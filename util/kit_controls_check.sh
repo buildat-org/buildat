@@ -22,6 +22,9 @@
 #   util/kit_controls_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
+# Workbench opens its project "world" at once, no Manage
+# ([WORKBENCH_PROJECTS]: workbench_check.sh goes through Manage)
+export BUILDAT_WORKBENCH_PROJECT=world
 here=$(cd "$(dirname "$0")/.." && pwd)
 for lua in luajit lua5.1; do
 	command -v $lua >/dev/null && break

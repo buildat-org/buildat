@@ -52,8 +52,9 @@ local hand = MATERIALS[1]
 local TOUCH = buildat.get_env("BUILDAT_TOUCH") == "1"
 
 -- A login by builtin/accounts: "l", or at once where BUILDAT_JOIN_NAME
--- names one; the launcher's own user is the admin without one. Its
--- console is builtin/chat's, the menu's Chat
+-- names one (main:account: unless join.lua's login was it,
+-- [WORKBENCH_PROJECTS]); the launcher's own user is the admin without one.
+-- Its console is builtin/chat's, the menu's Chat
 local accounts = nil
 do
 	local _, err, acc = buildat.run_script_file("accounts/accounts.lua")
@@ -72,9 +73,13 @@ local function log_in()
 	logging_in = true
 	accounts.start({title = "Workbench"})
 end
-if buildat.get_env("BUILDAT_JOIN_NAME") then
-	log_in()
-end
+buildat.sub_packet("main:account", function(data)
+	if data == "1" and accounts then
+		accounts.logged_in = true
+	elseif buildat.get_env("BUILDAT_JOIN_NAME") then
+		log_in()
+	end
+end)
 
 -- A plain light: the world is a workshop, not a scenery
 do

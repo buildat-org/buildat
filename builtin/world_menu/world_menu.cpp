@@ -25,8 +25,9 @@ struct Module: public interface::Module, public Interface
 	// The running world's name while a picker has the menu in it
 	ss_ m_running_name;
 	ss_ m_progress;
-	// select()'s world, until a picker's list has had it
+	// select()'s world, until a picker's list has had it; open_new()'s
 	ss_ m_select;
+	bool m_new = false;
 	// Who has the client half, and who has the menu up
 	std::set<PeerId> m_scripted, m_shown;
 
@@ -111,6 +112,11 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		m_select = name;
+	}
+
+	void open_new()
+	{
+		m_new = true;
 	}
 
 	void set_running(bool running)
@@ -201,6 +207,7 @@ struct Module: public interface::Module, public Interface
 	{
 		json::Value out = json::object();
 		out.set("title", m_config.title);
+		out.set("noun", m_config.noun);
 		const bool pick = open() && picker(peer);
 		out.set("running", m_running ? m_running_name : ss_());
 		out.set("note", note);
@@ -286,6 +293,10 @@ struct Module: public interface::Module, public Interface
 			out.set("selected", m_select);
 			log_i(MODULE, "world_menu: \"%s\" selected", cs(m_select));
 			m_select.clear();
+		}
+		if(pick && m_new){
+			out.set("new", true);
+			m_new = false;
 		}
 		network::send(m_server, peer, "world_menu:list", out.stringify());
 	}
@@ -393,8 +404,8 @@ struct Module: public interface::Module, public Interface
 			return false;
 		log_w(MODULE, "world_menu: %s of the running world \"%s\" refused",
 				cs(packet.name), cs(name));
-		send_list(packet.sender, "The running world can't be renamed or "
-				"deleted");
+		send_list(packet.sender, "The running "+m_config.noun+" can't be "
+				"renamed or deleted");
 		return true;
 	}
 

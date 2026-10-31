@@ -27,13 +27,18 @@
 // menu closes; the running one is not renamed or deleted; Close world is
 // world_menu:close (Close). Back closes the menu.
 //
+// [WORKBENCH_PROJECTS] What a save is called in the menu is the app's
+// (Config's noun: "world", "project"): nothing the menu says names one
+// itself.
+//
 // Packets, client to server: world_menu:get, world_menu:play ({name}),
 // world_menu:create ({name, options: {key: value}}), world_menu:rename
 // ({name, to}), world_menu:delete ({name}), world_menu:close. Server to
-// client: world_menu:list (JSON: {title, may_pick, wait, running, note,
+// client: world_menu:list (JSON: {title, noun, may_pick, wait, running, note,
 // fields: [{key, label, default, hint, ask, choices: [[value, label]]}],
 // worlds: [{name, bytes, options}], presets: [{label, options}],
-// selected: the world to select, once (select())}; wait:
+// selected: the world to select, once (select()), new: the new world
+// screen, once (open_new())}; wait:
 // the progress text, if any; running: the running world's name, if the
 // menu is shown in it; note: a refusal to say), world_menu:up.
 // **Presets** ([SKELDAT_HIGH_SCORES]): option sets the app offers on the
@@ -63,6 +68,8 @@ namespace world_menu
 	{
 		ss_ title;
 		std::vector<Field> fields;
+		// What one save is, in the menu's own lines: "world", "project"
+		ss_ noun;
 	};
 	struct Preset
 	{
@@ -112,6 +119,9 @@ namespace world_menu
 		// list a picker gets (its `selected`), once; a name that is no
 		// world is logged and selects nothing
 		virtual void select(const ss_ &name) = 0;
+		// [WORKBENCH_PROJECTS] The next list a picker gets opens the new
+		// world screen, once
+		virtual void open_new() = 0;
 	};
 
 	inline bool access(interface::Server *server,

@@ -430,7 +430,7 @@ struct Module: public interface::Module, public PlayersHost,
 					// The high score, written at the end (step_end())
 					{"ended", "The surface all bones after", "", "", true},
 					// Who played it, with their hours ([SKELDAT_HIGH_SCORES])
-					{"players", "Players", "", "", true}}});
+					{"players", "Players", "", "", true}}, "world"});
 		});
 		m_scores.send_presets();
 		// The launcher's picked world ([SKELDAT_LAUNCH_WORLD]), the launch's

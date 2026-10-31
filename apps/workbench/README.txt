@@ -6,6 +6,9 @@ in the editor (F6), and the voxels to build with (Kit's material set,
 Workbench's own, and the builders' own voxel types, made in the editor's
 "New voxel type...": a texture, solid, transparent, light, and friction
 and a surface tag for what moves on it). main/main.cpp says how it plays.
+Its saves are projects: New, Rename, Delete and Open in Manage
+(builtin/world_menu), which the launcher's "New workbench project",
+"Manage workbench projects" and a project's "Manage..." open.
 
 Licenses of textures and other media:
 ------------------------------------

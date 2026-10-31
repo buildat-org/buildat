@@ -404,6 +404,7 @@ function draw(saves, save_games)
 		selected = selected_save,
 		on_select = function(name) selected_save = name end,
 		empty = "No saves yet",
+		noun = "world",
 		-- One button rather than one per game: which game is a choice, and
 		-- it goes on the same screen as the name it is being given
 		new_label = menu_game and "New world..." or "New save...",

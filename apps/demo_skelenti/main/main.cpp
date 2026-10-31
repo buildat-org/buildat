@@ -190,7 +190,7 @@ struct Module: public interface::Module
 	void on_start()
 	{
 		world_menu::access(m_server, [&](world_menu::Interface *i){
-			i->configure({"skelenti", {}});
+			i->configure({"skelenti", {}, "world"});
 		});
 		const char *name = getenv("BUILDAT_SKELENTI_WORLD");
 		if(name && name[0])
