@@ -1270,6 +1270,12 @@ local function step_dig(dt)
 		end
 		dig = {key = k, t = 0, need = need, name = name, sound_t = 0}
 		send_voxel("dig_start", pointed)
+		-- [SKELDAT_DIG_CRACK_FLAKY] The dig's time from the next frame:
+		-- this frame's dt is time before the start, which the server's
+		-- clock (from the dig_start) does not have. After a dig the
+		-- voxel's going is a long frame, and the next voxel's dig counted
+		-- it, done early and refused as too short
+		return
 	end
 	if not dig.need then
 		return
