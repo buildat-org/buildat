@@ -296,6 +296,10 @@ namespace interface
 //       sample's layer is stone where steep, the riverbed under the sea,
 //       else its biome's top, and decorations are voxel objects. Answered
 //       with "kit:terrain" {tool, stroke, undo, what}
+//   {"op": "set_voxel", "pos": [x, y, z], "voxel": n}  -- ([KIT_EDIT_VOXELS])
+//       the cell in the builder's scene set to voxel n ("air": a dig),
+//       routed as a player's write (an owned cell goes to its owner's
+//       on_voxel), one undo, answered with "kit:edit_state"
 //   {"op": "voxel", "name": n, "texture": t, "kind": "solid"|"leaves"|
 //    "plant"|"water", "solid", "transparent", "light": 0..15,
 //    "friction": 0..10, "surface": tag}  -- ([KIT] stage 4g) the

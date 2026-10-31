@@ -272,6 +272,9 @@ struct Change
 	std::map<std::pair<int, int>, std::pair<float, heightmap::Weights>>
 			samples;
 	sv_<uint64_t> decor;
+	// [KIT_EDIT_VOXELS] a voxel edit's scene (the builder's), its cell in
+	// cells; nullptr: the World's
+	main_context::SceneReference scene = nullptr;
 };
 
 // [KIT] stage 4f: a decoration on a heightmap surface: a voxel object of
@@ -3865,7 +3868,7 @@ struct Module: public interface::Module, public Interface
 	{
 		size_t cells = 0;
 		if(!c.cells.empty())
-			voxelworld::access(m_server, m_world_scene,
+			voxelworld::access(m_server, c.scene ? c.scene : m_world_scene,
 					[&](voxelworld::Instance *w){
 				for(auto &q : c.cells){
 					const pv::Vector3DInt32 v(std::get<0>(q.first),
@@ -3873,7 +3876,7 @@ struct Module: public interface::Module, public Interface
 					if(!loaded(w, v))
 						continue;
 					set_id(w, v, q.second);
-					mark(w, m_world_scene, v, 'k', p.name);
+					mark(w, c.scene ? c.scene : m_world_scene, v, 'k', p.name);
 					cells++;
 				}
 			});
@@ -3902,9 +3905,84 @@ struct Module: public interface::Module, public Interface
 					[&](heightmap::Instance *map){
 				hash = ", map hash "+itos(map->content_hash());
 			});
-		log_i(MODULE, "An undo by %s: a terrain stroke, %zu cells, %zu samples "
-				"and %zu decorations put back%s", cs(p.name), cells,
+		log_i(MODULE, "An undo by %s: %s, %zu cells, %zu samples "
+				"and %zu decorations put back%s", cs(p.name), c.scene ?
+				"a voxel edit" : "a terrain stroke", cells,
 				c.samples.size(), c.decor.size(), cs(hash));
+	}
+
+	// [KIT_EDIT_VOXELS] A builder's place or dig in edit mode (api.h's
+	// "set_voxel" op): the cell in their scene, through voxelworld's
+	// routed write (an owned one goes to its owner), one undo.
+	// simplified: a write routed to an owner is not undone (its owner
+	// decided what it did)
+	void edit_voxel(Peer &p, size_t peer, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const json::Value &pos = j.get("pos");
+		if(!pos.is_array() || pos.size() != 3)
+			return refuse("pos: [x, y, z]");
+		int c[3];
+		for(unsigned k = 0; k < 3; k++){
+			const json::Value &v = pos.at(k);
+			if(!v.is_number() || !std::isfinite(v.as_number()) ||
+					std::fabs(v.as_number()) > MAX_COORD ||
+					v.as_number() != std::floor(v.as_number()))
+				return refuse("pos: whole numbers of at most "+
+						ftos(MAX_COORD));
+			c[k] = (int)v.as_number();
+		}
+		const ss_ voxel = jstr(j, "voxel");
+		auto si = m_host.scenes.find(p.scene);
+		if(si == m_host.scenes.end())
+			return refuse("not in a scene of the app's");
+		const pv::Vector3DInt32 q(c[0], c[1], c[2]);
+		uint32_t old = 0;
+		int r = -1;
+		ss_ why;
+		voxelworld::access(m_server, si->second, [&](voxelworld::Instance *w){
+			interface::VoxelName n;
+			n.block_name = voxel;
+			const interface::VoxelDefinition *d = w->get_voxel_reg()->get(n);
+			if(!d){
+				why = "voxel: a registered voxel's name (air: a dig)";
+				return;
+			}
+			if(!voxel_id(w, q, old)){
+				why = "the cell's section is not loaded";
+				return;
+			}
+			uint32_t word = 0;
+			w->get_voxel_reg()->get_format().id.set(word, d->id);
+			r = w->routed_set_voxel(q, interface::VoxelInstance(word),
+					"player:"+p.name);
+			if(r == voxelworld::Instance::WRITTEN)
+				mark(w, si->second, q, 'k', p.name);
+		});
+		if(!why.empty())
+			return refuse(why);
+		if(r < 0)
+			return refuse("the scene has no voxels");
+		if(r == voxelworld::Instance::REFUSED)
+			return refuse("an owned voxel whose owner takes no writes");
+		const ss_ what = (voxel == "air" ? ss_("dug") : "placed "+voxel)+
+				" at ("+itos(c[0])+","+itos(c[1])+","+itos(c[2])+")";
+		if(r == voxelworld::Instance::ROUTED){
+			log_i(MODULE, "A voxel edit by %s: %s, routed to its owner",
+					cs(p.name), cs(what));
+			return;
+		}
+		std::deque<Change> &u = m_undo[p.name];
+		Change nc;
+		nc.stroke = -2;
+		nc.scene = si->second;
+		nc.cells[std::make_tuple(c[0], c[1], c[2])] = old;
+		u.push_back(nc);
+		while(u.size() > UNDO_MAX)
+			u.pop_front();
+		log_i(MODULE, "A voxel edit by %s: %s (%zu to undo)", cs(p.name),
+				cs(what), u.size());
+		send_state(peer);
 	}
 
 	// Where voxelworld keeps the World loaded: a finite map's sections
@@ -8524,6 +8602,8 @@ struct Module: public interface::Module, public Interface
 			return terrain(p, peer, j, refuse);
 		if(op == "voxel")
 			return make_voxel(p, j, refuse);
+		if(op == "set_voxel")
+			return edit_voxel(p, peer, j, refuse);
 		if(op == "export")
 			return export_package(peer, p, refuse);
 		if(op == "restart"){

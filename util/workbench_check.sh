@@ -102,7 +102,8 @@ if [ "${1:-}" = web ]; then
 	# dragged in the plan by mouse (T), and Ctrl+Z its undo; ([KIT] stage
 	# 4g) "New voxel type...": a PNG uploaded by the browser's picker, the
 	# type named frost and made, taken in hand from the Voxel list (Down,
-	# Enter: a builder's own come first) and placed in play
+	# Enter: a builder's own come first; the voxels tool on with it, which
+	# the first Escape puts away) and placed in play
 	check_tmp workbench_web; t=$CHECK_TMP
 	stub="(function(){ var held = null, refuse = false;
  Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }});
@@ -181,6 +182,8 @@ if [ "${1:-}" = web ]; then
 	["click", "DropDownList", "▼", 203, 449], ["frames", 5], ["shot", "\${OUT}/voxel_list.png"],
 	["key", "Down"], ["key", "Enter"],
 	["waitlog", "kit editor: in hand webboss/frost", 10],
+	["waitlog", "kit editor: tool voxels", 10],
+	["key", "Escape"], ["waitlog", "kit editor: tool select", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Play mode", 600, 339], ["waitlog", "kit editor: edit mode off", 10], ["frames", 5],
 	["mouse", 600, 400], ["frames", 2], ["mouse", 600, 560], ["frames", 5],
@@ -884,6 +887,9 @@ EOF
 # goes into the crosshair and Escape comes out of it before the menu;
 # the inspector's x typed in and Move, a kit/world placed (game-wide), selected
 # from the list and deleted by the inspector's Delete, and the undo.
+# ([KIT_EDIT_VOXELS]) The voxels tool (V): a voxel placed by a click at the
+# pointer in 3D, and walking at the crosshair one placed, dug (Shift) and
+# the dig undone (Ctrl+Z), each one undo.
 # By finger (BUILDAT_TOUCH=1, finger_*): in play a tap digs, a finger
 # held places, a tap uses the button; in the plan the palette (folded on
 # a narrow screen) dragged from, a tap selects, a drag moves, a drag from
@@ -1056,6 +1062,34 @@ click Button "Delete"
 wait_log_any 5000 kit editor: state: 5 entities, 9 to undo
 click Button "Undo"
 wait_log_any 5000 kit editor: state: 6 entities, 8 to undo
+keypress V
+wait_log 5000 kit editor: tool voxels
+keypress F2
+wait_log 5000 kit editor: the view is 3D
+mouse_pos 512 560
+wait_log 5000 kit editor: guide: Left: place kit/cobble at
+frames 3
+screenshot @T@/voxel_3d.png
+mouse_click left
+wait_log 5000 kit editor: state: 6 entities, 9 to undo
+keypress F3
+wait_log 5000 kit editor: the view is Walk
+mouse_click left
+wait_log 5000 kit editor: into the crosshair
+look_dir 0 -1 0.6
+frames 5
+mouse_click left
+wait_log 5000 kit editor: state: 6 entities, 10 to undo
+keydown shift
+frames 3
+screenshot @T@/voxel_dig.png
+mouse_click left
+wait_log 5000 kit editor: state: 6 entities, 11 to undo
+keyup shift
+keydown ctrl
+keypress z
+keyup ctrl
+wait_log 5000 kit editor: state: 6 entities, 10 to undo
 quit
 EOF
 cat > "$t/touch.cmds" <<'EOF'
@@ -1193,13 +1227,18 @@ want "$t/srv3.log" "An edit by kitboss: placed kit/button 3 at [2,1,2]" \
 	"An edit by kitboss: deleted 7" \
 	"An undo by kitboss: 1 entities put back"
 want "$t/ed.log" "kit editor: turned 1 by 90" "kit editor: a box selected 2, 2 in the selection"
+# The voxels: the walk's place dug again, and the dig undone
+placed=$(grep -aoP 'A voxel edit by kitboss: placed kit/cobble at \K\([-0-9,]+\)' "$t/srv3.log")
+[ "$(echo "$placed" | wc -l)" = 2 ] || fail "not two voxels placed ($t/srv3.log)"
+want "$t/srv3.log" "A voxel edit by kitboss: dug at $(echo "$placed" | tail -1) (11 to undo)" \
+	"An undo by kitboss: a voxel edit, 1 cells"
 want "$t/srv4.log" "kit/button 3: pressed by kitboss" \
 	"An edit by kitboss: linked 5.pressed -> 4.toggle"
 grep -aq "workbench: kitboss dug (2,0,3): written" "$t/srv4.log" ||
 	fail "the tap did not dig ($t/srv4.log)"
 grep -aq "workbench: kitboss placed kit/stone (2,0,3): written" "$t/srv4.log" ||
 	fail "the finger held did not place ($t/srv4.log)"
-echo "ok: Kit's editor by mouse (the plan: a palette drag, select, a snapped move, a turn, an armed place, a link dragged, a box, the menu; 3D and walking) and by finger (tap, hold, drags, a link, the menu, a pinch)"
+echo "ok: Kit's editor by mouse (the plan: a palette drag, select, a snapped move, a turn, an armed place, a link dragged, a box, the menu; 3D and walking; voxels placed, dug and undone) and by finger (tap, hold, drags, a link, the menu, a pinch)"
 # 8. ([KIT] stage 4g) A builder's voxel type: with kitbob joined, the
 # admin uploads a PNG from their exports (the client's file picker) in
 # Kit's editor's "New voxel type...", names the type frost, sets its

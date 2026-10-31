@@ -48,9 +48,15 @@
 --     where it is let go (its ghost there meanwhile), or clicked it is
 --     placed by the clicks on the view until Escape, a right click or a
 --     click on it again (floorplanner's Object tool); its Voxel list puts
---     a voxel type in hand (O.pick_voxel(name), the app's placing), and
---     "New voxel type..." makes a builder's own: a texture (Kit's or an
---     uploaded PNG), kind, solid, transparent, light, friction, surface
+--     a voxel type in hand (O.pick_voxel(name), the app's placing) and
+--     the voxels tool on, "none" away; and "New voxel type..." makes a
+--     builder's own: a texture (Kit's or an uploaded PNG), kind, solid,
+--     transparent, light, friction, surface
+--   - **The voxels tool** (V, or Voxels by the palette's title; an app
+--     with solid): a left click places the voxel in hand on the face
+--     pointed at, Shift+left digs the voxel pointed at, each one undo;
+--     walking at the crosshair within play's reach (reach, 6 cells by
+--     default), the other views at the pointer
 --   - **Links dragged**: the selected entity's outputs are ports beside
 --     it; one dragged onto another entity's input (its ports show as the
 --     drag is over it) links them, onto the entity a link to its one
@@ -556,6 +562,7 @@ end
 M.over_ui = over_ui
 
 local refresh, people, show_log, rebuild_bar, set_view, terrain_panel
+local voxel_names
 
 -- [KIT] stage 4f: the terrain tool's state: the brush, its size (cells)
 -- and strength, the biome (nil: the World's), the stroke being drawn
@@ -707,13 +714,18 @@ local function panel_title(w, s, other)
 	local r = row(w)
 	local t = text(r, s, DIM)
 	t.minWidth = t.width + 8
-	if not (E.state and E.state.terrain) then
-		return
+	if E.state and E.state.terrain then
+		local b = button(r, other .. (S.touch and "" or " (T)"), function()
+			M.set_tool(S.tool ~= "terrain" and "terrain" or nil)
+		end)
+		b.minHeight, b.maxHeight = t.height, t.height
 	end
-	local b = button(r, other .. (S.touch and "" or " (T)"), function()
-		M.set_tool(S.tool ~= "terrain" and "terrain" or nil)
-	end)
-	b.minHeight, b.maxHeight = t.height, t.height
+	-- [KIT_EDIT_VOXELS] the voxels tool, on with the voxel in hand
+	if s == "Palette" and E.state and E.state.voxels and O.solid then
+		local b = button(r, "Voxels" .. (S.touch and "" or " (V)"),
+				M.toggle_voxels, S.tool == "voxels")
+		b.minHeight, b.maxHeight = t.height, t.height
+	end
 end
 
 -- [KIT] stage 5: the New tab, Kit packages from the Aittas in the
@@ -858,6 +870,7 @@ palette = function()
 				S.placing = nil
 				log:info("kit editor: placing nothing")
 			else
+				M.set_tool(nil)
 				S.placing = {type = it.type, prefab = it.prefab, label = it.label}
 				log:info("kit editor: placing " .. it.label)
 			end
@@ -868,24 +881,14 @@ palette = function()
 	-- [KIT] stage 4g: the voxel in hand (the app's, O.pick_voxel) and a
 	-- builder's own voxel type
 	if E.state.voxels then
-		if O.pick_voxel then
-			-- The builders' own first, then by name
-			local names, own = {}, {}
-			for _, v in ipairs(E.state.voxels) do
-				names[#names + 1] = v.name
-				own[v.name] = v.author ~= nil
+		if O.pick_voxel or O.solid then
+			local names = {{"none", ""}}
+			for _, n in ipairs(voxel_names()) do
+				names[#names + 1] = n
 			end
-			table.sort(names, function(a, b)
-				if own[a] ~= own[b] then
-					return own[a]
-				end
-				return a < b
-			end)
-			ui_utils.dropdown(row(w), names, S.voxel, function(name)
-				S.voxel = name
-				O.pick_voxel(name)
-				log:info("kit editor: in hand " .. name)
-			end, {label = "Voxel", none = "none", fill = true})
+			ui_utils.dropdown(row(w), names, S.voxel or "", function(name)
+				M.pick_voxel(name ~= "" and name or nil)
+			end, {label = "Voxel", fill = true})
 		end
 		button(w, "New voxel type...", function()
 			M.voxel_dialog()
@@ -905,6 +908,50 @@ palette = function()
 		end)
 	end
 	tabs()
+end
+
+-- The voxels to place, the builders' own first, then by name
+voxel_names = function()
+	local names, own = {}, {}
+	for _, v in ipairs(E.state and E.state.voxels or {}) do
+		names[#names + 1] = v.name
+		own[v.name] = v.author ~= nil
+	end
+	table.sort(names, function(a, b)
+		if own[a] ~= own[b] then
+			return own[a]
+		end
+		return a < b
+	end)
+	return names
+end
+
+-- [KIT_EDIT_VOXELS] The voxel in hand (nil: none): the app's
+-- (O.pick_voxel) and the voxels tool's, on with one and away with none
+function M.pick_voxel(name)
+	S.voxel = name
+	log:info("kit editor: in hand " .. tostring(name or "none"))
+	if name and O.pick_voxel then
+		O.pick_voxel(name)
+	end
+	if name and O.solid then
+		M.set_tool("voxels")
+	elseif S.tool == "voxels" then
+		M.set_tool(nil)
+	end
+	palette()
+end
+
+-- V or Voxels: the tool on (with the list's first in hand if none is) or
+-- away
+function M.toggle_voxels()
+	if S.tool == "voxels" then
+		return M.set_tool(nil)
+	end
+	if not S.voxel then
+		return M.pick_voxel(voxel_names()[1])
+	end
+	M.set_tool("voxels")
 end
 
 -- The palette's entry the pointer is on
@@ -1935,7 +1982,7 @@ end
 -- The right button let go where it was pressed: placing stops; on an
 -- entity its menu, on nothing the selection goes ([FP]'s)
 local function right_click(rc)
-	if S.tool then
+	if S.tool == "terrain" then
 		M.set_tool(nil)
 		return
 	end
@@ -2307,6 +2354,49 @@ draw_brush = function(dbg, mx, my)
 			col, false)
 end
 
+-- ---- [KIT_EDIT_VOXELS] the voxels tool (V, or Voxels on the palette's
+-- title): on while a voxel is in hand (the palette's Voxel list; "none"
+-- puts it away, as do V and Escape). A left click places it on the face
+-- pointed at, Shift+left digs the voxel pointed at, each one edit (one
+-- undo) through Kit's routed writes ("set_voxel"); walking at the
+-- crosshair within play's reach (O.reach, 6 cells past the body), the
+-- other views at the pointer. The right button stays the view's and the
+-- entity menu's.
+-- simplified: a click is one cell, and a touchscreen's tap selects as
+-- before; a left drag filling a box (Shift: clearing one), one op and
+-- one undo, is the upgrade
+local function voxel_target(mx, my)
+	if not O.solid then
+		return nil
+	end
+	local o, v = M.screen_ray(mx, my)
+	v = v:Normalized()
+	local reach = MAX_RAY
+	if S.view == "walk" then
+		-- A camera away from the eye reaches as far past the player
+		-- (Workbench's target())
+		local b = M.body_pos and M.body_pos()
+		local far = b and math.sqrt((o.x - b.x) ^ 2 + (o.y - b.y - 1.5) ^ 2 +
+				(o.z - b.z) ^ 2) or 0
+		reach = (O.reach or 6) + (far > 1 and far or 0)
+	end
+	local hit, front = M.voxel_ray({o.x, o.y, o.z}, {v.x, v.y, v.z}, O.solid,
+			reach)
+	return hit and {cell = hit, front = front} or nil
+end
+
+local function voxel_click(mx, my, dig)
+	local t = voxel_target(mx, my)
+	local c = t and (dig and t.cell or t.front)
+	if not c or not S.voxel then
+		return
+	end
+	local name = dig and "air" or S.voxel
+	log:info("kit editor: " .. (dig and "dig" or "place " .. name) .. " at " ..
+			table.concat(c, ","))
+	send({op = "set_voxel", pos = c, voxel = name})
+end
+
 -- ---- Input: the mouse ([FP]'s mouse_down, mouse_up, mouse_move)
 local function mouse_down(button_)
 	if not E.editing or S.touch then
@@ -2341,6 +2431,11 @@ local function mouse_down(button_)
 	end
 	if S.tool == "terrain" and button_ == magic.MOUSEB_LEFT then
 		stroke_begin(mx, my)
+		return
+	end
+	if S.tool == "voxels" and button_ == magic.MOUSEB_LEFT then
+		voxel_click(mx, my, key_held(magic.KEY_LSHIFT) or
+				key_held(magic.KEY_RSHIFT))
 		return
 	end
 	if button_ == magic.MOUSEB_RIGHT then
@@ -2812,6 +2907,8 @@ local function key_down(key, ctrl, shift)
 		return
 	elseif key == magic.KEY_T and E.state and E.state.terrain then
 		M.set_tool(S.tool ~= "terrain" and "terrain" or nil)
+	elseif key == magic.KEY_V and E.state and E.state.voxels and O.solid then
+		M.toggle_voxels()
 	elseif S.tool == "terrain" and (key == 91 or key == 93) then
 		-- [ and ] (SDL's keycodes: Urho3D's Lua has no names for them)
 		local d = key == 91 and -1 or 1
@@ -2990,6 +3087,27 @@ local function compute_guide()
 		g.note = not S.touch and "[ ]: size, Shift [ ]: strength, Esc: away" or nil
 		return g
 	end
+	if S.tool == "voxels" then
+		ghost(nil)
+		local t = voxel_target(mx, my)
+		if t then
+			if key_held(magic.KEY_LSHIFT) or key_held(magic.KEY_RSHIFT) then
+				hover.box(v3(t.cell), magic.Vector3(0.5, 0.5, 0.5), nil, M.DIG)
+			elseif t.front then
+				hover.face(t.cell, {t.front[1] - t.cell[1], t.front[2] -
+						t.cell[2], t.front[3] - t.cell[3]}, M.PLACE)
+			end
+			g.left = t.front and "place " .. tostring(S.voxel) .. " at " ..
+					table.concat(t.front, ",") or nil
+			g.shift = "dig " .. table.concat(t.cell, ",")
+		end
+		local p = pick(mx, my)
+		g.right = (p and p.id and "its menu; " or "") .. (S.view == "2d" and
+				"drag: into 3D, orbiting" or S.view == "3d" and "drag: orbit" or
+				"drag: turn")
+		g.note = not S.touch and "V or Esc: put the voxels away" or nil
+		return g
+	end
 	if S.placing then
 		local c = place_cell(mx, my)
 		ghost(c, S.placing)
@@ -3049,7 +3167,8 @@ local function guide_text(g)
 	end
 	local lines = {}
 	local names = S.touch and {{"left", "Tap"}, {"right", "Hold"}} or
-			{{"left", "Left"}, {"right", "Right"}, {"middle", "Middle"}}
+			{{"left", "Left"}, {"shift", "Shift+left"}, {"right", "Right"},
+			{"middle", "Middle"}}
 	for _, b in ipairs(names) do
 		local t = g[b[1]]
 		if t and S.touch then
