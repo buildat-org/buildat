@@ -35,8 +35,9 @@ core.register_on_joinplayer(function(player)
 		-- own default font size by it, so the second of these is three
 		-- times the first. The same word in both, so a scan can measure
 		-- them against each other.
+		local sized = {}
 		for i, scale in ipairs({1, 3}) do
-			player:hud_add({
+			sized[i] = player:hud_add({
 				hud_elem_type = "text",
 				position = {x = 0.2, y = 0.2 + 0.2 * i},
 				alignment = {x = 1, y = 0},
@@ -71,5 +72,15 @@ core.register_on_joinplayer(function(player)
 		-- drive waits for
 		core.chat_send_player(player:get_player_name(),
 				"hud text check: the elements added")
+		-- One element changed: the client draws again only what changed
+		-- ([FUZZ_CLIENT_FRAMES]), and the scan after it has to see the
+		-- new text and the other one still there
+		core.after(2, function()
+			if player and player:is_player() then
+				player:hud_change(sized[1], "text", "sized7")
+				core.chat_send_player(player:get_player_name(),
+						"hud text check: one changed")
+			end
+		end)
 	end)
 end)

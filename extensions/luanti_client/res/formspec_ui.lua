@@ -323,6 +323,24 @@ function M.new(magic, buildat, log, ctx)
 		return cols
 	end
 
+	-- A slot's count is a quarter of the slot, in a font size of its own
+	local function count_size(slot)
+		return math.max(8, math.floor(slot * 0.245))
+	end
+
+	-- The count's font size for a form laid out as layout, rasterized now:
+	-- FreeType renders a face's every glyph at its first use, 75 ms for
+	-- the 19 of a 1280x720 VoxeLibre inventory, which was most of its
+	-- first draw's list ([FUZZ_CLIENT_FRAMES]). Urho keeps a face per size.
+	function self:warm(root, layout)
+		local holder = root:CreateChild("UIElement")
+		if ctx.style then
+			holder.defaultStyle = ctx.style
+		end
+		label(holder, 0, 0, nil, "0", count_size(layout.slot))
+		holder:Remove()
+	end
+
 	-- An item stack in a slot: what it looks like, and how many
 	local function draw_stack(parent, x, y, size, stack)
 		local resource, cube = nil, nil
@@ -377,8 +395,7 @@ function M.new(magic, buildat, log, ctx)
 			-- simplified: the digits land where Luanti's do by an offset
 			-- measured for our font; another font wants it measured again
 			-- (builtin/luanti/test/ui_parity.sh)
-			local t = label(parent, x, y, size, count_text,
-					math.max(8, math.floor(size * 0.245)))
+			local t = label(parent, x, y, size, count_text, count_size(size))
 			t:SetTextAlignment(2) -- HA_RIGHT
 			t:SetPosition(math.floor(x + size * 0.025),
 					math.floor(y + size * 1.06 - t.height))

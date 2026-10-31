@@ -35,6 +35,9 @@ trap 'kill -INT "$srv" 2>/dev/null' EXIT
 { echo "wait_log 60000 chat: hud text check: the elements added"
 	echo "delay 1000"
 	echo "event scan"
+	echo "wait_log 10000 chat: hud text check: one changed"
+	echo "delay 1000"
+	echo "event scan"
 	echo "quit"; } > "$out/cmds.txt"
 # A run that has stopped logging is taken down rather than waited out
 run_client 60 "$out/cli.log" bin/buildat -s localhost:29791 -w 1280x720 \
@@ -45,6 +48,14 @@ for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 python3 - "$out/cli.log" <<'PY'
 import re, sys
 log = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+log, _, after = log.partition("hud text check: one changed")
+def texts(part):
+	return set(re.findall(r'hud text "(sized\d)" size', part))
+# [FUZZ_CLIENT_FRAMES]: one element changed is drawn again, the other kept
+if texts(after) != {"sized7", "sized3"}:
+	print("FAIL: after one hud_change the scan found %s, not sized7 and sized3" %
+			sorted(texts(after)))
+	sys.exit(1)
 found = {}
 for m in re.finditer(r'hud text "(sized\d)" size "([^"]*)" at (-?\d+),(-?\d+) '
 		r'size (\d+)x(\d+)', log):

@@ -1508,6 +1508,11 @@ local function show_client(host, port, name, password, mode, origin)
 		end
 
 		client.on_inventory_formspec = function(spec)
+			-- The count's font made before the key opens it
+			-- ([FUZZ_CLIENT_FRAMES])
+			if session and spec ~= "" and spec ~= inventory_spec then
+				session:warm(spec)
+			end
 			inventory_spec = spec
 			local form = form_on()
 			if form and form.source == "inventory" then
