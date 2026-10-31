@@ -143,6 +143,13 @@ namespace voxelworld
 		// this point's load radius, because the server cannot send what it
 		// does not keep. A peer with no point of its own gets everything.
 		size_t peer = 0;
+		// A pinned section (every radius zero) that is only kept, not
+		// asked for: a Luanti mapchunk's sections waiting for the rest of
+		// it. One that is asked for -- a forceload, an emerge -- gets a
+		// share of the streamer's budget and of worldgen's order, so that
+		// it comes in while a player keeps generating ([FORCELOAD_STARVED]);
+		// these would crowd it out, as a player leaves a trail of them.
+		bool hold_only = false;
 
 		LoadPoint(){}
 		LoadPoint(const pv::Vector3DInt32 &p,

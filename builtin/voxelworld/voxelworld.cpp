@@ -400,6 +400,8 @@ struct CInstance: public voxelworld::Instance
 	bool m_streaming = false;
 	size_t m_stream_budget = 2;
 	uint m_stream_tick = 0;
+	// Counts the passes, for a budget of one; see stream_pass()
+	size_t m_stream_passes = 0;
 	// Sections the save was asked for and does not have; see load_saved_only()
 	set_<uint64_t> m_save_misses;
 
@@ -779,7 +781,24 @@ struct CInstance: public voxelworld::Instance
 	{
 		measure_world();
 		mark_visits();
-		size_t budget = m_stream_budget;
+		// A pinned section's share of the budget ([FORCELOAD_STARVED]):
+		// the points went in order and a walking player always had
+		// something missing, so a forceload or an emerge_area far from
+		// everyone stayed unloaded for minutes. Half the budget goes to
+		// the pinned ones, every other pass when it is one, and what they
+		// do not want goes to the rest.
+		const size_t all = m_stream_budget;
+		const size_t share = all >= 2 ? all / 2 :
+				(all == 1 && (m_stream_passes++ & 1)) ? 1 : 0;
+		size_t left = share;
+		for(const voxelworld::LoadPoint &lp : m_load_points){
+			if(left == 0)
+				break;
+			if(lp.peer == 0 && lp.load_xz == 0 && lp.load_y == 0 &&
+					!lp.hold_only)
+				stream_around(lp, left);
+		}
+		size_t budget = all - share + left;
 		for(const voxelworld::LoadPoint &lp : m_load_points){
 			if(budget == 0)
 				break;
