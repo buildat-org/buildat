@@ -1042,14 +1042,20 @@ local function inspector(w, e, is_made)
 		end
 		table.sort(names)
 		local fields, values = {}, {}
+		local key = e.id .. "/" .. ci
 		for k, v in pairs(c.params or {}) do
+			values[k] = v
+		end
+		-- What is picked and not applied yet stays picked: the inspector is
+		-- drawn again on the state's packets (user, 2026-10-31: the camera
+		-- dropdown went back to first_person at once)
+		for k, v in pairs(E.pending[key] or {}) do
 			values[k] = v
 		end
 		for _, k in ipairs(names) do
 			fields[#fields + 1] = field(k, decl[k], values)
 		end
 		if #fields > 0 then
-			local key = e.id .. "/" .. ci
 			ui_utils.settings_form(w, fields, values, function(k, v)
 				E.pending[key] = E.pending[key] or {}
 				E.pending[key][k] = v
