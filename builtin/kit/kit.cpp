@@ -81,6 +81,8 @@ static const size_t MAX_TEXTURE_BYTES = 64 << 10;
 static const uint32_t MAX_TEXTURE_SIDE = 128;
 // An editor's undo goes back this many edits
 static const size_t UNDO_MAX = 50;
+// [KIT_VOXEL_EDITS] The edited sections "kit:edited" lists at most
+static const size_t MAX_EDITED_LISTED = 256;
 // [KIT] stage 4d: the entities play makes at most (copies), a prefab's
 // members, the lines an entity's log keeps, the signals a tick shows the
 // builders flowing
@@ -279,6 +281,10 @@ struct Change
 	// [KIT_EDIT_VOXELS] a voxel edit's scene (the builder's), its cell in
 	// cells; nullptr: the World's
 	main_context::SceneReference scene = nullptr;
+	// [KIT_VOXEL_EDITS] a regeneration's sections (the World's), their
+	// cells that differed from the generator's in cells: undone once they
+	// are generated again
+	sv_<pv::Vector3DInt16> regen;
 };
 
 // [KIT] stage 4f: a decoration on a heightmap surface: a voxel object of
@@ -654,6 +660,12 @@ struct Module: public interface::Module, public Interface
 	size_t m_world_generated = 0, m_world_logged = 0;
 	// A regeneration whose sections are not all generated again yet
 	bool m_world_regenerating = false;
+	// [KIT_VOXEL_EDITS] what the World's generator was made of, for a
+	// copy that says what a section would be (generated())
+	world::Params m_gen_p;
+	world::Ids m_gen_ids;
+	int m_gen_hi = 0;
+	bool m_gen_voxels = false;
 	// Guests' dropped entities' names by their `by`, for this run
 	// simplified: kept for the run (a name each guest that came)
 	sm_<ss_, ss_> m_gone_guests;
@@ -3171,6 +3183,11 @@ struct Module: public interface::Module, public Interface
 		world::Generator *g = new world::Generator();
 		g->p = p;
 		g->ids = ids;
+		// What generated() makes its own of
+		m_gen_p = p;
+		m_gen_ids = ids;
+		m_gen_hi = hi;
+		m_gen_voxels = h != nullptr;
 		if(!h){
 			// A heightmap's scene: no voxels
 			h.reset(new world::Heights());
@@ -3246,6 +3263,198 @@ struct Module: public interface::Module, public Interface
 		if(n && seams_named)
 			warn(itos(n)+" edited sections kept, seams where they meet the "
 					"new ground: "+seams+(n > 8 ? " ..." : ""));
+	}
+
+	// ---- [KIT_VOXEL_EDITS] The voxel edits manager (api.h's "edited" and
+	// "regenerate"): the World's sections somebody wrote (voxelworld's
+	// altered, set_writes_alter), each with how many of its cells differ
+	// from what the generator makes there, and a regeneration that drops a
+	// section's writes, the World generating it again; one undo.
+	// simplified: a section not loaded (an infinite World's far one, the
+	// voxel ground's under a heightmap surface) is listed with no count
+	// and not regenerated: its cells unread, an undo would have nothing
+
+	// A copy of the World's generator, to say what a section would be
+	up_<world::Generator> diff_generator()
+	{
+		up_<world::Generator> g(new world::Generator());
+		g->p = m_gen_p;
+		g->ids = m_gen_ids;
+		g->max_top = m_gen_hi;
+		g->h.reset(new world::Heights());
+		g->h->p = m_gen_p;
+		if(m_gen_voxels)
+			valleys_query(*g->h);
+		else
+			g->h->p.generator = "empty";
+		return g;
+	}
+
+	// A loaded, generated World section's cells that differ from the
+	// generator's: how many, and (out) each one's id now
+	bool section_diff(voxelworld::Instance *w, world::Generator &g,
+			const pv::Vector3DInt16 &s, size_t &n,
+			std::map<std::tuple<int, int, int>, uint32_t> *out = nullptr)
+	{
+		n = 0;
+		if(!w->is_section_loaded(s) || !w->is_section_generated(s))
+			return false;
+		const pv::Region r = w->get_section_region_voxels(s);
+		interface::VoxelVolume gen(r);
+		g.generate(m_world_scene, s, gen);
+		const interface::VoxelVolume now = w->get_volume(r);
+		const auto &fid = w->get_voxel_reg()->get_format().id;
+		const pv::Vector3DInt32 lc = r.getLowerCorner(), uc = r.getUpperCorner();
+		for(int y = lc.getY(); y <= uc.getY(); y++)
+		for(int z = lc.getZ(); z <= uc.getZ(); z++)
+		for(int x = lc.getX(); x <= uc.getX(); x++){
+			const uint32_t a = (uint32_t)fid.get(now.getVoxelAt(x, y, z).data);
+			if(a == (uint32_t)fid.get(gen.getVoxelAt(x, y, z).data))
+				continue;
+			n++;
+			if(out)
+				out->emplace(std::make_tuple(x, y, z), a);
+		}
+		return true;
+	}
+
+	// "kit:edited" {"size": a section's side, "sections": [{"s": [x, y, z],
+	// "cells": n (-1: not loaded), "owned": true (a component's voxels in
+	// it: not regenerated)}], "more": n past MAX_EDITED_LISTED}
+	void send_edited(size_t peer)
+	{
+		json::Value list = json::array();
+		size_t more = 0;
+		if(m_world_scene)
+			voxelworld::access(m_server, m_world_scene,
+					[&](voxelworld::Instance *w){
+				sv_<pv::Vector3DInt16> edited;
+				// The index marks a section altered as it is saved
+				w->save();
+				for(const auto &s : w->section_stats())
+					if(s.altered)
+						edited.push_back(s.p);
+				std::sort(edited.begin(), edited.end(), [](
+						const pv::Vector3DInt16 &a, const pv::Vector3DInt16 &b){
+					return std::make_tuple(a.getY(), a.getZ(), a.getX()) <
+							std::make_tuple(b.getY(), b.getZ(), b.getX());
+				});
+				if(edited.size() > MAX_EDITED_LISTED){
+					more = edited.size() - MAX_EDITED_LISTED;
+					edited.resize(MAX_EDITED_LISTED);
+				}
+				up_<world::Generator> g = diff_generator();
+				const auto &owned = m_owned_sections[m_world_scene];
+				for(const pv::Vector3DInt16 &s : edited){
+					size_t n = 0;
+					const bool counted = section_diff(w, *g, s, n);
+					json::Value r = json::object();
+					json::Value sp = json::array();
+					sp.append((int64_t)s.getX());
+					sp.append((int64_t)s.getY());
+					sp.append((int64_t)s.getZ());
+					r.set("s", sp);
+					r.set("cells", counted ? (int64_t)n : (int64_t)-1);
+					if(owned.count(std::make_tuple((int)s.getX(), (int)s.getY(),
+							(int)s.getZ())))
+						r.set("owned", true);
+					list.append(r);
+				}
+			});
+		json::Value j = json::object();
+		j.set("size", (int64_t)m_section_size);
+		j.set("sections", list);
+		j.set("more", (int64_t)more);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:edited", j.stringify());
+		});
+	}
+
+	// {"op": "regenerate", "s": [x, y, z]} one edited section, {"all":
+	// true} every one that can be: Ended only (a Running round's copies of
+	// the start would put its voxels back at End)
+	void regenerate_sections(Peer &p, size_t peer, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		if(!m_world_scene)
+			return refuse("no World here");
+		if(m_session.running)
+			return refuse("the game is Running: End it first");
+		const bool all = j.get("all").is_true();
+		std::tuple<int, int, int> one;
+		if(!all){
+			const json::Value &s = j.get("s");
+			if(!s.is_array() || s.size() != 3)
+				return refuse("s: a section's [x, y, z]");
+			int c[3];
+			for(unsigned k = 0; k < 3; k++){
+				const json::Value &v = s.at(k);
+				const int lo = k == 1 ? WORLD_SECTION_Y0 : -WORLD_SECTIONS_XZ,
+						hi = k == 1 ? WORLD_SECTION_Y1 : WORLD_SECTIONS_XZ - 1;
+				if(!v.is_number() || v.as_number() != std::floor(v.as_number())
+						|| v.as_number() < lo || v.as_number() > hi)
+					return refuse("s: a World section's whole numbers");
+				c[k] = (int)v.as_number();
+			}
+			one = std::make_tuple(c[0], c[1], c[2]);
+		}
+		Change nc;
+		nc.stroke = -2;
+		size_t cells = 0, skipped = 0;
+		ss_ why;
+		voxelworld::access(m_server, m_world_scene,
+				[&](voxelworld::Instance *w){
+			std::set<std::tuple<int, int, int>> want;
+			w->save();
+			for(const auto &s : w->section_stats())
+				if(s.altered)
+					want.insert(std::make_tuple((int)s.p.getX(),
+							(int)s.p.getY(), (int)s.p.getZ()));
+			if(!all){
+				if(!want.count(one)){
+					why = "not an edited section of the World";
+					return;
+				}
+				want = {one};
+			}
+			up_<world::Generator> g = diff_generator();
+			const auto &owned = m_owned_sections[m_world_scene];
+			sv_<pv::Vector3DInt16> forget;
+			for(const auto &k : want){
+				const pv::Vector3DInt16 s(std::get<0>(k), std::get<1>(k),
+						std::get<2>(k));
+				size_t n = 0;
+				std::map<std::tuple<int, int, int>, uint32_t> before;
+				if(owned.count(k) || !section_diff(w, *g, s, n, &before)){
+					if(!all)
+						why = owned.count(k) ? "the section holds a component's "
+								"voxels" : "the section is not loaded";
+					skipped++;
+					continue;
+				}
+				nc.cells.insert(before.begin(), before.end());
+				cells += n;
+				nc.regen.push_back(s);
+				w->unload_section(s);
+				forget.push_back(s);
+			}
+			w->forget_sections(forget);
+		});
+		if(!why.empty())
+			return refuse(why);
+		if(nc.regen.empty())
+			return refuse("no edited section to regenerate ("+itos(skipped)+
+					" not loaded or a component's)");
+		std::deque<Change> &u = m_undo[p.name];
+		u.push_back(nc);
+		while(u.size() > UNDO_MAX)
+			u.pop_front();
+		m_world_regenerating = true;
+		log_i(MODULE, "World by %s: %zu edited sections regenerated, %zu cells "
+				"back to the generator's, %zu skipped (%zu to undo)", cs(p.name),
+				nc.regen.size(), cells, skipped, u.size());
+		send_state(peer);
+		send_edited(peer);
 	}
 
 	// A heightmap surface: builtin/heightmap's map in the World's scene,
@@ -4173,7 +4382,8 @@ struct Module: public interface::Module, public Interface
 			});
 		log_i(MODULE, "An undo by %s: %s, %zu cells, %zu samples "
 				"and %zu decorations put back%s", cs(p.name), c.scene ?
-				"a voxel edit" : "a terrain stroke", cells,
+				"a voxel edit" : !c.regen.empty() ? "a regeneration" :
+				"a terrain stroke", cells,
 				c.samples.size(), c.decor.size(), cs(hash));
 	}
 
@@ -8917,6 +9127,10 @@ struct Module: public interface::Module, public Interface
 			return make_voxel(p, j, refuse);
 		if(op == "set_voxel")
 			return edit_voxel(p, peer, j, refuse);
+		if(op == "edited")
+			return send_edited(peer);
+		if(op == "regenerate")
+			return regenerate_sections(p, peer, j, refuse);
 		if(op == "export")
 			return export_package(peer, p, refuse);
 		if(op == "restart"){
@@ -8957,6 +9171,18 @@ struct Module: public interface::Module, public Interface
 			std::deque<Change> &u = m_undo[p.name];
 			if(u.empty())
 				return refuse("nothing of "+p.name+"'s to undo");
+			// A regeneration's: once its sections are there again
+			bool back = true;
+			if(!u.back().regen.empty())
+				voxelworld::access(m_server, m_world_scene,
+						[&](voxelworld::Instance *w){
+					for(const pv::Vector3DInt16 &s : u.back().regen)
+						back = back && w->is_section_loaded(s) &&
+								w->is_section_generated(s);
+				});
+			if(!back)
+				return refuse("the regenerated sections are not generated "
+						"again yet");
 			const Change c = u.back();
 			u.pop_back();
 			if(c.stroke != -1){

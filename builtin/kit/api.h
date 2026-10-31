@@ -320,6 +320,16 @@ namespace interface
 //       the cell in the builder's scene set to voxel n ("air": a dig),
 //       routed as a player's write (an owned cell goes to its owner's
 //       on_voxel), one undo, answered with "kit:edit_state"
+//   {"op": "edited"}  -- ([KIT_VOXEL_EDITS]) answered with "kit:edited"
+//       {"size": a section's side, "sections": [{"s": [x, y, z], "cells":
+//       how many differ from the generator's (-1: not loaded), "owned":
+//       true where a component owns voxels}], "more": n past 256}: the
+//       World's sections somebody wrote, which a change of its parameters
+//       keeps
+//   {"op": "regenerate", "s": [x, y, z]} or {"op": "regenerate", "all":
+//       true}  -- Ended only: an edited section's writes dropped (one
+//       loaded, no component's voxels in it), the World generating it
+//       again; one undo, which waits for it to be generated
 //   {"op": "voxel", "name": n, "texture": t, "kind": "solid"|"leaves"|
 //    "plant"|"water", "solid", "transparent", "light": 0..15,
 //    "friction": 0..10, "surface": tag}  -- ([KIT] stage 4g) the
