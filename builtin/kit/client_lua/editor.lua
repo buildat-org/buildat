@@ -649,12 +649,16 @@ local brush_at, stroke_begin, stroke_move, stroke_end, draw_brush
 
 -- The bar: Edit and Run/End in play (an app's own menu can have them:
 -- bar = false); in the tools floorplanner's toolbar -- Menu, the views,
--- the grid, the angle step, the cut, Undo, Save as start, Run/End, Play
--- mode, and on a narrow screen the panels' toggles
+-- the grid, the angle step, the cut, Undo, Run/End, Play mode, on a
+-- narrow screen the panels' toggles, and Save as start (Running) last:
+-- Run and End one place, one width, so nothing moves as they swap
 -- The bar's buttons in rows, as many as the screen's width needs
 -- ([FP_TOUCH] 2, floorplanner's build_toolbar): place(make) puts what
 -- make(parent) makes in the row it fits in
 local bar_row, bar_used, bar_room, bar_first
+-- The bar's buttons {label, element}, their places logged once laid out
+-- (as they change)
+local bar_items, bar_log, bar_logged = {}, false, nil
 local function place(make)
 	-- Measured before it is put in a row (floorplanner's probe)
 	local probe = make(magic.ui.root)
@@ -675,7 +679,24 @@ local function bar_button(s, key, fn, down)
 	if key and not S.touch then
 		s = s .. " (" .. key .. ")"
 	end
-	return place(function(parent) return button(parent, s, fn, down) end)
+	local e = place(function(parent) return button(parent, s, fn, down) end)
+	bar_items[#bar_items + 1] = {s, e}
+	return e
+end
+
+-- Run while Ended, End while Running, as wide as the wider of them
+local function run_end(parent)
+	local wd = 0
+	for _, s in ipairs({"Run", "End"}) do
+		local p = button(magic.ui.root, s, function() end)
+		wd = math.max(wd, p.minWidth)
+		p:Remove()
+	end
+	local b = button(parent, E.running and "End" or "Run", function()
+		if E.running then M.stop() else M.play() end
+	end)
+	b.minWidth = wd
+	return b
 end
 
 local function grid_text()
@@ -691,6 +712,7 @@ end
 
 rebuild_bar = function()
 	drop("bar")
+	bar_items, bar_log = {}, false
 	if not E.can_edit or (not E.editing and O.bar == false) then
 		return
 	end
@@ -700,9 +722,7 @@ rebuild_bar = function()
 	W.bar = w
 	if not E.editing then
 		button(w, "Edit", M.toggle_tools)
-		button(w, E.running and "End" or "Run", function()
-			if E.running then M.stop() else M.play() end
-		end)
+		run_end(w)
 		return
 	end
 	w:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(6, 6, 6, 6))
@@ -743,12 +763,7 @@ rebuild_bar = function()
 	bar_button("Undo", nil, function()
 		send({op = "undo"})
 	end)
-	if E.running then
-		bar_button("Save as start", nil, M.save_as_start)
-	end
-	bar_button(E.running and "End" or "Run", nil, function()
-		if E.running then M.stop() else M.play() end
-	end)
+	bar_items[#bar_items + 1] = {E.running and "End" or "Run", place(run_end)}
 	bar_button("Play mode", nil, M.toggle_tools)
 	if narrow() then
 		for _, p in ipairs({{"palette", "Palette"}, {"inspector", "Inspector"}}) do
@@ -757,6 +772,28 @@ rebuild_bar = function()
 				refresh()
 			end, not folded(p[1]))
 		end
+	end
+	if E.running then
+		bar_button("Save as start", nil, M.save_as_start)
+	end
+	bar_log = true
+end
+
+-- The bar's buttons' places, once laid out (a check compares them)
+local function log_bar()
+	if not bar_log or not W.bar then
+		return
+	end
+	bar_log = false
+	local t = {}
+	for _, it in ipairs(bar_items) do
+		local p = it[2].screenPosition
+		t[#t + 1] = string.format("%s %d,%d", it[1], p.x, p.y)
+	end
+	local s = table.concat(t, "; ")
+	if s ~= bar_logged then
+		bar_logged = s
+		log:info("kit editor: bar: " .. s)
 	end
 end
 
@@ -1066,6 +1103,19 @@ local function field(name, d, values)
 		f.choices = {}
 		for _, c in ipairs(d.choices) do
 			f.choices[#f.choices + 1] = {tostring(c), c}
+		end
+	elseif d.choices_from == "biomes" and E.state and E.state.terrain then
+		-- The material set's biomes, as the Terrain tool's (the value
+		-- there too when it is none of them, the server's refusal named)
+		f.type = "choice"
+		f.choices = {}
+		local has = false
+		for _, b in ipairs(E.state.terrain.biomes or {}) do
+			f.choices[#f.choices + 1] = {b, b}
+			has = has or b == values[name]
+		end
+		if not has and type(values[name]) == "string" then
+			f.choices[#f.choices + 1] = {values[name], values[name]}
 		end
 	elseif t == "prefab" then
 		f.type = "choice"
@@ -3469,6 +3519,7 @@ local function draw()
 		return
 	end
 	fit_people()
+	log_bar()
 	local dbg = O.debug
 	local now = buildat.get_time_us()
 	local YELLOW = magic.Color(1, 0.9, 0.2)

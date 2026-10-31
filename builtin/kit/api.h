@@ -147,7 +147,9 @@ namespace interface
 //   their links and entity parameters among them made the copy's, and
 //   remember the prefab ({"prefab": {"of", "version", "member", "copy"}});
 //   a parameter set on a copy is its override. A parameter type "prefab"
-//   names one; a parameter's `choices` = {...} are the values it takes.
+//   names one; a parameter's `choices` = {...} are the values it takes;
+//   `choices_from = "biomes"` makes the inspector's a dropdown of the
+//   material set's biomes (a string still; the World refuses another).
 //   Client parts: <name>.client.lua beside a type, sent to every client at
 //   join and run there as the client's own Lua is (client_lua/module.lua
 //   says what it gets).

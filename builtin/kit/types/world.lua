@@ -7,7 +7,8 @@
 --              valleys mapgen's surface, without rivers; native servers)
 --   seed       noise and valleys
 --   biome      the material set's biome: which voxels the ground is
---              (Kit's set: grassland, desert, rock -- rock has no water)
+--              (Kit's set: grassland, desert, rock -- rock has no water);
+--              the inspector's dropdown of them (choices_from)
 --   sea_level  water up to it over lower ground
 --   size       finite (width x depth cells round the origin, baked:
 --              every section stored) or infinite (generated where players
@@ -36,7 +37,8 @@ return {
 		generator = {type = "string", default = "flat",
 			choices = {"empty", "flat", "noise", "valleys"}},
 		seed = {type = "number", default = 0, min = 0, max = 4294967295},
-		biome = {type = "string", default = "grassland"},
+		biome = {type = "string", default = "grassland",
+			choices_from = "biomes"},
 		level = {type = "number", default = 0, min = -100, max = 200},
 		height = {type = "number", default = 12, min = 0, max = 100},
 		spread = {type = "number", default = 48, min = 4, max = 2000},

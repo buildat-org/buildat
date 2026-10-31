@@ -29,7 +29,9 @@
 #      discarded with the Stop notice to both builders (the door's own
 #      voxel write, a game change, not offered), and kept from the notice
 #      a moment later. The admin plays: a round from the start, the door
-#      opened again, the button pressed once.
+#      opened again, the button pressed once. The tools' bar Ended and
+#      Running (its logged places): End where Run is, no other button
+#      moved, Save as start the last.
 #   4. A restart: the authored row has what was edited, the server is
 #      still Running, and kitbob, alone, is still a builder.
 # KEEP_TMP=1 keeps the screenshots: edit mode with the inspector, a link
@@ -406,6 +408,33 @@ assert seen == [("4 open", "true"), ("17 presses", "0"), ("4 open", "false"),
 		("17 presses", "1")], seen
 EOF
 echo "ok: two builders, one's selection in the other's editor; Stop throws the round away and keeps the edits, a use refused and an edit to the start while Stopped; Play starts a round from the start"
+# [KIT_WORLD_BAR_FIXES] The tools' bar Running and Ended: End where Run
+# is, every other button in its place, Save as start the last (Running)
+python3 -I - "$t/boss.log" <<'EOF' || fail "the bar's buttons moved between Run and End ($t/boss.log)"
+import re, sys
+bars = []
+for l in open(sys.argv[1], errors="replace"):
+	m = re.search(r"kit editor: bar: (.*)$", l)
+	if m:
+		bars.append([re.match(r"(.*) (\d+),(\d+)$", it).groups()
+				for it in m.group(1).split("; ")])
+names = lambda b: [n for n, x, y in b]
+run = [b for b in bars if "Run" in names(b)]
+end = [b for b in bars if "End" in names(b)]
+assert run and end, (len(run), len(end))
+for b in end:
+	assert names(b)[-1] == "Save as start", names(b)
+for b in run:
+	assert "Save as start" not in names(b), names(b)
+pairs = [(r, e) for r in run for e in end if
+		[n if n != "Run" else "End" for n in names(r)] == names(e)[:-1]]
+assert pairs, (names(run[-1]), names(end[-1]))
+for r, e in pairs:
+	assert [(x, y) for n, x, y in r] == [(x, y) for n, x, y in e[:-1]], (r, e)
+print("  the bar Ended:", "; ".join(" ".join(i) for i in r))
+print("  the bar Running:", "; ".join(" ".join(i) for i in e))
+EOF
+echo "ok: the bar's End in Run's place, Save as start last, no button moved"
 
 cat > "$t/again.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob
