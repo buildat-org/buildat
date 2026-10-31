@@ -86,6 +86,19 @@ module under it.
   chat..." has the moderator's who-may-talk, mute, and reports, and
   everyone's report.
 
+- Kit (builtin/kit): a builder (the admin, or one the admin makes in
+  Kit's tools) has Edit (F6) and Play/Stop in the pause menu. Stopped,
+  the world is the start: its clock, bones, mobs and water stand, and
+  only builders dig, place and use; Kit's tools put Kit's types and
+  skeldat's own (main/kit/: `mob_spawner`, mobs of a kind on the ground
+  at it; `bones`, a cube of voxels given a bones value) in the world.
+  Play runs the game from the start (the inventory the new players'
+  items, the spawn), Stop puts the world back: the voxels Kit's, the
+  rest (the day, the mobs, the furnaces, the drops...) from the store
+  `skeldat_start`, a copy of skeldat's rows taken at Kit's first start,
+  at Play and at Save as start. Kit's counts and items (an item giver)
+  are skeldat's own inventory, its item names without `skeldat:`.
+
 Start it from the launcher, or `buildat_server -m apps/skeldat` and
 connect a client. Until a world runs, the first client on the server's
 machine picks one: play a save, name and create a new one, or delete one.

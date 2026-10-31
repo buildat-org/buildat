@@ -642,6 +642,9 @@ struct Module: public interface::Module, public Interface
 	// name, and the uploaded textures' served names (rows
 	// "texture:<hash>")
 	sm_<ss_, json::Value> m_voxel_types;
+	// [KIT] stage 6a (Host::app_items): each player's inventory as the app
+	// last gave it (set_items), by name
+	sm_<ss_, json::Value> m_app_items;
 	std::set<ss_> m_textures;
 	// The properties of what register_voxels() and a builder's type
 	// registered, by name (voxel_type())
@@ -4636,7 +4639,12 @@ struct Module: public interface::Module, public Interface
 			uint64_t inv_id = 0;
 			size_t inv_comp = 0;
 			const Instance *pv_ = provider_for(pid, inv_id, inv_comp);
-			if(!pv_){
+			if(app_items()){
+				// [KIT] stage 6a: the app's own, as Kit's counts are read
+				o += ",items=";
+				auto ai = m_app_items.find(m_entities[pid].name);
+				lua_lit(ai == m_app_items.end() ? json::object() : ai->second, o);
+			} else if(!pv_){
 				o += ",items={}";
 			} else if(pv_ == &in){
 				o += ",inv_self=true";
@@ -4839,6 +4847,9 @@ struct Module: public interface::Module, public Interface
 		const json::Value &tp = fx.get("teleport");
 		if(tp.is_array())
 			teleport(e, type, who, tp);
+		const json::Value &apps = fx.get("app");
+		for(unsigned i = 0; i < apps.size(); i++)
+			app_call(e, type, r.by, who, apps.at(i));
 		const json::Value &items = fx.get("items");
 		if(!who.empty() && !items.is_undefined())
 			got_items(e, type, who, items);
@@ -6018,7 +6029,62 @@ struct Module: public interface::Module, public Interface
 			}
 		log_i(MODULE, "Entity %s's %s: %s has %s", cs(itos(e.id)), cs(type),
 				cs(who), cs(mine.stringify()));
+		if(app_items()){
+			json::Value &had = m_app_items[who];
+			if(!had.is_object())
+				had = json::object();
+			m_server->emit_event("kit:items", new ItemsChanged(who,
+					had.deepcopy(), mine.deepcopy(), false));
+			had = mine;
+			return;
+		}
 		send_items(who, mine);
+	}
+
+	// [KIT] stage 6a: the app's own inventory is the players' (Host::
+	// app_items), unless a component replaces it
+	bool app_items()
+	{
+		return m_host.app_items && !m_provider;
+	}
+
+	void set_items(const ss_ &player, const json::Value &items)
+	{
+		json::Value mine = json::object();
+		if(items.is_object())
+			for(json::Iterator it(items); it; ++it){
+				const double n = (*it).is_number() ? (*it).as_number() : 0;
+				if(name_ok(it.key()) && n >= 1 && n == std::floor(n))
+					mine.set(it.key(), (int64_t)std::min<double>(n, MAX_ITEMS));
+			}
+		m_app_items[player] = mine;
+	}
+
+	// c:app(what, value) ([KIT] stage 6a): the app's own types' calls into
+	// its native code, the event kit:app; another author's refused
+	void app_call(const Entity &e, const ss_ &type, const ss_ &by,
+			const ss_ &who, const json::Value &call)
+	{
+		const ss_ what = jstr_at(call, 0);
+		if(type.compare(0, m_author.size() + 1, m_author+"/") != 0){
+			log_w(MODULE, "Entity %s's %s: c:app(%s) refused: not one of the "
+					"app's own types", cs(itos(e.id)), cs(type), cs(what));
+			add_log(e.id, "app "+what+" refused: not one of the app's types");
+			return;
+		}
+		AppCall *a = new AppCall();
+		a->entity = e.id;
+		a->type = type;
+		a->what = what;
+		a->value = call.at(1u).deepcopy();
+		a->by = by;
+		a->name = who;
+		scene_of(e, &a->scene);
+		a->has_pos = e.has_pos;
+		a->x = e.pos[0], a->y = e.pos[1], a->z = e.pos[2];
+		log_i(MODULE, "Entity %s's %s: app %s %s", cs(itos(e.id)), cs(type),
+				cs(what), cs(a->value.stringify().substr(0, 64)));
+		m_server->emit_event("kit:app", a);
 	}
 
 	// A player's items to their client: as given, or their entity's own
@@ -7887,6 +7953,11 @@ struct Module: public interface::Module, public Interface
 			save_session();
 			log_i(MODULE, "%s goes through the round's start: inventory %s",
 					cs(name), keep_inventory ? "kept" : "reset");
+			// The app's inventory reset at Play only: one who joins a
+			// round has the app's own, as the app keeps it
+			if(app_items() && !keep_inventory && at_play)
+				m_server->emit_event("kit:items", new ItemsChanged(name,
+						json::object(), json::object(), true));
 		}
 		bool placed = false;
 		for(auto &p : m_entities){

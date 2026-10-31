@@ -479,6 +479,30 @@ struct Mobs
 		}
 	}
 
+	// [KIT] stage 6a: a mob of the kind at x, z, on the ground found from 2
+	// over y down (where it is, none found), as a test's (skeldat/
+	// mob_spawner's)
+	uint32_t add(MobKind kind, float x, float y, float z)
+	{
+		Mob m;
+		m.kind = kind;
+		m.x = x, m.y = y, m.z = z;
+		voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+			Ground g = world.ground(w, m.x, m.y + 2, m.z, MOB_HEIGHT[m.kind]);
+			if(g.found)
+				m.y = g.y;
+		});
+		m.hp = MOB_HP[m.kind];
+		m.yaw = (float)M_PI;
+		m.mode_t = 30;
+		m.grass_t = world.t;
+		const uint32_t k = next_mob++;
+		all[k] = m;
+		log_i(MODULE, "skeldat: a %s (%u) at %.1f,%.1f,%.1f", MOB_KIND[m.kind],
+				k, m.x, m.y, m.z);
+		return k;
+	}
+
 	// Woken, it has seen nothing yet
 	void activate(Mob &m)
 	{

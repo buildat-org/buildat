@@ -3629,6 +3629,75 @@ grep -aq "the skeleton (1) is in a lamp light of" "$log66" &&
 	! grep -aq "the skeleton (2) burns\|the skeleton (2) is in a lamp" "$log66" ||
 	fail "the torchlight: $(grep -a "lamp light\|dies\|(2) burns" "$log66" | sed 's/.*skeldat: //' | tr '\n' ';') ($log66)"
 torchlight=$(grep -a "the skeleton (1) is in a lamp light of" "$log66" | head -1 | sed 's/.*light of //')
+# 62. Kit in skeldat ([KIT] stage 6a): flat ground at noon, the
+# launcher's client (the admin, a builder). Stop: the world is the start;
+# in Kit's editor a kit/item_giver of 3 coal, a skeldat/mob_spawner of 2
+# boars at each round's start and a skeldat/bones of 8 bones round it
+# placed. Play: the start's rows taken, the 2 boars on the ground by the
+# spawner; the giver used, the coal in skeldat's own inventory; the bones
+# used, the voxels round it boned. Stop: the boars gone, the start's rows
+# back, the bones' voxels Kit's put back. Play again: the inventory the
+# start's (nothing), the boars again; Stopped at the end. Run 2, the
+# server started again with no admin: Stopped still, the player's dig
+# refused.
+log67="$t/srv67.log"
+gy=6
+BUILDAT_SKELDAT_WORLD=kit BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+	BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+	BUILDAT_SKELDAT_SKELETONS=0 \
+	start_server "$log67" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv67" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log67)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "look 0 -30" "wait_log_any 60000 kit editor: edit rights: yes" \
+	'event kit_edit {"op": "stop"}' "wait_log 10000 kit editor: the server is Stopped" \
+	'event kit_edit {"op": "mode", "on": true}' "wait_log 10000 kit editor: edit mode on" \
+	"event kit_edit {\"op\": \"place\", \"type\": \"kit/item_giver\", \"pos\": [2, $gy, 2]}" \
+	"wait_log 10000 kit editor: state: 2 entities" \
+	'event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "item", "value": "coal"}' \
+	'event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "count", "value": 3}' \
+	"event kit_edit {\"op\": \"place\", \"type\": \"skeldat/mob_spawner\", \"pos\": [-3, $gy, 5]}" \
+	"wait_log 10000 kit editor: state: 3 entities" \
+	'event kit_edit {"op": "set", "id": 4, "comp": 0, "param": "kind", "value": "boar"}' \
+	'event kit_edit {"op": "set", "id": 4, "comp": 0, "param": "count", "value": 2}' \
+	'event kit_edit {"op": "set", "id": 4, "comp": 0, "param": "at_start", "value": true}' \
+	"event kit_edit {\"op\": \"place\", \"type\": \"skeldat/bones\", \"pos\": [3, $gy, 5]}" \
+	"wait_log 10000 kit editor: state: 4 entities" "delay 1000" \
+	"screenshot $t/kit_edit.png" \
+	'event kit_edit {"op": "mode", "on": false}' "wait_log 10000 kit editor: edit mode off" \
+	'event kit_edit {"op": "play"}' "wait_log 10000 kit editor: the server is Running" \
+	"delay 500" "event kit_use 3" "event kit_use 5" "delay 1500" \
+	"screenshot $t/kit_play.png" \
+	'event kit_edit {"op": "stop"}' "wait_log 10000 kit editor: the server is Stopped" \
+	"delay 1500" "screenshot $t/kit_stopped.png" 'event kit_edit {"op": "play"}' \
+	"wait_log 10000 kit editor: the server is Running" "delay 1000" \
+	'event kit_edit {"op": "stop"}' "wait_log 10000 kit editor: the server is Stopped" \
+	"delay 500" quit > "$t/kit.cmds"
+client kit "$t/kit.cmds"
+wait $CLIENT || fail "Kit's drive ($t/kit.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -a "skeldat: \(Kit\|the start\|a boar\|client1 gets\|client1's inventory\)" "$log67" | sed 's/.*skeldat: //'
+[ $(grep -ac "skeldat: a boar ([0-9]*) at" "$log67") = 4 ] &&
+	grep -aq "skeldat: client1 gets 3 skeldat:coal by Kit" "$log67" &&
+	grep -aq "skeldat: Kit's bones: [1-9][0-9]* voxels at 3,$gy,5 to 8" "$log67" &&
+	grep -aq "skeldat: the start's [0-9]* rows back, 0 mobs" "$log67" &&
+	grep -aq "skeldat: client1's inventory the start's" "$log67" ||
+	fail "Kit in skeldat ($log67)"
+BUILDAT_SKELDAT_WORLD=kit BUILDAT_SKELDAT_SKELETONS=0 \
+	start_server "$log67.2" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv67" -C "$t/srv.cache" -l 3 || fail "the server ($log67.2)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "look 0 -70" "delay 500" "mouse_down left" "delay 1000" \
+	"mouse_up left" "delay 500" quit > "$t/kit2.cmds"
+client kit2 "$t/kit2.cmds"
+wait $CLIENT || fail "Kit's second drive ($t/kit2.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "skeldat: Kit hosted, Stopped" "$log67.2" &&
+	grep -aq "skeldat: [a-z0-9]*'s luanti:dig_start refused: Stopped" "$log67.2" &&
+	! grep -aq "skeldat: [a-z0-9]* digs " "$log67.2" ||
+	fail "Stopped over a restart, a player's dig refused ($log67.2)"
+echo "Kit in skeldat: types placed Stopped, 2 boars at each Play, 3 coal given, bones set, Stop put back; Stopped, a player's dig refused"
 # The summary of a full run
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"

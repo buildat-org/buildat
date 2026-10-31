@@ -14,7 +14,9 @@
 -- points at; ground_y the cells' y where no voxel is met; camera the
 -- app's own (walking's); set_camera tells the app which camera draws
 -- (voxelworld.set_camera); menu opens the app's menu (a touchscreen's
--- Menu button; Escape's otherwise).
+-- Menu button; Escape's otherwise). ([KIT] stage 6a) viewport (optional):
+-- a function giving the app's own viewport for the walk view (its render
+-- path: skeldat's sky), else Kit's (its controls' effects).
 -- F6 or "Edit" asks the server for edit mode; with edit rights (the
 -- server's admin, a builder) the server answers with the palette and the
 -- authored tree. Floorplanner's, here:
@@ -1422,8 +1424,9 @@ local function apply_viewport()
 	S.shown_view = want
 	local node, cam = active_camera()
 	-- The walk view with the controls' effects (controls.lua)
-	magic.set_preferred_viewports({want == "walk" and
-			M.viewport(O.scene, cam) or magic.Viewport:new(O.scene, cam)})
+	magic.set_preferred_viewports({want == "walk" and (O.viewport and
+			O.viewport() or M.viewport(O.scene, cam)) or
+			magic.Viewport:new(O.scene, cam)})
 	if O.set_camera then
 		O.set_camera(node)
 	end

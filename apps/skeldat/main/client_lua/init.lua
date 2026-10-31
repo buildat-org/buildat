@@ -306,7 +306,7 @@ declare_keys()
 -- stick and buttons hold the same actions as the keys
 local touch = nil
 local function down(id)
-	return held == nil and (touch ~= nil and touch.held[id] or
+	return held == nil and game.kit_walks() and (touch ~= nil and touch.held[id] or
 			key[id] ~= 0 and magic.input:GetKeyDown(key[id]))
 end
 
@@ -415,9 +415,12 @@ do
 	magic.renderer.HDRRendering = true
 	local rp = sky_light.render_path(magic, viewport.renderPath)
 	viewport.renderPath = rp
+	game.viewport = viewport
 end
 voxelworld.set_camera(camera_node)
 voxel_shading.set_camera(camera_node)
+-- [KIT] stage 6a: Kit's editor (kit.lua)
+game.kit = load("main/kit.lua")(game, scene, camera_node)
 
 -- The wielded item before the eye ([SKELDAT_BOW]): hand.lua, the bow's
 -- draw the left button's while it holds a bow and an arrow is there; the
@@ -1247,7 +1250,8 @@ local function left_held()
 	if touch then
 		return touch.dig
 	end
-	return magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT)
+	return magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) and
+			not game.kit_editing() and not game.kit_press
 end
 
 local function step_dig(dt)
@@ -1621,7 +1625,8 @@ magic.SubscribeToEvent("Update", function()
 end)
 local hud_on = true
 function game.hud_visible()
-	return hud_on
+	-- Kit's tools have the screen's edges ([KIT] stage 6a)
+	return hud_on and not game.kit_editing()
 end
 
 -- [SKELDAT_BOARD_TOGGLE] Whether the board comes up by itself, the
@@ -1645,7 +1650,11 @@ end
 -- A key's action, which the touch controls' buttons press as well
 local function on_key(k)
 	if k == magic.KEY_ESCAPE then
-		open_pause()
+		if not game.kit.escape() then
+			open_pause()
+		end
+	elseif game.kit_editing() then
+		return
 	elseif k == key.inventory then
 		ui.open("inventory")
 	elseif k == key.drop then
@@ -1724,6 +1733,13 @@ end
 
 -- The left button's press: the bow drawn, or a pointed mob hit
 local function left_down()
+	local eye, dir = camera_node.worldPosition, camera_node.worldDirection
+	local kid, kt = game.kit.pick_entity(eye, dir, POINT_RANGE)
+	if kid and (not pointed or kt < (buildat.Vector3(eye) - pointed):Length()) then
+		game.kit_press = true
+		game.kit.use(kid)
+		return
+	end
 	if wielded() == "skeldat:bow" then
 		-- The bow digs and punches nothing; a press with no arrow is
 		-- nothing
@@ -1744,6 +1760,7 @@ local function left_down()
 end
 -- And its release: a drawn bow shoots
 local function left_up()
+	game.kit_press = nil
 	if not bow.t then
 		return
 	end
@@ -1771,7 +1788,8 @@ end
 -- say what it does there
 magic.SubscribeToEvent("MouseButtonDown", function(_, d)
 	local b = d:GetInt("Button")
-	if held or touch then
+	-- Kit's tools take the clicks
+	if held or touch or game.kit_editing() then
 		return
 	end
 	if not mouse_in_world then
@@ -1792,7 +1810,7 @@ magic.SubscribeToEvent("MouseButtonUp", function(_, d)
 end)
 
 magic.SubscribeToEvent("MouseWheel", function(_, d)
-	if held then
+	if held or game.kit_editing() then
 		return
 	end
 	local w = d:GetInt("Wheel")
@@ -2359,9 +2377,9 @@ function game.lock_move(m, dt)
 end
 magic.SubscribeToEvent("Update", function(_, d)
 	local dt = d:GetFloat("TimeStep")
-	if (held ~= nil) ~= was_held then
-		was_held = held ~= nil
-		set_mouse_in_world(not was_held)
+	if (held ~= nil) ~= was_held or game.kit_pointer() ~= game.kit_free then
+		was_held, game.kit_free = held ~= nil, game.kit_pointer()
+		set_mouse_in_world(not was_held and not game.kit_free)
 		dig = nil
 	end
 	if held or not mouse_in_world or not placed then
