@@ -215,7 +215,10 @@ if [ "${1:-}" = web_touch ]; then
 	# a finger held places. The stroke (x -7 to -4, z 0, 50 px a cell
 	# after the pinch, radius 3) keeps off the player at (0.5, 0.5): ground
 	# raised into the body shoved it up to 2 cells aside, the undo did not
-	# put it back, and the play taps pointed past the button
+	# put it back, and the play taps pointed past the button. The player
+	# still settles a few hundredths off (0.5, 0.5): the taps are where the
+	# use (566, 389) and the dig of (1, 0, 3) under the button (575, 470)
+	# hit the same with the eye 0.15 off either way
 	check_tmp workbench_web_touch; t=$CHECK_TMP
 	cat > "$t/steps.json" <<'J'
 [
@@ -260,8 +263,8 @@ if [ "${1:-}" = web_touch ]; then
 	["tap", 500, 174], ["waitlog", "kit editor: edit mode off", 10],
 	["frames", 10], ["shot", "${OUT}/play.png"],
 	["hold", 566, 389, 300], ["waitlog", "kit: use 3", 10],
-	["hold", 620, 440, 300], ["waitlog_any", "kit: points at dig", 10], ["sync", 5000],
-	["hold", 620, 440, 900], ["sync", 5000],
+	["hold", 575, 470, 300], ["waitlog_any", "kit: points at dig", 10], ["sync", 5000],
+	["hold", 575, 470, 900], ["sync", 5000],
 	["frames", 5], ["shot", "${OUT}/placed.png"]
 ]
 J
