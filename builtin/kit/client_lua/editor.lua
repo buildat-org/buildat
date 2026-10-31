@@ -1239,11 +1239,16 @@ people = function()
 			function()
 		send({op = "always_keep", on = not E.always_keep})
 	end)
-	-- The builders with the tools on, each in their colour
+	-- The builders with the tools on, each by a blob in their colour (user,
+	-- 2026-10-31: coloured text reads as a meaning, red as an error;
+	-- Hearth's larger blob) and the text plain
 	for _, bd in ipairs(E.builders) do
-		text(b, "Builder: " .. tostring(bd.name) .. (bd.you and " (you)" or
-				"") .. ((tonumber(bd.sel) or 0) > 0 and ", on " .. bd.sel or ""),
-				color(bd.color, DIM))
+		local br = row(b)
+		local dot = text(br, "●", color(bd.color, DIM))
+		dot:SetFixedWidth(dot.minWidth)
+		text(br, "Builder: " .. tostring(bd.name) .. (bd.you and " (you)" or
+				"") .. ((tonumber(bd.sel) or 0) > 0 and ", on " .. bd.sel or "")
+				):SetTextAlignment(magic.HA_LEFT)
 	end
 	-- The admin's: who here may edit
 	for _, p in ipairs(E.state and E.state.admin and E.state.people or {}) do
