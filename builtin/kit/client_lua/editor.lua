@@ -86,7 +86,8 @@
 -- kit.running() (and kit.by(), who), and kit.set_tools(on),
 -- kit.toggle_tools(), kit.play(), kit.stop(), kit.save_as_start() do what
 -- the bar does; kit.on_change(fn) calls fn() as any of the states changes.
--- kit.add_menu_items(menu) puts Edit and Play/Stop in extensions/
+-- kit.add_menu_items(menu) puts Edit and Play/Stop (a builder's) and
+-- Credits... (everyone's) in extensions/
 -- pause_menu's menu and Kit's Escape first (kit.escape(): the context
 -- menu, a drag, placing, a pending link, the crosshair; true when taken).
 -- kit.view() ("2d", "3d" or "walk": the app walks only in "walk" while
@@ -802,7 +803,7 @@ palette = function()
 	panel_title(w, "Palette", "Terrain")
 	-- [KIT] stage 5: its tabs at its foot (what is above them stays where
 	-- it was): all, the favourites and the New tab, and the credits
-	-- (simplified: a builder's; a player has them by kit.show_credits())
+	-- (a player's in the pause menu)
 	local function tabs()
 		local tr = row(w)
 		for _, tab in ipairs({"All", "Favourites", "New"}) do
@@ -2008,8 +2009,10 @@ end
 
 -- [KIT] stage 5 kit.show_credits(): who made what the composition uses,
 -- the server's (each package with its version and licences, Kit's, the
--- app's and each builder's)
-function M.show_credits()
+-- app's and each builder's). From the pause menu (menu given): a page of
+-- it, its Close or Escape the menu again
+function M.show_credits(menu)
+	menu = type(menu) == "table" and menu or nil
 	drop("dialog")
 	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
 	W.dialog = w
@@ -2036,15 +2039,22 @@ function M.show_credits()
 	if #(E.credits or {}) == 0 then
 		text(w, "Nothing placed yet", DIM)
 	end
-	button(w, "Close", function()
+	local function close()
 		drop("dialog")
 		log:info("kit editor: the credits closed")
-	end)
+		if menu then
+			menu.back()
+		end
+	end
+	button(w, "Close", close)
+	if menu then
+		menu.hold(close, w)
+	end
 end
 
 -- Kit's items in an app's pause menu (extensions/pause_menu), a builder's:
--- Edit ("Play mode" while the tools are on) and Play or Stop; and the
--- tools' Escape first
+-- Edit ("Play mode" while the tools are on) and Play or Stop; everyone's
+-- Credits...; and the tools' Escape first
 function M.add_menu_items(menu)
 	E.menu = menu
 	menu.add(function()
@@ -2055,6 +2065,8 @@ function M.add_menu_items(menu)
 	end, function()
 		if E.running then M.stop() else M.play() end
 	end, {order = 11})
+	menu.add("Credits...", function() M.show_credits(menu) end,
+			{order = 70, page = true})
 	menu.on_escape(M.escape)
 	M.on_change(menu.refresh)
 	O.menu = O.menu or function() menu.open() end

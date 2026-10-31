@@ -540,11 +540,19 @@
 			break;
 		case Type::Tap:
 		case Type::Finger:
-			ok = client::command_seq::inject_finger(input, c.type == Type::Tap ?
-					"tap" : c.param, (int)c.n,
-					logical_mode() ? (int)(m_logical_ox + c.x * m_logical_scale) : c.x,
-					logical_mode() ? (int)(m_logical_oy + c.y * m_logical_scale) : c.y,
-					&err);
+			{
+				// A tap by label: where the click by label would go (its
+				// c.n is the hint's, a tap's finger is 1)
+				const bool tap = c.type == Type::Tap;
+				int x = c.x, y = c.y;
+				if(tap && !c.s.empty())
+					ok = command_seq_find_click(c, &x, &y, &err);
+				ok = ok && client::command_seq::inject_finger(input,
+						tap ? "tap" : c.param, tap ? 1 : (int)c.n,
+						logical_mode() ? (int)(m_logical_ox + x * m_logical_scale) : x,
+						logical_mode() ? (int)(m_logical_oy + y * m_logical_scale) : y,
+						&err);
+			}
 			break;
 		case Type::Text:
 			ok = client::command_seq::inject_text(input, c.s, &err);

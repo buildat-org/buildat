@@ -95,9 +95,9 @@ if [ "${1:-}" = web ]; then
 	# from the palette). The pause menu ([KIT] 4c, extensions/pause_menu): up at
 	# once for the pointer lock headless Chrome does not give (then
 	# skeldat's web_lock_check stand-in in the page, a click off the menu
-	# closes it); Escape and the menu's Edit (at 1200x800 its rows are 41
-	# px apart from Continue at y 298: Edit or Play mode 339, Stop or Play
-	# 380); a link begun, Escape cancels it, the next Escape the menu;
+	# closes it); Escape and the menu's Edit (clicked by label, near where
+	# the menu's rows are at 1200x800: Kit's top bar has the same labels);
+	# a link begun, Escape cancels it, the next Escape the menu;
 	# Stop and Play there, and Play mode; ([KIT] stage 4f) a raise stroke
 	# dragged in the plan by mouse (T), and Ctrl+Z its undo; ([KIT] stage
 	# 4g) "New voxel type...": a PNG uploaded by the browser's picker, the
@@ -138,28 +138,28 @@ if [ "${1:-}" = web ]; then
 	["waitlog_any", "kit editor: edit rights: yes", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["shot", "\${OUT}/menu.png"],
-	["click", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
+	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
 	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
 	["drag", 93, 223, 616, 250], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
 	["frames", 3], ["click", 616, 250], ["waitlog", "kit editor: selected 3", 10],
 	["key", "PageUp"], ["waitlog", "kit editor: state: 2 entities, 2 to undo", 10],
 	["frames", 3], ["shot", "\${OUT}/edit.png"],
-	["click", 977, 209], ["waitlog", "kit editor: log of 3: .*restarted by webboss", 10],
-	["click", 977, 405], ["waitlog", "kit editor: linking from 3 said", 10],
+	["click", "Button", "Restart this"], ["waitlog", "kit editor: log of 3: .*restarted by webboss", 10],
+	["click", "Button", "Link said"], ["waitlog", "kit editor: linking from 3 said", 10],
 	["key", "Escape"], ["waitlog", "kit editor: link cancelled", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
-	["click", 600, 380], ["waitlog", "kit editor: the server is Stopped .by webboss.", 10],
+	["click", "Button", "Stop", 600, 380], ["waitlog", "kit editor: the server is Stopped .by webboss.", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
-	["click", 600, 380], ["waitlog", "kit editor: the server is Running .by webboss.", 10],
+	["click", "Button", "Play", 600, 380], ["waitlog", "kit editor: the server is Running .by webboss.", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
-	["click", 600, 339], ["waitlog", "kit editor: edit mode off", 10],
+	["click", "Button", "Play mode", 600, 339], ["waitlog", "kit editor: edit mode off", 10],
 	["frames", 3], ["shot", "\${OUT}/npc.png"],
 	["click", 600, 400], ["waitlog", "kit: entity 3 shows .Bob: Hello!.", 10],
 	["waitlog_any", "kit: entity 3's client part: dialog: Bob: Hello!", 10],
 	["frames", 5], ["shot", "\${OUT}/play.png"],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
-	["click", 600, 339], ["waitlog", "kit editor: state: 2 entities", 10],
-	["click", 247, 419], ["waitlog", "kit editor: placing .kit/button_door", 10],
+	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: state: 2 entities", 10],
+	["click", "Button", "[kit/button_door]"], ["waitlog", "kit editor: placing .kit/button_door", 10],
 	["click", 800, 550], ["waitlog", "kit editor: state: 4 entities", 10],
 	["key", "t"], ["waitlog", "kit editor: tool terrain", 10], ["frames", 3],
 	["drag", 450, 620, 650, 620], ["waitlog", "kit editor: terrain: raise", 10],
@@ -167,22 +167,22 @@ if [ "${1:-}" = web ]; then
 	["shot", "\${OUT}/terrain.png"],
 	["chord", "Ctrl+z"], ["sync", 5000],
 	["key", "t"], ["waitlog", "kit editor: tool select", 10], ["frames", 5],
-	["click", 175, 475], ["frames", 5],
-	["file", "$t/frost.png"], ["click", 443, 698],
+	["click", "Button", "New voxel type..."], ["frames", 5],
+	["file", "$t/frost.png"], ["click", "Button", "Upload a PNG..."],
 	["waitlog", "kit editor: uploaded kit/up/", 10], ["frames", 3],
-	["click", 717, 142], ["key", "End"], ["key", "Backspace"], ["key", "Backspace"],
+	["click", "LineEdit", "my_voxel"], ["key", "End"], ["key", "Backspace"], ["key", "Backspace"],
 	["key", "Backspace"], ["key", "Backspace"], ["key", "Backspace"],
 	["key", "Backspace"], ["key", "Backspace"], ["key", "Backspace"],
 	["type", "frost"], ["frames", 2],
-	["click", 717, 562], ["selall"], ["type", "0.2"], ["frames", 2],
+	["click", "LineEdit", "1", 717, 562], ["selall"], ["type", "0.2"], ["frames", 2],
 	["shot", "\${OUT}/voxel_dialog.png"],
-	["click", 601, 698], ["waitlog", "kit editor: [0-9]+ voxels to place", 10],
+	["click", "Button", "Make"], ["waitlog", "kit editor: [0-9]+ voxels to place", 10],
 	["frames", 3],
-	["click", 203, 449], ["frames", 5], ["shot", "\${OUT}/voxel_list.png"],
+	["click", "DropDownList", "▼", 203, 449], ["frames", 5], ["shot", "\${OUT}/voxel_list.png"],
 	["key", "Down"], ["key", "Enter"],
 	["waitlog", "kit editor: in hand webboss/frost", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
-	["click", 600, 339], ["waitlog", "kit editor: edit mode off", 10], ["frames", 5],
+	["click", "Button", "Play mode", 600, 339], ["waitlog", "kit editor: edit mode off", 10], ["frames", 5],
 	["mouse", 600, 400], ["frames", 2], ["mouse", 600, 560], ["frames", 5],
 	["shot", "\${OUT}/voxel_aim.png"],
 	["click", 600, 560, 100, 2], ["sync", 5000], ["frames", 5],
@@ -225,7 +225,13 @@ if [ "${1:-}" = web_touch ]; then
 	# put it back, and the play taps pointed past the button. The player
 	# still settles a few hundredths off (0.5, 0.5): the taps are where the
 	# use (566, 389) and the dig of (1, 0, 3) under the button (575, 470)
-	# hit the same with the eye 0.15 off either way
+	# hit the same with the eye 0.15 off either way.
+	# simplified: the bar's Palette (458, 64) stays a pixel tap. By label
+	# the tap waits for the UI fit, and the fit to the open palette (470
+	# tall in a root of 400) makes the root too big to be narrow: the
+	# Palette toggle goes and the palette's items move under the drag.
+	# The pixel taps and the drag land inside the fit's half second of
+	# quiet. Once the editor's narrow() ignores its own fit, use the label
 	check_tmp workbench_web_touch; t=$CHECK_TMP
 	cat > "$t/steps.json" <<'J'
 [
@@ -246,8 +252,8 @@ if [ "${1:-}" = web_touch ]; then
 	["tap", "Button", "Create"],
 	["waitlog", "player physics enabled", 120], ["frames", 10],
 	["waitlog_any", "kit editor: edit rights: yes", 10], ["frames", 10],
-	["tap", 955, 476], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
-	["tap", 500, 174], ["waitlog", "kit editor: state: 1 entities", 20],
+	["tap", "Button", "Menu"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+	["tap", "Button", "Edit", 500, 174], ["waitlog", "kit editor: state: 1 entities", 20],
 	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 5],
 	["shot", "${OUT}/plan.png"],
 	["tap", 458, 64], ["frames", 5],
@@ -259,7 +265,7 @@ if [ "${1:-}" = web_touch ]; then
 	["waitlog", "kit editor: moved 1 by -3, 0", 10], ["frames", 5],
 	["hold", 510, 198, 800], ["waitlog", "kit editor: the menu of 3", 10],
 	["frames", 3], ["shot", "${OUT}/menu.png"],
-	["tap", 605, 300], ["waitlog", "kit editor: state: 3 entities", 10],
+	["tap", "Button", "Duplicate"], ["waitlog", "kit editor: state: 3 entities", 10],
 	["fingers", 450, 250, 550, 250, 350, 250, 650, 250],
 	["waitlog", "kit editor: two fingers let go: the plan", 10],
 	["frames", 5], ["shot", "${OUT}/pinched.png"],
@@ -269,8 +275,8 @@ if [ "${1:-}" = web_touch ]; then
 	["waitlog", "kit editor: the stroke ended", 10], ["frames", 5],
 	["shot", "${OUT}/painted.png"],
 	["chord", "Ctrl+z"], ["sync", 5000], ["key", "t"], ["frames", 3],
-	["tap", 62, 29], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
-	["tap", 500, 174], ["waitlog", "kit editor: edit mode off", 10],
+	["tap", "Button", "Menu"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+	["tap", "Button", "Play mode", 500, 174], ["waitlog", "kit editor: edit mode off", 10],
 	["frames", 10], ["shot", "${OUT}/play.png"],
 	["hold", 566, 389, 300], ["waitlog", "kit: use 3", 10],
 	["hold", 575, 470, 300], ["waitlog_any", "kit: points at dig", 10], ["sync", 5000],
@@ -1088,7 +1094,7 @@ frames 3
 screenshot @T@/t_use.png
 finger_up 1
 wait_log 5000 kit: use 3
-tap 955 663
+tap Button "Menu"
 wait_log 5000 pause: the menu shown
 frames 3
 click Button "Edit"
@@ -1098,7 +1104,7 @@ wait_log 10000 kit editor: state: 3 entities
 keypress F1
 wait_log 5000 kit editor: the view is 2D
 frames 3
-tap 653 77
+tap Button "Palette"
 frames 5
 finger_down 1 138 195
 frames 2
@@ -1112,7 +1118,7 @@ screenshot @T@/t_ghost.png
 finger_up 1
 wait_log 10000 kit editor: state: 4 entities
 wait_log_any 5000 kit: entity 5 drawn
-tap 653 77
+tap Button "Palette"
 frames 5
 tap 700 300
 wait_log 5000 kit editor: selected 5

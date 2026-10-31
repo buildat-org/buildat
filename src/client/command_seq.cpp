@@ -307,14 +307,16 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			c.type = Type::MouseClick;
 			if(!parse_button(rest, &c.x, error))
 				return fail(*error);
-		} else if(cmd == "click"){
-			// simplified: the label has no escapes; a " cannot be in it
-			c.type = Type::Click;
+		} else if(cmd == "click" || (cmd == "tap" &&
+				rest.find('"') != ss_::npos)){
+			// simplified: the label has no escapes; a " cannot be in it.
+			// A tap by label is a finger where the click would go
+			c.type = cmd == "tap" ? Type::Tap : Type::Click;
 			size_t q0 = rest.find('"');
 			size_t q1 = q0 == ss_::npos ? q0 : rest.find('"', q0 + 1);
 			c.s = trim_copy(rest.substr(0, q0));
 			if(q1 == ss_::npos || c.s.empty() || c.s.find(' ') != ss_::npos)
-				return fail("click <type> \"<label>\" [x y]");
+				return fail(cmd+" <type> \"<label>\" [x y]");
 			c.param = rest.substr(q0 + 1, q1 - q0 - 1);
 			ss_ hint = trim_copy(rest.substr(q1 + 1));
 			if(!hint.empty()){
@@ -492,6 +494,11 @@ static void self_check()
 			cs[16].type != Type::Idle || cs[16].n != 5000 ||
 			cs[17].type != Type::Sync || cs[17].n != 4000)
 		throw Exception("command_seq self_check frames/idle/sync");
+	if(!parse_body("tap Button \"Menu\"\ntap 5 6\n", &cs, &err) ||
+			cs.size() != 2 || cs[0].type != Type::Tap || cs[0].s != "Button" ||
+			cs[0].param != "Menu" || cs[0].n != 0 || cs[1].type != Type::Tap ||
+			!cs[1].s.empty() || cs[1].y != 6)
+		throw Exception("command_seq self_check tap");
 	if(!parse_body("nope 1\n", &cs, &err) && err.find("unknown command") != ss_::npos)
 		return;
 	throw Exception("command_seq self_check unknown command");
@@ -567,6 +574,9 @@ ss_ dump_command(const Command &c)
 	case Type::MouseWheel:
 		return "mouse_wheel "+itos(c.n);
 	case Type::Tap:
+		if(!c.s.empty())
+			return "tap "+c.s+" \""+c.param+"\""+
+					(c.n ? " "+itos(c.x)+" "+itos(c.y) : "");
 		return "tap "+itos(c.x)+" "+itos(c.y);
 	case Type::Finger:
 		return "finger_"+c.param+" "+itos(c.n)+(c.param == "up" ? ss_() :
