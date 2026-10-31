@@ -72,7 +72,7 @@ echo "[{\"browser_download_url\": \"http://127.0.0.1:$HP/$(basename "$r").tar.gz
 setsid python3 -m http.server $HP --bind 127.0.0.1 --directory "$t/rel" \
 	> "$t/http.log" 2>&1 &
 groups+=($!)
-slog="$t/serve/server-$fp.pt-$SP.log"
+slog="$t/serve/server-tester.pt-$SP.log"
 setsid env AITTA=127.0.0.1:$P BUILDAT_SERVE_DIR="$t/serve" POLL_SECONDS=5 \
 	UPDATE_MAX_WAIT=60 RELEASES_URL="http://127.0.0.1:$HP/releases.json" \
 	"$here/util/serve_latest_release.sh" tester/pt $SP "$t/u" > "$t/serve.log" 2>&1 &

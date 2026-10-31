@@ -128,7 +128,7 @@ wait_log 30000 wasm cube: drew a cube
 quit
 C
 run "$t/c.log" tester/sl "$t/aitta.cmds" BUILDAT_STARPORT_MANAGED="$t/managed.json"
-grep -aq "aitta: play tester.sl@1.0.0 serverless" "$t/c.log" &&
+grep -aq "aitta: play $fp.sl@1.0.0 serverless" "$t/c.log" &&
 	grep -aq "sl: serverless true" "$t/c.log" || fail "not run from the Aitta"
 [ -f "$t/u/installed/$fp/sl/1.0.0/main/client_lua/init.lua" ] || fail "not installed"
 grep -aqE "cube: (built wasm/|wasm/ is built)" "$t/c.log" && fail "the installed package's wasm/ was built"

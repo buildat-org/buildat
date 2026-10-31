@@ -34,6 +34,9 @@ set -u
 here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp lively_menu; t=$CHECK_TMP
 export BUILDAT_STARPORT_DEFAULT=https://127.0.0.1:9
+# The package's key: a release with none is no package ([AITTA_KEY_IDENTITY])
+"$here/Build/bin/buildat" aitta keygen "$t/key" > "$t/pub" || fail "keygen"
+key=$(cat "$t/pub")
 
 # 1.
 cd "$here/Build"
@@ -72,7 +75,7 @@ hearth admin checkpass12 "$t/admin.log" '{"cmd":"new_topic","name":"News","about
 {"cmd":"new_thread","topic":2,"title":"Busy chat","body":"one"}
 {"cmd":"reply","thread":2,"body":"two"}
 {"cmd":"reply","thread":2,"body":"three"}
-{"cmd":"new_thread","topic":2,"title":"Lamp trouble in game","body":"It is dark","subject":"tester/game abc123"}
+{"cmd":"new_thread","topic":2,"title":"Lamp trouble in game","body":"It is dark","subject":"tester/game '"$key"'"}
 {"cmd":"reply","thread":3,"body":"Turn it on"}' \
 	"BUILDAT_HEARTH_ADMIN=add bob bobpass1234"
 hearth bob bobpass1234 "$t/bob.log" '{"cmd":"new_thread","topic":2,"title":"Guest spam","body":"a"}
@@ -108,7 +111,7 @@ lists = {
 		"name": "game", "version": "1.2.0", "kind": "app", "engine_api": 2,
 		"review": "reviewed", "time": $now, "description": "A check's",
 		"license_code": "MIT", "license_media": "CC0-1.0", "size": 1000,
-		"sha256": "00" * 32, "serverless": True}]},
+		"sha256": "00" * 32, "key": "$key", "serverless": True}]},
 }
 class H(http.server.BaseHTTPRequestHandler):
 	def answer(self):

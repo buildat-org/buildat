@@ -343,8 +343,10 @@ for c in c_u c_u2; do
 	cp -r "$t/c_mine/apps/$fp.savy" "$t/$c/apps/"
 done
 "$b" aitta install "$t/out/tester-savy-1.0.1.zip" "$t/u" > /dev/null || fail "install savy 1.0.1"
+# From the Aitta, as the world is: its "tester.savy" is the tester of
+# the world's Aitta ([AITTA_KEY_IDENTITY])
 for v in 1.0.0 1.0.1; do
-	"$b" aitta install "$t/out/tester-savy-$v.zip" "$t/u2" > /dev/null ||
+	"$b" aitta install 127.0.0.1:$P "tester/savy@$v" "$t/u2" > /dev/null ||
 		fail "install savy $v on u2"
 done
 mkdir -p "$t/u/dev_apps/mine"

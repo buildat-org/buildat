@@ -756,13 +756,33 @@
 				name += isalnum((unsigned char)c) ?
 						(char)tolower((unsigned char)c) : '_';
 		const ss_ dir = dev_apps_path()+"/"+name;
+		// [AITTA_KEY_IDENTITY] A manifest names the app "<author>.<name>",
+		// resolved on the world's Aitta at its install: an installed app's
+		// "<fp>.<name>" is its manifest's author's
+		ss_ named = app;
+		if(dot != ss_::npos &&
+				interface::aitta::fingerprint_ok(app.substr(0, dot))){
+			const ss_ versions = user+"/installed/"+app.substr(0, dot)+"/"+
+					app.substr(dot + 1);
+			ss_ author;
+			for(const auto &v : interface::fs::list_directory(versions)){
+				json::json_error_t e;
+				const json::Value vm = json::load_file((versions+"/"+v.name+
+						"/meta.json").c_str(), &e);
+				if(v.is_directory && vm.get("author").is_string())
+					author = vm.get("author").as_string();
+			}
+			if(!plain_aitta_name(author))
+				throw Exception("no installed app "+app);
+			named = author+"."+app.substr(dot + 1);
+		}
 		json::json_error_t err;
 		json::Value m = json::load_file((dir+"/meta.json").c_str(), &err);
 		if(interface::fs::path_exists(dir)){
 			if(interface::aitta::kind_of(m) != "world")
 				throw Exception(dir+" is another package: rename the save "
 						"or that folder");
-			if(m.get("app").is_string() && m.get("app").as_string() != app)
+			if(m.get("app").is_string() && m.get("app").as_string() != named)
 				throw Exception(dir+" is a world of "+m.get("app").as_string()+
 						": rename the save or that folder");
 		} else {
@@ -774,7 +794,7 @@
 				m.set("author", only_author());
 		}
 		m.set("kind", "world");
-		m.set("app", app);
+		m.set("app", named);
 		m.set("engine_api", (int64_t)interface::aitta::ENGINE_API);
 		m.set("buildat_version", BUILDAT_VERSION);
 		// The release of the app that made it, as storage pins it: "<version>

@@ -106,7 +106,7 @@ groups+=($!)
 serve=(env BUILDAT_SERVE_DIR="$t/serve" POLL_SECONDS=5 UPDATE_MAX_WAIT=60
 	RELEASES_URL="http://127.0.0.1:$HP/releases.json"
 	"$here/util/serve_latest_release.sh" tester/pt $SP "$t/u1")
-slog="$t/serve/server-$fp.pt-$SP.log"
+slog="$t/serve/server-tester.pt-$SP.log"
 
 # 3. Neither AITTA nor installed
 out=$("${serve[@]}" 2>&1)
