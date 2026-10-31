@@ -809,6 +809,7 @@ end)
 local glyphed = setmetatable({}, {__mode = "k"}) -- windows with the ×
 local function open_window(desc, width, on_escape, opts)
 	local root = uistack.main:push({desc = desc})
+	require("buildat/extension/ui_utils").client_screen(root)
 	root.defaultStyle = magic.cache:GetResource("XMLFile", STYLE)
 	local w = root:CreateChild("Window")
 	w:SetStyleAuto()

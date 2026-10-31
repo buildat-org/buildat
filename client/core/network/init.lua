@@ -323,6 +323,7 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 		log:warning("no description from the caller for "..uri)
 	end
 	local root = uistack.main:push({desc="network permission dialog"})
+	require("buildat/extension/ui_utils").client_screen(root)
 	dialogs_up = dialogs_up + 1
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "own:ui_utils/res/style.xml")
@@ -466,6 +467,7 @@ function M.pick_export(accept, cb, dir, back, parts)
 	-- The checks wait for this line
 	log:info("The file picker at " .. dir)
 	local root = uistack.main:push({desc="file picker"})
+	require("buildat/extension/ui_utils").client_screen(root)
 	dialogs_up = dialogs_up + 1
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "own:ui_utils/res/style.xml")
