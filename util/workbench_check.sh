@@ -149,9 +149,9 @@ if [ "${1:-}" = web ]; then
 	["click", "Button", "Link said"], ["waitlog", "kit editor: linking from 3 said", 10],
 	["key", "Escape"], ["waitlog", "kit editor: link cancelled", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
-	["click", "Button", "Stop", 600, 380], ["waitlog", "kit editor: the server is Stopped .by webboss.", 10],
+	["click", "Button", "End", 600, 380], ["waitlog", "kit editor: the server is Ended .by webboss.", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
-	["click", "Button", "Play", 600, 380], ["waitlog", "kit editor: the server is Running .by webboss.", 10],
+	["click", "Button", "Run", 600, 380], ["waitlog", "kit editor: the server is Running .by webboss.", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Play mode", 600, 339], ["waitlog", "kit editor: edit mode off", 10],
 	["frames", 3], ["shot", "\${OUT}/npc.png"],
@@ -211,7 +211,7 @@ J
 	# The first Escape in the tools took the link, not the menu
 	awk '/kit editor: linking from 3/ { l = 1 } l && /pause: the menu shown/ { exit !c } l && /link cancelled/ { c = 1 } END { exit !c }' "$t/out/page.log" ||
 		fail "Escape did not cancel the link before opening the menu ($t/out/page.log)"
-	echo "PASS: Workbench in the web client: the pause menu's Edit, Stop, Play and Play mode, Escape cancelling a link first; the admin places an NPC in Kit's editor and talks to it; a terrain stroke by mouse and its undo; a voxel type made from an uploaded PNG and placed"
+	echo "PASS: Workbench in the web client: the pause menu's Edit, End, Run and Play mode, Escape cancelling a link first; the admin places an NPC in Kit's editor and talks to it; a terrain stroke by mouse and its undo; a voxel type made from an uploaded PNG and placed"
 	exit 0
 fi
 if [ "${1:-}" = web_touch ]; then
@@ -386,8 +386,8 @@ click Button "Edit"
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
 keypress Escape
 wait_log 10000 pause: the menu shown
-click Button "Stop" 512 350
-wait_log 10000 kit editor: the server is Stopped (by kitboss)
+click Button "End" 512 350
+wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
 	# 3 spawner, 4 button, 5 gate, 6 lever, 7 timer, 8 door, 9 teleporter,
 	# 10 trigger zone, 11 scoreboard, 12 counter, 13 npc, 14 item giver,
@@ -418,7 +418,9 @@ EOF
 wait_log_any 10000 kit: entity 8 drawn 1x2x0.2 at 0,0.5,0, solid
 wait_log_any 10000 kit: entity 5 drawn 3x3x0.3 at 1,1,0, solid
 wait_log_any 10000 kit: entity 4 drawn 0.4x0.4x0.15 at 0,0,0
+keydown shift
 keypress Tab
+keyup shift
 wait_log 10000 kit editor: selected 3
 click Button "Link spawned"
 wait_log 10000 kit editor: linking from 3 spawned
@@ -427,7 +429,7 @@ wait_log 10000 kit editor: link cancelled
 wait_log_absent 500 pause: the menu shown
 keypress Escape
 wait_log 10000 pause: the menu shown
-click Button "Play" 512 350
+click Button "Run" 512 350
 wait_log 10000 kit editor: the server is Running (by kitboss)
 frames 5
 screenshot @T@/edit.png
@@ -604,7 +606,7 @@ wait_log 10000 kit editor: edit mode off
 look_dir 0 -1 -0.5
 mouse_click left
 event kit_edit {"op": "stop"}
-wait_log 10000 kit editor: the server is Stopped (by kitboss)
+wait_log 10000 kit editor: the server is Ended (by kitboss)
 wait_log_any 10000 kit: items: none
 wait_log_any 10000 kit: builds discarded: Builds while playing were discarded (kitbob 1, you
 frames 5
@@ -634,7 +636,7 @@ wait_log 10000 kit editor: edit mode off
 look_dir 0.5 -1 0
 mouse_click left
 event kit_edit {"op": "stop"}
-wait_log 10000 kit editor: the server is Stopped (by kitboss)
+wait_log 10000 kit editor: the server is Ended (by kitboss)
 frames 5
 mouse_click left
 frames 3
@@ -645,8 +647,11 @@ keypress F6
 wait_log 10000 kit editor: state: 16 entities, 2 to undo
 event kit_edit {"op": "set", "id": 17, "comp": 0, "param": "keep_inventory", "value": false}
 wait_log 10000 kit editor: state: 16 entities, 3 to undo
-event kit_edit {"op": "play"}
+keypress F6
 wait_log 10000 kit editor: the server is Running (by kitboss)
+wait_log 10000 kit editor: edit mode off
+keypress F6
+wait_log 10000 kit editor: state: 16 entities, 3 to undo
 frames 10
 event kit_edit {"op": "place", "type": "kit/teleporter", "pos": [2, 1, -2]}
 wait_log 10000 kit editor: state: 17 entities, 4 to undo
@@ -686,10 +691,10 @@ wait_log 10000 kit editor: edit mode off
 look_dir 0 -1 -0.6
 mouse_click left
 event kit_edit {"op": "stop"}
-wait_log 10000 kit editor: the server is Stopped (by kitboss)
+wait_log 10000 kit editor: the server is Ended (by kitboss)
 wait_log_absent 1500 kit: builds discarded
 event kit_edit {"op": "keep"}
-wait_log 10000 kit editor: refused: keep: no builds discarded since the last Play
+wait_log 10000 kit editor: refused: keep: no builds discarded since the last Run
 keypress F6
 wait_log 10000 kit editor: state: 19 entities
 event kit_edit {"op": "link", "id": 4, "comp": 0, "output": "pressed", "to": 12, "input": "add"}
@@ -756,7 +761,7 @@ sync 5000
 event kit_use 25
 wait_log_any 10000 kit: entity 30 drawn
 event kit_edit {"op": "stop"}
-wait_log 10000 kit editor: the server is Stopped (by kitboss)
+wait_log 10000 kit editor: the server is Ended (by kitboss)
 sync 5000
 quit
 EOF
@@ -817,10 +822,10 @@ for l in open(sys.argv[1], errors="replace"):
 	m = re.search(r"kit editor: the server is (\w+)|kit: items: (.*)", l)
 	if m:
 		seen.append(m.group(1) or "items " + m.group(2).strip())
-at = seen.index("Stopped")
+at = seen.index("Ended")
 seen = seen[at:]
 print("  from the first Stop:", seen)
-want = ["Stopped", "items none", "Running", "items key x1", "Stopped",
+want = ["Ended", "items none", "Running", "items key x1", "Ended",
 	"items none", "Running", "items none"]
 it = iter(seen)
 assert all(w in it for w in want), seen
@@ -900,14 +905,18 @@ EOF
 # (its ghost), a click selects, a drag moves it by whole cells, the knob
 # turns it by the angle step, an armed palette item placed by a click
 # (Escape: no longer), a link dragged from an out port onto an in port, a
-# box selects two, a right click's menu duplicates them; 3D (F2), where
+# box selects two, a right click's menu duplicates them; ([KIT_PLAYTEST_TWEAKS])
+# Tab in the order last accessed: Shift+Tab after the duplicate the oldest
+# (the door: the button was clicked and linked after it), Tab round to the
+# copies, a nudge of one (undone) puts it at the top; 3D (F2), where
 # a right drag orbits and opens no menu, and walking (F3), where a click
 # goes into the crosshair and Escape comes out of it before the menu;
 # the inspector's x typed in and Move, a kit/world placed (game-wide), selected
 # from the list and deleted by the inspector's Delete, and the undo.
 # ([KIT_EDIT_VOXELS]) The voxels tool (V): a voxel placed by a click at the
-# pointer in 3D, and walking at the crosshair one placed, dug (Shift) and
-# the dig undone (Ctrl+Z), each one undo.
+# pointer in 3D, and walking at the crosshair as in play
+# ([KIT_PLAYTEST_TWEAKS]) one placed (right), dug (left) and the dig undone
+# (Ctrl+Z), each one undo; Escape out of the crosshair, then the tool away.
 # ([KIT_SELECT_BURIED]) A dig zone under the ground: the hover and a click
 # in the plan go through the ground to it; with "Hide positioned entities"
 # off the list has it, its Select selects it; a link ("Link pressed") to it
@@ -1031,6 +1040,28 @@ click Button "Duplicate"
 wait_log_any 5000 kit editor: state: 5 entities
 frames 3
 screenshot @T@/duplicated.png
+keydown shift
+keypress Tab
+keyup shift
+wait_log 5000 kit editor: selected 4
+keypress Tab
+wait_log 5000 kit editor: selected 6
+keypress Tab
+wait_log 5000 kit editor: selected 5
+keypress Right
+wait_log 5000 kit editor: state: 5 entities, 7 to undo
+keydown ctrl
+keypress z
+keyup ctrl
+wait_log 5000 kit editor: state: 5 entities, 6 to undo
+keypress Tab
+wait_log 5000 kit editor: selected 6
+keydown shift
+keypress Tab
+wait_log 5000 kit editor: selected 5
+keypress Tab
+keyup shift
+wait_log 5000 kit editor: selected 4
 keypress F2
 wait_log 5000 kit editor: the view is 3D
 mouse_pos 600 400
@@ -1100,22 +1131,21 @@ mouse_click left
 wait_log 5000 kit editor: into the crosshair
 look_dir 0 -1 0.6
 frames 5
-mouse_click left
+wait_log_any 5000 kit editor: guide: Left: dig
+mouse_click right
 wait_log 5000 kit editor: state: 6 entities, 10 to undo
-keydown shift
 frames 3
 screenshot @T@/voxel_dig.png
 mouse_click left
 wait_log 5000 kit editor: state: 6 entities, 11 to undo
-keyup shift
 keydown ctrl
 keypress z
 keyup ctrl
 wait_log 5000 kit editor: state: 6 entities, 10 to undo
 keypress Escape
-wait_log 5000 kit editor: tool select
-keypress Escape
 wait_log 5000 kit editor: out of the crosshair
+keypress Escape
+wait_log 5000 kit editor: tool select
 keypress F1
 wait_log 5000 kit editor: the view is 2D
 event kit_edit {"op": "place", "type": "kit/dig_zone", "pos": [2, -1, -2]}

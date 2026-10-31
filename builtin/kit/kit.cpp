@@ -64,6 +64,8 @@ static const size_t MAX_TYPE_SOURCE = 256 << 10;
 // a volume has at most
 static const int MAX_EXTENT = 64;
 static const int MAX_VOLUME = 64;
+// The cells a grants type's c:set_voxel sets at most (its box)
+static const int MAX_SET_CELLS = 4096;
 // The most of an item a player has (Kit's own counts, c:add)
 static const int64_t MAX_ITEMS = 1000000;
 // What an editor's packet may be and do
@@ -5144,11 +5146,28 @@ struct Module: public interface::Module, public Interface
 		}
 		const json::Value &voxel = fx.get("voxel");
 		if(voxel.is_string() && !voxel.as_string().empty()){
-			if(!t.owns_voxel || !e.has_pos){
+			// The cells it owns, or a grants type's box ([KIT_TRIGGER_DIG]:
+			// kit/dig_zone's dig), MAX_SET_CELLS at most
+			sv_<pv::Vector3DInt32> cells = owned_cells(e);
+			if(!t.owns_voxel && !t.grants.empty() && e.has_pos){
+				int n[3];
+				extent(in.params.get(t.grants), n);
+				const pv::Vector3DInt32 o = voxel_p(e);
+				if(n[0] * n[1] * n[2] <= MAX_SET_CELLS)
+					for(int x = 0; x < n[0]; x++)
+						for(int y = 0; y < n[1]; y++)
+							for(int z = 0; z < n[2]; z++)
+								cells.push_back(o + pv::Vector3DInt32(x, y, z));
+				else
+					log_w(MODULE, "Entity %s's %s sets %i cells, past %i",
+							cs(itos(e.id)), cs(type), n[0] * n[1] * n[2],
+							MAX_SET_CELLS);
+			}
+			if(cells.empty()){
 				log_w(MODULE, "Entity %s's %s sets a voxel it does not own",
 						cs(itos(e.id)), cs(type));
 			} else {
-				for(const pv::Vector3DInt32 &p : owned_cells(e)){
+				for(const pv::Vector3DInt32 &p : cells){
 					Write w;
 					w.scene = scene_of(e);
 					w.p = p;
@@ -7409,7 +7428,7 @@ struct Module: public interface::Module, public Interface
 		if(!m_hosted)
 			return refuse("Kit is not hosted");
 		if(!m_session.running)
-			return refuse("the server is Stopped");
+			return refuse("the server is Ended");
 		if(data.empty() || !end || *end)
 			return refuse("not an entity's id");
 		auto pi = m_peers.find(peer);
@@ -7989,9 +8008,9 @@ struct Module: public interface::Module, public Interface
 			const std::function<void(const ss_&)> &refuse)
 	{
 		if(m_session.running)
-			return refuse("the server is Running: Stop discards and keeps");
+			return refuse("the server is Running: End discards and keeps");
 		if(m_discarded.empty())
-			return refuse("no builds discarded since the last Play");
+			return refuse("no builds discarded since the last Run");
 		const json::Value &names = j.get("names");
 		std::set<ss_> chosen;
 		for(unsigned i = 0; i < names.size(); i++)
@@ -8859,7 +8878,7 @@ struct Module: public interface::Module, public Interface
 			if(op == "play" && m_session.running)
 				return refuse("the server is Running");
 			if(op != "play" && !m_session.running)
-				return refuse("the server is Stopped");
+				return refuse("the server is Ended");
 			if(op == "play")
 				play(p.name);
 			else if(op == "stop")
@@ -8893,7 +8912,7 @@ struct Module: public interface::Module, public Interface
 			if(!in)
 				return refuse(why);
 			if(!m_session.running)
-				return refuse("the server is Stopped: it is at its start");
+				return refuse("the server is Ended: it is at its start");
 			const size_t ci = in - &e->comps[0];
 			const uint64_t id = e->id;
 			const ss_ type = in->type;
@@ -8957,7 +8976,7 @@ struct Module: public interface::Module, public Interface
 		if(it == m_entities.end()){
 			why = ss_(key)+": no entity "+v.stringify()+(m_removed.count(
 					(uint64_t)v.as_number()) ? " in the round (play removed "
-					"it; it is back at Stop)" : "");
+					"it; it is back at End)" : "");
 			return nullptr;
 		}
 		// Edits are the composition's ([KIT] stage 4d)

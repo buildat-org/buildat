@@ -23,7 +23,8 @@
 --   - **Three views**, the top bar's dropdown or F1, F2, F3: 2D (an
 --     orthographic camera looking down from the cut height, which the
 --     bar's Cut - and + move, north up), 3D (a free camera: WASD, Space
---     and C, Shift faster; the arrows turn it with nothing selected), and
+--     and C, faster the higher it is, as the plan's zoom, Shift faster;
+--     the arrows turn it with nothing selected), and
 --     walking (the app's own camera and its walk). 2D: the middle drag
 --     and WASD pan, the wheel zooms about the pointer; a right drag goes
 --     into 3D orbiting, let go north-up straight down back into the plan.
@@ -43,7 +44,9 @@
 --     bar's Angle, H; Z and X turn it a step), one edit; the arrows nudge
 --     it a grid step (Shift: a quarter), Page Up and Down up and down;
 --     Delete deletes it, Ctrl+D duplicates it, Ctrl+Z undoes this
---     editor's last edit, Tab selects the next entity
+--     editor's last edit, Tab selects the next entity in the order last
+--     accessed (clicked on, edited, made or duplicated: the top; Tab's
+--     own selection moves nothing), Shift+Tab the other way
 --   - **The palette** (left): a type or prefab dragged onto the view goes
 --     where it is let go (its ghost there meanwhile), or clicked it is
 --     placed by the clicks on the view until Escape, a right click or a
@@ -55,8 +58,10 @@
 --   - **The voxels tool** (V, or Voxels by the palette's title; an app
 --     with solid): a left click places the voxel in hand on the face
 --     pointed at, Shift+left digs the voxel pointed at, each one undo;
---     walking at the crosshair within play's reach (reach, 6 cells by
---     default), the other views at the pointer
+--     walking as play ([KIT_PLAYTEST_TWEAKS]): the left button digs, the
+--     right one places (a touchscreen: a tap digs, a finger held places),
+--     at the crosshair within play's reach (reach, 6 cells by default),
+--     Escape out of the crosshair first; the other views at the pointer
 --   - **Links dragged**: the selected entity's outputs are ports beside
 --     it; one dragged onto another entity's input (its ports show as the
 --     drag is over it) links them, onto the entity a link to its one
@@ -81,7 +86,7 @@
 --     over it, their cursor a cross; the entities listed to select (the
 --     game-wide ones, on the app root; "Hide positioned entities" off,
 --     all), a list that scrolls, kept under the palette; "Save as start" (the bar, Running); the builds the
---     last Stop discarded until the next Play: "Keep them", or "Choose..."
+--     last End discarded until the next Run: "Keep them", or "Choose..."
 --     a player's; "Always keep builds"
 --   - **A touchscreen** (BUILDAT_TOUCH=1, [FP_TOUCH]'s): a tap is a click,
 --     a finger dragged on the selection moves it (on a port links, on the
@@ -92,13 +97,15 @@
 --     Menu; the panels folded on a narrow screen, the bar's Palette and
 --     Inspector open one
 -- Kit's top bar, for a builder: the tools ("Edit", "Play mode" while they
--- are on; F6) and the server's state ("Play" while Stopped, "Stop" while
--- Running); kit.editor{bar = false} leaves it out of play for an app's own
--- menu (the tools always have theirs): kit.can_edit(), kit.editing(),
+-- are on; F6; play mode Runs the game if it has Ended) and the server's
+-- state ("Run" while Ended, "End" while Running: End puts the start
+-- back; [KIT_PLAYTEST_TWEAKS], Play and Stop before);
+-- kit.editor{bar = false} leaves it out of play for an app's own menu
+-- (the tools always have theirs): kit.can_edit(), kit.editing(),
 -- kit.running() (and kit.by(), who), and kit.set_tools(on),
 -- kit.toggle_tools(), kit.play(), kit.stop(), kit.save_as_start() do what
 -- the bar does; kit.on_change(fn) calls fn() as any of the states changes.
--- kit.add_menu_items(menu) puts Edit and Play/Stop (a builder's) and
+-- kit.add_menu_items(menu) puts Edit and Run/End (a builder's) and
 -- Credits... (everyone's) in extensions/
 -- pause_menu's menu and Kit's Escape first (kit.escape(): the context
 -- menu, a drag, placing, a pending link, the crosshair; true when taken).
@@ -141,6 +148,33 @@ local S = {view = "walk", sel = {}, primary = nil, grid = 1, angle = 4,
 	placing = nil, crosshair = false, fingers = {}, folds = {},
 	touch = buildat.get_env("BUILDAT_TOUCH") == "1"}
 M.S = S
+
+-- [KIT_PLAYTEST_TWEAKS] Tab's order: the entities last clicked on, edited,
+-- made or duplicated first (S.recent, ids), the rest after them by id;
+-- S.tab_at where Tab walks from, the top again at each of those
+S.recent = {}
+local function touch(id)
+	for i, x in ipairs(S.recent) do
+		if x == id then
+			table.remove(S.recent, i)
+			break
+		end
+	end
+	table.insert(S.recent, 1, id)
+	S.tab_at = 1
+end
+do
+	local send_ = send
+	local EDITS = {set = true, move = true, link = true, unlink = true}
+	send = function(j)
+		if EDITS[j.op] then
+			for _, id in ipairs(j.ids or {j.id}) do
+				touch(id)
+			end
+		end
+		return send_(j)
+	end
+end
 
 -- Floorplanner's: the grid steps (cells) and the angle steps (degrees, its
 -- for objects 15), the pixels a press may move and still be a click, a
@@ -203,6 +237,10 @@ local function changed()
 end
 
 function M.set_tools(on)
+	-- [KIT_PLAYTEST_TWEAKS] play mode runs the game if it has ended
+	if not on and E.editing and not E.running then
+		M.play()
+	end
 	send({op = "mode", on = on == true})
 end
 
@@ -608,9 +646,9 @@ local MAX_BRUSH = 12
 M.T = T
 local brush_at, stroke_begin, stroke_move, stroke_end, draw_brush
 
--- The bar: Edit and Play/Stop in play (an app's own menu can have them:
+-- The bar: Edit and Run/End in play (an app's own menu can have them:
 -- bar = false); in the tools floorplanner's toolbar -- Menu, the views,
--- the grid, the angle step, the cut, Undo, Save as start, Play/Stop, Play
+-- the grid, the angle step, the cut, Undo, Save as start, Run/End, Play
 -- mode, and on a narrow screen the panels' toggles
 -- The bar's buttons in rows, as many as the screen's width needs
 -- ([FP_TOUCH] 2, floorplanner's build_toolbar): place(make) puts what
@@ -661,7 +699,7 @@ rebuild_bar = function()
 	W.bar = w
 	if not E.editing then
 		button(w, "Edit", M.toggle_tools)
-		button(w, E.running and "Stop" or "Play", function()
+		button(w, E.running and "End" or "Run", function()
 			if E.running then M.stop() else M.play() end
 		end)
 		return
@@ -707,7 +745,7 @@ rebuild_bar = function()
 	if E.running then
 		bar_button("Save as start", nil, M.save_as_start)
 	end
-	bar_button(E.running and "Stop" or "Play", nil, function()
+	bar_button(E.running and "End" or "Run", nil, function()
 		if E.running then M.stop() else M.play() end
 	end)
 	bar_button("Play mode", nil, M.toggle_tools)
@@ -1064,7 +1102,7 @@ local function inspect_made(w, e)
 	text(w, "Entity " .. e.id .. ": " .. tostring(e.name))
 	text(w, e.kind == "player" and "A player" or ("Made in play" ..
 			(e.made == "b" and " by " .. tostring(e.made_by) or "") ..
-			", by entity " .. tostring(e.maker) .. ": gone at Stop"), DIM)
+			", by entity " .. tostring(e.maker) .. ": gone at End"), DIM)
 	for _, c in ipairs(e.components or {}) do
 		text(w, c.type, magic.Color(1.0, 0.85, 0.3))
 	end
@@ -1326,7 +1364,7 @@ people = function()
 	local b = window(magic.HA_LEFT, magic.VA_BOTTOM, 10, -50)
 	W.people = b
 	text(b, E.running and "Running: edits change the start and the round" or
-			"Stopped: edits change the start", DIM)
+			"Ended: edits change the start", DIM)
 	if E.status ~= "" then
 		text(b, E.status, WARN)
 	end
@@ -1372,7 +1410,7 @@ people = function()
 				(S.hide_positioned and "yes" or "no"))
 		people()
 	end)
-	-- The builds the last Stop discarded, to keep until the next Play: all,
+	-- The builds the last End discarded, to keep until the next Run: all,
 	-- or by player ("Choose...")
 	local names = {}
 	for name in pairs(E.discarded) do
@@ -1385,7 +1423,7 @@ people = function()
 			list[#list + 1] = name .. " " .. tostring(E.discarded[name])
 		end
 		local dr = row(b)
-		label(dr, "Builds discarded at Stop: " .. table.concat(list, ", "))
+		label(dr, "Builds discarded at End: " .. table.concat(list, ", "))
 		button(dr, "Keep them", function()
 			send({op = "keep"})
 		end)
@@ -1433,7 +1471,7 @@ people = function()
 end
 
 -- The selection: a click's, Shift's adding or taking out, a box's
-local function select(id, add)
+local function select(id, add, by_tab)
 	if not add then
 		S.sel = {}
 	end
@@ -1448,6 +1486,9 @@ local function select(id, add)
 		else
 			S.sel[id] = true
 			S.primary = id
+			if not by_tab then
+				touch(id)
+			end
 		end
 	elseif not add then
 		S.primary = nil
@@ -1663,8 +1704,8 @@ local function key_held(k)
 end
 
 -- The movement keys ([FP]'s move_camera): 2D pans (with a selection the
--- keys move it, a press at a time), 3D flies, the arrows turn it with
--- nothing selected; walking is the app's
+-- keys move it, a press at a time), 3D flies (the faster the higher), the
+-- arrows turn it with nothing selected; walking is the app's
 local function move_camera(dt)
 	if typing() or key_held(magic.KEY_LCTRL) or key_held(magic.KEY_RCTRL) or
 			(E.menu and E.menu.held()) then
@@ -1699,7 +1740,13 @@ local function move_camera(dt)
 	end
 	if key_held(magic.KEY_SPACE) then u = u + 1 end
 	if key_held(magic.KEY_C) then u = u - 1 end
-	local speed = (shift and 12 or 4) * dt
+	-- [KIT_PLAYTEST_TWEAKS] as fast as the plan pans at the zoom that sees
+	-- as much: the ground's width across the view from the camera's height
+	-- simplified: the height above the ground's level, not the voxels or
+	-- the heightmap under it
+	local h = S.pos.y - (O.ground_y - 0.5)
+	local speed = math.max(4, 2 * h * math.tan(math.rad(cam3d.fov) / 2)) *
+			(shift and 3 or 1) * dt
 	local yaw = math.rad(S.yaw)
 	S.pos = {x = S.pos.x + (math.sin(yaw) * f + math.cos(yaw) * r) * speed,
 		y = S.pos.y + u * speed,
@@ -2136,7 +2183,8 @@ function M.escape()
 		stroke_end(S.mx, S.my)
 		return true
 	end
-	if S.tool then
+	-- In the crosshair Escape leaves it first, the voxels tool kept
+	if S.tool and not M.looking() then
 		M.set_tool(nil)
 		return true
 	end
@@ -2216,7 +2264,7 @@ function M.show_credits(menu)
 end
 
 -- Kit's items in an app's pause menu (extensions/pause_menu), a builder's:
--- Edit ("Play mode" while the tools are on) and Play or Stop; everyone's
+-- Edit ("Play mode" while the tools are on) and Run or End; everyone's
 -- Credits...; and the tools' Escape first
 function M.add_menu_items(menu)
 	E.menu = menu
@@ -2224,7 +2272,7 @@ function M.add_menu_items(menu)
 		return E.can_edit and (E.editing and "Play mode" or "Edit") or nil
 	end, M.toggle_tools, {order = 10})
 	menu.add(function()
-		return E.can_edit and (E.running and "Stop" or "Play") or nil
+		return E.can_edit and (E.running and "End" or "Run") or nil
 	end, function()
 		if E.running then M.stop() else M.play() end
 	end, {order = 11})
@@ -2474,12 +2522,13 @@ end
 -- title): on while a voxel is in hand (the palette's Voxel list; "none"
 -- puts it away, as do V and Escape). A left click places it on the face
 -- pointed at, Shift+left digs the voxel pointed at, each one edit (one
--- undo) through Kit's routed writes ("set_voxel"); walking at the
--- crosshair within play's reach (O.reach, 6 cells past the body), the
--- other views at the pointer. The right button stays the view's and the
--- entity menu's.
--- simplified: a click is one cell, and a touchscreen's tap selects as
--- before; a left drag filling a box (Shift: clearing one), one op and
+-- undo) through Kit's routed writes ("set_voxel"); walking, as play, the
+-- left button digs and the right one places (a tap and a finger held), at
+-- the crosshair within play's reach (O.reach, 6 cells past the body); the
+-- other views at the pointer, where the right button stays the view's and
+-- the entity menu's.
+-- simplified: a click is one cell, and in 2D and 3D a touchscreen's tap
+-- selects as before; a left drag filling a box (Shift: clearing one), one op and
 -- one undo, is the upgrade
 local function voxel_target(mx, my)
 	if not O.solid then
@@ -2550,7 +2599,8 @@ local function mouse_down(button_)
 		return
 	end
 	if S.tool == "voxels" and button_ == magic.MOUSEB_LEFT then
-		voxel_click(mx, my, key_held(magic.KEY_LSHIFT) or
+		-- Walking, the left button digs as in play
+		voxel_click(mx, my, S.view == "walk" or key_held(magic.KEY_LSHIFT) or
 				key_held(magic.KEY_RSHIFT))
 		return
 	end
@@ -2611,7 +2661,11 @@ local function mouse_up(button_)
 		S.right_click = nil
 		local orbited = S.orbit
 		S.orbit = nil
-		if rc and rc.moved < RIGHT_CLICK_PX then
+		if rc and rc.moved < RIGHT_CLICK_PX and S.tool == "voxels" and
+				S.view == "walk" then
+			-- Walking, the right button places as in play
+			voxel_click(rc.mx, rc.my, false)
+		elseif rc and rc.moved < RIGHT_CLICK_PX then
 			if M.looking() then
 				-- The menu wants the pointer
 				S.crosshair = false
@@ -2928,6 +2982,10 @@ local function touch_end(id, x, y)
 	S.mx, S.my = x, y
 	if S.drag then
 		end_drag()
+	elseif not f.moved and not S.touch_cam and S.tool == "voxels" and
+			S.view == "walk" then
+		-- Walking with the voxels tool, as play's: a tap digs
+		voxel_click(x, y, true)
 	elseif not f.moved and not S.touch_cam then
 		-- A tap: the left click at the finger
 		S.press = S.press or {mx = x, my = y}
@@ -2952,7 +3010,12 @@ local function long_press_tick()
 			buildat.get_time_us() - only.t0 > LONG_PRESS_US then
 		only.held = true
 		S.press, S.drag = nil, nil
-		right_click({mx = only.x, my = only.y})
+		if S.tool == "voxels" and S.view == "walk" then
+			-- Walking with the voxels tool, as play's: held, it places
+			voxel_click(only.x, only.y, false)
+		else
+			right_click({mx = only.x, my = only.y})
+		end
 	end
 end
 
@@ -2998,17 +3061,38 @@ local function key_down(key, ctrl, shift)
 	elseif key == magic.KEY_F3 then
 		return set_view("walk")
 	elseif key == magic.KEY_TAB then
-		local list, at = {}, 0
+		-- The last accessed first (S.recent), then the rest by id; Shift
+		-- the other way
+		local list, placed, rest = {}, {}, {}
 		for _, x in ipairs(entities()) do
 			if x.pos then
-				list[#list + 1] = x.id
-				if x.id == S.primary then
-					at = #list
-				end
+				placed[x.id] = true
+				rest[#rest + 1] = x.id
 			end
 		end
+		for _, id in ipairs(S.recent) do
+			if placed[id] then
+				list[#list + 1] = id
+				placed[id] = false
+			end
+		end
+		table.sort(rest)
+		local at = 0
+		for _, id in ipairs(rest) do
+			if placed[id] then
+				list[#list + 1] = id
+			end
+		end
+		for i, id in ipairs(list) do
+			if id == S.primary then
+				at = i
+			end
+		end
+		at = S.tab_at and list[S.tab_at] and S.tab_at or at
 		if #list > 0 then
-			select(list[at % #list + 1])
+			S.tab_at = at == 0 and (shift and #list or 1) or
+					(at - 1 + (shift and -1 or 1)) % #list + 1
+			select(list[S.tab_at], false, true)
 		end
 	elseif key == magic.KEY_Z and ctrl then
 		send({op = "undo"})
@@ -3201,6 +3285,24 @@ local function compute_guide()
 		end
 		g.right = "put the terrain tool away; " .. right
 		g.note = not S.touch and "[ ]: size, Shift [ ]: strength, Esc: away" or nil
+		return g
+	end
+	if S.tool == "voxels" and S.view == "walk" then
+		-- [KIT_PLAYTEST_TWEAKS] walking as in play: left digs, right places
+		ghost(nil)
+		local t = voxel_target(mx, my)
+		if t then
+			hover.box(v3(t.cell), magic.Vector3(0.5, 0.5, 0.5), nil, M.DIG)
+			if t.front then
+				hover.face(t.cell, {t.front[1] - t.cell[1], t.front[2] -
+						t.cell[2], t.front[3] - t.cell[3]}, M.PLACE)
+			end
+			g.left = "dig " .. table.concat(t.cell, ",")
+			g.right = t.front and "place " .. tostring(S.voxel) .. " at " ..
+					table.concat(t.front, ",") or nil
+		end
+		g.note = not S.touch and "V: put the voxels away" ..
+				(M.looking() and ", Esc: out of the crosshair" or "") or nil
 		return g
 	end
 	if S.tool == "voxels" then
@@ -3558,6 +3660,18 @@ function M.editor(options)
 				log:info("kit editor: installed " .. tostring(l) .. " as " .. id)
 			end
 		end
+		-- Entities new since the last state (placed, duplicated): Tab's
+		-- order's top
+		if E.editing then
+			local known = {}
+			for _, e in ipairs(s.authored and s.authored.entities or {}) do
+				known[e.id] = true
+				if S.known and not S.known[e.id] then
+					touch(e.id)
+				end
+			end
+			S.known = known
+		end
 		E.state = E.editing and s or nil
 		if was ~= E.editing then
 			log:info("kit editor: edit mode " .. (E.editing and "on" or "off"))
@@ -3580,7 +3694,7 @@ function M.editor(options)
 		if E.running ~= (s.running == true) or E.by ~= tostring(s.by or "") then
 			E.running, E.by = s.running == true, tostring(s.by or "")
 			log:info("kit editor: the server is " .. (E.running and "Running" or
-					"Stopped") .. " (by " .. E.by .. ")")
+					"Ended") .. " (by " .. E.by .. ")")
 		end
 		if E.editing then
 			local n = #entities()

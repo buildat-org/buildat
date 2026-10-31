@@ -104,9 +104,8 @@ shot() # <name>
 {
 	cat <<EOF
 keypress F6
-wait_log 10000 kit editor: edit mode off
-event kit_edit {"op": "play"}
 wait_log 10000 the server put the player at
+wait_log_any 10000 kit editor: edit mode off
 idle 30000
 look_dir 1 -0.3 1
 frames 10
@@ -114,7 +113,7 @@ idle 30000
 frames 5
 screenshot @T@/$1.png
 event kit_edit {"op": "stop"}
-wait_log 10000 kit editor: the server is Stopped (by kitboss)
+wait_log 10000 kit editor: the server is Ended (by kitboss)
 keypress F6
 wait_log 10000 kit editor: state:
 EOF
@@ -139,7 +138,7 @@ EOF
 keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
-wait_log 10000 kit editor: the server is Stopped (by kitboss)
+wait_log 10000 kit editor: the server is Ended (by kitboss)
 event kit_edit {"op": "place", "type": "kit/world", "pos": [0, 1, 0]}
 wait_log 10000 entities, 1 to undo
 EOF
@@ -206,12 +205,11 @@ EOF
 	set_w level 0
 	cat <<'EOF'
 keypress F6
-wait_log 10000 kit editor: edit mode off
-event kit_edit {"op": "play"}
 wait_log 10000 the server put the player at
+wait_log_any 10000 kit editor: edit mode off
 idle 30000
 event kit_edit {"op": "stop"}
-wait_log 10000 kit editor: the server is Stopped (by kitboss)
+wait_log 10000 kit editor: the server is Ended (by kitboss)
 look_dir 0.01 -1 0.01
 frames 3
 mouse_click left
@@ -390,7 +388,7 @@ EOF
 keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
-wait_log 10000 kit editor: the server is Stopped (by kitboss)
+wait_log 10000 kit editor: the server is Ended (by kitboss)
 event kit_edit {"op": "place", "type": "kit/world", "pos": [0, 1, 0]}
 wait_log 10000 entities, 1 to undo
 EOF
@@ -410,16 +408,15 @@ EOF
 	terrain flatten 23 23 2 5 18 '"level": 0'
 	cat <<'EOF'
 keypress F6
-wait_log 10000 kit editor: edit mode off
-event kit_edit {"op": "play"}
 wait_log 10000 the server put the player at
+wait_log_any 10000 kit editor: edit mode off
 idle 2000
 look_dir 1 -0.35 1
 frames 10
 idle 3000
 screenshot @T@/grass.png
 event kit_edit {"op": "stop"}
-wait_log 10000 kit editor: the server is Stopped (by kitboss)
+wait_log 10000 kit editor: the server is Ended (by kitboss)
 keypress F6
 wait_log 10000 kit editor: state:
 EOF
@@ -434,16 +431,15 @@ EOF
 	terrain decorate -12 -12 4 5 22
 	cat <<'EOF'
 keypress F6
-wait_log 10000 kit editor: edit mode off
-event kit_edit {"op": "play"}
 wait_log 10000 the server put the player at
+wait_log_any 10000 kit editor: edit mode off
 idle 2000
 look_dir -1 -0.35 -1
 frames 10
 idle 3000
 screenshot @T@/decorated.png
 event kit_edit {"op": "stop"}
-wait_log 10000 kit editor: the server is Stopped (by kitboss)
+wait_log 10000 kit editor: the server is Ended (by kitboss)
 keypress F6
 wait_log 10000 kit editor: state:
 keypress F1

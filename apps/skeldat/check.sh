@@ -3666,7 +3666,7 @@ BUILDAT_SKELDAT_WORLD=kit BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 	-D "$t/srv67" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log67)"
 CHECK_PIDS+=($SERVER_PID)
 printf '%s\n' "$placed" "look 0 -30" "wait_log_any 60000 kit editor: edit rights: yes" \
-	'event kit_edit {"op": "stop"}' "wait_log 10000 kit editor: the server is Stopped" \
+	'event kit_edit {"op": "stop"}' "wait_log 10000 kit editor: the server is Ended" \
 	'event kit_edit {"op": "mode", "on": true}' "wait_log 10000 kit editor: edit mode on" \
 	"event kit_edit {\"op\": \"place\", \"type\": \"kit/item_giver\", \"pos\": [2, $gy, 2]}" \
 	"wait_log 10000 kit editor: state: 2 entities" \
@@ -3684,10 +3684,10 @@ printf '%s\n' "$placed" "look 0 -30" "wait_log_any 60000 kit editor: edit rights
 	'event kit_edit {"op": "play"}' "wait_log 10000 kit editor: the server is Running" \
 	"delay 500" "event kit_use 3" "event kit_use 5" "delay 1500" \
 	"screenshot $t/kit_play.png" \
-	'event kit_edit {"op": "stop"}' "wait_log 10000 kit editor: the server is Stopped" \
+	'event kit_edit {"op": "stop"}' "wait_log 10000 kit editor: the server is Ended" \
 	"delay 1500" "screenshot $t/kit_stopped.png" 'event kit_edit {"op": "play"}' \
 	"wait_log 10000 kit editor: the server is Running" "delay 1000" \
-	'event kit_edit {"op": "stop"}' "wait_log 10000 kit editor: the server is Stopped" \
+	'event kit_edit {"op": "stop"}' "wait_log 10000 kit editor: the server is Ended" \
 	"delay 500" quit > "$t/kit.cmds"
 client kit "$t/kit.cmds"
 wait $CLIENT || fail "Kit's drive ($t/kit.log)"

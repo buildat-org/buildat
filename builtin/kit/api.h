@@ -93,7 +93,8 @@ namespace interface
 //                               they were, so filtered
 // c: c.id, c.pos, c.params (read), c.state (read and written; a table in
 // it changed in place is written too), c:emit(output, value),
-// c:set_voxel(name) (each cell it owns),
+// c:set_voxel(name) (each cell it owns; a `grants` type that owns none:
+// each cell of its grants box, 4096 at most),
 // c:after(seconds) (on_timer then, on the game's clock; one an instance,
 // c:after() takes it back), c:teleport({x, y, z}) (the player who set the
 // run off, the app moving them on kit:move_player), c:log(...) (the

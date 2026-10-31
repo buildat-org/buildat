@@ -17,6 +17,8 @@
 #      click_to_move, a click at the crosshair walks there.
 #   4. kit/car: used, the player is in its seat (the chase camera), W
 #      drives it forward, F leaves it (put beside it); kit/ball the same.
+#      ([KIT_TRIGGER_DIG]) The car driven into a trigger zone linked to a
+#      dig zone's dig: the dig zone's box dug out.
 # The screenshots (walk, shake, vignette, top_down, first_click, car, ball)
 # are kept with KEEP_TMP=1; look at them.
 #   util/kit_controls_check.sh
@@ -149,6 +151,13 @@ EOF
 	set_p 4 movement '"kit/walker"'
 	edit '{"op": "place", "type": "kit/car", "pos": [-1, 1, 2]}'
 	edit '{"op": "place", "type": "kit/ball", "pos": [3, 1, 9]}'
+	# [KIT_TRIGGER_DIG] a trigger zone on the car's way, its "entered" to a
+	# dig zone's dig
+	edit '{"op": "place", "type": "kit/trigger_zone", "pos": [-2, 1, 5]}'
+	set_p 8 size '[3, 2, 4]'
+	edit '{"op": "place", "type": "kit/dig_zone", "pos": [6, -1, 2]}'
+	set_p 9 size '[2, 2, 2]'
+	edit '{"op": "link", "id": 8, "comp": 0, "output": "entered", "to": 9, "input": "dig"}'
 	cat <<'EOF'
 keypress F6
 wait_log 10000 kit editor: edit mode off
@@ -242,6 +251,14 @@ awk -v d="$d" 'BEGIN { exit !(d > 2) }' ||
 	fail "the car did not drive ($d m): $(body 6) -> $(body 7)"
 want "$s" "kitboss takes the seat of entity 6" "kitboss leaves the seat of entity 6" \
 	"kitboss takes the seat of entity 7" "kitboss leaves the seat of entity 7"
+want "$s" "kit/trigger_zone 8: kitboss entered; 1 inside" \
+	"kit/dig_zone 9: digs its box out by kitboss"
+grep -a "kitboss takes the seat of entity 6" -A1000 "$s" |
+	grep -aq "kit/trigger_zone 8: kitboss entered" ||
+	fail "the zone was not entered by car ($s)"
+grep -aq "sets a voxel it does not own\|sets [0-9]* cells, past" "$s" &&
+	fail "the dig zone's dig was not made ($s)"
+echo "ok: the car drove into a trigger zone, whose entered dug a dig zone's box out"
 d2=$(dist 8 9)
 awk -v d="$d2" 'BEGIN { exit !(d > 1) }' ||
 	fail "the ball did not roll ($d2 m): $(body 8) -> $(body 9)"

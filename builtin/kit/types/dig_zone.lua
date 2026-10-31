@@ -1,6 +1,8 @@
 -- A dig zone: a box of cells (its own and `size` on) where players may dig
 -- (and place, with `place`), edit rights or not. "off" takes it back, "on"
--- gives it again. Unseen in play; the editor draws its box
+-- gives it again; "dig" digs its box out ([KIT_TRIGGER_DIG]: every cell
+-- made air, a game change, put back as the round ends: a trigger zone's
+-- "entered" linked to it). Unseen in play; the editor draws its box
 local function set(c, on, by)
 	c.state.dig = on and c.params.dig
 	c.state.place = on and c.params.place
@@ -24,11 +26,16 @@ return {
 		place = {default = false},
 	},
 	gizmo = {shape = "box", size = 0.2, color = "#c08040"},
-	inputs = {on = "none", off = "none"},
+	inputs = {on = "none", off = "none", dig = "none"},
 	on_start = function(c)
 		set(c, true, "its start")
 	end,
 	on_input = function(c, input, value, by)
+		if input == "dig" then
+			c:set_voxel("air")
+			c:log("digs its box out by", c:name(by))
+			return
+		end
 		set(c, input == "on", by)
 	end,
 }
