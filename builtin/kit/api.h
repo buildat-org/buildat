@@ -32,8 +32,8 @@ namespace interface
 // A type is named "<author>/<name>" ([KIT] stage 4b): everyone makes their
 // own door. Kit's own generic types are builtin/kit/types/<name>.lua,
 // author "kit", in every hosting app; the app's are <types_path>/<name>.lua
-// under its author (Host::author, the app's id until publishing binds an
-// author to a key). An instance records its type and the type's version
+// under its author (Host::author, the app's id); other authors' come in
+// packages (below). An instance records its type and the type's version
 // (the file's `version`). A save from before, its types bare names, is
 // read as the app's type of that name if it has one, else Kit's, and
 // written back so.
@@ -82,6 +82,14 @@ namespace interface
 //   on_params(c, changed) (a live edit changed its parameters: {name = the
 //   value before}), on_remove(c) (it is about to go: deleted while Running,
 //   removed by c:remove, or "Restart this" before its on_start)
+//   migrate(params, from) ([KIT] stage 5) -- an instance of an older
+//                               version `from` (a save's, a prefab's, an
+//                               upgraded package's) made this one's: its
+//                               parameters returned as this version takes
+//                               them; then those it does not declare, or
+//                               whose value it refuses, are left out
+//                               (logged). No c; none: the parameters as
+//                               they were, so filtered
 // c: c.id, c.pos, c.params (read), c.state (read and written; a table in
 // it changed in place is written too), c:emit(output, value),
 // c:set_voxel(name) (each cell it owns),
@@ -122,7 +130,7 @@ namespace interface
 //   them, Always keep builds), others game changes. Save as start makes
 //   them the start's. MAX_MADE at once.
 //   Prefabs: a group of entities saved to place again, "<author>/<name>"
-//   as types are, in a file of its own (stage 5 publishes it):
+//   as types are, in a file of its own (a package's, below):
 //     {"format": "kit_prefab", "author", "name", "version": n,
 //      "entities": [{"id": 1..., "parent": 0 (the scene) or an earlier
 //      member's id, "name", "pos" (from where a copy is placed),
@@ -139,6 +147,39 @@ namespace interface
 //   Client parts: <name>.client.lua beside a type, sent to every client at
 //   join and run there as the client's own Lua is (client_lua/module.lua
 //   says what it gets).
+//   [KIT] stage 5 **Packages**: component types, prefabs and builders'
+//   voxel types published to Aitta as a package of "kind": "kit"
+//   (doc/aitta.txt), everything in it named by its manifest's author,
+//   whom Aitta binds to the publisher's key:
+//     meta.json      the manifest, with "dependencies": [{"kit":
+//                    "<author>/<name>", "version": the lowest it works
+//                    with}] (the packages its prefabs' types are of)
+//     types/<n>.lua, <n>.client.lua   the type <author>/<n>
+//     types/<n>.prefab.json           the prefab <author>/<n>
+//     types/<n>.voxel.json            the voxel type <author>/<n> (as
+//                    {"op": "voxel"} has it; "texture" a registered one's
+//                    or textures/<file>.png in the package)
+//   A builder installs one into the save from the palette's New tab:
+//   "kit:package" (the release's .sig, a 0 byte, its zip; the client
+//   fetched them from an Aitta with the dependencies, which go first), its
+//   signature checked, its dependencies installed here at their versions
+//   or newer, nothing of it another's (Kit's, the app's, a builder's,
+//   another package's). An author's packages here are signed by one key
+//   (simplified: the first seen). It is the rows
+//   "package:<author>/<name>" ({"version", "key", "sha256", "by",
+//   "manifest", "types": {name: {"source", "client"}}, "prefabs",
+//   "voxels"}), "prefab:..." and "voxel:..." ({"package"} in each) and
+//   "texture:...". A newer version upgrades it in place: it keeps the
+//   types the older had, and each authored instance of an older version
+//   of a type is migrated (migrate above). Answered with "kit:package"
+//   {"ok": true, "what"} or {"ok": false, "why"}. {"op": "export"}: the
+//   builder's own prefabs and voxel types as a package's files
+//   ("kit:export" {"author", "files", "hex", "dependencies"}), which the
+//   editor hands the client's publish screen. Credits: each client's
+//   "kit:edit_state" has "credits", [{"author", "package", "version",
+//   "license_code", "license_media" (a package's), "of": "kit"|"app",
+//   "uses": [types, "[prefab]"]}], what the composition uses by who made
+//   it (kit.show_credits(), the palette's Credits).
 //   Looks: shape "wedge", rotation {x, y, z} (degrees), material (plain,
 //   metal, glass, glow), and "param:<name>" anywhere in a look is that
 //   parameter's value (kit/part).

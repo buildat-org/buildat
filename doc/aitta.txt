@@ -20,7 +20,7 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
                                       its feedback and news go
         "changelog": "CHANGELOG.md",  optional: a file in the archive
         "kind": "app",                optional: "app", "extension",
-                                      "world" or "remix" (below)
+                                      "world", "remix" or "kit" (below)
         "audience": "everyone",       optional: "everyone", "teen" or
                                       "adult"; Aitta's page at / lists
                                       only "everyone" and "teen"
@@ -169,6 +169,25 @@ sandboxed). The client names it "<author>__<name>", so neither part may
 have "__" in it or start or end with _. It has no saves to pin, so an
 installed version replaces the one before it. An author/name stays the
 kind it was first installed as.
+
+Kit packages [KIT]
+------------------
+A package of kind "kit" is Kit's component types, prefabs and voxel
+types (builtin/kit/api.h says the files), named by the manifest's author,
+which Aitta binds to the key that signs it. It is not installed in the
+client: a builder installs it into a server's save from Kit's palette (its
+New tab lists the Aittas' Kit packages), and the server checks the
+signature again. One more manifest field:
+
+        "dependencies": [            the Kit packages it uses, fetched
+          {"kit": "alice/lamps",      and installed before it, each at
+           "version": "1.0.0"}]       that version or newer
+
+An Aitta lists it as kind "other" with its whole manifest (no change to
+an Aitta was needed); a client reads "manifest"."kind". Kit's "Publish
+my prefabs..." writes a builder's prefabs and voxel types into
+<user>/dev_apps/<name> and opens the publish screen on it; a package of
+types is written by hand: meta.json and types/<name>.lua.
 
 Worlds [WORLD_PACKAGES]
 -----------------------

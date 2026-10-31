@@ -22,6 +22,8 @@
 #include "interface/voxel.h"
 #include "interface/sha256.h"
 #include "interface/os.h"
+#include "interface/aitta.h"
+#include "interface/zip.h"
 #include "kit/world.h"
 #include "voxel_objects/api.h"
 #include "client_file/api.h"
@@ -91,6 +93,10 @@ static const double HM_STEP = 0.25;
 static const float HM_ROCK_SLOPE = 0.35f;
 // on_remove runs inside the run that removed: so deep at most
 static const int MAX_REMOVE_DEPTH = 4;
+// [KIT] stage 5: what a Kit package may be, packed and unpacked, and the
+// packages a save has at most
+static const size_t MAX_PACKAGE_BYTES = 1 << 20, MAX_PACKAGE_UNPACKED = 4 << 20;
+static const size_t MAX_PACKAGES = 128;
 
 struct Link
 {
@@ -533,6 +539,11 @@ struct Module: public interface::Module, public Interface
 	// Types are "<author>/<name>": Kit's own in builtin/kit/types/ (author
 	// "kit"), the app's in Host::types_path under its author
 	ss_ m_kit_types, m_author;
+	// [KIT] stage 5: the Kit packages installed (rows
+	// "package:<author>/<name>"), by name, and their component types,
+	// {"source", "client", "package"} by type
+	sm_<ss_, json::Value> m_packages;
+	sm_<ss_, json::Value> m_package_types;
 	// The app's defaults for parameters, {type: {param: value}}
 	json::Value m_defaults = json::object();
 	std::set<ss_> m_palette;
@@ -683,6 +694,8 @@ struct Module: public interface::Module, public Interface
 			});
 		sub(m_server, "network:packet_received/kit:texture",
 				&Module::on_texture);
+		sub(m_server, "network:packet_received/kit:package",
+				&Module::on_package);
 		sub(m_server, "kit:use_through", &Module::on_use);
 		sub(m_server, "kit:edit_through", &Module::on_edit);
 		sub(m_server, "network:client_disconnected", &Module::on_left);
@@ -836,8 +849,8 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// The directory an author's types are in: "" for an author not here
-	// simplified: Kit's and the app's; other authors' come with stage 5's
-	// packages
+	// (Kit's and the app's; other authors' are installed packages',
+	// m_package_types)
 	ss_ author_path(const ss_ &author)
 	{
 		if(author == "kit")
@@ -871,13 +884,17 @@ struct Module: public interface::Module, public Interface
 					name.substr(0, 64)+"\"";
 			return false;
 		}
+		// [KIT] stage 5: an installed package's, else the author's files
 		const ss_ dir = author_path(author);
-		if(dir.empty()){
+		auto pt = m_package_types.find(name);
+		if(dir.empty() && pt == m_package_types.end()){
 			why = "no component type "+name+" (no types of "+author+" here)";
 			return false;
 		}
-		const ss_ path = dir+"/"+short_name+".lua";
-		const ss_ src = read_file(path);
+		const bool pkg = pt != m_package_types.end();
+		const ss_ path = pkg ? "package "+jstr(pt->second, "package") :
+				dir+"/"+short_name+".lua";
+		const ss_ src = pkg ? jstr(pt->second, "source") : read_file(path);
 		if(src.empty() || src.size() > MAX_TYPE_SOURCE){
 			why = "no component type "+name+" ("+path+")";
 			return false;
@@ -903,7 +920,8 @@ struct Module: public interface::Module, public Interface
 		t.players = t.decl.get("players").is_true();
 		t.player = t.decl.get("player").is_true();
 		// Its client part, beside it
-		const ss_ client = read_file(dir+"/"+short_name+".client.lua");
+		const ss_ client = pkg ? jstr(pt->second, "client") :
+				read_file(dir+"/"+short_name+".client.lua");
 		if(client.size() > MAX_TYPE_SOURCE / 4){
 			why = name+": its client part is past "+itos(MAX_TYPE_SOURCE / 4)+
 					" bytes";
@@ -1170,6 +1188,50 @@ struct Module: public interface::Module, public Interface
 	// parameters dropped and its type's version, and the cells it owned are
 	// cleared once the tree is read (their owner entries, and their voxel
 	// made its "open" one, air by default). True if it was one
+	// [KIT] stage 5: an older version's parameters (from) as the type's
+	// version takes them: through its migrate(params, from) where it has
+	// one, then those it does not declare or whose value it refuses left
+	// out, each logged (a migrate that fails leaves the parameters as
+	// they were for that)
+	void migrate_params(const ss_ &type, int64_t from, json::Value &params,
+			const ss_ &who)
+	{
+		const Type &t = m_types[type];
+		if(t.handlers.count("migrate")){
+			ss_ o = "Mreturn {type=";
+			lua_lit(json::Value(type), o);
+			o += ",from=";
+			lua_lit(json::Value(from), o);
+			o += ",params=";
+			lua_lit(params, o);
+			o += "}";
+			ss_ answer, err;
+			if(box_call(o, answer, err)){
+				const json::Value p = json::load_string(answer.c_str());
+				params = p.is_object() ? p : json::object();
+				log_i(MODULE, "%s: %s's migrate from version %lli: %s",
+						cs(who), cs(type), (long long)from,
+						cs(params.stringify().substr(0, 200)));
+			} else {
+				log_w(MODULE, "%s: %s's migrate from version %lli failed: %s",
+						cs(who), cs(type), (long long)from, cs(err));
+			}
+		}
+		const json::Value &decl = t.decl.get("params");
+		json::Value kept = json::object();
+		for(json::Iterator it(params); it; ++it){
+			const json::Value &d = decl.get(it.key());
+			const ss_ bad = !d.is_object() ? "not a parameter of it" :
+					jstr(d, "type") == "entity" ? "" : check_param(d, *it);
+			if(bad.empty())
+				kept.set(it.key(), *it);
+			else
+				log_w(MODULE, "%s: %s's %s of version %lli left out: %s",
+						cs(who), cs(type), cs(it.key()), (long long)from, cs(bad));
+		}
+		params = kept;
+	}
+
 	bool migrate_object(const Entity &e, Instance &in, const json::Value &pj)
 	{
 		static const char *OLD[] = {"closed", "open", "up", "down",
@@ -1259,25 +1321,25 @@ struct Module: public interface::Module, public Interface
 				return false;
 			const Type &t = m_types[in.type];
 			// The version it was made with; the type's own for a new one
-			// simplified: one version of a type is on disk, and an
-			// instance of another runs on it. An explicit upgrade (and a
-			// parameter migration hook) comes with stage 5's packages
 			const json::Value &ver = cj.get("version");
 			in.version = ver.is_number() && ver.as_number() >= 1 &&
 					ver.as_number() <= 1e9 ? (int64_t)ver.as_number() : t.version;
-			const json::Value &pj = cj.get("params");
+			json::Value pj = cj.get("params");
 			// A starter door, gate, button or lever of before is an object
 			const bool object = migrate_object(e, in, pj);
-			// Kit's own types keep their older versions' parameters: an
-			// instance of one is upgraded to the file's ([KIT] stage 4d)
-			if(!object && in.version < t.version &&
-					in.type.compare(0, 4, "kit/") == 0){
+			// [KIT] stage 5: an instance of an older version is upgraded to
+			// the type's, its parameters through the type's migrate
+			if(!object && in.version < t.version){
+				pj = pj.is_object() ? pj.deepcopy() : json::object();
+				migrate_params(in.type, in.version, pj, "Entity "+itos(e.id));
 				log_i(MODULE, "Entity %s's %s upgraded from version %lli to "
 						"%lli", cs(itos(e.id)), cs(in.type), (long long)in.version,
 						(long long)t.version);
 				in.version = t.version;
 				m_upgraded++;
 			}
+			// simplified: a newer version's instance (a type's file put
+			// back to an older one) runs on the file's
 			if(in.version != t.version)
 				log_w(MODULE, "Entity %s's %s is of version %lli, its file "
 						"%lli: run on the file's", cs(itos(e.id)), cs(in.type),
@@ -1561,6 +1623,33 @@ struct Module: public interface::Module, public Interface
 		return ok;
 	}
 
+	// A type in the palette if it loads. The types on each player entity
+	// ([KIT] stage 4d) are not placed: at the start (`starting`) they are
+	// put on the players instead
+	// simplified: a package's player type installed while the server runs
+	// is on the players from the next start
+	void palette_add(const ss_ &t, bool starting)
+	{
+		ss_ why;
+		if(!load_type(t, why)){
+			log_w(MODULE, "Not in the palette: %s", cs(why));
+			return;
+		}
+		const Type &ty = m_types[t];
+		if(ty.player){
+			if(starting)
+				m_player_types.push_back(t);
+		} else if(ty.world && m_host.world_scene.empty()){
+			// [KIT] stage 4e: no World where the app has none
+		} else if(!m_host.controls && (ty.decl.get("controls").is_true() ||
+				ty.decl.get("movement").is_object())){
+			// [KIT] stage 4h: the controls and the movements where the
+			// app has Kit's controls
+		} else {
+			m_palette.insert(t);
+		}
+	}
+
 	bool host_u(const Host &host, ss_ &why)
 	{
 		m_host = host;
@@ -1596,6 +1685,7 @@ struct Module: public interface::Module, public Interface
 		}
 		log_i(MODULE, "The box is up (%s)", cs(m_box->engine_name()));
 
+		load_packages();
 		// Authored: the save's, or the app's file the first time
 		ss_ authored;
 		bool first = false;
@@ -1636,29 +1726,13 @@ struct Module: public interface::Module, public Interface
 						dot + 4 != n.name.size() ||
 						n.name.find('.') != dot)
 					continue;
-				const ss_ type = author+"/"+n.name.substr(0, dot);
-				ss_ twhy;
-				if(load_type(type, twhy))
-					m_palette.insert(type);
-				else
-					log_w(MODULE, "Not in the palette: %s", cs(twhy));
+				palette_add(author+"/"+n.name.substr(0, dot), true);
 			}
 		}
-		// The types on each player entity ([KIT] stage 4d) are not placed
-		for(const ss_ &t : sv_<ss_>(m_palette.begin(), m_palette.end()))
-			if(m_types[t].player){
-				m_player_types.push_back(t);
-				m_palette.erase(t);
-			} else if(m_types[t].world && m_host.world_scene.empty()){
-				// [KIT] stage 4e: no World where the app has none
-				m_palette.erase(t);
-			} else if(!m_host.controls &&
-					(m_types[t].decl.get("controls").is_true() ||
-					m_types[t].decl.get("movement").is_object())){
-				// [KIT] stage 4h: the controls and the movements where the
-				// app has Kit's controls
-				m_palette.erase(t);
-			}
+		// [KIT] stage 5: and the installed packages'
+		for(const auto &pt : m_package_types)
+			palette_add(pt.first, true);
+		std::sort(m_player_types.begin(), m_player_types.end());
 		ss_ names;
 		for(const ss_ &t : m_palette)
 			names += (names.empty() ? "" : " ")+t;
@@ -1990,6 +2064,9 @@ struct Module: public interface::Module, public Interface
 		if(!texture_choices().count(texture))
 			return refuse("texture: no voxel or upload has "+texture);
 		auto old = m_voxel_types.find(name);
+		if(old != m_voxel_types.end() && !jstr(old->second, "package").empty())
+			return refuse(name+" is the package "+jstr(old->second, "package")+
+					"'s");
 		bool taken = false;
 		each_registry([&](interface::VoxelRegistry *reg){
 			interface::VoxelName n;
@@ -2043,7 +2120,28 @@ struct Module: public interface::Module, public Interface
 		if(!m_hosted || pi == m_peers.end() || !pi->second.editing ||
 				!can_edit(peer))
 			return refuse("the tools on, with edit rights");
-		const ss_ &d = packet.data;
+		ss_ why;
+		const ss_ name = store_texture(packet.data, why);
+		if(name.empty())
+			return refuse(why);
+		log_i(MODULE, "%s uploaded texture %s", cs(pi->second.name), cs(name));
+		// The state first: the answer's name is in its textures
+		for(auto &o : m_peers)
+			send_state(o.first);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:texture", name);
+		});
+	}
+
+	// A texture's PNG checked, decoded and saved again as a PNG (a client
+	// is sent only what decoded) in the row "texture:<hash>", and served:
+	// its name ("kit/up/<hash>.png"), or "" and why not
+	ss_ store_texture(const ss_ &d, ss_ &why)
+	{
+		auto refuse = [&](const ss_ &s){
+			why = s;
+			return ss_();
+		};
 		// A PNG's signature and its IHDR's sides, before it is decoded
 		auto be32 = [&](size_t at){
 			return (uint32_t)(uint8_t)d[at] << 24 | (uint32_t)(uint8_t)d[at +
@@ -2077,13 +2175,450 @@ struct Module: public interface::Module, public Interface
 				interface::sha256::calculate(png)).substr(0, 16);
 		m_store->set("texture:"+hash, png);
 		serve_texture(hash, png);
-		log_i(MODULE, "%s uploaded texture kit/up/%s.png (%ux%u, %zu bytes)",
-				cs(pi->second.name), cs(hash), w, h, png.size());
-		// The state first: the answer's name is in its textures
+		log_i(MODULE, "Texture kit/up/%s.png (%ux%u, %zu bytes)", cs(hash), w,
+				h, png.size());
+		return "kit/up/"+hash+".png";
+	}
+
+	// ---- Packages ([KIT] stage 5): api.h says what one is
+
+	void load_packages()
+	{
+		for(const ss_ &k : m_store->list("package:")){
+			ss_ row;
+			if(!m_store->get(k, row))
+				continue;
+			const json::Value r = json::load_string(row.c_str());
+			if(r.is_object())
+				add_package(k.substr(8), r);
+		}
+		log_i(MODULE, "Kit packages: %zu", m_packages.size());
+	}
+
+	void add_package(const ss_ &name, const json::Value &r)
+	{
+		for(auto it = m_package_types.begin(); it != m_package_types.end();)
+			if(jstr(it->second, "package") == name)
+				it = m_package_types.erase(it);
+			else
+				++it;
+		m_packages[name] = r;
+		const ss_ author = name.substr(0, name.find('/'));
+		const json::Value &ts = r.get("types");
+		if(ts.is_object())
+			for(json::Iterator it(ts); it; ++it){
+				json::Value t = (*it).deepcopy();
+				t.set("package", name);
+				m_package_types[author+"/"+it.key()] = t;
+			}
+	}
+
+	// "kit:package" (a release's .sig, a 0 byte and its zip, as an Aitta
+	// serves them): a builder with the tools on installs a Kit package,
+	// or a newer version of one. Answered with "kit:package", {"ok": true,
+	// "what"} or {"ok": false, "why"}
+	void on_package(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		auto answer = [&](bool ok, const ss_ &s){
+			log_i(MODULE, "A package by peer %zu %s: %s", peer,
+					ok ? "taken" : "refused", cs(s));
+			json::Value a = json::object();
+			a.set("ok", ok);
+			a.set(ok ? "what" : "why", s);
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(peer, "kit:package", a.stringify());
+			});
+		};
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || !pi->second.editing ||
+				!can_edit(peer))
+			return answer(false, "the tools on, with edit rights");
+		const ss_ &d = packet.data;
+		const size_t z = d.find('\0');
+		if(d.size() > MAX_PACKAGE_BYTES || z == ss_::npos)
+			return answer(false, "a release's .sig, a 0 byte and its zip, "+
+					itos(MAX_PACKAGE_BYTES >> 10)+" KiB at most");
+		const json::Value sig = json::load_string(d.substr(0, z).c_str());
+		const ss_ zip = d.substr(z + 1);
+		const ss_ sha = interface::sha256::hex(
+				interface::sha256::calculate(zip));
+		if(jstr(sig, "format") != interface::aitta::RELEASE_FORMAT ||
+				jstr(sig, "sha256") != sha || !interface::aitta::verify(
+				jstr(sig, "key"), zip, jstr(sig, "signature")))
+			return answer(false, "the signature does not match the archive");
+		// Unpacked under the cache, read and thrown away
+		const ss_ tmp = m_server->get_config().get<ss_>("cache_path")+
+				"/kit_package_"+sha.substr(0, 16);
+		sm_<ss_, ss_> files;
+		ss_ why;
+		try {
+			interface::fs::create_directories(tmp+"/x");
+			if(!interface::fs::write_file(tmp+"/p.zip", zip))
+				throw Exception("cannot write "+tmp);
+			interface::zip_extract(tmp+"/p.zip", tmp+"/x", MAX_PACKAGE_UNPACKED);
+			for(const auto &e : interface::zip_list(tmp+"/p.zip"))
+				if(!e.name.empty() && e.name.back() != '/')
+					files[e.name] = read_file(tmp+"/x/"+e.name);
+		} catch(std::exception &e){
+			why = e.what();
+		}
+		interface::fs::remove_all(tmp);
+		if(!why.empty())
+			return answer(false, "the archive: "+why);
+		why = install_package(pi->second.name, sig, files);
+		if(why.compare(0, 3, "ok ") == 0)
+			return answer(true, why.substr(3));
+		answer(false, why);
+	}
+
+	// A package's files installed: "ok <what was done>", or why not
+	ss_ install_package(const ss_ &by, const json::Value &sig,
+			sm_<ss_, ss_> &files)
+	{
+		const json::Value m = json::load_string(files["meta.json"].c_str());
+		ss_ why = interface::aitta::check_manifest(m);
+		if(!why.empty())
+			return "meta.json: "+why;
+		if(interface::aitta::kind_of(m) != "kit")
+			return "not a Kit package (\"kind\": \"kit\")";
+		const ss_ author = jstr(m, "author"), name = author+"/"+jstr(m, "name"),
+				version = jstr(m, "version"), key = jstr(sig, "key");
+		if(author == "kit" || author == m_author)
+			return author+"'s types are here already, not from a package";
+		// simplified: an author's key is the one their first package here
+		// was signed with. Aitta binds an author to a key; a client fetched
+		// this from one, and the server trusts the first key it sees
+		for(auto &o : m_packages)
+			if(o.first.substr(0, o.first.find('/')) == author &&
+					jstr(o.second, "key") != key)
+				return author+"'s packages here are signed with another key";
+		auto old = m_packages.find(name);
+		const ss_ old_version = old == m_packages.end() ? "" :
+				jstr(old->second, "version");
+		if(!old_version.empty() &&
+				!interface::aitta::version_less(old_version, version))
+			return "ok "+name+" "+old_version+" is installed already";
+		if(old_version.empty() && m_packages.size() >= MAX_PACKAGES)
+			return "the save has "+itos(MAX_PACKAGES)+" packages";
+		const json::Value &deps = m.get("dependencies");
+		for(unsigned i = 0; i < deps.size(); i++){
+			const ss_ dn = jstr(deps.at(i), "kit"),
+					dv = jstr(deps.at(i), "version");
+			auto have = m_packages.find(dn);
+			if(have == m_packages.end() || interface::aitta::version_less(
+					jstr(have->second, "version"), dv))
+				return "it needs "+dn+" "+dv+" or newer: install that first";
+		}
+		// Its contents: types/<name>.lua (and <name>.client.lua),
+		// <name>.prefab.json and <name>.voxel.json; textures/<file>.png
+		json::Value types = json::object();
+		sm_<ss_, json::Value> prefabs, voxels;
+		for(auto &f : files){
+			if(f.first.compare(0, 6, "types/") != 0)
+				continue;
+			const ss_ base = f.first.substr(6);
+			ss_ n, kind;
+			for(const char *suffix : {".client.lua", ".prefab.json",
+					".voxel.json", ".lua"}){
+				const size_t sl = strlen(suffix);
+				if(base.size() > sl && base.compare(base.size() - sl, sl,
+						suffix) == 0){
+					n = base.substr(0, base.size() - sl);
+					kind = suffix;
+					break;
+				}
+			}
+			if(kind.empty())
+				continue;
+			if(!name_ok(n))
+				return f.first+": a name is letters, digits and _";
+			if(kind == ".prefab.json" || kind == ".voxel.json"){
+				const json::Value j = json::load_string(f.second.c_str());
+				if(!j.is_object())
+					return f.first+": not a JSON object";
+				(kind == ".prefab.json" ? prefabs : voxels)[author+"/"+n] = j;
+				continue;
+			}
+			json::Value t = types.get(n).is_object() ? types.get(n) :
+					json::object();
+			t.set(kind == ".lua" ? "source" : "client", f.second);
+			types.set(n, t);
+		}
+		for(json::Iterator it(types); it; ++it){
+			const ss_ t = author+"/"+it.key();
+			if(jstr(*it, "source").empty())
+				return "types/"+it.key()+".client.lua: no "+it.key()+".lua";
+			auto pt = m_package_types.find(t);
+			if(pt != m_package_types.end() && jstr(pt->second, "package") != name)
+				return t+" is "+jstr(pt->second, "package")+"'s here";
+		}
+		// A newer version keeps the types the composition may use
+		if(old != m_packages.end()){
+			const json::Value &ot = old->second.get("types");
+			for(json::Iterator it(ot); ot.is_object() && it; ++it)
+				if(!types.get(it.key()).is_object())
+					return version+" has no "+author+"/"+it.key()+", which "+
+							old_version+" had";
+		}
+		for(auto &p : prefabs){
+			ss_ row;
+			if(m_store->get("prefab:"+p.first, row) && jstr(json::load_string(
+					row.c_str()), "package") != name)
+				return "the prefab "+p.first+" is a builder's here";
+		}
+		for(auto &v : voxels){
+			auto vt = m_voxel_types.find(v.first);
+			if(vt != m_voxel_types.end() ? jstr(vt->second, "package") != name :
+					m_registered.count(v.first) != 0)
+				return "the voxel type "+v.first+" is another's here";
+		}
+		if(types.size() + prefabs.size() + voxels.size() == 0)
+			return "no types, prefabs or voxel types in types/";
+		// The textures its voxel types wear, stored as an upload's
+		for(auto &v : voxels){
+			const ss_ tex = jstr(v.second, "texture");
+			if(tex.compare(0, 9, "textures/") == 0){
+				auto f = files.find(tex);
+				if(f == files.end())
+					return v.first+": its texture "+tex+" is not in the archive";
+				ss_ twhy;
+				const ss_ served = store_texture(f->second, twhy);
+				if(served.empty())
+					return tex+": "+twhy;
+				v.second.set("texture", served);
+			} else if(!texture_choices().count(tex)){
+				return v.first+": no voxel or upload has the texture "+tex;
+			}
+			world::Material mt;
+			if(!mt.parse(v.second))
+				return v.first+": not a texture, a kind, light 0...15, "
+						"friction 0...10 and a surface tag";
+		}
+		// The types as the box takes them, then the prefabs on them; on a
+		// refusal the old version's are put back
+		std::set<ss_> names;
+		for(json::Iterator it(types); it; ++it)
+			names.insert(author+"/"+it.key());
+		json::Value row = json::object();
+		row.set("version", version);
+		row.set("key", key);
+		row.set("sha256", jstr(sig, "sha256"));
+		row.set("by", by);
+		row.set("manifest", m);
+		row.set("types", types);
+		json::Value was = old == m_packages.end() ? json::Value() : old->second;
+		auto reload = [&](){
+			for(const ss_ &t : names){
+				m_types.erase(t);
+				m_sources.erase(t);
+			}
+		};
+		reload();
+		add_package(name, row);
+		for(const ss_ &t : names)
+			if(!load_type(t, why))
+				break;
+		for(auto &p : prefabs){
+			if(!why.empty())
+				break;
+			p.second.set("author", author);
+			p.second.set("name", p.first.substr(author.size() + 1));
+			p.second.set("package", name);
+			m_bad_prefabs.erase(p.first);
+			ss_ pwhy;
+			if(!check_prefab(p.second, pwhy))
+				why = "the prefab "+p.first+": "+pwhy;
+		}
+		if(!why.empty()){
+			reload();
+			if(was.is_object()){
+				add_package(name, was);
+				ss_ ignore;
+				for(const ss_ &t : names)
+					load_type(t, ignore);
+			} else {
+				m_packages.erase(name);
+				add_package(name, json::object());
+				m_packages.erase(name);
+			}
+			return why;
+		}
+		json::Value pl = json::array(), vl = json::array();
+		for(auto &p : prefabs){
+			m_store->set("prefab:"+p.first, p.second.stringify());
+			m_prefabs[p.first] = p.second;
+			m_prefab_palette.insert(p.first);
+			pl.append(p.first);
+		}
+		for(auto &v : voxels){
+			v.second.set("format", ss_("kit_voxel"));
+			v.second.set("author", author);
+			v.second.set("name", v.first.substr(author.size() + 1));
+			v.second.set("package", name);
+			m_store->set("voxel:"+v.first, v.second.stringify());
+			m_voxel_types[v.first] = v.second;
+			register_builder_voxel(v.first, v.second);
+			vl.append(v.first);
+		}
+		row.set("prefabs", pl);
+		row.set("voxels", vl);
+		m_packages[name] = row;
+		m_store->set("package:"+name, row.stringify());
+		for(const ss_ &t : names)
+			palette_add(t, false);
+		// An upgrade: each authored instance of an older version of its
+		// types made the new one's (entity_from_json() migrates it)
+		// simplified: the authored ones; an entity made in play runs on
+		// the new version with the parameters it was made with
+		sv_<std::pair<uint64_t, json::Value>> change;
+		for(auto &e : m_entities){
+			if(!authored(e.second))
+				continue;
+			bool older = false;
+			for(const Instance &in : e.second.comps)
+				older = older || (names.count(in.type) &&
+						in.version < m_types[in.type].version);
+			if(older)
+				change.push_back(std::make_pair(e.first, entity_json(e.second)));
+		}
+		if(!change.empty())
+			commit(change, nullptr);
+		const ss_ what = (old_version.empty() ? "installed "+name+" "+version :
+				"upgraded "+name+" from "+old_version+" to "+version)+": "+
+				itos(names.size())+" types, "+itos(prefabs.size())+
+				" prefabs, "+itos(voxels.size())+" voxel types"+
+				(change.empty() ? "" : ", "+itos(change.size())+
+				" entities upgraded");
+		log_i(MODULE, "%s %s", cs(by), cs(what));
 		for(auto &o : m_peers)
 			send_state(o.first);
+		return "ok "+what;
+	}
+
+	// [KIT] stage 5: who made what the composition uses, for the credits:
+	// each package its types and prefabs came in, and each other author
+	// (Kit, the app's, a builder's prefabs), with what of theirs it uses
+	json::Value credits()
+	{
+		sm_<ss_, std::set<ss_>> uses; // "p<package>" or "a<author>": what
+		auto by = [&](const ss_ &n, const ss_ &pkg, const ss_ &what){
+			uses[pkg.empty() ? "a"+n.substr(0, n.find('/')) : "p"+pkg].insert(
+					what);
+		};
+		for(auto &e : m_entities){
+			if(!authored(e.second))
+				continue;
+			for(const Instance &in : e.second.comps){
+				auto pt = m_package_types.find(in.type);
+				by(in.type, pt == m_package_types.end() ? "" :
+						jstr(pt->second, "package"), in.type);
+			}
+			const ss_ of = jstr(e.second.prefab, "of");
+			const json::Value *pf = of.empty() ? nullptr : prefab(of);
+			if(pf)
+				by(of, jstr(*pf, "package"), "["+of+"]");
+		}
+		json::Value out = json::array();
+		for(auto &u : uses){
+			json::Value c = json::object();
+			const ss_ n = u.first.substr(1);
+			auto pk = m_packages.find(n);
+			if(u.first[0] == 'p' && pk != m_packages.end()){
+				const json::Value &mf = pk->second.get("manifest");
+				c.set("author", n.substr(0, n.find('/')));
+				c.set("package", n);
+				c.set("version", jstr(pk->second, "version"));
+				c.set("license_code", jstr(mf, "license_code"));
+				c.set("license_media", jstr(mf, "license_media"));
+			} else {
+				c.set("author", n);
+				if(n == "kit" || n == m_author)
+					c.set("of", ss_(n == "kit" ? "kit" : "app"));
+			}
+			json::Value w = json::array();
+			for(const ss_ &x : u.second)
+				w.append(x);
+			c.set("uses", w);
+			out.append(c);
+		}
+		return out;
+	}
+
+	// {"op": "export"}: the builder's own prefabs and voxel types (under
+	// their name, not a package's) as a Kit package's files, answered with
+	// "kit:export", {"author", "files": {path: text}, "hex": {path: bytes
+	// as hex}, "dependencies": [{"kit", "version"}]}: the packages their
+	// prefabs' types came in, at the versions here
+	// simplified: a prefab of the app's own types installs where that app
+	// is (the install's check of it says so elsewhere)
+	void export_package(size_t peer, const Peer &p,
+			std::function<void(const ss_&)> refuse)
+	{
+		const ss_ author = builder_author(p.name);
+		if(author.empty())
+			return refuse("a builder's prefabs are under their name, and it "
+					"is \""+p.name.substr(0, 64)+"\"");
+		json::Value files = json::object(), hex = json::object(),
+				deps = json::array();
+		std::set<ss_> dep_names;
+		for(const ss_ &k : m_store->list("prefab:"+author+"/")){
+			ss_ src;
+			m_store->get(k, src);
+			const json::Value pf = json::load_string(src.c_str());
+			if(!pf.is_object() || !jstr(pf, "package").empty())
+				continue;
+			const json::Value &es = pf.get("entities");
+			for(unsigned i = 0; i < es.size(); i++){
+				const json::Value &cs_ = es.at(i).get("components");
+				for(unsigned c = 0; c < cs_.size(); c++){
+					auto pt = m_package_types.find(jstr(cs_.at(c), "type"));
+					if(pt != m_package_types.end())
+						dep_names.insert(jstr(pt->second, "package"));
+				}
+			}
+			files.set("types/"+k.substr(8 + author.size())+".prefab.json",
+					pf.stringify());
+		}
+		for(auto &v : m_voxel_types){
+			if(v.first.compare(0, author.size() + 1, author+"/") != 0 ||
+					!jstr(v.second, "package").empty())
+				continue;
+			json::Value row = v.second.deepcopy();
+			const ss_ tex = jstr(row, "texture");
+			ss_ png;
+			if(tex.compare(0, 7, "kit/up/") == 0 && m_store->get("texture:"+
+					tex.substr(7, tex.size() - 11), png)){
+				static const char *H = "0123456789abcdef";
+				ss_ h;
+				for(unsigned char ch : png){
+					h += H[ch >> 4];
+					h += H[ch & 15];
+				}
+				const ss_ path = "textures/"+tex.substr(7);
+				hex.set(path, h);
+				row.set("texture", path);
+			}
+			files.set("types/"+v.first.substr(author.size() + 1)+
+					".voxel.json", row.stringify());
+		}
+		if(!files.size())
+			return refuse("no prefabs or voxel types of "+author+"'s here");
+		for(const ss_ &n : dep_names){
+			json::Value dj = json::object();
+			dj.set("kit", n);
+			dj.set("version", jstr(m_packages[n], "version"));
+			deps.append(dj);
+		}
+		json::Value j = json::object();
+		j.set("author", author);
+		j.set("files", files);
+		j.set("hex", hex);
+		j.set("dependencies", deps);
+		log_i(MODULE, "%s exports %zu files, %zu dependencies", cs(p.name),
+				(size_t)files.size(), (size_t)deps.size());
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "kit:texture", "kit/up/"+hash+".png");
+			inetwork->send(peer, "kit:export", j.stringify());
 		});
 	}
 
@@ -4767,7 +5302,15 @@ struct Module: public interface::Module, public Interface
 					return false;
 				}
 				const json::Value &decl = m_types[type].decl.get("params");
-				const json::Value &ps = c.get("params");
+				// [KIT] stage 5: a member of an older version of its type
+				// is checked as its copies will be made, migrated
+				json::Value ps = c.get("params");
+				if(ps.is_object() && json::jint(c, "version", 1) <
+						m_types[type].version){
+					ps = ps.deepcopy();
+					migrate_params(type, json::jint(c, "version", 1), ps,
+							"A prefab's "+who);
+				}
 				if(ps.is_object())
 					for(json::Iterator it(ps); it; ++it){
 						const json::Value &d = decl.get(it.key());
@@ -5199,6 +5742,11 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		const ss_ name = author+"/"+short_name;
+		const json::Value *had = prefab(name);
+		if(had && !jstr(*had, "package").empty()){
+			why = name+" is the package "+jstr(*had, "package")+"'s";
+			return false;
+		}
 		const json::Value &ids = j.get("ids");
 		if(!ids.is_array() || ids.size() < 1 || ids.size() > MAX_PREFAB){
 			why = "ids: 1 to "+itos(MAX_PREFAB)+" entities";
@@ -7728,7 +8276,14 @@ struct Module: public interface::Module, public Interface
 		// whether builds are always kept
 		j.set("discarded", discarded_counts());
 		j.set("always_keep", always_keep());
+		// [KIT] stage 5: the credits, everyone's
+		j.set("credits", credits());
 		if(editing){
+			// The installed packages' versions, by name
+			json::Value pk = json::object();
+			for(auto &k : m_packages)
+				pk.set(k.first, jstr(k.second, "version"));
+			j.set("packages", pk);
 			json::Value pal = json::object();
 			for(const ss_ &t : m_palette){
 				const json::Value &d = m_types[t].decl;
@@ -7898,6 +8453,8 @@ struct Module: public interface::Module, public Interface
 			return terrain(p, peer, j, refuse);
 		if(op == "voxel")
 			return make_voxel(p, j, refuse);
+		if(op == "export")
+			return export_package(peer, p, refuse);
 		if(op == "restart"){
 			Entity *e = nullptr;
 			ss_ why;

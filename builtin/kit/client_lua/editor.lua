@@ -97,6 +97,7 @@ local M, E, O, P = K.M, K.E, K.O, K.P
 local magic = require("buildat/extension/urho3d")
 local ui_utils = require("buildat/extension/ui_utils")
 local network = require("buildat/extension/network")
+local aitta = require("buildat/extension/aitta")
 local log = K.log
 local send, color, row, text, label, button, edit, v3 = K.send, K.color,
 		K.row, K.text, K.label, K.button, K.edit, K.v3
@@ -112,6 +113,7 @@ for k, v in pairs({state = nil, link = nil, cursor = nil, pending = {},
 		status = "", windows = {}, builders = {}, seen = {}, labels = {},
 		label_text = {}, listeners = {}, discarded = {}, always_keep = false,
 		choose = false, prefab_name = "", logs = {}, flows = {},
+		package_name = "my_prefabs", credits = {},
 		voxel_form = {name = "my_voxel", texture = "kit/stone.png", kind = "solid",
 			solid = true, transparent = false, light = 0, friction = 1,
 			surface = ""}}) do
@@ -711,6 +713,78 @@ local function panel_title(w, s, other)
 	b.minHeight, b.maxHeight = t.height, t.height
 end
 
+-- [KIT] stage 5: the New tab, Kit packages from the Aittas in the
+-- settings: each with Install (Upgrade where an older version is
+-- installed here), which fetches it with what it needs and sends each to
+-- the server; and Publish..., the builder's own prefabs and voxel types
+-- written into a package for the publish screen (native)
+function M.fetch_packages()
+	E.packages_status = "Asking the Aittas..."
+	aitta.kit_packages(function(list)
+		E.packages = list
+		E.packages_status = #list == 0 and "No Kit packages on the Aittas " ..
+				"in the settings" or nil
+		log:info("kit editor: " .. #list .. " packages listed")
+		for _, p in ipairs(list) do
+			log:info("kit editor: package " .. p.key .. " " .. p.version)
+		end
+		if S.tab == "New" then
+			palette()
+		end
+	end)
+end
+
+local function install(key)
+	E.status = "Fetching " .. key .. "..."
+	log:info("kit editor: fetching " .. key)
+	people()
+	aitta.kit_fetch(key, function(list, why)
+		if not list then
+			E.status = "Not installed: " .. tostring(why)
+			log:info("kit editor: " .. E.status)
+			return people()
+		end
+		for _, p in ipairs(list) do
+			log:info("kit editor: sending " .. p.key .. " " .. p.version)
+			buildat.send_packet("kit:package", p.data)
+		end
+	end)
+end
+
+local function new_tab(w)
+	local have = E.state.packages or {}
+	if E.packages_status then
+		text(w, E.packages_status, DIM)
+	end
+	for i, p in ipairs(E.packages or {}) do
+		if i > 12 then
+			break
+		end
+		local r = row(w)
+		local t = text(r, p.key .. " " .. p.version)
+		t.minWidth = 220
+		local cur = have[p.key]
+		if cur == p.version then
+			text(r, "installed", DIM)
+		else
+			button(r, cur and "Upgrade" or "Install", function()
+				install(p.key)
+			end)
+		end
+		if p.description ~= "" then
+			text(w, p.description:sub(1, 80), DIM)
+		end
+	end
+	local r = row(w)
+	label(r, "Package:")
+	edit(r, E.package_name, function(s)
+		E.package_name = s
+	end)
+	button(w, "Publish my prefabs...", function()
+		send({op = "export"})
+	end)
+end
+
 palette = function()
 	drop("palette")
 	palette_buttons = {}
@@ -724,12 +798,46 @@ palette = function()
 		return terrain_panel(w)
 	end
 	panel_title(w, "Palette", "Terrain")
+	-- [KIT] stage 5: its tabs at its foot (what is above them stays where
+	-- it was): all, the favourites and the New tab, and the credits
+	-- (simplified: a builder's; a player has them by kit.show_credits())
+	local function tabs()
+		local tr = row(w)
+		for _, tab in ipairs({"All", "Favourites", "New"}) do
+			button(tr, tab, function()
+				S.tab = tab
+				log:info("kit editor: the palette's " .. tab .. " tab")
+				if tab == "New" then
+					M.fetch_packages()
+				end
+				palette()
+			end, (S.tab or "All") == tab)
+		end
+		button(tr, "Credits", M.show_credits)
+	end
+	if S.tab == "New" then
+		new_tab(w)
+		return tabs()
+	end
+	local fav = {}
+	if S.tab == "Favourites" then
+		for _, n in ipairs(aitta.kit_favourites()) do
+			fav[n] = true
+		end
+	end
 	local items = {}
 	for _, t in ipairs(E.state.palette or {}) do
-		items[#items + 1] = {label = t, type = t}
+		if S.tab ~= "Favourites" or fav[t] then
+			items[#items + 1] = {label = t, type = t}
+		end
 	end
 	for _, p in ipairs(E.state.prefabs or {}) do
-		items[#items + 1] = {label = "[" .. p .. "]", prefab = p}
+		if S.tab ~= "Favourites" or fav["[" .. p .. "]"] then
+			items[#items + 1] = {label = "[" .. p .. "]", prefab = p}
+		end
+	end
+	if #items == 0 and S.tab == "Favourites" then
+		text(w, "None yet: arm one, then \"Favourite\"", DIM)
 	end
 	local r
 	for i, it in ipairs(items) do
@@ -780,6 +888,20 @@ palette = function()
 			M.voxel_dialog()
 		end)
 	end
+	-- The armed one starred or not
+	if S.placing then
+		local name, on = S.placing.label, false
+		for _, n in ipairs(aitta.kit_favourites()) do
+			on = on or n == name
+		end
+		button(w, (on and "Unfavourite " or "Favourite ") .. name, function()
+			aitta.kit_favourite(name, not on)
+			log:info("kit editor: " .. name .. (on and " not" or "") ..
+					" a favourite")
+			palette()
+		end)
+	end
+	tabs()
 end
 
 -- The palette's entry the pointer is on
@@ -1868,6 +1990,42 @@ function M.cancel_link()
 	log:info("kit editor: link cancelled")
 	refresh()
 	return true
+end
+
+-- [KIT] stage 5 kit.show_credits(): who made what the composition uses,
+-- the server's (each package with its version and licences, Kit's, the
+-- app's and each builder's)
+function M.show_credits()
+	drop("dialog")
+	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	W.dialog = w
+	w.priority = 10
+	w:SetFixedWidth(math.min(560, magic.ui.root.width - 16))
+	text(w, "Credits: what this world is made of")
+	for _, c in ipairs(E.credits or {}) do
+		local who = c.package and tostring(c.package) .. " " ..
+				tostring(c.version) .. " by " .. tostring(c.author) .. " (" ..
+				tostring(c.license_code) .. ", " .. tostring(c.license_media) ..
+				")" or c.of == "kit" and "Kit (Buildat)" or c.of == "app" and
+				"The app (" .. tostring(c.author) .. ")" or
+				"Built here by " .. tostring(c.author)
+		local uses = {}
+		for _, u in ipairs(type(c.uses) == "table" and c.uses or {}) do
+			uses[#uses + 1] = tostring(u)
+		end
+		local t = text(w, who)
+		t:SetWordwrap(true)
+		local u = text(w, "  " .. table.concat(uses, ", "), DIM)
+		u:SetWordwrap(true)
+		log:info("kit editor: credit " .. who .. ": " .. table.concat(uses, " "))
+	end
+	if #(E.credits or {}) == 0 then
+		text(w, "Nothing placed yet", DIM)
+	end
+	button(w, "Close", function()
+		drop("dialog")
+		log:info("kit editor: the credits closed")
+	end)
 end
 
 -- Kit's items in an app's pause menu (extensions/pause_menu), a builder's:
@@ -3141,6 +3299,7 @@ function M.editor(options)
 			end
 			apply_viewport()
 		end
+		E.credits = type(s.credits) == "table" and s.credits or {}
 		E.discarded = type(s.discarded) == "table" and s.discarded or {}
 		E.always_keep = s.always_keep == true
 		if not next(E.discarded) then
@@ -3234,6 +3393,30 @@ function M.editor(options)
 		if W.dialog then
 			M.voxel_dialog()
 		end
+	end)
+	-- [KIT] stage 5: an install's answer, and the export to publish
+	buildat.sub_packet("kit:package", function(data)
+		local a = network.parse_json(data)
+		if type(a) ~= "table" then
+			return
+		end
+		E.status = a.ok and "Package: " .. tostring(a.what) or
+				"Package refused: " .. tostring(a.why)
+		log:info("kit editor: " .. E.status)
+		if E.editing then
+			people()
+		else
+			ui_utils.show_notification(E.status, 4)
+		end
+	end)
+	buildat.sub_packet("kit:export", function(data)
+		local a = network.parse_json(data)
+		if type(a) ~= "table" then
+			return
+		end
+		log:info("kit editor: the export of " .. tostring(a.author))
+		aitta.kit_publish({name = E.package_name, author = a.author,
+			files = a.files, hex = a.hex, dependencies = a.dependencies})
 	end)
 	buildat.sub_packet("kit:edit_refused", function(data)
 		E.status = "Refused: " .. tostring(data)

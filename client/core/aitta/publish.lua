@@ -191,7 +191,8 @@ page_package = function(message)
 	for _, e in ipairs(entries) do
 		names[#names + 1] = {e.name .. (e.kind == "extension" and
 				" (ext.)" or e.kind == "world" and " (world)" or
-				e.kind == "remix" and " (my version)" or ""), e.name}
+				e.kind == "remix" and " (my version)" or
+				e.kind == "kit" and " (Kit)" or ""), e.name}
 	end
 	if #names > 0 then
 		add_dropdown(pr, names, st.selected, function(name)
@@ -783,6 +784,94 @@ function M.publish_world(app, save, code, rows)
 	st.selected, st.result = name, nil
 	page_package("The save " .. save .. " copied into " .. USER ..
 			"/dev_apps/" .. name .. "/world")
+end
+
+-- [KIT] stage 5: Kit's export (init.lua's kit_publish, which a server's
+-- script calls) written into the Kit package dev_apps/<name>, once the
+-- user says yes in a window of this client's: the files of types/ and
+-- textures/ only, and the manifest's kind, name and dependencies (the
+-- other fields kept, or the author's and a version to start from); then
+-- the screen opened on it
+-- simplified: a file the export no longer has stays in the folder
+function M.publish_kit(t)
+	local ui = require("buildat/extension/ui_utils").safe
+	local function refuse(why)
+		log:info("aitta publish: Kit's export refused: " .. why)
+		ui.show_message_dialog("Not published: " .. why)
+	end
+	if GetPlatform() == "Web" then
+		return refuse("publishing is in the native client")
+	end
+	local name, author = tostring(t.name), tostring(t.author)
+	for _, n in ipairs({name, author}) do
+		if not n:match("^[a-z0-9_]+$") or #n > 40 then
+			return refuse("a name is 1 to 40 of a-z, 0-9 and _: " .. n:sub(1, 40))
+		end
+	end
+	local writes, total = {}, 0
+	for which, pattern in pairs({files = "^types/[%w_]+%.[a-z]+%.json$",
+			hex = "^textures/[%w_]+%.png$"}) do
+		for path, v in pairs(type(t[which]) == "table" and t[which] or {}) do
+			if type(path) ~= "string" or not path:match(pattern) or
+					type(v) ~= "string" or (which == "hex" and
+					(#v % 2 ~= 0 or v:find("[^%x]"))) then
+				return refuse("not a file of a Kit package: " .. tostring(path):sub(1, 60))
+			end
+			writes[path] = which == "hex" and v:gsub("%x%x", function(h)
+				return string.char(tonumber(h, 16))
+			end) or v
+			total = total + #writes[path]
+		end
+	end
+	if next(writes) == nil or total > 4 * 1024 * 1024 then
+		return refuse("no files, or more than 4 MiB")
+	end
+	local deps = {}
+	for _, d in ipairs(type(t.dependencies) == "table" and t.dependencies or {}) do
+		deps[#deps + 1] = {kit = tostring(d.kit), version = tostring(d.version)}
+	end
+	local dir = USER .. "/dev_apps/" .. name
+	local m = read_meta(name)
+	if next(m) ~= nil and m.kind ~= "kit" then
+		return refuse(dir .. " is a package of another kind")
+	end
+	local n = 0
+	for _ in pairs(writes) do
+		n = n + 1
+	end
+	local root, w = open_window("aitta kit", 560, nil, {close_glyph = false})
+	add_text(w, "Write " .. n .. " files of " .. author ..
+			"'s prefabs and voxel types into " .. dir ..
+			", and open the publish screen on it?")
+	local r = add_row(w)
+	add_button(r, "Yes", function()
+		uistack.main:pop(root)
+		for _, sub in ipairs({"", "/types", "/textures"}) do
+			__buildat_create_directories(dir .. sub)
+		end
+		for path, data in pairs(writes) do
+			local ok, err = buildat.write_file_atomic(dir .. "/" .. path, data)
+			if not ok then
+				return refuse(tostring(err))
+			end
+		end
+		m.kind, m.name, m.dependencies = "kit", name, deps
+		m.author = m.author or author
+		m.version = m.version or "0.1.0"
+		m.description = m.description or "Prefabs and voxel types made in Kit"
+		local ok, err = write_meta(name, m)
+		if not ok then
+			return refuse(tostring(err))
+		end
+		log:info("aitta publish: Kit's export, " .. n .. " files in " .. dir)
+		st.selected, st.result = name, nil
+		refresh_menu()
+		page_package("Kit's export written into " .. dir)
+	end, nil, true)
+	add_button(r, "Cancel", function()
+		uistack.main:pop(root)
+	end)
+	log:info("aitta publish: Kit's export asked, " .. n .. " files")
 end
 end
 -- vim: set noet ts=4 sw=4:

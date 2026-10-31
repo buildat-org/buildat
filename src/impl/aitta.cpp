@@ -367,8 +367,27 @@ ss_ check_manifest(const json::Value &m, bool service)
 	};
 	if(!known("audience", {"everyone", "teen", "adult"}))
 		return "\"audience\": \"everyone\", \"teen\" or \"adult\"";
-	if(!known("kind", {"app", "extension", "world", "remix"}))
-		return "\"kind\": \"app\", \"extension\", \"world\" or \"remix\"";
+	if(!known("kind", {"app", "extension", "world", "remix", "kit"}))
+		return "\"kind\": \"app\", \"extension\", \"world\", \"remix\" or "
+				"\"kit\"";
+	// [KIT] stage 5: a Kit package's dependencies, the Kit packages it
+	// uses, each at a version or newer
+	if(kind_of(m) == "kit" && !m.get("dependencies").is_undefined()){
+		const json::Value &ds = m.get("dependencies");
+		if(!ds.is_array() || ds.size() > 32)
+			return "\"dependencies\": a list of 32 at most";
+		for(unsigned i = 0; i < ds.size(); i++){
+			const ss_ k = ds.at(i).get("kit").is_string() ?
+					ds.at(i).get("kit").as_string() : "";
+			const size_t slash = k.find('/');
+			const json::Value &v = ds.at(i).get("version");
+			if(slash == ss_::npos || !plain_name(k.substr(0, slash), false) ||
+					!plain_name(k.substr(slash + 1), false) ||
+					!v.is_string() || !semver_ok(v.as_string()))
+				return "\"dependencies\": each {\"kit\": \"<author>/<name>\", "
+						"\"version\": the lowest version it works with}";
+		}
+	}
 	// [APP_REMIX] The settings an app declares, and a remix's values of
 	// its base's (checked against them where the base is: remix_refusal)
 	if(!m.get("settings").is_undefined()){
@@ -513,7 +532,7 @@ ss_ check_media(const json::Value &m, const ss_ &dir)
 // a < b in SemVer's order. simplified: MAJOR.MINOR.PATCH by number and a
 // prerelease below its release; two prereleases compare as strings, not
 // by SemVer's identifiers (1.0.0-beta.11 is below 1.0.0-beta.2 here)
-static bool version_less(const ss_ &a, const ss_ &b)
+bool version_less(const ss_ &a, const ss_ &b)
 {
 	auto key = [](const ss_ &v){
 		const ss_ head = v.substr(0, v.find('+'));
@@ -584,7 +603,8 @@ ss_ kind_of(const json::Value &m)
 {
 	const json::Value &k = m.get("kind");
 	return k.is_string() && (k.as_string() == "extension" ||
-			k.as_string() == "world" || k.as_string() == "remix") ?
+			k.as_string() == "world" || k.as_string() == "remix" ||
+			k.as_string() == "kit") ?
 			k.as_string() : "app";
 }
 
@@ -1167,6 +1187,9 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 		if(kind == "world")
 			throw Exception("a world is installed as a new save of its app, "
 					"from the client's Apps from Aitta");
+		if(kind == "kit")
+			throw Exception("a Kit package is installed into an app's "
+					"composition, from Kit's palette");
 		// [APP_REMIX] A stranger's settings and files over an app that is
 		// here: data only, each checked against the base
 		if(kind == "remix"){
