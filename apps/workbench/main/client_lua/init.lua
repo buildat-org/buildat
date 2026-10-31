@@ -285,9 +285,12 @@ magic.SubscribeToEvent("Update", function()
 				math.floor(p.x + 0.5), math.floor(p.y + 0.95),
 				math.floor(p.z + 0.5), hand))
 	end
-	help_text:SetText(editing and "" or TOUCH and
-			"Stick: walk  drag: look  tap: use/dig  hold: place" or
+	local seated = kit.seated()
+	help_text:SetText(editing and "" or TOUCH and (seated and
+			"Stick: move  Exit: leave the seat" or
+			"Stick: walk  drag: look  tap: use/dig  hold: place") or
+			seated and "WASD Space: move  F: leave the seat  Esc: menu" or
 			"WASD Space: walk, jump  left: use or dig  right: place  " ..
-			"0-9: voxel  F: leave a seat  F6: edit  L: log in  Esc: menu")
+			"0-9: voxel  F6: edit  L: log in  Esc: menu")
 end)
 -- vim: set noet ts=4 sw=4:

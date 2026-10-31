@@ -3887,7 +3887,9 @@ struct Module: public interface::Module, public Interface
 			// used (a client's use reaches it), it grants digging or placing
 			// in its box (its state's dig and place, shared)
 			const Type &ty = m_types[in.type];
-			if(ty.usable && ty.handlers.count("on_use"))
+			// (a seat: taken by a use, [KIT] stage 4h)
+			if(ty.usable && (ty.handlers.count("on_use") || (m_host.controls &&
+					ty.decl.get("seat").is_true() && is_movement(in.type))))
 				show.set("usable", true);
 			if(!ty.grants.empty() && show.get("grants").is_undefined()){
 				int n[3];

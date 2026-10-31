@@ -879,7 +879,10 @@ end
 function M.play_target(origin, dir, reach, solid)
 	dir = unit(dir)
 	solid = solid or O.solid
-	local id, et, usable = M.pick_entity(origin, dir, reach)
+	-- Not the seat held: the ray goes out of it
+	local seat = M.seated and M.seated()
+	local id, et, usable = M.pick_entity(origin, dir, reach,
+			seat and {[seat] = true} or nil)
 	local hit, front, vt
 	if solid then
 		hit, front, vt = voxel_ray({origin.x, origin.y, origin.z},
