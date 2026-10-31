@@ -450,8 +450,9 @@
 		// [WEB_DRIVE_LABEL_CLICK] web_drive.js's click and tap by label:
 		// Module.buildatFind is a native click line, its hint in the
 		// canvas's pixels; Module.buildatFound is [x, y] in them, or the
-		// error a native sequence fails with
-		if(char *f = (char*)EM_ASM_PTR({
+		// error a native sequence fails with. Asked while a fit is due, it
+		// waits for it: the place would move under the tap
+		if(char *f = !m_fit_settled ? nullptr : (char*)EM_ASM_PTR({
 				var f = Module.buildatFind;
 				Module.buildatFind = null;
 				return f ? stringToNewUTF8(f) : 0; })){

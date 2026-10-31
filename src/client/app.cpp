@@ -1538,6 +1538,11 @@ struct CApp: public App, public magic::Application
 	int64_t m_input_busy_us = 0;
 	static constexpr int64_t FIT_QUIET_US = 500000;
 	static constexpr float FIT_FLOOR = 0.5f;
+	// The last update_ui_fit() looked and left the scale as it was: no fit
+	// is due, so a place on the screen found now is where a tap will land
+	// ([WB_TOUCH_NEW_PROJECT]: web_drive.js's tap by label found "New
+	// project..." at the old scale, and the fit moved it before the tap)
+	bool m_fit_settled = true;
 	bool m_restore_maximized = false;
 	Options m_options;
 	bool m_draw_debug_geometry = false;
@@ -2433,6 +2438,7 @@ struct CApp: public App, public magic::Application
 	// screen and does not count.
 	void update_ui_fit()
 	{
+		m_fit_settled = true;
 		if(logical_mode())
 			return;
 		magic::Graphics *g = GetSubsystem<magic::Graphics>();
@@ -2450,6 +2456,7 @@ struct CApp: public App, public magic::Application
 			for(int i = 0; keys && i < n && !busy; i++)
 				busy = keys[i] != 0;
 		}
+		m_fit_settled = false;
 		if(busy){
 			m_input_busy_us = now;
 			return;
@@ -2530,7 +2537,9 @@ struct CApp: public App, public magic::Application
 			else
 				log_i(MODULE, "UI scale fitted to the screen: x%g", f);
 			apply_ui_scale();
+			return;
 		}
+		m_fit_settled = true;
 	}
 
 	void Start()
