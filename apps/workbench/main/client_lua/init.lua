@@ -199,12 +199,10 @@ kit.editor{scene = scene, camera = camera_node, ground_y = 1, bar = false,
 	pick_voxel = function(name)
 		hand = name
 	end,
+	-- The heightmap's ground (Kit's cells under it, [KIT_HM_VOXELS]) and
+	-- the voxels
 	solid = function(x, y, z)
-		local h = heightmap.height_at(x, z)
-		if h and y < h then
-			return true
-		end
-		return voxel_at(x, y, z)
+		return kit.terrain_cell(x, y, z) or voxel_at(x, y, z)
 	end}
 
 -- The mouse turns the view in play and in the editor's crosshair; the

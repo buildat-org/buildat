@@ -19,7 +19,8 @@
 #      the surface set to a heightmap, which replaces the voxels at once
 #      (the client builds it), back to voxels (the client drops it) and a
 #      heightmap again (valleys, 256 a side).
-#   4. A restart: the save's heightmap, the admin standing on it.
+#   4. A restart: the save's heightmap, the admin standing on it and
+#      walking a few metres each way ([KIT_HM_WALK]).
 #   5. ([KIT] stage 4f) A restart: the heightmap's decorations (voxel
 #      objects) the save's; the terrain brushes on it by their packets,
 #      Stopped: a raise stroke (two dabs, one undo) steep enough that its
@@ -285,6 +286,25 @@ idle 30000
 look_dir 1 -0.25 1
 frames 10
 screenshot @T@/heightmap.png
+look_dir 0 0 1
+frames 10
+event kit_body
+keydown w
+frames 60
+keyup w
+event kit_body
+keydown a
+frames 60
+keyup a
+event kit_body
+keydown s
+frames 60
+keyup s
+event kit_body
+keydown d
+frames 60
+keyup d
+event kit_body
 quit
 EOF
 } > "$t/boss4.cmds"
@@ -293,7 +313,19 @@ client boss4
 stop
 s4=$t/srv4.log
 want "$s4" "World: valleys 256x256, seed 9, biome grassland, a heightmap"
-echo "ok: a heightmap surface, the admin on it"
+# [KIT_HM_WALK] The admin walks on it: w, a, s and d each move the body
+# metres its way (no voxel section was loaded over a heightmap, and an
+# unloaded cell is solid to the movement: walled in a cell)
+grep -a "kit: body at" "$t/boss4.log" |
+	sed 's/.*body at \([^,]*\),[^,]*,\([^,]*\), .* \([0-9]*\) corrections.*/\1 \2 \3/' > "$t/walk4"
+awk 'NR == 1 { x = $1; z = $2; c = $3; next }
+	{ dx = $1 - x; dz = $2 - z; leg = NR - 1
+	  if (leg == 1 && dz < 2 || leg == 2 && dx > -2 || leg == 3 && dz > -2 || leg == 4 && dx < 2) bad = bad " leg " leg
+	  if ($3 != c) bad = bad " corrections in leg " leg
+	  x = $1; z = $2; c = $3 }
+	END { if (NR != 5) bad = bad " " NR " positions"; if (bad) { print bad; exit 1 } }' "$t/walk4" ||
+	fail "walking on the heightmap: $(tr '\n' ';' < "$t/walk4") ($t/boss4.log)"
+echo "ok: a heightmap surface, the admin on it walking each way"
 
 # A brush's dab: terrain <tool> <x> <z> <size> <strength> <stroke> [more JSON]
 terrain()
@@ -584,7 +616,7 @@ wait_log 10000 kit editor: the server is Ended
 wait_log 10000 kit editor: edited sections: 1 0,0,0=1
 click Button "Regenerate"
 wait_log 10000 kit editor: edited sections: 0
-wait_log 30000 kit: World: generated again
+wait_log_any 30000 kit: World: generated again
 EOF
 	column 5 5
 	undo

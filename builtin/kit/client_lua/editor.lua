@@ -573,10 +573,12 @@ end
 local function place_cell(mx, my)
 	local o, v = M.screen_ray(mx, my)
 	if O.solid then
-		local hit, front = M.voxel_ray({o.x, o.y, o.z}, {v.x, v.y, v.z},
-				O.solid, MAX_RAY)
+		local solid = M.with_terrain(O.solid)
+		local hit, front, t = M.voxel_ray({o.x, o.y, o.z}, {v.x, v.y, v.z},
+				solid, MAX_RAY)
 		if hit then
-			return front
+			return M.place_front(hit, front, {o.x, o.y, o.z}, {v.x, v.y, v.z},
+					t, solid)
 		end
 	end
 	return ground_at(o, v)
@@ -2811,8 +2813,12 @@ local function voxel_target(mx, my)
 				(o.z - b.z) ^ 2) or 0
 		reach = (O.reach or 6) + (far > 1 and far or 0)
 	end
-	local hit, front = M.voxel_ray({o.x, o.y, o.z}, {v.x, v.y, v.z}, O.solid,
+	local solid = M.with_terrain(O.solid)
+	local hit, front, t = M.voxel_ray({o.x, o.y, o.z}, {v.x, v.y, v.z}, solid,
 			reach)
+	-- [KIT_HM_VOXELS] on the heightmap: the cell over the hit point
+	front = M.place_front(hit, front, {o.x, o.y, o.z}, {v.x, v.y, v.z}, t,
+			solid)
 	return hit and {cell = hit, front = front} or nil
 end
 
@@ -2820,6 +2826,12 @@ local function voxel_click(mx, my, dig)
 	local t = voxel_target(mx, my)
 	local c = t and (dig and t.cell or t.front)
 	if not c or not S.voxel then
+		return
+	end
+	-- The heightmap is not dug: voxels only (the Terrain tool's)
+	if dig and M.terrain_cell(c[1], c[2], c[3]) then
+		log:info("kit editor: dig: the heightmap is not dug, at " ..
+				table.concat(c, ","))
 		return
 	end
 	local name = dig and "air" or S.voxel
