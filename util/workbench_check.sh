@@ -212,7 +212,10 @@ if [ "${1:-}" = web_touch ]; then
 	# moves it 3 cells, a finger held is its menu (Duplicate), two fingers
 	# pinch; ([KIT] stage 4f) a finger dragged with the terrain tool (T)
 	# paints a raise stroke, undone; Play mode, and in play a tap uses the button, a tap digs and
-	# a finger held places
+	# a finger held places. The stroke (x -7 to -4, z 0, 50 px a cell
+	# after the pinch, radius 3) keeps off the player at (0.5, 0.5): ground
+	# raised into the body shoved it up to 2 cells aside, the undo did not
+	# put it back, and the play taps pointed past the button
 	check_tmp workbench_web_touch; t=$CHECK_TMP
 	cat > "$t/steps.json" <<'J'
 [
@@ -248,7 +251,7 @@ if [ "${1:-}" = web_touch ]; then
 	["waitlog", "kit editor: two fingers let go: the plan", 10],
 	["frames", 5], ["shot", "${OUT}/pinched.png"],
 	["key", "t"], ["waitlog", "kit editor: tool terrain", 10], ["frames", 3],
-	["drag", 250, 300, 400, 300, "touch"],
+	["drag", 100, 300, 250, 300, "touch"],
 	["waitlog", "kit editor: terrain: raise", 10],
 	["waitlog", "kit editor: the stroke ended", 10], ["frames", 5],
 	["shot", "${OUT}/painted.png"],
