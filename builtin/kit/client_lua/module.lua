@@ -174,7 +174,8 @@ end
 -- For a drive (doc/client_commands.txt's event): "event kit_edit <json>"
 -- sends an edit as the editor would, "event kit_use <id>" a use.
 local replicate = require("buildat/extension/replicate")
-local P = {nodes = {}, items = "", parts = {}, you = 0, preview = {}}
+local P = {nodes = {}, items = "", parts = {}, you = 0, preview = {},
+	pose = {}}
 
 local function parse(v)
 	if v:IsEmpty() then
@@ -509,6 +510,9 @@ local function update_play(_, data)
 				P.preview[id] = nil
 				pv = nil
 			end
+			-- A vehicle this client drives: where it predicts it
+			-- (controls.lua, [KIT] stage 4h)
+			pv = pv or P.pose[id]
 			if pv then
 				p = magic.Vector3(pv[1], pv[2], pv[3])
 				yaw = pv[4]
@@ -875,7 +879,10 @@ end
 function M.play_target(origin, dir, reach, solid)
 	dir = unit(dir)
 	solid = solid or O.solid
-	local id, et, usable = M.pick_entity(origin, dir, reach)
+	-- Not the seat held: the ray goes out of it
+	local seat = M.seated and M.seated()
+	local id, et, usable = M.pick_entity(origin, dir, reach,
+			seat and {[seat] = true} or nil)
 	local hit, front, vt
 	if solid then
 		hit, front, vt = voxel_ray({origin.x, origin.y, origin.z},
@@ -1064,6 +1071,15 @@ do
 		button = button, edit = edit, v3 = v3, WARN = WARN, DIM = DIM,
 		STYLE = STYLE, value = value, look_frame = look_frame,
 		entity_t = entity_t, unit = unit})
+end
+
+-- ---- The players' controls: controls.lua ([KIT] stage 4h)
+do
+	local ok, err, install = buildat.run_script_file("kit/controls.lua")
+	assert(ok and type(install) == "function", "kit: controls.lua: " ..
+			tostring(err))
+	install({M = M, E = E, O = O, P = P, log = log, STYLE = STYLE,
+		value = value})
 end
 
 return M

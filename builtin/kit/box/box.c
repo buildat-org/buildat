@@ -30,6 +30,11 @@
 **                        {line...}}; a call into
 **                        the provider (inv) is marked by "P" before it and
 **                        "p" after it, ahead of the answer
+**   "L<source>"          [KIT] stage 4h: the movement library
+**                        (client_lua/move.lua), before the types
+**   "S<lua literal>"     a body's steps: {type, params, state, inputs, dt,
+**                        sub, world (move.lua's snapshot)}; answers the
+**                        state after them
 ** A Lua error traps the call (no setjmp in this wasm). The host then calls
 ** box_recover(), which unwinds the Lua state as a longjmp to box_call's
 ** protected call would have, and answers "E" and the message; 0 from it
@@ -411,9 +416,31 @@ static const char PRELUDE[] =
 "	if #lines > 0 then fx.log = lines end\n"
 "	return json(fx)\n"
 "end\n"
+"-- [KIT] stage 4h: the movement library (client_lua/move.lua), and a\n"
+"-- body's steps with it\n"
+"local move\n"
+"local function step(req)\n"
+"	local def = types[req.type]\n"
+"	if not def or type(def.step) ~= 'function' then error('no movement ' .. tostring(req.type), 0) end\n"
+"	if not move then error('no movement library', 0) end\n"
+"	local w = move.snapshot(req.world or {})\n"
+"	local s = req.state or {}\n"
+"	move.steps(def, s, req.inputs or {}, req.dt or 1/60, req.sub or 1, w, req.params or {})\n"
+"	return json(s)\n"
+"end\n"
 "function box_request(s)\n"
 "	local op = s:sub(1, 1)\n"
-"	if op == 'D' then\n"
+"	if op == 'L' then\n"
+"		local f = assert(loadstring(s:sub(2), '=move'))\n"
+"		setfenv(f, {math = math_lib, ipairs = ipairs, pairs = pairs, type = type,\n"
+"			tostring = tostring, tonumber = tonumber, setmetatable = setmetatable})\n"
+"		move = f()\n"
+"		return 'true'\n"
+"	elseif op == 'S' then\n"
+"		local f = assert(loadstring(s:sub(2), '=request'))\n"
+"		setfenv(f, {})\n"
+"		return step(f())\n"
+"	elseif op == 'D' then\n"
 "		local z = s:find('\\0', 2, true)\n"
 "		if not z then error('a define with no name', 0) end\n"
 "		return define(s:sub(2, z - 1), s:sub(z + 1))\n"

@@ -1,0 +1,9 @@
+<!-- [KIT] stage 4h: the play view's effects after the frame
+     (KitEffects.glsl; controls.lua enables the tag while one is on) -->
+<renderpath>
+    <command type="quad" tag="KitEffects" vs="kit/KitEffects" ps="kit/KitEffects" output="viewport">
+        <parameter name="KitTint" value="0 0 0 0" />
+        <parameter name="KitFx" value="0 0 0 0" />
+        <texture unit="diffuse" name="viewport" />
+    </command>
+</renderpath>
