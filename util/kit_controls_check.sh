@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min, more with a cold module cache (2026-10-31)
-# covers: builtin/kit/** apps/workbench/**
+# covers: builtin/kit/** apps/workbench/** util/kit_move_check.lua
 # [KIT] stage 4h, Kit's controls on Workbench, the admin (kitboss, by the
 # setup code) playing:
 #   0. util/kit_move_check.lua: the movements stepped as the box does.
