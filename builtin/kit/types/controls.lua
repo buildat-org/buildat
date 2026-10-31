@@ -24,9 +24,9 @@ local function signal(c, input, value, by)
 	elseif input == "glitch" then
 		v.seconds = math.max(0, math.min(30, tonumber(value) or 1))
 	elseif input == "tint" then
-		v.color = tostring(value or "#ffffff")
+		v.color = type(value) == "string" and value or "#ffffff"
 	elseif input == "camera" then
-		v.mode = tostring(value or "")
+		v.mode = type(value) == "string" and value or ""
 	end
 	c.state[input] = v
 	c:log(input, tostring(value), who ~= "" and "for " .. who or "")
@@ -63,7 +63,9 @@ return {
 		fov_time = {type = "number", default = 0.3, min = 0, max = 10},
 		to = {type = "string", default = "all", choices = {"all", "player"}},
 	},
-	inputs = {shake = "number", fov = "number", glitch = "number",
-		tint = "string", camera = "string"},
+	-- Any signal: one without a value is shake 1, fov back, glitch 1 s,
+	-- tint white, the camera's own
+	inputs = {shake = "any", fov = "any", glitch = "any", tint = "any",
+		camera = "any"},
 	on_input = signal,
 }

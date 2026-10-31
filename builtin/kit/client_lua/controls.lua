@@ -501,6 +501,7 @@ local function go_to(target)
 	else
 		go_next = target
 	end
+	C.going = true
 	log:info(string.format("kit: going to %.2f,%.2f,%.2f", target[1],
 			target[2], target[3]))
 end
@@ -538,6 +539,13 @@ local function route_tick()
 		return
 	end
 	C.route = nil
+	if C.going then
+		-- There, or given up (the body's arrivals say which)
+		C.going = false
+		local p = pos_of(C.s) or {0, 0, 0}
+		log:info(string.format("kit: stopped at %.2f,%.2f,%.2f", p[1], p[2],
+				p[3]))
+	end
 	if C.use_at then
 		local p = pos_of(C.s)
 		local dx, dz = p[1] - C.use_at.x, p[3] - C.use_at.z
@@ -570,7 +578,7 @@ magic.SubscribeToEvent("MouseButtonDown", function(_, data)
 	end
 	local x, y = nil, nil
 	if M.pointer_free() then
-		local mp = magic.input.mousePosition
+		local mp = magic.input:GetMousePosition()
 		x, y = mp.x, mp.y
 	end
 	click(x, y, b == magic.MOUSEB_LEFT)
@@ -610,7 +618,7 @@ function M.pointer_ray(x, y)
 	local w, h = screen()
 	if not x then
 		if M.pointer_free() and not TOUCH then
-			local mp = magic.input.mousePosition
+			local mp = magic.input:GetMousePosition()
 			x, y = mp.x, mp.y
 		else
 			x, y = w / 2, h / 2
@@ -808,7 +816,10 @@ local function draw_avatar(at, mode)
 		m.castShadows = true
 	end
 	if avatar then
-		avatar.enabled = show
+		-- Deep: enabled is the node's own, its child drawn on
+		if avatar.enabled ~= show then
+			avatar:SetDeepEnabled(show)
+		end
 		if show then
 			local bd = body_decl()
 			local r, h = tonumber(bd.r) or 0.45, tonumber(bd.h) or 1.7
@@ -1024,6 +1035,18 @@ magic.SubscribeToEvent("Update", function(_, data)
 	draw_avatar(at, mode)
 	draw_others(mode)
 	effects(dt)
+end)
+
+-- For a drive: "event kit_click_at <x> <y> <z>" clicks (the left button)
+-- where that point is on the screen
+magic.SubscribeToEvent("command_seq:kit_click_at", function(_, data)
+	local x, y, z = data:GetString("Param"):match("^(%S+) (%S+) (%S+)")
+	local cam = O.camera:GetComponent("Camera")
+	local sp = cam:WorldToScreenPoint(magic.Vector3(tonumber(x) or 0,
+			tonumber(y) or 0, tonumber(z) or 0))
+	local w, h = screen()
+	log:info(string.format("kit: a click at %d,%d", sp.x * w, sp.y * h))
+	click(sp.x * w, sp.y * h, true)
 end)
 
 -- The app's options

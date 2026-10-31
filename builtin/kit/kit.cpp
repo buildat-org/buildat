@@ -1634,6 +1634,12 @@ struct Module: public interface::Module, public Interface
 			} else if(m_types[t].world && m_host.world_scene.empty()){
 				// [KIT] stage 4e: no World where the app has none
 				m_palette.erase(t);
+			} else if(!m_host.controls &&
+					(m_types[t].decl.get("controls").is_true() ||
+					m_types[t].decl.get("movement").is_object())){
+				// [KIT] stage 4h: the controls and the movements where the
+				// app has Kit's controls
+				m_palette.erase(t);
 			}
 		ss_ names;
 		for(const ss_ &t : m_palette)
@@ -6033,7 +6039,18 @@ struct Module: public interface::Module, public Interface
 		for(auto &bp : m_bodies){
 			Body &b = bp.second;
 			auto pi = m_peers.find(bp.first);
-			if(!b.put || b.type.empty() || pi == m_peers.end())
+			if(!b.put || pi == m_peers.end())
+				continue;
+			// An edit changed the movement or its parameters: put again where
+			// it is, so the client steps on with the same
+			ss_ type;
+			json::Value params;
+			body_movement(b, type, params);
+			if(type != b.type || params.stringify() != b.params.stringify()){
+				const json::Value st = b.state.deepcopy();
+				put_body(bp.first, b, 0, 0, 0, 0, &st);
+			}
+			if(b.type.empty())
 				continue;
 			const double rate = num(b.params, "rate", 60, 10, 120);
 			// A twentieth over the clock: a client's that runs a little fast

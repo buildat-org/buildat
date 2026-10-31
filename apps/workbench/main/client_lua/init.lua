@@ -156,10 +156,14 @@ local function voxel_at(x, y, z)
 end
 
 -- What a click would do in play ([KIT] stage 4e2, Kit's play_target): at
--- the crosshair, or a touchscreen's finger (x, y: its pixels)
+-- the crosshair, or a touchscreen's finger (x, y: its pixels); a camera
+-- away from the eye (chase, top-down) reaches as far past the player
 local function target(x, y)
 	local o, d = kit.pointer_ray(x, y)
-	return kit.play_target(o, d, REACH, voxel_at)
+	local b = kit.body_pos()
+	local far = b and math.sqrt((o.x - b.x) ^ 2 + (o.y - b.y - 1.5) ^ 2 +
+			(o.z - b.z) ^ 2) or 0
+	return kit.play_target(o, d, REACH + (far > 1 and far or 0), voxel_at)
 end
 
 -- For a drive: "event workbench_build {"p": [x, y, z], "voxel": "air"}"
