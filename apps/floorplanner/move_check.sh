@@ -70,13 +70,19 @@ BUILDAT_FP_NAME=owner timeout 300 "$here/Build/bin/buildat" \
 	fail "the drive ($t/f.log: $(grep -a "Command sequence failed" "$t/f.log" | tail -1))"
 grep -a "fp move: " "$t/f.log" | sed 's/.*fp move: //'
 check_slow # the 100 ms and 1.5 s below the machine's (check_lib: a performance)
-python3 -I - "$t/f.log" "$CHECK_SLOW" <<'PY' || fail "the moves (CHECK_SLOW $CHECK_SLOW; $t/f.log)"
+# A key step's and a drag's 100 ms end in a drawn frame: under software GL
+# (soft_gl; the check box's 3D drags 170-250 ms, p95 to 410) 2.5x more.
+# simplified: a fixed factor, not a measured draw; a GPU-bound regression
+#   under 2.5x on software GL passes there, and is caught on a real GPU
+draw=$CHECK_SLOW
+soft_gl "$t/f.log" && draw=$(awk -v f="$CHECK_SLOW" 'BEGIN { printf "%g", f * 2.5 }')
+python3 -I - "$t/f.log" "$CHECK_SLOW" "$draw" <<'PY' || fail "the moves (CHECK_SLOW $CHECK_SLOW, drawn x$draw; $t/f.log)"
 import sys, re
 def ts(l):
     m = re.search(r" (\d\d):(\d\d):(\d\d)\.(\d\d\d) ", l)
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000
 lines = open(sys.argv[1], errors="replace").read().split("\n")
-slow = float(sys.argv[2])
+slow, draw = float(sys.argv[2]), float(sys.argv[3])
 keys, drags = {}, {}
 for l in lines:
     m = re.search(r"fp move: (\w+) (\w+) key ([\d.]+) ms", l)
@@ -87,10 +93,10 @@ for l in lines:
         drags[(m.group(1), m.group(2))] = float(m.group(3))
 for what in ("furniture", "door", "node"):
     k = sorted(keys.get(what, []))
-    assert len(k) >= 5 and k[len(k) // 2] < 100 * slow, (what, k)
+    assert len(k) >= 5 and k[len(k) // 2] < 100 * draw, (what, k)
 for what in ("furniture", "door"):
     for view in ("2d", "3d"):
-        assert drags.get((what, view), 1e9) < 100 * slow, (what, view, drags)
+        assert drags.get((what, view), 1e9) < 100 * draw, (what, view, drags)
 w = [re.search(r"fp_where: (\d+) (-?\d+) (-?\d+) (-?\d+) grid (\d+)", l).groups()
         for l in lines if "fp_where: " in l]
 assert len(w) == 3, w
