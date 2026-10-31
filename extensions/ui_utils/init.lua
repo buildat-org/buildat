@@ -3074,12 +3074,16 @@ function M.safe.settings_form(parent, fields, values, on_change, w, files)
 			w.edit(r, tostring(v == nil and "" or v), function(text)
 				local x, bad = M.safe.check_setting(f, text)
 				why:SetText(bad and name .. ": " .. bad or " ")
+				why.visible = bad ~= nil
 				if x ~= nil then
 					choose(x)
 				end
 			end)
 		end
+		-- Its line only while it has something to say: one under every
+		-- field doubled a long form's height (Kit's kit/controls)
 		why = w.text(parent, " ", w.warn)
+		why.visible = false
 	end
 end
 
