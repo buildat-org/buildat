@@ -303,8 +303,18 @@
 		// owner may have written them while it was away
 		load_owned(section);
 		// A section whose light went stale while it was away is flooded
-		// again from what is around it now
-		relight_if_stale(section);
+		// again from what is around it now. Queued for relight_stale()'s
+		// budget while a game calls it (luanti, every tick): a load is
+		// inside some module's access, and worldgen's merge loading five
+		// stale neighbours relit them there, 0.2-0.5 s each, a 1.7 s
+		// step of the game waiting behind it ([FUZZ_STEP_DURING_GEN]).
+		// Until its turn the section wears the light it was saved with.
+		if(interface::os::time_us() - m_relight_stale_us <= RELIGHT_IDLE_US){
+			if(m_stale_sections.count(section_key(section_p)))
+				m_relight_queue.push_back(section_p);
+		} else {
+			relight_if_stale(section);
+		}
 		// What a game keeps of its own per section comes back with it
 		m_server->emit_event("voxelworld:section_loaded",
 				new SectionLoaded(m_scene_ref, section_p));
