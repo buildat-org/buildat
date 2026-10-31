@@ -132,7 +132,8 @@ namespace heightmap
 		// "<name>/meta" and "<name>/<cx>,<cz>"): true when the save had a
 		// map of this name and size and it was read, false when not, which
 		// leaves the map as it was (the app generates). A map of another
-		// size in the save is refused with a warning and false.
+		// size in the save is not read (a warning, false); this one
+		// replaces it as it is committed.
 		virtual bool set_save(storage::Save *save, const ss_ &name) = 0;
 
 		virtual void add_chunk_hook(up_<ChunkHook> hook) = 0;
@@ -153,9 +154,12 @@ namespace heightmap
 
 	struct Interface
 	{
-		// The map is flat at base_y until generated, loaded or set
+		// The map is flat at base_y until generated, loaded or set; the
+		// peers already on the scene get the whole of it at its first
+		// commit
 		virtual Instance* create_instance(SceneReference scene,
 				const Size &size) = 0;
+		// The peers on the scene drop it ("heightmap:remove")
 		virtual void delete_instance(SceneReference scene) = 0;
 		virtual Instance* get_instance(SceneReference scene) = 0;
 	};

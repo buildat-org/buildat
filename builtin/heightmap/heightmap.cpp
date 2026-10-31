@@ -355,8 +355,7 @@ struct Map: public Instance
 			return false;
 		if(saved != meta()){
 			log_w(MODULE, "heightmap: the save's map \"%s\" is of another"
-					" size or format; not read", cs(name));
-			m_store = nullptr;
+					" size or format; not read, this one replaces it", cs(name));
 			return false;
 		}
 		const int64_t t0 = interface::os::time_us();
@@ -573,7 +572,19 @@ struct Module: public interface::Module, public Interface
 
 	void delete_instance(SceneReference scene)
 	{
-		m_maps.erase(scene);
+		auto it = m_maps.find(scene);
+		if(it == m_maps.end())
+			return;
+		// The peers on the scene drop their Terrain
+		sv_<replicate::PeerId> peers;
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			peers = irep->find_peers_on_scene(scene);
+		});
+		network::access(m_server, [&](network::Interface *inet){
+			for(replicate::PeerId peer : peers)
+				inet->send(peer, "heightmap:remove", "");
+		});
+		m_maps.erase(it);
 	}
 
 	Instance* get_instance(SceneReference scene)
@@ -588,10 +599,11 @@ void Map::commit()
 	if(m_written.empty() && m_field_pending.empty() && m_node_id)
 		return;
 	const int64_t t0 = interface::os::time_us();
+	const bool first = !m_node_id;
 	std::map<int, Rect> written;
 	written.swap(m_written);
 	main_context::access(m_server, [&](main_context::Interface *imc){
-		if(!m_node_id)
+		if(first)
 			create_body(imc->check_scene(m_scene));
 		for(const Rect &r : m_field_pending)
 			update_field(r);
@@ -599,6 +611,15 @@ void Map::commit()
 			update_field(w.second);
 	});
 	m_field_pending.clear();
+	sv_<replicate::PeerId> peers;
+	replicate::access(m_server, [&](replicate::Interface *irep){
+		peers = irep->find_peers_on_scene(m_scene);
+	});
+	// A map made while peers are on its scene: the whole of it to them
+	// (a later join gets it from on_peer_joined_scene)
+	if(first)
+		for(replicate::PeerId peer : peers)
+			send_all(peer);
 	if(written.empty())
 		return;
 	if(m_store){
@@ -611,12 +632,8 @@ void Map::commit()
 			}
 		});
 	}
-	sv_<replicate::PeerId> peers;
-	replicate::access(m_server, [&](replicate::Interface *irep){
-		peers = irep->find_peers_on_scene(m_scene);
-	});
 	size_t bytes = 0;
-	if(!peers.empty()){
+	if(!peers.empty() && !first){
 		sv_<ss_> packets;
 		for(auto &w : written){
 			packets.push_back(region_packet(w.second, rect_data(w.second)));

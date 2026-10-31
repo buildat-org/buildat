@@ -654,8 +654,6 @@ struct Module: public interface::Module, public Interface
 	size_t m_world_generated = 0, m_world_logged = 0;
 	// A regeneration whose sections are not all generated again yet
 	bool m_world_regenerating = false;
-	// A change that applies at the next start, warned of once
-	ss_ m_world_pending;
 	// Guests' dropped entities' names by their `by`, for this run
 	// simplified: kept for the run (a name each guest that came)
 	sm_<ss_, ss_> m_gone_guests;
@@ -2909,8 +2907,7 @@ struct Module: public interface::Module, public Interface
 		return out;
 	}
 
-	// A builder is told: the World's refusals, seams and what waits for
-	// the next start
+	// A builder is told: the World's refusals and seams
 	void warn(const ss_ &text)
 	{
 		log_w(MODULE, "World: %s", cs(text));
@@ -3031,19 +3028,12 @@ struct Module: public interface::Module, public Interface
 					"this server has not";
 			return false;
 		}
-		// What applies at the next start: the surface, a heightmap's size
+		// The surface or a heightmap's size changed: the heightmap there
+		// goes (below, once nothing refuses), the new ground replacing it
 		const bool had = m_world_applied.is_object();
-		if(!first && had && (p.heightmap() != m_wp.heightmap() ||
-				(p.heightmap() && (p.width != m_wp.width ||
-				p.depth != m_wp.depth)))){
-			const ss_ w = "the surface and a heightmap's size apply at the "
-					"next start";
-			if(m_world_pending != w)
-				warn(w);
-			m_world_pending = w;
-			return true;
-		}
-		m_world_pending.clear();
+		const bool reshape = !first && had && (p.heightmap() != m_wp.heightmap()
+				|| (p.heightmap() && (p.width != m_wp.width ||
+				p.depth != m_wp.depth)));
 		const bool again = had && params.stringify() !=
 				m_world_applied.stringify();
 		world::Ids ids;
@@ -3116,12 +3106,26 @@ struct Module: public interface::Module, public Interface
 				}
 			caves = " ("+itos(n)+" of "+itos(of)+" sampled cells)";
 		}
+		if(reshape && m_wp.heightmap()){
+			decor_clear();
+			m_decor_dirty = true;
+			save_decor();
+			heightmap::access(m_server, [&](heightmap::Interface *ih){
+				ih->delete_instance(m_world_scene);
+			});
+		}
 		if(p.heightmap()){
 			if(!apply_heightmap(p, *h, layers, ids, again, hash, why))
 				return false;
 			dn = m_decor.size();
 			dh = decor_hash();
 			set_world_generator(p, ids, nullptr, lo, hi);
+			// The voxel ground it replaces: unloaded and forgotten (the
+			// edited sections stay in the save, unloaded)
+			if(reshape && !m_wp.heightmap()){
+				regenerate(by, false);
+				m_world_regenerating = false;
+			}
 		} else {
 			set_world_generator(p, ids, std::move(h), lo, hi);
 			if(again)
@@ -3192,7 +3196,7 @@ struct Module: public interface::Module, public Interface
 	// Every section nobody edited generated again (unloaded and forgotten:
 	// the load points bring them back); the edited ones stay, and those
 	// beside a regenerated one are the seams
-	void regenerate(const ss_ &by)
+	void regenerate(const ss_ &by, bool seams_named = true)
 	{
 		size_t again = 0;
 		std::set<std::tuple<int, int, int>> edited, redo;
@@ -3239,7 +3243,7 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "World%s: %zu sections generated again, %zu edited kept",
 				by.empty() ? "" : cs(" by "+by), again, edited.size());
 		m_world_regenerating = again > 0;
-		if(n)
+		if(n && seams_named)
 			warn(itos(n)+" edited sections kept, seams where they meet the "
 					"new ground: "+seams+(n > 8 ? " ..." : ""));
 	}
@@ -3272,7 +3276,10 @@ struct Module: public interface::Module, public Interface
 				gp.seed = p.seed;
 				// A voxel column's top cell is centred on its whole number
 				gp.height_fn = [&](float x, float z){ return h.at(x, z) + 0.5f; };
-				gp.sand_below = p.sea_level + 1.0f;
+				// Sand (the riverbed's layer) where a voxel column's top
+				// is under the sea, as the voxels have it: a flat ground
+				// at the sea's level its top's
+				gp.sand_below = p.sea_level;
 				map->generate(gp);
 				if(layers != sv_<int>{0, 1, 2})
 					for(int z = 0; z < map->samples_z(); z++)
@@ -3454,10 +3461,9 @@ struct Module: public interface::Module, public Interface
 		return s.name;
 	}
 
-	// The decorations at a start: generated with a generated map (the
-	// biome's scatter over its samples), else the save's
-	void decor_start(const world::Params &p, const world::Ids &ids,
-			bool generated)
+	// The decorations removed: their objects and the list (the row
+	// "decor" is save_decor()'s)
+	void decor_clear()
 	{
 		for(auto &d : m_decor)
 			if(d.second.node)
@@ -3466,6 +3472,14 @@ struct Module: public interface::Module, public Interface
 					vo->remove_object(d.second.node);
 				});
 		m_decor.clear();
+	}
+
+	// The decorations at a start: generated with a generated map (the
+	// biome's scatter over its samples), else the save's
+	void decor_start(const world::Params &p, const world::Ids &ids,
+			bool generated)
+	{
+		decor_clear();
 		ss_ row;
 		const bool saved = !generated && m_store->get("decor", row);
 		if(!saved && !p.with_decorations()){

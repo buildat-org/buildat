@@ -16,9 +16,10 @@
 #      player; a cell dug while Stopped (an edit), and a new seed generates
 #      again every section but that one, the warning naming its seams.
 #   3. A restart: the save holds the one edited section and nothing else;
-#      the surface set to a heightmap (valleys, 256 a side), which waits
-#      for the next start.
-#   4. A restart: the heightmap generated, the admin standing on it.
+#      the surface set to a heightmap, which replaces the voxels at once
+#      (the client builds it), back to voxels (the client drops it) and a
+#      heightmap again (valleys, 256 a side).
+#   4. A restart: the save's heightmap, the admin standing on it.
 #   5. ([KIT] stage 4f) A restart: the heightmap's decorations (voxel
 #      objects) the save's; the terrain brushes on it by their packets,
 #      Stopped: a raise stroke (two dabs, one undo) steep enough that its
@@ -39,7 +40,7 @@
 #      in the plan (T, a dragged stroke, Ctrl+Z its undo) and the caves seen
 #      through the plan's cut.
 #   web: the heightmap's save in the web client (headless Chrome).
-# The screenshots (flat, noise, valleys, heightmap, heightmap_close,
+# The screenshots (flat, noise, valleys, heightmap_live, heightmap, heightmap_close,
 # heightmap_edited, grass, decorated, brush, stroked, caves, web_heightmap)
 # are kept with KEEP_TMP=1; look at them.
 #   util/kit_world_check.sh
@@ -91,6 +92,12 @@ set_w() # <param> <json value>
 {
 	n=$((n + 1))
 	printf 'event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "%s", "value": %s}\nwait_log 10000 entities, %d to undo\n' "$1" "$2" "$n"
+}
+# The surface set, and the client's line that says the heightmap's change
+surface_w() # <surface> <client log text>
+{
+	n=$((n + 1))
+	printf 'event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "surface", "value": "%s"}\nwait_log 10000 %s\nwait_log_any 10000 entities, %d to undo\n' "$1" "$2" "$n"
 }
 # One that regenerates the ground (Stopped), and the wait for its
 # sections: a column read before them reads none
@@ -237,7 +244,7 @@ awk '/World by kitboss/ { exit } /sections generated since the start/ { bad = 1 
 grep -aq "workbench: kitboss dug .*: written" "$s2" || fail "the admin's dig ($s2)"
 echo "ok: the finite map baked and read back (hash $vh), infinite noise generated round the player, an edited section kept over a new seed, its seams named"
 
-# 3. The save holds the edited section alone; the heightmap waits
+# 3. The save holds the edited section alone; the heightmap at once
 {
 	joined
 	cat <<'EOF'
@@ -246,8 +253,13 @@ wait_log 10000 kit editor: state: 2 entities, 0 to undo
 EOF
 	n=0
 	set_w size '"finite"'
-	set_w surface '"heightmap"'
-	echo "wait_log_any 10000 kit: warning: World: the surface and a heightmap's size apply at the next start"
+	# [KIT_WORLD_HEIGHTMAP] The surface at once: the heightmap built on
+	# the client, the voxels gone; back to voxels (the map removed) and
+	# to the heightmap again
+	surface_w heightmap "heightmap: terrain built"
+	shot heightmap_live
+	surface_w voxels "heightmap: removed"
+	surface_w heightmap "heightmap: terrain built"
 	set_w width 256
 	set_w depth 256
 	set_w generator '"valleys"'
@@ -258,8 +270,12 @@ server 3
 client boss3
 stop
 s3=$t/srv3.log
-want "$s3" "World: noise infinite, seed 9" "World: the save holds 1 sections (1 edited)"
-echo "ok: an infinite world's save holds its edited section and nothing it only generated"
+want "$s3" "World: noise infinite, seed 9" "World: the save holds 1 sections (1 edited)" \
+	"World by kitboss: noise 192x192, seed 9, biome grassland, a heightmap" \
+	"World by kitboss: noise 192x192, seed 9, biome grassland, voxels" \
+	"World by kitboss: valleys 256x256, seed 9, biome grassland, a heightmap"
+grep -aq "warning: World: the surface" "$t/boss3.log" && fail "a surface change waits ($t/boss3.log)"
+echo "ok: an infinite world's save holds its edited section and nothing it only generated; the surface a heightmap at once, voxels and a heightmap again"
 
 # 4. The heightmap
 {

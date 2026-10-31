@@ -424,9 +424,9 @@ namespace interface
 // cave_wall) that a material set's biomes bind to voxels, never voxel
 // names; a role missing is refused, named. An edit of the World's
 // parameters generates again every section nobody wrote; a builder is
-// sent "kit:warning" (text) for the seams, a refusal, and what applies
-// at the next start. Voxel objects ([VOXEL_OBJECTS]) on a heightmap are
-// their own entities once they exist, not the World's.
+// sent "kit:warning" (text) for the seams and a refusal. Voxel objects
+// ([VOXEL_OBJECTS]) on a heightmap are their own entities once they
+// exist, not the World's.
 namespace kit
 {
 	// The World's voxelworld region, in sections (voxelworld's, WORLD_SECTION

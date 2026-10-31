@@ -153,6 +153,16 @@ buildat.sub_packet("heightmap:ready", function(data)
 	ready = true
 end)
 
+-- The server deleted the map
+buildat.sub_packet("heightmap:remove", function(data)
+	if M.node then
+		M.node:Remove()
+	end
+	M.node, M.terrain, info, ready = nil, nil, nil, false
+	changed = {}
+	log:info("heightmap: removed")
+end)
+
 local function create()
 	M.node = replicate.main_scene:CreateChild("heightmap")
 	M.node.position = magic.Vector3(info.sx * info.cell / 2, info.base_y,

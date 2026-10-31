@@ -72,7 +72,9 @@
 // Changing the parameters generates again every section nobody wrote
 // (voxelworld::set_writes_alter: any write but the generator's); the
 // written ones stay and a warning names those beside regenerated ones,
-// the seams. Size and surface of a heightmap apply at the next start.
+// the seams. A change of the surface (or a heightmap's size) replaces the
+// old ground at once: the heightmap made or deleted, the voxel sections
+// nobody wrote forgotten.
 // simplified: one biome a world (the parameter), no biome noise yet;
 // no dust placed; caves never open to the surface (no entrances).
 //

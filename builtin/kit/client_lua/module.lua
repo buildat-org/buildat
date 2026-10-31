@@ -632,7 +632,7 @@ buildat.sub_packet("kit:items", function(data)
 end)
 
 -- [KIT] stage 4e: the World's word to builders (a refusal, the seams of a
--- regeneration, what applies at the next start)
+-- regeneration)
 buildat.sub_packet("kit:warning", function(data)
 	log:info("kit: warning: " .. tostring(data))
 	ui_utils.show_notification(tostring(data), 8)
