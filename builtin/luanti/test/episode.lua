@@ -342,82 +342,102 @@ core.register_on_joinplayer(function(player)
 			end)
 			return
 		end
-		stamp()
-		player:get_inventory():set_list("main", {})
-		if NAME == "place" or NAME == "seaplace" then
-			-- Ten of the dirt in the first slot, which is what the
-			-- launcher's and the extension's hotbar select on join
-			player:get_inventory():set_stack("main", 1,
-					ItemStack(dirt .. " 10"))
-		end
-		-- Gravity stays on in the pool: sinking is the measure
-		if not SWIMMING[NAME] then
-			player:set_physics_override({gravity = 0})
-		end
-		for id, _ in pairs(player:hud_get_all()) do
-			player:hud_remove(id)
-		end
-		player:hud_set_flags({hotbar = false, healthbar = false,
-				breathbar = false, crosshair = false, minimap = false})
-		player:set_look_horizontal(0)
-		player:set_look_vertical(math.pi / 2)
 		-- In the pool's middle, a node under the surface, for the pool
 		-- episodes; on the platform otherwise
 		-- a node under the surface for sink and swim, four above it for
 		-- the fall in
 		local drop = NAME == "fall" and 8 or (SWIMMING[NAME] and 2 or
 				(NAME == "seaplace" and 3.5 or 1))
-		player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
-		local ent = some_entity()
-		if ent then
-			core.add_entity({x = ORIGIN.x + 2, y = ORIGIN.y + 1,
-					z = ORIGIN.z}, ent)
+		-- The player put there first and the stage emerged before it is
+		-- stamped: a far spawn's player has its own sections generated
+		-- first, and the stage's waited behind them -- stamped into a
+		-- section not generated yet, its air was the mapgen's stone when
+		-- it came (2026-10-31). Held there meanwhile.
+		local stamped = false
+		local function wait_there()
+			if not stamped and player:is_player() then
+				player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
+				core.after(0.5, wait_there)
+			end
 		end
-		core.log("action", "episode: state " .. NAME .. " dirt=" ..
-				tostring(dirt) .. " entity=" .. tostring(ent) ..
-				(water and (" water=" .. water .. " pointable=" ..
-				tostring(core.registered_nodes[water].pointable)) or ""))
-		-- Three seconds for the client to receive the stamp before it
-		-- acts: the module's client had the pre-stamp air under its ray a
-		-- second after the write
-		core.after(3, function()
-			-- Re-aimed, since the client had a say about the look; and
-			-- re-put, since a client that got the place before the
-			-- gravity override fell for a moment (the module's objects
-			-- lane and its physics packet are two lanes)
+		wait_there()
+		core.emerge_area(vector.subtract(ORIGIN, 3), vector.add(ORIGIN, 3),
+				function(blockpos, action, remaining)
+			if remaining > 0 then
+				return
+			end
+			stamped = true
+			stamp()
+			player:get_inventory():set_list("main", {})
+			if NAME == "place" or NAME == "seaplace" then
+				-- Ten of the dirt in the first slot, which is what the
+				-- launcher's and the extension's hotbar select on join
+				player:get_inventory():set_stack("main", 1,
+						ItemStack(dirt .. " 10"))
+			end
+			-- Gravity stays on in the pool: sinking is the measure
+			if not SWIMMING[NAME] then
+				player:set_physics_override({gravity = 0})
+			end
+			for id, _ in pairs(player:hud_get_all()) do
+				player:hud_remove(id)
+			end
+			player:hud_set_flags({hotbar = false, healthbar = false,
+					breathbar = false, crosshair = false, minimap = false})
 			player:set_look_horizontal(0)
 			player:set_look_vertical(math.pi / 2)
-			if not SWIMMING[NAME] then
-				player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
+			player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
+			local ent = some_entity()
+			if ent then
+				core.add_entity({x = ORIGIN.x + 2, y = ORIGIN.y + 1,
+						z = ORIGIN.z}, ent)
 			end
-			if NAME == "seaplace" then
-				-- Held over the pool: VoxeLibre's playerphysics rewrites
-				-- the override every step, so gravity 0 does not hold and
-				-- the body would sink into what it is placing on
-				local hold
-				hold = function()
-					if player:is_player() then
-						player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
-						core.after(0.5, hold)
+			core.log("action", "episode: state " .. NAME .. " dirt=" ..
+					tostring(dirt) .. " entity=" .. tostring(ent) ..
+					(water and (" water=" .. water .. " pointable=" ..
+					tostring(core.registered_nodes[water].pointable)) or ""))
+			-- Three seconds for the client to receive the stamp before it
+			-- acts: the module's client had the pre-stamp air under its ray a
+			-- second after the write
+			core.after(3, function()
+				-- Re-aimed, since the client had a say about the look; and
+				-- re-put, since a client that got the place before the
+				-- gravity override fell for a moment (the module's objects
+				-- lane and its physics packet are two lanes)
+				player:set_look_horizontal(0)
+				player:set_look_vertical(math.pi / 2)
+				if not SWIMMING[NAME] then
+					player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
+				end
+				if NAME == "seaplace" then
+					-- Held over the pool: VoxeLibre's playerphysics rewrites
+					-- the override every step, so gravity 0 does not hold and
+					-- the body would sink into what it is placing on
+					local hold
+					hold = function()
+						if player:is_player() then
+							player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
+							core.after(0.5, hold)
+						end
 					end
+					hold()
 				end
-				hold()
-			end
-			core.log("action", "episode: ready " .. NAME)
-			if NAME == "pour" then
-				-- The game's water source on the platform's middle; the
-				-- census counts what it spread to ([LIQUID_FLOW])
-				core.set_node({x = ORIGIN.x, y = ORIGIN.y + 1, z = ORIGIN.z},
-						{name = water})
-			end
-			core.after(SECONDS, function()
-				if not player:is_player() then
-					core.log("action", "episode: FAILED the player left " ..
-							"before the census")
-					return
+				core.log("action", "episode: ready " .. NAME)
+				if NAME == "pour" then
+					-- The game's water source on the platform's middle; the
+					-- census counts what it spread to ([LIQUID_FLOW])
+					core.set_node({x = ORIGIN.x, y = ORIGIN.y + 1, z = ORIGIN.z},
+							{name = water})
 				end
-				core.log("action", "episode: census " .. NAME .. " " ..
-						census(player))
+				core.after(SECONDS, function()
+					if not player:is_player() then
+						core.log("action", "episode: FAILED the player left " ..
+								"before the census")
+						return
+					end
+					core.log("action", "episode: census " .. NAME .. " " ..
+							census(player))
+				end)
 			end)
 		end)
 	end)

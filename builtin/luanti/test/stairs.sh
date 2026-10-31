@@ -23,10 +23,15 @@ if check_pgrep buildat_server >/dev/null; then
 	echo "SKIP: a buildat server is already running" >&2; exit "$SKIP"
 fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
+mkdir -p "$BUILDAT_USER_PATH/apps/vanilla/saves/$save/luanti"
+# The walks go on past the floor's edge, into generated air: a fall to the
+# terrain, which with damage kills the player before the second walk
+echo "enable_damage = false" > "$BUILDAT_USER_PATH/apps/vanilla/saves/$save/luanti/world.mt"
 srv=""
 trap 'kill -INT "$srv" 2>/dev/null; true' EXIT
 cat > "$out/fixture.lua" <<'LUA'
 core.register_on_joinplayer(function(player)
+	local build
 	local function lay()
 		for x = -3, 4 do for z = -3, 4 do
 			core.set_node({x=x, y=199, z=z}, {name="mcl_core:stone"})
@@ -35,23 +40,45 @@ core.register_on_joinplayer(function(player)
 		core.set_node({x=0, y=200, z=2}, {name="mcl_stairs:stair_stone_rough", param2=0})
 		core.set_node({x=2, y=200, z=-2}, {name="mcl_stairs:stair_stone_rough", param2=1})
 	end
+	-- Laid once the stage's sections are generated, and read back as
+	-- stone twice running before the walk: a write into a section outside
+	-- the load range is dropped, and one generated between two lays is
+	-- sent to the client as the mapgen's air, which the player fell
+	-- through (2026-10-31). The player waits there.
+	local corners = {{-3, -3}, {-3, 4}, {4, -3}, {4, 4}}
 	core.after(3, function()
+		player:set_pos({x=0, y=199.5, z=0})
+		build()
+	end)
+	local held = 0
+	function build()
+		local ok = true
+		for _, c in ipairs(corners) do
+			local q = {x=c[1], y=199, z=c[2]}
+			ok = ok and __luanti_section_state(q.x, q.y, q.z) == "generated" and
+					core.get_node(q).name == "mcl_core:stone"
+		end
+		held = ok and held + 1 or 0
 		lay()
+		if held < 2 then
+			-- Not fallen out of the stage's load range meanwhile
+			player:set_pos({x=0, y=199.5, z=0})
+			core.after(0.5, build)
+			return
+		end
 		player:set_pos({x=0, y=199.5, z=0})
 		player:set_look_horizontal(0)
-	end)
-	-- Again, in case the mapgen wrote over the first
-	core.after(5, function()
-		lay()
-		-- The drive waits for this line
-		core.chat_send_player(player:get_player_name(), "stairs: ready")
-	end)
-	core.after(14, function()
-		core.log("action", "stairs: second")
-		core.chat_send_player(player:get_player_name(), "stairs: second")
-		player:set_pos({x=0, y=199.5, z=-2})
-		player:set_look_horizontal(0)
-	end)
+		core.after(2, function()
+			-- The drive waits for this line
+			core.chat_send_player(player:get_player_name(), "stairs: ready")
+		end)
+		core.after(11, function()
+			core.log("action", "stairs: second")
+			core.chat_send_player(player:get_player_name(), "stairs: second")
+			player:set_pos({x=0, y=199.5, z=-2})
+			player:set_look_horizontal(0)
+		end)
+	end
 	local function tick()
 		if player:is_player() then
 			local p = player:get_pos()

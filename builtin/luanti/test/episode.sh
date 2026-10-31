@@ -93,14 +93,17 @@ trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 # And the client's own readiness: the extension builds its voxel registry
 # for seconds after it joins (its pointable table is not there until
 # then), so its line is waited for too; the module's client says "vanilla
-# client ready".
-drive() {   # log fifo clilog cliready -> the census line, or nothing
-	local log="$1" fifo="$2" clilog="$3" cliready="$4" i
+# client ready". The extension's world round the player too: on a slow
+# machine it was in 8 s after the registry, and the dig before it took
+# nothing (2026-10-31).
+drive() {   # log fifo clilog cliready... -> the census line, or nothing
+	local log="$1" fifo="$2" clilog="$3" i p ok
 	# Two and a half minutes: a VoxeLibre world and its client are up in
 	# two at the most
 	for i in $(seq 1 750); do
-		grep -aq "episode: ready\|episode: FAILED" "$log" &&
-				grep -aq "$cliready" "$clilog" && break
+		ok=1
+		for p in "${@:4}"; do grep -aq "$p" "$clilog" || ok=; done
+		grep -aq "episode: ready\|episode: FAILED" "$log" && [ "$ok" ] && break
 		kill -0 "$cli" 2>/dev/null || break
 		sleep 0.2 # a poll
 	done
@@ -130,6 +133,7 @@ player_backend = sqlite3
 auth_backend = sqlite3
 mod_storage_backend = sqlite3
 world_name = episode
+mg_name = v7
 creative_mode = false
 server_announce = false
 EOF
@@ -153,7 +157,7 @@ BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ep \
 cli=$!
 exec 3>"$fifo"
 luanti_census=$(drive "$out/luanti_srv.log" "$fifo" "$out/extension_cli.log" \
-	"voxel types have their own textures")
+	"voxel types have their own textures" "loading: the world is in")
 exec 3>&-
 kill "$cli" 2>/dev/null; wait "$cli" 2>/dev/null
 kill "$srv" 2>/dev/null
@@ -165,6 +169,10 @@ kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
 cd "$here/Build"
 save=buildat_test_episode
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
+# Both on v7, Luanti's default: the module's own default is valleys
+# (2026-10-14), and the platform's surroundings were another terrain
+mkdir -p "$BUILDAT_USER_PATH/apps/vanilla/saves/$save/luanti"
+echo "mg_name = v7" > "$BUILDAT_USER_PATH/apps/vanilla/saves/$save/luanti/world.mt"
 # A VoxeLibre world's mods are loaded in two minutes at the most
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" BUILDAT_LUANTI_SEED=1 \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
