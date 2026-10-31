@@ -11,8 +11,47 @@
 # FAILED line carries its reason.
 status=0
 say() { echo "FAIL: $*" >&2; status=1; }
-grep -a "fuzz: FAILED" "$out/srv.log" | sed 's/^.*fuzz: //' | while read -r l; do echo "FAIL: $l" >&2; done
-grep -aq "fuzz: FAILED" "$out/srv.log" && status=1
+# **A slow frame or step while the process waited for a CPU is the
+# machine's** ([FUZZ_FRAME_PEAK], 2026-10-31): the share of the SPAN
+# seconds before a log time (HH:MM:SS.mmm) that a main thread spent
+# runnable and not running, from fuzz.sh's cpu.log (column 3 the
+# client's wait, 6 the server's); empty without one. At load 13-17 on
+# this desk's 16 threads the client's main thread waited 50-150 ms of
+# every 120, its frames stretched to 0.84 s and a server step to 2 s;
+# a run's 5 s windows read 0.01-0.03 at the median, 0.16-0.41 at p90,
+# 0.39-0.57 at the worst. A frame the game made slow is running, not
+# waiting, so the share stays low and the fault stands.
+# simplified: a run crossing midnight reads its windows wrong
+CPU_WAIT_MAX=0.25
+cpu_wait() # <column> <time> <span>
+{
+	[ -s "$out/cpu.log" ] || return 0
+	awk -v col="$1" -v at="$2" -v span="$3" '
+		function s(x, a) { split(x, a, ":"); return a[1] * 3600 + a[2] * 60 + a[3] }
+		BEGIN { e = s(at) }
+		NF >= col { t = s($1); if (t >= e - span && t <= e) {
+			if (!n++) { t0 = t; w0 = $col } tl = t; wl = $col } }
+		END { if (n > 1 && tl > t0) printf "%.2f", (wl - w0) / 1e9 / (tl - t0) }' \
+		"$out/cpu.log"
+}
+machines() # <share>: whether it is over CPU_WAIT_MAX
+{
+	[ -n "$1" ] && awk -v w="$1" -v m="$CPU_WAIT_MAX" 'BEGIN {exit !(w >= m)}'
+}
+while read -r l; do
+	[ -n "$l" ] || continue
+	why=${l#*fuzz: }
+	w=""
+	case "$why" in
+	"FAILED a step took"*) w=$(cpu_wait 6 "$(echo "$l" | awk '{print $3}')" 5) ;;
+	esac
+	if machines "$w"; then
+		echo "note: $why, the server waiting for a CPU $w of the 5 s before it: the machine's, not a verdict" >&2
+	else
+		echo "FAIL: $why" >&2
+		status=1
+	fi
+done <<< "$(grep -a "fuzz: FAILED" "$out/srv.log")"
 # The world not settling in the start wait ([START_WAIT]) is a verdict
 grep -a 'wait_log: ".*" not seen' "$out/cli.log" | grep -a "the world is in" | head -1 | sed 's/.*wait_log: /FAIL: the world did not come in: /' >&2
 grep -aq 'wait_log: "load: the world is in" not seen' "$out/cli.log" && status=1
@@ -41,8 +80,10 @@ fi
 from=$(grep -a -m1 "fuzz: t=90 " "$out/srv.log" | awk '{print $3}')
 frames=$(grep -a "frame peak" "$out/cli.log" | tail -n +2 |
 	awk -v from="${from:-00:00:00}" '$3 >= from' |
-	sed 's/^.*frame peak \([0-9.]*\) s in \(.*\), held.*$/\1 \2/')
-worst=$(echo "$frames" | sort -rn | head -1)
+	sed 's/^\S* \S* \(\S*\) .*frame peak \([0-9.]*\) s in \(.*\), held.*$/\2 \1 \3/' |
+	sort -rn)
+# "0.308 rest", the time between left out
+worst=$(echo "$frames" | head -1 | awk '{$2 = ""; print}' | tr -s ' ')
 if [ -n "$worst" ]; then
 	echo "$frames" | awk '$1 > 0.05 {n++} END {
 		if (n) printf "warning: %d frame peaks over 50 ms\n", n}' >&2
@@ -58,8 +99,19 @@ if [ -n "$worst" ]; then
 			echo "note: a frame took $worst ([FRAME_PEAK]); not a" \
 					"verdict under BUILDAT_CI" >&2
 	else
-		awk -v w="${worst%% *}" 'BEGIN {exit !(w > 0.25)}' &&
-			say "a frame took $worst ([FRAME_PEAK])"
+		# Worst first; each over the ceiling the machine's or the game's
+		while read -r secs at phase; do
+			awk -v w="$secs" 'BEGIN {exit !(w > 0.25)}' || break
+			w=$(cpu_wait 3 "$at" 5)
+			if machines "$w"; then
+				echo "note: a frame took $secs $phase at $at ([FRAME_PEAK])," \
+						"the client waiting for a CPU $w of the 5 s before" \
+						"it: the machine's, not a verdict" >&2
+			else
+				say "a frame took $secs $phase ([FRAME_PEAK])${w:+, the client waiting for a CPU $w of the 5 s before it}"
+				break
+			fi
+		done <<< "$frames"
 	fi
 fi
 last=$(grep -a "fuzz: t=" "$out/srv.log" | tail -1 | sed 's/^.*fuzz: //')

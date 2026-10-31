@@ -162,6 +162,8 @@ M.use_skylight = false
 -- This line is what makes that visible without a debug run, the way
 -- "slow packet" does for the network.
 local SLOW_MESH_US = 25000
+-- And the update handler's own share; see the end of it
+local SLOW_UPDATE_US = 100000
 local slow_mesh_said = 0
 local function note_slow_mesh(node, t1, data_n, lod)
 	local took = buildat.get_time_us() - t1
@@ -847,9 +849,12 @@ function sub_events()
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
 		buildat.profiler_block_begin("Buildat|voxelworld:update")
 		local update_t0 = buildat.get_time_us()
+		local fu = M.frame_us
+		local parts0 = fu.mesh + fu.horizon + fu.physics
 
 		-- Required for handling device resets (eg. fullscreen toggle)
 		atlas_reg:update()
+		local atlas_t1 = buildat.get_time_us()
 
 		--local t0 = buildat.get_time_us()
 		--local dt = event_data:GetFloat("TimeStep")
@@ -911,6 +916,7 @@ function sub_events()
 
 		-- Node updates: Handle one or a few per frame
 		local current_us = buildat.get_time_us()
+		local handled = 0
 		-- Spend time doing this proportionate to the rest of the update cycle
 		local last_outer_frame_us = (current_us - end_of_update_processing_us)
 		-- Capped: a fraction of the last frame with no ceiling let a long
@@ -1026,6 +1032,7 @@ function sub_events()
 			end
 		end
 
+		local loop_t0 = buildat.get_time_us()
 		-- One more only when one like the last fits in what is left: a
 		-- remesh is 4 ms on the web (deserialising, the horizon note, the
 		-- task), and two of them over a 5 ms budget made the frame's p95
@@ -1115,6 +1122,7 @@ function sub_events()
 					end
 				end
 				did_update = true
+				handled = handled + 1
 			else
 				log:debug("Poked update #"..
 						node_update_queue:get_length()..
@@ -1137,8 +1145,23 @@ function sub_events()
 			camera_last_p = camera_p
 		end
 		--log:info(buildat.get_time_us()-t0)
-		M.frame_us.update = M.frame_us.update +
-				(buildat.get_time_us() - update_t0)
+		local update_t1 = buildat.get_time_us()
+		M.frame_us.update = M.frame_us.update + (update_t1 - update_t0)
+		-- The frame peak's "voxelworld" over a tenth of a second, said with
+		-- where in the handler it went ([FUZZ_FRAME_PEAK]: 0.476 s once in
+		-- fuzz.sh, with nothing in the log to say what it was)
+		local own = update_t1 - update_t0 -
+				(fu.mesh + fu.horizon + fu.physics - parts0)
+		if own >= SLOW_UPDATE_US then
+			log:info(string.format("slow update: %.0f ms of its own: atlas " ..
+					"%.0f ms, flush and checks %.0f ms, %d node updates in " ..
+					"%.0f ms (mesh, horizon and physics %.0f ms of it), %d queued",
+					own / 1000, (atlas_t1 - update_t0) / 1000,
+					(loop_t0 - atlas_t1) / 1000, handled,
+					(end_of_update_processing_us - loop_t0) / 1000,
+					(fu.mesh + fu.horizon + fu.physics - parts0) / 1000,
+					node_update_queue:get_length()))
+		end
 		buildat.profiler_block_end()
 	end)
 

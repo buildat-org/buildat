@@ -121,7 +121,15 @@ awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" -v wait="$((START_
 			shot = t
 			printf "screenshot %s/t%04d.png\n", out, int(t)
 			# and what the client sees, under the same stem ([SCAN_EVENT])
+			# Each in a frame of its own, the next step of the walk too:
+			# commands with no delay between them run in one frame, and the
+			# read-back of the screenshot (95 ms here), the scan (41-82 ms)
+			# and the inventory the next step opened (205 ms) made one
+			# frame of 0.35 s that the frame peak failed as the game
+			# ([FUZZ_FRAME_PEAK])
+			print "frames 1"
 			printf "event scan 8 t%04d\n", int(t)
+			print "frames 1"
 		}
 	}
 	print "quit"
@@ -170,6 +178,18 @@ bin/buildat -s "localhost:$cport" -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
 	-c @"$out/cmds.txt" \
 	> "$out/cli.log" 2>&1 &
 cli=$!
+# How long the client's main thread and the server's luanti thread (a
+# module runs in a thread of its name; the fuzz step is that one's, the
+# process's own thread ran 8 ms of 3 s) waited for a CPU while runnable,
+# four times a second: the kernel's schedstat (run ns, wait ns, slices),
+# which verdict.sh reads beside a slow frame or step ([FUZZ_FRAME_PEAK]).
+# Empty where there is no /proc.
+stid=$(grep -lx luanti /proc/"$srv"/task/*/comm 2>/dev/null | head -1 | cut -d/ -f5)
+( while kill -0 "$cli" 2>/dev/null; do
+	echo "$(date +%T.%3N) $(cat "/proc/$cli/task/$cli/schedstat" \
+			"/proc/$srv/task/$stid/schedstat" 2>/dev/null | tr '\n' ' ')"
+	sleep 0.25
+done ) > "$out/cpu.log" &
 # The walk plus the load, and then some: a client that has not exited by
 # then is hung, which is a finding of its own ([QUIT_HANG], seed 15 sat
 # twelve minutes in Urho3D's FileWatcher at exit) and not a reason for
