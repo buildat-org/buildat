@@ -104,9 +104,8 @@ shot() # <name>
 {
 	cat <<EOF
 keypress F6
-wait_log 10000 kit editor: edit mode off
-event kit_edit {"op": "play"}
 wait_log 10000 the server put the player at
+wait_log_any 10000 kit editor: edit mode off
 idle 30000
 look_dir 1 -0.3 1
 frames 10
@@ -206,9 +205,8 @@ EOF
 	set_w level 0
 	cat <<'EOF'
 keypress F6
-wait_log 10000 kit editor: edit mode off
-event kit_edit {"op": "play"}
 wait_log 10000 the server put the player at
+wait_log_any 10000 kit editor: edit mode off
 idle 30000
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
@@ -410,9 +408,8 @@ EOF
 	terrain flatten 23 23 2 5 18 '"level": 0'
 	cat <<'EOF'
 keypress F6
-wait_log 10000 kit editor: edit mode off
-event kit_edit {"op": "play"}
 wait_log 10000 the server put the player at
+wait_log_any 10000 kit editor: edit mode off
 idle 2000
 look_dir 1 -0.35 1
 frames 10
@@ -434,9 +431,8 @@ EOF
 	terrain decorate -12 -12 4 5 22
 	cat <<'EOF'
 keypress F6
-wait_log 10000 kit editor: edit mode off
-event kit_edit {"op": "play"}
 wait_log 10000 the server put the player at
+wait_log_any 10000 kit editor: edit mode off
 idle 2000
 look_dir -1 -0.35 -1
 frames 10
