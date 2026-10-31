@@ -27,7 +27,7 @@
 --   start to.
 -- * No attachments, so collide_with_objects and the parent and child of an
 --   attachment are the empty answer rather than an answer.
--- * The collision is axis by axis against the voxels a box overlaps, with no
+-- * The collision is axis by axis against the voxels a box sweeps, with no
 --   stepping up and no sliding along a corner. An item lands on the floor
 --   and stays out of a wall, which is what the builtin's entities ask about.
 
@@ -3183,38 +3183,66 @@ end
 -- resting exactly on a surface from being inside it.
 local SHRINK = 0.001
 
+local AXIS_MIN = {x = 1, y = 2, z = 3}
+local AXIS_MAX = {x = 4, y = 5, z = 6}
+
 local function box_range(lo, hi)
 	return math.floor(lo + SHRINK + 0.5), math.floor(hi - SHRINK + 0.5)
 end
 
--- The voxel the box ran into, taken along axis i in direction dir so that
--- the one that stops it first is the one that answers
-local function box_blocker(pos, box, i, dir)
-	local x0, x1 = box_range(pos.x + box[1], pos.x + box[4])
-	local y0, y1 = box_range(pos.y + box[2], pos.y + box[5])
-	local z0, z1 = box_range(pos.z + box[3], pos.z + box[6])
-	local best = nil
-	for z = z0, z1 do
-		for y = y0, y1 do
-			for x = x0, x1 do
+-- The voxel the box ran into, moving along axis i by d from where it was
+-- (pos[i] is already was + d), taken so that the one that stops it first is
+-- the one that answers.
+--
+-- **Swept** ([OBJECT_COLLIDE_EDGE], 2026-10-31): the voxels between where
+-- the box was and where it ends, not only those it ends in, as Luanti's
+-- collisionMoveSimple does. A dropped item's box is 0.4 high and a step can
+-- be half a second, so a fall of 7 m/s went past a one-node floor whole,
+-- landed on the voxel under it and was pushed up into the floor by
+-- VoxeLibre, to rest 0.2 inside it. A voxel ahead of the leading face
+-- answers first; without one, any the end box overlaps (one the box was
+-- already in), which the caller leaves the box where it was for.
+local function box_blocker(pos, box, i, d, was)
+	local lo, hi = {}, {}
+	for _, a in ipairs({"x", "y", "z"}) do
+		lo[a], hi[a] = box_range(pos[a] + box[AXIS_MIN[a]],
+				pos[a] + box[AXIS_MAX[a]])
+	end
+	-- The end box's voxels on axis i, and the sweep from the leading face
+	local e0, e1 = lo[i], hi[i]
+	local face
+	if d > 0 then
+		face = was + box[AXIS_MAX[i]]
+		lo[i] = math.min(lo[i], math.floor(face + 0.5))
+	else
+		face = was + box[AXIS_MIN[i]]
+		hi[i] = math.max(hi[i], math.floor(face + 0.5))
+	end
+	local ahead, inside = nil, nil
+	for z = lo.z, hi.z do
+		for y = lo.y, hi.y do
+			for x = lo.x, hi.x do
 				if voxel_walkable(x, y, z) then
 					local p = {x = x, y = y, z = z}
-					if best == nil or (dir > 0 and p[i] < best[i]) or
-							(dir < 0 and p[i] > best[i]) then
-						best = p
+					local v = p[i]
+					if (d > 0 and v - 0.5 >= face - SHRINK) or
+							(d < 0 and v + 0.5 <= face + SHRINK) then
+						if ahead == nil or (d > 0 and v < ahead[i]) or
+								(d < 0 and v > ahead[i]) then
+							ahead = p
+						end
+					elseif inside == nil and v >= e0 and v <= e1 then
+						inside = p
 					end
 				end
 			end
 		end
 	end
-	return best
+	return ahead or inside
 end
 
 local TRACE_OBJECT = os.getenv and os.getenv("BUILDAT_LUANTI_TRACE_OBJECT") or nil
 if TRACE_OBJECT == "" then TRACE_OBJECT = nil end
-
-local AXIS_MIN = {x = 1, y = 2, z = 3}
-local AXIS_MAX = {x = 4, y = 5, z = 6}
 
 local function move_axis(o, i, d, box, result)
 	if d == 0 then
@@ -3222,7 +3250,7 @@ local function move_axis(o, i, d, box, result)
 	end
 	local was = o.pos[i]
 	o.pos[i] = was + d
-	local hit = box_blocker(o.pos, box, i, d)
+	local hit = box_blocker(o.pos, box, i, d, was)
 	if hit == nil then
 		return
 	end
