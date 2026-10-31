@@ -14,7 +14,11 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 cd "$here"
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 t=$(mktemp -d)
-trap 'rm -rf "$t"' EXIT
+# The world the drive makes (the list holds whatever devtest worlds the
+# user path has, none in a fresh one), gone before and after
+w=$BUILDAT_USER_PATH/apps/vanilla/saves/world_lsr
+rm -rf "$w"
+trap 'rm -rf "$t" "$w"' EXIT
 fail(){ echo "FAIL: $*"; cp "$t/log" /tmp/local_server_reuse.log; exit 1; }
 
 # Apps, then "devt" typed (by text: a keypress types nothing) searches
@@ -24,8 +28,7 @@ fail(){ echo "FAIL: $*"; cp "$t/log" /tmp/local_server_reuse.log; exit 1; }
 # most: the screen a line says is up laid out in the frames after it, a
 # selection's panel laid out again once its info fills it (a click at
 # once hit its "server performance" for Play)
-launch='mouse_pos 300 374
-mouse_click left
+launch='click Button "Apps"
 wait_log 10000 rows, by
 delay 300
 text devt
@@ -34,8 +37,9 @@ delay 300
 keypress Return
 wait_log 60000 handle_packet(): main:menu
 delay 2000'
-# The world list's first world, then Play; in the world, Escape and the
-# pause menu's "Leave the game" (positions at 800x600, from a scan)
+# A new world, "world" with "_lsr" typed after it in the name field that
+# has the focus, no damage (a fall death makes Escape a respawn), created
+# and played; in the world, Escape and the pause menu's "Leave the game"
 cat > "$t/cmds" <<C
 wait_log_any 20000 rows in
 delay 800
@@ -44,11 +48,12 @@ keypress Escape
 wait_log 20000 rows in
 delay 1500
 $launch
-mouse_pos 270 156
-mouse_click left
-wait_log 10000 menu: the world
+click Button "New world..."
 delay 500
-click Button "Play"
+text _lsr
+click Button "[x] Enable damage"
+delay 300
+click Button "Create and play"
 wait_log 150000 load: the world is in
 keypress Escape
 wait_log 5000 pause: the menu shown
