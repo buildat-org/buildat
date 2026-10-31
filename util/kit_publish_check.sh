@@ -17,7 +17,8 @@
 #      the command line.
 #   3. On server B carol (its admin) installs alice/my_prefabs from the
 #      New tab: alice/lamps comes with it first; places the prefab
-#      alice/lamp_post; the credits name both packages.
+#      alice/lamp_post; the credits, from the pause menu (Credits...,
+#      its Escape and Close back to the menu), name both packages.
 #   4. alice/lamps 2.0.0 (its lamp version 2: level for brightness, by
 #      its migrate) published; carol upgrades it from the New tab: the
 #      placed lamp is migrated (brightness 7, level 70), and after a
@@ -244,10 +245,22 @@ click Button "Install"
 wait_log 20000 kit editor: Package: installed alice/my_prefabs 0.1.0
 event kit_edit {"op": "place", "prefab": "alice/lamp_post", "pos": [1, 1, 3]}
 wait_log 10000 entities, 1 to undo
-click Button "Credits"
+keypress Escape
+wait_log 10000 pause: the menu shown
+click Button "Credits..."
 wait_log 5000 kit editor: credit alice/my_prefabs 0.1.0 by alice
 frames 3
 screenshot @T@/b_credits.png
+keypress Escape
+wait_log 5000 kit editor: the credits closed
+frames 3
+click Button "Credits..."
+wait_log 5000 kit editor: credit alice/lamps 1.0.0 by alice
+click Button "Close"
+wait_log 5000 kit editor: the credits closed
+frames 3
+click Button "Continue"
+wait_log 5000 pause: the menu closed
 EOF
 BUILDAT_JOIN_NAME=carol BUILDAT_JOIN_CODE=$c client carol carol
 want "$t/srvb.log" "carol installed alice/lamps 1.0.0" \

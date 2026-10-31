@@ -255,6 +255,9 @@ tap <x> <y>
     A finger down and up at x, y (TouchBegin and TouchEnd in one frame):
     the touch controls with BUILDAT_TOUCH=1, natively.
 
+tap <type> "<label>" [x y]
+    A tap where `click <type> "<label>" [x y]` would click.
+
 finger_down <id> <x> <y>
 finger_move <id> <x> <y>
 finger_up <id>
