@@ -340,8 +340,8 @@ struct World
 		// Forceloaded too: Luanti emerges a forceloaded block's whole
 		// mapchunk, and with nobody near the sections of it outside the
 		// forceload were left to unload before it completed
-		const bool near = near_a_point(section_p);
-		const bool may_ask = !asked && (near ||
+		const bool is_near = near_a_point(section_p);
+		const bool may_ask = !asked && (is_near ||
 				m_forceloaded.count(section_key(section_p)));
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			for(int cz = chunk_index(z0); cz <= chunk_index(z0 + sz - 1); cz++)
@@ -349,7 +349,7 @@ struct World
 			for(int cx = chunk_index(x0); cx <= chunk_index(x0 + sx - 1); cx++){
 				if(m_chunks_run.count(chunk_key(cx, cy, cz)))
 					continue;
-				if(ask_chunk(world, cx, cy, cz, may_ask, near))
+				if(ask_chunk(world, cx, cy, cz, may_ask, is_near))
 					out.push_back(pv::Vector3DInt16(cx, cy, cz));
 			}
 		});
