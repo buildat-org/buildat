@@ -41,8 +41,11 @@ core.register_on_mods_loaded(function()
 			-- The air over the platform and the fall cleared down to its
 			-- section's floor: on a random seed a hill pushed the item on
 			-- the platform up to 134.7 and a tree stopped the other at
-			-- 117.7 (2026-10-31; the runner's seed is fixed since)
-			for y = 64, V.y do
+			-- 117.7 (2026-10-31; the runner's seed is fixed since). And
+			-- above it: the item drops in at V.y + 0.5, its box reaching
+			-- into the node over V, which was solid once and made the item
+			-- start inside it and be pushed upwards ([OBJECT_COLLIDE_EDGE])
+			for y = 64, V.y + 2 do
 				core.set_node({x = V.x, y = y, z = V.z}, {name = "air"})
 			end
 		end
@@ -57,6 +60,7 @@ core.register_on_mods_loaded(function()
 					core.get_node(O).name == "mcl_core:dirt" and
 					__luanti_section_state(V.x, V.y, V.z) == "generated" and
 					core.get_node(V).name == "air" and
+					core.get_node({x = V.x, y = V.y + 1, z = V.z}).name == "air" and
 					core.get_node({x = V.x, y = 64, z = V.z}).name == "air"
 			lay()
 			held = ok and (held + 1) or 0
