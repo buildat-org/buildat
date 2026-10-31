@@ -13,6 +13,7 @@
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 out=${1:-$here/local/web_idle/check}
+mkdir -p "$(dirname "$out")"
 "$here/util/web_drive.sh" chrome floorplanner "$here/apps/floorplanner/test/web_idle.json" \
 		"$out" > "$out.txt" 2>&1 || { tail -5 "$out.txt"; echo "FAIL: the drive"; exit 1; }
 n(){ grep -a "eval: \"$1: clears" "$out.txt" | sed 's/.*clears \([0-9]*\).*/\1/'; }

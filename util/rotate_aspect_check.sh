@@ -36,6 +36,9 @@ core.register_on_joinplayer(function(player)
 		p:set_look_vertical(0)
 		core.set_node({x = 0, y = 41, z = 4}, {name = "rot:square"})
 	end
+	-- At the join too, so that the client's first place is this one and
+	-- every "settle:" line it says is of the world around it
+	put()
 	core.after(2, put)
 	core.after(4, function() put(); core.chat_send_player(name, "ra: ready") end)
 end)
@@ -55,6 +58,10 @@ lay(){ echo "[\"eval\", \"var e = document.getElementById('lag') || document.hea
 # (its ScreenMode, the canvas at its new size); the half second after it
 # and the 2 s after the world's settle line are settles, the frames at the
 # new size drawn
+# The world's settle line can come before "ra: ready" (it is said once,
+# when the world around the player has settled, and the puts after the
+# join's move nothing), so it is looked for in all of the log; then the
+# client idle, the node's mesh made.
 # The page joins by the login (check_lib.sh). Its address bar shown: the
 # login's last key is a gesture, which the world's start would take the
 # page fullscreen by, and a headless fullscreen page is not resized
@@ -64,7 +71,8 @@ cat > "$t/steps.json" <<J
  ["nav", "\${URL}?pref=web_address_bar=show"],
 $login
  ["waitlog", "chat: ra: ready", 120],
- ["waitlog", "settle: 0 to mesh, [0-9]+ chunks in scene, 0 undrawn within 2", 60], ["wait", 2000],
+ ["waitlog_any", "settle: 0 to mesh, [0-9]+ chunks in scene, 0 undrawn within 2", 60],
+ ["idle", 20000], ["wait", 2000],
  $cv, ["shot", "\${OUT}/1.png"],
  ["viewport", 393, 873], ["waitlog", "screen mode: ", 10], ["wait", 500],
  $cv, ["shot", "\${OUT}/2.png"],
