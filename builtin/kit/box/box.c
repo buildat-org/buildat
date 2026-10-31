@@ -27,7 +27,7 @@
 **                        inv_set = {{key, value}...} (the provider's
 **                        state), spawn = {{ref, pos|null, id}...}, remove
 **                        = {id...}, send = {{id, input, value}...}, log =
-**                        {line...}}; a call into
+**                        {line...}, app = {{what, value}...}}; a call into
 **                        the provider (inv) is marked by "P" before it and
 **                        "p" after it, ahead of the answer
 **   "L<source>"          [KIT] stage 4h: the movement library
@@ -399,6 +399,13 @@ static const char PRELUDE[] =
 "		if type(pos) ~= 'table' then error('teleport: a position, {x, y, z}', 2) end\n"
 "		fx.teleport = {tonumber(pos[1]) or 0, tonumber(pos[2]) or 0, tonumber(pos[3]) or 0}\n"
 "	end\n"
+"	-- [KIT] stage 6a: a call into the app's native code (the host lets\n"
+"	-- only the app's own types through)\n"
+"	local apps = {}\n"
+"	function c:app(what, value)\n"
+"		if #apps >= 8 then error('app: 8 a run at most', 2) end\n"
+"		apps[#apps + 1] = {tostring(what), value == nil and NULL or value}\n"
+"	end\n"
 "	-- A line in the server's log at once, and the entity's own in the answer\n"
 "	function c:log(...)\n"
 "		local s = line(...)\n"
@@ -414,6 +421,7 @@ static const char PRELUDE[] =
 "	if #removes > 0 then fx.remove = removes end\n"
 "	if #sends > 0 then fx.send = sends end\n"
 "	if #lines > 0 then fx.log = lines end\n"
+"	if #apps > 0 then fx.app = apps end\n"
 "	return json(fx)\n"
 "end\n"
 "-- [KIT] stage 4h: the movement library (client_lua/move.lua), and a\n"

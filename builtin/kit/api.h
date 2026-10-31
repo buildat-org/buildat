@@ -96,7 +96,9 @@ namespace interface
 // c:after(seconds) (on_timer then, on the game's clock; one an instance,
 // c:after() takes it back), c:teleport({x, y, z}) (the player who set the
 // run off, the app moving them on kit:move_player), c:log(...) (the
-// server's log and the entity's own, which the inspector shows). A
+// server's log and the entity's own, which the inspector shows),
+// c:app(what, value) ([KIT] stage 6a; the app's own types only: the event
+// kit:app, AppCall, its native code's to do; 8 a run). A
 // component reaches its own entity and its links, the entities its entity
 // parameters name and the copies it made, and the player who set it off
 // (every player with `players = true`), nothing else.
@@ -456,6 +458,42 @@ namespace kit
 		// put_player() puts them, a teleport puts them without
 		// kit:move_player. False: the app moves them (set_peer)
 		bool controls = false;
+		// [KIT] stage 6a: the players' inventory is the app's own (a native
+		// app's, skeldat's): Kit's count/add/take/list read the list the
+		// app gave by set_items(), and a run that changed it is the event
+		// "kit:items" (ItemsChanged) for the app to apply, as is the round's
+		// start's reset. A replacing component (inventory = true) still
+		// replaces it. False: Kit's own (kit/inventory on the player entity)
+		bool app_items = false;
+	};
+
+	// kit:items ([KIT] stage 6a, Host::app_items): a player's inventory as
+	// Kit's run left it, {item: n}, and as it had it (set_items()'s) -- the
+	// app applies the difference; or reset: the round's start, the app's
+	// inventory as it gives one at a start (no "keep inventory")
+	struct ItemsChanged: public interface::Event::Private
+	{
+		ss_ name;
+		json::Value before, after;
+		bool reset = false;
+		ItemsChanged(const ss_ &name, const json::Value &before,
+				const json::Value &after, bool reset):
+			name(name), before(before), after(after), reset(reset){}
+	};
+
+	// kit:app ([KIT] stage 6a): one of the app's own types (its author's)
+	// called c:app(what, value): the app's native code does what it names,
+	// at the entity's position, for the player who set the run off (by,
+	// their name; "" for none). The app checks the value: it is the type's
+	// word, and the app's types are the app's own code
+	struct AppCall: public interface::Event::Private
+	{
+		uint64_t entity = 0;
+		ss_ type, what;
+		json::Value value;
+		ss_ by, name, scene;
+		bool has_pos = false;
+		double x = 0, y = 0, z = 0;
 	};
 
 	// kit:move_player: a component moves a player (c:teleport); the app
@@ -544,6 +582,10 @@ namespace kit
 		// its feet in the cell at x, y, z (a spawn, a respawn), standing
 		// still, out of any seat
 		virtual void put_player(size_t peer, double x, double y, double z) = 0;
+		// [KIT] stage 6a (Host::app_items): the player's inventory as the
+		// app has it now, {item: n}, an item letters, digits and _ (the
+		// app maps its own names); the app calls it as it changes
+		virtual void set_items(const ss_ &player, const json::Value &items) = 0;
 	};
 
 	inline bool access(interface::Server *server,

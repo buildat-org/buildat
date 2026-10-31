@@ -77,6 +77,8 @@ return function(game, declare_keys)
 		-- The keys read again after the settings window
 		on_settings_closed = declare_keys,
 	}
+	-- [KIT] stage 6a: Kit's Edit and Play/Stop (a builder's), its Escape
+	require("buildat/module/kit").add_menu_items(pmenu)
 	local open = pmenu.open
 
 	-- The menu, or a page of skeldat's, closed: the world again

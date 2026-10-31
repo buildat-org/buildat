@@ -17,6 +17,7 @@
 		{"module": "starport_announce"},
 		{"module": "moderation"},
 		{"module": "chat"},
-		{"module": "world_menu"}
+		{"module": "world_menu"},
+		{"module": "kit"}
 	]
 }

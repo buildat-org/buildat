@@ -22,6 +22,10 @@ struct PlayersHost
 	virtual void joined(size_t peer, Player &pl) = 0;
 	// A skip of time running: the players held
 	virtual bool skipping() = 0;
+	// [KIT] stage 6a: a player dug or placed at x, y, z; the inventory
+	// as just sent (Kit reads its counts)
+	virtual void wrote(size_t peer, int x, int y, int z){}
+	virtual void items_sent(size_t peer){}
 protected:
 	~PlayersHost() {}
 };
@@ -451,6 +455,7 @@ struct Players: public luanti_session::Game, public MobsHost
 				list_text("craft", pl.craft)+
 				list_text("craftresult", pl.craftresult)+
 				list_text("craftpreview", preview));
+		host.items_sent(peer);
 	}
 
 	void send_furnace(const ss_ &at)
@@ -771,6 +776,7 @@ struct Players: public luanti_session::Game, public MobsHost
 		// again at midnight
 		world.set_node(x, y, z, n->name == "skeldat:apple_fruit" ?
 				world.id_of("skeldat:apple_branch") : ID_AIR);
+		host.wrote(peer, x, y, z);
 		if(cap && cap->uses > 0){
 			tool.wear += skeldat::WEAR_MAX / cap->uses;
 			if(tool.wear >= skeldat::WEAR_MAX)
@@ -857,6 +863,7 @@ struct Players: public luanti_session::Game, public MobsHost
 		if(n->groups.count("leaves"))
 			param = 1;
 		world.set_node(x, y, z, id, param);
+		host.wrote(peer, x, y, z);
 		log_i(MODULE, "skeldat: %s places %s at %s", cs(pl.name),
 				cs(n->name), cs(pos_key(x, y, z)));
 		if(n->name == "skeldat:furnace" || n->name == "skeldat:lantern")
