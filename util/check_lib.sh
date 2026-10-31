@@ -141,8 +141,10 @@ export -f check_pgrep check_pkill
 # git hash the build was made at (Build/lib/libbuildat_core.so's, which
 # both binaries load; "web": web/buildat.wasm's) and
 # git's diff from it to HEAD over what that build compiled in -- natively
-# src, 3rdparty and CMakeLists.txt; the web bundle packs the client's Lua
-# too. Called by start_server and run_client before their first start and
+# src, 3rdparty and CMakeLists.txt; the web bundle packs what
+# CMakeLists.txt's WEB_PRELOAD names too, and no other builtin/ path
+# ([STALE_GUARD_BUILTIN]: a module's server code is the server's, read at
+# its start). Called by start_server and run_client before their first start and
 # by util/web_drive.sh. BUILDAT_STALE_OK=1 lets a deliberate run through.
 # A hash git does not know (a git archive, a rebased build) is passed.
 # simplified: uncommitted changes are not seen, the hash being a commit's;
@@ -153,7 +155,9 @@ check_build()
 	local root=$_check_root f h changed paths="src 3rdparty CMakeLists.txt"
 	f=$root/Build/lib/libbuildat_core.so
 	if [ "${1:-}" = web ]; then
-		f=$root/web/buildat.wasm paths="$paths client extensions builtin"
+		f=$root/web/buildat.wasm paths="$paths client extensions
+			builtin/luanti/client_data builtin/voxel_shading/client_data
+			builtin/client_lua/client_lua/wasm_main.lua"
 	elif [ -z "${2:-}" ]; then
 		[ -z "${CHECK_BUILD_DONE:-}" ] || return 0
 		CHECK_BUILD_DONE=1
