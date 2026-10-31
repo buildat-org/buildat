@@ -46,7 +46,10 @@ core.register_on_joinplayer(function(player)
 	end)
 end)
 L
-# "left right" magenta pixel counts of a shot
+# "left right" magenta pixel counts of a shot. By hue, not brightness
+# ([PARTICLE_DRAW_DARK]): under pbr the noon light goes through the
+# exposure and the tonemap as a node's does, and the full magenta texel
+# comes out near (145,0,145); the flat modes draw it at 255
 magenta(){ python3 - "$1" <<'PY'
 import sys
 from PIL import Image
@@ -56,7 +59,7 @@ n = [0, 0]
 for y in range(0, h, 2):
 	for x in range(0, w, 2):
 		r, g, b = im.getpixel((x, y))
-		if r > 150 and b > 150 and g < 100:
+		if r > 100 and b > 100 and g < 40 and abs(r - b) < 40:
 			n[0 if x < w // 2 else 1] += 1
 print(n[0], n[1])
 PY
