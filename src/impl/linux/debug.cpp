@@ -343,24 +343,15 @@ void log_backtrace_chain(const std::list<ThreadBacktrace> &chain,
  *************************************************************************/
 
 // Used for signals because a signal often occurs inside core/log's mutex
-// synchronization, causing a deadlock. Also, does not allocate new memory.
+// synchronization, causing a deadlock. Also, does not allocate new memory:
+// backtrace_symbols() mallocs, and a SIGSEGV in malloc on a corrupt heap
+// then waited for malloc's own lock for good (2026-10-31). simplified: the
+// frames unmangled, as backtrace_symbols_fd() prints them (c++filt them)
 static void stderr_backtrace(void* const *trace, int trace_size, int sig)
 {
-	char **symbols = backtrace_symbols(trace, trace_size);
-
-	backtrace_mutex.lock();
-
-	backtrace_buffer_len = 0;
+	fprintf(stderr, "  Backtrace for signal %i:\n", sig);
 	// The first stack frame points to this functiton
-	bt_print_backtrace(symbols, trace, trace_size, 1);
-
-	// Print to stderr
-	backtrace_buffer[sizeof backtrace_buffer - 1] = 0;
-	fprintf(stderr, "  Backtrace for signal %i:\n%s\n", sig, backtrace_buffer);
-
-	backtrace_mutex.unlock();
-
-	free(symbols);
+	backtrace_symbols_fd(trace + 1, trace_size - 1, STDERR_FILENO);
 }
 
 // Used for avoiding the handing of a SIGSEGV caused by trying to handle a
@@ -402,7 +393,8 @@ static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 	stderr_backtrace(trace, trace_size, sig);
 
 	g_signal_handlers_active--;
-	exit(1);
+	// Not exit(): its atexit handlers and destructors run on what crashed
+	_exit(1);
 }
 
 // The watchdog ([WIN8_START] 14): the watched thread is sent SIGUSR2
