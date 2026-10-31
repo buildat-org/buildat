@@ -130,6 +130,7 @@ player_backend = sqlite3
 auth_backend = sqlite3
 mod_storage_backend = sqlite3
 world_name = episode
+mg_name = v7
 creative_mode = false
 server_announce = false
 EOF
@@ -165,6 +166,10 @@ kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
 cd "$here/Build"
 save=buildat_test_episode
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
+# Both on v7, Luanti's default: the module's own default is valleys
+# (2026-10-14), and the platform's surroundings were another terrain
+mkdir -p "$BUILDAT_USER_PATH/apps/vanilla/saves/$save/luanti"
+echo "mg_name = v7" > "$BUILDAT_USER_PATH/apps/vanilla/saves/$save/luanti/world.mt"
 # A VoxeLibre world's mods are loaded in two minutes at the most
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" BUILDAT_LUANTI_SEED=1 \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
