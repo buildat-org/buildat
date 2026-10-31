@@ -371,8 +371,7 @@ end
 -- key: "<fp>/<name>" ([AITTA_KEY_IDENTITY])
 local function play_installed(key, version, rel)
 	if rel and in_page(rel) then
-		return go_in_page(tostring(rel.author) .. "/" .. tostring(rel.name),
-				rel)
+		return go_in_page(key, rel)
 	end
 	local id = key:gsub("/", ".", 1) .. "@" .. tostring(version)
 	log:info("aitta: play " .. id .. " serverless")
