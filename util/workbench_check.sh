@@ -418,7 +418,9 @@ EOF
 wait_log_any 10000 kit: entity 8 drawn 1x2x0.2 at 0,0.5,0, solid
 wait_log_any 10000 kit: entity 5 drawn 3x3x0.3 at 1,1,0, solid
 wait_log_any 10000 kit: entity 4 drawn 0.4x0.4x0.15 at 0,0,0
+keydown shift
 keypress Tab
+keyup shift
 wait_log 10000 kit editor: selected 3
 click Button "Link spawned"
 wait_log 10000 kit editor: linking from 3 spawned
@@ -903,7 +905,10 @@ EOF
 # (its ghost), a click selects, a drag moves it by whole cells, the knob
 # turns it by the angle step, an armed palette item placed by a click
 # (Escape: no longer), a link dragged from an out port onto an in port, a
-# box selects two, a right click's menu duplicates them; 3D (F2), where
+# box selects two, a right click's menu duplicates them; ([KIT_PLAYTEST_TWEAKS])
+# Tab in the order last accessed: Shift+Tab after the duplicate the oldest
+# (the door: the button was clicked and linked after it), Tab round to the
+# copies, a nudge of one (undone) puts it at the top; 3D (F2), where
 # a right drag orbits and opens no menu, and walking (F3), where a click
 # goes into the crosshair and Escape comes out of it before the menu;
 # the inspector's x typed in and Move, a kit/world placed (game-wide), selected
@@ -1035,6 +1040,28 @@ click Button "Duplicate"
 wait_log_any 5000 kit editor: state: 5 entities
 frames 3
 screenshot @T@/duplicated.png
+keydown shift
+keypress Tab
+keyup shift
+wait_log 5000 kit editor: selected 4
+keypress Tab
+wait_log 5000 kit editor: selected 6
+keypress Tab
+wait_log 5000 kit editor: selected 5
+keypress Right
+wait_log 5000 kit editor: state: 5 entities, 7 to undo
+keydown ctrl
+keypress z
+keyup ctrl
+wait_log 5000 kit editor: state: 5 entities, 6 to undo
+keypress Tab
+wait_log 5000 kit editor: selected 6
+keydown shift
+keypress Tab
+wait_log 5000 kit editor: selected 5
+keypress Tab
+keyup shift
+wait_log 5000 kit editor: selected 4
 keypress F2
 wait_log 5000 kit editor: the view is 3D
 mouse_pos 600 400

@@ -43,7 +43,9 @@
 --     bar's Angle, H; Z and X turn it a step), one edit; the arrows nudge
 --     it a grid step (Shift: a quarter), Page Up and Down up and down;
 --     Delete deletes it, Ctrl+D duplicates it, Ctrl+Z undoes this
---     editor's last edit, Tab selects the next entity
+--     editor's last edit, Tab selects the next entity in the order last
+--     accessed (clicked on, edited, made or duplicated: the top; Tab's
+--     own selection moves nothing), Shift+Tab the other way
 --   - **The palette** (left): a type or prefab dragged onto the view goes
 --     where it is let go (its ghost there meanwhile), or clicked it is
 --     placed by the clicks on the view until Escape, a right click or a
@@ -145,6 +147,33 @@ local S = {view = "walk", sel = {}, primary = nil, grid = 1, angle = 4,
 	placing = nil, crosshair = false, fingers = {}, folds = {},
 	touch = buildat.get_env("BUILDAT_TOUCH") == "1"}
 M.S = S
+
+-- [KIT_PLAYTEST_TWEAKS] Tab's order: the entities last clicked on, edited,
+-- made or duplicated first (S.recent, ids), the rest after them by id;
+-- S.tab_at where Tab walks from, the top again at each of those
+S.recent = {}
+local function touch(id)
+	for i, x in ipairs(S.recent) do
+		if x == id then
+			table.remove(S.recent, i)
+			break
+		end
+	end
+	table.insert(S.recent, 1, id)
+	S.tab_at = 1
+end
+do
+	local send_ = send
+	local EDITS = {set = true, move = true, link = true, unlink = true}
+	send = function(j)
+		if EDITS[j.op] then
+			for _, id in ipairs(j.ids or {j.id}) do
+				touch(id)
+			end
+		end
+		return send_(j)
+	end
+end
 
 -- Floorplanner's: the grid steps (cells) and the angle steps (degrees, its
 -- for objects 15), the pixels a press may move and still be a click, a
@@ -1441,7 +1470,7 @@ people = function()
 end
 
 -- The selection: a click's, Shift's adding or taking out, a box's
-local function select(id, add)
+local function select(id, add, by_tab)
 	if not add then
 		S.sel = {}
 	end
@@ -1456,6 +1485,9 @@ local function select(id, add)
 		else
 			S.sel[id] = true
 			S.primary = id
+			if not by_tab then
+				touch(id)
+			end
 		end
 	elseif not add then
 		S.primary = nil
@@ -3022,17 +3054,38 @@ local function key_down(key, ctrl, shift)
 	elseif key == magic.KEY_F3 then
 		return set_view("walk")
 	elseif key == magic.KEY_TAB then
-		local list, at = {}, 0
+		-- The last accessed first (S.recent), then the rest by id; Shift
+		-- the other way
+		local list, placed, rest = {}, {}, {}
 		for _, x in ipairs(entities()) do
 			if x.pos then
-				list[#list + 1] = x.id
-				if x.id == S.primary then
-					at = #list
-				end
+				placed[x.id] = true
+				rest[#rest + 1] = x.id
 			end
 		end
+		for _, id in ipairs(S.recent) do
+			if placed[id] then
+				list[#list + 1] = id
+				placed[id] = false
+			end
+		end
+		table.sort(rest)
+		local at = 0
+		for _, id in ipairs(rest) do
+			if placed[id] then
+				list[#list + 1] = id
+			end
+		end
+		for i, id in ipairs(list) do
+			if id == S.primary then
+				at = i
+			end
+		end
+		at = S.tab_at and list[S.tab_at] and S.tab_at or at
 		if #list > 0 then
-			select(list[at % #list + 1])
+			S.tab_at = at == 0 and (shift and #list or 1) or
+					(at - 1 + (shift and -1 or 1)) % #list + 1
+			select(list[S.tab_at], false, true)
 		end
 	elseif key == magic.KEY_Z and ctrl then
 		send({op = "undo"})
@@ -3599,6 +3652,18 @@ function M.editor(options)
 			if l and l ~= old_names[id] then
 				log:info("kit editor: installed " .. tostring(l) .. " as " .. id)
 			end
+		end
+		-- Entities new since the last state (placed, duplicated): Tab's
+		-- order's top
+		if E.editing then
+			local known = {}
+			for _, e in ipairs(s.authored and s.authored.entities or {}) do
+				known[e.id] = true
+				if S.known and not S.known[e.id] then
+					touch(e.id)
+				end
+			end
+			S.known = known
 		end
 		E.state = E.editing and s or nil
 		if was ~= E.editing then
