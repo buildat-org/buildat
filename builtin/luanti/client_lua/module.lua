@@ -3496,6 +3496,9 @@ buildat.sub_packet("luanti:player_formspec", function(data)
 	if player_spec == "" and (values[1] or "") ~= "" then
 		log:info("form: the game set the inventory")
 	end
+	if (values[1] or "") ~= "" and values[1] ~= player_spec then
+		S():warm(values[1])
+	end
 	player_spec = values[1] or ""
 	-- The open inventory too: this is how a game turns its own page, as
 	-- VoxeLibre's creative one does ([CREATIVE_PAGES])

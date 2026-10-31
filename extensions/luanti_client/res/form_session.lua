@@ -150,6 +150,22 @@ function M.new(env)
 		end
 	end
 
+	-- A parsed form's layout on this screen
+	function self:layout(size, real)
+		local root = magic.ui.root
+		return env.formspec.layout(size, real, root.width, root.height,
+				root.height / math.max(1, magic.graphics.height),
+				buildat.display_density())
+	end
+
+	-- What a form will draw with made now, before it opens: the player's
+	-- inventory form is known long before the key opens it
+	function self:warm(spec)
+		spec = env.prepare and env.prepare(spec) or spec
+		local _, size, real = env.formspec.parse(spec)
+		ui:warm(magic.ui.root, self:layout(size, real))
+	end
+
 	function self:draw()
 		local form = self.form
 		-- What the player typed into a field, kept where the new spec's
@@ -178,8 +194,7 @@ function M.new(env)
 		-- arrives in, which are the root's
 		local root = magic.ui.root
 		local w, h = root.width, root.height
-		local layout = env.formspec.layout(size, real, w, h,
-				h / math.max(1, magic.graphics.height), buildat.display_density())
+		local layout = self:layout(size, real)
 		form.drawn = ui:show(root, elements, layout, w, h, form.state)
 		local typeable = false
 		for _, f in ipairs(form.drawn.fields or {}) do

@@ -247,7 +247,32 @@ local function copy_movement()
 	return t
 end
 
+-- f(x, y, z) remembered by position, nil and false included
+local NONE = {}
+local function memo(f)
+	if f == nil then
+		return nil
+	end
+	local seen = {}
+	return function(x, y, z)
+		local k = x .. "," .. y .. "," .. z
+		local v = seen[k]
+		if v == nil then
+			v = f(x, y, z)
+			seen[k] = v == nil and NONE or v
+			return v
+		end
+		if v == NONE then
+			return nil
+		end
+		return v
+	end
+end
+
 function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
+	local real = {solid = is_solid, liquid = is_liquid,
+			climbable = is_climbable, resistance = resistance_at,
+			groups = groups_at}
 	local self = {
 		x = 0, y = 0, z = 0,
 		vx = 0, vy = 0, vz = 0,
@@ -668,9 +693,20 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		end
 		local steps = math.ceil(dtime / max_step)
 		local part = dtime / steps
+		-- The world's answers kept for the frame's steps
+		-- ([FUZZ_CLIENT_FRAMES]): each step asks about the same few dozen
+		-- nodes, a lookup is a trip through the voxel registry, and a
+		-- loaded machine's long frame was ten or more steps, 40-63 ms,
+		-- which made the next frame longer still
+		is_solid, is_liquid, is_climbable = memo(real.solid),
+				memo(real.liquid), memo(real.climbable)
+		resistance_at, groups_at = memo(real.resistance), memo(real.groups)
 		for _ = 1, steps do
 			step(part, wish)
 		end
+		is_solid, is_liquid, is_climbable = real.solid, real.liquid,
+				real.climbable
+		resistance_at, groups_at = real.resistance, real.groups
 		return self.x, self.y, self.z
 	end
 
@@ -728,6 +764,17 @@ do
 	assert(dropped.landed_at and dropped.landed_at > 14,
 			"player: a long fall does not report how hard it landed")
 	assert(dropped.on_ground, "player: the fall did not end on the ground")
+	-- And a long frame asks about each node once ([FUZZ_CLIENT_FRAMES]):
+	-- half a second is fifty steps on that floor
+	local asked = 0
+	local counted = M.new(function(x, y, z)
+		asked = asked + 1
+		return y <= 0
+	end)
+	counted:set_position(0, 0.5, 0)
+	counted:update(0.5, {x = 1, z = 0})
+	assert(counted.on_ground and asked < 100,
+			"player: a long frame asked " .. asked .. " times")
 
 	-- And what something thick does to a walk: the same push into the same
 	-- empty space, through air, through water's own resistance, and through

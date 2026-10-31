@@ -36,8 +36,9 @@
 --   yaw()          the camera's horizontal angle, for the compass
 --   minimap(parent, w, h) -> a minimap.lua minimap
 --   hud_flag(name) whether the game left that flag on
--- r:draw(elements) -> what was not drawn {kind = count}, and the image
---   elements' rectangles {name, x, y, w, h}
+-- r:draw(elements[, fallback]) -> what was not drawn {kind = count}, and
+--   the image elements' rectangles {name, x, y, w, h}; fallback an element
+--   drawn when the game drew no minimap
 -- r:update(dt)     the waypoints, compasses and minimaps, once a frame
 -- r.root, r.minimaps
 --
@@ -133,9 +134,18 @@ function M.new(magic, log, ctx)
 		return magic.Color(r / 255, g / 255, b / 255, a / 255)
 	end
 
-	-- What a missing texture is said as, once per name
+	-- What a missing texture is said as, once per name. One found is kept
+	-- by name: the lookup was 0.3-0.5 ms, and VoxeLibre's HUD has 37
+	-- blank.png images, drawn as nothing and so looked up on every draw
+	-- ([FUZZ_CLIENT_FRAMES]); one not there yet is asked for again.
+	local textures = {}
+	-- Set when a draw found a picture missing, so its element is drawn
+	-- again next time rather than kept as nothing
+	local missed = false
 	local function texture(name, what)
-		local tex = name ~= "" and ctx.texture(name) or nil
+		local tex = textures[name] or name ~= "" and ctx.texture(name) or nil
+		textures[name] = tex
+		missed = missed or (tex == nil and name ~= "")
 		if not tex and name ~= "" then
 			say_once(name, "the game's HUD wants " .. what .. " called \"" ..
 					name .. "\", which is not there")
@@ -453,17 +463,59 @@ function M.new(magic, log, ctx)
 		return m.view
 	end
 
-	-- The HUD again from what the game last sent: everything taken away
-	-- and drawn in z_index order, the id breaking a tie because
-	-- table.sort is not stable
-	function self:draw(elements)
-		root:RemoveAllChildren()
-		waypoints, compasses = {}, {}
+	-- What each element was drawn as last time, by id: {sig, el, and what
+	-- it added to images, waypoints, compasses and minimaps}
+	local drawn = {}
+
+	-- An element's fields as one string, and the screen it was laid out on:
+	-- the same string is the same drawing
+	local function signature(e, screen)
+		local parts = {screen}
+		for k, v in pairs(e) do
+			-- __placed and the like are the client's own
+			if string.sub(k, 1, 2) ~= "__" then
+				parts[#parts + 1] = k .. "=" .. tostring(v)
+			end
+		end
+		table.sort(parts)
+		return table.concat(parts, "\1")
+	end
+
+	local function slice(list, from)
+		local out = {}
+		for i = from + 1, #list do
+			out[#out + 1] = list[i]
+		end
+		return out
+	end
+
+	local function append(list, items)
+		for _, v in ipairs(items) do
+			list[#list + 1] = v
+		end
+	end
+
+	local function undraw(d)
+		if d.el then
+			d.el:Remove()
+		end
 		-- The cameras the minimaps put in the world are this one's to take
 		-- away
-		for _, m in ipairs(self.minimaps) do
+		for _, m in ipairs(d.minimaps) do
 			m.camera:Remove()
 		end
+	end
+
+	-- The HUD again from what the game last sent, in z_index order, the id
+	-- breaking a tie because table.sort is not stable. Only what changed is
+	-- drawn again ([FUZZ_CLIENT_FRAMES]): VoxeLibre's HUD is 117 elements,
+	-- 22-71 ms drawn whole, and a player taking damage or dead changed a
+	-- bar several times a second. An inventory row follows the inventory
+	-- and is always drawn again. fallback, if given, is drawn when the
+	-- game drew no minimap: official's own, which the engine draws whether
+	-- or not the game adds one.
+	function self:draw(elements, fallback)
+		waypoints, compasses = {}, {}
 		self.minimaps = {}
 		self.has_inventory = false
 		hud.scale_factor = ctx.scale()
@@ -471,6 +523,8 @@ function M.new(magic, log, ctx)
 		-- As big as the screen, because an element aligned to the centre or
 		-- the bottom is aligned inside this
 		root.size = magic.IntVector2(sw, sh)
+		local screen = sw .. "x" .. sh .. "x" .. hud.scale_factor ..
+				(ctx.hud_flag and tostring(ctx.hud_flag("minimap")) or "")
 		local order = {}
 		for id, e in pairs(elements) do
 			order[#order + 1] = {id = id, e = e, n = M.normalize(e)}
@@ -482,27 +536,78 @@ function M.new(magic, log, ctx)
 			return tostring(a.id) < tostring(b.id)
 		end)
 		local skipped, images = {}, {}
+		local now = {}
+		local function one(id, e, n)
+			local sig = signature(e, screen)
+			local d = drawn[id]
+			drawn[id] = nil
+			if d and (d.sig ~= sig or d.kind == "inventory") then
+				undraw(d)
+				d = nil
+			end
+			if d then
+				append(images, d.images)
+				append(waypoints, d.waypoints)
+				append(compasses, d.compasses)
+				append(self.minimaps, d.minimaps)
+				if d.kind == "inventory" then
+					self.has_inventory = true
+				end
+				now[id] = d
+				return d.el
+			end
+			local f = draw[n.kind]
+			local ni, nw, nc, nm = #images, #waypoints, #compasses,
+					#self.minimaps
+			missed = false
+			local el = f and f(n, images)
+			-- Nothing drawn is kept too, unless a picture was missing:
+			-- VoxeLibre's 37 blank.png images are drawn as nothing
+			if el or (el == nil and f and not missed) then
+				now[id] = {sig = sig, el = el or nil, kind = n.kind,
+						images = slice(images, ni),
+						waypoints = slice(waypoints, nw),
+						compasses = slice(compasses, nc),
+						minimaps = slice(self.minimaps, nm)}
+			end
+			if el == false or not f then
+				skipped[n.kind] = (skipped[n.kind] or 0) + 1
+				say_once("kind:" .. n.kind, "the game asked for a \"" ..
+						n.kind .. "\" HUD element, which is not drawn")
+			end
+			return el
+		end
 		for _, o in ipairs(order) do
-			local f = draw[o.n.kind]
-			local el = f and f(o.n, images)
 			-- Which UI element it was placed as, for the scan's rectangles
 			-- ([SCAN_EVENT]); none for one not drawn this time, whose
 			-- last one is gone
-			o.e.__placed = el or nil
-			if el == false or not f then
-				skipped[o.n.kind] = (skipped[o.n.kind] or 0) + 1
-				say_once("kind:" .. o.n.kind, "the game asked for a \"" ..
-						o.n.kind .. "\" HUD element, which is not drawn")
+			o.e.__placed = one(o.id, o.e, o.n) or nil
+		end
+		if fallback and #self.minimaps == 0 then
+			one("\1fallback", fallback, M.normalize(fallback))
+		end
+		-- What is gone from the game's list, or was not drawn this time
+		for _, d in pairs(drawn) do
+			undraw(d)
+		end
+		drawn = now
+		-- Drawn in this order: Urho sorts siblings by priority, and kept
+		-- elements were created before the new ones
+		local priority = 0
+		local function rank(d)
+			if d and d.el then
+				priority = priority + 1
+				if d.priority ~= priority then
+					d.priority = priority
+					d.el.priority = priority
+				end
 			end
 		end
+		for _, o in ipairs(order) do
+			rank(now[o.id])
+		end
+		rank(now["\1fallback"])
 		return skipped, images
-	end
-
-	-- One element drawn on top of what is there: official's own minimap,
-	-- which the engine draws whether or not the game adds one
-	function self:draw_one(e)
-		local n = M.normalize(e)
-		return draw[n.kind](n, {})
 	end
 
 	-- Once a frame: what moves is the player

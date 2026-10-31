@@ -3148,15 +3148,12 @@ local function draw_hud(elements, flags)
 	hotbar_shown = shown and luanti.hud_flag("hotbar")
 	draw_hotbar()
 	wielded_text.visible = hotbar_shown
-	hud_r:draw(elements)
 	-- Official's own minimap ([VIEW_KEYS]): the engine draws one at the
 	-- top right whether or not the game adds a minimap element, under the
 	-- minimap HUD flag, and V walks its modes; here the same element as a
 	-- game's, 128 Luanti pixels, hidden while the mode is "off"
-	if #hud_r.minimaps == 0 and shown then
-		hud_r:draw_one({type = "minimap", pos = "1,0", offset = "-10,10",
-				align = "-1,1", size = "128,128"})
-	end
+	hud_r:draw(elements, shown and {type = "minimap", pos = "1,0",
+			offset = "-10,10", align = "-1,1", size = "128,128"} or nil)
 end
 
 keys.stage = {hud = draw_hud,
