@@ -2043,11 +2043,32 @@ local look = {on = false, paused = false, was = false, t = 0,
 -- and takes the pointer back once the last one is gone.
 --   ui_utils.wants_clicks(window)   while the window is there
 --   ui_utils.clicks_wanted() -> whether one is up
+-- The client's own screens over a game count while they are on the stack
+-- ([WB_NET_DIALOG_CLICK]: a Kit editor's click on the network dialog went
+-- into its crosshair):
+--   ui_utils.client_screen(root)   trusted: a root uistack.main pushed
 local click_windows = {}
+local client_screens = {}
+function M.client_screen(root)
+	client_screens[#client_screens + 1] = root
+end
 function M.safe.wants_clicks(window)
 	click_windows[#click_windows + 1] = window
 end
 function M.safe.clicks_wanted()
+	-- Off the stack, a client screen is gone for good
+	local up = {}
+	for _, e in ipairs(uistack.main.stack) do
+		up[e] = true
+	end
+	for i = #client_screens, 1, -1 do
+		if not up[client_screens[i]] then
+			table.remove(client_screens, i)
+		end
+	end
+	if #client_screens > 0 then
+		return true
+	end
 	for i = #click_windows, 1, -1 do
 		local ok, shown = pcall(function() return click_windows[i].visible end)
 		if not ok then
