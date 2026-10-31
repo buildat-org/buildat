@@ -61,6 +61,11 @@
 --     it; one dragged onto another entity's input (its ports show as the
 --     drag is over it) links them, onto the entity a link to its one
 --     input. The inspector's "Link <output>" and then "To <input>" too
+--   - **What a click picks** ([KIT_SELECT_BURIED], user): an entity
+--     anywhere along the ray, through voxels (one under the ground too),
+--     to select, for its menu, to link to and in the hover; voxels hide
+--     what is behind them only while they are worked on (pick's
+--     voxel_work()) and for the camera's pivot
 --   - **A right click** (held, it looks) on an entity: its menu -- Delete,
 --     Duplicate, Make prefab..., Restart this (Running) -- for the
 --     selection if it is in it; on nothing it lets go of the selection
@@ -73,8 +78,9 @@
 --   - the admin's: who is here, each "Builder: yes/no" to grant or take
 --     edit rights; ([KIT] stage 4c) the builders with the tools on, each
 --     in a colour: another's selection outlined in theirs with their name
---     over it, their cursor a cross; game-wide entities (on the app root)
---     listed to select; "Save as start" (the bar, Running); the builds the
+--     over it, their cursor a cross; the entities listed to select (the
+--     game-wide ones, on the app root; "Hide positioned entities" off,
+--     all), a list that scrolls, kept under the palette; "Save as start" (the bar, Running); the builds the
 --     last Stop discarded until the next Play: "Keep them", or "Choose..."
 --     a player's; "Always keep builds"
 --   - **A touchscreen** (BUILDAT_TOUCH=1, [FP_TOUCH]'s): a tap is a click,
@@ -407,10 +413,22 @@ local function plane_at(o, v, y)
 	return o + v * t
 end
 
+-- Whether voxels are what is being worked on ([KIT_SELECT_BURIED], user):
+-- the voxels and terrain tools, a palette item armed or dragged, an entity
+-- dragged (where it lands)
+local function voxel_work()
+	local d = S.drag and S.drag.kind
+	return S.tool == "voxels" or S.tool == "terrain" or S.placing ~= nil or
+			d == "palette" or d == "move" or d == "turn"
+end
+
 -- What the pointer is on: an entity (the nearest along the ray: its look,
 -- or a box round its cell), else a voxel (and the cell before its face),
--- else the ground. {id, t} or {cell, front, t} or {ground} or nil
-local function pick(mx, my, skip)
+-- else the ground. {id, t} or {cell, front, t} or {ground} or nil.
+-- Voxels hide an entity behind them only in voxel_work() or with nearest
+-- (the camera's pivot): otherwise (select, the menu, a link, the hover) an
+-- entity anywhere along the ray wins, so one under the ground is clicked
+local function pick(mx, my, skip, nearest)
 	local o, v = M.screen_ray(mx, my)
 	local id, et = nil, nil
 	local oo, dd = {o.x, o.y, o.z}, {v.x, v.y, v.z}
@@ -462,7 +480,7 @@ local function pick(mx, my, skip)
 		hit, front, vt = M.voxel_ray({o.x, o.y, o.z}, {v.x, v.y, v.z}, O.solid,
 				MAX_RAY)
 	end
-	if id and (not hit or et <= vt + 0.05) then
+	if id and (not hit or et <= vt + 0.05 or not (nearest or voxel_work())) then
 		return {id = id, t = et}
 	end
 	if hit then
@@ -1264,10 +1282,42 @@ show_log = function()
 	end
 end
 
+-- The people window's list (a ScrollView in it) and where it was scrolled
+local PV = {view = nil, y = 0}
+
+-- The list's height: what is left between the palette's foot (the bar's,
+-- folded) and the people window's place over the bottom, less the rest of
+-- the window; each frame, as the palette, the window and the screen change
+local function fit_people()
+	local b, view = W.people, PV.view
+	if not b or not view or not view.visible then
+		return
+	end
+	local above = W.palette or W.bar
+	local top = above and above.screenPosition.y + above.height + 8 or 8
+	-- The rest of the window, as it was built (its layout does not shrink
+	-- with the view: its height is set)
+	PV.other = PV.other or b.height - view.height
+	local room = magic.ui.root.height - 50 - top - PV.other
+	local h = math.max(0, math.min(view.contentElement.height, room))
+	if view.height ~= h then
+		view:SetScrollBarsVisible(false, h < view.contentElement.height)
+		view:SetFixedHeight(h)
+		b.height = PV.other + h
+		log:info(string.format("kit editor: the list %d of %d tall, the " ..
+				"window's top %d, the palette's foot %d", h,
+				view.contentElement.height, b.screenPosition.y, top - 8))
+	end
+end
+
 -- Below at the left, out of the view's way: the server's state, a refusal,
--- game-wide entities, who edits and who may. Rebuilt alone as the
+-- the entities' list, who edits and who may. Rebuilt alone as the
 -- builders move (the inspector being typed in is left as it is)
 people = function()
+	if W.people and PV.view then
+		PV.y = PV.view.viewPosition.y
+	end
+	PV.view, PV.other = nil, nil
 	drop("people")
 	-- A narrow screen's palette opened is where it was
 	if not E.editing or (narrow() and not folded("palette")) then
@@ -1280,16 +1330,48 @@ people = function()
 	if E.status ~= "" then
 		text(b, E.status, WARN)
 	end
-	-- Game-wide entities (on the app root, no position), to select
+	-- The entities, to select ([KIT_SELECT_BURIED]: one under the ground
+	-- too): the game-wide ones (on the app root, no position), and the
+	-- positioned with "Hide positioned entities" off; in a view that
+	-- scrolls, fit_people() bounding it under the palette
+	local hide = S.hide_positioned ~= false
+	local view = b:CreateChild("ScrollView")
+	local list = view:CreateChild("UIElement")
+	list:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+	local lw, n = 0, 0
 	for _, e in ipairs(entities()) do
-		if not e.pos and e.kind ~= "scene" then
-			local gr = row(b)
-			label(gr, "Game-wide: " .. e.id .. " " .. tostring(e.name))
-			button(gr, e.id == S.primary and "Selected" or "Select", function()
+		if e.kind ~= "scene" and not (hide and e.pos) then
+			local gr = row(list)
+			local l = label(gr, e.pos and e.id .. " " .. tostring(e.name) ..
+					" at " .. table.concat(e.pos, ",") or "Game-wide: " .. e.id ..
+					" " .. tostring(e.name))
+			local sb = button(gr, e.id == S.primary and "Selected" or "Select",
+					function()
 				M.select(e.id)
 			end)
+			lw, n = math.max(lw, l.minWidth + 4 + sb.minWidth), n + 1
 		end
 	end
+	-- Its layout's size, as the rows made it
+	local lh = list.height
+	view:SetStyleAuto()
+	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
+	view.scrollBarsAutoVisible = false
+	view:SetScrollBarsVisible(false, false)
+	list:SetFixedSize(lw, lh)
+	view.contentElement = list
+	list:SetPosition(0, 0)
+	view:SetFixedWidth(lw + view.verticalScrollBar.width + 4)
+	view:SetFixedHeight(lh)
+	view.visible = n > 0
+	PV.view = view
+	button(b, "Hide positioned entities: " .. (hide and "yes" or "no"),
+			function()
+		S.hide_positioned = not hide
+		log:info("kit editor: hide positioned entities " ..
+				(S.hide_positioned and "yes" or "no"))
+		people()
+	end)
 	-- The builds the last Stop discarded, to keep until the next Play: all,
 	-- or by player ("Choose...")
 	local names = {}
@@ -1343,6 +1425,10 @@ people = function()
 				send({op = "builder", name = p.name, on = not p.builder})
 			end)
 		end
+	end
+	fit_people()
+	if PV.view then
+		PV.view.viewPosition = magic.IntVector2(0, PV.y)
 	end
 end
 
@@ -1624,7 +1710,7 @@ end
 -- pointer is on, or where its ray meets the ground
 local function camera_pivot(mx, my)
 	local o, v = M.screen_ray(mx, my)
-	local p = pick(mx, my)
+	local p = pick(mx, my, nil, true)
 	if p and p.t then
 		return o + v * p.t
 	end
@@ -2643,7 +2729,7 @@ local function mouse_wheel(wheel)
 		S.cx, S.cz = S.cx + o0.x - o1.x, S.cz + o0.z - o1.z
 	elseif S.view == "3d" then
 		local o, v = M.screen_ray(S.mx, S.my)
-		local p = pick(S.mx, S.my)
+		local p = pick(S.mx, S.my, nil, true)
 		local dist = p and p.t or 10
 		local step = math.min(dist * (1 - f), math.max(0, dist - 0.3))
 		S.pos = {x = S.pos.x + v.x * step, y = S.pos.y + v.y * step,
@@ -3255,6 +3341,7 @@ local function draw()
 		show_ports("in", nil)
 		return
 	end
+	fit_people()
 	local dbg = O.debug
 	local now = buildat.get_time_us()
 	local YELLOW = magic.Color(1, 0.9, 0.2)

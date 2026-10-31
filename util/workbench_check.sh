@@ -220,9 +220,11 @@ if [ "${1:-}" = web_touch ]; then
 	# and Edit; in the plan (F1) the palette (folded on a narrow screen,
 	# its toggle tapped) dragged from by finger, a tap selects, a drag
 	# moves it 3 cells, a finger held is its menu (Duplicate), two fingers
-	# pinch; ([KIT] stage 4f) a finger dragged with the terrain tool (T)
+	# pinch; ([KIT_SELECT_BURIED]) five more copies (Ctrl+D) listed with
+	# "Hide positioned entities" off, the list bounded under the bar (it
+	# scrolls), the copies undone; ([KIT] stage 4f) a finger dragged with the terrain tool (T)
 	# paints a raise stroke, undone; Play mode, and in play a tap uses the button, a tap digs and
-	# a finger held places. The stroke (x -7 to -4, z 0, 50 px a cell
+	# a finger held places. The stroke (x -7 to -4, z 1, 50 px a cell
 	# after the pinch, radius 3) keeps off the player at (0.5, 0.5): ground
 	# raised into the body shoved it up to 2 cells aside, the undo did not
 	# put it back, and the play taps pointed past the button. The player
@@ -268,11 +270,28 @@ if [ "${1:-}" = web_touch ]; then
 	["hold", 510, 198, 800], ["waitlog", "kit editor: the menu of 3", 10],
 	["frames", 3], ["shot", "${OUT}/menu.png"],
 	["tap", "Button", "Duplicate"], ["waitlog", "kit editor: state: 3 entities", 10],
+	["chord", "Ctrl+d"], ["waitlog", "kit editor: state: 4 entities", 10],
+	["chord", "Ctrl+d"], ["waitlog", "kit editor: state: 5 entities", 10],
+	["chord", "Ctrl+d"], ["waitlog", "kit editor: state: 6 entities", 10],
+	["chord", "Ctrl+d"], ["waitlog", "kit editor: state: 7 entities", 10],
+	["chord", "Ctrl+d"], ["waitlog", "kit editor: state: 8 entities", 10],
+	["tap", "Button", "Hide positioned entities: yes"],
+	["waitlog", "kit editor: hide positioned entities no", 10],
+	["waitlog", "kit editor: the list ", 10], ["frames", 5],
+	["shot", "${OUT}/list.png"],
+	["tap", "Button", "Hide positioned entities: no"],
+	["waitlog", "kit editor: hide positioned entities yes", 10],
+	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 7 entities", 10],
+	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 6 entities", 10],
+	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 5 entities", 10],
+	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 4 entities", 10],
+	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 3 entities", 10],
+	["frames", 3],
 	["fingers", 450, 250, 550, 250, 350, 250, 650, 250],
 	["waitlog", "kit editor: two fingers let go: the plan", 10],
 	["frames", 5], ["shot", "${OUT}/pinched.png"],
 	["key", "t"], ["waitlog", "kit editor: tool terrain", 10], ["frames", 3],
-	["drag", 100, 300, 250, 300, "touch"],
+	["drag", 100, 250, 250, 250, "touch"],
 	["waitlog", "kit editor: terrain: raise", 10],
 	["waitlog", "kit editor: the stroke ended", 10], ["frames", 5],
 	["shot", "${OUT}/painted.png"],
@@ -889,6 +908,10 @@ EOF
 # ([KIT_EDIT_VOXELS]) The voxels tool (V): a voxel placed by a click at the
 # pointer in 3D, and walking at the crosshair one placed, dug (Shift) and
 # the dig undone (Ctrl+Z), each one undo.
+# ([KIT_SELECT_BURIED]) A dig zone under the ground: the hover and a click
+# in the plan go through the ground to it; with "Hide positioned entities"
+# off the list has it, its Select selects it; a link ("Link pressed") to it
+# by a click through the ground.
 # By finger (BUILDAT_TOUCH=1, finger_*): in play a tap digs, a finger
 # held places, a tap uses the button; in the plan the palette (folded on
 # a narrow screen) dragged from, a tap selects, a drag moves, a drag from
@@ -1089,6 +1112,45 @@ keydown ctrl
 keypress z
 keyup ctrl
 wait_log 5000 kit editor: state: 6 entities, 10 to undo
+keypress Escape
+wait_log 5000 kit editor: tool select
+keypress Escape
+wait_log 5000 kit editor: out of the crosshair
+keypress F1
+wait_log 5000 kit editor: the view is 2D
+event kit_edit {"op": "place", "type": "kit/dig_zone", "pos": [2, -1, -2]}
+wait_log 10000 kit editor: state: 7 entities, 11 to undo
+mouse_pos 556 422
+wait_log 5000 kit editor: guide: Left: select kit/dig_zone
+frames 3
+screenshot @T@/buried_hover.png
+mouse_click left
+wait_log 5000 kit editor: selected 8 (kit/dig_zone 8)
+mouse_pos 700 520
+mouse_click left
+wait_log 5000 kit editor: selected none
+click Button "Hide positioned entities: yes"
+wait_log 5000 kit editor: hide positioned entities no
+frames 3
+screenshot @T@/list_all.png
+mouse_pos 150 600
+mouse_wheel -10
+frames 3
+screenshot @T@/list_scrolled.png
+click Button "Select" 150 690
+wait_log 5000 kit editor: selected 8 (kit/dig_zone 8)
+mouse_pos 672 306
+mouse_click left
+wait_log 5000 kit editor: selected 3
+click Button "Link pressed"
+wait_log 5000 kit editor: linking from 3 pressed
+mouse_pos 556 422
+mouse_click left
+wait_log 5000 kit editor: selected 8
+frames 3
+screenshot @T@/buried_link.png
+click Button "To on"
+wait_log 5000 kit editor: state: 7 entities, 12 to undo
 quit
 EOF
 cat > "$t/touch.cmds" <<'EOF'
@@ -1224,7 +1286,9 @@ want "$t/srv3.log" "An edit by kitboss: placed kit/button 3 at [2,1,2]" \
 	"An edit by kitboss: moved 3 to [6,1,2]" \
 	"An edit by kitboss: placed kit/world 7 on the app root" \
 	"An edit by kitboss: deleted 7" \
-	"An undo by kitboss: 1 entities put back"
+	"An undo by kitboss: 1 entities put back" \
+	"An edit by kitboss: placed kit/dig_zone 8 at [2,-1,-2]" \
+	"An edit by kitboss: linked 3.pressed -> 8.on"
 want "$t/ed.log" "kit editor: turned 1 by 90" "kit editor: a box selected 2, 2 in the selection"
 # The voxels: the walk's place dug again, and the dig undone
 placed=$(grep -aoP 'A voxel edit by kitboss: placed kit/cobble at \K\([-0-9,]+\)' "$t/srv3.log")
@@ -1237,7 +1301,7 @@ grep -aq "workbench: kitboss dug (2,0,3): written" "$t/srv4.log" ||
 	fail "the tap did not dig ($t/srv4.log)"
 grep -aq "workbench: kitboss placed kit/stone (2,0,3): written" "$t/srv4.log" ||
 	fail "the finger held did not place ($t/srv4.log)"
-echo "ok: Kit's editor by mouse (the plan: a palette drag, select, a snapped move, a turn, an armed place, a link dragged, a box, the menu; 3D and walking; voxels placed, dug and undone) and by finger (tap, hold, drags, a link, the menu, a pinch)"
+echo "ok: Kit's editor by mouse (the plan: a palette drag, select, a snapped move, a turn, an armed place, a link dragged, a box, the menu; 3D and walking; voxels placed, dug and undone; an entity under the ground selected through it, from the list, and linked to through it) and by finger (tap, hold, drags, a link, the menu, a pinch)"
 # 8. ([KIT] stage 4g) A builder's voxel type: with kitbob joined, the
 # admin uploads a PNG from their exports (the client's file picker) in
 # Kit's editor's "New voxel type...", names the type frost, sets its
