@@ -23,7 +23,8 @@
 --   - **Three views**, the top bar's dropdown or F1, F2, F3: 2D (an
 --     orthographic camera looking down from the cut height, which the
 --     bar's Cut - and + move, north up), 3D (a free camera: WASD, Space
---     and C, Shift faster; the arrows turn it with nothing selected), and
+--     and C, faster the higher it is, as the plan's zoom, Shift faster;
+--     the arrows turn it with nothing selected), and
 --     walking (the app's own camera and its walk). 2D: the middle drag
 --     and WASD pan, the wheel zooms about the pointer; a right drag goes
 --     into 3D orbiting, let go north-up straight down back into the plan.
@@ -1703,8 +1704,8 @@ local function key_held(k)
 end
 
 -- The movement keys ([FP]'s move_camera): 2D pans (with a selection the
--- keys move it, a press at a time), 3D flies, the arrows turn it with
--- nothing selected; walking is the app's
+-- keys move it, a press at a time), 3D flies (the faster the higher), the
+-- arrows turn it with nothing selected; walking is the app's
 local function move_camera(dt)
 	if typing() or key_held(magic.KEY_LCTRL) or key_held(magic.KEY_RCTRL) or
 			(E.menu and E.menu.held()) then
@@ -1739,7 +1740,13 @@ local function move_camera(dt)
 	end
 	if key_held(magic.KEY_SPACE) then u = u + 1 end
 	if key_held(magic.KEY_C) then u = u - 1 end
-	local speed = (shift and 12 or 4) * dt
+	-- [KIT_PLAYTEST_TWEAKS] as fast as the plan pans at the zoom that sees
+	-- as much: the ground's width across the view from the camera's height
+	-- simplified: the height above the ground's level, not the voxels or
+	-- the heightmap under it
+	local h = S.pos.y - (O.ground_y - 0.5)
+	local speed = math.max(4, 2 * h * math.tan(math.rad(cam3d.fov) / 2)) *
+			(shift and 3 or 1) * dt
 	local yaw = math.rad(S.yaw)
 	S.pos = {x = S.pos.x + (math.sin(yaw) * f + math.cos(yaw) * r) * speed,
 		y = S.pos.y + u * speed,
