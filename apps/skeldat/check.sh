@@ -3179,6 +3179,10 @@ boats() { # log, client name, delay ms[, the test's fixtures[, a client log line
 			game_rate "$t/srv58" 1 && wait_for_log "$t/$2.log" "$5" 60 "$t/srv58"
 	elif [ -n "${5:-}" ]; then
 		sped "$t/$2.log" && wait_for_log "$t/$2.log" "$5" $(($3 / 1000)) "$t/srv58"
+	elif [ -n "${END54:-}" ]; then
+		# A server line ending it, and the game's seconds after it
+		sped "$t/$2.log" && wait_for_log "$1" "$END54" $(($3 / 1000)) "$t/srv58" &&
+			game_wait "$t/srv58" "${END54_AFTER:-0}"
 	else
 		sped "$t/$2.log" && game_wait "$t/srv58" $(($3 / 1000))
 	fi
@@ -3225,7 +3229,11 @@ grep -aq "skeldat: a skeleton on a boat" "$t/boats1.log" ||
 # [SKELDAT_BOAT_STAND] Standing on it as it moves, not walking
 grep -aq "skeldat: a skeleton stands on its moving boat ([0-9]*), its limbs at 0 degrees" "$t/boats1.log" ||
 	fail "the skeleton on the moving boat not standing ($t/boats1.log)"
-boats "$t/srv58_2.log" boats2 170000
+# [SKELDAT_BOATS_FLAKY] Run 2 ends 50 game seconds after the landing,
+# which is at night: the landing's sunrise and day. Its limit is the
+# landing's: the boat's way to a shore is its random aims, and 170 s
+# (2.8 days) saw none now and then
+END54='skeldat: a skeleton \([0-9]+\) lands at' END54_AFTER=50 boats "$t/srv58_2.log" boats2 400000
 boat=$(python3 -I - "$log58" "$t/srv58_2.log" <<'PY'
 import sys, re
 a = open(sys.argv[1], errors="replace").read()
@@ -3249,7 +3257,15 @@ for log in (a, b[:l.start()]):
 # [SKELDAT_BOAT_LAND_SKULL] A skull by the landing, and no burning after
 sk = re.search(r"a skeleton \(%s\) lands at .*, a skull at (-?\d+),-?\d+,(-?\d+)" % k, b)
 assert sk and abs(int(sk.group(1)) - lx) <= 1 and abs(int(sk.group(2)) - lz) <= 1, ("no skull by the landing", sk and sk.groups())
-assert not re.search(r"the skeleton \(%s\) burns" % k, b[l.end():]), "it burnt by its skull"
+# Not while it stands by its skull: it walks off by night (to a footprint,
+# building) as any skeleton does, and a burn is the sun on its way back,
+# a shelter search's way of more than two steps before it; beside the
+# skull it is not exposed and searches none ([SKELDAT_BOATS_FLAKY])
+ashore = b[l.end():]
+for burn in re.finditer(r"the skeleton \(%s\) burns" % k, ashore):
+    way = list(re.finditer(r"a skeleton \(%s\) finds a way to [^:\n]*: (\d+) steps[^\n]*\n"
+            r"[^\n]*a skeleton \(%s\) finds shelter at" % (k, k), ashore[:burn.start()]))
+    assert way and int(way[-1].group(1)) > 2, ("it burnt by its skull", way and way[-1].group(0))
 print("a boat from %s,%s, aim %s; landed at %d %d, a skull at %s,%s" % (m.group(1), m.group(2), m.group(3), lx, lz, sk.group(1), sk.group(2)))
 PY
 ) || fail "boats ($log58, $t/srv58_2.log)"
