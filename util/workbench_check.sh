@@ -1469,7 +1469,7 @@ echo "ok: a builder's voxel type made in Kit's editor from an uploaded PNG, draw
 # tool: a voxel placed on the ground, one on its face, a third placed and
 # dug, the heightmap not dug; End. ([KIT_HM_WALK]) In play w, a, s and d
 # each walk several metres, no corrections. Opened again
-# (save=projectalpha): the two voxels at the crosshair, their section in
+# (save=alpha): the two voxels at the crosshair, their section in
 # the save.
 # menu=projects project=world: Manage with "world" selected, renamed
 # "first", "alpha" moved to the trash, "first" opened. save=first: open
@@ -1609,7 +1609,7 @@ frames 30
 wait_log_any 5000 kit editor: guide: Left: dig $top |
 quit
 EOF
-local_server 9b "$(printf 'launcher=1\nsave=projectalpha')"
+local_server 9b "$(printf 'launcher=1\nsave=alpha')"
 client again9
 stop
 want "$t/srv9b.log" "World: 1 edited voxel sections over the heightmap"
