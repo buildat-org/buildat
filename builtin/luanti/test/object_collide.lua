@@ -32,11 +32,16 @@ core.register_on_mods_loaded(function()
 				for z = -3, 3 do
 					core.set_node({x = O.x + x, y = O.y, z = O.z + z},
 							{name = "mcl_core:dirt"})
+					for y = O.y + 1, O.y + 4 do
+						core.set_node({x = O.x + x, y = y, z = O.z + z},
+								{name = "air"})
+					end
 				end
 			end
-			-- The fall cleared down to its section's floor: the seed is
-			-- a new one each run, and a tree or a hill under V stopped
-			-- the item at 117.7 (2026-10-31)
+			-- The air over the platform and the fall cleared down to its
+			-- section's floor: on a random seed a hill pushed the item on
+			-- the platform up to 134.7 and a tree stopped the other at
+			-- 117.7 (2026-10-31; the runner's seed is fixed since)
 			for y = 64, V.y do
 				core.set_node({x = V.x, y = y, z = V.z}, {name = "air"})
 			end
