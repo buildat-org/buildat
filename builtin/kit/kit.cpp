@@ -3427,6 +3427,16 @@ struct Module: public interface::Module, public Interface
 				log_i(MODULE, "World: the save holds %zu sections (%zu "
 						"edited)", n, edited);
 			});
+		// [KIT_HM_VOXELS] the voxels built over a heightmap
+		if(first && p.heightmap())
+			voxelworld::access(m_server, m_world_scene,
+					[&](voxelworld::Instance *w){
+				size_t n = 0;
+				for(const auto &s : w->section_stats())
+					n += s.altered;
+				log_i(MODULE, "World: %zu edited voxel sections over the "
+						"heightmap", n);
+			});
 		return true;
 	}
 
@@ -3462,7 +3472,9 @@ struct Module: public interface::Module, public Interface
 		voxelworld::access(m_server, m_world_scene,
 				[&](voxelworld::Instance *w){
 			w->set_writes_alter(true);
-			w->set_save_unaltered(p.finite());
+			// [KIT_HM_VOXELS] a heightmap's air sections: only the
+			// edited ones saved
+			w->set_save_unaltered(p.finite() && !p.heightmap());
 		});
 	}
 
@@ -4883,8 +4895,8 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// Where voxelworld keeps the World loaded: a finite map's sections
-	// pinned, its whole; an infinite one round each player and the spawn;
-	// a heightmap's scene none
+	// pinned, its whole; an infinite one, and a heightmap's voxels (air
+	// over the terrain), round each player and the spawn
 	void world_load_points()
 	{
 		if(!m_world_scene)
@@ -4893,8 +4905,24 @@ struct Module: public interface::Module, public Interface
 		const int S = m_section_size;
 		auto sec = [&](int v){ return v >= 0 ? v / S : -((-v + S - 1) / S); };
 		const world::Params &p = m_wp;
-		if(p.heightmap()){
-		} else if(p.finite()){
+		if(p.heightmap() || !p.finite()){
+			// [KIT_HM_WALK] round the spawn and each player; a heightmap's
+			// voxels are air built on over the terrain
+			double x = 0, y = 0, z = 0;
+			world_spawn(x, y, z);
+			pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
+					p.heightmap() ? (int)x : 0, (int)y, p.heightmap() ? (int)z : 0),
+					1, 1, 1, 1));
+			// (a heightmap's air a section round a player: each loaded
+			// section's chunks are the client's to mesh, empty or not)
+			const int lxz = p.heightmap() ? 1 : world::LOAD_XZ;
+			const int gxz = p.heightmap() ? 1 : world::GEN_XZ;
+			for(auto &wp : m_world_peers)
+				pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
+						wp.second[0], wp.second[1], wp.second[2]), lxz,
+						world::LOAD_Y, gxz, world::LOAD_Y, wp.first));
+		} else {
+			// A finite voxel World: every section of the map
 			const int m = p.border == "water" ? world::SEA_BORDER :
 					p.border == "wall" ? 1 : 0;
 			const int ylo = std::min(m_world_min, p.border == "water" ?
@@ -4908,15 +4936,6 @@ struct Module: public interface::Module, public Interface
 					sy <= std::min(sec(yhi), (int)WORLD_SECTION_Y1); sy++)
 				pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
 						sx * S + S / 2, sy * S + S / 2, sz * S + S / 2), 0, 0, 0, 0));
-		} else {
-			double x = 0, y = 0, z = 0;
-			world_spawn(x, y, z);
-			pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(0, (int)y, 0),
-					1, 1, 1, 1));
-			for(auto &wp : m_world_peers)
-				pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
-						wp.second[0], wp.second[1], wp.second[2]), world::LOAD_XZ,
-						world::LOAD_Y, world::GEN_XZ, world::LOAD_Y, wp.first));
 		}
 		voxelworld::access(m_server, m_world_scene,
 				[&](voxelworld::Instance *w){
@@ -4925,12 +4944,13 @@ struct Module: public interface::Module, public Interface
 		log_v(MODULE, "World: %zu load points", pts.size());
 	}
 
-	// An infinite World loads round a player as they go (the section
-	// they are in changed)
+	// An infinite World, or a heightmap's voxels, load round a player as
+	// they go (the section they are in changed)
 	void world_peer(size_t peer, const ss_ &scene, double x, double y,
 			double z)
 	{
-		if(!m_world_scene || m_wp.finite() || scene != m_host.world_scene)
+		if(!m_world_scene || (m_wp.finite() && !m_wp.heightmap()) ||
+				scene != m_host.world_scene)
 			return;
 		const std::array<int32_t, 3> c = {{(int32_t)std::floor(x),
 				(int32_t)std::floor(y), (int32_t)std::floor(z)}};

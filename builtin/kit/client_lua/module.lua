@@ -57,8 +57,8 @@ M.USE = magic.Color(1.0, 0.55, 0.1)
 -- ground textures as the voxels draw theirs, a 16 px texture a metre (a
 -- cell) and nearest filtered, not a texture 4 m across smoothed (a texel
 -- 25 cm, magnified and blurry close up)
+local heightmap = require("buildat/module/heightmap")
 do
-	local heightmap = require("buildat/module/heightmap")
 	heightmap.detail_metres = 1
 	heightmap.filter = magic.FILTER_NEAREST
 end
@@ -849,6 +849,46 @@ local function voxel_ray(o, v, solid, reach)
 end
 M.voxel_ray = voxel_ray
 
+-- [KIT_HM_VOXELS] A heightmap's ground for the voxel tools: a cell whose
+-- bottom is under the terrain at its middle is ground, pointed at and
+-- built on, never dug (the voxels over it are air until built)
+function M.terrain_cell(x, y, z)
+	local h = heightmap.terrain and heightmap.height_at(x, z)
+	return type(h) == "number" and y - 0.5 < h
+end
+
+-- Where a placement on a ray's hit (voxel_ray's hit, front and t; o and v
+-- the ray) goes: the cell before a voxel's face; on the heightmap the
+-- cell over the hit point, its bottom at or just above the terrain there
+-- (the face's cell when that one is taken)
+function M.place_front(hit, front, o, v, t, solid)
+	if not (hit and M.terrain_cell(hit[1], hit[2], hit[3])) then
+		return front
+	end
+	local x, z = o[1] + v[1] * t, o[3] + v[3] * t
+	local h = heightmap.height_at(x, z)
+	if type(h) ~= "number" then
+		return front
+	end
+	local c = {math.floor(x + 0.5), math.ceil(h + 0.5 - 1e-4),
+			math.floor(z + 0.5)}
+	if solid and solid(c[1], c[2], c[3]) then
+		return front
+	end
+	return c
+end
+
+-- solid() with a heightmap's ground in it
+local function with_terrain(solid)
+	if not heightmap.terrain then
+		return solid
+	end
+	return function(x, y, z)
+		return M.terrain_cell(x, y, z) or (solid and solid(x, y, z) or false)
+	end
+end
+M.with_terrain = with_terrain
+
 -- Whether a component grants this player key ("dig" or "place") at the
 -- cell: its `grants` box (from its own cell up and on) holds it and its
 -- state's key is true, while the server is Running (the server's
@@ -889,9 +929,12 @@ function M.play_target(origin, dir, reach, solid)
 	local id, et, usable = M.pick_entity(origin, dir, reach,
 			seat and {[seat] = true} or nil)
 	local hit, front, vt
+	solid = with_terrain(solid)
 	if solid then
 		hit, front, vt = voxel_ray({origin.x, origin.y, origin.z},
 				{dir.x, dir.y, dir.z}, solid, reach)
+		front = M.place_front(hit, front, {origin.x, origin.y, origin.z},
+				{dir.x, dir.y, dir.z}, vt, solid)
 	end
 	local t = {}
 	-- The object first: what is in front of the voxel is pointed at
@@ -901,12 +944,17 @@ function M.play_target(origin, dir, reach, solid)
 		end
 		return t
 	end
-	if hit and M.may_dig(hit[1], hit[2], hit[3]) then
+	if hit and not M.terrain_cell(hit[1], hit[2], hit[3]) and
+			M.may_dig(hit[1], hit[2], hit[3]) then
 		t.left = {kind = "dig", cell = hit}
 	end
 	if hit and front and M.may_place(front[1], front[2], front[3]) then
-		t.right = {kind = "place", cell = front, on = hit, normal = {
-			front[1] - hit[1], front[2] - hit[2], front[3] - hit[3]}}
+		local n = {front[1] - hit[1], front[2] - hit[2], front[3] - hit[3]}
+		if math.abs(n[1]) + math.abs(n[2]) + math.abs(n[3]) ~= 1 then
+			-- Over the heightmap's hit point: its top
+			n = {0, 1, 0}
+		end
+		t.right = {kind = "place", cell = front, on = hit, normal = n}
 	end
 	return t
 end

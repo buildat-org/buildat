@@ -67,8 +67,8 @@
 #      finger: below.
 #   8. ([KIT] stage 4g) A builder's voxel type made, drawn by a second
 #      client already in, placed and kept over a restart: below.
-#   9. ([WORKBENCH_PROJECTS]) The projects, by the launcher's own client:
-#      below.
+#   9. ([WORKBENCH_PROJECTS]) The projects, by the launcher's own client;
+#      a New project's heightmap walked on and built on: below.
 # Parts 1-8 make their project in Manage (New project..., the name
 # "project" it offers when there is none), a restart opening it again.
 # KEEP_TMP=1 keeps the screenshots: the contraption in edit mode, in play,
@@ -1465,6 +1465,12 @@ echo "ok: a builder's voxel type made in Kit's editor from an uploaded PNG, draw
 # beside them. The launcher's entries (luajit): the tile and Manage are
 # menu=projects, New menu=new, a save's Manage... project=<it>. menu=new:
 # the name screen at once, "alpha" typed and made, Workbench in it.
+# ([KIT_HM_VOXELS]) On its heightmap, the editor's walk with the voxels
+# tool: a voxel placed on the ground, one on its face, a third placed and
+# dug, the heightmap not dug; End. ([KIT_HM_WALK]) In play w, a, s and d
+# each walk several metres, no corrections. Opened again
+# (save=projectalpha): the two voxels at the crosshair, their section in
+# the save.
 # menu=projects project=world: Manage with "world" selected, renamed
 # "first", "alpha" moved to the trash, "first" opened. save=first: open
 # with no Manage.
@@ -1495,6 +1501,62 @@ text alpha
 click Button "Create"
 wait_log_any 60000 player physics enabled
 wait_log_any 30000 heightmap: terrain built
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log 10000 kit editor: state:
+keypress V
+wait_log 5000 kit editor: tool voxels
+keypress F3
+wait_log 5000 kit editor: the view is Walk
+mouse_click left
+wait_log 5000 kit editor: into the crosshair
+look_dir 0 -1 -2.5
+frames 30
+mouse_click right
+wait_log 5000 kit editor: place
+frames 10
+mouse_click right
+wait_log 5000 kit editor: place
+frames 10
+look_dir -1 -1 -1.5
+frames 30
+mouse_click right
+wait_log 5000 kit editor: place
+frames 10
+mouse_click left
+wait_log 5000 kit editor: dig at
+look_dir 1 -1 0
+frames 30
+mouse_click left
+wait_log 5000 kit editor: dig: the heightmap is not dug
+look_dir 0 -1 -2.5
+frames 30
+screenshot @T@/hm_built.png
+keypress Escape
+wait_log 5000 kit editor: out of the crosshair
+click Button "End"
+wait_log 10000 kit editor: the server is Ended
+keypress F6
+wait_log 10000 kit editor: the server is Running
+look_dir 0 0 1
+frames 30
+event kit_body
+keydown w
+frames 120
+keyup w
+event kit_body
+keydown a
+frames 120
+keyup a
+event kit_body
+keydown s
+frames 120
+keyup s
+event kit_body
+keydown d
+frames 120
+keyup d
+event kit_body
 quit
 EOF
 BUILDAT_WORKBENCH_STONE= local_server 9 "$(printf 'launcher=1\nmenu=new')"
@@ -1509,6 +1571,48 @@ grep -aq "World: the save holds\|biome grassland, voxels\|biome rock" "$t/srv9.l
 want "$t/new9.log" "heightmap: terrain built"
 grep -aq "world_menu: the list shown" "$t/new9.log" &&
 	fail "menu=new showed the list first ($t/new9.log)"
+# The walk: each leg several metres its way (w +z, a -x, s -z, d +x), no
+# corrections
+grep -a "kit: body at" "$t/new9.log" | sed 's/.*body at \([^,]*\),[^,]*,\([^,]*\), .* \([0-9]*\) corrections.*/\1 \2 \3/' > "$t/walk9"
+[ $(wc -l < "$t/walk9") = 5 ] || fail "not 5 body positions ($t/new9.log)"
+awk 'NR == 1 { x = $1; z = $2; c = $3; next }
+	{ dx = $1 - x; dz = $2 - z; leg = NR - 1
+	  if (leg == 1 && dz < 3 || leg == 2 && dx > -3 || leg == 3 && dz > -3 || leg == 4 && dx < 3) bad = bad " leg " leg
+	  if ($3 != c) bad = bad " corrections in leg " leg
+	  x = $1; z = $2; c = $3 }
+	END { if (bad) { print bad; exit 1 } }' "$t/walk9" ||
+	fail "walking on the heightmap: $(tr '\n' ';' < "$t/walk9") ($t/new9.log)"
+# The voxels built over it: three placed, the top one dug, the ground not
+cells=$(grep -a "kit editor: place kit/cobble at" "$t/new9.log" | sed 's/.* at //')
+[ $(echo "$cells" | wc -l) = 3 ] || fail "not 3 placed ($t/new9.log)"
+# The first on the ground, the second on its face toward the player
+a=$(echo "$cells" | sed -n 1p); top=$(echo "$cells" | sed -n 2p)
+[ "$top" = "$(echo "$a" | awk -F, '{print $1 "," $2 "," $3 + 1}')" ] ||
+	fail "the second voxel ($top) not on the first's face ($a) ($t/new9.log)"
+want "$t/new9.log" "kit editor: dig at $(echo "$cells" | sed -n 3p)" "kit editor: dig: the heightmap is not dug"
+grep -a "set_voxel" "$t/srv9.log" | grep -aq "refus\|not loaded" && fail "a set_voxel refused ($t/srv9.log)"
+# ... and over a restart (the project opened again): the save holds them
+cat > "$t/again9.cmds" <<EOF
+wait_log_any 60000 player physics enabled
+wait_log_any 30000 heightmap: terrain built
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log 10000 kit editor: state:
+keypress V
+wait_log 5000 kit editor: tool voxels
+keypress F3
+wait_log 5000 kit editor: the view is Walk
+mouse_click left
+wait_log 5000 kit editor: into the crosshair
+look_dir 0 -1 -2.5
+frames 30
+wait_log_any 5000 kit editor: guide: Left: dig $top |
+quit
+EOF
+local_server 9b "$(printf 'launcher=1\nsave=projectalpha')"
+client again9
+stop
+want "$t/srv9b.log" "World: 1 edited voxel sections over the heightmap"
 cat > "$t/manage9.cmds" <<'EOF'
 wait_log_any 60000 world_menu: the list shown, 2 worlds
 wait_log_any 5000 world_menu: world selected
