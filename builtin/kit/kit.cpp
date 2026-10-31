@@ -7736,9 +7736,16 @@ struct Module: public interface::Module, public Interface
 							o.set(k, t.second.decl.get(k));
 					types.set(t.first, o);
 				}
+			// [KIT] stage 4h: the controls, the movements and the seats
+			// after the objects
 			json::Value names = json::array();
-			for(const ss_ &t : m_palette)
-				names.append(t);
+			for(int last = 0; last < 2; last++)
+				for(const ss_ &t : m_palette){
+					const json::Value &d = m_types[t].decl;
+					if((d.get("controls").is_true() ||
+							d.get("movement").is_object()) == (last == 1))
+						names.append(t);
+				}
 			j.set("palette", names);
 			j.set("types", types);
 			j.set("authored", authored_json());
