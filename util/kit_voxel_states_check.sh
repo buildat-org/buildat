@@ -103,7 +103,7 @@ EOF
 	n=$((n + 1)); pat 18 a; echo "wait_log 10000 kit editor: state: 21 entities, $n to undo"
 	n=$((n + 1)); pat 19 a; echo "wait_log 10000 kit editor: state: 21 entities, $n to undo"
 	echo "keypress p"
-	echo "frames 5"
+	echo "wait_log 10000 a dig at the pillar sent"
 	echo "keypress b"
 	echo "wait_log 10000 replicated: entity 3 presses = 2"
 	n=$((n + 1)); pat 18 b; echo "wait_log 10000 kit editor: state: 21 entities, $n to undo"

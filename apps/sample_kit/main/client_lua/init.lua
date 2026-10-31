@@ -68,7 +68,10 @@ local KEYS = {
 	[magic.KEY_E] = function() buildat.send_packet("kit:use", "10") end,
 	[magic.KEY_H] = function() buildat.send_packet("kit:use", "11") end,
 	[magic.KEY_D] = function() buildat.send_packet("main:dig", "") end,
-	[magic.KEY_P] = function() buildat.send_packet("main:dig", "pillar") end,
+	[magic.KEY_P] = function()
+		buildat.send_packet("main:dig", "pillar")
+		log:info("a dig at the pillar sent")
+	end,
 	-- Every kind of edit, as packets, whatever edit mode says: a player
 	-- without edit rights is refused each
 	[magic.KEY_X] = function()
