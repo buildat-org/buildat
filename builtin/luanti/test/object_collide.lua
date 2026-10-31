@@ -12,7 +12,13 @@
 core.register_on_mods_loaded(function()
 	core.after(4, function()
 		local O = {x = 0, y = 120, z = 0}
+		-- The spot over nothing, a hundred away: generated air, not a
+		-- section that is loaded and not yet generated, which reads as
+		-- ignore -- and VoxeLibre's item stops its physics in ignore and
+		-- keeps the velocity it was dropped with, rising (2026-10-31)
+		local V = {x = 100, y = 122, z = 100}
 		core.forceload_block(O)
+		core.forceload_block(V)
 		-- No player joins, so objects are stepped wherever they are
 		core.__active_everywhere = true
 		-- **Built until it stays built**: on a save that is being made,
@@ -26,17 +32,33 @@ core.register_on_mods_loaded(function()
 				for z = -3, 3 do
 					core.set_node({x = O.x + x, y = O.y, z = O.z + z},
 							{name = "mcl_core:dirt"})
+					for y = O.y + 1, O.y + 4 do
+						core.set_node({x = O.x + x, y = y, z = O.z + z},
+								{name = "air"})
+					end
 				end
 			end
-			return core.get_node({x = O.x, y = O.y, z = O.z}).name ==
-					"mcl_core:dirt"
+			-- The air over the platform and the fall cleared down to its
+			-- section's floor: on a random seed a hill pushed the item on
+			-- the platform up to 134.7 and a tree stopped the other at
+			-- 117.7 (2026-10-31; the runner's seed is fixed since)
+			for y = 64, V.y do
+				core.set_node({x = V.x, y = y, z = V.z}, {name = "air"})
+			end
 		end
 		local on_floor, over_void
 		local watch
 		local t = 0
 		local held = 0
 		local function build()
-			local ok = lay()
+			-- Read before this lay: a node just set reads back as set
+			-- whatever becomes of it
+			local ok = __luanti_section_state(O.x, O.y, O.z) == "generated" and
+					core.get_node(O).name == "mcl_core:dirt" and
+					__luanti_section_state(V.x, V.y, V.z) == "generated" and
+					core.get_node(V).name == "air" and
+					core.get_node({x = V.x, y = 64, z = V.z}).name == "air"
+			lay()
 			held = ok and (held + 1) or 0
 			if held < 2 then
 				core.after(1, build)
@@ -49,7 +71,7 @@ core.register_on_mods_loaded(function()
 			on_floor = core.add_item({x = 0, y = 122.5, z = 0},
 					"mcl_core:dirt")
 			-- And over nothing at all: the same height, a hundred away
-			over_void = core.add_item({x = 100, y = 122.5, z = 100},
+			over_void = core.add_item({x = V.x, y = 122.5, z = V.z},
 					"mcl_core:dirt")
 			core.after(0.25, watch)
 		end

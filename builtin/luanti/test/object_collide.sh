@@ -25,8 +25,10 @@ if check_pgrep buildat_server >/dev/null; then
 fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 trap 'check_pkill -INT buildat_server 2>/dev/null; true' EXIT
+# A fixed seed: on a new one each run the drops landed in a hill or a
+# lake now and then (2026-10-31)
 BUILDAT_LUANTI_GAME="${GAME:-mineclone2}" BUILDAT_LUANTI_SAVE="$save" \
-	BUILDAT_LUANTI_LUA="$me/object_collide.lua" \
+	BUILDAT_LUANTI_SEED=1 BUILDAT_LUANTI_LUA="$me/object_collide.lua" \
 	start_server "$out/srv.log" "collidecheck: done" 280 29791 \
 	timeout 300 bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 || [ $? = 1 ] || exit 1 # its own verdict below
