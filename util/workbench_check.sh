@@ -82,6 +82,9 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
+# Parts 1-8 build on the stone floor; New's own ground, a heightmap
+# ([WB_NEW_PROJECT_GROUND]), is part 9's
+export BUILDAT_WORKBENCH_STONE=1
 if [ "${1:-}" = web ]; then
 	# Workbench in the web client (web/), in headless Chrome at 1200x800:
 	# the admin logs in (the setup code), points at the floor ahead in
@@ -1491,12 +1494,19 @@ screenshot @T@/p_new.png
 text alpha
 click Button "Create"
 wait_log_any 60000 player physics enabled
+wait_log_any 30000 heightmap: terrain built
 quit
 EOF
-local_server 9 "$(printf 'launcher=1\nmenu=new')"
+BUILDAT_WORKBENCH_STONE= local_server 9 "$(printf 'launcher=1\nmenu=new')"
 client new9
 stop
-want "$t/srv9.log" 'world_menu: made "alpha"' 'workbench: the project "alpha" opens'
+# [WB_NEW_PROJECT_GROUND] New's project on a 64x64 grassland heightmap, no
+# voxel ground, the player at its middle
+want "$t/srv9.log" 'world_menu: made "alpha"' 'workbench: the project "alpha" opens' \
+	'World: noise 64x64, seed 0, biome grassland, a heightmap,' ' put at (32.5, '
+grep -aq "World: the save holds\|biome grassland, voxels\|biome rock" "$t/srv9.log" &&
+	fail "the new project has voxel ground ($t/srv9.log)"
+want "$t/new9.log" "heightmap: terrain built"
 grep -aq "world_menu: the list shown" "$t/new9.log" &&
 	fail "menu=new showed the list first ($t/new9.log)"
 cat > "$t/manage9.cmds" <<'EOF'
@@ -1540,7 +1550,7 @@ client save9
 stop
 grep -aq "world_menu: the list shown" "$t/save9.log" &&
 	fail "save=first showed Manage ($t/save9.log)"
-want "$t/srv11.log" 'workbench: the project "first" opens'
-echo "ok: projects: the launcher's New and Manage, a name typed and made, the old \"world\" renamed, one deleted to the trash, a listed one opened, save= opened with no Manage"
+want "$t/srv11.log" 'workbench: the project "first" opens' 'biome rock, voxels'
+echo "ok: projects: the launcher's New and Manage, a name typed and made (on a grassland heightmap), the old \"world\" renamed (still stone), one deleted to the trash, a listed one opened, save= opened with no Manage"
 echo "PASS: Workbench: the admin builds a contraption of Kit's starter set in its editor, Stopped, and plays it, a second player joins the round, may build only in the dig zone and uses a key; a restart mid-round keeps the rows, Stop puts the start back, Play gives a kept inventory back and places players, Save as start keeps the round's voxels"
 # vim: set noet ts=4 sw=4:
