@@ -14,6 +14,7 @@
 #   builtin/luanti/test/leave_ui.sh
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_leave_ui.XXXXXX")
 cd "$here/Build"

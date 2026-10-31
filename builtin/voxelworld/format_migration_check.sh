@@ -15,6 +15,7 @@
 #   builtin/voxelworld/format_migration_check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../.." && pwd)
 check_tmp format_migration
 # Under the repo, not /tmp: the boxed server reads nothing in /tmp

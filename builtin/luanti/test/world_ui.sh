@@ -13,6 +13,7 @@
 #   builtin/luanti/test/world_ui.sh
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_world_ui.XXXXXX")
 out="$here/local/world_ui"; mkdir -p "$out"

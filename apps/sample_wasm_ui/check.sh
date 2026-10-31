@@ -39,6 +39,7 @@
 # covers: util/gen_wasm_bindings.lua doc/client_api.txt src/interface/rust/buildat_wasm/src/client.rs src/interface/buildat_client.h src/lua_bindings/wasm_bindings.inc src/lua_bindings/wasm.cpp src/wasm/** builtin/client_lua/client_lua/wasm_main.lua client/core/urho3d/** client/api.lua src/interface/wasm_api.h apps/sample_wasm_ui/**
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../.." && pwd)
 app=sample_wasm_ui
 web=0

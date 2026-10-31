@@ -111,4 +111,19 @@ v = c.execute("SELECT value FROM store WHERE store='__save' AND key='version'").
 assert v and v[0], v
 PY
 echo "ok: a 0.6 save opened with its rows, stamped 2 and the version"
-echo "PASS: a save stamped with its format and version; one stamped newer refused with the reason and left as it was; a 0.6 save opened as it was and stamped"
+
+# [BOX_SHARED_USER_SAVES]: vanilla over a newer _server and _chat stops with
+# the reason. It crashed (SIGSEGV logging accounts' failed core:start: a
+# module calling into accounts cleared the backtrace list being read).
+for s in _server _chat; do
+	mkdir -p "$t/v/apps/vanilla/saves/$s"
+	python3 -c 'import sqlite3, sys; sqlite3.connect(sys.argv[1]).execute("PRAGMA user_version=9")' \
+		"$t/v/apps/vanilla/saves/$s/save.sqlite"
+done
+(cd "$here/Build" && timeout 120 bin/buildat_server -m ../apps/vanilla -u launcher=1 \
+	-D "$t/v" -P 0 -l 3 2>&1) > "$t/vanilla.log"
+grep -aq "Crash:" "$t/vanilla.log" && fail "vanilla crashed over a newer save ($t/vanilla.log)"
+grep -aq "Shutdown: M\[[a-z]*\]->event() failed: The save .* was written by a newer Buildat (save format 9" \
+	"$t/vanilla.log" || fail "vanilla did not stop with the reason ($t/vanilla.log)"
+echo "ok: vanilla over a newer save stops with the reason"
+echo "PASS: a save stamped with its format and version; one stamped newer refused with the reason and left as it was; a 0.6 save opened as it was and stamped; vanilla over one stops with the reason"

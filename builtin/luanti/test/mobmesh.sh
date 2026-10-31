@@ -11,6 +11,7 @@
 #                                                       the same stage and shots)
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 FIXTURE="${FIXTURE:-mobmesh}"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)

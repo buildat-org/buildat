@@ -18,6 +18,7 @@
 # covers: builtin/luanti/lua/bootstrap.lua builtin/voxelworld/voxelworld.cpp builtin/luanti/mapgen_params.h
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/alias_check"; mkdir -p "$out"

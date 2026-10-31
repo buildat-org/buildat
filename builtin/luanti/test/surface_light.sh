@@ -23,6 +23,7 @@
 #   builtin/luanti/test/surface_light.sh
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/surface_light"; mkdir -p "$out"

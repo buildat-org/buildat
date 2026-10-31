@@ -259,9 +259,12 @@ struct ModuleContainer
 	int64_t slot_wait_from = 0;
 
 	// NOTE: thread-ref_backtraces() Holds the backtraces along the way of a
-	// direct callback chain initiated by this module. Cleared when beginning to
-	// execute a direct callback. Read when event() (and maybe something else)
-	// returns an uncatched exception.
+	// direct callback chain initiated by this module. Cleared by the module's
+	// own thread as an event begins, and read when event() returns an
+	// uncatched exception. Not by a caller: the clear a caller made posting
+	// a direct callback freed the list under the module's own thread while
+	// it logged an event's failure (a refused save's core:start, SIGSEGV;
+	// [BOX_SHARED_USER_SAVES]).
 
 	// Set to true when deleting the module; used for enforcing some limitations
 	bool executing_module_destructor = false;
@@ -480,7 +483,6 @@ struct ModuleContainer
 			direct_cb = &cb;
 			direct_cb_exception = nullptr;
 			thread->set_caller_thread(interface::Thread::get_current_thread());
-			thread->ref_backtraces().clear();
 			event_queue_sem.post();
 		}
 		log_t(MODULE, "execute_direct_cb[%s]: Waiting for execution to finish",
@@ -695,6 +697,7 @@ void ModuleThread::handle_event(Event &event)
 		log_w(MODULE, "M[%s]: Module is null; cannot"
 				" handle event", cs(mc->info.name));
 	} else {
+		mc->thread->ref_backtraces().clear();
 		try {
 			log_t(MODULE, "M[%s]->event(): Executing",
 					cs(mc->info.name));
