@@ -153,6 +153,25 @@ run(walker, s9, 5, {f = 0, r = 0, yaw = 0, jump = 0, go = 0}, ice, wp)
 run(walker, s9, 10, {f = 1, r = 0, yaw = 90, jump = 0, go = 0}, ice, wp)
 assert(s9.surface == "ice" and s9.vel[1] < 1, s9.vel[1])
 
+-- Buried by a raise (two cells under a standing body): lifted onto them,
+-- not shoved sideways; a heightmap raised under it the same
+local bury = world(function(i, j, k)
+	if i == 0 and k == 10 and (j == 1 or j == 2) then
+		return STONE
+	end
+end)
+local sb = {pos = {0.2, 0.5, 10.1}, ground = true}
+run(walker, sb, 3, {f = 0, r = 0, yaw = 0, jump = 0, go = 0}, bury, wp)
+assert(near(sb.pos[1], 0.2) and near(sb.pos[3], 10.1) and
+		near(sb.pos[2], 2.5) and sb.ground, table.concat(sb.pos, ","))
+local hraise = MV.world{cell = function() return nil end, ground = function()
+	return 3
+end}
+local sh2 = {pos = {1, 0, 1}, ground = true}
+run(walker, sh2, 3, {f = 0, r = 0, yaw = 0, jump = 0, go = 0}, hraise, wp)
+assert(near(sh2.pos[1], 1) and near(sh2.pos[3], 1) and near(sh2.pos[2], 3),
+		table.concat(sh2.pos, ","))
+
 -- The heightmap: a slope rising 0.3 a metre along x, walked up
 local hw = MV.world{cell = function() return nil end, ground = function(x, z)
 	return x * 0.3

@@ -380,6 +380,31 @@ function W:blocked(b)
 	return false
 end
 
+-- A body buried by an edit (voxels or the heightmap raised into it):
+-- lifted to the lowest free place over it, up to its height and a cell,
+-- never sideways. pos the body's bottom middle, changed; true: lifted
+function W:unbury(pos, b)
+	local x, y, z = pos[1], pos[2], pos[3]
+	local g = self:ground_max(x - b.r, z - b.r, x + b.r, z + b.r)
+	local cand = y
+	if g and g > y + EPS then
+		cand = g
+	end
+	local top = y + b.h + 1
+	while cand <= top do
+		if not self:blocked(box_of(x, cand, z, b.r, b.h)) then
+			if cand == y then
+				return false
+			end
+			pos[2] = cand
+			return true
+		end
+		-- The next cell top over the bottom
+		cand = floor(cand + 0.5 + EPS) + 0.5
+	end
+	return false
+end
+
 -- x and z, each as far as it goes; then the heightmap's ground under the
 -- new footprint: climbed where its slope is within b.slope, else the move
 -- back
@@ -627,6 +652,9 @@ function W:walk(s, b, wx, wz, jump, dt, p)
 		s.vel = {0, 0, 0}
 	end
 	local pos, v = s.pos, s.vel
+	if self:unbury(pos, b) and v[2] < 0 then
+		v[2] = 0
+	end
 	local g = num(p.gravity, 15)
 	local jh = num(p.jump_height, 1.6)
 	local ground = s.ground == true

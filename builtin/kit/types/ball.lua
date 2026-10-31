@@ -29,6 +29,7 @@ return {
 		s.pos = type(s.pos) == "table" and s.pos or {0, 0, 0}
 		s.vel = type(s.vel) == "table" and s.vel or {0, 0, 0}
 		local pos, v = s.pos, s.vel
+		w:unbury(pos, BODY)
 		local mass = p.mass or 10
 		local a = (tonumber(i.yaw) or 0) * w.PI / 180
 		local sn, cs = w.sin(a), w.cos(a)

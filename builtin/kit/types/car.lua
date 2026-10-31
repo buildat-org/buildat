@@ -55,6 +55,7 @@ return {
 		s.pos = type(s.pos) == "table" and s.pos or {0, 0, 0}
 		s.vel = type(s.vel) == "table" and s.vel or {0, 0, 0}
 		local pos, v = s.pos, s.vel
+		w:unbury(pos, BODY)
 		local yaw = tonumber(s.yaw) or 0
 		local a = yaw * w.PI / 180
 		local sn, cs = w.sin(a), w.cos(a)
