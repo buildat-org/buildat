@@ -620,6 +620,8 @@ struct Module: public interface::Module, public Interface
 	// Where players appear on a voxel World: the cell their feet go in
 	std::array<int, 3> m_world_spawn = {{0, 1, 0}};
 	size_t m_world_generated = 0, m_world_logged = 0;
+	// A regeneration whose sections are not all generated again yet
+	bool m_world_regenerating = false;
 	// A change that applies at the next start, warned of once
 	ss_ m_world_pending;
 	// Guests' dropped entities' names by their `by`, for this run
@@ -2443,6 +2445,7 @@ struct Module: public interface::Module, public Interface
 		}
 		log_i(MODULE, "World%s: %zu sections generated again, %zu edited kept",
 				by.empty() ? "" : cs(" by "+by), again, edited.size());
+		m_world_regenerating = again > 0;
 		if(n)
 			warn(itos(n)+" edited sections kept, seams where they meet the "
 					"new ground: "+seams+(n > 8 ? " ..." : ""));
@@ -3546,6 +3549,19 @@ struct Module: public interface::Module, public Interface
 		m_world_logged = m_world_generated;
 		log_i(MODULE, "World: %zu sections generated since the start",
 				m_world_generated);
+		// Builders told the regeneration is done: what they read of the
+		// ground after it is the new ground's
+		if(!m_world_regenerating)
+			return;
+		m_world_regenerating = false;
+		sv_<size_t> to;
+		for(auto &p : m_peers)
+			if(can_edit(p.first))
+				to.push_back(p.first);
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(size_t peer : to)
+				inetwork->send(peer, "kit:regenerated", "");
+		});
 	}
 
 	// ---- Players as entities ([KIT] stage 4d)

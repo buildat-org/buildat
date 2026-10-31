@@ -638,6 +638,11 @@ buildat.sub_packet("kit:warning", function(data)
 	ui_utils.show_notification(tostring(data), 8)
 end)
 
+-- A regeneration's sections all generated again (a check's wait)
+buildat.sub_packet("kit:regenerated", function(data)
+	log:info("kit: World: generated again")
+end)
+
 -- The Stop notice: the round's builds were discarded, who built them when
 -- others did; a builder may keep them (here, or the tools' panel until the
 -- next Play). Not a dialog: it takes no focus and goes by itself
