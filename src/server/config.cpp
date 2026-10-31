@@ -18,6 +18,11 @@ Config::Config()
 	// The ports a boxed server may connect to beyond buildat's own, the
 	// admin's (--connect-ports, BUILDAT_CONNECT_PORTS): "8080,2525" or "any"
 	set_default("connect_ports", "");
+	// [AITTA_KEY_IDENTITY] The Aittas Kit asks to vouch for a package's
+	// key, which the installing client names (BUILDAT_KIT_VOUCH): "" any
+	// (within interface::aitta::vouch_guarded()'s limits), "none" none,
+	// else a comma-separated list of origins
+	set_default("kit_vouch", "");
 	// Started by a boxed parent, in the box (Windows; --boxed)
 	set_default("boxed", false);
 	// What the box is made of, for an admin's Health page

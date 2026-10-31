@@ -587,4 +587,14 @@ wait_quiet()
 	done
 	return 0
 }
+# [AITTA_KEY_IDENTITY] A public key's fingerprint (its hex, or a file of
+# it): the first 20 hex digits of the sha256 of its bytes, which name a
+# package where it is installed (installed/<fp>/<name>, "<fp>.<name>")
+aitta_fp() # <public key hex or file>
+{
+	local k=$1
+	[ -f "$k" ] && k=$(tr -d ' \n' < "$k")
+	python3 -I -c 'import hashlib, sys
+print(hashlib.sha256(bytes.fromhex(sys.argv[1])).hexdigest()[:20])' "$k"
+}
 # vim: set noet ts=4 sw=4:

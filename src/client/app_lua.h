@@ -93,6 +93,7 @@
 					path+"/launcher/init.lua"));
 			lua_setfield(L, -2, "launcher");
 			set_package_icon(L, path);
+			set_package_identity(L, id);
 			lua_rawseti(L, -2, i++);
 		}
 		// And a reviewer's playtests ([AITTA_REVIEW]), as installed ones
@@ -159,6 +160,7 @@
 			lua_setfield(L, -2, "version");
 			lua_pushboolean(L, false);
 			lua_setfield(L, -2, "launcher");
+			set_package_identity(L, id);
 			lua_rawseti(L, -2, i++);
 		}
 		return 1;
@@ -265,6 +267,34 @@
 				return "";
 		}
 		return h+".png";
+	}
+	// [AITTA_KEY_IDENTITY] An installed package's identity on its row: the
+	// key's fingerprint ("fp"), its manifest's author ("author", a name to
+	// show) and the Aitta that vouched for that author ("aitta", "" for
+	// unverified), for "alice (aitta.buildat.org)" where two share a name
+	static void set_package_identity(lua_State *L, const ss_ &id)
+	{
+		const size_t dot = id.find('.'), colon = id.find(':');
+		const ss_ fp = id.substr(colon == ss_::npos ? 0 : colon + 1,
+				dot - (colon == ss_::npos ? 0 : colon + 1));
+		if(dot == ss_::npos || !interface::aitta::fingerprint_ok(fp))
+			return;
+		json::json_error_t err;
+		const json::Value m = json::load_file((app_dir(id)+"/meta.json").c_str(),
+				&err);
+		const ss_ user = g_client_config.get<ss_>("user_path");
+		lua_pushstring(L, fp.c_str());
+		lua_setfield(L, -2, "fp");
+		lua_pushstring(L, m.get("author").is_string() ?
+				m.get("author").as_cstring() : "");
+		lua_setfield(L, -2, "author");
+		lua_pushstring(L, interface::aitta::installed_vouch(user, fp).c_str());
+		lua_setfield(L, -2, "aitta");
+		std::ifstream f(app_dir(id)+"/.aitta_from", std::ios::binary);
+		ss_ from;
+		std::getline(f, from);
+		lua_pushstring(L, from.c_str());
+		lua_setfield(L, -2, "from");
 	}
 	static void set_package_icon(lua_State *L, const ss_ &dir)
 	{
@@ -546,7 +576,11 @@
 		}
 		json::Value m = json::object();
 		m.set("kind", "remix");
-		m.set("base", installed ? id.substr(0, at) : id);
+		// [AITTA_KEY_IDENTITY] A manifest names an installed app by its
+		// author, <author>.<name>: the id's <fp> is this install's
+		const ss_ named = installed ? (bm.get("author").is_string() ?
+				bm.get("author").as_string() : "")+id.substr(dot, at - dot) : id;
+		m.set("base", named);
 		if(installed)
 			m.set("base_version", id.substr(at + 1));
 		if(!only_author().empty())
@@ -554,8 +588,7 @@
 		m.set("name", name);
 		m.set("version", "1.0.0");
 		m.set("engine_api", (int64_t)interface::aitta::ENGINE_API);
-		m.set("description", "My own version of "+(installed ?
-				id.substr(0, at) : id));
+		m.set("description", "My own version of "+named);
 		// simplified: the base's licences as a start; what the author adds
 		// may need another
 		for(const char *k : {"license_code", "license_media"})
@@ -1144,7 +1177,9 @@
 		return 1;
 	}
 
-	// aitta_install(zip, sig[, aitta[, review]]) -> the directory, or nil
+	// aitta_install(zip, sig[, aitta[, review[, world[, info]]]]) -> the
+	// directory, or nil. info: the Aitta's info answer for the .sig's
+	// key, its vouch (record_vouch()). The rest:
 	// and why: a release fetched from an Aitta, checked and installed under
 	// <user>/installed ([AITTA_MVP]); with review, a reviewer's playtest
 	// under <user>/review ([AITTA_REVIEW]). The Aitta, where given, in its
@@ -1203,11 +1238,12 @@
 			}
 			const ss_ dir = interface::aitta::install(tmp+".zip", tmp+".sig",
 					g_client_config.get<ss_>("user_path"), review,
-					g_client_config.get<ss_>("share_path"));
-			if(!from.empty()){
-				std::ofstream o(dir+"/.aitta_from", std::ios::binary);
-				o<<from<<"\n";
-			}
+					g_client_config.get<ss_>("share_path"), from);
+			// [AITTA_KEY_IDENTITY] The Aitta's own info for the key, which
+			// this client fetched from the address it installed from
+			if(!from.empty() && !review && lua_isstring(L, 6))
+				record_vouch(json::load_string(sig.c_str()).get("key"), from,
+						lua_bindings::lua_tocppstring(L, 6), dir);
 			interface::fs::remove_all(tmp+".zip");
 			interface::fs::remove_all(tmp+".sig");
 			lua_pushstring(L, dir.c_str());
@@ -1219,6 +1255,77 @@
 			lua_pushstring(L, e.what());
 			return 2;
 		}
+	}
+
+	// [AITTA_KEY_IDENTITY] An Aitta's info answer for a key (its GET
+	// /api/v1/aitta/info?key=, this client's own to that address), kept as
+	// the installed key's vouch where it binds the key to the author of
+	// dir's manifest. Whether it does.
+	static bool record_vouch(const json::Value &key, const ss_ &aitta,
+			const ss_ &body, const ss_ &dir)
+	{
+		json::json_error_t err;
+		const json::Value m = json::load_file((dir+"/meta.json").c_str(), &err);
+		const ss_ fp = key.is_string() ?
+				interface::aitta::fingerprint(key.as_string()) : "";
+		const ss_ author = m.get("author").is_string() ?
+				m.get("author").as_string() : "";
+		const ss_ why = interface::aitta::vouch_answer(body, author);
+		if(fp.empty() || !why.empty()){
+			log_i(MODULE, "aitta: %s unverified by %s: %s", cs(fp), cs(aitta),
+					cs(fp.empty() ? ss_("no key") : why));
+			return false;
+		}
+		interface::aitta::record_vouch(g_client_config.get<ss_>("user_path"),
+				fp, aitta, author);
+		log_i(MODULE, "aitta: %s is %s's on %s", cs(fp), cs(author), cs(aitta));
+		return true;
+	}
+
+	// aitta_vouch(fp, aitta, body) -> true or false: an installed key
+	// unverified checked again ([AITTA_KEY_IDENTITY]), the body the
+	// Aitta's info answer for it. Trusted only: client/core/aitta.
+	static int l_aitta_vouch(lua_State *L)
+	{
+		const ss_ fp = lua_bindings::lua_tocppstring(L, 1);
+		const ss_ user = g_client_config.get<ss_>("user_path");
+		if(!interface::aitta::fingerprint_ok(fp)){
+			lua_pushboolean(L, false);
+			return 1;
+		}
+		ss_ key;
+		{
+			std::ifstream f(user+"/installed/"+fp+"/.key", std::ios::binary);
+			std::getline(f, key);
+		}
+		ss_ dir;
+		for(const auto &n : interface::fs::list_directory(user+"/installed/"+fp))
+			for(const auto &v : interface::fs::list_directory(
+					user+"/installed/"+fp+"/"+n.name))
+				if(n.is_directory && v.is_directory && dir.empty())
+					dir = user+"/installed/"+fp+"/"+n.name+"/"+v.name;
+		// The Aitta it came from only: its vouch is that Aitta's
+		ss_ from;
+		{
+			std::ifstream f(dir+"/.aitta_from", std::ios::binary);
+			std::getline(f, from);
+		}
+		lua_pushboolean(L, !dir.empty() && !from.empty() &&
+				from == lua_bindings::lua_tocppstring(L, 2) &&
+				record_vouch(json::Value(key),
+				lua_bindings::lua_tocppstring(L, 2),
+				lua_bindings::lua_tocppstring(L, 3), dir));
+		return 1;
+	}
+
+	// aitta_fingerprint(key) -> the key's fingerprint, "" for no key
+	// ([AITTA_KEY_IDENTITY]: a package is <fp>/<name>)
+	static int l_aitta_fingerprint(lua_State *L)
+	{
+		const ss_ fp = interface::aitta::fingerprint(
+				lua_bindings::lua_tocppstring(L, 1));
+		lua_pushlstring(L, fp.c_str(), fp.size());
+		return 1;
 	}
 
 	// remove_review(id) -> true, or nil and why: a playtest's tile gone
@@ -1272,6 +1379,7 @@
 			lua_setfield(L, -2, "size");
 			lua_pushstring(L, app_kind(game_path).c_str());
 			lua_setfield(L, -2, "kind");
+			set_package_identity(L, name);
 			lua_rawseti(L, -2, i++);
 		}
 		return 1;

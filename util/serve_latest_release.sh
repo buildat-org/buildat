@@ -12,10 +12,11 @@
 #
 # **An app from an Aitta** ([AITTA_SERVE]): a game <author>/<name> (a slash
 # tells it from the release's own apps) runs the newest version installed
-# under <user dir>/installed/<author>/<name>/, which
+# under <user dir>/installed/<fp>/<name>/ (fp its key's, its manifest's
+# author <author>), which
 #   bin/buildat aitta install <Aitta> <author>/<name> <user dir>
 # (in a release's directory) puts there; the server calls it
-# <author>.<name>, as its saves under <user dir>/apps/. Its version moves
+# <fp>.<name>, as its saves under <user dir>/apps/. Its version moves
 # only when told: with AITTA=<the Aitta's address>, each update check
 # installs the app's newest listed release there and restarts onto it as
 # for a new engine release, with the same wait and warning; without it the
@@ -145,12 +146,27 @@ while [ $# -gt 0 ]; do
 done
 [ ${#games[@]} -eq 0 ] && usage
 
-# An Aitta app's directory: its newest version installed, or nothing
+# An Aitta app's directory: its newest version installed, or nothing.
+# [AITTA_KEY_IDENTITY] installed/<fp>/<name>/, fp its key's: the one whose
+# manifest's author is the game's (two keys' are refused, which is which
+# not said)
 aitta_dir(){
-	local d="${users[$1]}/installed/${games[$1]}" v
-	# Its versions are directories; the key beside them is a file
-	v=$(cd "$d" 2>/dev/null && ls -1d -- */ | tr -d / | sort -V | tail -n 1)
-	[ -n "$v" ] && echo "$d/$v"
+	local a=${games[$1]%%/*} n=${games[$1]#*/} d v found=
+	for d in "${users[$1]}"/installed/*/"$n"; do
+		[ -d "$d" ] || continue
+		# Its versions are directories
+		v=$(cd "$d" 2>/dev/null && ls -1d -- */ | tr -d / | sort -V | tail -n 1)
+		[ -n "$v" ] || continue
+		python3 -I -c 'import json, sys
+sys.exit(json.load(open(sys.argv[1])).get("author") != sys.argv[2])' \
+			"$d/$v/meta.json" "$a" 2>/dev/null || continue
+		if [ -n "$found" ]; then
+			echo "${games[$1]} is installed by two keys in ${users[$1]}" >&2
+			return 1
+		fi
+		found="$d/$v"
+	done
+	[ -n "$found" ] && echo "$found"
 }
 for i in "${!games[@]}"; do
 	case ${games[$i]} in */*) ;; *) continue ;; esac

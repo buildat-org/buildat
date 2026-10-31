@@ -1107,11 +1107,18 @@ local function game_target()
 	end
 	-- An app from Aitta is a package: its subject as [PACKAGE_SUBJECT]
 	-- makes it, and the Hearth's package page
-	local author, name, version = app:match("^([%w_]+)%.([%w_]+)@(.+)$")
+	-- [AITTA_KEY_IDENTITY] Its id "<fp>.<name>@<version>", the key in
+	-- installed/<fp>/.key and the author its manifest's
+	local fp, name, version = app:match("^([%w_]+)%.([%w_]+)@(.+)$")
+	local author = nil
+	for _, g in ipairs(fp and __buildat_list_apps() or {}) do
+		if g.name == app then
+			author = g.author
+		end
+	end
 	if author then
-		local dir = __buildat_get_path("user") .. "/installed/" .. author ..
-				"/" .. name
-		local kf = io.open(dir .. "/key", "rb")
+		local kf = io.open(__buildat_get_path("user") .. "/installed/" .. fp ..
+				"/.key", "rb")
 		local key = kf and kf:read("*a"):match("%x+") or ""
 		if kf then kf:close() end
 		return {name = author .. "/" .. name, source = "aitta",
@@ -1516,7 +1523,7 @@ local function launch_ui_says(name, word)
 	return false
 end
 function buildat.launch_ui_sandboxed(name)
-	-- One installed from Aitta ("<author>__<name>") always is
+	-- One installed from Aitta ("<fp>__<name>") always is
 	return type(name) == "string" and name:find("__", 1, true) ~= nil or
 			launch_ui_says(name, "sandboxed")
 end

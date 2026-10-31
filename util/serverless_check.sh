@@ -101,6 +101,7 @@ CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
+fp=$(aitta_fp "$t/pub")
 printf 'wait_log_any 30000 "id":2,\nquit\n' > "$t/reqs.cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 	BUILDAT_AITTA_CODE=$code \
@@ -129,7 +130,7 @@ C
 run "$t/c.log" tester/sl "$t/aitta.cmds" BUILDAT_STARPORT_MANAGED="$t/managed.json"
 grep -aq "aitta: play tester.sl@1.0.0 serverless" "$t/c.log" &&
 	grep -aq "sl: serverless true" "$t/c.log" || fail "not run from the Aitta"
-[ -f "$t/u/installed/tester/sl/1.0.0/main/client_lua/init.lua" ] || fail "not installed"
+[ -f "$t/u/installed/$fp/sl/1.0.0/main/client_lua/init.lua" ] || fail "not installed"
 grep -aqE "cube: (built wasm/|wasm/ is built)" "$t/c.log" && fail "the installed package's wasm/ was built"
 echo "ok: installed from the Aitta and run, the .wasm the release's"
 

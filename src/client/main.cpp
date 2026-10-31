@@ -208,7 +208,11 @@ static int aitta_main(int argc, char *argv[])
 					sha = pick.get("sha256").as_string();
 			if(!plain(a) || !plain(n) || !plain(v) || !plain(sha))
 				throw Exception("the list's release has a name not taken");
-			const ss_ dir = user+"/installed/"+a+"/"+n+"/"+v;
+			// [AITTA_KEY_IDENTITY] Its key's, as the list says it; the .sig's
+			// own is what the install keys it by
+			const ss_ fp = interface::aitta::fingerprint(
+					pick.get("key").is_string() ? pick.get("key").as_string() : "");
+			const ss_ dir = user+"/installed/"+fp+"/"+n+"/"+v;
 			if(interface::fs::path_exists(dir)){
 				fprintf(stderr, "%s/%s %s is installed already\n", a.c_str(),
 						n.c_str(), v.c_str());
@@ -225,7 +229,19 @@ static int aitta_main(int argc, char *argv[])
 			}
 			ss_ out;
 			try {
-				out = interface::aitta::install(tmp+".zip", tmp+".sig", user);
+				out = interface::aitta::install(tmp+".zip", tmp+".sig", user,
+						false, "", base);
+				// Who the Aitta says the key is: asked of it, not the list
+				json::json_error_t se;
+				const ss_ key = json::load_file((tmp+".sig").c_str(), &se).
+						get("key").as_string();
+				const ss_ why = interface::aitta::vouch(base, key, a);
+				if(why.empty())
+					interface::aitta::record_vouch(user,
+							interface::aitta::fingerprint(key), base, a);
+				else
+					fprintf(stderr, "%s/%s: unverified: %s\n", a.c_str(),
+							n.c_str(), why.c_str());
 			} catch(...){
 				std::remove((tmp+".zip").c_str());
 				std::remove((tmp+".sig").c_str());

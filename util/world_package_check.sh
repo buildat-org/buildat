@@ -60,6 +60,7 @@ user u
 user u2
 mkdir -p "$t/u/aitta_keys"
 "$b" aitta keygen "$t/u/aitta_keys/tester.key" > "$t/pub" 2>/dev/null || fail "keygen"
+fp=$(aitta_fp "$t/pub")
 # The admin binds tester to the key, and lets / show a release at once
 printf 'wait_log_any 30000 "id":2,"ok":\nquit\n' > "$t/admin.cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
@@ -332,14 +333,14 @@ done
 "$b" aitta install "$t/out/tester-savy-1.0.0.zip" "$t/u" > /dev/null || fail "install savy 1.0.0"
 start_server "$t/mine.log" "savy: save mine" 300 auto bin/buildat_server \
 	-u "$(printf 'launcher=1\nsave=mine')" -A 127.0.0.1 \
-	-m "$t/u/installed/tester/savy/1.0.0" -D "$t/u" -C "$t/c_mine" -l 3 ||
+	-m "$t/u/installed/$fp/savy/1.0.0" -D "$t/u" -C "$t/c_mine" -l 3 ||
 	fail "savy's save mine ($t/mine.log)"
 kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null
 # The app's modules as this server built them, one build a run; the
 # clients' caches have no other server's log
 for c in c_u c_u2; do
 	mkdir -p "$t/$c/apps"
-	cp -r "$t/c_mine/apps/tester.savy" "$t/$c/apps/"
+	cp -r "$t/c_mine/apps/$fp.savy" "$t/$c/apps/"
 done
 "$b" aitta install "$t/out/tester-savy-1.0.1.zip" "$t/u" > /dev/null || fail "install savy 1.0.1"
 for v in 1.0.0 1.0.1; do
@@ -371,7 +372,7 @@ run_client 60 "$t/cont.log" timeout 240 "$b" -o launch_ui=launch_menu -D "$t/u" 
 	-C "$t/c_u" -w 1000x700 -l 3 -o sound_mute=1 -c @"$t/cont.cmds" ||
 	fail "the Continue drive ($t/cont.log)"
 for p in $(pgrep -f "[b]uildat_server .*-D $t/u "); do kill $p; done
-grep -aq "start: Starting tester.savy@1.0.0" "$t/cont.log" ||
+grep -aq "start: Starting $fp.savy@1.0.0" "$t/cont.log" ||
 	fail "Continue did not start savy 1.0.0, mine's release ($t/cont.log)"
 cat "$t"/c_u/buildat_server*.log | grep -aq "savy: save mine, marker made as mine" ||
 	fail "Continue did not open mine ($t/c_u/buildat_server*.log)"
@@ -417,7 +418,7 @@ run_client 120 "$t/inst2.log" timeout 300 "$b" -o launch_ui=launch_menu -D "$t/u
 	-C "$t/c_u2" -w 1000x700 -l 3 -o sound_mute=1 -c @"$t/inst2.cmds" ||
 	fail "the install drive of mine ($t/inst2.log)"
 for p in $(pgrep -f "[b]uildat_server .*-D $t/u2"); do kill $p; done
-grep -aq "start: Starting tester.savy@1.0.0" "$t/inst2.log" ||
+grep -aq "start: Starting $fp.savy@1.0.0" "$t/inst2.log" ||
 	fail "Install and play did not start savy 1.0.0 ($t/inst2.log)"
 cat "$t"/c_u2/buildat_server*.log | grep -aq "savy: save mine, marker made as mine" ||
 	fail "Install and play did not open mine ($t/c_u2/buildat_server*.log)"

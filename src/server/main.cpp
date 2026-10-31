@@ -113,6 +113,8 @@ int main(int argc, char *argv[])
 	bool unconfined = interface::os::unconfined_by_env();
 	// --connect-ports P,Q: what a boxed server may connect to beyond
 	// buildat's own ports; also BUILDAT_CONNECT_PORTS
+	if(getenv("BUILDAT_KIT_VOUCH"))
+		config.set("kit_vouch", ss_(getenv("BUILDAT_KIT_VOUCH")));
 	if(getenv("BUILDAT_CONNECT_PORTS"))
 		config.set("connect_ports", ss_(getenv("BUILDAT_CONNECT_PORTS")));
 	// The launcher's owner token: kept in the config, where no game's Lua

@@ -53,6 +53,7 @@ user u
 user u2
 mkdir -p "$t/u/aitta_keys"
 "$b" aitta keygen "$t/u/aitta_keys/tester.key" > "$t/pub" 2>/dev/null || fail "keygen"
+fp=$(aitta_fp "$t/pub")
 printf 'wait_log_any 30000 "id":2,"ok":\nquit\n' > "$t/admin.cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 BUILDAT_AITTA_CODE=$code BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}
@@ -216,7 +217,7 @@ echo "$out" | grep -q "a remix: main/client_lua/init.lua" ||
 out=$("$b" aitta install "$t/raw/tester-evilmix-1.0.0.zip" "$t/u3" 2>&1) &&
 	fail "an install took a remix carrying client Lua: $out"
 echo "$out" | grep -q "a remix: main/client_lua/init.lua" || fail "install evilmix: $out"
-[ ! -e "$t/u3/installed/tester/evilmix" ] || fail "evilmix was installed"
+[ ! -e "$t/u3/installed/$fp/evilmix" ] || fail "evilmix was installed"
 v=$t/bad
 mkdir -p "$v"
 manifest badmix '{"board_size": 99}' > "$v/meta.json"
@@ -260,8 +261,8 @@ run_client 120 "$t/inst.log" timeout 400 "$b" -o launch_ui=launch_menu -D "$t/u2
 	-C "$t/c_u2" -w 1000x700 -l 3 -o sound_mute=1 -c @"$t/inst.cmds" ||
 	fail "the install and play drive ($t/inst.log)"
 for p in $(pgrep -f "[b]uildat_server .*-D $t/u2"); do kill $p; done
-[ -f "$t/u2/installed/tester/boardy/1.0.0/meta.json" ] || fail "the base was not installed"
-[ -f "$t/u2/installed/tester/boardy_mine/1.0.0/main/client_data/green_texture.png" ] ||
+[ -f "$t/u2/installed/$fp/boardy/1.0.0/meta.json" ] || fail "the base was not installed"
+[ -f "$t/u2/installed/$fp/boardy_mine/1.0.0/main/client_data/green_texture.png" ] ||
 	fail "the remix was not installed"
 cat "$t"/c_u2/buildat_server*.log | grep -aq "demo_board_game: a board of 6x6" ||
 	fail "the server's board is not 6x6 ($t/c_u2/buildat_server*.log)"

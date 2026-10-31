@@ -911,8 +911,9 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 			start_named();
 		});
 	// [WEB_LOCAL_AITTA] The installed package's files, as the client's
-	// storage has them, to the worker at /installed/<author>/<name>/
-	// <version> (the server names its saves <author>.<name> by that), and
+	// storage has them, to the worker at /installed/<fp>/<name>/
+	// <version> (the server names its saves <fp>.<name> by that, fp its
+	// key's, [AITTA_KEY_IDENTITY]), and
 	// its .web/ .wasm at /wasm/, where the server looks for them
 	function start_package(m){
 		var dir = '/buildat/user/installed/' + m[1] + '/' + m[2] + '/' + m[3];

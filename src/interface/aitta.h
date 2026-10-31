@@ -107,7 +107,9 @@ namespace interface
 		// [LUANTI_APP_PACKAGES] The app a variant is made on ([GAME_BASE]):
 		// its manifest's "base", a plain name -- an app beside app_dir, as
 		// in the tree, else one shipped in <share_path>/apps -- or
-		// "<author>.<name>", an installed package: the newest installed
+		// "<author>.<name>", an installed package (resolve_installed(), on
+		// the Aitta in app_dir's .aitta_from; the key it resolved to kept
+		// in app_dir's .aitta_base and followed after): the newest installed
 		// version, or with "base_version" the newest of its major at that
 		// version or above. The base's directory; "" with *why empty for
 		// no base, "" with *why set for one not there.
@@ -126,19 +128,79 @@ namespace interface
 		ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir,
 				const sv_<std::pair<ss_, ss_>> &built = {});
 
+		// **A package is its key and its name** ([AITTA_KEY_IDENTITY]):
+		// <fp>/<name>, fp the signing key's fingerprint, the first
+		// FINGERPRINT_LEN hex digits of the sha256 of its 65 bytes. Two
+		// Aittas may each bind an author "alice"; their packages are two.
+		// The manifest's "author" is a name to show, and which Aitta
+		// vouches for it (vouch()) says whose. "" for no key.
+		static const size_t FINGERPRINT_LEN = 20;
+		ss_ fingerprint(const ss_ &public_hex);
+		bool fingerprint_ok(const ss_ &s);
+
 		// Checks a release -- the hash, the signature, the manifest, the
 		// engine API -- and unpacks it into
-		// <user>/installed/<author>/<name>/<version>/. The first install of
-		// an author/name keeps its key, and a later version signed by
-		// another key is refused. Returns the directory; throws why not.
-		// review: a reviewer's playtest ([AITTA_REVIEW]), an app only, into
-		// <user>/review/<author>__<name>/<version>/, no key kept, over one
-		// there was.
+		// <user>/installed/<fp>/<name>/<version>/: a version of another
+		// key is another package. Returns the directory; throws why not.
+		// from: the Aitta it came from, in the version's .aitta_from,
+		// which its references to other packages resolve on
+		// (resolve_installed()). review: a reviewer's playtest
+		// ([AITTA_REVIEW]), an app only, into
+		// <user>/review/<fp>__<name>/<version>/, over one there was.
 		// share_path given: a variant whose base is not there (find_base())
 		// is refused, naming it.
 		ss_ install(const ss_ &zip_path, const ss_ &sig_path,
 				const ss_ &user_path, bool review = false,
-				const ss_ &share_path = "");
+				const ss_ &share_path = "", const ss_ &from = "");
+
+		// [AITTA_KEY_IDENTITY] A package named as its manifests name one
+		// -- "<author>/<name>" (a Kit dependency), "<author>.<name>" (a
+		// base, a world's app), "<author>__<name>" (an extension) --
+		// resolved to an installed one: the fingerprint of the one whose
+		// manifest's author that is, from the Aitta `from` (its
+		// .aitta_from); with from "" (a local file), the only one by that
+		// author and name. "" and *why for none or more than one.
+		ss_ resolve_installed(const ss_ &user_path, const ss_ &author,
+				const ss_ &name, const ss_ &from, ss_ *why);
+
+		// **Who vouches for a key**: the Aitta's own word, its
+		// GET <aitta>/api/v1/aitta/info?key=<key>, whose "author" is the
+		// one it binds the key to -- never what a package or an uploading
+		// client says. vouch_answer(): that answer's body read against the
+		// manifest's author, "" or why not. vouch(): the GET (blocking) and
+		// the same.
+		ss_ vouch_answer(const ss_ &body, const ss_ &author);
+		ss_ vouch(const ss_ &aitta, const ss_ &public_hex, const ss_ &author);
+		// The vouch a server asks for a client that named the Aitta
+		// (Kit's install of a package): the server's GET to a host it was
+		// told, so its reach is narrowed. The Aitta is an origin,
+		// https://host[:port] and nothing after it; its name's addresses
+		// each a public one (none private, link-local, CGNAT, multicast,
+		// unspecified, or loopback: loopback, and http with it, only with
+		// loopback_ok, which a caller gives where the asking client is on
+		// the server's machine itself and reaches its loopback already);
+		// then one GET to the address checked (http_get_pinned): no
+		// redirect, VOUCH_MAX_BYTES, VOUCH_TIMEOUT_S. "" when it vouches,
+		// else why not.
+		static const size_t VOUCH_MAX_BYTES = 4096;
+		static const long VOUCH_TIMEOUT_S = 5;
+		ss_ vouch_guarded(const ss_ &aitta, const ss_ &public_hex,
+				const ss_ &author, bool loopback_ok);
+		// An address a server's GET to a host a client named may go to
+		// (vouch_guarded()): a numeric v4 or v6
+		bool public_address(const ss_ &ip, bool loopback_ok);
+		// The host an Aitta's address names ("aitta.buildat.org",
+		// "127.0.0.1:8080"), for showing whose an author is
+		ss_ aitta_host(const ss_ &aitta);
+		// An installed key's vouch, <user>/installed/<fp>/.vouch
+		// ({"aitta", "author"}), written by the installing client after
+		// its own vouch() (or a GET of its own to the same address) and
+		// read for the tile's "alice (aitta.buildat.org)" or "alice
+		// (unverified)". record_vouch() writes it; installed_vouch()
+		// reads it: the Aitta's address, "" for unverified.
+		void record_vouch(const ss_ &user_path, const ss_ &fp,
+				const ss_ &aitta, const ss_ &author);
+		ss_ installed_vouch(const ss_ &user_path, const ss_ &fp);
 
 		// [WORLD_PACKAGES] A world: a save on top of a named app ("kind":
 		// "world", "app", "app_version", "buildat_version"), its save

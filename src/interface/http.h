@@ -25,6 +25,13 @@ namespace interface
 	// second, and it throws -- for a thread its module's stop joins
 	ss_ http_get(const ss_ &url, ss_ *redirect = nullptr,
 			const std::atomic<bool> *cancel = nullptr);
+	// [AITTA_KEY_IDENTITY] One GET a server makes to a host a client
+	// named: connected to `ip` alone (the address its caller checked,
+	// whatever the name resolves to by then), no redirect followed (one is
+	// an error), the body at most max_bytes and the whole of it timeout_s.
+	// Throws as http_get does.
+	ss_ http_get_pinned(const ss_ &url, const ss_ &ip, size_t max_bytes,
+			long timeout_s);
 	// The body of a POST of `body` as `content_type` ([STARPORT]: a server
 	// announcing itself, a client's report); throws as http_get does.
 	// ipv4: over IPv4 only, for an announce whose source address is what

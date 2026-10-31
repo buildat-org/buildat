@@ -293,11 +293,12 @@ local function feedback_target(source)
 	if not home then
 		return nil
 	end
-	local kf = io.open(source.path .. "/../key", "rb")
+	-- [AITTA_KEY_IDENTITY] installed/<fp>/.key; the author its manifest's
+	local kf = io.open(source.path .. "/../../.key", "rb")
 	local key = kf and kf:read("*a"):match("%x+") or ""
 	if kf then kf:close() end
-	local author, name, version = source.name:match("^(.-)%.(.-)@(.*)$")
-	return hearth_target(home, author, name, version, key)
+	local _, name, version = source.name:match("^(.-)%.(.-)@(.*)$")
+	return hearth_target(home, tostring(m.author), name, version, key)
 end
 
 -- [SAVE_CONTEXT_MENU] An app's actions on one of its saves, a launcher's
@@ -332,11 +333,39 @@ function M.actions(log)
 	local sources = buildat.list_launchers()
 	-- How many versions of each installed app are here ([AITTA_MVP])
 	local versions = {}
+	-- [AITTA_KEY_IDENTITY] The installed ones' authors by name, the keys
+	-- each name has here: two keys' "alice" are told apart by their
+	-- Aittas' hosts
+	local keys_of = {}
 	for _, source in ipairs(sources) do
 		if source.kind == "installed" then
 			local app = source.name:match("^(.-)@")
 			versions[app] = (versions[app] or 0) + 1
 		end
+		if source.fp and source.author then
+			keys_of[source.author] = keys_of[source.author] or {}
+			keys_of[source.author][source.fp] = true
+		end
+	end
+	local function by(source)
+		if not (source.fp and source.author) then
+			return nil
+		end
+		local n = 0
+		for _ in pairs(keys_of[source.author]) do
+			n = n + 1
+		end
+		local host = tostring(source.aitta ~= "" and source.aitta or
+				source.from or ""):match("^%a+://([^/]+)") or ""
+		return "By " .. source.author .. ((n > 1 or source.aitta == "") and
+				host ~= "" and " @" .. host or "") ..
+				(source.aitta == "" and " (unverified)" or "")
+	end
+	-- A tile's description, and who it is by
+	local function describe(a, source)
+		local d = type(a.description) == "string" and a.description or nil
+		local b = by(source)
+		return b and (d and d .. "\n" .. b or b) or d
 	end
 	for _, source in ipairs(sources) do
 		local actions, from = nil, source.kind.."/"..source.name
@@ -502,8 +531,10 @@ function M.actions(log)
 				end
 			end
 			local aitta = (read(".aitta_from") or ""):match("^(https?://%S+)")
-			local author, name, version = source.name:gsub("^review:", ""):
+			-- [AITTA_KEY_IDENTITY] The Aitta's id for it, its author's
+			local _, name, version = source.name:gsub("^review:", ""):
 					match("^([%w_]+)%.([%w_]+)@(.+)$")
+			local author = source.author
 			local ok, aitta_ext = pcall(require, "buildat/core/aitta")
 			if aitta and author and ok and type(aitta_ext) == "table" then
 				actions[#actions + 1] = {id = "report",
@@ -583,8 +614,7 @@ function M.actions(log)
 							"review") and a.id ~= "move_saves" and
 							a.id ~= "remove") and
 							a.label.." "..source.name:match("@(.*)$") or a.label,
-					description = type(a.description) == "string" and
-							a.description or nil,
+					description = describe(a, source),
 					order = tonumber(a.order),
 					kind = source.kind, from = from,
 					category = category_of(a) or
