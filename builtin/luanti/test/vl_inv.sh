@@ -192,8 +192,7 @@ run_vanilla(){
 		{ echo "FAIL: the server did not start"; exit 1; }
 	local srv=$SERVER_PID
 	pids+=($srv)
-	cmds "$o" "wait_log 120000 the server put the player" \
-		"wait_log 60000 scene, 0 undrawn within 2" > "$o/cmds.txt"
+	cmds "$o" "wait_log 180000 load: the world is in" > "$o/cmds.txt"
 	timeout 180 bin/buildat -s localhost:29797 -w 1280x720 -l 3 \
 		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1 ||
 		fail "vanilla: the drive ($o/cli.log): $(grep -ao 'Command sequence failed.*' "$o/cli.log" | head -1)"

@@ -50,6 +50,9 @@ public:
 
 	u32 flags = 0;
 	int mapseed = 0;
+	// buildat: the world's seed, from the mapgen placeDeco() runs for; what
+	// DecoSchematic rolls its schematic's probabilities from
+	s32 world_seed = 0;
 	std::vector<content_t> c_place_on;
 	s16 sidelen = 1;
 	s16 y_min;

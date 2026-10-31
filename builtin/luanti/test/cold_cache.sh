@@ -37,8 +37,7 @@ if ! grep -aq "Mods loaded" "$out/srv.log" 2>/dev/null; then
 fi
 # The port taken, up to 10 s
 for _ in $(seq 50); do port_taken 29825 && break; sleep 0.2; done
-{ echo "wait_log 120000 the server put the player"
-	echo "wait_log 60000 scene, 0 undrawn within 2"
+{ echo "wait_log 180000 load: the world is in"
 	echo "quit"; } > "$out/cmds.txt"
 # -C: a cache path of its own, empty, so nothing is there to be reused
 timeout 300 bin/buildat -s "localhost:29825" -C "$out/cache" -w 1280x720 \

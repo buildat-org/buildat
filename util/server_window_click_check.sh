@@ -27,8 +27,7 @@ for size in auto 1.5; do
 	# A page of the Server window says it is shown; a click on its page
 	# must bring no Settings back, the one off it must
 	cat > "$t/$size.cmds" <<C
-wait_log 120000 the server put the player at
-wait_log 60000 scene, 0 undrawn within 2
+wait_log 180000 load: the world is in
 keypress Escape
 wait_log 5000 pause: the menu shown
 delay 300

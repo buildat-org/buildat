@@ -129,6 +129,7 @@ void Decoration::placeDeco(Mapgen *mg, u32 blockseed, v3s16 nmin, v3s16 nmax)
 		return;
 
 	PcgRandom ps(blockseed + 53);
+	world_seed = mg->seed;
 	int carea_size = nmax.X - nmin.X + 1;
 	if (nmax.Z - nmin.Z + 1 != carea_size) {
 		// TODO: this is a stupid restriction, which we should lift
@@ -445,7 +446,15 @@ size_t DecoSchematic::generate(MMVManip *vm, PcgRandom *pr, v3s16 p, bool ceilin
 
 	bool force_placement = (flags & DECO_FORCE_PLACEMENT);
 
-	schematic->blitToVManip(vm, p, rot, force_placement);
+	// buildat: upstream rolls the schematic's probabilities with myrand(),
+	// the process's one generator, so a tree's leaves and a structure's
+	// random parts differ between runs and with what else drew from it
+	// before. Rolled here from the world's seed and where it is placed,
+	// which is the same every time and does not move this decoration's pr
+	// ([MCL_GEN_NONDETERMINISTIC])
+	PcgRandom blit_pr((u64)(u16)p.X | (u64)(u16)p.Y << 16 |
+			(u64)(u16)p.Z << 32, (u64)(u32)world_seed);
+	schematic->blitToVManip(vm, p, rot, force_placement, &blit_pr);
 
 	return 1;
 }

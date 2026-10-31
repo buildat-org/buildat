@@ -19,6 +19,8 @@
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
 #include <deque>
+#include <set>
+#include <tuple>
 #define MODULE "worldgen"
 
 namespace magic = Urho3D;
@@ -78,6 +80,9 @@ struct CInstance: public worldgen::Instance
 
 	std::deque<pv::Vector3DInt16> m_queued_sections;
 	pv::Vector3DInt16 m_last_taken = pv::Vector3DInt16(0, 0, 0);
+	// Counts the takes, for the pinned sections' share; see
+	// take_next_section()
+	size_t m_takes = 0;
 
 	CInstance(interface::Server *server, SceneReference scene_ref):
 		m_server(server),
@@ -110,6 +115,7 @@ struct CInstance: public worldgen::Instance
 	// simplified: a scan of the whole queue per section; it is hundreds
 	// long and a section takes a hundred milliseconds or more to generate
 	bool take_next_section(const sv_<pv::Vector3DInt16> &players,
+			const std::set<std::tuple<int16_t, int16_t, int16_t>> &pinned,
 			pv::Vector3DInt16 *section_p_out,
 			GeneratorInterface **generator_out, uint64_t *epoch_out)
 	{
@@ -132,7 +138,24 @@ struct CInstance: public worldgen::Instance
 		// chunks a section in a fuzz.sh walk, 3.4 by the ring.
 		size_t best = 0;
 		int64_t best_ring = INT64_MAX, best_last = INT64_MAX;
-		for(size_t i = 0; i < m_queued_sections.size() && !players.empty(); i++){
+		// Every other take is the oldest pinned section's, a forceload's
+		// or an emerge_area's, not one only held (LoadPoint::hold_only)
+		// ([FORCELOAD_STARVED]): by the player's ring
+		// alone one far from every player waited as long as anybody kept
+		// walking into new terrain, minutes. Not the last taken: the
+		// player's next one is still nearest the player's last.
+		bool share = !pinned.empty() && m_takes++ % 2 == 1;
+		bool found = false;
+		for(size_t i = 0; share && i < m_queued_sections.size(); i++){
+			const pv::Vector3DInt16 &s = m_queued_sections[i];
+			if(pinned.count(std::make_tuple(s.getX(), s.getY(), s.getZ()))){
+				best = i;
+				found = true;
+				break;
+			}
+		}
+		for(size_t i = 0; !found && i < m_queued_sections.size() &&
+				!players.empty(); i++){
 			const pv::Vector3DInt16 &s = m_queued_sections[i];
 			for(const pv::Vector3DInt16 &p : players){
 				int64_t r = ring(s, p);
@@ -147,7 +170,8 @@ struct CInstance: public worldgen::Instance
 			}
 		}
 		*section_p_out = m_queued_sections[best];
-		m_last_taken = *section_p_out;
+		if(!found)
+			m_last_taken = *section_p_out;
 		*generator_out = m_generator.get();
 		*epoch_out = m_epoch;
 		m_queued_sections.erase(m_queued_sections.begin() + best);
@@ -409,6 +433,9 @@ void GenerateThread::run(interface::Thread *thread)
 				scenes.push_back(pair.first);
 		});
 		std::map<SceneReference, sv_<pv::Vector3DInt16>> players;
+		// And the pinned sections asked for, the points with no radius
+		std::map<SceneReference, std::set<std::tuple<int16_t, int16_t,
+				int16_t>>> pinned;
 		for(SceneReference scene : scenes){
 			try {
 				voxelworld::access(m_module->m_server, scene,
@@ -420,12 +447,16 @@ void GenerateThread::run(interface::Thread *thread)
 					};
 					for(const voxelworld::LoadPoint &lp :
 							world->get_load_points()){
-						if(lp.peer == 0)
-							continue;
-						players[scene].push_back(pv::Vector3DInt16(
+						pv::Vector3DInt16 sp(
 								floor_div(lp.p.getX(), ss.getX()),
 								floor_div(lp.p.getY(), ss.getY()),
-								floor_div(lp.p.getZ(), ss.getZ())));
+								floor_div(lp.p.getZ(), ss.getZ()));
+						if(lp.peer != 0)
+							players[scene].push_back(sp);
+						else if(lp.load_xz == 0 && lp.load_y == 0 &&
+								!lp.hold_only)
+							pinned[scene].insert(std::make_tuple(sp.getX(),
+									sp.getY(), sp.getZ()));
 					}
 				});
 			} catch(NullptrCatch &e){
@@ -453,7 +484,7 @@ void GenerateThread::run(interface::Thread *thread)
 				task.scene_ref = instance->m_scene_ref;
 				task.instance = instance.get();
 				if(instance->take_next_section(players[pair.first],
-						&task.section_p,
+						pinned[pair.first], &task.section_p,
 						&task.generator, &task.epoch))
 					tasks.push_back(task);
 			}

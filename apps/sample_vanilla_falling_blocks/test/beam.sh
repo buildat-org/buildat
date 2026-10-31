@@ -127,8 +127,7 @@ sleep 5
 srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
 cat > "$out/cmds.txt" <<CMDS
-wait_log 60000 the server put the player
-wait_log 60000 scene, 0 undrawn within 2
+wait_log 120000 load: the world is in
 delay 2000
 look_dir 2 0.5 2
 delay 300

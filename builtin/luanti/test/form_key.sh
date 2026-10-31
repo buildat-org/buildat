@@ -34,12 +34,11 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	{ echo "FAIL: the server did not start"; exit 1; }
 srv=$SERVER_PID
 trap "kill -INT $srv 2>/dev/null" EXIT
-# The 2 s after the settle: VoxeLibre's inventory formspec arrives a few
+# The 2 s after the world is in: VoxeLibre's inventory formspec arrives a few
 # ticks after the join and nothing marks it on the client. The form's
 # field is focused, and its scan done, in the frames after "opened"
 cat > "$out/cmds.txt" <<CMDS
-wait_log 60000 the server put the player
-wait_log 60000 scene, 0 undrawn within 2
+wait_log 120000 load: the world is in
 delay 2000
 keypress E
 text e

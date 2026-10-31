@@ -152,6 +152,12 @@ struct World
 	// pin share this, and one owner's free took the other's hold with it
 	// (the check read its room out of an unloaded section, 2026-09-21)
 	sm_<uint64_t, int> m_forceloaded;
+	// How many of a section's holds are those of chunks completed only
+	// because a player or the spawn is near (m_held_chunks): one held by
+	// those alone is LoadPoint::hold_only. A chunk asked for -- a
+	// forceload's, an emerge's, a mod's read -- is a forceload's own.
+	sm_<uint64_t, int> m_chunk_pinned;
+	std::set<int64_t> m_held_chunks;
 
 
 	// Where the world stays loaded: every player, and the origin whether or
@@ -182,6 +188,9 @@ struct World
 					(int32_t)sp.getY() * m_section_size.getY(),
 					(int32_t)sp.getZ() * m_section_size.getZ()),
 					0, 0, 0, 0));
+			auto it = m_chunk_pinned.find(pair.first);
+			points.back().hold_only = it != m_chunk_pinned.end() &&
+					it->second >= pair.second;
 		}
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			world->set_load_points(points);
@@ -331,7 +340,8 @@ struct World
 		// Forceloaded too: Luanti emerges a forceloaded block's whole
 		// mapchunk, and with nobody near the sections of it outside the
 		// forceload were left to unload before it completed
-		const bool may_ask = !asked && (near_a_point(section_p) ||
+		const bool near = near_a_point(section_p);
+		const bool may_ask = !asked && (near ||
 				m_forceloaded.count(section_key(section_p)));
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			for(int cz = chunk_index(z0); cz <= chunk_index(z0 + sz - 1); cz++)
@@ -339,7 +349,7 @@ struct World
 			for(int cx = chunk_index(x0); cx <= chunk_index(x0 + sx - 1); cx++){
 				if(m_chunks_run.count(chunk_key(cx, cy, cz)))
 					continue;
-				if(ask_chunk(world, cx, cy, cz, may_ask))
+				if(ask_chunk(world, cx, cy, cz, may_ask, near))
 					out.push_back(pv::Vector3DInt16(cx, cy, cz));
 			}
 		});
@@ -355,7 +365,7 @@ struct World
 	// asked for -- from the save, which is synchronous, or from the
 	// generator, whose answer comes back through on_section_generated().
 	bool ask_chunk(voxelworld::Instance *world, int cx, int cy, int cz,
-			bool ask)
+			bool ask, bool held_only = false)
 	{
 		using luanti_mapgen::CHUNK_NODES;
 		using luanti_mapgen::CHUNK_OFFSET;
@@ -367,12 +377,16 @@ struct World
 		const int64_t key = chunk_key(cx, cy, cz);
 		bool complete = true;
 		const bool pin = ask && !m_chunk_pins.count(key);
+		if(pin && held_only)
+			m_held_chunks.insert(key);
 		for(int z = floordiv(nz, sz); z <= floordiv(nz + CHUNK_NODES - 1, sz); z++)
 		for(int y = floordiv(ny, sy); y <= floordiv(ny + CHUNK_NODES - 1, sy); y++)
 		for(int x = floordiv(nx, sx); x <= floordiv(nx + CHUNK_NODES - 1, sx); x++){
 			const pv::Vector3DInt16 sp(x, y, z);
 			if(pin){
 				m_forceloaded[section_key(sp)]++;
+				if(held_only)
+					m_chunk_pinned[section_key(sp)]++;
 				m_chunk_pins[key].push_back(section_key(sp));
 				m_load_points_changed = true;
 			}
@@ -451,10 +465,14 @@ struct World
 				gennotify_string(events), maps);
 		auto pins = m_chunk_pins.find(chunk_key(c.getX(), c.getY(), c.getZ()));
 		if(pins != m_chunk_pins.end()){
+			const bool held = m_held_chunks.erase(pins->first);
 			for(uint64_t k : pins->second){
 				auto it = m_forceloaded.find(k);
 				if(it != m_forceloaded.end() && --it->second <= 0)
 					m_forceloaded.erase(it);
+				auto cit = held ? m_chunk_pinned.find(k) : m_chunk_pinned.end();
+				if(cit != m_chunk_pinned.end() && --cit->second <= 0)
+					m_chunk_pinned.erase(cit);
 			}
 			m_chunk_pins.erase(pins);
 		}
