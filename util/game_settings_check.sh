@@ -88,6 +88,13 @@ wait_log 5000 dropdown_
 keypress Down
 keypress Return
 wait_log 5000 dropdown_
+# The Keys row is below the window's view since the Page Up/Down row
+# ([LIST_PAGE_SIZE]), and a click by label does not scroll: the wheel to
+# the end, as the Keys row is above the last section (Logs and errors)
+mouse_pos 550 500
+$(for _ in $(seq 20); do echo "mouse_wheel -1"; done)
+# the wheel's frames: the scrolls read before the click looks for its button
+delay 500
 click Button "Key bindings..."
 wait_log 5000 Game keys shown
 delay 500
