@@ -233,6 +233,7 @@ click <type> "<label>" [x y]
     with its rectangle and why it was left (another label, hidden, covered
     by what). For the checks that clicked at fixed pixels and missed
     silently when a row moved; move one to it when it is next touched.
+    util/web_drive.js's click and tap steps take the same lookup.
 
         click Button "Accept" 283 154
         click Button "No invites*"

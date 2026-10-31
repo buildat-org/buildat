@@ -447,6 +447,25 @@
 		if(m_state)
 			EM_ASM({ Module.buildatSynced = $0; },
 					(double)m_state->get_synced());
+		// [WEB_DRIVE_LABEL_CLICK] web_drive.js's click and tap by label:
+		// Module.buildatFind is a native click line, its hint in the
+		// canvas's pixels; Module.buildatFound is [x, y] in them, or the
+		// error a native sequence fails with
+		if(char *f = (char*)EM_ASM_PTR({
+				var f = Module.buildatFind;
+				Module.buildatFind = null;
+				return f ? stringToNewUTF8(f) : 0; })){
+			sv_<client::command_seq::Command> cmds;
+			ss_ err = "not a click line";
+			int x = 0, y = 0;
+			bool ok = client::command_seq::parse(f, &cmds, &err) &&
+					cmds.size() == 1 &&
+					cmds[0].type == client::command_seq::Type::Click &&
+					command_seq_find_click(cmds[0], &x, &y, &err);
+			free(f);
+			EM_ASM({ Module.buildatFound = ($0 ? [$1, $2] : UTF8ToString($3)); },
+					ok, x, y, err.c_str());
+		}
 	}
 #endif
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~60s (2026-10-18)
-# covers: src/client/web/index.html src/client/app_lua.h client/api.lua builtin/accounts/client_lua/accounts.lua
+# covers: src/client/web/index.html src/client/app_lua.h client/api.lua builtin/accounts/client_lua/accounts.lua util/web_left_dialog.json
 # [WEB_LEFT_DIALOG]: the web page after a leave with no launcher under the
 # game. floorplanner in Firefox (util/web_drive.sh, the web client from
 # web/): the first admin logs in by the setup code and logs out from the

@@ -30,6 +30,13 @@
 //   ["chord", "Ctrl+Shift+z"] a key with Ctrl, Alt and Shift held
 //   ["click", x, y]         left button, in CSS pixels
 //   ["click", x, y, ms, b]  button b (0 left, 1 middle, 2 right) held ms
+//   ["click", type, label]  left button at the centre of a UI element, as
+//                           the native click <type> "<label>" finds it
+//                           (doc/client_commands.txt): exact, or a prefix
+//                           with a trailing *; visible and not covered;
+//                           none fails the run with the client's list
+//   ["click", type, label, x, y]
+//                           of several, the one nearest x, y (CSS pixels)
 //   ["mouse", x, y]         the pointer there, no button
 //   ["wheel", x, y, dy]     the mouse wheel turned over x, y by dy CSS
 //                           pixels (positive scrolls down); it moves no
@@ -38,6 +45,8 @@
 //   ["tap", x, y]           a finger's touch there and up again
 //   ["tap", x, y, n]        n taps there with nothing awaited between,
 //                           a double tap in time (Chrome only)
+//   ["tap", type, label]    a tap where the click by label would go
+//   ["tap", type, label, x, y]
 //   ["hold", x, y, ms]      a finger held still there for ms
 //   ["drag", x0, y0, x1, y1, "touch"]
 //                           the left button (or a finger) down at x0, y0,
@@ -630,6 +639,33 @@ async function drive_wait(b, op, a) {
 	console.log(op + ": done");
 }
 
+// [WEB_DRIVE_LABEL_CLICK] The centre of a UI element, in CSS pixels, as
+// the native `click <type> "<label>" [x y]` finds it: the client answers
+// Module.buildatFind in the next frame (web_drive_waits()), in the
+// canvas's pixels
+async function find(b, type, label, hx, hy) {
+	const cv = "document.getElementById('canvas')";
+	// JSON both ways: Firefox's BiDi hands an array back as remote values
+	const json = async js => JSON.parse(await b.ops.value(`JSON.stringify(${js})`));
+	const [l, t, k] = await json(`(function(){ var c = ${cv},` +
+			" r = c.getBoundingClientRect();" +
+			" return [r.left, r.top, c.width / r.width]; })()");
+	const line = `click ${type} "${label}"` + (hx === undefined ? "" :
+			` ${Math.round((hx - l) * k)} ${Math.round((hy - t) * k)}`);
+	await b.ops.value(`Module.buildatFound = null, Module.buildatFind = ` +
+			JSON.stringify(line));
+	const until = Date.now() + 10000;
+	let r = null;
+	while ((r = await json("Module.buildatFound").catch(() => null)) === null) {
+		if (Date.now() > until)
+			throw new Error("no answer from the page to " + line);
+		await new Promise(r => setTimeout(r, 50));
+	}
+	if (typeof r === "string")
+		throw new Error(r);
+	return [l + r[0] / k, t + r[1] / k];
+}
+
 (async () => {
 	const b = args.browser === "firefox" ? await firefox() :
 			args.browser === "chrome" ? await chrome() :
@@ -713,6 +749,10 @@ async function drive_wait(b, op, a) {
 						throw new Error((await b.ops.count()) + " windows, not " + a);
 					await new Promise(r => setTimeout(r, 200));
 				}
+			} else if ((op === "click" || op === "tap") && typeof a === "string") {
+				const [x, y] = await find(b, a, c, args[2], args[3]);
+				console.log(op + ": " + a + " \"" + c + "\" at " + x + ", " + y);
+				await b.ops[op](x, y);
 			} else if (op === "nav") {
 				await b.ops.nav(full_rate(args[0]));
 			} else if (b.ops[op]) {
