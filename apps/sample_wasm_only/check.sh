@@ -24,6 +24,7 @@
 # covers: builtin/client_lua/client_lua/wasm_main.lua builtin/loader/loader.cpp src/server/wasm_build.cpp src/interface/wasm_api.h src/interface/rust/** apps/sample_wasm_only/** apps/sample_wasm_only_rust/**
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../.." && pwd)
 web=0 app=sample_wasm_only
 for a in "$@"; do

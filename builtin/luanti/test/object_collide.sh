@@ -14,6 +14,7 @@
 # covers: builtin/luanti/lua/entity.lua
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/object_collide"; mkdir -p "$out"

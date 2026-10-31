@@ -52,6 +52,7 @@
 # covers: builtin/voxelworld/wasm/** client/api.lua src/server/wasm_build.cpp src/lua_bindings/wasm.cpp src/wasm/** src/interface/wasm_api.h 3rdparty/wabt/** 3rdparty/wamr/** apps/sample_wasm/** builtin/client_data/**
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../.." && pwd)
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"

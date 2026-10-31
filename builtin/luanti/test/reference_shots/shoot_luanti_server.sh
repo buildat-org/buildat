@@ -26,6 +26,7 @@
 # likely to have been spoiled by the desktop's real mouse.
 set -u
 . "$(dirname "$0")/../../../../util/check_lib.sh"
+check_user
 
 # The repository root, from builtin/luanti/test/reference_shots/
 here=$(cd "$(dirname "$0")/../../../.." && pwd)

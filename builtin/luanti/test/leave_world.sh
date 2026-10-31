@@ -26,6 +26,7 @@
 # covers: extensions/launch_menu/init.lua src/client/app.cpp
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/leave_world"; mkdir -p "$out"; rm -f "$out"/*.png
@@ -36,6 +37,14 @@ for i in $(seq 1 300); do check_pgrep buildat_server >/dev/null || break; sleep 
 if check_pgrep buildat_server >/dev/null; then
 	echo "SKIP: a buildat_server is already running" >&2; exit "$SKIP"
 fi
+# A VoxeLibre save of the run's own to pick ([BOX_SHARED_USER_SAVES]: the
+# user path is fresh; fuzz.sh's world was there to pick before): the game's
+# id is all of it, an unstamped save the server stamps as it opens it
+s="$BUILDAT_USER_PATH/apps/vanilla/saves/buildat_test_leave"
+mkdir -p "$s"
+sqlite3 "$s/save.sqlite" "CREATE TABLE store (store TEXT NOT NULL, key TEXT NOT NULL,
+	value BLOB, PRIMARY KEY(store, key)); INSERT INTO store VALUES ('main', 'gameid', 'mineclone2')" ||
+	fail "the save"
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
 trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; check_pkill -INT buildat_server 2>/dev/null; rm -rf "$tmp"' EXIT

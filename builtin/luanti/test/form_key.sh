@@ -11,6 +11,7 @@
 #   builtin/luanti/test/form_key.sh
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 out="$here/local/form_key"
 mkdir -p "$out"

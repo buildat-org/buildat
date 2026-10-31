@@ -59,10 +59,7 @@
 # is run and reported but does not decide the status.
 set -u
 . "$(dirname "$0")/check_lib.sh"
-# builtin/luanti/test's runners are named by their file name alone, as
-# they were when this lived there ([RUN_ALL_TO_UTIL])
 root=$(cd "$(dirname "$0")/.." && pwd)
-luanti_test="$root/builtin/luanti/test"
 tier="${1:-quick}"
 list_only=""
 changed_range=""
@@ -85,7 +82,8 @@ mkdir -p "$out"
 # CI"): a check under util/, apps/ or extensions/ that names a tier is
 # run the same way as builtin/luanti/test's. A runner is named by its
 # path from the root, so the kinds are told apart in the output and in
-# the log names.
+# the log names -- builtin/luanti/test's too ([BOX_SHARED_USER_SAVES]:
+# named "fly.sh" alone, an ONLY or a pick by its path missed it).
 runners=""
 # **core.sh beside a check.sh** is the cheap runner an edit runs
 # ([CHECK_COST]): where the full one is dear, its tree carries a second
@@ -127,7 +125,6 @@ for f in $(tiered); do
 		[ "$t" = "$tier" ] || continue
 	fi
 	name=${f#"$root"/}
-	case "$f" in "$luanti_test"/*) name=$(basename "$f");; esac
 	[ -n "${ONLY:-}" ] && { echo "$name" | grep -qE "$ONLY" || continue; }
 	runners="$runners $name"
 done
@@ -186,7 +183,7 @@ if [ -n "$changed" ]; then
 	declare -A pats cost web rec
 	for name in $runners; do
 		rec[$name]=$(echo "${name%.sh}" | tr / _)
-		path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
+		path="$root/$name"
 		pats[$name]=$(covers_of "$path" "$name" | sed 's/\*\*/*/g')
 		cost[$name]=$(cost_of "$path" "$name")
 		web[$name]=$(grep -q web_drive "$path" && echo 1)
@@ -200,7 +197,6 @@ if [ -n "$changed" ]; then
 	for f in $files; do
 		[ -f "$root/$f" ] && grep -qE '^# tier: *(quick|full|long)' "$root/$f" || continue
 		name=$f
-		case "$f" in builtin/luanti/test/*) name=${f##*/};; esac
 		self[$f]=1; self[$name]=1
 		selfs="${selfs:-} $name"
 		pats[$name]=$(covers_of "$root/$f" "$name" | sed 's/\*\*/*/g')
@@ -286,7 +282,7 @@ $bw"
 	# second -- would otherwise be the cheapest runner covering half the
 	# tree and push every deep one out of the pick
 	for name in $runners; do
-		path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
+		path="$root/$name"
 		grep -q "^# always: *yes" "$path" || continue
 		picked="$picked
 $name"
@@ -307,7 +303,7 @@ $name"
 	runners=$picked
 	total=0
 	for name in $runners; do
-		path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
+		path="$root/$name"
 		total=$((total + $(cost_of "$path" "$name")))
 	done
 	echo "$(echo "$runners" | wc -w) runners, about ${total}s"
@@ -370,7 +366,7 @@ if [ -n "${REMOTE:-}" ]; then
 	near=""; far=(""  "")
 	k=0
 	for name in $runners; do
-		path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
+		path="$root/$name"
 		if [ "$(cost_of "$path" "$name")" -ge "${REMOTE_MIN:-300}" ] &&
 				! grep -q web_drive "$path"; then
 			far[$k]="${far[$k]} $name"; k=$((1 - k))
@@ -395,8 +391,7 @@ started=$(date +%s)
 for name in $runners; do
 	printf '%-34s ' "$name"
 	log="$out/$(echo "${name%.sh}" | tr / _).log"
-	path="$luanti_test/$name"
-	[ -f "$path" ] || path="$root/$name"
+	path="$root/$name"
 	tf="$touched/$(echo "${name%.sh}" | tr / _)"
 	rm -f "$tf.new"
 	t0=$(date +%s)

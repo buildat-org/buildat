@@ -34,6 +34,7 @@
 # loading, which is a minute and a half on this machine and is not a constant.
 set -u
 . "$(dirname "$0")/../../../../util/check_lib.sh"
+check_user
 
 # The repository root, from builtin/luanti/test/reference_shots/
 here=$(cd "$(dirname "$0")/../../../.." && pwd)
