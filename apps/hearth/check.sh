@@ -315,9 +315,16 @@ grep -qi 'href="[^"]*script\|<script\|<img' "$t/page" &&
 # 8. The reply field is multi-line: Enter breaks the line, Up moves a row
 # (the field's, not the buttons' -- ui_utils' keyboard page) keeping its x
 # past the empty one ([HEARTH_PAGE_KEYS]'s goal column), Home goes to the
-# row's start, Ctrl+Enter
-# sends
-# (the field's keys a tick apart, as typed)
+# row's start, Ctrl+Enter sends (the field's keys a tick apart, as typed).
+# First the ntfy question, which each admin login is asked until it is
+# answered: in a window over the thread, which takes the keys, and closing
+# it leaves the reply field unfocused ([HEARTH_XTHREE]). Don't add in a
+# login of its own, as mod_tools_check.sh's; the second before quit is
+# the answer's packet sent
+CMDS='wait_log_any 20000 server window: the page ntfy\ndelay 300\nclick Button "Don'"'"'t add"\nwait_log 5000 server window: closed\ndelay 1000\nquit\n' \
+	client admin checkpass12 "$t/admin_ntfy.log" ''
+grep -aq "admin answered the ntfy question: never" "$t/srv.log" ||
+	fail "the ntfy question not answered ($t/admin_ntfy.log)"
 CMDS='wait_log_any 20000 hearth: m1 text\ndelay 500\ntext one two\ndelay 100\nkeypress Return\ndelay 100\ntext three\ndelay 100\nkeypress Return\ndelay 100\nkeypress Return\ndelay 100\ntext four\ndelay 100\nkeypress Up\ndelay 100\nkeypress Up\ndelay 100\nkeypress Home\ndelay 100\ntext X\ndelay 100\nkeydown ctrl\ndelay 100\nkeypress Return\ndelay 100\nkeyup ctrl\nwait_log_any 10000 Xthree\nquit\n' \
 	client admin checkpass12 "$t/admin9.log" '' BUILDAT_HEARTH_OPEN=1
 get /t/1 > /dev/null
