@@ -12,6 +12,7 @@
 #include "core/log.h"
 #include <unordered_map>
 #include <list>
+#include <algorithm>
 #include <set>
 #include "interface/module.h"
 #include "interface/server.h"
@@ -977,7 +978,9 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 	struct Chunk
 	{
 		v3s16 node_min;
-		sv_<MapNode> nodes; // CHUNK_NODES^3, x fastest, then y
+		// CHUNK_NODES^3, x fastest, then y, as runs of one node: 20-120
+		// kB against the 2 MB a chunk is laid out, so that many are kept
+		sv_<std::pair<uint32_t, MapNode>> runs;
 		// What crossed the edge: a tree's crown, the top of a structure.
 		// Not the plain stone and water a mapgen overgenerates a layer of,
 		// which is the neighbour's own terrain before its caves.
@@ -988,12 +991,17 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 	// its on_generated has run or is still waiting for what was left the
 	// first time.
 	std::set<int64_t> m_reported;
-	// simplified: the last CHUNK_CACHE chunks (2 MB each) and nothing
-	// saved; a section after them makes its chunks again, which gives the
-	// same chunk at the cost of making it. A save of them is what to add
-	// if the generator's time ever shows up.
-	static const size_t CHUNK_CACHE = 32;
+	// simplified: the last CHUNK_CACHE chunks and nothing saved; a
+	// section after them makes its chunks again, which gives the same
+	// chunk at the cost of making it (100-170 ms). A section reads up to
+	// 27 (its own and the ones whose padding reaches into it); keeping
+	// 32, a fuzz.sh walk made 3.4 chunks a section, and 1.5 keeping 256
+	// ([WORLDGEN_SLOWDOWN]). A save of them is what to add if the
+	// generator's time shows up again.
+	static const size_t CHUNK_CACHE = 256;
 	std::list<sp_<Chunk>> m_chunks;
+	// One of them laid out, for generate()
+	sv_<MapNode> m_nodes;
 
 	const Chunk& get_chunk(const v3s16 &node_min)
 	{
@@ -1044,8 +1052,6 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 		const content_t c_stone = m_ndef.getId("mapgen_stone");
 		const content_t c_water = m_ndef.getId("mapgen_water_source");
 		const content_t c_river = m_ndef.getId("mapgen_river_water_source");
-		ch->nodes.resize((size_t)CHUNK_NODES * CHUNK_NODES * CHUNK_NODES);
-		size_t i = 0;
 		for(s16 z = full_min.Z; z <= full_max.Z; z++)
 		for(s16 y = full_min.Y; y <= full_max.Y; y++)
 		for(s16 x = full_min.X; x <= full_max.X; x++){
@@ -1054,7 +1060,10 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 			if(p.X >= node_min.X && p.X <= node_max.X &&
 					p.Y >= node_min.Y && p.Y <= node_max.Y &&
 					p.Z >= node_min.Z && p.Z <= node_max.Z){
-				ch->nodes[i++] = n;
+				if(!ch->runs.empty() && ch->runs.back().second == n)
+					ch->runs.back().first++;
+				else
+					ch->runs.emplace_back(1, n);
 				continue;
 			}
 			const content_t c = n.getContent();
@@ -1171,6 +1180,13 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 		const pv::Vector3DInt32 uc(sec_max.X, sec_max.Y, sec_max.Z);
 		size_t written = 0;
 		for(const Chunk *ch : chunks){
+			// Laid out again, a few milliseconds against making it
+			m_nodes.resize((size_t)CHUNK_NODES * CHUNK_NODES * CHUNK_NODES);
+			size_t i = 0;
+			for(const auto &run : ch->runs){
+				std::fill_n(m_nodes.begin() + i, run.first, run.second);
+				i += run.first;
+			}
 			const int x0 = std::max<int>(lc.getX(), ch->node_min.X);
 			const int y0 = std::max<int>(lc.getY(), ch->node_min.Y);
 			const int z0 = std::max<int>(lc.getZ(), ch->node_min.Z);
@@ -1180,7 +1196,7 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 			for(int z = z0; z <= z1; z++)
 			for(int y = y0; y <= y1; y++)
 			for(int x = x0; x <= x1; x++){
-				const MapNode &n = ch->nodes[
+				const MapNode &n = m_nodes[
 						((size_t)(z - ch->node_min.Z) * CHUNK_NODES +
 						(y - ch->node_min.Y)) * CHUNK_NODES +
 						(x - ch->node_min.X)];
@@ -1208,8 +1224,14 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 		}
 
 		if(++m_sections_made % 50 == 0){
-			log_i(MODULE, "%zu sections out of %zu chunks made",
-					m_sections_made, m_chunks_made);
+			size_t kept = 0;
+			for(const sp_<Chunk> &ch : m_chunks){
+				kept += ch->runs.size() * sizeof(ch->runs[0]) +
+						ch->spill.size() * sizeof(ch->spill[0]);
+			}
+			log_i(MODULE, "%zu sections out of %zu chunks made, "
+					"%zu chunks kept in %zu kB", m_sections_made, m_chunks_made,
+					m_chunks.size(), kept / 1024);
 		}
 		if(m_logged < 3){
 			m_logged++;
