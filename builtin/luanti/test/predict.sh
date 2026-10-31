@@ -123,11 +123,12 @@ trap 'kill -INT "$srv" 2>/dev/null' EXIT
 # client says which one is the answer to the click. A line where a
 # predicted voxel is written over by the server's would be the event
 # The fixture's move onto the platform waited for, not the spawn: after
-# the spawn's settle the platform was not there yet and the player fell.
-# The world in either side of it: what the keys and the aim wait for
+# the spawn's settle the platform was not there yet and the player fell
 cat > "$out/cmds.txt" <<CMDS
 wait_log_any 60000 the server put the player at 0.0, 121.0, 0.0
-wait_log_any 120000 load: the world is in
+wait_log 60000 scene, 0 undrawn within 2
+# Not "load: the world is in": that is said once, at the first spawn,
+# before this move ([LUANTI_LOADED_WAITS]); the platform is what has to be in
 # a settle after the line: the player lands on the platform
 delay 2000
 look_dir 1 -1 0
