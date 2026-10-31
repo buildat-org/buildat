@@ -228,13 +228,10 @@ if [ "${1:-}" = web_touch ]; then
 	# put it back, and the play taps pointed past the button. The player
 	# still settles a few hundredths off (0.5, 0.5): the taps are where the
 	# use (566, 389) and the dig of (1, 0, 3) under the button (575, 470)
-	# hit the same with the eye 0.15 off either way.
-	# simplified: the bar's Palette (458, 64) stays a pixel tap. By label
-	# the tap waits for the UI fit, and the fit to the open palette (470
-	# tall in a root of 400) makes the root too big to be narrow: the
-	# Palette toggle goes and the palette's items move under the drag.
-	# The pixel taps and the drag land inside the fit's half second of
-	# quiet. Once the editor's narrow() ignores its own fit, use the label
+	# hit the same with the eye 0.15 off either way. The open palette (470
+	# tall in a root of 400) makes the UI fit shrink it; the screen still
+	# reads narrow ([KIT_NARROW_RESCALE]), so the bar's Palette stays and
+	# is tapped by label, and the drag starts at kit/button after the fit.
 	check_tmp workbench_web_touch; t=$CHECK_TMP
 	cat > "$t/steps.json" <<'J'
 [
@@ -259,10 +256,12 @@ if [ "${1:-}" = web_touch ]; then
 	["tap", "Button", "Edit", 500, 174], ["waitlog", "kit editor: state: 1 entities", 20],
 	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 5],
 	["shot", "${OUT}/plan.png"],
-	["tap", 458, 64], ["frames", 5],
-	["drag", 114, 162, 572, 198, "touch"],
+	["tap", "Button", "Palette"],
+	["waitlog", "UI scale fitted to the screen: x0", 5], ["frames", 3],
+	["shot", "${OUT}/palette.png"],
+	["drag", 82, 116, 572, 198, "touch"],
 	["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
-	["tap", 458, 64], ["frames", 3],
+	["tap", "Button", "Palette"], ["frames", 3],
 	["tap", 572, 198], ["waitlog", "kit editor: selected 3", 10], ["frames", 3],
 	["drag", 572, 198, 510, 198, "touch"],
 	["waitlog", "kit editor: moved 1 by -3, 0", 10], ["frames", 5],

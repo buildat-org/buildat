@@ -33,8 +33,10 @@
 //   ["click", type, label]  left button at the centre of a UI element, as
 //                           the native click <type> "<label>" finds it
 //                           (doc/client_commands.txt): exact, or a prefix
-//                           with a trailing *; visible and not covered;
-//                           none fails the run with the client's list
+//                           with a trailing *; visible and not covered
+//                           (an exact one covered is asked for again,
+//                           up to 10 s); none fails the run with the
+//                           client's list
 //   ["click", type, label, x, y]
 //                           of several, the one nearest x, y (CSS pixels)
 //   ["mouse", x, y]         the pointer there, no button
@@ -657,10 +659,21 @@ async function find(b, type, label, hx, hy) {
 			JSON.stringify(line));
 	const until = Date.now() + 10000;
 	let r = null;
-	while ((r = await json("Module.buildatFound").catch(() => null)) === null) {
-		if (Date.now() > until)
-			throw new Error("no answer from the page to " + line);
-		await new Promise(r => setTimeout(r, 50));
+	for (;;) {
+		while ((r = await json("Module.buildatFound").catch(() => null)) === null) {
+			if (Date.now() > until)
+				throw new Error("no answer from the page to " + line);
+			await new Promise(r => setTimeout(r, 50));
+		}
+		// Covered for now (a notification over it goes by itself,
+		// [KIT_NARROW_RESCALE]): asked again until the deadline
+		const mine = typeof r === "string" &&
+				r.split("\n").find(s => s.includes(`"${label}" at`));
+		if (!mine || !mine.includes("covered by") || Date.now() > until)
+			break;
+		await new Promise(r => setTimeout(r, 200));
+		await b.ops.value(`Module.buildatFound = null, Module.buildatFind = ` +
+				JSON.stringify(line));
 	}
 	if (typeof r === "string")
 		throw new Error(r);

@@ -490,8 +490,21 @@ end
 -- the left and the inspector at the right under it, folded away on a
 -- narrow screen ([FP_TOUCH] 2) and opened from the bar, one at a time
 local W = {} -- the windows: bar, palette, inspector, people, log, ctx, dialog, touch
+-- The screen's own size in UI units is the root's smallest at the
+-- screen's pixels: the client's fit only shrinks the UI, and its root
+-- under the open palette (470 tall in a phone's 400) read as no longer
+-- narrow, the fold buttons gone ([KIT_NARROW_RESCALE]).
+-- simplified: a UI scale turned down keeps the smaller root until the
+-- screen's size changes; the client giving Lua its scale before the fit
+-- is the upgrade
+local screen_ui = {}
 local function narrow()
-	return magic.ui.root.width < 700 or magic.ui.root.height < 500
+	local r, g, u = magic.ui.root, magic.graphics, screen_ui
+	if u.gw ~= g.width or u.gh ~= g.height then
+		u.gw, u.gh, u.w, u.h = g.width, g.height, r.width, r.height
+	end
+	u.w, u.h = math.min(u.w, r.width), math.min(u.h, r.height)
+	return u.w < 700 or u.h < 500
 end
 
 local function folded(key)
