@@ -18,6 +18,7 @@
 #   builtin/luanti/test/pbr_pair.sh [vanilla|ext]   (both by default)
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 out="$here/local/pbr_pair"; mkdir -p "$out"
 luanti=$LUANTI

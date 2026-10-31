@@ -20,6 +20,7 @@
 # are one each.
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 # Seed 1 is no playtest world under mapgen v7, whatever the game: a sea at

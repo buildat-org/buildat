@@ -9,6 +9,7 @@
 #   GAME=mineclone2 apps/sample_vanilla_falling_blocks/test/beam.sh
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 GAME="${GAME:-mineclone2}"
 out="$here/local/voxel_physics"

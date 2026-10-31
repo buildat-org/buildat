@@ -11,6 +11,7 @@
 #   SEED=5 builtin/luanti/test/diglight.sh
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 SEED="${SEED:-5}"

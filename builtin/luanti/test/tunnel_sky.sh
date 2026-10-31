@@ -17,6 +17,7 @@
 #   (vanilla, 40, pbr by default)
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 which=${1:-vanilla}; range=${2:-40}; mode=${3:-pbr}
 out="$here/local/tunnel_sky/${which}_${mode}_r$range"; mkdir -p "$out"

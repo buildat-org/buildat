@@ -15,6 +15,7 @@
 # Every extension that ships a launch_ui.txt is booted by name.
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/launch_uis"; mkdir -p "$out"
 cd "$here/Build"

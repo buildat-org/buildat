@@ -16,6 +16,7 @@
 #   GAME=mineclone2 builtin/luanti/test/predict.sh
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 GAME="${GAME:-mineclone2}"
 out="$here/local/predict"

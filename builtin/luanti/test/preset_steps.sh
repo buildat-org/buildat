@@ -19,6 +19,7 @@
 #   SECONDS_EACH=180 builtin/luanti/test/preset_steps.sh
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 out="$here/local/preset_steps"; mkdir -p "$out"
 SECONDS_EACH="${SECONDS_EACH:-180}"

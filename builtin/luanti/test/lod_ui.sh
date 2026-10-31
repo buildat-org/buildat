@@ -17,6 +17,7 @@
 # covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/menu.lua
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_lod_ui.XXXXXX")
 cd "$here/Build"

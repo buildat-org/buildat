@@ -51,17 +51,47 @@ export BUILDAT_STARPORT_DEFAULT="${BUILDAT_STARPORT_DEFAULT:-https://127.0.0.1:9
 # The checks only read them; a write into a linked file would reach the desk.
 # simplified: linked once; a game the desk updates later is not seen until
 # local/check/user/shared/vanilla/<dir> is removed and linked again
-for _d in games texture_packs textures; do
-	[ -d "$_check_root/user/shared/vanilla/$_d" ] &&
-		[ ! -e "$BUILDAT_USER_PATH/shared/vanilla/$_d" ] &&
-		{ cp -al "$_check_root/user/shared/vanilla/$_d" \
-			"$BUILDAT_USER_PATH/shared/vanilla/$_d" 2>/dev/null || {
-		# Across file systems (a CHECK_USER_PATH in /tmp): copied
-		rm -rf "$BUILDAT_USER_PATH/shared/vanilla/$_d"
-		cp -r "$_check_root/user/shared/vanilla/$_d" \
-			"$BUILDAT_USER_PATH/shared/vanilla/$_d"; }; }
-done
-unset _d
+_check_link_games() # <from: a shared/vanilla>
+{
+	local d
+	for d in games texture_packs textures; do
+		[ -d "$1/$d" ] && [ ! -e "$BUILDAT_USER_PATH/shared/vanilla/$d" ] &&
+			{ cp -al "$1/$d" "$BUILDAT_USER_PATH/shared/vanilla/$d" 2>/dev/null || {
+			# Across file systems (a CHECK_USER_PATH in /tmp): copied
+			rm -rf "$BUILDAT_USER_PATH/shared/vanilla/$d"
+			cp -r "$1/$d" "$BUILDAT_USER_PATH/shared/vanilla/$d"; }; }
+	done
+}
+_check_link_games "$_check_root/user/shared/vanilla"
+
+# **A runner's own user path, emptied each run** ([BOX_SHARED_USER_SAVES]):
+# local/check/runs/<the runner's path>, all of it removed at the call but
+# the games and texture packs, linked once (~0.5 s) from the user path
+# it had (the desk's, linked above, or a parent runner's). Saves,
+# settings and the address store are the run's own: a save of a newer
+# format that another branch's run left in the shared user path (the
+# check box runs the branches in one slot) is not read. Exported as
+# CHECK_USER_PATH, so a script the runner starts that sources this file
+# shares it. The compiled modules stay shared (BUILDAT_CACHE_PATH).
+# Under the tree, not /tmp: the links need one file system, and a boxed
+# server reads nothing through a symlink out of its user path.
+# simplified: one directory a runner, so the same runner twice at once in
+# one tree shares it; a mktemp'd name and a removal at exit if that is
+# ever wanted.
+#   check_user          right after sourcing this file
+check_user()
+{
+	local u from=$BUILDAT_USER_PATH/shared/vanilla
+	u=$(realpath --relative-to="$_check_root" "$0") || fail "check_user: no runner at $0"
+	u="$_check_root/local/check/runs/$(echo "${u%.sh}" | tr / _)"
+	export CHECK_USER_PATH=$u BUILDAT_USER_PATH=$u
+	mkdir -p "$u/shared/vanilla"
+	find "$u" -mindepth 1 -maxdepth 1 ! -name shared -exec rm -rf {} +
+	find "$u/shared" -mindepth 1 -maxdepth 1 ! -name vanilla -exec rm -rf {} +
+	find "$u/shared/vanilla" -mindepth 1 -maxdepth 1 ! -name games \
+		! -name texture_packs ! -name textures -exec rm -rf {} +
+	_check_link_games "$from"
+}
 
 # An address a scripted client may connect to without the network
 # permission dialog, which a command file cannot answer: an accepted entry

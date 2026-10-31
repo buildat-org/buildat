@@ -17,6 +17,7 @@
 # sounds; devtest's do not, which is why this is not the game to ask.
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
+check_user
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/footstep"; mkdir -p "$out"
