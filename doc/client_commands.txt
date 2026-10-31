@@ -108,9 +108,11 @@ wait_log <ms> <text>
     work.
 
 wait_log_any <ms> <text>
-    The same, but the line counts wherever it appeared in this run. For
-    something a program says once, and says while the sequence is still
-    being read -- a launch UI that is slow to build says it is ready
+    The same, but the line counts wherever it appeared in this run, as
+    far back as the client keeps lines: the last 400 (src/core/log.cpp's
+    RECENT_MAX), so a busy log can lose an early one; wait for that first.
+    For something a program says once, and says while the sequence is
+    still being read -- a launch UI that is slow to build says it is ready
     before the first command runs, and wait_log then sits out its whole
     timeout and every step after it runs that much late.
 
