@@ -34,6 +34,12 @@ core.register_on_mods_loaded(function()
 							{name = "mcl_core:dirt"})
 				end
 			end
+			-- The fall cleared down to its section's floor: the seed is
+			-- a new one each run, and a tree or a hill under V stopped
+			-- the item at 117.7 (2026-10-31)
+			for y = 64, V.y do
+				core.set_node({x = V.x, y = y, z = V.z}, {name = "air"})
+			end
 		end
 		local on_floor, over_void
 		local watch
@@ -45,7 +51,8 @@ core.register_on_mods_loaded(function()
 			local ok = __luanti_section_state(O.x, O.y, O.z) == "generated" and
 					core.get_node(O).name == "mcl_core:dirt" and
 					__luanti_section_state(V.x, V.y, V.z) == "generated" and
-					core.get_node(V).name == "air"
+					core.get_node(V).name == "air" and
+					core.get_node({x = V.x, y = 64, z = V.z}).name == "air"
 			lay()
 			held = ok and (held + 1) or 0
 			if held < 2 then
