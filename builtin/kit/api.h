@@ -3,6 +3,7 @@
 #pragma once
 #include "interface/server.h"
 #include "interface/module.h"
+#include "core/json.h"
 #include <functional>
 
 namespace main_context
@@ -252,12 +253,30 @@ namespace interface
 //       sample's layer is stone where steep, the riverbed under the sea,
 //       else its biome's top, and decorations are voxel objects. Answered
 //       with "kit:terrain" {tool, stroke, undo, what}
+//   {"op": "voxel", "name": n, "texture": t, "kind": "solid"|"leaves"|
+//    "plant"|"water", "solid", "transparent", "light": 0..15,
+//    "friction": 0..10, "surface": tag}  -- ([KIT] stage 4g) the
+//       builder's voxel type "<their name>/<n>" (the store's row
+//       "voxel:<their name>/<n>", its "version" counted up by each),
+//       world.h's Material's fields: registered in every scene at once and
+//       sent to the clients connected (voxelworld's registry), placed by
+//       its name, saved by it. Texture t is a registered voxel's or an
+//       upload's. A new version of a registered one is drawn so at the
+//       next start (a registry's definitions never change). Friction and
+//       surface are for what moves on it (stage 4h); nothing reads them
+//       yet but voxel_type()
+// "kit:texture", a PNG's bytes ([KIT] stage 4g): a builder with the tools
+// on uploads a texture (square, 8..128 a side, a power of two, 64 KiB at
+// most), decoded and saved again (the row "texture:<hash>"), served as
+// "kit/up/<hash>.png" and answered with "kit:texture", that name.
 // Each is checked on the server, the rights first, then the ids, types,
 // parameter values (as the type declares them) and signal names; a
 // refusal is logged and answered with "kit:edit_refused" ("<op>: why").
 // An editor is sent "kit:edit_state" after each edit, anyone's:
 // {"editing", "palette": [type...], "types": {type: {params, inputs,
 // outputs, gizmo, usable, root}}, "authored": the row, "undo": n, "admin",
+// "voxels": [{"name", "texture", and the properties above}...] (each
+// placeable voxel), "textures": [name...] (what a type may wear),
 // and the admin's "people": [{name, admin, builder}] here}, and always
 // "can_edit", "running" and "by" (who started the round). Everyone is
 // sent it as the server's state changes, and a player as the admin grants
@@ -465,6 +484,10 @@ namespace kit
 		// [KIT] stage 4e: Kit's material set's voxels (kit/stone...)
 		// registered, the ones not there yet: before set_save()
 		virtual void register_voxels(interface::VoxelRegistry *reg) = 0;
+		// [KIT] stage 4g: a voxel's properties, Kit's set's or a builder's
+		// type's ({kind, solid, transparent, light, friction, surface}; a
+		// heightmap material's are its ground's); null for another's
+		virtual json::Value voxel_type(const ss_ &name) = 0;
 		// Where a player stands at the World's middle: x, z, and y the
 		// cell their feet are in (a heightmap's: its surface + 0.5)
 		virtual void world_spawn(double &x, double &y, double &z) = 0;

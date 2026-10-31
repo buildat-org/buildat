@@ -4,6 +4,7 @@
 	"dependencies": [
 		{"module": "client_lua"},
 		{"module": "client_data"},
+		{"module": "client_file"},
 		{"module": "main_context"},
 		{"module": "network"},
 		{"module": "replicate"},

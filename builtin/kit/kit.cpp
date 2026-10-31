@@ -24,7 +24,11 @@
 #include "interface/os.h"
 #include "kit/world.h"
 #include "voxel_objects/api.h"
+#include "client_file/api.h"
 #include <Scene.h>
+#include <Image.h>
+#include <MemoryBuffer.h>
+#include <VectorBuffer.h>
 #include <Node.h>
 #include <array>
 #include <chrono>
@@ -64,6 +68,11 @@ static const size_t MAX_STRING = 256;
 static const double MAX_COORD = 30000;
 static const size_t MAX_ENTITIES = 4096;
 static const size_t MAX_LINKS = 64;
+// [KIT] stage 4g: the builders' voxel types and uploaded textures a save
+// has at most, and what an upload may be
+static const size_t MAX_VOXEL_TYPES = 256, MAX_TEXTURES = 256;
+static const size_t MAX_TEXTURE_BYTES = 64 << 10;
+static const uint32_t MAX_TEXTURE_SIDE = 128;
 // An editor's undo goes back this many edits
 static const size_t UNDO_MAX = 50;
 // [KIT] stage 4d: the entities play makes at most (copies), a prefab's
@@ -616,9 +625,14 @@ struct Module: public interface::Module, public Interface
 	// Guests' dropped entities' names by their `by`, for this run
 	// simplified: kept for the run (a name each guest that came)
 	sm_<ss_, ss_> m_gone_guests;
-	// [KIT] stage 4f: the World's generator version as the save pinned it
-	// (1: a stage 4e save, kept so until the World changes; 0: none)
-	int64_t m_saved_version = 0;
+	// [KIT] stage 4g: the builders' voxel types (rows "voxel:<name>") by
+	// name, and the uploaded textures' served names (rows
+	// "texture:<hash>")
+	sm_<ss_, json::Value> m_voxel_types;
+	std::set<ss_> m_textures;
+	// The properties of what register_voxels() and a builder's type
+	// registered, by name (voxel_type())
+	sm_<ss_, world::Material> m_registered;
 	// The decorations on a heightmap surface (row "decor"), by id, and the
 	// voxel objects' models made, by structure
 	std::map<uint64_t, Decor> m_decor;
@@ -665,6 +679,8 @@ struct Module: public interface::Module, public Interface
 				m_server->emit_event_after_queued(interface::Event(
 						"kit:"+kind+"_through", new network::Packet(p)));
 			});
+		sub(m_server, "network:packet_received/kit:texture",
+				&Module::on_texture);
 		sub(m_server, "kit:use_through", &Module::on_use);
 		sub(m_server, "kit:edit_through", &Module::on_edit);
 		sub(m_server, "network:client_disconnected", &Module::on_left);
@@ -1627,6 +1643,7 @@ struct Module: public interface::Module, public Interface
 			names += (names.empty() ? "" : " ")+t;
 		log_i(MODULE, "On each player: %s", cs(names));
 		load_prefab_palette();
+		load_builder_voxels();
 		if(!host_world(why))
 			return false;
 
@@ -1777,54 +1794,272 @@ struct Module: public interface::Module, public Interface
 		for(auto &v : set.voxels){
 			interface::VoxelName n;
 			n.block_name = v.first;
+			m_registered.emplace(v.first, v.second);
 			if(reg->get(n))
 				continue;
-			const world::Material &m = v.second;
-			interface::VoxelDefinition def;
-			def.name = n;
-			// The faces: +y, -y, then the sides
-			for(int f = 0; f < 6; f++){
-				auto &seg = def.textures[f];
-				seg.resource_name = f == 0 ? m.top : f == 1 ? m.bottom : m.side;
-				seg.total_segments = magic::IntVector2(1, 1);
-				seg.select_segment = magic::IntVector2(0, 0);
-			}
-			if(m.kind == "water"){
-				// Passive: no flow (user, 2026-10-30)
-				def.edge_material_id = 10;
-				def.translucent = true;
-				def.transmits_light = true;
-			} else if(m.kind == "plant"){
-				// [KIT] stage 4f: Luanti's plantlike, two quads a cell
-				// across crossed on its diagonals, both sides drawn, cut out
-				// by the texture's alpha; walked through
-				def.face_draw_type = interface::FaceDrawType::NEVER;
-				def.edge_material_id = interface::EDGEMATERIALID_EMPTY;
-				def.alpha_masked = true;
-				def.transmits_light = true;
-				def.shape_double_sided = true;
-				const float r = 0.5f * 0.70710678f;
-				for(int i = 0; i < 2; i++){
-					const float az = i ? r : -r;
-					const float pts[4][3] = {{-r, -0.5f, az}, {r, -0.5f, -az},
-						{r, 0.5f, -az}, {-r, 0.5f, az}};
-					const float uv[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
-					interface::VoxelQuad q;
-					for(int k = 0; k < 4; k++){
-						for(int c = 0; c < 3; c++)
-							q.p[k][c] = pts[k][c];
-						q.uv[k][0] = uv[k][0];
-						q.uv[k][1] = uv[k][1];
-					}
-					def.shape.push_back(q);
-				}
-			} else {
-				def.edge_material_id = interface::EDGEMATERIALID_GROUND;
-				def.physically_solid = true;
-				def.alpha_masked = m.kind == "leaves";
-			}
-			reg->add_voxel(def);
+			reg->add_voxel(v.second.definition(v.first));
 		}
+	}
+
+	json::Value voxel_type(const ss_ &name)
+	{
+		auto it = m_registered.find(name);
+		return it == m_registered.end() ? json::Value() :
+				it->second.properties();
+	}
+
+	// ---- [KIT] stage 4g: voxel types made by builders (api.h)
+
+	// A builder's name as an author: letters, digits and _ ("" for none
+	// that may be one)
+	static ss_ builder_author(const ss_ &name)
+	{
+		ss_ author = name.substr(0, 64);
+		for(char &c : author)
+			if(!isalnum((unsigned char)c))
+				c = '_';
+		return author == "kit" ? "" : author;
+	}
+
+	// The registries of the app's scenes that have voxels
+	void each_registry(std::function<void(interface::VoxelRegistry*)> f)
+	{
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			for(auto &s : m_host.scenes){
+				voxelworld::Instance *w = ivw->get_instance(s.second);
+				if(w)
+					f(w->get_voxel_reg());
+			}
+		});
+	}
+
+	// A builder's type registered where it is not yet (a new version of
+	// one registered: at the next start)
+	// simplified: a registry's definitions never change once added (its
+	// rule), so a new version of a type is drawn at the next start
+	void register_builder_voxel(const ss_ &name, const json::Value &row)
+	{
+		world::Material m;
+		if(!m.parse(row)){
+			log_w(MODULE, "Voxel type %s: not a texture, a kind, light "
+					"0...15, friction 0...10 and a surface tag; not "
+					"registered", cs(name));
+			return;
+		}
+		m.layer = -1;
+		// simplified: the row's at once, though drawn so at the next start
+		m_registered[name] = m;
+		each_registry([&](interface::VoxelRegistry *reg){
+			interface::VoxelName n;
+			n.block_name = name;
+			if(!reg->get(n))
+				reg->add_voxel(m.definition(name));
+		});
+	}
+
+	// The save's: the uploaded textures served, the builders' types
+	// registered, before a section is loaded (the save's names then
+	// resolve to them)
+	void load_builder_voxels()
+	{
+		for(const ss_ &k : m_store->list("texture:")){
+			ss_ png;
+			if(m_store->get(k, png))
+				serve_texture(k.substr(8), png);
+		}
+		for(const ss_ &k : m_store->list("voxel:")){
+			ss_ row;
+			if(!m_store->get(k, row))
+				continue;
+			const json::Value r = json::load_string(row.c_str());
+			m_voxel_types[k.substr(6)] = r;
+			register_builder_voxel(k.substr(6), r);
+		}
+		log_i(MODULE, "Builders' voxel types: %zu, uploaded textures: %zu",
+				m_voxel_types.size(), m_textures.size());
+	}
+
+	void serve_texture(const ss_ &hash, const ss_ &png)
+	{
+		const ss_ name = "kit/up/"+hash+".png";
+		client_file::access(m_server, [&](client_file::Interface *i){
+			i->add_file_content(name, png);
+		});
+		m_textures.insert(name);
+	}
+
+	// The textures a builder's type may wear: every registered voxel's and
+	// the uploaded ones
+	std::set<ss_> texture_choices()
+	{
+		std::set<ss_> out = m_textures;
+		each_registry([&](interface::VoxelRegistry *reg){
+			for(const auto &d : reg->get_all())
+				for(const auto &t : d.textures)
+					if(!t.resource_name.empty())
+						out.insert(t.resource_name);
+		});
+		return out;
+	}
+
+	// The voxels to place, for the palette: each registered one but air,
+	// a builder's with its properties
+	json::Value voxel_palette()
+	{
+		json::Value out = json::array();
+		std::set<ss_> seen;
+		each_registry([&](interface::VoxelRegistry *reg){
+			for(const auto &d : reg->get_all()){
+				const ss_ &n = d.name.block_name;
+				if(d.fully_empty || !seen.insert(n).second)
+					continue;
+				auto it = m_voxel_types.find(n);
+				auto mt = m_registered.find(n);
+				json::Value v = it != m_voxel_types.end() ?
+						it->second.deepcopy() : mt != m_registered.end() ?
+						mt->second.properties() : json::object();
+				v.set("name", n);
+				if(it == m_voxel_types.end() &&
+						!d.textures[0].resource_name.empty())
+					v.set("texture", d.textures[0].resource_name);
+				out.append(v);
+			}
+		});
+		return out;
+	}
+
+	// {"op": "voxel", "name", "texture", "kind", "solid", "transparent",
+	// "light", "friction", "surface"}: the builder's voxel type "<their name>/<name>", or its
+	// next version
+	void make_voxel(const Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const ss_ short_name = jstr(j, "name");
+		const ss_ author = builder_author(p.name);
+		if(!name_ok(short_name))
+			return refuse("name: letters, digits and _");
+		if(author.empty())
+			return refuse("a builder's voxel types are under their name, "
+					"and it is \""+p.name.substr(0, 64)+"\"");
+		const ss_ name = author+"/"+short_name;
+		json::Value row = json::object();
+		row.set("format", ss_("kit_voxel"));
+		row.set("author", author);
+		row.set("name", short_name);
+		const ss_ texture = jstr(j, "texture");
+		row.set("texture", texture);
+		row.set("kind", jstr(j, "kind", "solid"));
+		row.set("solid", !j.get("solid").is_boolean() ||
+				j.get("solid").is_true());
+		row.set("transparent", j.get("transparent").is_true());
+		row.set("light", j.get("light").is_number() ? j.get("light") :
+				json::Value((int64_t)0));
+		row.set("friction", j.get("friction").is_number() ?
+				j.get("friction") : json::Value(1.0));
+		row.set("surface", jstr(j, "surface"));
+		world::Material m;
+		if(!m.parse(row) || m.light != row.get("light").as_number())
+			return refuse("a texture, a kind (solid, leaves, plant, water), "
+					"light (a whole number 0...15), friction 0...10 and a "
+					"surface tag (letters, digits and _)");
+		if(!texture_choices().count(texture))
+			return refuse("texture: no voxel or upload has "+texture);
+		auto old = m_voxel_types.find(name);
+		bool taken = false;
+		each_registry([&](interface::VoxelRegistry *reg){
+			interface::VoxelName n;
+			n.block_name = name;
+			taken = taken || reg->get(n);
+		});
+		if(old == m_voxel_types.end() && taken)
+			return refuse(name+" is the app's or Kit's voxel");
+		if(old == m_voxel_types.end() &&
+				m_voxel_types.size() >= MAX_VOXEL_TYPES)
+			return refuse("the save has "+itos(MAX_VOXEL_TYPES)+
+					" builders' voxel types");
+		const int64_t version = old == m_voxel_types.end() ? 1 :
+				json::jint(old->second, "version", 1) + 1;
+		row.set("version", version);
+		m_store->set("voxel:"+name, row.stringify());
+		m_voxel_types[name] = row;
+		register_builder_voxel(name, row);
+		log_i(MODULE, "%s made voxel type %s version %s (%s, %s%s%s, light "
+				"%i, friction %g, surface \"%s\")%s", cs(p.name), cs(name),
+				cs(itos(version)), cs(texture), cs(m.kind),
+				m.solid ? ", solid" : "", m.transparent ? ", transparent" : "",
+				m.light, m.friction, cs(m.surface),
+				taken ? ": drawn so at the next start" : "");
+		if(taken)
+			for(auto &o : m_peers)
+				if(o.second.name == p.name)
+					network::access(m_server, [&](network::Interface *in){
+						in->send(o.first, "kit:warning", "Voxel type "+name+
+								" version "+itos(version)+" is drawn so at the "
+								"next start");
+					});
+		for(auto &o : m_peers)
+			send_state(o.first);
+	}
+
+	// "kit:texture" (a PNG's bytes): a builder with the tools on uploads a
+	// texture for their voxel types; answered with "kit:texture" (its
+	// name, "kit/up/<hash>.png") or "kit:edit_refused". Decoded here and
+	// saved again as a PNG: a client is sent only what decoded
+	void on_texture(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		auto refuse = [&](const ss_ &why){
+			log_i(MODULE, "A texture by peer %zu refused: %s", peer, cs(why));
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(peer, "kit:edit_refused", "texture: "+why);
+			});
+		};
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || !pi->second.editing ||
+				!can_edit(peer))
+			return refuse("the tools on, with edit rights");
+		const ss_ &d = packet.data;
+		// A PNG's signature and its IHDR's sides, before it is decoded
+		auto be32 = [&](size_t at){
+			return (uint32_t)(uint8_t)d[at] << 24 | (uint32_t)(uint8_t)d[at +
+					1] << 16 | (uint32_t)(uint8_t)d[at + 2] << 8 |
+					(uint8_t)d[at + 3];
+		};
+		const uint32_t w = d.size() >= 24 ? be32(16) : 0,
+				h = d.size() >= 24 ? be32(20) : 0;
+		if(d.size() > MAX_TEXTURE_BYTES || d.compare(0, 8,
+				"\x89PNG\r\n\x1a\n", 8) != 0 || w != h || w < 8 ||
+				w > MAX_TEXTURE_SIDE || (w & (w - 1)))
+			return refuse("a PNG of at most "+itos(MAX_TEXTURE_BYTES >> 10)+
+					" KiB, square, its side a power of two 8..."+
+					itos(MAX_TEXTURE_SIDE));
+		if(m_textures.size() >= MAX_TEXTURES)
+			return refuse("the save has "+itos(MAX_TEXTURES)+" textures");
+		ss_ png;
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			magic::Image img(imc->get_context());
+			magic::MemoryBuffer in(d.data(), (unsigned)d.size());
+			if(!img.Load(in) || img.IsCompressed() ||
+					img.GetWidth() != (int)w || img.GetHeight() != (int)h)
+				return;
+			magic::VectorBuffer buf;
+			if(img.Save(buf))
+				png.assign((const char*)buf.GetData(), buf.GetSize());
+		});
+		if(png.empty())
+			return refuse("not an image that decodes");
+		const ss_ hash = interface::sha256::hex(
+				interface::sha256::calculate(png)).substr(0, 16);
+		m_store->set("texture:"+hash, png);
+		serve_texture(hash, png);
+		log_i(MODULE, "%s uploaded texture kit/up/%s.png (%ux%u, %zu bytes)",
+				cs(pi->second.name), cs(hash), w, h, png.size());
+		// The state first: the answer's name is in its textures
+		for(auto &o : m_peers)
+			send_state(o.first);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:texture", "kit/up/"+hash+".png");
+		});
 	}
 
 	// The World's parameters: the first World on the root's, over its
@@ -1897,28 +2132,16 @@ struct Module: public interface::Module, public Interface
 		if(m_store->get("world", row)){
 			const json::Value r = json::load_string(row.c_str());
 			m_world_applied = r.get("params").deepcopy();
-			// Parameters newer than the save ([KIT] stage 4f's caves and
-			// decorations) at their defaults: not a change of the World (a
-			// version 1 save makes neither)
-			const json::Value pd = m_types.count("kit/world") ?
-					m_types["kit/world"].decl.get("params") : json::Value();
-			if(m_world_applied.is_object() && pd.is_object())
-				for(json::Iterator it(pd); it; ++it)
-					if(m_world_applied.get(it.key()).is_undefined())
-						m_world_applied.set(it.key(), (*it).get("default"));
 			world::Params was;
 			was.from(m_world_applied);
 			const int64_t v = json::jint(r, "version", 0);
-			// Version 1 is kept: no caves or decorations ([KIT] stage 4f)
-			m_saved_version = v;
-			if(!was.finite() && !was.heightmap() && v != 1 &&
+			if(!was.finite() && !was.heightmap() &&
 					v != world::generator_version(was.generator)){
 				why = "the save's infinite world is the "+was.generator+
 						" generator's version "+itos(v)+", this build's is "+
 						itos(world::generator_version(was.generator));
 				return false;
 			}
-			was.version = v == 1 ? 1 : world::VERSION;
 			m_wp = was;
 		}
 		ss_ awhy;
@@ -2005,9 +2228,6 @@ struct Module: public interface::Module, public Interface
 		m_world_pending.clear();
 		const bool again = had && params.stringify() !=
 				m_world_applied.stringify();
-		// A stage 4e save's version kept until the World changes
-		p.version = first && !again && m_saved_version == 1 ? 1 :
-				world::VERSION;
 		world::Ids ids;
 		ids.filler_depth = b.filler_depth;
 		sv_<int> layers;
@@ -2095,8 +2315,7 @@ struct Module: public interface::Module, public Interface
 		m_world_applied = params.deepcopy();
 		json::Value row = json::object();
 		row.set("params", m_world_applied);
-		row.set("version", (int64_t)(world::generator_version(p.generator) ?
-				p.version : 0));
+		row.set("version", (int64_t)world::generator_version(p.generator));
 		m_store->set("world", row.stringify());
 		world_load_points();
 		log_i(MODULE, "World%s: %s %s, seed %u, biome %s, %s, %s; ground %i "
@@ -2107,7 +2326,7 @@ struct Module: public interface::Module, public Interface
 				cs(p.heightmap() ? ss_("a heightmap") : "voxels"),
 				cs("border "+p.border), lo, hi, hash,
 				first ? (again ? ", the save's was another" : "") : "",
-				p.version, p.with_caves() && !p.heightmap() ? ", caves" : "",
+				world::VERSION, p.with_caves() && !p.heightmap() ? ", caves" : "",
 				cs(caves), dn, dh);
 		if(first && !p.heightmap())
 			voxelworld::access(m_server, m_world_scene,
@@ -6827,6 +7046,13 @@ struct Module: public interface::Module, public Interface
 			for(const ss_ &n : m_prefab_palette)
 				pfs.append(n);
 			j.set("prefabs", pfs);
+			// [KIT] stage 4g: the voxels to place and the textures a
+			// builder's type may wear
+			j.set("voxels", voxel_palette());
+			json::Value ts = json::array();
+			for(const ss_ &t : texture_choices())
+				ts.append(t);
+			j.set("textures", ts);
 			// [KIT] stage 4f: what the terrain brushes choose from
 			if(m_world_scene){
 				json::Value t = json::object(), bs = json::array();
@@ -6930,6 +7156,8 @@ struct Module: public interface::Module, public Interface
 			return focus(peer, j, refuse);
 		if(op == "terrain")
 			return terrain(p, peer, j, refuse);
+		if(op == "voxel")
+			return make_voxel(p, j, refuse);
 		if(op == "restart"){
 			Entity *e = nullptr;
 			ss_ why;

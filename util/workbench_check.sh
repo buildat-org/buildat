@@ -65,9 +65,11 @@
 #      entities, the zone's members in the runtime row.
 #   7. ([KIT] stage 4e2) Kit's editor as floorplanner's, by mouse and by
 #      finger: below.
+#   8. ([KIT] stage 4g) A builder's voxel type made, drawn by a second
+#      client already in, placed and kept over a restart: below.
 # KEEP_TMP=1 keeps the screenshots: the contraption in edit mode, in play,
 # after the restart, and after the Stop; what is pointed at in play; part
-# 7's views, drags and menus.
+# 7's views, drags and menus; part 8's dialog, palette and the type placed.
 #
 #   util/workbench_check.sh
 #   util/workbench_check.sh web    the admin's part in headless Chrome
@@ -93,7 +95,10 @@ if [ "${1:-}" = web ]; then
 	# px apart from Continue at y 298: Edit or Play mode 339, Stop or Play
 	# 380); a link begun, Escape cancels it, the next Escape the menu;
 	# Stop and Play there, and Play mode; ([KIT] stage 4f) a raise stroke
-	# dragged in the plan by mouse (T), and Ctrl+Z its undo
+	# dragged in the plan by mouse (T), and Ctrl+Z its undo; ([KIT] stage
+	# 4g) "New voxel type...": a PNG uploaded by the browser's picker, the
+	# type named frost and made, taken in hand from the Voxel list (Down,
+	# Enter: a builder's own come first) and placed in play
 	check_tmp workbench_web; t=$CHECK_TMP
 	stub="(function(){ var held = null, refuse = false;
  Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }});
@@ -132,8 +137,8 @@ if [ "${1:-}" = web ]; then
 	["frames", 3], ["click", 616, 250], ["waitlog", "kit editor: selected 3", 10],
 	["key", "PageUp"], ["waitlog", "kit editor: state: 2 entities, 2 to undo", 10],
 	["frames", 3], ["shot", "\${OUT}/edit.png"],
-	["click", 977, 181], ["waitlog", "kit editor: log of 3: .*restarted by webboss", 10],
-	["click", 977, 377], ["waitlog", "kit editor: linking from 3 said", 10],
+	["click", 977, 209], ["waitlog", "kit editor: log of 3: .*restarted by webboss", 10],
+	["click", 977, 405], ["waitlog", "kit editor: linking from 3 said", 10],
 	["key", "Escape"], ["waitlog", "kit editor: link cancelled", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", 600, 380], ["waitlog", "kit editor: the server is Stopped .by webboss.", 10],
@@ -153,9 +158,31 @@ if [ "${1:-}" = web ]; then
 	["drag", 450, 620, 650, 620], ["waitlog", "kit editor: terrain: raise", 10],
 	["waitlog", "kit editor: the stroke ended", 10], ["frames", 5],
 	["shot", "\${OUT}/terrain.png"],
-	["chord", "Ctrl+z"], ["sync", 5000]
+	["chord", "Ctrl+z"], ["sync", 5000],
+	["key", "t"], ["waitlog", "kit editor: tool select", 10], ["frames", 5],
+	["click", 175, 391], ["frames", 5],
+	["file", "$t/frost.png"], ["click", 443, 698],
+	["waitlog", "kit editor: uploaded kit/up/", 10], ["frames", 3],
+	["click", 717, 142], ["key", "End"], ["key", "Backspace"], ["key", "Backspace"],
+	["key", "Backspace"], ["key", "Backspace"], ["key", "Backspace"],
+	["key", "Backspace"], ["key", "Backspace"], ["key", "Backspace"],
+	["type", "frost"], ["frames", 2],
+	["click", 717, 562], ["selall"], ["type", "0.2"], ["frames", 2],
+	["shot", "\${OUT}/voxel_dialog.png"],
+	["click", 601, 698], ["waitlog", "kit editor: [0-9]+ voxels to place", 10],
+	["frames", 3],
+	["click", 203, 365], ["frames", 5], ["shot", "\${OUT}/voxel_list.png"],
+	["key", "Down"], ["key", "Enter"],
+	["waitlog", "kit editor: in hand webboss/frost", 10],
+	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+	["click", 600, 339], ["waitlog", "kit editor: edit mode off", 10], ["frames", 5],
+	["mouse", 600, 400], ["frames", 2], ["mouse", 600, 560], ["frames", 5],
+	["shot", "\${OUT}/voxel_aim.png"],
+	["click", 600, 560, 100, 2], ["sync", 5000], ["frames", 5],
+	["shot", "\${OUT}/voxel_placed.png"]
 ]
 J
+	cp "$here/apps/workbench/main/client_data/lever_on.png" "$t/frost.png"
 	"$here/util/web_drive.sh" chrome workbench "$t/steps.json" "$t/out" ||
 		fail "the web drive ($t/out)"
 	grep -aq "kit/npc 3: says to webboss" "$t/out/server.log" ||
@@ -165,13 +192,16 @@ J
 	for w in "webboss restarts entity 3's kit/npc from the start" \
 			"placed prefab kit/button_door as 4...5" \
 			"Terrain by webboss: raise at" \
-			"An undo by webboss: a terrain stroke"; do
+			"An undo by webboss: a terrain stroke" \
+			"webboss uploaded texture kit/up/" \
+			"webboss made voxel type webboss/frost version 1 (kit/up/" \
+			"workbench: webboss placed webboss/frost ("; do
 		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
 	done
 	# The first Escape in the tools took the link, not the menu
 	awk '/kit editor: linking from 3/ { l = 1 } l && /pause: the menu shown/ { exit !c } l && /link cancelled/ { c = 1 } END { exit !c }' "$t/out/page.log" ||
 		fail "Escape did not cancel the link before opening the menu ($t/out/page.log)"
-	echo "PASS: Workbench in the web client: the pause menu's Edit, Stop, Play and Play mode, Escape cancelling a link first; the admin places an NPC in Kit's editor and talks to it; a terrain stroke by mouse and its undo"
+	echo "PASS: Workbench in the web client: the pause menu's Edit, Stop, Play and Play mode, Escape cancelling a link first; the admin places an NPC in Kit's editor and talks to it; a terrain stroke by mouse and its undo; a voxel type made from an uploaded PNG and placed"
 	exit 0
 fi
 if [ "${1:-}" = web_touch ]; then
@@ -824,7 +854,9 @@ EOF
 # (Escape: no longer), a link dragged from an out port onto an in port, a
 # box selects two, a right click's menu duplicates them; 3D (F2), where
 # a right drag orbits and opens no menu, and walking (F3), where a click
-# goes into the crosshair and Escape comes out of it before the menu.
+# goes into the crosshair and Escape comes out of it before the menu;
+# the inspector's x typed in and Move, a kit/world placed (game-wide), selected
+# from the list and deleted by the inspector's Delete, and the undo.
 # By finger (BUILDAT_TOUCH=1, finger_*): in play a tap digs, a finger
 # held places, a tap uses the button; in the plan the palette (folded on
 # a narrow screen) dragged from, a tap selects, a drag moves, a drag from
@@ -965,6 +997,33 @@ wait_log 5000 kit editor: out of the crosshair
 wait_log_absent 300 pause: the menu shown
 keypress F1
 wait_log 5000 kit editor: the view is 2D
+mouse_pos 614 306
+mouse_click left
+wait_log 5000 kit editor: selected 3
+frames 3
+click LineEdit "4"
+keypress End
+keypress Backspace
+text 6
+frames 2
+screenshot @T@/inspector_pos.png
+click Button "Move"
+wait_log 5000 kit editor: moved 1 by 2, 0, 0 from the inspector
+wait_log_any 5000 kit editor: state: 5 entities, 7 to undo
+click Button "kit/world"
+wait_log 5000 kit editor: placing kit/world
+mouse_pos 300 450
+mouse_click left
+wait_log_any 5000 kit editor: state: 6 entities, 8 to undo
+frames 3
+click Button "Select*"
+wait_log 5000 (kit/world
+frames 3
+screenshot @T@/inspector_world.png
+click Button "Delete"
+wait_log_any 5000 kit editor: state: 5 entities, 9 to undo
+click Button "Undo"
+wait_log_any 5000 kit editor: state: 6 entities, 8 to undo
 quit
 EOF
 cat > "$t/touch.cmds" <<'EOF'
@@ -1091,7 +1150,11 @@ done
 want "$t/srv3.log" "An edit by kitboss: placed kit/button 3 at [2,1,2]" \
 	"An edit by kitboss: moved 3 to [4,1,2]" \
 	"An edit by kitboss: placed kit/door 4 at [-2,1,2]" \
-	"An edit by kitboss: linked 3.pressed -> 4.toggle"
+	"An edit by kitboss: linked 3.pressed -> 4.toggle" \
+	"An edit by kitboss: moved 3 to [6,1,2]" \
+	"An edit by kitboss: placed kit/world 7 on the app root" \
+	"An edit by kitboss: deleted 7" \
+	"An undo by kitboss: 1 entities put back"
 want "$t/ed.log" "kit editor: turned 1 by 90" "kit editor: a box selected 2, 2 in the selection"
 want "$t/srv4.log" "kit/button 3: pressed by kitboss" \
 	"An edit by kitboss: linked 5.pressed -> 4.toggle"
@@ -1100,5 +1163,111 @@ grep -aq "workbench: kitboss dug (2,0,3): written" "$t/srv4.log" ||
 grep -aq "workbench: kitboss placed kit/stone (2,0,3): written" "$t/srv4.log" ||
 	fail "the finger held did not place ($t/srv4.log)"
 echo "ok: Kit's editor by mouse (the plan: a palette drag, select, a snapped move, a turn, an armed place, a link dragged, a box, the menu; 3D and walking) and by finger (tap, hold, drags, a link, the menu, a pinch)"
+# 8. ([KIT] stage 4g) A builder's voxel type: with kitbob joined, the
+# admin uploads a PNG from their exports (the client's file picker) in
+# Kit's editor's "New voxel type...", names the type frost, sets its
+# friction, makes it, takes it in hand from the Voxel list and places it in
+# play; kitbob's client reads the registry again and draws it. A restart:
+# the type registered before the save's sections load (not adopted).
+cat > "$t/maker.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 30000 server window: the page ntfy
+frames 3
+click Button "Don't add"
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log 10000 kit editor: state: 1 entities
+wait_log_any 120000 kit editor: people: kitbob
+frames 3
+click Button "New voxel type..."
+frames 3
+click Button "Upload a PNG..."
+wait_log 10000 The file picker at
+frames 3
+click Button "frost.png"
+wait_log 10000 kit editor: uploaded kit/up/
+frames 3
+click LineEdit "my_voxel"
+keypress End
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+text frost
+frames 2
+click LineEdit "1"
+keypress End
+keypress Backspace
+text 0.2
+frames 3
+screenshot @T@/voxel_dialog.png
+click Button "Make"
+wait_log 10000 voxels to place
+frames 3
+click DropDownList "▼" 51 226
+frames 3
+click Text "kitboss/frost"
+wait_log 5000 kit editor: in hand kitboss/frost
+frames 3
+screenshot @T@/voxel_palette.png
+keypress F6
+wait_log 10000 kit editor: edit mode off
+look_dir 0 -1 0.6
+wait_log_any 5000 kit: points at dig
+mouse_click right
+sync 5000
+frames 10
+screenshot @T@/voxel_placed.png
+quit
+EOF
+cat > "$t/watcher.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitbob
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 the voxel registry from the served file
+wait_log 120000 the voxel registry from the served file
+look_dir 0 -1 0.6
+wait_log 60000 drawn again
+frames 10
+screenshot @T@/voxel_watched.png
+quit
+EOF
+cat > "$t/again.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+look_dir 0 -1 0.6
+frames 10
+screenshot @T@/voxel_again.png
+quit
+EOF
+mkdir -p "$t/cu_maker/exports"
+cp "$here/apps/workbench/main/client_data/lever_on.png" "$t/cu_maker/exports/frost.png"
+server 5 "$t/user5"
+wait_for_log "$t/srv5.log" "setup code [A-Z0-9]+" 30
+code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv5.log" | head -1)
+[ -n "$code" ] || fail "no setup code ($t/srv5.log)"
+BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code \
+	BUILDAT_JOIN_ADMIN="setting open_registration on" client maker &
+maker=$!
+wait_for_log "$t/maker.log" "kit editor: state: 1 entities" 120 ||
+	fail "the admin did not get to the editor ($t/maker.log)"
+BUILDAT_JOIN_NAME=kitbob client watcher
+wait $maker || fail "the admin's client ($t/maker.log)"
+stop
+want "$t/srv5.log" "kitboss uploaded texture kit/up/" \
+	"kitboss made voxel type kitboss/frost version 1 (kit/up/" \
+	"solid, light 0, friction 0.2, surface \"\")" \
+	"workbench: kitboss placed kitboss/frost ("
+server 6 "$t/user5"
+BUILDAT_JOIN_NAME=kitboss client again
+stop
+want "$t/srv6.log" "Builders' voxel types: 1, uploaded textures: 1"
+grep -a "which this game does not register" "$t/srv6.log" &&
+	fail "the builder's type was adopted, not registered ($t/srv6.log)"
+echo "ok: a builder's voxel type made in Kit's editor from an uploaded PNG, drawn by a client already in, placed, and registered again at a restart"
 echo "PASS: Workbench: the admin builds a contraption of Kit's starter set in its editor, Stopped, and plays it, a second player joins the round, may build only in the dig zone and uses a key; a restart mid-round keeps the rows, Stop puts the start back, Play gives a kept inventory back and places players, Save as start keeps the round's voxels"
 # vim: set noet ts=4 sw=4:
