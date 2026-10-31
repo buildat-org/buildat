@@ -78,7 +78,10 @@
 --   - the inspector (right): the selected entity's instances, their
 --     parameters in ui_utils' settings_form, "Apply" sends them; its x, y
 --     and z typed in and "Move" (the selection by as much), "Delete"
---     (the selection, a game-wide entity too)
+--     (the selection, a game-wide entity too); ([KIT_TRY_INPUTS]) "Try:"
+--     a button per input (a value field beside one that takes a value)
+--     sends it to the entity as a link would, running the game first
+--     while Ended; what it emitted is shown a moment ("→ opened")
 --   - every entity drawn as a box, the selected ones yellow, links as
 --     lines, and a type's gizmo (a sphere or a box), in edit mode only
 --   - the admin's: who is here, each "Builder: yes/no" to grant or take
@@ -136,7 +139,7 @@ for k, v in pairs({state = nil, link = nil, cursor = nil, pending = {},
 		status = "", windows = {}, builders = {}, seen = {}, labels = {},
 		label_text = {}, listeners = {}, discarded = {}, always_keep = false,
 		choose = false, prefab_name = "", logs = {}, flows = {},
-		package_name = "my_prefabs", credits = {},
+		package_name = "my_prefabs", credits = {}, try_values = {},
 		voxel_form = {name = "my_voxel", texture = "kit/stone.png", kind = "solid",
 			solid = true, transparent = false, light = 0, friction = 1,
 			surface = ""}}) do
@@ -255,6 +258,42 @@ end
 
 function M.stop()
 	send({op = "stop"})
+end
+
+-- [KIT_TRY_INPUTS] The inspector's Try: entity id's input sent to it, the
+-- value typed (s) read as the input's type ty takes it; Ended, the game
+-- Run first (as play mode does)
+function M.try(id, input, ty, s)
+	s = s or ""
+	local v, ok = nil, true
+	if ty == "number" or ty == "entity" then
+		v = tonumber(s)
+		ok = v ~= nil
+	elseif ty == "bool" then
+		ok = s == "true" or s == "false"
+		v = s == "true"
+	elseif ty == "position" then
+		local x, y, z = s:match(
+				"^%s*(%-?[%d.]+)[%s,]+(%-?[%d.]+)[%s,]+(%-?[%d.]+)%s*$")
+		v = x and {tonumber(x), tonumber(y), tonumber(z)}
+		ok = v ~= nil
+	elseif ty == "string" then
+		v = s
+	elseif ty == "any" and s ~= "" then
+		v = tonumber(s) or s
+	end
+	if not ok then
+		E.status = "Try " .. input .. ": " .. (ty == "position" and
+				"three numbers" or ty == "bool" and "true or false" or "a " .. ty)
+		return people()
+	end
+	if not E.running then
+		M.play()
+	end
+	log:info("kit editor: try " .. id .. "'s " .. input .. (v ~= nil and
+			" " .. tostring(type(v) == "table" and table.concat(v, ",") or v) or
+			""))
+	send({op = "try", id = id, input = input, value = v})
 end
 
 function M.save_as_start()
@@ -646,6 +685,11 @@ local BRUSH_NAMES = {raise = "Raise", lower = "Lower", smooth = "Smooth",
 local MAX_BRUSH = 12
 M.T = T
 local brush_at, stroke_begin, stroke_move, stroke_end, draw_brush
+-- [KIT_VOXEL_EDITS] The edited sections ("kit:edited": list), the
+-- terrain panel's rows of them ({el, s}), its view and where it was
+-- scrolled, and the section hovered
+local ED = {list = nil, rows = {}, view = nil, y = 0, hover = nil}
+local ED_HEIGHT = 200
 
 -- The bar: Edit and Run/End in play (an app's own menu can have them:
 -- bar = false); in the tools floorplanner's toolbar -- Menu, the views,
@@ -921,6 +965,10 @@ local function new_tab(w)
 end
 
 palette = function()
+	if ED.view then
+		ED.y = ED.view.viewPosition.y
+	end
+	ED.view, ED.rows, ED.hover = nil, {}, nil
 	drop("palette")
 	palette_buttons = {}
 	if not E.editing or folded("palette") then
@@ -1317,6 +1365,32 @@ local function inspector(w, e, is_made)
 				refresh()
 			end)
 		end
+		-- [KIT_TRY_INPUTS] Try: each input sent to it as a link would (by
+		-- this builder), a value typed beside one that takes one, three a
+		-- row
+		local tr
+		for i, input in ipairs(t.inputs or {}) do
+			if i % 3 == 1 then
+				tr = row(w)
+				label(tr, i == 1 and "Try:" or "", 32)
+			end
+			local ty = type(t.inputs_types) == "table" and
+					t.inputs_types[input] or "any"
+			local vk = e.id .. "/" .. input
+			if ty ~= "none" then
+				edit(tr, E.try_values[vk] or "", function(s)
+					E.try_values[vk] = s
+				end).minWidth = 48
+			end
+			button(tr, input, function()
+				M.try(e.id, input, ty, E.try_values[vk])
+			end)
+		end
+	end
+	-- What the last Try's runs emitted, for a while
+	local a = E.tried
+	if a and a.id == e.id and buildat.get_time_us() < a.till then
+		text(w, a.text, magic.Color(0.5, 1, 0.6))
 	end
 	if E.link and E.link.id ~= e.id then
 		text(w, "Link " .. E.link.id .. "'s " .. E.link.output .. " to:")
@@ -2398,7 +2472,12 @@ end
 -- the biome. A left drag on the ground is a stroke (one undo), its dabs
 -- as it moves and while it stays; a touchscreen's finger the same. The
 -- brush is a circle on the ground in what it does' colour; a right click
--- or Escape puts the tool away (floorplanner's Object tool)
+-- or Escape puts the tool away (floorplanner's Object tool).
+-- [KIT_VOXEL_EDITS] Under the brushes the World's edited sections, each
+-- with its cells unlike the generator's, Regenerate and Regenerate all
+-- (Ended: the section generated again, one undo); a row hovered outlines
+-- its section brighter; with the tool on every edited section is
+-- outlined in 2D and 3D
 local heightmap = require("buildat/module/heightmap")
 
 function M.set_tool(tool)
@@ -2409,6 +2488,9 @@ function M.set_tool(tool)
 	T.down, T.fill = false, nil
 	S.placing = nil
 	log:info("kit editor: tool " .. tostring(tool or "select"))
+	if tool == "terrain" then
+		send({op = "edited"})
+	end
 	refresh()
 end
 
@@ -2471,6 +2553,91 @@ terrain_panel = function(w)
 	end, {height = 24})
 	text(w, tr.surface == "heightmap" and "On the heightmap" or
 			"On the voxels", DIM)
+	-- [KIT_VOXEL_EDITS] The sections somebody wrote, which a change of the
+	-- World's parameters keeps: each its cells unlike the generator's
+	-- (hovered, outlined in the view), Regenerate dropping its writes (one
+	-- undo); in a view that scrolls past ED_HEIGHT
+	local l = ED.list
+	if not l then
+		return
+	end
+	local secs = type(l.sections) == "table" and l.sections or {}
+	text(w, "Edited sections: " .. (#secs + (tonumber(l.more) or 0)), DIM)
+	if #secs == 0 then
+		return
+	end
+	local view = w:CreateChild("ScrollView")
+	local list = view:CreateChild("UIElement")
+	list:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+	local lw = 0
+	for _, e in ipairs(secs) do
+		local s = e.s
+		local n = tonumber(e.cells) or -1
+		local r = row(list)
+		local lb = label(r, table.concat(s, ",") .. ": " .. (n < 0 and
+				"not loaded" or n .. " cells") .. (e.owned and
+				" (a component's)" or ""), 130)
+		local b = button(r, "Regenerate", function()
+			log:info("kit editor: regenerate " .. table.concat(s, ","))
+			send({op = "regenerate", s = s})
+		end)
+		lw = math.max(lw, lb.minWidth + 4 + b.minWidth)
+		ED.rows[#ED.rows + 1] = {el = r, s = s}
+	end
+	local lh = list.height
+	view:SetStyleAuto()
+	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
+	view.scrollBarsAutoVisible = false
+	view:SetScrollBarsVisible(false, lh > ED_HEIGHT)
+	list:SetFixedSize(lw, lh)
+	view.contentElement = list
+	list:SetPosition(0, 0)
+	view:SetFixedWidth(lw + view.verticalScrollBar.width + 4)
+	view:SetFixedHeight(math.min(lh, ED_HEIGHT))
+	view.viewPosition = magic.IntVector2(0, ED.y)
+	ED.view = view
+	button(w, "Regenerate all", function()
+		log:info("kit editor: regenerate all")
+		send({op = "regenerate", all = true})
+	end)
+end
+
+-- The edited sections hovered in the terrain panel's list (the pointer's
+-- pixels), and outlined in the view: the terrain tool's, the hovered one
+-- brighter
+local function draw_edited(dbg, mx, my)
+	if S.tool ~= "terrain" or not ED.list then
+		return
+	end
+	local sc = magic.ui.scale
+	local x, y = mx / sc, my / sc
+	local hover = nil
+	if ED.view and inside(ED.view, x, y) then
+		for _, r in ipairs(ED.rows) do
+			if inside(r.el, x, y) then
+				hover = r.s
+			end
+		end
+	end
+	local key = hover and table.concat(hover, ",")
+	if key ~= ED.hover then
+		ED.hover = key
+		log:info("kit editor: section hovered: " .. tostring(key))
+	end
+	if S.view == "walk" then
+		return
+	end
+	local n = tonumber(ED.list.size) or 64
+	for _, e in ipairs(type(ED.list.sections) == "table" and
+			ED.list.sections or {}) do
+		local s = e.s
+		local lit = table.concat(s, ",") == key
+		dbg:AddBoundingBox(magic.BoundingBox(
+				magic.Vector3(s[1] * n - 0.5, s[2] * n - 0.5, s[3] * n - 0.5),
+				magic.Vector3((s[1] + 1) * n - 0.5, (s[2] + 1) * n - 0.5,
+				(s[3] + 1) * n - 0.5)), lit and magic.Color(1, 1, 0.3) or
+				magic.Color(1, 0.45, 0.1), false)
+	end
 end
 
 -- The ground the pointer is on: {x, y, z}, a voxel's cell (its top cell)
@@ -2578,6 +2745,9 @@ stroke_end = function(mx, my)
 		log:info("kit editor: the stroke ended, " .. T.dabs .. " dabs")
 	end
 	T.fill = nil
+	-- The edited sections as the stroke left them (after its dabs: the
+	-- server takes them in order)
+	send({op = "edited"})
 end
 
 -- The brush on the ground: its circle (a fill's rectangle) where it is
@@ -3558,6 +3728,11 @@ local function draw()
 	log_bar()
 	local dbg = O.debug
 	local now = buildat.get_time_us()
+	-- A Try's answer shown long enough
+	if E.tried and now >= E.tried.till then
+		E.tried = nil
+		inspector_window()
+	end
 	local YELLOW = magic.Color(1, 0.9, 0.2)
 	-- The round's own entities, orange (players are drawn by the app)
 	for _, e in ipairs(made()) do
@@ -3667,6 +3842,7 @@ local function draw()
 		end
 	end
 	draw_box_rect()
+	draw_edited(dbg, S.mx, S.my)
 	if not (E.menu and E.menu.held()) then
 		local mx, my = S.mx, S.my
 		if M.looking() then
@@ -3838,6 +4014,49 @@ function M.editor(options)
 		end
 		refresh()
 		changed()
+		if E.editing and S.tool == "terrain" then
+			send({op = "edited"})
+		end
+	end)
+	-- [KIT_TRY_INPUTS] A Try's answer: what the entity emitted ("→ opened"),
+	-- in the inspector for 3 s
+	buildat.sub_packet("kit:tried", function(data)
+		local a = network.parse_json(data)
+		if type(a) ~= "table" then
+			return
+		end
+		local outs = {}
+		for _, o in ipairs(type(a.emitted) == "table" and a.emitted or {}) do
+			local v = type(o) == "table" and o[2]
+			outs[#outs + 1] = tostring(type(o) == "table" and o[1]) ..
+					(v ~= nil and type(v) ~= "table" and " " .. tostring(v) or "")
+		end
+		local t = "→ " .. (#outs > 0 and table.concat(outs, ", ") or
+				"nothing emitted")
+		E.tried = {id = tonumber(a.id), text = t,
+			till = buildat.get_time_us() + 3000000}
+		log:info("kit editor: tried " .. tostring(a.id) .. "'s " ..
+				tostring(a.input) .. ": " .. t)
+		inspector_window()
+	end)
+	-- [KIT_VOXEL_EDITS] The edited sections, the terrain panel's list
+	buildat.sub_packet("kit:edited", function(data)
+		local a = network.parse_json(data)
+		if type(a) ~= "table" then
+			return
+		end
+		ED.list = a
+		local parts = {}
+		local secs = type(a.sections) == "table" and a.sections or {}
+		for i = 1, math.min(#secs, 16) do
+			parts[i] = table.concat(secs[i].s or {}, ",") .. "=" ..
+					tostring(secs[i].cells)
+		end
+		log:info("kit editor: edited sections: " .. #secs .. " " ..
+				table.concat(parts, " "))
+		if S.tool == "terrain" then
+			palette()
+		end
 	end)
 	buildat.sub_packet("kit:builders", function(data)
 		local a = network.parse_json(data)

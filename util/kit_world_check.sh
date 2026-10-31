@@ -540,6 +540,76 @@ grep -aq "Terrain by kitboss: raise at .*stroke [0-9]\{6,\}" "$s6" || fail "the 
 	fail "Ctrl+Z, the undo of the mouse's stroke ($s6)"
 echo "ok: the brushes on voxels (raise, its stroke undone, lower under the sea, paint, fill ground and water, smooth, flatten exposing the layers), decorations and caves by the seed ($w0), a decorate stroke and its undo, the terrain tool by mouse"
 
+# 7. ([KIT_VOXEL_EDITS]) The voxel edits manager: a fresh save (stone,
+# flat), a cell dug Ended; the terrain tool's list has its section with
+# one changed cell; Regenerate clicked while Running is refused (the row
+# hovered under the pointer), Ended it drops the section's writes (the
+# cell stone again, the list empty), and the undo digs it again
+mkdir -p "$t/user7"
+{
+	cat <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 30000 server window: the page ntfy
+frames 3
+click Button "Don't add"
+EOF
+	joined
+	cat <<'EOF'
+keypress F6
+wait_log 10000 kit editor: state: 1 entities, 0 to undo
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended (by kitboss)
+EOF
+	column 5 5
+	cat <<'EOF'
+event kit_edit {"op": "set_voxel", "pos": [5, 0, 5], "voxel": "air"}
+wait_log 10000 entities, 1 to undo
+EOF
+	column 5 5
+	cat <<'EOF'
+keypress F1
+wait_log 5000 kit editor: the view is 2D
+keypress T
+wait_log 5000 kit editor: tool terrain
+wait_log 10000 kit editor: edited sections: 1 0,0,0=1
+frames 5
+screenshot @T@/edited.png
+event kit_edit {"op": "play"}
+wait_log 10000 kit editor: the server is Running
+click Button "Regenerate"
+wait_log 5000 kit editor: section hovered: 0,0,0
+wait_log 5000 kit editor: refused: regenerate: the game is Running
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended
+wait_log 10000 kit editor: edited sections: 1 0,0,0=1
+click Button "Regenerate"
+wait_log 10000 kit editor: edited sections: 0
+wait_log 30000 kit: World: generated again
+EOF
+	column 5 5
+	undo
+	echo "wait_log 10000 kit editor: edited sections: 1 0,0,0=1"
+	column 5 5
+	echo quit
+} > "$t/boss7.cmds"
+server 7 "$t/user7"
+wait_for_log "$t/srv7.log" "setup code [A-Z0-9]+" 30
+code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv7.log" | head -1)
+[ -n "$code" ] || fail "no setup code ($t/srv7.log)"
+BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
+	BUILDAT_JOIN_ADMIN="setting open_registration on" client boss7
+stop
+s7=$t/srv7.log
+want "$s7" "World by kitboss: 1 edited sections regenerated, 1 cells back to the generator's, 0 skipped (2 to undo)" \
+	"An undo by kitboss: a regeneration, 1 cells"
+# The column: stone, dug, stone again, dug again
+cols=$(grep -aoP 'column at \(5,0,5\) .*; \Kcolumn \(5,5\): .*' "$s7")
+[ "$(echo "$cols" | wc -l)" = 4 ] && [ "$(echo "$cols" | sed -n 1p)" = "$(echo "$cols" | sed -n 3p)" ] &&
+	[ "$(echo "$cols" | sed -n 2p)" = "$(echo "$cols" | sed -n 4p)" ] &&
+	[ "$(echo "$cols" | sed -n 1p)" != "$(echo "$cols" | sed -n 2p)" ] ||
+	fail "the column through dig, regenerate and undo: $cols ($s7)"
+echo "ok: the voxel edits manager: a dug cell's section listed with its one cell, Regenerate refused Running, Ended the cell generated again, the undo digging it again"
+
 # web: the heightmap in the web client, a guest
 mkdir -p "$t/web/user"
 cp -a "$t/user/." "$t/web/user/"

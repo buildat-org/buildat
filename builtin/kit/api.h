@@ -351,6 +351,21 @@ namespace interface
 //       the cell in the builder's scene set to voxel n ("air": a dig),
 //       routed as a player's write (an owned cell goes to its owner's
 //       on_voxel), one undo, answered with "kit:edit_state"
+//   {"op": "edited"}  -- ([KIT_VOXEL_EDITS]) answered with "kit:edited"
+//       {"size": a section's side, "sections": [{"s": [x, y, z], "cells":
+//       how many differ from the generator's (-1: not loaded), "owned":
+//       true where a component owns voxels}], "more": n past 256}: the
+//       World's sections somebody wrote, which a change of its parameters
+//       keeps
+//   {"op": "regenerate", "s": [x, y, z]} or {"op": "regenerate", "all":
+//       true}  -- Ended only: an edited section's writes dropped (one
+//       loaded, no component's voxels in it), the World generating it
+//       again; one undo, which waits for it to be generated
+//   {"op": "try", "id": n, "input": i, "value": v}  -- ([KIT_TRY_INPUTS])
+//       Running only: input i delivered to entity n as a link would, by
+//       the builder, v checked against the input's type; the runs it
+//       makes answered with "kit:tried" {"id", "input", "emitted":
+//       [[output, value], ...]} (a timer's later emits are not)
 //   {"op": "pattern", "id", "comp", "param", "action": "capture"|"show"|
 //    "fill", "voxel": n}  -- ([KIT_VOXEL_STATES]) a "voxels" parameter
 //       of the instance: capture (the voxel_box's cells as they are now;

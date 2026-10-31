@@ -3,8 +3,10 @@
 //
 // [KIT] Workbench: the blank app that only hosts Kit and its editor. The
 // world is Kit's World ([KIT] stage 4e, kit/world on the app root): by
-// default a flat stone floor 64x64 round the origin, its top at y 0
-// (Kit's material set, biome "rock"), the players walking on it (Kit's
+// default a gentle grassland heightmap 64x64 for a project New made
+// ([WB_NEW_PROJECT_GROUND]), a flat stone floor 64x64 round the origin,
+// its top at y 0, for others (Kit's material set, biome "rock"), the
+// players walking on it (Kit's
 // controls, [KIT] stage 4h: kit/controls and kit/walker on the app root
 // set them); its generator, size and surface
 // the World's parameters in the editor. Kit's own components (its starter
@@ -162,14 +164,19 @@ struct Module: public interface::Module
 	// Manage again
 	void on_project_play(const world_menu::Play &event)
 	{
-		if(!start_project(event.name, false))
+		if(!start_project(event.name, false, event.created))
 			world_menu::access(m_server, [&](world_menu::Interface *i){
 				i->show(event.peer);
 			});
 	}
 
-	// The save `name` opened (made, when `create`) and Kit hosted in it
-	bool start_project(const ss_ &name, bool create)
+	// The save `name` opened (made, when `create`) and Kit hosted in it.
+	// [WB_NEW_PROJECT_GROUND] A project New made (`fresh`) starts on a
+	// heightmap, the save's store "workbench" "ground" saying so from then
+	// on; others (from before, BUILDAT_WORKBENCH_PROJECT's) on the stone
+	// floor. BUILDAT_WORKBENCH_STONE=1: New's on stone too (the checks
+	// built on it)
+	bool start_project(const ss_ &name, bool create, bool fresh = false)
 	{
 		if(m_save)
 			return false;
@@ -236,10 +243,21 @@ struct Module: public interface::Module
 		h.save = m_save;
 		h.scenes["world"] = m_scene;
 		h.controls = true;
-		// The World: Workbench's floor, stone, unless the composer says
-		// otherwise
+		// The World: Workbench's floor, unless the composer says otherwise:
+		// a new project's a gentle grassland heightmap, 64x64 (its least
+		// side), the player at its middle (world_spawn); before, stone
+		const char *stone = getenv("BUILDAT_WORKBENCH_STONE");
+		ss_ ground;
+		if(fresh && !(stone && stone[0] == '1'))
+			m_save->store("workbench")->set("ground", "heightmap");
+		m_save->store("workbench")->get("ground", ground);
 		h.world_scene = "world";
-		h.defaults = "{\"kit/world\": {\"biome\": \"rock\"}}";
+		h.defaults = ground == "heightmap" ?
+				"{\"kit/world\": {\"surface\": \"heightmap\", \"biome\": "
+				"\"grassland\", \"generator\": \"noise\", \"level\": 4, "
+				"\"height\": 3, \"width\": 64, \"depth\": 64, "
+				"\"decorations\": false}}" :
+				"{\"kit/world\": {\"biome\": \"rock\"}}";
 		if(!kit::host(m_server, h)){
 			m_server->shutdown(1, "workbench: Kit is not hosted");
 			return true;
