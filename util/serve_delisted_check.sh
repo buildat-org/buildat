@@ -32,6 +32,7 @@ start_server "$t/srv.log" "Listening at" 60 auto \
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
+fp=$(aitta_fp "$t/pub")
 req(){ # <log> <requests>
 	# The run ends at the request's answer, "ai: {...}"
 	printf 'wait_log_any 30000 ai: {"id":1,\nquit\n' > "$t/reqs.cmds"
@@ -98,7 +99,7 @@ wait_for_log "$t/serve.log" "stopped until a newer release is listed" 60 ||
 sleep 12
 curl -s -m 5 "http://127.0.0.1:$SP/" | grep -q "withdrawn by the Aitta it came from (malware: &lt;steals&gt;)" ||
 	fail "the stand-in's page: $(curl -s -m 5 "http://127.0.0.1:$SP/")"
-[ "$(grep -ac "Listening at" "$slog")" = "$n" ] && ! pgrep -f "installed/tester/pt/1.0.0" > /dev/null ||
+[ "$(grep -ac "Listening at" "$slog")" = "$n" ] && ! pgrep -f "installed/$fp/pt/1.0.0" > /dev/null ||
 	fail "started again ($slog)"
 echo "ok: delisted for malware, stopped, the stand-in says why"
 
@@ -109,7 +110,7 @@ for _i in $(seq 600); do
 	sleep 0.2
 done
 [ "$(grep -ac "Listening at" "$slog")" -gt "$n" ] || fail "1.0.1 did not start ($t/serve.log)"
-pgrep -f "installed/tester/pt/1.0.1" > /dev/null || fail "not on 1.0.1"
+pgrep -f "installed/$fp/pt/1.0.1" > /dev/null || fail "not on 1.0.1"
 for _i in $(seq 50); do
 	curl -s -m 2 "http://127.0.0.1:$SP/health" | grep -q . && break
 	sleep 0.2
@@ -124,6 +125,6 @@ wait_for_log "$t/serve.log" "could not read 127.0.0.1:$P's list" 60 ||
 	fail "an unreadable list not said ($t/serve.log)"
 curl -s -m 5 "http://127.0.0.1:$SP/health" | grep -q . ||
 	fail "not serving with the list unreadable"
-pgrep -f "installed/tester/pt/1.0.1" > /dev/null || fail "1.0.1 stopped"
+pgrep -f "installed/$fp/pt/1.0.1" > /dev/null || fail "1.0.1 stopped"
 echo "ok: the list unreadable said, 1.0.1 runs on"
 echo "PASS: every step above held"

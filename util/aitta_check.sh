@@ -4,9 +4,11 @@
 # cost: 2s (2026-10-03)
 # covers: src/impl/aitta.cpp src/interface/aitta.h src/client/main.cpp
 # [AITTA_MVP] step 1: an app packed and signed, installed, and the installs
-# that must be refused -- a byte changed, another key, an engine API this
-# engine does not have, a name that is a path, a home Hearth that is not an
-# address, a changelog not in it; the signing deterministic.
+# that must be refused -- a byte changed, an engine API this engine does
+# not have, a name that is a path, a home Hearth that is not an address, a
+# changelog not in it; the signing deterministic. [AITTA_KEY_IDENTITY] A
+# package is its key's: the same author/name signed by another key is
+# another package, installed beside it under installed/<fp>/.
 #
 #   util/aitta_check.sh
 set -u
@@ -29,13 +31,18 @@ manifest(){ # version engine_api name
 
 "$b" aitta keygen "$t/key" > "$t/pub" || fail "keygen"
 "$b" aitta keygen "$t/key" 2>/dev/null && fail "keygen overwrote a key"
-"$b" aitta keygen "$t/key2" > /dev/null || fail "keygen 2"
+"$b" aitta keygen "$t/key2" > "$t/pub2" || fail "keygen 2"
+fp=$(aitta_fp "$t/pub") fp2=$(aitta_fp "$t/pub2")
+[ ${#fp} = 20 ] && [ "$fp" != "$fp2" ] || fail "the fingerprints: $fp $fp2"
 
 manifest 1.0.0 2
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out") || fail "pack"
 [ "$zip" = "$t/out/tester-demo-1.0.0.zip" ] || fail "pack wrote $zip"
 grep -q "$(cat "$t/pub")" "$t/out/tester-demo-1.0.0.sig" || fail "the .sig has another key"
 dir=$("$b" aitta install "$zip" "$t/user") || fail "install"
+[ "$dir" = "$t/user/installed/$fp/demo/1.0.0" ] || fail "installed in $dir"
+[ "$(cat "$t/user/installed/$fp/.key")" = "$(cat "$t/pub")" ] ||
+	fail "no key in installed/$fp/.key"
 # Signing is deterministic (RFC 6979): the same archive, the same signature
 "$b" aitta pack "$t/app" "$t/key" "$t/again" > /dev/null || fail "pack again"
 cmp -s "$zip" "$t/again/tester-demo-1.0.0.zip" || fail "the same app packed differently"
@@ -57,10 +64,13 @@ sed -i "s/\"sha256\": *\"[0-9a-f]*\"/\"sha256\":\"$h\"/" "$t/tampered.sig"
 "$b" aitta install "$t/tampered.zip" "$t/user" 2>/dev/null && fail "a re-hashed tampered archive installed"
 "$b" aitta install "$zip" "$t/user" > /dev/null || fail "install 1.1.0 beside 1.0.0"
 
-# Another author's key for the same author/name
+# Another key for the same author/name: another package, beside it
 manifest 1.2.0 2
 zip=$("$b" aitta pack "$t/app" "$t/key2" "$t/out") || fail "pack 1.2.0"
-"$b" aitta install "$zip" "$t/user" 2>/dev/null && fail "installed under another key"
+dir=$("$b" aitta install "$zip" "$t/user") || fail "install under another key"
+[ "$dir" = "$t/user/installed/$fp2/demo/1.2.0" ] ||
+	fail "another key's installed in $dir"
+[ -e "$t/user/installed/$fp/demo/1.2.0" ] && fail "another key's beside the first's"
 
 # An engine API this engine does not have; a name that is a path
 manifest 1.3.0 999
@@ -96,8 +106,8 @@ zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out") || fail "pack with the fields"
 "$b" aitta install "$zip" "$t/user" > /dev/null || fail "install with the fields"
 
 # [AITTA] step 3: a client extension, "kind": "extension". Its name in the
-# client is <author>__<name>, so neither part has "__" or an end "_"; it
-# has init.lua; a new version replaces the old; an app stays an app
+# client is <fp>__<name>, so its name has no "__" or an end "_"; it has
+# init.lua; a new version replaces the old; an app stays an app
 mkdir -p "$t/ext"
 ext(){ # version name [kind]
 	printf '{"author": "tester", "name": "%s", "version": "%s",
@@ -131,14 +141,14 @@ zip=$("$b" aitta pack "$t/ext" "$t/key" "$t/out") || fail "pack an extension"
 ext 1.1.0 ui
 zip=$("$b" aitta pack "$t/ext" "$t/key" "$t/out") || fail "pack an extension 1.1.0"
 "$b" aitta install "$zip" "$t/user" > /dev/null || fail "install an extension 1.1.0"
-[ "$(ls "$t/user/installed/tester/ui")" = "$(printf '1.1.0\nkey')" ] ||
-	fail "an extension's old version stayed: $(ls "$t/user/installed/tester/ui")"
+[ "$(ls "$t/user/installed/$fp/ui")" = "1.1.0" ] ||
+	fail "an extension's old version stayed: $(ls "$t/user/installed/$fp/ui")"
 ext 1.6.0 demo
 zip=$("$b" aitta pack "$t/ext" "$t/key" "$t/out") || fail "pack demo as an extension"
 "$b" aitta install "$zip" "$t/user" 2>&1 | grep -q "is installed as an app" ||
 	fail "an app became an extension"
 # The client boots it as a launch UI, in the sandbox though it does not
-# ask to be
+# ask to be: by its author's name, the one installed of that name
 if [ "${AITTA_CHECK_CLIENT:-1}" = 1 ]; then
 	# The launch UI quits the client itself once it has said its line
 	printf "wait_log_any 15000 EXTBOOT io=\nquit\n" > "$t/cmds.txt"
@@ -166,7 +176,7 @@ echo x > "$t/world/world/save.sqlite"
 zip=$("$b" aitta pack "$t/world" "$t/key" "$t/out") || fail "pack a world"
 "$b" aitta install "$zip" "$t/user" 2>&1 | grep -q "installed as a new save" ||
 	fail "a world installed as an app"
-[ ! -e "$t/user/installed/tester/wp" ] || fail "a world left something in installed/"
+[ ! -e "$t/user/installed/$fp/wp" ] || fail "a world left something in installed/"
 
 [ -z "$(ls -A "$t/user/installed" | grep incoming)" ] || fail "an .incoming directory was left"
-echo "PASS: packed, signed and installed; tampering, another key, a newer and an older engine API, a version not SemVer and a path name refused; an extension installed over its old version and booted sandboxed; a world packed and refused as an app"
+echo "PASS: packed, signed and installed; another key's another package beside it; tampering, a newer and an older engine API, a version not SemVer and a path name refused; an extension installed over its old version and booted sandboxed; a world packed and refused as an app"

@@ -60,9 +60,10 @@ namespace server
 
 	// The app's name, which get_app_id() answers: the directory's name, or
 	// for an app installed from a release ([AITTA_MVP]),
-	// .../installed/<author>/<name>/<version>, "<author>.<name>" -- every
-	// version one app, with one save directory, and no tree app's name
-	// has a dot in it; a playtest's "review.<author>__<name>"
+	// .../installed/<fp>/<name>/<version>, "<fp>.<name>" (fp its key's
+	// fingerprint, [AITTA_KEY_IDENTITY]) -- every version one app, with
+	// one save directory, and no tree app's name has a dot in it; a
+	// playtest's "review.<fp>__<name>"
 	inline ss_ app_of(const ss_ &module_path)
 	{
 		sv_<ss_> parts;
@@ -80,7 +81,7 @@ namespace server
 		if(n >= 4 && parts[n - 4] == "installed")
 			return parts[n - 3]+"."+parts[n - 2];
 		// A reviewer's playtest ([AITTA_REVIEW]),
-		// .../review/<author>__<name>/<version>: its saves apart
+		// .../review/<fp>__<name>/<version>: its saves apart
 		if(n >= 3 && parts[n - 3] == "review" &&
 				parts[n - 2].find("__") != ss_::npos)
 			return "review."+parts[n - 2];

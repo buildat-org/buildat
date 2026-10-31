@@ -33,14 +33,15 @@ mkdir -p "$t/app/main/client_lua"
 { cat "$here/apps/vanilla/main/client_lua/init.lua"
 	echo 'log:info("init.lua: the variant'"'"'s own")'; } \
 	> "$t/app/main/client_lua/init.lua"
-"$b" aitta keygen "$t/key" > /dev/null 2>&1 || fail "keygen"
+"$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
+fp=$(aitta_fp "$t/pub")
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>"$t/pack.log") ||
 	fail "pack: $(cat "$t/pack.log")"
 d=$t/u
 mkdir -p "$d"
 dir=$("$b" aitta install "$zip" "$d" 2>"$t/install.log") ||
 	fail "install: $(cat "$t/install.log")"
-[ "$dir" = "$d/installed/tester/vvp/1.0.0" ] || fail "installed at $dir"
+[ "$dir" = "$d/installed/$fp/vvp/1.0.0" ] || fail "installed at $dir"
 
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=bi start_server "$t/srv.log" \
 	"STATUS Listening" 120 auto "$here/Build/bin/buildat_server" \
@@ -59,7 +60,7 @@ grep -aq "init.lua: the variant's own" "$t/cli.log" ||
 	fail "the client did not run the variant's init.lua ($t/cli.log)"
 grep -aq "menu.lua\|pause.lua" "$t/srv.log" ||
 	fail "vanilla's other client_lua files not served ($t/srv.log)"
-ls -d "$d"/apps/tester.vvp/saves/bi > /dev/null 2>&1 ||
+ls -d "$d"/apps/$fp.vvp/saves/bi > /dev/null 2>&1 ||
 	fail "the save is not the variant's: $(ls "$d/apps" 2>&1)"
 echo "PASS: an installed variant finds vanilla among the shipped apps, plays with one client_lua file of its own, and keeps its own save"
 # vim: set noet ts=4 sw=4:

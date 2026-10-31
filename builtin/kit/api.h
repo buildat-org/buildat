@@ -33,7 +33,8 @@ namespace interface
 // own door. Kit's own generic types are builtin/kit/types/<name>.lua,
 // author "kit", in every hosting app; the app's are <types_path>/<name>.lua
 // under its author (Host::author, the app's id); other authors' come in
-// packages (below). An instance records its type and the type's version
+// packages (below), named "<fp>/<name>" by the package's key
+// ([AITTA_KEY_IDENTITY]: fp the key's fingerprint, doc/aitta.txt). An instance records its type and the type's version
 // (the file's `version`). A save from before, its types bare names, is
 // read as the app's type of that name if it has one, else Kit's, and
 // written back so.
@@ -151,8 +152,10 @@ namespace interface
 //   says what it gets).
 //   [KIT] stage 5 **Packages**: component types, prefabs and builders'
 //   voxel types published to Aitta as a package of "kind": "kit"
-//   (doc/aitta.txt), everything in it named by its manifest's author,
-//   whom Aitta binds to the publisher's key:
+//   (doc/aitta.txt). [AITTA_KEY_IDENTITY] A package is its key and its
+//   name, "<fp>/<name>", and its things are "<fp>/<n>": two Aittas'
+//   "alice" are two. Its files name them by its manifest's author
+//   (whom its Aitta binds to the key), "<author>/<n>":
 //     meta.json      the manifest, with "dependencies": [{"kit":
 //                    "<author>/<name>", "version": the lowest it works
 //                    with}] (the packages its prefabs' types are of)
@@ -162,23 +165,37 @@ namespace interface
 //                    {"op": "voxel"} has it; "texture" a registered one's
 //                    or textures/<file>.png in the package)
 //   A builder installs one into the save from the palette's New tab:
-//   "kit:package" (the release's .sig, a 0 byte, its zip; the client
-//   fetched them from an Aitta with the dependencies, which go first), its
-//   signature checked, its dependencies installed here at their versions
-//   or newer, nothing of it another's (Kit's, the app's, a builder's,
-//   another package's). An author's packages here are signed by one key
-//   (simplified: the first seen). It is the rows
-//   "package:<author>/<name>" ({"version", "key", "sha256", "by",
-//   "manifest", "types": {name: {"source", "client"}}, "prefabs",
-//   "voxels"}), "prefab:..." and "voxel:..." ({"package"} in each) and
-//   "texture:...". A newer version upgrades it in place: it keeps the
+//   "kit:package" (the Aitta it came from, a 0 byte, the release's .sig,
+//   a 0 byte, its zip; the client fetched them from that Aitta with the
+//   dependencies, which go first), its signature checked, its
+//   dependencies installed here at their versions or newer (each "<author>/
+//   <name>" the one installed from the same Aitta, or the key an older
+//   version resolved it to), nothing of it another's (a builder's,
+//   another package's). Its prefabs' and voxel types' "<author>/<n>" of
+//   its own author or a dependency's are made "<fp>/<n>" as it is
+//   installed (simplified: in their JSON; a type's Lua names others as
+//   stored, "<fp>/<n>"). It is the rows "package:<fp>/<name>"
+//   ({"version", "key", "sha256", "by", "aitta", "local", "vouched",
+//   "deps": {"<author>/<name>": "<fp>/<name>"}, "manifest", "types":
+//   {name: {"source", "client"}}, "prefabs", "voxels"}), "prefab:..." and
+//   "voxel:..." ({"package"} in each) and "texture:...". The server asks
+//   the named Aitta whose key it is (interface::aitta::vouch_guarded(),
+//   whose limits say where it may go; the setting kit_vouch narrows it);
+//   until it says the manifest's author, the package is shown
+//   "alice/lamps @<host> (unverified)". Where two packages' authors have
+//   one name, each is shown with its Aitta's host. "kit:edit_state"'s
+//   "names": {"<fp>/<n>" or a package's id: as shown}. A newer version upgrades it in place: it keeps the
 //   types the older had, and each authored instance of an older version
 //   of a type is migrated (migrate above). Answered with "kit:package"
 //   {"ok": true, "what"} or {"ok": false, "why"}. {"op": "export"}: the
 //   builder's own prefabs and voxel types as a package's files
-//   ("kit:export" {"author", "files", "hex", "dependencies"}), which the
-//   editor hands the client's publish screen. Credits: each client's
-//   "kit:edit_state" has "credits", [{"author", "package", "version",
+//   ("kit:export" {"author", "files", "hex", "dependencies"}; the
+//   packages' "<fp>/" its author's name again, a dependency its
+//   "<author>/<name>"), which the editor hands the client's publish
+//   screen. Credits: each client's
+//   "kit:edit_state" has "credits", [{"author" (a package's with its
+//   Aitta's host where it is ambiguous or unverified), "package"
+//   ("<author>/<name>"), "id", "aitta", "verified", "version",
 //   "license_code", "license_media" (a package's), "of": "kit"|"app",
 //   "uses": [types, "[prefab]"]}], what the composition uses by who made
 //   it (kit.show_credits(), the palette's Credits).

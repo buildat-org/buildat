@@ -5,6 +5,7 @@
 #include "interface/bignum.h"
 #include "interface/compress.h"
 #include "interface/fs.h"
+#include "interface/http.h"
 #include "interface/os.h"
 #include "interface/server.h"
 #include "interface/server_config.h"
@@ -12,6 +13,16 @@
 #include "interface/zip.h"
 #include "core/log.h"
 #include "zlib.h"
+#ifdef _WIN32
+	#include <winsock2.h>
+	#include <ws2tcpip.h>
+	#undef interface
+#else
+	#include <arpa/inet.h>
+	#include <netdb.h>
+	#include <netinet/in.h>
+	#include <sys/socket.h>
+#endif
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
 #include <algorithm>
@@ -550,6 +561,9 @@ static ss_ major_of(const ss_ &v)
 	return v.substr(0, v.find('.'));
 }
 
+static ss_ first_line(const ss_ &path);
+static ss_ newest_version_dir(const ss_ &dir);
+
 ss_ find_base(const json::Value &m, const ss_ &app_dir,
 		const ss_ &share_path, const ss_ &user_path, ss_ *why)
 {
@@ -578,7 +592,24 @@ ss_ find_base(const json::Value &m, const ss_ &app_dir,
 		*why = "the base \""+b+"\" is not <author>.<name>";
 		return "";
 	}
-	const ss_ dir = user_path+"/installed/"+author+"/"+name;
+	// [AITTA_KEY_IDENTITY] The author's on the Aitta app_dir came from,
+	// and once resolved that key's, kept beside it (where it can be
+	// written: confine's find_base() before a boxed server's, whose box
+	// does not list the installed packages); a key no longer installed
+	// resolved again
+	ss_ fp = first_line(app_dir+"/.aitta_base");
+	if(!fingerprint_ok(fp) || !fs::path_exists(user_path+"/installed/"+fp+
+			"/"+name)){
+		fp = resolve_installed(user_path, author, name,
+				first_line(app_dir+"/.aitta_from"), why);
+		if(fp.empty()){
+			*why = "the base "+*why;
+			return "";
+		}
+		std::ofstream o(app_dir+"/.aitta_base", std::ios::binary);
+		o<<fp<<"\n";
+	}
+	const ss_ dir = user_path+"/installed/"+fp+"/"+name;
 	ss_ best;
 	for(const fs::Node &n : fs::list_directory(dir)){
 		if(!n.is_directory || !semver_ok(n.name) ||
@@ -1135,6 +1166,222 @@ ss_ pack_page(const ss_ &page_dir, const ss_ &package, const ss_ &key_path,
 			PAGE_FORMAT, out_dir+"/"+base+"-page");
 }
 
+// [AITTA_KEY_IDENTITY]
+ss_ fingerprint(const ss_ &public_hex)
+{
+	if(!sha256::is_hex(public_hex, 130) || public_hex.compare(0, 2, "04") != 0)
+		return "";
+	return sha256::hex(sha256::calculate(unhex(public_hex))).substr(0,
+			FINGERPRINT_LEN);
+}
+
+bool fingerprint_ok(const ss_ &s)
+{
+	return sha256::is_hex(s, FINGERPRINT_LEN);
+}
+
+// A small file's first line, "" for none
+static ss_ first_line(const ss_ &path)
+{
+	std::ifstream f(path, std::ios::binary);
+	ss_ line;
+	if(f.good())
+		std::getline(f, line);
+	while(!line.empty() && (line.back() == '\r' || line.back() == ' '))
+		line.pop_back();
+	return line;
+}
+
+// The newest version directory of an installed package's dir, "" for none
+static ss_ newest_version_dir(const ss_ &dir)
+{
+	ss_ best;
+	for(const fs::Node &n : fs::list_directory(dir))
+		if(n.is_directory && semver_ok(n.name) &&
+				fs::path_exists(dir+"/"+n.name+"/meta.json") &&
+				(best.empty() || version_less(best, n.name)))
+			best = n.name;
+	return best.empty() ? "" : dir+"/"+best;
+}
+
+ss_ resolve_installed(const ss_ &user_path, const ss_ &author,
+		const ss_ &name, const ss_ &from, ss_ *why)
+{
+	const ss_ installed = user_path+"/installed";
+	sv_<ss_> any, there;
+	for(const fs::Node &k : fs::list_directory(installed)){
+		if(!k.is_directory || !fingerprint_ok(k.name))
+			continue;
+		const ss_ v = newest_version_dir(installed+"/"+k.name+"/"+name);
+		if(v.empty())
+			continue;
+		json::json_error_t e;
+		const json::Value m = json::load_file((v+"/meta.json").c_str(), &e);
+		if(!m.get("author").is_string() || m.get("author").as_string() != author)
+			continue;
+		any.push_back(k.name);
+		if(!from.empty() && first_line(v+"/.aitta_from") == from)
+			there.push_back(k.name);
+	}
+	const sv_<ss_> &c = from.empty() ? any : there;
+	if(c.size() == 1){
+		why->clear();
+		return c[0];
+	}
+	*why = author+"/"+name+(c.empty() ? " is not installed"+(from.empty() ?
+			ss_() : " from "+from) : " is installed by "+itos(c.size())+
+			" keys; which one is not said");
+	return "";
+}
+
+ss_ vouch_answer(const ss_ &body, const ss_ &author)
+{
+	json::json_error_t e;
+	const json::Value v = json::load_string(body.c_str(), &e);
+	const json::Value &a = v.get("author");
+	if(!v.is_object() || !v.get("ok").is_boolean() || !v.get("ok").as_boolean())
+		return "the Aitta's answer was not its info";
+	if(!a.is_string() || a.as_string().empty())
+		return "the Aitta binds no author to the key";
+	if(a.as_string() != author)
+		return "the Aitta binds the key to "+a.as_string().substr(0, 40)+
+				", not "+author;
+	return "";
+}
+
+ss_ vouch(const ss_ &aitta, const ss_ &public_hex, const ss_ &author)
+{
+	if(fingerprint(public_hex).empty())
+		return "not a key";
+	try {
+		// No redirect followed: the answer is that address's own
+		ss_ redirect;
+		const ss_ body = http_get(aitta+"/api/v1/aitta/info?key="+public_hex,
+				&redirect);
+		if(!redirect.empty())
+			return "the Aitta answered with a redirect";
+		return vouch_answer(body, author);
+	} catch(std::exception &e){
+		return ss_("the Aitta was not reached: ")+e.what();
+	}
+}
+
+bool public_address(const ss_ &ip, bool loopback_ok)
+{
+	unsigned char a[16];
+	if(inet_pton(AF_INET, ip.c_str(), a) == 1){
+		const unsigned b0 = a[0], b1 = a[1];
+		if(b0 == 127)
+			return loopback_ok;
+		return !(b0 == 0 || b0 == 10 || (b0 == 100 && (b1 & 0xc0) == 64) ||
+				(b0 == 169 && b1 == 254) || (b0 == 172 && (b1 & 0xf0) == 16) ||
+				(b0 == 192 && b1 == 168) || (b0 == 192 && b1 == 0 &&
+				a[2] == 0) || (b0 == 198 && (b1 & 0xfe) == 18) || b0 >= 224);
+	}
+	if(inet_pton(AF_INET6, ip.c_str(), a) != 1)
+		return false;
+	static const unsigned char LOOP[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1};
+	static const unsigned char ZERO[16] = {0};
+	if(memcmp(a, LOOP, 16) == 0)
+		return loopback_ok;
+	if(memcmp(a, ZERO, 16) == 0)
+		return false;
+	// v4-mapped (::ffff:a.b.c.d) as that v4 address
+	static const unsigned char MAPPED[12] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
+	if(memcmp(a, MAPPED, 12) == 0)
+		return public_address(itos(a[12])+"."+itos(a[13])+"."+itos(a[14])+
+				"."+itos(a[15]), loopback_ok);
+	// Unique local fc00::/7, link-local fe80::/10, multicast ff00::/8,
+	// and the documentation's and v4-compatible ones
+	return !((a[0] & 0xfe) == 0xfc || (a[0] == 0xfe && (a[1] & 0xc0) == 0x80) ||
+			a[0] == 0xff || (a[0] == 0x20 && a[1] == 0x01 && a[2] == 0x0d &&
+			a[3] == 0xb8) || memcmp(a, ZERO, 12) == 0);
+}
+
+ss_ vouch_guarded(const ss_ &aitta, const ss_ &public_hex,
+		const ss_ &author, bool loopback_ok)
+{
+	if(fingerprint(public_hex).empty())
+		return "not a key";
+	Url u;
+	if(aitta.size() > 200 || !parse_url(aitta, &u) || u.host.empty() ||
+			!(u.path.empty() || u.path == "/"))
+		return "the Aitta is not an origin (https://host[:port])";
+	for(char c : u.host)
+		if(!(isalnum((unsigned char)c) || c == '.' || c == '-' || c == ':'))
+			return "the Aitta's host is not a name or an address";
+	if(u.scheme != "https" && !(u.scheme == "http" && loopback_ok))
+		return "the Aitta is not https";
+	struct addrinfo hints, *res = nullptr;
+	memset(&hints, 0, sizeof hints);
+	hints.ai_socktype = SOCK_STREAM;
+	if(getaddrinfo(u.host.c_str(), u.port.c_str(), &hints, &res) != 0 || !res)
+		return "the Aitta's name "+u.host+" does not resolve";
+	ss_ ip, bad;
+	for(struct addrinfo *r = res; r; r = r->ai_next){
+		char buf[64] = {0};
+		const void *src = r->ai_family == AF_INET ?
+				(const void*)&((struct sockaddr_in*)r->ai_addr)->sin_addr :
+				r->ai_family == AF_INET6 ?
+				(const void*)&((struct sockaddr_in6*)r->ai_addr)->sin6_addr :
+				nullptr;
+		if(!src || !inet_ntop(r->ai_family, src, buf, sizeof buf))
+			continue;
+		if(!public_address(buf, loopback_ok))
+			bad = buf;
+		else if(ip.empty())
+			ip = buf;
+	}
+	freeaddrinfo(res);
+	if(!bad.empty())
+		return "the Aitta's name "+u.host+" has the address "+bad+
+				", which this server does not ask";
+	if(ip.empty())
+		return "the Aitta's name "+u.host+" has no address";
+	if(u.scheme == "http" && !loopback_ok)
+		return "the Aitta is not https";
+	try {
+		const ss_ origin = u.scheme+"://"+join_host_port(u.host, u.port);
+		const ss_ body = http_get_pinned(origin+"/api/v1/aitta/info?key="+
+				public_hex, ip, VOUCH_MAX_BYTES, VOUCH_TIMEOUT_S);
+		return vouch_answer(body, author);
+	} catch(std::exception &e){
+		return ss_("the Aitta was not reached: ")+e.what();
+	}
+}
+
+ss_ aitta_host(const ss_ &aitta)
+{
+	size_t p = aitta.find("://");
+	ss_ h = p == ss_::npos ? aitta : aitta.substr(p + 3);
+	h = h.substr(0, h.find('/'));
+	return h;
+}
+
+void record_vouch(const ss_ &user_path, const ss_ &fp, const ss_ &aitta,
+		const ss_ &author)
+{
+	if(!fingerprint_ok(fp))
+		return;
+	json::Value v = json::object();
+	v.set("aitta", aitta);
+	v.set("author", author);
+	const ss_ dir = user_path+"/installed/"+fp;
+	fs::create_directories(dir);
+	std::ofstream o(dir+"/.vouch", std::ios::binary);
+	o<<v.stringify()<<"\n";
+}
+
+ss_ installed_vouch(const ss_ &user_path, const ss_ &fp)
+{
+	if(!fingerprint_ok(fp))
+		return "";
+	json::json_error_t e;
+	const json::Value v = json::load_file((user_path+"/installed/"+fp+
+			"/.vouch").c_str(), &e);
+	return v.get("aitta").is_string() ? v.get("aitta").as_string() : "";
+}
+
 // A release's .sig read and checked against its archive: the .sig, or
 // throws why not
 static json::Value verified_sig(const ss_ &zip_path, const ss_ &sig_path)
@@ -1156,7 +1403,7 @@ static json::Value verified_sig(const ss_ &zip_path, const ss_ &sig_path)
 }
 
 ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
-		bool review, const ss_ &share_path)
+		bool review, const ss_ &share_path, const ss_ &from)
 {
 	const json::Value sig = verified_sig(zip_path, sig_path);
 	json::json_error_t e;
@@ -1164,6 +1411,12 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 		const json::Value &v = sig.get(k);
 		return v.is_string() ? v.as_string() : "";
 	};
+	// [AITTA_KEY_IDENTITY] Its key is half its name
+	const ss_ fp = fingerprint(sstr("key"));
+	if(fp.empty())
+		throw Exception("the .sig's key is not a key");
+	if(from.find_first_of("\n\r") != ss_::npos)
+		throw Exception("not an Aitta's address: "+from);
 
 	// Unpacked beside where it goes, and moved into place once its
 	// manifest has been read: nothing half there under its own name
@@ -1177,6 +1430,9 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 		const ss_ why = check_manifest(m);
 		if(!why.empty())
 			throw Exception("meta.json: "+why);
+		// Where it came from, for its base to resolve on (find_base())
+		if(!from.empty())
+			write_file(incoming+"/.aitta_from", from+"\n");
 		if(!share_path.empty()){
 			ss_ why;
 			find_base(m, incoming, share_path, user_path, &why);
@@ -1209,8 +1465,7 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 			if(kind != "app" && kind != "remix")
 				throw Exception("only an app is playtested; an extension "
 						"is reviewed by its files");
-			const ss_ app = installed+"/"+m.get("author").as_string()+"__"+
-					m.get("name").as_string();
+			const ss_ app = installed+"/"+fp+"__"+m.get("name").as_string();
 			const ss_ dir = app+"/"+m.get("version").as_string();
 			fs::remove_all(dir);
 			fs::create_directories(app);
@@ -1219,14 +1474,13 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 			write_file(dir+"/.aitta_sha256", sstr("sha256")+"\n");
 			return dir;
 		}
-		const ss_ app = installed+"/"+m.get("author").as_string()+"/"+
-				m.get("name").as_string();
+		const ss_ app = installed+"/"+fp+"/"+m.get("name").as_string();
 		const ss_ dir = app+"/"+m.get("version").as_string();
 		if(fs::path_exists(dir))
 			throw Exception("already installed: "+dir);
 		if(kind == "extension" && !fs::path_exists(incoming+"/init.lua"))
 			throw Exception("an extension with no init.lua at its root");
-		// An author/name stays the kind it was first installed as
+		// A key's name stays the kind it was first installed as
 		for(const auto &n : fs::list_directory(app)){
 			const ss_ was = n.is_directory ? kind_of(json::load_file(
 					(app+"/"+n.name+"/meta.json").c_str(), &e)) : kind;
@@ -1235,21 +1489,10 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 						m.get("name").as_string()+" is installed as "+
 						(was == "remix" ? "a " : "an ")+was);
 		}
-		// The first install's key is the app's: a later version signed by
-		// another is someone else's (trust on first install)
+		// The key, beside its versions: a package of another key is
+		// another package, in a directory of its own
 		fs::create_directories(app);
-		const ss_ key_file = app+"/key";
-		if(fs::path_exists(key_file)){
-			ss_ known = read_file(key_file);
-			while(!known.empty() && (known.back() == '\n' || known.back() == '\r'))
-				known.pop_back();
-			if(known != sstr("key"))
-				throw Exception("signed by another key than the installed "
-						"versions of "+m.get("author").as_string()+"/"+
-						m.get("name").as_string());
-		} else {
-			write_file(key_file, sstr("key")+"\n");
-		}
+		write_file(user_path+"/installed/"+fp+"/.key", sstr("key")+"\n");
 		if(!fs::rename(incoming, dir))
 			throw Exception("cannot move it into "+dir);
 		// Inside, where the app's boxed server can read it to pin a save
@@ -1301,12 +1544,22 @@ ss_ install_world(const ss_ &zip_path, const ss_ &sig_path,
 		if(kind_of(m) != "world")
 			throw Exception("not a world: an app or an extension is installed "
 					"as one");
-		if(str("app") != app)
-			throw Exception("a world of "+str("app")+", not of "+app);
 		// The app it is a save of, here: one that comes with Buildat, or an
 		// installed package -- of the version that made it, which another
 		// version does not open (storage's pin)
 		const size_t dot = app.find('.');
+		// [AITTA_KEY_IDENTITY] An installed app is <fp>.<name> here and
+		// <author>.<name> in a manifest: the one here by that author
+		ss_ app_author = app;
+		if(dot != ss_::npos){
+			const ss_ v = newest_version_dir(user_path+"/installed/"+
+					app.substr(0, dot)+"/"+app.substr(dot + 1));
+			const json::Value am = json::load_file((v+"/meta.json").c_str(), &e);
+			app_author = (am.get("author").is_string() ?
+					am.get("author").as_string() : "?")+app.substr(dot);
+		}
+		if(str("app") != app_author)
+			throw Exception("a world of "+str("app")+", not of "+app_author);
 		if(dot == ss_::npos){
 			if(!fs::path_exists(share_path+"/apps/"+app))
 				throw Exception("its app "+app+" is not here");

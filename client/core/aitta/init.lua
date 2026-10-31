@@ -29,23 +29,42 @@ local M = {safe = {}}
 -- installed beside the others, never over one. Where the filters hide
 -- unreviewed content, reviewed releases only. `query`: only the releases whose
 -- author/name or description has it, case aside.
+-- [AITTA_KEY_IDENTITY] By "<fp>/<name>", a package's key and name: two
+-- Aittas' "alice" are two. Each: {version = true}; and the second table
+-- the same keys' {author, from (the Aitta it came from), aitta (the one
+-- vouching, "" for unverified)} as the install says them.
 local function aitta_installed()
-	local have = {}
+	local have, meta = {}, {}
 	for _, g in ipairs(buildat.list_apps() or {}) do
-		local author, name, version = tostring(g.name):match("^([%w_]+)%.([%w_]+)@(.+)$")
-		if author then
-			local k = author .. "/" .. name
+		local fp, name, version = tostring(g.name):match("^([%w_]+)%.([%w_]+)@(.+)$")
+		if fp and g.fp == fp then
+			local k = fp .. "/" .. name
 			have[k] = have[k] or {}
 			have[k][version] = true
+			meta[k] = {author = g.author, from = g.from, aitta = g.aitta}
 		end
 	end
 	for _, x in ipairs(buildat.list_launchers() or {}) do
-		local author, name = tostring(x.name):match("^([%w_]-)__([%w_]+)$")
-		if x.kind == "extension" and author and x.version then
-			have[author .. "/" .. name] = {[x.version] = true}
+		local fp, name = tostring(x.name):match("^([%w_]-)__([%w_]+)$")
+		if x.kind == "extension" and fp and x.fp == fp and x.version then
+			have[fp .. "/" .. name] = {[x.version] = true}
+			meta[fp .. "/" .. name] = {author = x.author, from = x.from,
+					aitta = x.aitta}
 		end
 	end
-	return have
+	return have, meta
+end
+-- An Aitta's host, as a package's name says it beside an author another
+-- Aitta has too
+local function aitta_host(aitta)
+	return tostring(aitta):match("^%a+://([^/]+)") or tostring(aitta)
+end
+-- A release's package here: "<fp>/<name>" by the key its Aitta lists
+-- The installed packages asked again whose key they are, once a run
+local revouched = {}
+local function package_id(rel)
+	local fp = __buildat_aitta_fingerprint(tostring(rel.key or ""))
+	return fp ~= "" and fp .. "/" .. tostring(rel.name) or nil
 end
 
 -- **A release fetched and installed** ([REWORK_1019_FIXES] client 10):
@@ -67,9 +86,17 @@ local function fetch_install(aitta, sha256, o, done)
 			if not zip or zip:sub(1, 2) ~= "PK" then
 				return done(nil, zip and refused or tostring(e2), "fetch")
 			end
-			local dir, why = __buildat_aitta_install(zip, sig, aitta, o.review,
-					o.world)
-			done(dir, why, "install")
+			-- [AITTA_KEY_IDENTITY] Who this Aitta says the key is, asked of
+			-- it by this client: the install keeps it as the key's vouch
+			-- where it is the manifest's author; unverified where not
+			local s = network.parse_json(sig)
+			local key = type(s) == "table" and tostring(s.key or "") or ""
+			network.http_get(aitta .. "/api/v1/aitta/info?key=" ..
+					(key:match("^%x+$") or ""), function(info)
+				local dir, why = __buildat_aitta_install(zip, sig, aitta,
+						o.review, o.world, info)
+				done(dir, why, "install")
+			end, options)
 		end, options)
 	end, options)
 end
@@ -142,8 +169,8 @@ M.report_release = aitta_report
 -- listed again. simplified: noted when the Aitta page fetches the list,
 -- not on its own -- a check at the grid's start when a user asks
 local function aitta_note(rel, why)
-	local a, n, v = tostring(rel.author), tostring(rel.name),
-			tostring(rel.version)
+	local a, n, v = __buildat_aitta_fingerprint(tostring(rel.key or "")),
+			tostring(rel.name), tostring(rel.version)
 	if not (a:match("^[%w_]+$") and n:match("^[%w_]+$") and
 			v:match("^[%w%.%-%+_]+$") and v ~= "." and v ~= "..") then
 		return
@@ -216,6 +243,19 @@ end
 -- its launcher's {code}, or nil and why not
 local function world_app(rel)
 	local app = type(rel.app) == "string" and rel.app or ""
+	-- [AITTA_KEY_IDENTITY] "<author>.<name>", the installed one of that
+	-- author from the world's Aitta: "<fp>.<name>" here
+	local author, name = app:match("^([%w_]+)%.([%w_]+)$")
+	if author and not (#author == 20 and author:match("^[0-9a-f]+$")) then
+		local have, meta = aitta_installed()
+		for k, _ in pairs(have) do
+			local fp, n = k:match("^(.-)/(.*)$")
+			if n == name and meta[k].author == author and
+					meta[k].from == rel.aitta then
+				app = fp .. "." .. name
+			end
+		end
+	end
 	local wp = (buildat.world_packages() or {})[app]
 	if not wp then
 		return app, nil, app == "" and "it names no app" or app ..
@@ -245,7 +285,7 @@ end
 
 -- [WEB_LOCAL_AITTA] An installed release run in the page: its .wasm
 -- fetched from its Aitta, each checked against its sha256, kept under .web/
--- in its directory, and the page goes to ?local=<author>.<name>@<version>,
+-- in its directory, and the page goes to ?local=<fp>.<name>@<version>,
 -- which runs the engine's server for packages on it (web/index.html)
 local function go_in_page(key, rel)
 	local ui = require("buildat/extension/ui_utils").safe
@@ -328,9 +368,11 @@ end
 -- An installed release's client half started with no server, the pages
 -- over the launcher taken down first; one whose server runs in the page
 -- (rel given), run there
+-- key: "<fp>/<name>" ([AITTA_KEY_IDENTITY])
 local function play_installed(key, version, rel)
 	if rel and in_page(rel) then
-		return go_in_page(key, rel)
+		return go_in_page(tostring(rel.author) .. "/" .. tostring(rel.name),
+				rel)
 	end
 	local id = key:gsub("/", ".", 1) .. "@" .. tostring(version)
 	log:info("aitta: play " .. id .. " serverless")
@@ -470,7 +512,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 	-- [LIVELY_MENU] Hearth's feed: each package's posts and newest threads
 	local feed = nil
 	local function state(p)
-		local mine = have[p.key]
+		local mine = have[p.id]
 		return not mine and "Not installed" or
 				mine[tostring(p.rel.version)] and "Installed" or "Updates"
 	end
@@ -498,9 +540,17 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 					least:match("^(%d+)%.") and
 					(starport.semver_cmp(v, least) or -1) >= 0)
 		end
-		for v in pairs(aitta_installed()[a .. "/" .. n] or {}) do
-			if fits(v) then
-				return nil
+		-- [AITTA_KEY_IDENTITY] By that author from the remix's Aitta, as
+		-- the install resolves it
+		local have, meta = aitta_installed()
+		for k, h in pairs(have) do
+			if meta[k].author == a and k:match("/(.*)$") == n and
+					meta[k].from == rel.aitta then
+				for v, _ in pairs(h) do
+					if fits(v) then
+						return nil
+					end
+				end
 			end
 		end
 		local best = nil
@@ -547,7 +597,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 			end
 			world = {app = app, code = wp.code}
 		end
-		say("Fetching " .. k .. "...")
+		say("Fetching " .. p.label .. "...")
 		fetch_install(rel.aitta, rel.sha256, {description = "Aitta (install)",
 				world = world}, function(dir, why, stage)
 			if stage == "fetch" then
@@ -571,7 +621,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 				return
 			end
 			if dir and play then
-				return play_installed(k, rel.version, rel)
+				return play_installed(p.id, rel.version, rel)
 			end
 			-- Read before the grid's refresh, which takes the page down
 			local q = search:GetText()
@@ -581,7 +631,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 			if menu and type(menu.refresh) == "function" then
 				menu.refresh()
 			end
-			aitta_page(dir and ("Installed " .. k .. " " ..
+			aitta_page(dir and ("Installed " .. p.label .. " " ..
 					tostring(rel.version) .. (rel.kind == "extension" and
 					(": the extension " .. tostring(rel.author) .. "__" ..
 					tostring(rel.name) .. ", in the sandbox") or
@@ -597,7 +647,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		panel:RemoveAllChildren()
 		local rel = p.rel
 		log:info("aitta panel: " .. p.key .. " " .. tostring(rel.version))
-		ptext(p.key, nil, 18)
+		ptext(p.label, nil, 18)
 		ptext(tostring(rel.version) .. ", " .. (rel.kind == "extension" and
 				"an extension" or rel.kind == "world" and "a world for " ..
 				tostring(rel.app) .. (rel.app_version and " " ..
@@ -661,7 +711,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		if (rel.serverless == true or in_page(rel)) and not why_not then
 			add_button(actions, "Play", function()
 				if st == "Installed" then
-					play_installed(p.key, rel.version, rel)
+					play_installed(p.id, rel.version, rel)
 				else
 					install(p, true)
 				end
@@ -755,8 +805,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 			-- simplified: a long name cut by its length, about 10 units a
 			-- character at the rows' size
 			local most = math.floor(list_w * 0.55 / 10)
-			local b = view:row({label = #p.key > most and
-					p.key:sub(1, most - 3) .. "..." or p.key,
+			local b = view:row({label = #p.label > most and
+					p.label:sub(1, most - 3) .. "..." or p.label,
 					icon = aitta_media(p.rel, "icon", function()
 						if is_open(root) then
 							show_rows()
@@ -796,7 +846,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 				end
 				last_click[p] = t
 			end)
-			if p.key == chosen or not first then
+			if p.key == chosen or p.id == chosen or not first then
 				first = {p = p, b = b}
 			end
 		end
@@ -819,8 +869,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		end
 	end)
 	-- Every Aitta's list, merged as Starports' are: a release shown once
-	-- by author/name, version and key, from the first Aitta listing it;
-	-- a package is its newest
+	-- by its key's fingerprint, name and version, from the first Aitta
+	-- listing it; a package is its newest
 	local errors, waiting = {}, #e.aittas
 	local function show_all()
 		local newest, order = {}, {}
@@ -833,27 +883,69 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 					-- The Aitta it came from, never the list's own word: a list
 					-- naming another address sent this client's fetches there
 					rel.aitta = a
-					local k = tostring(rel.author) .. "/" .. tostring(rel.name)
-					log:info("aitta page: " .. k .. " " ..
+					local k = package_id(rel)
+					log:info("aitta page: " .. tostring(rel.author) .. "/" ..
+							tostring(rel.name) .. " " ..
 							tostring(rel.version) .. " " ..
 							(rel.review == "reviewed" and "reviewed" or
 							"unreviewed"))
-					if not newest[k] then
+					if not k then
+						-- no key, no package ([AITTA_KEY_IDENTITY])
+					elseif not newest[k] then
 						order[#order + 1] = k
 					end
-					local old = newest[k]
+					local old = k and newest[k]
 					local runs = not cannot_run(rel)
 					local old_runs = old and not cannot_run(old)
-					if not old or (runs and not old_runs) or
-							(runs == old_runs and newer_release(rel, old)) then
+					if k and (not old or (runs and not old_runs) or
+							(runs == old_runs and newer_release(rel, old))) then
 						newest[k] = rel
 					end
 				end
 			end
 		end
-		have = aitta_installed()
-		for _, k in ipairs(order) do
-			packages[#packages + 1] = {key = k, rel = newest[k]}
+		local meta
+		have, meta = aitta_installed()
+		-- [AITTA_KEY_IDENTITY] A package is its key's: two of one
+		-- author/name (two Aittas' "alice") are two rows, each named with
+		-- its Aitta's host; an installed one no Aitta vouched for says so
+		local named = {}
+		for _, id in ipairs(order) do
+			local rel = newest[id]
+			local k = tostring(rel.author) .. "/" .. tostring(rel.name)
+			named[k] = (named[k] or 0) + 1
+		end
+		for id, m in pairs(meta) do
+			local k = tostring(m.author) .. "/" .. id:match("/(.*)$")
+			if not newest[id] then
+				named[k] = (named[k] or 0) + 1
+			end
+		end
+		for _, id in ipairs(order) do
+			local rel = newest[id]
+			local k = tostring(rel.author) .. "/" .. tostring(rel.name)
+			local label = k
+			if named[k] > 1 then
+				label = label .. " @" .. aitta_host(rel.aitta)
+			end
+			if meta[id] and meta[id].aitta == "" then
+				label = label .. " (unverified)"
+			end
+			packages[#packages + 1] = {key = k, id = id, rel = rel,
+					label = label}
+			-- One installed that its Aitta did not vouch for (unreached
+			-- then): asked again, its key as this list has it
+			if meta[id] and meta[id].aitta == "" and meta[id].from == rel.aitta and
+					not revouched[id] then
+				revouched[id] = true
+				network.http_get(rel.aitta .. "/api/v1/aitta/info?key=" ..
+						(tostring(rel.key):match("^%x+$") or ""), function(info)
+					if info and __buildat_aitta_vouch(id:match("^(.-)/"),
+							rel.aitta, info) then
+						log:info("aitta: " .. k .. " vouched for by " .. rel.aitta)
+					end
+				end, {description = "Aitta (vouch)"})
+			end
 		end
 		local n = show_rows()
 		if not message then
@@ -934,8 +1026,13 @@ function M.playtest(offer, start)
 				log:warning("playtest: " .. id .. ": " .. tostring(why))
 				return ui.show_message_dialog("Not installed: " .. tostring(why))
 			end
-			local author, name, version = id:match("^(.-)/(.-)/(.*)$")
-			local app = "review:" .. author .. "." .. name .. "@" .. version
+			-- [AITTA_KEY_IDENTITY] review/<fp>__<name>/<version>
+			local fp, name, version = tostring(dir):match(
+					"review/([%w_]-)__([%w_]+)/([^/]+)/?$")
+			if not fp then
+				return ui.show_message_dialog("Not installed: " .. tostring(dir))
+			end
+			local app = "review:" .. fp .. "." .. name .. "@" .. version
 			log:info("playtest: installed " .. app .. " in " .. dir)
 			local menu = buildat.menu_extension()
 			if menu and type(menu.refresh) == "function" then
@@ -962,22 +1059,31 @@ function M.run_serverless(key)
 	end
 	local best, waiting, errors = nil, #e.aittas, {}
 	local function decide()
-		local have = aitta_installed()[key]
+		-- [AITTA_KEY_IDENTITY] The best release's key's package; with no
+		-- answer, an installed one whose author and name are these
+		local installed, meta = aitta_installed()
+		local id = best and package_id(best)
+		local have = id and installed[id]
 		if best and have and have[tostring(best.version)] then
-			return play_installed(key, best.version, best)
+			return play_installed(id, best.version, best)
 		end
-		if best then
+		if best and id then
 			fetch_install(best.aitta, best.sha256, {description = "Aitta (install)"},
 					function(dir, why)
 				if not dir then
 					return failed(tostring(why))
 				end
-				play_installed(key, best.version, best)
+				play_installed(id, best.version, best)
 			end)
 			return
 		end
-		for version, _ in pairs(have or {}) do
-			return play_installed(key, version)
+		local a, n = key:match("^([^/]+)/(.+)$")
+		for k, h in pairs(installed) do
+			if meta[k].author == a and k:match("/(.*)$") == n then
+				for version, _ in pairs(h) do
+					return play_installed(k, version)
+				end
+			end
 		end
 		failed(#errors > 0 and table.concat(errors, "; ") or
 				"no Aitta in the settings lists it as playable in the browser")
@@ -1093,12 +1199,16 @@ function M.safe.aitta_shown()
 end
 
 -- [KIT] stage 5 **Kit's packages** (builtin/kit/api.h), for its palette's
--- New tab: kit_packages(cb) gives cb({{key = "author/name", version,
--- description, license_code, license_media, dependencies, time}, ...}),
--- each package's newest release the filters let through, the newest
--- first, once every Aitta in the settings answered or failed.
+-- New tab: kit_packages(cb) gives cb({{key = "<fp>/<name>", author,
+-- name, label, aitta, version, description, license_code, license_media,
+-- dependencies, time}, ...}), each package's newest release the filters
+-- let through, the newest first, once every Aitta in the settings
+-- answered or failed. [AITTA_KEY_IDENTITY] A package is its key's
+-- fingerprint and name; label is "author/name", with " @<host>" where two
+-- listed share it. A dependency's {kit = "author/name"} is the one on the
+-- depending package's Aitta.
 -- simplified: a fetch each call, the last list kept for kit_fetch
-local kit_list = {}
+local kit_list, kit_by_aitta = {}, {}
 function M.safe.kit_packages(cb)
 	if type(cb) ~= "function" then
 		error("kit_packages(cb: function)")
@@ -1111,8 +1221,17 @@ function M.safe.kit_packages(cb)
 			return
 		end
 		kit_list = newest
+		kit_by_aitta = {}
+		local named = {}
+		for k, r in pairs(newest) do
+			local an = tostring(r.rel.author) .. "/" .. tostring(r.rel.name)
+			kit_by_aitta[r.aitta] = kit_by_aitta[r.aitta] or {}
+			kit_by_aitta[r.aitta][an] = k
+			named[an] = (named[an] or 0) + 1
+		end
 		local out = {}
 		for k, r in pairs(newest) do
+			local an = tostring(r.rel.author) .. "/" .. tostring(r.rel.name)
 			local deps = {}
 			for _, d in ipairs(type(r.rel.manifest.dependencies) == "table" and
 					r.rel.manifest.dependencies or {}) do
@@ -1121,7 +1240,10 @@ function M.safe.kit_packages(cb)
 							tostring(d.version)}
 				end
 			end
-			out[#out + 1] = {key = k, version = tostring(r.rel.version),
+			out[#out + 1] = {key = k, author = tostring(r.rel.author),
+				name = tostring(r.rel.name), aitta = r.aitta,
+				label = an .. (named[an] > 1 and " @" .. aitta_host(r.aitta) or ""),
+				version = tostring(r.rel.version),
 				description = tostring(r.rel.description or ""):sub(1, 300),
 				license_code = tostring(r.rel.license_code or ""),
 				license_media = tostring(r.rel.license_media or ""),
@@ -1137,10 +1259,12 @@ function M.safe.kit_packages(cb)
 			local v = body and network.parse_json(body)
 			for _, rel in ipairs(type(v) == "table" and
 					type(v.releases) == "table" and v.releases or {}) do
-				local k = type(rel) == "table" and tostring(rel.author) ..
+				local an = type(rel) == "table" and tostring(rel.author) ..
 						"/" .. tostring(rel.name)
+				local k = an and an:match("^[%w_]+/[%w_]+$") and #an <= 81 and
+						package_id(rel)
 				local api = k and tonumber(rel.engine_api) or 0
-				if k and k:match("^[%w_]+/[%w_]+$") and #k <= 81 and
+				if k and
 						type(rel.manifest) == "table" and
 						rel.manifest.kind == "kit" and rel.delisted ~= true and
 						type(rel.sha256) == "string" and
@@ -1160,7 +1284,8 @@ end
 
 -- kit_fetch(key, cb): the package of the last kit_packages() list and the
 -- newest listed release of each dependency it needs (at its version or
--- newer), each's signature and archive: cb({{key, version, data =
+-- newer; on the depending package's Aitta), each's signature and archive:
+-- cb({{key, aitta, version, data =
 -- <.sig> .. "\0" .. <.zip>}, ...}), the dependencies first, which is what
 -- Kit's "kit:package" takes; or cb(nil, why). The server checks each
 -- signature and archive again
@@ -1169,7 +1294,14 @@ function M.safe.kit_fetch(key, cb)
 		error("kit_fetch(key: string, cb: function)")
 	end
 	local order, seen = {}, {}
-	local function want(k, min)
+	local function want(k, min, on)
+		if on then
+			local named = k
+			k = (kit_by_aitta[on] or {})[named]
+			if not k then
+				return named .. " is not on " .. on
+			end
+		end
 		local r = kit_list[k]
 		if not r then
 			return k .. " is on no Aitta in the settings"
@@ -1188,7 +1320,7 @@ function M.safe.kit_fetch(key, cb)
 		for _, d in ipairs(type(r.rel.manifest.dependencies) == "table" and
 				r.rel.manifest.dependencies or {}) do
 			local why = type(d) == "table" and want(tostring(d.kit),
-					tostring(d.version))
+					tostring(d.version), r.aitta)
 			if why then
 				return why
 			end
@@ -1217,8 +1349,8 @@ function M.safe.kit_fetch(key, cb)
 				if not zip or zip:sub(1, 2) ~= "PK" then
 					return cb(nil, k .. ": " .. tostring(zip and "the Aitta refused it" or e2))
 				end
-				out[#out + 1] = {key = k, version = tostring(r.rel.version),
-					data = sig .. "\0" .. zip}
+				out[#out + 1] = {key = k, aitta = r.aitta,
+					version = tostring(r.rel.version), data = sig .. "\0" .. zip}
 				next_one()
 			end, o)
 		end, o)

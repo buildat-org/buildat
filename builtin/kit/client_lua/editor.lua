@@ -754,7 +754,8 @@ function M.fetch_packages()
 				"in the settings" or nil
 		log:info("kit editor: " .. #list .. " packages listed")
 		for _, p in ipairs(list) do
-			log:info("kit editor: package " .. p.key .. " " .. p.version)
+			log:info("kit editor: package " .. tostring(p.label or p.key) ..
+					" " .. p.version)
 		end
 		if S.tab == "New" then
 			palette()
@@ -762,8 +763,18 @@ function M.fetch_packages()
 	end)
 end
 
-local function install(key)
-	E.status = "Fetching " .. key .. "..."
+-- [AITTA_KEY_IDENTITY] A package's thing ("<fp>/<n>") as people read it:
+-- its author's name, and its Aitta's host where that is ambiguous or
+-- unverified (the server's word)
+local function shown(n)
+	local names = E.state and type(E.state.names) == "table" and
+			E.state.names or {}
+	return names[n] or n
+end
+M.shown = shown
+
+local function install(key, label)
+	E.status = "Fetching " .. (label or key) .. "..."
 	log:info("kit editor: fetching " .. key)
 	people()
 	aitta.kit_fetch(key, function(list, why)
@@ -774,7 +785,9 @@ local function install(key)
 		end
 		for _, p in ipairs(list) do
 			log:info("kit editor: sending " .. p.key .. " " .. p.version)
-			buildat.send_packet("kit:package", p.data)
+			-- The Aitta it came from first, which the server asks whose
+			-- key it is
+			buildat.send_packet("kit:package", p.aitta .. "\0" .. p.data)
 		end
 	end)
 end
@@ -789,14 +802,14 @@ local function new_tab(w)
 			break
 		end
 		local r = row(w)
-		local t = text(r, p.key .. " " .. p.version)
+		local t = text(r, tostring(p.label or p.key) .. " " .. p.version)
 		t.minWidth = 220
 		local cur = have[p.key]
 		if cur == p.version then
 			text(r, "installed", DIM)
 		else
 			button(r, cur and "Upgrade" or "Install", function()
-				install(p.key)
+				install(p.key, p.label)
 			end)
 		end
 		if p.description ~= "" then
@@ -854,14 +867,16 @@ palette = function()
 		end
 	end
 	local items = {}
+	-- Each by its name (a favourite's), shown as people read it
 	for _, t in ipairs(E.state.palette or {}) do
 		if S.tab ~= "Favourites" or fav[t] then
-			items[#items + 1] = {label = t, type = t}
+			items[#items + 1] = {key = t, label = shown(t), type = t}
 		end
 	end
 	for _, p in ipairs(E.state.prefabs or {}) do
 		if S.tab ~= "Favourites" or fav["[" .. p .. "]"] then
-			items[#items + 1] = {label = "[" .. p .. "]", prefab = p}
+			items[#items + 1] = {key = "[" .. p .. "]",
+					label = "[" .. shown(p) .. "]", prefab = p}
 		end
 	end
 	if #items == 0 and S.tab == "Favourites" then
@@ -884,7 +899,8 @@ palette = function()
 				log:info("kit editor: placing nothing")
 			else
 				M.set_tool(nil)
-				S.placing = {type = it.type, prefab = it.prefab, label = it.label}
+				S.placing = {type = it.type, prefab = it.prefab, label = it.label,
+						key = it.key}
 				log:info("kit editor: placing " .. it.label)
 			end
 			palette()
@@ -909,13 +925,14 @@ palette = function()
 	end
 	-- The armed one starred or not
 	if S.placing then
-		local name, on = S.placing.label, false
+		local name, on = S.placing.key or S.placing.label, false
 		for _, n in ipairs(aitta.kit_favourites()) do
 			on = on or n == name
 		end
-		button(w, (on and "Unfavourite " or "Favourite ") .. name, function()
+		local label = S.placing.label
+		button(w, (on and "Unfavourite " or "Favourite ") .. label, function()
 			aitta.kit_favourite(name, not on)
-			log:info("kit editor: " .. name .. (on and " not" or "") ..
+			log:info("kit editor: " .. label .. (on and " not" or "") ..
 					" a favourite")
 			palette()
 		end)
@@ -997,7 +1014,7 @@ local function field(name, d, values)
 		f.type = "choice"
 		f.choices = {{"none", ""}}
 		for _, p in ipairs(E.state.prefabs or {}) do
-			f.choices[#f.choices + 1] = {p, p}
+			f.choices[#f.choices + 1] = {shown(p), p}
 		end
 	elseif t == "number" or t == "bool" then
 		f.type = t
@@ -3443,6 +3460,16 @@ function M.editor(options)
 		end
 		if E.editing and #(s.voxels or {}) ~= #((E.state or {}).voxels or {}) then
 			log:info("kit editor: " .. #(s.voxels or {}) .. " voxels to place")
+		end
+		-- [AITTA_KEY_IDENTITY] A package's name as people read it, said
+		-- when it changes (its Aitta's vouch, a second "alice")
+		local old_names = (E.state or {}).names or {}
+		for id, label in pairs(E.editing and type(s.names) == "table" and
+				s.packages or {}) do
+			local l = s.names[id]
+			if l and l ~= old_names[id] then
+				log:info("kit editor: installed " .. tostring(l) .. " as " .. id)
+			end
 		end
 		E.state = E.editing and s or nil
 		if was ~= E.editing then

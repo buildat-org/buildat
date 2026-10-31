@@ -1029,9 +1029,10 @@ static bool valid_app_name(const ss_ &name)
 }
 
 // **An app installed from a release** ([AITTA_MVP]) is named on the grid
-// and to start_local_server() "<author>.<name>@<version>", and lives in
-// <user>/installed/<author>/<name>/<version>/; its server calls it
-// "<author>.<name>" (server::app_of()). Each part as the install checked
+// and to start_local_server() "<fp>.<name>@<version>", fp its key's
+// fingerprint ([AITTA_KEY_IDENTITY]), and lives in
+// <user>/installed/<fp>/<name>/<version>/; its server calls it
+// "<fp>.<name>" (server::app_of()). Each part as the install checked
 // it (interface::aitta::check_manifest()); "" for anything else.
 static ss_ installed_app_dir(const ss_ &id)
 {
@@ -1056,10 +1057,10 @@ static ss_ installed_app_dir(const ss_ &id)
 			name+"/"+version;
 }
 
-// **A reviewer's playtest** ([AITTA_REVIEW]): "review:<author>.<name>
+// **A reviewer's playtest** ([AITTA_REVIEW]): "review:<fp>.<name>
 // @<version>" on the grid and to start_local_server(), in
-// <user>/review/<author>__<name>/<version>/, apart from the installed
-// ones; its server calls it "review.<author>__<name>", its saves its own
+// <user>/review/<fp>__<name>/<version>/, apart from the installed
+// ones; its server calls it "review.<fp>__<name>", its saves its own
 static ss_ review_app_dir(const ss_ &id)
 {
 	if(id.compare(0, 7, "review:") != 0)
@@ -1170,7 +1171,20 @@ static ss_ installed_extension_dir(const ss_ &name)
 	for(const DevEntry &e : dev_entries())
 		if(!e.client_name.empty() && e.client_name == name)
 			return e.dir;
-	const ss_ prefix = name.substr(0, sep)+"."+name.substr(sep + 2)+"@";
+	// [AITTA_KEY_IDENTITY] "<fp>__<name>" is that key's; "<author>__<name>",
+	// as code requires one, the only installed one by that author
+	// simplified: not by the Aitta the requiring app came from, which
+	// extension_path() is not told; two by one author name are neither
+	ss_ fp = name.substr(0, sep);
+	if(!interface::aitta::fingerprint_ok(fp)){
+		ss_ why;
+		fp = interface::aitta::resolve_installed(
+				g_client_config.get<ss_>("user_path"), fp, name.substr(sep + 2),
+				"", &why);
+		if(fp.empty())
+			return "";
+	}
+	const ss_ prefix = fp+"."+name.substr(sep + 2)+"@";
 	for(const ss_ &id : installed_app_ids(true))
 		if(id.compare(0, prefix.size(), prefix) == 0)
 			return installed_app_dir(id);
@@ -2696,6 +2710,8 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(disconnect)
 		DEF_BUILDAT_FUNC(list_apps)
 		DEF_BUILDAT_FUNC(aitta_install)
+		DEF_BUILDAT_FUNC(aitta_vouch)
+		DEF_BUILDAT_FUNC(aitta_fingerprint)
 		DEF_BUILDAT_FUNC(remove_review)
 		DEF_BUILDAT_FUNC(aitta_dev)
 		DEF_BUILDAT_FUNC(open_url)

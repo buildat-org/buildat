@@ -165,23 +165,27 @@ version runs none of them.
 A package of kind "extension" is a client extension: init.lua at its
 root, run in the client's sandbox like extensions/ (an app's client Lua
 requires it, or a launch_ui.txt beside it makes it a launch UI, always
-sandboxed). The client names it "<author>__<name>", so neither part may
-have "__" in it or start or end with _. It has no saves to pin, so an
-installed version replaces the one before it. An author/name stays the
-kind it was first installed as.
+sandboxed). The client names it "<fp>__<name>" (its key's, below), so
+its name may not have "__" in it or start or end with _. It has no saves
+to pin, so an installed version replaces the one before it. A key's name
+stays the kind it was first installed as. An app's require of
+"<author>__<name>" is the one installed from that app's own Aitta
+(simplified: the only one of that author and name installed).
 
 Kit packages [KIT]
 ------------------
 A package of kind "kit" is Kit's component types, prefabs and voxel
-types (builtin/kit/api.h says the files), named by the manifest's author,
-which Aitta binds to the key that signs it. It is not installed in the
-client: a builder installs it into a server's save from Kit's palette (its
-New tab lists the Aittas' Kit packages), and the server checks the
-signature again. One more manifest field:
+types (builtin/kit/api.h says the files), a package of its key and name
+as everywhere (below); its files name its things by the manifest's
+author, "<author>/<n>". It is not installed in the client: a builder
+installs it into a server's save from Kit's palette (its New tab lists
+the Aittas' Kit packages), and the server checks the signature again and
+asks the Aitta the client named whose key it is. One more manifest field:
 
         "dependencies": [            the Kit packages it uses, fetched
           {"kit": "alice/lamps",      and installed before it, each at
-           "version": "1.0.0"}]       that version or newer
+           "version": "1.0.0"}]       that version or newer, from the
+                                      depending package's Aitta
 
 An Aitta lists it as kind "other" with its whole manifest (no change to
 an Aitta was needed); a client reads "manifest"."kind". Kit's "Publish
@@ -197,7 +201,8 @@ manifest fields:
 
         "app": "vanilla",             the app it is a save of: a shipped
                                       app's name or an installed
-                                      package's <author>.<name>
+                                      package's <author>.<name> (the one
+                                      from the world's Aitta)
         "app_version": "1.2.0",       the app's version that made it, for
                                       an installed package's (its saves are
                                       pinned to their release)
@@ -309,7 +314,10 @@ an app with settings, not a variant or a remix (simplified: the loader
 takes one base). Apps from Aitta's Install on a remix whose base is an
 <author>.<name> not installed installs the base first, the newest of
 base_version's major on the same Aitta; Aitta lists it as "remix of
-<base>". The remix's saves are its own (<user>/apps/<author>.<name>).
+<base>". The remix's saves are its own (<user>/apps/<fp>.<name>). An
+<author>.<name> base is the installed one from the remix's Aitta, and the
+key it resolved to is kept beside the remix (.aitta_base), so it stays
+that one's.
 
 engine_api is the engine API it is written for; the engine runs
 interface::aitta::ENGINE_API_MIN...ENGINE_API (src/interface/aitta.h,
@@ -332,16 +340,17 @@ The commands
 
     bin/buildat aitta install <release .zip> <user path>
         Checks the hash, the signature and the manifest, and unpacks into
-        <user>/installed/<author>/<name>/<version>/. The first version
-        installed keeps its key in <user>/installed/<author>/<name>/key; a
-        later version signed by another key is refused. A version already
-        there is not replaced: an update is a new directory beside it.
+        <user>/installed/<fp>/<name>/<version>/ (fp: its key's
+        fingerprint, below), the key in <user>/installed/<fp>/.key. A
+        version already there is not replaced: an update is a new
+        directory beside it.
 
     bin/buildat aitta install <Aitta> <author>/<name>[@<version>] <user path>
         The same, fetched from an Aitta's list by name: the version asked,
         else the newest listed. A version not listed is refused with the
         versions there are; one installed already is only said. Prints the
-        version's directory.
+        version's directory. It asks the Aitta whose the key is (below);
+        unverified, it says so.
 
     bin/buildat aitta publish <release .zip> <Aitta's host:port>
         Uploads a release to an Aitta (apps/aitta). Its key has to be bound
@@ -431,8 +440,8 @@ cannot set it back without a review) and Delist, each in the audit log
 with whether the reviewer playtested it. Playtest makes a ticket (an
 hour, one fetch of each file, a release not listed too) and leaves to
 the launcher, which asks in its own dialog before it installs the release
-under <user>/review/<author>__<name>/<version>, apart from the installed
-ones, and starts it: to its server "review.<author>__<name>", saves of
+under <user>/review/<fp>__<name>/<version>, apart from the installed
+ones, and starts it: to its server "review.<fp>__<name>", saves of
 its own. Its tile is badged Playtest, with a "remove" tile beside it.
 
 Anyone reports a release: "Report..." on Aitta's page in the launcher or
@@ -528,7 +537,7 @@ serverless releases and those whose server runs in the page, with Play.
 Play on one of the second kind installs it into the browser's storage
 (its .sig checked as above), fetches each .wasm its Aitta built and
 checks it against the list's sha256, keeps them under .web/ in the
-release's directory and goes to ?local=<author>.<name>@<version>. That
+release's directory and goes to ?local=<fp>.<name>@<version>. That
 page (cross-origin isolated) runs the engine's server for packages, the
 builtins that keep to the web API built for the browser (web/local/_aitta,
 util/build_web_server.sh), in a worker, hands it the installed files and
@@ -540,17 +549,17 @@ browser. A release with C++ ("web_cpp") has its own server .wasm, kept as
 local/_aitta's .js when that .js is the one its Aitta's SDK had (by
 sha256; else "built for another version of this page's engine"), the
 EM_ASM addresses moved by the release's shift (src/server/web/post.js).
-Its saves are an IndexedDB database of their own (/user/apps/<author>.
-<name> in the server's files; the rest of /user is memory): its C++
+Its saves are an IndexedDB database of their own (/user/apps/<fp>.<name>
+in the server's files; the rest of /user is memory): its C++
 reaches every file of the server, so no other app's saves are mounted.
 
 Running an installed app
 ------------------------
 Every installed version is a tile on the launch grid, "<label> <version>",
 and starts a sandboxed server from its directory. To the client it is
-"<author>.<name>@<version>"; to its server, and to its save, shared and
-cache directories, "<author>.<name>": every version is one app. `buildat -a
-installed/<author>.<name>@<version>/<id>` runs its tile on boot.
+"<fp>.<name>@<version>"; to its server, and to its save, shared and
+cache directories, "<fp>.<name>": every version is one app. `buildat -a
+installed/<fp>.<name>@<version>/<id>` runs its tile on boot.
 
 A save remembers the release that made it (version and sha256, from the
 .aitta_sha256 the install leaves in the version's directory), and another
@@ -562,8 +571,9 @@ which plays that version and moves the saves another version made to it
 On a dedicated server [AITTA_SERVE]
 -----------------------------------
 util/serve_latest_release.sh takes <author>/<name> as a game: it runs the
-newest version installed in that server's user directory, as the server
-<author>.<name> (its saves under <user>/apps/<author>.<name>/). Install it
+newest version installed in that server's user directory whose author it
+is (two keys' of that name are refused), as the server <fp>.<name> (its
+saves under <user>/apps/<fp>.<name>/). Install it
 first with the command above, or set AITTA=<the Aitta's address>: then
 the script installs it, and at each update check installs the newest
 listed release, compiles it and restarts onto it as it does for a new
@@ -574,6 +584,44 @@ under Install's "On a dedicated server", after "On the client" (Apps
 from Aitta, this Aitta added in the Starport settings) ([AITTA_INSTALL_HELP]).
 
     AITTA=https://aitta.example util/serve_latest_release.sh someone/lamps 29500 ~/lamps-user
+
+A package is its key and its name [AITTA_KEY_IDENTITY]
+-----------------------------------------------------
+An author's name is an Aitta's word: two Aittas may each bind an "alice",
+to two keys. So a package here is its signing key and its name, and the
+author is what people read. The key's fingerprint is the first 20 hex
+digits of the sha256 of its 65 bytes (the uncompressed P-256 point,
+interface::aitta::fingerprint()), and it names the package everywhere:
+<user>/installed/<fp>/<name>/, the app id "<fp>.<name>@<version>", an
+extension "<fp>__<name>", a playtest's review/<fp>__<name>, Kit's rows
+"package:<fp>/<name>" and its things "<fp>/<n>". No key is pinned to a
+name: a release of alice/lamps signed by another key is another package,
+beside the first.
+
+What a package's own files say stays its author's form: a manifest's
+dependency {"kit": "alice/lamps"}, a remix's "base" and a world's "app"
+("alice.lamps"), an app's require of "alice__ui", a Kit prefab's
+"alice/lamp". Each is resolved, as it is installed, to the installed
+package of that author and name from the same Aitta as the one naming
+it, and the key it resolved to is kept (a remix's .aitta_base, a Kit
+package's "deps"), so an upgrade follows that key.
+
+**Who vouches.** The install asks the Aitta it came from, GET
+/api/v1/aitta/info?key=<the key>, and the package is "alice's on that
+Aitta" where its answer binds the key to the manifest's author. The
+client asks it itself and keeps the answer in <user>/installed/<fp>/.vouch
+({"aitta", "author"}); Kit's server asks the Aitta its installing client
+names (interface::aitta::vouch_guarded(): https and an origin only; every
+address of its name a public one, loopback and http only where the client
+is on the server's machine; one GET to the address checked, no redirect,
+4 KiB and 5 s at most; once per package and key, an Aitta not reached
+asked again; the server's setting kit_vouch, BUILDAT_KIT_VOUCH: "" any,
+"none", or a comma-separated list of Aittas). Not vouched for, a package
+is shown "alice @<host> (unverified)" and asked again (the client's Apps
+from Aitta, when it lists it; Kit, at its next install and at a start).
+Where two installed packages' authors have one name, the launcher's
+tiles, Apps from Aitta, Kit's palette and its credits say each with its
+Aitta's host: "alice @aitta.example".
 
 The key is ECDSA P-256 (Mbed TLS, in the tree); signing is deterministic
 (RFC 6979), so a release packed twice is the same .sig. util/aitta_check.sh,

@@ -23,6 +23,7 @@
 #include "interface/sha256.h"
 #include "interface/os.h"
 #include "interface/aitta.h"
+#include "interface/address.h"
 #include "interface/zip.h"
 #include "kit/world.h"
 #include "voxel_objects/api.h"
@@ -41,6 +42,7 @@
 #include <algorithm>
 #include <set>
 #include <sstream>
+#include <thread>
 #define MODULE "kit"
 
 namespace kit {
@@ -543,9 +545,23 @@ struct Module: public interface::Module, public Interface
 	// "kit"), the app's in Host::types_path under its author
 	ss_ m_kit_types, m_author;
 	// [KIT] stage 5: the Kit packages installed (rows
-	// "package:<author>/<name>"), by name, and their component types,
-	// {"source", "client", "package"} by type
+	// "package:<fp>/<name>", [AITTA_KEY_IDENTITY]), by id, and their
+	// component types, {"source", "client", "package"} by type
 	sm_<ss_, json::Value> m_packages;
+	// [AITTA_KEY_IDENTITY] The vouches asked of the Aittas the installing
+	// clients named, each a GET on a thread of its own: the package's id
+	// and when (once per package and key; one unreached is asked again
+	// after VOUCH_AGAIN_US), their answers ("" or why not) as they come
+	struct VouchResults {
+		std::mutex m;
+		sv_<std::pair<ss_, ss_>> r;
+	};
+	std::shared_ptr<VouchResults> m_vouches =
+			std::make_shared<VouchResults>();
+	sm_<ss_, int64_t> m_vouch_asked;
+	// The peers on this machine (a loopback address): the Aitta they name
+	// may be on its loopback too
+	std::set<size_t> m_local_peers;
 	sm_<ss_, json::Value> m_package_types;
 	// The app's defaults for parameters, {type: {param: value}}
 	json::Value m_defaults = json::object();
@@ -705,6 +721,7 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "kit:use_through", &Module::on_use);
 		sub(m_server, "kit:edit_through", &Module::on_edit);
 		sub(m_server, "network:client_disconnected", &Module::on_left);
+		sub(m_server, "network:client_connected", &Module::on_joined);
 		// [KIT] stage 4h: a body's inputs, a seat left
 		sub(m_server, "network:packet_received/kit:input", &Module::on_input);
 		sub(m_server, "network:packet_received/kit:exit", &Module::on_exit);
@@ -1923,7 +1940,9 @@ struct Module: public interface::Module, public Interface
 		for(char &c : author)
 			if(!isalnum((unsigned char)c))
 				c = '_';
-		return author == "kit" ? "" : author;
+		// [AITTA_KEY_IDENTITY] A key's fingerprint's shape is a package's
+		return author == "kit" || interface::aitta::fingerprint_ok(author) ?
+				"" : author;
 	}
 
 	// The registries of the app's scenes that have voxels
@@ -2199,6 +2218,9 @@ struct Module: public interface::Module, public Interface
 				add_package(k.substr(8), r);
 		}
 		log_i(MODULE, "Kit packages: %zu", m_packages.size());
+		// [AITTA_KEY_IDENTITY] Those no Aitta vouched for yet, asked again
+		for(auto &p : m_packages)
+			ask_vouch(p.first, p.second.get("local").is_true());
 	}
 
 	void add_package(const ss_ &name, const json::Value &r)
@@ -2219,10 +2241,10 @@ struct Module: public interface::Module, public Interface
 			}
 	}
 
-	// "kit:package" (a release's .sig, a 0 byte and its zip, as an Aitta
-	// serves them): a builder with the tools on installs a Kit package,
-	// or a newer version of one. Answered with "kit:package", {"ok": true,
-	// "what"} or {"ok": false, "why"}
+	// "kit:package" (the Aitta it came from, a 0 byte, a release's .sig,
+	// a 0 byte and its zip, as the Aitta serves them): a builder with the
+	// tools on installs a Kit package, or a newer version of one. Answered
+	// with "kit:package", {"ok": true, "what"} or {"ok": false, "why"}
 	void on_package(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
@@ -2240,11 +2262,18 @@ struct Module: public interface::Module, public Interface
 		if(!m_hosted || pi == m_peers.end() || !pi->second.editing ||
 				!can_edit(peer))
 			return answer(false, "the tools on, with edit rights");
-		const ss_ &d = packet.data;
+		const size_t za = packet.data.find('\0');
+		const ss_ aitta = za == ss_::npos ? "" : packet.data.substr(0, za);
+		const ss_ d = za == ss_::npos ? "" : packet.data.substr(za + 1);
 		const size_t z = d.find('\0');
-		if(d.size() > MAX_PACKAGE_BYTES || z == ss_::npos)
-			return answer(false, "a release's .sig, a 0 byte and its zip, "+
-					itos(MAX_PACKAGE_BYTES >> 10)+" KiB at most");
+		bool plain = aitta.size() <= 200;
+		for(char c : aitta)
+			plain = plain && (unsigned char)c > 32 && c != 127;
+		if(d.size() > MAX_PACKAGE_BYTES || z == ss_::npos || aitta.empty() ||
+				!plain)
+			return answer(false, "the Aitta, a 0 byte, a release's .sig, a 0 "
+					"byte and its zip, "+itos(MAX_PACKAGE_BYTES >> 10)+
+					" KiB at most");
 		const json::Value sig = json::load_string(d.substr(0, z).c_str());
 		const ss_ zip = d.substr(z + 1);
 		const ss_ sha = interface::sha256::hex(
@@ -2272,15 +2301,168 @@ struct Module: public interface::Module, public Interface
 		interface::fs::remove_all(tmp);
 		if(!why.empty())
 			return answer(false, "the archive: "+why);
-		why = install_package(pi->second.name, sig, files);
+		why = install_package(pi->second.name, sig, files, aitta,
+				m_local_peers.count(peer) != 0);
 		if(why.compare(0, 3, "ok ") == 0)
 			return answer(true, why.substr(3));
 		answer(false, why);
 	}
 
-	// A package's files installed: "ok <what was done>", or why not
+	// [AITTA_KEY_IDENTITY] What a package is called where people read
+	// it: its author's name and its own, with its Aitta's host where
+	// another installed package's author has that name under another key,
+	// and " (unverified)" (and the host) where its Aitta did not vouch
+	ss_ package_label(const ss_ &id, const ss_ &what = "")
+	{
+		auto pk = m_packages.find(id);
+		if(pk == m_packages.end())
+			return what.empty() ? id : what;
+		const json::Value &mf = pk->second.get("manifest");
+		const ss_ author = jstr(mf, "author");
+		bool shared = false;
+		for(auto &o : m_packages)
+			shared = shared || (o.first.substr(0, o.first.find('/')) !=
+					id.substr(0, id.find('/')) &&
+					jstr(o.second.get("manifest"), "author") == author);
+		const bool vouched = pk->second.get("vouched").is_true();
+		const ss_ host = interface::aitta::aitta_host(jstr(pk->second, "aitta"));
+		return author+"/"+(what.empty() ? jstr(mf, "name") : what)+
+				(shared || !vouched ? " @"+host : "")+
+				(vouched ? "" : " (unverified)");
+	}
+
+	// A package's thing, "<fp>/<n>", as people read it ("alice/lamp");
+	// anything else as it is
+	ss_ shown(const ss_ &n)
+	{
+		const size_t slash = n.find('/');
+		if(slash == ss_::npos ||
+				!interface::aitta::fingerprint_ok(n.substr(0, slash)))
+			return n;
+		const ss_ fp = n.substr(0, slash);
+		for(auto &o : m_packages)
+			if(o.first.compare(0, fp.size() + 1, fp+"/") == 0)
+				return package_label(o.first, n.substr(slash + 1));
+		return n;
+	}
+
+	// [AITTA_KEY_IDENTITY] The vouch for a package, asked of the Aitta its
+	// installing client named, on a thread (vouch_guarded() narrows where
+	// it goes); once per package and key, again after VOUCH_AGAIN_US where
+	// it was not reached. The server's "kit_vouch" setting: "" asks any
+	// Aitta a client names, "none" none, else the Aittas (origins) it
+	// lists, comma-separated
+	static const int64_t VOUCH_AGAIN_US = 60 * 1000000LL;
+	void ask_vouch(const ss_ &id, bool loopback_ok)
+	{
+		auto pk = m_packages.find(id);
+		if(pk == m_packages.end() || pk->second.get("vouched").is_true())
+			return;
+		const int64_t now = interface::os::time_us();
+		auto asked = m_vouch_asked.find(id);
+		if(asked != m_vouch_asked.end() && (asked->second < 0 ||
+				now - asked->second < VOUCH_AGAIN_US))
+			return;
+		const ss_ aitta = jstr(pk->second, "aitta"),
+				key = jstr(pk->second, "key"),
+				author = jstr(pk->second.get("manifest"), "author");
+		const ss_ allowed = m_server->get_config().get<ss_>("kit_vouch");
+		bool listed = allowed.empty();
+		if(allowed != "none"){
+			std::istringstream list(allowed);
+			ss_ a;
+			while(std::getline(list, a, ','))
+				listed = listed || a == aitta;
+		}
+		if(!listed){
+			log_i(MODULE, "Package %s: unverified, kit_vouch does not "
+					"ask %s", cs(id), cs(aitta));
+			m_vouch_asked[id] = -1;
+			return;
+		}
+		m_vouch_asked[id] = now;
+		log_i(MODULE, "Package %s: asking %s whose key it is", cs(id),
+				cs(aitta));
+		std::shared_ptr<VouchResults> results = m_vouches;
+		std::thread([=](){
+			const ss_ why = interface::aitta::vouch_guarded(aitta, key,
+					author, loopback_ok);
+			std::lock_guard<std::mutex> lock(results->m);
+			results->r.push_back(std::make_pair(id, why));
+		}).detach();
+	}
+
+	// The vouches answered: each package's row says it, and everyone's
+	// labels follow
+	void take_vouches()
+	{
+		sv_<std::pair<ss_, ss_>> got;
+		{
+			std::lock_guard<std::mutex> lock(m_vouches->m);
+			got.swap(m_vouches->r);
+		}
+		if(got.empty())
+			return;
+		for(auto &g : got){
+			auto pk = m_packages.find(g.first);
+			if(pk == m_packages.end())
+				continue;
+			const ss_ host = interface::aitta::aitta_host(jstr(pk->second,
+					"aitta"));
+			if(g.second.empty()){
+				pk->second.set("vouched", true);
+				m_vouch_asked[g.first] = -1;
+				log_i(MODULE, "Package %s: %s's on %s", cs(g.first),
+						cs(jstr(pk->second.get("manifest"), "author")), cs(host));
+			} else {
+				log_i(MODULE, "Package %s: unverified by %s: %s", cs(g.first),
+						cs(host), cs(g.second));
+				// An answer that is not a vouch stands; an unreached
+				// Aitta is asked again
+				if(g.second.compare(0, 23, "the Aitta was not reach") != 0)
+					m_vouch_asked[g.first] = -1;
+			}
+			m_store->set("package:"+g.first, pk->second.stringify());
+		}
+		for(auto &o : m_peers)
+			send_state(o.first);
+	}
+
+	// [AITTA_KEY_IDENTITY] JSON from a package, every "<author>/<n>" of an
+	// author in `keys` made "<fp>/<n>" (its own author's and its
+	// dependencies')
+	static void resolve_names(json::Value &v, const sm_<ss_, ss_> &keys)
+	{
+		if(v.is_string()){
+			const ss_ s = v.as_string();
+			const size_t slash = s.find('/');
+			auto k = slash == ss_::npos ? keys.end() :
+					keys.find(s.substr(0, slash));
+			if(k != keys.end() && name_ok(s.substr(slash + 1)))
+				v = json::Value((k->second+s.substr(slash)).c_str());
+		} else if(v.is_array()){
+			for(unsigned i = 0; i < v.size(); i++){
+				json::Value e = v.at(i);
+				resolve_names(e, keys);
+				v.set_at(i, e);
+			}
+		} else if(v.is_object()){
+			sv_<ss_> ks;
+			for(json::Iterator it(v); it; ++it)
+				ks.push_back(it.key());
+			for(const ss_ &k : ks){
+				json::Value e = v.get(k);
+				resolve_names(e, keys);
+				v.set(k, e);
+			}
+		}
+	}
+
+	// A package's files installed: "ok <what was done>", or why not.
+	// aitta: the one its client named it from; loopback_ok: that client
+	// is on this machine
 	ss_ install_package(const ss_ &by, const json::Value &sig,
-			sm_<ss_, ss_> &files)
+			sm_<ss_, ss_> &files, const ss_ &aitta, bool loopback_ok)
 	{
 		const json::Value m = json::load_string(files["meta.json"].c_str());
 		ss_ why = interface::aitta::check_manifest(m);
@@ -2288,33 +2470,61 @@ struct Module: public interface::Module, public Interface
 			return "meta.json: "+why;
 		if(interface::aitta::kind_of(m) != "kit")
 			return "not a Kit package (\"kind\": \"kit\")";
-		const ss_ author = jstr(m, "author"), name = author+"/"+jstr(m, "name"),
-				version = jstr(m, "version"), key = jstr(sig, "key");
-		if(author == "kit" || author == m_author)
-			return author+"'s types are here already, not from a package";
-		// simplified: an author's key is the one their first package here
-		// was signed with. Aitta binds an author to a key; a client fetched
-		// this from one, and the server trusts the first key it sees
-		for(auto &o : m_packages)
-			if(o.first.substr(0, o.first.find('/')) == author &&
-					jstr(o.second, "key") != key)
-				return author+"'s packages here are signed with another key";
+		const ss_ key = jstr(sig, "key"),
+				fp = interface::aitta::fingerprint(key);
+		if(fp.empty())
+			return "the signature's key is not a key";
+		// [AITTA_KEY_IDENTITY] A package is its key's and its name: two
+		// Aittas' "alice" are two, and nothing here pins an author's name
+		// to a key. Its things are "<fp>/<n>"; author is what people read
+		const ss_ author = jstr(m, "author"), name = fp+"/"+jstr(m, "name"),
+				named = author+"/"+jstr(m, "name"),
+				version = jstr(m, "version");
 		auto old = m_packages.find(name);
 		const ss_ old_version = old == m_packages.end() ? "" :
 				jstr(old->second, "version");
 		if(!old_version.empty() &&
-				!interface::aitta::version_less(old_version, version))
-			return "ok "+name+" "+old_version+" is installed already";
+				!interface::aitta::version_less(old_version, version)){
+			// Not vouched yet: asked again (an Aitta unreached before)
+			if(old->second.get("vouched").is_true() == false &&
+					jstr(old->second, "aitta") == aitta)
+				ask_vouch(name, loopback_ok);
+			return "ok "+named+" "+old_version+" is installed already";
+		}
 		if(old_version.empty() && m_packages.size() >= MAX_PACKAGES)
 			return "the save has "+itos(MAX_PACKAGES)+" packages";
+		// Its dependencies, "author/name", the installed ones from its
+		// Aitta (or as an older version of it resolved them): each its
+		// "<fp>/<name>" in the row's "deps", and its author's names
+		// resolved through it
 		const json::Value &deps = m.get("dependencies");
+		sm_<ss_, ss_> keys;
+		keys[author] = fp;
+		json::Value resolved = json::object();
 		for(unsigned i = 0; i < deps.size(); i++){
 			const ss_ dn = jstr(deps.at(i), "kit"),
 					dv = jstr(deps.at(i), "version");
-			auto have = m_packages.find(dn);
+			const ss_ kept = old == m_packages.end() ? "" :
+					jstr(old->second.get("deps"), dn.c_str());
+			auto have = m_packages.find(kept);
+			if(have == m_packages.end()){
+				for(auto o = m_packages.begin(); o != m_packages.end(); ++o){
+					const json::Value &om = o->second.get("manifest");
+					if(jstr(om, "author")+"/"+jstr(om, "name") == dn &&
+							jstr(o->second, "aitta") == aitta)
+						have = o;
+				}
+			}
 			if(have == m_packages.end() || interface::aitta::version_less(
 					jstr(have->second, "version"), dv))
-				return "it needs "+dn+" "+dv+" or newer: install that first";
+				return "it needs "+dn+" "+dv+" or newer from "+
+						interface::aitta::aitta_host(aitta)+": install that first";
+			const ss_ da = dn.substr(0, dn.find('/')),
+					dfp = have->first.substr(0, have->first.find('/'));
+			if(keys.count(da) && keys[da] != dfp)
+				return "two of its packages' authors are "+da+", by two keys";
+			keys[da] = dfp;
+			resolved.set(dn, have->first);
 		}
 		// Its contents: types/<name>.lua (and <name>.client.lua),
 		// <name>.prefab.json and <name>.voxel.json; textures/<file>.png
@@ -2343,7 +2553,9 @@ struct Module: public interface::Module, public Interface
 				const json::Value j = json::load_string(f.second.c_str());
 				if(!j.is_object())
 					return f.first+": not a JSON object";
-				(kind == ".prefab.json" ? prefabs : voxels)[author+"/"+n] = j;
+				json::Value r = j.deepcopy();
+				resolve_names(r, keys);
+				(kind == ".prefab.json" ? prefabs : voxels)[fp+"/"+n] = r;
 				continue;
 			}
 			json::Value t = types.get(n).is_object() ? types.get(n) :
@@ -2352,7 +2564,7 @@ struct Module: public interface::Module, public Interface
 			types.set(n, t);
 		}
 		for(json::Iterator it(types); it; ++it){
-			const ss_ t = author+"/"+it.key();
+			const ss_ t = fp+"/"+it.key();
 			if(jstr(*it, "source").empty())
 				return "types/"+it.key()+".client.lua: no "+it.key()+".lua";
 			auto pt = m_package_types.find(t);
@@ -2364,7 +2576,8 @@ struct Module: public interface::Module, public Interface
 			const json::Value &ot = old->second.get("types");
 			for(json::Iterator it(ot); ot.is_object() && it; ++it)
 				if(!types.get(it.key()).is_object())
-					return version+" has no "+author+"/"+it.key()+", which "+
+					return version+" has no "+named.substr(0, named.find('/'))+
+							"/"+it.key()+", which "+
 							old_version+" had";
 		}
 		for(auto &p : prefabs){
@@ -2405,10 +2618,17 @@ struct Module: public interface::Module, public Interface
 		// refusal the old version's are put back
 		std::set<ss_> names;
 		for(json::Iterator it(types); it; ++it)
-			names.insert(author+"/"+it.key());
+			names.insert(fp+"/"+it.key());
 		json::Value row = json::object();
 		row.set("version", version);
 		row.set("key", key);
+		row.set("aitta", aitta);
+		row.set("local", loopback_ok);
+		row.set("deps", resolved);
+		// A vouch stands for its Aitta's key, which the id is
+		row.set("vouched", old != m_packages.end() &&
+				jstr(old->second, "aitta") == aitta &&
+				old->second.get("vouched").is_true());
 		row.set("sha256", jstr(sig, "sha256"));
 		row.set("by", by);
 		row.set("manifest", m);
@@ -2429,7 +2649,7 @@ struct Module: public interface::Module, public Interface
 			if(!why.empty())
 				break;
 			p.second.set("author", author);
-			p.second.set("name", p.first.substr(author.size() + 1));
+			p.second.set("name", p.first.substr(fp.size() + 1));
 			p.second.set("package", name);
 			m_bad_prefabs.erase(p.first);
 			ss_ pwhy;
@@ -2460,7 +2680,7 @@ struct Module: public interface::Module, public Interface
 		for(auto &v : voxels){
 			v.second.set("format", ss_("kit_voxel"));
 			v.second.set("author", author);
-			v.second.set("name", v.first.substr(author.size() + 1));
+			v.second.set("name", v.first.substr(fp.size() + 1));
 			v.second.set("package", name);
 			m_store->set("voxel:"+v.first, v.second.stringify());
 			m_voxel_types[v.first] = v.second;
@@ -2490,13 +2710,15 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!change.empty())
 			commit(change, nullptr);
-		const ss_ what = (old_version.empty() ? "installed "+name+" "+version :
-				"upgraded "+name+" from "+old_version+" to "+version)+": "+
+		ask_vouch(name, loopback_ok);
+		const ss_ what = (old_version.empty() ? "installed "+named+" "+version :
+				"upgraded "+named+" from "+old_version+" to "+version)+": "+
 				itos(names.size())+" types, "+itos(prefabs.size())+
 				" prefabs, "+itos(voxels.size())+" voxel types"+
 				(change.empty() ? "" : ", "+itos(change.size())+
 				" entities upgraded");
-		log_i(MODULE, "%s %s", cs(by), cs(what));
+		log_i(MODULE, "%s %s (%s, from %s)", cs(by), cs(what), cs(name),
+				cs(aitta));
 		for(auto &o : m_peers)
 			send_state(o.first);
 		return "ok "+what;
@@ -2532,8 +2754,17 @@ struct Module: public interface::Module, public Interface
 			auto pk = m_packages.find(n);
 			if(u.first[0] == 'p' && pk != m_packages.end()){
 				const json::Value &mf = pk->second.get("manifest");
-				c.set("author", n.substr(0, n.find('/')));
-				c.set("package", n);
+				// [AITTA_KEY_IDENTITY] The author as people read it: the
+				// host where it is ambiguous or unverified
+				const ss_ label = package_label(n);
+				const size_t sp = label.find(' ');
+				c.set("author", jstr(mf, "author")+(sp == ss_::npos ? "" :
+						label.substr(sp)));
+				c.set("package", jstr(mf, "author")+"/"+jstr(mf, "name"));
+				c.set("id", n);
+				c.set("aitta", interface::aitta::aitta_host(jstr(pk->second,
+						"aitta")));
+				c.set("verified", pk->second.get("vouched").is_true());
 				c.set("version", jstr(pk->second, "version"));
 				c.set("license_code", jstr(mf, "license_code"));
 				c.set("license_media", jstr(mf, "license_media"));
@@ -2544,7 +2775,8 @@ struct Module: public interface::Module, public Interface
 			}
 			json::Value w = json::array();
 			for(const ss_ &x : u.second)
-				w.append(x);
+				w.append(x[0] == '[' ? "["+shown(x.substr(1, x.size() - 2))+
+						"]" : shown(x));
 			c.set("uses", w);
 			out.append(c);
 		}
@@ -2568,6 +2800,7 @@ struct Module: public interface::Module, public Interface
 		json::Value files = json::object(), hex = json::object(),
 				deps = json::array();
 		std::set<ss_> dep_names;
+		sm_<ss_, json::Value> pfs;
 		for(const ss_ &k : m_store->list("prefab:"+author+"/")){
 			ss_ src;
 			m_store->get(k, src);
@@ -2583,8 +2816,24 @@ struct Module: public interface::Module, public Interface
 						dep_names.insert(jstr(pt->second, "package"));
 				}
 			}
-			files.set("types/"+k.substr(8 + author.size())+".prefab.json",
-					pf.stringify());
+			pfs[k.substr(8 + author.size())] = pf;
+		}
+		// [AITTA_KEY_IDENTITY] A package's file says names as its author
+		// does, "<author>/<n>": each dependency's "<fp>/" made its
+		// author's, which its manifest's dependencies resolve again
+		sm_<ss_, ss_> authors;
+		std::set<ss_> named;
+		for(const ss_ &n : dep_names){
+			const ss_ da = jstr(m_packages[n].get("manifest"), "author");
+			if(named.count(da) && authors[n.substr(0, n.find('/'))] != da)
+				return refuse("two packages your prefabs use are "+da+"'s, "
+						"by two keys");
+			authors[n.substr(0, n.find('/'))] = da;
+			named.insert(da);
+		}
+		for(auto &pf : pfs){
+			resolve_names(pf.second, authors);
+			files.set("types/"+pf.first+".prefab.json", pf.second.stringify());
 		}
 		for(auto &v : m_voxel_types){
 			if(v.first.compare(0, author.size() + 1, author+"/") != 0 ||
@@ -2611,8 +2860,9 @@ struct Module: public interface::Module, public Interface
 		if(!files.size())
 			return refuse("no prefabs or voxel types of "+author+"'s here");
 		for(const ss_ &n : dep_names){
+			const json::Value &dm = m_packages[n].get("manifest");
 			json::Value dj = json::object();
-			dj.set("kit", n);
+			dj.set("kit", jstr(dm, "author")+"/"+jstr(dm, "name"));
 			dj.set("version", jstr(m_packages[n], "version"));
 			deps.append(dj);
 		}
@@ -6381,6 +6631,7 @@ struct Module: public interface::Module, public Interface
 		if(!m_hosted || !m_box)
 			return;
 		m_box->poll();
+		take_vouches();
 		flush_copies();
 		// Writes into the start, made as their sections load: Running,
 		// kept past the round's Stop
@@ -7203,8 +7454,19 @@ struct Module: public interface::Module, public Interface
 				cs(pi->second.name));
 	}
 
+	void on_joined(const network::NewClient &nc)
+	{
+		const ss_ &a = nc.info.address;
+		ss_ host = a, port;
+		interface::split_host_port(a, &host, &port, "0");
+		if(!nc.info.web && interface::aitta::public_address(host, true) &&
+				!interface::aitta::public_address(host, false))
+			m_local_peers.insert(nc.info.id);
+	}
+
 	void on_left(const network::OldClient &old)
 	{
+		m_local_peers.erase(old.info.id);
 		const bool was_editing = m_peers.count(old.info.id) &&
 				m_peers[old.info.id].editing;
 		const uint64_t player = m_peers.count(old.info.id) ?
@@ -8430,9 +8692,27 @@ struct Module: public interface::Module, public Interface
 		if(editing){
 			// The installed packages' versions, by name
 			json::Value pk = json::object();
-			for(auto &k : m_packages)
+			// [AITTA_KEY_IDENTITY] and each package's thing ("<fp>/<n>")
+			// as people read it, by name
+			json::Value shown_as = json::object();
+			for(auto &k : m_packages){
 				pk.set(k.first, jstr(k.second, "version"));
+				shown_as.set(k.first, package_label(k.first));
+				for(const char *what : {"prefabs", "voxels"}){
+					const json::Value &l = k.second.get(what);
+					for(unsigned i = 0; l.is_array() && i < l.size(); i++)
+						shown_as.set(l.at(i).as_string(),
+								shown(l.at(i).as_string()));
+				}
+				const json::Value &ts = k.second.get("types");
+				for(json::Iterator it(ts); ts.is_object() && it; ++it){
+					const ss_ t = k.first.substr(0, k.first.find('/'))+"/"+
+							it.key();
+					shown_as.set(t, shown(t));
+				}
+			}
 			j.set("packages", pk);
+			j.set("names", shown_as);
 			json::Value pal = json::object();
 			for(const ss_ &t : m_palette){
 				const json::Value &d = m_types[t].decl;

@@ -10,9 +10,9 @@
 #   3. serve_latest_release.sh tester/pt with neither AITTA nor an install:
 #      refused with the install command.
 #   4. With AITTA, from a release made from this tree: installs and serves
-#      it as tester.pt (/health); 1.0.1 published, it is installed,
+#      it as <fp>.pt (/health); 1.0.1 published, it is installed,
 #      compiled and the server restarted onto it, a save under
-#      apps/tester.pt kept. A build host that offers nothing (404) is
+#      apps/<fp>.pt kept. A build host that offers nothing (404) is
 #      asked for the release's build with aitta= and version=1.0.0, the
 #      install before it, and for 1.0.1's ([BUILDS_AITTA_ASK]); the
 #      stand-ins started with no log yet print no error.
@@ -41,6 +41,7 @@ CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
+fp=$(aitta_fp "$t/pub")
 printf 'wait_log_any 20000 ai: {"id":2,\nquit\n' > "$t/reqs.cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 	BUILDAT_AITTA_CODE=$code \
@@ -67,7 +68,7 @@ publish 1.0.0
 
 # 1. By name
 d=$("$b" aitta install 127.0.0.1:$P tester/pt "$t/u0" 2>"$t/err") &&
-	[ "$d" = "$t/u0/installed/tester/pt/1.0.0" ] && [ -f "$d/main/main.cpp" ] ||
+	[ "$d" = "$t/u0/installed/$fp/pt/1.0.0" ] && [ -f "$d/main/main.cpp" ] ||
 	fail "install by name: $d $(cat "$t/err")"
 ls "$t/u0" | grep -q "^\.aitta" && fail "the download left behind"
 d=$("$b" aitta install 127.0.0.1:$P tester/pt@1.0.0 "$t/u0" 2>"$t/err") &&
@@ -133,8 +134,8 @@ setsid env AITTA=127.0.0.1:$P BUILDS_URL="http://127.0.0.1:$BP/build" \
 groups+=($!)
 wait_for_log "$slog" "Listening at" 180 || fail "1.0.0 did not start ($t/serve.log)"
 curl -s -m 5 "http://127.0.0.1:$SP/health" | grep -q . || fail "no /health"
-[ -d "$t/u1/installed/tester/pt/1.0.0" ] || fail "not installed by the script"
-echo kept > "$t/u1/apps/tester.pt/save.txt"
+[ -d "$t/u1/installed/$fp/pt/1.0.0" ] || fail "not installed by the script"
+echo kept > "$t/u1/apps/$fp.pt/save.txt"
 echo "ok: installed and serving 1.0.0"
 publish 1.0.1
 wait_for_log "$t/serve.log" "tester/pt 1.0.1 is ready" 180 ||
@@ -145,8 +146,8 @@ for _i in $(seq 300); do
 	sleep 0.2
 done
 [ "$(grep -ac "Listening at" "$slog")" -ge 2 ] || fail "1.0.1 did not start ($slog)"
-pgrep -f "installed/tester/pt/1.0.1" > /dev/null || fail "not on 1.0.1"
-[ "$(cat "$t/u1/apps/tester.pt/save.txt")" = kept ] || fail "the save lost"
+pgrep -f "installed/$fp/pt/1.0.1" > /dev/null || fail "not on 1.0.1"
+[ "$(cat "$t/u1/apps/$fp.pt/save.txt")" = kept ] || fail "the save lost"
 echo "ok: 1.0.1 installed, compiled and restarted onto, the save kept"
 grep -q "('aitta', '127.0.0.1:$P').*('release', 'buildat-0.0.1-.*('version', '1.0.0')" \
 	"$t/builds.log" || fail "the release's ask without the version ($t/builds.log)"
@@ -177,7 +178,7 @@ done
 publish 1.0.2
 # A wait for nothing to happen: three of the script's 5 s polls
 sleep 15
-[ -d "$t/u1/installed/tester/pt/1.0.2" ] && fail "1.0.2 installed without AITTA"
+[ -d "$t/u1/installed/$fp/pt/1.0.2" ] && fail "1.0.2 installed without AITTA"
 grep -aq "tester/pt 1.0.2" "$t/serve2.log" && fail "updated without AITTA"
 
 # 6. The page's order

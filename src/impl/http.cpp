@@ -171,6 +171,52 @@ ss_ http_get(const ss_ &url, ss_ *redirect, const std::atomic<bool> *cancel)
 	return redirect && !redirect->empty() ? ss_() : body;
 }
 
+struct Capped {
+	ss_ s;
+	size_t max;
+};
+static size_t to_capped(char *p, size_t size, size_t n, void *user)
+{
+	Capped &c = *(Capped*)user;
+	if(c.s.size() + size * n > c.max)
+		return 0;
+	c.s.append(p, size * n);
+	return size * n;
+}
+
+ss_ http_get_pinned(const ss_ &url, const ss_ &ip, size_t max_bytes,
+		long timeout_s)
+{
+	interface::Url u;
+	if(!interface::parse_url(url, &u) || u.host.empty())
+		throw Exception("http: not a URL: "+url);
+	char errbuf[CURL_ERROR_SIZE] = {0};
+	CURL *c = easy(url, errbuf);
+	// The name to the checked address and nothing else: a second lookup
+	// answering another address (DNS rebinding) is never asked
+	const ss_ pin = u.host+":"+u.port+":"+(ip.find(':') != ss_::npos ?
+			"["+ip+"]" : ip);
+	struct curl_slist *resolve = curl_slist_append(nullptr, pin.c_str());
+	curl_easy_setopt(c, CURLOPT_RESOLVE, resolve);
+	curl_easy_setopt(c, CURLOPT_MAXREDIRS, 0L);
+	curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, timeout_s);
+	curl_easy_setopt(c, CURLOPT_TIMEOUT, timeout_s);
+	Capped body{"", max_bytes};
+	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, to_capped);
+	curl_easy_setopt(c, CURLOPT_WRITEDATA, &body);
+	ss_ redirect;
+	try {
+		perform(c, url, errbuf, &redirect);
+	} catch(...){
+		curl_slist_free_all(resolve);
+		throw;
+	}
+	curl_slist_free_all(resolve);
+	if(!redirect.empty())
+		throw Exception("http: "+url+": a redirect, which is not followed");
+	return body.s;
+}
+
 ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type,
 		ss_ *redirect, bool ipv4, const std::atomic<bool> *cancel)
 {

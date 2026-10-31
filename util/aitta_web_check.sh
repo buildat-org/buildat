@@ -91,6 +91,7 @@ grep -ao "C++ servers for the page: linked from $sdk, with emsdk .*" "$t/srv.log
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
 "$b" aitta keygen "$t/key2" > "$t/pub2" 2>/dev/null || fail "keygen"
+fp=$(aitta_fp "$t/pub")
 printf 'wait_log_any 30000 admin script: done\nwait_log_any 30000 "id":2,\nquit\n' > "$t/reqs.cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 	BUILDAT_AITTA_CODE=$code BUILDAT_AITTA_ADMIN="add other checkpass2" \
@@ -531,7 +532,7 @@ cat > "$t/steps.json" <<J
  ["waitlog", "local: asking the player's name", 60],
  ["type", "tester"],
  ["key", "Enter"],
- ["waitlog", "local: tester.rusty@1.0.0, [0-9]+ files, 4 .wasm", 60],
+ ["waitlog", "local: $fp.rusty@1.0.0, [0-9]+ files, 4 .wasm", 60],
  ["eval", "'isolated ' + crossOriginIsolated + ' at ' + location.search"],
  ["waitlog", "drew a cube", 120],
  ["key", "Space"],
@@ -543,9 +544,9 @@ WEB_DRIVE_URL=http://127.0.0.1:$PP "$here/util/web_drive.sh" chrome play \
 page=$t/web/page.log
 grep -a "eval:" "$t/web.out" | cut -c 1-200
 grep -a "server: .*wasm \(main\|counter\|endless\): " "$page" | sed 's/.*wasm    : //' | cut -c1-120
-grep -q "isolated true at ?local=tester.rusty%401.0.0" "$t/web.out" ||
+grep -q "isolated true at ?local=$fp.rusty%401.0.0" "$t/web.out" ||
 	fail "not the package's isolated page"
-for want in "server: .*Loading module main from /installed/tester/rusty/1.0.0/main" \
+for want in "server: .*Loading module main from /installed/$fp/rusty/1.0.0/main" \
 		"server: .*wasm main: ready (the browser's instance)" \
 		"server: .*wasm endless: stopped: init ran past its budget" \
 		"server: .*wasm main: key from peer 1: count 1"; do
@@ -565,7 +566,7 @@ for browser in chrome webkit; do
  ["waitlog", "local: asking the player's name", 60],
  ["type", "tester"],
  ["key", "Enter"],
- ["waitlog", "local: tester.cpp@1.0.0 has its own server .wasm", 60],
+ ["waitlog", "local: $fp.cpp@1.0.0 has its own server .wasm", 60],
  ["eval", "'isolated ' + crossOriginIsolated + ' at ' + location.search"],
  ["waitlog", "CPPSERVER hello", 120],
  ["waitlog", "CPPPONG pong from the page 1", 60]]
@@ -576,9 +577,9 @@ J
 		"$t/steps_cpp.json" "$t/web_cpp_$browser" > "$t/web_cpp_$browser.out" 2>&1 ||
 		fail "the $browser drive of cpp ($(tail -3 "$t/web_cpp_$browser.out"); $t/web_cpp_$browser)"
 	page=$t/web_cpp_$browser/page.log
-	grep -q "isolated true at ?local=tester.cpp%401.0.0" "$t/web_cpp_$browser.out" ||
+	grep -q "isolated true at ?local=$fp.cpp%401.0.0" "$t/web_cpp_$browser.out" ||
 		fail "$browser: not the package's isolated page"
-	for want in "server: .*Loading module main from /installed/tester/cpp/1.0.0/main" \
+	for want in "server: .*Loading module main from /installed/$fp/cpp/1.0.0/main" \
 			"server: .*CPPSERVER hello from the release's C++" \
 			"CPPPONG pong from the page 1"; do
 		grep -aq "$want" "$page" || fail "$browser: no \"$want\" in $page"

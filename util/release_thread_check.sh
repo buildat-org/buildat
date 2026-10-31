@@ -54,6 +54,7 @@ ch=$(code_of "$t/hearth.log" $ph)
 # Aitta: tester bound to a key; demo 1.0.0 at home in this Hearth, elsewhere
 # in another
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
+fp=$(aitta_fp "$t/pub")
 printf 'wait_log_any 20000 ai: {"id":1,\nquit\n' > "$t/cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 BUILDAT_AITTA_CODE=$ca \
@@ -120,7 +121,7 @@ BUILDAT_HEARTH_REQS='{"cmd":"new_thread","feedback":true,"subject":"tester/demo 
 {"cmd":"status","thread":1,"status":"fixed"}
 {"cmd":"new_thread","topic":1,"title":"x","body":"x","kind":"bug"}' \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/user" -C "$t/cache_f" -w 800x600 -l 3 \
-	-o sound_mute=1 -a installed/tester.demo@1.0.0/feedback -c @"$t/cmds_f" \
+	-o sound_mute=1 -a installed/$fp.demo@1.0.0/feedback -c @"$t/cmds_f" \
 	> "$t/cl_f.log" 2>&1 || fail "the feedback client: $(why "$t/cl_f.log")"
 f=$(grep -a "hr feedback: " "$t/cl_f.log")
 [ -n "$f" ] || fail "no feedback composer ($(grep -a "ERROR\|WARNING" "$t/cl_f.log" | tail -3))"

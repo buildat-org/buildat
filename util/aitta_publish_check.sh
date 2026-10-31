@@ -193,8 +193,8 @@ mapfile -t cmds < <(open aitta "$START"
 	echo "wait_log 20000 aitta status: Installed tester/hello_ext 0.1.0"
 	echo "delay 500"; echo "shot installed.png")
 client u2 install "${cmds[@]}"
-[ -d "$t/u2/installed/tester/hello/0.1.1" ] ||
+ls -d "$t"/u2/installed/*/hello/0.1.1 > /dev/null 2>&1 ||
 	fail "0.1.1 was not installed from Apps from Aitta (aitta.png)"
-[ -f "$t/u2/installed/tester/hello_ext/0.1.0/init.lua" ] ||
+ls "$t"/u2/installed/*/hello_ext/0.1.0/init.lua > /dev/null 2>&1 ||
 	fail "the extension was not installed from Apps from Aitta (installed.png)"
 echo "PASS: made, played, checked, keyed, bound, published, refused, raised, an extension; both installed elsewhere"
