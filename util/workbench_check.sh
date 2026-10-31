@@ -1075,6 +1075,14 @@ mouse_pos 700 400
 frames 2
 mouse_up right
 wait_log_absent 300 kit editor: the menu of
+mouse_down middle
+frames 2
+mouse_pos 650 450
+frames 2
+mouse_pos 700 500
+frames 2
+mouse_up middle
+wait_log 5000 kit editor: panned in 3D from
 keypress F3
 wait_log 5000 kit editor: the view is Walk
 frames 5
@@ -1320,6 +1328,11 @@ want "$t/srv3.log" "An edit by kitboss: placed kit/button 3 at [2,1,2]" \
 	"An edit by kitboss: placed kit/dig_zone 8 at [2,-1,-2]" \
 	"An edit by kitboss: linked 3.pressed -> 8.on"
 want "$t/ed.log" "kit editor: turned 1 by 90" "kit editor: a box selected 2, 2 in the selection"
+# The 3D middle drag pans over the ground (user's playtest, 2026-10-31):
+# the camera's height kept, its x and z moved
+pan=$(grep -aoP 'kit editor: panned in 3D from \K.*' "$t/ed.log" | head -1)
+echo "$pan" | awk -F'[ ,]' '{d=($1-$5)^2+($3-$7)^2; exit !($2 == $6 && d > 0.01)}' ||
+	fail "the 3D pan is not over the ground: $pan ($t/ed.log)"
 # The voxels: the walk's place dug again, and the dig undone
 placed=$(grep -aoP 'A voxel edit by kitboss: placed kit/cobble at \K\([-0-9,]+\)' "$t/srv3.log")
 [ "$(echo "$placed" | wc -l)" = 2 ] || fail "not two voxels placed ($t/srv3.log)"

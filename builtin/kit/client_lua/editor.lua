@@ -29,7 +29,8 @@
 --     and WASD pan, the wheel zooms about the pointer; a right drag goes
 --     into 3D orbiting, let go north-up straight down back into the plan.
 --     3D: the right drag orbits round what the pointer is on, the middle
---     drag pans, the wheel goes toward it. Walking at the pointer, the
+--     drag pans over the ground (the XZ plane, the point grabbed kept under
+--     the pointer), the wheel goes toward it. Walking at the pointer, the
 --     right drag turns; a click on the view goes up into the crosshair
 --     (the mouse looks, the clicks act at the crosshair) and Escape comes
 --     back down.
@@ -1764,6 +1765,15 @@ local function camera_pivot(mx, my)
 	return plane_at(o, v, O.ground_y - 0.5)
 end
 
+-- A 3D pan's start: the height it slides at, the pointer's point's
+-- (user's playtest, 2026-10-31: in the XZ plane, as floorplanner's)
+local function pan3d_start(mx, my)
+	local p = camera_pivot(mx, my)
+	return {dist = p and (p - cam3d_node.position):Length() or 5,
+		y = p and p.y or O.ground_y - 0.5,
+		from = {x = S.pos.x, y = S.pos.y, z = S.pos.z}}
+end
+
 -- Whether the 3D camera looks as the plan does: straight down, north up
 -- within 10 degrees
 local function plan_aligned()
@@ -2619,8 +2629,7 @@ local function mouse_down(button_)
 		if S.view == "2d" then
 			S.panning = true
 		elseif S.view == "3d" then
-			local p = camera_pivot(mx, my)
-			S.pan3d = {dist = p and (p - cam3d_node.position):Length() or 5}
+			S.pan3d = pan3d_start(mx, my)
 		end
 		return
 	end
@@ -2687,6 +2696,12 @@ local function mouse_up(button_)
 		return
 	end
 	if button_ == magic.MOUSEB_MIDDLE then
+		if S.pan3d then
+			local f = S.pan3d.from
+			log:info(string.format("kit editor: panned in 3D from %.2f,%.2f,%.2f"
+					.. " to %.2f,%.2f,%.2f", f.x, f.y, f.z, S.pos.x, S.pos.y,
+					S.pos.z))
+		end
 		S.panning, S.pan3d = false, nil
 		return
 	end
@@ -2734,13 +2749,24 @@ local function mouse_move(x, y, dx, dy)
 		return
 	end
 	if S.pan3d then
-		local _, h = screen_size()
-		local k = S.pan3d.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
-		local q = rot3d()
-		local r, u = q * magic.Vector3(1, 0, 0), q * magic.Vector3(0, 1, 0)
-		S.pos = {x = S.pos.x - (r.x * dx - u.x * dy) * k,
-			y = S.pos.y - (r.y * dx - u.y * dy) * k,
-			z = S.pos.z - (r.z * dx - u.z * dy) * k}
+		-- In the XZ plane: the point grabbed stays under the pointer where
+		-- both rays meet its height; else (looking level) by the view's
+		-- right and its forward along the ground
+		local o0, v0 = M.screen_ray(x - dx, y - dy)
+		local o1, v1 = M.screen_ray(x, y)
+		local a, b = plane_at(o0, v0, S.pan3d.y), plane_at(o1, v1, S.pan3d.y)
+		local mx_, mz_
+		if a and b then
+			mx_, mz_ = b.x - a.x, b.z - a.z
+		else
+			local _, h = screen_size()
+			local k = S.pan3d.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
+			local yaw = math.rad(S.yaw)
+			local rx, rz = math.cos(yaw), -math.sin(yaw)
+			-- right (rx, rz), forward along the ground (-rz, rx)
+			mx_, mz_ = (rx * dx + rz * dy) * k, (rz * dx - rx * dy) * k
+		end
+		S.pos = {x = S.pos.x - mx_, y = S.pos.y, z = S.pos.z - mz_}
 		return
 	end
 	if M.looking() then
@@ -2925,8 +2951,7 @@ local function touch_move(id, x, y, dx, dy)
 			-- The view moves: the plan pans, the 3D camera pans
 			S.touch_cam = true
 			if S.view == "3d" then
-				local p = camera_pivot(x, y)
-				S.pan3d = {dist = p and (p - cam3d_node.position):Length() or 5}
+				S.pan3d = pan3d_start(x, y)
 			end
 		end
 	end
