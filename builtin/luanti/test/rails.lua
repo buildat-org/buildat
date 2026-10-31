@@ -79,9 +79,26 @@ end)
 core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
 	core.set_player_privs(name, {interact = true, shout = true})
-	core.after(3, function()
+	-- Laid once the stage's sections are generated, and read back as
+	-- stone twice running before the walks: a write into a section
+	-- outside the load range is dropped, and one generated after a lay is
+	-- sent to the client as the mapgen's air (2026-10-31). The player
+	-- waits there, put back each time so as not to fall out of its range.
+	local held = 0
+	local function build()
+		local ok = true
+		for _, c in ipairs({{-8, -4}, {-8, 14}, {8, -4}, {8, 14}}) do
+			local q = {x = c[1], y = 199, z = c[2]}
+			ok = ok and __luanti_section_state(q.x, q.y, q.z) == "generated" and
+					core.get_node(q).name == "mcl_core:stone"
+		end
+		held = ok and held + 1 or 0
 		lay()
 		player:set_pos({x = 0, y = 199.5, z = -2})
+		if held < 2 then
+			core.after(0.5, build)
+			return
+		end
 		for _, q in ipairs({{0, 200, 0}, {0, 200, 8}, {3, 200, 8}, {-6, 200, 3},
 				{-6, 201, 4}, {6, 200, 2}, {8, 201, 2}}) do
 			local n = core.get_node({x = q[1], y = q[2], z = q[3]})
@@ -89,5 +106,6 @@ core.register_on_joinplayer(function(player)
 					q[1], q[2], q[3], n.name, n.param2))
 		end
 		core.chat_send_player(name, "rails: the stage is laid")
-	end)
+	end
+	core.after(3, build)
 end)
