@@ -273,6 +273,8 @@ want "$t/srvb.log" "Entity 3: alice/lamp's migrate from version 1: {\"level\":70
 	"carol upgraded alice/lamps from 1.0.0 to 2.0.0: 1 types, 0 prefabs, 0 voxel types, 1 entities upgraded"
 stop
 server srvb2 "$t/b"
+# Kit hosts after "Listening at"
+wait_for_log "$t/srvb2.log" "Component type alice/lamp version" 60
 want "$t/srvb2.log" "Kit packages: 2" "Component type alice/lamp version 2"
 grep -aq "Entity 3's alice/lamp upgraded" "$t/srvb2.log" &&
 	fail "upgraded again at the restart ($t/srvb2.log)"
