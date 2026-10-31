@@ -46,7 +46,9 @@ local MATERIALS = {"kit/stone", "workbench/glass", "kit/planks",
 local heightmap = require("buildat/module/heightmap")
 
 local scene = replicate.main_scene
-local material = 1
+-- The voxel in hand: one of MATERIALS by its key, or any by Kit's
+-- editor's Voxel list ([KIT] stage 4g, a builder's own types too)
+local hand = MATERIALS[1]
 local TOUCH = buildat.get_env("BUILDAT_TOUCH") == "1"
 
 -- A login by builtin/accounts: "l", or at once where BUILDAT_JOIN_NAME
@@ -182,14 +184,16 @@ local function act(t, left)
 	elseif a.kind == "dig" then
 		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), "air")
 	elseif a.kind == "place" then
-		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]),
-				MATERIALS[material])
+		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), hand)
 	end
 end
 
 -- Kit's items in the pause menu in place of its top bar
 kit.editor{scene = scene, camera = camera_node, ground_y = 1, bar = false,
 	mouse_look = true, set_camera = voxelworld.set_camera,
+	pick_voxel = function(name)
+		hand = name
+	end,
 	solid = function(x, y, z)
 		local h = heightmap.height_at(x, z)
 		if h and y < h then
@@ -238,9 +242,9 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 	elseif key == magic.KEY_L then
 		log_in()
 	elseif key >= magic.KEY_1 and key <= magic.KEY_9 then
-		material = key - magic.KEY_1 + 1
+		hand = MATERIALS[key - magic.KEY_1 + 1]
 	elseif key == magic.KEY_0 then
-		material = 10
+		hand = MATERIALS[10]
 	end
 end)
 
@@ -279,7 +283,7 @@ magic.SubscribeToEvent("Update", function()
 	if p then
 		status_text:SetText(string.format("(%d, %d, %d)  in hand: %s",
 				math.floor(p.x + 0.5), math.floor(p.y + 0.95),
-				math.floor(p.z + 0.5), MATERIALS[material]))
+				math.floor(p.z + 0.5), hand))
 	end
 	help_text:SetText(editing and "" or TOUCH and
 			"Stick: walk  drag: look  tap: use/dig  hold: place" or

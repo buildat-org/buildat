@@ -24,5 +24,10 @@ mushroom_brown.png (farming_mushroom_brown.png) and mossy_cobble.png
 mcl_flowers_tallgrass.png (grey, tinted by VoxeLibre at run time)
 multiplied by #79c05a, the grass's tint.
 
+snow.png ([KIT] stage 4g) is a byte-for-byte copy of VoxeLibre 0.92.3's
+textures/default_snow.png (the same pack, CC BY-SA 4.0 by its LEGAL.md;
+the release's files, as poppy.png and mossy_cobble.png there are the same
+bytes as at cfc0913d7bed).
+
 DiffAlphaMask.xml is Urho3D's Techniques/Diff.xml with ALPHAMASK added
 (MIT, as Urho3D).

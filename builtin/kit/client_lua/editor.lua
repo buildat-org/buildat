@@ -45,7 +45,10 @@
 --   - **The palette** (left): a type or prefab dragged onto the view goes
 --     where it is let go (its ghost there meanwhile), or clicked it is
 --     placed by the clicks on the view until Escape, a right click or a
---     click on it again (floorplanner's Object tool)
+--     click on it again (floorplanner's Object tool); its Voxel list puts
+--     a voxel type in hand (O.pick_voxel(name), the app's placing), and
+--     "New voxel type..." makes a builder's own: a texture (Kit's or an
+--     uploaded PNG), kind, solid, transparent, light, friction, surface
 --   - **Links dragged**: the selected entity's outputs are ports beside
 --     it; one dragged onto another entity's input (its ports show as the
 --     drag is over it) links them, onto the entity a link to its one
@@ -54,7 +57,9 @@
 --     Duplicate, Make prefab..., Restart this (Running) -- for the
 --     selection if it is in it; on nothing it lets go of the selection
 --   - the inspector (right): the selected entity's instances, their
---     parameters in ui_utils' settings_form, "Apply" sends them
+--     parameters in ui_utils' settings_form, "Apply" sends them; its x, y
+--     and z typed in and "Move" (the selection by as much), "Delete"
+--     (the selection, a game-wide entity too)
 --   - every entity drawn as a box, the selected ones yellow, links as
 --     lines, and a type's gizmo (a sphere or a box), in edit mode only
 --   - the admin's: who is here, each "Builder: yes/no" to grant or take
@@ -106,7 +111,10 @@ end
 for k, v in pairs({state = nil, link = nil, cursor = nil, pending = {},
 		status = "", windows = {}, builders = {}, seen = {}, labels = {},
 		label_text = {}, listeners = {}, discarded = {}, always_keep = false,
-		choose = false, prefab_name = "", logs = {}, flows = {}}) do
+		choose = false, prefab_name = "", logs = {}, flows = {},
+		voxel_form = {name = "my_voxel", texture = "kit/stone.png", kind = "solid",
+			solid = true, transparent = false, light = 0, friction = 1,
+			surface = ""}}) do
 	init(E, k, v)
 end
 -- Floorplanner's S: the view, the cameras and what the pointer is doing
@@ -746,6 +754,32 @@ palette = function()
 		end, armed)
 		palette_buttons[#palette_buttons + 1] = {button = b, item = it}
 	end
+	-- [KIT] stage 4g: the voxel in hand (the app's, O.pick_voxel) and a
+	-- builder's own voxel type
+	if E.state.voxels then
+		if O.pick_voxel then
+			-- The builders' own first, then by name
+			local names, own = {}, {}
+			for _, v in ipairs(E.state.voxels) do
+				names[#names + 1] = v.name
+				own[v.name] = v.author ~= nil
+			end
+			table.sort(names, function(a, b)
+				if own[a] ~= own[b] then
+					return own[a]
+				end
+				return a < b
+			end)
+			ui_utils.dropdown(row(w), names, S.voxel, function(name)
+				S.voxel = name
+				O.pick_voxel(name)
+				log:info("kit editor: in hand " .. name)
+			end, {label = "Voxel", none = "none", fill = true})
+		end
+		button(w, "New voxel type...", function()
+			M.voxel_dialog()
+		end)
+	end
 end
 
 -- The palette's entry the pointer is on
@@ -836,11 +870,40 @@ local function inspector(w, e, is_made)
 		text(w, n .. " selected", DIM)
 	end
 	text(w, "Entity " .. e.id .. ": " .. tostring(e.name))
+	-- Its position typed in (fine tuning, and where keys are not at hand:
+	-- a touchscreen), Move one edit; with several selected they move by
+	-- what this one moves
 	if e.pos then
-		text(w, string.format("at %g, %g, %g", e.pos[1], e.pos[2], e.pos[3]) ..
-				((e.yaw or 0) ~= 0 and string.format(", turned %g", e.yaw) or ""),
-				DIM)
+		local r, at = row(w), {e.pos[1], e.pos[2], e.pos[3]}
+		for i, axis in ipairs({"x", "y", "z"}) do
+			-- One letter's room: the row's layout has already widened it
+			label(r, axis):SetFixedWidth(12)
+			local f = edit(r, string.format("%g", at[i]), function(s)
+				at[i] = tonumber(s)
+			end)
+			f.minWidth = 56
+		end
+		button(r, "Move", function()
+			if not (at[1] and at[2] and at[3]) then
+				E.status = "Move: three numbers"
+				return people()
+			end
+			local by = {at[1] - e.pos[1], at[2] - e.pos[2], at[3] - e.pos[3]}
+			if n > 1 then
+				send({op = "move", ids = sel_ids(), by = by})
+			else
+				send({op = "move", id = e.id, pos = at})
+			end
+			log:info(string.format("kit editor: moved %d by %g, %g, %g from "
+					.. "the inspector", n, by[1], by[2], by[3]))
+		end)
+		if (e.yaw or 0) ~= 0 then
+			text(w, string.format("turned %g", e.yaw), DIM)
+		end
 	end
+	button(w, "Delete", function()
+		M.delete_selected()
+	end)
 	for ci, c in ipairs(e.components or {}) do
 		local t = type_of(c.type)
 		text(w, c.type, magic.Color(1.0, 0.85, 0.3))
@@ -1132,6 +1195,49 @@ local function prefab_dialog(ids)
 	local br = row(w)
 	button(br, "Save prefab", function()
 		send({op = "save_prefab", ids = ids, name = E.prefab_name})
+		drop("dialog")
+	end)
+	button(br, "Cancel", function()
+		drop("dialog")
+	end)
+end
+
+-- [KIT] stage 4g: a builder's voxel type ("<their name>/<name>"), made or
+-- its next version: a registered voxel's texture or an uploaded PNG's
+local VOXEL_FIELDS = {
+	{name = "name", type = "text", max_length = 64},
+	{name = "texture", type = "texture"},
+	{name = "kind", type = "choice",
+		choices = {"solid", "leaves", "plant", "water"}},
+	{name = "solid", type = "bool"},
+	{name = "transparent", type = "bool"},
+	{name = "light", type = "number", integer = true, min = 0, max = 15},
+	{name = "friction", type = "number", min = 0, max = 10},
+	{name = "surface", type = "text", max_length = 32},
+}
+
+function M.voxel_dialog()
+	drop("dialog")
+	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	W.dialog = w
+	w.priority = 10
+	-- A fixed width: the form's rows widen it past the screen otherwise
+	w:SetFixedWidth(math.min(480, magic.ui.root.width - 16))
+	local f = E.voxel_form
+	text(w, "A voxel type of yours")
+	ui_utils.settings_form(w, VOXEL_FIELDS, f, function(k, v)
+		f[k] = v
+	end, WIDGETS, {texture = E.state.textures or {}})
+	local br = row(w)
+	button(br, "Upload a PNG...", function()
+		S.uploading = buildat.pick_file(".png")
+	end)
+	button(br, "Make", function()
+		local j = {op = "voxel"}
+		for k, v in pairs(f) do
+			j[k] = v
+		end
+		send(j)
 		drop("dialog")
 	end)
 	button(br, "Cancel", function()
@@ -3019,6 +3125,9 @@ function M.editor(options)
 			log:info("kit editor: people: " .. tostring(p.name) ..
 					(p.admin and " admin" or p.builder and " builder" or " player"))
 		end
+		if E.editing and #(s.voxels or {}) ~= #((E.state or {}).voxels or {}) then
+			log:info("kit editor: " .. #(s.voxels or {}) .. " voxels to place")
+		end
 		E.state = E.editing and s or nil
 		if was ~= E.editing then
 			log:info("kit editor: edit mode " .. (E.editing and "on" or "off"))
@@ -3118,6 +3227,14 @@ function M.editor(options)
 					tostring(a.undo) .. " to undo)")
 		end
 	end)
+	-- [KIT] stage 4g: an upload's name, the dialog's texture
+	buildat.sub_packet("kit:texture", function(data)
+		E.voxel_form.texture = data
+		log:info("kit editor: uploaded " .. data)
+		if W.dialog then
+			M.voxel_dialog()
+		end
+	end)
 	buildat.sub_packet("kit:edit_refused", function(data)
 		E.status = "Refused: " .. tostring(data)
 		log:info("kit editor: refused: " .. tostring(data))
@@ -3182,6 +3299,18 @@ function M.editor(options)
 	end)
 	magic.SubscribeToEvent("Update", function(_, data)
 		local dt = data:GetFloat("TimeStep")
+		if S.uploading then
+			local name, png = buildat.picked_file()
+			if name then
+				S.uploading = false
+				log:info("kit editor: uploading " .. name)
+				buildat.send_packet("kit:texture", png)
+			elseif png then
+				S.uploading = false
+				E.status = tostring(png)
+				people()
+			end
+		end
 		if E.editing then
 			move_camera(dt)
 			place_cameras()

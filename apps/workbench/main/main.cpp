@@ -51,24 +51,10 @@ using interface::Event;
 static const int WORLD_XZ = kit::WORLD_SECTIONS_XZ * kit::WORLD_SECTION;
 static const int WORLD_Y0 = kit::WORLD_SECTION_Y0 * kit::WORLD_SECTION,
 		WORLD_Y1 = (kit::WORLD_SECTION_Y1 + 1) * kit::WORLD_SECTION - 1;
-// Workbench's own voxels (its textures), and those the starter set's
-// components showed their state with before they were objects ([KIT]
-// stage 4c; kept registered for the saves that have them). Kit's material
-// set's are Kit's (register_voxels)
-static const char *OWN_VOXELS[] = {"glass", "brick", "button",
-	"button_pressed", "lever_off", "lever_on", "door", "gate"};
-// A save from before [KIT] stage 4e names its voxels bare
-static const std::map<ss_, ss_> ALIASES = {{"stone", "kit/stone"},
-	{"grass", "kit/grass"}, {"wood", "kit/planks"},
-	{"glass", "workbench/glass"}, {"brick", "workbench/brick"},
-	{"button", "workbench/button"},
-	{"button_pressed", "workbench/button_pressed"},
-	{"lever_off", "workbench/lever_off"}, {"lever_on", "workbench/lever_on"},
-	{"door", "workbench/door"}, {"gate", "workbench/gate"}};
-// What a builder places (the client's keys); "air" is a dig
-static const char *PLACEABLE[] = {"air", "kit/stone", "workbench/glass",
-	"kit/planks", "workbench/brick", "kit/grass", "kit/dirt", "kit/sand",
-	"kit/log", "kit/leaves", "kit/water", "kit/gravel", "kit/cobble"};
+// Workbench's own voxels (its textures). Kit's material set's are Kit's
+// (register_voxels), and the builders' theirs ([KIT] stage 4g); a builder
+// places any of them, "air" a dig
+static const char *OWN_VOXELS[] = {"glass", "brick"};
 
 struct Module: public interface::Module
 {
@@ -146,7 +132,6 @@ struct Module: public interface::Module
 			k->register_voxels(reg);
 		});
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
-			w->set_name_aliases(ALIASES);
 			w->set_save(m_save, "main");
 		});
 		kit::Host h;
@@ -247,8 +232,11 @@ struct Module: public interface::Module
 			c[k] = ok ? (int)std::floor(p.at(k).as_number()) : 0;
 		}
 		bool placeable = false;
-		for(const char *v : PLACEABLE)
-			placeable = placeable || voxel == v;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			interface::VoxelName n;
+			n.block_name = voxel;
+			placeable = w->get_voxel_reg()->get(n) != nullptr;
+		});
 		if(!ok || !placeable){
 			log_i(MODULE, "workbench: a build by peer %zu refused: not a "
 					"cell of the world and a voxel to build with", peer);

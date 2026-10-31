@@ -11,7 +11,12 @@
 //    "voxels": {"<author>/<name>": {"texture": t | "top", "side",
 //        "bottom": t, "kind": "solid" (default) | "water" | "leaves" |
 //        "plant" (two crossed quads, walked through), "heightmap": the
-//        layer of builtin/heightmap's ground textures that is its look},
+//        layer of builtin/heightmap's ground textures that is its look,
+//        ([KIT] stage 4g) "solid": a cube that stops players (true by
+//        default), "transparent": a cube cut out by its texture's alpha
+//        (a leaves' always), "light": 0...15 it emits, "friction": 0...10
+//        (1 by default) and "surface": a tag ("road", "ice", "mud";
+//        letters, digits and _, none by default) for what moves on it},
 //        ...},
 //    "fallbacks": {role: role, ...},
 //    "structures": {name: {"voxel": v} | {"voxels": {letter: v, ...},
@@ -59,9 +64,7 @@
 // it, its bed 4 under sea_level). **Infinite** maps are generated where
 // players go; a section nobody wrote is not saved
 // (voxelworld::set_save_unaltered), the generator and its version pinned
-// in Kit's row "world"; a save of version 1 (stage 4e's, before caves and
-// decorations) keeps generating as version 1 until the World changes. **A
-// heightmap surface**: builtin/heightmap's map, finite, from the origin
+// in Kit's row "world". **A heightmap surface**: builtin/heightmap's map, finite, from the origin
 // (a side a multiple of 64), the same heights, its layers the biome's
 // top, stone and riverbed's; no water on it yet; its decorations voxel
 // objects (kit.cpp).
@@ -96,8 +99,7 @@ static const char *ROLES[] = {"stone", "top", "filler", "water", "riverbed",
 	"dust", "cave_floor", "cave_wall"};
 // The generators' versions: an infinite world pins its generator's in the
 // save, and a build whose version differs refuses it (a finite one is
-// baked and does not care). 2: caves and decorations ([KIT] stage 4f);
-// version 1 is kept (both off)
+// baked and does not care). 2: caves and decorations ([KIT] stage 4f)
 static const int VERSION = 2;
 static int generator_version(const ss_ &g)
 {
@@ -117,6 +119,109 @@ struct Material
 {
 	ss_ top, side, bottom, kind = "solid";
 	int layer = -1; // the heightmap's
+	// [KIT] stage 4g: a cube's (solid, leaves): stops players, cut out
+	// by its alpha; the light it emits
+	bool solid = true, transparent = false;
+	int light = 0;
+	// For what moves on it (stage 4h's walker, ball and car): nothing reads
+	// them yet. A heightmap's material's are its ground's
+	double friction = 1;
+	ss_ surface;
+
+	// A set's voxel or a builder's ([KIT] stage 4g: the same fields)
+	bool parse(const json::Value &j)
+	{
+		const ss_ t = json::jstr(j, "texture");
+		top = json::jstr(j, "top", t);
+		side = json::jstr(j, "side", t);
+		bottom = json::jstr(j, "bottom", t);
+		kind = json::jstr(j, "kind", "solid");
+		layer = (int)json::jint(j, "heightmap", -1);
+		solid = !j.get("solid").is_boolean() || j.get("solid").is_true();
+		transparent = j.get("transparent").is_true();
+		const json::Value &l = j.get("light");
+		light = l.is_number() ? (int)l.as_number() : 0;
+		const json::Value &f = j.get("friction");
+		friction = f.is_number() ? f.as_number() : 1;
+		surface = json::jstr(j, "surface");
+		bool tag_ok = surface.size() <= 32;
+		for(char c : surface)
+			tag_ok = tag_ok && (isalnum((unsigned char)c) || c == '_');
+		return !top.empty() && !side.empty() && !bottom.empty() &&
+				light >= 0 && light <= 15 && (kind == "solid" ||
+				kind == "water" || kind == "leaves" || kind == "plant") &&
+				friction >= 0 && friction <= 10 && tag_ok;
+	}
+
+	// Its properties as a builder's row has them, for a palette and
+	// Interface::voxel_type()
+	json::Value properties() const
+	{
+		json::Value v = json::object();
+		v.set("kind", kind);
+		v.set("solid", solid);
+		v.set("transparent", transparent);
+		v.set("light", (int64_t)light);
+		v.set("friction", friction);
+		v.set("surface", surface);
+		return v;
+	}
+
+	// Its definition in a voxel registry
+	// simplified: light is the definition's light_source, which a world
+	// maintaining lamp light reads; Workbench's does not (its format has
+	// no light plane), so it draws nothing different. The upgrade:
+	// light_lamp in the app's format, voxelworld's set_light_maintained
+	// and a client technique lit by the vertex colours
+	interface::VoxelDefinition definition(const ss_ &name) const
+	{
+		interface::VoxelDefinition def;
+		def.name.block_name = name;
+		// The faces: +y, -y, then the sides
+		for(int f = 0; f < 6; f++){
+			auto &seg = def.textures[f];
+			seg.resource_name = f == 0 ? top : f == 1 ? bottom : side;
+			seg.total_segments = Urho3D::IntVector2(1, 1);
+			seg.select_segment = Urho3D::IntVector2(0, 0);
+		}
+		def.light_source = (uint8_t)light;
+		if(kind == "water"){
+			// Passive: no flow (user, 2026-10-30)
+			def.edge_material_id = 10;
+			def.translucent = true;
+			def.transmits_light = true;
+		} else if(kind == "plant"){
+			// [KIT] stage 4f: Luanti's plantlike, two quads a cell
+			// across crossed on its diagonals, both sides drawn, cut out
+			// by the texture's alpha; walked through
+			def.face_draw_type = interface::FaceDrawType::NEVER;
+			def.edge_material_id = interface::EDGEMATERIALID_EMPTY;
+			def.alpha_masked = true;
+			def.transmits_light = true;
+			def.shape_double_sided = true;
+			const float r = 0.5f * 0.70710678f;
+			for(int i = 0; i < 2; i++){
+				const float az = i ? r : -r;
+				const float pts[4][3] = {{-r, -0.5f, az}, {r, -0.5f, -az},
+					{r, 0.5f, -az}, {-r, 0.5f, az}};
+				const float uv[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+				interface::VoxelQuad q;
+				for(int k = 0; k < 4; k++){
+					for(int c = 0; c < 3; c++)
+						q.p[k][c] = pts[k][c];
+					q.uv[k][0] = uv[k][0];
+					q.uv[k][1] = uv[k][1];
+				}
+				def.shape.push_back(q);
+			}
+		} else {
+			def.edge_material_id = interface::EDGEMATERIALID_GROUND;
+			def.physically_solid = solid;
+			def.alpha_masked = kind == "leaves" || transparent;
+			def.transmits_light = def.alpha_masked;
+		}
+		return def;
+	}
 };
 
 // [KIT] stage 4f: a voxel structure (a decoration's look): sx x sy x sz
@@ -225,16 +330,9 @@ struct MaterialSet
 		if(vs.is_object())
 			for(json::Iterator it(vs); it; ++it){
 				Material m;
-				const ss_ t = json::jstr(*it, "texture");
-				m.top = json::jstr(*it, "top", t);
-				m.side = json::jstr(*it, "side", t);
-				m.bottom = json::jstr(*it, "bottom", t);
-				m.kind = json::jstr(*it, "kind", "solid");
-				m.layer = (int)json::jint(*it, "heightmap", -1);
-				if(m.top.empty() || m.side.empty() || m.bottom.empty() ||
-						(m.kind != "solid" && m.kind != "water" &&
-						m.kind != "leaves" && m.kind != "plant")){
-					why = "voxel "+it.key()+": a texture and a kind";
+				if(!m.parse(*it)){
+					why = "voxel "+it.key()+": a texture, a kind, light 0...15, "
+							"friction 0...10 and a surface tag";
 					return false;
 				}
 				voxels[it.key()] = m;
@@ -313,10 +411,8 @@ struct Params
 	uint32_t seed = 0;
 	int level = 0, height = 12, spread = 48, sea_level = 0, width = 64,
 			depth = 64;
-	// [KIT] stage 4f: caves and the biome's decorations; the generator's
-	// version (1: neither, a stage 4e save's)
+	// [KIT] stage 4f: caves and the biome's decorations
 	bool caves = false, decorations = true;
-	int version = VERSION;
 
 	void from(const json::Value &j)
 	{
@@ -345,8 +441,8 @@ struct Params
 	}
 	bool finite() const { return size != "infinite"; }
 	bool heightmap() const { return surface == "heightmap"; }
-	bool with_caves() const { return version >= 2 && caves; }
-	bool with_decorations() const { return version >= 2 && decorations; }
+	bool with_caves() const { return caves; }
+	bool with_decorations() const { return decorations; }
 	int x0() const { return -width / 2; }
 	int z0() const { return -depth / 2; }
 	bool in_map(int x, int z) const

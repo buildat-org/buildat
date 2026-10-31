@@ -100,7 +100,9 @@ end
 
 local function label(parent, s, width)
 	local t = text(parent, s)
-	t.minWidth = math.max(width or 0, t.width)
+	-- Its text's own width (minWidth): a row's layout may have stretched
+	-- its width already
+	t.minWidth = math.max(width or 0, t.minWidth)
 	return t
 end
 

@@ -2,7 +2,7 @@
 	"format": "kit_materials",
 	"author": "kit",
 	"name": "default",
-	"comment": "[KIT] stage 4e: Kit's own material set, Workbench's (builtin/kit/world.h says the format). The textures are skeldat's and VoxeLibre's (client_data/, README.txt); heightmap is the layer of builtin/heightmap's ground textures with the same pixels. Stage 4f: plants, structures, decorations.",
+	"comment": "[KIT] stage 4e: Kit's own material set, Workbench's (builtin/kit/world.h says the format). The textures are skeldat's and VoxeLibre's (client_data/, README.txt); heightmap is the layer of builtin/heightmap's ground textures with the same pixels. Stage 4f: plants, structures, decorations. Stage 4g: snow.",
 	"voxels": {
 		"kit/stone": {"texture": "kit/stone.png", "heightmap": 1},
 		"kit/cobble": {"texture": "kit/cobble.png"},
@@ -22,7 +22,8 @@
 		"kit/poppy": {"texture": "kit/poppy.png", "kind": "plant"},
 		"kit/mushroom_red": {"texture": "kit/mushroom_red.png", "kind": "plant"},
 		"kit/mushroom_brown": {"texture": "kit/mushroom_brown.png",
-			"kind": "plant"}
+			"kind": "plant"},
+		"kit/snow": {"texture": "kit/snow.png"}
 	},
 	"fallbacks": {
 		"top": "filler", "filler": "stone", "riverbed": "filler",
@@ -80,6 +81,12 @@
 				{"structure": "boulder", "on": "top", "density": 0.003},
 				{"structure": "boulder", "on": "water", "density": 0.01},
 				{"structure": "mushroom_brown", "on": "cave", "density": 0.01}]},
+		"snow": {"top": "kit/snow", "filler": "kit/dirt", "filler_depth": 3,
+			"stone": "kit/stone", "water": "kit/water", "riverbed": "kit/gravel",
+			"decorations": [
+				{"structure": "tree", "on": "top", "density": 0.003},
+				{"structure": "boulder", "on": "top", "density": 0.002},
+				{"structure": "boulder", "on": "water", "density": 0.01}]},
 		"rock": {"stone": "kit/stone", "riverbed": "kit/gravel"}
 	}
 }
