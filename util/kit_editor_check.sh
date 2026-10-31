@@ -155,6 +155,7 @@ frames 3
 click Button "Don't add"
 frames 3
 wait_log_any 60000 replicated: entity 4 open = false
+wait_log_any 60000 kit editor: edit rights: yes
 click Button "Edit"
 wait_log 10000 kit editor: state: 15 entities, 0 to undo
 mouse_pos 921 213
@@ -408,6 +409,7 @@ echo "ok: two builders, one's selection in the other's editor; Stop throws the r
 
 cat > "$t/again.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob
+wait_log_any 60000 kit editor: edit rights: yes
 click Button "Edit"
 wait_log 10000 kit editor: state: 20 entities, 0 to undo
 quit
