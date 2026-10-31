@@ -1,6 +1,5 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: long
 # The verdict of a run, sourced by fuzz.sh and drive.sh so that a driven
 # run reports an error or a slow step or frame in the fuzz's words
 # ([SCAN_DRIVE]). Expects: out (the run's directory with srv.log and
