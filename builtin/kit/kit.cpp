@@ -194,6 +194,9 @@ struct Run
 	json::Value args = json::array();
 	ss_ by = "app"; // who caused it, carried along the links
 	int hops = 0;
+	// [KIT_TRY_INPUTS] The peer + 1 of the builder whose Try it is (0:
+	// none), told what it emits
+	size_t tried = 0;
 };
 
 struct Write
@@ -3457,6 +3460,48 @@ struct Module: public interface::Module, public Interface
 		send_edited(peer);
 	}
 
+	// [KIT_TRY_INPUTS] {"op": "try", "id": n, "input": i, "value": v}: the
+	// inspector's Try, the input delivered to the entity as a link would,
+	// by the builder; Running only (the editor runs the game first). Its
+	// runs' emits are answered with "kit:tried"
+	void try_input(Peer &p, size_t peer, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		ss_ why;
+		Entity *e = entity_arg(j, "id", why);
+		if(!e)
+			return refuse(why);
+		if(!m_session.running)
+			return refuse("the game is Ended: Run it first");
+		const ss_ input = jstr(j, "input");
+		json::Value value = j.get("value");
+		if(value.is_undefined())
+			value = json::null();
+		bool has = false, ok = false;
+		ss_ type;
+		for(const Instance &in : e->comps){
+			const Type &t = m_types[in.type];
+			if(!t.inputs.count(input))
+				continue;
+			has = true;
+			type = t.in_types.at(input);
+			ok = ok || signal_ok(type, value);
+		}
+		if(!has)
+			return refuse("input: entity "+itos(e->id)+" has no input \""+
+					input.substr(0, 32)+"\"");
+		if(!ok)
+			return refuse("value: its input "+input+" takes a "+type);
+		const uint64_t id = e->id;
+		const size_t before = m_queue.size();
+		deliver(id, input, value, by_of(p.name), 0);
+		for(size_t i = before; i < m_queue.size(); i++)
+			m_queue[i].tried = peer + 1;
+		log_i(MODULE, "%s tries entity %s's %s %s", cs(p.name), cs(itos(id)),
+				cs(input), cs(value.stringify().substr(0, 64)));
+		add_log(id, "tried: "+input+" by "+p.name);
+	}
+
 	// A heightmap surface: builtin/heightmap's map in the World's scene,
 	// generated from the same heights unless the save had it as applied;
 	// its grass, rock and sand the biome's top, stone and riverbed layers
@@ -5316,6 +5361,7 @@ struct Module: public interface::Module, public Interface
 				replicate_state(e, r.comp, k);
 		}
 		const json::Value &emits = fx.get("emit");
+		json::Value tried_out = json::array();
 		for(unsigned i = 0; i < emits.size(); i++){
 			const ss_ output = emits.at(i).at(0u).is_string() ?
 					emits.at(i).at(0u).as_string() : ss_();
@@ -5338,6 +5384,12 @@ struct Module: public interface::Module, public Interface
 			}
 			if(ot == "none")
 				value = json::null();
+			if(r.tried){
+				json::Value o = json::array();
+				o.append(output);
+				o.append(value);
+				tried_out.append(o);
+			}
 			for(const Link &l : in.links){
 				if(l.output != output)
 					continue;
@@ -5351,6 +5403,19 @@ struct Module: public interface::Module, public Interface
 				}
 				deliver(l.to, l.input, value, r.by, r.hops + 1, e.id, output);
 			}
+		}
+		// [KIT_TRY_INPUTS] The Try's answer: what it emitted, nothing too
+		if(r.tried){
+			json::Value a = json::object();
+			a.set("id", (int64_t)r.entity);
+			a.set("input", r.args.at(0u));
+			a.set("emitted", tried_out);
+			log_i(MODULE, "A try of entity %s's %s emitted %s", cs(itos(r.entity)),
+					cs(r.args.at(0u).stringify()), cs(tried_out.stringify().
+					substr(0, 200)));
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(r.tried - 1, "kit:tried", a.stringify());
+			});
 		}
 		// The provider's state, changed by the inventory calls of this run
 		Instance *pv_ = provider_for(pid, inv_id, inv_comp);
@@ -9131,6 +9196,8 @@ struct Module: public interface::Module, public Interface
 			return send_edited(peer);
 		if(op == "regenerate")
 			return regenerate_sections(p, peer, j, refuse);
+		if(op == "try")
+			return try_input(p, peer, j, refuse);
 		if(op == "export")
 			return export_package(peer, p, refuse);
 		if(op == "restart"){

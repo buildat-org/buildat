@@ -330,6 +330,11 @@ namespace interface
 //       true}  -- Ended only: an edited section's writes dropped (one
 //       loaded, no component's voxels in it), the World generating it
 //       again; one undo, which waits for it to be generated
+//   {"op": "try", "id": n, "input": i, "value": v}  -- ([KIT_TRY_INPUTS])
+//       Running only: input i delivered to entity n as a link would, by
+//       the builder, v checked against the input's type; the runs it
+//       makes answered with "kit:tried" {"id", "input", "emitted":
+//       [[output, value], ...]} (a timer's later emits are not)
 //   {"op": "voxel", "name": n, "texture": t, "kind": "solid"|"leaves"|
 //    "plant"|"water", "solid", "transparent", "light": 0..15,
 //    "friction": 0..10, "surface": tag}  -- ([KIT] stage 4g) the

@@ -78,7 +78,10 @@
 --   - the inspector (right): the selected entity's instances, their
 --     parameters in ui_utils' settings_form, "Apply" sends them; its x, y
 --     and z typed in and "Move" (the selection by as much), "Delete"
---     (the selection, a game-wide entity too)
+--     (the selection, a game-wide entity too); ([KIT_TRY_INPUTS]) "Try:"
+--     a button per input (a value field beside one that takes a value)
+--     sends it to the entity as a link would, running the game first
+--     while Ended; what it emitted is shown a moment ("→ opened")
 --   - every entity drawn as a box, the selected ones yellow, links as
 --     lines, and a type's gizmo (a sphere or a box), in edit mode only
 --   - the admin's: who is here, each "Builder: yes/no" to grant or take
@@ -136,7 +139,7 @@ for k, v in pairs({state = nil, link = nil, cursor = nil, pending = {},
 		status = "", windows = {}, builders = {}, seen = {}, labels = {},
 		label_text = {}, listeners = {}, discarded = {}, always_keep = false,
 		choose = false, prefab_name = "", logs = {}, flows = {},
-		package_name = "my_prefabs", credits = {},
+		package_name = "my_prefabs", credits = {}, try_values = {},
 		voxel_form = {name = "my_voxel", texture = "kit/stone.png", kind = "solid",
 			solid = true, transparent = false, light = 0, friction = 1,
 			surface = ""}}) do
@@ -255,6 +258,42 @@ end
 
 function M.stop()
 	send({op = "stop"})
+end
+
+-- [KIT_TRY_INPUTS] The inspector's Try: entity id's input sent to it, the
+-- value typed (s) read as the input's type ty takes it; Ended, the game
+-- Run first (as play mode does)
+function M.try(id, input, ty, s)
+	s = s or ""
+	local v, ok = nil, true
+	if ty == "number" or ty == "entity" then
+		v = tonumber(s)
+		ok = v ~= nil
+	elseif ty == "bool" then
+		ok = s == "true" or s == "false"
+		v = s == "true"
+	elseif ty == "position" then
+		local x, y, z = s:match(
+				"^%s*(%-?[%d.]+)[%s,]+(%-?[%d.]+)[%s,]+(%-?[%d.]+)%s*$")
+		v = x and {tonumber(x), tonumber(y), tonumber(z)}
+		ok = v ~= nil
+	elseif ty == "string" then
+		v = s
+	elseif ty == "any" and s ~= "" then
+		v = tonumber(s) or s
+	end
+	if not ok then
+		E.status = "Try " .. input .. ": " .. (ty == "position" and
+				"three numbers" or ty == "bool" and "true or false" or "a " .. ty)
+		return people()
+	end
+	if not E.running then
+		M.play()
+	end
+	log:info("kit editor: try " .. id .. "'s " .. input .. (v ~= nil and
+			" " .. tostring(type(v) == "table" and table.concat(v, ",") or v) or
+			""))
+	send({op = "try", id = id, input = input, value = v})
 end
 
 function M.save_as_start()
@@ -1290,6 +1329,32 @@ local function inspector(w, e, is_made)
 				refresh()
 			end)
 		end
+		-- [KIT_TRY_INPUTS] Try: each input sent to it as a link would (by
+		-- this builder), a value typed beside one that takes one, three a
+		-- row
+		local tr
+		for i, input in ipairs(t.inputs or {}) do
+			if i % 3 == 1 then
+				tr = row(w)
+				label(tr, i == 1 and "Try:" or "", 32)
+			end
+			local ty = type(t.inputs_types) == "table" and
+					t.inputs_types[input] or "any"
+			local vk = e.id .. "/" .. input
+			if ty ~= "none" then
+				edit(tr, E.try_values[vk] or "", function(s)
+					E.try_values[vk] = s
+				end).minWidth = 48
+			end
+			button(tr, input, function()
+				M.try(e.id, input, ty, E.try_values[vk])
+			end)
+		end
+	end
+	-- What the last Try's runs emitted, for a while
+	local a = E.tried
+	if a and a.id == e.id and buildat.get_time_us() < a.till then
+		text(w, a.text, magic.Color(0.5, 1, 0.6))
 	end
 	if E.link and E.link.id ~= e.id then
 		text(w, "Link " .. E.link.id .. "'s " .. E.link.output .. " to:")
@@ -3627,6 +3692,11 @@ local function draw()
 	log_bar()
 	local dbg = O.debug
 	local now = buildat.get_time_us()
+	-- A Try's answer shown long enough
+	if E.tried and now >= E.tried.till then
+		E.tried = nil
+		inspector_window()
+	end
 	local YELLOW = magic.Color(1, 0.9, 0.2)
 	-- The round's own entities, orange (players are drawn by the app)
 	for _, e in ipairs(made()) do
@@ -3910,6 +3980,27 @@ function M.editor(options)
 		if E.editing and S.tool == "terrain" then
 			send({op = "edited"})
 		end
+	end)
+	-- [KIT_TRY_INPUTS] A Try's answer: what the entity emitted ("→ opened"),
+	-- in the inspector for 3 s
+	buildat.sub_packet("kit:tried", function(data)
+		local a = network.parse_json(data)
+		if type(a) ~= "table" then
+			return
+		end
+		local outs = {}
+		for _, o in ipairs(type(a.emitted) == "table" and a.emitted or {}) do
+			local v = type(o) == "table" and o[2]
+			outs[#outs + 1] = tostring(type(o) == "table" and o[1]) ..
+					(v ~= nil and type(v) ~= "table" and " " .. tostring(v) or "")
+		end
+		local t = "→ " .. (#outs > 0 and table.concat(outs, ", ") or
+				"nothing emitted")
+		E.tried = {id = tonumber(a.id), text = t,
+			till = buildat.get_time_us() + 3000000}
+		log:info("kit editor: tried " .. tostring(a.id) .. "'s " ..
+				tostring(a.input) .. ": " .. t)
+		inspector_window()
 	end)
 	-- [KIT_VOXEL_EDITS] The edited sections, the terrain panel's list
 	buildat.sub_packet("kit:edited", function(data)

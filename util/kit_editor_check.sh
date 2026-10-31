@@ -9,7 +9,9 @@
 #   1. The admin (kitboss, by the setup code) switches edit mode on,
 #      places a button and a door, a marker (moved, deleted, the delete
 #      undone), sets the door's "closed" to glass in the inspector and
-#      links the button's "pressed" to the door's "toggle"; leaves edit
+#      tries the door's "toggle" twice in the inspector ([KIT_TRY_INPUTS]:
+#      it opens and closes, "→ opened" shown), links the button's
+#      "pressed" to the door's "toggle"; leaves edit
 #      mode and uses the new button twice: the door opens and closes to
 #      glass. Back in edit mode an undo removes the link, and the button
 #      then moves no door.
@@ -209,6 +211,11 @@ text glass
 wait_log 5000 kit editor: 18/1 closed = glass
 click Button "Apply"
 wait_log 10000 kit editor: state: 18 entities, 5 to undo
+click Button "toggle"
+wait_log_any 10000 kit editor: tried 18's toggle: → opened
+wait_log_any 10000 replicated: entity 18 open = true
+click Button "toggle"
+wait_log_any 10000 kit editor: tried 18's toggle: → closed
 frames 3
 screenshot @T@/inspector.png
 mouse_pos 620 350
@@ -334,9 +341,11 @@ want "$s" "kitboss is in edit mode" \
 	"An edit by kitboss: linked 17.pressed -> 18.toggle" "kitboss left edit mode" \
 	"sample_kit/button 17: pressed by kitboss times 1" \
 	"sample_kit/door 18: opened by kitboss to air" \
+	"kitboss tries entity 18's toggle null" "A try of entity 18's \"toggle\" emitted [[\"opened\"" \
+	"A try of entity 18's \"toggle\" emitted [[\"closed\"" \
 	"sample_kit/door 18: closed by kitboss to glass" \
 	"sample_kit/button 17: pressed by kitboss times 3"
-[ "$(grep -ac "sample_kit/door 18: opened" "$s")" = 1 ] ||
+[ "$(grep -ac "sample_kit/door 18: opened" "$s")" = 2 ] ||
 	fail "the door moved after the undo took the link away ($s)"
 echo "ok: the admin edits: edit mode, place, move, delete, the inspector, the link, undo; the edit works in play"
 for op in mode place move delete set link unlink undo builder restart save_prefab; do
