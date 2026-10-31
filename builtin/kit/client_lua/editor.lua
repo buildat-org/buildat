@@ -81,7 +81,7 @@
 --     over it, their cursor a cross; the entities listed to select (the
 --     game-wide ones, on the app root; "Hide positioned entities" off,
 --     all), a list that scrolls, kept under the palette; "Save as start" (the bar, Running); the builds the
---     last Stop discarded until the next Play: "Keep them", or "Choose..."
+--     last End discarded until the next Run: "Keep them", or "Choose..."
 --     a player's; "Always keep builds"
 --   - **A touchscreen** (BUILDAT_TOUCH=1, [FP_TOUCH]'s): a tap is a click,
 --     a finger dragged on the selection moves it (on a port links, on the
@@ -92,13 +92,15 @@
 --     Menu; the panels folded on a narrow screen, the bar's Palette and
 --     Inspector open one
 -- Kit's top bar, for a builder: the tools ("Edit", "Play mode" while they
--- are on; F6) and the server's state ("Play" while Stopped, "Stop" while
--- Running); kit.editor{bar = false} leaves it out of play for an app's own
--- menu (the tools always have theirs): kit.can_edit(), kit.editing(),
+-- are on; F6; play mode Runs the game if it has Ended) and the server's
+-- state ("Run" while Ended, "End" while Running: End puts the start
+-- back; [KIT_PLAYTEST_TWEAKS], Play and Stop before);
+-- kit.editor{bar = false} leaves it out of play for an app's own menu
+-- (the tools always have theirs): kit.can_edit(), kit.editing(),
 -- kit.running() (and kit.by(), who), and kit.set_tools(on),
 -- kit.toggle_tools(), kit.play(), kit.stop(), kit.save_as_start() do what
 -- the bar does; kit.on_change(fn) calls fn() as any of the states changes.
--- kit.add_menu_items(menu) puts Edit and Play/Stop (a builder's) and
+-- kit.add_menu_items(menu) puts Edit and Run/End (a builder's) and
 -- Credits... (everyone's) in extensions/
 -- pause_menu's menu and Kit's Escape first (kit.escape(): the context
 -- menu, a drag, placing, a pending link, the crosshair; true when taken).
@@ -203,6 +205,10 @@ local function changed()
 end
 
 function M.set_tools(on)
+	-- [KIT_PLAYTEST_TWEAKS] play mode runs the game if it has ended
+	if not on and E.editing and not E.running then
+		M.play()
+	end
 	send({op = "mode", on = on == true})
 end
 
@@ -608,9 +614,9 @@ local MAX_BRUSH = 12
 M.T = T
 local brush_at, stroke_begin, stroke_move, stroke_end, draw_brush
 
--- The bar: Edit and Play/Stop in play (an app's own menu can have them:
+-- The bar: Edit and Run/End in play (an app's own menu can have them:
 -- bar = false); in the tools floorplanner's toolbar -- Menu, the views,
--- the grid, the angle step, the cut, Undo, Save as start, Play/Stop, Play
+-- the grid, the angle step, the cut, Undo, Save as start, Run/End, Play
 -- mode, and on a narrow screen the panels' toggles
 -- The bar's buttons in rows, as many as the screen's width needs
 -- ([FP_TOUCH] 2, floorplanner's build_toolbar): place(make) puts what
@@ -661,7 +667,7 @@ rebuild_bar = function()
 	W.bar = w
 	if not E.editing then
 		button(w, "Edit", M.toggle_tools)
-		button(w, E.running and "Stop" or "Play", function()
+		button(w, E.running and "End" or "Run", function()
 			if E.running then M.stop() else M.play() end
 		end)
 		return
@@ -707,7 +713,7 @@ rebuild_bar = function()
 	if E.running then
 		bar_button("Save as start", nil, M.save_as_start)
 	end
-	bar_button(E.running and "Stop" or "Play", nil, function()
+	bar_button(E.running and "End" or "Run", nil, function()
 		if E.running then M.stop() else M.play() end
 	end)
 	bar_button("Play mode", nil, M.toggle_tools)
@@ -1064,7 +1070,7 @@ local function inspect_made(w, e)
 	text(w, "Entity " .. e.id .. ": " .. tostring(e.name))
 	text(w, e.kind == "player" and "A player" or ("Made in play" ..
 			(e.made == "b" and " by " .. tostring(e.made_by) or "") ..
-			", by entity " .. tostring(e.maker) .. ": gone at Stop"), DIM)
+			", by entity " .. tostring(e.maker) .. ": gone at End"), DIM)
 	for _, c in ipairs(e.components or {}) do
 		text(w, c.type, magic.Color(1.0, 0.85, 0.3))
 	end
@@ -1326,7 +1332,7 @@ people = function()
 	local b = window(magic.HA_LEFT, magic.VA_BOTTOM, 10, -50)
 	W.people = b
 	text(b, E.running and "Running: edits change the start and the round" or
-			"Stopped: edits change the start", DIM)
+			"Ended: edits change the start", DIM)
 	if E.status ~= "" then
 		text(b, E.status, WARN)
 	end
@@ -1372,7 +1378,7 @@ people = function()
 				(S.hide_positioned and "yes" or "no"))
 		people()
 	end)
-	-- The builds the last Stop discarded, to keep until the next Play: all,
+	-- The builds the last End discarded, to keep until the next Run: all,
 	-- or by player ("Choose...")
 	local names = {}
 	for name in pairs(E.discarded) do
@@ -1385,7 +1391,7 @@ people = function()
 			list[#list + 1] = name .. " " .. tostring(E.discarded[name])
 		end
 		local dr = row(b)
-		label(dr, "Builds discarded at Stop: " .. table.concat(list, ", "))
+		label(dr, "Builds discarded at End: " .. table.concat(list, ", "))
 		button(dr, "Keep them", function()
 			send({op = "keep"})
 		end)
@@ -2216,7 +2222,7 @@ function M.show_credits(menu)
 end
 
 -- Kit's items in an app's pause menu (extensions/pause_menu), a builder's:
--- Edit ("Play mode" while the tools are on) and Play or Stop; everyone's
+-- Edit ("Play mode" while the tools are on) and Run or End; everyone's
 -- Credits...; and the tools' Escape first
 function M.add_menu_items(menu)
 	E.menu = menu
@@ -2224,7 +2230,7 @@ function M.add_menu_items(menu)
 		return E.can_edit and (E.editing and "Play mode" or "Edit") or nil
 	end, M.toggle_tools, {order = 10})
 	menu.add(function()
-		return E.can_edit and (E.running and "Stop" or "Play") or nil
+		return E.can_edit and (E.running and "End" or "Run") or nil
 	end, function()
 		if E.running then M.stop() else M.play() end
 	end, {order = 11})
@@ -3580,7 +3586,7 @@ function M.editor(options)
 		if E.running ~= (s.running == true) or E.by ~= tostring(s.by or "") then
 			E.running, E.by = s.running == true, tostring(s.by or "")
 			log:info("kit editor: the server is " .. (E.running and "Running" or
-					"Stopped") .. " (by " .. E.by .. ")")
+					"Ended") .. " (by " .. E.by .. ")")
 		end
 		if E.editing then
 			local n = #entities()

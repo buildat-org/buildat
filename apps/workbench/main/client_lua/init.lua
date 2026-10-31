@@ -17,11 +17,11 @@
 --   F6 or the menu's "Edit": Kit's editor, floorplanner's (its 2D, 3D and
 --   walking views: here the walk); walking in it, the pointer is free and
 --   the right button held looks round, a click goes up into the crosshair
---   (Escape back down). The menu's "Play" and "Stop" (a builder's): the
---   server Running or Stopped ([KIT] 4c)
+--   (Escape back down). The menu's "Run" and "End" (a builder's): the
+--   server Running or Ended, the start put back ([KIT] 4c)
 --   L: log in (builtin/accounts' dialog)
 --   Escape: the pause menu (extensions/pause_menu: Continue, Kit's Edit
---   and Play/Stop, Chat, Settings, Leave); in the tools Kit's first (a
+--   and Run/End, Chat, Settings, Leave); in the tools Kit's first (a
 --   pending link, a drag, the crosshair)
 -- A touchscreen (BUILDAT_TOUCH=1, Kit's controls.lua): a stick at the
 -- lower left, a drag elsewhere turns the view, a tap is the left click at

@@ -7428,7 +7428,7 @@ struct Module: public interface::Module, public Interface
 		if(!m_hosted)
 			return refuse("Kit is not hosted");
 		if(!m_session.running)
-			return refuse("the server is Stopped");
+			return refuse("the server is Ended");
 		if(data.empty() || !end || *end)
 			return refuse("not an entity's id");
 		auto pi = m_peers.find(peer);
@@ -8008,9 +8008,9 @@ struct Module: public interface::Module, public Interface
 			const std::function<void(const ss_&)> &refuse)
 	{
 		if(m_session.running)
-			return refuse("the server is Running: Stop discards and keeps");
+			return refuse("the server is Running: End discards and keeps");
 		if(m_discarded.empty())
-			return refuse("no builds discarded since the last Play");
+			return refuse("no builds discarded since the last Run");
 		const json::Value &names = j.get("names");
 		std::set<ss_> chosen;
 		for(unsigned i = 0; i < names.size(); i++)
@@ -8878,7 +8878,7 @@ struct Module: public interface::Module, public Interface
 			if(op == "play" && m_session.running)
 				return refuse("the server is Running");
 			if(op != "play" && !m_session.running)
-				return refuse("the server is Stopped");
+				return refuse("the server is Ended");
 			if(op == "play")
 				play(p.name);
 			else if(op == "stop")
@@ -8912,7 +8912,7 @@ struct Module: public interface::Module, public Interface
 			if(!in)
 				return refuse(why);
 			if(!m_session.running)
-				return refuse("the server is Stopped: it is at its start");
+				return refuse("the server is Ended: it is at its start");
 			const size_t ci = in - &e->comps[0];
 			const uint64_t id = e->id;
 			const ss_ type = in->type;
@@ -8976,7 +8976,7 @@ struct Module: public interface::Module, public Interface
 		if(it == m_entities.end()){
 			why = ss_(key)+": no entity "+v.stringify()+(m_removed.count(
 					(uint64_t)v.as_number()) ? " in the round (play removed "
-					"it; it is back at Stop)" : "");
+					"it; it is back at End)" : "");
 			return nullptr;
 		}
 		// Edits are the composition's ([KIT] stage 4d)

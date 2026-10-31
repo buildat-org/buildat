@@ -85,9 +85,9 @@ if [ "${1:-}" = web ]; then
 	["key", "u"], ["waitlog", "replicated: entity 18 open = true", 10],
 	["waitlog_any", "kit editor: signal 17.pressed -> 18.toggle", 10],
 	["key", "u"], ["waitlog", "replicated: entity 18 open = false", 10],
-	["click", "Button", "Stop"], ["waitlog_any", "kit editor: the server is Stopped .by webboss", 10],
+	["click", "Button", "End"], ["waitlog_any", "kit editor: the server is Ended .by webboss", 10],
 	["frames", 3], ["shot", "${OUT}/stopped.png"],
-	["click", "Button", "Play"], ["waitlog_any", "kit editor: the server is Running .by webboss", 10],
+	["click", "Button", "Run"], ["waitlog_any", "kit editor: the server is Running .by webboss", 10],
 	["key", "b"], ["waitlog", "replicated: entity 4 open = true", 10],
 	["frames", 10], ["shot", "${OUT}/play.png"]
 ]
@@ -254,8 +254,8 @@ wait_log 30000 kit editor: builder kitbob (#4aa0ff) selects 3
 wait_log 30000 replicated: entity 4 open = true
 frames 3
 screenshot @T@/builders.png
-click Button "Stop"
-wait_log 10000 kit editor: the server is Stopped (by kitboss)
+click Button "End"
+wait_log 10000 kit editor: the server is Ended (by kitboss)
 wait_log_any 10000 replicated: entity 17 presses = 0
 wait_log_any 30000 kit editor: state: 20 entities
 wait_log_any 10000 kit: builds discarded: Your builds while playing were discarded.
@@ -264,7 +264,7 @@ screenshot @T@/stopped.png
 delay 1000
 click Button "Keep them" 1000 100
 frames 3
-click Button "Play"
+click Button "Run"
 wait_log 10000 kit editor: the server is Running (by kitboss)
 wait_log 30000 replicated: entity 4 open = true
 click Button "Play mode"
@@ -294,7 +294,7 @@ keypress Tab
 wait_log 10000 kit editor: selected 3
 keypress b
 wait_log 10000 replicated: entity 4 open = true
-wait_log 60000 kit editor: the server is Stopped (by kitboss)
+wait_log 60000 kit editor: the server is Ended (by kitboss)
 wait_log_any 10000 kit: builds discarded: Builds while playing were discarded (kitboss 1).
 event kit_edit {"op": "place", "type": "sample_kit/marker", "pos": [0, 1, 0]}
 wait_log 10000 kit editor: state: 20 entities
@@ -354,7 +354,7 @@ echo "ok: a player without edit rights is refused each kind of edit and the gran
 want "$s" "kitbob is in edit mode" "kitbob selects entity 3" \
 	"sample_kit/door 4: opened by kitbob to air" \
 	"Stop by kitboss: " "Play by kitboss: a round from the start" \
-	"refused: the server is Stopped" \
+	"refused: the server is Ended" \
 	"An edit by kitbob: placed sample_kit/marker 21 at [0,1,0]" \
 	"sample_kit/button 17: pressed by kitboss times 1"
 want "$t/boss.log" "kit editor: builder kitbob (#4aa0ff) selects 3, cursor none"
