@@ -642,7 +642,8 @@ async function drive_wait(b, op, a) {
 // [WEB_DRIVE_LABEL_CLICK] The centre of a UI element, in CSS pixels, as
 // the native `click <type> "<label>" [x y]` finds it: the client answers
 // Module.buildatFind in the next frame (web_drive_waits()), in the
-// canvas's pixels
+// canvas's pixels; while a UI fit is due (up to half a second after input)
+// it waits for the fit, which would move the place ([WB_TOUCH_NEW_PROJECT])
 async function find(b, type, label, hx, hy) {
 	const cv = "document.getElementById('canvas')";
 	// JSON both ways: Firefox's BiDi hands an array back as remote values
