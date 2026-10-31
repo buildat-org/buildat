@@ -440,6 +440,11 @@ for name in $runners; do
 			failed_names="$failed_names $name"
 		fi ;;
 	esac
+	# The status where it and the verdict disagree ([RUN_ALL_PASS_THEN_FAIL]):
+	# a PASS: line with a failing status, or a FAIL: line with 0
+	case "$rc:${verdict%%:*}" in
+	[1-9]*:PASS|0:FAIL) verdict="$verdict (exit status $rc)" ;;
+	esac
 	printf '%-6s %4ss  %s\n' "$state" "$((t1 - t0))" "${verdict:-(no verdict line)}"
 	# What it cost here, for the next --changed pick
 	echo "$name $((t1 - t0))" >> "$costs"
