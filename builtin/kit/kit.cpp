@@ -668,6 +668,9 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "kit:use_through", &Module::on_use);
 		sub(m_server, "kit:edit_through", &Module::on_edit);
 		sub(m_server, "network:client_disconnected", &Module::on_left);
+		// [KIT] stage 4h: a body's inputs, a seat left
+		sub(m_server, "network:packet_received/kit:input", &Module::on_input);
+		sub(m_server, "network:packet_received/kit:exit", &Module::on_exit);
 		sub(m_server, "accounts:privs", &Module::on_privs);
 		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
 		sub(m_server, "worldgen:section_generated", &Module::on_generated);
@@ -693,8 +696,20 @@ struct Module: public interface::Module, public Interface
 		if(!m_box)
 			return false;
 		// The types again: a new box knows none. One that fails here
-		// leaves no box (no restart inside a restart)
+		// leaves no box (no restart inside a restart). [KIT] stage 4h: the
+		// movement library first
 		m_starting = true;
+		{
+			ss_ answer;
+			const ss_ lib = read_file(m_server->get_module_path(MODULE)+
+					"/client_lua/move.lua");
+			if(lib.empty() || !box_call("L"+lib, answer, why)){
+				why = "client_lua/move.lua: "+(lib.empty() ? ss_("none") : why);
+				m_starting = false;
+				m_box.reset();
+				return false;
+			}
+		}
 		for(auto &s : m_sources){
 			ss_ answer;
 			if(!define(s.first, s.second, answer, why)){
@@ -726,7 +741,9 @@ struct Module: public interface::Module, public Interface
 		m_box->poll();
 		// A type's file (and the box's first making) runs with the whole
 		// of a call's budget; a handler with its slice
-		const int64_t slice = request[0] == 'D' ? m_box->budget() :
+		// [KIT] stage 4h: a body's batch of steps a quarter
+		const int64_t slice = request[0] == 'D' || request[0] == 'L' ?
+				m_box->budget() : request[0] == 'S' ? m_box->budget() / 4 :
 				m_box->budget() / SLICE_DIV;
 		m_box->set_call_budget(slice);
 		m_box->input = request;
@@ -5108,7 +5125,8 @@ struct Module: public interface::Module, public Interface
 		ss_ scene;
 		scene_of(e, &scene);
 		const size_t peer = who.empty() ? 0 : peer_of(who, scene);
-		const char *why = !m_host.moves_players ? "the app moves no players" :
+		const char *why = !m_host.moves_players && !m_host.controls ?
+				"the app moves no players" :
 				who.empty() ? "no player set it off" :
 				!peer ? "the player is not in its scene" :
 				!pos_ok(pos) ? "not a position" : nullptr;
@@ -5121,7 +5139,10 @@ struct Module: public interface::Module, public Interface
 				z = pos.at(2u).as_number();
 		log_i(MODULE, "Entity %s's %s teleports %s to (%g, %g, %g)",
 				cs(itos(e.id)), cs(type), cs(who), x, y, z);
-		m_server->emit_event("kit:move_player", new MovePlayer(peer, x, y, z));
+		if(m_host.controls)
+			put_player(peer, x, y, z);
+		else
+			m_server->emit_event("kit:move_player", new MovePlayer(peer, x, y, z));
 	}
 
 	// ---- The players' inventory: count, add, take and list (api.h), Kit's
@@ -5436,6 +5457,12 @@ struct Module: public interface::Module, public Interface
 				m_start_writes.push_back(w);
 		}
 		save_marks();
+		// [KIT] stage 4h: the bodies step Stopped too, first, out of the
+		// tick's budget
+		const int64_t budget = m_box ? m_box->budget() / SLICE_DIV *
+				TICK_SLICES : 0;
+		int64_t spent = step_bodies(budget);
+		send_controls();
 		if(!m_session.running){
 			// Stopped: components do not run. A write routed to one is
 			// made by no one
@@ -5494,9 +5521,6 @@ struct Module: public interface::Module, public Interface
 		run_timers();
 		check_zones();
 		// The queue, in order, within the tick's budget
-		const int64_t budget = m_box ? m_box->budget() / SLICE_DIV *
-				TICK_SLICES : 0;
-		int64_t spent = 0;
 		while(!m_queue.empty() && spent < budget && m_box){
 			const Run r = m_queue.front();
 			m_queue.pop_front();
@@ -5510,6 +5534,682 @@ struct Module: public interface::Module, public Interface
 		save_runtime();
 		save_marks();
 		send_debug();
+	}
+
+	// ---- [KIT] stage 4h: the players' controls (Host::controls). Each
+	// placed player has a body that a movement type steps (kit/walker; a
+	// seat's own while they hold it: kit/car, kit/ball): `movement` says
+	// its body, `step(s, i, dt, w, p)` its steps, in the box on this side
+	// and in the client's own Lua for its prediction, both with
+	// client_lua/move.lua's world. The client sends its inputs numbered
+	// ("kit:input"), each one step at the movement's rate; the server steps
+	// those it gets, no more than the clock allows, within the tick's
+	// budget, and answers the state after the last ("kit:body", the input
+	// it ends with); the client takes it and steps again those it sent
+	// since (hillclimb's prediction). A put ("kit:body" with put) starts
+	// it over. The camera, the pointer, the effects and the movement each
+	// player has come in "kit:controls" (controls_for()), sent again as
+	// they change.
+	struct Body
+	{
+		bool put = false;
+		ss_ type; // the movement stepping it now
+		json::Value params = json::object();
+		json::Value state = json::object();
+		ss_ state_json = "{}";
+		uint32_t ack = 0; // the last input stepped
+		std::deque<std::pair<uint32_t, ss_>> inputs; // each a Lua literal
+		double allowance = 0;
+		int64_t last_us = 0;
+		int64_t puts = 0;
+		double home[3] = {0, 0, 0}; // the last put's cell
+		uint64_t seat = 0; // the seat held (an entity, 0: none)
+		bool failed = false; // a step's error logged
+	};
+	std::map<size_t, Body> m_bodies;
+	sm_<size_t, ss_> m_controls_sent;
+	// Vehicles moved in play, where they were: back at Stop
+	std::map<uint64_t, std::array<double, 4>> m_seat_home;
+	// The voxels' friction and surface where the material set has them
+	// ({name: {friction, surface}}; read once)
+	json::Value m_voxel_extra;
+	bool m_voxel_extra_read = false;
+
+	static const int MAX_INPUTS = 120; // queued, a body
+	static const int BATCH = 8; // inputs a step request
+
+	// A movement type: its file's `movement` and a step
+	bool is_movement(const ss_ &type)
+	{
+		ss_ why;
+		if(type.empty() || !load_type(type, why))
+			return false;
+		const Type &t = m_types[type];
+		return t.decl.get("movement").is_object() && t.handlers.count("step");
+	}
+
+	// The first instance of a type on the app root (nullptr: none)
+	const Instance* root_instance(const ss_ &type)
+	{
+		for(auto &p : m_entities){
+			if(p.second.parent != 1 || p.second.has_pos)
+				continue;
+			for(const Instance &i : p.second.comps)
+				if(i.type == type)
+					return &i;
+		}
+		return nullptr;
+	}
+
+	// An instance's parameters over its type's defaults (nullptr: the
+	// defaults), as the client gets them (JSON's own precision), so both
+	// sides step with the same
+	json::Value params_of(const ss_ &type, const Instance *in)
+	{
+		json::Value out = json::object();
+		const json::Value &pd = m_types[type].decl.get("params");
+		if(pd.is_object())
+			for(json::Iterator it(pd); it; ++it){
+				const json::Value &v = in ? in->params.get(it.key()) :
+						json::Value();
+				out.set(it.key(), v.is_undefined() ? (*it).get("default") : v);
+			}
+		return json::load_string(out.stringify().c_str());
+	}
+
+	json::Value controls_params()
+	{
+		ss_ why;
+		if(!load_type("kit/controls", why))
+			return json::object();
+		return params_of("kit/controls", root_instance("kit/controls"));
+	}
+
+	// The movement a body has: its seat's, else the controls' choice
+	void body_movement(Body &b, ss_ &type, json::Value &params)
+	{
+		if(b.seat){
+			auto it = m_entities.find(b.seat);
+			if(it != m_entities.end())
+				for(const Instance &in : it->second.comps)
+					if(is_movement(in.type)){
+						type = in.type;
+						params = params_of(in.type, &in);
+						return;
+					}
+		}
+		type = jstr(controls_params(), "movement", "kit/walker");
+		if(!is_movement(type)){
+			type = "";
+			params = json::object();
+			return;
+		}
+		params = params_of(type, root_instance(type));
+	}
+
+	static double num(const json::Value &v, const char *k, double def,
+			double lo, double hi)
+	{
+		const json::Value &x = v.get(k);
+		const double d = x.is_number() ? x.as_number() : def;
+		return std::isfinite(d) ? std::max(lo, std::min(hi, d)) : def;
+	}
+
+	// The movement's body: {r, h, eye}
+	json::Value body_decl(const ss_ &type)
+	{
+		const json::Value &m = m_types[type].decl.get("movement");
+		return m.get("body").is_object() ? m.get("body") : json::object();
+	}
+
+	// The voxels' friction and surface where the material set gives them
+	// simplified: a voxel's "friction" and "surface" in the material set's
+	// JSON (the app's or Kit's materials.json); none: 1 and its name
+	const json::Value& voxel_extra()
+	{
+		if(m_voxel_extra_read)
+			return m_voxel_extra;
+		m_voxel_extra_read = true;
+		m_voxel_extra = json::object();
+		const ss_ ms = m_host.materials.empty() ? read_file(
+				m_server->get_module_path(MODULE)+"/materials.json") :
+				m_host.materials;
+		const json::Value j = json::load_string(ms.c_str());
+		const json::Value &vs = j.get("voxels");
+		if(vs.is_object())
+			for(json::Iterator it(vs); it; ++it){
+				const json::Value &f = (*it).get("friction");
+				const ss_ s = jstr(*it, "surface");
+				if(!f.is_number() && s.empty())
+					continue;
+				json::Value e = json::object();
+				if(f.is_number())
+					e.set("friction", f.as_number());
+				if(!s.empty())
+					e.set("surface", s);
+				m_voxel_extra.set(it.key(), e);
+			}
+		return m_voxel_extra;
+	}
+
+	// What a peer's client controls with: the camera, the pointer, the
+	// effects and the signals for them, the movement (its source, its
+	// parameters, its body) and the seat
+	json::Value controls_for(size_t peer)
+	{
+		json::Value c = json::object();
+		const json::Value p = controls_params();
+		c.set("params", p);
+		// The signals' state, those for everyone and this player's
+		const Instance *ci = root_instance("kit/controls");
+		const Peer &pe = m_peers[peer];
+		json::Value sig = json::object();
+		if(ci && ci->state.is_object())
+			for(json::Iterator it(ci->state); it; ++it){
+				const ss_ by = jstr(*it, "by");
+				if(jstr(p, "to") == "player" && !by.empty() && by != pe.name)
+					continue;
+				sig.set(it.key(), *it);
+			}
+		c.set("signals", sig);
+		auto bi = m_bodies.find(peer);
+		if(bi != m_bodies.end() && !bi->second.type.empty()){
+			Body &b = bi->second;
+			json::Value m = json::object();
+			m.set("type", b.type);
+			m.set("src", m_sources[b.type]);
+			m.set("params", b.params);
+			m.set("decl", m_types[b.type].decl.get("movement"));
+			c.set("move", m);
+			c.set("seat", (int64_t)b.seat);
+		}
+		c.set("voxels", voxel_extra());
+		if(m_world_scene && m_wp.heightmap() && pe.scene == m_host.world_scene)
+			heightmap::access(m_server, [&](heightmap::Interface *ih){
+				heightmap::Instance *map = ih->get_instance(m_world_scene);
+				if(!map)
+					return;
+				json::Value hm = json::array();
+				hm.append(map->samples_x());
+				hm.append(map->samples_z());
+				c.set("hm", hm);
+			});
+		return c;
+	}
+
+	void send_controls()
+	{
+		if(!m_host.controls)
+			return;
+		for(auto &p : m_peers){
+			if(!p.second.player)
+				continue;
+			const ss_ s = controls_for(p.first).stringify();
+			ss_ &sent = m_controls_sent[p.first];
+			if(s == sent)
+				continue;
+			sent = s;
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(p.first, "kit:controls", s);
+			});
+		}
+	}
+
+	// Where a body's state puts a peer (the middle of the cell their feet
+	// are in: x and z as they are, the feet + 0.5), and their entity
+	void body_moved(size_t peer, Body &b)
+	{
+		const json::Value &pos = b.state.get("pos");
+		if(!pos.is_array() || pos.size() != 3)
+			return;
+		double v[3];
+		for(unsigned k = 0; k < 3; k++){
+			v[k] = pos.at(k).is_number() ? pos.at(k).as_number() : 0;
+			if(!std::isfinite(v[k]))
+				return;
+		}
+		if(b.seat){
+			auto it = m_entities.find(b.seat);
+			if(it != m_entities.end()){
+				Entity &e = it->second;
+				e.pos[0] = v[0];
+				e.pos[1] = v[1] + 0.5;
+				e.pos[2] = v[2];
+				const json::Value &yaw = b.state.get("yaw");
+				if(yaw.is_number() && std::isfinite(yaw.as_number()))
+					e.yaw = norm_yaw(yaw.as_number());
+				main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
+					magic::Node *n = sc->GetNode(e.node);
+					if(n){
+						n->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
+						n->SetRotation(magic::Quaternion(0, (float)e.yaw, 0));
+					}
+				});
+			}
+		}
+		Peer &p = m_peers[peer];
+		p.pos[0] = v[0];
+		p.pos[1] = v[1] + 0.5;
+		p.pos[2] = v[2];
+		world_peer(peer, p.scene, p.pos[0], p.pos[1], p.pos[2]);
+		place_player(p);
+	}
+
+	// A body put: its state new at the cell (its feet just over the cell's
+	// bottom), the client told
+	void put_body(size_t peer, Body &b, double x, double y, double z,
+			double yaw = 0, const json::Value *state = nullptr)
+	{
+		body_movement(b, b.type, b.params);
+		if(state){
+			b.state = state->deepcopy();
+		} else {
+			b.state = json::object();
+			json::Value pos = json::array();
+			pos.append(x);
+			pos.append(y - 0.45);
+			pos.append(z);
+			b.state.set("pos", pos);
+			b.state.set("yaw", yaw);
+			b.home[0] = x;
+			b.home[1] = y;
+			b.home[2] = z;
+		}
+		b.state = json::load_string(b.state.stringify().c_str());
+		b.state_json = b.state.stringify();
+		b.put = true;
+		b.inputs.clear();
+		b.allowance = 0;
+		b.last_us = interface::os::time_us();
+		b.failed = false;
+		const int64_t n = ++b.puts;
+		body_moved(peer, b);
+		// The controls first: the client steps the put with the movement
+		send_controls();
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:body", "{\"put\":"+itos(n)+",\"ack\":"+
+					itos(b.ack)+",\"s\":"+b.state_json+"}");
+		});
+	}
+
+	void put_player(size_t peer, double x, double y, double z)
+	{
+		if(!m_host.controls || !m_peers.count(peer))
+			return;
+		Body &b = m_bodies[peer];
+		if(b.seat)
+			unseat(peer, b, false);
+		log_i(MODULE, "%s put at (%g, %g, %g)", cs(m_peers[peer].name), x, y,
+				z);
+		put_body(peer, b, x, y, z);
+	}
+
+	// "kit:input": "<put>;<n> f r yaw jump go tx ty tz;..." (the inputs
+	// after the last the client heard of, numbered on; put: the last put
+	// it heard of, those of an earlier one dropped)
+	void on_input(const network::Packet &packet)
+	{
+		auto bi = m_bodies.find(packet.sender);
+		if(bi == m_bodies.end() || !bi->second.put ||
+				packet.data.size() > 16384)
+			return;
+		Body &b = bi->second;
+		const uint32_t last = b.inputs.empty() ? b.ack : b.inputs.back().first;
+		uint32_t at = last;
+		const ss_ &d = packet.data;
+		size_t i = d.find(';');
+		if(i == ss_::npos || atoll(d.substr(0, i).c_str()) != b.puts)
+			return;
+		i++;
+		while(i < d.size()){
+			size_t e = d.find(';', i);
+			if(e == ss_::npos)
+				e = d.size();
+			const ss_ one = d.substr(i, std::min<size_t>(e - i, 200));
+			i = e + 1;
+			unsigned n = 0;
+			double v[8];
+			if(sscanf(one.c_str(), "%u %lf %lf %lf %lf %lf %lf %lf %lf", &n,
+					&v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]) != 9)
+				continue;
+			bool ok = n > at;
+			for(int k = 0; k < 8; k++)
+				ok = ok && std::isfinite(v[k]) && std::fabs(v[k]) <= MAX_COORD;
+			if(!ok)
+				continue;
+			if(b.inputs.size() >= (size_t)MAX_INPUTS)
+				break;
+			at = n;
+			ss_ o = "{f=";
+			lua_lit(json::Value(std::max(-1.0, std::min(1.0, v[0]))), o);
+			o += ",r=";
+			lua_lit(json::Value(std::max(-1.0, std::min(1.0, v[1]))), o);
+			o += ",yaw=";
+			lua_lit(json::Value(v[2]), o);
+			o += ",jump=";
+			o += v[3] != 0 ? "1" : "0";
+			o += ",go=";
+			o += v[4] != 0 ? "1" : "0";
+			o += ",tx=";
+			lua_lit(json::Value(v[5]), o);
+			o += ",ty=";
+			lua_lit(json::Value(v[6]), o);
+			o += ",tz=";
+			lua_lit(json::Value(v[7]), o);
+			o += "}";
+			b.inputs.push_back(std::make_pair(n, o));
+		}
+	}
+
+	// The world round a body for a step: its cells, the solid looks near
+	// it and a heightmap's samples (move.lua's snapshot)
+	void snapshot(ss_ &o, const Peer &pe, const Body &b, const double pos[3],
+			double r, double h, double reach)
+	{
+		auto si = m_host.scenes.find(pe.scene);
+		const main_context::SceneReference scene =
+				si == m_host.scenes.end() ? nullptr : si->second;
+		// As far as the batch may go (reach, m) and a cell more: the cells
+		// past it read as air (a request's text is dear in the box)
+		const int R = (int)std::ceil(r + reach) + 1, down = (int)std::ceil(reach) + 2;
+		const int x0 = (int)std::floor(pos[0] + 0.5) - R,
+				z0 = (int)std::floor(pos[2] + 0.5) - R,
+				y0 = (int)std::floor(pos[1] + 0.5) - down;
+		const int nx = 2 * R + 1, nz = 2 * R + 1,
+				ny = down + (int)std::ceil(h + reach) + 2;
+		ss_ cells((size_t)nx * ny * nz, '.');
+		json::Value classes = json::array();
+		std::map<uint32_t, char> cls;
+		const json::Value &extra = voxel_extra();
+		if(scene)
+			voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+				voxelworld::Instance *w = ivw->get_instance(scene);
+				if(!w)
+					return;
+				interface::VoxelRegistry *reg = w->get_voxel_reg();
+				const auto &fmt = reg->get_format();
+				const interface::VoxelVolume vol = w->get_volume(pv::Region(
+						pv::Vector3DInt32(x0, y0, z0), pv::Vector3DInt32(x0 + nx - 1,
+						y0 + ny - 1, z0 + nz - 1)));
+				for(int y = 0; y < ny; y++)
+				for(int z = 0; z < nz; z++)
+				for(int x = 0; x < nx; x++){
+					const uint32_t id = (uint32_t)fmt.id.get(vol.getVoxelAt(
+							x0 + x, y0 + y, z0 + z).data);
+					char ch = '.';
+					if(id == interface::VOXELTYPEID_UNDEFINED){
+						ch = '?';
+					} else {
+						auto c = cls.find(id);
+						if(c != cls.end()){
+							ch = c->second;
+						} else {
+							const interface::VoxelDefinition *def = reg->get(id);
+							if(def && def->physically_solid && classes.size() < 190){
+								const ss_ name = def->name.block_name;
+								json::Value k = json::array();
+								k.append(name);
+								k.append(true);
+								const json::Value &x = extra.get(name);
+								k.append(x.get("friction").is_number() ?
+										x.get("friction") : json::Value(1.0));
+								k.append(jstr(x, "surface"));
+								classes.append(k);
+								ch = (char)(64 + classes.size());
+							}
+							cls[id] = ch;
+						}
+					}
+					cells[x + (size_t)nx * (z + (size_t)nz * y)] = ch;
+				}
+			});
+		o += "{x0="+itos(x0)+",y0="+itos(y0)+",z0="+itos(z0)+",nx="+itos(nx)+
+				",ny="+itos(ny)+",nz="+itos(nz)+",cells=";
+		lua_lit(json::Value(cells), o);
+		o += ",classes=";
+		lua_lit(classes, o);
+		// The solid looks near it (the seat held none)
+		o += ",looks={";
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(!e.has_pos || e.id == b.seat || e.kind == "player" ||
+					std::fabs(e.pos[0] - pos[0]) > R + 8 ||
+					std::fabs(e.pos[2] - pos[2]) > R + 8 ||
+					std::fabs(e.pos[1] - pos[1]) > ny + 8)
+				continue;
+			ss_ es;
+			if(scene_of(e, &es) != scene || !scene)
+				continue;
+			for(const Instance &in : e.comps){
+				const json::Value &d = m_types[in.type].decl.get("look");
+				if(d.is_undefined())
+					continue;
+				const json::Value look = look_of(in, d);
+				const ss_ key = jstr(look, "state");
+				const bool on = !key.empty() && in.state.get(key).is_true();
+				o += "{";
+				lua_lit(look, o);
+				o += on ? ",true,{" : ",false,{";
+				for(int k = 0; k < 3; k++){
+					lua_lit(json::Value(e.pos[k]), o);
+					o += ',';
+				}
+				o += "},";
+				lua_lit(json::Value(e.yaw), o);
+				o += "},";
+				break;
+			}
+		}
+		o += "}";
+		if(m_world_scene && m_wp.heightmap() && scene == m_world_scene)
+			heightmap::access(m_server, [&](heightmap::Interface *ih){
+				heightmap::Instance *map = ih->get_instance(m_world_scene);
+				if(!map)
+					return;
+				const int hx0 = std::max(0, x0), hz0 = std::max(0, z0);
+				const int hx1 = std::min(map->samples_x() - 1, x0 + nx),
+						hz1 = std::min(map->samples_z() - 1, z0 + nz);
+				if(hx1 < hx0 || hz1 < hz0)
+					return;
+				o += ",hm={x0="+itos(hx0)+",z0="+itos(hz0)+",nx="+
+						itos(hx1 - hx0 + 1)+",nz="+itos(hz1 - hz0 + 1)+",h={";
+				char buf[32];
+				for(int z = hz0; z <= hz1; z++)
+					for(int x = hx0; x <= hx1; x++){
+						snprintf(buf, sizeof buf, "%.9g,", map->height_at(x, z));
+						o += buf;
+					}
+				o += "}}";
+			});
+		o += "}";
+	}
+
+	// The bodies' inputs stepped, the clock's worth for each, within the
+	// tick's budget: what it spent
+	int64_t step_bodies(int64_t budget)
+	{
+		int64_t spent = 0;
+		const int64_t now = interface::os::time_us();
+		for(auto &bp : m_bodies){
+			Body &b = bp.second;
+			auto pi = m_peers.find(bp.first);
+			if(!b.put || b.type.empty() || pi == m_peers.end())
+				continue;
+			const double rate = num(b.params, "rate", 60, 10, 120);
+			// A twentieth over the clock: a client's that runs a little fast
+			// is not held back
+			b.allowance = std::min(rate * 0.5 + BATCH, b.allowance +
+					(now - b.last_us) / 1e6 * rate * 1.05);
+			b.last_us = now;
+			bool stepped = false;
+			while(!b.inputs.empty() && b.allowance >= 1 && spent < budget &&
+					m_box){
+				const json::Value bd = body_decl(b.type);
+				const double r = num(bd, "r", 0.45, 0.05, 8),
+						h = num(bd, "h", 1.7, 0.05, 16);
+				double pos[3] = {0, 0, 0};
+				const json::Value &sp = b.state.get("pos");
+				for(unsigned k = 0; k < 3 && sp.is_array() && k < sp.size(); k++)
+					pos[k] = sp.at(k).is_number() ? sp.at(k).as_number() : 0;
+				ss_ o = "Sreturn {type=";
+				lua_lit(json::Value(b.type), o);
+				o += ",params=";
+				lua_lit(b.params, o);
+				o += ",state=";
+				lua_lit(b.state, o);
+				o += ",dt=";
+				lua_lit(json::Value(1.0 / rate), o);
+				o += ",sub="+itos((int64_t)num(b.params, "substeps", 1, 1, 8));
+				o += ",inputs={";
+				uint32_t last = b.ack;
+				int n_in = 0;
+				for(; n_in < BATCH && !b.inputs.empty() &&
+						b.allowance >= 1; n_in++){
+					o += b.inputs.front().second+",";
+					last = b.inputs.front().first;
+					b.inputs.pop_front();
+					b.allowance -= 1;
+				}
+				o += "},world=";
+				// The speed now and what a batch may add to it
+				double v2 = 0;
+				const json::Value &sv = b.state.get("vel");
+				for(unsigned k = 0; k < 3 && sv.is_array() && k < sv.size(); k++)
+					if(sv.at(k).is_number())
+						v2 += sv.at(k).as_number() * sv.at(k).as_number();
+				const double reach = std::min(16.0, (std::sqrt(v2) + 10) *
+						n_in / rate);
+				snapshot(o, pi->second, b, pos, r, h, reach);
+				o += "}";
+				ss_ answer, why;
+				bool runaway = false;
+				int64_t used = 0;
+				const bool ok = box_call(o, answer, why, &runaway, &used);
+				spent += used;
+				if(!ok){
+					if(!b.failed)
+						log_w(MODULE, "%s's body (%s): %s", cs(pi->second.name),
+								cs(b.type), cs(why));
+					b.failed = true;
+					b.inputs.clear();
+					break;
+				}
+				b.ack = last;
+				b.state = json::load_string(answer.c_str());
+				b.state_json = answer;
+				stepped = true;
+			}
+			if(!stepped)
+				continue;
+			// Out of the World's region: back where it was put
+			const json::Value &sp = b.state.get("pos");
+			if(sp.is_array() && sp.size() == 3 && sp.at(1).is_number() &&
+					sp.at(1).as_number() < WORLD_SECTION_Y0 * WORLD_SECTION - 8){
+				log_i(MODULE, "%s fell out of the world", cs(pi->second.name));
+				if(b.seat)
+					unseat(bp.first, b, false);
+				put_body(bp.first, b, b.home[0], b.home[1], b.home[2]);
+				continue;
+			}
+			body_moved(bp.first, b);
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(bp.first, "kit:body", "{\"ack\":"+itos(b.ack)+
+						",\"s\":"+b.state_json+"}");
+			});
+		}
+		return spent;
+	}
+
+	// Possession: a seat (a type with `seat = true` and a movement) used
+	// takes the player's controls until they leave it ("kit:exit")
+	bool seat_type(const Entity &e)
+	{
+		for(const Instance &in : e.comps)
+			if(m_types[in.type].decl.get("seat").is_true() && is_movement(in.type))
+				return true;
+		return false;
+	}
+
+	void seat(size_t peer, uint64_t id)
+	{
+		Body &b = m_bodies[peer];
+		Entity &e = m_entities[id];
+		for(auto &o : m_bodies)
+			if(o.second.seat == id){
+				log_i(MODULE, "Entity %s: %s is in it already", cs(itos(id)),
+						cs(m_peers[o.first].name));
+				return;
+			}
+		if(b.seat)
+			unseat(peer, b, false);
+		if(!m_seat_home.count(id))
+			m_seat_home[id] = {{e.pos[0], e.pos[1], e.pos[2], e.yaw}};
+		b.seat = id;
+		json::Value st = json::object(), pos = json::array();
+		pos.append(e.pos[0]);
+		pos.append(e.pos[1] - 0.5);
+		pos.append(e.pos[2]);
+		st.set("pos", pos);
+		st.set("yaw", e.yaw);
+		log_i(MODULE, "%s takes the seat of entity %s", cs(m_peers[peer].name),
+				cs(itos(id)));
+		put_body(peer, b, 0, 0, 0, 0, &st);
+	}
+
+	// Out of the seat: beside it (its right, its left, behind, on it),
+	// standing; put: the client told
+	void unseat(size_t peer, Body &b, bool put = true)
+	{
+		const uint64_t id = b.seat;
+		b.seat = 0;
+		auto it = m_entities.find(id);
+		log_i(MODULE, "%s leaves the seat of entity %s", cs(m_peers[peer].name),
+				cs(itos(id)));
+		if(!put || it == m_entities.end())
+			return;
+		const Entity &e = it->second;
+		const double a = e.yaw * 3.14159265358979323846 / 180;
+		double r = 1;
+		for(const Instance &in : e.comps)
+			if(is_movement(in.type))
+				r = num(body_decl(in.type), "r", 1, 0.05, 8);
+		const double d = r + 1;
+		double x = e.pos[0] + std::cos(a) * d, z = e.pos[2] - std::sin(a) * d;
+		const double y = std::floor(e.pos[1] + 0.5);
+		put_body(peer, b, x, y, z);
+	}
+
+	void on_exit(const network::Packet &packet)
+	{
+		auto bi = m_bodies.find(packet.sender);
+		if(bi == m_bodies.end() || !bi->second.seat)
+			return;
+		unseat(packet.sender, bi->second);
+	}
+
+	// Stop: everyone out of the seats, the vehicles back
+	void seats_home()
+	{
+		for(auto &bp : m_bodies)
+			if(bp.second.seat)
+				unseat(bp.first, bp.second);
+		for(auto &h : m_seat_home){
+			auto it = m_entities.find(h.first);
+			if(it == m_entities.end())
+				continue;
+			Entity &e = it->second;
+			for(int k = 0; k < 3; k++)
+				e.pos[k] = h.second[k];
+			e.yaw = h.second[3];
+			main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
+				magic::Node *n = sc->GetNode(e.node);
+				if(n){
+					n->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
+					n->SetRotation(magic::Quaternion(0, (float)e.yaw, 0));
+				}
+			});
+		}
+		m_seat_home.clear();
 	}
 
 	// ---- Clients act
@@ -5547,6 +6247,12 @@ struct Module: public interface::Module, public Interface
 		if(d2 > m_host.use_range * m_host.use_range)
 			return refuse("out of range");
 		bool any = false;
+		// [KIT] stage 4h: a seat taken
+		if(m_host.controls && seat_type(e) && m_bodies[peer].put &&
+				m_bodies[peer].seat != id){
+			seat(peer, id);
+			any = true;
+		}
 		for(size_t i = 0; i < e.comps.size(); i++){
 			const Type &t = m_types[e.comps[i].type];
 			if(!t.usable || !t.handlers.count("on_use"))
@@ -5576,6 +6282,8 @@ struct Module: public interface::Module, public Interface
 				m_peers[old.info.id].guest;
 		const ss_ name = m_peers.count(old.info.id) ?
 				m_peers[old.info.id].name : "";
+		m_bodies.erase(old.info.id);
+		m_controls_sent.erase(old.info.id);
 		m_peers.erase(old.info.id);
 		if(player)
 			unplace_player(player);
@@ -5610,15 +6318,18 @@ struct Module: public interface::Module, public Interface
 		const bool was_guest = p.guest;
 		p.name = name;
 		p.scene = scene;
-		p.pos[0] = x;
-		p.pos[1] = y;
-		p.pos[2] = z;
+		// [KIT] stage 4h: a body put is where it is
+		if(!m_host.controls || !m_bodies[peer].put){
+			p.pos[0] = x;
+			p.pos[1] = y;
+			p.pos[2] = z;
+		}
 		// A guest: no account (where builtin/accounts is; without it
 		// nobody is one)
 		if(renamed)
 			p.guest = m_server->has_module("accounts") &&
 					account_of(peer).empty();
-		world_peer(peer, scene, x, y, z);
+		world_peer(peer, scene, p.pos[0], p.pos[1], p.pos[2]);
 		if(!m_hosted)
 			return;
 		// Their entity follows them ([KIT] stage 4d)
@@ -6422,6 +7133,8 @@ struct Module: public interface::Module, public Interface
 	// Each player is told the server's state, and the app
 	void session_changed(bool saved, const ss_ &by)
 	{
+		if(!m_session.running)
+			seats_home();
 		for(auto &p : m_peers)
 			send_state(p.first);
 		m_server->emit_event("kit:session", new SessionChanged(

@@ -4,8 +4,9 @@
 // [KIT] Workbench: the blank app that only hosts Kit and its editor. The
 // world is Kit's World ([KIT] stage 4e, kit/world on the app root): by
 // default a flat stone floor 64x64 round the origin, its top at y 0
-// (Kit's material set, biome "rock"), the players walking on it (their
-// client's physics, as demo_digger's); its generator, size and surface
+// (Kit's material set, biome "rock"), the players walking on it (Kit's
+// controls, [KIT] stage 4h: kit/controls and kit/walker on the app root
+// set them); its generator, size and surface
 // the World's parameters in the editor. Kit's own components (its starter
 // set, author "kit") to place, set and link in Kit's editor, and Kit's
 // voxels (kit/stone...) and Workbench's own (glass, brick) to build with.
@@ -33,7 +34,6 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
-#include <cereal/archives/portable_binary.hpp>
 #include <array>
 #include <map>
 #include <cmath>
@@ -51,10 +51,6 @@ using interface::Event;
 static const int WORLD_XZ = kit::WORLD_SECTIONS_XZ * kit::WORLD_SECTION;
 static const int WORLD_Y0 = kit::WORLD_SECTION_Y0 * kit::WORLD_SECTION,
 		WORLD_Y1 = (kit::WORLD_SECTION_Y1 + 1) * kit::WORLD_SECTION - 1;
-// A player's position as Kit takes it: the middle of the cell their feet
-// are in, their body's centre this far over it when they stand (the
-// client's capsule is 1.7 tall); a put is a little over that
-static const double FEET_CELL = 0.35, PUT_OVER = 0.05;
 // Workbench's own voxels (its textures), and those the starter set's
 // components showed their state with before they were objects ([KIT]
 // stage 4c; kept registered for the saves that have them). Kit's material
@@ -83,7 +79,6 @@ struct Module: public interface::Module
 	// peer -> how many times the server has put them: a position the
 	// client sent before it heard of the last is not taken (a teleport
 	// would bounce back for a packet's time otherwise)
-	sm_<size_t, int32_t> m_moves;
 	// peer -> where Kit has them
 	sm_<size_t, std::array<double, 3>> m_pos;
 
@@ -95,12 +90,9 @@ struct Module: public interface::Module
 	{
 		sub(m_server, "core:start", &Module::on_start);
 		sub(m_server, "client_file:files_transmitted", &Module::on_files);
-		sub(m_server, "network:packet_received/main:player_pos",
-				&Module::on_player_pos);
 		sub(m_server, "network:packet_received/main:build", &Module::on_build);
 		sub(m_server, "network:client_disconnected", &Module::on_left);
 		sub(m_server, "accounts:login", &Module::on_login);
-		sub(m_server, "kit:move_player", &Module::on_move);
 		sub(m_server, "kit:spawn_player", &Module::on_spawn);
 	}
 
@@ -162,38 +154,13 @@ struct Module: public interface::Module
 				"/composition.json";
 		h.save = m_save;
 		h.scenes["world"] = m_scene;
-		h.moves_players = true;
+		h.controls = true;
 		// The World: Workbench's floor, stone, unless the composer says
 		// otherwise
 		h.world_scene = "world";
 		h.defaults = "{\"kit/world\": {\"biome\": \"rock\"}}";
 		if(!kit::host(m_server, h))
 			m_server->shutdown(1, "workbench: Kit is not hosted");
-	}
-
-	// main:spawn: the player put at x, y, z (their body's centre), and
-	// the count of the puts, which their positions carry back
-	void send_spawn(size_t peer, double x, double y, double z)
-	{
-		const int32_t n = ++m_moves[peer];
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(x, y, z, n);
-		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "main:spawn", os.str());
-		});
-	}
-
-	// Kit's teleport (a component's, for the player who set it off): the
-	// position is the cell the feet go in
-	void on_move(const kit::MovePlayer &m)
-	{
-		log_i(MODULE, "workbench: %s moved to (%g, %g, %g)",
-				cs(m_names[m.peer]), m.x, m.y, m.z);
-		send_spawn(m.peer, m.x, m.y + FEET_CELL + PUT_OVER, m.z);
-		place(m.peer, m.x, m.y, m.z);
 	}
 
 	void place(size_t peer, double x, double y, double z)
@@ -225,8 +192,10 @@ struct Module: public interface::Module
 		kit::access(m_server, [&](kit::Interface *k){
 			k->world_spawn(x, y, z);
 		});
-		send_spawn(peer, x, y + FEET_CELL + PUT_OVER, z);
 		place(peer, x, y, z);
+		kit::access(m_server, [&](kit::Interface *k){
+			k->put_player(peer, x, y, z);
+		});
 	}
 
 	// A round starts and no spawner places the player: the default
@@ -256,21 +225,7 @@ struct Module: public interface::Module
 	{
 		log_i(MODULE, "workbench: %s left", cs(m_names[old.info.id]));
 		m_names.erase(old.info.id);
-		m_moves.erase(old.info.id);
 		m_pos.erase(old.info.id);
-	}
-
-	void on_player_pos(const network::Packet &packet)
-	{
-		double x = 0, y = 0, z = 0;
-		int32_t n = 0;
-		std::istringstream is(packet.data, std::ios::binary);
-		cereal::PortableBinaryInputArchive ar(is);
-		ar(x, y, z, n);
-		if(!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) ||
-				!m_names.count(packet.sender) || n != m_moves[packet.sender])
-			return;
-		place(packet.sender, x, y - FEET_CELL, z);
 	}
 
 	// A builder's dig or place in play: {"p": [x, y, z], "voxel": name},

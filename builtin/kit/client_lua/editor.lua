@@ -1193,7 +1193,9 @@ local function apply_viewport()
 	end
 	S.shown_view = want
 	local node, cam = active_camera()
-	magic.set_preferred_viewports({magic.Viewport:new(O.scene, cam)})
+	-- The walk view with the controls' effects (controls.lua)
+	magic.set_preferred_viewports({want == "walk" and
+			M.viewport(O.scene, cam) or magic.Viewport:new(O.scene, cam)})
 	if O.set_camera then
 		O.set_camera(node)
 	end

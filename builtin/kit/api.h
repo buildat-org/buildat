@@ -388,6 +388,14 @@ namespace kit
 		// The material set (JSON, world.h's format) binding the roles to
 		// the app's voxels; "": Kit's own (materials.json)
 		ss_ materials;
+		// [KIT] stage 4h: Kit moves the players: each one's body is stepped
+		// by a movement (kit/walker...) on the server and predicted on their
+		// client (kit.controls{} there), the camera, the pointer and the
+		// movement the app root's kit/controls (its defaults with none).
+		// set_peer()'s position is then only where a player first appears,
+		// put_player() puts them, a teleport puts them without
+		// kit:move_player. False: the app moves them (set_peer)
+		bool controls = false;
 	};
 
 	// kit:move_player: a component moves a player (c:teleport); the app
@@ -468,6 +476,10 @@ namespace kit
 		// Where a player stands at the World's middle: x, z, and y the
 		// cell their feet are in (a heightmap's: its surface + 0.5)
 		virtual void world_spawn(double &x, double &y, double &z) = 0;
+		// [KIT] stage 4h (Host::controls): a placed peer's body put with
+		// its feet in the cell at x, y, z (a spawn, a respawn), standing
+		// still, out of any seat
+		virtual void put_player(size_t peer, double x, double y, double z) = 0;
 	};
 
 	inline bool access(interface::Server *server,
