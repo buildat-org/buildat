@@ -19,7 +19,18 @@
 // player_wrote), which a builder's Stop discards unless kept. The server
 // starts Running (Kit's, [KIT] stage 4c): the World is generated (merged,
 // not play's), and a builder's Stop puts the start back, Play starts a
-// round. One save, "world": the voxels, Kit's rows, a heightmap's map.
+// round.
+//
+// [WORKBENCH_PROJECTS] A save is a project: the voxels, Kit's rows, a
+// heightmap's map. Until one runs, a joining client gets builtin/world_menu
+// (Manage, the projects: New, Rename, Delete, Open) and the launcher's own
+// client or an admin picks one; the rest wait for it, a join logging in
+// first (an admin's way to the list). The launch picks it: save= opens it,
+// menu=projects shows Manage (project= selected), menu=new its New. With
+// none of them (a server no launcher started) the project that ran last
+// opens again. BUILDAT_WORKBENCH_PROJECT=<name> opens it, made if it is not
+// there (the checks; a server nobody sits at). A project runs until the
+// server stops.
 #include "core/log.h"
 #include "core/json.h"
 #include "accounts/api.h"
@@ -30,12 +41,15 @@
 #include "replicate/api.h"
 #include "storage/api.h"
 #include "voxelworld/api.h"
+#include "world_menu/api.h"
+#include "interface/server_config.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include <array>
 #include <map>
+#include <set>
 #include <cmath>
 #include <sstream>
 #define MODULE "main"
@@ -67,6 +81,9 @@ struct Module: public interface::Module
 	// would bounce back for a packet's time otherwise)
 	// peer -> where Kit has them
 	sm_<size_t, std::array<double, 3>> m_pos;
+	// Peers logging in before they see Manage, peers shown Manage, peers
+	// in the project (its client run)
+	std::set<size_t> m_joining, m_waiting, m_in;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server)
@@ -80,6 +97,7 @@ struct Module: public interface::Module
 		sub(m_server, "network:client_disconnected", &Module::on_left);
 		sub(m_server, "accounts:login", &Module::on_login);
 		sub(m_server, "kit:spawn_player", &Module::on_spawn);
+		sub(m_server, "world_menu:play", &Module::on_project_play);
 	}
 
 	void on_start()
@@ -87,14 +105,92 @@ struct Module: public interface::Module
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			m_scene = imc->create_scene();
 		});
-		storage::access(m_server, [&](storage::Interface *istorage){
-			m_save = istorage->open("world");
-			if(!m_save)
-				m_save = istorage->create("world");
+		// None in the web client's own server (accounts is native): the
+		// one project, "world"
+		if(!m_server->has_module("world_menu")){
+			start_project("world", true);
+			return;
+		}
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			i->configure({"Workbench", {}, "project"});
+		});
+		const char *env = getenv("BUILDAT_WORKBENCH_PROJECT");
+		if(env && env[0]){
+			if(!start_project(env, true))
+				m_server->shutdown(1, "workbench: no project");
+			return;
+		}
+		const ss_ u = m_server->get_config().get<ss_>("untrusted_launch");
+		bool refused = false;
+		const ss_ save = interface::launch_param(u, "save", &refused);
+		if(refused)
+			log_w(MODULE, "workbench: the launch's save refused");
+		if(!save.empty() && start_project(save, false))
+			return;
+		const ss_ menu = interface::launch_param(u, "menu");
+		const ss_ want = interface::launch_param(u, "project");
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			if(menu == "new")
+				i->open_new();
+			else if(!want.empty())
+				i->select(want);
+		});
+		// No launcher: the project that ran last
+		ss_ last;
+		if(u.empty() && server_store() &&
+				server_store()->get("running", last) && !last.empty() &&
+				!start_project(last, false))
+			log_w(MODULE, "workbench: the project %s that ran last is gone",
+					cs(last));
+	}
+
+	// The save "_workbench" (the server's own, no project): store "server",
+	// "running" the project that ran last
+	storage::Save *m_own = nullptr;
+	storage::Store* server_store()
+	{
+		if(!m_own)
+			storage::access(m_server, [&](storage::Interface *i){
+				m_own = i->open("_workbench");
+				if(!m_own)
+					m_own = i->create("_workbench");
+			});
+		return m_own ? m_own->store("server") : nullptr;
+	}
+
+	// A project picked or made in Manage; one that does not start is
+	// Manage again
+	void on_project_play(const world_menu::Play &event)
+	{
+		if(!start_project(event.name, false))
+			world_menu::access(m_server, [&](world_menu::Interface *i){
+				i->show(event.peer);
+			});
+	}
+
+	// The save `name` opened (made, when `create`) and Kit hosted in it
+	bool start_project(const ss_ &name, bool create)
+	{
+		if(m_save)
+			return false;
+		storage::access(m_server, [&](storage::Interface *i){
+			if(!i->valid_name(name) || name[0] == '_')
+				return;
+			m_save = i->open(name);
+			if(!m_save && create)
+				m_save = i->create(name);
 		});
 		if(!m_save){
-			m_server->shutdown(1, "workbench: no save");
-			return;
+			log_w(MODULE, "workbench: no project \"%s\"", cs(name));
+			return false;
+		}
+		log_i(MODULE, "workbench: the project \"%s\" opens", cs(name));
+		if(m_server->has_module("world_menu")){
+			world_menu::access(m_server, [&](world_menu::Interface *i){
+				i->set_running(true);
+			});
+			if(server_store())
+				server_store()->set("running", name);
 		}
 		// Kit's World's region, loaded only where Kit's load points say
 		const int XZ = kit::WORLD_SECTIONS_XZ;
@@ -144,8 +240,14 @@ struct Module: public interface::Module
 		// otherwise
 		h.world_scene = "world";
 		h.defaults = "{\"kit/world\": {\"biome\": \"rock\"}}";
-		if(!kit::host(m_server, h))
+		if(!kit::host(m_server, h)){
 			m_server->shutdown(1, "workbench: Kit is not hosted");
+			return true;
+		}
+		for(size_t peer : m_waiting)
+			enter(peer);
+		m_waiting.clear();
+		return true;
 	}
 
 	void place(size_t peer, double x, double y, double z)
@@ -156,16 +258,54 @@ struct Module: public interface::Module
 		});
 	}
 
+	// The project if it runs; else Manage, after a login (but the
+	// launcher's own client's): an admin picks
 	void on_files(const client_file::FilesTransmitted &event)
 	{
 		const size_t peer = event.recipient;
-		replicate::assign_scene_to_peer(m_server, m_scene, peer);
+		if(m_save){
+			enter(peer);
+			return;
+		}
+		bool joined = false;
+		accounts::access(m_server, [&](accounts::Interface *a){
+			joined = a->is_local(peer) || !a->name_of(peer).empty();
+		});
+		if(!joined){
+			if(m_joining.insert(peer).second)
+				network::send(m_server, peer, "core:run_script",
+						"buildat.run_script_file(\"main/join.lua\")");
+			return;
+		}
+		manage(peer);
+	}
+
+	void manage(size_t peer)
+	{
+		if(m_waiting.insert(peer).second)
+			world_menu::access(m_server, [&](world_menu::Interface *i){
+				i->show(peer);
+			});
+	}
+
+	// Into the running project: its client once, the scene, the spawn
+	void enter(size_t peer)
+	{
 		ss_ name;
 		// None in the web client's own server (builtin/accounts is native)
 		if(m_server->has_module("accounts"))
 			accounts::access(m_server, [&](accounts::Interface *a){
 				name = a->name_of(peer);
 			});
+		if(m_in.insert(peer).second){
+			network::send(m_server, peer, "core:run_script",
+					"buildat.run_script_file(\"main/init.lua\")");
+			// Whether it logged in already (Manage's login): its client
+			// logs in again only if not
+			network::send(m_server, peer, "main:account", name.empty() ?
+					"" : "1");
+		}
+		replicate::assign_scene_to_peer(m_server, m_scene, peer);
 		m_names[peer] = name.empty() ? "p"+itos(peer) : name;
 		spawn(peer);
 	}
@@ -197,6 +337,13 @@ struct Module: public interface::Module
 	void on_login(const accounts::Login &login)
 	{
 		m_names[login.peer] = login.name;
+		if(m_joining.erase(login.peer)){
+			if(m_save)
+				enter(login.peer);
+			else
+				manage(login.peer);
+			return;
+		}
 		log_i(MODULE, "workbench: peer %zu is %s", (size_t)login.peer,
 				cs(login.name));
 		// Kit knows them by the new name at once: what they do next is
@@ -211,6 +358,9 @@ struct Module: public interface::Module
 		log_i(MODULE, "workbench: %s left", cs(m_names[old.info.id]));
 		m_names.erase(old.info.id);
 		m_pos.erase(old.info.id);
+		m_joining.erase(old.info.id);
+		m_waiting.erase(old.info.id);
+		m_in.erase(old.info.id);
 	}
 
 	// A builder's dig or place in play: {"p": [x, y, z], "voxel": name},

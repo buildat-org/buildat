@@ -14,7 +14,9 @@
 -- with a menu of its own (vanilla) opens the screen itself:
 --   local world_menu = require("buildat/module/world_menu")
 --   world_menu.open(spec) -> {root, play}  -- the screen, its Play button
--- spec: title; worlds = {{name, label}} (label: the row and what the
+-- spec: title; noun (what one is called, "world", "project": the
+-- screen's own lines say it, [WORKBENCH_PROJECTS]); worlds = {{name,
+-- label}} (label: the row and what the
 -- filter reads, the name by default); selected (the menu writes it back,
 -- and calls on_select(name)); empty (the text for no worlds); new_label;
 -- play(name), new(), rename(name, to) (nil: no Rename), delete(name),
@@ -265,7 +267,7 @@ function M.open(spec)
 					e.date:sub(12, 13) .. ":" .. e.date:sub(14, 15)) or ""
 			local row = add_row(e.name .. " (in the trash" .. when .. ")")
 			menu:add(row, function()
-				ui_utils.show_confirm_dialog("The world " .. e.name ..
+				ui_utils.show_confirm_dialog("The " .. spec.noun .. " " .. e.name ..
 						" is in the trash" .. when .. ".", function()
 					log:info("world_menu: restore " .. e.entry)
 					spec.trash_restore(e.entry)
@@ -279,7 +281,8 @@ function M.open(spec)
 		end
 	end
 	if #shown == 0 and trashed == 0 then
-		text_on(left, #spec.worlds == 0 and (spec.empty or "No worlds yet") or
+		text_on(left, #spec.worlds == 0 and (spec.empty or
+				("No " .. spec.noun .. "s yet")) or
 				"Nothing matches")
 	end
 	if spec.footer then
@@ -288,15 +291,15 @@ function M.open(spec)
 	local function add_left(label, action)
 		return button_on(menu, left, label, action, fit(520))
 	end
-	add_left(spec.new_label or "New world...", spec.new)
+	add_left(spec.new_label or ("New " .. spec.noun .. "..."), spec.new)
 	if spec.under then
 		spec.under(add_left, left)
 	end
 	on_escape(menu, root, spec.back or function() buildat.leave() end)
 
 	-- The right column: the selected world and what it does
-	local head = text_on(right, spec.selected or (narrow() and
-			"Pick a world above" or "Pick a world on the left"))
+	local head = text_on(right, spec.selected or ("Pick a " .. spec.noun ..
+			(narrow() and " above" or " on the left")))
 	local out = {root = root}
 	if spec.selected then
 		local name = spec.selected
@@ -313,7 +316,7 @@ function M.open(spec)
 		end
 		add_right("Delete...", function()
 			ui_utils.show_confirm_dialog(spec.delete_text and
-					spec.delete_text(name) or ("Move the world " .. name ..
+					spec.delete_text(name) or ("Move the " .. spec.noun .. " " .. name ..
 					" to the trash?"), function()
 				log:info("world_menu: delete " .. name)
 				select(nil)
@@ -411,9 +414,9 @@ local served = {}
 -- `typed` the name typed before it was picked
 local function draw_new(state, preset, typed)
 	local menu, root = screen(served, "new world")
-	text_on(menu.window, state.title .. ": a new world, named:")
+	text_on(menu.window, state.title .. ": a new " .. state.noun .. ", named:")
 	local name = edit_on(menu.window, typed or
-			(#state.worlds == 0 and "world" or ""))
+			(#state.worlds == 0 and state.noun or ""))
 	local presets = state.presets or {}
 	local from = preset and presets[preset] and presets[preset].options or {}
 	if #presets > 0 then
@@ -490,7 +493,7 @@ buildat.sub_packet("world_menu:list", function(data)
 		-- peer replaces its name), whose Create has the code's field
 		local extra = nil
 		local text = (state.wait or "") ~= "" and state.wait or
-				"Waiting for an admin to pick a world"
+				"Waiting for an admin to pick a " .. state.noun
 		if (state.wait or "") == "" and state.no_admin then
 			text = "This server has no admin yet: join with the setup code " ..
 					"from the server's log"
@@ -512,7 +515,7 @@ buildat.sub_packet("world_menu:list", function(data)
 	for _, w in ipairs(state.worlds) do
 		by_name[w.name] = w
 	end
-	served.title = state.title .. ": which world?"
+	served.title = state.title .. ": which " .. state.noun .. "?"
 	served.worlds = state.worlds
 	-- [SKELDAT_SAVE_WORLD_MENU] The world the launch named, once: the
 	-- server sends it in one list only, so a click after stands
@@ -557,7 +560,7 @@ buildat.sub_packet("world_menu:list", function(data)
 	end
 	served.under = function(add)
 		if running then
-			add("Close world", function()
+			add("Close " .. state.noun, function()
 				log:info("world_menu: close " .. running)
 				send("close", {})
 				waiting("Closing " .. running .. "...")
@@ -576,6 +579,12 @@ buildat.sub_packet("world_menu:list", function(data)
 				text_on(right, f.label .. ": " .. v, fit(420))
 			end
 		end
+	end
+	served.noun = state.noun
+	-- [WORKBENCH_PROJECTS] The launch's New: the name screen, once
+	if state.new then
+		draw_new(state)
+		return
 	end
 	M.open(served)
 end)

@@ -29,6 +29,9 @@
 #   util/kit_publish_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
+# Workbench opens its project "world" at once, no Manage
+# ([WORKBENCH_PROJECTS]: workbench_check.sh goes through Manage)
+export BUILDAT_WORKBENCH_PROJECT=world
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then

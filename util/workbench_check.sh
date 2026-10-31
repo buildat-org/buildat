@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min, ~2 min with a cold module cache (2026-10-30)
-# covers: apps/workbench/** builtin/kit/** extensions/pause_menu/**
+# covers: apps/workbench/** builtin/kit/** extensions/pause_menu/** builtin/world_menu/**
 # [KIT] stages 4 and 4b, Workbench and Kit's starter set (kit/*), on
 # scripted clients, the server's game clock at CHECK_RATE (the timer's
 # seconds are the game's):
@@ -67,6 +67,10 @@
 #      finger: below.
 #   8. ([KIT] stage 4g) A builder's voxel type made, drawn by a second
 #      client already in, placed and kept over a restart: below.
+#   9. ([WORKBENCH_PROJECTS]) The projects, by the launcher's own client:
+#      below.
+# Parts 1-8 make their project in Manage (New project..., the name
+# "project" it offers when there is none), a restart opening it again.
 # KEEP_TMP=1 keeps the screenshots: the contraption in edit mode, in play,
 # after the restart, and after the Stop; what is pointed at in play; part
 # 7's views, drags and menus; part 8's dialog, palette and the type placed.
@@ -113,12 +117,7 @@ if [ "${1:-}" = web ]; then
 	cat > "$t/steps.json" <<J
 [
 	["nav", "\${URL}"],
-	["waitlog", "player physics enabled", 120],
-	["waitlog_any", "pause: the menu shown", 10],
-	["eval", "$(echo "$stub" | tr "\n" " ")"],
-	["click", 100, 700], ["waitlog", "pause: the menu closed", 10], ["wait", 1000],
-	["key", "l"],
-	["waitlog", "accounts: the login page shown", 60], ["wait", 1000],
+	["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
 	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
 	["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
 	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
@@ -127,9 +126,17 @@ if [ "${1:-}" = web ]; then
 	["type", "\${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
 	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
 	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
+	["click", "Button", "Don't add"], ["frames", 3],
+	["waitlog_any", "world_menu: the list shown, 0 worlds", 30], ["frames", 3],
+	["click", "Button", "New project..."],
+	["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
+	["click", "Button", "Create"],
+	["waitlog", "player physics enabled", 120],
+	["waitlog_any", "pause: the menu shown", 10],
+	["eval", "$(echo "$stub" | tr "\n" " ")"],
+	["click", 100, 700], ["waitlog", "pause: the menu closed", 10], ["wait", 1000],
 	["waitlog_any", "kit editor: edit rights: yes", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
-	["click", 891, 217], ["waitlog", "server window: closed", 10], ["frames", 3],
 	["shot", "\${OUT}/menu.png"],
 	["click", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
 	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
@@ -223,9 +230,7 @@ if [ "${1:-}" = web_touch ]; then
 	cat > "$t/steps.json" <<'J'
 [
 	["nav", "${URL}"],
-	["waitlog", "player physics enabled", 120], ["frames", 10],
-	["key", "l"],
-	["waitlog", "accounts: the login page shown", 60], ["wait", 1000],
+	["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
 	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
 	["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
 	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
@@ -234,8 +239,13 @@ if [ "${1:-}" = web_touch ]; then
 	["type", "${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
 	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
 	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
+	["tap", "Button", "Don't add"], ["frames", 3],
+	["waitlog_any", "world_menu: the list shown, 0 worlds", 30], ["frames", 3],
+	["tap", "Button", "New project..."],
+	["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
+	["tap", "Button", "Create"],
+	["waitlog", "player physics enabled", 120], ["frames", 10],
 	["waitlog_any", "kit editor: edit rights: yes", 10], ["frames", 10],
-	["tap", 784, 185], ["frames", 3],
 	["tap", 955, 476], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["tap", 500, 174], ["waitlog", "kit editor: state: 1 entities", 20],
 	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 5],
@@ -287,7 +297,7 @@ if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
 check_tmp workbench; t=$CHECK_TMP
-save="$t/user/apps/workbench/saves/world"
+save="$t/user/apps/workbench/saves/project"
 cd "$here/Build"
 
 server() # <n> [user dir]
@@ -334,6 +344,11 @@ wait_log_any 60000 Joined as kitboss
 wait_log_any 30000 server window: the page ntfy
 frames 3
 click Button "Don't add"
+wait_log_any 30000 world_menu: the list shown, 0 worlds
+frames 3
+click Button "New project..."
+wait_log 5000 world_menu: the name screen shown
+click Button "Create"
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
 keypress Escape
@@ -873,6 +888,11 @@ wait_log_any 60000 Joined as kitboss
 wait_log_any 30000 server window: the page ntfy
 frames 3
 click Button "Don't add"
+wait_log_any 30000 world_menu: the list shown, 0 worlds
+frames 3
+click Button "New project..."
+wait_log 5000 world_menu: the name screen shown
+click Button "Create"
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
 keypress F6
@@ -1037,6 +1057,11 @@ wait_log_any 60000 Joined as kitboss
 wait_log_any 30000 server window: the page ntfy
 frames 3
 click Button "Don't add"
+wait_log_any 30000 world_menu: the list shown, 0 worlds
+frames 3
+click Button "New project..."
+wait_log 5000 world_menu: the name screen shown
+click Button "Create"
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
 keypress F6
@@ -1180,6 +1205,11 @@ wait_log_any 60000 Joined as kitboss
 wait_log_any 30000 server window: the page ntfy
 frames 3
 click Button "Don't add"
+wait_log_any 30000 world_menu: the list shown, 0 worlds
+frames 3
+click Button "New project..."
+wait_log 5000 world_menu: the name screen shown
+click Button "Create"
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
 keypress F6
@@ -1275,5 +1305,91 @@ want "$t/srv6.log" "Builders' voxel types: 1, uploaded textures: 1"
 grep -a "which this game does not register" "$t/srv6.log" &&
 	fail "the builder's type was adopted, not registered ($t/srv6.log)"
 echo "ok: a builder's voxel type made in Kit's editor from an uploaded PNG, drawn by a client already in, placed, and registered again at a restart"
+
+# 9. ([WORKBENCH_PROJECTS]) The projects, on the launcher's own server and
+# client (-u launcher=1): an old save "world" (part 1's project copied)
+# beside them. The launcher's entries (luajit): the tile and Manage are
+# menu=projects, New menu=new, a save's Manage... project=<it>. menu=new:
+# the name screen at once, "alpha" typed and made, Workbench in it.
+# menu=projects project=world: Manage with "world" selected, renamed
+# "first", "alpha" moved to the trash, "first" opened. save=first: open
+# with no Manage.
+luajit -e "local e = dofile('$here/apps/workbench/launcher/init.lua')({launch = function(a) got = a end})
+	local want = {play = 'projects', new = 'new', manage = 'projects', manage_project = 'projects'}
+	for _, x in ipairs(e) do
+		got = nil; x.run('w1')
+		assert(got.app == 'workbench' and got.params.menu == want[x.id], x.id)
+		assert((got.params.project == 'w1') == (x.for_save == true), x.id)
+		want[x.id] = nil
+	end
+	assert(next(want) == nil, 'missing ' .. tostring(next(want)))" ||
+	fail "the launcher's entries"
+mkdir -p "$t/user9/apps/workbench/saves"
+cp -r "$save" "$t/user9/apps/workbench/saves/world"
+local_server() # <n> <-u lines>
+{
+	start_server "$t/srv$1.log" "Listening at" 300 auto \
+		bin/buildat_server -u "$2" -m ../apps/workbench -D "$t/user9" -l 3 ||
+		fail "the server did not come up ($t/srv$1.log)"
+	CHECK_PIDS+=($SERVER_PID)
+}
+cat > "$t/new9.cmds" <<'EOF'
+wait_log_any 60000 world_menu: the name screen shown
+frames 3
+screenshot @T@/p_new.png
+text alpha
+click Button "Create"
+wait_log_any 60000 player physics enabled
+quit
+EOF
+local_server 9 "$(printf 'launcher=1\nmenu=new')"
+client new9
+stop
+want "$t/srv9.log" 'world_menu: made "alpha"' 'workbench: the project "alpha" opens'
+grep -aq "world_menu: the list shown" "$t/new9.log" &&
+	fail "menu=new showed the list first ($t/new9.log)"
+cat > "$t/manage9.cmds" <<'EOF'
+wait_log_any 60000 world_menu: the list shown, 2 worlds
+wait_log_any 5000 world_menu: world selected
+frames 3
+screenshot @T@/p_manage.png
+click Button "Rename..."
+wait_log 5000 world_menu: the name screen shown
+text first
+frames 3
+screenshot @T@/p_rename.png
+click Button "Rename"
+wait_log 10000 world_menu: the list shown, 2 worlds
+click Button "alpha"
+wait_log 5000 world_menu: the list shown, 2 worlds
+click Button "Delete..."
+frames 3
+screenshot @T@/p_delete.png
+click Button "Move to the trash"
+wait_log 10000 world_menu: the list shown, 1 worlds, 1 in the trash
+click Button "first"
+wait_log 5000 world_menu: the list shown, 1 worlds
+frames 3
+screenshot @T@/p_trashed.png
+click Button "Play"
+wait_log_any 60000 player physics enabled
+quit
+EOF
+local_server 10 "$(printf 'launcher=1\nmenu=projects\nproject=world')"
+client manage9
+stop
+want "$t/srv10.log" 'world_menu: "world" selected' 'world_menu: "world" renamed "first"' \
+	'world_menu: "alpha" moved to the trash' 'workbench: the project "first" opens'
+cat > "$t/save9.cmds" <<'EOF'
+wait_log_any 60000 player physics enabled
+quit
+EOF
+local_server 11 "$(printf 'launcher=1\nsave=first')"
+client save9
+stop
+grep -aq "world_menu: the list shown" "$t/save9.log" &&
+	fail "save=first showed Manage ($t/save9.log)"
+want "$t/srv11.log" 'workbench: the project "first" opens'
+echo "ok: projects: the launcher's New and Manage, a name typed and made, the old \"world\" renamed, one deleted to the trash, a listed one opened, save= opened with no Manage"
 echo "PASS: Workbench: the admin builds a contraption of Kit's starter set in its editor, Stopped, and plays it, a second player joins the round, may build only in the dig zone and uses a key; a restart mid-round keeps the rows, Stop puts the start back, Play gives a kept inventory back and places players, Save as start keeps the round's voxels"
 # vim: set noet ts=4 sw=4:
