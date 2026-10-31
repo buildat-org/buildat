@@ -89,6 +89,12 @@ set_w() # <param> <json value>
 	n=$((n + 1))
 	printf 'event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "%s", "value": %s}\nwait_log 10000 entities, %d to undo\n' "$1" "$2" "$n"
 }
+# One that regenerates the ground (Stopped), and the wait for its
+# sections: a column read before them reads none
+regen_w() # <param> <json value>
+{
+	printf 'event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "%s", "value": %s}\nwait_log 10000 kit: World: generated again\n' "$1" "$2"
+}
 # Play from the start (the app's spawn on the World's ground), a look over
 # it, the shot, and Stopped again with the tools on
 shot() # <name>
@@ -386,9 +392,8 @@ event kit_edit {"op": "place", "type": "kit/world", "pos": [0, 1, 0]}
 wait_log 10000 entities, 1 to undo
 EOF
 	n=1
-	set_w decorations false
-	set_w biome '"grassland"'
-	echo "idle 3000"
+	regen_w decorations false
+	regen_w biome '"grassland"'
 	column 8 8
 	for i in 1 2; do terrain raise 8 8 2 2 11; done
 	undo
@@ -415,17 +420,11 @@ wait_log 10000 kit editor: the server is Stopped (by kitboss)
 keypress F6
 wait_log 10000 kit editor: state:
 EOF
-	for pv in "decorations true" "caves true"; do
-		echo 'event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "'${pv% *}'", "value": '${pv#* }'}'
-		echo "wait_log 10000 kit editor: state:"
-	done
-	echo "idle 3000"
+	regen_w decorations true
+	regen_w caves true
 	for c in "-20 -20" "-10 -25" "-25 -5" "-6 -14"; do column $c; done
-	for v in 3 0; do
-		echo 'event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "seed", "value": '$v'}'
-		echo "wait_log 10000 kit editor: state:"
-		echo "idle 3000"
-	done
+	regen_w seed 3
+	regen_w seed 0
 	for c in "-20 -20" "-10 -25" "-25 -5" "-6 -14"; do column $c; done
 	terrain decorate -12 -12 4 5 21
 	undo
