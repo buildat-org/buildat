@@ -7,7 +7,8 @@
 #   1. alice's key is bound on the Aitta; her Kit package alice/lamps
 #      1.0.0 (a component type, alice/lamp, written by hand) packed and
 #      published by the command line.
-#   2. On server A alice (its admin) opens the palette's New tab, which
+#   2. On server A alice (its admin) opens the palette's New tab, accepts
+#      the network dialog's question about the Aitta by a click; the tab
 #      lists it, and installs it; places an alice/lamp, sets its
 #      brightness and saves it as her prefab lamp_post; stars it a
 #      favourite (the Favourites tab has it); the credits name the
@@ -106,11 +107,13 @@ manifest "$t/lamps" lamps 1.0.0
 publish "$t/lamps"
 echo "ok: alice/lamps 1.0.0 published"
 
-# A user path with only this Aitta, its address already allowed
-user(){
+# A user path with only this Aitta, its address already allowed; "ask"
+# leaves it to the network dialog
+user(){ # <name> [ask]
 	mkdir -p "$t/cu_$1"
 	echo "{\"starports\": [], \"aittas\": [\"http://127.0.0.1:$P\"]}" \
 		> "$t/cu_$1/starport.json"
+	[ "${2:-}" = ask ] && return
 	local now; now=$(date +%s)
 	printf 'accepted,address,description,created,last_attempt,name,icon,server\n"true","http://127.0.0.1:%s","","%s","%s","","",""\n' \
 		$P $now $now > "$t/cu_$1/network_addresses.csv"
@@ -155,8 +158,10 @@ click Button "Edit"
 wait_log 10000 kit editor: state:'
 export BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1
 
-# 2. Server A, alice
-user alice
+# 2. Server A, alice, whose New tab asks about the Aitta: the dialog's
+# Accept clicked, not the editor's walk view under it going up into the
+# crosshair ([WB_NET_DIALOG_CLICK])
+user alice ask
 server srva "$t/a"
 c=$(code "$t/srva.log")
 cat > "$t/alice.cmds" <<EOF
@@ -164,7 +169,11 @@ wait_log_any 60000 Joined as alice
 $NTFY
 $EDIT
 click Button "New"
-wait_log 20000 kit editor: package alice/lamps 1.0.0
+wait_log 20000 Asking the user about
+frames 3
+click Button "Accept"
+wait_log 10000 The user accepted http://127.0.0.1:$P
+wait_log_any 20000 kit editor: package alice/lamps 1.0.0
 frames 3
 screenshot @T@/a_new.png
 click Button "Install"
@@ -205,6 +214,8 @@ delay 300
 screenshot @T@/a_publish.png
 EOF
 BUILDAT_JOIN_NAME=alice BUILDAT_JOIN_CODE=$c client alice alice
+! grep -aq "kit editor: into the crosshair" "$t/alice.log" ||
+	fail "a click on the network dialog went into the editor's crosshair ($t/alice.log)"
 want "$t/srva.log" "alice installed alice/lamps 1.0.0: 1 types, 0 prefabs" \
 	"alice exports 1 files, 1 dependencies"
 d="$t/cu_alice/dev_apps/my_prefabs"
