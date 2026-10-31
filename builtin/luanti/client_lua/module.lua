@@ -572,7 +572,12 @@ function M.warm_fonts()
 	local holder = magic.ui.root:CreateChild("UIElement")
 	holder.defaultStyle = magic.cache:GetResource("XMLFile",
 			"ui_utils/res/style.xml")
-	for _, size in ipairs({12, 13, 14, 15, 16}) do
+	-- 8-11 too: a slot's count is a quarter of the slot (formspec_ui's
+	-- draw_stack), 9 or 10 in a 1280x720 window, and fuzz.sh's first
+	-- inventory with a stack of more than one drew that count in 77 ms of
+	-- its 78 ms list; the lists of the frames that failed took 139-213 ms
+	-- ([FUZZ_FRAME_PEAK])
+	for _, size in ipairs({8, 9, 10, 11, 12, 13, 14, 15, 16}) do
 		local t = holder:CreateChild("Text")
 		t:SetStyleAuto()
 		t.text = "0"

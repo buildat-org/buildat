@@ -137,7 +137,7 @@ core.register_on_joinplayer(function(player)
 	local start = player:get_pos()
 	local moved = 0
 	local last = start
-	local failed = false
+	local failed, step_failed = false, false
 	local function fail(why)
 		if failed then
 			return
@@ -323,8 +323,13 @@ core.register_on_joinplayer(function(player)
 			core.log("warning", string.format(
 					"fuzz: step peak %.2f s in %s at t=%d (the start-up "..
 					"load, not counted)", peak, phase, t))
-		elseif peak > STEP_FAIL_S then
-			fail(string.format("a step took %.2f s in %s", peak, phase))
+		elseif peak > STEP_FAIL_S and not step_failed then
+			-- Latched on its own: verdict.sh may find the step the
+			-- machine's (the server waiting for a CPU), and a fault found
+			-- after it must still be said ([FUZZ_FRAME_PEAK])
+			step_failed = true
+			core.log("action", string.format("fuzz: FAILED a step took " ..
+					"%.2f s in %s", peak, phase))
 		elseif ON_CI and peak > 1.0 then
 			core.log("warning", string.format(
 					"fuzz: step peak %.2f s in %s at t=%d (BUILDAT_CI: a "..
