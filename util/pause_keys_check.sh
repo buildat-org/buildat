@@ -34,14 +34,13 @@ trap '[ -n "$srv" ] && kill $srv 2>/dev/null; rm -rf "$t"' EXIT
 nolog(){ cat "$1"; }
 fail(){ echo "FAIL: $*"; exit 1; }
 
-port=29592
 # A launcher-started server is local ([VANILLA_PUBLIC]) and auto-starts the
 # bundled minimal game (no ContentDB), so the client lands in a world.
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=pausekeys \
-start_server "$t/srv.log" "STATUS Listening" 60 "$port" \
+start_server "$t/srv.log" "STATUS Listening" 60 auto \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$t/srv" -l 3 ||
 	fail "server did not listen"
-srv=$SERVER_PID
+srv=$SERVER_PID port=$SERVER_PORT
 
 # A line logged by sky_now.set_range alone, not the F5 status line (which has
 # the range mid-string): "<ts> I vanilla : view range: N" and nothing after.
@@ -60,9 +59,11 @@ run_drive(){
 		echo "delay 2000"
 		echo "keypress Escape"
 		echo "wait_log 5000 pause: the menu shown"
-		# The view range is the pause menu's one dropdown; its popup opens
-		# in the frames after the click
-		echo 'click DropDownList "▼"'
+		# The view range is the pause menu's last dropdown (above it "Who
+		# may talk" for an admin, [VANILLA_CHAT_MIN]; every one is labelled
+		# "▼"): the one nearest the window's bottom. Its popup opens in the
+		# frames after the click
+		echo 'click DropDownList "▼" 500 700'
 		echo "delay 500"
 		echo "keypress Up"
 		echo "delay 200"
