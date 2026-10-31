@@ -109,8 +109,14 @@ run() { # tag preset-line-or-empty
 	local srv=$SERVER_PID
 	local cl=() n ok=1
 	for n in 1 2 3; do
-		# The clients run until the measuring ends; timeout is their cap
-		taskset -c 2-$(( $(nproc) - 1 )) timeout $((SECONDS_EACH + 300)) \
+		# The clients run until the measuring ends; timeout is their cap.
+		# The first is the owner (no owner token: any client from this
+		# machine), the others make accounts of their own: they were shown
+		# the login page in a fresh user path, and the run's user path is
+		# fresh each time ([BOX_SHARED_USER_SAVES])
+		join=(); [ $n -gt 1 ] && join=(BUILDAT_JOIN_NAME=ps$n
+			BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1)
+		taskset -c 2-$(( $(nproc) - 1 )) env "${join[@]}" timeout $((SECONDS_EACH + 300)) \
 			bin/buildat -s localhost:$port -w 320x240 -l 3 \
 			-o sound_mute=1 -o default_username=ps$n \
 			> "$out/cli_${tag}_$n.log" 2>&1 &
