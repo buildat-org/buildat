@@ -64,6 +64,8 @@ static const size_t MAX_TYPE_SOURCE = 256 << 10;
 // a volume has at most
 static const int MAX_EXTENT = 64;
 static const int MAX_VOLUME = 64;
+// The cells a grants type's c:set_voxel sets at most (its box)
+static const int MAX_SET_CELLS = 4096;
 // The most of an item a player has (Kit's own counts, c:add)
 static const int64_t MAX_ITEMS = 1000000;
 // What an editor's packet may be and do
@@ -5144,11 +5146,28 @@ struct Module: public interface::Module, public Interface
 		}
 		const json::Value &voxel = fx.get("voxel");
 		if(voxel.is_string() && !voxel.as_string().empty()){
-			if(!t.owns_voxel || !e.has_pos){
+			// The cells it owns, or a grants type's box ([KIT_TRIGGER_DIG]:
+			// kit/dig_zone's dig), MAX_SET_CELLS at most
+			sv_<pv::Vector3DInt32> cells = owned_cells(e);
+			if(!t.owns_voxel && !t.grants.empty() && e.has_pos){
+				int n[3];
+				extent(in.params.get(t.grants), n);
+				const pv::Vector3DInt32 o = voxel_p(e);
+				if(n[0] * n[1] * n[2] <= MAX_SET_CELLS)
+					for(int x = 0; x < n[0]; x++)
+						for(int y = 0; y < n[1]; y++)
+							for(int z = 0; z < n[2]; z++)
+								cells.push_back(o + pv::Vector3DInt32(x, y, z));
+				else
+					log_w(MODULE, "Entity %s's %s sets %i cells, past %i",
+							cs(itos(e.id)), cs(type), n[0] * n[1] * n[2],
+							MAX_SET_CELLS);
+			}
+			if(cells.empty()){
 				log_w(MODULE, "Entity %s's %s sets a voxel it does not own",
 						cs(itos(e.id)), cs(type));
 			} else {
-				for(const pv::Vector3DInt32 &p : owned_cells(e)){
+				for(const pv::Vector3DInt32 &p : cells){
 					Write w;
 					w.scene = scene_of(e);
 					w.p = p;
