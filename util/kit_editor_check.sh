@@ -36,6 +36,13 @@
 #      moved, Save as start the last.
 #   4. A restart: the authored row has what was edited, the server is
 #      still Running, and kitbob, alone, is still a builder.
+#   5. ([KIT_ROUND_START]) kitbob's edits in play kept past what comes
+#      after them: a kit/voxel_replace 22 (glass to stone) and a probe 23
+#      (a kit/voxel_states) over (6, 1, 1) and the pillar (6, 1, 2), both
+#      cells edited to glass; 22's toggle tried (a game write over the
+#      first), and out of edit mode the pillar dug (a build over the
+#      second). A restart, then End: both cells glass again (the edit, and
+#      the edit under the discarded build), as the probe captures them.
 # KEEP_TMP=1 keeps the screenshots: edit mode with the inspector, a link
 # line, the marker's gizmo, play with none of them, the admin's builders
 # (kitbob's selection in their colour), and the Stopped server.
@@ -458,5 +465,63 @@ stop
 want "$t/srv2.log" "Hosted: 21 entities" "kitbob is in edit mode" \
 	"The server is Running (by kitboss): "
 grep -aq "the composition's first start" "$t/srv2.log" && fail "the composition was read again ($t/srv2.log)"
-echo "PASS: Kit's editor: the admin's edit rights and builders kept in the accounts, edit mode, place, move, delete, the inspector, links, undo, each edit and grant refused without rights, live edits while Running, two builders' selections, Stop and Play, the authored row and the server's state over a restart"
+
+# 5. Edits under a game write and under a build, over a restart
+ed() { echo "event kit_edit $1"; }
+{
+	cat <<'EOF'
+wait_log_any 60000 Joined as kitbob
+wait_log_any 60000 kit editor: edit rights: yes
+click Button "Edit"
+wait_log 10000 kit editor: state: 20 entities, 0 to undo
+EOF
+	n=0
+	edit() { ed "$1"; n=$((n + 1)); echo "wait_log 10000 kit editor: state: $2 entities, $n to undo"; }
+	edit '{"op": "place", "type": "kit/voxel_replace", "pos": [6, 1, 1]}' 21
+	edit '{"op": "set", "id": 22, "comp": 0, "param": "size", "value": [1, 1, 1]}' 21
+	edit '{"op": "set", "id": 22, "comp": 0, "param": "find", "value": "glass"}' 21
+	edit '{"op": "set", "id": 22, "comp": 0, "param": "replace", "value": "stone"}' 21
+	edit '{"op": "place", "type": "kit/voxel_states", "pos": [6, 1, 1]}' 22
+	edit '{"op": "set", "id": 23, "comp": 0, "param": "size", "value": [1, 1, 2]}' 22
+	edit '{"op": "set_voxel", "pos": [6, 1, 1], "voxel": "glass"}' 22
+	edit '{"op": "set_voxel", "pos": [6, 1, 2], "voxel": "glass"}' 22
+	ed '{"op": "try", "id": 22, "input": "toggle"}'
+	echo "wait_log 10000 kit editor: tried 22's toggle"
+	echo "keypress F6"
+	echo "wait_log 10000 kit editor: edit mode off"
+	echo "keypress p"
+	echo "wait_log 10000 a dig at the pillar sent"
+	echo "frames 10"
+	echo "quit"
+} > "$t/edits.cmds"
+cat > "$t/end.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitbob
+wait_log_any 60000 kit editor: edit rights: yes
+click Button "Edit"
+wait_log 10000 kit editor: state: 22 entities, 0 to undo
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended (by kitbob)
+event kit_edit {"op": "pattern", "id": 23, "comp": 0, "param": "a", "action": "capture"}
+wait_log 10000 kit editor: state: 22 entities, 1 to undo
+quit
+EOF
+server 3
+BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE= client edits
+stop
+want "$t/srv3.log" "kit/voxel_replace 22: on: 1 cells glass to stone by kitbob" \
+	"sample_kit: a dig at the pillar: written"
+server 4
+BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE= client end
+stop
+want "$t/srv4.log" "Stop by kitbob: 2 kept cells (edits, builds always kept) put back in, 1 builds discarded: kitbob 1"
+sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'authored'" > "$t/authored5.json"
+python3 -I - "$t/authored5.json" <<'EOF' || fail "the edits were not there after End ($t/srv4.log)"
+import json, sys
+e = {x["id"]: x for x in json.load(open(sys.argv[1]))["entities"]}
+a = e[23]["components"][0]["params"]["a"]
+print("  the probe after End:", a)
+assert a == "1 1 2;glass;0*2", a
+EOF
+echo "ok: an edit in play kept over a game write, and over a build discarded at End, past a restart"
+echo "PASS: Kit's editor: the admin's edit rights and builders kept in the accounts, edit mode, place, move, delete, the inspector, links, undo, each edit and grant refused without rights, live edits while Running, two builders' selections, Stop and Play, the authored row and the server's state over a restart, edits in play kept under a game write and a discarded build"
 # vim: set noet ts=4 sw=4:

@@ -359,13 +359,18 @@ static const int NUM_COLORS = sizeof COLORS / sizeof COLORS[0];
 // [KIT] stage 4c: a cell play changed and who: a build ('b', kept only if a
 // builder keeps it at Stop) or kept as it is made ('k': a live edit, or a
 // build with "Always keep builds"), and the voxel it was given. A cell the
-// game changed has none; one whose voxel is another at Stop was changed
-// by the game after (the last writer's)
+// game changed has none; a build whose voxel is another at Stop was
+// changed by the game after (the last writer's). A game write leaves a 'k'
+// mark: Stop writes the cell back as edited. [KIT_ROUND_START] A build over
+// an edit keeps the edit under it (under_by, under_id), given back when the
+// build is discarded or the game writes over it
 struct Mark
 {
 	char kind = 'b';
 	ss_ by;
 	uint32_t id = 0;
+	ss_ under_by; // empty: no edit under it
+	uint32_t under_id = 0;
 };
 
 // A build Stop discarded: its cell and final voxel, until the next Play;
@@ -449,22 +454,78 @@ struct Owner: public voxelworld::OwnerHandler
 	}
 };
 
+// A section's copy for the store (its key, the copy), or
+// ([KIT_ROUND_START]) a generator's merge into a copied section: its part
+// of the merge's volume, to make into the copy too
+struct Copy
+{
+	ss_ key, data;
+	up_<interface::VoxelVolume> merge;
+	bool has_owned = false;
+	pv::Region owned;
+	bool keep_standing = false;
+};
+
 // [KIT] stage 4c: voxelworld's side of the copy-on-write start. A section's
 // voxels before the round first writes to it, queued for Kit's thread (it
-// comes on voxelworld's, under its lock) as the store's key and the copy
+// comes on voxelworld's, under its lock) as the store's key and the copy;
+// then a merge into a copied one (`copied`, the copies' keys: the round's
+// before this watch, and those it made), after its copy
 struct Watch: public voxelworld::SectionWatch
 {
 	ss_ scene;
 	std::mutex *mutex;
-	std::deque<std::pair<ss_, ss_>> *queue;
+	std::deque<Copy> *queue;
+	std::set<ss_> copied;
+	ss_ key_of(const pv::Vector3DInt16 &sp)
+	{
+		return "start:"+scene+":"+itos(sp.getX())+","+
+				itos(sp.getY())+","+itos(sp.getZ());
+	}
 	void before_write(voxelworld::Instance *world,
 			const pv::Vector3DInt16 &sp, const interface::VoxelVolume &before)
 	{
-		const ss_ key = "start:"+scene+":"+itos(sp.getX())+","+
-				itos(sp.getY())+","+itos(sp.getZ());
-		ss_ copy = interface::serialize_volume_compressed(before);
+		Copy c;
+		c.key = key_of(sp);
+		c.data = interface::serialize_volume_compressed(before);
 		std::lock_guard<std::mutex> lock(*mutex);
-		queue->push_back(std::make_pair(key, std::move(copy)));
+		copied.insert(c.key);
+		queue->push_back(std::move(c));
+	}
+	void merged(voxelworld::Instance *world, const pv::Vector3DInt16 &sp,
+			const interface::VoxelVolume &volume, const pv::Region *owned,
+			bool keep_standing)
+	{
+		Copy c;
+		c.key = key_of(sp);
+		{
+			std::lock_guard<std::mutex> lock(*mutex);
+			if(!copied.count(c.key))
+				return;
+		}
+		// The merge's part in the section
+		pv::Region r = volume.getEnclosingRegion();
+		const pv::Vector3DInt16 ss = world->get_section_size_voxels();
+		const pv::Vector3DInt32 sl(sp.getX() * ss.getX(),
+				sp.getY() * ss.getY(), sp.getZ() * ss.getZ());
+		r.cropTo(pv::Region(sl, sl + pv::Vector3DInt32(ss.getX() - 1,
+				ss.getY() - 1, ss.getZ() - 1)));
+		const pv::Vector3DInt32 lc = r.getLowerCorner();
+		const pv::Vector3DInt32 uc = r.getUpperCorner();
+		if(lc.getX() > uc.getX() || lc.getY() > uc.getY() ||
+				lc.getZ() > uc.getZ())
+			return;
+		c.merge.reset(new interface::VoxelVolume(r, volume.planes()));
+		const size_t n = (size_t)(uc.getX() - lc.getX() + 1);
+		for(int z = lc.getZ(); z <= uc.getZ(); z++)
+		for(int y = lc.getY(); y <= uc.getY(); y++)
+			c.merge->copy_run_from(volume, lc.getX(), y, z, lc.getX(), y, z, n);
+		c.has_owned = owned != nullptr;
+		if(owned)
+			c.owned = *owned;
+		c.keep_standing = keep_standing;
+		std::lock_guard<std::mutex> lock(*mutex);
+		queue->push_back(std::move(c));
 	}
 };
 
@@ -724,7 +785,7 @@ struct Module: public interface::Module, public Interface
 	json::Value m_start = json::object();
 	// Copies from voxelworld's thread (Watch)
 	std::mutex m_copies_mutex;
-	std::deque<std::pair<ss_, ss_>> m_copies;
+	std::deque<Copy> m_copies;
 	// The origins of the round's changed cells ("<scene>:x,y,z" a section,
 	// its cells; saved as "marks:<scene>:x,y,z" beside its copy), the
 	// sections changed since the last save, and the builds the last Stop
@@ -8435,9 +8496,11 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// A cell the round wrote to, as written: origin 'g' a game change (a
-	// build's mark there goes: the game wrote last), 'b' a build by `who`
-	// (kept as made with "Always keep builds"), 'k' kept as made. Running
-	// only: Stopped, every write is the start's
+	// build's mark there goes: the game wrote last; an edit's stays, and
+	// one under the build is the mark again), 'b' a build by `who` (kept as
+	// made with "Always keep builds"; over an edit, the edit kept under
+	// it), 'k' kept as made. Running only: Stopped, every write is the
+	// start's
 	void mark(voxelworld::Instance *w, main_context::SceneReference ref,
 			const pv::Vector3DInt32 &p, char origin, const ss_ &who)
 	{
@@ -8448,10 +8511,26 @@ struct Module: public interface::Module, public Interface
 			return;
 		const ss_ key = section_key(scene, w, p);
 		const auto c = std::make_tuple(p.getX(), p.getY(), p.getZ());
+		auto si = m_marks.find(key);
+		Mark *old = nullptr;
+		if(si != m_marks.end()){
+			auto ci = si->second.find(c);
+			if(ci != si->second.end())
+				old = &ci->second;
+		}
 		if(origin == 'g' || who.empty()){
-			auto it = m_marks.find(key);
-			if(it != m_marks.end() && it->second.erase(c))
-				m_marks_dirty.insert(key);
+			if(!old || old->kind == 'k')
+				return;
+			if(old->under_by.empty()){
+				si->second.erase(c);
+			} else {
+				old->kind = 'k';
+				old->by = old->under_by;
+				old->id = old->under_id;
+				old->under_by.clear();
+				old->under_id = 0;
+			}
+			m_marks_dirty.insert(key);
 			return;
 		}
 		Mark m;
@@ -8459,6 +8538,10 @@ struct Module: public interface::Module, public Interface
 			return;
 		m.kind = origin == 'k' || always_keep() ? 'k' : 'b';
 		m.by = who;
+		if(m.kind == 'b' && old){
+			m.under_by = old->kind == 'k' ? old->by : old->under_by;
+			m.under_id = old->kind == 'k' ? old->id : old->under_id;
+		}
 		m_marks[key][c] = m;
 		m_marks_dirty.insert(key);
 	}
@@ -8504,6 +8587,10 @@ struct Module: public interface::Module, public Interface
 					a.append(ss_(1, c.second.kind));
 					a.append(c.second.by);
 					a.append((int64_t)c.second.id);
+					if(!c.second.under_by.empty()){
+						a.append(c.second.under_by);
+						a.append((int64_t)c.second.under_id);
+					}
 					j.set(itos(std::get<0>(c.first))+","+
 							itos(std::get<1>(c.first))+","+
 							itos(std::get<2>(c.first)), a);
@@ -8533,6 +8620,11 @@ struct Module: public interface::Module, public Interface
 				m.kind = jstr_at((*it), 0) == "k" ? 'k' : 'b';
 				m.by = (*it).at(1u).as_string();
 				m.id = (uint32_t)(*it).at(2u).as_number();
+				if(m.kind == 'b' && (*it).at(3u).is_string() &&
+						(*it).at(4u).is_number()){
+					m.under_by = (*it).at(3u).as_string();
+					m.under_id = (uint32_t)(*it).at(4u).as_number();
+				}
 				cells[std::make_tuple(x, y, z)] = m;
 			}
 		}
@@ -8645,9 +8737,10 @@ struct Module: public interface::Module, public Interface
 		return n;
 	}
 
-	// At Stop, before the copies are put back: each marked cell whose voxel
-	// is still what its mark gave (else the game wrote it last), into
-	// `kept` (kept as made) or m_discarded (builds). The marks go
+	// At Stop, before the copies are put back: each edit ('k') as it was
+	// made, into `kept`, and each build whose voxel is still what its mark
+	// gave (else the game wrote it last) into m_discarded, the edit under
+	// it into `kept`. The marks go
 	// simplified: a marked cell in a section unloaded by now is dropped
 	void sort_marks(sv_<Discarded> &kept)
 	{
@@ -8665,10 +8758,21 @@ struct Module: public interface::Module, public Interface
 					d.p[1] = std::get<1>(c.first);
 					d.p[2] = std::get<2>(c.first);
 					d.by = c.second.by;
-					if(!w || !voxel_id(w, pv::Vector3DInt32(d.p[0], d.p[1],
-							d.p[2]), d.id) || d.id != c.second.id)
+					if(!w)
 						continue;
-					(c.second.kind == 'k' ? kept : m_discarded).push_back(d);
+					if(c.second.kind == 'k'){
+						d.id = c.second.id;
+						kept.push_back(d);
+						continue;
+					}
+					if(voxel_id(w, pv::Vector3DInt32(d.p[0], d.p[1],
+							d.p[2]), d.id) && d.id == c.second.id)
+						m_discarded.push_back(d);
+					if(!c.second.under_by.empty()){
+						d.by = c.second.under_by;
+						d.id = c.second.under_id;
+						kept.push_back(d);
+					}
 				}
 			}
 		});
@@ -8844,6 +8948,9 @@ struct Module: public interface::Module, public Interface
 					wt->scene = s.first;
 					wt->mutex = &m_copies_mutex;
 					wt->queue = &m_copies;
+					wt->copied = m_session.copied;
+					wt->copied.insert(m_session.restore.begin(),
+							m_session.restore.end());
 				}
 				w->set_section_watch(wt);
 			}
@@ -8855,26 +8962,69 @@ struct Module: public interface::Module, public Interface
 	// simplified: a copy waits for Kit's next tick to reach the store, and
 	// voxelworld's checkpoint could write the changed section first; a
 	// crash between them loses that section's start
+	// [KIT_ROUND_START] A generator's merge into a copied section is made
+	// into the copy too, in the queue's order (after the copy)
 	void flush_copies()
 	{
-		std::deque<std::pair<ss_, ss_>> copies;
+		std::deque<Copy> copies;
 		{
 			std::lock_guard<std::mutex> lock(m_copies_mutex);
 			copies.swap(m_copies);
 		}
 		if(copies.empty() || !m_session.running)
 			return;
-		size_t n = 0;
-		m_store->batch([&](){
-			for(auto &c : copies)
-				if(m_session.copied.insert(c.first).second){
-					m_store->set(c.first, c.second);
+		size_t n = 0, merges = 0;
+		// The copies this flush stores, as data or, merged into, read
+		sm_<ss_, ss_> out;
+		sm_<ss_, up_<interface::VoxelVolume>> read;
+		for(Copy &c : copies){
+			if(!c.merge){
+				if(m_session.copied.insert(c.key).second){
+					out[c.key] = std::move(c.data);
 					n++;
 				}
+				continue;
+			}
+			if(!m_session.copied.count(c.key) &&
+					!m_session.restore.count(c.key))
+				continue;
+			up_<interface::VoxelVolume> &v = read[c.key];
+			if(!v){
+				ss_ data;
+				auto it = out.find(c.key);
+				if(it != out.end())
+					data = it->second;
+				else if(!m_store->get(c.key, data))
+					continue;
+				v = interface::deserialize_volume(data);
+				if(!v)
+					continue;
+			}
+			main_context::SceneReference scene = nullptr;
+			pv::Vector3DInt16 sp;
+			if(!parse_copy(c.key, scene, sp))
+				continue;
+			voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+				voxelworld::Instance *w = ivw->get_instance(scene);
+				if(w)
+					w->merge_into_volume(*v, *c.merge,
+							c.has_owned ? &c.owned : nullptr, c.keep_standing);
+			});
+			merges++;
+		}
+		for(auto &r : read)
+			if(r.second)
+				out[r.first] = interface::serialize_volume_compressed(
+						*r.second);
+		m_store->batch([&](){
+			for(auto &o : out)
+				m_store->set(o.first, o.second);
 		});
 		if(n)
 			log_i(MODULE, "%zu sections copied out (%zu this round)", n,
 					m_session.copied.size());
+		if(merges)
+			log_i(MODULE, "%zu generator merges made into the copies", merges);
 	}
 
 	// A copy's key, "start:<scene>:x,y,z", as its scene and section

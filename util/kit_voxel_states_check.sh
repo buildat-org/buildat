@@ -24,9 +24,11 @@
 #   3. On again, then End: both boxes are the start again (the game's
 #      changes put back; the dug pillar, a build, kept).
 #   4. R's start_on, then Run: R is on at the start, its stones glass.
-# The probes' patterns are read from the save's authored row. (Ended
-# first: sample_kit's floor is merged after a fresh save's round copied
-# its section, so the first End takes it away; the start is set here.)
+# The probes' patterns are read from the save's authored row.
+# ([KIT_ROUND_START]) The first End is a fresh save's: sample_kit's floor
+# is merged after the round copied its section, and the merge is made
+# into the copy, so R's box (probe 20's b, captured then) has its floor
+# and pillar after it.
 #
 #   util/kit_voxel_states_check.sh
 set -u
@@ -77,6 +79,7 @@ EOF
 	done
 	echo "click Button \"End\""
 	echo "wait_log 10000 kit editor: the server is Ended (by kitboss)"
+	n=$((n + 1)); pat 20 b; echo "wait_log 10000 kit editor: state: 21 entities, $n to undo"
 	show() { edit "{\"op\": \"pattern\", \"id\": $1, \"comp\": 0, \"param\": \"a\", \"action\": \"show\"}" 21; }
 	set1 18 a '"3 2 3;stone glass air;0*9 1 2*3 0 2*4"'
 	show 18
@@ -173,6 +176,7 @@ def r_box(floor, glass, pillar):
 	return lambda x, y, z: floor if y == 0 else glass if (x, z) == (0, 0) else \
 		pillar if (x, z) == (1, 1) else "air"
 ok = all([
+	expect("R's box after the first End", cells(20, "b"), r_box("stone", "air", "stone")),
 	expect("R's box on", cells(18, "a"), r_box("glass", "glass", "glass")),
 	expect("R's box off, the pillar dug", cells(18, "b"), r_box("stone", "glass", "air")),
 	expect("R's box after End", cells(20, "a"), r_box("stone", "glass", "air")),
@@ -191,7 +195,8 @@ want() # <text>...
 		grep -aqF -- "$w" "$s" || fail "no \"$w\" in $s"
 	done
 }
-want "An edit by kitboss: captured 22's kit/voxel_states a, 8 cells in 2 voxels" \
+want "generator merges made into the copies" \
+	"An edit by kitboss: captured 22's kit/voxel_states a, 8 cells in 2 voxels" \
 	"An edit by kitboss: filled 22's kit/voxel_states b, 8 cells in 1 voxels" \
 	"An edit by kitboss: showed 22's kit/voxel_states b, 8 cells written" \
 	"An edit by kitboss: captured 22's kit/voxel_states b, 8 cells in 1 voxels" \

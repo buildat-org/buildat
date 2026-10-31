@@ -2689,6 +2689,57 @@ struct CInstance: public voxelworld::Instance
 		write_volume(volume, create_missing_sections, false, owned);
 	}
 
+	// Whether a merge writes a voxel over what is there: see merge_volume()
+	// in api.h. write_volume()'s walk and merge_into_volume() both ask
+	bool merge_takes(const interface::VoxelSample &src_v,
+			const interface::VoxelSample &dst_v, bool old_undefined,
+			bool writer_owns, bool keep_standing)
+	{
+		if(keep_standing && !old_undefined && !voxel_is_fully_empty(dst_v))
+			return false;
+		if(!writer_owns && !old_undefined){
+			// Anything already standing here wins
+			if(!voxel_is_fully_empty(dst_v))
+				return false;
+			// Empty stays empty unless something is put in it
+			if(voxel_is_fully_empty(src_v))
+				return false;
+		}
+		return true;
+	}
+
+	void merge_into_volume(VoxelVolume &dst, const VoxelVolume &volume,
+			const pv::Region *owned, bool keep_standing)
+	{
+		pv::Region r = volume.getEnclosingRegion();
+		r.cropTo(dst.getEnclosingRegion());
+		const pv::Vector3DInt32 lc = r.getLowerCorner();
+		const pv::Vector3DInt32 uc = r.getUpperCorner();
+		if(lc.getX() > uc.getX() || lc.getY() > uc.getY() ||
+				lc.getZ() > uc.getZ())
+			return;
+		dst.add_planes(volume.planes());
+		const size_t planes = std::min(dst.planes().size(),
+				volume.planes().size());
+		for(int z = lc.getZ(); z <= uc.getZ(); z++)
+		for(int y = lc.getY(); y <= uc.getY(); y++)
+		for(int x = lc.getX(); x <= uc.getX(); x++){
+			const interface::VoxelSample src_v = volume.sample_at(x, y, z);
+			if(is_undefined(VoxelInstance(src_v.planes[0])))
+				continue;
+			const interface::VoxelSample dst_v = dst.sample_at(x, y, z);
+			const bool writer_owns = owned != nullptr &&
+					owned->containsPoint(pv::Vector3DInt32(x, y, z));
+			if(!merge_takes(src_v, dst_v,
+					is_undefined(VoxelInstance(dst_v.planes[0])),
+					writer_owns, keep_standing))
+				continue;
+			for(size_t pi = 0; pi < std::max<size_t>(planes, 1); pi++)
+				dst.set_plane_at((uint8_t)pi, x, y, z,
+						volume.plane_at((uint8_t)pi, x, y, z));
+		}
+	}
+
 	// The same walk that overwrites instead, which is what everything that
 	// is not a generator wants: an importer, a VoxelManip, a mod putting a
 	// building down.
@@ -2725,6 +2776,27 @@ struct CInstance: public voxelworld::Instance
 				watch_voxel(pv::Vector3DInt32(cx * m_chunk_size_voxels.getX(),
 						cy * m_chunk_size_voxels.getY(),
 						cz * m_chunk_size_voxels.getZ()));
+		// [KIT_ROUND_START] and the sections a merge reaches, told of it
+		// before it writes (keep_standing as the walk below decides it)
+		if(!overwrite && m_section_watch){
+			sp_<SectionWatch> watch = m_section_watch;
+			std::set<std::tuple<int, int, int>> told;
+			for(int cz = chunk_lc.getZ(); cz <= chunk_uc.getZ(); cz++)
+			for(int cy = chunk_lc.getY(); cy <= chunk_uc.getY(); cy++)
+			for(int cx = chunk_lc.getX(); cx <= chunk_uc.getX(); cx++){
+				const pv::Vector3DInt32 chunk_p(cx, cy, cz);
+				if(!chunk_section_fits(chunk_p))
+					continue;
+				const pv::Vector3DInt16 sp =
+						container_coord16(chunk_p, m_section_size_chunks);
+				if(!told.insert(std::make_tuple(sp.getX(), sp.getY(),
+						sp.getZ())).second)
+					continue;
+				Section *s = get_section(sp);
+				watch->merged(this, sp, volume, owned,
+						owned != nullptr && (s == nullptr || !s->arrived));
+			}
+		}
 		for(int cz = chunk_lc.getZ(); cz <= chunk_uc.getZ(); cz++){
 		for(int cy = chunk_lc.getY(); cy <= chunk_uc.getY(); cy++){
 		for(int cx = chunk_lc.getX(); cx <= chunk_uc.getX(); cx++){
@@ -2835,17 +2907,9 @@ struct CInstance: public voxelworld::Instance
 						y <= owned->getUpperCorner().getY() &&
 						z >= owned->getLowerCorner().getZ() &&
 						z <= owned->getUpperCorner().getZ());
-				if(keep_standing && !old_undefined &&
-						!voxel_is_fully_empty(dst_v))
+				if(!merge_takes(src_v, dst_v, old_undefined, writer_owns,
+						keep_standing))
 					continue;
-				if(!writer_owns && !old_undefined){
-					// Anything already standing here wins
-					if(!voxel_is_fully_empty(dst_v))
-						continue;
-					// Empty stays empty unless something is put in it
-					if(voxel_is_fully_empty(src_v))
-						continue;
-				}
 
 				// Only the faces of the volume touch what was already in
 				// the world: a voxel inside it that had no light and is

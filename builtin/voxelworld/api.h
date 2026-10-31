@@ -192,12 +192,23 @@ namespace voxelworld
 	// routed write made), set_volume() and put_section(); not a generator's
 	// merge_volume(). Called with voxelworld held, on its thread: the watch
 	// keeps the copy and calls nothing back.
+	//
+	// [KIT_ROUND_START] merged(): a generator's merge_volume() reaching a
+	// section, any section while the watch is set (told before the merge
+	// writes; a copy made earlier is the watch's to know of), with the
+	// merge's volume and owned region (nullptr: none) and whether it keeps
+	// what stands there (keep_standing). merge_into_volume() makes the same
+	// merge into a copy.
 	struct SectionWatch
 	{
 		virtual ~SectionWatch(){}
 		virtual void before_write(Instance *world,
 				const pv::Vector3DInt16 &section_p,
 				const VoxelVolume &before) = 0;
+		virtual void merged(Instance *world,
+				const pv::Vector3DInt16 &section_p,
+				const VoxelVolume &volume, const pv::Region *owned,
+				bool keep_standing){}
 	};
 
 	struct CommitHook
@@ -472,6 +483,17 @@ namespace voxelworld
 				const VoxelVolume &volume,
 				bool create_missing_sections,
 				const pv::Region *owned = nullptr) = 0;
+
+		// [KIT_ROUND_START] The voxel choices merge_volume() makes, into a
+		// volume of the caller's (a SectionWatch's copy): the part of
+		// `volume` inside `dst`, by the same priorities. keep_standing is
+		// what SectionWatch::merged() said.
+		// simplified: the voxels are written with the light they came
+		// with; nothing is flooded. A copy put back is lit as the generator
+		// lit it
+		virtual void merge_into_volume(VoxelVolume &dst,
+				const VoxelVolume &volume, const pv::Region *owned,
+				bool keep_standing) = 0;
 
 		// Maintain the sky light (the format's light_sky) of every voxel in
 		// the world.
