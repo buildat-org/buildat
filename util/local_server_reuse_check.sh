@@ -49,8 +49,7 @@ mouse_click left
 wait_log 10000 menu: the world
 delay 500
 click Button "Play"
-wait_log 90000 the server put the player
-wait_log 60000 scene, 0 undrawn within 2
+wait_log 150000 load: the world is in
 keypress Escape
 wait_log 5000 pause: the menu shown
 delay 500

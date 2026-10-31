@@ -51,13 +51,12 @@ menu_closed(){ nolog "$1" | grep -qE 'vanilla : .*FPS:.*view range:'; }
 
 run_drive(){
 	{
-		echo "wait_log 60000 the server put the player"
 		# Past the server's reposition of a spawned player onto meshed
 		# ground (a second "put the player"), which eats a key pressed too
-		# soon and leaves the menu unopened: the world settled, and the
-		# two seconds after it for the reposition, which the client does
-		# not tell apart from the first
-		echo "wait_log 60000 scene, 0 undrawn within 2"
+		# soon and leaves the menu unopened: the world in (the keys go to
+		# it from then), and the two seconds after it for the reposition,
+		# which the client does not tell apart from the first
+		echo "wait_log 120000 load: the world is in"
 		echo "delay 2000"
 		echo "keypress Escape"
 		echo "wait_log 5000 pause: the menu shown"

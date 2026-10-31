@@ -188,7 +188,10 @@ stick(){ # dy: down from (150, 300) for 2 s
 }
 click="wait_log 10000 form: a left click"
 {
-	echo "wait_log 60000 chat: touch_parity: ready"
+	# The taps go to the world once it is in. First, as wait_log_any
+	# looks back only 400 lines and the line comes early
+	echo "wait_log_any 60000 load: the world is in"
+	echo "wait_log_any 60000 chat: touch_parity: ready"
 	# The client's world round the player too: the loading screen ends at
 	# the player's own chunk ([LOAD_OWN_CHUNK]), the marker's may come
 	# after, drawn in the frames after the line

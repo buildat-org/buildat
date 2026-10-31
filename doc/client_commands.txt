@@ -90,19 +90,29 @@ wait_log <ms> <text>
     text. Not seen in the time, the sequence fails and the client exits
     non-zero (read from standard input, a line says so and it goes on). A
     wait for a screen or a moment instead of a guessed delay:
-    "wait_log 60000 the server put the player" and then "wait_log 60000
-    scene, 0 undrawn within 2" is the world being playable (a substring:
-    "0 undrawn" alone is also "110 undrawn"); "wait_log 90000 voxel
-    types have their own textures" the same for the luanti_client extension.
+    "wait_log 120000 load: the world is in" is the world being playable
+    in an app that runs the luanti module (vanilla and the apps based on
+    it, such as sample_vanilla_falling_blocks; sample_luanti_glue;
+    demo_skelenti): the player is placed and the ground under them is
+    loaded, and the keys, the HUD and the mouse look go to the world from
+    then. "the server put the player at ..." and the once-a-second
+    "settle: ... N undrawn within 2" come from the same client. Wait for
+    "scene, 0 undrawn within 2" only where a run looks at the world's
+    pixels, which want the chunks round the player drawn (a substring:
+    "0 undrawn" alone is also "110 undrawn"), and for the world in as
+    well if it sends input after. "wait_log 90000 voxel types have their
+    own textures" is the same for the luanti_client extension.
 
     It waits for the *next* such line: what was logged before it started
     does not count, which is what makes "wait for it to happen again"
     work.
 
 wait_log_any <ms> <text>
-    The same, but the line counts wherever it appeared in this run. For
-    something a program says once, and says while the sequence is still
-    being read -- a launch UI that is slow to build says it is ready
+    The same, but the line counts wherever it appeared in this run, as
+    far back as the client keeps lines: the last 400 (src/core/log.cpp's
+    RECENT_MAX), so a busy log can lose an early one; wait for that first.
+    For something a program says once, and says while the sequence is
+    still being read -- a launch UI that is slow to build says it is ready
     before the first command runs, and wait_log then sits out its whole
     timeout and every step after it runs that much late.
 
@@ -352,7 +362,7 @@ screen it drew:
 Take the same shot every run, whatever the camera was left pointing at,
 of the world drawn:
 
-    wait_log 60000 the server put the player at
+    wait_log 60000 scene, 0 undrawn within 2
     look 275 -15
     idle 30000
     screenshot /tmp/buildat_view.png
@@ -360,7 +370,7 @@ of the world drawn:
 Hold W for half a second while connected to a local server, and shoot
 once the server has had the walk and the client the answer:
 
-    wait_log 60000 the server put the player at
+    wait_log 120000 load: the world is in
     keydown W
     delay 500
     keyup W

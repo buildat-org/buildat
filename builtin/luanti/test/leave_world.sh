@@ -156,10 +156,8 @@ for e in els or []:
 if not play:
     fail("no Play row; saw " + ", ".join(e[5] for e in els or [])[:300])
 click(play)
-if not waitlog("the server put the player", 120):
-    fail("the world never came up; see " + log)
-if not waitlog("scene, 0 undrawn within 2", 60):
-    fail("the world was never drawn; see " + log)
+if not waitlog("load: the world is in", 180):
+    fail("the world never came in; see " + log)
 # A settle after the line: the world drawn in the frames after it
 write("delay 1000", "screenshot %s/in_world.png" % out)
 

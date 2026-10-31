@@ -127,6 +127,8 @@ trap 'kill -INT "$srv" 2>/dev/null' EXIT
 cat > "$out/cmds.txt" <<CMDS
 wait_log_any 60000 the server put the player at 0.0, 121.0, 0.0
 wait_log 60000 scene, 0 undrawn within 2
+# Not "load: the world is in": that is said once, at the first spawn,
+# before this move ([LUANTI_LOADED_WAITS]); the platform is what has to be in
 # a settle after the line: the player lands on the platform
 delay 2000
 look_dir 1 -1 0

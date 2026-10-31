@@ -1119,6 +1119,27 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 				maps.humidmap.assign(bg->humidmap, bg->humidmap + n);
 			m_maps->put(key, std::move(maps));
 		}
+
+		// What the chunk came out as, which is the same for the same seed
+		// and position whatever was made before it: in this run if the
+		// cache dropped it and it is made again, and in the next.
+		// builtin/luanti/test/mapgen_deterministic.sh compares these
+		// ([MCL_GEN_NONDETERMINISTIC])
+		uint64_t h = 1469598103934665603ull; // FNV-1a over the words
+		auto mix = [&h](uint64_t v) { h = (h ^ v) * 1099511628211ull; };
+		for(const auto &r : ch->runs){
+			mix(r.first);
+			mix(r.second.param0 | (uint64_t)r.second.param1 << 16 |
+					(uint64_t)r.second.param2 << 24);
+		}
+		for(const auto &s : ch->spill){
+			mix((uint64_t)(u16)s.first.X | (uint64_t)(u16)s.first.Y << 16 |
+					(uint64_t)(u16)s.first.Z << 32);
+			mix(s.second.param0 | (uint64_t)s.second.param1 << 16 |
+					(uint64_t)s.second.param2 << 24);
+		}
+		log_v(MODULE, "Chunk (%i, %i, %i) made: hash %016llx", node_min.X,
+				node_min.Y, node_min.Z, (unsigned long long)h);
 		return ch;
 	}
 

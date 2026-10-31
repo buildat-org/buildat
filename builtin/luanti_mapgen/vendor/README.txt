@@ -26,6 +26,19 @@ Luanti's own, unchanged (upstream: git master, 2026-09):
     util/serialize.h, util/serialize.cpp, util/hex.h, util/ieee_float.*
                                         <- vendored, not yet compiled
 
+Changed from upstream, each marked "buildat:" where it is
+-------------------------------------------------------------
+
+    mg_schematic.h/.cpp, mg_decoration.h/.cpp  [MCL_GEN_NONDETERMINISTIC]
+        Schematic::blitToVManip() takes the PcgRandom it rolls the slice
+        and node probabilities with; DecoSchematic::generate() passes one
+        seeded from the world's seed and the placement. Upstream rolls
+        them with myrand(), one generator for the process (here rand()),
+        so the same chunk came out differently between runs and within
+        one. The other callers leave it out and get myrand(); Lua's
+        core.place_schematic*() are builtin/luanti/lua/stubs.lua's own,
+        rolled with math.random as upstream's are with myrand().
+
 Where the port stopped (2026-09-13)
 -----------------------------------
 

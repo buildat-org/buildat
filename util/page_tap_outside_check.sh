@@ -128,7 +128,7 @@ after(){ # server log, client log
 server "$t/n"
 client touch BUILDAT_TOUCH=1 <<C
 wait_log 60000 chat: page_tap: ready
-wait_log_any 60000 scene, 0 undrawn within 2
+wait_log_any 60000 load: the world is in
 delay 2000
 tap 645 94
 wait_log 5000 pause: the menu shown

@@ -66,10 +66,10 @@ def wait_for(path, text, secs):
         time.sleep(0.1)
     fail("no \"%s\" in %d s (%s)" % (text, secs, path))
 # The stacks are set four seconds after the join, on the server; the
-# client's world drawn, then a settle of a second for the inventory to
+# client's world in, then a settle of a second for the inventory to
 # reach the hotbar in the frames after
 wait_for(srv, "itemmeta: the stacks are set", 90)
-write("wait_log_any 60000 scene, 0 undrawn within 2", "delay 1000")
+write("wait_log_any 60000 load: the world is in", "delay 1000")
 lines = scan()
 # Slot 1 in hand, which is where the hand's own picture is read; the
 # 800 ms are the hand swapped in the frames after the key

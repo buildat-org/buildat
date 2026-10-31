@@ -48,7 +48,10 @@ trap 'kill -INT "$srv" 2>/dev/null' EXIT
 # client marks (see camera.sh)
 cat > "$out/cmds.txt" <<CMDS
 wait_log 60000 the server put the player
-wait_log 60000 scene, 0 undrawn within 2
+# The keys go to the world once it is in, which may come after the
+# placement; the pictures are the world's own, so drawn round the player
+wait_log_any 60000 load: the world is in
+wait_log_any 60000 scene, 0 undrawn within 2
 # "0 undrawn" is the mesher's count, not the frame: the first picture is
 # the one the fullscreen check compares against, and taken two seconds
 # after that line it came out at a frame mean of 19 against the usual 109

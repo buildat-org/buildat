@@ -37,7 +37,10 @@ trap 'kill -INT "$srv" 2>/dev/null' EXIT
 # old 8 s were not measured either; if the pool reads dark, a line where
 # the client takes a section's light is the event.
 shoot() { # <tag>
-	{ echo "wait_log 150000 chat: liquid_shore: ready"
+	{ # The look goes to the world once it is in. First, as wait_log_any
+		# looks back only 400 lines and the line comes early
+		echo "wait_log_any 150000 load: the world is in"
+		echo "wait_log_any 150000 chat: liquid_shore: ready"
 		# And the client's own world drawn before the shot, not only the
 		# server's light settled
 		echo "wait_log_any 60000 scene, 0 undrawn within 2"

@@ -33,11 +33,11 @@ srv=$SERVER_PID
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
 # The stage is the fixture's turn to the east after its set_pos, which
 # the client logs as the server putting the player there "looking 90";
-# either can come first, it or the world drawn around the spawn. The
+# either can come first, it or the world in around the spawn. The
 # second stage is the fixture's next set_pos, 16 s after the first; the 2
 # s and 1.5 s after a look_dir are the models and the world drawn there
 cat > "$out/cmds.txt" <<CMDS
-wait_log_any 120000 scene, 0 undrawn within 2
+wait_log_any 120000 load: the world is in
 wait_log_any 60000 looking 90
 look_dir 1 -0.15 0
 # simplified: the models and the world in the new direction drawn; a

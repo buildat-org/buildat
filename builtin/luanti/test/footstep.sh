@@ -72,10 +72,9 @@ if ! grep -aq "Mods loaded" "$out/srv.log"; then
 	kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
 	echo "SKIP: the server did not come up" >&2; exit "$SKIP"
 fi
-# On the platform (the fixture's line is the server's): placed, the world
-# around drawn, a second to land; then the five seconds of W
-{ echo "wait_log 60000 the server put the player"
-	echo "wait_log 60000 scene, 0 undrawn within 2"
+# On the platform (the fixture's line is the server's): the world in,
+# which is when keys walk, a second to land; then the five seconds of W
+{ echo "wait_log 120000 load: the world is in"
 	echo "delay 1000"
 	echo "keydown W"
 	# A timing test: walks 5 s
