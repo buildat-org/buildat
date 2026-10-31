@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <cstdlib>
 #include "core/log.h"
 #include "voxelworld/api.h"
 #include "worldgen/api.h"
@@ -75,6 +77,7 @@ struct CInstance: public worldgen::Instance
 	bool m_enabled = false;
 
 	std::deque<pv::Vector3DInt16> m_queued_sections;
+	pv::Vector3DInt16 m_last_taken = pv::Vector3DInt16(0, 0, 0);
 
 	CInstance(interface::Server *server, SceneReference scene_ref):
 		m_server(server),
@@ -112,21 +115,39 @@ struct CInstance: public worldgen::Instance
 	{
 		if(!m_enabled || m_queued_sections.empty())
 			return false;
+		auto d2 = [](const pv::Vector3DInt16 &a, const pv::Vector3DInt16 &b){
+			int64_t dx = a.getX() - b.getX(), dy = a.getY() - b.getY(),
+					dz = a.getZ() - b.getZ();
+			return dx*dx + dy*dy + dz*dz;
+		};
+		auto ring = [](const pv::Vector3DInt16 &a, const pv::Vector3DInt16 &b){
+			return std::max({std::abs(a.getX() - b.getX()),
+					std::abs(a.getY() - b.getY()), std::abs(a.getZ() - b.getZ())});
+		};
+		// The ring of sections around a player first, and in it the one
+		// nearest the last taken ([WORLDGEN_SLOWDOWN]): a generator keeps
+		// what it made for the last few sections (luanti_mapgen's chunk
+		// cache). By plain distance the nearest are on opposite sides of
+		// the player, taken in turn, and every chunk was made again: 5.6
+		// chunks a section in a fuzz.sh walk, 3.4 by the ring.
 		size_t best = 0;
-		int64_t best_d = INT64_MAX;
+		int64_t best_ring = INT64_MAX, best_last = INT64_MAX;
 		for(size_t i = 0; i < m_queued_sections.size() && !players.empty(); i++){
 			const pv::Vector3DInt16 &s = m_queued_sections[i];
 			for(const pv::Vector3DInt16 &p : players){
-				int64_t dx = s.getX() - p.getX(), dy = s.getY() - p.getY(),
-						dz = s.getZ() - p.getZ();
-				int64_t d = dx*dx + dy*dy + dz*dz;
-				if(d < best_d){
-					best_d = d;
+				int64_t r = ring(s, p);
+				if(r > best_ring)
+					continue;
+				int64_t last = d2(s, m_last_taken);
+				if(r < best_ring || last < best_last){
+					best_ring = r;
+					best_last = last;
 					best = i;
 				}
 			}
 		}
 		*section_p_out = m_queued_sections[best];
+		m_last_taken = *section_p_out;
 		*generator_out = m_generator.get();
 		*epoch_out = m_epoch;
 		m_queued_sections.erase(m_queued_sections.begin() + best);

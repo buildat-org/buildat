@@ -36,7 +36,9 @@ across="${4:-6}"
 save="${5:-bench_worldgen}"
 build="$root/Build"
 saves="$BUILDAT_USER_PATH/apps/vanilla/saves"
-out="$(mktemp -d /tmp/buildat_bench_worldgen.XXXXXX)"
+# In the tree: a boxed server reads its probe from nowhere under /tmp
+mkdir -p "$root/local"
+out="$(mktemp -d "$root/local/bench_worldgen.XXXXXX")"
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $out" >&2 || rm -rf "$out"' EXIT
 
 if [ ! -x "$build/bin/buildat_server" ]; then
