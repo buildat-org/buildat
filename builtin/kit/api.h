@@ -76,7 +76,7 @@ namespace interface
 //           (its sides), color = "#rrggbb", text = "<shared state key>",
 //           extent = "<position param>", depth = n, solid = true,
 //           state = "<shared state key>", when = {color, solid, scale =
-//           {x, y, z}, swing = true}}  -- drawn where it is on every
+//           {x, y, z}, swing = true, mirror = true}}  -- drawn where it is on every
 //                               client, in both modes (Stopped: the
 //                               start's state), the state `text` over
 //                               it. extent: a box over those cells from
@@ -87,7 +87,9 @@ namespace interface
 //                               while the state `state` is true, `when`
 //                               over it: scale its sides (its bottom
 //                               kept), swing it a quarter round its -x
-//                               edge (a door). kit/door, gate, button,
+//                               edge (a door; towards +z, or with
+//                               mirror towards -z [KIT_DOOR_MIRROR]:
+//                               "param:mirror", kit/door's). kit/door, gate, button,
 //                               lever and key_door are such objects
 //                               ([KIT] stage 4c; before, voxels they
 //                               owned: a save's are migrated, the cells

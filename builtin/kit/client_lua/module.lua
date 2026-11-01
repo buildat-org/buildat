@@ -163,7 +163,8 @@ end
 --   on_update(e, dt) (each frame), on_use(e) (this player used it, before
 --   the server hears of it), on_remove(e)
 --   e.id, e.node (its replicated node), e.look, e.hinge, e.body (its look's
---   nodes: the body turns with the hinge), e.state (the server's), e.mine
+--   nodes: the body turns with the hinge), e.swing (a swing's open angle:
+--   -90, or 90 when.mirror), e.state (the server's), e.mine
 --   (this player's own entity), e:shown(key) (the state as drawn),
 --   e:near(d) (this player's entity within d of it),
 --   e:predict(key, value, seconds) (drawn so at once, until the server's
@@ -301,9 +302,13 @@ local function look_box(look, on)
 		end
 	end
 	if w.swing then
+		-- [KIT_DOOR_MIRROR] mirror: the other way, from its back to -z
 		local hinge, front = off[1] - size[1] / 2, off[3] - size[3] / 2
+		local back = off[3] + size[3] / 2
 		size[1], size[3] = size[3], size[1]
-		off[1], off[3] = hinge + size[1] / 2, front + size[3] / 2
+		off[1] = hinge + size[1] / 2
+		off[3] = w.mirror == true and back - size[3] / 2 or
+				front + size[3] / 2
 	end
 	return {size = size, off = off, solid = solid, color = w.color or look.color}
 end
@@ -424,7 +429,10 @@ local function draw_look(id, n, look)
 		local c = look_box(look, false)
 		local px = c.off[1] - c.size[1] / 2 + c.size[3] / 2
 		n.hinge.position = magic.Vector3(px, 0, c.off[3])
-		n.hinge.rotation = magic.Quaternion(0, on and -90 or 0, 0)
+		-- [KIT_DOOR_MIRROR] Open: -90, or 90 mirrored (the client part's
+		-- e.swing)
+		n.swing = look.when.mirror == true and 90 or -90
+		n.hinge.rotation = magic.Quaternion(0, on and n.swing or 0, 0)
 		n.body.position = magic.Vector3(c.off[1] - px, c.off[2], 0)
 		n.body.scale = v3(c.size)
 	else
@@ -624,6 +632,7 @@ local function update_play(_, data)
 			local e = n.e
 			e.look, e.hinge, e.body, e.mine = n.look, n.hinge, n.body,
 					id == P.you
+			e.swing = n.swing
 			if not n.added then
 				n.added, n.vals = true, {}
 				for _, part in ipairs(parts) do

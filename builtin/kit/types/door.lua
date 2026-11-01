@@ -1,7 +1,7 @@
 -- A door: an object one wide and two tall (its size), drawn shut or
 -- swung open, and solid while shut. A player opens and shuts it by using
 -- it, a link by "open", "close" or "toggle"; it shuts itself after
--- close_after seconds (0: it stays open)
+-- close_after seconds (0: it stays open). mirror: it swings the other way
 local function set(c, open, by)
 	if open == c.state.open then
 		return
@@ -19,10 +19,15 @@ return {
 	usable = true,
 	params = {
 		size = {type = "position", default = {1, 2, 1}},
+		-- [KIT_DOOR_MIRROR] It swings the other way: to its back (-z) rather
+		-- than its front, round the same hinge. Two doors, one turned half
+		-- round and mirrored, are a double door
+		mirror = {type = "bool", default = false},
 		close_after = {type = "number", default = 0, min = 0, max = 3600},
 	},
 	look = {shape = "box", extent = "size", depth = 0.2, color = "#8a5a30",
-		solid = true, state = "open", when = {swing = true, solid = false}},
+		solid = true, state = "open", when = {swing = true,
+		mirror = "param:mirror", solid = false}},
 	state = {open = {default = false, shared = true}},
 	inputs = {open = "none", close = "none", toggle = "none"},
 	outputs = {opened = "none", closed = "none"},

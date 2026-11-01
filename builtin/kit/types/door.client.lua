@@ -14,7 +14,7 @@ return {
 		if not e.hinge then
 			return
 		end
-		local want = e:shown("open") == true and -90 or 0
+		local want = e:shown("open") == true and (e.swing or -90) or 0
 		if not e.angle then
 			e.angle = want
 		end

@@ -229,9 +229,13 @@ function M.look_box(look, on, pos, yaw)
 		end
 	end
 	if w.swing then
+		-- [KIT_DOOR_MIRROR] mirror: the other way, from its back to -z
 		local hinge, front = off[1] - size[1] / 2, off[3] - size[3] / 2
+		local back = off[3] + size[3] / 2
 		size[1], size[3] = size[3], size[1]
-		off[1], off[3] = hinge + size[1] / 2, front + size[3] / 2
+		off[1] = hinge + size[1] / 2
+		off[3] = w.mirror == true and back - size[3] / 2 or
+				front + size[3] / 2
 	end
 	local r = type(look.rotation) == "table" and look.rotation or {}
 	local R = rotation(tonumber(r[1]) or 0, (tonumber(r[2]) or 0) +

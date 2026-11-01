@@ -61,7 +61,8 @@
 #      line lit, the spawner's log in the editor), at most max, a live
 #      edit (on_params), "Restart this" taking the copy back (on_remove),
 #      the copies gone at Stop; a wedge kit/part; kit/door's client part
-#      swinging a door on use. The players' items and scores are on their
+#      swinging a door on use, and the other way once mirrored, live
+#      ([KIT_DOOR_MIRROR]). The players' items and scores are on their
 #      entities, the zone's members in the runtime row.
 #   7. ([KIT] stage 4e2) Kit's editor as floorplanner's, by mouse and by
 #      finger: below.
@@ -760,6 +761,11 @@ event kit_edit {"op": "restart", "id": 3, "comp": 0}
 wait_log 10000 kit editor: log of 3:
 event kit_use 21
 wait_log 10000 kit: entity 21's client part: swung to -90
+# [KIT_DOOR_MIRROR] Mirrored while open, live: drawn at its back, the
+# client part swinging it the other way
+event kit_edit {"op": "set", "id": 21, "comp": 0, "param": "mirror", "value": true}
+wait_log 10000 kit: entity 21 drawn 0.2x2x1 at -0.4,0.5,-0.4
+wait_log 10000 kit: entity 21's client part: swung to 90
 sync 5000
 event kit_use 25
 wait_log_any 10000 kit: entity 30 drawn
@@ -838,7 +844,7 @@ EOF
 # spawner's copies by a button's signal (its line lit, its log in the
 # editor), at most max, taken back by "Restart this" (on_remove) after
 # a live edit (on_params), gone at Stop; a wedge part; the door's client
-# part swinging it on use
+# part swinging it on use, the other way mirrored
 want "$s2" "placed prefab kit/button_door as 21...22" \
 	"saved prefab kitboss/door2 version 1 of 2 entities (0 entities of other copies follow it)" \
 	"placed prefab kitboss/door2 as 23...24" \
@@ -849,7 +855,9 @@ want "$s2" "placed prefab kit/button_door as 21...22" \
 want "$t/boss.log" "client part: your score 1" \
 	"kit: entity 13's client part: dialog: Ada: Welcome!"
 want "$t/again.log" "kit editor: signal 25.pressed -> 3.spawn" \
-	"kit editor: log of 3: " "kit: entity 21's client part: swung to -90"
+	"kit editor: log of 3: " "kit: entity 21's client part: swung to -90" \
+	"kit: entity 21 drawn 0.2x2x1 at -0.4,0.5,-0.4" \
+	"kit: entity 21's client part: swung to 90"
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'authored'" > "$t/authored2.json"
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'runtime'" > "$t/runtime2.json"
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'prefab:kitboss/door2'" > "$t/prefab2.json"

@@ -233,4 +233,24 @@ local snap = MV.snapshot{x0 = -2, y0 = -1, z0 = -2, nx = 5, ny = 4, nz = 5,
 local ss = {pos = {0, 0.6, 0}}
 run(walker, ss, 30, {f = 0, r = 0, yaw = 0, jump = 0, go = 0}, snap, wp)
 assert(near(ss.pos[2], -0.5) and ss.surface == "stone", ss.pos[2])
+-- [KIT_DOOR_MIRROR] A door's box, shut, open, and open mirrored: its leaf
+-- turned round its -x edge to its front (+z), or to its back (-z)
+local function door_box(on, mirror)
+	-- (as the server sends kit/door's look; its open box asked for solid,
+	-- as look_box gives none for a box that is not)
+	return MV.look_box({shape = "box", size = {1, 2, 0.2},
+		offset = {0, 0.5, 0}, solid = true, state = "open",
+		when = {swing = true, mirror = mirror, solid = true}}, on, {0, 0, 0}, 0)
+end
+local function box_is(b, want)
+	assert(b, "no box")
+	for i = 1, 6 do
+		assert(near(b[i], want[i]), table.concat(b, ",") .. " not " ..
+				table.concat(want, ","))
+	end
+end
+assert(type_of("door").params.mirror.default == false)
+box_is(door_box(false, false), {-0.5, -0.5, -0.1, 0.5, 1.5, 0.1})
+box_is(door_box(true, false), {-0.5, -0.5, -0.1, -0.3, 1.5, 0.9})
+box_is(door_box(true, true), {-0.5, -0.5, -0.9, -0.3, 1.5, 0.1})
 print("kit_move_check: ok")

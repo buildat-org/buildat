@@ -16,11 +16,16 @@ return {
 	usable = true,
 	params = {
 		size = {type = "position", default = {1, 2, 1}},
+		-- [KIT_DOOR_MIRROR] It swings the other way: to its back (-z) rather
+		-- than its front, round the same hinge. Two doors, one turned half
+		-- round and mirrored, are a double door
+		mirror = {type = "bool", default = false},
 		key = {type = "string", default = "key"},
 		take = {type = "bool", default = false},
 	},
 	look = {shape = "box", extent = "size", depth = 0.2, color = "#c8a040",
-		solid = true, state = "open", when = {swing = true, solid = false}},
+		solid = true, state = "open", when = {swing = true,
+		mirror = "param:mirror", solid = false}},
 	state = {open = {default = false, shared = true}},
 	inputs = {close = "none"},
 	outputs = {opened = "none", closed = "none", refused = "none"},
