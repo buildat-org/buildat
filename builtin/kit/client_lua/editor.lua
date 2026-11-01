@@ -2928,6 +2928,13 @@ local function voxel_click(mx, my, dig)
 		j.param = M.hand.shape ~= "" and M.shape_param(v, n, t.y) or 0
 		j.tint = M.hand.tint
 	end
+	-- [KIT_HM_VOXELS] on the heightmap: the surface it is sunken in
+	local h = not dig and M.terrain_cell(t.cell[1], t.cell[2], t.cell[3]) and
+			heightmap.height_at(c[1], c[3])
+	if h then
+		log:info(string.format("kit editor: on the heightmap, its surface " ..
+				"at %.3f", h))
+	end
 	log:info("kit editor: " .. (dig and "dig" or "place " .. name) .. " at " ..
 			table.concat(c, ",") .. (j.param and j.param ~= 0 and
 			" param " .. j.param or "") .. (j.tint and j.tint ~= 0 and

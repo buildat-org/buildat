@@ -159,6 +159,20 @@ local function voxel_at(x, y, z)
 			voxelworld.get_static_voxel(magic.Vector3(x, y, z))) > 1
 end
 
+-- For a drive ([KIT_HM_NO_SEA]): "event wb_column" logs the voxels of
+-- the column (5, 5) from y -8 to 0 (on a heightmap all air, no sea)
+magic.SubscribeToEvent("command_seq:wb_column", function()
+	local reg, n = voxelworld.get_voxel_registry(), {0, 0, 0}
+	for y = -8, 0 do
+		local id = reg:id_of(voxelworld.get_static_voxel(
+				magic.Vector3(5, y, 5)))
+		local k = id == 0 and 1 or id == 1 and 2 or 3
+		n[k] = n[k] + 1
+	end
+	log:info("workbench: column 5,5: " .. n[1] .. " not loaded, " ..
+			n[2] .. " air, " .. n[3] .. " voxels")
+end)
+
 -- What a click would do in play ([KIT] stage 4e2, Kit's play_target): at
 -- the crosshair, or a touchscreen's finger (x, y: its pixels); a camera
 -- away from the eye (chase, top-down) reaches as far past the player

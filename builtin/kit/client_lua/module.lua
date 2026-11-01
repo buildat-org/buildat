@@ -985,28 +985,63 @@ end
 M.voxel_ray = voxel_ray
 
 -- [KIT_HM_VOXELS] A heightmap's ground for the voxel tools: a cell whose
--- bottom is under the terrain at its middle is ground, pointed at and
--- built on, never dug (the voxels over it are air until built)
+-- top is at or under the terrain at its middle is ground, pointed at and
+-- built on, never dug (the voxels over it are air until built). The cell
+-- the terrain cuts through is air: the first layer built, partly sunken
+-- (a wall without a gap under it), each of its voxels still seen
+local SUNK = 1e-4 -- a cell sunken less than this is ground
 function M.terrain_cell(x, y, z)
 	local h = heightmap.terrain and heightmap.height_at(x, z)
-	return type(h) == "number" and y - 0.5 < h
+	return type(h) == "number" and y + 0.5 <= h + SUNK
+end
+
+-- Where the ray meets the terrain's surface, back from t (where it is in
+-- the ground's cells, under the surface): {x, h, z}, or nil
+local function surface_point(o, v, t)
+	local function under(s)
+		local x, z = o[1] + v[1] * s, o[3] + v[3] * s
+		local h = heightmap.height_at(x, z)
+		return type(h) == "number" and o[2] + v[2] * s <= h
+	end
+	local step = 0.1 / math.max(1e-6, math.sqrt(v[1] ^ 2 + v[2] ^ 2 + v[3] ^ 2))
+	-- (Over the surface already at t, between samples: t's point)
+	local a, b = t, nil -- a under, b over
+	for i = 1, under(t) and 80 or 0 do
+		local s = t - step * i
+		if s <= 0 then
+			break
+		end
+		if not under(s) then
+			b = s
+			break
+		end
+		a = s
+	end
+	if b then
+		for _ = 1, 12 do
+			local m = (a + b) / 2
+			if under(m) then a = m else b = m end
+		end
+	end
+	local x, z = o[1] + v[1] * a, o[3] + v[3] * a
+	local h = heightmap.height_at(x, z)
+	return type(h) == "number" and {x, h, z} or nil
 end
 
 -- Where a placement on a ray's hit (voxel_ray's hit, front and t; o and v
 -- the ray) goes: the cell before a voxel's face; on the heightmap the
--- cell over the hit point, its bottom at or just above the terrain there
--- (the face's cell when that one is taken)
+-- cell the terrain cuts through where the ray meets it, the lowest one at
+-- least partly seen (the face's cell when that one is taken)
 function M.place_front(hit, front, o, v, t, solid)
 	if not (hit and M.terrain_cell(hit[1], hit[2], hit[3])) then
 		return front
 	end
-	local x, z = o[1] + v[1] * t, o[3] + v[3] * t
-	local h = heightmap.height_at(x, z)
-	if type(h) ~= "number" then
+	local p = surface_point(o, v, t)
+	if not p then
 		return front
 	end
-	local c = {math.floor(x + 0.5), math.ceil(h + 0.5 - 1e-4),
-			math.floor(z + 0.5)}
+	local c = {math.floor(p[1] + 0.5), math.floor(p[2] + 0.5 + SUNK),
+			math.floor(p[3] + 0.5)}
 	if solid and solid(c[1], c[2], c[3]) then
 		return front
 	end

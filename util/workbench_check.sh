@@ -1466,7 +1466,8 @@ echo "ok: a builder's voxel type made in Kit's editor from an uploaded PNG, draw
 # menu=projects, New menu=new, a save's Manage... project=<it>. menu=new:
 # the name screen at once, "alpha" typed and made, Workbench in it.
 # ([KIT_HM_VOXELS]) On its heightmap, the editor's walk with the voxels
-# tool: a voxel placed on the ground, one on its face, a third placed and
+# tool: a voxel placed on the ground (in the cell the surface cuts
+# through), one on its face, a third placed and
 # dug, the heightmap not dug; End. ([KIT_HM_WALK]) In play w, a, s and d
 # each walk several metres, no corrections. Opened again
 # (save=alpha): the two voxels at the crosshair, their section in
@@ -1504,6 +1505,7 @@ wait_log_any 30000 heightmap: terrain built
 wait_log_any 10000 kit editor: edit rights: yes
 keypress F6
 wait_log 10000 kit editor: state:
+event wb_column
 keypress V
 wait_log 5000 kit editor: tool voxels
 keypress F3
@@ -1569,6 +1571,9 @@ want "$t/srv9.log" 'world_menu: made "alpha"' 'workbench: the project "alpha" op
 grep -aq "World: the save holds\|biome grassland, voxels\|biome rock" "$t/srv9.log" &&
 	fail "the new project has voxel ground ($t/srv9.log)"
 want "$t/new9.log" "heightmap: terrain built"
+# [KIT_HM_NO_SEA] The voxels on a heightmap all air: no sea over the
+# voxel map's square
+want "$t/new9.log" "workbench: column 5,5: 0 not loaded, 9 air, 0 voxels"
 grep -aq "world_menu: the list shown" "$t/new9.log" &&
 	fail "menu=new showed the list first ($t/new9.log)"
 # The walk: each leg several metres its way (w +z, a -x, s -z, d +x), no
@@ -1585,9 +1590,17 @@ awk 'NR == 1 { x = $1; z = $2; c = $3; next }
 # The voxels built over it: three placed, the top one dug, the ground not
 cells=$(grep -a "kit editor: place kit/cobble at" "$t/new9.log" | sed 's/.* at //')
 [ $(echo "$cells" | wc -l) = 3 ] || fail "not 3 placed ($t/new9.log)"
-# The first on the ground, the second on its face toward the player
+# The first on the ground, the second on its face
 a=$(echo "$cells" | sed -n 1p); top=$(echo "$cells" | sed -n 2p)
-[ "$top" = "$(echo "$a" | awk -F, '{print $1 "," $2 "," $3 + 1}')" ] ||
+# The first in the cell the terrain cuts through (partly sunken, at least
+# barely seen)
+h=$(grep -a "kit editor: on the heightmap, its surface at" "$t/new9.log" | head -1 | sed 's/.* at //')
+[ -n "$h" ] || fail "the first voxel not on the heightmap ($t/new9.log)"
+echo "$a $h" | awk -F'[, ]' '{ y = $2; h = $4; exit !(y - 0.5 < h + 0.0002 && y + 0.5 > h) }' ||
+	fail "the first voxel ($a) not the cell the surface at $h cuts through ($t/new9.log)"
+# (its top or its side: the first is partly sunken)
+echo "$a,$top" | awk -F, '{ d = ($4 - $1) ^ 2 + ($5 - $2) ^ 2 + ($6 - $3) ^ 2
+	exit !(d == 1 && $5 >= $2) }' ||
 	fail "the second voxel ($top) not on the first's face ($a) ($t/new9.log)"
 want "$t/new9.log" "kit editor: dig at $(echo "$cells" | sed -n 3p)" "kit editor: dig: the heightmap is not dug"
 grep -a "set_voxel" "$t/srv9.log" | grep -aq "refus\|not loaded" && fail "a set_voxel refused ($t/srv9.log)"

@@ -3701,10 +3701,18 @@ struct Module: public interface::Module, public Interface
 		m_gen_hi = hi;
 		m_gen_voxels = h != nullptr;
 		if(!h){
-			// A heightmap's scene: no voxels
+			// A heightmap's scene: no voxels, all air: neither the World's
+			// sea (an empty map's columns are all under it: water up to
+			// sea_level over the voxel map's square, round the origin and
+			// not the heightmap's) nor its border, caves or decorations
+			// ([KIT_HM_NO_SEA])
+			g->p.generator = "empty";
+			g->p.border = "void";
+			g->p.sea_level = INT_MIN / 2;
+			g->p.caves = false;
+			g->p.decorations = false;
 			h.reset(new world::Heights());
-			h->p = p;
-			h->p.generator = "empty";
+			h->p = g->p;
 		}
 		g->h = std::move(h);
 		g->max_top = hi;
