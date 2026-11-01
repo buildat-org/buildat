@@ -381,12 +381,13 @@ local function voxel_def(name)
 	return voxel_defs.by[name]
 end
 
--- [KIT_LOOK_MATERIAL] A unit box wearing a voxel material's six tiles
--- (+y, -y, +x, -x, +z, -z, the voxels' order), a texture a metre of its
--- sides `size` as the voxels wear theirs (a tile of a texture of several
--- stretched over its face); nil when the material has no textures here
+-- [KIT_LOOK_MATERIAL] A unit box or wedge (wedge's) wearing a voxel
+-- material's tiles (+y, -y, +x, -x, +z, -z, the voxels' order; a wedge's
+-- slope its +y, its back +z), a texture a metre of its sides `size` as the
+-- voxels wear theirs (a tile of a texture of several stretched over its
+-- face); nil when the material has no textures here
 local face_textures = {}
-local function voxel_box(node, def, size)
+local function voxel_mesh(node, def, size, shape)
 	local tex = {}
 	for i = 1, 6 do
 		local seg = def.textures[i]
@@ -409,63 +410,111 @@ local function voxel_box(node, def, size)
 	if not next(tex) then
 		return nil
 	end
+	local sx, sy, sz = size[1], size[2], size[3]
+	local a, b = -0.5, 0.5
+	-- Each face: its tile, its normal (unit box), its corners {x, y, z}
+	-- (unit) with where they are on it in metres {u, v} (v down), as
+	-- triangles; its extent in metres (a segment's fraction)
+	local faces
+	local function corner(x, y, z, u, v)
+		return {x, y, z, u, v}
+	end
+	if shape == "wedge" then
+		local L = math.sqrt(sy * sy + sz * sz)
+		-- The slope: from its back top (v 0) down to its front bottom
+		local function sl(x, y, z)
+			return corner(x, y, z, (x + 0.5) * sx, (0.5 - z) * L)
+		end
+		local function bt(x, y, z)
+			return corner(x, y, z, (x + 0.5) * sx, (z + 0.5) * sz)
+		end
+		local function bk(x, y, z)
+			return corner(x, y, z, (0.5 - x) * sx, (0.5 - y) * sy)
+		end
+		local function sd(x, y, z, k)
+			return corner(x, y, z, (k * z + 0.5) * sz, (0.5 - y) * sy)
+		end
+		faces = {
+			{1, {0, 1, -1}, {sx, L}, {sl(a, a, a), sl(a, b, b), sl(b, b, b),
+				sl(a, a, a), sl(b, b, b), sl(b, a, a)}},
+			{2, {0, -1, 0}, {sx, sz}, {bt(a, a, a), bt(b, a, a), bt(b, a, b),
+				bt(a, a, a), bt(b, a, b), bt(a, a, b)}},
+			{5, {0, 0, 1}, {sx, sy}, {bk(a, a, b), bk(b, a, b), bk(b, b, b),
+				bk(a, a, b), bk(b, b, b), bk(a, b, b)}},
+			{4, {-1, 0, 0}, {sz, sy}, {sd(a, a, a, 1), sd(a, a, b, 1),
+				sd(a, b, b, 1)}},
+			{3, {1, 0, 0}, {sz, sy}, {sd(b, a, a, -1), sd(b, b, b, -1),
+				sd(b, a, b, -1)}},
+		}
+	else
+		-- Its normal, its across and down edges
+		local quads = {
+			{{0, 1, 0}, {1, 0, 0}, {0, 0, -1}},
+			{{0, -1, 0}, {1, 0, 0}, {0, 0, 1}},
+			{{1, 0, 0}, {0, 0, 1}, {0, -1, 0}},
+			{{-1, 0, 0}, {0, 0, -1}, {0, -1, 0}},
+			{{0, 0, 1}, {-1, 0, 0}, {0, -1, 0}},
+			{{0, 0, -1}, {1, 0, 0}, {0, -1, 0}},
+		}
+		faces = {}
+		for i, f in ipairs(quads) do
+			local nr, eu, ev = f[1], f[2], f[3]
+			local mu = math.abs(eu[1] * sx + eu[2] * sy + eu[3] * sz)
+			local mv = math.abs(ev[1] * sx + ev[2] * sy + ev[3] * sz)
+			local function at(fu, fv)
+				local p = {}
+				for k = 1, 3 do
+					p[k] = nr[k] * 0.5 + eu[k] * (fu - 0.5) +
+							ev[k] * (fv - 0.5)
+				end
+				return corner(p[1], p[2], p[3], fu * mu, fv * mv)
+			end
+			faces[i] = {i, nr, {mu, mv}, {at(0, 0), at(1, 0), at(1, 1),
+				at(0, 0), at(1, 1), at(0, 1)}}
+		end
+	end
 	local cg = node:CreateComponent("CustomGeometry")
-	cg:SetNumGeometries(6)
-	-- Each face: its normal, its across and down edges (unit box)
-	local faces = {
-		{{0, 1, 0}, {1, 0, 0}, {0, 0, -1}},
-		{{0, -1, 0}, {1, 0, 0}, {0, 0, 1}},
-		{{1, 0, 0}, {0, 0, 1}, {0, -1, 0}},
-		{{-1, 0, 0}, {0, 0, -1}, {0, -1, 0}},
-		{{0, 0, 1}, {-1, 0, 0}, {0, -1, 0}},
-		{{0, 0, -1}, {1, 0, 0}, {0, -1, 0}},
-	}
+	cg:SetNumGeometries(#faces)
 	local mats = {}
-	for i, f in ipairs(faces) do
-		local nr, eu, ev = f[1], f[2], f[3]
-		-- Its metres across and down
-		local mu = math.abs(eu[1] * size[1] + eu[2] * size[2] + eu[3] * size[3])
-		local mv = math.abs(ev[1] * size[1] + ev[2] * size[2] + ev[3] * size[3])
-		local t = tex[i] or tex[1] or select(2, next(tex))
+	for g, f in ipairs(faces) do
+		local tile, nr, ext, vs = f[1], f[2], f[3], f[4]
+		local t = tex[tile] or tex[1] or select(2, next(tex))
 		local nx, ny = t.n and t.n.x or 1, t.n and t.n.y or 1
-		local function uv(fu, fv)
-			if nx > 1 or ny > 1 then
-				return magic.Vector2((t.s.x + fu) / nx, (t.s.y + fv) / ny)
+		local nv = magic.Vector3(nr[1], nr[2], nr[3]):Normalized()
+		cg:BeginGeometry(g - 1, magic.TRIANGLE_LIST)
+		for q = 1, #vs, 3 do
+			local tri = {vs[q], vs[q + 1], vs[q + 2]}
+			-- Wound so it faces its normal: cross(p2 - p1, p3 - p1) along
+			-- it (the wedge's)
+			local e1, e2 = {}, {}
+			for k = 1, 3 do
+				e1[k] = tri[2][k] - tri[1][k]
+				e2[k] = tri[3][k] - tri[1][k]
 			end
-			return magic.Vector2(fu * mu, fv * mv)
-		end
-		local c = {}
-		for k = 1, 3 do
-			c[k] = nr[k] * 0.5 - eu[k] * 0.5 - ev[k] * 0.5
-		end
-		local function at(fu, fv)
-			return {c[1] + eu[1] * fu + ev[1] * fv, c[2] + eu[2] * fu +
-					ev[2] * fv, c[3] + eu[3] * fu + ev[3] * fv}
-		end
-		-- Wound so it faces its normal: cross(p2 - p1, p3 - p1) along it
-		-- (the wedge's)
-		local cx = {eu[2] * ev[3] - eu[3] * ev[2], eu[3] * ev[1] -
-				eu[1] * ev[3], eu[1] * ev[2] - eu[2] * ev[1]}
-		local flip = cx[1] * nr[1] + cx[2] * nr[2] + cx[3] * nr[3] < 0
-		local quad = {{0, 0}, {1, 0}, {1, 1}, {0, 0}, {1, 1}, {0, 1}}
-		cg:BeginGeometry(i - 1, magic.TRIANGLE_LIST)
-		for q = 1, 6 do
-			local k = q
-			if flip then
-				k = ({1, 3, 2, 4, 6, 5})[q]
+			local cx = {e1[2] * e2[3] - e1[3] * e2[2], e1[3] * e2[1] -
+					e1[1] * e2[3], e1[1] * e2[2] - e1[2] * e2[1]}
+			if cx[1] * nr[1] + cx[2] * nr[2] + cx[3] * nr[3] < 0 then
+				tri[2], tri[3] = tri[3], tri[2]
 			end
-			local p = at(quad[k][1], quad[k][2])
-			cg:DefineVertex(magic.Vector3(p[1], p[2], p[3]))
-			cg:DefineNormal(magic.Vector3(nr[1], nr[2], nr[3]))
-			cg:DefineTexCoord(uv(quad[k][1], quad[k][2]))
+			for _, c in ipairs(tri) do
+				cg:DefineVertex(magic.Vector3(c[1], c[2], c[3]))
+				cg:DefineNormal(nv)
+				if nx > 1 or ny > 1 then
+					cg:DefineTexCoord(magic.Vector2(
+							(t.s.x + c[4] / ext[1]) / nx,
+							(t.s.y + c[5] / ext[2]) / ny))
+				else
+					cg:DefineTexCoord(magic.Vector2(c[4], c[5]))
+				end
+			end
 		end
 		local m = magic.Material:new()
 		m:SetTechnique(0, magic.cache:GetResource("Technique",
 				"Techniques/Diff.xml"))
 		m:SetTexture(magic.TU_DIFFUSE, t.t)
 		m:SetShaderParameter("MatSpecColor", magic.Color(0.05, 0.05, 0.05))
-		cg:SetMaterial(i - 1, m)
-		mats[i] = m
+		cg:SetMaterial(g - 1, m)
+		mats[g] = m
 	end
 	cg:Commit()
 	cg.castShadows = true
@@ -491,26 +540,23 @@ local function draw_look(id, n, look)
 		n.hinge = n.look:CreateChild("Hinge")
 		n.body = n.hinge:CreateChild("Body")
 		n.mat = material(look.material)
-		-- [KIT_LOOK_MATERIAL] A box wearing a voxel material: its sides
-		-- the shut look's
-		local def = look.shape ~= "wedge" and look.shape ~= "sphere" and
-				type(look.voxel) == "string" and look.voxel ~= "" and
-				voxel_def(look.voxel)
-		local worn = def and voxel_box(n.body, def, look_box(look, false).size)
-		if type(look.voxel) == "string" and look.voxel ~= "" then
+		-- [KIT_LOOK_MATERIAL] A box or a wedge wearing a voxel material:
+		-- its sides the shut look's
+		local wants = look.shape ~= "sphere" and type(look.voxel) ==
+				"string" and look.voxel ~= "" and look.voxel or nil
+		local def = wants and voxel_def(wants)
+		local worn = def and voxel_mesh(n.body, def,
+				look_box(look, false).size, look.shape)
+		if wants then
 			log:info("kit: entity " .. id .. (worn and " wears " or
-					" wears no ") .. look.voxel)
-			if worn then
-				n.wear_wanted = nil
-			end
+					" wears no ") .. wants)
 		end
-		n.wear_wanted = not worn and not def and type(look.voxel) ==
-				"string" and look.voxel ~= "" and look.shape ~= "wedge" and
-				look.shape ~= "sphere" and look.voxel or nil
-		if look.shape == "wedge" then
-			wedge(n.body):SetMaterial(0, n.mat)
-		elseif worn then
+		-- Not in the registry yet: drawn again once it is
+		n.wear_wanted = wants and not def and wants or nil
+		if worn then
 			-- (drawn)
+		elseif look.shape == "wedge" then
+			wedge(n.body):SetMaterial(0, n.mat)
 		else
 			local m = n.body:CreateComponent("StaticModel")
 			m.model = magic.cache:GetResource("Model", "Models/" ..

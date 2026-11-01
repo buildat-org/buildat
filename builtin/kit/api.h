@@ -82,8 +82,9 @@ namespace interface
 //                               start's state), the state `text` over
 //                               it. extent: a box over those cells from
 //                               its own up and on (as zone). voxel: a
-//                               box wears that voxel material's six
-//                               tiles, a texture a metre as the voxels
+//                               box or a wedge (its slope the top)
+//                               wears that voxel material's tiles, a
+//                               texture a metre as the voxels
 //                               (its colour unused; "": none)
 //                               [KIT_LOOK_MATERIAL]; kit/door, key_door,
 //                               gate, sign and mover's `material`,

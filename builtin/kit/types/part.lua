@@ -15,7 +15,8 @@ return {
 			choices = {"plain", "metal", "glass", "glow"}},
 		collision = {type = "bool", default = true},
 		-- [KIT_LOOK_MATERIAL] A voxel material it wears ("": its colour; a
-		-- box only). Its `material` is its surface, from before
+		-- box's or a wedge's, its slope the material's top). Its `material`
+		-- is its surface, from before
 		voxel = {type = "voxel", default = "", choices_from = "voxels"},
 	},
 	look = {shape = "param:shape", size = "param:size",
