@@ -1105,6 +1105,13 @@ palette = function()
 			on = on or n == name
 		end
 		local label = S.placing.label
+		-- [KIT] stage 4l: the type's average cost, its instances' now
+		if S.placing.type then
+			local c = E.costs and E.costs.types and
+					E.costs.types[S.placing.type]
+			text(w, c and string.format("Costs %.2f%% of Kit's budget an " ..
+					"instance", c) or "Its cost: none running", DIM)
+		end
 		button(w, (on and "Unfavourite " or "Favourite ") .. label, function()
 			aitta.kit_favourite(name, not on)
 			log:info("kit editor: " .. label .. (on and " not" or "") ..
@@ -1246,6 +1253,9 @@ end
 -- player's, shown and not edited
 local function inspect_made(w, e)
 	text(w, "Entity " .. e.id .. ": " .. tostring(e.name))
+	-- [KIT] stage 4l: what it costs, changed in place as "kit:costs" comes
+	S.cost_text = text(w, M.cost_line(e.id), DIM)
+	S.cost_id = e.id
 	text(w, e.kind == "player" and "A player" or ("Made in play" ..
 			(e.made == "b" and " by " .. tostring(e.made_by) or "") ..
 			", by entity " .. tostring(e.maker) .. ": gone at End"), DIM)
@@ -1274,6 +1284,9 @@ local function inspector(w, e, is_made)
 		text(w, n .. " selected", DIM)
 	end
 	text(w, "Entity " .. e.id .. ": " .. tostring(e.name))
+	-- [KIT] stage 4l: what it costs, changed in place as "kit:costs" comes
+	S.cost_text = text(w, M.cost_line(e.id), DIM)
+	S.cost_id = e.id
 	-- Its position typed in (fine tuning, and where keys are not at hand:
 	-- a touchscreen), Move one edit; with several selected they move by
 	-- what this one moves
@@ -1404,6 +1417,16 @@ local function inspector(w, e, is_made)
 				send({op = "unlink", id = e.id, comp = ci - 1,
 					output = l.output, to = l.to, input = l.input})
 			end)
+			-- [KIT] stage 4l: drawn for players in play too
+			button(r, l.visible and "Shown in play" or "Hidden in play",
+					function()
+				send({op = "link_visible", id = e.id, comp = ci - 1,
+					output = l.output, to = l.to, input = l.input,
+					visible = not l.visible})
+				log:info("kit editor: link " .. e.id .. "." .. l.output ..
+						" -> " .. l.to .. "." .. l.input .. " " ..
+						(l.visible and "hidden" or "shown") .. " in play")
+			end)
 		end
 		local r = row(w)
 		for _, o in ipairs(t.outputs or {}) do
@@ -1476,6 +1499,7 @@ end
 
 local function inspector_window()
 	drop("inspector")
+	S.cost_text, S.cost_id = nil, nil
 	local e, is_made = nil, false
 	if S.primary then
 		e, is_made = find(S.primary)
@@ -1509,6 +1533,17 @@ refresh = function()
 	inspector_window()
 	people()
 	show_log()
+end
+
+-- [KIT] stage 4l: an entity's cost, the last few seconds' share of Kit's
+-- budget its components spent
+function M.cost_line(id)
+	local ents = E.costs and E.costs.entities
+	if not ents then
+		return "Cost: measuring"
+	end
+	local c = tonumber(ents[tostring(id)]) or 0
+	return string.format("Cost: %.2f%% of Kit's budget", c)
 end
 
 -- The selected entity's log ([KIT] stage 4d): its c:log lines and Kit's
@@ -3790,10 +3825,42 @@ end
 
 -- ---- Drawing: every entity a box, the selection yellow, gizmos, zones,
 -- links, the cursor, the knob, the link being dragged, the builders
+-- [KIT] stage 4l: the links shown in play, for every player: drawn as in
+-- edit mode, lit 0.6 s as a signal passes
+local function draw_play_links()
+	local dbg = O.debug
+	local now = buildat.get_time_us()
+	E.play_drawn = E.play_drawn or {}
+	for id, n in pairs(P.nodes) do
+		local show = type(n.show) == "table" and n.show or {}
+		for _, to in ipairs(type(show.links) == "table" and show.links or {}) do
+			local o = P.nodes[to]
+			if o and n.node and o.node then
+				local a, b = n.at or n.node.position, o.at or o.node.position
+				local key = id .. ">" .. tostring(to)
+				local lit = (E.flows[key] or 0) > now
+				local col = lit and magic.Color(1, 1, 0.3) or
+						magic.Color(0.2, 1, 0.4)
+				dbg:AddLine(a, b, col, false)
+				dbg:AddCross(magic.Vector3(a.x + (b.x - a.x) * 0.85,
+						a.y + (b.y - a.y) * 0.85, a.z + (b.z - a.z) * 0.85),
+						lit and 0.6 or 0.3, col, false)
+				local was = E.play_drawn[key]
+				if was ~= (lit and "lit" or "drawn") then
+					E.play_drawn[key] = lit and "lit" or "drawn"
+					log:info("kit: link " .. key .. " " .. E.play_drawn[key] ..
+							" in play")
+				end
+			end
+		end
+	end
+end
+
 local function draw()
 	if not E.editing then
 		show_ports("out", nil)
 		show_ports("in", nil)
+		draw_play_links()
 		return
 	end
 	fit_people()
@@ -4156,6 +4223,21 @@ function M.editor(options)
 			log:info("kit editor: signal " .. tostring(f[1]) .. "." ..
 					tostring(f[2]) .. " -> " .. tostring(f[3]) .. "." ..
 					tostring(f[4]))
+		end
+	end)
+	-- [KIT] stage 4l: the costs, every few seconds while editing
+	buildat.sub_packet("kit:costs", function(data)
+		local c = network.parse_json(data)
+		if type(c) ~= "table" then
+			return
+		end
+		E.costs = c
+		if S.cost_text and S.cost_id then
+			local line = M.cost_line(S.cost_id)
+			if S.cost_text.text ~= line then
+				S.cost_text.text = line
+				log:info("kit editor: entity " .. S.cost_id .. ": " .. line)
+			end
 		end
 	end)
 	buildat.sub_packet("kit:log", function(data)

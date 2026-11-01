@@ -57,6 +57,8 @@ static const int MAX_HOPS = 16;
 static const size_t MAX_QUEUE = 4096;
 // [KIT] stage 7b's first part: named timers an instance (c:after)
 static const size_t MAX_TIMERS = 64;
+// [KIT] stage 4l: the window costs are measured over
+static const int64_t COST_WINDOW_US = 5000000;
 // A run's slice of the box's meter is its budget() / this (about 5 ms of
 // a plain loop); a tick works through TICK_SLICES of them at most
 static const int64_t SLICE_DIV = 20;
@@ -116,6 +118,8 @@ struct Link
 	ss_ output;
 	uint64_t to = 0;
 	ss_ input;
+	// [KIT] stage 4l: its signals are drawn for players too, in play
+	bool visible = false;
 };
 
 struct Instance
@@ -141,6 +145,9 @@ struct Instance
 	// authored: a prefab copy's parameters set on this copy, kept as the
 	// prefab changes ([KIT] stage 4d)
 	std::set<ss_> overrides;
+	// runtime, not saved ([KIT] stage 4l): the meter it spent in this cost
+	// window
+	int64_t spent = 0;
 };
 
 struct Entity
@@ -829,6 +836,9 @@ struct Module: public interface::Module, public Interface
 	std::set<ss_> m_bad_prefabs, m_prefab_loading;
 	// Signals passed along links this tick, for the builders' link lines
 	json::Value m_flows = json::array();
+	// [KIT] stage 4l: the signals along links shown in play, by scene; its
+	// players not editing are sent them
+	std::map<ss_, json::Value> m_play_flows;
 	// Each entity's log (its c:log lines and Kit's about it), not saved,
 	// and those with new lines this tick
 	std::map<uint64_t, std::deque<ss_>> m_logs;
@@ -1676,6 +1686,8 @@ struct Module: public interface::Module, public Interface
 				l.output = jstr(ls.at(m), "output");
 				l.to = (uint64_t)json::jint(ls.at(m), "to", 0);
 				l.input = jstr(ls.at(m), "input");
+				l.visible = ls.at(m).get("visible").is_boolean() &&
+						ls.at(m).get("visible").as_boolean();
 				if(!t.outputs.count(l.output)){
 					why = "entity "+itos(e.id)+": "+in.type+
 							" has no output "+l.output;
@@ -1724,6 +1736,8 @@ struct Module: public interface::Module, public Interface
 				lj.set("output", l.output);
 				lj.set("to", (int64_t)l.to);
 				lj.set("input", l.input);
+				if(l.visible)
+					lj.set("visible", true);
 				ls.append(lj);
 			}
 			cj.set("links", ls);
@@ -5622,8 +5636,10 @@ struct Module: public interface::Module, public Interface
 			sv_<std::pair<ss_, json::Value>> set;
 			for(json::Iterator it(o); it; ++it){
 				if((*it).is_object()){
-					json::Value sub = *it;
+					// (a copy, set back: its `when` substituted too)
+					json::Value sub = (*it).deepcopy();
 					params(sub, depth + 1);
+					set.push_back(std::make_pair(it.key(), sub));
 				} else if((*it).is_string() &&
 						(*it).as_string().compare(0, 6, "param:") == 0){
 					const json::Value &v = in.params.get((*it).as_string().
@@ -5691,6 +5707,15 @@ struct Module: public interface::Module, public Interface
 				parts.append(in.type);
 			for(const ss_ &k : m_types[in.type].shared)
 				shared.insert(k);
+			// [KIT] stage 4l: its links shown in play, [to id, ...]
+			for(const Link &l : in.links)
+				if(l.visible){
+					if(show.get("links").is_undefined())
+						show.set("links", json::array());
+					json::Value ls = show.get("links");
+					ls.append((int64_t)l.to);
+					show.set("links", ls);
+				}
 		}
 		if(parts.size()){
 			json::Value keys = json::array();
@@ -5978,7 +6003,15 @@ struct Module: public interface::Module, public Interface
 		const uint64_t pid = player_id(r.by);
 		uint64_t inv_id = 0;
 		size_t inv_comp = 0;
-		if(!box_call(request, answer, error, &runaway, &spent, &in_provider)){
+		const bool called = box_call(request, answer, error, &runaway, &spent,
+				&in_provider);
+		{
+			// Its cost ([KIT] stage 4l), to the instance that ran
+			auto ci = m_entities.find(r.entity);
+			if(ci != m_entities.end() && r.comp < ci->second.comps.size())
+				ci->second.comps[r.comp].spent += spent;
+		}
+		if(!called){
 			Instance *pv_ = provider_for(pid, inv_id, inv_comp);
 			if(runaway && in_provider && pv_){
 				// The inventory's provider ran past it: it is disabled, not
@@ -6064,6 +6097,21 @@ struct Module: public interface::Module, public Interface
 					add_log(e.id, "a signal loop cut at "+output+" -> "+
 							itos(l.to)+"."+l.input);
 					continue;
+				}
+				if(l.visible){
+					ss_ scene;
+					scene_of(e, &scene);
+					auto pf = m_play_flows.find(scene);
+					if(pf == m_play_flows.end())
+						pf = m_play_flows.emplace(scene, json::array()).first;
+					if(pf->second.size() < MAX_FLOWS){
+						json::Value f = json::array();
+						f.append((int64_t)e.id);
+						f.append(output);
+						f.append((int64_t)l.to);
+						f.append(l.input);
+						pf->second.append(f);
+					}
 				}
 				deliver(l.to, l.input, value, r.by, r.hops + 1, e.id, output);
 			}
@@ -6744,6 +6792,8 @@ struct Module: public interface::Module, public Interface
 					lj.set("output", l.output);
 					lj.set("to", member(l.to));
 					lj.set("input", l.input);
+					if(l.visible)
+						lj.set("visible", true);
 					ls.append(lj);
 				}
 				cj.set("links", ls);
@@ -6820,6 +6870,9 @@ struct Module: public interface::Module, public Interface
 					lj.set("output", jstr(links.at(l), "output"));
 					lj.set("to", to);
 					lj.set("input", jstr(links.at(l), "input"));
+					if(links.at(l).get("visible").is_boolean() &&
+							links.at(l).get("visible").as_boolean())
+						lj.set("visible", true);
 					ls.append(lj);
 				}
 				cj.set("links", ls);
@@ -7218,6 +7271,17 @@ struct Module: public interface::Module, public Interface
 			});
 		}
 		m_flows = json::array();
+		for(auto &sf : m_play_flows){
+			if(!sf.second.size())
+				continue;
+			const ss_ data = sf.second.stringify();
+			network::access(m_server, [&](network::Interface *inetwork){
+				for(auto &p : m_peers)
+					if(!p.second.editing && p.second.scene == sf.first)
+						inetwork->send(p.first, "kit:flow", data);
+			});
+		}
+		m_play_flows.clear();
 		for(size_t peer : editors)
 			if(m_log_dirty.count(m_peers[peer].sel))
 				send_log(peer);
@@ -7826,6 +7890,59 @@ struct Module: public interface::Module, public Interface
 		save_runtime();
 		save_marks();
 		send_debug();
+		send_costs(budget);
+	}
+
+	// ---- Costs ([KIT] stage 4l): what each instance spent of the meter,
+	// over COST_WINDOW_US, as a share of Kit's budget for that time (a
+	// tick's budget times the ticks); sent to the builders ("kit:costs"
+	// {"entities": {id: percent}, "types": {type: the average of its
+	// instances}}): the inspector shows the selected entity's, the palette
+	// an armed type's. simplified: the runs only, not a body's steps
+	int64_t m_cost_since = 0;
+	int64_t m_cost_budget = 0;
+	json::Value m_costs = json::object();
+
+	void send_costs(int64_t tick_budget)
+	{
+		const int64_t now = interface::os::time_us();
+		if(!m_cost_since)
+			m_cost_since = now;
+		m_cost_budget += tick_budget;
+		if(now - m_cost_since < COST_WINDOW_US)
+			return;
+		const double whole = (double)std::max<int64_t>(1, m_cost_budget);
+		m_cost_since = now;
+		m_cost_budget = 0;
+		json::Value ents = json::object(), types = json::object();
+		std::map<ss_, std::pair<double, int>> by_type;
+		for(auto &p : m_entities){
+			double sum = 0;
+			for(Instance &in : p.second.comps){
+				const double pct = 100.0 * in.spent / whole;
+				in.spent = 0;
+				sum += pct;
+				auto &bt = by_type[in.type];
+				bt.first += pct;
+				bt.second++;
+			}
+			if(sum > 0)
+				ents.set(itos(p.first), std::round(sum * 1000) / 1000);
+		}
+		for(auto &t : by_type)
+			types.set(t.first, std::round(t.second.first / t.second.second *
+					1000) / 1000);
+		m_costs = json::object();
+		m_costs.set("entities", ents);
+		m_costs.set("types", types);
+		const ss_ data = m_costs.stringify();
+		for(auto &p : m_peers){
+			if(!p.second.editing)
+				continue;
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(p.first, "kit:costs", data);
+			});
+		}
 	}
 
 	// ---- [KIT] stage 4h: the players' controls (Host::controls). Each
@@ -10400,6 +10517,34 @@ struct Module: public interface::Module, public Interface
 			change.push_back(std::make_pair(e->id, entity_json(copy)));
 			what = "set "+itos(e->id)+"'s "+in->type+" "+param+" to "+
 					j.get("value").stringify();
+			return true;
+		}
+		// [KIT] stage 4l {"op": "link_visible", "id", "output", "to", "input",
+		// "visible": bool}
+		if(op == "link_visible"){
+			Entity *e = nullptr;
+			Instance *in = instance_arg(j, e, why);
+			if(!in)
+				return false;
+			const ss_ output = jstr(j, "output"), input = jstr(j, "input");
+			const uint64_t to = (uint64_t)json::jint(j, "to", 0);
+			const bool vis = j.get("visible").is_boolean() &&
+					j.get("visible").as_boolean();
+			const size_t ci = in - &e->comps[0];
+			Entity copy = *e;
+			bool found = false;
+			for(Link &l : copy.comps[ci].links)
+				if(l.output == output && l.to == to && l.input == input){
+					l.visible = vis;
+					found = true;
+				}
+			if(!found){
+				why = "no such link";
+				return false;
+			}
+			change.push_back(std::make_pair(e->id, entity_json(copy)));
+			what = ss_(vis ? "showed " : "hid ")+itos(e->id)+"."+output+
+					" -> "+itos(to)+"."+input+" in play";
 			return true;
 		}
 		if(op == "link" || op == "unlink"){

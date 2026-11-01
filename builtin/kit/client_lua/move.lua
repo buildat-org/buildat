@@ -210,6 +210,13 @@ function M.look_box(look, on, pos, yaw)
 	if not solid then
 		return nil
 	end
+	-- [KIT] stage 4l: moved by when.offset while on (kit/mover).
+	-- simplified: where the state has it at once, not along its slide
+	if type(w.offset) == "table" then
+		for i = 1, 3 do
+			off[i] = off[i] + (tonumber(w.offset[i]) or 0)
+		end
+	end
 	if type(w.scale) == "table" then
 		for i = 1, 3 do
 			local was = size[i]

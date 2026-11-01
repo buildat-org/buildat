@@ -378,16 +378,37 @@ local function draw_look(id, n, look)
 			m.castShadows = true
 		end
 		if look.text then
-			local l = n.look:CreateChild("Text")
+			-- In the hinge, so it goes with a slide ([KIT] stage 4l)
+			local l = n.hinge:CreateChild("Text")
 			local t = l:CreateComponent("Text3D")
-			t:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 16)
+			-- [KIT] stage 4l: text_facing "flat" (on the box's front, its -z
+			-- side, as the entity faces) or "camera" (turning round y),
+			-- text_size cells high, text_color; none: over it, a label of a
+			-- fixed size on the screen
+			local facing = look.text_facing
+			if facing ~= "flat" and facing ~= "camera" then
+				facing = nil
+			end
+			t:SetFont(magic.cache:GetResource("Font", buildat.font_sans),
+					facing and 48 or 16)
 			t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-			t.faceCameraMode = magic.FC_ROTATE_XYZ
-			t.fixedScreenSize = true
-			t.textEffect = magic.TE_STROKE
-			t.effectColor = magic.Color(0, 0, 0, 0.8)
+			t:SetTextAlignment(magic.HA_CENTER)
+			t.faceCameraMode = facing == "flat" and magic.FC_NONE or
+					facing == "camera" and magic.FC_ROTATE_Y or
+					magic.FC_ROTATE_XYZ
+			t.fixedScreenSize = not facing
+			if facing ~= "flat" then
+				t.textEffect = magic.TE_STROKE
+				t.effectColor = magic.Color(0, 0, 0, 0.8)
+			end
+			if type(look.text_color) == "string" then
+				t:SetColor(color(look.text_color, magic.Color(1, 1, 1)))
+			end
 			n.text = t
 			n.text_node = l
+			n.text_facing = facing
+			n.text_size = math.max(0.02, math.min(8,
+					tonumber(look.text_size) or 0.25))
 		end
 		local r = type(look.rotation) == "table" and look.rotation or {}
 		n.look_rot = magic.Quaternion(tonumber(r[1]) or 0,
@@ -412,9 +433,37 @@ local function draw_look(id, n, look)
 		col = magic.Color(col.r, col.g, col.b, 0.4)
 	end
 	n.mat:SetShaderParameter("MatDiffColor", col)
+	-- [KIT] stage 4l: color "none", no box drawn (a sign's letters alone)
+	n.body.enabled = b.color ~= "none"
 	if n.text_node then
-		n.text_node.position = magic.Vector3(b.off[1], b.off[2] + b.size[2] / 2 +
-				0.45, b.off[3])
+		if n.text_facing then
+			-- Just in front of the box's front
+			n.text_node.position = magic.Vector3(b.off[1], b.off[2],
+					b.off[3] - b.size[3] / 2 - 0.01)
+		else
+			n.text_node.position = magic.Vector3(b.off[1], b.off[2] +
+					b.size[2] / 2 + 0.45, b.off[3])
+		end
+	end
+	-- [KIT] stage 4l: when.offset, the look moved by it while its state is
+	-- on; over when.slide seconds (kit/mover), else at once
+	local w = type(look.when) == "table" and look.when or {}
+	local wo = type(w.offset) == "table" and w.offset or nil
+	if wo then
+		local full = magic.Vector3(tonumber(wo[1]) or 0, tonumber(wo[2]) or 0,
+				tonumber(wo[3]) or 0)
+		n.slide_to = on and full or magic.Vector3(0, 0, 0)
+		local secs = tonumber(w.slide) or 0
+		n.slide_speed = secs > 0 and full:Length() / secs or nil
+		if not n.slide_at or not n.slide_speed then
+			n.slide_at = n.slide_to
+		end
+		n.hinge.position = n.slide_at
+		if n.solid then
+			n.solid.position = n.slide_at
+		end
+	else
+		n.slide_to, n.slide_at = nil, nil
 	end
 	-- Solid: a static body (no mass) the players' bodies meet; a wedge's
 	-- its slope and its back, thin
@@ -443,6 +492,9 @@ local function draw_look(id, n, look)
 		else
 			box(v3(b.off), v3(b.size))
 		end
+	end
+	if n.solid and n.slide_at then
+		n.solid.position = n.slide_at
 	end
 	log:info(string.format("kit: entity %d drawn %gx%gx%g at %g,%g,%g%s", id,
 			b.size[1], b.size[2], b.size[3], b.off[1], b.off[2], b.off[3],
@@ -495,6 +547,24 @@ local function update_play(_, data)
 		local show = type(n.show) == "table" and n.show or {}
 		if type(show.look) == "table" then
 			draw_look(id, n, show.look)
+			-- A slide under way ([KIT] stage 4l)
+			if n.slide_to and n.slide_at and n.slide_speed and
+					(n.slide_to - n.slide_at):Length() > 1e-5 then
+				local d = n.slide_to - n.slide_at
+				local step = n.slide_speed * dt
+				if d:Length() <= step then
+					n.slide_at = n.slide_to
+					log:info("kit: entity " .. id .. " slid to " ..
+							string.format("%g,%g,%g", n.slide_at.x,
+							n.slide_at.y, n.slide_at.z))
+				else
+					n.slide_at = n.slide_at + d:Normalized() * step
+				end
+				n.hinge.position = n.slide_at
+				if n.solid then
+					n.solid.position = n.slide_at
+				end
+			end
 		end
 		-- Where it is, turned by its entity's yaw ([KIT] stage 4e2) over its
 		-- look's own turn, or where an editor's drag has it meanwhile
@@ -529,6 +599,12 @@ local function update_play(_, data)
 			if v ~= n.last_text then
 				n.last_text = v
 				n.text.text = v
+				-- Its letters text_size high: the font's 48 pixels at 1/128
+				-- of a cell each (Text3D's scaling)
+				if n.text_facing then
+					local sc = n.text_size / (48 / 128)
+					n.text_node.scale = magic.Vector3(sc, sc, sc)
+				end
 				log:info("kit: entity " .. id .. " shows \"" .. v .. "\"")
 			end
 		end
@@ -756,6 +832,12 @@ magic.SubscribeToEvent("command_seq:kit_edit", function(_, data)
 end)
 magic.SubscribeToEvent("command_seq:kit_use", function(_, data)
 	M.use(data:GetString("Param"))
+end)
+-- For a drive: "event kit_select <id>" selects it in the editor
+magic.SubscribeToEvent("command_seq:kit_select", function(_, data)
+	if M.select then
+		M.select(tonumber(data:GetString("Param")))
+	end
 end)
 
 

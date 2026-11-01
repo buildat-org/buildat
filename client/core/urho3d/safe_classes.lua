@@ -2893,6 +2893,9 @@ function M.define(dst, util)
 					{"Text3D", "Font", {"number", "__nil"}}),
 			SetAlignment = util.self_function("SetAlignment", {},
 					{"Text3D", "number", "number"}),
+			-- How its lines line up with each other (a sign's several)
+			SetTextAlignment = util.self_function("SetTextAlignment", {},
+					{"Text3D", "number"}),
 			SetColor = util.self_function("SetColor", {},
 					{"Text3D", "Color"}),
 		},

@@ -4997,6 +4997,11 @@ impl Text3D {
 		let mut r = call(imports::buildat_c_Text3D_SetFont, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put, &a2 as &dyn Put]);
 		r.value().boolean()
 	}
+	/// Text3D:SetTextAlignment(number)
+	pub fn SetTextAlignment(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Text3D_SetTextAlignment, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
 	/// Text3D.effectColor:Color
 	pub fn effectColor(&self) -> Color {
 		let mut r = call(imports::buildat_c_Text3D_get_effectColor, &[&H(self.handle()) as &dyn Put]);
@@ -8534,6 +8539,8 @@ mod imports {
 		pub fn buildat_c_Text3D_SetColor(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Text3D:SetFont(Font,number?):boolean"]
 		pub fn buildat_c_Text3D_SetFont(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Text3D:SetTextAlignment(number)"]
+		pub fn buildat_c_Text3D_SetTextAlignment(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Text3D.effectColor:Color"]
 		pub fn buildat_c_Text3D_get_effectColor(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Text3D.effectColor=Color"]

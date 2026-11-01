@@ -911,6 +911,7 @@ BUILDAT_BINDING("Cursor.useSystemShapes=boolean", "set", "Cursor", "useSystemSha
 BUILDAT_BINDING("Text3D:SetAlignment(number,number)", "call", "Text3D", "SetAlignment")
 BUILDAT_BINDING("Text3D:SetColor(Color)", "call", "Text3D", "SetColor")
 BUILDAT_BINDING("Text3D:SetFont(Font,number?):boolean", "call", "Text3D", "SetFont")
+BUILDAT_BINDING("Text3D:SetTextAlignment(number)", "call", "Text3D", "SetTextAlignment")
 BUILDAT_BINDING("Text3D.effectColor:Color", "get", "Text3D", "effectColor")
 BUILDAT_BINDING("Text3D.effectColor=Color", "set", "Text3D", "effectColor")
 BUILDAT_BINDING("Text3D.effectStrokeThickness:number", "get", "Text3D", "effectStrokeThickness")

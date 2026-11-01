@@ -870,6 +870,7 @@ BUILDAT_CLIENT_IMPORT("Cursor.useSystemShapes=boolean", buildat_c_Cursor_set_use
 BUILDAT_CLIENT_IMPORT("Text3D:SetAlignment(number,number)", buildat_c_Text3D_SetAlignment)
 BUILDAT_CLIENT_IMPORT("Text3D:SetColor(Color)", buildat_c_Text3D_SetColor)
 BUILDAT_CLIENT_IMPORT("Text3D:SetFont(Font,number?):boolean", buildat_c_Text3D_SetFont)
+BUILDAT_CLIENT_IMPORT("Text3D:SetTextAlignment(number)", buildat_c_Text3D_SetTextAlignment)
 BUILDAT_CLIENT_IMPORT("Text3D.effectColor:Color", buildat_c_Text3D_get_effectColor)
 BUILDAT_CLIENT_IMPORT("Text3D.effectColor=Color", buildat_c_Text3D_set_effectColor)
 BUILDAT_CLIENT_IMPORT("Text3D.effectStrokeThickness:number", buildat_c_Text3D_get_effectStrokeThickness)
@@ -3869,6 +3870,8 @@ public:
 	// Text3D:SetFont(Font,number?):boolean
 	bool SetFont(const ::buildat::Font & a1) const;
 	bool SetFont(const ::buildat::Font & a1, double a2) const;
+	// Text3D:SetTextAlignment(number)
+	void SetTextAlignment(double a1) const;
 	// Text3D.effectColor:Color
 	::buildat::Color effectColor() const;
 	// Text3D.effectColor=Color
@@ -5645,6 +5648,7 @@ inline void Text3D::SetAlignment(double a1, double a2) const{ ::buildat::detail:
 inline void Text3D::SetColor(const ::buildat::Color & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_SetColor, *this, a1); (void)r; }
 inline bool Text3D::SetFont(const ::buildat::Font & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_SetFont, *this, a1); return r.boolean(); }
 inline bool Text3D::SetFont(const ::buildat::Font & a1, double a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_SetFont, *this, a1, a2); return r.boolean(); }
+inline void Text3D::SetTextAlignment(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_SetTextAlignment, *this, a1); (void)r; }
 inline ::buildat::Color Text3D::effectColor() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_get_effectColor, *this); ::buildat::Color v{}; r.get(v); return v; }
 inline void Text3D::effectColor(const ::buildat::Color & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_set_effectColor, *this, a1); (void)r; }
 inline double Text3D::effectStrokeThickness() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_get_effectStrokeThickness, *this); return r.number(); }
