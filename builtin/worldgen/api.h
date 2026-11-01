@@ -78,6 +78,12 @@ namespace worldgen
 		virtual void set_generator(GeneratorInterface *generator) = 0;
 		virtual void enable() = 0;
 		virtual size_t get_num_sections_queued() = 0;
+		// The queued ones and those taken off the queue and not yet merged
+		// (a generator's run, or one skipped as replaced): 0 is every
+		// section asked for in the world. A QueueModifiedEvent's queue_size
+		// is the queue's when it was emitted, not when it is handled
+		// ([KIT_REGENERATED_EARLY])
+		virtual size_t get_num_sections_pending() = 0;
 	};
 
 	struct Interface

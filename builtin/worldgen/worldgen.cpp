@@ -83,6 +83,9 @@ struct CInstance: public worldgen::Instance
 	// Counts the takes, for the pinned sections' share; see
 	// take_next_section()
 	size_t m_takes = 0;
+	// Taken off the queue and not yet done (generate_and_merge()); under
+	// the module like the queue
+	size_t m_taken = 0;
 
 	CInstance(interface::Server *server, SceneReference scene_ref):
 		m_server(server),
@@ -175,7 +178,16 @@ struct CInstance: public worldgen::Instance
 		*generator_out = m_generator.get();
 		*epoch_out = m_epoch;
 		m_queued_sections.erase(m_queued_sections.begin() + best);
+		m_taken++;
 		return true;
+	}
+
+	// generate_and_merge()'s end, the section merged or not
+	void on_task_done()
+	{
+		if(m_taken > 0)
+			m_taken--;
+		announce_queue_size();
 	}
 
 	void announce_queue_size()
@@ -201,6 +213,11 @@ struct CInstance: public worldgen::Instance
 	size_t get_num_sections_queued()
 	{
 		return m_queued_sections.size();
+	}
+
+	size_t get_num_sections_pending()
+	{
+		return m_queued_sections.size() + m_taken;
 	}
 };
 
@@ -336,6 +353,18 @@ struct Module: public interface::Module, public Interface
 	// Interface for GenerateThread. Called with no module held.
 	void generate_and_merge(const GenerateTask &task)
 	{
+		generate_and_merge_section(task);
+		// The instance may be gone by now
+		worldgen::access(m_server, [&](worldgen::Interface*){
+			for(auto &pair : m_instances){
+				if(pair.second.get() == task.instance)
+					pair.second->on_task_done();
+			}
+		});
+	}
+
+	void generate_and_merge_section(const GenerateTask &task)
+	{
 		try {
 			if(!task.generator)
 				return;
@@ -349,19 +378,13 @@ struct Module: public interface::Module, public Interface
 				section_region =
 						world->get_section_region_voxels(task.section_p);
 			});
-			pv::Region region = section_region;
-			pv::Vector3DInt32 pad = task.generator->get_padding_voxels();
-			region.setLowerCorner(region.getLowerCorner() - pad);
-			region.setUpperCorner(region.getUpperCorner() + pad);
-
-			log_v(MODULE, "Generating section " PV3I_FORMAT " (scene %p)",
-					PV3I_PARAMS(task.section_p), task.scene_ref);
-
 			// Undefined is what a generator leaves where it puts nothing,
 			// and it is what a volume starts as: every plane of a new one
 			// reads as zero, which is VOXELTYPEID_UNDEFINED, without any of
-			// them being allocated
-			VoxelVolume volume(region);
+			// them being allocated. Sized by the padding under the lock
+			// below ([WORLDGEN_PADDING_RACE]: asked before it, a generator
+			// replaced meanwhile was already freed)
+			up_<VoxelVolume> volume_p;
 
 			{
 				// The instance may be gone by now: it is looked for under
@@ -380,9 +403,19 @@ struct Module: public interface::Module, public Interface
 							PV3I_PARAMS(task.section_p));
 					return;
 				}
+				pv::Region region = section_region;
+				pv::Vector3DInt32 pad = task.generator->get_padding_voxels();
+				region.setLowerCorner(region.getLowerCorner() - pad);
+				region.setUpperCorner(region.getUpperCorner() + pad);
+
+				log_v(MODULE, "Generating section " PV3I_FORMAT " (scene %p)",
+						PV3I_PARAMS(task.section_p), task.scene_ref);
+
+				volume_p.reset(new VoxelVolume(region));
 				task.generator->generate(task.scene_ref, task.section_p,
-						volume);
+						*volume_p);
 			}
+			VoxelVolume &volume = *volume_p;
 
 			// Only this part needs voxelworld. A section the padding reaches
 			// into that does not exist yet is created ungenerated, so that it
@@ -400,12 +433,6 @@ struct Module: public interface::Module, public Interface
 			// terrain that has just appeared goes here
 			m_server->emit_event("worldgen:section_generated",
 					new SectionGenerated(task.scene_ref, task.section_p));
-
-			worldgen::access(m_server, task.scene_ref,
-					[&](worldgen::Instance *instance)
-			{
-				((CInstance*)instance)->announce_queue_size();
-			});
 		} catch(NullptrCatch &e){
 			// Something was probably deleted or unloaded
 			log_v(MODULE, "NullptrCatch: %s", e.what());

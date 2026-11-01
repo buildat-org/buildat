@@ -5429,6 +5429,17 @@ struct Module: public interface::Module, public Interface
 		if(e.scene != m_world_scene || !m_world_scene || e.queue_size ||
 				m_world_generated == m_world_logged)
 			return;
+		// The event's queue size is the one when it was emitted: a
+		// regeneration queued since, or a section still being generated,
+		// is not done ([KIT_REGENERATED_EARLY]: a brush right after "World:
+		// generated again" found no ground)
+		size_t pending = 0;
+		worldgen::access(m_server, [&](worldgen::Interface *i){
+			worldgen::Instance *wi = i->get_instance(m_world_scene);
+			pending = wi ? wi->get_num_sections_pending() : 0;
+		});
+		if(pending)
+			return;
 		m_world_logged = m_world_generated;
 		log_i(MODULE, "World: %zu sections generated since the start",
 				m_world_generated);
