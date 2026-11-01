@@ -114,6 +114,13 @@ EOF
 	set_p 4 tint_amount 0
 	set_p 4 camera '"top_down"'
 	set_p 4 movement '"kit/click_to_move"'
+	# [KIT_PLAY_RULES_CHECKS_FAULT] the round is Running: out of edit mode
+	# the admin digs and places by the play rules ([KIT_BUILDER_PLAY_RULES]),
+	# so a region allows both around the area (entity 6)
+	edit '{"op": "place", "type": "kit/region", "pos": [-20, -5, -20]}'
+	set_p 6 size '[40, 12, 40]'
+	set_p 6 dig '"all"'
+	set_p 6 place '"all"'
 	cat <<'EOF'
 keypress F6
 wait_log 10000 kit editor: edit mode off
@@ -154,17 +161,17 @@ EOF
 	# [KIT_TRIGGER_DIG] a trigger zone on the car's way, its "entered" to a
 	# region's dig_out ([KIT] 4j: the dig zone's dig)
 	edit '{"op": "place", "type": "kit/trigger_zone", "pos": [-2, 1, 5]}'
-	set_p 8 size '[3, 2, 4]'
+	set_p 9 size '[3, 2, 4]'
 	edit '{"op": "place", "type": "kit/region", "pos": [6, -1, 2]}'
-	set_p 9 size '[2, 2, 2]'
-	set_p 9 dig '"all"'
-	edit '{"op": "link", "id": 8, "comp": 0, "output": "entered", "to": 9, "input": "dig_out"}'
+	set_p 10 size '[2, 2, 2]'
+	set_p 10 dig '"all"'
+	edit '{"op": "link", "id": 9, "comp": 0, "output": "entered", "to": 10, "input": "dig_out"}'
 	cat <<'EOF'
 keypress F6
 wait_log 10000 kit editor: edit mode off
 wait_log_any 10000 kit: controls: camera first_person, pointer crosshair, movement kit/walker
-event kit_use 6
-wait_log 10000 kit: controls: camera chase, pointer crosshair, movement kit/car, seat 6
+event kit_use 7
+wait_log 10000 kit: controls: camera chase, pointer crosshair, movement kit/car, seat 7
 frames 30
 event kit_body
 keydown W
@@ -176,8 +183,8 @@ event kit_body
 keypress F
 wait_log 10000 kit: controls: camera first_person, pointer crosshair, movement kit/walker
 frames 5
-event kit_use 7
-wait_log 10000 kit: controls: camera chase, pointer crosshair, movement kit/ball, seat 7
+event kit_use 8
+wait_log 10000 kit: controls: camera chase, pointer crosshair, movement kit/ball, seat 8
 frames 10
 event kit_body
 keydown W
@@ -250,12 +257,12 @@ echo "ok: top-down cursor pointed, click_to_move walked to a floor click and to 
 d=$(dist 6 7)
 awk -v d="$d" 'BEGIN { exit !(d > 2) }' ||
 	fail "the car did not drive ($d m): $(body 6) -> $(body 7)"
-want "$s" "kitboss takes the seat of entity 6" "kitboss leaves the seat of entity 6" \
-	"kitboss takes the seat of entity 7" "kitboss leaves the seat of entity 7"
-want "$s" "kit/trigger_zone 8: kitboss entered; 1 inside" \
-	"kit/region 9: digs its box out by kitboss"
-grep -a "kitboss takes the seat of entity 6" -A1000 "$s" |
-	grep -aq "kit/trigger_zone 8: kitboss entered" ||
+want "$s" "kitboss takes the seat of entity 7" "kitboss leaves the seat of entity 7" \
+	"kitboss takes the seat of entity 8" "kitboss leaves the seat of entity 8"
+want "$s" "kit/trigger_zone 9: kitboss entered; 1 inside" \
+	"kit/region 10: digs its box out by kitboss"
+grep -a "kitboss takes the seat of entity 7" -A1000 "$s" |
+	grep -aq "kit/trigger_zone 9: kitboss entered" ||
 	fail "the zone was not entered by car ($s)"
 grep -aq "sets a voxel it does not own\|sets [0-9]* cells, past" "$s" &&
 	fail "the dig zone's dig was not made ($s)"

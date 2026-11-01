@@ -200,7 +200,9 @@ want "$t/boss1.log" "kit: warning: World: not applied: the noise generator needs
 echo "ok: flat, a biome, a role missing refused by name, noise hills (by seed: $h0, $h7, $h0b), valleys without rivers with a water border"
 
 # 2. The baked map, then infinite noise, an edit, a new seed (Stopped,
-# as the save says)
+# as the save says); the admin digs the cell under it in edit mode (the
+# editor's camera does not turn): Ended refuses a play dig
+# ([KIT_BUILDER_PLAY_RULES], [KIT_PLAY_RULES_CHECKS_FAULT])
 {
 	joined
 	cat <<'EOF'
@@ -218,13 +220,10 @@ wait_log_any 10000 kit editor: edit mode off
 idle 30000
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
-look_dir 0.01 -1 0.01
-frames 3
-mouse_click left
-frames 3
-sync 5000
 keypress F6
 wait_log 10000 kit editor: state:
+event workbench_build {"p": [1, 6, 1], "voxel": "air"}
+sync 5000
 EOF
 	set_w seed 9
 	echo "wait_log_any 10000 kit: warning: World: 1 edited sections kept, seams where they meet the new ground"
