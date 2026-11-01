@@ -735,6 +735,14 @@ namespace kit
 		// [KIT] stage 4e: Kit's material set's voxels (kit/stone...)
 		// registered, the ones not there yet: before set_save()
 		virtual void register_voxels(interface::VoxelRegistry *reg) = 0;
+		// [KIT_TINT_MATERIALS] An app's own voxel `name` made of a material
+		// as a material set's voxel says it (world.h; its "tint" may name
+		// one of its own "palettes"), registered when it is not yet: before
+		// register_voxels(), which makes its shapes. False (why says) for
+		// one that does not parse
+		virtual bool register_material(interface::VoxelRegistry *reg,
+				const ss_ &name, const json::Value &material,
+				ss_ *why = nullptr) = 0;
 		// [KIT] stage 4g: a voxel's properties, Kit's set's or a builder's
 		// type's ({kind, solid, transparent, light, friction, surface}; a
 		// heightmap material's are its ground's); null for another's

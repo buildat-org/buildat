@@ -410,6 +410,16 @@ local function voxel_mesh(node, def, size, shape)
 	if not next(tex) then
 		return nil
 	end
+	-- [KIT_TINT_MASK] Worn as the voxels wear it untinted: its palette's
+	-- entry 0 (a re-painted texture's own colour), masked by a solid one's
+	-- alpha
+	local pal = def.tint_palette
+	local c0 = pal and tonumber(pal[1]) or 0xffffff
+	local tint0 = magic.Color(math.floor(c0 / 65536) % 256 / 255,
+			math.floor(c0 / 256) % 256 / 255, c0 % 256 / 255, 1)
+	local look_tech = def.translucent and "kit/KitVoxelLookAlpha.xml" or
+			def.alpha_masked and "kit/KitVoxelLookMasked.xml" or
+			"kit/KitVoxelLook.xml"
 	local sx, sy, sz = size[1], size[2], size[3]
 	local a, b = -0.5, 0.5
 	-- Each face: its tile, its normal (unit box), its corners {x, y, z}
@@ -509,9 +519,9 @@ local function voxel_mesh(node, def, size, shape)
 			end
 		end
 		local m = magic.Material:new()
-		m:SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/Diff.xml"))
+		m:SetTechnique(0, magic.cache:GetResource("Technique", look_tech))
 		m:SetTexture(magic.TU_DIFFUSE, t.t)
+		m:SetShaderParameter("MatDiffColor", tint0)
 		m:SetShaderParameter("MatSpecColor", magic.Color(0.05, 0.05, 0.05))
 		cg:SetMaterial(g - 1, m)
 		mats[g] = m

@@ -247,13 +247,14 @@ import re, sys
 log = open(sys.argv[1], errors="replace").read().splitlines()
 ev = []
 for l in log:
-	m = re.search(r"kit editor: (in hand \S+|shape [a-z ]+|tint \d+|\S+ has no shapes)$", l)
+	m = re.search(r"kit editor: (in hand \S+|shape [a-z ]+|tint \d+(?: \([a-z ]+\))?|\S+ has no shapes)$", l)
 	if m:
 		ev.append(m.group(1))
 hand = [e for e in ev if e.startswith("in hand")]
 assert len(hand) >= 3 and hand[0] == hand[2] != hand[1], ev
 rest = ev[ev.index(hand[1]) + 2:]
-assert rest[:4] == ["shape slab", "shape cube", "tint 1", "tint 0"], ev
+# [KIT_TINT_PALETTE] the default palette's names in the log
+assert rest[:4] == ["shape slab", "shape cube", "tint 1 (dusty)", "tint 0 (default)"], ev
 print("  wheel: " + ", ".join(ev[:7]))
 PY
 echo "ok: sky light off computes nothing; on ($relit) generates nothing again, the open air 15, the closed room 0, a shaft lets light in (under it $r8, a corner $r9)"

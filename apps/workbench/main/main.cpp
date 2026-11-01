@@ -67,10 +67,39 @@ using interface::Event;
 static const int WORLD_XZ = kit::WORLD_SECTIONS_XZ * kit::WORLD_SECTION;
 static const int WORLD_Y0 = kit::WORLD_SECTION_Y0 * kit::WORLD_SECTION,
 		WORLD_Y1 = (kit::WORLD_SECTION_Y1 + 1) * kit::WORLD_SECTION - 1;
-// Workbench's own voxels (its textures). Kit's material set's are Kit's
+// Workbench's own voxels (its textures), Kit's materials as its material
+// set's are (kit/world.h; [KIT_TINT_MATERIALS] their palettes, entry 0
+// the texture's own look: the brick's mortar keeps its colour, masked by
+// its alpha, and the glass is blended). Kit's material set's are Kit's
 // (register_voxels), and the builders' theirs ([KIT] stage 4g); a builder
 // places any of them, "air" a dig
 static const char *OWN_VOXELS[] = {"glass", "brick"};
+static const char *OWN_MATERIALS = R"({
+	"workbench/glass": {"texture": "main/glass.png", "kind": "glass", "tint": [
+		{"color": "#c4e4ee", "name": "clear"},
+		{"color": "#f9801d", "name": "orange"},
+		{"color": "#c74ebd", "name": "magenta"},
+		{"color": "#3ab3da", "name": "light blue"},
+		{"color": "#fed83d", "name": "yellow"},
+		{"color": "#80c71f", "name": "lime"},
+		{"color": "#f38baa", "name": "pink"},
+		{"color": "#474f52", "name": "grey"},
+		{"color": "#9d9d97", "name": "light grey"},
+		{"color": "#169c9c", "name": "cyan"},
+		{"color": "#8932b8", "name": "purple"},
+		{"color": "#3c44aa", "name": "blue"},
+		{"color": "#835432", "name": "brown"},
+		{"color": "#5e7c16", "name": "green"},
+		{"color": "#b02e26", "name": "red"},
+		{"color": "#1d1d21", "name": "black"}]},
+	"workbench/brick": {"texture": "main/brick.png", "tint": [
+		{"color": "#a03c2d", "name": "clay red"},
+		{"color": "#9f7f4c", "name": "yellow"},
+		{"color": "#472e28", "name": "dark"},
+		{"color": "#b2aea8", "name": "white-washed"},
+		{"color": "#613f33", "name": "brown"},
+		{"color": "#985933", "name": "orange"}]}
+})";
 
 struct Module: public interface::Module
 {
@@ -215,22 +244,17 @@ struct Module: public interface::Module
 			air.name.block_name = "air";
 			air.fully_empty = true;
 			reg->add_voxel(air);
-			for(const char *v : OWN_VOXELS){
-				interface::VoxelDefinition def;
-				def.name.block_name = ss_("workbench/")+v;
-				def.physically_solid = true;
-				def.edge_material_id = interface::EDGEMATERIALID_GROUND;
-				for(auto &seg : def.textures){
-					seg.resource_name = ss_("main/")+v+".png";
-					seg.total_segments = magic::IntVector2(1, 1);
-					seg.select_segment = magic::IntVector2(0, 0);
-				}
-				reg->add_voxel(def);
-			}
 		});
-		// Kit's voxels (its material set's); the registry is the world's
-		// and takes them from any thread
+		// Workbench's own voxels, then Kit's (its material set's); the
+		// registry is the world's and takes them from any thread
 		kit::access(m_server, [&](kit::Interface *k){
+			const json::Value own = json::load_string(OWN_MATERIALS);
+			for(const char *v : OWN_VOXELS){
+				const ss_ name = ss_("workbench/")+v;
+				ss_ why;
+				if(!k->register_material(reg, name, own.get(name.c_str()), &why))
+					log_e(MODULE, "%s", cs(why));
+			}
 			k->register_voxels(reg);
 		});
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){

@@ -1,0 +1,12 @@
+<!-- [KIT_TINT_MASK] An object's look wearing a cut out voxel material, leaves or a
+     plant (module.lua's voxel_mesh): the tint the material's colour. -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" psdefines="DIFFMAP ALPHAMASK">
+    <pass name="base" />
+    <pass name="litbase" psdefines="AMBIENT" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="prepass" psdefines="PREPASS" />
+    <pass name="material" psdefines="MATERIAL" depthtest="equal" depthwrite="false" />
+    <pass name="deferred" psdefines="DEFERRED" />
+    <pass name="depth" vs="Depth" ps="Depth" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" psdefines="ALPHAMASK" />
+</technique>

@@ -527,6 +527,9 @@ struct CVoxelRegistry: public VoxelRegistry
 			cache.variant_of_param[i] = def.variant_of_param[i];
 		cache.tint_ramp[0] = def.tint_ramp[0];
 		cache.tint_ramp[1] = def.tint_ramp[1];
+		cache.tint_palette = def.tint_palette;
+		if(cache.tint_palette.size() > 16)
+			cache.tint_palette.resize(16);
 		cache.sag_extent = def.sag_extent;
 		cache.shape_double_sided = def.shape_double_sided;
 		cache.shape_lit_from_above = def.shape_lit_from_above;

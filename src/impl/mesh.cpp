@@ -614,6 +614,12 @@ static uint32_t mul_rgb(uint32_t a, uint32_t b)
 static uint32_t tint_ramp_color(const interface::CachedVoxelDefinition *def,
 		float t)
 {
+	// [KIT_TINT_PALETTE] a palette's entry; past its end, the first
+	const auto &pal = def->tint_palette;
+	if(!pal.empty()){
+		const int i = t <= 0.0f ? 0 : t >= 1.0f ? 15 : (int)(t * 15.0f + 0.5f);
+		return (i < (int)pal.size() ? pal[i] : pal[0]) & 0xffffff;
+	}
 	const uint32_t a = def->tint_ramp[0], b = def->tint_ramp[1];
 	if(a == 0xffffff && b == 0xffffff)
 		return 0xffffff;

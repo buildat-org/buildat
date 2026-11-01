@@ -7,9 +7,15 @@
 //       builtin/voxel_shading/client_data/PBRVoxel.glsl). The ambient a
 //       face gets is cAmbientColor * a + rgb, and the sun reaches it by a
 //       too: a room with no way to the sky is dark.
-//   KITTINT  Kit's tint (0..15 along a material's tint ramp): the colour
-//       the mesher wrote, packed 5-6-5, into the tangent's x. It multiplies
-//       the albedo. 0 there (a mesh without the slot) is no tint.
+//   KITTINT  Kit's tint (0..15, an entry of a material's tint palette):
+//       the colour the mesher wrote, packed 5-6-5, into the tangent's x. It
+//       multiplies the albedo. 0 there (a mesh without the slot) is no tint.
+//   KITTINTMASK  ([KIT_TINT_MASK]) a solid voxel's: the texture's alpha is
+//       how much the tint applies (1 all, 0 none: a grass block's dirt, a
+//       brick's mortar keep their colour); the face is opaque either way.
+//   KITLOOKTINT  ([KIT_TINT_MASK]) an object's look wearing a voxel
+//       material (module.lua's voxel_mesh): the tint is the material's
+//       diffuse colour instead of a vertex's, masked as KITTINTMASK says.
 //
 // The vertex colour is light, not albedo, so it is not multiplied into the
 // diffuse colour as LitSolid's VERTEXCOLOR does.
@@ -148,10 +154,23 @@ void PS()
             float tintR = floor(tintPacked / 2048.0);
             float tintG = floor((tintPacked - tintR * 2048.0) / 32.0);
             float tintB = tintPacked - tintR * 2048.0 - tintG * 32.0;
-            diffColor.rgb *= vec3(tintR / 31.0, tintG / 63.0, tintB / 31.0);
+            vec3 tintColor = vec3(tintR / 31.0, tintG / 63.0, tintB / 31.0);
+            #ifdef KITTINTMASK
+                diffColor.rgb *= mix(vec3(1.0), tintColor, diffInput.a);
+            #else
+                diffColor.rgb *= tintColor;
+            #endif
         }
+        #ifdef KITTINTMASK
+            diffColor.a = cMatDiffColor.a;
+        #endif
     #endif
     
+    #if defined(KITLOOKTINT) && defined(KITTINTMASK)
+        diffColor = vec4(diffInput.rgb * mix(vec3(1.0), cMatDiffColor.rgb,
+                diffInput.a), cMatDiffColor.a);
+    #endif
+
     // Get material specular albedo
     #ifdef SPECMAP
         vec3 specColor = cMatSpecColor.rgb * texture2D(sSpecMap, vTexCoord.xy).rgb;

@@ -429,6 +429,15 @@ local function check_voxel_modifiers()
 			"tint_ramp is "..def.tint_ramp[1]..", "..def.tint_ramp[2])
 	assert(math.abs(def.sag_extent - 0.25) < 1e-6,
 			"sag_extent is "..def.sag_extent)
+	-- [KIT_TINT_PALETTE] A palette of a definition of its own: the tint
+	-- picks one of its colours (the round trip below carries it)
+	local pal = safe.VoxelDefinition()
+	pal.name.block_name = "engine_test:mossy"
+	pal.edge_material_id = safe.VoxelDefinition.EDGEMATERIALID_GROUND
+	pal.tint_palette = {0xffffff, 0x91bd59, 0x507a32}
+	reg:add_voxel(pal)
+	assert(#pal.tint_palette == 3 and pal.tint_palette[3] == 0x507a32,
+			"tint_palette is "..#pal.tint_palette.." long")
 
 	-- Both travel to a client with the rest of the registry
 	local other = safe.createVoxelRegistry()

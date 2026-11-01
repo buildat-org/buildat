@@ -1086,13 +1086,15 @@ palette = function()
 				end, {label = "Shape", fill = true})
 			end
 			if entry then
-				local tints = {}
-				for i = 0, 15 do
-					tints[#tints + 1] = {i == 0 and "none" or tostring(i), i}
+				-- [KIT_TINT_PALETTE] its palette's entries, by name
+				local tints = M.tints_of(S.voxel)
+				if M.hand.tint >= #tints then
+					M.hand.tint = 0
 				end
 				ui_utils.dropdown(row(w), tints, M.hand.tint, function(t)
 					M.hand.tint = tonumber(t) or 0
-					log:info("kit editor: tint " .. M.hand.tint)
+					log:info("kit editor: tint " .. M.tint_label(S.voxel,
+							M.hand.tint))
 				end, {label = "Tint", fill = true})
 			end
 		end
@@ -1143,6 +1145,49 @@ end
 -- [KIT_EDIT_VOXELS] The voxel in hand (nil: none): the app's
 -- (O.pick_voxel) and the voxels tool's, on with one and away with none
 -- Whether a material of the palette has shapes (module.lua's hand_voxel)
+-- [KIT_TINT_PALETTE] A material's tints as the dropdown and the log name
+-- them: {{label, index}...}, its palette's length (an index past it draws
+-- as 0), its entries' names where it has them
+function M.tints_of(name)
+	local entry
+	for _, v in ipairs(E.state and E.state.voxels or {}) do
+		if v.name == name then
+			entry = v
+		end
+	end
+	local colors = entry and type(entry.tint) == "table" and entry.tint or {}
+	local names = entry and type(entry.tint_names) == "table" and
+			entry.tint_names or {}
+	local n = math.max(1, math.min(16, #colors > 0 and #colors or 16))
+	local out = {}
+	for i = 0, n - 1 do
+		local nm = names[i + 1]
+		out[#out + 1] = {type(nm) == "string" and nm ~= "" and nm or
+				(i == 0 and "default" or tostring(i)), i}
+	end
+	return out
+end
+
+-- "3 (very muddy)": the log's tint, its name after it when named
+function M.tint_label(name, i)
+	local t = M.tints_of(name)[i + 1]
+	return tostring(i) .. (t and t[1] ~= tostring(i) and " (" .. t[1] .. ")"
+			or "")
+end
+
+-- A check's look at a material's tints as the dropdown has them:
+-- `event kit_tints <material>` logs "kit editor: tints of <material>:
+-- default, dusty, ..."
+magic.SubscribeToEvent("command_seq:kit_tints", function(_, data)
+	local name = data:GetString("Param")
+	local labels = {}
+	for _, t in ipairs(M.tints_of(name)) do
+		labels[#labels + 1] = t[1]
+	end
+	log:info("kit editor: tints of " .. name .. ": " ..
+			table.concat(labels, ", "))
+end)
+
 function M.material_has_shapes(name)
 	for _, v in ipairs(E.state and E.state.voxels or {}) do
 		if v.name == name then
@@ -3211,8 +3256,9 @@ local function wheel_hand(wheel, q)
 		return
 	end
 	if ctrl then
-		M.hand.tint = (M.hand.tint + step) % 16
-		log:info("kit editor: tint " .. M.hand.tint)
+		local n = #M.tints_of(S.voxel)
+		M.hand.tint = (M.hand.tint + step) % n
+		log:info("kit editor: tint " .. M.tint_label(S.voxel, M.hand.tint))
 		return palette()
 	end
 	if not M.material_has_shapes(S.voxel) then

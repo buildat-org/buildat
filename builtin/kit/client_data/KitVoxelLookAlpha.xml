@@ -1,0 +1,7 @@
+<!-- [KIT_TINT_MASK] An object's look wearing a translucent voxel material, water or
+     stained glass (module.lua's voxel_mesh): the tint the material's colour. -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" psdefines="DIFFMAP">
+    <pass name="alpha" depthwrite="false" blend="alpha" />
+    <pass name="litalpha" depthwrite="false" blend="addalpha" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>

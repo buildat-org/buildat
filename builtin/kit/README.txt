@@ -24,6 +24,20 @@ mushroom_brown.png (farming_mushroom_brown.png) and mossy_cobble.png
 mcl_flowers_tallgrass.png (grey, tinted by VoxeLibre at run time)
 multiplied by #79c05a, the grass's tint.
 
+[KIT_TINT_NATURE] [KIT_TINT_MATERIALS] (2026-11-01) The ones a tint
+palette hues (materials.json's "palettes") are no longer byte-for-byte
+copies: grass_top.png, grass_side.png's grass, tall_grass.png,
+leaves.png, water.png, mossy_cobble.png's moss, wood.png, tree.png,
+tree_top.png's bark ring, sand.png and stone.png were re-painted to grey
+(each pixel's luminance over its group's brightest), and each palette's
+entry 0 fitted (least squares) so that the grey times it is the old
+look again. On a solid one the alpha is where the tint applies: 0 on
+grass_side.png's dirt, mossy_cobble.png's stones and tree_top.png's
+rings, which keep their colours. grass_bottom.png is dirt.png with
+alpha 0 (a grass block's bottom, untinted). The same goes for
+apps/workbench's brick.png (its mortar alpha 0) and glass.png (grey, its
+alpha how much it lets through). Derivatives, under the same licence.
+
 snow.png ([KIT] stage 4g) is a byte-for-byte copy of VoxeLibre 0.92.3's
 textures/default_snow.png (the same pack, CC BY-SA 4.0 by its LEGAL.md;
 the release's files, as poppy.png and mossy_cobble.png there are the same

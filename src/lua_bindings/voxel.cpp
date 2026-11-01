@@ -121,6 +121,31 @@ void vdef_set_tint_ramp(VoxelDefinition &def, luabind::object value,
 	}
 }
 
+// [KIT_TINT_PALETTE] vdef.tint_palette = {0xffffff, 0x91bd59, ...}: up to
+// 16 colours the tint picks one of; {} for the ramp. See
+// VoxelDefinition::tint_palette.
+luabind::object vdef_get_tint_palette(const VoxelDefinition &def,
+		lua_State *L)
+{
+	luabind::object result = luabind::newtable(L);
+	for(size_t i = 0; i < def.tint_palette.size(); i++)
+		result[i+1] = luabind::object(L, (double)def.tint_palette[i]);
+	return result;
+}
+
+void vdef_set_tint_palette(VoxelDefinition &def, luabind::object value,
+		lua_State *L)
+{
+	def.tint_palette.clear();
+	for(size_t i = 0; value && i < 16; i++){
+		luabind::object v = value[i+1];
+		if(!v || luabind::type(v) != LUA_TNUMBER)
+			break;
+		def.tint_palette.push_back(
+				(uint32_t)luabind::object_cast<double>(v) & 0xffffffUL);
+	}
+}
+
 void vdef_set_tile_turns(VoxelDefinition &def, luabind::object value,
 		lua_State *L)
 {
@@ -774,6 +799,8 @@ void init_voxel(lua_State *L)
 					&vdef_set_shape_masked)
 			.property("variants", &vdef_get_variants, &vdef_set_variants)
 			.property("tint_ramp", &vdef_get_tint_ramp, &vdef_set_tint_ramp)
+			.property("tint_palette", &vdef_get_tint_palette,
+					&vdef_set_tint_palette)
 			.def_readwrite("sag_extent", &VoxelDefinition::sag_extent)
 			.def_readwrite("shape_double_sided",
 					&VoxelDefinition::shape_double_sided)

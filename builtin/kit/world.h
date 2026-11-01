@@ -10,7 +10,10 @@
 //   {"format": "kit_materials", "author", "name",
 //    "voxels": {"<author>/<name>": {"texture": t | "top", "side",
 //        "bottom": t, "kind": "solid" (default) | "water" | "leaves" |
-//        "plant" (two crossed quads, walked through), "heightmap": the
+//        "plant" (two crossed quads, walked through) | "glass" (a solid
+//        cube blended by its texture's alpha, [KIT_TINT_MATERIALS]),
+//        "tint": its tint palette (TintPalette::parse; a name is one of
+//        "palettes"), "heightmap": the
 //        layer of builtin/heightmap's ground textures that is its look,
 //        ([KIT] stage 4g) "solid": a cube that stops players (true by
 //        default), "transparent": a cube cut out by its texture's alpha
@@ -18,6 +21,7 @@
 //        (1 by default) and "surface": a tag ("road", "ice", "mud";
 //        letters, digits and _, none by default) for what moves on it},
 //        ...},
+//    "palettes": {name: [entry, ...], ...} ([KIT_TINT_PALETTE]),
 //    "fallbacks": {role: role, ...},
 //    "structures": {name: {"voxel": v} | {"voxels": {letter: v, ...},
 //        "origin": [x, y, z], "layers": [[row, ...], ...]}, ...},
@@ -118,6 +122,99 @@ static const int LOAD_XZ = 2, GEN_XZ = 2, LOAD_Y = 1;
 // Caves: from this far under the top down to CAVE_DEEP under it
 static const int CAVE_TOP = 5, CAVE_DEEP = 100;
 
+// [KIT_TINT_PALETTE] "#rrggbb" -> 0xRRGGBB; false for anything else
+inline bool parse_hex_color(const json::Value &v, uint32_t &out)
+{
+	const ss_ c = v.is_string() ? v.as_string() : "";
+	bool hex = c.size() == 7 && c[0] == '#';
+	for(size_t i = 1; hex && i < 7; i++)
+		hex = isxdigit((unsigned char)c[i]);
+	if(hex)
+		out = (uint32_t)strtoul(c.c_str() + 1, nullptr, 16);
+	return hex;
+}
+inline uint32_t lerp_color(uint32_t a, uint32_t b, double t)
+{
+	uint32_t out = 0;
+	for(int shift = 16; shift >= 0; shift -= 8){
+		const double ca = (a >> shift) & 0xff, cb = (b >> shift) & 0xff;
+		out |= (uint32_t)(ca + (cb - ca) * t + 0.5) << shift;
+	}
+	return out;
+}
+// A tint palette: up to 16 colours, each maybe named
+struct TintPalette
+{
+	sv_<uint32_t> colors;
+	sv_<ss_> names;
+	// [KIT_TINT_PALETTE] Kit's default (a material naming none): 0 its own
+	// look, 1-5 towards brown, 6-10 from brown towards green, 11-15 from
+	// green towards dark: dirty and weathered rather than darker
+	static const TintPalette& standard()
+	{
+		static TintPalette p = []{
+			TintPalette t;
+			const uint32_t white = 0xffffff, brown = 0x7a5a3a,
+					green = 0x6a7a40, dark = 0x2a2620;
+			static const char *NAMES[16] = {"", "dusty", "very dusty", "muddy",
+				"very muddy", "brown", "faintly mossy", "slightly mossy",
+				"mossy", "very mossy", "green", "grimy", "very grimy", "sooty",
+				"very sooty", "dark"};
+			for(int i = 0; i < 16; i++){
+				t.colors.push_back(i <= 5 ? lerp_color(white, brown, i / 5.0) :
+						i <= 10 ? lerp_color(brown, green, (i - 5) / 5.0) :
+						lerp_color(green, dark, (i - 10) / 5.0));
+				t.names.push_back(NAMES[i]);
+			}
+			return t;
+		}();
+		return p;
+	}
+	// "tint" of a material set's voxel: ["#a", "#b"] (16 steps from the
+	// first to the second), [entry...] (1 to 16, each "#rrggbb" or
+	// {"color": "#rrggbb", "name": "savanna"}) or a palette's name in
+	// `palettes` (the set's "palettes": {name: [entry...]})
+	bool parse(const json::Value &j, const json::Value *palettes)
+	{
+		colors.clear();
+		names.clear();
+		if(j.is_string()){
+			if(!palettes || !palettes->is_object() ||
+					!palettes->get(j.as_string().c_str()).is_array())
+				return false;
+			return parse(palettes->get(j.as_string().c_str()), nullptr);
+		}
+		if(!j.is_array() || j.size() < 1 || j.size() > 16)
+			return false;
+		uint32_t a = 0, b = 0;
+		if(j.size() == 2 && parse_hex_color(j.at(0u), a) &&
+				parse_hex_color(j.at(1u), b)){
+			for(int i = 0; i < 16; i++){
+				colors.push_back(lerp_color(a, b, i / 15.0));
+				names.push_back("");
+			}
+			return true;
+		}
+		for(unsigned i = 0; i < j.size(); i++){
+			const json::Value &e = j.at(i);
+			uint32_t c = 0;
+			ss_ name;
+			if(e.is_object()){
+				if(!parse_hex_color(e.get("color"), c))
+					return false;
+				name = json::jstr(e, "name");
+				if(name.size() > 32)
+					return false;
+			} else if(!parse_hex_color(e, c)){
+				return false;
+			}
+			colors.push_back(c);
+			names.push_back(name);
+		}
+		return true;
+	}
+};
+
 struct Material
 {
 	ss_ top, side, bottom, kind = "solid";
@@ -130,13 +227,14 @@ struct Material
 	// them yet. A heightmap's material's are its ground's
 	double friction = 1;
 	ss_ surface;
-	// [KIT_VOXEL_FORMAT] the tint field's ramp, 0 to 15 from the first to
-	// the second (albedo multiplied): Kit's default whitens nothing and
-	// darkens to a stained grey; "tint": ["#rrggbb", "#rrggbb"] its own
-	uint32_t tint_ramp[2] = {0xffffff, 0x4a4540};
+	// [KIT_TINT_PALETTE] The tint field's palette (albedo multiplied),
+	// entry 0 the material's own look: "tint" (TintPalette::parse), Kit's
+	// standard one otherwise
+	TintPalette tint = TintPalette::standard();
 
-	// A set's voxel or a builder's ([KIT] stage 4g: the same fields)
-	bool parse(const json::Value &j)
+	// A set's voxel or a builder's ([KIT] stage 4g: the same fields);
+	// palettes: the set's named ones
+	bool parse(const json::Value &j, const json::Value *palettes = nullptr)
 	{
 		const ss_ t = json::jstr(j, "texture");
 		top = json::jstr(j, "top", t);
@@ -153,24 +251,15 @@ struct Material
 		surface = json::jstr(j, "surface");
 		const json::Value &tr = j.get("tint");
 		bool tint_ok = tr.is_undefined() || tr.is_null();
-		if(tr.is_array() && tr.size() == 2){
-			tint_ok = true;
-			for(unsigned k = 0; k < 2; k++){
-				const ss_ c = tr.at(k).is_string() ? tr.at(k).as_string() : "";
-				bool hex = c.size() == 7 && c[0] == '#';
-				for(size_t i = 1; hex && i < 7; i++)
-					hex = isxdigit((unsigned char)c[i]);
-				tint_ok = tint_ok && hex;
-				if(hex)
-					tint_ramp[k] = (uint32_t)strtoul(c.c_str() + 1, nullptr, 16);
-			}
-		}
+		if(!tint_ok)
+			tint_ok = tint.parse(tr, palettes);
 		bool tag_ok = surface.size() <= 32;
 		for(char c : surface)
 			tag_ok = tag_ok && (isalnum((unsigned char)c) || c == '_');
 		return !top.empty() && !side.empty() && !bottom.empty() &&
 				light >= 0 && light <= 15 && (kind == "solid" ||
-				kind == "water" || kind == "leaves" || kind == "plant") &&
+				kind == "water" || kind == "leaves" || kind == "plant" ||
+				kind == "glass") &&
 				friction >= 0 && friction <= 10 && tag_ok && tint_ok;
 	}
 
@@ -185,22 +274,26 @@ struct Material
 		v.set("light", (int64_t)light);
 		v.set("friction", friction);
 		v.set("surface", surface);
-		json::Value t = json::array();
-		for(uint32_t c : tint_ramp){
+		// [KIT_TINT_PALETTE] its colours and their names ("" unnamed)
+		json::Value t = json::array(), tn = json::array();
+		for(size_t i = 0; i < tint.colors.size(); i++){
 			char b[8];
-			snprintf(b, sizeof b, "#%06x", (unsigned)(c & 0xffffff));
+			snprintf(b, sizeof b, "#%06x", (unsigned)(tint.colors[i] & 0xffffff));
 			t.append(ss_(b));
+			tn.append(i < tint.names.size() ? tint.names[i] : ss_());
 		}
 		v.set("tint", t);
+		v.set("tint_names", tn);
 		// The shapes it has ([KIT_VOXEL_FORMAT]): a solid cube's
 		v.set("shapes", has_shapes());
 		return v;
 	}
 
-	// [KIT_VOXEL_FORMAT] Whether its shapes are made (a solid cube's)
+	// [KIT_VOXEL_FORMAT] Whether its shapes are made (a solid cube's, a
+	// glass one's too)
 	bool has_shapes() const
 	{
-		return kind == "solid" && solid && !transparent;
+		return (kind == "solid" || kind == "glass") && solid && !transparent;
 	}
 
 	// Its definition in a voxel registry
@@ -221,11 +314,18 @@ struct Material
 			seg.select_segment = Urho3D::IntVector2(0, 0);
 		}
 		def.light_source = (uint8_t)light;
-		def.tint_ramp[0] = tint_ramp[0];
-		def.tint_ramp[1] = tint_ramp[1];
+		def.tint_palette = tint.colors;
 		if(kind == "water"){
 			// Passive: no flow (user, 2026-10-30)
 			def.edge_material_id = 10;
+			def.translucent = true;
+			def.transmits_light = true;
+		} else if(kind == "glass"){
+			// [KIT_TINT_MATERIALS] Blended as water is, a cube that stops
+			// players; its own edge material, so glass against glass draws
+			// no face between
+			def.edge_material_id = 11;
+			def.physically_solid = solid;
 			def.translucent = true;
 			def.transmits_light = true;
 		} else if(kind == "plant"){
@@ -469,12 +569,15 @@ struct MaterialSet
 		}
 		name = json::jstr(j, "author")+"/"+json::jstr(j, "name");
 		const json::Value &vs = j.get("voxels");
+		// [KIT_TINT_PALETTE] palettes its voxels share by name
+		const json::Value &pals = j.get("palettes");
 		if(vs.is_object())
 			for(json::Iterator it(vs); it; ++it){
 				Material m;
-				if(!m.parse(*it)){
+				if(!m.parse(*it, &pals)){
 					why = "voxel "+it.key()+": a texture, a kind, light 0...15, "
-							"friction 0...10 and a surface tag";
+							"friction 0...10, a surface tag and a tint (two "
+							"colours, 1 to 16 entries or a palette's name)";
 					return false;
 				}
 				voxels[it.key()] = m;

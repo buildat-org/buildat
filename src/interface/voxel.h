@@ -386,6 +386,14 @@ namespace interface
 		// As with VoxelVariant::color the vertex colour is light rather than
 		// albedo, so this tints the light the voxel receives.
 		uint32_t tint_ramp[2] = {0xffffff, 0xffffff};
+		// [KIT_TINT_PALETTE] Up to 16 colours (0xRRGGBB) the tint modifier
+		// picks one of instead of a point on the ramp: the field's value
+		// at 0...1 times 15, rounded, is the index, and an index past the
+		// end picks the first. Empty: the ramp. A palette of natural
+		// variations (a grass's biomes, wood species, dye colours) is not
+		// a line between two colours, and the slot the shader reads stays
+		// one 5-6-5 colour either way.
+		sv_<uint32_t> tint_palette;
 		// How far a full-value sag modifier moves a face, in voxels. 0 for a
 		// voxel that does not sag, which is most of them.
 		//
@@ -452,6 +460,7 @@ namespace interface
 		uint8_t variant_of_param[256] = {};
 		// Copied from the definition
 		uint32_t tint_ramp[2] = {0xffffff, 0xffffff};
+		sv_<uint32_t> tint_palette;
 		float sag_extent = 0.0f;
 
 		uint8_t tile_turns[6] = {};

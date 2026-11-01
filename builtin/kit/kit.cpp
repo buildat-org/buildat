@@ -2298,18 +2298,39 @@ struct Module: public interface::Module, public Interface
 			reg->add_voxel(v.second.definition(v.first));
 		}
 		// [KIT_VOXEL_FORMAT] the shapes of every solid cube there (Kit's,
-		// and the app's own registered before)
+		// and the app's own registered before); a material knows
 		for(const interface::VoxelDefinition &d : reg->get_all()){
 			const ss_ &name = d.name.block_name;
 			if(d.id == interface::VOXELTYPEID_UNDEFINED || !d.physically_solid ||
-					!d.shape.empty() || d.alpha_masked || d.translucent ||
-					name.empty() || world::material_of(name) != name)
+					!d.shape.empty() || name.empty() ||
+					world::material_of(name) != name)
 				continue;
 			auto it = m_registered.find(name);
-			if(it != m_registered.end() && !it->second.has_shapes())
+			if(it != m_registered.end() ? !it->second.has_shapes() :
+					d.alpha_masked || d.translucent)
 				continue;
 			register_shapes(reg, d);
 		}
+	}
+
+	// [KIT_TINT_MATERIALS] An app's own voxel as a material (world.h's
+	// set's voxel: its palette, its kind), registered unless it is there
+	bool register_material(interface::VoxelRegistry *reg, const ss_ &name,
+			const json::Value &material, ss_ *why)
+	{
+		world::Material m;
+		if(name.empty() || world::material_of(name) != name ||
+				!m.parse(material, &material.get("palettes"))){
+			if(why)
+				*why = "not a material: "+name;
+			return false;
+		}
+		m_registered.emplace(name, m);
+		interface::VoxelName n;
+		n.block_name = name;
+		if(!reg->get(n))
+			reg->add_voxel(m.definition(name));
+		return true;
 	}
 
 	// A cube's shape types where they are not yet
@@ -2448,6 +2469,15 @@ struct Module: public interface::Module, public Interface
 				json::Value v = it != m_voxel_types.end() ?
 						it->second.deepcopy() : mt != m_registered.end() ?
 						mt->second.properties() : json::object();
+				// [KIT_TINT_PALETTE] a builder's type: its material's palette
+				if(it != m_voxel_types.end() && v.get("tint_names").is_undefined()){
+					world::Material m;
+					if(m.parse(v)){
+						const json::Value p = m.properties();
+						v.set("tint", p.get("tint"));
+						v.set("tint_names", p.get("tint_names"));
+					}
+				}
 				v.set("name", n);
 				interface::VoxelName sn;
 				sn.block_name = n+":"+world::shapes()[0].name;

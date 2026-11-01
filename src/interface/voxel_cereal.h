@@ -56,7 +56,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		Record<Archive> r(archive, "VoxelDefinition", 1, 0);
+		Record<Archive> r(archive, "VoxelDefinition", 1, 1);
 		r.ar(
 				v.name,
 				v.id,
@@ -107,6 +107,9 @@ namespace interface
 				v.collision_boxes,
 				v.selection_boxes
 		);
+		// [KIT_TINT_PALETTE]
+		if(r.minor >= 1)
+			r.ar(v.tint_palette);
 		r.end();
 	}
 
