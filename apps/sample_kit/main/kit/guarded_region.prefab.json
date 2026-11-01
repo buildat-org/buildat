@@ -1,0 +1,13 @@
+{
+	"format": "kit_prefab",
+	"author": "sample_kit",
+	"name": "guarded_region",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "guarded region", "pos": [0, 0, 0],
+			"components": [
+				{"type": "kit/region", "params": {"size": [3, 3, 3],
+					"dig": "others"}},
+				{"type": "sample_kit/guard"}]}
+	]
+}

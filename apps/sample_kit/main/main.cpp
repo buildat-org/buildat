@@ -16,7 +16,9 @@
 // and the builders edit with Kit's editor (util/kit_editor_check.sh).
 // The floor is laid once a save, merged as a generator's voxels (the
 // start, not play's: the server starts Running, [KIT] stage 4c); a
-// client's "p" key digs the pillar, the player's own write (a build).
+// client's "p" key digs the pillar, the player's own write (a build),
+// a region's rules asked there ([KIT] stage 4j; kit/guard.lua an allow
+// hook on the prefab guarded_region).
 #include "core/log.h"
 #include "accounts/api.h"
 #include "client_file/api.h"
@@ -178,6 +180,25 @@ struct Module: public interface::Module
 	{
 		const bool pillar = packet.data == "pillar";
 		const pv::Vector3DInt32 p = pillar ? PILLAR : DOOR;
+		// [KIT] stage 4j: in a region its rules (and its allow hook) say
+		// whether a player may dig there, edit rights aside; outside every
+		// region sample_kit lets anyone dig
+		bool allowed = true;
+		ss_ why;
+		kit::access(m_server, [&](kit::Interface *k){
+			if(!k->can_edit(packet.sender) && k->region_of(packet.sender,
+					p.getX(), p.getY(), p.getZ()))
+				allowed = k->allows(packet.sender, "dig", p.getX(), p.getY(),
+						p.getZ(), &why);
+		});
+		if(!allowed){
+			log_i(MODULE, "sample_kit: a dig at the %s: refused: %s",
+					pillar ? "pillar" : "door", cs(why));
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(packet.sender, "kit:warning", why);
+			});
+			return;
+		}
 		bool written = false;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			interface::VoxelName air;

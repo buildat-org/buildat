@@ -3833,6 +3833,32 @@ local function draw_play_links()
 	E.play_drawn = E.play_drawn or {}
 	for id, n in pairs(P.nodes) do
 		local show = type(n.show) == "table" and n.show or {}
+		-- [KIT] stage 4j: a region's border, its show_border on (its size
+		-- as a resize has it)
+		if show.border and type(show.region) == "table" and n.node and
+				n.node:GetVar("kit:enabled"):GetString() ~= "false" then
+			local sz = network.parse_json(n.node:GetVar("kit:size"):GetString())
+			if type(sz) ~= "table" then
+				sz = show.region
+			end
+			local p = n.node.position
+			local o = magic.Vector3(math.floor(p.x + 1e-4) - 0.5,
+					math.floor(p.y + 1e-4) - 0.5, math.floor(p.z + 1e-4) - 0.5)
+			local e = {}
+			for i = 1, 3 do
+				e[i] = math.max(1, math.min(64, math.floor(tonumber(sz[i]) or 1)))
+			end
+			dbg:AddBoundingBox(magic.BoundingBox(o, magic.Vector3(o.x + e[1],
+					o.y + e[2], o.z + e[3])), magic.Color(1, 0.3, 0.3), true)
+			local key = "border " .. id
+			local was = E.play_drawn[key]
+			local now_s = table.concat(e, "x")
+			if was ~= now_s then
+				E.play_drawn[key] = now_s
+				log:info("kit: region " .. id .. " border " .. now_s ..
+						" drawn in play")
+			end
+		end
 		for _, to in ipairs(type(show.links) == "table" and show.links or {}) do
 			local o = P.nodes[to]
 			if o and n.node and o.node then
@@ -3913,7 +3939,8 @@ local function draw()
 				end
 				-- A zone's and an owned volume's extent, from its cell on
 				local t = type_of(c.type)
-				for _, k in ipairs({"zone", "volume", "grants", "voxel_box"}) do
+				for _, k in ipairs({"zone", "volume", "grants", "voxel_box",
+						"region"}) do
 					local n = t[k] and c.params and c.params[t[k]]
 					if type(n) == "table" then
 						local ext = {}
@@ -3925,7 +3952,8 @@ local function draw()
 								magic.Vector3(x + ext[1] - 0.5, y + ext[2] - 0.5,
 								z + ext[3] - 0.5)), k == "zone" and
 								magic.Color(0.3, 0.75, 1) or k == "voxel_box" and
-								magic.Color(0.63, 0.38, 0.88) or magic.Color(1, 0.6, 0.2),
+								magic.Color(0.63, 0.38, 0.88) or k == "region" and
+								magic.Color(1, 0.3, 0.3) or magic.Color(1, 0.6, 0.2),
 								false)
 					end
 				end

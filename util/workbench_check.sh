@@ -394,18 +394,18 @@ wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
 	# 3 spawner, 4 button, 5 gate, 6 lever, 7 timer, 8 door, 9 teleporter,
 	# 10 trigger zone, 11 scoreboard, 12 counter, 13 npc, 14 item giver,
-	# 15 key door, 16 dig zone, 17 player state (on the app root)
+	# 15 key door, 16 region (digging for all), 17 player state (on the app root)
 	for p in 'kit/spawner [0, 1, -4]' 'kit/button [2, 1, 2]' 'kit/gate [4, 1, 6]' \
 			'kit/lever [-2, 1, 2]' 'kit/timer [-3, 1, 2]' 'kit/door [-4, 1, 6]' \
 			'kit/teleporter [0, 1, -1]' 'kit/trigger_zone [6, 1, -10]' \
 			'kit/scoreboard [6, 1, -4]' 'kit/counter [5, 1, -4]' 'kit/npc [2, 1, -3]' \
 			'kit/item_giver [-2, 1, -3]' 'kit/key_door [2, 1, -5]' \
-			'kit/dig_zone [-1, 0, -7]' 'kit/player_state [0, 1, 0]'; do
+			'kit/region [-1, 0, -7]' 'kit/player_state [0, 1, 0]'; do
 		edit "{\"op\": \"place\", \"type\": \"${p%% *}\", \"pos\": ${p#* }}"
 	done
 	for s in '7 interval 1' '7 repeats 3' '9 to [8, 1, -8]' '10 size [5, 2, 5]' \
 			'12 target 2' '13 name "Ada"' '13 lines "Welcome!|Two came through."' \
-			'15 take true' '16 size [3, 1, 3]' '17 keep_position true'; do
+			'15 take true' '16 size [3, 1, 3]' '16 dig "others"' '17 keep_position true'; do
 		set -- $s
 		v=${s#* * }
 		edit "{\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $v}"
@@ -558,8 +558,8 @@ echo "ok: the admin plays it: the button opens the gate and starts the timer, wh
 want "$s" "kitbob goes through the round's start: inventory reset" \
 	"kit/spawner 3: spawns kitbob" \
 	"Entity 3's kit/spawner teleports kitbob to (0, 1, -4)" \
-	"workbench: a build by kitbob refused: no edit rights and no grant at (0,0,-3)" \
-	"kit/dig_zone 16: grants dig by its start" \
+	"workbench: a build by kitbob refused: no edit rights and not allowed at (0,0,-3): Protected: no " \
+	"kit/region 16: holds dig others, place none, enter all, pvp all, damage all" \
 	"kit/key_door 15: locked to kitbob who has no key" \
 	"kit/item_giver 14: gives kitbob 1 key" \
 	"kit/key_door 15: opened by kitbob taking their key" \
@@ -879,7 +879,7 @@ e = {x["id"]: x for x in a["entities"]}
 assert [x["components"][0]["type"] for x in a["entities"] if x["id"] > 2] == [
 	"kit/" + t for t in ["spawner", "button", "gate", "lever", "timer", "door", "teleporter",
 	"trigger_zone", "scoreboard", "counter", "npc", "item_giver", "key_door",
-	"dig_zone", "player_state"]], a
+	"region", "player_state"]], a
 assert e[17]["parent"] == 1 and "pos" not in e[17], e[17]
 assert e[9]["components"][0]["params"]["to"] == [8, 1, -8], e[9]
 assert len([l for x in a["entities"] for c in x["components"] for l in c["links"]]) == 8
@@ -900,7 +900,7 @@ assert not pl("kitbob")["items"], pl("kitbob")  # an empty table: [] or {}
 assert pl("kitboss")["score"] == 1 and pl("kitbob")["score"] == 1, (pl("kitboss"), pl("kitbob"))
 assert pid("kitboss") >= 1000000, r["players"]
 assert not r["10"][0].get("inside"), r["10"]
-assert st(15)["open"] is True and st(16)["dig"] is True, (st(15), st(16))
+assert st(15)["open"] is True and st(16)["rules"]["dig"] == "others", (st(15), st(16))
 print("  rows: 15 instances, 8 links, the scores, the lever on, the doors and the gate open, the key")
 EOF
 # 7. ([KIT] stage 4e2) Kit's editor as floorplanner's, on fresh saves at
@@ -1159,14 +1159,14 @@ keypress Escape
 wait_log 5000 kit editor: tool select
 keypress F1
 wait_log 5000 kit editor: the view is 2D
-event kit_edit {"op": "place", "type": "kit/dig_zone", "pos": [2, -1, -2]}
+event kit_edit {"op": "place", "type": "kit/region", "pos": [2, -1, -2]}
 wait_log 10000 kit editor: state: 7 entities, 11 to undo
 mouse_pos 556 422
-wait_log 5000 kit editor: guide: Left: select kit/dig_zone
+wait_log 5000 kit editor: guide: Left: select kit/region
 frames 3
 screenshot @T@/buried_hover.png
 mouse_click left
-wait_log 5000 kit editor: selected 8 (kit/dig_zone 8)
+wait_log 5000 kit editor: selected 8 (kit/region 8)
 mouse_pos 700 520
 mouse_click left
 wait_log 5000 kit editor: selected none
@@ -1179,7 +1179,7 @@ mouse_wheel -10
 frames 3
 screenshot @T@/list_scrolled.png
 click Button "Select" 150 690
-wait_log 5000 kit editor: selected 8 (kit/dig_zone 8)
+wait_log 5000 kit editor: selected 8 (kit/region 8)
 mouse_pos 672 306
 mouse_click left
 wait_log 5000 kit editor: selected 3
@@ -1190,7 +1190,7 @@ mouse_click left
 wait_log 5000 kit editor: selected 8
 frames 3
 screenshot @T@/buried_link.png
-click Button "To on"
+click Button "To enable"
 wait_log 5000 kit editor: state: 7 entities, 12 to undo
 quit
 EOF
@@ -1328,8 +1328,8 @@ want "$t/srv3.log" "An edit by kitboss: placed kit/button 3 at [2,1,2]" \
 	"An edit by kitboss: placed kit/world 7 on the app root" \
 	"An edit by kitboss: deleted 7" \
 	"An undo by kitboss: 1 entities put back" \
-	"An edit by kitboss: placed kit/dig_zone 8 at [2,-1,-2]" \
-	"An edit by kitboss: linked 3.pressed -> 8.on"
+	"An edit by kitboss: placed kit/region 8 at [2,-1,-2]" \
+	"An edit by kitboss: linked 3.pressed -> 8.enable"
 want "$t/ed.log" "kit editor: turned 1 by 90" "kit editor: a box selected 2, 2 in the selection"
 # The 3D middle drag pans over the ground (user's playtest, 2026-10-31):
 # the camera's height kept, its x and z moved

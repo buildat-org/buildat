@@ -203,6 +203,10 @@ struct Type
 	// The position parameters that are its zone's, its owned volume's and
 	// its grants' extent ("" for none)
 	ss_ zone, volume, grants;
+	// [KIT] stage 4j: the position parameter that is its region's extent
+	// ("" none): it decides digging, placing, entering, pvp and damage in
+	// it by its state's rules and owners
+	ss_ region;
 	// [KIT_VOXEL_STATES] The position parameter that is the box its
 	// c:set_voxels writes in ("" none), and whether its runs read that
 	// box's voxels (reads_voxels = true)
@@ -362,6 +366,11 @@ struct Peer
 	// [KIT] 4d's answer: no account (a guest, p1...): their entity goes
 	// when they leave or log in
 	bool guest = false;
+	// [KIT] stage 4j: where they last stood that they may enter (a refused
+	// region puts them back), and when they were last told why
+	double ok_pos[3] = {0, 0, 0};
+	bool has_ok = false;
+	int64_t told_us = 0;
 };
 
 // A builder's colour while their tools are on: the first one no other
@@ -777,6 +786,10 @@ struct Module: public interface::Module, public Interface
 	std::set<ss_> m_palette;
 	// Bare type names made <author>/<name> as the composition was read
 	size_t m_migrated = 0;
+	// [KIT] stage 4j: the entities a load made regions of dig zones
+	std::set<uint64_t> m_from_dig_zone;
+	// A handler's answer (what it returned: [value, reason]), the last run's
+	json::Value m_ret = json::null();
 	// Instances of Kit's own types made their file's version
 	size_t m_upgraded = 0;
 	sm_<ss_, std::deque<Change>> m_undo;
@@ -1232,6 +1245,7 @@ struct Module: public interface::Module, public Interface
 		for(auto k : {std::make_pair("zone", &t.zone),
 				std::make_pair("volume", &t.volume),
 				std::make_pair("grants", &t.grants),
+				std::make_pair("region", &t.region),
 				std::make_pair("voxel_box", &t.voxel_box)}){
 			const ss_ pn = jstr(t.decl, k.first);
 			if(pn.empty())
@@ -1248,6 +1262,10 @@ struct Module: public interface::Module, public Interface
 			t.shared.insert("dig");
 			t.shared.insert("place");
 		}
+		// A region's too ([KIT] stage 4j: the clients say why before asking)
+		if(!t.region.empty())
+			for(const char *k : {"enabled", "owners", "rules", "size"})
+				t.shared.insert(k);
 		// A look's extent is a position parameter's too
 		const ss_ lx = jstr(t.decl.get("look"), "extent");
 		if(!lx.empty() && jstr(t.decl.get("params").get(lx), "type") !=
@@ -1631,6 +1649,27 @@ struct Module: public interface::Module, public Interface
 						cs(jstr(cj, "type")), cs(in.type));
 				m_migrated++;
 			}
+			// [KIT] stage 4j: a dig zone is a region with only dig and place,
+			// for everyone; its inputs on, off and dig are enable, disable
+			// and dig_out (load_composition() moves the links to it)
+			json::Value dz;
+			if(in.type == "kit/dig_zone"){
+				const json::Value &op = cj.get("params");
+				dz = json::object();
+				if(pos_ok(op.get("size")))
+					dz.set("size", op.get("size"));
+				const bool dig = !op.get("dig").is_boolean() ||
+						op.get("dig").as_boolean();
+				const bool place = op.get("place").is_true();
+				dz.set("dig", dig ? "all" : "none");
+				dz.set("place", place ? "all" : "none");
+				in.type = "kit/region";
+				m_from_dig_zone.insert(e.id);
+				log_i(MODULE, "Entity %s's kit/dig_zone is a kit/region now "
+						"(dig %s, place %s, for everyone)", cs(itos(e.id)),
+						dig ? "yes" : "no", place ? "yes" : "no");
+				m_migrated++;
+			}
 			if(!load_type(in.type, why))
 				return false;
 			const Type &t = m_types[in.type];
@@ -1638,7 +1677,9 @@ struct Module: public interface::Module, public Interface
 			const json::Value &ver = cj.get("version");
 			in.version = ver.is_number() && ver.as_number() >= 1 &&
 					ver.as_number() <= 1e9 ? (int64_t)ver.as_number() : t.version;
-			json::Value pj = cj.get("params");
+			json::Value pj = dz.is_object() ? dz : cj.get("params");
+			if(dz.is_object())
+				in.version = t.version;
 			// A starter door, gate, button or lever of before is an object
 			const bool object = migrate_object(e, in, pj);
 			// [KIT] stage 5: an instance of an older version is upgraded to
@@ -1762,6 +1803,7 @@ struct Module: public interface::Module, public Interface
 		m_entities[1] = root;
 		const json::Value &es = c.get("entities");
 		m_pending_ids.clear();
+		m_from_dig_zone.clear();
 		for(unsigned i = 0; i < es.size(); i++)
 			m_pending_ids.insert((uint64_t)json::jint(es.at(i), "id", 0));
 		for(unsigned i = 0; i < es.size(); i++){
@@ -1795,12 +1837,17 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			for(Instance &in : e.comps)
-				for(const Link &l : in.links)
+				for(Link &l : in.links){
+					// A dig zone's inputs, a region's now ([KIT] stage 4j)
+					if(m_from_dig_zone.count(l.to))
+						l.input = l.input == "on" ? "enable" : l.input == "off" ?
+								"disable" : l.input == "dig" ? "dig_out" : l.input;
 					if(!m_entities.count(l.to)){
 						why = "entity "+itos(e.id)+": a link to "+itos(l.to)+
 								", which is not there";
 						return false;
 					}
+				}
 		}
 		return true;
 	}
@@ -5699,6 +5746,18 @@ struct Module: public interface::Module, public Interface
 			if(ty.usable && (ty.handlers.count("on_use") || (m_host.controls &&
 					ty.decl.get("seat").is_true() && is_movement(in.type))))
 				show.set("usable", true);
+			// [KIT] stage 4j: a region's extent by its parameter (its state's
+			// size while resized), and its border drawn in play
+			if(!ty.region.empty() && show.get("region").is_undefined()){
+				int n[3];
+				extent(in.params.get(ty.region), n);
+				json::Value g = json::array();
+				for(int k = 0; k < 3; k++)
+					g.append(n[k]);
+				show.set("region", g);
+				if(in.params.get("show_border").is_true())
+					show.set("border", true);
+			}
 			if(!ty.grants.empty() && show.get("grants").is_undefined()){
 				int n[3];
 				extent(in.params.get(ty.grants), n);
@@ -6005,6 +6064,7 @@ struct Module: public interface::Module, public Interface
 		ss_ answer, error;
 		bool runaway = false, in_provider = false;
 		int64_t spent = 0;
+		m_ret = json::null();
 		const ss_ request = request_of(e, e.comps[r.comp], r);
 		const uint64_t pid = player_id(r.by);
 		uint64_t inv_id = 0;
@@ -6046,6 +6106,8 @@ struct Module: public interface::Module, public Interface
 			return spent;
 		}
 		const json::Value fx = json::load_string(answer.c_str());
+		if(fx.get("ret").is_array())
+			m_ret = fx.get("ret");
 		Instance &in = e.comps[r.comp];
 		const Type &t = m_types[type];
 		const json::Value &lines = fx.get("log");
@@ -6153,12 +6215,16 @@ struct Module: public interface::Module, public Interface
 		}
 		const json::Value &voxel = fx.get("voxel");
 		if(voxel.is_string() && !voxel.as_string().empty()){
-			// The cells it owns, or a grants type's box ([KIT_TRIGGER_DIG]:
-			// kit/dig_zone's dig), MAX_SET_CELLS at most
+			// The cells it owns, or a grants type's or a region's box
+			// ([KIT_TRIGGER_DIG]: kit/region's dig_out), MAX_SET_CELLS at most
 			sv_<pv::Vector3DInt32> cells = owned_cells(e);
-			if(!t.owns_voxel && !t.grants.empty() && e.has_pos){
+			if(!t.owns_voxel && (!t.grants.empty() || !t.region.empty()) &&
+					e.has_pos){
 				int n[3];
-				extent(in.params.get(t.grants), n);
+				if(!t.region.empty())
+					region_extent(in, t, n);
+				else
+					extent(in.params.get(t.grants), n);
 				const pv::Vector3DInt32 o = voxel_p(e);
 				if(n[0] * n[1] * n[2] <= MAX_SET_CELLS)
 					for(int x = 0; x < n[0]; x++)
@@ -7527,12 +7593,240 @@ struct Module: public interface::Module, public Interface
 
 	bool can_dig(size_t peer, int x, int y, int z)
 	{
-		return granted(peer, "dig", x, y, z);
+		return allows(peer, "dig", x, y, z, nullptr);
+	}
+
+	uint64_t region_of(size_t peer, int x, int y, int z)
+	{
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end())
+			return 0;
+		const Entity *re = nullptr;
+		return region_at(pi->second.scene, x, y, z, &re) ? re->id : 0;
 	}
 
 	bool can_place(size_t peer, int x, int y, int z)
 	{
-		return granted(peer, "place", x, y, z);
+		return allows(peer, "place", x, y, z, nullptr);
+	}
+
+	// ---- [KIT] stage 4j: regions
+
+	// A region's extent: its state's size while a signal resized it, else
+	// its parameter's
+	void region_extent(const Instance &in, const Type &t, int n[3])
+	{
+		const json::Value &sz = in.state.get("size");
+		extent(pos_ok(sz) ? sz : in.params.get(t.region), n);
+	}
+
+	// The region deciding a cell of a scene: the smallest enabled one
+	// holding it (nullptr: none), and the entity it is on
+	const Instance *region_at(const ss_ &scene, int x, int y, int z,
+			const Entity **on)
+	{
+		const Instance *best = nullptr;
+		int64_t best_v = 0;
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(!e.has_pos)
+				continue;
+			for(const Instance &in : e.comps){
+				const Type &t = m_types[in.type];
+				if(t.region.empty() || !in.disabled.empty() ||
+						in.state.get("enabled").is_false())
+					continue;
+				int n[3];
+				region_extent(in, t, n);
+				const pv::Vector3DInt32 o = voxel_p(e);
+				if(x < o.getX() || x >= o.getX() + n[0] || y < o.getY() ||
+						y >= o.getY() + n[1] || z < o.getZ() ||
+						z >= o.getZ() + n[2])
+					continue;
+				ss_ sc;
+				scene_of(e, &sc);
+				if(sc != scene)
+					continue;
+				const int64_t v = (int64_t)n[0] * n[1] * n[2];
+				if(!best || v < best_v){
+					best = &in;
+					best_v = v;
+					*on = &e;
+				}
+			}
+		}
+		return best;
+	}
+
+	// Whether the peer is among a region's owners: "nobody", "builders"
+	// (edit rights), or names (a list, or a text of them)
+	bool owns(size_t peer, const json::Value &owners)
+	{
+		const Peer &p = m_peers[peer];
+		if(owners.is_string()){
+			const ss_ o = owners.as_string();
+			if(o == "nobody" || o.empty())
+				return false;
+			if(o == "builders")
+				return can_edit(peer);
+			ss_ name;
+			for(size_t i = 0; i <= o.size(); i++){
+				if(i == o.size() || o[i] == ',' || o[i] == ' '){
+					if(!name.empty() && name == p.name)
+						return true;
+					name.clear();
+				} else {
+					name += o[i];
+				}
+			}
+			return false;
+		}
+		for(unsigned i = 0; i < owners.size(); i++)
+			if(owners.at(i).is_string() && owners.at(i).as_string() == p.name)
+				return true;
+		return false;
+	}
+
+	static const char *refusal(const ss_ &action)
+	{
+		return action == "dig" ? "Protected: no digging here" :
+				action == "place" ? "Protected: no placing here" :
+				action == "enter" ? "Protected: no entering here" :
+				action == "pvp" ? "Protected: no fighting players here" :
+				action == "damage" ? "Protected: no damage here" :
+				"Protected";
+	}
+
+	// Whether a placed peer may do action ("dig", "place", "enter", "pvp"
+	// or "damage") at a cell of their scene, and why not. The region
+	// holding it decides (the smallest): a component on its entity with an
+	// allow handler first (true or false decides, nil leaves it), then its
+	// rules, the owners' column or everyone else's. Outside every region
+	// the World's default: digging and placing by a type's grants alone
+	// (none: no), entering, pvp and damage yes. Edit rights are not in it
+	bool allows(size_t peer, const ss_ &action, int x, int y, int z, ss_ *why)
+	{
+		auto pi = m_peers.find(peer);
+		const bool build = action == "dig" || action == "place";
+		// Stopped, the world is the start: only a builder changes it
+		if(!m_hosted || pi == m_peers.end() || (build && !m_session.running)){
+			if(why)
+				*why = build ? "The server is not Running" : "Not here";
+			return !build && pi != m_peers.end();
+		}
+		const Entity *re = nullptr;
+		const Instance *rg = region_at(pi->second.scene, x, y, z, &re);
+		if(!rg){
+			if(!build)
+				return true;
+			if(granted(peer, action.c_str(), x, y, z))
+				return true;
+			if(why)
+				*why = refusal(action);
+			return false;
+		}
+		// The hook: the entity's allow handlers, by its player
+		const uint64_t rid = re->id;
+		const ss_ by = pi->second.player ? "player:"+itos(pi->second.player) :
+				"app";
+		for(size_t i = 0; m_session.running; i++){
+			auto it = m_entities.find(rid);
+			if(it == m_entities.end() || i >= it->second.comps.size())
+				break;
+			if(!m_types[it->second.comps[i].type].handlers.count("allow"))
+				continue;
+			Run r;
+			r.entity = rid;
+			r.comp = i;
+			r.handler = "allow";
+			r.by = by;
+			r.args.append(by);
+			r.args.append(action);
+			json::Value pos = json::array();
+			pos.append((int64_t)x);
+			pos.append((int64_t)y);
+			pos.append((int64_t)z);
+			r.args.append(pos);
+			run(r);
+			if(m_ret.is_array() && m_ret.at(0u).is_boolean()){
+				const bool yes = m_ret.at(0u).as_boolean();
+				if(!yes && why)
+					*why = m_ret.at(1u).is_string() && !m_ret.at(1u).
+							as_string().empty() ? m_ret.at(1u).as_string().
+							substr(0, 200) : refusal(action);
+				return yes;
+			}
+		}
+		// (the hook may have changed the tree: the region again)
+		rg = region_at(pi->second.scene, x, y, z, &re);
+		if(!rg){
+			if(!build || granted(peer, action.c_str(), x, y, z))
+				return true;
+			if(why)
+				*why = refusal(action);
+			return false;
+		}
+		const json::Value &rule = rg->state.get("rules").get(action);
+		const bool owner = owns(peer, rg->state.get("owners"));
+		// Who may: "all", "owners", "others" or "none"
+		const ss_ who = rule.is_string() ? rule.as_string() : "none";
+		const bool yes = who == "all" || who == (owner ? "owners" : "others");
+		if(!yes && why)
+			*why = refusal(action);
+		return yes;
+	}
+
+	// Who stands where they may not enter is put back where they last
+	// could (while Running, by an app that moves its players), and told
+	void check_regions()
+	{
+		if(!m_hosted || !m_session.running ||
+				(!m_host.moves_players && !m_host.controls))
+			return;
+		const int64_t now = interface::os::time_us();
+		for(auto &pp : m_peers){
+			Peer &p = pp.second;
+			if(!p.player)
+				continue;
+			int c[3];
+			for(int k = 0; k < 3; k++)
+				c[k] = (int)std::floor(p.pos[k] + 0.5);
+			ss_ why;
+			if(allows(pp.first, "enter", c[0], c[1], c[2], &why)){
+				for(int k = 0; k < 3; k++)
+					p.ok_pos[k] = p.pos[k];
+				p.has_ok = true;
+				continue;
+			}
+			if(!p.has_ok)
+				continue;
+			log_i(MODULE, "%s may not enter (%i,%i,%i): %s; put back",
+					cs(p.name), c[0], c[1], c[2], cs(why));
+			const size_t peer = pp.first;
+			const double x = p.ok_pos[0], y = p.ok_pos[1], z = p.ok_pos[2];
+			for(int k = 0; k < 3; k++)
+				p.pos[k] = p.ok_pos[k];
+			// (put_player()'s y is the body's + 0.45, a peer's pos its + 0.5:
+			// the peer's y given as is lifted it 0.05 a put, and one walking
+			// into the region rose into the air)
+			if(m_host.controls)
+				put_player(peer, x, y - 0.05, z);
+			else
+				m_server->emit_event("kit:move_player",
+						new MovePlayer(peer, x, y, z));
+			if(now - p.told_us > 1000000){
+				p.told_us = now;
+				tell(peer, why);
+			}
+		}
+	}
+
+	// A line shown to a peer ("kit:warning", a notification)
+	void tell(size_t peer, const ss_ &text)
+	{
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:warning", text);
+		});
 	}
 
 	static bool loaded(voxelworld::Instance *world, const pv::Vector3DInt32 &p)
@@ -7786,6 +8080,7 @@ struct Module: public interface::Module, public Interface
 		// Their entity, and the client parts of the types ([KIT] stage 4d)
 		json::Value you = json::object(), parts = json::object();
 		you.set("id", (int64_t)p.player);
+		you.set("name", p.name);
 		for(auto &t : m_types)
 			if(!t.second.client.empty())
 				parts.set(t.first, t.second.client);
@@ -7882,6 +8177,7 @@ struct Module: public interface::Module, public Interface
 		}
 		run_timers();
 		check_zones();
+		check_regions();
 		// The queue, in order, within the tick's budget
 		while(!m_queue.empty() && spent < budget && m_box){
 			const Run r = m_queue.front();
@@ -10074,7 +10370,7 @@ struct Module: public interface::Module, public Interface
 				const json::Value &d = m_types[t].decl;
 				json::Value o = json::object();
 				for(const char *k : {"params", "inputs", "outputs", "gizmo",
-						"usable", "zone", "volume", "grants", "voxel_box", "version",
+						"usable", "zone", "volume", "grants", "region", "voxel_box", "version",
 						"inventory", "root", "inputs_types", "outputs_types",
 						"player"})
 					if(!d.get(k).is_undefined())
@@ -10088,7 +10384,7 @@ struct Module: public interface::Module, public Interface
 				if(!m_palette.count(t.first)){
 					json::Value o = json::object();
 					for(const char *k : {"params", "inputs", "outputs", "gizmo",
-							"zone", "volume", "grants", "voxel_box", "version", "inventory",
+							"zone", "volume", "grants", "region", "voxel_box", "version", "inventory",
 							"root", "inputs_types", "outputs_types", "player"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));

@@ -27,6 +27,9 @@
 --   kit.show_target(t): t drawn this frame (vanilla's pointed box round
 --     the object or the voxel, the placement face's frame), logged as it
 --     changes ("kit: points at ..."); kit.show_target(nil) none
+--   kit.allows(action, x, y, z) -> ok, why: whether this player may
+--     "dig", "place" or "enter" there by the regions' rules ([KIT] stage
+--     4j; the server's allows()), and why not; kit.refused(why) shows it
 --   kit.may_dig(x, y, z), kit.may_place(x, y, z): this player's rights
 --     and the grants there (a grant only while the server is Running)
 --   kit.pick_entity(origin, dir, reach) -> id, t, usable: the usable
@@ -693,6 +696,7 @@ end)
 buildat.sub_packet("kit:you", function(data)
 	local y = network.parse_json(data)
 	P.you = type(y) == "table" and tonumber(y.id) or 0
+	P.my_name = type(y) == "table" and y.name or nil
 	log:info("kit: this player is entity " .. tostring(P.you))
 end)
 
@@ -1044,12 +1048,100 @@ local function granted(key, x, y, z)
 	return false
 end
 
+-- [KIT] stage 4j: the region deciding a cell (the smallest enabled one
+-- holding it), as the server's region_at(): its node, or nil
+local function region_at(x, y, z)
+	local best, best_v
+	for _, n in pairs(P.nodes) do
+		local g = show_of(n).region
+		if type(g) == "table" and value(n, "enabled") ~= false then
+			local sz = value(n, "size")
+			if type(sz) ~= "table" then
+				sz = g
+			end
+			local e = {}
+			for i = 1, 3 do
+				e[i] = math.max(1, math.min(64, math.floor(tonumber(sz[i]) or 1)))
+			end
+			local p = n.node.position
+			local ox, oy, oz = math.floor(p.x + 1e-4), math.floor(p.y + 1e-4),
+					math.floor(p.z + 1e-4)
+			if x >= ox and x < ox + e[1] and y >= oy and y < oy + e[2] and
+					z >= oz and z < oz + e[3] then
+				local v = e[1] * e[2] * e[3]
+				if not best or v < best_v then
+					best, best_v = n, v
+				end
+			end
+		end
+	end
+	return best
+end
+M.region_at = region_at
+
+local REFUSED = {dig = "Protected: no digging here",
+	place = "Protected: no placing here",
+	enter = "Protected: no entering here"}
+
+-- Whether this player may do action at the cell, and why not (the
+-- server's allows(); a region's allow hook is the server's alone)
+function M.allows(action, x, y, z)
+	if E.can_edit and (action == "dig" or action == "place") then
+		return true
+	end
+	if (action == "dig" or action == "place") and not E.running then
+		return false, "The server is not Running"
+	end
+	local n = region_at(x, y, z)
+	if not n then
+		if action ~= "dig" and action ~= "place" then
+			return true
+		end
+		if granted(action, x, y, z) then
+			return true
+		end
+		return false, REFUSED[action]
+	end
+	local o = value(n, "owners")
+	local mine = false
+	if o == "builders" then
+		mine = E.can_edit == true
+	elseif type(o) == "table" then
+		for _, name in ipairs(o) do
+			mine = mine or name == P.my_name
+		end
+	elseif type(o) == "string" and o ~= "nobody" then
+		for name in o:gmatch("[^,%s]+") do
+			mine = mine or name == P.my_name
+		end
+	end
+	local rules = value(n, "rules")
+	local rule = type(rules) == "table" and rules[action]
+	if rule == "all" or rule == (mine and "owners" or "others") then
+		return true
+	end
+	return false, REFUSED[action] or "Protected"
+end
+
 function M.may_dig(x, y, z)
-	return E.can_edit or granted("dig", x, y, z)
+	return (M.allows("dig", x, y, z))
 end
 
 function M.may_place(x, y, z)
-	return E.can_edit or granted("place", x, y, z)
+	return (M.allows("place", x, y, z))
+end
+
+-- A refusal told (a click the rules refuse), not more than once a second
+-- for the same reason
+local told, told_at = nil, 0
+function M.refused(why)
+	local now = buildat.get_time_us()
+	if why == told and now - told_at < 1000000 then
+		return
+	end
+	told, told_at = why, now
+	log:info("kit: refused: " .. tostring(why))
+	ui_utils.show_notification(tostring(why), 3)
 end
 
 function M.play_target(origin, dir, reach, solid)
@@ -1075,11 +1167,20 @@ function M.play_target(origin, dir, reach, solid)
 		end
 		return t
 	end
-	if hit and not M.terrain_cell(hit[1], hit[2], hit[3]) and
-			M.may_dig(hit[1], hit[2], hit[3]) then
-		t.left = {kind = "dig", cell = hit}
+	if hit and not M.terrain_cell(hit[1], hit[2], hit[3]) then
+		local ok, why = M.allows("dig", hit[1], hit[2], hit[3])
+		-- [KIT] stage 4j: refused, the click says why
+		t.left = ok and {kind = "dig", cell = hit} or
+				{kind = "refused", why = why}
 	end
-	if hit and front and M.may_place(front[1], front[2], front[3]) then
+	local place_ok, place_why = false, nil
+	if hit and front then
+		place_ok, place_why = M.allows("place", front[1], front[2], front[3])
+		if not place_ok then
+			t.right = {kind = "refused", why = place_why}
+		end
+	end
+	if hit and front and place_ok then
 		local n = {front[1] - hit[1], front[2] - hit[2], front[3] - hit[3]}
 		if math.abs(n[1]) + math.abs(n[2]) + math.abs(n[3]) ~= 1 then
 			-- Over the heightmap's hit point: its top

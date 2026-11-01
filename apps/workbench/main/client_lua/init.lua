@@ -181,7 +181,10 @@ local function act(t, left)
 	if not a then
 		return
 	end
-	if a.kind == "use" then
+	if a.kind == "refused" then
+		-- [KIT] stage 4j: a region's rule (or no grant): why, shown
+		kit.refused(a.why)
+	elseif a.kind == "use" then
 		kit.use(a.id)
 	elseif a.kind == "dig" then
 		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), "air")

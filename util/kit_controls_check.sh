@@ -152,12 +152,13 @@ EOF
 	edit '{"op": "place", "type": "kit/car", "pos": [-1, 1, 2]}'
 	edit '{"op": "place", "type": "kit/ball", "pos": [3, 1, 9]}'
 	# [KIT_TRIGGER_DIG] a trigger zone on the car's way, its "entered" to a
-	# dig zone's dig
+	# region's dig_out ([KIT] 4j: the dig zone's dig)
 	edit '{"op": "place", "type": "kit/trigger_zone", "pos": [-2, 1, 5]}'
 	set_p 8 size '[3, 2, 4]'
-	edit '{"op": "place", "type": "kit/dig_zone", "pos": [6, -1, 2]}'
+	edit '{"op": "place", "type": "kit/region", "pos": [6, -1, 2]}'
 	set_p 9 size '[2, 2, 2]'
-	edit '{"op": "link", "id": 8, "comp": 0, "output": "entered", "to": 9, "input": "dig"}'
+	set_p 9 dig '"all"'
+	edit '{"op": "link", "id": 8, "comp": 0, "output": "entered", "to": 9, "input": "dig_out"}'
 	cat <<'EOF'
 keypress F6
 wait_log 10000 kit editor: edit mode off
@@ -252,7 +253,7 @@ awk -v d="$d" 'BEGIN { exit !(d > 2) }' ||
 want "$s" "kitboss takes the seat of entity 6" "kitboss leaves the seat of entity 6" \
 	"kitboss takes the seat of entity 7" "kitboss leaves the seat of entity 7"
 want "$s" "kit/trigger_zone 8: kitboss entered; 1 inside" \
-	"kit/dig_zone 9: digs its box out by kitboss"
+	"kit/region 9: digs its box out by kitboss"
 grep -a "kitboss takes the seat of entity 6" -A1000 "$s" |
 	grep -aq "kit/trigger_zone 8: kitboss entered" ||
 	fail "the zone was not entered by car ($s)"

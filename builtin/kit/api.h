@@ -276,6 +276,17 @@ namespace interface
 //                             players dig/place: Interface::can_dig/place;
 //                             dig and place are shared, so the clients
 //                             show where a click digs ([KIT] stage 4e2).
+// Regions ([KIT] stage 4j, kit/region):
+//   region = "<param>"     -- a box of cells (as zone) whose state decides
+//                             dig, place, enter, pvp and damage in it:
+//                             enabled (false: it decides nothing), owners
+//                             ("nobody", "builders", or names) and rules
+//                             ({dig = {owners, others}, ...}), all shared.
+//                             The smallest holding a cell decides
+//                             (Interface::allows); a component on its
+//                             entity with allow(c, player, action, pos)
+//                             returning true or false, reason decides
+//                             first (nil: the rules).
 // `by` is who caused it, "player:<name>" or "app", carried along the links
 // it sets off and kept with a timer. Handlers run only while the server
 // is Running (below).
@@ -675,6 +686,21 @@ namespace kit
 		// are not in it: an app asks it beside can_edit
 		virtual bool can_dig(size_t peer, int x, int y, int z) = 0;
 		virtual bool can_place(size_t peer, int x, int y, int z) = 0;
+		// [KIT] stage 4j: whether a placed peer may do action ("dig",
+		// "place", "enter", "pvp" or "damage") at x, y, z of their scene,
+		// and why not (why: may be null; "Protected: no digging here", or
+		// an allow hook's reason): the smallest region holding the cell
+		// decides, by its owners' column or everyone else's; outside every
+		// region digging and placing need a grant and the rest is allowed.
+		// can_dig and can_place are it. Kit has no hits of its own: a game
+		// that has them asks pvp and damage here. Edit rights are not in it
+		virtual bool allows(size_t peer, const ss_ &action, int x, int y,
+				int z, ss_ *why) = 0;
+		// The entity of the region deciding at x, y, z of a placed peer's
+		// scene (the smallest enabled holding it), 0 outside every region:
+		// an app whose own default differs outside them asks allows() only
+		// where this is one (sample_kit's digs)
+		virtual uint64_t region_of(size_t peer, int x, int y, int z) = 0;
 		// The server's state ([KIT] stage 4c): Running or Stopped. The app
 		// plays or stops as a builder would, by "app" (or another name)
 		virtual bool running() = 0;
