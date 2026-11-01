@@ -33,7 +33,9 @@
 --     the pointer), the wheel goes toward it. Walking at the pointer, the
 --     right drag turns; a click on the view goes up into the crosshair
 --     (the mouse looks, the clicks act at the crosshair) and Escape comes
---     back down.
+--     back down. Walking with the voxels tool on, the wheel steps the
+--     voxel in hand through the Voxel list, Shift+wheel its shape,
+--     Ctrl+Shift+wheel its tint ([KIT_WALK_WHEEL])
 --   - **The same tools in every view**: what a click would do is shown on
 --     what is pointed at (kit.HOVER's frame) and said at the bottom
 --     ("Left: ... Right: ..."), nothing where a click does nothing; a click
@@ -3177,8 +3179,72 @@ local function mouse_move(x, y, dx, dy)
 	end
 end
 
-local function mouse_wheel(wheel)
-	if not E.editing or over_ui(S.mx, S.my) then
+-- [KIT_WALK_WHEEL] Walking with the voxels tool on (the crosshair's or
+-- the pointer's): the wheel steps the voxel in hand through the Voxel
+-- list, Shift+wheel its shape (a material with shapes), Ctrl+Shift+wheel
+-- its tint; up the one before, as Luanti's hotbar, round at the ends
+local function wheel_hand(wheel, q)
+	local shift = q % 2 == 1
+	local ctrl = math.floor(q / 2) % 2 == 1
+	local step = wheel > 0 and -1 or 1
+	local function round(i, n)
+		return (i - 1) % n + 1
+	end
+	if ctrl and not shift then
+		return
+	end
+	if not shift then
+		local names = voxel_names()
+		if #names == 0 then
+			return
+		end
+		local at = 0
+		for i, n in ipairs(names) do
+			if n == S.voxel then
+				at = i
+			end
+		end
+		return M.pick_voxel(names[round(at == 0 and (step > 0 and 0 or 1) +
+				step or at + step, #names)])
+	end
+	if not S.voxel then
+		return
+	end
+	if ctrl then
+		M.hand.tint = (M.hand.tint + step) % 16
+		log:info("kit editor: tint " .. M.hand.tint)
+		return palette()
+	end
+	if not M.material_has_shapes(S.voxel) then
+		log:info("kit editor: " .. S.voxel .. " has no shapes")
+		return
+	end
+	local shapes = {""}
+	local at = 1
+	for _, sh in ipairs(M.SHAPES) do
+		shapes[#shapes + 1] = sh
+		if sh == M.hand.shape then
+			at = #shapes
+		end
+	end
+	M.hand.shape = shapes[round(at + step, #shapes)]
+	log:info("kit editor: shape " .. (M.hand.shape ~= "" and
+			M.hand.shape:gsub("_", " ") or "cube"))
+	if O.pick_voxel then
+		O.pick_voxel(S.voxel)
+	end
+	palette()
+end
+
+local function mouse_wheel(wheel, q)
+	if not E.editing then
+		return
+	end
+	if S.view == "walk" and S.tool == "voxels" and wheel ~= 0 and
+			(M.looking() or not over_ui(S.mx, S.my)) then
+		return wheel_hand(wheel, q or 0)
+	end
+	if over_ui(S.mx, S.my) then
 		return
 	end
 	local notches = math.max(-10, math.min(10, wheel))
@@ -4382,7 +4448,7 @@ function M.editor(options)
 		if S.touch then
 			return
 		end
-		mouse_wheel(data:GetInt("Wheel"))
+		mouse_wheel(data:GetInt("Wheel"), data:GetInt("Qualifiers"))
 	end)
 	magic.SubscribeToEvent("TouchBegin", function(_, data)
 		if S.touch then

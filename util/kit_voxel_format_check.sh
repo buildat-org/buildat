@@ -6,7 +6,10 @@
 # [KIT_VOXEL_FORMAT] (kit_plan 4g2) Kit's voxel format on Workbench: id,
 # param (a shape's facing), tint and sky light in one word; shapes as
 # voxels of their own ("kit/stone:stair"); the World's sky_light. A fresh
-# save, the admin Ended, a World (flat grassland):
+# save, the admin Ended ([KIT_WALK_WHEEL] walking, the voxels tool on
+# (V): the wheel steps the voxel in hand and back, Shift+wheel its shape,
+# Ctrl+Shift+wheel its tint; with the tool away the wheel leaves it), a
+# World (flat grassland):
 #   1. Placed by the editor's set_voxel: a stone stair facing 5 (upside
 #      down) tinted 3, a planks slab; param 300 and tint 16 refused; a
 #      slab tinted over by stone and the undo giving the slab back with
@@ -136,6 +139,27 @@ keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
+keypress v
+wait_log 10000 kit editor: in hand
+mouse_wheel 1
+wait_log 5000 kit editor: in hand
+mouse_wheel -1
+wait_log 5000 kit editor: in hand
+keydown shift
+mouse_wheel -1
+wait_log 5000 kit editor: shape
+mouse_wheel 1
+wait_log 5000 kit editor: shape
+keydown ctrl
+mouse_wheel -1
+wait_log 5000 kit editor: tint
+mouse_wheel 1
+wait_log 5000 kit editor: tint
+keyup ctrl
+keyup shift
+keypress v
+mouse_wheel -1
+wait_log_absent 1000 kit editor: in hand
 EOF
 	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "biome", "value": "grassland"}'
@@ -211,6 +235,23 @@ r9=$(line 9 | grep -oP 'sky light \K\d+')
 [ "${r8:-0}" -gt 0 ] && [ "${r9:-0}" -gt 0 ] && [ "$r9" -lt 15 ] ||
 	fail "the shaft let no light into the room: $(line 8); $(line 9) ($s)"
 want "$t/boss1.log" "kit: sky light on"
+# [KIT_WALK_WHEEL] Walking with the voxels tool on: the wheel up the
+# list's last, down its first again; Shift+wheel the shape, Ctrl+Shift
+# the tint; with the tool away the wheel leaves the hand
+python3 - "$t/boss1.log" <<'PY' || fail "the wheel's voxel, shape and tint ($t/boss1.log)"
+import re, sys
+log = open(sys.argv[1], errors="replace").read().splitlines()
+ev = []
+for l in log:
+	m = re.search(r"kit editor: (in hand \S+|shape [a-z ]+|tint \d+|\S+ has no shapes)$", l)
+	if m:
+		ev.append(m.group(1))
+hand = [e for e in ev if e.startswith("in hand")]
+assert len(hand) >= 3 and hand[0] == hand[2] != hand[1], ev
+rest = ev[ev.index(hand[1]) + 2:]
+assert rest[:4] == ["shape slab", "shape cube", "tint 1", "tint 0"], ev
+print("  wheel: " + ", ".join(ev[:7]))
+PY
 echo "ok: sky light off computes nothing; on ($relit) generates nothing again, the open air 15, the closed room 0, a shaft lets light in (under it $r8, a corner $r9)"
 want "$s" "workbench: kitboss placed kit/stone:slab (2,1,3): written"
 # Read in play (sky light 15: a slab lets the light through), then the
