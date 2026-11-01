@@ -866,6 +866,10 @@ struct Module: public interface::Module, public Interface
 	// is in (an infinite world loads round them), and the sections
 	// generated (logged as worldgen's queue empties)
 	main_context::SceneReference m_world_scene = nullptr;
+	// [KIT_HM_FREE] The World's voxels when it is a heightmap: a section
+	// not loaded is air (never generated round a player); an edit
+	// generates its own (hm_section())
+	voxelworld::Instance *m_hm_world = nullptr;
 	world::MaterialSet m_materials;
 	json::Value m_world_applied;
 	world::Params m_wp;
@@ -3729,6 +3733,7 @@ struct Module: public interface::Module, public Interface
 			// [KIT_HM_VOXELS] a heightmap's air sections: only the
 			// edited ones saved
 			w->set_save_unaltered(p.finite() && !p.heightmap());
+			m_hm_world = p.heightmap() ? w : nullptr;
 		});
 	}
 
@@ -4912,7 +4917,7 @@ struct Module: public interface::Module, public Interface
 				for(auto &q : c.cells){
 					const pv::Vector3DInt32 v(std::get<0>(q.first),
 							std::get<1>(q.first), std::get<2>(q.first));
-					if(!loaded(w, v))
+					if(!hm_section(w, v))
 						continue;
 					set_id(w, v, q.second);
 					mark(w, c.scene ? c.scene : m_world_scene, v, 'k', p.name);
@@ -5040,7 +5045,7 @@ struct Module: public interface::Module, public Interface
 				why = "voxel: a registered voxel's name (air: a dig)";
 				return;
 			}
-			if(!voxel_id(w, q, old)){
+			if(!hm_section(w, q) || !voxel_id(w, q, old)){
 				why = "the cell's section is not loaded";
 				return;
 			}
@@ -5182,7 +5187,7 @@ struct Module: public interface::Module, public Interface
 					for(int x = 0; x < n[0]; x++, i++){
 						const pv::Vector3DInt32 q = o + pv::Vector3DInt32(x, y, z);
 						uint32_t old = 0;
-						if(!voxel_id(w, q, old)){
+						if(!hm_section(w, q) || !voxel_id(w, q, old)){
 							why = "a cell of the box is not loaded";
 							continue;
 						}
@@ -5220,19 +5225,22 @@ struct Module: public interface::Module, public Interface
 		if(p.heightmap() || !p.finite()){
 			// [KIT_HM_WALK] round the spawn and each player; a heightmap's
 			// voxels are air built on over the terrain
+			// [KIT_HM_FREE] A heightmap's: only the sections the save has
+			// (what was built) loaded, none generated (-1): a body walks
+			// over cells not loaded (move.lua's), and an edit generates
+			// its own section (hm_section())
+			const int hgen = p.heightmap() ? -1 : 1;
 			double x = 0, y = 0, z = 0;
 			world_spawn(x, y, z);
 			pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
 					p.heightmap() ? (int)x : 0, (int)y, p.heightmap() ? (int)z : 0),
-					1, 1, 1, 1));
-			// (a heightmap's air a section round a player: each loaded
-			// section's chunks are the client's to mesh, empty or not)
-			const int lxz = p.heightmap() ? 1 : world::LOAD_XZ;
-			const int gxz = p.heightmap() ? 1 : world::GEN_XZ;
+					1, 1, hgen, hgen));
+			const int gxz = p.heightmap() ? -1 : world::GEN_XZ;
+			const int gy = p.heightmap() ? -1 : world::LOAD_Y;
 			for(auto &wp : m_world_peers)
 				pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
-						wp.second[0], wp.second[1], wp.second[2]), lxz,
-						world::LOAD_Y, gxz, world::LOAD_Y, wp.first));
+						wp.second[0], wp.second[1], wp.second[2]),
+						world::LOAD_XZ, world::LOAD_Y, gxz, gy, wp.first));
 		} else {
 			// A finite voxel World: every section of the map
 			const int m = p.border == "water" ? world::SEA_BORDER :
@@ -7837,6 +7845,53 @@ struct Module: public interface::Module, public Interface
 		});
 	}
 
+	// [KIT_HM_FREE] How many of a heightmap's sections are loaded, logged
+	// as it changes (a few ticks apart): only what was built and edited,
+	// none round a player for walking
+	size_t m_hm_loaded = 0;
+	int m_hm_ticks = 0;
+	void hm_sections_tick()
+	{
+		if(!m_hm_world || ++m_hm_ticks < 10)
+			return;
+		m_hm_ticks = 0;
+		size_t n = 0;
+		voxelworld::access(m_server, m_world_scene,
+				[&](voxelworld::Instance *w){
+			n = w->get_loaded_sections().size();
+		});
+		if(n == m_hm_loaded)
+			return;
+		m_hm_loaded = n;
+		log_i(MODULE, "World: %zu of the heightmap's voxel sections loaded",
+				n);
+	}
+
+	// [KIT_HM_FREE] A heightmap's section an edit goes in: generated
+	// (all air) if not loaded; false elsewhere or past the map
+	bool hm_section(voxelworld::Instance *w, const pv::Vector3DInt32 &p)
+	{
+		if(!w || w != m_hm_world || loaded(w, p))
+			return loaded(w, p);
+		// (the heightmap's samples: whole chunks of 64, apply_heightmap()'s)
+		if(p.getX() < 0 || p.getZ() < 0 ||
+				p.getX() >= (m_wp.width + 63) / 64 * 64 ||
+				p.getZ() >= (m_wp.depth + 63) / 64 * 64)
+			return false;
+		const pv::Vector3DInt16 ss = w->get_section_size_voxels();
+		auto div = [](int32_t a, int b){
+			return (int16_t)std::floor((double)a / b);
+		};
+		const pv::Vector3DInt16 sp(div(p.getX(), ss.getX()),
+				div(p.getY(), ss.getY()), div(p.getZ(), ss.getZ()));
+		if(sp.getY() < WORLD_SECTION_Y0 || sp.getY() > WORLD_SECTION_Y1)
+			return false;
+		w->load_or_generate_section(sp);
+		log_i(MODULE, "World: a heightmap's section (%i,%i,%i) generated "
+				"for an edit", sp.getX(), sp.getY(), sp.getZ());
+		return loaded(w, p);
+	}
+
 	static bool loaded(voxelworld::Instance *world, const pv::Vector3DInt32 &p)
 	{
 		const pv::Vector3DInt16 ss = world->get_section_size_voxels();
@@ -7922,7 +7977,7 @@ struct Module: public interface::Module, public Interface
 			voxelworld::Instance *world = ivw->get_instance(w.scene);
 			if(!world)
 				return;
-			if(!loaded(world, w.p)){
+			if(!hm_section(world, w.p)){
 				done = false;
 				return;
 			}
@@ -8111,6 +8166,7 @@ struct Module: public interface::Module, public Interface
 		m_box->poll();
 		take_vouches();
 		sky_relight_tick();
+		hm_sections_tick();
 		flush_copies();
 		// Writes into the start, made as their sections load: Running,
 		// kept past the round's Stop
@@ -8736,7 +8792,10 @@ struct Module: public interface::Module, public Interface
 						hz1 = std::min(map->samples_z() - 1, z0 + nz);
 				if(hx1 < hx0 || hz1 < hz0)
 					return;
-				o += ",hm={x0="+itos(hx0)+",z0="+itos(hz0)+",nx="+
+				// [KIT_HM_FREE] the map's size: its edge is a wall
+				o += ",hm={sx="+itos(map->samples_x())+",sz="+
+						itos(map->samples_z())+",x0="+itos(hx0)+",z0="+
+						itos(hz0)+",nx="+
 						itos(hx1 - hx0 + 1)+",nz="+itos(hz1 - hz0 + 1)+",h={";
 				char buf[32];
 				for(int z = hz0; z <= hz1; z++)
@@ -9238,11 +9297,16 @@ struct Module: public interface::Module, public Interface
 		return m;
 	}
 
-	static bool voxel_id(voxelworld::Instance *w, const pv::Vector3DInt32 &p,
+	// (A heightmap's cell not loaded: 0, never written, air)
+	bool voxel_id(voxelworld::Instance *w, const pv::Vector3DInt32 &p,
 			uint32_t &id)
 	{
-		if(!loaded(w, p))
-			return false;
+		if(!loaded(w, p)){
+			if(w != m_hm_world || !w)
+				return false;
+			id = 0;
+			return true;
+		}
 		const interface::VoxelFormat &f = w->get_voxel_reg()->get_format();
 		id = w->get_voxel(p, true).data & state_mask(f);
 		return true;
@@ -9508,7 +9572,7 @@ struct Module: public interface::Module, public Interface
 				const pv::Vector3DInt32 p(d.p[0], d.p[1], d.p[2]);
 				if(!w)
 					continue;
-				if(!loaded(w, p)){
+				if(!hm_section(w, p)){
 					const pv::Vector3DInt16 ss = w->get_section_size_voxels();
 					w->load_section_no_generate(pv::Vector3DInt16(
 							div_floor(p.getX(), ss.getX()),

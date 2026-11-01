@@ -31,7 +31,8 @@
 -- info = {solid = true, friction = n (1), surface = "<tag>"}: a voxel's
 -- (its type's `friction` and `surface` where it has them, else 1 and its
 -- name without the author), an object's ("object"), the heightmap's
--- ("ground") or a cell not loaded ("unknown", solid).
+-- ("ground") or a cell not loaded ("unknown", solid; air over a
+-- heightmap, [KIT_HM_FREE]) or a heightmap's edge ("edge").
 local M = {}
 local floor, sqrt = math.floor, math.sqrt
 local PI = 3.14159265358979323846
@@ -113,6 +114,7 @@ M.PI = PI
 M.UNKNOWN = {solid = true, friction = 1, surface = "unknown"}
 M.OBJECT = {solid = true, friction = 1, surface = "object"}
 M.GROUND = {solid = true, friction = 1, surface = "ground"}
+M.EDGE = {solid = true, friction = 1, surface = "edge"}
 
 -- A voxel's info from its definition's values (the server's table, both
 -- sides): solid, friction (1 if none), surface ("" if none: its name's
@@ -253,7 +255,10 @@ end
 
 -- ---- The world: t.cell(i, j, k) -> info or nil, t.boxes ({x0, y0, z0,
 -- x1, y1, z1, info = ...}...), t.ground(x, z) -> a heightmap's height
--- or nil
+-- or nil, t.edge {x0, z0, x1, z1}: a heightmap's extent. [KIT_HM_FREE]
+-- Over a heightmap (t.ground or t.edge) a cell not loaded is air: its
+-- voxels are only what is built, and a body walks on while they come in;
+-- the extent is a wall: nobody walks off the map
 local W = {}
 W.sin, W.cos, W.atan2, W.sqrt, W.PI = M.sin, M.cos, M.atan2, sqrt, PI
 
@@ -266,6 +271,8 @@ function M.world(t)
 	w.cell_fn = t.cell
 	w.boxes = t.boxes or {}
 	w.ground_fn = t.ground
+	w.edge = t.edge
+	w.unknown_air = t.ground ~= nil or t.edge ~= nil
 	w.cache = {}
 	return w
 end
@@ -276,6 +283,9 @@ function W:cell(i, j, k)
 	local v = self.cache[key]
 	if v == nil then
 		v = self.cell_fn(i, j, k) or false
+		if v == M.UNKNOWN and self.unknown_air then
+			v = false
+		end
 		self.cache[key] = v
 	end
 	return v or nil
@@ -385,6 +395,23 @@ function W:sweep(b, a, d)
 			end
 		end
 	end end
+	-- [KIT_HM_FREE] The heightmap's extent: a wall (one past it already:
+	-- no further out)
+	local e = self.edge
+	if e and a ~= 2 then
+		local q = a == 1 and 0 or 1
+		if d > 0 then
+			local lim = e[q + 3] - b[a + 3]
+			if lim < d then
+				d, hit = lim < 0 and 0 or lim, M.EDGE
+			end
+		else
+			local lim = e[q + 1] - b[a]
+			if lim > d then
+				d, hit = lim > 0 and 0 or lim, M.EDGE
+			end
+		end
+	end
 	-- The heightmap stops a fall (one in it already: at once)
 	if a == 2 and d < 0 then
 		local g = self:ground_max(b[1], b[3], b[4], b[6])
@@ -896,7 +923,9 @@ function M.snapshot(t)
 			return M.height(sample, x, z)
 		end
 	end
-	return M.world{cell = cell, boxes = boxes, ground = ground}
+	local edge = type(hm) == "table" and hm.sx and
+			{0, 0, hm.sx - 1, hm.sz - 1} or nil
+	return M.world{cell = cell, boxes = boxes, ground = ground, edge = edge}
 end
 
 -- The steps of a batch: each input dt long, in sub steps of its own

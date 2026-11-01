@@ -1469,7 +1469,9 @@ echo "ok: a builder's voxel type made in Kit's editor from an uploaded PNG, draw
 # tool: a voxel placed on the ground (in the cell the surface cuts
 # through), one on its face, a third placed and
 # dug, the heightmap not dug; End. ([KIT_HM_WALK]) In play w, a, s and d
-# each walk several metres, no corrections. Opened again
+# each walk several metres, no corrections; ([KIT_HM_FREE]) w on to the
+# map's edge, stopped there; no voxel section loaded but the edits' few.
+# Opened again
 # (save=alpha): the two voxels at the crosshair, their section in
 # the save.
 # menu=projects project=world: Manage with "world" selected, renamed
@@ -1559,6 +1561,10 @@ keydown d
 frames 120
 keyup d
 event kit_body
+keydown w
+frames 900
+keyup w
+event kit_body
 quit
 EOF
 BUILDAT_WORKBENCH_STONE= local_server 9 "$(printf 'launcher=1\nmenu=new')"
@@ -1572,21 +1578,31 @@ grep -aq "World: the save holds\|biome grassland, voxels\|biome rock" "$t/srv9.l
 	fail "the new project has voxel ground ($t/srv9.log)"
 want "$t/new9.log" "heightmap: terrain built"
 # [KIT_HM_NO_SEA] The voxels on a heightmap all air: no sea over the
-# voxel map's square
-want "$t/new9.log" "workbench: column 5,5: 0 not loaded, 9 air, 0 voxels"
+# voxel map's square (not loaded, too: [KIT_HM_FREE])
+want "$t/new9.log" "workbench: column 5,5: "
+grep -a "workbench: column 5,5: " "$t/new9.log" | grep -aq " air, 0 voxels" ||
+	fail "voxels in column 5,5 on the heightmap ($t/new9.log)"
 grep -aq "world_menu: the list shown" "$t/new9.log" &&
 	fail "menu=new showed the list first ($t/new9.log)"
 # The walk: each leg several metres its way (w +z, a -x, s -z, d +x), no
-# corrections
+# corrections; ([KIT_HM_FREE]) then w on to the map's edge (z 63, the
+# body's radius in), stopped there
 grep -a "kit: body at" "$t/new9.log" | sed 's/.*body at \([^,]*\),[^,]*,\([^,]*\), .* \([0-9]*\) corrections.*/\1 \2 \3/' > "$t/walk9"
-[ $(wc -l < "$t/walk9") = 5 ] || fail "not 5 body positions ($t/new9.log)"
-awk 'NR == 1 { x = $1; z = $2; c = $3; next }
+[ $(wc -l < "$t/walk9") = 6 ] || fail "not 6 body positions ($t/new9.log)"
+awk 'NR == 6 { if ($2 < 62 || $2 > 63 || $3 != c) { print "edge leg " $0; bad = 1 }; next }
+	NR == 1 { x = $1; z = $2; c = $3; next }
 	{ dx = $1 - x; dz = $2 - z; leg = NR - 1
 	  if (leg == 1 && dz < 3 || leg == 2 && dx > -3 || leg == 3 && dz > -3 || leg == 4 && dx < 3) bad = bad " leg " leg
 	  if ($3 != c) bad = bad " corrections in leg " leg
 	  x = $1; z = $2; c = $3 }
 	END { if (bad) { print bad; exit 1 } }' "$t/walk9" ||
 	fail "walking on the heightmap: $(tr '\n' ';' < "$t/walk9") ($t/new9.log)"
+# [KIT_HM_FREE] No voxel section made for walking: those loaded only the
+# edits' (made for them), a few
+want "$t/srv9.log" "World: a heightmap's section "
+grep -a "of the heightmap's voxel sections loaded" "$t/srv9.log" |
+	sed 's/.*World: \([0-9]*\) of.*/\1/' | awk '$1 > 3 { bad = 1 } END { exit bad }' ||
+	fail "more than 3 heightmap sections loaded ($t/srv9.log)"
 # The voxels built over it: three placed, the top one dug, the ground not
 cells=$(grep -a "kit editor: place kit/cobble at" "$t/new9.log" | sed 's/.* at //')
 [ $(echo "$cells" | wc -l) = 3 ] || fail "not 3 placed ($t/new9.log)"

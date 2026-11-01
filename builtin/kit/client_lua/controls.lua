@@ -176,7 +176,8 @@ local function world()
 			return MV.UNKNOWN
 		end
 		return voxel_info(id, v)
-	end, boxes = boxes, ground = ground}
+	end, boxes = boxes, ground = ground,
+		edge = ground and {0, 0, hm[1] - 1, hm[2] - 1} or nil}
 end
 
 -- ---- The body
