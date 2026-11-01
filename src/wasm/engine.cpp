@@ -329,6 +329,15 @@ static bool check_module(const ss_ &bytes, wabt::Module &m,
 //   instruction run is charged at least once (an overcount, never an
 //   undercount), whatever the path, a call_indirect and a recursion
 //   included. Tail calls are not read (validation).
+// - [KIT_METER_SEGMENTS] Except a segment of SEGMENT_CHARGE instructions
+//   or more that runs only on some paths: the code after a block, an if
+//   or a loop ends (where a br out of it lands), or an if's branch. That
+//   one is charged where it starts, when it is reached, and not at the
+//   region's top: a switch's cases (a br_table into nested blocks, the
+//   Lua VM's loop) were all charged for each one run, some 20 times the
+//   instructions run. Still never an undercount: a segment is entered at
+//   its start only (no branch lands inside one), and one hoisted to a
+//   start that is passed each time before it runs, inside the same loop.
 // - memory.fill, memory.copy, memory.init, table.copy and table.init are
 //   charged by their sizes too (bytes / 16), before they run.
 // - The imports charge their own work (run_import()).
@@ -364,20 +373,12 @@ static const int64_t INTERP_BUDGET = BUDGET / 16;
 // The bytes of memory.fill and its kind that count as one instruction
 static const int BULK_SHIFT = 4;
 
-// The instructions of a region: these, and those of their blocks and
-// ifs, but not those of a loop (its own region; the loop itself counts)
-static uint64_t region_cost(const wabt::ExprList &l)
-{
-	uint64_t n = 0;
-	for(const wabt::Expr &e : l){
-		n++;
-		if(const wabt::BlockExpr *b = wabt::dyn_cast<wabt::BlockExpr>(&e))
-			n += region_cost(b->block.exprs);
-		else if(const wabt::IfExpr *i = wabt::dyn_cast<wabt::IfExpr>(&e))
-			n += region_cost(i->true_.exprs) + region_cost(i->false_);
-	}
-	return n;
-}
+// A segment of this many instructions or more that runs on some paths
+// only is charged where it starts (above); a shorter one at its region's
+// top, as a charge there is 9 instructions of its own. Measured on the
+// Kit box (Lua): 8 charges as little as 1 does, a seventh of before (the
+// region-wide charge), and its compiled time some 5% longer; 32 half
+static const uint64_t SEGMENT_CHARGE = 8;
 
 // [WASM_WEB_CALL_DEPTH] On the web the browser's own stack holds the
 // module's frames, and nothing counted them: a recursion ran until the
@@ -431,25 +432,71 @@ struct Meter {
 		return l;
 	}
 
+	// The instructions charge() adds, its trap's unreachable included
+	static uint64_t charge_size()
+	{
+		return 9;
+	}
+
+	// Charged here: cost and charge()'s own, before `at` in l
+	void charge_at(wabt::ExprList &l, wabt::ExprList::iterator at,
+			uint64_t cost)
+	{
+		wabt::ExprList c = charge(cost + charge_size());
+		l.splice(at, c);
+	}
+
 	// A list's loops charged at their tops, its bulk operations by their
-	// sizes; scratch is the function's i32 for those, made on first use
-	void walk(wabt::Func *f, wabt::ExprList &l, wabt::Index &scratch)
+	// sizes, its segments on some paths of SEGMENT_CHARGE or more where
+	// they start; scratch is the function's i32 for those, made on first
+	// use. Returns the instructions to charge where the list starts: its
+	// first segment's and the shorter ones', its nested blocks' and short
+	// branches' as theirs.
+	uint64_t walk(wabt::Func *f, wabt::ExprList &l, wabt::Index &scratch)
 	{
 		using namespace wabt;
+		uint64_t start = 0; // charged at the list's start
+		uint64_t acc = 0; // the segment's so far
+		bool first = true, opens = false;
+		ExprList::iterator seg = l.begin();
+		auto close = [&](){
+			if(first || acc < SEGMENT_CHARGE)
+				start += acc;
+			else
+				charge_at(l, seg, acc);
+			first = false;
+			acc = 0;
+		};
 		for(auto it = l.begin(); it != l.end(); ++it){
+			if(opens){
+				seg = it;
+				opens = false;
+			}
+			acc++;
 			switch(it->type()){
 			case ExprType::Block:
-				walk(f, cast<BlockExpr>(&*it)->block.exprs, scratch);
+				acc += walk(f, cast<BlockExpr>(&*it)->block.exprs, scratch);
+				close();
+				opens = true;
 				break;
-			case ExprType::If:
-				walk(f, cast<IfExpr>(&*it)->true_.exprs, scratch);
-				walk(f, cast<IfExpr>(&*it)->false_, scratch);
+			case ExprType::If: {
+				IfExpr *e = cast<IfExpr>(&*it);
+				for(ExprList *b : {&e->true_.exprs, &e->false_}){
+					const uint64_t c = walk(f, *b, scratch);
+					if(c < SEGMENT_CHARGE)
+						acc += c;
+					else
+						charge_at(*b, b->begin(), c);
+				}
+				close();
+				opens = true;
 				break;
+			}
 			case ExprType::Loop: {
 				ExprList &body = cast<LoopExpr>(&*it)->block.exprs;
-				walk(f, body, scratch);
-				ExprList c = charge(region_cost(body) + 1);
-				body.splice(body.begin(), c);
+				charge_at(body, body.begin(), walk(f, body, scratch) + 1);
+				close();
+				opens = true;
 				break;
 			}
 			case ExprType::Call:
@@ -469,6 +516,8 @@ struct Meter {
 				auto trap = std::make_unique<IfExpr>();
 				trap->true_.exprs.push_back(std::make_unique<UnreachableExpr>());
 				c.push_back(std::move(trap));
+				// those before it, here; those after it are read next
+				acc += c.size() + 1;
 				l.splice(it, c);
 				ExprList after;
 				after.push_back(std::make_unique<GlobalGetExpr>(g));
@@ -497,6 +546,7 @@ struct Meter {
 						Var(scratch, Location())));
 				ExprList rest = charge(0, scratch);
 				c.splice(c.end(), rest);
+				acc += c.size() + 1;
 				l.splice(it, c);
 				break;
 			}
@@ -504,6 +554,9 @@ struct Meter {
 				break;
 			}
 		}
+		if(!opens)
+			close();
+		return start;
 	}
 };
 
@@ -544,9 +597,8 @@ static bool meter_module(wabt::Module &m, bool &has_start, ss_ &why)
 		Func *f = m.funcs[i];
 		Index scratch = ~0u;
 		meter.frame = WEB_FRAME_BASE + 8 * (int64_t)f->GetNumParamsAndLocals();
-		meter.walk(f, f->exprs, scratch);
-		ExprList c = meter.charge(region_cost(f->exprs) + 1);
-		f->exprs.splice(f->exprs.begin(), c);
+		meter.charge_at(f->exprs, f->exprs.begin(),
+				meter.walk(f, f->exprs, scratch) + 1);
 	}
 	has_start = !m.starts.empty();
 	if(has_start){
@@ -788,7 +840,7 @@ static const DWORD COMPILE_PROCESSES = 16;
 #endif
 // Bumped when the C this writes changes (the glue, or what meter_module()
 // adds), so that the cache is not reused
-static const char *GLUE_VERSION = "buildat-wasm2c-glue 8";
+static const char *GLUE_VERSION = "buildat-wasm2c-glue 9"; // 9: [KIT_METER_SEGMENTS]
 
 // wasm2c's runtime files the C is built with, as name, contents, name,
 // contents, ..., null (3rdparty/wabt/CMakeLists.txt): its headers, and on
