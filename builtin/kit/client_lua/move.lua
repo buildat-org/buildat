@@ -117,15 +117,36 @@ M.GROUND = {solid = true, friction = 1, surface = "ground"}
 -- A voxel's info from its definition's values (the server's table, both
 -- sides): solid, friction (1 if none), surface ("" if none: its name's
 -- after the author)
-function M.voxel_info(name, solid, friction, surface)
+-- ([KIT_VOXEL_FORMAT]) and boxes: a shape's, {x0, y0, z0, x1, y1, z1, ...}
+-- in the cell's -0.5...0.5 (none: the whole cell); the surface of a shape
+-- ("kit/stone:stair") its material's
+function M.voxel_info(name, solid, friction, surface, boxes)
 	if not solid then
 		return nil
 	end
 	if not surface or surface == "" then
-		surface = tostring(name):match("([^/]*)$") or ""
+		surface = tostring(name):match("([^/:]*)[^/]*$") or ""
 	end
-	return {solid = true, friction = tonumber(friction) or 1,
+	local info = {solid = true, friction = tonumber(friction) or 1,
 		surface = surface}
+	if type(boxes) == "table" and #boxes >= 6 then
+		info.boxes = boxes
+	end
+	return info
+end
+
+-- A cell's sub-boxes in the world (a shape's), or nil for the whole cell
+local function cell_boxes(info, i, j, k)
+	local bx = info.boxes
+	if not bx then
+		return nil
+	end
+	local out = {}
+	for q = 1, #bx - 5, 6 do
+		out[#out + 1] = {i + bx[q], j + bx[q + 1], k + bx[q + 2],
+			i + bx[q + 3], j + bx[q + 4], k + bx[q + 5], info = info}
+	end
+	return out
 end
 
 -- ---- Looks as boxes: an object's look (module.lua's look_box: its size,
@@ -303,11 +324,18 @@ function W:sweep(b, a, d)
 	else
 		r1[a] = floor(b[a] + EPS - 0.5)
 	end
+	-- The shapes' boxes in the way, met with the objects' below
+	local sub = nil
 	for i = r0[1], r1[1] do
 		for j = r0[2], r1[2] do
 			for k = r0[3], r1[3] do
 				local info = self:cell(i, j, k)
-				if info then
+				if info and info.boxes then
+					sub = sub or {}
+					for _, o in ipairs(cell_boxes(info, i, j, k)) do
+						sub[#sub + 1] = o
+					end
+				elseif info then
 					local c = a == 1 and i or a == 2 and j or k
 					-- One the box is in already is no wall: it gets out
 					if d > 0 then
@@ -325,7 +353,11 @@ function W:sweep(b, a, d)
 			end
 		end
 	end
-	for _, o in ipairs(self.boxes) do
+	local function box_list(n)
+		if n == 1 then return self.boxes end
+		return sub or {}
+	end
+	for n = 1, 2 do for _, o in ipairs(box_list(n)) do
 		local over = true
 		for q = 1, 3 do
 			if q ~= a and (o[q] >= b[q + 3] - EPS or o[q + 3] <= b[q] + EPS) then
@@ -345,7 +377,7 @@ function W:sweep(b, a, d)
 				end
 			end
 		end
-	end
+	end end
 	-- The heightmap stops a fall (one in it already: at once)
 	if a == 2 and d < 0 then
 		local g = self:ground_max(b[1], b[3], b[4], b[6])
@@ -365,7 +397,16 @@ function W:blocked(b)
 	for i = lo_cell(b[1]), hi_cell(b[4]) do
 		for j = lo_cell(b[2]), hi_cell(b[5]) do
 			for k = lo_cell(b[3]), hi_cell(b[6]) do
-				if self:cell(i, j, k) then
+				local info = self:cell(i, j, k)
+				if info and info.boxes then
+					for _, o in ipairs(cell_boxes(info, i, j, k)) do
+						if o[1] < b[4] - EPS and o[4] > b[1] + EPS and
+								o[2] < b[5] - EPS and o[5] > b[2] + EPS and
+								o[3] < b[6] - EPS and o[6] > b[3] + EPS then
+							return true
+						end
+					end
+				elseif info then
 					return true
 				end
 			end
@@ -490,7 +531,40 @@ function W:ray(ox, oy, oz, dx, dy, dz, len)
 			break
 		end
 		local info = self:cell(c[1], c[2], c[3])
-		if info then
+		if info and info.boxes then
+			-- A shape: its boxes, the nearest hit (else on through it)
+			for _, b in ipairs(cell_boxes(info, c[1], c[2], c[3])) do
+				local t0, t1, na = 0, len, nil
+				for q = 1, 3 do
+					if abs(v[q]) < 1e-9 then
+						if o[q] < b[q] or o[q] > b[q + 3] then
+							t0 = math.huge
+						end
+					else
+						local a1, a2 = (b[q] - o[q]) / v[q], (b[q + 3] - o[q]) / v[q]
+						if a1 > a2 then
+							a1, a2 = a2, a1
+						end
+						if a1 > t0 then
+							t0, na = a1, q
+						end
+						if a2 < t1 then
+							t1 = a2
+						end
+					end
+				end
+				if t0 <= t1 and (not best or t0 < best) then
+					local n = {0, 0, 0}
+					if na then
+						n[na] = v[na] > 0 and -1 or 1
+					end
+					best, bi, bn = t0, info, n
+				end
+			end
+			if best then
+				break
+			end
+		elseif info then
 			local n = {0, 0, 0}
 			if axis then
 				n[axis] = -st[axis]
@@ -573,9 +647,26 @@ function W:down(x, y, z, len)
 	local top = j
 	while top + 0.5 > y - len - 1 do
 		local c = self:cell(i, top, k)
+		local ctop = top + 0.5
+		if c and c.boxes then
+			-- A shape: the highest of its boxes under the point (none: on
+			-- down through the cell)
+			local hi = nil
+			for _, o in ipairs(cell_boxes(c, i, top, k)) do
+				if x >= o[1] and x <= o[4] and z >= o[3] and z <= o[6] and
+						o[2] <= y + EPS and (not hi or o[5] > hi) then
+					hi = o[5]
+				end
+			end
+			if hi then
+				ctop = hi
+			else
+				c = nil
+			end
+		end
 		if c then
 			-- Inside it: the top of the cell above it... a wall, 0
-			local d = y - (top + 0.5)
+			local d = y - ctop
 			if d < 0 then
 				d = 0
 			end
@@ -754,12 +845,13 @@ end
 
 -- ---- The server's world: what kit.cpp sends a step (a box of cells round
 -- the body, a char each, x fastest, then z, then y: "." air, "?" not
--- loaded, "A"... its classes {name, solid, friction, surface}; the solid
+-- loaded, "A"... its classes {name, solid, friction, surface, boxes (a
+-- shape's, [KIT_VOXEL_FORMAT]; a class a facing)}; the solid
 -- looks near {look, on, {x, y, z}, yaw}; a heightmap's samples round it)
 function M.snapshot(t)
 	local classes = {}
 	for i, c in ipairs(t.classes or {}) do
-		classes[i] = M.voxel_info(c[1], c[2], c[3], c[4])
+		classes[i] = M.voxel_info(c[1], c[2], c[3], c[4], c[5])
 	end
 	local cells, x0, y0, z0 = t.cells or "", t.x0 or 0, t.y0 or 0, t.z0 or 0
 	local nx, ny, nz = t.nx or 0, t.ny or 0, t.nz or 0

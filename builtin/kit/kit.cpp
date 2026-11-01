@@ -1330,7 +1330,7 @@ struct Module: public interface::Module, public Interface
 							out[i] = "air";
 							continue;
 						}
-						const interface::VoxelDefinition *d = reg->get(id);
+						const interface::VoxelDefinition *d = reg->get(type_of(w, id));
 						if(d)
 							out[i] = d->name.block_name;
 					}
@@ -2189,11 +2189,37 @@ struct Module: public interface::Module, public Interface
 				continue;
 			reg->add_voxel(v.second.definition(v.first));
 		}
+		// [KIT_VOXEL_FORMAT] the shapes of every solid cube there (Kit's,
+		// and the app's own registered before)
+		for(const interface::VoxelDefinition &d : reg->get_all()){
+			const ss_ &name = d.name.block_name;
+			if(d.id == interface::VOXELTYPEID_UNDEFINED || !d.physically_solid ||
+					!d.shape.empty() || d.alpha_masked || d.translucent ||
+					name.empty() || world::material_of(name) != name)
+				continue;
+			auto it = m_registered.find(name);
+			if(it != m_registered.end() && !it->second.has_shapes())
+				continue;
+			register_shapes(reg, d);
+		}
+	}
+
+	// A cube's shape types where they are not yet
+	void register_shapes(interface::VoxelRegistry *reg,
+			const interface::VoxelDefinition &cube)
+	{
+		if(!reg->get_format().param.bound())
+			return;
+		for(const interface::VoxelDefinition &sd :
+				world::shape_definitions(cube)){
+			if(!reg->get(sd.name))
+				reg->add_voxel(sd);
+		}
 	}
 
 	json::Value voxel_type(const ss_ &name)
 	{
-		auto it = m_registered.find(name);
+		auto it = m_registered.find(world::material_of(name));
 		return it == m_registered.end() ? json::Value() :
 				it->second.properties();
 	}
@@ -2246,6 +2272,8 @@ struct Module: public interface::Module, public Interface
 			n.block_name = name;
 			if(!reg->get(n))
 				reg->add_voxel(m.definition(name));
+			if(m.has_shapes())
+				register_shapes(reg, m.definition(name));
 		});
 	}
 
@@ -2303,7 +2331,9 @@ struct Module: public interface::Module, public Interface
 		each_registry([&](interface::VoxelRegistry *reg){
 			for(const auto &d : reg->get_all()){
 				const ss_ &n = d.name.block_name;
-				if(d.fully_empty || !seen.insert(n).second)
+				// [KIT_VOXEL_FORMAT] a shape is its material's entry's
+				if(d.fully_empty || world::material_of(n) != n ||
+						!seen.insert(n).second)
 					continue;
 				auto it = m_voxel_types.find(n);
 				auto mt = m_registered.find(n);
@@ -2311,6 +2341,9 @@ struct Module: public interface::Module, public Interface
 						it->second.deepcopy() : mt != m_registered.end() ?
 						mt->second.properties() : json::object();
 				v.set("name", n);
+				interface::VoxelName sn;
+				sn.block_name = n+":"+world::shapes()[0].name;
+				v.set("shapes", reg->get(sn) != nullptr);
 				if(it == m_voxel_types.end() &&
 						!d.textures[0].resource_name.empty())
 					v.set("texture", d.textures[0].resource_name);
@@ -3302,8 +3335,9 @@ struct Module: public interface::Module, public Interface
 		const bool reshape = !first && had && (p.heightmap() != m_wp.heightmap()
 				|| (p.heightmap() && (p.width != m_wp.width ||
 				p.depth != m_wp.depth)));
-		const bool again = had && params.stringify() !=
-				m_world_applied.stringify();
+		// [KIT_VOXEL_FORMAT] the sky light alone changed generates nothing
+		const bool again = had && ground_key(params) !=
+				ground_key(m_world_applied);
 		world::Ids ids;
 		ids.filler_depth = b.filler_depth;
 		sv_<int> layers;
@@ -3403,6 +3437,7 @@ struct Module: public interface::Module, public Interface
 		m_world_min = lo;
 		m_world_max = hi;
 		m_world_applied = params.deepcopy();
+		apply_sky(params.get("sky_light").is_true() && !p.heightmap(), by);
 		json::Value row = json::object();
 		row.set("params", m_world_applied);
 		row.set("version", (int64_t)world::generator_version(p.generator));
@@ -3438,6 +3473,113 @@ struct Module: public interface::Module, public Interface
 						"heightmap", n);
 			});
 		return true;
+	}
+
+	// The World's parameters but its sky light, which generates nothing
+	static ss_ ground_key(const json::Value &params)
+	{
+		if(!params.is_object())
+			return params.stringify();
+		json::Value c = params.deepcopy();
+		c.del_key("sky_light");
+		return c.stringify();
+	}
+
+	// [KIT_VOXEL_FORMAT] The World's sky light, per World: on, voxelworld
+	// keeps the light_sky bits up to date (each write floods; the sections
+	// loaded now are relit at once) and the clients mesh with it ("kit:sky");
+	// off, nothing is computed and the bits are left as they are (relit
+	// when it is on again). A heightmap's world has none (its ground is no
+	// voxels). simplified: per World, not per scene -- a peer in another
+	// scene is told the World's
+	bool m_sky = false;
+	void apply_sky(bool on, const ss_ &by)
+	{
+		if(on == m_sky)
+			return;
+		bool bound = false;
+		voxelworld::access(m_server, m_world_scene,
+				[&](voxelworld::Instance *w){
+			bound = w->get_voxel_reg()->get_format().light_sky.bound();
+		});
+		if(on && !bound){
+			warn("sky light: the app's voxel format has no light_sky "
+					"(kit::voxel_format() has)");
+			return;
+		}
+		m_sky = on;
+		const int64_t t0 = interface::os::time_us();
+		size_t n = 0;
+		voxelworld::access(m_server, m_world_scene,
+				[&](voxelworld::Instance *w){
+			w->set_light_maintained(voxelworld::Instance::LIGHT_SKY, on);
+			if(!on)
+				return;
+			for(const pv::Vector3DInt16 &sp : w->get_loaded_sections()){
+				w->relight_region_later(w->get_section_region_voxels(sp));
+				n++;
+			}
+		});
+		m_sky_relight = m_sky_left = n;
+		m_sky_relight_us = m_sky_relight_max_us = 0;
+		m_sky_relight_t0 = t0;
+		log_i(MODULE, "World%s: sky light %s (%zu loaded sections to relight)",
+				by.empty() ? "" : cs(" by "+by), on ? "on" : "off", n);
+		send_sky(-1);
+	}
+
+	// The loaded sections' relight, a slice a tick (a section is a quarter
+	// of a million voxels: 8 of them at once were a 2.5 s step); each
+	// commit sends what is done. Until then a section wears its old light
+	// (none: dark until it is relit)
+	size_t m_sky_relight = 0;
+	size_t m_sky_left = 0;
+	int64_t m_sky_relight_us = 0, m_sky_relight_t0 = 0,
+			m_sky_relight_max_us = 0;
+	static constexpr int64_t SKY_RELIGHT_BUDGET_US = 20000;
+	void sky_relight_tick()
+	{
+		if(!m_sky_relight || !m_world_scene)
+			return;
+		const int64_t t0 = interface::os::time_us();
+		size_t left = 0;
+		voxelworld::access(m_server, m_world_scene,
+				[&](voxelworld::Instance *w){
+			left = w->relight_stale(SKY_RELIGHT_BUDGET_US);
+			// Committed as each section is done, not each tick
+			if(left != m_sky_left)
+				w->commit();
+		});
+		m_sky_left = left;
+		const int64_t took = interface::os::time_us() - t0;
+		m_sky_relight_us += took;
+		m_sky_relight_max_us = std::max(m_sky_relight_max_us, took);
+		if(left)
+			return;
+		log_i(MODULE, "World: sky light: %zu sections relit, %.1f ms of "
+				"ticks (at most %.1f in one) over %.1f s", m_sky_relight,
+				m_sky_relight_us / 1000.0, m_sky_relight_max_us / 1000.0,
+				(interface::os::time_us() - m_sky_relight_t0) / 1e6);
+		m_sky_relight = 0;
+		send_sky(-1, true);
+	}
+
+	// "kit:sky" {"on": bool, "relit": true once the loaded sections are} to
+	// a peer (-1: all of them)
+	void send_sky(int64_t peer, bool relit = false)
+	{
+		json::Value j = json::object();
+		j.set("on", m_sky);
+		if(relit)
+			j.set("relit", true);
+		network::access(m_server, [&](network::Interface *inetwork){
+			if(peer >= 0){
+				inetwork->send((size_t)peer, "kit:sky", j.stringify());
+				return;
+			}
+			for(auto &p : m_peers)
+				inetwork->send(p.first, "kit:sky", j.stringify());
+		});
 	}
 
 	// The voxels' generator, and voxelworld told what to keep: a section
@@ -3571,13 +3713,13 @@ struct Module: public interface::Module, public Interface
 		interface::VoxelVolume gen(r);
 		g.generate(m_world_scene, s, gen);
 		const interface::VoxelVolume now = w->get_volume(r);
-		const auto &fid = w->get_voxel_reg()->get_format().id;
+		const uint32_t sm = state_mask(w->get_voxel_reg()->get_format());
 		const pv::Vector3DInt32 lc = r.getLowerCorner(), uc = r.getUpperCorner();
 		for(int y = lc.getY(); y <= uc.getY(); y++)
 		for(int z = lc.getZ(); z <= uc.getZ(); z++)
 		for(int x = lc.getX(); x <= uc.getX(); x++){
-			const uint32_t a = (uint32_t)fid.get(now.getVoxelAt(x, y, z).data);
-			if(a == (uint32_t)fid.get(gen.getVoxelAt(x, y, z).data))
+			const uint32_t a = now.getVoxelAt(x, y, z).data & sm;
+			if(a == (gen.getVoxelAt(x, y, z).data & sm))
 				continue;
 			n++;
 			if(out)
@@ -4250,7 +4392,7 @@ struct Module: public interface::Module, public Interface
 				uint32_t id = 0;
 				if(!voxel_id(w, pv::Vector3DInt32(x, y, z), id))
 					return false;
-				v = id;
+				v = type_of(w, id);
 				return true;
 			};
 			br.set = [&](int x, int y, int z, interface::VoxelTypeId v){
@@ -4702,6 +4844,46 @@ struct Module: public interface::Module, public Interface
 	// routed write (an owned one goes to its owner), one undo.
 	// simplified: a write routed to an owner is not undone (its owner
 	// decided what it did)
+	// [KIT_VOXEL_FORMAT] {"op": "voxel_info", "pos": [x, y, z]}: what a
+	// cell of the builder's scene holds, logged -- its voxel, param (a
+	// shape's facing), tint and sky light (a check's read-back)
+	void voxel_info(Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const json::Value &pos = j.get("pos");
+		if(!pos.is_array() || pos.size() != 3)
+			return refuse("pos: [x, y, z]");
+		int c[3];
+		for(unsigned k = 0; k < 3; k++){
+			const json::Value &v = pos.at(k);
+			if(!v.is_number() || !std::isfinite(v.as_number()) ||
+					std::fabs(v.as_number()) > MAX_COORD)
+				return refuse("pos: numbers of at most "+ftos(MAX_COORD));
+			c[k] = (int)std::floor(v.as_number());
+		}
+		auto si = m_host.scenes.find(p.scene);
+		if(si == m_host.scenes.end())
+			return refuse("not in a scene of the app's");
+		ss_ what;
+		voxelworld::access(m_server, si->second, [&](voxelworld::Instance *w){
+			const pv::Vector3DInt32 q(c[0], c[1], c[2]);
+			if(!loaded(w, q))
+				return;
+			const interface::VoxelFormat &f = w->get_voxel_reg()->get_format();
+			const uint32_t word = w->get_voxel(q, true).data;
+			const interface::VoxelDefinition *d =
+					w->get_voxel_reg()->get(f.id.get(word));
+			what = (d ? d->name.block_name : ss_("?"))+
+					", param "+itos(f.param.bound() ? f.param.get(word) : 0)+
+					", tint "+itos(f.tint.bound() ? f.tint.get(word) : 0)+
+					", sky light "+itos(f.light_sky.bound() ?
+					f.light_sky.get(word) : 0);
+		});
+		if(what.empty())
+			return refuse("the cell's section is not loaded");
+		log_i(MODULE, "Voxel at (%i,%i,%i): %s", c[0], c[1], c[2], cs(what));
+	}
+
 	void edit_voxel(Peer &p, size_t peer, const json::Value &j,
 			std::function<void(const ss_&)> refuse)
 	{
@@ -4719,6 +4901,18 @@ struct Module: public interface::Module, public Interface
 			c[k] = (int)v.as_number();
 		}
 		const ss_ voxel = jstr(j, "voxel");
+		// [KIT_VOXEL_FORMAT] a shape's facing (0..7) and a tint (0..15)
+		const json::Value &pj = j.get("param"), &tj = j.get("tint");
+		if(!pj.is_undefined() && !(pj.is_number() &&
+				pj.as_number() >= 0 && pj.as_number() <= 255 &&
+				pj.as_number() == std::floor(pj.as_number())))
+			return refuse("param: a whole number 0..255");
+		if(!tj.is_undefined() && !(tj.is_number() &&
+				tj.as_number() >= 0 && tj.as_number() <= 15 &&
+				tj.as_number() == std::floor(tj.as_number())))
+			return refuse("tint: a whole number 0..15");
+		const uint32_t param = pj.is_undefined() ? 0 : (uint32_t)pj.as_number();
+		const uint32_t tint = tj.is_undefined() ? 0 : (uint32_t)tj.as_number();
 		auto si = m_host.scenes.find(p.scene);
 		if(si == m_host.scenes.end())
 			return refuse("not in a scene of the app's");
@@ -4738,8 +4932,12 @@ struct Module: public interface::Module, public Interface
 				why = "the cell's section is not loaded";
 				return;
 			}
-			uint32_t word = 0;
-			w->get_voxel_reg()->get_format().id.set(word, d->id);
+			const interface::VoxelFormat &f = w->get_voxel_reg()->get_format();
+			if((param && !f.param.bound()) || (tint && !f.tint.bound())){
+				why = "the scene's voxels take no param or tint";
+				return;
+			}
+			const uint32_t word = kit::voxel_word(f, d->id, param, tint);
 			r = w->routed_set_voxel(q, interface::VoxelInstance(word),
 					"player:"+p.name);
 			if(r == voxelworld::Instance::WRITTEN)
@@ -4751,8 +4949,10 @@ struct Module: public interface::Module, public Interface
 			return refuse("the scene has no voxels");
 		if(r == voxelworld::Instance::REFUSED)
 			return refuse("an owned voxel whose owner takes no writes");
-		const ss_ what = (voxel == "air" ? ss_("dug") : "placed "+voxel)+
-				" at ("+itos(c[0])+","+itos(c[1])+","+itos(c[2])+")";
+		const ss_ what = (voxel == "air" ? ss_("dug") : "placed "+voxel+
+				(param || tint ? " (param "+itos(param)+", tint "+itos(tint)+
+				")" : ss_("")))+" at ("+itos(c[0])+","+itos(c[1])+","+
+				itos(c[2])+")";
 		if(r == voxelworld::Instance::ROUTED){
 			log_i(MODULE, "A voxel edit by %s: %s, routed to its owner",
 					cs(p.name), cs(what));
@@ -7424,6 +7624,7 @@ struct Module: public interface::Module, public Interface
 			inetwork->send(peer, "kit:client_parts", parts.stringify());
 			inetwork->send(peer, "kit:you", you.stringify());
 		});
+		send_sky((int64_t)peer);
 		if(m_session.running)
 			round_join(peer, false);
 		else
@@ -7437,6 +7638,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		m_box->poll();
 		take_vouches();
+		sky_relight_tick();
 		flush_copies();
 		// Writes into the start, made as their sections load: Running,
 		// kept past the round's Stop
@@ -7910,13 +8112,17 @@ struct Module: public interface::Module, public Interface
 				for(int y = 0; y < ny; y++)
 				for(int z = 0; z < nz; z++)
 				for(int x = 0; x < nx; x++){
-					const uint32_t id = (uint32_t)fmt.id.get(vol.getVoxelAt(
-							x0 + x, y0 + y, z0 + z).data);
+					const uint32_t word = vol.getVoxelAt(x0 + x, y0 + y,
+							z0 + z).data;
+					const uint32_t id = (uint32_t)fmt.id.get(word);
+					// [KIT_VOXEL_FORMAT] a shape's class is its facing's too
+					const uint32_t key = id | (fmt.param.bound() ?
+							(fmt.param.get(word) & 0xff) << 16 : 0);
 					char ch = '.';
 					if(id == interface::VOXELTYPEID_UNDEFINED){
 						ch = '?';
 					} else {
-						auto c = cls.find(id);
+						auto c = cls.find(key);
 						if(c != cls.end()){
 							ch = c->second;
 						} else {
@@ -7926,14 +8132,31 @@ struct Module: public interface::Module, public Interface
 								json::Value k = json::array();
 								k.append(name);
 								k.append(true);
-								const json::Value &x = extra.get(name);
+								const json::Value &x = extra.get(
+										world::material_of(name));
 								k.append(x.get("friction").is_number() ?
 										x.get("friction") : json::Value(1.0));
 								k.append(jstr(x, "surface"));
+								// Its boxes (the cell's -0.5...0.5), a
+								// shape's by its param's variant
+								const sv_<float> *bx = &def->collision_boxes;
+								if(!def->variants.empty()){
+									const size_t vi = def->variant_of_param[
+											(key >> 16) & 0xff];
+									if(vi < def->variants.size() &&
+											!def->variants[vi].collision_boxes.empty())
+										bx = &def->variants[vi].collision_boxes;
+								}
+								if(!bx->empty()){
+									json::Value b = json::array();
+									for(float f : *bx)
+										b.append((double)f);
+									k.append(b);
+								}
 								classes.append(k);
 								ch = (char)(64 + classes.size());
 							}
-							cls[id] = ch;
+							cls[key] = ch;
 						}
 					}
 					cells[x + (size_t)nx * (z + (size_t)nz * y)] = ch;
@@ -8475,23 +8698,41 @@ struct Module: public interface::Module, public Interface
 		return "";
 	}
 
-	// A voxel's id, where its section is loaded
+	// [KIT_VOXEL_FORMAT] A voxel's state where its section is loaded: its
+	// word less its light (id, param, tint), what undo, the round's copies
+	// and the marks keep, so a shape's facing and a tint survive them
+	static uint32_t state_mask(const interface::VoxelFormat &f)
+	{
+		uint32_t m = 0;
+		f.id.set(m, 0xffffffff);
+		if(f.param.bound() && f.param.plane == f.id.plane)
+			f.param.set(m, 0xffffffff);
+		if(f.tint.bound() && f.tint.plane == f.id.plane)
+			f.tint.set(m, 0xffffffff);
+		return m;
+	}
+
 	static bool voxel_id(voxelworld::Instance *w, const pv::Vector3DInt32 &p,
 			uint32_t &id)
 	{
 		if(!loaded(w, p))
 			return false;
-		id = (uint32_t)w->get_voxel_reg()->get_format().id.get(
-				w->get_voxel(p, true).data);
+		const interface::VoxelFormat &f = w->get_voxel_reg()->get_format();
+		id = w->get_voxel(p, true).data & state_mask(f);
 		return true;
 	}
 
-	static void set_id(voxelworld::Instance *w, const pv::Vector3DInt32 &p,
-			uint32_t id)
+	// The type id alone of a state voxel_id() gave
+	static uint32_t type_of(voxelworld::Instance *w, uint32_t state)
 	{
-		uint32_t word = 0;
-		w->get_voxel_reg()->get_format().id.set(word, id);
-		w->set_voxel(p, interface::VoxelInstance(word));
+		return w->get_voxel_reg()->get_format().id.get(state);
+	}
+
+	static void set_id(voxelworld::Instance *w, const pv::Vector3DInt32 &p,
+			uint32_t state)
+	{
+		w->set_voxel(p, interface::VoxelInstance(
+				state & state_mask(w->get_voxel_reg()->get_format())));
 	}
 
 	// "<scene>:x,y,z", the section of a cell
@@ -9740,6 +9981,9 @@ struct Module: public interface::Module, public Interface
 		}
 		if(op == "builder")
 			return grant(peer, j, refuse);
+		// In play too: it reads
+		if(op == "voxel_info")
+			return voxel_info(p, j, refuse);
 		if(op == "mode"){
 			tools(p, peer, j.get("on").is_true());
 			log_i(MODULE, "%s %s edit mode", cs(p.name),

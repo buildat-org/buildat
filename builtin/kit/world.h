@@ -88,6 +88,7 @@
 #include "heightmap/api.h"
 #include "luanti_mapgen/api.h"
 #include "interface/noise.h"
+#include "luanti/shapes.h"
 #include <climits>
 #include <functional>
 
@@ -129,6 +130,10 @@ struct Material
 	// them yet. A heightmap's material's are its ground's
 	double friction = 1;
 	ss_ surface;
+	// [KIT_VOXEL_FORMAT] the tint field's ramp, 0 to 15 from the first to
+	// the second (albedo multiplied): Kit's default whitens nothing and
+	// darkens to a stained grey; "tint": ["#rrggbb", "#rrggbb"] its own
+	uint32_t tint_ramp[2] = {0xffffff, 0x4a4540};
 
 	// A set's voxel or a builder's ([KIT] stage 4g: the same fields)
 	bool parse(const json::Value &j)
@@ -146,13 +151,27 @@ struct Material
 		const json::Value &f = j.get("friction");
 		friction = f.is_number() ? f.as_number() : 1;
 		surface = json::jstr(j, "surface");
+		const json::Value &tr = j.get("tint");
+		bool tint_ok = tr.is_undefined() || tr.is_null();
+		if(tr.is_array() && tr.size() == 2){
+			tint_ok = true;
+			for(unsigned k = 0; k < 2; k++){
+				const ss_ c = tr.at(k).is_string() ? tr.at(k).as_string() : "";
+				bool hex = c.size() == 7 && c[0] == '#';
+				for(size_t i = 1; hex && i < 7; i++)
+					hex = isxdigit((unsigned char)c[i]);
+				tint_ok = tint_ok && hex;
+				if(hex)
+					tint_ramp[k] = (uint32_t)strtoul(c.c_str() + 1, nullptr, 16);
+			}
+		}
 		bool tag_ok = surface.size() <= 32;
 		for(char c : surface)
 			tag_ok = tag_ok && (isalnum((unsigned char)c) || c == '_');
 		return !top.empty() && !side.empty() && !bottom.empty() &&
 				light >= 0 && light <= 15 && (kind == "solid" ||
 				kind == "water" || kind == "leaves" || kind == "plant") &&
-				friction >= 0 && friction <= 10 && tag_ok;
+				friction >= 0 && friction <= 10 && tag_ok && tint_ok;
 	}
 
 	// Its properties as a builder's row has them, for a palette and
@@ -166,7 +185,22 @@ struct Material
 		v.set("light", (int64_t)light);
 		v.set("friction", friction);
 		v.set("surface", surface);
+		json::Value t = json::array();
+		for(uint32_t c : tint_ramp){
+			char b[8];
+			snprintf(b, sizeof b, "#%06x", (unsigned)(c & 0xffffff));
+			t.append(ss_(b));
+		}
+		v.set("tint", t);
+		// The shapes it has ([KIT_VOXEL_FORMAT]): a solid cube's
+		v.set("shapes", has_shapes());
 		return v;
+	}
+
+	// [KIT_VOXEL_FORMAT] Whether its shapes are made (a solid cube's)
+	bool has_shapes() const
+	{
+		return kind == "solid" && solid && !transparent;
 	}
 
 	// Its definition in a voxel registry
@@ -187,6 +221,8 @@ struct Material
 			seg.select_segment = Urho3D::IntVector2(0, 0);
 		}
 		def.light_source = (uint8_t)light;
+		def.tint_ramp[0] = tint_ramp[0];
+		def.tint_ramp[1] = tint_ramp[1];
 		if(kind == "water"){
 			// Passive: no flow (user, 2026-10-30)
 			def.edge_material_id = 10;
@@ -225,6 +261,110 @@ struct Material
 		return def;
 	}
 };
+
+// **[KIT_VOXEL_FORMAT] Shapes** (stage 4g2): a solid cube material's shape
+// types, made where the material is registered and named
+// "<material>:<shape>" (ids stay stable in a save: it names them). A
+// shape's param is its facing: 0...3 a quarter turn about +Y each (Luanti's
+// facedir 0...3: the shape's back to +z, +x, -z, -x -- a stair's high side
+// away from a player who looked that way placing it), 4...7 the same upside
+// down (facedir 20...23; a slab at the cell's top, a stair hung from the
+// ceiling). Their quads wear the material's textures cut to the boxes
+// (luanti/shapes.h); they stop a player by their boxes (the variants'
+// collision boxes, Kit's movement's cells' boxes) and let light through
+// (the sky's, where it is maintained). The registry's id of a shape
+// knows its material by the name: material_of().
+struct ShapeDef
+{
+	const char *name;
+	// x0 y0 z0 x1 y1 z1 each, the voxel's -0.5...0.5, facing 0
+	sv_<float> boxes;
+};
+inline const sv_<ShapeDef>& shapes()
+{
+	static const sv_<ShapeDef> s = {
+		{"slab", {-0.5f, -0.5f, -0.5f, 0.5f, 0.0f, 0.5f}},
+		{"stair", {-0.5f, -0.5f, -0.5f, 0.5f, 0.0f, 0.5f,
+			-0.5f, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f}},
+		{"inner_stair", {-0.5f, -0.5f, -0.5f, 0.5f, 0.0f, 0.5f,
+			-0.5f, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f,
+			-0.5f, 0.0f, -0.5f, 0.0f, 0.5f, 0.0f}},
+		{"outer_stair", {-0.5f, -0.5f, -0.5f, 0.5f, 0.0f, 0.5f,
+			-0.5f, 0.0f, 0.0f, 0.0f, 0.5f, 0.5f}},
+		{"panel", {-0.5f, -0.5f, 0.0f, 0.5f, 0.5f, 0.5f}},
+		{"pillar", {-0.25f, -0.5f, -0.25f, 0.25f, 0.5f, 0.25f}},
+	};
+	return s;
+}
+static const int SHAPE_PARAMS = 8;
+// The facedir of a shape's param
+inline uint8_t shape_facedir(int param)
+{
+	param &= 7;
+	return (uint8_t)(param < 4 ? param : 20 + (param - 4));
+}
+// Luanti's dir_to_facedir: the facing a look along (dx, dz) places
+inline int shape_param_of_look(double dx, double dz, bool upside = false)
+{
+	int f = std::fabs(dx) > std::fabs(dz) ? (dx < 0 ? 3 : 1) :
+			(dz < 0 ? 2 : 0);
+	return f + (upside ? 4 : 0);
+}
+// "kit/stone:stair" -> "kit/stone" (a name with no shape: itself)
+inline ss_ material_of(const ss_ &name)
+{
+	const size_t c = name.rfind(':');
+	if(c == ss_::npos)
+		return name;
+	const ss_ sh = name.substr(c + 1);
+	for(const ShapeDef &d : shapes())
+		if(sh == d.name)
+			return name.substr(0, c);
+	return name;
+}
+// The shape of a name ("" for a full cube)
+inline ss_ shape_of(const ss_ &name)
+{
+	const ss_ m = material_of(name);
+	return m.size() == name.size() ? ss_() : name.substr(m.size() + 1);
+}
+// The shape types of a cube's definition `cube` (a solid one's)
+inline sv_<interface::VoxelDefinition> shape_definitions(
+		const interface::VoxelDefinition &cube)
+{
+	sv_<interface::VoxelDefinition> out;
+	for(const ShapeDef &sd : shapes()){
+		interface::VoxelDefinition def = cube;
+		def.id = interface::VOXELTYPEID_UNDEFINED;
+		def.name.block_name = cube.name.block_name+":"+sd.name;
+		def.face_draw_type = interface::FaceDrawType::NEVER;
+		def.edge_material_id = interface::EDGEMATERIALID_EMPTY;
+		def.transmits_light = true;
+		def.alpha_masked = false;
+		def.shape.clear();
+		def.variants.clear();
+		for(int p = 0; p < SHAPE_PARAMS; p++){
+			sv_<interface::VoxelQuad> q;
+			for(size_t b = 0; b + 6 <= sd.boxes.size(); b += 6)
+				luanti_shapes::add_box_quads(q, sd.boxes[b], sd.boxes[b + 1],
+						sd.boxes[b + 2], sd.boxes[b + 3], sd.boxes[b + 4],
+						sd.boxes[b + 5]);
+			interface::VoxelVariant v;
+			const uint8_t fd = shape_facedir(p);
+			luanti_shapes::turn_quads(q, fd, v.shape);
+			luanti_shapes::turn_boxes(sd.boxes, fd, v.collision_boxes);
+			v.selection_boxes = v.collision_boxes;
+			def.variants.push_back(v);
+		}
+		for(int p = 0; p < 256; p++)
+			def.variant_of_param[p] = (uint8_t)(p & 7);
+		def.shape = def.variants[0].shape;
+		def.collision_boxes = def.variants[0].collision_boxes;
+		def.selection_boxes = def.collision_boxes;
+		out.push_back(def);
+	}
+	return out;
+}
 
 // [KIT] stage 4f: a voxel structure (a decoration's look): sx x sy x sz
 // cells, x fastest, then z, then y; "" leaves a cell as it is. Its origin

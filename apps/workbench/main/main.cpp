@@ -209,9 +209,8 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			w->set_load_points({});
 			reg = w->get_voxel_reg();
-			interface::VoxelFormat f;
-			f.id = interface::VoxelField{0, 0, 16};
-			reg->set_format(f);
+			// [KIT_VOXEL_FORMAT] Kit's: id, param, tint, sky light
+			reg->set_format(kit::voxel_format());
 			interface::VoxelDefinition air;
 			air.name.block_name = "air";
 			air.fully_empty = true;
@@ -381,8 +380,8 @@ struct Module: public interface::Module
 		m_in.erase(old.info.id);
 	}
 
-	// A builder's dig or place in play: {"p": [x, y, z], "voxel": name},
-	// "air" a dig. Routed: a voxel a component owns goes to the component
+	// A builder's dig or place in play: {"p": [x, y, z], "voxel": name,
+	// "param": a shape's facing, "tint": 0..15}, "air" a dig. Routed: a voxel a component owns goes to the component
 	void on_build(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
@@ -390,7 +389,11 @@ struct Module: public interface::Module
 				json::load_string(packet.data.c_str()) : json::null();
 		const json::Value &p = j.get("p");
 		const ss_ voxel = json::jstr(j, "voxel");
-		bool ok = p.is_array() && p.size() == 3;
+		// [KIT_VOXEL_FORMAT] a shape's facing (0..7) and a tint (0..15)
+		const int64_t param = json::jint(j, "param", 0),
+				tint = json::jint(j, "tint", 0);
+		bool ok = p.is_array() && p.size() == 3 && param >= 0 &&
+				param < 256 && tint >= 0 && tint < 16;
 		int c[3] = {0, 0, 0};
 		for(unsigned k = 0; ok && k < 3; k++){
 			const double lo = k == 1 ? WORLD_Y0 : -WORLD_XZ,
@@ -427,8 +430,10 @@ struct Module: public interface::Module
 			interface::VoxelName n;
 			n.block_name = voxel;
 			const auto r = w->routed_set_voxel(pv::Vector3DInt32(c[0], c[1],
-					c[2]), interface::VoxelInstance(w->get_voxel_reg()->
-					get(n)->id), "player:"+m_names[peer]);
+					c[2]), interface::VoxelInstance(kit::voxel_word(
+					w->get_voxel_reg()->get_format(), w->get_voxel_reg()->
+					get(n)->id, (uint32_t)param, (uint32_t)tint)),
+					"player:"+m_names[peer]);
 			written = r == voxelworld::Instance::WRITTEN;
 			log_i(MODULE, "workbench: %s %s (%i,%i,%i): %s", cs(m_names[peer]),
 					voxel == "air" ? "dug" : cs("placed "+voxel), c[0], c[1],

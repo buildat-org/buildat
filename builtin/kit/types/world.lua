@@ -25,6 +25,11 @@
 --              bushes, flowers, grass, a log with mushrooms, boulders under
 --              water, mushrooms and moss in caves (on a heightmap: those
 --              bigger than a cell, as voxel objects)
+--   sky_light  ([KIT_VOXEL_FORMAT]) the sky's light in the voxels: a room
+--              with no way out to the sky is dark, a cave mouth's light
+--              fades inward. Off, nothing computes it (the scene's lights
+--              alone, the look before it); not on a heightmap. Changing it
+--              generates nothing again
 -- Changing them while editing generates again every section nobody
 -- edited; edited ones stay, a warning names the seams.
 -- Voxel objects ([VOXEL_OBJECTS]) on a heightmap are their own entities
@@ -53,5 +58,6 @@ return {
 			choices = {"voxels", "heightmap"}},
 		caves = {type = "bool", default = false},
 		decorations = {type = "bool", default = true},
+		sky_light = {type = "bool", default = false},
 	},
 }

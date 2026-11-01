@@ -76,9 +76,8 @@ struct Module: public interface::Module
 			ivw->create_instance(m_scene, pv::Region(0, 0, 0, 0, 0, 0));
 			voxelworld::Instance *world = ivw->get_instance(m_scene);
 			interface::VoxelRegistry *reg = world->get_voxel_reg();
-			interface::VoxelFormat f;
-			f.id = interface::VoxelField{0, 0, 16};
-			reg->set_format(f);
+			// [KIT_VOXEL_FORMAT] Kit's: id, param, tint, sky light
+			reg->set_format(kit::voxel_format());
 			for(const ss_ name : {"air", "stone", "glass"}){
 				interface::VoxelDefinition def;
 				def.name.block_name = name;

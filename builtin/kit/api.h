@@ -4,6 +4,7 @@
 #include "interface/server.h"
 #include "interface/module.h"
 #include "core/json.h"
+#include "interface/voxel.h"
 #include <functional>
 
 namespace main_context
@@ -489,6 +490,40 @@ namespace kit
 	static const int WORLD_SECTION = 64;
 	static const int WORLD_SECTIONS_XZ = 256;
 	static const int WORLD_SECTION_Y0 = -2, WORLD_SECTION_Y1 = 3;
+
+	// [KIT_VOXEL_FORMAT] (stage 4g2) Kit's voxel format, what an app
+	// hosting Kit's World sets on its registry before the first voxel:
+	// plane 0 is `id` 0..15 (material and shape: "kit/stone" and
+	// "kit/stone:stair" are two ids, the shapes made by Kit's registering,
+	// world.h), `param` 16..23 (what the definition says: a shape's
+	// facing, see world::SHAPE_PARAMS), `tint` 24..27 (16 steps of the
+	// material's tint ramp, albedo) and `light_sky` 28..31, maintained
+	// only while the World's "sky_light" is on (dark caves; off, nothing
+	// computes it and the client draws the world as fully lit). A save
+	// from before read 0 in the new bits: the default facing, no tint, no
+	// light (computed when sky light is turned on).
+	inline interface::VoxelFormat voxel_format()
+	{
+		interface::VoxelFormat f;
+		f.id = interface::VoxelField{0, 0, 16};
+		f.param = interface::VoxelField{0, 16, 8};
+		f.tint = interface::VoxelField{0, 24, 4};
+		f.light_sky = interface::VoxelField{0, 28, 4};
+		return f;
+	}
+	// A voxel's word in a format: its id, param and tint (bits the format
+	// does not have dropped), the light 0 (computed where maintained)
+	inline uint32_t voxel_word(const interface::VoxelFormat &f, uint32_t id,
+			uint32_t param = 0, uint32_t tint = 0)
+	{
+		uint32_t w = 0;
+		f.id.set(w, id);
+		if(f.param.bound())
+			f.param.set(w, param);
+		if(f.tint.bound())
+			f.tint.set(w, tint);
+		return w;
+	}
 
 	struct Host
 	{

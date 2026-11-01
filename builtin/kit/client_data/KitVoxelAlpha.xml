@@ -1,0 +1,7 @@
+<!-- [KIT_VOXEL_FORMAT] Kit's translucent voxels, water (DiffAlpha.xml's): KitVoxel.glsl with
+     the tint (module.lua's voxel_look). -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" vsdefines="KITTINT" psdefines="DIFFMAP KITTINT">
+    <pass name="alpha" depthwrite="false" blend="alpha" />
+    <pass name="litalpha" depthwrite="false" blend="addalpha" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>

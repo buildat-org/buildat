@@ -57,7 +57,10 @@ local kit = require("buildat/module/kit")
 kit.editor{scene = scene, camera = camera_node, ground_y = 1,
 	solid = function(x, y, z)
 		-- 0: not there, 1: air
-		return voxelworld.get_static_voxel(magic.Vector3(x, y, z)).id > 1
+		-- the id's bits only ([KIT_VOXEL_FORMAT]: param, tint and light
+		-- above)
+		return voxelworld.get_voxel_registry():id_of(
+				voxelworld.get_static_voxel(magic.Vector3(x, y, z))) > 1
 	end}
 
 local KEYS = {

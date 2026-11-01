@@ -102,18 +102,33 @@ end
 
 -- ---- The world: this client's voxels (not loaded: solid), the solid
 -- looks (the seat held none), a heightmap's samples
-local function voxel_info(id)
-	local c = C.classes[id]
+-- ([KIT_VOXEL_FORMAT]) a shape's class is its facing's too: keyed by the
+-- id and param bits (Kit's format: the low 24), its boxes the variant's
+local function voxel_info(id, v)
+	local reg = voxelworld.get_voxel_registry()
+	local key = v and v.data % 16777216 or id
+	local c = C.classes[key]
 	if c == nil then
-		local def = voxelworld.get_voxel_registry():get_by_id(id)
+		local def = reg:get_by_id(id)
 		c = false
 		if def and def.physically_solid then
 			local name = def.name and def.name.block_name or ""
+			local mat = name:match("^(.*):[%w_]+$") or name
 			local x = C.ctl and type(C.ctl.voxels) == "table" and
-					C.ctl.voxels[name] or {}
-			c = MV.voxel_info(name, true, x.friction, x.surface)
+					C.ctl.voxels[mat] or {}
+			local boxes = nil
+			local bl = v and reg:collision_boxes_of(v)
+			if type(bl) == "table" then
+				boxes = {}
+				for _, b in ipairs(bl) do
+					for q = 1, 6 do
+						boxes[#boxes + 1] = b[q]
+					end
+				end
+			end
+			c = MV.voxel_info(name, true, x.friction, x.surface, boxes)
 		end
-		C.classes[id] = c
+		C.classes[key] = c
 	end
 	return c or nil
 end
@@ -160,7 +175,7 @@ local function world()
 		if id == 0 then
 			return MV.UNKNOWN
 		end
-		return voxel_info(id)
+		return voxel_info(id, v)
 	end, boxes = boxes, ground = ground}
 end
 

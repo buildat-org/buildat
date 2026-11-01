@@ -107,23 +107,10 @@ do
 end
 voxelworld.set_camera(camera_node)
 
--- Kit's water (translucent voxels, a chunk's child "alpha") alpha blended;
--- ([KIT] stage 4f) its leaves and plants (alpha masked, "masked") cut out;
--- a heightmap's decorations (voxel objects) drawn as the voxels are
-local function voxel_look(node)
-	for child, technique in pairs({[""] = "Techniques/Diff.xml",
-			alpha = "Techniques/DiffAlpha.xml",
-			masked = "kit/DiffAlphaMask.xml"}) do
-		local n = child == "" and node or node:GetChild(child)
-		local cg = n and n:GetComponent("CustomGeometry")
-		local i = 0
-		while cg and cg:GetMaterial(i) do
-			cg:GetMaterial(i):SetTechnique(0, magic.cache:GetResource(
-					"Technique", technique))
-			i = i + 1
-		end
-	end
-end
+-- Kit's voxels' look (module.lua's voxel_look): water blended, leaves and
+-- plants cut out, the tint and the World's sky light; a heightmap's
+-- decorations (voxel objects) drawn as the voxels are
+local voxel_look = kit.voxel_look
 voxelworld.sub_material_update(voxel_look)
 require("buildat/module/voxel_objects").set_material_cb(voxel_look)
 
@@ -148,18 +135,28 @@ for _, s in ipairs({{15, 1}, {1, 15}}) do
 	crosshair[#crosshair + 1] = bar
 end
 
-local function build(p, voxel)
+-- [KIT_VOXEL_FORMAT] a placing carries the shape in hand's facing and
+-- Kit's tint in hand (the editor's palette)
+local function build(p, voxel, param)
 	if not p then
 		return
 	end
+	local extra = ""
+	if voxel ~= "air" then
+		voxel = kit.hand_voxel(voxel)
+		extra = ', "param": ' .. (kit.hand.shape ~= "" and param or 0) ..
+				', "tint": ' .. (kit.hand.tint or 0)
+	end
 	buildat.send_packet("main:build", '{"p": [' .. p.x .. ', ' .. p.y .. ', ' ..
-			p.z .. '], "voxel": "' .. voxel .. '"}')
+			p.z .. '], "voxel": "' .. voxel .. '"' .. extra .. '}')
 end
 
 -- The voxels a click digs and places on (the heightmap's surface none)
 local function voxel_at(x, y, z)
 	-- 0: not there, 1: air
-	return voxelworld.get_static_voxel(magic.Vector3(x, y, z)).id > 1
+	-- the id's bits only ([KIT_VOXEL_FORMAT]: param, tint and light above)
+	return voxelworld.get_voxel_registry():id_of(
+			voxelworld.get_static_voxel(magic.Vector3(x, y, z))) > 1
 end
 
 -- What a click would do in play ([KIT] stage 4e2, Kit's play_target): at
@@ -189,7 +186,7 @@ local function act(t, left)
 	elseif a.kind == "dig" then
 		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), "air")
 	elseif a.kind == "place" then
-		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), hand)
+		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), hand, a.param)
 	end
 end
 

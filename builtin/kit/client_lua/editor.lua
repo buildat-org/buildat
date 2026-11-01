@@ -1062,6 +1062,37 @@ palette = function()
 			ui_utils.dropdown(row(w), names, S.voxel or "", function(name)
 				M.pick_voxel(name ~= "" and name or nil)
 			end, {label = "Voxel", fill = true})
+			-- [KIT_VOXEL_FORMAT] its shape (a solid cube's; the facing
+			-- from the view as it is placed) and tint
+			local entry = nil
+			for _, v in ipairs(E.state.voxels or {}) do
+				if v.name == S.voxel then
+					entry = v
+				end
+			end
+			if entry and entry.shapes then
+				local shapes = {{"cube", ""}}
+				for _, sh in ipairs(M.SHAPES) do
+					shapes[#shapes + 1] = {sh:gsub("_", " "), sh}
+				end
+				ui_utils.dropdown(row(w), shapes, M.hand.shape, function(sh)
+					M.hand.shape = sh
+					log:info("kit editor: shape " .. (sh ~= "" and sh or "cube"))
+					if S.voxel and O.pick_voxel then
+						O.pick_voxel(S.voxel)
+					end
+				end, {label = "Shape", fill = true})
+			end
+			if entry then
+				local tints = {}
+				for i = 0, 15 do
+					tints[#tints + 1] = {i == 0 and "none" or tostring(i), i}
+				end
+				ui_utils.dropdown(row(w), tints, M.hand.tint, function(t)
+					M.hand.tint = tonumber(t) or 0
+					log:info("kit editor: tint " .. M.hand.tint)
+				end, {label = "Tint", fill = true})
+			end
 		end
 		button(w, "New voxel type...", function()
 			M.voxel_dialog()
@@ -1102,7 +1133,21 @@ end
 
 -- [KIT_EDIT_VOXELS] The voxel in hand (nil: none): the app's
 -- (O.pick_voxel) and the voxels tool's, on with one and away with none
+-- Whether a material of the palette has shapes (module.lua's hand_voxel)
+function M.material_has_shapes(name)
+	for _, v in ipairs(E.state and E.state.voxels or {}) do
+		if v.name == name then
+			return v.shapes == true
+		end
+	end
+	return false
+end
+
 function M.pick_voxel(name)
+	-- A material without shapes is placed as its cube
+	if name ~= S.voxel and not M.material_has_shapes(name) then
+		M.hand.shape = ""
+	end
 	S.voxel = name
 	log:info("kit editor: in hand " .. tostring(name or "none"))
 	if name and O.pick_voxel then
@@ -2819,7 +2864,8 @@ local function voxel_target(mx, my)
 	-- [KIT_HM_VOXELS] on the heightmap: the cell over the hit point
 	front = M.place_front(hit, front, {o.x, o.y, o.z}, {v.x, v.y, v.z}, t,
 			solid)
-	return hit and {cell = hit, front = front} or nil
+	return hit and {cell = hit, front = front,
+		y = t and o.y + v.y * t} or nil
 end
 
 local function voxel_click(mx, my, dig)
@@ -2834,10 +2880,24 @@ local function voxel_click(mx, my, dig)
 				table.concat(c, ","))
 		return
 	end
-	local name = dig and "air" or S.voxel
+	local name = dig and "air" or M.hand_voxel(S.voxel)
+	local j = {op = "set_voxel", pos = c, voxel = name}
+	if not dig then
+		-- [KIT_VOXEL_FORMAT] the facing from the view, the tint
+		local o, v = M.screen_ray(mx, my)
+		v = v:Normalized()
+		local n = {c[1] - t.cell[1], c[2] - t.cell[2], c[3] - t.cell[3]}
+		if math.abs(n[1]) + math.abs(n[2]) + math.abs(n[3]) ~= 1 then
+			n = {0, 1, 0}
+		end
+		j.param = M.hand.shape ~= "" and M.shape_param(v, n, t.y) or 0
+		j.tint = M.hand.tint
+	end
 	log:info("kit editor: " .. (dig and "dig" or "place " .. name) .. " at " ..
-			table.concat(c, ","))
-	send({op = "set_voxel", pos = c, voxel = name})
+			table.concat(c, ",") .. (j.param and j.param ~= 0 and
+			" param " .. j.param or "") .. (j.tint and j.tint ~= 0 and
+			" tint " .. j.tint or ""))
+	send(j)
 end
 
 -- ---- Input: the mouse ([FP]'s mouse_down, mouse_up, mouse_move)

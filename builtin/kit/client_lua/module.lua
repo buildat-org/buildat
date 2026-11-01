@@ -638,6 +638,55 @@ buildat.sub_packet("kit:warning", function(data)
 	ui_utils.show_notification(tostring(data), 8)
 end)
 
+-- [KIT_VOXEL_FORMAT] The World's sky light ("kit:sky" {"on": bool}, at
+-- the join and on a change; "relit" once the loaded sections are): the voxels meshed with the light the server
+-- keeps in them, drawn by KitVoxelSky*.xml; off, the plain look (the scene's
+-- lights alone) at no cost. M.sky_light() is it; M.on_sky(cb) is told.
+local sky_on, sky_cbs = false, {}
+function M.sky_light()
+	return sky_on
+end
+function M.on_sky(cb)
+	sky_cbs[#sky_cbs + 1] = cb
+end
+buildat.sub_packet("kit:sky", function(data)
+	local d = network.parse_json(data)
+	local on = type(d) == "table" and d.on == true
+	if on and d.relit then
+		log:info("kit: sky light: the loaded world relit")
+	end
+	if on == sky_on then
+		return
+	end
+	sky_on = on
+	log:info("kit: sky light " .. (on and "on" or "off"))
+	local voxelworld = require("buildat/module/voxelworld")
+	voxelworld.use_skylight = on
+	voxelworld.remesh_all()
+	for _, cb in ipairs(sky_cbs) do
+		cb(on)
+	end
+end)
+
+-- A chunk's look (voxelworld.sub_material_update, voxel_objects'
+-- set_material_cb): KitVoxel*.xml on its solid faces, its "alpha" child
+-- (water, blended) and its "masked" one (leaves and plants, cut out),
+-- with the tint, and the sky light when the World has it
+function M.voxel_look(node)
+	local sky = sky_on and "Sky" or ""
+	for child, kind in pairs({[""] = "", alpha = "Alpha",
+			masked = "Masked"}) do
+		local n = child == "" and node or node:GetChild(child)
+		local cg = n and n:GetComponent("CustomGeometry")
+		local i = 0
+		while cg and cg:GetMaterial(i) do
+			cg:GetMaterial(i):SetTechnique(0, magic.cache:GetResource(
+					"Technique", "kit/KitVoxel" .. sky .. kind .. ".xml"))
+			i = i + 1
+		end
+	end
+end
+
 -- A regeneration's sections all generated again (a check's wait)
 buildat.sub_packet("kit:regenerated", function(data)
 	log:info("kit: World: generated again")
@@ -954,9 +1003,47 @@ function M.play_target(origin, dir, reach, solid)
 			-- Over the heightmap's hit point: its top
 			n = {0, 1, 0}
 		end
-		t.right = {kind = "place", cell = front, on = hit, normal = n}
+		t.right = {kind = "place", cell = front, on = hit, normal = n,
+			param = M.shape_param(dir, n, vt and origin.y + dir.y * vt)}
 	end
 	return t
+end
+
+-- ---- [KIT_VOXEL_FORMAT] The hand's shape and tint (stage 4g2): what a
+-- placing puts down besides the material -- M.hand.shape ("" the cube,
+-- "slab", "stair", "inner_stair", "outer_stair", "panel", "pillar"; a
+-- material with shapes only) and M.hand.tint (0...15, the material's tint
+-- ramp). The editor's palette sets them; Workbench's placing and the
+-- editor's voxels tool read them.
+M.SHAPES = {"slab", "stair", "inner_stair", "outer_stair", "panel", "pillar"}
+M.hand = {shape = "", tint = 0}
+-- The voxel name the hand puts down of a material
+function M.hand_voxel(material)
+	if not material or material == "air" or M.hand.shape == "" or
+			(M.material_has_shapes and not M.material_has_shapes(material)) then
+		return material
+	end
+	return material .. ":" .. M.hand.shape
+end
+-- A shape's param, placed looking along dir onto a face whose normal is n
+-- ({x, y, z} toward the placed cell) at height y of the hit: its facing
+-- Luanti's dir_to_facedir (the shape's back away from the player), upside
+-- down when put against an underside or on the upper half of a side
+-- (Luanti's slabs)
+function M.shape_param(dir, n, y)
+	local f
+	if math.abs(dir.x) > math.abs(dir.z) then
+		f = dir.x < 0 and 3 or 1
+	else
+		f = dir.z < 0 and 2 or 0
+	end
+	local up = false
+	if n and n[2] == -1 then
+		up = true
+	elseif n and n[2] == 0 and y then
+		up = y - math.floor(y + 0.5) > 0
+	end
+	return f + (up and 4 or 0)
 end
 
 -- ---- The frames: vanilla's pointed box (extensions/luanti_client's

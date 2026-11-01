@@ -1,0 +1,12 @@
+<!-- [KIT_VOXEL_FORMAT] Kit's leaves and plants cut out (DiffAlphaMask.xml's): KitVoxel.glsl with
+     the tint and the World's sky light (module.lua's voxel_look). -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" vsdefines="KITTINT KITSKY" psdefines="DIFFMAP KITTINT KITSKY ALPHAMASK">
+    <pass name="base" />
+    <pass name="litbase" psdefines="AMBIENT" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="prepass" psdefines="PREPASS" />
+    <pass name="material" psdefines="MATERIAL" depthtest="equal" depthwrite="false" />
+    <pass name="deferred" psdefines="DEFERRED" />
+    <pass name="depth" vs="Depth" ps="Depth" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" psdefines="ALPHAMASK" />
+</technique>
