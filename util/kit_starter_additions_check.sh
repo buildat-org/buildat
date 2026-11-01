@@ -13,7 +13,8 @@
 # the plate's zone sees kitboss in (L's b: off), a press (b) latches L on:
 # the sign shows "Out: true", M slides 2 up and signals arrived, and the
 # link 3>17 is drawn and lit for the player in play. Screenshot of the
-# sign. Read back from the save: the link's "visible".
+# sign; the sign's board and the mover in the stone voxel's texture
+# ([KIT_LOOK_MATERIAL]). Read back from the save: the link's "visible".
 #
 #   util/kit_starter_additions_check.sh
 set -u
@@ -53,6 +54,9 @@ EOF
 	setp 18 text '"Out: {value}"'
 	place '{"op": "place", "type": "kit/mover", "pos": [4, 0, 4]}'
 	setp 19 time 0.5
+	# [KIT_LOOK_MATERIAL] The sign's board and the mover in voxel materials
+	setp 18 material '"stone"'
+	setp 19 material '"stone"'
 	place '{"op": "place", "prefab": "kit/pressure_plate", "pos": [-30, -10, -30]}'
 	setp 20 size '[60, 40, 60]' 1
 	link 3 pressed 17 a
@@ -80,6 +84,8 @@ wait_log 10000 replicated: entity 3 presses = 1
 wait_log_any 10000 kit: link 3>17 lit in play
 wait_log_any 10000 kit: entity 18 shows "Out: true"
 wait_log_any 10000 kit: entity 19 slid to
+frames 10
+look_dir 0 -0.15 1
 frames 10
 screenshot @T@/sign.png
 quit
@@ -122,6 +128,8 @@ grep -aq "kit: entity 19 slid to 0,2,0" "$b" ||
 grep -aqE "kit editor: entity 17: Cost(s|:)" "$b" ||
 	fail "the inspector did not show the cost ($b)"
 [ -s "$t/sign.png" ] || fail "no screenshot of the sign ($t)"
+grep -aq 'kit: entity 18 wears stone' "$b" && grep -aq 'kit: entity 19 wears stone' "$b" ||
+	fail "the sign and the mover do not wear the stone voxel ($b)"
 python3 - "$save/save.sqlite" <<'EOF' || fail "the save's visible link ($save)"
 import json, sqlite3, sys
 db = sqlite3.connect(sys.argv[1])

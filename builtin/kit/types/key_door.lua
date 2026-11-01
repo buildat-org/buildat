@@ -20,10 +20,13 @@ return {
 		-- than its front, round the same hinge. Two doors, one turned half
 		-- round and mirrored, are a double door
 		mirror = {type = "bool", default = false},
+		-- [KIT_LOOK_MATERIAL] A voxel material it wears ("": its own colour)
+		material = {type = "voxel", default = "", choices_from = "voxels"},
 		key = {type = "string", default = "key"},
 		take = {type = "bool", default = false},
 	},
-	look = {shape = "box", extent = "size", depth = 0.2, color = "#c8a040",
+	look = {shape = "box", extent = "size", depth = 0.2,
+		voxel = "param:material", color = "#c8a040",
 		solid = true, state = "open", when = {swing = true,
 		mirror = "param:mirror", solid = false}},
 	state = {open = {default = false, shared = true}},

@@ -217,6 +217,7 @@ local function drop_look(n)
 	if n.look then
 		n.look:Remove()
 	end
+	n.wear_wanted = nil
 	n.look, n.hinge, n.body, n.mat, n.text, n.solid, n.box, n.on = nil, nil,
 			nil, nil, nil, nil, nil, nil
 end
@@ -357,6 +358,120 @@ local function material(name)
 	return m
 end
 
+-- [KIT_LOOK_MATERIAL] A voxel material's definition by its name (a
+-- block's, not one of its shapes'): looked up again while the registry
+-- grows (a builder's new voxel)
+local voxel_defs = {count = -1, by = {}}
+local function voxel_def(name)
+	local reg = require("buildat/module/voxelworld").get_voxel_registry()
+	if not reg then
+		return nil
+	end
+	local count = reg:get_count()
+	if count ~= voxel_defs.count then
+		voxel_defs.count, voxel_defs.by = count, {}
+		for id = 1, count - 1 do
+			local def = reg:get_by_id(id)
+			local bn = def and def.name and def.name.block_name
+			if bn and not voxel_defs.by[bn] then
+				voxel_defs.by[bn] = def
+			end
+		end
+	end
+	return voxel_defs.by[name]
+end
+
+-- [KIT_LOOK_MATERIAL] A unit box wearing a voxel material's six tiles
+-- (+y, -y, +x, -x, +z, -z, the voxels' order), a texture a metre of its
+-- sides `size` as the voxels wear theirs (a tile of a texture of several
+-- stretched over its face); nil when the material has no textures here
+local face_textures = {}
+local function voxel_box(node, def, size)
+	local tex = {}
+	for i = 1, 6 do
+		local seg = def.textures[i]
+		local name = seg and seg.resource_name or ""
+		if name ~= "" then
+			local t = face_textures[name]
+			if t == nil then
+				t = magic.cache:GetResource("Texture2D", name) or false
+				if t then
+					t.filterMode = magic.FILTER_NEAREST
+				end
+				face_textures[name] = t
+			end
+			if t then
+				tex[i] = {t = t, n = seg.total_segments,
+					s = seg.select_segment}
+			end
+		end
+	end
+	if not next(tex) then
+		return nil
+	end
+	local cg = node:CreateComponent("CustomGeometry")
+	cg:SetNumGeometries(6)
+	-- Each face: its normal, its across and down edges (unit box)
+	local faces = {
+		{{0, 1, 0}, {1, 0, 0}, {0, 0, -1}},
+		{{0, -1, 0}, {1, 0, 0}, {0, 0, 1}},
+		{{1, 0, 0}, {0, 0, 1}, {0, -1, 0}},
+		{{-1, 0, 0}, {0, 0, -1}, {0, -1, 0}},
+		{{0, 0, 1}, {-1, 0, 0}, {0, -1, 0}},
+		{{0, 0, -1}, {1, 0, 0}, {0, -1, 0}},
+	}
+	local mats = {}
+	for i, f in ipairs(faces) do
+		local nr, eu, ev = f[1], f[2], f[3]
+		-- Its metres across and down
+		local mu = math.abs(eu[1] * size[1] + eu[2] * size[2] + eu[3] * size[3])
+		local mv = math.abs(ev[1] * size[1] + ev[2] * size[2] + ev[3] * size[3])
+		local t = tex[i] or tex[1] or select(2, next(tex))
+		local nx, ny = t.n and t.n.x or 1, t.n and t.n.y or 1
+		local function uv(fu, fv)
+			if nx > 1 or ny > 1 then
+				return magic.Vector2((t.s.x + fu) / nx, (t.s.y + fv) / ny)
+			end
+			return magic.Vector2(fu * mu, fv * mv)
+		end
+		local c = {}
+		for k = 1, 3 do
+			c[k] = nr[k] * 0.5 - eu[k] * 0.5 - ev[k] * 0.5
+		end
+		local function at(fu, fv)
+			return {c[1] + eu[1] * fu + ev[1] * fv, c[2] + eu[2] * fu +
+					ev[2] * fv, c[3] + eu[3] * fu + ev[3] * fv}
+		end
+		-- Wound so it faces its normal: cross(p2 - p1, p3 - p1) along it
+		-- (the wedge's)
+		local cx = {eu[2] * ev[3] - eu[3] * ev[2], eu[3] * ev[1] -
+				eu[1] * ev[3], eu[1] * ev[2] - eu[2] * ev[1]}
+		local flip = cx[1] * nr[1] + cx[2] * nr[2] + cx[3] * nr[3] < 0
+		local quad = {{0, 0}, {1, 0}, {1, 1}, {0, 0}, {1, 1}, {0, 1}}
+		cg:BeginGeometry(i - 1, magic.TRIANGLE_LIST)
+		for q = 1, 6 do
+			local k = q
+			if flip then
+				k = ({1, 3, 2, 4, 6, 5})[q]
+			end
+			local p = at(quad[k][1], quad[k][2])
+			cg:DefineVertex(magic.Vector3(p[1], p[2], p[3]))
+			cg:DefineNormal(magic.Vector3(nr[1], nr[2], nr[3]))
+			cg:DefineTexCoord(uv(quad[k][1], quad[k][2]))
+		end
+		local m = magic.Material:new()
+		m:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/Diff.xml"))
+		m:SetTexture(magic.TU_DIFFUSE, t.t)
+		m:SetShaderParameter("MatSpecColor", magic.Color(0.05, 0.05, 0.05))
+		cg:SetMaterial(i - 1, m)
+		mats[i] = m
+	end
+	cg:Commit()
+	cg.castShadows = true
+	return cg, mats
+end
+
 -- The look drawn as its state has it: built the first time, changed as the
 -- state changes
 local function draw_look(id, n, look)
@@ -376,8 +491,26 @@ local function draw_look(id, n, look)
 		n.hinge = n.look:CreateChild("Hinge")
 		n.body = n.hinge:CreateChild("Body")
 		n.mat = material(look.material)
+		-- [KIT_LOOK_MATERIAL] A box wearing a voxel material: its sides
+		-- the shut look's
+		local def = look.shape ~= "wedge" and look.shape ~= "sphere" and
+				type(look.voxel) == "string" and look.voxel ~= "" and
+				voxel_def(look.voxel)
+		local worn = def and voxel_box(n.body, def, look_box(look, false).size)
+		if type(look.voxel) == "string" and look.voxel ~= "" then
+			log:info("kit: entity " .. id .. (worn and " wears " or
+					" wears no ") .. look.voxel)
+			if worn then
+				n.wear_wanted = nil
+			end
+		end
+		n.wear_wanted = not worn and not def and type(look.voxel) ==
+				"string" and look.voxel ~= "" and look.shape ~= "wedge" and
+				look.shape ~= "sphere" and look.voxel or nil
 		if look.shape == "wedge" then
 			wedge(n.body):SetMaterial(0, n.mat)
+		elseif worn then
+			-- (drawn)
 		else
 			local m = n.body:CreateComponent("StaticModel")
 			m.model = magic.cache:GetResource("Model", "Models/" ..
@@ -444,6 +577,8 @@ local function draw_look(id, n, look)
 		col = magic.Color(col.r, col.g, col.b, 0.4)
 	end
 	n.mat:SetShaderParameter("MatDiffColor", col)
+	-- [KIT_LOOK_MATERIAL] (a voxel material is its own colours: col is
+	-- unused there)
 	-- [KIT] stage 4l: color "none", no box drawn (a sign's letters alone)
 	n.body.enabled = b.color ~= "none"
 	if n.text_node then
@@ -557,6 +692,12 @@ local function update_play(_, data)
 		end
 		local show = type(n.show) == "table" and n.show or {}
 		if type(show.look) == "table" then
+			-- [KIT_LOOK_MATERIAL] A voxel material not in the registry
+			-- yet (a builder's new one, the registry still coming): drawn
+			-- again once it is
+			if n.look and n.wear_wanted and voxel_def(n.wear_wanted) then
+				drop_look(n)
+			end
 			draw_look(id, n, show.look)
 			-- A slide under way ([KIT] stage 4l)
 			if n.slide_to and n.slide_at and n.slide_speed and

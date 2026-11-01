@@ -19,6 +19,7 @@ end
 return {
 	version = 1,
 	look = {shape = "box", size = "param:board", color = "param:background",
+		voxel = "param:material",
 		text = "shown", text_size = "param:size", text_color = "param:color",
 		text_facing = "param:facing", solid = "param:solid"},
 	params = {
@@ -28,6 +29,9 @@ return {
 		size = {type = "number", default = 0.25, min = 0.05, max = 4},
 		color = {type = "string", default = "#ffffff"},
 		background = {type = "string", default = "#304050"},
+		-- [KIT_LOOK_MATERIAL] A voxel material it wears ("": its background's colour; a background
+		-- of "none" no board still)
+		material = {type = "voxel", default = "", choices_from = "voxels"},
 		board = {type = "position", default = {1.5, 0.75, 0.1}},
 		solid = {type = "bool", default = true},
 	},

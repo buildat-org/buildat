@@ -19,13 +19,15 @@ end
 return {
 	version = 1,
 	look = {shape = "box", size = "param:size", color = "param:color",
-		solid = "param:solid", state = "out",
+		voxel = "param:material", solid = "param:solid", state = "out",
 		when = {offset = "param:offset", slide = "param:time"}},
 	params = {
 		offset = {type = "position", default = {0, 2, 0}},
 		time = {type = "number", default = 1, min = 0, max = 600},
 		size = {type = "position", default = {1, 0.25, 1}},
 		color = {type = "string", default = "#9090a0"},
+		-- [KIT_LOOK_MATERIAL] A voxel material it wears ("": its own colour)
+		material = {type = "voxel", default = "", choices_from = "voxels"},
 		solid = {type = "bool", default = true},
 		start_out = {type = "bool", default = false},
 	},

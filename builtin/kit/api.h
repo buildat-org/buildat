@@ -75,12 +75,19 @@ namespace interface
 //   look = {shape = "box"|"sphere", size = n (half its side) or {x, y, z}
 //           (its sides), color = "#rrggbb", text = "<shared state key>",
 //           extent = "<position param>", depth = n, solid = true,
+//           voxel = "<voxel material>",
 //           state = "<shared state key>", when = {color, solid, scale =
-//           {x, y, z}, swing = true, mirror = true}}  -- drawn where it is on every
-//                               client, in both modes (Stopped: the
+//           {x, y, z}, swing = true, mirror = true}}  -- drawn where it
+//                               is on every client, in both modes (Stopped: the
 //                               start's state), the state `text` over
 //                               it. extent: a box over those cells from
-//                               its own up and on (as zone), its z side
+//                               its own up and on (as zone). voxel: a
+//                               box wears that voxel material's six
+//                               tiles, a texture a metre as the voxels
+//                               (its colour unused; "": none)
+//                               [KIT_LOOK_MATERIAL]; kit/door, key_door,
+//                               gate, sign and mover's `material`,
+//                               kit/part's `voxel`. Its z side
 //                               `depth` in its first cells' middle when
 //                               given. solid: a collision shape on the
 //                               clients (client-side, as the voxels').
@@ -89,8 +96,9 @@ namespace interface
 //                               kept), swing it a quarter round its -x
 //                               edge (a door; towards +z, or with
 //                               mirror towards -z [KIT_DOOR_MIRROR]:
-//                               "param:mirror", kit/door's). kit/door, gate, button,
-//                               lever and key_door are such objects
+//                               "param:mirror", kit/door's). kit/door,
+//                               gate, button, lever and key_door are
+//                               such objects
 //                               ([KIT] stage 4c; before, voxels they
 //                               owned: a save's are migrated, the cells
 //                               they owned cleared)

@@ -62,7 +62,8 @@
 #      edit (on_params), "Restart this" taking the copy back (on_remove),
 #      the copies gone at Stop; a wedge kit/part; kit/door's client part
 #      swinging a door on use, and the other way once mirrored, live
-#      ([KIT_DOOR_MIRROR]). The players' items and scores are on their
+#      ([KIT_DOOR_MIRROR]), and in Kit's planks ([KIT_LOOK_MATERIAL]).
+#      The players' items and scores are on their
 #      entities, the zone's members in the runtime row.
 #   7. ([KIT] stage 4e2) Kit's editor as floorplanner's, by mouse and by
 #      finger: below.
@@ -766,6 +767,9 @@ wait_log 10000 kit: entity 21's client part: swung to -90
 event kit_edit {"op": "set", "id": 21, "comp": 0, "param": "mirror", "value": true}
 wait_log 10000 kit: entity 21 drawn 0.2x2x1 at -0.4,0.5,-0.4
 wait_log 10000 kit: entity 21's client part: swung to 90
+# [KIT_LOOK_MATERIAL] In Kit's planks
+event kit_edit {"op": "set", "id": 21, "comp": 0, "param": "material", "value": "kit/planks"}
+wait_log 10000 kit: entity 21 wears kit/planks
 sync 5000
 event kit_use 25
 wait_log_any 10000 kit: entity 30 drawn
@@ -857,7 +861,8 @@ want "$t/boss.log" "client part: your score 1" \
 want "$t/again.log" "kit editor: signal 25.pressed -> 3.spawn" \
 	"kit editor: log of 3: " "kit: entity 21's client part: swung to -90" \
 	"kit: entity 21 drawn 0.2x2x1 at -0.4,0.5,-0.4" \
-	"kit: entity 21's client part: swung to 90"
+	"kit: entity 21's client part: swung to 90" \
+	"kit: entity 21 wears kit/planks"
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'authored'" > "$t/authored2.json"
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'runtime'" > "$t/runtime2.json"
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'prefab:kitboss/door2'" > "$t/prefab2.json"

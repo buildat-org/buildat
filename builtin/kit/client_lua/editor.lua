@@ -1219,6 +1219,19 @@ local function field(name, d, values)
 		if not has and type(values[name]) == "string" then
 			f.choices[#f.choices + 1] = {values[name], values[name]}
 		end
+	elseif d.choices_from == "voxels" then
+		-- [KIT_LOOK_MATERIAL] The voxel materials, as the voxels tool's (the
+		-- value too when it is none of them)
+		f.type = "choice"
+		f.choices = {{"none", ""}}
+		local has = values[name] == ""
+		for _, v in ipairs(voxel_names()) do
+			f.choices[#f.choices + 1] = {v, v}
+			has = has or v == values[name]
+		end
+		if not has and type(values[name]) == "string" then
+			f.choices[#f.choices + 1] = {values[name], values[name]}
+		end
 	elseif t == "prefab" then
 		f.type = "choice"
 		f.choices = {{"none", ""}}

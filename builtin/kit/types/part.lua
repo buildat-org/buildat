@@ -14,8 +14,11 @@ return {
 		material = {type = "string", default = "plain",
 			choices = {"plain", "metal", "glass", "glow"}},
 		collision = {type = "bool", default = true},
+		-- [KIT_LOOK_MATERIAL] A voxel material it wears ("": its colour; a
+		-- box only). Its `material` is its surface, from before
+		voxel = {type = "voxel", default = "", choices_from = "voxels"},
 	},
 	look = {shape = "param:shape", size = "param:size",
 		rotation = "param:rotation", color = "param:color",
-		material = "param:material", solid = "param:collision"},
+		material = "param:material", voxel = "param:voxel", solid = "param:collision"},
 }
