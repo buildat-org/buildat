@@ -881,6 +881,12 @@ struct Module: public interface::Module, public Interface
 	size_t m_world_generated = 0, m_world_logged = 0;
 	// A regeneration whose sections are not all generated again yet
 	bool m_world_regenerating = false;
+	// The loaded sections regenerate() unloaded: the load points bring them
+	// back over the next passes, so an empty worldgen queue is not the end
+	// until each is in again ([KIT_REGENERATED_EARLY])
+	// simplified: one the load points no longer reach keeps the notice
+	// back until the next regeneration
+	sv_<pv::Vector3DInt16> m_regen_wait;
 	// [KIT_VOXEL_EDITS] what the World's generator was made of, for a
 	// copy that says what a section would be (generated())
 	world::Params m_gen_p;
@@ -3774,6 +3780,7 @@ struct Module: public interface::Module, public Interface
 	{
 		size_t again = 0;
 		std::set<std::tuple<int, int, int>> edited, redo;
+		sv_<pv::Vector3DInt16> wait;
 		voxelworld::access(m_server, m_world_scene,
 				[&](voxelworld::Instance *w){
 			// The edited ones into the save, so its index says them all
@@ -3792,6 +3799,7 @@ struct Module: public interface::Module, public Interface
 					continue;
 				w->unload_section(s);
 				forget.push_back(s);
+				wait.push_back(s);
 			}
 			for(const pv::Vector3DInt16 &s : forget)
 				redo.insert(std::make_tuple(s.getX(), s.getY(), s.getZ()));
@@ -3817,6 +3825,7 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "World%s: %zu sections generated again, %zu edited kept",
 				by.empty() ? "" : cs(" by "+by), again, edited.size());
 		m_world_regenerating = again > 0;
+		m_regen_wait = wait;
 		if(n && seams_named)
 			warn(itos(n)+" edited sections kept, seams where they meet the "
 					"new ground: "+seams+(n > 8 ? " ..." : ""));
@@ -5440,6 +5449,20 @@ struct Module: public interface::Module, public Interface
 		});
 		if(pending)
 			return;
+		bool back = true;
+		if(!m_regen_wait.empty())
+			voxelworld::access(m_server, m_world_scene,
+					[&](voxelworld::Instance *w){
+				for(const pv::Vector3DInt16 &sp : m_regen_wait)
+					if(!w->is_section_loaded(sp) ||
+							!w->is_section_generated(sp)){
+						back = false;
+						break;
+					}
+			});
+		if(!back)
+			return;
+		m_regen_wait.clear();
 		m_world_logged = m_world_generated;
 		log_i(MODULE, "World: %zu sections generated since the start",
 				m_world_generated);
