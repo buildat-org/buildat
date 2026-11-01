@@ -55,6 +55,8 @@ using json::jstr;
 // A signal passed along more links than this is a loop, and cut
 static const int MAX_HOPS = 16;
 static const size_t MAX_QUEUE = 4096;
+// [KIT] stage 7b's first part: named timers an instance (c:after)
+static const size_t MAX_TIMERS = 64;
 // A run's slice of the box's meter is its budget() / this (about 5 ms of
 // a plain loop); a tick works through TICK_SLICES of them at most
 static const int64_t SLICE_DIV = 20;
@@ -124,10 +126,15 @@ struct Instance
 	sv_<Link> links; // authored
 	json::Value state = json::object(); // runtime
 	ss_ disabled; // runtime: why, "" while it runs
-	// runtime: its timer (c:after), when on the game's clock (-1: none),
-	// and who set off the run that set it
-	int64_t due_us = -1;
-	ss_ due_by;
+	// runtime: its timers (c:after), each by its name and player ("" the
+	// shared one), when due on the game's clock, and who set off the run
+	// that set it ([KIT] stage 7b's first part: named, many an instance)
+	struct Timer {
+		ss_ name, player;
+		int64_t due_us = 0;
+		ss_ by;
+	};
+	sv_<Timer> timers;
 	// runtime: the players in its zone, by their entity's id ([KIT] stage
 	// 4d: saved, so a restart does not enter them again)
 	std::set<ss_> inside;
@@ -1802,7 +1809,8 @@ struct Module: public interface::Module, public Interface
 		return c;
 	}
 
-	// {"<id>": [{"type", "state", "disabled", "timer": s, "timer_by",
+	// {"<id>": [{"type", "state", "disabled", "timers": [{"name",
+	//  "player", "s", "by"}] (before stage 7b: "timer": s, "timer_by"),
 	//  "inside": [id...]}, ...]}, and ([KIT] stage 4d) unless it is for the
 	// start, the round's entities: "made": [{"entity", "origin", "by",
 	// "maker": [id, comp]}], "removed": [{"entity", "origin", "by"}], the
@@ -1822,9 +1830,18 @@ struct Module: public interface::Module, public Interface
 				j.set("state", in.state);
 				if(!in.disabled.empty())
 					j.set("disabled", in.disabled);
-				if(in.due_us >= 0){
-					j.set("timer", std::max<int64_t>(0, in.due_us - now) / 1e6);
-					j.set("timer_by", in.due_by);
+				if(!in.timers.empty()){
+					json::Value ts = json::array();
+					for(const Instance::Timer &t : in.timers){
+						json::Value tj = json::object();
+						tj.set("name", t.name);
+						if(!t.player.empty())
+							tj.set("player", t.player);
+						tj.set("s", std::max<int64_t>(0, t.due_us - now) / 1e6);
+						tj.set("by", t.by);
+						ts.append(tj);
+					}
+					j.set("timers", ts);
 				}
 				if(!in.inside.empty() && !for_start){
 					json::Value ins = json::array();
@@ -1879,10 +1896,29 @@ struct Module: public interface::Module, public Interface
 			for(json::Iterator it(st); it; ++it)
 				in.state.set(it.key(), *it);
 		in.disabled = jstr(s, "disabled");
+		const int64_t now = interface::os::game_us();
+		in.timers.clear();
 		const json::Value &t = s.get("timer");
-		in.due_us = t.is_number() && t.as_number() >= 0 ?
-				interface::os::game_us() + (int64_t)(t.as_number() * 1e6) : -1;
-		in.due_by = jstr(s, "timer_by");
+		if(t.is_number() && t.as_number() >= 0){
+			Instance::Timer tm;
+			tm.due_us = now + (int64_t)(t.as_number() * 1e6);
+			tm.by = jstr(s, "timer_by");
+			in.timers.push_back(tm);
+		}
+		const json::Value &ts = s.get("timers");
+		for(unsigned i = 0; i < ts.size() && in.timers.size() < MAX_TIMERS;
+				i++){
+			const json::Value &tj = ts.at(i);
+			const json::Value &left = tj.get("s");
+			if(!tj.is_object() || !left.is_number() || left.as_number() < 0)
+				continue;
+			Instance::Timer tm;
+			tm.name = jstr(tj, "name");
+			tm.player = jstr(tj, "player");
+			tm.due_us = now + (int64_t)(left.as_number() * 1e6);
+			tm.by = jstr(tj, "by");
+			in.timers.push_back(tm);
+		}
 		in.inside.clear();
 		const json::Value &ins = s.get("inside");
 		for(unsigned i = 0; i < ins.size(); i++)
@@ -2108,8 +2144,9 @@ struct Module: public interface::Module, public Interface
 				if(full_type(jstr(s, "type")) == in.type){
 					runtime_from(in, s);
 					// Before [KIT] stage 4d a timer's player was a name
-					if(!player_id(in.due_by) && !player_of(in.due_by).empty())
-						in.due_by = by_of(player_of(in.due_by));
+					for(Instance::Timer &t : in.timers)
+						if(!player_id(t.by) && !player_of(t.by).empty())
+							t.by = by_of(player_of(t.by));
 					if(!in.disabled.empty())
 						log_w(MODULE, "Entity %s's %s stays disabled: %s",
 								cs(itos(e.id)), cs(in.type), cs(in.disabled));
@@ -6100,14 +6137,24 @@ struct Module: public interface::Module, public Interface
 		const json::Value &vx = fx.get("voxels");
 		if(vx.is_array() && vx.size())
 			set_voxels(e, in, vx, r.by, t.builds && pid ? 'b' : 'g');
+		// c:after(seconds, name, {player = id}): {{name, seconds, player}}
 		const json::Value &after = fx.get("after");
-		if(after.is_number()){
-			// simplified: one timer an instance; a new c:after replaces it
-			const double s = after.as_number();
-			in.due_us = s >= 0 && s < 1e7 ? interface::os::game_us() +
-					(int64_t)(s * 1e6) : -1;
-			in.due_by = r.by;
-			m_runtime_dirty = true;
+		for(unsigned i = 0; i < after.size(); i++){
+			const json::Value &a = after.at(i);
+			const ss_ name = a.at(0).is_string() ? a.at(0).as_string() : "";
+			const double s = a.at(1).is_number() ? a.at(1).as_number() : -1;
+			ss_ player;
+			const json::Value &pl = a.at(2);
+			if(pl.is_number() && pl.as_number() > 0)
+				player = "player:" + itos((int64_t)pl.as_number());
+			else if(pl.is_string())
+				player = pl.as_string();
+			if(!player.empty() && !player_id(player)){
+				log_w(MODULE, "Entity %s's %s: after: %s is no player",
+						cs(itos(e.id)), cs(type), cs(player));
+				continue;
+			}
+			set_timer(e, in, name, player, s, r.by);
 		}
 		const ss_ who = player_of(r.by);
 		const json::Value &tp = fx.get("teleport");
@@ -7526,23 +7573,75 @@ struct Module: public interface::Module, public Interface
 		return done;
 	}
 
-	// Timers due on the game's clock: on_timer(c), as by whoever set it off
+	// c:after(seconds, name, player): the instance's timer of that name and
+	// player set (again), or taken back (seconds < 0); MAX_TIMERS at most
+	void set_timer(const Entity &e, Instance &in, const ss_ &name,
+			const ss_ &player, double s, const ss_ &by)
+	{
+		auto it = std::find_if(in.timers.begin(), in.timers.end(),
+				[&](const Instance::Timer &t){
+					return t.name == name && t.player == player; });
+		m_runtime_dirty = true;
+		if(!(s >= 0 && s < 1e7)){
+			if(it != in.timers.end())
+				in.timers.erase(it);
+			return;
+		}
+		if(it == in.timers.end()){
+			if(in.timers.size() >= MAX_TIMERS){
+				log_w(MODULE, "Entity %s's %s: after: %i timers at most; "
+						"\"%s\" not set", cs(itos(e.id)), cs(in.type),
+						(int)MAX_TIMERS, cs(name));
+				return;
+			}
+			in.timers.push_back(Instance::Timer());
+			it = in.timers.end() - 1;
+			it->name = name;
+			it->player = player;
+		}
+		it->due_us = interface::os::game_us() + (int64_t)(s * 1e6);
+		it->by = by;
+	}
+
+	// Timers due on the game's clock: on_timer(c, name, player), as by
+	// whoever set it off
 	void run_timers()
 	{
 		const int64_t now = interface::os::game_us();
 		for(auto &p : m_entities)
 			for(size_t i = 0; i < p.second.comps.size(); i++){
 				Instance &in = p.second.comps[i];
-				if(in.due_us < 0 || now < in.due_us)
+				// In the order they are due; one set again in its own
+				// on_timer waits for its next due
+				sv_<Instance::Timer> due;
+				for(size_t k = 0; k < in.timers.size();){
+					if(now >= in.timers[k].due_us){
+						due.push_back(in.timers[k]);
+						in.timers.erase(in.timers.begin() + k);
+					} else {
+						k++;
+					}
+				}
+				if(due.empty())
 					continue;
-				in.due_us = -1;
+				std::stable_sort(due.begin(), due.end(),
+						[](const Instance::Timer &a, const Instance::Timer &b){
+							return a.due_us < b.due_us; });
 				m_runtime_dirty = true;
-				Run r;
-				r.entity = p.first;
-				r.comp = i;
-				r.handler = "on_timer";
-				r.by = in.due_by.empty() ? "app" : in.due_by;
-				queue_run(r);
+				for(const Instance::Timer &t : due){
+					Run r;
+					r.entity = p.first;
+					r.comp = i;
+					r.handler = "on_timer";
+					r.by = t.by.empty() ? "app" : t.by;
+					// on_timer(c, name, player): nil, nil for the unnamed
+					// shared one, so a handler of before reads as it did
+					r.args.append(t.name.empty() ? json::null() :
+							json::Value(t.name));
+					r.args.append(t.player.empty() ? json::null() :
+							json::Value(t.player));
+					queue_run(r);
+				}
 			}
 	}
 
@@ -9375,8 +9474,7 @@ struct Module: public interface::Module, public Interface
 		if(sd.is_object())
 			for(json::Iterator it(sd); it; ++it)
 				in.state.set(it.key(), (*it).get("default"));
-		in.due_us = -1;
-		in.due_by.clear();
+		in.timers.clear();
 		in.inside.clear();
 		const json::Value &s = m_start.get(itos(e.id)).at((unsigned)i);
 		if(full_type(jstr(s, "type")) == in.type)
@@ -10462,8 +10560,7 @@ struct Module: public interface::Module, public Interface
 				const Instance &was = it->second.comps[i];
 				in.state = was.state;
 				in.disabled = was.disabled;
-				in.due_us = was.due_us;
-				in.due_by = was.due_by;
+				in.timers = was.timers;
 				in.inside = was.inside;
 				json::Value old = json::object();
 				for(json::Iterator pi(in.params); pi; ++pi)

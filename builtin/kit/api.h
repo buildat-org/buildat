@@ -94,7 +94,8 @@ namespace interface
 //                               they owned cleared)
 //   hud = "<shared state key>"  -- that state on every client's screen
 //   on_input(c, input, value, by), on_use(c, by), on_voxel(c, voxel, by),
-//   on_timer(c), on_enter(c, by), on_leave(c, by), on_join(c, by),
+//   on_timer(c, name, player), on_enter(c, by), on_leave(c, by),
+//   on_join(c, by),
 //   on_params(c, changed) (a live edit changed its parameters: {name = the
 //   value before}), on_remove(c) (it is about to go: deleted while Running,
 //   removed by c:remove, or "Restart this" before its on_start)
@@ -115,8 +116,14 @@ namespace interface
 // all refused, logged, if one is outside the box or its name is not a
 // registered voxel; a cell whose section is not loaded is written when
 // it is),
-// c:after(seconds) (on_timer then, on the game's clock; one an instance,
-// c:after() takes it back), c:teleport({x, y, z}) (the player who set the
+// c:after(seconds, name, {player = id}) (on_timer(c, name, player) then,
+// on the game's clock, as by whoever set it; [KIT] stage 7b's first part:
+// many an instance, 64 at most, each by its name and player, a new one of
+// the same replacing it; no name: the unnamed one, on_timer's name and
+// player nil; a player: their own, "player:<id>" or c.player's number, a
+// button each player may use once in 10 s; no seconds takes that one
+// back; saved as game time left; the scope is where the component lives,
+// so one on a player's entity follows them), c:teleport({x, y, z}) (the player who set the
 // run off, the app moving them on kit:move_player), c:log(...) (the
 // server's log and the entity's own, which the inspector shows),
 // c:app(what, value) ([KIT] stage 6a; the app's own types only: the event

@@ -25,8 +25,9 @@
 **                        its effects, {set = {{key, value}...} (a table
 **                        changed in place too), emit = {{output,
 **                        value}...}, voxel = name, voxels = {{x, y, z,
-**                        name}...} (c:set_voxels), after = seconds (-1:
-**                        none), teleport = {x, y, z}, items = {item = n}
+**                        name}...} (c:set_voxels), after = {{name,
+**                        seconds (-1: taken back), player | null}...},
+**                        teleport = {x, y, z}, items = {item = n}
 **                        (the player's list after inventory calls),
 **                        inv_set = {{key, value}...} (the provider's
 **                        state), spawn = {{ref, pos|null, id}...}, remove
@@ -423,7 +424,18 @@ static const char PRELUDE[] =
 "		end\n"
 "		fx.voxels = out\n"
 "	end\n"
-"	function c:after(seconds) fx.after = tonumber(seconds) or -1 end\n"
+"	-- c:after(seconds, name, {player = id}): many an instance, by name and\n"
+"	-- player; no seconds (or < 0) takes that one back\n"
+"	function c:after(seconds, name, opts)\n"
+"		if name ~= nil and type(name) ~= 'string' then error('after: a name is a string', 2) end\n"
+"		if name and #name > 64 then error('after: a name is 64 characters at most', 2) end\n"
+"		if opts ~= nil and type(opts) ~= 'table' then error('after: options are {player = id}', 2) end\n"
+"		local a = fx.after or {}\n"
+"		if #a >= 64 then error('after: 64 a run at most', 2) end\n"
+"		local pl = opts and opts.player\n"
+"		a[#a + 1] = {name or '', tonumber(seconds) or -1, pl == nil and NULL or pl}\n"
+"		fx.after = a\n"
+"	end\n"
 "	function c:teleport(pos)\n"
 "		if type(pos) ~= 'table' then error('teleport: a position, {x, y, z}', 2) end\n"
 "		fx.teleport = {tonumber(pos[1]) or 0, tonumber(pos[2]) or 0, tonumber(pos[3]) or 0}\n"
