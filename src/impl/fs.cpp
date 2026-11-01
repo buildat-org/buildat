@@ -5,6 +5,8 @@
 #include <c55/string_util.h>
 #include <fstream>
 #include <cstdio>
+#include <atomic>
+#include <string>
 #include "core/log.h"
 #define MODULE "fs"
 #ifdef _WIN32
@@ -26,9 +28,22 @@ bool rename(const ss_ &from, const ss_ &to)
 #endif
 }
 
+// [FS_TMP_SHARED] The temporary file is this process's and this call's
+// own: with one name for all, two clients writing the same file in a
+// shared cache (the same hash: the checks' clients, two clients on one
+// machine) wrote one inode, and the first's rename put the second's
+// truncated write in place, read empty
+// (VOXEL_REG_EMPTY_FLAKE). simplified: one left by a crash stays
 bool write_file(const ss_ &path, const ss_ &data)
 {
-	const ss_ tmp = path+".tmp";
+	static std::atomic<uint64_t> serial(0);
+#ifdef _WIN32
+	const uint64_t pid = GetCurrentProcessId();
+#else
+	const uint64_t pid = getpid();
+#endif
+	const ss_ tmp = path+"."+std::to_string(pid)+"."+
+			std::to_string(serial++)+".tmp";
 	{
 		std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
 		f<<data;
