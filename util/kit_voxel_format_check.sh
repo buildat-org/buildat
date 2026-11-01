@@ -195,6 +195,10 @@ EOF
 	echo "idle 30000"
 	info $ROOM
 	info 7 -5 7
+	# Out of edit mode the admin builds by the play rules as everyone
+	# ([KIT_BUILDER_PLAY_RULES]): a region letting all place there
+	edit '{"op": "place", "type": "kit/region", "pos": [0, 0, 1]}'
+	edit '{"op": "set", "id": 4, "comp": 0, "param": "place", "value": "all"}'
 	shot sky_on 'event workbench_build {"p": [2, 1, 3], "voxel": "kit/stone:slab", "param": 4, "tint": 2}
 sync 5000
 event kit_edit {"op": "voxel_info", "pos": [2, 1, 3]}

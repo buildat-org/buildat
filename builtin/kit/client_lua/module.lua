@@ -1317,7 +1317,9 @@ local REFUSED = {dig = "Protected: no digging here",
 -- Whether this player may do action at the cell, and why not (the
 -- server's allows(); a region's allow hook is the server's alone)
 function M.allows(action, x, y, z)
-	if E.can_edit and (action == "dig" or action == "place") then
+	-- [KIT_BUILDER_PLAY_RULES] a builder builds freely in edit mode only;
+	-- out of it they play by the rules as everyone
+	if E.can_edit and E.editing and (action == "dig" or action == "place") then
 		return true
 	end
 	if (action == "dig" or action == "place") and not E.running then

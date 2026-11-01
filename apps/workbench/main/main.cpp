@@ -416,11 +416,11 @@ struct Module: public interface::Module
 		bool can = false;
 		ss_ why;
 		kit::access(m_server, [&](kit::Interface *k){
-			can = k->can_edit(peer) || k->allows(peer, voxel == "air" ? "dig" :
+			can = k->is_editing(peer) || k->allows(peer, voxel == "air" ? "dig" :
 					"place", c[0], c[1], c[2], &why);
 		});
 		if(!can){
-			log_i(MODULE, "workbench: a build by %s refused: no edit rights "
+			log_i(MODULE, "workbench: a build by %s refused: not in edit mode "
 					"and not allowed at (%i,%i,%i): %s", cs(m_names[peer]), c[0],
 					c[1], c[2], cs(why));
 			// [KIT] stage 4j: told why (a region's rule, its hook's reason)

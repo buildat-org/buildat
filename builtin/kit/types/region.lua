@@ -5,7 +5,7 @@
 -- nobody, the builders (edit rights), or the players named in `owners`
 -- ("alice, bob"); a team's from stage 7b. Where regions overlap the
 -- smallest holding the cell decides; outside every region the World's
--- default holds: no digging or placing (only a builder), entering, pvp
+-- default holds: no digging or placing (a builder in edit mode only), entering, pvp
 -- and damage for all.
 --
 -- Its signals: enable and disable (a disabled region decides nothing),

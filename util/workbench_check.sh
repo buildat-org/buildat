@@ -22,7 +22,10 @@
 #      lever three times, the lever opens and shuts the door, the zone
 #      scores the players who walk in and counts them, the counter at two
 #      makes the NPC speak), and presses Play.
-#   2. The admin plays it: looks at the button, shown as used (E does
+#   2. The admin plays it, by the play rules out of edit mode
+#      ([KIT_BUILDER_PLAY_RULES]: a dig sent outside the region refused;
+#      the region, 16, a big box round the spawn, digging and placing for
+#      all but owners, of whom it has none): looks at the button, shown as used (E does
 #      nothing, [KIT] stage 4e2), and clicks it (the gate
 #      opens, the timer ticks three times, the lever flips, the door
 #      follows, the button comes up again), digs the floor past the
@@ -402,12 +405,12 @@ EOF
 			'kit/teleporter [0, 1, -1]' 'kit/trigger_zone [6, 1, -10]' \
 			'kit/scoreboard [6, 1, -4]' 'kit/counter [5, 1, -4]' 'kit/npc [2, 1, -3]' \
 			'kit/item_giver [-2, 1, -3]' 'kit/key_door [2, 1, -5]' \
-			'kit/region [-1, 0, -7]' 'kit/player_state [0, 1, 0]'; do
+			'kit/region [-10, -1, -13]' 'kit/player_state [0, 1, 0]'; do
 		edit "{\"op\": \"place\", \"type\": \"${p%% *}\", \"pos\": ${p#* }}"
 	done
 	for s in '7 interval 1' '7 repeats 3' '9 to [8, 1, -8]' '10 size [5, 2, 5]' \
 			'12 target 2' '13 name "Ada"' '13 lines "Welcome!|Two came through."' \
-			'15 take true' '16 size [3, 1, 3]' '16 dig "others"' '17 keep_position true'; do
+			'15 take true' '16 size [13, 3, 15]' '16 dig "others"' '16 place "others"' '17 keep_position true'; do
 		set -- $s
 		v=${s#* * }
 		edit "{\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $v}"
@@ -442,6 +445,7 @@ keypress Escape
 wait_log 10000 pause: the menu shown
 click Button "Play mode" 512 350
 wait_log 10000 kit editor: edit mode off
+event workbench_build {"p": [6, 0, 6], "voxel": "air"}
 look_dir 1.5 -1.1 1.5
 wait_log_any 5000 kit: points at use 4
 frames 3
@@ -484,11 +488,11 @@ cat > "$t/bob.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob
 wait_log_any 60000 the server put the player at (0, 1.4, -4)
 wait_log_any 60000 player physics enabled
-look_dir 0 -1 0.5
+look_dir 1 -0.25 0
 wait_log_any 5000 kit: points at nothing
 frames 3
 screenshot @T@/point_none.png
-event workbench_build {"p": [0, 0, -3], "voxel": "air"}
+event workbench_build {"p": [6, 0, 6], "voxel": "air"}
 look_dir 0 -1 -0.5
 wait_log_any 5000 kit: points at dig 0,0,-5
 mouse_click left
@@ -555,13 +559,17 @@ want "$s" "kit/button 4: pressed by kitboss times 1" \
 # The button an object now: the dig past it is the floor's, a build
 grep -aq "workbench: kitboss dug .*: written" "$s" ||
 	fail "the admin's dig past the button was not written ($s)"
+# [KIT_BUILDER_PLAY_RULES] out of edit mode the admin plays by the rules:
+# a dig outside the region refused
+grep -aq "workbench: a build by kitboss refused: not in edit mode and not allowed at (6,0,6): Protected: no digging here" "$s" ||
+	fail "the admin out of edit mode was let dig outside every region ($s)"
 grep -aq "routed to its owner" "$s" && fail "a write was routed: the starter objects own no voxels ($s)"
 echo "ok: the admin plays it: the button opens the gate and starts the timer, which flips the lever, which moves the door; the NPC, the item giver, the teleporter into the zone"
 want "$s" "kitbob goes through the round's start: inventory reset" \
 	"kit/spawner 3: spawns kitbob" \
 	"Entity 3's kit/spawner teleports kitbob to (0, 1, -4)" \
-	"workbench: a build by kitbob refused: no edit rights and not allowed at (0,0,-3): Protected: no " \
-	"kit/region 16: holds dig others, place none, enter all, pvp all, damage all" \
+	"workbench: a build by kitbob refused: not in edit mode and not allowed at (6,0,6): Protected: no " \
+	"kit/region 16: holds dig others, place others, enter all, pvp all, damage all" \
 	"kit/key_door 15: locked to kitbob who has no key" \
 	"kit/item_giver 14: gives kitbob 1 key" \
 	"kit/key_door 15: opened by kitbob taking their key" \
@@ -618,9 +626,12 @@ frames 5
 look_dir 0.6 -0.25 1
 frames 10
 screenshot @T@/stopped.png
-look_dir 0 -1 -0.5
-mouse_click left
-frames 3
+# Ended: the admin digs the start by an edit in edit mode
+# ([KIT_BUILDER_PLAY_RULES]: out of it, the play rules: no build)
+keypress F6
+wait_log 10000 kit editor: state: 16 entities, 2 to undo
+event kit_edit {"op": "set_voxel", "pos": [0, 0, -5], "voxel": "air"}
+wait_log 10000 kit editor: state: 16 entities, 3 to undo
 event kit_edit {"op": "keep", "names": ["kitbob"]}
 frames 5
 delay 1500
@@ -628,14 +639,16 @@ event kit_edit {"op": "keep", "names": ["kitboss"]}
 frames 5
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
+keypress F6
+wait_log 10000 kit editor: edit mode off
 frames 10
 look_dir 0 -1 0.5
 mouse_click left
 frames 3
 keypress F6
-wait_log 10000 kit editor: state: 16 entities, 2 to undo
+wait_log 10000 kit editor: state: 16 entities, 3 to undo
 event kit_edit {"op": "save_start"}
-wait_log 10000 kit editor: state: 16 entities, 2 to undo
+wait_log 10000 kit editor: state: 16 entities, 3 to undo
 keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0.5 -1 0
@@ -643,31 +656,30 @@ mouse_click left
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 frames 5
-mouse_click left
-frames 3
-look_dir 0 -1 0.5
-mouse_click left
-frames 3
 keypress F6
-wait_log 10000 kit editor: state: 16 entities, 2 to undo
-event kit_edit {"op": "set", "id": 17, "comp": 0, "param": "keep_inventory", "value": false}
 wait_log 10000 kit editor: state: 16 entities, 3 to undo
+event kit_edit {"op": "set_voxel", "pos": [1, 0, -4], "voxel": "air"}
+wait_log 10000 kit editor: state: 16 entities, 4 to undo
+event kit_edit {"op": "set_voxel", "pos": [0, -1, -3], "voxel": "air"}
+wait_log 10000 kit editor: state: 16 entities, 5 to undo
+event kit_edit {"op": "set", "id": 17, "comp": 0, "param": "keep_inventory", "value": false}
+wait_log 10000 kit editor: state: 16 entities, 6 to undo
 keypress F6
 wait_log 10000 kit editor: the server is Running (by kitboss)
 wait_log 10000 kit editor: edit mode off
 keypress F6
-wait_log 10000 kit editor: state: 16 entities, 3 to undo
+wait_log 10000 kit editor: state: 16 entities, 6 to undo
 frames 10
 event kit_edit {"op": "place", "type": "kit/teleporter", "pos": [2, 1, -2]}
-wait_log 10000 kit editor: state: 17 entities, 4 to undo
+wait_log 10000 kit editor: state: 17 entities, 7 to undo
 event kit_edit {"op": "set", "id": 18, "comp": 0, "param": "to", "value": [-10, 1, -1]}
-wait_log 10000 kit editor: state: 17 entities, 5 to undo
+wait_log 10000 kit editor: state: 17 entities, 8 to undo
 event kit_edit {"op": "place", "type": "kit/door", "pos": [-10, 1, -4]}
-wait_log 10000 kit editor: state: 18 entities, 6 to undo
+wait_log 10000 kit editor: state: 18 entities, 9 to undo
 event kit_edit {"op": "place", "type": "kit/trigger_zone", "pos": [-11, 1, -12]}
-wait_log 10000 kit editor: state: 19 entities, 7 to undo
+wait_log 10000 kit editor: state: 19 entities, 10 to undo
 event kit_edit {"op": "set", "id": 20, "comp": 0, "param": "size", "value": [3, 2, 6]}
-wait_log 10000 kit editor: state: 19 entities, 8 to undo
+wait_log 10000 kit editor: state: 19 entities, 11 to undo
 keypress F6
 wait_log 10000 kit editor: edit mode off
 wait_log_any 10000 kit: entity 19 drawn 1x2x0.2 at 0,0.5,0, solid
@@ -688,9 +700,9 @@ keyup W
 frames 20
 sync 5000
 keypress F6
-wait_log 10000 kit editor: state: 19 entities, 8 to undo
+wait_log 10000 kit editor: state: 19 entities, 11 to undo
 event kit_edit {"op": "always_keep", "on": true}
-wait_log 10000 kit editor: state: 19 entities, 9 to undo
+wait_log 10000 kit editor: state: 19 entities, 12 to undo
 keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0 -1 -0.6
@@ -788,19 +800,21 @@ want "$s2" "Hosted: 17 entities, 15 instances" \
 	"The server is Running (by kitboss): " \
 	"Entity 3's kit/spawner teleports kitboss to (0, 1, -4)" \
 	"sections put back (0 wait for their load), each instance at its start, inventories put aside" \
-	"workbench: kitboss dug (0,0,-5): written" \
+	"A voxel edit by kitboss: dug at (0,0,-5)" \
 	"kitboss goes through the round's start: inventory kept" \
 	"Saved as the start by kitboss" \
 	"workbench: kitboss dug (0,0,-3): written" \
 	"kitboss goes through the round's start: inventory reset"
 grep -aq "the composition's first start" "$s2" && fail "the composition was read again ($s2)"
 # The dig at (0, 0, -5) before the Stop met nothing (kitbob's dig, in the
-# round restored over the restart); after it, the cell put back, a dig.
-# (1, 0, -4), dug after Save as start, was put back by the Stop: dug twice;
-# (0, 0, -3), dug before it, stayed dug: once
-[ "$(grep -ac "kitboss dug (0,0,-5)" "$s2")" = 1 ] ||
-	fail "the cell kitbob dug was not there to dig once after the Stop ($s2)"
-[ "$(grep -ac "kitboss dug (1,0,-4)" "$s2")" = 2 ] ||
+# round restored over the restart); after it, the cell put back, an edit's
+# dig ([KIT_BUILDER_PLAY_RULES]: Ended, a builder digs by edits only).
+# (1, 0, -4), dug after Save as start, was put back by the Stop: dug in
+# play, then by an edit; (0, 0, -3), dug before it, stayed dug: once
+[ "$(grep -ac "kitboss dug (0,0,-5)" "$s2")" = 0 ] ||
+	fail "the click at (0,0,-5) before the Stop dug ($s2)"
+want "$s2" "A voxel edit by kitboss: dug at (1,0,-4)" "A voxel edit by kitboss: dug at (0,-1,-3)"
+[ "$(grep -ac "kitboss dug (1,0,-4)" "$s2")" = 1 ] ||
 	fail "the cell dug after Save as start was not put back by the Stop ($s2)"
 [ "$(grep -ac "kitboss dug (0,0,-3)" "$s2")" = 1 ] ||
 	fail "the cell dug before Save as start did not stay dug ($s2)"
@@ -1223,6 +1237,13 @@ keypress F6
 wait_log 10000 kit editor: state: 1 entities
 event kit_edit {"op": "place", "type": "kit/button", "pos": [1, 1, 3]}
 wait_log_any 10000 kit: entity 3 drawn
+# [KIT_BUILDER_PLAY_RULES] a region round the tap's cells: digging and
+# placing for all (the admin plays by the rules out of edit mode)
+event kit_edit {"op": "place", "type": "kit/region", "pos": [0, -1, 0]}
+wait_log 10000 kit editor: state: 3 entities
+event kit_edit {"op": "set", "id": 4, "comp": 0, "param": "dig", "value": "all"}
+event kit_edit {"op": "set", "id": 4, "comp": 0, "param": "place", "value": "all"}
+wait_log 10000 kit editor: state: 3 entities, 3 to undo
 keypress F6
 wait_log 10000 kit editor: edit mode off
 frames 5
@@ -1247,9 +1268,9 @@ tap Button "Menu"
 wait_log 5000 pause: the menu shown
 frames 3
 click Button "Edit"
-wait_log 10000 kit editor: state: 2 entities
-event kit_edit {"op": "place", "type": "kit/door", "pos": [9, 1, 5]}
 wait_log 10000 kit editor: state: 3 entities
+event kit_edit {"op": "place", "type": "kit/door", "pos": [9, 1, 5]}
+wait_log 10000 kit editor: state: 4 entities
 keypress F1
 wait_log 5000 kit editor: the view is 2D
 frames 3
@@ -1265,12 +1286,12 @@ finger_move 1 700 300
 frames 3
 screenshot @T@/t_ghost.png
 finger_up 1
-wait_log 10000 kit editor: state: 4 entities
-wait_log_any 5000 kit: entity 5 drawn
+wait_log 10000 kit editor: state: 5 entities
+wait_log_any 5000 kit: entity 6 drawn
 tap Button "Palette"
 frames 5
 tap 700 300
-wait_log 5000 kit editor: selected 5
+wait_log 5000 kit editor: selected 6
 frames 3
 finger_down 1 700 300
 frames 2
@@ -1288,7 +1309,7 @@ frames 2
 finger_move 1 850 260
 frames 2
 finger_move 1 760 222
-wait_log 5000 kit editor: in ports of 4
+wait_log 5000 kit editor: in ports of 5
 frames 3
 finger_move 1 700 240
 frames 2
@@ -1296,15 +1317,15 @@ finger_move 1 656 256
 frames 3
 screenshot @T@/t_linking.png
 finger_up 1
-wait_log 5000 kit editor: link dropped on 4 toggle
-wait_log_any 10000 kit editor: state: 4 entities, 5 to undo
+wait_log 5000 kit editor: link dropped on 5 toggle
+wait_log_any 10000 kit editor: state: 5 entities, 8 to undo
 finger_down 1 790 305
-wait_log 3000 kit editor: the menu of 5
+wait_log 3000 kit editor: the menu of 6
 finger_up 1
 frames 3
 screenshot @T@/t_menu.png
 click Button "Duplicate"
-wait_log 5000 kit editor: state: 5 entities
+wait_log 5000 kit editor: state: 6 entities
 finger_down 1 600 400
 finger_down 2 800 400
 frames 2
@@ -1355,7 +1376,7 @@ placed=$(grep -aoP 'A voxel edit by kitboss: placed kit/cobble at \K\([-0-9,]+\)
 want "$t/srv3.log" "A voxel edit by kitboss: dug at $(echo "$placed" | tail -1) (11 to undo)" \
 	"An undo by kitboss: a voxel edit, 1 cells"
 want "$t/srv4.log" "kit/button 3: pressed by kitboss" \
-	"An edit by kitboss: linked 5.pressed -> 4.toggle"
+	"An edit by kitboss: linked 6.pressed -> 5.toggle"
 grep -aq "workbench: kitboss dug (2,0,3): written" "$t/srv4.log" ||
 	fail "the tap did not dig ($t/srv4.log)"
 grep -aq "workbench: kitboss placed kit/stone (2,0,3): written" "$t/srv4.log" ||
@@ -1418,10 +1439,15 @@ click Text "kitboss/frost"
 wait_log 5000 kit editor: in hand kitboss/frost
 frames 3
 screenshot @T@/voxel_palette.png
+# [KIT_BUILDER_PLAY_RULES] a region: placing for all round the spawn
+event kit_edit {"op": "place", "type": "kit/region", "pos": [-2, -1, -2]}
+wait_log 10000 kit editor: state: 2 entities
+event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "place", "value": "all"}
+wait_log 10000 kit editor: state: 2 entities, 2 to undo
 keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0 -1 0.6
-wait_log_any 5000 kit: points at dig
+wait_log_any 5000 kit: points at place
 mouse_click right
 sync 5000
 frames 10

@@ -692,9 +692,14 @@ namespace kit
 		// Whether a placed peer has edit rights here (the accounts' or the
 		// app's word): an app's own building tools ask it
 		virtual bool can_edit(size_t peer) = 0;
+		// [KIT_BUILDER_PLAY_RULES] Whether a placed peer is in edit mode
+		// now (edit rights, the editor on): an app's own building tools
+		// build freely for that only. Out of edit mode a builder plays by
+		// the rules as everyone (allows() below), so they can try them
+		virtual bool is_editing(size_t peer) = 0;
 		// Whether a component grants a placed peer digging (placing) the
 		// voxel at x, y, z of their scene (a type's `grants`). Edit rights
-		// are not in it: an app asks it beside can_edit
+		// are not in it: an app asks it beside is_editing
 		virtual bool can_dig(size_t peer, int x, int y, int z) = 0;
 		virtual bool can_place(size_t peer, int x, int y, int z) = 0;
 		// [KIT] stage 4j: whether a placed peer may do action ("dig",

@@ -181,12 +181,12 @@ struct Module: public interface::Module
 		const bool pillar = packet.data == "pillar";
 		const pv::Vector3DInt32 p = pillar ? PILLAR : DOOR;
 		// [KIT] stage 4j: in a region its rules (and its allow hook) say
-		// whether a player may dig there, edit rights aside; outside every
+		// whether a player may dig there, edit mode aside ([KIT_BUILDER_PLAY_RULES]); outside every
 		// region sample_kit lets anyone dig
 		bool allowed = true;
 		ss_ why;
 		kit::access(m_server, [&](kit::Interface *k){
-			if(!k->can_edit(packet.sender) && k->region_of(packet.sender,
+			if(!k->is_editing(packet.sender) && k->region_of(packet.sender,
 					p.getX(), p.getY(), p.getZ()))
 				allowed = k->allows(packet.sender, "dig", p.getX(), p.getY(),
 						p.getZ(), &why);

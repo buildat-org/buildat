@@ -7719,7 +7719,7 @@ struct Module: public interface::Module, public Interface
 	// allow handler first (true or false decides, nil leaves it), then its
 	// rules, the owners' column or everyone else's. Outside every region
 	// the World's default: digging and placing by a type's grants alone
-	// (none: no), entering, pvp and damage yes. Edit rights are not in it
+	// (none: no), entering, pvp and damage yes. Edit mode is not in it
 	bool allows(size_t peer, const ss_ &action, int x, int y, int z, ss_ *why)
 	{
 		auto pi = m_peers.find(peer);
@@ -9241,6 +9241,13 @@ struct Module: public interface::Module, public Interface
 		bool admin = false;
 		const ss_ name = account_of(peer, &admin);
 		return admin || is_builder(name);
+	}
+
+	// [KIT_BUILDER_PLAY_RULES] In edit mode now (api.h)
+	bool is_editing(size_t peer)
+	{
+		auto pi = m_peers.find(peer);
+		return pi != m_peers.end() && pi->second.editing && can_edit(peer);
 	}
 
 	// An editor who lost the rights leaves edit mode; the admins' lists
