@@ -1012,9 +1012,15 @@ struct Module: public interface::Module, public Interface
 		// A type's file (and the box's first making) runs with the whole
 		// of a call's budget; a handler with its slice
 		// [KIT] stage 4h: a body's batch of steps a quarter
+		// [KIT_INTERP_SLICE] In the interpreter (the compile under way, a
+		// cold cache) a handler's slice is a tick's: its units are a
+		// sixteenth of the compiled engine's, and a handler fine there was
+		// disabled for good here
+		const bool interp = m_box->engine_name().compare(0, 11,
+				"interpreter") == 0;
 		const int64_t slice = request[0] == 'D' || request[0] == 'L' ?
 				m_box->budget() : request[0] == 'S' ? m_box->budget() / 4 :
-				m_box->budget() / SLICE_DIV;
+				m_box->budget() / SLICE_DIV * (interp ? TICK_SLICES : 1);
 		m_box->set_call_budget(slice);
 		m_box->input = request;
 		m_box->output.clear();
