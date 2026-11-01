@@ -10,7 +10,7 @@
 **   "D<name>\0<source>"  a component type: its file run in an environment
 **                        of its own; answers its declaration (the file's
 **                        table, functions as the names in "handlers")
-**   "R<lua literal>"     a handler run: {type, handler, id, pos, params,
+**   "R<lua literal>"     a handler run: {type, handler, id, pos, yaw, params,
 **                        state, args, nargs, player, and the player's
 **                        inventory: items (Kit's counts), inv = {type,
 **                        id, params, state} (the replacing provider, or the
@@ -27,7 +27,8 @@
 **                        value}...}, voxel = name, voxels = {{x, y, z,
 **                        name}...} (c:set_voxels), after = {{name,
 **                        seconds (-1: taken back), player | null}...},
-**                        teleport = {x, y, z}, items = {item = n}
+**                        teleport = {x, y, z}, teleport_yaw = degrees
+**                        (looking that way, level), items = {item = n}
 **                        (the player's list after inventory calls),
 **                        inv_set = {{key, value}...} (the provider's
 **                        state), spawn = {{ref, pos|null, id}...}, remove
@@ -355,7 +356,7 @@ static const char PRELUDE[] =
 "	local h = def[req.handler]\n"
 "	if type(h) ~= 'function' then return '{}' end\n"
 "	local state, sets, emits, fx = req.state or {}, {}, {}, {}\n"
-"	local c = {id = req.id, pos = req.pos, params = req.params or {},\n"
+"	local c = {id = req.id, pos = req.pos, yaw = req.yaw or 0, params = req.params or {},\n"
 "		player = req.player_id, made = req.made or {}, players = req.players}\n"
 "	c.state = proxy(state, sets)\n"
 "	local state_done = in_place(state, sets)\n"
@@ -436,9 +437,13 @@ static const char PRELUDE[] =
 "		a[#a + 1] = {name or '', tonumber(seconds) or -1, pl == nil and NULL or pl}\n"
 "		fx.after = a\n"
 "	end\n"
-"	function c:teleport(pos)\n"
+"	function c:teleport(pos, opts)\n"
 "		if type(pos) ~= 'table' then error('teleport: a position, {x, y, z}', 2) end\n"
-"		fx.teleport = {tonumber(pos[1]) or 0, tonumber(pos[2]) or 0, tonumber(pos[3]) or 0}\n"
+"		if opts ~= nil and type(opts) ~= 'table' then error('teleport: options are {yaw = degrees}', 2) end\n"
+"		local t = {tonumber(pos[1]) or 0, tonumber(pos[2]) or 0, tonumber(pos[3]) or 0}\n"
+"		local yaw = opts and tonumber(opts.yaw)\n"
+"		fx.teleport = t\n"
+"		fx.teleport_yaw = yaw and yaw - yaw == 0 and yaw or nil\n"
 "	end\n"
 "	-- [KIT] stage 6a: a call into the app's native code (the host lets\n"
 "	-- only the app's own types through)\n"

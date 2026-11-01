@@ -1,10 +1,11 @@
 -- A spawner: where players appear, and ([KIT] stage 4d) where copies are
--- made. With `players`, a player who goes through the round's start in
--- its scene (Play, or as they come in) is put on it. With a `copy` (an
+-- made. With `players` (off by default), a player who goes through the
+-- round's start in its scene (Play, or as they come in) is put on it,
+-- looking the way the spawner faces, level ([KIT_SPAWNER_PLAYERS]). With a `copy` (an
 -- entity) or a `prefab`, "spawn" makes a copy on it (and so every
 -- `every` seconds, 0: never), at most `max` of its copies there at once,
 -- and "clear" takes them away; without, "spawn" puts there the player who
--- set the signal off (a way back to the start). Its copies are play
+-- set the signal off (a way back to the start), facing so too. Its copies are play
 -- state, gone at Stop; "Restart this" and deleting it take them away.
 -- Several spawners of players: a joining player ends on the last placed
 local function copying(c)
@@ -40,7 +41,7 @@ return {
 	spawn = "players",
 	look = {shape = "sphere", size = 0.3, color = "#40d060"},
 	params = {
-		players = {type = "bool", default = true},
+		players = {type = "bool", default = false},
 		copy = {type = "entity", default = 0},
 		prefab = {type = "prefab", default = ""},
 		max = {type = "number", default = 5, min = 1, max = 100},
@@ -54,7 +55,7 @@ return {
 			return
 		end
 		c:log("spawns", c:name(by))
-		c:teleport(c.pos)
+		c:teleport(c.pos, {yaw = c.yaw})
 		c:emit("spawned")
 	end,
 	on_input = function(c, input, value, by)
@@ -65,7 +66,7 @@ return {
 			return make(c, by)
 		end
 		c:log("spawns", c:name(by), "again")
-		c:teleport(c.pos)
+		c:teleport(c.pos, {yaw = c.yaw})
 		c:emit("spawned")
 	end,
 	on_timer = function(c)

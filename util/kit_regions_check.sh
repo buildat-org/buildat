@@ -21,7 +21,7 @@
 #        owner, by kitbob: dug by the owners' column.
 #      Each refusal is told to kitbob's client (kit:warning).
 #   2. apps/workbench (its players moved by Kit's controls). Placed: a
-#      kit/spawner (3, at (0, 1, -4)) and a kit/region E (4, 5x3x3 ahead of
+#      kit/spawner (3, at (0, 1, -4), players on) and a kit/region E (4, 5x3x3 ahead of
 #      it, entering for owners only, show_border on). kitbob, put on the
 #      spawner, sees E's border drawn in play, a click at the floor there
 #      refused in the client and why ("Protected: no digging here"), walks
@@ -194,6 +194,7 @@ EOF
 	place() { c=$((c + 1)); edit "$1"; }
 	setp() { edit "{\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}"; }
 	place '{"op": "place", "type": "kit/spawner", "pos": [0, 1, -4]}'
+	setp 3 players true
 	place '{"op": "place", "type": "kit/region", "pos": [-2, 0, -9]}'
 	setp 4 size '[5, 3, 3]'
 	setp 4 enter '"owners"'

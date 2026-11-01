@@ -5956,7 +5956,8 @@ struct Module: public interface::Module, public Interface
 				lua_lit(json::Value(e.pos[k]), o);
 				o += ',';
 			}
-			o += '}';
+			o += "},yaw=";
+			lua_lit(json::Value(e.yaw), o);
 		}
 		o += ",params=";
 		lua_lit(in.params, o);
@@ -6295,7 +6296,7 @@ struct Module: public interface::Module, public Interface
 		const ss_ who = player_of(r.by);
 		const json::Value &tp = fx.get("teleport");
 		if(tp.is_array())
-			teleport(e, type, who, tp);
+			teleport(e, type, who, tp, fx.get("teleport_yaw"));
 		const json::Value &apps = fx.get("app");
 		for(unsigned i = 0; i < apps.size(); i++)
 			app_call(e, type, r.by, who, apps.at(i));
@@ -7384,10 +7385,11 @@ struct Module: public interface::Module, public Interface
 		return 0;
 	}
 
-	// c:teleport(pos): the player who set the run off, in the entity's
-	// scene, moved by the app. A component moves no one else
+	// c:teleport(pos[, {yaw}]): the player who set the run off, in the
+	// entity's scene, moved by the app, with a yaw looking that way level
+	// ([KIT_SPAWNER_PLAYERS]). A component moves no one else
 	void teleport(const Entity &e, const ss_ &type, const ss_ &who,
-			const json::Value &pos)
+			const json::Value &pos, const json::Value &yaw)
 	{
 		ss_ scene;
 		scene_of(e, &scene);
@@ -7404,12 +7406,19 @@ struct Module: public interface::Module, public Interface
 		}
 		const double x = pos.at(0u).as_number(), y = pos.at(1u).as_number(),
 				z = pos.at(2u).as_number();
-		log_i(MODULE, "Entity %s's %s teleports %s to (%g, %g, %g)",
-				cs(itos(e.id)), cs(type), cs(who), x, y, z);
-		if(m_host.controls)
-			put_player(peer, x, y, z);
+		const double look = yaw.is_number() && std::isfinite(yaw.as_number()) ?
+				norm_yaw(yaw.as_number()) : NAN;
+		if(std::isnan(look))
+			log_i(MODULE, "Entity %s's %s teleports %s to (%g, %g, %g)",
+					cs(itos(e.id)), cs(type), cs(who), x, y, z);
 		else
-			m_server->emit_event("kit:move_player", new MovePlayer(peer, x, y, z));
+			log_i(MODULE, "Entity %s's %s teleports %s to (%g, %g, %g) facing %g",
+					cs(itos(e.id)), cs(type), cs(who), x, y, z, look);
+		if(m_host.controls)
+			put_player(peer, x, y, z, look);
+		else
+			m_server->emit_event("kit:move_player",
+					new MovePlayer(peer, x, y, z, look));
 	}
 
 	// ---- The players' inventory: count, add, take and list (api.h), Kit's
@@ -8557,8 +8566,10 @@ struct Module: public interface::Module, public Interface
 
 	// A body put: its state new at the cell (its feet just over the cell's
 	// bottom), the client told
+	// look: the view's yaw set too, level (NaN: the view kept)
 	void put_body(size_t peer, Body &b, double x, double y, double z,
-			double yaw = 0, const json::Value *state = nullptr)
+			double yaw = 0, const json::Value *state = nullptr,
+			double look = NAN)
 	{
 		body_movement(b, b.type, b.params);
 		if(state){
@@ -8588,11 +8599,14 @@ struct Module: public interface::Module, public Interface
 		send_controls();
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "kit:body", "{\"put\":"+itos(n)+",\"ack\":"+
-					itos(b.ack)+",\"s\":"+b.state_json+"}");
+					itos(b.ack)+(std::isnan(look) ? ss_() :
+					",\"look\":"+json::Value(look).stringify())+
+					",\"s\":"+b.state_json+"}");
 		});
 	}
 
-	void put_player(size_t peer, double x, double y, double z)
+	void put_player(size_t peer, double x, double y, double z,
+			double look = NAN) override
 	{
 		if(!m_host.controls || !m_peers.count(peer))
 			return;
@@ -8601,7 +8615,7 @@ struct Module: public interface::Module, public Interface
 			unseat(peer, b, false);
 		log_i(MODULE, "%s put at (%g, %g, %g)", cs(m_peers[peer].name), x, y,
 				z);
-		put_body(peer, b, x, y, z);
+		put_body(peer, b, x, y, z, std::isnan(look) ? 0 : look, nullptr, look);
 	}
 
 	// "kit:input": "<put>;<n> f r yaw jump go tx ty tz;..." (the inputs

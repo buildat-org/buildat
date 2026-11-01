@@ -408,7 +408,10 @@ EOF
 			'kit/region [-10, -1, -13]' 'kit/player_state [0, 1, 0]'; do
 		edit "{\"op\": \"place\", \"type\": \"${p%% *}\", \"pos\": ${p#* }}"
 	done
-	for s in '7 interval 1' '7 repeats 3' '9 to [8, 1, -8]' '10 size [5, 2, 5]' \
+	# [KIT_SPAWNER_PLAYERS] The spawner places players (off by default)
+	# and faces +x: who it puts there looks that way, level
+	edit '{"op": "move", "ids": [3], "by": [0, 0, 0], "turn": 90}'
+	for s in '3 players true' '7 interval 1' '7 repeats 3' '9 to [8, 1, -8]' '10 size [5, 2, 5]' \
 			'12 target 2' '13 name "Ada"' '13 lines "Welcome!|Two came through."' \
 			'15 take true' '16 size [13, 3, 15]' '16 dig "others"' '16 place "others"' '17 keep_position true'; do
 		set -- $s
@@ -486,7 +489,7 @@ EOF
 } > "$t/boss.cmds"
 cat > "$t/bob.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob
-wait_log_any 60000 the server put the player at (0, 1.4, -4)
+wait_log_any 60000 the server put the player at (0, 1.4, -4) facing 90
 wait_log_any 60000 player physics enabled
 look_dir 1 -0.25 0
 wait_log_any 5000 kit: points at nothing
@@ -567,7 +570,7 @@ grep -aq "routed to its owner" "$s" && fail "a write was routed: the starter obj
 echo "ok: the admin plays it: the button opens the gate and starts the timer, which flips the lever, which moves the door; the NPC, the item giver, the teleporter into the zone"
 want "$s" "kitbob goes through the round's start: inventory reset" \
 	"kit/spawner 3: spawns kitbob" \
-	"Entity 3's kit/spawner teleports kitbob to (0, 1, -4)" \
+	"Entity 3's kit/spawner teleports kitbob to (0, 1, -4) facing 90" \
 	"workbench: a build by kitbob refused: not in edit mode and not allowed at (6,0,6): Protected: no " \
 	"kit/region 16: holds dig others, place others, enter all, pvp all, damage all" \
 	"kit/key_door 15: locked to kitbob who has no key" \
@@ -602,7 +605,7 @@ done
 # and right (1, 0, -4)
 cat > "$t/again.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitboss
-wait_log_any 60000 the server put the player at (0, 1.4, -4)
+wait_log_any 60000 the server put the player at (0, 1.4, -4) facing 90
 wait_log_any 30000 kit: the screen says "Score: kitbob 1, kitboss 1 | Items: key x1"
 wait_log_any 60000 player physics enabled
 look_dir 0.6 -0.25 1
@@ -693,9 +696,12 @@ keyup W
 frames 20
 event kit_use 19
 wait_log 10000 kit: entity 19 drawn 0.2x2x1 at -0.4,0.5,0.4
+# On into the zone, short of region 16's far edge (z -13), where the
+# dig below is let through by the play rules: a 1.5 s walk went past it
+# now and then ([KIT_BUILDER_PLAY_RULES])
 look_dir 0 0 -1
 keydown W
-delay 1500
+delay 1200
 keyup W
 frames 20
 sync 5000
@@ -798,7 +804,7 @@ grep -a " kit \| main " "$s2" | grep -v "A . call" | sed 's/^.*\(kit\|main\) *: 
 	grep -a "Stop by\|Play by\|Saved\|round's start\|dug\|sections\|spawner\|Running" | cut -c1-140
 want "$s2" "Hosted: 17 entities, 15 instances" \
 	"The server is Running (by kitboss): " \
-	"Entity 3's kit/spawner teleports kitboss to (0, 1, -4)" \
+	"Entity 3's kit/spawner teleports kitboss to (0, 1, -4) facing 90" \
 	"sections put back (0 wait for their load), each instance at its start, inventories put aside" \
 	"A voxel edit by kitboss: dug at (0,0,-5)" \
 	"kitboss goes through the round's start: inventory kept" \

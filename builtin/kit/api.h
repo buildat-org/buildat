@@ -6,6 +6,7 @@
 #include "core/json.h"
 #include "interface/voxel.h"
 #include <functional>
+#include <cmath>
 
 namespace main_context
 {
@@ -643,8 +644,11 @@ namespace kit
 	{
 		size_t peer = 0;
 		double x = 0, y = 0, z = 0;
-		MovePlayer(size_t peer, double x, double y, double z):
-			peer(peer), x(x), y(y), z(z){}
+		// [KIT_SPAWNER_PLAYERS] The yaw to look at, level; NaN: as it was
+		double yaw = NAN;
+		MovePlayer(size_t peer, double x, double y, double z,
+				double yaw = NAN):
+			peer(peer), x(x), y(y), z(z), yaw(yaw){}
 	};
 
 	// kit:spawn_player: a round starts (Play) and nothing in the player's
@@ -740,8 +744,10 @@ namespace kit
 		virtual void world_spawn(double &x, double &y, double &z) = 0;
 		// [KIT] stage 4h (Host::controls): a placed peer's body put with
 		// its feet in the cell at x, y, z (a spawn, a respawn), standing
-		// still, out of any seat
-		virtual void put_player(size_t peer, double x, double y, double z) = 0;
+		// still, out of any seat; with a look (degrees, [KIT_SPAWNER_PLAYERS])
+		// their view turned that way, level (NaN: the view kept)
+		virtual void put_player(size_t peer, double x, double y, double z,
+				double look = NAN) = 0;
 		// [KIT] stage 6a (Host::app_items): the player's inventory as the
 		// app has it now, {item: n}, an item letters, digits and _ (the
 		// app maps its own names); the app calls it as it changes

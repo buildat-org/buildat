@@ -253,12 +253,18 @@ buildat.sub_packet("kit:body", function(data)
 		C.route, C.use_at = nil, nil
 		local p = pos_of(C.s)
 		local h = tonumber(body_decl().h) or 1.7
-		-- A vehicle's facing; a walker's view kept
+		-- A vehicle's facing; a walker's view kept, or turned the way the
+		-- server says, level ([KIT_SPAWNER_PLAYERS]: a spawner's facing)
+		local look, facing = tonumber(b.look), ""
 		if M.seated() and tonumber(C.s.yaw) then
 			C.yaw = tonumber(C.s.yaw)
+		elseif look and look == look then
+			C.yaw = look % 360
+			C.pitch = 0
+			facing = " facing " .. C.yaw
 		end
 		log:info("the server put the player at (" .. p[1] .. ", " ..
-				(p[2] + h / 2) .. ", " .. p[3] .. ")")
+				(p[2] + h / 2) .. ", " .. p[3] .. ")" .. facing)
 		return
 	end
 	if not C.s then
