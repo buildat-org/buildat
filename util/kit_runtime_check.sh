@@ -337,8 +337,19 @@ pre=$t/rccpp_build/wasm/$h.wasm
 [ -f "$own" ] || fail "the box is not at $own"
 mkdir -p "$(dirname "$pre")" "$t/home"
 mv "$own" "$t/own.wasm" && cp "$t/pre/$h.wasm" "$pre" || fail "could not place $pre"
+# No toolchain on PATH either: PATH's programs but clang and wasm-ld (a
+# system clang, /usr/bin's, would be found)
+mkdir -p "$t/path"
+IFS=: read -ra dirs <<< "$PATH"
+for d in "${dirs[@]}"; do
+	for f in "$d"/*; do
+		n=${f##*/}
+		case $n in clang*|wasm-ld*|ld.lld*|lld*) continue ;; esac
+		[ -x "$f" ] && [ ! -e "$t/path/$n" ] && ln -s "$f" "$t/path/$n"
+	done
+done
 start_server "$t/srv3.log" "sample_kit: at start the counter is|Kit is not hosted" 120 auto \
-	env HOME="$t/home" EMSDK="$t/nowhere" RUSTUP_HOME="$t/nowhere" \
+	env HOME="$t/home" EMSDK="$t/nowhere" RUSTUP_HOME="$t/nowhere" PATH="$t/path" \
 	BUILDAT_WASM_CC= BUILDAT_WASM_LD= BUILDAT_CHECK_WASM_INTERPRETER=1 \
 	bin/buildat_server -m ../apps/sample_kit -r "$t/rccpp_build" -l 3
 CHECK_PIDS+=($SERVER_PID)
