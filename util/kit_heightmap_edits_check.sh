@@ -148,6 +148,25 @@ idle 3000
 frames 30
 screenshot @T@/view3d.png
 keypress F1
+wait_log 5000 kit editor: the view is 2D
+mouse_pos 640 350
+EOF
+	# [KIT_PLAN_3D_SKY] 4 steps further out (10), 3D from there again
+	for _ in $(seq 4); do echo "mouse_wheel -1"; echo "frames 2"; done
+	cat <<'EOF'
+frames 10
+mouse_down right
+frames 2
+mouse_pos 640 356
+frames 2
+mouse_pos 640 362
+frames 2
+mouse_up right
+wait_log_any 5000 kit editor: the view is 3D
+idle 3000
+frames 30
+screenshot @T@/view3d_far.png
+keypress F1
 wait_log 5000 kit editor: the view is
 EOF
 	column 10 10
@@ -224,6 +243,24 @@ print("  %s: grey at %s (%d) and %s (%d), %d px apart" % (
 assert d2(a, b) > 150 ** 2 and na >= 3 and nb >= 3
 PY2
 done
+# [KIT_PLAN_3D_SKY] 3D from a plan zoomed out 10 steps shows the ground,
+# not only sky (it started past the fog: 100% sky)
+python3 -I - "$t/view3d_far.png" <<'PY2' || fail "3D from the far plan is sky ($t/view3d_far.png)"
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB")
+W, H = im.size
+px = im.load()
+n = sky = 0
+for y in range(70, 625, 3):
+	for x in range(290, W - 10, 3):
+		r, g, b = px[x, y]
+		n += 1
+		sky += b > r + 40 and b > g + 20
+print("  view3d_far.png: %.0f%% sky" % (100.0 * sky / n))
+# The 64 wide map in a view about 115 across: a quarter of it ground
+assert n - sky > n * 0.15
+PY2
 g1=$(echo "$g" | sed -n 3p)
 echo "ok: a raised sample kept at $he over a resize and a change of height, an unedited one generated again, $dec builder's decorations kept"
 

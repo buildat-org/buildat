@@ -193,6 +193,8 @@ local ANGLE_STEPS = {false, 1, 5, 15, 45, 90}
 local DRAG_PX = 4
 local SNAP_PX = 12
 local RIGHT_CLICK_PX = 5
+-- [KIT_PLAN_3D_SKY] How high over the cut a plan's 3D view starts at most
+local PLAN_3D_MAX_H = 100
 local LONG_PRESS_US = 500000
 local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk"}
 -- [KIT_INPUT_ACTIONS] each view's key's action (input.lua)
@@ -3867,8 +3869,14 @@ local function mouse_move(x, y, dx, dy)
 			-- Into 3D as if it had been 3D all along ([FP_ORBIT_2D]): the
 			-- camera straight above the plan's middle, looking down, as
 			-- high as makes the cut's plane the plan's; then this is an
-			-- orbit round what was pressed
-			local d = S.span / (2 * math.tan(math.rad(cam3d.fov) / 2))
+			-- orbit round what was pressed.
+			-- [KIT_PLAN_3D_SKY] No higher than PLAN_3D_MAX_H: from a plan
+			-- zoomed out, the camera sat past Workbench's fog (120 to 200)
+			-- and drew only sky; lower, it sees the plan's middle.
+			-- simplified: a fixed height, not the app's fog read from its
+			-- zone; an app fogging nearer than 100 still fogs it
+			local d = math.min(PLAN_3D_MAX_H,
+					S.span / (2 * math.tan(math.rad(cam3d.fov) / 2)))
 			S.pos = {x = S.cx, y = (S.cut or O.ground_y) + d, z = S.cz}
 			S.yaw, S.pitch = 0, 90
 			local pivot = camera_pivot(rc.mx, rc.my)
