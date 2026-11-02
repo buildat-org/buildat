@@ -345,19 +345,33 @@ function W:sweep(b, a, d)
 	else
 		r1[a] = floor(b[a] + EPS - 0.5)
 	end
+	-- [KIT_SLAB_WALK] A shape's boxes in the cell the face is in are in
+	-- the way too (a slab's top is mid-cell: a body standing on it has
+	-- its feet in that cell); the boxes behind the face are left out below
+	local e0, e1 = r0[a], r1[a]
+	if d > 0 then
+		e0 = e0 - 1
+	else
+		e1 = e1 + 1
+	end
+	local lo_a, hi_a = r0[a], r1[a]
+	r0[a], r1[a] = e0, e1
 	-- The shapes' boxes in the way, met with the objects' below
 	local sub = nil
 	for i = r0[1], r1[1] do
 		for j = r0[2], r1[2] do
 			for k = r0[3], r1[3] do
 				local info = self:cell(i, j, k)
+				local c = a == 1 and i or a == 2 and j or k
+				if info and not info.boxes and (c < lo_a or c > hi_a) then
+					info = nil
+				end
 				if info and info.boxes then
 					sub = sub or {}
 					for _, o in ipairs(cell_boxes(info, i, j, k)) do
 						sub[#sub + 1] = o
 					end
 				elseif info then
-					local c = a == 1 and i or a == 2 and j or k
 					-- One the box is in already is no wall: it gets out
 					if d > 0 then
 						local lim = c - 0.5 - b[a + 3]
@@ -478,8 +492,9 @@ function W:unbury(pos, b)
 			pos[2] = cand
 			return true
 		end
-		-- The next cell top over the bottom
-		cand = floor(cand + 0.5 + EPS) + 0.5
+		-- The next half cell over the bottom ([KIT_SLAB_WALK]: a slab's
+		-- top, a cell's)
+		cand = (floor(cand * 2 + EPS) + 1) / 2
 	end
 	return false
 end
@@ -825,7 +840,7 @@ function W:walk(s, b, wx, wz, jump, dt, p)
 	local body = {x = pos[1], y = pos[2], z = pos[3], r = b.r, h = b.h,
 		slope = M.sin(lim) / M.cos(lim)}
 	local mx, my, mz, hits = self:move(body, v[1] * dt, v[2] * dt, v[3] * dt,
-			ground and num(p.step_height, 0.55) or 0)
+			ground and num(p.step_height, 0.6) or 0)
 	pos[1], pos[2], pos[3] = pos[1] + mx, pos[2] + my, pos[3] + mz
 	if hits.x ~= 0 then v[1] = 0 end
 	if hits.z ~= 0 then v[3] = 0 end
@@ -839,7 +854,7 @@ function W:walk(s, b, wx, wz, jump, dt, p)
 	-- Off an edge walking: down a step, not into the air
 	if not on and ground and not jumped then
 		local d, info = self:sweep(box_of(pos[1], pos[2], pos[3], b.r, b.h), 2,
-				-num(p.step_height, 0.55))
+				-num(p.step_height, 0.6))
 		if info then
 			pos[2] = pos[2] + d
 			v[2] = 0

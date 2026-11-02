@@ -30,7 +30,7 @@ return {
 		air_control = {type = "number", default = 0.5, min = 0, max = 1},
 		coyote_time = {type = "number", default = 0.1, min = 0, max = 1},
 		jump_buffer = {type = "number", default = 0.12, min = 0, max = 1},
-		step_height = {type = "number", default = 0.55, min = 0, max = 2},
+		step_height = {type = "number", default = 0.6, min = 0, max = 2},
 		slope_limit = {type = "number", default = 50, min = 0, max = 89},
 		rate = {type = "number", default = 60, min = 10, max = 120},
 		substeps = {type = "number", default = 1, min = 1, max = 8},

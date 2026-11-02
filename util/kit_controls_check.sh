@@ -19,7 +19,12 @@
 #      drives it forward, F leaves it (put beside it); kit/ball the same.
 #      ([KIT_TRIGGER_DIG]) The car driven into a trigger zone linked to a
 #      dig zone's dig: the dig zone's box dug out.
-# The screenshots (walk, shake, vignette, top_down, first_click, car, ball)
+#   5. ([KIT_SLAB_WALK]) Stop and Play, then from the spawn along -z a
+#      slab, a cube and slabs on cubes (wide stairs): walked up holding W
+#      only, y never going down, settled at 2.0 with no correction; Space
+#      jumps from the slab.
+# The screenshots (walk, shake, vignette, top_down, first_click, car, ball,
+# slabs, slab_top)
 # are kept with KEEP_TMP=1; look at them.
 #   util/kit_controls_check.sh
 set -u
@@ -197,6 +202,50 @@ keypress F
 wait_log 10000 kit: controls: camera first_person, pointer crosshair, movement kit/walker
 frames 10
 event kit_body
+keypress F6
+wait_log 10000 kit editor: state:
+EOF
+	# [KIT_SLAB_WALK] Wide stairs along -z from the spawn, x 0...1: a slab
+	# (top 1.0), a cube (1.5), then a cube under a slab (2.0) for three
+	# cells; Stop and Play put the player at the spawn
+	set_p 3 jump_height 1.25
+	for x in 0 1; do
+		edit "{\"op\": \"set_voxel\", \"pos\": [$x, 1, -3], \"voxel\": \"kit/stone:slab\"}"
+		edit "{\"op\": \"set_voxel\", \"pos\": [$x, 1, -4], \"voxel\": \"kit/stone\"}"
+		for z in -5 -6 -7; do
+			edit "{\"op\": \"set_voxel\", \"pos\": [$x, 1, $z], \"voxel\": \"kit/stone\"}"
+			edit "{\"op\": \"set_voxel\", \"pos\": [$x, 2, $z], \"voxel\": \"kit/stone:slab\"}"
+		done
+	done
+	cat <<'EOF'
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended (by kitboss)
+event kit_edit {"op": "play"}
+wait_log 10000 kit editor: the server is Running (by kitboss)
+keypress F6
+wait_log 10000 kit editor: edit mode off
+frames 60
+look_dir 0 -0.3 -1
+frames 10
+event kit_body
+keydown W
+EOF
+	for i in 1 2 3 4 5 6 7 8; do
+		printf 'delay 150\nevent kit_body\n'
+		[ $i = 4 ] && echo "screenshot @T@/slabs.png"
+	done
+	cat <<'EOF'
+keyup W
+frames 30
+event kit_body
+frames 30
+event kit_body
+screenshot @T@/slab_top.png
+keydown Space
+delay 200
+keyup Space
+frames 120
+event kit_body
 quit
 EOF
 } > "$t/boss.cmds"
@@ -272,5 +321,29 @@ awk -v d="$d2" 'BEGIN { exit !(d > 1) }' ||
 	fail "the ball did not roll ($d2 m): $(body 8) -> $(body 9)"
 n_corr=$(grep -ac "kit: the body corrected" "$c")
 echo "ok: the car drove $d m and was left, the ball rolled $d2 m and was left ($n_corr corrections in all)"
+# [KIT_SLAB_WALK] bodies 11 (the spawn), 12-19 (walking up), 20 and 21
+# (settled on the top slab), 22 (after a jump from it)
+read -r x0 y0 z0 a0 corr0 p0 j0 r0 <<< "$(fields "$(body 11)")"
+grep -aoP 'kit: body at \K[-0-9.]+,[-0-9.]+,[-0-9.]+' "$c" | sed -n '11,22p' |
+	tr '\n' ' '; echo
+prev=$y0
+for n in $(seq 12 19); do
+	read -r x y z rest <<< "$(fields "$(body $n)")"
+	awk -v a="$prev" -v b="$y" 'BEGIN { exit !(b >= a - 0.02) }' ||
+		fail "down on the way up the slabs: y $prev -> $y (body $n)"
+	prev=$y
+done
+read -r xa ya za aa corra pa ja ra <<< "$(fields "$(body 20)")"
+read -r xb yb zb ab corrb pb jb rb <<< "$(fields "$(body 21)")"
+awk -v a="$ya" -v b="$yb" -v z="$zb" 'BEGIN { exit !(a > 1.98 && a < 2.02 &&
+	(b - a) ^ 2 < 0.0004 && z < -4.5) }' ||
+	fail "not settled on the top slab (2.0): $(body 20) / $(body 21)"
+[ "$corrb" = "$corr0" ] ||
+	fail "the prediction was corrected on the slabs: $corr0 -> $corrb"
+read -r xc yc zc ac corrc pc jc rc <<< "$(fields "$(body 22)")"
+[ "$jc" -gt "$jb" ] || fail "no jump from the slab: $(body 21) -> $(body 22)"
+awk -v a="$yc" 'BEGIN { exit !(a > 1.98 && a < 2.02) }' ||
+	fail "not back on the slab after the jump: $(body 22)"
+echo "ok: walked up slab, cube, slabs on cubes holding forward (y never down, settled at 2.0, no correction); a jump from the slab"
 echo "PASS: Kit's controls on Workbench: kit/walker's walk and jump (prediction agreeing), jump off, a camera shake by a signal, effects, top-down click_to_move to the floor and to an object, first-person click_to_move, a car and a ball seated, driven and left"
 # vim: set noet ts=4 sw=4:

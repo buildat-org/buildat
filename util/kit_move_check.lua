@@ -102,7 +102,7 @@ p0.jump_height = 0
 local s4 = {pos = {-20, 0.5, -10}}
 run(walker, s4, 60, {f = 0, r = 0, yaw = 0, jump = 1, go = 0}, w, p0)
 assert(near(s4.pos[2], 0.5) and not s4.jumps, s4.pos[2])
--- The slab (0.5 up, under step_height 0.55): walked onto; the block not
+-- The slab (0.5 up, under step_height 0.6): walked onto; the block not
 local s5 = {pos = {0, 0.5, 0}}
 run(walker, s5, 60, {f = -1, r = 0, yaw = 0, jump = 0, go = 0}, w, wp)
 assert(s5.pos[3] < -4 and near(s5.pos[2], 1.0), s5.pos[2] .. "," .. s5.pos[3])
@@ -113,6 +113,51 @@ assert(near(s5b.pos[3], 3.05) and near(s5b.pos[2], 0.5), s5b.pos[3])
 run(walker, s5b, 60, {f = 1, r = 0, yaw = 0, jump = 1, go = 0}, w, wp)
 assert(s5b.pos[3] > 3.6 and s5b.pos[2] >= 1.5 - 1e-3, s5b.pos[2] .. "," ..
 		s5b.pos[3])
+-- [KIT_SLAB_WALK] Shaped cells as wide stairs, along +z from the floor:
+-- a slab (its top 1.0), a cube (1.5), a slab (2.0), cubes (2.5); a row of
+-- stairs (Kit's stair, facing 0: its back half +z) beside it, at x 10.
+-- Walked up holding forward only, settled on each top, a jump off a slab
+local SLAB = MV.voxel_info("kit/stone:slab", true, nil, nil,
+	{-0.5, -0.5, -0.5, 0.5, 0, 0.5})
+local STAIR = MV.voxel_info("kit/stone:stair", true, nil, nil,
+	{-0.5, -0.5, -0.5, 0.5, 0, 0.5, -0.5, 0, 0, 0.5, 0.5, 0.5})
+local rise = world(function(i, j, k)
+	local half = i >= 8 and STAIR or SLAB
+	if i < -2 or (i > 2 and i < 8) or i > 12 or j < 1 then
+		return nil
+	end
+	if k == 2 and j == 1 then return half end
+	if k == 3 and j == 1 then return STONE end
+	if k == 4 and j == 1 then return STONE end
+	if k == 4 and j == 2 then return half end
+	if k >= 5 and j <= 2 then return STONE end
+	return false
+end)
+for _, x in ipairs({0, 10}) do
+	local sr, ys = {pos = {x, 0.5, 0}}, {}
+	for n = 1, 120 do
+		run(walker, sr, 1, {f = 1, r = 0, yaw = 0, jump = 0, go = 0}, rise, wp)
+		ys[n] = sr.pos[2]
+	end
+	assert(sr.pos[3] > 6 and near(sr.pos[2], 2.5) and sr.ground,
+			"up the " .. (x == 0 and "slabs" or "stairs") .. ": " ..
+			sr.pos[2] .. "," .. sr.pos[3])
+	-- Never down while climbing (no bounce)
+	for n = 2, 120 do
+		assert(ys[n] >= ys[n - 1] - 0.02, "down at step " .. n .. ": " ..
+				ys[n - 1] .. " -> " .. ys[n])
+	end
+end
+local sj = {pos = {0, 1.0, 2}}
+run(walker, sj, 30, {f = 0, r = 0, yaw = 0, jump = 0, go = 0}, rise, wp)
+assert(near(sj.pos[2], 1.0) and sj.ground, "on the slab: " .. sj.pos[2])
+local sjtop = 0
+for _ = 1, 60 do
+	run(walker, sj, 1, {f = 0, r = 0, yaw = 0, jump = 1, go = 0}, rise, wp)
+	sjtop = math.max(sjtop, sj.pos[2])
+end
+assert(sj.jumps >= 1 and near(sjtop, 1.0 + wp.jump_height, 0.08),
+		"a jump off the slab: " .. sjtop)
 -- A jump buffered: pressed in the air just before landing
 local s6 = {pos = {-20, 2.5, 10}}
 local landed_jump = false
