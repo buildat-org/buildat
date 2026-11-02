@@ -2612,7 +2612,15 @@ magic.SubscribeToEvent("Update", function(_, d)
 		bow.t = nil
 	end
 	if bow.t then
+		-- [SK_BOW_DRAW_SLOW_HOST] Past 0.4 of the draw said once, for a
+		-- check's part draw: let go at the line, not after a wall-clock
+		-- delay, which a client at 2 frames a second stretched to full
+		local was = bow.t
 		bow.t = bow.t + dt
+		if was < 0.4 * BOW_DRAW and bow.t >= 0.4 * BOW_DRAW then
+			log:info(string.format("skeldat: the bow past 0.4 of its draw (%.2f)",
+					bow.t / BOW_DRAW))
+		end
 	end
 	bow.sound_step(dt)
 	local draw = bow.t and math.min(1, bow.t / BOW_DRAW) or -1

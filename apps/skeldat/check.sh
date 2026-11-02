@@ -1247,7 +1247,7 @@ grep -aq "skeleton ($4) finds a way to .*, 0 bone blocks" "$log25" &&
 	fail "a block built where a walking way is ($log25)"
 # 23. The bow ([SKELDAT_BOW]): the launcher's client, invulnerable, a
 # bow and 6 arrows, a skeleton 6 ahead at midnight in its lane. A full
-# draw (1.2 s) shoots at the bow's speed, a half (0.5 s) at half, a tap
+# draw (1.2 s) shoots at the bow's speed, a part (let go past 0.4) at part, a tap
 # nothing; two more full ones and the skeleton is dead. Held looking down the bow digs
 # nothing: the arrow shot into the ground at its feet is picked up. Five
 # presses far off: two or more shots, then with none left (the
@@ -1262,8 +1262,19 @@ grep -aq "skeleton ($4) finds a way to .*, 0 bone blocks" "$log25" &&
 log26="$t/srv26.log"
 { echo "$placed"; toggle; echo "look 0 -5"; echo "delay 1000"
 	echo "screenshot $t/bow_rest.png"
-	shot 1200 "$t/bow_full.png"; shot 450 "$t/bow_half.png"; shot 10
-	shot 1200; shot 1200
+	# [SK_BOW_DRAW_SLOW_HOST] The part draw let go at the client's line
+	# past 0.4 (a command acts before the frame's update: 0.4 to 0.4 and a
+	# frame), no screenshot inside it; the half drawn hand's screenshot in
+	# the next full draw. A delay of 450 at 2 frames a second held 1.0
+	shot 1200 "$t/bow_full.png"
+	printf '%s\n' "mouse_down left" "wait_log 10000 skeldat: the bow past 0.4" \
+		"mouse_up left" "delay 1500"
+	# The tap: pressed and let go in one frame (a delay of 10 was a frame,
+	# 0.42 at 2 frames a second)
+	printf '%s\n' "mouse_down left" "mouse_up left" "delay 1500"
+	printf '%s\n' "mouse_down left" "wait_log 10000 skeldat: the bow past 0.4" \
+		"screenshot $t/bow_half.png" "delay 1200" "mouse_up left" "delay 1500"
+	shot 1200
 	echo "look 0 -60"; shot 2500
 	echo "look 90 0"; shot 1200; shot 1200; shot 1200; shot 1200; shot 1200
 	fast "$t/srv26"; echo "delay 66000"; echo quit; } > "$t/bow1.cmds"
@@ -1300,10 +1311,10 @@ draws=$(grep -ac "client1 draws the bow" "$s1")
 undrawn=$(grep -ac "client1 lets the bow go undrawn" "$s1")
 # [CHECK_TIMING_LIMITS] Each draw the server timed is the hold the client
 # timed (its "released at", 0.04 apart on the check box), and goes undrawn
-# exactly when that is under BOW_MIN (0.1): the drive's 1200, 450 and 10 ms
-# are wall time, which a slow client stretches by its frames (a 4 fps one
-# held the tap 0.27 and the half, a screenshot inside it, 0.81). Here the
-# half is a part draw and the tap a tap
+# exactly when that is under BOW_MIN (0.1). The part draw is let go at
+# the client's own line past 0.4 and the tap within one frame
+# ([SK_BOW_DRAW_SLOW_HOST]): wall-clock delays a slow client stretched by
+# its frames (at 2 frames a second the half held 1.0)
 python3 -I - "$t/bow1.log" "$s1" <<'PY' || fail "the bow's draws: $speeds, $undrawn undrawn ($s1, $t/bow1.log)"
 import re, sys
 held = [float(x) for x in re.findall(r"skeldat: the bow released at ([\d.]+)", open(sys.argv[1], errors="replace").read())]
