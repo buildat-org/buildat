@@ -773,8 +773,11 @@ BUILDAT_SKELDAT_WORLD=take BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 B
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv13" -C "$t/srv.cache" -l 3 || fail "the server ($log13)"
 CHECK_PIDS+=($SERVER_PID)
+# The button held until the client's dig is done ([SKELDAT_DIG_BEFORE_KIT]:
+# a fixed 600 ms for the hand's 0.5 s ran out on a busy client, whose
+# frame times lag the wall clock's, and no dig was sent)
 printf '%s\n' "$placed" "delay 1500" "look 0 -60" "delay 500" "mouse_down left" \
-	"delay 600" "mouse_up left" "delay 800" "look 0 -60" "delay 500" \
+	"wait_log 5000 dig: done at" "mouse_up left" "delay 800" "look 0 -60" "delay 500" \
 	"mouse_down right" "delay 150" "mouse_up right" "delay 800" \
 	"screenshot $t/take.png" "delay 14000" quit > "$t/take.cmds"
 client take "$t/take.cmds"
