@@ -251,7 +251,7 @@ EOF
 	info 6 1 6
 	info 3 1 3
 	# [KIT_SCENE_HEIGHTMAP_SHOWN] A heightmap in the main scene, not
-	# drawn in the cave; each World labelled as its scene's
+	# drawn in the cave; each World in its scene's Scene tab of the list
 	ed '{"op": "scene", "name": "world"}'
 	in_scene world "world, cave, sky, mine"
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "size", "value": "finite"}'
@@ -260,7 +260,9 @@ EOF
 wait_log_any 30000 heightmap: terrain built
 sync 5000
 frames 10
-click Text "Scene world: 3 *"
+click Button "Scene (*"
+wait_log 5000 kit editor: list Scene
+click Text "3 *"
 event kit_edit {"op": "scene", "name": "cave"}
 EOF
 	in_scene cave "world, cave, sky, mine"
@@ -268,7 +270,7 @@ EOF
 wait_log_any 10000 heightmap: removed
 sync 5000
 wait_log_absent 2000 heightmap: terrain built
-click Text "Scene cave: 5 *"
+click Text "5 *"
 EOF
 	echo quit
 } > "$t/boss2.cmds"
@@ -283,6 +285,6 @@ expect 1 "(3,1,3): kit/stone, param 0, tint 0, sky light 0"
 expect 2 "(6,1,6): kit/planks, param 0, tint 0, sky light 0"
 expect 3 "(3,1,3): air, param 0, tint 0, sky light 0"
 echo "ok: after a restart a root World moves onto the main scene; the scenes are made again, each its voxels"
-echo "ok: a heightmap in the main scene is dropped in a voxel scene; each World labelled as its scene's"
+echo "ok: a heightmap in the main scene is dropped in a voxel scene; each World in its scene's Scene tab of the list"
 echo "PASS: scenes: a new scene with its World copied or blank, switched between, each its voxels and World row; refusals; a two-way teleporter between scenes, arriving silently; a root World migrated and the scenes back after a restart; a scene made while Running put back by Stop; no heightmap of another scene drawn"
 # vim: set noet ts=4 sw=4:

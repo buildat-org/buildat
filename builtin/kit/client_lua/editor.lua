@@ -91,9 +91,8 @@
 --   - the admin's: who is here, each "Builder: yes/no" to grant or take
 --     edit rights; ([KIT] stage 4c) the builders with the tools on, each
 --     in a colour: another's selection outlined in theirs with their name
---     over it, their cursor a cross; the entities listed to select (the
---     game-wide ones, on the app root; "Hide positioned entities" off,
---     all), a list that scrolls, kept under the palette; "Save as start" (the bar, Running); the builds the
+--     over it, their cursor a cross; the entities listed to select (tabs:
+--     Game-wide, Scene, Positioned), a list that scrolls, kept under the palette; "Save as start" (the bar, Running); the builds the
 --     last End discarded until the next Run: "Keep them", or "Choose..."
 --     a player's; "Always keep builds"
 --   - **A touchscreen** (BUILDAT_TOUCH=1, [FP_TOUCH]'s): a tap is a click,
@@ -2106,30 +2105,51 @@ people = function()
 		text(b, E.status, WARN)
 	end
 	-- The entities, to select ([KIT_SELECT_BURIED]: one under the ground
-	-- too): the game-wide ones (on the app root, no position), and the
-	-- positioned with "Hide positioned entities" off; in a view that
-	-- scrolls, fit_people() bounding it under the palette
-	local hide = S.hide_positioned ~= false
+	-- too), in three tabs ([KIT_LIST_TABS], user): Game-wide (the root's,
+	-- no position), Scene (the scene's with no position: its World, an
+	-- environment) and Positioned (the scene's, or the root's, placed),
+	-- each in the order they were added; the tab kept for the session. In
+	-- a view that scrolls, fit_people() bounding it under the palette.
+	local tabs = {["Game-wide"] = {}, Scene = {}, Positioned = {}}
+	for _, e in ipairs(entities()) do
+		if e.kind ~= "scene" then
+			local t = e.pos and "Positioned" or scene_name(e) and "Scene" or
+					"Game-wide"
+			table.insert(tabs[t], e)
+		end
+	end
+	local tab = S.list_tab or "Game-wide"
+	local tr = row(b)
+	for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
+		button(tr, name .. " (" .. #tabs[name] .. ")", function()
+			if S.list_tab ~= name then
+				S.list_tab = name
+				PV.y = 0
+			end
+			people()
+		end, name == tab)
+	end
 	local view = b:CreateChild("ScrollView")
 	local list = view:CreateChild("UIElement")
 	list:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
-	local lw, n = 0, 0
-	for _, e in ipairs(entities()) do
-		if e.kind ~= "scene" and not (hide and e.pos) then
-			-- [KIT_SCENE_HEIGHTMAP_SHOWN] one with no position in a scene
-			-- is the scene's, not game-wide
-			local gr = row(list)
-			local sn = scene_name(e)
-			local l = label(gr, e.pos and e.id .. " " .. tostring(e.name) ..
-					" at " .. table.concat(e.pos, ",") or (sn and "Scene " ..
-					sn .. ": " or "Game-wide: ") .. e.id .. " " ..
-					tostring(e.name))
-			local sb = button(gr, e.id == S.primary and "Selected" or "Select",
-					function()
-				M.select(e.id)
-			end)
-			lw, n = math.max(lw, l.minWidth + 4 + sb.minWidth), n + 1
-		end
+	local lw, n, ids = 0, 0, {}
+	for _, e in ipairs(tabs[tab]) do
+		local gr = row(list)
+		local l = label(gr, e.id .. " " .. tostring(e.name) .. (e.pos and
+				" at " .. table.concat(e.pos, ",") or ""))
+		local sb = button(gr, e.id == S.primary and "Selected" or "Select",
+				function()
+			M.select(e.id)
+		end)
+		lw, n = math.max(lw, l.minWidth + 4 + sb.minWidth), n + 1
+		ids[#ids + 1] = e.id
+	end
+	-- For a check: the tab and what it lists, as it changes
+	local said = "kit editor: list " .. tab .. " (" .. n .. "): " ..
+			table.concat(ids, ", ")
+	if said ~= PV.said then
+		PV.said = said
+		log:info(said)
 	end
 	-- Its layout's size, as the rows made it
 	local lh = list.height
@@ -2144,13 +2164,6 @@ people = function()
 	view:SetFixedHeight(lh)
 	view.visible = n > 0
 	PV.view = view
-	button(b, "Hide positioned entities: " .. (hide and "yes" or "no"),
-			function()
-		S.hide_positioned = not hide
-		log:info("kit editor: hide positioned entities " ..
-				(S.hide_positioned and "yes" or "no"))
-		people()
-	end)
 	-- The builds the last End discarded, to keep until the next Run: all,
 	-- or by player ("Choose...")
 	local names = {}

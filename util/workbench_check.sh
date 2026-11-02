@@ -244,7 +244,7 @@ if [ "${1:-}" = web_touch ]; then
 	# its toggle tapped) dragged from by finger, a tap selects, a drag
 	# moves it 3 cells, a finger held is its menu (Duplicate), two fingers
 	# pinch; ([KIT_SELECT_BURIED]) five more copies (Ctrl+D) listed with
-	# "Hide positioned entities" off, the list bounded under the bar (it
+	# the list's Positioned tab, the list bounded under the bar (it
 	# scrolls), the copies undone; ([KIT_BUILDER_PLAY_RULES]) a region
 	# tapped in from the palette at (-1, 1, 1), a cell down, digging and
 	# placing for all in the inspector, each list's row tapped: the UI fit
@@ -309,12 +309,13 @@ if [ "${1:-}" = web_touch ]; then
 	["chord", "Ctrl+d"], ["waitlog", "kit editor: state: 6 entities", 10],
 	["chord", "Ctrl+d"], ["waitlog", "kit editor: state: 7 entities", 10],
 	["chord", "Ctrl+d"], ["waitlog", "kit editor: state: 8 entities", 10],
-	["tap", "Button", "Hide positioned entities: yes"],
-	["waitlog", "kit editor: hide positioned entities no", 10],
+	["tap", "Button", "Positioned (*"],
+	["waitlog", "kit editor: list Positioned", 10],
 	["waitlog", "kit editor: the list ", 10], ["frames", 5],
 	["shot", "${OUT}/list.png"],
-	["tap", "Button", "Hide positioned entities: no"],
-	["waitlog", "kit editor: hide positioned entities yes", 10],
+	["tap", "Button", "Scene (*"], ["waitlog", "kit editor: list Scene", 10],
+	["tap", "Button", "Game-wide (*"],
+	["waitlog", "kit editor: list Game-wide", 10],
 	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 7 entities", 10],
 	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 6 entities", 10],
 	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 5 entities", 10],
@@ -1029,8 +1030,8 @@ EOF
 # ([KIT_PLAYTEST_TWEAKS]) one placed (right), dug (left) and the dig undone
 # (Ctrl+Z), each one undo; Escape out of the crosshair, then the tool away.
 # ([KIT_SELECT_BURIED]) A dig zone under the ground: the hover and a click
-# in the plan go through the ground to it; with "Hide positioned entities"
-# off the list has it, its Select selects it; a link ("Link pressed") to it
+# in the plan go through the ground to it; the list's Positioned tab has
+# it, its Select selects it; a link ("Link pressed") to it
 # by a click through the ground.
 # By finger (BUILDAT_TOUCH=1, finger_*): in play a tap digs, a finger
 # held places, a tap uses the button; in the plan the palette (folded on
@@ -1226,6 +1227,8 @@ mouse_pos 300 450
 mouse_click left
 wait_log_any 5000 kit editor: state: 6 entities, 8 to undo
 frames 3
+click Button "Scene (*"
+wait_log 5000 kit editor: list Scene
 click Button "Select*"
 wait_log 5000 (kit/world
 frames 3
@@ -1278,8 +1281,8 @@ wait_log 5000 kit editor: selected 8 (kit/region 8)
 mouse_pos 700 520
 mouse_click left
 wait_log 5000 kit editor: selected none
-click Button "Hide positioned entities: yes"
-wait_log 5000 kit editor: hide positioned entities no
+click Button "Positioned (*"
+wait_log 5000 kit editor: list Positioned
 frames 3
 screenshot @T@/list_all.png
 mouse_pos 150 600
