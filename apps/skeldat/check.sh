@@ -360,9 +360,12 @@ quit
 EOF
 # Both spawn at one place: bones at 8 beside it make client2 look like a
 # skeleton to client1 until it walks off (7 and the box: bones.h's self test).
-# The skeleton on the clean side, 20 off: it comes at the players, and in
-# the zone the bones would shade it from the sun
-BUILDAT_SKELDAT_SURVEY=1 BUILDAT_SKELDAT_TEST="skeleton 0 -20 marked; boar 6 0; bones 1 0 8" \
+# The skeleton on the clean side, 20 off, in the sun: it burns to death
+# there. hp 1, so the first burn does it ([SK_CHECK_SKELETON_RANGE]):
+# with its 20 hp it found shelter 2 voxels off before the world was relit
+# (the sun's light not in yet) and shot client1, put back at the spawn by
+# the movement check, to death before its dig
+BUILDAT_SKELDAT_SURVEY=1 BUILDAT_SKELDAT_TEST="skeleton 0 -20 marked hp 1; boar 6 0; bones 1 0 8" \
 	server "$t/srv1.log"
 client a1 "$t/a1.cmds"; a=$CLIENT
 wait_for_log "$t/srv1.log" "client1 joins" 330 || fail "client1 did not join ($t/a1.log)"
