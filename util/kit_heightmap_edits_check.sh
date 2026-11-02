@@ -8,7 +8,7 @@
 #   1. A fresh save: the World a noise grassland heightmap (64x64); a raise
 #      stroke at (10,10), a decorate stroke at (20,20); the map made 128
 #      wide (a resize) and its height 10 (its generated shape): the raised
-#      sample's height the same each time, an unedited one's (40,40)
+#      sample's height the same each time, an unedited one's (-20,-20)
 #      changed, the decorate stroke's decorations kept.
 #   2. A restart: the same heights and the builder's decorations; "Regenerate
 #      all" (discarding the edits) and its undo (the previous heightmap
@@ -17,6 +17,11 @@
 #      edit, kept at End and over a change of height after.
 #   3. A copy of the save whose World row says other parameters (as a code
 #      change would make them): the save's heightmap kept, with a warning.
+#   4. [KIT_HM_ORIGIN] A copy made a save from before maps had an origin:
+#      its map loaded at the world's origin, where it was.
+# [KIT_HM_ORIGIN] Part 1's map lies on the voxels' area, centred, and its
+# resize grows both sides; cobble on two of the area's corners, seen from
+# above (KEEP_TMP=1 keeps plan.png).
 #   util/kit_heightmap_edits_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -100,8 +105,23 @@ EOF
 	set_w height 3
 	set_w surface '"heightmap"'
 	echo "wait_log_any 20000 heightmap: terrain built"
+	# [KIT_HM_ORIGIN] Voxels on two corners of the voxels' area, seen
+	# from above with the map under them
+	for c in "-32 -32" "-31 -32" "-32 -31" "31 31" "30 31" "31 30"; do
+		set -- $c
+		n=$((n + 1))
+		printf 'event kit_edit {"op": "set_voxel", "pos": [%s, 9, %s], "voxel": "kit/cobble"}\nwait_log 10000 entities, %d to undo\n' "$1" "$2" "$n"
+	done
+	cat <<'EOF'
+keypress F1
+wait_log 5000 kit editor: the view is 2D
+frames 30
+screenshot @T@/plan.png
+keypress F1
+wait_log 5000 kit editor: the view is
+EOF
 	column 10 10
-	column 40 40
+	column -20 -20
 	for i in 1 2 3; do terrain raise 10 10 2 5 1; done
 	n=$((n + 1))
 	terrain decorate 20 20 3 5 2
@@ -109,13 +129,15 @@ EOF
 	column 10 10
 	set_w width 128
 	column 10 10
-	column 40 40
-	column 100 10
+	column -20 -20
+	column -60 10
+	column 60 10
 	set_w height 10
 	column 10 10
-	column 40 40
+	column -20 -20
 	echo quit
 } > "$t/boss1.cmds"
+sed -i "s|@T@|$t|g" "$t/boss1.cmds"
 server 1 "$t/user"
 wait_for_log "$t/srv1.log" "setup code [A-Z0-9]+" 30
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv1.log" | head -1)
@@ -124,15 +146,19 @@ stop
 s=$t/srv1.log
 grep -a "Terrain by\|World by\|World: .*edited\|decorations on the heightmap" "$s" | sed 's/^.*kit *: /  /' | cut -c1-200
 e=$(heights "$s" 10 10)
-g=$(heights "$s" 40 40)
+g=$(heights "$s" -20 -20)
 he=$(echo "$e" | sed -n 2p)
 [ -n "$he" ] && [ "$he" != "$(echo "$e" | sed -n 1p)" ] || fail "the raise did not raise (10,10): $e ($s)"
 [ "$(echo "$e" | sed -n 3p)" = "$he" ] && [ "$(echo "$e" | sed -n 4p)" = "$he" ] ||
 	fail "the raised sample not kept over the resize and the height: $e ($s)"
 [ "$(echo "$g" | sed -n 1p)" = "$(echo "$g" | sed -n 2p)" ] &&
 	[ "$(echo "$g" | sed -n 2p)" != "$(echo "$g" | sed -n 3p)" ] ||
-	fail "the unedited sample (40,40): the resize changed it or the height did not: $g ($s)"
-heights "$s" 100 10 | grep -q . || fail "no sample at (100,10) after the resize ($s)"
+	fail "the unedited sample (-20,-20): the resize changed it or the height did not: $g ($s)"
+# [KIT_HM_ORIGIN] On the voxels' area, centred: a resize grows both sides
+want "$s" "World: the heightmap from (-32,-32) to (31,31)" \
+	"World: the heightmap from (-64,-32) to (63,31)"
+heights "$s" -60 10 | grep -q . && heights "$s" 60 10 | grep -q . ||
+	fail "no samples at (-60,10) and (60,10) after the resize ($s)"
 dec=$(grep -aoP 'decorate at \(20,20\) .*, \K\d+(?= decorations \()' "$s" | head -1)
 [ "${dec:-0}" -gt 0 ] || fail "the decorate stroke placed none ($s)"
 [ "$(grep -ac "decorations on the heightmap (generated), $dec of them a builder's" "$s")" = 2 ] ||
@@ -146,7 +172,7 @@ echo "ok: a raised sample kept at $he over a resize and a change of height, an u
 {
 	joined
 	column 10 10
-	column 40 40
+	column -20 -20
 	cat <<'EOF'
 event kit_edit {"op": "hm_regenerate"}
 wait_log 10000 kit editor: state:
@@ -161,24 +187,24 @@ EOF
 	column 10 10
 	# [KIT_HM_EDIT_RUNNING_MARKS] A stroke while Running: a live edit,
 	# kept at End with its marks, so kept over a regeneration after
-	column 50 30
+	column 50 20
 	cat <<'EOF'
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running
 EOF
-	for i in 1 2 3; do terrain raise 50 30 2 5 6; done
-	column 50 30
+	for i in 1 2 3; do terrain raise 50 20 2 5 6; done
+	column 50 20
 	cat <<'EOF'
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended
 EOF
-	column 50 30
+	column 50 20
 	cat <<'EOF'
 event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "height", "value": 12}
 wait_log 10000 kit editor: state:
 EOF
-	column 50 30
-	column 40 40
+	column 50 20
+	column -20 -20
 	echo quit
 } > "$t/boss2.cmds"
 server 2 "$t/user"
@@ -188,7 +214,7 @@ s2=$t/srv2.log
 grep -a "Terrain by\|World by\|World: .*edited\|decorations on the heightmap\|An undo" "$s2" | sed 's/^.*kit *: /  /' | cut -c1-200
 e2=$(heights "$s2" 10 10)
 [ "$(echo "$e2" | sed -n 1p)" = "$he" ] || fail "the raised sample after a restart: $e2, not $he ($s2)"
-[ "$(heights "$s2" 40 40 | sed -n 1p)" = "$g1" ] || fail "(40,40) after a restart: not $g1 ($s2)"
+[ "$(heights "$s2" -20 -20 | sed -n 1p)" = "$g1" ] || fail "(-20,-20) after a restart: not $g1 ($s2)"
 want "$s2" "decorations on the heightmap (the save's), $dec of them a builder's" \
 	"the heightmap generated anew, " "edited samples discarded" \
 	"the previous heightmap restored"
@@ -196,12 +222,12 @@ want "$s2" "decorations on the heightmap (the save's), $dec of them a builder's"
 [ "$(echo "$e2" | sed -n 3p)" = "$he" ] || fail "the undo did not bring the edit back: $e2 ($s2)"
 r=$(echo "$e2" | sed -n 4p)
 [ -n "$r" ] && [ "$r" != "$he" ] || fail "the reset brush left the edit: $e2 ($s2)"
-r5=$(heights "$s2" 50 30)
+r5=$(heights "$s2" 50 20)
 [ "$(echo "$r5" | sed -n 2p)" != "$(echo "$r5" | sed -n 1p)" ] &&
 	[ "$(echo "$r5" | sed -n 3p)" = "$(echo "$r5" | sed -n 2p)" ] &&
 	[ "$(echo "$r5" | sed -n 4p)" = "$(echo "$r5" | sed -n 2p)" ] ||
 	fail "a stroke while Running not kept at End and over a regeneration: $r5 ($s2)"
-[ "$(heights "$s2" 40 40 | tail -1)" != "$g1" ] ||
+[ "$(heights "$s2" -20 -20 | tail -1)" != "$g1" ] ||
 	fail "the height's change after End generated nothing again ($s2)"
 hash2=$(grep -aoP 'column at .* map hash \K\d+' "$s2" | tail -1)
 echo "ok: kept over a restart; regenerate all discarded the edits and its undo brought them back; the reset brush made (10,10) generated again ($r)"
@@ -232,4 +258,40 @@ stop
 s3=$t/srv3.log
 want "$s3" "the save's heightmap kept, though the World's parameters differ" \
 	"decorations on the heightmap (the save's)" "map hash $hash2"
+# 4. [KIT_HM_ORIGIN] A save from before maps had an origin: no anchor in
+# the World's row, the map's meta without the origin: kept where it was,
+# at the world's origin, and the row says so after
+cp -a "$t/user" "$t/user4"
+db=$(find "$t/user4" -name save.sqlite | while read -r f; do
+	[ "$(sqlite3 "$f" "SELECT count(*) FROM store WHERE store = 'kit' AND key = 'world'")" = 1 ] && echo "$f"; done | head -1)
+[ -n "$db" ] || fail "no save with the World's row in $t/user4"
+python3 -I -c '
+import json, sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+v, = c.execute("SELECT value FROM store WHERE store = ? AND key = ?", ("kit", "world")).fetchone()
+r = json.loads(v)
+r.pop("hm_anchor", None)
+c.execute("UPDATE store SET value = ? WHERE store = ? AND key = ?", (json.dumps(r), "kit", "world"))
+m, = c.execute("SELECT value FROM store WHERE store = ? AND key = ?", ("heightmap", "world/meta")).fetchone()
+# the origin: a second pack of two floats (its endianness byte and 8)
+c.execute("UPDATE store SET value = ? WHERE store = ? AND key = ?", (m[:-9], "heightmap", "world/meta"))
+c.commit()' "$db"
+hl=$(grep -aoP 'heightmap: loaded "world": .*hash \K[0-9a-f]+' "$t/srv3.log" | tail -1)
+{
+	joined
+	column 10 10
+	column -10 10
+	echo quit
+} > "$t/boss4.cmds"
+server 4 "$t/user4"
+client boss4
+stop
+s4=$t/srv4.log
+want "$s4" "heightmap: loaded \"world\": " "hash $hl" \
+	"World: the heightmap from (0,0) to (127,63)"
+heights "$s4" -10 10 | grep -q . && fail "(-10,10) on a map at the world's origin ($s4)"
+heights "$s4" 10 10 | grep -q . || fail "no (10,10) on the old save's map ($s4)"
+sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'world'" | grep -q '"hm_anchor" *: *"corner"' ||
+	fail "the old save's World row not anchored at the corner ($db)"
+echo "ok: a save from before origins loaded with its map where it was"
 echo "PASS: a heightmap's terrain-tool edits and a builder's decorations kept over a resize, a change of shape and a restart; regenerate all discarding them, undone; the reset brush; the save's map kept where the World's parameters changed under it"

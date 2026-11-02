@@ -21,8 +21,8 @@
 --              every section stored) or infinite (generated where players
 --              go; only edited sections saved, the generator pinned)
 --   border     a finite map's edge: void, wall, water
---   surface    voxels, or heightmap (builtin/heightmap; finite only, its
---              map from the origin, a side a multiple of 64): either
+--   surface    voxels, or heightmap (builtin/heightmap; finite only, on
+--              the same area as the voxels, a side a multiple of 64): either
 --              replaces the other at once, the voxel sections nobody
 --              edited forgotten (the edited ones kept in the save)
 --   caves      ([KIT] stage 4f) tunnels and caverns under the ground (not

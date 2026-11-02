@@ -556,6 +556,10 @@ struct World
 	// A regeneration of everything asked (regenerate_all()): apply_world
 	// generates though nothing changed
 	bool hm_force = false;
+	// [KIT_HM_ORIGIN] The heightmap's sample (0, 0) at the world's origin
+	// (a World saved before maps had an origin: kept where it was), not at
+	// the map's corner (x0(), z0()), as the voxels' finite area
+	bool hm_corner = false;
 	bool decor_dirty = false;
 	std::set<ss_> decor_models;
 	// [KIT_VOXEL_FORMAT] its sky light (apply_sky()) and the loaded
@@ -3945,6 +3949,12 @@ struct Module: public interface::Module, public Interface
 			m_w->world_applied = r.get("params").deepcopy();
 			world::Params was;
 			was.from(m_w->world_applied);
+			// [KIT_HM_ORIGIN] a heightmap World saved before maps had an
+			// origin keeps its map at the world's origin (the row says so
+			// from its next write on)
+			const json::Value &an = r.get("hm_anchor");
+			m_w->hm_corner = an.is_string() ? an.as_string() == "corner" :
+					was.heightmap();
 			const int64_t v = json::jint(r, "version", 0);
 			if(!was.finite() && !was.heightmap() &&
 					v != world::generator_version(was.generator)){
@@ -4197,6 +4207,7 @@ struct Module: public interface::Module, public Interface
 		json::Value row = json::object();
 		row.set("params", m_w->world_applied);
 		row.set("version", (int64_t)world::generator_version(p.generator));
+		row.set("hm_anchor", ss_(m_w->hm_corner ? "corner" : "centre"));
 		m_store->set(world_row("world"), row.stringify());
 		world_load_points();
 		log_i(MODULE, "World%s: %s %s, seed %u, biome %s, %s, %s; ground %i "
@@ -4682,6 +4693,16 @@ struct Module: public interface::Module, public Interface
 		add_log(id, "tried: "+input+" by "+p.name);
 	}
 
+	// [KIT_HM_ORIGIN] A heightmap's sample (0, 0) as a world cell
+	static int hm_ox(heightmap::Instance *map)
+	{
+		return (int)std::floor(map->get_size().origin_x + 0.5f);
+	}
+	static int hm_oz(heightmap::Instance *map)
+	{
+		return (int)std::floor(map->get_size().origin_z + 0.5f);
+	}
+
 	// ---- [KIT_HEIGHTMAP_REGEN_LOSS] A heightmap's edited samples
 	// (World::hm_edits): the terrain tools mark what they write, a
 	// regeneration generates the rest and puts them back over it, the
@@ -4808,28 +4829,33 @@ struct Module: public interface::Module, public Interface
 	void hm_overlay(heightmap::Instance *map, world::Heights &h)
 	{
 		hm_edits_load();
-		const int sx = map->samples_x(), sz = map->samples_z();
+		// [KIT_HM_ORIGIN] the edits by world cell, the samples from the
+		// map's origin
+		const int sx = map->samples_x(), sz = map->samples_z(),
+				ox = hm_ox(map), oz = hm_oz(map);
+		auto on = [&](int x, int z){
+			return x >= ox && z >= oz && x < ox + sx && z < oz + sz;
+		};
 		std::set<std::pair<int, int>> near;
 		size_t n = 0;
 		for(auto &e : m_w->hm_edits){
 			const int x = e.first.first, z = e.first.second;
-			if(x < 0 || z < 0 || x >= sx || z >= sz)
+			if(!on(x, z))
 				continue;
-			map->set_height(x, z, e.second.first);
-			map->set_weights(x, z, e.second.second);
+			map->set_height(x - ox, z - oz, e.second.first);
+			map->set_weights(x - ox, z - oz, e.second.second);
 			n++;
 			for(int dz = -HM_BLEND; dz <= HM_BLEND; dz++)
 			for(int dx = -HM_BLEND; dx <= HM_BLEND; dx++){
 				const std::pair<int, int> k(x + dx, z + dz);
-				if(k.first >= 0 && k.second >= 0 && k.first < sx &&
-						k.second < sz && !m_w->hm_edits.count(k))
+				if(on(k.first, k.second) && !m_w->hm_edits.count(k))
 					near.insert(k);
 			}
 		}
 		std::map<std::pair<int, int>, float> deltas;
 		for(auto &q : near)
-			map->set_height(q.first, q.second, hm_blended(h, q.first, q.second,
-					deltas));
+			map->set_height(q.first - ox, q.second - oz, hm_blended(h, q.first,
+					q.second, deltas));
 		if(!m_w->hm_edits.empty())
 			log_i(MODULE, "World: %zu edited heightmap samples kept over the "
 					"generated map, %zu blended round them, %zu off the map",
@@ -5048,6 +5074,13 @@ struct Module: public interface::Module, public Interface
 		size.cell_size = 1;
 		size.base_y = -100;
 		size.materials = 5;
+		// [KIT_HM_ORIGIN] on the voxels' finite area (its corner x0(),
+		// z0()), so a resize grows every side; a World from before at the
+		// world's origin
+		if(!m_w->hm_corner){
+			size.origin_x = (float)p.x0();
+			size.origin_z = (float)p.z0();
+		}
 		heightmap::access(m_server, [&](heightmap::Interface *ih){
 			heightmap::Instance *map = ih->get_instance(m_w->world_scene);
 			bool loaded = false;
@@ -5083,6 +5116,9 @@ struct Module: public interface::Module, public Interface
 				hm_overlay(map, h);
 			}
 			hash = map->content_hash();
+			log_i(MODULE, "World: the heightmap from (%i,%i) to (%i,%i)",
+					hm_ox(map), hm_oz(map), hm_ox(map) + map->samples_x() - 1,
+					hm_oz(map) + map->samples_z() - 1);
 		});
 		decor_start(p, ids, generated);
 		return why.empty();
@@ -5237,10 +5273,13 @@ struct Module: public interface::Module, public Interface
 			const sv_<world::StructIds> &structs, uint32_t seed, int x, int z,
 			double mult, float &yaw)
 	{
-		const float h = map->get_height(x, z);
+		// [KIT_HM_ORIGIN] (x, z) a world cell, its sample from the origin
+		const int ox = hm_ox(map), oz = hm_oz(map);
+		const float h = map->get_height(x - ox, z - oz);
 		float steep = 0;
 		for(int k = 0; k < 4; k++){
-			const int nx = x + (k == 0) - (k == 1), nz = z + (k == 2) - (k == 3);
+			const int nx = x - ox + (k == 0) - (k == 1),
+					nz = z - oz + (k == 2) - (k == 3);
 			if(nx >= 0 && nz >= 0 && nx < map->samples_x() &&
 					nz < map->samples_z())
 				steep = std::max(steep, std::fabs(map->get_height(nx, nz) - h));
@@ -5312,9 +5351,11 @@ struct Module: public interface::Module, public Interface
 		heightmap::access(m_server, m_w->world_scene,
 				[&](heightmap::Instance *map){
 			sv_<New> on;
+			const float ox = (float)hm_ox(map), oz = (float)hm_oz(map);
 			for(New &n : made){
-				if(n.x < -0.5f || n.z < -0.5f || n.x > map->samples_x() - 0.5f ||
-						n.z > map->samples_z() - 0.5f){
+				if(n.x < ox - 0.5f || n.z < oz - 0.5f ||
+						n.x > ox + map->samples_x() - 0.5f ||
+						n.z > oz + map->samples_z() - 0.5f){
 					if(n.hand){
 						Decor d;
 						d.structure = n.s;
@@ -5341,13 +5382,15 @@ struct Module: public interface::Module, public Interface
 							(int)std::floor(n.z + 0.5f) + dz));
 			heightmap::access(m_server, m_w->world_scene,
 					[&](heightmap::Instance *map){
-				for(int z = 0; z < map->samples_z(); z++)
-				for(int x = 0; x < map->samples_x(); x++){
+				// [KIT_HM_ORIGIN] by world cell
+				const int ox = hm_ox(map), oz = hm_oz(map);
+				for(int z = oz; z < oz + map->samples_z(); z++)
+				for(int x = ox; x < ox + map->samples_x(); x++){
 					if(taken.count(std::make_pair(x, z)))
 						continue;
 					// Not on the spawn (world_spawn: the middle)
-					if(std::abs(x - map->samples_x() / 2) <= 3 &&
-							std::abs(z - map->samples_z() / 2) <= 3)
+					if(std::abs(x - ox - map->samples_x() / 2) <= 3 &&
+							std::abs(z - oz - map->samples_z() / 2) <= 3)
 						continue;
 					float yaw = 0;
 					const ss_ s = decor_pick(map, ids, ids.structs, p.seed, x, z,
@@ -5811,9 +5854,20 @@ struct Module: public interface::Module, public Interface
 				}, structs, bi);
 			});
 		heightmap::access(m_server, m_w->world_scene, [&](heightmap::Instance *map){
-			const int sx = map->samples_x(), sz = map->samples_z();
+			// [KIT_HM_ORIGIN] world cells here, the map's samples from its
+			// origin
+			const int sx = map->samples_x(), sz = map->samples_z(),
+					ox = hm_ox(map), oz = hm_oz(map);
 			auto in = [&](int x, int z){
-				return x >= 0 && z >= 0 && x < sx && z < sz;
+				return x >= ox && z >= oz && x < ox + sx && z < oz + sz;
+			};
+			auto HG = [&](int x, int z){ return map->get_height(x - ox, z - oz); };
+			auto HS = [&](int x, int z, float h){
+				map->set_height(x - ox, z - oz, h);
+			};
+			auto WG = [&](int x, int z){ return map->get_weights(x - ox, z - oz); };
+			auto WS = [&](int x, int z, const heightmap::Weights &w){
+				map->set_weights(x - ox, z - oz, w);
 			};
 			// [KIT_HEIGHTMAP_REGEN_LOSS] each sample written marked edited
 			// after (reset's unmarked). [KIT_HM_EDIT_RUNNING_MARKS] A stroke
@@ -5823,7 +5877,7 @@ struct Module: public interface::Module, public Interface
 			auto keep = [&](int x, int z){
 				if(c)
 					c->samples.emplace(std::make_pair(x, z), std::make_pair(
-							map->get_height(x, z), map->get_weights(x, z)));
+							HG(x, z), WG(x, z)));
 				if(tool != "reset")
 					touched.insert(std::make_pair(x, z));
 			};
@@ -5836,7 +5890,7 @@ struct Module: public interface::Module, public Interface
 			// The biome a sample is by its strongest layer (a biome whose
 			// top is it), else the World's
 			auto biome_of = [&](int x, int z) -> const world::Biome& {
-				const heightmap::Weights w = map->get_weights(x, z);
+				const heightmap::Weights w = WG(x, z);
 				int best = 0;
 				for(int k = 1; k < heightmap::MAX_MATERIALS; k++)
 					if(w[k] > w[best])
@@ -5849,21 +5903,21 @@ struct Module: public interface::Module, public Interface
 			// A sample's layer as its ground is: stone where steep, the
 			// riverbed under the sea, else its biome's top
 			auto relayer = [&](int x, int z, const world::Biome &b){
-				const float h = map->get_height(x, z);
+				const float h = HG(x, z);
 				float steep = 0;
 				for(int k = 0; k < 4; k++){
 					const int nx = x + (k == 0) - (k == 1),
 							nz = z + (k == 2) - (k == 3);
 					if(in(nx, nz))
-						steep = std::max(steep, std::fabs(map->get_height(nx, nz) -
+						steep = std::max(steep, std::fabs(HG(nx, nz) -
 								h));
 				}
 				const int layer = steep > HM_ROCK_SLOPE ? layer_of(b, "stone") :
 						h < m_w->wp.sea_level + 0.5f ? layer_of(b, "riverbed") :
 						layer_of(b, "top");
 				const heightmap::Weights w = one_hot(layer);
-				if(w != map->get_weights(x, z))
-					map->set_weights(x, z, w);
+				if(w != WG(x, z))
+					WS(x, z, w);
 			};
 			std::map<std::pair<int, int>, float> next;
 			auto circle = [&](std::function<void(int, int, double)> f){
@@ -5878,7 +5932,7 @@ struct Module: public interface::Module, public Interface
 			if(tool == "raise" || tool == "lower"){
 				circle([&](int x, int z, double d){
 					const double f = 1 - (d / (r + 1)) * (d / (r + 1));
-					next[std::make_pair(x, z)] = map->get_height(x, z) +
+					next[std::make_pair(x, z)] = HG(x, z) +
 							(tool == "raise" ? 1 : -1) * step * (float)f;
 				});
 			} else if(tool == "smooth"){
@@ -5889,24 +5943,24 @@ struct Module: public interface::Module, public Interface
 					for(int dz = -1; dz <= 1; dz++)
 					for(int dx = -1; dx <= 1; dx++)
 						if(in(x + dx, z + dz))
-							sum += map->get_height(x + dx, z + dz), n++;
-					const float h = map->get_height(x, z);
+							sum += HG(x + dx, z + dz), n++;
+					const float h = HG(x, z);
 					next[std::make_pair(x, z)] = h + (sum / n - h) * k;
 				});
 			} else if(tool == "flatten"){
 				circle([&](int x, int z, double){
-					const float h = map->get_height(x, z);
+					const float h = HG(x, z);
 					next[std::make_pair(x, z)] = h + std::max(-step,
 							std::min(step, (float)level - h));
 				});
 			} else if(tool == "fill"){
-				const int x0 = std::max(0, std::min(cx, (int)std::floor(fx1 + 0.5))),
-						x1 = std::min(sx - 1, std::max(cx, (int)std::floor(fx1 + 0.5))),
-						z0 = std::max(0, std::min(cz, (int)std::floor(fz1 + 0.5))),
-						z1 = std::min(sz - 1, std::max(cz, (int)std::floor(fz1 + 0.5)));
+				const int x0 = std::max(ox, std::min(cx, (int)std::floor(fx1 + 0.5))),
+						x1 = std::min(ox + sx - 1, std::max(cx, (int)std::floor(fx1 + 0.5))),
+						z0 = std::max(oz, std::min(cz, (int)std::floor(fz1 + 0.5))),
+						z1 = std::min(oz + sz - 1, std::max(cz, (int)std::floor(fz1 + 0.5)));
 				for(int z = z0; z <= z1; z++)
 					for(int x = x0; x <= x1; x++)
-						if(map->get_height(x, z) < level)
+						if(HG(x, z) < level)
 							next[std::make_pair(x, z)] = (float)level;
 				bx0 = x0 - 1, bz0 = z0 - 1, bx1 = x1 + 1, bz1 = z1 + 1;
 				what = "fill "+biome+" ("+itos(x0)+","+itos(z0)+") to ("+
@@ -5945,7 +5999,7 @@ struct Module: public interface::Module, public Interface
 				std::map<std::pair<int, int>, float> deltas;
 				for(auto &q : round){
 					keep(q.first, q.second);
-					map->set_height(q.first, q.second, hm_blended(gh, q.first,
+					HS(q.first, q.second, hm_blended(gh, q.first,
 							q.second, deltas));
 				}
 				for(auto &q : cells)
@@ -5973,7 +6027,7 @@ struct Module: public interface::Module, public Interface
 			// The heights, then the layers round them
 			for(auto &q : next){
 				keep(q.first.first, q.first.second);
-				map->set_height(q.first.first, q.first.second, q.second);
+				HS(q.first.first, q.first.second, q.second);
 				samples++;
 			}
 			std::set<std::pair<int, int>> around;
@@ -5989,19 +6043,19 @@ struct Module: public interface::Module, public Interface
 						biome_of(q.first, q.second));
 			}
 			for(auto &q : touched)
-				hm_mark(q.first, q.second, true, map->get_height(q.first,
-						q.second), map->get_weights(q.first, q.second), c);
+				hm_mark(q.first, q.second, true, HG(q.first,
+						q.second), WG(q.first, q.second), c);
 			if(what.empty())
 				what = tool+" at ("+itos(cx)+","+itos(cz)+") size "+itos(r)+
 						" strength "+itos((int)s);
 			if(in(cx, cz)){
-				const heightmap::Weights w = map->get_weights(cx, cz);
+				const heightmap::Weights w = WG(cx, cz);
 				int best = 0;
 				for(int k = 1; k < heightmap::MAX_MATERIALS; k++)
 					if(w[k] > w[best])
 						best = k;
 				what += " on the heightmap: "+itos(samples)+" samples; ("+
-						itos(cx)+","+itos(cz)+") at "+ftos(map->get_height(cx,
+						itos(cx)+","+itos(cz)+") at "+ftos(HG(cx,
 						cz))+" layer "+itos(best);
 			}
 			what += ", map hash "+itos(map->content_hash());
@@ -6045,10 +6099,16 @@ struct Module: public interface::Module, public Interface
 		if(!c.samples.empty())
 			heightmap::access(m_server, m_w->world_scene,
 					[&](heightmap::Instance *map){
+				// [KIT_HM_ORIGIN] kept by world cell; one the map no longer
+				// holds (a resize since) is left
+				const int ox = hm_ox(map), oz = hm_oz(map);
 				for(auto &q : c.samples){
-					map->set_height(q.first.first, q.first.second, q.second.first);
-					map->set_weights(q.first.first, q.first.second,
-							q.second.second);
+					const int sx = q.first.first - ox, sz = q.first.second - oz;
+					if(sx < 0 || sz < 0 || sx >= map->samples_x() ||
+							sz >= map->samples_z())
+						continue;
+					map->set_height(sx, sz, q.second.first);
+					map->set_weights(sx, sz, q.second.second);
 					x0 = std::min(x0, q.first.first);
 					x1 = std::max(x1, q.first.first);
 					z0 = std::min(z0, q.first.second);
@@ -6446,8 +6506,8 @@ struct Module: public interface::Module, public Interface
 				heightmap::Instance *map = ih->get_instance(m_w->world_scene);
 				if(!map)
 					return;
-				x = map->samples_x() / 2 + 0.5;
-				z = map->samples_z() / 2 + 0.5;
+				x = hm_ox(map) + map->samples_x() / 2 + 0.5;
+				z = hm_oz(map) + map->samples_z() / 2 + 0.5;
 				y = map->height_at((float)x, (float)z) + 0.5;
 			});
 			return;
@@ -10652,6 +10712,9 @@ struct Module: public interface::Module, public Interface
 				json::Value hm = json::array();
 				hm.append(map->samples_x());
 				hm.append(map->samples_z());
+				// [KIT_HM_ORIGIN] its sample (0, 0)'s world cell
+				hm.append(hm_ox(map));
+				hm.append(hm_oz(map));
 				c.set("hm", hm);
 			});
 		return c;
@@ -10953,14 +11016,17 @@ struct Module: public interface::Module, public Interface
 				heightmap::Instance *map = ih->get_instance(m_w->world_scene);
 				if(!map)
 					return;
-				const int hx0 = std::max(0, x0), hz0 = std::max(0, z0);
-				const int hx1 = std::min(map->samples_x() - 1, x0 + nx),
-						hz1 = std::min(map->samples_z() - 1, z0 + nz);
+				// [KIT_HM_ORIGIN] world cells, the map from its origin
+				const int ox = hm_ox(map), oz = hm_oz(map);
+				const int hx0 = std::max(ox, x0), hz0 = std::max(oz, z0);
+				const int hx1 = std::min(ox + map->samples_x() - 1, x0 + nx),
+						hz1 = std::min(oz + map->samples_z() - 1, z0 + nz);
 				if(hx1 < hx0 || hz1 < hz0)
 					return;
 				// [KIT_HM_FREE] the map's size: its edge is a wall
 				o += ",hm={sx="+itos(map->samples_x())+",sz="+
-						itos(map->samples_z())+",x0="+itos(hx0)+",z0="+
+						itos(map->samples_z())+",ox="+itos(ox)+",oz="+itos(oz)+
+						",x0="+itos(hx0)+",z0="+
 						itos(hz0)+",nx="+
 						itos(hx1 - hx0 + 1)+",nz="+itos(hz1 - hz0 + 1)+",h={";
 				char buf[32];

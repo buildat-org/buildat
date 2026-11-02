@@ -927,8 +927,9 @@ function M.snapshot(t)
 			return M.height(sample, x, z)
 		end
 	end
-	local edge = type(hm) == "table" and hm.sx and
-			{0, 0, hm.sx - 1, hm.sz - 1} or nil
+	-- [KIT_HM_ORIGIN] the map from its origin's world cell
+	local edge = type(hm) == "table" and hm.sx and {hm.ox or 0, hm.oz or 0,
+			(hm.ox or 0) + hm.sx - 1, (hm.oz or 0) + hm.sz - 1} or nil
 	return M.world{cell = cell, boxes = boxes, ground = ground, edge = edge}
 end
 

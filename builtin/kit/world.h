@@ -82,8 +82,10 @@
 // it, its bed 4 under sea_level). **Infinite** maps are generated where
 // players go; a section nobody wrote is not saved
 // (voxelworld::set_save_unaltered), the generator and its version pinned
-// in Kit's row "world". **A heightmap surface**: builtin/heightmap's map, finite, from the origin
-// (a side a multiple of 64), the same heights, its layers the biome's
+// in Kit's row "world". **A heightmap surface**: builtin/heightmap's map,
+// finite, on the voxels' finite area ([KIT_HM_ORIGIN] its origin x0(),
+// z0(); a World saved before origins at the world's origin, its row's
+// "hm_anchor" "corner") (a side a multiple of 64), the same heights, its layers the biome's
 // top, stone and riverbed's; no water on it yet; its decorations voxel
 // objects (kit.cpp).
 //

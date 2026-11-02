@@ -160,7 +160,9 @@ local function world()
 	if type(hm) == "table" and heightmap.terrain then
 		local samples = {}
 		local function sample(ix, iz)
-			if ix < 0 or iz < 0 or ix >= hm[1] or iz >= hm[2] then
+			-- [KIT_HM_ORIGIN] hm: {sx, sz, the origin's world x, z}
+			local ox, oz = hm[3] or 0, hm[4] or 0
+			if ix < ox or iz < oz or ix >= ox + hm[1] or iz >= oz + hm[2] then
 				return nil
 			end
 			local k = ix * 65536 + iz
@@ -183,7 +185,8 @@ local function world()
 		end
 		return voxel_info(id, v)
 	end, boxes = boxes, ground = ground,
-		edge = ground and {0, 0, hm[1] - 1, hm[2] - 1} or nil}
+		edge = ground and {hm[3] or 0, hm[4] or 0, (hm[3] or 0) + hm[1] - 1,
+			(hm[4] or 0) + hm[2] - 1} or nil}
 end
 
 -- ---- The body
