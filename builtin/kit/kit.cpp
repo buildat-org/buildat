@@ -5816,7 +5816,9 @@ struct Module: public interface::Module, public Interface
 				return x >= 0 && z >= 0 && x < sx && z < sz;
 			};
 			// [KIT_HEIGHTMAP_REGEN_LOSS] each sample written marked edited
-			// after (reset's unmarked)
+			// after (reset's unmarked). [KIT_HM_EDIT_RUNNING_MARKS] A stroke
+			// while Running is a live edit: End puts no heightmap back (Kit
+			// keeps no copy of one), so the stroke and its marks both stay
 			std::set<std::pair<int, int>> touched;
 			auto keep = [&](int x, int z){
 				if(c)

@@ -12,7 +12,9 @@
 #      changed, the decorate stroke's decorations kept.
 #   2. A restart: the same heights and the builder's decorations; "Regenerate
 #      all" (discarding the edits) and its undo (the previous heightmap
-#      back); the reset brush on the raised samples (the generator's again).
+#      back); the reset brush on the raised samples (the generator's again);
+#      a raise stroke while Running ([KIT_HM_EDIT_RUNNING_MARKS]): a live
+#      edit, kept at End and over a change of height after.
 #   3. A copy of the save whose World row says other parameters (as a code
 #      change would make them): the save's heightmap kept, with a warning.
 #   util/kit_heightmap_edits_check.sh
@@ -157,6 +159,26 @@ EOF
 	column 10 10
 	terrain reset 10 10 3 2 5
 	column 10 10
+	# [KIT_HM_EDIT_RUNNING_MARKS] A stroke while Running: a live edit,
+	# kept at End with its marks, so kept over a regeneration after
+	column 50 30
+	cat <<'EOF'
+event kit_edit {"op": "play"}
+wait_log 10000 kit editor: the server is Running
+EOF
+	for i in 1 2 3; do terrain raise 50 30 2 5 6; done
+	column 50 30
+	cat <<'EOF'
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended
+EOF
+	column 50 30
+	cat <<'EOF'
+event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "height", "value": 12}
+wait_log 10000 kit editor: state:
+EOF
+	column 50 30
+	column 40 40
 	echo quit
 } > "$t/boss2.cmds"
 server 2 "$t/user"
@@ -174,7 +196,14 @@ want "$s2" "decorations on the heightmap (the save's), $dec of them a builder's"
 [ "$(echo "$e2" | sed -n 3p)" = "$he" ] || fail "the undo did not bring the edit back: $e2 ($s2)"
 r=$(echo "$e2" | sed -n 4p)
 [ -n "$r" ] && [ "$r" != "$he" ] || fail "the reset brush left the edit: $e2 ($s2)"
-hash2=$(grep -aoP 'column at \(10,10\) .* map hash \K\d+' "$s2" | tail -1)
+r5=$(heights "$s2" 50 30)
+[ "$(echo "$r5" | sed -n 2p)" != "$(echo "$r5" | sed -n 1p)" ] &&
+	[ "$(echo "$r5" | sed -n 3p)" = "$(echo "$r5" | sed -n 2p)" ] &&
+	[ "$(echo "$r5" | sed -n 4p)" = "$(echo "$r5" | sed -n 2p)" ] ||
+	fail "a stroke while Running not kept at End and over a regeneration: $r5 ($s2)"
+[ "$(heights "$s2" 40 40 | tail -1)" != "$g1" ] ||
+	fail "the height's change after End generated nothing again ($s2)"
+hash2=$(grep -aoP 'column at .* map hash \K\d+' "$s2" | tail -1)
 echo "ok: kept over a restart; regenerate all discarded the edits and its undo brought them back; the reset brush made (10,10) generated again ($r)"
 
 # 3. The World row's parameters changed as code would: the map kept
