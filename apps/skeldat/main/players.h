@@ -367,6 +367,7 @@ struct Players: public luanti_session::Game, public MobsHost
 		pl.cy = pl.y;
 		pl.cz = pl.z;
 		pl.check_t = world.time;
+		pl.check_us = interface::os::time_us();
 		pl.check_air = false;
 		pl.moved = true;
 		pl.places = (pl.places + 1) & PLACES_MASK;
@@ -1053,13 +1054,19 @@ struct Players: public luanti_session::Game, public MobsHost
 	// (2026-10-15); spread them over the second when there are many
 	void check_moves()
 	{
+		const int64_t now_us = interface::os::time_us();
 		for(auto &pair : all){
 			const size_t peer = pair.first;
 			Player &pl = pair.second;
 			host.update_role(peer, pl, false);
 			if(!pl.placed)
 				continue;
-			const float dt = (float)(world.time - pl.check_t);
+			// [SK_HONEST_PULL_FLAKE] The longer of the game's time and the
+			// wall clock's since the last check: a tick of 4.8 s under
+			// load moved the game's clock on a second, and an honest walk
+			// of 10.8 voxels in the 2.7 s it took was pulled back
+			const float dt = (float)std::max(world.time - pl.check_t,
+					(now_us - pl.check_us) / 1e6);
 			skeldat::move_check::Board bd;
 			bd.on = pl.board_seen;
 			bd.v0 = pl.check_v;
@@ -1072,6 +1079,7 @@ struct Players: public luanti_session::Game, public MobsHost
 				pl.cy = pl.y;
 				pl.cz = pl.z;
 				pl.check_t = world.time;
+				pl.check_us = now_us;
 				pl.check_air = false;
 				pl.check_v = 0;
 				pl.board_air = 0;
@@ -1088,6 +1096,7 @@ struct Players: public luanti_session::Game, public MobsHost
 				pl.cy = pl.y;
 				pl.cz = pl.z;
 				pl.check_t = world.time;
+				pl.check_us = now_us;
 				pl.check_air = v.air;
 				pl.check_v = v.speed;
 				pl.board_air = bd.on && v.air ? bd.air + 1 : 0;

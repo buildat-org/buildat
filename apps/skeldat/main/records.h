@@ -58,6 +58,9 @@ struct Player
 	// and whether in the air
 	float cx = 0, cy = 0, cz = 0;
 	double check_t = 0;
+	// [SK_HONEST_PULL_FLAKE] when, on the wall clock: a client walks in real
+	// time, and a server's slow tick runs the game's clock behind it
+	int64_t check_us = 0;
 	bool check_air = false;
 	// [SKELDAT_SKATEBOARD] On the board now (the client's where), at any
 	// time since the last check, the speed that check measured and its
