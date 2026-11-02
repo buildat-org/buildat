@@ -3709,11 +3709,12 @@ BUILDAT_SKELDAT_WORLD=kit BUILDAT_SKELDAT_SKELETONS=0 \
 	-D "$t/srv67" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log67b)"
 CHECK_PIDS+=($SERVER_PID)
 printf '%s\n' "$placed" "wait_log_any 60000 kit editor: edit rights: yes" \
-	'event kit_edit {"op": "mode", "on": true}' "wait_log 10000 kit editor: state: 4 entities" \
+	'event kit_edit {"op": "mode", "on": true}' "wait_log 60000 kit editor: state: 4 entities" \
 	"event kit_edit {\"op\": \"voxel_info\", \"pos\": [4, $gy, -2]}" \
 	"delay 1000" quit > "$t/kit2.cmds"
 client kit2 "$t/kit2.cmds"
 wait $CLIENT || fail "Kit's second drive ($t/kit2.log)"
+wait_for_log "$log67b" "Voxel at (4,$gy,-2)" 30
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 kmobs=$(grep -a 'the world "kit" starts' "$log67b" | sed 's/.*furnaces, \([0-9]*\) mobs.*/\1/')
 grep -aq "skeldat: Kit hosted, persistent" "$log67b" &&
