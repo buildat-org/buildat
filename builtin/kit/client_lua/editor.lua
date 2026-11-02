@@ -1524,12 +1524,24 @@ local function inspector(w, e, is_made)
 			end
 		end
 		if #fields > 0 then
+			-- [KIT_APPLY_AMBER] Apply's label amber ([MENU_BRAND]'s main)
+			-- while an edit waits for it (user, 2026-11-02)
+			local apply_text
+			local function mark()
+				if apply_text then
+					apply_text:SetColor(next(E.pending[key] or {}) and
+							magic.Color(ui_utils.rgb("main")) or
+							magic.Color(ui_utils.rgb("text")))
+				end
+			end
 			ui_utils.settings_form(w, fields, values, function(k, v)
 				E.pending[key] = E.pending[key] or {}
 				E.pending[key][k] = v
 				log:info("kit editor: " .. key .. " " .. k .. " = " .. tostring(v))
+				mark()
 			end, WIDGETS)
-			button(w, "Apply", function()
+			local _
+			_, apply_text = button(w, "Apply", function()
 				for k, v in pairs(E.pending[key] or {}) do
 					if decl[k] and decl[k].type == "position" then
 						local x, y, z = tostring(v):match(
@@ -1546,6 +1558,7 @@ local function inspector(w, e, is_made)
 				E.pending[key] = nil
 				refresh()
 			end)
+			mark()
 		end
 		-- [KIT_VOXEL_STATES] Each pattern: Capture (the box as it is now),
 		-- Show (written into the world, an edit undone as one) and Fill (all

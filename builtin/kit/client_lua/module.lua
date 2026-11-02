@@ -126,7 +126,7 @@ local function button(parent, s, fn, down)
 	magic.SubscribeToEvent(b, "Released", function()
 		fn()
 	end)
-	return b
+	return b, t
 end
 
 local function edit(parent, value, on_text)
