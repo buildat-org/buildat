@@ -606,6 +606,7 @@ keypress F1
 wait_log 5000 kit editor: the view is 2D
 keypress T
 wait_log 5000 kit editor: tool terrain
+event kit_edit {"op": "edited"}
 wait_log 10000 kit editor: edited sections: 1 0,0,0=1
 frames 5
 screenshot @T@/edited.png
@@ -616,6 +617,7 @@ wait_log 5000 kit editor: section hovered: 0,0,0
 wait_log 5000 kit editor: refused: regenerate: the game is Running
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended
+event kit_edit {"op": "edited"}
 wait_log 10000 kit editor: edited sections: 1 0,0,0=1
 click Button "Regenerate"
 wait_log 10000 kit editor: edited sections: 0
@@ -623,6 +625,7 @@ wait_log_any 30000 kit: World: generated again
 EOF
 	column 5 5
 	undo
+	echo 'event kit_edit {"op": "edited"}'
 	echo "wait_log 10000 kit editor: edited sections: 1 0,0,0=1"
 	column 5 5
 	echo quit
