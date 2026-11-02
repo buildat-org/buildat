@@ -101,10 +101,20 @@ end
 -- An unlit cut-out (builtin/luanti's objects' technique); and whether
 -- the texture was found
 local function material(texture)
+	local t0 = buildat.get_time_us()
 	local m = magic.Material.new()
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
 			"luanti_client/res/LuantiUnlitMask.xml"))
+	local t1 = buildat.get_time_us()
 	local t = magic.cache:GetResource("Texture2D", texture)
+	-- [SK_WEB_JOIN_HANDLERS] A slow first one said (a web join's first
+	-- drops took 140 ms each)
+	local t2 = buildat.get_time_us()
+	if t2 - t0 > 20000 then
+		log:info(string.format("skeldat: material %s: the technique %.0f ms, "
+				.. "the texture %.0f ms", texture, (t1 - t0) / 1000,
+				(t2 - t1) / 1000))
+	end
 	if t then
 		t.filterMode = magic.FILTER_NEAREST
 		m:SetTexture(magic.TU_DIFFUSE, t)

@@ -1167,6 +1167,7 @@ buildat.sub_packet("skeldat:world", function(data)
 			end
 		end
 	end
+	local t_quads = buildat.get_time_us()
 	backdrop.node = scene:CreateChild("Backdrop")
 	local t = magic.cache:GetResource("Texture2D", "main/bone_block_top.png")
 	if t then
@@ -1176,7 +1177,9 @@ buildat.sub_packet("skeldat:world", function(data)
 	if tw then
 		tw.filterMode = magic.FILTER_NEAREST
 	end
+	local t_tex = buildat.get_time_us()
 	local tiles = buildat.set_quad_geometry(backdrop.node, quads)
+	local t_geom = buildat.get_time_us()
 	local cg = backdrop.node:GetComponent("CustomGeometry")
 	for i = 1, #tiles do
 		local m = magic.Material.new()
@@ -1193,9 +1196,12 @@ buildat.sub_packet("skeldat:world", function(data)
 	end
 	log:info(string.format("skeldat: the backdrop beyond the edge at %d, " ..
 			"%d quads in %d groups, %.1f ms; its rim at %.1f, the lowest " ..
-			"edge column %d; %s, the water at %s, drawn at %s", h, #quads,
-			#tiles, (buildat.get_time_us() - t0) / 1000, height(-h, 0), low,
-			form ~= "" and form or "-", tostring(water), tostring(water_y)))
+			"edge column %d; %s, the water at %s, drawn at %s; the quads %.0f ms, "
+			.. "the textures %.0f, the geometry %.0f, the materials %.0f", h,
+			#quads, #tiles, (buildat.get_time_us() - t0) / 1000, height(-h, 0),
+			low, form ~= "" and form or "-", tostring(water), tostring(water_y),
+			(t_quads - t0) / 1000, (t_tex - t_quads) / 1000,
+			(t_geom - t_tex) / 1000, (buildat.get_time_us() - t_geom) / 1000))
 end)
 -- Lit as an object under the open sky, twice a second: the light with no
 -- sun, and the sun's by each group's slope to it. object_light gives the
