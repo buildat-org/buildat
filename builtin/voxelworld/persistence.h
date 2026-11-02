@@ -291,10 +291,12 @@
 		if(section.loaded)
 			return;
 		section.loaded = true;
+		section.sourced = false;
 		pv::Vector3DInt16 section_p = section.section_p;
 		log_d(MODULE, "Loading section " PV3I_FORMAT, PV3I_PARAMS(section_p));
 
-		if(!m_store || !load_saved_section(section)){
+		if((!m_store || !load_saved_section(section)) &&
+				!load_from_source(section)){
 			create_section(section);
 			section.altered = false;
 			section.visited_day = today();
@@ -1276,7 +1278,22 @@
 		if(section == nullptr || !section->loaded)
 			return false;
 		watch_section(section_p);
-		const pv::Region sr = get_section_region_voxels(section_p);
+		write_section_voxels(section, volume);
+		// The light round it: what the neighbours lit across its faces
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
+			if(m_light_maintained[f]){
+				relight_region_later(get_section_region_voxels(section_p));
+				break;
+			}
+		maintain_maximum_buffer_limit();
+		return true;
+	}
+
+	// Every voxel of a loaded section as the volume has them, undefined
+	// ones too (put_section(), a section from the source)
+	void write_section_voxels(Section *section, const VoxelVolume &volume)
+	{
+		const pv::Region sr = get_section_region_voxels(section->section_p);
 		const pv::Region vr = volume.getEnclosingRegion();
 		for(size_t i = 0; i < section->num_chunks; i++){
 			const pv::Vector3DInt32 chunk_p = section->get_chunk_p(i);
@@ -1303,14 +1320,106 @@
 			mark_buffer_dirty(section, *buf);
 			dirty_neighbour_padding(chunk_p, lc, uc);
 		}
-		// The light round it: what the neighbours lit across its faces
-		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
-			if(m_light_maintained[f]){
-				relight_region_later(sr);
-				break;
-			}
+	}
+
+	// [KIT_SESSIONS_1] The copy-on-write base (api.h's SectionSource)
+	sp_<SectionSource> m_section_source;
+	size_t m_sourced = 0;
+
+	void set_section_source(sp_<SectionSource> source)
+	{
+		m_section_source = source;
+	}
+
+	// A section the save has not, made of the source's voxels: true if
+	// the source gave them. Generated, not altered: it is not written
+	// until something changes it. Its light is the source's (no relight)
+	bool load_from_source(Section &section)
+	{
+		if(!m_section_source)
+			return false;
+		// Held here: the source may be replaced from inside
+		sp_<SectionSource> source = m_section_source;
+		VoxelVolume v;
+		if(!source->section(this, section.section_p, v))
+			return false;
+		section.loaded = true;
+		create_section(section);
+		write_section_voxels(&section, v);
+		section.generated = true;
+		section.arrived = true;
+		section.awaiting = false;
+		section.altered = false;
+		section.sourced = true;
+		section.visited_day = today();
+		m_sourced++;
 		maintain_maximum_buffer_limit();
+		log_v(MODULE, "Section " PV3I_FORMAT " from the source",
+				PV3I_PARAMS(section.section_p));
 		return true;
+	}
+
+	bool read_section(const pv::Vector3DInt16 &section_p, VoxelVolume &out)
+	{
+		const pv::Region sr = get_section_region_voxels(section_p);
+		Section *section = get_section(section_p);
+		if(section != nullptr && section->loaded){
+			out = get_volume(sr);
+			return true;
+		}
+		if(!m_store)
+			return false;
+		update_id_maps();
+		if(!m_store) // update_id_maps() can refuse the save
+			return false;
+		VoxelVolume v(sr);
+		const pv::Vector3DInt32 c0(
+				section_p.getX() * m_section_size_chunks.getX(),
+				section_p.getY() * m_section_size_chunks.getY(),
+				section_p.getZ() * m_section_size_chunks.getZ());
+		for(int z = 0; z < m_section_size_chunks.getZ(); z++)
+		for(int y = 0; y < m_section_size_chunks.getY(); y++)
+		for(int x = 0; x < m_section_size_chunks.getX(); x++){
+			const pv::Vector3DInt32 chunk_p = c0 + pv::Vector3DInt32(x, y, z);
+			ss_ row, data;
+			bool converted = false;
+			if(!m_store->get(chunk_key(chunk_p), row) ||
+					!prepare_loaded_chunk(chunk_p, row, data, converted))
+				return false;
+			up_<VoxelVolume> cv = interface::deserialize_volume(data);
+			if(!cv)
+				return false;
+			v.add_planes(cv->planes());
+			const pv::Region cr = get_chunk_region_voxels(chunk_p);
+			const pv::Vector3DInt32 lc = cr.getLowerCorner();
+			const pv::Vector3DInt32 uc = cr.getUpperCorner();
+			const size_t run = (size_t)(uc.getX() - lc.getX() + 1);
+			for(int vz = lc.getZ(); vz <= uc.getZ(); vz++)
+			for(int vy = lc.getY(); vy <= uc.getY(); vy++){
+				if(v.copy_run_from(*cv, 0, vy - lc.getY(), vz - lc.getZ(),
+						lc.getX(), vy, vz, run))
+					continue;
+				for(int vx = lc.getX(); vx <= uc.getX(); vx++)
+					for(size_t pi = 0; pi < std::max<size_t>(
+							cv->planes().size(), 1); pi++)
+						v.set_plane_at((uint8_t)pi, vx, vy, vz, cv->plane_at(
+								(uint8_t)pi, vx - lc.getX(), vy - lc.getY(),
+								vz - lc.getZ()));
+			}
+		}
+		out = v;
+		return true;
+	}
+
+	size_t sourced_sections(size_t *loaded)
+	{
+		if(loaded){
+			*loaded = 0;
+			for(auto &sector : m_sections)
+				for(auto &sp : sector.second)
+					*loaded += sp.second.loaded && sp.second.sourced;
+		}
+		return m_sourced;
 	}
 
 	RoutedWrite routed_set_voxel(const pv::Vector3DInt32 &p,

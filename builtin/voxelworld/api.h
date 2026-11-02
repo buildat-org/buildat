@@ -211,6 +211,20 @@ namespace voxelworld
 				bool keep_standing){}
 	};
 
+	// [KIT_SESSIONS_1] A copy-on-write instance's base: a section its own
+	// save has not is asked of the source before it is created empty or
+	// generated (Kit's session: the start's section). True with the
+	// section's voxels in out (its region the section's, every plane, the
+	// light with them); false: none, the section is made as it would be
+	// without a source. Called with voxelworld held, on its thread; the
+	// source may read another instance (read_section()).
+	struct SectionSource
+	{
+		virtual ~SectionSource(){}
+		virtual bool section(Instance *world,
+				const pv::Vector3DInt16 &section_p, VoxelVolume &out) = 0;
+	};
+
 	struct CommitHook
 	{
 		virtual ~CommitHook(){}
@@ -429,6 +443,19 @@ namespace voxelworld
 		// not loaded.
 		virtual bool put_section(const pv::Vector3DInt16 &section_p,
 				const VoxelVolume &volume) = 0;
+		// [KIT_SESSIONS_1] The source, replacing one before (nullptr:
+		// none). A section from it is generated, not altered and not
+		// written to the save until something writes to it (with
+		// set_writes_alter() and set_save_unaltered(false), what an
+		// instance saves is only what it changed)
+		virtual void set_section_source(sp_<SectionSource> source) = 0;
+		// A section's voxels as they are (its region the section's): a
+		// loaded one's, else the save's; false if neither has it
+		virtual bool read_section(const pv::Vector3DInt16 &section_p,
+				VoxelVolume &out) = 0;
+		// How many sections came from the source since the instance was
+		// made, and how many of those are loaded now
+		virtual size_t sourced_sections(size_t *loaded = nullptr) = 0;
 
 		// The voxels of a region, in one read rather than one per voxel:
 		// what asks for this is a sweep, and a section is a quarter of a

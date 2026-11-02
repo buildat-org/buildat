@@ -151,6 +151,8 @@ struct Section
 	bool owned_unreadable = false;
 	// [KIT] stage 4c: the section watch's generation it was told of in
 	uint32_t watch_gen = 0;
+	// [KIT_SESSIONS_1] made of the instance's SectionSource's voxels
+	bool sourced = false;
 
 	Section(): // Needed for containers
 		chunk_size(0, 0, 0) // This is used to detect uninitialized instance
@@ -931,7 +933,8 @@ struct CInstance: public voxelworld::Instance
 		Section &section = force_get_section(sp);
 		if(section.loaded)
 			return true;
-		if(load_saved_section(section)){
+		section.sourced = false;
+		if(load_saved_section(section) || load_from_source(section)){
 			section.loaded = true;
 			m_server->emit_event("voxelworld:section_loaded",
 					new SectionLoaded(m_scene_ref, sp));
