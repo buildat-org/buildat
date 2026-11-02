@@ -3,7 +3,9 @@
 -- reads for every player): "add" gives the player who set the signal off
 -- a point, "reset" makes every score 0. Who it was is the signal's `by`,
 -- carried along the links: a zone a player walks into, linked to "add",
--- scores them. Players with no points are left out
+-- scores them. Players with no points are left out. "changed" carries
+-- its text ([KIT_UI_COMPONENTS]): linked to a kit/ui_text's "value", the
+-- board where the builder lays it out
 local function show(c)
 	local list = {}
 	for _, p in ipairs(c.players or {}) do
@@ -34,7 +36,7 @@ return {
 	params = {title = {type = "string", default = "Score"}},
 	state = {text = {default = "", shared = true}},
 	inputs = {add = "none", reset = "none"},
-	outputs = {changed = "none"},
+	outputs = {changed = "string"},
 	on_start = show,
 	on_input = function(c, input, value, by)
 		if input == "reset" then
@@ -53,6 +55,6 @@ return {
 	on_timer = function(c)
 		show(c)
 		c:log(c.state.text)
-		c:emit("changed")
+		c:emit("changed", c.state.text)
 	end,
 }
