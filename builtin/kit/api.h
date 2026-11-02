@@ -58,7 +58,13 @@ namespace interface
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
 //   usable   = true          -- a client may "use" it (in range); with an
 //                               on_use, the clients point it out as
-//                               used by a click ([KIT] stage 4e2)
+//                               used by a click ([KIT] stage 4e2).
+//                               Kit adds its parameter use ("all",
+//                               "owners" of the region holding it, or
+//                               "nobody": through its links only), asked
+//                               after the region's use rule
+//                               ([KIT_USE_ACCESS]); a type's own "use"
+//                               parameter is refused
 //   owns_voxel = true        -- it owns its position's voxel
 //   volume = "<param>"       -- with owns_voxel: it owns the box of cells
 //                               from its own up and on, the extent a
@@ -304,7 +310,7 @@ namespace interface
 //                             show where a click digs ([KIT] stage 4e2).
 // Regions ([KIT] stage 4j, kit/region):
 //   region = "<param>"     -- a box of cells (as zone) whose state decides
-//                             dig, place, enter, pvp and damage in it:
+//                             dig, place, enter, pvp, damage and use in it:
 //                             enabled (false: it decides nothing), owners
 //                             ("nobody", "builders", or names) and rules
 //                             ({dig = {owners, others}, ...}), all shared.
@@ -762,7 +768,7 @@ namespace kit
 		virtual bool can_dig(size_t peer, int x, int y, int z) = 0;
 		virtual bool can_place(size_t peer, int x, int y, int z) = 0;
 		// [KIT] stage 4j: whether a placed peer may do action ("dig",
-		// "place", "enter", "pvp" or "damage") at x, y, z of their scene,
+		// "place", "enter", "pvp", "damage" or "use") at x, y, z of their scene,
 		// and why not (why: may be null; "Protected: no digging here", or
 		// an allow hook's reason): the smallest region holding the cell
 		// decides, by its owners' column or everyone else's; outside every

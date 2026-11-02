@@ -17,8 +17,8 @@
 -- kit.HOVER (selecting, the editor's left button), kit.USE (using an
 -- object), kit.DIG (digging), kit.PLACE (placing).
 --   kit.play_target(origin, dir, reach[, solid]) -> {left = {kind = "use",
---     id} or {kind = "dig", cell}, right = {kind = "place", cell, on,
---     normal}}: in play, what a left click does where the ray points (an
+--     id} or {kind = "dig", cell} or {kind = "refused", why}, right =
+--     {kind = "place", cell, on, normal}}: in play, what a left click does where the ray points (an
 --     object a click uses, before what is behind it, else the voxel this
 --     player may dig: edit rights, or a component's grant) and a right
 --     click (a voxel placed on the pointed face where this player may);
@@ -28,13 +28,15 @@
 --     the object or the voxel, the placement face's frame), logged as it
 --     changes ("kit: points at ..."); kit.show_target(nil) none
 --   kit.allows(action, x, y, z) -> ok, why: whether this player may
---     "dig", "place" or "enter" there by the regions' rules ([KIT] stage
---     4j; the server's allows()), and why not; kit.refused(why) shows it
+--     "dig", "place", "enter" or "use" there by the regions' rules ([KIT]
+--     stage 4j; the server's allows()), and why not; kit.refused(why) shows it
 --   kit.may_dig(x, y, z), kit.may_place(x, y, z): this player's rights
 --     and the grants there (a grant only while the server is Running)
 --   kit.pick_entity(origin, dir, reach) -> id, t, usable: the usable
 --     entity nearest along the ray (its look's box, turned as drawn; one
---     with no look near its cell); the rest the ray goes through.
+--     with no look near its cell); the rest the ray goes through. usable
+--     false: its use is nobody's, through its links only
+--     ([KIT_USE_ACCESS]).
 --     simplified: a solid one (a shut gate) too, so a dig can reach the
 --     voxel behind it; the server's own rules still hold
 --   kit.highlighter() -> h: frames drawn this frame: h.begin(),
@@ -1633,7 +1635,8 @@ M.region_at = region_at
 
 local REFUSED = {dig = "Protected: no digging here",
 	place = "Protected: no placing here",
-	enter = "Protected: no entering here"}
+	enter = "Protected: no entering here",
+	use = "Protected: no using things here"}
 
 -- Whether this player may do action at the cell, and why not (the
 -- server's allows(); a region's allow hook is the server's alone)
@@ -1716,9 +1719,16 @@ function M.play_target(origin, dir, reach, solid)
 	local t = {}
 	-- The object first: what is in front of the voxel is pointed at
 	if id and (not hit or et <= vt + 0.05) then
-		if usable then
-			t.left = {kind = "use", id = id}
+		-- [KIT_USE_ACCESS] the region's use rule asked; one used through
+		-- its links only (usable "locked") told so. simplified: an object's
+		-- owners-only use is the server's to refuse
+		local p = P.nodes[id].node.position
+		local ok, why = M.allows("use", math.floor(p.x + 1e-4),
+				math.floor(p.y + 1e-4), math.floor(p.z + 1e-4))
+		if not usable then
+			ok, why = false, "Locked: used through its links only"
 		end
+		t.left = ok and {kind = "use", id = id} or {kind = "refused", why = why}
 		return t
 	end
 	if hit and not M.terrain_cell(hit[1], hit[2], hit[3]) then

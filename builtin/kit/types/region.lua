@@ -1,12 +1,14 @@
 -- A region ([KIT] stage 4j): a box of cells (its own and `size` on) with
--- rules: dig, place, enter, pvp and damage. Each rule says who may: all,
+-- rules: dig, place, enter, pvp, damage and use (using the objects in
+-- it, [KIT_USE_ACCESS]; an object's own use setting asked after). Each
+-- rule says who may: all,
 -- its owners, everyone else (others) or none ("Red base": dig and place
 -- for owners, enter and pvp for all). Its owners (`owner`):
 -- nobody, the builders (edit rights), or the players named in `owners`
 -- ("alice, bob"); a team's from stage 7b. Where regions overlap the
 -- smallest holding the cell decides; outside every region the World's
--- default holds: no digging or placing (a builder in edit mode only), entering, pvp
--- and damage for all.
+-- default holds: no digging or placing (a builder in edit mode only), entering, pvp,
+-- damage and use for all.
 --
 -- Its signals: enable and disable (a disabled region decides nothing),
 -- set_owner (the player who set it off owns it: a capture point; a value,
@@ -28,7 +30,7 @@
 -- simplified: Kit has no hits or damage of its own yet: pvp and damage
 -- are kept, shown and asked by api.h's allows() for the games that have
 -- them
-local RULES = {"dig", "place", "enter", "pvp", "damage"}
+local RULES = {"dig", "place", "enter", "pvp", "damage", "use"}
 
 local function owners_of(c)
 	local o = c.params.owner
@@ -99,7 +101,7 @@ local params = {
 	resize_time = {type = "number", default = 0, min = 0, max = 3600},
 }
 local defaults = {dig = "none", place = "none", enter = "all", pvp = "all",
-	damage = "all"}
+	damage = "all", use = "all"}
 for _, k in ipairs(RULES) do
 	params[k] = {type = "string", default = defaults[k],
 		choices = {"all", "owners", "others", "none"}}
@@ -123,7 +125,7 @@ return {
 	gizmo = {shape = "box", size = 0.2, color = "#c08040"},
 	inputs = {enable = "none", disable = "none", set_owner = "any",
 		dig = "bool", place = "bool", enter = "bool", pvp = "bool",
-		damage = "bool", resize = "position", dig_out = "none"},
+		damage = "bool", use = "bool", resize = "position", dig_out = "none"},
 	outputs = {changed = "string"},
 	on_start = function(c)
 		-- (the state at its start: a fresh one's defaults, or Stop's)

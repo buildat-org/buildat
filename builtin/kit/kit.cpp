@@ -1260,6 +1260,27 @@ struct Module: public interface::Module, public Interface
 				if((*it).get("shared").is_true())
 					t.shared.insert(it.key());
 		t.usable = t.decl.get("usable").is_true();
+		// [KIT_USE_ACCESS] Who may use it, the engine's on every usable type
+		// (on_use() asks it): all, owners (of the region holding it) or
+		// nobody (used through its links only)
+		if(t.usable){
+			json::Value ps = t.decl.get("params");
+			if(!ps.is_object())
+				ps = json::object();
+			if(!ps.get("use").is_undefined()){
+				why = name+": \"use\" is Kit's parameter on a usable type";
+				return false;
+			}
+			json::Value u = json::object();
+			u.set("type", "string");
+			u.set("default", "all");
+			json::Value ch = json::array();
+			for(const char *c : {"all", "owners", "nobody"})
+				ch.append(c);
+			u.set("choices", ch);
+			ps.set("use", u);
+			t.decl.set("params", ps);
+		}
 		t.owns_voxel = t.decl.get("owns_voxel").is_true();
 		const json::Value &ver = t.decl.get("version");
 		if(!ver.is_undefined() && (!ver.is_number() ||
@@ -1776,7 +1797,9 @@ struct Module: public interface::Module, public Interface
 					in.params.set(it.key(), (*it).get("default"));
 			if(pj.is_object())
 				for(json::Iterator it(pj); it; ++it){
-					if(object && !decl.get(it.key()).is_object())
+					// (use: Kit's, gone with a type no longer usable)
+					if((object || it.key() == "use") &&
+							!decl.get(it.key()).is_object())
 						continue;
 					if(!decl.get(it.key()).is_object()){
 						why = "entity "+itos(e.id)+": "+in.type+
@@ -6040,9 +6063,14 @@ struct Module: public interface::Module, public Interface
 			// in its box (its state's dig and place, shared)
 			const Type &ty = m_types[in.type];
 			// (a seat: taken by a use, [KIT] stage 4h)
-			if(ty.usable && (ty.handlers.count("on_use") || (m_host.controls &&
-					ty.decl.get("seat").is_true() && is_movement(in.type))))
-				show.set("usable", true);
+			// ([KIT_USE_ACCESS] "locked": its use is nobody's, a click
+			// told so)
+			if(use_kind(in)){
+				if(jstr(in.params, "use") != "nobody")
+					show.set("usable", true);
+				else if(!show.get("usable").is_true())
+					show.set("usable", ss_("locked"));
+			}
 			// [KIT] stage 4j: a region's extent by its parameter (its state's
 			// size while resized), and its border drawn in play
 			if(!ty.region.empty() && show.get("region").is_undefined()){
@@ -8772,11 +8800,12 @@ struct Module: public interface::Module, public Interface
 				action == "enter" ? "Protected: no entering here" :
 				action == "pvp" ? "Protected: no fighting players here" :
 				action == "damage" ? "Protected: no damage here" :
+				action == "use" ? "Protected: no using things here" :
 				"Protected";
 	}
 
-	// Whether a placed peer may do action ("dig", "place", "enter", "pvp"
-	// or "damage") at a cell of their scene, and why not. The region
+	// Whether a placed peer may do action ("dig", "place", "enter", "pvp",
+	// "damage" or "use") at a cell of their scene, and why not. The region
 	// holding it decides (the smallest): a component on its entity with an
 	// allow handler first (true or false decides, nil leaves it), then its
 	// rules, the owners' column or everyone else's. Outside every region
@@ -10024,11 +10053,38 @@ struct Module: public interface::Module, public Interface
 
 	// Possession: a seat (a type with `seat = true` and a movement) used
 	// takes the player's controls until they leave it ("kit:exit")
-	bool seat_type(const Entity &e)
+	// What a use reaches on it: an on_use, or a seat ([KIT] stage 4h)
+	bool use_kind(const Instance &in)
 	{
-		for(const Instance &in : e.comps)
-			if(m_types[in.type].decl.get("seat").is_true() && is_movement(in.type))
-				return true;
+		const Type &ty = m_types[in.type];
+		return ty.usable && (ty.handlers.count("on_use") || (m_host.controls &&
+				ty.decl.get("seat").is_true() && is_movement(in.type)));
+	}
+
+	// [KIT_USE_ACCESS] Whether a placed peer may use an instance by its
+	// use parameter, and why not: all (or none set), owners or nobody.
+	// simplified: owners are the owners of the region deciding its cell
+	// (kit/region's owner: nobody, the builders or named players, a
+	// set_owner's capture), none outside every region; an owner of its
+	// own (a name per object) when one is asked for
+	bool may_use(size_t peer, const Entity &e, const Instance &in, ss_ *why)
+	{
+		const ss_ use = jstr(in.params, "use");
+		if(use == "nobody"){
+			*why = "Locked: used through its links only";
+			return false;
+		}
+		if(use != "owners")
+			return true;
+		const pv::Vector3DInt32 c = voxel_p(e);
+		const Entity *re = nullptr;
+		ss_ scene;
+		scene_of(e, &scene);
+		const Instance *rg = region_at(scene, c.getX(), c.getY(), c.getZ(),
+				&re);
+		if(rg && owns(peer, rg->state.get("owners")))
+			return true;
+		*why = "Locked: its owners' only";
 		return false;
 	}
 
@@ -10148,30 +10204,53 @@ struct Module: public interface::Module, public Interface
 			d2 += (e.pos[k] - pi->second.pos[k]) * (e.pos[k] - pi->second.pos[k]);
 		if(d2 > m_host.use_range * m_host.use_range)
 			return refuse("out of range");
-		bool any = false;
-		// [KIT] stage 4h: a seat taken
-		if(m_host.controls && seat_type(e) && m_bodies[peer].put &&
-				m_bodies[peer].seat != id){
-			seat(peer, id);
-			any = true;
+		// [KIT_USE_ACCESS] The region's use rule for the player first (its
+		// allow hook may run and change the tree: the entity again), then
+		// each part's own use; a refusal told
+		ss_ why;
+		const pv::Vector3DInt32 c = voxel_p(e);
+		if(!allows(peer, "use", c.getX(), c.getY(), c.getZ(), &why)){
+			tell(peer, why);
+			return refuse(why);
 		}
-		for(size_t i = 0; i < e.comps.size(); i++){
-			const Type &t = m_types[e.comps[i].type];
-			if(!t.usable || !t.handlers.count("on_use"))
+		it = m_entities.find(id);
+		if(it == m_entities.end() || m_peers.find(peer) == m_peers.end())
+			return refuse("no such object");
+		Entity &e2 = it->second;
+		const ss_ by = by_of(m_peers[peer].name);
+		bool any = false, seated = false;
+		for(size_t i = 0; i < e2.comps.size(); i++){
+			const Instance &in = e2.comps[i];
+			if(!use_kind(in))
+				continue;
+			if(!may_use(peer, e2, in, &why))
+				continue;
+			// [KIT] stage 4h: a seat taken
+			if(!seated && m_host.controls && m_types[in.type].decl.get("seat").
+					is_true() && is_movement(in.type) && m_bodies[peer].put &&
+					m_bodies[peer].seat != id){
+				seat(peer, id);
+				seated = any = true;
+			}
+			if(!m_types[in.type].handlers.count("on_use"))
 				continue;
 			any = true;
 			Run r;
 			r.entity = id;
 			r.comp = i;
 			r.handler = "on_use";
-			r.by = by_of(pi->second.name);
+			r.by = by;
 			r.args.append(r.by);
 			queue_run(r);
+		}
+		if(!any && !why.empty()){
+			tell(peer, why);
+			return refuse(why);
 		}
 		if(!any)
 			return refuse("nothing on it is usable");
 		log_i(MODULE, "Entity %s used by %s", cs(itos(id)),
-				cs(pi->second.name));
+				cs(m_peers[peer].name));
 	}
 
 	void on_joined(const network::NewClient &nc)

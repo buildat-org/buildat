@@ -161,9 +161,9 @@ stop
 s=$t/srv_kit.log
 grep -a "kit/region 1[789]\|kit/logic 23\|sample_kit/guard 19\|a dig at the pillar" "$s" |
 	sed 's/^.* I [a-z_]* *: /  /' | cut -c1-150 | tail -16
-want "$s" "kit/region 17: holds dig owners, place none, enter all, pvp all, damage all" \
-	"kit/region 18: holds dig none, place none, enter all, pvp all, damage all" \
-	"kit/region 19: holds dig others, place none, enter all, pvp all, damage all" \
+want "$s" "kit/region 17: holds dig owners, place none, enter all, pvp all, damage all, use all" \
+	"kit/region 18: holds dig none, place none, enter all, pvp all, damage all, use all" \
+	"kit/region 19: holds dig others, place none, enter all, pvp all, damage all, use all" \
 	"kit/region 18: disabled by kitbob" "kit/region 19: disabled by kitbob" \
 	"sample_kit/guard 19: asked dig at 6,1,2 by kitbob" \
 	"kit/logic 23: or on by kitbob" "kit/region 17: dig on for everyone" \
@@ -244,7 +244,7 @@ stop
 s=$t/srv_wb.log
 grep -a "kit/region 4\|may not enter\|kitbob" "$s" | sed 's/^.* I [a-z_]* *: /  /' |
 	cut -c1-150 | tail -8
-want "$s" "kit/region 4: holds dig none, place none, enter owners, pvp all, damage all"
+want "$s" "kit/region 4: holds dig none, place none, enter owners, pvp all, damage all, use all"
 grep -aqE "kitbob may not enter \(-?[0-9]+,1,-7\): Protected: no entering here; put back" "$s" ||
 	fail "kitbob was not put back at the region's edge ($s)"
 # Put back out: never further in than its first row

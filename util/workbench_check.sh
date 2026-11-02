@@ -572,7 +572,7 @@ want "$s" "kitbob goes through the round's start: inventory reset" \
 	"kit/spawner 3: spawns kitbob" \
 	"Entity 3's kit/spawner teleports kitbob to (0, 1, -4) facing 90" \
 	"workbench: a build by kitbob refused: not in edit mode and not allowed at (6,0,6): Protected: no " \
-	"kit/region 16: holds dig others, place others, enter all, pvp all, damage all" \
+	"kit/region 16: holds dig others, place others, enter all, pvp all, damage all, use all" \
 	"kit/key_door 15: locked to kitbob who has no key" \
 	"kit/item_giver 14: gives kitbob 1 key" \
 	"kit/key_door 15: opened by kitbob taking their key" \
