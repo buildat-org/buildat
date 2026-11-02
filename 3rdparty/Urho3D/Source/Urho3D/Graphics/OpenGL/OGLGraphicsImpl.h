@@ -86,6 +86,20 @@ namespace Urho3D
 
 class Context;
 
+/// A texture's creation's error check ([WEB_TEXTURE_FIRST_LOAD], buildat):
+/// glGetError(), or none on the web, where it is a round trip to the GPU
+/// process that waits out every command queued before it (the frame
+/// before's drawing: 120 to 300 ms a texture under a software renderer).
+/// WebGL says a failed call in the browser's console itself.
+inline GLenum TextureCreateError()
+{
+#ifdef __EMSCRIPTEN__
+    return GL_NO_ERROR;
+#else
+    return glGetError();
+#endif
+}
+
 typedef HashMap<unsigned, SharedPtr<ConstantBuffer> > ConstantBufferMap;
 typedef HashMap<Pair<ShaderVariation*, ShaderVariation*>, SharedPtr<ShaderProgram> > ShaderProgramMap;
 

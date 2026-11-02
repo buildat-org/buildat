@@ -469,11 +469,11 @@ bool TextureCube::Create()
     bool success = true;
     if (!IsCompressed())
     {
-        glGetError();
+        TextureCreateError();
         for (unsigned i = 0; i < MAX_CUBEMAP_FACES; ++i)
         {
             glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, format, width_, height_, 0, externalFormat, dataType, 0);
-            if (glGetError())
+            if (TextureCreateError())
                 success = false;
         }
     }

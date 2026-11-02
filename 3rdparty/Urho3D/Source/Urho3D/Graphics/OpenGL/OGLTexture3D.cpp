@@ -365,9 +365,9 @@ bool Texture3D::Create()
 
     if (!IsCompressed())
     {
-        glGetError();
+        TextureCreateError();
         glTexImage3D(target_, 0, format, width_, height_, depth_, 0, externalFormat, dataType, 0);
-        if (glGetError())
+        if (TextureCreateError())
         {
             URHO3D_LOGERROR("Failed to create texture");
             success = false;

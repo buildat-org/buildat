@@ -444,9 +444,9 @@ bool Texture2DArray::Create()
     bool success = true;
     if (!IsCompressed())
     {
-        glGetError();
+        TextureCreateError();
         glTexImage3D(target_, 0, format, width_, height_, layers_, 0, externalFormat, dataType, 0);
-        if (glGetError())
+        if (TextureCreateError())
             success = false;
     }
     if (!success)
