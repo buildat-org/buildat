@@ -37,6 +37,17 @@
 // naming it. No river water: a river, if any, is the sea's water.
 // "voxels" is the set's own voxels, which register_voxels() adds (an app
 // binding roles to voxels of its own leaves it out).
+// [KIT_MATERIAL_SETS] **A set package** is a Kit package with
+// materials.json (this format): its voxels "<its author>/<n>", installed
+// as its voxel types (a face's texture "textures/<file>.png" in the
+// archive), and "extends": "kit/default" or "<author>/<name>" of a set
+// package it depends on (merge_sets(): the later set winning per voxel,
+// palette, fallback, structure and biome role). The World's "materials"
+// names one (kit.cpp material_json()).
+// simplified: a set's voxel looks on a heightmap as one of Kit's ground
+// layers ("heightmap": n), not as its own texture: a set's ground on a
+// heightmap surface wears Kit's textures; the upgrade is heightmap
+// layers made from package textures (the client's ground texture array)
 // **Structures** ([KIT] stage 4f) are voxel structures a decoration puts
 // down: layers bottom up, each its rows along z, a letter a cell along x
 // ("." leaves it), the origin the cell that stands on the ground (a
