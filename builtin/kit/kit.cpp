@@ -2781,8 +2781,11 @@ struct Module: public interface::Module, public Interface
 
 	// A texture's PNG checked, decoded and saved again as a PNG (a client
 	// is sent only what decoded) in the row "texture:<hash>", and served:
-	// its name ("kit/up/<hash>.png"), or "" and why not
-	ss_ store_texture(const ss_ &d, ss_ &why)
+	// its name ("kit/up/<hash>.png"), or "" and why not.
+	// [KIT_SET_ORPHAN_TEXTURES] pending: only checked and decoded, put
+	// there by hash for store_textures() once the whole package is taken
+	ss_ store_texture(const ss_ &d, ss_ &why,
+			sm_<ss_, ss_> *pending = nullptr)
 	{
 		auto refuse = [&](const ss_ &s){
 			why = s;
@@ -2802,7 +2805,7 @@ struct Module: public interface::Module, public Interface
 			return refuse("a PNG of at most "+itos(MAX_TEXTURE_BYTES >> 10)+
 					" KiB, square, its side a power of two 8..."+
 					itos(MAX_TEXTURE_SIDE));
-		if(m_textures.size() >= MAX_TEXTURES)
+		if(m_textures.size() + (pending ? pending->size() : 0) >= MAX_TEXTURES)
 			return refuse("the save has "+itos(MAX_TEXTURES)+" textures");
 		ss_ png;
 		main_context::access(m_server, [&](main_context::Interface *imc){
@@ -2819,6 +2822,10 @@ struct Module: public interface::Module, public Interface
 			return refuse("not an image that decodes");
 		const ss_ hash = interface::sha256::hex(
 				interface::sha256::calculate(png)).substr(0, 16);
+		if(pending){
+			(*pending)[hash] = png;
+			return "kit/up/"+hash+".png";
+		}
 		m_store->set("texture:"+hash, png);
 		serve_texture(hash, png);
 		log_i(MODULE, "Texture kit/up/%s.png (%ux%u, %zu bytes)", cs(hash), w,
@@ -3274,7 +3281,10 @@ struct Module: public interface::Module, public Interface
 		// The textures its voxel types wear, stored as an upload's: each
 		// face's ([KIT_MATERIAL_SETS] a set's voxel's: top, side, bottom,
 		// a season's)
+		// [KIT_SET_ORPHAN_TEXTURES] decoded here, stored only once nothing
+		// refuses the package
 		const std::set<ss_> choices = texture_choices();
+		sm_<ss_, ss_> pending_textures;
 		auto take = [&](const ss_ &what, json::Value &o, const char *face){
 			if(o.get(face).is_undefined())
 				return ss_();
@@ -3284,7 +3294,8 @@ struct Module: public interface::Module, public Interface
 				if(f == files.end())
 					return what+": its texture "+tex+" is not in the archive";
 				ss_ twhy;
-				const ss_ served = store_texture(f->second, twhy);
+				const ss_ served = store_texture(f->second, twhy,
+						&pending_textures);
 				if(served.empty())
 					return tex+": "+twhy;
 				o.set(face, served);
@@ -3393,6 +3404,12 @@ struct Module: public interface::Module, public Interface
 				m_packages.erase(name);
 			}
 			return why;
+		}
+		for(auto &t : pending_textures){
+			m_store->set("texture:"+t.first, t.second);
+			serve_texture(t.first, t.second);
+			log_i(MODULE, "Texture kit/up/%s.png (%zu bytes), %s's", cs(t.first),
+					t.second.size(), cs(named));
 		}
 		json::Value pl = json::array(), vl = json::array();
 		for(auto &p : prefabs){

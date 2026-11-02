@@ -19,6 +19,9 @@
 #      biome meadow refused naming the role stone; blueland: blue_grass on
 #      top over redland's gravel (the later set winning per role), the
 #      cobble still there.
+#   3. [KIT_SET_ORPHAN_TEXTURES] alice/badland (a texture, and a decoration
+#      naming no structure) refused at its install; at a restart the save
+#      still has 2 uploaded textures.
 # KEEP_TMP=1 keeps the screenshots: kit.png (Kit's set), red.png (redland),
 # blue.png (blueland).
 #   util/kit_material_sets_check.sh
@@ -220,4 +223,54 @@ want "$s" "installed alice/redland 1.0.0: 0 types, 0 prefabs, 1 voxel types, a m
 	fail "the base set not first ($s)"
 want "$t/boss.log" "kit: warning: World: 1 edited sections kept" \
 	"kit: warning: World: not applied: the flat generator needs the role stone"
-echo "PASS: a set package installed from a local Aitta, a World switched to it generated again with its voxels (a placed voxel's section kept), an extending set winning per role, a missing role refused by name"
+echo "ok: installed, a World switched between sets"
+
+# 3. A set refused at its install keeps no texture
+mkdir -p "$t/badland/textures"
+png "$t/badland/textures/bad.png" 200 200 0
+cat > "$t/badland/materials.json" <<'EOF2'
+{"format": "kit_materials",
+ "voxels": {"alice/bad": {"texture": "textures/bad.png"}},
+ "biomes": {"bad": {"top": "alice/bad", "decorations": [
+	{"structure": "nothing", "on": "top", "density": 0.1}]}}}
+EOF2
+manifest "$t/badland" badland
+publish "$t/badland"
+cat > "$t/boss2.cmds" <<EOF2
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log 10000 kit editor: state:
+click Button "New"
+wait_log_any 20000 kit editor: package alice/badland 1.0.0
+frames 3
+click Button "Install"
+wait_log 20000 kit editor: Package refused: materials.json: biome bad
+quit
+EOF2
+start_server "$t/srv2.log" "Listening at" 300 auto \
+	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 ||
+	fail "the server did not come up again ($t/srv2.log)"
+CHECK_PIDS+=($SERVER_PID)
+BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_NAME=kitboss \
+	run_client 60 "$t/boss2.log" timeout 200 bin/buildat -C "$t/client_cache" \
+	-D "$t/cu" -s localhost:$SERVER_PORT -w 1024x700 -l 3 -c @"$t/boss2.cmds" ||
+	fail "the second client failed ($t/boss2.log, $t/srv2.log)"
+kill -INT "$SERVER_PID" 2>/dev/null
+wait "$SERVER_PID" 2>/dev/null
+want "$t/srv2.log" "uploaded textures: 2" \
+	"refused: materials.json: biome bad: decoration 0"
+echo "ok: a refused set package stored no texture"
+
+# At a restart: the textures in the save
+start_server "$t/srv3.log" "Listening at" 300 auto \
+	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 ||
+	fail "the server did not come up again ($t/srv3.log)"
+CHECK_PIDS+=($SERVER_PID)
+wait_for_log "$t/srv3.log" "; materials " 60 ||
+	fail "no World applied ($t/srv3.log)"
+kill -INT "$SERVER_PID" 2>/dev/null
+wait "$SERVER_PID" 2>/dev/null
+want "$t/srv3.log" "Kit packages: 2" "uploaded textures: 2"
+echo "PASS: a set package installed from a local Aitta, a World switched to it generated again with its voxels (a placed voxel's section kept), an extending set winning per role, a missing role refused by name; a refused set storing no texture"
