@@ -100,43 +100,20 @@ end
 
 -- An unlit cut-out (builtin/luanti's objects' technique); and whether
 -- the texture was found
-local measured = {}
 local function material(texture)
 	local t0 = buildat.get_time_us()
 	local m = magic.Material.new()
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
 			"luanti_client/res/LuantiUnlitMask.xml"))
 	local t1 = buildat.get_time_us()
-	-- [WEB_TEXTURE_FIRST_LOAD] measurement, to be taken out: the steps of
-	-- a first load one by one
-	local steps = nil
-	if texture ~= "" and not measured[texture] then
-		measured[texture] = true
-		local a = buildat.get_time_us()
-		local ex = magic.cache:Exists(texture)
-		local b = buildat.get_time_us()
-		local img = ex and magic.cache:GetResource("Image", texture)
-		local c = buildat.get_time_us()
-		if img then
-			local tx = magic.Texture2D:new()
-			tx:SetData(img)
-		end
-		local d = buildat.get_time_us()
-		magic.cache:Exists((texture:gsub("%.png$", ".xml")))
-		local e = buildat.get_time_us()
-		steps = string.format("exists %.1f, image %.1f, upload %.1f, "
-				.. "xml %.1f ms", (b - a) / 1000, (c - b) / 1000, (d - c) / 1000,
-				(e - d) / 1000)
-		t1 = buildat.get_time_us()
-	end
 	local t = magic.cache:GetResource("Texture2D", texture)
 	-- [SK_WEB_JOIN_HANDLERS] A slow first one said (a web join's first
 	-- drops took 140 ms each)
 	local t2 = buildat.get_time_us()
-	if t2 - t0 > 20000 or steps then
+	if t2 - t0 > 20000 then
 		log:info(string.format("skeldat: material %s: the technique %.0f ms, "
-				.. "the texture %.0f ms; %s", texture, (t1 - t0) / 1000,
-				(t2 - t1) / 1000, steps or "-"))
+				.. "the texture %.0f ms", texture, (t1 - t0) / 1000,
+				(t2 - t1) / 1000))
 	end
 	if t then
 		t.filterMode = magic.FILTER_NEAREST
