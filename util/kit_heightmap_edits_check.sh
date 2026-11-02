@@ -124,6 +124,7 @@ EOF
 		echo "wait_log 5000 kit editor: cut at"
 	done
 	cat <<'EOF'
+idle 8000
 frames 30
 screenshot @T@/plan.png
 keypress F1
