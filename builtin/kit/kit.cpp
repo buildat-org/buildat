@@ -20,6 +20,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
+#include "interface/voxel_selector.h"
 #include "interface/sha256.h"
 #include "interface/os.h"
 #include "interface/aitta.h"
@@ -199,6 +200,9 @@ struct Type
 	bool spawn = false, between_plays = false, root = false;
 	// [KIT] stage 4e: it is the World (kit/world; the first on the root)
 	bool world = false;
+	// [KIT_ENVIRONMENT] it is an environment (kit/environment: the root's
+	// for every scene, a scene's own for it)
+	bool environment = false;
 	ss_ spawn_param;
 	// Its voxel writes are builds by the player who set the run off, not
 	// game changes (builds = true)
@@ -480,6 +484,9 @@ struct World
 	size_t world_generated = 0, world_logged = 0;
 	// A regeneration whose sections are not all generated again yet
 	bool world_regenerating = false;
+	// [KIT_SCENES_GENERATED] A World with no section in the save, its
+	// first sections not all generated yet (a new scene's)
+	bool world_first = false;
 	// The loaded sections regenerate() unloaded: the load points bring them
 	// back over the next passes, so an empty worldgen queue is not the end
 	// until each is in again ([KIT_REGENERATED_EARLY])
@@ -1277,6 +1284,7 @@ struct Module: public interface::Module, public Interface
 		t.between_plays = t.decl.get("between_plays").is_true();
 		t.root = t.decl.get("root").is_true();
 		t.world = t.decl.get("world").is_true();
+		t.environment = t.decl.get("environment").is_true();
 		t.builds = t.decl.get("builds").is_true();
 		for(const char *h : {"inventory_count", "inventory_add",
 				"inventory_take", "inventory_list"})
@@ -3784,6 +3792,7 @@ struct Module: public interface::Module, public Interface
 					n++, edited += s.altered;
 				log_i(MODULE, "World: the save holds %zu sections (%zu "
 						"edited)", n, edited);
+				m_w->world_first = n == 0;
 			});
 		// [KIT_HM_VOXELS] the voxels built over a heightmap
 		if(first && p.heightmap())
@@ -5661,6 +5670,19 @@ struct Module: public interface::Module, public Interface
 		m_w->world_logged = m_w->world_generated;
 		log_i(MODULE, "World: %zu sections generated since the start",
 				m_w->world_generated);
+		// [KIT_SCENES_GENERATED] The builders in a new World's scene told
+		// its ground is in: what they read of it after is the generator's
+		if(m_w->world_first){
+			m_w->world_first = false;
+			sv_<size_t> in;
+			for(auto &p : m_peers)
+				if(can_edit(p.first) && p.second.scene == m_w->name)
+					in.push_back(p.first);
+			network::access(m_server, [&](network::Interface *inetwork){
+				for(size_t peer : in)
+					inetwork->send(peer, "kit:generated", m_w->name);
+			});
+		}
 		// Builders told the regeneration is done: what they read of the
 		// ground after it is the new ground's
 		if(!m_w->world_regenerating)
@@ -8165,6 +8187,293 @@ struct Module: public interface::Module, public Interface
 	// until when (game µs) stepping into its zone is no entering
 	std::map<ss_, std::pair<uint64_t, int64_t>> m_arrive;
 
+	// ---- [KIT_ENVIRONMENT] The environment: a scene's own kit/environment
+	// (on its scene entity, no position), else the root's; its parameters
+	// over the type's defaults and what its signals set (state.set). Kit
+	// keeps its clock (the time of day going at day_minutes a day) and
+	// tells the clients in the scene ("kit:environment") as it changes;
+	// the season's voxel textures go as a registry ("kit:season")
+
+	// The environment instance on an entity (nullptr: none)
+	const Instance* env_on(const Entity &e)
+	{
+		if(e.has_pos || !e.kind.empty())
+			return nullptr;
+		for(const Instance &i : e.comps)
+			if(m_types.count(i.type) && m_types[i.type].environment &&
+					i.disabled.empty())
+				return &i;
+		return nullptr;
+	}
+
+	// The environment on an entity's children: the root's (1) or a
+	// scene's; its entity's id in *id
+	const Instance* env_at(uint64_t parent, uint64_t *id = nullptr)
+	{
+		if(!parent)
+			return nullptr;
+		for(auto &p : m_entities){
+			if(p.second.parent != parent)
+				continue;
+			const Instance *in = env_on(p.second);
+			if(in){
+				if(id)
+					*id = p.first;
+				return in;
+			}
+		}
+		return nullptr;
+	}
+
+	// A scene's: its own, else the root's; from says which
+	const Instance* env_of(const ss_ &scene, uint64_t *id = nullptr,
+			const char **from = nullptr)
+	{
+		const Instance *in = env_at(scene_id(scene), id);
+		if(from)
+			*from = in ? "scene" : "root";
+		return in ? in : env_at(1, id);
+	}
+
+	json::Value env_values(const Instance &in)
+	{
+		json::Value v = params_of(in.type, &in);
+		const json::Value &set = in.state.get("set");
+		if(set.is_object())
+			for(json::Iterator it(set); it; ++it)
+				if(v.get(it.key()).is_number() ? (*it).is_number() :
+						v.get(it.key()).is_string() && (*it).is_string())
+					v.set(it.key(), *it);
+		return v;
+	}
+
+	double env_gravity(const ss_ &scene)
+	{
+		const Instance *in = env_of(scene);
+		if(!in)
+			return 1;
+		const json::Value g = env_values(*in).get("gravity");
+		return g.is_number() && std::isfinite(g.as_number()) ?
+				std::max(0.0, std::min(10.0, g.as_number())) : 1;
+	}
+
+	// An environment's clock: from `base` hours at `at` (game µs), a day
+	// each `minutes`; started again as set_time's count or the time
+	// parameter changes
+	struct EnvClock
+	{
+		ss_ seq;
+		double base = 12, minutes = 0, last = -1;
+		int64_t at = 0;
+	};
+	std::map<uint64_t, EnvClock> m_env_clock;
+	sm_<ss_, ss_> m_env_sent, m_season_sent;
+	// A scene's season registry, by scene and season: the base registry's
+	// count it was made of, and it serialized ("": nothing to swap)
+	std::map<ss_, std::pair<size_t, ss_>> m_season_regs;
+
+	static double env_num(const json::Value &v, const char *k, double def)
+	{
+		const json::Value &x = v.get(k);
+		return x.is_number() && std::isfinite(x.as_number()) ?
+				x.as_number() : def;
+	}
+
+	EnvClock& env_clock(uint64_t id, const Instance &in, const json::Value &v)
+	{
+		EnvClock &c = m_env_clock[id];
+		const int64_t now = interface::os::game_us();
+		const ss_ seq = in.params.get("time").stringify()+"|"+
+				in.state.get("time_set").stringify();
+		const double minutes = std::max(0.0, env_num(v, "day_minutes", 0));
+		if(seq != c.seq){
+			c.seq = seq;
+			c.base = std::fmod(std::max(0.0, env_num(v, "time", 12)), 24.0);
+			c.at = now;
+			c.minutes = minutes;
+			c.last = -1;
+		} else if(minutes != c.minutes){
+			c.base = env_hours(c, now);
+			c.at = now;
+			c.minutes = minutes;
+		}
+		return c;
+	}
+
+	static double env_hours(const EnvClock &c, int64_t now)
+	{
+		if(c.minutes <= 0)
+			return c.base;
+		const double h = c.base + (double)(now - c.at) / 1e6 / 60.0 /
+				c.minutes * 24.0;
+		return std::fmod(h, 24.0);
+	}
+
+	// What the clients of a scene are told: {"on"} with none, else the
+	// values, "from" (root or scene) and the time now
+	json::Value env_json(const ss_ &scene, ss_ *key = nullptr)
+	{
+		json::Value j = json::object();
+		uint64_t id = 0;
+		const char *from = "root";
+		const Instance *in = env_of(scene, &id, &from);
+		j.set("on", in != nullptr);
+		if(!in){
+			if(key)
+				*key = j.stringify();
+			return j;
+		}
+		const json::Value v = env_values(*in);
+		for(json::Iterator it(v); it; ++it)
+			j.set(it.key(), *it);
+		j.set("from", from);
+		j.set("entity", (int64_t)id);
+		EnvClock &c = env_clock(id, *in, v);
+		if(key)
+			*key = j.stringify()+"|"+itos(c.at)+"|"+std::to_string(c.base);
+		j.set("time", env_hours(c, interface::os::game_us()));
+		return j;
+	}
+
+	void send_env(size_t peer)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end())
+			return;
+		const ss_ s = env_json(pi->second.scene).stringify();
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:environment", s);
+		});
+		send_season(pi->second.scene, (int64_t)peer);
+	}
+
+	// Each tick: a scene's environment changed is told to its peers; the
+	// clocks' dawn (6) and dusk (18) run on_daytime, Running
+	void env_tick()
+	{
+		for(auto &sc : m_host.scenes){
+			const ss_ &scene = sc.first;
+			if(!scene_id(scene))
+				continue;
+			ss_ key;
+			const json::Value j = env_json(scene, &key);
+			ss_ &sent = m_env_sent[scene];
+			if(key != sent){
+				sent = key;
+				const ss_ s = j.stringify();
+				log_i(MODULE, "Environment of the scene %s: %s", cs(scene),
+						cs(s.substr(0, 400)));
+				network::access(m_server, [&](network::Interface *inetwork){
+					for(auto &p : m_peers)
+						if(p.second.scene == scene)
+							inetwork->send(p.first, "kit:environment", s);
+				});
+			}
+			send_season(scene, -1);
+		}
+		const int64_t now = interface::os::game_us();
+		for(auto &c : m_env_clock){
+			auto e = m_entities.find(c.first);
+			const Instance *in = e == m_entities.end() ? nullptr :
+					env_on(e->second);
+			if(!in)
+				continue;
+			const double h = env_hours(c.second, now);
+			const double was = c.second.last;
+			c.second.last = h;
+			if(was < 0 || c.second.minutes <= 0 || !m_session.running)
+				continue;
+			for(double mark : {6.0, 18.0}){
+				const bool passed = was <= h ? (was < mark && h >= mark) :
+						(was < mark || h >= mark);
+				if(!passed)
+					continue;
+				Run r;
+				r.entity = c.first;
+				r.comp = in - &e->second.comps[0];
+				r.handler = "on_daytime";
+				r.args.append(mark == 6.0 ? "dawn" : "dusk");
+				queue_run(r);
+			}
+		}
+	}
+
+	// The season's registry to a scene's peers (-1: those not told it
+	// yet) or one peer: the base registry with the season textures of the
+	// materials that have them; "" swaps back
+	void send_season(const ss_ &scene, int64_t peer)
+	{
+		const Instance *in = env_of(scene);
+		const ss_ season = in ? jstr(env_values(*in), "season") : "";
+		if(peer < 0 && m_season_sent[scene] == season)
+			return;
+		if(peer < 0)
+			m_season_sent[scene] = season;
+		auto si = m_host.scenes.find(scene);
+		if(si == m_host.scenes.end() || !si->second)
+			return;
+		size_t count = 0;
+		sv_<interface::VoxelDefinition> defs;
+		interface::VoxelFormat format;
+		interface::VoxelSelector look;
+		bool have = false;
+		voxelworld::access(m_server, si->second, [&](voxelworld::Instance *w){
+			interface::VoxelRegistry *r = w->get_voxel_reg();
+			if(!r)
+				return;
+			count = r->get_count();
+			have = true;
+			std::pair<size_t, ss_> &c = m_season_regs[scene+"\n"+season];
+			if(c.first == count && count)
+				return;
+			defs = r->get_all();
+			format = r->get_format();
+			look = r->get_look_selector();
+		});
+		if(!have)
+			return;
+		std::pair<size_t, ss_> &c = m_season_regs[scene+"\n"+season];
+		if(c.first != count || !count){
+			size_t swapped = 0;
+			for(interface::VoxelDefinition &d : defs){
+				const ss_ &n = d.name.block_name;
+				auto mi = m_registered.find(n.substr(0, n.find(':')));
+				if(mi == m_registered.end())
+					continue;
+				auto se = mi->second.seasons.find(season);
+				if(se == mi->second.seasons.end())
+					continue;
+				for(int f = 0; f < 6; f++)
+					d.textures[f].resource_name = se->second[f == 0 ? 0 :
+							f == 1 ? 2 : 1];
+				swapped++;
+			}
+			ss_ data;
+			if(swapped){
+				up_<interface::VoxelRegistry> reg(
+						interface::createVoxelRegistry());
+				reg->set_format(format);
+				reg->add_voxels(defs);
+				reg->set_look_selector(look);
+				data = reg->serialize();
+			}
+			c = std::make_pair(count, data);
+			log_i(MODULE, "Season %s of the scene %s: %zu voxel types' "
+					"textures swapped", cs(season.empty() ? "none" : season),
+					cs(scene), swapped);
+		}
+		const ss_ msg = season+"\n"+c.second;
+		network::access(m_server, [&](network::Interface *inetwork){
+			if(peer >= 0){
+				inetwork->send((size_t)peer, "kit:season", msg);
+				return;
+			}
+			for(auto &p : m_peers)
+				if(p.second.scene == scene)
+					inetwork->send(p.first, "kit:season", msg);
+		});
+	}
+
 	// ---- The players' inventory: count, add, take and list (api.h), Kit's
 	// own counts (m_items) unless one component replaces them
 
@@ -8921,6 +9230,7 @@ struct Module: public interface::Module, public Interface
 			inetwork->send(peer, "kit:you", you.stringify());
 		});
 		send_sky((int64_t)peer);
+		send_env(peer);
 		if(m_session.running)
 			round_join(peer, false);
 		else
@@ -8956,6 +9266,7 @@ struct Module: public interface::Module, public Interface
 				TICK_SLICES : 0;
 		int64_t spent = step_bodies(budget);
 		send_controls();
+		env_tick();
 		if(!m_session.running){
 			// Stopped: components do not run. A write routed to one is
 			// made by no one
@@ -9169,7 +9480,18 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// The movement a body has: its seat's, else the controls' choice
-	void body_movement(Body &b, ss_ &type, json::Value &params)
+	void body_movement(Body &b, ss_ &type, json::Value &params,
+			const ss_ &scene)
+	{
+		body_movement_of(b, type, params);
+		// [KIT_ENVIRONMENT] the scene's gravity, times the movement's own
+		const json::Value &g = params.get("gravity");
+		const double f = env_gravity(scene);
+		if(g.is_number() && f != 1)
+			params.set("gravity", g.as_number() * f);
+	}
+
+	void body_movement_of(Body &b, ss_ &type, json::Value &params)
 	{
 		if(b.seat){
 			auto it = m_entities.find(b.seat);
@@ -9335,7 +9657,7 @@ struct Module: public interface::Module, public Interface
 			double yaw = 0, const json::Value *state = nullptr,
 			double look = NAN)
 	{
-		body_movement(b, b.type, b.params);
+		body_movement(b, b.type, b.params, m_peers[peer].scene);
 		if(state){
 			b.state = state->deepcopy();
 		} else {
@@ -9602,8 +9924,14 @@ struct Module: public interface::Module, public Interface
 			// it is, so the client steps on with the same
 			ss_ type;
 			json::Value params;
-			body_movement(b, type, params);
+			body_movement(b, type, params, pi->second.scene);
 			if(type != b.type || params.stringify() != b.params.stringify()){
+				if(type == b.type && !type.empty()){
+					const json::Value &g = params.get("gravity");
+					log_i(MODULE, "%s's movement %s changed: gravity %s",
+							cs(pi->second.name), cs(type), cs(g.is_number() ?
+							std::to_string(g.as_number()) : ss_("-")));
+				}
 				const json::Value st = b.state.deepcopy();
 				put_body(bp.first, b, 0, 0, 0, 0, &st);
 			}
@@ -9891,6 +10219,7 @@ struct Module: public interface::Module, public Interface
 	{
 		Peer &p = m_peers[peer];
 		const bool join = p.name != name || p.scene != scene;
+		const bool moved_scene = !p.scene.empty() && p.scene != scene;
 		if(p.name != name){
 			const bool was = p.editing;
 			tools(p, peer, false);
@@ -9918,6 +10247,9 @@ struct Module: public interface::Module, public Interface
 			p.guest = m_server->has_module("accounts") &&
 					account_of(peer).empty();
 		world_peer(peer, scene, p.pos[0], p.pos[1], p.pos[2]);
+		// [KIT_ENVIRONMENT] The new scene's environment and season
+		if(moved_scene && m_hosted)
+			send_env(peer);
 		if(!m_hosted)
 			return;
 		// Their entity follows them ([KIT] stage 4d)
@@ -11809,8 +12141,12 @@ struct Module: public interface::Module, public Interface
 			// World on the scene itself, no position (each scene's own),
 			// and a root type asked "on": "scene" (an environment of the
 			// scene's own)
+			// [KIT_ENVIRONMENT] an environment on the root, the scene's
+			// own once the root has one
 			const bool on_scene = m_types[type].world ||
-					(m_types[type].root && jstr(j, "on") == "scene");
+					(m_types[type].root && jstr(j, "on") == "scene") ||
+					(m_types[type].environment && jstr(j, "on") != "root" &&
+					env_at(1));
 			const bool root = m_types[type].root;
 			uint64_t scene = 0;
 			for(auto &e : m_entities)

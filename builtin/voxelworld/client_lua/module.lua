@@ -333,6 +333,13 @@ function M.registry_from_file()
 end
 
 buildat.sub_packet("voxelworld:ready", function(data)
+	-- [KIT_SCENES_READY_AGAIN] Again after a move to another scene (its
+	-- init came first): the events are subscribed and the callbacks run
+	-- already; doing it again drew each chunk twice
+	if is_ready then
+		log:info("voxelworld: ready again (another scene)")
+		return
+	end
 	sub_events()
 	on_ready()
 end)

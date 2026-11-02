@@ -113,7 +113,7 @@ EOF
 	# 4, 5: the cave, its World a copy of the main one's
 	edit '{"op": "new_scene", "name": "cave", "copy": true}'
 	in_scene cave "world, cave"
-	echo "sync 5000"
+	echo "wait_log_any 30000 kit: World of the scene cave: generated"
 	info 3 1 3
 	vox 6 1 6 kit/planks
 	edit '{"op": "set", "id": 5, "comp": 0, "param": "level", "value": 4}'

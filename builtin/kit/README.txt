@@ -43,5 +43,13 @@ textures/default_snow.png (the same pack, CC BY-SA 4.0 by its LEGAL.md;
 the release's files, as poppy.png and mossy_cobble.png there are the same
 bytes as at cfc0913d7bed).
 
+The season textures ([KIT_ENVIRONMENT], materials.json's "seasons") are
+made from those above by a script, under the same licences: snow_top.png
+is snow.png with alpha 0 (untinted on a grass block's top);
+grass_side_snow.png is grass_side.png with snow.png's top four rows (alpha
+0); leaves_autumn.png, leaves_winter.png and tall_grass_autumn.png are
+leaves.png and tall_grass.png re-coloured by their brightness (autumn's
+orange and straw, winter's grey with pale specks), alpha kept.
+
 DiffAlphaMask.xml is Urho3D's Techniques/Diff.xml with ALPHAMASK added
 (MIT, as Urho3D).

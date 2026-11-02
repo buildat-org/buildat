@@ -19,7 +19,10 @@
 //        default), "transparent": a cube cut out by its texture's alpha
 //        (a leaves' always), "light": 0...15 it emits, "friction": 0...10
 //        (1 by default) and "surface": a tag ("road", "ice", "mud";
-//        letters, digits and _, none by default) for what moves on it},
+//        letters, digits and _, none by default) for what moves on it,
+//        [KIT_ENVIRONMENT] "seasons": {season: {"texture" | "top",
+//        "side", "bottom"}, ...}: its look in that season (spring, summer,
+//        autumn, winter; the faces not named its own)},
 //        ...},
 //    "palettes": {name: [entry, ...], ...} ([KIT_TINT_PALETTE]),
 //    "fallbacks": {role: role, ...},
@@ -88,6 +91,7 @@
 // They write ground, air, water and plant cells only, never what a
 // builder put there or a tree.
 #pragma once
+#include <array>
 #include "worldgen/api.h"
 #include "heightmap/api.h"
 #include "luanti_mapgen/api.h"
@@ -231,6 +235,10 @@ struct Material
 	// entry 0 the material's own look: "tint" (TintPalette::parse), Kit's
 	// standard one otherwise
 	TintPalette tint = TintPalette::standard();
+	// [KIT_ENVIRONMENT] Its look in a season (kit/environment's), by the
+	// season's name: top, side, bottom textures (the client swaps them,
+	// the voxels unchanged)
+	sm_<ss_, std::array<ss_, 3>> seasons;
 
 	// A set's voxel or a builder's ([KIT] stage 4g: the same fields);
 	// palettes: the set's named ones
@@ -249,6 +257,27 @@ struct Material
 		const json::Value &f = j.get("friction");
 		friction = f.is_number() ? f.as_number() : 1;
 		surface = json::jstr(j, "surface");
+		seasons.clear();
+		bool seasons_ok = true;
+		const json::Value &ss = j.get("seasons");
+		if(ss.is_object()){
+			for(json::Iterator it(ss); it; ++it){
+				const ss_ k = it.key();
+				if(k != "spring" && k != "summer" && k != "autumn" &&
+						k != "winter"){
+					seasons_ok = false;
+					continue;
+				}
+				const ss_ st = json::jstr(*it, "texture");
+				std::array<ss_, 3> f = {{json::jstr(*it, "top",
+						st.empty() ? top : st), json::jstr(*it, "side",
+						st.empty() ? side : st), json::jstr(*it, "bottom",
+						st.empty() ? bottom : st)}};
+				seasons[k] = f;
+			}
+		} else if(!ss.is_undefined()){
+			seasons_ok = false;
+		}
 		const json::Value &tr = j.get("tint");
 		bool tint_ok = tr.is_undefined() || tr.is_null();
 		if(!tint_ok)
@@ -260,7 +289,8 @@ struct Material
 				light >= 0 && light <= 15 && (kind == "solid" ||
 				kind == "water" || kind == "leaves" || kind == "plant" ||
 				kind == "glass") &&
-				friction >= 0 && friction <= 10 && tag_ok && tint_ok;
+				friction >= 0 && friction <= 10 && tag_ok && tint_ok &&
+				seasons_ok;
 	}
 
 	// Its properties as a builder's row has them, for a palette and
