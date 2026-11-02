@@ -62,7 +62,8 @@ namespace command_seq
 		WaitLogAny,
 		// click <type> "<label>" [x y]: a left click at the centre of the
 		// visible, uncovered UI element of that type whose label matches
-		// (a trailing * is a prefix), the nearest the hint ([SEQ_CLICK]).
+		// (a trailing * is a prefix), the nearest the hint ([SEQ_CLICK]);
+		// or whose name does, for one of several alike ([KIT_LIST_TABS]).
 		// s is the type, param the label, n 1 with a hint in x, y.
 		Click,
 		// frames <n>: n rendered frames ([DRIVE_WAITS])

@@ -342,8 +342,14 @@
 					itos((int)(e->GetWidth() * k))+"x"+
 					itos((int)(e->GetHeight() * k));
 			ss_ left;
-			if(prefix ? label.compare(0, want_s.size(), want_s) != 0 :
-					label != want_s)
+			// Or its name: one of several alike (a list's "Select"s) by
+			// whose it is ([KIT_LIST_TABS])
+			ss_ name = e->GetName().CString();
+			auto match = [&](const ss_ &l){
+				return prefix ? l.compare(0, want_s.size(), want_s) == 0 :
+						l == want_s;
+			};
+			if(!match(label) && !match(name))
 				left = "another label";
 			else if(!e->IsVisibleEffective())
 				left = "hidden";
