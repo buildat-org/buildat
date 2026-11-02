@@ -843,6 +843,7 @@ rebuild_bar = function()
 	w:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(6, 6, 6, 6))
 	bar_row, bar_used, bar_first = row(w), 0, true
 	bar_room = magic.ui.root.width - 16 - 12
+	S.bar_root_w = magic.ui.root.width
 	if O.menu then
 		bar_button("Menu", "Esc", function()
 			O.menu()
@@ -943,6 +944,27 @@ local function log_bar()
 	if s ~= bar_logged then
 		bar_logged = s
 		log:info("kit editor: bar: " .. s)
+		-- [KIT_BAR_SERVER_OVERLAP] the first row's right end and the
+		-- server button's left (builtin/accounts'), for a check
+		local y0, x1 = t[1] and bar_items[1][2].screenPosition.y, 0
+		for _, it in ipairs(bar_items) do
+			local p = it[2].screenPosition
+			if p.y == y0 then
+				x1 = math.max(x1, p.x + it[2].width)
+			end
+		end
+		local root = magic.ui.root
+		for i = 0, root:GetNumChildren() - 1 do
+			-- nil for the client's own hidden UI
+			local c = root:GetChild(i)
+			local t = c and c:GetTypeName() == "Button" and c.visible and
+					c:GetNumChildren() > 0 and c:GetChild(0)
+			if t and t:GetTypeName() == "Text" and t.text == "Server" then
+				log:info(string.format("kit editor: bar's first row ends at "
+						.. "%d, the Server button from %d", x1,
+						c.screenPosition.x))
+			end
+		end
 	end
 end
 
@@ -4660,6 +4682,12 @@ local function draw()
 		show_ports("in", nil)
 		draw_play_links()
 		return
+	end
+	-- [KIT_BAR_SERVER_OVERLAP] Wrapped again at a new width: the UI fit's
+	-- scale changes the root's, and a bar wrapped for the old one ran
+	-- under the Server button at the top right
+	if W.bar and S.bar_root_w ~= magic.ui.root.width then
+		rebuild_bar()
 	end
 	fit_people()
 	fit_inspector()

@@ -377,6 +377,12 @@ J
 		/kit editor: 10\/1 place = all/ && o { ok = 1; exit }
 		END { exit !ok }' "$t/out/page.log" ||
 		fail "the UI scale moved with the inspector's lists up ($t/out/page.log)"
+	# [KIT_BAR_SERVER_OVERLAP] The bar's first row clear of the Server
+	# button at every width the fit gave it
+	awk '/kit editor: bar.s first row ends at/ { n++; e = $(NF - 5) + 0;
+			l = $NF + 0; if (e >= l) { print; bad = 1 } }
+		END { exit bad || !n }' "$t/out/page.log" ||
+		fail "the bar's first row under the Server button ($t/out/page.log)"
 	for w in "An edit by webboss: placed kit/button 3 at [4,1,3]" \
 			"An edit by webboss: moved 3 to [1,1,3]" \
 			"kit/button 3: pressed by webboss" \
