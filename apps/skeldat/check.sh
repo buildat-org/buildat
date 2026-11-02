@@ -779,9 +779,14 @@ CHECK_PIDS+=($SERVER_PID)
 # The button held until the client's dig is done ([SKELDAT_DIG_BEFORE_KIT]:
 # a fixed 600 ms for the hand's 0.5 s ran out on a busy client, whose
 # frame times lag the wall clock's, and no dig was sent)
+# [SK_BOW_DRAW_SLOW_HOST] The place when the skull is in the hand: a busy
+# client (600 KB of the world's packets behind) had the inventory still on
+# its way after a fixed 800 ms, and no place was sent; then waited for
+# the client's "place sent"
 printf '%s\n' "$placed" "delay 1500" "look 0 -60" "delay 500" "mouse_down left" \
-	"wait_log 5000 dig: done at" "mouse_up left" "delay 800" "look 0 -60" "delay 500" \
-	"mouse_down right" "delay 150" "mouse_up right" "delay 800" \
+	"wait_log 5000 dig: done at" "mouse_up left" \
+	"wait_log_any 20000 skeldat: in hand skeldat:marker_skull" "look 0 -60" "delay 500" \
+	"mouse_down right" "wait_log 10000 skeldat: place sent at" "mouse_up right" "delay 800" \
 	"screenshot $t/take.png" "delay 14000" quit > "$t/take.cmds"
 client take "$t/take.cmds"
 wait $CLIENT || fail "the drive by the lantern ($t/take.log)"

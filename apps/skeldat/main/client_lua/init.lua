@@ -181,9 +181,23 @@ function game.changed()
 	end
 end
 
+-- [SK_BOW_DRAW_SLOW_HOST] What the hand holds, said as it changes: a
+-- check's place waits for it (an item dug comes into the hand with the
+-- inventory, which a busy client handles behind the world's packets)
+local hand_said = nil
+local function say_hand()
+	local st = game.parse_stack and game.inv.main and
+			game.parse_stack(game.inv.main[game.wield])
+	local name = st and st.name or ""
+	if name ~= hand_said then
+		hand_said = name
+		log:info("skeldat: in hand " .. (name ~= "" and name or "nothing"))
+	end
+end
 buildat.sub_packet("skeldat:inv", function(data)
 	parse_lists(data, game.inv)
 	game.changed()
+	say_hand()
 end)
 
 buildat.sub_packet("skeldat:node_inv", function(data)
@@ -1369,6 +1383,7 @@ local function on_place()
 		game.send_luanti("place", {under = voxel(pointed), above = voxel(above),
 				sneak = 0}, {"object", {"under", VOXEL}, {"above", VOXEL},
 				{"sneak", "byte"}})
+		log:info("skeldat: place sent at " .. pkey(above))
 		node_sound("place", wielded(), above, 1.0)
 	end
 end
