@@ -1269,9 +1269,7 @@ log26="$t/srv26.log"
 	shot 1200 "$t/bow_full.png"
 	printf '%s\n' "mouse_down left" "wait_log 10000 skeldat: the bow past 0.4" \
 		"mouse_up left" "delay 1500"
-	# The tap: pressed and let go in one frame (a delay of 10 was a frame,
-	# 0.42 at 2 frames a second)
-	printf '%s\n' "mouse_down left" "mouse_up left" "delay 1500"
+	shot 10
 	printf '%s\n' "mouse_down left" "wait_log 10000 skeldat: the bow past 0.4" \
 		"screenshot $t/bow_half.png" "delay 1200" "mouse_up left" "delay 1500"
 	shot 1200
@@ -1312,9 +1310,9 @@ undrawn=$(grep -ac "client1 lets the bow go undrawn" "$s1")
 # [CHECK_TIMING_LIMITS] Each draw the server timed is the hold the client
 # timed (its "released at", 0.04 apart on the check box), and goes undrawn
 # exactly when that is under BOW_MIN (0.1). The part draw is let go at
-# the client's own line past 0.4 and the tap within one frame
-# ([SK_BOW_DRAW_SLOW_HOST]): wall-clock delays a slow client stretched by
-# its frames (at 2 frames a second the half held 1.0)
+# the client's own line past 0.4 ([SK_BOW_DRAW_SLOW_HOST]): a wall-clock
+# delay a slow client stretched by its frames (at 2 frames a second the
+# half held 1.0); the tap is a frame, judged by the client's frames
 python3 -I - "$t/bow1.log" "$s1" <<'PY' || fail "the bow's draws: $speeds, $undrawn undrawn ($s1, $t/bow1.log)"
 import re, sys
 held = [float(x) for x in re.findall(r"skeldat: the bow released at ([\d.]+)", open(sys.argv[1], errors="replace").read())]
@@ -1322,7 +1320,12 @@ srv = [float(a or b) for a, b in re.findall(r"client1 (?:shoots an arrow at [\d.
 assert len(held) == len(srv) and len(held) >= 7, (held, srv)
 for h, s in zip(held, srv):
     assert abs(h - s) <= 0.15 and ((s < 0.1) == (h < 0.1) or abs(h - 0.1) < 0.05), (h, s)
-assert held[0] == 1 and 0.4 <= held[1] < 0.95 and held[2] < 0.5, held[:3]
+# The tap is one frame at least (a mouse_up waits for the frame that read
+# the down, [SEQ_HOLD_FRAME]): under 0.5, or two of the client's slowest
+# frame average (0.47 at 2 to 4 frames a second)
+frames = [float(x) / 1000 for x in re.findall(r"skeldat: frames ([\d.]+) ms", open(sys.argv[1], errors="replace").read())]
+tap = max([0.5] + [2 * f for f in frames])
+assert held[0] == 1 and 0.4 <= held[1] < 0.95 and held[2] < tap, (held[:3], tap)
 print("the bow: held %s, the server's %s" % (held, srv))
 PY
 [ $# -ge 7 ] && [ $draws = $(($# + undrawn)) ] && [ $draws -lt 11 ] ||
