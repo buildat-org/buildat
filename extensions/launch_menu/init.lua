@@ -665,6 +665,16 @@ local function now_rows()
 	return out
 end
 
+-- **Home's selection is an item, not a place** ([LAUNCHER_SELECTION_JUMP],
+-- user): Home drawn again (the Hearth's rows arriving above the last
+-- used one) puts it back on the item it was on, by what the item is, and
+-- scrolls to it. A new search starts from its first row.
+local home_sel = nil -- {query, id}
+local function ident(e)
+	return tostring(e.key or e.id or (tostring(e.kind) .. ":" ..
+			tostring(e.label)))
+end
+
 local function home(query)
 	local t0 = api.get_time_us()
 	local width = math.min(magic.ui.root.width - 40, 760)
@@ -771,10 +781,21 @@ local function home(query)
 		local item = index and items[index]
 		if not (selected and item) then return end
 		local e = item.entry
+		home_sel = {query = query, id = ident(e)}
 		desc.text = (e.badge and e.badge .. ": " or "") ..
 				(e.description or "")
 		if not by_mouse then view:show(button) end
 	end)
+	local kept = home_sel and home_sel.query == query and home_sel.id
+	for i, item in ipairs(kept and items or {}) do
+		if ident(item.entry) == kept then
+			item.button:SetFocus(true)
+			-- What a check waits for
+			log:info("launch_menu: the selection kept on " ..
+					tostring(item.entry.label) .. ", row " .. i)
+			break
+		end
+	end
 	log:info("launch_menu: " .. #items .. " rows" ..
 			(query ~= "" and " for \"" .. query .. "\"" or "") .. " in " ..
 			math.floor((api.get_time_us() - t0) / 1000) .. " ms" ..
