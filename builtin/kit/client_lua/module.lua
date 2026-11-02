@@ -840,7 +840,9 @@ local function update_play(_, data)
 							if h <= n.board_h * 0.9 or k <= 0.3 then
 								break
 							end
-							k = math.max(0.3, k * n.board_h * 0.9 / h)
+							-- Wrapped wider as it shrinks: its height goes
+							-- about as the square of the size
+							k = math.max(0.3, k * math.sqrt(n.board_h * 0.9 / h))
 						end
 						log:info(string.format("kit: entity %d's text wrapped "
 								.. "at %d px, x%.2f, %.2f of %.2f cells high", id,
