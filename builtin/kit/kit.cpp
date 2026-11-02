@@ -3496,6 +3496,8 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		m_host.scenes[name] = ref;
+		if(m_session.running)
+			watch_scene(name, ref, true);
 		log_i(MODULE, "Scene %s made by the app", cs(name));
 		return true;
 	}
@@ -11060,24 +11062,31 @@ struct Module: public interface::Module, public Interface
 	// a persistent world: nothing to put back
 	void watch(bool on)
 	{
+		for(auto &s : m_host.scenes)
+			watch_scene(s.first, s.second, on);
+	}
+
+	// One scene's watch; [KIT_SCENE_RUNNING_UNWATCHED] a scene made while
+	// Running gets its own at once
+	void watch_scene(const ss_ &name, main_context::SceneReference ref,
+			bool on)
+	{
 		on = on && !m_host.persistent;
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
-			for(auto &s : m_host.scenes){
-				voxelworld::Instance *w = ivw->get_instance(s.second);
-				if(!w)
-					continue;
-				sp_<Watch> wt;
-				if(on){
-					wt = std::make_shared<Watch>();
-					wt->scene = s.first;
-					wt->mutex = &m_copies_mutex;
-					wt->queue = &m_copies;
-					wt->copied = m_session.copied;
-					wt->copied.insert(m_session.restore.begin(),
-							m_session.restore.end());
-				}
-				w->set_section_watch(wt);
+			voxelworld::Instance *w = ivw->get_instance(ref);
+			if(!w)
+				return;
+			sp_<Watch> wt;
+			if(on){
+				wt = std::make_shared<Watch>();
+				wt->scene = name;
+				wt->mutex = &m_copies_mutex;
+				wt->queue = &m_copies;
+				wt->copied = m_session.copied;
+				wt->copied.insert(m_session.restore.begin(),
+						m_session.restore.end());
 			}
+			w->set_section_watch(wt);
 		});
 	}
 

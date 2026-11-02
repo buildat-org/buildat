@@ -14,6 +14,9 @@
 #      sign, two-way: a teleporter back on the sign. Played: the
 #      teleporter takes the admin to the cave, onto the sign without
 #      stepping on its teleporter; the sign's takes them back.
+#      [KIT_SCENE_RUNNING_UNWATCHED] A scene "mine" made while Running,
+#      a cell there turned to air by a kit/voxel_replace; Stop puts it
+#      back.
 #   2. The save's World moved onto the root (as before scenes); a
 #      restart: it moves back onto the main scene, the scenes are made
 #      again by the app, each its voxels. [KIT_SCENE_HEIGHTMAP_SHOWN]
@@ -149,6 +152,28 @@ EOF
 	echo 'event kit_edit {"op": "try", "id": 6, "comp": 1, "input": "teleport"}'
 	in_scene world "world, cave, sky"
 	echo "sync 5000"
+	# [KIT_SCENE_RUNNING_UNWATCHED] A scene made while Running: a game
+	# change there (a kit/voxel_replace 10 turned on: its stone to air;
+	# a builder's own set_voxel is an edit, kept) is put back by Stop
+	echo 'event kit_edit {"op": "new_scene", "name": "mine"}'
+	in_scene mine "world, cave, sky, mine"
+	echo "wait_log_any 30000 kit: World of the scene mine: generated"
+	info 2 0 2
+	cat <<'EOF'
+event kit_edit {"op": "place", "type": "kit/voxel_replace", "pos": [2, 0, 2]}
+sync 5000
+event kit_edit {"op": "try", "id": 10, "comp": 0, "input": "on"}
+sync 5000
+EOF
+	info 2 0 2
+	cat <<'EOF'
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended (by kitboss)
+sync 5000
+event kit_edit {"op": "scene", "name": "mine"}
+sync 5000
+EOF
+	info 2 0 2
 	echo quit
 } > "$t/boss1.cmds"
 server 1
@@ -182,6 +207,11 @@ want "$s" ", a teleporter back on entity 6" \
 grep -aq "kit/teleporter 6: stepped on by\|kit/teleporter 8: stepped on by" "$s" &&
 	fail "an arrival stepped on the teleporter it arrived on ($s)"
 echo "ok: a two-way teleporter between scenes: there onto the sign and back, arriving silently"
+[ "$(line 5)" = "(2,0,2): air, param 0, tint 0, sky light 0" ] ||
+	fail "the voxel_replace in the scene mine: \"$(line 5)\" ($s)"
+[ -n "$(line 4)" ] && [ "$(line 6)" = "$(line 4)" ] ||
+	fail "Stop did not put back a game change in a scene made while Running: \"$(line 6)\", not \"$(line 4)\" ($s)"
+echo "ok: a scene made while Running: Stop puts back a game change there"
 db=$(find "$t/user" -name save.sqlite -path "*/saves/world/*" | head -1)
 [ -n "$db" ] || fail "no save.sqlite under $t/user"
 python3 - "$db" <<'PY' || fail "the scenes in the save ($db)"
@@ -216,14 +246,14 @@ wait_log 10000 kit editor: state:
 EOF
 	info 3 1 3
 	ed '{"op": "scene", "name": "cave"}'
-	in_scene cave "world, cave, sky"
+	in_scene cave "world, cave, sky, mine"
 	echo "sync 5000"
 	info 6 1 6
 	info 3 1 3
 	# [KIT_SCENE_HEIGHTMAP_SHOWN] A heightmap in the main scene, not
 	# drawn in the cave; each World labelled as its scene's
 	ed '{"op": "scene", "name": "world"}'
-	in_scene world "world, cave, sky"
+	in_scene world "world, cave, sky, mine"
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "size", "value": "finite"}'
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "surface", "value": "heightmap"}'
 	cat <<'EOF'
@@ -233,7 +263,7 @@ frames 10
 click Text "Scene world: 3 *"
 event kit_edit {"op": "scene", "name": "cave"}
 EOF
-	in_scene cave "world, cave, sky"
+	in_scene cave "world, cave, sky, mine"
 	cat <<'EOF'
 wait_log_any 10000 heightmap: removed
 sync 5000
@@ -254,5 +284,5 @@ expect 2 "(6,1,6): kit/planks, param 0, tint 0, sky light 0"
 expect 3 "(3,1,3): air, param 0, tint 0, sky light 0"
 echo "ok: after a restart a root World moves onto the main scene; the scenes are made again, each its voxels"
 echo "ok: a heightmap in the main scene is dropped in a voxel scene; each World labelled as its scene's"
-echo "PASS: scenes: a new scene with its World copied or blank, switched between, each its voxels and World row; refusals; a two-way teleporter between scenes, arriving silently; a root World migrated and the scenes back after a restart; no heightmap of another scene drawn"
+echo "PASS: scenes: a new scene with its World copied or blank, switched between, each its voxels and World row; refusals; a two-way teleporter between scenes, arriving silently; a root World migrated and the scenes back after a restart; a scene made while Running put back by Stop; no heightmap of another scene drawn"
 # vim: set noet ts=4 sw=4:
