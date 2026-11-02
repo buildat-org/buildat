@@ -11,7 +11,7 @@
 #      grassland only the top role) packed and published.
 #   2. The admin installs blueland from the New tab (redland with it,
 #      first); places a World (flat grassland, Kit's set), a cobble voxel
-#      at (5,1,5); switches the World to redland: the sections nobody
+#      at (-20,1,-20), away from the spawn's section; switches the World to redland: the sections nobody
 #      wrote generated again, red_grass on top and redland's filler
 #      (gravel) under it, the cobble's section kept (the seams warned;
 #      its Kit grass at y 0 too; the section under it, y < 0, generated
@@ -162,21 +162,21 @@ wait_log 10000 entities, 1 to undo
 EOF
 	n=1
 	regen_w biome '"grassland"'
-	echo 'event workbench_build {"p": [5, 1, 5], "voxel": "kit/cobble"}'
+	echo 'event workbench_build {"p": [-20, 1, -20], "voxel": "kit/cobble"}'
 	echo 'sync 5000'
-	column -20 -20
+	column 20 20
 	shot kit
 	regen_w materials "\"$fp/redland\""
 	echo "wait_log_any 10000 kit: warning: World: 1 edited sections kept"
+	column 20 20
 	column -20 -20
-	column 5 5
 	shot red
 	set_w biome '"meadow"'
 	echo "wait_log_any 10000 kit: warning: World: not applied: the flat generator needs the role stone"
 	set_w biome '"grassland"'
 	regen_w materials "\"$fp/blueland\""
+	column 20 20
 	column -20 -20
-	column 5 5
 	shot blue
 	echo quit
 } > "$t/boss.cmds"
@@ -207,16 +207,16 @@ want(){ # <log> <text>...
 want "$s" "installed alice/redland 1.0.0: 0 types, 0 prefabs, 1 voxel types, a material set" \
 	"installed alice/blueland 1.0.0: 0 types, 0 prefabs, 1 voxel types, a material set" \
 	"; materials kit/default" "; materials alice/redland" "; materials alice/blueland" \
-	"column (-20,-20): air 1..2, kit/grass 0, kit/dirt -3..-1" \
-	"column (-20,-20): air 1..2, $fp/red_grass 0, kit/gravel -3..-1" \
-	"column (-20,-20): air 1..2, $fp/blue_grass 0, kit/gravel -3..-1" \
+	"column (20,20): air 1..2, kit/grass 0, kit/dirt -3..-1" \
+	"column (20,20): air 1..2, $fp/red_grass 0, kit/gravel -3..-1" \
+	"column (20,20): air 1..2, $fp/blue_grass 0, kit/gravel -3..-1" \
 	"World: not applied: the flat generator needs the role stone, which biome meadow has none of (material set alice/redland"
 # The cobble's section (y 0...63, the grass at 0 in it) kept, the one
 # under it (y -64...-1) generated again: the set's filler there
-[ "$(grep -ac "column (5,5): kit/cobble 1, kit/grass 0, kit/gravel -3..-1" "$s")" = 2 ] ||
+[ "$(grep -ac "column (-20,-20): kit/cobble 1, kit/grass 0, kit/gravel -3..-1" "$s")" = 2 ] ||
 	fail "the placed cobble's section not kept, or the one under it not generated again ($s)"
-[ "$(grep -an "installed alice/redland" "$s" | cut -d: -f1)" -lt \
-	"$(grep -an "installed alice/blueland" "$s" | cut -d: -f1)" ] ||
+[ "$(grep -an "installed alice/redland" "$s" | head -1 | cut -d: -f1)" -lt \
+	"$(grep -an "installed alice/blueland" "$s" | head -1 | cut -d: -f1)" ] ||
 	fail "the base set not first ($s)"
 want "$t/boss.log" "kit: warning: World: 1 edited sections kept" \
 	"kit: warning: World: not applied: the flat generator needs the role stone"
