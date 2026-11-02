@@ -809,8 +809,14 @@ BUILDAT_SKELDAT_WORLD=dig BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BU
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv14" -C "$t/srv.cache" -l 3 || fail "the server ($log14)"
 CHECK_PIDS+=($SERVER_PID)
+# [SK_BOW_DRAW_SLOW_HOST] The holds by the client's lines, not wall time:
+# the dig let go at its "done" (held 2500 ms, a busy client dug the same
+# voxel again before the server's air reached it, and the server refused
+# it: 2 dones, 1 dig), the second press looked away at its first crack
+# frame (a wait_log sees the lines after it starts)
 printf '%s\n' "$placed" "delay 1500" "look 0 -60" "delay 500" "mouse_down left" \
-	"delay 2500" "mouse_up left" "delay 500" "mouse_down left" "delay 200" \
+	"wait_log 10000 dig: done at" "mouse_up left" "delay 500" "mouse_down left" \
+	"wait_log 5000 dig: the crack's frame" \
 	"look 0 60" "delay 500" "mouse_up left" "delay 500" quit > "$t/dig.cmds"
 client dig "$t/dig.cmds"
 wait $CLIENT || fail "the dig's drive ($t/dig.log)"
