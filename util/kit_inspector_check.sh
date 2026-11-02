@@ -60,6 +60,7 @@ wait_log 10000 entities, 3 to undo
 keypress F6
 wait_log_any 10000 kit: controls: camera
 EOF
+sed -i "s|@T@|$t|g" "$t/boss.cmds"
 start_server "$t/srv.log" "Listening at" 300 auto \
 	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 ||
 	fail "the server did not come up ($t/srv.log)"
