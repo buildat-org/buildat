@@ -16,7 +16,8 @@
 #       here");
 #   22: not its region's owner ("Locked: its owners' only").
 # [KIT_USE_FLOOD] Then 5000 uses of a kit/button (24) out of his range at
-# once: the refusal logged once, nothing queued; 18 used after: D shuts.
+# once: the refusal logged once, nothing queued; 18 used after (up again
+# after its hold): D shuts.
 #
 #   util/kit_use_access_check.sh
 set -u
@@ -104,6 +105,7 @@ event kit_use 22
 wait_log 10000 kit: warning: Locked: its owners' only
 event kit_use_flood 24 5000
 sync 3000
+delay 2000
 event kit_use 18
 wait_log 10000 replicated: entity 17 open = false
 sync 2000
