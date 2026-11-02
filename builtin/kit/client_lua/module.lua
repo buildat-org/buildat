@@ -745,6 +745,26 @@ local function entity_view(id, n)
 	return e
 end
 
+-- [KIT_NESTING] The way an entity's looks are carried by those it is
+-- under ("kit_parent", the entity it is under) as their looks slide
+-- (kit/mover): its node is where the slide ends (the server's), the look
+-- where the parent's is on the way
+local function carried(n)
+	local d = magic.Vector3(0, 0, 0)
+	local pid = n.node:GetVar("kit_parent"):GetInt()
+	for _ = 1, 16 do
+		local pn = pid ~= 0 and P.nodes[pid]
+		if not pn then
+			break
+		end
+		if pn.slide_at and pn.slide_to and pn.look then
+			d = d + pn.look.rotation * (pn.slide_at - pn.slide_to)
+		end
+		pid = pn.node:GetVar("kit_parent"):GetInt()
+	end
+	return d
+end
+
 local hud = nil
 local function update_play(_, data)
 	local dt = data:GetFloat("TimeStep")
@@ -807,6 +827,8 @@ local function update_play(_, data)
 			if pv then
 				p = magic.Vector3(pv[1], pv[2], pv[3])
 				yaw = pv[4]
+			else
+				p = p + carried(n)
 			end
 			if not n.at or (n.at - p):Length() > 1e-4 or
 					math.abs(yaw - n.at_yaw) > 1e-3 then

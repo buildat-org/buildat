@@ -91,6 +91,8 @@ static const size_t MAX_EDIT_PACKET = 4096;
 static const size_t MAX_STRING = 256;
 static const double MAX_COORD = 30000;
 static const size_t MAX_ENTITIES = 4096;
+// [KIT_NESTING] The levels of entities under entities a scene has at most
+static const int MAX_NEST = 16;
 static const size_t MAX_LINKS = 64;
 // [KIT] stage 4g: the builders' voxel types and uploaded textures a save
 // has at most, and what an upload may be
@@ -1499,10 +1501,201 @@ struct Module: public interface::Module, public Interface
 		return nullptr;
 	}
 
-	static pv::Vector3DInt32 voxel_p(const Entity &e)
+	// ---- [KIT_NESTING] Children for places: an entity under a positioned
+	// one has its position and yaw in its parent's frame, moving and turning
+	// with it; under a scene, the world's. Its node is its scene's child
+	// all the same, at its place in the world, with "kit_parent" its
+	// parent's id (0: none).
+	// simplified: replicate's nodes flat, each placed in the world (the
+	// clients' code reads node.position as the world's); a parent's move
+	// places each node under it again, a scan of the entities a level
+
+	// A turn round y by yaw degrees (Urho3D's: +z towards +x)
+	static void turn_xz(double yaw, double &x, double &z)
 	{
-		return pv::Vector3DInt32((int32_t)std::floor(e.pos[0]),
-				(int32_t)std::floor(e.pos[1]), (int32_t)std::floor(e.pos[2]));
+		if(yaw == 0)
+			return;
+		const double r = yaw * 3.14159265358979323846 / 180;
+		const double c = std::cos(r), s = std::sin(r);
+		const double nx = x * c + z * s, nz = -x * s + z * c;
+		x = nx;
+		z = nz;
+	}
+
+	// The frame the entities under id are in: its place in the world,
+	// moved by what its look carries (kit/mover's offset while out: they
+	// go where it goes, at once, as its box does for the players); the
+	// world's for a scene, the root or one with no position
+	void frame_of(uint64_t id, double o[3], double &yaw, int depth = 0)
+	{
+		o[0] = o[1] = o[2] = 0;
+		yaw = 0;
+		auto it = m_entities.find(id);
+		if(it == m_entities.end() || !it->second.has_pos ||
+				depth > MAX_NEST + 2)
+			return;
+		const Entity &e = it->second;
+		world_of(e, o, &yaw, depth + 1);
+		for(const Instance &in : e.comps){
+			auto ti = m_types.find(in.type);
+			if(ti == m_types.end())
+				continue;
+			const json::Value &d = ti->second.decl.get("look");
+			const ss_ key = d.is_object() ? jstr(d, "state") : ss_();
+			if(key.empty() || !in.state.get(key).is_true() ||
+					!d.get("when").is_object() ||
+					d.get("when").get("offset").is_undefined())
+				continue;
+			const json::Value off = look_of(in, d).get("when").get("offset");
+			if(!pos_ok(off))
+				continue;
+			double x = off.at(0u).as_number(), z = off.at(2u).as_number();
+			turn_xz(yaw, x, z);
+			o[0] += x;
+			o[1] += off.at(1u).as_number();
+			o[2] += z;
+			break;
+		}
+	}
+
+	// An entity's place and yaw in the world
+	void world_of(const Entity &e, double w[3], double *wyaw = nullptr,
+			int depth = 0)
+	{
+		double o[3], py;
+		frame_of(e.parent, o, py, depth);
+		double x = e.pos[0], z = e.pos[2];
+		turn_xz(py, x, z);
+		w[0] = o[0] + x;
+		w[1] = o[1] + e.pos[1];
+		w[2] = o[2] + z;
+		if(wyaw){
+			*wyaw = std::fmod(py + e.yaw, 360.0);
+			if(*wyaw < 0)
+				*wyaw += 360;
+		}
+	}
+
+	// A place and yaw in the world as an entity under `parent` has them
+	void to_local(uint64_t parent, const double w[3], double l[3],
+			double wyaw = 0, double *lyaw = nullptr)
+	{
+		double o[3], py;
+		frame_of(parent, o, py);
+		double x = w[0] - o[0], z = w[2] - o[2];
+		turn_xz(-py, x, z);
+		l[0] = x;
+		l[1] = w[1] - o[1];
+		l[2] = z;
+		if(lyaw)
+			*lyaw = norm_yaw(wyaw - py);
+	}
+
+	// A row's "pos" and "yaw", given in the world, made its parent's
+	// frame's (on the grid; nothing for a row under a scene)
+	void localize(json::Value &row)
+	{
+		const uint64_t parent = (uint64_t)json::jint(row, "parent", 0);
+		auto pi = m_entities.find(parent);
+		if(!pos_ok(row.get("pos")) || pi == m_entities.end() ||
+				!pi->second.has_pos)
+			return;
+		double w[3], l[3], ly;
+		for(unsigned k = 0; k < 3; k++)
+			w[k] = row.get("pos").at(k).as_number();
+		const double wy = row.get("yaw").is_number() ?
+				row.get("yaw").as_number() : 0;
+		to_local(parent, w, l, wy, &ly);
+		json::Value pos = json::array();
+		for(int k = 0; k < 3; k++)
+			pos.append(grid(l[k]));
+		row.set("pos", pos);
+		row.set("yaw", ly);
+	}
+
+	// An authored row as the editors get it: its place and yaw the
+	// world's
+	json::Value world_row(const Entity &e)
+	{
+		json::Value j = entity_json(e);
+		auto pi = m_entities.find(e.parent);
+		if(!e.has_pos || pi == m_entities.end() || !pi->second.has_pos)
+			return j;
+		double w[3], wy;
+		world_of(e, w, &wy);
+		json::Value pos = json::array();
+		for(int k = 0; k < 3; k++)
+			pos.append(w[k]);
+		j.set("pos", pos);
+		j.set("yaw", wy);
+		return j;
+	}
+
+	// Whether an entity's place in the tree may be: under one that is
+	// there; one with a position under a scene or a positioned entity (no
+	// player); no loop, MAX_NEST levels under its scene at most. Its own
+	// id may be in the tree already (an edit of it)
+	bool nest_ok(const Entity &n, ss_ &why)
+	{
+		auto pi = m_entities.find(n.parent);
+		if(n.id == 1)
+			return true;
+		if(pi == m_entities.end()){
+			why = "entity "+itos(n.id)+": no parent "+itos(n.parent);
+			return false;
+		}
+		if(n.has_pos && pi->second.kind != "scene" && (!pi->second.has_pos ||
+				!pi->second.kind.empty())){
+			why = "entity "+itos(n.id)+"'s parent "+itos(n.parent)+
+					" is no scene and has no position";
+			return false;
+		}
+		uint64_t id = n.parent;
+		for(int i = 0; id != 1; i++){
+			auto it = m_entities.find(id);
+			if(id == n.id || it == m_entities.end() || i > MAX_NEST + 2){
+				why = "entity "+itos(n.id)+"'s parent "+itos(n.parent)+
+						(id == n.id ? " is under it" : it == m_entities.end() ?
+						" is not under the root" : " is too deep");
+				return false;
+			}
+			id = it->second.parent;
+		}
+		return true;
+	}
+
+	// An entity's node at its place in the world, and those under it
+	void place_nodes(uint64_t id, int depth = 0)
+	{
+		auto it = m_entities.find(id);
+		if(it == m_entities.end())
+			return;
+		Entity &e = it->second;
+		if(e.node){
+			double w[3], wy;
+			world_of(e, w, &wy);
+			main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
+				magic::Node *n = sc->GetNode(e.node);
+				if(n){
+					n->SetPosition(magic::Vector3(w[0], w[1], w[2]));
+					n->SetRotation(magic::Quaternion(0, (float)wy, 0));
+				}
+			});
+		}
+		if(depth > MAX_NEST || e.kind == "player")
+			return;
+		for(auto &p : m_entities)
+			if(p.second.parent == id && p.first != id && p.second.has_pos)
+				place_nodes(p.first, depth + 1);
+	}
+
+	// The cell an entity is in, the world's
+	pv::Vector3DInt32 voxel_p(const Entity &e)
+	{
+		double w[3];
+		world_of(e, w);
+		return pv::Vector3DInt32((int32_t)std::floor(w[0]),
+				(int32_t)std::floor(w[1]), (int32_t)std::floor(w[2]));
 	}
 
 	// An extent parameter's cells each way: whole numbers, 1...MAX_EXTENT
@@ -2013,10 +2206,10 @@ struct Module: public interface::Module, public Interface
 		m_next_id = std::max<uint64_t>((uint64_t)json::jint(c, "next_id", 2), 2);
 		for(auto &p : m_entities){
 			Entity &e = p.second;
-			if(e.id != 1 && !m_entities.count(e.parent)){
-				why = "entity "+itos(e.id)+": no parent "+itos(e.parent);
+			// [KIT_NESTING] under one that is there, a positioned one under
+			// a scene or a positioned entity, no loop
+			if(!nest_ok(e, why))
 				return false;
-			}
 			m_next_id = std::max(m_next_id, e.id + 1);
 			if(e.kind == "scene" && !m_host.scenes.count(e.name) &&
 					!make_scene(e.name, why))
@@ -2047,8 +2240,10 @@ struct Module: public interface::Module, public Interface
 		return !e.made && e.kind != "player";
 	}
 
-	// The composition: the authored entities, those play removed too
-	json::Value authored_json()
+	// The composition: the authored entities, those play removed too.
+	// world: [KIT_NESTING] each one's place and yaw the world's (the
+	// editors'), else its parent's frame's (the save's)
+	json::Value authored_json(bool world = false)
 	{
 		std::map<uint64_t, const Entity*> all;
 		for(auto &p : m_entities)
@@ -2059,7 +2254,7 @@ struct Module: public interface::Module, public Interface
 		json::Value c = json::object();
 		json::Value es = json::array();
 		for(auto &p : all)
-			es.append(entity_json(*p.second));
+			es.append(world ? world_row(*p.second) : entity_json(*p.second));
 		c.set("entities", es);
 		c.set("next_id", (int64_t)m_next_id);
 		return c;
@@ -7099,15 +7294,26 @@ struct Module: public interface::Module, public Interface
 		return show;
 	}
 
+	// [KIT_NESTING] The entity a positioned one is under (0: a scene)
+	uint64_t parent_node_id(const Entity &e)
+	{
+		auto it = m_entities.find(e.parent);
+		return it != m_entities.end() && it->second.has_pos ? e.parent : 0;
+	}
+
 	void make_node(Entity &e)
 	{
 		const json::Value show = show_of(e);
 		main_context::SceneReference ref = scene_of(e);
+		double w[3], wy;
+		world_of(e, w, &wy);
 		main_context::access(m_server, ref, [&](magic::Scene *scene){
 			magic::Node *n = scene->CreateChild(("kit:"+itos(e.id)).c_str());
-			n->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
-			n->SetRotation(magic::Quaternion(0, (float)e.yaw, 0));
+			n->SetPosition(magic::Vector3(w[0], w[1], w[2]));
+			n->SetRotation(magic::Quaternion(0, (float)wy, 0));
 			n->SetVar(magic::StringHash("kit_id"), magic::Variant((int)e.id));
+			n->SetVar(magic::StringHash("kit_parent"),
+					magic::Variant((int)parent_node_id(e)));
 			n->SetVar(magic::StringHash("kit_show"),
 					magic::Variant(show.stringify().c_str()));
 			e.node = n->GetID();
@@ -7133,6 +7339,13 @@ struct Module: public interface::Module, public Interface
 				n->SetVar(magic::StringHash(("kit:"+key).c_str()),
 						magic::Variant(v.c_str()));
 		});
+		// [KIT_NESTING] the state that moves its look (kit/mover's out)
+		// moves what is under it
+		const json::Value &look = m_types[e.comps[comp].type].decl.get("look");
+		if(look.is_object() && jstr(look, "state") == key &&
+				look.get("when").is_object() &&
+				!look.get("when").get("offset").is_undefined())
+			place_nodes(e.id);
 	}
 
 	// [KIT_UI_COMPONENTS] A per_player state's value for a peer placed in
@@ -7337,13 +7550,16 @@ struct Module: public interface::Module, public Interface
 		lua_lit(json::Value(r.handler), o);
 		o += ",id="+itos(e.id);
 		if(e.has_pos){
+			// [KIT_NESTING] the world's
+			double w[3], wy;
+			world_of(e, w, &wy);
 			o += ",pos={";
 			for(int k = 0; k < 3; k++){
-				lua_lit(json::Value(e.pos[k]), o);
+				lua_lit(json::Value(w[k]), o);
 				o += ',';
 			}
 			o += "},yaw=";
-			lua_lit(json::Value(e.yaw), o);
+			lua_lit(json::Value(wy), o);
 		}
 		o += ",params=";
 		lua_lit(in.params, o);
@@ -7866,8 +8082,7 @@ struct Module: public interface::Module, public Interface
 					nullptr, 10));
 			const Entity &src = m_entities[g[0]];
 			if(src.has_pos)
-				for(int k = 0; k < 3; k++)
-					base[k] = src.pos[k];
+				world_of(src, base);
 			pf = group_prefab(g, base);
 		}
 		const json::Value &pos = s.at(1u);
@@ -7875,8 +8090,7 @@ struct Module: public interface::Module, public Interface
 			for(unsigned k = 0; k < 3; k++)
 				base[k] = pos.at(k).as_number();
 		} else if(e.has_pos){
-			for(int k = 0; k < 3; k++)
-				base[k] = e.pos[k];
+			world_of(e, base);
 		} else {
 			return refuse("no position: its own, or pos");
 		}
@@ -8119,11 +8333,20 @@ struct Module: public interface::Module, public Interface
 			why = (vox ? "0" : "1")+ss_(" to ")+itos(MAX_PREFAB)+" entities";
 			return false;
 		}
-		std::set<int64_t> ids;
+		std::set<int64_t> ids, placed;
 		for(unsigned i = 0; i < es.size(); i++){
 			const json::Value &e = es.at(i);
 			const int64_t id = json::jint(e, "id", 0);
 			const int64_t parent = json::jint(e, "parent", 0);
+			// [KIT_NESTING] one with a place under the scene or a member
+			// with a place
+			if(parent && !e.get("pos").is_undefined() && ids.count(parent) &&
+					!placed.count(parent)){
+				why = "member "+itos(id)+" has a position, its parent none";
+				return false;
+			}
+			if(!e.get("pos").is_undefined())
+				placed.insert(id);
 			if(id < 1 || id > (int64_t)MAX_PREFAB || ids.count(id)){
 				why = "a member's id is 1..."+itos(MAX_PREFAB)+", once";
 				return false;
@@ -8495,8 +8718,10 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// Entities as a prefab: members 1... in the order given (a parent
-	// before its children), positions from `base`, links and entity
-	// parameters among them made the members', others left out
+	// before its children), positions from `base` (the world's; [KIT_NESTING]
+	// a member under a positioned member keeps its own, its parent's
+	// frame's), links and entity parameters among them made the members',
+	// others left out
 	json::Value group_prefab(const sv_<uint64_t> &ids, const double base[3])
 	{
 		std::map<uint64_t, int64_t> local;
@@ -8514,12 +8739,17 @@ struct Module: public interface::Module, public Interface
 			j.set("parent", member(src.parent));
 			j.set("name", src.name);
 			if(src.has_pos){
+				const bool framed = member(src.parent) &&
+						m_entities[src.parent].has_pos;
+				double w[3], wy = src.yaw;
+				if(!framed)
+					world_of(src, w, &wy);
 				json::Value pos = json::array();
 				for(int k = 0; k < 3; k++)
-					pos.append(src.pos[k] - base[k]);
+					pos.append(framed ? src.pos[k] : w[k] - base[k]);
 				j.set("pos", pos);
-				if(src.yaw != 0)
-					j.set("yaw", src.yaw);
+				if(wy != 0)
+					j.set("yaw", wy);
 			}
 			json::Value comps = json::array();
 			for(const Instance &in : src.comps){
@@ -8580,6 +8810,11 @@ struct Module: public interface::Module, public Interface
 			auto it = ids.find(l);
 			return it == ids.end() ? 0 : (int64_t)it->second;
 		};
+		// The new ids of the members with a place
+		std::set<int64_t> positioned;
+		for(unsigned i = 0; i < es.size(); i++)
+			if(pos_ok(es.at(i).get("pos")))
+				positioned.insert((int64_t)ids[json::jint(es.at(i), "id", 0)]);
 		for(unsigned i = 0; i < es.size(); i++){
 			const json::Value &m = es.at(i);
 			const int64_t lid = json::jint(m, "id", 0);
@@ -8588,7 +8823,16 @@ struct Module: public interface::Module, public Interface
 			const int64_t parent = map(m.get("parent"));
 			e.set("parent", parent ? parent : (int64_t)scene);
 			e.set("name", jstr(m, "name"));
-			if(pos_ok(m.get("pos"))){
+			// [KIT_NESTING] under a positioned member: its own place in its
+			// parent's frame (a turn turns it with its parent)
+			if(parent && pos_ok(m.get("pos")) && positioned.count(parent)){
+				json::Value pos = json::array();
+				for(unsigned k = 0; k < 3; k++)
+					pos.append(grid(m.get("pos").at(k).as_number()));
+				e.set("pos", pos);
+				if(m.get("yaw").is_number())
+					e.set("yaw", norm_yaw(m.get("yaw").as_number()));
+			} else if(pos_ok(m.get("pos"))){
 				json::Value pos = json::array();
 				double off[3];
 				for(unsigned k = 0; k < 3; k++)
@@ -8718,9 +8962,17 @@ struct Module: public interface::Module, public Interface
 			m_paste.turn = turn;
 			m_paste.set = true;
 		}
+		// [KIT_NESTING] "parent": its members under that entity
+		uint64_t under = 0;
+		if(!parent_arg(j, p, under, why))
+			return false;
 		sv_<json::Value> rows;
 		instantiate(*pf, name, scene, base, m_next_id, rows, turn);
 		for(json::Value &row : rows){
+			if(under && json::jint(row, "parent", 0) == (int64_t)scene){
+				row.set("parent", (int64_t)under);
+				localize(row);
+			}
 			if(paste){
 				// Named as a duplicate's are
 				const json::Value &cs_ = row.get("components");
@@ -8797,8 +9049,21 @@ struct Module: public interface::Module, public Interface
 				why = "entity "+itos(e->id)+" is a "+e->kind;
 				return false;
 			}
-			if(std::find(group.begin(), group.end(), e->id) == group.end())
-				group.push_back(e->id);
+			// [KIT_NESTING] with what is under it
+			const sv_<uint64_t> sub = group_of(e->id);
+			if(sub.empty()){
+				why = "entity "+itos(e->id)+" has more than "+
+						itos(MAX_PREFAB)+" entities under it";
+				return false;
+			}
+			for(uint64_t x : sub)
+				if(std::find(group.begin(), group.end(), x) == group.end())
+					group.push_back(x);
+		}
+		if(group.size() > MAX_PREFAB){
+			why = "more than "+itos(MAX_PREFAB)+" entities with those under "
+					"them";
+			return false;
 		}
 		std::sort(group.begin(), group.end(), [&](uint64_t a, uint64_t b){
 			const int da = depth(a), db = depth(b);
@@ -8816,8 +9081,7 @@ struct Module: public interface::Module, public Interface
 			for(int k = 0; k < 3; k++)
 				base[k] = o[k];
 		} else if(m_entities[group[0]].has_pos){
-			for(int k = 0; k < 3; k++)
-				base[k] = m_entities[group[0]].pos[k];
+			world_of(m_entities[group[0]], base);
 		}
 		pf = group_prefab(group, base);
 		if(box){
@@ -8883,7 +9147,27 @@ struct Module: public interface::Module, public Interface
 			if(std::find(group.begin(), group.end(), e->id) == group.end())
 				group.push_back(e->id);
 		}
+		// [KIT_NESTING] one under another of them goes with it
+		const std::set<uint64_t> all(group.begin(), group.end());
+		group.erase(std::remove_if(group.begin(), group.end(),
+				[&](uint64_t id){
+			return under_one_of(id, all);
+		}), group.end());
 		return true;
+	}
+
+	// [KIT_NESTING] Whether an entity is under one of `ids` (at any depth)
+	bool under_one_of(uint64_t id, const std::set<uint64_t> &ids)
+	{
+		auto it = m_entities.find(id);
+		for(int d = 0; it != m_entities.end() && d <= MAX_NEST + 2; d++){
+			if(ids.count(it->second.parent))
+				return true;
+			if(it->second.parent == 1)
+				break;
+			it = m_entities.find(it->second.parent);
+		}
+		return false;
 	}
 
 	// [KIT] stage 4e2: {"op": "move", "ids": [n...], "by": [dx, dy, dz],
@@ -8911,29 +9195,37 @@ struct Module: public interface::Module, public Interface
 		double d[3] = {0, 0, 0}, mid[3] = {0, 0, 0};
 		for(unsigned k = 0; by.is_array() && k < 3; k++)
 			d[k] = by.at(k).as_number();
-		for(uint64_t id : group)
+		// [KIT_NESTING] in the world (what is under them goes with them)
+		sm_<uint64_t, std::array<double, 4>> at;
+		for(uint64_t id : group){
+			std::array<double, 4> &w = at[id];
+			world_of(m_entities[id], w.data(), &w[3]);
 			for(int k = 0; k < 3; k++)
-				mid[k] += m_entities[id].pos[k] / group.size();
+				mid[k] += w[k] / group.size();
+		}
 		const double a = turn.is_number() ? turn.as_number() : 0;
 		// Urho3D's turn round y: +z towards +x
 		const double r = a * 3.14159265358979323846 / 180, c = std::cos(r), sn = std::sin(r);
 		for(uint64_t id : group){
 			const Entity &e = m_entities[id];
-			const double rx = e.pos[0] - mid[0], rz = e.pos[2] - mid[2];
-			double np[3] = {mid[0] + rx * c + rz * sn + d[0], e.pos[1] + d[1],
+			const std::array<double, 4> &w = at[id];
+			const double rx = w[0] - mid[0], rz = w[2] - mid[2];
+			double np[3] = {mid[0] + rx * c + rz * sn + d[0], w[1] + d[1],
 					mid[2] - rx * sn + rz * c + d[2]};
-			json::Value after = entity_json(e), pos = json::array();
-			for(int k = 0; k < 3; k++){
+			for(int k = 0; k < 3; k++)
 				if(std::fabs(np[k]) > MAX_COORD){
 					why = "entity "+itos(id)+" would go past "+
 							itos((int)MAX_COORD);
 					return false;
 				}
+			json::Value after = entity_json(e), pos = json::array();
+			for(int k = 0; k < 3; k++)
 				pos.append(grid(np[k]));
-			}
 			after.set("pos", pos);
-			if(a != 0)
-				after.set("yaw", norm_yaw(e.yaw + a));
+			after.set("yaw", norm_yaw(w[3] + a));
+			localize(after);
+			if(a == 0)
+				after.set("yaw", e.yaw);
 			change.push_back(std::make_pair(id, after));
 		}
 		ss_ list;
@@ -8955,15 +9247,21 @@ struct Module: public interface::Module, public Interface
 			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
 			ss_ &why)
 	{
-		sv_<uint64_t> group;
-		if(!group_arg(j, group, why))
+		sv_<uint64_t> tops;
+		if(!group_arg(j, tops, why))
 			return false;
-		for(uint64_t id : group)
-			for(auto &o : m_entities)
-				if(o.second.parent == id){
-					why = "entity "+itos(id)+" has entities under it";
-					return false;
-				}
+		// [KIT_NESTING] each with what is under it, the copy beside it
+		// (under its parent)
+		std::sort(tops.begin(), tops.end());
+		sv_<uint64_t> group;
+		for(uint64_t id : tops)
+			for(uint64_t x : group_of(id, MAX_ENTITIES))
+				group.push_back(x);
+		if(group.size() > MAX_PREFAB){
+			why = "more than "+itos(MAX_PREFAB)+" entities with those under "
+					"them";
+			return false;
+		}
 		const json::Value &by = j.get("by");
 		if(!pos_ok(by)){
 			why = "by: three numbers within "+itos((int)MAX_COORD);
@@ -8978,17 +9276,22 @@ struct Module: public interface::Module, public Interface
 			why = "the editor is in no scene of the composition's";
 			return false;
 		}
-		std::sort(group.begin(), group.end());
 		const Entity &first = m_entities[group[0]];
 		double base[3];
-		for(int k = 0; k < 3; k++)
-			base[k] = first.pos[k];
+		world_of(first, base);
 		const json::Value pf = group_prefab(group, base);
 		for(int k = 0; k < 3; k++)
 			base[k] += by.at(k).as_number();
 		sv_<json::Value> rows;
 		instantiate(pf, "", scene, base, m_next_id, rows);
-		for(json::Value &row : rows){
+		for(size_t i = 0; i < rows.size(); i++){
+			json::Value &row = rows[i];
+			const uint64_t src_parent = m_entities[group[i]].parent;
+			if(std::find(tops.begin(), tops.end(), group[i]) != tops.end() &&
+					src_parent != scene){
+				row.set("parent", (int64_t)src_parent);
+				localize(row);
+			}
 			// Named as a placed one is
 			const json::Value &cs_ = row.get("components");
 			if(cs_.size())
@@ -9245,9 +9548,11 @@ struct Module: public interface::Module, public Interface
 				ss_ ts;
 				if(scene_of(*te, &ts)){
 					target = ts;
-					x = te->pos[0];
-					y = te->pos[1];
-					z = te->pos[2];
+					double w[3];
+					world_of(*te, w);
+					x = w[0];
+					y = w[1];
+					z = w[2];
 				} else {
 					te = nullptr;
 				}
@@ -9727,7 +10032,10 @@ struct Module: public interface::Module, public Interface
 		a->name = who;
 		scene_of(e, &a->scene);
 		a->has_pos = e.has_pos;
-		a->x = e.pos[0], a->y = e.pos[1], a->z = e.pos[2];
+		double w[3] = {0, 0, 0};
+		if(e.has_pos)
+			world_of(e, w);
+		a->x = w[0], a->y = w[1], a->z = w[2];
 		log_i(MODULE, "Entity %s's %s: app %s %s", cs(itos(e.id)), cs(type),
 				cs(what), cs(a->value.stringify().substr(0, 64)));
 		m_server->emit_event("kit:app", a);
@@ -10771,19 +11079,15 @@ struct Module: public interface::Module, public Interface
 			auto it = m_entities.find(b.seat);
 			if(it != m_entities.end()){
 				Entity &e = it->second;
-				e.pos[0] = v[0];
-				e.pos[1] = v[1] + 0.5;
-				e.pos[2] = v[2];
+				// [KIT_NESTING] the body's place is the world's
+				double w[3], wy;
+				world_of(e, w, &wy);
+				w[0] = v[0], w[1] = v[1] + 0.5, w[2] = v[2];
 				const json::Value &yaw = b.state.get("yaw");
 				if(yaw.is_number() && std::isfinite(yaw.as_number()))
-					e.yaw = norm_yaw(yaw.as_number());
-				main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
-					magic::Node *n = sc->GetNode(e.node);
-					if(n){
-						n->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
-						n->SetRotation(magic::Quaternion(0, (float)e.yaw, 0));
-					}
-				});
+					wy = yaw.as_number();
+				to_local(e.parent, w, e.pos, wy, &e.yaw);
+				place_nodes(e.id);
 			}
 		}
 		Peer &p = m_peers[peer];
@@ -10998,10 +11302,16 @@ struct Module: public interface::Module, public Interface
 		o += ",looks={";
 		for(auto &p : m_entities){
 			const Entity &e = p.second;
-			if(!e.has_pos || e.id == b.seat || e.kind == "player" ||
-					std::fabs(e.pos[0] - pos[0]) > R + 8 ||
-					std::fabs(e.pos[2] - pos[2]) > R + 8 ||
-					std::fabs(e.pos[1] - pos[1]) > ny + 8)
+			if(!e.has_pos || e.id == b.seat || e.kind == "player")
+				continue;
+			// [KIT_NESTING] where it is in the world; what rides on the
+			// seat held none either (simplified: its own children)
+			double w[3], wy;
+			world_of(e, w, &wy);
+			if((b.seat && e.parent == b.seat) ||
+					std::fabs(w[0] - pos[0]) > R + 8 ||
+					std::fabs(w[2] - pos[2]) > R + 8 ||
+					std::fabs(w[1] - pos[1]) > ny + 8)
 				continue;
 			ss_ es;
 			if(scene_of(e, &es) != scene || !scene)
@@ -11017,11 +11327,11 @@ struct Module: public interface::Module, public Interface
 				lua_lit(look, o);
 				o += on ? ",true,{" : ",false,{";
 				for(int k = 0; k < 3; k++){
-					lua_lit(json::Value(e.pos[k]), o);
+					lua_lit(json::Value(w[k]), o);
 					o += ',';
 				}
 				o += "},";
-				lua_lit(json::Value(e.yaw), o);
+				lua_lit(json::Value(wy), o);
 				o += "},";
 				break;
 			}
@@ -11221,12 +11531,14 @@ struct Module: public interface::Module, public Interface
 		if(!m_seat_home.count(id))
 			m_seat_home[id] = {{e.pos[0], e.pos[1], e.pos[2], e.yaw}};
 		b.seat = id;
+		double w[3], wy;
+		world_of(e, w, &wy);
 		json::Value st = json::object(), pos = json::array();
-		pos.append(e.pos[0]);
-		pos.append(e.pos[1] - 0.5);
-		pos.append(e.pos[2]);
+		pos.append(w[0]);
+		pos.append(w[1] - 0.5);
+		pos.append(w[2]);
 		st.set("pos", pos);
-		st.set("yaw", e.yaw);
+		st.set("yaw", wy);
 		log_i(MODULE, "%s takes the seat of entity %s", cs(m_peers[peer].name),
 				cs(itos(id)));
 		put_body(peer, b, 0, 0, 0, 0, &st);
@@ -11244,14 +11556,16 @@ struct Module: public interface::Module, public Interface
 		if(!put || it == m_entities.end())
 			return;
 		const Entity &e = it->second;
-		const double a = e.yaw * 3.14159265358979323846 / 180;
+		double w[3], wy;
+		world_of(e, w, &wy);
+		const double a = wy * 3.14159265358979323846 / 180;
 		double r = 1;
 		for(const Instance &in : e.comps)
 			if(is_movement(in.type))
 				r = num(body_decl(in.type), "r", 1, 0.05, 8);
 		const double d = r + 1;
-		double x = e.pos[0] + std::cos(a) * d, z = e.pos[2] - std::sin(a) * d;
-		const double y = std::floor(e.pos[1] + 0.5);
+		double x = w[0] + std::cos(a) * d, z = w[2] - std::sin(a) * d;
+		const double y = std::floor(w[1] + 0.5);
 		put_body(peer, b, x, y, z);
 	}
 
@@ -11280,13 +11594,7 @@ struct Module: public interface::Module, public Interface
 			for(int k = 0; k < 3; k++)
 				e.pos[k] = h.second[k];
 			e.yaw = h.second[3];
-			main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
-				magic::Node *n = sc->GetNode(e.node);
-				if(n){
-					n->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
-					n->SetRotation(magic::Quaternion(0, (float)e.yaw, 0));
-				}
-			});
+			place_nodes(e.id);
 		}
 		m_seat_home.clear();
 	}
@@ -11347,9 +11655,11 @@ struct Module: public interface::Module, public Interface
 		scene_of(e, &scene);
 		if(scene != pi->second.scene)
 			return refuse("in another scene");
-		double d2 = 0;
+		// [KIT_NESTING] where it is in the world
+		double w[3], d2 = 0;
+		world_of(e, w);
 		for(int k = 0; k < 3; k++)
-			d2 += (e.pos[k] - pi->second.pos[k]) * (e.pos[k] - pi->second.pos[k]);
+			d2 += (w[k] - pi->second.pos[k]) * (w[k] - pi->second.pos[k]);
 		if(d2 > m_host.use_range * m_host.use_range)
 			return refuse("out of range");
 		// [KIT_USE_ACCESS] The region's use rule for the player first (its
@@ -12743,6 +13053,11 @@ struct Module: public interface::Module, public Interface
 			Entity &e = m_entities[r.first];
 			e = r.second.e;
 			e.node = 0;
+		}
+		// [KIT_NESTING] once all are back: one under another is placed in
+		// its frame
+		for(auto &r : m_removed){
+			Entity &e = m_entities[r.first];
 			if(e.has_pos)
 				make_node(e);
 		}
@@ -13086,7 +13401,7 @@ struct Module: public interface::Module, public Interface
 				}
 			j.set("palette", names);
 			j.set("types", types);
-			j.set("authored", authored_json());
+			j.set("authored", authored_json(true));
 			// [KIT] stage 4d: the round's own entities (made in play) and
 			// the players here, shown and selected, not edited; the prefabs
 			json::Value made = json::array(), pfs = json::array();
@@ -13094,7 +13409,7 @@ struct Module: public interface::Module, public Interface
 				if(authored(e.second) || (e.second.kind == "player" &&
 						!e.second.has_pos))
 					continue;
-				json::Value mj = entity_json(e.second);
+				json::Value mj = world_row(e.second);
 				if(e.second.made){
 					mj.set("made", ss_(1, e.second.made));
 					mj.set("made_by", e.second.made_by);
@@ -13607,26 +13922,123 @@ struct Module: public interface::Module, public Interface
 		return &e->comps[(size_t)v.as_number()];
 	}
 
-	// An entity's delete as a change: it gone, and the links to it from the
-	// other authored entities
+	// [KIT_NESTING] An edit's "parent" (optional; 0 or none: the scene):
+	// a positioned authored entity of the editor's scene, room under it
+	// for `height` levels more. false with why
+	bool parent_arg(const json::Value &j, const Peer &p, uint64_t &parent,
+			ss_ &why, int height = 1)
+	{
+		parent = 0;
+		const json::Value &v = j.get("parent");
+		if(v.is_undefined() || (v.is_number() && v.as_number() == 0))
+			return true;
+		Entity *e = entity_arg(j, "parent", why);
+		if(!e)
+			return false;
+		ss_ scene;
+		scene_of(*e, &scene);
+		if(!e->has_pos || !e->kind.empty()){
+			why = "parent: entity "+itos(e->id)+" has no position";
+			return false;
+		}
+		if(scene != p.scene){
+			why = "parent: entity "+itos(e->id)+" is in another scene";
+			return false;
+		}
+		if(depth(e->id) - depth(scene_entity(scene)) + height > MAX_NEST){
+			why = "parent: entity "+itos(e->id)+" is "+itos(MAX_NEST)+
+					" levels deep";
+			return false;
+		}
+		parent = e->id;
+		return true;
+	}
+
+	// How many levels an entity and those under it are
+	int height_of(uint64_t id, int d = 0)
+	{
+		int h = 1;
+		if(d > MAX_NEST + 2)
+			return h;
+		for(auto &o : m_entities)
+			if(o.second.parent == id && o.first != id)
+				h = std::max(h, 1 + height_of(o.first, d + 1));
+		return h;
+	}
+
+	// [KIT_NESTING] {"op": "parent", "id": n, "parent": m (0: the scene)}:
+	// the entity (and what is under it) under m, where it is in the world
+	// kept; m not it nor under it
+	bool parent_change(const json::Value &j, const Peer &p,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
+			ss_ &why)
+	{
+		Entity *e = entity_arg(j, "id", why);
+		if(!e)
+			return false;
+		if(!e->has_pos || !e->kind.empty()){
+			why = "entity "+itos(e->id)+" has no position";
+			return false;
+		}
+		ss_ scene;
+		scene_of(*e, &scene);
+		if(scene != p.scene){
+			why = "entity "+itos(e->id)+" is in another scene";
+			return false;
+		}
+		uint64_t parent = 0;
+		if(!parent_arg(j, p, parent, why, height_of(e->id)))
+			return false;
+		if(parent == e->id || under_one_of(parent, {e->id})){
+			why = "parent: entity "+itos(parent)+" is "+(parent == e->id ?
+					"itself" : "under it");
+			return false;
+		}
+		const uint64_t to = parent ? parent : scene_entity(scene);
+		if(to == e->parent){
+			why = "entity "+itos(e->id)+" is under "+itos(to)+" already";
+			return false;
+		}
+		double w[3], wy;
+		world_of(*e, w, &wy);
+		json::Value after = entity_json(*e), pos = json::array();
+		for(int k = 0; k < 3; k++)
+			pos.append(grid(w[k]));
+		after.set("parent", (int64_t)to);
+		after.set("pos", pos);
+		after.set("yaw", wy);
+		localize(after);
+		if(!parent)
+			after.set("yaw", norm_yaw(wy));
+		change.push_back(std::make_pair(e->id, after));
+		what = "put "+itos(e->id)+" under "+(parent ? itos(parent) :
+				"the scene "+scene);
+		return true;
+	}
+
+	// An entity's delete as a change: it gone ([KIT_NESTING] and what is
+	// under it), and the links to them from the other authored entities
 	void delete_change(uint64_t id,
 			sv_<std::pair<uint64_t, json::Value>> &change)
 	{
-		change.push_back(std::make_pair(id, json::null()));
+		const sv_<uint64_t> g = group_of(id, MAX_ENTITIES);
+		const std::set<uint64_t> gone(g.begin(), g.end());
+		for(uint64_t x : g)
+			change.push_back(std::make_pair(x, json::null()));
 		for(auto &o : m_entities){
-			if(o.first == id || !authored(o.second))
+			if(gone.count(o.first) || !authored(o.second))
 				continue;
 			bool links = false;
 			for(const Instance &in : o.second.comps)
 				for(const Link &l : in.links)
-					links = links || l.to == id;
+					links = links || gone.count(l.to);
 			if(!links)
 				continue;
 			Entity copy = o.second;
 			for(Instance &in : copy.comps)
 				in.links.erase(std::remove_if(in.links.begin(),
 						in.links.end(), [&](const Link &l){
-					return l.to == id;
+					return gone.count(l.to) > 0;
 				}), in.links.end());
 			change.push_back(std::make_pair(o.first, entity_json(copy)));
 		}
@@ -13678,16 +14090,24 @@ struct Module: public interface::Module, public Interface
 				why = "the editor is in no scene of the composition's";
 				return false;
 			}
+			// [KIT_NESTING] "parent": under that entity, pos the world's
+			// (a type the root or the scene has, as ever)
+			uint64_t under = 0;
+			if(!root && !on_scene && !parent_arg(j, p, under, why))
+				return false;
 			const uint64_t id = m_next_id++;
 			json::Value e = json::object();
 			e.set("id", (int64_t)id);
-			e.set("parent", (int64_t)(on_scene ? scene : root ? 1 : scene));
+			e.set("parent", (int64_t)(on_scene ? scene : root ? 1 :
+					under ? under : scene));
 			e.set("name", type+" "+itos(id));
 			json::Value pos = json::array();
 			for(unsigned k = 0; k < 3; k++)
 				pos.append(grid(j.get("pos").at(k).as_number()));
-			if(!root)
+			if(!root){
 				e.set("pos", pos);
+				localize(e);
+			}
 			json::Value comp = json::object();
 			comp.set("type", type);
 			json::Value comps = json::array();
@@ -13696,7 +14116,8 @@ struct Module: public interface::Module, public Interface
 			change.push_back(std::make_pair(id, e));
 			what = "placed "+type+" "+itos(id)+(on_scene ? " on the scene "+
 					p.scene : root ? ss_(" on the app root") :
-					" at "+pos.stringify());
+					" at "+pos.stringify())+(under ? " under "+itos(under) :
+					ss_());
 			return true;
 		}
 		if(op == "move" && !j.get("ids").is_undefined())
@@ -13724,8 +14145,17 @@ struct Module: public interface::Module, public Interface
 			for(unsigned k = 0; k < 3; k++)
 				pos.append(grid(j.get("pos").at(k).as_number()));
 			after.set("pos", pos);
-			if(yaw.is_number())
-				after.set("yaw", norm_yaw(yaw.as_number()));
+			// [KIT_NESTING] pos and yaw the world's: its parent's frame's
+			// kept (what is under it goes with it)
+			double wy = e->yaw;
+			if(!yaw.is_number()){
+				double w[3];
+				world_of(*e, w, &wy);
+			}
+			after.set("yaw", yaw.is_number() ? norm_yaw(yaw.as_number()) : wy);
+			localize(after);
+			if(!yaw.is_number())
+				after.set("yaw", e->yaw);
 			change.push_back(std::make_pair(e->id, after));
 			what = "moved "+itos(e->id)+" to "+pos.stringify()+
 					(yaw.is_number() ? ", turned to "+
@@ -13734,6 +14164,8 @@ struct Module: public interface::Module, public Interface
 		}
 		if(op == "duplicate")
 			return duplicate(j, p, change, what, why);
+		if(op == "parent")
+			return parent_change(j, p, change, what, why);
 		if(op == "delete"){
 			Entity *e = entity_arg(j, "id", why);
 			if(!e)
@@ -13743,13 +14175,18 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			for(auto &o : m_entities)
-				if(o.second.parent == e->id){
-					why = "entity "+itos(e->id)+" has entities under it";
+				if(o.second.parent == e->id && !authored(o.second)){
+					why = "entity "+itos(e->id)+" has entities of play's or "
+							"a player under it";
 					return false;
 				}
 			delete_change(e->id, change);
-			what = "deleted "+itos(e->id)+(change.size() > 1 ? " and "+
-					itos(change.size() - 1)+" links' ends" : "");
+			size_t under = 0;
+			for(auto &c : change)
+				under += c.second.is_null() && c.first != e->id ? 1 : 0;
+			what = "deleted "+itos(e->id)+(under ? " and "+itos(under)+
+					" under it" : "")+(change.size() > under + 1 ? ", "+
+					itos(change.size() - under - 1)+" links' ends" : "");
 			return true;
 		}
 		if(op == "set"){
@@ -13883,9 +14320,11 @@ struct Module: public interface::Module, public Interface
 	// and owned voxels follow, the authored row is saved, and each editor
 	// is sent the tree. undo: the editor's, which gets what puts it back.
 	// Running, a deleted entity's on_remove runs first ([KIT] stage 4d)
-	void commit(const sv_<std::pair<uint64_t, json::Value>> &change,
+	void commit(const sv_<std::pair<uint64_t, json::Value>> &change_in,
 			std::deque<Change> *undo)
 	{
+		const sv_<std::pair<uint64_t, json::Value>> change =
+				ordered(change_in);
 		Change back;
 		for(const auto &c : change)
 			if(!c.second.is_null())
@@ -13918,6 +14357,42 @@ struct Module: public interface::Module, public Interface
 				send_state(p.first);
 	}
 
+	// [KIT_NESTING] A change in the order it applies in: the entities that
+	// go first, those under others before them; then the rows, a parent's
+	// before those under it (an undo's rows are its change's, in its order)
+	sv_<std::pair<uint64_t, json::Value>> ordered(
+			const sv_<std::pair<uint64_t, json::Value>> &change)
+	{
+		sv_<std::pair<uint64_t, json::Value>> out;
+		sv_<size_t> gone;
+		std::map<uint64_t, size_t> row;
+		for(size_t i = 0; i < change.size(); i++)
+			if(change[i].second.is_null())
+				gone.push_back(i);
+			else
+				row[change[i].first] = i;
+		std::stable_sort(gone.begin(), gone.end(), [&](size_t a, size_t b){
+			return depth(change[a].first) > depth(change[b].first);
+		});
+		for(size_t i : gone)
+			out.push_back(change[i]);
+		sv_<bool> done(change.size(), false);
+		std::function<void(size_t, int)> put = [&](size_t i, int d){
+			if(done[i])
+				return;
+			done[i] = true;
+			auto pi = row.find((uint64_t)json::jint(change[i].second,
+					"parent", 0));
+			if(pi != row.end() && d < MAX_NEST + 2)
+				put(pi->second, d + 1);
+			out.push_back(change[i]);
+		};
+		for(size_t i = 0; i < change.size(); i++)
+			if(!change[i].second.is_null())
+				put(i, 0);
+		return out;
+	}
+
 	void remove_node(const Entity &e)
 	{
 		if(!e.node)
@@ -13942,7 +14417,7 @@ struct Module: public interface::Module, public Interface
 		Entity n;
 		ss_ why;
 		if(!entity_from_json(after, n, why) || n.id != id ||
-				!m_entities.count(n.parent) || (n.has_pos && !scene_of(n))){
+				!nest_ok(n, why) || (n.has_pos && !scene_of(n))){
 			log_w(MODULE, "An edit of entity %s not made: %s", cs(itos(id)),
 					why.empty() ? "no parent or scene" : cs(why));
 			return;
@@ -14034,14 +14509,16 @@ struct Module: public interface::Module, public Interface
 			main_context::access(m_server, scene_of(e), [&](magic::Scene *scene){
 				magic::Node *nd = scene->GetNode(e.node);
 				if(nd){
-					nd->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
-					nd->SetRotation(magic::Quaternion(0, (float)e.yaw, 0));
 					// A parameter its look is drawn from may have changed
 					nd->SetVar(magic::StringHash("kit_show"), magic::Variant(
 							show_of(e).stringify().c_str()));
+					nd->SetVar(magic::StringHash("kit_parent"),
+							magic::Variant((int)parent_node_id(e)));
 				}
 			});
 		}
+		// [KIT_NESTING] it and what is under it where it is now
+		place_nodes(id);
 	}
 };
 

@@ -3,7 +3,8 @@
 -- wall, a lift's platform. "go" moves it out, "back" home, "toggle" the
 -- other way; it signals "moving" (true: out) as it starts and "arrived"
 -- (true: out) when it is there. Its state "out" draws it: the clients
--- slide it (the look's when.offset over when.slide).
+-- slide it (the look's when.offset over when.slide). The entities under it
+-- ([KIT_NESTING]) go with it, sliding with its look.
 -- simplified: the players meet its box where it is going at once, not
 -- along the way, and a player on it is not carried (with 4i: a voxel box)
 local function move(c, out, by)

@@ -26,6 +26,16 @@ namespace interface
 // The app's world is a tree of entities: the app the root (id 1), scenes
 // under it (the app's main_context scenes, by name), positional entities
 // ("objects") in a scene, and entities with no position under the root.
+// [KIT_NESTING] A positioned entity may be under another one in its scene
+// (MAX_NEST levels): its position and yaw are its parent's frame's, so it
+// moves and turns with it, and while its parent's look slides
+// (kit/mover's when.offset) it is carried there too. Zones, regions,
+// grants, owned voxels, use ranges, looks, c.pos and c.yaw are in the
+// world through the parents (zones and regions stay boxes of cells, not
+// turned). Its node is its scene's child at its place in the world (the
+// var "kit_parent": the entity it is under, 0 none). A positioned
+// entity's parent is a scene or a positioned entity; a loop, a missing
+// parent or one with no position is refused, in an edit and in a save.
 // An entity carries component instances: a component type is a Lua file
 // run in Kit's box, a Lua 5.1 in a server .wasm (box/box.c, sandboxed and
 // metered by src/wasm/engine.cpp); an instance has the type's parameters'
@@ -222,7 +232,8 @@ namespace interface
 //   as types are, in a file of its own (a package's, below):
 //     {"format": "kit_prefab", "author", "name", "version": n,
 //      "entities": [{"id": 1..., "parent": 0 (the scene) or an earlier
-//      member's id, "name", "pos" (from where a copy is placed),
+//      member's id, "name", "pos" (from where a copy is placed; under a
+//      member with a position, [KIT_NESTING], in that member's frame),
 //      "components": [{"type", "version", "params", "links": [{"output",
 //      "to": a member's id, "input"}]}]}],
 //      "voxels": {"at": [x, y, z], "size": [x, y, z], "air": bool,
@@ -430,6 +441,14 @@ namespace interface
 //       -- entities moved together, one edit, turned about their middle
 //   {"op": "duplicate", "ids": [n...], "by": [dx, dy, dz]}  -- a copy of
 //       them that far off, their links among them the copies'
+//   [KIT_NESTING] Positions and yaws in edits are the world's (a
+//   child's made its parent's frame's); a place (a type's, a prefab's, a
+//   paste) takes "parent": m, under that positioned entity of the scene;
+//   a move, duplicate, delete, copy and save_prefab take the entities
+//   under each one with it (one under another named goes with that one)
+//   {"op": "parent", "id": n, "parent": m}  -- n (and what is under it)
+//       under m (0: the scene), where it is in the world kept; m not n
+//       nor under it
 //   {"op": "delete", "id": n}
 //   {"op": "set", "id": n, "comp": i, "param": p, "value": v}
 //   {"op": "link"|"unlink", "id": n, "comp": i, "output": o, "to": m,
@@ -507,7 +526,8 @@ namespace interface
 // refusal is logged and answered with "kit:edit_refused" ("<op>: why").
 // An editor is sent "kit:edit_state" after each edit, anyone's:
 // {"editing", "palette": [type...], "types": {type: {params, inputs,
-// outputs, gizmo, usable, root}}, "authored": the row, "undo": n, "admin",
+// outputs, gizmo, usable, root}}, "authored": the row (positions and
+// yaws the world's, [KIT_NESTING]), "undo": n, "admin",
 // "voxels": [{"name", "texture", and the properties above}...] (each
 // placeable voxel), "textures": [name...] (what a type may wear),
 // and the admin's "people": [{name, admin, builder}] here}, and always
