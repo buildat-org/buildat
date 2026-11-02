@@ -126,6 +126,11 @@ EOF
 idle 8000
 frames 30
 screenshot @T@/plan.png
+keypress F2
+wait_log 5000 kit editor: the view is 3D
+idle 3000
+frames 30
+screenshot @T@/view3d.png
 keypress F1
 wait_log 5000 kit editor: the view is
 EOF
