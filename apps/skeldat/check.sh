@@ -824,7 +824,9 @@ kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 # "f N" a frame, "done" a dig sent, "gone": each crack's frames climb and
 # it goes; one gone after a "done" a dig (the held button digs on into
 # the next voxel), as many as the server's digs, and one cut off
-crack=$(grep -a "dig: the crack\|dig: done" "$t/dig.log" | sed 's/.*frame \([0-9]*\) .*/f \1/; s/.*the crack gone/gone/; s/.*dig: done.*/done/' | tr '\n' ' ')
+# The game's lines alone: the drive's own wait_log commands, echoed in
+# the log, name them too
+crack=$(grep -a "skeldat : dig: the crack\|skeldat : dig: done" "$t/dig.log" | sed 's/.*frame \([0-9]*\) .*/f \1/; s/.*the crack gone/gone/; s/.*dig: done.*/done/' | tr '\n' ' ')
 digs=$(grep -ac "client1 digs " "$log14")
 echo "$crack" | awk -v digs="$digs" '{ n = split($0, w, " "); last = -1; d = 0
 	for(i = 1; i <= n; i++){
