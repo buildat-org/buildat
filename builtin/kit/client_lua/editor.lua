@@ -1908,7 +1908,41 @@ magic.SubscribeToEvent("command_seq:kit_box_where", function(_, data)
 	log:info("kit editor: no box handle " .. name .. " on the screen")
 end)
 
+-- [KIT_INSPECTOR_OFF_SCREEN] The inspector's body scrolls (a ScrollView:
+-- the wheel, its bar, a finger dragged), bounded each frame above the
+-- screen's foot and the touch bar: kit/region's ran off a phone's screen
+-- at the UI fit's floor, Apply out of reach. Where it was scrolled is kept
+-- as it is drawn again on the state's packets.
+-- simplified: the title, Delete and Apply scroll with the rest; held in
+-- sight they would need inspector() to build into a head and a foot
+local IV = {view = nil, y = 0}
+
+local function fit_inspector()
+	local w, view = W.inspector, IV.view
+	if not w or not view then
+		return
+	end
+	local body = view.contentElement
+	local foot = W.touch and W.touch.visible and W.touch.height + 16 or 16
+	-- The screen's height at the unfitted scale (narrow()'s): bounded by
+	-- the root's, the inspector followed the fit and the fit it
+	narrow()
+	local room = screen_ui.h - w.position.y - 12 - foot
+	local h = math.max(40, math.min(body.height, room))
+	local bw = body.width + (h < body.height and view.verticalScrollBar.width + 4 or 0)
+	if view.height ~= h or view.width ~= bw then
+		view:SetScrollBarsVisible(false, h < body.height)
+		view:SetFixedSize(bw, h)
+		log:info(string.format("kit editor: the inspector %d of %d tall",
+				h, body.height))
+	end
+end
+
 inspector_window = function()
+	if W.inspector and IV.view then
+		IV.y = IV.view.viewPosition.y
+	end
+	IV.view = nil
 	drop("inspector")
 	S.cost_text, S.cost_id = nil, nil
 	local e, is_made = nil, false
@@ -1922,12 +1956,25 @@ inspector_window = function()
 	end
 	local y = W.bar and W.bar.height + 12 or 40
 	W.inspector = window(magic.HA_RIGHT, magic.VA_TOP, -8, y)
+	local view = W.inspector:CreateChild("ScrollView")
+	local body = view:CreateChild("UIElement")
+	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
 	if box then
-		BX.box_section(W.inspector)
+		BX.box_section(body)
 	end
 	if e then
-		inspector(W.inspector, e, is_made)
+		inspector(body, e, is_made)
 	end
+	view:SetStyleAuto()
+	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
+	view.scrollBarsAutoVisible = false
+	view:SetScrollBarsVisible(false, false)
+	view.contentElement = body
+	body:SetPosition(0, 0)
+	view:SetFixedSize(body.width, body.height)
+	IV.view = view
+	fit_inspector()
+	view.viewPosition = magic.IntVector2(0, IV.y)
 end
 
 -- A touchscreen's keys ([FP_TOUCH] 4): Undo, Delete and Escape's Cancel, at
@@ -4615,6 +4662,7 @@ local function draw()
 		return
 	end
 	fit_people()
+	fit_inspector()
 	log_bar()
 	local dbg = O.debug
 	local now = buildat.get_time_us()

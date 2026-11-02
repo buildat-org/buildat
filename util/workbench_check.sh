@@ -250,7 +250,10 @@ if [ "${1:-}" = web_touch ]; then
 	# placing for all in the inspector, each list's row tapped: the UI fit
 	# holds while a list is up, which takes the inspector off the root
 	# ([TOUCH_UI_SCALE_JUMP]: the fit went back to x1 and the list opened
-	# off the screen), and a row found by label is on it: the
+	# off the screen), and a row found by label is on it; the inspector
+	# scrolls ([KIT_INSPECTOR_OFF_SCREEN]: its foot was off the screen),
+	# its bar's down arrow tapped to the two rows and a finger dragged
+	# to Apply, tapped by label: the
 	# admin plays by the rules out of
 	# edit mode; ([KIT] stage 4f) a finger dragged with the terrain tool (T)
 	# paints a raise stroke, undone; Play mode, and in play a tap uses the button, a tap digs and
@@ -326,12 +329,23 @@ if [ "${1:-}" = web_touch ]; then
 	["tap", 469, 240], ["waitlog", "kit editor: selected 10", 10],
 	["key", "PageDown"], ["waitlog", "kit editor: state: 4 entities, 5 to undo", 10],
 	["tap", "Button", "Inspector"], ["frames", 5],
-	["tap", "DropDownList", "▼", 955, 206], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
+	["waitlog", "kit editor: the inspector [0-9]+ of [0-9]+ tall", 10],
+	["shot", "${OUT}/inspector.png"],
+	["tap", 972, 394], ["frames", 3],
+	["tap", 972, 394], ["frames", 3],
+	["tap", 972, 394], ["frames", 3],
+	["tap", 972, 394], ["frames", 3],
+	["tap", 972, 394], ["frames", 3],
+	["tap", 972, 394], ["frames", 3],
+	["tap", "DropDownList", "▼", 960, 183], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
 	["frames", 3], ["shot", "${OUT}/dropdown.png"],
-	["tap", "Text", "all", 930, 228], ["waitlog", "kit editor: 10/1 dig = all", 10],
-	["tap", "DropDownList", "▼", 955, 294], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
+	["tap", "Text", "all", 930, 205], ["waitlog", "kit editor: 10/1 dig = all", 10],
+	["tap", "DropDownList", "▼", 960, 355], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
 	["frames", 3],
-	["tap", "Text", "all", 930, 318], ["waitlog", "kit editor: 10/1 place = all", 10],
+	["tap", "Text", "all", 930, 377], ["waitlog", "kit editor: 10/1 place = all", 10],
+	["drag", 515, 380, 515, 120, "touch"], ["frames", 10],
+	["drag", 515, 380, 515, 120, "touch"], ["wait", 1000],
+	["shot", "${OUT}/inspector_foot.png"],
 	["tap", "Button", "Apply"], ["waitlog", "kit editor: state: 4 entities, 7 to undo", 10],
 	["frames", 3], ["shot", "${OUT}/region.png"],
 	["tap", "Button", "Inspector"], ["frames", 3],
@@ -356,11 +370,10 @@ J
 	TOUCH=1 WEB_DRIVE_VIEWPORT=1000x500@1 \
 		"$here/util/web_drive.sh" chrome workbench "$t/steps.json" "$t/out" ||
 		fail "the web drive ($t/out)"
-	# The inspector's fit (below x1 at 1000x500) held from before the
-	# first list was up until the second's pick
+	# The UI scale held from the first list up until the second's pick
 	awk '/kit editor: selected 10/ { s = 1 } !s { next }
-		/UI scale fitted/ { if (o) exit; f = $0 }
-		/ui_utils: dropdown_[0-9]+ open/ && !o { if (f == "" || f ~ / x1$/) exit; o = 1 }
+		/UI scale fitted/ { if (o) exit }
+		/ui_utils: dropdown_[0-9]+ open/ { o = 1 }
 		/kit editor: 10\/1 place = all/ && o { ok = 1; exit }
 		END { exit !ok }' "$t/out/page.log" ||
 		fail "the UI scale moved with the inspector's lists up ($t/out/page.log)"
