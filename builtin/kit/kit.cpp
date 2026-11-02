@@ -3217,11 +3217,14 @@ struct Module: public interface::Module, public Interface
 					world::merge_sets(base, set)).get("palettes");
 			const json::Value &sv = set.get("voxels");
 			for(json::Iterator it(sv); sv.is_object() && it; ++it){
-				const ss_ k = it.key();
+				// resolve_names() leaves keys: "<author>/<n>" made "<fp>/<n>"
+				const ss_ k = it.key().compare(0, author.size() + 1,
+						author+"/") == 0 ? fp+it.key().substr(author.size()) :
+						it.key();
 				if(k.compare(0, fp.size() + 1, fp+"/") != 0 ||
 						!name_ok(k.substr(fp.size() + 1)) || !(*it).is_object())
-					return "materials.json: voxel "+k+": its own, "+author+
-							"/<letters, digits and _>";
+					return "materials.json: voxel "+it.key()+": its own, "+
+							author+"/<letters, digits and _>";
 				json::Value v = (*it).deepcopy();
 				const json::Value &tn = v.get("tint");
 				if(tn.is_string() && pals.get(tn.as_string()).is_array())
