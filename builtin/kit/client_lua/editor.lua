@@ -2437,8 +2437,9 @@ end
 -- keys move it, a press at a time), 3D flies (the faster the higher), the
 -- arrows turn it with nothing selected; walking is the app's
 local function move_camera(dt)
+	-- [KIT_DROPDOWN_ARROWS_MOVE] an open dropdown's popup has the arrows
 	if typing() or key_held(magic.KEY_LCTRL) or key_held(magic.KEY_RCTRL) or
-			(E.menu and E.menu.held()) then
+			(E.menu and E.menu.held()) or ui_utils.dropdown_open() then
 		return
 	end
 	local shift = key_held(magic.KEY_LSHIFT) or key_held(magic.KEY_RSHIFT)
@@ -5089,7 +5090,11 @@ function M.editor(options)
 	end)
 	magic.SubscribeToEvent("KeyDown", function(_, data)
 		local key = data:GetInt("Key")
-		if typing() then
+		-- [KIT_DROPDOWN_ARROWS_MOVE] an open dropdown's popup has the keys:
+		-- its arrows and PageUp/PageDown moved the selection too, and none
+		-- of the editor's keys are meant while it is open (Escape or a
+		-- click closes it)
+		if typing() or ui_utils.dropdown_open() then
 			return
 		end
 		if key == magic.KEY_F6 then

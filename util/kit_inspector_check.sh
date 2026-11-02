@@ -10,7 +10,10 @@
 #   - a camera picked and not applied stays picked when the inspector is
 #     drawn again by an edit's state: the dropdown's Down from "chase"
 #     goes to top_down, which Apply sets (it went back to first_person,
-#     whose Down is chase).
+#     whose Down is chase);
+#   - the keys in an open dropdown are its alone: with the kit/door (4)
+#     selected by Tab and one of its dropdowns open, Down and Up do not
+#     move it too ([KIT_DROPDOWN_ARROWS_MOVE]).
 #
 #   util/kit_inspector_check.sh
 set -u
@@ -45,7 +48,7 @@ delay 500
 keypress Down
 keypress Return
 wait_log 5000 kit editor: 3/1 camera = chase
-event kit_edit {"op": "place", "type": "kit/button", "pos": [3, 1, 3]}
+event kit_edit {"op": "place", "type": "kit/door", "pos": [3, 1, 3]}
 wait_log 10000 entities, 2 to undo
 frames 5
 click DropDownList "▼" 965 178
@@ -57,6 +60,15 @@ frames 3
 screenshot @T@/picked.png
 click Button "Apply"
 wait_log 10000 entities, 3 to undo
+keypress Tab
+wait_log 5000 kit editor: selected 4
+frames 5
+click DropDownList "▼" 965 178
+delay 500
+keypress Down
+keypress Up
+keypress Escape
+frames 5
 keypress F6
 wait_log_any 10000 kit: controls: camera
 EOF
@@ -74,7 +86,11 @@ BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
 	-c @"$t/boss.cmds" || fail "the client failed ($t/boss.log, $t/srv.log)"
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
+[ "$(grep -acE "ui_utils: dropdown_[0-9]+ open" "$t/boss.log")" -ge 3 ] ||
+	fail "the door's dropdown did not open ($t/boss.log)"
+grep -aqF "An edit by kitboss: moved 4" "$t/srv.log" &&
+	fail "a key in the open dropdown moved the selection too ($t/srv.log)"
 got=$(grep -aoP 'kit: controls: camera \K\w+' "$t/boss.log" | tail -1)
 [ "$got" = top_down ] ||
 	fail "the camera is ${got:-not set}, not top_down: the pick did not stay ($t/picked.png)"
-echo "PASS: Kit's inspector: kit/controls' parameters fit with Apply on the screen; a pick not yet applied stays picked when the inspector is drawn again"
+echo "PASS: Kit's inspector: kit/controls' parameters fit with Apply on the screen; a pick not yet applied stays picked when the inspector is drawn again; a dropdown's keys move no selection"
