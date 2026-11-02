@@ -285,7 +285,8 @@ end)
 -- shows its own); a touchscreen's at the finger down, held still the right
 -- click's
 local function show_pointed()
-	if editing or menu.held() or ui_utils.mouse_look_paused() then
+	if editing or menu.held() or ui_utils.mouse_look_paused() or
+			ui_utils.clicks_wanted() then
 		kit.show_target(nil)
 		return
 	end
@@ -306,9 +307,16 @@ magic.SubscribeToEvent("Update", function()
 			capture(true)
 		end
 	end
+	-- [KIT_UI_CROSSHAIR] None while a window wants clicks (a Kit panel
+	-- with a button, the Server window): the pointer is the screen's then
+	local cross = not TOUCH and (not editing or looking) and
+			not kit.pointer_free() and not ui_utils.clicks_wanted()
+	if cross ~= crosshair.shown then
+		crosshair.shown = cross
+		log:info("workbench: the crosshair " .. (cross and "shown" or "hidden"))
+	end
 	for _, bar in ipairs(crosshair) do
-		bar.visible = not TOUCH and (not editing or looking) and
-				not kit.pointer_free()
+		bar.visible = cross
 	end
 	show_pointed()
 	local p = kit.body_pos()

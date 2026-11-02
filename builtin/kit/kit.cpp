@@ -10469,7 +10469,7 @@ struct Module: public interface::Module, public Interface
 						cs(data), peer, cs(why));
 		};
 		if(!m_session.running)
-			return refuse("the server is Ended");
+			return refuse("the server is Stopped");
 		if(data.empty() || !end || *end)
 			return refuse("not an entity's id");
 		auto it = m_entities.find(id);

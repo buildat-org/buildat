@@ -372,7 +372,7 @@ echo "ok: a player without edit rights is refused each kind of edit and the gran
 want "$s" "kitbob is in edit mode" "kitbob selects entity 3" \
 	"sample_kit/door 4: opened by kitbob to air" \
 	"Stop by kitboss: " "Play by kitboss: a round from the start" \
-	"refused: the server is Ended" \
+	"refused: the server is Stopped" \
 	"An edit by kitbob: placed sample_kit/marker 21 at [0,1,0]" \
 	"sample_kit/button 17: pressed by kitboss times 1"
 want "$t/boss.log" "kit editor: builder kitbob (#4aa0ff) selects 3, cursor none"

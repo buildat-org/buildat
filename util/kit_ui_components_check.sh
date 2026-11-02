@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-02)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/types/ui_*.lua builtin/kit/types/scoreboard.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/controls.lua
+# covers: apps/workbench/main/client_lua/init.lua builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/types/ui_*.lua builtin/kit/types/scoreboard.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/controls.lua
 # [KIT_UI_COMPONENTS] UI as screen-space components (stage 4m) on
 # Workbench. kitboss (the admin, 1024x700) places by the editor's packets
 #   3 kit/ui_text "Presses: {value}" (top), 4 kit/ui_button "Press me"
@@ -15,7 +15,8 @@
 #   1. edit mode draws every UI component framed, the hidden dialog too
 #      (overlay.png); a click on "Press me" selects it, a drag moves it;
 #   2. play: kitboss clicks "Press me": the text says "Presses: 1", the bar
-#      0.25 full, the dialog his (play.png); "Close" hides it; the bound
+#      0.25 full, the dialog his (play.png), no crosshair over it
+#      ([KIT_UI_CROSSHAIR]); "Close" hides it; the bound
 #      button presses the action (the server's "Action fire pressed");
 #   3. a flood of 2000 presses of 4: at most the acts' burst reaches it
 #      (the counter), as kit:action's;
@@ -221,6 +222,14 @@ want "$s" "UI button 4 pressed by kitboss" "kit/counter 5: count 1 by kitboss" \
 	"kit/ui_panel 7: shown for kitboss" "kit/ui_panel 7: hidden for kitboss"
 grep -aq 'kit: ui 8 text .*"Only you see this. \[R\] fires."' "$b" ||
 	fail "the dialog's text has no [R] for [fire] ($b)"
+# [KIT_UI_CROSSHAIR] No crosshair over the dialog (a panel with a button
+# wants the clicks), back once Close hid it
+awk '/kit: ui button 4 pressed/ && !p { p = 1 }
+	p == 1 && /workbench: the crosshair hidden/ { p = 2 }
+	p == 2 && /kit: ui button 9 pressed/ { p = 3 }
+	p == 3 && /workbench: the crosshair shown/ { p = 4 }
+	END { exit p != 4 }' "$b" ||
+	fail "the crosshair not hidden over the dialog and shown after it ($b)"
 echo "ok: play: the button counts, the text and the bar follow, the dialog is the presser's, Close hides it, a bound button presses its action"
 # 3. The flood
 p=$(grep -ac "UI button 4 pressed by kitboss" "$s")
