@@ -275,10 +275,12 @@ function M.make_one(name, i)
 	return list[i]
 end
 
--- [SK_WEB_JOIN_HANDLERS] The takes' variants are made over the frames
--- after the start, slice() making them until budget_ms has gone, not
--- all at the start (1.2 s of a web join's one thread); one picked before
--- its turn is made then. -> true once every one is made
+-- [SK_WEB_JOIN_HANDLERS] Each take's first variant (as designed) made at
+-- the start, the other 7 over the frames after it, slice() making them
+-- until budget_ms has gone: all of them at the start took 1.2 s of a
+-- web join's one thread. One picked before its turn is the first
+-- variant instead: made at its play, a take scaled to a peak took 58 to
+-- 117 ms on the web, a frame's hitch. -> true once every one is made
 local queue = nil
 function M.start(blip, magic, synth, log)
 	env = {blip = blip, magic = magic, synth = synth, n = 0, ms = 0,
@@ -289,7 +291,10 @@ function M.start(blip, magic, synth, log)
 		names[#names + 1] = name
 	end
 	table.sort(names)
-	for i = 1, M.VARIANTS do
+	for _, name in ipairs(names) do
+		M.make_one(name, 1)
+	end
+	for i = 2, M.VARIANTS do
 		for _, name in ipairs(names) do
 			queue[#queue + 1] = {name, i}
 		end
@@ -398,13 +403,11 @@ function M.self_check(blip, synth)
 	return "sounds: self-check passed, " .. table.concat(out, ", ")
 end
 
--- One of name's variants (made now if not yet), or nil before start()
--- or for a name it lacks
+-- One of name's variants (the first while the one drawn is not made
+-- yet), or nil before start() or for a name it lacks
 function M.pick(name)
-	if not env or not M.TAKES[name] then
-		return nil
-	end
-	return M.make_one(name, math.random(M.VARIANTS))
+	local list = M.made[name]
+	return list and (list[math.random(M.VARIANTS)] or list[1])
 end
 
 return M

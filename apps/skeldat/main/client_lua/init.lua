@@ -1020,10 +1020,13 @@ end
 local sounds = load("main/sounds.lua")
 do
 	local blip = require("buildat/extension/blip")
-	-- [SK_WEB_JOIN_HANDLERS] Made over the first frames, 4 ms of each
-	-- (a sound picked before its turn made then); the self-check for a
+	-- [SK_WEB_JOIN_HANDLERS] Each take's first variant at the start, the
+	-- rest over the first frames, 4 ms of each; the self-check for a
 	-- check alone (BUILDAT_SKELDAT_SELF_TEST=1, check.sh 23 and 40)
+	local t0 = buildat.get_time_us()
 	sounds.start(blip, magic, buildat.synth, function(line) log:info(line) end)
+	log:info(string.format("skeldat: the sounds' first variants made in "
+			.. "%.0f ms", (buildat.get_time_us() - t0) / 1000))
 	local frames, sub = 0, nil
 	sub = magic.SubscribeToEvent("Update", function()
 		if not sub then
@@ -1070,22 +1073,24 @@ local mobs = load("main/mobs.lua")(game, sounds)
 -- four compass ways at two tilts), a material each, lit as an object with
 -- no sun plus the sun by the group's normal (no shadows)
 local backdrop = {node = nil, groups = {}, light_t = 0}
+-- [SK_WEB_JOIN_HANDLERS] Its helpers made once, not two closures a call
+local function backdrop_hash(ix, iz)
+	local h = (ix * 374761393 + iz * 668265263) % 2147483647
+	h = (h * h * 3 + h * 1274126177) % 2147483647
+	return (h % 10007) / 10007
+end
+local function backdrop_layer(x, z, period)
+	local hash = backdrop_hash
+	local fx, fz = x / period, z / period
+	local ix, iz = math.floor(fx), math.floor(fz)
+	local tx, tz = fx - ix, fz - iz
+	tx, tz = tx * tx * (3 - 2 * tx), tz * tz * (3 - 2 * tz)
+	local a = hash(ix, iz) + (hash(ix + 1, iz) - hash(ix, iz)) * tx
+	local b = hash(ix, iz + 1) + (hash(ix + 1, iz + 1) - hash(ix, iz + 1)) * tx
+	return a + (b - a) * tz
+end
 local function backdrop_noise(x, z)
-	local function hash(ix, iz)
-		local h = (ix * 374761393 + iz * 668265263) % 2147483647
-		h = (h * h * 3 + h * 1274126177) % 2147483647
-		return (h % 10007) / 10007
-	end
-	local function layer(period)
-		local fx, fz = x / period, z / period
-		local ix, iz = math.floor(fx), math.floor(fz)
-		local tx, tz = fx - ix, fz - iz
-		tx, tz = tx * tx * (3 - 2 * tx), tz * tz * (3 - 2 * tz)
-		local a = hash(ix, iz) + (hash(ix + 1, iz) - hash(ix, iz)) * tx
-		local b = hash(ix, iz + 1) + (hash(ix + 1, iz + 1) - hash(ix, iz + 1)) * tx
-		return a + (b - a) * tz
-	end
-	return layer(48) * 0.7 + layer(16) * 0.3
+	return backdrop_layer(x, z, 48) * 0.7 + backdrop_layer(x, z, 16) * 0.3
 end
 buildat.sub_packet("skeldat:world", function(data)
 	local h, y0, y1, crest, low, water, form =
