@@ -14,7 +14,8 @@
 #      at (5,1,5); switches the World to redland: the sections nobody
 #      wrote generated again, red_grass on top and redland's filler
 #      (gravel) under it, the cobble's section kept (the seams warned;
-#      the ground's section under it, y < 0, generated again);
+#      its Kit grass at y 0 too; the section under it, y < 0, generated
+#      again: gravel);
 #      biome meadow refused naming the role stone; blueland: blue_grass on
 #      top over redland's gravel (the later set winning per role), the
 #      cobble still there.
@@ -195,7 +196,7 @@ BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_NAME=kitboss \
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 s=$t/srv.log
-grep -a " kit *: World\|column (" "$s" | sed 's/^.*kit *: /  /' | cut -c1-170
+grep -a " kit *: World\|column (" "$s" | sed 's/^.*kit *: /  /' | cut -c1-250
 want(){ # <log> <text>...
 	local log=$1 w
 	shift
@@ -210,10 +211,10 @@ want "$s" "installed alice/redland 1.0.0: 0 types, 0 prefabs, 1 voxel types, a m
 	"column (-20,-20): air 1..2, $fp/red_grass 0, kit/gravel -3..-1" \
 	"column (-20,-20): air 1..2, $fp/blue_grass 0, kit/gravel -3..-1" \
 	"World: not applied: the flat generator needs the role stone, which biome meadow has none of (material set alice/redland"
-# The cobble's section (y 0...63) kept, the ground's under it (y -64...-1)
-# generated again
-want "$s" "column (5,5): kit/cobble 1, $fp/red_grass 0" \
-	"column (5,5): kit/cobble 1, $fp/blue_grass 0"
+# The cobble's section (y 0...63, the grass at 0 in it) kept, the one
+# under it (y -64...-1) generated again: the set's filler there
+[ "$(grep -ac "column (5,5): kit/cobble 1, kit/grass 0, kit/gravel -3..-1" "$s")" = 2 ] ||
+	fail "the placed cobble's section not kept, or the one under it not generated again ($s)"
 [ "$(grep -an "installed alice/redland" "$s" | cut -d: -f1)" -lt \
 	"$(grep -an "installed alice/blueland" "$s" | cut -d: -f1)" ] ||
 	fail "the base set not first ($s)"
