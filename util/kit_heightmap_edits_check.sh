@@ -115,6 +115,10 @@ EOF
 	cat <<'EOF'
 keypress F1
 wait_log 5000 kit editor: the view is 2D
+mouse_pos 640 350
+EOF
+	for _ in $(seq 10); do echo "mouse_wheel -1"; echo "frames 2"; done
+	cat <<'EOF'
 frames 30
 screenshot @T@/plan.png
 keypress F1
