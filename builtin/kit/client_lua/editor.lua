@@ -1866,6 +1866,13 @@ local function inspector(w, e, is_made)
 		text(w, "Prefab " .. tostring(e.prefab.of) .. " " ..
 				tostring(e.prefab.version), DIM)
 	end
+	-- [KIT_GENERATORS] a generator's child: built again as it changes,
+	-- what is set here kept
+	if type(e.built) == "table" then
+		local g = find(e.built.by)
+		text(w, "Built by " .. (g and name_of(g) or tostring(e.built.by)) ..
+				" (its " .. tostring(e.built.member) .. ")", DIM)
+	end
 end
 
 -- [KIT_BOX_ADJUST] The Box tool's box adjusted once its two corners are

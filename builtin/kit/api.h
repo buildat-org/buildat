@@ -265,6 +265,33 @@ namespace interface
 //   Client parts: <name>.client.lua beside a type, sent to every client at
 //   join and run there as the client's own Lua is (client_lua/module.lua
 //   says what it gets).
+//   [KIT_GENERATORS] **Generators**: a type with on_build(c) builds its
+//   own children from c.params, in the editor: as it is placed (not a
+//   copy that has its own: a duplicate, a prefab's, a paste) and as an
+//   edit changes its parameters, into that edit (one undo puts the old
+//   children back). In it: c:child{type =, pos = {x, y, z} (its frame's;
+//   0, 0, 0 if none), yaw =, name =, params =, parent = an earlier
+//   child's number} -> the child's number (1...), c:link(from, output, to,
+//   input) (between children by their numbers, to 0 the generator
+//   itself), c:voxel_box{at =, size =, cells = {name...} (x fastest, then
+//   z, then y), air = bool} (a prefab's voxels, written about it as a
+//   prefab copy's). What it returns is checked as a prefab is
+//   (check_prefab()), MAX_BUILT children at most, no generator, root,
+//   World or environment among them; it runs with a call's budget (a
+//   build is not a tick's), past it the edit refused. Its children are
+//   ordinary authored entities marked {"built": {"by": the generator,
+//   "member": n, "moved": true once a builder moved it}}: a build again
+//   keeps a child of the same number, type and parent (its id, its
+//   overrides -- a parameter set on it -- its links to others and theirs
+//   to it, what was put under it by hand, its place if it was moved),
+//   and removes those it no longer makes (what a builder put under one
+//   then under the generator, where it was); one a builder put under
+//   another entity is theirs. A child not built (a builder's) is left as
+//   it is. Copies (duplicate, prefab, paste, c:spawn) carry the marks.
+//   simplified: the voxels an earlier build wrote stay where a new one
+//   writes none; a copy following its prefab builds again as its
+//   parameters change, its built children's overrides kept over the
+//   prefab's values. A build at each session's start: stage 7.
 //   [KIT] stage 5 **Packages**: component types, prefabs and builders'
 //   voxel types published to Aitta as a package of "kind": "kit"
 //   (doc/aitta.txt). [AITTA_KEY_IDENTITY] A package is its key and its
