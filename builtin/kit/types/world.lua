@@ -6,6 +6,13 @@
 --              height, a feature every spread cells), valleys (Luanti's
 --              valleys mapgen's surface, without rivers; native servers)
 --   seed       noise and valleys
+--   materials  ([KIT_MATERIAL_SETS]) the material set: "" the app's
+--              (Workbench's: Kit's own), or an installed set package's
+--              (where the app allows it); the inspector's dropdown of them.
+--              Changing it generates again what the generator wrote, the
+--              voxels placed keep theirs; refused, the role named, when the
+--              generator needs a role the set's biome lacks. A package's
+--              upgrade is the same change
 --   biome      the material set's biome: which voxels the ground is
 --              (Kit's set: grassland, desert, rock -- rock has no water);
 --              the inspector's dropdown of them (choices_from)
@@ -42,6 +49,8 @@ return {
 		generator = {type = "string", default = "flat",
 			choices = {"empty", "flat", "noise", "valleys"}},
 		seed = {type = "number", default = 0, min = 0, max = 4294967295},
+		materials = {type = "string", default = "",
+			choices_from = "material_sets"},
 		biome = {type = "string", default = "grassland",
 			choices_from = "biomes"},
 		level = {type = "number", default = 0, min = -100, max = 200},

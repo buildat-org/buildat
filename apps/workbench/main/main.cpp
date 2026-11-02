@@ -335,6 +335,8 @@ struct Module: public interface::Module
 			return make_scene(name, k);
 		};
 		h.controls = true;
+		// [KIT_MATERIAL_SETS] a World may be made of a set package
+		h.material_sets = true;
 		// The World: Workbench's floor, unless the composer says otherwise:
 		// a new project's a gentle grassland heightmap, 64x64 (its least
 		// side), the player at its middle (world_spawn); before, stone

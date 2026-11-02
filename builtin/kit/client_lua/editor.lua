@@ -1261,14 +1261,19 @@ palette = function()
 	tabs()
 end
 
--- The voxels to place, the builders' own first, then by name
+-- The voxels to place: the World's material set's first
+-- ([KIT_MATERIAL_SETS]), then the builders' own, then by name
 voxel_names = function()
-	local names, own = {}, {}
+	local names, own, set = {}, {}, {}
 	for _, v in ipairs(E.state and E.state.voxels or {}) do
 		names[#names + 1] = v.name
 		own[v.name] = v.author ~= nil
+		set[v.name] = v.set == true
 	end
 	table.sort(names, function(a, b)
+		if set[a] ~= set[b] then
+			return set[a]
+		end
 		if own[a] ~= own[b] then
 			return own[a]
 		end
@@ -1397,6 +1402,18 @@ local function field(name, d, values)
 		for _, b in ipairs(E.state.terrain.biomes or {}) do
 			f.choices[#f.choices + 1] = {b, b}
 			has = has or b == values[name]
+		end
+		if not has and type(values[name]) == "string" then
+			f.choices[#f.choices + 1] = {values[name], values[name]}
+		end
+	elseif d.choices_from == "material_sets" and E.state and E.state.terrain then
+		-- [KIT_MATERIAL_SETS] the sets a World may be made of ({label, id})
+		f.type = "choice"
+		f.choices = {}
+		local has = false
+		for _, s in ipairs(E.state.terrain.material_sets or {}) do
+			f.choices[#f.choices + 1] = {s[1], s[2]}
+			has = has or s[2] == values[name]
 		end
 		if not has and type(values[name]) == "string" then
 			f.choices[#f.choices + 1] = {values[name], values[name]}

@@ -500,6 +500,9 @@ struct World
 	voxelworld::Instance *hm_world = nullptr;
 	json::Value world_applied;
 	world::Params wp;
+	// [KIT_MATERIAL_SETS] the material set it is made of (its
+	// "materials": the app's, or an installed package's)
+	world::MaterialSet materials;
 	int world_min = 0, world_max = 0;
 	int section_size = 32;
 	sm_<size_t, std::array<int32_t, 3>> world_peers;
@@ -979,8 +982,6 @@ struct Module: public interface::Module, public Interface
 	// Ids of entities being made together (a composition, a prefab's
 	// copy), which an entity parameter may name before they are there
 	std::set<uint64_t> m_pending_ids;
-	// [KIT] stage 4e: the material set the Worlds are made of
-	world::MaterialSet m_materials;
 	// [KIT_SCENES] Each scene's World, by the scene's name, and the one the
 	// code at hand is about (m_w; use_world()). A scene not the app's World
 	// scene's kind (Host::world_scene "": none) has m_none's
@@ -2657,6 +2658,9 @@ struct Module: public interface::Module, public Interface
 					}
 				}
 				v.set("name", n);
+				// [KIT_MATERIAL_SETS] the World's set's, listed first
+				if(m_w->materials.voxels.count(n))
+					v.set("set", true);
 				interface::VoxelName sn;
 				sn.block_name = n+":"+world::shapes()[0].name;
 				v.set("shapes", reg->get(sn) != nullptr);
@@ -3180,6 +3184,54 @@ struct Module: public interface::Module, public Interface
 			t.set(kind == ".lua" ? "source" : "client", f.second);
 			types.set(n, t);
 		}
+		// [KIT_MATERIAL_SETS] materials.json: a material set (world.h's
+		// format) a World may be made of. Its own voxels are "<author>/<n>",
+		// installed as its voxel types; "extends": kit/default (Kit's own)
+		// or a set it depends on, the later set winning (world::merge_sets)
+		json::Value set, base;
+		std::set<ss_> set_voxels;
+		const auto mj = files.find("materials.json");
+		if(mj != files.end()){
+			set = json::load_string(mj->second.c_str());
+			if(!set.is_object() || jstr(set, "format") != "kit_materials")
+				return "materials.json: not a kit_materials set";
+			resolve_names(set, keys);
+			set.set("author", fp);
+			set.set("name", jstr(m, "name"));
+			const ss_ ex = jstr(set, "extends");
+			bool dep = ex.empty() || ex == "kit/default";
+			for(json::Iterator it(resolved); it; ++it){
+				auto d = m_packages.find((*it).as_string());
+				dep = dep || (d != m_packages.end() && d->first == ex &&
+						d->second.get("materials").is_object());
+			}
+			if(!dep || ex == name)
+				return "materials.json: \"extends\" is kit/default or the set "
+						"of a package it depends on";
+			ss_ pin, bwhy;
+			if(!ex.empty() && !material_json(ex, base, pin, bwhy))
+				return "materials.json: "+bwhy;
+			// Its voxels' tints named by a palette of it (or its base's)
+			// made the palette, as a voxel type's row has it
+			const json::Value pals = (ex.empty() ? set :
+					world::merge_sets(base, set)).get("palettes");
+			const json::Value &sv = set.get("voxels");
+			for(json::Iterator it(sv); sv.is_object() && it; ++it){
+				const ss_ k = it.key();
+				if(k.compare(0, fp.size() + 1, fp+"/") != 0 ||
+						!name_ok(k.substr(fp.size() + 1)) || !(*it).is_object())
+					return "materials.json: voxel "+k+": its own, "+author+
+							"/<letters, digits and _>";
+				json::Value v = (*it).deepcopy();
+				const json::Value &tn = v.get("tint");
+				if(tn.is_string() && pals.get(tn.as_string()).is_array())
+					v.set("tint", pals.get(tn.as_string()).deepcopy());
+				if(voxels.count(k))
+					return "materials.json: voxel "+k+" is in types/ too";
+				voxels[k] = v;
+				set_voxels.insert(k);
+			}
+		}
 		for(json::Iterator it(types); it; ++it){
 			const ss_ t = fp+"/"+it.key();
 			if(jstr(*it, "source").empty())
@@ -3209,27 +3261,77 @@ struct Module: public interface::Module, public Interface
 					m_registered.count(v.first) != 0)
 				return "the voxel type "+v.first+" is another's here";
 		}
-		if(types.size() + prefabs.size() + voxels.size() == 0)
-			return "no types, prefabs or voxel types in types/";
-		// The textures its voxel types wear, stored as an upload's
-		for(auto &v : voxels){
-			const ss_ tex = jstr(v.second, "texture");
+		if(old != m_packages.end() && old->second.get("materials").is_object() &&
+				!set.is_object())
+			return version+" has no material set, which "+old_version+" had";
+		if(types.size() + prefabs.size() + voxels.size() == 0 &&
+				!set.is_object())
+			return "no types, prefabs or voxel types in types/, and no "
+					"materials.json";
+		// The textures its voxel types wear, stored as an upload's: each
+		// face's ([KIT_MATERIAL_SETS] a set's voxel's: top, side, bottom,
+		// a season's)
+		const std::set<ss_> choices = texture_choices();
+		auto take = [&](const ss_ &what, json::Value &o, const char *face){
+			if(o.get(face).is_undefined())
+				return ss_();
+			const ss_ tex = jstr(o, face);
 			if(tex.compare(0, 9, "textures/") == 0){
 				auto f = files.find(tex);
 				if(f == files.end())
-					return v.first+": its texture "+tex+" is not in the archive";
+					return what+": its texture "+tex+" is not in the archive";
 				ss_ twhy;
 				const ss_ served = store_texture(f->second, twhy);
 				if(served.empty())
 					return tex+": "+twhy;
-				v.second.set("texture", served);
-			} else if(!texture_choices().count(tex)){
-				return v.first+": no voxel or upload has the texture "+tex;
+				o.set(face, served);
+			} else if(!choices.count(tex)){
+				return what+": no voxel or upload has the texture "+tex;
+			}
+			return ss_();
+		};
+		for(auto &v : voxels){
+			for(const char *face : {"texture", "top", "side", "bottom"}){
+				const ss_ twhy = take(v.first, v.second, face);
+				if(!twhy.empty())
+					return twhy;
+			}
+			if(v.second.get("seasons").is_object()){
+				json::Value ss = v.second.get("seasons").deepcopy();
+				for(json::Iterator it(v.second.get("seasons")); it; ++it){
+					json::Value se = (*it).deepcopy();
+					for(const char *face : {"texture", "top", "side", "bottom"}){
+						const ss_ twhy = take(v.first, se, face);
+						if(!twhy.empty())
+							return twhy;
+					}
+					ss.set(it.key(), se);
+				}
+				v.second.set("seasons", ss);
 			}
 			world::Material mt;
 			if(!mt.parse(v.second))
 				return v.first+": not a texture, a kind, light 0...15, "
 						"friction 0...10 and a surface tag";
+		}
+		// The set as a World would take it, its voxels with their textures
+		// served; its biomes and structures named as types are
+		if(set.is_object()){
+			json::Value sv = json::object();
+			for(const ss_ &k : set_voxels)
+				sv.set(k, voxels[k].deepcopy());
+			set.set("voxels", sv);
+			world::MaterialSet ms;
+			ss_ mwhy;
+			if(!ms.parse(base.is_object() ? world::merge_sets(base, set) : set,
+					mwhy))
+				return "materials.json: "+mwhy;
+			for(const char *k : {"biomes", "structures"})
+				for(json::Iterator it(set.get(k)); set.get(k).is_object() && it;
+						++it)
+					if(!name_ok(it.key()))
+						return "materials.json: "+ss_(k)+": "+it.key()+": a name "
+								"is letters, digits and _";
 		}
 		// The types as the box takes them, then the prefabs on them; on a
 		// refusal the old version's are put back
@@ -3250,6 +3352,8 @@ struct Module: public interface::Module, public Interface
 		row.set("by", by);
 		row.set("manifest", m);
 		row.set("types", types);
+		if(set.is_object())
+			row.set("materials", set);
 		json::Value was = old == m_packages.end() ? json::Value() : old->second;
 		auto reload = [&](){
 			for(const ss_ &t : names){
@@ -3332,10 +3436,13 @@ struct Module: public interface::Module, public Interface
 				"upgraded "+named+" from "+old_version+" to "+version)+": "+
 				itos(names.size())+" types, "+itos(prefabs.size())+
 				" prefabs, "+itos(voxels.size())+" voxel types"+
+				(set.is_object() ? ", a material set" : "")+
 				(change.empty() ? "" : ", "+itos(change.size())+
 				" entities upgraded");
 		log_i(MODULE, "%s %s (%s, from %s)", cs(by), cs(what), cs(name),
 				cs(aitta));
+		// [KIT_MATERIAL_SETS] a World made of its set (an upgrade) made again
+		world_check(by);
 		for(auto &o : m_peers)
 			send_state(o.first);
 		return "ok "+what;
@@ -3531,6 +3638,16 @@ struct Module: public interface::Module, public Interface
 						json::Value();
 				out.set(it.key(), v.is_undefined() ? (*it).get("default") : v);
 			}
+		// [KIT_MATERIAL_SETS] A package's set pinned by its version (and
+		// its bases'): an upgrade is a change of the World's, applied as
+		// one (sections nobody wrote generated again)
+		const ss_ set = jstr(out, "materials");
+		if(!set.empty()){
+			json::Value j;
+			ss_ pin, why;
+			material_json(set, j, pin, why);
+			out.set("materials_pin", pin);
+		}
 		return out;
 	}
 
@@ -3635,6 +3752,65 @@ struct Module: public interface::Module, public Interface
 		return moved;
 	}
 
+	// [KIT_MATERIAL_SETS] A material set as JSON (world.h's format): ""
+	// the app's (Host::materials, else Kit's own), "kit/default" Kit's own,
+	// else an installed package's ("<fp>/<name>"), the sets it extends
+	// under it (world::merge_sets). pin: the packages and their versions,
+	// what the World's row keeps
+	bool material_json(const ss_ &id, json::Value &out, ss_ &pin, ss_ &why,
+			int depth = 0)
+	{
+		if(id.empty() || id == "kit/default"){
+			const ss_ ms = !id.empty() || m_host.materials.empty() ?
+					read_file(m_server->get_module_path(MODULE)+
+					"/materials.json") : m_host.materials;
+			out = json::load_string(ms.c_str());
+			return true;
+		}
+		auto pk = m_packages.find(id);
+		const json::Value set = pk == m_packages.end() ? json::Value() :
+				pk->second.get("materials");
+		if(!set.is_object()){
+			why = "no material set "+shown(id)+" is installed";
+			return false;
+		}
+		// A dependency loop (an upgrade may make one) ends here
+		if(depth >= 8){
+			why = shown(id)+" extends sets 8 deep (a loop?)";
+			return false;
+		}
+		pin = id+" "+jstr(pk->second, "version")+(pin.empty() ? "" :
+				" < "+pin);
+		const ss_ base = jstr(set, "extends");
+		if(base.empty()){
+			out = set;
+			return true;
+		}
+		json::Value b;
+		if(!material_json(base, b, pin, why, depth + 1))
+			return false;
+		out = world::merge_sets(b, set);
+		return true;
+	}
+
+	bool material_set(const ss_ &id, world::MaterialSet &out, ss_ &pin,
+			ss_ &why)
+	{
+		json::Value j;
+		if(!id.empty() && !m_host.material_sets){
+			why = "this app binds its own materials (no material set packages)";
+			return false;
+		}
+		if(!material_json(id, j, pin, why))
+			return false;
+		out = world::MaterialSet();
+		if(!out.parse(j, why))
+			return false;
+		if(!id.empty())
+			out.name = shown(id);
+		return true;
+	}
+
 	bool host_world(ss_ &why)
 	{
 		if(m_host.world_scene.empty())
@@ -3643,11 +3819,9 @@ struct Module: public interface::Module, public Interface
 			why = "the World's scene "+m_host.world_scene+" is none of the app's";
 			return false;
 		}
-		const ss_ ms = m_host.materials.empty() ? read_file(
-				m_server->get_module_path(MODULE)+"/materials.json") :
-				m_host.materials;
-		ss_ mwhy;
-		if(!m_materials.parse(json::load_string(ms.c_str()), mwhy)){
+		world::MaterialSet app;
+		ss_ mwhy, pin;
+		if(!material_set("", app, pin, mwhy)){
 			why = "the material set: "+mwhy;
 			return false;
 		}
@@ -3738,10 +3912,14 @@ struct Module: public interface::Module, public Interface
 	{
 		world::Params p;
 		p.from(params);
-		auto bi = m_materials.biomes.find(p.biome);
-		if(bi == m_materials.biomes.end()){
-			why = "no biome \""+p.biome+"\" in the material set "+
-					m_materials.name;
+		// [KIT_MATERIAL_SETS] its material set, the one world_params() pinned
+		world::MaterialSet ms;
+		ss_ pin;
+		if(!material_set(jstr(params, "materials"), ms, pin, why))
+			return false;
+		auto bi = ms.biomes.find(p.biome);
+		if(bi == ms.biomes.end()){
+			why = "no biome \""+p.biome+"\" in the material set "+ms.name;
 			return false;
 		}
 		const world::Biome &b = bi->second;
@@ -3756,9 +3934,10 @@ struct Module: public interface::Module, public Interface
 		if(p.border == "wall")
 			need.push_back("stone");
 		for(const ss_ &r : need)
-			if(m_materials.resolve(b, r).empty()){
+			if(ms.resolve(b, r).empty()){
 				why = "the "+p.generator+" generator needs the role "+r+
-						", which biome "+p.biome+" has none of";
+						", which biome "+p.biome+" has none of (material set "+
+						ms.name+")";
 				return false;
 			}
 		if(p.heightmap() && !p.finite()){
@@ -3803,7 +3982,7 @@ struct Module: public interface::Module, public Interface
 			if(p.generator == "empty")
 				return;
 			// The roles, the decorations' structures ([KIT] stage 4f)
-			world::resolve_biome(m_materials, b, id, ids.structs, ids);
+			world::resolve_biome(ms, b, id, ids.structs, ids);
 			if(!ids.water)
 				ids.water = ids.air;
 		});
@@ -3811,9 +3990,9 @@ struct Module: public interface::Module, public Interface
 			return false;
 		if(p.heightmap())
 			for(const char *r : {"top", "stone", "riverbed"}){
-				const ss_ v = m_materials.resolve(b, r);
-				auto m = m_materials.voxels.find(v);
-				if(m == m_materials.voxels.end() || m->second.layer < 0){
+				const ss_ v = ms.resolve(b, r);
+				auto m = ms.voxels.find(v);
+				if(m == ms.voxels.end() || m->second.layer < 0){
 					why = v+" ("+r+") has no heightmap layer";
 					return false;
 				}
@@ -3855,6 +4034,10 @@ struct Module: public interface::Module, public Interface
 				}
 			caves = " ("+itos(n)+" of "+itos(of)+" sampled cells)";
 		}
+		// From here the World is made of the set (decorations' structures);
+		// the old one back if the heightmap refuses
+		world::MaterialSet was_set = m_w->materials;
+		m_w->materials = ms;
 		if(reshape && m_w->wp.heightmap()){
 			decor_clear();
 			m_w->decor_dirty = true;
@@ -3864,8 +4047,10 @@ struct Module: public interface::Module, public Interface
 			});
 		}
 		if(p.heightmap()){
-			if(!apply_heightmap(p, *h, layers, ids, again, hash, why))
+			if(!apply_heightmap(p, *h, layers, ids, again, hash, why)){
+				m_w->materials = was_set;
 				return false;
+			}
 			dn = m_w->decor.size();
 			dh = decor_hash();
 			set_world_generator(p, ids, nullptr, lo, hi);
@@ -3892,14 +4077,14 @@ struct Module: public interface::Module, public Interface
 		world_load_points();
 		log_i(MODULE, "World%s: %s %s, seed %u, biome %s, %s, %s; ground %i "
 				"to %i, heights hash %08x%s; version %i%s%s, decorations %zu "
-				"(hash %08x)", by.empty() ? "" : cs(" by "+by),
+				"(hash %08x); materials %s", by.empty() ? "" : cs(" by "+by),
 				cs(p.generator), cs(p.size == "finite" ? itos(p.width)+"x"+
 				itos(p.depth) : ss_("infinite")), p.seed, cs(p.biome),
 				cs(p.heightmap() ? ss_("a heightmap") : "voxels"),
 				cs("border "+p.border), lo, hi, hash,
 				first ? (again ? ", the save's was another" : "") : "",
 				world::VERSION, p.with_caves() && !p.heightmap() ? ", caves" : "",
-				cs(caves), dn, dh);
+				cs(caves), dn, dh, cs(ms.name));
 		if(first && !p.heightmap())
 			voxelworld::access(m_server, m_w->world_scene,
 					[&](voxelworld::Instance *w){
@@ -4438,8 +4623,8 @@ struct Module: public interface::Module, public Interface
 	{
 		if(m_w->decor_models.count(name))
 			return true;
-		auto si = m_materials.structures.find(name);
-		if(si == m_materials.structures.end())
+		auto si = m_w->materials.structures.find(name);
+		if(si == m_w->materials.structures.end())
 			return false;
 		const world::Structure &st = si->second;
 		sv_<interface::VoxelTypeId> ids;
@@ -4472,7 +4657,7 @@ struct Module: public interface::Module, public Interface
 	{
 		if(!decor_model(d.structure))
 			return;
-		const world::Structure &st = m_materials.structures[d.structure];
+		const world::Structure &st = m_w->materials.structures[d.structure];
 		const magic::Quaternion q(0, d.yaw, 0);
 		const magic::Vector3 pos = magic::Vector3(d.x, d.y, d.z) -
 				q * magic::Vector3(st.ox + 0.5f, (float)st.oy, st.oz + 0.5f);
@@ -4615,7 +4800,7 @@ struct Module: public interface::Module, public Interface
 			for(unsigned i = 0; a.is_array() && i < a.size(); i++){
 				const json::Value &r = a.at(i);
 				if(r.is_array() && r.size() == 5 && r.at(0).is_string() &&
-						m_materials.structures.count(r.at(0).as_string()))
+						m_w->materials.structures.count(r.at(0).as_string()))
 					made.push_back({r.at(0).as_string(),
 						(float)r.at(1).as_number(), (float)r.at(2).as_number(),
 						(float)r.at(3).as_number(), (float)r.at(4).as_number()});
@@ -4685,9 +4870,9 @@ struct Module: public interface::Module, public Interface
 		};
 		br.p = m_w->wp;
 		br.air = id("air");
-		for(auto &b : m_materials.biomes){
+		for(auto &b : m_w->materials.biomes){
 			world::BiomeIds bi;
-			world::resolve_biome(m_materials, b.second, id, br.structs, bi);
+			world::resolve_biome(m_w->materials, b.second, id, br.structs, bi);
 			br.biomes.push_back(std::make_pair(b.first, bi));
 			for(interface::VoxelTypeId v : {bi.top, bi.filler, bi.stone,
 					bi.riverbed, bi.cave_floor, bi.cave_wall})
@@ -4704,7 +4889,7 @@ struct Module: public interface::Module, public Interface
 				br.world = bi;
 		}
 		br.soft.insert(br.air);
-		for(auto &v : m_materials.voxels)
+		for(auto &v : m_w->materials.voxels)
 			if(v.second.kind == "plant")
 				br.soft.insert(id(v.first));
 		return why.empty();
@@ -4790,7 +4975,7 @@ struct Module: public interface::Module, public Interface
 		ss_ biome = jstr(j, "biome");
 		if(biome.empty())
 			biome = m_w->wp.biome;
-		if(!m_materials.biomes.count(biome) && !(tool == "fill" &&
+		if(!m_w->materials.biomes.count(biome) && !(tool == "fill" &&
 				biome == "water"))
 			return refuse("biome: one of the material set's"+ss_(tool ==
 					"fill" ? ", or water" : ""));
@@ -5047,8 +5232,8 @@ struct Module: public interface::Module, public Interface
 	// The heightmap's layer each biome role's voxel is (-1: none)
 	int layer_of(const world::Biome &b, const char *role)
 	{
-		auto m = m_materials.voxels.find(m_materials.resolve(b, role));
-		return m == m_materials.voxels.end() ? -1 : m->second.layer;
+		auto m = m_w->materials.voxels.find(m_w->materials.resolve(b, role));
+		return m == m_w->materials.voxels.end() ? -1 : m->second.layer;
 	}
 
 	ss_ terrain_heightmap(Peer &p, const ss_ &tool, double fx, double fy,
@@ -5062,7 +5247,7 @@ struct Module: public interface::Module, public Interface
 			return "";
 		}
 		const int cx = (int)std::floor(fx + 0.5), cz = (int)std::floor(fz + 0.5);
-		const world::Biome &sel = m_materials.biomes[biome];
+		const world::Biome &sel = m_w->materials.biomes[biome];
 		ss_ what;
 		size_t samples = 0, added = 0;
 		int bx0 = cx - r - 1, bz0 = cz - r - 1, bx1 = cx + r + 1,
@@ -5073,7 +5258,7 @@ struct Module: public interface::Module, public Interface
 		if(tool == "decorate")
 			voxelworld::access(m_server, m_w->world_scene,
 					[&](voxelworld::Instance *w){
-				world::resolve_biome(m_materials, sel,
+				world::resolve_biome(m_w->materials, sel,
 						[&](const ss_ &name) -> interface::VoxelTypeId {
 					interface::VoxelName n;
 					n.block_name = name;
@@ -5106,10 +5291,10 @@ struct Module: public interface::Module, public Interface
 				for(int k = 1; k < heightmap::MAX_MATERIALS; k++)
 					if(w[k] > w[best])
 						best = k;
-				for(auto &b : m_materials.biomes)
+				for(auto &b : m_w->materials.biomes)
 					if(layer_of(b.second, "top") == best)
 						return b.second;
-				return m_materials.biomes[m_w->wp.biome];
+				return m_w->materials.biomes[m_w->wp.biome];
 			};
 			// A sample's layer as its ground is: stone where steep, the
 			// riverbed under the sea, else its biome's top
@@ -12262,11 +12447,24 @@ struct Module: public interface::Module, public Interface
 			// [KIT] stage 4f: what the terrain brushes choose from
 			if(m_w->world_scene){
 				json::Value t = json::object(), bs = json::array();
-				for(auto &b : m_materials.biomes)
+				for(auto &b : m_w->materials.biomes)
 					bs.append(b.first);
 				t.set("biomes", bs);
 				t.set("biome", m_w->wp.biome);
 				t.set("surface", ss_(m_w->wp.heightmap() ? "heightmap" : "voxels"));
+				// [KIT_MATERIAL_SETS] the sets a World may be made of:
+				// [label, id], the app's ("") first
+				json::Value sets = json::array();
+				sets.append(json::load_string("[\"the app's\", \"\"]"));
+				for(auto &pk : m_packages)
+					if(m_host.material_sets &&
+							pk.second.get("materials").is_object()){
+						json::Value e = json::array();
+						e.append(package_label(pk.first));
+						e.append(pk.first);
+						sets.append(e);
+					}
+				t.set("material_sets", sets);
 				j.set("terrain", t);
 			}
 			j.set("undo", (int64_t)m_undo[pi->second.name].size());

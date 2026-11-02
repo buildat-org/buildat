@@ -117,6 +117,9 @@ static int generator_version(const ss_ &g)
 	return g == "empty" || g == "flat" || g == "noise" || g == "valleys" ?
 			VERSION : 0;
 }
+// [KIT_MATERIAL_SETS] A set's voxels and structures, and its biomes and
+// a biome's decorations, at most
+static const unsigned MAX_SET_VOXELS = 256, MAX_SET_BIOMES = 64;
 // A finite voxel map's side at most (a heightmap's is its own)
 static const int MAX_FINITE_VOXELS = 512;
 // Sea round a finite map with a water border, and its bed under sea level
@@ -286,6 +289,7 @@ struct Material
 		for(char c : surface)
 			tag_ok = tag_ok && (isalnum((unsigned char)c) || c == '_');
 		return !top.empty() && !side.empty() && !bottom.empty() &&
+				layer >= -1 && layer < heightmap::MAX_MATERIALS &&
 				light >= 0 && light <= 15 && (kind == "solid" ||
 				kind == "water" || kind == "leaves" || kind == "plant" ||
 				kind == "glass") &&
@@ -599,6 +603,13 @@ struct MaterialSet
 		}
 		name = json::jstr(j, "author")+"/"+json::jstr(j, "name");
 		const json::Value &vs = j.get("voxels");
+		// [KIT_MATERIAL_SETS] an installed package's set is untrusted
+		if(vs.size() > MAX_SET_VOXELS || j.get("structures").size() >
+				MAX_SET_VOXELS || j.get("biomes").size() > MAX_SET_BIOMES){
+			why = itos(MAX_SET_VOXELS)+" voxels, "+itos(MAX_SET_VOXELS)+
+					" structures and "+itos(MAX_SET_BIOMES)+" biomes at most";
+			return false;
+		}
 		// [KIT_TINT_PALETTE] palettes its voxels share by name
 		const json::Value &pals = j.get("palettes");
 		if(vs.is_object())
@@ -643,6 +654,11 @@ struct MaterialSet
 					b.roles[r] = v;
 			}
 			const json::Value &ds = (*it).get("decorations");
+			if(ds.size() > MAX_SET_BIOMES){
+				why = "biome "+it.key()+": "+itos(MAX_SET_BIOMES)+
+						" decorations at most";
+				return false;
+			}
 			for(unsigned i = 0; ds.is_array() && i < ds.size(); i++){
 				Decoration d;
 				d.structure = json::jstr(ds.at(i), "structure");
@@ -677,6 +693,38 @@ struct MaterialSet
 		return "";
 	}
 };
+
+// [KIT_MATERIAL_SETS] A set extending another (materials.json's "extends"):
+// `over` on `base`, the later winning per voxel, palette, fallback,
+// structure and, in a biome both have, per role (and filler_depth and
+// decorations, each a key of the biome)
+inline json::Value merge_sets(const json::Value &base, const json::Value &over)
+{
+	json::Value out = base.deepcopy();
+	for(const char *k : {"voxels", "palettes", "fallbacks", "structures",
+			"biomes"}){
+		const json::Value &o = over.get(k);
+		if(!o.is_object())
+			continue;
+		json::Value d = out.get(k).is_object() ? out.get(k).deepcopy() :
+				json::object();
+		for(json::Iterator it(o); it; ++it){
+			json::Value v = (*it).deepcopy();
+			const json::Value &was = d.get(it.key());
+			if(ss_(k) == "biomes" && was.is_object() && v.is_object()){
+				json::Value b = was.deepcopy();
+				for(json::Iterator r(v); r; ++r)
+					b.set(r.key(), *r);
+				v = b;
+			}
+			d.set(it.key(), v);
+		}
+		out.set(k, d);
+	}
+	for(const char *k : {"author", "name"})
+		out.set(k, json::Value(json::jstr(over, k).c_str()));
+	return out;
+}
 
 // The World's parameters (types/world.lua)
 struct Params

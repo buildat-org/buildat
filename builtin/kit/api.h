@@ -682,6 +682,11 @@ namespace kit
 		// The material set (JSON, world.h's format) binding the roles to
 		// the app's voxels; "": Kit's own (materials.json)
 		ss_ materials;
+		// [KIT_MATERIAL_SETS] Whether a World may name an installed material
+		// set package (its "materials") instead of the app's set: an app
+		// whose generators and brushes may use any voxels (Workbench). False:
+		// the app binds the roles in code (skeldat, vanilla)
+		bool material_sets = false;
 		// [KIT] stage 4h: Kit moves the players: each one's body is stepped
 		// by a movement (kit/walker...) on the server and predicted on their
 		// client (kit.controls{} there), the camera, the pointer and the
