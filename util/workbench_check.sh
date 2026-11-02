@@ -383,6 +383,11 @@ J
 			l = $NF + 0; if (e >= l) { print; bad = 1 } }
 		END { exit bad || !n }' "$t/out/page.log" ||
 		fail "the bar's first row under the Server button ($t/out/page.log)"
+	# [KIT_EDIT_NOTICE_SERVER] "You may edit here" under it too
+	awk '/ui_utils: notification: from y/ { n++; y = $(NF - 6) + 0;
+			f = $NF + 0; if (y <= f) { print; bad = 1 } }
+		END { exit bad || !n }' "$t/out/page.log" ||
+		fail "a notice over the Server button ($t/out/page.log)"
 	for w in "An edit by webboss: placed kit/button 3 at [4,1,3]" \
 			"An edit by webboss: moved 3 to [1,1,3]" \
 			"kit/button 3: pressed by webboss" \

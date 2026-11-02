@@ -3651,6 +3651,8 @@ show_account_button = function()
 	b:SetFixedWidth(t.width + 24)
 	b:SetAlignment(magic.HA_RIGHT, magic.VA_TOP)
 	b:SetPosition(-8, 8)
+	-- ui_utils' notices go under it ([KIT_EDIT_NOTICE_SERVER])
+	b:SetName("accounts: server button")
 	magic.SubscribeToEvent(b, "Released", function()
 		-- Closing the window is all; the app's own UI is under it
 		M.server_window("account", function() end)

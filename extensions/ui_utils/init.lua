@@ -2513,6 +2513,19 @@ function M.safe.show_notification(text, duration_s)
 
 	-- Align once the text is in; alignment does not follow a later resize
 	window:SetAlignment(HA_RIGHT, VA_TOP)
+	-- Under the Server button at the top right (builtin/accounts'), which
+	-- it covered ([KIT_EDIT_NOTICE_SERVER])
+	local root = magic.ui.root
+	for i = 0, root:GetNumChildren() - 1 do
+		-- nil for the client's own hidden UI
+		local c = root:GetChild(i)
+		if c and c.visible and c:GetName() == "accounts: server button" then
+			window:SetPosition(0, c.position.y + c.height + 4)
+			log:info(string.format("notification: from y %d, the Server "
+					.. "button's foot at %d", window.position.y,
+					c.position.y + c.height))
+		end
+	end
 
 	notification = {
 		window = window,
