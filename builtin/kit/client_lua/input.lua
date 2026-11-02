@@ -34,7 +34,7 @@ local TOUCH = buildat.get_env("BUILDAT_TOUCH") == "1"
 
 -- Kit's, the editor's and play's: id, label, default key, the store's
 -- shared name (every app's), the gamepad's button (SDL's game controller:
--- A 0, B 1, X 2, Y 3)
+-- A 0, B 1, X 2, Y 3), the mouse's button doing it too (shown unbound)
 local KIT_KEYS = {
 	{id = "forward", label = "Forward (play and the editor)", default = "W",
 		shared = "move.forward"},
@@ -44,7 +44,10 @@ local KIT_KEYS = {
 	{id = "jump", label = "Jump; up in the editor's 3D view",
 		default = "Space", shared = "jump", pad = 0},
 	{id = "down", label = "Down in the editor's 3D view", default = "C"},
-	{id = "use", label = "Use what is pointed at", default = "E", pad = 2},
+	-- No key by default: the left click uses ([KIT] stage 4e2: E no longer
+	-- did), the text's "[use]" says so; a key bound uses too
+	{id = "use", label = "Use what is pointed at (and the left click)",
+		pad = 2, mouse = "Left click"},
 	{id = "exit", label = "Leave a seat", default = "F", pad = 1},
 	{id = "edit", label = "Edit mode on and off", default = "F6"},
 	{id = "view_2d", label = "Editor: the 2D view", default = "F1"},
@@ -197,9 +200,11 @@ function M.key_text(s)
 			return nil
 		end
 		if TOUCH then
-			return "[" .. (k.label:match("^This world: (.*)$") or k.label) .. "]"
+			return "[" .. (k.mouse and "Tap" or
+					k.label:match("^This world: (.*)$") or k.label) .. "]"
 		end
-		return "[" .. (S.name[id] ~= "" and S.name[id] or "no key") .. "]"
+		return "[" .. (S.name[id] ~= "" and S.name[id] or k.mouse or
+				"no key") .. "]"
 	end))
 end
 

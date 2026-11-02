@@ -22,7 +22,8 @@
 --   kit.viewport(scene, camera) -> a Viewport with Kit's effects
 -- The keys (input.lua's actions, the player's to rebind; these the
 -- defaults): W A S D (a car: throttle, brake and steering), Space jumps,
--- E uses what is pointed at, F leaves a seat; a gamepad's left stick
+-- F leaves a seat (a key bound to use uses what is pointed at, the left
+-- click's use without its dig); a gamepad's left stick
 -- moves, its right one looks, A jumps, X uses, B leaves a seat; a free
 -- cursor turns the view with the right button held, the wheel zooms a
 -- chase or top-down camera. A touchscreen

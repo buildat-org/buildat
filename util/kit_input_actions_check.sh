@@ -9,13 +9,15 @@
 #   2. the editor's 3D view: I flies the camera forward;
 #   3. a kit/action "fire" (key R, 3) linked pressed -> a kit/counter's
 #      count (4) and held -> another's (6); a kit/sign (5) "Press [use] to
-#      use, [fire] to fire, [forward] to walk" shows kitboss "[E] ... [R]
-#      ... [I]"; R held: the server's "Action fire pressed", counter 4
-#      counts once, counter 6 at least once;
-#      the key store has Kit's actions and the world's (the keys page);
+#      use, [fire] to fire, [forward] to walk" shows kitboss "[Left
+#      click] ... [R] ... [I]" (use: no key by default, the left click);
+#      R held: the server's "Action fire pressed", counter 4 counts once,
+#      counter 6 at least once; the key store has Kit's actions and the
+#      world's (the keys page);
 #   4. kitbob on a touchscreen (BUILDAT_TOUCH=1): a Fire button over
 #      the touch bar; pressed, the counter counts again; the sign shows him
-#      "[Use] ... [Fire] ... [Forward ...]" (the buttons' labels).
+#      "[Tap] ... [Fire] ... [Forward ...]" (on a touchscreen: a tap, the
+#      buttons' labels).
 # Screenshots kept with KEEP_TMP=1: $t/keys.png (the pause menu's
 # Settings, Key bindings), $t/sign.png, $t/touch.png; look at them.
 #   util/kit_input_actions_check.sh
@@ -101,7 +103,7 @@ EOF
 keypress F6
 wait_log 10000 kit editor: edit mode off
 wait_log_any 10000 kit: the world's actions: 1
-wait_log_any 10000 kit: entity 5 shows "Press [E] to use, [R] to fire, [I] to walk"
+wait_log_any 10000 kit: entity 5 shows "Press [Left click] to use, [R] to fire, [I] to walk"
 look 0 0
 frames 10
 screenshot @T@/sign.png
@@ -125,7 +127,7 @@ cat > "$t/kitbob.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit: the touch bar: Jump, Menu; the world's: Fire
-wait_log_any 10000 kit: entity 5 shows "Press [Use what is pointed at] to use, [Fire] to fire, [Forward (play and the editor)] to walk"
+wait_log_any 10000 kit: entity 5 shows "Press [Tap] to use, [Fire] to fire, [Forward (play and the editor)] to walk"
 frames 10
 screenshot @T@/touch.png
 click Button "Fire"
@@ -178,7 +180,7 @@ grep -aq "kit/action 3: fire pressed by" "$s" || fail "no on_action ($s)"
 grep -aq "kit/counter 6: count 1 by kitboss" "$s" ||
 	fail "R held: no \"held\" reached counter 6 ($s)"
 echo "ok: R pressed: kit/action's pressed and held reached the linked counters"
-want "$c" 'kit: entity 5 shows "Press [E] to use, [R] to fire, [I] to walk"' \
+want "$c" 'kit: entity 5 shows "Press [Left click] to use, [R] to fire, [I] to walk"' \
 	"kit: the gamepad read"
 k=$t/cu_kitboss/keys.txt
 grep -aqP '^action\t[^\t]+\tforward\tW\tmove.forward\t' "$k" &&

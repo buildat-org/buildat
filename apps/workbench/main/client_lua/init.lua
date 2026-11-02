@@ -13,7 +13,6 @@
 --   places. kit/click_to_move takes the left button: a click walks there
 --   (The keys are the defaults: Kit's and these, the player's to rebind
 --   in the pause menu's Settings, Key bindings; [KIT_INPUT_ACTIONS])
---   E: use what the crosshair is on
 --   1...9, 0 the voxel placed (Kit's stone, Workbench's glass, Kit's
 --   planks, Workbench's brick, Kit's grass, dirt, sand, log, leaves, water)
 --   F: out of a seat (kit/car, kit/ball: a use takes it)
@@ -324,7 +323,7 @@ magic.SubscribeToEvent("Update", function()
 			kit.key_text(seated and "[forward][left][back][right] [jump]: " ..
 			"move  [exit]: leave the seat  Esc: menu" or
 			"[forward][left][back][right] [jump]: walk, jump  left: use or " ..
-			"dig  right: place  [use]: use  [voxel1]-[voxel10]: voxel  " ..
+			"dig  right: place  [voxel1]-[voxel10]: voxel  " ..
 			"[edit]: edit  [login]: log in  Esc: menu"))
 end)
 -- vim: set noet ts=4 sw=4:
