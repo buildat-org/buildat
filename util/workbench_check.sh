@@ -1773,7 +1773,7 @@ keypress F3
 wait_log 5000 kit editor: the view is Walk
 mouse_click left
 wait_log 5000 kit editor: into the crosshair
-look_dir 0 -1 -2.5
+look_dir 2.5 -1 0
 frames 30
 wait_log_any 5000 kit editor: guide: Left: dig $top |
 quit
