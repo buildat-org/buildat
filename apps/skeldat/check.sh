@@ -1324,12 +1324,17 @@ import re, sys
 held = [float(x) for x in re.findall(r"skeldat: the bow released at ([\d.]+)", open(sys.argv[1], errors="replace").read())]
 srv = [float(a or b) for a, b in re.findall(r"client1 (?:shoots an arrow at [\d.]+ \(drawn ([\d.]+)\)|lets the bow go undrawn \(([\d.]+)\))", open(sys.argv[2], errors="replace").read())]
 assert len(held) == len(srv) and len(held) >= 7, (held, srv)
+# [SK_BOW_DRAW_SLOW_HOST] The client's slowest frame average (its "frames
+# N ms" lines): its draw is its frames' time steps, smoothed, the
+# server's the wall clock's, apart by up to a frame (0.62 and 0.77 at
+# 4 frames a second)
+frames = [float(x) / 1000 for x in re.findall(r"skeldat: frames ([\d.]+) ms", open(sys.argv[1], errors="replace").read())]
+apart = max([0.15] + frames)
 for h, s in zip(held, srv):
-    assert abs(h - s) <= 0.15 and ((s < 0.1) == (h < 0.1) or abs(h - 0.1) < 0.05), (h, s)
+    assert abs(h - s) <= apart and ((s < 0.1) == (h < 0.1) or abs(h - 0.1) < 0.05), (h, s, apart)
 # The tap is one frame at least (a mouse_up waits for the frame that read
 # the down, [SEQ_HOLD_FRAME]): under 0.5, or two of the client's slowest
 # frame average (0.47 at 2 to 4 frames a second)
-frames = [float(x) / 1000 for x in re.findall(r"skeldat: frames ([\d.]+) ms", open(sys.argv[1], errors="replace").read())]
 tap = max([0.5] + [2 * f for f in frames])
 assert held[0] == 1 and 0.4 <= held[1] < 0.95 and held[2] < tap, (held[:3], tap)
 print("the bow: held %s, the server's %s" % (held, srv))
