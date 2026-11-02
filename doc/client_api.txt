@@ -705,6 +705,10 @@ buildat.safe.launch_actions() -> {{key, id, label, icon, kind, from,
 buildat.safe.save_actions(app) -> {{key, label, description}, ...}
 - What the app's launcher does to one of its saves ([SAVE_CONTEXT_MENU]),
   for launch(key, save); none of them a tile.
+buildat.world_packages() -> {app = {code = {paths}, ...}, ...}
+- Trusted only ([WORLD_PACKAGES]): the apps that take worlds, as their
+  launchers declared them (client/launch_grid.lua); Aitta's install of a
+  world package reads it.
 buildat.safe.launch(key) -> true, or false and why
 - Run one of them. The key is looked up in the table the trusted side built,
   so a sandbox can name nothing that is not on the grid. The key and the
@@ -3127,7 +3131,7 @@ magic.TU_SPECULAR:
 magic.Technique: 
 magic.Terrain: GetHeight, SetCastShadows, SetHeightMap, SetOccluder, SetSpacing, drawDistance, lodBias, material, maxLodLevels, patchSize, smoothing
 magic.Text: AddBoldRange, ClearSelection, SetColor, SetFontSize, SetHoverColor, SetSelection, SetSelectionColor, SetTextAlignment, SetTextEffect, SetWordwrap, effectColor, selectionLength, selectionStart, text
-magic.Text3D: SetAlignment, SetColor, SetFont, effectColor, effectStrokeThickness, faceCameraMode, fixedScreenSize, fontSize, material, opacity, text, textEffect, width, wordwrap
+magic.Text3D: SetAlignment, SetColor, SetFont, SetTextAlignment, effectColor, effectStrokeThickness, faceCameraMode, fixedScreenSize, fontSize, height, material, opacity, text, textEffect, width, wordwrap
 magic.Texture: SetNumLevels, filterMode, height, width
 magic.Texture2D: GetRenderSurface, SetData, SetSize, new
 magic.Texture2DArray: SetData, SetLayers, new

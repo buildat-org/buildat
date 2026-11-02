@@ -235,7 +235,9 @@ click <type> "<label>" [x y]
     A left click (mouse_pos and mouse_click) at the centre of a UI element
     found by its type name (Button, LineEdit, CheckBox, Text, ...) and its
     label: a Text's or a LineEdit's own text, otherwise its first child
-    Text's. The label is exact, or a prefix with a trailing *; it cannot
+    Text's -- or by its name, for one of several alike (Kit's list's
+    Select buttons are named "select <id>", [KIT_LIST_TABS]). The label
+    is exact, or a prefix with a trailing *; it cannot
     hold a ". The element is effectively visible, and the element under its
     centre is it or a child of it, so nothing (a dialog, a dropdown's list)
     is over it. Of several, the one nearest x y, in mouse_pos pixels.

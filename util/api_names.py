@@ -181,7 +181,8 @@ def server_listing(server):
 def doc_names_text(text, prefixes):
     found = set()
     for p in prefixes:
-        for m in re.finditer(r"(?<![/\w])" + re.escape(p) + r"[A-Za-z_][\w.]*", text):
+        # Not inside a host name: forum.buildat.org is a URL
+        for m in re.finditer(r"(?<![/\w.])" + re.escape(p) + r"[A-Za-z_][\w.]*", text):
             found.add(m.group(0).rstrip("."))
     return found
 
