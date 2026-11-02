@@ -26,7 +26,7 @@ return {
 	params = {
 		to = {type = "position", default = {0, 1, 0}},
 		pad = {type = "position", default = {1, 1, 1}},
-		scene = {type = "string", default = ""},
+		scene = {type = "string", default = "", choices_from = "scenes"},
 		target = {type = "entity", default = 0},
 		two_way = {type = "bool", default = false},
 	},

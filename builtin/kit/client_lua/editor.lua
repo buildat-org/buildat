@@ -1423,6 +1423,19 @@ local function field(name, d, values)
 		if not has and type(values[name]) == "string" then
 			f.choices[#f.choices + 1] = {values[name], values[name]}
 		end
+	elseif d.choices_from == "scenes" then
+		-- [KIT_TP_SCENE_CHOICE] The composition's scenes ("" none; the value
+		-- too when it names none of them)
+		f.type = "choice"
+		f.choices = {{"none", ""}}
+		local has = values[name] == "" or values[name] == nil
+		for _, sn in ipairs(E.state and E.state.scenes or {}) do
+			f.choices[#f.choices + 1] = {sn, sn}
+			has = has or sn == values[name]
+		end
+		if not has and type(values[name]) == "string" then
+			f.choices[#f.choices + 1] = {values[name], values[name]}
+		end
 	elseif d.choices_from == "voxels" then
 		-- [KIT_LOOK_MATERIAL] The voxel materials, as the voxels tool's (the
 		-- value too when it is none of them)

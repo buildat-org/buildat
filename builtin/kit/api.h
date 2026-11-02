@@ -249,6 +249,8 @@ namespace interface
 //   names one; a parameter's `choices` = {...} are the values it takes;
 //   `choices_from = "biomes"` makes the inspector's a dropdown of the
 //   material set's biomes (a string still; the World refuses another).
+//   `choices_from = "scenes"`: a dropdown of the composition's scenes
+//   and "none" ("").
 //   Client parts: <name>.client.lua beside a type, sent to every client at
 //   join and run there as the client's own Lua is (client_lua/module.lua
 //   says what it gets).
