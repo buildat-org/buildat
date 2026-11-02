@@ -104,6 +104,14 @@ struct Players: public luanti_session::Game, public MobsHost
 		send_time(peer);
 		host.send_end(peer);
 		host.send_world(peer);
+		// [SK_WEB_INTRO_LATE] The how-to-play with the world, not once the
+		// client is in: sent then, it came behind the sections round the
+		// player (a slow web join handled it 5 s late), and a web client's
+		// pointer lock rule had opened the pause menu under it by then
+		if(pl.intro){
+			pl.intro = false;
+			host.send_intro(peer);
+		}
 		host.joined(peer, pl);
 		world.load_points_dirty = true;
 		log_i(MODULE, "skeldat: %s joins at (%.1f, %.1f, %.1f)", cs(name),
@@ -118,10 +126,6 @@ struct Players: public luanti_session::Game, public MobsHost
 		// is in, its screens up by then (the join's was sent before)
 		if(it != all.end() && it->second.hp <= 0)
 			send_stats(peer, it->second);
-		if(it != all.end() && it->second.intro){
-			it->second.intro = false;
-			host.send_intro(peer);
-		}
 	}
 
 	void remove_player(const ss_ &name){}

@@ -1612,7 +1612,7 @@ intro_server()
 		-D "$t/srv31" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv31_$1.log)"
 	CHECK_PIDS+=($SERVER_PID)
 }
-printf '%s\n' "$placed" "wait_log 30000 pause: how to play shown" "delay 500" \
+printf '%s\n' "$placed" "wait_log_any 30000 pause: how to play shown" "delay 500" \
 	"screenshot $t/intro.png" "keypress Escape" "wait_log 5000 pause: the menu closed" \
 	"delay 500" quit > "$t/intro1.cmds"
 intro_server 1
