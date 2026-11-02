@@ -266,6 +266,11 @@ namespace interface
 //     types/<n>.voxel.json            the voxel type <author>/<n> (as
 //                    {"op": "voxel"} has it; "texture" a registered one's
 //                    or textures/<file>.png in the package)
+//     materials.json ([KIT_MATERIAL_SETS]) a material set (world.h): its
+//                    voxels its voxel types, "extends" kit/default or a
+//                    dependency's set; a World's "materials" may name it
+//                    (Host::material_sets), the row's "materials" holding
+//                    it with its textures served
 //   A builder installs one into the save from the palette's New tab:
 //   "kit:package" (the Aitta it came from, a 0 byte, the release's .sig,
 //   a 0 byte, its zip; the client fetched them from that Aitta with the
