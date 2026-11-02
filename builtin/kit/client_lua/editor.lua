@@ -2462,16 +2462,17 @@ local function apply_viewport()
 	S.shown_view = want
 	local node, cam = active_camera()
 	-- The walk view with the controls' effects (controls.lua).
-	-- [KIT_EDITOR_VIEW_HDR] The 3D view draws by the app's walk view's
-	-- render path (skeldat's HDR one: its exposure and tonemap); the
-	-- default path under an app's HDR was a frame of raw radiance, white
-	-- at noon. 2D keeps the default.
+	-- [KIT_EDITOR_VIEW_HDR] The 3D and 2D views draw by the app's walk
+	-- view's render path (skeldat's HDR one: its exposure and tonemap);
+	-- the default path under an app's HDR was a frame of raw radiance,
+	-- white at noon. [KIT_SK_2D_EMPTY] HDR off for 2D (floorplanner's) is
+	-- as white: skeldat's light is in the reference's radiances.
 	local vp
 	if want == "walk" then
 		vp = O.viewport and O.viewport() or M.viewport(O.scene, cam)
 	else
 		vp = magic.Viewport:new(O.scene, cam)
-		if want == "3d" and O.viewport then
+		if O.viewport then
 			vp.renderPath = O.viewport().renderPath
 		end
 	end
@@ -2479,6 +2480,25 @@ local function apply_viewport()
 	if O.set_camera then
 		O.set_camera(node)
 	end
+end
+
+-- [KIT_SK_2D_EMPTY] The ground's cell y under a point: the first cell
+-- over the app's voxels (or the heightmap) below it, else ground_y. The
+-- plan's first cut is from it: skeldat's ground is at 6, under the
+-- constant ground_y's cut of 1.5, and its plan was empty.
+-- simplified: 64 cells down at most
+local function ground_under(p)
+	if O.solid then
+		local solid = M.with_terrain(O.solid)
+		local x, z = math.floor(p.x + 0.5), math.floor(p.z + 0.5)
+		local y0 = math.floor(p.y + 0.5)
+		for y = y0, y0 - 64, -1 do
+			if solid(x, y, z) then
+				return y + 1
+			end
+		end
+	end
+	return O.ground_y
 end
 
 -- The free camera from the app's: where it is, looking as it does
@@ -2499,7 +2519,7 @@ set_view = function(v)
 	if v == "2d" and not S.cut then
 		local p = O.camera.worldPosition
 		S.cx, S.cz = p.x, p.z
-		S.cut = O.ground_y + 1.5
+		S.cut = ground_under(p) + 1.5
 	end
 	if v ~= S.view then
 		S.crosshair = false

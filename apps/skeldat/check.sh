@@ -3663,7 +3663,8 @@ torchlight=$(grep -a "the skeleton (1) is in a lamp light of" "$log66" | head -1
 # the bones used, the voxels round it boned. Nothing copied out. Run 2,
 # the server started again: the boars, the entities and the cobble still
 # there, no start rows. [KIT_EDITOR_VIEW_HDR] The 3D view (F2) as bright
-# and as saturated as the walk view it starts from.
+# and as saturated as the walk view it starts from; [KIT_SK_2D_EMPTY] the
+# 2D view (F1) showing the grass.
 log67="$t/srv67.log"; log67b="$t/srv67b.log"
 gy=6
 BUILDAT_SKELDAT_WORLD=kit BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
@@ -3692,6 +3693,8 @@ printf '%s\n' "$placed" "look 0 -30" "wait_log_any 60000 kit editor: edit rights
 	"screenshot $t/kit_edit.png" \
 	"keypress F2" "wait_log 10000 kit editor: the view is 3D" "delay 1000" \
 	"screenshot $t/kit_3d.png" \
+	"keypress F1" "wait_log 10000 kit editor: the view is 2D" "delay 1000" \
+	"screenshot $t/kit_2d.png" \
 	"keypress F3" "wait_log 10000 kit editor: the view is Walk" "delay 500" \
 	'event kit_edit {"op": "mode", "on": false}' "wait_log 10000 kit editor: edit mode off" \
 	"delay 500" "event kit_use 3" "event kit_use 5" "delay 1500" \
@@ -3717,7 +3720,10 @@ grep -a "kit editor: bar:" "$t/kit.log" | tail -1 | sed 's/.*kit editor: //'
 # tonemap, not a raw frame (it was white at noon: a mean of 247, 0.13
 # saturated, against the walk view's 102 and 0.58). The view's middle,
 # clear of the panels; the boars may move between the two
-python3 -I - "$t/kit_edit.png" "$t/kit_3d.png" <<'PY2' ||
+# [KIT_SK_2D_EMPTY] The 2D view (F1) not empty: its cut from the ground
+# under the eye (skeldat's at 6; at the constant 1.5 it showed nothing, a
+# dark grey), drawn by the same path: the grass green, not white
+python3 -I - "$t/kit_edit.png" "$t/kit_3d.png" "$t/kit_2d.png" <<'PY2' ||
 import colorsys, sys
 from PIL import Image
 def stats(f):
@@ -3730,8 +3736,11 @@ def stats(f):
 (lw, sw), (l3, s3) = stats(sys.argv[1]), stats(sys.argv[2])
 print("  Kit's views: walk mean %.1f saturation %.3f, 3D %.1f %.3f" % (lw, sw, l3, s3))
 assert abs(l3 - lw) < 15 and abs(s3 - sw) < 0.06
+l2, s2 = stats(sys.argv[3])
+print("  Kit's 2D view: mean %.1f saturation %.3f" % (l2, s2))
+assert 40 < l2 < 200 and s2 > 0.3
 PY2
-	fail "Kit's 3D view not as the walk view ($t/kit_edit.png, $t/kit_3d.png)"
+	fail "Kit's 3D view not as the walk view, or its 2D view empty ($t/kit_edit.png, $t/kit_3d.png, $t/kit_2d.png)"
 BUILDAT_SKELDAT_WORLD=kit BUILDAT_SKELDAT_SKELETONS=0 \
 	start_server "$log67b" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
