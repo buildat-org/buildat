@@ -113,6 +113,7 @@ local function lit_path(view)
 		view.finish(rp)
 	end
 	view.vp.renderPath = rp
+	LIT.grey = nil
 end
 
 function M.lit_viewport(vp, role, finish, node)
@@ -123,26 +124,30 @@ function M.lit_viewport(vp, role, finish, node)
 		magic.renderer.HDRRendering = M.physical()
 	end
 	lit_path(view)
+	if LIT.relight then
+		LIT.relight()
+	end
 end
 
 -- The lighting changed: the views' paths, HDR, the voxels' techniques
 local function set_lighting(mode)
 	mode = mode == "physical" and "physical" or "cartoon"
 	if mode == LIT.mode then
-		return
+		return false
 	end
 	LIT.mode = mode
 	local phys = M.physical()
 	log:info("kit: lighting " .. mode .. (phys and " (HDR, metered)" or
 			LIT.views.play and "" or " (the app draws its own)"))
 	if not LIT.views.play then
-		return
+		return true
 	end
 	magic.renderer.HDRRendering = phys
 	for _, view in pairs(LIT.views) do
 		lit_path(view)
 	end
 	require("buildat/module/voxelworld").remesh_all()
+	return true
 end
 
 -- The hue of the hour (skeldat's, its day colours alone): the zenith's
@@ -239,22 +244,88 @@ local function bool(v, default)
 	return default
 end
 
--- The values the sky and the light are drawn by: the environment's
--- parameters (and its signals') under the weather
-local function values()
-	local d = env.d
-	local w = d.weather
+-- ---- [KIT_LIGHTING] The weather, a modifier on the environment's own
+-- values (user, 2026-11-02): the parameters (and what the signals set)
+-- are the scene with no weather, and a weather pushes some of them by
+-- floors and factors, scaled by its intensity (0..1) -- an overcast scene
+-- stays overcast when rain starts. clear leaves them all; storm's wind is
+-- a floor in cells a second. Both lightings read the same final values.
+local WEATHER_MOD = {
+	clear = {},
+	cloudy = {cover = 0.7, light = 0.9},
+	rain = {cover = 0.8, light = 0.8},
+	snow = {cover = 0.8, light = 0.8},
+	storm = {cover = 0.95, light = 0.55, fog = 0.5, wind = 10},
+}
+local function weather_of(d)
+	return WEATHER_MOD[d.weather] and d.weather or "clear"
+end
+local function intensity_of(d)
+	return clamp01(tonumber(d.intensity) or 1)
+end
+
+-- The final values the environment's d says: the base under its weather
+local function target(d)
+	local m = WEATHER_MOD[weather_of(d)]
+	local i = intensity_of(d)
+	local function factor(f)
+		return 1 - (1 - (f or 1)) * i
+	end
 	return {
-		cover = clamp01(tonumber(d.cloud_cover) or 0.4),
+		cover = math.max(clamp01(tonumber(d.cloud_cover) or 0.4),
+				(m.cover or 0) * i),
 		height = math.max(10, tonumber(d.cloud_height) or SKY.CLOUD_HEIGHT),
-		wind = math.max(0, tonumber(d.cloud_wind_speed) or 2),
+		wind = math.max(math.max(0, tonumber(d.cloud_wind_speed) or 2),
+				(m.wind or 0) * i),
 		dir = tonumber(d.cloud_wind_dir) or 180,
-		light = w == "storm" and 0.55 or (w == "rain" or w == "snow") and
-				0.8 or 1,
-		fog = w == "storm" and 0.5 or 1,
+		light = factor(m.light), fog = factor(m.fog),
 		sun = bool(d.sun, true), moon = bool(d.moon, true),
 		stars = bool(d.stars, true),
 	}
+end
+
+-- A change fades over weather_fade seconds (the clouds roll in): the
+-- numbers from where they are to the new ones; the switches, the wind's
+-- direction and the time at once
+local FADE_KEYS = {"cover", "height", "wind", "light", "fog"}
+local FADE = {cur = nil, from = nil, to = nil, t = 0, dur = 0}
+local function fade_to(d, snap)
+	local to = target(d)
+	local same = FADE.to ~= nil
+	for k, v in pairs(to) do
+		same = same and FADE.to[k] == v
+	end
+	if same then
+		return
+	end
+	local dur = math.max(0, tonumber(d.weather_fade) or 0)
+	if snap or not FADE.cur or dur <= 0 then
+		FADE.cur, FADE.to, FADE.dur = to, to, 0
+		return
+	end
+	local from = {}
+	for k, v in pairs(FADE.cur) do
+		from[k] = v
+	end
+	FADE.from, FADE.to, FADE.t, FADE.dur, FADE.half = from, to, 0, dur,
+			false
+	log:info(string.format("kit: weather: fading to %s over %.1f s",
+			weather_of(d), dur))
+end
+
+-- The values now: the fade's, the rest its target's
+local function values()
+	if not FADE.cur then
+		fade_to(env.d, true)
+	end
+	local v = {}
+	for k, x in pairs(FADE.to) do
+		v[k] = x
+	end
+	for _, k in ipairs(FADE_KEYS) do
+		v[k] = FADE.cur[k]
+	end
+	return v
 end
 
 -- How much sky the view sees (0..1): with the World's sky light on, the
@@ -264,10 +335,15 @@ local GATE = {seen = 1, want = 1, t = 0}
 
 -- The sky's line in the log, when it changes
 local function sky_log(mode, s)
+	if FADE.dur > 0 then
+		return
+	end
 	local line = string.format("kit: sky: %s, %.1f o'clock, sun %d, moon %d,"..
-			" stars %.2f, clouds %.2f at %d, wind %.1f toward %d", mode, env.h,
+			" stars %.2f, clouds %.2f at %d, wind %.1f toward %d; %s %.2f:"..
+			" light %.2f, fog %.2f", mode, env.h,
 			s.sun and 1 or 0, s.moon and 1 or 0, s.stars, s.v.cover,
-			math.floor(s.v.height + 0.5), s.v.wind, math.floor(s.v.dir + 0.5))
+			math.floor(s.v.height + 0.5), s.v.wind, math.floor(s.v.dir + 0.5),
+			weather_of(env.d), intensity_of(env.d), s.v.light, s.v.fog)
 	if line ~= LIT.sky_line then
 		LIT.sky_line = line
 		log:info(line)
@@ -300,6 +376,11 @@ end
 
 -- physical's light of the hour: the sun (or the moon) and the ambient by
 -- voxel_light's terms, the fog the horizon's radiance, the dome
+-- How overcast the values are (0..1): a cover over a half grows into it
+local function overcast(v)
+	return clamp01((v.cover - 0.5) / 0.5)
+end
+
 local function phys_light(v)
 	local d = env.d
 	local sr = sky_render()
@@ -309,8 +390,21 @@ local function phys_light(v)
 	local lit = (0.175 + 0.825 * day) ^ 2.2
 	local zenith, horizon = hue_of_hour(PHYS, day, lit)
 	zenith, horizon = sr.sky_radiance(zenith, horizon, height)
+	-- Under cover the sky is the clouds' grey, and the meter's grey lower
+	-- (physical_sky's overcast and middle_grey), so a storm reads dark
+	local oc = overcast(v)
+	zenith, horizon = sr.physical_sky.overcast(zenith, horizon, SKY.CLOUD, oc,
+			sr.physical_sky.OVERCAST_DIM)
 	local t = sr.terms(height, sr.dome(zenith, horizon))
 	LIT.terms = t
+	local grey = sr.physical_sky.middle_grey(sr.EXPOSURE.middle_grey, oc)
+	if grey ~= LIT.grey then
+		LIT.grey = grey
+		for _, view in pairs(LIT.views) do
+			view.vp.renderPath:SetShaderParameter("AutoExposureMiddleGrey",
+					grey)
+		end
+	end
 	local dome = sky_dome(true)
 	local s = sky_bodies(dome, v, tx, height, tz, day)
 	local a = t.ambient
@@ -381,9 +475,12 @@ local function env_light()
 	local s = sky_bodies(dome, v, tx, height, tz, day)
 	if dome then
 		local h = env.zone.fogColor
-		local z = SKY.ZENITH
-		dome:set_look({r = h.r * z[1], g = h.g * z[2], b = h.b * z[3]},
-				{r = h.r, g = h.g, b = h.b}, nil)
+		local z, oc = SKY.ZENITH, overcast(v)
+		local function zen(c, k)
+			return c * (k + (0.95 - k) * oc)
+		end
+		dome:set_look({r = zen(h.r, z[1]), g = zen(h.g, z[2]),
+				b = zen(h.b, z[3])}, {r = h.r, g = h.g, b = h.b}, nil)
 		dome:set_dawn_glow(0, 0, 0, 0)
 		dome:set_sun_look(v.sun and SKY.defaults.sun_half or 0, SKY.SUN_TINT)
 		local c = SKY.CLOUD
@@ -393,6 +490,8 @@ local function env_light()
 	end
 	sky_log("cartoon", s)
 end
+
+LIT.relight = env_light
 
 local function env_restore()
 	if not env.zone then
@@ -577,21 +676,21 @@ local function weather_off()
 	if weather.node then
 		weather.node:Remove()
 	end
-	weather.node, weather.set, weather.kind, weather.drops = nil, nil, nil,
-			{}
+	weather.node, weather.set, weather.kind, weather.drops, weather.n = nil,
+			nil, nil, {}, nil
 end
 
-local function weather_on(kind, at)
+local function weather_on(kind, at, n)
 	weather_off()
 	local w = WEATHER_LOOK[kind]
 	local scene = replicate.main_scene
 	if not w or not scene then
 		return
 	end
-	weather.kind = kind
+	weather.kind, weather.n = kind, n
 	weather.node = scene:CreateChild("kit_weather")
 	local set = weather.node:CreateComponent("BillboardSet")
-	set.numBillboards = w.n
+	set.numBillboards = n
 	set.faceCameraMode = w.face == "y" and magic.FC_ROTATE_Y or
 			magic.FC_ROTATE_XYZ
 	local m = magic.Material:new()
@@ -602,8 +701,8 @@ local function weather_on(kind, at)
 	set.material = m
 	weather.set = set
 	log:info(string.format("kit: weather drawn: %s, %d drops about"..
-			" (%.0f, %.0f, %.0f)", kind, w.n, at.x, at.y, at.z))
-	for i = 0, w.n - 1 do
+			" (%.0f, %.0f, %.0f)", kind, n, at.x, at.y, at.z))
+	for i = 0, n - 1 do
 		local b = set:GetBillboard(i)
 		b.size = magic.Vector2(w.size[1], w.size[2])
 		b.enabled = true
@@ -638,12 +737,34 @@ local function gate_update(dt)
 	end
 end
 
+-- The fade's step: the values on toward the target, the light with them
+local function fade_update(dt)
+	if FADE.dur <= 0 then
+		return
+	end
+	FADE.t = FADE.t + dt
+	local k = math.min(1, FADE.t / FADE.dur)
+	for _, key in ipairs(FADE_KEYS) do
+		FADE.cur[key] = FADE.from[key] + (FADE.to[key] - FADE.from[key]) * k
+	end
+	if k >= 0.5 and not FADE.half then
+		FADE.half = true
+		log:info(string.format("kit: weather: half way: clouds %.2f,"..
+				" light %.2f", FADE.cur.cover, FADE.cur.light))
+	end
+	if k >= 1 then
+		FADE.cur, FADE.dur = FADE.to, 0
+	end
+	env_light()
+end
+
 local function env_update(dt)
 	lamps_update(dt)
 	local d = env.d
 	if not d then
 		return
 	end
+	fade_update(dt)
 	gate_update(dt)
 	if (tonumber(d.day_minutes) or 0) > 0 then
 		env.h = (env.h + dt / 60 / d.day_minutes * 24) % 24
@@ -667,10 +788,13 @@ local function env_update(dt)
 					"under cover: " .. what))
 		end
 	end
-	local kind = WEATHER_LOOK[d.weather] and env.open and d.weather or nil
-	if kind ~= weather.kind then
+	-- [KIT_LIGHTING] the intensity scales the drops: a drizzle to a downpour
+	local n = math.floor((WEATHER_LOOK[d.weather] and
+			WEATHER_LOOK[d.weather].n or 0) * intensity_of(d) + 0.5)
+	local kind = n > 0 and env.open and d.weather or nil
+	if kind ~= weather.kind or (kind and n ~= weather.n) then
 		if kind then
-			weather_on(kind, p)
+			weather_on(kind, p, n)
 		else
 			weather_off()
 		end
@@ -679,7 +803,7 @@ local function env_update(dt)
 	if not w or not weather.set then
 		return
 	end
-	for i = 0, w.n - 1 do
+	for i = 0, weather.n - 1 do
 		local q = weather.drops[i]
 		q[4] = q[4] + dt
 		q[1] = wrap(q[1] + math.sin(q[4]) * w.drift * dt, p.x)
@@ -706,13 +830,17 @@ buildat.sub_packet("kit:environment", function(data)
 		sky_dome(false)
 		LIT.lamps = {}
 		set_lighting("cartoon")
+		FADE.cur, FADE.to, FADE.dur = nil, nil, 0
 		return
 	end
 	local was = env.d and env.d.weather
+	local first = env.d == nil
 	env.d = d
 	env.h = (tonumber(d.time) or 12) % 24
 	LIT.lamps = type(d.lamps) == "table" and d.lamps or {}
-	set_lighting(d.lighting)
+	-- At once when the environment comes or the lighting changes, else
+	-- faded
+	fade_to(d, set_lighting(d.lighting) or first)
 	env_light()
 	log:info(string.format("kit: environment: from the %s, %s, %.1f o'clock,"..
 			" sky %s, fog %s-%s, gravity %s, weather %s, season %s",

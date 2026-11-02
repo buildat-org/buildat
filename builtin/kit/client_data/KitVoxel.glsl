@@ -212,7 +212,9 @@ void PS()
         vec3 finalColor;
 
         float diff = GetDiffuse(normal, vWorldPos.xyz, lightDir);
-        #ifdef KITSKY
+        // The sky gates the sun and the moon; under KITLINEAR a lamp (a
+        // point light, environment.lua's) lights a cave too
+        #if defined(KITSKY) && (!defined(KITLINEAR) || defined(DIRLIGHT))
             diff *= vColor.a;
         #endif
 

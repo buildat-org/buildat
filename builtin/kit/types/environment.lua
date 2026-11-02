@@ -27,13 +27,25 @@
 -- set_season, set_sky (a colour), set_fog (the fog's end, cells),
 -- set_ambient (a colour), set_gravity, set_clouds (the cover),
 -- set_cloud_height, set_wind (its speed), set_wind_dir, set_sun, set_moon
--- and set_stars (on or off). Out: dawn and dusk (6 and 18
--- o'clock, while the time goes), weather_changed and season_changed (the
--- new one).
-local WEATHER = {clear = true, rain = true, snow = true, storm = true}
+-- and set_stars (on or off), set_intensity.
+--
+-- The weather is a modifier on those (the scene with no weather): clear
+-- leaves them as set, cloudy covers at least 0.7 of the sky and dims the
+-- light to 0.9, rain and snow 0.8 and 0.8 with their drops, a storm 0.95
+-- and 0.55, the fog at half and the wind at least 10, heavy rain; the
+-- intensity (0..1) scales the drops and those floors and factors. A change
+-- of the weather or of the parameters fades over weather_fade seconds.
+-- set_weather moves the modifier, set_clouds, set_fog and the rest the
+-- base, each apart: a gloomy clear day stays gloomy through the rain.
+--
+-- Out: dawn and dusk (6 and 18 o'clock, while the time goes),
+-- weather_changed and season_changed (the new one).
+local WEATHER = {clear = true, cloudy = true, rain = true, snow = true,
+	storm = true}
 local SEASONS = {spring = true, summer = true, autumn = true, winter = true}
 -- The clouds' signals: the parameter, its range
 local CLOUDS = {set_clouds = {"cloud_cover", 0, 1},
+	set_intensity = {"intensity", 0, 1},
 	set_cloud_height = {"cloud_height", 10, 1000},
 	set_wind = {"cloud_wind_speed", 0, 100},
 	set_wind_dir = {"cloud_wind_dir", 0, 360}}
@@ -73,7 +85,9 @@ return {
 		day_minutes = {type = "number", default = 0, min = 0, max = 1440},
 		gravity = {type = "number", default = 1, min = 0, max = 10},
 		weather = {type = "string", default = "clear",
-			choices = {"clear", "rain", "snow", "storm"}},
+			choices = {"clear", "cloudy", "rain", "snow", "storm"}},
+		intensity = {type = "number", default = 1, min = 0, max = 1},
+		weather_fade = {type = "number", default = 5, min = 0, max = 600},
 		season = {type = "string", default = "summer",
 			choices = {"spring", "summer", "autumn", "winter"}},
 		lighting = {type = "string", default = "cartoon",
@@ -97,7 +111,7 @@ return {
 		set_fog = "number", set_ambient = "string", set_gravity = "number",
 		set_clouds = "number", set_cloud_height = "number",
 		set_wind = "number", set_wind_dir = "number", set_sun = "bool",
-		set_moon = "bool", set_stars = "bool"},
+		set_moon = "bool", set_stars = "bool", set_intensity = "number"},
 	outputs = {dawn = "none", dusk = "none", weather_changed = "string",
 		season_changed = "string"},
 	on_start = function(c)
