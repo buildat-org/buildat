@@ -191,6 +191,9 @@ struct Type
 {
 	json::Value decl;
 	std::set<ss_> inputs, outputs, handlers, shared;
+	// [KIT_UI_COMPONENTS] The state each player has their own of, {"player:
+	// <id>": value} (per_player = true): each client is sent only theirs
+	std::set<ss_> per_player;
 	// [KIT] stage 4d: each signal's value's type ("any" where the file
 	// gives none; "none": no value)
 	sm_<ss_, ss_> in_types, out_types;
@@ -396,6 +399,10 @@ struct Peer
 	// same one again is logged once a second at most
 	ss_ refused_why;
 	int64_t refused_at = 0;
+	// [KIT_UI_COMPONENTS] Their own of each per_player state as last sent
+	// ("<entity>:<key>": JSON), and the UI buttons they hold
+	std::map<ss_, ss_> mine_sent;
+	std::set<uint64_t> ui_held;
 };
 
 // A builder's colour while their tools are on: the first one no other
@@ -1052,6 +1059,7 @@ struct Module: public interface::Module, public Interface
 		// [KIT] stage 4h: a body's inputs, a seat left
 		sub(m_server, "network:packet_received/kit:input", &Module::on_input);
 		sub(m_server, "network:packet_received/kit:action", &Module::on_action);
+		sub(m_server, "network:packet_received/kit:ui", &Module::on_ui_press);
 		sub(m_server, "network:packet_received/kit:exit", &Module::on_exit);
 		sub(m_server, "accounts:privs", &Module::on_privs);
 		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
@@ -1299,6 +1307,10 @@ struct Module: public interface::Module, public Interface
 			for(json::Iterator it(st); it; ++it)
 				if((*it).get("shared").is_true())
 					t.shared.insert(it.key());
+				else if((*it).get("per_player").is_true()){
+					t.per_player.insert(it.key());
+					t.shared.insert(it.key());
+				}
 		t.usable = t.decl.get("usable").is_true();
 		// [KIT_USE_ACCESS] Who may use it, the engine's on every usable type
 		// (on_use() asks it): all, owners (of the region holding it) or
@@ -6174,6 +6186,12 @@ struct Module: public interface::Module, public Interface
 				show.set("look", look_of(in, d.get("look")));
 			if(show.get("hud").is_undefined() && !d.get("hud").is_undefined())
 				show.set("hud", d.get("hud"));
+			// [KIT_UI_COMPONENTS] Its UI, "param:<name>" as a look's
+			if(show.get("ui").is_undefined() && d.get("ui").is_object()){
+				json::Value u = look_of(in, d.get("ui"));
+				u.set("comp", (int64_t)(&in - &e.comps[0]));
+				show.set("ui", u);
+			}
 			// [KIT] stage 4e2: what a click would do, shown on it: it is
 			// used (a client's use reaches it), it grants digging or placing
 			// in its box (its state's dig and place, shared)
@@ -6212,7 +6230,8 @@ struct Module: public interface::Module, public Interface
 			if(!m_types[in.type].client.empty())
 				parts.append(in.type);
 			for(const ss_ &k : m_types[in.type].shared)
-				shared.insert(k);
+				if(!m_types[in.type].per_player.count(k))
+					shared.insert(k);
 			// [KIT] stage 4l: its links shown in play, [to id, ...]
 			for(const Link &l : in.links)
 				if(l.visible){
@@ -6257,6 +6276,11 @@ struct Module: public interface::Module, public Interface
 	{
 		if(!e.node)
 			return;
+		if(m_types[e.comps[comp].type].per_player.count(key)){
+			for(auto &p : m_peers)
+				send_mine(p.first, e, comp, key);
+			return;
+		}
 		const ss_ v = e.comps[comp].state.get(key).stringify();
 		main_context::access(m_server, scene_of(e), [&](magic::Scene *scene){
 			magic::Node *n = scene->GetNode(e.node);
@@ -6264,6 +6288,98 @@ struct Module: public interface::Module, public Interface
 				n->SetVar(magic::StringHash(("kit:"+key).c_str()),
 						magic::Variant(v.c_str()));
 		});
+	}
+
+	// [KIT_UI_COMPONENTS] A per_player state's value for a peer placed in
+	// the entity's scene: their own ({"player:<id>": v}'s; null: none),
+	// into the batch or sent as "kit:mine" {"list": [{"id", "key",
+	// "value"}]} when it is not what they were sent last
+	void send_mine(size_t peer, const Entity &e, size_t comp, const ss_ &key,
+			json::Value *batch = nullptr)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end() || !pi->second.player || !e.node)
+			return;
+		ss_ scene;
+		scene_of(e, &scene);
+		if(scene != pi->second.scene)
+			return;
+		const json::Value &all = e.comps[comp].state.get(key);
+		json::Value v = all.is_object() ?
+				all.get("player:"+itos(pi->second.player)) : json::null();
+		if(v.is_undefined())
+			v = json::null();
+		const ss_ text = v.stringify(), k = itos(e.id)+":"+key;
+		auto &sent = pi->second.mine_sent;
+		auto it = sent.find(k);
+		if(it == sent.end() ? v.is_null() : it->second == text)
+			return;
+		sent[k] = text;
+		json::Value o = json::object();
+		o.set("id", (int64_t)e.id);
+		o.set("key", key);
+		o.set("value", v);
+		if(batch){
+			batch->append(o);
+			return;
+		}
+		json::Value m = json::object(), l = json::array();
+		l.append(o);
+		m.set("list", l);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:mine", m.stringify());
+		});
+	}
+
+	// All of a peer's own, as they come into a scene or as another player:
+	// "kit:mine" {"all": true, "list"} (what they had before dropped)
+	void send_all_mine(size_t peer)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end())
+			return;
+		pi->second.mine_sent.clear();
+		json::Value l = json::array();
+		for(auto &p : m_entities)
+			for(size_t i = 0; i < p.second.comps.size(); i++)
+				for(const ss_ &k : m_types[p.second.comps[i].type].per_player)
+					send_mine(peer, p.second, i, k, &l);
+		json::Value m = json::object();
+		m.set("all", true);
+		m.set("list", l);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:mine", m.stringify());
+		});
+	}
+
+	// [KIT_UI_COMPONENTS] Whether a UI entity (a type with `ui`) is up for
+	// a player (their entity): its state `shown`, everyone's, under their
+	// own ("own": {"player:<id>": {shown}}), and its panel's (the ui's
+	// "panel", an entity id; 0 none) the same way
+	bool ui_visible(uint64_t id, uint64_t player, int depth = 0)
+	{
+		auto it = m_entities.find(id);
+		if(it == m_entities.end() || depth > 8)
+			return false;
+		for(const Instance &in : it->second.comps){
+			const json::Value &d = m_types[in.type].decl.get("ui");
+			if(!d.is_object())
+				continue;
+			bool shown = in.state.get("shown").is_true();
+			const json::Value &own = in.state.get("own");
+			if(own.is_object()){
+				const json::Value &o = own.get("player:"+itos(player));
+				if(o.is_object() && o.get("shown").is_boolean())
+					shown = o.get("shown").is_true();
+			}
+			if(!shown)
+				return false;
+			const json::Value p = look_of(in, d).get("panel");
+			const uint64_t pid = p.is_number() && p.as_number() >= 1 ?
+					(uint64_t)p.as_number() : 0;
+			return !pid || ui_visible(pid, player, depth + 1);
+		}
+		return false;
 	}
 
 	void own_voxels()
@@ -10571,6 +10687,78 @@ struct Module: public interface::Module, public Interface
 		action_runs(peer, name, down ? "pressed" : "released", json::null());
 	}
 
+	// [KIT_UI_COMPONENTS] "kit:ui" "<id> 1" pressed, "<id> 0" released:
+	// a UI button (a `ui` of kind "button" with on_ui) on a player's screen,
+	// from a peer the app placed, in play, in the button's scene, while it
+	// is up for them (ui_visible), within the acts' allowance
+	// (act_allowed, kit:action's); on_ui(c, phase, by) on it. A release
+	// lets go of a press only
+	void on_ui_press(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		const ss_ d = packet.data.substr(0, 32);
+		char *end = nullptr;
+		const uint64_t id = strtoull(d.c_str(), &end, 10);
+		const bool down = end && ss_(end) == " 1";
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || pi->second.name.empty() ||
+				!pi->second.player || !act_allowed(pi->second))
+			return;
+		Peer &pe = pi->second;
+		auto refuse = [&](const ss_ &why){
+			if(log_refusal(pe, why))
+				log_i(MODULE, "A UI press of %s from peer %zu refused: %s",
+						cs(d), peer, cs(why));
+		};
+		if(!end || end == d.c_str() || (!down && ss_(end) != " 0"))
+			return refuse("not \"<id> 1|0\"");
+		if(!down){
+			if(!pe.ui_held.erase(id) || !m_session.running)
+				return;
+		} else {
+			if(pe.ui_held.count(id))
+				return;
+			if(!m_session.running)
+				return refuse("the server is Stopped");
+			if(pe.editing)
+				return refuse("in the tools");
+		}
+		auto it = m_entities.find(id);
+		if(it == m_entities.end() || !it->second.has_pos)
+			return refuse("no such button");
+		ss_ scene;
+		scene_of(it->second, &scene);
+		if(scene != pe.scene)
+			return refuse("in another scene");
+		size_t comp = 0;
+		bool button = false;
+		for(size_t i = 0; i < it->second.comps.size() && !button; i++){
+			const Type &t = m_types[it->second.comps[i].type];
+			comp = i;
+			button = jstr(t.decl.get("ui"), "kind") == "button" &&
+					t.handlers.count("on_ui");
+		}
+		if(!button)
+			return refuse("no such button");
+		if(down){
+			if(!ui_visible(id, pe.player))
+				return refuse("not on their screen");
+			if(pe.ui_held.size() >= 16)
+				return refuse("too many held");
+			pe.ui_held.insert(id);
+		}
+		log_i(MODULE, "UI button %s %s by %s", cs(itos(id)),
+				down ? "pressed" : "released", cs(pe.name));
+		Run r;
+		r.entity = id;
+		r.comp = comp;
+		r.handler = "on_ui";
+		r.by = by_of(pe.name);
+		r.args.append(down ? "pressed" : "released");
+		r.args.append(r.by);
+		queue_run(r);
+	}
+
 	// "held" every HELD_EVERY_US of game time while held (in play)
 	void actions_held()
 	{
@@ -10674,8 +10862,10 @@ struct Module: public interface::Module, public Interface
 		if(renamed && was_guest)
 			drop_guest(old_name);
 		place_player(p);
-		if(join)
+		if(join){
 			joined(peer);
+			send_all_mine(peer);
+		}
 	}
 
 	// [KIT] 4d's answer (user, 2026-10-30): a guest's player entity is

@@ -735,7 +735,7 @@ local function over_ui(mx, my)
 		end
 	end
 	return ui_utils.dropdown_open() or ui_utils.clicks_wanted() or
-			(E.menu ~= nil and E.menu.held())
+			(E.menu ~= nil and E.menu.held()) or (M.ui_at ~= nil and M.ui_at(mx, my))
 end
 
 M.over_ui = over_ui

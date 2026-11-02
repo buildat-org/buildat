@@ -2014,5 +2014,13 @@ do
 		value = value})
 end
 
+-- ---- [KIT_UI_COMPONENTS] UI as screen-space components: ui.lua
+do
+	local ok, err, install = buildat.run_script_file("kit/ui.lua")
+	assert(ok and type(install) == "function", "kit: ui.lua: " ..
+			tostring(err))
+	install({M = M, E = E, P = P, log = log, STYLE = STYLE, send = send})
+end
+
 return M
 -- vim: set noet ts=4 sw=4:

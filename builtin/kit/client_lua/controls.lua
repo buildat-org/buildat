@@ -610,6 +610,10 @@ magic.SubscribeToEvent("MouseButtonDown", function(_, data)
 	if M.pointer_free() then
 		local mp = magic.input:GetMousePosition()
 		x, y = mp.x, mp.y
+		-- [KIT_UI_COMPONENTS] a UI button's, not the world's
+		if M.ui_at and M.ui_at(x, y) then
+			return
+		end
 	end
 	click(x, y, b == magic.MOUSEB_LEFT)
 end)
@@ -711,7 +715,7 @@ local function on_ui(x, y)
 		end
 	end
 	return paused() or ui_utils.clicks_wanted() or (O.on_ui and O.on_ui(x, y))
-			or (E.editing and M.over_ui(x, y))
+			or (E.editing and M.over_ui(x, y)) or (M.ui_at and M.ui_at(x, y))
 end
 
 -- A row of buttons {label, pressed or nil, released} at the lower right,
@@ -789,6 +793,18 @@ local function make_bar()
 	C.abar = button_row(acts, 8 + C.bar.height + 6)
 	log:info("kit: the touch bar: " .. labels(list) .. "; the world's: " ..
 			labels(acts))
+end
+
+-- [KIT_UI_COMPONENTS] Their top (UI y; nil: none): a UI component at the
+-- bottom stays over them
+function M.touch_bar_top()
+	local y = nil
+	for _, b in ipairs({C.bar, C.abar}) do
+		if b and b.visible then
+			y = math.min(y or b.screenPosition.y, b.screenPosition.y)
+		end
+	end
+	return y
 end
 
 -- [KIT_TOUCH_HELP_JUMP] Where the touch bars begin at the lower right

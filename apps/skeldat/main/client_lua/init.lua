@@ -1110,13 +1110,23 @@ buildat.sub_packet("skeldat:world", function(data)
 	game.world = {half = h, y0 = tonumber(y0), y1 = tonumber(y1)}
 	local t0 = buildat.get_time_us()
 	local C, R = 8, FAR_CLIP
+	-- [SK_WEB_JOIN_HANDLERS] Each grid point's once: a quad's corners are
+	-- its neighbours' (277 ms of a web join's skeldat:world for 2880 quads)
+	local heights = {}
 	local function height(x, z)
+		local key = x * 65536 + z
+		local y = heights[key]
+		if y then
+			return y
+		end
 		local e = math.max(math.abs(x + 0.5) - h, math.abs(z + 0.5) - h, 0)
 		local rolling = crest + (backdrop_noise(x, z) - 0.4) * 30 *
 				math.min(1, e / 32)
 		local s = math.min(1, e / 16)
 		s = s * s * (3 - 2 * s)
-		return low - 4 + (rolling - low + 4) * s
+		y = low - 4 + (rolling - low + 4) * s
+		heights[key] = y
+		return y
 	end
 	-- The group of a quad's upward normal: 0 flat, else 1 + its compass
 	-- way (+x, +z, -x, -z) + 4 when steep

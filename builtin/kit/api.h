@@ -54,7 +54,11 @@ namespace interface
 //              (c:voxels'), 4096 cells, 256 names and 32 KiB at most. The
 //              editor hides it from the fields: its op "pattern" sets it
 //   state    = {name = {default = v, shared = true}, ...} -- runtime; a
-//              shared one is replicated to the clients
+//              shared one is replicated to the clients;
+//              ([KIT_UI_COMPONENTS]) a per_player = true one is a table
+//              {"player:<id>": v} (a `by`'s key), each client sent only
+//              its own player's v ("kit:mine" {"all": bool, "list":
+//              [{"id", "key", "value"}]}; null: none) while in its scene
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
 //   usable   = true          -- a client may "use" it (in range); with an
 //                               on_use, the clients point it out as
@@ -111,6 +115,22 @@ namespace interface
 //                               owned: a save's are migrated, the cells
 //                               they owned cleared)
 //   hud = "<shared state key>"  -- that state on every client's screen
+//   ui = {kind = "text"|"bar"|"button"|"panel", anchor =, x =, y =,
+//         panel =, ...}  -- ([KIT_UI_COMPONENTS], stage 4m) drawn on the
+//                               players' screens, not in the world
+//                               (client_lua/ui.lua; "param:<name>" as a
+//                               look's): kit/ui_text, ui_bar, ui_button and
+//                               ui_panel. It is up for a player while its
+//                               state `shown` (shared) is true, or their
+//                               own in `own` (per_player, {shown}) says
+//                               so, and its `panel` (an entity: 0 none) is
+//                               up for them. A button's press: the packet
+//                               "kit:ui" "<id> 1" (pressed) or "<id> 0"
+//                               (released), from a placed peer out of the
+//                               tools, while Running, in its scene, while
+//                               it is up for them, within kit:action's
+//                               allowance (one bucket a peer); on_ui(c,
+//                               phase, by) on it ("pressed", "released")
 //   actions = {{name = "fire", key = "R", label = "Fire"}, ...}
 //                            -- ([KIT_INPUT_ACTIONS]) keys the players
 //                               press (8 at most; each value a string or
