@@ -387,7 +387,8 @@ namespace interface
 //   {"op": "builder", "name": account, "on": bool}  -- the admin's only:
 //       makes an account a builder, or no longer
 //   {"op": "play"}, {"op": "stop"}, {"op": "save_start"}  -- the server's
-//       state, below (a builder's, the tools on or not)
+//       state, below (a builder's, the tools on or not; refused in a
+//       persistent world, Host::persistent)
 //   {"op": "restart", "id": n, "comp": i}  -- Running: the instance's
 //       state from the start again, and its on_start
 //   {"op": "focus", "sel": n (0: none), "cursor": [x, y, z] or null}  --
@@ -484,7 +485,9 @@ namespace interface
 // server starts Running: a fresh save (an empty composition Running is the
 // same as Stopped), and one from before stage 4c, its start its types'
 // defaults; a restart resumes what the save says. Stopped only by a
-// builder's Stop (or the app's set_running).
+// builder's Stop (or the app's set_running). A persistent host
+// (Host::persistent) is Running always: no start, no copies, no Stop;
+// "kit:edit_state" says "persistent".
 //
 // Origins: a cell play writes is a build or a game change. Builds are what
 // players make: their own dig or place (the app says so, player_wrote())
@@ -650,6 +653,13 @@ namespace kit
 		// start's reset. A replacing component (inventory = true) still
 		// replaces it. False: Kit's own (kit/inventory on the player entity)
 		bool app_items = false;
+		// [KIT] stage 6a2: the world is the game itself (skeldat; vanilla
+		// later), not a round from a start: always Running, no Play, Stop
+		// or Save as start; nothing copied out, marked or discarded; an
+		// authored entity a component removes is gone. Edits apply live,
+		// as Running's do. A save from round hosting is Running from here
+		// on, the voxels as they stand, its copies and marks dropped
+		bool persistent = false;
 	};
 
 	// kit:items ([KIT] stage 6a, Host::app_items): a player's inventory as

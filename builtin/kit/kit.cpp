@@ -2264,6 +2264,27 @@ struct Module: public interface::Module, public Interface
 			if(!m_start.is_object())
 				m_start = json::object();
 		}
+		if(m_host.persistent){
+			// [KIT] stage 6a2: the world as it stands is the game; a round
+			// host's copies, marks and discarded builds dropped.
+			// simplified: what a component makes (c:spawn) stays play-made
+			// for good -- kept, its maker reaching it, the editor not
+			// editing it; making it authored would cut its maker off
+			size_t n = 0;
+			m_store->batch([&](){
+				for(const char *pre : {"start:", "marks:"})
+					for(const ss_ &k : m_store->list(pre))
+						m_store->remove(k), n++;
+				m_store->remove("discarded");
+			});
+			if(n || !m_session.running || !m_session.restore.empty())
+				log_i(MODULE, "Persistent: %zu copies and marks dropped, "
+						"%zu sections not put back, Running", n,
+						m_session.restore.size());
+			m_session.running = true;
+			m_session.restore.clear();
+			save_session();
+		}
 		for(const ss_ &k : m_store->list("start:"))
 			if(!m_session.restore.count(k))
 				m_session.copied.insert(k);
@@ -2281,6 +2302,11 @@ struct Module: public interface::Module, public Interface
 		load_players(rt, old_aside);
 		if(m_session.running)
 			load_round(rt);
+		// A round host's removed entities are gone in a persistent world
+		if(m_host.persistent && !m_removed.empty()){
+			m_removed.clear();
+			m_store->set("authored", authored_json().stringify());
+		}
 		const json::Value &nid = rt.get("next_id");
 		if(nid.is_number() && nid.as_number() > m_next_id &&
 				nid.as_number() < 9e15)
@@ -4147,13 +4173,13 @@ struct Module: public interface::Module, public Interface
 
 	// {"op": "regenerate", "s": [x, y, z]} one edited section, {"all":
 	// true} every one that can be: Ended only (a Running round's copies of
-	// the start would put its voxels back at End)
+	// the start would put its voxels back at End), or a persistent world
 	void regenerate_sections(Peer &p, size_t peer, const json::Value &j,
 			std::function<void(const ss_&)> refuse)
 	{
 		if(!m_w->world_scene)
 			return refuse("no World here");
-		if(m_session.running)
+		if(m_session.running && !m_host.persistent)
 			return refuse("the game is Running: End it first");
 		const bool all = j.get("all").is_true();
 		std::tuple<int, int, int> one;
@@ -6950,8 +6976,9 @@ struct Module: public interface::Module, public Interface
 			remove_node(it->second);
 			it->second.node = 0;
 			if(!it->second.made){
-				if(origin == 'b' && always_keep()){
-					// A build kept as made: out of the start too
+				if(m_host.persistent || (origin == 'b' && always_keep())){
+					// A build kept as made (in a persistent world any
+					// removal): out of the start too
 					authored_gone = true;
 				} else {
 					Removed rm;
@@ -10555,7 +10582,7 @@ struct Module: public interface::Module, public Interface
 	void mark(voxelworld::Instance *w, main_context::SceneReference ref,
 			const pv::Vector3DInt32 &p, char origin, const ss_ &who)
 	{
-		if(!m_session.running)
+		if(!m_session.running || m_host.persistent)
 			return;
 		const ss_ scene = scene_name(ref);
 		if(scene.empty())
@@ -10985,9 +11012,11 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// voxelworld's section watch on, each scene's (a new round of copies:
-	// every section copied again at its next write), or off
+	// every section copied again at its next write), or off. Never on in
+	// a persistent world: nothing to put back
 	void watch(bool on)
 	{
+		on = on && !m_host.persistent;
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
 			for(auto &s : m_host.scenes){
 				voxelworld::Instance *w = ivw->get_instance(s.second);
@@ -11479,7 +11508,7 @@ struct Module: public interface::Module, public Interface
 
 	void set_running(bool running, const ss_ &by)
 	{
-		if(!m_hosted)
+		if(!m_hosted || m_host.persistent)
 			return;
 		if(running)
 			play(by.empty() ? "app" : by);
@@ -11608,6 +11637,7 @@ struct Module: public interface::Module, public Interface
 		j.set("can_edit", can_edit(peer));
 		j.set("running", m_session.running);
 		j.set("by", m_session.by);
+		j.set("persistent", m_host.persistent);
 		// The builds the last Stop discarded, until the next Play, and
 		// whether builds are always kept
 		j.set("discarded", discarded_counts());
@@ -11807,6 +11837,9 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		// The server's state: a builder's, the tools on or not
+		if(m_host.persistent && (op == "play" || op == "stop" ||
+				op == "save_start" || op == "keep" || op == "always_keep"))
+			return refuse("the world is persistent: no rounds");
 		if(op == "play" || op == "stop" || op == "save_start"){
 			if(op == "play" && m_session.running)
 				return refuse("the server is Running");

@@ -105,7 +105,9 @@
 -- Kit's top bar, for a builder: the tools ("Edit", "Play mode" while they
 -- are on; F6; play mode Runs the game if it has Ended) and the server's
 -- state ("Run" while Ended, "End" while Running: End puts the start
--- back; [KIT_PLAYTEST_TWEAKS], Play and Stop before);
+-- back; [KIT_PLAYTEST_TWEAKS], Play and Stop before; none of it, nor
+-- Save as start, the discarded builds or "Always keep builds", in a
+-- persistent world, [KIT] stage 6a2);
 -- kit.editor{bar = false} leaves it out of play for an app's own menu
 -- (the tools always have theirs): kit.can_edit(), kit.editing(),
 -- kit.running() (and kit.by(), who), and kit.set_tools(on),
@@ -833,7 +835,9 @@ rebuild_bar = function()
 	W.bar = w
 	if not E.editing then
 		button(w, "Edit", M.toggle_tools)
-		run_end(w)
+		if not E.persistent then
+			run_end(w)
+		end
 		return
 	end
 	w:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(6, 6, 6, 6))
@@ -906,7 +910,9 @@ rebuild_bar = function()
 	if E.state and E.state.clipboard then
 		bar_button("Paste", "Ctrl+V", M.paste)
 	end
-	bar_items[#bar_items + 1] = {E.running and "End" or "Run", place(run_end)}
+	if not E.persistent then
+		bar_items[#bar_items + 1] = {E.running and "End" or "Run", place(run_end)}
+	end
 	bar_button("Play mode", nil, M.toggle_tools)
 	if narrow() then
 		for _, p in ipairs({{"palette", "Palette"}, {"inspector", "Inspector"}}) do
@@ -916,7 +922,7 @@ rebuild_bar = function()
 			end, not folded(p[1]))
 		end
 	end
-	if E.running then
+	if E.running and not E.persistent then
 		bar_button("Save as start", nil, M.save_as_start)
 	end
 	bar_log = true
@@ -2018,7 +2024,8 @@ people = function()
 	end
 	local b = window(magic.HA_LEFT, magic.VA_BOTTOM, 10, -50)
 	W.people = b
-	text(b, E.running and "Running: edits change the start and the round" or
+	text(b, E.persistent and "Edits change the world" or E.running and
+			"Running: edits change the start and the round" or
 			"Ended: edits change the start", DIM)
 	if E.status ~= "" then
 		text(b, E.status, WARN)
@@ -2094,10 +2101,12 @@ people = function()
 			end)
 		end
 	end
-	button(b, "Always keep builds: " .. (E.always_keep and "yes" or "no"),
-			function()
-		send({op = "always_keep", on = not E.always_keep})
-	end)
+	if not E.persistent then
+		button(b, "Always keep builds: " .. (E.always_keep and "yes" or "no"),
+				function()
+			send({op = "always_keep", on = not E.always_keep})
+		end)
+	end
 	-- The builders with the tools on, each by a blob in their colour (user,
 	-- 2026-10-31: coloured text reads as a meaning, red as an error;
 	-- Hearth's larger blob) and the text plain
@@ -3006,7 +3015,8 @@ function M.add_menu_items(menu)
 		return E.can_edit and (E.editing and "Play mode" or "Edit") or nil
 	end, M.toggle_tools, {order = 10})
 	menu.add(function()
-		return E.can_edit and (E.running and "End" or "Run") or nil
+		return E.can_edit and not E.persistent and
+				(E.running and "End" or "Run") or nil
 	end, function()
 		if E.running then M.stop() else M.play() end
 	end, {order = 11})
@@ -4887,13 +4897,15 @@ function M.editor(options)
 		E.credits = type(s.credits) == "table" and s.credits or {}
 		E.discarded = type(s.discarded) == "table" and s.discarded or {}
 		E.always_keep = s.always_keep == true
+		E.persistent = s.persistent == true
 		if not next(E.discarded) then
 			E.choose = false
 		end
 		if E.running ~= (s.running == true) or E.by ~= tostring(s.by or "") then
 			E.running, E.by = s.running == true, tostring(s.by or "")
 			log:info("kit editor: the server is " .. (E.running and "Running" or
-					"Ended") .. " (by " .. E.by .. ")")
+					"Ended") .. " (by " .. E.by .. ")" ..
+					(E.persistent and ", persistent" or ""))
 		end
 		if E.editing then
 			local n = #entities()

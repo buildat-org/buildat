@@ -6,16 +6,14 @@
 -- pause menu's) puts Kit's tools over the world: Kit's types and
 -- skeldat's own (mob_spawner, bones) in the palette, its 2D, 3D and walk
 -- views; walking is skeldat's own (the mouse looks in the editor's
--- crosshair only, a click goes up into it). The menu's Play and Stop
--- run the game from the start and put it back. In play a left click on
+-- crosshair only, a click goes up into it). The world is persistent
+-- (stage 6a2): no Play or Stop, the edits live. In play a left click on
 -- a usable Kit object uses it (init.lua's).
 --   game.kit = run_script_file("main/kit.lua")(game, scene, camera_node)
 local magic = require("buildat/extension/urho3d")
-local ui_utils = require("buildat/extension/ui_utils")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
 local kit = require("buildat/module/kit")
-local log = buildat.Logger("skeldat")
 
 return function(game, scene, camera_node)
 	kit.editor{scene = scene, camera = camera_node, ground_y = 0,
@@ -35,18 +33,6 @@ return function(game, scene, camera_node)
 			local def = reg:get_by_id(reg:id_of(v))
 			return def ~= nil and def.physically_solid
 		end}
-	-- The server's state said as it changes
-	local running = nil
-	kit.on_change(function()
-		if running ~= nil and running ~= kit.running() then
-			local line = kit.running() and
-					"Running: the game plays from the start" or
-					"Stopped: the world is the start, for a builder to edit"
-			log:info("skeldat: kit: " .. line)
-			ui_utils.show_notification(line, 4)
-		end
-		running = kit.running()
-	end)
 	-- Whether skeldat's own clicks and keys are off: Kit's tools are on
 	function game.kit_editing()
 		return kit.editing()

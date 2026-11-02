@@ -1,7 +1,7 @@
 -- A mob spawner ([KIT] stage 6a, skeldat's own): used, or on "spawn",
 -- `count` of skeldat's mobs of `kind` on the ground at it; with
--- `at_start` also at each round's start. The mobs are skeldat's, round
--- state: Stop takes them away with the rest of the round's world
+-- `at_start` also as it starts (placed, restarted). The mobs are
+-- skeldat's, in its persistent world as any other
 local function spawn(c, by)
 	c:log("spawns", c.params.count, c.params.kind, "for", c:name(by))
 	c:app("mob", {kind = c.params.kind, count = c.params.count})

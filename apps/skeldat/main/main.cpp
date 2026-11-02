@@ -182,9 +182,9 @@ struct Module: public interface::Module, public PlayersHost,
 	std::vector<std::pair<uint64_t, skeldat::hazards::Cell>> m_hz_displaced;
 	// A test's watched box (the "pocket" test): its water volume reported
 	int m_hz_watch[6] = {0, 0, 0, -1, -1, -1};
-	// [KIT] stage 6a: Kit hosted on this world (host_kit()), Stopped, and
-	// the players' positions told to it on the tick
-	bool m_kit = false, m_kit_stopped = false;
+	// [KIT] stage 6a: Kit hosted on this world (host_kit()), and the
+	// players' positions told to it on the tick
+	bool m_kit = false;
 	float m_kit_t = 0;
 	// Kit's calls queued for on_tick: game code (drops' pickup) runs inside
 	// voxelworld's access, where kit::access throws
@@ -348,7 +348,6 @@ struct Module: public interface::Module, public PlayersHost,
 				&Module::on_section_unloaded);
 		sub(m_server, "world_menu:play", &Module::on_world_play);
 		sub(m_server, "world_menu:close", &Module::on_world_close);
-		sub(m_server, "kit:session", &Module::on_kit_session);
 		sub(m_server, "kit:items", &Module::on_kit_items);
 		sub(m_server, "kit:app", &Module::on_kit_app);
 		sub(m_server, "kit:spawn_player", &Module::on_kit_spawn);
@@ -371,16 +370,6 @@ struct Module: public interface::Module, public PlayersHost,
 				if((m_admin.paused || m_admin.skip_left > 0) && p.name != "luanti:chat" &&
 						p.name != "luanti:wield" && p.name != "luanti:world_in"){
 					m_admin.refused_paused(p);
-					return;
-				}
-				// [KIT] stage 6a: Stopped, the world is the start: only a
-				// builder changes it
-				if(m_kit_stopped && p.name != "luanti:chat" &&
-						p.name != "luanti:wield" && p.name != "luanti:world_in" &&
-						p.name != "luanti:where" && p.name != "luanti:fell" &&
-						!kit_can_edit(p.sender)){
-					log_i(MODULE, "skeldat: %s's %s refused: Stopped",
-							cs(m_players.name_of(p.sender)), cs(p.name));
 					return;
 				}
 				m_players.session.packet(p);
@@ -751,8 +740,7 @@ struct Module: public interface::Module, public PlayersHost,
 
 	// What the store "skeldat" says of the world's run: the day, the end,
 	// the holes, the hazards, the marker counts, the furnaces, the trees,
-	// the mobs, the stuck arrows and the drops (at the start, and again at
-	// a Kit Stop: restore_start())
+	// the mobs, the stuck arrows and the drops
 	void load_state()
 	{
 		ss_ v;
@@ -1525,23 +1513,21 @@ struct Module: public interface::Module, public PlayersHost,
 
 	//
 	// [KIT] stage 6a: skeldat hosts Kit. A builder places Kit's types and
-	// skeldat's own (kit/ here: mob_spawner, bones) in the world, which
-	// is the start: Stopped, the world's steps stand and only a builder
-	// digs and places; Play runs the game from the start, Stop puts it
-	// back. Kit puts back the voxels; skeldat its own rows of the store
-	// "skeldat" (the mobs, the day, the furnaces...), copied to the store
-	// "skeldat_start" at the first host, at Play and at Save as start. The
-	// players (the store "skeldat_players"), their played times and the
-	// world menu's rows are not the start's. The players' inventory is
-	// skeldat's, Kit's counts read from it (Host::app_items).
+	// skeldat's own (kit/ here: mob_spawner, bones) in the world. Stage
+	// 6a2: persistent (Host::persistent), the world is the game: no rounds,
+	// the components always run and edits apply live. The players'
+	// inventory is skeldat's, Kit's counts read from it (Host::app_items).
 	//
 
 	void host_kit()
 	{
 		m_kit = true;
-		ss_ v;
-		if(!m_save->store("skeldat_start")->get(START_TAKEN, v))
-			copy_start();
+		// 6a's start rows (Play and Stop's), unused since 6a2
+		storage::Store *old = m_save->store("skeldat_start");
+		old->batch([&](){
+			for(const ss_ &k : old->list(""))
+				old->remove(k);
+		});
 		kit::Host h;
 		h.types_path = m_server->get_module_path(MODULE)+"/kit";
 		h.author = "skeldat";
@@ -1551,116 +1537,17 @@ struct Module: public interface::Module, public PlayersHost,
 		h.scenes["world"] = m_world.scene;
 		h.moves_players = true;
 		h.app_items = true;
-		bool running = true;
+		h.persistent = true;
 		if(!kit::host(m_server, h)){
 			log_w(MODULE, "skeldat: Kit is not hosted");
 			return;
 		}
-		kit::access(m_server, [&](kit::Interface *k){
-			running = k->running();
-		});
-		m_kit_stopped = !running;
-		log_i(MODULE, "skeldat: Kit hosted, %s", running ? "Running" :
-				"Stopped");
+		log_i(MODULE, "skeldat: Kit hosted, persistent");
 		for(auto &pair : m_players.all)
 			if(pair.second.placed){
 				kit_peer(pair.first, pair.second);
 				send_kit_items(pair.second);
 			}
-	}
-
-	static constexpr const char *START_TAKEN = "~taken";
-
-	// The rows of the run's state as they are now: the start's
-	void copy_start()
-	{
-		save();
-		storage::Store *st = m_save->store("skeldat_start");
-		size_t n = 0;
-		st->batch([&](){
-			for(const ss_ &k : st->list(""))
-				st->remove(k);
-			for(const ss_ &k : m_store->list("")){
-				ss_ v;
-				if(k.compare(0, 7, "played/") != 0 && m_store->get(k, v))
-					st->set(k, v), n++;
-			}
-			st->set(START_TAKEN, "1");
-		});
-		log_i(MODULE, "skeldat: the start's %zu rows taken", n);
-	}
-
-	// Stop: the run's state the start's again, the voxels Kit's put back
-	void restore_start()
-	{
-		storage::Store *st = m_save->store("skeldat_start");
-		size_t n = 0;
-		m_store->batch([&](){
-			for(const ss_ &k : m_store->list(""))
-				if(k.compare(0, 7, "played/") != 0)
-					m_store->remove(k);
-			for(const ss_ &k : st->list("")){
-				ss_ v;
-				if(k != START_TAKEN && st->get(k, v))
-					m_store->set(k, v), n++;
-			}
-		});
-		for(auto &kv : m_mobs.all)
-			if(kv.second.node_id)
-				m_mobs.remove_node(kv.second.node_id);
-		for(Arrow &a : m_mobs.arrows)
-			if(a.node_id)
-				m_mobs.remove_node(a.node_id);
-		for(Drop &d : m_drops.all)
-			if(d.node_id)
-				m_mobs.remove_node(d.node_id);
-		m_mobs.all.clear();
-		m_mobs.arrows.clear();
-		m_mobs.stuck.clear();
-		m_mobs.hole_day.clear();
-		m_mobs.markers.assign(m_world.footprints(), 0);
-		m_drops.all.clear();
-		m_furnaces.all.clear();
-		m_trees.centres.clear();
-		m_trees.queue.clear();
-		m_trees.saplings.clear();
-		m_hazards.active.clear();
-		m_hazards.due = decltype(m_hazards.due)();
-		m_hz_pending.clear();
-		m_hz_seen.clear();
-		m_hz_displaced.clear();
-		m_growth.ended = false;
-		load_state();
-		// simplified: the growth's own timers and the mobs' light state go
-		// on from the round; the tops and counts are read again
-		voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
-			for(size_t i = 0; i < m_world.footprints(); i++)
-				m_growth.sweep(w, i);
-		});
-		for(int sx = -m_world.half; sx < m_world.half; sx++)
-		for(int sz = -m_world.half; sz < m_world.half; sz++)
-		for(int sy = m_world.y0; sy <= m_world.y1; sy++)
-			m_growth.recount.insert(pos_key(sx, sy, sz));
-		for(auto &pair : m_players.all){
-			m_players.send_time(pair.first);
-			send_end(pair.first);
-		}
-		log_i(MODULE, "skeldat: the start's %zu rows back, %zu mobs, day %.4f",
-				n, m_mobs.all.size(), m_world.day);
-	}
-
-	void on_kit_session(const kit::SessionChanged &e)
-	{
-		if(!m_kit || !m_save)
-			return;
-		const bool was_stopped = m_kit_stopped;
-		m_kit_stopped = !e.running;
-		if(e.running && (was_stopped || e.saved))
-			copy_start();
-		else if(!e.running && !was_stopped)
-			restore_start();
-		log_i(MODULE, "skeldat: Kit %s by %s", e.running ? e.saved ?
-				"saved as start" : "Running" : "Stopped", cs(e.by));
 	}
 
 	Player* player_named(const ss_ &name, size_t &peer)
@@ -1816,16 +1703,6 @@ struct Module: public interface::Module, public PlayersHost,
 		});
 	}
 
-	bool kit_can_edit(size_t peer)
-	{
-		bool can = false;
-		if(m_kit)
-			kit::access(m_server, [&](kit::Interface *k){
-				can = k->can_edit(peer);
-			});
-		return can;
-	}
-
 	// PlayersHost's: a player's dig or place is theirs (a build), and their
 	// inventory Kit's counts
 	void wrote(size_t peer, int x, int y, int z)
@@ -1908,19 +1785,6 @@ struct Module: public interface::Module, public PlayersHost,
 					if(pair.second.placed)
 						kit_peer(pair.first, pair.second);
 			}
-		}
-		// [KIT] stage 6a: Stopped, the world is the start: its steps stand
-		// as paused; the players move, and are sent
-		if(m_kit_stopped && !m_admin.paused){
-			m_players.session.tick(event.dtime);
-			if(m_world.load_points_dirty)
-				update_load_points();
-			m_send_t += event.dtime;
-			if(m_send_t >= 0.2f){
-				m_send_t = 0;
-				m_players.send_players();
-			}
-			return;
 		}
 		// [SKELDAT_WORLD_ADMIN] Paused: the world's clock and every step of
 		// the game stand; the sections load and send, the session takes
