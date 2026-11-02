@@ -1653,7 +1653,7 @@ keypress F3
 wait_log 5000 kit editor: the view is Walk
 mouse_click left
 wait_log 5000 kit editor: into the crosshair
-look_dir 0 -1 -1.2
+look_dir 2.5 -1 0
 frames 30
 mouse_click right
 wait_log 5000 kit editor: place
@@ -1661,18 +1661,18 @@ frames 10
 mouse_click right
 wait_log 5000 kit editor: place
 frames 10
-look_dir -1 -1 -1.5
+look_dir 1.5 -1 -1
 frames 30
 mouse_click right
 wait_log 5000 kit editor: place
 wait_log 5000 kit editor: guide: Left: dig
 mouse_click left
 wait_log 5000 kit editor: dig at
-look_dir 1 -1 0
+look_dir 0 -1 1
 frames 30
 mouse_click left
 wait_log 5000 kit editor: dig: the heightmap is not dug
-look_dir 0 -1 -1.2
+look_dir 2.5 -1 0
 frames 30
 screenshot @T@/hm_built.png
 keypress Escape
