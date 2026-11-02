@@ -97,6 +97,10 @@ static const size_t MAX_EDITED_LISTED = 256;
 // builders flowing
 static const size_t MAX_MADE = 1024;
 static const size_t MAX_PREFAB = 64;
+// [KIT_PREFAB_VOXELS] A prefab's voxel box each way, and the kinds of cell
+// (a voxel, its param and tint) in it at most
+static const int MAX_PREFAB_BOX = 64;
+static const size_t MAX_PREFAB_KINDS = 256;
 static const size_t LOG_LINES = 50;
 static const size_t MAX_FLOWS = 64;
 // [KIT] stage 4f: a brush's radius at most, a fill's side and depth at most;
@@ -439,6 +443,8 @@ struct Change
 	// cells that differed from the generator's in cells: undone once they
 	// are generated again
 	sv_<pv::Vector3DInt16> regen;
+	// [KIT_PREFAB_VOXELS] stroke -3: a prefab's place, its entities in
+	// before and its voxels' cells in cells (scene's), undone together
 };
 
 // [KIT] stage 4f: a decoration on a heightmap surface: a voxel object of
@@ -844,6 +850,16 @@ struct Module: public interface::Module, public Interface
 	// Prefabs by "<author>/<name>", as read, and those placeable
 	sm_<ss_, json::Value> m_prefabs;
 	std::set<ss_> m_prefab_palette;
+	// [KIT_PREFAB_VOXELS] Each builder's copy: an unnamed prefab ("copy"),
+	// and a place's voxels, written once its entities are in (on_edit())
+	sm_<ss_, json::Value> m_clipboard;
+	struct VoxelPaste
+	{
+		json::Value vox;
+		int base[3] = {0, 0, 0};
+		int turn = 0;
+		bool set = false;
+	} m_paste;
 	// Those that did not load (logged once), and those loading now (a
 	// prefab naming itself is none)
 	std::set<ss_> m_bad_prefabs, m_prefab_loading;
@@ -3260,6 +3276,14 @@ struct Module: public interface::Module, public Interface
 					if(pt != m_package_types.end())
 						dep_names.insert(jstr(pt->second, "package"));
 				}
+			}
+			// [KIT_PREFAB_VOXELS] its voxels' packages too
+			const json::Value &kinds = pf.get("voxels").get("kinds");
+			for(unsigned i = 0; kinds.is_array() && i < kinds.size(); i++){
+				auto vt = m_voxel_types.find(jstr_at(kinds.at(i), 0));
+				if(vt != m_voxel_types.end() &&
+						!jstr(vt->second, "package").empty())
+					dep_names.insert(jstr(vt->second, "package"));
 			}
 			pfs[k.substr(8 + author.size())] = pf;
 		}
@@ -6782,9 +6806,17 @@ struct Module: public interface::Module, public Interface
 			why = "its version is a whole number from 1";
 			return false;
 		}
+		// [KIT_PREFAB_VOXELS] its voxels, if any: then it may have no
+		// entities
+		const bool vox = !j.get("voxels").is_undefined();
+		if(vox && !check_voxels(j.get("voxels"), why)){
+			why = "voxels: "+why;
+			return false;
+		}
 		const json::Value &es = j.get("entities");
-		if(!es.is_array() || es.size() < 1 || es.size() > MAX_PREFAB){
-			why = "1 to "+itos(MAX_PREFAB)+" entities";
+		if(!es.is_array() || es.size() < (vox ? 0 : 1) ||
+				es.size() > MAX_PREFAB){
+			why = (vox ? "0" : "1")+ss_(" to ")+itos(MAX_PREFAB)+" entities";
 			return false;
 		}
 		std::set<int64_t> ids;
@@ -6867,6 +6899,273 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		return true;
+	}
+
+	// [KIT_PREFAB_VOXELS] A prefab's voxels: {"at": [x, y, z] (its box's
+	// low corner from the prefab's base, whole numbers), "size": [x, y, z]
+	// (1...MAX_PREFAB_BOX each), "air": true (its air cells replace what is
+	// there; else they are skipped), "kinds": [[voxel name, param, tint]...]
+	// (MAX_PREFAB_KINDS at most), "runs": [count, kind, count, kind...]
+	// (the cells x fastest, then z, then y, every one)}
+	static bool check_voxels(const json::Value &v, ss_ &why)
+	{
+		if(!v.is_object()){
+			why = "an object";
+			return false;
+		}
+		auto whole = [](const json::Value &n, double lo, double hi){
+			return n.is_number() && n.as_number() >= lo &&
+					n.as_number() <= hi && n.as_number() == std::floor(
+					n.as_number());
+		};
+		const json::Value &at = v.get("at"), &size = v.get("size");
+		if(!at.is_array() || at.size() != 3 || !size.is_array() ||
+				size.size() != 3){
+			why = "at and size: three numbers each";
+			return false;
+		}
+		size_t total = 1;
+		for(unsigned k = 0; k < 3; k++){
+			if(!whole(at.at(k), -MAX_COORD, MAX_COORD) ||
+					!whole(size.at(k), 1, MAX_PREFAB_BOX)){
+				why = "at: whole numbers within "+itos((int)MAX_COORD)+
+						", size: 1..."+itos(MAX_PREFAB_BOX)+" each";
+				return false;
+			}
+			total *= (size_t)size.at(k).as_number();
+		}
+		if(!v.get("air").is_undefined() && !v.get("air").is_boolean()){
+			why = "air: true or false";
+			return false;
+		}
+		const json::Value &kinds = v.get("kinds"), &runs = v.get("runs");
+		if(!kinds.is_array() || kinds.size() < 1 ||
+				kinds.size() > MAX_PREFAB_KINDS){
+			why = "kinds: 1 to "+itos(MAX_PREFAB_KINDS);
+			return false;
+		}
+		for(unsigned i = 0; i < kinds.size(); i++){
+			const json::Value &c = kinds.at(i);
+			if(!c.is_array() || c.size() != 3 || !c.at(0u).is_string() ||
+					!voxel_name_ok(c.at(0u).as_string()) ||
+					!whole(c.at(1u), 0, 255) || !whole(c.at(2u), 0, 15)){
+				why = "a kind is [a voxel's name, param 0..255, tint 0..15]";
+				return false;
+			}
+		}
+		if(!runs.is_array() || runs.size() % 2 != 0){
+			why = "runs: [count, kind...]";
+			return false;
+		}
+		size_t n = 0;
+		for(unsigned i = 0; i < runs.size(); i += 2){
+			if(!whole(runs.at(i), 1, (double)total) ||
+					!whole(runs.at(i + 1), 0, kinds.size() - 1)){
+				why = "runs: a count from 1 and a kind's index each";
+				return false;
+			}
+			n += (size_t)runs.at(i).as_number();
+			if(n > total)
+				break;
+		}
+		if(n != total){
+			why = "runs: "+itos(n)+" cells, the box has "+itos(total);
+			return false;
+		}
+		return true;
+	}
+
+	// A cell of a prefab's box turned k quarter turns round y about its
+	// base cell (a cell's middle is its whole coordinates; Urho3D's +z
+	// towards +x, as move_group()'s): x, z from the base
+	static void turn_cell(int &x, int &z, int k)
+	{
+		for(int i = 0; i < (k & 3); i++){
+			const int nx = z, nz = -x;
+			x = nx;
+			z = nz;
+		}
+	}
+	// An offset (a member's position) turned likewise
+	static void turn_offset(double &x, double &z, int k)
+	{
+		for(int i = 0; i < (k & 3); i++){
+			const double nx = z, nz = -x;
+			x = nx;
+			z = nz;
+		}
+	}
+
+	// Whether a voxel's param is a shape's facing (world.h's shapes:
+	// "<material>:<shape>")
+	static bool is_shape(const ss_ &name)
+	{
+		const size_t colon = name.rfind(':');
+		if(colon == ss_::npos)
+			return false;
+		for(const world::ShapeDef &d : world::shapes())
+			if(name.compare(colon + 1, ss_::npos, d.name) == 0)
+				return true;
+		return false;
+	}
+
+	// [KIT_PREFAB_VOXELS] A box of a scene's voxels ([o, o + n)) as a
+	// prefab's voxels, at from `base`; null with why if a cell of it is
+	// not loaded or the scene has no voxels
+	json::Value read_voxels(main_context::SceneReference ref,
+			const int o[3], const int n[3], const int base[3], bool air,
+			ss_ &why, size_t *solid = nullptr)
+	{
+		json::Value out = json::null();
+		bool any = false;
+		voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
+			any = true;
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			const interface::VoxelFormat &f = reg->get_format();
+			std::map<std::tuple<ss_, uint32_t, uint32_t>, size_t> index;
+			json::Value kinds = json::array(), runs = json::array();
+			int64_t last = -1, count = 0;
+			size_t not_air = 0;
+			for(int y = 0; y < n[1]; y++)
+				for(int z = 0; z < n[2]; z++)
+					for(int x = 0; x < n[0]; x++){
+						const pv::Vector3DInt32 q(o[0] + x, o[1] + y, o[2] + z);
+						uint32_t word = 0;
+						if(!voxel_id(w, q, word)){
+							why = "the cell ("+itos(q.getX())+","+itos(q.getY())+
+									","+itos(q.getZ())+")'s section is not loaded";
+							return;
+						}
+						const interface::VoxelDefinition *d =
+								reg->get(f.id.get(word));
+						const ss_ name = d ? d->name.block_name : ss_("air");
+						const uint32_t pm = f.param.bound() ? f.param.get(word) : 0;
+						const uint32_t tn = f.tint.bound() ? f.tint.get(word) : 0;
+						if(name != "air")
+							not_air++;
+						const auto key = std::make_tuple(name, pm, tn);
+						auto it = index.find(key);
+						if(it == index.end()){
+							if(index.size() >= MAX_PREFAB_KINDS){
+								why = "more than "+itos(MAX_PREFAB_KINDS)+
+										" kinds of cell";
+								return;
+							}
+							it = index.insert(std::make_pair(key,
+									index.size())).first;
+							json::Value c = json::array();
+							c.append(name);
+							c.append((int64_t)pm);
+							c.append((int64_t)tn);
+							kinds.append(c);
+						}
+						if((int64_t)it->second == last){
+							count++;
+							continue;
+						}
+						if(count){
+							runs.append(count);
+							runs.append(last);
+						}
+						last = (int64_t)it->second;
+						count = 1;
+					}
+			if(count){
+				runs.append(count);
+				runs.append(last);
+			}
+			out = json::object();
+			json::Value at = json::array(), size = json::array();
+			for(int k = 0; k < 3; k++){
+				at.append((int64_t)(o[k] - base[k]));
+				size.append((int64_t)n[k]);
+			}
+			out.set("at", at);
+			out.set("size", size);
+			if(air)
+				out.set("air", true);
+			out.set("kinds", kinds);
+			out.set("runs", runs);
+			if(solid)
+				*solid = not_air;
+		});
+		if(!any)
+			why = "the scene has no voxels";
+		if(!why.empty())
+			return json::null();
+		return out;
+	}
+
+	// [KIT_PREFAB_VOXELS] A prefab's voxels written in a scene, its base
+	// cell at `base`, turned k quarter turns (a shape's facing too): its
+	// air cells skipped unless it has "air"; each cell's old word in nc
+	// (an undo's) the first time. Cells not loaded and voxels the scene
+	// has not are skipped, counted
+	void write_voxels(const json::Value &vox, main_context::SceneReference ref,
+			const int base[3], int k, Change &nc, const ss_ &who,
+			size_t &written, size_t &missing, size_t &unknown)
+	{
+		const json::Value &at = vox.get("at"), &size = vox.get("size");
+		const json::Value &kinds = vox.get("kinds"), &runs = vox.get("runs");
+		const bool air = vox.get("air").is_true();
+		int n[3], a[3];
+		for(unsigned i = 0; i < 3; i++){
+			n[i] = (int)size.at(i).as_number();
+			a[i] = (int)at.at(i).as_number();
+		}
+		voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			const interface::VoxelFormat &f = reg->get_format();
+			// Each kind's word turned, or -1 (skipped)
+			sv_<int64_t> words;
+			sv_<bool> is_air;
+			for(unsigned i = 0; i < kinds.size(); i++){
+				const json::Value &c = kinds.at(i);
+				const ss_ name = c.at(0u).as_string();
+				interface::VoxelName vn;
+				vn.block_name = name;
+				const interface::VoxelDefinition *d = reg->get(vn);
+				uint32_t pm = (uint32_t)c.at(1u).as_number();
+				if(is_shape(name))
+					pm = (pm & 4) | ((pm + k) & 3);
+				words.push_back(d ? (int64_t)kit::voxel_word(f, d->id, pm,
+						(uint32_t)c.at(2u).as_number()) : -1);
+				is_air.push_back(name == "air");
+			}
+			size_t cell = 0;
+			for(unsigned r = 0; r < runs.size(); r += 2){
+				const size_t count = (size_t)runs.at(r).as_number();
+				const size_t kind = (size_t)runs.at(r + 1).as_number();
+				for(size_t c = 0; c < count; c++, cell++){
+					if(is_air[kind] && !air)
+						continue;
+					if(words[kind] < 0){
+						unknown++;
+						continue;
+					}
+					int x = a[0] + (int)(cell % n[0]);
+					int z = a[2] + (int)(cell / n[0] % n[2]);
+					const int y = a[1] + (int)(cell / n[0] / n[2]);
+					turn_cell(x, z, k);
+					const pv::Vector3DInt32 q(base[0] + x, base[1] + y,
+							base[2] + z);
+					uint32_t old = 0;
+					if(!hm_section(w, q) || !voxel_id(w, q, old)){
+						missing++;
+						continue;
+					}
+					const uint32_t word = (uint32_t)words[kind] &
+							state_mask(f);
+					if(old == word)
+						continue;
+					nc.cells.insert(std::make_pair(std::make_tuple(q.getX(),
+							q.getY(), q.getZ()), old));
+					set_id(w, q, word);
+					mark(w, ref, q, 'k', who);
+					written++;
+				}
+			}
+		});
 	}
 
 	// The placeable prefabs: Kit's and the app's files, the builders' rows
@@ -6965,9 +7264,12 @@ struct Module: public interface::Module, public Interface
 	// A prefab's copy as entities' rows, ids from `first` in its order,
 	// under `scene` (or their parent among them), positions from `base`,
 	// links and entity parameters to the new ids. name: the prefab's (each
-	// member remembers it), "" for an entity's copy
+	// member remembers it), "" for an entity's copy. turn: quarter turns
+	// round y about the base ([KIT_PREFAB_VOXELS]), each member's position
+	// and yaw
 	void instantiate(const json::Value &pf, const ss_ &name, uint64_t scene,
-			const double base[3], uint64_t first, sv_<json::Value> &out)
+			const double base[3], uint64_t first, sv_<json::Value> &out,
+			int turn = 0)
 	{
 		const json::Value &es = pf.get("entities");
 		std::map<int64_t, uint64_t> ids;
@@ -6988,13 +7290,17 @@ struct Module: public interface::Module, public Interface
 			e.set("name", jstr(m, "name"));
 			if(pos_ok(m.get("pos"))){
 				json::Value pos = json::array();
+				double off[3];
 				for(unsigned k = 0; k < 3; k++)
-					pos.append(grid(base[k] + m.get("pos").at(k).as_number()));
+					off[k] = m.get("pos").at(k).as_number();
+				turn_offset(off[0], off[2], turn);
+				for(unsigned k = 0; k < 3; k++)
+					pos.append(grid(base[k] + off[k]));
 				e.set("pos", pos);
-				// simplified: each member keeps its own turn; the copy is
-				// not turned as a whole
-				if(m.get("yaw").is_number())
-					e.set("yaw", norm_yaw(m.get("yaw").as_number()));
+				const double yaw = (m.get("yaw").is_number() ?
+						m.get("yaw").as_number() : 0) + 90.0 * (turn & 3);
+				if(m.get("yaw").is_number() || (turn & 3))
+					e.set("yaw", norm_yaw(yaw));
 			}
 			json::Value comps = json::array();
 			const json::Value &cs_ = m.get("components");
@@ -7044,18 +7350,45 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
-	// {"op": "place", "prefab": name, "pos": [x, y, z]}: a copy of the
-	// prefab in the editor's scene, its members' ids the next ones
+	// {"op": "place", "prefab": name, "pos": [x, y, z], "turn": degrees}:
+	// a copy of the prefab in the editor's scene, its members' ids the
+	// next ones. [KIT_PREFAB_VOXELS] "clipboard": true instead of a
+	// prefab: the builder's copy (a paste, its members no prefab's);
+	// turn: a multiple of 90, the copy turned round y about its base
+	// (members, their yaws, its voxels and their shapes' facings); its
+	// voxels written in on_edit() once the entities are in (m_paste), its
+	// base the cell pos is in (a cell's middle its whole coordinates)
 	bool place_prefab(const json::Value &j, const Peer &p,
 			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
 			ss_ &why)
 	{
-		const ss_ name = jstr(j, "prefab");
-		const json::Value *pf = prefab(name);
+		const bool paste = j.get("clipboard").is_true();
+		const ss_ name = paste ? ss_() : jstr(j, "prefab");
+		const json::Value *pf = nullptr;
+		if(paste){
+			auto ci = m_clipboard.find(p.name);
+			if(ci == m_clipboard.end()){
+				why = "nothing copied (the copy op)";
+				return false;
+			}
+			pf = &ci->second;
+		} else {
+			pf = prefab(name);
+		}
 		if(!pf){
 			why = "no prefab \""+name.substr(0, 130)+"\"";
 			return false;
 		}
+		const json::Value &tj = j.get("turn");
+		if(!tj.is_undefined() && !(tj.is_number() &&
+				std::fabs(tj.as_number()) <= 3600 &&
+				std::fmod(tj.as_number(), 90.0) == 0)){
+			why = "turn: a multiple of 90 degrees";
+			return false;
+		}
+		const int turn = tj.is_number() ?
+				(((int)tj.as_number() / 90) % 4 + 4) % 4 : 0;
+		const bool vox = pf->get("voxels").is_object();
 		if(!pos_ok(j.get("pos"))){
 			why = "pos: three numbers within "+itos((int)MAX_COORD);
 			return false;
@@ -7072,16 +7405,160 @@ struct Module: public interface::Module, public Interface
 		}
 		double base[3];
 		for(unsigned k = 0; k < 3; k++)
-			base[k] = grid(j.get("pos").at(k).as_number());
+			base[k] = vox ? std::floor(j.get("pos").at(k).as_number() + 0.5) :
+					grid(j.get("pos").at(k).as_number());
+		if(vox){
+			if(m_host.scenes.find(p.scene) == m_host.scenes.end()){
+				why = "not in a scene of the app's";
+				return false;
+			}
+			m_paste.vox = pf->get("voxels");
+			for(int k = 0; k < 3; k++)
+				m_paste.base[k] = (int)base[k];
+			m_paste.turn = turn;
+			m_paste.set = true;
+		}
 		sv_<json::Value> rows;
-		instantiate(*pf, name, scene, base, m_next_id, rows);
-		for(const json::Value &row : rows)
+		instantiate(*pf, name, scene, base, m_next_id, rows, turn);
+		for(json::Value &row : rows){
+			if(paste){
+				// Named as a duplicate's are
+				const json::Value &cs_ = row.get("components");
+				if(cs_.size())
+					row.set("name", jstr(cs_.at(0), "type")+" "+
+							itos(json::jint(row, "id", 0)));
+			}
 			change.push_back(std::make_pair((uint64_t)json::jint(row, "id", 0),
 					row));
-		what = "placed prefab "+name+" as "+itos(m_next_id)+"..."+
-				itos(m_next_id + rows.size() - 1);
+		}
+		what = (paste ? ss_("pasted the copy") : "placed prefab "+name)+
+				(rows.empty() ? ss_() : " as "+itos(m_next_id)+"..."+
+				itos(m_next_id + rows.size() - 1))+(turn ? ", turned "+
+				itos(turn * 90) : ss_());
 		m_next_id += rows.size();
 		return true;
+	}
+
+	// [KIT_PREFAB_VOXELS] {"box": [x0, y0, z0, x1, y1, z1]} (cells, both
+	// corners in it) as its low corner and size, MAX_PREFAB_BOX each way
+	bool box_arg(const json::Value &j, int o[3], int n[3], ss_ &why)
+	{
+		const json::Value &b = j.get("box");
+		if(!b.is_array() || b.size() != 6){
+			why = "box: [x0, y0, z0, x1, y1, z1]";
+			return false;
+		}
+		int c[6];
+		for(unsigned i = 0; i < 6; i++){
+			const json::Value &v = b.at(i);
+			if(!v.is_number() || std::fabs(v.as_number()) > MAX_COORD ||
+					v.as_number() != std::floor(v.as_number())){
+				why = "box: whole numbers within "+itos((int)MAX_COORD);
+				return false;
+			}
+			c[i] = (int)v.as_number();
+		}
+		for(int k = 0; k < 3; k++){
+			o[k] = std::min(c[k], c[k + 3]);
+			n[k] = std::abs(c[k] - c[k + 3]) + 1;
+			if(n[k] > MAX_PREFAB_BOX){
+				why = "box: "+itos(MAX_PREFAB_BOX)+" cells each way at most";
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// [KIT_PREFAB_VOXELS] Entities (ids) and a box of voxels (box, air) as
+	// an unnamed prefab: its base the box's low corner (else the first
+	// entity's position; a cell's corner with voxels), the entities a
+	// parent before its children. false with why
+	bool group_with_voxels(const json::Value &j, const Peer &p,
+			sv_<uint64_t> &group, json::Value &pf, ss_ &why)
+	{
+		const json::Value &ids = j.get("ids");
+		const bool box = !j.get("box").is_undefined();
+		if(!ids.is_undefined() && (!ids.is_array() ||
+				ids.size() > MAX_PREFAB)){
+			why = "ids: at most "+itos(MAX_PREFAB)+" entities";
+			return false;
+		}
+		if(!box && (!ids.is_array() || ids.size() < 1)){
+			why = "ids: 1 to "+itos(MAX_PREFAB)+" entities, or a box";
+			return false;
+		}
+		for(unsigned i = 0; ids.is_array() && i < ids.size(); i++){
+			json::Value a = json::object();
+			a.set("id", ids.at(i));
+			Entity *e = entity_arg(a, "id", why);
+			if(!e)
+				return false;
+			if(!e->kind.empty()){
+				why = "entity "+itos(e->id)+" is a "+e->kind;
+				return false;
+			}
+			if(std::find(group.begin(), group.end(), e->id) == group.end())
+				group.push_back(e->id);
+		}
+		std::sort(group.begin(), group.end(), [&](uint64_t a, uint64_t b){
+			const int da = depth(a), db = depth(b);
+			return da != db ? da < db : a < b;
+		});
+		int o[3] = {0, 0, 0}, n[3] = {0, 0, 0};
+		if(box && !box_arg(j, o, n, why))
+			return false;
+		if(!j.get("air").is_undefined() && !j.get("air").is_boolean()){
+			why = "air: true or false";
+			return false;
+		}
+		double base[3] = {0, 0, 0};
+		if(box){
+			for(int k = 0; k < 3; k++)
+				base[k] = o[k];
+		} else if(m_entities[group[0]].has_pos){
+			for(int k = 0; k < 3; k++)
+				base[k] = m_entities[group[0]].pos[k];
+		}
+		pf = group_prefab(group, base);
+		if(box){
+			auto si = m_host.scenes.find(p.scene);
+			if(si == m_host.scenes.end()){
+				why = "not in a scene of the app's";
+				return false;
+			}
+			const int b[3] = {o[0], o[1], o[2]};
+			const json::Value v = read_voxels(si->second, o, n, b,
+					j.get("air").is_true(), why);
+			if(v.is_null())
+				return false;
+			pf.set("voxels", v);
+		}
+		if(pf.stringify().size() > MAX_TYPE_SOURCE){
+			why = "it is past "+itos(MAX_TYPE_SOURCE)+" bytes as a prefab";
+			return false;
+		}
+		return true;
+	}
+
+	// [KIT_PREFAB_VOXELS] {"op": "copy", "ids": [n...], "box": [x0, y0, z0,
+	// x1, y1, z1], "air": bool}: the builder's copy (an unnamed prefab,
+	// the server's: a paste is a place of it), entities, a box of voxels or
+	// both
+	void copy_op(Peer &p, size_t peer, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		sv_<uint64_t> group;
+		json::Value pf;
+		ss_ why;
+		if(!group_with_voxels(j, p, group, pf, why))
+			return refuse(why);
+		m_clipboard[p.name] = pf;
+		const json::Value &v = pf.get("voxels");
+		log_i(MODULE, "%s copied %zu entities and %s", cs(p.name),
+				group.size(), v.is_object() ? cs("a box of "+
+				v.get("size").stringify()+" voxels ("+
+				itos(v.get("kinds").size())+" kinds)") : "no voxels");
+		send_state(peer);
 	}
 
 	// The positional authored entities of `ids` (1 to MAX_PREFAB, none
@@ -7277,35 +7754,26 @@ struct Module: public interface::Module, public Interface
 			why = name+" is the package "+jstr(*had, "package")+"'s";
 			return false;
 		}
-		const json::Value &ids = j.get("ids");
-		if(!ids.is_array() || ids.size() < 1 || ids.size() > MAX_PREFAB){
-			why = "ids: 1 to "+itos(MAX_PREFAB)+" entities";
-			return false;
-		}
+		// [KIT_PREFAB_VOXELS] "box" (and "air"): a box of voxels in it too;
+		// "clipboard": true: the builder's copy named (no entities of the
+		// composition's become its copy)
 		sv_<uint64_t> group;
-		for(unsigned i = 0; i < ids.size(); i++){
-			json::Value a = json::object();
-			a.set("id", ids.at(i));
-			Entity *e = entity_arg(a, "id", why);
-			if(!e)
-				return false;
-			if(!e->kind.empty()){
-				why = "entity "+itos(e->id)+" is a "+e->kind;
+		json::Value pf;
+		if(j.get("clipboard").is_true()){
+			auto ci = m_clipboard.find(p.name);
+			if(ci == m_clipboard.end()){
+				why = "nothing copied (the copy op)";
 				return false;
 			}
-			if(std::find(group.begin(), group.end(), e->id) == group.end())
-				group.push_back(e->id);
+			pf = ci->second.deepcopy();
+			if(!j.get("air").is_undefined() && pf.get("voxels").is_object()){
+				json::Value v = pf.get("voxels").deepcopy();
+				v.set("air", j.get("air").is_true());
+				pf.set("voxels", v);
+			}
+		} else if(!group_with_voxels(j, p, group, pf, why)){
+			return false;
 		}
-		std::sort(group.begin(), group.end(), [&](uint64_t a, uint64_t b){
-			const int da = depth(a), db = depth(b);
-			return da != db ? da < db : a < b;
-		});
-		double base[3] = {0, 0, 0};
-		const Entity &first = m_entities[group[0]];
-		if(first.has_pos)
-			for(int k = 0; k < 3; k++)
-				base[k] = first.pos[k];
-		json::Value pf = group_prefab(group, base);
 		m_bad_prefabs.erase(name);
 		const json::Value *old = prefab(name);
 		const int64_t version = old ? json::jint(*old, "version", 1) + 1 : 1;
@@ -7368,9 +7836,12 @@ struct Module: public interface::Module, public Interface
 			change.push_back(std::make_pair(copy.id, entity_json(copy)));
 			updated++;
 		}
+		const json::Value &vx = pf.get("voxels");
 		what = "saved prefab "+name+" version "+itos(version)+" of "+
-				itos(group.size())+" entities ("+itos(updated)+" entities of "
-				"other copies follow it)";
+				itos(pf.get("entities").size())+" entities"+(vx.is_object() ?
+				" and a box of "+vx.get("size").stringify()+" voxels"+
+				(vx.get("air").is_true() ? " (air replaces)" : "") : ss_())+
+				" ("+itos(updated)+" entities of other copies follow it)";
 		return true;
 	}
 	// ---- Debugging for novices ([KIT] stage 4d): each entity's log
@@ -10579,6 +11050,19 @@ struct Module: public interface::Module, public Interface
 			for(const ss_ &n : m_prefab_palette)
 				pfs.append(n);
 			j.set("prefabs", pfs);
+			// [KIT_PREFAB_VOXELS] the builder's copy: its entities and
+			// its box's size ([0, 0, 0]: none), from its base
+			auto ci = m_clipboard.find(pi->second.name);
+			if(ci != m_clipboard.end()){
+				json::Value cb = json::object();
+				cb.set("entities", (int64_t)ci->second.get("entities").size());
+				const json::Value &v = ci->second.get("voxels");
+				cb.set("size", v.is_object() ? v.get("size") :
+						json::load_string("[0, 0, 0]"));
+				if(v.is_object())
+					cb.set("at", v.get("at"));
+				j.set("clipboard", cb);
+			}
 			// [KIT] stage 4g: the voxels to place and the textures a
 			// builder's type may wear
 			j.set("voxels", voxel_palette());
@@ -10704,6 +11188,8 @@ struct Module: public interface::Module, public Interface
 			return try_input(p, peer, j, refuse);
 		if(op == "pattern")
 			return pattern_op(p, peer, j, refuse);
+		if(op == "copy")
+			return copy_op(p, peer, j, refuse);
 		if(op == "export")
 			return export_package(peer, p, refuse);
 		if(op == "restart"){
@@ -10758,20 +11244,41 @@ struct Module: public interface::Module, public Interface
 						"again yet");
 			const Change c = u.back();
 			u.pop_back();
-			if(c.stroke != -1){
+			if(c.stroke != -1 && c.stroke != -3){
 				undo_terrain(c, p);
 				send_state(peer);
 				return;
 			}
+			// [KIT_PREFAB_VOXELS] a prefab's place: its voxels too
+			if(c.stroke == -3)
+				undo_terrain(c, p);
 			commit(c.before, nullptr);
 			log_i(MODULE, "An undo by %s: %zu entities put back (%zu more "
 					"to undo)", cs(p.name), c.before.size(), u.size());
 			world_check(p.name);
 			return;
 		}
-		if(!build_change(op, j, p, change, what, why))
+		m_paste.set = false;
+		if(!build_change(op, j, p, change, what, why)){
+			m_paste.set = false;
 			return refuse(why);
-		commit(change, &m_undo[p.name]);
+		}
+		std::deque<Change> &u = m_undo[p.name];
+		commit(change, &u);
+		// [KIT_PREFAB_VOXELS] a place's voxels, with its entities one undo
+		if(m_paste.set){
+			m_paste.set = false;
+			auto si = m_host.scenes.find(p.scene);
+			Change &nc = u.back();
+			nc.stroke = -3;
+			nc.scene = si->second;
+			size_t written = 0, missing = 0, unknown = 0;
+			write_voxels(m_paste.vox, nc.scene, m_paste.base, m_paste.turn,
+					nc, p.name, written, missing, unknown);
+			what += ", "+itos(written)+" voxels written"+(missing ? ", "+
+					itos(missing)+" not loaded" : ss_())+(unknown ? ", "+
+					itos(unknown)+" of voxels the scene has not" : ss_());
+		}
 		log_i(MODULE, "An edit by %s: %s", cs(p.name), cs(what));
 		world_check(p.name);
 	}
@@ -10847,7 +11354,8 @@ struct Module: public interface::Module, public Interface
 	bool build_change(const ss_ &op, const json::Value &j, const Peer &p,
 			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what, ss_ &why)
 	{
-		if(op == "place" && !j.get("prefab").is_undefined())
+		if(op == "place" && (!j.get("prefab").is_undefined() ||
+				j.get("clipboard").is_true()))
 			return place_prefab(j, p, change, what, why);
 		if(op == "save_prefab")
 			return save_prefab(j, p, change, what, why);

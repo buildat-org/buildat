@@ -178,8 +178,22 @@ namespace interface
 //      "entities": [{"id": 1..., "parent": 0 (the scene) or an earlier
 //      member's id, "name", "pos" (from where a copy is placed),
 //      "components": [{"type", "version", "params", "links": [{"output",
-//      "to": a member's id, "input"}]}]}]}
-//   an entity parameter in it a member's id (0: none). Kit's and the
+//      "to": a member's id, "input"}]}]}],
+//      "voxels": {"at": [x, y, z], "size": [x, y, z], "air": bool,
+//       "kinds": [[voxel, param, tint]...], "runs": [count, kind...]}}
+//   an entity parameter in it a member's id (0: none).
+//   [KIT_PREFAB_VOXELS] "voxels" (optional; then it may have no entities)
+//   is a box of cells (MAX_PREFAB_BOX each way) at `at` from its base (a
+//   cell's middle), each cell a kind (MAX_PREFAB_KINDS), the runs x
+//   fastest, then z, then y. A copy writes them into the editor's scene
+//   with its entities, one undo: their air cells skipped unless "air"
+//   (air replaces), cells not loaded and voxels the scene has not
+//   skipped. A copy turned (place's turn, quarter turns about its base)
+//   turns its members, their yaws, its cells and a shape's facing (its
+//   param, world.h's Shapes). Links between its entities and the cells
+//   they own stay its own: an owned voxel is its entity's (own_voxels()).
+//   simplified: a prefab copied in play (c:spawn) makes its entities, not
+//   its voxels; a cell's owned data is not in it. Kit's and the
 //   app's are <types dir>/<name>.prefab.json; a builder's ({"op":
 //   "save_prefab"}, author their name) the save's row
 //   "prefab:<author>/<name>", over a file. A copy's members have new ids,
@@ -337,10 +351,21 @@ namespace interface
 //       editor's scene with an instance of t (the palette: every
 //       type of Kit's and of the app's that loads), its id the next; a
 //       position on a 1/16 cell's grid
-//   {"op": "place", "prefab": name, "pos": [x, y, z]}  -- a prefab's copy
-//   {"op": "save_prefab", "ids": [n...], "name": n}  -- those entities a
-//       prefab of the builder's, they a copy of it; other copies follow
-//       its parameters but their overrides
+//   {"op": "place", "prefab": name, "pos": [x, y, z], "turn": degrees}
+//       -- a prefab's copy, turned a multiple of 90 about its base
+//       ([KIT_PREFAB_VOXELS]); "clipboard": true instead of a prefab: the
+//       builder's copy pasted (its members no prefab's)
+//   {"op": "save_prefab", "ids": [n...], "name": n, "box": [x0, y0, z0,
+//    x1, y1, z1], "air": bool}  -- those entities a prefab of the
+//       builder's, they a copy of it; other copies follow its parameters
+//       but their overrides. [KIT_PREFAB_VOXELS] box: the cells between
+//       its corners (the editor's scene's) its voxels too, its base the
+//       box's low corner (ids then optional); "clipboard": true instead:
+//       the builder's copy named
+//   {"op": "copy", "ids": [n...], "box": [...], "air": bool}  --
+//       [KIT_PREFAB_VOXELS] the builder's copy (the server's, an unnamed
+//       prefab): entities, a box's voxels or both; edit_state's
+//       "clipboard" {entities, size, at} says it
 //   {"op": "move", "id": n, "pos": [x, y, z], "yaw": degrees}  -- yaw
 //       optional ([KIT] stage 4e2: an entity's turn round y, 0...360, its
 //       look turned with it; zones and grants stay boxes of cells)

@@ -498,7 +498,8 @@ end
 -- dragged (where it lands)
 local function voxel_work()
 	local d = S.drag and S.drag.kind
-	return S.tool == "voxels" or S.tool == "terrain" or S.placing ~= nil or
+	return S.tool == "voxels" or S.tool == "terrain" or S.tool == "box" or
+			S.placing ~= nil or
 			d == "palette" or d == "move" or d == "turn"
 end
 
@@ -811,6 +812,17 @@ rebuild_bar = function()
 	bar_button("Undo", nil, function()
 		send({op = "undo"})
 	end)
+	-- [KIT_PREFAB_VOXELS] the Box tool's: the box (and the selection)
+	-- copied or a prefab, the copy pasted
+	if S.tool == "box" then
+		bar_button("Copy", "Ctrl+C", M.copy)
+		bar_button("Make prefab...", nil, function()
+			M.prefab_dialog(sel_ids())
+		end)
+	end
+	if E.state and E.state.clipboard then
+		bar_button("Paste", "Ctrl+V", M.paste)
+	end
 	bar_items[#bar_items + 1] = {E.running and "End" or "Run", place(run_end)}
 	bar_button("Play mode", nil, M.toggle_tools)
 	if narrow() then
@@ -879,6 +891,13 @@ local function panel_title(w, s, other)
 	if s == "Palette" and E.state and E.state.voxels and O.solid then
 		local b = button(r, "Voxels" .. (S.touch and "" or " (V)"),
 				M.toggle_voxels, S.tool == "voxels")
+		b.minHeight, b.maxHeight = t.height, t.height
+	end
+	-- [KIT_PREFAB_VOXELS] the Box tool: a box of voxels to copy or make
+	-- a prefab of
+	if s == "Palette" and O.solid then
+		local b = button(r, "Box" .. (S.touch and "" or " (B)"),
+				M.toggle_box, S.tool == "box")
 		b.minHeight, b.maxHeight = t.height, t.height
 	end
 end
@@ -1823,27 +1842,51 @@ function M.delete_selected()
 	end
 end
 
+-- [KIT_PREFAB_VOXELS] The voxel box (the Box tool's two corners) as
+-- the server takes it, or nil
+local function vbox()
+	local b = S.vbox
+	if not b or not b.a or not b.b then
+		return nil
+	end
+	return {b.a[1], b.a[2], b.a[3], b.b[1], b.b[2], b.b[3]}
+end
+
 local function prefab_dialog(ids)
 	drop("dialog")
 	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
 	W.dialog = w
 	w.priority = 10
+	-- [KIT_PREFAB_VOXELS] the Box tool's voxels too, their air replacing
+	-- what is there or not
+	local box = vbox()
 	text(w, "Make a prefab of " .. #ids .. (#ids == 1 and " entity" or
-			" entities"))
+			" entities") .. (box and " and the box's voxels" or ""))
 	local r = row(w)
 	label(r, "Prefab name:")
 	edit(r, E.prefab_name, function(s)
 		E.prefab_name = s
 	end)
+	if box then
+		button(row(w), "Air replaces: " .. (E.prefab_air and "on" or "off"),
+				function()
+			E.prefab_air = not E.prefab_air
+			prefab_dialog(ids)
+		end, E.prefab_air)
+	end
 	local br = row(w)
 	button(br, "Save prefab", function()
-		send({op = "save_prefab", ids = ids, name = E.prefab_name})
+		send({op = "save_prefab", ids = #ids > 0 and ids or nil,
+			box = box, air = box and (E.prefab_air or false) or nil,
+			name = E.prefab_name})
 		drop("dialog")
 	end)
 	button(br, "Cancel", function()
 		drop("dialog")
 	end)
 end
+
+M.prefab_dialog = prefab_dialog
 
 -- [KIT] stage 4g: a builder's voxel type ("<their name>/<name>"), made or
 -- its next version: a registered voxel's texture or an uploaded PNG's
@@ -2320,8 +2363,12 @@ local function place_at(cell, item)
 	if not cell or not item then
 		return
 	end
-	if item.prefab then
-		send({op = "place", prefab = item.prefab, pos = cell})
+	if item.clipboard then
+		send({op = "place", clipboard = true, pos = cell,
+			turn = item.turn or 0})
+	elseif item.prefab then
+		send({op = "place", prefab = item.prefab, pos = cell,
+			turn = item.turn or 0})
 	else
 		send({op = "place", type = item.type, pos = cell})
 	end
@@ -2625,6 +2672,10 @@ local heightmap = require("buildat/module/heightmap")
 function M.set_tool(tool)
 	if S.tool == tool then
 		return
+	end
+	-- [KIT_PREFAB_VOXELS] the Box tool's box goes with it
+	if S.tool == "box" then
+		S.vbox = nil
 	end
 	S.tool = tool
 	T.down, T.fill = false, nil
@@ -3002,6 +3053,79 @@ local function voxel_click(mx, my, dig)
 	send(j)
 end
 
+-- [KIT_PREFAB_VOXELS] The Box tool: a click on a voxel (or the ground
+-- cell) a corner of the box, the first and then the second; a third
+-- starts a new box
+local function box_click(mx, my)
+	local t = voxel_target(mx, my)
+	local c = t and t.cell or place_cell(mx, my)
+	if not c then
+		return
+	end
+	local b = S.vbox
+	if not b or b.b then
+		S.vbox = {a = c}
+		log:info("kit editor: box corner " .. table.concat(c, ","))
+	else
+		b.b = c
+		log:info("kit editor: box " .. table.concat(vbox(), ","))
+	end
+	refresh()
+end
+
+-- [KIT_PREFAB_VOXELS] The copy (the server's, the builder's): the
+-- selected entities and the Box tool's voxels
+function M.copy()
+	local ids, box = sel_ids(), vbox()
+	if #ids == 0 and not box then
+		log:info("kit editor: copy: nothing selected and no box")
+		return
+	end
+	send({op = "copy", ids = #ids > 0 and ids or nil, box = box})
+	log:info("kit editor: copy of " .. #ids .. " entities" .. (box and
+			" and the box " .. table.concat(box, ",") or ""))
+end
+
+-- A paste: the copy placed as a prefab is, turned with Z and X
+function M.paste()
+	if not (E.state and E.state.clipboard) then
+		log:info("kit editor: paste: nothing copied")
+		return
+	end
+	M.set_tool(nil)
+	S.placing = {clipboard = true, label = "Paste", turn = 0}
+	log:info("kit editor: pasting")
+	refresh()
+end
+
+function M.toggle_box()
+	M.set_tool(S.tool ~= "box" and "box" or nil)
+end
+
+-- The box a voxel prefab's (or the copy's) voxels would fill placed at
+-- cell, turned: its low and high cells
+local function turn_xz(x, z, turn)
+	for _ = 1, math.floor((turn or 0) / 90) % 4 do
+		x, z = z, -x
+	end
+	return x, z
+end
+function M.placed_box(cell, item)
+	local cb = item.clipboard and E.state and E.state.clipboard
+	local size = cb and cb.size
+	if not size or size[1] == 0 then
+		return nil
+	end
+	local at = cb.at or {0, 0, 0}
+	local x0, z0 = turn_xz(at[1], at[3], item.turn)
+	local x1, z1 = turn_xz(at[1] + size[1] - 1, at[3] + size[3] - 1, item.turn)
+	local base = {round(cell[1]), round(cell[2]), round(cell[3])}
+	return {base[1] + math.min(x0, x1), base[2] + at[2],
+			base[3] + math.min(z0, z1)},
+		{base[1] + math.max(x0, x1), base[2] + at[2] + size[2] - 1,
+			base[3] + math.max(z0, z1)}
+end
+
 -- ---- Input: the mouse ([FP]'s mouse_down, mouse_up, mouse_move)
 local function mouse_down(button_)
 	if not E.editing or S.touch then
@@ -3036,6 +3160,10 @@ local function mouse_down(button_)
 	end
 	if S.tool == "terrain" and button_ == magic.MOUSEB_LEFT then
 		stroke_begin(mx, my)
+		return
+	end
+	if S.tool == "box" and button_ == magic.MOUSEB_LEFT then
+		box_click(mx, my)
 		return
 	end
 	if S.tool == "voxels" and button_ == magic.MOUSEB_LEFT then
@@ -3616,6 +3744,10 @@ local function key_down(key, ctrl, shift)
 		end
 	elseif key == magic.KEY_Z and ctrl then
 		send({op = "undo"})
+	elseif key == magic.KEY_C and ctrl then
+		M.copy()
+	elseif key == magic.KEY_V and ctrl then
+		M.paste()
 	elseif key == magic.KEY_D and ctrl then
 		local ids = sel_ids()
 		if #ids > 0 then
@@ -3629,6 +3761,8 @@ local function key_down(key, ctrl, shift)
 		M.set_tool(S.tool ~= "terrain" and "terrain" or nil)
 	elseif key == magic.KEY_V and E.state and E.state.voxels and O.solid then
 		M.toggle_voxels()
+	elseif key == magic.KEY_B and O.solid then
+		M.toggle_box()
 	elseif S.tool == "terrain" and (key == 91 or key == 93) then
 		-- [ and ] (SDL's keycodes: Urho3D's Lua has no names for them)
 		local d = key == 91 and -1 or 1
@@ -3641,6 +3775,12 @@ local function key_down(key, ctrl, shift)
 		M.next_grid()
 	elseif key == magic.KEY_H then
 		M.next_angle()
+	elseif (key == magic.KEY_Z or key == magic.KEY_X) and S.placing and
+			(S.placing.prefab or S.placing.clipboard) then
+		-- [KIT_PREFAB_VOXELS] a prefab or a paste turned a quarter
+		S.placing.turn = ((S.placing.turn or 0) +
+				(key == magic.KEY_Z and -90 or 90)) % 360
+		log:info("kit editor: placing turned " .. S.placing.turn)
 	elseif key == magic.KEY_Z or key == magic.KEY_X then
 		turn_selection((key == magic.KEY_Z and -1 or 1) *
 				(ANGLE_STEPS[S.angle] or 15))
@@ -3721,10 +3861,20 @@ local function ghost(cell, item)
 	-- Over it, and in the plan north of it
 	ghost_label.position = magic.Vector3(cell[1], cell[2] + 0.8,
 			cell[3] + (S.view == "2d" and 0.9 or 0))
-	if t.text ~= item.label then
-		t.text = item.label
+	local label = item.label .. ((item.turn or 0) ~= 0 and
+			" (turned " .. item.turn .. ")" or "")
+	if t.text ~= label then
+		t.text = label
 	end
 	hover.box(v3(cell), magic.Vector3(0.45, 0.45, 0.45), nil, M.PLACE)
+	-- [KIT_PREFAB_VOXELS] a paste's voxels' box
+	local lo, hi = M.placed_box(cell, item)
+	if lo then
+		O.debug:AddBoundingBox(magic.BoundingBox(
+				magic.Vector3(lo[1] - 0.5, lo[2] - 0.5, lo[3] - 0.5),
+				magic.Vector3(hi[1] + 0.5, hi[2] + 0.5, hi[3] + 0.5)),
+				M.PLACE, false)
+	end
 end
 
 local function compute_guide()
@@ -3805,6 +3955,21 @@ local function compute_guide()
 		end
 		g.right = "put the terrain tool away; " .. right
 		g.note = not S.touch and "[ ]: size, Shift [ ]: strength, Esc: away" or nil
+		return g
+	end
+	if S.tool == "box" then
+		ghost(nil)
+		local t = voxel_target(mx, my)
+		local c = t and t.cell or place_cell(mx, my)
+		if c then
+			hover.box(v3(c), magic.Vector3(0.5, 0.5, 0.5), nil, M.HOVER)
+			g.left = ((S.vbox and not S.vbox.b) and "the box's second corner"
+					or "the box's first corner") .. " at " .. table.concat(c, ",")
+		end
+		g.right = S.view == "2d" and "drag: into 3D, orbiting" or
+				S.view == "3d" and "drag: orbit" or "drag: turn"
+		g.note = not S.touch and "Ctrl+C: copy the box (and the selection), " ..
+				"Ctrl+V: paste, B or Esc: put the box away" or nil
 		return g
 	end
 	if S.tool == "voxels" and S.view == "walk" then
@@ -4031,6 +4196,18 @@ local function draw()
 		inspector_window()
 	end
 	local YELLOW = magic.Color(1, 0.9, 0.2)
+	-- [KIT_PREFAB_VOXELS] the Box tool's box (its first corner alone
+	-- until the second)
+	local vb = S.vbox
+	if vb and vb.a then
+		local a, b = vb.a, vb.b or vb.a
+		dbg:AddBoundingBox(magic.BoundingBox(
+				magic.Vector3(math.min(a[1], b[1]) - 0.5,
+					math.min(a[2], b[2]) - 0.5, math.min(a[3], b[3]) - 0.5),
+				magic.Vector3(math.max(a[1], b[1]) + 0.5,
+					math.max(a[2], b[2]) + 0.5, math.max(a[3], b[3]) + 0.5)),
+				magic.Color(0.3, 1, 0.5), false)
+	end
 	-- The round's own entities, orange (players are drawn by the app)
 	for _, e in ipairs(made()) do
 		if e.pos and e.kind ~= "player" then
