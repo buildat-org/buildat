@@ -2783,7 +2783,7 @@ struct Module: public interface::Module, public Interface
 	// is sent only what decoded) in the row "texture:<hash>", and served:
 	// its name ("kit/up/<hash>.png"), or "" and why not.
 	// [KIT_SET_ORPHAN_TEXTURES] pending: only checked and decoded, put
-	// there by hash for store_textures() once the whole package is taken
+	// there by hash, stored once the whole package is taken
 	ss_ store_texture(const ss_ &d, ss_ &why,
 			sm_<ss_, ss_> *pending = nullptr)
 	{
@@ -3935,8 +3935,27 @@ struct Module: public interface::Module, public Interface
 		// [KIT_MATERIAL_SETS] its material set, the one world_params() pinned
 		world::MaterialSet ms;
 		ss_ pin;
-		if(!material_set(jstr(params, "materials"), ms, pin, why))
-			return false;
+		const ss_ set_id = jstr(params, "materials");
+		bool fell_back = false;
+		if(!material_set(set_id, ms, pin, why)){
+			// [KIT_SET_MISSING_NO_HOST] Hosting, a set not here (or broken):
+			// the app's, the biome its first where it has not that one; the
+			// ground as the save has it (nothing generated again), so it is
+			// the set's again once it is installed
+			if(!first || set_id.empty())
+				return false;
+			fell_back = true;
+			warn("material set "+shown(set_id)+": "+why+"; the app's set "
+					"used until it is installed");
+			why.clear();
+			if(!material_set("", ms, pin, why))
+				return false;
+			if(!ms.biomes.count(p.biome) && !ms.biomes.empty()){
+				warn("no biome \""+p.biome+"\" in the app's set; "+
+						ms.biomes.begin()->first+" used");
+				p.biome = ms.biomes.begin()->first;
+			}
+		}
 		auto bi = ms.biomes.find(p.biome);
 		if(bi == ms.biomes.end()){
 			why = "no biome \""+p.biome+"\" in the material set "+ms.name;
@@ -3982,7 +4001,7 @@ struct Module: public interface::Module, public Interface
 				|| (p.heightmap() && (p.width != m_w->wp.width ||
 				p.depth != m_w->wp.depth)));
 		// [KIT_VOXEL_FORMAT] the sky light alone changed generates nothing
-		const bool again = had && ground_key(params) !=
+		const bool again = had && !fell_back && ground_key(params) !=
 				ground_key(m_w->world_applied);
 		world::Ids ids;
 		ids.filler_depth = b.filler_depth;

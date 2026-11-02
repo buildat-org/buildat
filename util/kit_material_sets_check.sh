@@ -22,6 +22,9 @@
 #   3. [KIT_SET_ORPHAN_TEXTURES] alice/badland (a texture, and a decoration
 #      naming no structure) refused at its install; at a restart the save
 #      still has 2 uploaded textures.
+#   4. [KIT_SET_MISSING_NO_HOST] A copy of the save with blueland's package
+#      row deleted: Kit hosts, the World on the app's set with a warning
+#      naming blueland.
 # KEEP_TMP=1 keeps the screenshots: kit.png (Kit's set), red.png (redland),
 # blue.png (blueland).
 #   util/kit_material_sets_check.sh
@@ -263,14 +266,24 @@ want "$t/srv2.log" "uploaded textures: 2" \
 	"refused: materials.json: biome bad: decoration 0"
 echo "ok: a refused set package stored no texture"
 
-# At a restart: the textures in the save
+# 4. A copy of the save without blueland's package: hosted on the app's set
+cp -a "$t/user" "$t/user_copy"
+db=
+for f in $(find "$t/user_copy" -name save.sqlite); do
+	[ "$(sqlite3 "$f" "SELECT count(*) FROM store WHERE store = 'kit' AND key = 'package:$fp/blueland'")" = 1 ] && db=$f
+done
+[ -n "$db" ] || fail "no save with blueland's package row in $t/user_copy"
+sqlite3 "$db" "DELETE FROM store WHERE store = 'kit' AND key = 'package:$fp/blueland'"
 start_server "$t/srv3.log" "Listening at" 300 auto \
-	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 ||
-	fail "the server did not come up again ($t/srv3.log)"
+	bin/buildat_server -m ../apps/workbench -D "$t/user_copy" -l 3 ||
+	fail "the copy's server did not come up ($t/srv3.log)"
 CHECK_PIDS+=($SERVER_PID)
 wait_for_log "$t/srv3.log" "; materials " 60 ||
-	fail "no World applied ($t/srv3.log)"
+	fail "no World applied on the copy ($t/srv3.log)"
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
-want "$t/srv3.log" "Kit packages: 2" "uploaded textures: 2"
-echo "PASS: a set package installed from a local Aitta, a World switched to it generated again with its voxels (a placed voxel's section kept), an extending set winning per role, a missing role refused by name; a refused set storing no texture"
+want "$t/srv3.log" "Kit packages: 1" "uploaded textures: 2" \
+	"World: material set alice/blueland" \
+	"the app's set used until it is installed" "; materials kit/default"
+grep -aq "Kit is not hosted" "$t/srv3.log" && fail "Kit not hosted ($t/srv3.log)"
+echo "PASS: a set package installed from a local Aitta, a World switched to it generated again with its voxels (a placed voxel's section kept), an extending set winning per role, a missing role refused by name; a refused set storing no texture, a missing set hosted on the app's"
