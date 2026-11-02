@@ -483,17 +483,23 @@ local function drawn_at(e)
 	return n and n.node.position or center(e)
 end
 
--- A drag's preview of an entity: moved by d, turned by turn ([KIT_NESTING]
--- what is under it with it, turned round it)
-local function preview(e, d, turn)
-	P.preview[e.id] = {e.pos[1] + d[1], e.pos[2] + d[2], e.pos[3] + d[3],
-		(e.yaw or 0) + turn}
+-- A drag's preview of an entity: moved by d, turned by turn about mid (a
+-- Vector3; its own position without one), as the server's move_group
+-- ([KIT_GROUP_TURN_JUMP]: its place on the 1/16 grid; [KIT_NESTING] what
+-- is under it with it, turned round the same middle)
+local function preview(e, d, turn, mid)
 	local c = center(e)
 	local q = magic.Quaternion(0, turn, 0)
+	mid = mid or c
+	local p = mid + q * (c - mid)
+	local function g(v)
+		return math.floor(v * 16 + 0.5) / 16
+	end
+	local at = magic.Vector3(g(p.x + d[1]), g(p.y + d[2]), g(p.z + d[3]))
+	P.preview[e.id] = {at.x, at.y, at.z, (e.yaw or 0) + turn}
 	for _, x in ipairs(NT.under(e.id)) do
-		local p = c + q * (center(x) - c)
-		P.preview[x.id] = {p.x + d[1], p.y + d[2], p.z + d[3],
-			(x.yaw or 0) + turn}
+		local px = at + q * (center(x) - c)
+		P.preview[x.id] = {px.x, px.y, px.z, (x.yaw or 0) + turn}
 	end
 end
 
@@ -2456,8 +2462,8 @@ local function select(id, add, by_tab)
 	focus()
 	refresh()
 end
-M.select = function(id)
-	select(id)
+M.select = function(id, add)
+	select(id, add)
 end
 
 -- The context menu ([KIT] stage 4e2): an entity's, a right click's or a
@@ -2986,6 +2992,18 @@ local function near_knob(mx, my)
 			(sx - mx) ^ 2 + (sy - my) ^ 2 < (cx - mx) ^ 2 + (cy - my) ^ 2)
 end
 
+-- [KIT_GROUP_TURN_JUMP] A check's look for the selection's knob: where it
+-- is on the screen
+magic.SubscribeToEvent("command_seq:kit_knob_where", function()
+	local k = knob()
+	local sx, sy
+	if k then
+		sx, sy = to_screen(k)
+	end
+	log:info(sx and string.format("kit editor: the knob on the screen at "
+			.. "%d, %d", sx, sy) or "kit editor: no knob on the screen")
+end)
+
 -- ---- What a press would take: the knob, a port, an entity
 local function press_target(mx, my)
 	if near_knob(mx, my) then
@@ -3080,8 +3098,17 @@ local function update_drag()
 			end
 			d.turn = ((a - d.yaw0) % 360 + 540) % 360 - 180
 		end
-		for _, e in ipairs(movable()) do
-			preview(e, {0, 0, 0}, d.turn)
+		-- About the group's middle, the mean of their positions, as the
+		-- server's move_group
+		local l, m = movable(), {0, 0, 0}
+		for _, e in ipairs(l) do
+			for k = 1, 3 do
+				m[k] = m[k] + e.pos[k] / #l
+			end
+		end
+		local mid = magic.Vector3(m[1], m[2], m[3])
+		for _, e in ipairs(l) do
+			preview(e, {0, 0, 0}, d.turn, mid)
 		end
 	end
 end
@@ -3147,6 +3174,11 @@ local function end_drag()
 				ids[#ids + 1] = e.id
 			end
 			send({op = "move", ids = ids, by = {0, 0, 0}, turn = d.turn})
+		end
+		-- What was shown at the release, for a check against the rows
+		for id, pv in pairs(P.preview) do
+			log:verbose(string.format("kit editor: turn preview %d at %g,%g,%g "
+					.. "yaw %g", id, pv[1], pv[2], pv[3], pv[4]))
 		end
 		release_preview()
 		log:info(string.format("kit editor: turned %d by %g", #l, d.turn))

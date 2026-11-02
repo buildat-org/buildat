@@ -25,6 +25,9 @@
 #      nesting have them) added to the save: it loads where it was, the
 #      editor's rows the world's (S at 12,1,9 turned 90 under 4), its
 #      Positioned list each one under its parent (">" a level).
+#      [KIT_GROUP_TURN_JUMP] M and the teleporter selected, turned 90 by a
+#      drag of the knob in the 2D plan: the preview at the release (M,
+#      what is under it, the teleporter) is where the server puts them.
 #   4. A loop put in the save (M under S): Kit refuses the composition,
 #      naming it.
 #   util/kit_nesting_check.sh
@@ -247,6 +250,24 @@ sync 5000
 frames 10
 click Button "Positioned (*"
 wait_log 5000 kit editor: list Positioned
+event kit_select 6 4
+event kit_plan 12 10 20 3
+wait_log_any 5000 kit editor: the view is 2D
+frames 5
+event kit_knob_where
+mouse_pos 512 391
+frames 2
+mouse_down left
+frames 2
+mouse_pos 480 380
+frames 2
+mouse_pos 412 350
+frames 3
+mouse_up left
+wait_log 5000 kit editor: turned 2 by 90
+sync 5000
+frames 10
+sync 5000
 quit
 EOF
 } > "$t/boss2.cmds"
@@ -262,6 +283,28 @@ grep -aqE "kit editor: entity 5 [^ ]+ [0-9]+ at 12,1,9 yaw 90 under 4 links" "$b
 w="kit editor: list Positioned (22): 4, >5, >7, >8, >13, 6, 9, >10, >11, >12, 14, >15, >16, >17, >18, >24, 19, >20, >21, >22, >23, 60"
 grep -aqF "$w" "$b" || fail "no \"$w\" in $b"
 echo "ok: an old save loads as it was; the editor's rows are in the world, its list in the tree's order"
+# [KIT_GROUP_TURN_JUMP] 4 (with 5, 7, 8, 13 under it) and 6 turned 90 by
+# the knob: what the preview showed at the release is where the server put
+# them (turned about their middle), in the state after it
+grep -aqF "kit editor: the knob on the screen at 512, 391" "$b" ||
+	fail "the knob not at 512, 391, where the drive presses ($b)"
+python3 - "$b" <<'PY' || fail "the turn's preview is not where the server put them ($b)"
+import re, sys
+log = open(sys.argv[1], errors="replace").read()
+pv = {int(m[0]): (tuple(map(float, m[1].split(","))), float(m[2])) for m in
+    re.findall(r"kit editor: turn preview (\d+) at ([-\d.,]+) yaw ([-\d.]+)", log)}
+after = log[log.rindex("kit editor: turned 2 by 90"):]
+rows = {}
+for m in re.findall(r"kit editor: entity (\d+) .*? at ([-\d.,]+)( yaw [-\d.]+)? .*?links", after):
+    rows[int(m[0])] = (tuple(map(float, m[1].split(","))), float(m[2][5:] or 0))
+assert set(pv) == {4, 5, 6, 7, 8, 13}, pv
+for i, (p, yaw) in sorted(pv.items()):
+    q, ry = rows[i]
+    assert all(abs(a - b) < 1e-3 for a, b in zip(p, q)), (i, p, q)
+    assert abs((yaw - ry + 180) % 360 - 180) < 1e-3, (i, yaw, ry)
+    print("  %d previewed at %s yaw %g, put there" % (i, ",".join("%g" % v for v in p), yaw % 360))
+PY
+echo "ok: a group turned by the knob is previewed where the server puts it, about the group's middle, with what is under it"
 
 # 4. A loop in the save: the composition refused
 python3 - "$db" <<'PY' || fail "the loop put in the save ($db)"

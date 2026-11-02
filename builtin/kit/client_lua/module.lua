@@ -1147,10 +1147,15 @@ magic.SubscribeToEvent("command_seq:kit_use_flood", function(_, data)
 		buildat.send_packet("kit:use", id)
 	end
 end)
--- For a drive: "event kit_select <id>" selects it in the editor
+-- For a drive: "event kit_select <id>..." selects them in the editor, the
+-- last the primary
 magic.SubscribeToEvent("command_seq:kit_select", function(_, data)
-	if M.select then
-		M.select(tonumber(data:GetString("Param")))
+	local add = false
+	for id in data:GetString("Param"):gmatch("%d+") do
+		if M.select then
+			M.select(tonumber(id), add)
+		end
+		add = true
 	end
 end)
 
