@@ -26,6 +26,8 @@
 #      spawner, sees E's border drawn in play, a click at the floor there
 #      refused in the client and why ("Protected: no digging here"), walks
 #      into E and is put back out and told ("Protected: no entering here").
+#      A region (5) placed round the admin is not one they are put back
+#      out of ([KIT_REGION_NEW_RULES_EMPTY]).
 #
 #   util/kit_regions_check.sh
 set -u
@@ -199,6 +201,10 @@ EOF
 	setp 4 size '[5, 3, 3]'
 	setp 4 enter '"owners"'
 	setp 4 show_border true
+	# [KIT_REGION_NEW_RULES_EMPTY] a region placed round the admin, who
+	# stands at (0.5, 1, 0.5): not put back (its rules unpublished read
+	# as none for a moment)
+	place '{"op": "place", "type": "kit/region", "pos": [-2, 0, -2]}'
 	cat <<'EOF'
 keypress Escape
 wait_log 10000 pause: the menu shown
@@ -253,5 +259,7 @@ grep -aoE "kitbob may not enter \(-?[0-9]+,[0-9]+,-?[0-9]+\)" "$s" |
 # Put back at the height it walked in at, not lifted a little each time
 grep -aoE "kitbob may not enter \(-?[0-9]+,[0-9]+,-?[0-9]+\)" "$s" |
 	grep -vqE "\(-?[0-9]+,1,-?[0-9]+\)$" && fail "kitbob rose while put back ($s)"
+grep -aq "kitboss may not enter" "$s" &&
+	fail "the admin was put back by a region placed round them ($s)"
 [ -s "$t/border.png" ] || fail "no screenshot of the border ($t)"
 echo "PASS: Kit's regions: the smallest decides, an allow hook, the owners' and everyone else's columns, a rule's input and an owner by signals (sample_kit's digs); entering refused and put back, the border drawn, a refused click told why (Workbench); screenshot $t/border.png"

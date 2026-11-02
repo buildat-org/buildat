@@ -8901,9 +8901,18 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		const json::Value &rule = rg->state.get("rules").get(action);
-		const bool owner = owns(peer, rg->state.get("owners"));
+		// [KIT_REGION_NEW_RULES_EMPTY] Its rules not published yet (placed
+		// and its start not run): its parameters, which the start publishes
+		// as they are. Not "none": a player standing where it was placed
+		// was put back by its enter rule
+		const bool fresh = !rule.is_string();
+		const ss_ ow = jstr(rg->params, "owner");
+		const bool owner = owns(peer, !fresh ? rg->state.get("owners") :
+				rg->params.get(ow == "players" ? "owners" : "owner"));
 		// Who may: "all", "owners", "others" or "none"
-		const ss_ who = rule.is_string() ? rule.as_string() : "none";
+		const ss_ who = !fresh ? rule.as_string() :
+				rg->params.get(action).is_string() ?
+				rg->params.get(action).as_string() : "none";
 		const bool yes = who == "all" || who == (owner ? "owners" : "others");
 		if(!yes && why)
 			*why = refusal(action);
