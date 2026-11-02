@@ -6,9 +6,9 @@
 -- drawn as floorplanner's caps_node draws it. The plan is a camera at the
 -- cut looking down, so a wall, a hill or a box crossing the cut lost its
 -- top to the near clip and showed its sides edge-on. Flat quads just under
--- the cut, in a node of their own shown in 2D alone, lit as the voxels'
--- tops are (unlit, under skeldat's HDR path the colours came out nearly
--- black, its exposure being for its sun's radiance):
+-- the cut, unlit, in a node of their own shown in 2D alone (lit, they took
+-- the shadows of what is over the cut, and skeldat's sun on them was
+-- white); under an HDR render path (skeldat's) brighter by HDR_GAIN:
 --   - every solid (physically_solid) cell of the cut's layer (the cells
 --     the cut is in, ceil(cut - 0.5): the ones under it where it is at
 --     their tops, as the plan's x.5 cuts are, floor(cut)), in its
@@ -32,9 +32,15 @@ local magic = require("buildat/extension/urho3d")
 local voxelworld = require("buildat/module/voxelworld")
 local heightmap = require("buildat/module/heightmap")
 
--- How much darker a cut is than a top of its colour beside it
--- (floorplanner's objects' 0.7)
+-- How much darker a cut is than its colour (floorplanner's objects' 0.7)
 local DARK = 0.6
+-- [KIT_SK_2D_EMPTY] Under an HDR path the frame is exposed for the sun's
+-- radiance, and a cap of DARK came out nearly black (27 of 255 for
+-- cobble, the sunlit grass beside it 95)
+-- simplified: one constant, tuned on skeldat at noon: a cap reads brighter
+-- at night, and another app's radiances want another; the upgrade is the
+-- exposure's own number from the render path
+local HDR_GAIN = 4
 -- The plan's camera under the cut by CAM_UNDER (editor.lua), the voxels'
 -- and the heightmap's caps by UNDER, the entities' over those
 local CAM_UNDER = 0.01
@@ -51,7 +57,7 @@ local function make()
 	node = O.scene:CreateChild("kit_caps")
 	material = magic.Material:new()
 	material:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/NoTextureVCol.xml"))
+			"Techniques/NoTextureUnlitVCol.xml"))
 	material.cullMode = magic.CULL_NONE
 	node.enabled = false
 	C.ent_node = node:CreateChild("entities")
@@ -112,7 +118,8 @@ end
 -- (set_triangle_geometry's 12 numbers a vertex: position, normal, colour,
 -- texture coordinate); both sides drawn (the material's), so unwound
 local function quad(out, xz, y, c)
-	local r, g, b = c[1] * DARK, c[2] * DARK, c[3] * DARK
+	local k = magic.renderer.HDRRendering and DARK * HDR_GAIN or DARK
+	local r, g, b = c[1] * k, c[2] * k, c[3] * k
 	local n = #out
 	for _, k in ipairs({1, 2, 3, 1, 3, 4}) do
 		local p = xz[k]
@@ -358,10 +365,11 @@ local function entity_caps()
 	-- simplified: ten times a second (a door's swing a step behind), a
 	-- dozen sandbox calls an entity
 	local now = buildat.get_time_us()
-	if C.ents_cut == cut and now - (C.ents_us or 0) < 100000 then
+	if C.ents_cut == cut and C.ents_hv == C.hv and
+			now - (C.ents_us or 0) < 100000 then
 		return
 	end
-	C.ents_cut, C.ents_us = cut, now
+	C.ents_cut, C.ents_us, C.ents_hv = cut, now, C.hv
 	local list, sig = {}, {}
 	for id, n in pairs(P.nodes) do
 		local body = n.body
@@ -384,7 +392,7 @@ local function entity_caps()
 			end
 		end
 	end
-	sig = table.concat(sig, ";") .. "@" .. cut
+	sig = table.concat(sig, ";") .. "@" .. cut .. C.hv
 	if sig == C.ents then
 		return
 	end
@@ -417,7 +425,8 @@ function M.update(on, aspect)
 		C.size = {x = s.x, y = s.y, z = s.z}
 	end
 	local layer = math.ceil(S.cut - 0.5)
-	local hv = heightmap.version
+	-- (a change of the render path's HDR draws them all again)
+	local hv = heightmap.version .. (magic.renderer.HDRRendering and " hdr" or "")
 	if hv ~= C.hv then
 		-- The samples' materials, read as the caps want them
 		C.mats = {}
