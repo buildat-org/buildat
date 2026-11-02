@@ -230,7 +230,13 @@ if [ "${1:-}" = web_touch ]; then
 	# moves it 3 cells, a finger held is its menu (Duplicate), two fingers
 	# pinch; ([KIT_SELECT_BURIED]) five more copies (Ctrl+D) listed with
 	# "Hide positioned entities" off, the list bounded under the bar (it
-	# scrolls), the copies undone; ([KIT] stage 4f) a finger dragged with the terrain tool (T)
+	# scrolls), the copies undone; ([KIT_BUILDER_PLAY_RULES]) a region
+	# tapped in from the palette at (-1, 1, 1), a cell down, digging and
+	# placing for all in the inspector (picked by Home and Enter: the popup
+	# of a dropdown tapped there opened off the screen at a UI scale fitted
+	# again, and the arrows nudged the selection too, 2026-11-02): the
+	# admin plays by the rules out of
+	# edit mode; ([KIT] stage 4f) a finger dragged with the terrain tool (T)
 	# paints a raise stroke, undone; Play mode, and in play a tap uses the button, a tap digs and
 	# a finger held places. The stroke (x -7 to -4, z 1, 50 px a cell
 	# after the pinch, radius 3) keeps off the player at (0.5, 0.5): ground
@@ -241,7 +247,8 @@ if [ "${1:-}" = web_touch ]; then
 	# hit the same with the eye 0.15 off either way. The open palette (470
 	# tall in a root of 400) makes the UI fit shrink it; the screen still
 	# reads narrow ([KIT_NARROW_RESCALE]), so the bar's Palette stays and
-	# is tapped by label, and the drag starts at kit/button after the fit.
+	# is tapped by label, and the drag starts at kit/button after the fit,
+	# by label too ([KIT_SCENES]' Scene dropdown moved the palette's rows).
 	check_tmp workbench_web_touch; t=$CHECK_TMP
 	cat > "$t/steps.json" <<'J'
 [
@@ -269,7 +276,7 @@ if [ "${1:-}" = web_touch ]; then
 	["tap", "Button", "Palette"],
 	["waitlog", "UI scale fitted to the screen: x0", 5], ["frames", 3],
 	["shot", "${OUT}/palette.png"],
-	["drag", 82, 116, 572, 198, "touch"],
+	["drag", "Button", "kit/button", 572, 198, "touch"],
 	["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
 	["tap", "Button", "Palette"], ["frames", 3],
 	["tap", 572, 198], ["waitlog", "kit editor: selected 3", 10], ["frames", 3],
@@ -295,6 +302,21 @@ if [ "${1:-}" = web_touch ]; then
 	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 4 entities", 10],
 	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 3 entities", 10],
 	["frames", 3],
+	["tap", "Button", "Palette"], ["frames", 3],
+	["tap", "Button", "kit/region"], ["waitlog", "kit editor: placing kit/region", 10],
+	["tap", 469, 240], ["waitlog", "kit editor: state: 4 entities", 10],
+	["key", "Escape"], ["frames", 3],
+	["tap", "Button", "Palette"], ["frames", 3],
+	["tap", 469, 240], ["waitlog", "kit editor: selected 10", 10],
+	["key", "PageDown"], ["waitlog", "kit editor: state: 4 entities, 5 to undo", 10],
+	["tap", "Button", "Inspector"], ["frames", 5],
+	["tap", "DropDownList", "▼", 955, 206], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
+	["key", "Home"], ["key", "Enter"], ["waitlog", "kit editor: 10/1 dig = all", 10],
+	["tap", "DropDownList", "▼", 955, 294], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
+	["key", "Home"], ["key", "Enter"], ["waitlog", "kit editor: 10/1 place = all", 10],
+	["tap", "Button", "Apply"], ["waitlog", "kit editor: state: 4 entities, 7 to undo", 10],
+	["frames", 3], ["shot", "${OUT}/region.png"],
+	["tap", "Button", "Inspector"], ["frames", 3],
 	["fingers", 450, 250, 550, 250, 350, 250, 650, 250],
 	["waitlog", "kit editor: two fingers let go: the plan", 10],
 	["frames", 5], ["shot", "${OUT}/pinched.png"],
@@ -319,6 +341,8 @@ J
 	for w in "An edit by webboss: placed kit/button 3 at [4,1,3]" \
 			"An edit by webboss: moved 3 to [1,1,3]" \
 			"kit/button 3: pressed by webboss" \
+			"An edit by webboss: set 10's kit/region dig to \"all\"" \
+			"An edit by webboss: set 10's kit/region place to \"all\"" \
 			"workbench: webboss dug (1,0,3): written" \
 			"workbench: webboss placed kit/stone (1,0,3): written" \
 			"Terrain by webboss: raise at" \

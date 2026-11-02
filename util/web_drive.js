@@ -54,6 +54,8 @@
 //                           the left button (or a finger) down at x0, y0,
 //                           moved to x1, y1 over half a second, and up
 //                           (Chrome: a finger only)
+//   ["drag", type, label, x1, y1, "touch"]
+//                           the same from where the click by label would go
 //   ["shot", path]          a PNG of the page
 //   ["eval", js]            print what the expression gives
 //   ["frames", n]           n frames the client rendered
@@ -767,6 +769,10 @@ async function find(b, type, label, hx, hy) {
 				const [x, y] = await find(b, a, c, args[2], args[3]);
 				console.log(op + ": " + a + " \"" + c + "\" at " + x + ", " + y);
 				await b.ops[op](x, y);
+			} else if (op === "drag" && typeof a === "string") {
+				const [x, y] = await find(b, a, c);
+				console.log(op + ": " + a + " \"" + c + "\" from " + x + ", " + y);
+				await b.ops.drag(x, y, ...args.slice(2));
 			} else if (op === "nav") {
 				await b.ops.nav(full_rate(args[0]));
 			} else if (b.ops[op]) {
