@@ -1280,7 +1280,7 @@ for n in 1 2; do
 	CHECK_PIDS+=($SERVER_PID)
 	[ $n = 1 ] && { wait_for_log "$t/srv26_1.log" "skeldat: the world relit" 300 ||
 		fail "the world not relit ($t/srv26_1.log)"; }
-	client bow$n "$t/bow$n.cmds"
+	BUILDAT_SKELDAT_SELF_TEST=1 client bow$n "$t/bow$n.cmds"
 	if [ $n = 1 ]; then
 		sped "$t/bow1.log" && wait_for_log "$t/srv26_1.log" "a stuck arrow kept at" 66 "$t/srv26"
 		ended "$t/bow1.log"
@@ -2466,7 +2466,7 @@ CHECK_PIDS+=($SERVER_PID)
 # to the side on the grass
 printf '%s\n' "$placed" "keydown S" "delay 800" "keyup S" "delay 14700" \
 	"keydown D" "delay 800" "keyup D" "delay 1500" quit > "$t/snd2.cmds"
-client snd1 "$t/snd1.cmds"
+BUILDAT_SKELDAT_SELF_TEST=1 client snd1 "$t/snd1.cmds"
 p1=$CLIENT
 # The first to join has the bow (the test's give)
 wait_for_log "$t/snd1.log" "skeldat: placed at" 300 || fail "the shooter not placed ($t/snd1.log)"

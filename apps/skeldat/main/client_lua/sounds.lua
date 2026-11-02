@@ -235,30 +235,75 @@ function M.render(blip, synth, name, p)
 	return b
 end
 
--- Renders each picked take's variants. -> how many Sounds were made
--- magic and synth: for the takes scaled to a peak (blip.sound otherwise)
-function M.make(blip, magic, synth)
-	local gen, n = blip.gen, 0
-	for name, takes in pairs(M.TAKES) do
-		local p = gen.params(takes[M.PICK[name]])
-		local list = {}
-		for i = 1, M.VARIANTS do
-			-- Variant 1 is the take as designed
-			local pv = i == 1 and p or gen.vary(p, i, M.VARY)
-			if M.PEAK[name] then
-				local vb = magic.VectorBuffer:new()
-				M.render(blip, synth, name, pv):to_shorts(vb)
-				list[i] = magic.Sound:new()
-				list[i]:SetFormat(M.RATE, true, false)
-				list[i]:SetData(vb)
-			else
-				list[i] = blip.sound(pv)
-			end
-			n = n + 1
-		end
+-- [SK_WEB_JOIN_HANDLERS] A take's variant i, made once: its Sound in
+-- M.made[name][i]. magic and synth: for the takes scaled to a peak
+-- (blip.sound otherwise). Variant 1 is the take as designed
+local env = nil
+function M.make_one(name, i)
+	local list = M.made[name]
+	if not list then
+		list = {}
 		M.made[name] = list
 	end
-	return n
+	if list[i] then
+		return list[i]
+	end
+	local blip, magic, synth = env.blip, env.magic, env.synth
+	local gen = blip.gen
+	local p = gen.params(M.TAKES[name][M.PICK[name]])
+	local pv = i == 1 and p or gen.vary(p, i, M.VARY)
+	local t0 = buildat.get_time_us()
+	if M.PEAK[name] then
+		local vb = magic.VectorBuffer:new()
+		M.render(blip, synth, name, pv):to_shorts(vb)
+		list[i] = magic.Sound:new()
+		list[i]:SetFormat(M.RATE, true, false)
+		list[i]:SetData(vb)
+	else
+		list[i] = blip.sound(pv)
+	end
+	local ms = (buildat.get_time_us() - t0) / 1000
+	env.n, env.ms = env.n + 1, env.ms + ms
+	if ms > env.slowest_ms then
+		env.slowest, env.slowest_ms = name .. " " .. i, ms
+	end
+	return list[i]
+end
+
+-- [SK_WEB_JOIN_HANDLERS] The takes' variants are made over the frames
+-- after the start, slice() making them until budget_ms has gone, not
+-- all at the start (1.2 s of a web join's one thread); one picked before
+-- its turn is made then. -> true once every one is made
+local queue = nil
+function M.start(blip, magic, synth)
+	env = {blip = blip, magic = magic, synth = synth, n = 0, ms = 0,
+		slowest = "", slowest_ms = 0}
+	queue = {}
+	local names = {}
+	for name in pairs(M.TAKES) do
+		names[#names + 1] = name
+	end
+	table.sort(names)
+	for i = 1, M.VARIANTS do
+		for _, name in ipairs(names) do
+			queue[#queue + 1] = {name, i}
+		end
+	end
+end
+function M.slice(budget_ms)
+	local t0 = buildat.get_time_us()
+	while #queue > 0 do
+		local q = table.remove(queue, 1)
+		M.make_one(q[1], q[2])
+		if (buildat.get_time_us() - t0) / 1000 >= budget_ms then
+			break
+		end
+	end
+	return #queue == 0
+end
+-- How many were made, their time in all and the slowest
+function M.made_stats()
+	return env.n, env.ms, env.slowest, env.slowest_ms
 end
 
 -- [SKELDAT_BOW_SOUND_TUNE] The self-check against the takes as they were
@@ -348,10 +393,13 @@ function M.self_check(blip, synth)
 	return "sounds: self-check passed, " .. table.concat(out, ", ")
 end
 
--- One of name's variants, or nil before make() or for a name it lacks
+-- One of name's variants (made now if not yet), or nil before start()
+-- or for a name it lacks
 function M.pick(name)
-	local list = M.made[name]
-	return list and list[math.random(#list)]
+	if not env or not M.TAKES[name] then
+		return nil
+	end
+	return M.make_one(name, math.random(M.VARIANTS))
 end
 
 return M

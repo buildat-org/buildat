@@ -1019,16 +1019,33 @@ end
 --
 local sounds = load("main/sounds.lua")
 do
-	local t0 = buildat.get_time_us()
 	local blip = require("buildat/extension/blip")
-	local made = sounds.make(blip, magic, buildat.synth)
-	log:info(string.format("skeldat: %d sounds made in %.0f ms", made,
-			(buildat.get_time_us() - t0) / 1000))
-	local ok, line = pcall(sounds.self_check, blip, buildat.synth)
-	if ok then
-		log:info("skeldat: " .. line)
-	else
-		log:error("skeldat: " .. tostring(line))
+	-- [SK_WEB_JOIN_HANDLERS] Made over the first frames, 4 ms of each
+	-- (a sound picked before its turn made then); the self-check for a
+	-- check alone (BUILDAT_SKELDAT_SELF_TEST=1, check.sh 23 and 40)
+	sounds.start(blip, magic, buildat.synth)
+	local frames, sub = 0, nil
+	sub = magic.SubscribeToEvent("Update", function()
+		if not sub then
+			return
+		end
+		frames = frames + 1
+		if sounds.slice(4) then
+			local n, ms, slowest, slowest_ms = sounds.made_stats()
+			log:info(string.format("skeldat: %d sounds made in %.0f ms over "
+					.. "%d frames, the slowest %s %.1f ms", n, ms, frames,
+					slowest, slowest_ms))
+			magic.UnsubscribeFromEvent("Update", sub)
+			sub = nil
+		end
+	end)
+	if buildat.get_env("BUILDAT_SKELDAT_SELF_TEST") == "1" then
+		local ok, line = pcall(sounds.self_check, blip, buildat.synth)
+		if ok then
+			log:info("skeldat: " .. line)
+		else
+			log:error("skeldat: " .. tostring(line))
+		end
 	end
 end
 -- The player's own hurt, the stats' hp falling
