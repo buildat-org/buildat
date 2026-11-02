@@ -1359,6 +1359,15 @@ end)
 magic.SubscribeToEvent("command_seq:kit_use", function(_, data)
 	M.use(data:GetString("Param"))
 end)
+-- For a drive ([KIT_USE_FLOOD]): "event kit_use_flood <id> <n>" sends n
+-- uses of it at once, as a misbehaving client would
+magic.SubscribeToEvent("command_seq:kit_use_flood", function(_, data)
+	local id, n = data:GetString("Param"):match("^(%d+) (%d+)$")
+	log:info("kit: flooding " .. tostring(n) .. " uses of " .. tostring(id))
+	for _ = 1, math.min(tonumber(n) or 0, 100000) do
+		buildat.send_packet("kit:use", id)
+	end
+end)
 -- For a drive: "event kit_select <id>" selects it in the editor
 magic.SubscribeToEvent("command_seq:kit_select", function(_, data)
 	if M.select then

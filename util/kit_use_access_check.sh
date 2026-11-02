@@ -15,6 +15,8 @@
 #   20: its region's use rule refuses him ("Protected: no using things
 #       here");
 #   22: not its region's owner ("Locked: its owners' only").
+# [KIT_USE_FLOOD] Then 5000 uses of a kit/button (24) out of his range at
+# once: the refusal logged once, nothing queued; 18 used after: D shuts.
 #
 #   util/kit_use_access_check.sh
 set -u
@@ -74,6 +76,7 @@ EOF
 	setp 22 use '"owners"'
 	link 22
 	region 23 '[-1, 1, -1]' kitalice
+	place kit/button '[40, 1, 40]'
 	cat <<'EOF'
 event kit_select 17
 wait_log_any 5000 kit editor: selected 17
@@ -88,6 +91,7 @@ EOF
 } > "$t/boss.cmds"
 cat > "$t/bob.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob
+wait_log_any 60000 replicated: entity 24 presses = 0
 wait_log_any 60000 replicated: entity 23 owners = ["kitalice"]
 wait_log_any 60000 replicated: entity 17 open = false
 event kit_use 17
@@ -98,7 +102,11 @@ event kit_use 20
 wait_log 10000 kit: warning: Protected: no using things here
 event kit_use 22
 wait_log 10000 kit: warning: Locked: its owners' only
-sync 5000
+event kit_use_flood 24 5000
+sync 3000
+event kit_use 18
+wait_log 10000 replicated: entity 17 open = false
+sync 2000
 quit
 EOF
 
@@ -119,10 +127,18 @@ grep -a "kit/door 17\|A use of entity" "$s" | sed 's/^.* I [a-z_]* *: /  /' |
 	cut -c1-150 | tail -8
 opened=$(grep -ac "kit/door 17: opened" "$s")
 [ "$opened" = 1 ] || fail "door 17 opened $opened times, not once ($s)"
+# [KIT_USE_FLOOD] 5000 uses of the button 24, out of range, at once: the
+# burst's taken (40), each refused, the refusal logged once; the rest
+# dropped unsaid, no run queued; a use after it still reaches 18 (the
+# door shut again)
+far=$(grep -ac "A use of entity 24 by peer [0-9]* refused: out of range" "$s")
+[ "$far" = 1 ] || fail "the flood's refusal logged $far times, not once ($s)"
+grep -aq "The queue is full\|Entity 24 used" "$s" && fail "the flood reached the queue ($s)"
+grep -aq "kit/door 17: shut by kitbob" "$s" || fail "no use after the flood ($s)"
 for w in "used through its links only" "Protected: no using things here" \
 		"its owners' only"; do
 	grep -aqF -- "refused: Locked: $w" "$s" || grep -aqF -- "refused: $w" "$s" ||
 		fail "no refusal \"$w\" in $s"
 done
 [ -s "$t/inspector.png" ] || fail "no screenshot of the inspector ($t)"
-echo "PASS: Kit's use access: an object used by nobody refused and told, opened through a link; a region's use rule and an object's owners-only use refuse; screenshot $t/inspector.png"
+echo "PASS: Kit's use access: an object used by nobody refused and told, opened through a link; a region's use rule and an object's owners-only use refuse; 5000 uses at once refused and logged once, a use after them taken; screenshot $t/inspector.png"

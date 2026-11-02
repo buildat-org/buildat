@@ -66,8 +66,9 @@ static const int64_t COST_WINDOW_US = 5000000;
 static const int64_t SLICE_DIV = 20;
 static const int64_t TICK_SLICES = 4;
 // [KIT_INPUT_ACTIONS] The actions a type declares, the actions in the
-// world at once (the clients' key store's room), a client's presses and
-// releases a second (and their burst), and how often "held" comes
+// world at once (the clients' key store's room), a client's acts a
+// second (kit:action, kit:use and kit:exit together; [KIT_USE_FLOOD])
+// and their burst, and how often "held" comes
 static const size_t MAX_TYPE_ACTIONS = 8, MAX_ACTIONS = 16;
 static const double ACTION_RATE = 20, ACTION_BURST = 40;
 static const int64_t HELD_EVERY_US = 100000;
@@ -387,10 +388,14 @@ struct Peer
 	bool has_ok = false;
 	int64_t told_us = 0;
 	// [KIT_INPUT_ACTIONS] The actions they hold: when pressed and when
-	// "held" last came (game_us); their allowance of presses (time_us)
+	// "held" last came (game_us); their allowance of acts (time_us)
 	std::map<ss_, std::pair<int64_t, int64_t>> held;
 	double action_tokens = ACTION_BURST;
 	int64_t action_at = 0;
+	// [KIT_USE_FLOOD] The refusal last logged and when (time_us): the
+	// same one again is logged once a second at most
+	ss_ refused_why;
+	int64_t refused_at = 0;
 };
 
 // A builder's colour while their tools are on: the first one no other
@@ -10269,6 +10274,9 @@ struct Module: public interface::Module, public Interface
 
 	void on_exit(const network::Packet &packet)
 	{
+		auto pi = m_peers.find(packet.sender);
+		if(pi == m_peers.end() || !act_allowed(pi->second))
+			return;
 		auto bi = m_bodies.find(packet.sender);
 		if(bi == m_bodies.end() || !bi->second.seat)
 			return;
@@ -10302,25 +10310,52 @@ struct Module: public interface::Module, public Interface
 
 	// ---- Clients act
 
+	// [KIT_USE_FLOOD] A placed peer's act (kit:action, kit:use, kit:exit)
+	// taken from their allowance: ACTION_RATE a second, ACTION_BURST at
+	// once; false: dropped, unsaid
+	static bool act_allowed(Peer &pe)
+	{
+		const int64_t now = interface::os::time_us();
+		pe.action_tokens = std::min(ACTION_BURST, pe.action_tokens +
+				(now - pe.action_at) * 1e-6 * ACTION_RATE);
+		pe.action_at = now;
+		if(pe.action_tokens < 1)
+			return false;
+		pe.action_tokens -= 1;
+		return true;
+	}
+
+	// Whether a refusal is logged: not the same one again within a second
+	static bool log_refusal(Peer &pe, const ss_ &why)
+	{
+		const int64_t now = interface::os::time_us();
+		if(why == pe.refused_why && now - pe.refused_at < 1000000)
+			return false;
+		pe.refused_why = why;
+		pe.refused_at = now;
+		return true;
+	}
+
 	void on_use(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
 		const ss_ data = packet.data.substr(0, 32);
 		char *end = nullptr;
 		const uint64_t id = strtoull(data.c_str(), &end, 10);
+		// Unplaced or not hosted: dropped unsaid (nobody to bound it by)
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
+			return;
 		auto refuse = [&](const ss_ &why){
-			log_i(MODULE, "A use of entity %s by peer %zu refused: %s",
-					cs(data), peer, cs(why));
+			auto p = m_peers.find(peer);
+			if(p != m_peers.end() && log_refusal(p->second, why))
+				log_i(MODULE, "A use of entity %s by peer %zu refused: %s",
+						cs(data), peer, cs(why));
 		};
-		if(!m_hosted)
-			return refuse("Kit is not hosted");
 		if(!m_session.running)
 			return refuse("the server is Ended");
 		if(data.empty() || !end || *end)
 			return refuse("not an entity's id");
-		auto pi = m_peers.find(peer);
-		if(pi == m_peers.end())
-			return refuse("the app has not placed the player");
 		auto it = m_entities.find(id);
 		if(it == m_entities.end() || !it->second.has_pos)
 			return refuse("no such object");
@@ -10500,20 +10535,16 @@ struct Module: public interface::Module, public Interface
 		const size_t sp = d.find(' ');
 		const ss_ name = d.substr(0, sp);
 		const bool down = sp != ss_::npos && d.substr(sp + 1) == "1";
-		auto refuse = [&](const ss_ &why){
-			log_i(MODULE, "An action from peer %zu refused: %s", peer, cs(why));
-		};
 		auto pi = m_peers.find(peer);
-		if(!m_hosted || pi == m_peers.end() || pi->second.name.empty())
-			return refuse("the app has not placed the player");
+		if(!m_hosted || pi == m_peers.end() || pi->second.name.empty() ||
+				!act_allowed(pi->second))
+			return;
 		Peer &pe = pi->second;
-		const int64_t now = interface::os::time_us();
-		pe.action_tokens = std::min(ACTION_BURST, pe.action_tokens +
-				(now - pe.action_at) * 1e-6 * ACTION_RATE);
-		pe.action_at = now;
-		if(pe.action_tokens < 1)
-			return refuse("too many");
-		pe.action_tokens -= 1;
+		auto refuse = [&](const ss_ &why){
+			if(log_refusal(pe, why))
+				log_i(MODULE, "An action from peer %zu refused: %s", peer,
+						cs(why));
+		};
 		// A release always lets go (Stopped, or the action gone meanwhile)
 		auto h = pe.held.find(name);
 		if(!down){
