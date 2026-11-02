@@ -3,7 +3,7 @@
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
 -- The sky: extensions/sky_render's dome (physical_sky's) in pbr and
--- Luanti's own sky (extensions/luanti_sky/LuantiSky.glsl) in the
+-- Luanti's own sky (extensions/cartoon_sky/CartoonSky.glsl) in the
 -- parity modes, one material with the technique swapped (set_physical()),
 -- rather than
 -- builtin/voxel_shading's skybox. Luanti's schedule (res/sky_model.lua) and
@@ -96,7 +96,7 @@ function M.new(scene, sun_dir, defaults, log)
 	local physical_technique = magic.cache:GetResource("Technique",
 			"physical_sky/PhysicalSky.xml")
 	local luanti_technique = magic.cache:GetResource("Technique",
-			"luanti_sky/LuantiSky.xml")
+			"cartoon_sky/CartoonSky.xml")
 
 	-- **The parity modes' own**, on the same material: Luanti's cloud
 	-- colour, its dusk band and the technique.
@@ -153,7 +153,7 @@ function M.new(scene, sun_dir, defaults, log)
 
 	-- physical_sky's in pbr, Luanti's coloured sky in the parity modes
 	-- simplified: a client that changes mode mid-session keeps the disc's
-	-- radiance pbr last set, which LuantiSky does not read
+	-- radiance pbr last set, which CartoonSky does not read
 	local physical_now = true
 	function self:set_physical(on)
 		on = on and true or false

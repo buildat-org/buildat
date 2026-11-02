@@ -14,7 +14,7 @@
 --   new_dome(), the sky drawn by PhysicalSky.glsl beside this file
 --   new_cube(), that sky rendered into a cube for the reflections
 -- Luanti's coloured sky, the parity modes', is not here
--- (extensions/luanti_sky/LuantiSky.glsl).
+-- (extensions/cartoon_sky/CartoonSky.glsl).
 --
 -- **One source, two deliveries**: a client with no Buildat server behind it
 -- takes it bundled,

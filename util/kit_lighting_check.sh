@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-02)
-# covers: builtin/kit/kit.cpp builtin/kit/types/environment.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/lighting.lua builtin/kit/client_lua/controls.lua builtin/kit/client_data/KitVoxel* extensions/luanti_sky/** extensions/sky_render/** extensions/physical_sky/** apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/types/environment.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/environment.lua builtin/kit/client_lua/controls.lua builtin/kit/client_data/KitVoxel* extensions/cartoon_sky/** extensions/sky_render/** extensions/physical_sky/** apps/workbench/**
 # [KIT_LIGHTING] (kit_plan 4o) kit/environment's lighting, sky and weather
 # on Workbench. A fresh save, the admin Ended, a flat grassland World (no
 # trees); the shots from the editor's 3D camera at (20, 4, 20) toward

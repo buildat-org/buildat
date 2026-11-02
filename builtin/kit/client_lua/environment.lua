@@ -189,7 +189,7 @@ local function sun_toward(h)
 end
 
 -- ---- The sky: sky_render's dome (physical_sky's), drawn by its
--- PhysicalSky.glsl under physical and luanti_sky's LuantiSky.glsl under
+-- PhysicalSky.glsl under physical and cartoon_sky's CartoonSky.glsl under
 -- cartoon (Luanti's sky: the gradient, the sun's and the moon's squares,
 -- the stars, a flat two-tone layer of cloud), the two taking the same
 -- parameters (builtin/luanti's sky_dome.lua swaps them so too). What it
@@ -222,7 +222,7 @@ local function sky_dome(on)
 			physical = magic.cache:GetResource("Technique",
 					"physical_sky/PhysicalSky.xml"),
 			cartoon = magic.cache:GetResource("Technique",
-					"luanti_sky/LuantiSky.xml")}
+					"cartoon_sky/CartoonSky.xml")}
 	end
 	local dome = LIT.dome
 	if not dome then

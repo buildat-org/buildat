@@ -484,7 +484,7 @@ function M.new(magic, buildat, log, options)
 	local daylight_time = nil
 
 	-- The sky itself: a skybox drawn by physical_sky/PhysicalSky.glsl in pbr
-	-- and luanti_sky/LuantiSky.glsl in the parity modes,
+	-- and cartoon_sky/CartoonSky.glsl (Luanti's own sky) in the parity modes,
 	-- which is handed the colours and the sun's direction from here.
 	local sky_node = scene:CreateChild("Sky")
 	local sky_material = nil
@@ -494,7 +494,7 @@ function M.new(magic, buildat, log, options)
 		sky_material = magic.Material.new()
 		sky_material:SetTechnique(0, magic.cache:GetResource("Technique",
 				pbr and "physical_sky/PhysicalSky.xml" or
-				"luanti_sky/LuantiSky.xml"))
+				"cartoon_sky/CartoonSky.xml"))
 		skybox.material = sky_material
 	end
 
