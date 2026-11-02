@@ -134,6 +134,9 @@ local function hud_text(y, size)
 	return t
 end
 local help_text = hud_text(-10, 13)
+-- [KIT_TOUCH_HELP_JUMP] Wrapped to end before the touch bars (it ran
+-- under Jump at 1024 px), the status line kept above it
+help_text:SetWordwrap(true)
 local status_text = hud_text(-30, 15)
 local crosshair = {}
 for _, s in ipairs({{15, 1}, {1, 15}}) do
@@ -325,5 +328,11 @@ magic.SubscribeToEvent("Update", function()
 			"[forward][left][back][right] [jump]: walk, jump  left: use or " ..
 			"dig  right: place  [voxel1]-[voxel10]: voxel  " ..
 			"[edit]: edit  [login]: log in  Esc: menu"))
+	local right = kit.touch_bar_left() or magic.ui.root.width
+	local w = math.max(100, right - 10 - 12)
+	if help_text.width ~= w then
+		help_text:SetFixedWidth(w)
+	end
+	status_text:SetPosition(10, -10 - help_text.height - 5)
 end)
 -- vim: set noet ts=4 sw=4:

@@ -19,6 +19,7 @@
 --   kit.pointer_free(): the pointer is a cursor (no mouse look)
 --   kit.body_pos() -> the body's feet as drawn (nil before it is put)
 --   kit.seated() -> the seat's entity id (nil: none)
+--   kit.touch_bar_left() -> where the touch bars begin (UI x; nil: none)
 --   kit.viewport(scene, camera) -> a Viewport with Kit's effects
 -- The keys (input.lua's actions, the player's to rebind; these the
 -- defaults): W A S D (a car: throttle, brake and steering), Space jumps,
@@ -788,6 +789,19 @@ local function make_bar()
 	C.abar = button_row(acts, 8 + C.bar.height + 6)
 	log:info("kit: the touch bar: " .. labels(list) .. "; the world's: " ..
 			labels(acts))
+end
+
+-- [KIT_TOUCH_HELP_JUMP] Where the touch bars begin at the lower right
+-- (UI units), the leftmost of the two shown; nil with none: an app's help
+-- line ends before it
+function M.touch_bar_left()
+	local x = nil
+	for _, b in ipairs({C.bar, C.abar}) do
+		if b and b.visible then
+			x = math.min(x or b.screenPosition.x, b.screenPosition.x)
+		end
+	end
+	return x
 end
 
 if TOUCH then
