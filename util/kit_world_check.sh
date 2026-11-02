@@ -414,10 +414,14 @@ dec=$(grep -aoP 'decorate at \(135,110\) .*, \K\d+(?= decorations \()' "$s5" | h
 [ "${dec:-0}" -gt 0 ] || fail "the decorate stroke placed none ($s5)"
 grep -aq "An undo by kitboss: a terrain stroke, 0 cells, 0 samples and $dec decorations put back" "$s5" ||
 	fail "the decorate stroke's undo ($dec, $s5)"
-# Its decorations by the seed: 9's again after 4's
+# Its decorations by the seed: 4's and 9's differ, the decorate stroke's
+# kept over both ([KIT_HEIGHTMAP_REGEN_LOSS]: a builder's decorations and
+# edited samples stay over a regeneration)
 dd=$(grep -aoP 'World by kitboss: valleys 256x256, seed \d+, .*decorations \K\d+ \(hash [0-9a-f]+' "$s5")
-[ "$(echo "$dd" | sed -n 2p)" = "$d4" ] && [ "$(echo "$dd" | sed -n 1p)" != "$d4" ] ||
+[ -n "$(echo "$dd" | sed -n 2p)" ] && [ "$(echo "$dd" | sed -n 2p)" != "$(echo "$dd" | sed -n 1p)" ] ||
 	fail "the heightmap's decorations by the seed: $d4, then $dd ($s5)"
+[ "$(grep -ac "decorations on the heightmap (generated), $dec of them a builder's" "$s5")" = 2 ] ||
+	fail "the decorate stroke's $dec decorations not kept over the seed's changes ($s5)"
 echo "ok: the brushes on the heightmap (raise a stroke undone to its hash, its edge stone; lower, smooth, flatten under the sea to the riverbed, paint, fill, water refused, decorate and its undo), its decorations the save's and by the seed ($d4)"
 
 # 6. ([KIT] stage 4f) The brushes on voxels: a fresh save, flat grassland

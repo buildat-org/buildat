@@ -119,6 +119,9 @@ static const int MAX_BRUSH = 12;
 static const int MAX_FILL = 64;
 static const double HM_STEP = 0.25;
 static const float HM_ROCK_SLOPE = 0.35f;
+// [KIT_HEIGHTMAP_REGEN_LOSS] The edited samples' rows' chunk side, and how
+// far round an edited sample a generated one is blended toward it
+static const int HM_EDIT_CHUNK = 64, HM_BLEND = 4;
 // on_remove runs inside the run that removed: so deep at most
 static const int MAX_REMOVE_DEPTH = 4;
 // [KIT] stage 5: what a Kit package may be, packed and unpacked, and the
@@ -471,6 +474,12 @@ struct Change
 	// cells that differed from the generator's in cells: undone once they
 	// are generated again
 	sv_<pv::Vector3DInt16> regen;
+	// [KIT_HEIGHTMAP_REGEN_LOSS] a heightmap stroke's samples' edit marks
+	// as they were (false: not edited), and a regeneration of all (its
+	// undo the previous heightmap put back)
+	std::map<std::pair<int, int>, std::pair<bool, std::pair<float,
+			heightmap::Weights>>> hm_marks;
+	bool hm_restore = false;
 	// [KIT_PREFAB_VOXELS] stroke -3: a prefab's place, its entities in
 	// before and its voxels' cells in cells (scene's), undone together
 };
@@ -482,6 +491,9 @@ struct Decor
 	ss_ structure;
 	float x = 0, y = 0, z = 0, yaw = 0;
 	unsigned node = 0;
+	// [KIT_HEIGHTMAP_REGEN_LOSS] put by a builder (the decorate brush): kept
+	// over a regeneration, as the edited samples are
+	bool hand = false;
 };
 
 // [KIT] stage 4e: a scene's World (world.h; [KIT_SCENES] one a scene):
@@ -530,6 +542,20 @@ struct World
 	// the voxel objects' models made, by structure
 	std::map<uint64_t, Decor> decor;
 	uint64_t next_decor = 1;
+	// [KIT_HEIGHTMAP_REGEN_LOSS] a builder's decorations off the map (it
+	// was made smaller): kept in the save, back if it grows again
+	sv_<Decor> decor_off;
+	// The heightmap's samples the terrain tools wrote, by cell (the map is
+	// from the origin, a sample a cell): their height and layers, kept
+	// over every regeneration and resize (those off the map too), saved in
+	// rows "hm_edit/<cx>,<cz>" by HM_EDIT_CHUNK cells; the chunks changed
+	std::map<std::pair<int, int>, std::pair<float, heightmap::Weights>>
+			hm_edits;
+	std::set<std::pair<int, int>> hm_edits_dirty;
+	bool hm_edits_loaded = false;
+	// A regeneration of everything asked (regenerate_all()): apply_world
+	// generates though nothing changed
+	bool hm_force = false;
 	bool decor_dirty = false;
 	std::set<ss_> decor_models;
 	// [KIT_VOXEL_FORMAT] its sky light (apply_sky()) and the loaded
@@ -4054,8 +4080,8 @@ struct Module: public interface::Module, public Interface
 				|| (p.heightmap() && (p.width != m_w->wp.width ||
 				p.depth != m_w->wp.depth)));
 		// [KIT_VOXEL_FORMAT] the sky light alone changed generates nothing
-		const bool again = had && !fell_back && ground_key(params) !=
-				ground_key(m_w->world_applied);
+		const bool again = had && !fell_back && (m_w->hm_force ||
+				ground_key(params) != ground_key(m_w->world_applied));
 		world::Ids ids;
 		ids.filler_depth = b.filler_depth;
 		sv_<int> layers;
@@ -4119,11 +4145,24 @@ struct Module: public interface::Module, public Interface
 				}
 			caves = " ("+itos(n)+" of "+itos(of)+" sampled cells)";
 		}
+		// [KIT_HEIGHTMAP_REGEN_LOSS] A heightmap about to be generated again
+		// or replaced kept as the previous one (regenerate_heightmap() kept
+		// it already, its edits with it)
+		if(!first && had && m_w->wp.heightmap() && (again || reshape) &&
+				!m_w->hm_force)
+			hm_backup();
 		// From here the World is made of the set (decorations' structures);
 		// the old one back if the heightmap refuses
 		world::MaterialSet was_set = m_w->materials;
 		m_w->materials = ms;
 		if(reshape && m_w->wp.heightmap()){
+			// [KIT_HEIGHTMAP_REGEN_LOSS] a builder's decorations kept aside
+			for(auto &d : m_w->decor)
+				if(d.second.hand){
+					Decor o = d.second;
+					o.node = 0;
+					m_w->decor_off.push_back(o);
+				}
 			decor_clear();
 			m_w->decor_dirty = true;
 			save_decor();
@@ -4132,7 +4171,7 @@ struct Module: public interface::Module, public Interface
 			});
 		}
 		if(p.heightmap()){
-			if(!apply_heightmap(p, *h, layers, ids, again, hash, why)){
+			if(!apply_heightmap(p, *h, layers, ids, again, first, hash, why)){
 				m_w->materials = was_set;
 				return false;
 			}
@@ -4643,12 +4682,363 @@ struct Module: public interface::Module, public Interface
 		add_log(id, "tried: "+input+" by "+p.name);
 	}
 
+	// ---- [KIT_HEIGHTMAP_REGEN_LOSS] A heightmap's edited samples
+	// (World::hm_edits): the terrain tools mark what they write, a
+	// regeneration generates the rest and puts them back over it, the
+	// generated ones within HM_BLEND of them blended toward them
+
+	static int floor_div(int a, int b)
+	{
+		return a >= 0 ? a / b : -((-a - 1) / b) - 1;
+	}
+
+	void hm_edits_load()
+	{
+		if(m_w->hm_edits_loaded)
+			return;
+		m_w->hm_edits_loaded = true;
+		m_w->hm_edits.clear();
+		const ss_ pre = world_row("hm_edit")+"/";
+		const size_t rec = 6 + heightmap::MAX_MATERIALS;
+		for(const ss_ &k : m_store->list(pre)){
+			int cx = 0, cz = 0;
+			ss_ v;
+			if(sscanf(k.c_str() + pre.size(), "%d,%d", &cx, &cz) != 2 ||
+					!m_store->get(k, v))
+				continue;
+			for(size_t i = 0; i + rec <= v.size(); i += rec){
+				float h;
+				memcpy(&h, v.data() + i + 2, 4);
+				heightmap::Weights w;
+				memcpy(w.data(), v.data() + i + 6, heightmap::MAX_MATERIALS);
+				if(std::isfinite(h))
+					m_w->hm_edits[std::make_pair(cx * HM_EDIT_CHUNK +
+							(uint8_t)v[i], cz * HM_EDIT_CHUNK +
+							(uint8_t)v[i + 1])] = std::make_pair(h, w);
+			}
+		}
+		if(!m_w->hm_edits.empty())
+			log_i(MODULE, "World: %zu edited heightmap samples in the save",
+					m_w->hm_edits.size());
+	}
+
+	// The chunks of edits changed, to their rows (a chunk with none: gone)
+	// simplified: the float as this machine has it (a save moved to a
+	// big-endian one reads its edits wrong)
+	void hm_edits_save()
+	{
+		const int C = HM_EDIT_CHUNK;
+		for(const auto &ch : m_w->hm_edits_dirty){
+			ss_ v;
+			for(int x = ch.first * C; x < ch.first * C + C; x++)
+				for(auto it = m_w->hm_edits.lower_bound(std::make_pair(x,
+						ch.second * C)); it != m_w->hm_edits.end() &&
+						it->first.first == x && it->first.second <
+						ch.second * C + C; ++it){
+					char b[6 + heightmap::MAX_MATERIALS];
+					b[0] = (char)(x - ch.first * C);
+					b[1] = (char)(it->first.second - ch.second * C);
+					memcpy(b + 2, &it->second.first, 4);
+					memcpy(b + 6, it->second.second.data(),
+							heightmap::MAX_MATERIALS);
+					v.append(b, sizeof b);
+				}
+			const ss_ k = world_row("hm_edit")+"/"+itos(ch.first)+","+
+					itos(ch.second);
+			if(v.empty())
+				m_store->remove(k);
+			else
+				m_store->set(k, v);
+		}
+		m_w->hm_edits_dirty.clear();
+	}
+
+	// A sample marked edited (with what it holds) or not, its mark as it
+	// was kept in the change for an undo
+	void hm_mark(int x, int z, bool edited, float h,
+			const heightmap::Weights &w, Change *c)
+	{
+		hm_edits_load();
+		const std::pair<int, int> k(x, z);
+		auto it = m_w->hm_edits.find(k);
+		if(c && !c->hm_marks.count(k))
+			c->hm_marks[k] = it == m_w->hm_edits.end() ? std::make_pair(false,
+					std::make_pair(0.0f, heightmap::Weights{})) :
+					std::make_pair(true, it->second);
+		if(edited)
+			m_w->hm_edits[k] = std::make_pair(h, w);
+		else if(it != m_w->hm_edits.end())
+			m_w->hm_edits.erase(it);
+		m_w->hm_edits_dirty.insert(std::make_pair(floor_div(x, HM_EDIT_CHUNK),
+				floor_div(z, HM_EDIT_CHUNK)));
+	}
+
+	// An unedited sample's height: the generator's, blended toward the
+	// nearest edited sample within HM_BLEND (its difference from the
+	// generator's there, fading with the distance). deltas: those
+	// differences, kept over calls
+	float hm_blended(world::Heights &h, int x, int z,
+			std::map<std::pair<int, int>, float> &deltas)
+	{
+		const float g = h.at((float)x, (float)z) + 0.5f;
+		double best = HM_BLEND + 1;
+		float delta = 0;
+		for(int dz = -HM_BLEND; dz <= HM_BLEND; dz++)
+		for(int dx = -HM_BLEND; dx <= HM_BLEND; dx++){
+			const std::pair<int, int> k(x + dx, z + dz);
+			const double d = std::sqrt((double)(dx * dx + dz * dz));
+			if(d >= best)
+				continue;
+			auto e = m_w->hm_edits.find(k);
+			if(e == m_w->hm_edits.end())
+				continue;
+			auto dl = deltas.find(k);
+			if(dl == deltas.end())
+				dl = deltas.emplace(k, e->second.first - (h.at((float)k.first,
+						(float)k.second) + 0.5f)).first;
+			best = d;
+			delta = dl->second;
+		}
+		return best > HM_BLEND ? g : g + delta * (float)(1 - best /
+				(HM_BLEND + 1));
+	}
+
+	// The edited samples over a map just generated, and the generated ones
+	// round them blended
+	void hm_overlay(heightmap::Instance *map, world::Heights &h)
+	{
+		hm_edits_load();
+		const int sx = map->samples_x(), sz = map->samples_z();
+		std::set<std::pair<int, int>> near;
+		size_t n = 0;
+		for(auto &e : m_w->hm_edits){
+			const int x = e.first.first, z = e.first.second;
+			if(x < 0 || z < 0 || x >= sx || z >= sz)
+				continue;
+			map->set_height(x, z, e.second.first);
+			map->set_weights(x, z, e.second.second);
+			n++;
+			for(int dz = -HM_BLEND; dz <= HM_BLEND; dz++)
+			for(int dx = -HM_BLEND; dx <= HM_BLEND; dx++){
+				const std::pair<int, int> k(x + dx, z + dz);
+				if(k.first >= 0 && k.second >= 0 && k.first < sx &&
+						k.second < sz && !m_w->hm_edits.count(k))
+					near.insert(k);
+			}
+		}
+		std::map<std::pair<int, int>, float> deltas;
+		for(auto &q : near)
+			map->set_height(q.first, q.second, hm_blended(h, q.first, q.second,
+					deltas));
+		if(!m_w->hm_edits.empty())
+			log_i(MODULE, "World: %zu edited heightmap samples kept over the "
+					"generated map, %zu blended round them, %zu off the map",
+					n, near.size(), m_w->hm_edits.size() - n);
+	}
+
+	// ---- [KIT_HEIGHTMAP_REGEN_LOSS] The previous heightmap: before a
+	// regeneration, the map's rows (store "heightmap", "<name>/...") copied
+	// to "<name>~prev/...", its edits' rows to "hm_prev_edit/...", and the
+	// row "hm_prev" its World's parameters and decorations; restoring swaps
+	// them, so a restore is undone by another
+
+	static void clear_rows(storage::Store *st, const ss_ &prefix)
+	{
+		st->batch([&](){
+			for(const ss_ &k : st->list(prefix))
+				st->remove(k);
+		});
+	}
+
+	static void copy_rows(storage::Store *st, const ss_ &from, const ss_ &to)
+	{
+		st->batch([&](){
+			for(const ss_ &k : st->list(to))
+				st->remove(k);
+			for(const ss_ &k : st->list(from)){
+				ss_ v;
+				if(st->get(k, v))
+					st->set(to+k.substr(from.size()), v);
+			}
+		});
+	}
+
+	// The map's and the edits' rows as they are now
+	void hm_flush()
+	{
+		heightmap::access(m_server, [&](heightmap::Interface *ih){
+			heightmap::Instance *map = ih->get_instance(m_w->world_scene);
+			if(map)
+				map->commit();
+		});
+		hm_edits_load();
+		hm_edits_save();
+		m_w->decor_dirty = true;
+		save_decor();
+	}
+
+	void hm_backup()
+	{
+		storage::Store *hs = m_host.save ? m_host.save->store("heightmap") :
+				nullptr;
+		if(!hs)
+			return;
+		hm_flush();
+		const ss_ name = world_row("world");
+		copy_rows(hs, name+"/", name+"~prev/");
+		copy_rows(m_store, world_row("hm_edit")+"/",
+				world_row("hm_prev_edit")+"/");
+		json::Value meta = json::object();
+		meta.set("params", m_w->world_applied);
+		ss_ dec;
+		m_store->get(world_row("decor"), dec);
+		meta.set("decor", dec);
+		m_store->set(world_row("hm_prev"), meta.stringify());
+		log_i(MODULE, "World: the heightmap kept as the previous one (%zu "
+				"edited samples)", m_w->hm_edits.size());
+	}
+
+	// The first World entity on the World's scene and its instance's index
+	bool world_entity(uint64_t &id, size_t &comp)
+	{
+		const uint64_t sid = scene_id(m_w->name);
+		for(auto &p : m_entities){
+			if(!sid || p.second.parent != sid || p.second.has_pos)
+				continue;
+			for(size_t i = 0; i < p.second.comps.size(); i++)
+				if(m_types.count(p.second.comps[i].type) &&
+						m_types[p.second.comps[i].type].world){
+					id = p.first;
+					comp = i;
+					return true;
+				}
+		}
+		return false;
+	}
+
+	// The previous heightmap back (swapped with this one): its samples,
+	// edits, decorations and the World's parameters it was made by
+	bool hm_restore(const ss_ &by, ss_ &why)
+	{
+		storage::Store *hs = m_host.save ? m_host.save->store("heightmap") :
+				nullptr;
+		ss_ ms;
+		uint64_t id = 0;
+		size_t comp = 0;
+		if(!hs || !m_w->world_scene || !m_store->get(world_row("hm_prev"), ms)){
+			why = "no previous heightmap";
+			return false;
+		}
+		if(m_session.running && !m_host.persistent){
+			why = "the game is Running: End it first";
+			return false;
+		}
+		if(!m_w->wp.heightmap()){
+			why = "the World is voxels now: its surface a heightmap first";
+			return false;
+		}
+		const json::Value meta = json::load_string(ms.c_str());
+		json::Value params = meta.get("params").deepcopy();
+		world::Params pp;
+		pp.from(params);
+		if(!params.is_object() || !pp.heightmap() || !world_entity(id, comp)){
+			why = "the previous heightmap's World is none to restore";
+			return false;
+		}
+		hm_flush();
+		const ss_ name = world_row("world"), e = world_row("hm_edit")+"/",
+				pe = world_row("hm_prev_edit")+"/", te = world_row("hm_tmp_edit")+"/";
+		copy_rows(hs, name+"/", name+"~tmp/");
+		copy_rows(hs, name+"~prev/", name+"/");
+		copy_rows(hs, name+"~tmp/", name+"~prev/");
+		clear_rows(hs, name+"~tmp/");
+		copy_rows(m_store, e, te);
+		copy_rows(m_store, pe, e);
+		copy_rows(m_store, te, pe);
+		clear_rows(m_store, te);
+		ss_ dec;
+		m_store->get(world_row("decor"), dec);
+		m_store->set(world_row("decor"), jstr(meta, "decor"));
+		json::Value now = json::object();
+		now.set("params", m_w->world_applied);
+		now.set("decor", dec);
+		m_store->set(world_row("hm_prev"), now.stringify());
+		// Made again from the save, as at a start (the map read, kept)
+		decor_clear();
+		m_w->decor_off.clear();
+		heightmap::access(m_server, [&](heightmap::Interface *ih){
+			ih->delete_instance(m_w->world_scene);
+		});
+		m_w->hm_edits_loaded = false;
+		m_w->hm_edits.clear();
+		m_w->hm_edits_dirty.clear();
+		if(!apply_world(params, by, true, why))
+			return false;
+		// The World entity's parameters those it was made by
+		auto it = m_entities.find(id);
+		json::Value ej = entity_json(it->second);
+		json::Value comps = ej.get("components").deepcopy();
+		json::Value c0 = comps.at((unsigned)comp).deepcopy();
+		params.del_key("materials_pin");
+		c0.set("params", params);
+		comps.set_at((unsigned)comp, c0);
+		ej.set("components", comps);
+		commit({std::make_pair(id, ej)}, nullptr);
+		log_i(MODULE, "World by %s: the previous heightmap restored (%zu "
+				"edited samples)", cs(by), m_w->hm_edits.size());
+		return true;
+	}
+
+	// {"op": "regenerate_heightmap"}: the heightmap generated anew, its
+	// edited samples and a builder's decorations discarded (the map before
+	// kept as the previous one: the undo restores it)
+	void regenerate_heightmap(Peer &p, size_t peer, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		(void)j;
+		if(!m_w->world_scene || !m_w->wp.heightmap())
+			return refuse("a heightmap World's");
+		if(m_session.running && !m_host.persistent)
+			return refuse("the game is Running: End it first");
+		hm_backup();
+		const size_t n = m_w->hm_edits.size();
+		for(auto &e : m_w->hm_edits)
+			m_w->hm_edits_dirty.insert(std::make_pair(floor_div(e.first.first,
+					HM_EDIT_CHUNK), floor_div(e.first.second, HM_EDIT_CHUNK)));
+		m_w->hm_edits.clear();
+		hm_edits_save();
+		for(auto &d : m_w->decor)
+			d.second.hand = false;
+		m_w->decor_off.clear();
+		m_w->decor_dirty = true;
+		save_decor();
+		m_w->hm_force = true;
+		ss_ why;
+		const bool ok = apply_world(world_params(), p.name, false, why);
+		m_w->hm_force = false;
+		if(!ok)
+			return refuse(why);
+		std::deque<Change> &u = m_undo[p.name];
+		Change nc;
+		nc.hm_restore = true;
+		u.push_back(nc);
+		while(u.size() > UNDO_MAX)
+			u.pop_front();
+		log_i(MODULE, "World by %s: the heightmap generated anew, %zu edited "
+				"samples discarded (%zu to undo)", cs(p.name), n, u.size());
+		send_state(peer);
+	}
+
 	// A heightmap surface: builtin/heightmap's map in the World's scene,
 	// generated from the same heights unless the save had it as applied;
 	// its grass, rock and sand the biome's top, stone and riverbed layers
+	// [KIT_HEIGHTMAP_REGEN_LOSS] At a start (first) the save's map is kept
+	// even where the World's parameters differ from those it was made by
+	// (a warning): only a builder's change generates it again, and then
+	// only its unedited samples (hm_overlay())
 	bool apply_heightmap(const world::Params &p, world::Heights &h,
 			const sv_<int> &layers, const world::Ids &ids, bool again,
-			uint32_t &hash, ss_ &why)
+			bool first, uint32_t &hash, ss_ &why)
 	{
 		bool generated = false;
 		heightmap::Size size;
@@ -4665,7 +5055,11 @@ struct Module: public interface::Module, public Interface
 				map = ih->create_instance(m_w->world_scene, size);
 				loaded = map->set_save(m_host.save, world_row("world"));
 			}
-			if(!loaded || again){
+			if(loaded && again && first)
+				warn("the save's heightmap kept, though the World's "
+						"parameters differ from those it was made by; a change "
+						"of them generates its unedited samples again");
+			if(!loaded || (again && !first)){
 				generated = true;
 				heightmap::GenerateParams gp;
 				gp.seed = p.seed;
@@ -4686,6 +5080,7 @@ struct Module: public interface::Module, public Interface
 									o[layers[k]] + w[k]);
 						map->set_weights(x, z, o);
 					}
+				hm_overlay(map, h);
 			}
 			hash = map->content_hash();
 		});
@@ -4800,13 +5195,20 @@ struct Module: public interface::Module, public Interface
 			return;
 		m_w->decor_dirty = false;
 		json::Value a = json::array();
-		for(auto &d : m_w->decor){
+		auto put = [&](const Decor &d){
 			json::Value r = json::array();
-			r.append(d.second.structure);
-			for(float v : {d.second.x, d.second.y, d.second.z, d.second.yaw})
+			r.append(d.structure);
+			for(float v : {d.x, d.y, d.z, d.yaw})
 				r.append((double)v);
+			// [KIT_HEIGHTMAP_REGEN_LOSS] a builder's
+			if(d.hand)
+				r.append(true);
 			a.append(r);
-		}
+		};
+		for(auto &d : m_w->decor)
+			put(d.second);
+		for(const Decor &d : m_w->decor_off)
+			put(d);
 		m_store->set(world_row("decor"), a.stringify());
 	}
 
@@ -4871,36 +5273,78 @@ struct Module: public interface::Module, public Interface
 
 	// The decorations at a start: generated with a generated map (the
 	// biome's scatter over its samples), else the save's
+	// [KIT_HEIGHTMAP_REGEN_LOSS] A generated map keeps a builder's
+	// decorations (the row's, "hand"), each on the ground there, those off
+	// the map kept aside
 	void decor_start(const world::Params &p, const world::Ids &ids,
 			bool generated)
 	{
 		decor_clear();
 		ss_ row;
-		const bool saved = !generated && m_store->get(world_row("decor"), row);
-		if(!saved && !p.with_decorations()){
+		const bool had = m_store->get(world_row("decor"), row);
+		const bool saved = !generated && had;
+		struct New { ss_ s; float x, y, z, yaw; bool hand; };
+		sv_<New> made;
+		if(had){
+			const json::Value a = json::load_string(row.c_str());
+			for(unsigned i = 0; a.is_array() && i < a.size(); i++){
+				const json::Value &r = a.at(i);
+				const bool hand = r.size() == 6 && r.at(5).is_true();
+				if(r.is_array() && (r.size() == 5 || r.size() == 6) &&
+						r.at(0).is_string() && (saved || hand) &&
+						m_w->materials.structures.count(r.at(0).as_string()))
+					made.push_back({r.at(0).as_string(),
+						(float)r.at(1).as_number(), (float)r.at(2).as_number(),
+						(float)r.at(3).as_number(), (float)r.at(4).as_number(),
+						hand});
+			}
+		}
+		m_w->decor_off.clear();
+		if(!saved && !p.with_decorations() && made.empty()){
 			m_w->decor_dirty = true;
 			save_decor();
 			return;
 		}
 		if(!decor_instance())
 			return;
-		struct New { ss_ s; float x, y, z, yaw; };
-		sv_<New> made;
-		if(saved){
-			const json::Value a = json::load_string(row.c_str());
-			for(unsigned i = 0; a.is_array() && i < a.size(); i++){
-				const json::Value &r = a.at(i);
-				if(r.is_array() && r.size() == 5 && r.at(0).is_string() &&
-						m_w->materials.structures.count(r.at(0).as_string()))
-					made.push_back({r.at(0).as_string(),
-						(float)r.at(1).as_number(), (float)r.at(2).as_number(),
-						(float)r.at(3).as_number(), (float)r.at(4).as_number()});
+		// Those off the map aside, the others on its ground (a generated
+		// one's)
+		heightmap::access(m_server, m_w->world_scene,
+				[&](heightmap::Instance *map){
+			sv_<New> on;
+			for(New &n : made){
+				if(n.x < -0.5f || n.z < -0.5f || n.x > map->samples_x() - 0.5f ||
+						n.z > map->samples_z() - 0.5f){
+					if(n.hand){
+						Decor d;
+						d.structure = n.s;
+						d.x = n.x, d.y = n.y, d.z = n.z, d.yaw = n.yaw;
+						d.hand = true;
+						m_w->decor_off.push_back(d);
+					}
+					continue;
+				}
+				if(!saved)
+					n.y = decor_y(map, n.x, n.z);
+				on.push_back(n);
 			}
-		} else {
+			made.swap(on);
+		});
+		if(saved){
+		} else if(p.with_decorations()){
+			// Not where a builder's stands
+			std::set<std::pair<int, int>> taken;
+			for(const New &n : made)
+				for(int dz = -1; dz <= 1; dz++)
+				for(int dx = -1; dx <= 1; dx++)
+					taken.insert(std::make_pair((int)std::floor(n.x + 0.5f) + dx,
+							(int)std::floor(n.z + 0.5f) + dz));
 			heightmap::access(m_server, m_w->world_scene,
 					[&](heightmap::Instance *map){
 				for(int z = 0; z < map->samples_z(); z++)
 				for(int x = 0; x < map->samples_x(); x++){
+					if(taken.count(std::make_pair(x, z)))
+						continue;
 					// Not on the spawn (world_spawn: the middle)
 					if(std::abs(x - map->samples_x() / 2) <= 3 &&
 							std::abs(z - map->samples_z() / 2) <= 3)
@@ -4910,16 +5354,20 @@ struct Module: public interface::Module, public Interface
 							1, yaw);
 					if(!s.empty())
 						made.push_back({s, (float)x, decor_y(map, (float)x,
-								(float)z), (float)z, yaw});
+								(float)z), (float)z, yaw, false});
 				}
 			});
 		}
 		for(const New &n : made)
-			add_decor(n.s, n.x, n.y, n.z, n.yaw);
+			m_w->decor[add_decor(n.s, n.x, n.y, n.z, n.yaw)].hand = n.hand;
 		m_w->decor_dirty = true;
 		save_decor();
-		log_i(MODULE, "World: %zu decorations on the heightmap (%s)",
-				m_w->decor.size(), saved ? "the save's" : "generated");
+		size_t hand = 0;
+		for(auto &d : m_w->decor)
+			hand += d.second.hand;
+		log_i(MODULE, "World: %zu decorations on the heightmap (%s), %zu of "
+				"them a builder's, %zu off the map", m_w->decor.size(),
+				saved ? "the save's" : "generated", hand, m_w->decor_off.size());
 	}
 
 	// The decorations over a rectangle of samples back on the ground
@@ -5026,10 +5474,13 @@ struct Module: public interface::Module, public Interface
 			return refuse("the app has no World");
 		const ss_ tool = jstr(j, "tool");
 		static const std::set<ss_> TOOLS = {"raise", "lower", "smooth",
-			"flatten", "paint", "fill", "decorate", "column"};
+			"flatten", "paint", "fill", "decorate", "column", "reset"};
 		if(!TOOLS.count(tool))
 			return refuse("tool: raise, lower, smooth, flatten, paint, fill, "
-					"decorate or column");
+					"decorate, reset or column");
+		if(tool == "reset" && !m_w->wp.heightmap())
+			return refuse("reset: a heightmap's (a voxel World's edited "
+					"sections are generated again from their list)");
 		auto num = [&](const char *k, double lo, double hi, double def,
 				double &out) -> bool {
 			const json::Value &v = j.get(k);
@@ -5095,6 +5546,7 @@ struct Module: public interface::Module, public Interface
 		if(!why.empty())
 			return refuse(why);
 		save_decor();
+		hm_edits_save();
 		const size_t undo = m_undo[p.name].size();
 		log_i(MODULE, "Terrain by %s: %s%s", cs(p.name), cs(what),
 				c ? cs(", stroke "+itos((int64_t)stroke)+" ("+itos(undo)+
@@ -5363,10 +5815,15 @@ struct Module: public interface::Module, public Interface
 			auto in = [&](int x, int z){
 				return x >= 0 && z >= 0 && x < sx && z < sz;
 			};
+			// [KIT_HEIGHTMAP_REGEN_LOSS] each sample written marked edited
+			// after (reset's unmarked)
+			std::set<std::pair<int, int>> touched;
 			auto keep = [&](int x, int z){
 				if(c)
 					c->samples.emplace(std::make_pair(x, z), std::make_pair(
 							map->get_height(x, z), map->get_weights(x, z)));
+				if(tool != "reset")
+					touched.insert(std::make_pair(x, z));
 			};
 			auto one_hot = [](int layer){
 				heightmap::Weights w{};
@@ -5458,6 +5915,42 @@ struct Module: public interface::Module, public Interface
 					relayer(x, z, sel);
 					samples++;
 				});
+			} else if(tool == "reset"){
+				// [KIT_HEIGHTMAP_REGEN_LOSS] back to the generator's: unmarked,
+				// the generator's height (blended toward the edited ones
+				// near), the World's biome's layer by the ground's slope
+				// simplified: the layer is the brushes' rule (stone where
+				// steep, the riverbed under the sea, else the top), not the
+				// generator's blend of them
+				world::Heights gh;
+				gh.p = m_w->wp;
+				valleys_query(gh);
+				std::set<std::pair<int, int>> cells, round;
+				circle([&](int x, int z, double){
+					cells.insert(std::make_pair(x, z));
+				});
+				for(auto &q : cells){
+					keep(q.first, q.second);
+					hm_mark(q.first, q.second, false, 0, heightmap::Weights{}, c);
+					for(int dz = -HM_BLEND; dz <= HM_BLEND; dz++)
+					for(int dx = -HM_BLEND; dx <= HM_BLEND; dx++)
+						if(in(q.first + dx, q.second + dz) &&
+								!m_w->hm_edits.count(std::make_pair(q.first + dx,
+								q.second + dz)))
+							round.insert(std::make_pair(q.first + dx,
+									q.second + dz));
+				}
+				std::map<std::pair<int, int>, float> deltas;
+				for(auto &q : round){
+					keep(q.first, q.second);
+					map->set_height(q.first, q.second, hm_blended(gh, q.first,
+							q.second, deltas));
+				}
+				for(auto &q : cells)
+					relayer(q.first, q.second, m_w->materials.biomes[m_w->wp.biome]);
+				samples = round.size();
+				bx0 = cx - r - HM_BLEND - 1, bz0 = cz - r - HM_BLEND - 1;
+				bx1 = cx + r + HM_BLEND + 1, bz1 = cz + r + HM_BLEND + 1;
 			} else if(tool == "decorate"){
 				circle([&](int x, int z, double){
 					samples++;
@@ -5493,6 +5986,9 @@ struct Module: public interface::Module, public Interface
 				relayer(q.first, q.second, tool == "fill" ? sel :
 						biome_of(q.first, q.second));
 			}
+			for(auto &q : touched)
+				hm_mark(q.first, q.second, true, map->get_height(q.first,
+						q.second), map->get_weights(q.first, q.second), c);
 			if(what.empty())
 				what = tool+" at ("+itos(cx)+","+itos(cz)+") size "+itos(r)+
 						" strength "+itos((int)s);
@@ -5511,6 +6007,7 @@ struct Module: public interface::Module, public Interface
 		for(auto &d : decorate){
 			const uint64_t id = add_decor(d.first, d.second[0], d.second[1],
 					d.second[2], d.second[3]);
+			m_w->decor[id].hand = true;
 			if(c)
 				c->decor.push_back(id);
 			added++;
@@ -5556,6 +6053,16 @@ struct Module: public interface::Module, public Interface
 					z1 = std::max(z1, q.first.second);
 				}
 			});
+		// [KIT_HEIGHTMAP_REGEN_LOSS] the samples' edit marks as they were
+		for(auto &q : c.hm_marks){
+			if(q.second.first)
+				m_w->hm_edits[q.first] = q.second.second;
+			else
+				m_w->hm_edits.erase(q.first);
+			m_w->hm_edits_dirty.insert(std::make_pair(floor_div(q.first.first,
+					HM_EDIT_CHUNK), floor_div(q.first.second, HM_EDIT_CHUNK)));
+		}
+		hm_edits_save();
 		for(uint64_t id : c.decor)
 			remove_decor(id);
 		if(!c.samples.empty())
@@ -12543,6 +13050,13 @@ struct Module: public interface::Module, public Interface
 				t.set("biomes", bs);
 				t.set("biome", m_w->wp.biome);
 				t.set("surface", ss_(m_w->wp.heightmap() ? "heightmap" : "voxels"));
+				// [KIT_HEIGHTMAP_REGEN_LOSS] its edited samples, a previous map
+				if(m_w->wp.heightmap()){
+					hm_edits_load();
+					t.set("edited_samples", (int64_t)m_w->hm_edits.size());
+					ss_ prev;
+					t.set("previous", m_store->get(world_row("hm_prev"), prev));
+				}
 				// [KIT_MATERIAL_SETS] the sets a World may be made of:
 				// [label, id], the app's ("") first
 				json::Value sets = json::array();
@@ -12669,6 +13183,15 @@ struct Module: public interface::Module, public Interface
 			return send_edited(peer);
 		if(op == "regenerate")
 			return regenerate_sections(p, peer, j, refuse);
+		if(op == "regenerate_heightmap")
+			return regenerate_heightmap(p, peer, j, refuse);
+		if(op == "restore_heightmap"){
+			ss_ why;
+			if(!hm_restore(p.name, why))
+				return refuse(why);
+			send_state(peer);
+			return;
+		}
 		if(op == "try")
 			return try_input(p, peer, j, refuse);
 		if(op == "pattern")
@@ -12729,6 +13252,15 @@ struct Module: public interface::Module, public Interface
 						"again yet");
 			const Change c = u.back();
 			u.pop_back();
+			// [KIT_HEIGHTMAP_REGEN_LOSS] a regeneration of all: the
+			// heightmap before it back
+			if(c.hm_restore){
+				WorldScope ws(m_w, world_at(c.scene));
+				if(!hm_restore(p.name, why))
+					return refuse(why);
+				send_state(peer);
+				return;
+			}
 			if(c.stroke != -1 && c.stroke != -3){
 				undo_terrain(c, p);
 				send_state(peer);

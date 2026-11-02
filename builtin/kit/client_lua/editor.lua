@@ -749,10 +749,13 @@ local voxel_names
 -- (its id, the last dab and when, a fill's corner, the level)
 local T = {brush = "raise", size = 3, strength = 2, biome = nil,
 	stroke = nil}
+-- [KIT_HEIGHTMAP_REGEN_LOSS] reset: a heightmap's samples back to the
+-- generator's, no longer edited
 local BRUSHES = {"raise", "lower", "smooth", "flatten", "paint", "fill",
-	"decorate"}
+	"decorate", "reset"}
 local BRUSH_NAMES = {raise = "Raise", lower = "Lower", smooth = "Smooth",
-	flatten = "Flatten", paint = "Paint", fill = "Fill", decorate = "Decorate"}
+	flatten = "Flatten", paint = "Paint", fill = "Fill", decorate = "Decorate",
+	reset = "Reset"}
 local MAX_BRUSH = 12
 M.T = T
 local brush_at, stroke_begin, stroke_move, stroke_end, draw_brush
@@ -1546,6 +1549,40 @@ local function inspector(w, e, is_made)
 			button(w, "Restart this", function()
 				send({op = "restart", id = e.id, comp = ci - 1})
 			end)
+		end
+		-- [KIT_HEIGHTMAP_REGEN_LOSS] A heightmap World: its edited samples,
+		-- kept over every regeneration; generating all anew (discarding
+		-- them) asks first; the map before the last regeneration back
+		local tr = E.state.terrain
+		if c.type == "kit/world" and tr and tr.surface == "heightmap" then
+			text(w, (tr.edited_samples or 0) .. " edited heightmap samples",
+					DIM)
+			if E.regen_ask then
+				local r = row(w)
+				button(r, "Discard edits, regenerate all", function()
+					E.regen_ask = nil
+					send({op = "regenerate_heightmap"})
+					log:info("kit editor: the heightmap regenerated, edits "
+							.. "discarded")
+				end)
+				button(r, "Cancel", function()
+					E.regen_ask = nil
+					refresh()
+				end)
+			else
+				button(w, "Regenerate all...", function()
+					E.regen_ask = true
+					log:info("kit editor: regenerate all? " ..
+							(tr.edited_samples or 0) .. " edited samples")
+					refresh()
+				end)
+			end
+			if tr.previous then
+				button(w, "Restore the previous heightmap", function()
+					send({op = "restore_heightmap"})
+					log:info("kit editor: the previous heightmap asked back")
+				end)
+			end
 		end
 		local names, decl = {}, t.params or {}
 		for k in pairs(decl) do
@@ -3233,13 +3270,14 @@ end
 -- rest the hover's
 local function brush_color()
 	return T.brush == "lower" and M.DIG or (T.brush == "smooth" or
-			T.brush == "flatten") and M.HOVER or M.PLACE
+			T.brush == "flatten" or T.brush == "reset") and M.HOVER or M.PLACE
 end
 
 local BRUSH_TEXT = {raise = "raise the ground", lower = "lower the ground",
 	smooth = "smooth the ground", flatten = "flatten to the stroke's start",
 	paint = "paint the biome's ground", decorate = "decorate (the biome's)",
-	fill = "drag: fill a rectangle up to here"}
+	fill = "drag: fill a rectangle up to here",
+	reset = "back to the generated ground"}
 
 terrain_panel = function(w)
 	panel_title(w, "Terrain", "Palette")
