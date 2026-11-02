@@ -2493,6 +2493,10 @@ struct CApp: public App, public magic::Application
 			for(magic::UIElement *c : parent->GetChildren()){
 				if(!c || !c->IsVisible())
 					continue;
+				// A dropdown's popup is placed where its dropdown is; its
+				// height is ui_utils' to keep on the screen
+				if(c->GetVars().Contains(magic::StringHash("Origin")))
+					continue;
 				// A wrapped text is as wide as it was made, never what is in
 				// it: a chat line follows the root's width, and counted it
 				// scaled the UI down to fit itself ([LUANTI_CHAT_WRAP])
@@ -2537,6 +2541,11 @@ struct CApp: public App, public magic::Application
 			}
 		};
 		scan(root, 0);
+		// **A popup open takes its top-level element along under the
+		// modal root** ([TOUCH_UI_SCALE_JUMP]: the inspector a dropdown
+		// was tapped in left the root, the fit went back to x1, and the
+		// list opened off the screen): it is counted there
+		scan(ui->GetRootModalElement(), 0);
 		float f = std::max(FIT_FLOOR, std::min(1.f, need / base));
 		if(std::fabs(f - m_fit_factor) > 0.02f){
 			m_fit_factor = f;

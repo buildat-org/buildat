@@ -232,9 +232,10 @@ if [ "${1:-}" = web_touch ]; then
 	# "Hide positioned entities" off, the list bounded under the bar (it
 	# scrolls), the copies undone; ([KIT_BUILDER_PLAY_RULES]) a region
 	# tapped in from the palette at (-1, 1, 1), a cell down, digging and
-	# placing for all in the inspector (picked by Home and Enter: the popup
-	# of a dropdown tapped there opened off the screen at a UI scale fitted
-	# again, and the arrows nudged the selection too, 2026-11-02): the
+	# placing for all in the inspector, each list's row tapped: the UI fit
+	# holds while a list is up, which takes the inspector off the root
+	# ([TOUCH_UI_SCALE_JUMP]: the fit went back to x1 and the list opened
+	# off the screen), and a row found by label is on it: the
 	# admin plays by the rules out of
 	# edit mode; ([KIT] stage 4f) a finger dragged with the terrain tool (T)
 	# paints a raise stroke, undone; Play mode, and in play a tap uses the button, a tap digs and
@@ -311,9 +312,11 @@ if [ "${1:-}" = web_touch ]; then
 	["key", "PageDown"], ["waitlog", "kit editor: state: 4 entities, 5 to undo", 10],
 	["tap", "Button", "Inspector"], ["frames", 5],
 	["tap", "DropDownList", "▼", 955, 206], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
-	["key", "Home"], ["key", "Enter"], ["waitlog", "kit editor: 10/1 dig = all", 10],
+	["frames", 3], ["shot", "${OUT}/dropdown.png"],
+	["tap", "Text", "all", 930, 228], ["waitlog", "kit editor: 10/1 dig = all", 10],
 	["tap", "DropDownList", "▼", 955, 294], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
-	["key", "Home"], ["key", "Enter"], ["waitlog", "kit editor: 10/1 place = all", 10],
+	["frames", 3],
+	["tap", "Text", "all", 930, 318], ["waitlog", "kit editor: 10/1 place = all", 10],
 	["tap", "Button", "Apply"], ["waitlog", "kit editor: state: 4 entities, 7 to undo", 10],
 	["frames", 3], ["shot", "${OUT}/region.png"],
 	["tap", "Button", "Inspector"], ["frames", 3],
@@ -338,6 +341,14 @@ J
 	TOUCH=1 WEB_DRIVE_VIEWPORT=1000x500@1 \
 		"$here/util/web_drive.sh" chrome workbench "$t/steps.json" "$t/out" ||
 		fail "the web drive ($t/out)"
+	# The inspector's fit (below x1 at 1000x500) held from before the
+	# first list was up until the second's pick
+	awk '/kit editor: selected 10/ { s = 1 } !s { next }
+		/UI scale fitted/ { if (o) exit; f = $0 }
+		/ui_utils: dropdown_[0-9]+ open/ && !o { if (f == "" || f ~ / x1$/) exit; o = 1 }
+		/kit editor: 10\/1 place = all/ && o { ok = 1; exit }
+		END { exit !ok }' "$t/out/page.log" ||
+		fail "the UI scale moved with the inspector's lists up ($t/out/page.log)"
 	for w in "An edit by webboss: placed kit/button 3 at [4,1,3]" \
 			"An edit by webboss: moved 3 to [1,1,3]" \
 			"kit/button 3: pressed by webboss" \
