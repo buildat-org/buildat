@@ -1661,7 +1661,7 @@ frames 10
 mouse_click right
 wait_log 5000 kit editor: place
 frames 10
-look_dir 1.5 -1 -1
+look_dir 1.5 -1 1
 frames 30
 mouse_click right
 wait_log 5000 kit editor: place
