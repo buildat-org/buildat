@@ -10059,10 +10059,13 @@ struct Module: public interface::Module, public Interface
 		if(!w || !hm_world_of(w) || loaded(w, p))
 			return loaded(w, p);
 		WorldScope ws(m_w, hm_world_of(w));
-		// (the heightmap's samples: whole chunks of 64, apply_heightmap()'s)
-		if(p.getX() < 0 || p.getZ() < 0 ||
-				p.getX() >= (m_w->wp.width + 63) / 64 * 64 ||
-				p.getZ() >= (m_w->wp.depth + 63) / 64 * 64)
+		// (the heightmap's samples: whole chunks of 64 from its origin,
+		// apply_heightmap()'s, [KIT_HM_ORIGIN])
+		const int ox = m_w->hm_corner ? 0 : m_w->wp.x0(),
+				oz = m_w->hm_corner ? 0 : m_w->wp.z0();
+		if(p.getX() < ox || p.getZ() < oz ||
+				p.getX() >= ox + (m_w->wp.width + 63) / 64 * 64 ||
+				p.getZ() >= oz + (m_w->wp.depth + 63) / 64 * 64)
 			return false;
 		const pv::Vector3DInt16 ss = w->get_section_size_voxels();
 		auto div = [](int32_t a, int b){
