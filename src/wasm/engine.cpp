@@ -90,6 +90,7 @@
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -1597,6 +1598,14 @@ struct Compile {
 		for(ss_ &a : args)
 			argv.push_back(&a[0]);
 		argv.push_back(nullptr);
+		// PR_SET_PDEATHSIG fires when the forking thread exits, not the
+		// process: a compile started on a short-lived thread (Kit's early
+		// box on a std::async) was killed as that thread returned.
+		// simplified: the death signal only from the main thread; forked
+		// from another, a crash leaves the compile to its RLIMIT_CPU
+		// (COMPILE_CPU_S). Upgrade: a forker thread living as long as the
+		// process
+		const bool main_thread = getpid() == (pid_t)syscall(SYS_gettid);
 		const pid_t p = fork();
 		if(p < 0){
 			why = "fork failed";
@@ -1605,7 +1614,8 @@ struct Compile {
 		if(p == 0){
 			// The child: async-signal-safe calls only, then the compiler
 			setpgid(0, 0);
-			prctl(PR_SET_PDEATHSIG, SIGKILL);
+			if(main_thread)
+				prctl(PR_SET_PDEATHSIG, SIGKILL);
 			struct rlimit as = {(rlim_t)COMPILE_MEM_BYTES,
 					(rlim_t)COMPILE_MEM_BYTES};
 			struct rlimit cpu = {(rlim_t)COMPILE_CPU_S, (rlim_t)COMPILE_CPU_S};
