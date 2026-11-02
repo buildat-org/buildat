@@ -20,7 +20,7 @@
 #   4. [KIT_HM_ORIGIN] A copy made a save from before maps had an origin:
 #      its map loaded at the world's origin, where it was.
 # [KIT_HM_ORIGIN] Part 1's map lies on the voxels' area, centred, and its
-# resize grows both sides; cobble on two of the area's corners, seen from
+# resize grows both sides; cobble columns on two of the area's corners, seen from
 # above (KEEP_TMP=1 keeps plan.png).
 #   util/kit_heightmap_edits_check.sh
 set -u
@@ -107,10 +107,14 @@ EOF
 	echo "wait_log_any 20000 heightmap: terrain built"
 	# [KIT_HM_ORIGIN] Voxels on two corners of the voxels' area, seen
 	# from above with the map under them
-	for c in "-32 -32" "-31 -32" "-32 -31" "31 31" "30 31" "31 30"; do
+	# (columns: the plan shows the cut through them, whatever the
+	# ground's height there)
+	for c in "-32 -32" "31 31"; do
 		set -- $c
-		n=$((n + 1))
-		printf 'event kit_edit {"op": "set_voxel", "pos": [%s, 9, %s], "voxel": "kit/cobble"}\nwait_log 10000 entities, %d to undo\n' "$1" "$2" "$n"
+		for y in $(seq 0 12); do
+			n=$((n + 1))
+			printf 'event kit_edit {"op": "set_voxel", "pos": [%s, %s, %s], "voxel": "kit/cobble"}\nwait_log 10000 entities, %d to undo\n' "$1" "$y" "$2" "$n"
+		done
 	done
 	cat <<'EOF'
 keypress F1
@@ -118,11 +122,6 @@ wait_log 5000 kit editor: the view is 2D
 mouse_pos 640 350
 EOF
 	for _ in $(seq 10); do echo "mouse_wheel -1"; echo "frames 2"; done
-	# the plan's cut over the cobble (y 9)
-	for _ in $(seq 5); do
-		echo 'click Button "Cut +"'
-		echo "wait_log 5000 kit editor: cut at"
-	done
 	cat <<'EOF'
 idle 8000
 frames 30
