@@ -359,26 +359,35 @@ local function material(name)
 end
 
 -- [KIT_LOOK_MATERIAL] A voxel material's definition by its name (a
--- block's, not one of its shapes'): looked up again while the registry
--- grows (a builder's new voxel)
-local voxel_defs = {count = -1, by = {}}
+-- block's, not one of its shapes'): its id looked up again while the
+-- registry grows (a builder's new voxel). [KIT_SCENES_STALE_DEF] Only ids
+-- are kept, the definition fetched from the registry of the moment: a
+-- scene switch or a season replaces the registry, and a definition kept
+-- from the old one is freed memory (a crash reading its textures)
+local voxel_ids = {count = -1, by = {}}
 local function voxel_def(name)
 	local reg = require("buildat/module/voxelworld").get_voxel_registry()
 	if not reg then
 		return nil
 	end
+	local function named(id)
+		local def = id and reg:get_by_id(id)
+		return def and def.name and def.name.block_name == name and def or nil
+	end
 	local count = reg:get_count()
-	if count ~= voxel_defs.count then
-		voxel_defs.count, voxel_defs.by = count, {}
-		for id = 1, count - 1 do
-			local def = reg:get_by_id(id)
-			local bn = def and def.name and def.name.block_name
-			if bn and not voxel_defs.by[bn] then
-				voxel_defs.by[bn] = def
-			end
+	local def = count == voxel_ids.count and named(voxel_ids.by[name])
+	if def or (count == voxel_ids.count and voxel_ids.by[name] == nil) then
+		return def or nil
+	end
+	voxel_ids.count, voxel_ids.by = count, {}
+	for id = 1, count - 1 do
+		local d = reg:get_by_id(id)
+		local bn = d and d.name and d.name.block_name
+		if bn and not voxel_ids.by[bn] then
+			voxel_ids.by[bn] = id
 		end
 	end
-	return voxel_defs.by[name]
+	return named(voxel_ids.by[name])
 end
 
 -- [KIT_LOOK_MATERIAL] A unit box or wedge (wedge's) wearing a voxel
