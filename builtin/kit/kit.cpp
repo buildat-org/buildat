@@ -40,6 +40,7 @@
 #include <deque>
 #include <fstream>
 #include <mutex>
+#include <future>
 #include <algorithm>
 #include <set>
 #include <sstream>
@@ -822,6 +823,11 @@ struct Module: public interface::Module, public Interface
 	Host m_host;
 	storage::Store *m_store = nullptr;
 	up_<interface::WasmBox> m_box;
+	// [SK_KIT_START_STALL] The first box, made from init() on a thread of
+	// its own: its box/ built to a .wasm on a cold cache took 5.9 s, which
+	// an app hosting Kit late (skeldat, once its world is in) waited out
+	// on its tick with every player behind it. start_box() takes it.
+	std::future<std::pair<interface::WasmBox*, ss_>> m_early_box;
 	bool m_starting = false;
 	sm_<ss_, ss_> m_sources; // the types' Lua, by name
 	sm_<ss_, Type> m_types;
@@ -990,6 +996,8 @@ struct Module: public interface::Module, public Interface
 
 	~Module()
 	{
+		if(m_early_box.valid())
+			delete m_early_box.get().first;
 		// The owner handlers hold pointers into this module. Nothing is
 		// saved here: the runtime row is written after each tick that
 		// changed it, and the app's save may be closed by now
@@ -1011,6 +1019,12 @@ struct Module: public interface::Module, public Interface
 
 	void init()
 	{
+		m_early_box = std::async(std::launch::async, [this](){
+			ss_ why;
+			interface::WasmBox *b = m_server->create_wasm_box(MODULE, "box",
+					why);
+			return std::make_pair(b, why);
+		});
 		sub(m_server, "core:tick", &Module::on_tick);
 		// [KIT_DIG_STOP_ORDER] A client's kit packets are handled once
 		// every module has handled what the client sent before them: a dig
@@ -1053,8 +1067,17 @@ struct Module: public interface::Module, public Interface
 		// .wasm under way is then the new one's to wait on, not killed (and
 		// waited for) with the old
 		// "box", meta.json's "wasm_box"
-		up_<interface::WasmBox> b(m_server->create_wasm_box(MODULE, "box",
-				why));
+		up_<interface::WasmBox> b;
+		if(m_early_box.valid()){
+			const int64_t t0 = interface::os::time_us();
+			auto r = m_early_box.get();
+			b.reset(r.first);
+			why = r.second;
+			log_i(MODULE, "The box made since the start: waited %.1f s for it",
+					(interface::os::time_us() - t0) / 1e6);
+		} else {
+			b.reset(m_server->create_wasm_box(MODULE, "box", why));
+		}
 		m_box = std::move(b);
 		if(!m_box)
 			return false;
