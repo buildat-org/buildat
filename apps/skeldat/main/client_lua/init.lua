@@ -2195,12 +2195,20 @@ end
 local board_sound = load("main/board_sound.lua")
 local roll = {own = nil, others = {}, lo = nil, hi = nil}
 do
-	local ok, line = pcall(board_sound.self_test, buildat.synth)
-	if ok then
-		log:info("skeldat: " .. line)
-	else
-		log:error("skeldat: " .. tostring(line))
+	-- [SK_BOARD_SOUND_SELFTEST] Its self test for a check alone
+	-- (BUILDAT_SKELDAT_SELF_TEST=1, check.sh's board section): 2 s of the
+	-- roll and the splashes rendered, 3.6 s of a web join's one thread
+	if buildat.get_env("BUILDAT_SKELDAT_SELF_TEST") == "1" then
+		local t0 = buildat.get_time_us()
+		local ok, line = pcall(board_sound.self_test, buildat.synth)
+		if ok then
+			log:info("skeldat: " .. line .. string.format(" (%.0f ms)",
+					(buildat.get_time_us() - t0) / 1000))
+		else
+			log:error("skeldat: " .. tostring(line))
+		end
 	end
+	local t0 = buildat.get_time_us()
 	-- [SKELDAT_BOARD_SOUND_FAULT] The device's buffer as obtained, which
 	-- the engine's own line does not bring to this log
 	local device, fragment = board_sound.device(magic)
@@ -2221,6 +2229,8 @@ do
 		roll.others[i].source.farDistance = 32
 		roll.others[i].node = n
 	end
+	log:info(string.format("skeldat: board sound: the grains and 4 players "
+			.. "made in %.0f ms", (buildat.get_time_us() - t0) / 1000))
 end
 -- [SKELDAT_BOARD_WATER] The splash on entering water, one-shots: the
 -- player's own, and another's at its body within 32 (its source's range);

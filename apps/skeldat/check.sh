@@ -1399,7 +1399,9 @@ BUILDAT_SKELDAT_WORLD=board BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_STILL_W
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv27" -C "$t/srv.cache" -l 3 || fail "the server ($log27)"
 CHECK_PIDS+=($SERVER_PID)
-client board1 "$t/board1.cmds"; a=$CLIENT
+# [SK_BOARD_SOUND_SELFTEST] the board sound's self test, which a player's
+# start leaves out
+BUILDAT_SKELDAT_SELF_TEST=1 client board1 "$t/board1.cmds"; a=$CLIENT
 wait_for_log "$log27" "skeldat: test: a course" 330 || fail "no course ($log27)"
 client board2 "$t/board2.cmds"; bpid=$CLIENT
 wait $a || fail "the board's drive ($t/board1.log)"
