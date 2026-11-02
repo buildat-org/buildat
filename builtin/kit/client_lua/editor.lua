@@ -737,6 +737,7 @@ end
 M.over_ui = over_ui
 
 local refresh, people, show_log, rebuild_bar, set_view, terrain_panel
+local inspector_window
 local voxel_names
 
 -- [KIT] stage 4f: the terrain tool's state: the brush, its size (cells)
@@ -1664,19 +1665,243 @@ local function inspector(w, e, is_made)
 	end
 end
 
-local function inspector_window()
+-- [KIT_BOX_ADJUST] The Box tool's box adjusted once its two corners are
+-- in: typed (its low corner and its size, at the inspector's top) or by
+-- the handles on its six faces (a drag moves that face; Shift, the whole
+-- box along the axis). The box is the tool's: put away, it goes (a
+-- selection made first is kept, so entities and voxels copy together)
+local BX = {MAX = 64, AXES = {"x", "y", "z"}}
+
+-- Its low and high cells, or nil while it has no second corner
+function BX.box_lh()
+	local b = S.vbox
+	if not b or not b.a or not b.b then
+		return nil
+	end
+	local lo, hi = {}, {}
+	for k = 1, 3 do
+		lo[k], hi[k] = math.min(b.a[k], b.b[k]), math.max(b.a[k], b.b[k])
+	end
+	return lo, hi
+end
+
+function BX.set_box(lo, hi, how)
+	S.vbox = {a = {lo[1], lo[2], lo[3]}, b = {hi[1], hi[2], hi[3]}}
+	if how then
+		log:info(string.format("kit editor: box %d,%d,%d,%d,%d,%d (%s)",
+				lo[1], lo[2], lo[3], hi[1], hi[2], hi[3], how))
+	end
+end
+
+-- The handles: a small cube out from each face's middle
+function BX.box_handles()
+	local lo, hi = BX.box_lh()
+	if not lo or S.tool ~= "box" then
+		return {}
+	end
+	local hs = {}
+	for k = 1, 3 do
+		for _, side in ipairs({-1, 1}) do
+			local c = {(lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2,
+				(lo[3] + hi[3]) / 2}
+			c[k] = side < 0 and lo[k] - 0.9 or hi[k] + 0.9
+			hs[#hs + 1] = {k = k, side = side,
+				name = (side < 0 and "-" or "+") .. BX.AXES[k],
+				at = magic.Vector3(c[1], c[2], c[3])}
+		end
+	end
+	return hs
+end
+
+-- The handle under the pointer (the nearest on the screen), or nil
+function BX.box_handle_at(mx, my)
+	local best, bd = nil, nil
+	for _, h in ipairs(BX.box_handles()) do
+		local sx, sy = to_screen(h.at)
+		if sx then
+			local d = (sx - mx) ^ 2 + (sy - my) ^ 2
+			if d <= px(SNAP_PX * 1.5) ^ 2 and (not bd or d < bd) then
+				best, bd = h, d
+			end
+		end
+	end
+	return best
+end
+
+-- Where along a handle's axis the ray through the screen point (sx, sy)
+-- passes nearest: the axis's line through the handle, in cells from it
+function BX.box_axis_t(h, sx, sy)
+	local o, v = M.screen_ray(sx, sy)
+	local w = {h.at.x - o.x, h.at.y - o.y, h.at.z - o.z}
+	local vv = {v.x, v.y, v.z}
+	local b = vv[h.k]
+	local denom = 1 - b * b
+	if denom < 1e-4 then
+		return nil
+	end
+	local e = vv[1] * w[1] + vv[2] * w[2] + vv[3] * w[3]
+	return (b * e - w[h.k]) / denom
+end
+
+-- A press on a handle: the drag follows the pointer's moves from here,
+-- the handle where it was on the screen
+function BX.box_grab(h, sx, sy, shift)
+	local lo, hi = BX.box_lh()
+	S.box_drag = {h = h, lo = lo, hi = hi, shift = shift, m0 = {S.mx, S.my},
+		s0 = {sx, sy}, t0 = BX.box_axis_t(h, sx, sy), delta = 0}
+	log:info("kit editor: box handle " .. h.name .. (shift and
+			", moving the box" or ""))
+end
+
+function BX.box_drag_move(x, y)
+	local d = S.box_drag
+	local t = d.t0 and BX.box_axis_t(d.h, d.s0[1] + x - d.m0[1],
+			d.s0[2] + y - d.m0[2])
+	if not t then
+		return
+	end
+	local delta = round(t - d.t0)
+	if delta == d.delta then
+		return
+	end
+	d.delta = delta
+	local k = d.h.k
+	local lo = {d.lo[1], d.lo[2], d.lo[3]}
+	local hi = {d.hi[1], d.hi[2], d.hi[3]}
+	if d.shift then
+		lo[k], hi[k] = lo[k] + delta, hi[k] + delta
+	elseif d.h.side > 0 then
+		hi[k] = math.max(lo[k], math.min(lo[k] + BX.MAX - 1, hi[k] + delta))
+	else
+		lo[k] = math.min(hi[k], math.max(hi[k] - BX.MAX + 1, lo[k] + delta))
+	end
+	BX.set_box(lo, hi)
+	inspector_window()
+end
+
+function BX.box_drop()
+	local d = S.box_drag
+	S.box_drag = nil
+	local lo, hi = BX.box_lh()
+	if lo then
+		BX.set_box(lo, hi, (d.shift and "moved " or "face ") .. d.h.name ..
+				" by " .. d.delta)
+	end
+	refresh()
+end
+
+-- The inspector's box: its low corner and its size typed, each change
+-- taken as it is a whole number (a size 1 to 64)
+function BX.box_section(w)
+	local lo, hi = BX.box_lh()
+	text(w, "Box")
+	if not lo then
+		text(w, S.vbox and "Click its second corner." or
+				"Click its first corner.", DIM)
+		return
+	end
+	local at = {lo[1], lo[2], lo[3]}
+	local size = {hi[1] - lo[1] + 1, hi[2] - lo[2] + 1, hi[3] - lo[3] + 1}
+	local function apply(what)
+		BX.set_box(at, {at[1] + size[1] - 1, at[2] + size[2] - 1,
+			at[3] + size[3] - 1}, "typed " .. what)
+	end
+	for _, part in ipairs({{"at", at, {"x", "y", "z"}},
+			{"size", size, {"w", "h", "d"}}}) do
+		local r = row(w)
+		label(r, part[1]):SetFixedWidth(40)
+		for i, axis in ipairs(part[3]) do
+			label(r, axis):SetFixedWidth(12)
+			local f = edit(r, tostring(part[2][i]), function(s)
+				local n = tonumber(s)
+				if not n or n ~= math.floor(n) or n == part[2][i] or
+						(part[1] == "size" and (n < 1 or n > BX.MAX)) or
+						math.abs(n) > 30000 then
+					return
+				end
+				part[2][i] = n
+				apply(part[1] .. " " .. axis)
+			end)
+			f.minWidth = 48
+		end
+	end
+	text(w, "Drag a face's handle; Shift: the whole box", DIM)
+end
+
+-- A check's two corner clicks: "x y z x y z", the Box tool's box
+magic.SubscribeToEvent("command_seq:kit_box", function(_, data)
+	local c = {}
+	for n in data:GetString("Param"):gmatch("%-?%d+") do
+		c[#c + 1] = tonumber(n)
+	end
+	if #c ~= 6 or S.tool ~= "box" then
+		log:info("kit editor: kit_box: x y z x y z, the Box tool on")
+		return
+	end
+	S.vbox = {a = {c[1], c[2], c[3]}, b = {c[4], c[5], c[6]}}
+	log:info("kit editor: box " .. table.concat(c, ","))
+	refresh()
+end)
+
+-- A check's 3d view camera: "x y z x y z", where it is and a point it
+-- looks at
+magic.SubscribeToEvent("command_seq:kit_cam3d", function(_, data)
+	local c = {}
+	for n in data:GetString("Param"):gmatch("%-?[%d.]+") do
+		c[#c + 1] = tonumber(n)
+	end
+	if #c ~= 6 then
+		log:info("kit editor: kit_cam3d: x y z x y z")
+		return
+	end
+	local dx, dy, dz = c[4] - c[1], c[5] - c[2], c[6] - c[3]
+	local l = math.sqrt(dx * dx + dy * dy + dz * dz)
+	if l < 0.001 then
+		return
+	end
+	S.pos = {x = c[1], y = c[2], z = c[3]}
+	S.yaw = math.deg(math.atan2(dx, dz))
+	S.pitch = math.deg(math.asin(-dy / l))
+	set_view("3d")
+end)
+
+-- A check's look for a handle by its name ("+y", "-x"): where it is on
+-- the screen, and whether a press there takes it
+magic.SubscribeToEvent("command_seq:kit_box_where", function(_, data)
+	local name = data:GetString("Param")
+	for _, h in ipairs(BX.box_handles()) do
+		local sx, sy = to_screen(h.at)
+		if h.name == name and sx then
+			local found = BX.box_handle_at(sx, sy)
+			log:info(string.format("kit editor: box handle %s on the screen "
+					.. "at %d, %d%s", name, sx, sy, found and found.name == name
+					and "" or ", not the one picked there"))
+			return
+		end
+	end
+	log:info("kit editor: no box handle " .. name .. " on the screen")
+end)
+
+inspector_window = function()
 	drop("inspector")
 	S.cost_text, S.cost_id = nil, nil
 	local e, is_made = nil, false
 	if S.primary then
 		e, is_made = find(S.primary)
 	end
-	if not E.editing or not e or folded("inspector") then
+	-- [KIT_BOX_ADJUST] the Box tool's box at its top
+	local box = E.editing and S.tool == "box" and not folded("inspector")
+	if not E.editing or folded("inspector") or (not e and not box) then
 		return
 	end
 	local y = W.bar and W.bar.height + 12 or 40
 	W.inspector = window(magic.HA_RIGHT, magic.VA_TOP, -8, y)
-	inspector(W.inspector, e, is_made)
+	if box then
+		BX.box_section(W.inspector)
+	end
+	if e then
+		inspector(W.inspector, e, is_made)
+	end
 end
 
 -- A touchscreen's keys ([FP_TOUCH] 4): Undo, Delete and Escape's Cancel, at
@@ -2805,7 +3030,7 @@ function M.set_tool(tool)
 	end
 	-- [KIT_PREFAB_VOXELS] the Box tool's box goes with it
 	if S.tool == "box" then
-		S.vbox = nil
+		S.vbox, S.box_drag = nil, nil
 	end
 	S.tool = tool
 	T.down, T.fill = false, nil
@@ -3293,6 +3518,14 @@ local function mouse_down(button_)
 		return
 	end
 	if S.tool == "box" and button_ == magic.MOUSEB_LEFT then
+		-- [KIT_BOX_ADJUST] a face's handle dragged
+		local h = BX.box_handle_at(mx, my)
+		if h then
+			local sx, sy = to_screen(h.at)
+			BX.box_grab(h, sx, sy, key_held(magic.KEY_LSHIFT) or
+					key_held(magic.KEY_RSHIFT))
+			return
+		end
 		box_click(mx, my)
 		return
 	end
@@ -3338,6 +3571,10 @@ local function mouse_up(button_)
 	end
 	if button_ == magic.MOUSEB_LEFT and T.down then
 		stroke_end(S.mx, S.my)
+		return
+	end
+	if button_ == magic.MOUSEB_LEFT and S.box_drag then
+		BX.box_drop()
 		return
 	end
 	if button_ == magic.MOUSEB_LEFT and S.palette_press then
@@ -3405,6 +3642,10 @@ local function mouse_up(button_)
 end
 
 local function mouse_move(x, y, dx, dy)
+	if S.box_drag then
+		BX.box_drag_move(x, y)
+		return
+	end
 	local rc = S.right_click
 	if rc then
 		rc.moved = rc.moved + math.abs(dx) + math.abs(dy)
@@ -4091,7 +4332,12 @@ local function compute_guide()
 		ghost(nil)
 		local t = voxel_target(mx, my)
 		local c = t and t.cell or place_cell(mx, my)
-		if c then
+		-- [KIT_BOX_ADJUST] a handle: its face dragged
+		local h = S.box_drag and S.box_drag.h or BX.box_handle_at(mx, my)
+		if h then
+			g.left = "drag: the box's " .. h.name .. " face (Shift: the " ..
+					"whole box)"
+		elseif c then
 			hover.box(v3(c), magic.Vector3(0.5, 0.5, 0.5), nil, M.HOVER)
 			g.left = ((S.vbox and not S.vbox.b) and "the box's second corner"
 					or "the box's first corner") .. " at " .. table.concat(c, ",")
@@ -4337,6 +4583,19 @@ local function draw()
 				magic.Vector3(math.max(a[1], b[1]) + 0.5,
 					math.max(a[2], b[2]) + 0.5, math.max(a[3], b[3]) + 0.5)),
 				magic.Color(0.3, 1, 0.5), false)
+		-- [KIT_BOX_ADJUST] its handles, the axes' colours, the one under
+		-- the pointer or dragged yellow
+		local under = S.box_drag and S.box_drag.h or
+				BX.box_handle_at(S.mx or 0, S.my or 0)
+		local AXIS_COLOURS = {magic.Color(1, 0.35, 0.3),
+			magic.Color(0.4, 1, 0.4), magic.Color(0.35, 0.6, 1)}
+		for _, h in ipairs(BX.box_handles()) do
+			local r = 0.2
+			dbg:AddBoundingBox(magic.BoundingBox(
+					h.at - magic.Vector3(r, r, r), h.at + magic.Vector3(r, r, r)),
+					(under and under.name == h.name) and YELLOW or
+					AXIS_COLOURS[h.k], false)
+		end
 	end
 	-- The round's own entities, orange (players are drawn by the app)
 	for _, e in ipairs(made()) do
