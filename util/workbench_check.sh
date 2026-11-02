@@ -101,9 +101,10 @@ if [ "${1:-}" = web ]; then
 	# ([KIT] stage 4d: restarted by the inspector's "Restart this", its
 	# dialog drawn by kit/npc's client part; then kit/button_door placed
 	# from the palette). The pause menu ([KIT] 4c, extensions/pause_menu): up at
-	# once for the pointer lock headless Chrome does not give (then
-	# skeldat's web_lock_check stand-in in the page, a click off the menu
-	# closes it); Escape and the menu's Edit (clicked by label, near where
+	# once for the pointer lock not given (skeldat's web_lock_check
+	# stand-in in the page from the login on, refusing until the click off
+	# the menu that closes it: Chromium under a window manager gave the
+	# lock and no menu came up, 2026-11-02); Escape and the menu's Edit (clicked by label, near where
 	# the menu's rows are at 1200x800: Kit's top bar has the same labels);
 	# a link begun, Escape cancels it, the next Escape the menu;
 	# Stop and Play there, and Play mode; ([KIT] stage 4f) a raise stroke
@@ -111,7 +112,11 @@ if [ "${1:-}" = web ]; then
 	# 4g) "New voxel type...": a PNG uploaded by the browser's picker, the
 	# type named frost and made, taken in hand from the Voxel list (Down,
 	# Enter: a builder's own come first; the voxels tool on with it, which
-	# the first Escape puts away) and placed in play
+	# the first Escape puts away) and placed in play, in a region (6, at
+	# about (-1, 1, 2), clicked in from the palette in the plan) letting all
+	# place ([KIT_BUILDER_PLAY_RULES]: out of edit mode the admin plays by
+	# the rules); the palette's NPC dragged by label ([KIT_SCENES]' Scene
+	# dropdown moved its rows)
 	check_tmp workbench_web; t=$CHECK_TMP
 	stub="(function(){ var held = null, refuse = false;
  Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }});
@@ -119,7 +124,7 @@ if [ "${1:-}" = web ]; then
  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') refuse = true; }, true);
  document.addEventListener('mousedown', function(){ refuse = false; }, true);
  HTMLCanvasElement.prototype.requestPointerLock = function(){
-  if(refuse){ document.dispatchEvent(new Event('pointerlockerror')); return Promise.reject(new Error('refused')); }
+  if(refuse || !window.lockOk){ document.dispatchEvent(new Event('pointerlockerror')); return Promise.reject(new Error('refused')); }
   if(held !== this) set(this); return Promise.resolve(); };
  document.exitPointerLock = function(){ if(held) set(null); };
  return 'stub'; })()"
@@ -127,6 +132,7 @@ if [ "${1:-}" = web ]; then
 [
 	["nav", "\${URL}"],
 	["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+	["eval", "$(echo "$stub" | tr "\n" " ")"],
 	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
 	["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
 	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
@@ -142,14 +148,14 @@ if [ "${1:-}" = web ]; then
 	["click", "Button", "Create"],
 	["waitlog", "player physics enabled", 120],
 	["waitlog_any", "pause: the menu shown", 10],
-	["eval", "$(echo "$stub" | tr "\n" " ")"],
+	["eval", "window.lockOk = true, 'lock given from here'"],
 	["click", 100, 700], ["waitlog", "pause: the menu closed", 10], ["wait", 1000],
 	["waitlog_any", "kit editor: edit rights: yes", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["shot", "\${OUT}/menu.png"],
 	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
 	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
-	["drag", 93, 223, 616, 250], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
+	["drag", "Button", "kit/npc", 616, 250], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
 	["frames", 3], ["click", 616, 250], ["waitlog", "kit editor: selected 3", 10],
 	["key", "PageUp"], ["waitlog", "kit editor: state: 2 entities, 2 to undo", 10],
 	["frames", 3], ["shot", "\${OUT}/edit.png"],
@@ -192,6 +198,14 @@ if [ "${1:-}" = web ]; then
 	["waitlog", "kit editor: in hand webboss/frost", 10],
 	["waitlog", "kit editor: tool voxels", 10],
 	["key", "Escape"], ["waitlog", "kit editor: tool select", 10],
+	["click", "Button", "kit/region"], ["waitlog", "kit editor: placing kit/region", 10],
+	["click", 560, 340], ["waitlog", "kit editor: placed kit/region at", 10],
+	["key", "Escape"], ["waitlog", "kit editor: placing nothing", 10],
+	["click", 560, 340], ["waitlog", "kit editor: selected 6", 10], ["frames", 3],
+	["click", "DropDownList", "▼", 1162, 428], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
+	["key", "Home"], ["key", "Enter"], ["waitlog", "kit editor: 6/1 place = all", 10],
+	["click", "Button", "Apply"], ["sync", 5000], ["frames", 3],
+	["shot", "\${OUT}/region.png"],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Play mode", 600, 339], ["waitlog", "kit editor: edit mode off", 10], ["frames", 5],
 	["mouse", 600, 400], ["frames", 2], ["mouse", 600, 560], ["frames", 5],
@@ -213,6 +227,7 @@ J
 			"An undo by webboss: a terrain stroke" \
 			"webboss uploaded texture kit/up/" \
 			"webboss made voxel type webboss/frost version 1 (kit/up/" \
+			"An edit by webboss: set 6's kit/region place to \"all\"" \
 			"workbench: webboss placed webboss/frost ("; do
 		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
 	done
