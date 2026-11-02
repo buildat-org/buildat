@@ -266,6 +266,11 @@ function M.make_one(name, i)
 	env.n, env.ms = env.n + 1, env.ms + ms
 	if ms > env.slowest_ms then
 		env.slowest, env.slowest_ms = name .. " " .. i, ms
+		-- A frame's hitch if made at its first play: said as it grows
+		if ms >= 10 then
+			env.log(string.format("skeldat: sound %s %d made in %.1f ms, the "
+					.. "slowest yet (%d made)", name, i, ms, env.n))
+		end
 	end
 	return list[i]
 end
@@ -275,9 +280,9 @@ end
 -- all at the start (1.2 s of a web join's one thread); one picked before
 -- its turn is made then. -> true once every one is made
 local queue = nil
-function M.start(blip, magic, synth)
+function M.start(blip, magic, synth, log)
 	env = {blip = blip, magic = magic, synth = synth, n = 0, ms = 0,
-		slowest = "", slowest_ms = 0}
+		slowest = "", slowest_ms = 0, log = log}
 	queue = {}
 	local names = {}
 	for name in pairs(M.TAKES) do

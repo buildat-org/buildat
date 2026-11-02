@@ -1023,7 +1023,7 @@ do
 	-- [SK_WEB_JOIN_HANDLERS] Made over the first frames, 4 ms of each
 	-- (a sound picked before its turn made then); the self-check for a
 	-- check alone (BUILDAT_SKELDAT_SELF_TEST=1, check.sh 23 and 40)
-	sounds.start(blip, magic, buildat.synth)
+	sounds.start(blip, magic, buildat.synth, function(line) log:info(line) end)
 	local frames, sub = 0, nil
 	sub = magic.SubscribeToEvent("Update", function()
 		if not sub then
