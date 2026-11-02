@@ -5265,7 +5265,10 @@ struct Module: public interface::Module, public Interface
 			const uint32_t word = w->get_voxel(q, true).data;
 			const interface::VoxelDefinition *d =
 					w->get_voxel_reg()->get(f.id.get(word));
-			what = (d ? d->name.block_name : ss_("?"))+
+			// [KIT_SCENES_EMPTY_CELL] id 0 has no name: a section loaded
+			// and not generated yet holds it
+			what = (!d ? ss_("?") : d->name.block_name.empty() ?
+					ss_("undefined") : d->name.block_name)+
 					", param "+itos(f.param.bound() ? f.param.get(word) : 0)+
 					", tint "+itos(f.tint.bound() ? f.tint.get(word) : 0)+
 					", sky light "+itos(f.light_sky.bound() ?
@@ -5712,6 +5715,38 @@ struct Module: public interface::Module, public Interface
 						back = false;
 						break;
 					}
+			});
+		// [KIT_SCENES_EMPTY_CELL] A new World's queue drains between the
+		// streamer's batches: told "generated" after its first two
+		// sections, a builder read the cell they stood by as id 0. The
+		// section at each load point (the spawn, each player) is in first.
+		// simplified: the point's own section, not all of its generate
+		// radius
+		if(back && m_w->world_first)
+			voxelworld::access(m_server, m_w->world_scene,
+					[&](voxelworld::Instance *w){
+				const pv::Vector3DInt16 ss = w->get_section_size_voxels();
+				auto div = [](int32_t a, int b){
+					return (int16_t)std::floor((double)a / b);
+				};
+				for(const voxelworld::LoadPoint &lp : w->get_load_points()){
+					if(lp.generate_xz < 0 || lp.generate_y < 0 || lp.hold_only)
+						continue;
+					const pv::Vector3DInt16 sp(div(lp.p.getX(), ss.getX()),
+							div(lp.p.getY(), ss.getY()),
+							div(lp.p.getZ(), ss.getZ()));
+					// One out of the World's region is never generated
+					if(sp.getY() < WORLD_SECTION_Y0 ||
+							sp.getY() > WORLD_SECTION_Y1 ||
+							std::abs(sp.getX()) >= WORLD_SECTIONS_XZ ||
+							std::abs(sp.getZ()) >= WORLD_SECTIONS_XZ)
+						continue;
+					if(!w->is_section_loaded(sp) ||
+							!w->is_section_generated(sp)){
+						back = false;
+						break;
+					}
+				}
 			});
 		if(!back)
 			return;
