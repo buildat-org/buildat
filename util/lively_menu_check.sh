@@ -161,7 +161,7 @@ launcher "$t/home.log" "$t/home.cmds"
 grep -aq "Asking the user about" "$t/home.log" && fail "a permission dialog ($t/home.log)"
 # [LAUNCHER_SELECTION_JUMP] The strip's rows came in above the row Home
 # started on, and the selection stayed on that row, now under them
-kept=$(grep -a "launch_menu: the selection kept on" "$t/home.log" | head -1)
+kept=$(grep -a "launch_menu: the selection kept on" "$t/home.log" | tail -1)
 echo "  ${kept#*launch_menu: }"
 echo "$kept" | grep -qE "kept on .*, row ([6-9]|[1-9][0-9])$" &&
 	! echo "$kept" | grep -qE "kept on (Busy server|tester/game|Release 9|Busy chat|Lamp trouble)" ||
