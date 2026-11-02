@@ -6,7 +6,9 @@
 -- drawn as floorplanner's caps_node draws it. The plan is a camera at the
 -- cut looking down, so a wall, a hill or a box crossing the cut lost its
 -- top to the near clip and showed its sides edge-on. Flat quads just under
--- the cut, unlit, in a node of their own shown in 2D alone:
+-- the cut, in a node of their own shown in 2D alone, lit as the voxels'
+-- tops are (unlit, under skeldat's HDR path the colours came out nearly
+-- black, its exposure being for its sun's radiance):
 --   - every solid (physically_solid) cell of the cut's layer (the cells
 --     the cut is in, ceil(cut - 0.5): the ones under it where it is at
 --     their tops, as the plan's x.5 cuts are, floor(cut)), in its
@@ -30,8 +32,8 @@ local magic = require("buildat/extension/urho3d")
 local voxelworld = require("buildat/module/voxelworld")
 local heightmap = require("buildat/module/heightmap")
 
--- How much darker a cut is than its colour (floorplanner's objects' 0.7;
--- the voxels' tops in the sun are as light as their texture)
+-- How much darker a cut is than a top of its colour beside it
+-- (floorplanner's objects' 0.7)
 local DARK = 0.6
 -- The plan's camera under the cut by CAM_UNDER (editor.lua), the voxels'
 -- and the heightmap's caps by UNDER, the entities' over those
@@ -49,7 +51,7 @@ local function make()
 	node = O.scene:CreateChild("kit_caps")
 	material = magic.Material:new()
 	material:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/NoTextureUnlitVCol.xml"))
+			"Techniques/NoTextureVCol.xml"))
 	material.cullMode = magic.CULL_NONE
 	node.enabled = false
 	C.ent_node = node:CreateChild("entities")
