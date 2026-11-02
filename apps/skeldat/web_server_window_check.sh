@@ -47,7 +47,7 @@ cat > "$t/steps.json" <<J
  ["type", "\${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
  ["key", "Enter"], ["waitlog", "Joined as webboss", 30],
  ["waitlog", "server window: the page ntfy", 30],
- ["waitlog", "pause: how to play shown", 60], ["wait", 1500],
+ ["waitlog_any", "pause: how to play shown", 60], ["wait", 1500],
  ["click", 667, 217], ["waitlog", "server window: closed", 10], ["wait", 500],
  ["click", 600, 756], ["waitlog", "pause: the menu closed", 10], ["wait", 1500],
  ["nav", "\${URL}"], ["eval", "$stub"],
