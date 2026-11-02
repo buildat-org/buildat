@@ -4992,8 +4992,12 @@ function M.editor(options)
 		E.costs = c
 		if S.cost_text and S.cost_id then
 			local line = M.cost_line(S.cost_id)
-			if S.cost_text.text ~= line then
-				S.cost_text.text = line
+			S.cost_text.text = line
+			-- [KIT_COST_LOG_FLAKY] Told once a line, also when the inspector
+			-- showed it already (the costs in before the selection)
+			local said = S.cost_said
+			if not said or said.id ~= S.cost_id or said.line ~= line then
+				S.cost_said = {id = S.cost_id, line = line}
 				log:info("kit editor: entity " .. S.cost_id .. ": " .. line)
 			end
 		end
