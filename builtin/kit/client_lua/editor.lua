@@ -2041,10 +2041,14 @@ people = function()
 	local lw, n = 0, 0
 	for _, e in ipairs(entities()) do
 		if e.kind ~= "scene" and not (hide and e.pos) then
+			-- [KIT_SCENE_HEIGHTMAP_SHOWN] one with no position in a scene
+			-- is the scene's, not game-wide
 			local gr = row(list)
+			local sn = scene_name(e)
 			local l = label(gr, e.pos and e.id .. " " .. tostring(e.name) ..
-					" at " .. table.concat(e.pos, ",") or "Game-wide: " .. e.id ..
-					" " .. tostring(e.name))
+					" at " .. table.concat(e.pos, ",") or (sn and "Scene " ..
+					sn .. ": " or "Game-wide: ") .. e.id .. " " ..
+					tostring(e.name))
 			local sb = button(gr, e.id == S.primary and "Selected" or "Select",
 					function()
 				M.select(e.id)

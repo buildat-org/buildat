@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-02)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/teleporter.lua builtin/kit/client_lua/editor.lua builtin/replicate/** builtin/voxelworld/** apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/teleporter.lua builtin/kit/client_lua/editor.lua builtin/replicate/** builtin/voxelworld/** builtin/heightmap/** apps/workbench/**
 # [KIT_SCENES] (kit_plan 4k) Scenes, each its own World; portals. A fresh
 # save on Workbench, the admin Ended, a World on the main scene:
 #   1. A stone in the main scene. A new scene "cave" with the World
@@ -16,7 +16,10 @@
 #      stepping on its teleporter; the sign's takes them back.
 #   2. The save's World moved onto the root (as before scenes); a
 #      restart: it moves back onto the main scene, the scenes are made
-#      again by the app, each its voxels.
+#      again by the app, each its voxels. [KIT_SCENE_HEIGHTMAP_SHOWN]
+#      The main scene's World made a heightmap: the client builds it;
+#      in the cave (voxels) the client drops it; each World is listed
+#      as its scene's, not game-wide.
 #   util/kit_scenes_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -217,6 +220,26 @@ EOF
 	echo "sync 5000"
 	info 6 1 6
 	info 3 1 3
+	# [KIT_SCENE_HEIGHTMAP_SHOWN] A heightmap in the main scene, not
+	# drawn in the cave; each World labelled as its scene's
+	ed '{"op": "scene", "name": "world"}'
+	in_scene world "world, cave, sky"
+	edit '{"op": "set", "id": 3, "comp": 0, "param": "size", "value": "finite"}'
+	edit '{"op": "set", "id": 3, "comp": 0, "param": "surface", "value": "heightmap"}'
+	cat <<'EOF'
+wait_log_any 30000 heightmap: terrain built
+sync 5000
+frames 10
+click Text "Scene world: 3 *"
+event kit_edit {"op": "scene", "name": "cave"}
+wait_log 30000 heightmap: removed
+EOF
+	in_scene cave "world, cave, sky"
+	cat <<'EOF'
+sync 5000
+wait_log_absent 2000 heightmap: terrain built
+click Text "Scene cave: 5 *"
+EOF
 	echo quit
 } > "$t/boss2.cmds"
 server 2
@@ -230,5 +253,6 @@ expect 1 "(3,1,3): kit/stone, param 0, tint 0, sky light 0"
 expect 2 "(6,1,6): kit/planks, param 0, tint 0, sky light 0"
 expect 3 "(3,1,3): air, param 0, tint 0, sky light 0"
 echo "ok: after a restart a root World moves onto the main scene; the scenes are made again, each its voxels"
-echo "PASS: scenes: a new scene with its World copied or blank, switched between, each its voxels and World row; refusals; a two-way teleporter between scenes, arriving silently; a root World migrated and the scenes back after a restart"
+echo "ok: a heightmap in the main scene is dropped in a voxel scene; each World labelled as its scene's"
+echo "PASS: scenes: a new scene with its World copied or blank, switched between, each its voxels and World row; refusals; a two-way teleporter between scenes, arriving silently; a root World migrated and the scenes back after a restart; no heightmap of another scene drawn"
 # vim: set noet ts=4 sw=4:

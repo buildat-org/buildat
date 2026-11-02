@@ -511,6 +511,7 @@ struct Module: public interface::Module, public Interface
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("replicate:peer_joined_scene"));
+		m_server->sub_event(this, Event::t("replicate:peer_left_scene"));
 		m_server->sub_event(this, Event::t("main_context:scene_deleted"));
 	}
 
@@ -520,6 +521,8 @@ struct Module: public interface::Module, public Interface
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_TYPEN("replicate:peer_joined_scene", on_peer_joined_scene,
 				replicate::PeerJoinedScene)
+		EVENT_TYPEN("replicate:peer_left_scene", on_peer_left_scene,
+				replicate::PeerLeftScene)
 		EVENT_TYPEN("main_context:scene_deleted", on_scene_deleted,
 				main_context::SceneDeleted)
 	}
@@ -552,6 +555,29 @@ struct Module: public interface::Module, public Interface
 		// sent is the map as it is
 		it->second->commit();
 		it->second->send_all(event.peer);
+	}
+
+	// [KIT_SCENE_HEIGHTMAP_SHOWN] A peer gone to another scene drops the
+	// map of the one it left: the client has one Terrain, and the next
+	// scene's map (if it has one) comes in on_peer_joined_scene(). A
+	// peer that disconnected, or is on that scene again by the time the
+	// event is handled, is sent nothing
+	void on_peer_left_scene(const replicate::PeerLeftScene &event)
+	{
+		if(!m_maps.count(event.scene))
+			return;
+		sv_<replicate::PeerId> on;
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			on = irep->find_peers_on_scene(event.scene);
+		});
+		if(std::find(on.begin(), on.end(), event.peer) != on.end())
+			return;
+		network::access(m_server, [&](network::Interface *inet){
+			const sv_<network::PeerInfo::Id> peers = inet->list_peers();
+			if(std::find(peers.begin(), peers.end(), event.peer) !=
+					peers.end())
+				inet->send(event.peer, "heightmap:remove", "");
+		});
 	}
 
 	void on_scene_deleted(const main_context::SceneDeleted &event)
