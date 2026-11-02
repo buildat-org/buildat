@@ -1004,8 +1004,9 @@ picks=$(grep -ac "skeldat: sound_own pickup" "$t/drops.log")
 	fail "18 stacks picked up with $picks pickup sounds ($t/drops.log)"
 # 15. A respawn 250 voxels from the death ([SKELDAT_RESPAWN_LOAD]), in
 # 512 x 128 x 512: the player's range follows it, the chunks within 2 of
-# the eye drawn within 30 s (a join's 2.5 s; before, not until the player
-# walked into another section); the death by drowning there
+# the eye drawn within 30 s times CHECK_SLOW (a join's 2.5 s; before,
+# not until the player walked into another section); the death by
+# drowning there
 log18="$t/srv18.log"
 BUILDAT_SKELDAT_WORLD=respawn BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="4 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.4 BUILDAT_SKELDAT_SPAWN="0 0" \
@@ -1014,10 +1015,13 @@ BUILDAT_SKELDAT_WORLD=respawn BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="4 -1 
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv18" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log18)"
 CHECK_PIDS+=($SERVER_PID)
+# [SK_RESPAWN_DRAW_SLOW] 30 s on the desk, scaled by the machine's
+# speed: a full tier's loaded box took longer with the order right
+slow_limit respawn_ms 30000
 printf '%s\n' "wait_log 300000 skeldat: the chunks within 2 drawn" \
 	"wait_log 60000 pause: the death screen shown" \
 	"delay 1000" 'click Button "Respawn"' \
-	"wait_log 30000 skeldat: the chunks within 2 drawn" quit > "$t/respawn.cmds"
+	"wait_log ${respawn_ms%.*} skeldat: the chunks within 2 drawn" quit > "$t/respawn.cmds"
 client respawn "$t/respawn.cmds"
 wait $CLIENT || fail "the respawn's world not drawn ($t/respawn.log, $log18)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null

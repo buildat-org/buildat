@@ -211,6 +211,7 @@ local material_update_cbs = {} -- function(node)
 local node_volume_cache = {} -- {node_id: {volume:, last_access_us:}}
 -- Set up by sub_events(), which is what runs once the world is there
 local node_update_queue = nil
+local near_boost_set = false
 -- Where the queue measures from (the camera), for undrawn_around()
 local queue_p = nil
 -- node id -> {before =, after =}: the voxel data a predicted write
@@ -600,6 +601,7 @@ end
 
 function sub_events()
 	node_update_queue = buildat.SpatialUpdateQueue()
+	near_boost_set = false
 
 	local function note_horizon(node, moved)
 		if not M.horizon or not M.chunk_size_voxels or
@@ -964,6 +966,17 @@ function sub_events()
 
 		node_update_queue:set_p(camera_p)
 		queue_p = camera_p
+		-- [SK_RESPAWN_DRAW_SLOW] The near weight queue_initial_node_update()
+		-- gives within 5 chunks, read at the pick: given at insertion, the
+		-- chunks round a respawn 250 away, queued while far, sorted behind
+		-- the old place's and the near ones waited 30 s on a slow box.
+		-- A client built before the queue had it keeps the insertion's
+		if not near_boost_set and M.chunk_size_voxels and
+				node_update_queue.set_near_boost then
+			near_boost_set = true
+			node_update_queue:set_near_boost("geometry",
+					5 * M.chunk_size_voxels.x, MODIFIED_GEOMETRY_NEAR_WEIGHT)
+		end
 		-- Which way they look is part of the order now: what is in front
 		-- of them is what they are waiting to see
 		node_update_queue:set_dir(camera_dir)

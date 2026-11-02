@@ -94,6 +94,14 @@ struct SpatialUpdateQueue
 	// Inside this the camera can be standing on it, and which way it looks
 	// says nothing
 	static constexpr float VIEW_NEAR_D = 16.0f;
+	// [SK_RESPAWN_DRAW_SLOW] An item of this type within m_boost_d of the
+	// camera has a near weight of at least m_boost_w, read when picked: a
+	// weight given at insertion for "near the camera" stayed with chunks
+	// queued while the camera was far, and after a respawn 250 away those
+	// round the new eye sorted behind the old place's
+	ss_ m_boost_type;
+	float m_boost_d = -1.0f;
+	float m_boost_w = -1.0f;
 
 	// What an item is worth right now: the same near/far triggers as ever,
 	// then the two factors above.
@@ -104,8 +112,12 @@ struct SpatialUpdateQueue
 		item.f = -1.0f;
 		item.fw = -1.0f;
 		if(item.near_trigger_d != -1.0f){
+			float near_weight = item.near_weight;
+			if(d < m_boost_d && near_weight < m_boost_w &&
+					item.value.type == m_boost_type)
+				near_weight = m_boost_w;
 			float f_near = d / item.near_trigger_d;
-			float fw_near = f_near / item.near_weight;
+			float fw_near = f_near / near_weight;
 			if(item.fw == -1.0f || (fw_near < item.fw &&
 					(item.f == -1.0f || f_near < item.f))){
 				item.f = f_near;
@@ -161,6 +173,14 @@ struct SpatialUpdateQueue
 			m_p = p;
 			m_best_valid = false;
 		}
+	}
+
+	void set_near_boost(const ss_ &type, float d, float w)
+	{
+		m_boost_type = type;
+		m_boost_d = d;
+		m_boost_w = w;
+		m_best_valid = false;
 	}
 
 	void set_dir(const Vector3 &dir)
@@ -439,6 +459,29 @@ static void self_check()
 				item_value("geometry", 2)); // in front, further
 		assert(q.get_value().node_id == 1);
 	}
+
+	// [SK_RESPAWN_DRAW_SLOW] The near boost is read at the pick: an item
+	// queued far at a low weight, the camera then beside it, comes before
+	// one at weight 1 further off; another type is not boosted
+	{
+		SpatialUpdateQueue q;
+		q.set_p(Vector3(0, 0, 0));
+		q.set_dir(Vector3(0, 1, 0));
+		q.set_near_boost("geometry", 80.0f, 1.0f);
+		q.put(Vector3(300, 0, 0), 0.15f, 1000.0f, -1.0f, -1.0f,
+				item_value("geometry", 1)); // far: fw 2
+		q.put(Vector3(150, 0, 0), 1.0f, 1000.0f, -1.0f, -1.0f,
+				item_value("geometry", 2)); // fw 0.15
+		assert(q.get_value().node_id == 2);
+		q.put(Vector3(150, 0, 0), 1.0f, 1000.0f, -1.0f, -1.0f,
+				item_value("geometry", 2));
+		q.set_p(Vector3(250, 0, 0)); // 50 from item 1: boosted, fw 0.05
+		assert(q.get_value().node_id == 1);
+		q.put(Vector3(300, 0, 0), 0.15f, 1000.0f, -1.0f, -1.0f,
+				item_value("geometry", 1));
+		q.set_near_boost("physics", 80.0f, 1.0f); // fw 0.33 against 0.1
+		assert(q.get_value().node_id == 2);
+	}
 }
 
 struct LuaSUQ
@@ -462,6 +505,13 @@ struct LuaSUQ
 		tolua_Error tolua_err;
 		GET_TOLUA_STUFF(dir, 2, Vector3);
 		o->internal.set_dir(*dir);
+		return 0;
+	}
+	// set_near_boost(type, d, w)
+	static int l_set_near_boost(lua_State *L){
+		LuaSUQ *o = internal_checkobject(L, 1);
+		o->internal.set_near_boost(luaL_checkstring(L, 2),
+				luaL_checknumber(L, 3), luaL_checknumber(L, 4));
 		return 0;
 	}
 	static int l_put(lua_State *L){
@@ -602,6 +652,7 @@ struct LuaSUQ
 		// fill method_table_L
 		DEF_METHOD(set_p);
 		DEF_METHOD(set_dir);
+		DEF_METHOD(set_near_boost);
 		DEF_METHOD(put);
 		DEF_METHOD(get);
 		DEF_METHOD(peek_next_f);

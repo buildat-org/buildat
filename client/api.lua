@@ -2795,6 +2795,12 @@ buildat.safe.SpatialUpdateQueue = function()
 			end
 			internal:set_dir(getmetatable(safe_dir).unsafe)
 		end,
+		-- [SK_RESPAWN_DRAW_SLOW] set_near_boost(type, d, w): nil on a
+		-- client built before the queue had it
+		set_near_boost = internal.set_near_boost and
+				function(self, type, d, w)
+			internal:set_near_boost(type, d, w)
+		end or nil,
 	}
 end
 
