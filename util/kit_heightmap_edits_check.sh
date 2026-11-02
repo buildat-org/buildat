@@ -21,7 +21,8 @@
 #      its map loaded at the world's origin, where it was.
 # [KIT_HM_ORIGIN] Part 1's map lies on the voxels' area, centred, and its
 # resize grows both sides; cobble columns on two of the area's corners, seen from
-# above (KEEP_TMP=1 keeps plan.png).
+# above in 2D and 3D, a pixel test at the map's corners (KEEP_TMP=1 keeps
+# plan.png and view3d.png).
 #   util/kit_heightmap_edits_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -106,12 +107,13 @@ EOF
 	set_w surface '"heightmap"'
 	echo "wait_log_any 20000 heightmap: terrain built"
 	# [KIT_HM_ORIGIN] Voxels on two corners of the voxels' area, seen
-	# from above with the map under them
-	# (columns: the plan shows the cut through them, whatever the
-	# ground's height there)
+	# from above with the map under them. [KIT_HM_CORNER_VOXELS_UNSEEN]
+	# Columns from 0 (over the ground whatever its height) under the cut:
+	# a column the cut goes through shows nothing (no caps; its inner
+	# faces are not meshed), and one over the cut is cut away
 	for c in "-32 -32" "31 31"; do
 		set -- $c
-		for y in $(seq 0 12); do
+		for y in $(seq 0 11); do
 			n=$((n + 1))
 			printf 'event kit_edit {"op": "set_voxel", "pos": [%s, %s, %s], "voxel": "kit/cobble"}\nwait_log 10000 entities, %d to undo\n' "$1" "$y" "$2" "$n"
 		done
@@ -119,15 +121,29 @@ EOF
 	cat <<'EOF'
 keypress F1
 wait_log 5000 kit editor: the view is 2D
-mouse_pos 640 350
 EOF
-	for _ in $(seq 10); do echo "mouse_wheel -1"; echo "frames 2"; done
+	# The cut over the columns' tops (11.5) from any first cut over 0
+	for _ in $(seq 14); do echo 'click Button "Cut +"'; done
+	echo "wait_log_any 5000 kit editor: cut at"
+	echo "mouse_pos 640 350"
+	# Out to the whole map (6 steps: about 90 across; at 10 the 3D view
+	# from the plan sat past the far clip and drew only sky)
+	for _ in $(seq 6); do echo "mouse_wheel -1"; echo "frames 2"; done
+	# Then 3D from the plan (a right drag: straight down from over its
+	# middle, orbited a little)
 	cat <<'EOF'
 idle 8000
 frames 30
 screenshot @T@/plan.png
-keypress F2
-wait_log 5000 kit editor: the view is 3D
+mouse_pos 640 350
+mouse_down right
+frames 2
+mouse_pos 640 356
+frames 2
+mouse_pos 640 362
+frames 2
+mouse_up right
+wait_log_any 5000 kit editor: the view is 3D
 idle 3000
 frames 30
 screenshot @T@/view3d.png
@@ -179,6 +195,35 @@ dec=$(grep -aoP 'decorate at \(20,20\) .*, \K\d+(?= decorations \()' "$s" | head
 	fail "the decorate stroke's $dec decorations not kept over the resize and the height ($s)"
 want "$s" "edited heightmap samples kept over the generated map" \
 	"World: the heightmap kept as the previous one"
+# [KIT_HM_CORNER_VOXELS_UNSEEN] The corner columns drawn in 2D and 3D:
+# cobble's grey (unsaturated; the sand, grass and sky are not) clear of
+# the panels, in two spots as far apart as the map's corners
+for shot in plan view3d; do
+	python3 -I - "$t/$shot.png" <<'PY2' || fail "the corner columns not seen in $t/$shot.png"
+import colorsys, sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB")
+W, H = im.size
+px = im.load()
+grey = []
+for y in range(70, 625):
+	for x in range(290, W - 10):
+		r, g, b = px[x, y]
+		h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+		if s < 0.15 and 0.2 < v < 0.75:
+			grey.append((x, y))
+assert grey, "no grey"
+a = grey[0]
+d2 = lambda p, q: (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2
+b = max(grey, key=lambda p: d2(p, a))
+a = max(grey, key=lambda p: d2(p, b))
+na = sum(1 for p in grey if d2(p, a) < 100)
+nb = sum(1 for p in grey if d2(p, b) < 100)
+print("  %s: grey at %s (%d) and %s (%d), %d px apart" % (
+		sys.argv[1].split("/")[-1], a, na, b, nb, d2(a, b) ** 0.5))
+assert d2(a, b) > 150 ** 2 and na >= 3 and nb >= 3
+PY2
+done
 g1=$(echo "$g" | sed -n 3p)
 echo "ok: a raised sample kept at $he over a resize and a change of height, an unedited one generated again, $dec builder's decorations kept"
 
