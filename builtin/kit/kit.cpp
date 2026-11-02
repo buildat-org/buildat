@@ -893,6 +893,8 @@ struct Module: public interface::Module, public Interface
 	// may be on its loopback too
 	std::set<size_t> m_local_peers;
 	sm_<ss_, json::Value> m_package_types;
+	// [KIT_SET_UPGRADE_BREAKS] set_breaks()'s set, by package, while it tries
+	sm_<ss_, json::Value> m_set_trial;
 	// The app's defaults for parameters, {type: {param: value}}
 	json::Value m_defaults = json::object();
 	std::set<ss_> m_palette;
@@ -3346,6 +3348,12 @@ struct Module: public interface::Module, public Interface
 					if(!name_ok(it.key()))
 						return "materials.json: "+ss_(k)+": "+it.key()+": a name "
 								"is letters, digits and _";
+			// [KIT_SET_UPGRADE_BREAKS] an upgrade a World made of it takes
+			if(old != m_packages.end()){
+				const ss_ bwhy = set_breaks(name, set);
+				if(!bwhy.empty())
+					return bwhy;
+			}
 		}
 		// The types as the box takes them, then the prefabs on them; on a
 		// refusal the old version's are put back
@@ -3788,7 +3796,10 @@ struct Module: public interface::Module, public Interface
 			return true;
 		}
 		auto pk = m_packages.find(id);
-		const json::Value set = pk == m_packages.end() ? json::Value() :
+		// [KIT_SET_UPGRADE_BREAKS] an upgrade's set tried in its place
+		auto tr = m_set_trial.find(id);
+		const json::Value set = tr != m_set_trial.end() ? tr->second :
+				pk == m_packages.end() ? json::Value() :
 				pk->second.get("materials");
 		if(!set.is_object()){
 			why = "no material set "+shown(id)+" is installed";
@@ -3811,6 +3822,34 @@ struct Module: public interface::Module, public Interface
 			return false;
 		out = world::merge_sets(b, set);
 		return true;
+	}
+
+	// [KIT_SET_UPGRADE_BREAKS] Why package id's set `set` in place of its
+	// installed one would break a World made of it ("": none would)
+	ss_ set_breaks(const ss_ &id, const json::Value &set)
+	{
+		ss_ out;
+		for(auto &w : m_worlds){
+			if(!out.empty() || !w.second.world_scene || !scene_id(w.first))
+				continue;
+			WorldScope ws(m_w, &w.second);
+			const json::Value params = world_params();
+			const ss_ uses = jstr(params, "materials_pin");
+			if(!(uses.compare(0, id.size() + 1, id+" ") == 0 ||
+					uses.find(" < "+id+" ") != ss_::npos))
+				continue;
+			m_set_trial[id] = set;
+			world::MaterialSet ms;
+			ss_ pin, why;
+			world::Params p;
+			p.from(params);
+			if(material_set(jstr(params, "materials"), ms, pin, why))
+				why = set_refusal(p, ms);
+			m_set_trial.clear();
+			if(!why.empty())
+				out = "it would break the World of scene "+w.first+": "+why;
+		}
+		return out;
 	}
 
 	bool material_set(const ss_ &id, world::MaterialSet &out, ss_ &pin,
@@ -3927,6 +3966,39 @@ struct Module: public interface::Module, public Interface
 			warn("not applied: "+why);
 	}
 
+	// Why a World of these parameters cannot be made of the set ("": it
+	// can): its biome, the roles its generator needs, a heightmap's layers
+	static ss_ set_refusal(const world::Params &p, const world::MaterialSet &ms)
+	{
+		auto bi = ms.biomes.find(p.biome);
+		if(bi == ms.biomes.end())
+			return "no biome \""+p.biome+"\" in the material set "+ms.name;
+		const world::Biome &b = bi->second;
+		// The roles the generator needs, each a voxel by its biome
+		sv_<ss_> need;
+		if(p.generator != "empty")
+			need = {"top", "filler", "stone", "riverbed"};
+		if(p.generator == "noise" || p.generator == "valleys" ||
+				p.border == "water" || (p.generator == "flat" &&
+				p.sea_level > p.level))
+			need.push_back("water");
+		if(p.border == "wall")
+			need.push_back("stone");
+		for(const ss_ &r : need)
+			if(ms.resolve(b, r).empty())
+				return "the "+p.generator+" generator needs the role "+r+
+						", which biome "+p.biome+" has none of (material set "+
+						ms.name+")";
+		if(p.heightmap())
+			for(const char *r : {"top", "stone", "riverbed"}){
+				const ss_ v = ms.resolve(b, r);
+				auto m = ms.voxels.find(v);
+				if(m == ms.voxels.end() || m->second.layer < 0)
+					return v+" ("+r+") has no heightmap layer";
+			}
+		return "";
+	}
+
 	bool apply_world(const json::Value &params, const ss_ &by, bool first,
 			ss_ &why)
 	{
@@ -3956,29 +4028,10 @@ struct Module: public interface::Module, public Interface
 				p.biome = ms.biomes.begin()->first;
 			}
 		}
-		auto bi = ms.biomes.find(p.biome);
-		if(bi == ms.biomes.end()){
-			why = "no biome \""+p.biome+"\" in the material set "+ms.name;
+		why = set_refusal(p, ms);
+		if(!why.empty())
 			return false;
-		}
-		const world::Biome &b = bi->second;
-		// The roles the generator needs, each a voxel by its biome
-		sv_<ss_> need;
-		if(p.generator != "empty")
-			need = {"top", "filler", "stone", "riverbed"};
-		if(p.generator == "noise" || p.generator == "valleys" ||
-				p.border == "water" || (p.generator == "flat" &&
-				p.sea_level > p.level))
-			need.push_back("water");
-		if(p.border == "wall")
-			need.push_back("stone");
-		for(const ss_ &r : need)
-			if(ms.resolve(b, r).empty()){
-				why = "the "+p.generator+" generator needs the role "+r+
-						", which biome "+p.biome+" has none of (material set "+
-						ms.name+")";
-				return false;
-			}
+		const world::Biome &b = ms.biomes.find(p.biome)->second;
 		if(p.heightmap() && !p.finite()){
 			why = "a heightmap surface is finite only";
 			return false;
@@ -4028,15 +4081,8 @@ struct Module: public interface::Module, public Interface
 		if(!why.empty())
 			return false;
 		if(p.heightmap())
-			for(const char *r : {"top", "stone", "riverbed"}){
-				const ss_ v = ms.resolve(b, r);
-				auto m = ms.voxels.find(v);
-				if(m == ms.voxels.end() || m->second.layer < 0){
-					why = v+" ("+r+") has no heightmap layer";
-					return false;
-				}
-				layers.push_back(m->second.layer);
-			}
+			for(const char *r : {"top", "stone", "riverbed"})
+				layers.push_back(ms.voxels.find(ms.resolve(b, r))->second.layer);
 		up_<world::Heights> h(new world::Heights());
 		h->p = p;
 		valleys_query(*h);

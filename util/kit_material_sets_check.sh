@@ -20,8 +20,10 @@
 #      top over redland's gravel (the later set winning per role), the
 #      cobble still there.
 #   3. [KIT_SET_ORPHAN_TEXTURES] alice/badland (a texture, and a decoration
-#      naming no structure) refused at its install; at a restart the save
-#      still has 2 uploaded textures.
+#      naming no structure) refused at its install; [KIT_SET_UPGRADE_BREAKS]
+#      alice/redland 2.0.0 (grassland without stone) refused as an upgrade,
+#      naming the World it would break; at a restart the save still has 2
+#      uploaded textures and redland 1.0.0.
 #   4. [KIT_SET_MISSING_NO_HOST] A copy of the save with blueland's package
 #      row deleted: Kit hosts, the World on the app's set with a warning
 #      naming blueland.
@@ -228,8 +230,9 @@ want "$t/boss.log" "kit: warning: World: 1 edited sections kept" \
 	"kit: warning: World: not applied: the flat generator needs the role stone"
 echo "ok: installed, a World switched between sets"
 
-# 3. A set refused at its install keeps no texture
-mkdir -p "$t/badland/textures"
+# 3. A set refused at its install keeps no texture; an upgrade breaking
+# the World refused
+mkdir -p "$t/badland/textures" "$t/redland2/textures"
 png "$t/badland/textures/bad.png" 200 200 0
 cat > "$t/badland/materials.json" <<'EOF2'
 {"format": "kit_materials",
@@ -239,6 +242,12 @@ cat > "$t/badland/materials.json" <<'EOF2'
 EOF2
 manifest "$t/badland" badland
 publish "$t/badland"
+cp "$t/redland/textures/red_grass.png" "$t/redland2/textures/"
+sed 's/"stone": "kit\/stone", //' "$t/redland/materials.json" > "$t/redland2/materials.json"
+grep -q stone "$t/redland2/materials.json" && fail "redland 2.0.0 still has stone"
+manifest "$t/redland2" redland
+sed -i 's/"1.0.0"/"2.0.0"/' "$t/redland2/meta.json"
+publish "$t/redland2"
 cat > "$t/boss2.cmds" <<EOF2
 wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 player physics enabled
@@ -247,9 +256,13 @@ keypress F6
 wait_log 10000 kit editor: state:
 click Button "New"
 wait_log_any 20000 kit editor: package alice/badland 1.0.0
+wait_log_any 20000 kit editor: package alice/redland 2.0.0
 frames 3
 click Button "Install"
 wait_log 20000 kit editor: Package refused: materials.json: biome bad
+frames 3
+click Button "Upgrade"
+wait_log 20000 kit editor: Package refused: it would break the World of scene world
 quit
 EOF2
 start_server "$t/srv2.log" "Listening at" 300 auto \
@@ -263,8 +276,9 @@ BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_NAME=kitboss \
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 want "$t/srv2.log" "uploaded textures: 2" \
-	"refused: materials.json: biome bad: decoration 0"
-echo "ok: a refused set package stored no texture"
+	"refused: materials.json: biome bad: decoration 0" \
+	"refused: it would break the World of scene world: the flat generator needs the role stone"
+echo "ok: a refused set package stored no texture; an upgrade breaking the World refused"
 
 # 4. A copy of the save without blueland's package: hosted on the app's set
 cp -a "$t/user" "$t/user_copy"
@@ -286,4 +300,4 @@ want "$t/srv3.log" "Kit packages: 1" "uploaded textures: 2" \
 	"World: material set alice/blueland" \
 	"the app's set used until it is installed" "; materials kit/default"
 grep -aq "Kit is not hosted" "$t/srv3.log" && fail "Kit not hosted ($t/srv3.log)"
-echo "PASS: a set package installed from a local Aitta, a World switched to it generated again with its voxels (a placed voxel's section kept), an extending set winning per role, a missing role refused by name; a refused set storing no texture, a missing set hosted on the app's"
+echo "PASS: a set package installed from a local Aitta, a World switched to it generated again with its voxels (a placed voxel's section kept), an extending set winning per role, a missing role refused by name; a refused set storing no texture, an upgrade breaking a World refused, a missing set hosted on the app's"
