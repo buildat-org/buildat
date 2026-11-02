@@ -2,7 +2,7 @@
 // meters ([LC_SKY_SHARED]): a gradient from the horizon to the zenith, the
 // sun's disc and the moon, the stars at night, a flat layer of cloud lit by
 // the sun and the sky, and floorplanner's treeline. Luanti's coloured sky,
-// which the parity modes draw, is extensions/luanti_client/res/LuantiSky.glsl,
+// which the parity modes draw, is extensions/luanti_sky/LuantiSky.glsl,
 // the other half of what was one shader (SkyDome) with a switch.
 //
 // What time of day it is is not worked out here. The client hands in the

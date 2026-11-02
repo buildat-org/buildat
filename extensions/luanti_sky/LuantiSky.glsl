@@ -1,4 +1,6 @@
-// Luanti's sky, the parity modes' ([LC_SKY_SHARED] 5): a gradient from the
+// Luanti's sky, the parity modes' ([LC_SKY_SHARED] 5) and Kit's cartoon
+// lighting's ([KIT_LIGHTING]; moved here out of extensions/luanti_client/res,
+// so Kit does not depend on Luanti's client): a gradient from the
 // horizon to the zenith, the sun's and the moon's squares, the stars at
 // night and a flat layer of cloud, in display colours. pbr draws
 // extensions/physical_sky's PhysicalSky.glsl instead; the two were one

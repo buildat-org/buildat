@@ -16,13 +16,27 @@
 -- physical_sky's light by the hour, the voxels' light drawn). The World's
 -- sky light darkens caves in both when it is on.
 --
+-- The sky, each mode its own (cartoon Luanti's, physical physical_sky's),
+-- by the same parameters: the time places the sun and the moon and fades
+-- the stars in; sun, moon and stars switch them (off for a scene
+-- underground or in space: no sun, no moon, no light of theirs); the
+-- clouds' cover (0..1, 0 none), height (cells) and wind (cells a second,
+-- toward a direction in degrees, 0 +z, 90 +x).
+--
 -- Its signals: set_time (hours, 0 to 24), set_day_minutes, set_weather,
 -- set_season, set_sky (a colour), set_fog (the fog's end, cells),
--- set_ambient (a colour) and set_gravity. Out: dawn and dusk (6 and 18
+-- set_ambient (a colour), set_gravity, set_clouds (the cover),
+-- set_cloud_height, set_wind (its speed), set_wind_dir, set_sun, set_moon
+-- and set_stars (on or off). Out: dawn and dusk (6 and 18
 -- o'clock, while the time goes), weather_changed and season_changed (the
 -- new one).
 local WEATHER = {clear = true, rain = true, snow = true, storm = true}
 local SEASONS = {spring = true, summer = true, autumn = true, winter = true}
+-- The clouds' signals: the parameter, its range
+local CLOUDS = {set_clouds = {"cloud_cover", 0, 1},
+	set_cloud_height = {"cloud_height", 10, 1000},
+	set_wind = {"cloud_wind_speed", 0, 100},
+	set_wind_dir = {"cloud_wind_dir", 0, 360}}
 
 local function colour(v)
 	return type(v) == "string" and v:match("^#%x%x%x%x%x%x$") ~= nil
@@ -64,6 +78,13 @@ return {
 			choices = {"spring", "summer", "autumn", "winter"}},
 		lighting = {type = "string", default = "cartoon",
 			choices = {"cartoon", "physical"}},
+		cloud_cover = {type = "number", default = 0.4, min = 0, max = 1},
+		cloud_height = {type = "number", default = 120, min = 10, max = 1000},
+		cloud_wind_speed = {type = "number", default = 2, min = 0, max = 100},
+		cloud_wind_dir = {type = "number", default = 180, min = 0, max = 360},
+		sun = {type = "bool", default = true},
+		moon = {type = "bool", default = true},
+		stars = {type = "bool", default = true},
 	},
 	state = {
 		-- {key = value}: what the signals set, shared with the clients
@@ -73,7 +94,10 @@ return {
 	},
 	inputs = {set_time = "number", set_day_minutes = "number",
 		set_weather = "string", set_season = "string", set_sky = "string",
-		set_fog = "number", set_ambient = "string", set_gravity = "number"},
+		set_fog = "number", set_ambient = "string", set_gravity = "number",
+		set_clouds = "number", set_cloud_height = "number",
+		set_wind = "number", set_wind_dir = "number", set_sun = "bool",
+		set_moon = "bool", set_stars = "bool"},
 	outputs = {dawn = "none", dusk = "none", weather_changed = "string",
 		season_changed = "string"},
 	on_start = function(c)
@@ -110,6 +134,21 @@ return {
 			end
 			set(c, "fog_end", math.min(value, 2000))
 			set(c, "fog_start", math.min(value, 2000) * 0.6)
+		elseif input == "set_sun" or input == "set_moon" or
+				input == "set_stars" then
+			if type(value) ~= "boolean" then
+				return
+			end
+			set(c, k, value)
+		elseif CLOUDS[input] then
+			local p = CLOUDS[input]
+			if type(value) ~= "number" or value ~= value then
+				return
+			end
+			if input == "set_wind_dir" then
+				value = value % 360
+			end
+			set(c, p[1], math.max(p[2], math.min(p[3], value)))
 		elseif type(value) == "number" and value >= 0 then
 			-- set_day_minutes, set_gravity
 			set(c, k, math.min(value, k == "gravity" and 10 or 1440))

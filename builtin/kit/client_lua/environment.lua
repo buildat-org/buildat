@@ -19,9 +19,11 @@
 --            radiances), the voxels' albedo decoded (KitVoxel*Phys*.xml),
 --            the voxel types that give light drawn as point lights
 --   kit.physical() -> physical is drawn now
---   kit.lit_viewport(vp, role, finish): the lighting's render path on a
---     Kit view (role "play": the app's, which makes the look Kit's;
---     "editor": the editor's 3D and 2D), finish(rp) adding a view's own
+--   kit.lit_viewport(vp, role, finish, node): the lighting's render path
+--     on a Kit view (role "play": the app's, which makes the look Kit's;
+--     "editor": the editor's 3D and 2D), finish(rp) adding a view's own;
+--     node: its camera's (nil: the app's), where the sky and the lamps
+--     are looked at from
 return function(K)
 local M, O, log = K.M, K.O, K.log
 local magic = require("buildat/extension/urho3d")
@@ -113,9 +115,10 @@ local function lit_path(view)
 	view.vp.renderPath = rp
 end
 
-function M.lit_viewport(vp, role, finish)
+function M.lit_viewport(vp, role, finish, node)
 	local view = {vp = vp, base = vp.renderPath, finish = finish}
 	LIT.views[role] = view
+	LIT.view_node = node or O.camera
 	if role == "play" then
 		magic.renderer.HDRRendering = M.physical()
 	end
@@ -180,9 +183,14 @@ local function sun_toward(h)
 	return x / l, y / l, z / l
 end
 
--- The sky's dome (sky_render's: physical_sky's PhysicalSky.glsl), made
--- once; what it is before the hour says, voxel_shading's sky_defaults
--- and Luanti's moon and clouds (luanti_client's sky_model.lua's numbers)
+-- ---- The sky: sky_render's dome (physical_sky's), drawn by its
+-- PhysicalSky.glsl under physical and luanti_sky's LuantiSky.glsl under
+-- cartoon (Luanti's sky: the gradient, the sun's and the moon's squares,
+-- the stars, a flat two-tone layer of cloud), the two taking the same
+-- parameters (builtin/luanti's sky_dome.lua swaps them so too). What it
+-- is before the hour says: voxel_shading's sky_defaults, Luanti's moon
+-- and clouds (luanti_client's sky_model.lua's numbers: its cloud drift
+-- is at its clouds' height, 120)
 local SKY = {
 	defaults = {zenith = {r = 0.13, g = 0.24, b = 0.58},
 		horizon = {r = 0.55, g = 0.66, b = 0.84}, cloud_cover = 0.4,
@@ -190,24 +198,109 @@ local SKY = {
 		sun_color = {r = 1.7, g = 1.66, b = 1.52}},
 	schedule = {MOON_HALF = 0.048, CLOUD_ALPHA_DEFAULT = 229 / 255,
 		CLOUD_SPEED_DEFAULT = {0, -2}, CLOUD_WIND_PER_NODE = 0.0054},
+	CLOUD_HEIGHT = 120,
 	STAR_DENSITY = 0.004,
 	CLOUD = {r = 0.9, g = 0.92, b = 0.95},
+	SUN_TINT = {r = 244 / 255, g = 125 / 255, b = 29 / 255},
+	-- cartoon's zenith: the sky's colour deepened, the horizon's the fog's
+	ZENITH = {0.55, 0.65, 0.9},
 }
+-- The dome, made once there is a sky to draw (where Kit draws the app's
+-- view), its technique the mode's
 local function sky_dome(on)
 	local scene = replicate.main_scene
+	on = on and LIT.views.play ~= nil
 	if on and not LIT.dome and scene then
 		LIT.dome = sky_render().new_dome(scene, {x = 0, y = -1, z = 0},
 				SKY.defaults, log, SKY.schedule)
+		LIT.techniques = {
+			physical = magic.cache:GetResource("Technique",
+					"physical_sky/PhysicalSky.xml"),
+			cartoon = magic.cache:GetResource("Technique",
+					"luanti_sky/LuantiSky.xml")}
 	end
-	if LIT.dome then
-		LIT.dome:enabled(on)
+	local dome = LIT.dome
+	if not dome then
+		return nil
 	end
-	return on and LIT.dome
+	dome:enabled(on)
+	local mode = M.physical() and "physical" or "cartoon"
+	if on and LIT.dome_mode ~= mode then
+		LIT.dome_mode = mode
+		dome.material:SetTechnique(0, LIT.techniques[mode])
+	end
+	return on and dome
+end
+
+local function bool(v, default)
+	if type(v) == "boolean" then
+		return v
+	end
+	return default
+end
+
+-- The values the sky and the light are drawn by: the environment's
+-- parameters (and its signals') under the weather
+local function values()
+	local d = env.d
+	local w = d.weather
+	return {
+		cover = clamp01(tonumber(d.cloud_cover) or 0.4),
+		height = math.max(10, tonumber(d.cloud_height) or SKY.CLOUD_HEIGHT),
+		wind = math.max(0, tonumber(d.cloud_wind_speed) or 2),
+		dir = tonumber(d.cloud_wind_dir) or 180,
+		light = w == "storm" and 0.55 or (w == "rain" or w == "snow") and
+				0.8 or 1,
+		fog = w == "storm" and 0.5 or 1,
+		sun = bool(d.sun, true), moon = bool(d.moon, true),
+		stars = bool(d.stars, true),
+	}
+end
+
+-- How much sky the view sees (0..1): with the World's sky light on, the
+-- column over the camera looked up, eased (skeldat's gate, by one ray);
+-- off, the open sky everywhere
+local GATE = {seen = 1, want = 1, t = 0}
+
+-- The sky's line in the log, when it changes
+local function sky_log(mode, s)
+	local line = string.format("kit: sky: %s, %.1f o'clock, sun %d, moon %d,"..
+			" stars %.2f, clouds %.2f at %d, wind %.1f toward %d", mode, env.h,
+			s.sun and 1 or 0, s.moon and 1 or 0, s.stars, s.v.cover,
+			math.floor(s.v.height + 0.5), s.v.wind, math.floor(s.v.dir + 0.5))
+	if line ~= LIT.sky_line then
+		LIT.sky_line = line
+		log:info(line)
+	end
+end
+
+-- The sky of the hour, both modes: the sun, the moon and the stars where
+-- they are and as switched, the clouds' cover and drift (their height
+-- slows what is seen of a wind: the layer is drawn at one scale)
+-- simplified: the height changes the drift alone; the shaders have no
+-- height (a cloud height uniform, unset reading Luanti's 120, is the way)
+local function sky_bodies(dome, v, tx, height, tz, day)
+	local up, moon_up = clamp01(height / 0.05), clamp01(-height / 0.05)
+	local s = {v = v, sun = v.sun and up > 0, moon = v.moon and moon_up > 0,
+		stars = v.stars and (1 - day) * (1 - day) or 0, up = up,
+		moon_up = moon_up}
+	if dome then
+		dome:set_sun_direction({x = -tx, y = -height, z = -tz})
+		dome:set_moon_look(s.moon and SKY.schedule.MOON_HALF or 0)
+		dome:set_star_look(v.stars and SKY.STAR_DENSITY or 0, nil, s.stars)
+		dome:set_look(nil, nil, v.cover)
+		local a = math.rad(v.dir)
+		local k = v.wind * SKY.CLOUD_HEIGHT / v.height
+		dome:set_clouds(nil, {math.sin(a) * k, math.cos(a) * k})
+		local g = GATE.seen
+		dome:set_outside(sky_render().physical_sky.outside(g))
+	end
+	return s
 end
 
 -- physical's light of the hour: the sun (or the moon) and the ambient by
 -- voxel_light's terms, the fog the horizon's radiance, the dome
-local function phys_light()
+local function phys_light(v)
 	local d = env.d
 	local sr = sky_render()
 	local PHYS = sr.PHYS
@@ -218,38 +311,40 @@ local function phys_light()
 	zenith, horizon = sr.sky_radiance(zenith, horizon, height)
 	local t = sr.terms(height, sr.dome(zenith, horizon))
 	LIT.terms = t
+	local dome = sky_dome(true)
+	local s = sky_bodies(dome, v, tx, height, tz, day)
 	local a = t.ambient
 	env.zone.ambientColor = magic.Color(a.r, a.g, a.b)
-	env.zone.fogColor = magic.Color(horizon.r, horizon.g, horizon.b)
-	local fe = tonumber(d.fog_end) or env.orig.fog_end
-	local fs = tonumber(d.fog_start) or env.orig.fog_start
+	-- [TUNNEL_SKY] where the view sees no sky the sky and the fog are the
+	-- light of the place
+	local enc, gate = sr.enclosed(t, GATE.seen)
+	local fc = sr.physical_sky.fog(horizon, enc, gate)
+	env.zone.fogColor = magic.Color(fc.r, fc.g, fc.b)
+	local fe = (tonumber(d.fog_end) or env.orig.fog_end) * v.fog
+	local fs = (tonumber(d.fog_start) or env.orig.fog_start) * v.fog
 	env.zone.fogStart, env.zone.fogEnd = fs, math.max(fe, fs + 1)
-	local up, moon_up = clamp01(height / 0.05), clamp01(-height / 0.05)
-	if up > 0 then
+	if s.sun then
 		env.sun.direction = magic.Vector3(-tx, -height, -tz)
-		env.light.brightness = t.sun * up
+		env.light.brightness = t.sun * s.up * v.light
 		env.light.color = magic.Color(t.sun_color.r, t.sun_color.g,
 				t.sun_color.b)
 	else
 		env.sun.direction = magic.Vector3(tx, height, tz)
-		env.light.brightness = t.moon * moon_up
+		env.light.brightness = s.moon and t.moon * s.moon_up * v.light or 0
 		env.light.color = magic.Color(t.moon_color.r, t.moon_color.g,
 				t.moon_color.b)
 	end
-	local dome = sky_dome(true)
 	if dome then
-		dome:set_sun_direction({x = -tx, y = -height, z = -tz})
 		dome:set_look(zenith, horizon, nil)
 		dome:set_dawn_glow(t.glow.r, t.glow.g, t.glow.b, t.glow_tint)
 		local half = SKY.defaults.sun_half
-		dome:set_sun_look(half, SKY.defaults.sun_color)
+		dome:set_sun_look(v.sun and half or 0, SKY.defaults.sun_color)
 		dome:set_sun_radiance(sr.sun_disc(height, half, t.sun_color))
-		dome:set_moon_look(moon_up > 0 and SKY.schedule.MOON_HALF or 0)
-		dome:set_star_look(SKY.STAR_DENSITY, nil, (1 - day) * (1 - day))
-		dome:set_cloud_lit(sr.cloud_lit(SKY.CLOUD, zenith, horizon, height, 1))
-		-- simplified: the open sky everywhere (no indoor dimming yet)
-		dome:set_outside(1)
+		dome:set_cloud_lit(sr.cloud_lit(SKY.CLOUD, zenith, horizon, height,
+				1 - 0.8 * v.cover))
+		dome:set_indoors(enc, 1)
 	end
+	sky_log("physical", s)
 end
 
 -- The light of the hour h (0 to 24): the sun up from 6 to 18
@@ -258,30 +353,45 @@ local function env_light()
 	if not d or not env_nodes() then
 		return
 	end
+	local v = values()
 	if M.physical() then
-		return phys_light()
+		return phys_light(v)
 	end
-	sky_dome(false)
 	local a = (env.h - 6) / 12 * math.pi
 	local up = math.sin(a)
 	local day = math.max(0, math.min(1, up * 2 + 0.3))
-	local storm = d.weather == "storm" and 0.55 or
-			(d.weather == "rain" or d.weather == "snow") and 0.8 or 1
-	local f = (0.25 + 0.75 * day) * storm
+	local f = (0.25 + 0.75 * day) * v.light
 	env.zone.fogColor = hex_colour(d.sky, f) or env.orig.fog
 	env.zone.ambientColor = hex_colour(d.ambient, 0.35 + 0.65 * day) or
 			env.orig.ambient
 	local fe = tonumber(d.fog_end) or env.orig.fog_end
 	local fs = tonumber(d.fog_start) or env.orig.fog_start
-	if d.weather == "storm" then
-		fe, fs = fe * 0.5, fs * 0.4
-	end
+	-- the fog's start closer than its end (today's storm: 0.4 and 0.5)
+	fe, fs = fe * v.fog, fs * (1 - (1 - v.fog) * 1.2)
 	env.zone.fogStart, env.zone.fogEnd = fs, math.max(fe, fs + 1)
 	env.light.brightness = 0.8 * math.max(0, math.min(1, up * 1.5 + 0.1)) *
-			storm
+			v.light
 	env.light.color = env.orig.colour
 	env.sun.direction = magic.Vector3(-math.cos(a) * 0.8,
 			-math.max(up, 0.15), 0.5)
+	-- The sky: its horizon the fog's colour, its zenith the sky's colour
+	-- deepened, the clouds lit by the hour
+	local dome = sky_dome(true)
+	local tx, height, tz = sun_toward(env.h)
+	local s = sky_bodies(dome, v, tx, height, tz, day)
+	if dome then
+		local h = env.zone.fogColor
+		local z = SKY.ZENITH
+		dome:set_look({r = h.r * z[1], g = h.g * z[2], b = h.b * z[3]},
+				{r = h.r, g = h.g, b = h.b}, nil)
+		dome:set_dawn_glow(0, 0, 0, 0)
+		dome:set_sun_look(v.sun and SKY.defaults.sun_half or 0, SKY.SUN_TINT)
+		local c = SKY.CLOUD
+		local k = (0.3 + 0.7 * day) * v.light
+		dome.set_param("CloudColor", c.r * k, c.g * k, c.b * k)
+		dome:set_indoors({r = 0.39, g = 0.39, b = 0.39}, 0.35 + 0.65 * day)
+	end
+	sky_log("cartoon", s)
 end
 
 local function env_restore()
@@ -319,12 +429,8 @@ end
 local LAMP_R, LAMP_RY, LAMP_MAX = 8, 4, 8
 
 local function view_pos()
-	local vp = magic.renderer:GetViewport(0)
-	local cam = vp and vp.camera
-	if cam then
-		return cam.node.worldPosition
-	end
-	return O.camera and O.camera.worldPosition
+	local n = LIT.view_node or O.camera
+	return n and n.worldPosition
 end
 
 local function lamps_off()
@@ -511,12 +617,34 @@ local function wrap(v, c)
 	return c + ((v - c + WR) % (2 * WR)) - WR
 end
 
+-- The sky's gate: with the World's sky light on, whether the view's
+-- column is open (looked at four times a second), eased over half a second
+local function gate_update(dt)
+	if not M.sky_light() then
+		GATE.want = 1
+	else
+		GATE.t = GATE.t - dt
+		local p = GATE.t <= 0 and view_pos()
+		if p then
+			GATE.t = 0.25
+			GATE.want = open_sky(p) and 1 or 0
+		end
+	end
+	if GATE.seen ~= GATE.want then
+		local k = math.min(1, dt * 2)
+		GATE.seen = math.abs(GATE.want - GATE.seen) < 0.01 and GATE.want or
+				GATE.seen + (GATE.want - GATE.seen) * math.max(k, 0.05)
+		env_light()
+	end
+end
+
 local function env_update(dt)
 	lamps_update(dt)
 	local d = env.d
 	if not d then
 		return
 	end
+	gate_update(dt)
 	if (tonumber(d.day_minutes) or 0) > 0 then
 		env.h = (env.h + dt / 60 / d.day_minutes * 24) % 24
 		env.t = env.t + dt

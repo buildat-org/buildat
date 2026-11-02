@@ -1,6 +1,7 @@
-<!-- Luanti's sky, the parity modes'; see LuantiSky.glsl beside this file.
+<!-- Luanti's sky, the parity modes' and Kit's cartoon lighting's; see
+     LuantiSky.glsl beside this file.
      postopaque and no depth write is what keeps it behind the world; the box
      is seen from the inside, so nothing is culled. -->
-<technique vs="luanti_client/res/LuantiSky" ps="luanti_client/res/LuantiSky">
+<technique vs="luanti_sky/LuantiSky" ps="luanti_sky/LuantiSky">
     <pass name="postopaque" depthwrite="false" cull="none" />
 </technique>
