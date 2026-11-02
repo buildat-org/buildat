@@ -13,6 +13,14 @@
 --   M.node, M.terrain          once built (nil before)
 --   M.height_at(x, z)          the surface's height at a world point
 --   M.sub_built(cb)            cb() once the map is first built
+--   M.version                  counts the builds and edits applied
+--   M.grid()                   origin_x, origin_z, cell, sx, sz: sample
+--                              (i, k) at (origin_x + i * cell, origin_z +
+--                              k * cell), i 0...sx - 1, k 0...sz - 1
+--   M.sample_height(i, k)      a sample's height, as fast as Lua indexes
+--                              ([KIT_PLAN_CAPS]: height_at's sandbox calls
+--                              were most of the plan's caps' time)
+--   M.sample_material(i, k)    the material (1...) weighing most there
 --   M.textures                 the ground textures, a material each in
 --                              order, before building: one size, RGBA; a
 --                              map of more materials than listed repeats
@@ -38,6 +46,7 @@ M.textures = {"heightmap/grass.png", "heightmap/rock.png",
 M.detail_metres = 4
 M.node = nil
 M.terrain = nil
+M.version = 0
 
 -- {chunks_x, chunks_z, chunk_size, cell, base_y, step, materials, planes,
 -- sx, sz}
@@ -47,6 +56,7 @@ local built_cbs = {}
 -- (sx + 1) x (sz + 1): a vertex more each way, the last row and column the
 -- one before again, the top row the largest z (Terrain reads it upside down)
 local height_img = nil
+local hrows = {}
 local weight_imgs = {}
 local weight_texs = {}
 -- What arrived since the last build: the image rectangles {x0, y0, x1, y1}
@@ -86,6 +96,12 @@ buildat.sub_packet("heightmap:init", function(data)
 	info.sx = info.chunks_x * info.chunk_size
 	info.sz = info.chunks_z * info.chunk_size
 	height_img = blank_image(2)
+	-- The heights again as a string a row (k), two bytes a sample, high
+	-- first (the image's red and green)
+	hrows = {}
+	for k = 0, info.sz - 1 do
+		hrows[k] = string.rep("\0", info.sx * 2)
+	end
 	weight_imgs, weight_texs = {}, {}
 	for p = 1, info.planes do
 		weight_imgs[p] = blank_image(4)
@@ -140,6 +156,11 @@ buildat.sub_packet("heightmap:region", function(data)
 		return
 	end
 	write_rect(height_img, 2, x0, z0, w, hh, raw:sub(1, n * 2))
+	for r = 0, hh - 1 do
+		local row = hrows[z0 + r]
+		hrows[z0 + r] = row:sub(1, x0 * 2) ..
+				raw:sub(r * w * 2 + 1, (r + 1) * w * 2) .. row:sub((x0 + w) * 2 + 1)
+	end
 	for p = 1, info.planes do
 		local o = n * 2 + (p - 1) * n * 4
 		write_rect(weight_imgs[p], 4, x0, z0, w, hh, raw:sub(o + 1, o + n * 4))
@@ -164,6 +185,7 @@ buildat.sub_packet("heightmap:remove", function(data)
 	end
 	M.node, M.terrain, info, ready = nil, nil, nil, false
 	changed = {}
+	M.version = M.version + 1
 	log:info("heightmap: removed")
 end)
 
@@ -235,6 +257,7 @@ local function build()
 	end
 	changed = {}
 	got = {regions = 0, bytes = 0, us = 0}
+	M.version = M.version + 1
 end
 
 magic.SubscribeToEvent("Update", function(event_type, event_data)
@@ -256,6 +279,34 @@ function M.height_at(x, z)
 		return nil
 	end
 	return M.terrain:GetHeight(magic.Vector3(x, 0, z))
+end
+
+function M.grid()
+	if not M.terrain then
+		return nil
+	end
+	return info.origin_x, info.origin_z, info.cell, info.sx, info.sz
+end
+
+function M.sample_height(i, k)
+	local a, b = hrows[k]:byte(i * 2 + 1, i * 2 + 2)
+	return info.base_y + (a * 256 + b) * info.step
+end
+
+function M.sample_material(i, k)
+	-- The images' rows turned over (write_rect's)
+	local best, bw = 1, -1
+	for p = 1, info.planes do
+		local c = weight_imgs[p]:GetPixel(i, info.sz - k)
+		local w = {c.r, c.g, c.b, c.a}
+		for j = 1, 4 do
+			local m = (p - 1) * 4 + j
+			if m <= info.materials and w[j] > bw then
+				best, bw = m, w[j]
+			end
+		end
+	end
+	return best
 end
 
 function M.sub_built(cb)

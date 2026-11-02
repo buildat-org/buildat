@@ -1980,6 +1980,21 @@ magic.SubscribeToEvent("command_seq:kit_cam3d", function(_, data)
 	set_view("3d")
 end)
 
+-- [KIT_PLAN_CAPS] A check's plan: "x z span cut", its middle, how far
+-- across it is high and the cut
+magic.SubscribeToEvent("command_seq:kit_plan", function(_, data)
+	local c = {}
+	for n in data:GetString("Param"):gmatch("%-?[%d.]+") do
+		c[#c + 1] = tonumber(n)
+	end
+	if #c ~= 4 then
+		log:info("kit editor: kit_plan: x z span cut")
+		return
+	end
+	S.cx, S.cz, S.span, S.cut = c[1], c[2], c[3], c[4]
+	set_view("2d")
+end)
+
 -- A check's question: where the 3D camera is
 magic.SubscribeToEvent("command_seq:kit_cam_where", function(_, data)
 	local p = S.pos or {x = 0, y = 0, z = 0}
@@ -2609,11 +2624,24 @@ M.set_view = function(v)
 	set_view(v)
 end
 
+-- [KIT_PLAN_CAPS] What the plan's cut goes through, drawn in 2D (caps.lua)
+local caps
+do
+	local ok, err, install = buildat.run_script_file("kit/caps.lua")
+	assert(ok and type(install) == "function", "kit: caps.lua: " ..
+			tostring(err))
+	caps = install({O = O, S = S, P = P, color = color, log = log})
+end
+
 local function place_cameras()
 	local w, h = screen_size()
 	cam2d.orthoSize = S.span
 	cam2d.aspectRatio = w / math.max(1, h)
-	cam2d_node.position = magic.Vector3(S.cx, S.cut or (O.ground_y + 1.5), S.cz)
+	-- [KIT_PLAN_CAPS] A hair under the cut: an orthographic camera's near
+	-- clip is 0 in Urho3D, and a voxel's top at the cut (the cut's layer's,
+	-- capped) showed through its cap in patches
+	cam2d_node.position = magic.Vector3(S.cx,
+			(S.cut or (O.ground_y + 1.5)) - caps.CAM_UNDER, S.cz)
 	if S.pos then
 		cam3d.aspectRatio = w / math.max(1, h)
 		cam3d_node.position = magic.Vector3(S.pos.x, S.pos.y, S.pos.z)
@@ -5387,6 +5415,10 @@ function M.editor(options)
 			if T.down then
 				stroke_move(S.mx, S.my)
 			end
+		end
+		do
+			local w, h = screen_size()
+			caps.update(E.editing and S.view == "2d", w / math.max(1, h))
 		end
 		hover.begin()
 		-- The frames' bars: vanilla's, and in the plan about 3 pixels
