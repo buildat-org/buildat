@@ -384,6 +384,12 @@ J
 			l = $NF + 0; if (e >= l) { print; bad = 1 } }
 		END { exit bad || !n }' "$t/out/page.log" ||
 		fail "the bar's first row under the Server button ($t/out/page.log)"
+	# [KIT_LIST_TABS] Each tab lists its own: the seven kit/buttons
+	# placed, nothing game-wide nor of the scene
+	for w in "kit editor: list Positioned (7): 3, 4, 5, 6, 7, 8, 9" \
+			"kit editor: list Scene (0): " "kit editor: list Game-wide (0): "; do
+		grep -aq "$w\$" "$t/out/page.log" || fail "no \"$w\" in $t/out/page.log"
+	done
 	# [KIT_EDIT_NOTICE_SERVER] "You may edit here" under it too
 	awk '/ui_utils: notification: from y/ { n++; y = $(NF - 6) + 0;
 			f = $NF + 0; if (y <= f) { print; bad = 1 } }
@@ -1289,7 +1295,7 @@ mouse_pos 150 600
 mouse_wheel -10
 frames 3
 screenshot @T@/list_scrolled.png
-click Button "Select" 150 690
+click Button "select 8"
 wait_log 5000 kit editor: selected 8 (kit/region 8)
 mouse_pos 672 306
 mouse_click left

@@ -2141,6 +2141,8 @@ people = function()
 				function()
 			M.select(e.id)
 		end)
+		-- For a driven click by whose it is
+		sb:SetName("select " .. e.id)
 		lw, n = math.max(lw, l.minWidth + 4 + sb.minWidth), n + 1
 		ids[#ids + 1] = e.id
 	end

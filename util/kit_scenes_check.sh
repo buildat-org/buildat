@@ -285,6 +285,10 @@ expect 1 "(3,1,3): kit/stone, param 0, tint 0, sky light 0"
 expect 2 "(6,1,6): kit/planks, param 0, tint 0, sky light 0"
 expect 3 "(3,1,3): air, param 0, tint 0, sky light 0"
 echo "ok: after a restart a root World moves onto the main scene; the scenes are made again, each its voxels"
+# [KIT_LIST_TABS] The Scene tab lists each scene's own World
+for w in "kit editor: list Scene (1): 3" "kit editor: list Scene (1): 5"; do
+	grep -aq "$w\$" "$t/boss2.log" || fail "no \"$w\" in $t/boss2.log"
+done
 echo "ok: a heightmap in the main scene is dropped in a voxel scene; each World in its scene's Scene tab of the list"
 echo "PASS: scenes: a new scene with its World copied or blank, switched between, each its voxels and World row; refusals; a two-way teleporter between scenes, arriving silently; a root World migrated and the scenes back after a restart; a scene made while Running put back by Stop; no heightmap of another scene drawn"
 # vim: set noet ts=4 sw=4:
