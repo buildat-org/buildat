@@ -232,10 +232,10 @@ sync 5000
 frames 10
 click Text "Scene world: 3 *"
 event kit_edit {"op": "scene", "name": "cave"}
-wait_log 30000 heightmap: removed
 EOF
 	in_scene cave "world, cave, sky"
 	cat <<'EOF'
+wait_log_any 10000 heightmap: removed
 sync 5000
 wait_log_absent 2000 heightmap: terrain built
 click Text "Scene cave: 5 *"
