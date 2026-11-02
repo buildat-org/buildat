@@ -90,8 +90,13 @@ after=$(sed -n '/pause: Escape kept on the web/,$p' "$t/drive/page.log" |
 [ "$after" = "pause: a click off the menu,pause: the menu closed," ] ||
 	fail "after the Escape kept: \"$after\" ($t/drive/page.log)"
 # The pause menu twice, the lock lost and not given: none after Continue
-# or the inventory closed by its key
-shown=$(grep -ac "pause: the menu shown" "$t/drive/page.log")
-[ "$shown" = 2 ] && [ "$(grep -ac "pause: the pointer lock" "$t/drive/page.log")" = 1 ] ||
+# or the inventory closed by its key. Counted from the how-to-play on: a
+# join with no lock (the stand-in goes in at the dialog) opens the menu
+# by the rule when the world is in before the dialog's packet, which the
+# dialog then replaces ([SK_WEB_LOCK_FAIL], the build box: the intro
+# handled 5 s after the server sent it, behind the world's packets)
+from_intro=$(sed -n '/pause: how to play shown/,$p' "$t/drive/page.log")
+shown=$(grep -ac "pause: the menu shown" <<< "$from_intro")
+[ "$shown" = 2 ] && [ "$(grep -ac "pause: the pointer lock" <<< "$from_intro")" = 1 ] ||
 	fail "the pause menu $shown times, or the lock's rule not once ($t/drive/page.log)"
 echo "PASS: on the web a lost or refused pointer lock opens skeldat's pause menu, which Escape keeps and a click off closes"
