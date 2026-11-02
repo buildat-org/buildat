@@ -3658,7 +3658,7 @@ torchlight=$(grep -a "the skeleton (1) is in a lamp light of" "$log66" | head -1
 # the bones used, the voxels round it boned. Nothing copied out. Run 2,
 # the server started again: the boars, the entities and the cobble still
 # there, no start rows.
-log67="$t/srv67.log"
+log67="$t/srv67.log"; log67b="$t/srv67b.log"
 gy=6
 BUILDAT_SKELDAT_WORLD=kit BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 	BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
@@ -3704,9 +3704,9 @@ grep -a "kit editor: bar:" "$t/kit.log" | tail -1 | sed 's/.*kit editor: //'
 	! grep -a "kit editor: bar: " "$t/kit.log" | grep -q "Run \|End \|Save as start" ||
 	fail "Kit in skeldat, persistent ($log67, $t/kit.log)"
 BUILDAT_SKELDAT_WORLD=kit BUILDAT_SKELDAT_SKELETONS=0 \
-	start_server "$log67.2" "STATUS Listening" 300 auto \
+	start_server "$log67b" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv67" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log67.2)"
+	-D "$t/srv67" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log67b)"
 CHECK_PIDS+=($SERVER_PID)
 printf '%s\n' "$placed" "wait_log_any 60000 kit editor: edit rights: yes" \
 	'event kit_edit {"op": "mode", "on": true}' "wait_log 10000 kit editor: state: 4 entities" \
@@ -3715,12 +3715,12 @@ printf '%s\n' "$placed" "wait_log_any 60000 kit editor: edit rights: yes" \
 client kit2 "$t/kit2.cmds"
 wait $CLIENT || fail "Kit's second drive ($t/kit2.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-kmobs=$(grep -a 'the world "kit" starts' "$log67.2" | sed 's/.*furnaces, \([0-9]*\) mobs.*/\1/')
-grep -aq "skeldat: Kit hosted, persistent" "$log67.2" &&
-	grep -aq "Voxel at (4,$gy,-2): skeldat:cobble" "$log67.2" &&
-	grep -aq "The server is Running (by [^)]*): 0 sections copied out, 0 to put back" "$log67.2" &&
+kmobs=$(grep -a 'the world "kit" starts' "$log67b" | sed 's/.*furnaces, \([0-9]*\) mobs.*/\1/')
+grep -aq "skeldat: Kit hosted, persistent" "$log67b" &&
+	grep -aq "Voxel at (4,$gy,-2): skeldat:cobble" "$log67b" &&
+	grep -aq "The server is Running (by [^)]*): 0 sections copied out, 0 to put back" "$log67b" &&
 	[ "${kmobs:-0}" -ge 2 ] ||
-	fail "persistent over a restart: $kmobs mobs ($log67.2)"
+	fail "persistent over a restart: $kmobs mobs ($log67b)"
 echo "Kit in skeldat, persistent: types placed, 2 boars spawned in edit mode, 3 coal given, bones set; over a restart $kmobs mobs, the entities and the cobble kept"
 # The summary of a full run
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
