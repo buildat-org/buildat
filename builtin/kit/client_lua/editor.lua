@@ -1865,6 +1865,13 @@ magic.SubscribeToEvent("command_seq:kit_cam3d", function(_, data)
 	set_view("3d")
 end)
 
+-- A check's question: where the 3D camera is
+magic.SubscribeToEvent("command_seq:kit_cam_where", function(_, data)
+	local p = S.pos or {x = 0, y = 0, z = 0}
+	log:info(string.format("kit editor: the 3D camera at %.2f %.2f %.2f "
+			.. "(%s)", p.x, p.y, p.z, data:GetString("Param")))
+end)
+
 -- A check's look for a handle by its name ("+y", "-x"): where it is on
 -- the screen, and whether a press there takes it
 magic.SubscribeToEvent("command_seq:kit_box_where", function(_, data)
@@ -3684,12 +3691,23 @@ local function mouse_move(x, y, dx, dy)
 		local o0, v0 = M.screen_ray(x - dx, y - dy)
 		local o1, v1 = M.screen_ray(x, y)
 		local a, b = plane_at(o0, v0, S.pan3d.y), plane_at(o1, v1, S.pan3d.y)
+		-- [KIT_CAM_MIN_MOVE] never slower than a point this far away
+		-- grabbed: close to a surface, or under it, the pan still goes
+		local _, h = screen_size()
+		local kpx = 2 * math.tan(math.rad(cam3d.fov) / 2) / h
+		local least = 6 * kpx * math.sqrt(dx * dx + dy * dy)
 		local mx_, mz_
 		if a and b then
 			mx_, mz_ = b.x - a.x, b.z - a.z
-		else
-			local _, h = screen_size()
-			local k = S.pan3d.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
+			local m = math.sqrt(mx_ * mx_ + mz_ * mz_)
+			if m < 1e-6 then
+				mx_ = nil
+			elseif m < least then
+				mx_, mz_ = mx_ * least / m, mz_ * least / m
+			end
+		end
+		if not mx_ then
+			local k = math.max(6, S.pan3d.dist) * kpx
 			local yaw = math.rad(S.yaw)
 			local rx, rz = math.cos(yaw), -math.sin(yaw)
 			-- right (rx, rz), forward along the ground (-rz, rx)
@@ -3806,6 +3824,12 @@ local function mouse_wheel(wheel, q)
 		local p = pick(S.mx, S.my, nil, true)
 		local dist = p and p.t or 10
 		local step = math.min(dist * (1 - f), math.max(0, dist - 0.3))
+		-- [KIT_CAM_MIN_MOVE] at least a cell a notch: close to a surface,
+		-- or under it, the wheel still moves along the look
+		local least = math.abs(notches) * 1
+		if notches ~= 0 and math.abs(step) < least then
+			step = notches > 0 and least or -least
+		end
 		S.pos = {x = S.pos.x + v.x * step, y = S.pos.y + v.y * step,
 			z = S.pos.z + v.z * step}
 	end
