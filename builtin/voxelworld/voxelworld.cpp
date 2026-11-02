@@ -1168,14 +1168,30 @@ struct CInstance: public voxelworld::Instance
 					cs(parts));
 	}
 
+	// [KIT_SCENES] Only this instance's scene: every instance gets every
+	// event, and with two scenes a peer was taken by both
 	void on_peer_joined_scene(const replicate::PeerJoinedScene &event)
 	{
+		if(event.scene != m_scene_ref)
+			return;
 		initialize_peer(event.peer);
 	}
 
 	void on_peer_left_scene(const replicate::PeerLeftScene &event)
 	{
+		if(event.scene != m_scene_ref)
+			return;
 		m_clients_initialized.erase(event.peer);
+		forget_peer(event.peer);
+	}
+
+	// A peer gone to another scene: where it was is forgotten, so that it
+	// is sent its chunks afresh when it comes back. Its load point is the
+	// game's to take out (set_load_points()).
+	void forget_peer(replicate::PeerId peer)
+	{
+		std::lock_guard<std::mutex> lock(m_send_mutex);
+		m_peer_section.erase(peer);
 	}
 
 	void initialize_peer(replicate::PeerId peer)

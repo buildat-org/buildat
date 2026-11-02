@@ -307,7 +307,8 @@ local function focus()
 	send({op = "focus", sel = S.primary or 0, cursor = E.cursor})
 end
 
-local function entities()
+-- Every authored entity, of every scene
+local function all_entities()
 	local r = {}
 	for _, e in ipairs(E.state and E.state.authored and
 			E.state.authored.entities or {}) do
@@ -316,14 +317,74 @@ local function entities()
 	return r
 end
 
+-- [KIT_SCENES] The scene an entity is in (its scene entity's name; nil
+-- for the root's and the scenes themselves)
+local scene_cache = {state = nil, by = {}, of = {}}
+local function scene_name(e)
+	if scene_cache.state ~= E.state then
+		scene_cache = {state = E.state, by = {}, of = {}}
+		for _, x in ipairs(all_entities()) do
+			scene_cache.by[x.id] = x
+		end
+	end
+	local by = scene_cache.by
+	if e.id and scene_cache.of[e.id] ~= nil then
+		return scene_cache.of[e.id] or nil
+	end
+	local found = false
+	local id = e.parent
+	for _ = 1, 64 do
+		local x = by[id]
+		if not x then
+			return nil
+		end
+		if x.kind == "scene" then
+			found = x.name
+			break
+		end
+		id = x.parent
+	end
+	if e.id then
+		scene_cache.of[e.id] = found
+	end
+	return found or nil
+end
+
+-- The scene the editor is in
+local function current_scene()
+	return E.state and E.state.scene or ""
+end
+
+-- The authored entities the editor sees: the root's, the scenes, and
+-- those of the scene it is in
+local function entities()
+	local r = {}
+	local cur = current_scene()
+	for _, e in ipairs(all_entities()) do
+		local s = scene_name(e)
+		if s == nil or s == cur then
+			r[#r + 1] = e
+		end
+	end
+	return r
+end
+
 -- [KIT] stage 4d: the round's own entities (made in play) and the players,
--- shown and selected, not edited
+-- shown and selected, not edited (those of the scene it is in)
 local function made()
-	return E.state and E.state.made or {}
+	local r = {}
+	local cur = current_scene()
+	for _, e in ipairs(E.state and E.state.made or {}) do
+		local s = scene_name(e)
+		if s == nil or s == cur then
+			r[#r + 1] = e
+		end
+	end
+	return r
 end
 
 local function find(id)
-	for _, e in ipairs(entities()) do
+	for _, e in ipairs(all_entities()) do
 		if e.id == id then
 			return e
 		end
@@ -793,6 +854,27 @@ rebuild_bar = function()
 		set_view(v)
 	end, {height = 24})
 	bar_used = bar_used + math.max(d.minWidth, 90) + 4
+	-- [KIT_SCENES] the scene edited, switched by the list; New scene...
+	local scenes = E.state and E.state.scenes or {}
+	if #scenes > 1 or (E.state and E.state.can_make_scenes) then
+		local choices = {}
+		for _, n in ipairs(scenes) do
+			choices[#choices + 1] = {"Scene: " .. n, n}
+		end
+		if E.state.can_make_scenes then
+			choices[#choices + 1] = {"New scene...", "\0new"}
+		end
+		-- (in the first row as the view's: a dropdown is not probed)
+		local sd = ui_utils.dropdown(bar_row, choices, current_scene(),
+				function(v)
+			if v == "\0new" then
+				M.scene_dialog()
+			elseif v ~= current_scene() then
+				M.switch_scene(v)
+			end
+		end, {height = 24})
+		bar_used = bar_used + math.max(sd.minWidth, 120) + 4
+	end
 	bar_button("Grid " .. grid_text(), "G", function()
 		M.next_grid()
 	end)
@@ -1309,8 +1391,14 @@ local function field(name, d, values)
 	elseif t == "entity" then
 		f.type = "choice"
 		f.choices = {{"none", 0}}
-		for _, e in ipairs(entities()) do
-			f.choices[#f.choices + 1] = {e.id .. " " .. tostring(e.name), e.id}
+		-- [KIT_SCENES] every scene's, another's named (a portal's target)
+		local cur = current_scene()
+		for _, e in ipairs(all_entities()) do
+			if e.kind ~= "scene" then
+				local s = scene_name(e)
+				f.choices[#f.choices + 1] = {e.id .. " " .. tostring(e.name) ..
+						((s and s ~= cur) and " (" .. s .. ")" or ""), e.id}
+			end
 		end
 	else
 		f.type = "text"
@@ -1887,6 +1975,48 @@ local function prefab_dialog(ids)
 end
 
 M.prefab_dialog = prefab_dialog
+
+-- [KIT_SCENES] The scene edited switched (the server takes the builder
+-- there), and a new one made: its World the current one's copied, or a
+-- blank one (the World's defaults)
+function M.switch_scene(name)
+	log:info("kit editor: to the scene " .. tostring(name))
+	send({op = "scene", name = name})
+end
+
+function M.new_scene(name, copy)
+	log:info("kit editor: a new scene " .. tostring(name) ..
+			(copy and ", its World copied" or ", a blank World"))
+	send({op = "new_scene", name = name, copy = copy and true or false})
+end
+
+E.scene_name = E.scene_name or ""
+E.scene_copy = E.scene_copy ~= false
+function M.scene_dialog()
+	drop("dialog")
+	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	W.dialog = w
+	w.priority = 10
+	text(w, "A new scene: its own World and entities")
+	local r = row(w)
+	label(r, "Scene name:")
+	edit(r, E.scene_name, function(s)
+		E.scene_name = s
+	end)
+	button(row(w), E.scene_copy and "World: a copy of " .. current_scene() ..
+			"'s" or "World: a blank one", function()
+		E.scene_copy = not E.scene_copy
+		M.scene_dialog()
+	end, E.scene_copy)
+	local br = row(w)
+	button(br, "Make scene", function()
+		M.new_scene(E.scene_name, E.scene_copy)
+		drop("dialog")
+	end)
+	button(br, "Cancel", function()
+		drop("dialog")
+	end)
+end
 
 -- [KIT] stage 4g: a builder's voxel type ("<their name>/<name>"), made or
 -- its next version: a registered voxel's texture or an uploaded PNG's
@@ -4438,6 +4568,14 @@ function M.editor(options)
 			S.known = known
 		end
 		E.state = E.editing and s or nil
+		-- [KIT_SCENES] the scene edited, and the composition's
+		if E.state and (E.state.scene ~= E.scene_logged or
+				#(E.state.scenes or {}) ~= E.scenes_logged) then
+			E.scene_logged = E.state.scene
+			E.scenes_logged = #(E.state.scenes or {})
+			log:info("kit editor: in the scene " .. tostring(E.state.scene) ..
+					" of " .. table.concat(E.state.scenes or {}, ", "))
+		end
 		if was ~= E.editing then
 			log:info("kit editor: edit mode " .. (E.editing and "on" or "off"))
 			E.link, E.status = nil, ""

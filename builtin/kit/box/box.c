@@ -27,7 +27,9 @@
 **                        value}...}, voxel = name, voxels = {{x, y, z,
 **                        name}...} (c:set_voxels), after = {{name,
 **                        seconds (-1: taken back), player | null}...},
-**                        teleport = {x, y, z}, teleport_yaw = degrees
+**                        teleport = {x, y, z} (or {} with an entity),
+**                        teleport_yaw = degrees, teleport_scene = name,
+**                        teleport_entity = id
 **                        (looking that way, level), items = {item = n}
 **                        (the player's list after inventory calls),
 **                        inv_set = {{key, value}...} (the provider's
@@ -438,12 +440,16 @@ static const char PRELUDE[] =
 "		fx.after = a\n"
 "	end\n"
 "	function c:teleport(pos, opts)\n"
-"		if type(pos) ~= 'table' then error('teleport: a position, {x, y, z}', 2) end\n"
-"		if opts ~= nil and type(opts) ~= 'table' then error('teleport: options are {yaw = degrees}', 2) end\n"
-"		local t = {tonumber(pos[1]) or 0, tonumber(pos[2]) or 0, tonumber(pos[3]) or 0}\n"
+"		if opts ~= nil and type(opts) ~= 'table' then error('teleport: options are {yaw = degrees, scene = name, entity = id}', 2) end\n"
+"		local ent = opts and tonumber(opts.entity)\n"
+"		if ent == 0 then ent = nil end\n"
+"		if type(pos) ~= 'table' and not ent then error('teleport: a position, {x, y, z}, or an entity', 2) end\n"
+"		local t = type(pos) == 'table' and {tonumber(pos[1]) or 0, tonumber(pos[2]) or 0, tonumber(pos[3]) or 0} or {}\n"
 "		local yaw = opts and tonumber(opts.yaw)\n"
 "		fx.teleport = t\n"
 "		fx.teleport_yaw = yaw and yaw - yaw == 0 and yaw or nil\n"
+"		fx.teleport_scene = opts and type(opts.scene) == 'string' and opts.scene ~= '' and opts.scene or nil\n"
+"		fx.teleport_entity = ent\n"
 "	end\n"
 "	-- [KIT] stage 6a: a call into the app's native code (the host lets\n"
 "	-- only the app's own types through)\n"

@@ -105,6 +105,10 @@ struct Module: public interface::Module
 {
 	interface::Server *m_server;
 	main_context::SceneReference m_scene = nullptr;
+	// [KIT_SCENES] The composition's scenes by name ("world" m_scene; the
+	// rest made as Kit asks), and the one each peer is in
+	sm_<ss_, main_context::SceneReference> m_scenes;
+	sm_<size_t, ss_> m_peer_scene;
 	storage::Save *m_save = nullptr;
 	sm_<size_t, ss_> m_names; // peer -> the name Kit knows them by
 	// peer -> how many times the server has put them: a position the
@@ -128,6 +132,7 @@ struct Module: public interface::Module
 		sub(m_server, "network:client_disconnected", &Module::on_left);
 		sub(m_server, "accounts:login", &Module::on_login);
 		sub(m_server, "kit:spawn_player", &Module::on_spawn);
+		sub(m_server, "kit:change_scene", &Module::on_change_scene);
 		sub(m_server, "world_menu:play", &Module::on_project_play);
 	}
 
@@ -199,6 +204,97 @@ struct Module: public interface::Module
 			});
 	}
 
+	// A scene's voxels: Kit's World's region, loaded only where Kit's load
+	// points say, Kit's format, Workbench's voxels and Kit's -- the same in
+	// every scene, in the same order ([KIT_SCENES]: one registry file
+	// serves them all) -- and its save
+	void setup_scene(main_context::SceneReference scene, const ss_ &save_name,
+			kit::Interface *kit_in = nullptr)
+	{
+		const int XZ = kit::WORLD_SECTIONS_XZ;
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			ivw->create_instance(scene, pv::Region(-XZ, kit::WORLD_SECTION_Y0,
+					-XZ, XZ - 1, kit::WORLD_SECTION_Y1, XZ - 1));
+		});
+		interface::VoxelRegistry *reg = nullptr;
+		voxelworld::access(m_server, scene, [&](voxelworld::Instance *w){
+			w->set_load_points({});
+			reg = w->get_voxel_reg();
+			// [KIT_VOXEL_FORMAT] Kit's: id, param, tint, sky light
+			reg->set_format(kit::voxel_format());
+			interface::VoxelDefinition air;
+			air.name.block_name = "air";
+			air.fully_empty = true;
+			reg->add_voxel(air);
+		});
+		// Workbench's own voxels, then Kit's (its material set's); the
+		// registry is the world's and takes them from any thread
+		auto reg_voxels = [&](kit::Interface *k){
+			const json::Value own = json::load_string(OWN_MATERIALS);
+			for(const char *v : OWN_VOXELS){
+				const ss_ name = ss_("workbench/")+v;
+				ss_ why;
+				if(!k->register_material(reg, name, own.get(name.c_str()), &why))
+					log_e(MODULE, "%s", cs(why));
+			}
+			k->register_voxels(reg);
+		};
+		if(kit_in)
+			reg_voxels(kit_in);
+		else
+			kit::access(m_server, reg_voxels);
+		voxelworld::access(m_server, scene, [&](voxelworld::Instance *w){
+			w->set_save(m_save, save_name);
+		});
+	}
+
+	// [KIT_SCENES] Kit's make_scene: a scene of the composition's, its
+	// voxels saved as "scene_<name>"
+	main_context::SceneReference make_scene(const ss_ &name,
+			kit::Interface *k)
+	{
+		auto it = m_scenes.find(name);
+		if(it != m_scenes.end())
+			return it->second;
+		for(char c : name)
+			if(!isalnum((unsigned char)c) && c != '_')
+				return nullptr;
+		main_context::SceneReference ref = nullptr;
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			ref = imc->create_scene();
+		});
+		setup_scene(ref, "scene_"+name, k);
+		m_scenes[name] = ref;
+		log_i(MODULE, "workbench: scene %s made", cs(name));
+		return ref;
+	}
+
+	// [KIT_SCENES] Kit sends a player to another scene: replicate's scene
+	// theirs, Kit told, the body put
+	void on_change_scene(const kit::ChangeScene &c)
+	{
+		auto it = m_scenes.find(c.scene);
+		if(it == m_scenes.end() || !m_names.count(c.peer))
+			return;
+		m_peer_scene[c.peer] = c.scene;
+		replicate::assign_scene_to_peer(m_server, it->second, c.peer);
+		log_i(MODULE, "workbench: %s to scene %s", cs(m_names[c.peer]),
+				cs(c.scene));
+		place(c.peer, c.x, c.y, c.z);
+		kit::access(m_server, [&](kit::Interface *k){
+			k->put_player(c.peer, c.x, c.y, c.z, c.yaw);
+		});
+	}
+
+	// The scene a peer is in
+	main_context::SceneReference scene_of(size_t peer)
+	{
+		auto it = m_peer_scene.find(peer);
+		auto s = it == m_peer_scene.end() ? m_scenes.end() :
+				m_scenes.find(it->second);
+		return s == m_scenes.end() ? m_scene : s->second;
+	}
+
 	// The save `name` opened (made, when `create`) and Kit hosted in it.
 	// [WB_NEW_PROJECT_GROUND] A project New made (`fresh`) starts on a
 	// heightmap, the save's store "workbench" "ground" saying so from then
@@ -228,43 +324,16 @@ struct Module: public interface::Module
 			if(server_store())
 				server_store()->set("running", name);
 		}
-		// Kit's World's region, loaded only where Kit's load points say
-		const int XZ = kit::WORLD_SECTIONS_XZ;
-		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
-			ivw->create_instance(m_scene, pv::Region(-XZ, kit::WORLD_SECTION_Y0,
-					-XZ, XZ - 1, kit::WORLD_SECTION_Y1, XZ - 1));
-		});
-		interface::VoxelRegistry *reg = nullptr;
-		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
-			w->set_load_points({});
-			reg = w->get_voxel_reg();
-			// [KIT_VOXEL_FORMAT] Kit's: id, param, tint, sky light
-			reg->set_format(kit::voxel_format());
-			interface::VoxelDefinition air;
-			air.name.block_name = "air";
-			air.fully_empty = true;
-			reg->add_voxel(air);
-		});
-		// Workbench's own voxels, then Kit's (its material set's); the
-		// registry is the world's and takes them from any thread
-		kit::access(m_server, [&](kit::Interface *k){
-			const json::Value own = json::load_string(OWN_MATERIALS);
-			for(const char *v : OWN_VOXELS){
-				const ss_ name = ss_("workbench/")+v;
-				ss_ why;
-				if(!k->register_material(reg, name, own.get(name.c_str()), &why))
-					log_e(MODULE, "%s", cs(why));
-			}
-			k->register_voxels(reg);
-		});
-		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
-			w->set_save(m_save, "main");
-		});
+		setup_scene(m_scene, "main");
+		m_scenes["world"] = m_scene;
 		kit::Host h;
 		h.composition_path = m_server->get_module_path(MODULE)+
 				"/composition.json";
 		h.save = m_save;
 		h.scenes["world"] = m_scene;
+		h.make_scene = [this](const ss_ &name, kit::Interface *k){
+			return make_scene(name, k);
+		};
 		h.controls = true;
 		// The World: Workbench's floor, unless the composer says otherwise:
 		// a new project's a gentle grassland heightmap, 64x64 (its least
@@ -295,7 +364,8 @@ struct Module: public interface::Module
 	{
 		m_pos[peer] = {{x, y, z}};
 		kit::access(m_server, [&](kit::Interface *k){
-			k->set_peer(peer, m_names[peer], "world", x, y, z);
+			k->set_peer(peer, m_names[peer], m_peer_scene.count(peer) ?
+					m_peer_scene[peer] : ss_("world"), x, y, z);
 		});
 	}
 
@@ -347,6 +417,7 @@ struct Module: public interface::Module
 					"" : "1");
 		}
 		replicate::assign_scene_to_peer(m_server, m_scene, peer);
+		m_peer_scene[peer] = "world";
 		m_names[peer] = name.empty() ? "p"+itos(peer) : name;
 		spawn(peer);
 	}
@@ -354,6 +425,11 @@ struct Module: public interface::Module
 	// The middle of the World, unless a spawner puts them elsewhere
 	void spawn(size_t peer)
 	{
+		// [KIT_SCENES] the main scene's
+		if(m_peer_scene.count(peer) && m_peer_scene[peer] != "world"){
+			m_peer_scene[peer] = "world";
+			replicate::assign_scene_to_peer(m_server, m_scene, peer);
+		}
 		double x = 0.5, y = 1, z = 0.5;
 		kit::access(m_server, [&](kit::Interface *k){
 			k->world_spawn(x, y, z);
@@ -402,6 +478,7 @@ struct Module: public interface::Module
 		m_joining.erase(old.info.id);
 		m_waiting.erase(old.info.id);
 		m_in.erase(old.info.id);
+		m_peer_scene.erase(old.info.id);
 	}
 
 	// A builder's dig or place in play: {"p": [x, y, z], "voxel": name,
@@ -427,7 +504,7 @@ struct Module: public interface::Module
 			c[k] = ok ? (int)std::floor(p.at(k).as_number()) : 0;
 		}
 		bool placeable = false;
-		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+		voxelworld::access(m_server, scene_of(peer), [&](voxelworld::Instance *w){
 			interface::VoxelName n;
 			n.block_name = voxel;
 			placeable = w->get_voxel_reg()->get(n) != nullptr;
@@ -454,7 +531,7 @@ struct Module: public interface::Module
 			return;
 		}
 		bool written = false;
-		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+		voxelworld::access(m_server, scene_of(peer), [&](voxelworld::Instance *w){
 			interface::VoxelName n;
 			n.block_name = voxel;
 			const auto r = w->routed_set_voxel(pv::Vector3DInt32(c[0], c[1],

@@ -456,6 +456,73 @@ struct Decor
 	unsigned node = 0;
 };
 
+// [KIT] stage 4e: a scene's World (world.h; [KIT_SCENES] one a scene):
+// the parameters applied (its row) and parsed, the finite map's lowest and
+// highest ground, the section each player is in (an infinite world loads
+// round them), and the sections generated (logged as worldgen's queue
+// empties)
+struct World
+{
+	// The scene's name and its reference
+	ss_ name;
+	main_context::SceneReference world_scene = nullptr;
+	// [KIT_HM_FREE] The World's voxels when it is a heightmap: a section
+	// not loaded is air (never generated round a player); an edit
+	// generates its own (hm_section())
+	voxelworld::Instance *hm_world = nullptr;
+	json::Value world_applied;
+	world::Params wp;
+	int world_min = 0, world_max = 0;
+	int section_size = 32;
+	sm_<size_t, std::array<int32_t, 3>> world_peers;
+	// Where players appear on a voxel World: the cell their feet go in
+	std::array<int, 3> world_spawn = {{0, 1, 0}};
+	size_t world_generated = 0, world_logged = 0;
+	// A regeneration whose sections are not all generated again yet
+	bool world_regenerating = false;
+	// The loaded sections regenerate() unloaded: the load points bring them
+	// back over the next passes, so an empty worldgen queue is not the end
+	// until each is in again ([KIT_REGENERATED_EARLY])
+	// simplified: one the load points no longer reach keeps the notice
+	// back until the next regeneration
+	sv_<pv::Vector3DInt16> regen_wait;
+	// [KIT_VOXEL_EDITS] what the World's generator was made of, for a
+	// copy that says what a section would be (generated())
+	world::Params gen_p;
+	world::Ids gen_ids;
+	int gen_hi = 0;
+	bool gen_voxels = false;
+	// The decorations on a heightmap surface (its row "decor"), by id, and
+	// the voxel objects' models made, by structure
+	std::map<uint64_t, Decor> decor;
+	uint64_t next_decor = 1;
+	bool decor_dirty = false;
+	std::set<ss_> decor_models;
+	// [KIT_VOXEL_FORMAT] its sky light (apply_sky()) and the loaded
+	// sections' relight under way
+	bool sky = false;
+	size_t sky_relight = 0;
+	size_t sky_left = 0;
+	int64_t sky_relight_us = 0, sky_relight_t0 = 0, sky_relight_max_us = 0;
+	// [KIT_HM_FREE] its heightmap's loaded sections, logged as they change
+	size_t hm_loaded = 0;
+	int hm_ticks = 0;
+};
+
+// [KIT_SCENES] The World the code at hand is about, for a scope: m_w set
+// to w (null: left as it is) and put back after
+struct WorldScope
+{
+	World *&ref;
+	World *was;
+	WorldScope(World *&ref, World *w): ref(ref), was(ref)
+	{
+		if(w)
+			ref = w;
+	}
+	~WorldScope(){ ref = was; }
+};
+
 struct Module;
 
 // voxelworld's side: a write to a position Kit owns, queued for Kit's
@@ -876,39 +943,14 @@ struct Module: public interface::Module, public Interface
 	// Ids of entities being made together (a composition, a prefab's
 	// copy), which an entity parameter may name before they are there
 	std::set<uint64_t> m_pending_ids;
-	// [KIT] stage 4e: the World (world.h) in Host::world_scene: the
-	// material set, the parameters applied (the row "world") and parsed,
-	// the finite map's lowest and highest ground, the section each player
-	// is in (an infinite world loads round them), and the sections
-	// generated (logged as worldgen's queue empties)
-	main_context::SceneReference m_world_scene = nullptr;
-	// [KIT_HM_FREE] The World's voxels when it is a heightmap: a section
-	// not loaded is air (never generated round a player); an edit
-	// generates its own (hm_section())
-	voxelworld::Instance *m_hm_world = nullptr;
+	// [KIT] stage 4e: the material set the Worlds are made of
 	world::MaterialSet m_materials;
-	json::Value m_world_applied;
-	world::Params m_wp;
-	int m_world_min = 0, m_world_max = 0;
-	int m_section_size = 32;
-	sm_<size_t, std::array<int32_t, 3>> m_world_peers;
-	// Where players appear on a voxel World: the cell their feet go in
-	std::array<int, 3> m_world_spawn = {{0, 1, 0}};
-	size_t m_world_generated = 0, m_world_logged = 0;
-	// A regeneration whose sections are not all generated again yet
-	bool m_world_regenerating = false;
-	// The loaded sections regenerate() unloaded: the load points bring them
-	// back over the next passes, so an empty worldgen queue is not the end
-	// until each is in again ([KIT_REGENERATED_EARLY])
-	// simplified: one the load points no longer reach keeps the notice
-	// back until the next regeneration
-	sv_<pv::Vector3DInt16> m_regen_wait;
-	// [KIT_VOXEL_EDITS] what the World's generator was made of, for a
-	// copy that says what a section would be (generated())
-	world::Params m_gen_p;
-	world::Ids m_gen_ids;
-	int m_gen_hi = 0;
-	bool m_gen_voxels = false;
+	// [KIT_SCENES] Each scene's World, by the scene's name, and the one the
+	// code at hand is about (m_w; use_world()). A scene not the app's World
+	// scene's kind (Host::world_scene "": none) has m_none's
+	std::map<ss_, World> m_worlds;
+	World m_none;
+	World *m_w = &m_none;
 	// Guests' dropped entities' names by their `by`, for this run
 	// simplified: kept for the run (a name each guest that came)
 	sm_<ss_, ss_> m_gone_guests;
@@ -923,13 +965,6 @@ struct Module: public interface::Module, public Interface
 	// The properties of what register_voxels() and a builder's type
 	// registered, by name (voxel_type())
 	sm_<ss_, world::Material> m_registered;
-	// The decorations on a heightmap surface (row "decor"), by id, and the
-	// voxel objects' models made, by structure
-	std::map<uint64_t, Decor> m_decor;
-	uint64_t m_next_decor = 1;
-	bool m_decor_dirty = false;
-	std::set<ss_> m_decor_models;
-
 	Module(interface::Server *server):
 		interface::Module(MODULE),
 		m_server(server)
@@ -1854,10 +1889,9 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			m_next_id = std::max(m_next_id, e.id + 1);
-			if(e.kind == "scene" && !m_host.scenes.count(e.name)){
-				why = "scene "+e.name+": the app has none of that name";
+			if(e.kind == "scene" && !m_host.scenes.count(e.name) &&
+					!make_scene(e.name, why))
 				return false;
-			}
 			if(e.has_pos && !scene_of(e)){
 				why = "entity "+itos(e.id)+" has a position and no scene";
 				return false;
@@ -3347,15 +3381,17 @@ struct Module: public interface::Module, public Interface
 		});
 	}
 
-	// The World's parameters: the first World on the root's, over its
-	// type's defaults (the app's among them); none: the defaults
+	// The World's parameters: the first World on the current World's
+	// scene ([KIT_SCENES]; before, on the root), over its type's defaults
+	// (the app's among them); none: the defaults
 	json::Value world_params()
 	{
 		json::Value out = json::object();
 		ss_ type;
 		const Instance *in = nullptr;
+		const uint64_t sid = scene_id(m_w->name);
 		for(auto &p : m_entities){
-			if(p.second.parent != 1 || p.second.has_pos || in)
+			if(!sid || p.second.parent != sid || p.second.has_pos || in)
 				continue;
 			for(const Instance &i : p.second.comps)
 				if(m_types.count(i.type) && m_types[i.type].world){
@@ -3390,16 +3426,99 @@ struct Module: public interface::Module, public Interface
 		});
 	}
 
+	// [KIT_SCENES] The app asked for a scene of this name (Host::make_scene)
+	bool make_scene(const ss_ &name, ss_ &why)
+	{
+		if(!m_host.make_scene){
+			why = "scene "+name+": the app has none of that name";
+			return false;
+		}
+		main_context::SceneReference ref = m_host.make_scene(name, this);
+		if(!ref){
+			why = "scene "+name+": the app made none";
+			return false;
+		}
+		m_host.scenes[name] = ref;
+		log_i(MODULE, "Scene %s made by the app", cs(name));
+		return true;
+	}
+
+	// [KIT_SCENES] The scene entity of this name (0: none)
+	uint64_t scene_id(const ss_ &name)
+	{
+		if(name.empty())
+			return 0;
+		for(auto &e : m_entities)
+			if(e.second.kind == "scene" && e.second.name == name)
+				return e.first;
+		return 0;
+	}
+
+	World *world_named(const ss_ &scene)
+	{
+		auto it = m_worlds.find(scene);
+		return it == m_worlds.end() ? nullptr : &it->second;
+	}
+
+	World *world_at(main_context::SceneReference ref)
+	{
+		if(!ref)
+			return nullptr;
+		for(auto &w : m_worlds)
+			if(w.second.world_scene == ref)
+				return &w.second;
+		return nullptr;
+	}
+
+	// A peer's scene's World, the main one's for a peer not placed
+	World *world_of_peer(size_t peer)
+	{
+		auto it = m_peers.find(peer);
+		World *w = it == m_peers.end() ? nullptr : world_named(it->second.scene);
+		return w ? w : m_w;
+	}
+
+	// The save's row of the current World: the main scene's by its old
+	// name, another's with ":<scene>"
+	ss_ world_row(const ss_ &base)
+	{
+		return m_w->name == m_host.world_scene || m_w->name.empty() ? base :
+				base+":"+m_w->name;
+	}
+
+	// [KIT_SCENES] A World on the root (before every scene owned its own)
+	// moved onto the main scene
+	bool migrate_root_world()
+	{
+		const uint64_t main = scene_id(m_host.world_scene);
+		if(!main)
+			return false;
+		bool moved = false;
+		for(auto &p : m_entities){
+			Entity &e = p.second;
+			if(e.parent != 1 || e.has_pos)
+				continue;
+			for(const Instance &i : e.comps)
+				if(m_types.count(i.type) && m_types[i.type].world){
+					e.parent = main;
+					moved = true;
+					log_i(MODULE, "World: entity %llu moved from the root onto "
+							"the scene %s", (unsigned long long)e.id,
+							cs(m_host.world_scene));
+					break;
+				}
+		}
+		return moved;
+	}
+
 	bool host_world(ss_ &why)
 	{
 		if(m_host.world_scene.empty())
 			return true;
-		auto si = m_host.scenes.find(m_host.world_scene);
-		if(si == m_host.scenes.end()){
+		if(!m_host.scenes.count(m_host.world_scene)){
 			why = "the World's scene "+m_host.world_scene+" is none of the app's";
 			return false;
 		}
-		m_world_scene = si->second;
 		const ss_ ms = m_host.materials.empty() ? read_file(
 				m_server->get_module_path(MODULE)+"/materials.json") :
 				m_host.materials;
@@ -3408,16 +3527,41 @@ struct Module: public interface::Module, public Interface
 			why = "the material set: "+mwhy;
 			return false;
 		}
-		voxelworld::access(m_server, m_world_scene,
+		if(migrate_root_world())
+			m_store->set("authored", authored_json().stringify());
+		// The main scene's first, so that a refusal elsewhere is told in it
+		if(!host_world_of(m_host.world_scene, why))
+			return false;
+		for(auto &e : m_entities)
+			if(e.second.kind == "scene" && e.second.name != m_host.world_scene)
+				if(!host_world_of(e.second.name, why))
+					return false;
+		m_w = &m_worlds[m_host.world_scene];
+		return true;
+	}
+
+	// One scene's World made and applied (hosting, a new scene)
+	bool host_world_of(const ss_ &name, ss_ &why)
+	{
+		auto si = m_host.scenes.find(name);
+		if(si == m_host.scenes.end()){
+			why = "scene "+name+": the app has none of that name";
+			return false;
+		}
+		World &wd = m_worlds[name];
+		wd.name = name;
+		wd.world_scene = si->second;
+		WorldScope ws(m_w, &wd);
+		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
-			m_section_size = w->get_section_size_voxels().getX();
+			m_w->section_size = w->get_section_size_voxels().getX();
 		});
 		ss_ row;
-		if(m_store->get("world", row)){
+		if(m_store->get(world_row("world"), row)){
 			const json::Value r = json::load_string(row.c_str());
-			m_world_applied = r.get("params").deepcopy();
+			m_w->world_applied = r.get("params").deepcopy();
 			world::Params was;
-			was.from(m_world_applied);
+			was.from(m_w->world_applied);
 			const int64_t v = json::jint(r, "version", 0);
 			if(!was.finite() && !was.heightmap() &&
 					v != world::generator_version(was.generator)){
@@ -3426,14 +3570,14 @@ struct Module: public interface::Module, public Interface
 						itos(world::generator_version(was.generator));
 				return false;
 			}
-			m_wp = was;
+			m_w->wp = was;
 		}
 		ss_ awhy;
 		if(!apply_world(world_params(), "", true, awhy)){
 			// The save's own World again, else nothing generated
 			warn("not applied: "+awhy);
-			if(m_world_applied.is_object() &&
-					!apply_world(m_world_applied, "", true, awhy)){
+			if(m_w->world_applied.is_object() &&
+					!apply_world(m_w->world_applied, "", true, awhy)){
 				why = "the World: "+awhy;
 				return false;
 			}
@@ -3444,10 +3588,21 @@ struct Module: public interface::Module, public Interface
 	// The World's parameters changed (an edit, an undo): applied
 	void world_check(const ss_ &by)
 	{
-		if(!m_world_scene)
+		// [KIT_SCENES] each scene's
+		for(auto &w : m_worlds){
+			if(!scene_id(w.first))
+				continue;
+			WorldScope ws(m_w, &w.second);
+			world_check_one(by);
+		}
+	}
+
+	void world_check_one(const ss_ &by)
+	{
+		if(!m_w->world_scene)
 			return;
 		const json::Value p = world_params();
-		if(p.stringify() == m_world_applied.stringify())
+		if(p.stringify() == m_w->world_applied.stringify())
 			return;
 		ss_ why;
 		if(!apply_world(p, by, false, why))
@@ -3499,17 +3654,17 @@ struct Module: public interface::Module, public Interface
 		}
 		// The surface or a heightmap's size changed: the heightmap there
 		// goes (below, once nothing refuses), the new ground replacing it
-		const bool had = m_world_applied.is_object();
-		const bool reshape = !first && had && (p.heightmap() != m_wp.heightmap()
-				|| (p.heightmap() && (p.width != m_wp.width ||
-				p.depth != m_wp.depth)));
+		const bool had = m_w->world_applied.is_object();
+		const bool reshape = !first && had && (p.heightmap() != m_w->wp.heightmap()
+				|| (p.heightmap() && (p.width != m_w->wp.width ||
+				p.depth != m_w->wp.depth)));
 		// [KIT_VOXEL_FORMAT] the sky light alone changed generates nothing
 		const bool again = had && ground_key(params) !=
-				ground_key(m_world_applied);
+				ground_key(m_w->world_applied);
 		world::Ids ids;
 		ids.filler_depth = b.filler_depth;
 		sv_<int> layers;
-		voxelworld::access(m_server, m_world_scene,
+		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			interface::VoxelRegistry *reg = w->get_voxel_reg();
 			auto id = [&](const ss_ &name) -> interface::VoxelTypeId {
@@ -3576,40 +3731,40 @@ struct Module: public interface::Module, public Interface
 				}
 			caves = " ("+itos(n)+" of "+itos(of)+" sampled cells)";
 		}
-		if(reshape && m_wp.heightmap()){
+		if(reshape && m_w->wp.heightmap()){
 			decor_clear();
-			m_decor_dirty = true;
+			m_w->decor_dirty = true;
 			save_decor();
 			heightmap::access(m_server, [&](heightmap::Interface *ih){
-				ih->delete_instance(m_world_scene);
+				ih->delete_instance(m_w->world_scene);
 			});
 		}
 		if(p.heightmap()){
 			if(!apply_heightmap(p, *h, layers, ids, again, hash, why))
 				return false;
-			dn = m_decor.size();
+			dn = m_w->decor.size();
 			dh = decor_hash();
 			set_world_generator(p, ids, nullptr, lo, hi);
 			// The voxel ground it replaces: unloaded and forgotten (the
 			// edited sections stay in the save, unloaded)
-			if(reshape && !m_wp.heightmap()){
+			if(reshape && !m_w->wp.heightmap()){
 				regenerate(by, false);
-				m_world_regenerating = false;
+				m_w->world_regenerating = false;
 			}
 		} else {
 			set_world_generator(p, ids, std::move(h), lo, hi);
 			if(again)
 				regenerate(by);
 		}
-		m_wp = p;
-		m_world_min = lo;
-		m_world_max = hi;
-		m_world_applied = params.deepcopy();
+		m_w->wp = p;
+		m_w->world_min = lo;
+		m_w->world_max = hi;
+		m_w->world_applied = params.deepcopy();
 		apply_sky(params.get("sky_light").is_true() && !p.heightmap(), by);
 		json::Value row = json::object();
-		row.set("params", m_world_applied);
+		row.set("params", m_w->world_applied);
 		row.set("version", (int64_t)world::generator_version(p.generator));
-		m_store->set("world", row.stringify());
+		m_store->set(world_row("world"), row.stringify());
 		world_load_points();
 		log_i(MODULE, "World%s: %s %s, seed %u, biome %s, %s, %s; ground %i "
 				"to %i, heights hash %08x%s; version %i%s%s, decorations %zu "
@@ -3622,7 +3777,7 @@ struct Module: public interface::Module, public Interface
 				world::VERSION, p.with_caves() && !p.heightmap() ? ", caves" : "",
 				cs(caves), dn, dh);
 		if(first && !p.heightmap())
-			voxelworld::access(m_server, m_world_scene,
+			voxelworld::access(m_server, m_w->world_scene,
 					[&](voxelworld::Instance *w){
 				size_t n = 0, edited = 0;
 				for(const auto &s : w->section_stats())
@@ -3632,7 +3787,7 @@ struct Module: public interface::Module, public Interface
 			});
 		// [KIT_HM_VOXELS] the voxels built over a heightmap
 		if(first && p.heightmap())
-			voxelworld::access(m_server, m_world_scene,
+			voxelworld::access(m_server, m_w->world_scene,
 					[&](voxelworld::Instance *w){
 				size_t n = 0;
 				for(const auto &s : w->section_stats())
@@ -3660,13 +3815,12 @@ struct Module: public interface::Module, public Interface
 	// when it is on again). A heightmap's world has none (its ground is no
 	// voxels). simplified: per World, not per scene -- a peer in another
 	// scene is told the World's
-	bool m_sky = false;
 	void apply_sky(bool on, const ss_ &by)
 	{
-		if(on == m_sky)
+		if(on == m_w->sky)
 			return;
 		bool bound = false;
-		voxelworld::access(m_server, m_world_scene,
+		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			bound = w->get_voxel_reg()->get_format().light_sky.bound();
 		});
@@ -3675,10 +3829,10 @@ struct Module: public interface::Module, public Interface
 					"(kit::voxel_format() has)");
 			return;
 		}
-		m_sky = on;
+		m_w->sky = on;
 		const int64_t t0 = interface::os::time_us();
 		size_t n = 0;
-		voxelworld::access(m_server, m_world_scene,
+		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			w->set_light_maintained(voxelworld::Instance::LIGHT_SKY, on);
 			if(!on)
@@ -3688,9 +3842,9 @@ struct Module: public interface::Module, public Interface
 				n++;
 			}
 		});
-		m_sky_relight = m_sky_left = n;
-		m_sky_relight_us = m_sky_relight_max_us = 0;
-		m_sky_relight_t0 = t0;
+		m_w->sky_relight = m_w->sky_left = n;
+		m_w->sky_relight_us = m_w->sky_relight_max_us = 0;
+		m_w->sky_relight_t0 = t0;
 		log_i(MODULE, "World%s: sky light %s (%zu loaded sections to relight)",
 				by.empty() ? "" : cs(" by "+by), on ? "on" : "off", n);
 		send_sky(-1);
@@ -3700,35 +3854,31 @@ struct Module: public interface::Module, public Interface
 	// of a million voxels: 8 of them at once were a 2.5 s step); each
 	// commit sends what is done. Until then a section wears its old light
 	// (none: dark until it is relit)
-	size_t m_sky_relight = 0;
-	size_t m_sky_left = 0;
-	int64_t m_sky_relight_us = 0, m_sky_relight_t0 = 0,
-			m_sky_relight_max_us = 0;
 	static constexpr int64_t SKY_RELIGHT_BUDGET_US = 20000;
 	void sky_relight_tick()
 	{
-		if(!m_sky_relight || !m_world_scene)
+		if(!m_w->sky_relight || !m_w->world_scene)
 			return;
 		const int64_t t0 = interface::os::time_us();
 		size_t left = 0;
-		voxelworld::access(m_server, m_world_scene,
+		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			left = w->relight_stale(SKY_RELIGHT_BUDGET_US);
 			// Committed as each section is done, not each tick
-			if(left != m_sky_left)
+			if(left != m_w->sky_left)
 				w->commit();
 		});
-		m_sky_left = left;
+		m_w->sky_left = left;
 		const int64_t took = interface::os::time_us() - t0;
-		m_sky_relight_us += took;
-		m_sky_relight_max_us = std::max(m_sky_relight_max_us, took);
+		m_w->sky_relight_us += took;
+		m_w->sky_relight_max_us = std::max(m_w->sky_relight_max_us, took);
 		if(left)
 			return;
 		log_i(MODULE, "World: sky light: %zu sections relit, %.1f ms of "
-				"ticks (at most %.1f in one) over %.1f s", m_sky_relight,
-				m_sky_relight_us / 1000.0, m_sky_relight_max_us / 1000.0,
-				(interface::os::time_us() - m_sky_relight_t0) / 1e6);
-		m_sky_relight = 0;
+				"ticks (at most %.1f in one) over %.1f s", m_w->sky_relight,
+				m_w->sky_relight_us / 1000.0, m_w->sky_relight_max_us / 1000.0,
+				(interface::os::time_us() - m_w->sky_relight_t0) / 1e6);
+		m_w->sky_relight = 0;
 		send_sky(-1, true);
 	}
 
@@ -3736,8 +3886,10 @@ struct Module: public interface::Module, public Interface
 	// a peer (-1: all of them)
 	void send_sky(int64_t peer, bool relit = false)
 	{
+		// [KIT_SCENES] A peer's own scene's; all: the current World's
+		// scene's peers
 		json::Value j = json::object();
-		j.set("on", m_sky);
+		j.set("on", peer >= 0 ? world_of_peer((size_t)peer)->sky : m_w->sky);
 		if(relit)
 			j.set("relit", true);
 		network::access(m_server, [&](network::Interface *inetwork){
@@ -3746,7 +3898,8 @@ struct Module: public interface::Module, public Interface
 				return;
 			}
 			for(auto &p : m_peers)
-				inetwork->send(p.first, "kit:sky", j.stringify());
+				if(world_of_peer(p.first) == m_w)
+					inetwork->send(p.first, "kit:sky", j.stringify());
 		});
 	}
 
@@ -3760,10 +3913,10 @@ struct Module: public interface::Module, public Interface
 		g->p = p;
 		g->ids = ids;
 		// What generated() makes its own of
-		m_gen_p = p;
-		m_gen_ids = ids;
-		m_gen_hi = hi;
-		m_gen_voxels = h != nullptr;
+		m_w->gen_p = p;
+		m_w->gen_ids = ids;
+		m_w->gen_hi = hi;
+		m_w->gen_voxels = h != nullptr;
 		if(!h){
 			// A heightmap's scene: no voxels, all air: neither the World's
 			// sea (an empty map's columns are all under it: water up to
@@ -3781,19 +3934,19 @@ struct Module: public interface::Module, public Interface
 		g->h = std::move(h);
 		g->max_top = hi;
 		worldgen::access(m_server, [&](worldgen::Interface *i){
-			if(!i->get_instance(m_world_scene))
-				i->create_instance(m_world_scene);
-			worldgen::Instance *wi = i->get_instance(m_world_scene);
+			if(!i->get_instance(m_w->world_scene))
+				i->create_instance(m_w->world_scene);
+			worldgen::Instance *wi = i->get_instance(m_w->world_scene);
 			wi->set_generator(g);
 			wi->enable();
 		});
-		voxelworld::access(m_server, m_world_scene,
+		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			w->set_writes_alter(true);
 			// [KIT_HM_VOXELS] a heightmap's air sections: only the
 			// edited ones saved
 			w->set_save_unaltered(p.finite() && !p.heightmap());
-			m_hm_world = p.heightmap() ? w : nullptr;
+			m_w->hm_world = p.heightmap() ? w : nullptr;
 		});
 	}
 
@@ -3805,7 +3958,7 @@ struct Module: public interface::Module, public Interface
 		size_t again = 0;
 		std::set<std::tuple<int, int, int>> edited, redo;
 		sv_<pv::Vector3DInt16> wait;
-		voxelworld::access(m_server, m_world_scene,
+		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			// The edited ones into the save, so its index says them all
 			w->save();
@@ -3848,8 +4001,8 @@ struct Module: public interface::Module, public Interface
 		}
 		log_i(MODULE, "World%s: %zu sections generated again, %zu edited kept",
 				by.empty() ? "" : cs(" by "+by), again, edited.size());
-		m_world_regenerating = again > 0;
-		m_regen_wait = wait;
+		m_w->world_regenerating = again > 0;
+		m_w->regen_wait = wait;
 		if(n && seams_named)
 			warn(itos(n)+" edited sections kept, seams where they meet the "
 					"new ground: "+seams+(n > 8 ? " ..." : ""));
@@ -3868,12 +4021,12 @@ struct Module: public interface::Module, public Interface
 	up_<world::Generator> diff_generator()
 	{
 		up_<world::Generator> g(new world::Generator());
-		g->p = m_gen_p;
-		g->ids = m_gen_ids;
-		g->max_top = m_gen_hi;
+		g->p = m_w->gen_p;
+		g->ids = m_w->gen_ids;
+		g->max_top = m_w->gen_hi;
 		g->h.reset(new world::Heights());
-		g->h->p = m_gen_p;
-		if(m_gen_voxels)
+		g->h->p = m_w->gen_p;
+		if(m_w->gen_voxels)
 			valleys_query(*g->h);
 		else
 			g->h->p.generator = "empty";
@@ -3891,7 +4044,7 @@ struct Module: public interface::Module, public Interface
 			return false;
 		const pv::Region r = w->get_section_region_voxels(s);
 		interface::VoxelVolume gen(r);
-		g.generate(m_world_scene, s, gen);
+		g.generate(m_w->world_scene, s, gen);
 		const interface::VoxelVolume now = w->get_volume(r);
 		const uint32_t sm = state_mask(w->get_voxel_reg()->get_format());
 		const pv::Vector3DInt32 lc = r.getLowerCorner(), uc = r.getUpperCorner();
@@ -3915,8 +4068,8 @@ struct Module: public interface::Module, public Interface
 	{
 		json::Value list = json::array();
 		size_t more = 0;
-		if(m_world_scene)
-			voxelworld::access(m_server, m_world_scene,
+		if(m_w->world_scene)
+			voxelworld::access(m_server, m_w->world_scene,
 					[&](voxelworld::Instance *w){
 				sv_<pv::Vector3DInt16> edited;
 				// The index marks a section altered as it is saved
@@ -3934,7 +4087,7 @@ struct Module: public interface::Module, public Interface
 					edited.resize(MAX_EDITED_LISTED);
 				}
 				up_<world::Generator> g = diff_generator();
-				const auto &owned = m_owned_sections[m_world_scene];
+				const auto &owned = m_owned_sections[m_w->world_scene];
 				for(const pv::Vector3DInt16 &s : edited){
 					size_t n = 0;
 					const bool counted = section_diff(w, *g, s, n);
@@ -3952,7 +4105,7 @@ struct Module: public interface::Module, public Interface
 				}
 			});
 		json::Value j = json::object();
-		j.set("size", (int64_t)m_section_size);
+		j.set("size", (int64_t)m_w->section_size);
 		j.set("sections", list);
 		j.set("more", (int64_t)more);
 		network::access(m_server, [&](network::Interface *inetwork){
@@ -3966,7 +4119,7 @@ struct Module: public interface::Module, public Interface
 	void regenerate_sections(Peer &p, size_t peer, const json::Value &j,
 			std::function<void(const ss_&)> refuse)
 	{
-		if(!m_world_scene)
+		if(!m_w->world_scene)
 			return refuse("no World here");
 		if(m_session.running)
 			return refuse("the game is Running: End it first");
@@ -3992,7 +4145,7 @@ struct Module: public interface::Module, public Interface
 		nc.stroke = -2;
 		size_t cells = 0, skipped = 0;
 		ss_ why;
-		voxelworld::access(m_server, m_world_scene,
+		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			std::set<std::tuple<int, int, int>> want;
 			w->save();
@@ -4008,7 +4161,7 @@ struct Module: public interface::Module, public Interface
 				want = {one};
 			}
 			up_<world::Generator> g = diff_generator();
-			const auto &owned = m_owned_sections[m_world_scene];
+			const auto &owned = m_owned_sections[m_w->world_scene];
 			sv_<pv::Vector3DInt16> forget;
 			for(const auto &k : want){
 				const pv::Vector3DInt16 s(std::get<0>(k), std::get<1>(k),
@@ -4039,7 +4192,7 @@ struct Module: public interface::Module, public Interface
 		u.push_back(nc);
 		while(u.size() > UNDO_MAX)
 			u.pop_front();
-		m_world_regenerating = true;
+		m_w->world_regenerating = true;
 		log_i(MODULE, "World by %s: %zu edited sections regenerated, %zu cells "
 				"back to the generator's, %zu skipped (%zu to undo)", cs(p.name),
 				nc.regen.size(), cells, skipped, u.size());
@@ -4105,11 +4258,11 @@ struct Module: public interface::Module, public Interface
 		size.base_y = -100;
 		size.materials = 5;
 		heightmap::access(m_server, [&](heightmap::Interface *ih){
-			heightmap::Instance *map = ih->get_instance(m_world_scene);
+			heightmap::Instance *map = ih->get_instance(m_w->world_scene);
 			bool loaded = false;
 			if(!map){
-				map = ih->create_instance(m_world_scene, size);
-				loaded = map->set_save(m_host.save, "world");
+				map = ih->create_instance(m_w->world_scene, size);
+				loaded = map->set_save(m_host.save, world_row("world"));
 			}
 			if(!loaded || again){
 				generated = true;
@@ -4148,9 +4301,9 @@ struct Module: public interface::Module, public Interface
 	{
 		voxel_objects::Instance *vo = nullptr;
 		voxel_objects::access(m_server, [&](voxel_objects::Interface *iv){
-			vo = iv->get_instance(m_world_scene);
+			vo = iv->get_instance(m_w->world_scene);
 			if(!vo)
-				vo = iv->create_instance(m_world_scene);
+				vo = iv->create_instance(m_w->world_scene);
 		});
 		return vo;
 	}
@@ -4158,14 +4311,14 @@ struct Module: public interface::Module, public Interface
 	// A structure's model, made once from the material set's voxels
 	bool decor_model(const ss_ &name)
 	{
-		if(m_decor_models.count(name))
+		if(m_w->decor_models.count(name))
 			return true;
 		auto si = m_materials.structures.find(name);
 		if(si == m_materials.structures.end())
 			return false;
 		const world::Structure &st = si->second;
 		sv_<interface::VoxelTypeId> ids;
-		voxelworld::access(m_server, m_world_scene, [&](voxelworld::Instance *w){
+		voxelworld::access(m_server, m_w->world_scene, [&](voxelworld::Instance *w){
 			for(const ss_ &c : st.cells){
 				interface::VoxelName n;
 				n.block_name = c;
@@ -4174,7 +4327,7 @@ struct Module: public interface::Module, public Interface
 				ids.push_back(d ? d->id : 0);
 			}
 		});
-		voxel_objects::access(m_server, m_world_scene,
+		voxel_objects::access(m_server, m_w->world_scene,
 				[&](voxel_objects::Instance *vo){
 			voxel_objects::Model *m = vo->get_model("kit_"+name);
 			if(!m)
@@ -4184,7 +4337,7 @@ struct Module: public interface::Module, public Interface
 			for(int x = 0; x < st.sx; x++)
 				m->set_voxel(x, y, z, ids[((size_t)y * st.sz + z) * st.sx + x]);
 		});
-		m_decor_models.insert(name);
+		m_w->decor_models.insert(name);
 		return true;
 	}
 
@@ -4198,7 +4351,7 @@ struct Module: public interface::Module, public Interface
 		const magic::Quaternion q(0, d.yaw, 0);
 		const magic::Vector3 pos = magic::Vector3(d.x, d.y, d.z) -
 				q * magic::Vector3(st.ox + 0.5f, (float)st.oy, st.oz + 0.5f);
-		voxel_objects::access(m_server, m_world_scene,
+		voxel_objects::access(m_server, m_w->world_scene,
 				[&](voxel_objects::Instance *vo){
 			if(d.node)
 				vo->remove_object(d.node);
@@ -4219,41 +4372,41 @@ struct Module: public interface::Module, public Interface
 		Decor d;
 		d.structure = structure;
 		d.x = x, d.y = y, d.z = z, d.yaw = yaw;
-		const uint64_t id = m_next_decor++;
+		const uint64_t id = m_w->next_decor++;
 		decor_object(d);
-		m_decor[id] = d;
-		m_decor_dirty = true;
+		m_w->decor[id] = d;
+		m_w->decor_dirty = true;
 		return id;
 	}
 
 	void remove_decor(uint64_t id)
 	{
-		auto it = m_decor.find(id);
-		if(it == m_decor.end())
+		auto it = m_w->decor.find(id);
+		if(it == m_w->decor.end())
 			return;
 		if(it->second.node)
-			voxel_objects::access(m_server, m_world_scene,
+			voxel_objects::access(m_server, m_w->world_scene,
 					[&](voxel_objects::Instance *vo){
 				vo->remove_object(it->second.node);
 			});
-		m_decor.erase(it);
-		m_decor_dirty = true;
+		m_w->decor.erase(it);
+		m_w->decor_dirty = true;
 	}
 
 	void save_decor()
 	{
-		if(!m_decor_dirty)
+		if(!m_w->decor_dirty)
 			return;
-		m_decor_dirty = false;
+		m_w->decor_dirty = false;
 		json::Value a = json::array();
-		for(auto &d : m_decor){
+		for(auto &d : m_w->decor){
 			json::Value r = json::array();
 			r.append(d.second.structure);
 			for(float v : {d.second.x, d.second.y, d.second.z, d.second.yaw})
 				r.append((double)v);
 			a.append(r);
 		}
-		m_store->set("decor", a.stringify());
+		m_store->set(world_row("decor"), a.stringify());
 	}
 
 	// FNV-1a over the decorations, in their order: their structures' names
@@ -4262,7 +4415,7 @@ struct Module: public interface::Module, public Interface
 	{
 		uint32_t h = 2166136261u;
 		auto add = [&](uint8_t b){ h ^= b; h *= 16777619u; };
-		for(auto &d : m_decor){
+		for(auto &d : m_w->decor){
 			for(char c : d.second.structure)
 				add((uint8_t)c);
 			for(float v : {d.second.x, d.second.y, d.second.z, d.second.yaw}){
@@ -4291,7 +4444,7 @@ struct Module: public interface::Module, public Interface
 		}
 		int turns = 0;
 		const int k = world::pick_surface(b, seed, x, z, (int)std::floor(h),
-				m_wp.sea_level, mult, turns);
+				m_w->wp.sea_level, mult, turns);
 		if(k < 0 || b.decors[k].on != 't' || steep > 0.8f)
 			return "";
 		const world::StructIds &s = structs[b.decors[k].s];
@@ -4306,13 +4459,13 @@ struct Module: public interface::Module, public Interface
 	// "decor" is save_decor()'s)
 	void decor_clear()
 	{
-		for(auto &d : m_decor)
+		for(auto &d : m_w->decor)
 			if(d.second.node)
-				voxel_objects::access(m_server, m_world_scene,
+				voxel_objects::access(m_server, m_w->world_scene,
 						[&](voxel_objects::Instance *vo){
 					vo->remove_object(d.second.node);
 				});
-		m_decor.clear();
+		m_w->decor.clear();
 	}
 
 	// The decorations at a start: generated with a generated map (the
@@ -4322,9 +4475,9 @@ struct Module: public interface::Module, public Interface
 	{
 		decor_clear();
 		ss_ row;
-		const bool saved = !generated && m_store->get("decor", row);
+		const bool saved = !generated && m_store->get(world_row("decor"), row);
 		if(!saved && !p.with_decorations()){
-			m_decor_dirty = true;
+			m_w->decor_dirty = true;
 			save_decor();
 			return;
 		}
@@ -4343,7 +4496,7 @@ struct Module: public interface::Module, public Interface
 						(float)r.at(3).as_number(), (float)r.at(4).as_number()});
 			}
 		} else {
-			heightmap::access(m_server, m_world_scene,
+			heightmap::access(m_server, m_w->world_scene,
 					[&](heightmap::Instance *map){
 				for(int z = 0; z < map->samples_z(); z++)
 				for(int x = 0; x < map->samples_x(); x++){
@@ -4362,18 +4515,18 @@ struct Module: public interface::Module, public Interface
 		}
 		for(const New &n : made)
 			add_decor(n.s, n.x, n.y, n.z, n.yaw);
-		m_decor_dirty = true;
+		m_w->decor_dirty = true;
 		save_decor();
 		log_i(MODULE, "World: %zu decorations on the heightmap (%s)",
-				m_decor.size(), saved ? "the save's" : "generated");
+				m_w->decor.size(), saved ? "the save's" : "generated");
 	}
 
 	// The decorations over a rectangle of samples back on the ground
 	void reseat_decor(int x0, int z0, int x1, int z1)
 	{
 		sv_<uint64_t> moved;
-		heightmap::access(m_server, m_world_scene, [&](heightmap::Instance *map){
-			for(auto &d : m_decor){
+		heightmap::access(m_server, m_w->world_scene, [&](heightmap::Instance *map){
+			for(auto &d : m_w->decor){
 				if(d.second.x < x0 - 0.5f || d.second.x > x1 + 0.5f ||
 						d.second.z < z0 - 0.5f || d.second.z > z1 + 0.5f)
 					continue;
@@ -4385,9 +4538,9 @@ struct Module: public interface::Module, public Interface
 			}
 		});
 		for(uint64_t id : moved)
-			decor_object(m_decor[id]);
+			decor_object(m_w->decor[id]);
 		if(!moved.empty())
-			m_decor_dirty = true;
+			m_w->decor_dirty = true;
 	}
 
 	// ---- [KIT] stage 4f: the terrain brushes (api.h's "terrain" op)
@@ -4405,7 +4558,7 @@ struct Module: public interface::Module, public Interface
 				why = "voxel "+name+" is not registered";
 			return d ? d->id : 0;
 		};
-		br.p = m_wp;
+		br.p = m_w->wp;
 		br.air = id("air");
 		for(auto &b : m_materials.biomes){
 			world::BiomeIds bi;
@@ -4422,7 +4575,7 @@ struct Module: public interface::Module, public Interface
 				br.water.insert(bi.water);
 				br.soft.insert(bi.water);
 			}
-			if(b.first == m_wp.biome)
+			if(b.first == m_w->wp.biome)
 				br.world = bi;
 		}
 		br.soft.insert(br.air);
@@ -4468,7 +4621,7 @@ struct Module: public interface::Module, public Interface
 	void terrain(Peer &p, size_t peer, const json::Value &j,
 			std::function<void(const ss_&)> refuse)
 	{
-		if(!m_world_scene)
+		if(!m_w->world_scene)
 			return refuse("the app has no World");
 		const ss_ tool = jstr(j, "tool");
 		static const std::set<ss_> TOOLS = {"raise", "lower", "smooth",
@@ -4511,7 +4664,7 @@ struct Module: public interface::Module, public Interface
 			return refuse("fill: "+itos(MAX_FILL)+" cells a side at most");
 		ss_ biome = jstr(j, "biome");
 		if(biome.empty())
-			biome = m_wp.biome;
+			biome = m_w->wp.biome;
 		if(!m_materials.biomes.count(biome) && !(tool == "fill" &&
 				biome == "water"))
 			return refuse("biome: one of the material set's"+ss_(tool ==
@@ -4532,7 +4685,7 @@ struct Module: public interface::Module, public Interface
 		const int r = (int)std::floor(size + 0.5);
 		const double s = std::floor(strength + 0.5);
 		ss_ what, why;
-		if(m_wp.heightmap())
+		if(m_w->wp.heightmap())
 			what = terrain_heightmap(p, tool, x, y, z, x1, z1, r, s, level,
 					biome, c, why);
 		else
@@ -4563,7 +4716,7 @@ struct Module: public interface::Module, public Interface
 				cz = (int)std::floor(fz + 0.5);
 		const int L = (int)std::floor(level + 0.5);
 		ss_ what;
-		voxelworld::access(m_server, m_world_scene,
+		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			world::Brush br;
 			if(!make_brush(w, br, why))
@@ -4583,7 +4736,7 @@ struct Module: public interface::Module, public Interface
 				if(c)
 					c->cells.emplace(std::make_tuple(x, y, z), old);
 				set_id(w, q, v);
-				mark(w, m_world_scene, q, 'k', p.name);
+				mark(w, m_w->world_scene, q, 'k', p.name);
 			};
 			const world::BiomeIds *sel = &br.world;
 			for(auto &b : br.biomes)
@@ -4673,7 +4826,7 @@ struct Module: public interface::Module, public Interface
 				for(int y = cy + 2; y <= cy + 32 && !roofed; y++)
 					roofed = br.is_ground(cx, y, cz);
 				const double mult = 2 * s;
-				const uint32_t seed = m_wp.seed ^ world::BRUSH_SALT;
+				const uint32_t seed = m_w->wp.seed ^ world::BRUSH_SALT;
 				if(roofed){
 					for(int dy = -r; dy <= r; dy++)
 					for(int dz = -r; dz <= r; dz++)
@@ -4713,7 +4866,7 @@ struct Module: public interface::Module, public Interface
 							return;
 						columns++;
 						const int k = world::pick_surface(*sel, seed, x, z, t,
-								m_wp.sea_level, mult, turns);
+								m_w->wp.sea_level, mult, turns);
 						if(k >= 0)
 							br.place(br.structs[sel->decors[k].s], turns, x, t + 1,
 									z, sel->decors[k].on == 'w');
@@ -4793,7 +4946,7 @@ struct Module: public interface::Module, public Interface
 		world::BiomeIds bi;
 		sv_<world::StructIds> structs;
 		if(tool == "decorate")
-			voxelworld::access(m_server, m_world_scene,
+			voxelworld::access(m_server, m_w->world_scene,
 					[&](voxelworld::Instance *w){
 				world::resolve_biome(m_materials, sel,
 						[&](const ss_ &name) -> interface::VoxelTypeId {
@@ -4804,7 +4957,7 @@ struct Module: public interface::Module, public Interface
 					return d ? d->id : 0;
 				}, structs, bi);
 			});
-		heightmap::access(m_server, m_world_scene, [&](heightmap::Instance *map){
+		heightmap::access(m_server, m_w->world_scene, [&](heightmap::Instance *map){
 			const int sx = map->samples_x(), sz = map->samples_z();
 			auto in = [&](int x, int z){
 				return x >= 0 && z >= 0 && x < sx && z < sz;
@@ -4831,7 +4984,7 @@ struct Module: public interface::Module, public Interface
 				for(auto &b : m_materials.biomes)
 					if(layer_of(b.second, "top") == best)
 						return b.second;
-				return m_materials.biomes[m_wp.biome];
+				return m_materials.biomes[m_w->wp.biome];
 			};
 			// A sample's layer as its ground is: stone where steep, the
 			// riverbed under the sea, else its biome's top
@@ -4846,7 +4999,7 @@ struct Module: public interface::Module, public Interface
 								h));
 				}
 				const int layer = steep > HM_ROCK_SLOPE ? layer_of(b, "stone") :
-						h < m_wp.sea_level + 0.5f ? layer_of(b, "riverbed") :
+						h < m_w->wp.sea_level + 0.5f ? layer_of(b, "riverbed") :
 						layer_of(b, "top");
 				const heightmap::Weights w = one_hot(layer);
 				if(w != map->get_weights(x, z))
@@ -4908,11 +5061,11 @@ struct Module: public interface::Module, public Interface
 				circle([&](int x, int z, double){
 					samples++;
 					float yaw = 0;
-					const ss_ st = decor_pick(map, bi, structs, m_wp.seed ^
+					const ss_ st = decor_pick(map, bi, structs, m_w->wp.seed ^
 							world::BRUSH_SALT, x, z, 2 * s, yaw);
 					if(st.empty())
 						return;
-					for(auto &d : m_decor)
+					for(auto &d : m_w->decor)
 						if(std::fabs(d.second.x - x) < 1.5f &&
 								std::fabs(d.second.z - z) < 1.5f)
 							return;
@@ -4962,7 +5115,7 @@ struct Module: public interface::Module, public Interface
 			added++;
 		}
 		if(tool == "decorate")
-			what += ", "+itos(added)+" decorations ("+itos(m_decor.size())+
+			what += ", "+itos(added)+" decorations ("+itos(m_w->decor.size())+
 					" in all, hash "+itos(decor_hash())+")";
 		if(tool != "paint" && tool != "decorate" && tool != "column")
 			reseat_decor(bx0, bz0, bx1, bz1);
@@ -4973,9 +5126,10 @@ struct Module: public interface::Module, public Interface
 	// decorations as they were
 	void undo_terrain(const Change &c, const Peer &p)
 	{
+		WorldScope ws(m_w, world_at(c.scene));
 		size_t cells = 0;
 		if(!c.cells.empty())
-			voxelworld::access(m_server, c.scene ? c.scene : m_world_scene,
+			voxelworld::access(m_server, c.scene ? c.scene : m_w->world_scene,
 					[&](voxelworld::Instance *w){
 				for(auto &q : c.cells){
 					const pv::Vector3DInt32 v(std::get<0>(q.first),
@@ -4983,13 +5137,13 @@ struct Module: public interface::Module, public Interface
 					if(!hm_section(w, v))
 						continue;
 					set_id(w, v, q.second);
-					mark(w, c.scene ? c.scene : m_world_scene, v, 'k', p.name);
+					mark(w, c.scene ? c.scene : m_w->world_scene, v, 'k', p.name);
 					cells++;
 				}
 			});
 		int x0 = INT_MAX, z0 = INT_MAX, x1 = INT_MIN, z1 = INT_MIN;
 		if(!c.samples.empty())
-			heightmap::access(m_server, m_world_scene,
+			heightmap::access(m_server, m_w->world_scene,
 					[&](heightmap::Instance *map){
 				for(auto &q : c.samples){
 					map->set_height(q.first.first, q.first.second, q.second.first);
@@ -5007,8 +5161,8 @@ struct Module: public interface::Module, public Interface
 			reseat_decor(x0, z0, x1, z1);
 		save_decor();
 		ss_ hash;
-		if(m_wp.heightmap())
-			heightmap::access(m_server, m_world_scene,
+		if(m_w->wp.heightmap())
+			heightmap::access(m_server, m_w->world_scene,
 					[&](heightmap::Instance *map){
 				hash = ", map hash "+itos(map->content_hash());
 			});
@@ -5279,12 +5433,12 @@ struct Module: public interface::Module, public Interface
 	// over the terrain), round each player and the spawn
 	void world_load_points()
 	{
-		if(!m_world_scene)
+		if(!m_w->world_scene)
 			return;
 		sv_<voxelworld::LoadPoint> pts;
-		const int S = m_section_size;
+		const int S = m_w->section_size;
 		auto sec = [&](int v){ return v >= 0 ? v / S : -((-v + S - 1) / S); };
-		const world::Params &p = m_wp;
+		const world::Params &p = m_w->wp;
 		if(p.heightmap() || !p.finite()){
 			// [KIT_HM_WALK] round the spawn and each player; a heightmap's
 			// voxels are air built on over the terrain
@@ -5300,7 +5454,7 @@ struct Module: public interface::Module, public Interface
 					1, 1, hgen, hgen));
 			const int gxz = p.heightmap() ? -1 : world::GEN_XZ;
 			const int gy = p.heightmap() ? -1 : world::LOAD_Y;
-			for(auto &wp : m_world_peers)
+			for(auto &wp : m_w->world_peers)
 				pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
 						wp.second[0], wp.second[1], wp.second[2]),
 						world::LOAD_XZ, world::LOAD_Y, gxz, gy, wp.first));
@@ -5308,10 +5462,10 @@ struct Module: public interface::Module, public Interface
 			// A finite voxel World: every section of the map
 			const int m = p.border == "water" ? world::SEA_BORDER :
 					p.border == "wall" ? 1 : 0;
-			const int ylo = std::min(m_world_min, p.border == "water" ?
+			const int ylo = std::min(m_w->world_min, p.border == "water" ?
 					p.sea_level - world::SEA_BED : INT_MAX) -
 					(p.with_caves() ? world::CAVE_DEEP : 8);
-			const int yhi = std::max(m_world_max + (p.border == "wall" ? 4 : 0),
+			const int yhi = std::max(m_w->world_max + (p.border == "wall" ? 4 : 0),
 					p.sea_level);
 			for(int sx = sec(p.x0() - m); sx <= sec(p.x0() + p.width - 1 + m); sx++)
 			for(int sz = sec(p.z0() - m); sz <= sec(p.z0() + p.depth - 1 + m); sz++)
@@ -5320,7 +5474,7 @@ struct Module: public interface::Module, public Interface
 				pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
 						sx * S + S / 2, sy * S + S / 2, sz * S + S / 2), 0, 0, 0, 0));
 		}
-		voxelworld::access(m_server, m_world_scene,
+		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			w->set_load_points(pts);
 		});
@@ -5332,14 +5486,23 @@ struct Module: public interface::Module, public Interface
 	void world_peer(size_t peer, const ss_ &scene, double x, double y,
 			double z)
 	{
-		if(!m_world_scene || (m_wp.finite() && !m_wp.heightmap()) ||
-				scene != m_host.world_scene)
+		// [KIT_SCENES] Gone from another scene's World: it loads round
+		// them no more
+		for(auto &w : m_worlds){
+			if(w.first == scene || !w.second.world_peers.erase(peer))
+				continue;
+			WorldScope ws(m_w, &w.second);
+			world_load_points();
+		}
+		WorldScope ws(m_w, world_named(scene));
+		if(!m_w->world_scene || (m_w->wp.finite() && !m_w->wp.heightmap()) ||
+				m_w->name != scene)
 			return;
 		const std::array<int32_t, 3> c = {{(int32_t)std::floor(x),
 				(int32_t)std::floor(y), (int32_t)std::floor(z)}};
-		auto it = m_world_peers.find(peer);
-		const int S = m_section_size;
-		if(it != m_world_peers.end()){
+		auto it = m_w->world_peers.find(peer);
+		const int S = m_w->section_size;
+		if(it != m_w->world_peers.end()){
 			bool same = true;
 			for(int k = 0; k < 3; k++)
 				same = same && std::floor(it->second[k] / (double)S) ==
@@ -5347,8 +5510,14 @@ struct Module: public interface::Module, public Interface
 			if(same)
 				return;
 		}
-		m_world_peers[peer] = c;
+		m_w->world_peers[peer] = c;
 		world_load_points();
+	}
+
+	void scene_spawn(const ss_ &scene, double &x, double &y, double &z)
+	{
+		WorldScope ws(m_w, scene.empty() ? nullptr : world_named(scene));
+		world_spawn(x, y, z);
 	}
 
 	void world_spawn(double &x, double &y, double &z)
@@ -5356,12 +5525,12 @@ struct Module: public interface::Module, public Interface
 		x = 0.5;
 		y = 1;
 		z = 0.5;
-		if(!m_world_scene)
+		if(!m_w->world_scene)
 			return;
-		const world::Params &p = m_wp;
+		const world::Params &p = m_w->wp;
 		if(p.heightmap()){
 			heightmap::access(m_server, [&](heightmap::Interface *ih){
-				heightmap::Instance *map = ih->get_instance(m_world_scene);
+				heightmap::Instance *map = ih->get_instance(m_w->world_scene);
 				if(!map)
 					return;
 				x = map->samples_x() / 2 + 0.5;
@@ -5370,9 +5539,9 @@ struct Module: public interface::Module, public Interface
 			});
 			return;
 		}
-		x = m_world_spawn[0] + 0.5;
-		y = m_world_spawn[1];
-		z = m_world_spawn[2] + 0.5;
+		x = m_w->world_spawn[0] + 0.5;
+		y = m_w->world_spawn[1];
+		z = m_w->world_spawn[2] + 0.5;
 	}
 
 	// The valleys' surface for these heights (luanti_mapgen's; its
@@ -5401,7 +5570,7 @@ struct Module: public interface::Module, public Interface
 	void find_spawn(world::Heights &h, const world::Ids &ids)
 	{
 		const world::Params &p = h.p;
-		m_world_spawn = {{0, p.generator == "empty" ? p.level : 1, 0}};
+		m_w->world_spawn = {{0, p.generator == "empty" ? p.level : 1, 0}};
 		if(p.generator == "empty")
 			return;
 		const int w = p.finite() ? std::min(p.width, 128) : 128;
@@ -5444,23 +5613,25 @@ struct Module: public interface::Module, public Interface
 						blocked(x, z))
 					continue;
 				best = d2;
-				m_world_spawn = {{(int)dx, t + 1, (int)dz}};
+				m_w->world_spawn = {{(int)dx, t + 1, (int)dz}};
 			}
 		if(best < 0)
-			m_world_spawn = {{0, std::max(tops[(size_t)(d / 2) * w + w / 2],
+			m_w->world_spawn = {{0, std::max(tops[(size_t)(d / 2) * w + w / 2],
 					p.sea_level) + 1, 0}};
 	}
 
 	void on_generated(const worldgen::SectionGenerated &e)
 	{
-		if(e.scene == m_world_scene && m_world_scene)
-			m_world_generated++;
+		WorldScope ws(m_w, world_at(e.scene));
+		if(e.scene == m_w->world_scene && m_w->world_scene)
+			m_w->world_generated++;
 	}
 
 	void on_gen_queue(const worldgen::QueueModifiedEvent &e)
 	{
-		if(e.scene != m_world_scene || !m_world_scene || e.queue_size ||
-				m_world_generated == m_world_logged)
+		WorldScope ws(m_w, world_at(e.scene));
+		if(e.scene != m_w->world_scene || !m_w->world_scene || e.queue_size ||
+				m_w->world_generated == m_w->world_logged)
 			return;
 		// The event's queue size is the one when it was emitted: a
 		// regeneration queued since, or a section still being generated,
@@ -5468,16 +5639,16 @@ struct Module: public interface::Module, public Interface
 		// generated again" found no ground)
 		size_t pending = 0;
 		worldgen::access(m_server, [&](worldgen::Interface *i){
-			worldgen::Instance *wi = i->get_instance(m_world_scene);
+			worldgen::Instance *wi = i->get_instance(m_w->world_scene);
 			pending = wi ? wi->get_num_sections_pending() : 0;
 		});
 		if(pending)
 			return;
 		bool back = true;
-		if(!m_regen_wait.empty())
-			voxelworld::access(m_server, m_world_scene,
+		if(!m_w->regen_wait.empty())
+			voxelworld::access(m_server, m_w->world_scene,
 					[&](voxelworld::Instance *w){
-				for(const pv::Vector3DInt16 &sp : m_regen_wait)
+				for(const pv::Vector3DInt16 &sp : m_w->regen_wait)
 					if(!w->is_section_loaded(sp) ||
 							!w->is_section_generated(sp)){
 						back = false;
@@ -5486,15 +5657,15 @@ struct Module: public interface::Module, public Interface
 			});
 		if(!back)
 			return;
-		m_regen_wait.clear();
-		m_world_logged = m_world_generated;
+		m_w->regen_wait.clear();
+		m_w->world_logged = m_w->world_generated;
 		log_i(MODULE, "World: %zu sections generated since the start",
-				m_world_generated);
+				m_w->world_generated);
 		// Builders told the regeneration is done: what they read of the
 		// ground after it is the new ground's
-		if(!m_world_regenerating)
+		if(!m_w->world_regenerating)
 			return;
-		m_world_regenerating = false;
+		m_w->world_regenerating = false;
 		sv_<size_t> to;
 		for(auto &p : m_peers)
 			if(can_edit(p.first))
@@ -6384,7 +6555,8 @@ struct Module: public interface::Module, public Interface
 		const ss_ who = player_of(r.by);
 		const json::Value &tp = fx.get("teleport");
 		if(tp.is_array())
-			teleport(e, type, who, tp, fx.get("teleport_yaw"));
+			teleport(e, type, who, tp, fx.get("teleport_yaw"),
+					fx.get("teleport_scene"), fx.get("teleport_entity"));
 		const json::Value &apps = fx.get("app");
 		for(unsigned i = 0; i < apps.size(); i++)
 			app_call(e, type, r.by, who, apps.at(i));
@@ -7920,41 +8092,78 @@ struct Module: public interface::Module, public Interface
 		return 0;
 	}
 
-	// c:teleport(pos[, {yaw}]): the player who set the run off, in the
-	// entity's scene, moved by the app, with a yaw looking that way level
-	// ([KIT_SPAWNER_PLAYERS]). A component moves no one else
+	// c:teleport(pos[, {yaw, scene, entity}]): the player who set the run
+	// off, in the entity's scene, moved by the app, with a yaw looking that
+	// way level ([KIT_SPAWNER_PLAYERS]). A component moves no one else.
+	// [KIT_SCENES] `scene`: to pos in another scene of the composition (the
+	// app moving them there); `entity`: to that entity's place, in its
+	// scene, arriving there silently (its zone not entered)
 	void teleport(const Entity &e, const ss_ &type, const ss_ &who,
-			const json::Value &pos, const json::Value &yaw)
+			const json::Value &pos, const json::Value &yaw,
+			const json::Value &to_scene_v = json::Value(),
+			const json::Value &to_entity = json::Value())
 	{
 		ss_ scene;
 		scene_of(e, &scene);
 		const size_t peer = who.empty() ? 0 : peer_of(who, scene);
+		ss_ target = to_scene_v.is_string() ? to_scene_v.as_string() : scene;
+		double x = 0, y = 0, z = 0;
+		const Entity *te = nullptr;
+		if(to_entity.is_number()){
+			auto it = m_entities.find((uint64_t)to_entity.as_number());
+			if(it != m_entities.end() && it->second.has_pos &&
+					it->second.kind.empty()){
+				te = &it->second;
+				ss_ ts;
+				if(scene_of(*te, &ts)){
+					target = ts;
+					x = te->pos[0];
+					y = te->pos[1];
+					z = te->pos[2];
+				} else {
+					te = nullptr;
+				}
+			}
+		} else if(pos_ok(pos)){
+			x = pos.at(0u).as_number();
+			y = pos.at(1u).as_number();
+			z = pos.at(2u).as_number();
+		}
+		const bool other = target != scene;
 		const char *why = !m_host.moves_players && !m_host.controls ?
 				"the app moves no players" :
 				who.empty() ? "no player set it off" :
 				!peer ? "the player is not in its scene" :
-				!pos_ok(pos) ? "not a position" : nullptr;
+				to_entity.is_number() && !te ? "the target is no placed entity" :
+				!to_entity.is_number() && !pos_ok(pos) ? "not a position" :
+				other && !m_host.scenes.count(target) ?
+						"no scene of that name" :
+				other && !m_host.make_scene ?
+						"the app moves no one between scenes" : nullptr;
 		if(why){
 			log_w(MODULE, "Entity %s's %s: a teleport refused: %s",
 					cs(itos(e.id)), cs(type), why);
 			return;
 		}
-		const double x = pos.at(0u).as_number(), y = pos.at(1u).as_number(),
-				z = pos.at(2u).as_number();
 		const double look = yaw.is_number() && std::isfinite(yaw.as_number()) ?
 				norm_yaw(yaw.as_number()) : NAN;
+		const ss_ in = other ? " in the scene "+target : "";
 		if(std::isnan(look))
-			log_i(MODULE, "Entity %s's %s teleports %s to (%g, %g, %g)",
-					cs(itos(e.id)), cs(type), cs(who), x, y, z);
+			log_i(MODULE, "Entity %s's %s teleports %s to (%g, %g, %g)%s",
+					cs(itos(e.id)), cs(type), cs(who), x, y, z, cs(in));
 		else
-			log_i(MODULE, "Entity %s's %s teleports %s to (%g, %g, %g) facing %g",
-					cs(itos(e.id)), cs(type), cs(who), x, y, z, look);
-		if(m_host.controls)
-			put_player(peer, x, y, z, look);
-		else
-			m_server->emit_event("kit:move_player",
-					new MovePlayer(peer, x, y, z, look));
+			log_i(MODULE, "Entity %s's %s teleports %s to (%g, %g, %g)%s "
+					"facing %g", cs(itos(e.id)), cs(type), cs(who), x, y, z,
+					cs(in), look);
+		if(te)
+			m_arrive[who] = std::make_pair(te->id,
+					interface::os::game_us() + 10000000);
+		to_scene(peer, other ? target : "", x, y, z, look);
 	}
+
+	// [KIT_SCENES] A player teleported onto an entity, by name: its id and
+	// until when (game µs) stepping into its zone is no entering
+	std::map<ss_, std::pair<uint64_t, int64_t>> m_arrive;
 
 	// ---- The players' inventory: count, add, take and list (api.h), Kit's
 	// own counts (m_items) unless one component replaces them
@@ -8392,35 +8601,43 @@ struct Module: public interface::Module, public Interface
 	// [KIT_HM_FREE] How many of a heightmap's sections are loaded, logged
 	// as it changes (a few ticks apart): only what was built and edited,
 	// none round a player for walking
-	size_t m_hm_loaded = 0;
-	int m_hm_ticks = 0;
 	void hm_sections_tick()
 	{
-		if(!m_hm_world || ++m_hm_ticks < 10)
+		if(!m_w->hm_world || ++m_w->hm_ticks < 10)
 			return;
-		m_hm_ticks = 0;
+		m_w->hm_ticks = 0;
 		size_t n = 0;
-		voxelworld::access(m_server, m_world_scene,
+		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			n = w->get_loaded_sections().size();
 		});
-		if(n == m_hm_loaded)
+		if(n == m_w->hm_loaded)
 			return;
-		m_hm_loaded = n;
+		m_w->hm_loaded = n;
 		log_i(MODULE, "World: %zu of the heightmap's voxel sections loaded",
 				n);
 	}
 
 	// [KIT_HM_FREE] A heightmap's section an edit goes in: generated
 	// (all air) if not loaded; false elsewhere or past the map
+	// [KIT_SCENES] The World whose heightmap's voxels w is, null for none
+	World *hm_world_of(voxelworld::Instance *w)
+	{
+		for(auto &x : m_worlds)
+			if(w && x.second.hm_world == w)
+				return &x.second;
+		return nullptr;
+	}
+
 	bool hm_section(voxelworld::Instance *w, const pv::Vector3DInt32 &p)
 	{
-		if(!w || w != m_hm_world || loaded(w, p))
+		if(!w || !hm_world_of(w) || loaded(w, p))
 			return loaded(w, p);
+		WorldScope ws(m_w, hm_world_of(w));
 		// (the heightmap's samples: whole chunks of 64, apply_heightmap()'s)
 		if(p.getX() < 0 || p.getZ() < 0 ||
-				p.getX() >= (m_wp.width + 63) / 64 * 64 ||
-				p.getZ() >= (m_wp.depth + 63) / 64 * 64)
+				p.getX() >= (m_w->wp.width + 63) / 64 * 64 ||
+				p.getZ() >= (m_w->wp.depth + 63) / 64 * 64)
 			return false;
 		const pv::Vector3DInt16 ss = w->get_section_size_voxels();
 		auto div = [](int32_t a, int b){
@@ -8639,8 +8856,9 @@ struct Module: public interface::Module, public Interface
 				int n[3];
 				extent(in.params.get(t.zone), n);
 				const pv::Vector3DInt32 o = voxel_p(e);
-				// Who is in it, by their entity's id
-				std::set<ss_> now;
+				// Who is in it, by their entity's id; those arriving on it
+				// by a teleport enter it silently
+				std::set<ss_> now, silent;
 				for(auto &pp : m_peers){
 					const Peer &peer = pp.second;
 					if(peer.scene != scene || !peer.player)
@@ -8653,6 +8871,13 @@ struct Module: public interface::Module, public Interface
 					}
 					if(inside)
 						now.insert(itos(peer.player));
+					auto ar = m_arrive.find(peer.name);
+					if(inside && ar != m_arrive.end() &&
+							ar->second.first == e.id){
+						if(ar->second.second > interface::os::game_us())
+							silent.insert(itos(peer.player));
+						m_arrive.erase(ar);
+					}
 				}
 				auto fire = [&](const char *handler, const ss_ &id){
 					Run r;
@@ -8666,7 +8891,7 @@ struct Module: public interface::Module, public Interface
 				if(now == in.inside)
 					continue;
 				for(const ss_ &id : now)
-					if(!in.inside.count(id))
+					if(!in.inside.count(id) && !silent.count(id))
 						fire("on_enter", id);
 				for(const ss_ &id : in.inside)
 					if(!now.count(id))
@@ -8709,8 +8934,11 @@ struct Module: public interface::Module, public Interface
 			return;
 		m_box->poll();
 		take_vouches();
-		sky_relight_tick();
-		hm_sections_tick();
+		for(auto &w : m_worlds){
+			WorldScope ws(m_w, &w.second);
+			sky_relight_tick();
+			hm_sections_tick();
+		}
 		flush_copies();
 		// Writes into the start, made as their sections load: Running,
 		// kept past the round's Stop
@@ -9001,6 +9229,7 @@ struct Module: public interface::Module, public Interface
 	// parameters, its body) and the seat
 	json::Value controls_for(size_t peer)
 	{
+		WorldScope ws(m_w, world_of_peer(peer));
 		json::Value c = json::object();
 		const json::Value p = controls_params();
 		c.set("params", p);
@@ -9028,9 +9257,9 @@ struct Module: public interface::Module, public Interface
 			c.set("seat", (int64_t)b.seat);
 		}
 		c.set("voxels", voxel_extra());
-		if(m_world_scene && m_wp.heightmap() && pe.scene == m_host.world_scene)
+		if(m_w->world_scene && m_w->wp.heightmap() && pe.scene == m_host.world_scene)
 			heightmap::access(m_server, [&](heightmap::Interface *ih){
-				heightmap::Instance *map = ih->get_instance(m_world_scene);
+				heightmap::Instance *map = ih->get_instance(m_w->world_scene);
 				if(!map)
 					return;
 				json::Value hm = json::array();
@@ -9215,6 +9444,7 @@ struct Module: public interface::Module, public Interface
 	void snapshot(ss_ &o, const Peer &pe, const Body &b, const double pos[3],
 			double r, double h, double reach)
 	{
+		WorldScope ws(m_w, world_named(pe.scene));
 		auto si = m_host.scenes.find(pe.scene);
 		const main_context::SceneReference scene =
 				si == m_host.scenes.end() ? nullptr : si->second;
@@ -9331,9 +9561,9 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		o += "}";
-		if(m_world_scene && m_wp.heightmap() && scene == m_world_scene)
+		if(m_w->world_scene && m_w->wp.heightmap() && scene == m_w->world_scene)
 			heightmap::access(m_server, [&](heightmap::Interface *ih){
-				heightmap::Instance *map = ih->get_instance(m_world_scene);
+				heightmap::Instance *map = ih->get_instance(m_w->world_scene);
 				if(!map)
 					return;
 				const int hx0 = std::max(0, x0), hz0 = std::max(0, z0);
@@ -9644,8 +9874,11 @@ struct Module: public interface::Module, public Interface
 			unplace_player(player);
 		if(guest)
 			drop_guest(name);
-		if(m_world_peers.erase(old.info.id))
-			world_load_points();
+		for(auto &w : m_worlds)
+			if(w.second.world_peers.erase(old.info.id)){
+				WorldScope ws(m_w, &w.second);
+				world_load_points();
+			}
 		for(auto &p : m_peers)
 			if(p.second.editing)
 				send_state(p.first);
@@ -9858,7 +10091,7 @@ struct Module: public interface::Module, public Interface
 			uint32_t &id)
 	{
 		if(!loaded(w, p)){
-			if(w != m_hm_world || !w)
+			if(!w || !hm_world_of(w))
 				return false;
 			id = 0;
 			return true;
@@ -10956,6 +11189,7 @@ struct Module: public interface::Module, public Interface
 	// that it is not editing
 	void send_state(size_t peer)
 	{
+		WorldScope ws(m_w, world_of_peer(peer));
 		auto pi = m_peers.find(peer);
 		json::Value j = json::object();
 		const bool editing = pi != m_peers.end() && pi->second.editing;
@@ -10967,6 +11201,15 @@ struct Module: public interface::Module, public Interface
 		// whether builds are always kept
 		j.set("discarded", discarded_counts());
 		j.set("always_keep", always_keep());
+		// [KIT_SCENES] The composition's scenes and theirs, and whether
+		// new ones can be made
+		json::Value scenes = json::array();
+		for(auto &e : m_entities)
+			if(e.second.kind == "scene")
+				scenes.append(e.second.name);
+		j.set("scenes", scenes);
+		j.set("scene", pi != m_peers.end() ? pi->second.scene : ss_());
+		j.set("can_make_scenes", (bool)m_host.make_scene);
 		// [KIT] stage 5: the credits, everyone's
 		j.set("credits", credits());
 		if(editing){
@@ -11071,13 +11314,13 @@ struct Module: public interface::Module, public Interface
 				ts.append(t);
 			j.set("textures", ts);
 			// [KIT] stage 4f: what the terrain brushes choose from
-			if(m_world_scene){
+			if(m_w->world_scene){
 				json::Value t = json::object(), bs = json::array();
 				for(auto &b : m_materials.biomes)
 					bs.append(b.first);
 				t.set("biomes", bs);
-				t.set("biome", m_wp.biome);
-				t.set("surface", ss_(m_wp.heightmap() ? "heightmap" : "voxels"));
+				t.set("biome", m_w->wp.biome);
+				t.set("surface", ss_(m_w->wp.heightmap() ? "heightmap" : "voxels"));
 				j.set("terrain", t);
 			}
 			j.set("undo", (int64_t)m_undo[pi->second.name].size());
@@ -11129,6 +11372,8 @@ struct Module: public interface::Module, public Interface
 		if(pi == m_peers.end())
 			return refuse("the app has not placed the player");
 		Peer &p = pi->second;
+		// [KIT_SCENES] The World of the scene the editor is in
+		WorldScope ws(m_w, world_named(p.scene));
 		// Rights each packet: a revoked editor's next edit is refused
 		if(!can_edit(peer)){
 			if(p.editing){
@@ -11174,6 +11419,8 @@ struct Module: public interface::Module, public Interface
 			return refuse("not in edit mode");
 		if(op == "focus")
 			return focus(peer, j, refuse);
+		if(op == "scene")
+			return switch_scene(p, peer, j, refuse);
 		if(op == "terrain")
 			return terrain(p, peer, j, refuse);
 		if(op == "voxel")
@@ -11233,7 +11480,7 @@ struct Module: public interface::Module, public Interface
 			// A regeneration's: once its sections are there again
 			bool back = true;
 			if(!u.back().regen.empty())
-				voxelworld::access(m_server, m_world_scene,
+				voxelworld::access(m_server, m_w->world_scene,
 						[&](voxelworld::Instance *w){
 					for(const pv::Vector3DInt16 &s : u.back().regen)
 						back = back && w->is_section_loaded(s) &&
@@ -11263,6 +11510,7 @@ struct Module: public interface::Module, public Interface
 			m_paste.set = false;
 			return refuse(why);
 		}
+		two_way_returns(change, what);
 		std::deque<Change> &u = m_undo[p.name];
 		commit(change, &u);
 		// [KIT_PREFAB_VOXELS] a place's voxels, with its entities one undo
@@ -11281,6 +11529,187 @@ struct Module: public interface::Module, public Interface
 		}
 		log_i(MODULE, "An edit by %s: %s", cs(p.name), cs(what));
 		world_check(p.name);
+		// [KIT_SCENES] a new scene: its World, and its maker taken there
+		if(op == "new_scene"){
+			const ss_ name = jstr(j, "name");
+			ss_ hwhy;
+			if(!m_worlds.count(name) && !m_host.world_scene.empty() &&
+					!host_world_of(name, hwhy))
+				warn("scene "+name+": "+hwhy);
+			go_to_scene(p, peer, name);
+		}
+	}
+
+	// [KIT_SCENES] A two-way teleporter in a change, onto an entity: that
+	// entity teleports back (a teleporter put on it, or its own one with no
+	// target given this one), in the same undo
+	void two_way_returns(sv_<std::pair<uint64_t, json::Value>> &change,
+			ss_ &what)
+	{
+		const size_t n = change.size();
+		for(size_t ci = 0; ci < n; ci++){
+			const uint64_t id = change[ci].first;
+			if(!change[ci].second.is_object())
+				continue;
+			Entity e;
+			ss_ why;
+			if(!entity_from_json(change[ci].second, e, why))
+				continue;
+			for(const Instance &in : e.comps){
+				const json::Value &tv = in.params.get("target");
+				if(in.type != "kit/teleporter" ||
+						!in.params.get("two_way").is_true() ||
+						!tv.is_number() || tv.as_number() < 2)
+					continue;
+				const uint64_t tid = (uint64_t)tv.as_number();
+				auto ti = m_entities.find(tid);
+				bool in_change = false;
+				for(auto &c : change)
+					in_change = in_change || c.first == tid;
+				if(tid == id || in_change || ti == m_entities.end() ||
+						!ti->second.has_pos || !ti->second.kind.empty())
+					continue;
+				Entity t = ti->second;
+				Instance *back = nullptr;
+				for(Instance &ti2 : t.comps)
+					if(ti2.type == "kit/teleporter")
+						back = &ti2;
+				if(back){
+					const json::Value &bt = back->params.get("target");
+					if((bt.is_number() && bt.as_number() != 0) ||
+							jstr(back->params, "scene") != "")
+						continue;
+					back->params.set("target", (int64_t)id);
+				} else {
+					Instance r = in;
+					r.links.clear();
+					r.overrides.clear();
+					r.params = in.params.deepcopy();
+					r.params.set("target", (int64_t)id);
+					r.params.set("two_way", false);
+					r.params.set("scene", "");
+					t.comps.push_back(r);
+				}
+				change.push_back(std::make_pair(tid, entity_json(t)));
+				what += ", a teleporter back on entity "+itos(tid);
+			}
+		}
+	}
+
+	// [KIT_SCENES] A scene of the composition, a name of letters, digits
+	// and _: its entity, and its World the current scene's copied ("copy")
+	// or the World type's defaults (the app's); the app makes it
+	// (Host::make_scene). simplified: an undo takes the entities back, the
+	// app's scene stays (empty, unused)
+	bool new_scene_change(const json::Value &j, const Peer &p,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
+			ss_ &why)
+	{
+		const ss_ name = jstr(j, "name");
+		if(!m_host.make_scene){
+			why = "the app makes no scenes";
+			return false;
+		}
+		if(name.empty() || name.size() > 32 || !name_ok(name)){
+			why = "a scene's name is 1 to 32 letters, digits and _";
+			return false;
+		}
+		if(scene_id(name)){
+			why = "there is a scene "+name+" already";
+			return false;
+		}
+		if(!m_host.scenes.count(name) && !make_scene(name, why))
+			return false;
+		const uint64_t sid = m_next_id++;
+		json::Value e = json::object();
+		e.set("id", (int64_t)sid);
+		e.set("parent", (int64_t)1);
+		e.set("name", name);
+		e.set("kind", "scene");
+		change.push_back(std::make_pair(sid, e));
+		what = "made the scene "+name;
+		if(!j.get("copy").is_true() || m_host.world_scene.empty())
+			return true;
+		// The current scene's World entity, copied
+		const uint64_t cur = scene_id(p.scene);
+		for(auto &pe : m_entities){
+			const Entity &we = pe.second;
+			if(!cur || we.parent != cur || we.has_pos)
+				continue;
+			bool is_world = false;
+			for(const Instance &i : we.comps)
+				is_world = is_world || (m_types.count(i.type) &&
+						m_types[i.type].world);
+			if(!is_world)
+				continue;
+			Entity c = we;
+			c.id = m_next_id++;
+			c.parent = sid;
+			c.prefab = json::Value();
+			for(Instance &i : c.comps)
+				i.links.clear();
+			change.push_back(std::make_pair(c.id, entity_json(c)));
+			what += ", its World "+p.scene+"'s copied";
+			break;
+		}
+		return true;
+	}
+
+	// [KIT_SCENES] Where each player last was in each scene, by name and
+	// scene: a builder going back to one comes back there
+	std::map<std::pair<ss_, ss_>, std::array<double, 3>> m_scene_pos;
+
+	// A builder to another scene of the composition: where they last were
+	// in it, else its World's spawn
+	void go_to_scene(Peer &p, size_t peer, const ss_ &name)
+	{
+		m_scene_pos[std::make_pair(p.name, p.scene)] =
+				{{p.pos[0], p.pos[1], p.pos[2]}};
+		auto it = m_scene_pos.find(std::make_pair(p.name, name));
+		double x = 0.5, y = 1, z = 0.5;
+		if(it != m_scene_pos.end()){
+			x = it->second[0];
+			y = it->second[1];
+			z = it->second[2];
+		} else {
+			scene_spawn(name, x, y, z);
+		}
+		to_scene(peer, name, x, y, z);
+	}
+
+	// A player put at x, y, z of a scene: their own, put now; another,
+	// by the app (kit:change_scene)
+	void to_scene(size_t peer, const ss_ &scene, double x, double y,
+			double z, double look = NAN)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end())
+			return;
+		if(scene.empty() || scene == pi->second.scene){
+			if(m_host.controls)
+				put_player(peer, x, y, z, look);
+			else
+				m_server->emit_event("kit:move_player",
+						new MovePlayer(peer, x, y, z, look));
+			return;
+		}
+		log_i(MODULE, "%s goes to the scene %s at (%g, %g, %g)",
+				cs(pi->second.name), cs(scene), x, y, z);
+		m_server->emit_event("kit:change_scene",
+				new ChangeScene(peer, scene, x, y, z, look));
+	}
+
+	void switch_scene(Peer &p, size_t peer, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const ss_ name = jstr(j, "name");
+		if(!scene_id(name) || !m_host.scenes.count(name))
+			return refuse("no scene "+name.substr(0, 64));
+		if(name == p.scene)
+			return refuse("already in the scene "+name);
+		if(!m_host.make_scene)
+			return refuse("the app moves no one between scenes");
+		go_to_scene(p, peer, name);
 	}
 
 	// An id in a client's packet: a whole number of an entity that is there
@@ -11357,6 +11786,8 @@ struct Module: public interface::Module, public Interface
 		if(op == "place" && (!j.get("prefab").is_undefined() ||
 				j.get("clipboard").is_true()))
 			return place_prefab(j, p, change, what, why);
+		if(op == "new_scene")
+			return new_scene_change(j, p, change, what, why);
 		if(op == "save_prefab")
 			return save_prefab(j, p, change, what, why);
 		if(op == "place"){
@@ -11374,20 +11805,25 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			// In the scene the app placed the editor in, or a game-wide
-			// type (root) on the app root, no position
+			// type (root) on the app root, no position. [KIT_SCENES] A
+			// World on the scene itself, no position (each scene's own),
+			// and a root type asked "on": "scene" (an environment of the
+			// scene's own)
+			const bool on_scene = m_types[type].world ||
+					(m_types[type].root && jstr(j, "on") == "scene");
 			const bool root = m_types[type].root;
 			uint64_t scene = 0;
 			for(auto &e : m_entities)
 				if(e.second.kind == "scene" && e.second.name == p.scene)
 					scene = e.first;
-			if(!scene && !root){
+			if(!scene && (!root || on_scene)){
 				why = "the editor is in no scene of the composition's";
 				return false;
 			}
 			const uint64_t id = m_next_id++;
 			json::Value e = json::object();
 			e.set("id", (int64_t)id);
-			e.set("parent", (int64_t)(root ? 1 : scene));
+			e.set("parent", (int64_t)(on_scene ? scene : root ? 1 : scene));
 			e.set("name", type+" "+itos(id));
 			json::Value pos = json::array();
 			for(unsigned k = 0; k < 3; k++)
@@ -11400,7 +11836,8 @@ struct Module: public interface::Module, public Interface
 			comps.append(comp);
 			e.set("components", comps);
 			change.push_back(std::make_pair(id, e));
-			what = "placed "+type+" "+itos(id)+(root ? ss_(" on the app root") :
+			what = "placed "+type+" "+itos(id)+(on_scene ? " on the scene "+
+					p.scene : root ? ss_(" on the app root") :
 					" at "+pos.stringify());
 			return true;
 		}

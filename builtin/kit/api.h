@@ -580,6 +580,8 @@ namespace kit
 		return w;
 	}
 
+	struct Interface;
+
 	struct Host
 	{
 		// The app's component types, <types_path>/<name>.lua ("": none of
@@ -604,6 +606,17 @@ namespace kit
 		// The app's scenes by the names the composition gives them; a
 		// scene with a voxelworld instance has its voxels owned
 		sm_<ss_, main_context::SceneReference> scenes;
+		// [KIT_SCENES] The app makes a scene of this name for the
+		// composition (a builder's New scene, a saved composition's scene
+		// it has not made yet) and gives its reference, null when it will
+		// not. On a World app (world_scene) the scene has a voxelworld
+		// instance like world_scene's: the same voxels registered in the
+		// same order (one registry file serves every scene), its own save.
+		// Unset: the composition's scenes are only `scenes`. Called on
+		// Kit's thread: Kit's own calls (register_voxels...) go through k,
+		// not access()
+		std::function<main_context::SceneReference(const ss_ &name,
+				Interface *k)> make_scene;
 		// How far from an entity a player may use it
 		double use_range = 6;
 		// Whether the app moves players for a component (c:teleport), on
@@ -674,6 +687,23 @@ namespace kit
 		MovePlayer(size_t peer, double x, double y, double z,
 				double yaw = NAN):
 			peer(peer), x(x), y(y), z(z), yaw(yaw){}
+	};
+
+	// [KIT_SCENES] kit:change_scene: a player goes to another scene of the
+	// composition (a portal, a builder's switch of the scene edited): the
+	// app moves the peer there (replicate's scene, its voxels round them),
+	// says so by set_peer with that scene and puts them at x, y, z
+	// (put_player; with a yaw as MovePlayer's). Kit sends it only to an app
+	// with make_scene
+	struct ChangeScene: public interface::Event::Private
+	{
+		size_t peer = 0;
+		ss_ scene;
+		double x = 0, y = 0, z = 0;
+		double yaw = NAN;
+		ChangeScene(size_t peer, const ss_ &scene, double x, double y,
+				double z, double yaw = NAN):
+			peer(peer), scene(scene), x(x), y(y), z(z), yaw(yaw){}
 	};
 
 	// kit:spawn_player: a round starts (Play) and nothing in the player's
@@ -775,6 +805,9 @@ namespace kit
 		// Where a player stands at the World's middle: x, z, and y the
 		// cell their feet are in (a heightmap's: its surface + 0.5)
 		virtual void world_spawn(double &x, double &y, double &z) = 0;
+		// [KIT_SCENES] The same in a scene's World ("": the World scene's)
+		virtual void scene_spawn(const ss_ &scene, double &x, double &y,
+				double &z) = 0;
 		// [KIT] stage 4h (Host::controls): a placed peer's body put with
 		// its feet in the cell at x, y, z (a spawn, a respawn), standing
 		// still, out of any seat; with a look (degrees, [KIT_SPAWNER_PLAYERS])

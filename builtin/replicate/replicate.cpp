@@ -700,30 +700,74 @@ struct Module: public interface::Module, public replicate::Interface
 
 	// Interface
 
+	// [KIT_SCENES] The peer leaves its scene: the client is told to remove
+	// every node of it that it had (not the scene's own node, which it
+	// keeps as its one replicated scene), and nothing points into the state
+	// any more. Then a new scene arrives in it from nothing.
+	void leave_scene(PeerState &ps)
+	{
+		if(ps.scene_ref == nullptr)
+			return;
+		main_context::SceneReference old_ref = ps.scene_ref;
+		// Sent after, not from inside main_context
+		bool was_collecting = m_collecting_sends;
+		m_collecting_sends = true;
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			magic::Scene *scene = imc->find_scene(ps.scene_ref);
+			if(!scene){
+				forget_scene(ps);
+				return;
+			}
+			uint scene_id = scene->GetID();
+			sv_<uint> ids;
+			for(auto it = ps.scene_state.nodeStates_.Begin();
+					it != ps.scene_state.nodeStates_.End(); ++it)
+				if(it->first_ != scene_id)
+					ids.push_back(it->first_);
+			// Children first, so that a client removing a parent finds
+			// nothing of it left
+			std::sort(ids.rbegin(), ids.rend());
+			for(uint id : ids){
+				Node *n = scene->GetNode(id);
+				if(n){
+					drop_node_from_peer(ps.peer_id, n, id, ps.scene_state);
+				} else {
+					magic::VectorBuffer buf;
+					buf.WriteNetID(id);
+					send_to_peer(ps.peer_id, "replicate:remove_node", buf);
+				}
+			}
+			scene->CleanupConnection((magic::Connection*)&ps.scene_state);
+			ps.scene_state.Clear();
+		});
+		m_collecting_sends = was_collecting;
+		if(!was_collecting)
+			flush_pending_sends();
+		m_server->emit_event("replicate:peer_left_scene",
+				new PeerLeftScene(ps.peer_id, old_ref));
+		ps.scene_ref = nullptr;
+	}
+
 	void assign_scene_to_peer(
 			main_context::SceneReference scene_ref, PeerId peer)
 	{
 		log_v(MODULE, "assign_scene_to_peer(): scene_ref=%p, peer=%i",
 				scene_ref, peer);
+		auto it = m_peers.find(peer);
+		if(it != m_peers.end() && it->second.scene_ref == scene_ref)
+			return;
+		if(it != m_peers.end())
+			leave_scene(it->second);
 		if(scene_ref == nullptr){
-			auto it = m_peers.find(peer);
-			if(it == m_peers.end())
-				return; // Peer wasn't in any scene
-			PeerState &ps = it->second;
-			m_server->emit_event("replicate:peer_left_scene",
-					new PeerLeftScene(peer, ps.scene_ref));
-			m_peers.erase(peer);
-
-			log_w(MODULE, "assign_scene_to_peer(): Deassign not properly"
-					" implemented");
-			// TODO: Tell client to remove replicated nodes and components
-		} else {
-			m_server->emit_event("replicate:peer_joined_scene",
-					new PeerJoinedScene(peer, scene_ref));
-			PeerState &ps = m_peers[peer];
-			ps.peer_id = peer;
-			ps.scene_ref = scene_ref;
+			if(it != m_peers.end())
+				m_peers.erase(it);
+			return;
 		}
+		m_server->emit_event("replicate:peer_joined_scene",
+				new PeerJoinedScene(peer, scene_ref));
+		PeerState &ps = m_peers[peer];
+		ps.peer_id = peer;
+		ps.scene_ref = scene_ref;
 	}
 
 	sv_<PeerId> find_peers_on_scene(
