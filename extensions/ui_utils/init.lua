@@ -2506,6 +2506,9 @@ function M.safe.show_notification(text, duration_s)
 	window:SetName("show_notification window")
 	window:SetLayout(LM_VERTICAL, 0, magic.IntRect(10, 6, 10, 6))
 	window:SetFocusMode(FM_NOTFOCUSABLE)
+	-- Nor a click: a tap on what is under it (Kit's bar's Palette, put
+	-- under it as it went below the Server button) goes there
+	window.enabled = false
 
 	local message_text = window:CreateChild("Text")
 	message_text:SetStyleAuto()
