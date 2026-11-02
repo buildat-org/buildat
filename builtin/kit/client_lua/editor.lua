@@ -2545,6 +2545,9 @@ local function apply_viewport()
 		vp = magic.Viewport:new(O.scene, cam)
 		if O.viewport then
 			vp.renderPath = O.viewport().renderPath
+		else
+			-- [KIT_LIGHTING] the composition's lighting's (environment.lua)
+			M.lit_viewport(vp, "editor")
 		end
 	end
 	magic.set_preferred_viewports({vp})

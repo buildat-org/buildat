@@ -9348,6 +9348,7 @@ struct Module: public interface::Module, public Interface
 		if(set.is_object())
 			for(json::Iterator it(set); it; ++it)
 				if(v.get(it.key()).is_number() ? (*it).is_number() :
+						v.get(it.key()).is_boolean() ? (*it).is_boolean() :
 						v.get(it.key()).is_string() && (*it).is_string())
 					v.set(it.key(), *it);
 		return v;
@@ -9434,6 +9435,18 @@ struct Module: public interface::Module, public Interface
 			j.set(it.key(), *it);
 		j.set("from", from);
 		j.set("entity", (int64_t)id);
+		// [KIT_LIGHTING] The lighting is the composition's: the root's
+		// environment's (cartoon with none there), whatever a scene's says
+		const Instance *root = env_at(1);
+		j.set("lighting", root ? env_values(*root).get("lighting") :
+				json::Value("cartoon"));
+		// and the voxel types that give light ({name: 1..15}), which
+		// physical draws
+		json::Value lamps = json::object();
+		for(auto &m : m_registered)
+			if(m.second.light > 0)
+				lamps.set(m.first, (int64_t)std::min(15, m.second.light));
+		j.set("lamps", lamps);
 		EnvClock &c = env_clock(id, *in, v);
 		if(key)
 			*key = j.stringify()+"|"+itos(c.at)+"|"+std::to_string(c.base);

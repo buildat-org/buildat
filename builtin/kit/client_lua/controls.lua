@@ -395,14 +395,15 @@ buildat.sub_packet("kit:controls", function(data)
 end)
 
 -- ---- Effects: Kit's render path (kit_effects.xml), on a viewport of
--- the play view; off while none is on
+-- the play view; off while none is on. [KIT_LIGHTING] On the lighting's
+-- path (environment.lua's: physical's HDR), made again when it changes
 function M.viewport(scene, cam)
 	local vp = magic.Viewport:new(scene, cam)
-	local rp = vp.renderPath:Clone()
-	rp:Append(magic.cache:GetResource("XMLFile", "kit/kit_effects.xml"))
-	rp:SetEnabled("KitEffects", false)
-	vp.renderPath = rp
-	C.rp, C.rp_on = rp, false
+	M.lit_viewport(vp, "play", function(rp)
+		rp:Append(magic.cache:GetResource("XMLFile", "kit/kit_effects.xml"))
+		rp:SetEnabled("KitEffects", false)
+		C.rp, C.rp_on = rp, false
+	end)
 	return vp
 end
 

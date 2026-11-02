@@ -16,6 +16,11 @@
 //   KITLOOKTINT  ([KIT_TINT_MASK]) an object's look wearing a voxel
 //       material (module.lua's voxel_mesh): the tint is the material's
 //       diffuse colour instead of a vertex's, masked as KITTINTMASK says.
+//   KITLINEAR  ([KIT_LIGHTING]) physical lighting's: the frame is HDR,
+//       lit in linear and encoded once at its end, so the albedo (tinted)
+//       is decoded here, as luanti_client's PBRVoxel.glsl does, and with
+//       KITSKY the light bounced (the mesher's display level) too.
+//       simplified: 2.2, not the sRGB curve.
 //
 // The vertex colour is light, not albedo, so it is not multiplied into the
 // diffuse colour as LitSolid's VERTEXCOLOR does.
@@ -75,6 +80,9 @@ void VS()
 
     #ifdef KITSKY
         vColor = iColor;
+        #ifdef KITLINEAR
+            vColor.rgb = pow(iColor.rgb, vec3(2.2));
+        #endif
     #endif
     #ifdef KITTINT
         vTint = iTangent.x;
@@ -117,7 +125,7 @@ void VS()
         #else
             vVertexLight = GetAmbient(GetZonePos(worldPos));
             #ifdef KITSKY
-                vVertexLight = vVertexLight * iColor.a + iColor.rgb;
+                vVertexLight = vVertexLight * vColor.a + vColor.rgb;
             #endif
         #endif
         
@@ -169,6 +177,10 @@ void PS()
     #if defined(KITLOOKTINT) && defined(KITTINTMASK)
         diffColor = vec4(diffInput.rgb * mix(vec3(1.0), cMatDiffColor.rgb,
                 diffInput.a), cMatDiffColor.a);
+    #endif
+
+    #ifdef KITLINEAR
+        diffColor.rgb = pow(diffColor.rgb, vec3(2.2));
     #endif
 
     // Get material specular albedo

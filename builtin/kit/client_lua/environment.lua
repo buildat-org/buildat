@@ -1,0 +1,602 @@
+-- Buildat: builtin/kit/client_lua/environment.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+--
+-- [KIT_ENVIRONMENT] The environment of the scene ("kit:environment",
+-- kit/environment): the sky's colour (the fog's), the fog, the ambient
+-- light and the sun by the hour, the clock going on here between the
+-- server's word, and the weather drawn about the camera under open sky. The
+-- app's own Zone and Sun are the ones changed (made when there are none)
+-- and given back as they were when the environment goes. module.lua runs
+-- this file with what it shares.
+--   kit.environment() -> what it is now (nil: none)
+-- [KIT_LIGHTING] (kit_plan 4o) And the composition's lighting, where the
+-- app draws through Kit's views (kit.viewport: Workbench; skeldat's own
+-- HDR path stays its own):
+--   cartoon  today's look: LDR, the ambient, one sun, the fog
+--   physical sky_render's path (HDR: exposure, bloom, tonemap), the light
+--            of the hour by extensions/voxel_light's terms (physical_sky's
+--            radiances), the voxels' albedo decoded (KitVoxel*Phys*.xml),
+--            the voxel types that give light drawn as point lights
+--   kit.physical() -> physical is drawn now
+--   kit.lit_viewport(vp, role, finish): the lighting's render path on a
+--     Kit view (role "play": the app's, which makes the look Kit's;
+--     "editor": the editor's 3D and 2D), finish(rp) adding a view's own
+return function(K)
+local M, O, log = K.M, K.O, K.log
+local magic = require("buildat/extension/urho3d")
+local network = require("buildat/extension/network")
+local replicate = require("buildat/extension/replicate")
+
+local env = {d = nil, orig = nil, zone = nil, sun = nil, light = nil,
+		t = 0, h = 12, weather = "clear", open = true, check_t = 0}
+function M.environment()
+	return env.d
+end
+
+local function hex_colour(s, f)
+	f = f or 1
+	if type(s) ~= "string" or not s:match("^#%x%x%x%x%x%x$") then
+		return nil
+	end
+	return magic.Color(tonumber(s:sub(2, 3), 16) / 255 * f,
+			tonumber(s:sub(4, 5), 16) / 255 * f,
+			tonumber(s:sub(6, 7), 16) / 255 * f)
+end
+
+local function env_nodes()
+	local scene = replicate.main_scene
+	if not scene then
+		return false
+	end
+	if not env.zone then
+		local zn = scene:GetChild("Zone")
+		env.zone = zn and zn:GetComponent("Zone")
+		if not env.zone then
+			zn = scene:CreateChild("kit_env_zone")
+			env.zone = zn:CreateComponent("Zone")
+			env.zone.boundingBox = magic.BoundingBox(-100000, 100000)
+			env.made_zone = zn
+		end
+		local sn = scene:GetChild("Sun")
+		env.light = sn and sn:GetComponent("Light")
+		if not env.light then
+			sn = scene:CreateChild("kit_env_sun")
+			env.light = sn:CreateComponent("Light")
+			env.light.lightType = magic.LIGHT_DIRECTIONAL
+			env.made_sun = sn
+		end
+		env.sun = sn
+		local z, l = env.zone, env.light
+		local function copy(c)
+			return magic.Color(c.r, c.g, c.b)
+		end
+		env.orig = {ambient = copy(z.ambientColor), fog = copy(z.fogColor),
+			fog_start = z.fogStart, fog_end = z.fogEnd,
+			brightness = l.brightness, direction = sn.direction,
+			colour = copy(l.color)}
+	end
+	return true
+end
+
+-- ---- [KIT_LIGHTING] The lighting: the render path of Kit's views
+local LIT = {mode = "cartoon", views = {}, sky_render = nil, lamps = {},
+		lamp_nodes = {}, scan = nil}
+
+-- sky_render (and with it physical_sky and voxel_light), loaded when
+-- physical is first drawn: cartoon costs nothing
+local function sky_render()
+	if not LIT.sky_render then
+		local ok, err, sr = buildat.run_script_file("sky_render/init.lua")
+		assert(ok and type(sr) == "table", "kit: sky_render: " ..
+				tostring(err))
+		LIT.sky_render = sr
+	end
+	return LIT.sky_render
+end
+
+-- physical is drawn where the app draws through Kit's views
+function M.physical()
+	return LIT.mode == "physical" and LIT.views.play ~= nil
+end
+
+local function lit_path(view)
+	local rp
+	if M.physical() then
+		rp = sky_render().render_path(magic, view.base)
+	else
+		rp = view.base:Clone()
+	end
+	if view.finish then
+		view.finish(rp)
+	end
+	view.vp.renderPath = rp
+end
+
+function M.lit_viewport(vp, role, finish)
+	local view = {vp = vp, base = vp.renderPath, finish = finish}
+	LIT.views[role] = view
+	if role == "play" then
+		magic.renderer.HDRRendering = M.physical()
+	end
+	lit_path(view)
+end
+
+-- The lighting changed: the views' paths, HDR, the voxels' techniques
+local function set_lighting(mode)
+	mode = mode == "physical" and "physical" or "cartoon"
+	if mode == LIT.mode then
+		return
+	end
+	LIT.mode = mode
+	local phys = M.physical()
+	log:info("kit: lighting " .. mode .. (phys and " (HDR, metered)" or
+			LIT.views.play and "" or " (the app draws its own)"))
+	if not LIT.views.play then
+		return
+	end
+	magic.renderer.HDRRendering = phys
+	for _, view in pairs(LIT.views) do
+		lit_path(view)
+	end
+	require("buildat/module/voxelworld").remesh_all()
+end
+
+-- The hue of the hour (skeldat's, its day colours alone): the zenith's
+-- and the horizon's from night through dawn to day, day 0..1, lit the
+-- hour's level; physical_sky's radiances
+local function hue_of_hour(PHYS, t, lit)
+	local function three(night, dawn, day)
+		local a, b, k
+		if t < 0.5 then
+			a, b, k = night, dawn, t * 2
+		else
+			a, b, k = dawn, day, (t - 0.5) * 2
+		end
+		local function one(v, w)
+			local x = (v + (w - v) * k) * lit
+			return x > 0 and x ^ 2.2 or 0
+		end
+		return {r = one(a.r, b.r), g = one(a.g, b.g), b = one(a.b, b.b)}
+	end
+	local dz, dh = PHYS.day_zenith, PHYS.day_horizon
+	local nz = {r = dz.r * 0.10, g = dz.g * 0.10, b = dz.b * 0.14}
+	local nh = {r = dh.r * 0.10, g = dh.g * 0.10, b = dh.b * 0.14}
+	return three(nz, {r = (dz.r + nz.r) * 0.5, g = (dz.g + nz.g) * 0.5,
+			b = (dz.b + nz.b) * 0.5}, dz),
+		three(nh, {r = dh.r * 0.75, g = dh.g * 0.52, b = dh.b * 0.45}, dh)
+end
+
+local function clamp01(x)
+	return math.max(0, math.min(1, x))
+end
+
+-- Toward the sun at the hour h: up from 6 to 18, east (+x) in the morning,
+-- leaning south (-z); its height the sine of its elevation
+local function sun_toward(h)
+	local a = (h - 6) / 12 * math.pi
+	local x, y, z = math.cos(a), math.sin(a), -0.4
+	local l = math.sqrt(x * x + y * y + z * z)
+	return x / l, y / l, z / l
+end
+
+-- The sky's dome (sky_render's: physical_sky's PhysicalSky.glsl), made
+-- once; what it is before the hour says, voxel_shading's sky_defaults
+-- and Luanti's moon and clouds (luanti_client's sky_model.lua's numbers)
+local SKY = {
+	defaults = {zenith = {r = 0.13, g = 0.24, b = 0.58},
+		horizon = {r = 0.55, g = 0.66, b = 0.84}, cloud_cover = 0.4,
+		cloud_light = 1.0, sun_half = 0.075,
+		sun_color = {r = 1.7, g = 1.66, b = 1.52}},
+	schedule = {MOON_HALF = 0.048, CLOUD_ALPHA_DEFAULT = 229 / 255,
+		CLOUD_SPEED_DEFAULT = {0, -2}, CLOUD_WIND_PER_NODE = 0.0054},
+	STAR_DENSITY = 0.004,
+	CLOUD = {r = 0.9, g = 0.92, b = 0.95},
+}
+local function sky_dome(on)
+	local scene = replicate.main_scene
+	if on and not LIT.dome and scene then
+		LIT.dome = sky_render().new_dome(scene, {x = 0, y = -1, z = 0},
+				SKY.defaults, log, SKY.schedule)
+	end
+	if LIT.dome then
+		LIT.dome:enabled(on)
+	end
+	return on and LIT.dome
+end
+
+-- physical's light of the hour: the sun (or the moon) and the ambient by
+-- voxel_light's terms, the fog the horizon's radiance, the dome
+local function phys_light()
+	local d = env.d
+	local sr = sky_render()
+	local PHYS = sr.PHYS
+	local tx, height, tz = sun_toward(env.h)
+	local day = clamp01((height + 0.15) / 0.3)
+	local lit = (0.175 + 0.825 * day) ^ 2.2
+	local zenith, horizon = hue_of_hour(PHYS, day, lit)
+	zenith, horizon = sr.sky_radiance(zenith, horizon, height)
+	local t = sr.terms(height, sr.dome(zenith, horizon))
+	LIT.terms = t
+	local a = t.ambient
+	env.zone.ambientColor = magic.Color(a.r, a.g, a.b)
+	env.zone.fogColor = magic.Color(horizon.r, horizon.g, horizon.b)
+	local fe = tonumber(d.fog_end) or env.orig.fog_end
+	local fs = tonumber(d.fog_start) or env.orig.fog_start
+	env.zone.fogStart, env.zone.fogEnd = fs, math.max(fe, fs + 1)
+	local up, moon_up = clamp01(height / 0.05), clamp01(-height / 0.05)
+	if up > 0 then
+		env.sun.direction = magic.Vector3(-tx, -height, -tz)
+		env.light.brightness = t.sun * up
+		env.light.color = magic.Color(t.sun_color.r, t.sun_color.g,
+				t.sun_color.b)
+	else
+		env.sun.direction = magic.Vector3(tx, height, tz)
+		env.light.brightness = t.moon * moon_up
+		env.light.color = magic.Color(t.moon_color.r, t.moon_color.g,
+				t.moon_color.b)
+	end
+	local dome = sky_dome(true)
+	if dome then
+		dome:set_sun_direction({x = -tx, y = -height, z = -tz})
+		dome:set_look(zenith, horizon, nil)
+		dome:set_dawn_glow(t.glow.r, t.glow.g, t.glow.b, t.glow_tint)
+		local half = SKY.defaults.sun_half
+		dome:set_sun_look(half, SKY.defaults.sun_color)
+		dome:set_sun_radiance(sr.sun_disc(height, half, t.sun_color))
+		dome:set_moon_look(moon_up > 0 and SKY.schedule.MOON_HALF or 0)
+		dome:set_star_look(SKY.STAR_DENSITY, nil, (1 - day) * (1 - day))
+		dome:set_cloud_lit(sr.cloud_lit(SKY.CLOUD, zenith, horizon, height, 1))
+		-- simplified: the open sky everywhere (no indoor dimming yet)
+		dome:set_outside(1)
+	end
+end
+
+-- The light of the hour h (0 to 24): the sun up from 6 to 18
+local function env_light()
+	local d = env.d
+	if not d or not env_nodes() then
+		return
+	end
+	if M.physical() then
+		return phys_light()
+	end
+	sky_dome(false)
+	local a = (env.h - 6) / 12 * math.pi
+	local up = math.sin(a)
+	local day = math.max(0, math.min(1, up * 2 + 0.3))
+	local storm = d.weather == "storm" and 0.55 or
+			(d.weather == "rain" or d.weather == "snow") and 0.8 or 1
+	local f = (0.25 + 0.75 * day) * storm
+	env.zone.fogColor = hex_colour(d.sky, f) or env.orig.fog
+	env.zone.ambientColor = hex_colour(d.ambient, 0.35 + 0.65 * day) or
+			env.orig.ambient
+	local fe = tonumber(d.fog_end) or env.orig.fog_end
+	local fs = tonumber(d.fog_start) or env.orig.fog_start
+	if d.weather == "storm" then
+		fe, fs = fe * 0.5, fs * 0.4
+	end
+	env.zone.fogStart, env.zone.fogEnd = fs, math.max(fe, fs + 1)
+	env.light.brightness = 0.8 * math.max(0, math.min(1, up * 1.5 + 0.1)) *
+			storm
+	env.light.color = env.orig.colour
+	env.sun.direction = magic.Vector3(-math.cos(a) * 0.8,
+			-math.max(up, 0.15), 0.5)
+end
+
+local function env_restore()
+	if not env.zone then
+		return
+	end
+	if env.made_zone then
+		env.made_zone:Remove()
+	else
+		env.zone.ambientColor, env.zone.fogColor = env.orig.ambient,
+				env.orig.fog
+		env.zone.fogStart, env.zone.fogEnd = env.orig.fog_start,
+				env.orig.fog_end
+	end
+	if env.made_sun then
+		env.made_sun:Remove()
+	else
+		env.light.brightness = env.orig.brightness
+		env.light.color = env.orig.colour
+		env.sun.direction = env.orig.direction
+	end
+	env.zone, env.light, env.sun, env.made_zone, env.made_sun = nil, nil,
+			nil, nil, nil
+end
+
+-- ---- The voxel types that give light, under physical: a point light at
+-- each of the nearest, in voxel_light's lamp colour (its terms' lamp, a
+-- glowstone's at a torch's faces) scaled by the type's level, its reach
+-- the level in cells. Found by a scan of the cells about the camera, a
+-- slice a frame.
+-- simplified: within 8 cells across and 4 up and down of the camera, 8
+-- lights at most, scanned again every half second; a world lit by lamps
+-- farther off wants the mesher's lamp channel (the format has none:
+-- [KIT_VOXEL_FORMAT]'s light_sky alone) or a lamp list the server keeps
+local LAMP_R, LAMP_RY, LAMP_MAX = 8, 4, 8
+
+local function view_pos()
+	local vp = magic.renderer:GetViewport(0)
+	local cam = vp and vp.camera
+	if cam then
+		return cam.node.worldPosition
+	end
+	return O.camera and O.camera.worldPosition
+end
+
+local function lamps_off()
+	for _, n in ipairs(LIT.lamp_nodes) do
+		n:Remove()
+	end
+	LIT.lamp_nodes, LIT.scan = {}, nil
+end
+
+local function lamps_place(found, p)
+	table.sort(found, function(a, b)
+		return (a[1] - p.x) ^ 2 + (a[2] - p.y) ^ 2 + (a[3] - p.z) ^ 2 <
+			(b[1] - p.x) ^ 2 + (b[2] - p.y) ^ 2 + (b[3] - p.z) ^ 2
+	end)
+	local scene = replicate.main_scene
+	local t = LIT.terms
+	for i = 1, LAMP_MAX do
+		local f = found[i]
+		local n = LIT.lamp_nodes[i]
+		if f and t and scene then
+			if not n then
+				n = scene:CreateChild("kit_lamp")
+				local l = n:CreateComponent("Light")
+				l.lightType = magic.LIGHT_POINT
+				LIT.lamp_nodes[i] = n
+			end
+			n.enabled = true
+			n.position = magic.Vector3(f[1], f[2], f[3])
+			local l = n:GetComponent("Light")
+			local k = f[4] / 15
+			l.range = f[4]
+			l.color = magic.Color(t.lamp.r * k, t.lamp.g * k, t.lamp.b * k)
+		elseif n then
+			n.enabled = false
+		end
+	end
+	if #found ~= LIT.lamps_logged then
+		LIT.lamps_logged = #found
+		log:info("kit: lamps: " .. #found .. " lit about the camera")
+	end
+end
+
+local function lamps_update(dt)
+	if not M.physical() or not next(LIT.lamps) then
+		if #LIT.lamp_nodes > 0 then
+			lamps_off()
+		end
+		return
+	end
+	local p = view_pos()
+	if not p then
+		return
+	end
+	local voxelworld = require("buildat/module/voxelworld")
+	local reg = voxelworld.get_voxel_registry()
+	if not reg then
+		return
+	end
+	local s = LIT.scan
+	if not s then
+		s = {wait = 0}
+		LIT.scan = s
+	end
+	if not s.at then
+		s.wait = s.wait - dt
+		if s.wait > 0 then
+			return
+		end
+		s.at = {math.floor(p.x + 0.5), math.floor(p.y + 0.5),
+			math.floor(p.z + 0.5)}
+		s.x, s.found, s.names = -LAMP_R, {}, s.names or {}
+	end
+	-- A slice of x a frame
+	local c = s.at
+	local stop = math.min(LAMP_R, s.x + 3)
+	for x = s.x, stop do
+		for y = -LAMP_RY, LAMP_RY do
+			for z = -LAMP_R, LAMP_R do
+				local id = reg:id_of(voxelworld.get_static_voxel(
+						magic.Vector3(c[1] + x, c[2] + y, c[3] + z)))
+				if id ~= 0 then
+					local name = s.names[id]
+					if name == nil then
+						local def = reg:get_by_id(id)
+						name = def and def.name.block_name or false
+						s.names[id] = name
+					end
+					local level = name and (LIT.lamps[name] or
+							LIT.lamps[name:match("^(.-):[^/]*$") or ""])
+					if level then
+						s.found[#s.found + 1] = {c[1] + x, c[2] + y,
+							c[3] + z, level}
+					end
+				end
+			end
+		end
+	end
+	s.x = stop + 1
+	if s.x > LAMP_R then
+		lamps_place(s.found, p)
+		s.at, s.wait = nil, 0.5
+	end
+end
+
+-- The weather's drops: a billboard set about the camera, the drops in the
+-- world's space falling and wrapped round it
+local WEATHER_LOOK = {
+	rain = {n = 400, size = {0.03, 0.6}, colour = {0.65, 0.7, 0.85, 0.55},
+		speed = 16, drift = 0, face = "y"},
+	storm = {n = 700, size = {0.04, 0.8}, colour = {0.6, 0.65, 0.8, 0.6},
+		speed = 22, drift = 4, face = "y"},
+	snow = {n = 500, size = {0.12, 0.12}, colour = {1, 1, 1, 0.9},
+		speed = 2, drift = 0.6, face = "xyz"},
+}
+local WR = 14 -- the drops' box about the camera, half its side
+local weather = {node = nil, set = nil, kind = nil, drops = {}}
+
+-- The app's camera, kit.controls' or kit.editor's
+local function camera_pos()
+	return O.camera and O.camera.worldPosition
+end
+
+-- Open sky above p: no voxel there over the next 64 cells, known or not
+local function open_sky(p)
+	local voxelworld = require("buildat/module/voxelworld")
+	local reg = voxelworld.get_voxel_registry()
+	if not reg then
+		return true
+	end
+	local x, z = math.floor(p.x + 0.5), math.floor(p.z + 0.5)
+	for y = math.floor(p.y + 1.5), math.floor(p.y + 64) do
+		local id = reg:id_of(voxelworld.get_static_voxel(
+				magic.Vector3(x, y, z)))
+		local def = id ~= 0 and reg:get_by_id(id)
+		if def and def.physically_solid then
+			return false, string.format("%s at (%d, %d, %d)",
+					tostring(def.name and def.name.block_name), x, y, z)
+		end
+	end
+	return true
+end
+
+local function weather_off()
+	if weather.node then
+		weather.node:Remove()
+	end
+	weather.node, weather.set, weather.kind, weather.drops = nil, nil, nil,
+			{}
+end
+
+local function weather_on(kind, at)
+	weather_off()
+	local w = WEATHER_LOOK[kind]
+	local scene = replicate.main_scene
+	if not w or not scene then
+		return
+	end
+	weather.kind = kind
+	weather.node = scene:CreateChild("kit_weather")
+	local set = weather.node:CreateComponent("BillboardSet")
+	set.numBillboards = w.n
+	set.faceCameraMode = w.face == "y" and magic.FC_ROTATE_Y or
+			magic.FC_ROTATE_XYZ
+	local m = magic.Material:new()
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTextureUnlitAlpha.xml"))
+	m:SetShaderParameter("MatDiffColor", magic.Color(w.colour[1],
+			w.colour[2], w.colour[3], w.colour[4]))
+	set.material = m
+	weather.set = set
+	log:info(string.format("kit: weather drawn: %s, %d drops about"..
+			" (%.0f, %.0f, %.0f)", kind, w.n, at.x, at.y, at.z))
+	for i = 0, w.n - 1 do
+		local b = set:GetBillboard(i)
+		b.size = magic.Vector2(w.size[1], w.size[2])
+		b.enabled = true
+		weather.drops[i] = {at.x + (math.random() * 2 - 1) * WR,
+			at.y + (math.random() * 2 - 1) * WR,
+			at.z + (math.random() * 2 - 1) * WR, math.random() * 6.28}
+	end
+end
+
+local function wrap(v, c)
+	return c + ((v - c + WR) % (2 * WR)) - WR
+end
+
+local function env_update(dt)
+	lamps_update(dt)
+	local d = env.d
+	if not d then
+		return
+	end
+	if (tonumber(d.day_minutes) or 0) > 0 then
+		env.h = (env.h + dt / 60 / d.day_minutes * 24) % 24
+		env.t = env.t + dt
+		if env.t >= 1 then
+			env.t = 0
+			env_light()
+		end
+	end
+	local p = camera_pos()
+	if not p then
+		return
+	end
+	env.check_t = env.check_t - dt
+	if env.check_t <= 0 then
+		env.check_t = 0.25
+		local open, what = open_sky(p)
+		if open ~= env.open then
+			env.open = open
+			log:info("kit: weather " .. (open and "under open sky" or
+					"under cover: " .. what))
+		end
+	end
+	local kind = WEATHER_LOOK[d.weather] and env.open and d.weather or nil
+	if kind ~= weather.kind then
+		if kind then
+			weather_on(kind, p)
+		else
+			weather_off()
+		end
+	end
+	local w = kind and WEATHER_LOOK[kind]
+	if not w or not weather.set then
+		return
+	end
+	for i = 0, w.n - 1 do
+		local q = weather.drops[i]
+		q[4] = q[4] + dt
+		q[1] = wrap(q[1] + math.sin(q[4]) * w.drift * dt, p.x)
+		q[2] = wrap(q[2] - w.speed * dt, p.y)
+		q[3] = wrap(q[3] + math.cos(q[4] * 0.7) * w.drift * dt, p.z)
+		weather.set:GetBillboard(i).position = magic.Vector3(q[1], q[2],
+				q[3])
+	end
+	weather.set:Commit()
+end
+
+buildat.sub_packet("kit:environment", function(data)
+	local d = network.parse_json(data)
+	if type(d) ~= "table" then
+		return
+	end
+	if d.on ~= true then
+		if env.d then
+			log:info("kit: environment: none")
+		end
+		env.d = nil
+		weather_off()
+		env_restore()
+		sky_dome(false)
+		LIT.lamps = {}
+		set_lighting("cartoon")
+		return
+	end
+	local was = env.d and env.d.weather
+	env.d = d
+	env.h = (tonumber(d.time) or 12) % 24
+	LIT.lamps = type(d.lamps) == "table" and d.lamps or {}
+	set_lighting(d.lighting)
+	env_light()
+	log:info(string.format("kit: environment: from the %s, %s, %.1f o'clock,"..
+			" sky %s, fog %s-%s, gravity %s, weather %s, season %s",
+			tostring(d.from), tostring(d.entity), env.h, tostring(d.sky),
+			tostring(d.fog_start), tostring(d.fog_end), tostring(d.gravity),
+			tostring(d.weather), tostring(d.season)))
+	if d.weather ~= was then
+		log:info("kit: weather " .. tostring(d.weather))
+	end
+end)
+magic.SubscribeToEvent("Update", function(_, ev)
+	env_update(ev:GetFloat("TimeStep"))
+end)
+end
+-- vim: set noet ts=4 sw=4:

@@ -10,6 +10,12 @@
 -- sky) and the season by the voxels' season textures (a material's
 -- "seasons", materials.json), the voxels unchanged.
 --
+-- [KIT_LIGHTING] Its lighting is the composition's, the root's alone (a
+-- scene's says nothing): cartoon (the default; LDR, the ambient, one sun,
+-- the fog) or physical (HDR: sky_render's exposure, bloom and tonemap,
+-- physical_sky's light by the hour, the voxels' light drawn). The World's
+-- sky light darkens caves in both when it is on.
+--
 -- Its signals: set_time (hours, 0 to 24), set_day_minutes, set_weather,
 -- set_season, set_sky (a colour), set_fog (the fog's end, cells),
 -- set_ambient (a colour) and set_gravity. Out: dawn and dusk (6 and 18
@@ -56,6 +62,8 @@ return {
 			choices = {"clear", "rain", "snow", "storm"}},
 		season = {type = "string", default = "summer",
 			choices = {"spring", "summer", "autumn", "winter"}},
+		lighting = {type = "string", default = "cartoon",
+			choices = {"cartoon", "physical"}},
 	},
 	state = {
 		-- {key = value}: what the signals set, shared with the clients

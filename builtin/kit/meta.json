@@ -1,6 +1,7 @@
 {
 	"web": true,
 	"wasm_box": "box",
+	"client_extensions": ["physical_sky", "sky_render", "voxel_light"],
 	"dependencies": [
 		{"module": "client_lua"},
 		{"module": "client_data"},

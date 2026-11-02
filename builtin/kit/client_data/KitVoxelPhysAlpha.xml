@@ -1,0 +1,7 @@
+<!-- [KIT_LIGHTING] KitVoxelAlpha.xml under physical lighting: its albedo decoded
+     to linear (KITLINEAR), the frame being HDR. -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" vsdefines="KITLINEAR KITTINT" psdefines="KITLINEAR DIFFMAP KITTINT">
+    <pass name="alpha" depthwrite="false" blend="alpha" />
+    <pass name="litalpha" depthwrite="false" blend="addalpha" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>
