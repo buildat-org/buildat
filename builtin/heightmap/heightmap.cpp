@@ -189,7 +189,8 @@ struct Map: public Instance
 
 	float height_at(float wx, float wz)
 	{
-		float fx = wx / m_size.cell_size, fz = wz / m_size.cell_size;
+		float fx = (wx - m_size.origin_x) / m_size.cell_size,
+				fz = (wz - m_size.origin_z) / m_size.cell_size;
 		fx = fx < 0 ? 0 : fx > m_sx - 1 ? m_sx - 1 : fx;
 		fz = fz < 0 ? 0 : fz > m_sz - 1 ? m_sz - 1 : fz;
 		const int x = (int)fx, z = (int)fz;
@@ -216,9 +217,11 @@ struct Map: public Instance
 		for(int z = 0; z < m_sz; z++)
 			for(int x = 0; x < m_sx; x++)
 				h[(size_t)z * m_sx + x] = p.height_fn ?
-						p.height_fn(x * cell, z * cell) :
+						p.height_fn(m_size.origin_x + x * cell,
+								m_size.origin_z + z * cell) :
 						interface::noise::noise2(p.height, p.seed,
-								x * cell, z * cell);
+								m_size.origin_x + x * cell,
+								m_size.origin_z + z * cell);
 		const int n = m_size.materials;
 		auto ramp = [](float v){ return v < 0 ? 0.0f : v > 1 ? 1.0f : v; };
 		for(int z = 0; z < m_sz; z++)
@@ -334,9 +337,13 @@ struct Map: public Instance
 
 	ss_ meta()
 	{
-		return storage::pack((int32_t)DATA_FORMAT, (int32_t)m_size.chunks_x,
-				(int32_t)m_size.chunks_z, (int32_t)m_size.chunk_size,
-				m_size.cell_size, m_size.base_y, (int32_t)m_size.materials);
+		const ss_ m = storage::pack((int32_t)DATA_FORMAT,
+				(int32_t)m_size.chunks_x, (int32_t)m_size.chunks_z,
+				(int32_t)m_size.chunk_size, m_size.cell_size, m_size.base_y,
+				(int32_t)m_size.materials);
+		// [KIT_HM_ORIGIN] a map off the scene's origin says where
+		return m_size.origin_x == 0 && m_size.origin_z == 0 ? m :
+				m+storage::pack(m_size.origin_x, m_size.origin_z);
 	}
 
 	ss_ chunk_key(int cx, int cz)
@@ -424,8 +431,8 @@ struct Map: public Instance
 	void create_body(Scene *scene)
 	{
 		Node *n = scene->CreateChild("heightmap", LOCAL);
-		n->SetPosition(Vector3(m_sx * m_size.cell_size / 2, m_size.base_y,
-				m_sz * m_size.cell_size / 2));
+		n->SetPosition(Vector3(m_size.origin_x + m_sx * m_size.cell_size / 2,
+				m_size.base_y, m_size.origin_z + m_sz * m_size.cell_size / 2));
 		m_node_id = n->GetID();
 		RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 		// Bullet centres a heightfield between its least and greatest
@@ -454,7 +461,10 @@ struct Map: public Instance
 		return ss_(INIT_VERSION)+" "+itos(m_size.chunks_x)+" "+
 				itos(m_size.chunks_z)+" "+itos(m_size.chunk_size)+" "+
 				ftos(m_size.cell_size)+" "+ftos(m_size.base_y)+" "+
-				ftos(HEIGHT_STEP)+" "+itos(m_size.materials);
+				ftos(HEIGHT_STEP)+" "+itos(m_size.materials)+
+				// [KIT_HM_ORIGIN] the origin, where it is not the scene's
+				(m_size.origin_x == 0 && m_size.origin_z == 0 ? ss_() :
+				" "+ftos(m_size.origin_x)+" "+ftos(m_size.origin_z));
 	}
 
 	ss_ region_packet(const Rect &r, const ss_ &data)

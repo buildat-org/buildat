@@ -62,8 +62,11 @@ local function blank_image(comps)
 end
 
 buildat.sub_packet("heightmap:init", function(data)
-	local v, cx, cz, cs, cell, base, step, n = data:match(
-			"^(%S+) (%d+) (%d+) (%d+) (%S+) (%S+) (%S+) (%d+)$")
+	-- [KIT_HM_ORIGIN] then the origin (sample (0, 0)'s world x, z) where
+	-- it is not the scene's
+	local v, cx, cz, cs, cell, base, step, n, rest = data:match(
+			"^(%S+) (%d+) (%d+) (%d+) (%S+) (%S+) (%S+) (%d+)(.*)$")
+	local ox, oz = (rest or ""):match("^ (%S+) (%S+)$")
 	if v ~= "2" then
 		log:error("heightmap:init of a format this does not read: "..
 				tostring(data):sub(1, 40))
@@ -77,7 +80,8 @@ buildat.sub_packet("heightmap:init", function(data)
 	info = {chunks_x = tonumber(cx), chunks_z = tonumber(cz),
 			chunk_size = tonumber(cs), cell = tonumber(cell),
 			base_y = tonumber(base), step = tonumber(step),
-			materials = tonumber(n)}
+			materials = tonumber(n), origin_x = tonumber(ox) or 0,
+			origin_z = tonumber(oz) or 0}
 	info.planes = math.ceil(info.materials / 4)
 	info.sx = info.chunks_x * info.chunk_size
 	info.sz = info.chunks_z * info.chunk_size
@@ -165,8 +169,8 @@ end)
 
 local function create()
 	M.node = replicate.main_scene:CreateChild("heightmap")
-	M.node.position = magic.Vector3(info.sx * info.cell / 2, info.base_y,
-			info.sz * info.cell / 2)
+	M.node.position = magic.Vector3(info.origin_x + info.sx * info.cell / 2,
+			info.base_y, info.origin_z + info.sz * info.cell / 2)
 	M.terrain = M.node:CreateComponent("Terrain")
 	M.terrain.patchSize = 64
 	M.terrain:SetSpacing(magic.Vector3(info.cell, info.step * 256, info.cell))

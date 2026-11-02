@@ -9,9 +9,10 @@
 // weights. One per scene.
 //
 // The grid is samples_x() x samples_z() heights, a sample every cell_size
-// metres from the scene's origin: sample (x, z) is at world (x * cell_size,
-// height, z * cell_size). The surface ends at the last sample; past it there
-// is nothing (finite only; no holes).
+// metres from the map's origin (Size::origin_x, origin_z; the scene's
+// origin by default): sample (x, z) is at world (origin_x + x * cell_size,
+// height, origin_z + z * cell_size). The surface ends at the last sample;
+// past it there is nothing (finite only; no holes).
 //
 // Heights are kept as 16 bits: base_y + n * HEIGHT_STEP, n 0..65535, so a
 // map spans base_y .. base_y + 655.35 m in centimetres. A set height is
@@ -71,6 +72,9 @@ namespace heightmap
 		int chunk_size = 64;
 		float cell_size = 1.0f;
 		float base_y = 0.0f;
+		// [KIT_HM_ORIGIN] Where sample (0, 0) is in the world (x, z); a map
+		// at the scene's origin (0, 0) saves and sends as before it had one
+		float origin_x = 0.0f, origin_z = 0.0f;
 		// 1 to MAX_MATERIALS; generate() writes 0, 1 and 2
 		int materials = 3;
 	};
