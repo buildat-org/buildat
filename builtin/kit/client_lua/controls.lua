@@ -20,13 +20,17 @@
 --   kit.body_pos() -> the body's feet as drawn (nil before it is put)
 --   kit.seated() -> the seat's entity id (nil: none)
 --   kit.viewport(scene, camera) -> a Viewport with Kit's effects
--- The keys: W A S D (a car: throttle, brake and steering), Space jumps,
--- F leaves a seat; a free cursor turns the view with the right button
--- held, the wheel zooms a chase or top-down camera. A touchscreen
+-- The keys (input.lua's actions, the player's to rebind; these the
+-- defaults): W A S D (a car: throttle, brake and steering), Space jumps,
+-- E uses what is pointed at, F leaves a seat; a gamepad's left stick
+-- moves, its right one looks, A jumps, X uses, B leaves a seat; a free
+-- cursor turns the view with the right button held, the wheel zooms a
+-- chase or top-down camera. A touchscreen
 -- (BUILDAT_TOUCH=1, floorplanner's walking): a stick at the lower left
 -- walks (a car: steers), a drag elsewhere turns, a tap is the left click
 -- at the finger and a finger held still the right; the bar at the lower
--- right: Jump (a car: Gas and Brake), Exit in a seat, the app's.
+-- right: Jump (a car: Gas and Brake), Exit in a seat, the world's actions
+-- (held while pressed), the app's.
 -- For a drive: "event kit_body" logs the body and the corrections.
 return function(K)
 local M, E, O, P = K.M, K.E, K.O, K.P
@@ -440,10 +444,9 @@ local function effects(dt)
 	end
 end
 
--- ---- Input: the keys, the stick, the touch bar's
-local function key(k)
-	return magic.input:GetKeyDown(k)
-end
+-- ---- Input: the keys (input.lua's actions), the stick, the touch bar's,
+-- the gamepad's
+local key = M.key_down
 
 local function walking()
 	if O.walking then
@@ -469,13 +472,16 @@ local function gather()
 	local f, r, jump = 0, 0, 0
 	if walking() and not paused() and not (ui_utils.clicks_wanted() and
 			not M.looking()) then
-		if key(magic.KEY_W) then f = f + 1 end
-		if key(magic.KEY_S) then f = f - 1 end
-		if key(magic.KEY_D) then r = r + 1 end
-		if key(magic.KEY_A) then r = r - 1 end
-		if key(magic.KEY_SPACE) or magic.input:GetKeyPress(magic.KEY_SPACE) then
+		if key("forward") then f = f + 1 end
+		if key("back") then f = f - 1 end
+		if key("right") then r = r + 1 end
+		if key("left") then r = r - 1 end
+		if key("jump") or M.key_press("jump") then
 			jump = 1
 		end
+		-- The gamepad's left stick (its y down)
+		r = r + M.pad_axis(0)
+		f = f - M.pad_axis(1)
 		if C.stick then
 			r = r + C.stick.r
 			if (decl().touch or "stick") ~= "drive" then
@@ -614,6 +620,34 @@ magic.SubscribeToEvent("MouseWheel", function(_, data)
 			0.9 or 1 / 0.9)))
 end)
 
+local function exit_seat()
+	if M.seated() then
+		log:info("kit: leaving the seat")
+		buildat.send_packet("kit:exit", "")
+	end
+end
+
+-- [KIT_INPUT_ACTIONS] "use": the object pointed at used (a left click's
+-- use, never its dig), within the app's reach past the camera's distance
+local function use_pointed()
+	if not C.s or E.editing then
+		return
+	end
+	local o, d = M.pointer_ray()
+	local b = M.body_pos()
+	local far = b and math.sqrt((o.x - b.x) ^ 2 + (o.y - b.y - 1.5) ^ 2 +
+			(o.z - b.z) ^ 2) or 0
+	local t = M.play_target(o, d, 6 + (far > 1 and far or 0))
+	local l = t and t.left
+	if l and l.kind == "use" then
+		M.use(l.id)
+	elseif l and l.kind == "refused" then
+		M.refused(l.why)
+	end
+end
+M.on_pad_press("exit", function() if C.on then exit_seat() end end)
+M.on_pad_press("use", function() if C.on then use_pointed() end end)
+
 magic.SubscribeToEvent("KeyDown", function(_, data)
 	if not C.on or paused() then
 		return
@@ -622,9 +656,11 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 	if f ~= nil and f:GetTypeName() == "LineEdit" then
 		return
 	end
-	if data:GetInt("Key") == magic.KEY_F and M.seated() then
-		log:info("kit: leaving the seat")
-		buildat.send_packet("kit:exit", "")
+	local k = data:GetInt("Key")
+	if M.key("exit", k) then
+		exit_seat()
+	elseif M.key("use", k) and not data:GetBool("Repeat") then
+		use_pointed()
 	end
 end)
 
@@ -663,52 +699,30 @@ end
 
 local function on_ui(x, y)
 	local sc = magic.ui.scale
-	local b = C.bar
-	if b and b.visible then
-		local p, s = b.screenPosition, b.size
-		if x / sc >= p.x and y / sc >= p.y and x / sc < p.x + s.x and
-				y / sc < p.y + s.y then
-			return true
+	for _, b in ipairs({C.bar, C.abar}) do
+		if b.visible then
+			local p, s = b.screenPosition, b.size
+			if x / sc >= p.x and y / sc >= p.y and x / sc < p.x + s.x and
+					y / sc < p.y + s.y then
+				return true
+			end
 		end
 	end
 	return paused() or ui_utils.clicks_wanted() or (O.on_ui and O.on_ui(x, y))
 			or (E.editing and M.over_ui(x, y))
 end
 
-local function make_bar()
-	local kind = touch_kind() .. (M.seated() and ":seat" or "")
-	if C.bar and C.bar_kind == kind then
-		return
-	end
-	if C.bar then
-		C.bar:Remove()
-	end
-	C.bar_kind = kind
+-- A row of buttons {label, pressed or nil, released} at the lower right,
+-- y up from the bottom
+local function button_row(list, y)
 	local bar = magic.ui.root:CreateChild("Window")
 	bar.defaultStyle = K.STYLE
 	bar:SetStyleAuto()
 	bar:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(6, 6, 6, 6))
 	bar:SetAlignment(magic.HA_RIGHT, magic.VA_BOTTOM)
-	bar:SetPosition(-8, -8)
+	bar:SetPosition(-8, -y)
 	bar.opacity = 0.92
-	local list = {}
-	if touch_kind() == "drive" then
-		list[#list + 1] = {"Brake", function() C.gas = -1 end,
-			function() C.gas = 0 end}
-		list[#list + 1] = {"Gas", function() C.gas = 1 end,
-			function() C.gas = 0 end}
-	elseif touch_kind() ~= "tap" then
-		list[#list + 1] = {"Jump", nil, function() C.touch_jump = true end}
-	end
-	if M.seated() then
-		list[#list + 1] = {"Exit", nil, function()
-			log:info("kit: leaving the seat")
-			buildat.send_packet("kit:exit", "")
-		end}
-	end
-	for _, b in ipairs(O.buttons or {}) do
-		list[#list + 1] = {b[1], nil, b[2]}
-	end
+	bar.visible = #list > 0
 	for _, b in ipairs(list) do
 		local btn = bar:CreateChild("Button")
 		btn:SetStyleAuto()
@@ -723,7 +737,56 @@ local function make_bar()
 		end
 		magic.SubscribeToEvent(btn, "Released", b[3])
 	end
-	C.bar = bar
+	return bar
+end
+
+local function labels(list)
+	local l = {}
+	for i, b in ipairs(list) do
+		l[i] = b[1]
+	end
+	return table.concat(l, ", ")
+end
+
+local function make_bar()
+	local kind = touch_kind() .. (M.seated() and ":seat" or "") .. ":" ..
+			M.keys_version()
+	if C.bar and C.bar_kind == kind then
+		return
+	end
+	if C.bar then
+		C.bar:Remove()
+		C.abar:Remove()
+	end
+	C.bar_kind = kind
+	local list = {}
+	if touch_kind() == "drive" then
+		list[#list + 1] = {"Brake", function() C.gas = -1 end,
+			function() C.gas = 0 end}
+		list[#list + 1] = {"Gas", function() C.gas = 1 end,
+			function() C.gas = 0 end}
+	elseif touch_kind() ~= "tap" then
+		list[#list + 1] = {"Jump", nil, function() C.touch_jump = true end}
+	end
+	if M.seated() then
+		list[#list + 1] = {"Exit", nil, exit_seat}
+	end
+	for _, b in ipairs(O.buttons or {}) do
+		list[#list + 1] = {b[1], nil, b[2]}
+	end
+	-- [KIT_INPUT_ACTIONS] the world's actions, held while pressed: a row
+	-- of their own above (the bar not reaching into the app's help line)
+	local acts = {}
+	for _, a in ipairs(M.world_actions()) do
+		local name = a.name
+		acts[#acts + 1] = {a.label ~= "" and a.label or name,
+			function() M.press_action(name, true) end,
+			function() M.press_action(name, false) end}
+	end
+	C.bar = button_row(list, 8)
+	C.abar = button_row(acts, 8 + C.bar.height + 6)
+	log:info("kit: the touch bar: " .. labels(list) .. "; the world's: " ..
+			labels(acts))
 end
 
 if TOUCH then
@@ -998,11 +1061,17 @@ magic.SubscribeToEvent("Update", function(_, data)
 			mx, my = m.x, m.y
 		end
 	end
+	-- The gamepad's right stick: 120 degrees a second at full
+	if walking() and not paused() and camera_mode() ~= "top_down" then
+		mx = mx + M.pad_axis(2) * 1200 * dt
+		my = my + M.pad_axis(3) * 1200 * dt
+	end
 	C.yaw = (C.yaw + mx * 0.1) % 360
 	C.pitch = math.max(-89, math.min(89, C.pitch + my * 0.1))
 	if TOUCH then
 		make_bar()
 		C.bar.visible = not E.editing
+		C.abar.visible = not E.editing and #M.world_actions() > 0
 	end
 	-- The steps
 	if C.s and not C.ready and floor_ready() then

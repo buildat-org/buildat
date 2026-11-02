@@ -11,6 +11,9 @@
 --   colours): the left button uses an object with a click action, else
 --   digs (with edit rights, or where a component grants it); the right one
 --   places. kit/click_to_move takes the left button: a click walks there
+--   (The keys are the defaults: Kit's and these, the player's to rebind
+--   in the pause menu's Settings, Key bindings; [KIT_INPUT_ACTIONS])
+--   E: use what the crosshair is on
 --   1...9, 0 the voxel placed (Kit's stone, Workbench's glass, Kit's
 --   planks, Workbench's brick, Kit's grass, dirt, sand, log, leaves, water)
 --   F: out of a seat (kit/car, kit/ball: a use takes it)
@@ -50,6 +53,14 @@ local scene = replicate.main_scene
 -- editor's Voxel list ([KIT] stage 4g, a builder's own types too)
 local hand = MATERIALS[1]
 local TOUCH = buildat.get_env("BUILDAT_TOUCH") == "1"
+-- [KIT_INPUT_ACTIONS] Workbench's own keys, declared with Kit's (one set
+-- for edit mode and play, the pause menu's Settings, Key bindings)
+local KEYS = {{id = "login", label = "Log in", default = "L"}}
+for i = 1, 10 do
+	KEYS[#KEYS + 1] = {id = "voxel" .. i, label = "Voxel in hand: " ..
+		MATERIALS[i], default = tostring(i % 10)}
+end
+kit.declare_keys("Workbench", KEYS)
 
 -- A login by builtin/accounts: "l", or at once where BUILDAT_JOIN_NAME
 -- names one (main:account: unless join.lua's login was it,
@@ -234,7 +245,8 @@ local function capture(on)
 		end
 	end)
 end
-menu = pause_menu.new{capture = capture, accounts = accounts}
+menu = pause_menu.new{capture = capture, accounts = accounts,
+	on_settings_closed = function() kit.declare_keys() end}
 kit.add_menu_items(menu)
 -- The controls: their clicks the app's where the movement takes none
 kit.controls{camera = camera_node, capture = capture,
@@ -256,12 +268,14 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 		end
 	elseif menu.held() then
 		return
-	elseif key == magic.KEY_L then
+	elseif kit.key("login", key) then
 		log_in()
-	elseif key >= magic.KEY_1 and key <= magic.KEY_9 then
-		hand = MATERIALS[key - magic.KEY_1 + 1]
-	elseif key == magic.KEY_0 then
-		hand = MATERIALS[10]
+	else
+		for i = 1, 10 do
+			if kit.key("voxel" .. i, key) then
+				hand = MATERIALS[i]
+			end
+		end
 	end
 end)
 
@@ -303,11 +317,14 @@ magic.SubscribeToEvent("Update", function()
 				math.floor(p.z + 0.5), hand))
 	end
 	local seated = kit.seated()
+	-- [KIT_INPUT_ACTIONS] the keys as bound
 	help_text:SetText(editing and "" or TOUCH and (seated and
 			"Stick: move  Exit: leave the seat" or
 			"Stick: walk  drag: look  tap: use/dig  hold: place") or
-			seated and "WASD Space: move  F: leave the seat  Esc: menu" or
-			"WASD Space: walk, jump  left: use or dig  right: place  " ..
-			"0-9: voxel  F6: edit  L: log in  Esc: menu")
+			kit.key_text(seated and "[forward][left][back][right] [jump]: " ..
+			"move  [exit]: leave the seat  Esc: menu" or
+			"[forward][left][back][right] [jump]: walk, jump  left: use or " ..
+			"dig  right: place  [use]: use  [voxel1]-[voxel10]: voxel  " ..
+			"[edit]: edit  [login]: log in  Esc: menu"))
 end)
 -- vim: set noet ts=4 sw=4:

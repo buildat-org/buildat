@@ -9,7 +9,8 @@
 --   local kit = require("buildat/module/kit")
 --   kit.editor{scene = scene, camera = camera_node, ground_y = 1,
 --       solid = function(x, y, z) return <a voxel there> end}
--- editor.lua's head says what it does and its options.
+-- editor.lua's head says what it does and its options; input.lua's the
+-- keys as named actions (kit.declare_keys, kit.key_text...).
 --
 -- **Pointing** ([KIT] stage 4e2): what a click would do is shown on what
 -- is pointed at, nothing where a click does nothing, in floorplanner's
@@ -814,7 +815,9 @@ local function update_play(_, data)
 			end
 		end
 		if n.text then
-			local v = shown(parse(n.node:GetVar("kit:" .. tostring(show.look.text))))
+			-- [KIT_INPUT_ACTIONS] "[use]": this player's key for it
+			local v = M.key_text(shown(parse(n.node:GetVar("kit:" ..
+					tostring(show.look.text)))))
 			if v ~= n.last_text then
 				n.last_text = v
 				n.text.text = v
@@ -828,7 +831,7 @@ local function update_play(_, data)
 			end
 		end
 		if type(show.hud) == "string" then
-			local v = shown(parse(n.node:GetVar("kit:" .. show.hud)))
+			local v = M.key_text(shown(parse(n.node:GetVar("kit:" .. show.hud))))
 			if v ~= "" then
 				lines[#lines + 1] = {id, v}
 			end
@@ -1946,6 +1949,14 @@ function M.show_target(t)
 		shown_text = s
 		log:info("kit: points at " .. s)
 	end
+end
+
+-- ---- The keys as named actions: input.lua ([KIT_INPUT_ACTIONS])
+do
+	local ok, err, install = buildat.run_script_file("kit/input.lua")
+	assert(ok and type(install) == "function", "kit: input.lua: " ..
+			tostring(err))
+	install({M = M, E = E, O = O, log = log})
 end
 
 -- ---- The editor: editor.lua, given what it shares with play

@@ -17,6 +17,8 @@
 -- Menu button; Escape's otherwise). ([KIT] stage 6a) viewport (optional):
 -- a function giving the app's own viewport for the walk view (its render
 -- path: skeldat's sky), else Kit's (its controls' effects).
+-- The keys below are the defaults: each is an action of input.lua's, the
+-- player's to rebind ([KIT_INPUT_ACTIONS]); Ctrl, Shift and Escape fixed.
 -- F6 or "Edit" asks the server for edit mode; with edit rights (the
 -- server's admin, a builder) the server answers with the palette and the
 -- authored tree. Floorplanner's, here:
@@ -194,7 +196,8 @@ local SNAP_PX = 12
 local RIGHT_CLICK_PX = 5
 local LONG_PRESS_US = 500000
 local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk"}
-local VIEW_KEYS = {["2d"] = "F1", ["3d"] = "F2", walk = "F3"}
+-- [KIT_INPUT_ACTIONS] each view's key's action (input.lua)
+local VIEW_KEYS = {["2d"] = "view_2d", ["3d"] = "view_3d", walk = "view_walk"}
 -- How far a click looks for a voxel, in cells
 local MAX_RAY = 128
 
@@ -852,7 +855,7 @@ rebuild_bar = function()
 	local views = {}
 	for _, v in ipairs({"2d", "3d", "walk"}) do
 		views[#views + 1] = {VIEW_NAMES[v] .. (S.touch and "" or
-				" (" .. VIEW_KEYS[v] .. ")"), v}
+				" (" .. M.key_name(VIEW_KEYS[v]) .. ")"), v}
 	end
 	-- Not measured on the side (a dropdown made is kept by ui_utils): the
 	-- second thing in the first row
@@ -903,13 +906,13 @@ rebuild_bar = function()
 	-- [KIT_PREFAB_VOXELS] the Box tool's: the box (and the selection)
 	-- copied or a prefab, the copy pasted
 	if S.tool == "box" then
-		bar_button("Copy", "Ctrl+C", M.copy)
+		bar_button("Copy", "Ctrl+" .. M.key_name("copy"), M.copy)
 		bar_button("Make prefab...", nil, function()
 			M.prefab_dialog(sel_ids())
 		end)
 	end
 	if E.state and E.state.clipboard then
-		bar_button("Paste", "Ctrl+V", M.paste)
+		bar_button("Paste", "Ctrl+" .. M.key_name("paste"), M.paste)
 	end
 	if not E.persistent then
 		bar_items[#bar_items + 1] = {E.running and "End" or "Run", place(run_end)}
@@ -993,21 +996,24 @@ local function panel_title(w, s, other)
 	local t = text(r, s, DIM)
 	t.minWidth = t.width + 8
 	if E.state and E.state.terrain then
-		local b = button(r, other .. (S.touch and "" or " (T)"), function()
+		local b = button(r, other .. (S.touch and "" or
+				" (" .. M.key_name("terrain") .. ")"), function()
 			M.set_tool(S.tool ~= "terrain" and "terrain" or nil)
 		end)
 		b.minHeight, b.maxHeight = t.height, t.height
 	end
 	-- [KIT_EDIT_VOXELS] the voxels tool, on with the voxel in hand
 	if s == "Palette" and E.state and E.state.voxels and O.solid then
-		local b = button(r, "Voxels" .. (S.touch and "" or " (V)"),
+		local b = button(r, "Voxels" .. (S.touch and "" or
+				" (" .. M.key_name("voxels") .. ")"),
 				M.toggle_voxels, S.tool == "voxels")
 		b.minHeight, b.maxHeight = t.height, t.height
 	end
 	-- [KIT_PREFAB_VOXELS] the Box tool: a box of voxels to copy or make
 	-- a prefab of
 	if s == "Palette" and O.solid then
-		local b = button(r, "Box" .. (S.touch and "" or " (B)"),
+		local b = button(r, "Box" .. (S.touch and "" or
+				" (" .. M.key_name("box") .. ")"),
 				M.toggle_box, S.tool == "box")
 		b.minHeight, b.maxHeight = t.height, t.height
 	end
@@ -2517,10 +2523,12 @@ local function move_camera(dt)
 	end
 	local shift = key_held(magic.KEY_LSHIFT) or key_held(magic.KEY_RSHIFT)
 	local f, r, u = 0, 0, 0
-	if key_held(magic.KEY_W) then f = f + 1 end
-	if key_held(magic.KEY_S) then f = f - 1 end
-	if key_held(magic.KEY_D) then r = r + 1 end
-	if key_held(magic.KEY_A) then r = r - 1 end
+	-- [KIT_INPUT_ACTIONS] the keys play's (input.lua)
+	local held = M.key_down
+	if held("forward") then f = f + 1 end
+	if held("back") then f = f - 1 end
+	if held("right") then r = r + 1 end
+	if held("left") then r = r - 1 end
 	if S.view == "2d" then
 		if next(S.sel) then
 			return
@@ -2534,16 +2542,16 @@ local function move_camera(dt)
 	end
 	if not next(S.sel) then
 		local turn, tilt = 0, 0
-		if key_held(magic.KEY_RIGHT) then turn = turn + 1 end
-		if key_held(magic.KEY_LEFT) then turn = turn - 1 end
-		if key_held(magic.KEY_UP) then tilt = tilt + 1 end
-		if key_held(magic.KEY_DOWN) then tilt = tilt - 1 end
+		if held("nudge_right") then turn = turn + 1 end
+		if held("nudge_left") then turn = turn - 1 end
+		if held("nudge_forward") then tilt = tilt + 1 end
+		if held("nudge_back") then tilt = tilt - 1 end
 		local rate = (shift and 180 or 60) * dt
 		S.yaw = S.yaw + turn * rate
 		S.pitch = math.max(-89, math.min(89, S.pitch - tilt * rate))
 	end
-	if key_held(magic.KEY_SPACE) then u = u + 1 end
-	if key_held(magic.KEY_C) then u = u - 1 end
+	if held("jump") then u = u + 1 end
+	if held("down") then u = u - 1 end
 	-- [KIT_PLAYTEST_TWEAKS] as fast as the plan pans at the zoom that sees
 	-- as much: the ground's width across the view from the camera's height
 	-- simplified: the height above the ground's level, not the voxels or
@@ -4194,13 +4202,15 @@ local function turn_selection(deg)
 end
 
 local function key_down(key, ctrl, shift)
-	if key == magic.KEY_F1 then
+	-- [KIT_INPUT_ACTIONS] the keys by their actions (input.lua)
+	local is = function(id) return M.key(id, key) end
+	if is("view_2d") then
 		return set_view("2d")
-	elseif key == magic.KEY_F2 then
+	elseif is("view_3d") then
 		return set_view("3d")
-	elseif key == magic.KEY_F3 then
+	elseif is("view_walk") then
 		return set_view("walk")
-	elseif key == magic.KEY_TAB then
+	elseif is("next") then
 		-- The last accessed first (S.recent), then the rest by id; Shift
 		-- the other way
 		local list, placed, rest = {}, {}, {}
@@ -4234,57 +4244,61 @@ local function key_down(key, ctrl, shift)
 					(at - 1 + (shift and -1 or 1)) % #list + 1
 			select(list[S.tab_at], false, true)
 		end
-	elseif key == magic.KEY_Z and ctrl then
+	elseif is("undo") and ctrl then
 		send({op = "undo"})
-	elseif key == magic.KEY_C and ctrl then
+	elseif is("copy") and ctrl then
 		M.copy()
-	elseif key == magic.KEY_V and ctrl then
+	elseif is("paste") and ctrl then
 		M.paste()
-	elseif key == magic.KEY_D and ctrl then
+	elseif is("duplicate") and ctrl then
 		local ids = sel_ids()
 		if #ids > 0 then
 			send({op = "duplicate", ids = ids, by = {1, 0, 0}})
 		end
-	elseif key == magic.KEY_DELETE then
+	elseif is("delete") then
 		M.delete_selected()
 	elseif ctrl then
 		return
-	elseif key == magic.KEY_T and E.state and E.state.terrain then
+	elseif is("terrain") and E.state and E.state.terrain then
 		M.set_tool(S.tool ~= "terrain" and "terrain" or nil)
-	elseif key == magic.KEY_V and E.state and E.state.voxels and O.solid then
+	elseif is("voxels") and E.state and E.state.voxels and O.solid then
 		M.toggle_voxels()
-	elseif key == magic.KEY_B and O.solid then
+	elseif is("box") and O.solid then
 		M.toggle_box()
-	elseif S.tool == "terrain" and (key == 91 or key == 93) then
-		-- [ and ] (SDL's keycodes: Urho3D's Lua has no names for them)
-		local d = key == 91 and -1 or 1
+	elseif S.tool == "terrain" and (is("smaller") or is("larger")) then
+		local d = is("smaller") and -1 or 1
 		if shift then
 			M.brush_strength(d)
 		else
 			M.brush_size(d)
 		end
-	elseif key == magic.KEY_G then
+	elseif is("grid") then
 		M.next_grid()
-	elseif key == magic.KEY_H then
+	elseif is("angle") then
 		M.next_angle()
-	elseif (key == magic.KEY_Z or key == magic.KEY_X) and S.placing and
+	elseif (is("turn_left") or is("turn_right")) and S.placing and
 			(S.placing.prefab or S.placing.clipboard) then
 		-- [KIT_PREFAB_VOXELS] a prefab or a paste turned a quarter
 		S.placing.turn = ((S.placing.turn or 0) +
-				(key == magic.KEY_Z and -90 or 90)) % 360
+				(is("turn_left") and -90 or 90)) % 360
 		log:info("kit editor: placing turned " .. S.placing.turn)
-	elseif key == magic.KEY_Z or key == magic.KEY_X then
-		turn_selection((key == magic.KEY_Z and -1 or 1) *
+	elseif is("turn_left") or is("turn_right") then
+		turn_selection((is("turn_left") and -1 or 1) *
 				(ANGLE_STEPS[S.angle] or 15))
 	else
 		local g = shift and 0.25 or GRID_STEPS[S.grid]
-		local d = ({[magic.KEY_LEFT] = {-1, 0, 0}, [magic.KEY_RIGHT] = {1, 0, 0},
-			[magic.KEY_UP] = {0, 0, 1}, [magic.KEY_DOWN] = {0, 0, -1},
-			[magic.KEY_PAGEUP] = {0, 1, 0}, [magic.KEY_PAGEDOWN] = {0, -1, 0}})[key]
-		-- 2D: the movement keys move the selection, a press at a time
-		if not d and S.view == "2d" then
-			d = ({[magic.KEY_A] = {-1, 0, 0}, [magic.KEY_D] = {1, 0, 0},
-				[magic.KEY_W] = {0, 0, 1}, [magic.KEY_S] = {0, 0, -1}})[key]
+		local d = nil
+		for _, n in ipairs({{"nudge_left", -1, 0, 0}, {"nudge_right", 1, 0, 0},
+				{"nudge_forward", 0, 0, 1}, {"nudge_back", 0, 0, -1},
+				{"nudge_up", 0, 1, 0}, {"nudge_down", 0, -1, 0},
+				-- 2D: the movement keys move the selection, a press at a time
+				S.view == "2d" and {"left", -1, 0, 0} or {},
+				S.view == "2d" and {"right", 1, 0, 0} or {},
+				S.view == "2d" and {"forward", 0, 0, 1} or {},
+				S.view == "2d" and {"back", 0, 0, -1} or {}}) do
+			if not d and n[1] and is(n[1]) then
+				d = {n[2], n[3], n[4]}
+			end
 		end
 		if d then
 			nudge({d[1] * g, d[2] * g, d[3] * g})
@@ -4465,8 +4479,9 @@ local function compute_guide()
 		end
 		g.right = S.view == "2d" and "drag: into 3D, orbiting" or
 				S.view == "3d" and "drag: orbit" or "drag: turn"
-		g.note = not S.touch and "Ctrl+C: copy the box (and the selection), " ..
-				"Ctrl+V: paste, B or Esc: put the box away" or nil
+		g.note = not S.touch and M.key_text("Ctrl+[copy]: copy the box (and " ..
+				"the selection), Ctrl+[paste]: paste, [box] or Esc: put the " ..
+				"box away") or nil
 		return g
 	end
 	if S.tool == "voxels" and S.view == "walk" then
@@ -4483,7 +4498,7 @@ local function compute_guide()
 			g.right = t.front and "place " .. tostring(S.voxel) .. " at " ..
 					table.concat(t.front, ",") or nil
 		end
-		g.note = not S.touch and "V: put the voxels away" ..
+		g.note = not S.touch and M.key_text("[voxels]: put the voxels away") ..
 				(M.looking() and ", Esc: out of the crosshair" or "") or nil
 		return g
 	end
@@ -4505,7 +4520,8 @@ local function compute_guide()
 		g.right = (p and p.id and "its menu; " or "") .. (S.view == "2d" and
 				"drag: into 3D, orbiting" or S.view == "3d" and "drag: orbit" or
 				"drag: turn")
-		g.note = not S.touch and "V or Esc: put the voxels away" or nil
+		g.note = not S.touch and M.key_text("[voxels] or Esc: put the voxels " ..
+				"away") or nil
 		return g
 	end
 	if S.placing then
@@ -4922,7 +4938,8 @@ function M.editor(options)
 			E.can_edit = s.can_edit == true
 			log:info("kit editor: edit rights: " .. (E.can_edit and "yes" or "no"))
 			if E.can_edit and not E.editing then
-				ui_utils.show_notification("You may edit here: Edit, or F6", 4)
+				ui_utils.show_notification("You may edit here: Edit, or " ..
+						M.key_name("edit"), 4)
 			end
 		end
 		for _, p in ipairs(s.people or {}) do
@@ -5177,7 +5194,7 @@ function M.editor(options)
 		if typing() or ui_utils.dropdown_open() then
 			return
 		end
-		if key == magic.KEY_F6 then
+		if M.key("edit", key) then
 			return M.toggle_tools()
 		end
 		if E.editing and not (E.menu and E.menu.held()) then

@@ -295,7 +295,9 @@ local KEYS = {
 local key = {}
 game.key = key
 local function declare_keys()
-	local names = buildat.declare_keys(nil, "skeldat", KEYS)
+	-- [KIT_INPUT_ACTIONS] through Kit's, whose own keys (its editor's)
+	-- are declared with these: the store keeps an app's last list only
+	local names = require("buildat/module/kit").declare_keys("skeldat", KEYS)
 	for _, k in ipairs(KEYS) do
 		local name = type(names) == "table" and names[k.id] or k.default
 		key[k.id] = magic.input:GetKeyFromName(name)

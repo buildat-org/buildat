@@ -111,6 +111,22 @@ namespace interface
 //                               owned: a save's are migrated, the cells
 //                               they owned cleared)
 //   hud = "<shared state key>"  -- that state on every client's screen
+//   actions = {{name = "fire", key = "R", label = "Fire"}, ...}
+//                            -- ([KIT_INPUT_ACTIONS]) keys the players
+//                               press (8 at most; each value a string or
+//                               "param:<name>", kit/action's): name
+//                               letters, digits and _, key its default (a
+//                               key name, Input::GetKeyName's), label the
+//                               keys page's and a touch button's. Each
+//                               client binds its own key (its key store);
+//                               "[name]" in a shown text is that key.
+//                               on_action(c, name, phase, value, by) on
+//                               every instance declaring it, in the
+//                               player's scene or on the root: phase
+//                               "pressed", "released" or "held" (every
+//                               0.1 s of game time between, value the
+//                               seconds held). 16 actions in a world at
+//                               most (the first found)
 //   on_input(c, input, value, by), on_use(c, by), on_voxel(c, voxel, by),
 //   on_timer(c, name, player), on_enter(c, by), on_leave(c, by),
 //   on_join(c, by),
@@ -331,7 +347,11 @@ namespace interface
 // Clients act, components react: a client's packet "kit:use" (an entity's
 // id) reaches the entity's usable components if the app placed the peer
 // (set_peer) in the entity's scene within use_range. A client fires no
-// signal: there is no packet for one.
+// signal: there is no packet for one. "kit:action" "<name> 1" (pressed)
+// or "<name> 0" (released) ([KIT_INPUT_ACTIONS]): from a placed peer out
+// of the tools, while Running, a name the world declares ("kit:actions"
+// [{name, key, label}...] tells the clients, at the join and as it
+// changes), 20 a second at most (a burst of 40); a release always lets go.
 //
 // Authored and runtime state are kept apart, each its own row of the
 // save's store "kit": "authored" (the composition: entities, instances,

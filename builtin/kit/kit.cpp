@@ -64,6 +64,12 @@ static const int64_t COST_WINDOW_US = 5000000;
 // a plain loop); a tick works through TICK_SLICES of them at most
 static const int64_t SLICE_DIV = 20;
 static const int64_t TICK_SLICES = 4;
+// [KIT_INPUT_ACTIONS] The actions a type declares, the actions in the
+// world at once (the clients' key store's room), a client's presses and
+// releases a second (and their burst), and how often "held" comes
+static const size_t MAX_TYPE_ACTIONS = 8, MAX_ACTIONS = 16;
+static const double ACTION_RATE = 20, ACTION_BURST = 40;
+static const int64_t HELD_EVERY_US = 100000;
 static const size_t MAX_TYPE_SOURCE = 256 << 10;
 // A zone's or an owned volume's extent in cells, each way, and the cells
 // a volume has at most
@@ -379,6 +385,11 @@ struct Peer
 	double ok_pos[3] = {0, 0, 0};
 	bool has_ok = false;
 	int64_t told_us = 0;
+	// [KIT_INPUT_ACTIONS] The actions they hold: when pressed and when
+	// "held" last came (game_us); their allowance of presses (time_us)
+	std::map<ss_, std::pair<int64_t, int64_t>> held;
+	double action_tokens = ACTION_BURST;
+	int64_t action_at = 0;
 };
 
 // A builder's colour while their tools are on: the first one no other
@@ -1021,6 +1032,7 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "network:client_connected", &Module::on_joined);
 		// [KIT] stage 4h: a body's inputs, a seat left
 		sub(m_server, "network:packet_received/kit:input", &Module::on_input);
+		sub(m_server, "network:packet_received/kit:action", &Module::on_action);
 		sub(m_server, "network:packet_received/kit:exit", &Module::on_exit);
 		sub(m_server, "accounts:privs", &Module::on_privs);
 		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
@@ -1282,6 +1294,19 @@ struct Module: public interface::Module, public Interface
 			t.decl.set("params", ps);
 		}
 		t.owns_voxel = t.decl.get("owns_voxel").is_true();
+		// [KIT_INPUT_ACTIONS] {{name =, key =, label =}...}: strings, each
+		// a value or "param:<name>"
+		const json::Value &acts = t.decl.get("actions");
+		if(!acts.is_undefined()){
+			bool ok = acts.is_array() && acts.size() <= MAX_TYPE_ACTIONS;
+			for(unsigned i = 0; ok && i < acts.size(); i++)
+				ok = acts.at(i).is_object() && acts.at(i).get("name").is_string();
+			if(!ok){
+				why = name+": actions is a list of at most "+
+						itos(MAX_TYPE_ACTIONS)+" {name = , key = , label = }";
+				return false;
+			}
+		}
 		const json::Value &ver = t.decl.get("version");
 		if(!ver.is_undefined() && (!ver.is_number() ||
 				ver.as_number() != std::floor(ver.as_number()) ||
@@ -9333,6 +9358,7 @@ struct Module: public interface::Module, public Interface
 		});
 		send_sky((int64_t)peer);
 		send_env(peer);
+		send_actions((int64_t)peer);
 		if(m_session.running)
 			round_join(peer, false);
 		else
@@ -9369,6 +9395,13 @@ struct Module: public interface::Module, public Interface
 		int64_t spent = step_bodies(budget);
 		send_controls();
 		env_tick();
+		// simplified: the world's actions looked for once a second, not
+		// as the instances and their parameters change; a change hook is
+		// the upgrade if a world of thousands makes the scan a cost
+		if(interface::os::time_us() - m_actions_at > 1000000){
+			m_actions_at = interface::os::time_us();
+			send_actions(-1);
+		}
 		if(!m_session.running){
 			// Stopped: components do not run. A write routed to one is
 			// made by no one
@@ -9425,6 +9458,7 @@ struct Module: public interface::Module, public Interface
 						"owns now", w.p.getX(), w.p.getY(), w.p.getZ());
 		}
 		run_timers();
+		actions_held();
 		check_zones();
 		check_regions();
 		// The queue, in order, within the tick's budget
@@ -10324,6 +10358,180 @@ struct Module: public interface::Module, public Interface
 			return refuse("nothing on it is usable");
 		log_i(MODULE, "Entity %s used by %s", cs(itos(id)),
 				cs(m_peers[peer].name));
+	}
+
+	// ---- [KIT_INPUT_ACTIONS] Input as named actions: a type's `actions`
+	// (api.h), each client's keys for them its own (the clients' key
+	// store), a press reaching the instances that declare it
+
+	static bool action_name_ok(const ss_ &n)
+	{
+		if(n.empty() || n.size() > 32)
+			return false;
+		for(char c : n)
+			if(!isalnum((unsigned char)c) && c != '_')
+				return false;
+		return true;
+	}
+
+	// An instance's actions, {name, key, label}: its type's with
+	// "param:<name>" that parameter's value; a bad name left out
+	sv_<json::Value> actions_of(const Instance &in)
+	{
+		sv_<json::Value> out;
+		const json::Value &a = m_types[in.type].decl.get("actions");
+		for(unsigned i = 0; i < a.size(); i++){
+			json::Value o = json::object();
+			for(const char *k : {"name", "key", "label"}){
+				ss_ v = jstr(a.at(i), k);
+				if(v.compare(0, 6, "param:") == 0)
+					v = jstr(in.params, v.substr(6).c_str());
+				o.set(k, v.substr(0, 64));
+			}
+			if(action_name_ok(jstr(o, "name")))
+				out.push_back(o);
+		}
+		return out;
+	}
+
+	std::set<ss_> m_action_names;
+	ss_ m_actions_sent;
+	int64_t m_actions_at = 0;
+
+	// "kit:actions" [{name, key, label}...], the world's (the first
+	// MAX_ACTIONS names): to a peer, or to all (-1) when it changed
+	void send_actions(int64_t peer)
+	{
+		json::Value l = json::array();
+		std::set<ss_> names;
+		for(auto &p : m_entities)
+			for(const Instance &in : p.second.comps)
+				for(const json::Value &a : actions_of(in))
+					if(names.size() < MAX_ACTIONS &&
+							names.insert(jstr(a, "name")).second)
+						l.append(a);
+		const ss_ text = l.stringify();
+		if(peer < 0 && text == m_actions_sent)
+			return;
+		m_action_names.swap(names);
+		if(peer < 0){
+			m_actions_sent = text;
+			log_i(MODULE, "Actions: %s", cs(text));
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			if(peer >= 0){
+				inetwork->send((size_t)peer, "kit:actions", text);
+				return;
+			}
+			for(auto &p : m_peers)
+				inetwork->send(p.first, "kit:actions", text);
+		});
+	}
+
+	// on_action(c, name, phase, value, by) on each instance declaring the
+	// action, in the player's scene or on the root: phase "pressed",
+	// "released" or "held" (value: the seconds held)
+	void action_runs(size_t peer, const ss_ &name, const ss_ &phase,
+			const json::Value &value)
+	{
+		const Peer &pe = m_peers[peer];
+		const ss_ by = by_of(pe.name);
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			ss_ scene;
+			if(e.has_pos){
+				scene_of(e, &scene);
+				if(scene != pe.scene)
+					continue;
+			}
+			for(size_t i = 0; i < e.comps.size(); i++){
+				const Instance &in = e.comps[i];
+				if(!m_types[in.type].handlers.count("on_action"))
+					continue;
+				bool has = false;
+				for(const json::Value &a : actions_of(in))
+					has = has || jstr(a, "name") == name;
+				if(!has)
+					continue;
+				Run r;
+				r.entity = p.first;
+				r.comp = i;
+				r.handler = "on_action";
+				r.by = by;
+				r.args.append(name);
+				r.args.append(phase);
+				r.args.append(value);
+				r.args.append(by);
+				queue_run(r);
+			}
+		}
+	}
+
+	// "kit:action" "<name> 1" pressed, "<name> 0" released: from a peer
+	// the app placed, in play (not in the tools), an action the world
+	// declares, within ACTION_RATE a second
+	void on_action(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		const ss_ d = packet.data.substr(0, 40);
+		const size_t sp = d.find(' ');
+		const ss_ name = d.substr(0, sp);
+		const bool down = sp != ss_::npos && d.substr(sp + 1) == "1";
+		auto refuse = [&](const ss_ &why){
+			log_i(MODULE, "An action from peer %zu refused: %s", peer, cs(why));
+		};
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || pi->second.name.empty())
+			return refuse("the app has not placed the player");
+		Peer &pe = pi->second;
+		const int64_t now = interface::os::time_us();
+		pe.action_tokens = std::min(ACTION_BURST, pe.action_tokens +
+				(now - pe.action_at) * 1e-6 * ACTION_RATE);
+		pe.action_at = now;
+		if(pe.action_tokens < 1)
+			return refuse("too many");
+		pe.action_tokens -= 1;
+		// A release always lets go (Stopped, or the action gone meanwhile)
+		auto h = pe.held.find(name);
+		if(!down){
+			if(h == pe.held.end())
+				return;
+			pe.held.erase(h);
+			if(!m_session.running || !m_action_names.count(name))
+				return;
+		} else {
+			if(h != pe.held.end())
+				return;
+			if(!m_session.running)
+				return refuse("the server is Stopped");
+			if(sp == ss_::npos || !action_name_ok(name) ||
+					!m_action_names.count(name))
+				return refuse("no such action");
+			if(pe.editing)
+				return refuse("in the tools");
+			const int64_t t = interface::os::game_us();
+			pe.held[name] = std::make_pair(t, t);
+		}
+		log_i(MODULE, "Action %s %s by %s", cs(name),
+				down ? "pressed" : "released", cs(pe.name));
+		action_runs(peer, name, down ? "pressed" : "released", json::null());
+	}
+
+	// "held" every HELD_EVERY_US of game time while held (in play)
+	void actions_held()
+	{
+		const int64_t now = interface::os::game_us();
+		for(auto &pp : m_peers){
+			if(pp.second.editing)
+				continue;
+			for(auto &h : pp.second.held){
+				if(now - h.second.second < HELD_EVERY_US)
+					continue;
+				h.second.second = now;
+				action_runs(pp.first, h.first, "held",
+						json::Value((now - h.second.first) * 1e-6));
+			}
+		}
 	}
 
 	void on_joined(const network::NewClient &nc)
