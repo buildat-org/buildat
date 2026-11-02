@@ -337,7 +337,16 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			const ss_ id = rest.substr(0, sp);
 			if(!parse_i64(id, &c.n) || c.n < 1 || c.n > 9)
 				return fail(cmd+" <id 1-9>"+(c.param == "up" ? "" : " <x> <y>"));
-			if(c.param != "up" && (sp == ss_::npos ||
+			// finger_down <id> <type> "<label>" [x y]: down where the
+			// click by label would go; c.s is that click's line after
+			// "click ", found again when it runs
+			if(c.param == "down" && sp != ss_::npos &&
+					rest.find('"') != ss_::npos){
+				c.s = trim_copy(rest.substr(sp + 1));
+				sv_<Command> k;
+				if(!parse_body("click "+c.s, &k, error))
+					return fail(*error);
+			} else if(c.param != "up" && (sp == ss_::npos ||
 					!parse_xy(rest.substr(sp + 1), &c.x, &c.y, error)))
 				return fail(cmd+" <id 1-9> <x> <y>");
 		} else if(cmd == "mouse_wheel"){
@@ -499,6 +508,11 @@ static void self_check()
 			cs[0].param != "Menu" || cs[0].n != 0 || cs[1].type != Type::Tap ||
 			!cs[1].s.empty() || cs[1].y != 6)
 		throw Exception("command_seq self_check tap");
+	if(!parse_body("finger_down 2 Button \"kit/button\"\n", &cs, &err) ||
+			cs.size() != 1 || cs[0].type != Type::Finger || cs[0].n != 2 ||
+			cs[0].param != "down" || cs[0].s != "Button \"kit/button\"" ||
+			parse_body("finger_down 2 Button \"x\n", &cs, &err))
+		throw Exception("command_seq self_check finger_down by label");
 	if(!parse_body("nope 1\n", &cs, &err) && err.find("unknown command") != ss_::npos)
 		return;
 	throw Exception("command_seq self_check unknown command");
@@ -579,6 +593,8 @@ ss_ dump_command(const Command &c)
 					(c.n ? " "+itos(c.x)+" "+itos(c.y) : "");
 		return "tap "+itos(c.x)+" "+itos(c.y);
 	case Type::Finger:
+		if(!c.s.empty())
+			return "finger_down "+itos(c.n)+" "+c.s;
 		return "finger_"+c.param+" "+itos(c.n)+(c.param == "up" ? ss_() :
 				" "+itos(c.x)+" "+itos(c.y));
 	case Type::Text:

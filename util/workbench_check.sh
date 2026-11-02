@@ -1282,7 +1282,7 @@ wait_log 5000 kit editor: the view is 2D
 frames 3
 tap Button "Palette"
 frames 5
-finger_down 1 138 195
+finger_down 1 Button "kit/button"
 frames 2
 finger_move 1 300 250
 frames 2
@@ -1365,7 +1365,7 @@ want "$t/srv3.log" "An edit by kitboss: placed kit/button 3 at [2,1,2]" \
 	"An edit by kitboss: placed kit/door 4 at [-2,1,2]" \
 	"An edit by kitboss: linked 3.pressed -> 4.toggle" \
 	"An edit by kitboss: moved 3 to [6,1,2]" \
-	"An edit by kitboss: placed kit/world 7 on the app root" \
+	"An edit by kitboss: placed kit/world 7 on the scene world" \
 	"An edit by kitboss: deleted 7" \
 	"An undo by kitboss: 1 entities put back" \
 	"An edit by kitboss: placed kit/region 8 at [2,-1,-2]" \

@@ -259,11 +259,14 @@ tap <type> "<label>" [x y]
     A tap where `click <type> "<label>" [x y]` would click.
 
 finger_down <id> <x> <y>
+finger_down <id> <type> "<label>" [x y]
 finger_move <id> <x> <y>
 finger_up <id>
     One finger of up to nine (id 1-9), each a step: a drag is a down, moves
     with delays between them, and an up; two fingers down and moved make a
     pinch or a two-finger scroll. finger_up lifts it where it last was.
+    finger_down by label goes down where `click <type> "<label>" [x y]`
+    would click.
 
     BUILDAT_TOUCH=1 natively is a touch mode: the touch controls, and the
     UI scaled as on a phone (one UI pixel to a CSS pixel at least, half

@@ -29,7 +29,9 @@ namespace command_seq
 		Tap,
 		// finger_down <id> <x> <y>, finger_move <id> <x> <y>, finger_up
 		// <id>: one finger of several, for drags, holds and two-finger
-		// gestures (param "down", "move" or "up"; n the id)
+		// gestures (param "down", "move" or "up"; n the id).
+		// finger_down <id> <type> "<label>" [x y]: s the click line after
+		// "click ", the finger down where that click would go
 		Finger,
 		Text,
 		Quit,

@@ -547,6 +547,11 @@
 				int x = c.x, y = c.y;
 				if(tap && !c.s.empty())
 					ok = command_seq_find_click(c, &x, &y, &err);
+				// A finger down by label: c.s is its click's line
+				sv_<client::command_seq::Command> k;
+				if(!tap && !c.s.empty())
+					ok = client::command_seq::parse("click "+c.s, &k, &err) &&
+							command_seq_find_click(k[0], &x, &y, &err);
 				ok = ok && client::command_seq::inject_finger(input,
 						tap ? "tap" : c.param, tap ? 1 : (int)c.n,
 						logical_mode() ? (int)(m_logical_ox + x * m_logical_scale) : x,
