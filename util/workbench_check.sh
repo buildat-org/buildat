@@ -1653,7 +1653,7 @@ keypress F3
 wait_log 5000 kit editor: the view is Walk
 mouse_click left
 wait_log 5000 kit editor: into the crosshair
-look_dir 0 -1 -2.5
+look_dir 0 -1 -1.2
 frames 30
 mouse_click right
 wait_log 5000 kit editor: place
@@ -1672,7 +1672,7 @@ look_dir 1 -1 0
 frames 30
 mouse_click left
 wait_log 5000 kit editor: dig: the heightmap is not dug
-look_dir 0 -1 -2.5
+look_dir 0 -1 -1.2
 frames 30
 screenshot @T@/hm_built.png
 keypress Escape
@@ -1712,7 +1712,8 @@ stop
 # [WB_NEW_PROJECT_GROUND] New's project on a 64x64 grassland heightmap, no
 # voxel ground, the player at its middle
 want "$t/srv9.log" 'world_menu: made "alpha"' 'workbench: the project "alpha" opens' \
-	'World: noise 64x64, seed 0, biome grassland, a heightmap,' ' put at (32.5, '
+	'World: noise 64x64, seed 0, biome grassland, a heightmap,' ' put at (0.5, ' \
+	'World: the heightmap from (-32,-32) to (31,31)'
 grep -aq "World: the save holds\|biome grassland, voxels\|biome rock" "$t/srv9.log" &&
 	fail "the new project has voxel ground ($t/srv9.log)"
 want "$t/new9.log" "heightmap: terrain built"
@@ -1724,11 +1725,11 @@ grep -a "workbench: column 5,5: " "$t/new9.log" | grep -aq " air, 0 voxels" ||
 grep -aq "world_menu: the list shown" "$t/new9.log" &&
 	fail "menu=new showed the list first ($t/new9.log)"
 # The walk: each leg several metres its way (w +z, a -x, s -z, d +x), no
-# corrections; ([KIT_HM_FREE]) then w on to the map's edge (z 63, the
-# body's radius in), stopped there
+# corrections; ([KIT_HM_FREE]) then w on to the map's edge (z 31, the
+# body's radius in; [KIT_HM_ORIGIN] the map centred), stopped there
 grep -a "kit: body at" "$t/new9.log" | sed 's/.*body at \([^,]*\),[^,]*,\([^,]*\), .* \([0-9]*\) corrections.*/\1 \2 \3/' > "$t/walk9"
 [ $(wc -l < "$t/walk9") = 6 ] || fail "not 6 body positions ($t/new9.log)"
-awk 'NR == 6 { if ($2 < 62 || $2 > 63 || $3 != c) { print "edge leg " $0; bad = 1 }; next }
+awk 'NR == 6 { if ($2 < 30 || $2 > 31 || $3 != c) { print "edge leg " $0; bad = 1 }; next }
 	NR == 1 { x = $1; z = $2; c = $3; next }
 	{ dx = $1 - x; dz = $2 - z; leg = NR - 1
 	  if (leg == 1 && dz < 3 || leg == 2 && dx > -3 || leg == 3 && dz > -3 || leg == 4 && dx < 3) bad = bad " leg " leg
