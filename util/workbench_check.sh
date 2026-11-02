@@ -1292,7 +1292,17 @@ wait_log 5000 kit editor: list Positioned
 frames 3
 screenshot @T@/list_all.png
 mouse_pos 150 600
-mouse_wheel -10
+mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
 frames 3
 screenshot @T@/list_scrolled.png
 click Button "select 8"
