@@ -881,6 +881,7 @@ BUILDAT_CLIENT_IMPORT("Text3D.fixedScreenSize:boolean", buildat_c_Text3D_get_fix
 BUILDAT_CLIENT_IMPORT("Text3D.fixedScreenSize=boolean", buildat_c_Text3D_set_fixedScreenSize)
 BUILDAT_CLIENT_IMPORT("Text3D.fontSize:number", buildat_c_Text3D_get_fontSize)
 BUILDAT_CLIENT_IMPORT("Text3D.fontSize=number", buildat_c_Text3D_set_fontSize)
+BUILDAT_CLIENT_IMPORT("Text3D.height:number", buildat_c_Text3D_get_height)
 BUILDAT_CLIENT_IMPORT("Text3D.material:Material", buildat_c_Text3D_get_material)
 BUILDAT_CLIENT_IMPORT("Text3D.material=Material", buildat_c_Text3D_set_material)
 BUILDAT_CLIENT_IMPORT("Text3D.opacity:number", buildat_c_Text3D_get_opacity)
@@ -3894,6 +3895,8 @@ public:
 	double fontSize() const;
 	// Text3D.fontSize=number
 	void fontSize(double a1) const;
+	// Text3D.height:number
+	double height() const;
 	// Text3D.material:Material
 	::buildat::Material material() const;
 	// Text3D.material=Material
@@ -5665,6 +5668,7 @@ inline bool Text3D::fixedScreenSize() const{ ::buildat::detail::Reply r = ::buil
 inline void Text3D::fixedScreenSize(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_set_fixedScreenSize, *this, a1); (void)r; }
 inline double Text3D::fontSize() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_get_fontSize, *this); return r.number(); }
 inline void Text3D::fontSize(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_set_fontSize, *this, a1); (void)r; }
+inline double Text3D::height() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_get_height, *this); return r.number(); }
 inline ::buildat::Material Text3D::material() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_get_material, *this); return ::buildat::Material(r.handle()); }
 inline void Text3D::material(const ::buildat::Material & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_set_material, *this, a1); (void)r; }
 inline double Text3D::opacity() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text3D_get_opacity, *this); return r.number(); }

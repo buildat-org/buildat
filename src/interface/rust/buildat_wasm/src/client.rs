@@ -5052,6 +5052,11 @@ impl Text3D {
 		let mut r = call(imports::buildat_c_Text3D_set_fontSize, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
 		drop(r)
 	}
+	/// Text3D.height:number
+	pub fn height(&self) -> f64 {
+		let mut r = call(imports::buildat_c_Text3D_get_height, &[&H(self.handle()) as &dyn Put]);
+		r.value().number()
+	}
 	/// Text3D.material:Material
 	pub fn material(&self) -> Material {
 		let mut r = call(imports::buildat_c_Text3D_get_material, &[&H(self.handle()) as &dyn Put]);
@@ -8571,6 +8576,8 @@ mod imports {
 		pub fn buildat_c_Text3D_get_fontSize(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Text3D.fontSize=number"]
 		pub fn buildat_c_Text3D_set_fontSize(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Text3D.height:number"]
+		pub fn buildat_c_Text3D_get_height(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Text3D.material:Material"]
 		pub fn buildat_c_Text3D_get_material(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Text3D.material=Material"]

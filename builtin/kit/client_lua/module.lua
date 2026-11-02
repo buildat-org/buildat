@@ -654,6 +654,7 @@ local function draw_look(id, n, look)
 			-- Just in front of the box's front
 			n.text_node.position = magic.Vector3(b.off[1], b.off[2],
 					b.off[3] - b.size[3] / 2 - 0.01)
+			n.board_w, n.board_h = b.size[1], b.size[2]
 		else
 			n.text_node.position = magic.Vector3(b.off[1], b.off[2] +
 					b.size[2] / 2 + 0.45, b.off[3])
@@ -823,8 +824,30 @@ local function update_play(_, data)
 				n.text.text = v
 				-- Its letters text_size high: the font's 48 pixels at 1/128
 				-- of a cell each (Text3D's scaling)
+				-- [KIT_SIGN_WRAP] wrapped to the board's width, a tenth
+				-- spare, and made smaller while it is taller than the
+				-- board, the width wrapped again at the size it is.
+				-- simplified: down to 0.3 of its size; past that it
+				-- overflows (a sign's text is a builder's to shorten)
 				if n.text_facing then
-					local sc = n.text_size / (48 / 128)
+					local px, k = n.text_size / 48, 1
+					if (n.board_w or 0) > 0 and (n.board_h or 0) > 0 then
+						n.text.wordwrap = true
+						for _ = 1, 4 do
+							n.text.width = math.max(1, math.floor(
+									n.board_w * 0.9 / (px * k)))
+							local h = n.text.height * px * k
+							if h <= n.board_h * 0.9 or k <= 0.3 then
+								break
+							end
+							k = math.max(0.3, k * n.board_h * 0.9 / h)
+						end
+						log:info(string.format("kit: entity %d's text wrapped "
+								.. "at %d px, x%.2f, %.2f of %.2f cells high", id,
+								n.text.width, k, n.text.height * px * k,
+								n.board_h))
+					end
+					local sc = n.text_size * k / (48 / 128)
 					n.text_node.scale = magic.Vector3(sc, sc, sc)
 				end
 				log:info("kit: entity " .. id .. " shows \"" .. v .. "\"")

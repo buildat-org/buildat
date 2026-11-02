@@ -5,13 +5,13 @@
 # covers: builtin/kit/kit.cpp builtin/kit/types/logic.lua builtin/kit/types/sign.lua builtin/kit/types/mover.lua builtin/kit/types/pressure_plate.prefab.json builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/move.lua
 # [KIT] stage 4l's starter additions on apps/sample_kit, the server's
 # admin driving Kit's editor (one server, one client). Placed: a kit/logic
-# L (17, a latch), a kit/sign S (18, "Out: {value}"), a kit/mover M (19,
+# L (17, a latch), a kit/sign S (18, "Out: {value}, ..." long enough to wrap), a kit/mover M (19,
 # 0.5 s up 2) and a kit/pressure_plate P (20, its zone made big round the
 # player). Button 3's pressed to L's a (that link shown in play), L's out
 # to S's value, L's on to M's go, P's entered to L's b. The inspector
 # shows the selection's cost. End, Run, edit mode off: walking a step,
 # the plate's zone sees kitboss in (L's b: off), a press (b) latches L on:
-# the sign shows "Out: true", M slides 2 up and signals arrived, and the
+# the sign shows "Out: true, ...", wrapped and made smaller inside its board ([KIT_SIGN_WRAP]), M slides 2 up and signals arrived, and the
 # link 3>17 is drawn and lit for the player in play. Screenshot of the
 # sign; the sign's board, the mover and a wedge kit/part (21) in the
 # stone voxel's texture
@@ -52,7 +52,8 @@ EOF
 	place '{"op": "place", "type": "kit/logic", "pos": [2, 0, 2]}'
 	setp 17 mode '"latch"'
 	place '{"op": "place", "type": "kit/sign", "pos": [0, 2, 6]}'
-	setp 18 text '"Out: {value}"'
+	# [KIT_SIGN_WRAP] long enough to wrap on its board and be made smaller
+	setp 18 text '"Out: {value}, a line long enough to run past the board unless it is wrapped to its width"'
 	place '{"op": "place", "type": "kit/mover", "pos": [4, 0, 4]}'
 	setp 19 time 0.5
 	# [KIT_LOOK_MATERIAL] The sign's board and the mover in voxel materials
@@ -89,7 +90,7 @@ frames 10
 keypress b
 wait_log 10000 replicated: entity 3 presses = 1
 wait_log_any 10000 kit: link 3>17 lit in play
-wait_log_any 10000 kit: entity 18 shows "Out: true"
+wait_log_any 10000 kit: entity 18 shows "Out: true,
 wait_log_any 10000 kit: entity 19 slid to
 frames 10
 look_dir 0 -0.15 1
@@ -124,7 +125,7 @@ grep -aq "kit/trigger_zone 20: kitboss entered" "$s" ||
 	fail "the plate's zone did not see kitboss in ($s)"
 grep -aq "kit/logic 17: latch on by kitboss" "$s" ||
 	fail "the press did not latch the logic on ($s)"
-grep -aq 'kit/sign 18: shows "Out: true"' "$s" ||
+grep -aq 'kit/sign 18: shows "Out: true,' "$s" ||
 	fail "the sign was not sent the logic's out ($s)"
 grep -aq "kit/mover 19: going out" "$s" ||
 	fail "the mover did not go ($s)"
@@ -135,6 +136,11 @@ grep -aq "kit: entity 19 slid to 0,2,0" "$b" ||
 grep -aqE "kit editor: entity 17: Cost(s|:)" "$b" ||
 	fail "the inspector did not show the cost ($b)"
 [ -s "$t/sign.png" ] || fail "no screenshot of the sign ($t)"
+# [KIT_SIGN_WRAP] The long text wrapped and inside its board's height
+grep -a "kit: entity 18's text wrapped" "$b" | tail -1 | sed 's/^.*kit:/  kit:/'
+grep -a "kit: entity 18's text wrapped" "$b" | tail -1 |
+	awk '{ h = $(NF - 4) + 0; bh = $(NF - 2) + 0; exit !(h > 0 && h <= bh) }' ||
+	fail "the sign's text is not inside its board ($b)"
 grep -aq 'kit: entity 18 wears stone' "$b" && grep -aq 'kit: entity 19 wears stone' "$b" &&
 	grep -aq 'kit: entity 21 wears stone' "$b" ||
 	fail "the sign, the mover and the wedge do not wear the stone voxel ($b)"

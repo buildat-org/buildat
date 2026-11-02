@@ -922,6 +922,7 @@ BUILDAT_BINDING("Text3D.fixedScreenSize:boolean", "get", "Text3D", "fixedScreenS
 BUILDAT_BINDING("Text3D.fixedScreenSize=boolean", "set", "Text3D", "fixedScreenSize")
 BUILDAT_BINDING("Text3D.fontSize:number", "get", "Text3D", "fontSize")
 BUILDAT_BINDING("Text3D.fontSize=number", "set", "Text3D", "fontSize")
+BUILDAT_BINDING("Text3D.height:number", "get", "Text3D", "height")
 BUILDAT_BINDING("Text3D.material:Material", "get", "Text3D", "material")
 BUILDAT_BINDING("Text3D.material=Material", "set", "Text3D", "material")
 BUILDAT_BINDING("Text3D.opacity:number", "get", "Text3D", "opacity")

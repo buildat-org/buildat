@@ -2909,6 +2909,9 @@ function M.define(dst, util)
 			-- Wrapped at this many pixels of its own space, 0 for not
 			width = util.simple_property("number"),
 			wordwrap = util.simple_property("boolean"),
+			-- Its lines' height in its own pixels, as wrapped (a sign made
+			-- smaller to fit its board, [KIT_SIGN_WRAP])
+			height = util.read_only_property("number"),
 			-- Whether it is always the same size on the screen however far
 			-- away it is, and which way it turns to face the camera
 			fixedScreenSize = util.simple_property("boolean"),
