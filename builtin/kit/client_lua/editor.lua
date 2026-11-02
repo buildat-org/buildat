@@ -406,6 +406,67 @@ local function type_of(t)
 	return E.state and E.state.types and E.state.types[t] or {}
 end
 
+-- [KIT_NESTING] The tree of the positioned entities: each one's children
+-- (by its id), in the order they were added. A row's pos and yaw are the
+-- world's (the server's edit_state; the save keeps them in the parent's
+-- frame). In one table: the file's locals are at Lua's 200
+local NT = {cache = {}}
+function NT.tree()
+	local tree_cache = NT.cache
+	if tree_cache.state ~= E.state then
+		local by, kids = {}, {}
+		for _, x in ipairs(all_entities()) do
+			by[x.id] = x
+		end
+		for _, x in ipairs(all_entities()) do
+			local p = by[x.parent]
+			if x.pos and p and p.pos then
+				kids[p.id] = kids[p.id] or {}
+				table.insert(kids[p.id], x)
+			end
+		end
+		tree_cache = {state = E.state, by = by, kids = kids}
+		NT.cache = tree_cache
+	end
+	return tree_cache
+end
+
+-- The positioned entity e is under, or nil (a scene)
+function NT.parent_of(e)
+	local p = e and NT.tree().by[e.parent]
+	return p and p.pos and e.pos and p or nil
+end
+
+-- Every entity under id, parents first
+function NT.under(id)
+	local r, kids = {}, NT.tree().kids
+	local function walk(x, d)
+		for _, c in ipairs(kids[x] or {}) do
+			r[#r + 1] = c
+			if d < 16 then
+				walk(c.id, d + 1)
+			end
+		end
+	end
+	walk(id, 0)
+	return r
+end
+
+-- Whether e is under one of the ids (a set)
+function NT.under_one_of(e, ids)
+	local p = NT.parent_of(e)
+	for _ = 1, 18 do
+		if not p then
+			return false
+		end
+		if ids[p.id] then
+			return true
+		end
+		p = NT.parent_of(p)
+	end
+	return false
+end
+
 -- An entity's cell is the voxel at its position, centred on it
 local function center(e)
 	return magic.Vector3(e.pos[1], e.pos[2], e.pos[3])
@@ -422,10 +483,18 @@ local function drawn_at(e)
 	return n and n.node.position or center(e)
 end
 
--- A drag's preview of an entity: moved by d, turned by turn
+-- A drag's preview of an entity: moved by d, turned by turn ([KIT_NESTING]
+-- what is under it with it, turned round it)
 local function preview(e, d, turn)
 	P.preview[e.id] = {e.pos[1] + d[1], e.pos[2] + d[2], e.pos[3] + d[3],
 		(e.yaw or 0) + turn}
+	local c = center(e)
+	local q = magic.Quaternion(0, turn, 0)
+	for _, x in ipairs(NT.under(e.id)) do
+		local p = c + q * (center(x) - c)
+		P.preview[x.id] = {p.x + d[1], p.y + d[2], p.z + d[3],
+			(x.yaw or 0) + turn}
+	end
 end
 
 -- The previews let go of: shown until the server's nodes are there
@@ -1553,6 +1622,19 @@ local function inspector(w, e, is_made)
 		if (e.yaw or 0) ~= 0 then
 			text(w, string.format("turned %g", e.yaw), DIM)
 		end
+		-- [KIT_NESTING] what it is under; what is placed next under it
+		local pe = NT.parent_of(e)
+		if pe then
+			text(w, "Under " .. pe.id .. " " .. tostring(pe.name), DIM)
+		end
+		local on = S.under == e.id
+		button(w, on and "Placing under this: stop" or "Place under this",
+				function()
+			S.under = not on and e.id or nil
+			log:info("kit editor: placing under " ..
+					tostring(S.under or "the scene"))
+			refresh()
+		end, on)
 	end
 	button(w, "Delete", function()
 		M.delete_selected()
@@ -2188,20 +2270,42 @@ people = function()
 	if E.status ~= "" then
 		text(b, E.status, WARN)
 	end
+	if S.under and find(S.under) then
+		text(b, "New entities go under " .. S.under .. " (its inspector's " ..
+				"Place under this)", DIM)
+	end
 	-- The entities, to select ([KIT_SELECT_BURIED]: one under the ground
 	-- too), in three tabs ([KIT_LIST_TABS], user): Game-wide (the root's,
 	-- no position), Scene (the scene's with no position: its World, an
 	-- environment) and Positioned (the scene's, or the root's, placed),
 	-- each in the order they were added; the tab kept for the session. In
 	-- a view that scrolls, fit_people() bounding it under the palette.
+	-- [KIT_NESTING] Positioned in the tree's order, each one under its
+	-- parent indented; a name dragged onto another puts it under that one,
+	-- onto the tabs or the list's empty room back under the scene
 	local tabs = {["Game-wide"] = {}, Scene = {}, Positioned = {}}
+	local indent = {}
+	local function add_tree(e, d)
+		table.insert(tabs.Positioned, e)
+		indent[e.id] = d
+		for _, c in ipairs(NT.tree().kids[e.id] or {}) do
+			if d < 16 then
+				add_tree(c, d + 1)
+			end
+		end
+	end
 	for _, e in ipairs(entities()) do
 		if e.kind ~= "scene" then
 			local t = e.pos and "Positioned" or scene_name(e) and "Scene" or
 					"Game-wide"
-			table.insert(tabs[t], e)
+			if t ~= "Positioned" then
+				table.insert(tabs[t], e)
+			elseif not NT.parent_of(e) then
+				add_tree(e, 0)
+			end
 		end
 	end
+	PV.rows = {}
 	local tab = S.list_tab or "Game-wide"
 	local tr = row(b)
 	for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
@@ -2219,8 +2323,12 @@ people = function()
 	local lw, n, ids = 0, 0, {}
 	for _, e in ipairs(tabs[tab]) do
 		local gr = row(list)
-		local l = label(gr, e.id .. " " .. tostring(e.name) .. (e.pos and
-				" at " .. table.concat(e.pos, ",") or ""))
+		local l = label(gr, string.rep("    ", indent[e.id] or 0) .. e.id ..
+				" " .. tostring(e.name) .. (e.pos and " at " ..
+				table.concat(e.pos, ",") or ""))
+		if e.pos then
+			PV.rows[#PV.rows + 1] = {el = l, id = e.id}
+		end
 		local sb = button(gr, e.id == S.primary and "Selected" or "Select",
 				function()
 			M.select(e.id)
@@ -2231,6 +2339,11 @@ people = function()
 		ids[#ids + 1] = e.id
 	end
 	-- For a check: the tab and what it lists, as it changes
+	for i, id in ipairs(ids) do
+		if (indent[id] or 0) > 0 then
+			ids[i] = string.rep(">", indent[id]) .. id
+		end
+	end
 	local said = "kit editor: list " .. tab .. " (" .. n .. "): " ..
 			table.concat(ids, ", ")
 	if said ~= PV.said then
@@ -2356,7 +2469,8 @@ end
 function M.delete_selected()
 	for _, id in ipairs(sel_ids()) do
 		local e, is_made = find(id)
-		if e and not is_made then
+		-- [KIT_NESTING] one under another selected goes with it
+		if e and not is_made and not NT.under_one_of(e, S.sel) then
 			send({op = "delete", id = id})
 		end
 	end
@@ -2892,12 +3006,13 @@ local function snap(v, g)
 	return math.floor(v / g + 0.5) * g
 end
 
--- Each selected authored entity, with a position
+-- Each selected authored entity, with a position ([KIT_NESTING] but one
+-- under another of them, which takes it along)
 local function movable()
 	local l = {}
 	for _, id in ipairs(sel_ids()) do
 		local e, is_made = find(id)
-		if e and e.pos and not is_made then
+		if e and e.pos and not is_made and not NT.under_one_of(e, S.sel) then
 			l[#l + 1] = e
 		end
 	end
@@ -2975,17 +3090,24 @@ local function place_at(cell, item)
 	if not cell or not item then
 		return
 	end
+	-- [KIT_NESTING] under the entity the inspector's "Place under this"
+	-- named, while it is there (a root's or a scene's type goes on it all
+	-- the same, the server's)
+	if S.under and not find(S.under) then
+		S.under = nil
+	end
+	local parent = S.under
 	if item.clipboard then
 		send({op = "place", clipboard = true, pos = cell,
-			turn = item.turn or 0})
+			turn = item.turn or 0, parent = parent})
 	elseif item.prefab then
 		send({op = "place", prefab = item.prefab, pos = cell,
-			turn = item.turn or 0})
+			turn = item.turn or 0, parent = parent})
 	else
-		send({op = "place", type = item.type, pos = cell})
+		send({op = "place", type = item.type, pos = cell, parent = parent})
 	end
 	log:info("kit editor: placed " .. item.label .. " at " ..
-			table.concat(cell, ","))
+			table.concat(cell, ",") .. (parent and " under " .. parent or ""))
 end
 
 local function end_drag()
@@ -3740,6 +3862,35 @@ function M.placed_box(cell, item)
 			base[3] + math.max(z0, z1)}
 end
 
+-- [KIT_NESTING] The list's positioned row (a name) at the pointer
+function NT.list_row_at(mx, my)
+	local sc = magic.ui.scale
+	for _, r in ipairs(W.people and PV.rows or {}) do
+		if r.el.visible and inside(r.el, mx / sc, my / sc) and
+				(not PV.view or inside(PV.view, mx / sc, my / sc)) then
+			return r
+		end
+	end
+end
+
+-- A name dragged in the list let go: onto another name, under that one;
+-- onto the tabs or the rest of the list's window, under the scene
+function NT.list_drop(id, mx, my)
+	local sc = magic.ui.scale
+	local r = NT.list_row_at(mx, my)
+	local e = find(id)
+	if r and r.id ~= id then
+		log:info("kit editor: list drag " .. id .. " onto " .. r.id)
+		send({op = "parent", id = id, parent = r.id})
+	elseif not r and W.people and inside(W.people, mx / sc, my / sc) and
+			NT.parent_of(e) then
+		log:info("kit editor: list drag " .. id .. " onto the scene")
+		send({op = "parent", id = id, parent = 0})
+	else
+		log:info("kit editor: list drag " .. id .. " given up")
+	end
+end
+
 -- ---- Input: the mouse ([FP]'s mouse_down, mouse_up, mouse_move)
 local function mouse_down(button_)
 	if not E.editing or S.touch then
@@ -3751,6 +3902,12 @@ local function mouse_down(button_)
 		if item then
 			S.palette_press = {item = item, mx = mx, my = my}
 			S.palette_dragged = nil
+			return
+		end
+		-- [KIT_NESTING] a name in the list, to drag onto another
+		local r = NT.list_row_at(mx, my)
+		if r then
+			S.list_press = {id = r.id, mx = mx, my = my}
 			return
 		end
 	end
@@ -3834,6 +3991,14 @@ local function mouse_up(button_)
 	end
 	if button_ == magic.MOUSEB_LEFT and S.box_drag then
 		BX.box_drop()
+		return
+	end
+	if button_ == magic.MOUSEB_LEFT and S.list_press then
+		local lp = S.list_press
+		S.list_press = nil
+		if math.abs(S.mx - lp.mx) + math.abs(S.my - lp.my) > px(8) then
+			NT.list_drop(lp.id, S.mx, S.my)
+		end
 		return
 	end
 	if button_ == magic.MOUSEB_LEFT and S.palette_press then
@@ -5170,11 +5335,12 @@ function M.editor(options)
 								l.input
 					end
 				end
+				local pe = NT.parent_of(e)
 				log:verbose("kit editor: entity " .. e.id .. " " ..
 						tostring(e.name) .. (e.pos and " at " ..
 						table.concat(e.pos, ",") or "") .. ((e.yaw or 0) ~= 0 and
-						" yaw " .. e.yaw or "") .. " links " ..
-						table.concat(links, " "))
+						" yaw " .. e.yaw or "") .. (pe and " under " .. pe.id or
+						"") .. " links " .. table.concat(links, " "))
 			end
 			for id in pairs(S.sel) do
 				if not find(id) then
