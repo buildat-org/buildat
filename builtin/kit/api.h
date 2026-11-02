@@ -58,7 +58,11 @@ namespace interface
 //              ([KIT_UI_COMPONENTS]) a per_player = true one is a table
 //              {"player:<id>": v} (a `by`'s key), each client sent only
 //              its own player's v ("kit:mine" {"all": bool, "list":
-//              [{"id", "key", "value"}]}; null: none) while in its scene
+//              [{"id", "key", "value"}]}; null: none) while in its scene.
+//              simplified: a player's entry stays until the round's start
+//              resets the state, in a persistent world for good (one a
+//              player who ever set it off); dropping a gone player's is
+//              the upgrade
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
 //   usable   = true          -- a client may "use" it (in range); with an
 //                               on_use, the clients point it out as

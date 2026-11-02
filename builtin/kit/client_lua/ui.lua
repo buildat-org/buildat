@@ -17,7 +17,7 @@
 --   narrow screen. On a touchscreen a bottom anchor is above Kit's touch
 --   bars (kit.touch_bar_top()).
 --   **Play**: shown while the server is Running and this player is out of
---   the tools; a button's press is the action's (kit.press_action) or
+--   the tools (Stopped, the components do not run: none shown); a button's press is the action's (kit.press_action) or
 --   "kit:ui" "<id> 1|0", the server checking it is on this player's
 --   screen; while a panel with a button is up the pointer is free
 --   (ui_utils.wants_clicks) for a player in mouse look.
@@ -278,6 +278,8 @@ local function update()
 	if TOUCH and M.touch_bar_top then
 		local top = M.touch_bar_top()
 		lift = top and math.max(0, root.height - top) or 0
+		-- simplified: the whole width's bottom, though the bars are at
+		-- the lower right only; the bars' own rectangle is the upgrade
 		if top ~= bars_at then
 			bars_at = top
 			log:info("kit: ui touch bars at y " .. tostring(top))
@@ -531,7 +533,9 @@ local function release()
 	if not r or not d.at or not E.editing or not r.from_place then
 		return
 	end
-	-- Back from the place to x and y from its anchor
+	-- Back from the place to x and y from its anchor.
+	-- simplified: two edits, two undos; an op setting several parameters
+	-- at once is the upgrade
 	local ox, oy = r.from_place(d.at[1], d.at[2])
 	log:info("kit: ui " .. d.id .. " dragged to " .. ox .. ", " .. oy)
 	K.send({op = "set", id = d.id, comp = r.comp, param = "x", value = ox})
