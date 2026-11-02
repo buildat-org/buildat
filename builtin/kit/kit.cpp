@@ -4200,6 +4200,12 @@ struct Module: public interface::Module, public Interface
 			return params.stringify();
 		json::Value c = params.deepcopy();
 		c.del_key("sky_light");
+		// [KIT_HEIGHTMAP_REGEN_LOSS] The app's own set ("") is the key
+		// from before [KIT_MATERIAL_SETS]: no "materials", no pin
+		if(json::jstr(c, "materials").empty())
+			c.del_key("materials");
+		if(json::jstr(c, "materials_pin").empty())
+			c.del_key("materials_pin");
 		return c.stringify();
 	}
 
