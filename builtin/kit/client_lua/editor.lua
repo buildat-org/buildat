@@ -1561,7 +1561,7 @@ local function inspector(w, e, is_made)
 				local r = row(w)
 				button(r, "Discard edits, regenerate all", function()
 					E.regen_ask = nil
-					send({op = "regenerate_heightmap"})
+					send({op = "hm_regenerate"})
 					log:info("kit editor: the heightmap regenerated, edits "
 							.. "discarded")
 				end)
@@ -1579,7 +1579,7 @@ local function inspector(w, e, is_made)
 			end
 			if tr.previous then
 				button(w, "Restore the previous heightmap", function()
-					send({op = "restore_heightmap"})
+					send({op = "hm_restore"})
 					log:info("kit editor: the previous heightmap asked back")
 				end)
 			end

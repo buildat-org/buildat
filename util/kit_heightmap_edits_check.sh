@@ -146,7 +146,7 @@ echo "ok: a raised sample kept at $he over a resize and a change of height, an u
 	column 10 10
 	column 40 40
 	cat <<'EOF'
-event kit_edit {"op": "regenerate_heightmap"}
+event kit_edit {"op": "hm_regenerate"}
 wait_log 10000 kit editor: state:
 EOF
 	column 10 10

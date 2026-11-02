@@ -4989,7 +4989,7 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
-	// {"op": "regenerate_heightmap"}: the heightmap generated anew, its
+	// {"op": "hm_regenerate"}: the heightmap generated anew, its
 	// edited samples and a builder's decorations discarded (the map before
 	// kept as the previous one: the undo restores it)
 	void regenerate_heightmap(Peer &p, size_t peer, const json::Value &j,
@@ -13183,9 +13183,9 @@ struct Module: public interface::Module, public Interface
 			return send_edited(peer);
 		if(op == "regenerate")
 			return regenerate_sections(p, peer, j, refuse);
-		if(op == "regenerate_heightmap")
+		if(op == "hm_regenerate")
 			return regenerate_heightmap(p, peer, j, refuse);
-		if(op == "restore_heightmap"){
+		if(op == "hm_restore"){
 			ss_ why;
 			if(!hm_restore(p.name, why))
 				return refuse(why);
