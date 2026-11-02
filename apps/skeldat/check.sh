@@ -3657,7 +3657,8 @@ torchlight=$(grep -a "the skeleton (1) is in a lamp light of" "$log66" | head -1
 # Out of the tools the giver used, the coal in skeldat's own inventory;
 # the bones used, the voxels round it boned. Nothing copied out. Run 2,
 # the server started again: the boars, the entities and the cobble still
-# there, no start rows.
+# there, no start rows. [KIT_EDITOR_VIEW_HDR] The 3D view (F2) as bright
+# and as saturated as the walk view it starts from.
 log67="$t/srv67.log"; log67b="$t/srv67b.log"
 gy=6
 BUILDAT_SKELDAT_WORLD=kit BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
@@ -3684,6 +3685,9 @@ printf '%s\n' "$placed" "look 0 -30" "wait_log_any 60000 kit editor: edit rights
 	"event kit_edit {\"op\": \"set_voxel\", \"pos\": [4, $gy, -2], \"voxel\": \"skeldat:cobble\"}" \
 	'event kit_edit {"op": "try", "id": 4, "input": "spawn"}' "delay 1500" \
 	"screenshot $t/kit_edit.png" \
+	"keypress F2" "wait_log 10000 kit editor: the view is 3D" "delay 1000" \
+	"screenshot $t/kit_3d.png" \
+	"keypress F3" "wait_log 10000 kit editor: the view is Walk" "delay 500" \
 	'event kit_edit {"op": "mode", "on": false}' "wait_log 10000 kit editor: edit mode off" \
 	"delay 500" "event kit_use 3" "event kit_use 5" "delay 1500" \
 	"screenshot $t/kit_play.png" "keypress Escape" "wait_log 5000 pause: the menu shown" \
@@ -3703,6 +3707,26 @@ grep -a "kit editor: bar:" "$t/kit.log" | tail -1 | sed 's/.*kit editor: //'
 	grep -aq "kit editor: bar: " "$t/kit.log" &&
 	! grep -a "kit editor: bar: " "$t/kit.log" | grep -q "Run \|End \|Save as start" ||
 	fail "Kit in skeldat, persistent ($log67, $t/kit.log)"
+# [KIT_EDITOR_VIEW_HDR] The editor's 3D view (F2, from the walk view's
+# eye) drawn as the walk view is: skeldat's HDR path's exposure and
+# tonemap, not a raw frame (it was white at noon: a mean of 247, 0.13
+# saturated, against the walk view's 102 and 0.58). The view's middle,
+# clear of the panels; the boars may move between the two
+python3 -I - "$t/kit_edit.png" "$t/kit_3d.png" <<'PY2' ||
+import colorsys, sys
+from PIL import Image
+def stats(f):
+	im = Image.open(f).convert("RGB")
+	w, h = im.size
+	px = list(im.crop((w // 4, h // 4, 3 * w // 4, 3 * h // 4)).resize((80, 50)).getdata())
+	l = sum(0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in px) / len(px)
+	s = sum(colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)[1] for r, g, b in px) / len(px)
+	return l, s
+(lw, sw), (l3, s3) = stats(sys.argv[1]), stats(sys.argv[2])
+print("  Kit's views: walk mean %.1f saturation %.3f, 3D %.1f %.3f" % (lw, sw, l3, s3))
+assert abs(l3 - lw) < 15 and abs(s3 - sw) < 0.06
+PY2
+	fail "Kit's 3D view not as the walk view ($t/kit_edit.png, $t/kit_3d.png)"
 BUILDAT_SKELDAT_WORLD=kit BUILDAT_SKELDAT_SKELETONS=0 \
 	start_server "$log67b" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \

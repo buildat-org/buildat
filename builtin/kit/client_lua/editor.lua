@@ -2448,10 +2448,21 @@ local function apply_viewport()
 	end
 	S.shown_view = want
 	local node, cam = active_camera()
-	-- The walk view with the controls' effects (controls.lua)
-	magic.set_preferred_viewports({want == "walk" and (O.viewport and
-			O.viewport() or M.viewport(O.scene, cam)) or
-			magic.Viewport:new(O.scene, cam)})
+	-- The walk view with the controls' effects (controls.lua).
+	-- [KIT_EDITOR_VIEW_HDR] The 3D view draws by the app's walk view's
+	-- render path (skeldat's HDR one: its exposure and tonemap); the
+	-- default path under an app's HDR was a frame of raw radiance, white
+	-- at noon. 2D keeps the default.
+	local vp
+	if want == "walk" then
+		vp = O.viewport and O.viewport() or M.viewport(O.scene, cam)
+	else
+		vp = magic.Viewport:new(O.scene, cam)
+		if want == "3d" and O.viewport then
+			vp.renderPath = O.viewport().renderPath
+		end
+	end
+	magic.set_preferred_viewports({vp})
 	if O.set_camera then
 		O.set_camera(node)
 	end
