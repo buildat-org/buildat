@@ -3072,6 +3072,15 @@ function M.define(dst, util)
 	local function scripted_now()
 		return __buildat_is_scripted()
 	end
+	local function first_controller(input)
+		for i = 0, input.numJoysticks - 1 do
+			local j = input:GetJoystickByIndex(i)
+			if j and j:IsController() then
+				return j
+			end
+		end
+		return nil
+	end
 	util.wc("Input", {
 		properties = {
 			-- **Read-only, and now actually so**: the setter is
@@ -3126,6 +3135,23 @@ function M.define(dst, util)
 					{"Input"}),
 			-- A key's name and back, for a bindings file a person can read
 			-- ([KEY_BINDINGS])
+			-- [KIT_INPUT_ACTIONS] The first game controller's (SDL's
+			-- layout: buttons A 0, B 1, X 2, Y 3, Back 4, Guide 5, Start 6,
+			-- the sticks 7 8, the shoulders 9 10, the pad 11-14; axes the
+			-- left stick 0 1, the right 2 3, the triggers 4 5): a button
+			-- held, an axis -1..1; false and 0 without one. Not the
+			-- JoystickState itself: two numbers are what a game reads
+			GetControllerButtonDown = util.wrap_function({"Input", "number"},
+				function(self, b)
+					local j = first_controller(self)
+					return j ~= nil and not secret_focus() and j:GetButtonDown(b)
+				end),
+			GetControllerAxis = util.wrap_function({"Input", "number"},
+				function(self, a)
+					local j = first_controller(self)
+					return j ~= nil and not secret_focus() and
+							j:GetAxisPosition(a) or 0
+				end),
 			GetKeyName = util.self_function("GetKeyName", {"string"}, {"Input", "number"}),
 			GetKeyFromName = util.self_function("GetKeyFromName", {"number"}, {"Input", "string"}),
 			GetKeyPress = util.wrap_function({"Input", "number"},

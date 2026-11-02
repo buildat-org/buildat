@@ -908,6 +908,8 @@ BUILDAT_CLIENT_IMPORT("UI.root:UIElement", buildat_c_UI_get_root)
 BUILDAT_CLIENT_IMPORT("UI.root=UIElement", buildat_c_UI_set_root)
 BUILDAT_CLIENT_IMPORT("UI.scale:any", buildat_c_UI_get_scale)
 BUILDAT_CLIENT_IMPORT("UI.scale=any", buildat_c_UI_set_scale)
+BUILDAT_CLIENT_IMPORT("Input:GetControllerAxis(number):any", buildat_c_Input_GetControllerAxis)
+BUILDAT_CLIENT_IMPORT("Input:GetControllerButtonDown(number):any", buildat_c_Input_GetControllerButtonDown)
 BUILDAT_CLIENT_IMPORT("Input:GetKeyDown(number):any", buildat_c_Input_GetKeyDown)
 BUILDAT_CLIENT_IMPORT("Input:GetKeyFromName(string):number", buildat_c_Input_GetKeyFromName)
 BUILDAT_CLIENT_IMPORT("Input:GetKeyName(number):string", buildat_c_Input_GetKeyName)
@@ -3965,6 +3967,10 @@ class Input: public Object
 public:
 	constexpr Input() {}
 	constexpr explicit Input(unsigned int handle): Object(handle) {}
+	// Input:GetControllerAxis(number):any
+	::buildat::Value GetControllerAxis(double a1) const;
+	// Input:GetControllerButtonDown(number):any
+	::buildat::Value GetControllerButtonDown(double a1) const;
 	// Input:GetKeyDown(number):any
 	::buildat::Value GetKeyDown(double a1) const;
 	// Input:GetKeyFromName(string):number
@@ -5687,6 +5693,8 @@ inline ::buildat::UIElement UI::root() const{ ::buildat::detail::Reply r = ::bui
 inline void UI::root(const ::buildat::UIElement & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UI_set_root, *this, a1); (void)r; }
 inline ::buildat::Value UI::scale() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UI_get_scale, *this); return r.value(); }
 inline void UI::scale(const ::buildat::Any & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UI_set_scale, *this, a1); (void)r; }
+inline ::buildat::Value Input::GetControllerAxis(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Input_GetControllerAxis, *this, a1); return r.value(); }
+inline ::buildat::Value Input::GetControllerButtonDown(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Input_GetControllerButtonDown, *this, a1); return r.value(); }
 inline ::buildat::Value Input::GetKeyDown(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Input_GetKeyDown, *this, a1); return r.value(); }
 inline double Input::GetKeyFromName(::buildat::Str a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Input_GetKeyFromName, *this, a1); return r.number(); }
 inline ::buildat::Str Input::GetKeyName(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Input_GetKeyName, *this, a1); return r.string(); }

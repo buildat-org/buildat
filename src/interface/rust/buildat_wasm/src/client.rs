@@ -5217,6 +5217,16 @@ impl Deref for Input { type Target = Object; fn deref(&self) -> &Object { unsafe
 impl Input {
 	/// The same object as another class of the list's
 	pub fn as_<T: FromValue>(self) -> T { T::from_value(Value::Object(self.0)) }
+	/// Input:GetControllerAxis(number):any
+	pub fn GetControllerAxis(&self, a1: impl Put) -> Value {
+		let mut r = call(imports::buildat_c_Input_GetControllerAxis, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		r.value()
+	}
+	/// Input:GetControllerButtonDown(number):any
+	pub fn GetControllerButtonDown(&self, a1: impl Put) -> Value {
+		let mut r = call(imports::buildat_c_Input_GetControllerButtonDown, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		r.value()
+	}
 	/// Input:GetKeyDown(number):any
 	pub fn GetKeyDown(&self, a1: impl Put) -> Value {
 		let mut r = call(imports::buildat_c_Input_GetKeyDown, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
@@ -8615,6 +8625,10 @@ mod imports {
 		pub fn buildat_c_UI_get_scale(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "UI.scale=any"]
 		pub fn buildat_c_UI_set_scale(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Input:GetControllerAxis(number):any"]
+		pub fn buildat_c_Input_GetControllerAxis(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Input:GetControllerButtonDown(number):any"]
+		pub fn buildat_c_Input_GetControllerButtonDown(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Input:GetKeyDown(number):any"]
 		pub fn buildat_c_Input_GetKeyDown(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Input:GetKeyFromName(string):number"]

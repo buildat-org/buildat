@@ -2546,7 +2546,7 @@ magic.INSIDE:
 magic.INTERSECTS: 
 magic.Image: Clear, FlipVertical, GetPixel, Resize, SetPixel, SetPixelInt, SetSize, components, compressed, height, new, width
 magic.IndexBuffer: SetData, SetShadowed, SetSize, indexCount, indexSize, new
-magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, GetMousePosition, GetQualifierDown, IsMouseLocked, IsMouseVisible, SetMouseMode, SetMouseVisible, mouseVisible
+magic.Input: GetControllerAxis, GetControllerButtonDown, GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, GetMousePosition, GetQualifierDown, IsMouseLocked, IsMouseVisible, SetMouseMode, SetMouseVisible, mouseVisible
 magic.IntRect: bottom, left, right, top
 magic.IntVector2: x, y
 magic.IntVector3: Length, x, y, z
@@ -4051,6 +4051,8 @@ UI.root:UIElement  ->  UIElement UI::root()
 UI.root=UIElement  ->  void UI::root(UIElement)
 UI.scale:any  ->  Value UI::scale()
 UI.scale=any  ->  void UI::scale(Any)
+Input:GetControllerAxis(number):any  ->  Value Input::GetControllerAxis(double)
+Input:GetControllerButtonDown(number):any  ->  Value Input::GetControllerButtonDown(double)
 Input:GetKeyDown(number):any  ->  Value Input::GetKeyDown(double)
 Input:GetKeyFromName(string):number  ->  double Input::GetKeyFromName(Str)
 Input:GetKeyName(number):string  ->  Str Input::GetKeyName(double)
