@@ -1697,7 +1697,7 @@ frames 120
 keyup s
 event kit_body
 keydown d
-frames 120
+frames 60
 keyup d
 event kit_body
 keydown w
@@ -1726,7 +1726,8 @@ grep -aq "world_menu: the list shown" "$t/new9.log" &&
 	fail "menu=new showed the list first ($t/new9.log)"
 # The walk: each leg several metres its way (w +z, a -x, s -z, d +x), no
 # corrections; ([KIT_HM_FREE]) then w on to the map's edge (z 31, the
-# body's radius in; [KIT_HM_ORIGIN] the map centred), stopped there
+# body's radius in; [KIT_HM_ORIGIN] the map centred), stopped there (d
+# the shorter leg: w then goes clear of the voxels built at x 3)
 grep -a "kit: body at" "$t/new9.log" | sed 's/.*body at \([^,]*\),[^,]*,\([^,]*\), .* \([0-9]*\) corrections.*/\1 \2 \3/' > "$t/walk9"
 [ $(wc -l < "$t/walk9") = 6 ] || fail "not 6 body positions ($t/new9.log)"
 awk 'NR == 6 { if ($2 < 30 || $2 > 31 || $3 != c) { print "edge leg " $0; bad = 1 }; next }
