@@ -4,10 +4,11 @@
 # covers: builtin/accounts/accounts.cpp apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/join.lua
 # [GUEST_NAME_REUSE]: a game keeps its saves by player name, so a name
 # given out again after a restart hands someone the earlier player's.
-#   - vanilla on the launcher's server: its own client is singleplayer,
-#     and again after a restart; a client without the owner's token (the
-#     LAN's) gets the login page and is not placed; one logging in as
-#     singleplayer is held; bob logging in plays as bob;
+#   - vanilla on the launcher's server: its own client plays as its
+#     account (logged in with no dialog as User, the default name), and
+#     again after a restart ([VANILLA_OWNER_ACCOUNT]); a client without
+#     the owner's token (the LAN's) gets the login page and is not placed;
+#     SinglePlayer (the setup code's admin) and bob play as themselves;
 #   - [DELETED_NAME_REUSE]: bob deleted by the admin (SinglePlayer, by the
 #     setup code), bob registered again is refused; the admin's add makes
 #     it again;
@@ -44,20 +45,20 @@ owner(){
 	serve "$t/$1.log" -u launcher=1
 	drive "$1c" "wait_log 120000 load: the world is in"
 	stop
-	grep -aq "luanti  : Player singleplayer joined" "$t/$1.log" ||
-		bad="$bad; the owner not singleplayer ($t/$1.log, $t/$1c.log)"
+	grep -aq "luanti  : Player User joined" "$t/$1.log" ||
+		bad="$bad; the owner not User ($t/$1.log, $t/$1c.log)"
 }
 
-owner v1
-# The LAN's: an owner token no client here has
+# The LAN's first, while the accounts have no admin (the owner's local
+# login would be the first): an owner token no client here has
 BUILDAT_OWNER_TOKEN=notthisclients serve "$t/v2.log" -u launcher=1
 wait_for_log "$t/v2.log" "setup code" 30 # may come after Listening
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/v2.log" | head -1)
 drive lan_a "wait_log 60000 accounts: the login page shown" ||
 	bad="$bad; no login page for a LAN client ($t/lan_a.log)"
 BUILDAT_JOIN_NAME=SinglePlayer BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1 \
-	BUILDAT_JOIN_CODE=$code drive lan_s "wait_log 60000 join: held: " ||
-	bad="$bad; the host's name not held ($t/lan_s.log)"
+	BUILDAT_JOIN_CODE=$code drive lan_s "wait_log 120000 load: the world is in" ||
+	bad="$bad; SinglePlayer not in ($t/lan_s.log)"
 BUILDAT_JOIN_NAME=bob BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1 \
 	drive lan_b "wait_log 120000 load: the world is in" ||
 	bad="$bad; bob not in ($t/lan_b.log)"
@@ -76,9 +77,11 @@ admin add_b "add bob checkpass12" &&
 	grep -aq "admin result: The account bob was added" "$t/add_b.log" ||
 	bad="$bad; the admin's add of bob ($t/add_b.log)"
 stop
-# Who was placed: bob alone
-placed=$(grep -aoP "luanti  : Player \K\S+(?= joined)" "$t/v2.log" | tr '\n' ' ')
-[ "$placed" = "bob " ] || bad="$bad; placed on the LAN: $placed($t/v2.log)"
+# Who was placed: SinglePlayer and bob, by their accounts (the admin
+# drives' SinglePlayer may be placed again before it quits)
+placed=$(grep -aoP "luanti  : Player \K\S+(?= joined)" "$t/v2.log" | LC_ALL=C sort -u | tr '\n' ' ')
+[ "$placed" = "SinglePlayer bob " ] || bad="$bad; placed on the LAN: $placed($t/v2.log)"
+owner v1
 owner v3
 
 # hillclimb's guests, by a raw peer's accounts:guest
@@ -113,5 +116,5 @@ g1=$(hc h1) g2=$(hc h2)
 [ "$g1" != "$g2" ] || bad="$bad; $g1 again after the restart"
 
 [ -z "$bad" ] || fail "${bad#; }"
-echo "PASS: singleplayer kept, LAN clients log in (bob, not the host's name); a deleted bob not registered again, the admin's add makes it; guests $g1 then $g2"
+echo "PASS: the owner User, LAN clients log in (SinglePlayer, bob); a deleted bob not registered again, the admin's add makes it; guests $g1 then $g2"
 # vim: set noet ts=4 sw=4:

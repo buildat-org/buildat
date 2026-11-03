@@ -20,18 +20,13 @@ core.builtin_auth_handler = {
 		for priv, _ in pairs(auth_entry.privileges) do
 			privileges[priv] = true
 		end
-		-- If singleplayer, give all privileges except those marked as give_to_singleplayer = false
-		-- MODIFIED for buildat ([SECURITY_RUN_4]): the owner's alone. Every
-		-- other peer of a launcher's game is client<n> -- another user on
-		-- the machine, or the LAN once opened -- and has what its entry holds
-		if core.is_singleplayer() and name == core.__singleplayer_name then
-			for priv, def in pairs(core.registered_privileges) do
-				if def.give_to_singleplayer then
-					privileges[priv] = true
-				end
-			end
+		-- MODIFIED for buildat ([SECURITY_RUN_4], [VANILLA_OWNER_ACCOUNT]):
+		-- no singleplayer's privileges. Every player is an account, and the
+		-- launcher's owner has every privilege as the accounts' admin
+		-- (core.__admins); another user on the machine, or the LAN once
+		-- opened, has what its entry holds
 		-- For the admin, give everything
-		elseif name == core.settings:get("name") then
+		if name == core.settings:get("name") then
 			for priv, def in pairs(core.registered_privileges) do
 				if def.give_to_admin then
 					privileges[priv] = true

@@ -6,9 +6,10 @@
 -- game is told nothing about it. Escape used to disconnect, which is a key
 -- nobody was told about doing the one thing that cannot be undone.
 --
--- On a public server it has the account pages, builtin/accounts' as the
--- floorplanner has them, and an admin's world menu, which is main/menu.lua
--- over the world. While any of it is up, luanti.hold() makes the world
+-- It has the account pages, builtin/accounts' as the floorplanner has
+-- them (a launcher's game's too, its owner logged in through accounts,
+-- [VANILLA_OWNER_ACCOUNT]), and an admin's world menu, which is
+-- main/menu.lua over the world. While any of it is up, luanti.hold() makes the world
 -- keep its hands off the keys and the mouse, as a form does.
 --
 --   local open = run_script_file("main/pause.lua")(o)
@@ -245,12 +246,12 @@ open = function()
 					(ok and "" or ": " .. tostring(err)))
 		end, {label = "Screen orientation", fill = true})
 	end
+	-- My account... local or not ([ACCOUNT_BUTTON]); the way to
+	-- Accounts... is through it now (account_page's own button)
+	accounts.page_button(w, "My account...", function()
+		page(function() accounts.account_page(open) end, open)
+	end)
 	if account.public then
-		-- My account... local or not ([ACCOUNT_BUTTON]); the way to
-		-- Accounts... is through it now (account_page's own button)
-		accounts.page_button(w, "My account...", function()
-			page(function() accounts.account_page(open) end, open)
-		end)
 		if not account.is_local then
 			-- To the Starports that list it ([STARPORT] 5); the dialog is
 			-- the client's own
@@ -290,6 +291,72 @@ open = function()
 	-- What a check waits for
 	log:info("pause: the menu shown")
 end
+
+-- [VANILLA_OWNER_ACCOUNT] (b) **The running world's privileges per
+-- account**, an admin's entry in the Server window: what the world's auth
+-- table holds, a button per privilege that grants or revokes it there
+-- (main:set_world_priv), kept with the world. The server's answer,
+-- main:world_privs, is the registered privileges, then name and privileges
+-- for each account.
+-- simplified: every account and every privilege on one scrolling page; a
+-- server of many accounts wants a search
+local world_privs = nil
+local function split(csv)
+	local out = {}
+	for p in (csv or ""):gmatch("[^,]+") do
+		out[#out + 1] = p
+	end
+	return out
+end
+local function privs_page()
+	local w = accounts.server_open("World privileges")
+	if not world_privs then
+		accounts.page_text(w, "Asking the server...")
+		return
+	end
+	accounts.page_text(w, "What each account may do in the world " ..
+			account.world .. ", kept with it. An admin has every " ..
+			"privilege while one.")
+	local all = split(world_privs[1])
+	for i = 2, #world_privs - 1, 2 do
+		local name, has = world_privs[i], {}
+		for _, p in ipairs(split(world_privs[i + 1])) do
+			has[p] = true
+		end
+		accounts.page_text(w, name)
+		local r
+		for k, priv in ipairs(all) do
+			if (k - 1) % 4 == 0 then
+				r = w:CreateChild("UIElement")
+				r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
+			end
+			local b = accounts.page_button(r, priv .. (has[priv] and
+					": yes" or ": no"), function()
+				buildat.send_packet("main:set_world_priv", cereal.binary_output(
+						{name, priv, has[priv] and "" or "1"},
+						{"array", "string"}))
+			end)
+			-- What a check's click finds it by
+			b:SetName("priv " .. name .. " " .. priv)
+		end
+	end
+	log:info("privileges: the page drawn, " .. (#world_privs - 1) / 2 ..
+			" accounts")
+end
+accounts.server_menu = function(add)
+	if account.admin and account.world ~= "" then
+		add("Admin", "World privileges", "world_privs", function()
+			buildat.send_packet("main:get_world_privs", "")
+			privs_page()
+		end)
+	end
+end
+buildat.sub_packet("main:world_privs", function(data)
+	world_privs = cereal.binary_input(data, {"array", "string"})
+	if accounts.frame and accounts.server_current() == "world_privs" then
+		privs_page()
+	end
+end)
 
 -- A click or a tap off the menu is Continue, and off an account page it
 -- made way for (the chat, My account) that page's Back, as its Escape

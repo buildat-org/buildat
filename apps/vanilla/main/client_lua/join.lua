@@ -2,9 +2,9 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
--- A public server's first script ([VANILLA_PUBLIC] 2), and a LAN game's
--- for all but the singleplayer ([GUEST_NAME_REUSE]): the join, through
--- builtin/accounts. What comes after is the server's to send: the world,
+-- Every client's first script ([VANILLA_PUBLIC] 2, [GUEST_NAME_REUSE]):
+-- the join, through builtin/accounts; a launcher's game's owner with no
+-- dialog, by its local login ([VANILLA_OWNER_ACCOUNT]). What comes after is the server's to send: the world,
 -- the world menu for an admin while there is none, or else a wait until an
 -- admin has chosen one.
 local cereal = require("buildat/extension/cereal")
@@ -99,6 +99,7 @@ buildat.sub_packet("main:join_title", function(data)
 	local title = cereal.binary_input(data, {"array", "string"})[1] or ""
 	-- The pause menu has "My account..."; no corner button ([ACCOUNT_BUTTON])
 	accounts.no_account_button()
-	accounts.start({title = title ~= "" and title or "Luanti"})
+	accounts.start({title = title ~= "" and title or "Luanti",
+			local_login = true})
 end)
 -- vim: set noet ts=4 sw=4:

@@ -77,7 +77,7 @@ shoot() { # <tag> <extra env>
 # round of hours from the beginning
 shoot with "BUILDAT_LUANTI_NO_PREDAWN="
 # The same name joins again: the server has let the first one go
-wait_for_log "$out/srv.log" "Player singleplayer left" 10 ||
+wait_for_log "$out/srv.log" "Player [^ ]+ left" 10 ||
 	{ echo "FAIL: the first client's player was not let go ($out/srv.log)"; exit 1; }
 shoot without "BUILDAT_LUANTI_NO_PREDAWN=1"
 kill -INT "$srv" 2>/dev/null

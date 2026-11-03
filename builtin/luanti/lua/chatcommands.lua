@@ -49,8 +49,7 @@ end
 do
 	local set_privs = core.set_player_privs
 	core.set_player_privs = function(name, privs)
-		if core.__admins and core.__admins[name] and
-				not core.is_singleplayer() then
+		if core.__admins and core.__admins[name] then
 			local handler = core.get_auth_handler()
 			local entry = handler and handler.get_auth(name)
 			local stored = table.copy(entry and entry.privileges or {})

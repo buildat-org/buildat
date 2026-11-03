@@ -386,8 +386,7 @@ struct GameStart
 	void announce_world(const ss_ &world_name, const ss_ &game_path,
 			network::PeerInfo::Id peer)
 	{
-		// Announced under the world's name once open to the LAN; who comes
-		// in from there plays without an account (player_name_of())
+		// Announced under the world's name once open to the LAN
 		accounts::access(m_server, [&](accounts::Interface *i){
 			i->set_lan_name(world_name, false);
 		});

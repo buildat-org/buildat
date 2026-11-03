@@ -109,7 +109,7 @@ def page(l):
     return m and m.group(1)
 def first(l):
     # The list starts at the page's first item
-    m = re.search(r'scan %s: slot detached:creative_singleplayer:main:\d+ .* item (\S+)' % l, log)
+    m = re.search(r'scan %s: slot detached:creative_\w+:main:\d+ .* item (\S+)' % l, log)
     return m and m.group(1)
 for l in ("p1", "p2", "p3", "p4"):
     if not re.search(r'scan %s: form "" open' % l, log):

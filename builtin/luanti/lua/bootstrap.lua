@@ -3777,27 +3777,17 @@ end
 
 -- The server's admins ([VANILLA_PUBLIC] 3): every privilege, in every world.
 -- apps/vanilla says who they are, from builtin/accounts, and again when
--- that changes.
+-- that changes. [VANILLA_OWNER_ACCOUNT] The launcher's owner is one: it
+-- logs in through builtin/accounts as everyone does, and its every
+-- privilege is its account's admin.
 core.__admins = {}
 function core.__set_admin(name, on)
 	core.__admins[name] = on and true or nil
 	core.__send_privs(name)
 end
 
--- The singleplayer's name, which vanilla gives only to the launcher's own
--- client (the owner token, builtin/accounts): every other peer is
--- client<n>, and singleplayer mode's every privilege is the owner's alone
--- -- another user on the machine reaches 127.0.0.1 too, and the LAN does
--- once the game is opened to it ([SECURITY_RUN_1])
-local singleplayer_name = os.getenv("BUILDAT_LUANTI_NAME")
-if singleplayer_name == nil or singleplayer_name == "" then
-	singleplayer_name = "singleplayer"
-end
-core.__singleplayer_name = singleplayer_name
-
 function core.get_player_privs(name)
-	if (core.is_singleplayer() and name == singleplayer_name) or
-			core.__admins[name] then
+	if core.__admins[name] then
 		local all = {}
 		for priv, _ in pairs(core.registered_privileges or {}) do
 			all[priv] = true
@@ -3807,6 +3797,62 @@ function core.get_player_privs(name)
 	local handler = core.get_auth_handler and core.get_auth_handler()
 	local entry = handler and handler.get_auth and handler.get_auth(name)
 	return (entry and entry.privileges) or {}
+end
+
+-- [VANILLA_OWNER_ACCOUNT] (b) **The world's privileges per account**, for
+-- vanilla's admin page: core.__world_privs(names) is
+-- {"priv,priv,...", name, "priv,...", name, ...}, the registered privileges
+-- first, then each name's in the world's auth table (default_privs for a
+-- name with no entry, which it gets at its first join); an admin's are
+-- those stored, under the every privilege it has while an admin.
+local function stored_privs(name)
+	local handler = core.get_auth_handler()
+	local entry = handler.get_auth(name)
+	if entry then
+		return table.copy(entry.privileges)
+	end
+	return core.string_to_privs(core.settings:get("default_privs") or "")
+end
+local function privs_csv(privs)
+	local list = {}
+	for priv, on in pairs(privs) do
+		if on then
+			list[#list + 1] = priv
+		end
+	end
+	table.sort(list)
+	return table.concat(list, ",")
+end
+function core.__world_privs(names)
+	local all = {}
+	for priv, _ in pairs(core.registered_privileges) do
+		all[priv] = true
+	end
+	local out = {privs_csv(all)}
+	for _, name in ipairs(type(names) == "table" and names or {}) do
+		out[#out + 1] = tostring(name)
+		out[#out + 1] = privs_csv(stored_privs(tostring(name)))
+	end
+	return out
+end
+-- core.__set_world_priv({name, priv, on}): one privilege granted or
+-- revoked in the auth table, the grant and revoke callbacks run and the
+-- player's client told, as /grant and /revoke do; "" when done, else why
+-- not
+function core.__set_world_priv(t)
+	local name, priv = type(t) == "table" and t[1], type(t) == "table" and t[2]
+	if type(name) ~= "string" or name == "" or type(priv) ~= "string" then
+		return "malformed"
+	end
+	if not core.registered_privileges[priv] then
+		return "no privilege " .. priv
+	end
+	local privs = stored_privs(name)
+	privs[priv] = t[3] and true or nil
+	core.get_auth_handler().set_privileges(name, privs)
+	core.log("action", "[VANILLA_OWNER_ACCOUNT] " .. priv .. " " ..
+			(t[3] and "granted to " or "revoked from ") .. name)
+	return ""
 end
 
 -- The player's privileges to their client, sorted, on join and whenever

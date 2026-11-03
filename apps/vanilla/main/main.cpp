@@ -105,9 +105,6 @@ struct Module: public interface::Module
 	// seconds, each asking for the saves again and drawing the whole menu
 	// again over the one on the screen ([CONTENTDB_SCAN])
 	std::set<network::PeerInfo::Id> m_shown_menu;
-	// Which client took the name BUILDAT_LUANTI_NAME asked for, if any;
-	// see player_name_of()
-	network::PeerInfo::Id m_named_peer = 0;
 	// A world runs once: what a second choice would be is a second Luanti
 	// environment in one server, which is not what the module is
 	bool m_starting = false;
@@ -225,6 +222,8 @@ struct Module: public interface::Module
 			{"import_game", on(m_importer, &Importer::on_import_game)},
 			{"import_world", on(m_importer, &Importer::on_import_world)},
 			{"chat", on(*this, &Module::on_chat)},
+			{"get_world_privs", on(*this, &Module::on_get_world_privs)},
+			{"set_world_priv", on(*this, &Module::on_set_world_priv)},
 		};
 		for(const auto &packet : PACKETS)
 			sub<network::Packet>(m_server,
@@ -248,49 +247,15 @@ struct Module: public interface::Module
 		};
 	}
 
-	// A Luanti player per client. The name is this game's to choose and the
-	// client does not send one, so it is the peer's number: what it is for
-	// is to be the key everything about the player hangs off, and a mod
-	// that prints it gets something it can tell apart.
-	//
-	// The first client that connects is "singleplayer", the name Luanti's
-	// own singleplayer always plays as: games written for one player look
-	// it up by that name (citadel's get_player_by_name("singleplayer")),
-	// and an imported singleplayer world's own player is that one -- where
-	// they stood, what they carry. BUILDAT_LUANTI_NAME names them instead,
-	// spelled the way extensions/luanti_client spells it. Only the first
-	// client gets the name, because a name is one player and two clients
-	// cannot both be them; the next to connect after they leave gets it.
-	//
-	// simplified: an environment variable is not how a player picks
-	// themselves. The menu lists the saves and a save knows its players, so
-	// choosing one there is the shape this ends up as.
+	// A Luanti player per client, by the name of the account it joined as:
+	// every client logs in through builtin/accounts, the launcher's owner
+	// too, with no dialog ([VANILLA_OWNER_ACCOUNT]: no split, one who
+	// wants to play as "singleplayer" logs in as that). "client<peer>"
+	// before the login, which accounts keeps from new accounts.
 	ss_ player_name_of(network::PeerInfo::Id peer)
 	{
-		// A public server's players are its accounts ([VANILLA_PUBLIC] 3),
-		// and so are a LAN game's but the singleplayer ([GUEST_NAME_REUSE]:
-		// "client<peer>" came again after a restart, with the earlier
-		// player's save)
-		if(m_public || !is_named(peer)){
-			auto it = m_names.find(peer);
-			return it != m_names.end() ? it->second : "client"+itos(peer);
-		}
-		return named_name();
-	}
-	ss_ named_name()
-	{
-		const char *name = getenv("BUILDAT_LUANTI_NAME");
-		return name == nullptr || name[0] == '\0' ? "singleplayer" : name;
-	}
-	// The singleplayer is the launcher's own client (its owner token,
-	// builtin/accounts); anyone else who reaches the game -- another user
-	// on this machine, or the LAN once it is opened -- is an ordinary
-	// player ([SECURITY_RUN_1]), in by the join's login
-	bool is_named(network::PeerInfo::Id peer)
-	{
-		if(m_named_peer == 0 && is_owner(m_server, peer))
-			m_named_peer = peer;
-		return m_named_peer == peer;
+		auto it = m_names.find(peer);
+		return it != m_names.end() ? it->second : "client"+itos(peer);
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
@@ -298,8 +263,6 @@ struct Module: public interface::Module
 		m_shown_world.erase(old_client.info.id);
 		m_shown_menu.erase(old_client.info.id);
 		// The player is the module's to remove (its session)
-		if(m_named_peer == old_client.info.id)
-			m_named_peer = 0;
 		m_names.erase(old_client.info.id);
 		m_join_sent.erase(old_client.info.id);
 		// A transfer cut off leaves nothing behind
@@ -345,30 +308,26 @@ struct Module: public interface::Module
 		network::send(m_server, login.peer, "main:join_wait", packed);
 	}
 
-	// [GUEST_NAME_REUSE] A LAN player's join: the world under their
-	// account's name, never the singleplayer's
+	// [GUEST_NAME_REUSE] A launcher's game's join, its owner's
+	// ([VANILLA_OWNER_ACCOUNT], by accounts' local login) or a LAN
+	// player's: the world under their account's name; with none running
+	// the world menu for the owner, a wait for anyone else
 	void on_lan_login(const accounts::Login &login)
 	{
 		if(!m_join_sent.count(login.peer) || m_names.count(login.peer))
 			return;
-		auto lower = [](ss_ s){
-			for(char &c : s)
-				c = (char)tolower((unsigned char)c);
-			return s;
-		};
-		if(lower(login.name) == lower(named_name())){
-			log_i(MODULE, "%s: the singleplayer's name, held", cs(login.name));
-			const ss_ packed = storage::pack(sv_<ss_>{login.name+
-					" is this game's own player: join with another account"});
-			network::send(m_server, login.peer, "main:join_wait", packed);
-			return;
-		}
 		m_names[login.peer] = login.name;
 		if(m_scene){
 			show_world_to(login.peer);
 			return;
 		}
 		m_waiting_peers.push_back(login.peer);
+		if(is_owner(m_server, login.peer)){
+			m_shown_menu.insert(login.peer);
+			network::send(m_server, login.peer, "core:run_script",
+					"buildat.run_script_file(\"main/menu.lua\")");
+			return;
+		}
 		const ss_ packed = storage::pack(sv_<ss_>{"No world is running yet: "
 				"you are in as soon as the host starts one."});
 		network::send(m_server, login.peer, "main:join_wait", packed);
@@ -392,11 +351,12 @@ struct Module: public interface::Module
 		network::send(m_server, peer, "main:account", packed);
 	}
 
-	// A server admin has every privilege in the world ([VANILLA_PUBLIC] 3)
+	// A server admin has every privilege in the world ([VANILLA_PUBLIC] 3),
+	// the launcher's owner as one ([VANILLA_OWNER_ACCOUNT])
 	void on_accounts_privs(const accounts::Login &login)
 	{
 		send_account(login.peer);
-		if(!m_public || !m_scene)
+		if(!m_scene)
 			return;
 		const bool admin = m_access.is_admin(login.peer);
 		luanti::access(m_server, [&](luanti::Interface *i){
@@ -507,11 +467,10 @@ struct Module: public interface::Module
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
-		// A public server's client joins first ([VANILLA_PUBLIC] 2), as
-		// does a LAN game's but the singleplayer ([GUEST_NAME_REUSE]), and
-		// what it is shown after is on_accounts_login's
-		if((m_public || !is_named(event.recipient)) &&
-				!m_names.count(event.recipient)){
+		// Every client joins first ([VANILLA_PUBLIC] 2), a launcher's
+		// game's owner by accounts' local login ([VANILLA_OWNER_ACCOUNT]),
+		// and what it is shown after is on_accounts_login's
+		if(!m_names.count(event.recipient)){
 			if(m_join_sent.insert(event.recipient).second){
 				// The join's title is the Luanti game running, which the
 				// script waits for; "" before an admin has chosen a world
@@ -535,7 +494,7 @@ struct Module: public interface::Module
 		if(!m_scene){
 			// Waiting for an admin, or the host, to choose a world
 			if(m_public ? !m_access.is_admin(event.recipient) :
-					!is_named(event.recipient))
+					!is_owner(m_server, event.recipient))
 				return;
 			if(!m_shown_menu.insert(event.recipient).second)
 				return;
@@ -599,6 +558,76 @@ struct Module: public interface::Module
 		m_restart_in = 1.5f;
 	}
 
+	// [VANILLA_OWNER_ACCOUNT] (b) **The running world's privileges per
+	// account**, an admin's page (pause.lua): main:get_world_privs answered
+	// with main:world_privs {"priv,priv,..." the registered ones, then
+	// name, "priv,..." for each account}, what the world's auth table
+	// holds; main:set_world_priv {name, priv, "1" or ""} one granted or
+	// revoked there, as /grant and /revoke do, and the list sent again.
+	// Kept in the world's save with its players, not server-wide.
+	void on_get_world_privs(const network::Packet &packet)
+	{
+		send_world_privs(packet.sender);
+	}
+	void send_world_privs(network::PeerInfo::Id peer)
+	{
+		if(!m_access.is_admin(peer) || !m_scene)
+			return;
+		// Account names are letters, digits, _ and -: nothing a JSON
+		// string escapes
+		sv_<ss_> names;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			names = i->account_names();
+		});
+		ss_ json = "[";
+		for(const ss_ &n : names)
+			json += (json.size() > 1 ? ",\"" : "\"")+n+"\"";
+		json += "]";
+		ss_ r;
+		luanti::access(m_server, [&](luanti::Interface *i){
+			r = i->call_json("__world_privs", json);
+		});
+		const sajson::document doc = sajson::parse(
+				sajson::dynamic_allocation(), sajson::string(r.c_str(),
+				r.size()));
+		if(!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_ARRAY)
+			return;
+		const sajson::value root = doc.get_root();
+		sv_<ss_> values;
+		for(size_t k = 0; k < root.get_length(); k++)
+			if(root.get_array_element(k).get_type() == sajson::TYPE_STRING)
+				values.push_back(root.get_array_element(k).as_string());
+		network::send(m_server, peer, "main:world_privs",
+				storage::pack(values));
+	}
+	void on_set_world_priv(const network::Packet &packet)
+	{
+		const sv_<ss_> v = read_packet_strings(packet);
+		if(!m_access.is_admin(packet.sender) || !m_scene || v.size() < 3)
+			return;
+		bool exists = false;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			exists = i->exists(v[0]);
+		});
+		// A privilege's name as Luanti's: letters, digits and _
+		bool plain = !v[1].empty() && v[1].size() <= 64;
+		for(char c : v[1])
+			plain = plain && (isalnum((unsigned char)c) || c == '_');
+		if(!exists || !plain)
+			return;
+		ss_ r;
+		luanti::access(m_server, [&](luanti::Interface *i){
+			r = i->call_json("__set_world_priv", "[\""+v[0]+"\",\""+v[1]+
+					"\","+(v[2].empty() ? "false" : "true")+"]");
+		});
+		log_i(MODULE, "%s %s %s %s %s", cs(m_names[packet.sender]),
+				v[2].empty() ? "revokes" : "grants", cs(v[1]),
+				v[2].empty() ? "from" : "to", cs(v[0]));
+		if(r != "\"\"")
+			log_w(MODULE, "set_world_priv: %s", cs(r));
+		send_world_privs(packet.sender);
+	}
+
 	void show_world_to(network::PeerInfo::Id peer)
 	{
 		// Once per peer: files_transmitted comes again after every batch
@@ -627,7 +656,7 @@ struct Module: public interface::Module
 		send_account(peer);
 		// Placed only: in the world once the client has it loaded
 		// ([JOIN_WHEN_LOADED]); the player is the module's from here
-		const bool admin = m_public && m_access.is_admin(peer);
+		const bool admin = m_access.is_admin(peer);
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->join_player(player_name_of(peer), peer, admin);
 		});

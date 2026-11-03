@@ -4,7 +4,8 @@
 # ci
 # cost: 36s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [FLY_MODES]: the three modes as official has them, driven. A devtest
-# world (the singleplayer holds every privilege): K, then Space held for
+# world (the owner's account an admin, which the fixture takes away so
+# that a privilege can go): K, then Space held for
 # two seconds, and the player is up in the air; the fixture then revokes
 # fly, the client's chat has "Fly mode enabled (note: no 'fly' privilege)"
 # on the next K, and the player is down again within a few seconds (the
@@ -32,7 +33,11 @@ cat > "$out/fixture.lua" <<'LUA'
 -- so: what the client waits for before it leaves
 core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
-	core.settings:set("singleplayer", "false")
+	-- The owner is the accounts' admin, who has every privilege
+	-- (bootstrap.lua); the session says so after the join callbacks
+	core.after(0, function()
+		core.__set_admin(name, false)
+	end)
 	local privs = core.get_player_privs(name)
 	privs.fly = true; privs.fast = true; privs.noclip = true; privs.interact = true
 	core.set_player_privs(name, privs)
