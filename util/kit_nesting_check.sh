@@ -178,7 +178,6 @@ frames 3
 click Button "Positioned (*"
 frames 3
 click Button "select 4"
-wait_log 5000 kit editor: switch parent of 5 to 4
 EOF
 	n=$((n + 1))
 	printf 'wait_log 10000 entities, %d to undo\n' "$n"
@@ -223,6 +222,7 @@ echo "ok: a zone under a mover triggers where the mover takes it"
 want "$t/boss1.log" "kit editor: refused: parent: parent: entity 5 is under it" \
 	"kit editor: refused: parent: parent: entity 3 has no position" \
 	"kit editor: refused: parent: parent: no entity 999"
+want "$t/boss1.log" "kit editor: un-parent 5" "kit editor: switch parent of 5 to 4"
 want "$s" "An edit by kitboss: put 5 under the scene world" \
 	"An edit by kitboss: put 5 under 4" "An edit by kitboss: deleted 9 and 3 under it"
 db=$(find "$t/user" -name save.sqlite -path "*/saves/world/*" | head -1)
@@ -311,7 +311,7 @@ frames 5
 mouse_pos 512 350
 frames 2
 mouse_click left
-wait_log 5000 kit editor: switch parent of 60 to 9
+frames 3
 sync 5000
 quit
 EOF
@@ -350,6 +350,7 @@ for i, (p, yaw) in sorted(pv.items()):
     print("  %d previewed at %s yaw %g, put there" % (i, ",".join("%g" % v for v in p), yaw % 360))
 PY
 echo "ok: a group turned by the knob is previewed where the server puts it, about the group's middle, with what is under it"
+want "$t/boss2.log" "kit editor: switch parent of 60 to 9"
 want "$t/srv2.log" "An edit by kitboss: put 60 under 9"
 echo "ok: Switch parent: the parent clicked in the 2D plan"
 
