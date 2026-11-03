@@ -323,20 +323,25 @@ echo "ok: state over a restart, a save of bare type names migrated, the compiled
 # the server did, and in rccpp_build/wasm/ (an archive's cache/; what a
 # boxed server reads as built before, -r) it serves a server with no wasm
 # toolchain
-h=$(grep -ao "kit: \(built box/ in [0-9]* ms\|box/ is built (cache hit)\|box/ is in the shared build\): [^ ]*\.wasm" "$s" |
-	sed 's|.*/\([0-9a-f]\{40\}\)\.wasm|\1|' | tail -1)
-[ -n "$h" ] || fail "no name of the box's .wasm in $s"
+# The box's name where the server took it: its app's cache, or the shared
+# build make's prebuild filled ([BUILTIN_PREBUILD]; the tree's cache/,
+# never moved here: the server below reads -r's as its shared build)
+own=$(grep -ao "kit: \(built box/ in [0-9]* ms\|box/ is built (cache hit)\|box/ is in the shared build\): [^ ]*\.wasm" "$s" |
+	sed 's|.*: ||' | tail -1)
+h=$(basename "$own" .wasm)
+[ -n "$own" ] || fail "no name of the box's .wasm in $s"
 em=${EMSDK:-$HOME/emsdk}/upstream/bin
 python3 -I "$here/util/prebuild_wasm.py" "$(command -v clang || echo "$em/clang")" \
 		"$(command -v wasm-ld || echo "$em/wasm-ld")" "$here/src/interface" \
 		"$t/pre" "$here/builtin/kit" > "$t/pre.log" 2>&1 ||
 	fail "prebuild_wasm.py failed ($t/pre.log)"
 [ -f "$t/pre/$h.wasm" ] || fail "prebuild_wasm.py did not name it $h ($t/pre.log)"
-own=$BUILDAT_CACHE_PATH/apps/sample_kit/rccpp_build/wasm/$h.wasm
 pre=$t/rccpp_build/wasm/$h.wasm
 [ -f "$own" ] || fail "the box is not at $own"
+own=$BUILDAT_CACHE_PATH/apps/sample_kit/rccpp_build/wasm/$h.wasm
 mkdir -p "$(dirname "$pre")" "$t/home"
-mv "$own" "$t/own.wasm" && cp "$t/pre/$h.wasm" "$pre" || fail "could not place $pre"
+{ [ ! -f "$own" ] || mv "$own" "$t/own.wasm"; } && cp "$t/pre/$h.wasm" "$pre" ||
+	fail "could not place $pre"
 # No toolchain on PATH either: PATH's programs but clang and wasm-ld (a
 # system clang, /usr/bin's, would be found)
 mkdir -p "$t/path"
@@ -355,7 +360,7 @@ start_server "$t/srv3.log" "sample_kit: at start the counter is|Kit is not hoste
 CHECK_PIDS+=($SERVER_PID)
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
-mv "$t/own.wasm" "$own"
+[ ! -f "$t/own.wasm" ] || mv "$t/own.wasm" "$own"
 grep -a "No wasm toolchain\|kit: box/\|sample_kit: at start" "$t/srv3.log" | sed "s/^.* [IEW] /  /" | cut -c 1-140
 want "$t/srv3.log" "No wasm toolchain" "kit: box/ is in the shared build" \
 	"sample_kit: at start the counter is 4" "2 entities made in the round"
