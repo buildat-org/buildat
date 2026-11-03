@@ -40,6 +40,8 @@ v=$(got -o lighting=auto); case "$v" in *", auto true") ;;
 	*) fail "-o lighting=auto: $v";; esac
 echo "ok: lighting_auto true unset and with auto, false with cartoon"
 
+# The Lighting row's dropdown: the "▼" nearest its place (a row holds
+# 38 px; rows added above it move it -- 2026-11-03 the cache rows did)
 cat > "$t/e.cmds" <<C
 wait_log_any 60000 rows in
 delay 500
@@ -49,7 +51,7 @@ keypress Return
 wait_log 5000 Engine settings shown
 delay 800
 screenshot $t/cartoon.png
-click DropDownList "▼" 705 507
+click DropDownList "▼" 705 488
 wait_log 5000 dropdown_
 delay 300
 screenshot $t/list.png
