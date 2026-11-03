@@ -630,14 +630,17 @@ local function watch_near(dt)
 				(c0.z + dz) * sz.z
 		-- and within the mesh queue's reach (voxelworld.undrawn_around()'s
 		-- rule): at a view range of 96 a corner of the 5^3 is past it, never
-		-- meshed, and the placing never said it was drawn
+		-- meshed, and the placing never said it was drawn. [SOFT_GL_CARTOON]
+		-- 1.1 of the far plane, not the queue's 1.2: at the light profile's
+		-- 64 a chunk 76.6 from the eye sat at the queue's f 1.01, never
+		-- meshed (the queue's place a step behind); past the fog both
 		local ex, ey, ez = x0 + sz.x / 2 - eye.x, y0 + sz.y / 2 - eye.y,
 				z0 + sz.z / 2 - eye.z
 		if y0 >= box.y0 and y0 + sz.y - 1 <= box.y1 and
 				x0 >= -box.half and x0 + sz.x <= box.half and
 				z0 >= -box.half and z0 + sz.z <= box.half and
 				math.sqrt(ex * ex + ey * ey + ez * ez) <=
-						voxelworld.camera_far_clip * 1.2 then
+						voxelworld.camera_far_clip * 1.1 then
 			total = total + 1
 			if not voxelworld.is_chunk_drawn(buildat.Vector3(c0.x + dx,
 					c0.y + dy, c0.z + dz)) then
