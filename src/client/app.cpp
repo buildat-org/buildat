@@ -432,6 +432,14 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			opt->graphics.web_address_bar = value;
 			continue;
 		}
+		if(key == "lighting"){
+			if(value != "game" && value != "cartoon"){
+				*error = "lighting: game or cartoon";
+				return false;
+			}
+			opt->lighting = value;
+			continue;
+		}
 		if(key == "screen_orientation"){
 			if(value != "auto" && value != "landscape" && value != "portrait"){
 				*error = "screen_orientation: auto, landscape or portrait";
@@ -622,6 +630,10 @@ static void check_parse_preference_options()
 			!app::parse_preference_options("fov.skeldat=default", &o, &err) ||
 			o.fov.count("skeldat"))
 		throw Exception("parse_preference_options: fov.<app>'s values");
+	if(app::parse_preference_options("lighting=physical", &o, &err) ||
+			!app::parse_preference_options("lighting=cartoon", &o, &err) ||
+			o.lighting != "cartoon")
+		throw Exception("parse_preference_options: lighting's choices");
 	if(app::parse_preference_options("nonesuch=1", &o, &err))
 		throw Exception("parse_preference_options: took an unknown key");
 }
@@ -790,6 +802,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jll = o.get("log_level");
 	const json::Value &jsl = o.get("server_log_level");
 	const json::Value &jps = o.get("page_size");
+	const json::Value &jlt = o.get("lighting");
 	// Through the same parser as -o, so that the range checks are written
 	// once and a hand-edited file is refused the same way a flag is
 	ss_ items;
@@ -846,6 +859,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	if(jwa.is_string() && !jwa.as_string().empty())
 		items += ss_()+(items.empty()?"":",")+"web_address_bar="+
 				jwa.as_string();
+	if(jlt.is_string() && !jlt.as_string().empty())
+		items += ss_()+(items.empty()?"":",")+"lighting="+jlt.as_string();
 	if(jso.is_string())
 		items += ss_()+(items.empty()?"":",")+"screen_orientation="+
 				jso.as_string();
@@ -939,6 +954,8 @@ static void save_preferences(const app::Options &opt)
 	o.set("launch_ui", opt.launch_ui);
 	o.set("default_username", opt.default_username);
 	o.set("page_size", opt.page_size);
+	if(!opt.lighting.empty())
+		o.set("lighting", opt.lighting);
 	if(!opt.fov.empty()){
 		json::Value f = json::object();
 		for(auto &kv : opt.fov)
@@ -946,6 +963,47 @@ static void save_preferences(const app::Options &opt)
 		o.set("fov", f);
 	}
 	o.save_file(preferences_path().c_str());
+}
+
+// **Whether the GPU is the CPU** (SwiftShader, llvmpipe, softpipe,
+// Microsoft's basic renderer): by the GL renderer's name natively and by
+// WebGL's unmasked one on the web (Chrome gives it; a browser that does not
+// reads as a GPU). Asked once a GL context is up; until then false and
+// asked again.
+static bool soft_gl()
+{
+	static int known = -1;
+	if(known >= 0)
+		return known;
+#ifdef __EMSCRIPTEN__
+	known = EM_ASM_INT({
+		try {
+			var gl = document.createElement('canvas').getContext('webgl');
+			var info = gl && gl.getExtension('WEBGL_debug_renderer_info');
+			var name = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : '';
+			var lose = gl && gl.getExtension('WEBGL_lose_context');
+			if(lose)
+				lose.loseContext();
+			return /swiftshader|llvmpipe|softpipe|basic render|software/i.test(name)
+					? 1 : 0;
+		} catch(e){}
+		return 0;
+	});
+#else
+	typedef const unsigned char *(*GetString)(unsigned int);
+	GetString gs = (GetString)SDL_GL_GetProcAddress("glGetString");
+	const char *r = gs ? (const char*)gs(0x1F01) : nullptr; // GL_RENDERER
+	if(!r)
+		return false;
+	ss_ name = r;
+	std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+	known = 0;
+	for(const char *w : {"swiftshader", "llvmpipe", "softpipe",
+			"basic render", "software"})
+		if(name.find(w) != ss_::npos)
+			known = 1;
+#endif
+	return known;
 }
 
 // What render_scale "auto" is: natively 1, the bypass
@@ -964,16 +1022,8 @@ static float auto_render_scale()
 				(window.innerWidth * window.innerHeight * dpr * dpr)));
 		if(Math.max(screen.width, screen.height) * dpr > 3000)
 			s = Math.min(s, 0.5);
-		try {
-			var gl = document.createElement('canvas').getContext('webgl');
-			var info = gl && gl.getExtension('WEBGL_debug_renderer_info');
-			var name = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : '';
-			if(/swiftshader|llvmpipe|softpipe|basic render|software/i.test(name))
-				s = Math.min(s, 0.5);
-			var lose = gl && gl.getExtension('WEBGL_lose_context');
-			if(lose)
-				lose.loseContext();
-		} catch(e){}
+		if($0)
+			s = Math.min(s, 0.5);
 		// (no [a, b] here: a comma outside parentheses splits the macro)
 		var steps = '1 0.75 0.67 0.5 0.33 0.25'.split(' ');
 		for(var i = 0; i < steps.length; i++){
@@ -981,7 +1031,7 @@ static float auto_render_scale()
 				return +steps[i];
 		}
 		return 0.25;
-	});
+	}, soft_gl());
 #else
 	return 1.0f;
 #endif

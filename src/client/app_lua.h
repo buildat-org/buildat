@@ -1858,7 +1858,7 @@
 		static const char *names[] = {"render_scale", "vsync", "max_fps",
 				"multisampling", "sound_volume_db", "sound_mute", "ui_size", "lan_discovery",
 				"launch_ui",
-				"default_username", "page_size",
+				"default_username", "page_size", "lighting",
 #ifdef __EMSCRIPTEN__
 				// Only where it does something
 				"web_idle_fps",
@@ -1965,6 +1965,10 @@
 			lua_pushstring(L, o.default_username.c_str());
 		else if(name == "page_size")
 			lua_pushinteger(L, o.page_size);
+		// Unset is the device's: cartoon on software GL
+		else if(name == "lighting")
+			lua_pushstring(L, !o.lighting.empty() ? o.lighting.c_str() :
+					soft_gl() ? "cartoon" : "game");
 		else if(name == "log_level")
 			lua_pushinteger(L, o.log_level);
 		else if(name == "server_log_level")

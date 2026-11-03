@@ -30,6 +30,9 @@
 #      through at full cover, all at a half and under.
 #   7. [KIT_PHYS_SHADOWS] a plate (kit/part) over the ground: its shadow
 #      under physical, none under cartoon nor under physical's full cover.
+#   8. [KIT_FORCE_CARTOON] a second client with the preference lighting
+#      cartoon draws the composition's physical as cartoon. The first runs
+#      with lighting game (software GL's default is cartoon).
 # The shots are kept with KEEP_TMP=1; look at them.
 #   util/kit_lighting_check.sh
 #   REF=1 util/kit_lighting_check.sh   writes util/kit_lighting_ref.txt
@@ -58,7 +61,7 @@ client() # <name>: its commands in $t/<name>.cmds
 	sed -i "s|@T@|$t|g" "$t/$1.cmds"
 	run_client 60 "$t/$1.log" timeout 420 bin/buildat -C "$t/client_cache" \
 		-D "$t/cu_$1" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
-		-c @"$t/$1.cmds" ||
+		-o "lighting=${LIGHTING:-game}" -c @"$t/$1.cmds" ||
 		fail "client $1 failed ($t/$1.log, $t/srv.log)"
 }
 want() # <log> <text>...
@@ -266,6 +269,9 @@ EOF
 		ep weather '"clear"'
 		skyn "clouds 0.00 at 120, wind 0.0 toward 180; clear 1.00"
 		ep weather_fade 1
+		# 8. Left physical for the second client
+		ep lighting '"physical"'
+		echo "wait_log 10000 kit: lighting physical"
 		# The signals in play: set_clouds the base, set_weather the
 		# modifier, each apart (the gloom outlasts the rain)
 		echo 'event kit_edit {"op": "play"}'
@@ -293,6 +299,18 @@ code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv.log" | head -1)
 [ -n "$code" ] || fail "no setup code ($t/srv.log)"
 BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
 	BUILDAT_JOIN_ADMIN="setting open_registration on" client boss
+if [ -z "${REF:-}" ]; then
+	# 8. The composition physical, this client's preference cartoon
+	cat > "$t/force.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 30000 kit: lighting physical drawn as cartoon (the client's preference)
+wait_log_any 30000 kit: sky: cartoon
+delay 3000
+screenshot @T@/force_cartoon.png
+quit
+EOF
+	LIGHTING=cartoon client force
+fi
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 c=$t/boss.log
@@ -424,5 +442,12 @@ so=$(shade "$t/phys_plate_overcast.png")
 awk "BEGIN{exit !($sp < 0.6 && $sc > 0.85 && $so > 0.85)}" ||
 	fail "the plate's shadow: physical $sp, cartoon $sc, physical overcast $so (the middle over the sides)"
 echo "ok: the plate's shadow under physical ($sp of the open ground), none under cartoon ($sc) nor physical's full cover ($so)"
-echo "PASS: lighting: cartoon today's look, physical metered, the sky by the hour and its switches, the clouds, the sky light in caves, the weather a modifier that fades, the cover dimming the sun, physical's shadows"
+# 8. The preference: physical drawn as cartoon on that client alone
+f=$t/force.log
+want "$f" "kit: lighting physical drawn as cartoon (the client's preference)" \
+	"kit: sky: cartoon"
+! grep -aqF "kit: lighting physical (HDR" "$f" ||
+	fail "the client with lighting cartoon drew physical ($f)"
+echo "ok: the preference lighting cartoon draws the composition's physical as cartoon"
+echo "PASS: lighting: cartoon today's look, physical metered, the sky by the hour and its switches, the clouds, the sky light in caves, the weather a modifier that fades, the cover dimming the sun, physical's shadows, the client's force cartoon"
 # vim: set noet ts=4 sw=4:

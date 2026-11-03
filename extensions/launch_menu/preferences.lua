@@ -103,6 +103,16 @@ local PREFERENCES = {
 		label = "Mute",
 		values = {false, true},
 	},
+	-- [KIT_FORCE_CARTOON] Kit's physical lighting drawn as cartoon on this
+	-- client, a weak device's; unset it is cartoon on software GL
+	{
+		name = "lighting",
+		label = "Lighting",
+		values = {"game", "cartoon"},
+		show = function(v)
+			return v == "game" and "as the game sets" or "always cartoon"
+		end,
+	},
 	-- The UI scale; "auto" follows the window
 	{
 		name = "ui_size",
@@ -679,7 +689,7 @@ end
 local GAME_ROWS = {
 	{"Sound", {"sound_volume_db", "sound_mute"}},
 	{"Video", {"render_scale", "max_fps", "vsync", "multisampling",
-		"ui_size", "page_size", "web_address_bar", "screen_orientation", "web_idle_fps"}},
+		"lighting", "ui_size", "page_size", "web_address_bar", "screen_orientation", "web_idle_fps"}},
 }
 local game = nil
 

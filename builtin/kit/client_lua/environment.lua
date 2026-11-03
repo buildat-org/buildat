@@ -129,9 +129,21 @@ function M.lit_viewport(vp, role, finish, node)
 	end
 end
 
--- The lighting changed: the views' paths, HDR, the voxels' techniques
+-- The lighting changed: the views' paths, HDR, the voxels' techniques.
+-- [KIT_FORCE_CARTOON] physical drawn as cartoon where the client's
+-- preference says so (a weak device; unset, software GL)
 local function set_lighting(mode)
 	mode = mode == "physical" and "physical" or "cartoon"
+	local forced = mode == "physical" and
+			buildat.get_preference("lighting") == "cartoon"
+	if forced ~= (LIT.forced or false) then
+		LIT.forced = forced
+		if forced then
+			log:info("kit: lighting physical drawn as cartoon (the" ..
+					" client's preference)")
+		end
+	end
+	mode = forced and "cartoon" or mode
 	if mode == LIT.mode then
 		return false
 	end
@@ -801,6 +813,16 @@ local function env_update(dt)
 	local d = env.d
 	if not d then
 		return
+	end
+	-- [KIT_FORCE_CARTOON] the preference changed in the settings
+	-- simplified: looked at once a second, not told
+	LIT.pref_t = (LIT.pref_t or 0) - dt
+	if LIT.pref_t <= 0 then
+		LIT.pref_t = 1
+		if set_lighting(d.lighting) then
+			fade_to(d, true)
+			env_light()
+		end
 	end
 	fade_update(dt)
 	gate_update(dt)

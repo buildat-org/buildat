@@ -132,6 +132,11 @@ namespace app
 		// degrees of the app's most common camera, 30 to 140; an app
 		// unset here has its own default (buildat.declare_fov)
 		std::map<ss_, int> fov;
+		// **Kit's lighting** ([KIT_FORCE_CARTOON], user 2026-11-03): "game"
+		// draws what the game sets, "cartoon" draws its physical lighting as
+		// cartoon on this client (a weak device); empty is the device's
+		// default, cartoon on software GL (soft_gl())
+		ss_ lighting;
 	};
 
 	// Parses "k=v[,k=v...]" on top of whatever *opt already holds. Returns
