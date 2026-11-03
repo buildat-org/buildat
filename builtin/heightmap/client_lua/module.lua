@@ -26,6 +26,9 @@
 --                              map of more materials than listed repeats
 --                              the last
 --   M.detail_metres            how many metres a ground texture spans
+--   M.set_technique(name)      the ground's technique, now and for a
+--                              build after (nil: HeightmapBlend.xml);
+--                              HeightmapBlendLinear.xml in an HDR frame
 --   M.filter                   the ground textures' filter mode
 --                              (magic.FILTER_*; nil: Urho3D's default),
 --                              before building: FILTER_NEAREST for pixel
@@ -47,6 +50,15 @@ M.detail_metres = 4
 M.node = nil
 M.terrain = nil
 M.version = 0
+local technique = nil
+
+function M.set_technique(name)
+	technique = name
+	if M.terrain then
+		M.terrain.material:SetTechnique(0, magic.cache:GetResource(
+				"Technique", technique or "heightmap/HeightmapBlend.xml"))
+	end
+end
 
 -- {chunks_x, chunks_z, chunk_size, cell, base_y, step, materials, planes,
 -- sx, sz}
@@ -199,7 +211,7 @@ local function create()
 	M.terrain:SetCastShadows(true)
 	local material = magic.Material:new()
 	material:SetTechnique(0, magic.cache:GetResource("Technique",
-			"heightmap/HeightmapBlend.xml"))
+			technique or "heightmap/HeightmapBlend.xml"))
 	for p = 1, info.planes do
 		weight_texs[p] = magic.Texture2D:new()
 		weight_texs[p]:SetData(weight_imgs[p])

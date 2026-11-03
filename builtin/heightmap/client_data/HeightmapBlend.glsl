@@ -2,6 +2,9 @@
 // TerrainBlend.glsl with up to 16 materials instead of three -- up to four
 // RGBA weight maps and the ground textures in one texture array. The
 // lighting is TerrainBlend's, unchanged.
+// LINEARALBEDO ([KIT_PHYS_HEIGHTMAP_PALE], HeightmapBlendLinear.xml): the
+// frame is HDR, lit in linear, so the ground's albedo is decoded here, as
+// Kit's KitVoxel.glsl's KITLINEAR does. simplified: 2.2, not the sRGB curve.
 #include "Uniforms.glsl"
 #include "Samplers.glsl"
 #include "Transform.glsl"
@@ -155,6 +158,9 @@ void PS()
         AddPlane(texture2D(sWeightMap3, vTexCoord), 12.0, dx, dy, sum, total);
     vec4 diffColor = cMatDiffColor * (total > 0.0 ? sum / total :
             textureGrad(sDetailArray4, vec3(vDetailTexCoord, 0.0), dx, dy));
+    #ifdef LINEARALBEDO
+        diffColor.rgb = pow(diffColor.rgb, vec3(2.2));
+    #endif
 
     // Get material specular albedo
     vec3 specColor = cMatSpecColor.rgb;

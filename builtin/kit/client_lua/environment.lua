@@ -116,6 +116,13 @@ local function lit_path(view)
 	LIT.grey = nil
 end
 
+-- [KIT_PHYS_HEIGHTMAP_PALE] A heightmap's ground decoded to linear under
+-- physical, as the voxels are
+local function ground_look()
+	require("buildat/module/heightmap").set_technique(M.physical() and
+			"heightmap/HeightmapBlendLinear.xml" or nil)
+end
+
 function M.lit_viewport(vp, role, finish, node)
 	local view = {vp = vp, base = vp.renderPath, finish = finish}
 	LIT.views[role] = view
@@ -124,6 +131,7 @@ function M.lit_viewport(vp, role, finish, node)
 		magic.renderer.HDRRendering = M.physical()
 	end
 	lit_path(view)
+	ground_look()
 	if LIT.relight then
 		LIT.relight()
 	end
@@ -151,6 +159,7 @@ local function set_lighting(mode)
 	local phys = M.physical()
 	log:info("kit: lighting " .. mode .. (phys and " (HDR, metered)" or
 			LIT.views.play and "" or " (the app draws its own)"))
+	ground_look()
 	if not LIT.views.play then
 		return true
 	end

@@ -272,6 +272,25 @@ EOF
 		# 8. Left physical for the second client
 		ep lighting '"physical"'
 		echo "wait_log 10000 kit: lighting physical"
+		# 9. Physical's water over the flat ground (the sea up to 2), and
+		# the ground as voxels and as a heightmap (the same grass), the
+		# sky light off (the heightmap has none)
+		w() { edit "{\"op\": \"set\", \"id\": 3, \"comp\": 0, \"param\": \"$1\", \"value\": $2}"; }
+		w sky_light false
+		echo "wait_log 10000 kit: sky light off"
+		LOW="20 6 20 32 0 32"
+		w sea_level 2
+		echo "wait_log 30000 kit: World: generated again"
+		echo "idle 30000"
+		shot phys_water "$LOW"
+		w sea_level 0
+		echo "wait_log 30000 kit: World: generated again"
+		echo "idle 30000"
+		shot phys_ground_voxels "$LOW"
+		w surface '"heightmap"'
+		echo "wait_log_any 60000 heightmap: terrain built"
+		echo "idle 30000"
+		shot phys_ground_heightmap "$LOW"
 		# The signals in play: set_clouds the base, set_weather the
 		# modifier, each apart (the gloom outlasts the rain)
 		echo 'event kit_edit {"op": "play"}'
@@ -453,5 +472,24 @@ want "$f" "kit: lighting physical drawn as cartoon (the client's preference)" \
 ! grep -aqF "kit: lighting physical (HDR" "$f" ||
 	fail "the client with lighting cartoon drew physical ($f)"
 echo "ok: the preference lighting cartoon draws the composition's physical as cartoon"
-echo "PASS: lighting: cartoon today's look, physical metered, the sky by the hour and its switches, the clouds, the sky light in caves, the weather a modifier that fades, the cover dimming the sun, physical's shadows, the client's force cartoon"
+# 9. Physical's water blue (its alpha linear; it read pink), the
+# heightmap's ground at the voxels' level (decoded to linear; it read pale):
+# the frame's lower right, off the panels
+low() # <png>: "r g b" over columns 6-15, rows 7-9
+{
+	cells "$1" | python3 -I -c "
+import sys
+v = [list(map(int, l.split())) for l in sys.stdin]
+r = [v[y * 16 + x] for y in (7, 8, 9) for x in range(6, 16)]
+print(' '.join('%.0f' % (sum(c[i] for c in r) / len(r)) for i in range(3)))"
+}
+read wr wg wb <<<"$(low "$t/phys_water.png")"
+awk "BEGIN{exit !($wb > $wr * 1.3 && $wb > $wg * 1.2)}" ||
+	fail "physical's water not blue: $wr $wg $wb"
+read vr vg vb <<<"$(low "$t/phys_ground_voxels.png")"
+read hr hg hb <<<"$(low "$t/phys_ground_heightmap.png")"
+awk "BEGIN{v = $vr + $vg + $vb; h = $hr + $hg + $hb; exit !(h > v * 0.85 && h < v * 1.15)}" ||
+	fail "physical's heightmap ground ($hr $hg $hb) not the voxels' ($vr $vg $vb)"
+echo "ok: physical's water blue ($wr $wg $wb), its heightmap ground ($hr $hg $hb) the voxels' ($vr $vg $vb)"
+echo "PASS: lighting: cartoon today's look, physical metered, the sky by the hour and its switches, the clouds, the sky light in caves, the weather a modifier that fades, the cover dimming the sun, physical's shadows, the client's force cartoon, physical's water and heightmap ground"
 # vim: set noet ts=4 sw=4:
