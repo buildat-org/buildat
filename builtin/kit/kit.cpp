@@ -1547,6 +1547,26 @@ struct Module: public interface::Module, public Interface
 			ps.set("use", u);
 			t.decl.set("params", ps);
 		}
+		// [KIT_OWN_LOOK] Whether its own look shows in play, the engine's on
+		// every type with a look (show_of() marks it hidden; the clients
+		// draw it faded in edit mode). Off hides only the look: its
+		// collision is its own (a mover's box still carries players while
+		// solid), the entities under it are drawn as ever
+		if(t.decl.get("look").is_object()){
+			json::Value ps = t.decl.get("params");
+			if(!ps.is_object())
+				ps = json::object();
+			if(!ps.get("own_look").is_undefined()){
+				why = name+": \"own_look\" is Kit's parameter on a type with "
+						"a look";
+				return false;
+			}
+			json::Value o = json::object();
+			o.set("type", "bool");
+			o.set("default", true);
+			ps.set("own_look", o);
+			t.decl.set("params", ps);
+		}
 		t.owns_voxel = t.decl.get("owns_voxel").is_true();
 		// [KIT_INPUT_ACTIONS] {{name =, key =, label =}...}: strings, each
 		// a value or "param:<name>"
@@ -2271,8 +2291,10 @@ struct Module: public interface::Module, public Interface
 					in.params.set(it.key(), (*it).get("default"));
 			if(pj.is_object())
 				for(json::Iterator it(pj); it; ++it){
-					// (use: Kit's, gone with a type no longer usable)
-					if((object || it.key() == "use") &&
+					// (use: Kit's, gone with a type no longer usable; own_look
+					// with one that has no look)
+					if((object || it.key() == "use" ||
+							it.key() == "own_look") &&
 							!decl.get(it.key()).is_object())
 						continue;
 					if(!decl.get(it.key()).is_object()){
@@ -7430,8 +7452,13 @@ struct Module: public interface::Module, public Interface
 		std::set<ss_> shared;
 		for(const Instance &in : e.comps){
 			const json::Value &d = m_types[in.type].decl;
-			if(show.get("look").is_undefined() && !d.get("look").is_undefined())
-				show.set("look", look_of(in, d.get("look")));
+			if(show.get("look").is_undefined() && !d.get("look").is_undefined()){
+				json::Value l = look_of(in, d.get("look"));
+				// [KIT_OWN_LOOK] hidden in play
+				if(in.params.get("own_look").is_false())
+					l.set("hidden", true);
+				show.set("look", l);
+			}
 			if(show.get("hud").is_undefined() && !d.get("hud").is_undefined())
 				show.set("hud", d.get("hud"));
 			// [KIT_UI_COMPONENTS] Its UI, "param:<name>" as a look's

@@ -220,7 +220,7 @@ local function drop_look(n)
 	if n.look then
 		n.look:Remove()
 	end
-	n.wear_wanted = nil
+	n.wear_wanted, n.ghost, n.hidden = nil, nil, nil
 	n.look, n.hinge, n.body, n.mat, n.text, n.solid, n.box, n.on = nil, nil,
 			nil, nil, nil, nil, nil, nil
 end
@@ -717,6 +717,43 @@ local function draw_look(id, n, look)
 			(look.shape == "wedge" and ", a wedge" or ""))
 end
 
+-- [KIT_OWN_LOOK] A look hidden in play (its type's own_look off): not
+-- drawn there (its text neither; its collision kept); in edit mode a
+-- faded box of its size in its place. simplified: a box (a sphere's a
+-- sphere) whatever its shape or worn material
+local function own_look(id, n, look)
+	local hidden = look.hidden == true
+	if not hidden and not n.ghost then
+		return
+	end
+	local ghost = hidden and E.editing
+	local key = tostring(hidden) .. tostring(ghost)
+	if key ~= n.hidden then
+		n.hidden = key
+		log:info("kit: entity " .. id .. (not hidden and " shown" or ghost and
+				" drawn faded (own look off)" or " not drawn (own look off)"))
+	end
+	n.body.enabled = not hidden and n.box.color ~= "none"
+	if n.text then
+		n.text_node.enabled = not hidden or ghost
+	end
+	if ghost and not n.ghost then
+		n.ghost = n.hinge:CreateChild("Ghost")
+		local m = n.ghost:CreateComponent("StaticModel")
+		m.model = magic.cache:GetResource("Model", "Models/" ..
+				(look.shape == "sphere" and "Sphere" or "Box") .. ".mdl")
+		m.material = material("glass")
+		local c = color(n.box.color, magic.Color(0.8, 0.8, 0.8))
+		m.material:SetShaderParameter("MatDiffColor",
+				magic.Color(c.r, c.g, c.b, 0.45))
+	end
+	if n.ghost then
+		n.ghost.enabled = ghost
+		n.ghost.position = v3(n.box.off)
+		n.ghost.scale = v3(n.box.size)
+	end
+end
+
 -- The entity as its client parts have it
 local function entity_view(id, n)
 	local e = {id = id, node = n.node, state = {}}
@@ -788,6 +825,7 @@ local function update_play(_, data)
 				drop_look(n)
 			end
 			draw_look(id, n, show.look)
+			own_look(id, n, show.look)
 			-- A slide under way ([KIT] stage 4l)
 			if n.slide_to and n.slide_at and n.slide_speed and
 					(n.slide_to - n.slide_at):Length() > 1e-5 then

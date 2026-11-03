@@ -128,6 +128,12 @@ namespace interface
 //                               ([KIT] stage 4c; before, voxels they
 //                               owned: a save's are migrated, the cells
 //                               they owned cleared)
+//                               Kit adds its parameter own_look (on by
+//                               default; [KIT_OWN_LOOK]): off, the look
+//                               is not drawn in play (faded in edit
+//                               mode), its collision and the entities
+//                               under it as ever; a type's own
+//                               "own_look" parameter is refused
 //   hud = "<shared state key>"  -- that state on every client's screen
 //   ui = {kind = "text"|"bar"|"button"|"panel", anchor =, x =, y =,
 //         panel =, ...}  -- ([KIT_UI_COMPONENTS], stage 4m) drawn on the

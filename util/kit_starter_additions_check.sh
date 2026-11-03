@@ -16,6 +16,9 @@
 # sign; the sign's board, the mover and a wedge kit/part (21) in the
 # stone voxel's texture
 # ([KIT_LOOK_MATERIAL]). Read back from the save: the link's "visible".
+# [KIT_OWN_LOOK] A kit/button (22) under M, M's own_look off: M drawn
+# faded in edit mode, not in play (solid still), the button drawn
+# (own_look_edit.png, own_look.png).
 #
 #   util/kit_starter_additions_check.sh
 set -u
@@ -54,7 +57,7 @@ EOF
 	place '{"op": "place", "type": "kit/sign", "pos": [0, 2, 6]}'
 	# [KIT_SIGN_WRAP] long enough to wrap on its board and be made smaller
 	setp 18 text '"Out: {value}, a line long enough to run past the board unless it is wrapped to its width"'
-	place '{"op": "place", "type": "kit/mover", "pos": [4, 0, 4]}'
+	place '{"op": "place", "type": "kit/mover", "pos": [4, 1, 4]}'
 	setp 19 time 0.5
 	# [KIT_LOOK_MATERIAL] The sign's board and the mover in voxel materials
 	setp 18 material '"stone"'
@@ -72,7 +75,14 @@ EOF
 	link 17 out 18 value
 	link 17 on 19 go
 	link 20 entered 17 b 1
+	# [KIT_OWN_LOOK] A kit/button B (22) under M, M's own look off: a
+	# moving button
+	place '{"op": "place", "type": "kit/button", "pos": [4, 2, 4], "parent": 19}'
+	setp 19 own_look false
 	cat <<'EOF'
+wait_log_any 10000 kit: entity 19 drawn faded (own look off)
+frames 5
+screenshot @T@/own_look_edit.png
 event kit_select 17
 wait_log_any 5000 kit editor: selected 17
 wait_log 12000 kit editor: entity 17: Cost:
@@ -82,6 +92,7 @@ click Button "Run"
 wait_log 10000 kit editor: the server is Running (by kitboss)
 keypress F6
 wait_log 10000 kit editor: edit mode off
+wait_log_any 10000 kit: entity 19 not drawn (own look off)
 wait_log_any 10000 kit: link 3>17 drawn in play
 keydown W
 delay 400
@@ -93,6 +104,7 @@ wait_log_any 10000 kit: link 3>17 lit in play
 wait_log_any 10000 kit: entity 18 shows "Out: true,
 wait_log_any 10000 kit: entity 19 slid to
 frames 10
+screenshot @T@/own_look.png
 look_dir 0 -0.15 1
 frames 10
 screenshot @T@/sign.png
@@ -133,6 +145,13 @@ grep -aq "kit/mover 19: arrived out" "$s" ||
 	fail "the mover did not signal arrived ($s)"
 grep -aq "kit: entity 19 slid to 0,2,0" "$b" ||
 	fail "the client did not slide the mover 2 up ($b)"
+# [KIT_OWN_LOOK] M not drawn in play, its collision kept; B under it drawn
+grep -aqE "kit: entity 19 drawn .*, solid" "$b" ||
+	fail "the mover's box is not solid ($b)"
+grep -aq "kit: entity 22 drawn" "$b" ||
+	fail "the button under the mover not drawn ($b)"
+grep -aq "kit: entity 22 \(not drawn\|drawn faded\)" "$b" &&
+	fail "the button under the mover hidden ($b)"
 grep -aqE "kit editor: entity 17: Cost(s|:)" "$b" ||
 	fail "the inspector did not show the cost ($b)"
 [ -s "$t/sign.png" ] || fail "no screenshot of the sign ($t)"
