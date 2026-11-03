@@ -120,7 +120,7 @@ EOF
 	edit '{"op": "set_voxel", "pos": [3, 1, 2], "voxel": "kitboss/ore"}'
 	for v in '2, 1, 3] kit/stone' '4, 1, 2] kit/stone' '5, 1, 2] kit/dirt' \
 			'6, 1, 2] kit/stone'; do
-		edit "{\"op\": \"set_voxel\", \"pos\": [${v% *}, \"voxel\": \"${v#* }\"}"
+		edit "{\"op\": \"set_voxel\", \"pos\": [${v% *}, \"voxel\": \"${v##* }\"}"
 	done
 	cat <<EOF
 event kit_edit {"op": "play"}
