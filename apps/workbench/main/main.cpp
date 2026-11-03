@@ -110,6 +110,7 @@ struct Module: public interface::Module
 	sm_<ss_, main_context::SceneReference> m_scenes;
 	sm_<size_t, ss_> m_peer_scene;
 	storage::Save *m_save = nullptr;
+	ss_ m_project; // m_save's name
 	sm_<size_t, ss_> m_names; // peer -> the name Kit knows them by
 	// peer -> how many times the server has put them: a position the
 	// client sent before it heard of the last is not taken (a teleport
@@ -355,6 +356,7 @@ struct Module: public interface::Module
 			return false;
 		}
 		log_i(MODULE, "workbench: the project \"%s\" opens", cs(name));
+		m_project = name;
 		// [WB_LAN_NAME] Announced to the LAN as the project, as vanilla's
 		// world; a joiner there logs in
 		if(m_server->has_module("accounts"))
@@ -466,6 +468,9 @@ struct Module: public interface::Module
 			// the account's packets from here on; "" without accounts
 			network::send(m_server, peer, "main:account", name.empty() ?
 					"" : "1");
+			// [WB_EDITOR_VIEW_MEMORY] the editor's memory on the client
+			// is keyed by the project
+			network::send(m_server, peer, "main:project", m_project);
 		}
 		replicate::assign_scene_to_peer(m_server, m_scene, peer);
 		m_peer_scene[peer] = "world";

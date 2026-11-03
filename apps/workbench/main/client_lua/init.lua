@@ -253,6 +253,11 @@ local function capture(on)
 end
 menu = pause_menu.new{capture = capture, accounts = accounts,
 	on_settings_closed = function() kit.declare_keys() end}
+-- [WB_EDITOR_VIEW_MEMORY] How this user left the editor in this project,
+-- kept on this machine (Kit's editor's memory), never in the project
+buildat.sub_packet("main:project", function(name)
+	kit.remember("workbench_" .. name)
+end)
 kit.add_menu_items(menu)
 -- [WB_LAN] The Server window at My account (as skeldat's): Open to LAN
 -- there for the launcher's own user; its Close, a click off it or Escape

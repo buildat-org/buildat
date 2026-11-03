@@ -54,7 +54,10 @@
 --     own selection moves nothing), Shift+Tab the other way
 --   - **The panel** (left; [KIT_EDITOR_PANELS]): its tabs are the tools,
 --     each tab's body (it scrolls) the tool's options -- Components,
---     Terrain (T), Voxels (V), Box (B) and Entities. Components: a type or
+--     Terrain (T), Voxels (V); Box (B) and Entities, in two rows
+--     ([KIT_TABS_TWO_ROWS]); the tabs and the 3D camera as the builder
+--     left them in the project, kit.remember ([WB_EDITOR_VIEW_MEMORY]).
+--     Components: a type or
 --     prefab dragged onto the view goes where it is let go (its ghost
 --     there meanwhile), or clicked it is placed by the clicks on the view
 --     until Escape, a right click or a click on it again (floorplanner's
@@ -2322,6 +2325,13 @@ magic.SubscribeToEvent("command_seq:kit_mode", function(_, data)
 			" (" .. data:GetString("Param") .. ")")
 end)
 
+-- [WB_EDITOR_VIEW_MEMORY] A check's question: the view and the tabs
+magic.SubscribeToEvent("command_seq:kit_tabs", function(_, data)
+	log:info("kit editor: the view " .. S.view .. ", the tabs " .. NT.tab() ..
+			", " .. tostring(S.list_tab) .. ", " .. tostring(S.tab) .. " (" ..
+			data:GetString("Param") .. ")")
+end)
+
 -- A check's question: where the 3D camera is
 magic.SubscribeToEvent("command_seq:kit_cam_where", function(_, data)
 	local p = S.pos or {x = 0, y = 0, z = 0}
@@ -2948,6 +2958,120 @@ set_view = function(v)
 end
 M.set_view = function(v)
 	set_view(v)
+end
+
+-- [WB_EDITOR_VIEW_MEMORY] kit.remember(key): how this user left the
+-- editor, kept on this machine under key (the app's: Workbench's
+-- project), in the storage of the server's game (buildat.storage_*, the
+-- client's user directory; never the server's, so never in a published
+-- project): edit mode or play, the view, the 3D camera, and the tabs
+-- (the panel's, the palette's, the list's). Edit mode is asked for again
+-- once the rights are known; the view and the tab put back as edit mode
+-- comes on. Running or Stopped is not kept here: it is the server's (the
+-- save's session, which a restart resumes), and a Stop asked by a memory
+-- would throw a round away.
+-- simplified: written at most once a second (MEM.every), so a quit within
+-- a second of a change loses it; the palette's New tab not restored (its
+-- fetch asks about the network)
+local MEM = {every = 1}
+function MEM.name()
+	return "kit_editor_" .. MEM.key:gsub("[^%w_%-]", function(c)
+		return string.format(".%02x", c:byte())
+	end)
+end
+
+-- After an edit state (was: edit mode before it), and as the key comes
+function MEM.restore(was)
+	if not MEM.key then
+		return
+	end
+	if MEM.edit == "asked" then
+		MEM.edit = nil -- the server's answer
+	elseif MEM.edit == "want" and E.state_seen then
+		MEM.edit = E.can_edit and not E.editing and "asked" or nil
+		if MEM.edit then
+			log:info("kit editor: remembered: edit mode")
+			M.set_tools(true)
+		end
+	end
+	local t = MEM.view
+	if t and E.editing and not was then
+		MEM.view = nil
+		if VIEW_NAMES[t.view or ""] then
+			set_view(t.view)
+		end
+		if t.tab and NT.tab_shown(t.tab) and t.tab ~= NT.tab() then
+			NT.choose(t.tab)
+		end
+	end
+end
+
+function M.remember(key)
+	MEM.key = key
+	local t = {}
+	for k, v in (buildat.storage_read(MEM.name()) or ""):gmatch(
+			"([%w_]+) ([^\n]*)") do
+		t[k] = v
+	end
+	MEM.saved, MEM.at = nil, 0
+	MEM.edit = t.mode == "edit" and "want" or nil
+	MEM.view = t
+	local x, y, z = tonumber(t.x), tonumber(t.y), tonumber(t.z)
+	local yaw, pitch = tonumber(t.yaw), tonumber(t.pitch)
+	if x and y and z and yaw and pitch then
+		S.pos, S.yaw, S.pitch = {x = x, y = y, z = z}, yaw, pitch
+	end
+	if t.list_tab == "Game-wide" or t.list_tab == "Scene" or
+			t.list_tab == "Positioned" then
+		S.list_tab = t.list_tab
+	end
+	if t.palette_tab == "All" or t.palette_tab == "Favourites" then
+		S.tab = t.palette_tab
+	end
+	log:info("kit editor: remembered for " .. key .. ": " ..
+			(next(t) and (t.mode or "play") .. ", " .. tostring(t.view) ..
+			", " .. tostring(t.tab) .. (S.pos and string.format(
+			", the 3D camera at %.2f %.2f %.2f", S.pos.x, S.pos.y, S.pos.z) or
+			"") or "nothing"))
+	MEM.restore(false)
+end
+
+-- Each frame: written when it changed, at most every MEM.every seconds
+function MEM.tick(dt)
+	MEM.at = (MEM.at or 0) + dt
+	if not MEM.key or MEM.at < MEM.every then
+		return
+	end
+	MEM.at = 0
+	local old = MEM.last or {}
+	local t = {mode = (E.editing or MEM.edit) and "edit" or "play"}
+	-- Until edit mode put them back, the remembered; out of it, the last
+	local live = E.editing and not MEM.view
+	t.view = live and S.view or (MEM.view or {}).view or old.view
+	t.tab = live and NT.tab() or (MEM.view or {}).tab or old.tab
+	t.list_tab = S.list_tab
+	t.palette_tab = S.tab
+	if S.pos then
+		t.x, t.y, t.z = string.format("%.3f", S.pos.x),
+				string.format("%.3f", S.pos.y), string.format("%.3f", S.pos.z)
+		t.yaw, t.pitch = string.format("%.3f", S.yaw),
+				string.format("%.3f", S.pitch)
+	end
+	local lines = {}
+	for _, k in ipairs({"mode", "view", "tab", "list_tab", "palette_tab", "x",
+			"y", "z", "yaw", "pitch"}) do
+		if t[k] then
+			lines[#lines + 1] = k .. " " .. t[k]
+		end
+	end
+	local data = table.concat(lines, "\n") .. "\n"
+	if data ~= MEM.saved then
+		MEM.saved, MEM.last = data, t
+		local ok, err = buildat.storage_write(MEM.name(), data)
+		if not ok then
+			log:warning("kit editor: the editor's memory: " .. tostring(err))
+		end
+	end
 end
 
 -- [KIT_PLAN_CAPS] What the plan's cut goes through, drawn in 2D (caps.lua)
@@ -5517,7 +5641,7 @@ function M.editor(options)
 		if E.can_edit ~= (s.can_edit == true) then
 			E.can_edit = s.can_edit == true
 			log:info("kit editor: edit rights: " .. (E.can_edit and "yes" or "no"))
-			if E.can_edit and not E.editing then
+			if E.can_edit and not E.editing and MEM.edit ~= "want" then
 				ui_utils.show_notification("You may edit here: Edit, or " ..
 						M.key_name("edit"), 4)
 			end
@@ -5639,6 +5763,8 @@ function M.editor(options)
 		if E.editing and S.tool == "terrain" then
 			send({op = "edited"})
 		end
+		E.state_seen = true
+		MEM.restore(was)
 	end)
 	-- [KIT_TRY_INPUTS] A Try's answer: what the entity emitted ("→ opened"),
 	-- in the inspector for 3 s
@@ -5845,6 +5971,7 @@ function M.editor(options)
 	end)
 	magic.SubscribeToEvent("Update", function(_, data)
 		local dt = data:GetFloat("TimeStep")
+		MEM.tick(dt)
 		if S.uploading then
 			local name, png = buildat.picked_file()
 			if name then
