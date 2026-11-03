@@ -2,6 +2,7 @@
 # tier: full
 # cost: ~30 s (2026-11-03)
 # covers: src/client/app.cpp src/client/app_lua.h client/api.lua extensions/launch_menu/preferences.lua
+# drives: extensions/launch_menu/preferences.lua
 # [LIGHTING_PREF_LABELS]: the `lighting` preference's values, top first
 # "Automatic" (unset), "Don't override" (game), "Cartoon (lightweight)".
 # A client-only dev app logs get_preference("lighting") and

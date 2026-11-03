@@ -3,6 +3,7 @@
 # ci
 # cost: ~40 s (2026-10-11)
 # covers: 3rdparty/Urho3D/Source/Urho3D/UI/ScrollView.cpp extensions/launch_menu/preferences.lua
+# drives: extensions/launch_menu/preferences.lua
 # [TOUCH_SCROLL_ON_BUTTONS]: a finger's drag in a ScrollView scrolls it
 # from wherever it began. A client-only dev app made here opens the
 # settings window a game opens (buildat.show_game_settings) with a section

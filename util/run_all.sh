@@ -129,6 +129,13 @@ for f in $(tiered); do
 	runners="$runners $name"
 done
 costs="$out/costs"
+# **What a runner drives by place is its pick, whatever it costs**
+# ([RUN_ALL_PICK_GAPS]): a "# drives:" line names the files whose layout
+# or exact lines the runner hard-codes -- a click at a dialog's row, a
+# grep of a module's log line verbatim. The cheapest runner covering a
+# file proves the file runs, not that the rows another runner clicks
+# stayed put: a settings row added broke fov_setting_check, a voxel
+# type's log line workbench_check, and neither was the cheapest pick.
 # **What a runner read, measured** ([RUN_ALL_PICK] 2): every source file
 # a buildat or buildat_server opened during the runner's last pass here,
 # one a line from the root, in touched/<its log's name> -- the client's
@@ -180,11 +187,12 @@ if [ -n "$changed" ]; then
 	set -f
 	# Each runner's patterns ("**" as "*") and cost once, not per file
 	# ([REWORK_1019_PERF] build 9: 7.8 s for 27 files when per file)
-	declare -A pats cost web rec
+	declare -A pats cost web rec drives
 	for name in $runners; do
 		rec[$name]=$(echo "${name%.sh}" | tr / _)
 		path="$root/$name"
 		pats[$name]=$(covers_of "$path" "$name" | sed 's/\*\*/*/g')
+		drives[$name]=$(sed -n 's/^# drives: *//p' "$path" | sed 's/\*\*/*/g')
 		cost[$name]=$(cost_of "$path" "$name")
 		web[$name]=$(grep -q web_drive "$path" && echo 1)
 	done
@@ -268,6 +276,13 @@ $name"
 				done
 			done
 		fi
+		for name in $runners; do
+			for pat in ${drives[$name]}; do
+				# shellcheck disable=SC2254
+				case "$f" in $pat) bn="$bn
+$name"; break;; esac
+			done
+		done
 		if [ -n "$bn$bw" ]; then
 			picked="$picked
 $bn

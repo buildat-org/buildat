@@ -2,6 +2,7 @@
 # tier: full
 # cost: ~3 min (2026-10-11)
 # covers: extensions/launch_menu/preferences.lua extensions/launch_menu/init.lua extensions/ui_utils/init.lua client/api.lua apps/vanilla/main/client_lua/pause.lua apps/vanilla/main/client_lua/menu.lua
+# drives: extensions/launch_menu/preferences.lua
 # [SETTINGS_KEYS_PAGE]: the keys on a page of their own, one code for the
 # launcher's Keys screen and a game's settings window.
 #   1. The launcher's Keys screen: a row picked by the keys, then the

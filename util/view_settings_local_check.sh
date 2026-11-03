@@ -2,6 +2,7 @@
 # tier: full
 # cost: ~2.5 min (2026-10-12)
 # covers: builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua builtin/luanti/client_lua/module.lua client/api.lua
+# drives: extensions/launch_menu/preferences.lua
 # [VIEW_SETTINGS_LOCAL]: the render mode in vanilla's View settings.
 #   1. A launcher's game (save vs, the minimal game), settings.json saying
 #      pbr and a stale view_render_mode of unlit in the game's storage:

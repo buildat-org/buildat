@@ -2,6 +2,7 @@
 # tier: full
 # cost: ~2 min (2026-10-11)
 # covers: builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua extensions/luanti_client/init.lua extensions/luanti_client/settings.lua
+# drives: extensions/launch_menu/preferences.lua
 # [DEBUG_INFO_SETTING]: the F5 info's level is a setting, kept.
 # Vanilla on the minimal game, one client's three runs:
 #   1. at start Basic (the default); the settings' "Debug info (F5)" set

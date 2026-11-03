@@ -2,6 +2,7 @@
 # tier: full
 # cost: ~3 min (2026-10-11)
 # covers: extensions/ui_utils/init.lua 3rdparty/Urho3D/Source/Urho3D/UI/Menu.cpp
+# drives: extensions/launch_menu/preferences.lua
 # [TAP_DROPDOWN]: a tap on a dropdown opens it on a phone. In Chrome with
 # real touch events (which Chrome follows with its emulated mouse events,
 # as a phone's browser does) at a phone's 400x800 CSS pixels, device

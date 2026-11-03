@@ -2,6 +2,7 @@
 # tier: full
 # cost: ~1 min (2026-10-18)
 # covers: src/client/app.cpp src/client/app_lua.h client/api.lua extensions/launch_menu/preferences.lua
+# drives: extensions/launch_menu/preferences.lua
 # [FOV_SETTING]: fov.<app>, a field of view per app, and
 # buildat.declare_fov. A client-only dev app declares "skeldat" (72 by
 # default) and logs what it gets: 72 with no setting, and its own

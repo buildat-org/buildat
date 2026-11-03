@@ -2,6 +2,7 @@
 # tier: full
 # cost: 3min (2026-10-09)
 # covers: extensions/launch_menu/preferences.lua client/api.lua builtin/accounts/client_lua/accounts.lua apps/floorplanner/main/client_lua/pause.lua apps/vanilla/main/client_lua/pause.lua
+# drives: extensions/launch_menu/preferences.lua
 # [GAME_SETTINGS]: buildat.show_game_settings{}, the client's settings
 # window a game opens.
 #   1. A client-only dev app made here opens it with a section of its own
