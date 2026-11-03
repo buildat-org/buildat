@@ -1003,6 +1003,8 @@ buildat.sub_packet("kit:you", function(data)
 	P.you = type(y) == "table" and tonumber(y.id) or 0
 	P.my_name = type(y) == "table" and y.name or nil
 	P.use_range = type(y) == "table" and tonumber(y.use_range) or nil
+	-- [KIT_TOOLS_1] Kit's hotbar (hands.lua)
+	P.hands = type(y) == "table" and y.hands == true
 	log:info("kit: this player is entity " .. tostring(P.you))
 end)
 
@@ -1014,6 +1016,7 @@ buildat.sub_packet("kit:items", function(data)
 	end
 	table.sort(t)
 	P.items = #t > 0 and "Items: " .. table.concat(t, ", ") or ""
+	M.hands_items(items)
 	log:info("kit: items: " .. (#t > 0 and table.concat(t, ", ") or "none"))
 end)
 
@@ -1591,6 +1594,23 @@ function M.play_target(origin, dir, reach, solid)
 				{dir.x, dir.y, dir.z}, vt, solid)
 	end
 	local t = {}
+	-- [KIT_TOOLS_1] A melee item held: a player or an entity with health
+	-- in its reach is hit, a click at nothing swings; an item of use kind
+	-- "use" is used (on what is pointed at)
+	local sheet = M.held_item()
+	if sheet and sheet.use == "use" then
+		t.left = {kind = "item", id = id or 0}
+		return t
+	end
+	local me_far = me and (origin - me):Length() or 0
+	local hid, ht = M.hit_pick(origin, dir, me_far > 1 and me_far or 0)
+	if hid and (not hit or ht <= vt + 0.05) and (not id or ht <= et) then
+		t.left = {kind = "hit", id = hid}
+		return t
+	end
+	if sheet and sheet.use == "melee" and not id and not hit then
+		t.left = {kind = "swing"}
+	end
 	-- The object first: what is in front of the voxel is pointed at
 	if id and (not hit or et <= vt + 0.05) then
 		-- [KIT_USE_ACCESS] the region's use rule asked; one used through
@@ -1858,6 +1878,14 @@ do
 			tostring(err))
 	install({M = M, E = E, O = O, P = P, log = log, STYLE = STYLE,
 		value = value})
+end
+
+-- ---- [KIT_TOOLS_1] The hands, the hotbar, the hit: hands.lua
+do
+	local ok, err, install = buildat.run_script_file("kit/hands.lua")
+	assert(ok and type(install) == "function", "kit: hands.lua: " ..
+			tostring(err))
+	install({M = M, E = E, P = P, log = log, entity_t = entity_t})
 end
 
 -- ---- [KIT_UI_COMPONENTS] UI as screen-space components: ui.lua

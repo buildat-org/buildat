@@ -93,6 +93,9 @@ local function camera_mode()
 	return params().camera or "first_person"
 end
 
+-- [KIT_TOOLS_1] hands.lua's wheel picks in first person
+M.camera_mode = function() return camera_mode() end
+
 function M.pointer_free()
 	local p = params().pointer or "auto"
 	if p == "auto" then

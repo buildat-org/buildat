@@ -16,6 +16,9 @@
 --   1...9, 0 the voxel placed (Kit's stone, Workbench's glass, Kit's
 --   planks, Workbench's brick, Kit's grass, dirt, sand, log, leaves, water)
 --   F: out of a seat (kit/car, kit/ball: a use takes it)
+--   ([KIT_TOOLS_1]) the wheel (first person): the item in hand, Kit's
+--   hotbar; a melee item's left click hits a player or an entity with
+--   health, a dig that takes time goes on while the button is held
 --   F6 or the menu's "Edit": Kit's editor, floorplanner's (its 2D, 3D and
 --   walking views: here the walk); walking in it, the pointer is free and
 --   the right button held looks round, a click goes up into the crosshair
@@ -202,12 +205,22 @@ local function act(t, left)
 		kit.refused(a.why)
 	elseif a.kind == "use" then
 		kit.use(a.id)
+	elseif a.kind == "hit" or a.kind == "swing" then
+		-- [KIT_TOOLS_1] a melee item's
+		kit.swing(a.id)
+	elseif a.kind == "item" then
+		kit.use_item(a.id)
 	elseif a.kind == "dig" then
 		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), "air")
 	elseif a.kind == "place" then
 		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), hand, a.param)
 	end
 end
+
+-- [KIT_TOOLS_1] A dig that takes time, asked again when due
+kit.on_digging(function(c)
+	build(magic.Vector3(c[1], c[2], c[3]), "air")
+end)
 
 -- Kit's items in the pause menu in place of its top bar
 kit.editor{scene = scene, camera = camera_node, ground_y = 1, bar = false,

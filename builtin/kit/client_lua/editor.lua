@@ -155,7 +155,8 @@ for k, v in pairs({state = nil, link = nil, cursor = nil, pending = {},
 		package_name = "my_prefabs", credits = {}, try_values = {},
 		voxel_form = {name = "my_voxel", texture = "kit/stone.png", kind = "solid",
 			solid = true, transparent = false, light = 0, friction = 1,
-			surface = ""}}) do
+			surface = "", group = "", level = 0},
+		item_form = nil}) do
 	init(E, k, v)
 end
 -- Floorplanner's S: the view, the cameras and what the pointer is doing
@@ -1190,6 +1191,9 @@ function NT.voxels(w)
 	end
 	button(w, "New voxel type...", function()
 		M.voxel_dialog()
+	end)
+	button(w, "New item type...", function()
+		M.item_dialog()
 	end)
 	if O.solid then
 		text(w, S.touch and "Walking: a tap digs, a finger held places" or
@@ -2677,6 +2681,10 @@ local VOXEL_FIELDS = {
 	{name = "light", type = "number", integer = true, min = 0, max = 15},
 	{name = "friction", type = "number", min = 0, max = 10},
 	{name = "surface", type = "text", max_length = 32},
+	-- [KIT_TOOLS_1] its material group ("" none: dug at once, no drop) and
+	-- the level a tool needs for the drop
+	{name = "group", type = "text", max_length = 32},
+	{name = "level", type = "number", integer = true, min = 0, max = 15},
 }
 
 function M.voxel_dialog()
@@ -2700,6 +2708,89 @@ function M.voxel_dialog()
 		for k, v in pairs(f) do
 			j[k] = v
 		end
+		send(j)
+		drop("dialog")
+	end)
+	button(br, "Cancel", function()
+		drop("dialog")
+	end)
+end
+
+-- [KIT_TOOLS_1] A builder's item type ("<their name>/<name>"), made or
+-- its next version: a preset's sheet (Kit's kit/sword, kit/pickaxe; any
+-- item type) under the fields set here. dig is "group speed, ..."
+local ITEM_FIELDS = {
+	{name = "name", type = "text", max_length = 64},
+	{name = "icon", type = "texture"},
+	{name = "stack", type = "number", integer = true, min = 1, max = 999},
+	{name = "use", type = "choice", choices = {"none", "melee", "use"}},
+	{name = "cooldown", type = "number", min = 0, max = 60},
+	{name = "mode", type = "choice", choices = {"single", "auto", "burst"}},
+	{name = "burst", type = "number", integer = true, min = 1, max = 20},
+	{name = "charge", type = "number", min = 0, max = 10},
+	{name = "damage", type = "number", min = 0, max = 1000000},
+	{name = "damage_type", type = "text", max_length = 64},
+	{name = "crit", type = "number", min = 1, max = 100},
+	{name = "falloff", type = "number", min = 0, max = 1},
+	{name = "knockback", type = "number", min = 0, max = 50},
+	{name = "reach", type = "number", min = 0.5, max = 16},
+	{name = "dig", type = "text", max_length = 200},
+	{name = "level", type = "number", integer = true, min = 0, max = 15},
+	{name = "uses", type = "number", integer = true, min = 0, max = 1000000},
+	{name = "wear_dig", type = "number", integer = true, min = 0, max = 1000},
+	{name = "wear_hit", type = "number", integer = true, min = 0, max = 1000},
+	{name = "wear_shot", type = "number", integer = true, min = 0, max = 1000},
+	{name = "repair", type = "text", max_length = 129},
+}
+
+-- The form from an item type's sheet (its dig as text)
+local function item_form(preset, name)
+	local f = {preset = preset, name = name or "my_item"}
+	for k, v in pairs(M.item_types[preset] or {}) do
+		f[k] = v
+	end
+	local dig = {}
+	for g, sp in pairs(type(f.dig) == "table" and f.dig or {}) do
+		dig[#dig + 1] = g .. " " .. tostring(sp)
+	end
+	table.sort(dig)
+	f.dig = table.concat(dig, ", ")
+	f.preset, f.name = preset, name or "my_item"
+	return f
+end
+
+function M.item_dialog()
+	drop("dialog")
+	local presets = {}
+	for k in pairs(M.item_types) do presets[#presets + 1] = k end
+	table.sort(presets)
+	E.item_form = E.item_form or item_form(presets[1] or "", nil)
+	local f = E.item_form
+	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	W.dialog = w
+	w.priority = 10
+	w:SetFixedWidth(math.min(480, magic.ui.root.width - 16))
+	text(w, "An item type of yours")
+	ui_utils.settings_form(w, {{name = "preset", type = "choice",
+			choices = presets}}, f, function(_, v)
+		E.item_form = item_form(v, f.name)
+		M.item_dialog()
+	end, WIDGETS)
+	-- simplified: every field in one long form; 7c-2's ranged and look
+	-- fields go here too
+	-- The icon: a voxel's or an upload's texture, "" none (a text label)
+	local tex = {""}
+	for _, t in ipairs(E.state.textures or {}) do tex[#tex + 1] = t end
+	ui_utils.settings_form(w, ITEM_FIELDS, f, function(k, v)
+		f[k] = v
+	end, WIDGETS, {texture = tex})
+	local br = row(w)
+	button(br, "Make", function()
+		local j = {op = "item"}
+		for k, v in pairs(f) do
+			j[k] = v
+		end
+		j.format, j.author, j.version = nil, nil, nil
 		send(j)
 		drop("dialog")
 	end)
