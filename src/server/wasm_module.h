@@ -23,8 +23,9 @@ namespace server
 
 	// [KIT] A .wasm a module runs for itself (interface/wasm_box.h): the
 	// bytes checked and metered, granted only the every-module imports.
-	// Null with why when it is refused.
+	// Null with why when it is refused. prebuilt_root: a cache read only
+	// ([BUILTIN_PREBUILD]: the shared one a boxed server reads), or ""
 	interface::WasmBox* create_wasm_box(const ss_ &name, const ss_ &bytes,
-			const ss_ &cache_root, ss_ &why);
+			const ss_ &cache_root, const ss_ &prebuilt_root, ss_ &why);
 }
 // vim: set noet ts=4 sw=4:

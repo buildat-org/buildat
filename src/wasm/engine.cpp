@@ -2321,6 +2321,16 @@ struct Engine::Impl
 				hash+"\n"+WABT_VERSION_STRING+"\n"+GLUE_VERSION+"\n"+
 				imports_hash()+"\n"+
 				cc.path+"\n"+cc.version+"\n"+cc.flags+"\n"+WASM2C_DEFINES));
+		// [BUILTIN_PREBUILD] The shared build's, read only: written by an
+		// unboxed run (`make`'s prebuild), which no box is
+		const ss_ prebuilt = e.prebuilt_root.empty() ? ss_() :
+				e.prebuilt_root+"/"+key.substr(0, 32)+"/"+MODULE_FILE;
+		if(!prebuilt.empty() && is_file(prebuilt)){
+			log_i(MODULE, "wasm %s: compiled module from the shared build (%s)",
+					cs(e.name), cs(key.substr(0, 12)));
+			ready_from(prebuilt);
+			return;
+		}
 		// The cache, the user's alone; else no compiled module at all
 		const ss_ root = e.cache_root;
 		interface::fs::create_directories(interface::fs::strip_file_name(root));

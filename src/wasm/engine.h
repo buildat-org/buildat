@@ -99,6 +99,10 @@ namespace wasm_engine
 		// - natively, where its compiled module is cached (a directory
 		//   only this user can write is made there)
 		ss_ cache_root;
+		// - natively, a cache of compiled modules read, never written, before
+		//   cache_root ([BUILTIN_PREBUILD]: the shared build a boxed server
+		//   reads); "" for none
+		ss_ prebuilt_root;
 
 		Engine();
 		virtual ~Engine();

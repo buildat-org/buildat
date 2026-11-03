@@ -822,6 +822,23 @@ if(BUILD_SERVER)
 	if(BUILDAT_WEB_SERVER_APP)
 		include(util/web_server.cmake)
 	endif()
+	# [BUILTIN_PREBUILD] The builtin modules built by the new server into the
+	# shared rccpp_build (the paths its own detection finds, as the client's
+	# servers do), which a boxed server reads as rccpp_prebuilt_path and
+	# never writes; unboxed, as only this step and unboxed runs write there.
+	# About 1 s when current. A builtin that does not build is the server's
+	# warning, not a failed make. simplified: a builtin edit counts at the
+	# next make; until then each app builds its own
+	if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
+		add_custom_target(builtin_prebuild ALL
+			COMMAND $<TARGET_FILE:${SERVER_EXE_NAME}> --unconfined
+				--compile-only -m "${CMAKE_SOURCE_DIR}/builtin"
+				-D "${CMAKE_BINARY_DIR}/builtin_prebuild_user"
+				-L "${CMAKE_BINARY_DIR}/builtin_prebuild.log" -l 2
+				|| ${CMAKE_COMMAND} -E echo "builtin_prebuild: a builtin did not build, see ${CMAKE_BINARY_DIR}/builtin_prebuild.log"
+			COMMENT "Building the builtin modules into the shared cache")
+		add_dependencies(builtin_prebuild ${SERVER_EXE_NAME})
+	endif()
 endif(BUILD_SERVER)
 
 if(TARGET urho3d_build)

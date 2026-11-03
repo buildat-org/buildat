@@ -444,6 +444,10 @@ struct Module: public interface::Module, public loader::Interface
 		log_v(MODULE, "loader::load_modules()");
 		ss_ builtin = m_server->get_builtin_modules_path();
 		ss_ current = m_server->get_modules_path();
+		// [BUILTIN_PREBUILD] -m <share>/builtin: every builtin, as `make`'s
+		// --compile-only into the shared build loads them
+		const bool all_builtins = interface::fs::get_absolute_path(current) ==
+				interface::fs::get_absolute_path(builtin);
 
 		// Get a list of required modules; that is, everything in the main
 		// module path, and in the base game's when this is a variant
@@ -468,6 +472,11 @@ struct Module: public interface::Module, public loader::Interface
 			// **A builtin's name is the engine's** ([COMPAT_BREAK_07] 8c):
 			// an app's module of that name replaced it, and the modules
 			// that use it took the app's for the builtin's interface
+			if(all_builtins){
+				if(n.name != "loader")
+					required_modules.insert(n.name);
+				continue;
+			}
 			if(interface::fs::path_exists(builtin+"/"+n.name+"/meta.json")){
 				m_server->shutdown(1, "loader: the app's module \""+n.name+
 						"\" has the name of a module Buildat comes with; "

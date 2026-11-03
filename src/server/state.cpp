@@ -11,6 +11,7 @@
 #include "rccpp_util.h"
 #include "wasm_build.h"
 #include "wasm_module.h"
+#include "interface/wasm_box.h"
 #include "static_modules.h"
 #include "config.h"
 #include "interface/module.h"
@@ -1798,8 +1799,18 @@ struct CState: public State, public interface::Server
 		std::ifstream f(wasm, std::ios::binary);
 		std::ostringstream os(std::ios::binary);
 		os<<f.rdbuf();
-		return server::create_wasm_box(module_name, os.str(),
-				g_server_config.get<ss_>("rccpp_build_path")+"/wasm2c", why);
+		const ss_ prebuilt = g_server_config.get<ss_>("rccpp_prebuilt_path");
+		interface::WasmBox *b = server::create_wasm_box(module_name, os.str(),
+				g_server_config.get<ss_>("rccpp_build_path")+"/wasm2c",
+				prebuilt.empty() ? "" : prebuilt+"/wasm2c", why);
+		// [COMPILE_ONLY_WASM] Its wasm2c compile waited on into the cache,
+		// not killed with the box as the server leaves
+		while(b && g_server_config.get<bool>("compile_only") &&
+				b->engine_name() == "interpreter, compiling"){
+			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+			b->poll();
+		}
+		return b;
 	}
 
 	ss_ get_module_path(const ss_ &module_name)

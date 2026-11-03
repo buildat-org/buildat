@@ -1209,13 +1209,14 @@ struct Box: public interface::WasmBox
 };
 
 interface::WasmBox* create_wasm_box(const ss_ &name, const ss_ &bytes,
-		const ss_ &cache_root, ss_ &why)
+		const ss_ &cache_root, const ss_ &prebuilt_root, ss_ &why)
 {
 	set_server_imports();
 	up_<Box> b(new Box());
 	b->e.box = b.get();
 	b->e.name = name;
 	b->e.cache_root = cache_root;
+	b->e.prebuilt_root = prebuilt_root;
 	b->e.refuse_import = [](size_t which) -> ss_ {
 		return which == WI_LOG || which == WI_TIME_MS ||
 				which == WI_CALL_INPUT || which == WI_CALL_OUTPUT ? "" :
