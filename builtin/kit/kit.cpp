@@ -12763,6 +12763,7 @@ struct Module: public interface::Module, public Interface
 			leave_round(old.info.id, true);
 		}
 		m_peer_session.erase(old.info.id);
+		m_tools_back.erase(old.info.id);
 		if(id && guest)
 			drop_guest(name);
 	}
@@ -12813,11 +12814,13 @@ struct Module: public interface::Module, public Interface
 		SessionScope sc(*this, id);
 		const bool join = !m_peers.count(peer);
 		set_peer_u(peer, name, scene, x, y, z);
-		// A draft's builder: their tools on there
+		// A draft's builder: their tools on there; and back in the default
+		// as they were in the session ([KIT_DRAFT_LEAVE_PLAY])
 		GameSession *s = active_session();
 		Peer &p = m_peers[peer];
-		if(join && s && s->draft && p.name == s->by && can_edit(peer) &&
-				!p.editing){
+		const bool back = join && m_tools_back.erase(peer) > 0;
+		if(join && ((s && s->draft && p.name == s->by) || back) &&
+				can_edit(peer) && !p.editing){
 			tools(p, peer, true);
 			send_state(peer);
 			send_builders();
@@ -15598,6 +15601,9 @@ struct Module: public interface::Module, public Interface
 	uint64_t m_next_session = 1;
 	// The peers in a session (none: the default)
 	std::map<size_t, uint64_t> m_peer_session;
+	// [KIT_DRAFT_LEAVE_PLAY] The builders moved back to the default with
+	// their tools on: on again there as they join
+	std::set<size_t> m_tools_back;
 	std::map<main_context::SceneReference, uint64_t> m_ref_session;
 	// The app's scenes of ended sessions, dropped once their players are
 	// out (time_us)
@@ -15922,6 +15928,8 @@ struct Module: public interface::Module, public Interface
 			scene = pi->second.scene;
 			for(int k = 0; k < 3; k++)
 				pos[k] = pi->second.pos[k];
+			if(!to && pi->second.editing)
+				m_tools_back.insert(peer);
 			leave_round(peer, false);
 		}
 		if(to)

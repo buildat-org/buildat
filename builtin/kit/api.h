@@ -612,7 +612,9 @@ namespace interface
 // kind: "default" | "draft" | "game", by, clock, can}); {"op": "publish"}
 // puts the entities the draft's edits changed into the composition as one
 // edit (one undo) and the cells its builds and edits wrote into the start
-// as live edits; {"op": "leave_draft"} ends it. In a draft the World, the
+// as live edits; {"op": "leave_draft"} ends it (a builder back in the
+// default with their tools on as they were in the session, as after a
+// game session's end). In a draft the World, the
 // environment, terrain, voxel types, new scenes, rounds (Play, Stop) and
 // exports are refused; in a game session the tools edit nothing.
 // {"op": "sessions"} logs each session's stats. Sessions are not saved: a

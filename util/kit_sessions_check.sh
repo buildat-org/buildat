@@ -17,6 +17,8 @@
 #   2. A draft (2): a plank and a sign there; left unpublished, neither in
 #      the default. Another draft (3), from the start (no plank): a plank
 #      and a sign, Published: both in the default; refusals in a draft.
+#      ([KIT_DRAFT_LEAVE_PLAY]) Publish, Leave draft and the game's end
+#      keep the builder in edit mode.
 #   3. The arena with a duration: session 4 ends by itself. Session 5 left
 #      running, a cell changed there; a restart drops it and its voxels'
 #      rows; the default round as before. The World a heightmap: a draft
@@ -99,6 +101,15 @@ tools_on()
 	printf 'keypress F6\nwait_log 10000 kit editor: edit mode on\n'
 	settle
 }
+# [KIT_DRAFT_LEAVE_PLAY] Back in the default from a session the tools were
+# on in: on again by themselves, and staying on
+tools_back() # <label>
+{
+	printf 'sync 5000\nevent kit_mode %s\n' "$1"
+	printf 'wait_log_any 5000 kit editor: the mode: edit (%s)\n' "$1"
+	printf 'wait_log_absent 2000 kit editor: edit mode off\n'
+	settle
+}
 settle() # a session's sections (the start's: none generated) in
 {
 	echo "delay 2000"
@@ -162,7 +173,7 @@ EOF
 	refused '{"op": "draft"}' "draft: in a game session: the tools edit nothing here"
 	try 5 end
 	in_session 0 default
-	tools_on
+	tools_back "the game ended"
 	info 3 1 3
 	probe 3 1 3
 	# 2. A draft (2), left: its plank and sign (7) not in the default
@@ -179,7 +190,7 @@ EOF
 		"set: in a draft: the World and the environment are the default round's"
 	ed '{"op": "leave_draft"}'
 	in_session 0 default
-	tools_on
+	tools_back "draft 2 left"
 	info 7 1 7
 	# Another (3), Published: its plank and sign (8) in the default
 	ed '{"op": "draft"}'
@@ -191,9 +202,12 @@ EOF
 	edit '{"op": "place", "type": "kit/sign", "pos": [8, 1, 8]}' 2
 	ed '{"op": "publish"}'
 	echo "sync 5000"
+	# Publish keeps the tools on too
+	printf 'event kit_mode published\n'
+	printf 'wait_log_any 5000 kit editor: the mode: edit (published)\n'
 	ed '{"op": "leave_draft"}'
 	in_session 0 default
-	tools_on
+	tools_back "draft 3 left"
 	echo "sync 3000"
 	info 7 1 7
 	# 3. The arena with a duration: session 4 ends by itself
@@ -279,6 +293,7 @@ expect 8 7,1,7 kit/planks
 want "$s" "kitboss publishes draft 3: 1 entities, 1 cells" "Session 2 ended by kitboss"
 want "$c" "kit editor: refused: stop: in a draft: the default round's"
 echo "ok: a draft from the start; its edits in the default only by Publish"
+echo "ok: Publish, Leave draft and a game's end from inside keep the tools on"
 want "$s" "kit/arena 5: session 4 over: its time is up" "Session 4 ended"
 echo "ok: the arena's duration ends its session"
 db=$(find "$t/user" -name save.sqlite -path "*/saves/world/*" | head -1)

@@ -2106,6 +2106,12 @@ magic.SubscribeToEvent("command_seq:kit_plan", function(_, data)
 	set_view("2d")
 end)
 
+-- [KIT_DRAFT_LEAVE_PLAY] A check's question: edit mode or play now
+magic.SubscribeToEvent("command_seq:kit_mode", function(_, data)
+	log:info("kit editor: the mode: " .. (E.editing and "edit" or "play") ..
+			" (" .. data:GetString("Param") .. ")")
+end)
+
 -- A check's question: where the 3D camera is
 magic.SubscribeToEvent("command_seq:kit_cam_where", function(_, data)
 	local p = S.pos or {x = 0, y = 0, z = 0}
