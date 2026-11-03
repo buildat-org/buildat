@@ -175,6 +175,8 @@ frames 3
 click Button "Switch parent"
 wait_log 5000 kit editor: switch parent of 5: armed
 frames 3
+click Button "Entities"
+frames 3
 click Button "Positioned (*"
 frames 3
 click Button "select 4"
@@ -282,6 +284,8 @@ keypress F6
 wait_log 10000 kit editor: state:
 sync 5000
 frames 10
+click Button "Entities"
+frames 3
 click Button "Positioned (*"
 wait_log 5000 kit editor: list Positioned
 event kit_select 6 4

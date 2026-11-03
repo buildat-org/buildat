@@ -327,7 +327,10 @@ for y in range(10):
 		print("%d %d %d" % im.getpixel((x, y)))
 EOF
 }
-# The largest difference of two cell lists, over the rows from..to (0..9)
+# The largest difference of two cell lists, over the rows from..to (0..9),
+# the cells under the editor's UI left out: the bar (row 0), the left
+# panel (columns 0-5 down to row 6) and the builders' panel (columns 0-5,
+# rows 8-9), which [KIT_EDITOR_PANELS] changed since the reference
 celldiff() # <cells a> <cells b> <from> <to>
 {
 	python3 -I - "$1" "$2" "$3" "$4" <<'EOF'
@@ -335,7 +338,8 @@ import sys
 a = [list(map(int, l.split())) for l in open(sys.argv[1])]
 b = [list(map(int, l.split())) for l in open(sys.argv[2])]
 r0, r1 = int(sys.argv[3]), int(sys.argv[4])
-print(max(abs(x - y) for i in range(r0 * 16, (r1 + 1) * 16)
+ui = lambda i: i < 16 or (i % 16 < 6 and i // 16 != 7)
+print(max(abs(x - y) for i in range(r0 * 16, (r1 + 1) * 16) if not ui(i)
 	for x, y in zip(a[i], b[i])))
 EOF
 }

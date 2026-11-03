@@ -260,6 +260,8 @@ EOF
 wait_log_any 30000 heightmap: terrain built
 sync 5000
 frames 10
+click Button "Entities"
+frames 3
 click Button "Scene (*"
 wait_log 5000 kit editor: list Scene
 click Text "3 *"

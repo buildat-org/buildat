@@ -52,15 +52,19 @@
 --     editor's last edit, Tab selects the next entity in the order last
 --     accessed (clicked on, edited, made or duplicated: the top; Tab's
 --     own selection moves nothing), Shift+Tab the other way
---   - **The palette** (left): a type or prefab dragged onto the view goes
---     where it is let go (its ghost there meanwhile), or clicked it is
---     placed by the clicks on the view until Escape, a right click or a
---     click on it again (floorplanner's Object tool); its Voxel list puts
---     a voxel type in hand (O.pick_voxel(name), the app's placing) and
---     the voxels tool on, "none" away; and "New voxel type..." makes a
---     builder's own: a texture (Kit's or an uploaded PNG), kind, solid,
---     transparent, light, friction, surface
---   - **The voxels tool** (V, or Voxels by the palette's title; an app
+--   - **The panel** (left; [KIT_EDITOR_PANELS]): its tabs are the tools,
+--     each tab's body (it scrolls) the tool's options -- Components,
+--     Terrain (T), Voxels (V), Box (B) and Entities. Components: a type or
+--     prefab dragged onto the view goes where it is let go (its ghost
+--     there meanwhile), or clicked it is placed by the clicks on the view
+--     until Escape, a right click or a click on it again (floorplanner's
+--     Object tool). Voxels: its Voxel list puts a voxel type in hand
+--     (O.pick_voxel(name), the app's placing) and the voxels tool on,
+--     "none" away; and "New voxel type..." makes a builder's own: a
+--     texture (Kit's or an uploaded PNG), kind, solid, transparent, light,
+--     friction, surface. Entities: the entities listed to select (tabs:
+--     Game-wide, Scene, Positioned)
+--   - **The voxels tool** (V, or the panel's Voxels; an app
 --     with solid): a left click places the voxel in hand on the face
 --     pointed at, Shift+left digs the voxel pointed at, each one undo;
 --     walking as play ([KIT_PLAYTEST_TWEAKS]): the left button digs, the
@@ -94,17 +98,18 @@
 --   - the admin's: who is here, each "Builder: yes/no" to grant or take
 --     edit rights; ([KIT] stage 4c) the builders with the tools on, each
 --     in a colour: another's selection outlined in theirs with their name
---     over it, their cursor a cross; the entities listed to select (tabs:
---     Game-wide, Scene, Positioned), a list that scrolls, kept under the palette; "Save as start" (the bar, Running); the builds the
---     last End discarded until the next Run: "Keep them", or "Choose..."
---     a player's; "Always keep builds"
+--     over it, their cursor a cross (the builders' panel, below at the
+--     left); "Save as start" (the bar, Running); the builds the last End
+--     discarded until the next Run: "Keep them", or "Choose..." a
+--     player's; "Always keep builds" (the game's settings window's Kit
+--     section)
 --   - **A touchscreen** (BUILDAT_TOUCH=1, [FP_TOUCH]'s): a tap is a click,
 --     a finger dragged on the selection moves it (on a port links, on the
 --     knob turns), elsewhere it moves the view (2D: pans; 3D: pans; two
 --     fingers pinch to zoom, in 2D pan together and in 3D orbit round the
 --     middle; walking: the app's), held still it is the right click; the
 --     bar at the lower right: Undo, Delete, Cancel (Escape); the top bar's
---     Menu; the panels folded on a narrow screen, the bar's Palette and
+--     Menu; the panels folded on a narrow screen, the bar's Tools and
 --     Inspector open one
 -- Kit's top bar, for a builder: the tools ("Edit", "Play mode" while they
 -- are on; F6; play mode Runs the game if it has Ended) and the server's
@@ -840,10 +845,8 @@ local MAX_BRUSH = 12
 M.T = T
 local brush_at, stroke_begin, stroke_move, stroke_end, draw_brush
 -- [KIT_VOXEL_EDITS] The edited sections ("kit:edited": list), the
--- terrain panel's rows of them ({el, s}), its view and where it was
--- scrolled, and the section hovered
-local ED = {list = nil, rows = {}, view = nil, y = 0, hover = nil}
-local ED_HEIGHT = 200
+-- terrain tab's rows of them ({el, s}), and the section hovered
+local ED = {list = nil, rows = {}, hover = nil}
 
 -- The bar: Edit and Run/End in play (an app's own menu can have them:
 -- bar = false); in the tools floorplanner's toolbar -- Menu, the views,
@@ -1017,7 +1020,7 @@ rebuild_bar = function()
 	end
 	bar_button("Play mode", nil, M.toggle_tools)
 	if narrow() then
-		for _, p in ipairs({{"palette", "Palette"}, {"inspector", "Inspector"}}) do
+		for _, p in ipairs({{"palette", "Tools"}, {"inspector", "Inspector"}}) do
 			bar_button(p[2], nil, function()
 				toggle_fold(p[1])
 				refresh()
@@ -1086,34 +1089,219 @@ end
 local palette_buttons = {}
 local palette
 
--- [KIT] stage 4f: the palette's title and the terrain tool's, each with a
--- button to the other (T), as tall as the title: the buttons under it stay
--- where they were
-local function panel_title(w, s, other)
-	local r = row(w)
-	local t = text(r, s, DIM)
-	t.minWidth = t.width + 8
-	if E.state and E.state.terrain then
-		local b = button(r, other .. (S.touch and "" or
-				" (" .. M.key_name("terrain") .. ")"), function()
-			M.set_tool(S.tool ~= "terrain" and "terrain" or nil)
+-- [KIT_EDITOR_PANELS] The left panel (user, 2026-11-03): one window,
+-- its tabs the tools -- Components (the types and the prefabs to place),
+-- Terrain, Voxels, Box and Entities (the list) -- each tab's body the
+-- tool's options, in a view that scrolls (NT.view), bounded each frame
+-- above the builders' panel or the screen's foot (NT.fit_panel). A tab
+-- chosen is its tool on; a tool on (its key: T, V, B) is its tab; put away
+-- (Escape, a right click) the panel goes back to Components or Entities,
+-- whichever was last (S.panel_tab)
+NT.TABS = {"Components", "Terrain", "Voxels", "Box", "Entities"}
+NT.TOOL_TAB = {terrain = "Terrain", voxels = "Voxels", box = "Box"}
+NT.TAB_KEY = {Terrain = "terrain", Voxels = "voxels", Box = "box"}
+-- Where each tab's body was scrolled
+NT.y = {}
+
+function NT.tab_shown(name)
+	local st = E.state or {}
+	if name == "Terrain" then
+		return st.terrain ~= nil
+	elseif name == "Voxels" then
+		return st.voxels ~= nil and (O.solid ~= nil or O.pick_voxel ~= nil)
+	elseif name == "Box" then
+		return O.solid ~= nil
+	end
+	return true
+end
+
+function NT.tab()
+	local t = NT.TOOL_TAB[S.tool or ""] or S.panel_tab or "Components"
+	return NT.tab_shown(t) and t or "Components"
+end
+
+function NT.choose(name)
+	if name ~= NT.tab() then
+		log:info("kit editor: the panel's " .. name .. " tab")
+		S.placing = nil
+	end
+	if name == "Terrain" then
+		return M.set_tool("terrain")
+	elseif name == "Box" then
+		return M.set_tool("box")
+	elseif name == "Voxels" and O.solid then
+		if S.tool ~= "voxels" then
+			return M.toggle_voxels()
+		end
+		return palette()
+	end
+	-- (Voxels without the app's voxels: the voxel in hand for its placing)
+	S.panel_tab = name
+	if S.tool then
+		return M.set_tool(nil)
+	end
+	refresh()
+end
+
+-- The Voxels tab: the voxel in hand (the app's, O.pick_voxel), its shape
+-- and tint, and a builder's own voxel type
+function NT.voxels(w)
+	if O.pick_voxel or O.solid then
+		local names = {{"none", ""}}
+		for _, n in ipairs(voxel_names()) do
+			names[#names + 1] = n
+		end
+		ui_utils.dropdown(row(w), names, S.voxel or "", function(name)
+			M.pick_voxel(name ~= "" and name or nil)
+		end, {label = "Voxel", fill = true})
+		-- [KIT_VOXEL_FORMAT] its shape (a solid cube's; the facing
+		-- from the view as it is placed) and tint
+		local entry = nil
+		for _, v in ipairs(E.state.voxels or {}) do
+			if v.name == S.voxel then
+				entry = v
+			end
+		end
+		if entry and entry.shapes then
+			local shapes = {{"cube", ""}}
+			for _, sh in ipairs(M.SHAPES) do
+				shapes[#shapes + 1] = {sh:gsub("_", " "), sh}
+			end
+			ui_utils.dropdown(row(w), shapes, M.hand.shape, function(sh)
+				M.hand.shape = sh
+				log:info("kit editor: shape " .. (sh ~= "" and sh or "cube"))
+				if S.voxel and O.pick_voxel then
+					O.pick_voxel(S.voxel)
+				end
+			end, {label = "Shape", fill = true})
+		end
+		if entry then
+			-- [KIT_TINT_PALETTE] its palette's entries, by name
+			local tints = M.tints_of(S.voxel)
+			if M.hand.tint >= #tints then
+				M.hand.tint = 0
+			end
+			ui_utils.dropdown(row(w), tints, M.hand.tint, function(t)
+				M.hand.tint = tonumber(t) or 0
+				log:info("kit editor: tint " .. M.tint_label(S.voxel,
+						M.hand.tint))
+			end, {label = "Tint", fill = true})
+		end
+	end
+	button(w, "New voxel type...", function()
+		M.voxel_dialog()
+	end)
+	if O.solid then
+		text(w, S.touch and "Walking: a tap digs, a finger held places" or
+				"Left: place, Shift+left: dig; walking: left digs, right places",
+				DIM)
+	end
+end
+
+-- The Entities tab: the entities, to select ([KIT_SELECT_BURIED]: one
+-- under the ground too), in three tabs ([KIT_LIST_TABS], user): Game-wide
+-- (the root's, no position), Scene (the scene's with no position: its
+-- World, an environment) and Positioned (the scene's, or the root's,
+-- placed), each in the order they were added; the tab kept for the
+-- session. [KIT_NESTING] Positioned in the tree's order, each one under
+-- its parent indented ([KIT_REPARENT_BUTTONS]: a Select with Switch
+-- parent armed picks the parent)
+function NT.entities(w)
+	local tabs = {["Game-wide"] = {}, Scene = {}, Positioned = {}}
+	local indent = {}
+	local function add_tree(e, d)
+		table.insert(tabs.Positioned, e)
+		indent[e.id] = d
+		for _, c in ipairs(NT.tree().kids[e.id] or {}) do
+			if d < 16 then
+				add_tree(c, d + 1)
+			end
+		end
+	end
+	for _, e in ipairs(entities()) do
+		if e.kind ~= "scene" then
+			local t = e.pos and "Positioned" or scene_name(e) and "Scene" or
+					"Game-wide"
+			if t ~= "Positioned" then
+				table.insert(tabs[t], e)
+			elseif not NT.parent_of(e) then
+				add_tree(e, 0)
+			end
+		end
+	end
+	local tab = S.list_tab or "Game-wide"
+	local tr = row(w)
+	for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
+		button(tr, name .. " (" .. #tabs[name] .. ")", function()
+			S.list_tab = name
+			palette()
+		end, name == tab)
+	end
+	local n, ids = 0, {}
+	for _, e in ipairs(tabs[tab]) do
+		local gr = row(w)
+		label(gr, string.rep("    ", indent[e.id] or 0) .. e.id .. " " ..
+				tostring(e.name) .. (e.pos and " at " ..
+				table.concat(e.pos, ",") or ""))
+		local sb = button(gr, e.id == S.primary and "Selected" or
+				S.reparent and e.pos and "Parent" or "Select", function()
+			if not NT.pick_parent(e.id) then
+				M.select(e.id)
+			end
 		end)
-		b.minHeight, b.maxHeight = t.height, t.height
+		-- For a driven click by whose it is
+		sb:SetName("select " .. e.id)
+		n = n + 1
+		ids[#ids + 1] = (indent[e.id] or 0) > 0 and
+				string.rep(">", indent[e.id]) .. e.id or e.id
 	end
-	-- [KIT_EDIT_VOXELS] the voxels tool, on with the voxel in hand
-	if s == "Palette" and E.state and E.state.voxels and O.solid then
-		local b = button(r, "Voxels" .. (S.touch and "" or
-				" (" .. M.key_name("voxels") .. ")"),
-				M.toggle_voxels, S.tool == "voxels")
-		b.minHeight, b.maxHeight = t.height, t.height
+	if n == 0 then
+		text(w, "None", DIM)
 	end
-	-- [KIT_PREFAB_VOXELS] the Box tool: a box of voxels to copy or make
-	-- a prefab of
-	if s == "Palette" and O.solid then
-		local b = button(r, "Box" .. (S.touch and "" or
-				" (" .. M.key_name("box") .. ")"),
-				M.toggle_box, S.tool == "box")
-		b.minHeight, b.maxHeight = t.height, t.height
+	-- For a check: the tab and what it lists, as it changes
+	local said = "kit editor: list " .. tab .. " (" .. n .. "): " ..
+			table.concat(ids, ", ")
+	if said ~= NT.list_said then
+		NT.list_said = said
+		log:info(said)
+	end
+end
+
+-- The panel's body, each frame: as tall as it is, or the room there is
+-- (a scroll bar then), and as wide, or the screen's (a bar across)
+function NT.fit_panel()
+	local w, view = W.palette, NT.view
+	if not w or not view then
+		return
+	end
+	local body = view.contentElement
+	local foot = W.touch and W.touch.visible and W.touch.height + 16 or 12
+	-- The screen's size at the unfitted scale (as fit_inspector's)
+	narrow()
+	local bottom = screen_ui.h - foot
+	if W.people and W.people.visible then
+		bottom = math.min(bottom, W.people.screenPosition.y - 8)
+	end
+	local sb = view.verticalScrollBar.width + 4
+	-- The body as the view shows it: inside its panel's clip border
+	-- (DefaultStyle's 2 a side)
+	local bw, bh = body.width + 4, body.height + 4
+	local room_w = math.min(screen_ui.w, magic.ui.root.width) - 16 - 12 - 8
+	local hbar = bw > room_w
+	local room_h = bottom - view.screenPosition.y - 8 -
+			(hbar and view.horizontalScrollBar.height + 4 or 0)
+	local h = math.max(40, math.min(bh, room_h))
+	local vbar = h < bh
+	local vw = math.min(bw + (vbar and sb or 0), room_w)
+	local vh = h + (hbar and view.horizontalScrollBar.height + 4 or 0)
+	if view.height ~= vh or view.width ~= vw then
+		view:SetScrollBarsVisible(hbar, vbar)
+		view:SetFixedSize(vw, vh)
+		-- A layout only grows the window (and stretches its rows to
+		-- fill it): shrunk to what it holds
+		w.width, w.height = 0, 0
+		log:info(string.format("kit editor: the panel %d of %d tall, %d of " ..
+				"%d wide", h, bh, vw, bw))
 	end
 end
 
@@ -1202,23 +1390,9 @@ local function new_tab(w)
 	end)
 end
 
-palette = function()
-	if ED.view then
-		ED.y = ED.view.viewPosition.y
-	end
-	ED.view, ED.rows, ED.hover = nil, {}, nil
-	drop("palette")
-	palette_buttons = {}
-	if not E.editing or folded("palette") then
-		return
-	end
-	local y = W.bar and W.bar.height + 12 or 40
-	local w = window(magic.HA_LEFT, magic.VA_TOP, 8, y)
-	W.palette = w
-	if S.tool == "terrain" then
-		return terrain_panel(w)
-	end
-	panel_title(w, "Palette", "Terrain")
+-- The Components tab: the types and the prefabs, a click arms one (placed
+-- by the clicks on the view), a drag puts one where it is let go
+function NT.components(w)
 	-- [KIT] stage 5: its tabs at its foot (what is above them stays where
 	-- it was): all, the favourites and the New tab, and the credits
 	-- (a player's in the pause menu)
@@ -1288,55 +1462,6 @@ palette = function()
 		end, armed)
 		palette_buttons[#palette_buttons + 1] = {button = b, item = it}
 	end
-	-- [KIT] stage 4g: the voxel in hand (the app's, O.pick_voxel) and a
-	-- builder's own voxel type
-	if E.state.voxels then
-		if O.pick_voxel or O.solid then
-			local names = {{"none", ""}}
-			for _, n in ipairs(voxel_names()) do
-				names[#names + 1] = n
-			end
-			ui_utils.dropdown(row(w), names, S.voxel or "", function(name)
-				M.pick_voxel(name ~= "" and name or nil)
-			end, {label = "Voxel", fill = true})
-			-- [KIT_VOXEL_FORMAT] its shape (a solid cube's; the facing
-			-- from the view as it is placed) and tint
-			local entry = nil
-			for _, v in ipairs(E.state.voxels or {}) do
-				if v.name == S.voxel then
-					entry = v
-				end
-			end
-			if entry and entry.shapes then
-				local shapes = {{"cube", ""}}
-				for _, sh in ipairs(M.SHAPES) do
-					shapes[#shapes + 1] = {sh:gsub("_", " "), sh}
-				end
-				ui_utils.dropdown(row(w), shapes, M.hand.shape, function(sh)
-					M.hand.shape = sh
-					log:info("kit editor: shape " .. (sh ~= "" and sh or "cube"))
-					if S.voxel and O.pick_voxel then
-						O.pick_voxel(S.voxel)
-					end
-				end, {label = "Shape", fill = true})
-			end
-			if entry then
-				-- [KIT_TINT_PALETTE] its palette's entries, by name
-				local tints = M.tints_of(S.voxel)
-				if M.hand.tint >= #tints then
-					M.hand.tint = 0
-				end
-				ui_utils.dropdown(row(w), tints, M.hand.tint, function(t)
-					M.hand.tint = tonumber(t) or 0
-					log:info("kit editor: tint " .. M.tint_label(S.voxel,
-							M.hand.tint))
-				end, {label = "Tint", fill = true})
-			end
-		end
-		button(w, "New voxel type...", function()
-			M.voxel_dialog()
-		end)
-	end
 	-- The armed one starred or not
 	if S.placing then
 		local name, on = S.placing.key or S.placing.label, false
@@ -1359,6 +1484,61 @@ palette = function()
 		end)
 	end
 	tabs()
+end
+
+palette = function()
+	if NT.view then
+		NT.y[NT.shown or ""] = NT.view.viewPosition.y
+	end
+	NT.view, ED.rows, ED.hover = nil, {}, nil
+	drop("palette")
+	palette_buttons = {}
+	if not E.editing or folded("palette") then
+		return
+	end
+	local y = W.bar and W.bar.height + 12 or 40
+	local w = window(magic.HA_LEFT, magic.VA_TOP, 8, y)
+	W.palette = w
+	local tab = NT.tab()
+	NT.shown = tab == "Entities" and "Entities/" .. (S.list_tab or "") or tab
+	-- The tabs, in as many rows as the screen's width needs
+	-- (with room for the row's spacing and the scroll bar's)
+	local room = math.min(screen_ui.w or 1e9, magic.ui.root.width) - 16 - 12 -
+			24
+	local r, used = row(w), 0
+	for _, name in ipairs(NT.TABS) do
+		if NT.tab_shown(name) then
+			local key = NT.TAB_KEY[name]
+			local s = name .. ((key and not S.touch) and
+					" (" .. M.key_name(key) .. ")" or "")
+			-- Measured on the side, as the bar's (place())
+			local probe = button(magic.ui.root, s, function() end)
+			local bw = probe.minWidth + 4
+			probe:Remove()
+			if used > 0 and used + bw > room then
+				r, used = row(w), 0
+			end
+			button(r, s, function() NT.choose(name) end, name == tab)
+			used = used + bw
+		end
+	end
+	local view = w:CreateChild("ScrollView")
+	local body = view:CreateChild("UIElement")
+	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+	local fill = tab == "Terrain" and terrain_panel or tab == "Voxels" and
+			NT.voxels or tab == "Box" and NT.box_section or
+			tab == "Entities" and NT.entities or NT.components
+	fill(body)
+	view:SetStyleAuto()
+	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
+	view.scrollBarsAutoVisible = false
+	view:SetScrollBarsVisible(false, false)
+	view.contentElement = body
+	body:SetPosition(0, 0)
+	view:SetFixedSize(body.width, body.height)
+	NT.view = view
+	NT.fit_panel()
+	view.viewPosition = magic.IntVector2(0, NT.y[NT.shown] or 0)
 end
 
 -- The voxels to place: the World's material set's first
@@ -1470,6 +1650,10 @@ end
 -- The palette's entry the pointer is on
 local function palette_at(mx, my)
 	local sc = magic.ui.scale
+	-- (one scrolled out of the panel's view is not there)
+	if not NT.view or not inside(NT.view, mx / sc, my / sc) then
+		return nil
+	end
 	for _, pb in ipairs(palette_buttons) do
 		if inside(pb.button, mx / sc, my / sc) then
 			return pb.item
@@ -1910,7 +2094,7 @@ local function inspector(w, e, is_made)
 end
 
 -- [KIT_BOX_ADJUST] The Box tool's box adjusted once its two corners are
--- in: typed (its low corner and its size, at the inspector's top) or by
+-- in: typed (its low corner and its size, in the panel's Box tab) or by
 -- the handles on its six faces (a drag moves that face; Shift, the whole
 -- box along the axis). The box is the tool's: put away, it goes (a
 -- selection made first is kept, so entities and voxels copy together)
@@ -2020,7 +2204,7 @@ function BX.box_drag_move(x, y)
 		lo[k] = math.min(hi[k], math.max(hi[k] - BX.MAX + 1, lo[k] + delta))
 	end
 	BX.set_box(lo, hi)
-	inspector_window()
+	palette()
 end
 
 function BX.box_drop()
@@ -2034,7 +2218,7 @@ function BX.box_drop()
 	refresh()
 end
 
--- The inspector's box: its low corner and its size typed, each change
+-- The Box tab's box: its low corner and its size typed, each change
 -- taken as it is a whole number (a size 1 to 64)
 function BX.box_section(w)
 	local lo, hi = BX.box_lh()
@@ -2071,6 +2255,7 @@ function BX.box_section(w)
 	end
 	text(w, "Drag a face's handle; Shift: the whole box", DIM)
 end
+NT.box_section = BX.box_section
 
 -- A check's two corner clicks: "x y z x y z", the Box tool's box
 magic.SubscribeToEvent("command_seq:kit_box", function(_, data)
@@ -2195,9 +2380,7 @@ inspector_window = function()
 	if S.primary then
 		e, is_made = find(S.primary)
 	end
-	-- [KIT_BOX_ADJUST] the Box tool's box at its top
-	local box = E.editing and S.tool == "box" and not folded("inspector")
-	if not E.editing or folded("inspector") or (not e and not box) then
+	if not E.editing or folded("inspector") or not e then
 		return
 	end
 	local y = W.bar and W.bar.height + 12 or 40
@@ -2205,12 +2388,7 @@ inspector_window = function()
 	local view = W.inspector:CreateChild("ScrollView")
 	local body = view:CreateChild("UIElement")
 	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
-	if box then
-		BX.box_section(body)
-	end
-	if e then
-		inspector(body, e, is_made)
-	end
+	inspector(body, e, is_made)
 	view:SetStyleAuto()
 	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
 	view.scrollBarsAutoVisible = false
@@ -2274,44 +2452,13 @@ show_log = function()
 	end
 end
 
--- The people window's list (a ScrollView in it) and where it was scrolled
-local PV = {view = nil, y = 0}
-
--- The list's height: what is left between the palette's foot (the bar's,
--- folded) and the people window's place over the bottom, less the rest of
--- the window; each frame, as the palette, the window and the screen change
-local function fit_people()
-	local b, view = W.people, PV.view
-	if not b or not view or not view.visible then
-		return
-	end
-	local above = W.palette or W.bar
-	local top = above and above.screenPosition.y + above.height + 8 or 8
-	-- The rest of the window, as it was built (its layout does not shrink
-	-- with the view: its height is set)
-	PV.other = PV.other or b.height - view.height
-	local room = magic.ui.root.height - 50 - top - PV.other
-	local h = math.max(0, math.min(view.contentElement.height, room))
-	if view.height ~= h then
-		view:SetScrollBarsVisible(false, h < view.contentElement.height)
-		view:SetFixedHeight(h)
-		b.height = PV.other + h
-		log:info(string.format("kit editor: the list %d of %d tall, the " ..
-				"window's top %d, the palette's foot %d", h,
-				view.contentElement.height, b.screenPosition.y, top - 8))
-	end
-end
-
--- Below at the left, out of the view's way: the server's state, a refusal,
--- the entities' list, who edits and who may. Rebuilt alone as the
+-- Below at the left, out of the view's way ([KIT_EDITOR_PANELS]: the
+-- builders' panel, small): the server's state, a refusal, the builds the
+-- last End discarded, who edits and who may. Rebuilt alone as the
 -- builders move (the inspector being typed in is left as it is)
 people = function()
-	if W.people and PV.view then
-		PV.y = PV.view.viewPosition.y
-	end
-	PV.view, PV.other = nil, nil
 	drop("people")
-	-- A narrow screen's palette opened is where it was
+	-- A narrow screen's panel opened is where it was
 	if not E.editing or (narrow() and not folded("palette")) then
 		return
 	end
@@ -2327,93 +2474,6 @@ people = function()
 		text(b, "New entities go under " .. S.under .. " (its inspector's " ..
 				"Place under this)", DIM)
 	end
-	-- The entities, to select ([KIT_SELECT_BURIED]: one under the ground
-	-- too), in three tabs ([KIT_LIST_TABS], user): Game-wide (the root's,
-	-- no position), Scene (the scene's with no position: its World, an
-	-- environment) and Positioned (the scene's, or the root's, placed),
-	-- each in the order they were added; the tab kept for the session. In
-	-- a view that scrolls, fit_people() bounding it under the palette.
-	-- [KIT_NESTING] Positioned in the tree's order, each one under its
-	-- parent indented ([KIT_REPARENT_BUTTONS]: a Select with Switch parent
-	-- armed picks the parent)
-	local tabs = {["Game-wide"] = {}, Scene = {}, Positioned = {}}
-	local indent = {}
-	local function add_tree(e, d)
-		table.insert(tabs.Positioned, e)
-		indent[e.id] = d
-		for _, c in ipairs(NT.tree().kids[e.id] or {}) do
-			if d < 16 then
-				add_tree(c, d + 1)
-			end
-		end
-	end
-	for _, e in ipairs(entities()) do
-		if e.kind ~= "scene" then
-			local t = e.pos and "Positioned" or scene_name(e) and "Scene" or
-					"Game-wide"
-			if t ~= "Positioned" then
-				table.insert(tabs[t], e)
-			elseif not NT.parent_of(e) then
-				add_tree(e, 0)
-			end
-		end
-	end
-	local tab = S.list_tab or "Game-wide"
-	local tr = row(b)
-	for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
-		button(tr, name .. " (" .. #tabs[name] .. ")", function()
-			if S.list_tab ~= name then
-				S.list_tab = name
-				PV.y = 0
-			end
-			people()
-		end, name == tab)
-	end
-	local view = b:CreateChild("ScrollView")
-	local list = view:CreateChild("UIElement")
-	list:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
-	local lw, n, ids = 0, 0, {}
-	for _, e in ipairs(tabs[tab]) do
-		local gr = row(list)
-		local l = label(gr, string.rep("    ", indent[e.id] or 0) .. e.id ..
-				" " .. tostring(e.name) .. (e.pos and " at " ..
-				table.concat(e.pos, ",") or ""))
-		local sb = button(gr, e.id == S.primary and "Selected" or
-				S.reparent and e.pos and "Parent" or "Select", function()
-			if not NT.pick_parent(e.id) then
-				M.select(e.id)
-			end
-		end)
-		-- For a driven click by whose it is
-		sb:SetName("select " .. e.id)
-		lw, n = math.max(lw, l.minWidth + 4 + sb.minWidth), n + 1
-		ids[#ids + 1] = e.id
-	end
-	-- For a check: the tab and what it lists, as it changes
-	for i, id in ipairs(ids) do
-		if (indent[id] or 0) > 0 then
-			ids[i] = string.rep(">", indent[id]) .. id
-		end
-	end
-	local said = "kit editor: list " .. tab .. " (" .. n .. "): " ..
-			table.concat(ids, ", ")
-	if said ~= PV.said then
-		PV.said = said
-		log:info(said)
-	end
-	-- Its layout's size, as the rows made it
-	local lh = list.height
-	view:SetStyleAuto()
-	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
-	view.scrollBarsAutoVisible = false
-	view:SetScrollBarsVisible(false, false)
-	list:SetFixedSize(lw, lh)
-	view.contentElement = list
-	list:SetPosition(0, 0)
-	view:SetFixedWidth(lw + view.verticalScrollBar.width + 4)
-	view:SetFixedHeight(lh)
-	view.visible = n > 0
-	PV.view = view
 	-- The builds the last End discarded, to keep until the next Run: all,
 	-- or by player ("Choose...")
 	local names = {}
@@ -2443,12 +2503,6 @@ people = function()
 			end)
 		end
 	end
-	if not E.persistent then
-		button(b, "Always keep builds: " .. (E.always_keep and "yes" or "no"),
-				function()
-			send({op = "always_keep", on = not E.always_keep})
-		end)
-	end
 	-- The builders with the tools on, each by a blob in their colour (user,
 	-- 2026-10-31: coloured text reads as a meaning, red as an error;
 	-- Hearth's larger blob) and the text plain
@@ -2469,10 +2523,6 @@ people = function()
 				send({op = "builder", name = p.name, on = not p.builder})
 			end)
 		end
-	end
-	fit_people()
-	if PV.view then
-		PV.view.viewPosition = magic.IntVector2(0, PV.y)
 	end
 end
 
@@ -3475,8 +3525,8 @@ function M.drop_crosshair()
 	return true
 end
 
--- ---- [KIT] stage 4f: the terrain tool. T (or Terrain on the palette's
--- title) puts its brushes in the palette's place: Raise, Lower, Smooth, Flatten (to the
+-- ---- [KIT] stage 4f: the terrain tool. T (or the panel's Terrain tab)
+-- shows its brushes: Raise, Lower, Smooth, Flatten (to the
 -- stroke's first point), Paint (the biome's ground), Fill (a rectangle
 -- dragged, up to its first corner's level, with the biome's ground or
 -- water) and Decorate (the biome's scatter; in a cave its floor's and
@@ -3539,7 +3589,6 @@ local BRUSH_TEXT = {raise = "raise the ground", lower = "lower the ground",
 	reset = "back to the generated ground"}
 
 terrain_panel = function(w)
-	panel_title(w, "Terrain", "Palette")
 	local r
 	for i, b in ipairs(BRUSHES) do
 		if i % 2 == 1 then
@@ -3576,7 +3625,7 @@ terrain_panel = function(w)
 	-- [KIT_VOXEL_EDITS] The sections somebody wrote, which a change of the
 	-- World's parameters keeps: each its cells unlike the generator's
 	-- (hovered, outlined in the view), Regenerate dropping its writes (one
-	-- undo); in a view that scrolls past ED_HEIGHT
+	-- undo)
 	local l = ED.list
 	if not l then
 		return
@@ -3586,36 +3635,19 @@ terrain_panel = function(w)
 	if #secs == 0 then
 		return
 	end
-	local view = w:CreateChild("ScrollView")
-	local list = view:CreateChild("UIElement")
-	list:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
-	local lw = 0
 	for _, e in ipairs(secs) do
 		local s = e.s
 		local n = tonumber(e.cells) or -1
-		local r = row(list)
-		local lb = label(r, table.concat(s, ",") .. ": " .. (n < 0 and
+		local r = row(w)
+		label(r, table.concat(s, ",") .. ": " .. (n < 0 and
 				"not loaded" or n .. " cells") .. (e.owned and
 				" (a component's)" or ""), 130)
-		local b = button(r, "Regenerate", function()
+		button(r, "Regenerate", function()
 			log:info("kit editor: regenerate " .. table.concat(s, ","))
 			send({op = "regenerate", s = s})
 		end)
-		lw = math.max(lw, lb.minWidth + 4 + b.minWidth)
 		ED.rows[#ED.rows + 1] = {el = r, s = s}
 	end
-	local lh = list.height
-	view:SetStyleAuto()
-	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
-	view.scrollBarsAutoVisible = false
-	view:SetScrollBarsVisible(false, lh > ED_HEIGHT)
-	list:SetFixedSize(lw, lh)
-	view.contentElement = list
-	list:SetPosition(0, 0)
-	view:SetFixedWidth(lw + view.verticalScrollBar.width + 4)
-	view:SetFixedHeight(math.min(lh, ED_HEIGHT))
-	view.viewPosition = magic.IntVector2(0, ED.y)
-	ED.view = view
 	button(w, "Regenerate all", function()
 		log:info("kit editor: regenerate all")
 		send({op = "regenerate", all = true})
@@ -3632,7 +3664,7 @@ local function draw_edited(dbg, mx, my)
 	local sc = magic.ui.scale
 	local x, y = mx / sc, my / sc
 	local hover = nil
-	if ED.view and inside(ED.view, x, y) then
+	if NT.view and inside(NT.view, x, y) then
 		for _, r in ipairs(ED.rows) do
 			if inside(r.el, x, y) then
 				hover = r.s
@@ -3962,7 +3994,7 @@ function NT.arm_parent(id)
 	if id then
 		S.placing = nil
 		log:info("kit editor: switch parent of " .. id .. ": armed")
-		E.status = "Switch parent: click the new parent of " .. id ..
+		E.status = "Switch parent: pick the new parent of " .. id ..
 				" (Escape: cancel)"
 	else
 		log:info("kit editor: switch parent cancelled")
@@ -4949,7 +4981,7 @@ local function compute_guide()
 			M.frame_entity(hover, e.id, M.PLACE)
 			g.left = "make " .. name_of(e) .. " the parent of " .. S.reparent
 		else
-			g.left = "click the new parent of " .. S.reparent
+			g.left = "pick the new parent of " .. S.reparent
 		end
 		g.note = "Esc: cancel the parent's switch"
 		return g
@@ -5125,7 +5157,7 @@ local function draw()
 	if W.bar and S.bar_root_w ~= magic.ui.root.width then
 		rebuild_bar()
 	end
-	fit_people()
+	NT.fit_panel()
 	fit_inspector()
 	log_bar()
 	local dbg = O.debug
@@ -5346,6 +5378,23 @@ function M.editor(options)
 			O.scene:CreateComponent("DebugRenderer")
 	make_cameras()
 	rebuild_bar()
+	-- [KIT_EDITOR_PANELS] Kit's section of the game's settings window: a
+	-- builder's "Always keep builds" (the server's, for everyone's rounds)
+	buildat.add_game_settings_section("kit", {title = "Kit",
+			draw = function(_, ui)
+		NT.settings_redraw = ui.redraw
+		if E.can_edit and not E.persistent then
+			ui.button("Always keep builds: " .. (E.always_keep and "yes" or
+					"no"), function()
+				send({op = "always_keep", on = not E.always_keep})
+			end)
+			ui.text("Players' builds kept at End without asking (a builder's)",
+					"dim")
+		else
+			ui.text("Nothing to set here: Kit's settings are a builder's, " ..
+					"in a world of rounds", "dim")
+		end
+	end})
 
 	buildat.sub_packet("kit:edit_state", function(data)
 		local s = network.parse_json(data)
@@ -5415,8 +5464,15 @@ function M.editor(options)
 		end
 		E.credits = type(s.credits) == "table" and s.credits or {}
 		E.discarded = type(s.discarded) == "table" and s.discarded or {}
+		local keep_was = E.always_keep
 		E.always_keep = s.always_keep == true
 		E.persistent = s.persistent == true
+		if keep_was ~= E.always_keep then
+			log:info("kit editor: always keep builds: " ..
+					(E.always_keep and "yes" or "no"))
+			-- (the window gone, its redraw fails harmlessly)
+			pcall(NT.settings_redraw or function() end)
+		end
 		if not next(E.discarded) then
 			E.choose = false
 		end

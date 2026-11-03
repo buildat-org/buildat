@@ -183,6 +183,8 @@ if [ "${1:-}" = web ]; then
 	["shot", "\${OUT}/terrain.png"],
 	["chord", "Ctrl+z"], ["sync", 5000],
 	["key", "t"], ["waitlog", "kit editor: tool select", 10], ["frames", 5],
+	["click", "Button", "Voxels*"], ["waitlog", "kit editor: tool voxels", 10],
+	["frames", 5],
 	["click", "Button", "New voxel type..."], ["frames", 5],
 	["file", "$t/frost.png"], ["click", "Button", "Upload a PNG..."],
 	["waitlog", "kit editor: uploaded kit/up/", 10], ["frames", 3],
@@ -194,17 +196,16 @@ if [ "${1:-}" = web ]; then
 	["shot", "\${OUT}/voxel_dialog.png"],
 	["click", "Button", "Make"], ["waitlog", "kit editor: [0-9]+ voxels to place", 10],
 	["frames", 3],
-	["click", "DropDownList", "▼", 203, 449], ["frames", 5], ["shot", "\${OUT}/voxel_list.png"],
+	["click", "DropDownList", "▼", 290, 127], ["frames", 5], ["shot", "\${OUT}/voxel_list.png"],
 	["click", "Text", "webboss/frost"],
 	["waitlog", "kit editor: in hand webboss/frost", 10],
-	["waitlog", "kit editor: tool voxels", 10],
 	["key", "Escape"], ["waitlog", "kit editor: tool select", 10],
 	["click", "Button", "kit/region"], ["waitlog", "kit editor: placing kit/region", 10],
 	["click", 560, 340], ["waitlog", "kit editor: placed kit/region at", 10],
 	["key", "Escape"], ["waitlog", "kit editor: placing nothing", 10],
 	["waitlog_any", "kit editor: state: 5 entities", 10],
 	["click", 560, 340], ["waitlog", "kit editor: selected 6", 10], ["frames", 3],
-	["click", "DropDownList", "▼", 1162, 481], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
+	["click", "DropDownList", "▼", 1162, 527], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
 	["key", "Home"], ["key", "Enter"], ["waitlog", "kit editor: 6/1 place = all", 10],
 	["click", "Button", "Apply"], ["sync", 5000], ["frames", 3],
 	["shot", "\${OUT}/region.png"],
@@ -265,11 +266,11 @@ if [ "${1:-}" = web_touch ]; then
 	# put it back, and the play taps pointed past the button. The player
 	# still settles a few hundredths off (0.5, 0.5): the taps are where the
 	# use (566, 389) and the dig of (1, 0, 3) under the button (575, 470)
-	# hit the same with the eye 0.15 off either way. The open palette (470
-	# tall in a root of 400) makes the UI fit shrink it; the screen still
-	# reads narrow ([KIT_NARROW_RESCALE]), so the bar's Palette stays and
-	# is tapped by label, and the drag starts at kit/button after the fit,
-	# by label too ([KIT_SCENES]' Scene dropdown moved the palette's rows).
+	# hit the same with the eye 0.15 off either way. The open panel
+	# ([KIT_EDITOR_PANELS]) scrolls within the screen; the screen reads
+	# narrow, so the bar's Tools stays and is tapped by label, and the drag
+	# starts at kit/button by label too ([KIT_SCENES]' Scene dropdown
+	# moved the palette's rows).
 	check_tmp workbench_web_touch; t=$CHECK_TMP
 	cat > "$t/steps.json" <<'J'
 [
@@ -294,12 +295,12 @@ if [ "${1:-}" = web_touch ]; then
 	["tap", "Button", "Edit", 500, 174], ["waitlog", "kit editor: state: 1 entities", 20],
 	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 5],
 	["shot", "${OUT}/plan.png"],
-	["tap", "Button", "Palette"],
-	["waitlog", "UI scale fitted to the screen: x0", 5], ["frames", 3],
+	["tap", "Button", "Tools"],
+	["waitlog", "kit editor: the panel ", 5], ["frames", 3],
 	["shot", "${OUT}/palette.png"],
 	["drag", "Button", "kit/button", 572, 198, "touch"],
 	["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
-	["tap", "Button", "Palette"], ["frames", 3],
+	["tap", "Button", "Tools"], ["frames", 3],
 	["tap", 572, 198], ["waitlog", "kit editor: selected 3", 10], ["frames", 3],
 	["drag", 572, 198, 510, 198, "touch"],
 	["waitlog", "kit editor: moved 1 by -3, 0", 10], ["frames", 5],
@@ -311,9 +312,11 @@ if [ "${1:-}" = web_touch ]; then
 	["chord", "Ctrl+d"], ["waitlog", "kit editor: state: 6 entities", 10],
 	["chord", "Ctrl+d"], ["waitlog", "kit editor: state: 7 entities", 10],
 	["chord", "Ctrl+d"], ["waitlog", "kit editor: state: 8 entities", 10],
+	["tap", "Button", "Tools"], ["frames", 3],
+	["tap", "Button", "Entities"], ["frames", 3],
 	["tap", "Button", "Positioned (*"],
 	["waitlog", "kit editor: list Positioned", 10],
-	["waitlog", "kit editor: the list ", 10], ["frames", 5],
+	["waitlog", "kit editor: the panel ", 10], ["frames", 5],
 	["shot", "${OUT}/list.png"],
 	["tap", "Button", "Scene (*"], ["waitlog", "kit editor: list Scene", 10],
 	["tap", "Button", "Game-wide (*"],
@@ -324,16 +327,19 @@ if [ "${1:-}" = web_touch ]; then
 	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 4 entities", 10],
 	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 3 entities", 10],
 	["frames", 3],
-	["tap", "Button", "Palette"], ["frames", 3],
+	["tap", "Button", "Components"], ["frames", 3],
+	["drag", 250, 380, 250, 300, "touch"], ["frames", 5],
 	["tap", "Button", "kit/region"], ["waitlog", "kit editor: placing kit/region", 10],
+	["tap", "Button", "Tools"], ["frames", 3],
 	["tap", 469, 240], ["waitlog", "kit editor: state: 4 entities", 10],
 	["key", "Escape"], ["frames", 3],
-	["tap", "Button", "Palette"], ["frames", 3],
 	["tap", 469, 240], ["waitlog", "kit editor: selected 10", 10],
 	["key", "PageDown"], ["waitlog", "kit editor: state: 4 entities, 5 to undo", 10],
 	["tap", "Button", "Inspector"], ["frames", 5],
 	["waitlog", "kit editor: the inspector [0-9]+ of [0-9]+ tall", 10],
 	["shot", "${OUT}/inspector.png"],
+	["tap", 972, 394], ["frames", 3],
+	["tap", 972, 394], ["frames", 3],
 	["tap", 972, 394], ["frames", 3],
 	["tap", 972, 394], ["frames", 3],
 	["tap", 972, 394], ["frames", 3],
@@ -790,8 +796,28 @@ frames 20
 sync 5000
 keypress F6
 wait_log 10000 kit editor: state: 19 entities, 11 to undo
-event kit_edit {"op": "always_keep", "on": true}
-wait_log 10000 kit editor: state: 19 entities, 12 to undo
+# [KIT_EDITOR_PANELS] Always keep builds, in the Settings' Kit section
+# (under the fold: the window scrolled to it)
+keypress Escape
+wait_log 10000 pause: the menu shown
+click Button "Settings..."
+wait_log 5000 Game settings shown
+frames 3
+mouse_pos 512 350
+mouse_wheel -5
+frames 2
+mouse_wheel -5
+frames 2
+mouse_wheel -5
+frames 3
+click Button "Always keep builds: no"
+wait_log_any 10000 kit editor: always keep builds: yes
+wait_log_any 10000 kit editor: state: 19 entities, 12 to undo
+frames 3
+keypress Escape
+wait_log 5000 pause: the menu shown
+keypress Escape
+wait_log 5000 pause: the menu closed
 keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0 -1 -0.6
@@ -1231,9 +1257,11 @@ wait_log 5000 kit editor: moved 1 by 2, 0, 0 from the inspector
 wait_log_any 5000 kit editor: state: 5 entities, 7 to undo
 click Button "kit/world"
 wait_log 5000 kit editor: placing kit/world
-mouse_pos 300 450
+mouse_pos 600 450
 mouse_click left
 wait_log_any 5000 kit editor: state: 6 entities, 8 to undo
+frames 3
+click Button "Entities"
 frames 3
 click Button "Scene (*"
 wait_log 5000 kit editor: list Scene
@@ -1293,7 +1321,7 @@ click Button "Positioned (*"
 wait_log 5000 kit editor: list Positioned
 frames 3
 screenshot @T@/list_all.png
-mouse_pos 150 600
+mouse_pos 150 120
 mouse_wheel -1
 frames 2
 mouse_wheel -1
@@ -1376,7 +1404,7 @@ wait_log 10000 kit editor: state: 4 entities
 keypress F1
 wait_log 5000 kit editor: the view is 2D
 frames 3
-tap Button "Palette"
+tap Button "Tools"
 frames 5
 finger_down 1 Button "kit/button"
 frames 2
@@ -1390,7 +1418,7 @@ screenshot @T@/t_ghost.png
 finger_up 1
 wait_log 10000 kit editor: state: 5 entities
 wait_log_any 5000 kit: entity 6 drawn
-tap Button "Palette"
+tap Button "Tools"
 frames 5
 tap 700 300
 wait_log 5000 kit editor: selected 6
@@ -1506,6 +1534,9 @@ keypress F6
 wait_log 10000 kit editor: state: 1 entities
 wait_log_any 120000 kit editor: people: kitbob
 frames 3
+click Button "Voxels*"
+wait_log 5000 kit editor: tool voxels
+frames 3
 click Button "New voxel type..."
 frames 3
 click Button "Upload a PNG..."
@@ -1535,7 +1566,7 @@ screenshot @T@/voxel_dialog.png
 click Button "Make"
 wait_log 10000 voxels to place
 frames 3
-click DropDownList "▼" 51 226
+click DropDownList "▼" 180 70
 frames 3
 click Text "kitboss/frost"
 wait_log 5000 kit editor: in hand kitboss/frost

@@ -124,7 +124,8 @@ EOF
 	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "decorations", "value": false}'
 	echo "wait_log_any 30000 kit: World: generated again"
-	# 4: the sign, selected before the Box tool
+	# 4: the sign, selected before the Box tool (the Box tab's fields
+	# clicked at the left, not the sign's position in the inspector)
 	edit '{"op": "place", "type": "kit/sign", "pos": [7, 1, 6]}'
 	cat <<EOF
 event kit_select 4
@@ -136,12 +137,12 @@ wait_log 5000 kit editor: tool box
 event kit_box 6 1 4 8 2 10
 wait_log_any 5000 kit editor: box 6,1,4,8,2,10
 frames 3
-click LineEdit "7"
+click LineEdit "7" 100 100
 keypress End
 keypress Backspace
 text 5
 wait_log 5000 kit editor: box 6,1,4,8,2,8 (typed size d)
-click LineEdit "6"
+click LineEdit "6" 100 100
 keypress End
 keypress Backspace
 text 9

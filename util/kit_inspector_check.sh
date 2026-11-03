@@ -40,6 +40,8 @@ wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "place", "type": "kit/controls", "pos": [0, 1, 0]}
 wait_log 10000 entities, 1 to undo
 frames 5
+click Button "Entities"
+frames 3
 click Button "Select"
 wait_log 5000 kit editor: selected 3
 frames 5
