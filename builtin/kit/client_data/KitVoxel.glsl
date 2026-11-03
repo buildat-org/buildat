@@ -20,7 +20,8 @@
 //       lit in linear and encoded once at its end, so the albedo (tinted)
 //       is decoded here, as luanti_client's PBRVoxel.glsl does, and with
 //       KITSKY the light bounced (the mesher's display level) too.
-//       simplified: 2.2, not the sRGB curve.
+//       simplified: 2.2, not the sRGB curve. A translucent face's alpha
+//       is made linear's too ([KIT_PHYS_WATER_PINK]).
 //
 // The vertex colour is light, not albedo, so it is not multiplied into the
 // diffuse colour as LitSolid's VERTEXCOLOR does.
@@ -181,6 +182,13 @@ void PS()
 
     #ifdef KITLINEAR
         diffColor.rgb = pow(diffColor.rgb, vec3(2.2));
+        // [KIT_PHYS_WATER_PINK] A translucent face (water, glass) lets
+        // through what sRGB blending let through: (1 - a) there was a share
+        // of the encoded value, (1 - a)^2.2 of the linear one. With a's own
+        // share the bright bed under water (sand: ~0.6 linear against
+        // water's ~0.05) outshone the water and read pink.
+        // simplified: a's curve alone; no absorption by depth
+        diffColor.a = 1.0 - pow(1.0 - diffColor.a, 2.2);
     #endif
 
     // Get material specular albedo
