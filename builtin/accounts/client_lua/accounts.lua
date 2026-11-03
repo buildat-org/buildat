@@ -20,7 +20,8 @@
 -- A scripted client joins by the environment: <env>_NAME, <env>_PASSWORD,
 -- <env>_CODE and <env>_TOTP, or by a Starport ID's token in <env>_STARPORT;
 -- <env>_CREATE=1 makes the account (else an unknown name is refused).
--- (env is "BUILDAT_JOIN" by default).
+-- (env is "BUILDAT_JOIN" by default). start{local_login = true}: the
+-- launcher's own user (hello.local) is logged in without the dialog.
 local log = buildat.Logger("accounts")
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
@@ -725,6 +726,16 @@ local function on_hello(data)
 				buildat.get_env(env .. "_KEEP") == "1",
 				buildat.get_env(env .. "_TOTP") or "", "",
 				buildat.get_env(env .. "_CREATE") == "1")
+	elseif opts.local_login and M.hello["local"] == 1 and not M.auto_tried then
+		-- [WB_LAN] The launcher's own user, as the name kept here or the
+		-- launcher's default name: the server takes it without a password
+		-- (the first such account is the admin)
+		M.auto_tried = true
+		local kept = buildat.storage_read("name") or ""
+		M.name = kept ~= "" and kept or
+				buildat.get_preference("default_username") or "User"
+		log:info("Logging in as " .. M.name .. " on this computer")
+		send_login(M.name, "", "", nil, false, "", "")
 	elseif totp_wait() ~= "" then
 		-- Back at the code, if the server still waits for it
 		M.name = buildat.storage_read("name") or ""

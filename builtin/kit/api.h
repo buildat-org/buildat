@@ -817,7 +817,8 @@ namespace kit
 		// by a movement (kit/walker...) on the server and predicted on their
 		// client (kit.controls{} there), the camera, the pointer and the
 		// movement the app root's kit/controls (its defaults with none).
-		// set_peer()'s position is then only where a player first appears,
+		// set_peer()'s position is then only where a player first appears
+		// (their body put there, unless a spawner on the join put it),
 		// put_player() puts them, a teleport puts them without
 		// kit:move_player. False: the app moves them (set_peer)
 		bool controls = false;

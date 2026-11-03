@@ -386,23 +386,15 @@ J
 		/kit editor: 10\/1 place = all/ && o { ok = 1; exit }
 		END { exit !ok }' "$t/out/page.log" ||
 		fail "the UI scale moved with the inspector's lists up ($t/out/page.log)"
-	# [KIT_BAR_SERVER_OVERLAP] The bar's first row clear of the Server
-	# button at every width the fit gave it
-	awk '/kit editor: bar.s first row ends at/ { n++; e = $(NF - 5) + 0;
-			l = $NF + 0; if (e >= l) { print; bad = 1 } }
-		END { exit bad || !n }' "$t/out/page.log" ||
-		fail "the bar's first row under the Server button ($t/out/page.log)"
+	# ([WB_LAN] No corner Server button: [KIT_BAR_SERVER_OVERLAP] and
+	# [KIT_EDIT_NOTICE_SERVER] have nothing to clear here; the account is
+	# the pause menu's My account...)
 	# [KIT_LIST_TABS] Each tab lists its own: the seven kit/buttons
 	# placed, nothing game-wide nor of the scene
 	for w in "kit editor: list Positioned (7): 3, 4, 5, 6, 7, 8, 9" \
 			"kit editor: list Scene (0): " "kit editor: list Game-wide (0): "; do
 		grep -aq "$w\$" "$t/out/page.log" || fail "no \"$w\" in $t/out/page.log"
 	done
-	# [KIT_EDIT_NOTICE_SERVER] "You may edit here" under it too
-	awk '/ui_utils: notification: from y/ { n++; y = $(NF - 6) + 0;
-			f = $NF + 0; if (y <= f) { print; bad = 1 } }
-		END { exit bad || !n }' "$t/out/page.log" ||
-		fail "a notice over the Server button ($t/out/page.log)"
 	for w in "An edit by webboss: placed kit/button 3 at [4,1,3]" \
 			"An edit by webboss: moved 3 to [1,1,3]" \
 			"kit/button 3: pressed by webboss" \

@@ -9,6 +9,7 @@
 #include "core/log.h"
 #include "core/json.h"
 #include <algorithm>
+#include <map>
 #include <set>
 #define MODULE "world_menu"
 
@@ -30,6 +31,8 @@ struct Module: public interface::Module, public Interface
 	bool m_new = false;
 	// Who has the client half, and who has the menu up
 	std::set<PeerId> m_scripted, m_shown;
+	// What each menu up was sent: list_kind()
+	std::map<PeerId, int> m_kind;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server)
@@ -135,14 +138,24 @@ struct Module: public interface::Module, public Interface
 	{
 		m_scripted.erase(event.info.id);
 		m_shown.erase(event.info.id);
+		m_kind.erase(event.info.id);
 	}
 
 	// To every menu up: the peer's own may now pick, and the rest's wait
-	// text depends on whether there is an admin
+	// text depends on whether there is an admin. Only to those it changes:
+	// a list sent again redraws the menu ([WB_LAN]: the login's own peer,
+	// shown the launch's name screen in this login's event, got the list)
 	void on_account(const accounts::Login &)
 	{
 		for(PeerId peer : m_shown)
-			send_list(peer);
+			if(m_kind[peer] != list_kind(peer))
+				send_list(peer);
+	}
+
+	// 2 may pick; else 1 an admin exists, 0 none
+	int list_kind(PeerId peer)
+	{
+		return open() && picker(peer) ? 2 : any_admin() ? 1 : 0;
 	}
 
 	// [WORLD_MENU_ADMIN] Who picks the world: the launcher's own client
@@ -209,6 +222,7 @@ struct Module: public interface::Module, public Interface
 		out.set("title", m_config.title);
 		out.set("noun", m_config.noun);
 		const bool pick = open() && picker(peer);
+		m_kind[peer] = list_kind(peer);
 		out.set("running", m_running ? m_running_name : ss_());
 		out.set("note", note);
 		out.set("may_pick", pick);

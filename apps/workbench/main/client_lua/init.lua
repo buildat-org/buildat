@@ -21,10 +21,10 @@
 --   the right button held looks round, a click goes up into the crosshair
 --   (Escape back down). The menu's "Run" and "End" (a builder's): the
 --   server Running or Ended, the start put back ([KIT] 4c)
---   L: log in (builtin/accounts' dialog)
 --   Escape: the pause menu (extensions/pause_menu: Continue, Kit's Edit
---   and Run/End, Chat, Settings, Leave); in the tools Kit's first (a
---   pending link, a drag, the crosshair)
+--   and Run/End, Chat, My account (the Server window: Open to LAN for the
+--   launcher's own user, an admin's pages), Settings, Leave); in the tools
+--   Kit's first (a pending link, a drag, the crosshair)
 -- A touchscreen (BUILDAT_TOUCH=1, Kit's controls.lua): a stick at the
 -- lower left, a drag elsewhere turns the view, a tap is the left click at
 -- the finger and a finger held still the right click; Jump (a car's Gas
@@ -54,17 +54,16 @@ local hand = MATERIALS[1]
 local TOUCH = buildat.get_env("BUILDAT_TOUCH") == "1"
 -- [KIT_INPUT_ACTIONS] Workbench's own keys, declared with Kit's (one set
 -- for edit mode and play, the pause menu's Settings, Key bindings)
-local KEYS = {{id = "login", label = "Log in", default = "L"}}
+local KEYS = {}
 for i = 1, 10 do
 	KEYS[#KEYS + 1] = {id = "voxel" .. i, label = "Voxel in hand: " ..
 		MATERIALS[i], default = tostring(i % 10)}
 end
 kit.declare_keys("Workbench", KEYS)
 
--- A login by builtin/accounts: "l", or at once where BUILDAT_JOIN_NAME
--- names one (main:account: unless join.lua's login was it,
--- [WORKBENCH_PROJECTS]); the launcher's own user is the admin without one.
--- Its console is builtin/chat's, the menu's Chat
+-- The login was join.lua's ([WB_LAN]); this instance has the account's
+-- packets from here on (main:account "1"). Its console is builtin/chat's,
+-- the menu's Chat
 local accounts = nil
 do
 	local _, err, acc = buildat.run_script_file("accounts/accounts.lua")
@@ -75,19 +74,9 @@ do
 		log:warning("workbench: no accounts.lua: " .. tostring(err))
 	end
 end
-local logging_in = false
-local function log_in()
-	if logging_in or not accounts then
-		return
-	end
-	logging_in = true
-	accounts.start({title = "Workbench"})
-end
 buildat.sub_packet("main:account", function(data)
 	if data == "1" and accounts then
 		accounts.logged_in = true
-	elseif buildat.get_env("BUILDAT_JOIN_NAME") then
-		log_in()
 	end
 end)
 
@@ -250,6 +239,19 @@ end
 menu = pause_menu.new{capture = capture, accounts = accounts,
 	on_settings_closed = function() kit.declare_keys() end}
 kit.add_menu_items(menu)
+-- [WB_LAN] The Server window at My account (as skeldat's): Open to LAN
+-- there for the launcher's own user; its Close, a click off it or Escape
+-- back to the menu
+if accounts then
+	menu.add(function()
+		local me = accounts.who()
+		return "My account" .. (me and " (" .. me .. ")" or "") .. "..."
+	end, function()
+		menu.hold(function() accounts.server_close() end)
+		log:info("pause: my account shown")
+		accounts.account_page(function() menu.back() end)
+	end, {order = 30, page = true})
+end
 -- The controls: their clicks the app's where the movement takes none
 kit.controls{camera = camera_node, capture = capture,
 	paused = function() return menu.held() end,
@@ -270,8 +272,6 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 		end
 	elseif menu.held() then
 		return
-	elseif kit.key("login", key) then
-		log_in()
 	else
 		for i = 1, 10 do
 			if kit.key("voxel" .. i, key) then
@@ -335,7 +335,7 @@ magic.SubscribeToEvent("Update", function()
 			"move  [exit]: leave the seat  Esc: menu" or
 			"[forward][left][back][right] [jump]: walk, jump  left: use or " ..
 			"dig  right: place  [voxel1]-[voxel10]: voxel  " ..
-			"[edit]: edit  [login]: log in  Esc: menu"))
+			"[edit]: edit  Esc: menu"))
 	local right = kit.touch_bar_left() or magic.ui.root.width
 	local w = math.max(100, right - 10 - 12)
 	if help_text.width ~= w then

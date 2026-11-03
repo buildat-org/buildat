@@ -412,26 +412,28 @@ struct Module: public interface::Module
 		});
 	}
 
-	// The project if it runs; else Manage, after a login (but the
-	// launcher's own client's): an admin picks
+	// After a login ([WB_LAN]: everyone's, the launcher's own user's by
+	// join.lua without the dialog), the project if it runs; else Manage,
+	// where an admin picks
 	void on_files(const client_file::FilesTransmitted &event)
 	{
 		const size_t peer = event.recipient;
-		if(m_save){
-			enter(peer);
-			return;
-		}
-		bool joined = false;
-		accounts::access(m_server, [&](accounts::Interface *a){
-			joined = a->is_local(peer) || !a->name_of(peer).empty();
-		});
+		// None in the web client's own server (builtin/accounts is native)
+		bool joined = !m_server->has_module("accounts");
+		if(!joined)
+			accounts::access(m_server, [&](accounts::Interface *a){
+				joined = !a->name_of(peer).empty();
+			});
 		if(!joined){
 			if(m_joining.insert(peer).second)
 				network::send(m_server, peer, "core:run_script",
 						"buildat.run_script_file(\"main/join.lua\")");
 			return;
 		}
-		manage(peer);
+		if(m_save)
+			enter(peer);
+		else
+			manage(peer);
 	}
 
 	void manage(size_t peer)
@@ -454,8 +456,8 @@ struct Module: public interface::Module
 		if(m_in.insert(peer).second){
 			network::send(m_server, peer, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
-			// Whether it logged in already (Manage's login): its client
-			// logs in again only if not
+			// Logged in (join.lua's): the menu's accounts instance takes
+			// the account's packets from here on; "" without accounts
 			network::send(m_server, peer, "main:account", name.empty() ?
 					"" : "1");
 		}
@@ -477,10 +479,14 @@ struct Module: public interface::Module
 		kit::access(m_server, [&](kit::Interface *k){
 			k->world_spawn(x, y, z);
 		});
+		// A peer's first placing: Kit puts their body there, or a spawner
+		// elsewhere, which put_player() would undo
+		const bool placed = m_pos.count(peer) != 0;
 		place(peer, x, y, z);
-		kit::access(m_server, [&](kit::Interface *k){
-			k->put_player(peer, x, y, z);
-		});
+		if(placed)
+			kit::access(m_server, [&](kit::Interface *k){
+				k->put_player(peer, x, y, z);
+			});
 	}
 
 	// A round starts and no spawner places the player: the default

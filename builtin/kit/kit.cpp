@@ -13001,6 +13001,10 @@ struct Module: public interface::Module, public Interface
 		SessionScope sc(*this, id);
 		const bool join = !m_peers.count(peer);
 		set_peer_u(peer, name, scene, x, y, z);
+		// A body first put where the app placed them, but for one the join
+		// put already (a spawner's teleport)
+		if(join && m_host.controls && !m_bodies[peer].put)
+			put_player_u(peer, x, y, z, NAN);
 		// A draft's builder: their tools on there; and back in the default
 		// as they were in the session ([KIT_DRAFT_LEAVE_PLAY])
 		GameSession *s = active_session();
