@@ -139,7 +139,7 @@ namespace app
 		// **Kit's lighting** ([KIT_FORCE_CARTOON], user 2026-11-03): "game"
 		// draws what the game sets, "cartoon" draws its physical lighting as
 		// cartoon on this client (a weak device); empty is the device's
-		// default, cartoon on software GL (soft_gl())
+		// default, cartoon on software GL (soft_gl()), set as "auto"
 		ss_ lighting;
 	};
 

@@ -433,11 +433,12 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			continue;
 		}
 		if(key == "lighting"){
-			if(value != "game" && value != "cartoon"){
-				*error = "lighting: game or cartoon";
+			if(value != "auto" && value != "game" && value != "cartoon"){
+				*error = "lighting: auto, game or cartoon";
 				return false;
 			}
-			opt->lighting = value;
+			// [LIGHTING_PREF_LABELS] auto: unset, the device's default
+			opt->lighting = value == "auto" ? "" : value;
 			continue;
 		}
 		if(key == "screen_orientation"){
@@ -635,7 +636,9 @@ static void check_parse_preference_options()
 		throw Exception("parse_preference_options: fov.<app>'s values");
 	if(app::parse_preference_options("lighting=physical", &o, &err) ||
 			!app::parse_preference_options("lighting=cartoon", &o, &err) ||
-			o.lighting != "cartoon")
+			o.lighting != "cartoon" ||
+			!app::parse_preference_options("lighting=auto", &o, &err) ||
+			!o.lighting.empty())
 		throw Exception("parse_preference_options: lighting's choices");
 	if(app::parse_preference_options("nonesuch=1", &o, &err))
 		throw Exception("parse_preference_options: took an unknown key");

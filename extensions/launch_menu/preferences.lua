@@ -104,16 +104,22 @@ local PREFERENCES = {
 		values = {false, true},
 	},
 	-- [KIT_FORCE_CARTOON] Kit's physical lighting drawn as cartoon on this
-	-- client, a weak device's; unset it is cartoon on software GL.
+	-- client, a weak device's; unset ("auto") it is cartoon on software GL.
 	-- [SOFT_GL_CARTOON] skeldat and hillclimb draw no shadows and a shorter
-	-- view by it
+	-- view by it. get_preference("lighting") is what it comes to; whether
+	-- it is unset is "lighting_auto" ([LIGHTING_PREF_LABELS])
 	{
 		name = "lighting",
 		label = "Lighting",
-		values = {"game", "cartoon"},
+		values = {"auto", "game", "cartoon"},
+		get = function()
+			return api.get_preference("lighting_auto") and "auto" or
+					api.get_preference("lighting")
+		end,
 		show = function(v)
-			return v == "game" and "as the game sets" or
-					"light (no shadows, less drawn)"
+			return v == "auto" and "Automatic" or
+					v == "game" and "Don't override" or
+					"Cartoon (lightweight)"
 		end,
 	},
 	-- The UI scale; "auto" follows the window
@@ -341,7 +347,7 @@ function M.show()
 	title:SetFontSize(20)
 
 	for _, pref in ipairs(PREFERENCES) do
-		local value = api.get_preference(pref.name)
+		local value = pref.get and pref.get() or api.get_preference(pref.name)
 		if value == nil and pref.web then
 			-- Natively: not a preference here
 		elseif value == nil then
@@ -852,7 +858,8 @@ function M.show_game(o, app_key, extra)
 					choices[i] = {show_value(pref, v), i}
 				end
 				dropdown(w, pref.label, choices,
-						nearest_index(pref, api.get_preference(pref.name)),
+						nearest_index(pref, pref.get and pref.get() or
+								api.get_preference(pref.name)),
 						function(i)
 					local ok, err = api.set_preference(pref.name, pref.values[i])
 					if not ok then

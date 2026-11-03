@@ -1971,6 +1971,10 @@
 		else if(name == "lighting")
 			lua_pushstring(L, !o.lighting.empty() ? o.lighting.c_str() :
 					soft_gl() ? "cartoon" : "game");
+		// Not a preference: whether "lighting" is unset (the settings'
+		// "Automatic", [LIGHTING_PREF_LABELS])
+		else if(name == "lighting_auto")
+			lua_pushboolean(L, o.lighting.empty());
 		else if(name == "log_level")
 			lua_pushinteger(L, o.log_level);
 		else if(name == "server_log_level")

@@ -1227,7 +1227,8 @@ local function a_preference(name)
 end
 buildat.safe.list_preferences = __buildat_list_preferences
 buildat.safe.get_preference = function(name)
-	if not a_preference(name) then
+	-- lighting_auto: whether "lighting" is unset ([LIGHTING_PREF_LABELS])
+	if name ~= "lighting_auto" and not a_preference(name) then
 		return nil
 	end
 	return __buildat_get_preference(name)
