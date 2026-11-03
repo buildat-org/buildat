@@ -104,6 +104,11 @@ struct Map: public Instance
 
 	~Map()
 	{
+		// [KIT_WORLD_REGEN_SAVE] What was written since the last tick's
+		// commit is saved still: a map regenerated just before the server
+		// stops was lost, the rest of the save (Kit's rows) newer than it.
+		// The store outlives the map: storage is below this module
+		save_written(m_written);
 		// The node's RigidBody holds the shape in its compound: gone first
 		if(m_node_id){
 			main_context::access(m_server, [&](main_context::Interface *imc){
@@ -449,6 +454,7 @@ struct Map: public Instance
 	}
 
 	void commit();
+	void save_written(const std::map<int, Rect> &written);
 
 	ss_ init_packet()
 	{
@@ -583,6 +589,20 @@ struct Module: public interface::Module, public Interface
 	}
 };
 
+void Map::save_written(const std::map<int, Rect> &written)
+{
+	if(!m_store || written.empty())
+		return;
+	m_store->batch([&](){
+		m_store->set(m_name+"/meta", meta());
+		for(auto &w : written){
+			const int cx = w.first % m_size.chunks_x;
+			const int cz = w.first / m_size.chunks_x;
+			m_store->set(chunk_key(cx, cz), chunk_data(cx, cz));
+		}
+	});
+}
+
 void Map::commit()
 {
 	if(m_written.empty() && m_field_pending.empty() && m_node_id)
@@ -601,16 +621,7 @@ void Map::commit()
 	m_field_pending.clear();
 	if(written.empty())
 		return;
-	if(m_store){
-		m_store->batch([&](){
-			m_store->set(m_name+"/meta", meta());
-			for(auto &w : written){
-				const int cx = w.first % m_size.chunks_x;
-				const int cz = w.first / m_size.chunks_x;
-				m_store->set(chunk_key(cx, cz), chunk_data(cx, cz));
-			}
-		});
-	}
+	save_written(written);
 	sv_<replicate::PeerId> peers;
 	replicate::access(m_server, [&](replicate::Interface *irep){
 		peers = irep->find_peers_on_scene(m_scene);
