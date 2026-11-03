@@ -1082,7 +1082,7 @@ wait_log 10000 kit editor: state: 1 entities
 keypress F1
 wait_log 5000 kit editor: the view is 2D
 frames 3
-mouse_pos 70 89
+mouse_pos 70 107
 mouse_down left
 frames 2
 mouse_pos 300 200

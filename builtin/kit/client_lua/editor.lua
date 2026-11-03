@@ -1098,7 +1098,8 @@ local palette
 -- chosen is its tool on; a tool on (its key: T, V, B) is its tab; put away
 -- (Escape, a right click) the panel goes back to Components or Entities,
 -- whichever was last (S.panel_tab)
-NT.TABS = {"Components", "Terrain", "Voxels", "Box", "Entities"}
+-- [KIT_TABS_TWO_ROWS] in two rows, the panel as narrow as its content
+NT.TABS = {{"Components", "Terrain", "Voxels"}, {"Box", "Entities"}}
 NT.TOOL_TAB = {terrain = "Terrain", voxels = "Voxels", box = "Box"}
 NT.TAB_KEY = {Terrain = "terrain", Voxels = "voxels", Box = "box"}
 -- Where each tab's body was scrolled
@@ -1505,25 +1506,27 @@ palette = function()
 	W.palette = w
 	local tab = NT.tab()
 	NT.shown = tab == "Entities" and "Entities/" .. (S.list_tab or "") or tab
-	-- The tabs, in as many rows as the screen's width needs
-	-- (with room for the row's spacing and the scroll bar's)
+	-- The tabs, NT.TABS's rows, each in as many as the screen's width
+	-- needs (with room for the row's spacing and the scroll bar's)
 	local room = math.min(screen_ui.w or 1e9, magic.ui.root.width) - 16 - 12 -
 			24
-	local r, used = row(w), 0
-	for _, name in ipairs(NT.TABS) do
-		if NT.tab_shown(name) then
-			local key = NT.TAB_KEY[name]
-			local s = name .. ((key and not S.touch) and
-					" (" .. M.key_name(key) .. ")" or "")
-			-- Measured on the side, as the bar's (place())
-			local probe = button(magic.ui.root, s, function() end)
-			local bw = probe.minWidth + 4
-			probe:Remove()
-			if used > 0 and used + bw > room then
-				r, used = row(w), 0
+	for _, names in ipairs(NT.TABS) do
+		local r, used = nil, 0
+		for _, name in ipairs(names) do
+			if NT.tab_shown(name) then
+				local key = NT.TAB_KEY[name]
+				local s = name .. ((key and not S.touch) and
+						" (" .. M.key_name(key) .. ")" or "")
+				-- Measured on the side, as the bar's (place())
+				local probe = button(magic.ui.root, s, function() end)
+				local bw = probe.minWidth + 4
+				probe:Remove()
+				if not r or used > 0 and used + bw > room then
+					r, used = row(w), 0
+				end
+				button(r, s, function() NT.choose(name) end, name == tab)
+				used = used + bw
 			end
-			button(r, s, function() NT.choose(name) end, name == tab)
-			used = used + bw
 		end
 	end
 	local view = w:CreateChild("ScrollView")
