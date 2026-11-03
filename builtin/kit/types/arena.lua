@@ -4,7 +4,8 @@
 -- ends on the input "end", after `duration` seconds (0: when ended), or
 -- from inside the session (its own copy there given "end"); its players
 -- are back in the default round then. "started" and "ended" carry the
--- session's id; "status" is shown. Its copy in the session starts none
+-- session's id; "status" says it. Its pad is drawn at its own cell. Its
+-- copy in the session starts none
 return {
 	version = 1,
 	zone = "size",
@@ -18,7 +19,8 @@ return {
 		session = {default = 0},
 		status = {default = "waiting", shared = true},
 	},
-	gizmo = {shape = "box", size = 0.3, color = "#f0a030"},
+	-- Its pad, the zone's first cell's floor, seen in play
+	look = {shape = "box", size = {1, 0.1, 1}, color = "#f0a030"},
 	inputs = {["end"] = "none"},
 	outputs = {started = "number", ended = "number"},
 	on_enter = function(c, by)
