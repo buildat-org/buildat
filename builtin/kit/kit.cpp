@@ -1258,6 +1258,11 @@ struct Module: public interface::Module, public Interface
 			return std::make_pair(b, why);
 		});
 		sub(m_server, "core:tick", &Module::on_tick);
+		// [KIT_SHUTDOWN_SAVE] Synchronous, every save still open: what
+		// changed since the last tick (a mark, the runtime) was lost at a
+		// stop before the next one
+		sub(m_server, "core:shutdown", &Module::on_shutdown);
+		sub(m_server, "core:save", &Module::on_shutdown);
 		// [KIT_DIG_STOP_ORDER] A client's kit packets are handled once
 		// every module has handled what the client sent before them: a dig
 		// (the app's packet, its module's thread) sent just before a Stop
@@ -2592,6 +2597,29 @@ struct Module: public interface::Module, public Interface
 		for(unsigned i = 0; i < ins.size(); i++)
 			if(ins.at(i).is_string())
 				in.inside.insert(ins.at(i).as_string());
+	}
+
+	void on_shutdown()
+	{
+		if(!m_hosted)
+			return;
+		size_t n = 0;
+		auto save = [&](){
+			n += m_runtime_dirty + m_marks_dirty.size();
+			save_runtime();
+			save_marks();
+		};
+		save();
+		sv_<uint64_t> ids;
+		for(auto &s : m_sessions)
+			ids.push_back(s.first);
+		for(uint64_t id : ids){
+			SessionScope sc(*this, id);
+			save();
+		}
+		if(n)
+			log_i(MODULE, "Kit: saved at the stop: %zu rows changed since the"
+					" last tick (the runtime, marks)", n);
 	}
 
 	void save_runtime()

@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~40 s, ~1 min with a cold module cache (2026-10-30)
+# cost: ~1 min, more with a cold module cache (2026-11-03)
 # covers: builtin/kit/** apps/sample_kit/** builtin/accounts/**
 # [KIT] stage 3, Kit's editor, on apps/sample_kit and scripted clients
 # logged in through builtin/accounts. sample_kit plays once its floor is
@@ -43,6 +43,9 @@
 #      first), and out of edit mode the pillar dug (a build over the
 #      second). A restart, then End: both cells glass again (the edit, and
 #      the edit under the discarded build), as the probe captures them.
+#   6. ([KIT_SHUTDOWN_SAVE]) Part 5 again on its start, sample_kit stopping
+#      the server right after the dig, before a tick: Kit saves the dig's
+#      mark at the stop, and End after the restart discards the build.
 # KEEP_TMP=1 keeps the screenshots: edit mode with the inspector, a link
 # line, the marker's gizmo, play with none of them, the admin's builders
 # (kitbob's selection in their colour), and the Stopped server.
@@ -121,10 +124,10 @@ check_tmp kit_editor; t=$CHECK_TMP
 save="$t/user/apps/sample_kit/saves/world"
 cd "$here/Build"
 
-server() # <n>
+server() # <n>; USER_DIR another user path
 {
 	start_server "$t/srv$1.log" "Listening at" 300 auto \
-		bin/buildat_server -m ../apps/sample_kit -D "$t/user" -l 3 ||
+		bin/buildat_server -m ../apps/sample_kit -D "${USER_DIR:-$t/user}" -l 3 ||
 		fail "the server did not come up ($t/srv$1.log)"
 	CHECK_PIDS+=($SERVER_PID)
 }
@@ -505,6 +508,8 @@ event kit_edit {"op": "pattern", "id": 23, "comp": 0, "param": "a", "action": "c
 wait_log 10000 kit editor: state: 22 entities, 1 to undo
 quit
 EOF
+# 6's save: part 5's start
+cp -a "$t/user" "$t/user6"
 server 3
 BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE= client edits
 stop
@@ -523,5 +528,24 @@ print("  the probe after End:", a)
 assert a == "1 1 2;glass;0*2", a
 EOF
 echo "ok: an edit in play kept over a game write, and over a build discarded at End, past a restart"
-echo "PASS: Kit's editor: the admin's edit rights and builders kept in the accounts, edit mode, place, move, delete, the inspector, links, undo, each edit and grant refused without rights, live edits while Running, two builders' selections, Stop and Play, the authored row and the server's state over a restart, edits in play kept under a game write and a discarded build"
+
+# 6. [KIT_SHUTDOWN_SAVE] Part 5 again on its start, the server stopped by
+# sample_kit right after the dig (BUILDAT_SAMPLE_KIT_DIG_STOP), before a
+# tick: Kit's core:shutdown saves the dig's mark, and End discards it
+export USER_DIR="$t/user6"
+BUILDAT_SAMPLE_KIT_DIG_STOP=1 server 5
+sed -i "s|@T@|$t|g" "$t/edits.cmds"
+BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE= run_client 60 "$t/edits6.log" \
+	timeout 180 bin/buildat -C "$t/client_cache" -D "$t/cu_kitbob6" \
+	-s localhost:$SERVER_PORT -w 1024x700 -l 3 -c @"$t/edits.cmds"
+wait "$SERVER_PID" 2>/dev/null
+want "$t/srv5.log" "sample_kit: a dig at the pillar: written" \
+	"sample_kit: dug, stopping" "Kit: saved at the stop"
+server 6
+BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE= client end
+stop
+unset USER_DIR
+want "$t/srv6.log" "Stop by kitbob: 2 kept cells (edits, builds always kept) put back in, 1 builds discarded: kitbob 1"
+echo "ok: a dig's mark saved by a stop before the next tick"
+echo "PASS: Kit's editor: the admin's edit rights and builders kept in the accounts, edit mode, place, move, delete, the inspector, links, undo, each edit and grant refused without rights, live edits while Running, two builders' selections, Stop and Play, the authored row and the server's state over a restart, edits in play kept under a game write and a discarded build, a mark saved at a stop before a tick"
 # vim: set noet ts=4 sw=4:

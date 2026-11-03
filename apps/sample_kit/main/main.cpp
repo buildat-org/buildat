@@ -32,6 +32,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
+#include <cstdlib>
 #define MODULE "main"
 
 namespace sample_kit {
@@ -215,6 +216,10 @@ struct Module: public interface::Module
 			kit::access(m_server, [&](kit::Interface *k){
 				k->player_wrote(packet.sender, p.getX(), p.getY(), p.getZ());
 			});
+		// [KIT_SHUTDOWN_SAVE] kit_editor_check's: the server stopped
+		// before a tick saves the dig's mark
+		if(written && getenv("BUILDAT_SAMPLE_KIT_DIG_STOP"))
+			m_server->shutdown(0, "sample_kit: dug, stopping");
 	}
 };
 
