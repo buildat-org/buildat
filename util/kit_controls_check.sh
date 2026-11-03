@@ -23,8 +23,11 @@
 #      slab, a cube and slabs on cubes (wide stairs): walked up holding W
 #      only, y never going down, settled at 2.0 with no correction; Space
 #      jumps from the slab.
+#   6. ([WB_HOVER_OUT_OF_REACH]) The chase camera 20 behind, from the
+#      spawn: a button within the use range pointed out as used, one out
+#      of it (7.1 away) not, though the camera's reach covers it.
 # The screenshots (walk, shake, vignette, top_down, first_click, car, ball,
-# slabs, slab_top)
+# slabs, slab_top, reach_near, reach_far)
 # are kept with KEEP_TMP=1; look at them.
 #   util/kit_controls_check.sh
 set -u
@@ -246,6 +249,36 @@ delay 200
 keyup Space
 frames 120
 event kit_body
+keypress F6
+wait_log 10000 kit editor: state:
+EOF
+	# [WB_HOVER_OUT_OF_REACH] The chase camera 20 behind; a button (11)
+	# within the use range of the spawn, one (12) 7.1 from it: from the
+	# spawn, pointed at, 11 is pointed out as used, 12 not
+	set_p 4 camera '"chase"'
+	set_p 4 distance 20
+	edit '{"op": "place", "type": "kit/button", "pos": [2, 1, 3]}'
+	edit '{"op": "place", "type": "kit/button", "pos": [5, 1, 6]}'
+	cat <<'EOF'
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended (by kitboss)
+event kit_edit {"op": "play"}
+wait_log 10000 kit editor: the server is Running (by kitboss)
+keypress F6
+wait_log 10000 kit editor: edit mode off
+wait_log_any 10000 kit: controls: camera chase
+frames 60
+look_dir 0 -0.3 1
+frames 30
+event kit_body
+event kit_point_at 2 1 3
+wait_log 5000 kit: points at use 11
+frames 5
+screenshot @T@/reach_near.png
+event kit_point_at 5 1 6
+wait_log 5000 kit: points at
+frames 30
+screenshot @T@/reach_far.png
 quit
 EOF
 } > "$t/boss.cmds"
@@ -345,5 +378,15 @@ read -r xc yc zc ac corrc pc jc rc <<< "$(fields "$(body 22)")"
 awk -v a="$yc" 'BEGIN { exit !(a > 1.98 && a < 2.02) }' ||
 	fail "not back on the slab after the jump: $(body 22)"
 echo "ok: walked up slab, cube, slabs on cubes holding forward (y never down, settled at 2.0, no correction); a jump from the slab"
+# [WB_HOVER_OUT_OF_REACH] body 23: at the spawn, 12 out of the use range
+read -r x y z rest <<< "$(fields "$(body 23)")"
+awk -v x="$x" -v y="$y" -v z="$z" 'BEGIN { y = y + 0.5 - 1
+	d = sqrt((x - 5) ^ 2 + y ^ 2 + (z - 6) ^ 2)
+	e = sqrt((x - 2) ^ 2 + y ^ 2 + (z - 3) ^ 2)
+	exit !(d > 6.5 && e < 5.5) }' || fail "not at the spawn for the reach: $(body 23)"
+grep -a "kit: points at [a-z]" "$c" | tail -1 | sed 's/^.*kit:/  kit:/'
+grep -a "kit: points at use 11" -A1000 "$c" | grep -aq "kit: points at use 12" &&
+	fail "a button out of the use range pointed out as used ($c)"
+echo "ok: the chase camera 20 behind: a button in the use range pointed out as used, one out of it not"
 echo "PASS: Kit's controls on Workbench: kit/walker's walk and jump (prediction agreeing), jump off, a camera shake by a signal, effects, top-down click_to_move to the floor and to an object, first-person click_to_move, a car and a ball seated, driven and left"
 # vim: set noet ts=4 sw=4:

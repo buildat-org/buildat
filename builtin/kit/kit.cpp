@@ -11417,6 +11417,8 @@ struct Module: public interface::Module, public Interface
 		json::Value you = json::object(), parts = json::object();
 		you.set("id", (int64_t)p.player);
 		you.set("name", p.name);
+		// [WB_HOVER_OUT_OF_REACH] how far it may use things (kit:use's)
+		you.set("use_range", m_host.use_range);
 		for(auto &t : m_types)
 			if(!t.second.client.empty())
 				parts.set(t.first, t.second.client);

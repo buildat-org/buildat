@@ -517,6 +517,7 @@ end
 local function clicks_move()
 	return decl().click == true
 end
+M.clicks_move = clicks_move
 
 local function go_to(target)
 	local m = move()
@@ -684,7 +685,10 @@ function M.pointer_ray(x, y)
 	local node = O.camera
 	local cam = node:GetComponent("Camera")
 	local w, h = screen()
-	if not x then
+	if not x and C.aim then
+		local sp = cam:WorldToScreenPoint(C.aim)
+		x, y = sp.x * w, sp.y * h
+	elseif not x then
 		if M.pointer_free() and not TOUCH then
 			local mp = magic.input:GetMousePosition()
 			x, y = mp.x, mp.y
@@ -1173,6 +1177,17 @@ magic.SubscribeToEvent("command_seq:kit_click_at", function(_, data)
 	local w, h = screen()
 	log:info(string.format("kit: a click at %d,%d", sp.x * w, sp.y * h))
 	click(sp.x * w, sp.y * h, true)
+end)
+
+-- For a drive: "event kit_point_at <x> <y> <z>" points the pointer (the
+-- crosshair or the cursor) where that point is on the screen, following
+-- it as the camera moves; "event kit_point_at" lets go
+magic.SubscribeToEvent("command_seq:kit_point_at", function(_, data)
+	local x, y, z = data:GetString("Param"):match("^(%S+) (%S+) (%S+)")
+	C.aim = x and magic.Vector3(tonumber(x) or 0, tonumber(y) or 0,
+			tonumber(z) or 0) or nil
+	log:info("kit: pointing at " .. (x and x .. "," .. y .. "," .. z or
+			"the pointer's own"))
 end)
 
 -- The app's options

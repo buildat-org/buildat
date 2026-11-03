@@ -1002,6 +1002,7 @@ buildat.sub_packet("kit:you", function(data)
 	local y = network.parse_json(data)
 	P.you = type(y) == "table" and tonumber(y.id) or 0
 	P.my_name = type(y) == "table" and y.name or nil
+	P.use_range = type(y) == "table" and tonumber(y.use_range) or nil
 	log:info("kit: this player is entity " .. tostring(P.you))
 end)
 
@@ -1561,8 +1562,26 @@ function M.play_target(origin, dir, reach, solid)
 	solid = solid or O.solid
 	-- Not the seat held: the ray goes out of it
 	local seat = M.seated and M.seated()
-	local id, et, usable = M.pick_entity(origin, dir, reach,
-			seat and {[seat] = true} or nil)
+	local skip = {}
+	if seat then
+		skip[seat] = true
+	end
+	-- [WB_HOVER_OUT_OF_REACH] Only what a click would use: within the
+	-- server's use range of the player (their place in the world as the
+	-- server has it: the body's feet and a half, or their entity's), not
+	-- the ray's reach past a camera far behind; one a click walks to
+	-- (kit/click_to_move) wherever it is
+	local me = M.body_pos and M.body_pos()
+	me = me and me + magic.Vector3(0, 0.5, 0) or
+			P.nodes[P.you] and P.nodes[P.you].node.position
+	if me and P.use_range and not (M.clicks_move and M.clicks_move()) then
+		for nid, n in pairs(P.nodes) do
+			if (n.node.position - me):Length() > P.use_range then
+				skip[nid] = true
+			end
+		end
+	end
+	local id, et, usable = M.pick_entity(origin, dir, reach, skip)
 	local hit, front, vt
 	solid = with_terrain(solid)
 	if solid then
