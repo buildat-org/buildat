@@ -71,6 +71,12 @@ static const int64_t TICK_SLICES = 4;
 // and their burst, and how often "held" comes
 static const size_t MAX_TYPE_ACTIONS = 8, MAX_ACTIONS = 16;
 static const double ACTION_RATE = 20, ACTION_BURST = 40;
+// A builder's generator builds: their allowance in calls' budgets (a
+// build costs what its run spent, BUILD_MIN at least), BUILD_RATE a second
+// coming back up to BUILD_BURST; an edit that would build with less is
+// refused. simplified: a refusal, not a build deferred; the allowance a
+// peer's, not a name's (a reconnect starts it full; a slow way round it)
+static const double BUILD_RATE = 0.2, BUILD_BURST = 1, BUILD_MIN = 0.05;
 static const int64_t HELD_EVERY_US = 100000;
 static const size_t MAX_TYPE_SOURCE = 256 << 10;
 // A zone's or an owned volume's extent in cells, each way, and the cells
@@ -407,6 +413,9 @@ struct Peer
 	std::map<ss_, std::pair<int64_t, int64_t>> held;
 	double action_tokens = ACTION_BURST;
 	int64_t action_at = 0;
+	// Their generator builds' allowance (BUILD_RATE; time_us)
+	double build_tokens = BUILD_BURST;
+	int64_t build_at = 0;
 	// [KIT_USE_FLOOD] The refusal last logged and when (time_us): the
 	// same one again is logged once a second at most
 	ss_ refused_why;
@@ -9697,7 +9706,8 @@ struct Module: public interface::Module, public Interface
 	// (their positions its frame's), checked as a prefab's, MAX_BUILT at
 	// most, no generators, root, World or environment types among them;
 	// metered as a handler's run
-	bool build_of(const Entity &e, size_t comp, json::Value &pf, ss_ &why)
+	bool build_of(const Entity &e, size_t comp, json::Value &pf, ss_ &why,
+			int64_t *spent_out = nullptr)
 	{
 		Run r;
 		r.entity = e.id;
@@ -9710,6 +9720,8 @@ struct Module: public interface::Module, public Interface
 		const bool called = box_call(request_of(e, e.comps[comp], r), answer,
 				error, &runaway, &spent);
 		m_building = false;
+		if(spent_out)
+			*spent_out = spent;
 		auto it = m_entities.find(e.id);
 		if(it != m_entities.end() && comp < it->second.comps.size())
 			it->second.comps[comp].spent += spent;
@@ -10027,7 +10039,7 @@ struct Module: public interface::Module, public Interface
 	// changed. A child of one a builder moved or put elsewhere is marked
 	// so first. false and why: a build refused (the edit with it)
 	bool rebuilds(sv_<std::pair<uint64_t, json::Value>> &change,
-			const Peer &p, ss_ &what, ss_ &why)
+			Peer &p, ss_ &what, ss_ &why)
 	{
 		for(auto &c : change){
 			if(c.second.is_null() || !c.second.get("built").is_object())
@@ -10088,7 +10100,23 @@ struct Module: public interface::Module, public Interface
 			const Entity &n = gi.first;
 			const size_t ci = gi.second;
 			json::Value pf;
-			if(!build_of(n, ci, pf, why)){
+			// The builder's allowance, charged what the build spent
+			const int64_t t_us = interface::os::time_us();
+			p.build_tokens = std::min(BUILD_BURST, p.build_tokens +
+					(t_us - p.build_at) * 1e-6 * BUILD_RATE);
+			p.build_at = t_us;
+			if(p.build_tokens < BUILD_MIN){
+				why = "generators built too often: again in "+itos((int64_t)
+						std::ceil((BUILD_MIN - p.build_tokens) / BUILD_RATE))+" s";
+				log_i(MODULE, "Entity %s's build refused: %s", cs(itos(n.id)),
+						cs(why));
+				return false;
+			}
+			int64_t spent = 0;
+			const bool built = build_of(n, ci, pf, why, &spent);
+			p.build_tokens -= std::max(BUILD_MIN, m_box ? (double)spent /
+					std::max<int64_t>(1, m_box->budget()) : BUILD_MIN);
+			if(!built){
 				why = "entity "+itos(n.id)+"'s "+n.comps[ci].type+": "+why;
 				log_i(MODULE, "Entity %s's build refused: %s", cs(itos(n.id)),
 						cs(why));

@@ -12,7 +12,9 @@
 #      11 gone, 43 still under L. 18's lit set back to false.
 #   2. sample_kit/gen_many (70 children) refused at the cap;
 #      sample_kit/gen_runaway's build cut by the meter, refused; neither
-#      placed.
+#      placed. A builder's builds are rate-limited: right after the
+#      runaway's a build is refused ("built too often"), and runs again a
+#      few seconds later (the runaway's again, cut by the meter).
 #   3. A kit/spawner (68) copying L. Run: the board's middle lit as a
 #      plus (5); the corner tile 18 pressed (it and its two neighbours:
 #      8), again (5), the middle 30 (0): "solved". The spawner tried: a
@@ -99,6 +101,11 @@ EOF
 		"place: entity 68's sample_kit/gen_many: on_build: "
 	refused '{"op": "place", "type": "sample_kit/gen_runaway", "pos": [10, 1, 12]}' \
 		"place: entity 68's sample_kit/gen_runaway: on_build ran past its budget"
+	refused '{"op": "place", "type": "sample_kit/gen_runaway", "pos": [10, 1, 12]}' \
+		"place: generators built too often: again in "
+	echo "delay 6000"
+	refused '{"op": "place", "type": "sample_kit/gen_runaway", "pos": [10, 1, 12]}' \
+		"place: entity 68's sample_kit/gen_runaway: on_build ran past its budget"
 	# 68: a kit/spawner copying L (with its board)
 	edit '{"op": "place", "type": "kit/spawner", "pos": [8, 1, -3]}' 43
 	edit '{"op": "set", "id": 68, "comp": 0, "param": "copy", "value": 17}' 43
@@ -137,7 +144,12 @@ echo "ok: placed, it builds its board under it; a size change builds it again (k
 want "$t/boss1.log" "kit editor: refused: place: entity 68's sample_kit/gen_many: on_build: sample_kit/gen_many:8: child: 63 a build at most" \
 	"kit editor: refused: place: entity 68's sample_kit/gen_runaway: on_build ran past its budget"
 grep -aq "placed sample_kit/gen_" "$s" && fail "a refused generator was placed ($s)"
-echo "ok: a build past the cap is refused, a runaway build cut by the meter and refused"
+grep -ao "build refused: \(entity 68's sample_kit/gen_runaway\|generators built too often: again in [1-9] s\)" "$s" |
+	sed 's/: again in .*//' | tr '\n' '|' |
+	grep -qx "build refused: entity 68's sample_kit/gen_runaway|build refused: generators built too often|build refused: entity 68's sample_kit/gen_runaway|" ||
+	fail "a build right after the runaway's not refused by the builder's rate, or not run again later ($s)"
+want "$t/boss1.log" "kit editor: refused: place: generators built too often: again in "
+echo "ok: a build past the cap is refused, a runaway build cut by the meter and refused; one right after it refused by the builder's rate, run again later"
 want "$s" "kit/lights_out 17: lit 8" "kit/lights_out 17: solved"
 [ "$(grep -ac "kit/lights_out 17: solved" "$s")" = 1 ] ||
 	fail "\"solved\" not once ($s)"
