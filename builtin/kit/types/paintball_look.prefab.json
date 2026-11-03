@@ -1,0 +1,20 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "paintball_look",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "body", "pos": [0, 0.08, 0.1],
+			"components": [{"type": "kit/part", "params": {"size": [0.1, 0.12, 0.34],
+				"color": "#30d050", "collision": false}}]},
+		{"id": 2, "name": "barrel", "pos": [0, 0.1, 0.38],
+			"components": [{"type": "kit/part", "params": {"size": [0.05, 0.05, 0.24],
+				"color": "#ff8c1a", "collision": false}}]},
+		{"id": 3, "name": "hopper", "pos": [0, 0.21, 0.08],
+			"components": [{"type": "kit/part", "params": {"size": [0.12, 0.14, 0.14],
+				"color": "#ffe030", "collision": false}}]},
+		{"id": 4, "name": "grip", "pos": [0, -0.05, 0],
+			"components": [{"type": "kit/part", "params": {"size": [0.07, 0.16, 0.08],
+				"rotation": [-15, 0, 0], "color": "#3070ff", "collision": false}}]}
+	]
+}

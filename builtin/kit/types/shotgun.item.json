@@ -1,0 +1,21 @@
+{
+	"version": 1,
+	"icon": "",
+	"stack": 1,
+	"use": "ranged",
+	"shot": "hitscan",
+	"cooldown": 0.8,
+	"mode": "single",
+	"damage": 1.5,
+	"crit": 1.5,
+	"falloff": 0.6,
+	"knockback": 1,
+	"range": 20,
+	"spread": 6,
+	"pellets": 8,
+	"recoil": 6,
+	"magazine": 6,
+	"reload": 0.5,
+	"reload_mode": "one",
+	"color": "#5a3a2a"
+}

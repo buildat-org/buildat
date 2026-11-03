@@ -1,0 +1,22 @@
+{
+	"version": 1,
+	"icon": "",
+	"stack": 1,
+	"use": "ranged",
+	"shot": "projectile",
+	"cooldown": 0.3,
+	"mode": "single",
+	"charge": 1,
+	"damage": 8,
+	"crit": 1.5,
+	"knockback": 2,
+	"speed": 40,
+	"gravity": 9.81,
+	"lifetime": 5,
+	"recoil": 0,
+	"magazine": 0,
+	"ammo": "kit/arrow",
+	"uses": 300,
+	"wear_shot": 1,
+	"color": "#8a5a2a"
+}

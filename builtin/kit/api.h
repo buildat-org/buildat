@@ -671,21 +671,38 @@ namespace interface
 // (kit/sword, kit/pickaxe: the presets), a builder's are made by {"op":
 // "item"}. Its fields (each checked; one left out the preset's, else the
 // default): icon (a texture, "" a text label), stack (1..999), use
-// ("none", "melee": it hits, "use": a click runs the hooks; 7c-2 adds
-// "ranged"), timing (cooldown s, mode single|auto|burst, burst, charge
+// ("none", "melee": it hits, "use": a click runs the hooks, "ranged":
+// it shoots, [KIT_TOOLS_2]), timing (cooldown s, mode single|auto|burst, burst, charge
 // s), damage (damage, damage_type "normal", crit: the multiplier of a hit
 // falling, falloff: the share lost at the full reach, knockback m/s),
 // melee (reach m), digging (dig {group: speed}, or the text "stone 4,
 // wood 2"; level 0..15), wear (uses: 0 never wears, wear_dig, wear_hit,
-// wear_shot: a use's cost; repair: an item, kept), look (7c-2's, kept).
-// Clients get them all as "kit:item_types" {name: sheet}. An item in an
+// wear_shot: a use's cost; repair: an item, kept). [KIT_TOOLS_2] ranged
+// (shot "hitscan"|"projectile", speed m/s, gravity m/s/s, lifetime s,
+// spread degrees, pellets, range m, recoil degrees: the client's view
+// kick), loading (magazine: rounds, 0 none -- a shot then takes an ammo
+// item if it names one; reload s; reload_mode "whole"|"one"; ammo: an
+// item or ""), look (a prefab's name: its kit/parts and voxels drawn in
+// first person, fitted to 0.2 m about its base, +z ahead; "" a bar of its
+// colour with its icon), color ("#rrggbb": a shot's, a splat's), grip
+// ([right, up, ahead] m from the eye: where it is held in view).
+// Clients get them all as "kit:item_types" {name: sheet}, a look's
+// prefab with it ("look_data" {parts, voxels}; sent again as the prefab
+// is saved). An item in an
 // inventory is a name of letters, digits and _, or an item type's.
 // kit/equipment (on each player entity; `equipment = true`) holds the
 // hands slot, state "hands": the client's hotbar sends "kit:hold" <item>
-// (one of theirs, "" a hand); a list without it empties the hands. Its
-// state "wear" is each item type's uses left (the first of a stack's);
-// on_tool(c, item, cost, uses, drop) is Kit's call after a use: the drop
-// added, the cost taken, one of the item taken at 0 ("broke").
+// (one of theirs, "" a hand); a list without it empties the hands.
+// [KIT_TOOLS_2] ([KIT_ITEM_WEAR_SHAPE]) An item is an instance with data
+// of its own (kit/inventory's: the extension argument's "instances", a
+// take's out, an add's in): the hands hold the first of an item, its
+// wear (uses left) and loaded rounds on it, state "held" its data;
+// on_tool(c, item, cost, uses, drop, shot) is Kit's call after a use and
+// as the hands take it: the drop added, the cost taken (the instance
+// gone at 0: "broke"), shot {rounds, magazine, ammo} a shot's round from
+// the magazine or an ammo item (none: it returns false, why: refused);
+// on_reload(c, item, magazine, ammo, one) loads (true: one at a time has
+// more to load). kit/item_box moves an instance between players.
 // kit/health (on each player entity, and placeable: `health = true`)
 // has hp of max; a hit is on_hit(c, hit, by) there, after each
 // component of the entity's modify_hit(c, hit, by) in order: given hit
@@ -708,7 +725,23 @@ namespace interface
 // id the entity pointed at, 0 none). After each: on_item(c, item,
 // action, target, by) of every instance in the player's scene, the root's
 // and their entity's -- "hit" (the entity), "use" (the entity, 0), "dig"
-// (the cell [x, y, z]). Digging (dig_ready, dug below): a voxel with a
+// (the cell [x, y, z]). [KIT_TOOLS_2] "kit:draw" (a charge's draw
+// begun), "kit:shoot" {dir: [x, y, z]} (a placed peer's shot along dir
+// from their eye, the body's bottom and 1.55): Running, out of the tools,
+// a ranged item of theirs, past its cooldown, no reload under way, a
+// round (on_tool); a charge's share drawn (0.1...1 of its time) scales
+// the damage and speed; each pellet spread at random: hitscan hits the
+// first entity with health on the ray within range before a solid voxel
+// (a player's body a box 0.7 wide, its top 0.3 the head: crit), less the
+// falloff at the distance; a projectile is the server's, stepped each
+// tick with gravity until it meets an entity with health, a solid voxel
+// or its lifetime; a hit through Kit's rules as melee's. Clients draw
+// "kit:shot" {by, item, color, from, ends: [[x, y, z, 0 nothing|1 a
+// wall|2 a target]]}, "kit:projectile" {id, from, vel, gravity, life,
+// color, by} and "kit:projectile_end" {id, at, hit, color}. "kit:reload":
+// the held ranged item's magazine loaded after its reload time
+// ("kit:reloading" {item, time} to the client), one round a time while
+// "one". simplified: no lag compensation. Digging (dig_ready, dug below): a voxel with a
 // material group takes 1 / speed s (the held item's for the group, a
 // hand's 1; "kit:digging" {cell, wait, time} tells the client to ask
 // again) and drops its material into the inventory where the item's

@@ -1,0 +1,21 @@
+{
+	"version": 1,
+	"icon": "",
+	"stack": 1,
+	"use": "ranged",
+	"shot": "hitscan",
+	"cooldown": 0.2,
+	"mode": "auto",
+	"damage": 2,
+	"damage_type": "paint",
+	"knockback": 0,
+	"range": 30,
+	"spread": 1.5,
+	"recoil": 1,
+	"magazine": 20,
+	"reload": 2,
+	"reload_mode": "whole",
+	"color": "#ff3cc8",
+	"look": "kit/paintball_look",
+	"grip": [0.13, -0.12, 0.2]
+}

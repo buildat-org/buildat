@@ -42,6 +42,7 @@
 #include <mutex>
 #include <future>
 #include <algorithm>
+#include <random>
 #include <set>
 #include <sstream>
 #include <thread>
@@ -104,6 +105,7 @@ static const size_t MAX_LINKS = 64;
 // has at most, and what an upload may be
 static const size_t MAX_VOXEL_TYPES = 256, MAX_TEXTURES = 256;
 static const size_t MAX_ITEM_TYPES = 256; // [KIT_TOOLS_1]
+static const size_t MAX_PROJECTILES = 256; // [KIT_TOOLS_2] a round's
 static const size_t MAX_TEXTURE_BYTES = 64 << 10;
 static const uint32_t MAX_TEXTURE_SIDE = 128;
 // An editor's undo goes back this many edits
@@ -1297,6 +1299,11 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "network:packet_received/kit:hit", &Module::on_hit);
 		sub(m_server, "network:packet_received/kit:item",
 				&Module::on_item_use);
+		// [KIT_TOOLS_2] a ranged item's draw, shot and reload
+		sub(m_server, "network:packet_received/kit:draw", &Module::on_draw);
+		sub(m_server, "network:packet_received/kit:shoot", &Module::on_shoot);
+		sub(m_server, "network:packet_received/kit:reload",
+				&Module::on_reload);
 		sub(m_server, "accounts:privs", &Module::on_privs);
 		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
 		sub(m_server, "worldgen:section_generated", &Module::on_generated);
@@ -9798,6 +9805,12 @@ struct Module: public interface::Module, public Interface
 		m_store->set("prefab:"+name, pf.stringify());
 		m_prefabs[name] = pf;
 		m_prefab_palette.insert(name);
+		// [KIT_TOOLS_2] an item type's look may be it
+		for(auto &it : m_item_types)
+			if(jstr(it.second, "look") == name){
+				send_item_types(-1);
+				break;
+			}
 		std::set<uint64_t> in_group(group.begin(), group.end());
 		for(size_t i = 0; i < group.size(); i++){
 			Entity copy = m_entities[group[i]];
@@ -11758,6 +11771,7 @@ struct Module: public interface::Module, public Interface
 			send_actions(-1);
 		}
 		if(!m_session.running){
+			m_projectiles.clear(); // [KIT_TOOLS_2]
 			// Stopped: components do not run. A write routed to one is
 			// made by no one
 			for(const Write &w : writes)
@@ -11803,6 +11817,9 @@ struct Module: public interface::Module, public Interface
 						"owns now", w.p.getX(), w.p.getY(), w.p.getZ());
 		}
 		run_timers();
+		// [KIT_TOOLS_2] reloads due, projectiles in flight
+		reloads_tick();
+		projectiles_tick();
 		actions_held();
 		check_zones();
 		check_regions();
@@ -12792,8 +12809,28 @@ struct Module: public interface::Module, public Interface
 		bool digging = false;
 		int dig[3] = {0, 0, 0};
 		int64_t dig_us = 0;
+		// [KIT_TOOLS_2] a charge's draw begun ("kit:draw") and when; a
+		// reload under way: the item and when its round is in
+		bool drawing = false;
+		int64_t draw_us = 0;
+		ss_ reloading;
+		int64_t reload_us = 0;
 	};
 	std::map<size_t, ToolUse> m_tool_use;
+	// [KIT_TOOLS_2] A projectile in flight: the server's own (no entity
+	// row: not saved, gone at Stop), stepped each tick on the game's clock
+	struct Projectile
+	{
+		uint64_t id = 0;
+		size_t peer = 0; // whose shot (gone with them)
+		ss_ item;
+		json::Value sheet;
+		double pos[3] = {0, 0, 0}, vel[3] = {0, 0, 0};
+		double damage = 0;
+		int64_t at_us = 0, until_us = 0;
+	};
+	std::vector<Projectile> m_projectiles;
+	uint64_t m_next_shot = 1;
 	// The items each player had as a run last listed them (a replacing
 	// provider's: Kit reads its own kit/inventory's state)
 	sm_<ss_, json::Value> m_items_seen;
@@ -12839,6 +12876,23 @@ struct Module: public interface::Module, public Interface
 			{"wear_dig", 0, 1000, 1, true},
 			{"wear_hit", 0, 1000, 1, true},
 			{"wear_shot", 0, 1000, 1, true},
+			// [KIT_TOOLS_2] ranged: a projectile's speed (m/s), gravity
+			// (m/s/s) and lifetime (s); the spread (degrees off the aim,
+			// each pellet), pellets a shot, range (m: a hitscan's reach,
+			// its falloff's full distance), recoil (degrees the view kicks
+			// up, the client's)
+			{"speed", 1, 500, 40, false},
+			{"gravity", 0, 100, 9.81, false},
+			{"lifetime", 0.1, 30, 5, false},
+			{"spread", 0, 45, 0, false},
+			{"pellets", 1, 32, 1, true},
+			{"range", 1, 1000, 50, false},
+			{"recoil", 0, 45, 0, false},
+			// loading: rounds a magazine (0: none, a shot takes an ammo
+			// item if it has one), the reload's time (s; one round's, one
+			// at a time)
+			{"magazine", 0, 1000, 0, true},
+			{"reload", 0, 60, 1, false},
 		};
 		auto field = [&](const char *k) -> const json::Value& {
 			const json::Value &v = j.get(k);
@@ -12878,8 +12932,12 @@ struct Module: public interface::Module, public Interface
 		};
 		// The use kind: none (an item to carry: a key, a material), melee
 		// (it hits), use (on_item hooks only: a wand); 7c-2 adds ranged
-		if(!choice("use", "none", {"none", "melee", "use"}) ||
-				!choice("mode", "single", {"single", "auto", "burst"}))
+		// [KIT_TOOLS_2] ranged: it shoots, hitscan (a ray from the eye) or
+		// a projectile; a reload fills the whole magazine or one round
+		if(!choice("use", "none", {"none", "melee", "use", "ranged"}) ||
+				!choice("mode", "single", {"single", "auto", "burst"}) ||
+				!choice("shot", "hitscan", {"hitscan", "projectile"}) ||
+				!choice("reload_mode", "whole", {"whole", "one"}))
 			return false;
 		auto text = [&](const char *k, const char *def,
 				bool (*ok)(const ss_&)) -> bool {
@@ -12898,8 +12956,33 @@ struct Module: public interface::Module, public Interface
 		// prefab, its parts or voxels; kept, not drawn yet)
 		if(!text("damage_type", "normal", name_ok) ||
 				!text("repair", "", item_ok) || !text("preset", "", item_ok) ||
-				!text("look", "", item_ok))
+				!text("look", "", item_ok) || !text("ammo", "", item_ok))
 			return false;
+		// [KIT_TOOLS_2] its colour ("#rrggbb": a shot's, a splat's, the
+		// default look's) and the grip: where the look is in first person
+		// (metres right, up and ahead of the eye)
+		const json::Value &col = field("color");
+		const ss_ cs_ = col.is_string() ? col.as_string() : "#c0c0c0";
+		if(cs_.size() != 7 || cs_[0] != '#' ||
+				cs_.find_first_not_of("0123456789abcdefABCDEF", 1) != ss_::npos){
+			why = "color: \"#rrggbb\"";
+			return false;
+		}
+		out.set("color", cs_);
+		const json::Value &gr = field("grip");
+		json::Value grip = json::array();
+		for(unsigned i = 0; i < 3; i++){
+			const double def[3] = {0.13, -0.11, 0.22};
+			const double x = gr.is_array() && gr.at(i).is_number() ?
+					gr.at(i).as_number() : gr.is_undefined() || gr.is_null() ?
+					def[i] : NAN;
+			if(!(x >= -1 && x <= 1)){
+				why = "grip: [right, up, ahead], each -1...1 (m)";
+				return false;
+			}
+			grip.append(x);
+		}
+		out.set("grip", grip);
 		const json::Value &ic = field("icon");
 		out.set("icon", ic.is_string() ? ic.as_string().substr(0, 128) : ss_());
 		if(out.get("damage_type").as_string().empty())
@@ -12980,18 +13063,66 @@ struct Module: public interface::Module, public Interface
 			if(m_store->get(k, row))
 				m_item_types[k.substr(5)] = json::load_string(row.c_str());
 		}
-		ss_ names;
+		std::set<ss_> sorted;
 		for(auto &it : m_item_types)
-			names += (names.empty() ? "" : " ")+it.first;
+			sorted.insert(it.first);
+		ss_ names;
+		for(const ss_ &n : sorted)
+			names += (names.empty() ? "" : " ")+n;
 		log_i(MODULE, "Item types: %s", names.empty() ? "none" : cs(names));
+	}
+
+	// [KIT_TOOLS_2] An item type's look, a prefab of parts and voxels (4i's)
+	// as the client draws it in first person: {parts: [{pos, size,
+	// rotation, color, shape, material, voxel}], voxels: the prefab's};
+	// null: no such prefab (the default look is drawn).
+	// simplified: a member's place adds its parents' places, not their
+	// turns; a part's own rotation is kept
+	json::Value look_data(const ss_ &name)
+	{
+		const json::Value *pf = prefab(name);
+		if(!pf)
+			return json::null();
+		json::Value out = json::object(), parts = json::array();
+		std::map<int64_t, std::array<double, 3>> at;
+		const json::Value &es = pf->get("entities");
+		for(unsigned i = 0; es.is_array() && i < es.size(); i++){
+			const json::Value &e = es.at(i);
+			std::array<double, 3> p = {0, 0, 0};
+			auto pa = at.find(json::jint(e, "parent", 0));
+			for(unsigned k = 0; k < 3; k++)
+				p[k] = (pa == at.end() ? 0 : pa->second[k]) +
+						(e.get("pos").at(k).is_number() ?
+						e.get("pos").at(k).as_number() : 0);
+			at[json::jint(e, "id", 0)] = p;
+			const json::Value &cs_ = e.get("components");
+			for(unsigned c = 0; cs_.is_array() && c < cs_.size(); c++){
+				if(jstr(cs_.at(c), "type") != "kit/part")
+					continue;
+				json::Value part = cs_.at(c).get("params").is_object() ?
+						cs_.at(c).get("params").deepcopy() : json::object();
+				part.set("pos", point(p.data()));
+				parts.append(part);
+			}
+		}
+		out.set("parts", parts);
+		if(pf->get("voxels").is_object())
+			out.set("voxels", pf->get("voxels"));
+		return out;
 	}
 
 	// "kit:item_types" {name: sheet}: to a peer, or every one (-1)
 	void send_item_types(int64_t peer)
 	{
 		json::Value all = json::object();
-		for(auto &it : m_item_types)
-			all.set(it.first, it.second);
+		for(auto &it : m_item_types){
+			// [KIT_TOOLS_2] its look's prefab with it, as drawn
+			json::Value sheet = it.second.deepcopy();
+			const ss_ look = jstr(sheet, "look");
+			if(!look.empty())
+				sheet.set("look_data", look_data(look));
+			all.set(it.first, sheet);
+		}
 		const ss_ data = all.stringify();
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(auto &p : m_peers)
@@ -13150,6 +13281,8 @@ struct Module: public interface::Module, public Interface
 		set_hands(p.player, comp, item);
 		log_i(MODULE, "%s holds %s", cs(p.name), item.empty() ? "nothing" :
 				cs(item));
+		// [KIT_TOOLS_2] its instance's wear and rounds to the client
+		tool_run(p.player, item, 0, 0, "");
 	}
 
 	// The cell a world point is in
@@ -13349,14 +13482,19 @@ struct Module: public interface::Module, public Interface
 
 	// The item's wear and a drop, by kit/equipment's on_tool on the
 	// player's entity, their run: cost of the held item's uses (it breaks
-	// at 0, one taken), drop added
-	void tool_run(uint64_t player, const ss_ &item, int64_t cost,
-			int64_t uses, const ss_ &drop)
+	// at 0, one taken), drop added. [KIT_TOOLS_2] The wear is the held
+	// instance's (the first of the item in the inventory); shot (an
+	// object: {rounds, magazine, ammo}) takes a shot's rounds from its
+	// magazine, or its ammo item where it has none. Run with only the
+	// item it says the instance (equipment's "held", the client's). False:
+	// refused (why: no rounds)
+	bool tool_run(uint64_t player, const ss_ &item, int64_t cost,
+			int64_t uses, const ss_ &drop, const json::Value &shot =
+			json::Value(), ss_ *why = nullptr)
 	{
 		size_t comp = 0;
-		if(!equipment_of(player, &comp) || (drop.empty() &&
-				(item.empty() || cost <= 0 || uses <= 0)))
-			return;
+		if(!equipment_of(player, &comp) || (drop.empty() && item.empty()))
+			return true;
 		Run r;
 		r.entity = player;
 		r.comp = comp;
@@ -13366,7 +13504,15 @@ struct Module: public interface::Module, public Interface
 		r.args.append(cost);
 		r.args.append(uses);
 		r.args.append(drop.empty() ? json::null() : json::Value(drop));
+		r.args.append(shot.is_object() ? shot : json::null());
 		run(r);
+		if(m_ret.is_array() && m_ret.at(0u).is_boolean() &&
+				!m_ret.at(0u).as_boolean()){
+			if(why)
+				*why = jstr_at(m_ret, 1);
+			return false;
+		}
+		return true;
 	}
 
 	// The hooks for the rest ([KIT_TOOLS_1]): on_item(c, item, action,
@@ -13507,24 +13653,48 @@ struct Module: public interface::Module, public Interface
 			crit = !bi->second.state.get("ground").is_true() && v.is_array() &&
 					v.at(1u).is_number() && v.at(1u).as_number() < -1;
 		}
+		// The hit; then the item worn (it may break)
+		const json::Value sh = sheet->deepcopy();
+		const uint64_t me = p.player;
+		strike(peer, id, item, sh, amount, crit, dx, dz, true);
+		tool_run(me, item, json::jint(sh, "wear_hit", 1),
+				json::jint(sh, "uses", 0), "");
+	}
+
+	// [KIT_TOOLS_2] A hit Kit's rules allow landing (a melee hit's, a
+	// shot's): logged, the target's modifiers and health, knockback on a
+	// player (away along dx, dz, or where the attacker looks when on
+	// top), the hooks' "hit". allowed: Kit's rules asked already; else
+	// asked here (refused: logged and told)
+	void strike(size_t peer, uint64_t id, const ss_ &item,
+			const json::Value &sheet, double amount, bool crit, double dx,
+			double dz, bool allowed = false)
+	{
+		auto it = m_entities.find(id);
+		auto pi = m_peers.find(peer);
+		if(it == m_entities.end() || pi == m_peers.end())
+			return;
+		Peer &p = pi->second;
+		ss_ why;
+		if(!allowed && !hit_allowed(peer, it->second, why)){
+			tell(peer, why);
+			if(log_refusal(p, why))
+				log_i(MODULE, "A hit on entity %s by %s refused: %s",
+						cs(itos(id)), cs(p.name), cs(why));
+			return;
+		}
 		if(crit)
-			amount *= sheet->get("crit").as_number();
+			amount *= sheet.get("crit").as_number();
 		json::Value hit = json::object();
 		hit.set("amount", amount);
-		hit.set("type", jstr(*sheet, "damage_type", "normal"));
+		hit.set("type", jstr(sheet, "damage_type", "normal"));
 		hit.set("item", item);
 		hit.set("crit", crit);
 		const ss_ by = "player:"+itos(p.player);
-		const ss_ who = p.name;
-		const uint64_t me = p.player;
-		log_i(MODULE, "%s hits entity %s with %s: %g %s%s", cs(who),
+		log_i(MODULE, "%s hits entity %s with %s: %g %s%s", cs(p.name),
 				cs(itos(id)), cs(item), amount, cs(jstr(hit, "type")),
 				crit ? " (critical)" : "");
-		// The item worn (it may break); then the target's modifiers and
-		// health (runs: the tree may change under them)
-		tool_run(me, item, json::jint(*sheet, "wear_hit", 1),
-				json::jint(*sheet, "uses", 0), "");
-		const double k = sheet->get("knockback").as_number();
+		const double k = sheet.get("knockback").as_number();
 		// Not after a respawn (a put since)
 		const size_t tp = it->second.kind == "player" ? peer_of_player(id) : 0;
 		const int64_t puts = m_bodies.count(tp) ? m_bodies[tp].puts : -1;
@@ -13594,6 +13764,492 @@ struct Module: public interface::Module, public Interface
 				cs(itos(id)));
 		item_hooks(peer, item, "use", json::Value((int64_t)id));
 	}
+
+	// ---- [KIT_TOOLS_2] (stage 7c's second part) Ranged items: "kit:draw"
+	// (a charge's draw begun), "kit:shoot" {dir} (a shot along the aim
+	// from the eye), "kit:reload" (api.h). The server decides as a melee
+	// hit's: Running, out of the tools, a ranged item held, its cooldown,
+	// a reload not under way, the rounds (kit/equipment's on_tool: the
+	// held instance's magazine, or its ammo item where it has none); a
+	// hitscan's pellets hit what a ray from the eye meets first within
+	// its range (a solid voxel stops it), a projectile flies (speed,
+	// gravity, lifetime) and hits what its path meets; each hit through
+	// strike() (Kit's rules, the modifiers, health).
+	// simplified: no lag compensation (a hit lands where the target is
+	// now on the server); add it if arenas play badly
+
+	// Where a ray (d a unit vector) from o meets a solid voxel of the
+	// scene: its distance, max if none within it. Steps of a tenth of a
+	// metre (2000 at most)
+	double ray_wall(main_context::SceneReference scene, const double o[3],
+			const double d[3], double max)
+	{
+		double hit = max;
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			voxelworld::Instance *w = ivw->get_instance(scene);
+			if(!w)
+				return;
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			const auto &fmt = reg->get_format();
+			const double step = std::max(0.1, max / 2000);
+			for(double t = std::min(step, max); ; t = std::min(t + step, max)){
+				const double p[3] = {o[0] + d[0] * t, o[1] + d[1] * t,
+						o[2] + d[2] * t};
+				const interface::VoxelDefinition *def = reg->get(
+						(uint32_t)fmt.id.get(w->get_voxel(cell_of(p),
+						true).data));
+				if(def && def->physically_solid){
+					hit = t;
+					return;
+				}
+				if(t >= max)
+					return;
+			}
+		});
+		return hit;
+	}
+
+	// A ray's entry into a box (lo...hi) at t >= 0
+	static bool ray_box(const double o[3], const double d[3],
+			const double lo[3], const double hi[3], double &t)
+	{
+		double t0 = 0, t1 = 1e30;
+		for(int k = 0; k < 3; k++){
+			if(std::fabs(d[k]) < 1e-12){
+				if(o[k] < lo[k] || o[k] > hi[k])
+					return false;
+				continue;
+			}
+			double a = (lo[k] - o[k]) / d[k], b = (hi[k] - o[k]) / d[k];
+			if(a > b)
+				std::swap(a, b);
+			t0 = std::max(t0, a);
+			t1 = std::min(t1, b);
+			if(t0 > t1)
+				return false;
+		}
+		t = t0;
+		return true;
+	}
+
+	// The nearest entity with health in the scene along a ray (d a unit
+	// vector) from o within max, skip not: a player's body a box 0.7 wide
+	// from its node's 0.5 down to 1.2 up (its head the top 0.3), another's
+	// a cell round it. 0 for none; t its distance, head a player's head
+	uint64_t ray_target(const ss_ &scene, const double o[3],
+			const double d[3], double max, uint64_t skip, double &t,
+			bool &head)
+	{
+		uint64_t best = 0;
+		for(auto &e : m_entities){
+			const Entity &en = e.second;
+			if(e.first == skip || !en.has_pos)
+				continue;
+			bool health = false;
+			for(const Instance &in : en.comps)
+				health = health || (m_types[in.type].health &&
+						in.disabled.empty());
+			ss_ es;
+			if(!health || !scene_of(en, &es) || es != scene)
+				continue;
+			double w[3], et = 0;
+			world_of(en, w);
+			const bool player = en.kind == "player";
+			const double r = player ? 0.35 : 0.5;
+			const double lo[3] = {w[0] - r, w[1] - (player ? 0.5 : r),
+					w[2] - r};
+			const double hi[3] = {w[0] + r, w[1] + (player ? 1.2 : r),
+					w[2] + r};
+			if(!ray_box(o, d, lo, hi, et) || et > max)
+				continue;
+			best = e.first;
+			max = t = et;
+			head = player && o[1] + d[1] * et > w[1] + 0.9;
+		}
+		return best;
+	}
+
+	// The aim d turned at random within spread (radians) off it
+	static void spread_dir(const double d[3], double spread, double out[3])
+	{
+		static std::mt19937 rng(std::random_device{}());
+		std::uniform_real_distribution<double> u(0, 1);
+		const double a = spread * std::sqrt(u(rng)), phi = 2 * 3.14159265358979323846 * u(rng);
+		// Two unit vectors across d
+		double x[3] = {0, 1, 0};
+		if(std::fabs(d[1]) > 0.9)
+			x[0] = 1, x[1] = 0;
+		double v1[3] = {d[1] * x[2] - d[2] * x[1], d[2] * x[0] - d[0] * x[2],
+				d[0] * x[1] - d[1] * x[0]};
+		const double l = std::sqrt(v1[0] * v1[0] + v1[1] * v1[1] +
+				v1[2] * v1[2]);
+		for(double &c : v1)
+			c /= l;
+		const double v2[3] = {d[1] * v1[2] - d[2] * v1[1],
+				d[2] * v1[0] - d[0] * v1[2], d[0] * v1[1] - d[1] * v1[0]};
+		for(int k = 0; k < 3; k++)
+			out[k] = d[k] * std::cos(a) + (v1[k] * std::cos(phi) +
+					v2[k] * std::sin(phi)) * std::sin(a);
+	}
+
+	static json::Value point(const double p[3])
+	{
+		json::Value v = json::array();
+		for(int k = 0; k < 3; k++)
+			v.append(p[k]);
+		return v;
+	}
+
+	// A packet to every peer in a scene (shots and projectiles drawn)
+	void send_scene(const ss_ &scene, const char *name, const ss_ &data)
+	{
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &p : m_peers)
+				if(p.second.scene == scene)
+					inetwork->send(p.first, name, data);
+		});
+	}
+
+	// The held ranged item of a placed peer able to use it: its sheet
+	// (null: refused, why)
+	const json::Value* ranged_held(size_t peer, ss_ &item, ss_ &why)
+	{
+		Peer &p = m_peers[peer];
+		const json::Value *sheet = nullptr;
+		item = hands_of(p.player, &sheet);
+		if(!m_session.running)
+			why = "the server is Stopped";
+		else if(p.editing)
+			why = "in edit mode";
+		else if(!sheet || jstr(*sheet, "use") != "ranged")
+			why = item.empty() ? "nothing in hand" : item+" is no ranged item";
+		else if(!has_item(p.name, item))
+			why = "no "+item+" in their inventory";
+		else
+			return sheet;
+		return nullptr;
+	}
+
+	// [KIT_SESSIONS_1] each in the sender's session
+	void on_draw(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		auto pi = m_peers.find(packet.sender);
+		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
+			return;
+		ToolUse &tu = m_tool_use[packet.sender];
+		tu.drawing = true;
+		tu.draw_us = now_us();
+	}
+
+	void on_shoot(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_shoot_u(packet);
+	}
+
+	void on_shoot_u(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
+			return;
+		const ss_ who = pi->second.name, scene = pi->second.scene;
+		const uint64_t me = pi->second.player;
+		auto refuse = [&](const ss_ &why){
+			auto p = m_peers.find(peer);
+			if(p != m_peers.end() && log_refusal(p->second, why))
+				log_i(MODULE, "A shot by %s refused: %s", cs(who), cs(why));
+		};
+		ss_ item, why;
+		const json::Value *sp = ranged_held(peer, item, why);
+		if(!sp)
+			return refuse(why);
+		const json::Value sheet = sp->deepcopy();
+		const json::Value j = json::load_string(packet.data.substr(0, 256).
+				c_str());
+		const json::Value &dv = j.get("dir");
+		double dir[3], l = 0;
+		for(unsigned k = 0; k < 3; k++){
+			dir[k] = dv.is_array() && dv.at(k).is_number() ?
+					dv.at(k).as_number() : NAN;
+			l += dir[k] * dir[k];
+		}
+		l = std::sqrt(l);
+		if(!std::isfinite(l) || l < 1e-6)
+			return refuse("no aim");
+		for(double &c : dir)
+			c /= l;
+		auto mi = m_entities.find(me);
+		if(mi == m_entities.end() || !mi->second.has_pos)
+			return refuse("not placed");
+		ToolUse &tu = m_tool_use[peer];
+		if(!tu.reloading.empty())
+			return refuse("reloading");
+		if(!cooled(peer, sheet, why))
+			return refuse(why);
+		// A charge: the share of its time drawn (a tenth at least) scales
+		// the damage and a projectile's speed
+		const double charge = sheet.get("charge").as_number();
+		double f = 1;
+		if(charge > 0)
+			f = std::max(0.1, tu.drawing ? std::min(1.0,
+					(now_us() - tu.draw_us) / (charge * 1e6)) : 0.0);
+		tu.drawing = false;
+		// The round: the held instance's magazine's, or an ammo item; the
+		// wear
+		json::Value shot = json::object();
+		shot.set("rounds", (int64_t)1);
+		shot.set("magazine", json::jint(sheet, "magazine", 0));
+		shot.set("ammo", jstr(sheet, "ammo"));
+		if(!tool_run(me, item, json::jint(sheet, "wear_shot", 1),
+				json::jint(sheet, "uses", 0), "", shot, &why)){
+			tell(peer, why);
+			return refuse(why);
+		}
+		mi = m_entities.find(me);
+		auto p2 = m_peers.find(peer);
+		if(mi == m_entities.end() || p2 == m_peers.end())
+			return;
+		const main_context::SceneReference sref = scene_of(mi->second);
+		// The eye: the body's bottom and 1.55 (Peer::pos its bottom and
+		// 0.5)
+		const double eye[3] = {p2->second.pos[0], p2->second.pos[1] + 1.05,
+				p2->second.pos[2]};
+		const bool projectile = jstr(sheet, "shot") == "projectile";
+		const int64_t pellets = json::jint(sheet, "pellets", 1);
+		const double spread = sheet.get("spread").as_number() * 3.14159265358979323846 / 180;
+		const double damage = sheet.get("damage").as_number() * f;
+		const double range = sheet.get("range").as_number();
+		log_i(MODULE, "%s shoots %s: %s, %s pellet%s, charge %g, damage %g",
+				cs(who), cs(item), projectile ? "a projectile" : "hitscan",
+				cs(itos(pellets)), pellets > 1 ? "s" : "", f, damage);
+		json::Value ends = json::array();
+		for(int64_t i = 0; i < pellets; i++){
+			double d[3];
+			spread_dir(dir, spread, d);
+			if(projectile){
+				// A round's projectiles at once: a ceiling on the ticks' work
+				if(m_projectiles.size() >= MAX_PROJECTILES){
+					log_i(MODULE, "%s's projectile not made: %s in flight",
+							cs(who), cs(itos(MAX_PROJECTILES)));
+					break;
+				}
+				Projectile pr;
+				pr.id = m_next_shot++;
+				pr.peer = peer;
+				pr.item = item;
+				pr.sheet = sheet;
+				const double v = sheet.get("speed").as_number() * f;
+				for(int k = 0; k < 3; k++)
+					pr.pos[k] = eye[k], pr.vel[k] = d[k] * v;
+				pr.damage = damage;
+				pr.at_us = now_us();
+				pr.until_us = pr.at_us + (int64_t)(sheet.get("lifetime").
+						as_number() * 1e6);
+				json::Value pj = json::object();
+				pj.set("id", (int64_t)pr.id);
+				pj.set("from", point(pr.pos));
+				pj.set("vel", point(pr.vel));
+				pj.set("gravity", sheet.get("gravity"));
+				pj.set("life", sheet.get("lifetime"));
+				pj.set("color", jstr(sheet, "color"));
+				pj.set("by", (int64_t)me);
+				m_projectiles.push_back(pr);
+				send_scene(scene, "kit:projectile", pj.stringify());
+				continue;
+			}
+			const double wall = ray_wall(sref, eye, d, range);
+			double t = 0;
+			bool head = false;
+			const uint64_t id = ray_target(scene, eye, d, wall, me, t, head);
+			const double et = id ? t : wall;
+			const double e[3] = {eye[0] + d[0] * et, eye[1] + d[1] * et,
+					eye[2] + d[2] * et};
+			json::Value end = point(e);
+			end.append(id ? 2 : wall < range ? 1 : 0);
+			ends.append(end);
+			if(!id){
+				log_i(MODULE, "%s's shot with %s misses: %s at %.2f m",
+						cs(who), cs(item), wall < range ? "a wall" :
+						"out of range", et);
+				continue;
+			}
+			strike(peer, id, item, sheet, damage * (1 - sheet.get("falloff").
+					as_number() * std::min(1.0, t / range)), head, d[0], d[2]);
+			if(!m_peers.count(peer))
+				return;
+		}
+		if(projectile)
+			return;
+		// Drawn by every client in the scene: a tracer, a splat
+		json::Value sj = json::object();
+		sj.set("by", (int64_t)me);
+		sj.set("item", item);
+		sj.set("color", jstr(sheet, "color"));
+		sj.set("from", point(eye));
+		sj.set("ends", ends);
+		send_scene(scene, "kit:shot", sj.stringify());
+	}
+
+	// Each tick, Running: the projectiles step on the game's clock (a
+	// twentieth of a second at most each step), each hitting what the
+	// step's path meets first -- an entity with health (strike), a solid
+	// voxel -- or gone at its lifetime; their shooter gone, they go
+	void projectiles_tick()
+	{
+		const int64_t now = now_us();
+		for(size_t i = 0; i < m_projectiles.size(); ){
+			Projectile pr = m_projectiles[i];
+			auto pi = m_peers.find(pr.peer);
+			auto mi = pi == m_peers.end() ? m_entities.end() :
+					m_entities.find(pi->second.player);
+			bool ended = mi == m_entities.end(), hit = false;
+			const ss_ scene = ended ? ss_() : pi->second.scene;
+			const main_context::SceneReference sref = ended ?
+					main_context::SceneReference() : scene_of(mi->second);
+			const uint64_t me = ended ? 0 : mi->first;
+			double left = (std::min(now, pr.until_us) - pr.at_us) / 1e6;
+			while(!ended && left > 1e-6){
+				const double dt = std::min(0.05, left);
+				left -= dt;
+				const double g = pr.sheet.get("gravity").as_number();
+				const double np[3] = {pr.pos[0] + pr.vel[0] * dt,
+						pr.pos[1] + pr.vel[1] * dt - 0.5 * g * dt * dt,
+						pr.pos[2] + pr.vel[2] * dt};
+				pr.vel[1] -= g * dt;
+				double d[3] = {np[0] - pr.pos[0], np[1] - pr.pos[1],
+						np[2] - pr.pos[2]};
+				const double len = std::sqrt(d[0] * d[0] + d[1] * d[1] +
+						d[2] * d[2]);
+				if(len < 1e-9)
+					continue;
+				for(double &c : d)
+					c /= len;
+				const double wall = ray_wall(sref, pr.pos, d, len);
+				double t = 0;
+				bool head = false;
+				const uint64_t id = ray_target(scene, pr.pos, d, wall, me, t,
+						head);
+				const double go = id ? t : wall;
+				for(int k = 0; k < 3; k++)
+					pr.pos[k] += d[k] * go;
+				if(id){
+					log_i(MODULE, "%s's projectile %s hits entity %s",
+							cs(pi->second.name), cs(itos(pr.id)), cs(itos(id)));
+					strike(pr.peer, id, pr.item, pr.sheet, pr.damage, head,
+							d[0], d[2]);
+					ended = hit = true;
+				} else if(wall < len){
+					log_i(MODULE, "%s's projectile %s lands at (%.2f, %.2f, "
+							"%.2f)", cs(pi->second.name), cs(itos(pr.id)),
+							pr.pos[0], pr.pos[1], pr.pos[2]);
+					ended = true;
+				}
+			}
+			pr.at_us = std::min(now, pr.until_us);
+			if(!ended && now >= pr.until_us){
+				log_i(MODULE, "Projectile %s gone at its lifetime",
+						cs(itos(pr.id)));
+				ended = true;
+			}
+			if(!ended){
+				m_projectiles[i++] = pr;
+				continue;
+			}
+			json::Value ej = json::object();
+			ej.set("id", (int64_t)pr.id);
+			ej.set("at", point(pr.pos));
+			ej.set("hit", hit);
+			ej.set("color", jstr(pr.sheet, "color"));
+			if(!scene.empty())
+				send_scene(scene, "kit:projectile_end", ej.stringify());
+			m_projectiles.erase(m_projectiles.begin() + i);
+		}
+	}
+
+	// "kit:reload": the held ranged item's magazine filled after its
+	// reload time (one round each time, one at a time), from its ammo
+	// items if it takes any (kit/equipment's on_reload)
+	void on_reload(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		const size_t peer = packet.sender;
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
+			return;
+		Peer &p = pi->second;
+		ss_ item, why;
+		const json::Value *sheet = ranged_held(peer, item, why);
+		if(sheet && json::jint(*sheet, "magazine", 0) <= 0)
+			why = item+" has no magazine";
+		ToolUse &tu = m_tool_use[peer];
+		if(sheet && !tu.reloading.empty())
+			why = "reloading already";
+		if(!why.empty()){
+			if(log_refusal(p, why))
+				log_i(MODULE, "A reload by %s refused: %s", cs(p.name), cs(why));
+			return;
+		}
+		const double time = sheet->get("reload").as_number();
+		tu.reloading = item;
+		tu.reload_us = now_us() + (int64_t)(time * 1e6);
+		log_i(MODULE, "%s reloads %s: %g s", cs(p.name), cs(item), time);
+		json::Value rj = json::object();
+		rj.set("item", item);
+		rj.set("time", time);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:reloading", rj.stringify());
+		});
+	}
+
+	// Each tick, Running: the reloads due (the hands still holding the
+	// item): on_reload; one at a time, again while it says there is more
+	void reloads_tick()
+	{
+		const int64_t now = now_us();
+		sv_<size_t> due;
+		for(auto &p : m_peers){
+			auto ti = m_tool_use.find(p.first);
+			if(ti != m_tool_use.end() && !ti->second.reloading.empty() &&
+					now >= ti->second.reload_us)
+				due.push_back(p.first);
+		}
+		for(size_t peer : due){
+			ToolUse &tu = m_tool_use[peer];
+			const ss_ item = tu.reloading;
+			tu.reloading.clear();
+			Peer &p = m_peers[peer];
+			const json::Value *sheet = nullptr;
+			size_t comp = 0;
+			if(hands_of(p.player, &sheet) != item || !sheet ||
+					!equipment_of(p.player, &comp)){
+				log_i(MODULE, "%s's reload of %s stops: not in hand",
+						cs(p.name), cs(item));
+				continue;
+			}
+			const bool one = jstr(*sheet, "reload_mode") == "one";
+			const double time = sheet->get("reload").as_number();
+			Run r;
+			r.entity = p.player;
+			r.comp = comp;
+			r.handler = "on_reload";
+			r.by = "player:"+itos(p.player);
+			r.args.append(item);
+			r.args.append(json::jint(*sheet, "magazine", 0));
+			r.args.append(jstr(*sheet, "ammo"));
+			r.args.append(one);
+			run(r);
+			const bool more = m_ret.is_array() && m_ret.at(0u).is_true();
+			if(!m_tool_use.count(peer))
+				continue;
+			if(one && more){
+				m_tool_use[peer].reloading = item;
+				m_tool_use[peer].reload_us = now + (int64_t)(time * 1e6);
+			}
+		}
+	}
+
 
 	// The material of a voxel by name (Kit's set's, a builder's), null for
 	// another's (the app's own)
@@ -16774,6 +17430,7 @@ struct Module: public interface::Module, public Interface
 		ss_ actions_sent;
 		int64_t actions_at = 0;
 		std::map<std::pair<ss_, ss_>, std::array<double, 3>> scene_pos;
+		std::vector<Projectile> projectiles; // [KIT_TOOLS_2]
 		int64_t clock_base = 0;
 	};
 
@@ -16821,6 +17478,7 @@ struct Module: public interface::Module, public Interface
 		swap(m_actions_at, c.actions_at);
 		swap(m_scene_pos, c.scene_pos);
 		swap(m_clock_base, c.clock_base);
+		swap(m_projectiles, c.projectiles);
 	}
 
 	struct GameSession
