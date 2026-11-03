@@ -1295,6 +1295,7 @@
 	//   "unban", name or address -> the same
 	//   "ban_list"           -> "name|address, ..."
 	//   "ip", name           -> the address, or ""
+	//   "lan_open"           -> "1" once the owner opened it to the LAN
 	static int l_accounts(lua_State *L)
 	{
 		Module *self = module_of(L);
@@ -1323,6 +1324,8 @@
 					out += (out.empty() ? "" : ", ")+ban;
 			} else if(cmd == "ip"){
 				out = peer ? i->address_of(peer) : "";
+			} else if(cmd == "lan_open"){
+				out = i->lan_open() ? "1" : "";
 			}
 		});
 		lua_pushstring(L, out.c_str());

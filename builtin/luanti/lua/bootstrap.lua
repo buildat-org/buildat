@@ -1528,10 +1528,14 @@ end
 -- fly, fast, noclip, settime and the rest -- and a hosted server hands out
 -- default_privs and nothing more. A world opened through the launcher is
 -- somebody's own world, so this is true unless the world says otherwise.
+-- [LUANTI_IS_SINGLEPLAYER] Until its owner opens it to the LAN: a hosted
+-- game is not singleplayer, from then on for the rest of the server's
+-- life. A mod that read it while loading keeps what it read.
 function core.is_singleplayer()
 	-- A public server's is not ([VANILLA_PUBLIC] 3): apps/vanilla sets
 	-- core.__public before the game loads
-	if core.__public then
+	if core.__public or (__luanti_accounts and
+			__luanti_accounts("lan_open") == "1") then
 		return false
 	end
 	return core.settings:get_bool("singleplayer", true)

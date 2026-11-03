@@ -1217,6 +1217,11 @@ struct Module: public interface::Module, public Interface
 		return m_launched;
 	}
 
+	bool lan_open()
+	{
+		return m_lan_open;
+	}
+
 	void kick(PeerId peer, const ss_ &why)
 	{
 		auto it = m_peers.find(peer);

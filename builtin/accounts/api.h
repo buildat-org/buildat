@@ -95,6 +95,9 @@ namespace accounts
 		virtual bool is_local(PeerId peer) = 0;
 		// Whether the launcher started this server
 		virtual bool launched() = 0;
+		// [LUANTI_IS_SINGLEPLAYER] Whether its owner has opened it to the
+		// LAN; it stays open for the rest of the server's life
+		virtual bool lan_open() = 0;
 		// [ACCOUNTS_LAN] the name the server is announced under once its
 		// owner opens it to the LAN (the app id unless set), and whether
 		// joining it needs an account; announced again if open already
