@@ -132,6 +132,10 @@ namespace app
 		// 7, 14, 30 or 90; 0 is forever. No size limit: a cache holding
 		// what every visited server needs saves fetching it again
 		int cache_keep = 14;
+		// **A file cache of its own per server** ([CACHE_PER_SERVER], user
+		// 2026-11-03): a stored file counts as cached only once this server
+		// has sent it, so no server learns what another sent this client
+		bool cache_per_server = false;
 		// **A field of view per app** ([FOV_SETTING]): "fov.<app>", the
 		// degrees of the app's most common camera, 30 to 140; an app
 		// unset here has its own default (buildat.declare_fov)
@@ -193,6 +197,8 @@ namespace app
 		virtual Urho3D::Scene* get_scene() = 0;
 		virtual interface::thread_pool::ThreadPool* get_thread_pool() = 0;
 		virtual lua_State* get_lua() = 0;
+		// Options::cache_per_server, read at each connect
+		virtual bool cache_per_server() = 0;
 	};
 
 	App* createApp(Urho3D::Context *context, const Options &options = Options());

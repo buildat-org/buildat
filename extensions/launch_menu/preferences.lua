@@ -209,6 +209,14 @@ local PREFERENCES = {
 					[90] = "3 months", [0] = "forever"})[v]
 		end,
 	},
+	-- [CACHE_PER_SERVER] A server's file counts as cached only once that
+	-- server has sent it, so no server learns which others this client
+	-- visited; the store stays one, the bandwidth across servers is not saved
+	{
+		name = "cache_per_server",
+		label = "Use a separate file cache for each server",
+		values = {false, true},
+	},
 }
 
 local function show_value(pref, value)

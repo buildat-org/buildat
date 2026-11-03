@@ -1859,6 +1859,7 @@
 				"multisampling", "sound_volume_db", "sound_mute", "ui_size", "lan_discovery",
 				"launch_ui",
 				"default_username", "page_size", "lighting", "cache_keep",
+				"cache_per_server",
 #ifdef __EMSCRIPTEN__
 				// Only where it does something
 				"web_idle_fps",
@@ -1967,6 +1968,8 @@
 			lua_pushinteger(L, o.page_size);
 		else if(name == "cache_keep")
 			lua_pushinteger(L, o.cache_keep);
+		else if(name == "cache_per_server")
+			lua_pushboolean(L, o.cache_per_server);
 		// Unset is the device's: cartoon on software GL
 		else if(name == "lighting")
 			lua_pushstring(L, !o.lighting.empty() ? o.lighting.c_str() :

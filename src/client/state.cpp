@@ -153,6 +153,16 @@ struct CState: public State
 	ss_ m_remote_cache_path;
 	// What this connection has written into it, against REMOTE_WRITE_MAX
 	uint64_t m_remote_written = 0;
+	// **A file cache of its own per server** ([CACHE_PER_SERVER], user
+	// 2026-11-03, the preference cache_per_server): on, a stored file
+	// counts as cached only if its hash is in m_sent, what this server has
+	// sent this client (remote/servers/<server>, a hex hash a line), or in
+	// m_local, the client's own (add_local_files). Else it is asked for
+	// again, into the same store file. See sent_here()
+	bool m_per_server = false;
+	ss_ m_sent_path;
+	set_<ss_> m_sent; // hex
+	set_<ss_> m_local; // raw
 	ss_ m_tmp_path;
 	sm_<ss_, ss_> m_file_hashes; // name -> hash
 	set_<ss_> m_waiting_files; // name
@@ -341,6 +351,7 @@ struct CState: public State
 		for(auto &pair : m_file_hashes)
 			served.push_back(pair.first);
 		m_file_hashes.clear();
+		m_local.clear();
 		for(const ss_ &name : served)
 			m_app->served_file_forgotten(name);
 		m_waiting_files.clear();
@@ -513,6 +524,29 @@ struct CState: public State
 		// this client holds. What a connection may write is bounded
 		// (file_contents)
 		m_remote_written = 0;
+		// [CACHE_PER_SERVER] Named as the store per server was: this
+		// machine's own servers are one, the launcher's game being on a new
+		// port each time
+		m_per_server = m_app && m_app->cache_per_server();
+		m_sent.clear();
+		if(m_per_server){
+			ss_ name = "local";
+			if(address.compare(0, 10, "localhost:") != 0 &&
+					address.compare(0, 10, "127.0.0.1:") != 0 &&
+					address.compare(0, 6, "[::1]:") != 0 &&
+					address.compare(0, 5, "pipe:") != 0){
+				name = "server_"+address;
+				for(char &c : name)
+					if(!(isalnum((unsigned char)c) || c == '-' || c == '.'))
+						c = '_';
+			}
+			interface::fs::create_directories(m_remote_cache_path+"/servers");
+			m_sent_path = m_remote_cache_path+"/servers/"+name;
+			std::ifstream f(m_sent_path);
+			for(ss_ line; std::getline(f, line);)
+				m_sent.insert(line);
+			interface::fs::touch(m_sent_path); // [CACHE_GC] used
+		}
 		if(address.empty()){
 			if(error)
 				*error = "Cannot connect to empty address";
@@ -651,7 +685,8 @@ struct CState: public State
 		m_files_asked += wanted.size();
 		show_file_progress();
 		log_i(MODULE, "%zu of %zu announced files are cached, %zu asked for",
-				task.cached.size(), task.files.size(), wanted.size());
+				task.cached.size(), task.cached.size() + task.wanted.size(),
+				wanted.size());
 		if(!wanted.empty()){
 			std::ostringstream os(std::ios::binary);
 			{
@@ -667,6 +702,14 @@ struct CState: public State
 		run_held_scripts();
 	}
 
+	// [CACHE_PER_SERVER] Whether a stored file of this hash may count as
+	// this server's
+	bool sent_here(const ss_ &file_hash)
+	{
+		return !m_per_server || m_local.count(file_hash) ||
+				m_sent.count(interface::sha1::hex(file_hash));
+	}
+
 	ss_ get_file_path(const ss_ &name, ss_ *dst_file_hash)
 	{
 		auto it = m_file_hashes.find(name);
@@ -675,6 +718,12 @@ struct CState: public State
 		const ss_ &file_hash = it->second;
 		ss_ file_hash_hex = interface::sha1::hex(file_hash);
 		ss_ path = m_remote_cache_path+"/"+file_hash_hex;
+		// [CACHE_PER_SERVER] Not sent by this server yet: a path that is
+		// never there, as the store's would be for a file on its way, so
+		// neither the resource route nor get_file_content reads another
+		// server's copy
+		if(!sent_here(file_hash))
+			path += ".unsent";
 		if(dst_file_hash != nullptr)
 			*dst_file_hash = file_hash;
 		return path;
@@ -783,6 +832,7 @@ struct CState: public State
 			// Whole or not at all: CheckAnnouncedTask takes it as it is
 			interface::fs::write_file(path, content);
 			m_file_hashes[np.first] = hash;
+			m_local.insert(hash); // [CACHE_PER_SERVER] no list
 			m_app->file_updated_in_cache(np.first, hash, path);
 		}
 	}
@@ -1144,8 +1194,19 @@ void CState::setup_packet_handlers()
 		m_announce_checking = true;
 		interface::thread_pool::ThreadPool *pool =
 				m_app ? m_app->get_thread_pool() : nullptr;
+		// [CACHE_PER_SERVER] What this server has not sent is asked for,
+		// whatever is in the store
+		sv_<std::tuple<ss_, ss_>> unsent;
+		if(m_per_server){
+			sv_<std::tuple<ss_, ss_>> rest;
+			for(auto &pair : files)
+				(sent_here(std::get<1>(pair)) ? rest : unsent).push_back(
+						std::move(pair));
+			files.swap(rest);
+		}
 		up_<CheckAnnouncedTask> task(new CheckAnnouncedTask(
 				this, std::move(files), m_remote_cache_path));
+		task->wanted = std::move(unsent);
 		if(pool){
 			pool->add_task(std::move(task));
 		} else {
@@ -1222,9 +1283,14 @@ void CState::setup_packet_handlers()
 			ss_ path = m_remote_cache_path+"/"+file_hash_hex;
 			log_d(MODULE, "Saving %s to %s", cs(file_name), cs(path));
 			// Whole or not at all: CheckAnnouncedTask takes it as it is
-			if(!interface::fs::write_file(path, file_content))
+			if(!interface::fs::write_file(path, file_content)){
 				log_w(MODULE, "Could not save \"%s\" to %s", cs(file_name),
 						cs(path));
+			} else if(m_per_server && m_sent.insert(file_hash_hex).second){
+				// [CACHE_PER_SERVER] Sent by this server from now on
+				std::ofstream(m_sent_path, std::ios::app) << file_hash_hex
+						<< "\n";
+			}
 			// Let Lua resource wrapper know that this happened so it can
 			// update the copy made for Urho3D's resource cache
 			m_app->file_updated_in_cache(file_name, file_hash, path);

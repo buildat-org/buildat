@@ -330,6 +330,8 @@ int main(int argc, char *argv[])
 			"                       Down moves, 1 to 100),\n"
 			"                       cache_keep (days a cache file may go\n"
 			"                       unused: 7, 14, 30 or 90; 0 forever),\n"
+			"                       cache_per_server (1: a server's files\n"
+			"                       count as cached only once it sent them),\n"
 			"                       web_idle_fps (the web client: 1, 5, 10,\n"
 			"                       30 or 60 while unfocused or idle)\n"
 			"  -c [commands]        Run command sequence and exit\n"

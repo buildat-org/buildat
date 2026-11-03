@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: quick
 # cost: ~30 s (2026-11-03)
-# covers: src/impl/linux/fs.cpp src/client/state.cpp src/client/app.cpp
+# covers: src/impl/linux/fs.cpp src/client/state.cpp src/client/app.cpp extensions/launch_menu/preferences.lua
 # [CACHE_GC]: the client's start sweeps what went unused longer than
 # cache_keep from the cache's own directories, and keeps the rest; a cache
 # hit marks a file used; remote/ is one store for every server.
@@ -14,6 +14,10 @@
 #   3. another server of the same app on 127.0.0.1: nothing more stored,
 #      and a file made old is used and marked so
 #   4. cache_keep=0 (forever): nothing removed, no sweep
+#   5. [CACHE_PER_SERVER] cache_per_server=1 on a new cache: server a's
+#      files fetched; server b's same files fetched again but stored
+#      once; server a's next visit fetches nothing; the sweep dropped a
+#      list's entry whose file is gone and a list unused past cache_keep
 #   util/cache_gc_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -97,4 +101,40 @@ run_client 60 "$t/c3.log" timeout -k 5 60 "$here/Build/bin/buildat" \
 [ -e "$c2/remote/0000000000000000000000000000000000000001" ] &&
 	[ ! -e "$c2/cache_sweep" ] || fail "cache_keep=0 swept"
 
-echo "PASS: old cache files swept and the rest kept (a link not followed), one remote/ for two servers ($n files), a hit marked used, forever kept all"
+# 5.
+c3=$t/c3
+h4=0000000000000000000000000000000000000004 h5=0000000000000000000000000000000000000005
+mkdir -p "$c3/remote/servers"; echo y > "$c3/remote/$h4"
+printf '%s\n%s\n' $h4 $h5 > "$c3/remote/servers/server_example.org_1"
+old "$c3/remote/servers/server_old"
+asked() { grep -ao "announced files are cached, [0-9]* asked for" "$1" |
+	awk '{s += $5} END {print s + 0}'; }
+stored() { find "$c3/remote" -maxdepth 1 -type f | wc -l; }
+visit() # <n> <address> [sweep]
+{
+	printf 'sync 60000\nidle 60000\n%bquit\n' \
+		"${3:+wait_log_any 30000 Cache sweep:\n}" > "$t/p$1.cmds"
+	run_client 60 "$t/p$1.log" timeout -k 5 120 "$here/Build/bin/buildat" \
+		-s "$2" -C "$c3" -D "$t/u" -w 640x360 -l 3 \
+		-o sound_mute=1,cache_keep=14,cache_per_server=1 -c @"$t/p$1.cmds" ||
+		fail "per-server client $1 ($t/p$1.log): $(grep -a 'Command sequence failed' "$t/p$1.log" | head -1)"
+}
+visit 1 127.0.0.2:$pa sweep
+a1=$(asked "$t/p1.log"); s1=$(stored)
+[ "$a1" -gt 0 ] || fail "server a's files were not asked for ($t/p1.log)"
+la=$c3/remote/servers/server_127.0.0.2_$pa
+[ "$(sort -u "$la" | wc -l)" = "$(wc -l < "$la")" ] && [ -s "$la" ] ||
+	fail "server a's list empty or repeated ($la)"
+[ "$(cat "$c3/remote/servers/server_example.org_1")" = "$h4" ] ||
+	fail "the sweep kept a list's entry whose file is gone"
+[ ! -e "$c3/remote/servers/server_old" ] || fail "an unused list was kept"
+visit 2 127.0.0.1:$pb
+a2=$(asked "$t/p2.log"); s2=$(stored)
+[ "$a2" = "$a1" ] || fail "server b asked for $a2 files, not server a's $a1 ($t/p2.log)"
+[ "$s2" = "$s1" ] || fail "server b's same files stored again ($s1, then $s2)"
+[ -s "$c3/remote/servers/local" ] || fail "no list for server b"
+visit 3 127.0.0.2:$pa
+a3=$(asked "$t/p3.log")
+[ "$a3" = 0 ] || fail "server a's next visit asked for $a3 files ($t/p3.log)"
+
+echo "PASS: old cache files swept and the rest kept (a link not followed), one remote/ for two servers ($n files), a hit marked used, forever kept all; per server: b asked for a's $a1 files again, stored once ($s1), a's next visit nothing, lists swept"

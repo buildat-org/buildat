@@ -525,6 +525,8 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			opt->sound_mute = (v != 0);
 		} else if(key == "lan_discovery"){
 			opt->lan_discovery = (v != 0);
+		} else if(key == "cache_per_server"){
+			opt->cache_per_server = (v != 0);
 		} else if(key == "ui_size"){
 			in_range = (v >= 0.5 && v <= 3.0);
 			opt->ui_size = (float)v;
@@ -809,6 +811,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jsl = o.get("server_log_level");
 	const json::Value &jps = o.get("page_size");
 	const json::Value &jck = o.get("cache_keep");
+	const json::Value &jcp = o.get("cache_per_server");
 	const json::Value &jlt = o.get("lighting");
 	// Through the same parser as -o, so that the range checks are written
 	// once and a hand-edited file is refused the same way a flag is
@@ -859,6 +862,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 		items += ss_()+(items.empty()?"":",")+"sound_mute="+(jsm.as_boolean()?"1":"0");
 	if(jld.is_boolean())
 		items += ss_()+(items.empty()?"":",")+"lan_discovery="+(jld.as_boolean()?"1":"0");
+	if(jcp.is_boolean())
+		items += ss_()+(items.empty()?"":",")+"cache_per_server="+(jcp.as_boolean()?"1":"0");
 	if(jus.is_number())
 		items += ss_()+(items.empty()?"":",")+"ui_size="+ftos(jus.as_number());
 	else if(jus.is_string() && jus.as_string() == "auto")
@@ -958,6 +963,33 @@ static void start_cache_sweep(const ss_ &cache, int keep_days)
 		for(const ss_ &d : dirs)
 			removed += interface::fs::remove_older(cache+"/"+d, before,
 					&g_cache_sweep.stop);
+		// [CACHE_PER_SERVER] A server's list keeps only what is still in
+		// the store; one unused past cache_keep went above, as any file.
+		// simplified: a list rewritten here counts as used today, so one
+		// whose files keep expiring stays until none does; and an append
+		// by a client connecting meanwhile may be lost (that file is then
+		// asked for once more)
+		const ss_ remote = cache+"/remote";
+		for(const auto &n : interface::fs::list_directory(remote+"/servers")){
+			if(n.is_directory || g_cache_sweep.stop)
+				continue;
+			const ss_ list = remote+"/servers/"+n.name;
+			std::ifstream f(list);
+			ss_ kept;
+			bool dropped = false;
+			for(ss_ line; std::getline(f, line);){
+				if(line.size() == 40 &&
+						line.find_first_not_of("0123456789abcdef") ==
+						ss_::npos &&
+						interface::fs::path_exists(remote+"/"+line))
+					kept += line+"\n";
+				else
+					dropped = true;
+			}
+			f.close();
+			if(dropped)
+				interface::fs::write_file(list, kept);
+		}
 		if(!g_cache_sweep.stop)
 			log_i(MODULE, "Cache sweep: %zu files unused for over %i days "
 					"removed", removed, keep_days);
@@ -1015,6 +1047,7 @@ static void save_preferences(const app::Options &opt)
 	o.set("default_username", opt.default_username);
 	o.set("page_size", opt.page_size);
 	o.set("cache_keep", opt.cache_keep);
+	o.set("cache_per_server", opt.cache_per_server);
 	if(!opt.lighting.empty())
 		o.set("lighting", opt.lighting);
 	if(!opt.fov.empty()){
@@ -2446,6 +2479,11 @@ struct CApp: public App, public magic::Application
 	lua_State* get_lua()
 	{
 		return L;
+	}
+
+	bool cache_per_server()
+	{
+		return m_options.cache_per_server;
 	}
 
 	// Non-public methods
