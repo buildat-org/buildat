@@ -135,10 +135,14 @@ EOF
 	# 4: the environment, on the root
 	edit '{"op": "place", "type": "kit/environment", "pos": [0, 1, 0]}'
 	echo "wait_log_any 10000 kit: environment: from the root, 4,"
+	# Under a cover of 0.2 the sun all through, as the reference's frame
+	# ([KIT_CLOUDS_TOO_BRIGHT]: the default 0.4 lets 0.80 of it through)
+	ep cloud_cover 0.2
 	shot env_noon
 	if [ -n "${REF:-}" ]; then
 		echo quit
 	else
+		ep cloud_cover 0.4
 		# 2. The sky by the hour and its switches (cartoon), at once
 		ep weather_fade 0
 		sky "cartoon, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 0.40"
