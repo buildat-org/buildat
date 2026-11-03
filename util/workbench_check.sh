@@ -1614,7 +1614,7 @@ wait $maker || fail "the admin's client ($t/maker.log)"
 stop
 want "$t/srv5.log" "kitboss uploaded texture kit/up/" \
 	"kitboss made voxel type kitboss/frost version 1 (kit/up/" \
-	"solid, light 0, friction 0.2, surface \"\")" \
+	"solid, light 0, friction 0.2, surface \"\", group \"\" level 0)" \
 	"workbench: kitboss placed kitboss/frost ("
 server 6 "$t/user5"
 BUILDAT_JOIN_NAME=kitboss client again
