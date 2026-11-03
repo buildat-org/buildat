@@ -386,9 +386,10 @@ struct GameStart
 	void announce_world(const ss_ &world_name, const ss_ &game_path,
 			network::PeerInfo::Id peer)
 	{
-		// Announced under the world's name once open to the LAN
+		// Announced under the world's name once open to the LAN; a
+		// joiner logs in ([VANILLA_OWNER_ACCOUNT])
 		accounts::access(m_server, [&](accounts::Interface *i){
-			i->set_lan_name(world_name, false);
+			i->set_lan_name(world_name, true);
 		});
 		// [HEARTH_VISITOR_FLOW] The game where it came from, for the
 		// listing: what the ContentDB install wrote beside it
