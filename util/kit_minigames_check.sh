@@ -2,24 +2,30 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-11-03)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/arena.lua builtin/kit/types/team.lua builtin/kit/types/region.lua builtin/kit/types/team_match.prefab.json builtin/kit/client_lua/ui.lua apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/arena.lua builtin/kit/types/team.lua builtin/kit/types/region.lua builtin/kit/types/button.lua builtin/kit/types/team_match.prefab.json builtin/kit/client_lua/ui.lua apps/workbench/**
 # [KIT_MINIGAMES_1] (kit_plan stage 7b, its first part) A round-based
 # game from the palette: a fresh save on Workbench, the admin (kitboss)
 # places kit/team_match (an arena -- the lobby, queue and round --, the
 # teams Red and Blue with a base region and a button each) round a
 # spawner, the teams' pads brought near it; the arena takes 2 to 4 with
-# a 48 s countdown and a 120 s round (game time). Then:
+# a 48 s countdown and a 240 s round (game time).
+# [KIT_MINIGAMES_FIX] As in the user's playtest, another scene holds a
+# second arena (no countdown, a 10 s round) and two teams of its own
+# (Green, Yellow): the session copies them, and that arena stays idle
+# there (only the one that started it runs a round), its teams nobody's.
+# Then:
 #   1. kitboss in the zone waits alone; kitbob joins (the second): the
 #      countdown starts; kitbob leaves (quits): it is cancelled.
 #   2. kitbob again: the countdown's end makes session 1 with both, one
 #      in each team, each on their team's pad; the round timer ticks.
 #      kitbob's use of a team's button is refused in the default (no
-#      team's member there) and taken for their own team in the round.
-#      kitboss sets off Red's "add" 5: Red reaches its win_score, its
-#      link into the arena's "win" ends the round, Red winning; the
-#      scores shown; both back in the default.
-#   3. Back in the zone: session 2; nobody wins: the timer's end makes
-#      it a draw, shown in the default.
+#      team's member there) and taken for their own team in the round:
+#      each press adds 1, the fifth reaches its win_score, its link into
+#      the arena's "win" ends the round, kitbob's team winning; the
+#      scores and "Round ended by lobby: a win" shown; both back in the
+#      default.
+#   3. Back in the zone: session 2; nobody wins: the round runs its full
+#      240 s and the timer's end makes it a draw, shown in the default.
 #   util/kit_minigames_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -63,7 +69,8 @@ set_() # <id> <param> <value> <undo count after>
 	edit "{\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}" "$4"
 }
 # The ids: 3 the World, the prefab's 4 arena, 5 Red, 6 Blue, 7 and 8
-# their bases, 9 and 10 their buttons; 11 the spawner
+# their bases, 9 and 10 their buttons; 11 the spawner; 12 the scene
+# "other", 13 its arena, 14 and 15 its teams
 {
 	cat <<'EOF'
 wait_log_any 60000 Joined as kitboss
@@ -85,20 +92,33 @@ EOF
 	set_ 11 players true 6
 	set_ 4 size '[5, 3, 5]' 7
 	set_ 4 max_players 4 8
-	# Game seconds: at CHECK_RATE 12, 4 s, 10 s and 2 s
+	# Game seconds: at CHECK_RATE 12, 4 s, 20 s and 2 s
 	set_ 4 countdown 48 9
-	set_ 4 duration 120 10
+	set_ 4 duration 240 10
 	set_ 4 results 24 11
+	# The playtest's other scene: an arena of 10 s and two teams
+	edit '{"op": "new_scene", "name": "other"}' 12
+	echo 'wait_log 30000 kit editor: in the scene other of world, other'
+	edit '{"op": "place", "type": "kit/arena", "pos": [0, 1, 0]}' 13
+	edit '{"op": "place", "type": "kit/team", "pos": [5, 1, 0]}' 14
+	edit '{"op": "place", "type": "kit/team", "pos": [-5, 1, 0]}' 15
+	set_ 13 duration 10 16
+	set_ 13 countdown 0 17
+	set_ 13 players 1 18
+	set_ 13 results 0 19
+	set_ 14 name '"Green"' 20
+	set_ 15 name '"Yellow"' 21
 	cat <<'EOF'
+event kit_edit {"op": "scene", "name": "world"}
+wait_log 30000 kit editor: in the scene world of world, other
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
+event kit_edit {"op": "try", "id": 14, "comp": 0, "input": "join"}
 wait_log 120000 kit editor: in session 1 game
 keypress F6
 wait_log 10000 kit editor: edit mode on
 sync 2000
 EOF
-	# 2. Red's score to its win_score: the round's win
-	ed '{"op": "try", "id": 5, "comp": 0, "input": "add", "value": 5}'
 	cat <<'EOF'
 wait_log 60000 kit editor: in session 0 default
 wait_log 120000 kit editor: in session 2 game
@@ -129,11 +149,15 @@ event kit_use 9
 event kit_use 10
 sync 3000
 wait_log 60000 shown: "Team
-event kit_use 9
-event kit_use 10
-sync 3000
-wait_log 60000 Red wins!
-wait_log 60000 Last round: Red won
+EOF
+	# Five presses of their own team's point (the other's refused), each
+	# after the last one's 1 s hold (game time: 0.1 s at CHECK_RATE 12)
+	for i in 1 2 3 4 5; do
+		printf 'event kit_use 9\nevent kit_use 10\nsync 3000\ndelay 500\n'
+	done
+	cat <<'EOF'
+wait_log_any 60000 wins! | Round ended by lobby: a win
+wait_log 60000 Last round:
 wait_log 120000 Last round: a draw
 quit
 EOF
@@ -164,7 +188,13 @@ want "$s" "kit/arena 4: kitboss entered; 1 of 2 inside" \
 echo "ok: a queue of 2 to 4: one waits, the second starts the countdown, a leave cancels it"
 # 2. Session 1: both, one in each team, on its pad
 want "$s" "kit/arena 4: countdown over: a round for 2 players" \
-	"Session 1 (a game)" "kit/arena 4: round starts: 120 s"
+	"Session 1 (a game)" "kit/arena 4: round starts: 240 s" \
+	"kit/arena 13: idle in session 1 (another arena's round)" \
+	"kit/arena 13: idle in session 2 (another arena's round)"
+! grep -aq "kit/arena 13: round\|joins team \(Green\|Yellow\)\|not in its scene" "$s" ||
+	fail "the other scene's arena or teams took part ($s)"
+want "$s" "kit/team 14: kitboss is not in this team's scene: the join refused"
+echo "ok: the other scene's arena idle in the sessions, its teams nobody's; a join from another scene refused"
 python3 - "$s" <<'PY' || fail "the teams of session 1 ($s)"
 import re, sys
 log = open(sys.argv[1], errors="replace").read()
@@ -191,20 +221,38 @@ assert "kit/button %d: pressed by kitbob" % button in s1, team
 print("  kitbob's button (%s's) pressed in the round" % team)
 PY
 echo "ok: a team's button is its members' (a region owned by the team): refused in the default, kitbob's own in the round"
-want "$s" "kit/arena 4: round over: Red wins!" "kit/arena 4: session 1 ended Red won (" \
-	"Session 1 ended"
-# (Red's 5, and kitbob's press of their own team's button)
-grep -aq "kit/arena 4: round over: Red wins! Red [56] : Blue [01]" "$s" ||
-	fail "no Red 5 in the result ($s)"
-want "$t/bob2.log" "Red wins!" "Last round: Red won"
+python3 - "$s" "$t/bob2.log" <<'PY' || fail "five presses: the win ($s)"
+import re, sys
+log = open(sys.argv[1], errors="replace").read()
+s1 = log.split("Session 1 (a game)")[1].split("Session 1 ended")[0]
+team = re.search(r"kitbob joins team (\w+)", s1).group(1)
+tid = {"Red": 5, "Blue": 6}[team]
+got = re.findall(r"kit/team %d: score (\d+) by kitbob" % tid, s1)
+assert got == ["1", "2", "3", "4", "5"], got
+want = "kit/arena 4: round over: %s wins! " % team
+line = [l for l in s1.splitlines() if want in l]
+assert line and "-- Round ended by lobby: a win" in line[0], line
+assert "kit/arena 4: session 1 ended %s won (" % team in log, team
+assert "%s wins! | Round ended by lobby: a win" % team in \
+	open(sys.argv[2], errors="replace").read(), team
+print("  " + line[0].split("kit/arena 4: ")[1])
+PY
+want "$s" "Session 1 ended"
 grep -aP 'Peer \d+ from session 1 to session 0' "$s" | wc -l | grep -qx 2 ||
 	fail "not both back in the default after session 1 ($s)"
-echo "ok: the win link ends the round, Red winning; the scores shown; both back in the default"
+echo "ok: each press adds 1, the fifth wins by the link; why it ended and the scores shown; both back in the default"
 # 3. Session 2: the timer's end, a draw
 want "$s" "Session 2 (a game)" "kit/arena 4: session 2 over: its time is up" \
-	"kit/arena 4: round over: Draw" "kit/arena 4: session 2 ended a draw" \
-	"Session 2 ended"
+	"kit/arena 4: round over: Draw" "Round ended by lobby: time up" \
+	"kit/arena 4: session 2 ended a draw" "Session 2 ended"
 want "$t/bob2.log" "Last round: a draw"
-echo "ok: the round timer's end without a win is a draw"
-echo "PASS: minigames: the arena's queue (minimum, maximum, a countdown a leave cancels), a session for the round, two teams with their pads, a timer, the win link and a draw by time; team-owned regions"
+python3 - "$s" <<'PY' || fail "session 2's full duration ($s)"
+import sys
+log = open(sys.argv[1], errors="replace").read()
+s2 = log.split("Session 2 (a game)")[1].split("Session 2 ended")[0]
+for n in (230, 10, 1):
+	assert "kit/arena 4: round: %d s left" % n in s2, n
+PY
+echo "ok: the round runs its full 240 s; its end without a win is a draw, and why it ended shown"
+echo "PASS: minigames: an arena elsewhere idle in the sessions, the lobby's teams its own; the arena's queue (minimum, maximum, a countdown a leave cancels), a session for the round, two teams with their pads, a timer, the win link and a draw by time; team-owned regions"
 # vim: set noet ts=4 sw=4:

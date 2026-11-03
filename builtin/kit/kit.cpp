@@ -7905,14 +7905,14 @@ struct Module: public interface::Module, public Interface
 			o += ",players=";
 			lua_lit(players, o);
 		}
-		// [KIT_MINIGAMES_1] every team, by id: {id, params, state}
+		// [KIT_MINIGAMES_1] its teams, by id: {id, params, state}
 		if(m_types[in.type].teams){
 			json::Value teams = json::array();
-			for(auto &p : m_entities)
-				for(const Instance &ti : p.second.comps)
+			for(uint64_t tid : teams_of(e))
+				for(const Instance &ti : m_entities[tid].comps)
 					if(m_types[ti.type].team){
 						json::Value j = json::object();
-						j.set("id", (int64_t)p.first);
+						j.set("id", (int64_t)tid);
 						j.set("params", ti.params);
 						j.set("state", ti.state);
 						teams.append(j);
@@ -7952,10 +7952,24 @@ struct Module: public interface::Module, public Interface
 				}
 			}
 		}
+		// [KIT_MINIGAMES_FIX] its own name (c:name(c.id)), and whether the
+		// player who set it off is elsewhere than its scene
+		if(!e.name.empty())
+			names.set(itos(e.id), e.name);
+		if(pid){
+			ss_ scene;
+			scene_of(e, &scene);
+			if(!peer_of(player_of(r.by), scene))
+				o += ",player_away=true";
+		}
 		o += ",names=";
 		lua_lit(names, o);
-		// [KIT_SESSIONS_1] the session it runs in (0: the default)
+		// [KIT_SESSIONS_1] the session it runs in (0: the default);
+		// [KIT_MINIGAMES_FIX] the entity whose run started it (0: none, a
+		// draft's)
 		o += ",session="+itos(m_active);
+		if(GameSession *gs = active_session())
+			o += ",session_maker="+itos(gs->maker);
 		o += ",next_id="+itos(m_next_id)+",sizes={";
 		for(const auto &s : copy_sizes(e, ci)){
 			o += '[';
@@ -8275,11 +8289,31 @@ struct Module: public interface::Module, public Interface
 			for(auto &p : m_players)
 				r.insert(p.second);
 		if(m_types[in.type].teams)
-			for(auto &p : m_entities)
-				for(const Instance &ti : p.second.comps)
-					if(m_types[ti.type].team)
-						r.insert(p.first);
+			for(uint64_t tid : teams_of(e))
+				r.insert(tid);
 		return r;
+	}
+
+	// [KIT_MINIGAMES_FIX] The teams a `teams = true` type reads: those in
+	// its scene, and of those the ones under its own parent when there are
+	// any (a placed prefab's own)
+	sv_<uint64_t> teams_of(const Entity &e)
+	{
+		ss_ scene;
+		scene_of(e, &scene);
+		sv_<uint64_t> all, sib;
+		for(auto &p : m_entities){
+			bool team = false;
+			for(const Instance &ti : p.second.comps)
+				team = team || m_types[ti.type].team;
+			ss_ ts;
+			if(!team || !scene_of(p.second, &ts) || ts != scene)
+				continue;
+			all.push_back(p.first);
+			if(p.second.parent == e.parent)
+				sib.push_back(p.first);
+		}
+		return sib.empty() ? all : sib;
 	}
 
 	// An entity and every entity under it, parents first; empty past
@@ -10372,6 +10406,7 @@ struct Module: public interface::Module, public Interface
 		if(why){
 			log_w(MODULE, "Entity %s's %s: a teleport refused: %s",
 					cs(itos(e.id)), cs(type), why);
+			add_log(e.id, ss_("a teleport refused: ")+why);
 			return;
 		}
 		const double look = yaw.is_number() && std::isfinite(yaw.as_number()) ?

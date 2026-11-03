@@ -36,6 +36,11 @@ return {
 			if not c.player then
 				return
 			end
+			-- [KIT_MINIGAMES_FIX] the team's members are in its scene
+			if c.player_away then
+				c:log(c:name(by), "is not in this team's scene: the join refused")
+				return
+			end
 			local m = c.state.members
 			for _, id in ipairs(m) do
 				if id == c.player then

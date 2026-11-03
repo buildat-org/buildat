@@ -634,6 +634,9 @@ namespace interface
 // [KIT_MINIGAMES_1] c:session_end(id, result) carries a result (JSON, 4
 // KiB at most) to the maker's on_session_end(c, id, result) (nil
 // without one), so a round's outcome reaches the default round.
+// [KIT_MINIGAMES_FIX] In a session c.session_maker is the entity whose
+// run started it (0: none, a draft); c.player_away is true when the player
+// who set the run off is in another scene than the entity.
 //
 // **Minigames** ([KIT_MINIGAMES_1], stage 7b's first part): the framework
 // owns a round's lifecycle, each game its goal. kit/arena is the lobby
@@ -647,8 +650,11 @@ namespace interface
 // its name, colour, spawn (its pad) and shared score ("add", "set";
 // "reached" at win_score). **The Team interface**: a type with `team =
 // true` is a team, its state `members` (its players' entity ids) and
-// `score`; a type with `teams = true` reads every team, c.teams = {{id,
-// params, state}} by id, and reaches them (c:send); a kit/region with
+// `score`; a type with `teams = true` reads the teams in its scene (of
+// those, the ones under its own parent when there are any: a placed
+// prefab's own), c.teams = {{id, params, state}} by id, and reaches them
+// (c:send); a kit/arena runs a round only in the session it started (any
+// other arena there idle); a kit/region with
 // owner "team" is owned by the members of the team it is under (itself or
 // an entity up its parents with a team: a team's base placed under the
 // team). The prefab kit/team_match is a two-team match to place.

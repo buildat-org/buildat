@@ -15,7 +15,10 @@
 -- (a team's id -- a kit/team's "reached" --, a team's name, or else the
 -- team of the player who set it off), or as a draw at the timer's end;
 -- the result shown for `results` seconds, then everyone back in the
--- default round. "end" ends it at once, from either side.
+-- default round. "end" ends it at once, from either side. The screens and
+-- the log say why it ended ("Round ended by <arena>: time up", "a win",
+-- "end"). [KIT_MINIGAMES_FIX] The session is a copy of the whole start:
+-- only the arena that started it runs a round there, any other is idle.
 -- Its outputs, in the default round: started and ended (the session's
 -- id), result (the winner's name, "" a draw). Its status is on the
 -- players' screens (`ui`), their own team's name with it in a round.
@@ -52,6 +55,18 @@ local function prune(c)
 	end
 	c.state.queue = q
 	return q
+end
+
+-- In a session another arena started: nothing to do there
+local function idle(c)
+	return c.session ~= 0 and c.session_maker ~= c.id
+end
+
+-- Why the round ended, for the screens and the log
+local function ended_by(c, cause)
+	local n = c:name(c.id)
+	return "Round ended by " .. (n == tostring(c.id) and ("arena " .. n) or n) ..
+			": " .. cause
 end
 
 local function clock(s)
@@ -127,7 +142,8 @@ end
 
 local function round_status(c)
 	local teams = teams_of(c)
-	local s = c.state.result ~= "" and c.state.result or
+	local s = c.state.result ~= "" and
+			(c.state.result .. "|" .. c.state.ended) or
 			(c.params.duration > 0 and clock(c.state.left) .. " left" or
 			"Round")
 	if #teams > 0 then
@@ -146,22 +162,26 @@ local function round_status(c)
 	c.state.own = own
 end
 
--- The round's end: a winner's name, or nil (a draw)
-local function finish(c, winner)
+-- The round's end: a winner's name, or nil (a draw; stopped: by "end",
+-- at once), and its cause
+local function finish(c, winner, cause, stopped)
 	if c.state.result ~= "" then
 		return
 	end
 	c:after(-1, "tick")
 	local teams = teams_of(c)
-	c.state.result = winner and (winner .. " wins!") or "Draw"
-	c:log("round over:", c.state.result, scores(teams))
+	c.state.result = winner and (winner .. " wins!") or
+			(stopped and "Stopped" or "Draw")
+	c.state.ended = ended_by(c, cause)
+	c:log("round over:", c.state.result, scores(teams), "--", c.state.ended)
 	round_status(c)
 	local sc = {}
 	for _, t in ipairs(teams) do
 		sc[t.name] = t.score
 	end
-	c.state.outcome = {winner = winner or "", scores = sc}
-	if c.params.results > 0 then
+	c.state.outcome = {winner = winner or "", scores = sc,
+		ended = c.state.ended, stopped = stopped or nil}
+	if c.params.results > 0 and not stopped then
 		c:after(c.params.results, "over")
 	else
 		c:session_end(nil, c.state.outcome)
@@ -198,6 +218,7 @@ return {
 		assigned = {default = {}},
 		left = {default = 0},
 		result = {default = ""},
+		ended = {default = ""},
 		outcome = {default = false},
 		-- On the players' screens: everyone's, and each player's own
 		shown = {default = true, shared = true},
@@ -223,6 +244,11 @@ return {
 	on_start = function(c)
 		if c.session == 0 then
 			return lobby_status(c)
+		end
+		if idle(c) then
+			c.state.shown = false
+			c:log("idle in session", c.session, "(another arena's round)")
+			return
 		end
 		c.state.left = c.params.duration
 		c:log("round starts:", c.params.duration > 0 and
@@ -257,7 +283,8 @@ return {
 		lobby_status(c)
 	end,
 	on_join = function(c, by)
-		if c.session == 0 or not c.player or c.state.result ~= "" then
+		if c.session == 0 or idle(c) or not c.player or
+				c.state.result ~= "" then
 			return
 		end
 		local key = "player:" .. c.player
@@ -304,8 +331,14 @@ return {
 				t[#t + 1] = name .. " " .. tostring(s)
 			end
 			table.sort(t)
-			c.state.last = (w ~= "" and (w .. " won") or "a draw") ..
-					(#t > 0 and (" (" .. table.concat(t, ", ") .. ")") or "")
+			c.state.last = (outcome.stopped and "stopped" or
+					w ~= "" and (w .. " won") or "a draw") ..
+					(#t > 0 and (" (" .. table.concat(t, ", ") .. ")") or "") ..
+					(type(outcome.ended) == "string" and
+					("|" .. outcome.ended) or "")
+			if outcome.stopped then
+				w = nil
+			end
 		end
 		c:log("session", id, "ended", c.state.last)
 		c:emit("ended", id)
@@ -338,7 +371,7 @@ return {
 				end
 				if c.state.left <= 0 then
 					c:log("session", c.session, "over: its time is up")
-					return finish(c, nil)
+					return finish(c, nil, "time up")
 				end
 			end
 			round_status(c)
@@ -348,6 +381,9 @@ return {
 		end
 	end,
 	on_input = function(c, input, value, by)
+		if idle(c) then
+			return
+		end
 		if input == "win" then
 			if c.session == 0 then
 				return
@@ -368,7 +404,7 @@ return {
 				winner = winner or c:name(by)
 			end
 			if winner then
-				finish(c, winner)
+				finish(c, winner, "a win")
 			else
 				c:log("win: no team or player in", tostring(value))
 			end
@@ -379,8 +415,14 @@ return {
 		end
 		if c.session ~= 0 then
 			c:log("session", c.session, "ended from inside")
-			c:session_end()
+			if c.state.result ~= "" then
+				c:session_end(nil, c.state.outcome)
+			else
+				finish(c, nil, '"end"', true)
+			end
 		elseif c.state.session ~= 0 then
+			c.state.last = "stopped|" .. ended_by(c, '"end"')
+			c:log("round over:", c.state.last)
 			c:session_end(c.state.session)
 		end
 	end,
