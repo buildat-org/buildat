@@ -1340,7 +1340,7 @@
 			return false;
 		// Held here: the source may be replaced from inside
 		sp_<SectionSource> source = m_section_source;
-		VoxelVolume v;
+		VoxelVolume v(get_section_region_voxels(section.section_p));
 		if(!source->section(this, section.section_p, v))
 			return false;
 		section.loaded = true;
