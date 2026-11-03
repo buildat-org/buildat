@@ -316,7 +316,7 @@ click Button "Upgrade"
 wait_log 20000 kit editor: Package: upgraded alice/lamps from 1.0.0 to 2.0.0
 EOF
 BUILDAT_JOIN_CREATE= BUILDAT_JOIN_NAME=carol client carol upgrade
-want "$t/srvb.log" "Entity 3: $fp/lamp's migrate from version 1: {\"level\":70}" \
+want "$t/srvb.log" "Entity 3: $fp/lamp's migrate from version 1: {\"level\":70,\"own_look\":true}" \
 	"Entity 3's $fp/lamp upgraded from version 1 to 2" \
 	"carol upgraded alice/lamps from 1.0.0 to 2.0.0: 1 types, 0 prefabs, 0 voxel types, 1 entities upgraded"
 stop
