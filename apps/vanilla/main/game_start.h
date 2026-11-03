@@ -530,6 +530,11 @@ struct GameStart
 			if(!import_from.empty()){
 				i->import_world_settings(import_from, save);
 				i->import_world(import_from);
+				// [LUANTI_IMPORT_OWNER] Its singleplayer the importer's
+				auto it = m_names.find(peer);
+				if(it != m_names.end())
+					i->load_lua("core.__import_owner = [==["+it->second+
+							"]==]", "vanilla_import_owner");
 			}
 			// No singleplayer: its privileges are everyone's
 			// ([VANILLA_PUBLIC] 3)

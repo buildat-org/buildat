@@ -2470,9 +2470,19 @@ end
 -- What the save already knows about that name is kept, the way a mod's
 -- storage is, so that importing the same world twice does not undo what has
 -- happened since the first time. Returns whether the row was taken.
+-- [LUANTI_IMPORT_OWNER] A singleplayer world's own player is its importer's:
+-- "singleplayer" becomes core.__import_owner, the account that imported it
+-- (apps/vanilla sets it), where they stood and what they carry; the import
+-- is once, and a login as "singleplayer" after it is a new player.
 function core.__import_player(name, t)
 	if type(name) ~= "string" or name == "" or type(t) ~= "table" then
 		return false
+	end
+	if name == "singleplayer" and type(core.__import_owner) == "string" and
+			core.__import_owner ~= "" then
+		core.log("action", "__import_player(): singleplayer imported as " ..
+				core.__import_owner)
+		name = core.__import_owner
 	end
 	if saved_players[name] or players[name] then
 		return false
