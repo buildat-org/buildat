@@ -431,6 +431,34 @@ do
 	viewport.renderPath = rp
 	game.viewport = viewport
 end
+-- [SOFT_GL_CARTOON] **The light profile**, for software GL, where a frame
+-- took 290-340 ms (llvmpipe, 800x500; about 75 so): no sun or moon
+-- shadows and the view to 0.4 of FAR_CLIP (64 of 160), the HDR look kept;
+-- the world is still sent to FAR_CLIP. On where the client's lighting
+-- preference is cartoon, which it is unset on software GL.
+-- simplified: looked at once a second, as Kit's environment.lua; the log
+-- cannot tell the preference set from software GL's default (soft_gl() is
+-- not given to Lua; the client's "GL renderer:" line tells)
+local view = {far = FAR_CLIP, t = 0}
+local function light_profile(dt)
+	view.t = view.t - dt
+	if view.t > 0 then
+		return
+	end
+	view.t = 1
+	local on = buildat.get_preference("lighting") == "cartoon"
+	if on == (view.on or false) then
+		return
+	end
+	view.on = on
+	sun.castShadows, moon.castShadows = not on, not on
+	view.far = on and FAR_CLIP * 0.4 or FAR_CLIP
+	camera.farClip = view.far
+	log:info(on and "skeldat: the light profile on: no shadows, the view " ..
+			math.floor(view.far) .. " (lighting cartoon: the preference," ..
+			" or software GL's)" or "skeldat: the light profile off")
+end
+light_profile(0)
 voxelworld.set_camera(camera_node)
 voxel_shading.set_camera(camera_node)
 -- [KIT] stage 6a: Kit's editor (kit.lua)
@@ -810,6 +838,8 @@ local function danger_here()
 	return n > 0 and sum / (n * 15) or 0
 end
 local function update_fog(dt)
+	-- (here: the frame's handler is at Lua's 60 upvalues)
+	light_profile(dt)
 	fog.t = fog.t - dt
 	if fog.t <= 0 then
 		fog.t = 0.25
@@ -827,7 +857,7 @@ local function update_fog(dt)
 		fog.logged = tenth
 		log:info("skeldat: fog for danger " .. tenth / 10)
 	end
-	local far = FAR_CLIP * 0.95
+	local far = view.far * 0.95
 	local fog_end = far - (far - 8) * fog.d
 	game.zone.fogEnd = fog_end
 	game.zone.fogStart = fog_end * (0.6 - 0.6 * fog.d)

@@ -660,11 +660,11 @@ mp_server() # <name> "<VAR=value ...>" [server args]: in the background
 		fail "the server ($t/$name.log)"
 	CHECK_PIDS+=($SERVER_PID)
 }
-mp_client() # <name> <cmds>, in the background: its PID in $CLIENT
+mp_client() # <name> <cmds> [client args], in the background: its PID in $CLIENT
 {
 	mem_wait 1
 	timeout 300 bin/buildat -C "$t/c_$1" -D "$t/u_$1" -w 800x500 -l 3 \
-		-o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" -c @"$2" > "$t/$1.log" 2>&1 &
+		-o sound_mute=1 "${@:3}" -s "127.0.0.1:$SERVER_PORT" -c @"$2" > "$t/$1.log" 2>&1 &
 	CLIENT=$!
 	CHECK_PIDS+=($CLIENT)
 }
@@ -708,9 +708,11 @@ wait_log 120000 hillclimb: the round's results
 wait_log 30000 N, day
 quit
 C
-mp_client mp1 "$t/mp1.cmds"; c1=$CLIENT
+# [SOFT_GL_CARTOON] client1 with lighting game, client2 cartoon: the light
+# profile on client2's alone
+mp_client mp1 "$t/mp1.cmds" -o lighting=game; c1=$CLIENT
 wait_for_log "$t/mp.log" "hillclimb: client.*'s car \\(1\\)" 120 || fail "client1 has no car ($t/mp.log)"
-mp_client mp2 "$t/mp2.cmds"; c2=$CLIENT
+mp_client mp2 "$t/mp2.cmds" -o lighting=cartoon; c2=$CLIENT
 wait $c1 || fail "client1's drive ($t/mp1.log)"
 wait $c2 || fail "client2's drive ($t/mp2.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
@@ -739,6 +741,9 @@ seeds=$(grep -a "hillclimb: the hill, seed\|hillclimb: the hill as it was made, 
 grep -aq "hillclimb: the hill as it was made, seed 1" "$m" && [ "$seeds" = "1 1 " ] ||
 	fail "the hill not made anew with its seed: seeds $seeds ($m)"
 grep -aq "hillclimb: the round's results:.*$n1" "$t/mp2.log" || fail "client2 shown no results ($t/mp2.log)"
+grep -aq "hillclimb: the light profile on: no shadows, the view 60 m" "$t/mp2.log" &&
+	! grep -aq "hillclimb: the light profile on" "$t/mp1.log" ||
+	fail "the light profile not on client2's alone ($t/mp1.log, $t/mp2.log)"
 echo "  two cars: $n1 and $n2, ghosts both ways; the round: $n1's run, $n2 observing; seeds $seeds"
 # [HC_STARPORT] Its Starport a dead local port: the admin's IDs turned on
 # announce to nothing real

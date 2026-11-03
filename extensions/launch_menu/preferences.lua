@@ -104,13 +104,16 @@ local PREFERENCES = {
 		values = {false, true},
 	},
 	-- [KIT_FORCE_CARTOON] Kit's physical lighting drawn as cartoon on this
-	-- client, a weak device's; unset it is cartoon on software GL
+	-- client, a weak device's; unset it is cartoon on software GL.
+	-- [SOFT_GL_CARTOON] skeldat and hillclimb draw no shadows and a shorter
+	-- view by it
 	{
 		name = "lighting",
 		label = "Lighting",
 		values = {"game", "cartoon"},
 		show = function(v)
-			return v == "game" and "as the game sets" or "always cartoon"
+			return v == "game" and "as the game sets" or
+					"light (no shadows, less drawn)"
 		end,
 	},
 	-- The UI scale; "auto" follows the window

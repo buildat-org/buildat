@@ -106,6 +106,35 @@ do
 	magic.renderer.HDRRendering = true
 	viewport.renderPath = sky_light.render_path(magic, viewport.renderPath)
 end
+-- [SOFT_GL_CARTOON] **The light profile**, for software GL, where a frame
+-- took 158-202 ms (llvmpipe, 800x500): no sun shadows and the view to 0.4
+-- of FAR_CLIP, the HDR look kept; the hill is still sent to FAR_CLIP. On
+-- where the client's lighting preference is cartoon, which it is unset on
+-- software GL.
+-- simplified: looked at once a second, as Kit's environment.lua; the log
+-- cannot tell the preference set from software GL's default (soft_gl() is
+-- not given to Lua; the client's "GL renderer:" line tells)
+local profile = {t = 0}
+local function light_profile(dt)
+	profile.t = profile.t - dt
+	if profile.t > 0 then
+		return
+	end
+	profile.t = 1
+	local on = buildat.get_preference("lighting") == "cartoon"
+	if on == (profile.on or false) then
+		return
+	end
+	profile.on = on
+	sun.castShadows = not on
+	local far = on and FAR_CLIP * 0.4 or FAR_CLIP
+	camera.farClip = far
+	zone.fogStart, zone.fogEnd = far * 0.6, far * 0.95
+	log:info(on and "hillclimb: the light profile on: no shadows, the view " ..
+			math.floor(far / U) .. " m (lighting cartoon: the preference," ..
+			" or software GL's)" or "hillclimb: the light profile off")
+end
+light_profile(0)
 voxelworld.set_camera(camera_node)
 voxel_shading.set_camera(camera_node)
 
@@ -1349,6 +1378,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 	if hill == nil then
 		return
 	end
+	light_profile(dt)
 	update_sky()
 	light_outside(dt)
 	voxel_shading.update(dt)

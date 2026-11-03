@@ -2298,6 +2298,13 @@ print("the eyes within %.3f; the copy's off %s; flat %.2f over the feet" % (
 PY
 ) || fail "the bow on the move: $aim ($t/aim1.log, $log39)"
 echo "the bow on the move: $aim"
+# [SOFT_GL_CARTOON] The light profile on software GL alone (lighting
+# unset: cartoon there)
+if soft_gl "$t/aim1.log"; then
+	grep -aq "skeldat: the light profile on: no shadows, the view 64 " "$t/aim1.log"
+else
+	! grep -aq "skeldat: the light profile on" "$t/aim1.log"
+fi || fail "the light profile not on software GL alone ($t/aim1.log)"
 printf '%s\n' "$placed" "wait_log 60000 skeldat: placed at (-40.0," "delay 1500" \
 	"mouse_down left" "delay 500" "mouse_up left" "delay 3000" quit > "$t/aim2.cmds"
 aim_server "$t/srv39b.log" 5
