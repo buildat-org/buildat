@@ -25,7 +25,7 @@
 #      screen"; his own press shows him his own;
 #   5. every UI component on the screen at 1024x700 (no "OFF SCREEN"),
 #      and in the web client by finger (TOUCH=1, 1000x500, headless
-#      Chrome), a guest: a tap on "Press me" shows them their dialog
+#      Chrome), a player with an account: a tap on "Press me" shows them their dialog
 #      (touch.png),
 #      the bottom button over the touch bars.
 # Screenshots kept with KEEP_TMP=1: $t/overlay.png, $t/play.png,
@@ -188,10 +188,19 @@ BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code \
 	BUILDAT_JOIN_ADMIN="setting open_registration on" client kitboss
 BUILDAT_JOIN_NAME=kitbob client kitbob
 if [ -n "$web" ]; then
-	# A guest (Workbench lets one in, no login)
+	# A player who makes an account ([WB_LAN]: Workbench lets no one in
+	# without a login; the registration open by kitboss's script), by the
+	# keys workbench_check's web part uses, no code field
 	cat > "$t/web.json" <<'J'
 [
  ["nav", "${URL}"],
+ ["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+ ["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
+ ["selall"], ["frames", 2], ["type", "webfinger"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["key", "Enter"], ["waitlog", "Joined as webfinger", 30],
  ["waitlog", "player physics enabled", 120],
  ["waitlog_any", "kit: ui 9 button", 30], ["frames", 10],
  ["tap", "Button", "Press me"], ["waitlog", "kit: ui 7 panel .* shown: ", 10],
@@ -254,8 +263,8 @@ if [ -z "$web" ]; then
 fi
 pl=$t/drive/page.log
 grep -aq "OFF SCREEN" "$pl" && fail "a UI component off the screen on the web by finger ($pl)"
-grep -aqP "UI button 4 pressed by p\\d+" "$s" && grep -aqP "kit/ui_panel 7: shown for p\\d+" "$s" ||
-	fail "the guest's tap did not press the button and show their dialog ($s)"
+grep -aq "UI button 4 pressed by webfinger" "$s" && grep -aq "kit/ui_panel 7: shown for webfinger" "$s" ||
+	fail "the web player's tap did not press the button and show their dialog ($s)"
 # The bottom button over the touch bars: its foot above the bars' top
 foot=$(grep -aoP 'kit: ui 4 button at \d+,\K\d+ \d+x\d+' "$pl" | tail -1 |
 	awk '{ split($2, s, "x"); print $1 + s[2] }')
