@@ -1019,7 +1019,7 @@ print("  rows: 15 instances, 8 links, the scores, the lever on, the doors and th
 EOF
 # 7. ([KIT] stage 4e2) Kit's editor as floorplanner's, on fresh saves at
 # 1024x700. With the mouse: the plan (F1), kit/button dragged onto it
-# from the palette (its second tile, after kit/action) (its ghost), a
+# from the palette (its third tile, after kit/action and kit/arena) (its ghost), a
 # click selects, a drag moves it by whole cells, the knob
 # turns it by the angle step, an armed palette item placed by a click
 # (Escape: no longer), a link dragged from an out port onto an in port, a
@@ -1061,7 +1061,7 @@ wait_log 10000 kit editor: state: 1 entities
 keypress F1
 wait_log 5000 kit editor: the view is 2D
 frames 3
-mouse_pos 195 71
+mouse_pos 70 89
 mouse_down left
 frames 2
 mouse_pos 300 200
