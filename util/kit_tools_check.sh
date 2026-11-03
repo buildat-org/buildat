@@ -20,9 +20,12 @@
 #      to 12 and 4 with a knockback each, then dead and respawned at the
 #      spawner at 20; the blade's uses go 4, 3, 2, 1 and the fifth breaks
 #      it: the hands empty, a hit after (on the dummy) refused
-#   3. holding kit/pickaxe (dig stone 4, level 1): rock takes its 0.25 s
-#      (asked again) and drops kitboss/rock; ore (level 3) digs without a
-#      drop
+#   3. game_rules' dig_by_tools off (the default): Kit's kit/stone digs
+#      at once with no drop, as before groups ([KIT_DEFAULT_GROUPS]); then
+#      on: holding kit/pickaxe (dig stone 4, level 1): rock takes its
+#      0.25 s (asked again) and drops kitboss/rock; ore (level 3) digs
+#      without a drop; kit/stone (stone, level 1) drops; a bare hand digs
+#      kit/dirt in 1 s with a drop, kit/stone in 4 s without
 #   util/kit_tools_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -115,6 +118,10 @@ EOF
 	edit '{"op": "link", "id": 7, "comp": 0, "output": "given", "to": 12, "input": "count"}'
 	edit '{"op": "set_voxel", "pos": [2, 1, 2], "voxel": "kitboss/rock"}'
 	edit '{"op": "set_voxel", "pos": [3, 1, 2], "voxel": "kitboss/ore"}'
+	for v in '2, 1, 3] kit/stone' '4, 1, 2] kit/stone' '5, 1, 2] kit/dirt' \
+			'6, 1, 2] kit/stone'; do
+		edit "{\"op\": \"set_voxel\", \"pos\": [${v% *}, \"voxel\": \"${v#* }\"}"
+	done
 	cat <<EOF
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
@@ -148,12 +155,25 @@ EOF
 	for id in 9 9 $BOB $BOB $BOB 9; do
 		printf 'event kit_hit %s\nsync 2000\ndelay 1000\n' "$id"
 	done
-	# The dig: asked, told to wait, asked again
-	printf 'event kit_hold kit/pickaxe\nsync 2000\n'
-	for p in '2, 1, 2' '3, 1, 2'; do
+	dig() # <x, y, z>: asked, told to wait, asked again
+	{
 		for _ in 1 2; do
-			printf 'event workbench_build {"p": [%s], "voxel": "air"}\nsync 2000\ndelay 1000\n' "$p"
+			printf 'event workbench_build {"p": [%s], "voxel": "air"}\nsync 2000\ndelay 1000\n' "$1"
 		done
+	}
+	# dig_by_tools off (the default): kit/stone digs at once, no drop
+	printf 'event kit_hold kit/pickaxe\nsync 2000\n'
+	printf 'event workbench_build {"p": [2, 1, 3], "voxel": "air"}\nsync 2000\n'
+	tools on
+	set_ 4 dig_by_tools true
+	tools off
+	printf 'event kit_hold kit/pickaxe\nsync 2000\n'
+	for p in '2, 1, 2' '3, 1, 2' '6, 1, 2'; do
+		dig "$p"
+	done
+	printf 'event kit_hold\nsync 2000\n'
+	for p in '5, 1, 2' '4, 1, 2'; do
+		dig "$p"
 	done
 	printf 'sync 3000\nquit\n'
 } > "$t/boss.cmds"
@@ -233,5 +253,21 @@ want "$s" "kitboss digs kitboss/rock (stone, level 1) with kit/pickaxe: 0.25 s" 
 grep -aqE "kitboss has \{[^}]*\"kitboss/rock\":1" "$s" ||
 	fail "kitboss/rock not in kitboss's items ($s)"
 echo "ok: a pickaxe digs its group at its speed: rock (level 1) drops, ore (level 3) does not"
-echo "PASS: tools: an item type from a preset, health on players and entities, the hit through Kit's rules (region pvp, peaceful), knockback, wear and breaking, a respawn; digging by material group and level"
+python3 - "$s" "$t/boss.log" <<'PY' || fail "dig_by_tools ($s)"
+import sys
+log = open(sys.argv[1], errors="replace").read()
+assert "workbench: kitboss dug (2,1,3): written" in log
+off = log.split("workbench: kitboss dug (2,1,3): written")[0]
+assert "kitboss digs " not in off and "kitboss dug kit" not in off, "a dig by group with the rule off"
+assert "kitboss dug kit/stone (level 1) with kit/pickaxe (level 1): drops kit/stone" in log
+for w in ["kitboss digs kit/dirt (dirt, level 0) with a hand: 1 s",
+		"kitboss dug kit/dirt (level 0) with a hand (level 0): drops kit/dirt",
+		"kitboss digs kit/stone (stone, level 1) with a hand: 4 s",
+		"kitboss dug kit/stone (level 1) with a hand (level 0): no drop"]:
+	assert w in log, w
+PY
+grep -aqE "kitboss has \{[^}]*\"kit/stone\":1" "$s" ||
+	fail "kit/stone not in kitboss's items ($s)"
+echo "ok: dig_by_tools off: kit/stone dug at once, no drop; on: the pickaxe digs kit/stone with a drop, a hand kit/dirt in 1 s with a drop and kit/stone in 4 s without"
+echo "PASS: tools: an item type from a preset, health on players and entities, the hit through Kit's rules (region pvp, peaceful), knockback, wear and breaking, a respawn; digging by material group and level, under game_rules' dig_by_tools only"
 # vim: set noet ts=4 sw=4:

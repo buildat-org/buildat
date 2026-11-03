@@ -741,11 +741,16 @@ namespace interface
 // color, by} and "kit:projectile_end" {id, at, hit, color}. "kit:reload":
 // the held ranged item's magazine loaded after its reload time
 // ("kit:reloading" {item, time} to the client), one round a time while
-// "one". simplified: no lag compensation. Digging (dig_ready, dug below): a voxel with a
-// material group takes 1 / speed s (the held item's for the group, a
-// hand's 1; "kit:digging" {cell, wait, time} tells the client to ask
-// again) and drops its material into the inventory where the item's
-// level is the voxel's or above; one without a group digs as before.
+// "one". simplified: no lag compensation. Digging (dig_ready, dug below),
+// under kit/game_rules' dig_by_tools (off by default: every voxel digs at
+// once and drops nothing): a voxel with a material group takes 1 / speed
+// s (the held item's for the group, else a hand's: stone 0.25, dirt 1,
+// sand 1.5, wood 0.5, leaves 4, plant 50, any other 1; "kit:digging"
+// {cell, wait, time} tells the client to ask again) and drops its
+// material into the inventory where the item's level is the voxel's or
+// above; one without a group digs as before. Kit's default set's groups:
+// stone (stone, cobble, mossy cobble; level 1), dirt (dirt, grass, snow),
+// sand (sand, gravel), wood (log, planks), leaves, plant.
 //
 // Origins: a cell play writes is a build or a game change. Builds are what
 // players make: their own dig or place (the app says so, player_wrote())
@@ -1081,14 +1086,15 @@ namespace kit
 		// voxel takes 1 / speed seconds of game time, the speed the held
 		// item's for its group (its sheet's dig; a hand's 1), counted from
 		// the first ask at the cell. Ready at once: a voxel with no group
-		// (Kit's set's, the app's own), edit mode, Stopped. Asked before
-		// the dig is written
+		// (the app's own), edit mode, Stopped, kit/game_rules'
+		// dig_by_tools off. Asked before the dig is written
 		virtual bool dig_ready(size_t peer, int x, int y, int z,
 				const ss_ &voxel, double *wait) = 0;
 		// A placed peer's dig of `voxel` written (after player_wrote): the
 		// held item wears (its wear_dig), and the voxel's material drops
 		// into their inventory where the item's level (a hand's 0) is the
-		// voxel's or above. Nothing for a voxel with no group
+		// voxel's or above. Nothing for a voxel with no group, or with
+		// dig_by_tools off
 		virtual void dug(size_t peer, int x, int y, int z,
 				const ss_ &voxel) = 0;
 		// [KIT] stage 4e: Kit's material set's voxels (kit/stone...)

@@ -2682,7 +2682,8 @@ local VOXEL_FIELDS = {
 	{name = "friction", type = "number", min = 0, max = 10},
 	{name = "surface", type = "text", max_length = 32},
 	-- [KIT_TOOLS_1] its material group ("" none: dug at once, no drop) and
-	-- the level a tool needs for the drop
+	-- the level a tool needs for the drop; both only under kit/game_rules'
+	-- dig_by_tools
 	{name = "group", type = "text", max_length = 32},
 	{name = "level", type = "number", integer = true, min = 0, max = 15},
 }

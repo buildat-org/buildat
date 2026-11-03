@@ -14266,17 +14266,38 @@ struct Module: public interface::Module, public Interface
 		return dig_ready_u(peer, x, y, z, voxel, wait);
 	}
 
+	// [KIT_DEFAULT_GROUPS] Digging by tools is kit/game_rules'
+	// dig_by_tools (off by default, and without game_rules): off, every
+	// voxel digs at once and drops nothing, as before groups
+	bool dig_by_tools()
+	{
+		const Instance *gr = root_instance("kit/game_rules");
+		return gr && gr->params.get("dig_by_tools").is_true();
+	}
+
+	// A bare hand's speed for a material group (1 / the seconds a voxel
+	// takes), also an item's for a group its sheet's dig leaves out; a
+	// group not named here 1
+	static double hand_speed(const ss_ &group)
+	{
+		static const std::map<ss_, double> speeds = {{"stone", 0.25},
+				{"dirt", 1}, {"sand", 1.5}, {"wood", 0.5}, {"leaves", 4},
+				{"plant", 50}};
+		auto it = speeds.find(group);
+		return it == speeds.end() ? 1 : it->second;
+	}
+
 	bool dig_ready_u(size_t peer, int x, int y, int z, const ss_ &voxel,
 			double *wait)
 	{
 		auto pi = m_peers.find(peer);
 		const world::Material *m = material_named(voxel);
 		if(!m_hosted || pi == m_peers.end() || !m || m->group.empty() ||
-				pi->second.editing || !m_session.running)
+				pi->second.editing || !m_session.running || !dig_by_tools())
 			return true;
 		const json::Value *sheet = nullptr;
 		const ss_ item = hands_of(pi->second.player, &sheet);
-		double speed = 1;
+		double speed = hand_speed(m->group);
 		if(sheet && has_item(pi->second.name, item)){
 			const json::Value &s = sheet->get("dig").get(m->group.c_str());
 			if(s.is_number())
@@ -14321,7 +14342,8 @@ struct Module: public interface::Module, public Interface
 		auto pi = m_peers.find(peer);
 		const world::Material *m = material_named(voxel);
 		if(!m_hosted || pi == m_peers.end() || !m || m->group.empty() ||
-				pi->second.editing || !m_session.running || !pi->second.player)
+				pi->second.editing || !m_session.running || !pi->second.player ||
+				!dig_by_tools())
 			return;
 		const json::Value *sheet = nullptr;
 		ss_ item = hands_of(pi->second.player, &sheet);
