@@ -355,6 +355,12 @@ struct Module: public interface::Module
 			return false;
 		}
 		log_i(MODULE, "workbench: the project \"%s\" opens", cs(name));
+		// [WB_LAN_NAME] Announced to the LAN as the project, as vanilla's
+		// world; a joiner there logs in
+		if(m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *i){
+				i->set_lan_name(name, true);
+			});
 		if(m_server->has_module("world_menu")){
 			world_menu::access(m_server, [&](world_menu::Interface *i){
 				i->set_running(true);

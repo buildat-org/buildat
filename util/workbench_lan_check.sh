@@ -8,7 +8,8 @@
 #      is logged in without a dialog (as "lanowner", the launcher's
 #      default name), makes a project, and opens the pause menu's
 #      My account... > Open to LAN > its button: the server listens at
-#      the machine's LAN address too, announced as "workbench".
+#      the machine's LAN address too, announced as the project
+#      ("lanproject", [WB_LAN_NAME]).
 #   2. A second client finds it in the connect screen's "This network"
 #      (the announce heard on this machine's LAN address), joins and
 #      makes an account (lanbob, the login the LAN joiner must pass), and
@@ -82,8 +83,8 @@ at=$(grep -ao "Open to the LAN at [0-9.]*:[0-9]*" "$t/o.log" | head -1 | cut -d'
 [ -n "$at" ] || fail "not opened ($(grep -a "Open to LAN\|rror" "$t/o.log" | tail -3); $t/o.log)"
 grep -aq "Logging in as lanowner on this computer" "$t/o.log" ||
 	fail "the owner not logged in without the dialog ($t/o.log)"
-grep -aq 'Announced to the LAN as "workbench"' "$t/o.log" ||
-	fail "not announced as workbench ($t/o.log)"
+grep -aq 'Announced to the LAN as "lanproject"' "$t/o.log" ||
+	fail "not announced as the project, lanproject ($(grep -ao 'Announced to the LAN as "[^"]*"' "$t/o.log"); $t/o.log)"
 echo "ok: opened at $at from the pause menu's My account..."
 
 # 2, then 3's rights; the last click is to fail, there being no such
@@ -93,7 +94,7 @@ wait_log_any 60000 Join a Buildat server: shown
 click Button "This network"
 wait_log_any 10000 This network: 1 heard
 delay 300
-click Button "workbench"
+click Button "lanproject"
 delay 300
 click Button "Join"
 wait_log_any 300000 player physics enabled
