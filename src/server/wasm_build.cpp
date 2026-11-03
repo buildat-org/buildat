@@ -532,6 +532,7 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 	if(interface::fs::path_exists(out)){
 		log_i(MODULE, "%s: %s/ is built (cache hit): %s", cs(module_name),
 				cs(source), cs(out));
+		interface::fs::touch(out); // [CACHE_GC] used
 		return out;
 	}
 	const ss_ prebuilt_dir = config.get<ss_>("rccpp_prebuilt_path");

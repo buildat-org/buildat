@@ -761,6 +761,7 @@ local function cache_read(who, name)
 	end
 	local data = f:read("*a")
 	f:close()
+	__buildat_touch_file(path) -- [CACHE_GC] used
 	return data
 end
 local function cache_write(who, name, data)

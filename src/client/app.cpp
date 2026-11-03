@@ -531,6 +531,9 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 		} else if(key == "page_size"){
 			in_range = (v >= 1 && v <= 100 && v == (int)v);
 			opt->page_size = (int)v;
+		} else if(key == "cache_keep"){
+			in_range = (v == 0 || v == 7 || v == 14 || v == 30 || v == 90);
+			opt->cache_keep = (int)v;
 		} else if(key == "log_level"){
 			in_range = (v >= 0 && v <= 6);
 			opt->log_level = (int)v;
@@ -802,6 +805,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jll = o.get("log_level");
 	const json::Value &jsl = o.get("server_log_level");
 	const json::Value &jps = o.get("page_size");
+	const json::Value &jck = o.get("cache_keep");
 	const json::Value &jlt = o.get("lighting");
 	// Through the same parser as -o, so that the range checks are written
 	// once and a hand-edited file is refused the same way a flag is
@@ -812,6 +816,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 		items += ss_()+(items.empty()?"":",")+"server_log_level="+itos(jsl.as_integer());
 	if(jps.is_integer())
 		items += ss_()+(items.empty()?"":",")+"page_size="+itos(jps.as_integer());
+	if(jck.is_integer())
+		items += ss_()+(items.empty()?"":",")+"cache_keep="+itos(jck.as_integer());
 	if(jrs.is_number())
 		items += ss_()+(items.empty()?"":",")+"render_scale="+ftos(jrs.as_number());
 	else if(jrs.is_string() && jrs.as_string() == "auto")
@@ -904,6 +910,57 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	return true;
 }
 
+// **The cache collected** ([CACHE_GC], user 2026-11-03): at the start, at
+// most once a day (<cache>/cache_sweep holds when it last ran), a thread
+// removes what has not been used for cache_keep days from the directories
+// that are only cache, each file's modification time its last use (a hit
+// sets it). Never anything else: installed_games, the logs, the shared
+// rccpp_build (the archive's prebuilt modules, which a box reads and cannot
+// mark used, and a client without a compiler cannot build again). A file
+// gone under another process is a miss, fetched or built again.
+// simplified: no size limit (the user's call); a client that exits
+// mid-sweep leaves the rest to the next day's
+static struct CacheSweep {
+	std::atomic<bool> stop{false};
+	std::thread thread;
+	// At the process's exit too, which does not always destroy the app
+	~CacheSweep()
+	{
+		stop = true;
+		if(thread.joinable())
+			thread.join();
+	}
+} g_cache_sweep;
+static void start_cache_sweep(const ss_ &cache, int keep_days)
+{
+	const int64_t now = time(nullptr);
+	const ss_ stamp = cache+"/cache_sweep";
+	std::ifstream f(stamp);
+	int64_t last = 0;
+	if(keep_days <= 0 || ((f >> last) && last <= now && now - last < 86400))
+		return;
+	interface::fs::write_file(stamp, std::to_string(now)+"\n");
+	g_cache_sweep.thread = std::thread([cache, keep_days, now](){
+		const int64_t before = now - (int64_t)keep_days * 86400;
+		sv_<ss_> dirs = {"remote", "luanti_media", "luanti_res",
+				"luanti_client", "scripted", "tmp", "wasm2c"};
+		// The boxed apps' own builds and the compiler's temporary files
+		for(const auto &n : interface::fs::list_directory(cache+"/apps")){
+			if(!n.is_directory)
+				continue;
+			dirs.push_back("apps/"+n.name+"/rccpp_build");
+			dirs.push_back("apps/"+n.name+"/tmp");
+		}
+		size_t removed = 0;
+		for(const ss_ &d : dirs)
+			removed += interface::fs::remove_older(cache+"/"+d, before,
+					&g_cache_sweep.stop);
+		if(!g_cache_sweep.stop)
+			log_i(MODULE, "Cache sweep: %zu files unused for over %i days "
+					"removed", removed, keep_days);
+	});
+}
+
 static void save_preferences(const app::Options &opt)
 {
 	// Nothing that came from the command line is remembered: -o's
@@ -954,6 +1011,7 @@ static void save_preferences(const app::Options &opt)
 	o.set("launch_ui", opt.launch_ui);
 	o.set("default_username", opt.default_username);
 	o.set("page_size", opt.page_size);
+	o.set("cache_keep", opt.cache_keep);
 	if(!opt.lighting.empty())
 		o.set("lighting", opt.lighting);
 	if(!opt.fov.empty()){
@@ -1468,6 +1526,7 @@ public:
 					path = dest;
 				}
 			} else {
+				interface::fs::touch(dest); // [CACHE_GC] used
 				path = dest;
 			}
 		}
@@ -2650,6 +2709,10 @@ struct CApp: public App, public magic::Application
 
 		GetSubsystem<magic::Engine>()->SetMaxFps(m_options.graphics.max_fps);
 		apply_sound_preferences();
+#ifndef __EMSCRIPTEN__
+		start_cache_sweep(g_client_config.get<ss_>("cache_path"),
+				m_options.cache_keep);
+#endif
 
 		if(!m_options.graphics.fullscreen && m_restore_maximized){
 			magic::Graphics *g = GetSubsystem<magic::Graphics>();
@@ -2817,6 +2880,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_path)
 		DEF_BUILDAT_FUNC(create_directories)
+		DEF_BUILDAT_FUNC(touch_file)
 		DEF_BUILDAT_FUNC(count_files)
 		DEF_BUILDAT_FUNC(read_under)
 		DEF_BUILDAT_FUNC(write_under)

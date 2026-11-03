@@ -503,29 +503,16 @@ struct CState: public State
 			m_address = address;
 		}
 		m_owner_sent = false;
-		// **A cache of its own per server** ([SECURITY_RUN_1]): the files
-		// are kept by their hash and a client asks only for those it does
-		// not have, so in one cache every server learned which of another
-		// server's files this client held -- where it had been. This
-		// machine's own servers share one, the launcher's game being on a
-		// new port each time. And what a connection may write into it is
-		// bounded (file_contents).
-		{
-			ss_ name = "local";
-			if(address.compare(0, 10, "localhost:") != 0 &&
-					address.compare(0, 10, "127.0.0.1:") != 0 &&
-					address.compare(0, 6, "[::1]:") != 0 &&
-					address.compare(0, 5, "pipe:") != 0){
-				name = "server_"+address;
-				for(char &c : name)
-					if(!(isalnum((unsigned char)c) || c == '-' || c == '.'))
-						c = '_';
-			}
-			m_remote_cache_path = g_client_config.get<ss_>("cache_path")+
-					"/remote/"+name;
-			interface::fs::create_directories(m_remote_cache_path);
-			m_remote_written = 0;
-		}
+		// **One store for every server** ([CACHE_GC], user 2026-11-03:
+		// servers reuse media, and per address the same 95 MB was kept up
+		// to five times): a file is kept under its sha1 only once its
+		// content was checked against it (file_contents), so a server
+		// cannot put a wrong file under another's hash. It was a store per
+		// server ([SECURITY_RUN_1]): a client asks only for what it does
+		// not have, so a server can tell which of another server's files
+		// this client holds. What a connection may write is bounded
+		// (file_contents)
+		m_remote_written = 0;
 		if(address.empty()){
 			if(error)
 				*error = "Cannot connect to empty address";
@@ -783,9 +770,7 @@ struct CState: public State
 
 	void add_local_files(const sv_<std::pair<ss_, ss_>> &name_paths)
 	{
-		m_remote_cache_path = g_client_config.get<ss_>("cache_path")+
-				"/remote/local";
-		interface::fs::create_directories(m_remote_cache_path);
+		// Under the hash of what was read, as a server's file is
 		for(const auto &np : name_paths){
 			std::ifstream f(np.second, std::ios::binary);
 			if(!f.good())
@@ -1222,8 +1207,8 @@ void CState::setup_packet_handlers()
 				continue;
 			}
 			// simplified: a ceiling per connection, not on the cache: a
-			// server sends at most this much a session, and the disk is the
-			// user's to clear (the cache directory)
+			// server sends at most this much a session, and what goes
+			// unused is swept ([CACHE_GC])
 			static const uint64_t REMOTE_WRITE_MAX =
 					(uint64_t)2 * 1024 * 1024 * 1024;
 			if(m_remote_written + file_content.size() > REMOTE_WRITE_MAX){
@@ -1505,7 +1490,10 @@ bool CheckAnnouncedTask::thread()
 		// 15 s at each join.
 		// simplified: a copy changed on the disk afterwards is used as it
 		// is; deleting the cache directory is the way out
-		const bool cached_is_ok = interface::fs::path_exists(path);
+		// A hit marks it used ([CACHE_GC]); one the sweep took in between
+		// is asked for again
+		const bool cached_is_ok = interface::fs::touch(path) ||
+				interface::fs::path_exists(path);
 		if(cached_is_ok)
 			cached.push_back(std::make_tuple(file_name, file_hash, path));
 		else

@@ -1178,6 +1178,9 @@ struct CState: public State, public interface::Server
 				if(previous_hash == interface::sha1::hex(content_hash)){
 					log_v(MODULE, "No need to recompile %s", cs(info.name));
 					skip_compile = true;
+					// [CACHE_GC] Used; the shared build's, read only, is not
+					interface::fs::touch(build_dst);
+					interface::fs::touch(hashfile_path);
 				} else {
 					log_v(MODULE, "%s: the cached hash differs (%s against %s); "
 							"compiling", cs(info.name), cs(previous_hash.substr(0, 12)),

@@ -192,6 +192,17 @@ local PREFERENCES = {
 		values = {1, 2, 3, 4, 5},
 		show = function(v) return LOG_LEVEL_NAMES[v] end,
 	},
+	-- [CACHE_GC] Days a cache file may go unused before the start's sweep
+	-- removes it; 0 never
+	{
+		name = "cache_keep",
+		label = "Keep unused cache files",
+		values = {7, 14, 30, 90, 0},
+		show = function(v)
+			return ({[7] = "1 week", [14] = "2 weeks", [30] = "1 month",
+					[90] = "3 months", [0] = "forever"})[v]
+		end,
+	},
 }
 
 local function show_value(pref, value)

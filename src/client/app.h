@@ -128,6 +128,10 @@ namespace app
 		// definitely have different preferences"): items, 1 to 100; never
 		// more than are in sight either (ui_utils)
 		int page_size = 10;
+		// **Unused cache files kept** ([CACHE_GC], user 2026-11-03): days,
+		// 7, 14, 30 or 90; 0 is forever. No size limit: a cache holding
+		// what every visited server needs saves fetching it again
+		int cache_keep = 14;
 		// **A field of view per app** ([FOV_SETTING]): "fov.<app>", the
 		// degrees of the app's most common camera, 30 to 140; an app
 		// unset here has its own default (buildat.declare_fov)

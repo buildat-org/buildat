@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
 #include "core/types.h"
+#include <atomic>
 
 namespace interface
 {
@@ -57,6 +58,19 @@ namespace interface
 		uint64_t file_size(const ss_ &path);
 		// Sum of file_size for every regular file under path, recursively.
 		uint64_t directory_tree_size(const ss_ &path);
+
+		// [CACHE_GC] A cache hit: the file's modification time made now
+		// (atime is relatime or off); false if it could not be
+		bool touch(const ss_ &path);
+		// [CACHE_GC] Every file under dir modified before `before` (seconds
+		// since the epoch) removed, and each directory under it older than
+		// that and left empty. **No link is followed**: a box writes in
+		// some of the caches this sweeps, and a link there must not take
+		// the sweep into the user's files; a link is removed as a file. A
+		// file that cannot be removed (in use on Windows) is skipped. Stops
+		// early when *stop is set. The number of files removed.
+		size_t remove_older(const ss_ &dir, int64_t before,
+				const std::atomic<bool> *stop = nullptr);
 
 		// A server's icon in the client's list and in Starport's is this
 		// many pixels a side at most ([SERVER_ICONS])

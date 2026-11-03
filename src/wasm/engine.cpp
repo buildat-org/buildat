@@ -2351,6 +2351,7 @@ struct Engine::Impl
 		if(is_file(dir+"/"+MODULE_FILE)){
 			log_i(MODULE, "wasm %s: compiled module from the cache (%s)",
 					cs(e.name), cs(key.substr(0, 12)));
+			interface::fs::touch(dir+"/"+MODULE_FILE); // [CACHE_GC] used
 			ready_from(dir+"/"+MODULE_FILE);
 			return;
 		}

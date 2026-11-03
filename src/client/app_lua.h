@@ -1858,7 +1858,7 @@
 		static const char *names[] = {"render_scale", "vsync", "max_fps",
 				"multisampling", "sound_volume_db", "sound_mute", "ui_size", "lan_discovery",
 				"launch_ui",
-				"default_username", "page_size", "lighting",
+				"default_username", "page_size", "lighting", "cache_keep",
 #ifdef __EMSCRIPTEN__
 				// Only where it does something
 				"web_idle_fps",
@@ -1965,6 +1965,8 @@
 			lua_pushstring(L, o.default_username.c_str());
 		else if(name == "page_size")
 			lua_pushinteger(L, o.page_size);
+		else if(name == "cache_keep")
+			lua_pushinteger(L, o.cache_keep);
 		// Unset is the device's: cartoon on software GL
 		else if(name == "lighting")
 			lua_pushstring(L, !o.lighting.empty() ? o.lighting.c_str() :
@@ -3354,6 +3356,14 @@
 	{
 		ss_ path = lua_bindings::lua_tocppstring(L, 1);
 		lua_pushboolean(L, interface::fs::create_directories(path));
+		return 1;
+	}
+
+	// [CACHE_GC] touch_file(path): an extension's cache file marked used
+	static int l_touch_file(lua_State *L)
+	{
+		ss_ path = lua_bindings::lua_tocppstring(L, 1);
+		lua_pushboolean(L, interface::fs::touch(path));
 		return 1;
 	}
 
