@@ -30,7 +30,11 @@
 **                        teleport = {x, y, z} (or {} with an entity),
 **                        teleport_yaw = degrees, teleport_scene = name,
 **                        teleport_entity = id
-**                        (looking that way, level), items = {item = n}
+**                        (looking that way, level), sessions =
+**                        {{"start", {player id...} | null} | {"move",
+**                        player id, session} | {"end", session}...}
+**                        ([KIT_SESSIONS_1]; the request's session is the
+**                        one it runs in), items = {item = n}
 **                        (the player's list after inventory calls),
 **                        inv_set = {{key, value}...} (the provider's
 **                        state), spawn = {{ref, pos|null, id}...}, remove
@@ -460,6 +464,25 @@ static const char PRELUDE[] =
 "		if #apps >= 8 then error('app: 8 a run at most', 2) end\n"
 "		apps[#apps + 1] = {tostring(what), value == nil and NULL or value}\n"
 "	end\n"
+"	-- [KIT_SESSIONS_1] Sessions: the one it runs in (0: the default), and\n"
+"	-- what it asks of them (the host checks the players and the sessions)\n"
+"	c.session = req.session or 0\n"
+"	local sessions = {}\n"
+"	local function session_op(t)\n"
+"		if #sessions >= 8 then error('sessions: 8 calls a run at most', 3) end\n"
+"		sessions[#sessions + 1] = t\n"
+"	end\n"
+"	function c:session_start(players)\n"
+"		if players ~= nil and type(players) ~= 'table' then error('session_start: a list of player ids, or nil', 2) end\n"
+"		local l = NULL\n"
+"		if players then\n"
+"			l = {}\n"
+"			for i, p in ipairs(players) do if i <= 64 then l[i] = tonumber(p) or 0 end end\n"
+"		end\n"
+"		session_op({'start', l})\n"
+"	end\n"
+"	function c:session_move(player, id) session_op({'move', tonumber(player) or 0, tonumber(id) or 0}) end\n"
+"	function c:session_end(id) session_op({'end', tonumber(id) or c.session}) end\n"
 "	-- A line in the server's log at once, and the entity's own in the answer\n"
 "	function c:log(...)\n"
 "		local s = line(...)\n"
@@ -524,6 +547,7 @@ static const char PRELUDE[] =
 "	if #sends > 0 then fx.send = sends end\n"
 "	if #lines > 0 then fx.log = lines end\n"
 "	if #apps > 0 then fx.app = apps end\n"
+"	if #sessions > 0 then fx.sessions = sessions end\n"
 "	if req.handler == 'on_build' then fx.build = build end\n"
 "	return json(fx)\n"
 "end\n"

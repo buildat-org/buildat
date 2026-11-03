@@ -635,6 +635,153 @@ struct Copy
 	bool keep_standing = false;
 };
 
+// [KIT_SESSIONS_1] The start's copies of one scene's sections the default
+// round wrote, as a session's source reads them on voxelworld's thread: the
+// Watch's in flight (before Kit's next tick stores them), else the store's
+// rows ("start:<scene>:x,y,z"); cleared as the copies go (Play, Stop, Save
+// as start)
+struct StartCopies
+{
+	std::mutex mutex;
+	std::map<ss_, ss_> data;
+	storage::Store *store = nullptr;
+	void put(const ss_ &key, const ss_ &d)
+	{
+		std::lock_guard<std::mutex> lock(mutex);
+		data[key] = d;
+	}
+	void clear()
+	{
+		std::lock_guard<std::mutex> lock(mutex);
+		data.clear();
+		kept.clear();
+	}
+	// The cells of a section kept as made (live edits, marks 'k') since
+	// its copy, by its key
+	std::map<ss_, sv_<pv::Vector3DInt32>> kept;
+	void set_kept(const ss_ &key, const sv_<pv::Vector3DInt32> &cells)
+	{
+		std::lock_guard<std::mutex> lock(mutex);
+		if(cells.empty())
+			kept.erase(key);
+		else
+			kept[key] = cells;
+	}
+	sv_<pv::Vector3DInt32> kept_of(const ss_ &key)
+	{
+		std::lock_guard<std::mutex> lock(mutex);
+		auto it = kept.find(key);
+		return it == kept.end() ? sv_<pv::Vector3DInt32>() : it->second;
+	}
+	bool get(const ss_ &key, ss_ &out)
+	{
+		if(store && store->get(key, out))
+			return true;
+		std::lock_guard<std::mutex> lock(mutex);
+		auto it = data.find(key);
+		if(it == data.end())
+			return false;
+		out = it->second;
+		return true;
+	}
+};
+
+// [KIT_SESSIONS_1] A session's scene's voxels, copy-on-write over the
+// start's (voxelworld's SectionSource): a section the default round wrote,
+// its copy (the round's live edits over it); else the default's instance's
+// own (loaded, or its save's); else none (the session's World generates
+// it, as the start's would).
+// simplified: read as the session first loads it; a live edit in the
+// default since the session started is in a section it loads after
+// (its entities are the start's as it started). A snapshot of the start
+// at the session's start is the upgrade
+struct SessionSource: public voxelworld::SectionSource
+{
+	ss_ scene;
+	voxelworld::Instance *base = nullptr;
+	sp_<StartCopies> copies;
+	bool section(voxelworld::Instance *world, const pv::Vector3DInt16 &sp,
+			interface::VoxelVolume &out)
+	{
+		ss_ data;
+		const ss_ key = "start:"+scene+":"+itos(sp.getX())+","+
+				itos(sp.getY())+","+itos(sp.getZ());
+		if(copies && copies->get(key, data)){
+			up_<interface::VoxelVolume> v = interface::deserialize_volume(data);
+			if(v){
+				out = *v;
+				const sv_<pv::Vector3DInt32> kept = copies->kept_of(key);
+				interface::VoxelVolume now(out.getEnclosingRegion());
+				if(!kept.empty() && base && base->read_section(sp, now))
+					for(const pv::Vector3DInt32 &p : kept)
+						out.setVoxelAt(p, now.getVoxelAt(p));
+				return true;
+			}
+		}
+		return base && base->read_section(sp, out);
+	}
+};
+
+// [KIT_SESSIONS_1] A session's store: an overlay over Kit's, its rows in
+// memory (read through to the start's), so nothing a session does reaches
+// the save; the builder's own server-wide rows (prefabs, voxel types,
+// textures, packages) pass through
+struct OverlayStore: public storage::Store
+{
+	storage::Store *base = nullptr;
+	// key -> (there, value)
+	std::map<ss_, std::pair<bool, ss_>> own;
+	static bool through(const ss_ &key)
+	{
+		for(const char *pre : {"prefab:", "voxel:", "texture:", "package:"})
+			if(key.compare(0, strlen(pre), pre) == 0)
+				return true;
+		return false;
+	}
+	bool get(const ss_ &key, ss_ &value_out)
+	{
+		auto it = own.find(key);
+		if(it == own.end() || through(key))
+			return base->get(key, value_out);
+		if(!it->second.first)
+			return false;
+		value_out = it->second.second;
+		return true;
+	}
+	void set(const ss_ &key, const ss_ &value)
+	{
+		if(through(key))
+			return base->set(key, value);
+		own[key] = std::make_pair(true, value);
+	}
+	void remove(const ss_ &key)
+	{
+		if(through(key))
+			return base->remove(key);
+		own[key] = std::make_pair(false, ss_());
+	}
+	sv_<ss_> list(const ss_ &prefix)
+	{
+		std::set<ss_> r;
+		for(const ss_ &k : base->list(prefix))
+			r.insert(k);
+		for(auto it = own.lower_bound(prefix); it != own.end() &&
+				it->first.compare(0, prefix.size(), prefix) == 0; ++it){
+			if(through(it->first))
+				continue;
+			if(it->second.first)
+				r.insert(it->first);
+			else
+				r.erase(it->first);
+		}
+		return sv_<ss_>(r.begin(), r.end());
+	}
+	void batch(std::function<void()> writes)
+	{
+		writes();
+	}
+};
+
 // [KIT] stage 4c: voxelworld's side of the copy-on-write start. A section's
 // voxels before the round first writes to it, queued for Kit's thread (it
 // comes on voxelworld's, under its lock) as the store's key and the copy;
@@ -646,6 +793,8 @@ struct Watch: public voxelworld::SectionWatch
 	std::mutex *mutex;
 	std::deque<Copy> *queue;
 	std::set<ss_> copied;
+	// [KIT_SESSIONS_1] the sessions' view of the copies
+	sp_<StartCopies> start;
 	ss_ key_of(const pv::Vector3DInt16 &sp)
 	{
 		return "start:"+scene+":"+itos(sp.getX())+","+
@@ -657,6 +806,8 @@ struct Watch: public voxelworld::SectionWatch
 		Copy c;
 		c.key = key_of(sp);
 		c.data = interface::serialize_volume_compressed(before);
+		if(start)
+			start->put(c.key, c.data);
 		std::lock_guard<std::mutex> lock(*mutex);
 		copied.insert(c.key);
 		queue->push_back(std::move(c));
@@ -1064,6 +1215,14 @@ struct Module: public interface::Module, public Interface
 					if(w){
 						w->set_owner_handler("kit", nullptr);
 						w->set_section_watch(nullptr);
+					}
+				}
+				// [KIT_SESSIONS_1] the sessions' scenes
+				for(auto &r : m_ref_session){
+					voxelworld::Instance *w = ivw->get_instance(r.first);
+					if(w){
+						w->set_owner_handler("kit", nullptr);
+						w->set_section_source(nullptr);
 					}
 				}
 			});
@@ -2286,7 +2445,7 @@ struct Module: public interface::Module, public Interface
 	json::Value runtime_json(bool for_start = false)
 	{
 		json::Value r = json::object();
-		const int64_t now = interface::os::game_us();
+		const int64_t now = now_us();
 		json::Value made = json::array();
 		for(auto &p : m_entities){
 			if(p.second.comps.empty() || (for_start && !authored(p.second)))
@@ -2357,14 +2516,14 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// An instance's runtime from a runtime row's entry for it
-	static void runtime_from(Instance &in, const json::Value &s)
+	void runtime_from(Instance &in, const json::Value &s)
 	{
 		const json::Value &st = s.get("state");
 		if(st.is_object())
 			for(json::Iterator it(st); it; ++it)
 				in.state.set(it.key(), *it);
 		in.disabled = jstr(s, "disabled");
-		const int64_t now = interface::os::game_us();
+		const int64_t now = now_us();
 		in.timers.clear();
 		const json::Value &t = s.get("timer");
 		if(t.is_number() && t.as_number() >= 0){
@@ -2453,6 +2612,7 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		m_store = host.save->store("kit");
+		m_kit_store = m_store;
 		m_kit_types = m_server->get_module_path(MODULE)+"/types";
 		m_author = host.author;
 		if(m_author.empty()){
@@ -2599,6 +2759,8 @@ struct Module: public interface::Module, public Interface
 			if(!m_session.restore.count(k))
 				m_session.copied.insert(k);
 		load_marks();
+		for(auto &m : m_marks)
+			kept_to_copies(m.first);
 		if(m_store->get("discarded", discarded))
 			discarded_from(json::load_string(discarded.c_str()));
 		// Runtime: Running, the save's over each type's defaults; Stopped,
@@ -2686,6 +2848,7 @@ struct Module: public interface::Module, public Interface
 				"to put back", m_session.running ? "Running" : "Stopped",
 				m_session.by.empty() ? "no one" : cs(m_session.by),
 				m_session.copied.size(), m_session.restore.size());
+		sessions_from_save();
 		m_hosted = true;
 		size_t n = 0, es = 0;
 		for(auto &p : m_entities)
@@ -2997,7 +3160,14 @@ struct Module: public interface::Module, public Interface
 	// texture for their voxel types; answered with "kit:texture" (its
 	// name, "kit/up/<hash>.png") or "kit:edit_refused". Decoded here and
 	// saved again as a PNG: a client is sent only what decoded
+	// [KIT_SESSIONS_1] in the sender's session
 	void on_texture(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_texture_u(packet);
+	}
+
+	void on_texture_u(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
 		auto refuse = [&](const ss_ &why){
@@ -3117,7 +3287,14 @@ struct Module: public interface::Module, public Interface
 	// a 0 byte and its zip, as the Aitta serves them): a builder with the
 	// tools on installs a Kit package, or a newer version of one. Answered
 	// with "kit:package", {"ok": true, "what"} or {"ok": false, "why"}
+	// [KIT_SESSIONS_1] in the sender's session
 	void on_package(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_package_u(packet);
+	}
+
+	void on_package_u(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
 		auto answer = [&](bool ok, const ss_ &s){
@@ -3942,13 +4119,17 @@ struct Module: public interface::Module, public Interface
 			why = "scene "+name+": the app has none of that name";
 			return false;
 		}
-		main_context::SceneReference ref = m_host.make_scene(name, this);
+		// [KIT_SESSIONS_1] a session's, "<name>~<id>" to the app
+		main_context::SceneReference ref = m_host.make_scene(
+				app_scene(name, m_active), this);
 		if(!ref){
 			why = "scene "+name+": the app made none";
 			return false;
 		}
 		m_host.scenes[name] = ref;
-		if(m_session.running)
+		if(m_active)
+			session_scene(name, ref);
+		else if(m_session.running)
 			watch_scene(name, ref, true);
 		log_i(MODULE, "Scene %s made by the app", cs(name));
 		return true;
@@ -4608,7 +4789,8 @@ struct Module: public interface::Module, public Interface
 			w->set_writes_alter(true);
 			// [KIT_HM_VOXELS] a heightmap's air sections: only the
 			// edited ones saved
-			w->set_save_unaltered(p.finite() && !p.heightmap());
+			// [KIT_SESSIONS_1] a session's: only what it changed
+			w->set_save_unaltered(!m_active && p.finite() && !p.heightmap());
 			m_w->hm_world = p.heightmap() ? w : nullptr;
 		});
 	}
@@ -7676,6 +7858,8 @@ struct Module: public interface::Module, public Interface
 		}
 		o += ",names=";
 		lua_lit(names, o);
+		// [KIT_SESSIONS_1] the session it runs in (0: the default)
+		o += ",session="+itos(m_active);
 		o += ",next_id="+itos(m_next_id)+",sizes={";
 		for(const auto &s : copy_sizes(e, ci)){
 			o += '[';
@@ -7920,6 +8104,9 @@ struct Module: public interface::Module, public Interface
 		const json::Value &apps = fx.get("app");
 		for(unsigned i = 0; i < apps.size(); i++)
 			app_call(e, type, r.by, who, apps.at(i));
+		const json::Value &sessions = fx.get("sessions");
+		if(sessions.size())
+			session_fx(e, r.comp, r, sessions);
 		const json::Value &items = fx.get("items");
 		if(!who.empty() && !items.is_undefined())
 			got_items(e, type, who, items);
@@ -9944,7 +10131,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		// The game clock's minutes and seconds
 		char t[32];
-		const double sec = std::fmod(interface::os::game_us() / 1e6, 3600);
+		const double sec = std::fmod(now_us() / 1e6, 3600);
 		snprintf(t, sizeof t, "%02d:%04.1f ", (int)(sec / 60),
 				std::fmod(sec, 60));
 		std::deque<ss_> &l = m_logs[id];
@@ -10079,7 +10266,7 @@ struct Module: public interface::Module, public Interface
 					cs(in), look);
 		if(te)
 			m_arrive[who] = std::make_pair(te->id,
-					interface::os::game_us() + 10000000);
+					now_us() + 10000000);
 		to_scene(peer, other ? target : "", x, y, z, look);
 	}
 
@@ -10183,7 +10370,7 @@ struct Module: public interface::Module, public Interface
 	EnvClock& env_clock(uint64_t id, const Instance &in, const json::Value &v)
 	{
 		EnvClock &c = m_env_clock[id];
-		const int64_t now = interface::os::game_us();
+		const int64_t now = now_us();
 		const ss_ seq = in.params.get("time").stringify()+"|"+
 				in.state.get("time_set").stringify();
 		const double minutes = std::max(0.0, env_num(v, "day_minutes", 0));
@@ -10244,7 +10431,7 @@ struct Module: public interface::Module, public Interface
 		EnvClock &c = env_clock(id, *in, v);
 		if(key)
 			*key = j.stringify()+"|"+itos(c.at)+"|"+std::to_string(c.base);
-		j.set("time", env_hours(c, interface::os::game_us()));
+		j.set("time", env_hours(c, now_us()));
 		return j;
 	}
 
@@ -10284,7 +10471,7 @@ struct Module: public interface::Module, public Interface
 			}
 			send_season(scene, -1);
 		}
-		const int64_t now = interface::os::game_us();
+		const int64_t now = now_us();
 		for(auto &c : m_env_clock){
 			auto e = m_entities.find(c.first);
 			const Instance *in = e == m_entities.end() ? nullptr :
@@ -10587,10 +10774,22 @@ struct Module: public interface::Module, public Interface
 
 	bool can_dig(size_t peer, int x, int y, int z)
 	{
+		SessionScope sc(*this, session_of_peer(peer));
+		return can_dig_u(peer, x, y, z);
+	}
+
+	bool can_dig_u(size_t peer, int x, int y, int z)
+	{
 		return allows(peer, "dig", x, y, z, nullptr);
 	}
 
 	uint64_t region_of(size_t peer, int x, int y, int z)
+	{
+		SessionScope sc(*this, session_of_peer(peer));
+		return region_of_u(peer, x, y, z);
+	}
+
+	uint64_t region_of_u(size_t peer, int x, int y, int z)
 	{
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end())
@@ -10600,6 +10799,12 @@ struct Module: public interface::Module, public Interface
 	}
 
 	bool can_place(size_t peer, int x, int y, int z)
+	{
+		SessionScope sc(*this, session_of_peer(peer));
+		return can_place_u(peer, x, y, z);
+	}
+
+	bool can_place_u(size_t peer, int x, int y, int z)
 	{
 		return allows(peer, "place", x, y, z, nullptr);
 	}
@@ -10700,6 +10905,12 @@ struct Module: public interface::Module, public Interface
 	// the World's default: digging and placing by a type's grants alone
 	// (none: no), entering, pvp and damage yes. Edit mode is not in it
 	bool allows(size_t peer, const ss_ &action, int x, int y, int z, ss_ *why)
+	{
+		SessionScope sc(*this, session_of_peer(peer));
+		return allows_u(peer, action, x, y, z, why);
+	}
+
+	bool allows_u(size_t peer, const ss_ &action, int x, int y, int z, ss_ *why)
 	{
 		auto pi = m_peers.find(peer);
 		const bool build = action == "dig" || action == "place";
@@ -11025,7 +11236,7 @@ struct Module: public interface::Module, public Interface
 			it->name = name;
 			it->player = player;
 		}
-		it->due_us = interface::os::game_us() + (int64_t)(s * 1e6);
+		it->due_us = now_us() + (int64_t)(s * 1e6);
 		it->by = by;
 	}
 
@@ -11033,7 +11244,7 @@ struct Module: public interface::Module, public Interface
 	// whoever set it off
 	void run_timers()
 	{
-		const int64_t now = interface::os::game_us();
+		const int64_t now = now_us();
 		for(auto &p : m_entities)
 			for(size_t i = 0; i < p.second.comps.size(); i++){
 				Instance &in = p.second.comps[i];
@@ -11112,7 +11323,7 @@ struct Module: public interface::Module, public Interface
 					auto ar = m_arrive.find(peer.name);
 					if(inside && ar != m_arrive.end() &&
 							ar->second.first == e.id){
-						if(ar->second.second > interface::os::game_us())
+						if(ar->second.second > now_us())
 							silent.insert(itos(peer.player));
 						m_arrive.erase(ar);
 					}
@@ -11174,15 +11385,65 @@ struct Module: public interface::Module, public Interface
 			return;
 		m_box->poll();
 		take_vouches();
+		// [KIT_SESSIONS_1] Writes routed to owned voxels, by the session
+		// whose scene it is; each round's tick in its own members
+		std::deque<Write> all;
+		{
+			std::lock_guard<std::mutex> lock(m_writes_mutex);
+			all.swap(m_writes);
+		}
+		std::map<uint64_t, std::deque<Write>> writes;
+		for(Write &w : all)
+			writes[session_of_ref(w.scene)].push_back(w);
+		tick_round(writes[0]);
+		sv_<uint64_t> ids;
+		for(auto &s : m_sessions)
+			ids.push_back(s.first);
+		for(uint64_t id : ids){
+			SessionScope sc(*this, id);
+			tick_round(writes[id]);
+		}
+		session_ops();
+		// Sessions nobody is in end: a draft as its builder leaves, a game
+		// session after SESSION_IDLE_US
+		const int64_t now = interface::os::time_us();
+		std::set<uint64_t> used;
+		for(auto &ps : m_peer_session)
+			used.insert(ps.second);
+		for(uint64_t id : ids){
+			auto si = m_sessions.find(id);
+			if(si == m_sessions.end())
+				continue;
+			GameSession &gs = *si->second;
+			if(used.count(id)){
+				gs.empty_since = 0;
+				continue;
+			}
+			if(!gs.empty_since)
+				gs.empty_since = now;
+			if(gs.draft || now - gs.empty_since > SESSION_IDLE_US)
+				end_session(id, "nobody in it");
+		}
+		if(!m_drop_scenes.empty())
+			drop_scenes();
+	}
+
+	// One round's tick (the default's or a session's, entered); a
+	// session's has no copies or start of its own to write
+	// simplified: each session runs its round with a tick's whole budget
+	// (MAX_SESSIONS of them at most), not a share of one
+	void tick_round(std::deque<Write> &writes)
+	{
 		for(auto &w : m_worlds){
 			WorldScope ws(m_w, &w.second);
 			sky_relight_tick();
 			hm_sections_tick();
 		}
-		flush_copies();
+		if(!m_active)
+			flush_copies();
 		// Writes into the start, made as their sections load: Running,
 		// kept past the round's Stop
-		for(size_t n = m_start_writes.size(); n > 0; n--){
+		for(size_t n = m_active ? 0 : m_start_writes.size(); n > 0; n--){
 			Write w = m_start_writes.front();
 			m_start_writes.pop_front();
 			w.origin = 'k';
@@ -11207,11 +11468,6 @@ struct Module: public interface::Module, public Interface
 		if(!m_session.running){
 			// Stopped: components do not run. A write routed to one is
 			// made by no one
-			std::deque<Write> writes;
-			{
-				std::lock_guard<std::mutex> lock(m_writes_mutex);
-				writes.swap(m_writes);
-			}
 			for(const Write &w : writes)
 				log_i(MODULE, "A write routed to (%i,%i,%i) by %s: the server "
 						"is Stopped, its component does not run", w.p.getX(),
@@ -11227,11 +11483,6 @@ struct Module: public interface::Module, public Interface
 				m_pending_voxels.push_back(w);
 		}
 		// Writes routed to owned voxels: to the owner's on_voxel
-		std::deque<Write> writes;
-		{
-			std::lock_guard<std::mutex> lock(m_writes_mutex);
-			writes.swap(m_writes);
-		}
 		for(const Write &w : writes){
 			bool owned = false;
 			for(auto &p : m_entities){
@@ -11631,6 +11882,13 @@ struct Module: public interface::Module, public Interface
 	void put_player(size_t peer, double x, double y, double z,
 			double look = NAN) override
 	{
+		SessionScope sc(*this, session_of_peer(peer));
+		put_player_u(peer, x, y, z, look);
+	}
+
+	void put_player_u(size_t peer, double x, double y, double z,
+			double look)
+	{
 		if(!m_host.controls || !m_peers.count(peer))
 			return;
 		Body &b = m_bodies[peer];
@@ -11644,7 +11902,14 @@ struct Module: public interface::Module, public Interface
 	// "kit:input": "<put>;<n> f r yaw jump go tx ty tz;..." (the inputs
 	// after the last the client heard of, numbered on; put: the last put
 	// it heard of, those of an earlier one dropped)
+	// [KIT_SESSIONS_1] in the sender's session
 	void on_input(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_input_u(packet);
+	}
+
+	void on_input_u(const network::Packet &packet)
 	{
 		auto bi = m_bodies.find(packet.sender);
 		if(bi == m_bodies.end() || !bi->second.put ||
@@ -12058,7 +12323,14 @@ struct Module: public interface::Module, public Interface
 		put_body(peer, b, x, y, z);
 	}
 
+	// [KIT_SESSIONS_1] in the sender's session
 	void on_exit(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_exit_u(packet);
+	}
+
+	void on_exit_u(const network::Packet &packet)
 	{
 		auto pi = m_peers.find(packet.sender);
 		if(pi == m_peers.end() || !act_allowed(pi->second))
@@ -12116,7 +12388,14 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
+	// [KIT_SESSIONS_1] in the sender's session
 	void on_use(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_use_u(packet);
+	}
+
+	void on_use_u(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
 		const ss_ data = packet.data.substr(0, 32);
@@ -12310,7 +12589,14 @@ struct Module: public interface::Module, public Interface
 	// "kit:action" "<name> 1" pressed, "<name> 0" released: from a peer
 	// the app placed, in play (not in the tools), an action the world
 	// declares, within ACTION_RATE a second
+	// [KIT_SESSIONS_1] in the sender's session
 	void on_action(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_action_u(packet);
+	}
+
+	void on_action_u(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
 		const ss_ d = packet.data.substr(0, 40);
@@ -12345,7 +12631,7 @@ struct Module: public interface::Module, public Interface
 				return refuse("no such action");
 			if(pe.editing)
 				return refuse("in the tools");
-			const int64_t t = interface::os::game_us();
+			const int64_t t = now_us();
 			pe.held[name] = std::make_pair(t, t);
 		}
 		log_i(MODULE, "Action %s %s by %s", cs(name),
@@ -12359,7 +12645,14 @@ struct Module: public interface::Module, public Interface
 	// is up for them (ui_visible), within the acts' allowance
 	// (act_allowed, kit:action's); on_ui(c, phase, by) on it. A release
 	// lets go of a press only
+	// [KIT_SESSIONS_1] in the sender's session
 	void on_ui_press(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_ui_press_u(packet);
+	}
+
+	void on_ui_press_u(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
 		const ss_ d = packet.data.substr(0, 32);
@@ -12428,7 +12721,7 @@ struct Module: public interface::Module, public Interface
 	// "held" every HELD_EVERY_US of game time while held (in play)
 	void actions_held()
 	{
-		const int64_t now = interface::os::game_us();
+		const int64_t now = now_us();
 		for(auto &pp : m_peers){
 			if(pp.second.editing)
 				continue;
@@ -12455,23 +12748,45 @@ struct Module: public interface::Module, public Interface
 	void on_left(const network::OldClient &old)
 	{
 		m_local_peers.erase(old.info.id);
-		const bool was_editing = m_peers.count(old.info.id) &&
-				m_peers[old.info.id].editing;
-		const uint64_t player = m_peers.count(old.info.id) ?
-				m_peers[old.info.id].player : 0;
-		const bool guest = m_peers.count(old.info.id) &&
-				m_peers[old.info.id].guest;
-		const ss_ name = m_peers.count(old.info.id) ?
-				m_peers[old.info.id].name : "";
-		m_bodies.erase(old.info.id);
-		m_controls_sent.erase(old.info.id);
-		m_peers.erase(old.info.id);
+		// [KIT_SESSIONS_1] from their session's round; a guest's entity
+		// in the default goes too
+		const uint64_t id = session_of_peer(old.info.id);
+		ss_ name;
+		bool guest = false;
+		{
+			SessionScope sc(*this, id);
+			auto pi = m_peers.find(old.info.id);
+			if(pi != m_peers.end()){
+				name = pi->second.name;
+				guest = pi->second.guest;
+			}
+			leave_round(old.info.id, true);
+		}
+		m_peer_session.erase(old.info.id);
+		if(id && guest)
+			drop_guest(name);
+	}
+
+	// A peer out of the round entered: gone from the server, or
+	// ([KIT_SESSIONS_1]) to another session's (a guest's entity kept)
+	void leave_round(size_t peer, bool gone)
+	{
+		const bool was_editing = m_peers.count(peer) && m_peers[peer].editing;
+		const uint64_t player = m_peers.count(peer) ? m_peers[peer].player : 0;
+		const bool guest = m_peers.count(peer) && m_peers[peer].guest;
+		const ss_ name = m_peers.count(peer) ? m_peers[peer].name : "";
+		auto bi = m_bodies.find(peer);
+		if(bi != m_bodies.end() && bi->second.seat)
+			unseat(peer, bi->second, false);
+		m_bodies.erase(peer);
+		m_controls_sent.erase(peer);
+		m_peers.erase(peer);
 		if(player)
 			unplace_player(player);
-		if(guest)
+		if(guest && gone)
 			drop_guest(name);
 		for(auto &w : m_worlds)
-			if(w.second.world_peers.erase(old.info.id)){
+			if(w.second.world_peers.erase(peer)){
 				WorldScope ws(m_w, &w.second);
 				world_load_points();
 			}
@@ -12482,7 +12797,34 @@ struct Module: public interface::Module, public Interface
 			send_builders();
 	}
 
-	void set_peer(size_t peer, const ss_ &name, const ss_ &scene,
+	// [KIT_SESSIONS_1] The app's scene "<scene>~<id>" is session id's
+	// scene: the peer's there once Kit moved them (move_peer()); a place
+	// in another than their session's is from before the move
+	void set_peer(size_t peer, const ss_ &name, const ss_ &app_scene,
+			double x, double y, double z)
+	{
+		ss_ scene;
+		const uint64_t id = split_scene(app_scene, scene);
+		if(id != session_of_peer(peer)){
+			log_v(MODULE, "Peer %zu placed in %s, not in their session %s's",
+					peer, cs(app_scene), cs(itos(session_of_peer(peer))));
+			return;
+		}
+		SessionScope sc(*this, id);
+		const bool join = !m_peers.count(peer);
+		set_peer_u(peer, name, scene, x, y, z);
+		// A draft's builder: their tools on there
+		GameSession *s = active_session();
+		Peer &p = m_peers[peer];
+		if(join && s && s->draft && p.name == s->by && can_edit(peer) &&
+				!p.editing){
+			tools(p, peer, true);
+			send_state(peer);
+			send_builders();
+		}
+	}
+
+	void set_peer_u(size_t peer, const ss_ &name, const ss_ &scene,
 			double x, double y, double z)
 	{
 		Peer &p = m_peers[peer];
@@ -12616,6 +12958,12 @@ struct Module: public interface::Module, public Interface
 	// the app makes up may be someone's account
 	bool can_edit(size_t peer)
 	{
+		SessionScope sc(*this, session_of_peer(peer));
+		return can_edit_u(peer);
+	}
+
+	bool can_edit_u(size_t peer)
+	{
 		auto pi = m_peers.find(peer);
 		if(pi == m_peers.end())
 			return false;
@@ -12629,6 +12977,12 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_BUILDER_PLAY_RULES] In edit mode now (api.h)
 	bool is_editing(size_t peer)
+	{
+		SessionScope sc(*this, session_of_peer(peer));
+		return is_editing_u(peer);
+	}
+
+	bool is_editing_u(size_t peer)
 	{
 		auto pi = m_peers.find(peer);
 		return pi != m_peers.end() && pi->second.editing && can_edit(peer);
@@ -12656,6 +13010,17 @@ struct Module: public interface::Module, public Interface
 
 	// The player is told, so a new builder's client says it may edit now
 	void on_privs(const accounts::Login &login)
+	{
+		sv_<uint64_t> ids = {0};
+		for(auto &s : m_sessions)
+			ids.push_back(s.first);
+		for(uint64_t id : ids){
+			SessionScope sc(*this, id);
+			on_privs_u(login);
+		}
+	}
+
+	void on_privs_u(const accounts::Login &login)
 	{
 		recheck_rights();
 		auto pi = m_peers.find(login.peer);
@@ -12792,6 +13157,12 @@ struct Module: public interface::Module, public Interface
 	// game change (build false), or with their tools on a live edit
 	void player_wrote(size_t peer, int x, int y, int z, bool build)
 	{
+		SessionScope sc(*this, session_of_peer(peer));
+		player_wrote_u(peer, x, y, z, build);
+	}
+
+	void player_wrote_u(size_t peer, int x, int y, int z, bool build)
+	{
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || !m_session.running || pi == m_peers.end())
 			return;
@@ -12816,6 +13187,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		m_store->batch([&](){
 			for(const ss_ &key : m_marks_dirty){
+				kept_to_copies(key);
 				auto it = m_marks.find(key);
 				if(it == m_marks.end() || it->second.empty()){
 					m_store->remove("marks:"+key);
@@ -13190,6 +13562,8 @@ struct Module: public interface::Module, public Interface
 			bool on)
 	{
 		on = on && !m_host.persistent;
+		if(m_active)
+			return;
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
 			voxelworld::Instance *w = ivw->get_instance(ref);
 			if(!w)
@@ -13200,6 +13574,7 @@ struct Module: public interface::Module, public Interface
 				wt->scene = name;
 				wt->mutex = &m_copies_mutex;
 				wt->queue = &m_copies;
+				wt->start = start_copies(name);
 				wt->copied = m_session.copied;
 				wt->copied.insert(m_session.restore.begin(),
 						m_session.restore.end());
@@ -13484,6 +13859,7 @@ struct Module: public interface::Module, public Interface
 			std::lock_guard<std::mutex> lock(m_copies_mutex);
 			m_copies.clear();
 		}
+		clear_start_copies();
 		watch(true);
 		m_queue.clear();
 		for(auto &pe : m_entities)
@@ -13587,6 +13963,7 @@ struct Module: public interface::Module, public Interface
 				m_store->remove(k);
 		});
 		m_session.copied.clear();
+		clear_start_copies();
 		m_queue.clear();
 		m_pending_voxels.clear();
 		{
@@ -13649,6 +14026,7 @@ struct Module: public interface::Module, public Interface
 				m_store->remove(k);
 		});
 		m_session.copied.clear();
+		clear_start_copies();
 		// The marks with them: the round's cells are the start's now
 		drop_marks();
 		watch(true);
@@ -13827,6 +14205,17 @@ struct Module: public interface::Module, public Interface
 		j.set("scenes", scenes);
 		j.set("scene", pi != m_peers.end() ? pi->second.scene : ss_());
 		j.set("can_make_scenes", (bool)m_host.make_scene);
+		// [KIT_SESSIONS_1] the session they are in: {id, kind, by, clock}
+		{
+			GameSession *gs = active_session();
+			json::Value sj = json::object();
+			sj.set("id", (int64_t)m_active);
+			sj.set("kind", ss_(!gs ? "default" : gs->draft ? "draft" : "game"));
+			sj.set("by", gs ? gs->by : ss_());
+			sj.set("clock", (int64_t)(now_us() / 1000000));
+			sj.set("can", (bool)m_host.drop_scene && !m_host.persistent);
+			j.set("session", sj);
+		}
 		// [KIT] stage 5: the credits, everyone's
 		j.set("credits", credits());
 		if(editing){
@@ -13986,7 +14375,14 @@ struct Module: public interface::Module, public Interface
 		});
 	}
 
+	// [KIT_SESSIONS_1] in the sender's session
 	void on_edit(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_edit_u(packet);
+	}
+
+	void on_edit_u(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
 		const json::Value j = packet.data.size() <= MAX_EDIT_PACKET ?
@@ -14021,6 +14417,37 @@ struct Module: public interface::Module, public Interface
 		}
 		if(op == "builder")
 			return grant(peer, j, refuse);
+		// [KIT_SESSIONS_1] The sessions (stats in the log), a builder's
+		// draft; in a game session the tools edit nothing, in a draft
+		// nothing of the default round's
+		if(op == "sessions"){
+			log_i(MODULE, "Sessions: %s", cs(session_stats().stringify()));
+			return;
+		}
+		GameSession *gs = active_session();
+		if(gs && !gs->draft && op != "voxel_info" && op != "mode" &&
+				op != "focus" && op != "try")
+			return refuse("in a game session: the tools edit nothing here");
+		if(gs && (op == "play" || op == "stop" || op == "save_start" ||
+				op == "keep" || op == "always_keep" || op == "terrain" ||
+				op == "voxel" || op == "regenerate" || op == "hm_regenerate" ||
+				op == "hm_restore" || op == "new_scene" || op == "export" ||
+				op == "draft"))
+			return refuse("in a draft: the default round's");
+		if(op == "draft")
+			return make_draft(p, peer, refuse);
+		if(op == "publish")
+			return publish(p, refuse);
+		if(op == "leave_draft"){
+			if(!gs)
+				return refuse("not in a draft");
+			SessionOp so;
+			so.op = "end";
+			so.target = m_active;
+			so.by = p.name;
+			m_session_ops.push_back(so);
+			return;
+		}
 		// In play too: it reads
 		if(op == "voxel_info")
 			return voxel_info(p, j, refuse);
@@ -14172,6 +14599,13 @@ struct Module: public interface::Module, public Interface
 			m_next_id = next0;
 			return refuse(why);
 		}
+		if(in_draft())
+			for(const auto &c : change)
+				if(world_or_env(c.first, c.second)){
+					m_next_id = next0;
+					return refuse("in a draft: the World and the environment "
+							"are the default round's");
+				}
 		two_way_returns(change, what);
 		std::deque<Change> &u = m_undo[p.name];
 		commit(change, &u);
@@ -14200,6 +14634,27 @@ struct Module: public interface::Module, public Interface
 				warn("scene "+name+": "+hwhy);
 			go_to_scene(p, peer, name);
 		}
+	}
+
+	// [KIT_SESSIONS_1] Whether an entity changed is (or becomes) a World's
+	// or an environment's
+	bool world_or_env(uint64_t id, const json::Value &after)
+	{
+		auto is = [&](const ss_ &t){
+			auto ti = m_types.find(t);
+			return t == "kit/environment" ||
+					(ti != m_types.end() && ti->second.world);
+		};
+		auto it = m_entities.find(id);
+		if(it != m_entities.end())
+			for(const Instance &in : it->second.comps)
+				if(is(in.type))
+					return true;
+		const json::Value &cs = after.get("components");
+		for(unsigned i = 0; cs.is_array() && i < cs.size(); i++)
+			if(is(full_type(jstr(cs.at(i), "type"))))
+				return true;
+		return false;
 	}
 
 	// [KIT_SCENES] A two-way teleporter in a change, onto an entity: that
@@ -14358,7 +14813,7 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "%s goes to the scene %s at (%g, %g, %g)",
 				cs(pi->second.name), cs(scene), x, y, z);
 		m_server->emit_event("kit:change_scene",
-				new ChangeScene(peer, scene, x, y, z, look));
+				new ChangeScene(peer, app_scene(scene, m_active), x, y, z, look));
 	}
 
 	void switch_scene(Peer &p, size_t peer, const json::Value &j,
@@ -14819,6 +15274,10 @@ struct Module: public interface::Module, public Interface
 	{
 		const sv_<std::pair<uint64_t, json::Value>> change =
 				ordered(change_in);
+		// [KIT_SESSIONS_1] a draft's, for its Publish
+		if(in_draft())
+			for(const auto &c : change)
+				active_session()->touched.insert(c.first);
 		Change back;
 		for(const auto &c : change)
 			if(!c.second.is_null())
@@ -15013,6 +15472,812 @@ struct Module: public interface::Module, public Interface
 		}
 		// [KIT_NESTING] it and what is under it where it is now
 		place_nodes(id);
+	}
+
+	// ---- [KIT_SESSIONS_1] Sessions (api.h): game sessions and builders'
+	// private drafts beside the default round, each a round of its own from
+	// the start in the app's scenes "<scene>~<id>". The members a round has
+	// of its own are swapped in as the code at hand is about one
+	// (enter_session(); SessionScope): the rest (types, palette, prefabs,
+	// packages, rights, ids) are the server's
+
+	static const size_t MAX_SESSIONS = 8;
+	static const int64_t SESSION_IDLE_US = 60000000;
+
+	struct Ctx
+	{
+		std::map<uint64_t, Entity> entities;
+		std::deque<Run> queue;
+		sm_<size_t, Peer> peers;
+		bool runtime_dirty = false;
+		std::deque<Write> pending_voxels;
+		uint64_t provider = 0;
+		size_t provider_comp = 0;
+		std::set<ss_> inv_refused;
+		sm_<ss_, std::deque<Change>> undo;
+		std::map<main_context::SceneReference,
+				std::set<std::tuple<int, int, int>>> owned_sections;
+		Session session;
+		json::Value start = json::object();
+		std::map<ss_, std::map<std::tuple<int, int, int>, Mark>> marks;
+		std::set<ss_> marks_dirty;
+		sv_<Discarded> discarded;
+		std::map<uint64_t, Removed> removed;
+		std::map<ss_, uint64_t> players;
+		json::Value aside = json::object();
+		json::Value flows = json::array();
+		std::map<ss_, json::Value> play_flows;
+		std::map<uint64_t, std::deque<ss_>> logs;
+		std::set<uint64_t> log_dirty;
+		std::map<ss_, World> worlds;
+		World *w = nullptr;
+		sm_<ss_, main_context::SceneReference> scenes;
+		storage::Store *store = nullptr;
+		std::map<ss_, std::pair<uint64_t, int64_t>> arrive;
+		std::map<uint64_t, EnvClock> env_clock;
+		sm_<ss_, ss_> env_sent, season_sent;
+		int64_t cost_since = 0, cost_budget = 0;
+		json::Value costs = json::object();
+		std::map<size_t, Body> bodies;
+		sm_<size_t, ss_> controls_sent;
+		std::map<uint64_t, std::array<double, 4>> seat_home;
+		std::set<ss_> action_names;
+		ss_ actions_sent;
+		int64_t actions_at = 0;
+		std::map<std::pair<ss_, ss_>, std::array<double, 3>> scene_pos;
+		int64_t clock_base = 0;
+	};
+
+	void swap_ctx(Ctx &c)
+	{
+		using std::swap;
+		swap(m_entities, c.entities);
+		swap(m_queue, c.queue);
+		swap(m_peers, c.peers);
+		swap(m_runtime_dirty, c.runtime_dirty);
+		swap(m_pending_voxels, c.pending_voxels);
+		swap(m_provider, c.provider);
+		swap(m_provider_comp, c.provider_comp);
+		swap(m_inv_refused, c.inv_refused);
+		swap(m_undo, c.undo);
+		swap(m_owned_sections, c.owned_sections);
+		swap(m_session, c.session);
+		swap(m_start, c.start);
+		swap(m_marks, c.marks);
+		swap(m_marks_dirty, c.marks_dirty);
+		swap(m_discarded, c.discarded);
+		swap(m_removed, c.removed);
+		swap(m_players, c.players);
+		swap(m_aside, c.aside);
+		swap(m_flows, c.flows);
+		swap(m_play_flows, c.play_flows);
+		swap(m_logs, c.logs);
+		swap(m_log_dirty, c.log_dirty);
+		swap(m_worlds, c.worlds);
+		swap(m_w, c.w);
+		swap(m_host.scenes, c.scenes);
+		swap(m_store, c.store);
+		swap(m_arrive, c.arrive);
+		swap(m_env_clock, c.env_clock);
+		swap(m_env_sent, c.env_sent);
+		swap(m_season_sent, c.season_sent);
+		swap(m_cost_since, c.cost_since);
+		swap(m_cost_budget, c.cost_budget);
+		swap(m_costs, c.costs);
+		swap(m_bodies, c.bodies);
+		swap(m_controls_sent, c.controls_sent);
+		swap(m_seat_home, c.seat_home);
+		swap(m_action_names, c.action_names);
+		swap(m_actions_sent, c.actions_sent);
+		swap(m_actions_at, c.actions_at);
+		swap(m_scene_pos, c.scene_pos);
+		swap(m_clock_base, c.clock_base);
+	}
+
+	struct GameSession
+	{
+		uint64_t id = 0;
+		bool draft = false;
+		ss_ by; // who made it: a builder's name (a draft), a run's by
+		// The instance that made it (0: none), told on_session_end
+		uint64_t maker = 0;
+		size_t maker_comp = 0;
+		Ctx ctx;
+		up_<OverlayStore> store;
+		// A draft's: the entities its edits changed (Publish's)
+		std::set<uint64_t> touched;
+		// The app's scenes made for it, by their names
+		std::set<ss_> app_scenes;
+		// Since when nobody is in it (time_us; 0: someone is)
+		int64_t empty_since = 0;
+	};
+	std::map<uint64_t, up_<GameSession>> m_sessions;
+	// The default round's members while a session is entered
+	Ctx m_default_ctx;
+	uint64_t m_active = 0;
+	uint64_t m_next_session = 1;
+	// The peers in a session (none: the default)
+	std::map<size_t, uint64_t> m_peer_session;
+	std::map<main_context::SceneReference, uint64_t> m_ref_session;
+	// The app's scenes of ended sessions, dropped once their players are
+	// out (time_us)
+	sv_<std::pair<int64_t, ss_>> m_drop_scenes;
+	// What runs asked (c:session_start/move/end), done after the tick's
+	// rounds
+	struct SessionOp
+	{
+		ss_ op;
+		uint64_t from = 0, maker = 0, target = 0;
+		size_t comp = 0;
+		ss_ by;
+		sv_<size_t> peers;
+	};
+	std::deque<SessionOp> m_session_ops;
+	// The round's clock: game time since its start (the default's: the
+	// server's)
+	int64_t m_clock_base = 0;
+	// Kit's own store (a session's m_store is its overlay)
+	storage::Store *m_kit_store = nullptr;
+	// The start's voxel copies the sessions read, by scene
+	sm_<ss_, sp_<StartCopies>> m_start_copies;
+
+	int64_t now_us()
+	{
+		return interface::os::game_us() - m_clock_base;
+	}
+
+	Ctx& stash_of(uint64_t id)
+	{
+		return id ? m_sessions[id]->ctx : m_default_ctx;
+	}
+
+	// The members the session's (0: the default round's) from here on
+	void enter_session(uint64_t id)
+	{
+		if(id && !m_sessions.count(id))
+			id = 0;
+		if(id == m_active)
+			return;
+		swap_ctx(stash_of(m_active));
+		swap_ctx(stash_of(id));
+		m_active = id;
+	}
+
+	struct SessionScope
+	{
+		Module &m;
+		uint64_t was;
+		SessionScope(Module &m, uint64_t id): m(m), was(m.m_active)
+		{
+			m.enter_session(id);
+		}
+		~SessionScope(){ m.enter_session(was); }
+	};
+
+	uint64_t session_of_peer(size_t peer)
+	{
+		auto it = m_peer_session.find(peer);
+		return it == m_peer_session.end() ? 0 : it->second;
+	}
+
+	uint64_t session_of_ref(main_context::SceneReference ref)
+	{
+		auto it = m_ref_session.find(ref);
+		return it == m_ref_session.end() ? 0 : it->second;
+	}
+
+	GameSession* active_session()
+	{
+		auto it = m_sessions.find(m_active);
+		return it == m_sessions.end() ? nullptr : it->second.get();
+	}
+
+	bool in_draft()
+	{
+		GameSession *s = active_session();
+		return s && s->draft;
+	}
+
+	// A scene of Kit's as the app has it in session `id`
+	static ss_ app_scene(const ss_ &scene, uint64_t id)
+	{
+		return id ? scene+"~"+itos(id) : scene;
+	}
+
+	// The app's scene name as a session's (0 for none) and Kit's name
+	static uint64_t split_scene(const ss_ &app, ss_ &scene)
+	{
+		const size_t t = app.rfind('~');
+		scene = app;
+		if(t == ss_::npos)
+			return 0;
+		const ss_ n = app.substr(t + 1);
+		if(n.empty() || n.size() > 15 ||
+				n.find_first_not_of("0123456789") != ss_::npos)
+			return 0;
+		scene = app.substr(0, t);
+		return std::stoull(n);
+	}
+
+	sp_<StartCopies> start_copies(const ss_ &scene)
+	{
+		sp_<StartCopies> &c = m_start_copies[scene];
+		if(!c){
+			c = std::make_shared<StartCopies>();
+			c->store = m_kit_store;
+		}
+		return c;
+	}
+
+	void clear_start_copies()
+	{
+		for(auto &c : m_start_copies)
+			c.second->clear();
+	}
+
+	// A section's live edits kept (marks 'k'), which the start's copy has
+	// not before a Stop: the sessions' source reads them from the default's
+	// voxels
+	void kept_to_copies(const ss_ &key)
+	{
+		if(m_active)
+			return;
+		sv_<pv::Vector3DInt32> cells;
+		auto it = m_marks.find(key);
+		if(it != m_marks.end())
+			for(auto &c : it->second)
+				if(c.second.kind == 'k')
+					cells.push_back(pv::Vector3DInt32(std::get<0>(c.first),
+							std::get<1>(c.first), std::get<2>(c.first)));
+		start_copies(key.substr(0, key.find(':')))->set_kept("start:"+key,
+				cells);
+	}
+
+	// The row "sessions": the next id and the app's scenes the live ones
+	// have (and ended ones' not dropped yet), which a restart drops
+	// (sessions are not saved)
+	void save_sessions()
+	{
+		json::Value live = json::array();
+		for(auto &s : m_sessions)
+			for(const ss_ &n : s.second->app_scenes)
+				live.append(n);
+		// and those of ended ones not dropped yet
+		for(auto &d : m_drop_scenes)
+			live.append(d.second);
+		json::Value j = json::object();
+		j.set("next", (int64_t)m_next_session);
+		j.set("live", live);
+		m_kit_store->set("sessions", j.stringify());
+	}
+
+	void sessions_from_save()
+	{
+		ss_ row;
+		if(!m_kit_store->get("sessions", row))
+			return;
+		const json::Value j = json::load_string(row.c_str());
+		const int64_t next = json::jint(j, "next", 1);
+		if(next > 0 && next < (int64_t)1e15)
+			m_next_session = (uint64_t)next;
+		const json::Value &live = j.get("live");
+		size_t n = 0;
+		for(unsigned i = 0; i < live.size(); i++)
+			if(live.at(i).is_string() && m_host.drop_scene){
+				m_host.drop_scene(live.at(i).as_string());
+				n++;
+			}
+		if(n)
+			log_i(MODULE, "Sessions: %zu scenes of sessions before the "
+					"restart dropped", n);
+		save_sessions();
+	}
+
+	// [KIT_SESSIONS_1] One of the session's scenes as the app made it: its
+	// voxels the start's, copy-on-write (SessionSource), its registry the
+	// default scene's order (the copies' ids are the default's), its save
+	// only what the session changed
+	void session_scene(const ss_ &name, main_context::SceneReference ref)
+	{
+		GameSession *s = active_session();
+		s->app_scenes.insert(app_scene(name, m_active));
+		m_ref_session[ref] = m_active;
+		save_sessions();
+		auto bi = m_default_ctx.scenes.find(name);
+		const main_context::SceneReference base =
+				bi == m_default_ctx.scenes.end() ? nullptr : bi->second;
+		sp_<SessionSource> src = std::make_shared<SessionSource>();
+		src->scene = name;
+		src->copies = start_copies(name);
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			voxelworld::Instance *w = ivw->get_instance(ref);
+			voxelworld::Instance *b = base ? ivw->get_instance(base) : nullptr;
+			if(!w)
+				return;
+			if(b){
+				interface::VoxelRegistry *reg = w->get_voxel_reg();
+				size_t off = 0;
+				for(const interface::VoxelDefinition &d :
+						b->get_voxel_reg()->get_all()){
+					if(d.id == interface::VOXELTYPEID_UNDEFINED)
+						continue;
+					// By id: a name looked up that is not there is a warning
+					const interface::VoxelDefinition *have = reg->get(d.id);
+					if(have)
+						off += !(have->name == d.name);
+					else
+						off += reg->add_voxel(d) != d.id;
+				}
+				if(off)
+					log_w(MODULE, "Session %s: %zu voxel ids of scene %s "
+							"not the default's: its voxels read wrong",
+							cs(itos(m_active)), off, cs(name));
+			}
+			src->base = b;
+			w->set_section_source(src);
+			w->set_writes_alter(true);
+			w->set_save_unaltered(false);
+		});
+	}
+
+	// A session from the start ([KIT_SESSIONS_1]): the composition's
+	// entities at their start (the row "start" over the types' defaults),
+	// each scene's World as the default's, its on_start runs. 0 with why
+	// when refused. Made at the top (the default round entered)
+	uint64_t make_session(bool draft, const ss_ &by, uint64_t maker,
+			size_t comp, ss_ &why)
+	{
+		if(!m_host.make_scene || !m_host.drop_scene){
+			why = "the app makes no scenes for sessions";
+			return 0;
+		}
+		if(m_host.persistent){
+			why = "the world is persistent: no sessions";
+			return 0;
+		}
+		if(m_sessions.size() >= MAX_SESSIONS){
+			why = itos(MAX_SESSIONS)+" sessions at most";
+			return 0;
+		}
+		// A copy: the session's entities are its own
+		const json::Value c = json::load_string(
+				authored_json().stringify().c_str());
+		const uint64_t id = m_next_session++;
+		up_<GameSession> s(new GameSession());
+		s->id = id;
+		s->draft = draft;
+		s->by = by;
+		s->maker = maker;
+		s->maker_comp = comp;
+		s->store.reset(new OverlayStore());
+		s->store->base = m_kit_store;
+		s->ctx.store = s->store.get();
+		s->ctx.w = &m_none;
+		s->ctx.clock_base = interface::os::game_us();
+		s->ctx.session.running = true;
+		s->ctx.session.by = by;
+		s->ctx.start = m_start.deepcopy();
+		m_sessions[id] = std::move(s);
+		save_sessions();
+		bool ok = false;
+		{
+			SessionScope sc(*this, id);
+			ok = session_load(c, why);
+		}
+		if(!ok){
+			end_session(id, "", false);
+			return 0;
+		}
+		log_i(MODULE, "Session %s (%s) by %s: %zu entities from the start",
+				cs(itos(id)), draft ? "a draft" : "a game", cs(by),
+				stash_of(id).entities.size());
+		return id;
+	}
+
+	bool session_load(const json::Value &c, ss_ &why)
+	{
+		const uint64_t next = m_next_id;
+		for(auto &sc : m_default_ctx.scenes)
+			if(!m_host.scenes.count(sc.first) && !make_scene(sc.first, why))
+				return false;
+		if(!load_composition(c, why))
+			return false;
+		m_next_id = std::max(m_next_id, next);
+		if(!host_world(why))
+			return false;
+		for(auto &pe : m_entities)
+			for(size_t i = 0; i < pe.second.comps.size(); i++){
+				to_start(pe.second, i);
+				Run r;
+				r.entity = pe.first;
+				r.comp = i;
+				r.handler = "on_start";
+				queue_run(r);
+			}
+		for(auto &p : m_entities)
+			if(p.second.has_pos)
+				make_node(p.second);
+		own_voxels();
+		pick_provider();
+		m_runtime_dirty = true;
+		return true;
+	}
+
+	// A peer out of its round (as a leave, their entity there kept) and the
+	// app told to take them to the scene of that name in session `to` (0:
+	// the default; there at the scene's spawn), where set_peer() joins them
+	// to its round. At the top
+	void move_peer(size_t peer, uint64_t to)
+	{
+		const uint64_t from = session_of_peer(peer);
+		if(from == to || (to && !m_sessions.count(to)))
+			return;
+		ss_ scene;
+		double pos[3] = {0.5, 1, 0.5};
+		{
+			SessionScope sc(*this, from);
+			auto pi = m_peers.find(peer);
+			if(pi == m_peers.end())
+				return;
+			scene = pi->second.scene;
+			for(int k = 0; k < 3; k++)
+				pos[k] = pi->second.pos[k];
+			leave_round(peer, false);
+		}
+		if(to)
+			m_peer_session[peer] = to;
+		else
+			m_peer_session.erase(peer);
+		{
+			SessionScope sc(*this, to);
+			if(!m_host.scenes.count(scene))
+				scene = m_host.world_scene.empty() ?
+						m_host.scenes.begin()->first : m_host.world_scene;
+			if(!to)
+				scene_spawn(scene, pos[0], pos[1], pos[2]);
+		}
+		log_i(MODULE, "Peer %zu from session %s to session %s (scene %s)",
+				peer, cs(itos(from)), cs(itos(to)), cs(app_scene(scene, to)));
+		m_server->emit_event("kit:change_scene", new ChangeScene(peer,
+				app_scene(scene, to), pos[0], pos[1], pos[2]));
+	}
+
+	// A session ended: its players back in the default round, its scenes
+	// dropped once they are out, its maker told (on_session_end). At the top
+	void end_session(uint64_t id, const ss_ &by, bool tell = true)
+	{
+		auto it = m_sessions.find(id);
+		if(it == m_sessions.end())
+			return;
+		sv_<size_t> peers;
+		for(auto &ps : m_peer_session)
+			if(ps.second == id)
+				peers.push_back(ps.first);
+		for(size_t peer : peers)
+			move_peer(peer, 0);
+		{
+			SessionScope sc(*this, id);
+			m_queue.clear();
+			voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+				for(auto &s : m_host.scenes){
+					voxelworld::Instance *w = ivw->get_instance(s.second);
+					if(w){
+						w->set_owner_handler("kit", nullptr);
+						w->set_section_source(nullptr);
+						w->set_load_points({});
+					}
+				}
+			});
+			for(auto &s : m_host.scenes){
+				worldgen::access(m_server, [&](worldgen::Interface *i){
+					if(i->get_instance(s.second))
+						i->delete_instance(s.second);
+				});
+				heightmap::access(m_server, [&](heightmap::Interface *ih){
+					if(ih->get_instance(s.second))
+						ih->delete_instance(s.second);
+				});
+				if(m_server->has_module("voxel_objects"))
+					voxel_objects::access(m_server, [&](
+							voxel_objects::Interface *io){
+						if(io->get_instance(s.second))
+							io->delete_instance(s.second);
+					});
+				m_ref_session.erase(s.second);
+			}
+		}
+		GameSession &s = *it->second;
+		for(const ss_ &n : s.app_scenes)
+			m_drop_scenes.push_back(std::make_pair(
+					interface::os::time_us() + 2000000, n));
+		const uint64_t maker = s.maker;
+		const size_t comp = s.maker_comp;
+		log_i(MODULE, "Session %s ended%s", cs(itos(id)),
+				by.empty() ? "" : cs(" by "+by));
+		m_sessions.erase(it);
+		save_sessions();
+		if(tell && maker && m_entities.count(maker)){
+			Run r;
+			r.entity = maker;
+			r.comp = comp;
+			r.handler = "on_session_end";
+			r.args.append((int64_t)id);
+			queue_run(r);
+		}
+		for(auto &p : m_peers)
+			if(p.second.editing)
+				send_state(p.first);
+	}
+
+	// The app's scenes of ended sessions, once their players are out
+	void drop_scenes()
+	{
+		const int64_t now = interface::os::time_us();
+		for(size_t i = 0; i < m_drop_scenes.size();){
+			if(m_drop_scenes[i].first > now){
+				i++;
+				continue;
+			}
+			const ss_ n = m_drop_scenes[i].second;
+			m_drop_scenes.erase(m_drop_scenes.begin() + i);
+			m_host.drop_scene(n);
+			log_i(MODULE, "Session scene %s dropped", cs(n));
+		}
+		save_sessions();
+	}
+
+	// What the tick's runs asked of sessions, at the top
+	void session_ops()
+	{
+		while(!m_session_ops.empty()){
+			const SessionOp o = m_session_ops.front();
+			m_session_ops.pop_front();
+			if(o.op == "start"){
+				ss_ why;
+				const uint64_t id = make_session(false, o.by, o.maker, o.comp,
+						why);
+				if(!id){
+					log_i(MODULE, "Entity %s's session refused: %s",
+							cs(itos(o.maker)), cs(why));
+					add_log(o.maker, "session refused: "+why);
+					continue;
+				}
+				add_log(o.maker, "session "+itos(id)+" started");
+				for(size_t peer : o.peers)
+					if(!session_of_peer(peer))
+						move_peer(peer, id);
+				Run r;
+				r.entity = o.maker;
+				r.comp = o.comp;
+				r.handler = "on_session_start";
+				r.args.append((int64_t)id);
+				queue_run(r);
+			} else if(o.op == "move"){
+				for(size_t peer : o.peers)
+					if(session_of_peer(peer) == o.from)
+						move_peer(peer, o.target);
+			} else if(o.op == "end"){
+				end_session(o.target, o.by);
+			}
+		}
+	}
+
+	// A run's c:session_start(players), c:session_move(player, id),
+	// c:session_end(id): the players it reaches (in its zone, the run's,
+	// any for a type with `players`), the sessions it made; none from a
+	// session but its own end and moves back
+	void session_fx(const Entity &e, size_t comp, const Run &r,
+			const json::Value &ops)
+	{
+		const Instance &in = e.comps[comp];
+		const bool any = m_types[in.type].players;
+		const uint64_t run_player = player_id(r.by);
+		auto may = [&](uint64_t pid){
+			return pid && (any || pid == run_player ||
+					in.inside.count(itos(pid)));
+		};
+		auto peer_of_player = [&](uint64_t pid, size_t &peer){
+			for(auto &p : m_peers)
+				if(p.second.player == pid){
+					peer = p.first;
+					return true;
+				}
+			return false;
+		};
+		auto made_by = [&](uint64_t id){
+			auto it = m_sessions.find(id);
+			return it != m_sessions.end() && it->second->maker == e.id &&
+					it->second->maker_comp == comp;
+		};
+		for(unsigned i = 0; i < ops.size() && i < 8; i++){
+			const json::Value &o = ops.at(i);
+			const ss_ op = jstr_at(o, 0);
+			SessionOp so;
+			so.op = op;
+			so.from = m_active;
+			so.maker = e.id;
+			so.comp = comp;
+			so.by = r.by;
+			ss_ why;
+			if(op == "start"){
+				if(m_active)
+					why = "no session from inside one";
+				const json::Value &l = o.at(1u);
+				std::set<uint64_t> want;
+				if(l.is_array()){
+					for(unsigned k = 0; k < l.size() && k < 64; k++)
+						if(l.at(k).is_number())
+							want.insert((uint64_t)std::max(0.0,
+									l.at(k).as_number()));
+				} else {
+					for(const ss_ &x : in.inside)
+						want.insert(std::stoull(x));
+					if(run_player)
+						want.insert(run_player);
+				}
+				for(uint64_t pid : want){
+					size_t peer = 0;
+					if(!may(pid))
+						why = "player "+itos(pid)+" is none it reaches";
+					else if(peer_of_player(pid, peer))
+						so.peers.push_back(peer);
+				}
+			} else if(op == "move"){
+				const uint64_t pid = o.at(1u).is_number() ?
+						(uint64_t)std::max(0.0, o.at(1u).as_number()) : 0;
+				so.target = o.at(2u).is_number() ?
+						(uint64_t)std::max(0.0, o.at(2u).as_number()) : 0;
+				size_t peer = 0;
+				if(!may(pid) || !peer_of_player(pid, peer))
+					why = "player "+itos(pid)+" is none it reaches here";
+				else if(m_active ? so.target != 0 : !made_by(so.target))
+					why = "session "+itos(so.target)+" is none it made";
+				so.peers.push_back(peer);
+			} else if(op == "end"){
+				so.target = o.at(1u).is_number() ?
+						(uint64_t)std::max(0.0, o.at(1u).as_number()) : 0;
+				if(m_active ? so.target != m_active : !made_by(so.target))
+					why = "session "+itos(so.target)+" is none it made";
+			} else {
+				why = "no session op "+op.substr(0, 16);
+			}
+			if(!why.empty()){
+				add_log(e.id, "session_"+op.substr(0, 16)+" refused: "+why);
+				continue;
+			}
+			m_session_ops.push_back(so);
+		}
+	}
+
+	// The rounds' sessions' stats ({"op": "sessions"}): each one's kind,
+	// players, clock, entities, runtime and voxel sections
+	json::Value session_stats()
+	{
+		json::Value a = json::array();
+		sv_<uint64_t> ids = {0};
+		for(auto &s : m_sessions)
+			ids.push_back(s.first);
+		for(uint64_t id : ids){
+			SessionScope sc(*this, id);
+			json::Value j = json::object();
+			GameSession *gs = active_session();
+			j.set("id", (int64_t)id);
+			j.set("kind", ss_(!gs ? "default" : gs->draft ? "draft" : "game"));
+			j.set("by", gs ? gs->by : m_session.by);
+			json::Value pl = json::array();
+			for(auto &p : m_peers)
+				pl.append(p.second.name);
+			j.set("players", pl);
+			j.set("clock", (int64_t)(now_us() / 1000000));
+			j.set("entities", (int64_t)m_entities.size());
+			j.set("runtime", digest(runtime_json()));
+			size_t loaded = 0, sourced = 0, saved = 0, altered = 0;
+			voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+				for(auto &s : m_host.scenes){
+					voxelworld::Instance *w = ivw->get_instance(s.second);
+					if(!w)
+						continue;
+					// A session's: what it changed written (its own)
+					if(id)
+						w->save();
+					size_t l = 0;
+					sourced += w->sourced_sections(&l);
+					loaded += l;
+					for(const auto &st : w->section_stats()){
+						saved++;
+						altered += st.altered;
+					}
+				}
+			});
+			j.set("sourced", (int64_t)sourced);
+			j.set("sourced_loaded", (int64_t)loaded);
+			j.set("sections", (int64_t)saved);
+			j.set("altered", (int64_t)altered);
+			a.append(j);
+		}
+		return a;
+	}
+
+	// A builder's private draft ([KIT_SESSIONS_1]): a session of the start
+	// for them alone, their tools on in it
+	void make_draft(Peer &p, size_t peer,
+			const std::function<void(const ss_&)> &refuse)
+	{
+		if(m_active)
+			return refuse("in a session already");
+		ss_ why;
+		const uint64_t id = make_session(true, p.name, 0, 0, why);
+		if(!id)
+			return refuse(why);
+		move_peer(peer, id);
+	}
+
+	// Publish: the entities the draft's edits changed, as the draft has
+	// them, into the default's composition (one edit, one undo), and the
+	// cells its builds and edits wrote into the start, as live edits. The
+	// draft goes on, its edits published
+	void publish(Peer &p, const std::function<void(const ss_&)> &refuse)
+	{
+		GameSession *s = active_session();
+		if(!s || !s->draft)
+			return refuse("not in a draft");
+		const ss_ name = p.name;
+		sv_<std::pair<uint64_t, json::Value>> change;
+		for(uint64_t id : s->touched){
+			auto it = m_entities.find(id);
+			change.push_back(std::make_pair(id, it == m_entities.end() ||
+					!authored(it->second) ? json::null() :
+					entity_json(it->second)));
+		}
+		sv_<Write> cells;
+		size_t unknown = 0;
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			for(auto &sec : m_marks){
+				const ss_ scene = sec.first.substr(0, sec.first.find(':'));
+				auto si = m_host.scenes.find(scene);
+				auto di = m_default_ctx.scenes.find(scene);
+				voxelworld::Instance *w = si == m_host.scenes.end() ? nullptr :
+						ivw->get_instance(si->second);
+				if(!w || di == m_default_ctx.scenes.end()){
+					unknown += sec.second.size();
+					continue;
+				}
+				for(auto &c : sec.second){
+					Write wr;
+					wr.scene = di->second;
+					wr.p = pv::Vector3DInt32(std::get<0>(c.first),
+							std::get<1>(c.first), std::get<2>(c.first));
+					const interface::VoxelDefinition *d = w->get_voxel_reg()->
+							get(w->get_voxel_reg()->get_format().id.get(
+							w->get_voxel(wr.p).data));
+					if(!d){
+						unknown++;
+						continue;
+					}
+					wr.voxel = d->name.block_name;
+					wr.by = name;
+					wr.origin = 'k';
+					cells.push_back(wr);
+				}
+			}
+		});
+		for(auto &sec : m_marks)
+			m_marks_dirty.insert(sec.first);
+		m_marks.clear();
+		s->touched.clear();
+		const uint64_t id = m_active;
+		SessionScope sc(*this, 0);
+		// simplified: the draft's entity as it has it, over what the default
+		// made of it meanwhile (no merge)
+		if(!change.empty()){
+			commit(change, &m_undo[name]);
+			world_check(name);
+		}
+		for(const Write &w : cells)
+			m_start_writes.push_back(w);
+		log_i(MODULE, "%s publishes draft %s: %zu entities, %zu cells%s",
+				cs(name), cs(itos(id)), change.size(), cells.size(),
+				unknown ? cs(", "+itos(unknown)+" not read") : "");
 	}
 };
 

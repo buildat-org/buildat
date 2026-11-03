@@ -256,8 +256,12 @@ struct Module: public interface::Module
 		auto it = m_scenes.find(name);
 		if(it != m_scenes.end())
 			return it->second;
-		for(char c : name)
-			if(!isalnum((unsigned char)c) && c != '_')
+		// [KIT_SESSIONS_1] a session's: "<scene>~<id>"
+		const size_t t = name.find('~');
+		for(size_t i = 0; i < name.size(); i++)
+			if(!isalnum((unsigned char)name[i]) && name[i] != '_' &&
+					!(i == t && i > 0 && i + 1 < name.size() &&
+					name.find_first_not_of("0123456789", t + 1) == ss_::npos))
 				return nullptr;
 		main_context::SceneReference ref = nullptr;
 		main_context::access(m_server, [&](main_context::Interface *imc){
@@ -267,6 +271,40 @@ struct Module: public interface::Module
 		m_scenes[name] = ref;
 		log_i(MODULE, "workbench: scene %s made", cs(name));
 		return ref;
+	}
+
+	// [KIT_SESSIONS_1] Kit's drop_scene: a session's scene gone, its
+	// voxels' rows with it (a scene from before a restart: the rows only)
+	void drop_scene(const ss_ &name)
+	{
+		if(name.find('~') == ss_::npos)
+			return;
+		auto it = m_scenes.find(name);
+		if(it != m_scenes.end()){
+			main_context::SceneReference ref = it->second;
+			for(auto &ps : m_peer_scene)
+				if(ps.second == name){
+					ps.second = "world";
+					replicate::assign_scene_to_peer(m_server, m_scene, ps.first);
+				}
+			voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+				voxelworld::Instance *w = ivw->get_instance(ref);
+				if(w)
+					w->set_save(nullptr, "");
+				ivw->delete_instance(ref);
+			});
+			main_context::access(m_server, [&](main_context::Interface *imc){
+				imc->delete_scene(ref);
+			});
+			m_scenes.erase(it);
+		}
+		storage::Store *st = m_save ? m_save->store("voxelworld") : nullptr;
+		if(st)
+			st->batch([&](){
+				for(const ss_ &k : st->list("scene_"+name+"/"))
+					st->remove(k);
+			});
+		log_i(MODULE, "workbench: scene %s dropped", cs(name));
 	}
 
 	// [KIT_SCENES] Kit sends a player to another scene: replicate's scene
@@ -333,6 +371,9 @@ struct Module: public interface::Module
 		h.scenes["world"] = m_scene;
 		h.make_scene = [this](const ss_ &name, kit::Interface *k){
 			return make_scene(name, k);
+		};
+		h.drop_scene = [this](const ss_ &name){
+			drop_scene(name);
 		};
 		h.controls = true;
 		// [KIT_MATERIAL_SETS] a World may be made of a set package

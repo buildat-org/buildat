@@ -587,6 +587,37 @@ namespace interface
 // (Host::persistent) is Running always: no start, no copies, no Stop;
 // "kit:edit_state" says "persistent".
 //
+// **Sessions** ([KIT_SESSIONS_1], stage 7): beside the default round,
+// game sessions and builders' private drafts, each a round of its own from
+// the start (the composition's entities at their start, their on_start),
+// its own clock (game time since it started), entities, runtime, players'
+// entities and voxels, in the app's scenes "<scene>~<id>" (Host::make_scene;
+// Host::drop_scene takes them down; an app without both has no sessions,
+// nor a persistent one). A session's voxels are the start's copy-on-write:
+// a section is the start's until the session writes it (the default
+// round's copy, its live edits over it; else the default's own), and only
+// the sections it changed are its own. A component makes one
+// (c:session_start(players): players it reaches, in its zone or the
+// run's, any for a type with `players`; nil: those in its zone and the
+// run's), moves a player into one it made or back (c:session_move(player,
+// id), id 0 the default) and ends one it made (c:session_end(id));
+// on_session_start(c, id) and on_session_end(c, id) are its own. In a
+// session c.session is its id (0 in the default) and c:session_end() ends
+// it; none is made from inside one, MAX_SESSIONS (8) at most. Ending one
+// sends its players back to the default round at their scene's spawn.
+// Kit takes a player to a session by kit:change_scene to its scene; the
+// app's set_peer() there joins its round. A builder's draft ({"op":
+// "draft"}) is a session for them alone, their tools on in it: their edits
+// change the draft, not the start ("kit:edit_state"'s "session" {id,
+// kind: "default" | "draft" | "game", by, clock, can}); {"op": "publish"}
+// puts the entities the draft's edits changed into the composition as one
+// edit (one undo) and the cells its builds and edits wrote into the start
+// as live edits; {"op": "leave_draft"} ends it. In a draft the World, the
+// environment, terrain, voxel types, new scenes, rounds (Play, Stop) and
+// exports are refused; in a game session the tools edit nothing.
+// {"op": "sessions"} logs each session's stats. Sessions are not saved: a
+// restart drops them and their scenes (the row "sessions").
+//
 // Origins: a cell play writes is a build or a game change. Builds are what
 // players make: their own dig or place (the app says so, player_wrote())
 // and the voxel writes of a type with `builds = true` set off by a player;
@@ -724,6 +755,12 @@ namespace kit
 		// not access()
 		std::function<main_context::SceneReference(const ss_ &name,
 				Interface *k)> make_scene;
+		// [KIT_SESSIONS_1] A session's scene the app made ("<scene>~<id>")
+		// taken down: its voxelworld instance and its save's rows gone, its
+		// peers (none, Kit moved them out) in the main scene. Called on
+		// Kit's thread, for one made or one from before a restart (rows
+		// only). Unset (or make_scene unset): no sessions
+		std::function<void(const ss_ &name)> drop_scene;
 		// How far from an entity a player may use it
 		double use_range = 6;
 		// Whether the app moves players for a component (c:teleport), on
