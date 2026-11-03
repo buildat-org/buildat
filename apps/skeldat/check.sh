@@ -2239,8 +2239,8 @@ PY
 ) || fail "the stars moved against the moon: $(echo "$stars" | tail -1) ($t/sky_a.png, $t/sky_b.png)"
 echo "stars: $(echo "$stars" | tail -1)"
 # 35. The bow on the move ([SKELDAT_BOW_AIM]): on 24's course, a bow and
-# arrows, the ride down the slope looking to the side: five short draws
-# at different moments of the 0.1 s where, then one lying flat. Each
+# arrows, the ride down the slope looking to the side: one lying flat,
+# then five short draws at different moments of the 0.1 s where. Each
 # arrow starts on the crosshair's line: from the eye the client released
 # at, within 0.3; the server's copy, its where applied at the release,
 # under 1.5 off (before: 1.4 to 6.1, up to 0.3 s old); flat, 0.5 and a
@@ -2266,9 +2266,12 @@ quick() { printf '%s\n' "mouse_down left" "delay 300" "mouse_up left" "delay $1"
 	# way while the look turns ([SKELDAT_CAMERA_STEER])
 	echo "wait_log 5000 skeldat: on the board"
 	echo "delay 600"; echo "look 0 0"
+	# Flat first, waited on: a slow host's frames ran the draws past the
+	# board's landing, Shift then off the board ([SK_BOW_FLAT_BUILDBOX])
+	echo "keydown Left Shift"; echo "wait_log 5000 skeldat: lying flat"
+	quick 200; echo "keyup Left Shift"
 	quick 130; quick 160; quick 110; quick 190; quick 150
-	echo "keydown Left Shift"; echo "delay 700"; quick 200
-	echo "keyup Left Shift"; echo "keyup W"; echo "delay 1500"; echo quit; } > "$t/aim1.cmds"
+	echo "keyup W"; echo "delay 1500"; echo quit; } > "$t/aim1.cmds"
 aim_server "$log39"
 client aim1 "$t/aim1.cmds"
 wait $CLIENT || fail "the ride's drive ($t/aim1.log)"
@@ -2288,7 +2291,7 @@ assert max(gaps) < 0.3, "the arrows from %s off the eyes" % gaps
 # The copy too, its where applied at the release (luanti's session
 # applies them every 0.2 s): no more than the wire's wait behind
 assert max(s[3] for s in shots) < 1.5, "the copy's off: %s" % [s[3] for s in shots]
-flat = shots[5][1] - shots[5][4]
+flat = shots[0][1] - shots[0][4]
 assert 0.45 < flat < 0.8, "lying flat, the eye %.2f over the feet" % flat
 print("the eyes within %.3f; the copy's off %s; flat %.2f over the feet" % (
     max(gaps), " ".join("%.2f" % s[3] for s in shots), flat))

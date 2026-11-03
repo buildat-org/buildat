@@ -2533,6 +2533,14 @@ magic.SubscribeToEvent("Update", function(_, d)
 					" " .. tostring(board_model.enabled))
 		end
 	end
+	-- [SKELDAT_BOARD_PRONE] For a check to wait on (a field: the handler
+	-- is at its upvalues' limit)
+	if player.prone ~= (game.prone_shown or false) then
+		game.prone_shown = player.prone
+		log:info("skeldat: " .. (player.prone and "lying flat" or "up again")
+				.. string.format(" at (%.1f, %.1f, %.1f)", player.x, player.y,
+				player.z))
+	end
 	update_rolls(b)
 	if b and down("back") and not board_braking then
 		board_braking = true
