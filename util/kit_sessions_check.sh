@@ -150,8 +150,13 @@ EOF
 	edit '{"op": "set", "id": 4, "comp": 0, "param": "size", "value": [1, 1, 1]}' 5
 	edit '{"op": "place", "type": "kit/arena", "pos": [10, 1, 10]}' 6
 	edit '{"op": "set", "id": 5, "comp": 0, "param": "players", "value": 1}' 7
-	edit '{"op": "place", "type": "kit/teleporter", "pos": [2, 1, -3]}' 8
-	edit '{"op": "set", "id": 6, "comp": 0, "param": "to", "value": [11, 1, 11]}' 9
+	# At once, no time limit, no results shown ([KIT_MINIGAMES_1]'s
+	# defaults are a lobby's)
+	edit '{"op": "set", "id": 5, "comp": 0, "param": "countdown", "value": 0}' 8
+	edit '{"op": "set", "id": 5, "comp": 0, "param": "duration", "value": 0}' 9
+	edit '{"op": "set", "id": 5, "comp": 0, "param": "results", "value": 0}' 10
+	edit '{"op": "place", "type": "kit/teleporter", "pos": [2, 1, -3]}' 11
+	edit '{"op": "set", "id": 6, "comp": 0, "param": "to", "value": [11, 1, 11]}' 12
 	cat <<'EOF'
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)

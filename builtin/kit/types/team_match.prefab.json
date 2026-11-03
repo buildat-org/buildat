@@ -1,0 +1,34 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "team_match",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "lobby", "pos": [0, 0, 0],
+			"components": [{"type": "kit/arena", "version": 2, "params": {"players": 2,
+				"max_players": 8, "countdown": 10, "duration": 180,
+				"results": 5}}]},
+		{"id": 2, "name": "red team", "pos": [12, 0, 0],
+			"components": [{"type": "kit/team", "params": {"name": "Red",
+				"color": "#d03030", "win_score": 5}, "links": [
+				{"output": "reached", "to": 1, "input": "win"}]}]},
+		{"id": 3, "name": "blue team", "pos": [-12, 0, 0],
+			"components": [{"type": "kit/team", "params": {"name": "Blue",
+				"color": "#3050e0", "win_score": 5}, "links": [
+				{"output": "reached", "to": 1, "input": "win"}]}]},
+		{"id": 4, "name": "red base", "parent": 2, "pos": [-3, 0, -3],
+			"components": [{"type": "kit/region", "params": {"size": [7, 4, 7],
+				"owner": "team", "dig": "owners", "place": "owners",
+				"show_border": true}}]},
+		{"id": 5, "name": "blue base", "parent": 3, "pos": [-3, 0, -3],
+			"components": [{"type": "kit/region", "params": {"size": [7, 4, 7],
+				"owner": "team", "dig": "owners", "place": "owners",
+				"show_border": true}}]},
+		{"id": 6, "name": "red point", "parent": 2, "pos": [0, 1, 2],
+			"components": [{"type": "kit/button", "params": {"use": "owners"},
+				"links": [{"output": "pressed", "to": 2, "input": "add"}]}]},
+		{"id": 7, "name": "blue point", "parent": 3, "pos": [0, 1, 2],
+			"components": [{"type": "kit/button", "params": {"use": "owners"},
+				"links": [{"output": "pressed", "to": 3, "input": "add"}]}]}
+	]
+}

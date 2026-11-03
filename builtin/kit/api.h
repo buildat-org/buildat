@@ -625,6 +625,27 @@ namespace interface
 // exports are refused; in a game session the tools edit nothing.
 // {"op": "sessions"} logs each session's stats. Sessions are not saved: a
 // restart drops them and their scenes (the row "sessions").
+// [KIT_MINIGAMES_1] c:session_end(id, result) carries a result (JSON, 4
+// KiB at most) to the maker's on_session_end(c, id, result) (nil
+// without one), so a round's outcome reaches the default round.
+//
+// **Minigames** ([KIT_MINIGAMES_1], stage 7b's first part): the framework
+// owns a round's lifecycle, each game its goal. kit/arena is the lobby
+// and the queue (its zone: players join by entering it), the countdown
+// (its minimum `players` in it; one leaving under it cancels), the
+// session for up to `max_players`, the round timer (`duration`), the
+// teams' split and the result (`results` seconds on the screens, then
+// everyone back): its input "win" is the win-condition slot a builder
+// fills by a link (a team's id or name, or the team of the player who
+// set it off); the timer's end without one is a draw. kit/team is a team:
+// its name, colour, spawn (its pad) and shared score ("add", "set";
+// "reached" at win_score). **The Team interface**: a type with `team =
+// true` is a team, its state `members` (its players' entity ids) and
+// `score`; a type with `teams = true` reads every team, c.teams = {{id,
+// params, state}} by id, and reaches them (c:send); a kit/region with
+// owner "team" is owned by the members of the team it is under (itself or
+// an entity up its parents with a team: a team's base placed under the
+// team). The prefab kit/team_match is a two-team match to place.
 //
 // Origins: a cell play writes is a build or a game change. Builds are what
 // players make: their own dig or place (the app says so, player_wrote())
