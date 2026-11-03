@@ -51,12 +51,6 @@ The environment variables it reads, since none of them are in the client's -h:
     BUILDAT_LUANTI_FORCE_TIME=<n>    Pin the clock at a Luanti time of day
                                      (0..24000) and stop it running
     BUILDAT_LUANTI_FORCE_DAY=1       The same thing at noon
-    BUILDAT_LUANTI_NAME=<player>     Name the launcher's own client
-                                     something else than "singleplayer"
-                                     (the name Luanti's singleplayer plays
-                                     as, and an imported singleplayer
-                                     world's player); anyone else is
-                                     client<peer>
     BUILDAT_LUANTI_SEED=<seed>       A new save's fixed_map_seed, so a
                                      scripted run on both engines is of
                                      one world
