@@ -354,6 +354,12 @@ struct World: public Instance
 
 	~World()
 	{
+		// [VOXEL_OBJECTS_UNLOAD_LOSS] What was written since the last tick's
+		// commit is saved still: an edit just before the server stopped was
+		// lost. The store outlives the world (storage is below this module);
+		// the registry is looked up again, as a deleted scene's voxelworld
+		// instance may be gone already
+		save_dirty_all();
 		// The objects' nodes are this module's to take
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Scene *scene = imc->find_scene(m_scene);
@@ -510,6 +516,9 @@ struct World: public Instance
 	size_t num_objects(){ return m_objects.size(); }
 
 	void commit();
+	void save_dirty(ModelImpl *m, const std::set<int> &dirty,
+			VoxelRegistry *reg, size_t *saved = nullptr);
+	void save_dirty_all();
 
 	// The models and their chunks to a peer that joined the scene
 	void send_all(replicate::PeerId peer)
@@ -650,6 +659,55 @@ struct Module: public interface::Module, public Interface
 	}
 };
 
+void World::save_dirty(ModelImpl *m, const std::set<int> &dirty,
+		VoxelRegistry *reg, size_t *saved)
+{
+	if(!m_store || dirty.empty())
+		return;
+	m_store->batch([&](){
+		m_store->set(key(m, "meta"), m->meta());
+		for(int ci : dirty){
+			if(m->chunk_empty(ci))
+				m_store->remove(chunk_key(m, ci));
+			else
+				m_store->set(chunk_key(m, ci), m->chunk_save_data(ci, reg));
+			if(saved)
+				(*saved)++;
+		}
+	});
+}
+
+void World::save_dirty_all()
+{
+	if(!m_store)
+		return;
+	size_t n = 0;
+	for(auto &pair : m_models)
+		n += pair.second->m_dirty.size();
+	if(!n)
+		return;
+	bool done = false;
+	try {
+		voxelworld::access(m_server, [&](voxelworld::Interface *iv){
+			voxelworld::Instance *w = iv->get_instance(m_scene);
+			if(!w)
+				return;
+			for(auto &pair : m_models)
+				save_dirty(pair.second.get(), pair.second->m_dirty,
+						w->get_voxel_reg());
+			done = true;
+		});
+	} catch(std::exception &e){
+		log_w(MODULE, "voxel_objects: saving at the end: %s", e.what());
+	}
+	if(done)
+		log_i(MODULE, "voxel_objects: %zu chunks written since the last"
+				" commit saved at the end", n);
+	else
+		log_w(MODULE, "voxel_objects: %zu chunks written since the last"
+				" commit not saved: the scene's voxelworld is gone", n);
+}
+
 void World::commit()
 {
 	// A model made since the last commit is announced to the peers on the
@@ -682,19 +740,7 @@ void World::commit()
 			m->rebuild_chunk(ci, m_reg, true);
 		for(int ci : resend)
 			m->rebuild_chunk(ci, m_reg, false);
-		if(m_store){
-			m_store->batch([&](){
-				m_store->set(key(m, "meta"), m->meta());
-				for(int ci : dirty){
-					if(m->chunk_empty(ci))
-						m_store->remove(chunk_key(m, ci));
-					else
-						m_store->set(chunk_key(m, ci),
-								m->chunk_save_data(ci, m_reg));
-					st[m][0]++;
-				}
-			});
-		}
+		save_dirty(m, dirty, m_reg, &st[m][0]);
 		if(std::find(announce.begin(), announce.end(), m) != announce.end())
 			continue; // All its chunks go below
 		for(const std::set<int> *s : {&dirty, &resend})

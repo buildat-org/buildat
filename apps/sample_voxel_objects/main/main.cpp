@@ -339,11 +339,17 @@ struct Module: public interface::Module
 			log_i(MODULE, "sample_voxel_objects: the ball rests at (%.2f,"
 					" %.3f, %.2f): %.3f over the beam's top, %.3f over the"
 					" pad", p.x_, p.y_, p.z_, p.y_ - beam_top, p.y_ - m_pad_y);
+			// [VOXEL_OBJECTS_UNLOAD_LOSS] check.sh's: the edit made and the
+			// server stopped before a tick commits it
+			if(getenv("BUILDAT_VOXEL_OBJECTS_EDIT_STOP")){
+				edit(false);
+				m_server->shutdown(0, "sample_voxel_objects: edited, stopping");
+			}
 		}
 	}
 
 	// The house's chimney and the beam's far end gone
-	void on_edit(const network::Packet &packet)
+	void edit(bool commit)
 	{
 		voxel_objects::access(m_server, m_scene, [&](voxel_objects::Instance *vo){
 			voxel_objects::Model *house = vo->get_model("house");
@@ -354,8 +360,18 @@ struct Module: public interface::Module
 			for(int x = 10; x < 16; x++)
 				for(int z = 0; z < 2; z++)
 					beam->set_voxel(x, 0, z, 0);
-			vo->commit();
+			if(commit)
+				vo->commit();
+			log_i(MODULE, "sample_voxel_objects: edited: beam %08x, house"
+					" %08x, keep %08x", beam->content_hash(),
+					house->content_hash(),
+					vo->get_model("keep")->content_hash());
 		});
+	}
+
+	void on_edit(const network::Packet &packet)
+	{
+		edit(true);
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			imc->check_scene(m_scene)->GetNode(m_ball_id)->
 					GetComponent<RigidBody>()->Activate();

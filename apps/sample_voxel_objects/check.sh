@@ -18,7 +18,10 @@
 #      at;
 #   3. the server started again on the save loads each model with the hash
 #      it saved after the edit, and the ball rests on the pad (the loaded
-#      beam has no end).
+#      beam has no end);
+#   4. [VOXEL_OBJECTS_UNLOAD_LOSS] on a fresh save the same edit made as
+#      the ball rests, the server stopped before a tick commits it: the
+#      next start loads each model with the hash the edit left.
 #   apps/sample_voxel_objects/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -97,5 +100,22 @@ loaded_pad=$(rest "$t/s2.log" "the pad")
 near_radius "$loaded_pad" ||
 	fail "on the loaded models the ball rests ${loaded_pad:-?} over the pad, not 0.5 ($t/s2.log)"
 stop
-echo "PASS: the ball rests $on_beam over the turned beam; 6 meshes for 102 objects in $draws draw calls; the edit reached the client's 100 houses and the ball fell to $on_pad over the pad; frames $frame ms on average; saved and loaded" $loaded
+
+# 4 [VOXEL_OBJECTS_UNLOAD_LOSS] a fresh save, the edit made as the ball
+# rests and the server stopped before a tick commits it; the next start
+# loads each model with the hash the edit left
+BUILDAT_VOXEL_OBJECTS_EDIT_STOP=1 serve "$t/s3.log" "$t/u2"
+wait "$SERVER_PID" 2>/dev/null
+edited=$(grep -aoP "sample_voxel_objects: edited: \K.*" "$t/s3.log" | tail -1)
+[ -n "$edited" ] || fail "no edit before the stop ($t/s3.log)"
+serve "$t/s4.log" "$t/u2"
+wait_for_log "$t/s4.log" "the ball rests" 60 || fail "the ball never rested after the stop ($t/s4.log)"
+stop
+edited_h=$(echo "$edited" | grep -oP "[0-9a-f]{8}" | tr '\n' ' ')
+grep -aq "models loaded" "$t/s4.log" || fail "the models were not loaded after the stop ($t/s4.log)"
+reloaded_h=$(hashes "$t/s4.log" | awk '{print $2}' | tr '\n' ' ')
+echo "edited before the stop: $edited_h; loaded: $reloaded_h"
+[ "$edited_h" = "$reloaded_h" ] ||
+	fail "the edit made just before a stop was not saved: edited $edited_h, loaded $reloaded_h ($t/s3.log, $t/s4.log)"
+echo "PASS: the ball rests $on_beam over the turned beam; 6 meshes for 102 objects in $draws draw calls; the edit reached the client's 100 houses and the ball fell to $on_pad over the pad; frames $frame ms on average; saved and loaded" $loaded"; an edit just before a stop saved"
 # vim: set noet ts=4 sw=4:
