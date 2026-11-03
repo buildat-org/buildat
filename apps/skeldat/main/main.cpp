@@ -546,14 +546,16 @@ struct Module: public interface::Module, public PlayersHost,
 		// [SKELDAT_LOGIN] On a public server every join logs in first,
 		// whatever the world's state ([WORLD_MENU_ADMIN]: only an admin
 		// picks a world, the first made with the setup code); on_login()
-		// goes on from there. The launcher's own game lets its clients in
-		// as "client<peer>". simplified: BUILDAT_SKELDAT_GUEST_JOIN=1 (the
-		// server's environment, check.sh's) lets them in so too, for the
-		// scripted clients' names
+		// goes on from there. [SK_OWNER_NO_ADMIN_PAGES] The launcher's own
+		// game too: its owner by join.lua's local login, with no dialog (an
+		// admin: the Server window's admin pages and Open to LAN), a LAN
+		// player by the dialog. simplified: BUILDAT_SKELDAT_GUEST_JOIN=1
+		// (the server's environment, check.sh's) lets them in as
+		// "client<peer>" with no login, for the scripted clients' names
 		bool joined = getenv("BUILDAT_SKELDAT_GUEST_JOIN") &&
 				ss_(getenv("BUILDAT_SKELDAT_GUEST_JOIN")) == "1";
 		accounts::access(m_server, [&](accounts::Interface *i){
-			joined = joined || i->launched() || !i->name_of(peer).empty();
+			joined = joined || !i->name_of(peer).empty();
 		});
 		if(!joined){
 			if(!m_joining.insert(peer).second)
