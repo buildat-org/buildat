@@ -88,7 +88,7 @@ wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 event kit_edit {"op": "item", "name": "blade", "preset": "kit/sword", "damage": 8, "uses": 5, "knockback": 1}
-wait_log 10000 kit: 3 item types
+wait_log 10000 kit: 8 item types
 EOF
 	ed '{"op": "voxel", "name": "rock", "texture": "kit/stone.png", "group": "stone", "level": 1}'
 	ed '{"op": "voxel", "name": "ore", "texture": "kit/sand.png", "group": "stone", "level": 3}'
@@ -184,7 +184,7 @@ grep -a "item type\|Item types\|kit/health\|kit/equipment\|kit/counter\|hits ent
 	sed 's/^.*\(kit\|wasm\) *: /  /' | grep -v "^ *$" | cut -c1-160
 want "$s" "kitbob joined world as entity $BOB"
 # The item type and the voxel types
-want "$s" "Item types: kit/pickaxe kit/sword" \
+want "$s" "Item types: kit/arrow kit/bow kit/paintball kit/pickaxe kit/pistol kit/shotgun kit/sword" \
 	"kitboss made item type kitboss/blade version 1:" \
 	'"damage":8' '"preset":"kit/sword"' '"uses":5'
 want "$s" "kit/item_giver 7: gives kitboss 1 kitboss/blade" \
