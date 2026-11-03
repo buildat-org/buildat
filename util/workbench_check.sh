@@ -110,8 +110,9 @@ if [ "${1:-}" = web ]; then
 	# Stop and Play there, and Play mode; ([KIT] stage 4f) a raise stroke
 	# dragged in the plan by mouse (T), and Ctrl+Z its undo; ([KIT] stage
 	# 4g) "New voxel type...": a PNG uploaded by the browser's picker, the
-	# type named frost and made, taken in hand from the Voxel list (Down,
-	# Enter: a builder's own come first; the voxels tool on with it, which
+	# type named frost and made, taken in hand from the Voxel list (its
+	# name clicked: the World's material set comes first, [KIT_MATERIAL_SETS];
+	# the voxels tool on with it, which
 	# the first Escape puts away) and placed in play, in a region (6, at
 	# about (-1, 1, 2), clicked in from the palette in the plan) letting all
 	# place ([KIT_BUILDER_PLAY_RULES]: out of edit mode the admin plays by
@@ -194,15 +195,16 @@ if [ "${1:-}" = web ]; then
 	["click", "Button", "Make"], ["waitlog", "kit editor: [0-9]+ voxels to place", 10],
 	["frames", 3],
 	["click", "DropDownList", "▼", 203, 449], ["frames", 5], ["shot", "\${OUT}/voxel_list.png"],
-	["key", "Down"], ["key", "Enter"],
+	["click", "Text", "webboss/frost"],
 	["waitlog", "kit editor: in hand webboss/frost", 10],
 	["waitlog", "kit editor: tool voxels", 10],
 	["key", "Escape"], ["waitlog", "kit editor: tool select", 10],
 	["click", "Button", "kit/region"], ["waitlog", "kit editor: placing kit/region", 10],
 	["click", 560, 340], ["waitlog", "kit editor: placed kit/region at", 10],
 	["key", "Escape"], ["waitlog", "kit editor: placing nothing", 10],
+	["waitlog_any", "kit editor: state: 5 entities", 10],
 	["click", 560, 340], ["waitlog", "kit editor: selected 6", 10], ["frames", 3],
-	["click", "DropDownList", "▼", 1162, 428], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
+	["click", "DropDownList", "▼", 1162, 481], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
 	["key", "Home"], ["key", "Enter"], ["waitlog", "kit editor: 6/1 place = all", 10],
 	["click", "Button", "Apply"], ["sync", 5000], ["frames", 3],
 	["shot", "\${OUT}/region.png"],
@@ -1727,13 +1729,14 @@ grep -aq "world_menu: the list shown" "$t/new9.log" &&
 # The walk: each leg several metres its way (w +z, a -x, s -z, d +x), no
 # corrections; ([KIT_HM_FREE]) then w on to the map's edge (z 31, the
 # body's radius in; [KIT_HM_ORIGIN] the map centred), stopped there (d
-# the shorter leg: w then goes clear of the voxels built at x 3)
+# the shorter leg, half the others' frames and so 1.5 m its least: w then
+# goes clear of the voxels built at x 3)
 grep -a "kit: body at" "$t/new9.log" | sed 's/.*body at \([^,]*\),[^,]*,\([^,]*\), .* \([0-9]*\) corrections.*/\1 \2 \3/' > "$t/walk9"
 [ $(wc -l < "$t/walk9") = 6 ] || fail "not 6 body positions ($t/new9.log)"
 awk 'NR == 6 { if ($2 < 30 || $2 > 31 || $3 != c) { print "edge leg " $0; bad = 1 }; next }
 	NR == 1 { x = $1; z = $2; c = $3; next }
 	{ dx = $1 - x; dz = $2 - z; leg = NR - 1
-	  if (leg == 1 && dz < 3 || leg == 2 && dx > -3 || leg == 3 && dz > -3 || leg == 4 && dx < 3) bad = bad " leg " leg
+	  if (leg == 1 && dz < 3 || leg == 2 && dx > -3 || leg == 3 && dz > -3 || leg == 4 && dx < 1.5) bad = bad " leg " leg
 	  if ($3 != c) bad = bad " corrections in leg " leg
 	  x = $1; z = $2; c = $3 }
 	END { if (bad) { print bad; exit 1 } }' "$t/walk9" ||
