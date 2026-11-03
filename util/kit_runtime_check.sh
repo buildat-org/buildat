@@ -323,7 +323,7 @@ echo "ok: state over a restart, a save of bare type names migrated, the compiled
 # the server did, and in rccpp_build/wasm/ (an archive's cache/; what a
 # boxed server reads as built before, -r) it serves a server with no wasm
 # toolchain
-h=$(grep -ao "kit: \(built box/ in [0-9]* ms\|box/ is built (cache hit)\): [^ ]*\.wasm" "$s" |
+h=$(grep -ao "kit: \(built box/ in [0-9]* ms\|box/ is built (cache hit)\|box/ is in the shared build\): [^ ]*\.wasm" "$s" |
 	sed 's|.*/\([0-9a-f]\{40\}\)\.wasm|\1|' | tail -1)
 [ -n "$h" ] || fail "no name of the box's .wasm in $s"
 em=${EMSDK:-$HOME/emsdk}/upstream/bin

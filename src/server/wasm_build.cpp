@@ -538,9 +538,10 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 	const ss_ prebuilt_dir = config.get<ss_>("rccpp_prebuilt_path");
 	if(!prebuilt_dir.empty() &&
 			interface::fs::path_exists(prebuilt_dir+"/wasm/"+hash+".wasm")){
-		log_i(MODULE, "%s: %s/ is in the shared build", cs(module_name),
-				cs(source));
-		return prebuilt_dir+"/wasm/"+hash+".wasm";
+		const ss_ pre = prebuilt_dir+"/wasm/"+hash+".wasm";
+		log_i(MODULE, "%s: %s/ is in the shared build: %s", cs(module_name),
+				cs(source), cs(pre));
+		return pre;
 	}
 #ifdef BUILDAT_STATIC_MODULES
 	// [WEB_LOCAL_SERVER]: no compiler in a browser. util/web_server.cmake
