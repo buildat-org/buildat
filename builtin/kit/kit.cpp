@@ -3251,8 +3251,7 @@ struct Module: public interface::Module, public Interface
 								" version "+itos(version)+" is drawn so at the "
 								"next start");
 					});
-		for(auto &o : m_peers)
-			send_state(o.first);
+		send_state_all();
 	}
 
 	// "kit:texture" (a PNG's bytes): a builder with the tools on uploads a
@@ -3285,8 +3284,7 @@ struct Module: public interface::Module, public Interface
 			return refuse(why);
 		log_i(MODULE, "%s uploaded texture %s", cs(pi->second.name), cs(name));
 		// The state first: the answer's name is in its textures
-		for(auto &o : m_peers)
-			send_state(o.first);
+		send_state_all();
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "kit:texture", name);
 		});
@@ -3572,8 +3570,7 @@ struct Module: public interface::Module, public Interface
 			}
 			m_store->set("package:"+g.first, pk->second.stringify());
 		}
-		for(auto &o : m_peers)
-			send_state(o.first);
+		send_state_all();
 	}
 
 	// [AITTA_KEY_IDENTITY] JSON from a package, every "<author>/<n>" of an
@@ -3989,8 +3986,7 @@ struct Module: public interface::Module, public Interface
 				cs(aitta));
 		// [KIT_MATERIAL_SETS] a World made of its set (an upgrade) made again
 		world_check(by);
-		for(auto &o : m_peers)
-			send_state(o.first);
+		send_state_all();
 		return "ok "+what;
 	}
 
@@ -9805,6 +9801,13 @@ struct Module: public interface::Module, public Interface
 		m_store->set("prefab:"+name, pf.stringify());
 		m_prefabs[name] = pf;
 		m_prefab_palette.insert(name);
+		// [KIT_BROADCAST_SESSION] builders in every session see it in their
+		// palette
+		each_session([&]{
+			for(auto &o : m_peers)
+				if(o.second.editing)
+					send_state(o.first);
+		});
 		// [KIT_TOOLS_2] an item type's look may be it
 		for(auto &it : m_item_types)
 			if(jstr(it.second, "look") == name){
@@ -13111,7 +13114,8 @@ struct Module: public interface::Module, public Interface
 		return out;
 	}
 
-	// "kit:item_types" {name: sheet}: to a peer, or every one (-1)
+	// "kit:item_types" {name: sheet}: to a peer of this session, or every
+	// one of every session (-1)
 	void send_item_types(int64_t peer)
 	{
 		json::Value all = json::object();
@@ -13124,11 +13128,17 @@ struct Module: public interface::Module, public Interface
 			all.set(it.first, sheet);
 		}
 		const ss_ data = all.stringify();
-		network::access(m_server, [&](network::Interface *inetwork){
-			for(auto &p : m_peers)
-				if(peer < 0 || (size_t)peer == p.first)
-					inetwork->send(p.first, "kit:item_types", data);
-		});
+		auto send = [&]{
+			network::access(m_server, [&](network::Interface *inetwork){
+				for(auto &p : m_peers)
+					if(peer < 0 || (size_t)peer == p.first)
+						inetwork->send(p.first, "kit:item_types", data);
+			});
+		};
+		if(peer < 0)
+			each_session(send);
+		else
+			send();
 	}
 
 	// {"op": "item", "name": n, "preset": an item type, and the sheet's
@@ -14906,13 +14916,7 @@ struct Module: public interface::Module, public Interface
 	// The player is told, so a new builder's client says it may edit now
 	void on_privs(const accounts::Login &login)
 	{
-		sv_<uint64_t> ids = {0};
-		for(auto &s : m_sessions)
-			ids.push_back(s.first);
-		for(uint64_t id : ids){
-			SessionScope sc(*this, id);
-			on_privs_u(login);
-		}
+		each_session([&]{ on_privs_u(login); });
 	}
 
 	void on_privs_u(const accounts::Login &login)
@@ -17589,6 +17593,30 @@ struct Module: public interface::Module, public Interface
 		}
 		~SessionScope(){ m.enter_session(was); }
 	};
+
+	// [KIT_BROADCAST_SESSION] f in the default session's scope and then in
+	// each other's: m_peers is a session's, so what is the whole server's
+	// (item types, voxel types, textures, packages, prefabs) is sent so
+	void each_session(const std::function<void()> &f)
+	{
+		sv_<uint64_t> ids = {0};
+		for(auto &s : m_sessions)
+			ids.push_back(s.first);
+		for(uint64_t id : ids){
+			SessionScope sc(*this, id);
+			f();
+		}
+	}
+
+	// The editor state to every session's peers: the server's palette,
+	// voxel types, textures or packages changed
+	void send_state_all()
+	{
+		each_session([&]{
+			for(auto &o : m_peers)
+				send_state(o.first);
+		});
+	}
 
 	uint64_t session_of_peer(size_t peer)
 	{
