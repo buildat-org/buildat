@@ -346,10 +346,8 @@ local function body_light(name)
 	local node = scene:CreateChild(name)
 	local light = node:CreateComponent("Light")
 	light.lightType = magic.LIGHT_DIRECTIONAL
-	light.castShadows = true
 	light.specularIntensity = 1.0
-	light.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
-	light.shadowCascade = magic.CascadeParameters(24, 96, 0, 0, 0.8)
+	sky_light.cast_shadows(magic, light)
 	return node, light
 end
 local sun_node, sun = body_light("Sun")

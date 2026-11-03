@@ -63,6 +63,15 @@ function M.new_dome(scene, sun_dir, defaults, log, schedule)
 	return self
 end
 
+-- A sun's or a moon's shadow map ([KIT_PHYS_SHADOWS]): skeldat's numbers
+-- (builtin/luanti's [LIGHT_SHAPE]), two cascades to 24 and 96 cells, faded
+-- from 80% of the last
+function M.cast_shadows(magic, light)
+	light.castShadows = true
+	light.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
+	light.shadowCascade = magic.CascadeParameters(24, 96, 0, 0, 0.8)
+end
+
 -- [PT_EXPOSURE]: the meter -- Urho3D's AutoExposure.xml, log-average
 -- luminance as the key, clamped to the range, the frame scaled by middle
 -- grey over it -- which is the path-traced reference's own rule

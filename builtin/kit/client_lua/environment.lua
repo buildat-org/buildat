@@ -76,7 +76,7 @@ local function env_nodes()
 		env.orig = {ambient = copy(z.ambientColor), fog = copy(z.fogColor),
 			fog_start = z.fogStart, fog_end = z.fogEnd,
 			brightness = l.brightness, direction = sn.direction,
-			colour = copy(l.color)}
+			colour = copy(l.color), shadows = l.castShadows}
 	end
 	return true
 end
@@ -354,11 +354,11 @@ local function sky_log(mode, s)
 	end
 	local line = string.format("kit: sky: %s, %.1f o'clock, sun %d, moon %d,"..
 			" stars %.2f, clouds %.2f at %d, wind %.1f toward %d; %s %.2f:"..
-			" light %.2f, fog %.2f, sun through %.2f", mode, env.h,
+			" light %.2f, fog %.2f, sun through %.2f, shadows %d", mode, env.h,
 			s.sun and 1 or 0, s.moon and 1 or 0, s.stars, s.v.cover,
 			math.floor(s.v.height + 0.5), s.v.wind, math.floor(s.v.dir + 0.5),
 			weather_of(env.d), intensity_of(env.d), s.v.light, s.v.fog,
-			sun_through(s.v))
+			sun_through(s.v), env.light.castShadows and 1 or 0)
 	if line ~= LIT.sky_line then
 		LIT.sky_line = line
 		log:info(line)
@@ -391,6 +391,23 @@ end
 
 -- physical's light of the hour: the sun (or the moon) and the ambient by
 -- voxel_light's terms, the fog the horizon's radiance, the dome
+-- [KIT_PHYS_SHADOWS] Under physical the sun (or the moon) casts shadows
+-- from a shadow map, sky_render's (skeldat's): the voxels, the voxel
+-- objects (a heightmap's decorations), the looks and the heightmap's
+-- ground. None under cartoon, and none once the clouds took the light.
+-- Only where Kit draws the app's view: another app's own sun stays its own
+local function body_shadows()
+	if not LIT.views.play then
+		return
+	end
+	local on = M.physical() and env.light.brightness > 0
+	if on and not LIT.shadows_set then
+		LIT.shadows_set = true
+		sky_render().cast_shadows(magic, env.light)
+	end
+	env.light.castShadows = on
+end
+
 local function phys_light(v)
 	local d = env.d
 	local sr = sky_render()
@@ -449,6 +466,7 @@ local function phys_light(v)
 				1 - 0.8 * v.cover))
 		dome:set_indoors(enc, 1)
 	end
+	body_shadows()
 	sky_log("physical", s)
 end
 
@@ -505,6 +523,7 @@ local function env_light()
 		dome.set_param("CloudColor", c.r * k, c.g * k, c.b * k)
 		dome:set_indoors({r = 0.39, g = 0.39, b = 0.39}, 0.35 + 0.65 * day)
 	end
+	body_shadows()
 	sky_log("cartoon", s)
 end
 
@@ -527,10 +546,12 @@ local function env_restore()
 	else
 		env.light.brightness = env.orig.brightness
 		env.light.color = env.orig.colour
+		env.light.castShadows = env.orig.shadows
 		env.sun.direction = env.orig.direction
 	end
 	env.zone, env.light, env.sun, env.made_zone, env.made_sun = nil, nil,
 			nil, nil, nil
+	LIT.shadows_set = nil
 end
 
 -- ---- The voxel types that give light, under physical: a point light at

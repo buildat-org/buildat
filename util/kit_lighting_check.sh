@@ -28,6 +28,8 @@
 #      over weather_fade, set_weather apart from set_clouds.
 #   6. [KIT_CLOUDS_DIM_SUN] the cover dims the sun, both lightings: none
 #      through at full cover, all at a half and under.
+#   7. [KIT_PHYS_SHADOWS] a plate (kit/part) over the ground: its shadow
+#      under physical, none under cartoon nor under physical's full cover.
 # The shots are kept with KEEP_TMP=1; look at them.
 #   util/kit_lighting_check.sh
 #   REF=1 util/kit_lighting_check.sh   writes util/kit_lighting_ref.txt
@@ -163,22 +165,31 @@ EOF
 		sky "cartoon, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 0.80 at 120, wind 0.0"
 		shot clouds_still
 		shot clouds_still2
-		sky "light 1.00, fog 1.00, sun through 0.35"
+		sky "light 1.00, fog 1.00, sun through 0.35, shadows 0"
 		ep cloud_wind_speed 30
 		sky "clouds 0.80 at 120, wind 30.0 toward 180"
 		shot clouds_wind
 		shot clouds_wind2
 		ep cloud_wind_speed 0
 		ep cloud_cover 1
-		sky "clouds 1.00 at 120, wind 0.0 toward 180; clear 1.00: light 1.00, fog 1.00, sun through 0.00"
+		sky "clouds 1.00 at 120, wind 0.0 toward 180; clear 1.00: light 1.00, fog 1.00, sun through 0.00, shadows 0"
 		ep cloud_cover 0.1
 		sky "cartoon, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 0.10 at 120, wind 0.0"
+		# 7. A plate over the ground behind the default camera (5), its
+		# noon shadow 2 cells toward +z: the camera looks down at it
+		edit '{"op": "place", "type": "kit/part", "pos": [10, 6, 5]}'
+		edit '{"op": "set", "id": 5, "comp": 0, "param": "size", "value": [4, 0.5, 4]}'
+		PLATE="10 8 16 10 0.5 7.1"
+		shot cartoon_plate "$PLATE"
 		# 3. physical at noon, dusk and night
 		ep lighting '"physical"'
 		echo "wait_log_any 10000 kit: lighting physical"
 		sky "physical, 12.0 o'clock, sun 1"
+		sky "sun through 1.00, shadows 1"
+		shot phys_plate "$PLATE"
 		ep cloud_cover 1
-		sky "physical, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 1.00 at 120, wind 0.0 toward 180; clear 1.00: light 1.00, fog 1.00, sun through 0.00"
+		sky "physical, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 1.00 at 120, wind 0.0 toward 180; clear 1.00: light 1.00, fog 1.00, sun through 0.00, shadows 0"
+		shot phys_plate_overcast "$PLATE"
 		ep cloud_cover 0.1
 		sky "physical, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 0.10"
 		shot phys_noon
@@ -396,5 +407,22 @@ gn=$(mean "$t/clouds_none.png" 8 9) gc=$(mean "$t/clouds_still.png" 8 9)
 awk "BEGIN{exit !($gc < $gn * 0.85)}" ||
 	fail "the cover did not dim cartoon's sun: the ground $gc under 0.8, $gn under none"
 echo "ok: the cover dims the sun: cartoon's ground $gc under 0.8 against $gn under none; none through at full cover in both lightings"
-echo "PASS: lighting: cartoon today's look, physical metered, the sky by the hour and its switches, the clouds, the sky light in caves, the weather a modifier that fades, the cover dimming the sun"
+# 7. The plate's shadow: the frame's middle (the ground under the plate's
+# noon shadow) against its right side (the open ground; the panels on the
+# left), rows 4-5
+shade() # <png>: the middle's mean over the sides'
+{
+	cells "$1" | python3 -I -c "
+import sys
+v = [sum(map(int, l.split())) / 3 for l in sys.stdin]
+mid = [v[r * 16 + c] for r in (4, 5) for c in (7, 8)]
+side = [v[r * 16 + c] for r in (4, 5) for c in (13, 14, 15)]
+print('%.2f' % ((sum(mid) / len(mid)) / max(1, sum(side) / len(side))))"
+}
+sp=$(shade "$t/phys_plate.png") sc=$(shade "$t/cartoon_plate.png")
+so=$(shade "$t/phys_plate_overcast.png")
+awk "BEGIN{exit !($sp < 0.6 && $sc > 0.85 && $so > 0.85)}" ||
+	fail "the plate's shadow: physical $sp, cartoon $sc, physical overcast $so (the middle over the sides)"
+echo "ok: the plate's shadow under physical ($sp of the open ground), none under cartoon ($sc) nor physical's full cover ($so)"
+echo "PASS: lighting: cartoon today's look, physical metered, the sky by the hour and its switches, the clouds, the sky light in caves, the weather a modifier that fades, the cover dimming the sun, physical's shadows"
 # vim: set noet ts=4 sw=4:
