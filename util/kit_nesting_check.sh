@@ -12,8 +12,10 @@
 #      onto S says so -- B is used from there (its use range the
 #      world's); M goes out: Z comes to the player (entered), S is at (8,
 #      1, 9) (the teleport again), B used there; M back.
-#   2. Ended: S under the scene and back under M (its place in the world
-#      kept: its row (12, 1, 9) under the scene, (0, 0, 1) under M);
+#   2. Ended: S under the scene and back under M by the inspector's
+#      Un-parent and Switch parent (cancelled by Escape and by the button
+#      first; the parent picked in the list) -- its place in the world
+#      kept: its row (12, 1, 9) under the scene, (0, 0, 1) under M;
 #      refused: M under S (a loop), S under the World (no position), under
 #      an entity that is not there. A duplicate of M (9...) carries its
 #      three; one of S alone (13) stays under M; a delete of the copy
@@ -28,6 +30,8 @@
 #      [KIT_GROUP_TURN_JUMP] M and the teleporter selected, turned 90 by a
 #      drag of the knob in the 2D plan: the preview at the release (M,
 #      what is under it, the teleporter) is where the server puts them.
+#      [KIT_REPARENT_BUTTONS] 60 under M's copy (9) by Switch parent and a
+#      click on 9 in the plan.
 #   4. A loop put in the save (M under S): Kit refuses the composition,
 #      naming it.
 #   util/kit_nesting_check.sh
@@ -145,9 +149,39 @@ EOF
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
-	# 2. Re-parenting, refusals, the subtree carried
-	edit '{"op": "parent", "id": 5, "parent": 0}'
-	edit '{"op": "parent", "id": 5, "parent": 4}'
+	# 2. Re-parenting by the inspector's buttons ([KIT_REPARENT_BUTTONS]):
+	# S under the scene (Un-parent); Switch parent cancelled by Escape and
+	# by the button; then S under M, picked in the list; refusals, the
+	# subtree carried
+	cat <<'EOF'
+event kit_select 5
+frames 3
+click Button "Un-parent"
+EOF
+	n=$((n + 1))
+	printf 'wait_log 10000 entities, %d to undo\nframes 3\n' "$n"
+	cat <<'EOF'
+click Button "Switch parent"
+wait_log 5000 kit editor: switch parent of 5: armed
+keypress Escape
+wait_log 5000 kit editor: switch parent cancelled
+frames 3
+click Button "Switch parent"
+wait_log 5000 kit editor: switch parent of 5: armed
+frames 3
+click Button "Switch parent: Cancel"
+wait_log 5000 kit editor: switch parent cancelled
+frames 3
+click Button "Switch parent"
+wait_log 5000 kit editor: switch parent of 5: armed
+frames 3
+click Button "Positioned (*"
+frames 3
+click Button "select 4"
+wait_log 5000 kit editor: switch parent of 5 to 4
+EOF
+	n=$((n + 1))
+	printf 'wait_log 10000 entities, %d to undo\n' "$n"
 	refused '{"op": "parent", "id": 4, "parent": 5}' "parent: parent: entity 5 is under it"
 	refused '{"op": "parent", "id": 5, "parent": 3}' "parent: parent: entity 3 has no position"
 	refused '{"op": "parent", "id": 5, "parent": 999}' "parent: parent: no entity 999"
@@ -268,6 +302,17 @@ wait_log 5000 kit editor: turned 2 by 90
 sync 5000
 frames 10
 sync 5000
+event kit_select 60
+frames 3
+click Button "Switch parent"
+wait_log 5000 kit editor: switch parent of 60: armed
+event kit_plan 12 20 20 3
+frames 5
+mouse_pos 512 350
+frames 2
+mouse_click left
+wait_log 5000 kit editor: switch parent of 60 to 9
+sync 5000
 quit
 EOF
 } > "$t/boss2.cmds"
@@ -305,6 +350,8 @@ for i, (p, yaw) in sorted(pv.items()):
     print("  %d previewed at %s yaw %g, put there" % (i, ",".join("%g" % v for v in p), yaw % 360))
 PY
 echo "ok: a group turned by the knob is previewed where the server puts it, about the group's middle, with what is under it"
+want "$t/srv2.log" "An edit by kitboss: put 60 under 9"
+echo "ok: Switch parent: the parent clicked in the 2D plan"
 
 # 4. A loop in the save: the composition refused
 python3 - "$db" <<'PY' || fail "the loop put in the save ($db)"

@@ -85,7 +85,10 @@
 --     (the selection, a game-wide entity too); ([KIT_TRY_INPUTS]) "Try:"
 --     a button per input (a value field beside one that takes a value)
 --     sends it to the entity as a link would, running the game first
---     while Ended; what it emitted is shown a moment ("→ opened")
+--     while Ended; what it emitted is shown a moment ("→ opened");
+--     ([KIT_REPARENT_BUTTONS]) "Switch parent" and then an entity clicked
+--     (the view's or the list's; Escape or the button again cancels) puts
+--     it under that one, "Un-parent" back under the scene
 --   - every entity drawn as a box, the selected ones yellow, links as
 --     lines, and a type's gizmo (a sphere or a box), in edit mode only
 --   - the admin's: who is here, each "Builder: yes/no" to grant or take
@@ -1276,6 +1279,7 @@ palette = function()
 				log:info("kit editor: placing nothing")
 			else
 				M.set_tool(nil)
+				S.reparent = nil
 				S.placing = {type = it.type, prefab = it.prefab, label = it.label,
 						key = it.key}
 				log:info("kit editor: placing " .. it.label)
@@ -1644,10 +1648,24 @@ local function inspector(w, e, is_made)
 		if (e.yaw or 0) ~= 0 then
 			text(w, string.format("turned %g", e.yaw), DIM)
 		end
-		-- [KIT_NESTING] what it is under; what is placed next under it
+		-- [KIT_NESTING] what it is under; what is placed next under it.
+		-- [KIT_REPARENT_BUTTONS] Switch parent arms: the next entity clicked
+		-- (the view's or the list's) is its parent; Un-parent puts it back
+		-- under the scene. The server keeps its place in the world
 		local pe = NT.parent_of(e)
 		if pe then
 			text(w, "Under " .. pe.id .. " " .. tostring(pe.name), DIM)
+		end
+		local pr, armed = row(w), S.reparent == e.id
+		button(pr, armed and "Switch parent: Cancel" or "Switch parent",
+				function()
+			NT.arm_parent(not armed and e.id or nil)
+		end, armed)
+		if pe then
+			button(pr, "Un-parent", function()
+				log:info("kit editor: un-parent " .. e.id)
+				send({op = "parent", id = e.id, parent = 0})
+			end)
 		end
 		local on = S.under == e.id
 		button(w, on and "Placing under this: stop" or "Place under this",
@@ -2316,8 +2334,8 @@ people = function()
 	-- each in the order they were added; the tab kept for the session. In
 	-- a view that scrolls, fit_people() bounding it under the palette.
 	-- [KIT_NESTING] Positioned in the tree's order, each one under its
-	-- parent indented; a name dragged onto another puts it under that one,
-	-- onto the tabs or the list's empty room back under the scene
+	-- parent indented ([KIT_REPARENT_BUTTONS]: a Select with Switch parent
+	-- armed picks the parent)
 	local tabs = {["Game-wide"] = {}, Scene = {}, Positioned = {}}
 	local indent = {}
 	local function add_tree(e, d)
@@ -2340,7 +2358,6 @@ people = function()
 			end
 		end
 	end
-	PV.rows = {}
 	local tab = S.list_tab or "Game-wide"
 	local tr = row(b)
 	for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
@@ -2361,12 +2378,11 @@ people = function()
 		local l = label(gr, string.rep("    ", indent[e.id] or 0) .. e.id ..
 				" " .. tostring(e.name) .. (e.pos and " at " ..
 				table.concat(e.pos, ",") or ""))
-		if e.pos then
-			PV.rows[#PV.rows + 1] = {el = l, id = e.id}
-		end
-		local sb = button(gr, e.id == S.primary and "Selected" or "Select",
-				function()
-			M.select(e.id)
+		local sb = button(gr, e.id == S.primary and "Selected" or
+				S.reparent and e.pos and "Parent" or "Select", function()
+			if not NT.pick_parent(e.id) then
+				M.select(e.id)
+			end
 		end)
 		-- For a driven click by whose it is
 		sb:SetName("select " .. e.id)
@@ -3278,8 +3294,15 @@ local function click()
 		end
 		return
 	end
+	if t.id and NT.pick_parent(t.id) then
+		return
+	end
 	if t.id then
 		select(t.id, S.press.shift)
+		return
+	end
+	-- Switch parent armed: a click on nothing keeps it armed
+	if S.reparent then
 		return
 	end
 	if not S.press.shift then
@@ -3335,6 +3358,10 @@ function M.escape()
 	end
 	if T.down then
 		stroke_end(S.mx, S.my)
+		return true
+	end
+	if S.reparent then
+		NT.arm_parent(nil)
 		return true
 	end
 	-- In the crosshair Escape leaves it first, the voxels tool kept
@@ -3476,6 +3503,9 @@ function M.set_tool(tool)
 	S.tool = tool
 	T.down, T.fill = false, nil
 	S.placing = nil
+	if tool then
+		S.reparent = nil
+	end
 	log:info("kit editor: tool " .. tostring(tool or "select"))
 	if tool == "terrain" then
 		send({op = "edited"})
@@ -3923,33 +3953,45 @@ function M.placed_box(cell, item)
 			base[3] + math.max(z0, z1)}
 end
 
--- [KIT_NESTING] The list's positioned row (a name) at the pointer
-function NT.list_row_at(mx, my)
-	local sc = magic.ui.scale
-	for _, r in ipairs(W.people and PV.rows or {}) do
-		if r.el.visible and inside(r.el, mx / sc, my / sc) and
-				(not PV.view or inside(PV.view, mx / sc, my / sc)) then
-			return r
-		end
+-- [KIT_REPARENT_BUTTONS] Switch parent armed for id (nil: disarmed)
+function NT.arm_parent(id)
+	if S.reparent == id then
+		return
 	end
+	S.reparent = id
+	if id then
+		S.placing = nil
+		log:info("kit editor: switch parent of " .. id .. ": armed")
+		E.status = "Switch parent: click the new parent of " .. id ..
+				" (Escape: cancel)"
+	else
+		log:info("kit editor: switch parent cancelled")
+		E.status = ""
+	end
+	refresh()
 end
 
--- A name dragged in the list let go: onto another name, under that one;
--- onto the tabs or the rest of the list's window, under the scene
-function NT.list_drop(id, mx, my)
-	local sc = magic.ui.scale
-	local r = NT.list_row_at(mx, my)
-	local e = find(id)
-	if r and r.id ~= id then
-		log:info("kit editor: list drag " .. id .. " onto " .. r.id)
-		send({op = "parent", id = id, parent = r.id})
-	elseif not r and W.people and inside(W.people, mx / sc, my / sc) and
-			NT.parent_of(e) then
-		log:info("kit editor: list drag " .. id .. " onto the scene")
-		send({op = "parent", id = id, parent = 0})
-	else
-		log:info("kit editor: list drag " .. id .. " given up")
+-- The entity clicked while Switch parent is armed: its parent, one of the
+-- scene's positioned; true when taken
+function NT.pick_parent(id)
+	local child = S.reparent
+	if not child then
+		return false
 	end
+	local e, is_made = find(id)
+	if id == child or not e or is_made or not e.pos then
+		E.status = "Switch parent: " .. (id == child and "not itself" or
+				is_made and "not one made in play" or
+				"one with a position") .. "; Escape: cancel"
+		log:info("kit editor: switch parent of " .. child .. ": not " .. id)
+		people()
+		return true
+	end
+	log:info("kit editor: switch parent of " .. child .. " to " .. id)
+	send({op = "parent", id = child, parent = id})
+	S.reparent, E.status = nil, ""
+	refresh()
+	return true
 end
 
 -- ---- Input: the mouse ([FP]'s mouse_down, mouse_up, mouse_move)
@@ -3963,12 +4005,6 @@ local function mouse_down(button_)
 		if item then
 			S.palette_press = {item = item, mx = mx, my = my}
 			S.palette_dragged = nil
-			return
-		end
-		-- [KIT_NESTING] a name in the list, to drag onto another
-		local r = NT.list_row_at(mx, my)
-		if r then
-			S.list_press = {id = r.id, mx = mx, my = my}
 			return
 		end
 	end
@@ -4052,14 +4088,6 @@ local function mouse_up(button_)
 	end
 	if button_ == magic.MOUSEB_LEFT and S.box_drag then
 		BX.box_drop()
-		return
-	end
-	if button_ == magic.MOUSEB_LEFT and S.list_press then
-		local lp = S.list_press
-		S.list_press = nil
-		if math.abs(S.mx - lp.mx) + math.abs(S.my - lp.my) > px(8) then
-			NT.list_drop(lp.id, S.mx, S.my)
-		end
 		return
 	end
 	if button_ == magic.MOUSEB_LEFT and S.palette_press then
@@ -4913,6 +4941,19 @@ local function compute_guide()
 		return g
 	end
 	ghost(nil)
+	-- [KIT_REPARENT_BUTTONS] the new parent picked
+	if S.reparent then
+		local p = pick(mx, my)
+		local e = p and p.id ~= S.reparent and find(p.id)
+		if e and e.pos then
+			M.frame_entity(hover, e.id, M.PLACE)
+			g.left = "make " .. name_of(e) .. " the parent of " .. S.reparent
+		else
+			g.left = "click the new parent of " .. S.reparent
+		end
+		g.note = "Esc: cancel the parent's switch"
+		return g
+	end
 	if near_knob(mx, my) then
 		local k = knob()
 		hover.box(k, magic.Vector3(0.15, 0.15, 0.15), nil, M.HOVER)
@@ -5363,6 +5404,7 @@ function M.editor(options)
 			log:info("kit editor: edit mode " .. (E.editing and "on" or "off"))
 			E.link, E.status = nil, ""
 			S.drag, S.press, S.placing, S.crosshair = nil, nil, nil, false
+			S.reparent = nil
 			T.down, T.fill = false, nil
 			drop("ctx")
 			drop("dialog")
@@ -5420,6 +5462,9 @@ function M.editor(options)
 			end
 			if S.primary and not find(S.primary) then
 				S.primary = next(S.sel)
+			end
+			if S.reparent and not find(S.reparent) then
+				S.reparent = nil
 			end
 		end
 		refresh()
