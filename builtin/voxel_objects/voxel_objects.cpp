@@ -356,7 +356,9 @@ struct World: public Instance
 	{
 		// [VOXEL_OBJECTS_UNLOAD_LOSS] What was written since the last tick's
 		// commit is saved still: an edit just before the server stopped was
-		// lost. The store outlives the world (storage is below this module);
+		// lost. The store outlives the world (storage is below this module,
+		// and a store whose save the app closed first drops the writes:
+		// [SAVE_CLOSE_ORDER]);
 		// the registry is looked up again, as a deleted scene's voxelworld
 		// instance may be gone already
 		save_dirty_all();

@@ -65,10 +65,29 @@ typedef sqlite_stmt::Stmt Stmt;
 
 struct CStore: public Store
 {
+	// [SAVE_CLOSE_ORDER] Null once its save is closed: the store is kept
+	// (Module::m_closed_stores) and drops what it is asked, so a module
+	// still holding it -- a heightmap or voxel_objects world saving as it
+	// goes, after the app closed the save -- writes nothing rather than
+	// into freed memory
 	CSave *m_save;
 	ss_ m_name;
+	ss_ m_closed_path;
+	bool m_said_closed = false;
 
 	CStore(CSave *save, const ss_ &name): m_save(save), m_name(name){}
+
+	bool closed()
+	{
+		if(m_save)
+			return false;
+		if(!m_said_closed)
+			log_w(MODULE, "storage: the store \"%s\" of the closed save [%s]"
+					" was used; dropped (this is said once)", cs(m_name),
+					cs(m_closed_path));
+		m_said_closed = true;
+		return true;
+	}
 
 	bool get(const ss_ &key, ss_ &value_out);
 	void set(const ss_ &key, const ss_ &value);
@@ -273,6 +292,8 @@ struct CSave: public Save
 
 bool CStore::get(const ss_ &key, ss_ &value_out)
 {
+	if(closed())
+		return false;
 	interface::MutexScope ms(m_save->m_mutex);
 	Stmt st(m_save->m_db, &m_save->m_stmts,
 			"SELECT value FROM store WHERE store=? AND key=?", "storage: ");
@@ -286,6 +307,8 @@ bool CStore::get(const ss_ &key, ss_ &value_out)
 
 void CStore::set(const ss_ &key, const ss_ &value)
 {
+	if(closed())
+		return;
 	interface::MutexScope ms(m_save->m_mutex);
 	Stmt st(m_save->m_db, &m_save->m_stmts,
 			"INSERT INTO store (store, key, value) VALUES (?, ?, ?)"
@@ -299,6 +322,8 @@ void CStore::set(const ss_ &key, const ss_ &value)
 
 void CStore::remove(const ss_ &key)
 {
+	if(closed())
+		return;
 	interface::MutexScope ms(m_save->m_mutex);
 	Stmt st(m_save->m_db, &m_save->m_stmts,
 			"DELETE FROM store WHERE store=? AND key=?", "storage: ");
@@ -309,6 +334,8 @@ void CStore::remove(const ss_ &key)
 
 sv_<ss_> CStore::list(const ss_ &prefix)
 {
+	if(closed())
+		return {};
 	interface::MutexScope ms(m_save->m_mutex);
 	// >= prefix and < prefix with its last byte raised is the range a B-tree
 	// can seek to, and it does not have to care what LIKE thinks % means
@@ -353,6 +380,8 @@ sv_<ss_> CStore::list(const ss_ &prefix)
 
 void CStore::batch(std::function<void()> writes)
 {
+	if(closed())
+		return;
 	interface::MutexScope ms(m_save->m_mutex);
 	if(m_save->m_batch_depth > 0){
 		// Inside another batch: its transaction, its commit or rollback
@@ -425,6 +454,12 @@ struct Module: public interface::Module, public Interface
 	// Saves this server has open. The pointer a module holds stays valid
 	// until it closes it.
 	sv_<up_<CSave>> m_open;
+	// [SAVE_CLOSE_ORDER] The stores of the saves closed, each dropping what
+	// it is asked from then on
+	// simplified: kept until the server stops, a name each (world_menu's
+	// listing closes a save per world it lists); handles counted per save
+	// are the upgrade if that ever adds up
+	sv_<up_<CStore>> m_closed_stores;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -640,6 +675,26 @@ struct Module: public interface::Module, public Interface
 		if(s->get("f", v))
 			throw Exception("storage check: a nested failure was not rolled back");
 
+		// [SAVE_CLOSE_ORDER] A store used after its save closed drops what
+		// it is asked; it is not freed under whoever holds it
+		{
+			CSave *c = new CSave("", true);
+			m_open.push_back(up_<CSave>(c));
+			Store *cst = c->store("closing");
+			cst->set("k", "v");
+			close(c);
+			CStore *kept = m_closed_stores.empty() ? nullptr :
+					m_closed_stores.back().get();
+			if(kept != cst)
+				throw Exception("storage check: a closed save's store not kept");
+			kept->m_said_closed = true; // No warning at every start
+			cst->batch([&](){ cst->set("k", "w"); });
+			cst->remove("k");
+			if(cst->get("k", v) || !cst->list("").empty())
+				throw Exception("storage check: a closed save's store read");
+			m_closed_stores.pop_back();
+		}
+
 		if(valid_name("..") || valid_name("a/b") || valid_name("") ||
 				valid_name(".hidden") || valid_name("a\\b"))
 			throw Exception("storage check: valid_name accepted a bad name");
@@ -781,6 +836,16 @@ struct Module: public interface::Module, public Interface
 	{
 		for(auto it = m_open.begin(); it != m_open.end(); it++){
 			if(it->get() == save){
+				CSave *sv = it->get();
+				{
+					interface::MutexScope ms(sv->m_mutex);
+					for(auto &st : sv->m_stores){
+						st.second->m_save = nullptr;
+						st.second->m_closed_path = sv->m_path;
+						m_closed_stores.push_back(std::move(st.second));
+					}
+					sv->m_stores.clear();
+				}
 				m_open.erase(it);
 				return;
 			}

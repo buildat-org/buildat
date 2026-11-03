@@ -107,7 +107,9 @@ struct Map: public Instance
 		// [KIT_WORLD_REGEN_SAVE] What was written since the last tick's
 		// commit is saved still: a map regenerated just before the server
 		// stops was lost, the rest of the save (Kit's rows) newer than it.
-		// The store outlives the map: storage is below this module
+		// The store outlives the map: storage is below this module, and a
+		// store whose save the app closed first drops the writes
+		// ([SAVE_CLOSE_ORDER])
 		save_written(m_written);
 		// The node's RigidBody holds the shape in its compound: gone first
 		if(m_node_id){
