@@ -531,6 +531,11 @@ struct World
 	// not loaded is air (never generated round a player); an edit
 	// generates its own (hm_section())
 	voxelworld::Instance *hm_world = nullptr;
+	// A game session's finite map: loaded round its players and the
+	// spawn, as an infinite World is; a section it does not hold stays
+	// the start's alone (its SessionSource's), copied in for a player
+	// near it or a write (lean_section())
+	voxelworld::Instance *lean_world = nullptr;
 	json::Value world_applied;
 	world::Params wp;
 	// [KIT_MATERIAL_SETS] the material set it is made of (its
@@ -4828,6 +4833,8 @@ struct Module: public interface::Module, public Interface
 			// [KIT_SESSIONS_1] a session's: only what it changed
 			w->set_save_unaltered(!m_active && p.finite() && !p.heightmap());
 			m_w->hm_world = p.heightmap() ? w : nullptr;
+			m_w->lean_world = m_active && !in_draft() && p.finite() &&
+					!p.heightmap() ? w : nullptr;
 		});
 	}
 
@@ -6842,21 +6849,25 @@ struct Module: public interface::Module, public Interface
 		const int S = m_w->section_size;
 		auto sec = [&](int v){ return v >= 0 ? v / S : -((-v + S - 1) / S); };
 		const world::Params &p = m_w->wp;
-		if(p.heightmap() || !p.finite()){
+		const bool lean = m_w->lean_world != nullptr;
+		if(p.heightmap() || !p.finite() || lean){
 			// [KIT_HM_WALK] round the spawn and each player; a heightmap's
 			// voxels are air built on over the terrain
 			// [KIT_HM_FREE] A heightmap's: only the sections the save has
 			// (what was built) loaded, none generated (-1): a body walks
 			// over cells not loaded (move.lua's), and an edit generates
 			// its own section (hm_section())
-			const int hgen = p.heightmap() ? -1 : 1;
+			// A session's finite map: only what the start (its source) or
+			// its own save has, nothing generated
+			const bool none = p.heightmap() || lean;
+			const int hgen = none ? -1 : 1;
 			double x = 0, y = 0, z = 0;
 			world_spawn(x, y, z);
 			pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
-					p.heightmap() ? (int)x : 0, (int)y, p.heightmap() ? (int)z : 0),
+					none ? (int)x : 0, (int)y, none ? (int)z : 0),
 					1, 1, hgen, hgen));
-			const int gxz = p.heightmap() ? -1 : world::GEN_XZ;
-			const int gy = p.heightmap() ? -1 : world::LOAD_Y;
+			const int gxz = none ? -1 : world::GEN_XZ;
+			const int gy = none ? -1 : world::LOAD_Y;
 			for(auto &wp : m_w->world_peers)
 				pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
 						wp.second[0], wp.second[1], wp.second[2]),
@@ -6898,8 +6909,8 @@ struct Module: public interface::Module, public Interface
 			world_load_points();
 		}
 		WorldScope ws(m_w, world_named(scene));
-		if(!m_w->world_scene || (m_w->wp.finite() && !m_w->wp.heightmap()) ||
-				m_w->name != scene)
+		if(!m_w->world_scene || (m_w->wp.finite() && !m_w->wp.heightmap() &&
+				!m_w->lean_world) || m_w->name != scene)
 			return;
 		const std::array<int32_t, 3> c = {{(int32_t)std::floor(x),
 				(int32_t)std::floor(y), (int32_t)std::floor(z)}};
@@ -11026,7 +11037,16 @@ struct Module: public interface::Module, public Interface
 	bool allows(size_t peer, const ss_ &action, int x, int y, int z, ss_ *why)
 	{
 		SessionScope sc(*this, session_of_peer(peer));
-		return allows_u(peer, action, x, y, z, why);
+		if(!allows_u(peer, action, x, y, z, why))
+			return false;
+		auto pi = m_peers.find(peer);
+		if((action == "dig" || action == "place") && pi != m_peers.end() &&
+				!session_room(cell_key(pi->second.scene, x, y, z), false)){
+			if(why)
+				*why = "This round's world takes no more changes here";
+			return false;
+		}
+		return true;
 	}
 
 	bool allows_u(size_t peer, const ss_ &action, int x, int y, int z, ss_ *why)
@@ -11196,6 +11216,8 @@ struct Module: public interface::Module, public Interface
 
 	bool hm_section(voxelworld::Instance *w, const pv::Vector3DInt32 &p)
 	{
+		if(w && !loaded(w, p) && lean_section(w, p))
+			return loaded(w, p);
 		if(!w || !hm_world_of(w) || loaded(w, p))
 			return loaded(w, p);
 		WorldScope ws(m_w, hm_world_of(w));
@@ -11219,6 +11241,42 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "World: a heightmap's section (%i,%i,%i) generated "
 				"for an edit", sp.getX(), sp.getY(), sp.getZ());
 		return loaded(w, p);
+	}
+
+	// A game session's finite map: a section not loaded, in the map,
+	// copied from the start for a write (unloaded again once no player is
+	// near, its change kept in the session's save). False if the World
+	// is none such
+	// simplified: a read of a cell far from every player sees it not
+	// loaded, as an infinite World's (an entity there reads no voxels);
+	// reading the start's through the SessionSource would take that away
+	bool lean_section(voxelworld::Instance *w, const pv::Vector3DInt32 &p)
+	{
+		World *wd = nullptr;
+		for(auto &x : m_worlds)
+			if(x.second.lean_world == w)
+				wd = &x.second;
+		if(!wd)
+			return false;
+		const world::Params &wp = wd->wp;
+		const int m = wp.border == "water" ? world::SEA_BORDER :
+				wp.border == "wall" ? 1 : 0;
+		if(p.getX() < wp.x0() - m || p.getX() >= wp.x0() + wp.width + m ||
+				p.getZ() < wp.z0() - m || p.getZ() >= wp.z0() + wp.depth + m)
+			return true;
+		const pv::Vector3DInt16 sp = section_of(w, p);
+		if(sp.getY() < WORLD_SECTION_Y0 || sp.getY() > WORLD_SECTION_Y1)
+			return true;
+		w->load_or_generate_section(sp);
+		return true;
+	}
+
+	static pv::Vector3DInt16 section_of(voxelworld::Instance *w,
+			const pv::Vector3DInt32 &p)
+	{
+		const pv::Vector3DInt16 ss = w->get_section_size_voxels();
+		return pv::Vector3DInt16(div_floor(p.getX(), ss.getX()),
+				div_floor(p.getY(), ss.getY()), div_floor(p.getZ(), ss.getZ()));
 	}
 
 	static bool loaded(voxelworld::Instance *world, const pv::Vector3DInt32 &p)
@@ -11316,6 +11374,14 @@ struct Module: public interface::Module, public Interface
 			const interface::VoxelDefinition *def = reg->get(name);
 			if(!def){
 				log_w(MODULE, "No voxel type %s", cs(w.voxel));
+				return;
+			}
+			const ss_ scene = scene_name(w.scene);
+			if(!session_room(cell_key(scene, w.p.getX(), w.p.getY(),
+					w.p.getZ()), true)){
+				log_w(MODULE, "Voxel (%i,%i,%i) not set: session %s has "
+						"written %zu sections", w.p.getX(), w.p.getY(),
+						w.p.getZ(), cs(itos(m_active)), SESSION_MAX_WRITTEN);
 				return;
 			}
 			uint32_t word = 0;
@@ -13215,6 +13281,30 @@ struct Module: public interface::Module, public Interface
 				itos(div_floor(p.getZ(), ss.getZ()));
 	}
 
+	// "<scene>:x,y,z", the section of a cell of a Kit scene's World
+	ss_ cell_key(const ss_ &scene, int x, int y, int z)
+	{
+		const World *wd = world_named(scene);
+		const int S = wd ? wd->section_size : 64;
+		return scene+":"+itos(div_floor(x, S))+","+itos(div_floor(y, S))+
+				","+itos(div_floor(z, S));
+	}
+
+	// A game session's room for a write to a section (its key): one it
+	// wrote, or SESSION_MAX_WRITTEN not reached; `take` counts it in. The
+	// default round and a draft have no bound
+	bool session_room(const ss_ &key, bool take)
+	{
+		GameSession *gs = active_session();
+		if(!gs || gs->draft || gs->written.count(key))
+			return true;
+		if(gs->written.size() >= SESSION_MAX_WRITTEN)
+			return false;
+		if(take)
+			gs->written.insert(key);
+		return true;
+	}
+
 	// "Always keep builds": keep_builds of the first between_plays instance
 	// (kit/player_state)
 	bool always_keep()
@@ -13294,6 +13384,7 @@ struct Module: public interface::Module, public Interface
 		if(si == m_host.scenes.end())
 			return;
 		const char origin = pi->second.editing ? 'k' : build ? 'b' : 'g';
+		session_room(cell_key(pi->second.scene, x, y, z), true);
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
 			voxelworld::Instance *w = ivw->get_instance(si->second);
 			if(w)
@@ -15606,6 +15697,10 @@ struct Module: public interface::Module, public Interface
 	// packages, rights, ids) are the server's
 
 	static const size_t MAX_SESSIONS = 8;
+	// The sections a game session writes, its own beside the start's
+	// (each a copy of up to ~100 KB in memory): a write into one more is
+	// refused
+	static const size_t SESSION_MAX_WRITTEN = 256;
 	static const int64_t SESSION_IDLE_US = 60000000;
 
 	struct Ctx
@@ -15714,6 +15809,8 @@ struct Module: public interface::Module, public Interface
 		std::set<ss_> app_scenes;
 		// Since when nobody is in it (time_us; 0: someone is)
 		int64_t empty_since = 0;
+		// The sections its players and entities wrote ("<scene>:x,y,z")
+		std::set<ss_> written;
 	};
 	std::map<uint64_t, up_<GameSession>> m_sessions;
 	// The default round's members while a session is entered
@@ -16297,6 +16394,7 @@ struct Module: public interface::Module, public Interface
 		sv_<uint64_t> ids = {0};
 		for(auto &s : m_sessions)
 			ids.push_back(s.first);
+		size_t default_loaded = 0;
 		for(uint64_t id : ids){
 			SessionScope sc(*this, id);
 			json::Value j = json::object();
@@ -16311,7 +16409,7 @@ struct Module: public interface::Module, public Interface
 			j.set("clock", (int64_t)(now_us() / 1000000));
 			j.set("entities", (int64_t)m_entities.size());
 			j.set("runtime", digest(runtime_json()));
-			size_t loaded = 0, sourced = 0, saved = 0, altered = 0;
+			size_t loaded = 0, sourced = 0, saved = 0, altered = 0, all = 0;
 			voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
 				for(auto &s : m_host.scenes){
 					voxelworld::Instance *w = ivw->get_instance(s.second);
@@ -16320,9 +16418,10 @@ struct Module: public interface::Module, public Interface
 					// A session's: what it changed written (its own)
 					if(id)
 						w->save();
-					size_t l = 0;
-					sourced += w->sourced_sections(&l);
+					size_t l = 0, a = 0;
+					sourced += w->sourced_sections(&l, &a);
 					loaded += l;
+					all += a;
 					for(const auto &st : w->section_stats()){
 						saved++;
 						altered += st.altered;
@@ -16333,6 +16432,16 @@ struct Module: public interface::Module, public Interface
 			j.set("sourced_loaded", (int64_t)loaded);
 			j.set("sections", (int64_t)saved);
 			j.set("altered", (int64_t)altered);
+			// Its sections in memory; a session's: those it wrote, and
+			// those of the default's it holds no copy of
+			j.set("loaded", (int64_t)all);
+			if(!id)
+				default_loaded = all;
+			if(gs){
+				j.set("written", (int64_t)gs->written.size());
+				j.set("shared", (int64_t)(default_loaded > all ?
+						default_loaded - all : 0));
+			}
 			a.append(j);
 		}
 		return a;

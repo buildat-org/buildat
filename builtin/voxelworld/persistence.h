@@ -1329,6 +1329,11 @@
 	void set_section_source(sp_<SectionSource> source)
 	{
 		m_section_source = source;
+		// A copy's (a game session's) sections are mostly the source's,
+		// read rarely: few of their chunks kept decompressed (each ~150
+		// KB), the rest as their nodes have them
+		if(source)
+			m_max_buffers_loaded = std::min<size_t>(m_max_buffers_loaded, 16);
 	}
 
 	// A section the save has not, made of the source's voxels: true if
@@ -1411,14 +1416,19 @@
 		return true;
 	}
 
-	size_t sourced_sections(size_t *loaded)
+	size_t sourced_sections(size_t *loaded, size_t *all_loaded)
 	{
-		if(loaded){
+		if(loaded)
 			*loaded = 0;
-			for(auto &sector : m_sections)
-				for(auto &sp : sector.second)
+		if(all_loaded)
+			*all_loaded = 0;
+		for(auto &sector : m_sections)
+			for(auto &sp : sector.second){
+				if(loaded)
 					*loaded += sp.second.loaded && sp.second.sourced;
-		}
+				if(all_loaded)
+					*all_loaded += sp.second.loaded;
+			}
 		return m_sourced;
 	}
 

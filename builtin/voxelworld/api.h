@@ -454,8 +454,10 @@ namespace voxelworld
 		virtual bool read_section(const pv::Vector3DInt16 &section_p,
 				VoxelVolume &out) = 0;
 		// How many sections came from the source since the instance was
-		// made, and how many of those are loaded now
-		virtual size_t sourced_sections(size_t *loaded = nullptr) = 0;
+		// made, how many of those are loaded now, and how many sections
+		// are loaded in all
+		virtual size_t sourced_sections(size_t *loaded = nullptr,
+				size_t *all_loaded = nullptr) = 0;
 
 		// The voxels of a region, in one read rather than one per voxel:
 		// what asks for this is a sweep, and a section is a quarter of a

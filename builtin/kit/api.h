@@ -602,7 +602,11 @@ namespace interface
 // nor a persistent one). A session's voxels are the start's copy-on-write:
 // a section is the start's until the session writes it (the default
 // round's copy, its live edits over it; else the default's own), and only
-// the sections it changed are its own. A component makes one
+// the sections it changed are its own. A game session holds in memory
+// only the sections round its players and spawn (a finite map's too, as
+// an infinite World's) and those a write copies in; the others stay the
+// start's alone. It writes 256 sections at most: a dig or place into one
+// more is refused (told), an entity's write dropped (logged). A component makes one
 // (c:session_start(players): players it reaches, in its zone or the
 // run's, any for a type with `players`; nil: those in its zone and the
 // run's), moves a player into one it made or back (c:session_move(player,
@@ -623,7 +627,9 @@ namespace interface
 // game session's end). In a draft the World, the
 // environment, terrain, voxel types, new scenes, rounds (Play, Stop) and
 // exports are refused; in a game session the tools edit nothing.
-// {"op": "sessions"} logs each session's stats. Sessions are not saved: a
+// {"op": "sessions"} logs each session's stats (a session's "loaded",
+// "written" and "shared": the default's loaded sections it holds no copy
+// of). Sessions are not saved: a
 // restart drops them and their scenes (the row "sessions").
 // [KIT_MINIGAMES_1] c:session_end(id, result) carries a result (JSON, 4
 // KiB at most) to the maker's on_session_end(c, id, result) (nil

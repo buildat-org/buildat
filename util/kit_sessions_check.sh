@@ -112,7 +112,7 @@ tools_back() # <label>
 }
 settle() # a session's sections (the start's: none generated) in
 {
-	echo "delay 2000"
+	echo "delay 5000"
 }
 try() # <id> <input>
 {
@@ -145,18 +145,22 @@ EOF
 	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}' 1
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "biome", "value": "grassland"}' 2
 	echo "wait_log_any 30000 kit: World: generated again"
-	vox 3 1 3 kit/stone 3
-	edit '{"op": "place", "type": "kit/voxel_replace", "pos": [3, 1, 3]}' 4
-	edit '{"op": "set", "id": 4, "comp": 0, "param": "size", "value": [1, 1, 1]}' 5
-	edit '{"op": "place", "type": "kit/arena", "pos": [10, 1, 10]}' 6
-	edit '{"op": "set", "id": 5, "comp": 0, "param": "players", "value": 1}' 7
+	# 320 x 320: more sections than a session's player has round them
+	edit '{"op": "set", "id": 3, "comp": 0, "param": "width", "value": 320}' 3
+	edit '{"op": "set", "id": 3, "comp": 0, "param": "depth", "value": 320}' 4
+	echo "wait_log 60000 kit: World: generated again"
+	vox 3 1 3 kit/stone 5
+	edit '{"op": "place", "type": "kit/voxel_replace", "pos": [3, 1, 3]}' 6
+	edit '{"op": "set", "id": 4, "comp": 0, "param": "size", "value": [1, 1, 1]}' 7
+	edit '{"op": "place", "type": "kit/arena", "pos": [10, 1, 10]}' 8
+	edit '{"op": "set", "id": 5, "comp": 0, "param": "players", "value": 1}' 9
 	# At once, no time limit, no results shown ([KIT_MINIGAMES_1]'s
 	# defaults are a lobby's)
-	edit '{"op": "set", "id": 5, "comp": 0, "param": "countdown", "value": 0}' 8
-	edit '{"op": "set", "id": 5, "comp": 0, "param": "duration", "value": 0}' 9
-	edit '{"op": "set", "id": 5, "comp": 0, "param": "results", "value": 0}' 10
-	edit '{"op": "place", "type": "kit/teleporter", "pos": [2, 1, -3]}' 11
-	edit '{"op": "set", "id": 6, "comp": 0, "param": "to", "value": [11, 1, 11]}' 12
+	edit '{"op": "set", "id": 5, "comp": 0, "param": "countdown", "value": 0}' 10
+	edit '{"op": "set", "id": 5, "comp": 0, "param": "duration", "value": 0}' 11
+	edit '{"op": "set", "id": 5, "comp": 0, "param": "results", "value": 0}' 12
+	edit '{"op": "place", "type": "kit/teleporter", "pos": [2, 1, -3]}' 13
+	edit '{"op": "set", "id": 6, "comp": 0, "param": "to", "value": [11, 1, 11]}' 14
 	cat <<'EOF'
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
@@ -285,10 +289,14 @@ assert g["clock"] < d["clock"], (g["clock"], d["clock"])
 assert g["runtime"] != d["runtime"], (g, d)
 assert g["sourced"] > 0, g
 assert 1 <= g["altered"] <= 2, g
+# Its sections: round its player and those it wrote; the rest the start's
+# alone (shared, no copy of its own)
+assert g["shared"] > 0 and g["loaded"] < d["loaded"], (g, d)
+assert 1 <= g["written"] <= 2, g
 b = {s["id"]: s for s in json.loads(sys.argv[2])}
 assert b[2]["kind"] == "draft" and b[2]["entities"] == b[0]["entities"] + 1, b
-print("  session 1: clock %s s (the default's %s), %s sections the start's, %s its own" % (
-	g["clock"], d["clock"], g["sourced"], g["altered"]))
+print("  session 1: clock %s s (the default's %s), %s sections copied from the start, %s its own, %s shared (the default holds %s)" % (
+	g["clock"], d["clock"], g["sourced"], g["written"], g["shared"], d["loaded"]))
 PY
 echo "ok: a session's clock and runtime its own; its sections the start's but those it changed"
 expect 5 3,1,3 kit/stone
