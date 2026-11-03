@@ -79,7 +79,10 @@ struct RCCPP_Info {
 // difference between an array access and a function call per voxel: lighting a
 // section measured 178 ms at -O0 and 40 ms here. -O2 gets that to 37 ms but
 // costs a third more compile time on every module reload, which is the thing
-// this engine does constantly.
+// this engine does constantly. -g1, not -g ([MODULE_COMPILE_TIME]): a
+// backtrace keeps its functions and lines, gdb loses the locals and types,
+// and every module compiles about 35% faster (kit.cpp 35 s to 22.5 s).
+// Here rather than beside -fPIC so the module hash covers it.
 ss_ cxxflags_optimize()
 {
 #ifdef BUILDAT_SANITIZE
@@ -87,9 +90,9 @@ ss_ cxxflags_optimize()
 	// client's packet is handled, and a fuzz run against an uninstrumented
 	// module sees a crash and nothing short of one. In the module hash as
 	// well, so neither build is handed the other's.
-	return "-O1 -fsanitize=" BUILDAT_SANITIZE " -fno-omit-frame-pointer";
+	return "-O1 -g1 -fsanitize=" BUILDAT_SANITIZE " -fno-omit-frame-pointer";
 #else
-	return "-O1";
+	return "-O1 -g1";
 #endif
 }
 
@@ -119,7 +122,7 @@ struct CCompiler: public Compiler
 		// the difference between an array access and a function call per
 		// voxel. Modules are compiled once at startup, so the extra compile
 		// time is paid once and the code runs for the life of the server.
-		command += " -DRCCPP "+cxxflags_optimize()+" -g -fPIC -fvisibility=hidden -shared";
+		command += " -DRCCPP "+cxxflags_optimize()+" -fPIC -fvisibility=hidden -shared";
 		command += " -std=c++11";
 		if(extra_cxxflags != "")
 			command += ss_()+" "+extra_cxxflags;
