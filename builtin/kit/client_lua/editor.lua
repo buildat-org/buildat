@@ -915,9 +915,12 @@ rebuild_bar = function()
 	local w = E.editing and window(magic.HA_LEFT, magic.VA_TOP, 8, 4, true) or
 			window(magic.HA_CENTER, magic.VA_TOP, 0, 4, true)
 	W.bar = w
+	-- [KIT_SESSIONS_1] the round's: the default's only
+	local kind = (E.session or {}).kind or "default"
+	local rounds = not E.persistent and kind == "default"
 	if not E.editing then
 		button(w, "Edit", M.toggle_tools)
-		if not E.persistent then
+		if rounds then
 			run_end(w)
 		end
 		return
@@ -993,8 +996,21 @@ rebuild_bar = function()
 	if E.state and E.state.clipboard then
 		bar_button("Paste", "Ctrl+" .. M.key_name("paste"), M.paste)
 	end
-	if not E.persistent then
+	if rounds then
 		bar_items[#bar_items + 1] = {E.running and "End" or "Run", place(run_end)}
+	end
+	-- [KIT_SESSIONS_1] a private draft of the start: made, published, left
+	if kind == "draft" then
+		bar_button("Publish", nil, function()
+			send({op = "publish"})
+		end)
+		bar_button("Leave draft", nil, function()
+			send({op = "leave_draft"})
+		end)
+	elseif kind == "default" and (E.session or {}).can then
+		bar_button("Draft", nil, function()
+			send({op = "draft"})
+		end)
 	end
 	bar_button("Play mode", nil, M.toggle_tools)
 	if narrow() then
@@ -1005,7 +1021,7 @@ rebuild_bar = function()
 			end, not folded(p[1]))
 		end
 	end
-	if E.running and not E.persistent then
+	if E.running and rounds then
 		bar_button("Save as start", nil, M.save_as_start)
 	end
 	bar_log = true
@@ -5361,6 +5377,16 @@ function M.editor(options)
 			log:info("kit editor: the server is " .. (E.running and "Running" or
 					"Ended") .. " (by " .. E.by .. ")" ..
 					(E.persistent and ", persistent" or ""))
+		end
+		-- [KIT_SESSIONS_1] the session they are in: a draft's bar has
+		-- Publish and Leave draft, a session's no Run/End
+		E.session = type(s.session) == "table" and s.session or {}
+		local sk = tostring(E.session.id or 0) .. " " ..
+				tostring(E.session.kind or "default")
+		if E.session_logged ~= sk then
+			E.session_logged = sk
+			log:info("kit editor: in session " .. sk)
+			rebuild_bar()
 		end
 		if E.editing then
 			local n = #entities()
