@@ -5,7 +5,9 @@
 -- its owners, everyone else (others) or none ("Red base": dig and place
 -- for owners, enter and pvp for all). Its owners (`owner`):
 -- nobody, the builders (edit rights), or the players named in `owners`
--- ("alice, bob"); a team's from stage 7b. Where regions overlap the
+-- ("alice, bob"), or ([KIT_MINIGAMES_1]) "team": the members of the
+-- kit/team it is under (a team's base: its region placed under its
+-- team), as the team has them now. Where regions overlap the
 -- smallest holding the cell decides; outside every region the World's
 -- default holds: no digging or placing (a builder in edit mode only), entering, pvp,
 -- damage and use for all.
@@ -95,7 +97,7 @@ end
 local params = {
 	size = {type = "position", default = {5, 3, 5}},
 	owner = {type = "string", default = "nobody",
-		choices = {"nobody", "builders", "players"}},
+		choices = {"nobody", "builders", "players", "team"}},
 	owners = {type = "string", default = ""},
 	show_border = {type = "bool", default = false},
 	resize_time = {type = "number", default = 0, min = 0, max = 3600},

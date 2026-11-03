@@ -218,6 +218,9 @@ struct Type
 	// It reads every player entity (players = true); it is on each player
 	// entity, not placed (player = true)
 	bool players = false, player = false;
+	// [KIT_MINIGAMES_1] It is a team (team = true: the Team interface, its
+	// state members and score); it reads every team (teams = true)
+	bool team = false, teams = false;
 	// Its client part, <name>.client.lua beside it ("" none)
 	ss_ client;
 	bool usable = false, owns_voxel = false;
@@ -1507,6 +1510,8 @@ struct Module: public interface::Module, public Interface
 		names("handlers", t.handlers);
 		t.players = t.decl.get("players").is_true();
 		t.player = t.decl.get("player").is_true();
+		t.team = t.decl.get("team").is_true();
+		t.teams = t.decl.get("teams").is_true();
 		// Its client part, beside it
 		const ss_ client = pkg ? jstr(pt->second, "client") :
 				read_file(dir+"/"+short_name+".client.lua");
@@ -7861,6 +7866,22 @@ struct Module: public interface::Module, public Interface
 			o += ",players=";
 			lua_lit(players, o);
 		}
+		// [KIT_MINIGAMES_1] every team, by id: {id, params, state}
+		if(m_types[in.type].teams){
+			json::Value teams = json::array();
+			for(auto &p : m_entities)
+				for(const Instance &ti : p.second.comps)
+					if(m_types[ti.type].team){
+						json::Value j = json::object();
+						j.set("id", (int64_t)p.first);
+						j.set("params", ti.params);
+						j.set("state", ti.state);
+						teams.append(j);
+						break;
+					}
+			o += ",teams=";
+			lua_lit(teams, o);
+		}
 		// [KIT_VOXEL_STATES] its voxel box's size, and with reads_voxels
 		// its voxels: their names and each cell's index in them (from 1; 0:
 		// not loaded)
@@ -8214,6 +8235,11 @@ struct Module: public interface::Module, public Interface
 		if(m_types[in.type].players)
 			for(auto &p : m_players)
 				r.insert(p.second);
+		if(m_types[in.type].teams)
+			for(auto &p : m_entities)
+				for(const Instance &ti : p.second.comps)
+					if(m_types[ti.type].team)
+						r.insert(p.first);
 		return r;
 	}
 
@@ -10913,8 +10939,10 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// Whether the peer is among a region's owners: "nobody", "builders"
-	// (edit rights), or names (a list, or a text of them)
-	bool owns(size_t peer, const json::Value &owners)
+	// (edit rights), "team" (the members of the team the region `re` is
+	// under, [KIT_MINIGAMES_1]), or names (a list, or a text of them)
+	bool owns(size_t peer, const json::Value &owners,
+			const Entity *re = nullptr)
 	{
 		const Peer &p = m_peers[peer];
 		if(owners.is_string()){
@@ -10923,6 +10951,8 @@ struct Module: public interface::Module, public Interface
 				return false;
 			if(o == "builders")
 				return can_edit(peer);
+			if(o == "team")
+				return re && in_team(p.player, team_over(*re));
 			ss_ name;
 			for(size_t i = 0; i <= o.size(); i++){
 				if(i == o.size() || o[i] == ',' || o[i] == ' '){
@@ -10938,6 +10968,40 @@ struct Module: public interface::Module, public Interface
 		for(unsigned i = 0; i < owners.size(); i++)
 			if(owners.at(i).is_string() && owners.at(i).as_string() == p.name)
 				return true;
+		return false;
+	}
+
+	// [KIT_MINIGAMES_1] The Team interface: the team an entity is under
+	// (itself or the nearest one up its parents with a `team` type's
+	// instance), 0 none; whether a player's entity is among a team's
+	// members (its state's list of ids)
+	uint64_t team_over(const Entity &e)
+	{
+		const Entity *x = &e;
+		for(int i = 0; x && i <= MAX_NEST; i++){
+			for(const Instance &in : x->comps)
+				if(m_types[in.type].team)
+					return x->id;
+			auto it = m_entities.find(x->parent);
+			x = it == m_entities.end() ? nullptr : &it->second;
+		}
+		return 0;
+	}
+
+	bool in_team(uint64_t player, uint64_t team)
+	{
+		auto it = m_entities.find(team);
+		if(!player || it == m_entities.end())
+			return false;
+		for(const Instance &in : it->second.comps){
+			if(!m_types[in.type].team)
+				continue;
+			const json::Value &m = in.state.get("members");
+			for(unsigned i = 0; i < m.size(); i++)
+				if(m.at(i).is_number() &&
+						(uint64_t)m.at(i).as_number() == player)
+					return true;
+		}
 		return false;
 	}
 
@@ -11035,7 +11099,7 @@ struct Module: public interface::Module, public Interface
 		const bool fresh = !rule.is_string();
 		const ss_ ow = jstr(rg->params, "owner");
 		const bool owner = owns(peer, !fresh ? rg->state.get("owners") :
-				rg->params.get(ow == "players" ? "owners" : "owner"));
+				rg->params.get(ow == "players" ? "owners" : "owner"), re);
 		// Who may: "all", "owners", "others" or "none"
 		const ss_ who = !fresh ? rule.as_string() :
 				rg->params.get(action).is_string() ?
@@ -12321,7 +12385,7 @@ struct Module: public interface::Module, public Interface
 		scene_of(e, &scene);
 		const Instance *rg = region_at(scene, c.getX(), c.getY(), c.getZ(),
 				&re);
-		if(rg && owns(peer, rg->state.get("owners")))
+		if(rg && owns(peer, rg->state.get("owners"), re))
 			return true;
 		*why = "Locked: its owners' only";
 		return false;
@@ -15674,6 +15738,8 @@ struct Module: public interface::Module, public Interface
 		size_t comp = 0;
 		ss_ by;
 		sv_<size_t> peers;
+		// [KIT_MINIGAMES_1] an end's result, on_session_end's third
+		json::Value result = json::null();
 	};
 	std::deque<SessionOp> m_session_ops;
 	// The round's clock: game time since its start (the default's: the
@@ -16009,7 +16075,8 @@ struct Module: public interface::Module, public Interface
 
 	// A session ended: its players back in the default round, its scenes
 	// dropped once they are out, its maker told (on_session_end). At the top
-	void end_session(uint64_t id, const ss_ &by, bool tell = true)
+	void end_session(uint64_t id, const ss_ &by, bool tell = true,
+			const json::Value &result = json::null())
 	{
 		auto it = m_sessions.find(id);
 		if(it == m_sessions.end())
@@ -16067,6 +16134,7 @@ struct Module: public interface::Module, public Interface
 			r.comp = comp;
 			r.handler = "on_session_end";
 			r.args.append((int64_t)id);
+			r.args.append(result);
 			queue_run(r);
 		}
 		for(auto &p : m_peers)
@@ -16122,7 +16190,7 @@ struct Module: public interface::Module, public Interface
 					if(session_of_peer(peer) == o.from)
 						move_peer(peer, o.target);
 			} else if(o.op == "end"){
-				end_session(o.target, o.by);
+				end_session(o.target, o.by, true, o.result);
 			}
 		}
 	}
@@ -16203,6 +16271,13 @@ struct Module: public interface::Module, public Interface
 						(uint64_t)std::max(0.0, o.at(1u).as_number()) : 0;
 				if(m_active ? so.target != m_active : !made_by(so.target))
 					why = "session "+itos(so.target)+" is none it made";
+				// [KIT_MINIGAMES_1] its result for the maker, 4 KiB at most
+				const json::Value &res = o.at(2u);
+				if(!res.is_undefined() && !res.is_null() &&
+						res.stringify().size() > 4096)
+					why = "a result past 4096 bytes";
+				else if(!res.is_undefined())
+					so.result = res.deepcopy();
 			} else {
 				why = "no session op "+op.substr(0, 16);
 			}
