@@ -19,6 +19,8 @@
 --   ([KIT_TOOLS_1]) the wheel (first person): the item in hand, Kit's
 --   hotbar; a melee item's left click hits a player or an entity with
 --   health, a dig that takes time goes on while the button is held
+--   ([KIT_TOOLS_2]) a ranged item's left click shoots (held: auto, a
+--   bow's draw), R reloads; the held item drawn in first person
 --   F6 or the menu's "Edit": Kit's editor, floorplanner's (its 2D, 3D and
 --   walking views: here the walk); walking in it, the pointer is free and
 --   the right button held looks round, a click goes up into the crosshair

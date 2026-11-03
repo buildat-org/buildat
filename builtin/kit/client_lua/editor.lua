@@ -2723,7 +2723,8 @@ local ITEM_FIELDS = {
 	{name = "name", type = "text", max_length = 64},
 	{name = "icon", type = "texture"},
 	{name = "stack", type = "number", integer = true, min = 1, max = 999},
-	{name = "use", type = "choice", choices = {"none", "melee", "use"}},
+	{name = "use", type = "choice", choices = {"none", "melee", "use",
+		"ranged"}},
 	{name = "cooldown", type = "number", min = 0, max = 60},
 	{name = "mode", type = "choice", choices = {"single", "auto", "burst"}},
 	{name = "burst", type = "number", integer = true, min = 1, max = 20},
@@ -2741,6 +2742,22 @@ local ITEM_FIELDS = {
 	{name = "wear_hit", type = "number", integer = true, min = 0, max = 1000},
 	{name = "wear_shot", type = "number", integer = true, min = 0, max = 1000},
 	{name = "repair", type = "text", max_length = 129},
+	-- [KIT_TOOLS_2] ranged, loading, the look (a prefab's name: its parts
+	-- and voxels) and its colour
+	{name = "shot", type = "choice", choices = {"hitscan", "projectile"}},
+	{name = "speed", type = "number", min = 1, max = 500},
+	{name = "gravity", type = "number", min = 0, max = 100},
+	{name = "lifetime", type = "number", min = 0.1, max = 30},
+	{name = "spread", type = "number", min = 0, max = 45},
+	{name = "pellets", type = "number", integer = true, min = 1, max = 32},
+	{name = "range", type = "number", min = 1, max = 1000},
+	{name = "recoil", type = "number", min = 0, max = 45},
+	{name = "magazine", type = "number", integer = true, min = 0, max = 1000},
+	{name = "reload", type = "number", min = 0, max = 60},
+	{name = "reload_mode", type = "choice", choices = {"whole", "one"}},
+	{name = "ammo", type = "text", max_length = 129},
+	{name = "look", type = "text", max_length = 129},
+	{name = "color", type = "text", max_length = 7},
 }
 
 -- The form from an item type's sheet (its dig as text)
@@ -2776,8 +2793,7 @@ function M.item_dialog()
 		E.item_form = item_form(v, f.name)
 		M.item_dialog()
 	end, WIDGETS)
-	-- simplified: every field in one long form; 7c-2's ranged and look
-	-- fields go here too
+	-- simplified: every field in one long form
 	-- The icon: a voxel's or an upload's texture, "" none (a text label)
 	local tex = {""}
 	for _, t in ipairs(E.state.textures or {}) do tex[#tex + 1] = t end
@@ -2790,7 +2806,7 @@ function M.item_dialog()
 		for k, v in pairs(f) do
 			j[k] = v
 		end
-		j.format, j.author, j.version = nil, nil, nil
+		j.format, j.author, j.version, j.look_data = nil, nil, nil, nil
 		send(j)
 		drop("dialog")
 	end)

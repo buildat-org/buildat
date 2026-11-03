@@ -1602,6 +1602,11 @@ function M.play_target(origin, dir, reach, solid)
 		t.left = {kind = "item", id = id or 0}
 		return t
 	end
+	-- [KIT_TOOLS_2] a ranged item's click is its shot (hands.lua's)
+	if sheet and sheet.use == "ranged" then
+		t.left = {kind = "shoot"}
+		return t
+	end
 	local me_far = me and (origin - me):Length() or 0
 	local hid, ht = M.hit_pick(origin, dir, me_far > 1 and me_far or 0)
 	if hid and (not hit or ht <= vt + 0.05) and (not id or ht <= et) then
@@ -1885,7 +1890,9 @@ do
 	local ok, err, install = buildat.run_script_file("kit/hands.lua")
 	assert(ok and type(install) == "function", "kit: hands.lua: " ..
 			tostring(err))
-	install({M = M, E = E, P = P, log = log, entity_t = entity_t})
+	install({M = M, E = E, O = O, P = P, log = log, entity_t = entity_t,
+		material = material, wedge = wedge, voxel_def = voxel_def,
+		voxel_mesh = voxel_mesh, color = color})
 end
 
 -- ---- [KIT_UI_COMPONENTS] UI as screen-space components: ui.lua

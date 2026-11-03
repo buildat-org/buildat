@@ -53,6 +53,8 @@ local KIT_KEYS = {
 	-- default: an app's own (skeldat's E and Q) may be there
 	{id = "item_next", label = "The next item in hand"},
 	{id = "item_prev", label = "The item before in hand"},
+	-- [KIT_TOOLS_2] a ranged item's magazine
+	{id = "reload", label = "Reload what is in hand", default = "R"},
 	{id = "edit", label = "Edit mode on and off", default = "F6"},
 	{id = "view_2d", label = "Editor: the 2D view", default = "F1"},
 	{id = "view_3d", label = "Editor: the 3D view", default = "F2"},

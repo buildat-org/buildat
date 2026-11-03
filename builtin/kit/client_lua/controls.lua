@@ -95,6 +95,10 @@ end
 
 -- [KIT_TOOLS_1] hands.lua's wheel picks in first person
 M.camera_mode = function() return camera_mode() end
+-- [KIT_TOOLS_2] A shot's recoil: the view kicked up by deg degrees
+function M.kick(deg)
+	C.pitch = math.max(-89, C.pitch - (tonumber(deg) or 0))
+end
 
 function M.pointer_free()
 	local p = params().pointer or "auto"
