@@ -27,7 +27,7 @@
 #      it), intensity scaling the drops and the floors, a change fading
 #      over weather_fade, set_weather apart from set_clouds.
 #   6. [KIT_CLOUDS_DIM_SUN] the cover dims the sun, both lightings: none
-#      through at full cover, all at a half and under.
+#      through at full cover, all at 0.2 and under.
 #   7. [KIT_PHYS_SHADOWS] a plate (kit/part) over the ground: its shadow
 #      under physical, none under cartoon nor under physical's full cover.
 #   8. [KIT_FORCE_CARTOON] a second client with the preference lighting
@@ -168,7 +168,7 @@ EOF
 		sky "cartoon, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 0.80 at 120, wind 0.0"
 		shot clouds_still
 		shot clouds_still2
-		sky "light 1.00, fog 1.00, sun through 0.35, shadows 0"
+		sky "light 1.00, fog 1.00, sun through 0.06, shadows 0"
 		ep cloud_wind_speed 30
 		sky "clouds 0.80 at 120, wind 30.0 toward 180"
 		shot clouds_wind
@@ -442,7 +442,7 @@ awk "BEGIN{exit !($st < $cl * 0.85)}" || fail "the storm ($st) not darker than t
 echo "ok: the weather's floors over a cover of 0.9 and of 0 (rain, snow, storm, cloudy, clear), the intensity's drops (400, 200, 175), a fade half way at $half, the storm $st against clear $cl"
 echo "ok: in play set_clouds and set_weather apart: the overcast through the rain and after it"
 # 6. The cover dims the sun: cartoon's ground under 0.8 against none (the
-# lines' "sun through" waited for above: 0.35 at 0.8, none at full, both
+# lines' "sun through" waited for above: 0.06 at 0.8, none at full, both
 # lightings)
 gn=$(mean "$t/clouds_none.png" 8 9) gc=$(mean "$t/clouds_still.png" 8 9)
 awk "BEGIN{exit !($gc < $gn * 0.85)}" ||

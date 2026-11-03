@@ -360,11 +360,12 @@ local function overcast(v)
 end
 
 -- [KIT_CLOUDS_DIM_SUN] How much of the sun's (or the moon's) direct light
--- the clouds let through, both lightings: all up to a cover of a half, none
--- at full, a smoothstep between -- cloudy's 0.7 0.65, rain's 0.8 0.35,
--- storm's 0.95 0.03. The weather's light factor is on top of it.
+-- the clouds let through, both lightings: all up to a cover of 0.2, none
+-- from 0.9, a smoothstep between -- cloudy's 0.7 0.2, rain's 0.8 0.06,
+-- storm's 0.95 0 ([KIT_CLOUDS_TOO_BRIGHT]). The weather's light factor is
+-- on top of it.
 local function sun_through(v)
-	local k = overcast(v)
+	local k = clamp01((v.cover - 0.2) / 0.7)
 	return 1 - k * k * (3 - 2 * k)
 end
 
