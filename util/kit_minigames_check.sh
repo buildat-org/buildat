@@ -150,10 +150,13 @@ event kit_use 10
 sync 3000
 wait_log 60000 shown: "Team
 EOF
-	# Five presses of their own team's point (the other's refused), each
-	# after the last one's 1 s hold (game time: 0.1 s at CHECK_RATE 12)
-	for i in 1 2 3 4 5; do
-		printf 'event kit_use 9\nevent kit_use 10\nsync 3000\ndelay 500\n'
+	# Presses of their own team's point (the other's refused), each after
+	# the last one's 1 s hold (game time: 0.1 s at CHECK_RATE 12); seven,
+	# as a press while the last one is still down is lost (a slow host's
+	# game clock behind; the buildbox's, once)
+	# simplified: a fixed count; those after the win add on in the results
+	for i in 1 2 3 4 5 6 7; do
+		printf 'event kit_use 9\nevent kit_use 10\nsync 3000\ndelay 1000\n'
 	done
 	cat <<'EOF'
 wait_log_any 60000 wins! | Round ended by lobby: a win
@@ -228,8 +231,9 @@ s1 = log.split("Session 1 (a game)")[1].split("Session 1 ended")[0]
 team = re.search(r"kitbob joins team (\w+)", s1).group(1)
 tid = {"Red": 5, "Blue": 6}[team]
 got = re.findall(r"kit/team %d: score (\d+) by kitbob" % tid, s1)
-assert got == ["1", "2", "3", "4", "5"], got
+assert got[:5] == ["1", "2", "3", "4", "5"], got
 want = "kit/arena 4: round over: %s wins! " % team
+want += "Red 5 : Blue 0" if team == "Red" else "Red 0 : Blue 5"
 line = [l for l in s1.splitlines() if want in l]
 assert line and "-- Round ended by lobby: a win" in line[0], line
 assert "kit/arena 4: session 1 ended %s won (" % team in log, team
