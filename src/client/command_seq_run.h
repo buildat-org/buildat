@@ -349,7 +349,9 @@
 				return prefix ? l.compare(0, want_s.size(), want_s) == 0 :
 						l == want_s;
 			};
-			if(!match(label) && !match(name))
+			// An unnamed element is not one named "" ([WORLD_MENU_SEED_FIELD]:
+			// a LineEdit "" took the first field, its name unset)
+			if(!match(label) && (name.empty() || !match(name)))
 				left = "another label";
 			else if(!e->IsVisibleEffective())
 				left = "hidden";
