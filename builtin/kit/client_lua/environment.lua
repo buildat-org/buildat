@@ -333,6 +333,20 @@ end
 -- off, the open sky everywhere
 local GATE = {seen = 1, want = 1, t = 0}
 
+-- How overcast the values are (0..1): a cover over a half grows into it
+local function overcast(v)
+	return clamp01((v.cover - 0.5) / 0.5)
+end
+
+-- [KIT_CLOUDS_DIM_SUN] How much of the sun's (or the moon's) direct light
+-- the clouds let through, both lightings: all up to a cover of a half, none
+-- at full, a smoothstep between -- cloudy's 0.7 0.65, rain's 0.8 0.35,
+-- storm's 0.95 0.03. The weather's light factor is on top of it.
+local function sun_through(v)
+	local k = overcast(v)
+	return 1 - k * k * (3 - 2 * k)
+end
+
 -- The sky's line in the log, when it changes
 local function sky_log(mode, s)
 	if FADE.dur > 0 then
@@ -340,10 +354,11 @@ local function sky_log(mode, s)
 	end
 	local line = string.format("kit: sky: %s, %.1f o'clock, sun %d, moon %d,"..
 			" stars %.2f, clouds %.2f at %d, wind %.1f toward %d; %s %.2f:"..
-			" light %.2f, fog %.2f", mode, env.h,
+			" light %.2f, fog %.2f, sun through %.2f", mode, env.h,
 			s.sun and 1 or 0, s.moon and 1 or 0, s.stars, s.v.cover,
 			math.floor(s.v.height + 0.5), s.v.wind, math.floor(s.v.dir + 0.5),
-			weather_of(env.d), intensity_of(env.d), s.v.light, s.v.fog)
+			weather_of(env.d), intensity_of(env.d), s.v.light, s.v.fog,
+			sun_through(s.v))
 	if line ~= LIT.sky_line then
 		LIT.sky_line = line
 		log:info(line)
@@ -376,11 +391,6 @@ end
 
 -- physical's light of the hour: the sun (or the moon) and the ambient by
 -- voxel_light's terms, the fog the horizon's radiance, the dome
--- How overcast the values are (0..1): a cover over a half grows into it
-local function overcast(v)
-	return clamp01((v.cover - 0.5) / 0.5)
-end
-
 local function phys_light(v)
 	local d = env.d
 	local sr = sky_render()
@@ -419,12 +429,13 @@ local function phys_light(v)
 	env.zone.fogStart, env.zone.fogEnd = fs, math.max(fe, fs + 1)
 	if s.sun then
 		env.sun.direction = magic.Vector3(-tx, -height, -tz)
-		env.light.brightness = t.sun * s.up * v.light
+		env.light.brightness = t.sun * s.up * v.light * sun_through(v)
 		env.light.color = magic.Color(t.sun_color.r, t.sun_color.g,
 				t.sun_color.b)
 	else
 		env.sun.direction = magic.Vector3(tx, height, tz)
-		env.light.brightness = s.moon and t.moon * s.moon_up * v.light or 0
+		env.light.brightness = s.moon and t.moon * s.moon_up * v.light *
+				sun_through(v) or 0
 		env.light.color = magic.Color(t.moon_color.r, t.moon_color.g,
 				t.moon_color.b)
 	end
@@ -456,15 +467,21 @@ local function env_light()
 	local day = math.max(0, math.min(1, up * 2 + 0.3))
 	local f = (0.25 + 0.75 * day) * v.light
 	env.zone.fogColor = hex_colour(d.sky, f) or env.orig.fog
-	env.zone.ambientColor = hex_colour(d.ambient, 0.35 + 0.65 * day) or
-			env.orig.ambient
+	-- Under cover the ambient greyer, half way to its grey at full
+	local amb = hex_colour(d.ambient, 0.35 + 0.65 * day) or env.orig.ambient
+	local oc = overcast(v)
+	local grey = (amb.r + amb.g + amb.b) / 3
+	local function g(c)
+		return c + (grey - c) * 0.5 * oc
+	end
+	env.zone.ambientColor = magic.Color(g(amb.r), g(amb.g), g(amb.b))
 	local fe = tonumber(d.fog_end) or env.orig.fog_end
 	local fs = tonumber(d.fog_start) or env.orig.fog_start
 	-- the fog's start closer than its end (today's storm: 0.4 and 0.5)
 	fe, fs = fe * v.fog, fs * (1 - (1 - v.fog) * 1.2)
 	env.zone.fogStart, env.zone.fogEnd = fs, math.max(fe, fs + 1)
 	env.light.brightness = 0.8 * math.max(0, math.min(1, up * 1.5 + 0.1)) *
-			v.light
+			v.light * sun_through(v)
 	env.light.color = env.orig.colour
 	env.sun.direction = magic.Vector3(-math.cos(a) * 0.8,
 			-math.max(up, 0.15), 0.5)
@@ -475,7 +492,7 @@ local function env_light()
 	local s = sky_bodies(dome, v, tx, height, tz, day)
 	if dome then
 		local h = env.zone.fogColor
-		local z, oc = SKY.ZENITH, overcast(v)
+		local z = SKY.ZENITH
 		local function zen(c, k)
 			return c * (k + (0.95 - k) * oc)
 		end

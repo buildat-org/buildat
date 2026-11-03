@@ -26,6 +26,8 @@
 #      cover (an overcast clear day stays overcast under rain, and after
 #      it), intensity scaling the drops and the floors, a change fading
 #      over weather_fade, set_weather apart from set_clouds.
+#   6. [KIT_CLOUDS_DIM_SUN] the cover dims the sun, both lightings: none
+#      through at full cover, all at a half and under.
 # The shots are kept with KEEP_TMP=1; look at them.
 #   util/kit_lighting_check.sh
 #   REF=1 util/kit_lighting_check.sh   writes util/kit_lighting_ref.txt
@@ -161,17 +163,24 @@ EOF
 		sky "cartoon, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 0.80 at 120, wind 0.0"
 		shot clouds_still
 		shot clouds_still2
+		sky "light 1.00, fog 1.00, sun through 0.35"
 		ep cloud_wind_speed 30
 		sky "clouds 0.80 at 120, wind 30.0 toward 180"
 		shot clouds_wind
 		shot clouds_wind2
 		ep cloud_wind_speed 0
+		ep cloud_cover 1
+		sky "clouds 1.00 at 120, wind 0.0 toward 180; clear 1.00: light 1.00, fog 1.00, sun through 0.00"
 		ep cloud_cover 0.1
 		sky "cartoon, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 0.10 at 120, wind 0.0"
 		# 3. physical at noon, dusk and night
 		ep lighting '"physical"'
 		echo "wait_log_any 10000 kit: lighting physical"
 		sky "physical, 12.0 o'clock, sun 1"
+		ep cloud_cover 1
+		sky "physical, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 1.00 at 120, wind 0.0 toward 180; clear 1.00: light 1.00, fog 1.00, sun through 0.00"
+		ep cloud_cover 0.1
+		sky "physical, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 0.10"
 		shot phys_noon
 		ep time 17.5
 		sky "physical, 17.5 o'clock"
@@ -380,5 +389,12 @@ st=$(mean "$t/storm.png" 0 9) cl=$(mean "$t/clear.png" 0 9)
 awk "BEGIN{exit !($st < $cl * 0.85)}" || fail "the storm ($st) not darker than the clear day ($cl)"
 echo "ok: the weather's floors over a cover of 0.9 and of 0 (rain, snow, storm, cloudy, clear), the intensity's drops (400, 200, 175), a fade half way at $half, the storm $st against clear $cl"
 echo "ok: in play set_clouds and set_weather apart: the overcast through the rain and after it"
-echo "PASS: lighting: cartoon today's look, physical metered, the sky by the hour and its switches, the clouds, the sky light in caves, the weather a modifier that fades"
+# 6. The cover dims the sun: cartoon's ground under 0.8 against none (the
+# lines' "sun through" waited for above: 0.35 at 0.8, none at full, both
+# lightings)
+gn=$(mean "$t/clouds_none.png" 8 9) gc=$(mean "$t/clouds_still.png" 8 9)
+awk "BEGIN{exit !($gc < $gn * 0.85)}" ||
+	fail "the cover did not dim cartoon's sun: the ground $gc under 0.8, $gn under none"
+echo "ok: the cover dims the sun: cartoon's ground $gc under 0.8 against $gn under none; none through at full cover in both lightings"
+echo "PASS: lighting: cartoon today's look, physical metered, the sky by the hour and its switches, the clouds, the sky light in caves, the weather a modifier that fades, the cover dimming the sun"
 # vim: set noet ts=4 sw=4:
