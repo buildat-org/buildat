@@ -39,9 +39,9 @@ BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 CHECK_PIDS+=($SERVER_PID)
 # The page joins by the login, the server's first admin (check_lib.sh)
 login=$(web_login_steps soplayer "$t/srv.log") || fail "$login"
-# The dropdown at (244, 466), below View range, an admin's menu with Who
-# may talk above (2026-10-29); its Auto, Landscape and Portrait at y 481,
-# 495 and 509. After a line, settles of up to 1 s: the popup
+# The dropdown nearest (244, 466) and its Auto, Landscape and Portrait
+# nearest y 481, 495 and 509, found by type and label: the menu's rows
+# move as it gains some ("My account...", 2026-11-03). After a line, settles of up to 1 s: the popup
 # placed in the frames after it says it is open; after a pick, the page's
 # fullscreen, which the pick asks for and the browser enters a moment later
 # (the menu's line and the start's "so: ready" the same: the frames after)
@@ -52,13 +52,13 @@ cat > "$t/steps.json" <<J
 $login
  ["waitlog", "chat: so: ready", 120], ["wait", 1000],
  ["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["wait", 500],
- ["tap", 244, 466], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 495],
+ ["tap", "DropDownList", "*", 244, 466], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", "Text", "Landscape", 232, 495],
  ["waitlog", "pause: screen orientation landscape", 10], ["wait", 1000],
  $state,
- ["tap", 244, 466], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 509],
+ ["tap", "DropDownList", "*", 244, 466], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", "Text", "Portrait", 232, 509],
  ["waitlog", "pause: screen orientation portrait", 10], ["wait", 1000],
  $state,
- ["tap", 244, 466], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 481],
+ ["tap", "DropDownList", "*", 244, 466], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", "Text", "Auto", 232, 481],
  ["waitlog", "pause: screen orientation auto", 10], ["wait", 1000],
  $state
 ]
