@@ -1147,6 +1147,27 @@ magic.SubscribeToEvent("command_seq:kit_use_flood", function(_, data)
 		buildat.send_packet("kit:use", id)
 	end
 end)
+-- [KIT_SESSIONS_1] For a check: "event kit_probe <x> <y> <z>" logs the
+-- voxel this client has there and the entities it has
+magic.SubscribeToEvent("command_seq:kit_probe", function(_, data)
+	local c = {}
+	for n in data:GetString("Param"):gmatch("%-?%d+") do
+		c[#c + 1] = tonumber(n)
+	end
+	local voxelworld = require("buildat/module/voxelworld")
+	local reg = voxelworld.get_voxel_registry()
+	local v = voxelworld.get_static_voxel(magic.Vector3(c[1] or 0, c[2] or 0,
+			c[3] or 0))
+	local def = reg and reg:get_by_id(reg:id_of(v))
+	local ids = {}
+	for id in pairs(P.nodes) do
+		ids[#ids + 1] = id
+	end
+	table.sort(ids)
+	log:info("kit probe: voxel " .. (def and def.name and
+			tostring(def.name.block_name) or "?") .. ", entities " ..
+			table.concat(ids, ","))
+end)
 -- For a drive: "event kit_select <id>..." selects them in the editor, the
 -- last the primary
 magic.SubscribeToEvent("command_seq:kit_select", function(_, data)
