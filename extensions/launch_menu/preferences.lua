@@ -377,7 +377,7 @@ function M.show()
 					ui_utils.show_message_dialog(
 							pref.label..": "..tostring(err))
 				end
-			end, {label = pref.label, label_width = 300, width = 240})
+			end, {label = pref.label, label_width = 360, width = 240})
 			-- The press is the dropdown's own; this only puts it in the
 			-- arrows' order
 			menu:add(drop, function() end)

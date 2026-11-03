@@ -51,7 +51,7 @@ keypress Return
 wait_log 5000 Engine settings shown
 delay 800
 screenshot $t/cartoon.png
-click DropDownList "▼" 705 488
+click DropDownList "▼" 735 488
 wait_log 5000 dropdown_
 delay 300
 screenshot $t/list.png
