@@ -6,7 +6,8 @@
 -- "reached" (its own id) as the score first reaches `win_score` (0:
 -- never) -- linked to the arena's "win", the first team there wins.
 -- Kit reads it as the Team interface: a type with `team = true`, its
--- state `members` (player entity ids) and `score`, its `name`: a
+-- state `members` (player entity ids) and `score`, its `name`, its
+-- `friendly_fire` (off: Kit's hits between its members refused): a
 -- kit/region under it with owner "team" is its members' (api.h)
 local function show(c)
 	c.state.status = c.params.name .. ": " .. tostring(c.state.score)
@@ -21,6 +22,8 @@ return {
 		name = {type = "string", default = "Red"},
 		color = {type = "string", default = "#d03030"},
 		win_score = {type = "number", default = 0, min = 0, max = 1000000},
+		-- [KIT_TOOLS_1] whether its members' hits hurt each other
+		friendly_fire = {type = "bool", default = false},
 	},
 	state = {
 		members = {default = {}, shared = true},

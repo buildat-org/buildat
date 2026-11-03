@@ -585,6 +585,26 @@ struct Module: public interface::Module
 			});
 			return;
 		}
+		// [KIT_TOOLS_1] A dig takes its time by the voxel's material group
+		// and the held item; the client asks again when Kit says
+		ss_ was;
+		if(voxel == "air"){
+			voxelworld::access(m_server, scene_of(peer),
+					[&](voxelworld::Instance *w){
+				interface::VoxelRegistry *reg = w->get_voxel_reg();
+				const interface::VoxelDefinition *def = reg->get(
+						reg->get_format().id.get(w->get_voxel(
+						pv::Vector3DInt32(c[0], c[1], c[2]), true).data));
+				was = def ? def->name.block_name : "";
+			});
+			bool ready = true;
+			kit::access(m_server, [&](kit::Interface *k){
+				double wait = 0;
+				ready = k->dig_ready(peer, c[0], c[1], c[2], was, &wait);
+			});
+			if(!ready)
+				return;
+		}
 		bool written = false;
 		voxelworld::access(m_server, scene_of(peer), [&](voxelworld::Instance *w){
 			interface::VoxelName n;
@@ -604,6 +624,8 @@ struct Module: public interface::Module
 		if(written)
 			kit::access(m_server, [&](kit::Interface *k){
 				k->player_wrote(peer, c[0], c[1], c[2]);
+				if(voxel == "air")
+					k->dug(peer, c[0], c[1], c[2], was);
 			});
 	}
 };

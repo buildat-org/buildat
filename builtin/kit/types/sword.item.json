@@ -1,0 +1,17 @@
+{
+	"version": 1,
+	"icon": "",
+	"stack": 1,
+	"use": "melee",
+	"cooldown": 0.5,
+	"mode": "single",
+	"damage": 5,
+	"damage_type": "normal",
+	"crit": 1.5,
+	"falloff": 0,
+	"knockback": 6,
+	"reach": 3,
+	"uses": 100,
+	"wear_hit": 1,
+	"wear_dig": 2
+}

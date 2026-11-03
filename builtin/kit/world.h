@@ -247,6 +247,12 @@ struct Material
 	// them yet. A heightmap's material's are its ground's
 	double friction = 1;
 	ss_ surface;
+	// [KIT_TOOLS_1] (stage 7c) Its material group (letters, digits and _;
+	// "" none: dug at once and dropping nothing, as before) and its level
+	// (0...15): a tool digs a group at its speed and drops it only at that
+	// level or above
+	ss_ group;
+	int level = 0;
 	// [KIT_TINT_PALETTE] The tint field's palette (albedo multiplied),
 	// entry 0 the material's own look: "tint" (TintPalette::parse), Kit's
 	// standard one otherwise
@@ -273,6 +279,10 @@ struct Material
 		const json::Value &f = j.get("friction");
 		friction = f.is_number() ? f.as_number() : 1;
 		surface = json::jstr(j, "surface");
+		group = json::jstr(j, "group");
+		const double lv = j.get("level").is_number() ?
+				j.get("level").as_number() : 0;
+		level = lv >= 0 && lv <= 15 ? (int)lv : -1;
 		seasons.clear();
 		bool seasons_ok = true;
 		const json::Value &ss = j.get("seasons");
@@ -301,6 +311,9 @@ struct Material
 		bool tag_ok = surface.size() <= 32;
 		for(char c : surface)
 			tag_ok = tag_ok && (isalnum((unsigned char)c) || c == '_');
+		tag_ok = tag_ok && group.size() <= 32 && level >= 0 && lv == level;
+		for(char c : group)
+			tag_ok = tag_ok && (isalnum((unsigned char)c) || c == '_');
 		return !top.empty() && !side.empty() && !bottom.empty() &&
 				layer >= -1 && layer < heightmap::MAX_MATERIALS &&
 				light >= 0 && light <= 15 && (kind == "solid" ||
@@ -321,6 +334,8 @@ struct Material
 		v.set("light", (int64_t)light);
 		v.set("friction", friction);
 		v.set("surface", surface);
+		v.set("group", group);
+		v.set("level", (int64_t)level);
 		// [KIT_TINT_PALETTE] its colours and their names ("" unnamed)
 		json::Value t = json::array(), tn = json::array();
 		for(size_t i = 0; i < tint.colors.size(); i++){

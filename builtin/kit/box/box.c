@@ -21,7 +21,9 @@
 **                        "entity:<id>" = entities a copy makes};
 **                        [KIT_VOXEL_STATES] box {sx, sy, sz} (its
 **                        voxel_box) and voxels {names, ids} (reads_voxels:
-**                        each cell's name's index, 0 not loaded)}; answers
+**                        each cell's name's index, 0 not loaded);
+**                        [KIT_TOOLS_1] is_player (it is on a player's
+**                        entity)}; answers
 **                        its effects, {set = {{key, value}...} (a table
 **                        changed in place too), emit = {{output,
 **                        value}...}, voxel = name, voxels = {{x, y, z,
@@ -41,7 +43,9 @@
 **                        = {id...}, send = {{id, input, value}...}, log =
 **                        {line...}, app = {{what, value}...}, build =
 **                        {entities, voxels} (on_build's: a prefab's
-**                        members, [KIT_GENERATORS])}; a call into
+**                        members, [KIT_GENERATORS]), respawn = true
+**                        (c:respawn()), hit = {...} (modify_hit's
+**                        returned hit, [KIT_TOOLS_1])}; a call into
 **                        the provider (inv) is marked by "P" before it and
 **                        "p" after it, ahead of the answer
 **   "L<source>"          [KIT] stage 4h: the movement library
@@ -327,8 +331,10 @@ static const char PRELUDE[] =
 "		return r\n"
 "	end\n"
 "	local function args(item, n, ext)\n"
-"		if type(item) ~= 'string' or #item > 64 or not item:match('^[%w_]+$') then\n"
-"			error('an item is letters, digits and _', 4) end\n"
+"		-- [KIT_TOOLS_1] or an item type's <author>/<name>\n"
+"		if type(item) ~= 'string' or #item > 129 or not (item:match('^[%w_]+$') and #item <= 64 or\n"
+"				item:match('^[%w_]+/[%w_]+$') and #item:match('^[^/]*') <= 64 and #item:match('[^/]*$') <= 64) then\n"
+"			error('an item is letters, digits and _, or an item type\\'s <author>/<name>', 4) end\n"
 "		if type(n) ~= 'number' or n < 1 or n > MAX_ITEMS or n % 1 ~= 0 then\n"
 "			error('a count is a whole number from 1', 4) end\n"
 "		if ext ~= nil and type(ext) ~= 'table' then error('ext is a table', 4) end\n"
@@ -470,6 +476,10 @@ static const char PRELUDE[] =
 "	-- [KIT_MINIGAMES_FIX] the entity whose run started the session (0:\n"
 "	-- none), and whether the player who set it off is out of its scene\n"
 "	c.session_maker = req.session_maker or 0\n"
+"	-- [KIT_TOOLS_1] whether it is on a player's entity; c:respawn() puts\n"
+"	-- that player at their spawn after the run (kit/health's death)\n"
+"	c.is_player = req.is_player or false\n"
+"	function c:respawn() fx.respawn = true end\n"
 "	c.player_away = req.player_away or false\n"
 "	local sessions = {}\n"
 "	local function session_op(t)\n"
@@ -543,6 +553,8 @@ static const char PRELUDE[] =
 "	local r1, r2 = h(c, unpack(req.args or {}, 1, req.nargs or 0))\n"
 "	inv.finish()\n"
 "	if type(r1) == 'boolean' then fx.ret = {r1, type(r2) == 'string' and r2 or ''} end\n"
+"	-- [KIT_TOOLS_1] a hit's modifier: the hit as it goes on\n"
+"	if req.handler == 'modify_hit' and type(r1) == 'table' then fx.hit = r1 end\n"
 "	state_done()\n"
 "	fx.set = sets\n"
 "	fx.emit = emits\n"

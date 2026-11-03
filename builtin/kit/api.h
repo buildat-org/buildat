@@ -540,7 +540,8 @@ namespace interface
 //       edit, one undo; refused if empty or of another box size)
 //   {"op": "voxel", "name": n, "texture": t, "kind": "solid"|"leaves"|
 //    "plant"|"water", "solid", "transparent", "light": 0..15,
-//    "friction": 0..10, "surface": tag}  -- ([KIT] stage 4g) the
+//    "friction": 0..10, "surface": tag, "group": tag, "level": 0..15}
+//       -- ([KIT] stage 4g) the
 //       builder's voxel type "<their name>/<n>" (the store's row
 //       "voxel:<their name>/<n>", its "version" counted up by each),
 //       world.h's Material's fields: registered in every scene at once and
@@ -549,7 +550,13 @@ namespace interface
 //       upload's. A new version of a registered one is drawn so at the
 //       next start (a registry's definitions never change). Friction and
 //       surface are for what moves on it (stage 4h); nothing reads them
-//       yet but voxel_type()
+//       yet but voxel_type(). [KIT_TOOLS_1] group (its material group,
+//       "" none) and level: digging, below
+//   {"op": "item", "name": n, "preset": an item type, and the sheet's
+//    fields}  -- [KIT_TOOLS_1] the builder's item type "<their name>/<n>"
+//       (the row "item:<their name>/<n>", its "version" counted up by
+//       each): the preset's sheet under the fields given (Tools, below).
+//       Refused in a draft
 // "kit:texture", a PNG's bytes ([KIT] stage 4g): a builder with the tools
 // on uploads a texture (square, 8..128 a side, a power of two, 64 KiB at
 // most), decoded and saved again (the row "texture:<hash>"), served as
@@ -658,6 +665,54 @@ namespace interface
 // owner "team" is owned by the members of the team it is under (itself or
 // an entity up its parents with a team: a team's base placed under the
 // team). The prefab kit/team_match is a two-team match to place.
+//
+// **Tools** ([KIT_TOOLS_1], stage 7c's first part). An item type is a
+// flat sheet, "<author>/<name>": Kit's are types/<name>.item.json
+// (kit/sword, kit/pickaxe: the presets), a builder's are made by {"op":
+// "item"}. Its fields (each checked; one left out the preset's, else the
+// default): icon (a texture, "" a text label), stack (1..999), use
+// ("none", "melee": it hits, "use": a click runs the hooks; 7c-2 adds
+// "ranged"), timing (cooldown s, mode single|auto|burst, burst, charge
+// s), damage (damage, damage_type "normal", crit: the multiplier of a hit
+// falling, falloff: the share lost at the full reach, knockback m/s),
+// melee (reach m), digging (dig {group: speed}, or the text "stone 4,
+// wood 2"; level 0..15), wear (uses: 0 never wears, wear_dig, wear_hit,
+// wear_shot: a use's cost; repair: an item, kept), look (7c-2's, kept).
+// Clients get them all as "kit:item_types" {name: sheet}. An item in an
+// inventory is a name of letters, digits and _, or an item type's.
+// kit/equipment (on each player entity; `equipment = true`) holds the
+// hands slot, state "hands": the client's hotbar sends "kit:hold" <item>
+// (one of theirs, "" a hand); a list without it empties the hands. Its
+// state "wear" is each item type's uses left (the first of a stack's);
+// on_tool(c, item, cost, uses, drop) is Kit's call after a use: the drop
+// added, the cost taken, one of the item taken at 0 ("broke").
+// kit/health (on each player entity, and placeable: `health = true`)
+// has hp of max; a hit is on_hit(c, hit, by) there, after each
+// component of the entity's modify_hit(c, hit, by) in order: given hit
+// = {amount, type, item, crit}, it returns the hit as it goes on (nil:
+// unchanged; amount 0: nothing) -- armour, shields, stage 9's effects.
+// It signals "damaged" (the amount) and "died"; a player dead respawns
+// (c:respawn(): their team's pad, else the last spawner of players in
+// their scene, else the app's spawn) at max. c.is_player: on a player's
+// entity. "kit:hit" <entity id> is a placed peer's melee hit with what
+// they hold: Running, out of the tools, a melee item of theirs, past its
+// cooldown (game time), the target with health in their scene within its
+// reach (eye to body) and in sight (no solid voxel between); then Kit's
+// rules (kit/game_rules' peaceful on the root: players take no damage; the
+// region at the target: pvp for the attacker on a player, damage for the
+// player hit, damage for the attacker on an entity; kit/team's
+// friendly_fire, off: members do not hurt each other), the item's wear
+// (wear_hit), the hit (the amount less the falloff at the distance, the
+// crit multiplier falling), knockback on a player (away, or along their
+// look). "kit:item" <id> is a use kind "use" item's click (its cooldown;
+// id the entity pointed at, 0 none). After each: on_item(c, item,
+// action, target, by) of every instance in the player's scene, the root's
+// and their entity's -- "hit" (the entity), "use" (the entity, 0), "dig"
+// (the cell [x, y, z]). Digging (dig_ready, dug below): a voxel with a
+// material group takes 1 / speed s (the held item's for the group, a
+// hand's 1; "kit:digging" {cell, wait, time} tells the client to ask
+// again) and drops its material into the inventory where the item's
+// level is the voxel's or above; one without a group digs as before.
 //
 // Origins: a cell play writes is a build or a game change. Builds are what
 // players make: their own dig or place (the app says so, player_wrote())
@@ -965,8 +1020,9 @@ namespace kit
 		// an allow hook's reason): the smallest region holding the cell
 		// decides, by its owners' column or everyone else's; outside every
 		// region digging and placing need a grant and the rest is allowed.
-		// can_dig and can_place are it. Kit has no hits of its own: a game
-		// that has them asks pvp and damage here. Edit rights are not in it
+		// can_dig and can_place are it. Kit's own hits ([KIT_TOOLS_1]) ask
+		// pvp and damage here; a game with hits of its own asks them too.
+		// Edit rights are not in it
 		virtual bool allows(size_t peer, const ss_ &action, int x, int y,
 				int z, ss_ *why) = 0;
 		// The entity of the region deciding at x, y, z of a placed peer's
@@ -985,6 +1041,23 @@ namespace kit
 		// Stopped
 		virtual void player_wrote(size_t peer, int x, int y, int z,
 				bool build = true) = 0;
+		// [KIT_TOOLS_1] Digging by a voxel's material group and level: a
+		// placed peer's dig of `voxel` (its name) at x, y, z is ready now,
+		// or not yet (wait: the seconds left; Kit tells the client
+		// "kit:digging" {cell, wait, time}, and it asks again). A grouped
+		// voxel takes 1 / speed seconds of game time, the speed the held
+		// item's for its group (its sheet's dig; a hand's 1), counted from
+		// the first ask at the cell. Ready at once: a voxel with no group
+		// (Kit's set's, the app's own), edit mode, Stopped. Asked before
+		// the dig is written
+		virtual bool dig_ready(size_t peer, int x, int y, int z,
+				const ss_ &voxel, double *wait) = 0;
+		// A placed peer's dig of `voxel` written (after player_wrote): the
+		// held item wears (its wear_dig), and the voxel's material drops
+		// into their inventory where the item's level (a hand's 0) is the
+		// voxel's or above. Nothing for a voxel with no group
+		virtual void dug(size_t peer, int x, int y, int z,
+				const ss_ &voxel) = 0;
 		// [KIT] stage 4e: Kit's material set's voxels (kit/stone...)
 		// registered, the ones not there yet: before set_save()
 		virtual void register_voxels(interface::VoxelRegistry *reg) = 0;

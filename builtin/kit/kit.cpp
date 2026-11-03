@@ -103,6 +103,7 @@ static const size_t MAX_LINKS = 64;
 // [KIT] stage 4g: the builders' voxel types and uploaded textures a save
 // has at most, and what an upload may be
 static const size_t MAX_VOXEL_TYPES = 256, MAX_TEXTURES = 256;
+static const size_t MAX_ITEM_TYPES = 256; // [KIT_TOOLS_1]
 static const size_t MAX_TEXTURE_BYTES = 64 << 10;
 static const uint32_t MAX_TEXTURE_SIDE = 128;
 // An editor's undo goes back this many edits
@@ -218,6 +219,11 @@ struct Type
 	// It reads every player entity (players = true); it is on each player
 	// entity, not placed (player = true)
 	bool players = false, player = false;
+	// [KIT_TOOLS_1] A player's type builders also place on entities
+	// (placeable = true: kit/health); it is health (health = true: on_hit,
+	// what a hit damages), equipment (equipment = true: the hands slot,
+	// on_tool, the wear)
+	bool placeable = false, health = false, equipment = false;
 	// [KIT_MINIGAMES_1] It is a team (team = true: the Team interface, its
 	// state members and score); it reads every team (teams = true)
 	bool team = false, teams = false;
@@ -1286,6 +1292,11 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "network:packet_received/kit:action", &Module::on_action);
 		sub(m_server, "network:packet_received/kit:ui", &Module::on_ui_press);
 		sub(m_server, "network:packet_received/kit:exit", &Module::on_exit);
+		// [KIT_TOOLS_1] the hands, a melee hit, an item's use
+		sub(m_server, "network:packet_received/kit:hold", &Module::on_hold);
+		sub(m_server, "network:packet_received/kit:hit", &Module::on_hit);
+		sub(m_server, "network:packet_received/kit:item",
+				&Module::on_item_use);
 		sub(m_server, "accounts:privs", &Module::on_privs);
 		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
 		sub(m_server, "worldgen:section_generated", &Module::on_generated);
@@ -1520,6 +1531,9 @@ struct Module: public interface::Module, public Interface
 		names("handlers", t.handlers);
 		t.players = t.decl.get("players").is_true();
 		t.player = t.decl.get("player").is_true();
+		t.placeable = t.decl.get("placeable").is_true();
+		t.health = t.decl.get("health").is_true();
+		t.equipment = t.decl.get("equipment").is_true();
 		t.team = t.decl.get("team").is_true();
 		t.teams = t.decl.get("teams").is_true();
 		// Its client part, beside it
@@ -2662,6 +2676,8 @@ struct Module: public interface::Module, public Interface
 		if(ty.player){
 			if(starting)
 				m_player_types.push_back(t);
+			if(ty.placeable)
+				m_palette.insert(t);
 		} else if(ty.world && m_host.world_scene.empty()){
 			// [KIT] stage 4e: no World where the app has none
 		} else if(!m_host.controls && (ty.decl.get("controls").is_true() ||
@@ -2767,6 +2783,7 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "On each player: %s", cs(names));
 		load_prefab_palette();
 		load_builder_voxels();
+		load_items();
 		if(!host_world(why))
 			return false;
 
@@ -3178,11 +3195,16 @@ struct Module: public interface::Module, public Interface
 		row.set("friction", j.get("friction").is_number() ?
 				j.get("friction") : json::Value(1.0));
 		row.set("surface", jstr(j, "surface"));
+		// [KIT_TOOLS_1] its material group and level
+		row.set("group", jstr(j, "group"));
+		row.set("level", j.get("level").is_number() ? j.get("level") :
+				json::Value((int64_t)0));
 		world::Material m;
 		if(!m.parse(row) || m.light != row.get("light").as_number())
 			return refuse("a texture, a kind (solid, leaves, plant, water), "
-					"light (a whole number 0...15), friction 0...10 and a "
-					"surface tag (letters, digits and _)");
+					"light (a whole number 0...15), friction 0...10, a "
+					"surface tag and a group (letters, digits and _) and a "
+					"level (a whole number 0...15)");
 		if(!texture_choices().count(texture))
 			return refuse("texture: no voxel or upload has "+texture);
 		auto old = m_voxel_types.find(name);
@@ -3208,10 +3230,11 @@ struct Module: public interface::Module, public Interface
 		m_voxel_types[name] = row;
 		register_builder_voxel(name, row);
 		log_i(MODULE, "%s made voxel type %s version %s (%s, %s%s%s, light "
-				"%i, friction %g, surface \"%s\")%s", cs(p.name), cs(name),
+				"%i, friction %g, surface \"%s\", group \"%s\" level %i)%s",
+				cs(p.name), cs(name),
 				cs(itos(version)), cs(texture), cs(m.kind),
 				m.solid ? ", solid" : "", m.transparent ? ", transparent" : "",
-				m.light, m.friction, cs(m.surface),
+				m.light, m.friction, cs(m.surface), cs(m.group), m.level,
 				taken ? ": drawn so at the next start" : "");
 		if(taken)
 			for(auto &o : m_peers)
@@ -7570,6 +7593,10 @@ struct Module: public interface::Module, public Interface
 		}
 		if(e.kind == "player")
 			show.set("player", true);
+		// [KIT_TOOLS_1] a hit reaches it (hands.lua's pick)
+		for(const Instance &in : e.comps)
+			if(m_types[in.type].health && in.disabled.empty())
+				show.set("health", true);
 		return show;
 	}
 
@@ -7828,6 +7855,9 @@ struct Module: public interface::Module, public Interface
 		o += ",handler=";
 		lua_lit(json::Value(r.handler), o);
 		o += ",id="+itos(e.id);
+		// [KIT_TOOLS_1] a player's entity (kit/health respawns them)
+		if(e.kind == "player")
+			o += ",is_player=true";
 		if(e.has_pos){
 			// [KIT_NESTING] the world's
 			double w[3], wy;
@@ -8038,6 +8068,9 @@ struct Module: public interface::Module, public Interface
 		const json::Value fx = json::load_string(answer.c_str());
 		if(fx.get("ret").is_array())
 			m_ret = fx.get("ret");
+		// [KIT_TOOLS_1] modify_hit's hit as it goes on
+		if(fx.get("hit").is_object())
+			m_hit_ret = fx.get("hit");
 		Instance &in = e.comps[r.comp];
 		const Type &t = m_types[type];
 		const json::Value &lines = fx.get("log");
@@ -8220,6 +8253,9 @@ struct Module: public interface::Module, public Interface
 		const json::Value &items = fx.get("items");
 		if(!who.empty() && !items.is_undefined())
 			got_items(e, type, who, items);
+		// [KIT_TOOLS_1] kit/health's c:respawn() on a player's entity
+		if(fx.get("respawn").is_true() && e.kind == "player")
+			respawn_player(e.id);
 		// [KIT] stage 4d: entities: copies made, signals sent, removals
 		// (last: the instance itself may go)
 		const uint64_t self = e.id;
@@ -8725,7 +8761,7 @@ struct Module: public interface::Module, public Interface
 					why = who+": "+why;
 					return false;
 				}
-				if(m_types[type].player){
+				if(m_types[type].player && !m_types[type].placeable){
 					why = who+": "+type+" is a player's";
 					return false;
 				}
@@ -10805,12 +10841,15 @@ struct Module: public interface::Module, public Interface
 		if(items.is_object())
 			for(json::Iterator it(items); it; ++it){
 				const double n = (*it).is_number() ? (*it).as_number() : 0;
-				if(name_ok(it.key()) && n >= 1 && n <= MAX_ITEMS &&
+				if(item_ok(it.key()) && n >= 1 && n <= MAX_ITEMS &&
 						n == std::floor(n))
 					mine.set(it.key(), (int64_t)n);
 			}
 		log_i(MODULE, "Entity %s's %s: %s has %s", cs(itos(e.id)), cs(type),
 				cs(who), cs(mine.stringify()));
+		// [KIT_TOOLS_1] what the hands may hold
+		m_items_seen[who] = mine;
+		check_hands(who, mine);
 		if(app_items()){
 			json::Value &had = m_app_items[who];
 			if(!had.is_object())
@@ -10836,7 +10875,7 @@ struct Module: public interface::Module, public Interface
 		if(items.is_object())
 			for(json::Iterator it(items); it; ++it){
 				const double n = (*it).is_number() ? (*it).as_number() : 0;
-				if(name_ok(it.key()) && n >= 1 && n == std::floor(n))
+				if(item_ok(it.key()) && n >= 1 && n == std::floor(n))
 					mine.set(it.key(), (int64_t)std::min<double>(n, MAX_ITEMS));
 			}
 		m_app_items[player] = mine;
@@ -11612,6 +11651,8 @@ struct Module: public interface::Module, public Interface
 		you.set("name", p.name);
 		// [WB_HOVER_OUT_OF_REACH] how far it may use things (kit:use's)
 		you.set("use_range", m_host.use_range);
+		// [KIT_TOOLS_1] Kit's hotbar (not where the app has its own items)
+		you.set("hands", !m_host.app_items && equipment_of(p.player));
 		for(auto &t : m_types)
 			if(!t.second.client.empty())
 				parts.set(t.first, t.second.client);
@@ -11622,6 +11663,7 @@ struct Module: public interface::Module, public Interface
 		send_sky((int64_t)peer);
 		send_env(peer);
 		send_actions((int64_t)peer);
+		send_item_types((int64_t)peer);
 		if(m_session.running)
 			round_join(peer, false);
 		else
@@ -11862,6 +11904,9 @@ struct Module: public interface::Module, public Interface
 		double home[3] = {0, 0, 0}; // the last put's cell
 		uint64_t seat = 0; // the seat held (an entity, 0: none)
 		bool failed = false; // a step's error logged
+		// [KIT_TOOLS_1] the last input's yaw (degrees from +z toward +x):
+		// a hit's knockback where nothing else gives its direction
+		double look_yaw = 0;
 	};
 	std::map<size_t, Body> m_bodies;
 	sm_<size_t, ss_> m_controls_sent;
@@ -12210,6 +12255,7 @@ struct Module: public interface::Module, public Interface
 			lua_lit(json::Value(v[7]), o);
 			o += "}";
 			b.inputs.push_back(std::make_pair(n, o));
+			b.look_yaw = v[2];
 		}
 	}
 
@@ -12729,6 +12775,919 @@ struct Module: public interface::Module, public Interface
 				cs(m_peers[peer].name));
 	}
 
+	// ---- [KIT_TOOLS_1] (stage 7c's first part) Tools and weapons: item
+	// types, the hands slot (kit/equipment), the hit through health's
+	// modifiers (kit/health), melee, digging by a voxel's material group and
+	// level, wear (api.h)
+
+	// The item types by name: Kit's (types/<name>.item.json, the presets)
+	// and the builders' (the rows "item:<author>/<name>")
+	sm_<ss_, json::Value> m_item_types;
+	// Each placed peer's last hit or item use (the game's clock) and the
+	// dig under way: its cell and when it started
+	struct ToolUse
+	{
+		bool used = false;
+		int64_t used_us = 0;
+		bool digging = false;
+		int dig[3] = {0, 0, 0};
+		int64_t dig_us = 0;
+	};
+	std::map<size_t, ToolUse> m_tool_use;
+	// The items each player had as a run last listed them (a replacing
+	// provider's: Kit reads its own kit/inventory's state)
+	sm_<ss_, json::Value> m_items_seen;
+	// modify_hit's answer (run()'s fx.hit)
+	json::Value m_hit_ret;
+
+	// An item: letters, digits and _, or an item type's "<author>/<name>"
+	static bool item_ok(const ss_ &s)
+	{
+		const size_t sl = s.find('/');
+		if(sl == ss_::npos)
+			return name_ok(s);
+		return name_ok(s.substr(0, sl)) && name_ok(s.substr(sl + 1));
+	}
+
+	// An item type's sheet from what a builder or a file gives (j), over
+	// base (a preset's; null: the defaults): each field checked, those it
+	// does not know left out. One flat sheet for every use kind; 7c-2's
+	// ranged, loading and look go beside these
+	static bool item_sheet(const json::Value &j, const json::Value &base,
+			json::Value &out, ss_ &why)
+	{
+		struct Field { const char *name; double lo, hi, def; bool whole; };
+		static const Field NUMBERS[] = {
+			{"stack", 1, 999, 1, true},
+			// timing: a cooldown (s); auto repeats while held; burst
+			// (7c-2's ranged) shots a press; charge (s, a bow's draw)
+			{"cooldown", 0, 60, 0.5, false},
+			{"burst", 1, 20, 3, true},
+			{"charge", 0, 10, 0, false},
+			// damage: the amount, a critical (melee: falling) multiplier,
+			// the share lost at the full reach, knockback (m/s)
+			{"damage", 0, 1000000, 1, false},
+			{"crit", 1, 100, 1, false},
+			{"falloff", 0, 1, 0, false},
+			{"knockback", 0, 50, 0, false},
+			// melee: how far it hits (m, from the eye to the body)
+			{"reach", 0.5, 16, 3, false},
+			// digging: the level it drops voxels of (dig: speed a group)
+			{"level", 0, 15, 0, true},
+			// wear: uses until it breaks (0: never), a use's cost by action
+			{"uses", 0, 1000000, 0, true},
+			{"wear_dig", 0, 1000, 1, true},
+			{"wear_hit", 0, 1000, 1, true},
+			{"wear_shot", 0, 1000, 1, true},
+		};
+		auto field = [&](const char *k) -> const json::Value& {
+			const json::Value &v = j.get(k);
+			return v.is_undefined() ? base.get(k) : v;
+		};
+		out = json::object();
+		for(const Field &f : NUMBERS){
+			const json::Value &v = field(f.name);
+			if(v.is_undefined() || v.is_null()){
+				out.set(f.name, f.whole ? json::Value((int64_t)f.def) :
+						json::Value(f.def));
+				continue;
+			}
+			const double x = v.is_number() ? v.as_number() : NAN;
+			if(!std::isfinite(x) || x < f.lo || x > f.hi ||
+					(f.whole && x != std::floor(x))){
+				why = ss_(f.name)+": "+(f.whole ? "a whole number " :
+						"a number ")+dtos(f.lo)+"..."+dtos(f.hi);
+				return false;
+			}
+			out.set(f.name, f.whole ? json::Value((int64_t)x) :
+					json::Value(x));
+		}
+		auto choice = [&](const char *k, const char *def,
+				std::initializer_list<const char*> cs) -> bool {
+			const json::Value &v = field(k);
+			const ss_ s = v.is_string() ? v.as_string() : def;
+			for(const char *c : cs)
+				if(s == c){
+					out.set(k, s);
+					return true;
+				}
+			why = ss_(k)+": one of";
+			for(const char *c : cs)
+				why += ss_(" ")+c;
+			return false;
+		};
+		// The use kind: none (an item to carry: a key, a material), melee
+		// (it hits), use (on_item hooks only: a wand); 7c-2 adds ranged
+		if(!choice("use", "none", {"none", "melee", "use"}) ||
+				!choice("mode", "single", {"single", "auto", "burst"}))
+			return false;
+		auto text = [&](const char *k, const char *def,
+				bool (*ok)(const ss_&)) -> bool {
+			const json::Value &v = field(k);
+			const ss_ s = v.is_string() ? v.as_string() : def;
+			if(!s.empty() && !ok(s)){
+				why = ss_(k)+": \""+s.substr(0, 64)+"\" is no name";
+				return false;
+			}
+			out.set(k, s);
+			return true;
+		};
+		// The damage's type ("normal": armour, stage 9, tells them apart),
+		// the item that mends it, the preset it was made from; the icon (a
+		// texture's name, checked by the caller) and the look (7c-2: a
+		// prefab, its parts or voxels; kept, not drawn yet)
+		if(!text("damage_type", "normal", name_ok) ||
+				!text("repair", "", item_ok) || !text("preset", "", item_ok) ||
+				!text("look", "", item_ok))
+			return false;
+		const json::Value &ic = field("icon");
+		out.set("icon", ic.is_string() ? ic.as_string().substr(0, 128) : ss_());
+		if(out.get("damage_type").as_string().empty())
+			out.set("damage_type", ss_("normal"));
+		// Digging: its speed a material group, {group: speed} or the text
+		// "stone 4, wood 2"; a hand's is 1 for every group
+		json::Value dig = json::object();
+		const json::Value &d = field("dig");
+		if(d.is_string()){
+			std::istringstream is(d.as_string());
+			ss_ part;
+			while(std::getline(is, part, ',')){
+				std::istringstream ps(part);
+				ss_ g;
+				double sp = NAN;
+				if(!(ps >> g))
+					continue;
+				if(!(ps >> sp)){
+					why = "dig: \"group speed, ...\" (\""+part.substr(0, 32)+
+							"\")";
+					return false;
+				}
+				dig.set(g, sp);
+			}
+		} else if(d.is_object()){
+			dig = d.deepcopy();
+		} else if(!d.is_undefined() && !d.is_null()){
+			why = "dig: {group: speed} or \"group speed, ...\"";
+			return false;
+		}
+		size_t n = 0;
+		for(json::Iterator it(dig); it; ++it){
+			const double sp = (*it).is_number() ? (*it).as_number() : NAN;
+			if(!name_ok(it.key()) || it.key().size() > 32 || !(sp >= 0.01) ||
+					sp > 1000 || ++n > 16){
+				why = "dig: up to 16 groups (letters, digits and _), each "
+						"a speed 0.01...1000";
+				return false;
+			}
+		}
+		out.set("dig", dig);
+		return true;
+	}
+
+	static ss_ dtos(double v)
+	{
+		char b[32];
+		snprintf(b, sizeof b, "%g", v);
+		return b;
+	}
+
+	// Kit's item types (the presets: kit/sword, kit/pickaxe) and the
+	// save's builders'
+	void load_items()
+	{
+		m_item_types.clear();
+		const ss_ dir = author_path("kit");
+		for(const auto &n : interface::fs::list_directory(dir)){
+			const size_t dot = n.name.rfind(".item.json");
+			if(n.is_directory || dot == ss_::npos || dot + 10 != n.name.size())
+				continue;
+			const ss_ name = "kit/"+n.name.substr(0, dot);
+			json::Value sheet;
+			ss_ why;
+			const json::Value j = json::load_string(read_file(dir+"/"+
+					n.name).c_str());
+			if(!j.is_object() || !item_sheet(j, json::object(), sheet, why)){
+				log_w(MODULE, "Item type %s: %s", cs(name), why.empty() ?
+						"not a JSON object" : cs(why));
+				continue;
+			}
+			sheet.set("version", j.get("version").is_number() ?
+					j.get("version") : json::Value((int64_t)1));
+			m_item_types[name] = sheet;
+		}
+		for(const ss_ &k : m_store->list("item:")){
+			ss_ row;
+			if(m_store->get(k, row))
+				m_item_types[k.substr(5)] = json::load_string(row.c_str());
+		}
+		ss_ names;
+		for(auto &it : m_item_types)
+			names += (names.empty() ? "" : " ")+it.first;
+		log_i(MODULE, "Item types: %s", names.empty() ? "none" : cs(names));
+	}
+
+	// "kit:item_types" {name: sheet}: to a peer, or every one (-1)
+	void send_item_types(int64_t peer)
+	{
+		json::Value all = json::object();
+		for(auto &it : m_item_types)
+			all.set(it.first, it.second);
+		const ss_ data = all.stringify();
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &p : m_peers)
+				if(peer < 0 || (size_t)peer == p.first)
+					inetwork->send(p.first, "kit:item_types", data);
+		});
+	}
+
+	// {"op": "item", "name": n, "preset": an item type, and the sheet's
+	// fields}: the builder's item type "<their name>/<n>" (the row
+	// "item:<their name>/<n>", its version counted up by each), the
+	// preset's sheet under the fields given
+	void make_item(const Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const ss_ short_name = jstr(j, "name");
+		const ss_ author = builder_author(p.name);
+		if(!name_ok(short_name))
+			return refuse("name: letters, digits and _");
+		if(author.empty())
+			return refuse("a builder's item types are under their name, "
+					"and it is \""+p.name.substr(0, 64)+"\"");
+		const ss_ name = author+"/"+short_name;
+		const ss_ preset = jstr(j, "preset");
+		json::Value base = json::object();
+		if(!preset.empty()){
+			auto pt = m_item_types.find(preset);
+			if(pt == m_item_types.end())
+				return refuse("preset: no item type "+preset.substr(0, 129));
+			base = pt->second.deepcopy();
+			base.set("preset", preset);
+		}
+		json::Value row;
+		ss_ why;
+		if(!item_sheet(j, base, row, why))
+			return refuse(why);
+		const ss_ icon = jstr(row, "icon");
+		if(!icon.empty() && !texture_choices().count(icon))
+			return refuse("icon: no voxel or upload has "+icon);
+		auto old = m_item_types.find(name);
+		if(old == m_item_types.end() && m_item_types.size() >= MAX_ITEM_TYPES)
+			return refuse("the save has "+itos(MAX_ITEM_TYPES)+" item types");
+		const int64_t version = old == m_item_types.end() ? 1 :
+				json::jint(old->second, "version", 1) + 1;
+		row.set("format", ss_("kit_item"));
+		row.set("author", author);
+		row.set("name", short_name);
+		row.set("version", version);
+		m_store->set("item:"+name, row.stringify());
+		m_item_types[name] = row;
+		log_i(MODULE, "%s made item type %s version %s: %s", cs(p.name),
+				cs(name), cs(itos(version)), cs(row.stringify()));
+		send_item_types(-1);
+	}
+
+	// A player's equipment (kit/equipment on their entity): its instance
+	// and index, null for none (or disabled)
+	Instance* equipment_of(uint64_t player, size_t *comp = nullptr)
+	{
+		auto it = m_entities.find(player);
+		if(it == m_entities.end())
+			return nullptr;
+		for(size_t i = 0; i < it->second.comps.size(); i++){
+			Instance &in = it->second.comps[i];
+			if(m_types[in.type].equipment && in.disabled.empty()){
+				if(comp)
+					*comp = i;
+				return &in;
+			}
+		}
+		return nullptr;
+	}
+
+	// What a player holds ("" a hand) and its sheet (null: no item type)
+	ss_ hands_of(uint64_t player, const json::Value **sheet = nullptr)
+	{
+		const Instance *eq = equipment_of(player);
+		const ss_ item = eq ? jstr(eq->state, "hands") : ss_();
+		if(sheet){
+			auto it = m_item_types.find(item);
+			*sheet = it == m_item_types.end() ? nullptr : &it->second;
+		}
+		return item;
+	}
+
+	// Whether a player has an item (Kit's kit/inventory's state, the app's
+	// list, or a replacing provider's as a run last listed it)
+	bool has_item(const ss_ &who, const ss_ &item)
+	{
+		const json::Value *list = nullptr;
+		if(app_items()){
+			auto ai = m_app_items.find(who);
+			list = ai == m_app_items.end() ? nullptr : &ai->second;
+		} else if(provider()){
+			auto si = m_items_seen.find(who);
+			list = si == m_items_seen.end() ? nullptr : &si->second;
+		} else {
+			auto pl = m_players.find(who);
+			const Instance *own = pl == m_players.end() ? nullptr :
+					own_inventory(pl->second);
+			list = own ? &own->state.get("items") : nullptr;
+		}
+		return list && list->get(item.c_str()).is_number() &&
+				list->get(item.c_str()).as_number() >= 1;
+	}
+
+	// The hands emptied when what they held is gone from the list
+	void check_hands(const ss_ &who, const json::Value &items)
+	{
+		auto pl = m_players.find(who);
+		size_t comp = 0;
+		Instance *eq = pl == m_players.end() ? nullptr :
+				equipment_of(pl->second, &comp);
+		const ss_ item = eq ? jstr(eq->state, "hands") : ss_();
+		if(item.empty() || (items.get(item.c_str()).is_number() &&
+				items.get(item.c_str()).as_number() >= 1))
+			return;
+		set_hands(pl->second, comp, "");
+		log_i(MODULE, "%s has no %s: the hands empty", cs(who), cs(item));
+	}
+
+	void set_hands(uint64_t player, size_t comp, const ss_ &item)
+	{
+		Entity &e = m_entities[player];
+		e.comps[comp].state.set("hands", item);
+		m_runtime_dirty = true;
+		replicate_state(e, comp, "hands");
+	}
+
+	// "kit:hold" <item>: a placed peer's hands take one of their items
+	// ("": a hand)
+	// [KIT_SESSIONS_1] in the sender's session
+	void on_hold(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_hold_u(packet);
+	}
+
+	void on_hold_u(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		const ss_ item = packet.data.substr(0, 130);
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
+			return;
+		Peer &p = pi->second;
+		size_t comp = 0;
+		if(!p.player || !equipment_of(p.player, &comp))
+			return;
+		if(!item.empty() && (!item_ok(item) || !has_item(p.name, item))){
+			if(log_refusal(p, "hold "+item))
+				log_i(MODULE, "%s may not hold %s: not one of their items",
+						cs(p.name), cs(item.substr(0, 64)));
+			return;
+		}
+		set_hands(p.player, comp, item);
+		log_i(MODULE, "%s holds %s", cs(p.name), item.empty() ? "nothing" :
+				cs(item));
+	}
+
+	// The cell a world point is in
+	static pv::Vector3DInt32 cell_of(const double w[3])
+	{
+		return pv::Vector3DInt32((int)std::floor(w[0] + 0.5),
+				(int)std::floor(w[1] + 0.5), (int)std::floor(w[2] + 0.5));
+	}
+
+	// Whether nothing solid of the scene's voxels is between two points
+	// (each tenth of a metre)
+	bool in_sight(main_context::SceneReference scene, const double a[3],
+			const double b[3])
+	{
+		bool clear = true;
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			voxelworld::Instance *w = ivw->get_instance(scene);
+			if(!w)
+				return;
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			const auto &fmt = reg->get_format();
+			const double d = std::sqrt((b[0] - a[0]) * (b[0] - a[0]) +
+					(b[1] - a[1]) * (b[1] - a[1]) + (b[2] - a[2]) * (b[2] - a[2]));
+			const int n = std::min(400, (int)std::ceil(d / 0.1));
+			for(int i = 1; i < n && clear; i++){
+				const double t = (double)i / n, p[3] = {a[0] + (b[0] - a[0]) * t,
+						a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t};
+				const uint32_t id = (uint32_t)fmt.id.get(w->get_voxel(
+						cell_of(p), true).data);
+				const interface::VoxelDefinition *def = reg->get(id);
+				clear = !def || !def->physically_solid;
+			}
+		});
+		return clear;
+	}
+
+	// The placed peer of a player's entity in this round (0: none)
+	size_t peer_of_player(uint64_t player)
+	{
+		for(auto &p : m_peers)
+			if(p.second.player == player)
+				return p.first;
+		return 0;
+	}
+
+	// Whether Kit's rules let a hit by a placed peer reach an entity, and
+	// why not: the game's peaceful (kit/game_rules: players take no
+	// damage), the region holding the target -- its pvp rule for the
+	// attacker against a player, its damage rule for the player hit (an
+	// entity: for the attacker) -- and a team's friendly fire (kit/team's
+	// friendly_fire, off by default: its members do not hurt each other)
+	bool hit_allowed(size_t peer, const Entity &t, ss_ &why)
+	{
+		double w[3];
+		world_of(t, w);
+		const pv::Vector3DInt32 c = cell_of(w);
+		if(t.kind != "player")
+			return allows(peer, "damage", c.getX(), c.getY(), c.getZ(), &why);
+		const Instance *gr = root_instance("kit/game_rules");
+		if(gr && gr->params.get("peaceful").is_true()){
+			why = "Peaceful: players take no damage";
+			return false;
+		}
+		if(!allows(peer, "pvp", c.getX(), c.getY(), c.getZ(), &why))
+			return false;
+		const size_t tp = peer_of_player(t.id);
+		if(tp && !allows(tp, "damage", c.getX(), c.getY(), c.getZ(), &why))
+			return false;
+		const uint64_t me = m_peers[peer].player;
+		for(auto &e : m_entities)
+			for(const Instance &in : e.second.comps)
+				if(m_types[in.type].team && in_team(me, e.first) &&
+						in_team(t.id, e.first) &&
+						!in.params.get("friendly_fire").is_true()){
+					why = "Friendly fire is off in team "+jstr(in.params, "name");
+					return false;
+				}
+		return true;
+	}
+
+	// A hit on an entity: its components' modify_hit hooks in their order,
+	// each given the hit ({amount, type, item, crit}) and returning it as
+	// it goes on (nil: as it was; an amount of 0 ends it: armour, a
+	// shield, an effect's resistance, stage 9's), then its health's on_hit.
+	// What it came to (0: nothing)
+	double apply_hit(uint64_t target, json::Value hit, const ss_ &by)
+	{
+		for(size_t i = 0; ; i++){
+			auto it = m_entities.find(target);
+			if(it == m_entities.end() || i >= it->second.comps.size())
+				break;
+			if(!m_types[it->second.comps[i].type].handlers.count("modify_hit"))
+				continue;
+			Run r;
+			r.entity = target;
+			r.comp = i;
+			r.handler = "modify_hit";
+			r.by = by;
+			r.args.append(hit);
+			r.args.append(by);
+			m_hit_ret = json::Value();
+			run(r);
+			if(!m_hit_ret.is_object())
+				continue;
+			const json::Value &a = m_hit_ret.get("amount");
+			if(a.is_number() && std::isfinite(a.as_number()))
+				hit.set("amount", std::max(0.0, a.as_number()));
+			const ss_ ty = jstr(m_hit_ret, "type");
+			if(name_ok(ty))
+				hit.set("type", ty);
+		}
+		const double amount = hit.get("amount").as_number();
+		auto it = m_entities.find(target);
+		if(it == m_entities.end())
+			return 0;
+		if(amount <= 0){
+			log_i(MODULE, "A hit on entity %s by %s comes to nothing",
+					cs(itos(target)), cs(by_text(by)));
+			return 0;
+		}
+		for(size_t i = 0; i < it->second.comps.size(); i++){
+			const Instance &in = it->second.comps[i];
+			if(!m_types[in.type].health || !in.disabled.empty())
+				continue;
+			Run r;
+			r.entity = target;
+			r.comp = i;
+			r.handler = "on_hit";
+			r.by = by;
+			r.args.append(hit);
+			r.args.append(by);
+			run(r);
+			return amount;
+		}
+		return 0;
+	}
+
+	// A player's entity back at their spawn (kit/health's c:respawn()):
+	// their team's pad, else the last spawner of players in their scene,
+	// else the app's default
+	void respawn_player(uint64_t player)
+	{
+		const size_t peer = peer_of_player(player);
+		if(!peer)
+			return;
+		const ss_ scene = m_peers[peer].scene;
+		const Entity *pad = nullptr, *spawner = nullptr;
+		for(auto &e : m_entities){
+			ss_ es;
+			if(!e.second.has_pos || !scene_of(e.second, &es) || es != scene)
+				continue;
+			for(const Instance &in : e.second.comps){
+				const Type &ty = m_types[in.type];
+				if(ty.team && in_team(player, e.first))
+					pad = &e.second;
+				else if(ty.spawn && (ty.spawn_param.empty() ||
+						in.params.get(ty.spawn_param).is_true()))
+					spawner = &e.second;
+			}
+		}
+		const Entity *at = pad ? pad : spawner;
+		const ss_ who = m_peers[peer].name;
+		if(!at){
+			log_i(MODULE, "%s respawns at the app's spawn", cs(who));
+			m_server->emit_event("kit:spawn_player", new SpawnPlayer(peer));
+			return;
+		}
+		double w[3], wy;
+		world_of(*at, w, &wy);
+		log_i(MODULE, "%s respawns at entity %s", cs(who), cs(itos(at->id)));
+		to_scene(peer, "", w[0], w[1], w[2], wy);
+	}
+
+	// A player's knockback: their body's speed added to, away along the
+	// hit's direction (dx, dz, level) and a little up, put again so the
+	// client steps from it
+	void knock(size_t peer, double dx, double dz, double k)
+	{
+		auto bi = m_bodies.find(peer);
+		if(!m_host.controls || bi == m_bodies.end() || !bi->second.put ||
+				bi->second.seat || k <= 0)
+			return;
+		Body &b = bi->second;
+		json::Value st = b.state.deepcopy();
+		json::Value v = json::array();
+		const json::Value &ov = st.get("vel");
+		const double add[3] = {dx * k, k * 0.4, dz * k};
+		for(unsigned i = 0; i < 3; i++)
+			v.append((ov.is_array() && ov.at(i).is_number() ?
+					ov.at(i).as_number() : 0) + add[i]);
+		st.set("vel", v);
+		st.set("ground", false);
+		log_i(MODULE, "%s knocked back (%.2f, %.2f, %.2f)",
+				cs(m_peers[peer].name), add[0], add[1], add[2]);
+		put_body(peer, b, 0, 0, 0, 0, &st);
+	}
+
+	// The item's wear and a drop, by kit/equipment's on_tool on the
+	// player's entity, their run: cost of the held item's uses (it breaks
+	// at 0, one taken), drop added
+	void tool_run(uint64_t player, const ss_ &item, int64_t cost,
+			int64_t uses, const ss_ &drop)
+	{
+		size_t comp = 0;
+		if(!equipment_of(player, &comp) || (drop.empty() &&
+				(item.empty() || cost <= 0 || uses <= 0)))
+			return;
+		Run r;
+		r.entity = player;
+		r.comp = comp;
+		r.handler = "on_tool";
+		r.by = "player:"+itos(player);
+		r.args.append(item);
+		r.args.append(cost);
+		r.args.append(uses);
+		r.args.append(drop.empty() ? json::null() : json::Value(drop));
+		run(r);
+	}
+
+	// The hooks for the rest ([KIT_TOOLS_1]): on_item(c, item, action,
+	// target, by) of each instance in the player's scene, on the root and
+	// on their entity, after what the item did -- "hit" (target the
+	// entity), "dig" (the cell {x, y, z}) or "use" (a use kind "use"
+	// item's click: the entity pointed at, 0 none)
+	void item_hooks(size_t peer, const ss_ &item, const ss_ &action,
+			const json::Value &target)
+	{
+		const Peer &p = m_peers[peer];
+		const ss_ by = "player:"+itos(p.player);
+		for(auto &e : m_entities){
+			ss_ es;
+			const bool here = e.first == p.player || (e.second.parent == 1 &&
+					!e.second.has_pos) || (e.second.has_pos &&
+					e.second.kind != "player" && scene_of(e.second, &es) &&
+					es == p.scene);
+			if(!here)
+				continue;
+			for(size_t i = 0; i < e.second.comps.size(); i++){
+				if(!m_types[e.second.comps[i].type].handlers.count("on_item"))
+					continue;
+				Run r;
+				r.entity = e.first;
+				r.comp = i;
+				r.handler = "on_item";
+				r.by = by;
+				r.args.append(item);
+				r.args.append(action);
+				r.args.append(target);
+				r.args.append(by);
+				queue_run(r);
+			}
+		}
+	}
+
+	// A placed peer's use of their hands now (a hit, an item's use): past
+	// its cooldown (the game's clock), taken; false: refused, why
+	bool cooled(size_t peer, const json::Value &sheet, ss_ &why)
+	{
+		ToolUse &tu = m_tool_use[peer];
+		const int64_t now = now_us();
+		const double cd = sheet.get("cooldown").as_number();
+		if(tu.used && now >= tu.used_us && now - tu.used_us < cd * 1e6){
+			why = "cooling down";
+			return false;
+		}
+		tu.used = true;
+		tu.used_us = now;
+		return true;
+	}
+
+	// "kit:hit" <id>: a placed peer's melee hit with what they hold, on an
+	// entity with health (a player, or one placed with kit/health). The
+	// client has played the swing; the server decides: Running, out of
+	// the tools, a melee item held, its cooldown, the target in the
+	// peer's scene within its reach and in sight; then Kit's rules, the
+	// item's wear, the target's modifiers and health, knockback, the hooks
+	// [KIT_SESSIONS_1] in the sender's session
+	void on_hit(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_hit_u(packet);
+	}
+
+	void on_hit_u(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		const ss_ data = packet.data.substr(0, 32);
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
+			return;
+		auto refuse = [&](const ss_ &why){
+			auto p = m_peers.find(peer);
+			if(p != m_peers.end() && log_refusal(p->second, why))
+				log_i(MODULE, "A hit on entity %s by %s refused: %s", cs(data),
+						cs(p->second.name), cs(why));
+		};
+		Peer &p = pi->second;
+		if(!m_session.running)
+			return refuse("the server is Stopped");
+		if(p.editing)
+			return refuse("in edit mode");
+		char *end = nullptr;
+		const uint64_t id = strtoull(data.c_str(), &end, 10);
+		if(data.empty() || !end || *end)
+			return refuse("not an entity's id");
+		auto it = m_entities.find(id);
+		if(it == m_entities.end() || !it->second.has_pos || id == p.player)
+			return refuse("no such target");
+		bool health = false;
+		for(const Instance &in : it->second.comps)
+			health = health || (m_types[in.type].health && in.disabled.empty());
+		ss_ scene;
+		scene_of(it->second, &scene);
+		if(!health || scene != p.scene)
+			return refuse(!health ? "it has no health" : "in another scene");
+		const json::Value *sheet = nullptr;
+		const ss_ item = hands_of(p.player, &sheet);
+		if(!sheet || jstr(*sheet, "use") != "melee")
+			return refuse(item.empty() ? "nothing in hand" : item+
+					" is no melee item");
+		if(!has_item(p.name, item))
+			return refuse("no "+item+" in their inventory");
+		// From the eye (the body's bottom and 1.55; Peer::pos is its
+		// bottom and 0.5) to the target's middle (a player's body's: its
+		// node's 0.35 up), less the body's half width
+		const bool player = it->second.kind == "player";
+		double t[3];
+		world_of(it->second, t);
+		if(player)
+			t[1] += 0.35;
+		const double eye[3] = {p.pos[0], p.pos[1] + 1.05, p.pos[2]};
+		const double dx = t[0] - eye[0], dy = t[1] - eye[1], dz = t[2] - eye[2];
+		const double d = std::max(0.0, std::sqrt(dx * dx + dy * dy + dz * dz) -
+				(player ? 0.45 : 0.5));
+		const double reach = sheet->get("reach").as_number();
+		if(d > reach + 0.25)
+			return refuse("out of reach ("+dtos(d)+" m)");
+		if(!in_sight(scene_of(it->second), eye, t))
+			return refuse("not in sight");
+		ss_ why;
+		if(!cooled(peer, *sheet, why))
+			return refuse(why);
+		if(!hit_allowed(peer, it->second, why)){
+			tell(peer, why);
+			return refuse(why);
+		}
+		// The hit: the amount less the falloff at its distance, a critical
+		// one falling (the attacker's body going down in the air)
+		double amount = sheet->get("damage").as_number() *
+				(1 - sheet->get("falloff").as_number() * std::min(1.0, d / reach));
+		bool crit = false;
+		auto bi = m_bodies.find(peer);
+		if(bi != m_bodies.end()){
+			const json::Value &v = bi->second.state.get("vel");
+			crit = !bi->second.state.get("ground").is_true() && v.is_array() &&
+					v.at(1u).is_number() && v.at(1u).as_number() < -1;
+		}
+		if(crit)
+			amount *= sheet->get("crit").as_number();
+		json::Value hit = json::object();
+		hit.set("amount", amount);
+		hit.set("type", jstr(*sheet, "damage_type", "normal"));
+		hit.set("item", item);
+		hit.set("crit", crit);
+		const ss_ by = "player:"+itos(p.player);
+		const ss_ who = p.name;
+		const uint64_t me = p.player;
+		log_i(MODULE, "%s hits entity %s with %s: %g %s%s", cs(who),
+				cs(itos(id)), cs(item), amount, cs(jstr(hit, "type")),
+				crit ? " (critical)" : "");
+		// The item worn (it may break); then the target's modifiers and
+		// health (runs: the tree may change under them)
+		tool_run(me, item, json::jint(*sheet, "wear_hit", 1),
+				json::jint(*sheet, "uses", 0), "");
+		const double k = sheet->get("knockback").as_number();
+		// Not after a respawn (a put since)
+		const size_t tp = it->second.kind == "player" ? peer_of_player(id) : 0;
+		const int64_t puts = m_bodies.count(tp) ? m_bodies[tp].puts : -1;
+		const double came = apply_hit(id, hit, by);
+		if(came > 0 && tp && m_bodies.count(tp) && m_bodies[tp].puts == puts){
+			// Away from the attacker, or where they look when on top
+			double kx = dx, kz = dz;
+			double l = std::sqrt(kx * kx + kz * kz);
+			if(l < 0.2){
+				const double a = m_bodies.count(peer) ?
+						m_bodies[peer].look_yaw * 0.017453292519943295 : 0;
+				kx = std::sin(a), kz = std::cos(a), l = 1;
+			}
+			knock(tp, kx / l, kz / l, k);
+		}
+		if(m_peers.count(peer))
+			item_hooks(peer, item, "hit", json::Value((int64_t)id));
+	}
+
+	// "kit:item" <id>: a placed peer's click with a use kind "use" item
+	// (a wand): its cooldown, then the hooks' "use" with the entity
+	// pointed at (0: none; one in their scene within use range)
+	// [KIT_SESSIONS_1] in the sender's session
+	void on_item_use(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_item_use_u(packet);
+	}
+
+	void on_item_use_u(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		const ss_ data = packet.data.substr(0, 32);
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
+			return;
+		Peer &p = pi->second;
+		auto refuse = [&](const ss_ &why){
+			if(log_refusal(p, why))
+				log_i(MODULE, "An item's use by %s refused: %s", cs(p.name),
+						cs(why));
+		};
+		if(!m_session.running || p.editing)
+			return refuse(p.editing ? "in edit mode" : "the server is Stopped");
+		const json::Value *sheet = nullptr;
+		const ss_ item = hands_of(p.player, &sheet);
+		if(!sheet || jstr(*sheet, "use") != "use" || !has_item(p.name, item))
+			return refuse("no item of use kind \"use\" in hand");
+		uint64_t id = strtoull(data.c_str(), nullptr, 10);
+		auto it = m_entities.find(id);
+		ss_ scene;
+		double w[3], d2 = 0;
+		if(id && (it == m_entities.end() || !it->second.has_pos ||
+				!scene_of(it->second, &scene) || scene != p.scene))
+			id = 0;
+		if(id){
+			world_of(it->second, w);
+			for(int k = 0; k < 3; k++)
+				d2 += (w[k] - p.pos[k]) * (w[k] - p.pos[k]);
+			if(d2 > m_host.use_range * m_host.use_range)
+				id = 0;
+		}
+		ss_ why;
+		if(!cooled(peer, *sheet, why))
+			return refuse(why);
+		log_i(MODULE, "%s uses %s on entity %s", cs(p.name), cs(item),
+				cs(itos(id)));
+		item_hooks(peer, item, "use", json::Value((int64_t)id));
+	}
+
+	// The material of a voxel by name (Kit's set's, a builder's), null for
+	// another's (the app's own)
+	const world::Material* material_named(const ss_ &voxel)
+	{
+		auto it = m_registered.find(world::material_of(voxel));
+		return it == m_registered.end() ? nullptr : &it->second;
+	}
+
+	bool dig_ready(size_t peer, int x, int y, int z, const ss_ &voxel,
+			double *wait) override
+	{
+		SessionScope sc(*this, session_of_peer(peer));
+		return dig_ready_u(peer, x, y, z, voxel, wait);
+	}
+
+	bool dig_ready_u(size_t peer, int x, int y, int z, const ss_ &voxel,
+			double *wait)
+	{
+		auto pi = m_peers.find(peer);
+		const world::Material *m = material_named(voxel);
+		if(!m_hosted || pi == m_peers.end() || !m || m->group.empty() ||
+				pi->second.editing || !m_session.running)
+			return true;
+		const json::Value *sheet = nullptr;
+		const ss_ item = hands_of(pi->second.player, &sheet);
+		double speed = 1;
+		if(sheet && has_item(pi->second.name, item)){
+			const json::Value &s = sheet->get("dig").get(m->group.c_str());
+			if(s.is_number())
+				speed = s.as_number();
+		}
+		const int64_t need = (int64_t)(1e6 / speed), now = now_us();
+		ToolUse &tu = m_tool_use[peer];
+		const bool same = tu.digging && tu.dig[0] == x && tu.dig[1] == y &&
+				tu.dig[2] == z;
+		if(need <= 50000 || (same && now - tu.dig_us >= need)){
+			tu.digging = false;
+			return true;
+		}
+		if(!same){
+			tu.digging = true;
+			tu.dig[0] = x, tu.dig[1] = y, tu.dig[2] = z;
+			tu.dig_us = now;
+		}
+		const double left = (need - (now - tu.dig_us)) / 1e6;
+		if(wait)
+			*wait = left;
+		json::Value j = json::object(), c = json::array();
+		c.append((int64_t)x);
+		c.append((int64_t)y);
+		c.append((int64_t)z);
+		j.set("cell", c);
+		j.set("wait", left);
+		j.set("time", need / 1e6);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:digging", j.stringify());
+		});
+		if(!same)
+			log_i(MODULE, "%s digs %s (%s, level %i) with %s: %g s",
+					cs(pi->second.name), cs(voxel), cs(m->group), m->level,
+					item.empty() ? "a hand" : cs(item), need / 1e6);
+		return false;
+	}
+
+	void dug(size_t peer, int x, int y, int z, const ss_ &voxel) override
+	{
+		SessionScope sc(*this, session_of_peer(peer));
+		auto pi = m_peers.find(peer);
+		const world::Material *m = material_named(voxel);
+		if(!m_hosted || pi == m_peers.end() || !m || m->group.empty() ||
+				pi->second.editing || !m_session.running || !pi->second.player)
+			return;
+		const json::Value *sheet = nullptr;
+		ss_ item = hands_of(pi->second.player, &sheet);
+		if(!sheet || !has_item(pi->second.name, item))
+			item.clear(), sheet = nullptr;
+		const int64_t level = sheet ? json::jint(*sheet, "level", 0) : 0;
+		const ss_ drop = level >= m->level ? world::material_of(voxel) : "";
+		log_i(MODULE, "%s dug %s (level %i) with %s (level %s): %s",
+				cs(pi->second.name), cs(voxel), m->level, item.empty() ?
+				"a hand" : cs(item), cs(itos(level)), drop.empty() ?
+				"no drop" : cs("drops "+drop));
+		tool_run(pi->second.player, item, sheet ? json::jint(*sheet,
+				"wear_dig", 1) : 0, sheet ? json::jint(*sheet, "uses", 0) : 0,
+				drop);
+		json::Value c = json::array();
+		c.append((int64_t)x);
+		c.append((int64_t)y);
+		c.append((int64_t)z);
+		if(!item.empty())
+			item_hooks(peer, item, "dig", c);
+	}
+
 	// ---- [KIT_INPUT_ACTIONS] Input as named actions: a type's `actions`
 	// (api.h), each client's keys for them its own (the clients' key
 	// store), a press reaching the instances that declare it
@@ -13031,6 +13990,7 @@ struct Module: public interface::Module, public Interface
 			unseat(peer, bi->second, false);
 		m_bodies.erase(peer);
 		m_controls_sent.erase(peer);
+		m_tool_use.erase(peer);
 		m_peers.erase(peer);
 		if(player)
 			unplace_player(player);
@@ -14712,7 +15672,8 @@ struct Module: public interface::Module, public Interface
 			return refuse("in a game session: the tools edit nothing here");
 		if(gs && (op == "play" || op == "stop" || op == "save_start" ||
 				op == "keep" || op == "always_keep" || op == "terrain" ||
-				op == "voxel" || op == "regenerate" || op == "hm_regenerate" ||
+				op == "voxel" || op == "item" || op == "regenerate" ||
+				op == "hm_regenerate" ||
 				op == "hm_restore" || op == "new_scene" || op == "export" ||
 				op == "draft"))
 			return refuse("in a draft: the default round's");
@@ -14774,6 +15735,8 @@ struct Module: public interface::Module, public Interface
 			return terrain(p, peer, j, refuse);
 		if(op == "voxel")
 			return make_voxel(p, j, refuse);
+		if(op == "item")
+			return make_item(p, j, refuse);
 		if(op == "set_voxel")
 			return edit_voxel(p, peer, j, refuse);
 		if(op == "edited")

@@ -29,9 +29,8 @@
 -- says why ("Protected: no digging here"), and show_border draws its box
 -- for the players.
 --
--- simplified: Kit has no hits or damage of its own yet: pvp and damage
--- are kept, shown and asked by api.h's allows() for the games that have
--- them
+-- pvp and damage are asked by Kit's own hits ([KIT_TOOLS_1]) and by
+-- api.h's allows() for the games with hits of their own
 local RULES = {"dig", "place", "enter", "pvp", "damage", "use"}
 
 local function owners_of(c)

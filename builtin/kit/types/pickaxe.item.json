@@ -1,0 +1,17 @@
+{
+	"version": 1,
+	"icon": "",
+	"stack": 1,
+	"use": "melee",
+	"cooldown": 0.6,
+	"mode": "single",
+	"damage": 2,
+	"damage_type": "normal",
+	"knockback": 2,
+	"reach": 3,
+	"dig": {"stone": 4, "dirt": 2},
+	"level": 1,
+	"uses": 200,
+	"wear_hit": 2,
+	"wear_dig": 1
+}
