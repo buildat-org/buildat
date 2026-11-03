@@ -122,7 +122,8 @@ delay 500
 screenshot $t/o_privs.png
 click Button "priv bob fly"
 wait_log 60000 oac: bob flew
-delay 500
+# Past bob's held Space, whose end his drive then waits for the revoke
+delay 4000
 click Button "priv bob fly"
 delay 3000
 quit
