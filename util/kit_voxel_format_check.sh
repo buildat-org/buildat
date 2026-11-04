@@ -199,6 +199,9 @@ EOF
 	# ([KIT_BUILDER_PLAY_RULES]): a region letting all place there
 	edit '{"op": "place", "type": "kit/region", "pos": [0, 0, 1]}'
 	edit '{"op": "set", "id": 4, "comp": 0, "param": "place", "value": "all"}'
+	# [KIT_INVENTORY_PLAY] the palette's voxel in play: building "creative"
+	edit '{"op": "place", "type": "kit/game_rules", "pos": [0, 1, 0]}'
+	edit '{"op": "set", "id": 5, "comp": 0, "param": "building", "value": "creative"}'
 	shot sky_on 'event workbench_build {"p": [2, 1, 3], "voxel": "kit/stone:slab", "param": 4, "tint": 2}
 sync 5000
 event kit_edit {"op": "voxel_info", "pos": [2, 1, 3]}
