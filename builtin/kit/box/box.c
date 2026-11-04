@@ -33,7 +33,9 @@
 **                        teleport_yaw = degrees, teleport_scene = name,
 **                        teleport_entity = id, [KIT_CTF] move = {x, y,
 **                        z, fall} (c:move), speed = {{player, factor}...}
-**                        (c:speed); the request's regions = {{id, team,
+**                        (c:speed), [KIT_CARRY_ATTACH] attach = {player,
+**                        bone, x, y, z} | false (c:attach, c:detach);
+**                        the request's regions = {{id, team,
 **                        rules, o, n}...} (a type's `regions`: c:region_at)
 **                        (looking that way, level), sessions =
 **                        {{"start", {player id...} | null} | {"move",
@@ -519,6 +521,15 @@ static const char PRELUDE[] =
 "		s[#s + 1] = {type(player) == 'string' and player or tonumber(player) or 0, f}\n"
 "		fx.speed = s\n"
 "	end\n"
+"	-- [KIT_CARRY_ATTACH] its own entity on a player (drawn at their body)\n"
+"	function c:attach(player, opts)\n"
+"		if opts ~= nil and type(opts) ~= 'table' then error('attach: options are {bone = name, offset = {x, y, z}}', 2) end\n"
+"		local o = opts and type(opts.offset) == 'table' and opts.offset or {}\n"
+"		local bone = opts and opts.bone or ''\n"
+"		if type(bone) ~= 'string' then error('attach: a bone is a name', 2) end\n"
+"		fx.attach = {type(player) == 'string' and player or tonumber(player) or 0, bone, tonumber(o[1]) or 0, tonumber(o[2]) or 0, tonumber(o[3]) or 0}\n"
+"	end\n"
+"	function c:detach() fx.attach = false end\n"
 "	function c:region_at(pos)\n"
 "		if not req.regions then error('region_at: its type reads no regions (regions = true)', 2) end\n"
 "		if type(pos) ~= 'table' then error('region_at: a position, {x, y, z}', 2) end\n"

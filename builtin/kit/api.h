@@ -451,6 +451,20 @@ namespace interface
 //   their client's prediction ("kit:controls"' parameters) alike. Until
 //   another call, Stop, or their body's going (they leave, another
 //   session). 64 a run.
+//   c:attach(player, {bone = name, offset = {x, y, z}})
+//   ([KIT_CARRY_ATTACH]): its own entity on a player it reaches (an id or
+//   a by), placed and in its scene: every client draws its look at the
+//   player's body as that client draws it (its own prediction for the
+//   player themselves, the others' interpolated place for the rest; the
+//   body's turn), at the bone's point -- "head" (the neck), "body" (the
+//   hips), "hand" (the right hand's grip, turning with the arm), none
+//   (the feet) -- and offset metres in the body's turn (x right, y up, z
+//   forward). Its c.pos (and its node, for logic: reach, regions,
+//   c:near) follow the player's 5 times a second, roughly (the bone's
+//   rest). Last call wins; c:detach() lets go where it is. Gone also at
+//   Stop (back where it was then, as c:move's), with the entity, or as
+//   the player leaves or changes scene. Not a player's entity, nor one
+//   owning voxels (refused, logged).
 //   marker = {color = "#rrggbb", label = text, lift = m (1), state =
 //   "<shared state key>"} ("param:<name>" as a look's) -- the entity
 //   pointed out on every client's screen (client_lua/ui.lua) while that

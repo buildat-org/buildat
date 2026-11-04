@@ -244,6 +244,50 @@ end
 
 local bodies = {} -- player id -> body
 
+-- [KIT_CARRY_ATTACH] The entities on players (the node's "kit_attach":
+-- "<player> <bone> <x> <y> <z>", kit.cpp attach_fx()): their looks drawn
+-- at the player's body as it is drawn now, the bone's point (its pivot,
+-- posed) and the offset (m) in the body's turn (the hand's: the arm's
+-- too), over where the server's node has them (update_play's)
+local BONES = {head = "Head", body = "Body", hand = "Wield_Item"}
+local function draw_attached()
+	for _, n in pairs(P.nodes) do
+		local v = n.look and n.node:GetVar("kit_attach")
+		local a = v and not v:IsEmpty() and v:GetString() or ""
+		local pid, bone, x, y, z = a:match("^(%d+) (%S+) (%S+) (%S+) (%S+)$")
+		local b = pid and bodies[tonumber(pid)]
+		if a == "" and n.attach_to then
+			-- Let go: where the server's node is, from the next frame
+			n.attach_to, n.at = nil, nil
+			log:info("kit: an entity let go of player")
+		end
+		if b and b.at then
+			local root = b.root
+			local rot = root.rotation
+			local p = root.position
+			local part = BONES[bone]
+			if part then
+				local node = b.parts[part]
+				local pv = model.parts[part].pivot
+				local lp = node.rotation * magic.Vector3(pv[1], pv[2], pv[3]) +
+						node.position
+				p = p + rot * (lp * root.scale.x)
+				if bone == "hand" then
+					rot = rot * node.rotation
+				end
+			end
+			p = p + rot * magic.Vector3(tonumber(x) or 0, tonumber(y) or 0,
+					tonumber(z) or 0)
+			n.look.position = p
+			n.look.rotation = rot * (n.look_rot or magic.Quaternion(0, 0, 0))
+			if n.attach_to ~= a then
+				n.attach_to = a
+				log:info("kit: an entity drawn on player " .. pid .. " (" ..
+						bone .. ")")
+			end
+		end
+	end
+end
 local SWING = 10 / 30 -- the mine animation once (s)
 local function mining_now(b, swings, dig, t)
 	if swings ~= b.swings then
@@ -257,7 +301,7 @@ end
 
 -- Each frame, from controls.lua: this player's body at `own` (its feet;
 -- nil: none yet), yaw and pitch, its height, whether it is shown (posed
--- all the same); the others
+-- all the same: what is attached to it is drawn on it); the others
 function M.draw_players(own, yaw, pitch, h, show_own)
 	local dt = M.frame_dt or 1 / 60
 	local t = now_s()
@@ -355,6 +399,7 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 			end
 		end
 	end
+	draw_attached()
 	for id, b in pairs(bodies) do
 		if not seen[id] then
 			if not P.nodes[id] then
@@ -379,8 +424,16 @@ magic.SubscribeToEvent("Update", function(_, data)
 	M.frame_dt = data:GetFloat("TimeStep")
 end)
 
--- The bodies, for a drive: "event kit_players" logs each drawn one
+-- The bodies, for a drive: "event kit_players" logs each drawn one, and
+-- what is attached to them
 magic.SubscribeToEvent("command_seq:kit_players", function()
+	for id, n in pairs(P.nodes) do
+		if n.attach_to and n.look then
+			local p = n.look.position
+			log:info(string.format("kit: entity %d drawn at %.2f,%.2f,%.2f on %s",
+					id, p.x, p.y, p.z, n.attach_to))
+		end
+	end
 	for id, b in pairs(bodies) do
 		if b.root.enabled then
 			local p = b.root.position

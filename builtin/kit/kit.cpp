@@ -8548,6 +8548,12 @@ struct Module: public interface::Module, public Interface
 		const json::Value &speeds = fx.get("speed");
 		for(unsigned i = 0; i < speeds.size(); i++)
 			speed_fx(e, r.comp, r.by, speeds.at(i));
+		// [KIT_CARRY_ATTACH] c:attach, c:detach
+		const json::Value &att = fx.get("attach");
+		if(att.is_array())
+			attach_fx(e, r.comp, r.by, att);
+		else if(att.is_false() && m_attached.count(e.id))
+			detach(e.id, "c:detach");
 		const json::Value &apps = fx.get("app");
 		for(unsigned i = 0; i < apps.size(); i++)
 			app_call(e, type, r.by, who, apps.at(i));
@@ -10963,6 +10969,151 @@ struct Module: public interface::Module, public Interface
 		b.speed = f;
 	}
 
+	// [KIT_CARRY_ATTACH] c:attach(player, {bone, offset}): its own entity
+	// on a player it reaches, in its scene: drawn by every client at the
+	// player's drawn body (the node's "kit_attach": "<player> <bone> <x>
+	// <y> <z>"), its place (c.pos, for logic) the server's, ATTACH_US
+	// apart (attach_tick()). Not a player's entity, nor one owning voxels.
+	// Until c:detach(), Stop, either going, or the player leaving the
+	// scene; where it was at Stop it is again (as c:move's)
+	static const int64_t ATTACH_US = 200000;
+	void attach_fx(Entity &e, size_t comp, const ss_ &by, const json::Value &a)
+	{
+		const json::Value &who = a.at(0u);
+		const uint64_t pid = who.is_string() ? player_id(who.as_string()) :
+				who.is_number() && who.as_number() > 0 ?
+				(uint64_t)who.as_number() : 0;
+		const ss_ bone = jstr_at(a, 1);
+		auto pi = m_entities.find(pid);
+		ss_ why, es, ps;
+		if(pi == m_entities.end() || pi->second.kind != "player" ||
+				!pi->second.has_pos)
+			why = "no placed player";
+		else if(!reach(e, comp, by).count(pid))
+			why = "not a player it reaches";
+		else if(!e.has_pos || e.kind == "player")
+			why = "it has no place of its own";
+		else if(!owned_cells(e).empty())
+			why = "it owns voxels";
+		else if(!scene_of(e, &es) || !scene_of(pi->second, &ps) || es != ps)
+			why = "the player is in another scene";
+		else if(bone != "" && bone != "head" && bone != "body" && bone != "hand")
+			why = "a bone: head, body, hand or none";
+		Attach at;
+		for(int k = 0; k < 3 && why.empty(); k++){
+			const json::Value &v = a.at(2 + k);
+			at.off[k] = v.is_number() ? v.as_number() : 0;
+			if(!std::isfinite(at.off[k]) || std::fabs(at.off[k]) > 16)
+				why = "an offset of 16 m at most";
+		}
+		if(!why.empty()){
+			add_log(e.id, "attach to "+itos(pid)+" refused: "+why);
+			log_w(MODULE, "Entity %s: an attach refused: %s", cs(itos(e.id)),
+					cs(why));
+			return;
+		}
+		at.player = pid;
+		at.bone = bone;
+		if(!m_seat_home.count(e.id))
+			m_seat_home[e.id] = {{e.pos[0], e.pos[1], e.pos[2], e.yaw}};
+		m_attached[e.id] = at;
+		log_i(MODULE, "Entity %s attached to %s (%s, %g, %g, %g)",
+				cs(itos(e.id)), cs(pi->second.name), bone.empty() ? "feet" :
+				cs(bone), at.off[0], at.off[1], at.off[2]);
+		attach_tick(e.id);
+	}
+
+	void detach(uint64_t id, const ss_ &why)
+	{
+		auto ai = m_attached.find(id);
+		if(ai == m_attached.end())
+			return;
+		m_attached.erase(ai);
+		auto ei = m_entities.find(id);
+		if(ei != m_entities.end() && ei->second.node)
+			main_context::access(m_server, scene_of(ei->second),
+					[&](magic::Scene *sc){
+				magic::Node *n = sc->GetNode(ei->second.node);
+				if(n)
+					n->SetVar(magic::StringHash("kit_attach"),
+							magic::Variant(""));
+			});
+		log_i(MODULE, "Entity %s detached (%s)", cs(itos(id)), cs(why));
+	}
+
+	// Each attached entity's place kept on its player's (only = one now):
+	// the bone's rough height over the feet, the offset turned by the
+	// view's yaw; the client's node told once it is there
+	void attach_tick(uint64_t only = 0)
+	{
+		const int64_t now = interface::os::time_us();
+		sv_<std::pair<uint64_t, ss_>> gone;
+		for(auto &ap : m_attached){
+			if(only && ap.first != only)
+				continue;
+			Attach &a = ap.second;
+			auto ei = m_entities.find(ap.first);
+			auto pi = m_entities.find(a.player);
+			ss_ es, ps;
+			if(ei == m_entities.end() || !ei->second.has_pos){
+				gone.push_back({ap.first, "it is gone"});
+				continue;
+			}
+			if(pi == m_entities.end() || !pi->second.has_pos ||
+					!scene_of(ei->second, &es) || !scene_of(pi->second, &ps) ||
+					es != ps){
+				gone.push_back({ap.first, "its player is gone"});
+				continue;
+			}
+			Entity &e = ei->second;
+			if(e.node && a.told != e.node){
+				a.told = e.node;
+				char buf[160];
+				snprintf(buf, sizeof buf, "%llu %s %g %g %g",
+						(unsigned long long)a.player, a.bone.empty() ? "-" :
+						a.bone.c_str(), a.off[0], a.off[1], a.off[2]);
+				main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
+					magic::Node *n = sc->GetNode(e.node);
+					if(n)
+						n->SetVar(magic::StringHash("kit_attach"),
+								magic::Variant(buf));
+				});
+			}
+			if(!only && now - a.at_us < ATTACH_US)
+				continue;
+			a.at_us = now;
+			double yaw = 0;
+			const size_t peer = peer_of_player(a.player);
+			auto bi = peer ? m_bodies.find(peer) : m_bodies.end();
+			if(bi != m_bodies.end())
+				yaw = bi->second.look_yaw * 0.017453292519943295;
+			// The bone's place on the body (simplified: its rest, the
+			// model's; players.lua draws it posed)
+			double b[3] = {0, 0, 0};
+			if(a.bone == "head")
+				b[1] = 1.3;
+			else if(a.bone == "body")
+				b[1] = 1.0;
+			else if(a.bone == "hand")
+				b[0] = 0.3, b[1] = 0.8;
+			const double lx = b[0] + a.off[0], lz = b[2] + a.off[2];
+			// (the player's entity's place is its feet's cell's middle)
+			double w[3] = {pi->second.pos[0] + lx * std::cos(yaw) +
+					lz * std::sin(yaw), pi->second.pos[1] - 0.5 + b[1] + a.off[1],
+					pi->second.pos[2] - lx * std::sin(yaw) + lz * std::cos(yaw)};
+			double l[3];
+			to_local(e.parent, w, l);
+			if(std::fabs(l[0] - e.pos[0]) + std::fabs(l[1] - e.pos[1]) +
+					std::fabs(l[2] - e.pos[2]) < 0.01)
+				continue;
+			for(int k = 0; k < 3; k++)
+				e.pos[k] = l[k];
+			place_nodes(e.id);
+		}
+		for(auto &g : gone)
+			detach(g.first, g.second);
+	}
+
 	// [KIT_SCENES] A player teleported onto an entity, by name: its id and
 	// until when (game µs) stepping into its zone is no entering
 	std::map<ss_, std::pair<uint64_t, int64_t>> m_arrive;
@@ -12292,6 +12443,8 @@ struct Module: public interface::Module, public Interface
 			sky_relight_tick();
 			hm_sections_tick();
 		}
+		// [KIT_CARRY_ATTACH]
+		attach_tick();
 		if(!m_active)
 			flush_copies();
 		// Writes into the start, made as their sections load: Running,
@@ -12486,6 +12639,18 @@ struct Module: public interface::Module, public Interface
 	sm_<size_t, ss_> m_controls_sent;
 	// Vehicles moved in play, where they were: back at Stop
 	std::map<uint64_t, std::array<double, 4>> m_seat_home;
+	// [KIT_CARRY_ATTACH] Entities on players (c:attach): the player, the
+	// bone ("" the feet, "head", "body", "hand"), the offset (m, in the
+	// body's turn), the node told and when it was last placed
+	struct Attach
+	{
+		uint64_t player = 0;
+		ss_ bone;
+		double off[3] = {0, 0, 0};
+		uint32_t told = 0;
+		int64_t at_us = 0;
+	};
+	std::map<uint64_t, Attach> m_attached;
 
 	static const int MAX_INPUTS = 120; // queued, a body
 	static const int BATCH = 8; // inputs a step request
@@ -13284,6 +13449,12 @@ struct Module: public interface::Module, public Interface
 			place_nodes(e.id);
 		}
 		m_seat_home.clear();
+		// [KIT_CARRY_ATTACH] nothing on a player past Stop
+		sv_<uint64_t> on;
+		for(auto &a : m_attached)
+			on.push_back(a.first);
+		for(uint64_t id : on)
+			detach(id, "Stop");
 	}
 
 	// ---- Clients act
@@ -19746,6 +19917,7 @@ struct Module: public interface::Module, public Interface
 		std::map<size_t, Body> bodies;
 		sm_<size_t, ss_> controls_sent;
 		std::map<uint64_t, std::array<double, 4>> seat_home;
+		std::map<uint64_t, Attach> attached;
 		std::set<ss_> action_names;
 		ss_ actions_sent;
 		int64_t actions_at = 0;
@@ -19793,6 +19965,7 @@ struct Module: public interface::Module, public Interface
 		swap(m_bodies, c.bodies);
 		swap(m_controls_sent, c.controls_sent);
 		swap(m_seat_home, c.seat_home);
+		swap(m_attached, c.attached);
 		swap(m_action_names, c.action_names);
 		swap(m_actions_sent, c.actions_sent);
 		swap(m_actions_at, c.actions_at);
