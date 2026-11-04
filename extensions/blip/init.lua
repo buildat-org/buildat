@@ -12,9 +12,14 @@
 --                                    it into one stream
 --   blip.wav(sound) -> the bytes of a 16-bit WAV file
 -- A sound is any of blip1's forms (blip_gen.lua's params()); opts is
--- {gain, panning, type, node}, type the SoundSource's sound type
--- ("Effect"), so the client's volume settings apply, node one of the
--- caller's to play on (blip's own otherwise). blip.gen and blip.mix are
+-- {gain, panning, type, node, at, near, far}, type the SoundSource's
+-- sound type ("Effect"), so the client's volume settings apply, node one
+-- of the caller's to play on (blip's own otherwise); at ({x, y, z} or a
+-- Vector3) plays it positional there, a SoundSource3D on a child of node
+-- (node's scene's listener hears it; near and far its distances, 2 and
+-- 32 m). blip.design(sound, on_save) opens the designer with the sound,
+-- its Save calling on_save(the sound packed, "blip1:...") and closing it
+-- ([KIT_SOUNDS]). blip.gen and blip.mix are
 -- the generator and the mixer, which an app may also copy into itself.
 -- Its versioning is its formats' (blip1), not the engine's.
 local api = buildat.safe or buildat
@@ -74,11 +79,24 @@ end
 
 local function play_on(sound, opts)
 	opts = opts or {}
-	local source = (opts.node or own_node()):CreateComponent("SoundSource")
+	local source
+	if opts.at then
+		-- [KIT_SOUNDS] Positional: a node of its own, gone with the sound
+		local a = opts.at
+		local n = (opts.node or own_node()):CreateChild("blip_at")
+		n.worldPosition = type(a) == "table" and
+				magic.Vector3(a[1] or 0, a[2] or 0, a[3] or 0) or a
+		source = n:CreateComponent("SoundSource3D")
+		source.nearDistance = opts.near or 2
+		source.farDistance = opts.far or 32
+		source.autoRemoveMode = magic.REMOVE_NODE
+	else
+		source = (opts.node or own_node()):CreateComponent("SoundSource")
+		source.panning = opts.panning or 0
+		source.autoRemoveMode = magic.REMOVE_COMPONENT
+	end
 	source.gain = opts.gain or 1
-	source.panning = opts.panning or 0
 	source.soundType = opts.type or "Effect"
-	source.autoRemoveMode = magic.REMOVE_COMPONENT
 	source:Play(sound)
 	return source
 end
@@ -344,7 +362,9 @@ end
 
 local designer = nil
 
-local function open_designer()
+-- sound and on_save: [KIT_SOUNDS] the designer on that sound, a Save
+-- button calling on_save(the sound packed) and closing it
+local function open_designer(sound, on_save)
 	if designer then
 		return
 	end
@@ -352,8 +372,8 @@ local function open_designer()
 	local ui_utils = require("buildat/extension/ui_utils")
 	local import = api.run_extension_file("import.lua")(gen)
 	-- d.p is the sound, its first layer; d.layer the one being edited
-	local d = {p = gen.preset("pickup", 1), seed = 1, format = "compact",
-		use = "play", layer = 1}
+	local d = {p = sound and gen.params(sound) or gen.preset("pickup", 1),
+		seed = 1, format = "compact", use = "play", layer = 1}
 	-- Seeds drawn, not counted: a preset at seeds next to each other
 	-- makes its first choices alike, so clicking a button again repeats
 	local seeds = gen.rng(api.get_time_us() % 2147483646)
@@ -383,7 +403,10 @@ local function open_designer()
 		col = win:CreateChild("UIElement")
 		col:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
 	end
+	-- Its clicks are its own, not a game's or Kit editor's view's
+	ui_utils.wants_clicks(win)
 	local function close()
+		win.visible = false
 		state.on_update = nil
 		designer = nil
 		uistack.main:pop(root)
@@ -452,6 +475,16 @@ local function open_designer()
 	local function say(s)
 		status.text = s
 		log:info("designer: " .. s)
+	end
+	if on_save then
+		local sr = row()
+		button(sr, "Save", function()
+			local packed = gen.pack(d.p)
+			log:info("designer: saved " .. packed)
+			close()
+			on_save(packed)
+		end)
+		button(sr, "Cancel", close)
 	end
 
 	-- Play on every change; while a slider moves, the next play waits
@@ -882,6 +915,11 @@ local function open_designer()
 	show_values()
 	show_code()
 	log:info("designer shown")
+end
+
+function M.safe.design(sound, on_save)
+	assert(type(on_save) == "function", "blip.design: on_save a function")
+	open_designer(gen.params(sound), on_save)
 end
 
 -- The launch tile's way in (launcher/init.lua); params as a server's
