@@ -40,6 +40,12 @@
 -- many points wins the round (checked each second), whichever of it and
 -- the round's time comes first; a tie at the time up under "most" is
 -- overtime still.
+-- [KIT_ARENA_INSTANT_ROUND] `after_round`: after a round's end the next
+-- countdown lasts at least this many seconds (0: `countdown` alone), so
+-- the round's players, back in the lobby, have time to step into the
+-- queue for the next one; first come, first served -- with the next
+-- round full, the last to come wait. A countdown running then starts
+-- over.
 local function ids_in(list, n)
 	local out = {}
 	for i = 1, math.min(n, #list) do
@@ -125,10 +131,15 @@ local function try_count(c)
 			#c.state.queue < c.params.players then
 		return
 	end
-	if c.params.countdown <= 0 then
+	local secs = c.params.countdown
+	if c.state.fresh then
+		secs = math.max(secs, c.params.after_round)
+		c.state.fresh = false
+	end
+	if secs <= 0 then
 		return start(c)
 	end
-	c.state.count = c.params.countdown
+	c.state.count = secs
 	c:log("countdown", c.state.count, "s for", #c.state.queue, "players")
 	c:after(1, "count")
 end
@@ -239,6 +250,7 @@ return {
 			choices = {"draw", "most"}},
 		score_to_win = {type = "number", default = 0, min = 0,
 			max = 1000000},
+		after_round = {type = "number", default = 10, min = 0, max = 600},
 	},
 	state = {
 		-- The default round's: the players in the zone in the order they
@@ -247,6 +259,8 @@ return {
 		queue = {default = {}},
 		taking = {default = {}},
 		count = {default = 0},
+		-- A round ended, no countdown since (for `after_round` seconds)
+		fresh = {default = false},
 		session = {default = 0},
 		last = {default = ""},
 		status = {default = "waiting", shared = true},
@@ -386,6 +400,17 @@ return {
 		if type(w) == "string" then
 			c:emit("result", w)
 		end
+		if c.params.after_round > 0 then
+			c.state.fresh = true
+			c:after(c.params.after_round, "fresh")
+		end
+		if c.state.count > 0 then
+			c.state.count = math.max(c.params.countdown,
+					c.params.after_round)
+			c.state.fresh = false
+			c:log("a round ended: the countdown starts over,",
+					c.state.count, "s")
+		end
 		lobby_status(c)
 		try_count(c)
 	end,
@@ -453,6 +478,8 @@ return {
 			c:after(1, "tick")
 		elseif name == "over" then
 			c:session_end(nil, c.state.outcome)
+		elseif name == "fresh" then
+			c.state.fresh = false
 		end
 	end,
 	on_input = function(c, input, value, by)
