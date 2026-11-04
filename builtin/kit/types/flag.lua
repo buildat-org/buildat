@@ -34,9 +34,11 @@
 -- Its marker (P1's) points it out on every screen, through walls.
 -- Its times (return, immunity, scoring) are c:after's own; a clock each
 -- second counts the outputs' numbers down (up).
--- simplified: it follows its holder by c:move every `poll` s (the
--- server's place, not the holder's client's prediction), and distances
--- are the players' feet's to its place
+-- [KIT_CARRY_ATTACH] Carried, it is attached to its holder (c:attach:
+-- every client draws it at the holder's drawn body, `lift` m over their
+-- feet); every `poll` s the steals and near takes are looked for.
+-- simplified: distances are the players' feet's to its place (the
+-- server's, 5 times a second on its holder)
 local function dist(a, b)
 	local x, y, z = a[1] - b[1], a[2] - b[2], a[3] - b[3]
 	return math.sqrt(x * x + y * y + z * z)
@@ -80,10 +82,6 @@ local function ceil(x)
 	return math.floor(x + 0.999)
 end
 
-local function carry_at(c, p)
-	return {p.pos[1], p.pos[2] + c.params.lift, p.pos[3]}
-end
-
 -- The holder's line, theirs alone (own: per player)
 local function hint(c)
 	local h = c.params.holder_hint
@@ -98,6 +96,7 @@ end
 local function let_go(c)
 	if c.state.holder ~= 0 then
 		c:speed(c.state.holder, 1)
+		c:detach()
 	end
 	c.state.holder = 0
 	c.state.right_use = 0
@@ -147,7 +146,7 @@ local function take(c, p)
 		c.state.left = c.params.return_time
 		c:after(c.params.return_time, "return")
 	end
-	c:move(carry_at(c, p))
+	c:attach(p.id, {offset = {0, c.params.lift, 0}})
 	c:log("taken by", p.name, "from", from, t and "(" .. t.name .. ")" or "")
 	report(c, "holder_team", t and t.name or "")
 	report(c, "immune", ceil(c.state.immune))
@@ -259,10 +258,6 @@ local function poll(c)
 		local h = player(c, s.holder)
 		if not present(h) then
 			return go_home(c, h and h.here and not h.away and "died" or "left")
-		end
-		local at = carry_at(c, h)
-		if dist(at, c.pos) > 0.05 then
-			c:move(at)
 		end
 		local p = stealer(c, h)
 		if p then
