@@ -909,6 +909,10 @@ namespace interface
 
 		virtual const VoxelDefinition* get(const VoxelTypeId &id) = 0;
 		virtual const VoxelDefinition* get(const VoxelName &name) = 0;
+		// Whether a name is registered: get() without its warning, for the
+		// question "is it there yet?" (a module registering what is missing
+		// asked get() and logged a "not found" for each it then added)
+		virtual bool has(const VoxelName &name) = 0;
 
 		// Every method is safe to call from a worker thread while the main
 		// thread adds voxels, and a pointer handed out stays valid; the

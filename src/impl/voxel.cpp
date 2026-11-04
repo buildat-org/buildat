@@ -382,6 +382,12 @@ struct CVoxelRegistry: public VoxelRegistry
 		return get_unlocked(id);
 	}
 
+	bool has(const VoxelName &name)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_name_to_id.count(name) != 0;
+	}
+
 	// The fast path: an id whose entry is finished. `table` says finished
 	// for what -- the basic fields, or those and the atlas segments.
 	const CachedVoxelDefinition* fast_cached_in(

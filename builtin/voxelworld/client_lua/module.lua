@@ -309,6 +309,13 @@ buildat.sub_packet("voxelworld:init", function(data)
 	-- Clear caches
 	node_volume_cache = {}
 	static_node_cache = {}
+	-- [KIT_PLAYTEST_WARNINGS] and the old scene's queued updates and drawn
+	-- chunks: by node id, which the new scene's nodes reuse (a non-chunk
+	-- node "meshed": "A voxel volume not meshed: Failed to read 1 bytes")
+	if node_update_queue then
+		node_update_queue = buildat.SpatialUpdateQueue()
+	end
+	geometry_done = {}
 	static_untracked = static_seen
 
 	-- What this client wants sent to it; see M.send_distance -- and
@@ -1085,7 +1092,8 @@ function sub_events()
 					stuck_pops.distinct = stuck_pops.distinct + 1
 				end
 				local node = replicate.main_scene:GetNode(node_update.node_id)
-				if node then
+				-- (a chunk's: an id another scene's node has now is not)
+				if node and not node:GetVar("buildat_voxel_data"):IsEmpty() then
 					log:debug("Node update #"..
 							node_update_queue:get_length()..
 							" (f="..(math.floor(f*100)/100)..""..

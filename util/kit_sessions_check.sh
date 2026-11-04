@@ -171,6 +171,10 @@ EOF
 	try 6 teleport
 	in_session 1 game
 	tools_on
+	# [KIT_PLAYTEST_WARNINGS] a shape in a session: its scene's registry has
+	# them
+	echo 'event workbench_build {"p": [5, 1, 5], "voxel": "kit/stone:slab", "param": 0, "tint": 0}'
+	echo "sync 5000"
 	info 3 1 3
 	try 4 on
 	echo "sync 5000"
@@ -373,5 +377,15 @@ assert n == 0, "%d rows of session 5's voxels" % n
 assert [s["id"] for s in json.loads(sys.argv[2])] == [0], sys.argv[2]
 PY
 echo "ok: a restart drops the sessions and their voxels, their arena told; the default round as before"
+# [KIT_PLAYTEST_WARNINGS] A session's scene registered quietly (a "not
+# found" for each voxel and shape it then added, 406 a round); a scene
+# switch meshed no other scene's node by a reused id (the client's "not
+# meshed: Failed to read 1 bytes", 360 at the draft here)
+want "$t/srv1.log" "workbench: kitboss placed kit/stone:slab (5,1,5): written"
+grep -a "CVoxelRegistry::get(): name=" "$t"/srv*.log | head -3 | grep . &&
+	fail "the server asked for voxels not registered ($t/srv*.log)"
+grep -a "A voxel volume not meshed" "$t"/boss*.log | head -3 | grep . &&
+	fail "the client meshed what is not a chunk ($t/boss*.log)"
+echo "ok: a slab placed in a session; no voxel looked for in vain, no volume that does not read"
 echo "PASS: sessions: an arena's game session diverging from the start and the default, its clock, runtime and player its own, its sections shared until written, ended from inside or by time; drafts from the start, reaching the start only by Publish; a restart drops them"
 # vim: set noet ts=4 sw=4:

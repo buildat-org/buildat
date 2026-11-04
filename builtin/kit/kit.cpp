@@ -3018,7 +3018,7 @@ struct Module: public interface::Module, public Interface
 			interface::VoxelName n;
 			n.block_name = v.first;
 			m_registered.emplace(v.first, v.second);
-			if(reg->get(n))
+			if(reg->has(n))
 				continue;
 			reg->add_voxel(v.second.definition(v.first));
 		}
@@ -3053,7 +3053,7 @@ struct Module: public interface::Module, public Interface
 		m_registered.emplace(name, m);
 		interface::VoxelName n;
 		n.block_name = name;
-		if(!reg->get(n))
+		if(!reg->has(n))
 			reg->add_voxel(m.definition(name));
 		return true;
 	}
@@ -3066,7 +3066,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		for(const interface::VoxelDefinition &sd :
 				world::shape_definitions(cube)){
-			if(!reg->get(sd.name))
+			if(!reg->has(sd.name))
 				reg->add_voxel(sd);
 		}
 	}
@@ -3124,7 +3124,7 @@ struct Module: public interface::Module, public Interface
 		each_registry([&](interface::VoxelRegistry *reg){
 			interface::VoxelName n;
 			n.block_name = name;
-			if(!reg->get(n))
+			if(!reg->has(n))
 				reg->add_voxel(m.definition(name));
 			if(m.has_shapes())
 				register_shapes(reg, m.definition(name));
@@ -3209,7 +3209,7 @@ struct Module: public interface::Module, public Interface
 					v.set("set", true);
 				interface::VoxelName sn;
 				sn.block_name = n+":"+world::shapes()[0].name;
-				v.set("shapes", reg->get(sn) != nullptr);
+				v.set("shapes", reg->has(sn));
 				if(it == m_voxel_types.end() &&
 						!d.textures[0].resource_name.empty())
 					v.set("texture", d.textures[0].resource_name);
@@ -3279,7 +3279,7 @@ struct Module: public interface::Module, public Interface
 		each_registry([&](interface::VoxelRegistry *reg){
 			interface::VoxelName n;
 			n.block_name = name;
-			taken = taken || reg->get(n);
+			taken = taken || reg->has(n);
 		});
 		if(old == m_voxel_types.end() && taken)
 			return refuse(name+" is the app's or Kit's voxel");
