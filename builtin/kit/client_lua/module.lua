@@ -957,7 +957,8 @@ local function update_play(_, data)
 	for _, l in ipairs(lines) do
 		t[#t + 1] = l[2]
 	end
-	if P.items ~= "" then
+	-- [KIT_HUD] not beside Kit's own slots (its hotbar and screen)
+	if P.items ~= "" and not (M.slots_own and M.slots_own()) then
 		t[#t + 1] = P.items
 	end
 	local text = table.concat(t, "\n")
