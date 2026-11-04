@@ -14552,7 +14552,10 @@ struct Module: public interface::Module, public Interface
 		c.append((int64_t)y);
 		c.append((int64_t)z);
 		j.set("cell", c);
-		j.set("wait", left);
+		// [KIT_TOOLS_1] the client waits on the wall clock: the game's
+		// seconds at its rate (--sim-rate; 0, as fast as it goes: as they are)
+		const double rate = interface::os::game_rate();
+		j.set("wait", rate > 0 ? left / rate : left);
 		j.set("time", need / 1e6);
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "kit:digging", j.stringify());
