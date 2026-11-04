@@ -488,6 +488,122 @@ double fmod(double x, double y)
 	return x < 0 ? -ax : ax;
 }
 
+/* [KIT_BOX_TRIG] sin and cos: x less the nearest multiple of pi/2 (pi/2
+** in three parts, fdlibm's, exact for |x| < 2^20 or so), a series on what
+** is left (|r| <= pi/4, to r^19). The same wasm everywhere: the same
+** results on the server and each client.
+** simplified: no Payne-Hanek reduction, so far past 2^20 the result loses
+** digits (a component's angles are small); musl's __rem_pio2 is the
+** upgrade */
+static const double PIO2_1 = 1.57079632673412561417e+00;
+static const double PIO2_2 = 6.07710050630396597660e-11;
+static const double PIO2_3 = 2.02226624871116645580e-21;
+
+static double sin_kernel(double r)
+{
+	const double r2 = r * r;
+	double term = r, sum = r;
+	for(int i = 2; i < 20; i += 2){
+		term *= -r2 / (i * (i + 1));
+		sum += term;
+	}
+	return sum;
+}
+
+static double cos_kernel(double r)
+{
+	const double r2 = r * r;
+	double term = 1, sum = 1;
+	for(int i = 1; i < 20; i += 2){
+		term *= -r2 / (i * (i + 1));
+		sum += term;
+	}
+	return sum;
+}
+
+/* x's quadrant (0..3) and what is left in -pi/4..pi/4 */
+static int reduce(double x, double *r)
+{
+	const double k = floor(x * 0.63661977236758134308 + 0.5);
+	*r = ((x - k * PIO2_1) - k * PIO2_2) - k * PIO2_3;
+	return (int)fmod(k, 4) & 3;
+}
+
+double sin(double x)
+{
+	if(x == 0)
+		return x;
+	if(x != x || fabs(x) == HUGE_VAL)
+		return 0.0 / 0.0;
+	double r;
+	switch(reduce(x, &r)){
+	case 0: return sin_kernel(r);
+	case 1: return cos_kernel(r);
+	case 2: return -sin_kernel(r);
+	default: return -cos_kernel(r);
+	}
+}
+
+double cos(double x)
+{
+	if(x != x || fabs(x) == HUGE_VAL)
+		return 0.0 / 0.0;
+	double r;
+	switch(reduce(x, &r)){
+	case 0: return cos_kernel(r);
+	case 1: return -sin_kernel(r);
+	case 2: return -cos_kernel(r);
+	default: return sin_kernel(r);
+	}
+}
+
+/* atan: |x| > 1 as pi/2 - atan(1/x), past tan(pi/12) as pi/6 +
+** atan((x sqrt(3) - 1) / (sqrt(3) + x)), then a series (|t| < 0.27) */
+double atan(double x)
+{
+	if(x != x || x == 0)
+		return x;
+	if(x < 0)
+		return -atan(-x);
+	if(x > 1)
+		return 1.57079632679489661923 - atan(1 / x);
+	double base = 0;
+	if(x > 0.26794919243112270647){
+		x = (x * 1.73205080756887729353 - 1) / (1.73205080756887729353 + x);
+		base = 0.52359877559829887308;
+	}
+	const double x2 = x * x;
+	double term = x, sum = 0;
+	for(int i = 1; i < 40; i += 2){
+		sum += term / i;
+		term *= -x2;
+	}
+	return base + sum;
+}
+
+double atan2(double y, double x)
+{
+	const double PI = 3.14159265358979323846;
+	if(x != x || y != y)
+		return x + y;
+	const int yneg = ((bits){y}.u >> 63) != 0;
+	const int xneg = ((bits){x}.u >> 63) != 0;
+	if(y == 0)
+		return xneg ? (yneg ? -PI : PI) : y;
+	if(x == 0)
+		return yneg ? -PI / 2 : PI / 2;
+	if(fabs(x) == HUGE_VAL){
+		const double a = fabs(y) == HUGE_VAL ? PI / 4 : 0;
+		const double r = xneg ? PI - a : a;
+		return yneg ? -r : r;
+	}
+	if(fabs(y) == HUGE_VAL)
+		return yneg ? -PI / 2 : PI / 2;
+	const double a = atan(fabs(y / x));
+	const double r = xneg ? PI - a : a;
+	return yneg ? -r : r;
+}
+
 /* ---- locale.h */
 static char g_point[] = ".";
 static struct lconv g_lconv = {g_point};

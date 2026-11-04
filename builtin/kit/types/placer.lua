@@ -4,13 +4,8 @@
 -- cell at their feet's level there; `signal` (an input of the copy's, ""
 -- none) is sent to it then, as by them (kit/explosive's "arm"). Its
 -- output placed: the copy's id.
--- simplified: put where their feet are, ahead (the nearest of 8 ways),
--- whatever is there (into a wall too); the copy's own type may fall
--- (c:move)
--- sin and cos of yaw 0, 45, ... 315
-local R = 0.7071
-local WAYS = {{0, 1}, {R, R}, {1, 0}, {R, -R}, {0, -1}, {-R, -R}, {-1, 0},
-	{-R, R}}
+-- simplified: put where their feet are, ahead, whatever is there (into a
+-- wall too); the copy's own type may fall (c:move)
 
 return {
 	version = 1,
@@ -40,12 +35,12 @@ return {
 		if c.params.consume and not c:take(item, 1) then
 			return
 		end
-		-- (the box's Lua has no math.sin: the nearest of 8 ways)
-		local k = math.floor((tonumber(p.yaw) or 0) / 45 + 0.5) % 8 + 1
+		-- yaw in degrees, 0 towards +z, 90 towards +x
+		local a = math.pi / 180 * (tonumber(p.yaw) or 0)
 		local d = c.params.distance
-		local pos = {math.floor(p.pos[1] + WAYS[k][1] * d + 0.5),
+		local pos = {math.floor(p.pos[1] + math.sin(a) * d + 0.5),
 			math.floor(p.pos[2] + 0.5),
-			math.floor(p.pos[3] + WAYS[k][2] * d + 0.5)}
+			math.floor(p.pos[3] + math.cos(a) * d + 0.5)}
 		local id = c:spawn{prefab = c.params.prefab, pos = pos}
 		c:log(c:name(by), "places", c.params.prefab, "at", pos[1], pos[2],
 			pos[3], "as", id)

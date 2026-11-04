@@ -39,7 +39,11 @@ namespace interface
 // An entity carries component instances: a component type is a Lua file
 // run in Kit's box, a Lua 5.1 in a server .wasm (box/box.c, sandboxed and
 // metered by src/wasm/engine.cpp); an instance has the type's parameters'
-// values and links from its outputs to other entities' inputs.
+// values and links from its outputs to other entities' inputs. Its code
+// has Lua's base (no pcall, coroutines or loadstring), string, table and
+// math's abs, min, max, floor, ceil, sqrt, fmod, sin, cos, atan, atan2
+// (radians; the box's own, the same on the server and every client), pi,
+// huge and random (one sequence in the box).
 //
 // A type is named "<author>/<name>" ([KIT] stage 4b): everyone makes their
 // own door. Kit's own generic types are builtin/kit/types/<name>.lua,

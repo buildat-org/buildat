@@ -85,6 +85,10 @@ double pow(double x, double y);
 double fmod(double x, double y);
 double frexp(double x, int *e);
 double ldexp(double x, int e);
+double sin(double x);
+double cos(double x);
+double atan(double x);
+double atan2(double y, double x);
 
 /* locale.h */
 struct lconv { char *decimal_point; };

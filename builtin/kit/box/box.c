@@ -163,6 +163,26 @@ static int l_sqrt(lua_State *l)
 	lua_pushnumber(l, sqrt(luaL_checknumber(l, 1)));
 	return 1;
 }
+static int l_sin(lua_State *l)
+{
+	lua_pushnumber(l, sin(luaL_checknumber(l, 1)));
+	return 1;
+}
+static int l_cos(lua_State *l)
+{
+	lua_pushnumber(l, cos(luaL_checknumber(l, 1)));
+	return 1;
+}
+static int l_atan(lua_State *l)
+{
+	lua_pushnumber(l, atan(luaL_checknumber(l, 1)));
+	return 1;
+}
+static int l_atan2(lua_State *l)
+{
+	lua_pushnumber(l, atan2(luaL_checknumber(l, 1), luaL_checknumber(l, 2)));
+	return 1;
+}
 static int l_fmod(lua_State *l)
 {
 	lua_pushnumber(l, fmod(luaL_checknumber(l, 1), luaL_checknumber(l, 2)));
@@ -197,6 +217,7 @@ static int l_random(lua_State *l)
 
 static const luaL_Reg MATH[] = {
 	{"floor", l_floor}, {"ceil", l_ceil}, {"sqrt", l_sqrt}, {"fmod", l_fmod},
+	{"sin", l_sin}, {"cos", l_cos}, {"atan", l_atan}, {"atan2", l_atan2},
 	{"random", l_random}, {NULL, NULL}
 };
 
