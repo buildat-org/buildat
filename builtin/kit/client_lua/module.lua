@@ -1474,8 +1474,9 @@ local function region_at(x, y, z)
 				sz = g
 			end
 			local e = {}
+			-- ([KIT_CTF] the server's MAX_REGION_EXTENT)
 			for i = 1, 3 do
-				e[i] = math.max(1, math.min(64, math.floor(tonumber(sz[i]) or 1)))
+				e[i] = math.max(1, math.min(384, math.floor(tonumber(sz[i]) or 1)))
 			end
 			local p = n.node.position
 			local ox, oy, oz = math.floor(p.x + 1e-4), math.floor(p.y + 1e-4),
@@ -1910,7 +1911,8 @@ do
 	local ok, err, install = buildat.run_script_file("kit/ui.lua")
 	assert(ok and type(install) == "function", "kit: ui.lua: " ..
 			tostring(err))
-	install({M = M, E = E, P = P, log = log, STYLE = STYLE, send = send})
+	install({M = M, E = E, O = O, P = P, log = log, STYLE = STYLE,
+		send = send})
 end
 
 -- ---- [KIT_INVENTORY_PLAY] [KIT_HUD] The slots, the hotbar, the health

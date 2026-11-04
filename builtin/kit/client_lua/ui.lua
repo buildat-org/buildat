@@ -449,10 +449,129 @@ local function update()
 	end
 	want.visible = wants
 end
+
+-- [KIT_CTF] World markers: an entity whose type has a `marker` ({color,
+-- label, lift, state}, "param:<name>" as a look's) pointed out on this
+-- screen while its shared state `state` (none: always) is true: a dot of
+-- its colour and its label `lift` metres (1) over it, drawn over the
+-- world (through walls), kept at the screen's edge while it is off the
+-- screen or behind the view, following the entity as it moves
+local MK = {}
+local MARGIN = 14
+local function markers()
+	local cn = K.O.camera
+	local cam = cn and cn:GetComponent("Camera")
+	local root = magic.ui.root
+	for id, n in pairs(P.nodes) do
+		local mk = type(n.show) == "table" and type(n.show.marker) == "table"
+				and n.show.marker or nil
+		local r = MK[id]
+		if mk and (not r or r.node ~= n.node) then
+			if r then
+				r.el:Remove()
+			end
+			r = {node = n.node}
+			r.el = root:CreateChild("UIElement")
+			r.el.priority = -3
+			r.el.bringToFront = false
+			r.dot = r.el:CreateChild("BorderImage")
+			r.dot:SetFixedSize(12, 12)
+			r.t = r.el:CreateChild("Text")
+			r.t:SetFont(magic.cache:GetResource("Font", FONT), 14)
+			r.t:SetTextEffect(magic.TE_SHADOW)
+			MK[id] = r
+		end
+		if r then
+			r.seen = true
+			r.mk = mk
+		end
+	end
+	for id, r in pairs(MK) do
+		if not r.seen then
+			pcall(function() r.el:Remove() end)
+			MK[id] = nil
+		end
+		r.seen = nil
+	end
+	local W, H = root.width, root.height
+	for id, r in pairs(MK) do
+		local mk, n = r.mk, P.nodes[id]
+		local on = cam ~= nil and (type(mk.state) ~= "string" or
+				state(n, id, mk.state) == true)
+		local where = "hidden"
+		if on then
+			local p = n.node.worldPosition
+			p = magic.Vector3(p.x, p.y + num(mk.lift, 1, -100, 100), p.z)
+			local o, d = cn.worldPosition, cn.worldDirection
+			local behind = not cam.orthographic and (p.x - o.x) * d.x +
+					(p.y - o.y) * d.y + (p.z - o.z) * d.z <= 0.01
+			local sp = cam:WorldToScreenPoint(p)
+			local x, y = sp.x * W, sp.y * H
+			local cx, cy = W / 2, H / 2
+			local dx, dy = x - cx, y - cy
+			if behind then
+				-- (its projection is through the eye: the way to it across
+				-- the view instead, right = up x dir, up = dir x right, at
+				-- least at the edge; straight behind: the bottom)
+				local vx, vy, vz = p.x - o.x, p.y - o.y, p.z - o.z
+				local rx, rz = d.z, -d.x
+				local ux, uy, uz = -d.y * d.x, d.z * d.z + d.x * d.x, -d.y * d.z
+				dx = vx * rx + vz * rz
+				dy = -(vx * ux + vy * uy + vz * uz)
+				if math.abs(dx) + math.abs(dy) < 1e-3 then
+					dy = 1
+				end
+			end
+			local hw, hh = cx - MARGIN, cy - MARGIN
+			local k = math.min(dx ~= 0 and hw / math.abs(dx) or math.huge,
+					dy ~= 0 and hh / math.abs(dy) or math.huge)
+			where = "on screen"
+			if behind or k < 1 then
+				where = "at the edge"
+				dx, dy = dx * k, dy * k
+			end
+			x, y = math.floor(cx + dx), math.floor(cy + dy)
+			local label = tostring(mk.label == nil and "" or mk.label):sub(1, 64)
+			r.dot.color = color(mk.color, magic.Color(1, 0.85, 0.2))
+			r.t:SetColor(r.dot.color)
+			if r.t.text ~= label then
+				r.t.text = label
+			end
+			-- The dot on the point, the label over it, both on the screen
+			local tw, th = r.t.minWidth, r.t.height
+			r.dot:SetPosition(x - 6, y - 6)
+			r.t:SetPosition(math.max(0, math.min(W - tw, x - math.floor(tw /
+					2))), math.max(0, y - 8 - th))
+			where = where .. " at " .. x .. "," .. y
+			r.at = {x, y}
+		end
+		r.el.visible = on
+		r.where = where
+		local line = "kit: marker " .. id .. " \"" .. tostring(mk.label or "") ..
+				"\" " .. where:gsub(" at %-?%d+,%-?%d+$", "")
+		if line ~= r.log then
+			r.log = line
+			log:info(line .. (r.at and on and (" (" .. r.at[1] .. "," ..
+					r.at[2] .. " in " .. W .. "x" .. H .. ")") or ""))
+		end
+	end
+end
+
 magic.SubscribeToEvent("Update", function()
 	local ok, err = pcall(update)
 	if not ok then
 		log:warning("kit: ui: " .. tostring(err))
+	end
+	ok, err = pcall(markers)
+	if not ok then
+		log:warning("kit: markers: " .. tostring(err))
+	end
+end)
+
+-- For a drive: "event kit_markers" logs where each marker is drawn
+magic.SubscribeToEvent("command_seq:kit_markers", function()
+	for id, r in pairs(MK) do
+		log:info("kit: marker " .. id .. " is " .. tostring(r.where))
 	end
 end)
 

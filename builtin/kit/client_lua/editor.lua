@@ -5872,8 +5872,9 @@ local function draw_play_links()
 			local o = magic.Vector3(math.floor(p.x + 1e-4) - 0.5,
 					math.floor(p.y + 1e-4) - 0.5, math.floor(p.z + 1e-4) - 0.5)
 			local e = {}
+			-- ([KIT_CTF] the server's MAX_REGION_EXTENT)
 			for i = 1, 3 do
-				e[i] = math.max(1, math.min(64, math.floor(tonumber(sz[i]) or 1)))
+				e[i] = math.max(1, math.min(384, math.floor(tonumber(sz[i]) or 1)))
 			end
 			dbg:AddBoundingBox(magic.BoundingBox(o, magic.Vector3(o.x + e[1],
 					o.y + e[2], o.z + e[3])), magic.Color(1, 0.3, 0.3), true)

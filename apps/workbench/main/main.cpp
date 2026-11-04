@@ -384,6 +384,11 @@ struct Module: public interface::Module
 			drop_scene(name);
 		};
 		h.controls = true;
+		// [KIT_CTF] A check's own component types (a directory), as the
+		// app's; never set but by a check
+		const char *types = getenv("BUILDAT_WORKBENCH_TYPES");
+		if(types && types[0])
+			h.types_path = types;
 		// [KIT_MATERIAL_SETS] a World may be made of a set package
 		h.material_sets = true;
 		// The World: Workbench's floor, unless the composer says otherwise:

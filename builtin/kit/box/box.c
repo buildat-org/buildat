@@ -31,7 +31,10 @@
 **                        seconds (-1: taken back), player | null}...},
 **                        teleport = {x, y, z} (or {} with an entity),
 **                        teleport_yaw = degrees, teleport_scene = name,
-**                        teleport_entity = id
+**                        teleport_entity = id, [KIT_CTF] move = {x, y,
+**                        z, fall} (c:move), speed = {{player, factor}...}
+**                        (c:speed); the request's regions = {{id, team,
+**                        rules, o, n}...} (a type's `regions`: c:region_at)
 **                        (looking that way, level), sessions =
 **                        {{"start", {player id...} | null} | {"move",
 **                        player id, session} | {"end", session}...}
@@ -476,6 +479,39 @@ static const char PRELUDE[] =
 "		fx.teleport_yaw = yaw and yaw - yaw == 0 and yaw or nil\n"
 "		fx.teleport_scene = opts and type(opts.scene) == 'string' and opts.scene ~= '' and opts.scene or nil\n"
 "		fx.teleport_entity = ent\n"
+"	end\n"
+"	-- [KIT_CTF] its own entity moved (the world's position; fall: down\n"
+"	-- onto the first solid below, on_fall's), a player's speed, the\n"
+"	-- region deciding a cell (a type's `regions`: the smallest holding it)\n"
+"	function c:move(pos, opts)\n"
+"		if type(pos) ~= 'table' then error('move: a position, {x, y, z}', 2) end\n"
+"		if opts ~= nil and type(opts) ~= 'table' then error('move: options are {fall = true}', 2) end\n"
+"		local m = {tonumber(pos[1]) or 0, tonumber(pos[2]) or 0, tonumber(pos[3]) or 0, opts and opts.fall == true or false}\n"
+"		for k = 1, 3 do if m[k] ~= m[k] or m[k] - m[k] ~= 0 then error('move: a position of numbers', 2) end end\n"
+"		fx.move = m\n"
+"	end\n"
+"	function c:speed(player, factor)\n"
+"		local f = tonumber(factor)\n"
+"		if not f or f ~= f or f < 0 or f > 10 then error('speed: a factor from 0 to 10', 2) end\n"
+"		local s = fx.speed or {}\n"
+"		if #s >= 64 then error('speed: 64 a run at most', 2) end\n"
+"		s[#s + 1] = {type(player) == 'string' and player or tonumber(player) or 0, f}\n"
+"		fx.speed = s\n"
+"	end\n"
+"	function c:region_at(pos)\n"
+"		if not req.regions then error('region_at: its type reads no regions (regions = true)', 2) end\n"
+"		if type(pos) ~= 'table' then error('region_at: a position, {x, y, z}', 2) end\n"
+"		local p = {}\n"
+"		for k = 1, 3 do local v = (tonumber(pos[k]) or 0) + 0.5 p[k] = v - v % 1 end\n"
+"		local best, best_v\n"
+"		for _, r in ipairs(req.regions) do\n"
+"			local inside = true\n"
+"			for k = 1, 3 do inside = inside and p[k] >= r.o[k] and p[k] < r.o[k] + r.n[k] end\n"
+"			local v = r.n[1] * r.n[2] * r.n[3]\n"
+"			if inside and (not best or v < best_v) then best, best_v = r, v end\n"
+"		end\n"
+"		if not best then return nil end\n"
+"		return {id = best.id, team = best.team, rules = copy(best.rules)}\n"
 "	end\n"
 "	-- [KIT] stage 6a: a call into the app's native code (the host lets\n"
 "	-- only the app's own types through)\n"

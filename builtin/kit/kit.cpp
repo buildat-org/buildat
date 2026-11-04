@@ -84,6 +84,10 @@ static const size_t MAX_TYPE_SOURCE = 256 << 10;
 // a volume has at most
 static const int MAX_EXTENT = 64;
 static const int MAX_VOLUME = 64;
+// [KIT_CTF] A region's extent each way: the World's whole height, so a
+// map-wide region and a column down to the World's bottom fit
+static const int MAX_REGION_EXTENT = (kit::WORLD_SECTION_Y1 -
+		kit::WORLD_SECTION_Y0 + 1) * kit::WORLD_SECTION;
 // The cells a grants type's c:set_voxel sets at most (its box)
 static const int MAX_SET_CELLS = 4096;
 // [KIT_CTF] c:explode: its radius in cells (a sphere of about 3050 cells
@@ -238,6 +242,8 @@ struct Type
 	// [KIT_MINIGAMES_1] It is a team (team = true: the Team interface, its
 	// state members and score); it reads every team (teams = true)
 	bool team = false, teams = false;
+	// [KIT_CTF] It reads its scene's regions (regions = true: c:region_at)
+	bool regions = false;
 	// Its client part, <name>.client.lua beside it ("" none)
 	ss_ client;
 	bool usable = false, owns_voxel = false;
@@ -1556,6 +1562,7 @@ struct Module: public interface::Module, public Interface
 		t.equipment = t.decl.get("equipment").is_true();
 		t.team = t.decl.get("team").is_true();
 		t.teams = t.decl.get("teams").is_true();
+		t.regions = t.decl.get("regions").is_true();
 		// Its client part, beside it
 		const ss_ client = pkg ? jstr(pt->second, "client") :
 				read_file(dir+"/"+short_name+".client.lua");
@@ -1946,12 +1953,13 @@ struct Module: public interface::Module, public Interface
 				(int32_t)std::floor(w[1]), (int32_t)std::floor(w[2]));
 	}
 
-	// An extent parameter's cells each way: whole numbers, 1...MAX_EXTENT
-	static void extent(const json::Value &v, int out[3])
+	// An extent parameter's cells each way: whole numbers, 1...max
+	static void extent(const json::Value &v, int out[3],
+			int max = MAX_EXTENT)
 	{
 		for(unsigned k = 0; k < 3; k++){
 			const double d = v.at(k).is_number() ? v.at(k).as_number() : 1;
-			out[k] = (int)std::max(1.0, std::min((double)MAX_EXTENT,
+			out[k] = (int)std::max(1.0, std::min((double)max,
 					std::floor(d)));
 		}
 	}
@@ -7680,6 +7688,9 @@ struct Module: public interface::Module, public Interface
 			}
 			if(show.get("hud").is_undefined() && !d.get("hud").is_undefined())
 				show.set("hud", d.get("hud"));
+			// [KIT_CTF] its world marker, "param:<name>" as a look's
+			if(show.get("marker").is_undefined() && d.get("marker").is_object())
+				show.set("marker", look_of(in, d.get("marker")));
 			// [KIT_UI_COMPONENTS] Its UI, "param:<name>" as a look's
 			if(show.get("ui").is_undefined() && d.get("ui").is_object()){
 				json::Value u = look_of(in, d.get("ui"));
@@ -7703,7 +7714,7 @@ struct Module: public interface::Module, public Interface
 			// size while resized), and its border drawn in play
 			if(!ty.region.empty() && show.get("region").is_undefined()){
 				int n[3];
-				extent(in.params.get(ty.region), n);
+				extent(in.params.get(ty.region), n, MAX_REGION_EXTENT);
 				json::Value g = json::array();
 				for(int k = 0; k < 3; k++)
 					g.append(n[k]);
@@ -8083,11 +8094,66 @@ struct Module: public interface::Module, public Interface
 				for(const Instance &pi : it->second.comps)
 					st.set(pi.type, pi.state);
 				j.set("state", st);
+				// [KIT_CTF] where they are (the world's, their feet's cell's
+				// middle), which way they look, alive
+				if(it->second.has_pos){
+					double w[3];
+					world_of(it->second, w);
+					json::Value pos = json::array();
+					for(int k = 0; k < 3; k++)
+						pos.append(w[k]);
+					j.set("pos", pos);
+					auto bi = m_bodies.find(peer_of_player(pl.second));
+					j.set("yaw", bi != m_bodies.end() ? bi->second.look_yaw :
+							it->second.yaw);
+				}
+				j.set("alive", player_alive(it->second));
 				players.append(j);
 				names.set("player:"+itos(pl.second), pl.first);
 			}
 			o += ",players=";
 			lua_lit(players, o);
+		}
+		// [KIT_CTF] its scene's regions: {id, team, rules, o, n} (the
+		// enabled ones; c:region_at picks the smallest holding a cell)
+		if(m_types[in.type].regions){
+			ss_ scene;
+			scene_of(e, &scene);
+			json::Value regions = json::array();
+			for(auto &p : m_entities){
+				const Entity &re = p.second;
+				if(!re.has_pos)
+					continue;
+				for(const Instance &ri : re.comps){
+					const Type &rt = m_types[ri.type];
+					if(rt.region.empty() || !ri.disabled.empty() ||
+							ri.state.get("enabled").is_false())
+						continue;
+					ss_ rs;
+					scene_of(re, &rs);
+					if(rs != scene)
+						continue;
+					int n[3];
+					region_extent(ri, rt, n);
+					const pv::Vector3DInt32 c = voxel_p(re);
+					json::Value j = json::object(), o = json::array(),
+							nn = json::array();
+					o.append(c.getX());
+					o.append(c.getY());
+					o.append(c.getZ());
+					for(int k = 0; k < 3; k++)
+						nn.append(n[k]);
+					j.set("id", (int64_t)re.id);
+					j.set("team", (int64_t)team_over(re));
+					j.set("rules", ri.state.get("rules").is_object() ?
+							ri.state.get("rules") : json::object());
+					j.set("o", o);
+					j.set("n", nn);
+					regions.append(j);
+				}
+			}
+			o += ",regions=";
+			lua_lit(regions, o);
 		}
 		// [KIT_MINIGAMES_1] its teams, by id: {id, params, state}
 		if(m_types[in.type].teams){
@@ -8413,6 +8479,13 @@ struct Module: public interface::Module, public Interface
 		if(tp.is_array())
 			teleport(e, type, who, tp, fx.get("teleport_yaw"),
 					fx.get("teleport_scene"), fx.get("teleport_entity"));
+		// [KIT_CTF] c:move (its own entity), c:speed (players it reaches)
+		const json::Value &mv = fx.get("move");
+		if(mv.is_array())
+			move_fx(e, r.comp, mv, r.by);
+		const json::Value &speeds = fx.get("speed");
+		for(unsigned i = 0; i < speeds.size(); i++)
+			speed_fx(e, r.comp, r.by, speeds.at(i));
 		const json::Value &apps = fx.get("app");
 		for(unsigned i = 0; i < apps.size(); i++)
 			app_call(e, type, r.by, who, apps.at(i));
@@ -10675,6 +10748,159 @@ struct Module: public interface::Module, public Interface
 		to_scene(peer, other ? target : "", x, y, z, look);
 	}
 
+	// [KIT_CTF] c:move(pos, {fall}): the entity itself to a place in the
+	// world (and what is under it with it), back where it was at Stop; with
+	// fall, onto the first solid below there (fall_to), on_fall(c, pos)
+	// after (pos where it landed; nil: nothing below, it stayed). A
+	// player's entity (c:teleport moves them) or one owning voxels is
+	// refused
+	void move_fx(Entity &e, size_t comp, const json::Value &m, const ss_ &by)
+	{
+		const uint64_t id = e.id;
+		const ss_ type = comp < e.comps.size() ? e.comps[comp].type : "";
+		double w[3];
+		for(unsigned k = 0; k < 3; k++)
+			w[k] = m.at(k).is_number() ? m.at(k).as_number() : 0;
+		ss_ why;
+		if(!e.has_pos || e.kind == "player")
+			why = "it has no place of its own to move";
+		else if(!owned_cells(e).empty())
+			why = "it owns voxels";
+		for(int k = 0; k < 3 && why.empty(); k++)
+			if(!std::isfinite(w[k]) || std::fabs(w[k]) > MAX_COORD)
+				why = "past the world's coordinates";
+		if(!why.empty()){
+			log_w(MODULE, "Entity %s's %s: a move refused: %s", cs(itos(id)),
+					cs(type), cs(why));
+			add_log(id, "a move refused: "+why);
+			return;
+		}
+		const bool fall = m.at(3u).is_true();
+		const bool landed = !fall || fall_to(e, w);
+		if(landed){
+			if(!m_seat_home.count(id))
+				m_seat_home[id] = {{e.pos[0], e.pos[1], e.pos[2], e.yaw}};
+			double l[3];
+			to_local(e.parent, w, l);
+			for(int k = 0; k < 3; k++)
+				e.pos[k] = l[k];
+			place_nodes(id);
+			log_i(MODULE, "Entity %s's %s moves to (%g, %g, %g)", cs(itos(id)),
+					cs(type), w[0], w[1], w[2]);
+		} else {
+			log_i(MODULE, "Entity %s's %s: nothing to fall onto below (%g, "
+					"%g, %g)", cs(itos(id)), cs(type), w[0], w[1], w[2]);
+		}
+		if(!fall || !m_types[type].handlers.count("on_fall"))
+			return;
+		Run r;
+		r.entity = id;
+		r.comp = comp;
+		r.handler = "on_fall";
+		r.by = by;
+		if(landed){
+			json::Value p = json::array();
+			for(int k = 0; k < 3; k++)
+				p.append(w[k]);
+			r.args.append(p);
+		} else {
+			r.args.append(json::null());
+		}
+		queue_run(r);
+	}
+
+	// [KIT_CTF] A point dropped onto the first solid voxel below its cell
+	// (or a heightmap's ground over it): w[1] the middle of the cell over
+	// it (the ground + 0.5). A cell not loaded counts as solid, as
+	// move.lua's; false: nothing down to the World's bottom
+	bool fall_to(const Entity &e, double w[3])
+	{
+		ss_ scene;
+		main_context::SceneReference sr = scene_of(e, &scene);
+		const int x = (int)std::floor(w[0] + 0.5),
+				z = (int)std::floor(w[2] + 0.5),
+				bottom = WORLD_SECTION_Y0 * WORLD_SECTION;
+		bool found = false;
+		double y = 0;
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			voxelworld::Instance *vw = sr ? ivw->get_instance(sr) : nullptr;
+			if(!vw)
+				return;
+			interface::VoxelRegistry *reg = vw->get_voxel_reg();
+			const auto &fmt = reg->get_format();
+			const pv::Vector3DInt16 ss = vw->get_section_size_voxels();
+			auto div = [](int a, int b){ return a >= 0 ? a / b : -((-a + b - 1) / b); };
+			for(int j = (int)std::floor(w[1] + 0.5) - 1; j >= bottom; j--){
+				const pv::Vector3DInt16 sp(div(x, ss.getX()), div(j, ss.getY()),
+						div(z, ss.getZ()));
+				bool solid = !vw->is_section_loaded(sp);
+				if(!solid){
+					const interface::VoxelDefinition *d = reg->get((uint32_t)
+							fmt.id.get(vw->get_voxel(pv::Vector3DInt32(x, j, z),
+							true).data));
+					solid = d && d->physically_solid;
+				}
+				if(solid){
+					found = true;
+					y = j + 1;
+					break;
+				}
+			}
+		});
+		// The World's heightmap ground, where it is over the voxels found
+		World *wd = world_at(sr);
+		WorldScope ws(m_w, wd);
+		if(wd && m_w->world_scene && sr == m_w->world_scene &&
+				m_w->wp.heightmap())
+			heightmap::access(m_server, [&](heightmap::Interface *ih){
+				heightmap::Instance *map = ih->get_instance(m_w->world_scene);
+				if(!map)
+					return;
+				const double g = map->height_at((float)w[0], (float)w[2]) + 0.5;
+				if(g <= w[1] && (!found || g > y)){
+					found = true;
+					y = g;
+				}
+			});
+		if(found)
+			w[1] = y;
+		return found;
+	}
+
+	// [KIT_CTF] c:speed(player, factor): the player's movement's `speed`
+	// times factor (0...10) from now on, on the server's steps and their
+	// client's prediction (controls_for sends the parameters), until the
+	// next call, their body's going (a leave, another session) or Stop. A
+	// player it reaches: the run's, or any for a type with `players`
+	void speed_fx(const Entity &e, size_t comp, const ss_ &by,
+			const json::Value &s)
+	{
+		const json::Value &who = s.at(0u);
+		const uint64_t pid = who.is_string() ? player_id(who.as_string()) :
+				who.is_number() && who.as_number() > 0 ?
+				(uint64_t)who.as_number() : 0;
+		const double f = s.at(1u).is_number() ? s.at(1u).as_number() : 1;
+		auto pi = m_entities.find(pid);
+		ss_ why;
+		if(pi == m_entities.end() || pi->second.kind != "player")
+			why = "no player";
+		else if(!reach(e, comp, by).count(pid))
+			why = "not a player it reaches";
+		else if(!(f >= 0 && f <= 10))
+			why = "a factor from 0 to 10";
+		const size_t peer = why.empty() ? peer_of_player(pid) : 0;
+		if(why.empty() && (!peer || !m_host.controls))
+			why = "they are not here";
+		if(!why.empty()){
+			add_log(e.id, "speed "+itos(pid)+" refused: "+why);
+			return;
+		}
+		Body &b = m_bodies[peer];
+		if(b.speed != f)
+			log_i(MODULE, "%s's speed x%g", cs(pi->second.name), f);
+		b.speed = f;
+	}
+
 	// [KIT_SCENES] A player teleported onto an entity, by name: its id and
 	// until when (game µs) stepping into its zone is no entering
 	std::map<ss_, std::pair<uint64_t, int64_t>> m_arrive;
@@ -11228,7 +11454,8 @@ struct Module: public interface::Module, public Interface
 	void region_extent(const Instance &in, const Type &t, int n[3])
 	{
 		const json::Value &sz = in.state.get("size");
-		extent(pos_ok(sz) ? sz : in.params.get(t.region), n);
+		extent(pos_ok(sz) ? sz : in.params.get(t.region), n,
+				MAX_REGION_EXTENT);
 	}
 
 	// The region deciding a cell of a scene: the smallest enabled one
@@ -12183,6 +12410,8 @@ struct Module: public interface::Module, public Interface
 		// [KIT_TOOLS_1] the last input's yaw (degrees from +z toward +x):
 		// a hit's knockback where nothing else gives its direction
 		double look_yaw = 0;
+		// [KIT_CTF] c:speed's factor on the movement's `speed`
+		double speed = 1;
 	};
 	std::map<size_t, Body> m_bodies;
 	sm_<size_t, ss_> m_controls_sent;
@@ -12270,6 +12499,12 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		params = params_of(type, root_instance(type));
+		// [KIT_CTF] c:speed's factor (a seat's movement is the vehicle's own)
+		const json::Value &sp = params.get("speed");
+		if(b.speed != 1 && sp.is_number()){
+			params.set("speed", sp.as_number() * b.speed);
+			params = json::load_string(params.stringify().c_str());
+		}
 	}
 
 	static double num(const json::Value &v, const char *k, double def,
@@ -12919,12 +13154,16 @@ struct Module: public interface::Module, public Interface
 		unseat(packet.sender, bi->second);
 	}
 
-	// Stop: everyone out of the seats, the vehicles back
+	// Stop: everyone out of the seats, the vehicles (and what c:move moved,
+	// [KIT_CTF]) back
 	void seats_home()
 	{
-		for(auto &bp : m_bodies)
+		for(auto &bp : m_bodies){
 			if(bp.second.seat)
 				unseat(bp.first, bp.second);
+			// [KIT_CTF] c:speed's factors gone
+			bp.second.speed = 1;
+		}
 		for(auto &h : m_seat_home){
 			auto it = m_entities.find(h.first);
 			if(it == m_entities.end())
@@ -13880,6 +14119,21 @@ struct Module: public interface::Module, public Interface
 			}
 		});
 		return clear;
+	}
+
+	// [KIT_CTF] Whether a player is alive (c.players' alive): placed, not
+	// waiting to respawn and their health's hp above 0 where they have one
+	bool player_alive(const Entity &pe)
+	{
+		if(!pe.has_pos)
+			return false;
+		for(const Instance &in : pe.comps)
+			if(m_types[in.type].health){
+				const json::Value &hp = in.state.get("hp");
+				return !in.state.get("waiting").is_true() &&
+						(!hp.is_number() || hp.as_number() > 0);
+			}
+		return true;
 	}
 
 	// The placed peer of a player's entity in this round (0: none)

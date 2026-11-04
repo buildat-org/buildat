@@ -415,7 +415,40 @@ namespace interface
 //                             (Interface::allows); a component on its
 //                             entity with allow(c, player, action, pos)
 //                             returning true or false, reason decides
-//                             first (nil: the rules).
+//                             first (nil: the rules). [KIT_CTF] 384 cells
+//                             a side at most (the World's whole height:
+//                             a map-wide region, a column to the bottom)
+// **Places, moves, speed and markers** ([KIT_CTF], any game's):
+//   c.players (a type's `players`): each also has pos {x, y, z} (placed
+//   ones: the world's, their feet's cell's middle, as c.pos is for an
+//   entity), yaw (degrees, their view's last input) and alive (placed,
+//   not waiting to respawn, their health's hp above 0 where they have
+//   one).
+//   regions = true -- c:region_at({x, y, z}): the region deciding the
+//   cell the point is in (the smallest enabled one of its scene, as
+//   allows() picks), {id, team (the team it is under, 0 none), rules
+//   ({dig = "all"|"owners"|"others"|"none", ...}, its published state)},
+//   nil outside every region (the World's default). As the run began.
+//   c:move({x, y, z}, {fall = true}): its own entity (and what is under
+//   it) to that place in the world after the run, back where it was at
+//   Stop (as a vehicle). fall: dropped onto the first solid voxel below
+//   the point's cell (or the World's heightmap ground), its middle the
+//   cell over it; then on_fall(c, pos): where it landed, or nil when
+//   nothing was below down to the World's bottom (not moved). A cell not
+//   loaded counts as solid (move.lua's). A player's entity (c:teleport)
+//   and one owning voxels are refused, logged.
+//   c:speed(player, factor): a player it reaches (an id or a by), on an
+//   app with Kit's controls, moves at their movement's `speed` times
+//   factor (0...10; 1 as it was) from then on: the server's steps and
+//   their client's prediction ("kit:controls"' parameters) alike. Until
+//   another call, Stop, or their body's going (they leave, another
+//   session). 64 a run.
+//   marker = {color = "#rrggbb", label = text, lift = m (1), state =
+//   "<shared state key>"} ("param:<name>" as a look's) -- the entity
+//   pointed out on every client's screen (client_lua/ui.lua) while that
+//   state is true (none: always): a dot and its label `lift` over it,
+//   over the world (seen through walls), at the screen's edge while it
+//   is off the screen or behind the view, following the entity.
 // `by` is who caused it, "player:<name>" or "app", carried along the links
 // it sets off and kept with a timer. Handlers run only while the server
 // is Running (below).
