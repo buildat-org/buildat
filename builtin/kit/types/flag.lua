@@ -330,7 +330,18 @@ return {
 		left = "number", progress = "number", immune = "number",
 		holder_team = "string", scored = "string"},
 	on_start = function(c)
-		c.state.home = {c.pos[1], c.pos[2], c.pos[3]}
+		-- Home: the start's (a Save as start while it was away), else
+		-- its place in the composition, snapped to the cell; it starts
+		-- there
+		local h = c.state.home
+		if type(h) ~= "table" then
+			local f = math.floor
+			h = {f(c.pos[1] + 0.5), f(c.pos[2] + 0.5), f(c.pos[3] + 0.5)}
+			c.state.home = h
+		end
+		if dist(h, c.pos) > 0.01 then
+			c:move(h)
+		end
 		c.state.enabled = c.params.enabled
 		c:after(c.params.poll, "poll")
 		c:after(1, "clock")

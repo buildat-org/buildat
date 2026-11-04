@@ -437,7 +437,9 @@ namespace interface
 //   nil outside every region (the World's default). As the run began.
 //   c:move({x, y, z}, {fall = true}): its own entity (and what is under
 //   it) to that place in the world after the run, back where it was at
-//   Stop (as a vehicle). fall: dropped onto the first solid voxel below
+//   Stop (as a vehicle); the composition (a save, an edit, a session's
+//   copy) keeps where it was (Save as start: where it is). fall:
+//   dropped onto the first solid voxel below
 //   the point's cell (or the World's heightmap ground), its middle the
 //   cell over it; then on_fall(c, pos): where it landed, or nil when
 //   nothing was below down to the World's bottom (not moved). A cell not

@@ -2529,8 +2529,20 @@ struct Module: public interface::Module, public Interface
 			all[r.first] = &r.second.e;
 		json::Value c = json::object();
 		json::Value es = json::array();
-		for(auto &p : all)
-			es.append(world ? world_row(*p.second) : entity_json(*p.second));
+		for(auto &p : all){
+			// What play moved (c:move, a vehicle) at its place before:
+			// the round's place is never the composition's
+			// simplified: one under a moved one is placed (world) in the
+			// moved one's frame
+			auto h = m_seat_home.find(p.first);
+			Entity e = *p.second;
+			if(h != m_seat_home.end()){
+				for(int k = 0; k < 3; k++)
+					e.pos[k] = h->second[k];
+				e.yaw = h->second[3];
+			}
+			es.append(world ? world_row(e) : entity_json(e));
+		}
 		c.set("entities", es);
 		c.set("next_id", (int64_t)m_next_id);
 		return c;
@@ -18095,6 +18107,8 @@ struct Module: public interface::Module, public Interface
 			}
 		const size_t removed = m_removed.size();
 		m_removed.clear();
+		// What play moved stays where it is: its start's place now
+		m_seat_home.clear();
 		m_store->set("authored", authored_json().stringify());
 		m_start = runtime_json(true);
 		m_store->set("start", m_start.stringify());
@@ -19469,6 +19483,13 @@ struct Module: public interface::Module, public Interface
 				return !m_entities.count(l.to) && !m_pending_ids.count(l.to);
 			}), in.links.end());
 		const bool had = it != m_entities.end();
+		// An edit that puts one play moved elsewhere: that place is its
+		// composition's, not the one before play moved it
+		if(had)
+			for(int k = 0; k < 3; k++)
+				if(std::fabs(n.pos[k] - it->second.pos[k]) > 1e-6 ||
+						std::fabs(n.yaw - it->second.yaw) > 1e-6)
+					m_seat_home.erase(id);
 		sv_<size_t> fresh;
 		// Running, an instance whose parameters changed is told which, and
 		// what each was ([KIT] stage 4d)
