@@ -243,6 +243,8 @@ local function team_colors()
 end
 
 local bodies = {} -- player id -> body
+-- [KIT_SPECTATE] (below)
+local SP = {on = false, target = nil, pos = nil, hint = nil, text = nil}
 
 -- [KIT_CARRY_ATTACH] The entities on players (the node's "kit_attach":
 -- "<player> <bone> <x> <y> <z>", kit.cpp attach_fx()): their looks drawn
@@ -328,7 +330,9 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 					log:info("kit: player " .. id .. "'s body drawn")
 				end
 				b.hidden = false
-				show_body(b, id ~= P.you or show_own == true)
+				-- (one watched is seen from its eyes)
+				show_body(b, (id ~= P.you or show_own == true) and
+						id ~= SP.target)
 				set_skin(b, teams[id])
 				local at, speed
 				local item, dig, sw
@@ -412,6 +416,140 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 	end
 end
 
+-- ---- [KIT_SPECTATE] Out of play -- dead and waiting to respawn (kit/
+-- health's "waiting", M.waiting()) -- this player watches: a free camera
+-- (the movement keys, jump and down; from where they were) or another
+-- player's view (their drawn body's eyes, their pose's look; that body
+-- not drawn), the clicks cycling: the left the next, the right the one
+-- before, own team first, then the others by id, then the free camera
+-- again. No actions (the server refuses them). A hint of the keys at the
+-- screen's bottom.
+
+function M.spectating()
+	return M.waiting ~= nil and M.waiting()
+end
+
+local function eye_of(id)
+	local b = bodies[id]
+	if not b or not b.at or b.hidden or not P.nodes[id] then
+		return nil
+	end
+	local h = b.root.scale.x / model.unit * MODEL_H
+	return b.at + magic.Vector3(0, h * 0.91, 0), b.yaw or 0, b.pitch or 0
+end
+
+-- Whom to watch, in order: the own team's, then the rest, by id
+local function watchable()
+	local teams = team_colors()
+	local mine = teams[P.you]
+	local list = {}
+	for id, b in pairs(bodies) do
+		if id ~= P.you and not b.hidden and P.nodes[id] then
+			list[#list + 1] = id
+		end
+	end
+	table.sort(list, function(a, b)
+		local ta, tb = mine ~= nil and teams[a] == mine, mine ~= nil and
+				teams[b] == mine
+		if ta ~= tb then
+			return ta
+		end
+		return a < b
+	end)
+	return list
+end
+
+local function name_of(id)
+	local n = P.nodes[id]
+	local show = n and type(n.show) == "table" and n.show or {}
+	return tostring(show.player_name or ("player " .. id))
+end
+
+local function set_hint(text)
+	if text == SP.text then
+		return
+	end
+	SP.text = text
+	if not SP.hint then
+		SP.hint = magic.ui.root:CreateChild("Text")
+		SP.hint:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
+		SP.hint:SetAlignment(magic.HA_CENTER, magic.VA_BOTTOM)
+		SP.hint:SetPosition(0, -110)
+	end
+	SP.hint.visible = text ~= nil
+	if text then
+		SP.hint:SetText(text)
+		log:info("kit: spectating: " .. text:gsub("\n", " | "))
+	end
+end
+
+-- The camera's place and turn while spectating (nil: not), from
+-- controls.lua's place_camera: where it is now and the mouse's look
+function M.spectate_view(dt, cam_pos, yaw, pitch)
+	local on = M.spectating()
+	if on ~= SP.on then
+		SP.on, SP.target, SP.pos = on, nil, nil
+		log:info("kit: spectating " .. (on and "on" or "off"))
+		if not on then
+			set_hint(nil)
+		end
+	end
+	if not on then
+		return nil
+	end
+	if SP.target and not eye_of(SP.target) then
+		SP.target = nil
+	end
+	if SP.target then
+		local p, y, pt = eye_of(SP.target)
+		SP.pos = p
+		set_hint("Watching " .. name_of(SP.target) .. "\n[Left click] next  " ..
+				"[Right click] back")
+		return p, magic.Quaternion(pt, y, 0)
+	end
+	SP.pos = SP.pos or cam_pos
+	local rot = magic.Quaternion(pitch, yaw, 0)
+	local v = magic.Vector3(0, 0, 0)
+	local function k(id) return M.key_down and M.key_down(id) end
+	if k("forward") then v = v + rot * magic.Vector3(0, 0, 1) end
+	if k("back") then v = v - rot * magic.Vector3(0, 0, 1) end
+	if k("right") then v = v + rot * magic.Vector3(1, 0, 0) end
+	if k("left") then v = v - rot * magic.Vector3(1, 0, 0) end
+	if k("jump") then v = v + magic.Vector3(0, 1, 0) end
+	if k("down") then v = v - magic.Vector3(0, 1, 0) end
+	if v:Length() > 0 then
+		SP.pos = SP.pos + v:Normalized() * (8 * dt)
+	end
+	set_hint("Free camera: [" .. tostring(M.key_name("forward")) .. "][" ..
+			tostring(M.key_name("left")) .. "][" .. tostring(M.key_name("back")) ..
+			"][" .. tostring(M.key_name("right")) .. "] move, [" ..
+			tostring(M.key_name("jump")) .. "] up, [" ..
+			tostring(M.key_name("down")) .. "] down\n[Left click] watch a " ..
+			"player  [Right click] back")
+	return SP.pos, rot
+end
+
+-- A click while spectating: the next (left) or the one before; true:
+-- taken
+function M.spectate_click(left)
+	if not SP.on then
+		return false
+	end
+	local list = watchable()
+	list[#list + 1] = false -- the free camera
+	local at = #list
+	for i, id in ipairs(list) do
+		if id == SP.target then
+			at = i
+		end
+	end
+	local i = (at + (left and 1 or -1) - 1) % #list + 1
+	SP.target = list[i] or nil
+	log:info("kit: spectating " .. (SP.target and name_of(SP.target) or
+			"with the free camera"))
+	return true
+end
+
 -- [KIT_PLAYER_MODEL] This player's swings, which the others see (sent
 -- with each input, controls.lua)
 local view_swing = M.view_swing
@@ -427,6 +565,10 @@ end)
 -- The bodies, for a drive: "event kit_players" logs each drawn one, and
 -- what is attached to them
 magic.SubscribeToEvent("command_seq:kit_players", function()
+	if SP.on and SP.pos then
+		log:info(string.format("kit: the spectator's camera at %.2f,%.2f,%.2f",
+				SP.pos.x, SP.pos.y, SP.pos.z))
+	end
 	for id, n in pairs(P.nodes) do
 		if n.attach_to and n.look then
 			local p = n.look.position

@@ -7785,8 +7785,11 @@ struct Module: public interface::Module, public Interface
 			show.set("client", parts);
 			show.set("shared", keys);
 		}
-		if(e.kind == "player")
+		if(e.kind == "player"){
 			show.set("player", true);
+			// [KIT_SPECTATE] whom a spectator watches
+			show.set("player_name", e.name);
+		}
 		// [KIT_TOOLS_1] a hit reaches it (hands.lua's pick)
 		for(const Instance &in : e.comps)
 			if(m_types[in.type].health && in.disabled.empty())

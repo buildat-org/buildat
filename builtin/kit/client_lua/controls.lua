@@ -611,6 +611,10 @@ end
 
 -- The app's click, or the movement's
 local function click(x, y, left)
+	-- [KIT_SPECTATE] the clicks pick whom to watch (players.lua)
+	if M.spectate_click(left) then
+		return
+	end
 	if move_click(x, y, left) then
 		return
 	end
@@ -955,6 +959,15 @@ local function place_camera(dt, at)
 	local cam = node:GetComponent("Camera")
 	local par = params()
 	local mode = camera_mode()
+	-- [KIT_SPECTATE] out of play: a free camera or a player's view
+	-- (players.lua)
+	local sp, sr = M.spectate_view(dt, node.position, C.yaw, C.pitch)
+	if sp then
+		node.position = sp
+		node.rotation = sr
+		C.cam = sp
+		return mode
+	end
 	local bd = body_decl()
 	local ox, oy, oz = tonumber(par.offset_x) or 0, tonumber(par.offset_y) or 0,
 			tonumber(par.offset_z) or 0
@@ -1123,7 +1136,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 	-- [KIT_PLAYER_MODEL] the players' bodies (players.lua): this one's
 	-- where it is predicted, shown but in first person or in a seat
 	M.draw_players(at, C.yaw, C.pitch, bd_h(), mode ~= "first_person" and
-			not seat)
+			not seat and not M.spectating())
 	effects(dt)
 end)
 
