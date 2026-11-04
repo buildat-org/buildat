@@ -4618,6 +4618,7 @@ namespace PhysicsCollision { enum { BodyA = 0, BodyB = 1, Contacts = 2, NodeA = 
 namespace PhysicsPostStep { enum { TimeStep = 0 }; }
 namespace PhysicsPreStep { enum { TimeStep = 0 }; }
 namespace PostRenderUpdate { enum { TimeStep = 0 }; }
+namespace SceneUpdate { enum { TimeStep = 0 }; }
 namespace ScreenMode { enum { Borderless = 0, Fullscreen = 1, Height = 2, Resizable = 3, Width = 4 }; }
 namespace ScrollBarChanged { enum { Element = 0, Value = 1 }; }
 namespace SelectionChanged { enum { Element = 0 }; }

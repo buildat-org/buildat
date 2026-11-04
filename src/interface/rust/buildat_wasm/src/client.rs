@@ -6929,6 +6929,7 @@ pub mod fields {
 	pub mod PhysicsPostStep { pub const TimeStep: usize = 0; }
 	pub mod PhysicsPreStep { pub const TimeStep: usize = 0; }
 	pub mod PostRenderUpdate { pub const TimeStep: usize = 0; }
+	pub mod SceneUpdate { pub const TimeStep: usize = 0; }
 	pub mod ScreenMode { pub const Borderless: usize = 0; pub const Fullscreen: usize = 1; pub const Height: usize = 2; pub const Resizable: usize = 3; pub const Width: usize = 4; }
 	pub mod ScrollBarChanged { pub const Element: usize = 0; pub const Value: usize = 1; }
 	pub mod SelectionChanged { pub const Element: usize = 0; }

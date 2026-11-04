@@ -9,6 +9,12 @@ return {
 	PostRenderUpdate = {
 		TimeStep = {variant = "Float", safe = "number"},
 	},
+	-- A scene's own step, subscribed on the scene: its time step as its
+	-- time scale makes it, what cElapsedTime in its shaders moves by
+	-- (physical_sky's clouds, [CLOUD_WIND_JUMP])
+	SceneUpdate = {
+		TimeStep = {variant = "Float", safe = "number"},
+	},
 	-- The client is going away: the window was closed, or something asked
 	-- the engine to exit. It carries nothing; what it is for is closing what
 	-- a module opened, such as telling a server that we are leaving.

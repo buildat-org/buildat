@@ -405,6 +405,8 @@ local function sky_bodies(dome, v, tx, height, tz, day)
 		local a = math.rad(v.dir)
 		local k = v.wind * SKY.CLOUD_HEIGHT / v.height
 		dome:set_clouds(nil, {math.sin(a) * k, math.cos(a) * k})
+		-- [KIT_SUN_THROUGH_CLOUDS] the discs as dim as the light let through
+		dome:set_sun_through(sun_through(v))
 		local g = GATE.seen
 		dome:set_outside(sky_render().physical_sky.outside(g))
 	end

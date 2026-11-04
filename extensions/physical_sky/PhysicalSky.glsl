@@ -68,6 +68,16 @@ uniform float cMoonTextured;
 // game says nodes a second and the client fudges it, because these clouds
 // are not a layer at a height; see CLOUD_WIND below for what a node comes to.
 uniform vec2 cCloudWind;
+// [CLOUD_WIND_JUMP] Where the layer has drifted to, in the same units: the
+// wind summed over the frames by the client (physical_sky's dome), wrapped
+// to CLOUD_PERIOD. A wind changed by a fade moves the clouds by what it is
+// that frame, where cElapsedTimePS * cCloudWind moved them by the change
+// times all the time elapsed. cCloudWind stays for a material set by hand
+// (floorplanner's, luanti_client's); the dome leaves it zero.
+uniform vec2 cCloudOffset;
+// [KIT_SUN_THROUGH_CLOUDS] How much of the sun's and the moon's discs the
+// clouds hide: 0 (unset) drawn whole, 1 gone under a full cover
+uniform float cSunCovered;
 
 // **What a player who cannot see the sky is under.** Luanti's `indoors`
 // colour, already multiplied by how light it is, and whether the game let
@@ -132,6 +142,9 @@ const vec3 SUN_COLOR = vec3(1.0, 0.97, 0.86);
 
 const float CLOUD_SCALE = 6.0;
 const float CLOUD_PIXELS = 11.0;
+// The layer repeats every CLOUD_PERIOD units (its noise's cells wrapped), so
+// the offset can wrap there without a jump and keep a float's precision
+const float CLOUD_PERIOD = 1000.0;
 // How wide the thin edge of a cloud is, in the noise's own units: the cells
 // that used to be drawn a darker grey are these, and they are drawn thin
 // instead. It starts at the threshold rather than straddling it, so that the
@@ -263,10 +276,23 @@ float SkyNoise(vec2 p)
                f.y);
 }
 
+// SkyNoise with its cells wrapped to a period
+float CloudNoise(vec2 p, float period)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    vec2 j = mod(i + 1.0, period);
+    i = mod(i, period);
+    return mix(mix(SkyHash(i), SkyHash(vec2(j.x, i.y)), f.x),
+               mix(SkyHash(vec2(i.x, j.y)), SkyHash(j), f.x),
+               f.y);
+}
+
 float CloudDensity(vec2 p)
 {
-    float v = SkyNoise(p) * 0.65;
-    v += SkyNoise(p * 2.03) * 0.35;
+    float v = CloudNoise(p, CLOUD_PERIOD) * 0.65;
+    v += CloudNoise(p * 2.03, 2030.0) * 0.35; // CLOUD_PERIOD * 2.03, a whole cell
     return v;
 }
 
@@ -386,7 +412,7 @@ void PS()
     // flat and crowd together towards the horizon instead of wrapping the dome
     if(d.y > 0.0 && cCloudCoverage > 0.0){
         vec2 p = d.xz / max(d.y, CLOUD_HORIZON) * CLOUD_SCALE +
-                cElapsedTimePS * cCloudWind;
+                cCloudOffset + cElapsedTimePS * cCloudWind;
         float density = CloudDensity(floor(p * CLOUD_PIXELS) / CLOUD_PIXELS);
         float threshold = 1.0 - cCloudCoverage;
         // How much of a cloud this cell is: solid well past the threshold,
@@ -418,11 +444,17 @@ void PS()
         vec2 at = (body.yz - 0.5) * cSunSize * 2.0;
         float cover = body.x * above * (1.0 - smoothstep(
                 cSunSize - BODY_EDGE, cSunSize + BODY_EDGE, length(at)));
-        color = mix(color, cSunRadiance, cover);
+        // Under cloud the disc's radiance goes toward the sky's behind it
+        // in steps of brightness rather than of light: a twentieth of the
+        // sun is still a white disc, and the cover dims it to nothing
+        vec3 sky = max(color, vec3(1e-4));
+        vec3 radiance = sky * pow(max(cSunRadiance / sky, vec3(1.0)),
+                vec3(1.0 - cSunCovered));
+        color = mix(color, radiance, cover);
     } else if(cSunSize > 0.0){
         vec3 body = Body(d, sun, cSunSize);
         vec3 sun_color = mix(SUN_COLOR, cSunTint * 1.6, low);
-        float cover = body.x * above;
+        float cover = body.x * above * (1.0 - cSunCovered);
         if(cSunTextured > 0.5){
             // The texture's own colours, and its alpha as the coverage: a
             // sun drawn as a disc in a square image is a disc here too
@@ -436,7 +468,7 @@ void PS()
     if(cMoonSize > 0.0){
         vec3 body = Body(d, -sun, cMoonSize);
         vec3 moon_color = MOON_COLOR;
-        float cover = body.x * above;
+        float cover = body.x * above * (1.0 - cSunCovered);
         if(cMoonTextured > 0.5){
             vec4 tex = texture2D(sNormalMap, vec2(body.y, 1.0 - body.z));
             moon_color = tex.rgb;

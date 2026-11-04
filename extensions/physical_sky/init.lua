@@ -297,6 +297,9 @@ end
 -- How far past white the sun's disc is drawn, which is what makes it read as
 -- a light rather than a white circle. The extension's own value.
 local SUN_OVEREXPOSURE = 2.5
+-- The clouds' layer repeats every this many of the shaders' units
+-- (PhysicalSky.glsl's and CartoonSky.glsl's CLOUD_PERIOD)
+local CLOUD_PERIOD = 1000
 
 -- **The dawn glow** ([DAWN_LIGHT], the term the user set the two ramps
 -- aside for, 2026-09-25): the light of the sky before the sun, as a
@@ -611,7 +614,32 @@ function M.new_dome(scene, sun_dir, defaults, log)
 	set("StarFade", 0.0)
 	set("CloudCoverage", defaults.cloud_cover)
 	set("CloudAlpha", defaults.cloud_alpha or 1)
-	set("CloudWind", wind_default[1], wind_default[2])
+	-- [CLOUD_WIND_JUMP] The drift summed here each of the scene's steps
+	-- and given as an offset (CloudWind left zero): the shader's
+	-- cElapsedTimePS * wind moved the layer by a wind's change times all the
+	-- time elapsed, a fade's seconds of fast-forward. Wrapped to the
+	-- shaders' CLOUD_PERIOD, where the layer repeats.
+	set("CloudWind", 0, 0)
+	set("CloudOffset", 0, 0)
+	-- A step whose wind is not the last step's says where the layer went
+	-- (verbose; util/kit_sky_clouds_check.sh reads it)
+	local wind_now, offset, wind_was = wind_default, {0, 0}, {0, 0}
+	magic.SubscribeToEvent(scene, "SceneUpdate", function(_, _, ev)
+		local dt = ev:GetFloat("TimeStep")
+		local wx, wz = wind_now[1], wind_now[2]
+		if wx ~= wind_was[1] or wz ~= wind_was[2] then
+			log:verbose(string.format("sky: clouds at %.5f %.5f, wind %.5f"..
+					" %.5f, step %.5f", offset[1], offset[2], wx, wz, dt))
+			wind_was[1], wind_was[2] = wx, wz
+		end
+		if wx == 0 and wz == 0 then
+			return
+		end
+		offset[1] = (offset[1] + wx * dt) % CLOUD_PERIOD
+		offset[2] = (offset[2] + wz * dt) % CLOUD_PERIOD
+		set("CloudOffset", offset[1], offset[2])
+	end)
+	set("SunCovered", 0)
 	-- What a player who cannot see the sky is under, and whether the game
 	-- allows the dimming at all. Luanti's own indoors default is #646464
 	-- and auto_dim_skybox is on; see set_indoors() below and [CAVE_SKY].
@@ -648,8 +676,14 @@ function M.new_dome(scene, sun_dir, defaults, log)
 	-- the shader's units a second; nil leaves the defaults
 	function self:set_clouds(alpha, wind)
 		set("CloudAlpha", alpha or defaults.cloud_alpha or 1)
-		wind = wind or wind_default
-		set("CloudWind", wind[1], wind[2])
+		wind_now = wind or wind_default
+	end
+
+	-- [KIT_SUN_THROUGH_CLOUDS] How much of the sun's direct light the clouds
+	-- let through (0..1): the sun's and the moon's discs drawn by it, gone
+	-- at 0
+	function self:set_sun_through(k)
+		set("SunCovered", 1 - math.max(0, math.min(1, k or 1)))
 	end
 
 	-- An overcast dome (floorplanner's [FP_OVERCAST]): the gradient spread
