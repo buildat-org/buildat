@@ -22,6 +22,10 @@
 -- [KIT_CTF] hand_level: the highest material level a hand digs (a dig at
 -- a hand's speed: nothing held, or an item with no dig speed for the
 -- voxel's group); one above it is refused. 15 (the default): any
+-- [KIT_CTF] respawn: a dead player back at their spawn "at_once", or
+-- "on_signal": waiting (no actions, their body still, "Waiting to
+-- respawn" on their screen) until the input respawn, which respawns
+-- every player of the round waiting
 -- Stage 8's scene override goes beside it
 return {
 	version = 2,
@@ -43,7 +47,21 @@ return {
 			choices = {"keep", "drop", "lose"}},
 		show_health = {type = "bool", default = true},
 		hand_level = {type = "number", default = 15, min = 0, max = 15},
+		respawn = {type = "string", default = "at_once",
+			choices = {"at_once", "on_signal"}},
 	},
+	inputs = {respawn = "any"},
+	on_input = function(c, input)
+		if input == "respawn" then
+			c:respawn_waiting()
+		end
+	end,
+	-- Waiting players respawned when they would not wait any more
+	on_params = function(c)
+		if c.params.respawn == "at_once" then
+			c:respawn_waiting()
+		end
+	end,
 	-- Version 1's dig_by_tools gone: building replaces it (nothing is
 	-- released: every project plays by the inventory)
 	migrate = function(params, from)

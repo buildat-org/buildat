@@ -873,6 +873,49 @@ namespace kit
 	// plane 0 is `id` 0..15 (material and shape: "kit/stone" and
 	// "kit/stone:stair" are two ids, the shapes made by Kit's registering,
 	// world.h), `param` 16..23 (what the definition says: a shape's
+// **Death, respawn, hurts and blasts** ([KIT_CTF]). A player's death is
+// their health's c:died(by, type) (kit/health's at hp 0, on a player's
+// entity: c.is_player): on_died(c, player, by, type) of every instance in
+// their scene, on the root and on their entity (player their entity's
+// id, by who set the hit off: "player:<id>", an entity's run's by...,
+// type the hit's), their inventory by on_death, then kit/game_rules'
+// `respawn`: "at_once" (the default) back at their spawn (their team's
+// pad, else the scene's last spawner of players, else the app's) with
+// their health's hp at its max, through the spawn kits; "on_signal": the
+// player waits, their health's state "waiting" true (shared), until a
+// c:respawn_waiting() -- game_rules' input `respawn` -- puts every
+// waiting player of the round back so. A waiting player does nothing:
+// Kit refuses their hit, shot, draw, reload, use, item use, hold,
+// inventory move and action presses, and allows() everything but
+// "enter" ("Waiting to respawn": no dig, place or damage); the server
+// steps their body with no walking or jumping (the view turns), the
+// client too, and Kit's HUD says "Waiting to respawn". game_rules' respawn
+// changed to "at_once" respawns those waiting. c:respawn() (before
+// [KIT_CTF] kit/health's) still respawns a player at once.
+// c:hurt(player, amount | {amount = n | fraction = f, type = name}):
+// a player of the round hurt (fraction: of their health's max) through
+// their modify_hit hooks and health as a hit of type `type` ("hurt" by
+// default), by the run's by; Kit refuses it (logged) for a player waiting,
+// under game_rules' peaceful, or where the region at them refuses them
+// damage. 16 a run.
+// c:explode{at = {x, y, z} (c.pos by default), radius (0...9, 0), power
+// (0...1000, 1), kill (0...32, radius), hurt (0...32, 0), share (0...1,
+// 0.5), friendly_fire (true), type ("blast")}: a blast in the entity's
+// scene. A cell within radius (its middle) goes to air, a game change,
+// where the blast's strength there, power * (1 - distance / radius), is
+// above its material's blast_resist (materials.json's and op "voxel"'s,
+// 0...1000; 0, every material of Kit's set, goes at any strength), unless
+// the region holding it forbids digging to anyone (its dig rule other
+// than "all"). The players within kill (their body's middle, 0.9 m up)
+// are hit for their health's max, those within hurt for share of it,
+// each as a hit of type `type` by the run's by through Kit's refusals for
+// c:hurt; friendly_fire false: also a team's friendly_fire spares the
+// members of the team of the player who set it off (true: a blast hurts
+// teammates and its own player). on_blast(c, pos, by) of each other
+// entity within radius (64 at most). 4 a run; Kit's blasts are limited to
+// EXPLODE_RATE (4) a second, EXPLODE_BURST (16) at once, server-wide;
+// a refusal is in the entity's log.
+//
 	// facing, see world::SHAPE_PARAMS), `tint` 24..27 (16 steps of the
 	// material's tint ramp, albedo) and `light_sky` 28..31, maintained
 	// only while the World's "sky_light" is on (dark caves; off, nothing

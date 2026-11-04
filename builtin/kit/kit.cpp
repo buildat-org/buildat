@@ -90,6 +90,13 @@ static const int MAX_SET_CELLS = 4096;
 // bytes and the voxel names in it at most
 static const int MAX_VOXEL_BOX = 16;
 static const size_t MAX_PATTERN = 32768;
+// [KIT_CTF] c:explode: its radius in cells (a sphere of about 3050 cells
+// at most), the reach of its kill and hurt radii, the entities told
+// (on_blast), and Kit's blasts a second (a server's, every round's
+// together) and their burst
+static const double MAX_BLAST_RADIUS = 9, MAX_BLAST_REACH = 32;
+static const size_t MAX_BLAST_TOLD = 64;
+static const double EXPLODE_RATE = 4, EXPLODE_BURST = 16;
 static const size_t MAX_PATTERN_NAMES = 256;
 // The most of an item a player has (Kit's own counts, c:add)
 static const int64_t MAX_ITEMS = 1000000;
@@ -1084,6 +1091,9 @@ struct Module: public interface::Module, public Interface
 	// positions in, each scene's
 	std::map<ss_, bool> m_rights;
 	// The replacing inventory provider (an entity's id and its instance; 0:
+	// [KIT_CTF] c:explode's allowance (EXPLODE_RATE), time_us
+	double m_blast_tokens = EXPLODE_BURST;
+	int64_t m_blast_at = 0;
 	// none: each player entity's own), and those refused as a second
 	uint64_t m_provider = 0;
 	size_t m_provider_comp = 0;
@@ -3187,7 +3197,7 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// {"op": "voxel", "name", "texture", "kind", "solid", "transparent",
-	// "light", "friction", "surface", "group", "level", "sound_dig",
+	// "light", "friction", "blast_resist", "surface", "group", "level", "sound_dig",
 	// "sound_place", "drop"}: the builder's voxel type "<their name>/<name>", or its
 	// next version
 	void make_voxel(const Peer &p, const json::Value &j,
@@ -3223,12 +3233,16 @@ struct Module: public interface::Module, public Interface
 		// [KIT_SOUNDS] its dig's and place's sounds
 		row.set("sound_dig", jstr(j, "sound_dig"));
 		row.set("sound_place", jstr(j, "sound_place"));
+		// [KIT_CTF] the blast strength it stands (0: any blast's)
+		row.set("blast_resist", j.get("blast_resist").is_number() ?
+				j.get("blast_resist") : json::Value(0.0));
 		// [KIT_CTF] what its dig drops ("" itself)
 		row.set("drop", jstr(j, "drop"));
 		world::Material m;
 		if(!m.parse(row) || m.light != row.get("light").as_number())
 			return refuse("a texture, a kind (solid, leaves, plant, water), "
-					"light (a whole number 0...15), friction 0...10, a "
+					"light (a whole number 0...15), friction 0...10, "
+					"blast_resist 0...1000, a "
 					"surface tag and a group (letters, digits and _), a "
 					"level (a whole number 0...15), sounds' names and a "
 					"drop's (<author>/<name>)");
@@ -8484,6 +8498,33 @@ struct Module: public interface::Module, public Interface
 				r.insert(tid);
 		return r;
 	}
+		// [KIT_CTF] a health's c:died(by, type) on a player's entity; a
+		// component's c:respawn_waiting(), c:hurt() and c:explode() (each
+		// running the targets' hooks now: what the caller's run() reads
+		// kept)
+		const json::Value &died = fx.get("died");
+		const json::Value &hurts = fx.get("hurt");
+		const json::Value &blasts = fx.get("explode");
+		if((died.is_array() && e.kind == "player") ||
+				fx.get("respawn_waiting").is_true() || hurts.size() ||
+				blasts.size()){
+			const json::Value ret = m_ret, hit_ret = m_hit_ret;
+			const uint64_t self = e.id;
+			if(died.is_array() && e.kind == "player")
+				player_death(self, r.by, name_ok(jstr_at(died, 1)) ?
+						jstr_at(died, 1) : ss_("normal"));
+			if(fx.get("respawn_waiting").is_true())
+				log_i(MODULE, "Entity %s's %s respawns %i waiting players",
+						cs(itos(self)), cs(type), respawn_waiting());
+			for(unsigned i = 0; i < hurts.size() && m_entities.count(self);
+					i++)
+				hurt(m_entities[self], type, hurts.at(i), r.by);
+			for(unsigned i = 0; i < blasts.size() && m_entities.count(self);
+					i++)
+				explode(m_entities[self], type, blasts.at(i), r.by);
+			m_ret = ret;
+			m_hit_ret = hit_ret;
+		}
 
 	// [KIT_MINIGAMES_FIX] The teams a `teams = true` type reads: those in
 	// its scene, and of those the ones under its own parent when there are
@@ -11584,6 +11625,12 @@ struct Module: public interface::Module, public Interface
 		const world::Params &wp = wd->wp;
 		const int m = wp.border == "water" ? world::SEA_BORDER :
 				wp.border == "wall" ? 1 : 0;
+		// [KIT_CTF] a dead player waiting to respawn does nothing but stand
+		if(action != "enter" && player_waiting(pi->second.player)){
+			if(why)
+				*why = "Waiting to respawn";
+			return false;
+		}
 		if(p.getX() < wp.x0() - m || p.getX() >= wp.x0() + wp.width + m ||
 				p.getZ() < wp.z0() - m || p.getZ() >= wp.z0() + wp.depth + m)
 			return true;
@@ -12676,6 +12723,8 @@ struct Module: public interface::Module, public Interface
 			const double rate = num(b.params, "rate", 60, 10, 120);
 			// A twentieth over the clock: a client's that runs a little fast
 			// is not held back
+		const bool waiting = m_peers.count(packet.sender) &&
+				player_waiting(m_peers[packet.sender].player);
 			b.allowance = std::min(rate * 0.5 + BATCH, b.allowance +
 					(now - b.last_us) / 1e6 * rate * 1.05);
 			b.last_us = now;
@@ -12701,6 +12750,10 @@ struct Module: public interface::Module, public Interface
 				o += ",inputs={";
 				uint32_t last = b.ack;
 				int n_in = 0;
+			// [KIT_CTF] a dead player waiting to respawn stays where they
+			// fell: no walking, jumping or going (the view turns)
+			if(waiting)
+				v[0] = v[1] = v[3] = v[4] = 0;
 				for(; n_in < BATCH && !b.inputs.empty() &&
 						b.allowance >= 1; n_in++){
 					o += b.inputs.front().second+",";
@@ -13141,6 +13194,18 @@ struct Module: public interface::Module, public Interface
 			for(const char *c : cs)
 				if(s == c){
 					out.set(k, s);
+	// [KIT_CTF] A dead player waiting to respawn acts on nothing: refused
+	// (logged as other refusals)
+	bool waiting_refused(Peer &pe, const char *what)
+	{
+		if(!player_waiting(pe.player))
+			return false;
+		if(log_refusal(pe, ss_("waiting to respawn: ")+what))
+			log_i(MODULE, "%s's %s refused: waiting to respawn", cs(pe.name),
+					what);
+		return true;
+	}
+
 					return true;
 				}
 			why = ss_(k)+": one of";
@@ -13169,6 +13234,8 @@ struct Module: public interface::Module, public Interface
 			return true;
 		};
 		// The damage's type ("normal": armour, stage 9, tells them apart),
+		if(waiting_refused(pi->second, "use"))
+			return;
 		// the item that mends it, the preset it was made from; the icon (a
 		// texture's name, checked by the caller) and the look (7c-2: a
 		// prefab, its parts or voxels; kept, not drawn yet)
@@ -13845,11 +13912,17 @@ struct Module: public interface::Module, public Interface
 		const size_t tp = peer_of_player(t.id);
 		if(tp && !allows(tp, "damage", c.getX(), c.getY(), c.getZ(), &why))
 			return false;
-		const uint64_t me = m_peers[peer].player;
+		return !spared(m_peers[peer].player, t.id, why);
+	}
+
+	// Whether a team spares a player from another's hit: both its members
+	// and its friendly_fire off (kit/team's default)
+	bool spared(uint64_t me, uint64_t target, ss_ &why)
+	{
 		for(auto &e : m_entities)
 			for(const Instance &in : e.second.comps)
 				if(m_types[in.type].team && in_team(me, e.first) &&
-						in_team(t.id, e.first) &&
+						in_team(target, e.first) &&
 						!in.params.get("friendly_fire").is_true()){
 					why = "Friendly fire is off in team "+jstr(in.params, "name");
 					return false;
@@ -13924,7 +13997,72 @@ struct Module: public interface::Module, public Interface
 			return;
 		// [KIT_INVENTORY_PLAY] the inventory at a death, the kits at a spawn
 		player_died(player);
-		respawn_at(player, peer);
+		revive(player);
+	}
+
+	// ---- [KIT_CTF] Death and respawn, hurts and blasts
+
+	// A player's health: the first enabled instance of a `health` type on
+	// their entity (nullptr: none)
+	Instance *health_of(uint64_t player, size_t *comp = nullptr)
+	{
+		auto it = m_entities.find(player);
+		if(it == m_entities.end())
+			return nullptr;
+		for(size_t i = 0; i < it->second.comps.size(); i++){
+			Instance &in = it->second.comps[i];
+			if(m_types[in.type].health && in.disabled.empty()){
+				if(comp)
+					*comp = i;
+				return &in;
+			}
+		}
+		return nullptr;
+	}
+
+	// A player's health state set by Kit (its "waiting", its "hp")
+	void set_health(uint64_t player, const ss_ &key, const json::Value &v)
+	{
+		size_t comp = 0;
+		Instance *h = health_of(player, &comp);
+		if(!h)
+			return;
+		h->state.set(key, v);
+		m_runtime_dirty = true;
+		if(m_types[h->type].shared.count(key))
+			replicate_state(m_entities[player], comp, key);
+	}
+
+	// Whether a player is dead and waiting to respawn (kit/game_rules'
+	// respawn "on_signal"): their health's state "waiting"
+	bool player_waiting(uint64_t player)
+	{
+		const Instance *h = player ? health_of(player) : nullptr;
+		return h && h->state.get("waiting").is_true();
+	}
+
+	// The most health a player has (their health's max)
+	double health_max(uint64_t player)
+	{
+		const Instance *h = health_of(player);
+		if(!h)
+			return 0;
+		const json::Value &m = h->state.get("max").is_number() ?
+				h->state.get("max") : h->params.get("max");
+		return m.is_number() ? m.as_number() : 0;
+	}
+
+	// A player back from a death: not waiting, their health at its max, at
+	// their spawn (their team's pad...), through the kits
+	void revive(uint64_t player)
+	{
+		set_health(player, "waiting", false);
+		const double max = health_max(player);
+		if(max > 0)
+			set_health(player, "hp", max);
+		const size_t peer = peer_of_player(player);
+		if(peer)
+			respawn_at(player, peer);
 		give_kits(player, true);
 	}
 
@@ -13971,6 +14109,8 @@ struct Module: public interface::Module, public Interface
 		json::Value st = b.state.deepcopy();
 		json::Value v = json::array();
 		const json::Value &ov = st.get("vel");
+		if(waiting_refused(pi->second, "hold"))
+			return;
 		const double add[3] = {dx * k, k * 0.4, dz * k};
 		for(unsigned i = 0; i < 3; i++)
 			v.append((ov.is_array() && ov.at(i).is_number() ?
@@ -14069,7 +14209,7 @@ struct Module: public interface::Module, public Interface
 		}
 		tu.used = true;
 		tu.used_us = now;
-		return true;
+		return false;
 	}
 
 	// "kit:hit" <id>: a placed peer's melee hit with what they hold, on an
@@ -14181,6 +14321,310 @@ struct Module: public interface::Module, public Interface
 	{
 		auto it = m_entities.find(id);
 		auto pi = m_peers.find(peer);
+	// A player's death (their health's c:died(by, type)): on_died(c,
+	// player, by, type) of every instance in their scene, on the root and
+	// on their entity; their inventory by on_death; then by kit/game_rules'
+	// respawn: "at_once" back at their spawn, "on_signal" waiting (no
+	// actions, the body still) until a c:respawn_waiting() (game_rules'
+	// input "respawn")
+	void player_death(uint64_t player, const ss_ &by, const ss_ &type)
+	{
+		auto pe = m_entities.find(player);
+		if(pe == m_entities.end() || player_waiting(player))
+			return;
+		const size_t peer = peer_of_player(player);
+		const ss_ scene = peer ? m_peers[peer].scene : ss_();
+		for(auto &e : m_entities){
+			ss_ es;
+			const bool here = e.first == player || (e.second.parent == 1 &&
+					!e.second.has_pos) || (!scene.empty() &&
+					e.second.has_pos && e.second.kind != "player" &&
+					scene_of(e.second, &es) && es == scene);
+			if(!here)
+				continue;
+			for(size_t i = 0; i < e.second.comps.size(); i++){
+				if(!m_types[e.second.comps[i].type].handlers.count("on_died"))
+					continue;
+				Run r;
+				r.entity = e.first;
+				r.comp = i;
+				r.handler = "on_died";
+				r.by = by;
+				r.args.append((int64_t)player);
+				r.args.append(by);
+				r.args.append(type);
+				queue_run(r);
+			}
+		}
+		player_died(player);
+		const uint64_t bid = player_id(by);
+		const ss_ bn = bid && m_entities.count(bid) ? m_entities[bid].name : by;
+		if(jstr(game_rules(), "respawn") == "on_signal"){
+			set_health(player, "waiting", true);
+			log_i(MODULE, "%s died (%s by %s): waiting to respawn",
+					cs(pe->second.name), cs(type), cs(bn));
+			return;
+		}
+		log_i(MODULE, "%s died (%s by %s): respawns at once",
+				cs(pe->second.name), cs(type), cs(bn));
+		revive(player);
+	}
+
+	// c:respawn_waiting(): every player of the round waiting to respawn
+	// back at their spawn; how many
+	int respawn_waiting()
+	{
+		sv_<uint64_t> list;
+		for(auto &e : m_entities)
+			if(e.second.kind == "player" && player_waiting(e.first))
+				list.push_back(e.first);
+		for(uint64_t id : list)
+			revive(id);
+		return (int)list.size();
+	}
+
+	// Whether Kit lets a player take damage that is no player's hit (a
+	// component's c:hurt, a blast), and why not: waiting to respawn, the
+	// game's peaceful, the region at them (its damage rule for them)
+	bool takes_damage(uint64_t player, ss_ &why)
+	{
+		if(player_waiting(player)){
+			why = "waiting to respawn";
+			return false;
+		}
+		const Instance *gr = root_instance("kit/game_rules");
+		if(gr && gr->params.get("peaceful").is_true()){
+			why = "Peaceful: players take no damage";
+			return false;
+		}
+		const size_t tp = peer_of_player(player);
+		if(!tp)
+			return true;
+		const pv::Vector3DInt32 c = cell_of(m_peers[tp].pos);
+		return allows(tp, "damage", c.getX(), c.getY(), c.getZ(), &why);
+	}
+
+	// c:hurt(player, amount | {amount, fraction, type}): a player of the
+	// round hurt by a component, through their modifiers and health as a
+	// hit (type "hurt" by default); fraction: of their health's max
+	void hurt(const Entity &e, const ss_ &ctype, const json::Value &h,
+			const ss_ &by)
+	{
+		const json::Value &pv = h.at(0u);
+		const uint64_t id = pv.is_number() && pv.as_number() > 0 ?
+				(uint64_t)pv.as_number() : 0;
+		auto it = m_entities.find(id);
+		const ss_ who = "Entity "+itos(e.id)+"'s "+ctype;
+		if(it == m_entities.end() || it->second.kind != "player"){
+			log_w(MODULE, "%s: hurt: %s is no player", cs(who), cs(itos(id)));
+			return;
+		}
+		const json::Value &a = h.at(1u);
+		const json::Value &f = h.at(2u);
+		double amount = a.is_number() ? a.as_number() : 0;
+		if(f.is_number())
+			amount = f.as_number() * health_max(id);
+		if(!std::isfinite(amount) || amount <= 0)
+			return;
+		ss_ why;
+		if(!takes_damage(id, why)){
+			log_i(MODULE, "%s: hurt of %s refused: %s", cs(who),
+					cs(it->second.name), cs(why));
+			return;
+		}
+		json::Value hit = json::object();
+		hit.set("amount", amount);
+		hit.set("type", name_ok(jstr_at(h, 3)) ? jstr_at(h, 3) : ss_("hurt"));
+		hit.set("item", ss_());
+		hit.set("crit", false);
+		log_i(MODULE, "%s hurts %s: %g %s", cs(who), cs(it->second.name),
+				amount, cs(jstr(hit, "type")));
+		apply_hit(id, hit, by);
+	}
+
+	// c:explode{at, radius, power, kill, hurt, share, friendly_fire, type}
+	// ({x, y, z, radius, power, kill, hurt, share, friendly_fire, type}
+	// here): a blast at a world point of the entity's scene. Each cell
+	// within radius whose voxel's blast_resist is below the strength
+	// there (power, falling to 0 at radius) goes to air, a game change,
+	// but for those a region forbids digging to any player (its dig rule
+	// not "all"); the players within kill are hit for their health's max,
+	// those within hurt for share of it, as a hit of type `type` (Kit's
+	// takes_damage; friendly_fire false: a team's friendly_fire spares the
+	// members of the team of the player who set it off); on_blast(c, pos,
+	// by) of the entities within radius. Kit's blasts a second
+	// (EXPLODE_RATE) are limited
+	void explode(const Entity &e, const ss_ &ctype, const json::Value &x,
+			const ss_ &by)
+	{
+		const ss_ who = "Entity "+itos(e.id)+"'s "+ctype;
+		const int64_t now = interface::os::time_us();
+		m_blast_tokens = std::min(EXPLODE_BURST, m_blast_tokens +
+				(now - m_blast_at) * 1e-6 * EXPLODE_RATE);
+		m_blast_at = now;
+		if(m_blast_tokens < 1){
+			log_w(MODULE, "%s: explode refused: past %g blasts a second",
+					cs(who), EXPLODE_RATE);
+			add_log(e.id, "explode refused: past the blasts a second");
+			return;
+		}
+		m_blast_tokens -= 1;
+		ss_ scene;
+		main_context::SceneReference sref = scene_of(e, &scene);
+		if(!sref){
+			log_w(MODULE, "%s: explode: not in a scene", cs(who));
+			return;
+		}
+		double at[3];
+		for(unsigned k = 0; k < 3; k++){
+			const json::Value &v = x.at(k);
+			at[k] = v.is_number() ? v.as_number() : 0;
+			if(!std::isfinite(at[k]) || std::fabs(at[k]) > MAX_COORD)
+				return;
+		}
+		auto arg = [&](unsigned i, double def, double hi){
+			const json::Value &v = x.at(i);
+			const double d = v.is_number() ? v.as_number() : def;
+			return std::isfinite(d) ? std::max(0.0, std::min(hi, d)) : def;
+		};
+		const double radius = arg(3, 0, MAX_BLAST_RADIUS);
+		const double power = arg(4, 1, 1000);
+		const double kill = arg(5, radius, MAX_BLAST_REACH);
+		const double hurt_r = arg(6, 0, MAX_BLAST_REACH);
+		const double share = arg(7, 0.5, 1);
+		const bool ff = !x.at(8u).is_false();
+		const ss_ htype = name_ok(jstr_at(x, 9)) ? jstr_at(x, 9) :
+				ss_("blast");
+		// The cells: those in the sphere, by their voxel's resistance
+		sv_<pv::Vector3DInt32> cells;
+		const int r = (int)std::ceil(radius);
+		const pv::Vector3DInt32 c0 = cell_of(at);
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			voxelworld::Instance *w = ivw->get_instance(sref);
+			if(!w || radius <= 0)
+				return;
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			const auto &fmt = reg->get_format();
+			for(int dx = -r; dx <= r; dx++)
+				for(int dy = -r; dy <= r; dy++)
+					for(int dz = -r; dz <= r; dz++){
+						const pv::Vector3DInt32 q = c0 +
+								pv::Vector3DInt32(dx, dy, dz);
+						const double ex = q.getX() - at[0], ey = q.getY() -
+								at[1], ez = q.getZ() - at[2];
+						const double d = std::sqrt(ex * ex + ey * ey + ez * ez);
+						if(d > radius || !loaded(w, q))
+							continue;
+						const uint32_t id = (uint32_t)fmt.id.get(
+								w->get_voxel(q, true).data);
+						if(id <= 1)
+							continue;
+						const interface::VoxelDefinition *def = reg->get(id);
+						if(!def)
+							continue;
+						auto mi = m_registered.find(world::material_of(
+								def->name.block_name));
+						const double resist = mi == m_registered.end() ? 0 :
+								mi->second.blast_resist;
+						if(resist > 0 && resist >= power * (1 - d / radius))
+							continue;
+						cells.push_back(q);
+					}
+		});
+		size_t kept = 0, carved = 0;
+		for(const pv::Vector3DInt32 &q : cells){
+			const Entity *re = nullptr;
+			const Instance *rg = region_at(scene, q.getX(), q.getY(),
+					q.getZ(), &re);
+			if(rg){
+				const json::Value &rule = rg->state.get("rules").get("dig");
+				const ss_ dig = rule.is_string() ? rule.as_string() :
+						jstr(rg->params, "dig", "none");
+				if(dig != "all"){
+					kept++;
+					continue;
+				}
+			}
+			Write w;
+			w.scene = sref;
+			w.p = q;
+			w.voxel = "air";
+			w.by = by;
+			w.origin = 'g';
+			if(!set_voxel(w))
+				m_pending_voxels.push_back(w);
+			carved++;
+		}
+		log_i(MODULE, "%s explodes at (%.2f,%.2f,%.2f) radius %g power %g: "
+				"%zu cells to air, %zu protected", cs(who), at[0], at[1], at[2],
+				radius, power, carved, kept);
+		// The players: their bodies' middle (Peer::pos is the bottom + 0.5)
+		const uint64_t me = player_id(by);
+		sv_<std::pair<uint64_t, double>> hits;
+		for(auto &p : m_peers){
+			if(!p.second.player || p.second.scene != scene)
+				continue;
+			const double dx = p.second.pos[0] - at[0], dy = p.second.pos[1] +
+					0.4 - at[1], dz = p.second.pos[2] - at[2];
+			const double d = std::sqrt(dx * dx + dy * dy + dz * dz);
+			const double f = d <= kill ? 1 : d <= hurt_r ? share : 0;
+			if(f > 0)
+				hits.push_back(std::make_pair(p.second.player, f));
+		}
+		for(auto &h : hits){
+			auto pe = m_entities.find(h.first);
+			if(pe == m_entities.end())
+				continue;
+			ss_ why;
+			if(!takes_damage(h.first, why) || (!ff && me && me != h.first &&
+					spared(me, h.first, why))){
+				log_i(MODULE, "%s's blast spares %s: %s", cs(who),
+						cs(pe->second.name), cs(why));
+				continue;
+			}
+			json::Value hit = json::object();
+			hit.set("amount", h.second * health_max(h.first));
+			hit.set("type", htype);
+			hit.set("item", ss_());
+			hit.set("crit", false);
+			log_i(MODULE, "%s's blast hits %s: %g %s", cs(who),
+					cs(pe->second.name), hit.get("amount").as_number(),
+					cs(htype));
+			apply_hit(h.first, hit, by);
+		}
+		// on_blast(c, pos, by) of the entities within radius
+		json::Value pos = json::array();
+		for(int k = 0; k < 3; k++)
+			pos.append(at[k]);
+		size_t told = 0;
+		for(auto &o : m_entities){
+			ss_ os;
+			if(o.first == e.id || !o.second.has_pos || o.second.kind ==
+					"player" || !scene_of(o.second, &os) || os != scene)
+				continue;
+			double w[3];
+			world_of(o.second, w);
+			const double dx = w[0] - at[0], dy = w[1] - at[1],
+					dz = w[2] - at[2];
+			if(dx * dx + dy * dy + dz * dz > radius * radius)
+				continue;
+			for(size_t i = 0; i < o.second.comps.size() &&
+					told < MAX_BLAST_TOLD; i++){
+				if(!m_types[o.second.comps[i].type].handlers.count("on_blast"))
+					continue;
+				Run rr;
+				rr.entity = o.first;
+				rr.comp = i;
+				rr.handler = "on_blast";
+				rr.by = by;
+				rr.args.append(pos);
+				rr.args.append(by);
+				queue_run(rr);
+				told++;
+			}
+		}
+	}
+
 		if(it == m_entities.end() || pi == m_peers.end())
 			return;
 		Peer &p = pi->second;
@@ -14214,7 +14658,8 @@ struct Module: public interface::Module, public Interface
 		const size_t tp = it->second.kind == "player" ? peer_of_player(id) : 0;
 		const int64_t puts = m_bodies.count(tp) ? m_bodies[tp].puts : -1;
 		const double came = apply_hit(id, hit, by);
-		if(came > 0 && tp && m_bodies.count(tp) && m_bodies[tp].puts == puts){
+		if(came > 0 && tp && m_bodies.count(tp) && m_bodies[tp].puts == puts &&
+				!player_waiting(id)){
 			// Away from the attacker, or where they look when on top
 			double kx = dx, kz = dz;
 			double l = std::sqrt(kx * kx + kz * kz);
@@ -14332,7 +14777,7 @@ struct Module: public interface::Module, public Interface
 		for(int k = 0; k < 3; k++){
 			if(std::fabs(d[k]) < 1e-12){
 				if(o[k] < lo[k] || o[k] > hi[k])
-					return false;
+					return true;
 				continue;
 			}
 			double a = (lo[k] - o[k]) / d[k], b = (hi[k] - o[k]) / d[k];
@@ -14345,6 +14790,8 @@ struct Module: public interface::Module, public Interface
 		}
 		t = t0;
 		return true;
+		if(waiting_refused(pi->second, "hit"))
+			return;
 	}
 
 	// The nearest entity with health in the scene along a ray (d a unit
@@ -14499,6 +14946,8 @@ struct Module: public interface::Module, public Interface
 		if(mi == m_entities.end() || !mi->second.has_pos)
 			return refuse("not placed");
 		ToolUse &tu = m_tool_use[peer];
+		if(waiting_refused(pi->second, "item use"))
+			return;
 		if(!tu.reloading.empty())
 			return refuse("reloading");
 		if(!cooled(peer, sheet, why))
@@ -14705,6 +15154,8 @@ struct Module: public interface::Module, public Interface
 			why = "reloading already";
 		if(!why.empty()){
 			if(log_refusal(p, why))
+		if(waiting_refused(pi->second, "draw"))
+			return;
 				log_i(MODULE, "A reload by %s refused: %s", cs(p.name), cs(why));
 			return;
 		}
@@ -14722,6 +15173,8 @@ struct Module: public interface::Module, public Interface
 			inetwork->send(peer, "kit:reloading", rj.stringify());
 		});
 	}
+		if(waiting_refused(pi->second, "shoot"))
+			return;
 
 	// Each tick, Running: the reloads due (the hands still holding the
 	// item): on_reload; one at a time, again while it says there is more
@@ -14948,6 +15401,8 @@ struct Module: public interface::Module, public Interface
 				voxel+"'s place");
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || pi->second.editing ||
+		if(waiting_refused(pi->second, "reload"))
+			return;
 				!m_session.running || !inventory_mode() || !pi->second.player)
 			return;
 		const uint64_t pid = pi->second.player;
@@ -15662,6 +16117,8 @@ struct Module: public interface::Module, public Interface
 				}
 		return out;
 	}
+		if(waiting_refused(pi->second, "inventory move"))
+			return;
 
 	// A player entity's numbers in the carried keys, {type: {key: value}}
 	json::Value numbers_of(uint64_t pid, const std::set<ss_> &keys)
@@ -15961,7 +16418,7 @@ struct Module: public interface::Module, public Interface
 	{
 		const int64_t now = now_us();
 		for(auto &pp : m_peers){
-			if(pp.second.editing)
+			if(pp.second.editing || player_waiting(pp.second.player))
 				continue;
 			for(auto &h : pp.second.held){
 				if(now - h.second.second < HELD_EVERY_US)
@@ -16122,6 +16579,8 @@ struct Module: public interface::Module, public Interface
 			send_all_mine(peer);
 		}
 	}
+			if(waiting_refused(pe, "action"))
+				return;
 
 	// [KIT] 4d's answer (user, 2026-10-30): a guest's player entity is
 	// dropped when they leave or log in, not kept in the runtime row

@@ -2,9 +2,11 @@
 -- an entity a hit may damage (placeable). Kit's hits (a melee item's,
 -- api.h) go through the entity's modify_hit hooks, then on_hit here: hp
 -- goes down by the amount, "damaged" signals it; at 0 "died", and a
--- player respawns at their spawn (their team's pad, the scene's spawner)
--- with hp back at max. "heal" adds the signal's number (max without one),
--- "set" sets hp. Its client part shows the player theirs
+-- player's death is Kit's (c:died: on_died hooks, then kit/game_rules'
+-- respawn: at once at their spawn -- their team's pad, the scene's
+-- spawner -- with hp back at max, or [KIT_CTF] waiting, state "waiting",
+-- until a respawn signal). "heal" adds the signal's number (max without
+-- one), "set" sets hp. Its client part shows the player theirs
 return {
 	version = 1,
 	player = true,
@@ -14,6 +16,7 @@ return {
 	state = {
 		hp = {default = 20, shared = true},
 		max = {default = 20, shared = true},
+		waiting = {default = false, shared = true},
 	},
 	inputs = {heal = "any", set = "number"},
 	outputs = {damaged = "number", died = "none"},
@@ -37,8 +40,7 @@ return {
 		c:log("died")
 		c:emit("died")
 		if c.is_player then
-			c.state.hp = c.params.max
-			c:respawn()
+			c:died(by, hit.type)
 		end
 	end,
 }

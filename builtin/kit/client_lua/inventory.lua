@@ -203,7 +203,8 @@ local function draw_hud()
 	local x0, y0, n = hotbar_box()
 	local parts = {tostring(x0), tostring(y0), r.width, r.height,
 		tostring(health), tostring(hp), tostring(max), S.held,
-		network.write_json(S.slots), M.held_text and M.held_text() or ""}
+		network.write_json(S.slots), M.held_text and M.held_text() or "",
+		tostring(M.waiting and M.waiting())}
 	local sig = table.concat(parts, ";")
 	if sig == hud_sig then
 		return
@@ -237,10 +238,18 @@ local function draw_hud()
 		box(hud, hx + 2, hy + 2, (w - 4) * f, 10, magic.Color(0.85, 0.15, 0.15))
 		text(hud, string.format("%g/%g", hp, max), hx + w + 6, hy - 1, 12)
 	end
+	-- [KIT_CTF] a dead player waiting to respawn
+	local waiting = M.waiting and M.waiting()
+	if waiting then
+		local t = text(hud, "Waiting to respawn", 0, 0, 20)
+		t:SetPosition(math.floor((r.width - t.width) / 2),
+				math.floor(r.height * 0.4))
+	end
 	local line = "kit: hud: hotbar " .. (x0 and n .. " slots, held " ..
 			S.held .. " " .. (item_of(S.held) ~= "" and item_of(S.held) or
 			"(empty)") or "none") .. ", health " .. (health and
-			string.format("%g/%g", hp, max) or "none")
+			string.format("%g/%g", hp, max) or "none") ..
+			(waiting and ", waiting to respawn" or "")
 	if line ~= S.logged then
 		S.logged = line
 		log:info(line)

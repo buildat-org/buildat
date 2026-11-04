@@ -20,6 +20,8 @@
 //        (a leaves' always), "light": 0...15 it emits, "friction": 0...10
 //        (1 by default) and "surface": a tag ("road", "ice", "mud";
 //        letters, digits and _, none by default) for what moves on it,
+//        [KIT_CTF] "blast_resist": 0...1000 (0 by default), the blast
+//        strength it stands (Kit's c:explode, api.h),
 //        [KIT_ENVIRONMENT] "seasons": {season: {"texture" | "top",
 //        "side", "bottom"}, ...}: its look in that season (spring, summer,
 //        autumn, winter; the faces not named its own), [KIT_SOUNDS]
@@ -251,6 +253,9 @@ struct Material
 	// them yet. A heightmap's material's are its ground's
 	double friction = 1;
 	ss_ surface;
+	// [KIT_CTF] The blast strength it stands (c:explode: a cell goes to
+	// air where the strength there is past it; 0: any blast)
+	double blast_resist = 0;
 	// [KIT_TOOLS_1] (stage 7c) Its material group (letters, digits and _;
 	// "" none: dug at once and dropping nothing, as before) and its level
 	// (0...15): a tool digs a group at its speed and drops it only at that
@@ -288,6 +293,8 @@ struct Material
 		light = l.is_number() ? (int)l.as_number() : 0;
 		const json::Value &f = j.get("friction");
 		friction = f.is_number() ? f.as_number() : 1;
+		const json::Value &br = j.get("blast_resist");
+		blast_resist = br.is_number() ? br.as_number() : 0;
 		surface = json::jstr(j, "surface");
 		group = json::jstr(j, "group");
 		sound_dig = json::jstr(j, "sound_dig");
@@ -339,7 +346,8 @@ struct Material
 				light >= 0 && light <= 15 && (kind == "solid" ||
 				kind == "water" || kind == "leaves" || kind == "plant" ||
 				kind == "glass") &&
-				friction >= 0 && friction <= 10 && tag_ok && tint_ok &&
+				friction >= 0 && friction <= 10 && blast_resist >= 0 &&
+				blast_resist <= 1000 && tag_ok && tint_ok &&
 				seasons_ok;
 	}
 
@@ -353,6 +361,7 @@ struct Material
 		v.set("transparent", transparent);
 		v.set("light", (int64_t)light);
 		v.set("friction", friction);
+		v.set("blast_resist", blast_resist);
 		v.set("surface", surface);
 		v.set("group", group);
 		v.set("level", (int64_t)level);

@@ -480,10 +480,20 @@ local function input_yaw()
 	return C.yaw
 end
 
+-- [KIT_CTF] Whether this player is dead and waiting to respawn (their
+-- kit/health's shared "waiting"): they stay where they fell (the server
+-- steps them so too) and Kit's HUD says so
+function M.waiting()
+	local me = P.nodes[P.you]
+	local v = me and me.node:GetVar("kit:waiting")
+	return v ~= nil and not v:IsEmpty() and v:GetString() == "true"
+end
+
 local go_next = nil -- a target to send in the next step
 local function gather()
 	local f, r, jump = 0, 0, 0
-	if walking() and not paused() and not (ui_utils.clicks_wanted() and
+	if walking() and not paused() and not M.waiting() and
+			not (ui_utils.clicks_wanted() and
 			not M.looking()) then
 		if key("forward") then f = f + 1 end
 		if key("back") then f = f - 1 end

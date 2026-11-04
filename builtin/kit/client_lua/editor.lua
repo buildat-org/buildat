@@ -166,6 +166,7 @@ for k, v in pairs({state = nil, link = nil, cursor = nil, pending = {},
 		package_name = "my_prefabs", credits = {}, try_values = {},
 		voxel_form = {name = "my_voxel", texture = "kit/stone.png", kind = "solid",
 			solid = true, transparent = false, light = 0, friction = 1,
+			blast_resist = 0,
 			surface = "", group = "", level = 0, drop = ""}}) do
 	init(E, k, v)
 end
@@ -3080,6 +3081,8 @@ local VOXEL_FIELDS = {
 	{name = "transparent", type = "bool"},
 	{name = "light", type = "number", integer = true, min = 0, max = 15},
 	{name = "friction", type = "number", min = 0, max = 10},
+	-- [KIT_CTF] the blast strength it stands (0: any blast's; c:explode)
+	{name = "blast_resist", type = "number", min = 0, max = 1000},
 	{name = "surface", type = "text", max_length = 32},
 	-- [KIT_TOOLS_1] its material group ("" none: dug at once, no drop) and
 	-- the level a tool needs for the drop; both only under kit/game_rules'
