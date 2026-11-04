@@ -132,14 +132,14 @@ EOF
 	joined kitbob
 	echo 'wait_log 60000 shown: "Team'
 	press 2
-	echo 'wait_log 200000 wins! | Round ended by lobby: score to win (3)'
+	echo 'wait_log_any 200000 wins! | Round ended by lobby: score to win (3)'
 	tail_cmds
 } > "$t/bob.cmds"
 {
 	joined kitcat
 	echo 'wait_log 60000 shown: "Team'
 	press 6
-	echo 'wait_log 200000 wins! | Round ended by lobby: score to win (3)'
+	echo 'wait_log_any 200000 wins! | Round ended by lobby: score to win (3)'
 	tail_cmds
 } > "$t/cat.cmds"
 wait_for_log "$t/srv.log" "setup code [A-Z0-9]+" 30
