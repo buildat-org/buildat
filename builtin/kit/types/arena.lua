@@ -36,6 +36,10 @@
 -- overtime, shown, until the scores differ). Its UI is drawn in its own
 -- scene: output `status`, the round's line as it changes (the time left
 -- or "Overtime", the scores, the result), is for a text in the map
+-- [KIT_ARENA_SCORE_TO_WIN] `score_to_win` (0: none): a team with that
+-- many points wins the round (checked each second), whichever of it and
+-- the round's time comes first; a tie at the time up under "most" is
+-- overtime still.
 local function ids_in(list, n)
 	local out = {}
 	for i = 1, math.min(n, #list) do
@@ -233,6 +237,8 @@ return {
 		map = {type = "string", default = "", choices_from = "scenes"},
 		time_up = {type = "string", default = "draw",
 			choices = {"draw", "most"}},
+		score_to_win = {type = "number", default = 0, min = 0,
+			max = 1000000},
 	},
 	state = {
 		-- The default round's: the players in the zone in the order they
@@ -399,6 +405,20 @@ return {
 			end
 			lobby_status(c)
 		elseif name == "tick" then
+			local goal = c.params.score_to_win
+			if goal > 0 then
+				local best
+				for _, t in ipairs(teams_of(c)) do
+					if t.score >= goal and (not best or t.score > best.score) then
+						best = t
+					end
+				end
+				if best then
+					c:log("session", c.session, "over:", best.name, "has",
+							best.score, "of", goal, "points")
+					return finish(c, best.name, "score to win (" .. goal .. ")")
+				end
+			end
 			if c.params.duration > 0 then
 				c.state.left = math.max(0, c.state.left - 1)
 				if not c.state.overtime and

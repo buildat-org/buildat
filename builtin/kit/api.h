@@ -726,6 +726,8 @@ namespace interface
 // (checked each second). Its UI is drawn in its own scene only: its
 // output `status` (the round's line as it changes: the time left or
 // "Overtime", the scores, the result) is for a kit/ui_text in the map.
+// [KIT_ARENA_SCORE_TO_WIN] `score_to_win` (0 none): a team with that many
+// points wins the round, whichever of it and the time up comes first.
 // kit/timer's output `left`: the seconds left,
 // (repeats - ticks) * interval, at its start and each tick (none without
 // repeats).
