@@ -1926,6 +1926,15 @@ do
 		voxel_mesh = voxel_mesh, color = color})
 end
 
+-- ---- [KIT_PLAYER_MODEL] The players' bodies: players.lua (after
+-- hands.lua: the held item's look, the swings)
+do
+	local ok, err, install = buildat.run_script_file("kit/players.lua")
+	assert(ok and type(install) == "function", "kit: players.lua: " ..
+			tostring(err))
+	install({M = M, O = O, P = P, log = log, color = color})
+end
+
 -- ---- [KIT_UI_COMPONENTS] UI as screen-space components: ui.lua
 do
 	local ok, err, install = buildat.run_script_file("kit/ui.lua")

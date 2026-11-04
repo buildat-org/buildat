@@ -195,7 +195,7 @@ local function sample(keys, field, frame)
 	return out
 end
 
--- parse(data[, frame]) -> quads, groups, skipped
+-- parse(data[, frame]) -> quads, groups, skipped, bones
 --
 -- The same shape objmesh.parse() gives back: quads of
 -- {group = n, p = {12 numbers}, uv = {8 numbers}}, so the caller does not
@@ -211,6 +211,11 @@ end
 -- vertex moved by the bones that weight it, as Irrlicht does for Luanti.
 -- Without it the mesh is its bind pose, which for a mob authored in Blender
 -- is the arms out and the legs together ([OBJECT_MESH]).
+--
+-- bones: every node of the tree in order, {name, parent (an index or nil),
+-- rest = {px, py, pz, sx, sy, sz, qw, qx, qy, qz}, keys, weights}; a quad's
+-- bone is the index of the one weighting its first corner most (Kit's
+-- player model takes its parts by it, util/kit_player_model.lua).
 --
 -- What comes back is nil and a reason for bytes that are not a .b3d at all.
 --
@@ -319,13 +324,13 @@ function M.parse(data, frame)
 
 	local function read_node(from, to, parent, parent_bone)
 		r.seek(from)
-		r.cstring() -- name
+		local name = r.cstring()
 		local px, py, pz = r.f32(), r.f32(), r.f32()
 		local sx, sy, sz = r.f32(), r.f32(), r.f32()
 		local qw, qx, qy, qz = r.f32(), r.f32(), r.f32(), r.f32()
 		local matrix = multiply(parent, node_matrix(px, py, pz,
 				sx, sy, sz, qw, qx, qy, qz))
-		local bone = {parent = parent_bone,
+		local bone = {name = name, parent = parent_bone,
 				rest = {px, py, pz, sx, sy, sz, qw, qx, qy, qz},
 				keys = {}, weights = {}}
 		bones[#bones + 1] = bone
@@ -436,6 +441,15 @@ function M.parse(data, frame)
 		end
 	end
 
+	local heaviest = {} -- vertex -> {bone, weight}
+	for i, bone in ipairs(bones) do
+		for _, w in ipairs(bone.weights) do
+			local h = heaviest[w[1]]
+			if not h or w[2] > h[2] then
+				heaviest[w[1]] = {i, w[2]}
+			end
+		end
+	end
 	for _, t in ipairs(tris) do
 		local va, vb, vc = vertices[t[2]], vertices[t[3]], vertices[t[4]]
 		if not va or not vb or not vc then
@@ -445,6 +459,7 @@ function M.parse(data, frame)
 			-- what the mesher takes and what costs nothing to draw
 			quads[#quads + 1] = {
 				group = t[1],
+				bone = heaviest[t[2]] and heaviest[t[2]][1],
 				p = {va[1], va[2], va[3], vb[1], vb[2], vb[3],
 						vc[1], vc[2], vc[3], vc[1], vc[2], vc[3]},
 				uv = {va[4], va[5], vb[4], vb[5], vc[4], vc[5],
@@ -456,8 +471,13 @@ function M.parse(data, frame)
 	if groups < 1 then
 		groups = 1
 	end
-	return quads, groups, skipped
+	return quads, groups, skipped, bones
 end
+
+-- The transforms parse() poses with, for a caller posing bones itself
+-- (util/kit_player_model.lua)
+M.node_matrix, M.node_matrix_inverse, M.multiply, M.sample, M.transform =
+		node_matrix, node_matrix_inverse, multiply, sample, transform
 
 -- Every corner multiplied, for a node mesh a game asked to be drawn bigger
 -- or smaller than the cube it sits in

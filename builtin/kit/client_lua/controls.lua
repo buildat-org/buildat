@@ -941,71 +941,8 @@ local function body_at(dt, alpha)
 		q[3] + (p[3] - q[3]) * alpha + C.offset[3]}
 end
 
-local avatar = nil
-local function draw_avatar(at, mode)
-	local show = mode ~= "first_person" and not M.seated() and at ~= nil
-	if show and not avatar then
-		avatar = O.scene:CreateChild("kit_avatar")
-		local b = avatar:CreateChild("Body")
-		local m = b:CreateComponent("StaticModel")
-		m.model = magic.cache:GetResource("Model", "Models/Cylinder.mdl")
-		local mat = magic.Material:new()
-		mat:SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/NoTexture.xml"))
-		mat:SetShaderParameter("MatDiffColor", magic.Color(0.25, 0.45, 0.85))
-		m.material = mat
-		m.castShadows = true
-	end
-	if avatar then
-		-- Deep: enabled is the node's own, its child drawn on
-		if avatar.enabled ~= show then
-			avatar:SetDeepEnabled(show)
-		end
-		if show then
-			local bd = body_decl()
-			local r, h = tonumber(bd.r) or 0.45, tonumber(bd.h) or 1.7
-			avatar.position = magic.Vector3(at[1], at[2], at[3])
-			local b = avatar:GetChild("Body")
-			b.position = magic.Vector3(0, h / 2, 0)
-			b.scale = magic.Vector3(r * 2, h, r * 2)
-		end
-	end
-end
-
--- The other players, where the camera is not an eye (simplified: a
--- cylinder each at their entity)
-local others = {}
-local function draw_others(mode)
-	local seen = {}
-	if mode ~= "first_person" then
-		for id, n in pairs(P.nodes) do
-			local show = type(n.show) == "table" and n.show or {}
-			if show.player and id ~= P.you then
-				seen[id] = true
-				local o = others[id]
-				if not o then
-					o = O.scene:CreateChild("kit_other")
-					local m = o:CreateComponent("StaticModel")
-					m.model = magic.cache:GetResource("Model", "Models/Cylinder.mdl")
-					local mat = magic.Material:new()
-					mat:SetTechnique(0, magic.cache:GetResource("Technique",
-							"Techniques/NoTexture.xml"))
-					mat:SetShaderParameter("MatDiffColor", magic.Color(0.85, 0.5, 0.2))
-					m.material = mat
-					o.scale = magic.Vector3(0.9, 1.7, 0.9)
-					others[id] = o
-				end
-				local p = n.node.position
-				o.position = magic.Vector3(p.x, p.y - 0.5 + 0.85, p.z)
-			end
-		end
-	end
-	for id, o in pairs(others) do
-		if not seen[id] then
-			o:Remove()
-			others[id] = nil
-		end
-	end
+local function bd_h()
+	return tonumber(body_decl().h) or 1.7
 end
 
 local function lerp_yaw(a, b, t)
@@ -1149,8 +1086,12 @@ magic.SubscribeToEvent("Update", function(_, data)
 			C.seq = C.seq + 1
 			step(C.s, i, w)
 			C.pending[#C.pending + 1] = {C.seq, i}
-			C.out[#C.out + 1] = string.format("%d %s %s %s %d %d %s %s %s",
-					C.seq, i.f, i.r, i.yaw, i.jump, i.go, i.tx, i.ty, i.tz)
+			-- [KIT_PLAYER_MODEL] and the pitch, the swings and the dig
+			-- others see on this body
+			C.out[#C.out + 1] = string.format("%d %s %s %s %d %d %s %s %s " ..
+					"%s %d %d", C.seq, i.f, i.r, i.yaw, i.jump, i.go, i.tx, i.ty,
+					i.tz, fmt(C.pitch, 1), M.pose_swings or 0,
+					M.dig_progress and M.dig_progress() and 1 or 0)
 			route_tick()
 		end
 		if C.acc > step_len then
@@ -1179,8 +1120,10 @@ magic.SubscribeToEvent("Update", function(_, data)
 	if at then
 		place_camera(dt, at)
 	end
-	draw_avatar(at, mode)
-	draw_others(mode)
+	-- [KIT_PLAYER_MODEL] the players' bodies (players.lua): this one's
+	-- where it is predicted, shown but in first person or in a seat
+	M.draw_players(at, C.yaw, C.pitch, bd_h(), mode ~= "first_person" and
+			not seat)
 	effects(dt)
 end)
 

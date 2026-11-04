@@ -7728,6 +7728,10 @@ struct Module: public interface::Module, public Interface
 			// used (a client's use reaches it), it grants digging or placing
 			// in its box (its state's dig and place, shared)
 			const Type &ty = m_types[in.type];
+			// [KIT_PLAYER_MODEL] a team's colour, its members' (its state's
+			// members, shared) tint on their bodies
+			if(ty.team && show.get("team_color").is_undefined())
+				show.set("team_color", jstr(in.params, "color"));
 			// (a seat: taken by a use, [KIT] stage 4h)
 			// ([KIT_USE_ACCESS] "locked": its use is nobody's, a click
 			// told so)
@@ -12472,6 +12476,11 @@ struct Module: public interface::Module, public Interface
 		double look_yaw = 0;
 		// [KIT_CTF] c:speed's factor on the movement's `speed`
 		double speed = 1;
+		// [KIT_PLAYER_MODEL] the last input's view pitch (degrees, down
+		// positive), the client's count of its swings and its digging (1)
+		// or not; the pose last set on the player's node
+		double look_pitch = 0, swings = 0, dig = 0;
+		ss_ pose_sent;
 	};
 	std::map<size_t, Body> m_bodies;
 	sm_<size_t, ss_> m_controls_sent;
@@ -12798,12 +12807,16 @@ struct Module: public interface::Module, public Interface
 			const ss_ one = d.substr(i, std::min<size_t>(e - i, 200));
 			i = e + 1;
 			unsigned n = 0;
-			double v[8];
-			if(sscanf(one.c_str(), "%u %lf %lf %lf %lf %lf %lf %lf %lf", &n,
-					&v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]) != 9)
+			// [KIT_PLAYER_MODEL] then the pitch, the swings and the dig,
+			// for the body others see (an older client sends none)
+			double v[11] = {0};
+			const int got = sscanf(one.c_str(), "%u %lf %lf %lf %lf %lf %lf "
+					"%lf %lf %lf %lf %lf", &n, &v[0], &v[1], &v[2], &v[3], &v[4],
+					&v[5], &v[6], &v[7], &v[8], &v[9], &v[10]);
+			if(got != 9 && got != 12)
 				continue;
 			bool ok = n > at;
-			for(int k = 0; k < 8; k++)
+			for(int k = 0; k < 11; k++)
 				ok = ok && std::isfinite(v[k]) && std::fabs(v[k]) <= MAX_COORD;
 			if(!ok)
 				continue;
@@ -12833,7 +12846,43 @@ struct Module: public interface::Module, public Interface
 			o += "}";
 			b.inputs.push_back(std::make_pair(n, o));
 			b.look_yaw = v[2];
+			b.look_pitch = std::max(-90.0, std::min(90.0, v[8]));
+			b.swings = v[9];
+			b.dig = v[10];
 		}
+		set_pose(packet.sender, b);
+	}
+
+	// [KIT_PLAYER_MODEL] What others draw of a player's body that its
+	// node's place does not say, on the node as "kit_pose": "<yaw> <pitch>
+	// <swings> <flags> <held item>" (flags: 1 digging, 2 in a seat, 4 not
+	// in play: waiting to respawn), set as it changes
+	void set_pose(size_t peer, Body &b)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end() || !pi->second.player)
+			return;
+		auto ei = m_entities.find(pi->second.player);
+		if(ei == m_entities.end() || !ei->second.node)
+			return;
+		const int flags = (b.dig != 0 ? 1 : 0) | (b.seat ? 2 : 0) |
+				(player_waiting(pi->second.player) ? 4 : 0);
+		char buf[64];
+		snprintf(buf, sizeof buf, "%.0f %.0f %.0f %d ", b.look_yaw,
+				b.look_pitch, std::fmod(b.swings, 1000000), flags);
+		const ss_ pose = buf + hands_of(pi->second.player);
+		// (a node made again, at a scene's change, has none yet)
+		const ss_ sent = itos(ei->second.node) + "|" + pose;
+		if(sent == b.pose_sent)
+			return;
+		b.pose_sent = sent;
+		main_context::access(m_server, scene_of(ei->second),
+				[&](magic::Scene *sc){
+			magic::Node *n = sc->GetNode(ei->second.node);
+			if(n)
+				n->SetVar(magic::StringHash("kit_pose"),
+						magic::Variant(pose.c_str()));
+		});
 	}
 
 	// The world round a body for a step: its cells, the solid looks near

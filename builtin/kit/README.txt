@@ -58,3 +58,23 @@ crack_0.png to crack_9.png ([KIT_DIG_LOOK]) are byte-for-byte copies of
 apps/skeldat's: the ten frames of VoxeLibre's crack_anylength.png
 (<https://git.minetest.land/VoxeLibre/VoxeLibre>, CC BY-SA 4.0 by its
 LEGAL.md; credited as in apps/skeldat/README.md).
+
+The player model ([KIT_PLAYER_MODEL]): player_model.json is
+VoxeLibre 0.92.3's mods/ITEMS/mcl_armor/models/mcl_armor_character.b3d
+(<https://git.minetest.land/VoxeLibre/VoxeLibre>) converted by
+util/kit_player_model.lua (the skin's triangles by bone and the
+animations stand, walk, mine and walk_mine as each bone's transform a
+frame): CC BY-SA 3.0, VoxeLibre's media licence (LEGAL.md; mcl_armor's
+README: "see VoxeLibre license"). By VoxeLibre's git log the model is
+3D Armor's 3d_armor_character.b3d by stu (Stuart Jones), itself Minetest
+Game's character.b3d by MirceaKitsune (CC BY-SA 3.0, mcl_player's
+README), reworked in VoxeLibre by epCode (2020-2021: its bones and
+animations) and Johannes Fritz (2022). The conversion is a derivative
+under the same licence.
+
+player_skin.png is a byte-for-byte copy of VoxeLibre 0.92.3's
+textures/character.png, the Pixel Perfection resource pack's player by
+XSSheep (<https://www.planetminecraft.com/texture_pack/131pixel-perfection/>;
+"Change player texture to Pixel Perfection", Wuzzy, 2017), CC BY-SA 4.0
+by VoxeLibre's LEGAL.md. A team's colour is put on its shirt at run time
+(client_lua/players.lua).

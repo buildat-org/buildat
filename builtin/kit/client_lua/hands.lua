@@ -571,7 +571,8 @@ local function view_update()
 		V.node, V.item, V.look = nil, nil, nil
 	end
 	if not show then
-		if V.node then V.node.enabled = false end
+		-- (deep: a node's enabled is its own, its look's children drawn on)
+		if V.node and V.node.enabled then V.node:SetDeepEnabled(false) end
 		return
 	end
 	if not V.node then
@@ -587,7 +588,7 @@ local function view_update()
 				"%d voxels", item, np + nv > 0 and "look " ..
 				tostring(sheet.look) or "the default look", np, nv))
 	end
-	V.node.enabled = true
+	if not V.node.enabled then V.node:SetDeepEnabled(true) end
 	local g = type(sheet.grip) == "table" and sheet.grip or {}
 	local t = now_s()
 	local pos = magic.Vector3(tonumber(g[1]) or 0.13, tonumber(g[2]) or -0.11,
