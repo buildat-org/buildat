@@ -8083,6 +8083,10 @@ struct Module: public interface::Module, public Interface
 		o += "}";
 		if(m_types[in.type].players){
 			json::Value players = json::array();
+			// [KIT_CTF] its scene: a player in another is `away`
+			ss_ own_scene;
+			if(e.has_pos)
+				scene_of(e, &own_scene);
 			for(auto &pl : m_players){
 				auto it = m_entities.find(pl.second);
 				if(it == m_entities.end())
@@ -8106,6 +8110,10 @@ struct Module: public interface::Module, public Interface
 					auto bi = m_bodies.find(peer_of_player(pl.second));
 					j.set("yaw", bi != m_bodies.end() ? bi->second.look_yaw :
 							it->second.yaw);
+					ss_ ps;
+					scene_of(it->second, &ps);
+					if(!own_scene.empty() && ps != own_scene)
+						j.set("away", true);
 				}
 				j.set("alive", player_alive(it->second));
 				players.append(j);
@@ -20031,6 +20039,17 @@ struct Module: public interface::Module, public Interface
 				pos[k] = pi->second.pos[k];
 			if(!to && pi->second.editing)
 				m_tools_back.insert(peer);
+			// [KIT_CTF] Waiting to respawn (on_signal) there, they wait no
+			// more: back in that round later, they are alive at their max
+			const uint64_t pid = pi->second.player;
+			if(pid && player_waiting(pid)){
+				set_health(pid, "waiting", false);
+				const double max = health_max(pid);
+				if(max > 0)
+					set_health(pid, "hp", max);
+				log_i(MODULE, "%s waits to respawn no more: moved out of "
+						"session %s", cs(pi->second.name), cs(itos(from)));
+			}
 			leave_round(peer, false);
 		}
 		if(to)

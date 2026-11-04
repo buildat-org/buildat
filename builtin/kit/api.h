@@ -423,7 +423,7 @@ namespace interface
 //   ones: the world's, their feet's cell's middle, as c.pos is for an
 //   entity), yaw (degrees, their view's last input) and alive (placed,
 //   not waiting to respawn, their health's hp above 0 where they have
-//   one).
+//   one); away true when they are in another scene than the entity.
 //   regions = true -- c:region_at({x, y, z}): the region deciding the
 //   cell the point is in (the smallest enabled one of its scene, as
 //   allows() picks), {id, team (the team it is under, 0 none), rules
@@ -891,7 +891,9 @@ namespace interface
 // "enter" ("Waiting to respawn": no dig, place or damage); the server
 // steps their body with no walking or jumping (the view turns), the
 // client too, and Kit's HUD says "Waiting to respawn". game_rules' respawn
-// changed to "at_once" respawns those waiting. c:respawn() (before
+// changed to "at_once" respawns those waiting. A player moved to another
+// session (c:session_move, an arena's round and its end) waits no more in
+// the one they leave. c:respawn() (before
 // [KIT_CTF] kit/health's) still respawns a player at once.
 // c:hurt(player, amount | {amount = n | fraction = f, type = name}):
 // a player of the round hurt (fraction: of their health's max) through
