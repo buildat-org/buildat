@@ -92,7 +92,7 @@ namespace app
 		float sound_volume_db = 0.0f;
 		bool sound_mute = false;
 		// **Listening for LAN games** ([WIN_FIREWALL]): off until the
-		// player first opens the list of this network's games, then on
+		// player first opens the list of the LAN's games, then on
 		// from each start. The listen is on every interface, which is what
 		// Windows' firewall asks about: asked once, when the player looked.
 		bool lan_discovery = false;

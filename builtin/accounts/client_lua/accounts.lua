@@ -3023,8 +3023,8 @@ server_entries = function()
 	if M.hello and M.hello["local"] == 1 then
 		add("Mine", "Open to LAN", "lan", function()
 			local w = M.server_open("Open to LAN")
-			page_text(w, "Players on this network find the server in " ..
-					"their launcher's \"On this network\" and join it; " ..
+			page_text(w, "Players on the LAN find the server under " ..
+					"LAN in their launcher's Servers and join it; " ..
 					"until then it listens on this computer only.")
 			M.lan_row(w)
 		end)

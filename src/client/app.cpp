@@ -1868,7 +1868,7 @@ struct CApp: public App, public magic::Application
 		// so one built in its first frames (launch_world's floor) has
 		// heard the 2 s announcements by then: the window takes ~2 s.
 		// No address given is a launcher (boot_to_menu, set after this).
-		// Once the player has looked at this network's games ([WIN_FIREWALL])
+		// Once the player has looked at the LAN's games ([WIN_FIREWALL])
 		if(g_client_config.get<ss_>("server_address").empty() &&
 				m_options.lan_discovery)
 			lan_listen();

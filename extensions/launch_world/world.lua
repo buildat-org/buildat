@@ -207,9 +207,9 @@ do
 		end
 	end
 	log:info("servers: " .. #SERVERS .. " of the client's own")
-	-- **The games on this network** ([LAN_DISCOVERY]): what announced
+	-- **The games on the LAN** ([LAN_DISCOVERY]): what announced
 	-- itself before the room was built (the client listens from its
-	-- start once the player has opened This network, [WIN_FIREWALL]),
+	-- start once the player has opened Servers, [WIN_FIREWALL]),
 	-- as heard -- anyone on the LAN can announce.
 	-- simplified: heard once, at the build; a game opened to the LAN
 	-- after it stands on the floor the next time the room is entered.
@@ -227,12 +227,12 @@ do
 		if #SERVERS < 10 and not known then
 			SERVERS[#SERVERS + 1] = {address = address,
 				name = (e.name ~= "" and e.name or address) ..
-						" (on this network)",
+						" (LAN)",
 				players = e.players}
 			lan = lan + 1
 		end
 	end
-	log:info("servers: " .. lan .. " heard on this network")
+	log:info("servers: " .. lan .. " heard on the LAN")
 	-- **Starport's listings** ([SERVER_ICONS]): the lists kept from the
 	-- last fetch, as the filters let them through, each with the icon
 	-- its listing carries; a fetch now (of the Starports the user said
