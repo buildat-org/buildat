@@ -17,7 +17,7 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp aitta_on_web; t=$CHECK_TMP
 # The waits after a waitlog are settles after the line: the screen it
 # names drawn (before its shot) or focused (before the typing) in the
-# frames after. Enter on Home's second row says "launch_menu: browse
+# frames after. Enter on Home's third row (Get more) says "launch_menu: browse
 # <its label>" and opens that list; Escape closes it ("<kind> closed").
 cat > "$t/steps.json" <<J
 [
@@ -26,8 +26,9 @@ cat > "$t/steps.json" <<J
 	["wait", 1500],
 	["shot", "\${OUT}/home.png"],
 	["key", "Down"],
+	["key", "Down"],
 	["key", "Enter"],
-	["waitlog", "launch_menu: browse ", 10],
+	["waitlog", "launch_menu: browse Get more", 10],
 	["wait", 1500],
 	["shot", "\${OUT}/get_more.png"],
 	["key", "Escape"],

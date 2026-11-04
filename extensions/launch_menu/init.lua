@@ -688,7 +688,9 @@ local function home(query)
 			if n > 0 or kind == "server" then
 				row({label = KIND_TITLE[kind], kind = "browse",
 					glyph = kind == "server" and "🌐" or nil,
-					description = n .. " to choose from"}, tostring(n),
+					description = n > 0 and n .. " to choose from" or
+						"On the LAN, joined before, or public"},
+					n > 0 and tostring(n) or "",
 					function() browse(kind, "", "recent") end)
 			end
 		end
