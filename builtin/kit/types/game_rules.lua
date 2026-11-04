@@ -19,6 +19,9 @@
 -- `screen` (the inventory screen, its key E). `on_death`: "keep", "drop"
 -- (each stack a pickup where they died) or "lose".
 -- [KIT_HUD] show_health: the health bar on each player's screen.
+-- [KIT_CTF] hand_level: the highest material level a hand digs (a dig at
+-- a hand's speed: nothing held, or an item with no dig speed for the
+-- voxel's group); one above it is refused. 15 (the default): any
 -- Stage 8's scene override goes beside it
 return {
 	version = 2,
@@ -39,6 +42,7 @@ return {
 		on_death = {type = "string", default = "keep",
 			choices = {"keep", "drop", "lose"}},
 		show_health = {type = "bool", default = true},
+		hand_level = {type = "number", default = 15, min = 0, max = 15},
 	},
 	-- Version 1's dig_by_tools gone: building replaces it (nothing is
 	-- released: every project plays by the inventory)

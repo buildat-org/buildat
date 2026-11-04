@@ -546,7 +546,8 @@ namespace interface
 //       edit, one undo; refused if empty or of another box size)
 //   {"op": "voxel", "name": n, "texture": t, "kind": "solid"|"leaves"|
 //    "plant"|"water", "solid", "transparent", "light": 0..15,
-//    "friction": 0..10, "surface": tag, "group": tag, "level": 0..15}
+//    "friction": 0..10, "surface": tag, "group": tag, "level": 0..15,
+//    "sound_dig", "sound_place", "drop": a voxel or item type ("" itself)}
 //       -- ([KIT] stage 4g) the
 //       builder's voxel type "<their name>/<n>" (the store's row
 //       "voxel:<their name>/<n>", its "version" counted up by each),
@@ -676,6 +677,19 @@ namespace interface
 // owner "team" is owned by the members of the team it is under (itself or
 // an entity up its parents with a team: a team's base placed under the
 // team). The prefab kit/team_match is a two-team match to place.
+// [KIT_CTF] kit/arena's `map` (a scene's name; "" none: the round in the
+// arena's own scene): the session's players go into that scene's copy
+// (its spawn, then their team's pad), its teams the round's (c.teams, a
+// `teams = true` type's with a `map`), and at the session's end back to
+// the arena's scene (its spawn). `time_up`: "draw" (the default) or
+// "most": the team with the most points wins at the timer's end; a tie
+// runs on as overtime (the status line says so) until the scores differ
+// (checked each second). Its UI is drawn in its own scene only: its
+// output `status` (the round's line as it changes: the time left or
+// "Overtime", the scores, the result) is for a kit/ui_text in the map.
+// kit/timer's output `left`: the seconds left,
+// (repeats - ticks) * interval, at its start and each tick (none without
+// repeats).
 //
 // **Sounds** ([KIT_SOUNDS]): the project's named sounds, each blip's
 // parameters (extensions/blip's compact form, "blip1:...": data, made in
@@ -782,6 +796,11 @@ namespace interface
 // above; one without a group digs as before. Kit's default set's groups:
 // stone (stone, cobble, mossy cobble; level 1), dirt (dirt, grass, snow),
 // sand (sand, gravel), wood (log, planks), leaves, plant.
+// [KIT_CTF] A material's `drop` is what its dig drops instead of itself
+// (kit/stone's kit/cobble). kit/game_rules' hand_level (15 by default:
+// any): a dig at a hand's speed -- nothing held, or an item whose sheet's
+// dig names no speed for the voxel's group -- of a material above that
+// level is refused ("kit:warning", the client stops asking).
 //
 // Origins: a cell play writes is a build or a game change. Builds are what
 // players make: their own dig or place (the app says so, player_wrote())

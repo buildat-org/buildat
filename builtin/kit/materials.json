@@ -5,7 +5,7 @@
 	"comment": "[KIT] stage 4e: Kit's own material set, Workbench's (builtin/kit/world.h says the format). The textures are skeldat's and VoxeLibre's (client_data/, README.txt); heightmap is the layer of builtin/heightmap's ground textures with the same pixels. Stage 4f: plants, structures, decorations. Stage 4g: snow. [KIT_DEFAULT_GROUPS] Material groups and levels, used under kit/game_rules' dig_by_tools. [KIT_ENVIRONMENT] seasons: a voxel's textures in a season. [KIT_TINT_NATURE] [KIT_TINT_MATERIALS] The tinted ones' textures are greyscale, their alpha where the tint applies (a grass block's dirt, a log's rings keep their colour), and their palettes VoxeLibre's biome colours (grass, foliage, water) and kinds of wood, sand and stone, entry 0 the old look.",
 	"voxels": {
 		"kit/stone": {"sound_dig": "kit/dig", "sound_place": "kit/place",
-			"group": "stone", "level": 1,
+			"group": "stone", "level": 1, "drop": "kit/cobble",
 			"texture": "kit/stone.png", "heightmap": 1,
 			"tint": "stone"},
 		"kit/cobble": {"sound_dig": "kit/dig", "sound_place": "kit/place",

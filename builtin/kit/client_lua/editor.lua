@@ -166,7 +166,7 @@ for k, v in pairs({state = nil, link = nil, cursor = nil, pending = {},
 		package_name = "my_prefabs", credits = {}, try_values = {},
 		voxel_form = {name = "my_voxel", texture = "kit/stone.png", kind = "solid",
 			solid = true, transparent = false, light = 0, friction = 1,
-			surface = "", group = "", level = 0}}) do
+			surface = "", group = "", level = 0, drop = ""}}) do
 	init(E, k, v)
 end
 -- Floorplanner's S: the view, the cameras and what the pointer is doing
@@ -3089,6 +3089,8 @@ local VOXEL_FIELDS = {
 	-- [KIT_SOUNDS] its dig's and place's sounds
 	{name = "sound_dig", type = "sound"},
 	{name = "sound_place", type = "sound"},
+	-- [KIT_CTF] what its dig drops ("" itself): a voxel or item type
+	{name = "drop", type = "text", max_length = 129},
 }
 
 function M.voxel_dialog()

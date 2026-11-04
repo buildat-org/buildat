@@ -23,7 +23,9 @@
 //        [KIT_ENVIRONMENT] "seasons": {season: {"texture" | "top",
 //        "side", "bottom"}, ...}: its look in that season (spring, summer,
 //        autumn, winter; the faces not named its own), [KIT_SOUNDS]
-//        "sound_dig", "sound_place": a project's sound's name},
+//        "sound_dig", "sound_place": a project's sound's name,
+//        [KIT_CTF] "drop": what its dig drops (a voxel or item type's
+//        name, "<author>/<name>"; none: itself)},
 //        ...},
 //    "palettes": {name: [entry, ...], ...} ([KIT_TINT_PALETTE]),
 //    "fallbacks": {role: role, ...},
@@ -255,6 +257,9 @@ struct Material
 	// level or above
 	ss_ group;
 	int level = 0;
+	// [KIT_CTF] What its dig drops by that rule: a voxel or item type's
+	// name ("" itself)
+	ss_ drop;
 	// [KIT_SOUNDS] The sounds of its dig and its place: a project's sound's
 	// name ("<author>/<name>"; "" none)
 	ss_ sound_dig, sound_place;
@@ -287,6 +292,7 @@ struct Material
 		group = json::jstr(j, "group");
 		sound_dig = json::jstr(j, "sound_dig");
 		sound_place = json::jstr(j, "sound_place");
+		drop = json::jstr(j, "drop");
 		const double lv = j.get("level").is_number() ?
 				j.get("level").as_number() : 0;
 		level = lv >= 0 && lv <= 15 ? (int)lv : -1;
@@ -321,7 +327,7 @@ struct Material
 		tag_ok = tag_ok && group.size() <= 32 && level >= 0 && lv == level;
 		for(char c : group)
 			tag_ok = tag_ok && (isalnum((unsigned char)c) || c == '_');
-		for(const ss_ *sn : {&sound_dig, &sound_place}){
+		for(const ss_ *sn : {&sound_dig, &sound_place, &drop}){
 			tag_ok = tag_ok && sn->size() <= 129 && (sn->empty() ||
 					std::count(sn->begin(), sn->end(), '/') == 1);
 			for(char c : *sn)
@@ -352,6 +358,7 @@ struct Material
 		v.set("level", (int64_t)level);
 		v.set("sound_dig", sound_dig);
 		v.set("sound_place", sound_place);
+		v.set("drop", drop);
 		// [KIT_TINT_PALETTE] its colours and their names ("" unnamed)
 		json::Value t = json::array(), tn = json::array();
 		for(size_t i = 0; i < tint.colors.size(); i++){

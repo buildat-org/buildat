@@ -24,7 +24,7 @@
 #      with no drop, as before groups ([KIT_DEFAULT_GROUPS]); then
 #      "inventory" (the default): holding kit/pickaxe (dig stone 4, level 1): rock takes its
 #      0.25 s (asked again) and drops kitboss/rock; ore (level 3) digs
-#      without a drop; kit/stone (stone, level 1) drops; a bare hand digs
+#      without a drop; kit/stone (stone, level 1) drops kit/cobble (its drop); a bare hand digs
 #      kit/dirt in 1 s with a drop, kit/stone in 4 s without
 #   util/kit_tools_check.sh
 set -u
@@ -263,7 +263,7 @@ log = open(sys.argv[1], errors="replace").read()
 assert "workbench: kitboss dug (2,1,3): written" in log
 off = log.split("workbench: kitboss dug (2,1,3): written")[0]
 assert "kitboss digs " not in off and "kitboss dug kit" not in off, "a dig by group in creative"
-assert "kitboss dug kit/stone (level 1) with kit/pickaxe (level 1): drops kit/stone" in log
+assert "kitboss dug kit/stone (level 1) with kit/pickaxe (level 1): drops kit/cobble" in log
 for w in ["kitboss digs kit/dirt (dirt, level 0) with a hand: 1 s",
 		"kitboss dug kit/dirt (level 0) with a hand (level 0): drops kit/dirt",
 		"kitboss digs kit/stone (stone, level 1) with a hand: 4 s",

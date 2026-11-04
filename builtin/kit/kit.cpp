@@ -3187,7 +3187,8 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// {"op": "voxel", "name", "texture", "kind", "solid", "transparent",
-	// "light", "friction", "surface"}: the builder's voxel type "<their name>/<name>", or its
+	// "light", "friction", "surface", "group", "level", "sound_dig",
+	// "sound_place", "drop"}: the builder's voxel type "<their name>/<name>", or its
 	// next version
 	void make_voxel(const Peer &p, const json::Value &j,
 			std::function<void(const ss_&)> refuse)
@@ -3222,12 +3223,15 @@ struct Module: public interface::Module, public Interface
 		// [KIT_SOUNDS] its dig's and place's sounds
 		row.set("sound_dig", jstr(j, "sound_dig"));
 		row.set("sound_place", jstr(j, "sound_place"));
+		// [KIT_CTF] what its dig drops ("" itself)
+		row.set("drop", jstr(j, "drop"));
 		world::Material m;
 		if(!m.parse(row) || m.light != row.get("light").as_number())
 			return refuse("a texture, a kind (solid, leaves, plant, water), "
 					"light (a whole number 0...15), friction 0...10, a "
 					"surface tag and a group (letters, digits and _), a "
-					"level (a whole number 0...15) and sounds' names");
+					"level (a whole number 0...15), sounds' names and a "
+					"drop's (<author>/<name>)");
 		if(!texture_choices().count(texture))
 			return refuse("texture: no voxel or upload has "+texture);
 		auto old = m_voxel_types.find(name);
@@ -8484,10 +8488,15 @@ struct Module: public interface::Module, public Interface
 	// [KIT_MINIGAMES_FIX] The teams a `teams = true` type reads: those in
 	// its scene, and of those the ones under its own parent when there are
 	// any (a placed prefab's own)
+	// [KIT_CTF] A `map` scene of its own (kit/arena's): that scene's teams
 	sv_<uint64_t> teams_of(const Entity &e)
 	{
 		ss_ scene;
 		scene_of(e, &scene);
+		for(const Instance &in : e.comps)
+			if(m_types[in.type].teams && m_host.scenes.count(
+					jstr(in.params, "map")))
+				scene = jstr(in.params, "map");
 		sv_<uint64_t> all, sib;
 		for(auto &p : m_entities){
 			bool team = false;
@@ -14808,10 +14817,26 @@ struct Module: public interface::Module, public Interface
 		const json::Value *sheet = nullptr;
 		const ss_ item = hands_of(pi->second.player, &sheet);
 		double speed = hand_speed(m->group);
+		bool hand = true;
 		if(sheet && has_item(pi->second.name, item)){
 			const json::Value &s = sheet->get("dig").get(m->group.c_str());
 			if(s.is_number())
-				speed = s.as_number();
+				speed = s.as_number(), hand = false;
+		}
+		// [KIT_CTF] kit/game_rules' hand_level: a dig at a hand's speed
+		// of a material above it refused
+		if(hand && m->level > json::jint(game_rules(), "hand_level", 15)){
+			const ss_ why = "A hand does not dig "+voxel;
+			if(log_refusal(pi->second, why)){
+				log_i(MODULE, "A dig by %s refused: %s (level %i)",
+						cs(pi->second.name), cs(why), m->level);
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->send(peer, "kit:warning", why);
+				});
+			}
+			if(wait)
+				*wait = 0;
+			return false;
 		}
 		const int64_t need = (int64_t)(1e6 / speed), now = now_us();
 		ToolUse &tu = m_tool_use[peer];
@@ -14867,8 +14892,10 @@ struct Module: public interface::Module, public Interface
 		if(!sheet || !has_item(pi->second.name, item))
 			item.clear(), sheet = nullptr;
 		const int64_t level = sheet ? json::jint(*sheet, "level", 0) : 0;
-		const ss_ drop = level >= mlevel && item_ok(world::material_of(voxel)) ?
-				world::material_of(voxel) : "";
+		// [KIT_CTF] its material's drop (none: itself)
+		const ss_ what = m && !m->drop.empty() ? m->drop :
+				world::material_of(voxel);
+		const ss_ drop = level >= mlevel && item_ok(what) ? what : "";
 		log_i(MODULE, "%s dug %s (level %i) with %s (level %s): %s",
 				cs(pi->second.name), cs(voxel), mlevel, item.empty() ?
 				"a hand" : cs(item), cs(itos(level)), drop.empty() ?
@@ -17087,6 +17114,24 @@ struct Module: public interface::Module, public Interface
 				queue_run(r);
 			}
 		}
+		// [KIT_CTF] The arena that made the game, in another scene, when
+		// this is its `map`: its join (the teams)
+		if(GameSession *gs = active_session()){
+			auto me = m_entities.find(gs->maker);
+			ss_ ms;
+			if(me != m_entities.end() && scene_of(me->second, &ms) &&
+					ms != scene && gs->maker_comp < me->second.comps.size() &&
+					jstr(me->second.comps[gs->maker_comp].params, "map") ==
+					scene){
+				Run r;
+				r.entity = gs->maker;
+				r.comp = gs->maker_comp;
+				r.handler = "on_join";
+				r.by = "player:"+itos(pid);
+				r.args.append(r.by);
+				queue_run(r);
+			}
+		}
 		if(at_play && !keep_position && !placed){
 			log_i(MODULE, "%s to the app's default spawn", cs(name));
 			m_server->emit_event("kit:spawn_player", new SpawnPlayer(peer));
@@ -19279,12 +19324,27 @@ struct Module: public interface::Module, public Interface
 			m_peer_session[peer] = to;
 		else
 			m_peer_session.erase(peer);
+		// [KIT_CTF] kit/arena's `map`: into the game in that scene, and
+		// back out in the arena's own
+		ss_ map = maker_param(to ? to : from, "map", "");
+		if(!m_host.scenes.count(map))
+			map.clear();
+		if(!map.empty()){
+			if(to)
+				scene = map;
+			else if(m_sessions.count(from)){
+				SessionScope sc(*this, 0);
+				auto me = m_entities.find(m_sessions[from]->maker);
+				if(me != m_entities.end())
+					scene_of(me->second, &scene);
+			}
+		}
 		{
 			SessionScope sc(*this, to);
 			if(!m_host.scenes.count(scene))
 				scene = m_host.world_scene.empty() ?
 						m_host.scenes.begin()->first : m_host.world_scene;
-			if(!to)
+			if(!to || !map.empty())
 				scene_spawn(scene, pos[0], pos[1], pos[2]);
 		}
 		log_i(MODULE, "Peer %zu from session %s to session %s (scene %s)",

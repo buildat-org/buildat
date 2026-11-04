@@ -4,7 +4,9 @@
 -- scope ([KIT] stage 7b's first part): "shared", one timer for all; or
 -- "per_player", each player who starts it their own (their own ticks,
 -- signalled as by them, a "stop" of theirs stopping only theirs); a start
--- by no player (autostart, the app) is the shared one's
+-- by no player (autostart, the app) is the shared one's.
+-- [KIT_CTF] "left": the seconds left, (repeats - ticks) * interval, at
+-- its start and each tick (none without repeats), for a HUD's text
 local function player_of(c, by)
 	if c.params.scope == "per_player" and type(by) == "string" and
 			by:match("^player:%d+$") then
@@ -26,7 +28,14 @@ local function stop(c, player, why)
 	c:log("stopped:", why, "after", c.state.ticks, "ticks")
 end
 
+local function left(c, n)
+	if c.params.repeats > 0 then
+		c:emit("left", (c.params.repeats - n) * c.params.interval)
+	end
+end
+
 local function start(c, player)
+	left(c, 0)
 	if player then
 		c.state.per[player] = 0
 		c:after(c.params.interval, "tick", {player = player})
@@ -54,7 +63,7 @@ return {
 		per = {default = {}},
 	},
 	inputs = {start = "none", stop = "none"},
-	outputs = {tick = "number", done = "none"},
+	outputs = {tick = "number", done = "none", left = "number"},
 	on_start = function(c)
 		if c.params.autostart then
 			start(c, nil)
@@ -94,6 +103,7 @@ return {
 			c:log("tick", n)
 		end
 		c:emit("tick", n)
+		left(c, n)
 		if c.params.repeats > 0 and n >= c.params.repeats then
 			stop(c, player, "its repeats done")
 			c:emit("done")

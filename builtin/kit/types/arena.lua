@@ -28,7 +28,14 @@
 -- back after the results: "before" (what they had before the round),
 -- "keep" (the round's), "clear" (nothing) or "living" (the round's for
 -- one who did not die in it, else nothing). Health starts full in a
--- round (its player entity is the round's own)
+-- round (its player entity is the round's own).
+-- [KIT_CTF] `map`: the scene the round is played in ("": the arena's
+-- own): the session's players go into its copy, its teams the round's,
+-- and back to the arena's scene at the end. `time_up`: "draw" (the
+-- default) or "most" (the team with the most points wins; a tie is
+-- overtime, shown, until the scores differ). Its UI is drawn in its own
+-- scene: output `status`, the round's line as it changes (the time left
+-- or "Overtime", the scores, the result), is for a text in the map
 local function ids_in(list, n)
 	local out = {}
 	for i = 1, math.min(n, #list) do
@@ -157,10 +164,14 @@ local function round_status(c)
 	local teams = teams_of(c)
 	local s = c.state.result ~= "" and
 			(c.state.result .. "|" .. c.state.ended) or
-			(c.params.duration > 0 and clock(c.state.left) .. " left" or
+			(c.state.overtime and "Overtime" or
+			c.params.duration > 0 and clock(c.state.left) .. " left" or
 			"Round")
 	if #teams > 0 then
 		s = s .. "|" .. scores(teams)
+	end
+	if s ~= c.state.value then
+		c:emit("status", s)
 	end
 	c.state.status = s
 	c.state.value = s
@@ -219,6 +230,9 @@ return {
 			choices = {"kit", "clear", "keep"}},
 		at_end = {type = "string", default = "before",
 			choices = {"before", "keep", "clear", "living"}},
+		map = {type = "string", default = "", choices_from = "scenes"},
+		time_up = {type = "string", default = "draw",
+			choices = {"draw", "most"}},
 	},
 	state = {
 		-- The default round's: the players in the zone in the order they
@@ -234,6 +248,7 @@ return {
 		-- id), the seconds left, the result
 		assigned = {default = {}},
 		left = {default = 0},
+		overtime = {default = false},
 		result = {default = ""},
 		ended = {default = ""},
 		outcome = {default = false},
@@ -247,7 +262,8 @@ return {
 	-- Its pad, the zone's first cell's floor, seen in play
 	look = {shape = "box", size = {1, 0.1, 1}, color = "#f0a030"},
 	inputs = {["end"] = "none", win = "any"},
-	outputs = {started = "number", ended = "number", result = "string"},
+	outputs = {started = "number", ended = "number", result = "string",
+		status = "string"},
 	-- Version 1 started at once and had no results to show
 	migrate = function(params, from)
 		if from < 2 then
@@ -268,6 +284,7 @@ return {
 			return
 		end
 		c.state.left = c.params.duration
+		c.state.overtime = false
 		c:log("round starts:", c.params.duration > 0 and
 				(c.params.duration .. " s") or "no time limit")
 		round_status(c)
@@ -384,10 +401,30 @@ return {
 		elseif name == "tick" then
 			if c.params.duration > 0 then
 				c.state.left = math.max(0, c.state.left - 1)
-				if c.state.left <= 3 or c.state.left % 10 == 0 then
+				if not c.state.overtime and
+						(c.state.left <= 3 or c.state.left % 10 == 0) then
 					c:log("round:", c.state.left, "s left")
 				end
-				if c.state.left <= 0 then
+				if c.state.left <= 0 and c.params.time_up == "most" then
+					local best, tie
+					for _, t in ipairs(teams_of(c)) do
+						if not best or t.score > best.score then
+							best, tie = t, false
+						elseif t.score == best.score then
+							tie = true
+						end
+					end
+					if best and not tie then
+						c:log("session", c.session, "over: its time is up,",
+								best.name, "has the most points")
+						return finish(c, best.name, "time up, the most points")
+					elseif best and not c.state.overtime then
+						c.state.overtime = true
+						c:log("time up, tied:", scores(teams_of(c)),
+								"-- overtime")
+					end
+				end
+				if c.state.left <= 0 and not c.state.overtime then
 					c:log("session", c.session, "over: its time is up")
 					return finish(c, nil, "time up")
 				end
