@@ -13420,6 +13420,9 @@ struct Module: public interface::Module, public Interface
 	sm_<ss_, json::Value> m_items_seen;
 	// modify_hit's answer (run()'s fx.hit)
 	json::Value m_hit_ret;
+	// [KIT_HIT_FEEDBACK] the item of the player's hit being applied (a
+	// death's kill message names it)
+	ss_ m_striking;
 
 	// An item: letters, digits and _, or an item type's "<author>/<name>"
 	static bool item_ok(const ss_ &s)
@@ -14420,6 +14423,22 @@ struct Module: public interface::Module, public Interface
 		player_died(player);
 		const uint64_t bid = player_id(by);
 		const ss_ bn = bid && m_entities.count(bid) ? m_entities[bid].name : by;
+		// [KIT_HIT_FEEDBACK] the kill message to the session's players: who
+		// (a player, else none), whom, with what (the hit's item; none: its
+		// damage type)
+		{
+			json::Value km = json::object();
+			km.set("victim", pe->second.name);
+			km.set("by", bid && bid != player ? bn : ss_());
+			km.set("item", bid ? m_striking : ss_());
+			km.set("type", type);
+			const ss_ data = km.stringify();
+			log_i(MODULE, "Kill message: %s", cs(data));
+			network::access(m_server, [&](network::Interface *inetwork){
+				for(auto &p : m_peers)
+					inetwork->send(p.first, "kit:kill", data);
+			});
+		}
 		if(jstr(game_rules(), "respawn") == "on_signal"){
 			set_health(player, "waiting", true);
 			log_i(MODULE, "%s died (%s by %s): waiting to respawn",
@@ -14973,7 +14992,19 @@ struct Module: public interface::Module, public Interface
 		// Not after a respawn (a put since)
 		const size_t tp = it->second.kind == "player" ? peer_of_player(id) : 0;
 		const int64_t puts = m_bodies.count(tp) ? m_bodies[tp].puts : -1;
+		m_striking = item;
 		const double came = apply_hit(id, hit, by);
+		m_striking.clear();
+		// [KIT_HIT_FEEDBACK] the attacker told it landed (the crosshair's
+		// hit marker)
+		if(came > 0 && m_peers.count(peer)){
+			json::Value hl = json::object();
+			hl.set("id", (int64_t)id);
+			hl.set("amount", came);
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(peer, "kit:hit_landed", hl.stringify());
+			});
+		}
 		if(came > 0 && tp && m_bodies.count(tp) && m_bodies[tp].puts == puts &&
 				!player_waiting(id)){
 			// Away from the attacker, or where they look when on top

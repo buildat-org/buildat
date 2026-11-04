@@ -31,6 +31,10 @@
 -- ("nearest": the nearest player or entity with health), "event
 -- kit_shoot [<id>]" (at that entity, else along the view), "event
 -- kit_draw" (a charge's start), "event kit_reload"
+-- [KIT_HIT_FEEDBACK] A hit of this player's that landed ("kit:hit_landed")
+-- marked on the crosshair, a drop of their health a red flash, the
+-- session's kills ("kit:kill": who killed whom with what) a line each
+-- for a while at the top right; a melee use one cycle of the dig's swing.
 return function(K)
 local M, E, P = K.M, K.E, K.P
 local magic = require("buildat/extension/urho3d")
@@ -389,6 +393,8 @@ magic.SubscribeToEvent("command_seq:kit_hit", function(_, data)
 		end
 	end
 	log:info("kit: hit " .. tostring(id))
+	-- [KIT_HIT_FEEDBACK] its swing, as a click's
+	M.view_swing()
 	buildat.send_packet("kit:hit", tostring(id))
 end)
 
@@ -794,8 +800,12 @@ magic.SubscribeToEvent("MouseButtonUp", function(_, data)
 	end
 end)
 
+-- A melee use's one swing (the dig's, once)
 function M.view_swing()
 	V.swing = now_s()
+	if V.node and V.node.enabled then
+		log:info("kit: " .. tostring(V.item) .. " swings once in first person")
+	end
 end
 
 magic.SubscribeToEvent("Update", function()
@@ -845,6 +855,115 @@ magic.SubscribeToEvent("command_seq:kit_draw", function()
 end)
 magic.SubscribeToEvent("command_seq:kit_reload", function()
 	reload()
+end)
+
+-- ---- [KIT_HIT_FEEDBACK] A hit that landed marked on the crosshair (an X
+-- of dots round it, 0.25 s), a red flash as this player's health
+-- drops, the session's kills a line each at the top right for 5 s
+local F = {marks = nil, mark_at = -1, flash = nil, flash_at = -1, hp = nil,
+	feed = nil, kills = {}}
+
+local function ui_box(col)
+	local b = magic.ui.root:CreateChild("BorderImage")
+	b.blendMode = magic.BLEND_ALPHA
+	b.color = col
+	b.priority = 100
+	b.visible = false
+	return b
+end
+
+buildat.sub_packet("kit:hit_landed", function(data)
+	local d = network.parse_json(data)
+	if not F.marks then
+		F.marks = {}
+		-- An X round the crosshair: three dots out along each diagonal
+		for _, o in ipairs({{-1, -1}, {1, -1}, {-1, 1}, {1, 1}}) do
+			for r = 9, 15, 3 do
+				local b = ui_box(magic.Color(1, 1, 1, 0.9))
+				b:SetFixedSize(3, 3)
+				b:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+				b:SetPosition(o[1] * r, o[2] * r)
+				F.marks[#F.marks + 1] = b
+			end
+		end
+	end
+	F.mark_at = now_s()
+	log:info("kit: the hit landed on " .. tostring(type(d) == "table" and
+			d.id) .. ": the hit marker")
+end)
+
+-- The item's name as a line says it: after its author's "kitboss/"
+local function item_text(item)
+	return tostring(item):match("([^/]+)$") or tostring(item)
+end
+
+buildat.sub_packet("kit:kill", function(data)
+	local d = network.parse_json(data)
+	if type(d) ~= "table" then
+		return
+	end
+	local victim = tostring(d.victim or "?")
+	local line
+	if type(d.by) == "string" and d.by ~= "" then
+		line = d.by .. " killed " .. victim .. ((type(d.item) == "string" and
+				d.item ~= "") and " with " .. item_text(d.item) or "")
+	else
+		line = victim .. " died" .. ((type(d.type) == "string" and
+				d.type ~= "" and d.type ~= "normal") and " (" .. d.type .. ")" or "")
+	end
+	F.kills[#F.kills + 1] = {text = line, till = now_s() + 5}
+	if #F.kills > 4 then
+		table.remove(F.kills, 1)
+	end
+	F.kills_changed = true
+	log:info("kit: kill message: " .. line)
+end)
+
+magic.SubscribeToEvent("Update", function()
+	local t = now_s()
+	if F.marks then
+		local on = t - F.mark_at < 0.25
+		for _, b in ipairs(F.marks) do b.visible = on end
+	end
+	-- This player's health: a drop flashes the screen red
+	local me = P.nodes[P.you]
+	local hv = me and me.node:GetVar("kit:hp")
+	local hp = hv and not hv:IsEmpty() and tonumber(hv:GetString()) or nil
+	if hp and F.hp and hp < F.hp then
+		F.flash = F.flash or ui_box(magic.Color(1, 0, 0, 0))
+		F.flash_at = t
+		log:info(string.format("kit: hurt (%g to %g): the red flash", F.hp, hp))
+	end
+	F.hp = hp
+	if F.flash then
+		local a = 1 - (t - F.flash_at) / 0.4
+		F.flash.visible = a > 0
+		if a > 0 then
+			F.flash:SetPosition(0, 0)
+			F.flash:SetFixedSize(magic.ui.root.width, magic.ui.root.height)
+			F.flash.color = magic.Color(1, 0, 0, 0.35 * a)
+		end
+	end
+	-- The kill lines: gone as their time is up
+	while F.kills[1] and F.kills[1].till < t do
+		table.remove(F.kills, 1)
+		F.kills_changed = true
+	end
+	if F.kills_changed then
+		F.kills_changed = false
+		if not F.feed then
+			F.feed = magic.ui.root:CreateChild("Text")
+			F.feed:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 14)
+			F.feed:SetAlignment(magic.HA_RIGHT, magic.VA_TOP)
+			F.feed:SetPosition(-10, 40)
+			F.feed:SetTextAlignment(magic.HA_RIGHT)
+			F.feed.priority = 100
+		end
+		local s = {}
+		for _, k in ipairs(F.kills) do s[#s + 1] = k.text end
+		F.feed:SetText(table.concat(s, "\n"))
+		F.feed.visible = #s > 0
+	end
 end)
 
 end
