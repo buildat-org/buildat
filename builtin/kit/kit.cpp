@@ -13195,6 +13195,41 @@ struct Module: public interface::Module, public Interface
 			send();
 	}
 
+	// [KIT_ITEMS_TAB] {"op": "item_delete", "name"}: a builder's item type
+	// gone (the project's own: Kit's and a package's are not); what holds
+	// it keeps the name, an item of no type
+	void delete_item(const Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		if(active_session())
+			return refuse("in a draft: the default round's");
+		const ss_ name = jstr(j, "name");
+		ss_ row;
+		if(!item_ok(name) || !m_store->get("item:"+name, row) ||
+				!jstr(json::load_string(row.c_str()), "package").empty())
+			return refuse("no item type of the project's own named "+
+					name.substr(0, 129));
+		m_store->remove("item:"+name);
+		m_item_types.erase(name);
+		log_i(MODULE, "%s deleted item type %s", cs(p.name), cs(name));
+		send_item_types(-1);
+	}
+
+	// [KIT_ITEMS_TAB] {"op": "give", "item"}: one of an item to the
+	// builder's own player in play, as a dig's drop goes (kit/equipment's
+	// on_tool: the slots, a full inventory's rule)
+	void give_me(const Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const ss_ item = jstr(j, "item");
+		if(!item_ok(item))
+			return refuse("give: an item's name");
+		if(!m_session.running || !p.player || !equipment_of(p.player))
+			return refuse("give: in play, to a player with kit/equipment");
+		tool_run(p.player, "", 0, 0, item);
+		log_i(MODULE, "%s gives themselves %s", cs(p.name), cs(item));
+	}
+
 	// {"op": "item", "name": n, "preset": an item type, and the sheet's
 	// fields}: the builder's item type "<their name>/<n>" (the row
 	// "item:<their name>/<n>", its version counted up by each), the
@@ -13306,41 +13341,6 @@ struct Module: public interface::Module, public Interface
 		if(eq && slot > 0 && own_slots()){
 			const json::Value sl = slots_of(pl->second);
 			const ss_ now = slot_item(sl.at((unsigned)slot - 1));
-	// [KIT_ITEMS_TAB] {"op": "item_delete", "name"}: a builder's item type
-	// gone (the project's own: Kit's and a package's are not); what holds
-	// it keeps the name, an item of no type
-	void delete_item(const Peer &p, const json::Value &j,
-			std::function<void(const ss_&)> refuse)
-	{
-		if(active_session())
-			return refuse("in a draft: the default round's");
-		const ss_ name = jstr(j, "name");
-		ss_ row;
-		if(!item_ok(name) || !m_store->get("item:"+name, row) ||
-				!jstr(json::load_string(row.c_str()), "package").empty())
-			return refuse("no item type of the project's own named "+
-					name.substr(0, 129));
-		m_store->remove("item:"+name);
-		m_item_types.erase(name);
-		log_i(MODULE, "%s deleted item type %s", cs(p.name), cs(name));
-		send_item_types(-1);
-	}
-
-	// [KIT_ITEMS_TAB] {"op": "give", "item"}: one of an item to the
-	// builder's own player in play, as a dig's drop goes (kit/equipment's
-	// on_tool: the slots, a full inventory's rule)
-	void give_me(const Peer &p, const json::Value &j,
-			std::function<void(const ss_&)> refuse)
-	{
-		const ss_ item = jstr(j, "item");
-		if(!item_ok(item))
-			return refuse("give: an item's name");
-		if(!m_session.running || !p.player || !equipment_of(p.player))
-			return refuse("give: in play, to a player with kit/equipment");
-		tool_run(p.player, "", 0, 0, item);
-		log_i(MODULE, "%s gives themselves %s", cs(p.name), cs(item));
-	}
-
 			if(now == item)
 				return;
 			set_hands(pl->second, comp, now);
@@ -17424,6 +17424,11 @@ struct Module: public interface::Module, public Interface
 			return copy_op(p, peer, j, refuse);
 		if(op == "export")
 			return export_package(peer, p, refuse);
+		// [KIT_ITEMS_TAB]
+		if(op == "item_delete")
+			return delete_item(p, j, refuse);
+		if(op == "give")
+			return give_me(p, j, refuse);
 		if(op == "restart"){
 			Entity *e = nullptr;
 			ss_ why;
@@ -17756,11 +17761,6 @@ struct Module: public interface::Module, public Interface
 		}
 		// Edits are the composition's ([KIT] stage 4d)
 		if(!authored(it->second)){
-		// [KIT_ITEMS_TAB]
-		if(op == "item_delete")
-			return delete_item(p, j, refuse);
-		if(op == "give")
-			return give_me(p, j, refuse);
 			why = ss_(key)+": entity "+v.stringify()+" is "+(it->second.made ?
 					"made in play" : "a player's")+", not the composition's";
 			return nullptr;
@@ -17972,6 +17972,24 @@ struct Module: public interface::Module, public Interface
 			}
 			json::Value comp = json::object();
 			comp.set("type", type);
+			// [KIT_ITEMS_TAB] "params": set at the place (an item dragged
+			// in: a kit/pickup of it), each checked as "set" checks it
+			const json::Value &ps = j.get("params");
+			if(ps.is_object()){
+				json::Value own = json::object();
+				for(json::Iterator it(ps); it; ++it){
+					const json::Value &decl = m_types[type].decl.
+							get("params").get(it.key());
+					const ss_ bad = decl.is_object() ?
+							check_param(decl, *it) : "not a parameter of it";
+					if(!bad.empty()){
+						why = type+"'s "+it.key().substr(0, 64)+" is "+bad;
+						return false;
+					}
+					own.set(it.key(), *it);
+				}
+				comp.set("params", own);
+			}
 			json::Value comps = json::array();
 			comps.append(comp);
 			e.set("components", comps);
@@ -18305,24 +18323,6 @@ struct Module: public interface::Module, public Interface
 		for(size_t i = 0; i < n.comps.size(); i++){
 			Instance &in = n.comps[i];
 			if(had && i < it->second.comps.size() &&
-			// [KIT_ITEMS_TAB] "params": set at the place (an item dragged
-			// in: a kit/pickup of it), each checked as "set" checks it
-			const json::Value &ps = j.get("params");
-			if(ps.is_object()){
-				json::Value own = json::object();
-				for(json::Iterator it(ps); it; ++it){
-					const json::Value &decl = m_types[type].decl.
-							get("params").get(it.key());
-					const ss_ bad = decl.is_object() ?
-							check_param(decl, *it) : "not a parameter of it";
-					if(!bad.empty()){
-						why = type+"'s "+it.key().substr(0, 64)+" is "+bad;
-						return false;
-					}
-					own.set(it.key(), *it);
-				}
-				comp.set("params", own);
-			}
 					it->second.comps[i].type == in.type){
 				// The same instance: its runtime state goes on
 				const Instance &was = it->second.comps[i];

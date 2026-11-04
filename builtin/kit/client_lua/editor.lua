@@ -1204,10 +1204,6 @@ function NT.voxels(w)
 	end
 end
 
--- The Entities tab: the entities, to select ([KIT_SELECT_BURIED]: one
--- under the ground too), in three tabs ([KIT_LIST_TABS], user): Game-wide
--- (the root's, no position), Scene (the scene's with no position: its
--- World, an environment) and Positioned (the scene's, or the root's,
 -- [KIT_ITEMS_TAB] The Items tab: Kit's item types, the project's own
 -- and its packages', grouped by their use -- Tools (a dig speed, or the
 -- use kind "use"), Weapons (melee, ranged), Ammo (another's ammo), Other
@@ -1409,6 +1405,10 @@ function M.items_changed()
 	end
 end
 
+-- The Entities tab: the entities, to select ([KIT_SELECT_BURIED]: one
+-- under the ground too), in three tabs ([KIT_LIST_TABS], user): Game-wide
+-- (the root's, no position), Scene (the scene's with no position: its
+-- World, an environment) and Positioned (the scene's, or the root's,
 -- placed), each in the order they were added; the tab kept for the
 -- session. [KIT_NESTING] Positioned in the tree's order, each one under
 -- its parent indented ([KIT_REPARENT_BUTTONS]: a Select with Switch
@@ -1887,15 +1887,15 @@ local function field(name, d, values)
 		for _, c in ipairs(d.choices) do
 			f.choices[#f.choices + 1] = {tostring(c), c}
 		end
+	elseif d.choices_from == "items" then
+		-- [KIT_ITEMS_TAB] an item: the Items tab's list
+		f.type = "choice"
+		f.choices = IT.choices(values[name])
 	elseif d.choices_from == "biomes" and E.state and E.state.terrain then
 		-- The material set's biomes, as the Terrain tool's (the value
 		-- there too when it is none of them, the server's refusal named)
 		f.type = "choice"
 		f.choices = {}
-	elseif d.choices_from == "items" then
-		-- [KIT_ITEMS_TAB] an item: the Items tab's list
-		f.type = "choice"
-		f.choices = IT.choices(values[name])
 		local has = false
 		for _, b in ipairs(E.state.terrain.biomes or {}) do
 			f.choices[#f.choices + 1] = {b, b}
@@ -2162,15 +2162,6 @@ local function inspector(w, e, is_made)
 				log:info("kit editor: " .. key .. " " .. k .. " = " .. tostring(v))
 				mark()
 			end, WIDGETS)
-			local _
-			_, apply_text = button(w, "Apply", function()
-				for k, v in pairs(E.pending[key] or {}) do
-					if decl[k] and decl[k].type == "position" then
-						local x, y, z = tostring(v):match(
-								"^%s*(%-?[%d.]+)[%s,]+(%-?[%d.]+)[%s,]+(%-?[%d.]+)%s*$")
-						v = x and {tonumber(x), tonumber(y), tonumber(z)}
-					end
-					if v == nil then
 			-- [KIT_ITEMS_TAB] a list of items: one added from the Items
 			-- tab's list (a count typed after it)
 			for _, k in ipairs(names) do
@@ -2189,6 +2180,15 @@ local function inspector(w, e, is_made)
 					end, {label = "Add to " .. k, fill = true})
 				end
 			end
+			local _
+			_, apply_text = button(w, "Apply", function()
+				for k, v in pairs(E.pending[key] or {}) do
+					if decl[k] and decl[k].type == "position" then
+						local x, y, z = tostring(v):match(
+								"^%s*(%-?[%d.]+)[%s,]+(%-?[%d.]+)[%s,]+(%-?[%d.]+)%s*$")
+						v = x and {tonumber(x), tonumber(y), tonumber(z)}
+					end
+					if v == nil then
 						E.status = k .. ": three numbers"
 					else
 						send({op = "set", id = e.id, comp = ci - 1, param = k,
@@ -3073,155 +3073,6 @@ function M.item_dialog()
 	end)
 end
 
-local function context_menu(id, mx, my)
-	close_menu()
-	local e, is_made = find(id)
-	if not e or is_made then
-		return
-	end
-	if not S.sel[id] then
-		select(id)
-	end
-	local ids = sel_ids()
-	local sc = magic.ui.scale
-	local w = window(magic.HA_LEFT, magic.VA_TOP, math.floor(mx / sc),
-			math.floor(my / sc))
-	W.ctx = w
-	w.priority = 10
-	text(w, #ids > 1 and #ids .. " selected" or name_of(e), DIM)
-	button(w, "Delete", function()
-		close_menu()
-		M.delete_selected()
-	end)
-	button(w, "Duplicate", function()
-		close_menu()
-		send({op = "duplicate", ids = ids, by = {1, 0, 0}})
-	end)
-	button(w, "Make prefab...", function()
-		close_menu()
-		prefab_dialog(ids)
-	end)
-	if E.running then
-		button(w, "Restart this", function()
-			close_menu()
-			for _, sid in ipairs(ids) do
-				local se = find(sid)
-				for ci in ipairs(se and se.components or {}) do
-					send({op = "restart", id = sid, comp = ci - 1})
-				end
-			end
-		end)
-	end
-	-- On the screen whole
-	local rw, rh = magic.ui.root.width, magic.ui.root.height
-	w:SetPosition(math.max(0, math.min(math.floor(mx / sc), rw - w.width)),
-			math.max(0, math.min(math.floor(my / sc), rh - w.height)))
-	log:info("kit editor: the menu of " .. id .. " (" .. #ids .. " selected)")
-end
-
--- ---- The views ([FP] Views): set_view, the cameras placed each frame
-local function apply_viewport()
-	local want = E.editing and S.view or "walk"
-	if S.shown_view == want then
-		return
-	end
-	S.shown_view = want
-	local node, cam = active_camera()
-	-- The walk view with the controls' effects (controls.lua).
-	-- [KIT_EDITOR_VIEW_HDR] The 3D and 2D views draw by the app's walk
-	-- view's render path (skeldat's HDR one: its exposure and tonemap);
-	-- the default path under an app's HDR was a frame of raw radiance,
-	-- white at noon. [KIT_SK_2D_EMPTY] HDR off for 2D (floorplanner's) is
-	-- as white: skeldat's light is in the reference's radiances.
-	local vp
-	if want == "walk" then
-		vp = O.viewport and O.viewport() or M.viewport(O.scene, cam)
-	else
-		vp = magic.Viewport:new(O.scene, cam)
-		if O.viewport then
-			vp.renderPath = O.viewport().renderPath
-		else
-			-- [KIT_LIGHTING] the composition's lighting's (environment.lua)
-			M.lit_viewport(vp, "editor", nil, node)
-		end
-	end
-	magic.set_preferred_viewports({vp})
-	if O.set_camera then
-		O.set_camera(node)
-	end
-end
-
--- [KIT_SK_2D_EMPTY] The ground's cell y under a point: the first cell
--- over the app's voxels (or the heightmap) below it, else ground_y. The
--- plan's first cut is from it: skeldat's ground is at 6, under the
--- constant ground_y's cut of 1.5, and its plan was empty.
--- simplified: 64 cells down at most
-local function ground_under(p)
-	if O.solid then
-		local solid = M.with_terrain(O.solid)
-		local x, z = math.floor(p.x + 0.5), math.floor(p.z + 0.5)
-		local y0 = math.floor(p.y + 0.5)
-		for y = y0, y0 - 64, -1 do
-			if solid(x, y, z) then
-				return y + 1
-			end
-		end
-	end
-	return O.ground_y
-end
-
--- The free camera from the app's: where it is, looking as it does
-local function cam3d_from_app()
-	local p, d = O.camera.worldPosition, O.camera.worldDirection
-	S.pos = {x = p.x, y = p.y, z = p.z}
-	S.yaw = math.deg(math.atan2(d.x, d.z))
-	S.pitch = math.deg(math.asin(math.max(-1, math.min(1, -d.y))))
-end
-
-set_view = function(v)
-	if v ~= "2d" and v ~= "3d" and v ~= "walk" then
-		return
-	end
-	if v == "3d" and not S.pos then
-		cam3d_from_app()
-	end
-	if v == "2d" and not S.cut then
-		local p = O.camera.worldPosition
-		S.cx, S.cz = p.x, p.z
-		S.cut = ground_under(p) + 1.5
-	end
-	if v ~= S.view then
-		S.crosshair = false
-		S.from_plan = nil
-	end
-	S.view = v
-	apply_viewport()
-	log:info("kit editor: the view is " .. VIEW_NAMES[v])
-	refresh()
-	changed()
-end
-M.set_view = function(v)
-	set_view(v)
-end
-
--- [WB_EDITOR_VIEW_MEMORY] kit.remember(key): how this user left the
--- editor, kept on this machine under key (the app's: Workbench's
--- project), in the storage of the server's game (buildat.storage_*, the
--- client's user directory; never the server's, so never in a published
--- project): edit mode or play, the view, the 3D camera, and the tabs
--- (the panel's, the palette's, the list's). Edit mode is asked for again
--- once the rights are known; the view and the tab put back as edit mode
--- comes on. Running or Stopped is not kept here: it is the server's (the
--- save's session, which a restart resumes), and a Stop asked by a memory
--- would throw a round away.
--- simplified: written at most once a second (MEM.every), so a quit within
--- a second of a change loses it; the palette's New tab not restored (its
--- fetch asks about the network)
-local MEM = {every = 1}
-function MEM.name()
-	return "kit_editor_" .. MEM.key:gsub("[^%w_%-]", function(c)
-		return string.format(".%02x", c:byte())
-	end)
 -- [KIT_ITEMS_TAB] An item type's sheet in the inspector (the Items tab's
 -- selection), its buttons at the top, its fields in sections, each folded
 -- by its button (at first the basics and its use's own open): Kit's and a package's copied as new (the
@@ -3386,6 +3237,155 @@ function IT.sheet(w)
 	end
 end
 
+local function context_menu(id, mx, my)
+	close_menu()
+	local e, is_made = find(id)
+	if not e or is_made then
+		return
+	end
+	if not S.sel[id] then
+		select(id)
+	end
+	local ids = sel_ids()
+	local sc = magic.ui.scale
+	local w = window(magic.HA_LEFT, magic.VA_TOP, math.floor(mx / sc),
+			math.floor(my / sc))
+	W.ctx = w
+	w.priority = 10
+	text(w, #ids > 1 and #ids .. " selected" or name_of(e), DIM)
+	button(w, "Delete", function()
+		close_menu()
+		M.delete_selected()
+	end)
+	button(w, "Duplicate", function()
+		close_menu()
+		send({op = "duplicate", ids = ids, by = {1, 0, 0}})
+	end)
+	button(w, "Make prefab...", function()
+		close_menu()
+		prefab_dialog(ids)
+	end)
+	if E.running then
+		button(w, "Restart this", function()
+			close_menu()
+			for _, sid in ipairs(ids) do
+				local se = find(sid)
+				for ci in ipairs(se and se.components or {}) do
+					send({op = "restart", id = sid, comp = ci - 1})
+				end
+			end
+		end)
+	end
+	-- On the screen whole
+	local rw, rh = magic.ui.root.width, magic.ui.root.height
+	w:SetPosition(math.max(0, math.min(math.floor(mx / sc), rw - w.width)),
+			math.max(0, math.min(math.floor(my / sc), rh - w.height)))
+	log:info("kit editor: the menu of " .. id .. " (" .. #ids .. " selected)")
+end
+
+-- ---- The views ([FP] Views): set_view, the cameras placed each frame
+local function apply_viewport()
+	local want = E.editing and S.view or "walk"
+	if S.shown_view == want then
+		return
+	end
+	S.shown_view = want
+	local node, cam = active_camera()
+	-- The walk view with the controls' effects (controls.lua).
+	-- [KIT_EDITOR_VIEW_HDR] The 3D and 2D views draw by the app's walk
+	-- view's render path (skeldat's HDR one: its exposure and tonemap);
+	-- the default path under an app's HDR was a frame of raw radiance,
+	-- white at noon. [KIT_SK_2D_EMPTY] HDR off for 2D (floorplanner's) is
+	-- as white: skeldat's light is in the reference's radiances.
+	local vp
+	if want == "walk" then
+		vp = O.viewport and O.viewport() or M.viewport(O.scene, cam)
+	else
+		vp = magic.Viewport:new(O.scene, cam)
+		if O.viewport then
+			vp.renderPath = O.viewport().renderPath
+		else
+			-- [KIT_LIGHTING] the composition's lighting's (environment.lua)
+			M.lit_viewport(vp, "editor", nil, node)
+		end
+	end
+	magic.set_preferred_viewports({vp})
+	if O.set_camera then
+		O.set_camera(node)
+	end
+end
+
+-- [KIT_SK_2D_EMPTY] The ground's cell y under a point: the first cell
+-- over the app's voxels (or the heightmap) below it, else ground_y. The
+-- plan's first cut is from it: skeldat's ground is at 6, under the
+-- constant ground_y's cut of 1.5, and its plan was empty.
+-- simplified: 64 cells down at most
+local function ground_under(p)
+	if O.solid then
+		local solid = M.with_terrain(O.solid)
+		local x, z = math.floor(p.x + 0.5), math.floor(p.z + 0.5)
+		local y0 = math.floor(p.y + 0.5)
+		for y = y0, y0 - 64, -1 do
+			if solid(x, y, z) then
+				return y + 1
+			end
+		end
+	end
+	return O.ground_y
+end
+
+-- The free camera from the app's: where it is, looking as it does
+local function cam3d_from_app()
+	local p, d = O.camera.worldPosition, O.camera.worldDirection
+	S.pos = {x = p.x, y = p.y, z = p.z}
+	S.yaw = math.deg(math.atan2(d.x, d.z))
+	S.pitch = math.deg(math.asin(math.max(-1, math.min(1, -d.y))))
+end
+
+set_view = function(v)
+	if v ~= "2d" and v ~= "3d" and v ~= "walk" then
+		return
+	end
+	if v == "3d" and not S.pos then
+		cam3d_from_app()
+	end
+	if v == "2d" and not S.cut then
+		local p = O.camera.worldPosition
+		S.cx, S.cz = p.x, p.z
+		S.cut = ground_under(p) + 1.5
+	end
+	if v ~= S.view then
+		S.crosshair = false
+		S.from_plan = nil
+	end
+	S.view = v
+	apply_viewport()
+	log:info("kit editor: the view is " .. VIEW_NAMES[v])
+	refresh()
+	changed()
+end
+M.set_view = function(v)
+	set_view(v)
+end
+
+-- [WB_EDITOR_VIEW_MEMORY] kit.remember(key): how this user left the
+-- editor, kept on this machine under key (the app's: Workbench's
+-- project), in the storage of the server's game (buildat.storage_*, the
+-- client's user directory; never the server's, so never in a published
+-- project): edit mode or play, the view, the 3D camera, and the tabs
+-- (the panel's, the palette's, the list's). Edit mode is asked for again
+-- once the rights are known; the view and the tab put back as edit mode
+-- comes on. Running or Stopped is not kept here: it is the server's (the
+-- save's session, which a restart resumes), and a Stop asked by a memory
+-- would throw a round away.
+-- simplified: written at most once a second (MEM.every), so a quit within
+-- a second of a change loses it; the palette's New tab not restored (its
+-- fetch asks about the network)
+local MEM = {every = 1}
+function MEM.name()
+	return "kit_editor_" .. MEM.key:gsub("[^%w_%-]", function(c)
+		return string.format(".%02x", c:byte())
+	end)
 end
 
 -- After an edit state (was: edit mode before it), and as the key comes
@@ -3868,6 +3868,10 @@ local function place_at(cell, item)
 	elseif item.prefab then
 		send({op = "place", prefab = item.prefab, pos = cell,
 			turn = item.turn or 0, parent = parent})
+	elseif item.pickup then
+		-- [KIT_ITEMS_TAB] an item from the Items tab: a pickup of it
+		send({op = "place", type = "kit/pickup", pos = cell, parent = parent,
+			params = {item = item.pickup}})
 	else
 		send({op = "place", type = item.type, pos = cell, parent = parent})
 	end
@@ -4017,10 +4021,6 @@ end
 local function right_click(rc)
 	if S.tool == "terrain" then
 		M.set_tool(nil)
-	elseif item.pickup then
-		-- [KIT_ITEMS_TAB] an item from the Items tab: a pickup of it
-		send({op = "place", type = "kit/pickup", pos = cell, parent = parent,
-			params = {item = item.pickup}})
 		return
 	end
 	if S.placing then

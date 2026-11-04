@@ -48,11 +48,11 @@ buildat.sub_packet("kit:item_types", function(data)
 	local n = 0
 	for _ in pairs(M.item_types) do n = n + 1 end
 	log:info("kit: " .. n .. " item types")
-end)
 	-- [KIT_ITEMS_TAB] the editor's Items tab and sheet follow
 	if M.items_changed then
 		M.items_changed()
 	end
+end)
 
 -- The held item's sheet (nil: a hand, or no item type)
 function M.held_item()
