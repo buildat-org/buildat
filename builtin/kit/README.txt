@@ -53,3 +53,8 @@ orange and straw, winter's grey with pale specks), alpha kept.
 
 DiffAlphaMask.xml is Urho3D's Techniques/Diff.xml with ALPHAMASK added
 (MIT, as Urho3D).
+
+crack_0.png to crack_9.png ([KIT_DIG_LOOK]) are byte-for-byte copies of
+apps/skeldat's: the ten frames of VoxeLibre's crack_anylength.png
+(<https://git.minetest.land/VoxeLibre/VoxeLibre>, CC BY-SA 4.0 by its
+LEGAL.md; credited as in apps/skeldat/README.md).

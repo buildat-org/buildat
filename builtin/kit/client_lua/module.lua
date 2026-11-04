@@ -1820,6 +1820,8 @@ end
 local play_hl = nil
 local shown_text = nil
 function M.show_target(t)
+	-- [KIT_DIG_HOLD] hands.lua's held dig follows it
+	M.pointed_target = t
 	play_hl = play_hl or M.highlighter()
 	play_hl.begin()
 	local s = "nothing"

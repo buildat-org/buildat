@@ -1228,8 +1228,9 @@ namespace kit
 		// [KIT_TOOLS_1] Digging by a voxel's material group and level: a
 		// placed peer's dig of `voxel` (its name) at x, y, z is ready now,
 		// or not yet (wait: the seconds left; Kit tells the client
-		// "kit:digging" {cell, wait, time}, and it asks again). A grouped
-		// voxel takes 1 / speed seconds of game time, the speed the held
+		// "kit:digging" {cell, wait, time, span: the whole on the wall
+		// clock}, and it asks again). A grouped voxel takes 1 / speed
+		// seconds of game time, the speed the held
 		// item's for its group (its sheet's dig; a hand's 1), counted from
 		// the first ask at the cell. Ready at once: a voxel with no group
 		// (the app's own), edit mode, Stopped, kit/game_rules'

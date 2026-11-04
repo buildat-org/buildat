@@ -12,7 +12,9 @@
 -- the swing at once, here, the hit the server's ("kit:hit"); an item of
 -- use kind "use" ("kit:item"). A dig the server says takes time
 -- ("kit:digging") is asked again when due while the left button is held
--- (M.on_digging(cb): the app sends it).
+-- (M.on_digging(cb): the app sends it); [KIT_DIG_HOLD] held on, the next
+-- cell pointed at is dug, and so on; [KIT_DIG_LOOK] the held item swings
+-- over and over through it, the cell's crack grows (skeldat's frames).
 -- [KIT_TOOLS_2] A ranged item: the left button shoots ("kit:shoot" {dir}
 -- along the view: single a press, auto while held, burst `burst` a
 -- press), a charge draws while held and shoots as let go ("kit:draw"
@@ -42,6 +44,12 @@ local held = ""
 local bar = nil
 local last_swing = 0
 local dig_cbs, digging = {}, nil
+-- [KIT_DIG_LOOK] A swing's time (a melee use's one; a dig's as many whole
+-- ones of about it as fit its time, the last ending as the cell goes)
+M.SWING_TIME = 0.25
+local function swings(time)
+	return math.max(1, math.floor(time / M.SWING_TIME + 0.5))
+end
 
 buildat.sub_packet("kit:item_types", function(data)
 	local t = network.parse_json(data)
@@ -198,34 +206,142 @@ function M.on_digging(cb)
 	dig_cbs[#dig_cbs + 1] = cb
 end
 
+-- [KIT_DIG_LOOK] The dug cell's crack (skeldat's: VoxeLibre's ten frames,
+-- kit/crack_N.png, a cube just outside the cell wearing the frame the dig
+-- has got to; one node a frame, enabled one at a time). simplified: a
+-- cube round anything; the others' digging shows none (not sent)
+local CRACK_FRAMES = 10
+local crack = {nodes = {}, scene = nil, shown = nil}
+local function set_crack(cell, frame)
+	local scene = require("buildat/extension/replicate").main_scene
+	if crack.scene ~= scene then
+		crack.nodes, crack.scene, crack.shown = {}, scene, nil
+	end
+	local n = crack.shown and crack.nodes[crack.shown]
+	if n and (not cell or frame ~= crack.shown) then
+		n.enabled = false
+		crack.shown = nil
+	end
+	if not cell or not scene then
+		return
+	end
+	n = crack.nodes[frame]
+	if not n then
+		n = scene:CreateChild("kit_crack")
+		local model = n:CreateComponent("StaticModel")
+		model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+		local m = magic.Material:new()
+		m:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/DiffUnlitAlpha.xml"))
+		local tex = magic.cache:GetResource("Texture2D",
+				"kit/crack_" .. frame .. ".png")
+		if tex then
+			tex.filterMode = magic.FILTER_NEAREST
+			m:SetTexture(magic.TU_DIFFUSE, tex)
+		end
+		model.material = m
+		model.castShadows = false
+		-- Just outside the cell, not fighting its faces for the depth
+		n.scale = magic.Vector3(1.004, 1.004, 1.004)
+		crack.nodes[frame] = n
+	end
+	n.position = magic.Vector3(cell[1], cell[2], cell[3])
+	if crack.shown ~= frame then
+		log:info(string.format("kit: the crack's frame %d at (%d,%d,%d)", frame,
+				cell[1], cell[2], cell[3]))
+	end
+	n.enabled = true
+	crack.shown = frame
+end
+
+local TOUCH = buildat.get_env("BUILDAT_TOUCH") == "1"
+local function cell_key(c)
+	return string.format("%d,%d,%d", c[1] or 0, c[2] or 0, c[3] or 0)
+end
+-- [KIT_DIG_HOLD] The left button held after a timed dig began digs on: the
+-- next cell pointed at (the dug one gone, or another looked at) asked for
+-- at once, as skeldat's; a cell asked once (sent), an instant dig's next
+-- a repeat's 0.15 s after
+local hold = {on = false, sent = nil, at = 0}
+
 buildat.sub_packet("kit:digging", function(data)
 	local d = network.parse_json(data)
 	if type(d) ~= "table" or type(d.cell) ~= "table" then
 		return
 	end
 	local wait = tonumber(d.wait) or 0
-	digging = {cell = d.cell, due = buildat.get_time_us() + wait * 1000000}
-	log:info(string.format("kit: digging (%d,%d,%d): %.2f s",
-			d.cell[1] or 0, d.cell[2] or 0, d.cell[3] or 0, wait))
+	local now = buildat.get_time_us()
+	-- [KIT_DIG_LOOK] its whole time on the wall clock (span), for the
+	-- crack and the swing
+	local time = math.max(tonumber(d.span) or wait, wait, 0.01)
+	digging = {cell = d.cell, due = now + wait * 1000000,
+		start = now + (wait - time) * 1000000, time = time}
+	hold.sent = cell_key(d.cell)
+	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
+		hold.on = true
+	end
+	log:info(string.format("kit: digging (%d,%d,%d): %.2f s, %d swings",
+			d.cell[1] or 0, d.cell[2] or 0, d.cell[3] or 0, wait, swings(time)))
 end)
+
+-- The left button held in play (a touchscreen's tap held till due)
+local function left_held()
+	return magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) and P.hands and
+			not E.editing and magic.ui.focusElement == nil and
+			not M.pointer_free()
+end
+
+-- How far the dig has got (0 to 1), nil when not digging
+function M.dig_progress()
+	if not digging then
+		return nil
+	end
+	local f = 1 - (digging.due - buildat.get_time_us()) / 1e6 / digging.time
+	return math.max(0, math.min(1, f))
+end
 
 magic.SubscribeToEvent("Update", function()
 	if bar and bar.visible == E.editing then
 		show()
 	end
-	if not digging or buildat.get_time_us() < digging.due then
-		return
+	local down = left_held()
+	if not down then
+		hold.on, hold.sent = false, nil
+		if not TOUCH then
+			digging = nil
+		end
 	end
-	local c = digging.cell
-	digging = nil
-	-- simplified: the button held is the dig going on; the pointer moved
-	-- off the cell meanwhile still digs it (the server's reach decides).
-	-- [KIT_INVENTORY_PLAY] On a touchscreen (a finger held places) a tap's
-	-- dig goes on until it is due
-	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) or
-			buildat.get_env("BUILDAT_TOUCH") == "1" then
-		for _, cb in ipairs(dig_cbs) do cb(c) end
+	-- [KIT_DIG_HOLD] the cell pointed at now: another than the one being
+	-- dug asked for (the server starts it over there)
+	if hold.on and down then
+		local l = M.pointed_target and M.pointed_target.left
+		local now = buildat.get_time_us()
+		if l and l.kind == "dig" and type(l.cell) == "table" then
+			local k = cell_key(l.cell)
+			if k ~= hold.sent and now - hold.at >= 150000 then
+				hold.sent, hold.at = k, now
+				digging = nil
+				log:info("kit: digs on at (" .. k .. ")")
+				for _, cb in ipairs(dig_cbs) do cb(l.cell) end
+			end
+		elseif digging then
+			-- Pointed off the dig (the sky, a body): it stops
+			digging = nil
+		end
 	end
+	if digging and buildat.get_time_us() >= digging.due then
+		local c = digging.cell
+		digging = nil
+		hold.sent, hold.at = cell_key(c), buildat.get_time_us()
+		-- [KIT_INVENTORY_PLAY] On a touchscreen (a finger held places) a
+		-- tap's dig goes on until it is due
+		if down or TOUCH then
+			for _, cb in ipairs(dig_cbs) do cb(c) end
+		end
+	end
+	local f = M.dig_progress()
+	set_crack(f and digging.cell, f and math.min(CRACK_FRAMES - 1,
+			math.floor(f * CRACK_FRAMES)))
 end)
 
 magic.SubscribeToEvent("MouseWheel", function(_, data)
@@ -423,6 +539,19 @@ local function build_look(holder, sheet)
 	inner.scale = magic.Vector3(k, k, k)
 	return nparts, nvox, hi[3] * k
 end
+-- [KIT_PLAYER_MODEL] the held item on the others' hands too (players.lua)
+M.build_item_look = build_look
+
+-- [KIT_DIG_LOOK] The swing's phase now (0 to 1; nil: none)
+local function swing_phase(t)
+	if digging then
+		local s = (t - digging.start / 1e6) * swings(digging.time) /
+				digging.time
+		return s - math.floor(s)
+	end
+	local sw = V.swing >= 0 and (t - V.swing) / M.SWING_TIME or 1
+	return sw < 1 and sw or nil
+end
 
 -- The held item's node under the camera, built as the hands change; drawn
 -- in first person while playing
@@ -458,9 +587,9 @@ local function view_update()
 	local pos = magic.Vector3(tonumber(g[1]) or 0.13, tonumber(g[2]) or -0.11,
 			tonumber(g[3]) or 0.22)
 	local rot = magic.Quaternion(0, -4, 0)
-	-- A melee swing: down and in over a quarter of a second
-	local sw = V.swing >= 0 and (t - V.swing) / 0.25 or 1
-	if sw < 1 then
+	-- A swing: down and in, a melee use's one, a dig's over and over
+	local sw = swing_phase(t)
+	if sw then
 		local a = math.sin(sw * math.pi)
 		rot = rot * magic.Quaternion(60 * a, -20 * a, 0)
 		pos = pos + magic.Vector3(-0.04 * a, -0.02 * a, 0.05 * a)

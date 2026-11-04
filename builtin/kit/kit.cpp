@@ -15602,6 +15602,9 @@ struct Module: public interface::Module, public Interface
 		const double rate = interface::os::game_rate();
 		j.set("wait", rate > 0 ? left / rate : left);
 		j.set("time", need / 1e6);
+		// [KIT_DIG_LOOK] the whole dig on the wall clock (the crack's, the
+		// swing's)
+		j.set("span", rate > 0 ? need / 1e6 / rate : need / 1e6);
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "kit:digging", j.stringify());
 		});
