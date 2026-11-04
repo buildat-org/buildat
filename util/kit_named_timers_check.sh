@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~1 min (2026-11-01)
+# cost: ~1.5 min (2026-11-04)
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/api.h builtin/kit/types/timer.lua
 # [KIT] stage 7b's first part, named timers and their scopes, on
 # apps/sample_kit, the server's admin driving Kit's editor (one server,
@@ -15,6 +15,10 @@
 # with kitboss's player), as game time left. Started again with no one
 # on: both go on from their ticks (the shared one's 6th or more, and
 # kitboss's next, as by them), the timers restored from the save.
+# [KIT_AFTER_DRIFT] Two more timers start at the same Run: 18 every 0.1 s
+# 300 times, 19 once after 30 s: when 19 ticks, 18 has ticked 298 to 300
+# times (a chain re-armed in its on_timer keeps its period; the drift was
+# a tick each, about 225).
 #
 #   util/kit_named_timers_check.sh
 set -u
@@ -42,14 +46,18 @@ wait_log_any 60000 kit editor: edit rights: yes
 click Button "Edit"
 wait_log 10000 kit editor: state: 15 entities, 0 to undo
 EOF
-	n=0
-	edit() { ed "$1"; n=$((n + 1)); echo "wait_log 10000 kit editor: state: 16 entities, $n to undo"; }
+	n=0 ents=16
+	edit() { ed "$1"; n=$((n + 1)); echo "wait_log 10000 kit editor: state: $ents entities, $n to undo"; }
 	edit '{"op": "place", "type": "kit/timer", "pos": [2, 0, 2]}'
-	set1() { edit "{\"op\": \"set\", \"id\": 17, \"comp\": 0, \"param\": \"$1\", \"value\": $2}"; }
+	set1() { edit "{\"op\": \"set\", \"id\": ${3:-17}, \"comp\": 0, \"param\": \"$1\", \"value\": $2}"; }
 	set1 interval 0.5
 	set1 autostart true
 	set1 scope '"per_player"'
 	edit '{"op": "link", "id": 3, "comp": 0, "output": "pressed", "to": 17, "input": "start"}'
+	ents=17; edit '{"op": "place", "type": "kit/timer", "pos": [3, 0, 2]}'
+	set1 interval 0.1 18; set1 repeats 300 18; set1 autostart true 18
+	ents=18; edit '{"op": "place", "type": "kit/timer", "pos": [4, 0, 2]}'
+	set1 interval 30 19; set1 repeats 1 19; set1 autostart true 19
 	# A fresh save is Running: End, then Run, so T starts as authored
 	echo 'click Button "End"'
 	echo "wait_log 10000 kit editor: the server is Ended (by kitboss)"
@@ -59,6 +67,7 @@ EOF
 	echo "keypress b"
 	echo "wait_log 10000 replicated: entity 3 presses = 1"
 	echo "wait_log 10000 kit: entity 17 shows \"5\""
+	echo "wait_log_any 40000 kit: entity 19 shows \"1\""
 	echo "quit"
 } > "$t/boss.cmds"
 
@@ -99,6 +108,13 @@ assert names == [("", False), ("tick", True)], names
 assert all(0 <= t["s"] <= 0.5 for t in ts), ts
 assert next(t for t in ts if t["name"] == "tick")["by"].startswith("player:"), ts
 EOF
+# The chain's ticks logged before the 30 s one's
+chain=$(grep -a "kit/timer 1[89]: tick" "$s" | sed '/kit\/timer 19: tick 1$/q' |
+	grep -ac "kit/timer 18: tick")
+grep -aq "kit/timer 19: tick 1$" "$s" || fail "timer 19 did not tick ($s)"
+[ "$chain" -ge 298 ] && [ "$chain" -le 300 ] ||
+	fail "300 chained 0.1 s: $chain of them in 30 s ($s)"
+echo "ok: c:after(0.1) chained: $chain in 30 s"
 echo "ok: two timers on one instance, the shared and kitboss's, saved (shared at $shared, kitboss's at $mine)"
 
 start_server "$t/srv2.log" "Listening at" 300 auto \

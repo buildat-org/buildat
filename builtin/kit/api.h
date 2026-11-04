@@ -199,7 +199,9 @@ namespace interface
 // the same replacing it; no name: the unnamed one, on_timer's name and
 // player nil; a player: their own, "player:<id>" or c.player's number, a
 // button each player may use once in 10 s; no seconds takes that one
-// back; saved as game time left; the scope is where the component lives,
+// back; due at the first tick at or after its time, and set again in its
+// own on_timer counted from when it was due, so a chain keeps its period;
+// saved as game time left; the scope is where the component lives,
 // so one on a player's entity follows them), c:teleport({x, y, z}) (the player who set the
 // run off, the app moving them on kit:move_player), c:log(...) (the
 // server's log and the entity's own, which the inspector shows),

@@ -401,6 +401,9 @@ struct Run
 	// [KIT_TRY_INPUTS] The peer + 1 of the builder whose Try it is (0:
 	// none), told what it emits
 	size_t tried = 0;
+	// [KIT_AFTER_DRIFT] on_timer's: the timer's due time; set again in
+	// its own handler, it counts from that, not from the tick it ran in
+	int64_t timer_due = 0;
 };
 
 struct Write
@@ -8480,7 +8483,11 @@ struct Module: public interface::Module, public Interface
 						cs(itos(e.id)), cs(type), cs(player));
 				continue;
 			}
-			set_timer(e, in, name, player, s, r.by);
+			// The running timer set again: from its due time, so a chain
+			// keeps its period (a tick late at most, not a tick each)
+			const bool own = r.timer_due && r.handler == "on_timer" &&
+					jstr_at(r.args, 0) == name && jstr_at(r.args, 1) == player;
+			set_timer(e, in, name, player, s, r.by, own ? r.timer_due : 0);
 		}
 		const ss_ who = player_of(r.by);
 		const json::Value &tp = fx.get("teleport");
@@ -12001,9 +12008,10 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// c:after(seconds, name, player): the instance's timer of that name and
-	// player set (again), or taken back (seconds < 0); MAX_TIMERS at most
+	// player set (again), or taken back (seconds < 0); MAX_TIMERS at most.
+	// from: when it counts from (0: now)
 	void set_timer(const Entity &e, Instance &in, const ss_ &name,
-			const ss_ &player, double s, const ss_ &by)
+			const ss_ &player, double s, const ss_ &by, int64_t from = 0)
 	{
 		auto it = std::find_if(in.timers.begin(), in.timers.end(),
 				[&](const Instance::Timer &t){
@@ -12026,7 +12034,7 @@ struct Module: public interface::Module, public Interface
 			it->name = name;
 			it->player = player;
 		}
-		it->due_us = now_us() + (int64_t)(s * 1e6);
+		it->due_us = (from ? from : now_us()) + (int64_t)(s * 1e6);
 		it->by = by;
 	}
 
@@ -12067,6 +12075,7 @@ struct Module: public interface::Module, public Interface
 							json::Value(t.name));
 					r.args.append(t.player.empty() ? json::null() :
 							json::Value(t.player));
+					r.timer_due = t.due_us;
 					queue_run(r);
 				}
 			}
