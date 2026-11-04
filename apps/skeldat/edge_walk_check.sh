@@ -70,7 +70,9 @@ command -v "${FIREFOX:-firefox}" > /dev/null && [ -f "$here/web/buildat.wasm" ] 
 	echo "PASS: native walked the bones' edge a minute ($native stuck lines, none in open air or a voxel); Firefox skipped (no Firefox or web/)"
 	exit 0
 }
-server web -A 127.0.0.1 -W "$here/web"
+# [SK_OWNER_NO_ADMIN_PAGES] A web peer is never the launcher's own (local)
+# client: no login without a dialog; the scripted page joins as a guest
+BUILDAT_SKELDAT_GUEST_JOIN=1 server web -A 127.0.0.1 -W "$here/web"
 stub="(function(){ var held = null; Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }}); function set(e){ held = e; document.dispatchEvent(new Event('pointerlockchange')); } HTMLCanvasElement.prototype.requestPointerLock = function(){ if(held !== this) set(this); return Promise.resolve(); }; document.exitPointerLock = function(){ if(held) set(null); }; return 'stub'; })()"
 python3 - "$stub" "$t/steps.json" <<'PY'
 import json, sys

@@ -28,7 +28,9 @@ command -v "${CHROME:-google-chrome}" > /dev/null || skip "no Chrome"
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp sk_web_lock; t=$CHECK_TMP
 trap check_cleanup EXIT
-BUILDAT_SKELDAT_WORLD=wl BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_TIME=0.5 \
+# [SK_OWNER_NO_ADMIN_PAGES] A web peer is never the launcher's own (local)
+# client: no login without a dialog; the scripted page joins as a guest
+BUILDAT_SKELDAT_GUEST_JOIN=1 BUILDAT_SKELDAT_WORLD=wl BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_TIME=0.5 \
 	BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SKELETONS=0 \
 	start_server "$t/srv.log" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -u launcher=1 -A 127.0.0.1 \

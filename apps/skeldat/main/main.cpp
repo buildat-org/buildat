@@ -269,7 +269,10 @@ struct Module: public interface::Module, public PlayersHost,
 		m_world.on_set.push_back([this, in_box](int x, int y, int z,
 				uint32_t old, uint32_t id, uint32_t){
 			const skeldat::NodeDef *n = m_world.node_of(id);
-			if(old == id || id == ID_AIR || (n && !n->walkable))
+			// Water flowing into the box is not walked into (as
+			// world_view's walkable())
+			if(old == id || id == ID_AIR || (n && (!n->walkable ||
+					n->shape == skeldat::LIQUID || n->shape == skeldat::TORCH)))
 				return;
 			if(const Player *pl = in_box(x, y, z))
 				log_w(MODULE, "skeldat: %s set inside %s's box at (%d, %d, %d)"
