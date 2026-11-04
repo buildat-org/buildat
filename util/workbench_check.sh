@@ -566,8 +566,8 @@ frames 5
 screenshot @T@/play.png
 event kit_use 9
 wait_log 10000 the server put the player at (8, 1.4, -8)
-wait_log_any 10000 kit: the screen says "Score: kitboss 1 |
-wait_log 60000 kit: the screen says "Score: kitbob 1, kitboss 1 |
+wait_log_any 10000 kit: the screen says "Score: kitboss 1"
+wait_log 60000 kit: the screen says "Score: kitbob 1, kitboss 1"
 wait_log_any 30000 kit: entity 13 shows "Ada: Two came through."
 look_dir -1 -0.4 1
 frames 5
@@ -611,7 +611,7 @@ code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv1.log" | head -1)
 BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code \
 	BUILDAT_JOIN_ADMIN="setting open_registration on" client boss &
 boss=$!
-wait_for_log "$t/boss.log" 'the screen says "Score: kitboss 1 [|]' 240 ||
+wait_for_log "$t/boss.log" 'the screen says "Score: kitboss 1"' 240 ||
 	fail "the admin did not get as far as the zone ($t/boss.log)"
 BUILDAT_JOIN_NAME=kitbob client bob
 wait $boss || fail "the admin's client ($t/boss.log)"
@@ -696,7 +696,9 @@ done
 cat > "$t/again.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 the server put the player at (0, 1.4, -4) facing 90
-wait_log_any 30000 kit: the screen says "Score: kitbob 1, kitboss 1 | Items: key x1"
+wait_log_any 30000 kit: the screen says "Score: kitbob 1, kitboss 1"
+# [KIT_HUD] the key in a slot (no "Items:" on the screen beside the slots)
+wait_log_any 30000 kit: items: key x1
 wait_log_any 60000 player physics enabled
 look_dir 0.6 -0.25 1
 frames 10
