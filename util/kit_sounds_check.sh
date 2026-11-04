@@ -220,7 +220,7 @@ wait "$SERVER_PID" 2>/dev/null
 s=$t/srv.log c=$t/boss2.log
 grep -a "Sounds:\|sound \|Sound " "$s" | sed 's/^.*\(kit\|wasm\) *: /  /' |
 	cut -c1-160
-want "$s" "Sounds: 8" \
+want "$s" "Sounds: 9" \
 	"kitboss made sound kitboss/my_sound version 1:" \
 	"kitboss made sound kitboss/click_2 version 1:" \
 	"kitboss deleted sound kitboss/click_2" \
