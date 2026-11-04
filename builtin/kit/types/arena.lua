@@ -46,6 +46,18 @@
 -- queue for the next one; first come, first served -- with the next
 -- round full, the last to come wait. A countdown running then starts
 -- over.
+-- [KIT_LATE_JOIN] `late_join`, what a player stepping into the queue
+-- while a round runs gets: "queue" (wait for the next round), "join"
+-- (into a running round with room: fewer than `max_players` in it,
+-- within `join_window` seconds of its start (0: any time) and before its
+-- `duration`), "parallel" (enough waiting start another round in a
+-- session of its own, `max_rounds` at once) or "join_or_parallel" (join
+-- where there is room, else a parallel round). `join_team`, the team a
+-- late joiner gets: "fewest" (the fewest players, at random on a tie),
+-- "lowest_score" (then the fewest) or "backfill" (only into a round
+-- fewer than its start took are in now, into the team furthest under its
+-- most). The players a round starts with are split by the fewest, the
+-- first on a tie.
 local function ids_in(list, n)
 	local out = {}
 	for i = 1, math.min(n, #list) do
@@ -101,11 +113,13 @@ end
 local function lobby_status(c)
 	local q, p = #c.state.queue, c.params.players
 	local s
-	if c.state.session ~= 0 then
-		s = "Round running (" .. q .. " waiting)"
-	elseif c.state.count > 0 then
+	local n = #c.state.rounds
+	if c.state.count > 0 then
 		s = "Starting in " .. c.state.count .. " (" .. q .. " of " ..
 				c.params.max_players .. ")"
+	elseif n > 0 then
+		s = (n == 1 and "Round running" or (n .. " rounds running")) ..
+				" (" .. q .. " waiting)"
 	else
 		s = "Waiting for players: " .. q .. " of " .. p
 	end
@@ -114,7 +128,7 @@ local function lobby_status(c)
 	end
 	c.state.status = s
 	c.state.value = s
-	c.state.shown = q > 0 or c.state.session ~= 0 or c.state.last ~= ""
+	c.state.shown = q > 0 or n > 0 or c.state.last ~= ""
 end
 
 local function start(c)
@@ -126,9 +140,15 @@ local function start(c)
 	c:session_start(ids)
 end
 
+local function parallel(c)
+	return c.params.late_join == "parallel" or
+			c.params.late_join == "join_or_parallel"
+end
+
 local function try_count(c)
-	if c.state.session ~= 0 or c.state.count > 0 or
-			#c.state.queue < c.params.players then
+	local n = #c.state.rounds
+	if c.state.count > 0 or #c.state.queue < c.params.players or
+			(n > 0 and (not parallel(c) or n >= c.params.max_rounds)) then
 		return
 	end
 	local secs = c.params.countdown
@@ -142,6 +162,32 @@ local function try_count(c)
 	c.state.count = secs
 	c:log("countdown", c.state.count, "s for", #c.state.queue, "players")
 	c:after(1, "count")
+end
+
+-- [KIT_LATE_JOIN] A player in the queue into a running round with room
+-- simplified: c.sessions is as the run began, so two joining in one tick
+-- may take one more than max_players
+local function try_join(c, pid, by)
+	local lj, p = c.params.late_join, c.params
+	if lj ~= "join" and lj ~= "join_or_parallel" then
+		return false
+	end
+	for _, id in ipairs(c.state.rounds) do
+		local s = (c.sessions or {})[id]
+		if s and s.players < p.max_players and
+				(p.join_window <= 0 or s.clock < p.join_window) and
+				(p.duration <= 0 or s.clock < p.duration) and
+				(p.join_team ~= "backfill" or s.players < s.taken) then
+			local q = c.state.queue
+			drop(q, pid)
+			c.state.queue = q
+			c:log(c:name(by), "joins the running round in session",
+					id, "(" .. s.players .. " in it)")
+			c:session_move(pid, id)
+			return true
+		end
+	end
+	return false
 end
 
 -- The session's side: the teams by id, each with its count of players.
@@ -251,22 +297,29 @@ return {
 		score_to_win = {type = "number", default = 0, min = 0,
 			max = 1000000},
 		after_round = {type = "number", default = 10, min = 0, max = 600},
+		late_join = {type = "string", default = "queue",
+			choices = {"queue", "join", "parallel", "join_or_parallel"}},
+		join_window = {type = "number", default = 0, min = 0, max = 86400},
+		join_team = {type = "string", default = "fewest",
+			choices = {"fewest", "lowest_score", "backfill"}},
+		max_rounds = {type = "number", default = 2, min = 1, max = 8},
 	},
 	state = {
 		-- The default round's: the players in the zone in the order they
-		-- came, the countdown's seconds left, the running round's session
+		-- came, the countdown's seconds left, the running rounds' sessions
 		-- and the last round's result
 		queue = {default = {}},
 		taking = {default = {}},
 		count = {default = 0},
 		-- A round ended, no countdown since (for `after_round` seconds)
 		fresh = {default = false},
-		session = {default = 0},
+		rounds = {default = {}},
 		last = {default = ""},
 		status = {default = "waiting", shared = true},
 		-- The round's: the team of each player ("player:<id>" = its
 		-- id), the seconds left, the result
 		assigned = {default = {}},
+		peak = {default = {}},
 		left = {default = 0},
 		overtime = {default = false},
 		result = {default = ""},
@@ -319,7 +372,9 @@ return {
 		q[#q + 1] = c.player
 		c.state.queue = q
 		c:log(c:name(by), "entered;", #q, "of", c.params.players, "inside")
-		try_count(c)
+		if not try_join(c, c.player, by) then
+			try_count(c)
+		end
 		lobby_status(c)
 	end,
 	on_leave = function(c, by)
@@ -346,23 +401,54 @@ return {
 			c:send(c.state.assigned[key], "join")
 			return
 		end
-		local best
+		-- [KIT_LATE_JOIN] Those its start took split by the fewest (the
+		-- first on a tie); a late joiner by join_team, at random on a tie
+		local a, taken = c.state.assigned, 0
+		for _ in pairs(a) do
+			taken = taken + 1
+		end
+		local late = taken >= (c.session_players or 0)
+		local rule = late and c.params.join_team or "fewest"
+		local peak = c.state.peak
+		local function key(t)
+			if rule == "lowest_score" then
+				return t.score * 1000 + t.n
+			elseif rule == "backfill" then
+				return (t.n - (peak[tostring(t.id)] or 0)) * 1000 + t.n
+			end
+			return t.n
+		end
+		local best, ties = nil, {}
 		for _, t in ipairs(teams_of(c)) do
-			if not best or t.n < best.n then
-				best = t
+			if not best or key(t) < key(best) then
+				best, ties = t, {t}
+			elseif key(t) == key(best) then
+				ties[#ties + 1] = t
 			end
 		end
 		if not best then
 			return
 		end
-		local a = c.state.assigned
+		if late and #ties > 1 then
+			best = ties[math.random(#ties)]
+		end
+		if late then
+			c:log(c:name(by), "joins late (" .. rule .. ")")
+		end
 		a[key] = best.id
 		c.state.assigned = a
 		c:send(best.id, "join")
+		-- Each team's most players at once (backfill's)
+		for _, t in ipairs(teams_of(c)) do
+			peak[tostring(t.id)] = math.max(peak[tostring(t.id)] or 0, t.n)
+		end
+		c.state.peak = peak
 		round_status(c)
 	end,
 	on_session_start = function(c, id)
-		c.state.session = id
+		local rounds = c.state.rounds
+		rounds[#rounds + 1] = id
+		c.state.rounds = rounds
 		-- Those taken in are out of the queue (out of the zone, too)
 		local q = c.state.queue
 		for _, pid in ipairs(c.state.taking) do
@@ -372,13 +458,16 @@ return {
 		c.state.taking = {}
 		c:log("session", id, "started")
 		c:emit("started", id)
+		-- Those left waiting: a parallel round
+		try_count(c)
 		lobby_status(c)
 	end,
 	on_session_end = function(c, id, outcome)
-		if id ~= c.state.session then
+		local rounds = c.state.rounds
+		if not drop(rounds, id) then
 			return
 		end
-		c.state.session = 0
+		c.state.rounds = rounds
 		local w = type(outcome) == "table" and outcome.winner or nil
 		if type(outcome) == "table" then
 			local t = {}
@@ -522,10 +611,12 @@ return {
 			else
 				finish(c, nil, '"end"', true)
 			end
-		elseif c.state.session ~= 0 then
+		elseif #c.state.rounds > 0 then
 			c.state.last = "stopped|" .. ended_by(c, '"end"')
 			c:log("round over:", c.state.last)
-			c:session_end(c.state.session)
+			for _, id in ipairs(c.state.rounds) do
+				c:session_end(id)
+			end
 		end
 	end,
 }

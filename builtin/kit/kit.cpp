@@ -8242,7 +8242,26 @@ struct Module: public interface::Module, public Interface
 		// draft's)
 		o += ",session="+itos(m_active);
 		if(GameSession *gs = active_session())
-			o += ",session_maker="+itos(gs->maker);
+			o += ",session_maker="+itos(gs->maker)+",session_players="+
+					itos(gs->start_players);
+		// [KIT_LATE_JOIN] the game sessions it made (from the default
+		// round): each one's players now, those its start took and its
+		// clock (s)
+		if(!m_active){
+			o += ",sessions={";
+			for(auto &s : m_sessions){
+				const GameSession &gs = *s.second;
+				if(gs.draft || gs.maker != e.id || gs.maker_comp != ci)
+					continue;
+				size_t n = 0;
+				for(auto &ps : m_peer_session)
+					n += ps.second == s.first;
+				o += "["+itos(s.first)+"]={players="+itos(n)+",taken="+
+						itos(gs.start_players)+",clock="+itos((interface::os::
+						game_us() - gs.ctx.clock_base) / 1000000)+"},";
+			}
+			o += "}";
+		}
 		o += ",next_id="+itos(m_next_id)+",sizes={";
 		for(const auto &s : copy_sizes(e, ci)){
 			o += '[';
@@ -19708,6 +19727,8 @@ struct Module: public interface::Module, public Interface
 		int64_t empty_since = 0;
 		// The sections its players and entities wrote ("<scene>:x,y,z")
 		std::set<ss_> written;
+		// [KIT_LATE_JOIN] The players its start took in
+		size_t start_players = 0;
 	};
 	std::map<uint64_t, up_<GameSession>> m_sessions;
 	// The default round's members while a session is entered
@@ -20323,9 +20344,13 @@ struct Module: public interface::Module, public Interface
 					continue;
 				}
 				add_log(o.maker, "session "+itos(id)+" started");
+				size_t taken = 0;
 				for(size_t peer : o.peers)
-					if(!session_of_peer(peer))
+					if(!session_of_peer(peer)){
 						move_peer(peer, id);
+						taken++;
+					}
+				m_sessions[id]->start_players = taken;
 				Run r;
 				r.entity = o.maker;
 				r.comp = o.comp;

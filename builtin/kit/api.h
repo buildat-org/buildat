@@ -697,6 +697,10 @@ namespace interface
 // [KIT_MINIGAMES_FIX] In a session c.session_maker is the entity whose
 // run started it (0: none, a draft); c.player_away is true when the player
 // who set the run off is in another scene than the entity.
+// [KIT_LATE_JOIN] In a game session c.session_players is the number of
+// players its start took in; in the default round c.sessions =
+// {[id] = {players, taken, clock}} the game sessions it made: its players
+// now, those its start took, its clock (s). As the run began.
 //
 // **Minigames** ([KIT_MINIGAMES_1], stage 7b's first part): the framework
 // owns a round's lifecycle, each game its goal. kit/arena is the lobby
