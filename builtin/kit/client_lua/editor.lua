@@ -54,7 +54,8 @@
 --     own selection moves nothing), Shift+Tab the other way
 --   - **The panel** (left; [KIT_EDITOR_PANELS]): its tabs are the tools,
 --     each tab's body (it scrolls) the tool's options -- Components,
---     Terrain (T), Voxels (V); Box (B), Entities and Sounds, in two rows
+--     Terrain (T), Voxels (V); Box (B), Entities, Items and Sounds, in
+--     two rows
 --     ([KIT_TABS_TWO_ROWS]); the tabs and the 3D camera as the builder
 --     left them in the project, kit.remember ([WB_EDITOR_VIEW_MEMORY]).
 --     Components: a type or
@@ -66,7 +67,11 @@
 --     "none" away; and "New voxel type..." makes a builder's own: a
 --     texture (Kit's or an uploaded PNG), kind, solid, transparent, light,
 --     friction, surface. Entities: the entities listed to select (tabs:
---     Game-wide, Scene, Positioned). [KIT_SOUNDS] Sounds: the
+--     Game-wide, Scene, Positioned). [KIT_ITEMS_TAB] Items: the item
+--     types by group (a search), one selected its sheet in the inspector,
+--     each copied as new, given to oneself in play, deleted (the
+--     project's own), dragged into the view as a kit/pickup of it.
+--     [KIT_SOUNDS] Sounds: the
 --     project's named sounds (blip's parameters), each played, edited in
 --     blip's designer (its Save writes it back), copied as new or deleted;
 --     "New sound..." names one and opens the designer
@@ -161,8 +166,7 @@ for k, v in pairs({state = nil, link = nil, cursor = nil, pending = {},
 		package_name = "my_prefabs", credits = {}, try_values = {},
 		voxel_form = {name = "my_voxel", texture = "kit/stone.png", kind = "solid",
 			solid = true, transparent = false, light = 0, friction = 1,
-			surface = "", group = "", level = 0},
-		item_form = nil}) do
+			surface = "", group = "", level = 0}}) do
 	init(E, k, v)
 end
 -- Floorplanner's S: the view, the cameras and what the pointer is doing
@@ -3180,45 +3184,6 @@ local function item_form(preset, name)
 	f.dig = table.concat(dig, ", ")
 	f.preset, f.name = preset, name or "my_item"
 	return f
-end
-
-function M.item_dialog()
-	drop("dialog")
-	local presets = {}
-	for k in pairs(M.item_types) do presets[#presets + 1] = k end
-	table.sort(presets)
-	E.item_form = E.item_form or item_form(presets[1] or "", nil)
-	local f = E.item_form
-	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
-	W.dialog = w
-	w.priority = 10
-	w:SetFixedWidth(math.min(480, magic.ui.root.width - 16))
-	text(w, "An item type of yours")
-	ui_utils.settings_form(w, {{name = "preset", type = "choice",
-			choices = presets}}, f, function(_, v)
-		E.item_form = item_form(v, f.name)
-		M.item_dialog()
-	end, WIDGETS)
-	-- simplified: every field in one long form
-	-- The icon: a voxel's or an upload's texture, "" none (a text label)
-	local tex = {""}
-	for _, t in ipairs(E.state.textures or {}) do tex[#tex + 1] = t end
-	ui_utils.settings_form(w, M.with_sounds(ITEM_FIELDS, f), f, function(k, v)
-		f[k] = v
-	end, WIDGETS, {texture = tex})
-	local br = row(w)
-	button(br, "Make", function()
-		local j = {op = "item"}
-		for k, v in pairs(f) do
-			j[k] = v
-		end
-		j.format, j.author, j.version, j.look_data = nil, nil, nil, nil
-		send(j)
-		drop("dialog")
-	end)
-	button(br, "Cancel", function()
-		drop("dialog")
-	end)
 end
 
 -- [KIT_ITEMS_TAB] An item type's sheet in the inspector (the Items tab's
