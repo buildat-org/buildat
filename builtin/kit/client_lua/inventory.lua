@@ -140,6 +140,7 @@ local function stack(parent, s, x, y, n)
 	local c = tonumber(s.n) or 1
 	if c > 1 then
 		local t = text(parent, tostring(c), 0, 0, 12)
+		t:SetTextEffect(magic.TE_STROKE) -- readable over a light picture
 		t:SetPosition(math.floor(x + n - t.width), math.floor(y + n - t.height))
 	end
 	-- Wear left as a bar (the first instance's uses of its type's)
