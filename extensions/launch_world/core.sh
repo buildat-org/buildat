@@ -26,7 +26,8 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/launch_world_core"; mkdir -p "$out"
 rm -f "$out"/*.png
 # The room's description asserts itself first, and costs nothing
-lua "$here/extensions/launch_world/room.lua" || exit 1
+lua=$(command -v luajit || command -v lua) || skip "no luajit or lua"
+"$lua" "$here/extensions/launch_world/room.lua" || exit 1
 cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
 	echo "SKIP: SKIP: a buildat client is already running"; exit 77
