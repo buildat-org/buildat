@@ -3675,14 +3675,14 @@ struct Module: public interface::Module, public Interface
 		// Its contents: types/<name>.lua (and <name>.client.lua),
 		// <name>.prefab.json and <name>.voxel.json; textures/<file>.png
 		json::Value types = json::object();
-		sm_<ss_, json::Value> prefabs, voxels;
+		sm_<ss_, json::Value> prefabs, voxels, items;
 		for(auto &f : files){
 			if(f.first.compare(0, 6, "types/") != 0)
 				continue;
 			const ss_ base = f.first.substr(6);
 			ss_ n, kind;
 			for(const char *suffix : {".client.lua", ".prefab.json",
-					".voxel.json", ".lua"}){
+					".voxel.json", ".item.json", ".lua"}){
 				const size_t sl = strlen(suffix);
 				if(base.size() > sl && base.compare(base.size() - sl, sl,
 						suffix) == 0){
@@ -3695,13 +3695,15 @@ struct Module: public interface::Module, public Interface
 				continue;
 			if(!name_ok(n))
 				return f.first+": a name is letters, digits and _";
-			if(kind == ".prefab.json" || kind == ".voxel.json"){
+			if(kind == ".prefab.json" || kind == ".voxel.json" ||
+					kind == ".item.json"){
 				const json::Value j = json::load_string(f.second.c_str());
 				if(!j.is_object())
 					return f.first+": not a JSON object";
 				json::Value r = j.deepcopy();
 				resolve_names(r, keys);
-				(kind == ".prefab.json" ? prefabs : voxels)[fp+"/"+n] = r;
+				(kind == ".prefab.json" ? prefabs : kind == ".voxel.json" ?
+						voxels : items)[fp+"/"+n] = r;
 				continue;
 			}
 			json::Value t = types.get(n).is_object() ? types.get(n) :
@@ -3792,7 +3794,24 @@ struct Module: public interface::Module, public Interface
 		if(old != m_packages.end() && old->second.get("materials").is_object() &&
 				!set.is_object())
 			return version+" has no material set, which "+old_version+" had";
-		if(types.size() + prefabs.size() + voxels.size() == 0 &&
+		// [KIT_PACKAGE_ITEMS] its item types, "<fp>/<n>", each sheet as a
+		// builder's is checked; one of the project's own of that name kept
+		for(auto &it : items){
+			json::Value sheet;
+			ss_ iwhy;
+			if(!item_sheet(it.second, json::object(), sheet, iwhy))
+				return "types/"+it.first.substr(fp.size() + 1)+".item.json: "+
+						iwhy;
+			ss_ row;
+			if(m_store->get("item:"+it.first, row) && jstr(json::load_string(
+					row.c_str()), "package") != name)
+				return "the item type "+it.first+" is a builder's here";
+			if(!m_item_types.count(it.first) &&
+					m_item_types.size() >= MAX_ITEM_TYPES)
+				return "the save has "+itos(MAX_ITEM_TYPES)+" item types";
+			it.second = sheet;
+		}
+		if(types.size() + prefabs.size() + voxels.size() + items.size() == 0 &&
 				!set.is_object())
 			return "no types, prefabs or voxel types in types/, and no "
 					"materials.json";
@@ -3822,6 +3841,12 @@ struct Module: public interface::Module, public Interface
 			}
 			return ss_();
 		};
+		for(auto &it : items){
+			const ss_ twhy = jstr(it.second, "icon").empty() ? ss_() :
+					take(it.first, it.second, "icon");
+			if(!twhy.empty())
+				return twhy;
+		}
 		for(auto &v : voxels){
 			for(const char *face : {"texture", "top", "side", "bottom"}){
 				const ss_ twhy = take(v.first, v.second, face);
@@ -3952,8 +3977,22 @@ struct Module: public interface::Module, public Interface
 			register_builder_voxel(v.first, v.second);
 			vl.append(v.first);
 		}
+		json::Value il = json::array();
+		for(auto &it : items){
+			it.second.set("format", ss_("kit_item"));
+			it.second.set("author", author);
+			it.second.set("name", it.first.substr(fp.size() + 1));
+			it.second.set("version", (int64_t)1);
+			it.second.set("package", name);
+			m_store->set("item:"+it.first, it.second.stringify());
+			m_item_types[it.first] = it.second;
+			il.append(it.first);
+		}
+		if(!items.empty())
+			send_item_types(-1);
 		row.set("prefabs", pl);
 		row.set("voxels", vl);
+		row.set("items", il);
 		m_packages[name] = row;
 		m_store->set("package:"+name, row.stringify());
 		for(const ss_ &t : names)
@@ -3980,6 +4019,7 @@ struct Module: public interface::Module, public Interface
 				"upgraded "+named+" from "+old_version+" to "+version)+": "+
 				itos(names.size())+" types, "+itos(prefabs.size())+
 				" prefabs, "+itos(voxels.size())+" voxel types"+
+				(items.empty() ? "" : ", "+itos(items.size())+" item types")+
 				(set.is_object() ? ", a material set" : "")+
 				(change.empty() ? "" : ", "+itos(change.size())+
 				" entities upgraded");
@@ -4132,8 +4172,37 @@ struct Module: public interface::Module, public Interface
 			files.set("types/"+v.first.substr(author.size() + 1)+
 					".voxel.json", row.stringify());
 		}
+		// [KIT_PACKAGE_ITEMS] the builder's item types, what the prefabs'
+		// givers and kits name (an uploaded icon in textures/, as a voxel
+		// type's). simplified: all of them, not only those the prefabs name.
+		// [KIT_SOUNDS] the sounds they play go beside them here
+		for(const ss_ &k : m_store->list("item:"+author+"/")){
+			ss_ src, png;
+			m_store->get(k, src);
+			json::Value row = json::load_string(src.c_str());
+			if(!row.is_object() || !jstr(row, "package").empty())
+				continue;
+			for(const char *f : {"format", "author", "name", "version",
+					"look_data"})
+				row.del_key(f);
+			const ss_ icon = jstr(row, "icon");
+			if(icon.compare(0, 7, "kit/up/") == 0 && m_store->get("texture:"+
+					icon.substr(7, icon.size() - 11), png)){
+				static const char *H = "0123456789abcdef";
+				ss_ h;
+				for(unsigned char ch : png){
+					h += H[ch >> 4];
+					h += H[ch & 15];
+				}
+				hex.set("textures/"+icon.substr(7), h);
+				row.set("icon", "textures/"+icon.substr(7));
+			}
+			files.set("types/"+k.substr(6 + author.size())+".item.json",
+					row.stringify());
+		}
 		if(!files.size())
-			return refuse("no prefabs or voxel types of "+author+"'s here");
+			return refuse("no prefabs, voxel or item types of "+author+
+					"'s here");
 		for(const ss_ &n : dep_names){
 			const json::Value &dm = m_packages[n].get("manifest");
 			json::Value dj = json::object();
