@@ -22,6 +22,13 @@
 -- Its outputs, in the default round: started and ended (the session's
 -- id), result (the winner's name, "" a draw). Its status is on the
 -- players' screens (`ui`), their own team's name with it in a round.
+-- [KIT_INVENTORY_PLAY] The inventory at the round's ends (Kit's):
+-- `at_start` "kit" (empty, then the starting kits), "clear" (empty, no
+-- kit) or "keep" (what they had in the lobby); `at_end`, as they come
+-- back after the results: "before" (what they had before the round),
+-- "keep" (the round's), "clear" (nothing) or "living" (the round's for
+-- one who did not die in it, else nothing). Health starts full in a
+-- round (its player entity is the round's own)
 local function ids_in(list, n)
 	local out = {}
 	for i = 1, math.min(n, #list) do
@@ -189,7 +196,7 @@ local function finish(c, winner, cause, stopped)
 end
 
 return {
-	version = 2,
+	version = 3,
 	zone = "size",
 	teams = true,
 	-- (every player read: the queue keeps those here)
@@ -202,6 +209,10 @@ return {
 		countdown = {type = "number", default = 10, min = 0, max = 600},
 		duration = {type = "number", default = 300, min = 0, max = 86400},
 		results = {type = "number", default = 5, min = 0, max = 60},
+		at_start = {type = "string", default = "kit",
+			choices = {"kit", "clear", "keep"}},
+		at_end = {type = "string", default = "before",
+			choices = {"before", "keep", "clear", "living"}},
 	},
 	state = {
 		-- The default round's: the players in the zone in the order they

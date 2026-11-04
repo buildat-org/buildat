@@ -15,6 +15,10 @@
 --   in the pause menu's Settings, Key bindings; [KIT_INPUT_ACTIONS])
 --   1...9, 0 the voxel placed (Kit's stone, Workbench's glass, Kit's
 --   planks, Workbench's brick, Kit's grass, dirt, sand, log, leaves, water)
+--   in edit mode and under kit/game_rules' building "creative"; in play
+--   under "inventory" (the default) the hotbar's slot, a place putting
+--   down the held slot's voxel ([KIT_INVENTORY_PLAY]); E the inventory
+--   screen, Q a drop
 --   F: out of a seat (kit/car, kit/ball: a use takes it)
 --   ([KIT_TOOLS_1]) the wheel (first person): the item in hand, Kit's
 --   hotbar; a melee item's left click hits a player or an entity with
@@ -215,7 +219,18 @@ local function act(t, left)
 	elseif a.kind == "dig" then
 		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), "air")
 	elseif a.kind == "place" then
-		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), hand, a.param)
+		-- [KIT_INVENTORY_PLAY] in play under "inventory" building, the held
+		-- slot's voxel (the server takes it from there), else the palette's
+		local v = hand
+		if not kit.editing() and kit.building() == "inventory" then
+			local _, item = kit.held_item()
+			if item == "" then
+				kit.refused("Nothing in hand to place")
+				return
+			end
+			v = item
+		end
+		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), v, a.param)
 	end
 end
 
@@ -287,12 +302,15 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 		return
 	end
 	if key == magic.KEY_ESCAPE then
-		if not ui_utils.mouse_look_escape() then
+		-- [KIT_INVENTORY_PLAY] Kit's inventory screen closed first
+		if not ui_utils.mouse_look_escape() and not kit.close_screens() then
 			menu.escape()
 		end
 	elseif menu.held() then
 		return
-	else
+	elseif kit.editing() or kit.building() ~= "inventory" then
+		-- [KIT_INVENTORY_PLAY] the palette's keys (in "inventory" building
+		-- Kit's hotbar has them in play)
 		for i = 1, 10 do
 			if kit.key("voxel" .. i, key) then
 				hand = MATERIALS[i]
@@ -342,9 +360,11 @@ magic.SubscribeToEvent("Update", function()
 	local p = kit.body_pos()
 	status_text.visible = not editing and p ~= nil
 	if p then
+		local _, held = kit.held_item()
 		status_text:SetText(string.format("(%d, %d, %d)  in hand: %s",
 				math.floor(p.x + 0.5), math.floor(p.y + 0.95),
-				math.floor(p.z + 0.5), hand))
+				math.floor(p.z + 0.5), kit.building() == "inventory" and
+				(held ~= "" and held or "nothing") or hand))
 	end
 	local seated = kit.seated()
 	-- [KIT_INPUT_ACTIONS] the keys as bound
@@ -354,7 +374,8 @@ magic.SubscribeToEvent("Update", function()
 			kit.key_text(seated and "[forward][left][back][right] [jump]: " ..
 			"move  [exit]: leave the seat  Esc: menu" or
 			"[forward][left][back][right] [jump]: walk, jump  left: use or " ..
-			"dig  right: place  [voxel1]-[voxel10]: voxel  " ..
+			"dig  right: place  " .. (kit.building() == "inventory" and
+			"[inventory]: inventory  " or "[voxel1]-[voxel10]: voxel  ") ..
 			"[edit]: edit  Esc: menu"))
 	local right = kit.touch_bar_left() or magic.ui.root.width
 	local w = math.max(100, right - 10 - 12)

@@ -1,6 +1,9 @@
 -- A player's equipment ([KIT_TOOLS_1], stage 7c): on each player entity,
 -- the hands slot -- the item they hold, one of their items, picked on
 -- their client's hotbar (Kit sets it; it empties when the item is gone).
+-- [KIT_INVENTORY_PLAY] `slot` the inventory's slot the hands hold (Kit
+-- sets it with hands; 0 none): its instance is the held one, so two
+-- swords in two slots are held and worn apart.
 -- [KIT_TOOLS_2] The held item is an instance (kit/inventory's: the first
 -- of that item), its own wear (uses left) and loaded rounds kept on it:
 -- two swords wear apart, a worn one given keeps its wear. Kit runs
@@ -11,11 +14,10 @@
 -- for the client. on_reload loads rounds (a whole magazine or one) from
 -- the ammo items, if it takes any. Stage 8's other slots go beside the
 -- hands. Not placed
--- simplified: the hands hold the first of an item (no picking between
--- two swords); an item type's repair item is kept on its sheet, and
+-- simplified: an item type's repair item is kept on its sheet, and
 -- nothing mends with it yet (a station's job)
 local function take(c, item)
-	local ext = {}
+	local ext = {slot = c.state.slot}
 	if not c:take(item, 1, ext) then
 		return nil
 	end
@@ -23,7 +25,7 @@ local function take(c, item)
 end
 
 local function put(c, item, inst)
-	c:add(item, 1, {instances = {inst}})
+	c:add(item, 1, {instances = {inst}, slot = c.state.slot})
 	c.state.held = inst
 end
 
@@ -33,6 +35,7 @@ return {
 	equipment = true,
 	state = {
 		hands = {default = "", shared = true},
+		slot = {default = 0, shared = true},
 		held = {default = {}, shared = true},
 	},
 	outputs = {broke = "any"},

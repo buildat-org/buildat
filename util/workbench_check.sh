@@ -26,12 +26,14 @@
 #   2. The admin plays it, by the play rules out of edit mode
 #      ([KIT_BUILDER_PLAY_RULES]: a dig sent outside the region refused;
 #      the region, 16, a big box round the spawn, digging and placing for
-#      all but owners, of whom it has none): looks at the button, shown as used (E does
-#      nothing, [KIT] stage 4e2), and clicks it (the gate
+#      all but owners, of whom it has none): looks at the button, shown as used (E opens
+#      the inventory screen and uses nothing, [KIT] stage 4e2;
+#      [KIT_INVENTORY_PLAY]), a dig held as it takes its time, and clicks it (the gate
 #      opens, the timer ticks three times, the lever flips, the door
 #      follows, the button comes up again), digs the floor past the
-#      button (an object, no voxel) and places a stone, each shown first
-#      (the dig's frame, the placement's face), talks to the NPC, takes
+#      button (an object, no voxel), shown first (the dig's frame); a
+#      place refused: nothing in hand (kit/game_rules' building
+#      "inventory", the default with none: [KIT_INVENTORY_PLAY]), talks to the NPC, takes
 #      a key from the item giver (once), and uses the teleporter, which
 #      puts them in the zone: scored, counted.
 #   3. A second player (kitbob) joins mid-round and is put on the spawner,
@@ -536,7 +538,10 @@ wait_log_any 5000 kit: points at use 4
 frames 3
 screenshot @T@/point_use.png
 keypress e
+wait_log 5000 kit: inventory screen opened
 wait_log_absent 500 kit: use 4
+keypress e
+wait_log_any 5000 kit: inventory screen closed
 mouse_click left
 wait_log 10000 kit: use 4
 wait_log 10000 kit: entity 7 shows "3"
@@ -544,10 +549,11 @@ look_dir 0.4 -1 0
 wait_log_any 5000 kit: points at dig 1,0,1, place 1,1,1
 frames 3
 screenshot @T@/point_dig.png
-mouse_click left
-wait_log 5000 kit: points at dig 2,0,1, place 1,0,1
+mouse_down left
+wait_log 8000 kit: points at dig 2,0,1, place 1,0,1
+mouse_up left
 mouse_click right
-wait_log 5000 kit: points at dig 1,0,1, place 1,1,1
+wait_log 5000 kit: refused: Nothing in hand to place
 look_dir 1.5 -1.1 -3.5
 wait_log_any 5000 kit: points at use 13
 mouse_click left
@@ -580,7 +586,9 @@ screenshot @T@/point_none.png
 event workbench_build {"p": [6, 0, 6], "voxel": "air"}
 look_dir 0 -1 -0.5
 wait_log_any 5000 kit: points at dig 0,0,-5
-mouse_click left
+mouse_down left
+delay 4500
+mouse_up left
 event kit_use 15
 frames 2
 event kit_use 14
@@ -630,7 +638,7 @@ want "$s" "kit/button 4: pressed by kitboss times 1" \
 	"kit/timer 7: stopped: its repeats done after 3 ticks" \
 	"kit/lever 6: flipped on by kitboss" "kit/lever 6: flipped off by kitboss" \
 	"kit/door 8: opened by kitboss" "kit/door 8: shut by kitboss" \
-	"workbench: kitboss placed kit/stone" \
+	"workbench: kitboss dug (1,0,1): written" \
 	"kit/npc 13: says to kitboss \"Welcome!\"" \
 	"kit/item_giver 14: gives kitboss 1 key" \
 	"kit/item_giver 14: kitboss has had theirs" \
@@ -728,7 +736,9 @@ keypress F6
 wait_log 10000 kit editor: edit mode off
 frames 10
 look_dir 0 -1 0.5
-mouse_click left
+mouse_down left
+delay 4500
+mouse_up left
 frames 3
 keypress F6
 wait_log 10000 kit editor: state: 16 entities, 3 to undo
@@ -737,7 +747,9 @@ wait_log 10000 kit editor: state: 16 entities, 3 to undo
 keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0.5 -1 0
-mouse_click left
+mouse_down left
+delay 4500
+mouse_up left
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 frames 5
@@ -814,7 +826,9 @@ wait_log 5000 pause: the menu closed
 keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0 -1 -0.6
-mouse_click left
+mouse_down left
+delay 4500
+mouse_up left
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 wait_log_absent 1500 kit: builds discarded
@@ -1060,8 +1074,8 @@ EOF
 # in the plan go through the ground to it; the list's Positioned tab has
 # it, its Select selects it; a link ("Link pressed") to it
 # by a click through the ground.
-# By finger (BUILDAT_TOUCH=1, finger_*): in play a tap digs, a finger
-# held places, a tap uses the button; in the plan the palette (folded on
+# By finger (BUILDAT_TOUCH=1, finger_*): in play a tap digs (going on
+# till it is due), a finger held places (refused: nothing in hand), a tap uses the button; in the plan the palette (folded on
 # a narrow screen) dragged from, a tap selects, a drag moves, a drag from
 # the out port links (onto the door: its inputs shown, onto toggle), a
 # finger held is the menu, two fingers pinch the plan
@@ -1376,9 +1390,10 @@ frames 3
 screenshot @T@/t_dig.png
 finger_up 1
 wait_log 5000 kit: points at nothing
+delay 5000
 finger_down 1 700 615
 wait_log 5000 kit: points at dig 2,0,4, place 2,0,3
-wait_log 3000 kit: points at dig 2,0,3, place 2,1,3
+wait_log_any 3000 kit: refused: Nothing in hand to place
 finger_up 1
 wait_log 5000 kit: points at nothing
 finger_down 1 605 545
@@ -1502,8 +1517,8 @@ want "$t/srv4.log" "kit/button 3: pressed by kitboss" \
 	"An edit by kitboss: linked 6.pressed -> 5.toggle"
 grep -aq "workbench: kitboss dug (2,0,3): written" "$t/srv4.log" ||
 	fail "the tap did not dig ($t/srv4.log)"
-grep -aq "workbench: kitboss placed kit/stone (2,0,3): written" "$t/srv4.log" ||
-	fail "the finger held did not place ($t/srv4.log)"
+grep -aq "kit: refused: Nothing in hand to place" "$t/touch.log" ||
+	fail "the finger held was not refused: nothing in hand ($t/touch.log)"
 echo "ok: Kit's editor by mouse (the plan: a palette drag, select, a snapped move, a turn, an armed place, a link dragged, a box, the menu; 3D and walking; voxels placed, dug and undone; an entity under the ground selected through it, from the list, and linked to through it) and by finger (tap, hold, drags, a link, the menu, a pinch)"
 # 8. ([KIT] stage 4g) A builder's voxel type: with kitbob joined, the
 # admin uploads a PNG from their exports (the client's file picker) in
@@ -1570,6 +1585,11 @@ event kit_edit {"op": "place", "type": "kit/region", "pos": [-2, -1, -2]}
 wait_log 10000 kit editor: state: 2 entities
 event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "place", "value": "all"}
 wait_log 10000 kit editor: state: 2 entities, 2 to undo
+# [KIT_INVENTORY_PLAY] the palette's voxels in play: building "creative"
+event kit_edit {"op": "place", "type": "kit/game_rules", "pos": [0, 1, 0]}
+wait_log 10000 kit editor: state: 3 entities, 3 to undo
+event kit_edit {"op": "set", "id": 4, "comp": 0, "param": "building", "value": "creative"}
+wait_log 10000 kit editor: state: 3 entities, 4 to undo
 keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0 -1 0.6

@@ -55,6 +55,11 @@ local KIT_KEYS = {
 	{id = "item_prev", label = "The item before in hand"},
 	-- [KIT_TOOLS_2] a ranged item's magazine
 	{id = "reload", label = "Reload what is in hand", default = "R"},
+	-- [KIT_INVENTORY_PLAY] the inventory screen, a drop, the hotbar's
+	-- slots (in "inventory" building; the app's palette keys otherwise)
+	{id = "inventory", label = "The inventory screen", default = "E"},
+	{id = "drop", label = "Drop one of what is in hand (Ctrl: all)",
+		default = "Q"},
 	{id = "edit", label = "Edit mode on and off", default = "F6"},
 	{id = "view_2d", label = "Editor: the 2D view", default = "F1"},
 	{id = "view_3d", label = "Editor: the 3D view", default = "F2"},
@@ -90,6 +95,10 @@ local KIT_KEYS = {
 	{id = "nudge_up", label = "Editor: nudge up", default = "PageUp"},
 	{id = "nudge_down", label = "Editor: nudge down", default = "PageDown"},
 }
+for i = 1, 10 do
+	KIT_KEYS[#KIT_KEYS + 1] = {id = "hotbar" .. i, label = "Hotbar slot " .. i,
+		default = tostring(i % 10)}
+end
 -- The world's actions take the gamepad's free buttons in order: Y, LB, RB
 local PAD_FREE = {3, 9, 10}
 

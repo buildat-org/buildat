@@ -577,8 +577,10 @@ struct Module: public interface::Module
 		bool can = false;
 		ss_ why;
 		kit::access(m_server, [&](kit::Interface *k){
-			can = k->is_editing(peer) || k->allows(peer, voxel == "air" ? "dig" :
-					"place", c[0], c[1], c[2], &why);
+			can = k->is_editing(peer) || (k->allows(peer, voxel == "air" ?
+					"dig" : "place", c[0], c[1], c[2], &why) &&
+					// [KIT_INVENTORY_PLAY] one of the held slot's
+					(voxel == "air" || k->place_ready(peer, voxel, &why)));
 		});
 		if(!can){
 			log_i(MODULE, "workbench: a build by %s refused: not in edit mode "
@@ -631,6 +633,8 @@ struct Module: public interface::Module
 				k->player_wrote(peer, c[0], c[1], c[2]);
 				if(voxel == "air")
 					k->dug(peer, c[0], c[1], c[2], was);
+				else
+					k->placed(peer, c[0], c[1], c[2], voxel);
 			});
 	}
 };

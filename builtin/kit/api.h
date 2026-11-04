@@ -1097,6 +1097,16 @@ namespace kit
 		// dig_by_tools off
 		virtual void dug(size_t peer, int x, int y, int z,
 				const ss_ &voxel) = 0;
+		// [KIT_INVENTORY_PLAY] Whether a placed peer may put down `voxel`
+		// now by kit/game_rules' building, and why not: "inventory" (the
+		// default), one of the held slot's material (a shape of it too);
+		// "creative", any (the palette). Edit mode and Stopped: yes. Asked
+		// after allows() and before the write; placed() after it takes
+		// the one put down from the held slot
+		virtual bool place_ready(size_t peer, const ss_ &voxel,
+				ss_ *why) = 0;
+		virtual void placed(size_t peer, int x, int y, int z,
+				const ss_ &voxel) = 0;
 		// [KIT] stage 4e: Kit's material set's voxels (kit/stone...)
 		// registered, the ones not there yet: before set_save()
 		virtual void register_voxels(interface::VoxelRegistry *reg) = 0;

@@ -20,9 +20,9 @@
 #      to 12 and 4 with a knockback each, then dead and respawned at the
 #      spawner at 20; the blade's uses go 4, 3, 2, 1 and the fifth breaks
 #      it: the hands empty, a hit after (on the dummy) refused
-#   3. game_rules' dig_by_tools off (the default): Kit's kit/stone digs
-#      at once with no drop, as before groups ([KIT_DEFAULT_GROUPS]); then
-#      on: holding kit/pickaxe (dig stone 4, level 1): rock takes its
+#   3. game_rules' building "creative": Kit's kit/stone digs at once
+#      with no drop, as before groups ([KIT_DEFAULT_GROUPS]); then
+#      "inventory" (the default): holding kit/pickaxe (dig stone 4, level 1): rock takes its
 #      0.25 s (asked again) and drops kitboss/rock; ore (level 3) digs
 #      without a drop; kit/stone (stone, level 1) drops; a bare hand digs
 #      kit/dirt in 1 s with a drop, kit/stone in 4 s without
@@ -161,11 +161,14 @@ EOF
 			printf 'event workbench_build {"p": [%s], "voxel": "air"}\nsync 2000\ndelay 1000\n' "$1"
 		done
 	}
-	# dig_by_tools off (the default): kit/stone digs at once, no drop
+	# Building "creative": kit/stone digs at once, no drop
+	tools on
+	set_ 4 building '"creative"'
+	tools off
 	printf 'event kit_hold kit/pickaxe\nsync 2000\n'
 	printf 'event workbench_build {"p": [2, 1, 3], "voxel": "air"}\nsync 2000\n'
 	tools on
-	set_ 4 dig_by_tools true
+	set_ 4 building '"inventory"'
 	tools off
 	printf 'event kit_hold kit/pickaxe\nsync 2000\n'
 	for p in '2, 1, 2' '3, 1, 2' '6, 1, 2'; do
@@ -240,7 +243,8 @@ log = open(sys.argv[1], errors="replace").read()
 left = re.findall(r"kit/equipment \d+: kitboss/blade uses left (\d+)", log)
 assert left[:4] == ["4", "3", "2", "1"], left
 assert "kitboss/blade breaks" in log
-assert "kitboss has no kitboss/blade: the hands empty" in log
+# [KIT_INVENTORY_PLAY] the hands hold its slot, empty now
+assert "kitboss's slot 1 holds nothing: in hand" in log
 after = log.split("kitboss/blade breaks")[1]
 assert "nothing in hand" in after, "no refusal after the break"
 print("  uses left " + ", ".join(left[:4]) + ", then it breaks")
@@ -253,12 +257,12 @@ want "$s" "kitboss digs kitboss/rock (stone, level 1) with kit/pickaxe: 0.25 s" 
 grep -aqE "kitboss has \{[^}]*\"kitboss/rock\":1" "$s" ||
 	fail "kitboss/rock not in kitboss's items ($s)"
 echo "ok: a pickaxe digs its group at its speed: rock (level 1) drops, ore (level 3) does not"
-python3 - "$s" "$t/boss.log" <<'PY' || fail "dig_by_tools ($s)"
+python3 - "$s" "$t/boss.log" <<'PY' || fail "building ($s)"
 import sys
 log = open(sys.argv[1], errors="replace").read()
 assert "workbench: kitboss dug (2,1,3): written" in log
 off = log.split("workbench: kitboss dug (2,1,3): written")[0]
-assert "kitboss digs " not in off and "kitboss dug kit" not in off, "a dig by group with the rule off"
+assert "kitboss digs " not in off and "kitboss dug kit" not in off, "a dig by group in creative"
 assert "kitboss dug kit/stone (level 1) with kit/pickaxe (level 1): drops kit/stone" in log
 for w in ["kitboss digs kit/dirt (dirt, level 0) with a hand: 1 s",
 		"kitboss dug kit/dirt (level 0) with a hand (level 0): drops kit/dirt",
@@ -268,6 +272,6 @@ for w in ["kitboss digs kit/dirt (dirt, level 0) with a hand: 1 s",
 PY
 grep -aqE "kitboss has \{[^}]*\"kit/stone\":1" "$s" ||
 	fail "kit/stone not in kitboss's items ($s)"
-echo "ok: dig_by_tools off: kit/stone dug at once, no drop; on: the pickaxe digs kit/stone with a drop, a hand kit/dirt in 1 s with a drop and kit/stone in 4 s without"
-echo "PASS: tools: an item type from a preset, health on players and entities, the hit through Kit's rules (region pvp, peaceful), knockback, wear and breaking, a respawn; digging by material group and level, under game_rules' dig_by_tools only"
+echo "ok: creative: kit/stone dug at once, no drop; inventory: the pickaxe digs kit/stone with a drop, a hand kit/dirt in 1 s with a drop and kit/stone in 4 s without"
+echo "PASS: tools: an item type from a preset, health on players and entities, the hit through Kit's rules (region pvp, peaceful), knockback, wear and breaking, a respawn; digging by material group and level, under game_rules' building \"inventory\" only"
 # vim: set noet ts=4 sw=4:

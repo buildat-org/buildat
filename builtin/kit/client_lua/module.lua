@@ -1903,5 +1903,16 @@ do
 	install({M = M, E = E, P = P, log = log, STYLE = STYLE, send = send})
 end
 
+-- ---- [KIT_INVENTORY_PLAY] [KIT_HUD] The slots, the hotbar, the health
+-- bar, the inventory screen and chests: inventory.lua (after ui.lua: its
+-- ui_at over the UI components')
+do
+	local ok, err, install = buildat.run_script_file("kit/inventory.lua")
+	assert(ok and type(install) == "function", "kit: inventory.lua: " ..
+			tostring(err))
+	install({M = M, E = E, O = O, P = P, log = log, voxel_def = voxel_def,
+		color = color})
+end
+
 return M
 -- vim: set noet ts=4 sw=4:

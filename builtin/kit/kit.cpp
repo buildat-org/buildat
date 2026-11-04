@@ -1296,6 +1296,7 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "network:packet_received/kit:exit", &Module::on_exit);
 		// [KIT_TOOLS_1] the hands, a melee hit, an item's use
 		sub(m_server, "network:packet_received/kit:hold", &Module::on_hold);
+		sub(m_server, "network:packet_received/kit:inv", &Module::on_inv);
 		sub(m_server, "network:packet_received/kit:hit", &Module::on_hit);
 		sub(m_server, "network:packet_received/kit:item",
 				&Module::on_item_use);
@@ -7874,7 +7875,8 @@ struct Module: public interface::Module, public Interface
 			lua_lit(json::Value(wy), o);
 		}
 		o += ",params=";
-		lua_lit(in.params, o);
+		// [KIT_INVENTORY_PLAY] Kit's own inventory stores by the rules
+		lua_lit(in.type == "kit/inventory" ? inv_params() : in.params, o);
 		o += ",state=";
 		lua_lit(in.state, o);
 		o += ",args=";
@@ -7905,7 +7907,8 @@ struct Module: public interface::Module, public Interface
 				o += ",inv={type=";
 				lua_lit(json::Value(pv_->type), o);
 				o += ",id="+itos(inv_id)+",params=";
-				lua_lit(pv_->params, o);
+				lua_lit(pv_->type == "kit/inventory" ? inv_params() :
+						pv_->params, o);
 				o += ",state=";
 				lua_lit(pv_->state, o);
 				o += "}";
@@ -10866,6 +10869,8 @@ struct Module: public interface::Module, public Interface
 		// [KIT_TOOLS_1] what the hands may hold
 		m_items_seen[who] = mine;
 		check_hands(who, mine);
+		// [KIT_INVENTORY_PLAY] what did not fit dropped, the slots sent
+		slots_changed(who);
 		if(app_items()){
 			json::Value &had = m_app_items[who];
 			if(!had.is_object())
@@ -10945,6 +10950,8 @@ struct Module: public interface::Module, public Interface
 				if(p.second.name == who)
 					inetwork->send(p.first, "kit:items", data);
 		});
+		// [KIT_INVENTORY_PLAY]
+		send_slots(who);
 	}
 	// ---- Grants (api.h's can_dig, can_place)
 
@@ -11158,6 +11165,22 @@ struct Module: public interface::Module, public Interface
 		if(!allows_u(peer, action, x, y, z, why))
 			return false;
 		auto pi = m_peers.find(peer);
+		// [KIT_INVENTORY_PLAY] kit/game_rules' dig, place and placed_only
+		if((action == "dig" || action == "place") && pi != m_peers.end()){
+			const json::Value r = game_rules();
+			ss_ no;
+			if(!r.get(action).is_true())
+				no = action == "dig" ? "No digging in this game" :
+						"No placing in this game";
+			else if(action == "dig" && r.get("placed_only").is_true() &&
+					!player_placed(pi->second.scene, x, y, z))
+				no = "Only what players placed can be dug";
+			if(!no.empty()){
+				if(why)
+					*why = no;
+				return false;
+			}
+		}
 		if((action == "dig" || action == "place") && pi != m_peers.end() &&
 				!session_room(cell_key(pi->second.scene, x, y, z), false)){
 			if(why)
@@ -11245,6 +11268,31 @@ struct Module: public interface::Module, public Interface
 		const bool yes = who == "all" || who == (owner ? "owners" : "others");
 		if(!yes && why)
 			*why = refusal(action);
+		return yes;
+	}
+
+	// [KIT_INVENTORY_PLAY] Whether a player placed the voxel at a cell in
+	// this round: its mark a build ('b') of a voxel, not a dig. Edits
+	// ('k': a builder's, or any with "Always keep builds") and a
+	// persistent world's (no marks) do not count
+	bool player_placed(const ss_ &scene, int x, int y, int z)
+	{
+		auto si = m_host.scenes.find(scene);
+		if(si == m_host.scenes.end())
+			return false;
+		bool yes = false;
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			voxelworld::Instance *w = ivw->get_instance(si->second);
+			if(!w)
+				return;
+			auto mi = m_marks.find(section_key(scene, w,
+					pv::Vector3DInt32(x, y, z)));
+			if(mi == m_marks.end())
+				return;
+			auto ci = mi->second.find(std::make_tuple(x, y, z));
+			yes = ci != mi->second.end() && ci->second.kind == 'b' &&
+					type_of(w, ci->second.id) > 1;
+		});
 		return yes;
 	}
 
@@ -11712,6 +11760,7 @@ struct Module: public interface::Module, public Interface
 			tick_round(writes[id]);
 		}
 		session_ops();
+		rules_watch();
 		// Sessions nobody is in end: a draft as its builder leaves, a game
 		// session after SESSION_IDLE_US
 		const int64_t now = interface::os::time_us();
@@ -11834,6 +11883,8 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!m_queue.empty())
 			log_v(MODULE, "%zu runs wait for the next tick", m_queue.size());
+		else if(!m_kits_due.empty())
+			kits_due();
 		// simplified: the runtime row is written after each tick that
 		// changed it; a write per interval is the upgrade if a busy world
 		// makes it a cost
@@ -12774,6 +12825,9 @@ struct Module: public interface::Module, public Interface
 				seat(peer, id);
 				seated = any = true;
 			}
+			// [KIT_INVENTORY_PLAY] a chest opens on the user's screen
+			if(!m_types[in.type].decl.get("container").is_undefined())
+				chest_opened(peer, id);
 			if(!m_types[in.type].handlers.count("on_use"))
 				continue;
 			any = true;
@@ -13247,6 +13301,20 @@ struct Module: public interface::Module, public Interface
 		Instance *eq = pl == m_players.end() ? nullptr :
 				equipment_of(pl->second, &comp);
 		const ss_ item = eq ? jstr(eq->state, "hands") : ss_();
+		// [KIT_INVENTORY_PLAY] The hands hold a slot: what is in it now
+		const int64_t slot = eq ? json::jint(eq->state, "slot", 0) : 0;
+		if(eq && slot > 0 && own_slots()){
+			const json::Value sl = slots_of(pl->second);
+			const ss_ now = slot_item(sl.at((unsigned)slot - 1));
+			if(now == item)
+				return;
+			set_hands(pl->second, comp, now);
+			log_i(MODULE, "%s's slot %s holds %s: in hand", cs(who),
+					cs(itos(slot)), now.empty() ? "nothing" : cs(now));
+			if(!now.empty())
+				tool_run(pl->second, now, 0, 0, "");
+			return;
+		}
 		if(item.empty() || (items.get(item.c_str()).is_number() &&
 				items.get(item.c_str()).as_number() >= 1))
 			return;
@@ -13254,12 +13322,18 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "%s has no %s: the hands empty", cs(who), cs(item));
 	}
 
-	void set_hands(uint64_t player, size_t comp, const ss_ &item)
+	// slot: the inventory's slot they hold (-1: as it was)
+	void set_hands(uint64_t player, size_t comp, const ss_ &item,
+			int64_t slot = -1)
 	{
 		Entity &e = m_entities[player];
 		e.comps[comp].state.set("hands", item);
 		m_runtime_dirty = true;
 		replicate_state(e, comp, "hands");
+		if(slot >= 0){
+			e.comps[comp].state.set("slot", slot);
+			replicate_state(e, comp, "slot");
+		}
 	}
 
 	// "kit:hold" <item>: a placed peer's hands take one of their items
@@ -13282,6 +13356,36 @@ struct Module: public interface::Module, public Interface
 		size_t comp = 0;
 		if(!p.player || !equipment_of(p.player, &comp))
 			return;
+		// [KIT_INVENTORY_PLAY] "#<n>": the slot n (from 1; empty: a hand);
+		// an item: its first slot
+		if(own_slots()){
+			const json::Value sl = slots_of(p.player);
+			int64_t slot = 0;
+			if(!item.empty() && item[0] == '#'){
+				slot = atoll(item.c_str() + 1);
+				if(slot < 1 || slot > 256)
+					return;
+			} else {
+				for(unsigned i = 0; i < sl.size() && !item.empty(); i++)
+					if(slot_item(sl.at(i)) == item){
+						slot = i + 1;
+						break;
+					}
+			}
+			const ss_ now = slot ? slot_item(sl.at((unsigned)slot - 1)) : "";
+			if(!item.empty() && item[0] != '#' && !slot){
+				if(log_refusal(p, "hold "+item))
+					log_i(MODULE, "%s may not hold %s: not one of their items",
+							cs(p.name), cs(item.substr(0, 64)));
+				return;
+			}
+			set_hands(p.player, comp, now, slot);
+			log_i(MODULE, "%s holds %s (slot %s)", cs(p.name), now.empty() ?
+					"nothing" : cs(now), cs(itos(slot)));
+			send_slots(p.name);
+			tool_run(p.player, now, 0, 0, "");
+			return;
+		}
 		if(!item.empty() && (!item_ok(item) || !has_item(p.name, item))){
 			if(log_refusal(p, "hold "+item))
 				log_i(MODULE, "%s may not hold %s: not one of their items",
@@ -13438,6 +13542,14 @@ struct Module: public interface::Module, public Interface
 		const size_t peer = peer_of_player(player);
 		if(!peer)
 			return;
+		// [KIT_INVENTORY_PLAY] the inventory at a death, the kits at a spawn
+		player_died(player);
+		respawn_at(player, peer);
+		give_kits(player, true);
+	}
+
+	void respawn_at(uint64_t player, size_t peer)
+	{
 		const ss_ scene = m_peers[peer].scene;
 		const Entity *pad = nullptr, *spawner = nullptr;
 		for(auto &e : m_entities){
@@ -14276,13 +14388,12 @@ struct Module: public interface::Module, public Interface
 		return dig_ready_u(peer, x, y, z, voxel, wait);
 	}
 
-	// [KIT_DEFAULT_GROUPS] Digging by tools is kit/game_rules'
-	// dig_by_tools (off by default, and without game_rules): off, every
-	// voxel digs at once and drops nothing, as before groups
+	// [KIT_DEFAULT_GROUPS] Digging by tools: [KIT_INVENTORY_PLAY]
+	// kit/game_rules' building "inventory" (the default; "creative": every
+	// voxel digs at once and drops nothing, as before groups)
 	bool dig_by_tools()
 	{
-		const Instance *gr = root_instance("kit/game_rules");
-		return gr && gr->params.get("dig_by_tools").is_true();
+		return inventory_mode();
 	}
 
 	// A bare hand's speed for a material group (1 / the seconds a voxel
@@ -14351,18 +14462,22 @@ struct Module: public interface::Module, public Interface
 		SessionScope sc(*this, session_of_peer(peer));
 		auto pi = m_peers.find(peer);
 		const world::Material *m = material_named(voxel);
-		if(!m_hosted || pi == m_peers.end() || !m || m->group.empty() ||
-				pi->second.editing || !m_session.running || !pi->second.player ||
-				!dig_by_tools())
+		// [KIT_INVENTORY_PLAY] a voxel with no group (the app's own) drops
+		// itself at any level
+		if(!m_hosted || pi == m_peers.end() || voxel.empty() ||
+				voxel == "air" || pi->second.editing || !m_session.running ||
+				!pi->second.player || !dig_by_tools())
 			return;
+		const int mlevel = m && !m->group.empty() ? m->level : 0;
 		const json::Value *sheet = nullptr;
 		ss_ item = hands_of(pi->second.player, &sheet);
 		if(!sheet || !has_item(pi->second.name, item))
 			item.clear(), sheet = nullptr;
 		const int64_t level = sheet ? json::jint(*sheet, "level", 0) : 0;
-		const ss_ drop = level >= m->level ? world::material_of(voxel) : "";
+		const ss_ drop = level >= mlevel && item_ok(world::material_of(voxel)) ?
+				world::material_of(voxel) : "";
 		log_i(MODULE, "%s dug %s (level %i) with %s (level %s): %s",
-				cs(pi->second.name), cs(voxel), m->level, item.empty() ?
+				cs(pi->second.name), cs(voxel), mlevel, item.empty() ?
 				"a hand" : cs(item), cs(itos(level)), drop.empty() ?
 				"no drop" : cs("drops "+drop));
 		tool_run(pi->second.player, item, sheet ? json::jint(*sheet,
@@ -14374,6 +14489,797 @@ struct Module: public interface::Module, public Interface
 		c.append((int64_t)z);
 		if(!item.empty())
 			item_hooks(peer, item, "dig", c);
+	}
+
+	bool place_ready(size_t peer, const ss_ &voxel, ss_ *why) override
+	{
+		SessionScope sc(*this, session_of_peer(peer));
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || pi->second.editing ||
+				!m_session.running || !inventory_mode())
+			return true;
+		const ss_ held = pi->second.player ? hands_of(pi->second.player) : "";
+		if(!held.empty() && held == world::material_of(voxel) &&
+				has_item(pi->second.name, held))
+			return true;
+		if(why)
+			*why = held.empty() ? "Nothing in hand to place" :
+					"Not in hand: "+world::material_of(voxel);
+		return false;
+	}
+
+	void placed(size_t peer, int x, int y, int z, const ss_ &voxel) override
+	{
+		SessionScope sc(*this, session_of_peer(peer));
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || pi->second.editing ||
+				!m_session.running || !inventory_mode() || !pi->second.player)
+			return;
+		const uint64_t pid = pi->second.player;
+		const ss_ item = world::material_of(voxel);
+		const Instance *eq = equipment_of(pid);
+		const int64_t slot = eq ? json::jint(eq->state, "slot", 0) : 0;
+		json::Value sl = slots_of(pid);
+		const json::Value s = sl.at((unsigned)std::max<int64_t>(0, slot - 1));
+		if(own_slots() && slot > 0 && slot_item(s) == item){
+			json::Value one = json::object();
+			if(slot_n(s) > 1){
+				one.set("item", item);
+				one.set("n", slot_n(s) - 1);
+				json::Value inst = s.get("inst");
+				if(inst.is_array() && inst.size() > 1){
+					inst.del_at(0);
+					one.set("inst", inst);
+				}
+			}
+			sl.set_at((unsigned)slot - 1, one);
+			set_slots(pid, sl);
+		} else {
+			// simplified: under a replacing provider (counts only, no held
+			// slot) a place takes nothing; its own on_item may
+			return;
+		}
+		log_i(MODULE, "%s placed %s at (%i,%i,%i): one taken from slot %s",
+				cs(pi->second.name), cs(voxel), x, y, z, cs(itos(slot)));
+	}
+
+	// ---- [KIT_INVENTORY_PLAY] Inventory play: kit/game_rules' building
+	// and inventory rules (its declared defaults without one on the root),
+	// the slots of Kit's kit/inventory (its Lua's format: {item, n, inst},
+	// {} an empty one; `items` the counts), the hands by slot, pickups,
+	// chests, starting kits and the inventory at a death and at a round's
+	// ends. Under a replacing provider or the app's own items: counts only,
+	// none of the slot parts
+
+	json::Value game_rules()
+	{
+		json::Value r = json::object();
+		auto ti = m_types.find("kit/game_rules");
+		if(ti != m_types.end() && ti->second.decl.get("params").is_object())
+			for(json::Iterator it(ti->second.decl.get("params")); it; ++it)
+				r.set(it.key(), (*it).get("default"));
+		const Instance *gr = root_instance("kit/game_rules");
+		if(gr && gr->params.is_object())
+			for(json::Iterator it(gr->params); it; ++it)
+				r.set(it.key(), *it);
+		return r;
+	}
+
+	bool inventory_mode()
+	{
+		return jstr(game_rules(), "building") != "creative";
+	}
+
+	// Kit's own slots in play (not under a replacing provider or the app's
+	// items)
+	bool own_slots()
+	{
+		return !provider() && !app_items();
+	}
+
+	// kit/inventory's params: the rules it stores by
+	json::Value inv_params()
+	{
+		const json::Value r = game_rules();
+		json::Value p = json::object(), st = json::object();
+		for(const char *k : {"slots", "stack", "full"})
+			p.set(k, r.get(k));
+		for(auto &it : m_item_types)
+			if(it.second.get("stack").is_number())
+				st.set(it.first, it.second.get("stack"));
+		p.set("stacks", st);
+		return p;
+	}
+
+	// An item's stack size by the rules (unlimited slots: no limit)
+	int64_t stack_of(const json::Value &rules, const ss_ &item)
+	{
+		if(json::jint(rules, "slots", 0) <= 0)
+			return MAX_ITEMS;
+		auto it = m_item_types.find(item);
+		const int64_t s = it != m_item_types.end() &&
+				it->second.get("stack").is_number() ?
+				json::jint(it->second, "stack", 1) :
+				json::jint(rules, "stack", 99);
+		return std::max<int64_t>(1, std::min(MAX_ITEMS, s));
+	}
+
+	static int64_t slot_n(const json::Value &s)
+	{
+		return s.is_object() ? json::jint(s, "n", 0) : 0;
+	}
+
+	static ss_ slot_item(const json::Value &s)
+	{
+		return slot_n(s) > 0 ? jstr(s, "item") : ss_();
+	}
+
+	// A player's slots (a copy; empty without Kit's own inventory)
+	json::Value slots_of(uint64_t pid)
+	{
+		const Instance *own = own_inventory(pid);
+		const json::Value &s = own ? own->state.get("slots") :
+				json::Value();
+		return s.is_array() ? s : json::array();
+	}
+
+	// A list of slots made sound (each {item, n, inst} or {}), at most
+	// `size` (0: any) of them, the trailing empties dropped; the counts
+	static json::Value clean_slots(const json::Value &in, size_t size,
+			json::Value *items = nullptr)
+	{
+		json::Value out = json::array();
+		if(items)
+			*items = json::object();
+		size_t last = 0;
+		for(unsigned i = 0; i < in.size() && (!size || i < size) && i < 256;
+				i++){
+			const json::Value &s = in.at(i);
+			const ss_ item = slot_item(s);
+			const int64_t n = std::min(MAX_ITEMS, slot_n(s));
+			if(item.empty() || !item_ok(item)){
+				out.append(json::object());
+				continue;
+			}
+			json::Value o = json::object();
+			o.set("item", item);
+			o.set("n", n);
+			if(s.get("inst").is_array() && s.get("inst").size())
+				o.set("inst", s.get("inst"));
+			out.append(o);
+			last = out.size();
+			if(items)
+				items->set(item, std::min<int64_t>(MAX_ITEMS,
+						json::jint(*items, item.c_str(), 0) + n));
+		}
+		while(out.size() > last)
+			out.del_at(out.size() - 1);
+		return out;
+	}
+
+	// A player's slots set (Kit's own inventory): the counts with them,
+	// their client told, the hands following the held slot
+	void set_slots(uint64_t pid, const json::Value &slots)
+	{
+		Instance *own = own_inventory(pid);
+		auto ei = m_entities.find(pid);
+		if(!own || ei == m_entities.end())
+			return;
+		json::Value items;
+		own->state.set("slots", clean_slots(slots, 0, &items));
+		own->state.set("items", items);
+		m_runtime_dirty = true;
+		got_items(ei->second, own->type, ei->second.name, items);
+	}
+
+	// Where a player is: their peer's scene and place (false: not placed)
+	bool player_at(uint64_t pid, ss_ &scene, double p[3])
+	{
+		const size_t peer = peer_of_player(pid);
+		if(!peer)
+			return false;
+		scene = m_peers[peer].scene;
+		for(int k = 0; k < 3; k++)
+			p[k] = m_peers[peer].pos[k];
+		return true;
+	}
+
+	// A pickup (kit/pickup) of n of an item made at a world point of a
+	// scene, a game change gone at Stop
+	void make_pickup(const ss_ &scene, const double p[3], const ss_ &item,
+			int64_t n, const json::Value &inst)
+	{
+		const uint64_t sc = scene_entity(scene);
+		if(!sc || !m_types.count("kit/pickup") || n < 1 || !item_ok(item) ||
+				made_count() >= MAX_MADE || m_entities.size() >= MAX_ENTITIES){
+			log_w(MODULE, "A pickup of %s %s at (%.1f,%.1f,%.1f) not made: %s",
+					cs(itos(n)), cs(item), p[0], p[1], p[2], !sc ? "no scene" :
+					"the round has made its entities");
+			return;
+		}
+		Entity e;
+		e.id = m_next_id++;
+		e.parent = sc;
+		e.has_pos = true;
+		for(int k = 0; k < 3; k++)
+			e.pos[k] = std::floor(p[k] + 0.5);
+		e.made = 'g';
+		Instance in;
+		in.type = "kit/pickup";
+		fresh(in);
+		in.params.set("item", item);
+		in.params.set("count", std::min(MAX_ITEMS, n));
+		if(inst.is_array())
+			in.state.set("inst", inst);
+		e.comps.push_back(in);
+		m_entities[e.id] = e;
+		make_node(m_entities[e.id]);
+		Run r;
+		r.entity = e.id;
+		r.handler = "on_start";
+		queue_run(r);
+		m_runtime_dirty = true;
+		log_i(MODULE, "A pickup of %s %s at (%g,%g,%g): entity %s",
+				cs(itos(n)), cs(item), e.pos[0], e.pos[1], e.pos[2],
+				cs(itos(e.id)));
+	}
+
+	// Each slot's stack a pickup where a player is (at most 64)
+	void drop_slots(uint64_t pid, const json::Value &slots,
+			const double *at = nullptr)
+	{
+		ss_ scene;
+		double p[3];
+		if(!player_at(pid, scene, p))
+			return;
+		if(at)
+			for(int k = 0; k < 3; k++)
+				p[k] = at[k];
+		for(unsigned i = 0, made = 0; i < slots.size() && made < 64; i++)
+			if(!slot_item(slots.at(i)).empty()){
+				make_pickup(scene, p, slot_item(slots.at(i)),
+						slot_n(slots.at(i)), slots.at(i).get("inst"));
+				made++;
+			}
+	}
+
+	// After an inventory change of Kit's own: what did not fit dropped as
+	// a pickup where the player is (got_items: then the hands follow the
+	// held slot, check_hands, and send_items sends the slots)
+	void slots_changed(const ss_ &who)
+	{
+		auto pl = m_players.find(who);
+		Instance *own = pl == m_players.end() ? nullptr :
+				own_inventory(pl->second);
+		if(!own || !own_slots())
+			return;
+		const json::Value of = own->state.get("overflow");
+		if(of.is_array() && of.size()){
+			own->state.set("overflow", json::array());
+			m_runtime_dirty = true;
+			drop_slots(pl->second, of);
+		}
+	}
+
+	// "kit:slots" {slots: [{item, n, wear, loaded}...], held, rules} to a
+	// player's clients: their slots (the first instance's wear and rounds)
+	// and the rules the hotbar, the screen and the HUD go by
+	void send_slots(const ss_ &who)
+	{
+		auto pl = m_players.find(who);
+		json::Value j = json::object(), l = json::array();
+		const json::Value r = game_rules();
+		if(pl != m_players.end() && own_slots()){
+			const json::Value s = slots_of(pl->second);
+			for(unsigned i = 0; i < s.size(); i++){
+				json::Value o = json::object();
+				if(!slot_item(s.at(i)).empty()){
+					o.set("item", slot_item(s.at(i)));
+					o.set("n", slot_n(s.at(i)));
+					const json::Value &d = s.at(i).get("inst").at(0u);
+					for(const char *k : {"wear", "loaded"})
+						if(d.get(k).is_number())
+							o.set(k, d.get(k));
+				}
+				l.append(o);
+			}
+			const Instance *eq = equipment_of(pl->second);
+			j.set("held", eq ? json::jint(eq->state, "slot", 0) : 0);
+		}
+		j.set("slots", l);
+		json::Value rules = json::object();
+		for(const char *k : {"building", "slots", "hotbar", "screen",
+				"drop_items", "show_health", "dig", "place"})
+			rules.set(k, r.get(k));
+		rules.set("own", own_slots());
+		j.set("rules", rules);
+		const ss_ data = j.stringify();
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &p : m_peers)
+				if(p.second.name == who)
+					inetwork->send(p.first, "kit:slots", data);
+		});
+	}
+
+	// The rules as last sent: a change (an edit of kit/game_rules) sends
+	// every player's slots again
+	ss_ m_rules_sent;
+	void rules_watch()
+	{
+		const ss_ r = game_rules().stringify();
+		if(r == m_rules_sent)
+			return;
+		m_rules_sent = r;
+		std::set<ss_> names;
+		for(auto &p : m_peers)
+			if(!p.second.name.empty())
+				names.insert(p.second.name);
+		for(const ss_ &n : names)
+			send_slots(n);
+	}
+
+	// Moves n from one slot to another (the same list or two), by the
+	// stack size: onto an empty slot or the same item's as far as it
+	// fits; a whole stack onto another item's swaps them. The instances'
+	// data goes with the first ones moved
+	bool move_slots(json::Value &a, unsigned ai, json::Value &b, unsigned bi,
+			int64_t n, const json::Value &rules, bool same)
+	{
+		while(a.size() <= ai)
+			a.append(json::object());
+		while(b.size() <= bi)
+			b.append(json::object());
+		if(same && ai == bi)
+			return false;
+		json::Value from = a.at(ai), to = b.at(bi);
+		const ss_ item = slot_item(from), there = slot_item(to);
+		const int64_t have = slot_n(from);
+		if(item.empty() || n < 1)
+			return false;
+		n = std::min(n, have);
+		if(!there.empty() && there != item){
+			if(n != have)
+				return false;
+			a.set_at(ai, to);
+			b.set_at(bi, from);
+			return true;
+		}
+		const int64_t st = stack_of(rules, item);
+		n = std::min(n, st - slot_n(to));
+		if(n < 1)
+			return false;
+		json::Value fi = from.get("inst").is_array() ? from.get("inst") :
+				json::array();
+		json::Value moved = json::array(), rest = json::array();
+		for(unsigned i = 0; i < fi.size(); i++)
+			((int64_t)i < n ? moved : rest).append(fi.at(i));
+		if(!there.empty()){
+			while((int64_t)moved.size() < n && to.get("inst").size())
+				moved.append(json::object());
+			const json::Value &ti = to.get("inst");
+			for(unsigned i = 0; i < ti.size(); i++)
+				moved.append(ti.at(i));
+		}
+		json::Value nt = json::object();
+		nt.set("item", item);
+		nt.set("n", slot_n(to) + n);
+		if(moved.size())
+			nt.set("inst", moved);
+		json::Value nf = json::object();
+		if(have > n){
+			nf.set("item", item);
+			nf.set("n", have - n);
+			if(rest.size())
+				nf.set("inst", rest);
+		}
+		a.set_at(ai, nf);
+		b.set_at(bi, nt);
+		return true;
+	}
+
+	// The chest a peer has open: its entity, while it is there, in their
+	// scene and in reach (0: none)
+	sm_<size_t, uint64_t> m_open_chest;
+	Instance* open_chest(size_t peer, Entity **ep = nullptr)
+	{
+		auto oc = m_open_chest.find(peer);
+		auto pi = m_peers.find(peer);
+		if(oc == m_open_chest.end() || pi == m_peers.end())
+			return nullptr;
+		auto it = m_entities.find(oc->second);
+		ss_ scene;
+		double w[3], d2 = 0;
+		if(it != m_entities.end() && it->second.has_pos){
+			scene_of(it->second, &scene);
+			world_of(it->second, w);
+			for(int k = 0; k < 3; k++)
+				d2 += (w[k] - pi->second.pos[k]) * (w[k] - pi->second.pos[k]);
+		}
+		if(it == m_entities.end() || scene != pi->second.scene ||
+				d2 > m_host.use_range * m_host.use_range * 2.25){
+			m_open_chest.erase(oc);
+			return nullptr;
+		}
+		for(Instance &in : it->second.comps)
+			if(!m_types[in.type].decl.get("container").is_undefined()){
+				if(ep)
+					*ep = &it->second;
+				return &in;
+			}
+		m_open_chest.erase(oc);
+		return nullptr;
+	}
+
+	size_t chest_size(const Instance &in)
+	{
+		const ss_ p = jstr(m_types[in.type].decl, "container");
+		return (size_t)std::max<int64_t>(1, std::min<int64_t>(54,
+				json::jint(in.params, p.c_str(), 27)));
+	}
+
+	// "kit:chest" {id, name, size, slots} to the peers with it open ({}
+	// for one whose chest is gone)
+	void send_chest(size_t peer)
+	{
+		Entity *e = nullptr;
+		Instance *in = open_chest(peer, &e);
+		json::Value j = json::object();
+		if(in){
+			j.set("id", (int64_t)e->id);
+			j.set("name", e->name.empty() ? in->type : e->name);
+			j.set("size", (int64_t)chest_size(*in));
+			json::Value l = json::array();
+			const json::Value &s = in->state.get("slots");
+			for(unsigned i = 0; i < s.size(); i++){
+				json::Value o = json::object();
+				if(!slot_item(s.at(i)).empty()){
+					o.set("item", slot_item(s.at(i)));
+					o.set("n", slot_n(s.at(i)));
+				}
+				l.append(o);
+			}
+			j.set("slots", l);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:chest", j.stringify());
+		});
+	}
+
+	// A container type's use: it opens on the user's screen
+	void chest_opened(size_t peer, uint64_t id)
+	{
+		if(!own_slots() || !game_rules().get("screen").is_true())
+			return;
+		m_open_chest[peer] = id;
+		log_i(MODULE, "%s opens entity %s", cs(m_peers[peer].name),
+				cs(itos(id)));
+		send_chest(peer);
+	}
+
+	// "kit:inv" {op, ...} from a placed peer ([KIT_SESSIONS_1] in their
+	// session): "move" {from: [where, slot], to: [where, slot], n} (where
+	// "p" their own, "c" their open chest; slots from 1), "drop" {slot, n,
+	// dir: [x, z]} (a pickup two metres along dir), "close" (the chest)
+	void on_inv(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_inv_u(packet);
+	}
+
+	void on_inv_u(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second) ||
+				!pi->second.player || packet.data.size() > 512 ||
+				!own_inventory(pi->second.player))
+			return;
+		Peer &p = pi->second;
+		const json::Value j = json::load_string(packet.data.c_str());
+		const ss_ op = jstr(j, "op");
+		const json::Value rules = game_rules();
+		auto refuse = [&](const ss_ &why){
+			if(log_refusal(p, "inv "+why))
+				log_i(MODULE, "%s's inventory %s refused: %s", cs(p.name),
+						cs(op.substr(0, 16)), cs(why));
+		};
+		if(op == "close"){
+			m_open_chest.erase(peer);
+			return;
+		}
+		if(!own_slots())
+			return refuse("not Kit's own slots");
+		if(!m_session.running)
+			return refuse("the server is Stopped");
+		const int64_t size = json::jint(rules, "slots", 0);
+		auto slot_ok = [&](int64_t s, int64_t max){
+			return s >= 1 && s <= (max > 0 ? max : 256);
+		};
+		if(op == "drop"){
+			const int64_t s = json::jint(j, "slot", 0);
+			if(!rules.get("drop_items").is_true())
+				return refuse("dropping items is off");
+			json::Value sl = slots_of(p.player);
+			if(!slot_ok(s, size) || s > (int64_t)sl.size() ||
+					slot_item(sl.at((unsigned)s - 1)).empty())
+				return refuse("no such slot");
+			const json::Value from = sl.at((unsigned)s - 1);
+			const int64_t n = std::max<int64_t>(1, std::min(slot_n(from),
+					json::jint(j, "n", 1)));
+			json::Value one = json::array();
+			one.append(json::object());
+			move_slots(sl, (unsigned)s - 1, one, 0, n, json::object(), false);
+			const json::Value &d = j.get("dir");
+			double dx = d.at(0u).is_number() ? d.at(0u).as_number() : 0,
+					dz = d.at(1u).is_number() ? d.at(1u).as_number() : 0;
+			const double len = std::sqrt(dx * dx + dz * dz);
+			dx = len > 1e-6 ? dx / len : 0;
+			dz = len > 1e-6 ? dz / len : 0;
+			double at[3] = {p.pos[0] + 2 * dx, p.pos[1], p.pos[2] + 2 * dz};
+			log_i(MODULE, "%s drops %s %s", cs(p.name), cs(itos(n)),
+					cs(slot_item(one.at(0u))));
+			const uint64_t pid = p.player;
+			set_slots(pid, sl);
+			drop_slots(pid, one, at);
+			return;
+		}
+		if(op != "move")
+			return refuse("no such op");
+		if(!rules.get("screen").is_true())
+			return refuse("the inventory screen is off");
+		const json::Value &f = j.get("from"), &t = j.get("to");
+		const ss_ fw = jstr_at(f, 0), tw = jstr_at(t, 0);
+		const int64_t fs = f.at(1u).is_number() ? (int64_t)f.at(1u).
+				as_number() : 0, ts = t.at(1u).is_number() ? (int64_t)t.at(1u).
+				as_number() : 0;
+		const int64_t n = json::jint(j, "n", 0);
+		Instance *chest = (fw == "c" || tw == "c") ? open_chest(peer) :
+				nullptr;
+		if((fw == "c" || tw == "c") && !chest)
+			return refuse("no chest open");
+		const int64_t cs_ = chest ? (int64_t)chest_size(*chest) : 0;
+		if((fw != "p" && fw != "c") || (tw != "p" && tw != "c") ||
+				!slot_ok(fs, fw == "p" ? size : cs_) ||
+				!slot_ok(ts, tw == "p" ? size : cs_))
+			return refuse("no such slot");
+		json::Value mine = slots_of(p.player);
+		json::Value theirs = chest && chest->state.get("slots").is_array() ?
+				chest->state.get("slots") : json::array();
+		json::Value &a = fw == "p" ? mine : theirs;
+		json::Value &b = tw == "p" ? mine : theirs;
+		// The chest's stacks by the same rules (its slots limited)
+		json::Value cr = rules;
+		if(!json::jint(cr, "slots", 0))
+			cr.set("slots", (int64_t)cs_);
+		if(!move_slots(a, (unsigned)fs - 1, b, (unsigned)ts - 1, n,
+				fw == "c" || tw == "c" ? cr : rules, fw == tw))
+			return refuse("nothing moves");
+		log_i(MODULE, "%s moves %s from %s:%s to %s:%s", cs(p.name),
+				cs(itos(n)), cs(fw), cs(itos(fs)), cs(tw), cs(itos(ts)));
+		const uint64_t pid = p.player;
+		if(fw == "c" || tw == "c"){
+			chest->state.set("slots", clean_slots(theirs, (size_t)cs_));
+			m_runtime_dirty = true;
+			for(auto &oc : m_open_chest)
+				if(open_chest(oc.first) == chest)
+					send_chest(oc.first);
+		}
+		if(fw == "p" || tw == "p")
+			set_slots(pid, mine);
+	}
+
+	// The hook for the rest: each instance with on_inventory(c, player,
+	// when, kept, gone) in the player's scene, on the root or on their
+	// entity -- when "death" or "round_end"; kept what the player will
+	// have, gone what is dropped or lost -- returns them as it wants them
+	// (nil: as they are)
+	void inventory_hooks(uint64_t pid, const ss_ &when, json::Value &kept,
+			json::Value &gone)
+	{
+		ss_ scene;
+		double p[3];
+		const bool placed = player_at(pid, scene, p);
+		sv_<std::pair<uint64_t, size_t>> list;
+		for(auto &e : m_entities){
+			ss_ es;
+			const bool here = e.first == pid || (e.second.parent == 1 &&
+					!e.second.has_pos) || (placed && e.second.has_pos &&
+					scene_of(e.second, &es) && es == scene);
+			if(!here)
+				continue;
+			for(size_t i = 0; i < e.second.comps.size(); i++)
+				if(m_types[e.second.comps[i].type].handlers.count(
+						"on_inventory"))
+					list.push_back(std::make_pair(e.first, i));
+		}
+		for(auto &x : list){
+			if(!m_entities.count(x.first))
+				continue;
+			Run r;
+			r.entity = x.first;
+			r.comp = x.second;
+			r.handler = "on_inventory";
+			r.by = "player:"+itos(pid);
+			r.args.append(r.by);
+			r.args.append(when);
+			r.args.append(kept);
+			r.args.append(gone);
+			m_ret = json::null();
+			run(r);
+			if(m_ret.is_array() && m_ret.at(0u).is_array()){
+				kept = clean_slots(m_ret.at(0u), 256);
+				gone = m_ret.at(1u).is_array() ? clean_slots(m_ret.at(1u),
+						256) : json::array();
+				log_i(MODULE, "Entity %s's on_inventory (%s) for %s: %s kept, "
+						"%s gone", cs(itos(x.first)), cs(when), cs(itos(pid)),
+						cs(itos(kept.size())), cs(itos(gone.size())));
+			}
+		}
+	}
+
+	// A player's death (kit/health's respawn), before they are put back:
+	// kit/game_rules' on_death -- keep, drop (each stack a pickup where
+	// they died) or lose --, through the hook; marked died for the round
+	void player_died(uint64_t pid)
+	{
+		Instance *own = own_inventory(pid);
+		if(!own || !own_slots())
+			return;
+		own->state.set("died", true);
+		const ss_ rule = jstr(game_rules(), "on_death");
+		json::Value kept = slots_of(pid), gone = json::array();
+		if(rule == "drop" || rule == "lose")
+			std::swap(kept, gone);
+		inventory_hooks(pid, "death", kept, gone);
+		log_i(MODULE, "%s died: on_death %s: %s stacks kept, %s %s",
+				cs(m_entities[pid].name), cs(rule), cs(itos(kept.size())),
+				cs(itos(gone.size())), rule == "drop" ? "dropped" : "lost");
+		if(rule == "drop")
+			drop_slots(pid, gone);
+		set_slots(pid, kept);
+	}
+
+	// The starting kits (a type with on_give, kit/starting_kit) a player
+	// goes through: at a round's start ("round": each kit) or a respawn
+	// ("spawn": those whose `when` is spawn); in the player's scene or on
+	// the root, one under a team its members' only. A kit's `clear`
+	// empties the inventory first
+	void give_kits(uint64_t pid, bool respawn)
+	{
+		ss_ scene;
+		double p[3];
+		if(!own_inventory(pid) || !player_at(pid, scene, p))
+			return;
+		sv_<std::pair<uint64_t, size_t>> list;
+		for(auto &e : m_entities){
+			ss_ es;
+			if(e.second.has_pos ? !scene_of(e.second, &es) || es != scene :
+					!(e.second.parent == 1 || e.second.parent ==
+					scene_entity(scene)))
+				continue;
+			for(size_t i = 0; i < e.second.comps.size(); i++){
+				const Instance &in = e.second.comps[i];
+				if(!m_types[in.type].handlers.count("on_give") ||
+						!in.disabled.empty() || (respawn &&
+						jstr(in.params, "when") != "spawn"))
+					continue;
+				const uint64_t tid = team_over(e.second);
+				if(tid && !in_team(pid, tid))
+					continue;
+				list.push_back(std::make_pair(e.first, i));
+			}
+		}
+		for(auto &x : list){
+			if(m_entities[x.first].comps[x.second].params.get("clear").
+					is_true())
+				set_slots(pid, json::array());
+			Run r;
+			r.entity = x.first;
+			r.comp = x.second;
+			r.handler = "on_give";
+			r.by = "player:"+itos(pid);
+			r.args.append(r.by);
+			run(r);
+		}
+	}
+
+	// ---- The round's ends ([KIT_INVENTORY_PLAY]; kit/arena's at_start
+	// and at_end, kit/player_state's carry): what goes into a game session
+	// and back, by the player's name
+	struct Carry {
+		json::Value slots = json::array();
+		json::Value numbers = json::object(); // {type: {key: value}}
+		ss_ at_start = "kit";
+	};
+	sm_<ss_, Carry> m_carry_in;
+	// The players whose round's starting kits wait for its joins: {session,
+	// player entity}
+	std::set<std::pair<uint64_t, uint64_t>> m_kits_due;
+
+	// In a round's tick, its queue run through
+	void kits_due()
+	{
+		sv_<uint64_t> due;
+		for(auto it = m_kits_due.begin(); it != m_kits_due.end();)
+			if(it->first == m_active){
+				due.push_back(it->second);
+				it = m_kits_due.erase(it);
+			} else {
+				++it;
+			}
+		for(uint64_t pid : due)
+			give_kits(pid, false);
+	}
+
+	// kit/player_state's carry: the state keys that carry
+	std::set<ss_> carried_keys()
+	{
+		std::set<ss_> out;
+		for(auto &p : m_entities)
+			for(const Instance &in : p.second.comps)
+				if(m_types[in.type].between_plays){
+					std::istringstream is(jstr(in.params, "carry"));
+					ss_ k;
+					while(is >> k)
+						if(k.size() <= 64)
+							out.insert(k);
+					return out;
+				}
+		return out;
+	}
+
+	// A player entity's numbers in the carried keys, {type: {key: value}}
+	json::Value numbers_of(uint64_t pid, const std::set<ss_> &keys)
+	{
+		json::Value out = json::object();
+		auto it = m_entities.find(pid);
+		if(it == m_entities.end())
+			return out;
+		for(const Instance &in : it->second.comps)
+			for(const ss_ &k : keys)
+				if(in.state.get(k).is_number()){
+					json::Value o = out.get(in.type).is_object() ?
+							out.get(in.type) : json::object();
+					o.set(k, in.state.get(k));
+					out.set(in.type, o);
+				}
+		return out;
+	}
+
+	void set_numbers(uint64_t pid, const json::Value &nums)
+	{
+		auto it = m_entities.find(pid);
+		if(it == m_entities.end() || !nums.is_object())
+			return;
+		Entity &e = it->second;
+		for(size_t i = 0; i < e.comps.size(); i++){
+			const json::Value &o = nums.get(e.comps[i].type);
+			if(!o.is_object())
+				continue;
+			for(json::Iterator k(o); k; ++k){
+				e.comps[i].state.set(k.key(), *k);
+				if(m_types[e.comps[i].type].shared.count(k.key()))
+					replicate_state(e, i, k.key());
+			}
+			m_runtime_dirty = true;
+		}
+	}
+
+	// A game session's maker's parameter (kit/arena's at_start, at_end):
+	// read in the default round
+	ss_ maker_param(uint64_t session, const char *key, const ss_ &def)
+	{
+		auto si = m_sessions.find(session);
+		if(si == m_sessions.end() || si->second->draft)
+			return "";
+		SessionScope sc(*this, 0);
+		auto it = m_entities.find(si->second->maker);
+		if(it == m_entities.end() || si->second->maker_comp >=
+				it->second.comps.size())
+			return def;
+		const ss_ v = jstr(it->second.comps[si->second->maker_comp].params,
+				key);
+		return v.empty() ? def : v;
 	}
 
 	// ---- [KIT_INPUT_ACTIONS] Input as named actions: a type's `actions`
@@ -14679,6 +15585,7 @@ struct Module: public interface::Module, public Interface
 		m_bodies.erase(peer);
 		m_controls_sent.erase(peer);
 		m_tool_use.erase(peer);
+		m_open_chest.erase(peer);
 		m_peers.erase(peer);
 		if(player)
 			unplace_player(player);
@@ -15708,10 +16615,38 @@ struct Module: public interface::Module, public Interface
 			for(size_t i = 0; i < pe.comps.size(); i++)
 				to_start(pe, i);
 			Instance *own = own_inventory(pid);
-			const json::Value kept = m_aside.get(name);
-			if(own && keep_inventory && kept.is_object() && kept.size())
-				own->state.set("items", kept.deepcopy());
+			json::Value kept = m_aside.get(name).deepcopy();
+			// [KIT_INVENTORY_PLAY] carried numbers; the slots with the items
+			set_numbers(pid, kept.get("#numbers"));
+			kept.del_key("#numbers");
+			if(own && keep_inventory && kept.get("#slots").is_array()){
+				json::Value items;
+				own->state.set("slots", clean_slots(kept.get("#slots"), 0,
+						&items));
+				own->state.set("items", items);
+			} else if(own && keep_inventory && kept.is_object() &&
+					kept.size()){
+				own->state.set("items", kept);
+			}
 			m_aside.del_key(name);
+			// A game session's start: kit/arena's at_start, the numbers
+			// carried in, the starting kits (after the round's joins:
+			// a team's own)
+			auto ci = m_carry_in.find(name);
+			ss_ at_start = "kit";
+			if(ci != m_carry_in.end()){
+				at_start = ci->second.at_start;
+				set_numbers(pid, ci->second.numbers);
+				if(own && at_start == "keep"){
+					json::Value items;
+					own->state.set("slots", clean_slots(ci->second.slots, 0,
+							&items));
+					own->state.set("items", items);
+				}
+				m_carry_in.erase(ci);
+			}
+			if(at_start == "kit")
+				m_kits_due.insert(std::make_pair(m_active, pid));
 			m_runtime_dirty = true;
 			save_session();
 			log_i(MODULE, "%s goes through the round's start: inventory %s",
@@ -15898,12 +16833,24 @@ struct Module: public interface::Module, public Interface
 		bool keep_inventory = false, keep_position = false;
 		between_plays(keep_inventory, keep_position);
 		m_aside = json::object();
+		// [KIT_INVENTORY_PLAY] the slots with them ("#slots"), and
+		// kit/player_state's carried numbers ("#numbers")
+		const std::set<ss_> carry = carried_keys();
 		for(auto &p : m_players){
 			const Instance *own = keep_inventory ? own_inventory(p.second) :
 					nullptr;
+			json::Value a = json::object();
 			if(own && own->state.get("items").is_object() &&
-					own->state.get("items").size())
-				m_aside.set(p.first, own->state.get("items").deepcopy());
+					own->state.get("items").size()){
+				a = own->state.get("items").deepcopy();
+				if(own->state.get("slots").is_array())
+					a.set("#slots", own->state.get("slots"));
+			}
+			const json::Value nums = numbers_of(p.second, carry);
+			if(nums.size())
+				a.set("#numbers", nums);
+			if(a.size())
+				m_aside.set(p.first, a);
 		}
 		for(auto &pe : m_entities)
 			for(size_t i = 0; i < pe.second.comps.size(); i++)
@@ -17878,6 +18825,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		ss_ scene;
 		double pos[3] = {0.5, 1, 0.5};
+		round_ends(peer, from, to);
 		{
 			SessionScope sc(*this, from);
 			auto pi = m_peers.find(peer);
@@ -17906,6 +18854,77 @@ struct Module: public interface::Module, public Interface
 				peer, cs(itos(from)), cs(itos(to)), cs(app_scene(scene, to)));
 		m_server->emit_event("kit:change_scene", new ChangeScene(peer,
 				app_scene(scene, to), pos[0], pos[1], pos[2]));
+	}
+
+	// [KIT_INVENTORY_PLAY] A player into a game session from the default
+	// round: their slots and carried numbers for its start (round_join
+	// takes them by kit/arena's at_start: keep, clear or the kit); back
+	// out: the round's inventory by its at_end -- "before" (the default:
+	// what they had before it), keep, clear, or "living" (the round's if
+	// they did not die in it) -- through the hook ("round_end": kept, gone),
+	// and the numbers back. Drafts carry nothing
+	void round_ends(size_t peer, uint64_t from, uint64_t to)
+	{
+		ss_ name;
+		{
+			// m_peers is a session's: the peer is in `from`'s
+			SessionScope sc(*this, from);
+			auto pi = m_peers.find(peer);
+			if(pi != m_peers.end())
+				name = pi->second.name;
+		}
+		if(name.empty())
+			return;
+		const std::set<ss_> carry = carried_keys();
+		if(!from && to){
+			const ss_ at_start = maker_param(to, "at_start", "kit");
+			if(at_start.empty())
+				return;
+			auto pl = m_players.find(name);
+			Carry c;
+			c.at_start = at_start;
+			if(pl != m_players.end()){
+				c.slots = slots_of(pl->second);
+				c.numbers = numbers_of(pl->second, carry);
+			}
+			m_carry_in[name] = c;
+			return;
+		}
+		if(!from || to)
+			return;
+		const ss_ at_end = maker_param(from, "at_end", "before");
+		if(at_end.empty())
+			return;
+		json::Value before = json::array();
+		{
+			auto pl = m_players.find(name);
+			if(pl != m_players.end())
+				before = slots_of(pl->second);
+		}
+		json::Value kept, gone, nums = json::object();
+		{
+			SessionScope sc(*this, from);
+			const uint64_t pid = m_peers[peer].player;
+			const Instance *own = pid ? own_inventory(pid) : nullptr;
+			if(!own || !own_slots())
+				return;
+			const json::Value round = slots_of(pid);
+			const bool died = own->state.get("died").is_true();
+			const bool keep = at_end == "keep" || (at_end == "living" &&
+					!died);
+			kept = at_end == "before" ? before : keep ? round : json::array();
+			gone = keep ? json::array() : round;
+			inventory_hooks(pid, "round_end", kept, gone);
+			nums = numbers_of(pid, carry);
+			log_i(MODULE, "%s's round ends (at_end %s%s): %s stacks kept, %s "
+					"gone", cs(name), cs(at_end), died ? ", died in it" : "",
+					cs(itos(kept.size())), cs(itos(gone.size())));
+		}
+		auto pl = m_players.find(name);
+		if(pl == m_players.end() || !own_inventory(pl->second))
+			return;
+		set_numbers(pl->second, nums);
+		set_slots(pl->second, kept);
 	}
 
 	// A session ended: its players back in the default round, its scenes

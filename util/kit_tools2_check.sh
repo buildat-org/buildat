@@ -174,6 +174,8 @@ EOF
 	step "event kit_hit 19"
 	step "event kit_hit 19"
 	step "event kit_use 15"
+	# [KIT_INVENTORY_PLAY] the hands held its slot, empty now: the other
+	printf 'event kit_hold kitboss/blade\nsync 2000\n'
 	step "event kit_hit 19"
 	tools on
 	set_ 6 friendly_fire true

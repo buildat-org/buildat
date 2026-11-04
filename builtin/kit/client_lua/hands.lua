@@ -3,7 +3,9 @@
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 -- [KIT_TOOLS_1] (stage 7c's first part) The hands: the item types
 -- ("kit:item_types"), the hotbar -- this player's items in a line at the
--- bottom, the one held marked; the wheel (first person) and the keys
+-- bottom, the one held marked (a text line; [KIT_INVENTORY_PLAY] under a
+-- replacing provider only, Kit's own slots inventory.lua's hotbar);
+-- the wheel (first person) and the keys
 -- item_next and item_prev (none by default) pick, "kit:hold" tells the
 -- server -- and what a held item does: a melee item's hit on a player or
 -- an entity with health in its reach (M.hit_pick, play_target's "hit"):
@@ -54,7 +56,8 @@ function M.held_item()
 end
 
 local function show()
-	if not P.hands then
+	-- [KIT_INVENTORY_PLAY] Kit's own slots: inventory.lua's hotbar
+	if not P.hands or (M.slots_own and M.slots_own()) then
 		if bar then bar.visible = false end
 		return
 	end
@@ -98,6 +101,12 @@ local function pick(step)
 		if k == held then at = i end
 	end
 	M.hold(list[(at - 1 + step) % #list + 1])
+end
+
+-- [KIT_INVENTORY_PLAY] inventory.lua's held slot: its item in hand
+function M.hands_slot(item)
+	held = tostring(item or "")
+	show()
 end
 
 -- module.lua's kit:items handler tells it
@@ -202,8 +211,11 @@ magic.SubscribeToEvent("Update", function()
 	local c = digging.cell
 	digging = nil
 	-- simplified: the button held is the dig going on; the pointer moved
-	-- off the cell meanwhile still digs it (the server's reach decides)
-	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
+	-- off the cell meanwhile still digs it (the server's reach decides).
+	-- [KIT_INVENTORY_PLAY] On a touchscreen (a finger held places) a tap's
+	-- dig goes on until it is due
+	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) or
+			buildat.get_env("BUILDAT_TOUCH") == "1" then
 		for _, cb in ipairs(dig_cbs) do cb(c) end
 	end
 end)
@@ -213,7 +225,12 @@ magic.SubscribeToEvent("MouseWheel", function(_, data)
 			M.camera_mode() ~= "first_person" or M.pointer_free() then
 		return
 	end
-	pick(data:GetInt("Wheel") > 0 and -1 or 1)
+	local step = data:GetInt("Wheel") > 0 and -1 or 1
+	if M.slots_own and M.slots_own() then
+		M.pick_slot(step)
+	else
+		pick(step)
+	end
 end)
 
 magic.SubscribeToEvent("KeyDown", function(_, data)
@@ -221,10 +238,11 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 	if not P.hands or E.editing or magic.ui.focusElement ~= nil then
 		return
 	end
+	local own = M.slots_own and M.slots_own()
 	if M.key("item_next", key) then
-		pick(1)
+		if own then M.pick_slot(1) else pick(1) end
 	elseif M.key("item_prev", key) then
-		pick(-1)
+		if own then M.pick_slot(-1) else pick(-1) end
 	end
 end)
 
@@ -606,7 +624,8 @@ end
 -- The left button while playing (the pointer captured)
 local function playing()
 	return P.hands and not E.editing and magic.ui.focusElement == nil and
-			not M.pointer_free()
+			not M.pointer_free() and
+			not require("buildat/extension/ui_utils").clicks_wanted()
 end
 
 magic.SubscribeToEvent("MouseButtonDown", function(_, data)
