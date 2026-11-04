@@ -219,7 +219,7 @@ code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv.log" | head -1)
 BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
 	BUILDAT_JOIN_ADMIN="setting open_registration on" client boss &
 boss=$!
-wait_for_log "$t/srv.log" "workbench: kitboss placed kit/sand \(-2,1,3\)" 400 ||
+wait_for_log "$t/srv.log" "set 4's kit/game_rules building to \"inventory\"" 400 ||
 	fail "kitboss's part alone did not end ($t/srv.log, $t/boss.log)"
 BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE=1 client bob
 wait $boss || fail "the admin's client ($t/boss.log)"
