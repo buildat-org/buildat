@@ -17,6 +17,11 @@
 --              (Kit's set: grassland, desert, rock -- rock has no water);
 --              the inspector's dropdown of them (choices_from)
 --   sea_level  water up to it over lower ground
+--   soil_depth ([KIT_SOIL_DEPTH]) the filler's layers under the top
+--              (grassland's dirt under the grass): -1 the biome's
+--              (grassland 3), 0 stone right under the top.
+--              simplified: the generator's; the terrain brushes lay the
+--              biome's depth (a Brush taking it too when one wants it)
 --   size       finite (width x depth cells round the origin, baked:
 --              every section stored) or infinite (generated where players
 --              go; only edited sections saved, the generator pinned)
@@ -57,6 +62,7 @@ return {
 		height = {type = "number", default = 12, min = 0, max = 100},
 		spread = {type = "number", default = 48, min = 4, max = 2000},
 		sea_level = {type = "number", default = 0, min = -100, max = 200},
+		soil_depth = {type = "number", default = -1, min = -1, max = 16},
 		size = {type = "string", default = "finite",
 			choices = {"finite", "infinite"}},
 		width = {type = "number", default = 64, min = 16, max = 2048},

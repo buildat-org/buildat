@@ -4771,6 +4771,10 @@ struct Module: public interface::Module, public Interface
 				return;
 			// The roles, the decorations' structures ([KIT] stage 4f)
 			world::resolve_biome(ms, b, id, ids.structs, ids);
+			// [KIT_SOIL_DEPTH] the World's own (-1: the biome's)
+			const int64_t soil = json::jint(params, "soil_depth", -1);
+			if(soil >= 0)
+				ids.filler_depth = (int)std::min<int64_t>(soil, 16);
 			if(!ids.water)
 				ids.water = ids.air;
 		});
@@ -4910,6 +4914,9 @@ struct Module: public interface::Module, public Interface
 			return params.stringify();
 		json::Value c = params.deepcopy();
 		c.del_key("sky_light");
+		// [KIT_SOIL_DEPTH] the biome's (-1), the key from before it
+		if(json::jint(c, "soil_depth", -1) < 0)
+			c.del_key("soil_depth");
 		// [KIT_HEIGHTMAP_REGEN_LOSS] The app's own set ("") is the key
 		// from before [KIT_MATERIAL_SETS]: no "materials", no pin
 		if(json::jstr(c, "materials").empty())

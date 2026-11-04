@@ -12,8 +12,8 @@
 #     spawner of players, a kit/arena off it (map "map", time_up "most");
 #     the items kitboss/knife (kit/sword: damage 1000, reach 3, cooldown
 #     5, no knockback) and kitboss/bomb (use "use", the look kit/bomb_look)
-#   the map (scene "map"): a flat 96x96 grassland World (grass, dirt,
-#     stone), huts (kit/hut), teams Red (+x) and Blue (-x) with their zones
+#   the map (scene "map"): a flat 96x96 grassland World (grass 1, dirt 1,
+#     stone: soil_depth 1), huts (kit/hut), teams Red (+x) and Blue (-x) with their zones
 #     (regions under them), a map-wide region allowing dig and place, a
 #     prep region over the map (enter none) a prep kit/timer disables, the
 #     flag (kit/flag, a pole kit/part under it) at the middle in a
@@ -208,6 +208,9 @@ EOF
 	id=$((id + 1))
 	printf 'event kit_edit {"op": "new_scene", "name": "map"}\nwait_log 30000 kit editor: in the scene map of world, map\n'
 	world 96
+	# [KIT_SOIL_DEPTH] grass 1 over dirt 1 over stone: a tunnel needs a
+	# pickaxe
+	set_ $id soil_depth 1
 	place kit/team '30, 1, 0'; RED=$id
 	set_ $id name '"Red"'
 	set_ $id color '"#d03030"'
@@ -348,6 +351,7 @@ extras()
 	warps kitbob '0, 1, 20' '1, 1, 1' '0, 1, 0' '0, 1, 0' '-30, 1, 2'
 	warps kitcat '0, 1, 0' '21, 1, 0' '-1, 1, 0' '0, 1, 20' '3, 1, 5'
 	ed '{"op": "set_voxel", "pos": [21, 1, 2], "voxel": "kit/stone"}'
+	printf 'event kit_edit {"op": "terrain", "tool": "column", "x": 20, "y": 0, "z": 20}\nwait_log 5000 kit editor: terrain: column at (20,\n'
 	echo "$SCENE_LOBBY"
 	place workbench/warp '-4, 1, 4'
 	set_ $id p1 '[9, 1, 1]'
@@ -639,7 +643,8 @@ assert F + "taken by kitboss from home (Red)" in s2
 assert "Red wins!" in s2
 print("  ok")
 PY
-want "$s" "kitcat dug kit/stone (level 1) with kit/pickaxe (level 1): drops kit/cobble" \
+want "$s" "column (20,20): air 1..2, kit/grass 0, kit/dirt -1, kit/stone -6..-2" \
+	"kitcat dug kit/stone (level 1) with kit/pickaxe (level 1): drops kit/cobble" \
 	"A dig by kitcat refused: A hand does not dig kit/stone (level 1)"
 for f in boss_carry_fp boss_walk_fp1 boss_walk_fp2 cat_carry_3p cat_bomb_held cat_bomb_lying cat_walk_1 cat_walk_4; do
 	[ -s "$t/$f.png" ] || fail "no screenshot $f ($t)"
