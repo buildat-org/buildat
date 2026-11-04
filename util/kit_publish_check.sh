@@ -212,6 +212,12 @@ click Button "All"
 wait_log 5000 kit editor: the palette's All tab
 click Button "alice/lamp"
 wait_log 5000 kit editor: placing alice/lamp
+# The palette's list is taller than the room above the builders' panel
+# (since kit/flag): its foot, the Favourite button and the tabs, by the
+# wheel over it, as a click by label does not scroll
+mouse_pos 140 300
+$(for _ in $(seq 10); do echo "mouse_wheel -1"; done)
+frames 3
 click Button "Favourite alice/lamp"
 wait_log 5000 kit editor: alice/lamp a favourite
 click Button "Favourites"
@@ -229,7 +235,7 @@ wait_log 5000 kit editor: the credits closed
 click Button "New"
 wait_log 20000 kit editor: package alice/lamps 1.0.0
 event kit_edit {"op": "sound", "name": "zap", "params": "blip1:AAALvAABrNYAAf_f_AAAAf_AAUNf_AAf_f___f_AAGaf_gA4DbW"}
-wait_log 10000 kit: 9 sounds
+wait_log 10000 kit: 10 sounds
 event kit_edit {"op": "item", "name": "wand", "preset": "kit/sword", "damage": 9, "sound_hit": "alice/zap"}
 wait_log 10000 kit: 8 item types
 click Button "Publish my prefabs..."
@@ -342,7 +348,7 @@ server srvb2 "$t/b"
 wait_for_log "$t/srvb2.log" "Component type $fp/lamp version" 60
 want "$t/srvb2.log" "Kit packages: 2" "Component type $fp/lamp version 2"
 # [KIT_SOUNDS] the sounds loaded after the item types
-wait_for_log "$t/srvb2.log" "Sounds: 9" 60 ||
+wait_for_log "$t/srvb2.log" "Sounds: 10" 60 ||
 	fail "no sound $fp/zap after B's restart ($t/srvb2.log)"
 grep -aq "Item types: .*$fp/wand" "$t/srvb2.log" ||
 	fail "no item type $fp/wand after B's restart ($t/srvb2.log)"
@@ -409,6 +415,10 @@ wait_log 5000 kit editor: the palette's All tab
 click Button "alice/lamp @127.0.0.1:$P2"
 wait_log 5000 kit editor: placing alice/lamp @127.0.0.1:$P2
 mouse_click right
+# The palette's foot, the tabs, by the wheel (as alice's Favourite)
+mouse_pos 140 300
+$(for _ in $(seq 10); do echo "mouse_wheel -1"; done)
+frames 3
 click Button "Credits"
 wait_log 5000 kit editor: credit alice/lamps 2.0.0 by alice @127.0.0.1:$P (
 wait_log_any 5000 kit editor: credit alice/lamps 1.0.0 by alice @127.0.0.1:$P2 (
