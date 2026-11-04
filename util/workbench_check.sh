@@ -587,7 +587,7 @@ event workbench_build {"p": [6, 0, 6], "voxel": "air"}
 look_dir 0 -1 -0.5
 wait_log_any 5000 kit: points at dig 0,0,-5
 mouse_down left
-delay 4500
+wait_log 8000 kit: points at dig 0,-1,-5
 mouse_up left
 event kit_use 15
 frames 2
@@ -739,7 +739,7 @@ wait_log 10000 kit editor: edit mode off
 frames 10
 look_dir 0 -1 0.5
 mouse_down left
-delay 4500
+wait_log 8000 kit: points at dig 0,-1,-3
 mouse_up left
 frames 3
 keypress F6
@@ -750,7 +750,7 @@ keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0.5 -1 0
 mouse_down left
-delay 4500
+wait_log 8000 kit: points at dig 1,-1,-4
 mouse_up left
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
@@ -829,7 +829,7 @@ keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0 -1 -0.6
 mouse_down left
-delay 4500
+wait_log 8000 kit: digs on at
 mouse_up left
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
