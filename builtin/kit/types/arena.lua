@@ -410,7 +410,7 @@ return {
 		local late = taken >= (c.session_players or 0)
 		local rule = late and c.params.join_team or "fewest"
 		local peak = c.state.peak
-		local function key(t)
+		local function rank(t)
 			if rule == "lowest_score" then
 				return t.score * 1000 + t.n
 			elseif rule == "backfill" then
@@ -420,9 +420,9 @@ return {
 		end
 		local best, ties = nil, {}
 		for _, t in ipairs(teams_of(c)) do
-			if not best or key(t) < key(best) then
+			if not best or rank(t) < rank(best) then
 				best, ties = t, {t}
-			elseif key(t) == key(best) then
+			elseif rank(t) == rank(best) then
 				ties[#ties + 1] = t
 			end
 		end

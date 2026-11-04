@@ -20351,13 +20351,14 @@ struct Module: public interface::Module, public Interface
 					continue;
 				}
 				add_log(o.maker, "session "+itos(id)+" started");
+				// (counted first: a move runs its join)
 				size_t taken = 0;
 				for(size_t peer : o.peers)
-					if(!session_of_peer(peer)){
-						move_peer(peer, id);
-						taken++;
-					}
+					taken += !session_of_peer(peer);
 				m_sessions[id]->start_players = taken;
+				for(size_t peer : o.peers)
+					if(!session_of_peer(peer))
+						move_peer(peer, id);
 				Run r;
 				r.entity = o.maker;
 				r.comp = o.comp;
