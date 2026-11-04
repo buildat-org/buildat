@@ -489,10 +489,8 @@ delay 500
 event kit_click_at 0 1 0 right
 wait_log 30000 Red 0 : Blue 2
 event kit_use $FLAG
-wait_log 30000 your health 0/
-wait_log 30000 your health 20/20
-wait_log 30000 your health 0/
-wait_log 30000 your health 20/20
+wait_log 30000 kill message: kitboss killed kitbob
+wait_log 30000 kill message: kitboss killed kitbob
 wait_log 200000 Blue wins!
 EOF
 	lobby 1 wait_log
