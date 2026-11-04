@@ -4,7 +4,7 @@
 # cost: ~3 min (2026-11-04)
 # covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/world.h builtin/kit/box/box.c builtin/kit/sounds.json builtin/kit/materials.json builtin/kit/types/sound.lua builtin/kit/types/door.lua builtin/kit/types/button.lua builtin/kit/types/pickup.lua builtin/kit/types/equipment.lua builtin/kit/types/*.item.json builtin/kit/client_lua/sounds.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/hands.lua builtin/kit/client_lua/module.lua extensions/blip/init.lua apps/workbench/**
 # [KIT_SOUNDS] The project's sounds on a fresh Workbench save:
-#   1. the admin (kitboss), in edit mode: the Sounds tab lists Kit's 8;
+#   1. the admin (kitboss), in edit mode: the Sounds tab lists Kit's 9;
 #      "New sound..." names my_sound and opens blip's designer, its laser
 #      then Save makes kitboss/my_sound; Copy as new of kit/click makes
 #      kitboss/click_2 and its Delete removes it; my_sound's Edit opens the
@@ -82,7 +82,7 @@ wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
 keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
-wait_log_any 10000 kit: 8 sounds
+wait_log_any 10000 kit: 9 sounds
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 click Button "Sounds"
@@ -97,16 +97,16 @@ frames 5
 click Button "laser"
 wait_log 5000 designer: laser
 click Button "Save"
-wait_log 10000 kit: 9 sounds
+wait_log 10000 kit: 10 sounds
 frames 5
 click Button "sound copy kit/click"
 frames 3
 click Button "OK"
-wait_log 10000 kit: 10 sounds
+wait_log 10000 kit: 11 sounds
 frames 5
 screenshot $t/tab2.png
 click Button "sound delete kitboss/click_2"
-wait_log 10000 kit: 9 sounds
+wait_log 10000 kit: 10 sounds
 frames 5
 click Button "sound edit kitboss/my_sound"
 wait_log 5000 kit editor: designing sound kitboss/my_sound
@@ -114,7 +114,7 @@ frames 5
 click Button "explosion"
 wait_log 5000 designer: explosion
 click Button "Save"
-wait_log 10000 kit: 9 sounds
+wait_log 10000 kit: 10 sounds
 EOF
 	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/door", "pos": [2, 1, -2]}'
@@ -158,7 +158,7 @@ EOF
 cat > "$t/boss2.cmds" <<EOF
 wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 player physics enabled
-wait_log_any 10000 kit: 9 sounds
+wait_log_any 10000 kit: 10 sounds
 wait_log_any 10000 kit editor: edit mode on
 keypress F6
 wait_log 10000 kit editor: edit mode off
@@ -197,7 +197,7 @@ if [ -n "$web" ]; then
  ["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
  ["key", "Enter"], ["waitlog", "Joined as webear", 30],
  ["waitlog", "player physics enabled", 120],
- ["waitlog_any", "kit: 9 sounds", 30],
+ ["waitlog_any", "kit: 10 sounds", 30],
  ["waitlog", "kit: sound kitboss/my_sound at", 240],
  ["waitlog", "played cached", 10],
  ["waitlog", "kit: sound kit/dig at", 120],
