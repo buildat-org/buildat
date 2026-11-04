@@ -428,7 +428,7 @@ Value& json::Value::del_key(const std::string &key){
 Value& json::Value::del_at(unsigned int index){
 	if(type == T_ARRAY){
 		if(p->a.size() > index)
-			p->a[index] = Value();
+			p->a.erase(p->a.begin() + index);
 	}
 	return *this;
 }

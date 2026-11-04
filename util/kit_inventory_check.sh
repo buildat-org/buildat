@@ -17,7 +17,9 @@
 #      (not in hand) refused; a dig of dirt with the inventory full drops
 #      it as a pickup
 #   3. the chest: its screen beside the player's, 5 stone moved into it
-#      and its 3 dirt out; the drop key drops one dirt as a pickup
+#      and its 3 dirt out; the drop key drops one dirt as a pickup, then
+#      the held last slot's 3 arrows (the slots' trailing empty dropped:
+#      the server hung there before)
 #   4. hotbar 0 and show_health off: no hotbar, no health bar
 #   5. placed_only: the terrain's dirt refused, the placed stone dug;
 #      creative: a place takes nothing
@@ -166,6 +168,10 @@ event kit_slot 3
 sync 2000
 event kit_drop
 sync 2000
+event kit_slot 5
+sync 2000
+event kit_drop all
+wait_log 10000 kit: slots: 1:kit/stone x9, 2:kit/stone x10, 3:kit/dirt x2, 4:kitboss/blade x1 (held 5
 EOF
 	# 4. No hotbar, no health bar
 	tools on
@@ -243,10 +249,11 @@ want "$b" "kit: slots: 1:kit/stone x9,"
 echo "ok: a place takes one from the held slot, one not in hand refused, a dig into a full inventory drops a pickup"
 # 3.
 want "$s" "kitboss opens entity 9" "kitboss moves 5 from p:3 to c:2" \
-	"kitboss moves 3 from c:1 to p:3" "kitboss drops 1 kit/dirt"
+	"kitboss moves 3 from c:1 to p:3" "kitboss drops 1 kit/dirt" \
+	"kitboss drops 3 kit/arrow" "A pickup of 3 kit/arrow"
 grep -aqE "A pickup of 1 kit/dirt.*" "$s" && [ "$(grep -ac 'A pickup of 1 kit/dirt' "$s")" -ge 2 ] ||
 	fail "no pickup of the dropped dirt ($s)"
-echo "ok: the chest's stacks moved both ways on the screen; the drop key drops a pickup"
+echo "ok: the chest's stacks moved both ways on the screen; the drop key drops a pickup, the last slot's whole stack too"
 # 4.
 want "$b" "kit: hud: hotbar none, health none"
 echo "ok: hotbar 0 and show_health off: no hotbar, no health bar"
