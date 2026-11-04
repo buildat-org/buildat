@@ -21,7 +21,7 @@
 #      keep the builder in edit mode.
 #   3. The arena with a duration: session 4 ends by itself. Session 5 left
 #      running, a cell changed there; a restart drops it and its voxels'
-#      rows; the default round as before. The World a heightmap: a draft
+#      rows, its arena told (back to its lobby); the default round as before. The World a heightmap: a draft
 #      (6) of it.
 #   util/kit_sessions_check.sh
 set -u
@@ -355,7 +355,8 @@ BUILDAT_JOIN_CREATE= client boss2
 stop
 s=$t/srv2.log
 want "$s" "Sessions: 1 scenes of sessions before the restart dropped" \
-	"workbench: scene world~5 dropped"
+	"workbench: scene world~5 dropped" "Session 5 ended by the restart" \
+	"session 5 ended stopped|the server restarted"
 infos=$(grep -aoP 'Voxel at \K.*' "$s")
 expect 1 3,1,3 kit/stone
 expect 2 7,1,7 kit/planks
@@ -371,6 +372,6 @@ n = db.execute("select count(*) from store where store='voxelworld' and key like
 assert n == 0, "%d rows of session 5's voxels" % n
 assert [s["id"] for s in json.loads(sys.argv[2])] == [0], sys.argv[2]
 PY
-echo "ok: a restart drops the sessions and their voxels; the default round as before"
+echo "ok: a restart drops the sessions and their voxels, their arena told; the default round as before"
 echo "PASS: sessions: an arena's game session diverging from the start and the default, its clock, runtime and player its own, its sections shared until written, ended from inside or by time; drafts from the start, reaching the start only by Publish; a restart drops them"
 # vim: set noet ts=4 sw=4:

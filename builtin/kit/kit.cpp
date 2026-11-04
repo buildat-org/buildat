@@ -19858,19 +19858,29 @@ struct Module: public interface::Module, public Interface
 
 	// The row "sessions": the next id and the app's scenes the live ones
 	// have (and ended ones' not dropped yet), which a restart drops
-	// (sessions are not saved)
+	// (sessions are not saved), and the live ones' makers [id, entity,
+	// comp], told on_session_end at the restart
 	void save_sessions()
 	{
-		json::Value live = json::array();
-		for(auto &s : m_sessions)
+		json::Value live = json::array(), makers = json::array();
+		for(auto &s : m_sessions){
 			for(const ss_ &n : s.second->app_scenes)
 				live.append(n);
+			if(s.second->maker){
+				json::Value m = json::array();
+				m.append((int64_t)s.first);
+				m.append((int64_t)s.second->maker);
+				m.append((int64_t)s.second->maker_comp);
+				makers.append(m);
+			}
+		}
 		// and those of ended ones not dropped yet
 		for(auto &d : m_drop_scenes)
 			live.append(d.second);
 		json::Value j = json::object();
 		j.set("next", (int64_t)m_next_session);
 		j.set("live", live);
+		j.set("makers", makers);
 		m_kit_store->set("sessions", j.stringify());
 	}
 
@@ -19893,6 +19903,27 @@ struct Module: public interface::Module, public Interface
 		if(n)
 			log_i(MODULE, "Sessions: %zu scenes of sessions before the "
 					"restart dropped", n);
+		// Their makers told they ended (an arena back to its lobby)
+		const json::Value &makers = j.get("makers");
+		for(unsigned i = 0; i < makers.size(); i++){
+			const json::Value &m = makers.at(i);
+			const json::Value &e = m.at(1u), &c = m.at(2u), &id = m.at(0u);
+			if(!id.is_number() || !e.is_number() || !c.is_number() ||
+					!m_entities.count((uint64_t)e.as_number()))
+				continue;
+			Run r;
+			r.entity = (uint64_t)e.as_number();
+			r.comp = (size_t)std::max(0.0, c.as_number());
+			r.handler = "on_session_end";
+			r.args.append((int64_t)id.as_number());
+			json::Value o = json::object();
+			o.set("stopped", true);
+			o.set("ended", "the server restarted");
+			r.args.append(o);
+			queue_run(r);
+			log_i(MODULE, "Session %s ended by the restart",
+					cs(itos((int64_t)id.as_number())));
+		}
 		save_sessions();
 	}
 
