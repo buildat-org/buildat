@@ -14,6 +14,9 @@
 #      R held: the server's "Action fire pressed", counter 4 counts once,
 #      counter 6 at least once; the key store has Kit's actions and the
 #      world's (the keys page);
+#   3b. [KIT_KEY_ACTIONS_CAP] the check's types workbench/acts_a (8
+#      actions) and acts_b (7) placed: with fire the world's 16 actions;
+#      each key pressed reaches the server; the store has the 16th;
 #   4. kitbob on a touchscreen (BUILDAT_TOUCH=1): a Fire button over
 #      the touch bar; pressed, the counter counts again; the sign shows him
 #      "[Tap] ... [Fire] ... [Forward ...]" (on a touchscreen: a tap, the
@@ -29,6 +32,23 @@ if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
 check_tmp kit_input_actions; t=$CHECK_TMP
+# The check's types: 8 and 7 actions (with fire, the world's 16 at most)
+mkdir -p "$t/user/apps/workbench/check_types"
+acts_type() # <name> <prefix> <key>...
+{
+	local f=$t/user/apps/workbench/check_types/$1.lua p=$2 i=1 k
+	shift 2
+	echo "local acts = {}" > "$f"
+	for k in "$@"; do
+		echo "acts[$i] = {name = \"$p$i\", key = \"$k\", label = \"$p$i\"}" >> "$f"
+		i=$((i + 1))
+	done
+	echo "return {version = 1, actions = acts}" >> "$f"
+}
+ACTS_A="Y U O P J K L N" ACTS_B="M F4 F5 F7 F8 Home End"
+acts_type acts_a a $ACTS_A
+acts_type acts_b b $ACTS_B
+export BUILDAT_WORKBENCH_TYPES=$t/user/apps/workbench/check_types
 cd "$here/Build"
 export BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1
 
@@ -112,6 +132,19 @@ delay 600
 keyup R
 wait_log 10000 kit: action fire released
 frames 10
+keypress F6
+wait_log 10000 kit editor: edit mode on
+EOF
+	edit '{"op": "place", "type": "workbench/acts_a", "pos": [5, 1, 4]}'
+	edit '{"op": "place", "type": "workbench/acts_b", "pos": [6, 1, 4]}'
+	printf '%s\n' "keypress F6" "wait_log_any 10000 kit: the world's actions: 16" \
+		"frames 10"
+	for k in $ACTS_A $ACTS_B; do
+		printf 'keydown %s\nframes 5\nkeyup %s\nframes 5\n' "$k" "$k"
+	done
+	cat <<'EOF'
+wait_log_any 10000 kit: action b7 released
+frames 10
 keypress Escape
 frames 5
 click Button "Settings..."
@@ -180,6 +213,12 @@ grep -aq "kit/action 3: fire pressed by" "$s" || fail "no on_action ($s)"
 grep -aq "kit/counter 6: count 1 by kitboss" "$s" ||
 	fail "R held: no \"held\" reached counter 6 ($s)"
 echo "ok: R pressed: kit/action's pressed and held reached the linked counters"
+for a in a1 a2 a3 a4 a5 a6 a7 a8 b1 b2 b3 b4 b5 b6 b7; do
+	want "$s" "Action $a pressed by kitboss"
+done
+grep -aqP '^action\t[^\t]+\tb7\tEnd\t' "$t/cu_kitboss/keys.txt" ||
+	fail "the key store lacks the world's 16th action"
+echo "ok: the world's 16 actions: each key reached the server"
 want "$c" 'kit: entity 5 shows "Press [Left click] to use, [R] to fire, [I] to walk"' \
 	"kit: the gamepad read"
 k=$t/cu_kitboss/keys.txt

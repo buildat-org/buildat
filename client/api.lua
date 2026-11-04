@@ -2024,7 +2024,11 @@ local function client_keys_changed()
 		__buildat_apply_client_keys(__buildat_client_key_names())
 	end
 end
-local MAX_KEY_ACTIONS = 64
+-- An app's actions in the store at most: a bound on what one app (served
+-- code too) writes into keys.txt and lists in the keys page. Kit's own
+-- 48, an app's (Workbench's 10) and a world's 16 (builtin/kit's
+-- MAX_ACTIONS) go in one app's list, the world's last
+local MAX_KEY_ACTIONS = 128
 -- declare_keys(app, label, actions) -> {action id = key name}, and
 -- {action id = the key it has without the app's override}
 local function declare_keys(app_id, label, actions, served)

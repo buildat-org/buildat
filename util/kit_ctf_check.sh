@@ -75,7 +75,7 @@ if [ -z "$build_only" ]; then
 	mkdir -p "$t/user/apps/workbench/check_types"
 	cat > "$t/user/apps/workbench/check_types/warp.lua" <<'EOF'
 -- The check's warps: each action teleports who pressed it (`who` alone,
--- "" anyone) to its p<n>. Five: Kit's own keys take 58 of a client's 64
+-- "" anyone) to its p<n>. Five
 local acts, params = {}, {who = {type = "string", default = ""}}
 for i, k in ipairs({"Y", "U", "I", "O", "P"}) do
 	acts[i] = {name = "warp" .. i, key = k, label = "Warp " .. i}
