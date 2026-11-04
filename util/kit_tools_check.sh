@@ -270,8 +270,8 @@ for w in ["kitboss digs kit/dirt (dirt, level 0) with a hand: 1 s",
 		"kitboss dug kit/stone (level 1) with a hand (level 0): no drop"]:
 	assert w in log, w
 PY
-grep -aqE "kitboss has \{[^}]*\"kit/stone\":1" "$s" ||
-	fail "kit/stone not in kitboss's items ($s)"
-echo "ok: creative: kit/stone dug at once, no drop; inventory: the pickaxe digs kit/stone with a drop, a hand kit/dirt in 1 s with a drop and kit/stone in 4 s without"
+grep -aqE "kitboss has \{[^}]*\"kit/cobble\":1" "$s" ||
+	fail "kit/cobble not in kitboss's items ($s)"
+echo "ok: creative: kit/stone dug at once, no drop; inventory: the pickaxe digs kit/stone with its drop (kit/cobble), a hand kit/dirt in 1 s with a drop and kit/stone in 4 s without"
 echo "PASS: tools: an item type from a preset, health on players and entities, the hit through Kit's rules (region pvp, peaceful), knockback, wear and breaking, a respawn; digging by material group and level, under game_rules' building \"inventory\" only"
 # vim: set noet ts=4 sw=4:
