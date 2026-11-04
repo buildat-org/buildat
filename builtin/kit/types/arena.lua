@@ -122,16 +122,22 @@ local function try_count(c)
 	c:after(1, "count")
 end
 
--- The session's side: the teams by id, each with its count of players
+-- The session's side: the teams by id, each with its count of players.
+-- [KIT_TEAM_LEFTOVERS] A leaver's slot: only the players still here
+-- counted, so the next to join fills the team they left; one who comes
+-- back is put in their own team again
 local function teams_of(c)
-	local out = {}
+	local out, here = {}, {}
 	for _, t in ipairs(c.teams or {}) do
 		out[#out + 1] = {id = t.id, name = tostring(t.params.name or t.id),
 			score = tonumber(t.state.score) or 0, n = 0}
 	end
-	for _, tid in pairs(c.state.assigned) do
+	for _, p in ipairs(c.players or {}) do
+		here["player:" .. p.id] = true
+	end
+	for pid, tid in pairs(c.state.assigned) do
 		for _, t in ipairs(out) do
-			if t.id == tid then
+			if t.id == tid and here[pid] then
 				t.n = t.n + 1
 			end
 		end
@@ -300,6 +306,7 @@ return {
 		end
 		local key = "player:" .. c.player
 		if c.state.assigned[key] then
+			c:send(c.state.assigned[key], "join")
 			return
 		end
 		local best

@@ -4,15 +4,31 @@
 -- {value} the value. Where, who sees it and "show", "hide" and "toggle"
 -- as kit/ui_text's
 local function view(c, by)
-	if c.params.to ~= "player" or not c.player then
+	if (c.params.to ~= "player" and c.params.to ~= "team") or
+			not c.player then
 		return c.state
 	end
-	c.state.own[by] = c.state.own[by] or {}
-	return c.state.own[by]
+	local v = c.state.own[by] or {}
+	c.state.own[by] = v
+	-- [KIT_TEAM_LEFTOVERS] to "team": the player's team's members see the
+	-- same (a player in no team, their own)
+	for _, t in ipairs(c.params.to == "team" and c.teams or {}) do
+		local m = t.state.members or {}
+		for _, id in ipairs(m) do
+			if id == c.player then
+				for _, o in ipairs(m) do
+					c.state.own["player:" .. o] = v
+				end
+			end
+		end
+	end
+	return v
 end
 
 return {
 	version = 1,
+	-- (to "team" reads them)
+	teams = true,
 	ui = {kind = "bar", text = "param:label", anchor = "param:anchor",
 		x = "param:x", y = "param:y", width = "param:width",
 		min = "param:min", max = "param:max", color = "param:color",
@@ -32,7 +48,7 @@ return {
 		color = {type = "string", default = "#d04040"},
 		panel = {type = "entity", default = 0},
 		to = {type = "string", default = "everyone",
-			choices = {"everyone", "player"}},
+			choices = {"everyone", "player", "team"}},
 		shown = {type = "bool", default = true},
 	},
 	state = {

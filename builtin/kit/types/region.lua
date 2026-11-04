@@ -14,7 +14,8 @@
 --
 -- Its signals: enable and disable (a disabled region decides nothing),
 -- set_owner (the player who set it off owns it: a capture point; a value,
--- a name or names, else), one input a rule taking a bool (that rule for
+-- a name or names, else; [KIT_TEAM_LEFTOVERS] with `capture` "team" their
+-- team does, its members as it has them, "team:<id>"), one input a rule taking a bool (that rule for
 -- everyone else on or off; the owners keep theirs), resize (a size, {x, y, z}: the
 -- region that size from its corner on, over `resize_time` seconds), and
 -- dig_out (every cell in it made air, a game change put back as the round
@@ -98,6 +99,8 @@ local params = {
 	owner = {type = "string", default = "nobody",
 		choices = {"nobody", "builders", "players", "team"}},
 	owners = {type = "string", default = ""},
+	capture = {type = "string", default = "player",
+		choices = {"player", "team"}},
 	show_border = {type = "bool", default = false},
 	resize_time = {type = "number", default = 0, min = 0, max = 3600},
 }
@@ -111,6 +114,8 @@ end
 return {
 	version = 1,
 	region = "size",
+	-- (set_owner's capture by team reads them)
+	teams = true,
 	params = params,
 	state = {
 		enabled = {default = true, shared = true},
@@ -169,6 +174,15 @@ return {
 				c.state.owners = value
 			elseif by and by:match("^player:") then
 				c.state.owners = {c:name(by)}
+				for _, t in ipairs(c.params.capture == "team" and c.teams or
+						{}) do
+					for _, id in ipairs(t.state.members or {}) do
+						if id == c.player then
+							c.state.owners = "team:" .. t.id
+							c:log("captured by team", t.id)
+						end
+					end
+				end
 			end
 			publish(c, by, "owner")
 		elseif input == "resize" then

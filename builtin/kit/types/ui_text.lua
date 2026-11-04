@@ -5,19 +5,36 @@
 -- in from it, on the screen or in its `panel` (a kit/ui_panel: shown
 -- while it is). Who sees it: everyone, or with `to` "player" each player
 -- their own, the player who set a signal off the one it changes (a signal
--- by no player, everyone's). "show", "hide" and "toggle" show it;
+-- by no player, everyone's), or with "team" the members of that
+-- player's team alike. "show", "hide" and "toggle" show it;
 -- `shown`: at the start. Edit mode draws every UI component where it
 -- would be, to click on
 local function view(c, by)
-	if c.params.to ~= "player" or not c.player then
+	if (c.params.to ~= "player" and c.params.to ~= "team") or
+			not c.player then
 		return c.state
 	end
-	c.state.own[by] = c.state.own[by] or {}
-	return c.state.own[by]
+	local v = c.state.own[by] or {}
+	c.state.own[by] = v
+	-- [KIT_TEAM_LEFTOVERS] to "team": the player's team's members see the
+	-- same (a player in no team, their own)
+	for _, t in ipairs(c.params.to == "team" and c.teams or {}) do
+		local m = t.state.members or {}
+		for _, id in ipairs(m) do
+			if id == c.player then
+				for _, o in ipairs(m) do
+					c.state.own["player:" .. o] = v
+				end
+			end
+		end
+	end
+	return v
 end
 
 return {
 	version = 1,
+	-- (to "team" reads them)
+	teams = true,
 	ui = {kind = "text", text = "param:text", anchor = "param:anchor",
 		x = "param:x", y = "param:y", size = "param:size",
 		color = "param:color", background = "param:background",
@@ -34,7 +51,7 @@ return {
 		background = {type = "string", default = "none"},
 		panel = {type = "entity", default = 0},
 		to = {type = "string", default = "everyone",
-			choices = {"everyone", "player"}},
+			choices = {"everyone", "player", "team"}},
 		shown = {type = "bool", default = true},
 	},
 	state = {

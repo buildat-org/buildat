@@ -11,15 +11,31 @@
 -- captured) cannot click it: an action's key, a touchscreen, a free
 -- pointer (top-down) or a panel (which frees the pointer) reach it
 local function view(c, by)
-	if c.params.to ~= "player" or not c.player then
+	if (c.params.to ~= "player" and c.params.to ~= "team") or
+			not c.player then
 		return c.state
 	end
-	c.state.own[by] = c.state.own[by] or {}
-	return c.state.own[by]
+	local v = c.state.own[by] or {}
+	c.state.own[by] = v
+	-- [KIT_TEAM_LEFTOVERS] to "team": the player's team's members see the
+	-- same (a player in no team, their own)
+	for _, t in ipairs(c.params.to == "team" and c.teams or {}) do
+		local m = t.state.members or {}
+		for _, id in ipairs(m) do
+			if id == c.player then
+				for _, o in ipairs(m) do
+					c.state.own["player:" .. o] = v
+				end
+			end
+		end
+	end
+	return v
 end
 
 return {
 	version = 1,
+	-- (to "team" reads them)
+	teams = true,
 	ui = {kind = "button", text = "param:label", action = "param:action",
 		anchor = "param:anchor", x = "param:x", y = "param:y",
 		width = "param:width", panel = "param:panel"},
@@ -35,7 +51,7 @@ return {
 		width = {type = "number", default = 0, min = 0, max = 2000},
 		panel = {type = "entity", default = 0},
 		to = {type = "string", default = "everyone",
-			choices = {"everyone", "player"}},
+			choices = {"everyone", "player", "team"}},
 		shown = {type = "bool", default = true},
 	},
 	state = {

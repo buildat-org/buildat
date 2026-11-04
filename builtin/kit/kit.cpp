@@ -11089,6 +11089,9 @@ struct Module: public interface::Module, public Interface
 				return can_edit(peer);
 			if(o == "team")
 				return re && in_team(p.player, team_over(*re));
+			// [KIT_TEAM_LEFTOVERS] a team captured it (set_owner by team)
+			if(o.compare(0, 5, "team:") == 0)
+				return in_team(p.player, strtoull(o.c_str() + 5, nullptr, 10));
 			ss_ name;
 			for(size_t i = 0; i <= o.size(); i++){
 				if(i == o.size() || o[i] == ',' || o[i] == ' '){
