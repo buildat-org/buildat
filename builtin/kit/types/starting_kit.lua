@@ -19,7 +19,8 @@ return {
 	version = 1,
 	look = {shape = "box", size = 0.3, color = "#50a0e0"},
 	params = {
-		items = {type = "string", default = "kit/pickaxe, kit/stone 20"},
+		items = {type = "string", default = "kit/pickaxe, kit/stone 20",
+			choices_from = "item_list"},
 		when = {type = "string", default = "round", choices = {"round", "spawn"}},
 		clear = {type = "bool", default = false},
 	},

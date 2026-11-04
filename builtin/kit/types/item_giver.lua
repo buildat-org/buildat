@@ -6,7 +6,7 @@ return {
 	usable = true,
 	look = {shape = "box", size = 0.3, color = "#f0a020"},
 	params = {
-		item = {type = "string", default = "key"},
+		item = {type = "string", default = "key", choices_from = "items"},
 		count = {type = "number", default = 1, min = 1, max = 1000},
 		once = {type = "bool", default = true},
 	},

@@ -1102,7 +1102,8 @@ local palette
 -- (Escape, a right click) the panel goes back to Components or Entities,
 -- whichever was last (S.panel_tab)
 -- [KIT_TABS_TWO_ROWS] in two rows, the panel as narrow as its content
-NT.TABS = {{"Components", "Terrain", "Voxels"}, {"Box", "Entities"}}
+NT.TABS = {{"Components", "Terrain", "Voxels"},
+	{"Box", "Entities", "Items"}}
 NT.TOOL_TAB = {terrain = "Terrain", voxels = "Voxels", box = "Box"}
 NT.TAB_KEY = {Terrain = "terrain", Voxels = "voxels", Box = "box"}
 -- Where each tab's body was scrolled
@@ -1196,9 +1197,6 @@ function NT.voxels(w)
 	button(w, "New voxel type...", function()
 		M.voxel_dialog()
 	end)
-	button(w, "New item type...", function()
-		M.item_dialog()
-	end)
 	if O.solid then
 		text(w, S.touch and "Walking: a tap digs, a finger held places" or
 				"Left: place, Shift+left: dig; walking: left digs, right places",
@@ -1210,6 +1208,207 @@ end
 -- under the ground too), in three tabs ([KIT_LIST_TABS], user): Game-wide
 -- (the root's, no position), Scene (the scene's with no position: its
 -- World, an environment) and Positioned (the scene's, or the root's,
+-- [KIT_ITEMS_TAB] The Items tab: Kit's item types, the project's own
+-- and its packages', grouped by their use -- Tools (a dig speed, or the
+-- use kind "use"), Weapons (melee, ranged), Ammo (another's ammo), Other
+-- -- and searched by name. A row's name selects it (its sheet in the
+-- inspector, IT.sheet) or, dragged into the world, places a kit/pickup
+-- of it; Copy as new (a type of the builder's own from it, the next free
+-- "<name>_<n>"), Give to me (in play: one, into the slots as a dig's
+-- drop) and Delete (the project's own). "New item type..." at its top: a
+-- new sheet in the inspector. IT.choices() is the same list for every
+-- field that names an item
+local IT = {GROUPS = {"Tools", "Weapons", "Ammo", "Other"}, sel = nil}
+NT.IT = IT
+
+-- The item types by name, the project's own first
+function IT.names()
+	local out = {}
+	for n in pairs(M.item_types or {}) do
+		out[#out + 1] = n
+	end
+	table.sort(out, function(a, b)
+		local oa, ob = IT.own(a), IT.own(b)
+		if oa ~= ob then
+			return oa
+		end
+		return a < b
+	end)
+	return out
+end
+
+-- The project's own (a builder's; not Kit's nor a package's)
+function IT.own(n)
+	local s = M.item_types[n]
+	return type(s) == "table" and s.author ~= nil and s.package == nil
+end
+
+function IT.group(n, ammo)
+	local s = M.item_types[n] or {}
+	if ammo[n] then
+		return "Ammo"
+	elseif (type(s.dig) == "table" and next(s.dig)) or s.use == "use" then
+		return "Tools"
+	elseif s.use == "melee" or s.use == "ranged" then
+		return "Weapons"
+	end
+	return "Other"
+end
+
+-- A picker's choices ({label, value}): none (""), the item types, then
+-- the voxels (a dig's drops, placed from the hands); the value too when
+-- it is none of them
+function IT.choices(value)
+	local out, has = {{"none", ""}}, value == nil or value == ""
+	for _, n in ipairs(IT.names()) do
+		out[#out + 1] = {M.shown(n), n}
+		has = has or n == value
+	end
+	for _, n in ipairs(voxel_names()) do
+		out[#out + 1] = {n, n}
+		has = has or n == value
+	end
+	if not has and type(value) == "string" then
+		out[#out + 1] = {value, value}
+	end
+	return out
+end
+
+-- The builder's own author name (kit.cpp's builder_author)
+function IT.me()
+	return (tostring(P.my_name or ""):sub(1, 64):gsub("%W", "_"))
+end
+
+-- A copy of n as the builder's own, the sheet's fields f over it
+function IT.copy(n, f)
+	local base = n:match("[^/]*$")
+	local cand, i = base, 1
+	while M.item_types[IT.me() .. "/" .. cand] do
+		i = i + 1
+		cand = base .. "_" .. i
+	end
+	local j = {}
+	for k, v in pairs(f or {}) do
+		j[k] = v
+	end
+	j.format, j.author, j.version, j.look_data, j.package = nil, nil, nil,
+			nil, nil
+	j.op, j.name, j.preset = "item", cand, n
+	send(j)
+	IT.sel, IT.form = IT.me() .. "/" .. cand, nil
+	log:info("kit editor: item " .. n .. " copied as " .. IT.sel)
+end
+
+-- The rows shown by the search (and their groups' headings)
+function IT.filter()
+	local q, seen, n = (IT.search or ""):lower(), {}, 0
+	for _, r in ipairs(IT.rows or {}) do
+		local on = q == "" or r.label:lower():find(q, 1, true) ~= nil
+		r.row.visible = on
+		seen[r.group] = seen[r.group] or on
+		n = n + (on and 1 or 0)
+	end
+	for g, h in pairs(IT.heads or {}) do
+		h.visible = seen[g] == true
+	end
+	-- (a layout only grows: the body shrunk to what it shows, the panel
+	-- after it, NT.fit_panel)
+	if NT.view and NT.view.contentElement then
+		NT.view.contentElement.height = 0
+	end
+	if q ~= (IT.searched or "") then
+		IT.searched = q
+		log:info("kit editor: items for \"" .. q .. "\": " .. n)
+	end
+end
+
+function NT.items(w)
+	button(w, "New item type...", function()
+		IT.sel, IT.form = "", nil
+		log:info("kit editor: a new item type")
+		refresh()
+	end)
+	local sr = row(w)
+	label(sr, "Search", 60)
+	edit(sr, IT.search or "", function(s)
+		IT.search = s
+		IT.filter()
+	end):SetName("item search")
+	local ammo, groups = {}, {}
+	for _, sh in pairs(M.item_types or {}) do
+		if type(sh.ammo) == "string" and sh.ammo ~= "" then
+			ammo[sh.ammo] = true
+		end
+	end
+	for _, n in ipairs(IT.names()) do
+		local g = IT.group(n, ammo)
+		groups[g] = groups[g] or {}
+		table.insert(groups[g], n)
+	end
+	IT.rows, IT.heads = {}, {}
+	local said = {}
+	for _, g in ipairs(IT.GROUPS) do
+		if groups[g] then
+			IT.heads[g] = text(w, g, magic.Color(1.0, 0.85, 0.3))
+		end
+		for _, n in ipairs(groups[g] or {}) do
+			local r = row(w)
+			local b = button(r, M.shown(n), function()
+				-- (a drag into the world was not a click)
+				if S.palette_dragged then
+					S.palette_dragged = nil
+					return
+				end
+				IT.sel, IT.form = n, nil
+				log:info("kit editor: item " .. n .. " selected")
+				refresh()
+			end, IT.sel == n)
+			b:SetName("item " .. n)
+			palette_buttons[#palette_buttons + 1] = {button = b,
+				item = {label = M.shown(n), pickup = n}}
+			button(r, "Copy as new", function()
+				IT.copy(n)
+			end):SetName("copy " .. n)
+			if E.running then
+				button(r, "Give to me", function()
+					send({op = "give", item = n})
+					log:info("kit editor: give me " .. n)
+				end):SetName("give " .. n)
+			end
+			if IT.own(n) then
+				button(r, "Delete", function()
+					send({op = "item_delete", name = n})
+					if IT.sel == n then
+						IT.sel = nil
+					end
+					log:info("kit editor: item " .. n .. " deleted")
+				end):SetName("delete " .. n)
+			end
+			IT.rows[#IT.rows + 1] = {row = r, label = M.shown(n), group = g}
+			said[#said + 1] = g .. " " .. n
+		end
+	end
+	if #IT.rows == 0 then
+		text(w, "No item types", DIM)
+	end
+	text(w, "Drag one into the world: a pickup of it", DIM)
+	IT.filter()
+	-- For a check: the list as it changes
+	local line = "kit editor: items (" .. #said .. "): " ..
+			table.concat(said, ", ")
+	if line ~= IT.said then
+		IT.said = line
+		log:info(line)
+	end
+end
+
+function M.items_changed()
+	if E.editing and NT.tab() == "Items" then
+		palette()
+		inspector_window()
+	end
+end
+
 -- placed), each in the order they were added; the tab kept for the
 -- session. [KIT_NESTING] Positioned in the tree's order, each one under
 -- its parent indented ([KIT_REPARENT_BUTTONS]: a Select with Switch
@@ -1535,7 +1734,8 @@ palette = function()
 	local view = w:CreateChild("ScrollView")
 	local body = view:CreateChild("UIElement")
 	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
-	local fill = tab == "Terrain" and terrain_panel or tab == "Voxels" and
+	local fill = tab == "Items" and NT.items or
+			tab == "Terrain" and terrain_panel or tab == "Voxels" and
 			NT.voxels or tab == "Box" and NT.box_section or
 			tab == "Entities" and NT.entities or NT.components
 	fill(body)
@@ -1692,6 +1892,10 @@ local function field(name, d, values)
 		-- there too when it is none of them, the server's refusal named)
 		f.type = "choice"
 		f.choices = {}
+	elseif d.choices_from == "items" then
+		-- [KIT_ITEMS_TAB] an item: the Items tab's list
+		f.type = "choice"
+		f.choices = IT.choices(values[name])
 		local has = false
 		for _, b in ipairs(E.state.terrain.biomes or {}) do
 			f.choices[#f.choices + 1] = {b, b}
@@ -1967,6 +2171,24 @@ local function inspector(w, e, is_made)
 						v = x and {tonumber(x), tonumber(y), tonumber(z)}
 					end
 					if v == nil then
+			-- [KIT_ITEMS_TAB] a list of items: one added from the Items
+			-- tab's list (a count typed after it)
+			for _, k in ipairs(names) do
+				if decl[k].choices_from == "item_list" then
+					ui_utils.dropdown(row(w), IT.choices(), "", function(x)
+						local cur = tostring(values[k] or decl[k].default or "")
+						if x == "" then
+							return
+						end
+						E.pending[key] = E.pending[key] or {}
+						E.pending[key][k] = cur:match("%S") and cur .. ", " ..
+								x or x
+						log:info("kit editor: " .. key .. " " .. k .. " = " ..
+								E.pending[key][k])
+						inspector_window()
+					end, {label = "Add to " .. k, fill = true})
+				end
+			end
 						E.status = k .. ": three numbers"
 					else
 						send({op = "set", id = e.id, comp = ci - 1, param = k,
@@ -2413,7 +2635,9 @@ inspector_window = function()
 	if S.primary then
 		e, is_made = find(S.primary)
 	end
-	if not E.editing or folded("inspector") or not e then
+	-- [KIT_ITEMS_TAB] the Items tab's item type's sheet instead
+	local item = NT.tab() == "Items" and IT.sel
+	if not E.editing or folded("inspector") or not (e or item) then
 		return
 	end
 	local y = W.bar and W.bar.height + 12 or 40
@@ -2421,7 +2645,11 @@ inspector_window = function()
 	local view = W.inspector:CreateChild("ScrollView")
 	local body = view:CreateChild("UIElement")
 	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
-	inspector(body, e, is_made)
+	if item then
+		IT.sheet(body)
+	else
+		inspector(body, e, is_made)
+	end
 	view:SetStyleAuto()
 	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
 	view.scrollBarsAutoVisible = false
@@ -2994,6 +3222,170 @@ function MEM.name()
 	return "kit_editor_" .. MEM.key:gsub("[^%w_%-]", function(c)
 		return string.format(".%02x", c:byte())
 	end)
+-- [KIT_ITEMS_TAB] An item type's sheet in the inspector (the Items tab's
+-- selection), its buttons at the top, its fields in sections, each folded
+-- by its button (at first the basics and its use's own open): Kit's and a package's copied as new (the
+-- edits made here go into the copy), the project's own saved as its next
+-- version, a new one ("New item type...") made from a preset
+IT.SECTIONS = {
+	{"Basics", {"icon", "stack", "use", "color", "look"}},
+	{"Timing", {"cooldown", "mode", "burst", "charge"}},
+	{"Damage", {"damage", "damage_type", "crit", "falloff", "knockback",
+		"reach"}},
+	{"Ranged", {"shot", "speed", "gravity", "lifetime", "spread", "pellets",
+		"range", "recoil"}},
+	{"Loading", {"magazine", "reload", "reload_mode", "ammo"}},
+	{"Digging", {"dig", "level"}},
+	{"Wear", {"uses", "wear_dig", "wear_hit", "wear_shot", "repair"}},
+}
+IT.open = {}
+
+function IT.needs(sec, f)
+	if sec == "Damage" then
+		return f.use == "melee"
+	elseif sec == "Ranged" then
+		return f.use == "ranged"
+	elseif sec == "Digging" then
+		return (f.dig or "") ~= ""
+	end
+	return sec == "Basics"
+end
+
+-- ITEM_FIELDS' as the sheet shows them: ammo and repair the item picker,
+-- look a prefab's
+function IT.fields(list, f)
+	local out = {}
+	for i, fd in ipairs(list) do
+		if fd.name == "ammo" or fd.name == "repair" then
+			fd = {name = fd.name, type = "choice",
+				choices = IT.choices(f[fd.name])}
+		elseif fd.name == "look" then
+			fd = {name = "look", type = "choice", choices = {{"none", ""}}}
+			for _, p in ipairs(E.state.prefabs or {}) do
+				fd.choices[#fd.choices + 1] = {M.shown(p), p}
+			end
+		end
+		out[i] = fd
+	end
+	return M.with_sounds and M.with_sounds(out, f) or out
+end
+
+-- A sheet's form sent: Make, Save, a copy
+function IT.send(f, name)
+	local j = {}
+	for k, v in pairs(f) do
+		j[k] = v
+	end
+	j.format, j.author, j.version, j.look_data, j.package = nil, nil, nil,
+			nil, nil
+	j.op, j.name = "item", name
+	send(j)
+end
+
+function IT.sheet(w)
+	local n = IT.sel
+	local new, sheet = n == "", M.item_types[n]
+	if not new and not sheet then
+		text(w, "Item type " .. n .. ": not here (yet)", DIM)
+		return
+	end
+	if not IT.form then
+		IT.preset = IT.preset or "kit/sword"
+		IT.form = item_form(new and IT.preset or n, new and "my_item" or
+				n:match("[^/]*$"))
+		IT.form.preset = new and IT.preset or sheet.preset
+	end
+	local f, own = IT.form, not new and IT.own(n)
+	text(w, new and "A new item type of yours" or "Item type " ..
+			M.shown(n))
+	text(w, new and "From a preset, its fields changed here" or own and
+			"The project's own: Save makes its next version" or
+			(sheet.package and "A package's" or "Kit's") ..
+			": Copy as new to change it", DIM)
+	local br = row(w)
+	if new then
+		button(br, "Make", function()
+			IT.send(f, f.name)
+			IT.sel, IT.form = IT.me() .. "/" .. tostring(f.name), nil
+			log:info("kit editor: item " .. IT.sel .. " made")
+		end)
+	elseif own then
+		button(br, "Save", function()
+			IT.send(f, n:match("[^/]*$"))
+			IT.form = nil
+			log:info("kit editor: item " .. n .. " saved")
+		end)
+	end
+	if not new then
+		button(br, "Copy as new", function()
+			IT.copy(n, f)
+		end)
+	end
+	if new then
+		local presets = {}
+		for _, p in ipairs(IT.names()) do
+			presets[#presets + 1] = {M.shown(p), p}
+		end
+		ui_utils.settings_form(w, {{name = "name", type = "text",
+				max_length = 64}, {name = "preset", type = "choice",
+				choices = presets}}, f, function(k, v)
+			if k == "preset" then
+				IT.preset, IT.form = v, item_form(v, f.name)
+				return inspector_window()
+			end
+			f[k] = v
+		end, WIDGETS)
+	end
+	-- The icon: a voxel's or an upload's texture, "" none (a text label)
+	local tex = {""}
+	for _, t in ipairs(E.state.textures or {}) do tex[#tex + 1] = t end
+	local by, placed, secs = {}, {name = true}, {}
+	for _, fd in ipairs(ITEM_FIELDS) do
+		by[fd.name] = fd
+	end
+	for _, sec in ipairs(IT.SECTIONS) do
+		local list = {}
+		for _, k in ipairs(sec[2]) do
+			list[#list + 1] = by[k]
+			placed[k] = true
+		end
+		secs[#secs + 1] = {sec[1], list}
+	end
+	-- The fields no section names (its sounds, [KIT_SOUNDS]) last
+	local rest = {}
+	for _, fd in ipairs(ITEM_FIELDS) do
+		if not placed[fd.name] then
+			rest[#rest + 1] = fd
+		end
+	end
+	if #rest > 0 then
+		secs[#secs + 1] = {"More", rest}
+	end
+	for _, sec in ipairs(secs) do
+		local name, open = sec[1], IT.open[sec[1]]
+		if open == nil then
+			open = IT.needs(name, f)
+		end
+		button(w, (open and "- " or "+ ") .. name, function()
+			IT.open[name] = not open
+			log:info("kit editor: item section " .. name ..
+					(open and " folded" or " open"))
+			inspector_window()
+		end, open):SetName("section " .. name)
+		if open then
+			ui_utils.settings_form(w, IT.fields(sec[2], f), f,
+					function(k, v)
+				f[k] = v
+				log:info("kit editor: item " .. (new and "(new)" or n) ..
+						" " .. k .. " = " .. tostring(v))
+				if k == "use" then
+					inspector_window()
+				end
+			end, WIDGETS, {texture = tex})
+		end
+	end
+end
+
 end
 
 -- After an edit state (was: edit mode before it), and as the key comes
@@ -3625,6 +4017,10 @@ end
 local function right_click(rc)
 	if S.tool == "terrain" then
 		M.set_tool(nil)
+	elseif item.pickup then
+		-- [KIT_ITEMS_TAB] an item from the Items tab: a pickup of it
+		send({op = "place", type = "kit/pickup", pos = cell, parent = parent,
+			params = {item = item.pickup}})
 		return
 	end
 	if S.placing then

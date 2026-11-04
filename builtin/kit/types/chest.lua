@@ -22,7 +22,7 @@ return {
 	look = {shape = "box", size = {0.8, 0.6, 0.6}, color = "#8a6236"},
 	params = {
 		size = {type = "number", default = 27, min = 1, max = 54},
-		items = {type = "string", default = ""},
+		items = {type = "string", default = "", choices_from = "item_list"},
 	},
 	state = {slots = {default = {}}},
 	outputs = {opened = "none"},

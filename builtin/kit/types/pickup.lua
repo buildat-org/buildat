@@ -17,7 +17,7 @@ return {
 	zone = "size",
 	look = {shape = "box", size = 0.3, color = "#e8d070", text = "label"},
 	params = {
-		item = {type = "string", default = "kit/stone"},
+		item = {type = "string", default = "kit/stone", choices_from = "items"},
 		count = {type = "number", default = 1, min = 1, max = 1000000},
 		size = {type = "position", default = {1, 2, 1}},
 	},
