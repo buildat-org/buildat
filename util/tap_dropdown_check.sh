@@ -118,7 +118,7 @@ cat > "$t/plain.json" <<J
  ["waitlog", "launch_menu: ", 60], ["wait", 1000],
  ["tap", 200, 497], ["waitlog", "launch_menu: settings, ", 10], ["wait", 500],
  ["tap", 180, 275], ["waitlog", "Engine settings shown", 10], ["wait", 500],
-$(taps 306 326 100 217)
+$(taps 306 286 100 188)
  ["wait", 200]
 ]
 J
