@@ -1487,7 +1487,7 @@
 		game_path = interface::fs::get_absolute_path(game_path);
 		g_local_server_app = server_app_id(game);
 		g_local_server_game = game;
-		g_local_server_port = pick_free_local_port();
+		g_local_server_port = pick_local_port(g_local_server_app);
 		log_i(MODULE, "Starting local server on port %s", cs(g_local_server_port));
 		{
 			const ss_ raw = interface::bignum::random_bytes(16);

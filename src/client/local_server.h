@@ -6,6 +6,7 @@
 // which outlives a CApp reboot; included by app.cpp ([SPLITS]: moved out
 // as it was).
 #include "core/version.h"
+#include <set>
 
 // Survives CApp reboot so disconnect can kill the server we started.
 static interface::process::Handle g_local_server;
@@ -93,22 +94,60 @@ static bool local_server_answers()
 	return interface::probe_connect("127.0.0.1", g_local_server_port);
 }
 
-// simplified: A free port is picked by probing; a race with another process
-// grabbing it in between is possible but harmless for a local game (the server
-// exits and the menu says so). Upgrade path: have the server bind port 0 and
-// report the actual port back to the client.
-static ss_ pick_free_local_port()
+// **A port per app, kept** ([LAN_KEEP_LOGIN]): a joiner keeps its login
+// under the host's address and port (app_lua.h l_game_storage_dir), so an
+// app's server comes back on the port it had: the one remembered for it
+// in <user>/local_ports.txt ("<port> <app>" lines) if that is free, else a
+// random free one, which is remembered then. A random pick skips the
+// ports other apps remembered, or two apps would share a joiner's folder
+// and flip its logins.
+// simplified: free is probed; a race with another process grabbing it in
+// between is possible but harmless for a local game (the server exits and
+// the menu says so). Upgrade path: have the server bind port 0 and report
+// the actual port back to the client.
+static ss_ pick_local_port(const ss_ &app)
 {
-	std::random_device rd;
-	for(int i = 0; i < 100; i++){
-		// 29168...29999 is unassigned in IANA's registry and below the
-		// ephemeral port range, so nothing else should want it
-		int port = 29168 + rd() % 832;
-		ss_ port_s = std::to_string(port);
-		if(!interface::probe_connect("127.0.0.1", port_s))
-			return port_s;
+	const ss_ path = g_client_config.get<ss_>("user_path")+"/local_ports.txt";
+	std::map<ss_, ss_> port_of; // app -> port
+	std::set<int> remembered;
+	{
+		std::ifstream f(path);
+		ss_ line;
+		while(std::getline(f, line)){
+			const size_t sp = line.find(' ');
+			const int port = sp == ss_::npos ? 0 : atoi(line.c_str());
+			if(port < 1024 || port > 65535)
+				continue;
+			port_of[line.substr(sp + 1)] = std::to_string(port);
+			remembered.insert(port);
+		}
 	}
-	return "29500";
+	auto it = port_of.find(app);
+	if(it != port_of.end() && !interface::probe_connect("127.0.0.1", it->second))
+		return it->second;
+	// 29168...29999 is unassigned in IANA's registry and below the
+	// ephemeral port range, so nothing else should want it: from a random
+	// one up, the first that is free and no other app's
+	std::random_device rd;
+	const int start = rd() % 832;
+	ss_ picked = "29500";
+	for(int i = 0; i < 832; i++){
+		int port = 29168 + (start + i) % 832;
+		if(remembered.count(port))
+			continue;
+		ss_ port_s = std::to_string(port);
+		if(!interface::probe_connect("127.0.0.1", port_s)){
+			picked = port_s;
+			break;
+		}
+	}
+	port_of[app] = picked;
+	std::ofstream f(path, std::ios::trunc);
+	for(auto &p : port_of)
+		f<<p.second<<" "<<p.first<<"\n";
+	if(!f)
+		log_w(MODULE, "Cannot write %s", cs(path));
+	return picked;
 }
 
 static ss_ pidfile_path()
