@@ -164,25 +164,35 @@ local function try_count(c)
 	c:after(1, "count")
 end
 
--- [KIT_LATE_JOIN] A player in the queue into a running round with room
--- simplified: c.sessions is as the run began, so two joining in one tick
--- may take one more than max_players
+-- [KIT_LATE_JOIN] A player in the queue into a running round with room.
+-- c.sessions is as the run began, the moves done after the tick: those
+-- sent since its count last changed (`sent`) are counted on it
+-- simplified: a leave in the tick a move lands leaves the count as it
+-- was, the move counted twice until it changes again (one waits)
 local function try_join(c, pid, by)
 	local lj, p = c.params.late_join, c.params
 	if lj ~= "join" and lj ~= "join_or_parallel" then
 		return false
 	end
+	local sent = c.state.sent
 	for _, id in ipairs(c.state.rounds) do
 		local s = (c.sessions or {})[id]
-		if s and s.players < p.max_players and
+		local k = tostring(id)
+		local n = s and s.players
+		if s and sent[k] and sent[k].was == s.players then
+			n = n + sent[k].n
+		end
+		if s and n < p.max_players and
 				(p.join_window <= 0 or s.clock < p.join_window) and
 				(p.duration <= 0 or s.clock < p.duration) and
-				(p.join_team ~= "backfill" or s.players < s.taken) then
+				(p.join_team ~= "backfill" or n < s.taken) then
 			local q = c.state.queue
 			drop(q, pid)
 			c.state.queue = q
+			sent[k] = {was = s.players, n = n - s.players + 1}
+			c.state.sent = sent
 			c:log(c:name(by), "joins the running round in session",
-					id, "(" .. s.players .. " in it)")
+					id, "(" .. n .. " in it)")
 			c:session_move(pid, id)
 			return true
 		end
@@ -314,6 +324,9 @@ return {
 		-- A round ended, no countdown since (for `after_round` seconds)
 		fresh = {default = false},
 		rounds = {default = {}},
+		-- The players sent into each round ({[id] = {was, n}}: n since its
+		-- count was `was`)
+		sent = {default = {}},
 		last = {default = ""},
 		status = {default = "waiting", shared = true},
 		-- The round's: the team of each player ("player:<id>" = its
@@ -468,6 +481,9 @@ return {
 			return
 		end
 		c.state.rounds = rounds
+		local sent = c.state.sent
+		sent[tostring(id)] = nil
+		c.state.sent = sent
 		local w = type(outcome) == "table" and outcome.winner or nil
 		if type(outcome) == "table" then
 			local t = {}

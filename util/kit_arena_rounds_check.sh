@@ -17,8 +17,9 @@
 #      the 24 s countdown). kitboss sets max_players 2, players 1, duration
 #      60 meanwhile: session 2 takes two, the third waits and starts
 #      session 3 alongside (a parallel round; join_or_parallel with no
-#      room). Session 2's players back in the queue count down 120 s
-#      again; session 3's end starts that countdown over.
+#      room). Session 2's players back in the queue: one joins session 3
+#      (its room for one), the other counts down 120 s again; session 3's
+#      end starts that countdown over.
 #   util/kit_arena_rounds_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -192,6 +193,8 @@ assert 0 < s2_at < s3_at < log.find("Session 2 ended"), "session 3 not alongside
 assert A + "countdown over: a round for 1 players" in log[s2_at:s3_at]
 assert A + "session 2 over: its time is up" in log and A + "session 3 over: its time is up" in log
 after2 = log.split("Session 2 ended")[1]
+j = re.findall(A + r"\w+ joins the running round in session 3 \((\d+) in it\)", after2)
+assert j == ["1"], "not one of session 2's into session 3's room: %s" % j
 c = re.search(A + r"countdown (\d+) s for", after2)
 assert c and c.group(1) == "120", "the countdown after round 2: " + (c.group(0) if c else "none")
 after3 = log.split("Session 3 ended")[1]
