@@ -1,0 +1,14 @@
+{
+	"format": "kit_sounds",
+	"comment": "[KIT_SOUNDS] Kit's own sounds, kit/<name>: blip's parameters (extensions/blip, blip1's compact form), made from blip's generators (click: blip 3, shot: explosion 11, hit: hit 5, dig: crunch 4, place: knock 2, door: thud 6, pickup: pickup 9; swing: noise falling, by hand). A builder copies one to change it.",
+	"sounds": {
+		"click": {"params": "blip1:AAALvAABrNYAAf_f_AAAAf_AAUNf_AAf_f___f_AAGaf_gA4DbW"},
+		"swing": {"params": "blip1:DD2CkAAKPgAAAX_f_AAAAf_AAAAf_AAf_f_szf_AAJmf_WZAAAA"},
+		"shot": {"params": "blip1:DAAScj6SEXaAAZKf_AAAAf_AAAAf_AAawd6__f_AAAAf_gAajSd"},
+		"hit": {"params": "blip1:AAABRAAKahSAAMxf_AAAAf_AAeTf_AAf_f___f_AAAAf_gAErx3"},
+		"dig": {"params": "blip1:DAAJFAAMSTNAAf_f_AAAAf_AAAAf_AAf_f_ccf_HgO5f_gAZPJjAAAA1CAA"},
+		"place": {"params": "blip1:CAAAATJH9kxAAfkf_AAAAf_AAAAf_AAf_f___f_AAMzf_gAJCFZ"},
+		"door": {"params": "blip1:EAAEQfeLVOvAAZWf_AAAAf_AAAAf_AAf_f___f_AAAAf_gAiF_2"},
+		"pickup": {"params": "blip1:AAACBedUoZmAAf_f_AAAAf_AAAAf_AAf_f___f_AAAAf_gAMIkX"}
+	}
+}

@@ -183,6 +183,9 @@ namespace interface
 //                               they were, so filtered
 // c: c.id, c.pos, c.params (read), c.state (read and written; a table in
 // it changed in place is written too), c:emit(output, value),
+// [KIT_SOUNDS] c:sound(name, {everywhere = true}) (a project's sound at
+// it, heard in its scene; everywhere, or an entity with no place: not
+// positional; 8 a run; "" or nil nothing),
 // c:set_voxel(name) (each cell it owns; a `grants` type that owns none:
 // each cell of its grants box, 4096 at most),
 // c:set_voxels({{x, y, z, name}, ...}) ([KIT_VOXEL_STATES]; a voxel_box
@@ -267,7 +270,8 @@ namespace interface
 //   `choices_from = "biomes"` makes the inspector's a dropdown of the
 //   material set's biomes (a string still; the World refuses another).
 //   `choices_from = "scenes"`: a dropdown of the composition's scenes
-//   and "none" ("").
+//   and "none" (""). [KIT_SOUNDS] A parameter type "sound": a dropdown of
+//   the project's sounds and "none" ("").
 //   Client parts: <name>.client.lua beside a type, sent to every client at
 //   join and run there as the client's own Lua is (client_lua/module.lua
 //   says what it gets).
@@ -312,6 +316,8 @@ namespace interface
 //     types/<n>.voxel.json            the voxel type <author>/<n> (as
 //                    {"op": "voxel"} has it; "texture" a registered one's
 //                    or textures/<file>.png in the package)
+//     types/<n>.sound.json            ([KIT_SOUNDS]) the sound <author>/<n>,
+//                    {"params": "blip1:..."}
 //     materials.json ([KIT_MATERIAL_SETS]) a material set (world.h): its
 //                    voxels its voxel types, "extends" kit/default or a
 //                    dependency's set; a World's "materials" may name it
@@ -557,6 +563,11 @@ namespace interface
 //       (the row "item:<their name>/<n>", its "version" counted up by
 //       each): the preset's sheet under the fields given (Tools, below).
 //       Refused in a draft
+//   {"op": "sound", "name": n, "params": "blip1:..."}  -- [KIT_SOUNDS]
+//       the builder's sound "<their name>/<n>" made or changed, or n a
+//       project's sound's whole name changed (not Kit's, not a
+//       package's: those are copied); {"op": "sound_delete", "name": its
+//       whole name}. Refused in a draft. Sounds below
 // "kit:texture", a PNG's bytes ([KIT] stage 4g): a builder with the tools
 // on uploads a texture (square, 8..128 a side, a power of two, 64 KiB at
 // most), decoded and saved again (the row "texture:<hash>"), served as
@@ -666,6 +677,24 @@ namespace interface
 // an entity up its parents with a team: a team's base placed under the
 // team). The prefab kit/team_match is a two-team match to place.
 //
+// **Sounds** ([KIT_SOUNDS]): the project's named sounds, each blip's
+// parameters (extensions/blip's compact form, "blip1:...": data, made in
+// its designer, not audio files): Kit's own in sounds.json (kit/click,
+// kit/swing, kit/shot, kit/hit, kit/dig, kit/place, kit/door,
+// kit/pickup), a builder's {"op": "sound"} (rows "sound:<author>/<n>"), a
+// package's types/<n>.sound.json ({"params"}). Every session's clients
+// get them as "kit:sounds" {name: {params, author, name, version,
+// package}}. A trigger plays one by name, "kit:sound" {name, at: [x, y,
+// z] | null} to the peers in the scene (at: positional there; null: not
+// positional), the server logging "Sound <name> (<why>) ...": an item
+// type's sound_* (the swing, the shot and the reload where its holder is
+// -- the holder's client plays its own swing and shot at once, the
+// server the others'; the hit at the target; the break where it broke),
+// a voxel type's sound_dig and sound_place (at the cell, edit mode too),
+// a component's c:sound (kit/door's sound_open and sound_close,
+// kit/button's sound_press, kit/pickup's sound, kit/sound's "play"
+// input).
+//
 // **Tools** ([KIT_TOOLS_1], stage 7c's first part). An item type is a
 // flat sheet, "<author>/<name>": Kit's are types/<name>.item.json
 // (kit/sword, kit/pickaxe: the presets), a builder's are made by {"op":
@@ -686,6 +715,8 @@ namespace interface
 // first person, fitted to 0.2 m about its base, +z ahead; "" a bar of its
 // colour with its icon), color ("#rrggbb": a shot's, a splat's), grip
 // ([right, up, ahead] m from the eye: where it is held in view).
+// [KIT_SOUNDS] sound_swing, sound_shot, sound_hit, sound_reload,
+// sound_break: a project's sound each ("" none).
 // Clients get them all as "kit:item_types" {name: sheet}, a look's
 // prefab with it ("look_data" {parts, voxels}; sent again as the prefab
 // is saved). An item in an

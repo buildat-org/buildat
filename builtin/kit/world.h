@@ -22,7 +22,8 @@
 //        letters, digits and _, none by default) for what moves on it,
 //        [KIT_ENVIRONMENT] "seasons": {season: {"texture" | "top",
 //        "side", "bottom"}, ...}: its look in that season (spring, summer,
-//        autumn, winter; the faces not named its own)},
+//        autumn, winter; the faces not named its own), [KIT_SOUNDS]
+//        "sound_dig", "sound_place": a project's sound's name},
 //        ...},
 //    "palettes": {name: [entry, ...], ...} ([KIT_TINT_PALETTE]),
 //    "fallbacks": {role: role, ...},
@@ -110,6 +111,7 @@
 #include "luanti_mapgen/api.h"
 #include "interface/noise.h"
 #include "luanti/shapes.h"
+#include <algorithm>
 #include <climits>
 #include <functional>
 
@@ -253,6 +255,9 @@ struct Material
 	// level or above
 	ss_ group;
 	int level = 0;
+	// [KIT_SOUNDS] The sounds of its dig and its place: a project's sound's
+	// name ("<author>/<name>"; "" none)
+	ss_ sound_dig, sound_place;
 	// [KIT_TINT_PALETTE] The tint field's palette (albedo multiplied),
 	// entry 0 the material's own look: "tint" (TintPalette::parse), Kit's
 	// standard one otherwise
@@ -280,6 +285,8 @@ struct Material
 		friction = f.is_number() ? f.as_number() : 1;
 		surface = json::jstr(j, "surface");
 		group = json::jstr(j, "group");
+		sound_dig = json::jstr(j, "sound_dig");
+		sound_place = json::jstr(j, "sound_place");
 		const double lv = j.get("level").is_number() ?
 				j.get("level").as_number() : 0;
 		level = lv >= 0 && lv <= 15 ? (int)lv : -1;
@@ -314,6 +321,13 @@ struct Material
 		tag_ok = tag_ok && group.size() <= 32 && level >= 0 && lv == level;
 		for(char c : group)
 			tag_ok = tag_ok && (isalnum((unsigned char)c) || c == '_');
+		for(const ss_ *sn : {&sound_dig, &sound_place}){
+			tag_ok = tag_ok && sn->size() <= 129 && (sn->empty() ||
+					std::count(sn->begin(), sn->end(), '/') == 1);
+			for(char c : *sn)
+				tag_ok = tag_ok && (isalnum((unsigned char)c) || c == '_' ||
+						c == '/');
+		}
 		return !top.empty() && !side.empty() && !bottom.empty() &&
 				layer >= -1 && layer < heightmap::MAX_MATERIALS &&
 				light >= 0 && light <= 15 && (kind == "solid" ||
@@ -336,6 +350,8 @@ struct Material
 		v.set("surface", surface);
 		v.set("group", group);
 		v.set("level", (int64_t)level);
+		v.set("sound_dig", sound_dig);
+		v.set("sound_place", sound_place);
 		// [KIT_TINT_PALETTE] its colours and their names ("" unnamed)
 		json::Value t = json::array(), tn = json::array();
 		for(size_t i = 0; i < tint.colors.size(); i++){

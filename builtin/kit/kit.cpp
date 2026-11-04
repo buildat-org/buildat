@@ -105,6 +105,8 @@ static const size_t MAX_LINKS = 64;
 // has at most, and what an upload may be
 static const size_t MAX_VOXEL_TYPES = 256, MAX_TEXTURES = 256;
 static const size_t MAX_ITEM_TYPES = 256; // [KIT_TOOLS_1]
+// [KIT_SOUNDS] the sounds a save has at most, a sound's params' length
+static const size_t MAX_SOUNDS = 256, MAX_SOUND = 2048;
 static const size_t MAX_PROJECTILES = 256; // [KIT_TOOLS_2] a round's
 static const size_t MAX_TEXTURE_BYTES = 64 << 10;
 static const uint32_t MAX_TEXTURE_SIDE = 128;
@@ -2075,6 +2077,15 @@ struct Module: public interface::Module, public Interface
 					return "a voxel's name (letters, digits, _, : and /)";
 			return "";
 		}
+		if(t == "sound"){
+			// [KIT_SOUNDS] a project's sound's name ("": none; one not here
+			// plays nothing)
+			if(!v.is_string() || v.as_string().size() > 129 ||
+					(!v.as_string().empty() && (!item_ok(v.as_string()) ||
+					v.as_string().find('/') == ss_::npos)))
+				return "a sound's name, <author>/<name>";
+			return "";
+		}
 		if(t == "voxels"){
 			// [KIT_VOXEL_STATES] a pattern ("": none); not an inspector
 			// field (Capture and Fill set it)
@@ -2792,6 +2803,7 @@ struct Module: public interface::Module, public Interface
 		load_prefab_palette();
 		load_builder_voxels();
 		load_items();
+		load_sounds();
 		if(!host_world(why))
 			return false;
 
@@ -3207,12 +3219,15 @@ struct Module: public interface::Module, public Interface
 		row.set("group", jstr(j, "group"));
 		row.set("level", j.get("level").is_number() ? j.get("level") :
 				json::Value((int64_t)0));
+		// [KIT_SOUNDS] its dig's and place's sounds
+		row.set("sound_dig", jstr(j, "sound_dig"));
+		row.set("sound_place", jstr(j, "sound_place"));
 		world::Material m;
 		if(!m.parse(row) || m.light != row.get("light").as_number())
 			return refuse("a texture, a kind (solid, leaves, plant, water), "
 					"light (a whole number 0...15), friction 0...10, a "
-					"surface tag and a group (letters, digits and _) and a "
-					"level (a whole number 0...15)");
+					"surface tag and a group (letters, digits and _), a "
+					"level (a whole number 0...15) and sounds' names");
 		if(!texture_choices().count(texture))
 			return refuse("texture: no voxel or upload has "+texture);
 		auto old = m_voxel_types.find(name);
@@ -3675,14 +3690,14 @@ struct Module: public interface::Module, public Interface
 		// Its contents: types/<name>.lua (and <name>.client.lua),
 		// <name>.prefab.json and <name>.voxel.json; textures/<file>.png
 		json::Value types = json::object();
-		sm_<ss_, json::Value> prefabs, voxels, items;
+		sm_<ss_, json::Value> prefabs, voxels, items, sounds;
 		for(auto &f : files){
 			if(f.first.compare(0, 6, "types/") != 0)
 				continue;
 			const ss_ base = f.first.substr(6);
 			ss_ n, kind;
 			for(const char *suffix : {".client.lua", ".prefab.json",
-					".voxel.json", ".item.json", ".lua"}){
+					".voxel.json", ".item.json", ".sound.json", ".lua"}){
 				const size_t sl = strlen(suffix);
 				if(base.size() > sl && base.compare(base.size() - sl, sl,
 						suffix) == 0){
@@ -3695,6 +3710,21 @@ struct Module: public interface::Module, public Interface
 				continue;
 			if(!name_ok(n))
 				return f.first+": a name is letters, digits and _";
+			// [KIT_SOUNDS] its sounds, {"params": "blip1:..."}, "<fp>/<n>"
+			if(kind == ".sound.json"){
+				const ss_ params = jstr(json::load_string(f.second.c_str()),
+						"params");
+				if(!sound_params_ok(params))
+					return f.first+": no blip1 \"params\"";
+				ss_ row;
+				if(m_store->get("sound:"+fp+"/"+n, row) && jstr(json::load_string(
+						row.c_str()), "package") != name)
+					return "the sound "+fp+"/"+n+" is a builder's here";
+				json::Value r = json::object();
+				r.set("params", params);
+				sounds[fp+"/"+n] = r;
+				continue;
+			}
 			if(kind == ".prefab.json" || kind == ".voxel.json" ||
 					kind == ".item.json"){
 				const json::Value j = json::load_string(f.second.c_str());
@@ -3811,8 +3841,13 @@ struct Module: public interface::Module, public Interface
 				return "the save has "+itos(MAX_ITEM_TYPES)+" item types";
 			it.second = sheet;
 		}
-		if(types.size() + prefabs.size() + voxels.size() + items.size() == 0 &&
-				!set.is_object())
+		size_t new_sounds = 0;
+		for(auto &so : sounds)
+			new_sounds += !m_sounds.count(so.first);
+		if(m_sounds.size() + new_sounds > MAX_SOUNDS)
+			return "the save has "+itos(MAX_SOUNDS)+" sounds";
+		if(types.size() + prefabs.size() + voxels.size() + items.size() +
+				sounds.size() == 0 && !set.is_object())
 			return "no types, prefabs or voxel types in types/, and no "
 					"materials.json";
 		// The textures its voxel types wear, stored as an upload's: each
@@ -3990,9 +4025,22 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!items.empty())
 			send_item_types(-1);
+		json::Value sl = json::array();
+		for(auto &so : sounds){
+			so.second.set("author", author);
+			so.second.set("name", so.first.substr(fp.size() + 1));
+			so.second.set("version", (int64_t)1);
+			so.second.set("package", name);
+			m_store->set("sound:"+so.first, so.second.stringify());
+			m_sounds[so.first] = so.second;
+			sl.append(so.first);
+		}
+		if(!sounds.empty())
+			send_sounds(-1);
 		row.set("prefabs", pl);
 		row.set("voxels", vl);
 		row.set("items", il);
+		row.set("sounds", sl);
 		m_packages[name] = row;
 		m_store->set("package:"+name, row.stringify());
 		for(const ss_ &t : names)
@@ -4020,6 +4068,7 @@ struct Module: public interface::Module, public Interface
 				itos(names.size())+" types, "+itos(prefabs.size())+
 				" prefabs, "+itos(voxels.size())+" voxel types"+
 				(items.empty() ? "" : ", "+itos(items.size())+" item types")+
+				(sounds.empty() ? "" : ", "+itos(sounds.size())+" sounds")+
 				(set.is_object() ? ", a material set" : "")+
 				(change.empty() ? "" : ", "+itos(change.size())+
 				" entities upgraded");
@@ -4175,7 +4224,6 @@ struct Module: public interface::Module, public Interface
 		// [KIT_PACKAGE_ITEMS] the builder's item types, what the prefabs'
 		// givers and kits name (an uploaded icon in textures/, as a voxel
 		// type's). simplified: all of them, not only those the prefabs name.
-		// [KIT_SOUNDS] the sounds they play go beside them here
 		for(const ss_ &k : m_store->list("item:"+author+"/")){
 			ss_ src, png;
 			m_store->get(k, src);
@@ -4199,6 +4247,19 @@ struct Module: public interface::Module, public Interface
 			}
 			files.set("types/"+k.substr(6 + author.size())+".item.json",
 					row.stringify());
+		}
+		// [KIT_SOUNDS] the builder's sounds, types/<n>.sound.json
+		// {"params"}. simplified: all of them, as the item types
+		for(const ss_ &k : m_store->list("sound:"+author+"/")){
+			ss_ src;
+			m_store->get(k, src);
+			const json::Value row = json::load_string(src.c_str());
+			if(!row.is_object() || !jstr(row, "package").empty())
+				continue;
+			json::Value o = json::object();
+			o.set("params", jstr(row, "params"));
+			files.set("types/"+k.substr(7 + author.size())+".sound.json",
+					o.stringify());
 		}
 		if(!files.size())
 			return refuse("no prefabs, voxel or item types of "+author+
@@ -8292,6 +8353,21 @@ struct Module: public interface::Module, public Interface
 				}
 			}
 		}
+		// [KIT_SOUNDS] c:sound(name, {everywhere}): at the entity (none
+		// placed, or everywhere: not positional), heard in its scene (one
+		// with no scene: in every one)
+		const json::Value &sounds = fx.get("sounds");
+		for(unsigned i = 0; i < sounds.size(); i++){
+			ss_ scene;
+			const bool in_scene = scene_of(e, &scene) != nullptr ||
+					!scene.empty();
+			double w[3];
+			const bool at = e.has_pos && !sounds.at(i).at(1u).is_true();
+			if(at)
+				world_of(e, w);
+			play_sound(jstr_at(sounds.at(i), 0), in_scene ? &scene : nullptr,
+					at ? w : nullptr, "entity "+itos(e.id)+"'s "+type);
+		}
 		const json::Value &vx = fx.get("voxels");
 		if(vx.is_array() && vx.size())
 			set_voxels(e, in, vx, r.by, t.builds && pid ? 'b' : 'g');
@@ -11800,6 +11876,7 @@ struct Module: public interface::Module, public Interface
 		send_env(peer);
 		send_actions((int64_t)peer);
 		send_item_types((int64_t)peer);
+		send_sounds((int64_t)peer);
 		if(m_session.running)
 			round_join(peer, false);
 		else
@@ -12929,6 +13006,9 @@ struct Module: public interface::Module, public Interface
 	// The item types by name: Kit's (types/<name>.item.json, the presets)
 	// and the builders' (the rows "item:<author>/<name>")
 	sm_<ss_, json::Value> m_item_types;
+	// [KIT_SOUNDS] the project's sounds by name, {params, author, name,
+	// version, package}
+	sm_<ss_, json::Value> m_sounds;
 	// Each placed peer's last hit or item use (the game's clock) and the
 	// dig under way: its cell and when it started
 	struct ToolUse
@@ -13083,6 +13163,11 @@ struct Module: public interface::Module, public Interface
 		// the item that mends it, the preset it was made from; the icon (a
 		// texture's name, checked by the caller) and the look (7c-2: a
 		// prefab, its parts or voxels; kept, not drawn yet)
+		// [KIT_SOUNDS] its sounds by action, a project's sound's name each
+		for(const char *k : {"sound_swing", "sound_shot", "sound_hit",
+				"sound_reload", "sound_break"})
+			if(!text(k, "", item_ok))
+				return false;
 		if(!text("damage_type", "normal", name_ok) ||
 				!text("repair", "", item_ok) || !text("preset", "", item_ok) ||
 				!text("look", "", item_ok) || !text("ammo", "", item_ok))
@@ -13347,6 +13432,185 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "%s made item type %s version %s: %s", cs(p.name),
 				cs(name), cs(itos(version)), cs(row.stringify()));
 		send_item_types(-1);
+	}
+
+	// ---- [KIT_SOUNDS] The project's sounds: named blip sounds (blip1's
+	// compact form, extensions/blip: data, not audio), Kit's own
+	// (sounds.json: kit/click...) and the builders' (rows
+	// "sound:<author>/<name>", a package's too), to every session's peers
+	// as "kit:sounds" {name: {params, author, version}}; a trigger plays one
+	// by name, "kit:sound" {name, at: [x, y, z] | null} to the peers in its
+	// scene
+
+	static bool sound_params_ok(const ss_ &s)
+	{
+		if(s.size() < 7 || s.size() > MAX_SOUND || s.compare(0, 6, "blip1:"))
+			return false;
+		for(size_t i = 6; i < s.size(); i++)
+			if(!isalnum((unsigned char)s[i]) && !strchr("-_+", s[i]))
+				return false;
+		return true;
+	}
+
+	void load_sounds()
+	{
+		m_sounds.clear();
+		const json::Value own = json::load_string(read_file(
+				m_server->get_module_path(MODULE)+"/sounds.json").c_str());
+		for(json::Iterator it(own.get("sounds")); own.get("sounds").
+				is_object() && it; ++it){
+			json::Value r = json::object();
+			r.set("params", jstr(*it, "params"));
+			r.set("author", ss_("kit"));
+			r.set("name", it.key());
+			r.set("version", (int64_t)1);
+			if(sound_params_ok(jstr(r, "params")) && name_ok(it.key()))
+				m_sounds["kit/"+it.key()] = r;
+			else
+				log_w(MODULE, "Kit's sound %s: not blip1 params", cs(it.key()));
+		}
+		for(const ss_ &k : m_store->list("sound:")){
+			ss_ row;
+			if(m_store->get(k, row))
+				m_sounds[k.substr(6)] = json::load_string(row.c_str());
+		}
+		log_i(MODULE, "Sounds: %zu", m_sounds.size());
+	}
+
+	// "kit:sounds" to a peer of this session, or every one of every
+	// session (-1)
+	void send_sounds(int64_t peer)
+	{
+		json::Value all = json::object();
+		for(auto &it : m_sounds)
+			all.set(it.first, it.second);
+		const ss_ data = all.stringify();
+		auto send = [&]{
+			network::access(m_server, [&](network::Interface *inetwork){
+				for(auto &p : m_peers)
+					if(peer < 0 || (size_t)peer == p.first)
+						inetwork->send(p.first, "kit:sounds", data);
+			});
+		};
+		if(peer < 0)
+			each_session(send);
+		else
+			send();
+	}
+
+	// {"op": "sound", "name": n, "params": "blip1:..."}: a builder's sound
+	// made ("<their name>/<n>") or one of the project's changed (n its
+	// whole name, a builder's or a package's not; Kit's are copied, not
+	// changed); {"op": "sound_delete", "name": whole name}
+	void make_sound(const Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		ss_ name = jstr(j, "name");
+		const ss_ params = jstr(j, "params");
+		if(!sound_params_ok(params))
+			return refuse("params: blip1's compact form, \"blip1:...\", "
+					"at most "+itos(MAX_SOUND)+" characters");
+		auto old = m_sounds.find(name);
+		if(old == m_sounds.end()){
+			const ss_ author = builder_author(p.name);
+			if(!name_ok(name))
+				return refuse("name: letters, digits and _ (or a sound's "
+						"whole name)");
+			if(author.empty())
+				return refuse("a builder's sounds are under their name, and "
+						"it is \""+p.name.substr(0, 64)+"\"");
+			name = author+"/"+name;
+			old = m_sounds.find(name);
+		}
+		if(old != m_sounds.end() && (jstr(old->second, "author") == "kit" ||
+				!jstr(old->second, "package").empty()))
+			return refuse(name+" is "+(jstr(old->second, "author") == "kit" ?
+					ss_("Kit's") : "a package's")+": copy it as new");
+		if(old == m_sounds.end() && m_sounds.size() >= MAX_SOUNDS)
+			return refuse("the save has "+itos(MAX_SOUNDS)+" sounds");
+		json::Value row = json::object();
+		row.set("params", params);
+		row.set("author", name.substr(0, name.find('/')));
+		row.set("name", name.substr(name.find('/') + 1));
+		row.set("version", old == m_sounds.end() ? (int64_t)1 :
+				json::jint(old->second, "version", 1) + 1);
+		m_store->set("sound:"+name, row.stringify());
+		m_sounds[name] = row;
+		log_i(MODULE, "%s made sound %s version %s: %s", cs(p.name), cs(name),
+				cs(itos(json::jint(row, "version", 1))), cs(params));
+		send_sounds(-1);
+	}
+
+	void delete_sound(const Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const ss_ name = jstr(j, "name");
+		auto it = m_sounds.find(name);
+		if(it == m_sounds.end())
+			return refuse("no sound "+name.substr(0, 129));
+		if(jstr(it->second, "author") == "kit" ||
+				!jstr(it->second, "package").empty())
+			return refuse(name+" is "+(jstr(it->second, "author") == "kit" ?
+					ss_("Kit's") : "a package's"));
+		// simplified: what names it (a parameter, an item type) keeps the
+		// name and plays nothing; made again under it, it plays again
+		m_store->remove("sound:"+name);
+		m_sounds.erase(it);
+		log_i(MODULE, "%s deleted sound %s", cs(p.name), cs(name));
+		send_sounds(-1);
+	}
+
+	// A sound played (its name; "" or one not here: nothing) for the peers
+	// of this session in `scene` (null: in any): at a place (positional),
+	// or at == null for each where they are; except a peer (0 none: its
+	// client played it already). why: the trigger, for the log
+	void play_sound(const ss_ &name, const ss_ *scene, const double *at,
+			const ss_ &why, size_t except = 0)
+	{
+		if(name.empty())
+			return;
+		if(!m_sounds.count(name)){
+			log_i(MODULE, "Sound %s (%s): no such sound", cs(name), cs(why));
+			return;
+		}
+		json::Value j = json::object();
+		j.set("name", name);
+		j.set("at", at ? point(at) : json::null());
+		const ss_ data = j.stringify();
+		size_t n = 0;
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &o : m_peers)
+				if((!scene || o.second.scene == *scene) && o.first != except){
+					inetwork->send(o.first, "kit:sound", data);
+					n++;
+				}
+		});
+		char where[96] = "everywhere";
+		if(at)
+			snprintf(where, sizeof where, "at (%.1f,%.1f,%.1f)", at[0], at[1],
+					at[2]);
+		log_i(MODULE, "Sound %s (%s) %s to %zu peers", cs(name), cs(why),
+				where, n);
+	}
+
+	// An item type's sound for an action ("swing", "shot", "hit",
+	// "reload", "break"; its sheet's sound_<action>)
+	ss_ item_sound(const ss_ &item, const char *action)
+	{
+		auto it = m_item_types.find(item);
+		return it == m_item_types.end() ? ss_() :
+				jstr(it->second, (ss_("sound_")+action).c_str());
+	}
+
+	// A peer's own place (its body's middle) and the item's sound there
+	void play_item_sound(size_t peer, const ss_ &item, const char *action,
+			bool except_them)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end())
+			return;
+		play_sound(item_sound(item, action), &pi->second.scene,
+				pi->second.pos, item+"'s "+action, except_them ? peer : 0);
 	}
 
 	// A player's equipment (kit/equipment on their entity): its instance
@@ -13741,6 +14005,10 @@ struct Module: public interface::Module, public Interface
 				*why = jstr_at(m_ret, 1);
 			return false;
 		}
+		// [KIT_SOUNDS] equipment's on_tool says "broke" (true, "broke"):
+		// the item's break sound where its holder is
+		if(m_ret.is_array() && jstr_at(m_ret, 1) == "broke")
+			play_item_sound(peer_of_player(player), item, "break", false);
 		return true;
 	}
 
@@ -13882,6 +14150,9 @@ struct Module: public interface::Module, public Interface
 			crit = !bi->second.state.get("ground").is_true() && v.is_array() &&
 					v.at(1u).is_number() && v.at(1u).as_number() < -1;
 		}
+		// [KIT_SOUNDS] the swing's sound for the others (the client played
+		// it; a swing at nothing is its client's alone)
+		play_item_sound(peer, item, "swing", true);
 		// The hit; then the item worn (it may break)
 		const json::Value sh = sheet->deepcopy();
 		const uint64_t me = p.player;
@@ -13924,6 +14195,12 @@ struct Module: public interface::Module, public Interface
 				cs(itos(id)), cs(item), amount, cs(jstr(hit, "type")),
 				crit ? " (critical)" : "");
 		const double k = sheet.get("knockback").as_number();
+		// [KIT_SOUNDS] the item's hit sound where the target is
+		{
+			double tw[3];
+			world_of(it->second, tw);
+			play_sound(jstr(sheet, "sound_hit"), &p.scene, tw, item+"'s hit");
+		}
 		// Not after a respawn (a put since)
 		const size_t tp = it->second.kind == "player" ? peer_of_player(id) : 0;
 		const int64_t puts = m_bodies.count(tp) ? m_bodies[tp].puts : -1;
@@ -14253,6 +14530,8 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "%s shoots %s: %s, %s pellet%s, charge %g, damage %g",
 				cs(who), cs(item), projectile ? "a projectile" : "hitscan",
 				cs(itos(pellets)), pellets > 1 ? "s" : "", f, damage);
+		// [KIT_SOUNDS] its shot sound for the others (their client played it)
+		play_item_sound(peer, item, "shot", true);
 		json::Value ends = json::array();
 		for(int64_t i = 0; i < pellets; i++){
 			double d[3];
@@ -14424,6 +14703,9 @@ struct Module: public interface::Module, public Interface
 		tu.reloading = item;
 		tu.reload_us = now_us() + (int64_t)(time * 1e6);
 		log_i(MODULE, "%s reloads %s: %g s", cs(p.name), cs(item), time);
+		// [KIT_SOUNDS] its reload sound, theirs too (their client plays
+		// none of its own: a refused reload makes no sound)
+		play_item_sound(peer, item, "reload", false);
 		json::Value rj = json::object();
 		rj.set("item", item);
 		rj.set("time", time);
@@ -14572,6 +14854,7 @@ struct Module: public interface::Module, public Interface
 		SessionScope sc(*this, session_of_peer(peer));
 		auto pi = m_peers.find(peer);
 		const world::Material *m = material_named(voxel);
+		voxel_sound(peer, x, y, z, m ? m->sound_dig : ss_(), voxel+"'s dig");
 		// [KIT_INVENTORY_PLAY] a voxel with no group (the app's own) drops
 		// itself at any level
 		if(!m_hosted || pi == m_peers.end() || voxel.empty() ||
@@ -14601,6 +14884,18 @@ struct Module: public interface::Module, public Interface
 			item_hooks(peer, item, "dig", c);
 	}
 
+	// [KIT_SOUNDS] A voxel type's dig or place sound at the cell's middle,
+	// edit mode too
+	void voxel_sound(size_t peer, int x, int y, int z, const ss_ &name,
+			const ss_ &why)
+	{
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end())
+			return;
+		const double c[3] = {x + 0.5, y + 0.5, z + 0.5};
+		play_sound(name, &pi->second.scene, c, why);
+	}
+
 	bool place_ready(size_t peer, const ss_ &voxel, ss_ *why) override
 	{
 		SessionScope sc(*this, session_of_peer(peer));
@@ -14621,6 +14916,9 @@ struct Module: public interface::Module, public Interface
 	void placed(size_t peer, int x, int y, int z, const ss_ &voxel) override
 	{
 		SessionScope sc(*this, session_of_peer(peer));
+		const world::Material *mt = material_named(voxel);
+		voxel_sound(peer, x, y, z, mt ? mt->sound_place : ss_(),
+				voxel+"'s place");
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || pi->second.editing ||
 				!m_session.running || !inventory_mode() || !pi->second.player)
@@ -17411,7 +17709,8 @@ struct Module: public interface::Module, public Interface
 			return refuse("in a game session: the tools edit nothing here");
 		if(gs && (op == "play" || op == "stop" || op == "save_start" ||
 				op == "keep" || op == "always_keep" || op == "terrain" ||
-				op == "voxel" || op == "item" || op == "regenerate" ||
+				op == "voxel" || op == "item" || op == "sound" ||
+				op == "sound_delete" || op == "regenerate" ||
 				op == "hm_regenerate" ||
 				op == "hm_restore" || op == "new_scene" || op == "export" ||
 				op == "draft"))
@@ -17476,6 +17775,10 @@ struct Module: public interface::Module, public Interface
 			return make_voxel(p, j, refuse);
 		if(op == "item")
 			return make_item(p, j, refuse);
+		if(op == "sound")
+			return make_sound(p, j, refuse);
+		if(op == "sound_delete")
+			return delete_sound(p, j, refuse);
 		if(op == "set_voxel")
 			return edit_voxel(p, peer, j, refuse);
 		if(op == "edited")

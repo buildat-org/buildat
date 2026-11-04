@@ -54,7 +54,7 @@
 --     own selection moves nothing), Shift+Tab the other way
 --   - **The panel** (left; [KIT_EDITOR_PANELS]): its tabs are the tools,
 --     each tab's body (it scrolls) the tool's options -- Components,
---     Terrain (T), Voxels (V); Box (B) and Entities, in two rows
+--     Terrain (T), Voxels (V); Box (B), Entities and Sounds, in two rows
 --     ([KIT_TABS_TWO_ROWS]); the tabs and the 3D camera as the builder
 --     left them in the project, kit.remember ([WB_EDITOR_VIEW_MEMORY]).
 --     Components: a type or
@@ -66,7 +66,10 @@
 --     "none" away; and "New voxel type..." makes a builder's own: a
 --     texture (Kit's or an uploaded PNG), kind, solid, transparent, light,
 --     friction, surface. Entities: the entities listed to select (tabs:
---     Game-wide, Scene, Positioned)
+--     Game-wide, Scene, Positioned). [KIT_SOUNDS] Sounds: the
+--     project's named sounds (blip's parameters), each played, edited in
+--     blip's designer (its Save writes it back), copied as new or deleted;
+--     "New sound..." names one and opens the designer
 --   - **The voxels tool** (V, or the panel's Voxels; an app
 --     with solid): a left click places the voxel in hand on the face
 --     pointed at, Shift+left digs the voxel pointed at, each one undo;
@@ -1103,7 +1106,7 @@ local palette
 -- whichever was last (S.panel_tab)
 -- [KIT_TABS_TWO_ROWS] in two rows, the panel as narrow as its content
 NT.TABS = {{"Components", "Terrain", "Voxels"},
-	{"Box", "Entities", "Items"}}
+	{"Box", "Entities", "Items", "Sounds"}}
 NT.TOOL_TAB = {terrain = "Terrain", voxels = "Voxels", box = "Box"}
 NT.TAB_KEY = {Terrain = "terrain", Voxels = "voxels", Box = "box"}
 -- Where each tab's body was scrolled
@@ -1737,7 +1740,8 @@ palette = function()
 	local fill = tab == "Items" and NT.items or
 			tab == "Terrain" and terrain_panel or tab == "Voxels" and
 			NT.voxels or tab == "Box" and NT.box_section or
-			tab == "Entities" and NT.entities or NT.components
+			tab == "Entities" and NT.entities or
+			tab == "Sounds" and NT.sounds or NT.components
 	fill(body)
 	view:SetStyleAuto()
 	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
@@ -1942,6 +1946,10 @@ local function field(name, d, values)
 		if not has and type(values[name]) == "string" then
 			f.choices[#f.choices + 1] = {values[name], values[name]}
 		end
+	elseif t == "sound" then
+		-- [KIT_SOUNDS] the project's sounds and "none"
+		f.type = "choice"
+		f.choices = M.sound_choices(values[name])
 	elseif t == "prefab" then
 		f.type = "choice"
 		f.choices = {{"none", ""}}
@@ -2926,6 +2934,137 @@ function M.scene_dialog()
 	end)
 end
 
+-- ---- [KIT_SOUNDS] The project's sounds (sounds.lua's M.sounds)
+
+-- A dropdown's choices: "none" (""), the project's own by name, then
+-- Kit's and the packages'; the value too when it names none of them (a
+-- deleted one)
+function M.sound_choices(value)
+	local own, other = {}, {}
+	for n, s in pairs(M.sounds or {}) do
+		local list = (s.author == "kit" or s.package) and other or own
+		list[#list + 1] = n
+	end
+	table.sort(own)
+	table.sort(other)
+	local out, has = {{"none", ""}}, value == nil or value == ""
+	for _, list in ipairs({own, other}) do
+		for _, n in ipairs(list) do
+			out[#out + 1] = {n, n}
+			has = has or n == value
+		end
+	end
+	if not has and type(value) == "string" then
+		out[#out + 1] = {value, value}
+	end
+	return out
+end
+
+-- A form's fields, each of type "sound" a dropdown of sound_choices()
+function M.with_sounds(fields, values)
+	local out = {}
+	for i, f in ipairs(fields) do
+		if f.type == "sound" then
+			f = {name = f.name, label = f.label, type = "choice",
+				choices = M.sound_choices(values[f.name])}
+		end
+		out[i] = f
+	end
+	return out
+end
+
+-- A name asked (a builder's sound, "<their name>/<name>"), then ok(name)
+function NT.sound_name_dialog(title, name, ok)
+	drop("dialog")
+	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	W.dialog = w
+	w.priority = 10
+	w:SetFixedWidth(math.min(360, magic.ui.root.width - 16))
+	text(w, title)
+	local f = {name = name}
+	ui_utils.settings_form(w, {{name = "name", type = "text",
+		max_length = 64}}, f, function(k, v) f[k] = v end, WIDGETS)
+	local br = row(w)
+	button(br, "OK", function()
+		drop("dialog")
+		ok(f.name)
+	end)
+	button(br, "Cancel", function()
+		drop("dialog")
+	end)
+end
+
+-- The designer (blip's) on a sound; its Save sends it as name
+function NT.design(name, params)
+	log:info("kit editor: designing sound " .. name)
+	require("buildat/extension/blip").design(params, function(packed)
+		send({op = "sound", name = name, params = packed})
+	end)
+end
+
+-- A short name for a copy of `of`, one no sound has: <name>_2, _3...
+function NT.copy_name(of)
+	local base = tostring(of):match("[^/]*$")
+	local taken = {}
+	for n in pairs(M.sounds) do
+		taken[n:match("[^/]*$")] = true
+	end
+	local i, cand = 2, base .. "_2"
+	while taken[cand] do
+		i = i + 1
+		cand = base .. "_" .. i
+	end
+	return cand
+end
+
+M.on_sounds(function()
+	if E.editing and NT.tab() == "Sounds" then
+		palette()
+	end
+end)
+
+-- The Sounds tab: "New sound..." (a name, then the designer; its Save
+-- makes it), then each sound: Play, Edit (the designer; its Save writes
+-- it back) and Delete for the project's own, Copy as new for every one
+-- (Kit's and a package's are copied, not changed)
+function NT.sounds(w)
+	button(w, "New sound...", function()
+		NT.sound_name_dialog("A new sound of yours", "my_sound", function(n)
+			-- blip's own first sound (its pickup)
+			NT.design(n, "blip1:AAAAVgDHjZmAAf_f_AAAAf_AAAAf_AAf_f___f_AAAAf_gAwG2s")
+		end)
+	end)
+	local list = M.sound_choices()
+	if #list == 1 then
+		text(w, "No sounds", DIM)
+	end
+	for i = 2, #list do
+		local n = list[i][2]
+		local s = M.sounds[n]
+		local own = s.author ~= "kit" and not s.package
+		local r = row(w)
+		label(r, n .. (own and "" or s.author == "kit" and " (Kit's)" or
+				" (a package's)"), 150)
+		-- Named for a drive: "sound play <name>"...
+		button(r, "Play", function() M.play_sound(n) end):SetName(
+				"sound play " .. n)
+		if own then
+			button(r, "Edit", function() NT.design(n, s.params) end):SetName(
+					"sound edit " .. n)
+		end
+		button(r, "Copy as new", function()
+			NT.sound_name_dialog("A copy of " .. n, NT.copy_name(n), function(c)
+				send({op = "sound", name = c, params = s.params})
+			end)
+		end):SetName("sound copy " .. n)
+		if own then
+			button(r, "Delete", function()
+				send({op = "sound_delete", name = n})
+			end):SetName("sound delete " .. n)
+		end
+	end
+end
+
 -- [KIT] stage 4g: a builder's voxel type ("<their name>/<name>"), made or
 -- its next version: a registered voxel's texture or an uploaded PNG's
 local VOXEL_FIELDS = {
@@ -2943,6 +3082,9 @@ local VOXEL_FIELDS = {
 	-- dig_by_tools
 	{name = "group", type = "text", max_length = 32},
 	{name = "level", type = "number", integer = true, min = 0, max = 15},
+	-- [KIT_SOUNDS] its dig's and place's sounds
+	{name = "sound_dig", type = "sound"},
+	{name = "sound_place", type = "sound"},
 }
 
 function M.voxel_dialog()
@@ -2954,7 +3096,7 @@ function M.voxel_dialog()
 	w:SetFixedWidth(math.min(480, magic.ui.root.width - 16))
 	local f = E.voxel_form
 	text(w, "A voxel type of yours")
-	ui_utils.settings_form(w, VOXEL_FIELDS, f, function(k, v)
+	ui_utils.settings_form(w, M.with_sounds(VOXEL_FIELDS, f), f, function(k, v)
 		f[k] = v
 	end, WIDGETS, {texture = E.state.textures or {}})
 	local br = row(w)
@@ -3016,6 +3158,12 @@ local ITEM_FIELDS = {
 	{name = "ammo", type = "text", max_length = 129},
 	{name = "look", type = "text", max_length = 129},
 	{name = "color", type = "text", max_length = 7},
+	-- [KIT_SOUNDS] its sounds by action
+	{name = "sound_swing", type = "sound"},
+	{name = "sound_shot", type = "sound"},
+	{name = "sound_hit", type = "sound"},
+	{name = "sound_reload", type = "sound"},
+	{name = "sound_break", type = "sound"},
 }
 
 -- The form from an item type's sheet (its dig as text)
@@ -3055,7 +3203,7 @@ function M.item_dialog()
 	-- The icon: a voxel's or an upload's texture, "" none (a text label)
 	local tex = {""}
 	for _, t in ipairs(E.state.textures or {}) do tex[#tex + 1] = t end
-	ui_utils.settings_form(w, ITEM_FIELDS, f, function(k, v)
+	ui_utils.settings_form(w, M.with_sounds(ITEM_FIELDS, f), f, function(k, v)
 		f[k] = v
 	end, WIDGETS, {texture = tex})
 	local br = row(w)

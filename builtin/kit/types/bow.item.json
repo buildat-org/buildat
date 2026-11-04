@@ -18,5 +18,8 @@
 	"ammo": "kit/arrow",
 	"uses": 300,
 	"wear_shot": 1,
-	"color": "#8a5a2a"
+	"color": "#8a5a2a",
+	"sound_shot": "kit/swing",
+	"sound_hit": "kit/hit",
+	"sound_break": "kit/dig"
 }

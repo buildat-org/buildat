@@ -45,7 +45,8 @@
 **                        {entities, voxels} (on_build's: a prefab's
 **                        members, [KIT_GENERATORS]), respawn = true
 **                        (c:respawn()), hit = {...} (modify_hit's
-**                        returned hit, [KIT_TOOLS_1])}; a call into
+**                        returned hit, [KIT_TOOLS_1]), sounds = {{name,
+**                        everywhere}...} (c:sound, [KIT_SOUNDS])}; a call into
 **                        the provider (inv) is marked by "P" before it and
 **                        "p" after it, ahead of the answer
 **   "L<source>"          [KIT] stage 4h: the movement library
@@ -414,6 +415,15 @@ static const char PRELUDE[] =
 "	function c:list(ext) return inv.list(ext) end\n"
 "	function c:emit(output, value) emits[#emits + 1] = {tostring(output), value == nil and NULL or value} end\n"
 "	function c:set_voxel(name) fx.voxel = tostring(name) end\n"
+"	-- [KIT_SOUNDS] a project's sound played at it (everywhere: not\n"
+"	-- positional); a name of \"\" or nil plays nothing\n"
+"	local sounds = {}\n"
+"	function c:sound(name, opts)\n"
+"		if name == nil or name == '' then return end\n"
+"		if opts ~= nil and type(opts) ~= 'table' then error('sound: options are {everywhere = true}', 2) end\n"
+"		if #sounds >= 8 then error('sound: 8 a run at most', 2) end\n"
+"		sounds[#sounds + 1] = {tostring(name), opts and opts.everywhere == true or false}\n"
+"	end\n"
 "	-- [KIT_VOXEL_STATES] Its voxel box: its size, its voxels (reads_voxels)\n"
 "	-- in box order, and cells written in it\n"
 "	c.box = req.box\n"
@@ -563,6 +573,7 @@ static const char PRELUDE[] =
 "	if #sends > 0 then fx.send = sends end\n"
 "	if #lines > 0 then fx.log = lines end\n"
 "	if #apps > 0 then fx.app = apps end\n"
+"	if #sounds > 0 then fx.sounds = sounds end\n"
 "	if #sessions > 0 then fx.sessions = sessions end\n"
 "	if req.handler == 'on_build' then fx.build = build end\n"
 "	return json(fx)\n"

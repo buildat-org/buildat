@@ -13,15 +13,16 @@
 #      brightness and saves it as her prefab lamp_post; stars it a
 #      favourite (the Favourites tab has it); the credits name the
 #      package; "Publish my prefabs..." writes her prefabs and
-#      ([KIT_PACKAGE_ITEMS]) her item type wand into
-#      dev_apps/my_prefabs (its dependency on alice/lamps) and opens the
-#      publish screen on it, which the check then packs and publishes by
-#      the command line.
+#      ([KIT_PACKAGE_ITEMS]) her item type wand ([KIT_SOUNDS] and its hit's
+#      sound zap) into dev_apps/my_prefabs (its dependency on
+#      alice/lamps) and opens the publish screen on it, which the check
+#      then packs and publishes by the command line.
 #   3. On server B carol (its admin) installs alice/my_prefabs from the
 #      New tab: alice/lamps comes with it first; places the prefab
-#      alice/lamp_post (its item type <fp>/wand there too, after B's
-#      restart); the credits, from the pause menu (Credits...,
-#      its Escape and Close back to the menu), name both packages.
+#      alice/lamp_post (its item type <fp>/wand and sound <fp>/zap there
+#      too, after B's restart); the credits, from the pause menu
+#      (Credits..., its Escape and Close back to the menu), name both
+#      packages.
 #   4. alice/lamps 2.0.0 (its lamp version 2: level for brightness, by
 #      its migrate) published; carol upgrades it from the New tab: the
 #      placed lamp is migrated (brightness 7, level 70), and after a
@@ -227,10 +228,12 @@ click Button "Close"
 wait_log 5000 kit editor: the credits closed
 click Button "New"
 wait_log 20000 kit editor: package alice/lamps 1.0.0
-event kit_edit {"op": "item", "name": "wand", "preset": "kit/sword", "damage": 9}
+event kit_edit {"op": "sound", "name": "zap", "params": "blip1:AAALvAABrNYAAf_f_AAAAf_AAUNf_AAf_f___f_AAGaf_gA4DbW"}
+wait_log 10000 kit: 9 sounds
+event kit_edit {"op": "item", "name": "wand", "preset": "kit/sword", "damage": 9, "sound_hit": "alice/zap"}
 wait_log 10000 kit: 8 item types
 click Button "Publish my prefabs..."
-wait_log 10000 aitta publish: Kit's export asked, 2 files
+wait_log 10000 aitta publish: Kit's export asked, 3 files
 frames 3
 screenshot @T@/a_export.png
 click Button "Yes"
@@ -242,12 +245,15 @@ BUILDAT_JOIN_NAME=alice BUILDAT_JOIN_CODE=$c client alice alice
 ! grep -aq "kit editor: into the crosshair" "$t/alice.log" ||
 	fail "a click on the network dialog went into the editor's crosshair ($t/alice.log)"
 want "$t/srva.log" "alice installed alice/lamps 1.0.0: 1 types, 0 prefabs" \
-	"alice exports 2 files, 1 dependencies"
+	"alice exports 3 files, 1 dependencies"
 d="$t/cu_alice/dev_apps/my_prefabs"
 [ -f "$d/types/lamp_post.prefab.json" ] || fail "no lamp_post in $d"
 # [KIT_PACKAGE_ITEMS] the builder's item type with them
 grep -q '"damage" *: *9' "$d/types/wand.item.json" ||
 	fail "no item type wand in $d"
+grep -q '"sound_hit" *: *"alice/zap"' "$d/types/wand.item.json" &&
+	grep -q '"params" *: *"blip1:' "$d/types/zap.sound.json" ||
+	fail "no sound zap, the wand's hit's, in $d"
 grep -q '"kit" : "alice/lamps"' "$d/meta.json" ||
 	fail "no dependency on alice/lamps ($d/meta.json)"
 grep -q '"brightness" *: *7' "$d/types/lamp_post.prefab.json" ||
@@ -303,7 +309,7 @@ wait_log 5000 pause: the menu closed
 EOF
 BUILDAT_JOIN_NAME=carol BUILDAT_JOIN_CODE=$c client carol carol
 want "$t/srvb.log" "carol installed alice/lamps 1.0.0" \
-	"carol installed alice/my_prefabs 0.1.0: 0 types, 1 prefabs, 0 voxel types, 1 item types"
+	"carol installed alice/my_prefabs 0.1.0: 0 types, 1 prefabs, 0 voxel types, 1 item types, 1 sounds"
 want "$t/carol.log" "kit editor: credit alice/lamps 1.0.0 by alice"
 [ "$(grep -an "carol installed alice/lamps" "$t/srvb.log" | cut -d: -f1)" -lt \
 	"$(grep -an "carol installed alice/my_prefabs" "$t/srvb.log" | cut -d: -f1)" ] ||
@@ -335,6 +341,9 @@ server srvb2 "$t/b"
 # Kit hosts after "Listening at"
 wait_for_log "$t/srvb2.log" "Component type $fp/lamp version" 60
 want "$t/srvb2.log" "Kit packages: 2" "Component type $fp/lamp version 2"
+# [KIT_SOUNDS] the sounds loaded after the item types
+wait_for_log "$t/srvb2.log" "Sounds: 9" 60 ||
+	fail "no sound $fp/zap after B's restart ($t/srvb2.log)"
 grep -aq "Item types: .*$fp/wand" "$t/srvb2.log" ||
 	fail "no item type $fp/wand after B's restart ($t/srvb2.log)"
 grep -aq "Entity 3's $fp/lamp upgraded" "$t/srvb2.log" &&

@@ -1865,6 +1865,15 @@ do
 	install({M = M, E = E, O = O, log = log})
 end
 
+-- ---- [KIT_SOUNDS] The project's sounds, played: sounds.lua
+-- (before the editor: its Sounds tab's)
+do
+	local ok, err, install = buildat.run_script_file("kit/sounds.lua")
+	assert(ok and type(install) == "function", "kit: sounds.lua: " ..
+			tostring(err))
+	install({M = M, O = O, log = log})
+end
+
 -- ---- The editor: editor.lua, given what it shares with play
 do
 	local ok, err, install = buildat.run_script_file("kit/editor.lua")

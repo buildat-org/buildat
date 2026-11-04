@@ -4,7 +4,8 @@
 -- stays. Kit makes one where a full inventory drops the rest, where a
 -- player drops a stack (the drop key, a stack let go out of the screen)
 -- and where one dies with kit/game_rules' on_death "drop"; a builder may
--- place one. "taken" signals the count taken.
+-- place one. "taken" signals the count taken; [KIT_SOUNDS] `sound` plays
+-- at it then.
 -- simplified: no pickup delay (a drop lands 2 m ahead of the dropper, an
 -- overflow where a full inventory has no room); one standing in it takes it
 -- only on entering again
@@ -20,6 +21,7 @@ return {
 		item = {type = "string", default = "kit/stone", choices_from = "items"},
 		count = {type = "number", default = 1, min = 1, max = 1000000},
 		size = {type = "position", default = {1, 2, 1}},
+		sound = {type = "sound", default = "kit/pickup"},
 	},
 	state = {
 		left = {default = 0},
@@ -51,6 +53,7 @@ return {
 		c.state.left = c.state.left - n
 		c:log(c:name(by), "takes", n, c.params.item)
 		c:emit("taken", n)
+		c:sound(c.params.sound)
 		if c.state.left <= 0 then
 			c:remove(c.id)
 		else

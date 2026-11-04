@@ -13,5 +13,8 @@
 	"reach": 3,
 	"uses": 100,
 	"wear_hit": 1,
-	"wear_dig": 2
+	"wear_dig": 2,
+	"sound_swing": "kit/swing",
+	"sound_hit": "kit/hit",
+	"sound_break": "kit/dig"
 }

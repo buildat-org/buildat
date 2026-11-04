@@ -72,7 +72,8 @@ return {
 				c.state.held = {}
 				c:log(item, "breaks")
 				c:emit("broke", item)
-				return
+				-- [KIT_SOUNDS] Kit plays the item's break sound
+				return true, "broke"
 			end
 			inst.wear = left
 			c:log(item, "uses left", left)

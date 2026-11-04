@@ -17,5 +17,8 @@
 	"reload_mode": "whole",
 	"color": "#ff3cc8",
 	"look": "kit/paintball_look",
-	"grip": [0.13, -0.12, 0.2]
+	"grip": [0.13, -0.12, 0.2],
+	"sound_shot": "kit/shot",
+	"sound_hit": "kit/hit",
+	"sound_reload": "kit/click"
 }

@@ -15,5 +15,8 @@
 	"magazine": 12,
 	"reload": 1.5,
 	"reload_mode": "whole",
-	"color": "#404040"
+	"color": "#404040",
+	"sound_shot": "kit/shot",
+	"sound_hit": "kit/hit",
+	"sound_reload": "kit/click"
 }

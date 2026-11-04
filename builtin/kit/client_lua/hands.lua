@@ -23,7 +23,8 @@
 -- a swing for a melee hit, a kick back and a muzzle flash for a shot.
 -- Shots ("kit:shot") leave a splat of their colour where they end;
 -- projectiles ("kit:projectile") fly as the server's do, stopping where
--- it says ("kit:projectile_end"). No sounds: Kit has no sound path yet.
+-- it says ("kit:projectile_end"). [KIT_SOUNDS] The swing's and the shot's
+-- sounds at once here (sounds.lua), the server's for the others.
 -- For a drive: "event kit_hold <item>" ("" a hand), "event kit_hit <id>"
 -- ("nearest": the nearest player or entity with health), "event
 -- kit_shoot [<id>]" (at that entity, else along the view), "event
@@ -173,6 +174,9 @@ function M.swing(id)
 	last_swing = now
 	log:info("kit: swing " .. item .. (id and " at " .. tostring(id) or ""))
 	M.view_swing()
+	-- [KIT_SOUNDS] its swing's sound here at once (the server plays it
+	-- for the others on a hit)
+	M.play_sound(sheet.sound_swing)
 	if id then
 		buildat.send_packet("kit:hit", tostring(id))
 	end
@@ -512,6 +516,7 @@ local function shoot(id, dir)
 	local d = aim(id, dir)
 	buildat.send_packet("kit:shoot", network.write_json({dir = {d.x, d.y, d.z}}))
 	R.drawing = false
+	M.play_sound(sheet.sound_shot)
 	V.kick, V.flash_at = t, t
 	if M.kick then
 		M.kick(tonumber(sheet.recoil) or 0)

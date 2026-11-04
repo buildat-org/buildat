@@ -1,12 +1,14 @@
 -- A door: an object one wide and two tall (its size), drawn shut or
 -- swung open, and solid while shut. A player opens and shuts it by using
 -- it, a link by "open", "close" or "toggle"; it shuts itself after
--- close_after seconds (0: it stays open). mirror: it swings the other way
+-- close_after seconds (0: it stays open). mirror: it swings the other way.
+-- [KIT_SOUNDS] sound_open and sound_close play at it
 local function set(c, open, by)
 	if open == c.state.open then
 		return
 	end
 	c.state.open = open
+	c:sound(open and c.params.sound_open or c.params.sound_close)
 	c:log(open and "opened" or "shut", "by", c:name(by))
 	c:emit(open and "opened" or "closed")
 	if open and c.params.close_after > 0 then
@@ -26,6 +28,8 @@ return {
 		-- [KIT_LOOK_MATERIAL] A voxel material it wears ("": its own colour)
 		material = {type = "voxel", default = "", choices_from = "voxels"},
 		close_after = {type = "number", default = 0, min = 0, max = 3600},
+		sound_open = {type = "sound", default = "kit/door"},
+		sound_close = {type = "sound", default = "kit/door"},
 	},
 	look = {shape = "box", extent = "size", depth = 0.2,
 		voxel = "param:material", color = "#8a5a30",
