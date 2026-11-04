@@ -366,7 +366,8 @@ local function build_look(holder, sheet)
 				K.wedge(body):SetMaterial(0, mat)
 			else
 				local m = body:CreateComponent("StaticModel")
-				m.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+				m.model = magic.cache:GetResource("Model", "Models/" ..
+						(pt.shape == "sphere" and "Sphere" or "Box") .. ".mdl")
 				m.material = mat
 			end
 		end

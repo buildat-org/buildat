@@ -1,0 +1,14 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "bomb_look",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "ball", "pos": [0, 0.15, 0],
+			"components": [{"type": "kit/part", "params": {"shape": "sphere",
+				"size": [0.3, 0.3, 0.3], "color": "#101010", "collision": false}}]},
+		{"id": 2, "name": "fuse", "pos": [0, 0.33, 0],
+			"components": [{"type": "kit/part", "params": {"size": [0.04, 0.08, 0.04],
+				"color": "#c0a060", "collision": false}}]}
+	]
+}

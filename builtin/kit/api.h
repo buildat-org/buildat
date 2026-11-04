@@ -918,6 +918,14 @@ namespace interface
 // entity within radius (64 at most). 4 a run; Kit's blasts are limited to
 // EXPLODE_RATE (4) a second, EXPLODE_BURST (16) at once, server-wide;
 // a refusal is in the entity's log.
+// [KIT_CTF] Built on these, Kit's types (their files say how): kit/flag (a
+// carriable objective: taken by a click or within a range, stolen,
+// placed by an action, scoring in a team's region, home by a timer, a
+// death, a leave, a fall), kit/explosive (a fuse, a hiss, c:explode) and
+// kit/placer (an item of use kind "use" puts a prefab's copy ahead of its
+// player); kit/part's shape "sphere"; the prefabs kit/hut (voxels) and
+// kit/bomb_look; the sound kit/hiss. util/kit_ctf_check.sh composes a
+// capture the flag of them.
 //
 // **The World** ([KIT] stage 4e; world.h says how it is made): one
 // game-wide kit/world on the app root, its parameters the choices -- the
