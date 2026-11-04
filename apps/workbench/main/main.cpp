@@ -315,14 +315,24 @@ struct Module: public interface::Module
 		auto it = m_scenes.find(c.scene);
 		if(it == m_scenes.end() || !m_names.count(c.peer))
 			return;
+		// [KIT_CTF] Into another session ("<scene>~<id>"): Kit puts the
+		// body as they join there, unless the join put them already (a
+		// team's teleport), which a put here would undo
+		auto session = [](const ss_ &s){
+			const size_t t = s.find('~');
+			return t == ss_::npos ? ss_() : s.substr(t + 1);
+		};
+		const bool joins = !m_peer_scene.count(c.peer) ||
+				session(m_peer_scene[c.peer]) != session(c.scene);
 		m_peer_scene[c.peer] = c.scene;
 		replicate::assign_scene_to_peer(m_server, it->second, c.peer);
 		log_i(MODULE, "workbench: %s to scene %s", cs(m_names[c.peer]),
 				cs(c.scene));
 		place(c.peer, c.x, c.y, c.z);
-		kit::access(m_server, [&](kit::Interface *k){
-			k->put_player(c.peer, c.x, c.y, c.z, c.yaw);
-		});
+		if(!joins)
+			kit::access(m_server, [&](kit::Interface *k){
+				k->put_player(c.peer, c.x, c.y, c.z, c.yaw);
+			});
 	}
 
 	// The scene a peer is in
