@@ -841,38 +841,6 @@ namespace interface
 // builtin/accounts is) is dropped when they leave or log in; leaving the
 // server leaves a zone (on_leave), and joining inside one enters it.
 //
-// **The World** ([KIT] stage 4e; world.h says how it is made): one
-// game-wide kit/world on the app root, its parameters the choices -- the
-// generator (empty, flat, noise, valleys), the seed, the biome, the size
-// (finite width x depth round the origin, baked; or infinite, only edited
-// sections saved, the generator's version pinned in the row "world"), a
-// finite map's border (void, wall, water) and the surface (voxels or
-// builtin/heightmap's map). An app that has one names its scene
-// (Host::world_scene) and creates its voxelworld instance with the region
-// WORLD_SECTIONS_XZ / WORLD_SECTION_Y0..Y1 and nothing loaded (Kit sets
-// the load points), and its voxels (register_voxels(): Kit's own
-// material set, materials.json) before the save. Generators work against
-// roles (stone, top, filler, water, riverbed, dust, cave_floor,
-// cave_wall) that a material set's biomes bind to voxels, never voxel
-// names; a role missing is refused, named. An edit of the World's
-// parameters generates again every section nobody wrote; a builder is
-// sent "kit:warning" (text) for the seams and a refusal. Voxel objects
-// ([VOXEL_OBJECTS]) on a heightmap are their own entities once they
-// exist, not the World's.
-namespace kit
-{
-	// The World's voxelworld region, in sections (voxelworld's, WORLD_SECTION
-	// voxels a side): what an infinite world may reach, -16384...16383
-	// each way, -128...255 up
-	static const int WORLD_SECTION = 64;
-	static const int WORLD_SECTIONS_XZ = 256;
-	static const int WORLD_SECTION_Y0 = -2, WORLD_SECTION_Y1 = 3;
-
-	// [KIT_VOXEL_FORMAT] (stage 4g2) Kit's voxel format, what an app
-	// hosting Kit's World sets on its registry before the first voxel:
-	// plane 0 is `id` 0..15 (material and shape: "kit/stone" and
-	// "kit/stone:stair" are two ids, the shapes made by Kit's registering,
-	// world.h), `param` 16..23 (what the definition says: a shape's
 // **Death, respawn, hurts and blasts** ([KIT_CTF]). A player's death is
 // their health's c:died(by, type) (kit/health's at hp 0, on a player's
 // entity: c.is_player): on_died(c, player, by, type) of every instance in
@@ -916,6 +884,38 @@ namespace kit
 // EXPLODE_RATE (4) a second, EXPLODE_BURST (16) at once, server-wide;
 // a refusal is in the entity's log.
 //
+// **The World** ([KIT] stage 4e; world.h says how it is made): one
+// game-wide kit/world on the app root, its parameters the choices -- the
+// generator (empty, flat, noise, valleys), the seed, the biome, the size
+// (finite width x depth round the origin, baked; or infinite, only edited
+// sections saved, the generator's version pinned in the row "world"), a
+// finite map's border (void, wall, water) and the surface (voxels or
+// builtin/heightmap's map). An app that has one names its scene
+// (Host::world_scene) and creates its voxelworld instance with the region
+// WORLD_SECTIONS_XZ / WORLD_SECTION_Y0..Y1 and nothing loaded (Kit sets
+// the load points), and its voxels (register_voxels(): Kit's own
+// material set, materials.json) before the save. Generators work against
+// roles (stone, top, filler, water, riverbed, dust, cave_floor,
+// cave_wall) that a material set's biomes bind to voxels, never voxel
+// names; a role missing is refused, named. An edit of the World's
+// parameters generates again every section nobody wrote; a builder is
+// sent "kit:warning" (text) for the seams and a refusal. Voxel objects
+// ([VOXEL_OBJECTS]) on a heightmap are their own entities once they
+// exist, not the World's.
+namespace kit
+{
+	// The World's voxelworld region, in sections (voxelworld's, WORLD_SECTION
+	// voxels a side): what an infinite world may reach, -16384...16383
+	// each way, -128...255 up
+	static const int WORLD_SECTION = 64;
+	static const int WORLD_SECTIONS_XZ = 256;
+	static const int WORLD_SECTION_Y0 = -2, WORLD_SECTION_Y1 = 3;
+
+	// [KIT_VOXEL_FORMAT] (stage 4g2) Kit's voxel format, what an app
+	// hosting Kit's World sets on its registry before the first voxel:
+	// plane 0 is `id` 0..15 (material and shape: "kit/stone" and
+	// "kit/stone:stair" are two ids, the shapes made by Kit's registering,
+	// world.h), `param` 16..23 (what the definition says: a shape's
 	// facing, see world::SHAPE_PARAMS), `tint` 24..27 (16 steps of the
 	// material's tint ramp, albedo) and `light_sky` 28..31, maintained
 	// only while the World's "sky_light" is on (dark caves; off, nothing

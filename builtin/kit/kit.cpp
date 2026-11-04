@@ -86,10 +86,6 @@ static const int MAX_EXTENT = 64;
 static const int MAX_VOLUME = 64;
 // The cells a grants type's c:set_voxel sets at most (its box)
 static const int MAX_SET_CELLS = 4096;
-// [KIT_VOXEL_STATES] A voxel_box's extent each way, a pattern parameter's
-// bytes and the voxel names in it at most
-static const int MAX_VOXEL_BOX = 16;
-static const size_t MAX_PATTERN = 32768;
 // [KIT_CTF] c:explode: its radius in cells (a sphere of about 3050 cells
 // at most), the reach of its kill and hurt radii, the entities told
 // (on_blast), and Kit's blasts a second (a server's, every round's
@@ -97,6 +93,10 @@ static const size_t MAX_PATTERN = 32768;
 static const double MAX_BLAST_RADIUS = 9, MAX_BLAST_REACH = 32;
 static const size_t MAX_BLAST_TOLD = 64;
 static const double EXPLODE_RATE = 4, EXPLODE_BURST = 16;
+// [KIT_VOXEL_STATES] A voxel_box's extent each way, a pattern parameter's
+// bytes and the voxel names in it at most
+static const int MAX_VOXEL_BOX = 16;
+static const size_t MAX_PATTERN = 32768;
 static const size_t MAX_PATTERN_NAMES = 256;
 // The most of an item a player has (Kit's own counts, c:add)
 static const int64_t MAX_ITEMS = 1000000;
@@ -1085,15 +1085,15 @@ struct Module: public interface::Module, public Interface
 	std::deque<Write> m_writes;
 	// Voxels an instance set whose section was not loaded: tried each tick
 	std::deque<Write> m_pending_voxels;
+	// [KIT_CTF] c:explode's allowance (EXPLODE_RATE), time_us
+	double m_blast_tokens = EXPLODE_BURST;
+	int64_t m_blast_at = 0;
 	// The editor: edit rights the app gave or took (set_editor) over the
 	// accounts' default, the types an editor places (each of Kit's
 	// and the app's that loads), each editor's undo, and the sections Kit owns
 	// positions in, each scene's
 	std::map<ss_, bool> m_rights;
 	// The replacing inventory provider (an entity's id and its instance; 0:
-	// [KIT_CTF] c:explode's allowance (EXPLODE_RATE), time_us
-	double m_blast_tokens = EXPLODE_BURST;
-	int64_t m_blast_at = 0;
 	// none: each player entity's own), and those refused as a second
 	uint64_t m_provider = 0;
 	size_t m_provider_comp = 0;
@@ -3225,6 +3225,9 @@ struct Module: public interface::Module, public Interface
 				json::Value((int64_t)0));
 		row.set("friction", j.get("friction").is_number() ?
 				j.get("friction") : json::Value(1.0));
+		// [KIT_CTF] the blast strength it stands (0: any blast's)
+		row.set("blast_resist", j.get("blast_resist").is_number() ?
+				j.get("blast_resist") : json::Value(0.0));
 		row.set("surface", jstr(j, "surface"));
 		// [KIT_TOOLS_1] its material group and level
 		row.set("group", jstr(j, "group"));
@@ -3233,9 +3236,6 @@ struct Module: public interface::Module, public Interface
 		// [KIT_SOUNDS] its dig's and place's sounds
 		row.set("sound_dig", jstr(j, "sound_dig"));
 		row.set("sound_place", jstr(j, "sound_place"));
-		// [KIT_CTF] the blast strength it stands (0: any blast's)
-		row.set("blast_resist", j.get("blast_resist").is_number() ?
-				j.get("blast_resist") : json::Value(0.0));
 		// [KIT_CTF] what its dig drops ("" itself)
 		row.set("drop", jstr(j, "drop"));
 		world::Material m;
@@ -8425,6 +8425,33 @@ struct Module: public interface::Module, public Interface
 		// [KIT_TOOLS_1] kit/health's c:respawn() on a player's entity
 		if(fx.get("respawn").is_true() && e.kind == "player")
 			respawn_player(e.id);
+		// [KIT_CTF] a health's c:died(by, type) on a player's entity; a
+		// component's c:respawn_waiting(), c:hurt() and c:explode() (each
+		// running the targets' hooks now: what the caller's run() reads
+		// kept)
+		const json::Value &died = fx.get("died");
+		const json::Value &hurts = fx.get("hurt");
+		const json::Value &blasts = fx.get("explode");
+		if((died.is_array() && e.kind == "player") ||
+				fx.get("respawn_waiting").is_true() || hurts.size() ||
+				blasts.size()){
+			const json::Value ret = m_ret, hit_ret = m_hit_ret;
+			const uint64_t self = e.id;
+			if(died.is_array() && e.kind == "player")
+				player_death(self, r.by, name_ok(jstr_at(died, 1)) ?
+						jstr_at(died, 1) : ss_("normal"));
+			if(fx.get("respawn_waiting").is_true())
+				log_i(MODULE, "Entity %s's %s respawns %i waiting players",
+						cs(itos(self)), cs(type), respawn_waiting());
+			for(unsigned i = 0; i < hurts.size() && m_entities.count(self);
+					i++)
+				hurt(m_entities[self], type, hurts.at(i), r.by);
+			for(unsigned i = 0; i < blasts.size() && m_entities.count(self);
+					i++)
+				explode(m_entities[self], type, blasts.at(i), r.by);
+			m_ret = ret;
+			m_hit_ret = hit_ret;
+		}
 		// [KIT] stage 4d: entities: copies made, signals sent, removals
 		// (last: the instance itself may go)
 		const uint64_t self = e.id;
@@ -8498,33 +8525,6 @@ struct Module: public interface::Module, public Interface
 				r.insert(tid);
 		return r;
 	}
-		// [KIT_CTF] a health's c:died(by, type) on a player's entity; a
-		// component's c:respawn_waiting(), c:hurt() and c:explode() (each
-		// running the targets' hooks now: what the caller's run() reads
-		// kept)
-		const json::Value &died = fx.get("died");
-		const json::Value &hurts = fx.get("hurt");
-		const json::Value &blasts = fx.get("explode");
-		if((died.is_array() && e.kind == "player") ||
-				fx.get("respawn_waiting").is_true() || hurts.size() ||
-				blasts.size()){
-			const json::Value ret = m_ret, hit_ret = m_hit_ret;
-			const uint64_t self = e.id;
-			if(died.is_array() && e.kind == "player")
-				player_death(self, r.by, name_ok(jstr_at(died, 1)) ?
-						jstr_at(died, 1) : ss_("normal"));
-			if(fx.get("respawn_waiting").is_true())
-				log_i(MODULE, "Entity %s's %s respawns %i waiting players",
-						cs(itos(self)), cs(type), respawn_waiting());
-			for(unsigned i = 0; i < hurts.size() && m_entities.count(self);
-					i++)
-				hurt(m_entities[self], type, hurts.at(i), r.by);
-			for(unsigned i = 0; i < blasts.size() && m_entities.count(self);
-					i++)
-				explode(m_entities[self], type, blasts.at(i), r.by);
-			m_ret = ret;
-			m_hit_ret = hit_ret;
-		}
 
 	// [KIT_MINIGAMES_FIX] The teams a `teams = true` type reads: those in
 	// its scene, and of those the ones under its own parent when there are
@@ -11398,6 +11398,12 @@ struct Module: public interface::Module, public Interface
 				*why = build ? "The server is not Running" : "Not here";
 			return !build && pi != m_peers.end();
 		}
+		// [KIT_CTF] a dead player waiting to respawn does nothing but stand
+		if(action != "enter" && player_waiting(pi->second.player)){
+			if(why)
+				*why = "Waiting to respawn";
+			return false;
+		}
 		const Entity *re = nullptr;
 		const Instance *rg = region_at(pi->second.scene, x, y, z, &re);
 		if(!rg){
@@ -11625,12 +11631,6 @@ struct Module: public interface::Module, public Interface
 		const world::Params &wp = wd->wp;
 		const int m = wp.border == "water" ? world::SEA_BORDER :
 				wp.border == "wall" ? 1 : 0;
-		// [KIT_CTF] a dead player waiting to respawn does nothing but stand
-		if(action != "enter" && player_waiting(pi->second.player)){
-			if(why)
-				*why = "Waiting to respawn";
-			return false;
-		}
 		if(p.getX() < wp.x0() - m || p.getX() >= wp.x0() + wp.width + m ||
 				p.getZ() < wp.z0() - m || p.getZ() >= wp.z0() + wp.depth + m)
 			return true;
@@ -12488,6 +12488,8 @@ struct Module: public interface::Module, public Interface
 			return;
 		Body &b = bi->second;
 		const uint32_t last = b.inputs.empty() ? b.ack : b.inputs.back().first;
+		const bool waiting = m_peers.count(packet.sender) &&
+				player_waiting(m_peers[packet.sender].player);
 		uint32_t at = last;
 		const ss_ &d = packet.data;
 		size_t i = d.find(';');
@@ -12513,6 +12515,10 @@ struct Module: public interface::Module, public Interface
 			if(b.inputs.size() >= (size_t)MAX_INPUTS)
 				break;
 			at = n;
+			// [KIT_CTF] a dead player waiting to respawn stays where they
+			// fell: no walking, jumping or going (the view turns)
+			if(waiting)
+				v[0] = v[1] = v[3] = v[4] = 0;
 			ss_ o = "{f=";
 			lua_lit(json::Value(std::max(-1.0, std::min(1.0, v[0]))), o);
 			o += ",r=";
@@ -12723,8 +12729,6 @@ struct Module: public interface::Module, public Interface
 			const double rate = num(b.params, "rate", 60, 10, 120);
 			// A twentieth over the clock: a client's that runs a little fast
 			// is not held back
-		const bool waiting = m_peers.count(packet.sender) &&
-				player_waiting(m_peers[packet.sender].player);
 			b.allowance = std::min(rate * 0.5 + BATCH, b.allowance +
 					(now - b.last_us) / 1e6 * rate * 1.05);
 			b.last_us = now;
@@ -12750,10 +12754,6 @@ struct Module: public interface::Module, public Interface
 				o += ",inputs={";
 				uint32_t last = b.ack;
 				int n_in = 0;
-			// [KIT_CTF] a dead player waiting to respawn stays where they
-			// fell: no walking, jumping or going (the view turns)
-			if(waiting)
-				v[0] = v[1] = v[3] = v[4] = 0;
 				for(; n_in < BATCH && !b.inputs.empty() &&
 						b.allowance >= 1; n_in++){
 					o += b.inputs.front().second+",";
@@ -12955,6 +12955,18 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
+	// [KIT_CTF] A dead player waiting to respawn acts on nothing: refused
+	// (logged as other refusals)
+	bool waiting_refused(Peer &pe, const char *what)
+	{
+		if(!player_waiting(pe.player))
+			return false;
+		if(log_refusal(pe, ss_("waiting to respawn: ")+what))
+			log_i(MODULE, "%s's %s refused: waiting to respawn", cs(pe.name),
+					what);
+		return true;
+	}
+
 	// Whether a refusal is logged: not the same one again within a second
 	static bool log_refusal(Peer &pe, const ss_ &why)
 	{
@@ -12982,6 +12994,8 @@ struct Module: public interface::Module, public Interface
 		// Unplaced or not hosted: dropped unsaid (nobody to bound it by)
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
+			return;
+		if(waiting_refused(pi->second, "use"))
 			return;
 		auto refuse = [&](const ss_ &why){
 			auto p = m_peers.find(peer);
@@ -13194,18 +13208,6 @@ struct Module: public interface::Module, public Interface
 			for(const char *c : cs)
 				if(s == c){
 					out.set(k, s);
-	// [KIT_CTF] A dead player waiting to respawn acts on nothing: refused
-	// (logged as other refusals)
-	bool waiting_refused(Peer &pe, const char *what)
-	{
-		if(!player_waiting(pe.player))
-			return false;
-		if(log_refusal(pe, ss_("waiting to respawn: ")+what))
-			log_i(MODULE, "%s's %s refused: waiting to respawn", cs(pe.name),
-					what);
-		return true;
-	}
-
 					return true;
 				}
 			why = ss_(k)+": one of";
@@ -13234,8 +13236,6 @@ struct Module: public interface::Module, public Interface
 			return true;
 		};
 		// The damage's type ("normal": armour, stage 9, tells them apart),
-		if(waiting_refused(pi->second, "use"))
-			return;
 		// the item that mends it, the preset it was made from; the icon (a
 		// texture's name, checked by the caller) and the look (7c-2: a
 		// prefab, its parts or voxels; kept, not drawn yet)
@@ -13799,6 +13799,8 @@ struct Module: public interface::Module, public Interface
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
 			return;
+		if(waiting_refused(pi->second, "hold"))
+			return;
 		Peer &p = pi->second;
 		size_t comp = 0;
 		if(!p.player || !equipment_of(p.player, &comp))
@@ -13925,9 +13927,9 @@ struct Module: public interface::Module, public Interface
 						in_team(target, e.first) &&
 						!in.params.get("friendly_fire").is_true()){
 					why = "Friendly fire is off in team "+jstr(in.params, "name");
-					return false;
+					return true;
 				}
-		return true;
+		return false;
 	}
 
 	// A hit on an entity: its components' modify_hit hooks in their order,
@@ -14066,261 +14068,6 @@ struct Module: public interface::Module, public Interface
 		give_kits(player, true);
 	}
 
-	void respawn_at(uint64_t player, size_t peer)
-	{
-		const ss_ scene = m_peers[peer].scene;
-		const Entity *pad = nullptr, *spawner = nullptr;
-		for(auto &e : m_entities){
-			ss_ es;
-			if(!e.second.has_pos || !scene_of(e.second, &es) || es != scene)
-				continue;
-			for(const Instance &in : e.second.comps){
-				const Type &ty = m_types[in.type];
-				if(ty.team && in_team(player, e.first))
-					pad = &e.second;
-				else if(ty.spawn && (ty.spawn_param.empty() ||
-						in.params.get(ty.spawn_param).is_true()))
-					spawner = &e.second;
-			}
-		}
-		const Entity *at = pad ? pad : spawner;
-		const ss_ who = m_peers[peer].name;
-		if(!at){
-			log_i(MODULE, "%s respawns at the app's spawn", cs(who));
-			m_server->emit_event("kit:spawn_player", new SpawnPlayer(peer));
-			return;
-		}
-		double w[3], wy;
-		world_of(*at, w, &wy);
-		log_i(MODULE, "%s respawns at entity %s", cs(who), cs(itos(at->id)));
-		to_scene(peer, "", w[0], w[1], w[2], wy);
-	}
-
-	// A player's knockback: their body's speed added to, away along the
-	// hit's direction (dx, dz, level) and a little up, put again so the
-	// client steps from it
-	void knock(size_t peer, double dx, double dz, double k)
-	{
-		auto bi = m_bodies.find(peer);
-		if(!m_host.controls || bi == m_bodies.end() || !bi->second.put ||
-				bi->second.seat || k <= 0)
-			return;
-		Body &b = bi->second;
-		json::Value st = b.state.deepcopy();
-		json::Value v = json::array();
-		const json::Value &ov = st.get("vel");
-		if(waiting_refused(pi->second, "hold"))
-			return;
-		const double add[3] = {dx * k, k * 0.4, dz * k};
-		for(unsigned i = 0; i < 3; i++)
-			v.append((ov.is_array() && ov.at(i).is_number() ?
-					ov.at(i).as_number() : 0) + add[i]);
-		st.set("vel", v);
-		st.set("ground", false);
-		log_i(MODULE, "%s knocked back (%.2f, %.2f, %.2f)",
-				cs(m_peers[peer].name), add[0], add[1], add[2]);
-		put_body(peer, b, 0, 0, 0, 0, &st);
-	}
-
-	// The item's wear and a drop, by kit/equipment's on_tool on the
-	// player's entity, their run: cost of the held item's uses (it breaks
-	// at 0, one taken), drop added. [KIT_TOOLS_2] The wear is the held
-	// instance's (the first of the item in the inventory); shot (an
-	// object: {rounds, magazine, ammo}) takes a shot's rounds from its
-	// magazine, or its ammo item where it has none. Run with only the
-	// item it says the instance (equipment's "held", the client's). False:
-	// refused (why: no rounds)
-	bool tool_run(uint64_t player, const ss_ &item, int64_t cost,
-			int64_t uses, const ss_ &drop, const json::Value &shot =
-			json::Value(), ss_ *why = nullptr)
-	{
-		size_t comp = 0;
-		if(!equipment_of(player, &comp) || (drop.empty() && item.empty()))
-			return true;
-		Run r;
-		r.entity = player;
-		r.comp = comp;
-		r.handler = "on_tool";
-		r.by = "player:"+itos(player);
-		r.args.append(item);
-		r.args.append(cost);
-		r.args.append(uses);
-		r.args.append(drop.empty() ? json::null() : json::Value(drop));
-		r.args.append(shot.is_object() ? shot : json::null());
-		run(r);
-		if(m_ret.is_array() && m_ret.at(0u).is_boolean() &&
-				!m_ret.at(0u).as_boolean()){
-			if(why)
-				*why = jstr_at(m_ret, 1);
-			return false;
-		}
-		// [KIT_SOUNDS] equipment's on_tool says "broke" (true, "broke"):
-		// the item's break sound where its holder is
-		if(m_ret.is_array() && jstr_at(m_ret, 1) == "broke")
-			play_item_sound(peer_of_player(player), item, "break", false);
-		return true;
-	}
-
-	// The hooks for the rest ([KIT_TOOLS_1]): on_item(c, item, action,
-	// target, by) of each instance in the player's scene, on the root and
-	// on their entity, after what the item did -- "hit" (target the
-	// entity), "dig" (the cell {x, y, z}) or "use" (a use kind "use"
-	// item's click: the entity pointed at, 0 none)
-	void item_hooks(size_t peer, const ss_ &item, const ss_ &action,
-			const json::Value &target)
-	{
-		const Peer &p = m_peers[peer];
-		const ss_ by = "player:"+itos(p.player);
-		for(auto &e : m_entities){
-			ss_ es;
-			const bool here = e.first == p.player || (e.second.parent == 1 &&
-					!e.second.has_pos) || (e.second.has_pos &&
-					e.second.kind != "player" && scene_of(e.second, &es) &&
-					es == p.scene);
-			if(!here)
-				continue;
-			for(size_t i = 0; i < e.second.comps.size(); i++){
-				if(!m_types[e.second.comps[i].type].handlers.count("on_item"))
-					continue;
-				Run r;
-				r.entity = e.first;
-				r.comp = i;
-				r.handler = "on_item";
-				r.by = by;
-				r.args.append(item);
-				r.args.append(action);
-				r.args.append(target);
-				r.args.append(by);
-				queue_run(r);
-			}
-		}
-	}
-
-	// A placed peer's use of their hands now (a hit, an item's use): past
-	// its cooldown (the game's clock), taken; false: refused, why
-	bool cooled(size_t peer, const json::Value &sheet, ss_ &why)
-	{
-		ToolUse &tu = m_tool_use[peer];
-		const int64_t now = now_us();
-		const double cd = sheet.get("cooldown").as_number();
-		if(tu.used && now >= tu.used_us && now - tu.used_us < cd * 1e6){
-			why = "cooling down";
-			return false;
-		}
-		tu.used = true;
-		tu.used_us = now;
-		return false;
-	}
-
-	// "kit:hit" <id>: a placed peer's melee hit with what they hold, on an
-	// entity with health (a player, or one placed with kit/health). The
-	// client has played the swing; the server decides: Running, out of
-	// the tools, a melee item held, its cooldown, the target in the
-	// peer's scene within its reach and in sight; then Kit's rules, the
-	// item's wear, the target's modifiers and health, knockback, the hooks
-	// [KIT_SESSIONS_1] in the sender's session
-	void on_hit(const network::Packet &packet)
-	{
-		SessionScope sc(*this, session_of_peer(packet.sender));
-		on_hit_u(packet);
-	}
-
-	void on_hit_u(const network::Packet &packet)
-	{
-		const size_t peer = packet.sender;
-		const ss_ data = packet.data.substr(0, 32);
-		auto pi = m_peers.find(peer);
-		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
-			return;
-		auto refuse = [&](const ss_ &why){
-			auto p = m_peers.find(peer);
-			if(p != m_peers.end() && log_refusal(p->second, why))
-				log_i(MODULE, "A hit on entity %s by %s refused: %s", cs(data),
-						cs(p->second.name), cs(why));
-		};
-		Peer &p = pi->second;
-		if(!m_session.running)
-			return refuse("the server is Stopped");
-		if(p.editing)
-			return refuse("in edit mode");
-		char *end = nullptr;
-		const uint64_t id = strtoull(data.c_str(), &end, 10);
-		if(data.empty() || !end || *end)
-			return refuse("not an entity's id");
-		auto it = m_entities.find(id);
-		if(it == m_entities.end() || !it->second.has_pos || id == p.player)
-			return refuse("no such target");
-		bool health = false;
-		for(const Instance &in : it->second.comps)
-			health = health || (m_types[in.type].health && in.disabled.empty());
-		ss_ scene;
-		scene_of(it->second, &scene);
-		if(!health || scene != p.scene)
-			return refuse(!health ? "it has no health" : "in another scene");
-		const json::Value *sheet = nullptr;
-		const ss_ item = hands_of(p.player, &sheet);
-		if(!sheet || jstr(*sheet, "use") != "melee")
-			return refuse(item.empty() ? "nothing in hand" : item+
-					" is no melee item");
-		if(!has_item(p.name, item))
-			return refuse("no "+item+" in their inventory");
-		// From the eye (the body's bottom and 1.55; Peer::pos is its
-		// bottom and 0.5) to the target's middle (a player's body's: its
-		// node's 0.35 up), less the body's half width
-		const bool player = it->second.kind == "player";
-		double t[3];
-		world_of(it->second, t);
-		if(player)
-			t[1] += 0.35;
-		const double eye[3] = {p.pos[0], p.pos[1] + 1.05, p.pos[2]};
-		const double dx = t[0] - eye[0], dy = t[1] - eye[1], dz = t[2] - eye[2];
-		const double d = std::max(0.0, std::sqrt(dx * dx + dy * dy + dz * dz) -
-				(player ? 0.45 : 0.5));
-		const double reach = sheet->get("reach").as_number();
-		if(d > reach + 0.25)
-			return refuse("out of reach ("+dtos(d)+" m)");
-		if(!in_sight(scene_of(it->second), eye, t))
-			return refuse("not in sight");
-		ss_ why;
-		if(!cooled(peer, *sheet, why))
-			return refuse(why);
-		if(!hit_allowed(peer, it->second, why)){
-			tell(peer, why);
-			return refuse(why);
-		}
-		// The hit: the amount less the falloff at its distance, a critical
-		// one falling (the attacker's body going down in the air)
-		double amount = sheet->get("damage").as_number() *
-				(1 - sheet->get("falloff").as_number() * std::min(1.0, d / reach));
-		bool crit = false;
-		auto bi = m_bodies.find(peer);
-		if(bi != m_bodies.end()){
-			const json::Value &v = bi->second.state.get("vel");
-			crit = !bi->second.state.get("ground").is_true() && v.is_array() &&
-					v.at(1u).is_number() && v.at(1u).as_number() < -1;
-		}
-		// [KIT_SOUNDS] the swing's sound for the others (the client played
-		// it; a swing at nothing is its client's alone)
-		play_item_sound(peer, item, "swing", true);
-		// The hit; then the item worn (it may break)
-		const json::Value sh = sheet->deepcopy();
-		const uint64_t me = p.player;
-		strike(peer, id, item, sh, amount, crit, dx, dz, true);
-		tool_run(me, item, json::jint(sh, "wear_hit", 1),
-				json::jint(sh, "uses", 0), "");
-	}
-
-	// [KIT_TOOLS_2] A hit Kit's rules allow landing (a melee hit's, a
-	// shot's): logged, the target's modifiers and health, knockback on a
-	// player (away along dx, dz, or where the attacker looks when on
-	// top), the hooks' "hit". allowed: Kit's rules asked already; else
-	// asked here (refused: logged and told)
-	void strike(size_t peer, uint64_t id, const ss_ &item,
-			const json::Value &sheet, double amount, bool crit, double dx,
-			double dz, bool allowed = false)
-	{
-		auto it = m_entities.find(id);
-		auto pi = m_peers.find(peer);
 	// A player's death (their health's c:died(by, type)): on_died(c,
 	// player, by, type) of every instance in their scene, on the root and
 	// on their entity; their inventory by on_death; then by kit/game_rules'
@@ -14625,6 +14372,261 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
+	void respawn_at(uint64_t player, size_t peer)
+	{
+		const ss_ scene = m_peers[peer].scene;
+		const Entity *pad = nullptr, *spawner = nullptr;
+		for(auto &e : m_entities){
+			ss_ es;
+			if(!e.second.has_pos || !scene_of(e.second, &es) || es != scene)
+				continue;
+			for(const Instance &in : e.second.comps){
+				const Type &ty = m_types[in.type];
+				if(ty.team && in_team(player, e.first))
+					pad = &e.second;
+				else if(ty.spawn && (ty.spawn_param.empty() ||
+						in.params.get(ty.spawn_param).is_true()))
+					spawner = &e.second;
+			}
+		}
+		const Entity *at = pad ? pad : spawner;
+		const ss_ who = m_peers[peer].name;
+		if(!at){
+			log_i(MODULE, "%s respawns at the app's spawn", cs(who));
+			m_server->emit_event("kit:spawn_player", new SpawnPlayer(peer));
+			return;
+		}
+		double w[3], wy;
+		world_of(*at, w, &wy);
+		log_i(MODULE, "%s respawns at entity %s", cs(who), cs(itos(at->id)));
+		to_scene(peer, "", w[0], w[1], w[2], wy);
+	}
+
+	// A player's knockback: their body's speed added to, away along the
+	// hit's direction (dx, dz, level) and a little up, put again so the
+	// client steps from it
+	void knock(size_t peer, double dx, double dz, double k)
+	{
+		auto bi = m_bodies.find(peer);
+		if(!m_host.controls || bi == m_bodies.end() || !bi->second.put ||
+				bi->second.seat || k <= 0)
+			return;
+		Body &b = bi->second;
+		json::Value st = b.state.deepcopy();
+		json::Value v = json::array();
+		const json::Value &ov = st.get("vel");
+		const double add[3] = {dx * k, k * 0.4, dz * k};
+		for(unsigned i = 0; i < 3; i++)
+			v.append((ov.is_array() && ov.at(i).is_number() ?
+					ov.at(i).as_number() : 0) + add[i]);
+		st.set("vel", v);
+		st.set("ground", false);
+		log_i(MODULE, "%s knocked back (%.2f, %.2f, %.2f)",
+				cs(m_peers[peer].name), add[0], add[1], add[2]);
+		put_body(peer, b, 0, 0, 0, 0, &st);
+	}
+
+	// The item's wear and a drop, by kit/equipment's on_tool on the
+	// player's entity, their run: cost of the held item's uses (it breaks
+	// at 0, one taken), drop added. [KIT_TOOLS_2] The wear is the held
+	// instance's (the first of the item in the inventory); shot (an
+	// object: {rounds, magazine, ammo}) takes a shot's rounds from its
+	// magazine, or its ammo item where it has none. Run with only the
+	// item it says the instance (equipment's "held", the client's). False:
+	// refused (why: no rounds)
+	bool tool_run(uint64_t player, const ss_ &item, int64_t cost,
+			int64_t uses, const ss_ &drop, const json::Value &shot =
+			json::Value(), ss_ *why = nullptr)
+	{
+		size_t comp = 0;
+		if(!equipment_of(player, &comp) || (drop.empty() && item.empty()))
+			return true;
+		Run r;
+		r.entity = player;
+		r.comp = comp;
+		r.handler = "on_tool";
+		r.by = "player:"+itos(player);
+		r.args.append(item);
+		r.args.append(cost);
+		r.args.append(uses);
+		r.args.append(drop.empty() ? json::null() : json::Value(drop));
+		r.args.append(shot.is_object() ? shot : json::null());
+		run(r);
+		if(m_ret.is_array() && m_ret.at(0u).is_boolean() &&
+				!m_ret.at(0u).as_boolean()){
+			if(why)
+				*why = jstr_at(m_ret, 1);
+			return false;
+		}
+		// [KIT_SOUNDS] equipment's on_tool says "broke" (true, "broke"):
+		// the item's break sound where its holder is
+		if(m_ret.is_array() && jstr_at(m_ret, 1) == "broke")
+			play_item_sound(peer_of_player(player), item, "break", false);
+		return true;
+	}
+
+	// The hooks for the rest ([KIT_TOOLS_1]): on_item(c, item, action,
+	// target, by) of each instance in the player's scene, on the root and
+	// on their entity, after what the item did -- "hit" (target the
+	// entity), "dig" (the cell {x, y, z}) or "use" (a use kind "use"
+	// item's click: the entity pointed at, 0 none)
+	void item_hooks(size_t peer, const ss_ &item, const ss_ &action,
+			const json::Value &target)
+	{
+		const Peer &p = m_peers[peer];
+		const ss_ by = "player:"+itos(p.player);
+		for(auto &e : m_entities){
+			ss_ es;
+			const bool here = e.first == p.player || (e.second.parent == 1 &&
+					!e.second.has_pos) || (e.second.has_pos &&
+					e.second.kind != "player" && scene_of(e.second, &es) &&
+					es == p.scene);
+			if(!here)
+				continue;
+			for(size_t i = 0; i < e.second.comps.size(); i++){
+				if(!m_types[e.second.comps[i].type].handlers.count("on_item"))
+					continue;
+				Run r;
+				r.entity = e.first;
+				r.comp = i;
+				r.handler = "on_item";
+				r.by = by;
+				r.args.append(item);
+				r.args.append(action);
+				r.args.append(target);
+				r.args.append(by);
+				queue_run(r);
+			}
+		}
+	}
+
+	// A placed peer's use of their hands now (a hit, an item's use): past
+	// its cooldown (the game's clock), taken; false: refused, why
+	bool cooled(size_t peer, const json::Value &sheet, ss_ &why)
+	{
+		ToolUse &tu = m_tool_use[peer];
+		const int64_t now = now_us();
+		const double cd = sheet.get("cooldown").as_number();
+		if(tu.used && now >= tu.used_us && now - tu.used_us < cd * 1e6){
+			why = "cooling down";
+			return false;
+		}
+		tu.used = true;
+		tu.used_us = now;
+		return true;
+	}
+
+	// "kit:hit" <id>: a placed peer's melee hit with what they hold, on an
+	// entity with health (a player, or one placed with kit/health). The
+	// client has played the swing; the server decides: Running, out of
+	// the tools, a melee item held, its cooldown, the target in the
+	// peer's scene within its reach and in sight; then Kit's rules, the
+	// item's wear, the target's modifiers and health, knockback, the hooks
+	// [KIT_SESSIONS_1] in the sender's session
+	void on_hit(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_hit_u(packet);
+	}
+
+	void on_hit_u(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		const ss_ data = packet.data.substr(0, 32);
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
+			return;
+		if(waiting_refused(pi->second, "hit"))
+			return;
+		auto refuse = [&](const ss_ &why){
+			auto p = m_peers.find(peer);
+			if(p != m_peers.end() && log_refusal(p->second, why))
+				log_i(MODULE, "A hit on entity %s by %s refused: %s", cs(data),
+						cs(p->second.name), cs(why));
+		};
+		Peer &p = pi->second;
+		if(!m_session.running)
+			return refuse("the server is Stopped");
+		if(p.editing)
+			return refuse("in edit mode");
+		char *end = nullptr;
+		const uint64_t id = strtoull(data.c_str(), &end, 10);
+		if(data.empty() || !end || *end)
+			return refuse("not an entity's id");
+		auto it = m_entities.find(id);
+		if(it == m_entities.end() || !it->second.has_pos || id == p.player)
+			return refuse("no such target");
+		bool health = false;
+		for(const Instance &in : it->second.comps)
+			health = health || (m_types[in.type].health && in.disabled.empty());
+		ss_ scene;
+		scene_of(it->second, &scene);
+		if(!health || scene != p.scene)
+			return refuse(!health ? "it has no health" : "in another scene");
+		const json::Value *sheet = nullptr;
+		const ss_ item = hands_of(p.player, &sheet);
+		if(!sheet || jstr(*sheet, "use") != "melee")
+			return refuse(item.empty() ? "nothing in hand" : item+
+					" is no melee item");
+		if(!has_item(p.name, item))
+			return refuse("no "+item+" in their inventory");
+		// From the eye (the body's bottom and 1.55; Peer::pos is its
+		// bottom and 0.5) to the target's middle (a player's body's: its
+		// node's 0.35 up), less the body's half width
+		const bool player = it->second.kind == "player";
+		double t[3];
+		world_of(it->second, t);
+		if(player)
+			t[1] += 0.35;
+		const double eye[3] = {p.pos[0], p.pos[1] + 1.05, p.pos[2]};
+		const double dx = t[0] - eye[0], dy = t[1] - eye[1], dz = t[2] - eye[2];
+		const double d = std::max(0.0, std::sqrt(dx * dx + dy * dy + dz * dz) -
+				(player ? 0.45 : 0.5));
+		const double reach = sheet->get("reach").as_number();
+		if(d > reach + 0.25)
+			return refuse("out of reach ("+dtos(d)+" m)");
+		if(!in_sight(scene_of(it->second), eye, t))
+			return refuse("not in sight");
+		ss_ why;
+		if(!cooled(peer, *sheet, why))
+			return refuse(why);
+		if(!hit_allowed(peer, it->second, why)){
+			tell(peer, why);
+			return refuse(why);
+		}
+		// The hit: the amount less the falloff at its distance, a critical
+		// one falling (the attacker's body going down in the air)
+		double amount = sheet->get("damage").as_number() *
+				(1 - sheet->get("falloff").as_number() * std::min(1.0, d / reach));
+		bool crit = false;
+		auto bi = m_bodies.find(peer);
+		if(bi != m_bodies.end()){
+			const json::Value &v = bi->second.state.get("vel");
+			crit = !bi->second.state.get("ground").is_true() && v.is_array() &&
+					v.at(1u).is_number() && v.at(1u).as_number() < -1;
+		}
+		// [KIT_SOUNDS] the swing's sound for the others (the client played
+		// it; a swing at nothing is its client's alone)
+		play_item_sound(peer, item, "swing", true);
+		// The hit; then the item worn (it may break)
+		const json::Value sh = sheet->deepcopy();
+		const uint64_t me = p.player;
+		strike(peer, id, item, sh, amount, crit, dx, dz, true);
+		tool_run(me, item, json::jint(sh, "wear_hit", 1),
+				json::jint(sh, "uses", 0), "");
+	}
+
+	// [KIT_TOOLS_2] A hit Kit's rules allow landing (a melee hit's, a
+	// shot's): logged, the target's modifiers and health, knockback on a
+	// player (away along dx, dz, or where the attacker looks when on
+	// top), the hooks' "hit". allowed: Kit's rules asked already; else
+	// asked here (refused: logged and told)
+	void strike(size_t peer, uint64_t id, const ss_ &item,
+			const json::Value &sheet, double amount, bool crit, double dx,
+			double dz, bool allowed = false)
+	{
+		auto it = m_entities.find(id);
+		auto pi = m_peers.find(peer);
 		if(it == m_entities.end() || pi == m_peers.end())
 			return;
 		Peer &p = pi->second;
@@ -14690,6 +14692,8 @@ struct Module: public interface::Module, public Interface
 		const ss_ data = packet.data.substr(0, 32);
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
+			return;
+		if(waiting_refused(pi->second, "item use"))
 			return;
 		Peer &p = pi->second;
 		auto refuse = [&](const ss_ &why){
@@ -14777,7 +14781,7 @@ struct Module: public interface::Module, public Interface
 		for(int k = 0; k < 3; k++){
 			if(std::fabs(d[k]) < 1e-12){
 				if(o[k] < lo[k] || o[k] > hi[k])
-					return true;
+					return false;
 				continue;
 			}
 			double a = (lo[k] - o[k]) / d[k], b = (hi[k] - o[k]) / d[k];
@@ -14790,8 +14794,6 @@ struct Module: public interface::Module, public Interface
 		}
 		t = t0;
 		return true;
-		if(waiting_refused(pi->second, "hit"))
-			return;
 	}
 
 	// The nearest entity with health in the scene along a ray (d a unit
@@ -14899,6 +14901,8 @@ struct Module: public interface::Module, public Interface
 		auto pi = m_peers.find(packet.sender);
 		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
 			return;
+		if(waiting_refused(pi->second, "draw"))
+			return;
 		ToolUse &tu = m_tool_use[packet.sender];
 		tu.drawing = true;
 		tu.draw_us = now_us();
@@ -14915,6 +14919,8 @@ struct Module: public interface::Module, public Interface
 		const size_t peer = packet.sender;
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
+			return;
+		if(waiting_refused(pi->second, "shoot"))
 			return;
 		const ss_ who = pi->second.name, scene = pi->second.scene;
 		const uint64_t me = pi->second.player;
@@ -14946,8 +14952,6 @@ struct Module: public interface::Module, public Interface
 		if(mi == m_entities.end() || !mi->second.has_pos)
 			return refuse("not placed");
 		ToolUse &tu = m_tool_use[peer];
-		if(waiting_refused(pi->second, "item use"))
-			return;
 		if(!tu.reloading.empty())
 			return refuse("reloading");
 		if(!cooled(peer, sheet, why))
@@ -15144,6 +15148,8 @@ struct Module: public interface::Module, public Interface
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
 			return;
+		if(waiting_refused(pi->second, "reload"))
+			return;
 		Peer &p = pi->second;
 		ss_ item, why;
 		const json::Value *sheet = ranged_held(peer, item, why);
@@ -15154,8 +15160,6 @@ struct Module: public interface::Module, public Interface
 			why = "reloading already";
 		if(!why.empty()){
 			if(log_refusal(p, why))
-		if(waiting_refused(pi->second, "draw"))
-			return;
 				log_i(MODULE, "A reload by %s refused: %s", cs(p.name), cs(why));
 			return;
 		}
@@ -15173,8 +15177,6 @@ struct Module: public interface::Module, public Interface
 			inetwork->send(peer, "kit:reloading", rj.stringify());
 		});
 	}
-		if(waiting_refused(pi->second, "shoot"))
-			return;
 
 	// Each tick, Running: the reloads due (the hands still holding the
 	// item): on_reload; one at a time, again while it says there is more
@@ -15401,8 +15403,6 @@ struct Module: public interface::Module, public Interface
 				voxel+"'s place");
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || pi->second.editing ||
-		if(waiting_refused(pi->second, "reload"))
-			return;
 				!m_session.running || !inventory_mode() || !pi->second.player)
 			return;
 		const uint64_t pid = pi->second.player;
@@ -15864,6 +15864,8 @@ struct Module: public interface::Module, public Interface
 				!pi->second.player || packet.data.size() > 512 ||
 				!own_inventory(pi->second.player))
 			return;
+		if(waiting_refused(pi->second, "inventory move"))
+			return;
 		Peer &p = pi->second;
 		const json::Value j = json::load_string(packet.data.c_str());
 		const ss_ op = jstr(j, "op");
@@ -16117,8 +16119,6 @@ struct Module: public interface::Module, public Interface
 				}
 		return out;
 	}
-		if(waiting_refused(pi->second, "inventory move"))
-			return;
 
 	// A player entity's numbers in the carried keys, {type: {key: value}}
 	json::Value numbers_of(uint64_t pid, const std::set<ss_> &keys)
@@ -16326,6 +16326,8 @@ struct Module: public interface::Module, public Interface
 				return refuse("no such action");
 			if(pe.editing)
 				return refuse("in the tools");
+			if(waiting_refused(pe, "action"))
+				return;
 			const int64_t t = now_us();
 			pe.held[name] = std::make_pair(t, t);
 		}
@@ -16579,8 +16581,6 @@ struct Module: public interface::Module, public Interface
 			send_all_mine(peer);
 		}
 	}
-			if(waiting_refused(pe, "action"))
-				return;
 
 	// [KIT] 4d's answer (user, 2026-10-30): a guest's player entity is
 	// dropped when they leave or log in, not kept in the runtime row
