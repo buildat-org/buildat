@@ -54,7 +54,7 @@ s+="$(ctrl A)event scan s1\ntext hello wörld foo_bar, baz\ndelay 200\n$(ctrl Le
 s+="$(ctrl Left)keydown shift\n$(ctrl Right)keyup shift\nevent scan s3\n"
 s+='keypress End\nkeydown alt\nkeypress Backspace\nkeyup alt\ndelay 200\nevent scan s4\n'
 s+="$(ctrl Backspace)event scan s5\nkeypress Home\n$(ctrl Delete)event scan s6\n"
-s+='mouse_pos 772 285\ndelay 300\nmouse_click left\nmouse_click left\ndelay 200\nevent scan s7\n'
+s+='mouse_pos 527 364\ndelay 300\nmouse_click left\nmouse_click left\ndelay 200\nevent scan s7\n'
 s+="delay 1000\nmouse_click left\nmouse_click left\nmouse_click left\ndelay 200\nevent scan s8\nscreenshot $t/single.png\n"
 # [TEXT_UNDO]: typed over the selection, "beta" copied and pasted over
 # "alpha", then back and forth
@@ -71,7 +71,7 @@ timeout 60 bin/buildat -m launch_menu -D "$t/cl" -w 1280x720 -l 3 \
 	-o sound_mute=1 -a extension/launch_menu/connect -c @"$t/single.cmds" > "$t/single.log" 2>&1
 grep -aq "Command sequence complete" "$t/single.log" || fail "the single-line drive"
 grep -aq "Lua runtime error" "$t/single.log" && fail "a Lua error in the single-line drive"
-L=$t/single.log; A=749,277
+L=$t/single.log; A=504,356
 want $L s1 $A 'text "localhost:29500" cursor 15 text "localhost:29500" selection 0+15'
 want $L s2 $A 'text "hello wörld foo_bar, baz" cursor 21 text "hello wörld foo_bar, baz"'
 want $L s3 $A 'text "hello wörld foo_bar, baz" cursor 19 text "hello wörld foo_bar, baz" selection 12+7'
