@@ -307,9 +307,13 @@ echo "ok: the prefab's package installed on another server, its dependency first
 lamp 2
 manifest "$t/lamps" lamps 2.0.0
 publish "$t/lamps"
+# ([WB_EDITOR_VIEW_MEMORY]) carol left B in edit mode: back in it at once
 cat > "$t/upgrade.cmds" <<EOF
 wait_log_any 60000 Joined as carol
-$EDIT
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: remembered: edit mode
+wait_log_any 10000 kit editor: edit mode on
+wait_log_any 10000 kit editor: state:
 click Button "New"
 wait_log 20000 kit editor: package alice/lamps 2.0.0
 click Button "Upgrade"
