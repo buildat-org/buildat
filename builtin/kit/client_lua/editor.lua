@@ -2332,6 +2332,22 @@ magic.SubscribeToEvent("command_seq:kit_tabs", function(_, data)
 			data:GetString("Param") .. ")")
 end)
 
+-- A check's question: where the editor's windows are on the screen, in
+-- pixels ("<name> x y w h" each), for a mask over a frame compared
+magic.SubscribeToEvent("command_seq:kit_ui_where", function(_, data)
+	local sc, r = magic.ui.scale, {}
+	for _, k in ipairs({"bar", "palette", "inspector", "people"}) do
+		local w = W[k]
+		if w and w.visible then
+			local p = w.screenPosition
+			r[#r + 1] = string.format("%s %d %d %d %d", k, p.x * sc, p.y * sc,
+					w.width * sc, w.height * sc)
+		end
+	end
+	log:info("kit editor: the windows at " .. table.concat(r, ", ") ..
+			" (" .. data:GetString("Param") .. ")")
+end)
+
 -- A check's question: where the 3D camera is
 magic.SubscribeToEvent("command_seq:kit_cam_where", function(_, data)
 	local p = S.pos or {x = 0, y = 0, z = 0}

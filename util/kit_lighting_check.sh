@@ -100,6 +100,7 @@ frames 10
 delay ${SETTLE:-4000}
 frames 3
 screenshot @T@/$1.png
+event kit_ui_where $1
 EOF
 }
 sky() # <text>: in the client's sky line ("kit: sky: <mode>, <hour>, ...")
@@ -351,17 +352,27 @@ for y in range(10):
 EOF
 }
 # The largest difference of two cell lists, over the rows from..to (0..9),
-# the cells under the editor's UI left out: the bar (row 0), the left
-# panel (columns 0-5 down to row 6) and the builders' panel (columns 0-5,
-# rows 8-9), which [KIT_EDITOR_PANELS] changed since the reference
-celldiff() # <cells a> <cells b> <from> <to>
+# the cells under the editor's UI left out: the reference's (the bar's
+# row 0, columns 0-5 but row 7) and the windows where the shot's client
+# logged them (kit_ui_where: the left panel's size follows its tabs and
+# its components, [KIT_TABS_TWO_ROWS])
+celldiff() # <cells a> <cells b> <from> <to> <shot>
 {
-	python3 -I - "$1" "$2" "$3" "$4" <<'EOF'
-import sys
+	python3 -I - "$1" "$2" "$3" "$4" \
+		"$(grep -aoP "kit editor: the windows at \K.*(?= \($5\))" "$c" | tail -1)" <<'EOF'
+import sys, re
 a = [list(map(int, l.split())) for l in open(sys.argv[1])]
 b = [list(map(int, l.split())) for l in open(sys.argv[2])]
 r0, r1 = int(sys.argv[3]), int(sys.argv[4])
-ui = lambda i: i < 16 or (i % 16 < 6 and i // 16 != 7)
+# The windows, x y w h in the 1024x700 frame's pixels; a cell 64 x 70
+rects = [tuple(map(int, m)) for m in
+	re.findall(r"\w+ (-?\d+) (-?\d+) (\d+) (\d+)", sys.argv[5])]
+assert rects, "no windows logged"
+def over(i):
+	x0, y0 = i % 16 * 64, i // 16 * 70
+	return any(x < x0 + 64 and x + w > x0 and y < y0 + 70 and y + h > y0
+		for x, y, w, h in rects)
+ui = lambda i: i < 16 or (i % 16 < 6 and i // 16 != 7) or over(i)
 print(max(abs(x - y) for i in range(r0 * 16, (r1 + 1) * 16) if not ui(i)
 	for x, y in zip(a[i], b[i])))
 EOF
@@ -391,8 +402,8 @@ if [ -n "${REF:-}" ]; then
 fi
 sed -n '/^plain$/,/^env_noon$/p' "$REF_FILE" | sed '1d;$d' > "$t/ref_plain.cells"
 sed -n '/^env_noon$/,$p' "$REF_FILE" | sed '1d' > "$t/ref_env_noon.cells"
-d1=$(celldiff "$t/plain.cells" "$t/ref_plain.cells" 0 9)
-d2=$(celldiff "$t/env_noon.cells" "$t/ref_env_noon.cells" 8 9)
+d1=$(celldiff "$t/plain.cells" "$t/ref_plain.cells" 0 9 plain) || fail "no windows logged for the mask ($c)"
+d2=$(celldiff "$t/env_noon.cells" "$t/ref_env_noon.cells" 8 9 env_noon) || fail "no windows logged for the mask ($c)"
 [ "$d1" -le 3 ] || fail "with no environment the frame moved from today's: $d1 of 255 a cell"
 [ "$d2" -le 3 ] || fail "cartoon's ground at noon moved from today's: $d2 of 255 a cell"
 echo "ok: cartoon is today's look: the frame with no environment within $d1 of 255 a cell, the ground under cartoon's noon within $d2"
