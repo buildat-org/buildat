@@ -290,110 +290,22 @@ function M.join_listed(address)
 	end, true)
 end
 
--- **Join a Buildat server**: launch_menu's Servers layout
--- (playtest, 2026-10-07): a title, the servers in one list, sectioned,
--- and a column beside it with the picked one, the address fields and Join
+-- **Servers** ([SERVERS_SCREEN], user 2026-11-03): servers only, in
+-- sections in one list -- the LAN's, the ones joined before, the
+-- Starports' public ones and Luanti's -- and beside it the shown one's
+-- info: the row under the mouse, or the one Up and Down moved to. A click
+-- (Enter, a tap) joins; a finger held on a row only shows it. Report arms:
+-- the next public server clicked is reported instead of joined.
 local PANEL_WIDTH = 300
+local LONG_PRESS_US = 600000
+-- The Luanti client's connect dialog, which a Luanti server's join opens
+-- on its address (the name and password are asked there)
+local LUANTI_CONNECT = "extension/luanti_client/connect"
 
-function M.show_connect_to_server()
-	api.stop_local_server()
-	local root = uistack.main:push({desc="connect_to_server"})
-	root.defaultStyle = magic.cache:GetResource("XMLFile", STYLE)
-
-	local narrow = magic.ui.root.width < 760
-	local width = math.min(magic.ui.root.width - 40, 1000)
-	local list_w = narrow and width - 32 or width - 32 - PANEL_WIDTH - 12
-	-- A fifth of the height to spare: a phone's browser bars take some of
-	-- the page as it scrolls (playtest, 2026-10-07)
-	local room = math.floor(magic.ui.root.height * 0.8) - 220 - (narrow and 300 or 0)
-	local outer = root:CreateChild("Window")
-	outer:SetStyleAuto()
-	outer:SetLayout(LM_VERTICAL, 8, magic.IntRect(16, 12, 16, 12))
-	outer:SetAlignment(HA_LEFT, VA_CENTER)
-	outer:SetFixedWidth(width)
-	local title = outer:CreateChild("Text")
-	title:SetStyleAuto()
-	title.text = "Join a Buildat server"
-	title:SetFontSize(20)
-	-- What the Starports said; an error is long and wraps
-	local sp_title = outer:CreateChild("Text")
-	sp_title:SetStyleAuto()
-	sp_title.text = "Public servers: asking the Starports..."
-	sp_title.color = magic.Color(ui_utils.rgb("dim"))
-	sp_title:SetWordwrap(true)
-	sp_title:SetFixedWidth(width - 32)
-
-	local body = outer:CreateChild("UIElement")
-	body:SetLayout(narrow and LM_VERTICAL or LM_HORIZONTAL, 12,
-			magic.IntRect(0, 0, 0, 0))
-	local left = body:CreateChild("UIElement")
-	left:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
-	left:SetFixedWidth(list_w)
-	local window = body:CreateChild("UIElement")
-	window:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
-	window:SetFixedWidth(narrow and width - 32 or PANEL_WIDTH)
-
-	-- The tabs, which list is shown, and a filter of it
-	local search_row = left:CreateChild("UIElement")
-	search_row:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
-	local tabs = search_row:CreateChild("UIElement")
-	tabs:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
-	local search_label = search_row:CreateChild("Text")
-	search_label:SetStyleAuto()
-	search_label.text = "Filter"
-	search_label:SetFixedWidth(60)
-	local search = search_row:CreateChild("LineEdit")
-	search:SetStyleAuto()
-	search:SetFixedHeight(26)
-	search.textCopyable = true
-	search.textSelectable = true
-	-- A typed address, and the servers used, unless the Starport lock
-	-- says the list is the only way in ([STARPORT] 4)
-	local direct = starport.direct_connect_allowed()
-	local address_edit, port_edit
-	local do_connect
-	local picked = nil
-	-- The fleet open, or nil for the top ([STARPORT] 2b); the list's
-	-- drawing, which a fleet's row opens
-	local open_fleet, redraw = nil, nil
-	local function pick(row, second)
-		if row.back or row.fleet_id then
-			open_fleet = row.fleet_id
-			picked = row.fleet_id and row or nil
-			redraw()
-			return
-		end
-		picked = row
-		if row.host and direct then
-			address_edit:SetText(row.host)
-			port_edit:SetText(row.port)
-		end
-		if second and not row.native_only then
-			do_connect()
-		end
-	end
-	-- One list, of the tab's servers: the ones used, the Starports'
-	-- public ones, or this network's (playtest, 2026-10-07)
-	local list = ui_utils.server_list(left, {width = list_w,
-			height = math.max(120, room), panel = window,
-			hint = not direct and "Pick a server from the list" or nil}, pick)
-
-	if direct then
-		address_edit = make_labeled_edit(window, "Address", "localhost",
-				PANEL_WIDTH)
-		port_edit = make_labeled_edit(window, "Port (optional)", "29500",
-				PANEL_WIDTH)
-		address_edit:SetFocus(true)
-	end
-
-	-- [PLAY_PAGE] (b): an https page reaches a server by a secure
-	-- WebSocket only, so one with no TLS in front is the native client's
-	local web_tls_only = buildat.get_env("BUILDAT_PAGE_HTTPS") == "1"
-
-	-- **Public servers** from the Starports in the settings, merged and
-	-- filtered by the extension; the filter narrows what came
-	local sp_rows = {}
-	local lan_rows, used_rows = {}, {}
+-- An address's own row of the Starports' merged list as rows: a fleet's
+-- pools and servers each a row, named "<fleet>: <pool>"
+-- simplified: a fleet is not a level to open, its rows are listed flat
+local function public_rows(rows, tls_only)
 	local function categories(x)
 		local d = {}
 		for k, v in pairs(x.descriptors or {}) do
@@ -406,296 +318,524 @@ function M.show_connect_to_server()
 				tostring(x.access) ..
 				(#d > 0 and " (" .. table.concat(d, ", ") .. ")" or "")
 	end
-	local function public_rows(q)
-		local shown = {}
-		for _, x in ipairs(sp_rows) do
-			local f = type(x.fleet) == "table" and x.fleet or {}
-			local hay = (tostring(x.name) .. " " .. tostring(x.description) ..
-					" " .. table.concat(x.tags or {}, " ") .. " " ..
-					tostring(f.name or "")):lower()
-			if q == "" or hay:find(q, 1, true) then
-				shown[#shown + 1] = x
-			end
+	local out = {}
+	local function add(g, prefix)
+		local x = g.server
+		if tls_only and not x.tls then return end
+		local row = {kind = "buildat", address = tostring(x.address),
+			report = tostring(x.address),
+			name = prefix .. (g.kind == "pool" and tostring(g.name) or
+					tostring(x.name)),
+			badge = (g.kind == "pool" and g.count .. " servers, " or "") ..
+					g.players .. " playing" ..
+					(x.updating == true and ", updating" or ""),
+			info = tostring(x.address) .. "\n" ..
+					tostring(x.description or "") .. "\n" .. categories(x) ..
+					"\nListed by " .. table.concat(x.starports or {}, ", "),
+			fallbacks = {}}
+		-- [STARPORT] 3: said before the connect, not after
+		if x.access == "external" then
+			row.signup = tostring(x.signup_url or "")
+			row.info = row.info .. "\nSign up at " .. row.signup .. " first"
 		end
-		local rows = {}
-		if open_fleet then
-			rows[1] = {name = "< All public servers", back = true}
+		-- A pool: its best first, the others to fall back on
+		for i = 2, #g.servers do
+			row.fallbacks[#row.fallbacks + 1] = g.servers[i].address
 		end
-		for _, g in ipairs(starport.group(shown, open_fleet)) do
-			local x = g.server
-			local row = {group = g}
-			if g.kind == "fleet" then
-				row.name = tostring(g.name)
-				row.badge = "fleet of " .. g.count .. ", " .. g.players ..
-						" playing"
-				row.line = tostring(g.description or "")
-				row.fleet_id = g.fleet.id
-			else
-				row.host, row.port = x.address:match("^(.*):(%d+)$")
-				row.address = x.address
-				row.name = g.kind == "pool" and tostring(g.name) or
-						tostring(x.name)
-				row.badge = (g.kind == "pool" and g.count .. " servers, " or
-						"") .. g.players .. " playing" ..
-						(x.updating == true and ", updating" or "")
-				row.line = tostring(x.description or "") .. "\n" ..
-						categories(x) .. "  via " ..
-						table.concat(x.starports or {}, ", ")
-				-- [STARPORT] 3: said before the connect, not after
-				if x.access == "external" then
-					row.signup = tostring(x.signup_url or "")
-					row.line = row.line .. "\nSign up at " .. row.signup ..
-							" first"
-				end
-				if web_tls_only and not x.tls then
-					row.native_only = true
-					row.badge = row.badge .. ", native client only"
-					row.line = "Native client only: no TLS in front of " ..
-							"it, which a web page needs\n" .. row.line
-				end
-				-- A pool: its best first, the others to fall back on
-				row.fallbacks = {}
-				for i = 2, #g.servers do
-					row.fallbacks[#row.fallbacks + 1] = g.servers[i].address
-				end
-			end
-			rows[#rows + 1] = row
-		end
-		return rows
+		out[#out + 1] = row
 	end
-	-- Without direct connects there is only the Starports' list
-	local tab = "starport"
-	local tab_buttons = {}
-	-- **From 2 characters** (user, 2026-10-07): one matches so much that
-	-- the list's redraw lags at each key
-	local function filter_text()
-		local q = search:GetText():lower()
-		return #q >= 2 and q or ""
-	end
-	redraw = function()
-		local q = filter_text()
-		for name, b in pairs(tab_buttons) do
-			b.selected = (name == tab)
-			-- In the main button's amber, as launch_menu's locked row
-			b:GetChild("ButtonText").color = magic.Color(ui_utils.rgb(
-					name == tab and "main" or "text"))
-		end
-		local rows
-		if tab == "starport" then
-			rows = public_rows(q)
+	for _, g in ipairs(starport.group(rows)) do
+		if g.kind == "fleet" then
+			for _, p in ipairs(starport.group(rows, g.fleet.id)) do
+				add(p, tostring(g.name) .. ": ")
+			end
 		else
-			rows = {}
-			for _, r in ipairs(tab == "lan" and lan_rows or used_rows) do
-				if q == "" or (r.name .. " " .. (r.line or "")):lower():find(q,
-						1, true) then
-					rows[#rows + 1] = r
-				end
-			end
+			add(g, "")
 		end
-		if #rows == 0 then
-			rows[1] = {header = q ~= "" and "Nothing matches the filter" or
-					tab == "used" and "No servers used yet" or
-					tab == "lan" and "Nothing heard on this network yet" or
-					"No public servers"}
-		elseif tab == "lan" then
-			-- Anyone on the network can announce
-			table.insert(rows, 1, {header = "As announced:"})
-		end
-		list:set_rows(rows)
 	end
+	return out
+end
+
+function M.show_servers()
+	local root = uistack.main:push({desc = "servers"})
+	root.defaultStyle = magic.cache:GetResource("XMLFile", STYLE)
+	local page = buildat.get_env("BUILDAT_PAGE_HTTPS")
+	-- A browser has no LAN; an https page reaches only servers behind TLS
+	local web, tls_only = page ~= nil, page == "1"
+	-- The Starport lock: its list the only way in ([STARPORT] 4)
+	local direct = starport.direct_connect_allowed()
+
+	local narrow = magic.ui.root.width < 760
+	local width = math.min(magic.ui.root.width - 40, 1000)
+	local list_w = narrow and width - 32 or width - 32 - PANEL_WIDTH - 12
+	-- A fifth of the height to spare: a phone's browser bars take some of
+	-- the page as it scrolls (playtest, 2026-10-07)
+	local room = math.max(120, math.floor(magic.ui.root.height * 0.8) -
+			130 - (narrow and 170 or 0))
+	local outer = root:CreateChild("Window")
+	outer:SetStyleAuto()
+	outer:SetLayout(LM_VERTICAL, 8, magic.IntRect(16, 12, 16, 12))
+	outer:SetAlignment(HA_LEFT, VA_CENTER)
+	outer:SetFixedWidth(width)
+	local title = outer:CreateChild("Text")
+	title:SetStyleAuto()
+	title.text = "Servers"
+	title:SetFontSize(20)
+
+	-- The filter's line: the filter, and Report
+	local line = outer:CreateChild("UIElement")
+	line:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
+	line:SetFixedHeight(26)
+	local filter_label = line:CreateChild("Text")
+	filter_label:SetStyleAuto()
+	filter_label.text = "Filter"
+	filter_label:SetFixedWidth(50)
+	filter_label.verticalAlignment = VA_CENTER
+	local search = line:CreateChild("LineEdit")
+	search:SetStyleAuto()
+	search:SetFixedHeight(26)
+	search:SetFixedWidth(math.min(240, width - 32 - 50 - 160 - 16))
+	search.textCopyable = true
+	search.textSelectable = true
+	local report = make_button(line, "Report")
+	report.minWidth = 0
+	report:SetFixedSize(150, 26)
+
+	local body = outer:CreateChild("UIElement")
+	body:SetLayout(narrow and LM_VERTICAL or LM_HORIZONTAL, 12,
+			magic.IntRect(0, 0, 0, 0))
+	local left = body:CreateChild("UIElement")
+	left:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+	left:SetFixedWidth(list_w)
+	local view = ui_utils.list_view(left, list_w, room,
+			{wheel = 40, follow_focus = true})
+	local panel = body:CreateChild("UIElement")
+	panel:SetFixedSize(narrow and width - 32 or PANEL_WIDTH,
+			narrow and 130 or room)
+	panel.clipChildren = true
+	local under = left:CreateChild("UIElement")
+	under:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
+	under:SetFixedHeight(28)
+	local by_address = nil
 	if direct then
-		for _, t in ipairs({{"used", "Servers used"},
-				{"starport", "Starports"}, {"lan", "This network"}}) do
-			local b = make_button(tabs, t[2])
-			b.minWidth = 0
-			b:SetFixedSize(120, 26)
-			magic.SubscribeToEvent(b, "Released", function()
-				tab = t[1]
-				-- Listening on the LAN from here on ([WIN_FIREWALL]): the
-				-- firewall's question comes when the player looked
-				if tab == "lan" and not api.get_preference("lan_discovery") then
-					local ok, err = api.set_preference("lan_discovery", true)
-					if not ok then
-						log:warning("lan_discovery: " .. tostring(err))
-					end
-				end
-				redraw()
-			end)
-			tab_buttons[t[1]] = b
-		end
+		by_address = make_button(under, "Join by address...")
+		by_address.minWidth = 0
+		by_address:SetFixedSize(180, 28)
 	end
-	-- Filtered as it is typed, redrawn only when what it filters by changed
-	local filtered_by = ""
-	magic.SubscribeToEvent(search, "TextChanged", function()
-		if filter_text() ~= filtered_by then
-			filtered_by = filter_text()
-			redraw()
+	local back = make_button(under, "Back")
+	back.minWidth = 0
+	back:SetFixedSize(100, 28)
+
+	-- What the sections hold, and what an empty one says
+	local lan_rows, recent_rows = {}, {}
+	local sp_rows, sp_note = {}, "Asking the Starports..."
+	local lt_rows, lt_note = {}, "Asking the Luanti server list..."
+	local sp_ask, lt_ask = nil, nil
+	local armed = false
+	local shown_row = nil
+	local row_ids = {} -- a row's button -> its id, for the focus
+	local untouched = true
+	local touch = {t0 = nil, moved = 0, clear = false}
+
+	-- The shown server's info, placed by hand: a layout would share the
+	-- spare height out between the lines
+	local function show(row)
+		shown_row = row
+		panel:RemoveAllChildren()
+		local y = 0
+		local function text(s, size, color)
+			local t = panel:CreateChild("Text")
+			t:SetStyleAuto()
+			t.text = s
+			t:SetFontSize(size)
+			if color then t.color = magic.Color(ui_utils.rgb(color)) end
+			t:SetWordwrap(true)
+			t:SetFixedWidth(panel.width)
+			t:SetPosition(0, y)
+			y = y + t.height + 4
 		end
-	end)
-	local function refresh(ask)
-		starport.fetch(function(rows, info)
-			-- The answer can come after the screen was closed, and its
-			-- elements are gone then
-			local open = false
-			for _, r in ipairs(uistack.main.stack) do
-				if r == root then open = true end
-			end
-			if not open then return end
-			sp_rows = rows
-			sp_title.text = "Public servers: " .. #rows ..
-					(info.hidden > 0 and ", " .. info.hidden ..
-					" hidden by your filters" or "") ..
-					(info.unasked > 0 and "; Refresh asks " .. info.unasked ..
-					" more Starport(s)" or "") ..
-					(info.stale > 0 and "; kept from " ..
-					math.floor(info.stale / 60) .. " min ago" or "") ..
-					(#info.errors > 0 and "\n" .. table.concat(info.errors,
-					"\n") or "")
-			if tab == "starport" then redraw() end
-		end, ask)
+		text(row.name, 18)
+		text(row.section .. (row.badge ~= "" and ", " .. row.badge or ""), 12,
+				"dim")
+		if row.info and row.info ~= "" then text(row.info, 13, "dim") end
 	end
 
-	-- **On this network** ([LAN_DISCOVERY]): what announces itself on
-	-- the LAN, asked every second; redrawn only when it changed, so a
-	-- pick and the scroll stay. Anyone on the network can announce, so
-	-- it is said as heard, and the join is the ordinary connect.
-	if direct then
-		local shown, next_us = nil, 0
-		root:SubscribeToStackEvent("Update", function()
-			local now = api.get_time_us()
-			if now < next_us then
+	local function set_armed(on)
+		armed = on
+		report:GetChild("ButtonText").text = on and "Report: Cancel" or
+				"Report"
+		report:GetChild("ButtonText").color = magic.Color(ui_utils.rgb(
+				on and "main" or "text"))
+		log:info("Servers: Report " .. (on and "armed" or "disarmed"))
+	end
+
+	local function join(row)
+		log:info("Servers: join " .. row.name)
+		if row.kind == "luanti" then
+			local ok, why = api.launch(LUANTI_CONNECT, row.address)
+			if not ok then show_error(why) end
+			return
+		end
+		if row.signup and not row.told then
+			row.told = true
+			show_error("This server needs an account made at\n" ..
+					row.signup .. " first.\nJoin again when you have one.")
+			return
+		end
+		api.stop_local_server()
+		connect_or_show_error(row.address, row.fallbacks)
+	end
+
+	-- A row's click, Enter or tap
+	local function activate(row, button)
+		-- A finger: dragged, the list scrolled; held, the row only shown
+		if touch.t0 then
+			local held = api.get_time_us() - touch.t0 >= LONG_PRESS_US
+			local moved = touch.moved > 20
+			touch.t0 = nil
+			if moved then return end
+			if held then
+				button:SetFocus(true)
+				show(row)
+				log:info("Servers: shown " .. row.name)
 				return
 			end
+		end
+		if row.ask then
+			row.ask()
+		elseif armed then
+			set_armed(false)
+			if not (row.report and starport.open_report(row.report)) then
+				show_error("Only the public Buildat servers can be reported.")
+			end
+		else
+			join(row)
+		end
+	end
+
+	local function matches(row, q)
+		return q == "" or (row.name .. " " .. (row.badge or "") .. " " ..
+				(row.info or "")):lower():find(q, 1, true) ~= nil
+	end
+
+	-- The list drawn again, its scroll and the focused row kept
+	local function draw()
+		local q = search:GetText():lower()
+		local top = -view.list.position.y
+		-- The row with the focus, by what it is
+		local f = magic.ui.focusElement
+		local focused = nil
+		for b, id in pairs(row_ids) do
+			if b == f then focused = id end
+		end
+		row_ids = {}
+		view.list:RemoveAllChildren()
+		-- Free while the rows go in: a vertical layout is redone for each
+		-- one added (list_view's fit())
+		view.list:SetLayout(magic.LM_FREE, 0, magic.IntRect(0, 0, 0, 0))
+		view.list:SetPosition(0, 0)
+		local refocus, first = nil, nil
+		local function section(name, rows, empty, ask)
+			view:header(name, 14, "text")
+			local n = 0
+			for _, row in ipairs(rows) do
+				if matches(row, q) then
+					n = n + 1
+					row.section = name
+					row.id = name .. "/" .. tostring(row.address)
+					local b = view:row({label = row.name, glyph = "🌐"},
+							row.badge)
+					b:SetFocusMode(magic.FM_FOCUSABLE)
+					magic.SubscribeToEvent(b, "HoverBegin", function()
+						show(row)
+					end)
+					magic.SubscribeToEvent(b, "Focused", function()
+						show(row)
+					end)
+					magic.SubscribeToEvent(b, "Released", function()
+						activate(row, b)
+					end)
+					row_ids[b] = row.id
+					if row.id == focused then refocus = b end
+					first = first or b
+				end
+			end
+			if n > 0 then return end
+			-- The one line an empty section says; one that can ask is a row
+			if ask and q == "" then
+				local b = view:row({label = ask.name}, ask.badge)
+				b:SetFocusMode(magic.FM_FOCUSABLE)
+				magic.SubscribeToEvent(b, "Released", function()
+					activate(ask, b)
+				end)
+			else
+				-- Wrapped: a phone's list is narrower than the LAN's line
+				local t = view.list:CreateChild("Text")
+				t:SetStyleAuto()
+				t.text = q ~= "" and "Nothing matches the filter" or empty
+				t:SetFontSize(12)
+				t.color = magic.Color(ui_utils.rgb("dim"))
+				t:SetWordwrap(true)
+				t:SetFixedWidth(list_w)
+			end
+		end
+		if direct and not web then
+			section("LAN", lan_rows, "No LAN games found. The host opens " ..
+					"one from the pause menu: My account... > Open to LAN.")
+		end
+		if direct then
+			section("Recent", recent_rows, "No servers joined yet.")
+		end
+		section("Public (Buildat)", sp_rows, sp_note, sp_ask)
+		section("Public (Luanti)", lt_rows, lt_note, lt_ask)
+		view:fit()
+		-- The list's height stays: the window does not move under the
+		-- mouse as rows come and go
+		view.viewport:SetFixedSize(list_w, room)
+		view:scroll(top)
+		-- A focus the redraw took goes back to its row, or the first;
+		-- until the player did anything, the first server has it
+		if refocus or ((focused or untouched) and first) then
+			(refocus or first):SetFocus(true)
+		end
+		return first
+	end
+
+	-- **Recent**: the servers this client joined, the last first
+	local listed = {}
+	for _, x in ipairs(starport.kept_rows()) do
+		listed[tostring(x.address)] = x
+	end
+	for _, a in ipairs(network.known_addresses()) do
+		local scheme, host, port = a.uri:match("^(%a+)://(.-):(%d+)$")
+		if a.accepted and a.last_attempt > 0 and (scheme == "https" or
+				scheme == "udp" or (scheme == "tcp" and not tls_only)) then
+			local address = (scheme == "https" and "https://" or "") ..
+					host .. ":" .. port
+			local luanti = scheme == "udp"
+			local x = listed[address]
+			recent_rows[#recent_rows + 1] = {
+				kind = luanti and "luanti" or "buildat", address = address,
+				name = not luanti and a.name ~= "" and a.name or
+						x and tostring(x.name) or address,
+				badge = (luanti and "Luanti" or "Buildat") ..
+						(x and ", " .. tostring(x.players or 0) ..
+						" playing" or ""),
+				info = address .. (luanti and a.name ~= "" and
+						"\nJoined as " .. a.name or "") ..
+						(a.description ~= "" and "\n" .. a.description or "")}
+		end
+	end
+
+	-- **The LAN** ([LAN_DISCOVERY]): what announces itself there, asked
+	-- every second, the list drawn again only when it changed. Listening
+	-- from here on ([WIN_FIREWALL]): the firewall's question comes when
+	-- the player looked. Anyone on the network can announce, so the join
+	-- is the ordinary connect.
+	if direct and not web then
+		if not api.get_preference("lan_discovery") then
+			local ok, err = api.set_preference("lan_discovery", true)
+			if not ok then log:warning("lan_discovery: " .. tostring(err)) end
+		end
+		local heard, next_us = nil, 0
+		root:SubscribeToStackEvent("Update", function()
+			local now = api.get_time_us()
+			if now < next_us then return end
 			next_us = now + 1000000
 			local rows = {}
 			for _, e in ipairs(api.lan_servers()) do
-				rows[#rows + 1] = {host = e.host, port = e.port,
-						name = e.name ~= "" and e.name or e.host,
-						badge = e.players .. " playing",
-						line = e.app .. " " .. e.version .. "  at " .. e.host ..
-						":" .. e.port .. (e.account and
-						"; needs an account there" or "")}
+				local address = e.host .. ":" .. e.port
+				rows[#rows + 1] = {kind = "buildat", address = address,
+					name = e.name ~= "" and e.name or address,
+					badge = e.players .. " playing",
+					info = address .. "\n" .. e.app .. " " .. e.version ..
+							(e.account and "\nNeeds an account there" or "")}
 			end
 			table.sort(rows, function(a, b) return a.name < b.name end)
 			local sig = {}
 			for _, r in ipairs(rows) do
-				sig[#sig + 1] = r.name .. r.badge .. r.line
+				sig[#sig + 1] = r.name .. r.badge .. r.info
 			end
 			sig = table.concat(sig, "\n")
-			if sig ~= shown then
-				shown = sig
+			if sig ~= heard then
+				heard = sig
 				lan_rows = rows
-				if tab == "lan" then redraw() end
+				draw()
 				-- What a check waits for
-				log:info("This network: " .. #rows .. " heard")
+				log:info("LAN: " .. #rows .. " heard")
 			end
 		end)
-
-		for _, e in ipairs(network.known_addresses()) do
-			local host, port = e.uri:match("^%a+://(.-):(%d+)$")
-			-- A Luanti server (udp://) is the Luanti client's to list
-			if e.uri:match("^udp://") then host = nil end
-			if host and e.accepted then
-				-- One behind TLS is joined by its https address
-				if e.uri:match("^https://") then host = "https://" .. host end
-				used_rows[#used_rows + 1] = {name = host .. ":" .. port,
-						host = host, port = port,
-						line = e.description ~= "" and e.description or nil}
-			end
-		end
-		if #used_rows > 0 then tab = "used" end
-	end
-	redraw()
-	refresh(false)
-
-	do_connect = function()
-		if not direct then
-			if not picked then
-				show_error("Pick a server from the list")
-				return
-			end
-			if not picked.host then
-				show_error("Pick a server of the fleet")
-				return
-			end
-			if picked.signup and not picked.told then
-				picked.told = true
-				show_error("This server needs an account made at\n" ..
-						picked.signup .. " first.\nConnect again when you "..
-						"have one.")
-				return
-			end
-			connect_or_show_error(picked.host .. ":" .. picked.port,
-					picked.fallbacks)
-			return
-		end
-		local host = address_edit:GetText()
-		local port = port_edit:GetText()
-		if host == "" then
-			show_error("Enter a server address")
-			return
-		end
-		local address = host
-		if port ~= "" then
-			address = host..":"..port
-		end
-		if picked and picked.address == address and picked.signup and
-				not picked.told then
-			picked.told = true
-			show_error("This server needs an account made at\n" ..
-					picked.signup .. " first.\nConnect again when you have one.")
-			return
-		end
-		connect_or_show_error(address, picked and
-				picked.address == address and picked.fallbacks or nil)
 	end
 
-	local connect_button = make_button(window, "Join", true)
-	connect_button:SetFixedHeight(28)
-	magic.SubscribeToEvent(connect_button, "Released", function()
-		do_connect()
+	-- A finger on the list: when it went down and how far it moved
+	root:SubscribeToStackEvent("TouchBegin", function()
+		touch.t0, touch.moved = api.get_time_us(), 0
+		untouched = false
 	end)
-	local sp_buttons = window:CreateChild("UIElement")
-	sp_buttons:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
-	for _, b in ipairs({
-		{"Refresh", function() refresh(true) end},
-		{"Report...", function()
-			local address = picked and (picked.address or (picked.group and
-					picked.group.servers[1].address))
-			if not address or not starport.open_report(address) then
-				show_error("Pick a public server to report")
+	root:SubscribeToStackEvent("TouchMove", function(_, d)
+		touch.moved = touch.moved + math.abs(d:GetInt("DX")) +
+				math.abs(d:GetInt("DY"))
+	end)
+	-- Forgotten the frame after it lifted, after the release's click
+	root:SubscribeToStackEvent("TouchEnd", function() touch.clear = true end)
+	root:SubscribeToStackEvent("Update", function()
+		if touch.clear then touch.t0, touch.clear = nil, false end
+	end)
+
+	-- **The public lists, fetched as it opens**: the Starports and
+	-- Luanti's list whose hosts the player accepted; the others are
+	-- asked by a click on the section's line, which may ask the player
+	local function still_open()
+		for _, r in ipairs(uistack.main.stack) do
+			if r == root then return true end
+		end
+		return false
+	end
+	local function fetch_public(ask)
+		sp_note, sp_ask = "Asking the Starports...", nil
+		starport.fetch(function(rows, info)
+			-- The answer can come after the screen was closed
+			if not still_open() then return end
+			sp_rows = public_rows(rows, tls_only)
+			sp_note = #info.errors > 0 and "The Starports did not answer." or
+					"No public servers listed."
+			for _, e in ipairs(info.errors) do log:warning(e) end
+			if info.unasked > 0 then
+				sp_ask = {name = "Ask for the lists",
+					badge = info.unasked .. " Starport(s)",
+					ask = function() fetch_public(true) end}
 			end
-		end},
-	}) do
-		local button = make_button(sp_buttons, b[1])
-		button.minWidth = 0
-		button:SetFixedHeight(26)
-		magic.SubscribeToEvent(button, "Released", b[2])
+			log:info("Servers: " .. #sp_rows .. " public Buildat servers")
+			draw()
+		end, ask)
 	end
-	if direct then
-		magic.SubscribeToEvent(address_edit, "TextFinished", function()
-			do_connect()
-		end)
-		magic.SubscribeToEvent(port_edit, "TextFinished", function()
-			do_connect()
-		end)
+	fetch_public(false)
+	local ok_sl, sl = pcall(require, "buildat/extension/serverlist")
+	sl = ok_sl and type(sl) == "table" and (sl.fetch and sl or sl.safe)
+	local function fetch_luanti(ask)
+		lt_note, lt_ask = "Asking the Luanti server list...", nil
+		sl.fetch(function(rows, err, unasked)
+			if not still_open() then return end
+			lt_rows = {}
+			for _, s in ipairs(rows or {}) do
+				lt_rows[#lt_rows + 1] = {kind = "luanti", address = s.address,
+					name = s.name, badge = s.players .. " playing",
+					info = s.address .. (s.game ~= "" and "\n" .. s.game or "")}
+			end
+			lt_note = err and "The Luanti server list did not come." or
+					"No servers listed."
+			if unasked then
+				lt_ask = {name = "Ask for the list", badge = unasked,
+					ask = function() fetch_luanti(true) end}
+			end
+			draw()
+		end, ask)
+	end
+	if sl and sl.fetch then
+		fetch_luanti(false)
+	else
+		lt_note = "No Luanti server list here."
 	end
 
+	magic.SubscribeToEvent(search, "TextChanged", function() draw() end)
+	magic.SubscribeToEvent(report, "Released", function()
+		set_armed(not armed)
+	end)
+	if by_address then
+		magic.SubscribeToEvent(by_address, "Released", function()
+			M.show_join_by_address()
+		end)
+	end
+	magic.SubscribeToEvent(back, "Released", function()
+		uistack.main:pop(root)
+	end)
+	draw()
+	root:SubscribeToStackEvent("MouseButtonDown", function()
+		untouched = false
+	end)
 	ui_utils.close_glyph(root, outer)
-
-	-- [JOIN_BUILDAT_KEYS]: Up and Down in the list or the column beside
-	-- it, Right and Left between them
+	-- Up and Down through the page: the filter, Report, the rows, the
+	-- buttons under them
 	ui_utils.keyboard_page(outer)
-	ui_utils.keyboard_columns(outer, left, window)
-
-	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
-		if event_data:GetInt("Key") == KEY_ESCAPE then
-			uistack.main:pop(root)
+	root:SubscribeToStackEvent("KeyDown", function(_, d)
+		untouched = false
+		if d:GetInt("Key") == KEY_ESCAPE then
+			if armed then
+				set_armed(false)
+			else
+				uistack.main:pop(root)
+			end
 			return true -- taken; the menu's own Escape = Back stands down
 		end
 	end)
 	-- The checks wait for this line
-	log:info("Join a Buildat server: shown")
+	log:info("Servers: shown")
+end
+
+-- **Join by address**: one field, the address with an optional port, and
+-- which kind of server it is. A Luanti one opens the Luanti client's
+-- connect dialog on it, for the name and password.
+function M.show_join_by_address()
+	local root = uistack.main:push({desc = "join_by_address"})
+	root.defaultStyle = magic.cache:GetResource("XMLFile", STYLE)
+	local window = root:CreateChild("Window")
+	window:SetStyleAuto()
+	window:SetLayout(LM_VERTICAL, 8, magic.IntRect(16, 12, 16, 12))
+	window:SetAlignment(HA_CENTER, VA_CENTER)
+	window:SetFixedWidth(math.min(magic.ui.root.width - 40, 400))
+	local title = window:CreateChild("Text")
+	title:SetStyleAuto()
+	title.text = "Join by address"
+	title:SetFontSize(20)
+	local address_edit = make_labeled_edit(window, "Address",
+			"localhost:29500", 200)
+	local kind = "Buildat"
+	ui_utils.dropdown(window, {"Buildat", "Luanti"}, kind, function(k)
+		kind = k
+	end, {label = "Server", width = 160})
+	local buttons = window:CreateChild("UIElement")
+	buttons:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
+	local join_button = make_button(buttons, "Join", true)
+	join_button.minWidth = 0
+	join_button:SetFixedSize(120, 28)
+	local cancel = make_button(buttons, "Cancel")
+	cancel.minWidth = 0
+	cancel:SetFixedSize(120, 28)
+	local function join()
+		local address = address_edit:GetText():gsub("^%s+", ""):gsub("%s+$", "")
+		if address == "" then
+			show_error("Enter a server address")
+			return
+		end
+		log:info("Join by address: " .. kind .. " " .. address)
+		if kind == "Luanti" then
+			local ok, why = api.launch(LUANTI_CONNECT, address)
+			if not ok then show_error(why) end
+			return
+		end
+		if not starport.direct_connect_allowed() then
+			show_error("Joining by address is off in the Starport settings")
+			return
+		end
+		api.stop_local_server()
+		connect_or_show_error(address)
+	end
+	magic.SubscribeToEvent(join_button, "Released", join)
+	magic.SubscribeToEvent(address_edit, "TextFinished", join)
+	magic.SubscribeToEvent(cancel, "Released", function()
+		uistack.main:pop(root)
+	end)
+	address_edit:SetFocus(true)
+	ui_utils.close_glyph(root, window)
+	ui_utils.keyboard_page(window)
+	root:SubscribeToStackEvent("KeyDown", function(_, d)
+		if d:GetInt("Key") == KEY_ESCAPE then
+			uistack.main:pop(root)
+			return true
+		end
+	end)
+	-- The checks wait for this line
+	log:info("Join by address: shown")
 end
 
 local function show_starting(game)

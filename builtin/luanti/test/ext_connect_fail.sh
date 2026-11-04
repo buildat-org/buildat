@@ -3,7 +3,7 @@
 # tier: quick
 # ci
 # cost: 16s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
-# [BOX_PLAYTEST_2] (2): the "Join a Luanti server" row in the menu,
+# [BOX_PLAYTEST_2] (2): the "Join a Luanti server" dialog,
 # a connect to an address nothing answers at: the failure must be said in
 # a dialog and OK must return to the connect screen, not the menu and not
 # the desktop. Prints PASS or FAIL.
@@ -24,7 +24,7 @@ fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 # and the scan found no rows. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
-bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
+bin/buildat -m launch_menu -a extension/luanti_client/connect -w 1280x720 -l 3 -c - < "$fifo" \
 	> "$tmp/cli.log" 2>&1 &
 cli=$!
 exec 3> "$fifo"
@@ -83,17 +83,9 @@ def wait_for(texts, secs, anywhere=False):
 def mark():
     global seen
     seen = len(open(log, "rb").read())
-wait_for(["rows in"], 30, True)
-mark()
-write("text join a lua")
-wait_for(['rows for "join a lua"'], 5)
-els = scan("a")
-if not els: fail("no menu scan")
-tiles = [e for e in els if "join a luanti server" in e[5].lower() and e[3] > 0]
-if not tiles: fail("no connect row; saw " + ", ".join(e[5] for e in els)[:300])
-mark()
-click(max(tiles, key=lambda e: e[2]))
-wait_for(["Join a Luanti server: shown"], 10)
+# The dialog by its launch action (-a): the Servers screen's way to a
+# Luanti server ([SERVERS_SCREEN]) opens the same
+wait_for(["Join a Luanti server: shown"], 30, True)
 els = scan("b")
 addr = [e for e in els if e[0] == "LineEdit" and ":" in e[5]] if els else None
 if not addr: fail("no address field; saw " + ", ".join(e[5] for e in els or [])[:300])

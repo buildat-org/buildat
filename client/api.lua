@@ -495,7 +495,8 @@ end
 -- launch(key[, save]): run one of them. The key is looked up in the table
 -- the trusted side built, so a sandbox cannot name anything that is not
 -- on the grid, and it never hands a function across. A save action's
--- save is one list_saves(app) answers, as launch_save's.
+-- save is one list_saves(app) answers, as launch_save's; any other
+-- action is handed it as a plain string, or nil.
 buildat.safe.launch = function(key, save)
 	if type(key) ~= "string" then
 		return false, "launch(key): a string from launch_actions()"
@@ -516,7 +517,9 @@ buildat.safe.launch = function(key, save)
 		return false, "launch(" .. key .. "): no such action"
 	end
 	launch_history_note(key)
-	run()
+	-- A Luanti connect's address ([SERVERS_SCREEN]); the action reads
+	-- it as untrusted
+	run(type(save) == "string" and save or nil)
 	return true
 end
 -- **Its own persistent storage**, one directory per launch extension

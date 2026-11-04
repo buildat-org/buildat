@@ -49,7 +49,7 @@ code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | head -1 | cut -d' ' -f3)
 # has nowhere to go back to). The 300 ms after a click is its focus, which
 # the field takes in the frames after it.
 join(){
-	{ printf 'wait_log_any 20000 Join a Buildat server: shown\nclick LineEdit "29500"\ndelay 300\nkeypress End\n'
+	{ printf 'wait_log_any 20000 Join by address: shown\nclick LineEdit "localhost:29500"\ndelay 300\nkeypress End\n'
 		printf 'keypress Backspace\n%.0s' 1 2 3 4 5
 		printf 'text %s\ndelay 300\nclick Button "Join"\n' $PORT
 		cat "$5"; } > "$5.full"

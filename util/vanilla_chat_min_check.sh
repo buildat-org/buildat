@@ -73,7 +73,7 @@ echo "enable_damage = false" >> "$d/apps/vanilla/saves/w/luanti/world.mt"
 # join <name> <create> <code> <log> <cmds>: by the launcher's connect
 # screen, as util/vanilla_stop_check.sh
 join(){
-	{ printf 'wait_log_any 20000 Join a Buildat server: shown\nclick LineEdit "29500"\ndelay 300\nkeypress End\n'
+	{ printf 'wait_log_any 20000 Join by address: shown\nclick LineEdit "localhost:29500"\ndelay 300\nkeypress End\n'
 		printf 'keypress Backspace\n%.0s' 1 2 3 4 5
 		printf 'text %s\ndelay 300\nclick Button "Join"\n' $PORT
 		cat "$5"; } > "$5.full"

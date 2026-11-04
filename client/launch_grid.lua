@@ -68,11 +68,17 @@ local function menu_actions()
 			icon = "own:launch_menu/res/icon_local.png", resolved_icon = true,
 			description = "Start an app on this machine",
 			run = function() M.screens().show_local_apps() end},
-		{id = "connect", label = "Join a Buildat server", order = 2,
+		-- [SERVERS_SCREEN] The LAN's, the ones joined, the public lists
+		{id = "servers", label = "Servers", order = 2,
 			category = "connect",
 			icon = "own:launch_menu/res/icon_network.png", resolved_icon = true,
-			description = "By its address, on this network or from the Starports",
-			run = function() M.screens().show_connect_to_server() end},
+			description = "On the LAN, joined before, or public",
+			run = function() M.screens().show_servers() end},
+		{id = "connect", label = "Join by address...", order = 3,
+			category = "connect",
+			icon = "own:launch_menu/res/icon_network.png", resolved_icon = true,
+			description = "A Buildat or Luanti server by its address",
+			run = function() M.screens().show_join_by_address() end},
 	}
 	-- [AITTA_REVIEW]: where the filters (under Starport's lock) hide
 	-- unreviewed content, the tile lists reviewed releases only
@@ -625,8 +631,10 @@ function M.actions(log)
 					network = short_name(a.network),
 					listed_by = short_name(a.listed_by),
 					section = short_name(a.section),
-					run = function()
-						local ok, err = pcall(run)
+					-- arg: launch()'s second, a string or nil (a Luanti
+					-- connect's address, [SERVERS_SCREEN])
+					run = function(arg)
+						local ok, err = pcall(run, arg)
 						if not ok then
 							log:warning("launcher "..from..": "..tostring(err))
 						end

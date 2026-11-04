@@ -12,7 +12,7 @@
 # left by Escape gives its parent back the selection it was opened from:
 # Down after it goes on from there, not from the top. A row the mouse
 # selected is let go when the mouse leaves it, and Down brings it back; one
-# the keys selected stays wherever the mouse goes. In the Servers list a
+# the keys selected stays wherever the mouse goes. In the Apps list a
 # clicked row is locked: the panel stays its while the mouse is over
 # another row, and an arrow key lets go. Then in Firefox
 # (with web/ from util/build_web.sh, skipped without), apps/play's page,
@@ -131,13 +131,12 @@ n=$(grep -ac 'push(): .*show_confirm_dialog' "$t/log")
 grep -aq "command: quit" "$t/log" && fail "the arrows' Quit did not quit"
 [ "$(grep -ac 'pop(): .*show_confirm_dialog' "$t/log")" = 2 ] || fail "the arrows' Cancel"
 
-# Home's Browse > Servers, its rows at 800x600: a click on the second, the
+# Home's Browse > Apps, its rows at 800x600: a click on the second, the
 # mouse on the third, then Down
 cat > "$t/cmds2" <<C
 wait_log_any 20000 rows in
 delay 500
-keypress Down
-keypress Return
+click Button "Apps"
 wait_log 5000  rows, by 
 delay 300
 mouse_pos 200 298
@@ -156,13 +155,14 @@ timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$t/u2" -w 800x600 -l 4
 	-o sound_mute=1 -c @"$t/cmds2" > "$t/log2" 2>&1 ||
 	{ cp "$t/log2" "$t/log"; fail "the drive: $(grep -a 'Command sequence failed' "$t/log2" | head -1)"; }
 cp "$t/log2" "$t/log"
-grep -aq "launch_menu: locked Join a Buildat server" "$t/log2" || fail "the click locked nothing"
+locked=$(grep -ao "launch_menu: locked .*" "$t/log2" | head -1 | sed 's/launch_menu: locked //')
+[ -n "$locked" ] || fail "the click locked nothing"
 # The panel's heading, and the focus, in each scan
 p(){ awk -v n="$1" '/command: event scan/{i++} i == n && /size 166x20 text/{
 	sub(/.*text /, ""); print; exit}' "$t/log2"; }
-[ "$(p 1)" = '"Join a Buildat server"' ] || fail "the panel left the locked row for the hovered one: $(p 1)"
+[ "$(p 1)" = "\"$locked\"" ] || fail "the panel left the locked row for the hovered one: $(p 1)"
 grep -aq "launch_menu: unlocked" "$t/log2" || fail "Down did not let go"
-[ "$(p 2)" != '"Join a Buildat server"' ] || fail "the panel stayed locked after Down"
+[ "$(p 2)" != "\"$locked\"" ] || fail "the panel stayed locked after Down"
 echo "ok: a click on nothing is Back above the first screen, and nothing on it; a click locks a row"
 
 [ -f web/buildat.wasm ] || { echo "PASS: (web part skipped: no web/)"; exit 0; }

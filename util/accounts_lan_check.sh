@@ -8,7 +8,7 @@
 #      the LAN address too and is announced as "floorplanner".
 #   2. A raw peer at the LAN address, and one on a server the launcher
 #      did not start, ask with accounts:open_lan and are refused.
-#   3. A second client finds it under "This network", joins and
+#   3. A second client finds it under LAN in Servers, joins and
 #      registers; its Server window has no Open to LAN.
 #   4. Vanilla on the bundled minimal game: the pause menu's Open to LAN
 #      opens it, announced under the world's name.
@@ -94,17 +94,12 @@ ask_lan 127.0.0.1 "$SERVER_PORT"
 wait_for_log "$t/d.log" "Open to LAN refused" 10 || fail "the dedicated server did not refuse"
 
 # 3: the last click is to fail, there being no such button
-# The delays of 300 ms: the list drawn again, and a row picked, in the
-# frames after the line and the click
+# The delay of 300 ms: the list drawn again in the frames after the line
 cat > "$t/b.cmds" <<C
-wait_log_any 30000 Join a Buildat server: shown
-click Button "This network"
-wait_log_any 10000 This network: 1 heard
+wait_log_any 30000 Servers: shown
+wait_log_any 10000 LAN: 1 heard
 delay 300
 click Button "floorplanner"
-# The click's frames: the row picked before Join is looked for
-delay 300
-click Button "Join"
 wait_log 60000 Plan picker:
 delay 1000
 click Button "Menu..."
@@ -117,7 +112,7 @@ click Button "Open to LAN"
 quit
 C
 BUILDAT_FP_NAME=guest BUILDAT_FP_PASSWORD=guestpass12 BUILDAT_FP_CREATE=1 \
-	client -C "$t/cb" -D "$t/ub" -a extension/launch_menu/connect \
+	client -C "$t/cb" -D "$t/ub" -a extension/launch_menu/servers \
 	-c @"$t/b.cmds" > "$t/b.log" 2>&1
 grep -aq "guest joined from ${at%:*}" "$t/a.log" ||
 	fail "the second client did not join over the LAN ($(grep -a "Command seq\|click:" "$t/b.log" | tail -3))"

@@ -84,7 +84,7 @@ CHECK_PIDS+=($SERVER_PID)
 # Through the connect screen, which the rejoin comes back to; shadows,
 # Down, is unlit
 {
-	printf 'wait_log_any 30000 Join a Buildat server: shown\ndelay 500\nclick LineEdit "29500"\ndelay 300\nkeypress End\n'
+	printf 'wait_log_any 30000 Join by address: shown\ndelay 500\nclick LineEdit "localhost:29500"\ndelay 300\nkeypress End\n'
 	printf 'keypress Backspace\n%.0s' 1 2 3 4 5
 	printf 'text %s\ndelay 300\nclick Button "Join"\n' $SERVER_PORT
 	printf 'wait_log 60000 load: the world is in\ndelay 1500\n'

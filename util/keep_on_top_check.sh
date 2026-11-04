@@ -22,7 +22,7 @@ CHECK_PIDS+=($SERVER_PID)
 # The 300 ms delays are the screen laid out after its line, and a click's
 # focus taken before the keys
 login(){ # log, then the commands after the login page is up
-	{ printf 'wait_log_any 30000 Join a Buildat server: shown\ndelay 300\nclick LineEdit "29500"\ndelay 300\nkeypress End\n'
+	{ printf 'wait_log_any 30000 Join by address: shown\ndelay 300\nclick LineEdit "localhost:29500"\ndelay 300\nkeypress End\n'
 		printf 'keypress Backspace\n%.0s' 1 2 3 4 5
 		printf 'text %s\ndelay 300\nclick Button "Join"\n' $SERVER_PORT
 		printf 'wait_log 30000 Keep me logged in|\ndelay 1000\n'

@@ -94,20 +94,34 @@ local function accepted(url)
 	return false
 end
 
-local fetching = false
-local function fetch(ask)
-	if fetching then return end
+-- The callers waiting for the fetch under way, each told once it ends:
+-- cb(rows, why it failed or nil, the host not asked or nil)
+local fetching = nil
+local function fetch(ask, cb)
 	local url = list_url()
 	if not ask and not accepted(url) then
 		log:info("not fetching " .. url .. " until asked to: this client" ..
 				" has not said yes to it")
+		if cb then cb(M.safe.servers(), nil, url:match("^%a+://([^/]+)")) end
 		return
 	end
-	fetching = true
+	if fetching then
+		fetching[#fetching + 1] = cb
+		return
+	end
+	fetching = {cb}
 	network.http_get(url .. "/list", function(body, err)
-		fetching = false
+		local waiting = fetching
+		fetching = nil
+		local function tell(why)
+			for _, f in ipairs(waiting) do
+				local ok, e = pcall(f, M.safe.servers(), why)
+				if not ok then log:warning("fetch: " .. tostring(e)) end
+			end
+		end
 		if not body then
 			log:warning("the list did not come: " .. tostring(err))
+			tell(tostring(err))
 			return
 		end
 		local data = network.parse_json(body)
@@ -133,6 +147,7 @@ local function fetch(ask)
 		table.sort(rows, function(a, b) return a.players > b.players end)
 		while #rows > MAX do table.remove(rows) end
 		write_cache(rows)
+		tell(nil)
 	end, {description = "the server list"})
 end
 
@@ -151,6 +166,13 @@ end
 -- This is the call that may ask the user about the host.
 function M.safe.refresh()
 	fetch(true)
+end
+
+-- fetch(cb[, ask]): the list fetched again, cb(rows, why, unasked) when it
+-- ends: the rows servers() then answers, why the fetch failed or nil, and
+-- the list's host when it was not asked (not accepted yet, and no `ask`)
+function M.safe.fetch(cb, ask)
+	fetch(ask == true, type(cb) == "function" and cb or nil)
 end
 
 -- Loading this extension starts a fetch where the host is already

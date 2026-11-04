@@ -134,45 +134,6 @@ local function recent(entries, n)
 	return out
 end
 
--- **The Servers list's filters** ([SERVER_FILTER]): All, the ones joined
--- before, then one per list the servers came from and one per network,
--- out of what the entries say rather than a fixed set, so an app's own
--- server tiles bring their own. In the user's order ([BROWSE_TWEAKS]);
--- any other after those, by name.
-local FILTER_ORDER = {"Starport", "Luanti server list", "LAN", "Buildat",
-	"Luanti"}
-local function server_filters(list)
-	-- This menu's own two lists are offered when they are empty too
-	local seen = {Starport = true, LAN = not web or nil}
-	for _, e in ipairs(list) do
-		if e.listed_by then seen[e.listed_by] = true end
-		if e.network then seen[e.network] = true end
-	end
-	local out, rest = {"All", "Previously connected"}, {}
-	for _, f in ipairs(FILTER_ORDER) do
-		if seen[f] then
-			out[#out + 1] = f
-			seen[f] = nil
-		end
-	end
-	for f in pairs(seen) do rest[#rest + 1] = f end
-	table.sort(rest)
-	for _, f in ipairs(rest) do out[#out + 1] = f end
-	return out
-end
-assert(table.concat(server_filters({{listed_by = "Zed", network = "Luanti"},
-		{listed_by = "Luanti server list", network = "Buildat"},
-		{listed_by = "Abc"}, {network = "Mine"}}), ",") == (web and
-		"All,Previously connected,Starport,Luanti server list,Buildat,Luanti,Abc,Mine,Zed" or
-		"All,Previously connected,Starport,Luanti server list,LAN,Buildat,Luanti,Abc,Mine,Zed"),
-		"server_filters: the user's order, then by name")
-
-local function passes(e, filter)
-	if filter == "All" then return true end
-	if filter == "Previously connected" then return e.last ~= nil end
-	return e.listed_by == filter or e.network == filter
-end
-
 -- "3 h ago": when a thing was last used, for the panel
 local function ago(t, now)
 	local d = math.max(0, now - t)
@@ -302,8 +263,11 @@ local function gather()
 		-- ([WEB_LOCAL_SERVER])
 		if not (web and (a.kind ~= "extension" and a.kind ~= "web_local" or
 				a.key == "extension/launch_menu/local")) and
-				-- Its lists are this menu's Apps and Servers
-				a.key ~= "extension/launch_menu/local" then
+				-- Its lists are this menu's Apps and Servers, and the
+				-- Servers screen holds the ways to a server
+				-- ([SERVERS_SCREEN])
+				a.key ~= "extension/launch_menu/local" and
+				a.category ~= "connect" then
 			local cat = a.category or "action"
 			local kind = KIND_OF[cat] or "action"
 			local settings = cat == "settings"
@@ -719,7 +683,9 @@ local function home(query)
 			for _, e in ipairs(entries) do
 				if e.kind == kind then n = n + 1 end
 			end
-			if n > 0 then
+			-- Servers always: its screen has the LAN, the public lists
+			-- and Join by address
+			if n > 0 or kind == "server" then
 				row({label = KIND_TITLE[kind], kind = "browse",
 					glyph = kind == "server" and "🌐" or nil,
 					description = n .. " to choose from"}, tostring(n),
@@ -810,38 +776,24 @@ end
 -- screen the panel is under the list.
 -- simplified: one scrolled list rather than pages; hundreds of rows are
 -- hundreds of buttons, which is fine at this size.
-browse = function(kind, query, by, filter, focus_filter)
-	filter = filter or "All"
+-- Servers is a screen of its own, every launch UI's ([SERVERS_SCREEN];
+-- extensions/launch_menu/screens.lua)
+browse = function(kind, query, by)
+	if kind == "server" then
+		local ok, why = api.launch("extension/launch_menu/servers")
+		if not ok then log:warning(tostring(why)) end
+		return
+	end
 	local narrow = magic.ui.root.width < 760
 	local width = math.min(magic.ui.root.width - 40, 1000)
 	local list_w = narrow and width - 32 or width - 32 - PANEL_WIDTH - 12
 	local root, window = screen("launch_menu " .. kind, width,
 			narrow and KIND_TITLE[kind] .. " (type to search)" or
 			KIND_TITLE[kind] .. "   (type to search; Ctrl+S sorts by " ..
-			(by == "name" and "recent use" or "name") ..
-			(kind == "server" and "; Ctrl+F filters" or "") .. ")", query)
+			(by == "name" and "recent use" or "name") .. ")", query)
 	local of_kind = {}
 	for _, e in ipairs(entries) do
 		if e.kind == kind then of_kind[#of_kind + 1] = e end
-	end
-	local filters = kind == "server" and server_filters(of_kind) or nil
-	if filters then
-		log:info("launch_menu: filters " .. table.concat(filters, ", "))
-	end
-	local function refilter(f, focus_filter)
-		uistack.main:pop(root)
-		browse(kind, query, by, f, focus_filter)
-	end
-	local drop = nil
-	if filters then
-		drop = ui_utils.dropdown(window, filters, filter, function(f)
-			deferred = function() refilter(f, true) end
-		end, {width = 240, height = ROW_HEIGHT})
-		local kept = {}
-		for _, e in ipairs(of_kind) do
-			if passes(e, filter) then kept[#kept + 1] = e end
-		end
-		of_kind = kept
 	end
 	local body = window:CreateChild("UIElement")
 	body:SetLayout(narrow and LM_VERTICAL or LM_HORIZONTAL, 12,
@@ -858,16 +810,6 @@ browse = function(kind, query, by, filter, focus_filter)
 
 	local shown = search(of_kind, #query < SEARCH_MIN and "" or query,
 			by)[1] or {}
-	-- The LAN's servers first, whatever the order: they answered just now
-	-- (user, 2026-10-06)
-	if kind == "server" then
-		local lan, rest = {}, {}
-		for _, e in ipairs(shown) do
-			table.insert(e.listed_by == "LAN" and lan or rest, e)
-		end
-		for _, e in ipairs(rest) do lan[#lan + 1] = e end
-		shown = lan
-	end
 	local items = {}
 	local action_buttons = {}
 	local current = nil
@@ -965,28 +907,6 @@ browse = function(kind, query, by, filter, focus_filter)
 	end
 
 	local nav = ui_utils.bind_button_menu(root, items, function(key)
-		-- [V2_FILTER_KEYS]: the filter above the list, Up from its first
-		-- row; Left and Right step it, Down goes back to the list
-		if drop and drop:HasFocus() then
-			if key == KEY_LEFT or key == KEY_RIGHT then
-				local i = 1
-				for j, f in ipairs(filters) do
-					if f == filter then i = j end
-				end
-				refilter(filters[(i - 1 + (key == KEY_RIGHT and 1 or -1)) %
-						#filters + 1], true)
-				return true
-			elseif key == KEY_DOWN then
-				if items[1] then items[1].button:SetFocus(true) end
-				return true
-			elseif key == KEY_UP then
-				return true
-			end
-		elseif drop and key == KEY_UP and items[1] and
-				items[1].button:HasFocus() then
-			drop:SetFocus(true)
-			return true
-		end
 		local i = in_actions()
 		-- Shift+Tab is Left, and Tab in the panel Down, as in a form
 		-- ([BROWSE_TWEAKS])
@@ -1026,22 +946,13 @@ browse = function(kind, query, by, filter, focus_filter)
 		if key == magic.KEY_S and
 				magic.input:GetQualifierDown(magic.QUAL_CTRL) then
 			uistack.main:pop(root)
-			browse(kind, query, by == "name" and "recent" or "name", filter)
+			browse(kind, query, by == "name" and "recent" or "name")
 			return true
 		end
 		local q = search_key(key, query)
 		if q then
 			uistack.main:pop(root)
-			browse(kind, q, by, filter)
-			return true
-		end
-		if filters and key == magic.KEY_F and
-				magic.input:GetQualifierDown(magic.QUAL_CTRL) then
-			local i = 1
-			for j, f in ipairs(filters) do
-				if f == filter then i = j end
-			end
-			refilter(filters[i % #filters + 1])
+			browse(kind, q, by)
 			return true
 		end
 		if key == KEY_ESCAPE then
@@ -1050,7 +961,7 @@ browse = function(kind, query, by, filter, focus_filter)
 			return true
 		end
 	end)
-	on_typed(root, query, function(q) browse(kind, q, by, filter) end)
+	on_typed(root, query, function(q) browse(kind, q, by) end)
 	save_menus(root, items)
 	nav:on_change(function(button, selected, index, by_mouse)
 		local item = index and items[index]
@@ -1059,12 +970,9 @@ browse = function(kind, query, by, filter, focus_filter)
 		if not locked then fill(item.entry) end
 		if not by_mouse then view:show(button) end
 	end)
-	if focus_filter and drop then
-		drop:SetFocus(true)
-	end
 	log:info("launch_menu: " .. kind .. ", " .. #items .. " rows" ..
 			(query ~= "" and " for \"" .. query .. "\"" or "") ..
-			", by " .. by .. (filters and ", " .. filter or ""))
+			", by " .. by)
 end
 
 -- **Logs and errors** ([LOG_REACH]): where the log is, and the caught
@@ -1284,6 +1192,11 @@ function M.boot(launch_action)
 				e.run()
 				return
 			end
+		end
+		-- One not listed here: the ways to a server ([SERVERS_SCREEN])
+		if api.launch(launch_action) then
+			log:info("Launch action: " .. launch_action)
+			return
 		end
 		log:warning("Launch action " .. launch_action .. " is not here")
 	end

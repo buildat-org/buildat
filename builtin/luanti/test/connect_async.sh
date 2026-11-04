@@ -24,7 +24,7 @@ fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 # and the scan found no rows. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
-( cd "$here/Build" && exec bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
+( cd "$here/Build" && exec bin/buildat -m launch_menu -a extension/launch_menu/connect -w 1280x720 -l 3 -c - < "$fifo" \
 	> "$out/cli.log" 2>&1 ) &
 cli=$!
 exec 3> "$fifo"
@@ -87,25 +87,13 @@ def wait_for(text, secs, anywhere=False):
 def mark():
     global seen
     seen = len(open(log, "rb").read())
-wait_for("rows in", 30, True)
-mark()
-write("text join a bu")
-wait_for('rows for "join a bu"', 5)
-els = scan()
-e = find(els, "Join a Buildat server")
-if not e:
-    fail("no connect entry on the first screen; saw " +
-         ", ".join("%r" % x[5] for x in els or [])[:300])
-mark()
-click(e)
-wait_for("Join a Buildat server: shown", 10)
+# Join by address, by its launch action (-a)
+wait_for("Join by address: shown", 30, True)
 els = scan()
 edits = [x for x in els if x[0] == "LineEdit" and x[3] > 0]
-if len(edits) < 2:
-    fail("the connect screen has %d fields" % len(edits))
-# The address field by what it holds: the public servers' search is a
-# field too, and comes first ([STARPORT] 4)
-address = [x for x in edits if x[5] == "localhost"]
+if not edits:
+    fail("Join by address has no field")
+address = [x for x in edits if x[5] == "localhost:29500"]
 click(address[0] if address else edits[0])
 write("keypress End", *(["keypress Backspace"] * 40))
 write("text 192.0.2.1", "delay 200")

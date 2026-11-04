@@ -26,7 +26,7 @@ run() {   # $1 = which pass; drives one client through the python below
 # and the scan found no rows. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
-	bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
+	bin/buildat -m launch_menu -a extension/luanti_client/connect -w 1280x720 -l 3 -c - < "$fifo" \
 		> "$tmp/cli.log" 2>&1 &
 	local cli=$!
 	exec 3> "$fifo"
@@ -83,13 +83,8 @@ def at(e):
     return "mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2)
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
-# Home drawn, then the search's own list
-until("rows in", 0, 30)
-act('rows for "join a lua"', "text join a lua")
-els = scan("a")
-tile = find(els, "Join a Luanti server")
-if not tile: fail("no Luanti row; saw " + ", ".join(e[5] for e in els or [])[:300])
-act("Join a Luanti server: shown", at(tile), "mouse_click left")
+# The dialog by its launch action (-a), as the Servers screen opens it
+until("Join a Luanti server: shown", 0, 30)
 els = scan("b")
 label = find(els, "Filter")
 if not label: fail("no filter row; saw " + ", ".join(e[5] for e in els or [])[:300])

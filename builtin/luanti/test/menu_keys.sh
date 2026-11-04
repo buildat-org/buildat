@@ -13,10 +13,8 @@
 # gives its own root the focus as it pushes it.
 #
 #   1. On the launch menu, Down moves the selection.
-#   2. On "Join a Buildat server", which opens with the address field focused,
-#      Down moves nothing in the server list beside it: since the user's
-#      "rows by Up and Down" (2026-10-07) it goes to the Port field, and
-#      the list is what must stay.
+#   2. On Servers, a screen pushed over the menu ([SERVERS_SCREEN]), Down
+#      moves the selection too.
 #
 # The pictures are compared by how many pixels differ, because a focused
 # field blinks its caret and that is not the selection moving.
@@ -114,52 +112,42 @@ write("delay 500")
 shot("a")
 write("keypress DOWN", "delay 300")
 shot("b")
-# 2. The connect screen, found by its own text
-seen = len(open(log, "rb").read())
-write("text join a bu")
-wait_for('rows for "join a bu"', 5)
+# 2. Servers, Home's row found by its text
 els = scan()
 entry = None
 for e in els or []:
-	if "join a buildat server" in e[5].lower() and e[3] > 0:
+	if e[5] == "Servers" and e[3] > 0:
 		entry = e
 if entry is None:
-	print("FAIL: no \"Join a Buildat server\" in the menu; saw " +
+	print("FAIL: no \"Servers\" in the menu; saw " +
 			", ".join("%r" % x[5] for x in els or [])[:200])
 	write("quit"); sys.exit(1)
 seen = len(open(log, "rb").read())
-# The 300 ms is the hover taken before the press; the 500 the screen
-# laid out after its line
+# The 300 ms is the hover taken before the press; the 1500 the screen
+# laid out after its line, and the lists' fetches answered
 write("mouse_pos %d %d" % (entry[1] + entry[3] // 2, entry[2] + entry[4] // 2),
 		"delay 300", "mouse_click left")
-wait_for("Join a Buildat server: shown", 10)
-write("delay 500")
+wait_for("Servers: shown", 10)
+write("delay 1500")
 shot("c")
-# The fields' column: the list is left of it
-fields = [e for e in scan() or [] if e[0] == "LineEdit" and e[3] > 0]
-left_of = min(e[1] for e in fields) - 8 if fields else None
 write("keypress DOWN", "delay 300")
 shot("d")
 write("quit")
 
 CARET = 400
 moved = differing("a", "b")
-still = differing("c", "d", left_of)
+moved2 = differing("c", "d")
 ok = True
 if moved <= CARET:
 	print("FAIL: Down moved nothing on the menu (%d pixels)" % moved)
 	ok = False
 else:
 	print("ok: Down moves the selection (%d pixels)" % moved)
-if not left_of:
-	print("FAIL: no fields on the connect screen")
-	ok = False
-elif still > CARET:
-	print("FAIL: Down moved the server list while the address field had the "
-			"focus (%d pixels)" % still)
+if moved2 <= CARET:
+	print("FAIL: Down moved nothing on Servers (%d pixels)" % moved2)
 	ok = False
 else:
-	print("ok: the list stays while a field has the focus (%d pixels)" % still)
+	print("ok: Down moves the selection on Servers (%d pixels)" % moved2)
 print("PASS: every step above held" if ok else "FAIL: see above")
 sys.exit(0 if ok else 1)
 PY

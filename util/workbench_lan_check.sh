@@ -11,7 +11,7 @@
 #      the machine's LAN address too, announced as the project
 #      ([WB_LAN_NAME]; "projectlanproject": the name typed after New's
 #      "project").
-#   2. A second client finds it in the connect screen's "This network"
+#   2. A second client finds it in the Servers screen's LAN section
 #      (the announce heard on this machine's LAN address), joins and
 #      makes an account (lanbob, the login the LAN joiner must pass), and
 #      plays without edit rights; its pause menu's Server window has no
@@ -92,13 +92,10 @@ echo "ok: opened at $at from the pause menu's My account..."
 # 2, then 3's rights; the last click is to fail, there being no such
 # button
 cat > "$t/b.cmds" <<C
-wait_log_any 60000 Join a Buildat server: shown
-click Button "This network"
-wait_log_any 10000 This network: 1 heard
+wait_log_any 60000 Servers: shown
+wait_log_any 10000 LAN: 1 heard
 delay 300
 click Button "$proj"
-delay 300
-click Button "Join"
 wait_log_any 300000 player physics enabled
 delay 2000
 keypress Escape
@@ -112,7 +109,7 @@ click Button "Open to LAN"
 quit
 C
 BUILDAT_JOIN_NAME=lanbob BUILDAT_JOIN_PASSWORD=lanpass1234 BUILDAT_JOIN_CREATE=1 \
-	client -C "$t/cb" -D "$t/ub" -a extension/launch_menu/connect \
+	client -C "$t/cb" -D "$t/ub" -a extension/launch_menu/servers \
 	-c @"$t/b.cmds" > "$t/b.log" 2>&1
 grep -aq "lanbob joined from ${at%:*}" "$t/o.log" ||
 	fail "lanbob did not join over the LAN ($(grep -a "Command seq\|click:" "$t/b.log" | tail -3); $t/b.log)"
@@ -124,5 +121,5 @@ grep -aq "kit editor: edit rights: yes" "$t/b.log" ||
 	fail "lanbob not given edit rights ($(grep -a "Command seq" "$t/b.log" | tail -1); $t/o.log)"
 grep -aq 'click: no visible, uncovered Button "Open to LAN"' "$t/b.log" ||
 	fail "lanbob has Open to LAN ($t/b.log)"
-echo "PASS: Workbench opened to the LAN at $at from the pause menu (the owner logged in without a dialog), found under This network and joined with a new account, which the owner made a builder in the Accounts page"
+echo "PASS: Workbench opened to the LAN at $at from the pause menu (the owner logged in without a dialog), found under LAN in Servers and joined with a new account, which the owner made a builder in the Accounts page"
 # vim: set noet ts=4 sw=4:

@@ -122,8 +122,8 @@ echo "ok: floorplanner listed on the Starport"
 # drive expects.
 cat > "$t/c1" <<C
 expect_error Disconnected from server: The server is restarting
-wait_log_any 30000 Join a Buildat server: shown
-click LineEdit "29500"
+wait_log_any 30000 Join by address: shown
+click LineEdit "localhost:29500"
 # the click's frames: the field takes focus a frame later
 delay 300
 keypress End
@@ -265,8 +265,8 @@ echo "ok: the listing no longer says updating"
 # t4 with a client on: it waits; the client leaves, and it goes
 # On until the shell kills it: the delay at the end is that
 cat > "$t/c2" <<C
-wait_log_any 30000 Join a Buildat server: shown
-click LineEdit "29500"
+wait_log_any 30000 Join by address: shown
+click LineEdit "localhost:29500"
 # the click's frames: the field takes focus a frame later
 delay 300
 keypress End

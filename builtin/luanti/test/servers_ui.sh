@@ -4,7 +4,7 @@
 # needs: network
 # cost: 27s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [SERVER_LIST]: the two connect screens, driven -- the launch menu's
-# "Join a Buildat server" shot with the used addresses on the left; then the
+# Servers screen shot with the used addresses under Recent; then the
 # luanti_client's dialog, "Official list" picked, the permission dialog
 # accepted, the list read (rows with a players count) and shot. The
 # addresses file is put back after. Prints PASS or FAIL; the shots are
@@ -94,17 +94,13 @@ wait_for(["rows in" if stage == "launch" else "world: self-test ok"], 30, True)
 els = scan("a")
 if not els: fail("no menu scan")
 if stage == "launch":
+    b = [e for e in els if e[5] == "Servers" and e[3] > 0]
+    if not b: fail("no Servers; saw " + ", ".join(e[5] for e in els)[:300])
     mark()
-    write("text join a bu")
-    wait_for(['rows for "join a bu"'], 5)
-    els = scan("a2")
-    b = els and find(els, "Join a Buildat server")
-    if not b: fail("no Join a Buildat server; saw " + ", ".join(e[5] for e in els)[:300])
-    mark()
-    click(b)
-    wait_for(["Join a Buildat server: shown"], 10)
+    click(b[0])
+    wait_for(["Servers: shown"], 10)
     els = scan("b")
-    if not (els and find(els, "Servers used")): fail("no used list; saw " + ", ".join(e[5] for e in els or [])[:300])
+    if not (els and find(els, "Recent")): fail("no Recent section; saw " + ", ".join(e[5] for e in els or [])[:300])
     write("screenshot " + out + "/launch_connect.png")
     wait_for(["Wrote screenshot " + out + "/launch_connect.png"], 10)
     print("PASS: (launch)")

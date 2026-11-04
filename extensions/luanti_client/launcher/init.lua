@@ -8,12 +8,27 @@
 -- ctx.launch and the extension's on_untrusted_launch(), which treats the
 -- params as it would a packet from a server.
 return function(ctx)
+	local net = require("buildat/core/network")
+	net = net.known_addresses and net or net.safe
 	local out = {
+		-- address: the Servers screen's or Join by address's
+		-- ([SERVERS_SCREEN]), the dialog opened on it with the name used
+		-- there before
 		{id = "connect", label = "Join a Luanti server",
 			icon = "grass_block.png", order = 20, network = "Luanti",
 			category = "connect",
 			description = "By its address, or from Luanti's server list",
-			run = function() ctx.launch{extension = "luanti_client"} end},
+			run = function(address)
+				local name = nil
+				for _, a in ipairs(type(address) == "string" and
+						net.known_addresses() or {}) do
+					if a.uri == "udp://" .. address and a.name ~= "" then
+						name = a.name
+					end
+				end
+				ctx.launch{extension = "luanti_client",
+					params = {address = address, name = name}}
+			end},
 		-- The client's own settings ([EXT_SETTINGS]): a trusted screen on
 		-- the stack, no server behind it
 		{id = "settings", label = "Luanti client settings",
@@ -27,8 +42,6 @@ return function(ctx)
 	-- **The Luanti servers this client has joined** ([LAUNCH_MENU_V2]):
 	-- the network store's udp:// rows, keyed by address as serverlist's
 	-- are, with the name used there; the connect dialog opens filled in
-	local net = require("buildat/core/network")
-	net = net.known_addresses and net or net.safe
 	for _, a in ipairs(net.known_addresses()) do
 		local address = a.uri:match("^udp://(.+)$")
 		if address and a.accepted then

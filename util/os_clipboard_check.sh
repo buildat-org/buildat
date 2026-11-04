@@ -36,10 +36,20 @@ done
 # are the client holding the clipboard while the shell reads it; the shell
 # ends the client as soon as it has
 cat > "$t/cmds" <<C
-wait_log_any 20000 Join a Buildat server: shown
-click LineEdit "29500"
+wait_log_any 20000 Join by address: shown
+click LineEdit "localhost:29500"
 delay 300
 keypress End
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
 keypress Backspace
 keypress Backspace
 keypress Backspace
