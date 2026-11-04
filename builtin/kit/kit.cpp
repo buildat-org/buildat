@@ -7713,6 +7713,11 @@ struct Module: public interface::Module, public Interface
 			// [KIT_CTF] its world marker, "param:<name>" as a look's
 			if(show.get("marker").is_undefined() && d.get("marker").is_object())
 				show.set("marker", look_of(in, d.get("marker")));
+			// [KIT_FLAG_RIGHT_CLICK] the shared state naming the player
+			// whose right click uses it
+			if(show.get("right_use").is_undefined() &&
+					d.get("right_use").is_string())
+				show.set("right_use", d.get("right_use"));
 			// [KIT_UI_COMPONENTS] Its UI, "param:<name>" as a look's
 			if(show.get("ui").is_undefined() && d.get("ui").is_object()){
 				json::Value u = look_of(in, d.get("ui"));

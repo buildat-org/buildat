@@ -732,6 +732,11 @@ namespace interface
 // (checked each second). Its UI is drawn in its own scene only: its
 // output `status` (the round's line as it changes: the time left or
 // "Overtime", the scores, the result) is for a kit/ui_text in the map.
+// [KIT_FLAG_RIGHT_CLICK] A type's `right_use` names a shared state of its
+// own: the player whose entity id it holds has their right click use the
+// entity (kit:use, its on_use) instead of placing a voxel (the client's
+// pointer target's right); kit/flag's while carried with place_by
+// "right_click".
 // [KIT_ARENA_SCORE_TO_WIN] `score_to_win` (0 none): a team with that many
 // points wins the round, whichever of it and the time up comes first.
 // kit/timer's output `left`: the seconds left,

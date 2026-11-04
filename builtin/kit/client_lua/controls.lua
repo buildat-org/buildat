@@ -1184,16 +1184,17 @@ magic.SubscribeToEvent("Update", function(_, data)
 	effects(dt)
 end)
 
--- For a drive: "event kit_click_at <x> <y> <z>" clicks (the left button)
--- where that point is on the screen
+-- For a drive: "event kit_click_at <x> <y> <z> [right]" clicks (the left
+-- button; the right one) where that point is on the screen
 magic.SubscribeToEvent("command_seq:kit_click_at", function(_, data)
-	local x, y, z = data:GetString("Param"):match("^(%S+) (%S+) (%S+)")
+	local x, y, z, b = data:GetString("Param"):match(
+			"^(%S+) (%S+) (%S+) ?(%S*)")
 	local cam = O.camera:GetComponent("Camera")
 	local sp = cam:WorldToScreenPoint(magic.Vector3(tonumber(x) or 0,
 			tonumber(y) or 0, tonumber(z) or 0))
 	local w, h = screen()
 	log:info(string.format("kit: a click at %d,%d", sp.x * w, sp.y * h))
-	click(sp.x * w, sp.y * h, true)
+	click(sp.x * w, sp.y * h, b ~= "right")
 end)
 
 -- For a drive: "event kit_point_at <x> <y> <z>" points the pointer (the

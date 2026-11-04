@@ -26,11 +26,12 @@
 # presser to set places, as walking there would): kitboss (Red), kitbob
 # (Blue), kitcat (Red) queue in that order;
 #   1. prep: kitbob's warp out of his zone put back; the flag disabled
-#   2. kitboss takes the flag at home by touch (x1.3 speed); kitcat, his
-#      teammate, beside him past the immunity takes nothing; kitbob does
-#      (immune 5 s after), places it in Blue's zone: a point after the
-#      interval; his click takes it back (the count starts over), placed
-#      again: the next point a whole interval after
+#   2. kitboss takes the flag at home by touch (x1.3 speed), the hint on
+#      his screen alone; kitcat, his teammate, beside him past the
+#      immunity takes nothing; kitbob does (immune 5 s after), places it
+#      in Blue's zone by a right click: a point after the interval; his
+#      click takes it back (the count starts over), placed again: the
+#      next point a whole interval after (each placing a right click)
 #   3. kitcat: stone by hand refused, with a pickaxe from the spawner dug,
 #      kit/cobble dropped
 #   4. kitboss with the knife kills kitbob carrying it: the flag home, he
@@ -456,7 +457,7 @@ look_dir 1 0 0
 frames 10
 keypress O
 delay 800
-keypress G
+event kit_click_at 0 1 0 right
 wait_log 60000 Red wins!
 wait_log 60000 kit editor: in session 0
 sync 2000
@@ -480,12 +481,12 @@ keypress U
 wait_log 10000 ${SHOWN}Flag carried by Blue
 keypress P
 delay 800
-keypress G
+event kit_click_at 0 1 0 right
 wait_log 30000 Red 0 : Blue 1
 delay 2000
 event kit_use $FLAG
 delay 500
-keypress G
+event kit_click_at 0 1 0 right
 wait_log 30000 Red 0 : Blue 2
 event kit_use $FLAG
 wait_log 30000 your health 0/
@@ -533,7 +534,7 @@ keypress Y
 wait_log 10000 ${SHOWN}Flag carried by Red
 keypress O
 delay 1000
-keypress G
+event kit_click_at 0 1 0 right
 delay 500
 event kit_hold kitboss/bomb
 look_dir 0 -0.4 1
@@ -646,6 +647,20 @@ PY
 want "$s" "column (20,20): air 1..2, kit/grass 0, kit/dirt -1, kit/stone -6..-2" \
 	"kitcat dug kit/stone (level 1) with kit/pickaxe (level 1): drops kit/cobble" \
 	"A dig by kitcat refused: A hand does not dig kit/stone (level 1)"
+# [KIT_FLAG_HOLDER_HINT] The holder's hint on kitboss's screen as he
+# carries it, not on kitbob's then
+python3 - "$t/boss.log" "$t/bob.log" "$FLAG" <<'PY' || fail "the holder's hint ($t)"
+import sys
+boss, bob = (open(f, errors="replace").read() for f in sys.argv[1:3])
+hint = 'ui %s text at ' % sys.argv[3]
+line = 'shown: "You have the flag: right-click in your team\'s zone to place it"'
+assert any(hint in l and line in l for l in boss.splitlines()), "not on kitboss's"
+a = bob.index('shown: "Flag carried by Red')
+b = bob.index('shown: "Flag carried by Blue')
+assert not any(hint in l and line in l for l in bob[a:b].splitlines()), \
+	"on kitbob's while kitboss held it"
+assert any(hint in l and line in l for l in bob[b:].splitlines()), "not on kitbob's as he held it"
+PY
 for f in boss_carry_fp boss_walk_fp1 boss_walk_fp2 cat_carry_3p cat_bomb_held cat_bomb_lying cat_walk_1 cat_walk_4; do
 	[ -s "$t/$f.png" ] || fail "no screenshot $f ($t)"
 done

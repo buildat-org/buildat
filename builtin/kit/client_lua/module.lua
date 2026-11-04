@@ -1657,6 +1657,24 @@ function M.play_target(origin, dir, reach, solid)
 	return t
 end
 
+-- [KIT_FLAG_RIGHT_CLICK] An entity whose type's right_use (a shared
+-- state's name) holds this player's id: their right click uses it, not a
+-- placing (kit/flag carried)
+do
+	local target = M.play_target
+	function M.play_target(...)
+		local t = target(...)
+		for id, n in pairs(P.nodes) do
+			local k = type(n.show) == "table" and n.show.right_use
+			if type(k) == "string" and P.you ~= 0 and
+					tonumber(parse(n.node:GetVar("kit:" .. k))) == P.you then
+				t.right = {kind = "use", id = id}
+			end
+		end
+		return t
+	end
+end
+
 -- ---- [KIT_VOXEL_FORMAT] The hand's shape and tint (stage 4g2): what a
 -- placing puts down besides the material -- M.hand.shape ("" the cube,
 -- "slab", "stair", "inner_stair", "outer_stair", "panel", "pillar"; a

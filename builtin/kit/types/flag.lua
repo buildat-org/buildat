@@ -7,9 +7,13 @@
 -- `immunity` s after a take nobody takes it from them; then `steal`:
 -- "opponents" (a player not of the holder's team -- a teamless one is
 -- everyone's opponent -- within `steal_range` m of them takes it, immune
--- in turn), "anyone" or "none". The holder puts it down by the action
--- `place_action` (its key `place_key`, rebindable): it falls to the ground
--- under them. Lying placed in a team's region (c:region_at), every
+-- in turn), "anyone" or "none". The holder puts it down, `place_by`:
+-- "right_click" (their right click places it, not a voxel; the left click
+-- keeps hitting and digging -- [KIT_FLAG_RIGHT_CLICK]) or "action" (the
+-- action `place_action`, its key `place_key`, rebindable): it falls to
+-- the ground under them. [KIT_FLAG_HOLDER_HINT] The holder alone sees
+-- `holder_hint` on their screen while they hold it ("auto": how to place
+-- it by place_by; "": none). Lying placed in a team's region (c:region_at), every
 -- `score_interval` s it gives `score_points` (kit/team's "add") to the
 -- region's team, or with `score_to` "placer" to the team of who placed
 -- it; the count starts over as it is taken. Taken from home, `return_time`
@@ -80,11 +84,24 @@ local function carry_at(c, p)
 	return {p.pos[1], p.pos[2] + c.params.lift, p.pos[3]}
 end
 
+-- The holder's line, theirs alone (own: per player)
+local function hint(c)
+	local h = c.params.holder_hint
+	if h == "auto" then
+		h = "You have the flag: " .. (c.params.place_by == "right_click" and
+				"right-click" or ("press [" .. c.params.place_action .. "]")) ..
+				" in your team's zone to place it"
+	end
+	return h
+end
+
 local function let_go(c)
 	if c.state.holder ~= 0 then
 		c:speed(c.state.holder, 1)
 	end
 	c.state.holder = 0
+	c.state.right_use = 0
+	c.state.own = {}
 	c.state.holder_team = 0
 	c.state.immune = 0
 	c:after(nil, "immune")
@@ -112,6 +129,12 @@ local function take(c, p)
 	local t = team_of(c, p.id)
 	c.state.where = "carried"
 	c.state.holder = p.id
+	-- [KIT_FLAG_RIGHT_CLICK] their right click a use of it
+	c.state.right_use = c.params.place_by == "right_click" and p.id or 0
+	local h = hint(c)
+	if h ~= "" then
+		c.state.own = {["player:" .. p.id] = {shown = true, value = h}}
+	end
 	c.state.holder_team = t and t.id or 0
 	c.state.immune = c.params.immunity
 	if c.params.immunity > 0 then
@@ -262,6 +285,16 @@ local function poll(c)
 	end
 end
 
+-- The holder puts it down where they are
+local function place(c, p)
+	c.state.placer_team = c.state.holder_team
+	let_go(c)
+	c.state.where = "placed"
+	c:move(p.pos, {fall = true})
+	c:log("placed by", p.name)
+	c:emit("placed", p.name)
+end
+
 return {
 	version = 1,
 	usable = true,
@@ -276,6 +309,11 @@ return {
 		lift = "param:marker_lift"},
 	actions = {{name = "param:place_action", key = "param:place_key",
 		label = "param:place_label"}},
+	-- (a right click by the player in its state right_use uses it)
+	right_use = "right_use",
+	-- The holder's hint: `own`'s, theirs alone
+	ui = {kind = "text", text = "{value}", anchor = "center", x = 0, y = 90,
+		size = 18, color = "#ffe040", background = "#00000080"},
 	params = {
 		color = {type = "string", default = "#f0f0f0"},
 		enabled = {type = "bool", default = true},
@@ -290,9 +328,12 @@ return {
 		steal_range = {type = "number", default = 2, min = 0, max = 32},
 		immunity = {type = "number", default = 5, min = 0, max = 3600},
 		speed = {type = "number", default = 1, min = 0, max = 10},
+		place_by = {type = "string", default = "right_click",
+			choices = {"right_click", "action"}},
 		place_action = {type = "string", default = "place_flag"},
 		place_key = {type = "string", default = "G"},
 		place_label = {type = "string", default = "Place the flag"},
+		holder_hint = {type = "string", default = "auto"},
 		score_points = {type = "number", default = 1, min = 0,
 			max = 1000000},
 		score_interval = {type = "number", default = 10, min = 0.1,
@@ -316,6 +357,10 @@ return {
 		enabled = {default = true, shared = true},
 		home = {default = false},
 		holder = {default = 0, shared = true},
+		right_use = {default = 0, shared = true},
+		shown = {default = false, shared = true},
+		value = {default = "", shared = true},
+		own = {default = {}, per_player = true},
 		holder_team = {default = 0},
 		placer_team = {default = 0},
 		immune = {default = 0},
@@ -374,25 +419,28 @@ return {
 	end,
 	on_use = function(c, by)
 		local p = player(c, c.player)
-		if taking(c) == "click" and present(p) then
+		if not present(p) then
+			return
+		end
+		if c.state.where == "carried" then
+			if c.player == c.state.holder and
+					c.params.place_by == "right_click" then
+				place(c, p)
+			end
+		elseif taking(c) == "click" then
 			take(c, p)
 		end
 	end,
 	on_action = function(c, name, phase, value, by)
 		if phase ~= "pressed" or name ~= c.params.place_action or
+				c.params.place_by ~= "action" or
 				c.state.where ~= "carried" or c.player ~= c.state.holder then
 			return
 		end
 		local p = player(c, c.player)
-		if not present(p) then
-			return
+		if present(p) then
+			place(c, p)
 		end
-		c.state.placer_team = c.state.holder_team
-		let_go(c)
-		c.state.where = "placed"
-		c:move(p.pos, {fall = true})
-		c:log("placed by", p.name)
-		c:emit("placed", p.name)
 	end,
 	on_died = function(c, player_id)
 		if c.state.where == "home" then
