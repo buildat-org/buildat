@@ -9,7 +9,8 @@
 --     lists in one), a filter over them (id, name, type)
 --   - Middle: the selected one's name to edit, and its links, in both
 --     directions, Inputs first: a row a link, flowing left to right as
---     object.member on both sides, a gap between entities. Either signal, by either button, opens the link's menu
+--     object.member on both sides, the arrow after what it carries (the type,
+--     none for a trigger), a gap between entities. Either signal, by either button, opens the link's menu
 --     (Delete); the checkbox is whether it is shown in play; an entity's name
 --     selects it. "+ Add link" picks an output, a target and an input here
 --     (dropdowns)
@@ -287,8 +288,28 @@ local function shown_check(r, id, ci, l)
 	return b, t, t.width + 28
 end
 
+-- What a link passes on: the output's type, or the input's where the output
+-- says any; "" where the input takes no value (a trigger, whatever is sent)
+local function carries(x)
+	local c = x.from and x.from.components and x.from.components[x.ci]
+	local ot = c and type_of(c.type).outputs_types
+	local out = type(ot) == "table" and ot[x.l.output] or "any"
+	local inn = "any"
+	for _, tc in ipairs(x.to and x.to.components or {}) do
+		local t = type_of(tc.type)
+		if type(t.inputs_types) == "table" and t.inputs_types[x.l.input] then
+			inn = t.inputs_types[x.l.input]
+			break
+		end
+	end
+	if inn == "none" then
+		return ""
+	end
+	return out == "any" and inn or out
+end
+
 -- The links as a table, a link to a row, flowing left to right, as
--- object.member: "◆ 18 timer.done  →  ◆ 16 flag.enable  [ ] Shown". Inputs and
+-- object.member: "◆ 18 timer.done  number →  ◆ 16 bar.value  [ ] Shown". Inputs and
 -- outputs alike, the selected entity repeated on each. The names stand against
 -- their dots, the dots in a column; the arrow has spare room on both sides and
 -- the checkbox the right edge. rows: {first = a new other entity, from, from_id,
@@ -298,7 +319,7 @@ end
 -- sideways.
 local function link_table(body, rows, self_id)
 	local DOT, ARROW, INDENT = 5, 20, 8
-	local widest = {lname = 0, lsig = 0, rname = 0, rsig = 0, check = 0}
+	local widest = {lname = 0, lsig = 0, kind = 0, rname = 0, rsig = 0, check = 0}
 	local built = {}
 	for i, x in ipairs(rows) do
 		if x.first and i > 1 then
@@ -342,6 +363,14 @@ local function link_table(body, rows, self_id)
 		dot()
 		signal(x.l.output, "lsig", "signal ")
 		cells.gap1 = r:CreateChild("UIElement")
+		x.kind = carries(x)
+		-- (a space's width from the arrow)
+		cells.kind = text(r, x.kind == "" and "" or x.kind .. " ", DIM)
+		cells.kind:SetTextAlignment(magic.HA_RIGHT)
+		if x.kind ~= "" then
+			-- (minWidth: its text's own, the row may have stretched it)
+			widest.kind = math.max(widest.kind, cells.kind.minWidth + 4)
+		end
 		text(r, "→"):SetFixedWidth(ARROW)
 		cells.gap2 = r:CreateChild("UIElement")
 		entity(x.to, x.to_id, "rname")
@@ -352,10 +381,13 @@ local function link_table(body, rows, self_id)
 		cells.check, cells.check_t = check, t
 		widest.check = math.max(widest.check, w)
 		built[i] = cells
+		if x.kind ~= "" then
+			SG.kinds[#SG.kinds + 1] = x.l.output .. ">" .. x.l.input .. " " .. x.kind
+		end
 	end
 	local function spare_now()
-		return SG.links_w - (INDENT + widest.lname + widest.lsig + widest.rname +
-				widest.rsig + 2 * DOT + ARROW + widest.check)
+		return SG.links_w - (INDENT + widest.lname + widest.lsig + widest.kind +
+				widest.rname + widest.rsig + 2 * DOT + ARROW + widest.check)
 	end
 	-- Too narrow: the selected entity's name, on every row, as its id alone
 	if spare_now() < 0 then
@@ -381,7 +413,7 @@ local function link_table(body, rows, self_id)
 	local over = -spare_now()
 	if over > 0 then
 		local key = built[1].lname.own and "rname" or "lname"
-		local w = math.max(70, widest[key] - over)
+		local w = math.max(60, widest[key] - over)
 		for _, cells in ipairs(built) do
 			local c = cells[key]
 			for n = #c.s - 2, 4, -1 do
@@ -400,6 +432,7 @@ local function link_table(body, rows, self_id)
 			cells[key].b:SetFixedWidth(widest[key])
 		end
 		cells.gap1:SetFixedWidth(around)
+		cells.kind:SetFixedWidth(widest.kind)
 		cells.gap2:SetFixedWidth(around)
 		cells.gap3:SetFixedWidth(spare - 2 * around)
 		cells.check:SetFixedWidth(widest.check)
@@ -555,7 +588,7 @@ function SG.links()
 	if SG.add and (not e or SG.add.id ~= e.id) then
 		SG.add = nil
 	end
-	SG.cells, SG.links_drawn_w = {}, SG.links_w
+	SG.cells, SG.links_drawn_w, SG.kinds = {}, SG.links_w, {}
 	SG.links_body = put_body(SG.links_view, function(body)
 		text(body, title, magic.Color(1.0, 0.85, 0.3))
 		SG.status_text = text(body, E.status or "", WARN)
@@ -607,7 +640,8 @@ function SG.links()
 		end
 		local out = outputs(body, e)
 		local said = "kit editor: signals: " .. e.id .. " " .. short_name(e) ..
-				": " .. out .. " out, " .. inn .. " in"
+				": " .. out .. " out, " .. inn .. " in; " ..
+				table.concat(SG.kinds, ", ")
 		if said ~= SG.links_said then
 			SG.links_said = said
 			log:info(said)

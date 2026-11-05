@@ -471,6 +471,11 @@ grep -a "I __app   : UI scale [0-9]" "$t/kitfit.log" | tail -1 | grep -q "UI sca
 echo "ok: a window made small and large again has the UI at its full scale"
 stop_server
 want "$t/kitwide.log" "signals: $FLAG $FLAG Home flag: " "signals: columns in 1800x1000 "
+# What the arrow says: a value's type, nothing for a trigger
+wantp "$t/kitwide.log" "signals: $FLAG $FLAG Home flag: .*left>value number"
+if grep -a "signals: $FLAG $FLAG Home flag: " "$t/kitwide.log" | grep -aq "home>hide"; then
+	fail "a trigger shown as carrying a value ($t/kitwide.log)"
+fi
 wantp "$t/kitwide.log" "signals: the HUD in the viewport on"
 wantp "$t/kitnarrow.log" "signals: columns in 600x400 under \d+: sg_links \d+ \d+ 588 \d+"
 wantp "$t/kitnarrow.log" "signals: columns in 600x400 under \d+: sg_list \d+ \d+ 588 \d+"
