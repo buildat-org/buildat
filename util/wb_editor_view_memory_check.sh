@@ -15,6 +15,9 @@
 # published or exported project carries none of it.
 # [KIT_TABS_TWO_ROWS] KEEP_TMP=1 keeps left.png (the panel's tabs in two
 # rows: Components, Terrain, Voxels; Box, Entities).
+# [KIT_PALETTE_FOOT] One armed, the list taller than its room: its Favourite
+# and the palette's tabs stay in view under the scrolled list, the panel's
+# window above the builders' panel. KEEP_TMP=1 keeps foot.png.
 #   util/wb_editor_view_memory_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -58,6 +61,14 @@ wait_log_any 10000 kit editor: edit rights: yes
 wait_log_any 10000 kit editor: remembered for workbench_world: nothing
 keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
+click Button "kit/flag"
+wait_log 5000 kit editor: placing kit/flag
+frames 5
+screenshot $t/foot.png
+click Button "Favourite kit/flag"
+wait_log 5000 kit editor: kit/flag a favourite
+click Button "kit/flag"
+wait_log 5000 kit editor: placing nothing
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 event kit_cam3d 6 8 -6 0 1 0
@@ -107,6 +118,16 @@ client boss2
 stop
 
 l1=$t/boss1.log l2=$t/boss2.log
+# "the panel <h> of <body> tall, <w> of <body> wide, its window down to <y>
+# of <room's foot>", the last while armed (the first is before the builders'
+# panel has its place)
+read -r h bh y foot < <(sed -n '/placing kit\/flag/,/placing nothing/p' "$l1" |
+	grep -aoP 'the panel \K\d+ of \d+ tall, \d+ of \d+ wide, its window down to \d+ of \d+' | tail -1 |
+	sed -E 's/^([0-9]+) of ([0-9]+) tall.* to ([0-9]+) of ([0-9]+)$/\1 \2 \3 \4/')
+[ -n "${foot:-}" ] || fail "no panel line after the arming ($l1)"
+[ "$h" -lt "$bh" ] || fail "the list fits ($h of $bh): the foot not tested ($l1)"
+[ "$y" -le "$foot" ] ||
+	fail "the panel's window down to $y, its room to $foot ($l1)"
 grep -a ' I kit .*kit editor: \(remembered\|the view\|the 3D camera at\|edit mode\|the server is\)' \
 	"$l1" "$l2" | sed 's/^.*kit editor: /  /'
 tabs() { grep -aoP "kit editor: the view \K.*(?= \($2\))" "$1" | tail -1; }

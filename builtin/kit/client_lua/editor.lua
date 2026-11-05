@@ -1503,7 +1503,10 @@ function NT.fit_panel()
 	local bw, bh = body.width + 4, body.height + 4
 	local room_w = math.min(screen_ui.w, magic.ui.root.width) - 16 - 12 - 8
 	local hbar = bw > room_w
-	local room_h = bottom - view.screenPosition.y - 8 -
+	-- [KIT_PALETTE_FOOT] What the window has under the view: its border,
+	-- the palette's foot
+	local under = w.height - view.position.y - view.height
+	local room_h = bottom - view.screenPosition.y - under - 2 -
 			(hbar and view.horizontalScrollBar.height + 4 or 0)
 	local h = math.max(40, math.min(bh, room_h))
 	local vbar = h < bh
@@ -1516,7 +1519,8 @@ function NT.fit_panel()
 		-- fill it): shrunk to what it holds
 		w.width, w.height = 0, 0
 		log:info(string.format("kit editor: the panel %d of %d tall, %d of " ..
-				"%d wide", h, bh, vw, bw))
+				"%d wide, its window down to %d of %d", h, bh, vw, bw,
+				w.screenPosition.y + w.height, bottom))
 	end
 end
 
@@ -1611,8 +1615,15 @@ function NT.components(w)
 	-- [KIT] stage 5: its tabs at its foot (what is above them stays where
 	-- it was): all, the favourites and the New tab, and the credits
 	-- (a player's in the pause menu)
+	-- [KIT_PALETTE_FOOT] The foot, the armed one's Favourite and the tabs,
+	-- in the panel's window under the view (created after it), not in the
+	-- body: the list scrolls, they stay in view (NT.fit_panel leaves them
+	-- their room)
+	-- simplified: the foot's rows do not wrap; a screen narrower than the
+	-- tabs or a long name's Favourite runs off it (wrap as palette()'s tabs)
+	local foot = W.palette
 	local function tabs()
-		local tr = row(w)
+		local tr = row(foot)
 		for _, tab in ipairs({"All", "Favourites", "New"}) do
 			button(tr, tab, function()
 				S.tab = tab
@@ -1688,10 +1699,10 @@ function NT.components(w)
 		if S.placing.type then
 			local c = E.costs and E.costs.types and
 					E.costs.types[S.placing.type]
-			text(w, c and string.format("Costs %.2f%% of Kit's budget an " ..
+			text(foot, c and string.format("Costs %.2f%% of Kit's budget an " ..
 					"instance", c) or "Its cost: none running", DIM)
 		end
-		button(w, (on and "Unfavourite " or "Favourite ") .. label, function()
+		button(foot, (on and "Unfavourite " or "Favourite ") .. label, function()
 			aitta.kit_favourite(name, not on)
 			log:info("kit editor: " .. label .. (on and " not" or "") ..
 					" a favourite")

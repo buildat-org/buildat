@@ -212,12 +212,6 @@ click Button "All"
 wait_log 5000 kit editor: the palette's All tab
 click Button "alice/lamp"
 wait_log 5000 kit editor: placing alice/lamp
-# The palette's list is taller than the room above the builders' panel
-# (since kit/flag): its foot, the Favourite button and the tabs, by the
-# wheel over it, as a click by label does not scroll
-mouse_pos 140 300
-$(for _ in $(seq 10); do echo "mouse_wheel -1"; done)
-frames 3
 click Button "Favourite alice/lamp"
 wait_log 5000 kit editor: alice/lamp a favourite
 click Button "Favourites"
@@ -415,10 +409,6 @@ wait_log 5000 kit editor: the palette's All tab
 click Button "alice/lamp @127.0.0.1:$P2"
 wait_log 5000 kit editor: placing alice/lamp @127.0.0.1:$P2
 mouse_click right
-# The palette's foot, the tabs, by the wheel (as alice's Favourite)
-mouse_pos 140 300
-$(for _ in $(seq 10); do echo "mouse_wheel -1"; done)
-frames 3
 click Button "Credits"
 wait_log 5000 kit editor: credit alice/lamps 2.0.0 by alice @127.0.0.1:$P (
 wait_log_any 5000 kit editor: credit alice/lamps 1.0.0 by alice @127.0.0.1:$P2 (
