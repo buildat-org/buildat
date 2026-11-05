@@ -8,8 +8,8 @@
 --   - Left: the entities as a tree, as the Entities tab's (all three of its
 --     lists in one), a filter over them (id, name, type)
 --   - Middle: the selected one's name to edit, and its links, in both
---     directions, Inputs first: a row a link, flowing left to right, a gap
---     between entities. Either signal, by either button, opens the link's menu
+--     directions, Inputs first: a row a link, flowing left to right as
+--     object.member on both sides, a gap between entities. Either signal, by either button, opens the link's menu
 --     (Delete); the checkbox is whether it is shown in play; an entity's name
 --     selects it. "+ Add link" picks an output, a target and an input here
 --     (dropdowns)
@@ -79,8 +79,23 @@ local function short_name(e)
 	return e.id .. " " .. (own_name(e) or kit_short(main_type(e)))
 end
 
+-- The first n bytes, not ending inside a character, and ".."
+local function cut(s, n)
+	return (s:sub(1, n):gsub("[\192-\255][\128-\191]*$", "")) .. ".."
+end
+
 local function clipped(s)
-	return #s > NAME_CHARS and s:sub(1, NAME_CHARS - 2) .. ".." or s
+	return #s > NAME_CHARS and cut(s, NAME_CHARS - 2) or s
+end
+
+-- How an entity reads wherever it is shown: "◆ 21 ui_text", "◆ 21 Prep text"
+function NT.entity_label(e)
+	return K.ENTITY .. short_name(e)
+end
+
+-- As it is shown: its mark, and no longer than a list writes
+local function shown_name(e)
+	return K.ENTITY .. clipped(short_name(e))
 end
 
 -- A column: a window with a ScrollView; its body put in by put_body
@@ -104,9 +119,11 @@ local function put_body(view, build)
 	local body = view:CreateChild("UIElement")
 	body:SetLayout(magic.LM_VERTICAL, 3, magic.IntRect(0, 0, 2, 0))
 	build(body)
+	-- Its width first: wider than the view, a sideways bar comes for a moment
+	-- and leaves the view's position past the top
+	SG.body_w(view, body)
 	view.contentElement = body
 	body:SetPosition(0, 0)
-	SG.body_w(view, body)
 	view.viewPosition = magic.IntVector2(0, y)
 	return body
 end
@@ -157,7 +174,7 @@ function SG.rows()
 					end
 					local d = indent[e.id] or 0
 					local on = e.id == S.primary
-					local b, t = item(body, clipped(short_name(e)), function()
+					local b, t = item(body, shown_name(e), function()
 						M.select(e.id)
 					end, on and magic.Color(1.0, 0.85, 0.3) or nil, on)
 					t:SetPosition(4 + d * 12, 0)
@@ -267,90 +284,125 @@ local function shown_check(r, id, ci, l)
 	c:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
 	c:SetPosition(4, 0)
 	t:SetPosition(24, 0)
-	return b, t.width + 28
+	return b, t, t.width + 28
 end
 
--- The links as a table, a link to a row, flowing left to right: what they come
--- from, the arrow, what they go to, and at the right edge whether it is shown.
--- rows: {first = a new entity, e = it, id = its id, from_id, ci, l}. The name
--- column stands left of the signals for inputs (name_first), right of the
--- arrow for outputs. Related cells touch; what is spare goes to the name
--- column and before the checkbox.
--- simplified: a window too narrow for even short names scrolls sideways.
-local function link_table(body, rows, name_first)
-	local order = name_first and {"name", "left", "arrow", "right"} or
-			{"left", "arrow", "name", "right"}
-	local widest, built = {name = 0, left = 0, arrow = 20, right = 0, check = 0}, {}
+-- The links as a table, a link to a row, flowing left to right, as
+-- object.member: "◆ 18 timer.done  →  ◆ 16 flag.enable  [ ] Shown". Inputs and
+-- outputs alike, the selected entity repeated on each. The names stand against
+-- their dots, the dots in a column; the arrow has spare room on both sides and
+-- the checkbox the right edge. rows: {first = a new other entity, from, from_id,
+-- to, to_id, ci, l}.
+-- simplified: a window too narrow for that writes the selected entity as its id
+-- alone, drops the checkbox's label and shortens the other names, then scrolls
+-- sideways.
+local function link_table(body, rows, self_id)
+	local DOT, ARROW, INDENT = 5, 20, 8
+	local widest = {lname = 0, lsig = 0, rname = 0, rsig = 0, check = 0}
+	local built = {}
 	for i, x in ipairs(rows) do
 		if x.first and i > 1 then
 			body:CreateChild("UIElement"):SetFixedHeight(10)
 		end
-		local r, cells = row(body), {}
+		local r = row(body)
+		r:SetLayout(magic.LM_HORIZONTAL, 0, magic.IntRect(INDENT, 0, 0, 0))
+		local cells = {}
+		local function entity(e, id, key)
+			local goal = e and e.id or id
+			local c = {s = e and NT.entity_label(e) or K.ENTITY .. tostring(id),
+				own = goal == self_id, short = K.ENTITY .. tostring(goal)}
+			c.b, c.t = item(r, e and shown_name(e) or c.s, function()
+				M.select(goal)
+			end)
+			c.t:SetAlignment(magic.HA_RIGHT, magic.VA_CENTER)
+			c.t:SetPosition(-1, 0)
+			if goal == self_id then
+				-- It is what the page is about: nothing to go to
+				c.b.enabled = false
+			else
+				c.b:SetName("goto " .. tostring(goal))
+			end
+			cells[key] = c
+			widest[key] = math.max(widest[key], c.t.width + 5)
+		end
 		local function signal(s, key, name)
 			local c = {id = x.from_id, ci = x.ci, l = x.l}
 			c.b, c.t = item(r, s, function() link_menu(c) end,
 					magic.Color(ui_utils.rgb("focus")))
+			c.t:SetPosition(1, 0)
 			c.b:SetName(name .. link_key(x.from_id, x.l))
 			SG.cells[#SG.cells + 1] = c
 			cells[key] = c
-			widest[key] = math.max(widest[key], c.t.width + 8)
+			widest[key] = math.max(widest[key], c.t.width + 5)
 		end
-		for _, k in ipairs(order) do
-			if k == "name" then
-				local c = {}
-				if x.first then
-					local goal = x.e and x.e.id or x.id
-					c.s = x.e and short_name(x.e) or tostring(x.id)
-					c.b, c.t = item(r, clipped(c.s), function() M.select(goal) end)
-					c.b:SetName("goto " .. tostring(goal))
-					widest.name = math.max(widest.name, c.t.width + 8)
-				else
-					c.b = r:CreateChild("UIElement")
-				end
-				cells.name = c
-			elseif k == "arrow" then
-				local t = text(r, "→")
-				t:SetTextAlignment(magic.HA_CENTER)
-				cells.arrow = {b = t}
-			elseif k == "left" then
-				signal(x.l.output, "left", "signal ")
-			else
-				signal(x.l.input, "right", "signal in ")
-			end
+		local function dot()
+			text(r, "."):SetFixedWidth(DOT)
 		end
-		cells.gap = r:CreateChild("UIElement")
-		local check, w = shown_check(r, x.from_id, x.ci, x.l)
-		cells.check = {b = check}
+		entity(x.from, x.from_id, "lname")
+		dot()
+		signal(x.l.output, "lsig", "signal ")
+		cells.gap1 = r:CreateChild("UIElement")
+		text(r, "→"):SetFixedWidth(ARROW)
+		cells.gap2 = r:CreateChild("UIElement")
+		entity(x.to, x.to_id, "rname")
+		dot()
+		signal(x.l.input, "rsig", "signal in ")
+		cells.gap3 = r:CreateChild("UIElement")
+		local check, t, w = shown_check(r, x.from_id, x.ci, x.l)
+		cells.check, cells.check_t = check, t
 		widest.check = math.max(widest.check, w)
 		built[i] = cells
 	end
-	local spare = SG.links_w - (widest.name + widest.left + widest.arrow +
-			widest.right + widest.check + 5 * 4)
-	-- Too narrow: the names shorter, down to what still tells them apart
-	if spare < 0 then
-		local w = math.max(70, widest.name + spare)
-		for _, cells in ipairs(built) do
-			local c = cells.name
-			if c.t and c.t.width + 8 > w then
-				local n = math.max(4, math.floor(#c.s * (w - 8) / c.t.width) - 2)
-				c.t:SetText(c.s:sub(1, n) .. "..")
+	local function spare_now()
+		return SG.links_w - (INDENT + widest.lname + widest.lsig + widest.rname +
+				widest.rsig + 2 * DOT + ARROW + widest.check)
+	end
+	-- Too narrow: the selected entity's name, on every row, as its id alone
+	if spare_now() < 0 then
+		for _, key in ipairs({"lname", "rname"}) do
+			if built[1][key].own then
+				widest[key] = 0
+				for _, cells in ipairs(built) do
+					local c = cells[key]
+					c.t:SetText(c.short)
+					widest[key] = math.max(widest[key], c.t.width + 5)
+				end
 			end
 		end
-		spare = spare + widest.name - w
-		widest.name = w
 	end
-	spare = math.max(0, spare)
-	local grown = math.floor(spare * 0.3)
+	-- Then the checkbox alone: a name says more than a label on every row
+	if spare_now() < 0 then
+		widest.check = 26
+		for _, cells in ipairs(built) do
+			cells.check_t.visible = false
+		end
+	end
+	-- Then the other names shorter, down to what still tells them apart
+	local over = -spare_now()
+	if over > 0 then
+		local key = built[1].lname.own and "rname" or "lname"
+		local w = math.max(70, widest[key] - over)
+		for _, cells in ipairs(built) do
+			local c = cells[key]
+			for n = #c.s - 2, 4, -1 do
+				if c.t.width + 5 <= w then
+					break
+				end
+				c.t:SetText(cut(c.s, n))
+			end
+		end
+		widest[key] = w
+	end
+	local spare = math.max(0, spare_now())
+	local around = math.floor(spare * 0.25)
 	for _, cells in ipairs(built) do
-		cells.name.b:SetFixedWidth(widest.name + grown)
-		cells.left.b:SetFixedWidth(widest.left)
-		-- Against the arrow: the two signals of a link read as a pair
-		cells.left.t:SetAlignment(magic.HA_RIGHT, magic.VA_CENTER)
-		cells.left.t:SetPosition(-4, 0)
-		cells.arrow.b:SetFixedWidth(widest.arrow)
-		cells.right.b:SetFixedWidth(widest.right)
-		cells.gap:SetFixedWidth(spare - grown)
-		cells.check.b:SetFixedWidth(widest.check)
+		for _, key in ipairs({"lname", "lsig", "rname", "rsig"}) do
+			cells[key].b:SetFixedWidth(widest[key])
+		end
+		cells.gap1:SetFixedWidth(around)
+		cells.gap2:SetFixedWidth(around)
+		cells.gap3:SetFixedWidth(spare - 2 * around)
+		cells.check:SetFixedWidth(widest.check)
 	end
 	if #rows == 0 then
 		text(body, "None", DIM)
@@ -383,13 +435,13 @@ local function outputs(body, e)
 		local to, first = find(g.to), true
 		for _, i in ipairs(g.inputs) do
 			for _, x in ipairs(i) do
-				rows[#rows + 1] = {first = first, e = to, id = g.to, from_id = e.id,
-					ci = x.ci, l = x.l}
+				rows[#rows + 1] = {first = first, from = e, from_id = e.id, to = to,
+					to_id = g.to, ci = x.ci, l = x.l}
 				first = false
 			end
 		end
 	end
-	return link_table(body, rows, false)
+	return link_table(body, rows, e.id)
 end
 
 -- The links into this entity, by source
@@ -400,14 +452,14 @@ local function inputs(body, e)
 		for ci, c in ipairs(src.components or {}) do
 			for _, l in ipairs(c.links or {}) do
 				if l.to == e.id then
-					rows[#rows + 1] = {first = first, e = src, from_id = src.id,
-						ci = ci, l = l}
+					rows[#rows + 1] = {first = first, from = src, from_id = src.id,
+						to = e, to_id = e.id, ci = ci, l = l}
 					first = false
 				end
 			end
 		end
 	end
-	return link_table(body, rows, true)
+	return link_table(body, rows, e.id)
 end
 
 -- The outputs it has, {label, "<comp index> <output>"}
@@ -455,7 +507,7 @@ local function add_form(body, e)
 	local targets = {}
 	for _, x in ipairs(A.entities()) do
 		if x.id ~= e.id and x.kind ~= "scene" and #input_choices(x) > 0 then
-			targets[#targets + 1] = {short_name(x), x.id}
+			targets[#targets + 1] = {NT.entity_label(x), x.id}
 		end
 	end
 	pick(body, "Target", targets, a.to, function(v)
@@ -497,7 +549,7 @@ function SG.links()
 	local title = "Select an entity on the left"
 	if e then
 		local own = own_name(e)
-		title = "Signals of " .. e.id .. " " .. (own and own .. " (" ..
+		title = "Signals of " .. K.ENTITY .. e.id .. " " .. (own and own .. " (" ..
 				main_type(e) .. ")" or main_type(e))
 	end
 	if SG.add and (not e or SG.add.id ~= e.id) then

@@ -388,7 +388,7 @@ frames 5
 keypress F4
 frames 8
 screenshot @T@/touch_panel.png
-tap Text "$BAR *"
+tap Text "◆ $BAR *"
 frames 5
 event kit_tabs title
 tap 60 300

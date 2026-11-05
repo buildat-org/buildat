@@ -487,7 +487,7 @@ function NT.style_sources(id, ci)
 	for _, e in ipairs(entities()) do
 		for i, c in ipairs(e.components or {}) do
 			if NT.style_prefix(c.type) and (e.id ~= id or i ~= ci) then
-				list[#list + 1] = {e.id .. " " .. tostring(e.name), e.id .. " " .. i}
+				list[#list + 1] = {NT.entity_label(e), e.id .. " " .. i}
 			end
 		end
 	end
@@ -637,7 +637,7 @@ local function release_preview()
 end
 
 local function name_of(e)
-	return tostring(e and e.name or "?")
+	return e and NT.entity_label(e) or "?"
 end
 
 local function sel_ids()
@@ -1572,8 +1572,8 @@ function NT.entities(w)
 	local n, ids = 0, {}
 	for _, e in ipairs(tabs[tab]) do
 		local gr = row(w)
-		label(gr, string.rep("    ", indent[e.id] or 0) .. e.id .. " " ..
-				tostring(e.name) .. (e.pos and " at " ..
+		label(gr, string.rep("    ", indent[e.id] or 0) .. NT.entity_label(e) ..
+				(e.pos and " at " ..
 				table.concat(e.pos, ",") or ""))
 		local sb = button(gr, e.id == S.primary and "Selected" or
 				S.reparent and e.pos and "Parent" or "Select", function()
@@ -2100,7 +2100,7 @@ local function field(name, d, values)
 		for _, e in ipairs(all_entities()) do
 			if e.kind ~= "scene" then
 				local s = scene_name(e)
-				f.choices[#f.choices + 1] = {e.id .. " " .. tostring(e.name) ..
+				f.choices[#f.choices + 1] = {NT.entity_label(e) ..
 						((s and s ~= cur) and " (" .. s .. ")" or ""), e.id}
 			end
 		end
@@ -2123,7 +2123,7 @@ end
 -- [KIT] stage 4d: an entity of the round's own (made in play) or a
 -- player's, shown and not edited
 local function inspect_made(w, e)
-	text(w, "Entity " .. e.id .. ": " .. tostring(e.name))
+	text(w, NT.entity_label(e))
 	-- [KIT] stage 4l: what it costs, changed in place as "kit:costs" comes
 	S.cost_text = text(w, M.cost_line(e.id), DIM)
 	S.cost_id = e.id
@@ -2377,7 +2377,7 @@ local function inspector(w, e, is_made)
 	if n > 1 then
 		text(w, n .. " selected", DIM)
 	end
-	text(w, "Entity " .. e.id .. ": " .. tostring(e.name))
+	text(w, NT.entity_label(e))
 	-- [KIT] stage 4l: what it costs, changed in place as "kit:costs" comes
 	S.cost_text = text(w, M.cost_line(e.id), DIM)
 	S.cost_id = e.id
@@ -2420,7 +2420,7 @@ local function inspector(w, e, is_made)
 		-- under the scene. The server keeps its place in the world
 		local pe = NT.parent_of(e)
 		if pe then
-			text(w, "Under " .. pe.id .. " " .. tostring(pe.name), DIM)
+			text(w, "Under " .. NT.entity_label(pe), DIM)
 		end
 		local pr, armed = row(w), S.reparent == e.id
 		button(pr, armed and "Switch parent: Cancel" or "Switch parent",
@@ -2989,7 +2989,7 @@ function NT.hud_panel_body(body, own)
 	if not e then
 		return
 	end
-	text(body, e.id .. " " .. tostring(e.name), magic.Color(1.0, 0.85, 0.3))
+	text(body, NT.entity_label(e), magic.Color(1.0, 0.85, 0.3))
 	local any = false
 	for ci, c in ipairs(e.components or {}) do
 		local t = type_of(c.type)

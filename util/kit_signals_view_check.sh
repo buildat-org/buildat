@@ -126,7 +126,7 @@ frames 3
 click DropDownList "▼" 450 327
 frames 3
 screenshot @T@/form_target.png
-click Text "$BAR3 ui_bar"
+click Text "◆ $BAR3 ui_bar"
 frames 3
 click DropDownList "▼" 450 361
 frames 3
@@ -150,7 +150,7 @@ click Button "signal in $FLAG.taken $BAR2.hide"
 frames 3
 keypress Escape
 frames 3
-mouse_pos 260 409
+mouse_pos 310 409
 frames 2
 mouse_click right
 frames 3

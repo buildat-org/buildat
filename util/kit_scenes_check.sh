@@ -264,7 +264,7 @@ click Button "Entities"
 frames 3
 click Button "Scene (*"
 wait_log 5000 kit editor: list Scene
-click Text "3 *"
+click Text "◆ 3 *"
 event kit_edit {"op": "scene", "name": "cave"}
 EOF
 	in_scene cave "world, cave, sky, mine"
@@ -272,7 +272,7 @@ EOF
 wait_log_any 10000 heightmap: removed
 sync 5000
 wait_log_absent 2000 heightmap: terrain built
-click Text "5 *"
+click Text "◆ 5 *"
 EOF
 	echo quit
 } > "$t/boss2.cmds"

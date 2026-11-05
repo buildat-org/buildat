@@ -301,7 +301,7 @@ frames 5
 mouse_click left
 delay 500
 screenshot @T@/copy_list.png
-click Text "$STYLE_FROM kit/ui_bar $STYLE_FROM"
+click Text "◆ $STYLE_FROM ui_bar"
 wait_log_any 10000 kit editor: copied the style of $STYLE_FROM to $STYLE_TO
 sync 3000
 event kit_edit {"op": "try", "id": $FMT, "input": "value", "value": 125.4}

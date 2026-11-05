@@ -1915,7 +1915,9 @@ do
 		color = color, row = row, text = text, label = label,
 		button = button, edit = edit, v3 = v3, WARN = WARN, DIM = DIM,
 		STYLE = STYLE, value = value, look_frame = look_frame,
-		entity_t = entity_t, unit = unit})
+		entity_t = entity_t, unit = unit,
+		-- What an entity's name stands behind wherever it is shown
+		ENTITY = "◆ "})
 end
 
 -- ---- The players' controls: controls.lua ([KIT] stage 4h)
