@@ -274,12 +274,21 @@ void ScrollView::OnResize(const IntVector2& newSize, const IntVector2& delta)
     // This may force another update of the panel size
     if (scrollBarsAutoVisible_)
     {
-        ignoreEvents_ = true;
-        horizontalScrollBar_->SetVisible(horizontalScrollBar_->GetRange() > M_EPSILON);
-        verticalScrollBar_->SetVisible(verticalScrollBar_->GetRange() > M_EPSILON);
-        ignoreEvents_ = false;
+        // Buildat: the view size follows the panel and the bars are looked at
+        // again. A bar going gives the panel its room: with the view left
+        // smaller than the panel, UpdateView clamps the position below zero
+        // (the content off to the right), and the other bar may have no more
+        // reason to be up.
+        for (int i = 0; i < 2; ++i)
+        {
+            ignoreEvents_ = true;
+            horizontalScrollBar_->SetVisible(horizontalScrollBar_->GetRange() > M_EPSILON);
+            verticalScrollBar_->SetVisible(verticalScrollBar_->GetRange() > M_EPSILON);
+            ignoreEvents_ = false;
 
-        UpdatePanelSize();
+            UpdatePanelSize();
+            UpdateViewSize();
+        }
     }
 }
 
