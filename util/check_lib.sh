@@ -250,6 +250,15 @@ start_server()
 		return 2
 	fi
 	SERVER_PORT=$port
+	# [CHECK_STOP_STATUS] check_cleanup reads this log for a crash. Only in
+	# the check's own shell: a subshell's trap would clean up the parent's
+	# temp directory and pids at its exit
+	# simplified: a server started in a subshell, or under a check's own EXIT
+	# trap that does not call check_cleanup, goes unread
+	_CHECK_SERVER_LOGS+=("$(realpath -m "$log")")
+	if [ "$BASHPID" = "$$" ] && [ -z "$(trap -p EXIT)" ]; then
+		trap check_cleanup EXIT
+	fi
 	"$@" -P "$port" > "$log" 2>&1 &
 	SERVER_PID=$!
 	for _i in $(seq $((timeout * 5))); do
@@ -363,7 +372,15 @@ _needs=$(grep -m1 '^# needs:' "$0" 2>/dev/null)
 # age. simplified: "failed" is the exit status the trap sees, so a check
 # whose own trap runs commands before check_cleanup keeps nothing
 #   check_tmp starport; CHECK_PIDS+=($SERVER_PID)
+# **A server that crashed fails the check** ([CHECK_STOP_STATUS]): a check's
+# stop ignores the exit status and a pass deletes the logs, so a crash as a
+# server stopped went unseen. Read off the log, not the exit status, so a
+# crash under the cleanup's own kill counts too. CHECK_CRASH_OK=1 for a check
+# that crashes one on purpose.
+# simplified: what prints nothing (SIGKILL, the OOM killer) goes unseen
 CHECK_PIDS=()
+_CHECK_SERVER_LOGS=()
+_CHECK_CRASH_RE='^Crash: |ERROR: AddressSanitizer'
 check_tmp()
 {
 	CHECK_TMP=$(mktemp -d "/tmp/buildat_$1.XXXXXX")
@@ -371,7 +388,7 @@ check_tmp()
 }
 check_cleanup()
 {
-	local status=$? p i killed=("${CHECK_PIDS[@]}")
+	local status=$? p i killed=("${CHECK_PIDS[@]}") crashed=
 	for p in "${CHECK_PIDS[@]}"; do kill "$p" 2>/dev/null; done
 	# A local server a failed drive's client started and did not stop
 	# (2026-10-13: one outlived world_mods_check and made the next checks
@@ -390,7 +407,18 @@ check_cleanup()
 		for i in $(seq 50); do kill -0 "$p" 2>/dev/null || break; sleep 0.2; done
 		kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
 	done
-	[ -n "${CHECK_TMP:-}" ] || return 0
+	if [ "$status" = 0 ] && [ -z "${CHECK_CRASH_OK:-}" ]; then
+		for p in "${_CHECK_SERVER_LOGS[@]}"; do
+			grep -aqE "$_CHECK_CRASH_RE" "$p" 2>/dev/null || continue
+			echo "FAIL: a server crashed ($p):"
+			grep -aE -A15 "$_CHECK_CRASH_RE" "$p" | head -30
+			crashed=1 status=1
+		done
+	fi
+	if [ -z "${CHECK_TMP:-}" ]; then
+		[ -z "$crashed" ] || exit 1
+		return 0
+	fi
 	if [ "$status" != 0 ] && [ -z "${KEEP_TMP:-}" ]; then
 		local kept="$_check_root/local/check/failed/$(basename "$CHECK_TMP")"
 		mkdir -p "$kept" && (cd "$CHECK_TMP" && find . -type f \
@@ -399,6 +427,7 @@ check_cleanup()
 		echo "logs kept in $kept"
 	fi
 	if [ -n "${KEEP_TMP:-}" ]; then echo "kept $CHECK_TMP"; else rm -rf "$CHECK_TMP"; fi
+	[ -z "$crashed" ] || exit 1
 }
 
 # **The game's clock** ([CHECK_TIME_SCALE]): a server run with
