@@ -205,7 +205,7 @@ local function atlas_part(r, z, col, i)
 	return b
 end
 
-local function make(r, id, parent)
+local function make(r, id, parent, in_panel)
 	local u, el = r.ui, nil
 	local shapes = u.style ~= "plain"
 	if u.kind == "button" then
@@ -230,7 +230,7 @@ local function make(r, id, parent)
 	-- Under the editor's panels (-1); a panel over the rest; in a panel, over
 	-- its background
 	local order = num(u.order, 0, -40, 40)
-	el.priority = math.floor(parent ~= magic.ui.root and 60 + order or
+	el.priority = math.floor(in_panel and 60 + order or
 			u.kind == "panel" and -100 + order or -1000 + order)
 	el.bringToFront = false
 	r.el = el
@@ -397,14 +397,27 @@ function M.hud_unit()
 end
 
 -- Where one of Kit's own of w x h goes on the screen (UI units)
+-- The room a finger's bars take at the bottom, and for what stands on the
+-- hotbar there the hotbar's too: its unit is a finger's, not its percents.
+-- simplified: by the default order, hotbar, item line, health, hint, as far
+-- as they were dragged or not
+local function own_lift(name, V)
+	local r = magic.ui.root
+	local top = TOUCH and M.touch_bar_top and M.touch_bar_top()
+	if not top then
+		return 0
+	end
+	local lift = math.max(0, r.height - top)
+	local line = math.max(16, 2.4 * V)
+	local over = name == "item_line" and 1 or name == "health" and 2 or
+			name == "hint" and 3 or nil
+	return over and lift + M.hud_unit() + 4 + (over - 1) * (line + 4) or lift
+end
+
 function M.own_place(name, w, h)
 	local r = magic.ui.root
-	local lift = 0
-	if TOUCH and M.touch_bar_top then
-		local top = M.touch_bar_top()
-		lift = top and math.max(0, r.height - top) or 0
-	end
-	return place(own_ui(name), w, h, r.width, r.height, lift, vmin())
+	local V = vmin()
+	return place(own_ui(name), w, h, r.width, r.height, own_lift(name, V), V)
 end
 
 -- A Text of Kit's own placed by its rules, its font `pct` percent
@@ -709,7 +722,7 @@ local function update()
 			drop(r)
 		end
 		if parent and not r.el then
-			make(r, id, parent)
+			make(r, id, parent, pid ~= nil)
 			r.pkey = key
 		end
 		if r.el then
@@ -832,7 +845,8 @@ local function update()
 			if r.sx then
 				x, y = r.sx, r.sy
 			else
-				x, y = place(u, w, h, r.pw, r.ph, pr and 0 or lift, V)
+				x, y = place(u, w, h, r.pw, r.ph,
+						pr and 0 or r.own and own_lift(r.own, V) or lift, V)
 				if pr then
 					x, y = x + pad, y + pad + r.top
 				end

@@ -115,7 +115,7 @@ EOF
 	set_p 11 action '"fire"'
 	set_p 11 label '""'
 	set_p 11 anchor '"right"'
-	set_p 11 x 12
+	set_p 11 x 1.1
 	link 4 pressed 5 count
 	link 4 pressed 7 show
 	link 5 changed 3 value

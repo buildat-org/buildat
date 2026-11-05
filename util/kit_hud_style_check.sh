@@ -24,10 +24,13 @@
 #  11. a save's version 1 kit/ui_text's pixels converted against 1080 p at
 #      load: the same pixels at the automatic scale (kitdan, 1 percent 10.8),
 #      version 2 in the save afterwards;
-#  12. the health bar: a bar in Kit's HUD, as the rules' health_* say.
+#  12. the health bar: a bar in Kit's HUD, as the rules' health_* say;
+#  13. the web client (headless Chrome, WebGL): the same elements, the pies
+#      from the atlas ($t/drive/web.png).
 # Screenshots kept with KEEP_TMP=1: $t/overlay.png (edit mode), $t/inspector.png
 # (the handles), $t/copy_list.png (the dropdown), $t/play.png,
-# $t/big.png (kitbob's larger window), $t/after.png, $t/auto.png; look at them.
+# $t/big.png (kitbob's larger window), $t/big_menu.png (the menu over them all),
+# $t/after.png, $t/auto.png; look at them.
 #   util/kit_hud_style_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -65,10 +68,14 @@ wantp() # <log> <perl regex>
 serve() # <log>
 {
 	start_server "$1" "Listening at" 300 auto \
-		bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 \
+		bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 $web \
 		--sim-rate "$CHECK_RATE" || fail "the server did not come up ($1)"
 	CHECK_PIDS+=($SERVER_PID)
 }
+web=""
+if command -v "${CHROME:-google-chrome}" > /dev/null && [ -f "$here/web/buildat.wasm" ]; then
+	web="-W $here/web"
+fi
 stop_server()
 {
 	kill -INT "$SERVER_PID" 2>/dev/null
@@ -244,6 +251,10 @@ wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit: ui $STYLE_TO bar
 frames 20
 screenshot @T@/big.png
+keypress Escape
+delay 500
+screenshot @T@/big_menu.png
+keypress Escape
 sync 3000
 quit
 EOF
@@ -254,6 +265,29 @@ code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv.log" | head -1)
 BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code \
 	BUILDAT_JOIN_ADMIN="setting open_registration on" client kitboss 1024x700 -u 1
 BUILDAT_JOIN_NAME=kitbob client kitbob 1400x1000 -u 1
+if [ -n "$web" ]; then
+	# A player who makes an account, as kit_ui_components_check's
+	cat > "$t/web.json" <<J
+[
+ ["nav", "\${URL}"],
+ ["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+ ["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
+ ["selall"], ["frames", 2], ["type", "webhud"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["key", "Enter"], ["waitlog", "Joined as webhud", 30],
+ ["waitlog", "player physics enabled", 120],
+ ["waitlog_any", "kit: ui $PIE bar", 30],
+ ["waitlog_any", "pie step 8 of 32", 30], ["frames", 10],
+ ["shot", "\${OUT}/web.png"], ["sync", 3000]
+]
+J
+	WEB_DRIVE_VIEWPORT=1024x700@1 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
+		"$here/util/web_drive.sh" chrome workbench "$t/web.json" "$t/drive" \
+		> "$t/drive.txt" 2>&1 || fail "the web drive ($(tail -2 "$t/drive.txt"), $t/drive)"
+	echo "ok: the web client: pies from the atlas ($t/drive/web.png)"
+fi
 b=$t/kitboss.log o=$t/kitbob.log s=$t/srv.log
 hx=$(grep -aoP "kit: ui own:hotbar own at \K\d+,\d+" "$o" | tail -1)
 stop_server
@@ -274,8 +308,8 @@ echo "ok: {value:time}, {value:int}, {value}"
 # 3. The same element at both windows
 wantp "$b" "kit: ui $L2R bar at \d+,\d+ 140x21 in 1024x700 font"
 wantp "$o" "kit: ui $L2R bar at \d+,\d+ 200x30 in 1400x1000 font"
-wantp "$b" "kit: ui $FMT text at .* in 1024x700 font 14 "
-wantp "$o" "kit: ui $FMT text at .* in 1400x1000 font 20 "
+wantp "$b" "kit: ui $FMT text at .* in 1024x700 font 13 "
+wantp "$o" "kit: ui $FMT text at .* in 1400x1000 font 18 "
 echo "ok: sizes in vmin at two windows"
 # 4. The label: under its size (14 at 7 units), not wrapped
 f=$(grep -aoP "kit: ui $LONG bar at .* font \K\d+" "$b" | tail -1)

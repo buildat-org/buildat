@@ -53,7 +53,7 @@ return {
 		y = {type = "number", default = 3.7, min = -400, max = 400},
 		width = {type = "number", default = 0, min = 0, max = 400},
 		height = {type = "number", default = 0, min = 0, max = 400},
-		size = {type = "number", default = 2, min = 0.5, max = 30},
+		size = {type = "number", default = 1.8, min = 0.5, max = 30},
 		style = {type = "string", default = "shapes",
 			choices = {"shapes", "plain"}},
 		color = {type = "string", default = "#ffffff"},
