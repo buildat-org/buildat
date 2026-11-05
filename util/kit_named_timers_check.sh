@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~1.5 min (2026-11-04)
+# cost: ~15 s, more with a cold module cache (2026-11-06)
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/api.h builtin/kit/types/timer.lua
 # [KIT] stage 7b's first part, named timers and their scopes, on
 # apps/sample_kit, the server's admin driving Kit's editor (one server,
@@ -67,12 +67,16 @@ EOF
 	echo "keypress b"
 	echo "wait_log 10000 replicated: entity 3 presses = 1"
 	echo "wait_log 10000 replicated: entity 17 ticks = 5"
+	# The press behind it, the rest of timer 19's 30 s of game time at the
+	# rate's ceiling, its limit in the game's seconds
+	echo "game_clock $t/user"
+	echo "game_rate $CHECK_RATE"
 	echo "wait_log_any 40000 replicated: entity 19 ticks = 1"
 	echo "quit"
 } > "$t/boss.cmds"
 
 start_server "$t/srv.log" "Listening at" 300 auto \
-	bin/buildat_server -m ../apps/sample_kit -D "$t/user" -l 3 ||
+	bin/buildat_server -m ../apps/sample_kit -D "$t/user" -l 3 --sim-rate 1 ||
 	fail "the server did not come up ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 wait_for_log "$t/srv.log" "setup code [A-Z0-9]+" 30
