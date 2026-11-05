@@ -366,7 +366,7 @@ local OWN_LABEL = {hotbar = "Hotbar", feed = "Kill feed", hint =
 local OWN_ANCHOR = {health = "bottom", hotbar = "bottom", feed = "top_right",
 	hint = "bottom", item_line = "bottom"}
 -- A frame's size, percent (the hotbar's by its slots)
-local OWN_SIZE = {feed = {24, 7}, hint = {44, 5}, item_line = {30, 2.4}}
+local OWN_SIZE = {feed = {24, 7}, hint = {44, 3}, item_line = {30, 2.4}}
 
 local function hud_rules()
 	local h = M.game_rule and M.game_rule("hud")

@@ -81,7 +81,7 @@ return {
 		feed_y = {type = "number", default = 3.7, min = -400, max = 400},
 		hint_anchor = {type = "string", default = "bottom", choices = ANCHORS},
 		hint_x = {type = "number", default = 0, min = -400, max = 400},
-		hint_y = {type = "number", default = 14, min = -400, max = 400},
+		hint_y = {type = "number", default = 13.4, min = -400, max = 400},
 		item_line_anchor = {type = "string", default = "bottom", choices = ANCHORS},
 		item_line_x = {type = "number", default = 0, min = -400, max = 400},
 		item_line_y = {type = "number", default = 7.4, min = -400, max = 400},
