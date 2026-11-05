@@ -613,6 +613,11 @@ local function stack(r, V)
 	end
 end
 
+-- The HUD in edit mode is the Walk view's: 2D and 3D draw the world alone
+function M.hud_off()
+	return E.editing and M.view ~= nil and M.view() ~= "walk"
+end
+
 local function update()
 	local root = magic.ui.root
 	local play = E.running and not E.editing
@@ -884,8 +889,8 @@ local function update()
 			dress(r, math.floor(w), math.floor(h), V, r.frac or 0)
 			-- Play: as its state says; edit mode: all, a hidden one dimmed,
 			-- framed
-			r.el.visible = not r.skip and not (r.empty and not E.editing) and
-					((play and r.on) or E.editing or (r.own ~= nil and r.on))
+			r.el.visible = not M.hud_off() and not r.skip and
+					not (r.empty and not E.editing) and ((play and r.on) or E.editing or (r.own ~= nil and r.on))
 			r.el.enabled = E.editing or r.kind ~= "text"
 			local blink = tonumber(u.blink_below) or 0
 			r.blinking = not E.editing and r.frac ~= nil and blink > 0 and
@@ -1102,7 +1107,8 @@ local function markers()
 	local D = math.max(8, math.floor(1.1 * V))
 	for id, r in pairs(MK) do
 		local mk, n = r.mk, P.nodes[id]
-		local on = cam ~= nil and (type(mk.state) ~= "string" or
+		local on = cam ~= nil and not M.hud_off() and
+				(type(mk.state) ~= "string" or
 				state(n, id, mk.state) == true)
 		local where = "hidden"
 		if on then

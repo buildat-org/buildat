@@ -19,6 +19,7 @@
 #   9. edit mode: a drag in whole percents, one snapped to another's edge, a
 #      handle's resize; Kit's own hotbar dragged, kit/game_rules placed to
 #      keep it, and there after the server's restart (kitcat's client);
+#      in 2D and 3D no HUD, in Walk it is back;
 #  10. copy style from one bar to another: the style's parameters set,
 #      x, y, label and the links not;
 #  11. a save's version 1 kit/ui_text's pixels converted against 1080 p at
@@ -162,6 +163,10 @@ EOF
 	drag 512 665 512 500
 	echo "wait_log 10000 kit: ui own:hotbar dragged to"
 	echo "wait_log 10000 kit: ui own:hotbar own at"
+	# In edit mode the HUD is the Walk view's
+	for v in "F2 3D" "F3 Walk" "F1 2D" "F3 Walk"; do
+		printf 'keypress %s\nwait_log_any 10000 kit editor: the view is %s\ndelay 300\n' $v
+	done
 	id=$((id + 1)) # kit/game_rules, placed to keep it
 	echo "sync 3000"
 	# 1. Four directions at the left, a pie and a full one
@@ -341,6 +346,15 @@ wantp "$b" "kit: ui $PTEXT text .* plain order"
 want "$s" "set $SIZED's kit/ui_bar width to 25" "set $SIZED's kit/ui_bar height to 6"
 want "$s" "kit/game_rules"
 echo "ok: a drag in whole percents, snapped to an edge, a handle's resize"
+# The HUD by view: the hotbar's frame's last line under each
+for v in "3D hidden" "2D hidden" "Walk shown"; do
+	set -- $v
+	awk -v v="the view is $1" -v w="kit: ui own:hotbar own at .* $2, edit mode" '
+		index($0, "the view is ") { on = index($0, v) > 0 }
+		on && $0 ~ w { f = 1 }
+		END { exit !f }' "$b" || fail "the HUD in the $1 view is not $2 ($b)"
+done
+echo "ok: in edit mode the HUD in the Walk view only"
 # 10. Copy style
 for p in color direction blink_below background width height; do
 	want "$s" "set $STYLE_TO's kit/ui_bar $p to"

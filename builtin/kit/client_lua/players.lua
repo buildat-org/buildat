@@ -474,7 +474,6 @@ local function set_hint(text)
 		SP.hint = magic.ui.root:CreateChild("Text")
 		SP.hint:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
 	end
-	SP.hint.visible = text ~= nil
 	if text then
 		SP.hint:SetText(text)
 		log:info("kit: spectating: " .. text:gsub("\n", " | "))
@@ -483,6 +482,9 @@ end
 
 -- [KIT_HUD_STYLE] Where kit/game_rules keeps it
 magic.SubscribeToEvent("Update", function()
+	if SP.hint then
+		SP.hint.visible = SP.text ~= nil and not M.hud_off()
+	end
 	if SP.hint and SP.hint.visible then
 		M.own_place_text(SP.hint, "hint", 1.6)
 	end

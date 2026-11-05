@@ -961,7 +961,9 @@ magic.SubscribeToEvent("Update", function()
 		local s = {}
 		for _, k in ipairs(F.kills) do s[#s + 1] = k.text end
 		F.feed:SetText(table.concat(s, "\n"))
-		F.feed.visible = #s > 0
+	end
+	if F.feed then
+		F.feed.visible = #F.kills > 0 and not M.hud_off()
 	end
 	-- [KIT_HUD_STYLE] Where kit/game_rules keeps them
 	if F.feed and F.feed.visible then
