@@ -227,9 +227,11 @@ local function make(r, id, parent)
 		el.blendMode = magic.BLEND_ALPHA
 		el.color = magic.Color(0, 0, 0, 0)
 	end
-	-- Under the editor's panels (-1); a panel over the rest
+	-- Under the editor's panels (-1); a panel over the rest; in a panel, over
+	-- its background
 	local order = num(u.order, 0, -40, 40)
-	el.priority = math.floor(u.kind == "panel" and -100 + order or -1000 + order)
+	el.priority = math.floor(parent ~= magic.ui.root and 60 + order or
+			u.kind == "panel" and -100 + order or -1000 + order)
 	el.bringToFront = false
 	r.el = el
 	r.parts = {}
@@ -266,6 +268,9 @@ local function make(r, id, parent)
 	r.t = el:CreateChild("Text")
 	r.t.priority = 5
 	r.t:SetTextEffect(magic.TE_SHADOW)
+	local a = tostring(u.anchor or "")
+	r.t:SetTextAlignment(u.kind == "text" and (a:find("left") and magic.HA_LEFT or
+			a:find("right") and magic.HA_RIGHT) or magic.HA_CENTER)
 	if u.kind ~= "bar" and u.kind ~= "own" then
 		r.t:SetColor(color(u.color, magic.Color(1, 1, 1)))
 	end
