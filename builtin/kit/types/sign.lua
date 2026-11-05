@@ -23,17 +23,19 @@ return {
 		text = "shown", text_size = "param:size", text_color = "param:color",
 		text_facing = "param:facing", solid = "param:solid"},
 	params = {
-		text = {type = "string", default = "Welcome!"},
-		facing = {type = "string", default = "flat",
+		text = {cat = "look", type = "string", default = "Welcome!"},
+		facing = {cat = "look", type = "string", default = "flat",
 			choices = {"flat", "camera"}},
-		size = {type = "number", default = 0.25, min = 0.05, max = 4},
-		color = {type = "string", default = "#ffffff"},
-		background = {type = "string", default = "#304050"},
+		size = {cat = "look", type = "number", default = 0.25, min = 0.05,
+			max = 4},
+		color = {cat = "look", type = "string", default = "#ffffff"},
+		background = {cat = "look", type = "string", default = "#304050"},
 		-- [KIT_LOOK_MATERIAL] A voxel material it wears ("": its background's colour; a background
 		-- of "none" no board still)
-		material = {type = "voxel", default = "", choices_from = "voxels"},
-		board = {type = "position", default = {1.5, 0.75, 0.1}},
-		solid = {type = "bool", default = true},
+		material = {cat = "look", type = "voxel", default = "",
+			choices_from = "voxels"},
+		board = {cat = "look", type = "position", default = {1.5, 0.75, 0.1}},
+		solid = {cat = "physics", type = "bool", default = true},
 	},
 	state = {
 		value = {default = ""},

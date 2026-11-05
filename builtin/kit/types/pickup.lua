@@ -20,8 +20,8 @@ return {
 	params = {
 		item = {type = "string", default = "kit/stone", choices_from = "items"},
 		count = {type = "number", default = 1, min = 1, max = 1000000},
-		size = {type = "position", default = {1, 2, 1}},
-		sound = {type = "sound", default = "kit/pickup"},
+		size = {cat = "look", type = "position", default = {1, 2, 1}},
+		sound = {cat = "look", type = "sound", default = "kit/pickup"},
 	},
 	state = {
 		left = {default = 0},

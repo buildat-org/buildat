@@ -20,7 +20,7 @@ return {
 		text = "status"},
 	params = {
 		name = {type = "string", default = "Red"},
-		color = {type = "string", default = "#d03030"},
+		color = {cat = "look", type = "string", default = "#d03030"},
 		win_score = {type = "number", default = 0, min = 0, max = 1000000},
 		-- [KIT_TOOLS_1] whether its members' hits hurt each other
 		friendly_fire = {type = "bool", default = false},

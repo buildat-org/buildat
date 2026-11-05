@@ -286,6 +286,12 @@ namespace interface
 //   `choices_from = "scenes"`: a dropdown of the composition's scenes
 //   and "none" (""). [KIT_SOUNDS] A parameter type "sound": a dropdown of
 //   the project's sounds and "none" ("").
+//   [KIT_PARAM_CATEGORIES] A parameter's `cat` is the inspector's category
+//   it is under: "behaviour" (without one), "hud", "look" (appearance in
+//   the world and sounds), "physics" or "advanced" (technical: poll, rate,
+//   substeps). Another value is warned of at the type's load and treated
+//   as behaviour. A type with 8 parameters or more in two categories or
+//   more gets a row of chips for them.
 //   Client parts: <name>.client.lua beside a type, sent to every client at
 //   join and run there as the client's own Lua is (client_lua/module.lua
 //   says what it gets).

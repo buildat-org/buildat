@@ -1623,8 +1623,35 @@ struct Module: public interface::Module, public Interface
 			json::Value o = json::object();
 			o.set("type", "bool");
 			o.set("default", true);
+			o.set("cat", "look");
 			ps.set("own_look", o);
 			t.decl.set("params", ps);
+		}
+		// [KIT_PARAM_CATEGORIES] Which of the inspector's categories a
+		// parameter is under. Another value does not stop the type: warned
+		// of and treated as none (behaviour)
+		json::Value cat_ps = t.decl.get("params");
+		if(cat_ps.is_object()){
+			std::vector<ss_> bad_cats;
+			for(json::Iterator it(cat_ps); it; ++it){
+				if(!(*it).is_object() || (*it).get("cat").is_undefined())
+					continue;
+				const json::Value &c = (*it).get("cat");
+				if(!c.is_string() || (c.as_string() != "behaviour" &&
+						c.as_string() != "hud" && c.as_string() != "look" &&
+						c.as_string() != "physics" && c.as_string() != "advanced"))
+					bad_cats.push_back(it.key());
+			}
+			for(const ss_ &k : bad_cats){
+				log_w(MODULE, "%s: parameter %s: cat %s is none of behaviour, "
+						"hud, look, physics, advanced: treated as behaviour",
+						cs(name), cs(k), cs(cat_ps.get(k).get("cat").stringify()));
+				json::Value p = cat_ps.get(k);
+				p.set("cat", "behaviour");
+				cat_ps.set(k, p);
+			}
+			if(!bad_cats.empty())
+				t.decl.set("params", cat_ps);
 		}
 		t.owns_voxel = t.decl.get("owns_voxel").is_true();
 		// [KIT_INPUT_ACTIONS] {{name =, key =, label =}...}: strings, each

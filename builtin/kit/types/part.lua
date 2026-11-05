@@ -8,17 +8,19 @@
 return {
 	version = 1,
 	params = {
-		shape = {type = "string", default = "box", choices = {"box", "wedge", "sphere"}},
-		size = {type = "position", default = {1, 1, 1}},
-		rotation = {type = "position", default = {0, 0, 0}},
-		color = {type = "string", default = "#b0b0b0"},
-		material = {type = "string", default = "plain",
+		shape = {cat = "look", type = "string", default = "box",
+			choices = {"box", "wedge", "sphere"}},
+		size = {cat = "look", type = "position", default = {1, 1, 1}},
+		rotation = {cat = "look", type = "position", default = {0, 0, 0}},
+		color = {cat = "look", type = "string", default = "#b0b0b0"},
+		material = {cat = "look", type = "string", default = "plain",
 			choices = {"plain", "metal", "glass", "glow"}},
-		collision = {type = "bool", default = true},
+		collision = {cat = "physics", type = "bool", default = true},
 		-- [KIT_LOOK_MATERIAL] A voxel material it wears ("": its colour; a
 		-- box's or a wedge's, its slope the material's top). Its `material`
 		-- is its surface, from before
-		voxel = {type = "voxel", default = "", choices_from = "voxels"},
+		voxel = {cat = "look", type = "voxel", default = "",
+			choices_from = "voxels"},
 	},
 	look = {shape = "param:shape", size = "param:size",
 		rotation = "param:rotation", color = "param:color",

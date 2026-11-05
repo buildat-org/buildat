@@ -6,7 +6,7 @@ return {
 	usable = true,
 	params = {
 		hold = {type = "number", default = 1, min = 0.1, max = 60},
-		sound_press = {type = "sound", default = "kit/click"},
+		sound_press = {cat = "look", type = "sound", default = "kit/click"},
 	},
 	look = {shape = "box", size = {0.4, 0.4, 0.15}, color = "#d03030",
 		state = "down", when = {scale = {1, 1, 0.4}, color = "#702020"}},
