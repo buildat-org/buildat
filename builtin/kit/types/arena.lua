@@ -20,7 +20,8 @@
 -- "end"). [KIT_MINIGAMES_FIX] The session is a copy of the whole start:
 -- only the arena that started it runs a round there, any other is idle.
 -- Its outputs, in the default round: started and ended (the session's
--- id), result (the winner's name, "" a draw). Its status is on the
+-- id), result (the winner's name, "" a draw), won (the winner's name, in the
+-- round, its players still in the map: as its results begin). Its status is on the
 -- players' screens (`ui`), their own team's name with it in a round.
 -- [KIT_INVENTORY_PLAY] The inventory at the round's ends (Kit's):
 -- `at_start` "kit" (empty, then the starting kits), "clear" (empty, no
@@ -270,6 +271,9 @@ local function finish(c, winner, cause, stopped)
 	c.state.ended = ended_by(c, cause)
 	c:log("round over:", c.state.result, scores(teams), "--", c.state.ended)
 	round_status(c)
+	if winner then
+		c:emit("won", winner)
+	end
 	local sc = {}
 	for _, t in ipairs(teams) do
 		sc[t.name] = t.score
@@ -374,6 +378,7 @@ return {
 	look = {shape = "box", size = {1, 0.1, 1}, color = "#f0a030"},
 	inputs = {["end"] = "none", win = "any"},
 	outputs = {started = "number", ended = "number", result = "string:team",
+		won = "string:team",
 		status = "string:text"},
 	-- Version 1 started at once and had no results to show
 	migrate = function(params, from)

@@ -223,6 +223,33 @@ namespace interface
 // parameters name and the copies it made, and the player who set it off
 // (every player with `players = true`), nothing else.
 //
+// [KIT_PARTICLES], [KIT_FEEDBACK_EFFECTS] What the clients show at a moment,
+// no play reads it. c:effect{...} (32 a run; 240 a second in all, burst 480,
+// past it refused and logged at verbose): all optional, each clamped, a bad
+// one its default. at {x, y, z} (none: the entity's place) or entity (an id:
+// the clients follow its look, a carried flag's), offset; count (256 at most,
+// to peers within 128 m in its scene), shape square, round, ring or voxel
+// (voxels: 4 material names, the particles sharing them; none: no particles),
+// colors (4 "#rrggbb", the particles sharing them), dir, spread (degrees
+// either side), speed_min, speed_max, gravity, drag, ttl_min, ttl_max (10 s),
+// size_min, size_max (m a side), grow, fade, box, spin, land (stops on the
+// ground's voxels within 3 cells); a light, never with a shadow: light_time
+// (2 s), light_color, light_range, light_brightness; player (an id): their
+// body flash_time s in flash_color for everyone, and on their own screen an
+// arc_time s arc in arc_color at the edge towards arc_from {x, y, z}.
+// Packets: "kit:effect", "kit:effect_arc" (that player's alone). A client
+// keeps 1500 particles at most and drops what is past that.
+// World events: `events = "<a string parameter>"` in a type and on_event(c,
+// ev, by) on every instance in the scene whose parameter names the kind:
+// "dig", "place" (ev.pos, ev.voxels
+// {material}, ev.player), "hit" (ev.pos at the target's body, ev.player a hit
+// player's id, ev.from where it came from, ev.dir the way its spray goes:
+// towards a hitter, away from a blast; ev.share of its health, at most 1),
+// "blast" (ev.pos, ev.radius, ev.voxels the blown ones' 4 commonest
+// materials, ev.cells), "respawn" (ev.pos, ev.player), or any other a
+// component says with c:event(kind) (at it, 8 a run: kit/pickup's "pickup").
+// types/effect.lua is the type a composition uses for all of it.
+//
 // [KIT] stage 4d:
 //   Typed signals: inputs = {"a", b = "number"} (a name alone is "any"):
 //   any, none (no value), number, bool, string, entity, position. A link

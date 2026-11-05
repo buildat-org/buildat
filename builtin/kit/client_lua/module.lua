@@ -1948,6 +1948,15 @@ do
 	install({M = M, O = O, P = P, log = log, color = color})
 end
 
+-- ---- [KIT_PARTICLES] Effects: effects.lua (after players.lua: a hit's tint)
+do
+	local ok, err, install = buildat.run_script_file("kit/effects.lua")
+	assert(ok and type(install) == "function", "kit: effects.lua: " ..
+			tostring(err))
+	install({M = M, O = O, P = P, log = log, color = color,
+		voxel_def = voxel_def})
+end
+
 -- ---- [KIT_UI_COMPONENTS] UI as screen-space components: ui.lua
 do
 	local ok, err, install = buildat.run_script_file("kit/ui.lua")

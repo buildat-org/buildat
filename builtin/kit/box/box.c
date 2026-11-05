@@ -55,7 +55,9 @@
 **                        power, kill, hurt, share, friendly_fire,
 **                        type}...}, hit = {...} (modify_hit's
 **                        returned hit, [KIT_TOOLS_1]), sounds = {{name,
-**                        everywhere}...} (c:sound, [KIT_SOUNDS])}; a call into
+**                        everywhere}...} (c:sound, [KIT_SOUNDS]), effects =
+**                        {{...}...} (c:effect), events = {{kind}...} (c:event,
+**                        [KIT_PARTICLES])}; a call into
 **                        the provider (inv) is marked by "P" before it and
 **                        "p" after it, ahead of the answer
 **   "L<source>"          [KIT] stage 4h: the movement library
@@ -453,6 +455,20 @@ static const char PRELUDE[] =
 "		if opts ~= nil and type(opts) ~= 'table' then error('sound: options are {everywhere = true}', 2) end\n"
 "		if #sounds >= 8 then error('sound: 8 a run at most', 2) end\n"
 "		sounds[#sounds + 1] = {tostring(name), opts and opts.everywhere == true or false}\n"
+"	end\n"
+"	-- [KIT_PARTICLES] An effect (api.h; the host clamps it), an event of its own\n"
+"	function c:effect(t)\n"
+"		if type(t) ~= 'table' then error('effect: a table of its fields', 2) end\n"
+"		local x = fx.effects or {}\n"
+"		if #x >= 32 then error('effect: 32 a run at most', 2) end\n"
+"		x[#x + 1] = t\n"
+"		fx.effects = x\n"
+"	end\n"
+"	function c:event(kind)\n"
+"		local x = fx.events or {}\n"
+"		if #x >= 4 then error('event: 4 a run at most', 2) end\n"
+"		x[#x + 1] = {tostring(kind)}\n"
+"		fx.events = x\n"
 "	end\n"
 "	-- [KIT_VOXEL_STATES] Its voxel box: its size, its voxels (reads_voxels)\n"
 "	-- in box order, and cells written in it\n"
