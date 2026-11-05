@@ -88,8 +88,12 @@ EOF
 export BUILDAT_WORKBENCH_TYPES=$t/user/apps/workbench/check_types
 cd "$here/Build"
 
+web=""
+if command -v "${CHROME:-google-chrome}" > /dev/null && [ -f "$here/web/buildat.wasm" ]; then
+	web="-W $here/web"
+fi
 start_server "$t/srv.log" "Listening at" 300 auto \
-	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 4 ||
+	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 4 $web ||
 	fail "the server did not come up ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 client() # <name>: its commands in $t/<name>.cmds; BUILDAT_JOIN_* its login
@@ -179,6 +183,11 @@ EOF
 	place kit/effect '1.5, 1, 0'; FOUNTAIN=$id
 	set_ 'count=60' 'color="#ffd070"' 'color2="#ffffff"' 'spread=25' \
 		'speed_min=2.5' 'speed_max=4.2' 'gravity=9' 'ttl_min=0.7' 'ttl_max=0.9'
+	# Where the web player looks from the spawn, fired by the fountain
+	place kit/effect '0, 1.5, 4'; WEB_RING=$id
+	set_ 'count=9' 'shape="ring"' 'color="#40a0ff"' 'spread=60' 'speed_min=1' \
+		'speed_max=2' 'gravity=0' 'ttl_min=5' 'ttl_max=5' 'size_min=0.5' 'size_max=0.5'
+	edit "{\"op\": \"link\", \"id\": $FOUNTAIN, \"comp\": 0, \"output\": \"fired\", \"to\": $WEB_RING, \"input\": \"burst\"}"
 	place kit/explosive '2, 1, 3'; BOMB=$id
 	set_ 'fuse=2.5' 'radius=1' 'kill=0' 'hurt=5' 'share=0.25' 'sound_every=1' \
 		'blink_color="#ff3010"' 'blink_slow=0.8' 'blink_fast=0.1'
@@ -280,6 +289,30 @@ BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE=1 client bob &
 bob=$!
 wait $boss || fail "kitboss's client ($t/boss.log)"
 wait $bob || fail "kitbob's client ($t/bob.log)"
+# WebGL: a player's burst there, no GL error, a shot to look at (the bomb is gone)
+if [ -n "$web" ]; then
+	cat > "$t/web.json" <<'J'
+[
+ ["nav", "${URL}"],
+ ["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+ ["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
+ ["selall"], ["frames", 2], ["type", "webplayer"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["key", "Enter"], ["waitlog", "Joined as webplayer", 30],
+ ["waitlog", "player physics enabled", 120], ["frames", 30],
+ ["click", "Button", "Continue"], ["frames", 10],
+ ["key", "j"], ["frames", 3], ["shot", "${OUT}/web_fountain.png"], ["sync", 1000]
+]
+J
+	WEB_DRIVE_VIEWPORT=1000x600@1 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
+		"$here/util/web_drive.sh" chrome workbench "$t/web.json" "$t/drive" \
+		> "$t/drive.txt" 2>&1 || fail "the web drive ($(tail -2 "$t/drive.txt"), $t/drive)"
+	! grep -a "GL_INVALID\|WebGL: \|attempt to\|does not have field or property" "$t/drive/page.log" |
+		head -5 | grep . || fail "a fault in the page's log ($t/drive/page.log)"
+	echo "ok: on the web, effects drawn with no GL error: $t/drive/web_fountain.png"
+fi
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 s=$t/srv.log
