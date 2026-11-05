@@ -14,7 +14,7 @@
 #      edits; the toggle's in the save;
 #   3. a target's name selects it, its Inputs there;
 #   4. the filter narrows the list, by type and by name; a view key while
-#      typing in it;
+#      typing in it; the list's symbols marked for what has a link either way;
 #   5. a rename: the server's edit, undone by Ctrl+Z, again; in the save, and
 #      read in the table by another client after the server's restart;
 #   6. the viewport's camera on the selected entity, the walk camera's on one
@@ -361,6 +361,12 @@ echo "ok: a target's name selects it, its links both ways there"
 wantp "$b" "signals: list \"ui_bar\" \(3\): .*$BAR1, .*$BAR2, .*$BAR3"
 wantp "$b" "signals: list \"home F\" \(1\): .*$FLAG\$"
 echo "ok: the filter, by type and by name"
+# Marked: from a link and to a link; game_rules and the unlinked third bar not,
+# the bar once its link is added
+want "$b" "signals: linked marks: $FLAG, $BAR1, $BAR2, $TIMER, $LOGIC" \
+	"signals: linked marks: $FLAG, $BAR1, $BAR2, $BAR3, $TIMER, $LOGIC"
+kit "$b" | grep -a "signals: linked marks: " | sed "s/.*marks: //" | grep -aw "$RULES" && fail "game_rules marked ($b)"
+echo "ok: a list's symbols marked by links, either way"
 seq=$(kit "$b" | grep -a "kit editor: the view is " | sed 's/.*view is //' | tr '\n' ' ')
 case $seq in
 *"3D Signals 3D Signals 3D Walk Signals "*) ;;

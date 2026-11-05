@@ -6,7 +6,8 @@
 -- a table, over the whole window under the top bar (a flag with 18 links did
 -- not fit the inspector). editor.lua runs this file and puts it at NT.sg.
 --   - Left: the entities as a tree, as the Entities tab's (all three of its
---     lists in one), a filter over them (id, name, type)
+--     lists in one), a filter over them (id, name, type); the symbol of one with
+--     a link, either way, in the signals' cyan
 --   - Middle: the selected one's name to edit, and its links, in both
 --     directions, Inputs first: a row a link, flowing left to right as
 --     object.member on both sides, the arrow after what it carries (the type,
@@ -166,9 +167,27 @@ local function matches(e)
 	return s:find(f, 1, true) ~= nil
 end
 
+-- The ids with a link, from or to them, in order
+local function linked_ids()
+	local set, ids = {}, {}
+	for _, e in ipairs(A.all_entities()) do
+		for _, c in ipairs(e.components or {}) do
+			for _, l in ipairs(c.links or {}) do
+				set[e.id], set[l.to] = true, true
+			end
+		end
+	end
+	for id in pairs(set) do
+		ids[#ids + 1] = id
+	end
+	table.sort(ids)
+	return set, ids
+end
+
 function SG.rows()
 	local tabs, indent = NT.entity_lists()
 	local ids = {}
+	local linked, linked_list = linked_ids()
 	SG.list_body = put_body(SG.list_view, function(body)
 		for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
 			local head = false
@@ -180,11 +199,17 @@ function SG.rows()
 					end
 					local d = indent[e.id] or 0
 					local on = e.id == S.primary
-					local b, t = item(body, shown_name(e), function()
+					local own_color = on and magic.Color(1.0, 0.85, 0.3) or nil
+					local b, t = item(body, clipped(short_name(e)), function()
 						M.select(e.id)
-					end, on and magic.Color(1.0, 0.85, 0.3) or nil, on)
-					t:SetPosition(4 + d * 12, 0)
-					b.minWidth = t.width + 12 + d * 12
+					end, own_color, on)
+					-- The symbol a Text of its own, for its own colour
+					local m = text(b, K.ENTITY, linked[e.id] and
+							magic.Color(ui_utils.rgb("focus")) or own_color)
+					m:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
+					m:SetPosition(4 + d * 12, 0)
+					t:SetPosition(4 + d * 12 + m.width, 0)
+					b.minWidth = m.width + t.width + 12 + d * 12
 					-- For a driven click by whose it is
 					b:SetName("select " .. e.id)
 					ids[#ids + 1] = d > 0 and string.rep(">", d) .. e.id or e.id
@@ -199,6 +224,11 @@ function SG.rows()
 			"): " .. table.concat(ids, ", ")
 	if said ~= SG.list_said then
 		SG.list_said = said
+		log:info(said)
+	end
+	said = "kit editor: signals: linked marks: " .. table.concat(linked_list, ", ")
+	if said ~= SG.marks_said then
+		SG.marks_said = said
 		log:info(said)
 	end
 end
