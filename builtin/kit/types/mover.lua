@@ -25,11 +25,12 @@ return {
 	params = {
 		offset = {type = "position", default = {0, 2, 0}},
 		time = {type = "number", default = 1, min = 0, max = 600},
-		size = {type = "position", default = {1, 0.25, 1}},
-		color = {type = "string", default = "#9090a0"},
+		size = {cat = "look", type = "position", default = {1, 0.25, 1}},
+		color = {cat = "look", type = "string", default = "#9090a0"},
 		-- [KIT_LOOK_MATERIAL] A voxel material it wears ("": its own colour)
-		material = {type = "voxel", default = "", choices_from = "voxels"},
-		solid = {type = "bool", default = true},
+		material = {cat = "look", type = "voxel", default = "",
+			choices_from = "voxels"},
+		solid = {cat = "physics", type = "bool", default = true},
 		start_out = {type = "bool", default = false},
 	},
 	state = {

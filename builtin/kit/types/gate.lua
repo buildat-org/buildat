@@ -5,9 +5,10 @@
 return {
 	version = 2,
 	params = {
-		size = {type = "position", default = {3, 3, 1}},
+		size = {cat = "look", type = "position", default = {3, 3, 1}},
 		-- [KIT_LOOK_MATERIAL] A voxel material it wears ("": its own colour)
-		material = {type = "voxel", default = "", choices_from = "voxels"},
+		material = {cat = "look", type = "voxel", default = "",
+			choices_from = "voxels"},
 	},
 	look = {shape = "box", extent = "size", depth = 0.3, color = "#707880",
 		voxel = "param:material",

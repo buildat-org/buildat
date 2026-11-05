@@ -101,7 +101,7 @@ local params = {
 	owners = {type = "string", default = ""},
 	capture = {type = "string", default = "player",
 		choices = {"player", "team"}},
-	show_border = {type = "bool", default = false},
+	show_border = {cat = "look", type = "bool", default = false},
 	resize_time = {type = "number", default = 0, min = 0, max = 3600},
 }
 local defaults = {dig = "none", place = "none", enter = "all", pvp = "all",

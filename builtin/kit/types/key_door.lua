@@ -15,13 +15,14 @@ return {
 	version = 2,
 	usable = true,
 	params = {
-		size = {type = "position", default = {1, 2, 1}},
+		size = {cat = "look", type = "position", default = {1, 2, 1}},
 		-- [KIT_DOOR_MIRROR] It swings the other way: to its back (-z) rather
 		-- than its front, round the same hinge. Two doors, one turned half
 		-- round and mirrored, are a double door
 		mirror = {type = "bool", default = false},
 		-- [KIT_LOOK_MATERIAL] A voxel material it wears ("": its own colour)
-		material = {type = "voxel", default = "", choices_from = "voxels"},
+		material = {cat = "look", type = "voxel", default = "",
+			choices_from = "voxels"},
 		key = {type = "string", default = "key"},
 		take = {type = "bool", default = false},
 	},

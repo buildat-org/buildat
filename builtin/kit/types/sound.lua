@@ -5,8 +5,8 @@ return {
 	version = 1,
 	look = {shape = "sphere", size = 0.25, color = "#30b0e0"},
 	params = {
-		sound = {type = "sound", default = "kit/click"},
-		everywhere = {type = "bool", default = false},
+		sound = {cat = "look", type = "sound", default = "kit/click"},
+		everywhere = {cat = "look", type = "bool", default = false},
 	},
 	inputs = {play = "none"},
 	on_input = function(c, input, value, by)

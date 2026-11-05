@@ -33,7 +33,7 @@ return {
 	players = true,
 	hud = "text",
 	look = {shape = "box", size = 0.25, color = "#e04080"},
-	params = {title = {type = "string", default = "Score"}},
+	params = {title = {cat = "hud", type = "string", default = "Score"}},
 	state = {text = {default = "", shared = true}},
 	inputs = {add = "none", reset = "none"},
 	outputs = {changed = "string"},
