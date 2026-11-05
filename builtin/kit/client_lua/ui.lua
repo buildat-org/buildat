@@ -123,10 +123,21 @@ local function num(v, d, lo, hi)
 	return math.max(lo, math.min(hi, v))
 end
 
--- One percent of the root's shorter side, in UI units
-local function vmin()
+-- [KIT_SIGNALS_VIEW] The box the HUD is laid out in (screen UI units): the
+-- Signals view's viewport with its Show HUD on, else the root
+local function hud_box()
+	local a = M.hud_area and M.hud_area()
+	if a then
+		return a.x, a.y, a.w, a.h
+	end
 	local r = magic.ui.root
-	return math.min(r.width, r.height) / 100
+	return 0, 0, r.width, r.height
+end
+
+-- One percent of the box's shorter side (the root's, CSS's vmin), in UI units
+local function vmin()
+	local _, _, w, h = hud_box()
+	return math.min(w, h) / 100
 end
 
 local function pad_of(V)
@@ -404,7 +415,7 @@ end
 local function own_lift(name, V)
 	local r = magic.ui.root
 	local top = TOUCH and M.touch_bar_top and M.touch_bar_top()
-	if not top then
+	if not top or (M.hud_area and M.hud_area()) then
 		return 0
 	end
 	local lift = math.max(0, r.height - top)
@@ -415,9 +426,10 @@ local function own_lift(name, V)
 end
 
 function M.own_place(name, w, h)
-	local r = magic.ui.root
+	local bx, by, bw, bh = hud_box()
 	local V = vmin()
-	return place(own_ui(name), w, h, r.width, r.height, own_lift(name, V), V)
+	local x, y = place(own_ui(name), w, h, bw, bh, own_lift(name, V), V)
+	return x + bx, y + by
 end
 
 -- A Text of Kit's own placed by its rules, its font `pct` percent
@@ -613,11 +625,11 @@ local function stack(r, V)
 	end
 end
 
--- The HUD in edit mode is the Walk and HUD views': 2D and 3D draw the world
--- alone
+-- The HUD in edit mode is the Walk and HUD views', and in the Signals view's
+-- viewport with its Show HUD: 2D and 3D draw the world alone
 function M.hud_off()
 	return E.editing and M.view ~= nil and M.view() ~= "walk" and
-			M.view() ~= "hud"
+			M.view() ~= "hud" and not (M.hud_area and M.hud_area())
 end
 
 local function update()
@@ -625,6 +637,7 @@ local function update()
 	local play = E.running and not E.editing
 	local V = vmin()
 	local pad = pad_of(V)
+	local bx, by, bw, bh = hud_box()
 	-- The ones there now; a panel before what is in it
 	local list = {}
 	for id, n in pairs(P.nodes) do
@@ -687,7 +700,8 @@ local function update()
 	local lift = 0
 	if TOUCH and M.touch_bar_top then
 		local top = M.touch_bar_top()
-		lift = top and math.max(0, root.height - top) or 0
+		lift = top and not (M.hud_area and M.hud_area()) and
+				math.max(0, root.height - top) or 0
 		-- simplified: the whole width's bottom, though the bars are at
 		-- the lower right only; the bars' own rectangle is the upgrade
 		if top ~= bars_at then
@@ -757,8 +771,8 @@ local function update()
 				end
 			end
 			r.value = value
-			local pw = pr and pr.w or root.width
-			local ph = pr and pr.h or root.height
+			local pw = pr and pr.w or bw
+			local ph = pr and pr.h or bh
 			local top = 0
 			if pr then
 				-- Under its panel's title, inside its edge
@@ -856,8 +870,11 @@ local function update()
 						pr and 0 or r.own and own_lift(r.own, V) or lift, V)
 				if pr then
 					x, y = x + pad, y + pad + r.top
+				else
+					x, y = x + bx, y + by
 				end
 			end
+			-- (no drag in the Signals view's box: bx, by not undone here)
 			r.to_params = function(px, py, nw, nh)
 				if pr then
 					px, py = px - pad, py - pad - r.top
@@ -938,7 +955,7 @@ local function update()
 				end
 			end
 			-- Said as it changes: where it is and what it shows
-			local sw, sh = root.width, root.height
+			local sw, sh = bw, bh
 			local sp = r.el.screenPosition
 			local line = string.format("kit: ui %s %s at %d,%d %dx%d in %dx%d" ..
 					" font %d %s order %g %s%s%s%s%s%s: \"%s\"", tostring(id), r.kind,
@@ -953,8 +970,8 @@ local function update()
 					(r.text:gsub("\n", " | ")))
 			if line ~= r.log then
 				r.log = line
-				local off = sp.x < 0 or sp.y < 0 or sp.x + w > sw or
-						sp.y + h > sh
+				local off = sp.x < bx or sp.y < by or sp.x + w > bx + sw or
+						sp.y + h > by + sh
 				log:info(line .. ((off and r.el.visible) and " OFF SCREEN" or ""))
 			end
 		end
@@ -1048,10 +1065,13 @@ end
 -- label on a dark rectangle; "plain" a square and the text alone
 local MK = {}
 local function markers()
-	local cn = K.O.camera
-	local cam = cn and cn:GetComponent("Camera")
+	-- [KIT_SIGNALS_VIEW] Through the viewport's camera, in its box
+	local area = M.hud_area and M.hud_area()
+	local cn = area and area.node or K.O.camera
+	local cam = area and area.cam or (cn and cn:GetComponent("Camera"))
 	local root = magic.ui.root
 	local V = vmin()
+	local bx, by, W, H = hud_box()
 	for id, n in pairs(P.nodes) do
 		local mk = type(n.show) == "table" and type(n.show.marker) == "table"
 				and n.show.marker or nil
@@ -1104,7 +1124,6 @@ local function markers()
 		end
 		r.seen = nil
 	end
-	local W, H = root.width, root.height
 	local MARGIN = 2 * V
 	local D = math.max(8, math.floor(1.1 * V))
 	for id, r in pairs(MK) do
@@ -1158,6 +1177,7 @@ local function markers()
 			end
 			-- The dot on the point, the label over it, both on the screen
 			local tw, th = r.t.minWidth, r.t.height
+			r.el:SetPosition(bx, by)
 			r.dot:SetFixedSize(D, D)
 			r.dot:SetPosition(x - math.floor(D / 2), y - math.floor(D / 2))
 			local tx = math.max(3, math.min(W - tw - 3, x - math.floor(tw / 2)))

@@ -19577,6 +19577,37 @@ struct Module: public interface::Module, public Interface
 					json::Value(norm_yaw(yaw.as_number())).stringify() : ss_());
 			return true;
 		}
+		// [KIT_SIGNALS_VIEW] {"op": "rename", "id", "name"}: the name a builder
+		// reads it by, kept as the rest of the row is; "" back to its type's
+		// and id. A scene's name is what it is found by: not that
+		if(op == "rename"){
+			Entity *e = entity_arg(j, "id", why);
+			if(!e)
+				return false;
+			if(!e->kind.empty()){
+				why = "entity "+itos(e->id)+" is a "+e->kind;
+				return false;
+			}
+			ss_ name;
+			for(char c : jstr(j, "name"))
+				if((unsigned char)c >= 32 && c != 127)
+					name += c;
+			if(name.size() > 64){
+				// (not left in the middle of a UTF-8 sequence)
+				size_t end = 64;
+				while(end > 0 && ((unsigned char)name[end] & 0xc0) == 0x80)
+					end--;
+				name = name.substr(0, end);
+			}
+			if(name.empty())
+				name = (e->comps.empty() ? ss_("entity") : e->comps[0].type)+" "+
+						itos(e->id);
+			Entity copy = *e;
+			copy.name = name;
+			change.push_back(std::make_pair(e->id, entity_json(copy)));
+			what = "renamed "+itos(e->id)+" to "+name;
+			return true;
+		}
 		if(op == "duplicate")
 			return duplicate(j, p, change, what, why);
 		if(op == "parent")

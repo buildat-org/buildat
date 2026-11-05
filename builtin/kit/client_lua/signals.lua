@@ -1,0 +1,724 @@
+-- Buildat: builtin/kit/client_lua/signals.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+--
+-- [KIT_SIGNALS_VIEW] The editor's Signals view (F5): a composition's links as
+-- a table, over the whole window under the top bar (a flag with 18 links did
+-- not fit the inspector). editor.lua runs this file and puts it at NT.sg.
+--   - Left: the entities as a tree, as the Entities tab's (all three of its
+--     lists in one), a filter over them (id, name, type)
+--   - Middle: the selected one's name to edit, and its links, in both
+--     directions: "Goes to" by target and input, "Comes from" by source. An
+--     output's chip unlinks it, the small button beside it is that link's
+--     Hidden in play; a target's or source's name selects it. "+ Add link"
+--     picks an output, a target and an input here (dropdowns)
+--   - Right: the inspector (editor.lua's: in this view its parameters and Try
+--     alone), under it a View3D of the scene from a camera of its own, on
+--     the selected entity; one with no position (or none): what the walk
+--     camera sees. "Show HUD" lays Kit's HUD out in that rectangle (ui.lua's
+--     hud_box, by kit.hud_area()) and over it, shown and not clicked
+--   - Where an entity is listed its name stands after its id; one still
+--     named as placed ("kit/flag 16", or nothing) reads as its type
+--   - A narrow window (a phone): one column at a time, by the bar's buttons
+--     (S.touch too); the viewport under the inspector, or none in a short window.
+--     Fingers scroll them
+-- The world's clicks and keys are not taken here (NT.world_off()), as in the
+-- HUD view; Ctrl+Z undoes, Escape goes back. The panels fill the window, so the
+-- world is drawn once, in the View3D; under the panels a viewport of an empty
+-- scene, on the same render path: what reads the renderer's first viewport
+-- (voxel_light's, the sky's parameters) reaches the View3D's picture through it.
+-- simplified: the camera jumps to the selected entity from one fixed angle,
+-- no orbit or zoom, and may stand in a wall; a drag in it is the upgrade.
+-- The View3D's texture is in UI units, soft under a UI scale above 1.
+-- The entity's log window is not shown in this view.
+-- The HUD in the viewport is shown, not clicked or dragged; the HUD view is for
+-- that. A dropdown's list has no scrollbar past half a window: the wheel scrolls
+-- it; a scrollbar or a filter of its own is the upgrade.
+return function(A)
+local K, S, W, NT, IV = A.K, A.S, A.W, A.NT, A.IV
+local M, E, O = K.M, K.E, K.O
+local magic = require("buildat/extension/urho3d")
+local ui_utils = require("buildat/extension/ui_utils")
+local log = K.log
+local send, window, find, type_of, typed = A.send, A.window, A.find, A.type_of,
+		A.typed
+local row, text, label, button, edit = K.row, K.text, K.label, K.button, K.edit
+local WARN, DIM = K.WARN, K.DIM
+
+-- filter: the list's; hud: Show HUD; add: the Add link form ({id, out, to,
+-- input}); tab: the narrow window's column; area: where the viewport is
+local SG = {filter = "", hud = false, add = nil, tab = "links", area = nil}
+NT.sg = SG
+
+local MARGIN = 6
+-- The table's first columns, and the longest name it writes in them
+local NAME_W, INPUT_W, NAME_CHARS = 104, 76, 22
+
+local function kit_short(ty)
+	return (tostring(ty):gsub("^kit/", ""))
+end
+
+local function main_type(e)
+	return e.components and e.components[1] and e.components[1].type or
+			e.kind or "?"
+end
+
+-- The name a builder gave it, nil for the one it was placed with
+local function own_name(e)
+	local n, ty = tostring(e.name or ""), main_type(e)
+	if n == "" or n == ty or n:match("^(.*) %d+$") == ty then
+		return nil
+	end
+	return n
+end
+
+-- "26 ui_bar" or "26 Home's bar"
+local function short_name(e)
+	return e.id .. " " .. (own_name(e) or kit_short(main_type(e)))
+end
+
+local function clipped(s)
+	return #s > NAME_CHARS and s:sub(1, NAME_CHARS - 2) .. ".." or s
+end
+
+-- A column: a window with a ScrollView; its body put in by put_body
+local function column(key)
+	local w = window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
+	W[key] = w
+	return w
+end
+
+local function new_view(w)
+	local view = w:CreateChild("ScrollView")
+	view:SetStyleAuto()
+	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
+	view.scrollBarsAutoVisible = true
+	return view
+end
+
+-- A new body for the view, kept scrolled where it was
+local function put_body(view, build)
+	local y = view.viewPosition.y
+	local body = view:CreateChild("UIElement")
+	body:SetLayout(magic.LM_VERTICAL, 3, magic.IntRect(0, 0, 2, 0))
+	build(body)
+	view.contentElement = body
+	body:SetPosition(0, 0)
+	view.viewPosition = magic.IntVector2(0, y)
+	SG.body_w(view, body)
+	return body
+end
+
+-- A button no wider than its text, its text at the left
+local function tight(parent, s, fn, down)
+	local b, t = button(parent, s, fn, down)
+	b.maxWidth = b.minWidth
+	return b, t
+end
+
+-- ---- The list
+local function matches(e)
+	local f = SG.filter:lower()
+	if f == "" then
+		return true
+	end
+	local s = (e.id .. " " .. tostring(e.name) .. " " ..
+			main_type(e)):lower()
+	return s:find(f, 1, true) ~= nil
+end
+
+function SG.rows()
+	local tabs, indent = NT.entity_lists()
+	local ids = {}
+	SG.list_body = put_body(SG.list_view, function(body)
+		for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
+			local head = false
+			for _, e in ipairs(tabs[name]) do
+				if matches(e) then
+					if not head then
+						text(body, name, DIM)
+						head = true
+					end
+					local d = indent[e.id] or 0
+					local b, t = button(body, clipped(short_name(e)), function()
+						M.select(e.id)
+					end, e.id == S.primary)
+					t:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
+					t:SetPosition(4 + d * 12, 0)
+					b.minWidth = t.width + 12 + d * 12
+					-- For a driven click by whose it is
+					b:SetName("select " .. e.id)
+					ids[#ids + 1] = d > 0 and string.rep(">", d) .. e.id or e.id
+				end
+			end
+		end
+		if #ids == 0 then
+			text(body, "None", DIM)
+		end
+	end)
+	local said = "kit editor: signals: list \"" .. SG.filter .. "\" (" .. #ids ..
+			"): " .. table.concat(ids, ", ")
+	if said ~= SG.list_said then
+		SG.list_said = said
+		log:info(said)
+	end
+end
+
+-- ---- The links
+local function link_key(id, l)
+	return id .. "." .. l.output .. " " .. l.to .. "." .. l.input
+end
+
+local function unlink(id, ci, l)
+	log:info("kit editor: signals: unlinked " .. id .. "." .. l.output ..
+			" -> " .. l.to .. "." .. l.input)
+	send({op = "unlink", id = id, comp = ci - 1, output = l.output, to = l.to,
+		input = l.input})
+end
+
+local function toggle_visible(id, ci, l)
+	log:info("kit editor: signals: " .. id .. "." .. l.output .. " -> " .. l.to ..
+			"." .. l.input .. (l.visible and " hidden" or " shown") .. " in play")
+	send({op = "link_visible", id = id, comp = ci - 1, output = l.output,
+		to = l.to, input = l.input, visible = not l.visible})
+end
+
+-- A link's chip and its toggle in the row
+local function chip(r, id, ci, l)
+	local c = tight(r, l.output, function() unlink(id, ci, l) end)
+	c:SetName("unlink " .. link_key(id, l))
+	local v = tight(r, l.visible and "shown" or "hidden", function()
+		toggle_visible(id, ci, l)
+	end, l.visible)
+	v:SetName("visible " .. link_key(id, l))
+	return c.minWidth + v.minWidth + 8
+end
+
+-- A name that selects what it names, in a column of its own width; a blank
+-- under the first of a group
+local function name_cell(r, e, id)
+	if e or id then
+		local b = button(r, e and clipped(short_name(e)) or tostring(id), function()
+			M.select(e and e.id or id)
+		end)
+		b:SetFixedWidth(math.max(NAME_W, b.minWidth))
+		b:SetName("goto " .. tostring(e and e.id or id))
+		return b.minWidth
+	end
+	label(r, "", NAME_W):SetFixedWidth(NAME_W)
+	return NAME_W
+end
+
+local function goes_to(body, e)
+	-- By target, then by input, in the order first met
+	local order, targets = {}, {}
+	for ci, c in ipairs(e.components or {}) do
+		for _, l in ipairs(c.links or {}) do
+			local g = targets[l.to]
+			if not g then
+				g = {to = l.to, inputs = {}, by = {}}
+				targets[l.to] = g
+				order[#order + 1] = g
+			end
+			local i = g.by[l.input]
+			if not i then
+				i = {input = l.input, links = {}}
+				g.by[l.input] = i
+				g.inputs[#g.inputs + 1] = i
+			end
+			i.links[#i.links + 1] = {ci = ci, l = l}
+		end
+	end
+	local n = 0
+	for _, g in ipairs(order) do
+		local to = find(g.to)
+		for gi, i in ipairs(g.inputs) do
+			local r = row(body)
+			local used = name_cell(r, gi == 1 and (to or nil) or nil,
+					gi == 1 and not to and g.to or nil) + INPUT_W + 8
+			local il = label(r, i.input .. " <-", INPUT_W)
+			il:SetFixedWidth(il.minWidth)
+			for _, x in ipairs(i.links) do
+				local need = 110
+				if used + need > SG.links_w and used > NAME_W + INPUT_W + 8 then
+					r = row(body)
+					label(r, "", NAME_W):SetFixedWidth(NAME_W)
+					label(r, "", INPUT_W):SetFixedWidth(INPUT_W)
+					used = NAME_W + INPUT_W + 8
+				end
+				used = used + chip(r, e.id, x.ci, x.l)
+				n = n + 1
+			end
+		end
+	end
+	if n == 0 then
+		text(body, "Nothing", DIM)
+	end
+	return n
+end
+
+local function comes_from(body, e)
+	local n = 0
+	for _, src in ipairs(A.all_entities()) do
+		local first = true
+		for ci, c in ipairs(src.components or {}) do
+			for _, l in ipairs(c.links or {}) do
+				if l.to == e.id then
+					local r = row(body)
+					name_cell(r, first and src or nil)
+					first = false
+					chip(r, src.id, ci, l)
+					label(r, "-> " .. l.input)
+					n = n + 1
+				end
+			end
+		end
+	end
+	if n == 0 then
+		text(body, "Nothing", DIM)
+	end
+	return n
+end
+
+-- The outputs it has, {label, "<comp index> <output>"}
+local function output_choices(e)
+	local r = {}
+	for ci, c in ipairs(e.components or {}) do
+		local t = type_of(c.type)
+		for _, o in ipairs(t.outputs or {}) do
+			r[#r + 1] = {o .. typed(t, "outputs", o), (ci - 1) .. " " .. o}
+		end
+	end
+	return r
+end
+
+local function input_choices(e)
+	local r, seen = {}, {}
+	for _, c in ipairs(e and e.components or {}) do
+		local t = type_of(c.type)
+		for _, i in ipairs(t.inputs or {}) do
+			if not seen[i] then
+				seen[i] = true
+				r[#r + 1] = {i .. typed(t, "inputs", i), i}
+			end
+		end
+	end
+	return r
+end
+
+local function pick(body, what, choices, current, fn)
+	local d = ui_utils.dropdown(body, choices, current, fn, {label = what,
+		fill = true, label_width = 62, none = #choices > 0 and "Choose" or nil})
+	-- A popup goes as tall as its list and past the window's edge: the list
+	-- scrolled within half a window
+	d.listView.maxHeight = math.floor(magic.ui.root.height / 2)
+end
+
+local function add_form(body, e)
+	local a = SG.add
+	local outs = output_choices(e)
+	a.out = a.out or (outs[1] and outs[1][2])
+	pick(body, "Output", outs, a.out, function(v)
+		a.out = v
+		log:info("kit editor: signals: add link: output " .. tostring(v))
+	end)
+	local targets = {}
+	for _, x in ipairs(A.entities()) do
+		if x.id ~= e.id and x.kind ~= "scene" and #input_choices(x) > 0 then
+			targets[#targets + 1] = {short_name(x), x.id}
+		end
+	end
+	pick(body, "Target", targets, a.to, function(v)
+		a.to = v
+		a.input = nil
+		log:info("kit editor: signals: add link: target " .. tostring(v))
+		SG.links()
+	end)
+	local inputs = a.to and input_choices(find(a.to)) or {}
+	a.input = a.input or (inputs[1] and inputs[1][2])
+	pick(body, "Input", inputs, a.input, function(v)
+		a.input = v
+		log:info("kit editor: signals: add link: input " .. tostring(v))
+	end)
+	local r = row(body)
+	tight(r, "Link", function()
+		local comp, output = tostring(a.out):match("^(%d+) (.*)$")
+		if not (comp and a.to and a.input) then
+			E.status = "Add link: an output, a target and an input"
+			return SG.status()
+		end
+		E.status = ""
+		log:info("kit editor: signals: linked " .. e.id .. "." .. output .. " -> " ..
+				a.to .. "." .. a.input)
+		send({op = "link", id = e.id, comp = tonumber(comp), output = output,
+			to = a.to, input = a.input})
+	end)
+	tight(r, "Done", function()
+		SG.add = nil
+		SG.links()
+	end)
+end
+
+function SG.links()
+	local e, is_made = nil, false
+	if S.primary then
+		e, is_made = find(S.primary)
+	end
+	local title = "Select an entity on the left"
+	if e then
+		local own = own_name(e)
+		title = "Signals of " .. e.id .. " " .. (own and own .. " (" ..
+				main_type(e) .. ")" or main_type(e))
+	end
+	if SG.add and (not e or SG.add.id ~= e.id) then
+		SG.add = nil
+	end
+	SG.links_body = put_body(SG.links_view, function(body)
+		text(body, title, magic.Color(1.0, 0.85, 0.3))
+		SG.status_text = text(body, E.status or "", WARN)
+		SG.status_text.visible = (E.status or "") ~= ""
+		if not e then
+			return
+		end
+		if is_made then
+			text(body, "Made in play or a player: its links are not edited", DIM)
+			return
+		end
+		-- Its name, what is typed kept as the table is drawn again
+		local nr = row(body)
+		local nl = label(nr, "Name")
+		nl:SetFixedWidth(nl.minWidth + 6)
+		if SG.name_of ~= e.id then
+			SG.name_of, SG.name_text = e.id, nil
+		end
+		local function rename()
+			log:info("kit editor: signals: renamed " .. e.id .. " to \"" ..
+					tostring(SG.name_text or own_name(e) or "") .. "\"")
+			send({op = "rename", id = e.id,
+				name = SG.name_text or own_name(e) or ""})
+			SG.name_text = nil
+		end
+		local f = edit(nr, SG.name_text or own_name(e) or "", function(s)
+			SG.name_text = s
+		end)
+		f:SetName("signals name")
+		magic.SubscribeToEvent(f, "TextFinished", rename)
+		tight(nr, "Rename", rename)
+		local head = row(body)
+		label(head, "Goes to", NAME_W):SetFixedWidth(NAME_W)
+		local b = tight(head, SG.add and "+ Add link: close" or "+ Add link",
+				function()
+			SG.add = not SG.add and {id = e.id} or nil
+			log:info("kit editor: signals: add link " ..
+					(SG.add and "open" or "closed"))
+			SG.links()
+		end, SG.add ~= nil)
+		b:SetName("add link")
+		if SG.add then
+			add_form(body, e)
+		end
+		local out = goes_to(body, e)
+		text(body, "Comes from", magic.Color(ui_utils.rgb("text")))
+		local inn = comes_from(body, e)
+		text(body, "An output's button unlinks it", DIM)
+		local said = "kit editor: signals: " .. e.id .. " " .. short_name(e) ..
+				": " .. out .. " out, " .. inn .. " in"
+		if said ~= SG.links_said then
+			SG.links_said = said
+			log:info(said)
+		end
+	end)
+end
+
+-- A refusal or what a form lacks, as people() would have said it
+function SG.status()
+	if SG.status_text then
+		SG.status_text.text = E.status or ""
+		SG.status_text.visible = (E.status or "") ~= ""
+	end
+end
+
+-- Escape: the form first; true when taken
+function SG.escape()
+	if SG.add then
+		SG.add = nil
+		SG.links()
+		return true
+	end
+	return false
+end
+
+-- A view's key while typing in the filter
+function SG.view_key(key, keys)
+	if not NT.sig() then
+		return false
+	end
+	for _, action in pairs(keys) do
+		if M.key(action, key) then
+			return true
+		end
+	end
+	return false
+end
+
+-- ---- The viewport
+function SG.node()
+	if not SG.cam_node then
+		SG.cam_node = O.scene:CreateChild("kit_camera_signals")
+		SG.cam = SG.cam_node:CreateComponent("Camera")
+	end
+	return SG.cam_node
+end
+
+-- Made once and kept, hidden out of this view (hidden it draws nothing): the
+-- lighting (kit.lit_viewport) holds on to the viewports. What the window's
+-- viewports are to be in this view
+function SG.world_viewport()
+	if SG.under then
+		return SG.under
+	end
+	local w = window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
+	w.visible = false
+	-- Under the HUD drawn over it (kit/ui_*: down to -1040; markers -1500),
+	-- over the client's own picture of the world (-10000)
+	w.priority = -9000
+	w.opacity = 1
+	SG.view_win = w
+	local _, t = button(w, "Show HUD", function()
+		SG.hud = not SG.hud
+		log:info("kit editor: signals: the HUD in the viewport " ..
+				(SG.hud and "on" or "off"))
+		SG.hud_text:SetColor(SG.hud and magic.Color(1.0, 0.85, 0.3) or
+				magic.Color(ui_utils.rgb("text")))
+	end)
+	SG.hud_text = t
+	local v = w:CreateChild("View3D")
+	v:SetFixedSize(160, 120)
+	v:SetView(O.scene, (SG.node() and SG.cam), false)
+	SG.view3d = v
+	local vp = v:GetViewport()
+	local scene = magic.Scene.new()
+	scene:CreateComponent("Octree")
+	local zone = scene:CreateChild("zone"):CreateComponent("Zone")
+	zone.boundingBox = magic.BoundingBox(-1000, 1000)
+	zone.fogColor = magic.Color(0, 0, 0)
+	SG.under_scene = scene
+	SG.under = magic.Viewport:new(scene,
+			scene:CreateChild("camera"):CreateComponent("Camera"))
+	if O.viewport then
+		local rp = O.viewport().renderPath
+		SG.under.renderPath = rp
+		vp.renderPath = rp
+	else
+		M.lit_viewport(SG.under, "signals", function(rp)
+			vp.renderPath = rp
+		end, SG.cam_node)
+	end
+	return SG.under
+end
+
+function M.hud_area()
+	return SG.hud and SG.area or nil
+end
+
+-- Each frame: the camera; the layout as the window or the bar changes
+function SG.tick()
+	if not NT.sig() or not SG.view3d then
+		return
+	end
+	SG.layout()
+	local walk = O.camera
+	local wc = walk:GetComponent("Camera")
+	SG.cam.fov, SG.cam.nearClip, SG.cam.farClip = wc.fov, wc.nearClip, wc.farClip
+	local e = S.primary and find(S.primary)
+	local shows
+	if e and e.pos then
+		local at = A.drawn_at(e)
+		local q = magic.Quaternion(32, 40, 0)
+		SG.cam_node.rotation = q
+		SG.cam_node.position = at + q * magic.Vector3(0, 0, -6)
+		shows = "entity " .. e.id
+	else
+		SG.cam_node.position = walk.worldPosition
+		SG.cam_node.direction = walk.worldDirection
+		shows = "what the walk camera shows"
+	end
+	if shows ~= SG.shows then
+		SG.shows = shows
+		local p = SG.cam_node.worldPosition
+		log:info(string.format("kit editor: signals: the viewport shows %s, " ..
+				"from %.2f %.2f %.2f", shows, p.x, p.y, p.z))
+	end
+end
+
+-- ---- The columns
+-- simplified: the columns' shares fixed; dragging their edges is the upgrade
+local function fit(win, view, body, x, y, w, h, above)
+	win:SetPosition(x, y)
+	win:SetFixedSize(w, h)
+	if view then
+		view:SetFixedSize(w - 12, h - 12 - (above or 0))
+		SG.body_w(view, body)
+	end
+end
+
+function SG.body_w(view, body)
+	if body then
+		-- Room for its bar
+		body.minWidth = view.width - view.verticalScrollBar.width - 8
+	end
+end
+
+-- Whether a column is up: all on a wide window, one on a narrow one
+local function shown(tab)
+	return not SG.is_narrow or SG.tab == tab
+end
+
+function SG.layout(force)
+	local root, bar = magic.ui.root, W.bar
+	local top = bar and bar.screenPosition.y + bar.height + MARGIN or 40
+	local rw, rh = root.width, root.height
+	SG.is_narrow = A.narrow()
+	local key = table.concat({rw, rh, top, SG.is_narrow and SG.tab or "wide"}, " ")
+	if key == SG.laid and not force then
+		SG.area_update()
+		return
+	end
+	SG.laid = key
+	local h = rh - top - MARGIN
+	local lx, lw, mx, mw, rx, rcw
+	if SG.is_narrow then
+		lx, mx, rx = MARGIN, MARGIN, MARGIN
+		lw, mw, rcw = rw - 2 * MARGIN, rw - 2 * MARGIN, rw - 2 * MARGIN
+	else
+		lw = math.floor(math.max(180, math.min(360, rw * 0.18)))
+		rcw = math.floor(math.max(420, math.min(640, rw * 0.36)))
+		mw = rw - lw - rcw - 4 * MARGIN
+		lx, mx, rx = MARGIN, 2 * MARGIN + lw, 3 * MARGIN + lw + mw
+	end
+	SG.links_w = mw - 12 - 20
+	if W.sg_list then
+		W.sg_list.visible = shown("list")
+		fit(W.sg_list, SG.list_view, SG.list_body, lx, top, lw, h, SG.filter_h)
+	end
+	if W.sg_links then
+		W.sg_links.visible = shown("links")
+		fit(W.sg_links, SG.links_view, SG.links_body, mx, top, mw, h)
+	end
+	-- The viewport's height: a 4:3 picture of the column, at most 45 percent
+	local vh = math.floor(math.min(h * 0.45, (rcw - 12) * 0.75)) + 12 + 28
+	local on_right = shown("inspector")
+	-- A short narrow window (a phone held sideways): the inspector alone
+	local no_view = SG.is_narrow and h < 320
+	if no_view then
+		vh = -MARGIN
+	end
+	if W.sg_view then
+		W.sg_view.visible = on_right and not no_view
+		fit(W.sg_view, nil, nil, rx, top + h - vh, rcw, vh)
+		SG.view3d:SetFixedSize(rcw - 12, math.max(1, vh - 12 - 28))
+	end
+	if W.inspector and IV.view then
+		W.inspector.visible = on_right
+		fit(W.inspector, IV.view, IV.view.contentElement, rx, top, rcw, h - vh - MARGIN)
+	end
+	SG.area_update()
+	local r = {}
+	for _, k in ipairs({"sg_list", "sg_links", "inspector", "sg_view"}) do
+		local w = W[k]
+		if w and w.visible then
+			r[#r + 1] = string.format("%s %d %d %d %d", k, w.position.x, w.position.y,
+					w.width, w.height)
+		end
+	end
+	local said = "kit editor: signals: columns in " .. rw .. "x" .. rh ..
+			" under " .. top .. ": " .. table.concat(r, ", ")
+	if said ~= SG.columns_said then
+		SG.columns_said = said
+		log:info(said)
+	end
+end
+
+function SG.area_update()
+	local w = SG.view_win
+	if not (NT.sig() and w and w.visible) then
+		SG.area = nil
+		return
+	end
+	local v, a = SG.view3d, SG.area or {}
+	local p = v.screenPosition
+	a.x, a.y, a.w, a.h, a.node, a.cam = p.x, p.y, v.width, v.height, SG.cam_node,
+			SG.cam
+	SG.area = a
+end
+
+-- The inspector just built into its window (editor.lua's inspector_window)
+function SG.inspector(win, view)
+	view.scrollBarsAutoVisible = true
+	SG.laid = nil
+	SG.layout(true)
+end
+
+-- A narrow window's columns, in the bar
+function SG.bar(bar_button)
+	for _, c in ipairs({{"list", "Entities"}, {"links", "Links"},
+			{"inspector", "Inspector"}}) do
+		bar_button(c[2], nil, function()
+			SG.tab = c[1]
+			log:info("kit editor: signals: the column " .. c[2])
+			A.refresh()
+		end, SG.tab == c[1])
+	end
+end
+
+local function close()
+	if W.sg_list then
+		W.sg_list:Remove()
+		W.sg_list, SG.list_view, SG.list_body = nil, nil, nil
+	end
+	if W.sg_links then
+		W.sg_links:Remove()
+		W.sg_links, SG.links_view, SG.links_body, SG.status_text = nil, nil, nil,
+				nil
+	end
+	if SG.view_win then
+		SG.view_win.visible = false
+		W.sg_view = nil
+	end
+	SG.area, SG.laid, SG.shows = nil, nil, nil
+	SG.add = nil
+end
+
+-- With the editor's other windows, on every state
+function SG.refresh()
+	if not NT.sig() then
+		return close()
+	end
+	if not W.sg_list then
+		local w = column("sg_list")
+		local r = row(w)
+		r:SetFixedHeight(26)
+		local fl = label(r, "Filter")
+		fl:SetFixedWidth(fl.minWidth + 6)
+		local f = edit(r, SG.filter, function(s)
+			SG.filter = s
+			SG.rows()
+		end)
+		f:SetName("signals filter")
+		f.minWidth = 40
+		SG.filter_h = 30
+		SG.list_view = new_view(w)
+	end
+	if not W.sg_links then
+		SG.links_view = new_view(column("sg_links"))
+	end
+	SG.world_viewport()
+	W.sg_view = SG.view_win
+	SG.view_win.visible = true
+	SG.layout(true)
+	SG.rows()
+	SG.links()
+	SG.layout(true)
+end
+end
+-- vim: set noet ts=4 sw=4:

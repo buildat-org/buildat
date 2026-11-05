@@ -137,8 +137,10 @@
 -- Credits... (everyone's) in extensions/
 -- pause_menu's menu and Kit's Escape first (kit.escape(): the context
 -- menu, a drag, placing, a pending link, the crosshair; true when taken).
--- kit.view() ("2d", "3d", "walk" or "hud": the app walks only in "walk" while
--- editing), kit.looking() (the editor's crosshair: the app's mouse looks).
+-- [KIT_SIGNALS_VIEW] F5 or the dropdown: Signals, the composition's links as a
+-- table over the whole window (signals.lua).
+-- kit.view() ("2d", "3d", "walk", "hud" or "signals": the app walks only in
+-- "walk" while editing), kit.looking() (the editor's crosshair: the app's mouse looks).
 -- kit.selected(): the id last selected, kept after edit mode.
 -- simplified: one edit per entity for a Delete of several; a duplicate
 -- one cell along +x; the windows rebuilt whole on each state
@@ -194,7 +196,8 @@ local function touch(id)
 end
 do
 	local send_ = send
-	local EDITS = {set = true, move = true, link = true, unlink = true}
+	local EDITS = {set = true, move = true, link = true, unlink = true,
+		rename = true}
 	send = function(j)
 		if EDITS[j.op] then
 			for _, id in ipairs(j.ids or {j.id}) do
@@ -216,10 +219,11 @@ local RIGHT_CLICK_PX = 5
 -- [KIT_PLAN_3D_SKY] How high over the cut a plan's 3D view starts at most
 local PLAN_3D_MAX_H = 100
 local LONG_PRESS_US = 500000
-local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk", hud = "HUD"}
+local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk", hud = "HUD",
+	signals = "Signals"}
 -- [KIT_INPUT_ACTIONS] each view's key's action (input.lua)
 local VIEW_KEYS = {["2d"] = "view_2d", ["3d"] = "view_3d", walk = "view_walk",
-	hud = "view_hud"}
+	hud = "view_hud", signals = "view_signals"}
 -- How far a click looks for a voxel, in cells
 local MAX_RAY = 128
 
@@ -432,6 +436,16 @@ end
 -- world's (the server's edit_state; the save keeps them in the parent's
 -- frame). In one table: the file's locals are at Lua's 200
 local NT = {cache = {}}
+
+-- [KIT_SIGNALS_VIEW] Whether the Signals table has the window now
+function NT.sig()
+	return E.editing and S.view == "signals"
+end
+
+-- The views with the world's clicks and keys not taken
+function NT.world_off()
+	return E.editing and (S.view == "hud" or S.view == "signals")
+end
 -- [KIT_HUD_STYLE] kit/game_rules' entity and component: the scene's own,
 -- else the root's (nil: none)
 function M.rules_entity()
@@ -659,7 +673,8 @@ local function screen_size()
 end
 
 local function active_camera()
-	if not E.editing or S.view == "walk" or S.view == "hud" then
+	if not E.editing or S.view == "walk" or S.view == "hud" or
+			S.view == "signals" then
 		return O.camera, O.camera:GetComponent("Camera")
 	elseif S.view == "2d" then
 		return cam2d_node, cam2d
@@ -1046,7 +1061,7 @@ rebuild_bar = function()
 		end)
 	end
 	local views = {}
-	for _, v in ipairs({"2d", "3d", "walk", "hud"}) do
+	for _, v in ipairs({"2d", "3d", "walk", "hud", "signals"}) do
 		views[#views + 1] = {VIEW_NAMES[v] .. (S.touch and "" or
 				" (" .. M.key_name(VIEW_KEYS[v]) .. ")"), v}
 	end
@@ -1124,7 +1139,9 @@ rebuild_bar = function()
 		end)
 	end
 	bar_button("Play mode", nil, M.toggle_tools)
-	if narrow() then
+	if narrow() and NT.sig() then
+		NT.sg.bar(bar_button)
+	elseif narrow() then
 		for _, p in ipairs({{"palette", "Tools"}, {"inspector", "Inspector"}}) do
 			bar_button(p[2], nil, function()
 				toggle_fold(p[1])
@@ -1514,7 +1531,8 @@ end
 -- session. [KIT_NESTING] Positioned in the tree's order, each one under
 -- its parent indented ([KIT_REPARENT_BUTTONS]: a Select with Switch
 -- parent armed picks the parent)
-function NT.entities(w)
+-- The Entities tab's lists, and how deep in the tree each one is
+function NT.entity_lists()
 	local tabs = {["Game-wide"] = {}, Scene = {}, Positioned = {}}
 	local indent = {}
 	local function add_tree(e, d)
@@ -1537,6 +1555,11 @@ function NT.entities(w)
 			end
 		end
 	end
+	return tabs, indent
+end
+
+function NT.entities(w)
+	local tabs, indent = NT.entity_lists()
 	local tab = S.list_tab or "Game-wide"
 	local tr = row(w)
 	for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
@@ -1813,7 +1836,7 @@ palette = function()
 	NT.view, ED.rows, ED.hover = nil, {}, nil
 	drop("palette")
 	palette_buttons = {}
-	if not E.editing or folded("palette") then
+	if not E.editing or folded("palette") or NT.sig() then
 		return
 	end
 	local y = W.bar and W.bar.height + 12 or 40
@@ -2134,10 +2157,13 @@ local function inspector(w, e, is_made)
 	-- [KIT] stage 4l: what it costs, changed in place as "kit:costs" comes
 	S.cost_text = text(w, M.cost_line(e.id), DIM)
 	S.cost_id = e.id
+	-- [KIT_SIGNALS_VIEW] In the Signals view its parameters and Try alone: the
+	-- links are the view's own table
+	local sig = NT.sig()
 	-- Its position typed in (fine tuning, and where keys are not at hand:
 	-- a touchscreen), Move one edit; with several selected they move by
 	-- what this one moves
-	if e.pos then
+	if e.pos and not sig then
 		local r, at = row(w), {e.pos[1], e.pos[2], e.pos[3]}
 		for i, axis in ipairs({"x", "y", "z"}) do
 			-- One letter's room: the row's layout has already widened it
@@ -2192,9 +2218,11 @@ local function inspector(w, e, is_made)
 			refresh()
 		end, on)
 	end
-	button(w, "Delete", function()
-		M.delete_selected()
-	end)
+	if not sig then
+		button(w, "Delete", function()
+			M.delete_selected()
+		end)
+	end
 	for ci, c in ipairs(e.components or {}) do
 		local t = type_of(c.type)
 		text(w, c.type, magic.Color(1.0, 0.85, 0.3))
@@ -2356,7 +2384,7 @@ local function inspector(w, e, is_made)
 				end)
 			end
 		end
-		for _, l in ipairs(c.links or {}) do
+		for _, l in ipairs(not sig and c.links or {}) do
 			local r = row(w)
 			local to = find(l.to)
 			label(r, l.output .. " -> " .. l.to .. " " .. tostring(to and
@@ -2377,7 +2405,7 @@ local function inspector(w, e, is_made)
 			end)
 		end
 		local r = row(w)
-		for _, o in ipairs(t.outputs or {}) do
+		for _, o in ipairs(not sig and t.outputs or {}) do
 			button(r, "Link " .. o, function()
 				begin_link(e.id, ci - 1, o)
 				refresh()
@@ -2685,7 +2713,8 @@ end)
 -- pixels ("<name> x y w h" each), for a mask over a frame compared
 magic.SubscribeToEvent("command_seq:kit_ui_where", function(_, data)
 	local sc, r = magic.ui.scale, {}
-	for _, k in ipairs({"bar", "palette", "inspector", "people"}) do
+	for _, k in ipairs({"bar", "palette", "inspector", "people", "sg_list",
+			"sg_links", "sg_view"}) do
 		local w = W[k]
 		if w and w.visible then
 			local p = w.screenPosition
@@ -2732,7 +2761,8 @@ local IV = {view = nil, y = 0}
 
 local function fit_inspector()
 	local w, view = W.inspector, IV.view
-	if not w or not view then
+	-- ([KIT_SIGNALS_VIEW] the view's own column there, NT.sg.layout)
+	if not w or not view or NT.sig() then
 		return
 	end
 	local body = view.contentElement
@@ -2763,12 +2793,15 @@ inspector_window = function()
 		e, is_made = find(S.primary)
 	end
 	-- [KIT_ITEMS_TAB] the Items tab's item type's sheet instead
-	local item = NT.tab() == "Items" and IT.sel
-	if not E.editing or folded("inspector") or not (e or item) then
+	local sig = NT.sig()
+	local item = not sig and NT.tab() == "Items" and IT.sel
+	if not E.editing or (folded("inspector") and not sig) or
+			not (e or item) then
 		return
 	end
 	local y = W.bar and W.bar.height + 12 or 40
-	W.inspector = window(magic.HA_RIGHT, magic.VA_TOP, -8, y)
+	W.inspector = sig and window(magic.HA_LEFT, magic.VA_TOP, 0, 0) or
+			window(magic.HA_RIGHT, magic.VA_TOP, -8, y)
 	local view = W.inspector:CreateChild("ScrollView")
 	local body = view:CreateChild("UIElement")
 	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
@@ -2785,6 +2818,9 @@ inspector_window = function()
 	body:SetPosition(0, 0)
 	view:SetFixedSize(body.width, body.height)
 	IV.view = view
+	if sig then
+		NT.sg.inspector(W.inspector, view)
+	end
 	fit_inspector()
 	view.viewPosition = magic.IntVector2(0, IV.y)
 end
@@ -2793,7 +2829,7 @@ end
 -- the lower right
 local function touch_bar()
 	drop("touch")
-	if not E.editing or not S.touch then
+	if not E.editing or not S.touch or NT.sig() then
 		return
 	end
 	local b = window(magic.HA_RIGHT, magic.VA_BOTTOM, -8, -8, true)
@@ -2808,6 +2844,7 @@ refresh = function()
 	palette()
 	touch_bar()
 	inspector_window()
+	NT.sg.refresh()
 	people()
 	show_log()
 end
@@ -2827,7 +2864,8 @@ end
 -- about it, its last ones, below on the right. Rebuilt alone as it grows
 show_log = function()
 	drop("log")
-	local lines = E.editing and S.primary and E.logs[S.primary] or {}
+	local lines = E.editing and not NT.sig() and S.primary and
+			E.logs[S.primary] or {}
 	if #lines == 0 then
 		return
 	end
@@ -2846,6 +2884,10 @@ end
 -- builders move (the inspector being typed in is left as it is)
 people = function()
 	drop("people")
+	-- [KIT_SIGNALS_VIEW] A refusal over the table; the rest not in that view
+	if NT.sig() then
+		return NT.sg.status()
+	end
 	-- A narrow screen's panel opened is where it was
 	if not E.editing or (narrow() and not folded("palette")) then
 		return
@@ -3553,6 +3595,14 @@ local function apply_viewport()
 		return
 	end
 	S.shown_view = want
+	-- [KIT_SIGNALS_VIEW] The world in the view's own View3D
+	if want == "signals" then
+		magic.set_preferred_viewports({NT.sg.world_viewport()})
+		if O.set_camera then
+			O.set_camera(NT.sg.node())
+		end
+		return
+	end
 	local node, cam = active_camera()
 	-- The walk view with the controls' effects (controls.lua).
 	-- [KIT_EDITOR_VIEW_HDR] The 3D and 2D views draw by the app's walk
@@ -3615,6 +3665,13 @@ set_view = function(v)
 		S.before_hud = S.view
 		close_menu()
 		drop("dialog")
+	end
+	-- [KIT_SIGNALS_VIEW] Out to the view it came from, past a HUD view
+	if v == "signals" and S.view ~= "signals" then
+		S.before_signals = S.view == "hud" and S.before_hud or S.view
+		close_menu()
+		drop("dialog")
+		E.link, S.placing = nil, nil
 	end
 	for _, w in pairs(W) do
 		w.visible = v ~= "hud"
@@ -3763,6 +3820,17 @@ do
 	assert(ok and type(install) == "function", "kit: caps.lua: " ..
 			tostring(err))
 	caps = install({O = O, S = S, P = P, color = color, log = log})
+end
+
+-- [KIT_SIGNALS_VIEW] The Signals view's table and viewport (signals.lua)
+do
+	local ok, err, install = buildat.run_script_file("kit/signals.lua")
+	assert(ok and type(install) == "function", "kit: signals.lua: " ..
+			tostring(err))
+	install({K = K, S = S, W = W, NT = NT, IV = IV, send = send, window = window,
+		find = find, entities = entities, all_entities = all_entities,
+		type_of = type_of, typed = typed, drawn_at = drawn_at, narrow = narrow,
+		refresh = function() refresh() end})
 end
 
 local function place_cameras()
@@ -4321,6 +4389,12 @@ function M.escape()
 	if W.dialog or W.ctx then
 		drop("dialog")
 		close_menu()
+		return true
+	end
+	if NT.sig() then
+		if not NT.sg.escape() then
+			set_view(S.before_signals or "walk")
+		end
 		return true
 	end
 	if S.drag then
@@ -5590,7 +5664,11 @@ local function key_down(key, ctrl, shift)
 	local is = function(id) return M.key(id, key) end
 	if is("view_hud") then
 		return set_view("hud")
-	elseif S.view == "hud" and not (is("view_2d") or is("view_3d") or
+	elseif is("view_signals") then
+		return set_view("signals")
+	elseif S.view == "signals" and is("undo") and ctrl then
+		return send({op = "undo"})
+	elseif NT.world_off() and not (is("view_2d") or is("view_3d") or
 			is("view_walk")) then
 		return
 	elseif is("view_2d") then
@@ -6015,7 +6093,7 @@ local function draw_guide()
 		guide_hud.priority = 90
 	end
 	local s = ""
-	if E.editing and S.view ~= "hud" and not (E.menu and E.menu.held()) then
+	if E.editing and not NT.world_off() and not (E.menu and E.menu.held()) then
 		s = guide_text(compute_guide())
 	else
 		ghost(nil)
@@ -6227,6 +6305,12 @@ local function draw()
 				end
 			end
 		end
+	end
+	-- [KIT_SIGNALS_VIEW] The boxes and links for its viewport; no tools
+	if S.view == "signals" then
+		show_ports("out", nil)
+		show_ports("in", nil)
+		return
 	end
 	if E.cursor then
 		dbg:AddCross(magic.Vector3(E.cursor[1], E.cursor[2] - 0.5,
@@ -6644,7 +6728,9 @@ function M.editor(options)
 		-- its arrows and PageUp/PageDown moved the selection too, and none
 		-- of the editor's keys are meant while it is open (Escape or a
 		-- click closes it)
-		if typing() or ui_utils.dropdown_open() then
+		-- ([KIT_SIGNALS_VIEW] the view keys there: the filter keeps the focus)
+		if (typing() and not NT.sg.view_key(key, VIEW_KEYS)) or
+				ui_utils.dropdown_open() then
 			return
 		end
 		if M.key("edit", key) then
@@ -6668,23 +6754,26 @@ function M.editor(options)
 			end
 			return
 		end
+		if NT.world_off() then
+			return
+		end
 		mouse_down(data:GetInt("Button"))
 	end)
 	magic.SubscribeToEvent("MouseButtonUp", function(_, data)
-		if S.view == "hud" and E.editing then
+		if NT.world_off() then
 			return
 		end
 		mouse_up(data:GetInt("Button"))
 	end)
 	magic.SubscribeToEvent("MouseMove", function(_, data)
-		if not E.editing or S.touch or S.view == "hud" then
+		if not E.editing or S.touch or NT.world_off() then
 			return
 		end
 		mouse_move(data:GetInt("X"), data:GetInt("Y"), data:GetInt("DX"),
 				data:GetInt("DY"))
 	end)
 	magic.SubscribeToEvent("MouseWheel", function(_, data)
-		if S.touch or (S.view == "hud" and E.editing) then
+		if S.touch or NT.world_off() then
 			return
 		end
 		mouse_wheel(data:GetInt("Wheel"), data:GetInt("Qualifiers"))
@@ -6692,18 +6781,18 @@ function M.editor(options)
 	magic.SubscribeToEvent("TouchBegin", function(_, data)
 		if S.touch and S.view == "hud" and E.editing then
 			NT.hud_press(data:GetInt("X"), data:GetInt("Y"))
-		elseif S.touch then
+		elseif S.touch and not NT.world_off() then
 			touch_begin(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"))
 		end
 	end)
 	magic.SubscribeToEvent("TouchMove", function(_, data)
-		if S.touch and not (S.view == "hud" and E.editing) then
+		if S.touch and not NT.world_off() then
 			touch_move(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"),
 					data:GetInt("DX"), data:GetInt("DY"))
 		end
 	end)
 	magic.SubscribeToEvent("TouchEnd", function(_, data)
-		if S.touch and not (S.view == "hud" and E.editing) then
+		if S.touch and not NT.world_off() then
 			touch_end(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"))
 		end
 	end)
@@ -6725,6 +6814,7 @@ function M.editor(options)
 		if E.editing then
 			move_camera(dt)
 			place_cameras()
+			NT.sg.tick()
 			long_press_tick()
 			if T.down then
 				stroke_move(S.mx, S.my)
