@@ -176,13 +176,19 @@ struct Module: public interface::Module, public replicate::Interface
 		if(ps.scene_ref){
 			main_context::access(m_server, [&](main_context::Interface *imc){
 				magic::Scene *scene = imc->find_scene(ps.scene_ref);
-				if(!scene)
-					return; // Deleted; see forget_scene()
 				// NOTE: We use pointers to SceneReplicationStates as Connection
 				//       pointers in other replication states in order to
 				//       scene->CleanupConnection() without an actual Connection
 				//       object (which we don't want to use)
-				scene->CleanupConnection((magic::Connection*)&ps.scene_state);
+				if(scene) // Otherwise deleted; see forget_scene()
+					scene->CleanupConnection((magic::Connection*)&ps.scene_state);
+				// [SERVER_EXIT_HEAP] Cleared here, not by the erase below:
+				// its NodeReplicationStates hold weak pointers to the nodes
+				// and the scene, whose counts main_context's thread changes
+				// with every event. An erase in this thread can lose an update
+				// of the scene's count; one short frees its RefCount early
+				// as main_context exits.
+				ps.scene_state.Clear();
 			});
 			m_server->emit_event("replicate:peer_left_scene",
 					new PeerLeftScene(peer, ps.scene_ref));
