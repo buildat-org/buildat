@@ -22,6 +22,9 @@
 --     shown and not clicked, the element on an amber rectangle
 --   - Where an entity is listed its name stands after its id; one still
 --     named as placed ("kit/flag 16", or nothing) reads as its type
+--   - [KIT_SIGNALS_TOGGLE] Under 1500 UI pixels of width the links and the
+--     inspector with its viewport share one slot beside the list, the bar's
+--     Links and Inspector buttons saying which
 --   - A narrow window (a phone): one column at a time, by the bar's buttons
 --     (S.touch too); the viewport under the inspector, or none in a short window.
 --     Fingers scroll them
@@ -49,13 +52,15 @@ local row, text, label, button, edit = K.row, K.text, K.label, K.button, K.edit
 local WARN, DIM = K.WARN, K.DIM
 
 -- filter: the list's; hud: the HUD in the viewport as logged; add: the Add link form ({id, out, to,
--- input}); tab: the narrow window's column; area: where the viewport is
+-- input}); tab: the column in the slot of a window too narrow for all; area: where the viewport is
 local SG = {filter = "", hud = false, add = nil, tab = "links", area = nil}
 NT.sg = SG
 
 local MARGIN = 6
 -- The longest name a list writes
 local NAME_CHARS = 22
+-- Under this root width the links and the inspector take turns
+local THREE_COLUMNS = 1500
 
 local function kit_short(ty)
 	return (tostring(ty):gsub("^kit/", ""))
@@ -794,17 +799,35 @@ function SG.body_w(view, body, view_w)
 	end
 end
 
--- Whether a column is up: all on a wide window, one on a narrow one
+-- What the window has room for: "wide" all three columns, "two" the list and
+-- one of the others, "narrow" one column
+local function mode_now()
+	if A.narrow() then
+		return "narrow"
+	end
+	return magic.ui.root.width < THREE_COLUMNS and "two" or "wide"
+end
+
+-- The column in the slot: "two" has the list up anyway
+local function tab_now(mode)
+	return mode == "two" and SG.tab == "list" and "links" or SG.tab
+end
+
+-- Whether a column is up
 local function shown(tab)
-	return not SG.is_narrow or SG.tab == tab
+	local mode = SG.mode
+	return mode == "wide" or (mode == "two" and tab == "list") or
+			tab_now(mode) == tab
 end
 
 function SG.layout(force)
 	local root, bar = magic.ui.root, W.bar
 	local top = bar and bar.screenPosition.y + bar.height + MARGIN or 40
 	local rw, rh = root.width, root.height
-	SG.is_narrow = A.narrow()
-	local key = table.concat({rw, rh, top, SG.is_narrow and SG.tab or "wide"}, " ")
+	local was_mode = SG.mode
+	SG.mode = mode_now()
+	SG.is_narrow = SG.mode == "narrow"
+	local key = table.concat({rw, rh, top, SG.mode, tab_now(SG.mode)}, " ")
 	if key == SG.laid and not force then
 		SG.area_update()
 		return
@@ -815,6 +838,11 @@ function SG.layout(force)
 	if SG.is_narrow then
 		lx, mx, rx = MARGIN, MARGIN, MARGIN
 		lw, mw, rcw = rw - 2 * MARGIN, rw - 2 * MARGIN, rw - 2 * MARGIN
+	elseif SG.mode == "two" then
+		lw = math.floor(math.max(180, math.min(360, rw * 0.18)))
+		mw = rw - lw - 3 * MARGIN
+		rcw = mw
+		lx, mx, rx = MARGIN, 2 * MARGIN + lw, 2 * MARGIN + lw
 	else
 		lw = math.floor(math.max(180, math.min(360, rw * 0.18)))
 		rcw = math.floor(math.max(420, math.min(640, rw * 0.36)))
@@ -854,7 +882,9 @@ function SG.layout(force)
 	-- The inspector's fields are made at a width: made again at a new one
 	local was = SG.inspector_w
 	SG.inspector_w = rcw
-	if was and was ~= rcw then
+	-- A new mode too: the bar's buttons with it (the refresh's layout finds both
+	-- the same)
+	if (was and was ~= rcw) or (was_mode and was_mode ~= SG.mode) then
 		A.refresh()
 	end
 	local r = {}
@@ -893,15 +923,21 @@ function SG.inspector(win, view)
 	SG.layout(true)
 end
 
--- A narrow window's columns, in the bar
+-- The columns that take turns, in the bar
 function SG.bar(bar_button)
+	local mode = mode_now()
+	if mode == "wide" then
+		return
+	end
 	for _, c in ipairs({{"list", "Entities"}, {"links", "Links"},
 			{"inspector", "Inspector"}}) do
-		bar_button(c[2], nil, function()
-			SG.tab = c[1]
-			log:info("kit editor: signals: the column " .. c[2])
-			A.refresh()
-		end, SG.tab == c[1])
+		if mode == "narrow" or c[1] ~= "list" then
+			bar_button(c[2], nil, function()
+				SG.tab = c[1]
+				log:info("kit editor: signals: the column " .. c[2])
+				A.refresh()
+			end, tab_now(mode) == c[1])
+		end
 	end
 end
 
@@ -924,7 +960,7 @@ local function close()
 		W.sg_view = nil
 	end
 	SG.area, SG.laid, SG.shows, SG.cells, SG.links_drawn_w = nil, nil, nil, nil, nil
-	SG.inspector_w = nil
+	SG.inspector_w, SG.mode = nil, nil
 	SG.add = nil
 end
 

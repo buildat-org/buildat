@@ -1140,7 +1140,7 @@ rebuild_bar = function()
 		end)
 	end
 	bar_button("Play mode", nil, M.toggle_tools)
-	if narrow() and NT.sig() then
+	if NT.sig() then
 		NT.sg.bar(bar_button)
 	elseif narrow() then
 		for _, p in ipairs({{"palette", "Tools"}, {"inspector", "Inspector"}}) do

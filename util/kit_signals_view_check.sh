@@ -6,8 +6,9 @@
 # [KIT_SIGNALS_VIEW] The editor's Signals view on Workbench. kitboss (the
 # admin, 1024x700), a kit/flag with links to three kit/ui_bars and from a
 # kit/timer:
-#   1. F5 from 3D: the three columns side by side under the bar, no panel, no
-#      other window; the 3D camera where it was afterwards;
+#   1. F5 from 3D: the list and the links side by side under the bar, the
+#      Inspector button the list and the inspector over its viewport, no
+#      panel, no other window; the 3D camera where it was afterwards;
 #   2. a link added from the table (output, target, input by its dropdowns),
 #      unlinked by its menu, hidden and shown by its checkbox: the server's
 #      edits; the toggle's in the save;
@@ -20,7 +21,8 @@
 #      with no position; a ui_bar selected: the HUD laid out in its rectangle,
 #      that bar marked; game_rules selected: no HUD;
 #   7. Escape back to the view before; Walk has its panels and HUD back;
-#   8. a 1800x1000 window, and a touch client at 600x400: one column at a time;
+#   8. a 1800x1000 window: all three columns; a touch client at 600x400: one
+#      column at a time;
 #   9. a real window made small and large again: the UI's fit back at x1.
 # Screenshots kept with KEEP_TMP=1: $t/menu.png, $t/refit.png, $t/signals.png, $t/added.png, $t/hud.png,
 # $t/game_wide.png, $t/wide.png, $t/narrow_*.png; look at them.
@@ -244,6 +246,9 @@ frames 5
 EOF
 	# 6. The viewport; its HUD
 	cat <<EOF
+click Button "Inspector"
+frames 5
+screenshot @T@/inspector_tab.png
 event kit_select $RULES
 frames 5
 screenshot @T@/nohud.png
@@ -255,6 +260,8 @@ event kit_select $RULES
 frames 5
 screenshot @T@/game_wide.png
 event kit_select $FLAG
+frames 5
+click Button "Links"
 frames 5
 event kit_cam_where after
 frames 3
@@ -297,31 +304,43 @@ kit() # <log>: Kit's own lines, not the drive's
 {
 	grep -a " I kit " "$1"
 }
-# 1. Three columns side by side, under the bar, inside the window
+# 1. Two columns side by side, the slot taken by turns, under the bar, inside
+# the window
 kit "$b" > "$t/kit.txt"
 python3 -I - "$t/kit.txt" <<'PY' || fail "the columns ($t/kit.txt)"
 import re, sys
 lines = [l for l in open(sys.argv[1], errors="replace") if "signals: columns in 1024x700" in l]
 assert lines, "no columns line"
-m = re.search(r"under (\d+): (.*)$", lines[-1])
-top, cols = int(m[1]), {}
-for c in m[2].split(", "):
-    n, x, y, w, h = c.split()
-    cols[n] = (int(x), int(y), int(w), int(h))
-assert set(cols) == {"sg_list", "sg_links", "inspector", "sg_view"}, cols
-l, c, i, v = (cols[k] for k in ("sg_list", "sg_links", "inspector", "sg_view"))
-assert l[0] + l[2] <= c[0] and c[0] + c[2] <= i[0], cols
+def columns(line):
+    m = re.search(r"under (\d+): (.*)$", line)
+    cols = {}
+    for c in m[2].split(", "):
+        n, x, y, w, h = c.split()
+        cols[n] = (int(x), int(y), int(w), int(h))
+    return int(m[1]), cols
+links = [columns(l) for l in lines if " sg_links " in l]
+right = [columns(l) for l in lines if " inspector " in l]
+assert links and right, lines
+top, cols = links[-1]
+assert set(cols) == {"sg_list", "sg_links"}, cols
+l, c = cols["sg_list"], cols["sg_links"]
+assert l[0] + l[2] <= c[0] and c[0] + c[2] <= 1024 and l[1] + l[3] <= 700, cols
+assert min(l[1], c[1]) >= top > 10, (top, cols)
+top, cols = right[-1]
+assert set(cols) == {"sg_list", "inspector", "sg_view"}, cols
+i, v = cols["inspector"], cols["sg_view"]
+assert i[0] == c[0] and i[2] == c[2] and cols["sg_list"] == l, (cols, c, l)
 assert i[1] + i[3] <= v[1] and i[0] == v[0], cols
-assert v[0] + v[2] <= 1024 and v[1] + v[3] <= 700 and l[1] + l[3] <= 700, cols
-assert min(l[1], c[1], i[1]) >= top > 10, (top, cols)
+assert v[0] + v[2] <= 1024 and v[1] + v[3] <= 700, cols
+assert i[1] >= top > 10, (top, cols)
 PY
-wantp "$b" "the windows at bar \d+ \d+ \d+ \d+, inspector \d+ \d+ \d+ \d+, sg_list \d+ \d+ \d+ \d+, sg_links \d+ \d+ \d+ \d+, sg_view \d+ \d+ \d+ \d+ \(signals\)"
+wantp "$b" "the windows at bar \d+ \d+ \d+ \d+, sg_list \d+ \d+ \d+ \d+, sg_links \d+ \d+ \d+ \d+ \(signals\)"
 wantp "$b" "the view Signals|the view signals, the tabs"
 want "$b" "kit editor: the view is Signals"
 before=$(grep -a "the 3D camera at .*(before)" "$b" | sed 's/.*camera at //; s/ (.*//')
 after=$(grep -a "the 3D camera at .*(after)" "$b" | sed 's/.*camera at //; s/ (.*//')
 [ -n "$before" ] && [ "$before" = "$after" ] || fail "the 3D camera moved: $before, $after"
-echo "ok: F5: three columns under the bar in 1024x700, no other panel; the 3D camera kept"
+echo "ok: F5: the list beside the links or the inspector under the bar in 1024x700, no other panel; the 3D camera kept"
 # 2.
 [ "$(grep -ac "signals: the menu of $FLAG.taken $BAR2.hide" "$b")" = 3 ] || fail "a signal's menu by either button"
 want "$b" "signals: linked $FLAG.progress -> $BAR3.value" "signals: unlinked $FLAG.taken -> $BAR2.hide" \
@@ -473,6 +492,7 @@ grep -a "I __app   : UI scale [0-9]" "$t/kitfit.log" | tail -1 | grep -q "UI sca
 echo "ok: a window made small and large again has the UI at its full scale"
 stop_server
 want "$t/kitwide.log" "signals: $FLAG $FLAG Home flag: " "signals: columns in 1800x1000 "
+wantp "$t/kitwide.log" "signals: columns in 1800x1000 under \d+: sg_list \d+ \d+ \d+ \d+, sg_links \d+ \d+ \d+ \d+, inspector \d+ \d+ \d+ \d+, sg_view "
 # What the arrow says: a value's type, nothing for a trigger
 wantp "$t/kitwide.log" "signals: $FLAG $FLAG Home flag: .*left>value number"
 # A string's label
@@ -488,4 +508,4 @@ echo "ok: the name after a restart, read by another client; a wide window; one c
 if grep -aE "kit: ui: |kit: ui handles: |attempt to|stack traceback" "$b" "$t/kitwide.log" "$t/kitnarrow.log" | grep -av " I kit editor" | head -5 | grep -a .; then
 	fail "a Lua error in the logs"
 fi
-echo "PASS: the Signals view: three columns, links added, unlinked and hidden, names followed, a rename kept, the filter, the viewport and its HUD; screenshots $t/signals.png $t/added.png $t/hud.png $t/wide.png $t/narrow_links.png"
+echo "PASS: the Signals view: its columns by width, links added, unlinked and hidden, names followed, a rename kept, the filter, the viewport and its HUD; screenshots $t/signals.png $t/added.png $t/hud.png $t/wide.png $t/narrow_links.png"

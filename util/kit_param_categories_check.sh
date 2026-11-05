@@ -248,6 +248,8 @@ event kit_select $FLAG
 frames 5
 keypress F5
 frames 8
+click Button "Inspector"
+frames 5
 click Button "Look"
 frames 5
 screenshot @T@/signals.png
