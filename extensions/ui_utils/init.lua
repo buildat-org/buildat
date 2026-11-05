@@ -1907,6 +1907,14 @@ end
 -- window's layout would place it; kept at the window's corner and over it
 -- each frame. Not in the keyboard's walk. Does on_close, or what a tap on
 -- nothing does: Escape.
+-- Under the trusted overlay when a window's corner is in the overlay's
+-- place (client/core/urho3d/overlay.lua, priority 2001): the click would
+-- be its "Starport settings...". On the web there is none.
+-- simplified: the extents of the overlay with no ID logged in, whether
+-- shown or not, as a script is not told F9's state ([TRUST_CODE]); each ID
+-- logged in adds a row that can cover the × again (Escape still closes).
+local OVERLAY_W, OVERLAY_BOTTOM = 384, 49
+local has_overlay = buildat.get_env("BUILDAT_PAGE_HTTPS") == nil
 function M.safe.close_glyph(parent, window, on_close)
 	local b = parent:CreateChild("Button")
 	b:SetName("close_glyph")
@@ -1942,7 +1950,12 @@ function M.safe.close_glyph(parent, window, on_close)
 	local function read()
 		local w, p, at = window.screenPosition, parent.screenPosition,
 				b.position
-		return w.x - p.x + window.width - 40, w.y - p.y, window.visible,
+		local y = w.y
+		if has_overlay and y < OVERLAY_BOTTOM and
+				w.x + window.width > magic.ui.root.width - OVERLAY_W then
+			y = OVERLAY_BOTTOM
+		end
+		return w.x - p.x + window.width - 40, y - p.y, window.visible,
 				window.priority + 1, at.x, at.y
 	end
 	local lvis, lpri
