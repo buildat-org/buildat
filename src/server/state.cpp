@@ -1135,10 +1135,10 @@ struct CState: public State, public interface::Server
 		// [PROCESS_SANDBOX]: a boxed server builds into its app's own
 		// cache, and the shared build -- what an unboxed run or the
 		// archive made -- is read, never written: a module whose hash
-		// matches there is loaded from it as it is
+		// matches there is loaded from it as it is, whatever older copy the
+		// app's cache holds ([CACHE_GC] sweeps that one)
 		const ss_ prebuilt_dir = g_server_config.get<ss_>("rccpp_prebuilt_path");
-		if(!skip_compile && !prebuilt_dir.empty() &&
-				!std::ifstream(build_dst).good()){
+		if(!skip_compile && !prebuilt_dir.empty()){
 			// The same file name in the other directory
 			const ss_ prebuilt = prebuilt_dir+build_dst.substr(
 					g_server_config.get<ss_>("rccpp_build_path").size());
