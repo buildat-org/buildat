@@ -31,6 +31,7 @@
 -- "signal"; sent again as a player dies while it is home, so a respawn
 -- "on_signal" linked to it lets them back at once), left (the return's
 -- whole seconds left, 0 home), progress (the scoring count, 0...100),
+-- home_team (just before home: the team that held it last, "" none),
 -- immune (the holder's whole seconds left), holder_team (its name, ""
 -- none), scored (the team's name). "enable" and "disable" (`enabled` at
 -- the start): disabled, nobody takes it (a prep phase).
@@ -122,6 +123,7 @@ local function go_home(c, why)
 	report(c, "progress", 0)
 	c:move(c.state.home)
 	c:log("home:", why)
+	c:emit("home_team", c.state.last_team)
 	c:emit("home", why)
 end
 
@@ -138,6 +140,7 @@ local function take(c, p)
 		c.state.own = {["player:" .. p.id] = {shown = true, value = h}}
 	end
 	c.state.holder_team = t and t.id or 0
+	c.state.last_team = t and t.name or ""
 	c.state.immune = c.params.immunity
 	if c.params.immunity > 0 then
 		c:after(c.params.immunity, "immune")
@@ -396,6 +399,7 @@ return {
 		value = {default = "", shared = true},
 		own = {default = {}, per_player = true},
 		holder_team = {default = 0},
+		last_team = {default = ""},
 		placer_team = {default = 0},
 		immune = {default = 0},
 		-- The return's seconds left (-1: not counting), the scoring's
@@ -408,7 +412,8 @@ return {
 	outputs = {taken = "string:player", placed = "string:player",
 		home = "string:reason",
 		left = "number", progress = "number", immune = "number",
-		holder_team = "string:team", scored = "string:team"},
+		holder_team = "string:team", scored = "string:team",
+		home_team = "string:team"},
 	on_start = function(c)
 		-- Home: the start's (a Save as start while it was away), else
 		-- its place in the composition, snapped to the cell; it starts

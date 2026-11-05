@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~6 min (2026-11-04)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/types/flag.lua builtin/kit/types/explosive.lua builtin/kit/types/placer.lua builtin/kit/types/part.lua builtin/kit/types/hut.prefab.json builtin/kit/types/bomb_look.prefab.json builtin/kit/sounds.json builtin/kit/types/arena.lua builtin/kit/types/region.lua builtin/kit/client_lua/hands.lua apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/types/effect.lua builtin/kit/client_lua/effects.lua builtin/kit/types/flag.lua builtin/kit/types/explosive.lua builtin/kit/types/placer.lua builtin/kit/types/part.lua builtin/kit/types/hut.prefab.json builtin/kit/types/bomb_look.prefab.json builtin/kit/sounds.json builtin/kit/types/arena.lua builtin/kit/types/region.lua builtin/kit/client_lua/hands.lua apps/workbench/**
 # [KIT_CTF] Capture the flag composed on a fresh Workbench save with the
 # editor's ops alone (kitboss, the admin, Stopped), then played by three
 # clients. The composition (compose() below; the game's numbers in
@@ -101,7 +101,7 @@ fi
 cd "$here/Build"
 
 start_server "$t/srv.log" "Listening at" 300 auto \
-	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 ||
+	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 4 ||
 	fail "the server did not come up ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 client() # <name>: its commands in $t/<name>.cmds; BUILDAT_JOIN_* its login
@@ -164,6 +164,16 @@ sidebar() # <x, y, z> <label> <max> <color>: a bar in the right-hand column
 	set_ $id size 1.9
 	set_ $id shown false
 }
+effect() # <x, y, z> <name> <parent or ""> <param>=<json>...: a kit/effect
+{
+	local at=$1 nm=$2 par=$3 a
+	shift 3
+	place kit/effect "$at" $par
+	name_ "$nm"
+	for a; do
+		set_ $id "${a%%=*}" "${a#*=}"
+	done
+}
 prefab_of() # <id> <name>: the entity saved as the builder's prefab, gone
 {
 	printf 'event kit_edit {"op": "save_prefab", "ids": [%s], "name": "%s"}\nsync 3000\n' "$1" "$2"
@@ -221,6 +231,12 @@ EOF
 	place kit/spawner '0, 1, 0'
 	name_ 'Player spawner'
 	set_ $id players true
+	# [KIT_FEEDBACK_EFFECTS] For the blast's shake, weaker further away
+	place kit/controls '6, 1, 0'; CONTROLS=$id
+	name_ 'Controls'
+	set_ $id shake_amount 1.5
+	set_ $id shake_near 3
+	set_ $id shake_far 30
 	place kit/arena '8, 1, 0'; ARENA=$id
 	name_ 'Arena'
 	set_ $id size '[3, 3, 3]'
@@ -388,13 +404,68 @@ EOF
 	set_ $id hurt 7
 	set_ $id share 0.5
 	set_ $id friendly_fire true
-	prefab_of $id bomb
+	# It blinks faster to its end, and sparkles from its top from arming on
+	set_ $id blink_color '"#ff3010"'
+	set_ $id blink_slow 1
+	set_ $id blink_fast 0.1
+	BOMB=$id
+	effect '10, 1.125, 6' 'Bomb fuse' $BOMB count=6 'color="#ffe8b0"' \
+		'color2="#ffe040"' spread=25 speed_min=3.6 speed_max=4.4 gravity=9 \
+		ttl_min=0.6 ttl_max=0.8 size_min=0.04 size_max=0.07 every=0.15
+	link $BOMB armed $id on
+	prefab_of $BOMB bomb
 	place kit/placer '11, 1, 6'
 	name_ 'Bomb placer'
 	set_ $id item '"kitboss/bomb"'
 	set_ $id prefab '"kitboss/bomb"'
 	set_ $id signal '"arm"'
 	set_ $id distance 1.5
+	# [KIT_PARTICLES] [KIT_FEEDBACK_EFFECTS] What the game shows of itself
+	effect '13, 1, 8' 'Blood' '' 'on="hit"' count=30 'color="#e00000"' \
+		along_hit=true spread=45 scale_by_damage=true speed_min=0.2 speed_max=3 \
+		ttl_min=1 ttl_max=1.2 size_min=0.05 size_max=0.09 land=true fade=0.2 \
+		flash_time=0.1 'flash_color="#ff2020"' arc_time=1.2
+	effect '14, 1, 8' 'Dig crumbs' '' 'on="dig"' 'shape="voxel"' count=14 \
+		spread=70 'offset=[0, 0.4, 0]' speed_min=1 speed_max=3 ttl_min=0.5 \
+		ttl_max=0.9 size_min=0.08 size_max=0.14 land=true
+	effect '15, 1, 8' 'Place dust' '' 'on="place"' 'shape="round"' count=8 \
+		'color="#b0a590"' gravity=0 'offset=[0, -0.4, 0]' speed_min=0.3 \
+		speed_max=0.8 ttl_min=0.4 ttl_max=0.6 size_min=0.2 size_max=0.3 grow=2
+	effect '16, 1, 8' 'Blast debris' '' 'on="blast"' 'shape="voxel"' count=60 \
+		spread=80 speed_min=3 speed_max=8 ttl_min=0.9 ttl_max=1.3 size_min=0.1 \
+		size_max=0.2 land=true light_time=0.15 light_range=14 light_brightness=4
+	link $id fired $CONTROLS shake
+	effect '17, 1, 8' 'Blast smoke' '' 'on="blast"' 'shape="round"' count=30 \
+		'color="#605850"' 'color2="#303030"' gravity=-1 speed_min=0.5 speed_max=2 \
+		ttl_min=1 ttl_max=2 size_min=0.5 size_max=1 grow=1 fade=0.6 box=1.5
+	effect '18, 1, 8' 'Blast ring' '' 'on="blast"' 'shape="ring"' count=1 \
+		'color="#ffe0a0"' gravity=0 speed_min=0 speed_max=0 ttl_min=0.25 \
+		ttl_max=0.25 size_min=1 size_max=1 grow=24 fade=0.6
+	effect '19, 1, 8' 'Respawn sparkle' '' 'on="respawn"' count=20 \
+		'color="#80e0ff"' gravity=-1 'offset=[0, 0.5, 0]' size_min=0.05 size_max=0.08
+	effect '20, 1, 8' 'Pickup sparkle' '' 'on="pickup"' count=14 \
+		'color="#ffe060"' gravity=2 size_min=0.05 size_max=0.08
+	effect '21, 1, 8' 'Flag taken' '' 'where="value"' team_color=true count=24 \
+		'offset=[0, 1, 0]'
+	link $FLAG taken $id burst
+	effect '0, 1.5, 0' 'Flag home' '' team_color=true count=26
+	link $FLAG home_team $id burst
+	effect '0, 2, 0' 'Flag scored' '' team_color=true count=28 speed_min=2 \
+		speed_max=4
+	link $FLAG scored $id burst
+	# (over the carrier's head: at the flag's own place it is inside their body)
+	effect '22, 1, 8' 'Flag trail' '' at_entity=$FLAG team_color=true count=3 \
+		'offset=[0, 1, 0]' every=0.1 spread=180 speed_min=0.2 speed_max=0.5 \
+		gravity=0.5 ttl_min=0.6 ttl_max=0.9 size_min=0.05 size_max=0.08 box=0.3
+	link $FLAG taken $id on
+	link $FLAG holder_team $id color
+	link $FLAG placed $id off
+	link $FLAG home $id off
+	effect '23, 1, 8' 'Confetti' '' 'where="value"' team_color=true count=40 \
+		'color2="#ffffff"' 'offset=[0, 1, 0]' speed_min=3 speed_max=7 gravity=5 \
+		drag=0.5 ttl_min=1.5 ttl_max=2.5 size_min=0.06 size_max=0.1 spin=360 \
+		every=0.4 repeats=4
+	link $ARENA won $id on
 	local p
 	for p in kit/pickaxe:pickaxe kitboss/bomb:bomb kitboss/knife:knife; do
 		place kit/pickup '12, 1, 6'
@@ -600,6 +671,8 @@ event kit_use $FLAG
 wait_log 30000 kill message: kitboss killed kitbob
 wait_log 30000 kill message: kitboss killed kitbob
 wait_log 200000 Blue wins!
+frames 15
+screenshot $t/bob_confetti.png
 EOF
 	lobby 1 wait_log
 	cat <<EOF
@@ -624,6 +697,9 @@ delay 1000
 look_dir 1 1 0
 frames 10
 screenshot $t/cat_carry_3p.png
+look_dir 1 0.7 0
+frames 10
+screenshot $t/cat_trail.png
 delay 6500
 keypress U
 delay 1500
@@ -756,6 +832,14 @@ PY
 want "$s" "column (20,20): air 1..2, kit/grass 0, kit/dirt -1, kit/stone -6..-2" \
 	"kitcat dug kit/stone (level 1) with kit/pickaxe (level 1): drops kit/cobble" \
 	"A dig by kitcat refused: A hand does not dig kit/stone (level 1)"
+# [KIT_PARTICLES] [KIT_FEEDBACK_EFFECTS] What this build fires, by its counts
+# (dust and the trail's colour: kit_particles_check's or the screenshots)
+want "$s" "an effect of 14 voxel" "an effect of 60 voxel" "an effect of 30 round" \
+	"an effect of 1 ring" "an effect of 6 square" "an effect of 3 square" \
+	"an effect of 24 square" "an effect of 26 square" "an effect of 28 square" \
+	"an effect of 40 square" "an effect of 20 square" "an effect of 14 square"
+want "$t/boss.log" "kit: camera shake from" "body flashes"
+want "$t/bob.log" "kit: a hit's arc from"
 # [KIT_FLAG_HOLDER_HINT] The holder's hint on kitboss's screen as he
 # carries it, not on kitbob's then
 python3 - "$t/boss.log" "$t/bob.log" "$FLAG" <<'PY' || fail "the holder's hint ($t)"
@@ -770,7 +854,7 @@ assert not any(hint in l and line in l for l in bob[a:b].splitlines()), \
 	"on kitbob's while kitboss held it"
 assert any(hint in l and line in l for l in bob[b:].splitlines()), "not on kitbob's as he held it"
 PY
-for f in boss_carry_fp boss_walk_fp1 boss_walk_fp2 cat_carry_3p cat_bomb_held cat_bomb_lying cat_walk_1 cat_walk_4; do
+for f in boss_carry_fp boss_walk_fp1 boss_walk_fp2 cat_carry_3p cat_bomb_held cat_bomb_lying cat_walk_1 cat_walk_4 bob_confetti cat_trail; do
 	[ -s "$t/$f.png" ] || fail "no screenshot $f ($t)"
 done
 echo "PASS: [KIT_CTF] capture the flag composed by edit ops and played by three clients; screenshots in $t"
