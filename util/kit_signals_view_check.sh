@@ -9,9 +9,9 @@
 #   1. F5 from 3D: the three columns side by side under the bar, no panel, no
 #      other window; the 3D camera where it was afterwards;
 #   2. a link added from the table (output, target, input by its dropdowns),
-#      unlinked by its chip, hidden and shown by its toggle: the server's
+#      unlinked by its menu, hidden and shown by its checkbox: the server's
 #      edits; the toggle's in the save;
-#   3. a target's name selects it, its "Comes from" there;
+#   3. a target's name selects it, its Inputs there;
 #   4. the filter narrows the list, by type and by name; a view key while
 #      typing in it;
 #   5. a rename: the server's edit, undone by Ctrl+Z, again; in the save, and
@@ -20,8 +20,9 @@
 #      with no position; a ui_bar selected: the HUD laid out in its rectangle,
 #      that bar marked; game_rules selected: no HUD;
 #   7. Escape back to the view before; Walk has its panels and HUD back;
-#   8. a 1800x1000 window, and a touch client at 600x400: one column at a time.
-# Screenshots kept with KEEP_TMP=1: $t/signals.png, $t/added.png, $t/hud.png,
+#   8. a 1800x1000 window, and a touch client at 600x400: one column at a time;
+#   9. a real window made small and large again: the UI's fit back at x1.
+# Screenshots kept with KEEP_TMP=1: $t/menu.png, $t/refit.png, $t/signals.png, $t/added.png, $t/hud.png,
 # $t/game_wide.png, $t/wide.png, $t/narrow_*.png; look at them.
 #   util/kit_signals_view_check.sh
 set -u
@@ -118,16 +119,16 @@ EOF
 click Button "add link"
 frames 3
 screenshot @T@/form.png
-click DropDownList "▼" 450 200
+click DropDownList "▼" 450 293
 frames 3
 click Text "progress*"
 frames 3
-click DropDownList "▼" 450 230
+click DropDownList "▼" 450 327
 frames 3
 screenshot @T@/form_target.png
 click Text "$BAR3 ui_bar"
 frames 3
-click DropDownList "▼" 450 264
+click DropDownList "▼" 450 361
 frames 3
 click Text "value*"
 frames 3
@@ -140,7 +141,21 @@ frames 3
 screenshot @T@/added.png
 click Button "Done"
 frames 3
-click Button "unlink $FLAG.taken $BAR2.hide"
+click Button "signal $FLAG.taken $BAR2.hide"
+frames 3
+screenshot @T@/menu.png
+keypress Escape
+frames 3
+click Button "signal in $FLAG.taken $BAR2.hide"
+frames 3
+keypress Escape
+frames 3
+mouse_pos 260 409
+frames 2
+mouse_click right
+frames 3
+screenshot @T@/menu_right.png
+click Button "Delete"
 EOF
 	state
 	cat <<EOF
@@ -306,6 +321,7 @@ after=$(grep -a "the 3D camera at .*(after)" "$b" | sed 's/.*camera at //; s/ (.
 [ -n "$before" ] && [ "$before" = "$after" ] || fail "the 3D camera moved: $before, $after"
 echo "ok: F5: three columns under the bar in 1024x700, no other panel; the 3D camera kept"
 # 2.
+[ "$(grep -ac "signals: the menu of $FLAG.taken $BAR2.hide" "$b")" = 3 ] || fail "a signal's menu by either button"
 want "$b" "signals: linked $FLAG.progress -> $BAR3.value" "signals: unlinked $FLAG.taken -> $BAR2.hide" \
 	"signals: $FLAG.left -> $BAR1.value shown in play" "signals: $FLAG.home -> $BAR1.hide shown in play" \
 	"signals: $FLAG.home -> $BAR1.hide hidden in play"
@@ -418,6 +434,41 @@ EOF
 serve "$t/srv2.log"
 BUILDAT_JOIN_NAME=kitboss client kitwide 1800x1000 -u 1
 BUILDAT_JOIN_NAME=kitboss BUILDAT_TOUCH=1 client kitnarrow 600x400 -u 1
+# 9. A real window (no -w: the fit is on) made small and large again: the UI
+# back at its full scale, the Signals view's panels not holding the fit down
+cat > "$t/kitfit.cmds" <<EOF
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log_any 10000 kit editor: edit mode on
+frames 5
+event kit_select $FLAG
+frames 3
+keypress F5
+wait_log_any 10000 signals: columns in
+wait_log_any 20000 screen mode: 500x400
+wait_log_any 20000 UI scale fitted to the screen: x0
+wait_log_any 20000 screen mode: 1400x900
+wait_log_any 20000 UI scale fitted to the screen: x1
+frames 5
+screenshot @T@/refit.png
+quit
+EOF
+sed -i "s|@T@|$t|g" "$t/kitfit.cmds"
+BUILDAT_TEST_REAL_WINDOW=1 BUILDAT_JOIN_NAME=kitboss timeout 120 bin/buildat -C "$t/client_cache" -D "$t/cu_kitfit" \
+	-s localhost:$SERVER_PORT -l 3 -c @"$t/kitfit.cmds" > "$t/kitfit.log" 2>&1 &
+fit_pid=$!
+CHECK_PIDS+=($fit_pid)
+wait_for_log "$t/kitfit.log" "signals: columns in" 60
+win=$(xdotool search --pid "$(pgrep -P "$fit_pid")" 2>/dev/null | tail -1)
+[ -n "$win" ] || fail "no window of the client to resize"
+xdotool windowsize "$win" 500 400
+wait_for_log "$t/kitfit.log" "I __app   : UI scale fitted to the screen: x0" 20
+xdotool windowsize "$win" 1400 900
+wait "$fit_pid" || fail "the UI's scale did not come back in a larger window ($t/kitfit.log)"
+grep -a "I __app   : UI scale [0-9]" "$t/kitfit.log" | tail -1 | grep -q "UI scale 0.833333 (1400x900)" || fail "the last scale ($t/kitfit.log)"
+echo "ok: a window made small and large again has the UI at its full scale"
 stop_server
 want "$t/kitwide.log" "signals: $FLAG $FLAG Home flag: " "signals: columns in 1800x1000 "
 wantp "$t/kitwide.log" "signals: the HUD in the viewport on"

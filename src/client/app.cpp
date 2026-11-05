@@ -1747,7 +1747,12 @@ struct CApp: public App, public magic::Application
 	float m_logical_scale = 1.f;
 	int m_logical_ox = 0;
 	int m_logical_oy = 0;
-	bool logical_mode() const { return m_command_seq_active && m_logical_w > 0; }
+	// BUILDAT_TEST_REAL_WINDOW: a drive of what a person's window does, the fit on
+	bool logical_mode() const
+	{
+		static const bool real = getenv("BUILDAT_TEST_REAL_WINDOW") != nullptr;
+		return !real && m_command_seq_active && m_logical_w > 0;
+	}
 	void update_logical_placement()
 	{
 		magic::Graphics *g = GetSubsystem<magic::Graphics>();
@@ -2652,6 +2657,11 @@ struct CApp: public App, public magic::Application
 				// scaled the UI down to fit itself ([LUANTI_CHAT_WRAP])
 				if(c->GetType() == magic::Text::GetTypeStatic() &&
 						static_cast<magic::Text *>(c)->GetWordwrap())
+					continue;
+				// Sized from the root less its margins (Kit's Signals view):
+				// after a fit it grows with the root and holds the fit down
+				// for good, the window enlarged or not
+				if(c->GetVar(magic::StringHash("FollowsRoot")).GetString() == "1")
 					continue;
 				const magic::IntVector2 sz = c->GetSize();
 				// The root's own size, give or take its rounding -- or its

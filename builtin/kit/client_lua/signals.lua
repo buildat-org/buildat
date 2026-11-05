@@ -8,10 +8,11 @@
 --   - Left: the entities as a tree, as the Entities tab's (all three of its
 --     lists in one), a filter over them (id, name, type)
 --   - Middle: the selected one's name to edit, and its links, in both
---     directions: "Goes to" by target and input, "Comes from" by source. An
---     output's chip unlinks it, the small button beside it is that link's
---     Hidden in play; a target's or source's name selects it. "+ Add link"
---     picks an output, a target and an input here (dropdowns)
+--     directions, Inputs first: a row a link, flowing left to right, a gap
+--     between entities. Either signal, by either button, opens the link's menu
+--     (Delete); the checkbox is whether it is shown in play; an entity's name
+--     selects it. "+ Add link" picks an output, a target and an input here
+--     (dropdowns)
 --   - Right: the inspector (editor.lua's: in this view its parameters and Try
 --     alone), under it a View3D of the scene from a camera of its own, on
 --     the selected entity; one with no position (or none): what the walk
@@ -52,8 +53,8 @@ local SG = {filter = "", hud = false, add = nil, tab = "links", area = nil}
 NT.sg = SG
 
 local MARGIN = 6
--- The table's first columns, and the longest name it writes in them
-local NAME_W, INPUT_W, NAME_CHARS = 104, 76, 22
+-- The longest name a list writes
+local NAME_CHARS = 22
 
 local function kit_short(ty)
 	return (tostring(ty):gsub("^kit/", ""))
@@ -105,8 +106,8 @@ local function put_body(view, build)
 	build(body)
 	view.contentElement = body
 	body:SetPosition(0, 0)
-	view.viewPosition = magic.IntVector2(0, y)
 	SG.body_w(view, body)
+	view.viewPosition = magic.IntVector2(0, y)
 	return body
 end
 
@@ -114,6 +115,20 @@ end
 local function tight(parent, s, fn, down)
 	local b, t = button(parent, s, fn, down)
 	b.maxWidth = b.minWidth
+	return b, t
+end
+
+-- A thing in a list rather than an action: no button's bevel, a fill under the
+-- pointer, the selected one's fill of its own
+local function item(parent, s, fn, color, selected)
+	local b, t = button(parent, s, fn)
+	b:SetStyle(selected and "ListItemSelected" or "ListItem")
+	b.blendMode = magic.BLEND_ALPHA
+	t:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
+	t:SetPosition(4, 0)
+	if color then
+		t:SetColor(color)
+	end
 	return b, t
 end
 
@@ -141,10 +156,10 @@ function SG.rows()
 						head = true
 					end
 					local d = indent[e.id] or 0
-					local b, t = button(body, clipped(short_name(e)), function()
+					local on = e.id == S.primary
+					local b, t = item(body, clipped(short_name(e)), function()
 						M.select(e.id)
-					end, e.id == S.primary)
-					t:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
+					end, on and magic.Color(1.0, 0.85, 0.3) or nil, on)
 					t:SetPosition(4 + d * 12, 0)
 					b.minWidth = t.width + 12 + d * 12
 					-- For a driven click by whose it is
@@ -184,34 +199,167 @@ local function toggle_visible(id, ci, l)
 		to = l.to, input = l.input, visible = not l.visible})
 end
 
--- A link's chip and its toggle in the row
-local function chip(r, id, ci, l)
-	local c = tight(r, l.output, function() unlink(id, ci, l) end)
-	c:SetName("unlink " .. link_key(id, l))
-	local v = tight(r, l.visible and "shown" or "hidden", function()
-		toggle_visible(id, ci, l)
-	end, l.visible)
-	v:SetName("visible " .. link_key(id, l))
-	return c.minWidth + v.minWidth + 8
-end
-
--- A name that selects what it names, in a column of its own width; a blank
--- under the first of a group
-local function name_cell(r, e, id)
-	if e or id then
-		local b = button(r, e and clipped(short_name(e)) or tostring(id), function()
-			M.select(e and e.id or id)
-		end)
-		b:SetFixedWidth(math.max(NAME_W, b.minWidth))
-		b:SetName("goto " .. tostring(e and e.id or id))
-		return b.minWidth
+-- A link's menu, under the signal: both of a row's signals open it, by either
+-- button (the right one's press in SG.pressed)
+local function link_menu(c)
+	if W.ctx then
+		W.ctx:Remove()
 	end
-	label(r, "", NAME_W):SetFixedWidth(NAME_W)
-	return NAME_W
+	local p = c.b.screenPosition
+	local w = window(magic.HA_LEFT, magic.VA_TOP, p.x, p.y + c.b.height)
+	W.ctx = w
+	w.priority = 10
+	text(w, c.l.output .. " → " .. c.l.input, DIM)
+	button(w, "Delete", function()
+		W.ctx:Remove()
+		W.ctx = nil
+		unlink(c.id, c.ci, c.l)
+	end)
+	-- On the screen whole
+	local root = magic.ui.root
+	w:SetPosition(math.max(0, math.min(p.x, root.width - w.width)),
+			math.max(0, math.min(p.y + c.b.height, root.height - w.height)))
+	log:info("kit editor: signals: the menu of " .. link_key(c.id, c.l))
 end
 
-local function goes_to(body, e)
-	-- By target, then by input, in the order first met
+local function at(e, x, y)
+	local p = e.screenPosition
+	return x >= p.x and y >= p.y and x < p.x + e.width and y < p.y + e.height
+end
+
+-- A press anywhere: past the menu it closes it; the right button on a signal
+-- opens that link's (a Button's Released is the left button's alone)
+function SG.pressed(x, y, right)
+	if not NT.sig() then
+		return
+	end
+	local sc = magic.ui.scale
+	x, y = x / sc, y / sc
+	if W.ctx and not at(W.ctx, x, y) then
+		W.ctx:Remove()
+		W.ctx = nil
+	end
+	if right and SG.links_view and at(SG.links_view, x, y) then
+		for _, c in ipairs(SG.cells or {}) do
+			if at(c.b, x, y) then
+				return link_menu(c)
+			end
+		end
+	end
+end
+magic.SubscribeToEvent("MouseButtonDown", function(_, data)
+	local m = magic.input:GetMousePosition()
+	SG.pressed(m.x, m.y, data:GetInt("Button") == magic.MOUSEB_RIGHT)
+end)
+magic.SubscribeToEvent("TouchBegin", function(_, data)
+	SG.pressed(data:GetInt("X"), data:GetInt("Y"), false)
+end)
+
+-- Shown in play: a checkbox and its label, both the button
+local function shown_check(r, id, ci, l)
+	local b, t = item(r, "Shown", function() toggle_visible(id, ci, l) end)
+	b:SetName("visible " .. link_key(id, l))
+	local c = b:CreateChild("CheckBox")
+	c:SetStyleAuto()
+	c.checked = l.visible and true or false
+	-- The button under it takes the click
+	c.enabled = false
+	c:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
+	c:SetPosition(4, 0)
+	t:SetPosition(24, 0)
+	return b, t.width + 28
+end
+
+-- The links as a table, a link to a row, flowing left to right: what they come
+-- from, the arrow, what they go to, and at the right edge whether it is shown.
+-- rows: {first = a new entity, e = it, id = its id, from_id, ci, l}. The name
+-- column stands left of the signals for inputs (name_first), right of the
+-- arrow for outputs. Related cells touch; what is spare goes to the name
+-- column and before the checkbox.
+-- simplified: a window too narrow for even short names scrolls sideways.
+local function link_table(body, rows, name_first)
+	local order = name_first and {"name", "left", "arrow", "right"} or
+			{"left", "arrow", "name", "right"}
+	local widest, built = {name = 0, left = 0, arrow = 20, right = 0, check = 0}, {}
+	for i, x in ipairs(rows) do
+		if x.first and i > 1 then
+			body:CreateChild("UIElement"):SetFixedHeight(10)
+		end
+		local r, cells = row(body), {}
+		local function signal(s, key, name)
+			local c = {id = x.from_id, ci = x.ci, l = x.l}
+			c.b, c.t = item(r, s, function() link_menu(c) end,
+					magic.Color(ui_utils.rgb("focus")))
+			c.b:SetName(name .. link_key(x.from_id, x.l))
+			SG.cells[#SG.cells + 1] = c
+			cells[key] = c
+			widest[key] = math.max(widest[key], c.t.width + 8)
+		end
+		for _, k in ipairs(order) do
+			if k == "name" then
+				local c = {}
+				if x.first then
+					local goal = x.e and x.e.id or x.id
+					c.s = x.e and short_name(x.e) or tostring(x.id)
+					c.b, c.t = item(r, clipped(c.s), function() M.select(goal) end)
+					c.b:SetName("goto " .. tostring(goal))
+					widest.name = math.max(widest.name, c.t.width + 8)
+				else
+					c.b = r:CreateChild("UIElement")
+				end
+				cells.name = c
+			elseif k == "arrow" then
+				local t = text(r, "→")
+				t:SetTextAlignment(magic.HA_CENTER)
+				cells.arrow = {b = t}
+			elseif k == "left" then
+				signal(x.l.output, "left", "signal ")
+			else
+				signal(x.l.input, "right", "signal in ")
+			end
+		end
+		cells.gap = r:CreateChild("UIElement")
+		local check, w = shown_check(r, x.from_id, x.ci, x.l)
+		cells.check = {b = check}
+		widest.check = math.max(widest.check, w)
+		built[i] = cells
+	end
+	local spare = SG.links_w - (widest.name + widest.left + widest.arrow +
+			widest.right + widest.check + 5 * 4)
+	-- Too narrow: the names shorter, down to what still tells them apart
+	if spare < 0 then
+		local w = math.max(70, widest.name + spare)
+		for _, cells in ipairs(built) do
+			local c = cells.name
+			if c.t and c.t.width + 8 > w then
+				local n = math.max(4, math.floor(#c.s * (w - 8) / c.t.width) - 2)
+				c.t:SetText(c.s:sub(1, n) .. "..")
+			end
+		end
+		spare = spare + widest.name - w
+		widest.name = w
+	end
+	spare = math.max(0, spare)
+	local grown = math.floor(spare * 0.3)
+	for _, cells in ipairs(built) do
+		cells.name.b:SetFixedWidth(widest.name + grown)
+		cells.left.b:SetFixedWidth(widest.left)
+		-- Against the arrow: the two signals of a link read as a pair
+		cells.left.t:SetAlignment(magic.HA_RIGHT, magic.VA_CENTER)
+		cells.left.t:SetPosition(-4, 0)
+		cells.arrow.b:SetFixedWidth(widest.arrow)
+		cells.right.b:SetFixedWidth(widest.right)
+		cells.gap:SetFixedWidth(spare - grown)
+		cells.check.b:SetFixedWidth(widest.check)
+	end
+	if #rows == 0 then
+		text(body, "None", DIM)
+	end
+	return #rows
+end
+
+-- This entity's links, by target and then by input, in the order first met
+local function outputs(body, e)
 	local order, targets = {}, {}
 	for ci, c in ipairs(e.components or {}) do
 		for _, l in ipairs(c.links or {}) do
@@ -223,62 +371,43 @@ local function goes_to(body, e)
 			end
 			local i = g.by[l.input]
 			if not i then
-				i = {input = l.input, links = {}}
+				i = {}
 				g.by[l.input] = i
 				g.inputs[#g.inputs + 1] = i
 			end
-			i.links[#i.links + 1] = {ci = ci, l = l}
+			i[#i + 1] = {ci = ci, l = l}
 		end
 	end
-	local n = 0
+	local rows = {}
 	for _, g in ipairs(order) do
-		local to = find(g.to)
-		for gi, i in ipairs(g.inputs) do
-			local r = row(body)
-			local used = name_cell(r, gi == 1 and (to or nil) or nil,
-					gi == 1 and not to and g.to or nil) + INPUT_W + 8
-			local il = label(r, i.input .. " <-", INPUT_W)
-			il:SetFixedWidth(il.minWidth)
-			for _, x in ipairs(i.links) do
-				local need = 110
-				if used + need > SG.links_w and used > NAME_W + INPUT_W + 8 then
-					r = row(body)
-					label(r, "", NAME_W):SetFixedWidth(NAME_W)
-					label(r, "", INPUT_W):SetFixedWidth(INPUT_W)
-					used = NAME_W + INPUT_W + 8
-				end
-				used = used + chip(r, e.id, x.ci, x.l)
-				n = n + 1
+		local to, first = find(g.to), true
+		for _, i in ipairs(g.inputs) do
+			for _, x in ipairs(i) do
+				rows[#rows + 1] = {first = first, e = to, id = g.to, from_id = e.id,
+					ci = x.ci, l = x.l}
+				first = false
 			end
 		end
 	end
-	if n == 0 then
-		text(body, "Nothing", DIM)
-	end
-	return n
+	return link_table(body, rows, false)
 end
 
-local function comes_from(body, e)
-	local n = 0
+-- The links into this entity, by source
+local function inputs(body, e)
+	local rows = {}
 	for _, src in ipairs(A.all_entities()) do
 		local first = true
 		for ci, c in ipairs(src.components or {}) do
 			for _, l in ipairs(c.links or {}) do
 				if l.to == e.id then
-					local r = row(body)
-					name_cell(r, first and src or nil)
+					rows[#rows + 1] = {first = first, e = src, from_id = src.id,
+						ci = ci, l = l}
 					first = false
-					chip(r, src.id, ci, l)
-					label(r, "-> " .. l.input)
-					n = n + 1
 				end
 			end
 		end
 	end
-	if n == 0 then
-		text(body, "Nothing", DIM)
-	end
-	return n
+	return link_table(body, rows, true)
 end
 
 -- The outputs it has, {label, "<comp index> <output>"}
@@ -374,6 +503,7 @@ function SG.links()
 	if SG.add and (not e or SG.add.id ~= e.id) then
 		SG.add = nil
 	end
+	SG.cells, SG.links_drawn_w = {}, SG.links_w
 	SG.links_body = put_body(SG.links_view, function(body)
 		text(body, title, magic.Color(1.0, 0.85, 0.3))
 		SG.status_text = text(body, E.status or "", WARN)
@@ -405,8 +535,13 @@ function SG.links()
 		f:SetName("signals name")
 		magic.SubscribeToEvent(f, "TextFinished", rename)
 		tight(nr, "Rename", rename)
+		body:CreateChild("UIElement"):SetFixedHeight(8)
+		text(body, "Inputs", magic.Color(ui_utils.rgb("text")))
+		local inn = inputs(body, e)
+		body:CreateChild("UIElement"):SetFixedHeight(12)
 		local head = row(body)
-		label(head, "Goes to", NAME_W):SetFixedWidth(NAME_W)
+		local ol = label(head, "Outputs")
+		ol:SetFixedWidth(ol.minWidth + 12)
 		local b = tight(head, SG.add and "+ Add link: close" or "+ Add link",
 				function()
 			SG.add = not SG.add and {id = e.id} or nil
@@ -418,10 +553,7 @@ function SG.links()
 		if SG.add then
 			add_form(body, e)
 		end
-		local out = goes_to(body, e)
-		text(body, "Comes from", magic.Color(ui_utils.rgb("text")))
-		local inn = comes_from(body, e)
-		text(body, "An output's button unlinks it", DIM)
+		local out = outputs(body, e)
 		local said = "kit editor: signals: " .. e.id .. " " .. short_name(e) ..
 				": " .. out .. " out, " .. inn .. " in"
 		if said ~= SG.links_said then
@@ -556,16 +688,23 @@ end
 local function fit(win, view, body, x, y, w, h, above)
 	win:SetPosition(x, y)
 	win:SetFixedSize(w, h)
+	-- Sized from the root: not to hold the client's fit down (update_ui_fit)
+	win:SetVar("FollowsRoot", "1")
 	if view then
+		-- The body first: wider than a narrowed view, a sideways bar comes for
+		-- a moment and leaves the view's position past the top
+		SG.body_w(view, body, w - 12)
 		view:SetFixedSize(w - 12, h - 12 - (above or 0))
-		SG.body_w(view, body)
 	end
 end
 
-function SG.body_w(view, body)
+function SG.body_w(view, body, view_w)
 	if body then
 		-- Room for its bar
-		body.minWidth = view.width - view.verticalScrollBar.width - 8
+		local w = (view_w or view.width) - view.verticalScrollBar.width - 8
+		body.minWidth = w
+		-- A narrower window: the layout keeps a width it had
+		body.width = w
 	end
 end
 
@@ -623,6 +762,15 @@ function SG.layout(force)
 		fit(W.inspector, IV.view, IV.view.contentElement, rx, top, rcw, h - vh - MARGIN)
 	end
 	SG.area_update()
+	if SG.links_view and SG.links_drawn_w and SG.links_drawn_w ~= SG.links_w then
+		SG.links()
+	end
+	-- The inspector's fields are made at a width: made again at a new one
+	local was = SG.inspector_w
+	SG.inspector_w = rcw
+	if was and was ~= rcw then
+		A.refresh()
+	end
 	local r = {}
 	for _, k in ipairs({"sg_list", "sg_links", "inspector", "sg_view"}) do
 		local w = W[k]
@@ -672,6 +820,10 @@ function SG.bar(bar_button)
 end
 
 local function close()
+	-- The ordinary inspector counts for the fit again
+	if W.inspector then
+		W.inspector:SetVar("FollowsRoot", "")
+	end
 	if W.sg_list then
 		W.sg_list:Remove()
 		W.sg_list, SG.list_view, SG.list_body = nil, nil, nil
@@ -685,7 +837,8 @@ local function close()
 		SG.view_win.visible = false
 		W.sg_view = nil
 	end
-	SG.area, SG.laid, SG.shows = nil, nil, nil
+	SG.area, SG.laid, SG.shows, SG.cells, SG.links_drawn_w = nil, nil, nil, nil, nil
+	SG.inspector_w = nil
 	SG.add = nil
 end
 
