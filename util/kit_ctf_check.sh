@@ -128,6 +128,10 @@ place() # <type> <x, y, z> [parent]: the next id
 	id=$((id + 1))
 	ed "{\"op\": \"place\", \"type\": \"$1\", \"pos\": [$2]${3:+, \"parent\": $3}}"
 }
+name_() # <name>: of the entity just placed, for reading the composition
+{
+	ed "{\"op\": \"rename\", \"id\": $id, \"name\": \"$1\"}"
+}
 set_() # <id> <param> <value>
 {
 	ed "{\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}"
@@ -206,15 +210,19 @@ wait_log 10000 kit: 9 item types
 EOF
 	# The lobby
 	world 32; LOBBY_WORLD=$id
+	name_ 'Lobby world'
 	place kit/game_rules '0, 1, 0'; RULES=$id
+	name_ 'Game rules'
 	set_ $id hand_level 0
 	set_ $id on_death '"keep"'
 	set_ $id respawn '"on_signal"'
 	set_ $id health_style '"shapes"'
 	set_ $id health_form '"bar"'
 	place kit/spawner '0, 1, 0'
+	name_ 'Player spawner'
 	set_ $id players true
 	place kit/arena '8, 1, 0'; ARENA=$id
+	name_ 'Arena'
 	set_ $id size '[3, 3, 3]'
 	set_ $id players $PLAYERS
 	set_ $id max_players 16
@@ -228,23 +236,32 @@ EOF
 	id=$((id + 1))
 	printf 'event kit_edit {"op": "new_scene", "name": "map"}\nwait_log 30000 kit editor: in the scene map of world, map\n'
 	world 96
+	name_ 'Map world'
 	# [KIT_SOIL_DEPTH] grass 1 over dirt 1 over stone: a tunnel needs a
 	# pickaxe
 	set_ $id soil_depth 1
 	place kit/team '30, 1, 0'; RED=$id
+	name_ 'Red team'
 	set_ $id name '"Red"'
 	set_ $id color '"#d03030"'
 	place kit/team '-30, 1, 0'; BLUE=$id
+	name_ 'Blue team'
 	set_ $id name '"Blue"'
 	set_ $id color '"#3050e0"'
 	region '24, -2, -6' '13, 12, 13' all all all $RED
+	name_ 'Red zone'
 	set_ $id owner '"team"'
 	region '-36, -2, -6' '13, 12, 13' all all all $BLUE
+	name_ 'Blue zone'
 	set_ $id owner '"team"'
 	region '-50, -128, -50' '100, 384, 100' all all all
+	name_ 'Map area'
 	region '-48, -128, -48' '96, 384, 96' all all none; PREP_REGION=$id
+	name_ 'Prep area'
 	region '-1, -128, -1' '3, 384, 3' none none all
+	name_ 'Flag column'
 	place kit/flag '0, 1, 0'; FLAG=$id
+	name_ 'Flag'
 	set_ $id enabled false
 	set_ $id take_home '"near"'
 	set_ $id home_range 1
@@ -261,10 +278,12 @@ EOF
 	set_ $id hud_style '"shapes"'
 	set_ $id marker_style '"shapes"'
 	place kit/part '0, 1.2, 0' $FLAG
+	name_ 'Flag pole'
 	set_ $id size '[0.06, 1.4, 0.06]'
 	set_ $id color '"#c0a070"'
 	set_ $id collision false
 	place kit/timer '2, 1, 6'; PREP_TIMER=$id
+	name_ 'Prep timer'
 	set_ $id interval 1
 	set_ $id repeats $PREP
 	set_ $id autostart true
@@ -274,6 +293,7 @@ EOF
 	# under the kill feed a column of what's on about the flag, no gap for
 	# what isn't
 	place kit/ui_panel '3, 1, 7'; PREP_ROW=$id
+	name_ 'Prep row'
 	set_ $id layout '"row"'
 	set_ $id gap 1
 	set_ $id width 0
@@ -282,6 +302,7 @@ EOF
 	set_ $id y -16
 	set_ $id shown true
 	place kit/ui_bar '3, 1, 6'; PREP_PIE=$id
+	name_ 'Prep pie'
 	set_ $id style '"shapes"'
 	set_ $id form '"pie"'
 	set_ $id panel $PREP_ROW
@@ -291,10 +312,12 @@ EOF
 	set_ $id width 4.5
 	set_ $id label '""'
 	text '3, 2, 6' 'Prep {value:int} s: stay in your zone' top_left 0; PREP_TEXT=$id
+	name_ 'Prep text'
 	set_ $id panel $PREP_ROW
 	set_ $id background '"none"'
 	set_ $id border '"none"'
 	place kit/ui_panel '4, 1, 7'; TOP=$id
+	name_ 'Top panel'
 	set_ $id layout '"column"'
 	set_ $id gap 0.6
 	set_ $id width 0
@@ -305,11 +328,14 @@ EOF
 	set_ $id y 0.5
 	set_ $id shown true
 	text '4, 1, 6' '{value}' top 0; STATUS=$id
+	name_ 'Round status'
 	set_ $id panel $TOP
 	text '8, 1, 6' 'Flag carried by {value}' top 0; HOLDER_TEXT=$id
+	name_ 'Holder text'
 	set_ $id panel $TOP
 	set_ $id shown false
 	place kit/ui_panel '5, 1, 7'; SIDE=$id
+	name_ 'Side panel'
 	set_ $id layout '"column"'
 	set_ $id gap 0.6
 	set_ $id width 0
@@ -321,8 +347,11 @@ EOF
 	set_ $id y 12
 	set_ $id shown true
 	sidebar '5, 1, 6' 'Flag home in {value:int} s' $RETURN '#1a9ab0'; LEFT_BAR=$id
+	name_ 'Flag home bar'
 	sidebar '6, 1, 6' 'Scoring {value:int}%' 100 '#30a030'; BAR=$id
+	name_ 'Scoring bar'
 	sidebar '7, 1, 6' 'Immune {value:int} s' $IMMUNITY '#5080d0'; IMMUNE_BAR=$id
+	name_ 'Immune bar'
 	link $PREP_TIMER left $PREP_TEXT value
 	link $PREP_TIMER progress $PREP_PIE value
 	link $PREP_TIMER done $PREP_ROW hide
@@ -346,6 +375,7 @@ EOF
 	link $FLAG home $HOLDER_TEXT hide
 	link $FLAG home $RULES respawn
 	place kit/starting_kit '9, 1, 6'
+	name_ 'Starting kit'
 	set_ $id items '"kit/planks 10"'
 	# The bomb: a kit/explosive saved as kitboss/bomb, put down by the
 	# placer from the item kitboss/bomb
@@ -360,6 +390,7 @@ EOF
 	set_ $id friendly_fire true
 	prefab_of $id bomb
 	place kit/placer '11, 1, 6'
+	name_ 'Bomb placer'
 	set_ $id item '"kitboss/bomb"'
 	set_ $id prefab '"kitboss/bomb"'
 	set_ $id signal '"arm"'
@@ -370,10 +401,12 @@ EOF
 		set_ $id item "\"${p%%:*}\""
 		prefab_of $id "${p##*:}_pickup"
 	done
-	for p in '21, 1, 0:pickaxe' '-21, 1, 0:pickaxe' '0, 1, 20:bomb' \
-			'0, 1, -20:knife'; do
+	for p in '21, 1, 0:pickaxe:Red pickaxes' '-21, 1, 0:pickaxe:Blue pickaxes' \
+			'0, 1, 20:bomb:Bombs' '0, 1, -20:knife:Knives'; do
 		place kit/spawner "${p%%:*}"
-		set_ $id prefab "\"kitboss/${p##*:}_pickup\""
+		name_ "${p##*:}"
+		p=${p#*:}
+		set_ $id prefab "\"kitboss/${p%%:*}_pickup\""
 		set_ $id every $EVERY
 		set_ $id max 1
 	done
