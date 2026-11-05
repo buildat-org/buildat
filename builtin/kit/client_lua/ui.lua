@@ -613,9 +613,11 @@ local function stack(r, V)
 	end
 end
 
--- The HUD in edit mode is the Walk view's: 2D and 3D draw the world alone
+-- The HUD in edit mode is the Walk and HUD views': 2D and 3D draw the world
+-- alone
 function M.hud_off()
-	return E.editing and M.view ~= nil and M.view() ~= "walk"
+	return E.editing and M.view ~= nil and M.view() ~= "walk" and
+			M.view() ~= "hud"
 end
 
 local function update()

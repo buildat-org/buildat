@@ -64,6 +64,7 @@ local KIT_KEYS = {
 	{id = "view_2d", label = "Editor: the 2D view", default = "F1"},
 	{id = "view_3d", label = "Editor: the 3D view", default = "F2"},
 	{id = "view_walk", label = "Editor: walking", default = "F3"},
+	{id = "view_hud", label = "Editor: adjusting the HUD", default = "F4"},
 	{id = "next", label = "Editor: the next object (Shift: back)",
 		default = "Tab"},
 	{id = "undo", label = "Editor: undo, with Ctrl", default = "Z"},

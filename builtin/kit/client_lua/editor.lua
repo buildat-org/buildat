@@ -137,7 +137,7 @@
 -- Credits... (everyone's) in extensions/
 -- pause_menu's menu and Kit's Escape first (kit.escape(): the context
 -- menu, a drag, placing, a pending link, the crosshair; true when taken).
--- kit.view() ("2d", "3d" or "walk": the app walks only in "walk" while
+-- kit.view() ("2d", "3d", "walk" or "hud": the app walks only in "walk" while
 -- editing), kit.looking() (the editor's crosshair: the app's mouse looks).
 -- kit.selected(): the id last selected, kept after edit mode.
 -- simplified: one edit per entity for a Delete of several; a duplicate
@@ -216,9 +216,10 @@ local RIGHT_CLICK_PX = 5
 -- [KIT_PLAN_3D_SKY] How high over the cut a plan's 3D view starts at most
 local PLAN_3D_MAX_H = 100
 local LONG_PRESS_US = 500000
-local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk"}
+local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk", hud = "HUD"}
 -- [KIT_INPUT_ACTIONS] each view's key's action (input.lua)
-local VIEW_KEYS = {["2d"] = "view_2d", ["3d"] = "view_3d", walk = "view_walk"}
+local VIEW_KEYS = {["2d"] = "view_2d", ["3d"] = "view_3d", walk = "view_walk",
+	hud = "view_hud"}
 -- How far a click looks for a voxel, in cells
 local MAX_RAY = 128
 
@@ -658,7 +659,7 @@ local function screen_size()
 end
 
 local function active_camera()
-	if not E.editing or S.view == "walk" then
+	if not E.editing or S.view == "walk" or S.view == "hud" then
 		return O.camera, O.camera:GetComponent("Camera")
 	elseif S.view == "2d" then
 		return cam2d_node, cam2d
@@ -893,6 +894,8 @@ local function window(halign, valign, x, y, horizontal)
 	w:SetAlignment(halign, valign)
 	w:SetPosition(x, y)
 	w.opacity = 0.92
+	-- [KIT_HUD_VIEW] No panels there; one rebuilt there stays out of the way
+	w.visible = S.view ~= "hud"
 	-- Under the menus (the pause menu over a wide inspector)
 	w.priority = -1
 	w.bringToFront = false
@@ -1043,7 +1046,7 @@ rebuild_bar = function()
 		end)
 	end
 	local views = {}
-	for _, v in ipairs({"2d", "3d", "walk"}) do
+	for _, v in ipairs({"2d", "3d", "walk", "hud"}) do
 		views[#views + 1] = {VIEW_NAMES[v] .. (S.touch and "" or
 				" (" .. M.key_name(VIEW_KEYS[v]) .. ")"), v}
 	end
@@ -2917,7 +2920,7 @@ end
 -- simplified: kit/ui_* by name; kit/flag and kit/arena declare a ui too but
 -- stand in the world, and so would a builder's type (no way to say yet)
 function NT.walk_for_ui(ui)
-	if ui and S.view ~= "walk" then
+	if ui and (S.view == "2d" or S.view == "3d") then
 		set_view("walk")
 	end
 end
@@ -3543,6 +3546,9 @@ end
 -- ---- The views ([FP] Views): set_view, the cameras placed each frame
 local function apply_viewport()
 	local want = E.editing and S.view or "walk"
+	if want == "hud" then
+		want = "walk"
+	end
 	if S.shown_view == want then
 		return
 	end
@@ -3600,8 +3606,18 @@ local function cam3d_from_app()
 end
 
 set_view = function(v)
-	if v ~= "2d" and v ~= "3d" and v ~= "walk" then
+	if not VIEW_NAMES[v] then
 		return
+	end
+	-- [KIT_HUD_VIEW] Adjusting the HUD: the walk camera held still, no
+	-- panels, the world not to be clicked; out to the view it came from
+	if v == "hud" and S.view ~= "hud" then
+		S.before_hud = S.view
+		close_menu()
+		drop("dialog")
+	end
+	for _, w in pairs(W) do
+		w.visible = v ~= "hud"
 	end
 	if v == "3d" and not S.pos then
 		cam3d_from_app()
@@ -3712,7 +3728,8 @@ function MEM.tick(dt)
 	local t = {mode = (E.editing or MEM.edit) and "edit" or "play"}
 	-- Until edit mode put them back, the remembered; out of it, the last
 	local live = E.editing and not MEM.view
-	t.view = live and S.view or (MEM.view or {}).view or old.view
+	t.view = live and (S.view == "hud" and S.before_hud or S.view) or
+			(MEM.view or {}).view or old.view
 	t.tab = live and NT.tab() or (MEM.view or {}).tab or old.tab
 	t.list_tab = S.list_tab
 	t.palette_tab = S.tab
@@ -4297,6 +4314,10 @@ end
 -- Escape's, the tools' first ([FP_ESC]: down one level): a dialog or the
 -- menu, a drag, placing, a pending link, the crosshair. True when taken
 function M.escape()
+	if S.view == "hud" then
+		set_view(S.before_hud)
+		return true
+	end
 	if W.dialog or W.ctx then
 		drop("dialog")
 		close_menu()
@@ -5546,10 +5567,33 @@ local function turn_selection(deg)
 	end
 end
 
+-- [KIT_HUD_VIEW] A click or a tap: two on nothing of the HUD leave the view.
+-- (ui.lua's own handlers select and drag what is of the HUD)
+function NT.hud_press(x, y)
+	if M.ui_at(x, y) then
+		S.hud_click = nil
+		return
+	end
+	local now, c = buildat.get_time_us(), S.hud_click
+	if c and now - c.t < 400000 and math.abs(x - c.x) + math.abs(y - c.y) <
+			px(24) then
+		S.hud_click = nil
+		log:info("kit editor: a double click out of the HUD view")
+		M.escape()
+	else
+		S.hud_click = {t = now, x = x, y = y}
+	end
+end
+
 local function key_down(key, ctrl, shift)
 	-- [KIT_INPUT_ACTIONS] the keys by their actions (input.lua)
 	local is = function(id) return M.key(id, key) end
-	if is("view_2d") then
+	if is("view_hud") then
+		return set_view("hud")
+	elseif S.view == "hud" and not (is("view_2d") or is("view_3d") or
+			is("view_walk")) then
+		return
+	elseif is("view_2d") then
 		return set_view("2d")
 	elseif is("view_3d") then
 		return set_view("3d")
@@ -5971,7 +6015,7 @@ local function draw_guide()
 		guide_hud.priority = 90
 	end
 	local s = ""
-	if E.editing and not (E.menu and E.menu.held()) then
+	if E.editing and S.view ~= "hud" and not (E.menu and E.menu.held()) then
 		s = guide_text(compute_guide())
 	else
 		ghost(nil)
@@ -6052,6 +6096,15 @@ local function draw_play_links()
 end
 
 local function draw()
+	if not E.editing and S.view == "hud" then
+		set_view(S.before_hud)
+	end
+	if E.editing and S.view == "hud" then
+		show_ports("out", nil)
+		show_ports("in", nil)
+		draw_guide()
+		return
+	end
 	if not E.editing then
 		show_ports("out", nil)
 		show_ports("in", nil)
@@ -6607,37 +6660,50 @@ function M.editor(options)
 		if not M.looking() then
 			S.mx, S.my = m.x, m.y
 		end
+		if S.view == "hud" and E.editing then
+			if data:GetInt("Button") == magic.MOUSEB_LEFT and not S.touch then
+				NT.hud_press(m.x, m.y)
+				-- (out of the view by it: its release is not the view's)
+				S.swallow_up = S.view ~= "hud" and magic.MOUSEB_LEFT or nil
+			end
+			return
+		end
 		mouse_down(data:GetInt("Button"))
 	end)
 	magic.SubscribeToEvent("MouseButtonUp", function(_, data)
+		if S.view == "hud" and E.editing then
+			return
+		end
 		mouse_up(data:GetInt("Button"))
 	end)
 	magic.SubscribeToEvent("MouseMove", function(_, data)
-		if not E.editing or S.touch then
+		if not E.editing or S.touch or S.view == "hud" then
 			return
 		end
 		mouse_move(data:GetInt("X"), data:GetInt("Y"), data:GetInt("DX"),
 				data:GetInt("DY"))
 	end)
 	magic.SubscribeToEvent("MouseWheel", function(_, data)
-		if S.touch then
+		if S.touch or (S.view == "hud" and E.editing) then
 			return
 		end
 		mouse_wheel(data:GetInt("Wheel"), data:GetInt("Qualifiers"))
 	end)
 	magic.SubscribeToEvent("TouchBegin", function(_, data)
-		if S.touch then
+		if S.touch and S.view == "hud" and E.editing then
+			NT.hud_press(data:GetInt("X"), data:GetInt("Y"))
+		elseif S.touch then
 			touch_begin(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"))
 		end
 	end)
 	magic.SubscribeToEvent("TouchMove", function(_, data)
-		if S.touch then
+		if S.touch and not (S.view == "hud" and E.editing) then
 			touch_move(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"),
 					data:GetInt("DX"), data:GetInt("DY"))
 		end
 	end)
 	magic.SubscribeToEvent("TouchEnd", function(_, data)
-		if S.touch then
+		if S.touch and not (S.view == "hud" and E.editing) then
 			touch_end(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"))
 		end
 	end)
