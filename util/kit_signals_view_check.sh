@@ -317,6 +317,11 @@ kit() # <log>: Kit's own lines, not the drive's
 	grep -a " I kit " "$1"
 }
 # 0. No position, in the Scene group
+# A bar going leaves the body at the left (the engine's ScrollView kept its view
+# size smaller than the panel); a notice comes under the editor's bar, which comes
+# after it
+grep -a "signals: a body off by" "$b" && fail "the links body sideways ($b)"
+wantp "$b" "notification: from y (6[0-9]|7[0-9]), the top's foot at"
 want "$s" "placed kit/ui_bar $BAR1, no position" "placed kit/timer $TIMER, no position" \
 	"placed kit/starting_kit $KID, no position under $FLAG"
 kit "$b" | grep -a "kit editor: list Scene (" | tail -1 | grep -aq " $BAR1, $BAR2, $BAR3, $TIMER, $LOGIC, $KID, $((PIE - 1)), $PIE\$" ||

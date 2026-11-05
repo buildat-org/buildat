@@ -132,6 +132,9 @@ local function put_body(view, build)
 	view.contentElement = body
 	body:SetPosition(0, 0)
 	view.viewPosition = magic.IntVector2(0, y)
+	if view.viewPosition.x ~= 0 then
+		log:warning("kit editor: signals: a body off by " .. view.viewPosition.x)
+	end
 	return body
 end
 

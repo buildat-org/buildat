@@ -1042,6 +1042,8 @@ rebuild_bar = function()
 	local w = E.editing and window(magic.HA_LEFT, magic.VA_TOP, 8, 4, true) or
 			window(magic.HA_CENTER, magic.VA_TOP, 0, 4, true)
 	W.bar = w
+	-- ui_utils' notices go under it
+	w:SetName("kit: bar")
 	-- [KIT_SESSIONS_1] the round's: the default's only
 	local kind = (E.session or {}).kind or "default"
 	local rounds = not E.persistent and kind == "default"

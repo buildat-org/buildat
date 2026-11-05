@@ -2504,6 +2504,28 @@ end
 local notification = nil
 local notification_update_subscribed = false
 
+-- Under the Server button at the top right (builtin/accounts'), which it
+-- covered ([KIT_EDIT_NOTICE_SERVER]), and Kit's bar, whose end it covered. Each
+-- frame: the notice that tells of edit rights comes before the bar it goes under
+local function notification_under_top()
+	local root = magic.ui.root
+	local foot = 0
+	for i = 0, root:GetNumChildren() - 1 do
+		-- nil for the client's own hidden UI
+		local c = root:GetChild(i)
+		if c and c.visible and (c:GetName() == "accounts: server button" or
+				c:GetName() == "kit: bar") then
+			foot = math.max(foot, c.position.y + c.height)
+		end
+	end
+	local y = foot > 0 and foot + 4 or 0
+	if y ~= notification.window.position.y then
+		notification.window:SetPosition(0, y)
+		log:info(string.format("notification: from y %d, the top's foot at %d",
+				y, foot))
+	end
+end
+
 function M.safe.show_notification(text, duration_s)
 	duration_s = duration_s or 2.0
 
@@ -2529,24 +2551,11 @@ function M.safe.show_notification(text, duration_s)
 
 	-- Align once the text is in; alignment does not follow a later resize
 	window:SetAlignment(HA_RIGHT, VA_TOP)
-	-- Under the Server button at the top right (builtin/accounts'), which
-	-- it covered ([KIT_EDIT_NOTICE_SERVER])
-	local root = magic.ui.root
-	for i = 0, root:GetNumChildren() - 1 do
-		-- nil for the client's own hidden UI
-		local c = root:GetChild(i)
-		if c and c.visible and c:GetName() == "accounts: server button" then
-			window:SetPosition(0, c.position.y + c.height + 4)
-			log:info(string.format("notification: from y %d, the Server "
-					.. "button's foot at %d", window.position.y,
-					c.position.y + c.height))
-		end
-	end
-
 	notification = {
 		window = window,
 		end_time_us = buildat.get_time_us() + duration_s * 1000000,
 	}
+	notification_under_top()
 
 	-- One subscription for the lifetime of the process. Unsubscribing from
 	-- inside a handler breaks extension/urho3d's global event multiplexer.
@@ -2557,6 +2566,9 @@ function M.safe.show_notification(text, duration_s)
 			if notification and buildat.get_time_us() >= notification.end_time_us then
 				notification.window:Remove()
 				notification = nil
+			end
+			if notification then
+				notification_under_top()
 			end
 		end)
 	end
