@@ -54,6 +54,8 @@ return {
 		c:log(c:name(by), "takes", n, c.params.item)
 		c:emit("taken", n)
 		c:sound(c.params.sound)
+		-- [KIT_PARTICLES]
+		c:event("pickup")
 		if c.state.left <= 0 then
 			c:remove(c.id)
 		else

@@ -117,6 +117,31 @@ local function show_body(b, on)
 	end
 end
 
+-- [KIT_FEEDBACK_EFFECTS] A hit's tint: for time s its whole body one unlit
+-- colour (its effects' c:effect flash_*); every body's own material back
+-- after. A material a colour, kept
+local flash_mats = {}
+local function flash_mat(color)
+	local m = flash_mats[color]
+	if not m then
+		m = magic.Material:new()
+		m:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/NoTextureUnlit.xml"))
+		m:SetShaderParameter("MatDiffColor", K.color(color, magic.Color(1, 1, 1)))
+		flash_mats[color] = m
+	end
+	return m
+end
+
+local function body_material(b, mat)
+	for _, pn in ipairs(ORDER) do
+		local cg = b[pn .. "_cg"]
+		if cg then
+			cg:SetMaterial(0, mat)
+		end
+	end
+end
+
 local function set_skin(b, color)
 	if b.color == color and b.mat then
 		return
@@ -125,12 +150,7 @@ local function set_skin(b, color)
 	b.mat = skin(color)
 	log:info("kit: player " .. b.id .. "'s body in " .. tostring(color or
 			"the skin's colours"))
-	for _, pn in ipairs(ORDER) do
-		local cg = b[pn .. "_cg"]
-		if cg then
-			cg:SetMaterial(0, b.mat)
-		end
-	end
+	body_material(b, b.mat)
 end
 
 local function quat(t, i)
@@ -301,6 +321,14 @@ local function mining_now(b, swings, dig, t)
 	return dig or t - b.swing_at < SWING
 end
 
+function M.flash_player(id, color, time)
+	local b = bodies[id]
+	if b then
+		b.flash_till, b.flash_color, b.flashing = now_s() + time, color, false
+		log:info("kit: player " .. id .. "'s body flashes " .. tostring(color))
+	end
+end
+
 -- Each frame, from controls.lua: this player's body at `own` (its feet;
 -- nil: none yet), yaw and pitch, its height, whether it is shown (posed
 -- all the same: what is attached to it is drawn on it); the others
@@ -334,6 +362,15 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 				show_body(b, (id ~= P.you or show_own == true) and
 						id ~= SP.target)
 				set_skin(b, teams[id])
+				if b.flash_till then
+					if t >= b.flash_till then
+						b.flash_till = nil
+						body_material(b, b.mat)
+					elseif not b.flashing then
+						body_material(b, flash_mat(b.flash_color))
+					end
+					b.flashing = b.flash_till ~= nil
+				end
 				local at, speed
 				local item, dig, sw
 				if id == P.you then

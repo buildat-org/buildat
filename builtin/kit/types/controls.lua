@@ -8,7 +8,9 @@
 -- fov, an offset, smoothing (seconds), roll (degrees), and the effects
 -- tint (#rrggbb) at tint_amount, vignette, blur and glitch (0...1). The
 -- inputs play for everyone (to = player: the player who set them off):
--- shake (an amount, decaying at shake_decay a second), fov (to a value
+-- shake (an amount, decaying at shake_decay a second; [KIT_FEEDBACK_EFFECTS]
+-- a position: shake_amount, on each client full within shake_near m of its
+-- camera, nothing from shake_far, 0 everywhere full), fov (to a value
 -- over fov_time; 0: back), glitch (for seconds), tint (a flash of a
 -- colour) and camera (a mode: "" the camera's own). Without it an app
 -- with Kit's controls walks with kit/walker in first person.
@@ -18,7 +20,13 @@ local function signal(c, input, value, by)
 	local who = tostring(by or ""):match("^player:") and c:name(by) or ""
 	local v = {n = n, by = who}
 	if input == "shake" then
-		v.amount = math.max(0, math.min(5, tonumber(value) or 1))
+		if type(value) == "table" then
+			v.amount = c.params.shake_amount
+			v.at = {tonumber(value[1]) or 0, tonumber(value[2]) or 0,
+				tonumber(value[3]) or 0}
+		else
+			v.amount = math.max(0, math.min(5, tonumber(value) or 1))
+		end
 	elseif input == "fov" then
 		v.value = math.max(0, math.min(170, tonumber(value) or 0))
 	elseif input == "glitch" then
@@ -73,6 +81,12 @@ return {
 		glitch = {cat = "look", type = "number", default = 0, min = 0, max = 1},
 		shake_decay = {cat = "look", type = "number", default = 3, min = 0.1,
 			max = 30},
+		shake_amount = {cat = "look", type = "number", default = 1, min = 0,
+			max = 5},
+		shake_near = {cat = "look", type = "number", default = 2, min = 0,
+			max = 200},
+		shake_far = {cat = "look", type = "number", default = 0, min = 0,
+			max = 500},
 		fov_time = {cat = "look", type = "number", default = 0.3, min = 0,
 			max = 10},
 		to = {type = "string", default = "all", choices = {"all", "player"}},

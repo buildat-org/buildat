@@ -97,6 +97,14 @@ static const int MAX_SET_CELLS = 4096;
 static const double MAX_BLAST_RADIUS = 9, MAX_BLAST_REACH = 32;
 static const size_t MAX_BLAST_TOLD = 64;
 static const double EXPLODE_RATE = 4, EXPLODE_BURST = 16;
+// [KIT_PARTICLES] c:effect: the particles of a burst, the colours and voxel
+// materials it shares them between, how far from a player it is sent at
+// most (m), and Kit's bursts a second (a server's, every round's together)
+// and their burst
+static const int MAX_EFFECT_PARTICLES = 256;
+static const unsigned MAX_EFFECT_KINDS = 4;
+static const double MAX_EFFECT_RANGE = 128;
+static const double EFFECT_RATE = 240, EFFECT_BURST = 480;
 // [KIT_VOXEL_STATES] A voxel_box's extent each way, a pattern parameter's
 // bytes and the voxel names in it at most
 static const int MAX_VOXEL_BOX = 16;
@@ -234,6 +242,9 @@ struct Type
 	// It reads every player entity (players = true); it is on each player
 	// entity, not placed (player = true)
 	bool players = false, player = false;
+	// [KIT_PARTICLES] The parameter saying which world event its on_event
+	// takes (events = "<param>"; "": none)
+	ss_ events;
 	// [KIT_TOOLS_1] A player's type builders also place on entities
 	// (placeable = true: kit/health); it is health (health = true: on_hit,
 	// what a hit damages), equipment (equipment = true: the hands slot,
@@ -1114,6 +1125,9 @@ struct Module: public interface::Module, public Interface
 	// [KIT_CTF] c:explode's allowance (EXPLODE_RATE), time_us
 	double m_blast_tokens = EXPLODE_BURST;
 	int64_t m_blast_at = 0;
+	// [KIT_PARTICLES] c:effect's allowance (EFFECT_RATE), time_us
+	double m_effect_tokens = EFFECT_BURST;
+	int64_t m_effect_at = 0;
 	// The editor: edit rights the app gave or took (set_editor) over the
 	// accounts' default, the types an editor places (each of Kit's
 	// and the app's that loads), each editor's undo, and the sections Kit owns
@@ -1583,6 +1597,7 @@ struct Module: public interface::Module, public Interface
 		t.team = t.decl.get("team").is_true();
 		t.teams = t.decl.get("teams").is_true();
 		t.regions = t.decl.get("regions").is_true();
+		t.events = jstr(t.decl, "events");
 		// Its client part, beside it
 		const ss_ client = pkg ? jstr(pt->second, "client") :
 				read_file(dir+"/"+short_name+".client.lua");
@@ -8601,6 +8616,13 @@ struct Module: public interface::Module, public Interface
 			play_sound(jstr_at(sounds.at(i), 0), in_scene ? &scene : nullptr,
 					at ? w : nullptr, "entity "+itos(e.id)+"'s "+type);
 		}
+		// [KIT_PARTICLES] c:effect, c:event
+		const json::Value &effects = fx.get("effects");
+		for(unsigned i = 0; i < effects.size(); i++)
+			effect_fx(e, type, effects.at(i));
+		const json::Value &events = fx.get("events");
+		for(unsigned i = 0; i < events.size(); i++)
+			event_fx(e, type, events.at(i), r.by);
 		const json::Value &vx = fx.get("voxels");
 		if(vx.is_array() && vx.size())
 			set_voxels(e, in, vx, r.by, t.builds && pid ? 'b' : 'g');
@@ -14577,6 +14599,323 @@ struct Module: public interface::Module, public Interface
 		return false;
 	}
 
+	// ---- [KIT_PARTICLES] World events and effects (api.h)
+
+	// A world event ({kind, pos, ...}) to on_event(c, ev, by) of the
+	// instances asking for its kind (their `events` parameter) in the scene
+	// and with no place on the root. Queued: it runs in this tick
+	void fire_event(const ss_ &scene, const json::Value &ev, const ss_ &by)
+	{
+		const ss_ kind = jstr(ev, "kind");
+		for(auto &e : m_entities){
+			ss_ es;
+			if(!(e.second.parent == 1 && !e.second.has_pos) &&
+					!(e.second.has_pos && e.second.kind != "player" &&
+					scene_of(e.second, &es) && es == scene))
+				continue;
+			for(size_t i = 0; i < e.second.comps.size(); i++){
+				const Instance &in = e.second.comps[i];
+				const Type &t = m_types[in.type];
+				if(t.events.empty() || !t.handlers.count("on_event") ||
+						jstr(in.params, t.events.c_str()) != kind)
+					continue;
+				Run r;
+				r.entity = e.first;
+				r.comp = i;
+				r.handler = "on_event";
+				r.by = by;
+				r.args.append(ev);
+				r.args.append(by);
+				queue_run(r);
+			}
+		}
+	}
+
+	// A player's dig or place, as world events
+	void voxel_event(size_t peer, const char *kind, int x, int y, int z,
+			const ss_ &voxel)
+	{
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || pi->second.editing ||
+				!m_session.running)
+			return;
+		const double c[3] = {(double)x, (double)y, (double)z};
+		json::Value ev = json::object();
+		ev.set("kind", kind);
+		ev.set("pos", point(c));
+		json::Value vs = json::array();
+		vs.append(world::material_of(voxel));
+		ev.set("voxels", vs);
+		ev.set("player", (int64_t)pi->second.player);
+		fire_event(pi->second.scene, ev, pi->second.player ?
+				"player:"+itos(pi->second.player) : ss_("app"));
+	}
+
+	// A hit that came to something (apply_hit), as a world event: where it
+	// landed, how much of the target's health (share, 0...1), and with a
+	// hit.from the way its spray goes (dir): towards it, or with hit.away
+	// away from it
+	void hit_event(uint64_t target, const json::Value &hit, double amount,
+			const ss_ &by)
+	{
+		auto it = m_entities.find(target);
+		if(it == m_entities.end())
+			return;
+		double w[3];
+		ss_ scene;
+		const size_t peer = it->second.kind == "player" ?
+				peer_of_player(target) : 0;
+		if(peer){
+			const Peer &p = m_peers[peer];
+			w[0] = p.pos[0], w[1] = p.pos[1] + 0.4, w[2] = p.pos[2];
+			scene = p.scene;
+		} else if(it->second.has_pos && scene_of(it->second, &scene)){
+			world_of(it->second, w);
+		} else {
+			return;
+		}
+		json::Value ev = json::object();
+		ev.set("kind", "hit");
+		ev.set("pos", point(w));
+		ev.set("amount", amount);
+		const double max = health_max(target);
+		ev.set("share", max > 0 ? std::min(1.0, amount / max) : 1.0);
+		ev.set("type", jstr(hit, "type"));
+		if(peer)
+			ev.set("player", (int64_t)target);
+		const json::Value &from = hit.get("from");
+		if(from.size() == 3 && from.at(0u).is_number() &&
+				from.at(1u).is_number() && from.at(2u).is_number()){
+			double d[3], l = 0;
+			for(unsigned k = 0; k < 3; k++){
+				d[k] = from.at(k).as_number() - w[k];
+				if(hit.get("away").is_true())
+					d[k] = -d[k];
+				l += d[k] * d[k];
+			}
+			l = std::sqrt(l);
+			if(l > 1e-3){
+				for(double &v : d)
+					v /= l;
+				ev.set("dir", point(d));
+			}
+			ev.set("from", from);
+		}
+		fire_event(scene, ev, by);
+	}
+
+	// c:event(kind): a type's own world event, not one of Kit's
+	void event_fx(const Entity &e, const ss_ &ctype, const json::Value &x,
+			const ss_ &by)
+	{
+		const ss_ kind = jstr_at(x, 0);
+		ss_ scene;
+		if(!name_ok(kind) || kind == "dig" || kind == "place" ||
+				kind == "hit" || kind == "blast" || kind == "respawn" ||
+				!scene_of(e, &scene)){
+			log_w(MODULE, "Entity %s's %s: event %s refused",
+					cs(itos(e.id)), cs(ctype), cs(kind));
+			return;
+		}
+		double w[3] = {0, 0, 0};
+		if(e.has_pos)
+			world_of(e, w);
+		json::Value ev = json::object();
+		ev.set("kind", kind);
+		ev.set("pos", point(w));
+		const uint64_t pid = player_id(by);
+		if(pid)
+			ev.set("player", (int64_t)pid);
+		fire_event(scene, ev, by);
+	}
+
+	// c:effect{...}, its fields as kit/effect's parameters (api.h): each
+	// clamped here, for it comes from a composition, and sent to the
+	// players of the scene near enough; the arc to its player alone
+	void effect_fx(const Entity &e, const ss_ &ctype, const json::Value &x)
+	{
+		const ss_ who = "Entity "+itos(e.id)+"'s "+ctype;
+		const int64_t now = interface::os::time_us();
+		m_effect_tokens = std::min(EFFECT_BURST, m_effect_tokens +
+				(now - m_effect_at) * 1e-6 * EFFECT_RATE);
+		m_effect_at = now;
+		if(m_effect_tokens < 1){
+			log_v(MODULE, "%s: effect refused: past %g bursts a second",
+					cs(who), EFFECT_RATE);
+			return;
+		}
+		m_effect_tokens -= 1;
+		if(!x.is_object())
+			return;
+		auto num = [&](const char *k, double def, double lo, double hi){
+			const json::Value &v = x.get(k);
+			const double d = v.is_number() ? v.as_number() : def;
+			return std::isfinite(d) ? std::max(lo, std::min(hi, d)) : def;
+		};
+		auto vec = [&](const char *k, double out[3], double lim){
+			const json::Value &v = x.get(k);
+			if(v.size() != 3)
+				return false;
+			for(unsigned i = 0; i < 3; i++){
+				const json::Value &n = v.at(i);
+				if(!n.is_number() || !std::isfinite(n.as_number()) ||
+						std::fabs(n.as_number()) > lim)
+					return false;
+				out[i] = n.as_number();
+			}
+			return true;
+		};
+		auto color_ok = [](const ss_ &c){
+			if(c.size() != 7 && c.size() != 9)
+				return false;
+			for(size_t i = 1; i < c.size(); i++)
+				if(!isxdigit((unsigned char)c[i]))
+					return false;
+			return c[0] == '#';
+		};
+		// Where: an entity's (the clients follow its look), the point, its own
+		double at[3], off[3] = {0, 0, 0};
+		ss_ scene;
+		const Entity *on = &e;
+		const json::Value &ent = x.get("entity");
+		if(ent.is_number() && ent.as_number() > 0){
+			auto f = m_entities.find((uint64_t)ent.as_number());
+			if(f == m_entities.end() || !f->second.has_pos)
+				return;
+			on = &f->second;
+		}
+		const bool in_scene = scene_of(*on, &scene) != nullptr ||
+				!scene.empty();
+		if(on != &e || !vec("at", at, MAX_COORD)){
+			if(!on->has_pos){
+				log_i(MODULE, "%s: effect: no place to be at", cs(who));
+				return;
+			}
+			world_of(*on, at);
+		}
+		vec("offset", off, 16);
+		for(int k = 0; k < 3; k++)
+			at[k] += off[k];
+		json::Value j = json::object();
+		j.set("at", point(at));
+		if(on != &e){
+			j.set("entity", (int64_t)on->id);
+			j.set("offset", point(off));
+		}
+		// The particles
+		int count = (int)num("count", 0, 0, MAX_EFFECT_PARTICLES);
+		ss_ shape = jstr(x, "shape", "square");
+		if(shape != "square" && shape != "round" && shape != "ring" &&
+				shape != "voxel")
+			shape = "square";
+		json::Value colors = json::array(), voxels = json::array();
+		const json::Value &cl = x.get("colors");
+		for(unsigned i = 0; i < cl.size() && i < MAX_EFFECT_KINDS; i++)
+			if(cl.at(i).is_string() && color_ok(cl.at(i).as_string()))
+				colors.append(cl.at(i));
+		if(shape == "voxel"){
+			const json::Value &vl = x.get("voxels");
+			for(unsigned i = 0; i < vl.size() && i < MAX_EFFECT_KINDS; i++)
+				if(vl.at(i).is_string() && material_named(vl.at(i).as_string()))
+					voxels.append(vl.at(i));
+			if(!voxels.size())
+				count = 0;
+		}
+		if(count > 0){
+			j.set("count", (int64_t)count);
+			j.set("shape", shape);
+			j.set("colors", colors);
+			j.set("voxels", voxels);
+			double dir[3] = {0, 1, 0};
+			vec("dir", dir, 1e6);
+			const double l = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] +
+					dir[2] * dir[2]);
+			if(l > 1e-6){
+				for(double &v : dir)
+					v /= l;
+			} else {
+				dir[0] = dir[2] = 0, dir[1] = 1;
+			}
+			j.set("dir", point(dir));
+			j.set("spread", num("spread", 180, 0, 180));
+			const double smin = num("speed_min", 1, 0, 60);
+			j.set("speed_min", smin);
+			j.set("speed_max", num("speed_max", smin, smin, 60));
+			j.set("gravity", num("gravity", 0, -50, 50));
+			j.set("drag", num("drag", 0, 0, 20));
+			const double tmin = num("ttl_min", 1, 0.05, 10);
+			j.set("ttl_min", tmin);
+			j.set("ttl_max", num("ttl_max", tmin, tmin, 10));
+			const double zmin = num("size_min", 0.1, 0.01, 8);
+			j.set("size_min", zmin);
+			j.set("size_max", num("size_max", zmin, zmin, 8));
+			j.set("grow", num("grow", 0, -20, 100));
+			j.set("fade", num("fade", 0.3, 0, 1));
+			j.set("box", num("box", 0, 0, 16));
+			j.set("spin", num("spin", 0, 0, 1440));
+			j.set("land", x.get("land").is_true());
+		}
+		// The light, without a shadow ever
+		const double ltime = num("light_time", 0, 0, 2);
+		const ss_ lc = jstr(x, "light_color");
+		if(ltime > 0 && color_ok(lc)){
+			j.set("light_color", lc);
+			j.set("light_time", ltime);
+			j.set("light_range", num("light_range", 8, 0.5, 40));
+			j.set("light_brightness", num("light_brightness", 2, 0, 8));
+		}
+		// The tint on a player's body, the arc on their screen
+		const json::Value &pl = x.get("player");
+		const uint64_t player = pl.is_number() && pl.as_number() > 0 ?
+				(uint64_t)pl.as_number() : 0;
+		const double ftime = num("flash_time", 0, 0, 2);
+		const ss_ fc = jstr(x, "flash_color");
+		if(player && ftime > 0 && color_ok(fc)){
+			j.set("flash_player", (int64_t)player);
+			j.set("flash_color", fc);
+			j.set("flash_time", ftime);
+		}
+		const double atime = num("arc_time", 0, 0, 10);
+		const ss_ ac = jstr(x, "arc_color");
+		double from[3];
+		if(player && atime > 0 && color_ok(ac) &&
+				vec("arc_from", from, MAX_COORD)){
+			const size_t ap = peer_of_player(player);
+			if(ap){
+				json::Value a = json::object();
+				a.set("from", point(from));
+				a.set("color", ac);
+				a.set("time", atime);
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->send(ap, "kit:effect_arc", a.stringify());
+				});
+				log_v(MODULE, "%s: a hit's arc to player %s", cs(who),
+						cs(itos(player)));
+			}
+		}
+		if(j.get("count").is_undefined() &&
+				j.get("light_color").is_undefined() &&
+				j.get("flash_color").is_undefined())
+			return;
+		const ss_ data = j.stringify();
+		size_t n = 0;
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &p : m_peers){
+				if(in_scene && p.second.scene != scene)
+					continue;
+				const double dx = p.second.pos[0] - at[0], dy = p.second.pos[1] -
+						at[1], dz = p.second.pos[2] - at[2];
+				if(dx * dx + dy * dy + dz * dz >
+						MAX_EFFECT_RANGE * MAX_EFFECT_RANGE)
+					continue;
+				inetwork->send(p.first, "kit:effect", data);
+				n++;
+			}
+		});
+		log_v(MODULE, "%s: an effect of %i %s at (%.1f,%.1f,%.1f) to %zu peers",
+				cs(who), count, cs(shape), at[0], at[1], at[2], n);
+	}
+
 	// A hit on an entity: its components' modify_hit hooks in their order,
 	// each given the hit ({amount, type, item, crit}) and returning it as
 	// it goes on (nil: as it was; an amount of 0 ends it: armour, a
@@ -14629,6 +14968,7 @@ struct Module: public interface::Module, public Interface
 			r.args.append(hit);
 			r.args.append(by);
 			run(r);
+			hit_event(target, hit, amount, by);
 			return amount;
 		}
 		return 0;
@@ -14905,6 +15245,9 @@ struct Module: public interface::Module, public Interface
 				ss_("blast");
 		// The cells: those in the sphere, by their voxel's resistance
 		sv_<pv::Vector3DInt32> cells;
+		// [KIT_PARTICLES] (the blast event's voxels: the commonest of those
+		// it may carve)
+		std::map<ss_, int> blown;
 		const int r = (int)std::ceil(radius);
 		const pv::Vector3DInt32 c0 = cell_of(at);
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
@@ -14937,6 +15280,7 @@ struct Module: public interface::Module, public Interface
 						if(resist > 0 && resist >= power * (1 - d / radius))
 							continue;
 						cells.push_back(q);
+						blown[world::material_of(def->name.block_name)]++;
 					}
 		});
 		size_t kept = 0, carved = 0;
@@ -14966,6 +15310,23 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "%s explodes at (%.2f,%.2f,%.2f) radius %g power %g: "
 				"%zu cells to air, %zu protected", cs(who), at[0], at[1], at[2],
 				radius, power, carved, kept);
+		// [KIT_PARTICLES] The blast as a world event
+		{
+			sv_<std::pair<int, ss_>> most;
+			for(auto &b : blown)
+				most.push_back(std::make_pair(-b.second, b.first));
+			std::sort(most.begin(), most.end());
+			json::Value vs = json::array();
+			for(size_t i = 0; i < most.size() && i < MAX_EFFECT_KINDS; i++)
+				vs.append(most[i].second);
+			json::Value ev = json::object();
+			ev.set("kind", "blast");
+			ev.set("pos", point(at));
+			ev.set("radius", radius);
+			ev.set("voxels", vs);
+			ev.set("cells", (int64_t)carved);
+			fire_event(scene, ev, by);
+		}
 		// The players: their bodies' middle (Peer::pos is the bottom + 0.5)
 		const uint64_t me = player_id(by);
 		sv_<std::pair<uint64_t, double>> hits;
@@ -14995,6 +15356,8 @@ struct Module: public interface::Module, public Interface
 			hit.set("type", htype);
 			hit.set("item", ss_());
 			hit.set("crit", false);
+			hit.set("from", point(at));
+			hit.set("away", true);
 			log_i(MODULE, "%s's blast hits %s: %g %s", cs(who),
 					cs(pe->second.name), hit.get("amount").as_number(),
 					cs(htype));
@@ -15061,6 +15424,13 @@ struct Module: public interface::Module, public Interface
 		world_of(*at, w, &wy);
 		log_i(MODULE, "%s respawns at entity %s", cs(who), cs(itos(at->id)));
 		to_scene(peer, "", w[0], w[1], w[2], wy);
+		// [KIT_PARTICLES] simplified: not at the app's own spawn, above, whose
+		// place the app decides later
+		json::Value ev = json::object();
+		ev.set("kind", "respawn");
+		ev.set("pos", point(w));
+		ev.set("player", (int64_t)player);
+		fire_event(scene, ev, "player:"+itos(player));
 	}
 
 	// A player's knockback: their body's speed added to, away along the
@@ -15306,6 +15676,9 @@ struct Module: public interface::Module, public Interface
 		hit.set("type", jstr(sheet, "damage_type", "normal"));
 		hit.set("item", item);
 		hit.set("crit", crit);
+		// [KIT_PARTICLES] (their body's middle, as hit_event's target's)
+		const double hf[3] = {p.pos[0], p.pos[1] + 0.4, p.pos[2]};
+		hit.set("from", point(hf));
 		const ss_ by = "player:"+itos(p.player);
 		log_i(MODULE, "%s hits entity %s with %s: %g %s%s", cs(p.name),
 				cs(itos(id)), cs(item), amount, cs(jstr(hit, "type")),
@@ -16011,6 +16384,7 @@ struct Module: public interface::Module, public Interface
 		auto pi = m_peers.find(peer);
 		const world::Material *m = material_named(voxel);
 		voxel_sound(peer, x, y, z, m ? m->sound_dig : ss_(), voxel+"'s dig");
+		voxel_event(peer, "dig", x, y, z, voxel);
 		// [KIT_INVENTORY_PLAY] a voxel with no group (the app's own) drops
 		// itself at any level
 		if(!m_hosted || pi == m_peers.end() || voxel.empty() ||
@@ -16077,6 +16451,7 @@ struct Module: public interface::Module, public Interface
 		const world::Material *mt = material_named(voxel);
 		voxel_sound(peer, x, y, z, mt ? mt->sound_place : ss_(),
 				voxel+"'s place");
+		voxel_event(peer, "place", x, y, z, voxel);
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || pi->second.editing ||
 				!m_session.running || !inventory_mode() || !pi->second.player)

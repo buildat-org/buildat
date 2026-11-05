@@ -333,8 +333,20 @@ end)
 local function signal(key, v)
 	local par = params()
 	if key == "shake" then
-		C.shake = math.max(C.shake, tonumber(v.amount) or 0)
-		log:info("kit: camera shake " .. tostring(v.amount))
+		local a = tonumber(v.amount) or 0
+		-- [KIT_FEEDBACK_EFFECTS] From a place: weaker with the distance
+		local far = tonumber(par.shake_far) or 0
+		if type(v.at) == "table" and far > 0 and O.camera then
+			local p = O.camera.worldPosition
+			local dx, dy, dz = p.x - (tonumber(v.at[1]) or 0), p.y -
+					(tonumber(v.at[2]) or 0), p.z - (tonumber(v.at[3]) or 0)
+			local near = tonumber(par.shake_near) or 0
+			local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+			a = a * math.max(0, math.min(1, (far - d) / math.max(far - near, 1e-3)))
+			log:info(string.format("kit: camera shake from %.1f m", d))
+		end
+		C.shake = math.max(C.shake, a)
+		log:info("kit: camera shake " .. tostring(a))
 	elseif key == "fov" then
 		local to = tonumber(v.value) or 0
 		if to <= 0 then
