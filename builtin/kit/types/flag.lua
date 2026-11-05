@@ -1,7 +1,10 @@
 -- A carriable objective ([KIT_CTF]): a flag, a relic, a ball to carry
 -- home. It starts at its own place (home). A player takes it -- at home by
 -- `take_home`, lying placed by `take_placed`: "click" (a use of it) or
--- "near" (within `home_range` / `placed_range` m of it; 1: a touch) --
+-- "near" (within `home_range` / `placed_range` m of it, 1: a touch; or a
+-- use of it: whichever the player prefers) -- a use from within
+-- `click_range` m, where a client's pointer shows it as usable (use_range),
+-- and only while one takes it (use_when) --
 -- and carries it, it following them `lift` m over their feet, they moving
 -- at `speed` times their speed (c:speed; reset as it leaves them). For
 -- `immunity` s after a take nobody takes it from them; then `steal`:
@@ -254,6 +257,8 @@ local function poll(c)
 	local dt = c.params.poll
 	c:after(dt, "poll")
 	local s = c.state
+	-- simplified: as of the last poll, what a pointer shows up to `poll` s late
+	s.takeable = taking(c) ~= nil
 	if s.where == "carried" then
 		local h = player(c, s.holder)
 		if not present(h) then
@@ -306,6 +311,8 @@ return {
 		label = "param:place_label"}},
 	-- (a right click by the player in its state right_use uses it)
 	right_use = "right_use",
+	use_range = "param:click_range",
+	use_when = "takeable",
 	-- The holder's hint: `own`'s, theirs alone
 	ui = {kind = "text", text = "{value}", anchor = "param:hud_anchor",
 		x = "param:hud_x", y = "param:hud_y", width = "param:hud_width",
@@ -338,6 +345,7 @@ return {
 		take_placed = {type = "string", default = "click",
 			choices = {"click", "near"}},
 		placed_range = {type = "number", default = 1, min = 0, max = 32},
+		click_range = {type = "number", default = 2, min = 0, max = 32},
 		steal = {type = "string", default = "opponents",
 			choices = {"opponents", "anyone", "none"}},
 		steal_range = {type = "number", default = 2, min = 0, max = 32},
@@ -370,6 +378,7 @@ return {
 		-- "home", "carried" or "placed"
 		where = {default = "home", shared = true},
 		enabled = {default = true, shared = true},
+		takeable = {default = false, shared = true},
 		home = {default = false},
 		holder = {default = 0, shared = true},
 		right_use = {default = 0, shared = true},
@@ -403,6 +412,7 @@ return {
 			c:move(h)
 		end
 		c.state.enabled = c.params.enabled
+		c.state.takeable = taking(c) ~= nil
 		c:after(c.params.poll, "poll")
 		c:after(1, "clock")
 	end,
@@ -442,7 +452,7 @@ return {
 					c.params.place_by == "right_click" then
 				place(c, p)
 			end
-		elseif taking(c) == "click" then
+		elseif taking(c) then
 			take(c, p)
 		end
 	end,

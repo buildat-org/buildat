@@ -7694,6 +7694,17 @@ struct Module: public interface::Module, public Interface
 		return l;
 	}
 
+	// [KIT_FLAG_CLICK_RANGE] A type's own `use_range` ("param:<name>"): its
+	// parameter's value, -1 with none
+	double use_range_of(const Instance &in)
+	{
+		const json::Value &u = m_types[in.type].decl.get("use_range");
+		if(!u.is_string() || u.as_string().compare(0, 6, "param:") != 0)
+			return -1;
+		const json::Value &v = in.params.get(u.as_string().substr(6));
+		return v.is_number() ? v.as_number() : -1;
+	}
+
 	// What its types show every client: the first look and hud
 	json::Value show_of(const Entity &e)
 	{
@@ -7718,6 +7729,13 @@ struct Module: public interface::Module, public Interface
 			if(show.get("right_use").is_undefined() &&
 					d.get("right_use").is_string())
 				show.set("right_use", d.get("right_use"));
+			// [KIT_FLAG_CLICK_RANGE] where and when a client's pointer shows
+			// it as usable
+			if(use_range_of(in) >= 0)
+				show.set("use_range", use_range_of(in));
+			if(show.get("use_when").is_undefined() &&
+					d.get("use_when").is_string())
+				show.set("use_when", d.get("use_when"));
 			// [KIT_UI_COMPONENTS] Its UI, "param:<name>" as a look's
 			if(show.get("ui").is_undefined() && d.get("ui").is_object()){
 				json::Value u = look_of(in, d.get("ui"));
@@ -13565,6 +13583,15 @@ struct Module: public interface::Module, public Interface
 				continue;
 			if(!may_use(peer, e2, in, &why))
 				continue;
+			// [KIT_FLAG_CLICK_RANGE] Not what they carry: its place is
+			// up to ATTACH_US behind them
+			const double ur = use_range_of(in);
+			auto ca = m_attached.find(id);
+			if(ur >= 0 && d2 > ur * ur && (ca == m_attached.end() ||
+					ca->second.player != player_id(by))){
+				why = "Too far away";
+				continue;
+			}
 			// [KIT] stage 4h: a seat taken
 			if(!seated && m_host.controls && m_types[in.type].decl.get("seat").
 					is_true() && is_movement(in.type) && m_bodies[peer].put &&

@@ -759,6 +759,11 @@ namespace interface
 // entity (kit:use, its on_use) instead of placing a voxel (the client's
 // pointer target's right); kit/flag's while carried with place_by
 // "right_click".
+// [KIT_FLAG_CLICK_RANGE] A type's `use_range` ("param:<name>") is how far
+// it is used from, the server's check and a client's pointer alike, below
+// the host's own; its `use_when` names a shared state of its own: while
+// that is false a client's pointer goes through it. kit/flag's click_range,
+// 2 m by default.
 // [KIT_ARENA_SCORE_TO_WIN] `score_to_win` (0 none): a team with that many
 // points wins the round, whichever of it and the time up comes first.
 // kit/timer's output `left`: the seconds left,

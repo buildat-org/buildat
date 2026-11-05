@@ -1581,9 +1581,20 @@ function M.play_target(origin, dir, reach, solid)
 			P.nodes[P.you] and P.nodes[P.you].node.position
 	if me and P.use_range and not (M.clicks_move and M.clicks_move()) then
 		for nid, n in pairs(P.nodes) do
-			if (n.node.position - me):Length() > P.use_range then
+			-- [KIT_FLAG_CLICK_RANGE] its type's own, if it has one
+			local r = math.min(P.use_range, tonumber(show_of(n).use_range) or
+					P.use_range)
+			if (n.node.position - me):Length() > r then
 				skip[nid] = true
 			end
+		end
+	end
+	-- [KIT_FLAG_CLICK_RANGE] One that a click does nothing to just now: the
+	-- ray goes through
+	for nid, n in pairs(P.nodes) do
+		local k = show_of(n).use_when
+		if type(k) == "string" and parse(n.node:GetVar("kit:" .. k)) == false then
+			skip[nid] = true
 		end
 	end
 	local id, et, usable = M.pick_entity(origin, dir, reach, skip)

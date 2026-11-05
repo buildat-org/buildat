@@ -408,7 +408,7 @@ warps() # <who> <p1>..<p5>: a map warp of theirs
 extras()
 {
 	# Each one's: Y U I O P to p1..p5
-	warps kitboss '0, 1, 0' '0, 1, -20' '0, 1, 0' '30, 1, 4' '-30, 1, 2'
+	warps kitboss '0, 1, 0' '0, 1, -20' '4, 1, 0' '30, 1, 4' '-30, 1, 2'
 	warps kitbob '0, 1, 20' '1, 1, 1' '0, 1, 0' '0, 1, 0' '-30, 1, 2'
 	warps kitcat '0, 1, 0' '21, 1, 0' '-1, 1, 0' '0, 1, 20' '3, 1, 5'
 	ed '{"op": "set_voxel", "pos": [21, 1, 2], "voxel": "kit/stone"}'
@@ -507,7 +507,16 @@ EOF
 	cat <<EOF
 wait_log 60000 Overtime
 delay 500
-keypress Y
+keypress I
+delay 500
+look_dir -1 -0.3 0
+frames 5
+event kit_use $FLAG
+sync 2000
+keydown W
+wait_log 5000 kit: points at use $FLAG
+keyup W
+event kit_use $FLAG
 wait_log 10000 ${SHOWN}Flag carried by Red
 look_dir 1 0 0
 frames 5
@@ -704,7 +713,10 @@ assert m and float(m.group(2)) < 1, "the flag did not fall: " + (m.group(0) if m
 assert "has the most points" in s1 and "Blue wins!" in s1
 # 7. overtime
 assert "time up, tied: Red 0 : Blue 0 -- overtime" in s2
-assert F + "taken by kitboss from home (Red)" in s2
+# (a use of it from 4 m refused; walked into click_range, the pointer shows
+# it, a use takes it; its take_home "near", home_range 1)
+assert "refused: Too far away" in s2, "a use from 4 m not refused"
+assert re.search(r"Entity %s used by kitboss[^\0]*?" % sys.argv[2] + re.escape(F) + r"taken by kitboss from home \(Red\)", s2), "not taken by a use from afar"
 assert "Red wins!" in s2
 print("  ok")
 PY
