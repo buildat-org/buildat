@@ -1608,7 +1608,7 @@ wait_log_any 60000 player physics enabled
 wait_log_any 10000 the voxel registry from the served file
 wait_log 120000 the voxel registry from the served file
 look_dir 0 -1 0.6
-wait_log 60000 drawn again
+wait_log_any 60000 drawn again
 frames 10
 screenshot @T@/voxel_watched.png
 quit
