@@ -1773,6 +1773,7 @@ function NT.components(w)
 				S.placing = {type = it.type, prefab = it.prefab, label = it.label,
 						key = it.key}
 				log:info("kit editor: placing " .. it.label)
+				NT.palette_chosen(it)
 			end
 			palette()
 		end, armed)
@@ -2911,6 +2912,28 @@ people = function()
 end
 
 -- The selection: a click's, Shift's adding or taking out, a box's
+-- [KIT_HUD_WALK_ONLY] The HUD is the Walk view's: to choose a UI component
+-- is to go there.
+-- simplified: kit/ui_* by name; kit/flag and kit/arena declare a ui too but
+-- stand in the world, and so would a builder's type (no way to say yet)
+function NT.walk_for_ui(ui)
+	if ui and S.view ~= "walk" then
+		set_view("walk")
+	end
+end
+
+function NT.is_ui(t)
+	return type(t) == "string" and t:sub(1, 7) == "kit/ui_"
+end
+
+function NT.palette_chosen(item)
+	local ui = NT.is_ui(item.type)
+	for _, n in ipairs(item.prefab and E.state.prefabs_ui or {}) do
+		ui = ui or n == item.prefab
+	end
+	NT.walk_for_ui(ui)
+end
+
 local function select(id, add, by_tab)
 	if not add then
 		S.sel = {}
@@ -2938,6 +2961,12 @@ local function select(id, add, by_tab)
 	log:info("kit editor: " .. (out and "took out " or "selected ") ..
 			tostring(id or "none") .. " (" .. tostring(e and e.name) .. ")" ..
 			(n > 1 and ", " .. n .. " in the selection" or ""))
+	-- (not while Tab goes through them, nor a click adding to a selection)
+	if e and not add and not by_tab then
+		for _, c in ipairs(e.components or {}) do
+			NT.walk_for_ui(NT.is_ui(c.type))
+		end
+	end
 	focus()
 	refresh()
 end
@@ -5149,6 +5178,7 @@ local function mouse_move(x, y, dx, dy)
 			px(DRAG_PX) and not palette_at(x, y) then
 		S.drag = {kind = "palette", item = pp.item}
 		S.palette_dragged = true
+		NT.palette_chosen(pp.item)
 		log:info("kit editor: dragging " .. pp.item.label .. " from the palette")
 	end
 	if S.press and not S.drag and math.abs(x - S.press.mx) +
@@ -5328,6 +5358,7 @@ local function touch_move(id, x, y, dx, dy)
 		S.mx, S.my = x, y
 		if not S.drag and f.moved and not palette_at(x, y) then
 			S.drag = {kind = "palette", item = pp.item}
+			NT.palette_chosen(pp.item)
 			log:info("kit editor: dragging " .. pp.item.label .. " from the palette")
 		end
 		return

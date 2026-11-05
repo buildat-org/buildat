@@ -18716,9 +18716,24 @@ struct Module: public interface::Module, public Interface
 				made.append(mj);
 			}
 			j.set("made", made);
-			for(const ss_ &n : m_prefab_palette)
+			// [KIT_HUD_WALK_ONLY] those holding a UI component
+			json::Value pfs_ui = json::array();
+			for(const ss_ &n : m_prefab_palette){
 				pfs.append(n);
+				const json::Value *pf = prefab(n);
+				bool ui = false;
+				for(unsigned i = 0; pf && i < pf->get("entities").size(); i++){
+					const json::Value &es = pf->get("entities");
+					const json::Value &cs_ = es.at(i).get("components");
+					for(unsigned c = 0; c < cs_.size(); c++){
+						ui = ui || jstr(cs_.at(c), "type").rfind("kit/ui_", 0) == 0;
+					}
+				}
+				if(ui)
+					pfs_ui.append(n);
+			}
 			j.set("prefabs", pfs);
+			j.set("prefabs_ui", pfs_ui);
 			// [KIT_PREFAB_VOXELS] the builder's copy: its entities and
 			// its box's size ([0, 0, 0]: none), from its base
 			auto ci = m_clipboard.find(pi->second.name);

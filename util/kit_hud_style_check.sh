@@ -19,7 +19,9 @@
 #   9. edit mode: a drag in whole percents, one snapped to another's edge, a
 #      handle's resize; Kit's own hotbar dragged, kit/game_rules placed to
 #      keep it, and there after the server's restart (kitcat's client);
-#      in 2D and 3D no HUD, in Walk it is back;
+#      in 2D and 3D no HUD, in Walk it is back; a UI component chosen (its
+#      palette button, its prefab's, one selected) goes to Walk, kit/flag's
+#      button does not;
 #  10. copy style from one bar to another: the style's parameters set,
 #      x, y, label and the links not;
 #  11. a save's version 1 kit/ui_text's pixels converted against 1080 p at
@@ -167,6 +169,34 @@ EOF
 	for v in "F2 3D" "F3 Walk" "F1 2D" "F3 Walk"; do
 		printf 'keypress %s\nwait_log_any 10000 kit editor: the view is %s\ndelay 300\n' $v
 	done
+	# To choose a UI component goes to Walk: one selected, its palette
+	# button, its prefab's; another type's stays
+	cat <<EOF
+keypress F2
+frames 5
+event kit_select $SIZED
+frames 5
+keypress F1
+frames 5
+click Button "kit/flag"
+frames 5
+click Button "kit/flag"
+frames 5
+mouse_pos 60 300
+frames 2
+$(for i in $(seq 20); do printf 'mouse_wheel -1\nframes 1\n'; done)
+frames 5
+click Button "kit/ui_bar"
+frames 5
+click Button "kit/ui_bar"
+frames 5
+keypress F2
+frames 5
+click Button "[kit/health_bar]"
+frames 5
+click Button "[kit/health_bar]"
+frames 5
+EOF
 	id=$((id + 1)) # kit/game_rules, placed to keep it
 	echo "sync 3000"
 	# 1. Four directions at the left, a pie and a full one
@@ -355,6 +385,15 @@ for v in "3D hidden" "2D hidden" "Walk shown"; do
 		END { exit !f }' "$b" || fail "the HUD in the $1 view is not $2 ($b)"
 done
 echo "ok: in edit mode the HUD in the Walk view only"
+# In order: 3D, one selected, Walk; 2D, kit/flag there, still 2D; its button
+# again; kit/ui_bar armed, Walk; 3D; the prefab armed, Walk
+seq=$(grep -a "kit editor: the view is \|kit editor: placing \|kit editor: selected $SIZED " "$b" |
+	sed 's/.*kit editor: //; s/ (.*//' | tr '\n' ';')
+case $seq in
+*"the view is 3D;selected $SIZED;the view is Walk;the view is 2D;placing kit/flag;placing nothing;placing kit/ui_bar;the view is Walk;placing nothing;the view is 3D;placing [kit/health_bar];the view is Walk;placing nothing;"*) ;;
+*) fail "choosing and the views: $seq ($b)" ;;
+esac
+echo "ok: a UI component chosen goes to Walk, another type stays"
 # 10. Copy style
 for p in color direction blink_below background width height; do
 	want "$s" "set $STYLE_TO's kit/ui_bar $p to"
