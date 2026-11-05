@@ -1,0 +1,13 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "health_bar",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "health bar", "pos": [0, 0, 0],
+			"components": [{"type": "kit/ui_bar", "version": 2, "params": {
+				"source": "health", "label": "{value:int}", "color": "#d82828",
+				"blink_below": 0.25, "anchor": "bottom", "y": 10.2, "x": 0,
+				"width": 20, "height": 2.4, "size": 1.8}}]}
+	]
+}

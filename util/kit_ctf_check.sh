@@ -136,13 +136,29 @@ link() # <from> <output> <to> <input>
 {
 	ed "{\"op\": \"link\", \"id\": $1, \"comp\": 0, \"output\": \"$2\", \"to\": $3, \"input\": \"$4\"}"
 }
-text() # <x, y, z> <text> <anchor> <y> [shown]: a kit/ui_text
+text() # <x, y, z> <text> <anchor> <y, percent>: a kit/ui_text in shapes
 {
 	place kit/ui_text "$1"
+	set_ $id style '"shapes"'
 	set_ $id text "\"$2\""
 	set_ $id anchor "\"$3\""
 	set_ $id y "$4"
-	[ -z "${5:-}" ] || set_ $id shown "$5"
+}
+sidebar() # <x, y, z> <label> <max> <color>: a bar in the right-hand column
+{
+	place kit/ui_bar "$1"
+	set_ $id style '"shapes"'
+	set_ $id form '"bar"'
+	set_ $id panel $SIDE
+	set_ $id label "\"$2\""
+	set_ $id min 0
+	set_ $id max "$3"
+	set_ $id start 0
+	set_ $id color "\"$4\""
+	set_ $id width 24
+	set_ $id height 3
+	set_ $id size 1.9
+	set_ $id shown false
 }
 prefab_of() # <id> <name>: the entity saved as the builder's prefab, gone
 {
@@ -194,6 +210,8 @@ EOF
 	set_ $id hand_level 0
 	set_ $id on_death '"keep"'
 	set_ $id respawn '"on_signal"'
+	set_ $id health_style '"shapes"'
+	set_ $id health_form '"bar"'
 	place kit/spawner '0, 1, 0'
 	set_ $id players true
 	place kit/arena '8, 1, 0'; ARENA=$id
@@ -205,6 +223,7 @@ EOF
 	set_ $id results $RESULTS
 	set_ $id time_up '"most"'
 	set_ $id map '"map"'
+	set_ $id hud_style '"shapes"'
 	# The map
 	id=$((id + 1))
 	printf 'event kit_edit {"op": "new_scene", "name": "map"}\nwait_log 30000 kit editor: in the scene map of world, map\n'
@@ -239,6 +258,8 @@ EOF
 	set_ $id score_to '"region"'
 	set_ $id return_time $RETURN
 	set_ $id lift 1.4
+	set_ $id hud_style '"shapes"'
+	set_ $id marker_style '"shapes"'
 	place kit/part '0, 1.2, 0' $FLAG
 	set_ $id size '[0.06, 1.4, 0.06]'
 	set_ $id color '"#c0a070"'
@@ -247,39 +268,78 @@ EOF
 	set_ $id interval 1
 	set_ $id repeats $PREP
 	set_ $id autostart true
-	text '3, 1, 6' 'Prep {value} s: stay in your zone' center -120; PREP_TEXT=$id
-	text '4, 1, 6' '{value}' top 10; STATUS=$id
-	text '5, 1, 6' 'Flag home in {value} s' top_right 40 false; LEFT_TEXT=$id
-	set_ $id x -12
-	place kit/ui_bar '6, 1, 6'; BAR=$id
-	set_ $id label '"Scoring {value}%"'
-	set_ $id min 0
-	set_ $id max 100
+	# The HUD, in shapes (percents of the window's short side). At the top's
+	# middle the round's line and under it who has the flag; above the
+	# crosshair the prep's row: a pie running out and its line; at the right
+	# under the kill feed a column of what's on about the flag, no gap for
+	# what isn't
+	place kit/ui_panel '3, 1, 7'; PREP_ROW=$id
+	set_ $id layout '"row"'
+	set_ $id gap 1
+	set_ $id width 0
+	set_ $id height 0
+	set_ $id anchor '"center"'
+	set_ $id y -16
+	set_ $id shown true
+	place kit/ui_bar '3, 1, 6'; PREP_PIE=$id
+	set_ $id style '"shapes"'
+	set_ $id form '"pie"'
+	set_ $id panel $PREP_ROW
+	set_ $id min 1
+	set_ $id max 0
 	set_ $id start 0
-	set_ $id anchor '"top_right"'
-	set_ $id x -12
-	set_ $id y 70
-	set_ $id color '"#40c040"'
+	set_ $id width 4.5
+	set_ $id label '""'
+	text '3, 2, 6' 'Prep {value:int} s: stay in your zone' top_left 0; PREP_TEXT=$id
+	set_ $id panel $PREP_ROW
+	set_ $id background '"none"'
+	set_ $id border '"none"'
+	place kit/ui_panel '4, 1, 7'; TOP=$id
+	set_ $id layout '"column"'
+	set_ $id gap 0.6
+	set_ $id width 0
+	set_ $id height 0
+	set_ $id background '"none"'
+	set_ $id border '"none"'
+	set_ $id anchor '"top"'
+	set_ $id y 0.5
+	set_ $id shown true
+	text '4, 1, 6' '{value}' top 0; STATUS=$id
+	set_ $id panel $TOP
+	text '8, 1, 6' 'Flag carried by {value}' top 0; HOLDER_TEXT=$id
+	set_ $id panel $TOP
 	set_ $id shown false
-	text '7, 1, 6' 'Immune {value} s' top_right 100 false; IMMUNE_TEXT=$id
-	set_ $id x -12
-	text '8, 1, 6' 'Flag carried by {value}' top 95 false; HOLDER_TEXT=$id
+	place kit/ui_panel '5, 1, 7'; SIDE=$id
+	set_ $id layout '"column"'
+	set_ $id gap 0.6
+	set_ $id width 0
+	set_ $id height 0
+	set_ $id background '"none"'
+	set_ $id border '"none"'
+	set_ $id anchor '"top_right"'
+	set_ $id x 0.9
+	set_ $id y 12
+	set_ $id shown true
+	sidebar '5, 1, 6' 'Flag home in {value:int} s' $RETURN '#1a9ab0'; LEFT_BAR=$id
+	sidebar '6, 1, 6' 'Scoring {value:int}%' 100 '#30a030'; BAR=$id
+	sidebar '7, 1, 6' 'Immune {value:int} s' $IMMUNITY '#5080d0'; IMMUNE_BAR=$id
 	link $PREP_TIMER left $PREP_TEXT value
-	link $PREP_TIMER done $PREP_TEXT hide
+	link $PREP_TIMER progress $PREP_PIE value
+	link $PREP_TIMER done $PREP_ROW hide
 	link $PREP_TIMER done $PREP_REGION disable
 	link $PREP_TIMER done $FLAG enable
 	link $ARENA status $STATUS value
-	link $FLAG left $LEFT_TEXT value
-	link $FLAG taken $LEFT_TEXT show
-	link $FLAG home $LEFT_TEXT hide
+	link $FLAG left $LEFT_BAR value
+	link $FLAG taken $LEFT_BAR show
+	link $FLAG home $LEFT_BAR hide
 	link $FLAG progress $BAR value
 	link $FLAG placed $BAR show
 	link $FLAG taken $BAR hide
 	link $FLAG home $BAR hide
-	link $FLAG immune $IMMUNE_TEXT value
-	link $FLAG taken $IMMUNE_TEXT show
-	link $FLAG placed $IMMUNE_TEXT hide
-	link $FLAG home $IMMUNE_TEXT hide
+	link $FLAG immune $IMMUNE_BAR value
+	link $FLAG taken $IMMUNE_BAR show
+	link $FLAG placed $IMMUNE_BAR hide
+	link $FLAG home $IMMUNE_BAR hide
 	link $FLAG holder_team $HOLDER_TEXT value
 	link $FLAG taken $HOLDER_TEXT show
 	link $FLAG placed $HOLDER_TEXT hide
@@ -407,6 +467,9 @@ wait_log 10000 kit editor: edit mode off
 EOF
 	lobby 0 wait_log_any
 	cat <<EOF
+wait_log_any 60000 Prep 3 s
+frames 5
+screenshot $t/hud_prep.png
 wait_log 60000 Prep 0 s
 delay 500
 keypress Y
@@ -419,6 +482,9 @@ wait_log 30000 ${SHOWN}Flag carried by Blue
 keypress U
 delay 1500
 event kit_hold kitboss/knife
+wait_log_any 60000 Scoring 25%
+frames 5
+screenshot $t/hud_scoring.png
 wait_log 60000 Red 0 : Blue 2
 delay 300
 keypress P

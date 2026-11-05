@@ -1,9 +1,13 @@
 -- A text on the players' screens ([KIT_UI_COMPONENTS], stage 4m): a
 -- score, a countdown, a hint. In `text`, {value} is the last value on
--- "value", [<action>] each player's key for it, | a new line. Where:
--- `anchor` (a corner, an edge's middle or the centre) and x, y, UI units
--- in from it, on the screen or in its `panel` (a kit/ui_panel: shown
--- while it is). Who sees it: everyone, or with `to` "player" each player
+-- "value" ({value:time} as m:ss, {value:int} a whole number), [<action>]
+-- each player's key for it, | a new line. Where: `anchor` (a corner, an
+-- edge's middle or the centre) and x, y in from it, on the screen or in
+-- its `panel` (a kit/ui_panel: shown while it is). [KIT_HUD_STYLE] x, y,
+-- width, height and size in percent of the screen's shorter side; width
+-- and height 0 from the text; `order` over or under what it overlaps;
+-- `style` "shapes" (`background` and `border` round the text, each a
+-- colour with alpha or "none") or "plain" (the text alone). Who sees it: everyone, or with `to` "player" each player
 -- their own, the player who set a signal off the one it changes (a signal
 -- by no player, everyone's), or with "team" the members of that
 -- player's team alike. "show", "hide" and "toggle" show it;
@@ -32,23 +36,30 @@ local function view(c, by)
 end
 
 return {
-	version = 1,
+	version = 2,
 	-- (to "team" reads them)
 	teams = true,
 	ui = {kind = "text", text = "param:text", anchor = "param:anchor",
-		x = "param:x", y = "param:y", size = "param:size",
-		color = "param:color", background = "param:background",
-		panel = "param:panel"},
+		x = "param:x", y = "param:y", width = "param:width",
+		height = "param:height", size = "param:size", color = "param:color",
+		background = "param:background", border = "param:border",
+		style = "param:style", order = "param:order", panel = "param:panel"},
 	params = {
 		text = {type = "string", default = "Score: {value}"},
 		anchor = {type = "string", default = "top", choices = {"top_left",
 			"top", "top_right", "left", "center", "right", "bottom_left",
 			"bottom", "bottom_right"}},
-		x = {type = "number", default = 0, min = -2000, max = 2000},
-		y = {type = "number", default = 40, min = -2000, max = 2000},
-		size = {type = "number", default = 18, min = 8, max = 64},
+		x = {type = "number", default = 0, min = -400, max = 400},
+		y = {type = "number", default = 3.7, min = -400, max = 400},
+		width = {type = "number", default = 0, min = 0, max = 400},
+		height = {type = "number", default = 0, min = 0, max = 400},
+		size = {type = "number", default = 1.8, min = 0.5, max = 30},
+		style = {type = "string", default = "shapes",
+			choices = {"shapes", "plain"}},
 		color = {type = "string", default = "#ffffff"},
-		background = {type = "string", default = "none"},
+		background = {type = "string", default = "#000000a0"},
+		border = {type = "string", default = "#808080a0"},
+		order = {type = "number", default = 0, min = -40, max = 40},
 		panel = {type = "entity", default = 0},
 		to = {type = "string", default = "everyone",
 			choices = {"everyone", "player", "team"}},
@@ -61,6 +72,18 @@ return {
 	},
 	inputs = {value = "any", clear = "none", show = "none", hide = "none",
 		toggle = "none"},
+	-- [KIT_HUD_STYLE] Version 1's pixels as percents of the shorter side,
+	-- against a 1080 p screen
+	migrate = function(params, from)
+		if from < 2 then
+			for _, k in ipairs({"x", "y", "width", "height", "size"}) do
+				if type(params[k]) == "number" then
+					params[k] = math.floor(params[k] * 10000 / 1080 + 0.5) / 100
+				end
+			end
+		end
+		return params
+	end,
 	on_start = function(c)
 		c.state.shown = c.params.shown
 	end,

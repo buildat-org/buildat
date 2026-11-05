@@ -431,6 +431,96 @@ end
 -- world's (the server's edit_state; the save keeps them in the parent's
 -- frame). In one table: the file's locals are at Lua's 200
 local NT = {cache = {}}
+-- [KIT_HUD_STYLE] kit/game_rules' entity and component: the scene's own,
+-- else the root's (nil: none)
+function M.rules_entity()
+	local cur, id, comp = current_scene(), nil, nil
+	for _, e in ipairs(all_entities()) do
+		if not e.pos then
+			for i, c in ipairs(e.components or {}) do
+				if c.type == "kit/game_rules" then
+					local s = scene_name(e)
+					if s == cur then
+						return e.id, i - 1
+					elseif s == nil then
+						id, comp = e.id, i - 1
+					end
+				end
+			end
+		end
+	end
+	return id, comp
+end
+
+-- [KIT_HUD_STYLE] "Copy style from...": a UI element's style parameters
+-- (never its position, text or wiring) onto another's. A type's own prefix
+-- where they live beside others (its parameters' names start with it)
+NT.STYLE_KEYS = {"style", "form", "direction", "color", "background", "border",
+	"size", "blink_below", "width", "height"}
+NT.STYLE_PREFIX = {["kit/game_rules"] = "health_", ["kit/arena"] = "hud_",
+	["kit/flag"] = "hud_"}
+
+-- The prefix of a component with a style (nil: it has none)
+function NT.style_prefix(ctype)
+	local pre = NT.STYLE_PREFIX[ctype] or ""
+	return (type_of(ctype).params or {})[pre .. "style"] and pre or nil
+end
+
+-- Those with a style but the component `id`, `ci` ({label, "<id> <comp>"})
+function NT.style_sources(id, ci)
+	local list = {{"pick one", ""}}
+	for _, e in ipairs(entities()) do
+		for i, c in ipairs(e.components or {}) do
+			if NT.style_prefix(c.type) and (e.id ~= id or i ~= ci) then
+				list[#list + 1] = {e.id .. " " .. tostring(e.name), e.id .. " " .. i}
+			end
+		end
+	end
+	return list
+end
+
+function NT.copy_style(from, from_ci, to, to_ci)
+	local f, t = find(from), find(to)
+	local fc = f and f.components and f.components[from_ci]
+	local tc = t and t.components and t.components[to_ci]
+	local fp = fc and NT.style_prefix(fc.type)
+	local tp = tc and NT.style_prefix(tc.type)
+	if not fp or not tp then
+		return
+	end
+	local fd, td = type_of(fc.type).params, type_of(tc.type).params
+	local n = 0
+	for _, k in ipairs(NT.STYLE_KEYS) do
+		local d, dt = fd[fp .. k], td[tp .. k]
+		if d and dt then
+			local v = (fc.params or {})[fp .. k]
+			if v == nil then
+				v = d.default
+			end
+			local now = (tc.params or {})[tp .. k]
+			if now == nil then
+				now = dt.default
+			end
+			if v ~= now then
+				send({op = "set", id = to, comp = to_ci - 1, param = tp .. k,
+					value = v})
+				n = n + 1
+			end
+		end
+	end
+	log:info("kit editor: copied the style of " .. from .. " to " .. to .. ": " ..
+			n .. " parameters")
+end
+
+-- For a drive: "event kit_copy_style <from id> <to id>" (the first
+-- component of each), as the sheet's dropdown does
+magic.SubscribeToEvent("command_seq:kit_copy_style", function(_, data)
+	local from, to = data:GetString("Param"):match("^(%d+) (%d+)$")
+	if from then
+		NT.copy_style(tonumber(from), 1, tonumber(to), 1)
+	end
+end)
+
 function NT.tree()
 	local tree_cache = NT.cache
 	if tree_cache.state ~= E.state then
@@ -2108,6 +2198,15 @@ local function inspector(w, e, is_made)
 			button(w, "Restart this", function()
 				send({op = "restart", id = e.id, comp = ci - 1})
 			end)
+		end
+		-- [KIT_HUD_STYLE] "Copy style from..."
+		if NT.style_prefix(c.type) then
+			ui_utils.dropdown(row(w), NT.style_sources(e.id, ci), "", function(x)
+				local fid, fci = tostring(x):match("^(%d+) (%d+)$")
+				if fid then
+					NT.copy_style(tonumber(fid), tonumber(fci), e.id, ci)
+				end
+			end, {label = "Copy style from...", fill = true})
 		end
 		-- [KIT_HEIGHTMAP_REGEN_LOSS] A heightmap World: its edited samples,
 		-- kept over every regeneration; generating all anew (discarding

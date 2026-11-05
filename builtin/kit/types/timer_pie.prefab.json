@@ -1,0 +1,16 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "timer_pie",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "timer", "pos": [0, 0, 0],
+			"components": [{"type": "kit/timer", "params": {"interval": 1,
+				"repeats": 60}, "links": [
+				{"output": "progress", "to": 2, "input": "value"}]}]},
+		{"id": 2, "name": "timer pie", "pos": [1, 0, 0],
+			"components": [{"type": "kit/ui_bar", "version": 2, "params": {
+				"form": "pie", "label": "", "min": 1, "max": 0, "start": 0,
+				"blink_below": 0.17, "anchor": "top", "x": 0, "y": 2}}]}
+	]
+}

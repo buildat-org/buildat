@@ -6,7 +6,9 @@
 -- signalled as by them, a "stop" of theirs stopping only theirs); a start
 -- by no player (autostart, the app) is the shared one's.
 -- [KIT_CTF] "left": the seconds left, (repeats - ticks) * interval, at
--- its start and each tick (none without repeats), for a HUD's text
+-- its start and each tick (none without repeats), for a HUD's text;
+-- [KIT_HUD_STYLE] "progress" beside it: 0 at its start to 1 at its end, for
+-- a kit/ui_bar (a bar or a pie; its min 1 and max 0 to empty instead)
 local function player_of(c, by)
 	if c.params.scope == "per_player" and type(by) == "string" and
 			by:match("^player:%d+$") then
@@ -31,6 +33,7 @@ end
 local function left(c, n)
 	if c.params.repeats > 0 then
 		c:emit("left", (c.params.repeats - n) * c.params.interval)
+		c:emit("progress", n / c.params.repeats)
 	end
 end
 
@@ -63,7 +66,8 @@ return {
 		per = {default = {}},
 	},
 	inputs = {start = "none", stop = "none"},
-	outputs = {tick = "number", done = "none", left = "number"},
+	outputs = {tick = "number", done = "none", left = "number",
+		progress = "number"},
 	on_start = function(c)
 		if c.params.autostart then
 			start(c, nil)
