@@ -4,14 +4,28 @@
 -- with `radius`, `power`, `kill`, `hurt`, `share` and `friendly_fire`,
 -- api.h's) and is gone. "explode" sets it off at once. Nothing in Kit lets
 -- a player remove an entity in play, so an armed one stays until it goes.
--- Outputs: armed, exploded (none)
+-- [KIT_FEEDBACK_EFFECTS] Armed, its look blinks (blink_color, "" not):
+-- every blink_slow s at the fuse's start, every blink_fast s at its end.
+-- Outputs: armed, exploded (where: kit/controls' shake, kit/effect's burst)
 local function boom(c)
 	local p = c.params
 	c:log("explodes")
 	c:explode{radius = p.radius, power = p.power, kill = p.kill,
 		hurt = p.hurt, share = p.share, friendly_fire = p.friendly_fire}
-	c:emit("exploded")
+	c:emit("exploded", c.pos)
 	c:remove()
+end
+
+local function blink(c)
+	local p = c.params
+	if p.blink_color == "" or p.fuse <= 0 then
+		return
+	end
+	c.state.lit = not c.state.lit
+	local f = math.max(0, math.min(1, c.state.left / p.fuse))
+	local every = p.blink_fast + (p.blink_slow - p.blink_fast) * f
+	c:log("blink", every)
+	c:after(every, "blink")
 end
 
 local function arm(c)
@@ -24,13 +38,15 @@ local function arm(c)
 	c:emit("armed")
 	c:sound(c.params.sound)
 	c:after(math.min(c.params.sound_every, c.params.fuse), "tick")
+	blink(c)
 end
 
 return {
 	version = 1,
 	-- (on the ground at its default size)
 	look = {shape = "sphere", size = "param:size", offset = {0, -0.2, 0},
-		color = "param:color"},
+		color = "param:color", state = "lit",
+		when = {color = "param:blink_color"}},
 	params = {
 		armed = {type = "bool", default = false},
 		fuse = {type = "number", default = 5, min = 0, max = 3600},
@@ -46,13 +62,19 @@ return {
 		size = {cat = "look", type = "number", default = 0.3, min = 0.05,
 			max = 4},
 		color = {cat = "look", type = "string", default = "#101010"},
+		blink_color = {cat = "look", type = "string", default = ""},
+		blink_slow = {cat = "look", type = "number", default = 0.8, min = 0.05,
+			max = 60},
+		blink_fast = {cat = "look", type = "number", default = 0.1, min = 0.05,
+			max = 60},
 	},
 	state = {
 		armed = {default = false, shared = true},
+		lit = {default = false, shared = true},
 		left = {default = 0},
 	},
 	inputs = {arm = "none", explode = "none"},
-	outputs = {armed = "none", exploded = "none"},
+	outputs = {armed = "none", exploded = "position"},
 	on_start = function(c)
 		if c.params.armed then
 			arm(c)
@@ -65,7 +87,10 @@ return {
 			arm(c)
 		end
 	end,
-	on_timer = function(c)
+	on_timer = function(c, name)
+		if name == "blink" then
+			return blink(c)
+		end
 		local s = c.state
 		s.left = s.left - c.params.sound_every
 		if s.left <= 0 then
