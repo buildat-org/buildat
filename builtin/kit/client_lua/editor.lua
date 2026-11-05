@@ -910,6 +910,7 @@ local function window(halign, valign, x, y, horizontal)
 	w:SetPosition(x, y)
 	w.opacity = 0.92
 	-- [KIT_HUD_VIEW] No panels there; one rebuilt there stays out of the way
+	-- ([KIT_PARAM_CATEGORIES] but for NT.hud_panel's)
 	w.visible = S.view ~= "hud"
 	-- Under the menus (the pause menu over a wide inspector)
 	w.priority = -1
@@ -2145,6 +2146,229 @@ local function begin_link(id, comp, output)
 	log:info("kit editor: linking from " .. id .. " " .. output)
 end
 
+-- [KIT_PARAM_CATEGORIES] The inspector's categories of a component's parameters,
+-- a parameter's `cat` in its type (undeclared: Behaviour). The chip chosen
+-- (S.param_cat, nil All) is kept between entities: a type without it shows All
+-- and it is chosen again on the next that has it. Kit's own HUD element
+-- selected narrows kit/game_rules to its <name>_*, until a chip is pressed
+-- (S.cat_released).
+-- simplified: the choice lasts the session (MEM's kit.remember is the upgrade);
+-- no chip says it holds a pending edit, Apply's amber alone does
+NT.CATS = {{"behaviour", "Behaviour"}, {"hud", "HUD"}, {"look", "Look"},
+	{"physics", "Physics"}, {"advanced", "Advanced"}}
+NT.CAT_ROW_MIN = 8
+NT.OWN_NAMES = {health = "Health bar", hotbar = "Hotbar", feed = "Kill feed",
+	hint = "Spectate hint", item_line = "Item line"}
+
+function NT.cat_of(d)
+	for _, c in ipairs(NT.CATS) do
+		if d.cat == c[1] then
+			return c[1]
+		end
+	end
+	return "behaviour"
+end
+
+function NT.own_keep(own)
+	local prefix = own .. "_"
+	return function(k)
+		return k:sub(1, #prefix) == prefix
+	end
+end
+
+-- A chip pressed: the parameters drawn again, from the top; what is pending
+-- stays in E.pending
+function NT.cat_pick(cat, own)
+	S.param_cat, S.cat_released, S.cat_top = cat, own, true
+	log:info("kit editor: the chip " .. tostring(cat or "all"))
+	inspector_window()
+end
+
+-- The row at the top of a component's parameters, none on a type with few or
+-- with one category. Returns keep(name, decl) for params_form
+function NT.cat_row(w, e, ci, c, t)
+	local decl, has, n, kinds = t.params or {}, {}, 0, 0
+	for _, d in pairs(decl) do
+		local cat = NT.cat_of(d)
+		n = n + 1
+		kinds = kinds + (has[cat] and 0 or 1)
+		has[cat] = true
+	end
+	local sel_own = c.type == "kit/game_rules" and M.own_selected and
+			M.own_selected(e.id) or nil
+	local own = sel_own ~= S.cat_released and sel_own or nil
+	local keep, cur = nil, not own and has[S.param_cat] and S.param_cat or nil
+	local chips = {}
+	if own or (n >= NT.CAT_ROW_MIN and kinds >= 2) then
+		local r = row(w)
+		if own then
+			button(r, NT.OWN_NAMES[own] or own, function() end, true)
+			chips[1] = "[" .. own .. "]"
+			keep = NT.own_keep(own)
+		end
+		button(r, "All", function() NT.cat_pick(nil, sel_own) end,
+				not own and not cur)
+		chips[#chips + 1] = "All"
+		for _, k in ipairs(NT.CATS) do
+			if has[k[1]] then
+				button(r, k[2], function() NT.cat_pick(k[1], sel_own) end,
+						not own and cur == k[1])
+				chips[#chips + 1] = k[2]
+			end
+		end
+		if cur then
+			keep = function(_, d)
+				return NT.cat_of(d) == cur
+			end
+		end
+	end
+	-- Said as it changes: the chips and what they show
+	local shown = {}
+	for k, d in pairs(decl) do
+		if not keep or keep(k, d) then
+			shown[#shown + 1] = k
+		end
+	end
+	table.sort(shown)
+	local line = e.id .. "/" .. ci .. " " .. c.type .. ": " .. (#chips > 0 and
+			"chips " .. table.concat(chips, " ") .. ", showing " ..
+			(own and own .. "_*" or cur or "all") or "no chips") .. ", " .. #shown ..
+			" of " .. n .. ": " .. table.concat(shown, " ")
+	S.cat_log = S.cat_log or {}
+	if S.cat_log[ci] ~= line then
+		S.cat_log[ci] = line
+		log:info("kit editor: parameters " .. line)
+	end
+	return keep
+end
+
+-- [KIT_PARAM_CATEGORIES] A click on a HUD element: the HUD chip, Kit's own
+-- narrowed to its parameters, its panel open in the HUD view
+function M.hud_picked()
+	S.param_cat, S.cat_released, S.hud_panel_off, S.cat_top = "hud", nil, nil, true
+	inspector_window()
+	NT.hud_panel(true)
+end
+
+-- [KIT_PARAM_CATEGORIES] A component's parameters, keep(name, decl) saying which
+-- (all without one), with Apply. Pending values and Apply cover every parameter
+-- of it, shown or not: the inspector's and the HUD view's panel's share them
+function NT.params_form(w, e, ci, c, t, keep)
+	local names, decl = {}, t.params or {}
+	for k in pairs(decl) do
+		if not keep or keep(k, decl[k]) then
+				names[#names + 1] = k
+			end
+	end
+	table.sort(names)
+	local fields, values = {}, {}
+	local key = e.id .. "/" .. ci
+	for k, v in pairs(c.params or {}) do
+		values[k] = v
+	end
+	-- What is picked and not applied yet stays picked: the inspector is
+	-- drawn again on the state's packets (user, 2026-10-31: the camera
+	-- dropdown went back to first_person at once)
+	for k, v in pairs(E.pending[key] or {}) do
+		values[k] = v
+	end
+	local patterns = {}
+	for _, k in ipairs(names) do
+		-- [KIT_VOXEL_STATES] A pattern of voxels is no text to type:
+		-- its buttons below
+		if decl[k].type == "voxels" then
+			patterns[#patterns + 1] = k
+		else
+			fields[#fields + 1] = field(k, decl[k], values)
+		end
+	end
+	if #fields > 0 then
+		-- [KIT_APPLY_AMBER] Apply's label amber ([MENU_BRAND]'s main)
+		-- while an edit waits for it (user, 2026-11-02)
+		local apply_text
+		local function mark()
+			if apply_text then
+				apply_text:SetColor(next(E.pending[key] or {}) and
+						magic.Color(ui_utils.rgb("main")) or
+						magic.Color(ui_utils.rgb("text")))
+			end
+		end
+		ui_utils.settings_form(w, fields, values, function(k, v)
+			E.pending[key] = E.pending[key] or {}
+			E.pending[key][k] = v
+			log:info("kit editor: " .. key .. " " .. k .. " = " .. tostring(v))
+			mark()
+		end, WIDGETS)
+		-- [KIT_ITEMS_TAB] a list of items: one added from the Items
+		-- tab's list (a count typed after it)
+		for _, k in ipairs(names) do
+			if decl[k].choices_from == "item_list" then
+				ui_utils.dropdown(row(w), IT.choices(), "", function(x)
+					local cur = tostring(values[k] or decl[k].default or "")
+					if x == "" then
+						return
+					end
+					E.pending[key] = E.pending[key] or {}
+					E.pending[key][k] = cur:match("%S") and cur .. ", " ..
+							x or x
+					log:info("kit editor: " .. key .. " " .. k .. " = " ..
+							E.pending[key][k])
+					inspector_window()
+				end, {label = "Add to " .. k, fill = true})
+			end
+		end
+		local _
+		_, apply_text = button(w, "Apply", function()
+			for k, v in pairs(E.pending[key] or {}) do
+				if decl[k] and decl[k].type == "position" then
+					local x, y, z = tostring(v):match(
+							"^%s*(%-?[%d.]+)[%s,]+(%-?[%d.]+)[%s,]+(%-?[%d.]+)%s*$")
+					v = x and {tonumber(x), tonumber(y), tonumber(z)}
+				end
+				if v == nil then
+					E.status = k .. ": three numbers"
+				else
+					send({op = "set", id = e.id, comp = ci - 1, param = k,
+						value = v})
+				end
+			end
+			E.pending[key] = nil
+			refresh()
+		end)
+		mark()
+	end
+	-- [KIT_VOXEL_STATES] Each pattern: Capture (the box as it is now),
+	-- Show (written into the world, an edit undone as one) and Fill (all
+	-- of the box one voxel: the one picked here, the one in hand first)
+	if #patterns > 0 then
+		E.fill = E.fill or {}
+		local names = {{"air", "air"}}
+		for _, n in ipairs(voxel_names()) do
+			names[#names + 1] = n
+		end
+		E.fill[key] = E.fill[key] or S.voxel or "air"
+		ui_utils.dropdown(row(w), names, E.fill[key], function(name)
+			E.fill[key] = name
+			log:info("kit editor: " .. key .. " fill with " .. name)
+		end, {label = "Fill with", fill = true})
+	end
+	for _, k in ipairs(patterns) do
+		local r, v = row(w), values[k]
+		local cells = type(v) == "string" and v:match("^(%d+ %d+ %d+);")
+		label(r, k:upper() .. (cells and "" or " (empty)"))
+		for _, a in ipairs({{"Capture", "capture"}, {"Show", "show"},
+				{"Fill", "fill"}}) do
+			button(r, a[1] .. " " .. k:upper(), function()
+				send({op = "pattern", id = e.id, comp = ci - 1, param = k,
+					action = a[2], voxel = a[2] == "fill" and E.fill[key] or
+					nil})
+				log:info("kit editor: " .. a[2] .. " " .. e.id .. " " .. k)
+			end)
+		end
+	end
+return names
+end
+
 local function inspector(w, e, is_made)
 	if is_made then
 		return inspect_made(w, e)
@@ -2274,116 +2498,7 @@ local function inspector(w, e, is_made)
 				end)
 			end
 		end
-		local names, decl = {}, t.params or {}
-		for k in pairs(decl) do
-			names[#names + 1] = k
-		end
-		table.sort(names)
-		local fields, values = {}, {}
-		local key = e.id .. "/" .. ci
-		for k, v in pairs(c.params or {}) do
-			values[k] = v
-		end
-		-- What is picked and not applied yet stays picked: the inspector is
-		-- drawn again on the state's packets (user, 2026-10-31: the camera
-		-- dropdown went back to first_person at once)
-		for k, v in pairs(E.pending[key] or {}) do
-			values[k] = v
-		end
-		local patterns = {}
-		for _, k in ipairs(names) do
-			-- [KIT_VOXEL_STATES] A pattern of voxels is no text to type:
-			-- its buttons below
-			if decl[k].type == "voxels" then
-				patterns[#patterns + 1] = k
-			else
-				fields[#fields + 1] = field(k, decl[k], values)
-			end
-		end
-		if #fields > 0 then
-			-- [KIT_APPLY_AMBER] Apply's label amber ([MENU_BRAND]'s main)
-			-- while an edit waits for it (user, 2026-11-02)
-			local apply_text
-			local function mark()
-				if apply_text then
-					apply_text:SetColor(next(E.pending[key] or {}) and
-							magic.Color(ui_utils.rgb("main")) or
-							magic.Color(ui_utils.rgb("text")))
-				end
-			end
-			ui_utils.settings_form(w, fields, values, function(k, v)
-				E.pending[key] = E.pending[key] or {}
-				E.pending[key][k] = v
-				log:info("kit editor: " .. key .. " " .. k .. " = " .. tostring(v))
-				mark()
-			end, WIDGETS)
-			-- [KIT_ITEMS_TAB] a list of items: one added from the Items
-			-- tab's list (a count typed after it)
-			for _, k in ipairs(names) do
-				if decl[k].choices_from == "item_list" then
-					ui_utils.dropdown(row(w), IT.choices(), "", function(x)
-						local cur = tostring(values[k] or decl[k].default or "")
-						if x == "" then
-							return
-						end
-						E.pending[key] = E.pending[key] or {}
-						E.pending[key][k] = cur:match("%S") and cur .. ", " ..
-								x or x
-						log:info("kit editor: " .. key .. " " .. k .. " = " ..
-								E.pending[key][k])
-						inspector_window()
-					end, {label = "Add to " .. k, fill = true})
-				end
-			end
-			local _
-			_, apply_text = button(w, "Apply", function()
-				for k, v in pairs(E.pending[key] or {}) do
-					if decl[k] and decl[k].type == "position" then
-						local x, y, z = tostring(v):match(
-								"^%s*(%-?[%d.]+)[%s,]+(%-?[%d.]+)[%s,]+(%-?[%d.]+)%s*$")
-						v = x and {tonumber(x), tonumber(y), tonumber(z)}
-					end
-					if v == nil then
-						E.status = k .. ": three numbers"
-					else
-						send({op = "set", id = e.id, comp = ci - 1, param = k,
-							value = v})
-					end
-				end
-				E.pending[key] = nil
-				refresh()
-			end)
-			mark()
-		end
-		-- [KIT_VOXEL_STATES] Each pattern: Capture (the box as it is now),
-		-- Show (written into the world, an edit undone as one) and Fill (all
-		-- of the box one voxel: the one picked here, the one in hand first)
-		if #patterns > 0 then
-			E.fill = E.fill or {}
-			local names = {{"air", "air"}}
-			for _, n in ipairs(voxel_names()) do
-				names[#names + 1] = n
-			end
-			E.fill[key] = E.fill[key] or S.voxel or "air"
-			ui_utils.dropdown(row(w), names, E.fill[key], function(name)
-				E.fill[key] = name
-				log:info("kit editor: " .. key .. " fill with " .. name)
-			end, {label = "Fill with", fill = true})
-		end
-		for _, k in ipairs(patterns) do
-			local r, v = row(w), values[k]
-			local cells = type(v) == "string" and v:match("^(%d+ %d+ %d+);")
-			label(r, k:upper() .. (cells and "" or " (empty)"))
-			for _, a in ipairs({{"Capture", "capture"}, {"Show", "show"},
-					{"Fill", "fill"}}) do
-				button(r, a[1] .. " " .. k:upper(), function()
-					send({op = "pattern", id = e.id, comp = ci - 1, param = k,
-						action = a[2], voxel = a[2] == "fill" and E.fill[key] or
-						nil})
-					log:info("kit editor: " .. a[2] .. " " .. e.id .. " " .. k)
-				end)
-			end
-		end
+		NT.params_form(w, e, ci, c, t, NT.cat_row(w, e, ci, c, t))
 		for _, l in ipairs(not sig and c.links or {}) do
 			local r = row(w)
 			local to = find(l.to)
@@ -2394,7 +2509,9 @@ local function inspector(w, e, is_made)
 					output = l.output, to = l.to, input = l.input})
 			end)
 			-- [KIT] stage 4l: drawn for players in play too
-			button(r, l.visible and "Shown in play" or "Hidden in play",
+			-- ([KIT_PARAM_CATEGORIES] as short as the Signals view's: a long link's
+			-- row is what sets the inspector's width)
+			button(r, l.visible and "Shown" or "Hidden",
 					function()
 				send({op = "link_visible", id = e.id, comp = ci - 1,
 					output = l.output, to = l.to, input = l.input,
@@ -2404,8 +2521,13 @@ local function inspector(w, e, is_made)
 						(l.visible and "hidden" or "shown") .. " in play")
 			end)
 		end
-		local r = row(w)
-		for _, o in ipairs(not sig and t.outputs or {}) do
+		-- [KIT_PARAM_CATEGORIES] Three a row, as Try's: kit/flag's eight in one
+		-- made the whole inspector over 1000 wide
+		local r
+		for i, o in ipairs(not sig and t.outputs or {}) do
+			if i % 3 == 1 then
+				r = row(w)
+			end
 			button(r, "Link " .. o, function()
 				begin_link(e.id, ci - 1, o)
 				refresh()
@@ -2440,12 +2562,16 @@ local function inspector(w, e, is_made)
 	end
 	if E.link and E.link.id ~= e.id then
 		text(w, "Link " .. E.link.id .. "'s " .. E.link.output .. " to:")
-		local r = row(w)
+		local r, m = nil, 0
 		local seen = {}
 		for _, c in ipairs(e.components or {}) do
 			for _, i in ipairs(type_of(c.type).inputs or {}) do
 				if not seen[i] then
 					seen[i] = true
+					m = m + 1
+					if m % 3 == 1 then
+						r = row(w)
+					end
 					button(r, "To " .. i, function()
 						send({op = "link", id = E.link.id, comp = E.link.comp,
 							output = E.link.output, to = e.id, input = i})
@@ -2714,7 +2840,7 @@ end)
 magic.SubscribeToEvent("command_seq:kit_ui_where", function(_, data)
 	local sc, r = magic.ui.scale, {}
 	for _, k in ipairs({"bar", "palette", "inspector", "people", "sg_list",
-			"sg_links", "sg_view"}) do
+			"sg_links", "sg_view", "hud_panel"}) do
 		local w = W[k]
 		if w and w.visible then
 			local p = w.screenPosition
@@ -2772,7 +2898,8 @@ local function fit_inspector()
 	narrow()
 	local room = screen_ui.h - w.position.y - 12 - foot
 	local h = math.max(40, math.min(body.height, room))
-	local bw = body.width + (h < body.height and view.verticalScrollBar.width + 4 or 0)
+	-- ([KIT_PARAM_CATEGORIES] 4: the view's clip border cut the fields' right edge)
+	local bw = body.width + 4 + (h < body.height and view.verticalScrollBar.width + 4 or 0)
 	if view.height ~= h or view.width ~= bw then
 		view:SetScrollBarsVisible(false, h < body.height)
 		view:SetFixedSize(bw, h)
@@ -2784,6 +2911,9 @@ end
 inspector_window = function()
 	if W.inspector and IV.view then
 		IV.y = IV.view.viewPosition.y
+	end
+	if S.cat_top then
+		S.cat_top, IV.y = nil, 0
 	end
 	IV.view = nil
 	drop("inspector")
@@ -2825,6 +2955,174 @@ inspector_window = function()
 	view.viewPosition = magic.IntVector2(0, IV.y)
 end
 
+-- [KIT_PARAM_CATEGORIES] The HUD view's one panel: the selected HUD element's
+-- HUD parameters, beside it; a click on the background closes it
+-- (S.hud_panel_off), a click on an element opens it again. Each frame it follows
+-- the element; on each state it is drawn again, as the inspector
+function NT.hud_panel_said(names)
+	local line = table.concat(names, " ")
+	if line ~= S.hud_panel_said then
+		S.hud_panel_said = line
+		log:info("kit editor: the HUD panel's parameters: " .. line)
+	end
+end
+
+function NT.hud_panel_body(body, own)
+	local keep = function(_, d)
+		return NT.cat_of(d) == "hud"
+	end
+	if own then
+		text(body, NT.OWN_NAMES[own] or own, magic.Color(1.0, 0.85, 0.3))
+		local rid, comp = M.rules_entity()
+		local re = rid and find(rid)
+		local rc = re and re.components and re.components[comp + 1]
+		if not rc then
+			button(body, "Place kit/game_rules", function()
+				send({op = "place", type = "kit/game_rules", pos = {0, 0, 0}})
+			end)
+			return
+		end
+		return NT.hud_panel_said(NT.params_form(body, re, comp + 1, rc,
+				type_of(rc.type), NT.own_keep(own)))
+	end
+	local e = find(S.primary)
+	if not e then
+		return
+	end
+	text(body, e.id .. " " .. tostring(e.name), magic.Color(1.0, 0.85, 0.3))
+	local any = false
+	for ci, c in ipairs(e.components or {}) do
+		local t = type_of(c.type)
+		for _, d in pairs(t.params or {}) do
+			if NT.cat_of(d) == "hud" then
+				any = true
+				NT.hud_panel_said(NT.params_form(body, e, ci, c, t, keep))
+				break
+			end
+		end
+	end
+	if not any then
+		text(body, "No HUD parameters", DIM)
+	end
+end
+
+function NT.hud_panel_build(key, own)
+	local view_y = S.hud_panel_key == key and W.hud_panel and
+			S.hud_panel_view.viewPosition.y or 0
+	drop("hud_panel")
+	local win = window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
+	win.visible = true
+	W.hud_panel = win
+	local view = win:CreateChild("ScrollView")
+	local body = view:CreateChild("UIElement")
+	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+	NT.hud_panel_body(body, own)
+	view:SetStyleAuto()
+	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
+	view.scrollBarsAutoVisible = false
+	view.contentElement = body
+	body:SetPosition(0, 0)
+	S.hud_panel_h0 = body.height
+	view:SetFixedSize(1, 1)
+	NT.hud_panel_fit(view)
+	view.viewPosition = magic.IntVector2(0, view_y)
+	S.hud_panel_view, S.hud_panel_key = view, key
+end
+
+-- Its height the body's, at most the screen's, the rest scrolled. A field's
+-- warning grows the body and a layout never shrinks it again by itself: asked
+-- to, while it is over the height it was built at
+function NT.hud_panel_fit(view)
+	local body = view.contentElement
+	if body.height > S.hud_panel_h0 then
+		body.height = 1
+	end
+	local h = math.min(body.height, magic.ui.root.height - 28,
+			S.hud_panel_limit or math.huge)
+	local tall = h < body.height
+	local bw = body.width + 4 + (tall and view.verticalScrollBar.width + 4 or 0)
+	if view.height ~= h or view.width ~= bw then
+		view:SetScrollBarsVisible(false, tall)
+		view:SetFixedSize(bw, h)
+	end
+end
+
+-- Beside the element: of the sides it fits on, the one with most room. On none,
+-- above or below scrolled to the room there (a short window), and when that is
+-- too little to use, over the element, inside the screen
+function NT.hud_panel_place(x, y, w, h)
+	local win, root, gap = W.hud_panel, magic.ui.root, 6
+	local view = S.hud_panel_view
+	local pw, ph = win.width, win.height
+	-- Its height unscrolled: what the sides are asked for, so that scrolling
+	-- does not change the answer
+	local chrome = ph - view.height
+	local fh = view.contentElement.height + chrome
+	local sides = {{"right", root.width - x - w, pw}, {"left", x, pw},
+		{"below", root.height - y - h, fh}, {"above", y, fh}}
+	local best, best_fits = nil, false
+	for _, s in ipairs(sides) do
+		local fits = s[2] >= s[3] + gap
+		if not best or (fits and not best_fits) or (fits == best_fits and
+				s[2] > best[2]) then
+			best, best_fits = s, fits
+		end
+	end
+	S.hud_panel_limit = nil
+	if not best_fits then
+		local v = sides[3][2] >= sides[4][2] and sides[3] or sides[4]
+		if v[2] - gap - chrome >= 100 then
+			best, S.hud_panel_limit = v, v[2] - gap - chrome
+		end
+	end
+	if S.hud_panel_limit or best_fits then
+		ph = math.min(fh, S.hud_panel_limit and S.hud_panel_limit + chrome or fh)
+	end
+	local px, py = x + math.floor((w - pw) / 2), y + math.floor((h - ph) / 2)
+	if best[1] == "right" then
+		px = x + w + gap
+	elseif best[1] == "left" then
+		px = x - pw - gap
+	elseif best[1] == "below" then
+		py = y + h + gap
+	else
+		py = y - ph - gap
+	end
+	px = math.max(0, math.min(root.width - pw, px))
+	py = math.max(0, math.min(root.height - ph, py))
+	win:SetPosition(px, py)
+	local line = string.format("%s %s %d %d %d %d", S.hud_panel_key, best[1], px, py,
+			pw, ph)
+	if line ~= S.hud_panel_line then
+		S.hud_panel_line = line
+		log:info("kit editor: the HUD panel at " .. line .. string.format(
+				", the element %d %d %d %d", x, y, w, h))
+	end
+end
+
+-- Up to date with the view and the selection; rebuild: its values too
+function NT.hud_panel(rebuild)
+	local x, y, w, h, own
+	if S.view == "hud" and E.editing and not S.hud_panel_off and
+			M.hud_selected_rect then
+		x, y, w, h, own = M.hud_selected_rect()
+	end
+	if not x then
+		if W.hud_panel then
+			drop("hud_panel")
+			S.hud_panel_view, S.hud_panel_line = nil, nil
+			log:info("kit editor: the HUD panel closed")
+		end
+		return
+	end
+	local key = own and "own:" .. own or tostring(S.primary)
+	if rebuild or not W.hud_panel or key ~= S.hud_panel_key then
+		NT.hud_panel_build(key, own)
+	end
+	NT.hud_panel_fit(S.hud_panel_view)
+	NT.hud_panel_place(x, y, w, h)
+end
+
 -- A touchscreen's keys ([FP_TOUCH] 4): Undo, Delete and Escape's Cancel, at
 -- the lower right
 local function touch_bar()
@@ -2844,6 +3142,7 @@ refresh = function()
 	palette()
 	touch_bar()
 	inspector_window()
+	NT.hud_panel(true)
 	NT.sg.refresh()
 	people()
 	show_log()
@@ -3010,6 +3309,10 @@ local function select(id, add, by_tab)
 	if e and not add and not by_tab then
 		for _, c in ipairs(e.components or {}) do
 			NT.walk_for_ui(NT.is_ui(c.type))
+			-- [KIT_PARAM_CATEGORIES] one chosen in the list too
+			if NT.is_ui(c.type) and (S.view == "walk" or S.view == "hud") then
+				S.param_cat = "hud"
+			end
 		end
 	end
 	focus()
@@ -3663,6 +3966,7 @@ set_view = function(v)
 	-- panels, the world not to be clicked; out to the view it came from
 	if v == "hud" and S.view ~= "hud" then
 		S.before_hud = S.view
+		S.hud_panel_off = nil
 		close_menu()
 		drop("dialog")
 	end
@@ -5644,9 +5948,15 @@ end
 -- [KIT_HUD_VIEW] A click or a tap: two on nothing of the HUD leave the view.
 -- (ui.lua's own handlers select and drag what is of the HUD)
 function NT.hud_press(x, y)
-	if M.ui_at(x, y) then
+	-- ([KIT_PARAM_CATEGORIES] the panel's and its dropdowns' clicks are its own)
+	if over_ui(x, y) then
 		S.hud_click = nil
 		return
+	end
+	-- The first of a double click may close it
+	if W.hud_panel then
+		S.hud_panel_off = true
+		NT.hud_panel()
 	end
 	local now, c = buildat.get_time_us(), S.hud_click
 	if c and now - c.t < 400000 and math.abs(x - c.x) + math.abs(y - c.y) <
@@ -6181,6 +6491,7 @@ local function draw()
 		show_ports("out", nil)
 		show_ports("in", nil)
 		draw_guide()
+		NT.hud_panel()
 		return
 	end
 	if not E.editing then

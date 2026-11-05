@@ -1020,6 +1020,22 @@ local function resizable(r)
 	return r and r.el and r.kind ~= "own" and r.el.visible
 end
 
+-- [KIT_PARAM_CATEGORIES] Kit's own element selected with entity `id`: its name
+function M.own_selected(id)
+	return own_sel and own_sel.entity == id and own_sel.name or nil
+end
+
+-- The selected element's box (screen UI units) and, of Kit's own, its name;
+-- nil with none on the screen
+function M.hud_selected_rect()
+	local r = selected_rec()
+	if not r or not r.el or not r.el.visible or not r.w then
+		return nil
+	end
+	local p = r.el.screenPosition
+	return p.x, p.y, r.w, r.h, r.own
+end
+
 -- The handles' {mode, x, y}: on the right edge's and the bottom edge's
 -- middle and the corner, in screen UI units
 local function handle_list(r)
@@ -1303,6 +1319,11 @@ local function press(x, y)
 	if h then
 		drag = {id = sel.id, x0 = x, y0 = y, mode = h.mode, w = sel.w,
 			h = sel.h, px = sel.el.position.x, py = sel.el.position.y}
+		-- ([KIT_PARAM_CATEGORIES] a small one's handles cover it: a press on
+		-- one opens its panel too)
+		if M.hud_picked then
+			M.hud_picked()
+		end
 		return
 	end
 	local id = hit(x, y)
@@ -1319,6 +1340,9 @@ local function press(x, y)
 		log:info("kit: ui: selected Kit's own " .. r.own)
 	elseif M.select then
 		M.select(id)
+	end
+	if M.hud_picked then
+		M.hud_picked()
 	end
 	drag = {id = id, x0 = x, y0 = y, px = r.el.position.x,
 		py = r.el.position.y, stacked = r.sx ~= nil}
