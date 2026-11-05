@@ -1,7 +1,12 @@
 -- A panel on the players' screens ([KIT_UI_COMPONENTS], stage 4m): a box
--- `width` x `height` UI units with a `title`, the UI components whose
--- `panel` it is laid out in it and shown while it is: a dialog (its text,
--- its buttons, one that `closes` it), a prompt, a teacher's panel. While
+-- `width` x `height` with a `title`, the UI components whose `panel` it is
+-- laid out in it and shown while it is: a dialog (its text, its buttons,
+-- one that `closes` it), a prompt, a teacher's panel.
+-- [KIT_HUD_STYLE] Sizes in percent of the screen's shorter side; `layout`
+-- "column" or "row" stacks its shown children by `order` with a `gap`, a
+-- hidden one leaving no gap, a width or height of 0 fitting it to them;
+-- `background` and `border` may be "none" (a layout alone, drawn nowhere).
+-- While
 -- one with a button is up, a player in mouse look has the pointer to
 -- click with. Hidden at the start by default (`shown`); "show", "hide"
 -- and "toggle", where and who sees it as kit/ui_text's: with `to`
@@ -29,23 +34,34 @@ local function view(c, by)
 end
 
 return {
-	version = 1,
+	version = 2,
 	-- (to "team" reads them)
 	teams = true,
 	ui = {kind = "panel", text = "param:title", anchor = "param:anchor",
 		x = "param:x", y = "param:y", width = "param:width",
-		height = "param:height", color = "param:background",
-		panel = "param:panel"},
+		height = "param:height", color = "param:color",
+		background = "param:background", border = "param:border",
+		style = "param:style", size = "param:size", order = "param:order",
+		layout = "param:layout", gap = "param:gap", panel = "param:panel"},
 	params = {
 		title = {type = "string", default = ""},
 		anchor = {type = "string", default = "center", choices = {"top_left",
 			"top", "top_right", "left", "center", "right", "bottom_left",
 			"bottom", "bottom_right"}},
-		x = {type = "number", default = 0, min = -2000, max = 2000},
-		y = {type = "number", default = 0, min = -2000, max = 2000},
-		width = {type = "number", default = 320, min = 40, max = 2000},
-		height = {type = "number", default = 160, min = 30, max = 2000},
-		background = {type = "string", default = "#203040"},
+		x = {type = "number", default = 0, min = -400, max = 400},
+		y = {type = "number", default = 0, min = -400, max = 400},
+		width = {type = "number", default = 30, min = 0, max = 400},
+		height = {type = "number", default = 15, min = 0, max = 400},
+		size = {type = "number", default = 1.7, min = 0.5, max = 30},
+		style = {type = "string", default = "shapes",
+			choices = {"shapes", "plain"}},
+		layout = {type = "string", default = "none",
+			choices = {"none", "column", "row"}},
+		gap = {type = "number", default = 0.6, min = 0, max = 100},
+		color = {type = "string", default = "#ffffff"},
+		background = {type = "string", default = "#000000a0"},
+		border = {type = "string", default = "#808080a0"},
+		order = {type = "number", default = 0, min = -40, max = 40},
 		panel = {type = "entity", default = 0},
 		to = {type = "string", default = "everyone",
 			choices = {"everyone", "player", "team"}},
@@ -57,6 +73,18 @@ return {
 	},
 	inputs = {show = "none", hide = "none", toggle = "none"},
 	outputs = {shown = "bool"},
+	-- [KIT_HUD_STYLE] Version 1's pixels as percents of the shorter side,
+	-- against a 1080 p screen
+	migrate = function(params, from)
+		if from < 2 then
+			for _, k in ipairs({"x", "y", "width", "height", "size"}) do
+				if type(params[k]) == "number" then
+					params[k] = math.floor(params[k] * 10000 / 1080 + 0.5) / 100
+				end
+			end
+		end
+		return params
+	end,
 	on_start = function(c)
 		c.state.shown = c.params.shown
 	end,

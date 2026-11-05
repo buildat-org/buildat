@@ -16026,6 +16026,38 @@ struct Module: public interface::Module, public Interface
 		return r;
 	}
 
+	// [KIT_HUD_STYLE] kit/game_rules' parameters of Kit's own HUD: the
+	// root's, a scene's own kit/game_rules over them for that scene
+	json::Value hud_rules(const ss_ &scene)
+	{
+		const json::Value r = game_rules();
+		json::Value h = json::object();
+		const auto is_hud = [](const ss_ &k) -> bool {
+			for(const char *pre : {"health_", "hotbar_", "feed_", "hint_",
+					"item_line_"})
+				if(k.compare(0, strlen(pre), pre) == 0)
+					return true;
+			return false;
+		};
+		for(json::Iterator it(r); it; ++it)
+			if(is_hud(it.key()))
+				h.set(it.key(), *it);
+		uint64_t sc = 0;
+		for(auto &e : m_entities)
+			if(e.second.kind == "scene" && e.second.name == scene)
+				sc = e.first;
+		for(auto &p : m_entities){
+			if(!sc || p.second.parent != sc || p.second.has_pos)
+				continue;
+			for(const Instance &i : p.second.comps)
+				if(i.type == "kit/game_rules" && i.params.is_object())
+					for(json::Iterator it(i.params); it; ++it)
+						if(is_hud(it.key()))
+							h.set(it.key(), *it);
+		}
+		return h;
+	}
+
 	bool inventory_mode()
 	{
 		return jstr(game_rules(), "building") != "creative";
@@ -16253,12 +16285,13 @@ struct Module: public interface::Module, public Interface
 				"drop_items", "show_health", "dig", "place"})
 			rules.set(k, r.get(k));
 		rules.set("own", own_slots());
-		j.set("rules", rules);
-		const ss_ data = j.stringify();
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(auto &p : m_peers)
-				if(p.second.name == who)
-					inetwork->send(p.first, "kit:slots", data);
+				if(p.second.name == who){
+					rules.set("hud", hud_rules(p.second.scene));
+					j.set("rules", rules);
+					inetwork->send(p.first, "kit:slots", j.stringify());
+				}
 		});
 	}
 
@@ -16267,7 +16300,11 @@ struct Module: public interface::Module, public Interface
 	ss_ m_rules_sent;
 	void rules_watch()
 	{
-		const ss_ r = game_rules().stringify();
+		// (a scene's own kit/game_rules too: its HUD's override)
+		ss_ r = game_rules().stringify();
+		for(auto &p : m_entities)
+			if(p.second.kind == "scene")
+				r += hud_rules(p.second.name).stringify();
 		if(r == m_rules_sent)
 			return;
 		m_rules_sent = r;

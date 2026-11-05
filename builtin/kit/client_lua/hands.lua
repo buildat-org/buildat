@@ -81,8 +81,6 @@ local function show()
 	if not bar then
 		bar = magic.ui.root:CreateChild("Text")
 		bar:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 14)
-		bar:SetAlignment(magic.HA_CENTER, magic.VA_BOTTOM)
-		bar:SetPosition(0, -64)
 	end
 	local s = {held == "" and "[hand]" or "hand"}
 	local names = {}
@@ -95,6 +93,9 @@ local function show()
 	end
 	bar:SetText(table.concat(s, "  "))
 	bar.visible = not E.editing
+	if M.own_place_text then
+		M.own_place_text(bar, "item_line", 1.5)
+	end
 end
 
 function M.hold(item)
@@ -955,15 +956,19 @@ magic.SubscribeToEvent("Update", function()
 		if not F.feed then
 			F.feed = magic.ui.root:CreateChild("Text")
 			F.feed:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 14)
-			F.feed:SetAlignment(magic.HA_RIGHT, magic.VA_TOP)
-			F.feed:SetPosition(-10, 40)
-			F.feed:SetTextAlignment(magic.HA_RIGHT)
 			F.feed.priority = 100
 		end
 		local s = {}
 		for _, k in ipairs(F.kills) do s[#s + 1] = k.text end
 		F.feed:SetText(table.concat(s, "\n"))
 		F.feed.visible = #s > 0
+	end
+	-- [KIT_HUD_STYLE] Where kit/game_rules keeps them
+	if F.feed and F.feed.visible then
+		M.own_place_text(F.feed, "feed", 1.5)
+	end
+	if bar and bar.visible then
+		M.own_place_text(bar, "item_line", 1.5)
 	end
 end)
 

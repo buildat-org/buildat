@@ -13,8 +13,10 @@
 --   "inventory" building (the creative palette's keys otherwise), a tap
 --   on a slot picks it (on a touchscreen a tap on the held one opens the
 --   screen). "kit:hold" "#<n>" tells the server.
---   **The health bar** above it while the rule show_health is on (the
---   player's kit/health, its shared hp and max).
+--   **The health bar** is ui.lua's ([KIT_HUD_STYLE]: a kit/ui_bar's looks by
+--   the rules' health_*; kit.my_health() its value); the hotbar's place
+--   the rules' hotbar_* (kit.own_place), its slots' size in percents
+--   (kit.hud_unit).
 --   **The inventory screen** (the rule screen; the key inventory, E):
 --   the slots in rows of nine, the hotbar's row apart at the bottom, an
 --   open chest's above ("kit:chest" {id, name, size, slots}, as a chest
@@ -162,24 +164,24 @@ local function shown()
 	return M.slots_own() and not E.editing and P.hands
 end
 
--- The hotbar's box (x, y of its first slot), nil without one
+-- The hotbar's box (x, y of its first slot, slots, a slot's square), nil
+-- without one
 local function hotbar_box()
 	local n = hotbar_n()
 	if n == 0 or not shown() then
 		return nil
 	end
-	local r = magic.ui.root
-	local bottom = TOUCH and M.touch_bar_top and M.touch_bar_top() or r.height
-	-- Clear of an app's line of keys at the bottom (Workbench's)
-	return math.floor((r.width - n * U) / 2), bottom - U - (TOUCH and 8 or 30), n
+	local u = M.hud_unit()
+	local x, y = M.own_place("hotbar", n * u, u)
+	return x, y, n, u
 end
 
 local function hotbar_at(x, y)
-	local x0, y0, n = hotbar_box()
-	if not x0 or y < y0 or y >= y0 + U or x < x0 or x >= x0 + n * U then
+	local x0, y0, n, u = hotbar_box()
+	if not x0 or y < y0 or y >= y0 + u or x < x0 or x >= x0 + n * u then
 		return nil
 	end
-	return math.floor((x - x0) / U) + 1
+	return math.floor((x - x0) / u) + 1
 end
 
 local function my_health()
@@ -195,12 +197,13 @@ local function my_health()
 	end
 	return hp, max
 end
+M.my_health = my_health
 
 local function draw_hud()
 	local r = magic.ui.root
 	local hp, max = my_health()
 	local health = shown() and S.rules.show_health ~= false and hp ~= nil
-	local x0, y0, n = hotbar_box()
+	local x0, y0, n, u = hotbar_box()
 	local parts = {tostring(x0), tostring(y0), r.width, r.height,
 		tostring(health), tostring(hp), tostring(max), S.held,
 		network.write_json(S.slots), M.held_text and M.held_text() or "",
@@ -214,29 +217,20 @@ local function draw_hud()
 	z = 0
 	hud:SetFixedSize(r.width, r.height)
 	if x0 then
-		box(hud, x0 - 4, y0 - 4, n * U + 4, U + 4, magic.Color(0, 0, 0, 0.45))
+		box(hud, x0 - 4, y0 - 4, n * u + 4, u + 4, magic.Color(0, 0, 0, 0.45))
 		for i = 1, n do
-			local x = x0 + (i - 1) * U
+			local x = x0 + (i - 1) * u
 			if i == S.held then
-				box(hud, x - 3, y0 - 3, U + 2, U + 2, magic.Color(1, 1, 1, 0.95))
+				box(hud, x - 3, y0 - 3, u + 2, u + 2, magic.Color(1, 1, 1, 0.95))
 			end
-			box(hud, x, y0, U - 4, U - 4, magic.Color(0.2, 0.2, 0.22, 0.85))
-			stack(hud, S.slots[i], x + 2, y0 + 2, U - 8)
+			box(hud, x, y0, u - 4, u - 4, magic.Color(0.2, 0.2, 0.22, 0.85))
+			stack(hud, S.slots[i], x + 2, y0 + 2, u - 8)
 		end
 		local ht = M.held_text and M.held_text() or ""
 		if ht ~= "" then
 			local t = text(hud, ht:gsub("^ ", ""), 0, 0, 13)
 			t:SetPosition(math.floor((r.width - t.width) / 2), y0 - 22)
 		end
-	end
-	if health then
-		local w = 200
-		local hx = x0 and x0 or math.floor((r.width - w) / 2)
-		local hy = (y0 or (r.height - 8)) - (x0 and 44 or 24)
-		local f = math.max(0, math.min(1, hp / max))
-		box(hud, hx, hy, w, 14, magic.Color(0, 0, 0, 0.55))
-		box(hud, hx + 2, hy + 2, (w - 4) * f, 10, magic.Color(0.85, 0.15, 0.15))
-		text(hud, string.format("%g/%g", hp, max), hx + w + 6, hy - 1, 12)
 	end
 	-- [KIT_CTF] a dead player waiting to respawn
 	local waiting = M.waiting and M.waiting()

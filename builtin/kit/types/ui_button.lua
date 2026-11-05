@@ -6,7 +6,7 @@
 -- with no `label` it is called what the action is. A press counts only
 -- while it is on that player's screen, within their acts a second (as
 -- an action's). Where, who sees it and "show", "hide" and "toggle" as
--- kit/ui_text's.
+-- kit/ui_text's ([KIT_HUD_STYLE] its `style`, colours and sizes too).
 -- simplified: out of a panel, a player in mouse look (the pointer
 -- captured) cannot click it: an action's key, a touchscreen, a free
 -- pointer (top-down) or a panel (which frees the pointer) reach it
@@ -33,12 +33,15 @@ local function view(c, by)
 end
 
 return {
-	version = 1,
+	version = 2,
 	-- (to "team" reads them)
 	teams = true,
 	ui = {kind = "button", text = "param:label", action = "param:action",
 		anchor = "param:anchor", x = "param:x", y = "param:y",
-		width = "param:width", panel = "param:panel"},
+		width = "param:width", height = "param:height", color = "param:color",
+		background = "param:background", border = "param:border",
+		style = "param:style", size = "param:size", order = "param:order",
+		panel = "param:panel"},
 	params = {
 		label = {type = "string", default = "OK"},
 		action = {type = "string", default = ""},
@@ -46,9 +49,17 @@ return {
 		anchor = {type = "string", default = "bottom", choices = {"top_left",
 			"top", "top_right", "left", "center", "right", "bottom_left",
 			"bottom", "bottom_right"}},
-		x = {type = "number", default = 0, min = -2000, max = 2000},
-		y = {type = "number", default = 60, min = -2000, max = 2000},
-		width = {type = "number", default = 0, min = 0, max = 2000},
+		x = {type = "number", default = 0, min = -400, max = 400},
+		y = {type = "number", default = 5.6, min = -400, max = 400},
+		width = {type = "number", default = 0, min = 0, max = 400},
+		height = {type = "number", default = 0, min = 0, max = 400},
+		size = {type = "number", default = 1.8, min = 0.5, max = 30},
+		style = {type = "string", default = "shapes",
+			choices = {"shapes", "plain"}},
+		color = {type = "string", default = "#ffffff"},
+		background = {type = "string", default = "#000000a0"},
+		border = {type = "string", default = "#808080a0"},
+		order = {type = "number", default = 0, min = -40, max = 40},
 		panel = {type = "entity", default = 0},
 		to = {type = "string", default = "everyone",
 			choices = {"everyone", "player", "team"}},
@@ -60,6 +71,18 @@ return {
 	},
 	inputs = {show = "none", hide = "none", toggle = "none"},
 	outputs = {pressed = "none", released = "none"},
+	-- [KIT_HUD_STYLE] Version 1's pixels as percents of the shorter side,
+	-- against a 1080 p screen
+	migrate = function(params, from)
+		if from < 2 then
+			for _, k in ipairs({"x", "y", "width", "height", "size"}) do
+				if type(params[k]) == "number" then
+					params[k] = math.floor(params[k] * 10000 / 1080 + 0.5) / 100
+				end
+			end
+		end
+		return params
+	end,
 	on_start = function(c)
 		c.state.shown = c.params.shown
 	end,

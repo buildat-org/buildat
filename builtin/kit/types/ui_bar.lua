@@ -1,8 +1,15 @@
 -- A bar on the players' screens ([KIT_UI_COMPONENTS], stage 4m): health,
 -- the time left, a capture's progress. It fills from `min` to `max` as
--- the value on "value" does (`start`: at the start); `label` over it,
--- {value} the value. Where, who sees it and "show", "hide" and "toggle"
--- as kit/ui_text's
+-- the value on "value" does (`start`: at the start; min over max: it
+-- empties as the value grows); `label` over it, {value} the value
+-- ({value:time}, {value:int}), shrunk to fit it, then clipped. Where, who
+-- sees it and "show", "hide" and "toggle" as kit/ui_text's.
+-- [KIT_HUD_STYLE] `form` "bar" (running by `direction`) or "pie" (a disc in
+-- 32 steps; width and height 0: a bar's or a pie's default size); `color`
+-- the fill's, `background` and `border` each a colour with alpha or "none";
+-- `blink_below` a fraction of the range under which it blinks (0 off);
+-- `source` "health": the player's own kit/health instead of signals (Kit's
+-- health bar, kit/game_rules' show_health, gives way to one up)
 local function view(c, by)
 	if (c.params.to ~= "player" and c.params.to ~= "team") or
 			not c.player then
@@ -26,13 +33,17 @@ local function view(c, by)
 end
 
 return {
-	version = 1,
+	version = 2,
 	-- (to "team" reads them)
 	teams = true,
 	ui = {kind = "bar", text = "param:label", anchor = "param:anchor",
 		x = "param:x", y = "param:y", width = "param:width",
-		min = "param:min", max = "param:max", color = "param:color",
-		panel = "param:panel"},
+		height = "param:height", min = "param:min", max = "param:max",
+		color = "param:color", background = "param:background",
+		border = "param:border", style = "param:style", form = "param:form",
+		direction = "param:direction", size = "param:size",
+		blink_below = "param:blink_below", order = "param:order",
+		source = "param:source", panel = "param:panel"},
 	params = {
 		label = {type = "string", default = "{value}"},
 		min = {type = "number", default = 0, min = -1000000, max = 1000000},
@@ -42,10 +53,24 @@ return {
 		anchor = {type = "string", default = "top_left", choices = {"top_left",
 			"top", "top_right", "left", "center", "right", "bottom_left",
 			"bottom", "bottom_right"}},
-		x = {type = "number", default = 12, min = -2000, max = 2000},
-		y = {type = "number", default = 80, min = -2000, max = 2000},
-		width = {type = "number", default = 160, min = 20, max = 2000},
-		color = {type = "string", default = "#d04040"},
+		x = {type = "number", default = 1.1, min = -400, max = 400},
+		y = {type = "number", default = 7.4, min = -400, max = 400},
+		width = {type = "number", default = 0, min = 0, max = 400},
+		height = {type = "number", default = 0, min = 0, max = 400},
+		size = {type = "number", default = 1.7, min = 0.5, max = 30},
+		style = {type = "string", default = "shapes",
+			choices = {"shapes", "plain"}},
+		form = {type = "string", default = "bar", choices = {"bar", "pie"}},
+		direction = {type = "string", default = "left_to_right",
+			choices = {"left_to_right", "right_to_left", "bottom_to_top",
+			"top_to_bottom"}},
+		source = {type = "string", default = "signal",
+			choices = {"signal", "health"}},
+		color = {type = "string", default = "#20c8e0"},
+		background = {type = "string", default = "#000000a0"},
+		border = {type = "string", default = "#808080a0"},
+		blink_below = {type = "number", default = 0, min = 0, max = 1},
+		order = {type = "number", default = 0, min = -40, max = 40},
 		panel = {type = "entity", default = 0},
 		to = {type = "string", default = "everyone",
 			choices = {"everyone", "player", "team"}},
@@ -58,6 +83,18 @@ return {
 	},
 	inputs = {value = "number", show = "none", hide = "none",
 		toggle = "none"},
+	-- [KIT_HUD_STYLE] Version 1's pixels as percents of the shorter side,
+	-- against a 1080 p screen
+	migrate = function(params, from)
+		if from < 2 then
+			for _, k in ipairs({"x", "y", "width", "height", "size"}) do
+				if type(params[k]) == "number" then
+					params[k] = math.floor(params[k] * 10000 / 1080 + 0.5) / 100
+				end
+			end
+		end
+		return params
+	end,
 	on_start = function(c)
 		c.state.shown = c.params.shown
 		c.state.value = c.params.start

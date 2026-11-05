@@ -144,7 +144,15 @@ namespace interface
 //                               players' screens, not in the world
 //                               (client_lua/ui.lua; "param:<name>" as a
 //                               look's): kit/ui_text, ui_bar, ui_button and
-//                               ui_panel. It is up for a player while its
+//                               ui_panel. [KIT_HUD_STYLE] Its fields as
+//                               theirs: style, width, height, size, color,
+//                               background, border, order, a bar's form,
+//                               direction, blink_below, source, a panel's
+//                               layout and gap; x, y and the sizes in
+//                               percent of the screen's shorter side;
+//                               prefix: its parameters' names' start, for
+//                               edit mode's drags (kit/arena's "hud_").
+//                               It is up for a player while its
 //                               state `shown` (shared) is true, or their
 //                               own in `own` (per_player, {shown}) says
 //                               so, and its `panel` (an entity: 0 none) is

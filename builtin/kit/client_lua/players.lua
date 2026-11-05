@@ -473,8 +473,6 @@ local function set_hint(text)
 	if not SP.hint then
 		SP.hint = magic.ui.root:CreateChild("Text")
 		SP.hint:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
-		SP.hint:SetAlignment(magic.HA_CENTER, magic.VA_BOTTOM)
-		SP.hint:SetPosition(0, -110)
 	end
 	SP.hint.visible = text ~= nil
 	if text then
@@ -482,6 +480,13 @@ local function set_hint(text)
 		log:info("kit: spectating: " .. text:gsub("\n", " | "))
 	end
 end
+
+-- [KIT_HUD_STYLE] Where kit/game_rules keeps it
+magic.SubscribeToEvent("Update", function()
+	if SP.hint and SP.hint.visible then
+		M.own_place_text(SP.hint, "hint", 1.6)
+	end
+end)
 
 -- The camera's place and turn while spectating (nil: not), from
 -- controls.lua's place_camera: where it is now and the mouse's look
