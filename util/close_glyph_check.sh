@@ -5,7 +5,9 @@
 # [CLOSE_GLYPH]: launch_menu at a phone's size in the touch mode
 # (BUILDAT_TOUCH=1, 400x760), and at a desktop's:
 #   1. Home, the first screen, has no ×.
-#   2. Apps has one, inside its window's top right corner (ui scan).
+#   2. Apps has one, inside its window's top right corner (ui scan), or
+#      right under the trusted overlay where the window reaches the
+#      overlay's place, as at the phone's size.
 #   3. A tap on it closes Apps as Escape does: Home is back.
 #   4. Starport settings (open_window) has one too, and a click on it
 #      closes it.
@@ -33,7 +35,8 @@ drive(){ # name size commands [env...]
 	grep -aq "Lua runtime error\|error shown in a dialog" "$t/$name.log" &&
 		fail "an error in $name: $(grep -a 'error shown' "$t/$name.log" | head -1)"
 }
-# The ×'s centre, if inside the top right of the top window: "x y"
+# The ×'s centre, if inside the top right of the top window: "x y".
+# 49: the overlay's bottom, by phone.png's pixels (ui_utils' OVERLAY_BOTTOM)
 glyph(){ # log label
 	grep -a "scan $2: " "$1" | python3 -c '
 import re, sys
@@ -48,7 +51,7 @@ for l in sys.stdin:
 	if "text \"×\"" in m.group(7):
 		cx, cy = x + w // 2, y + h // 2
 		wx, wy, ww, wh = win
-		if wx + ww - 50 <= cx <= wx + ww and wy <= cy <= wy + 50:
+		if wx + ww - 50 <= cx <= wx + ww and wy <= cy <= max(wy, 49) + 50:
 			print(cx, cy)
 		else:
 			print("outside", (cx, cy), win)
