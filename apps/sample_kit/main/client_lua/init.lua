@@ -129,7 +129,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 end)
 
 -- Kit's nodes: "kit:<id>", a shared state value in the var "kit:<key>"
-local NAMES = {"open", "presses", "enabled", "out", "owners", "lit"}
+local NAMES = {"open", "presses", "enabled", "out", "owners", "lit", "ticks"}
 local seen = {}
 local nodes = {}
 replicate.sub_sync_node_added({}, function(node)

@@ -32,7 +32,7 @@ return {
 	version = 2,
 	players = true,
 	hud = "text",
-	look = {shape = "box", size = 0.25, color = "#e04080"},
+	no_position = true,
 	params = {title = {cat = "hud", type = "string", default = "Score"}},
 	state = {text = {default = "", shared = true}},
 	inputs = {add = "none", reset = "none"},

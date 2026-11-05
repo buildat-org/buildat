@@ -35,6 +35,7 @@ end
 
 return {
 	version = 2,
+	no_position = true,
 	-- (to "team" reads them)
 	teams = true,
 	ui = {kind = "panel", text = "param:title", anchor = "param:anchor",

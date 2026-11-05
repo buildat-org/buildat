@@ -544,7 +544,6 @@ keypress e
 wait_log_any 5000 kit: inventory screen closed
 mouse_click left
 wait_log 10000 kit: use 4
-wait_log 10000 kit: entity 7 shows "3"
 look_dir 0.4 -1 0
 wait_log_any 5000 kit: points at dig 1,0,1, place 1,1,1
 frames 3
@@ -1318,7 +1317,7 @@ wait_log 5000 kit editor: the view is 2D
 event kit_edit {"op": "place", "type": "kit/region", "pos": [2, -1, -2]}
 wait_log 10000 kit editor: state: 7 entities, 11 to undo
 mouse_pos 556 422
-wait_log 5000 kit editor: guide: Left: select kit/region
+wait_log 5000 kit editor: guide: Left: select ◆ 8 region
 frames 3
 screenshot @T@/buried_hover.png
 mouse_click left

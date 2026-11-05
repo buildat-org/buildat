@@ -4,10 +4,10 @@
 -- a touchscreen's button call it. "[<action>]" in a sign's text shows each
 -- player the key they have for it. It signals "pressed" and "released" as
 -- a player presses and lets go, and "held" with the seconds held every
--- 0.1 s in between; each as by that player. The presses are drawn over it
+-- 0.1 s in between; each as by that player
 return {
 	version = 1,
-	look = {shape = "box", size = 0.25, color = "#40b0a0", text = "presses"},
+	no_position = true,
 	params = {
 		action = {type = "string", default = "fire"},
 		key = {type = "string", default = "R"},

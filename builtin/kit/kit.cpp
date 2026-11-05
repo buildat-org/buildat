@@ -253,6 +253,8 @@ struct Type
 	// says what players keep between plays (between_plays), it goes on the
 	// app root (root)
 	bool spawn = false, between_plays = false, root = false;
+	// [KIT_NO_WORLD_TYPES]
+	bool no_position = false;
 	// [KIT] stage 4e: it is the World (kit/world; the first on the root)
 	bool world = false;
 	// [KIT_ENVIRONMENT] it is an environment (kit/environment: the root's
@@ -1704,6 +1706,7 @@ struct Module: public interface::Module, public Interface
 		}
 		t.between_plays = t.decl.get("between_plays").is_true();
 		t.root = t.decl.get("root").is_true();
+		t.no_position = t.decl.get("no_position").is_true();
 		t.world = t.decl.get("world").is_true();
 		t.environment = t.decl.get("environment").is_true();
 		t.builds = t.decl.get("builds").is_true();
@@ -1782,6 +1785,26 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// ---- The tree
+
+	// [KIT_NO_WORLD_TYPES] Whether all its types say no_position (api.h)
+	bool no_position(const Entity &e)
+	{
+		if(e.comps.empty() || !e.kind.empty())
+			return false;
+		for(const Instance &in : e.comps){
+			auto t = m_types.find(in.type);
+			if(t == m_types.end() || !t->second.no_position)
+				return false;
+		}
+		return true;
+	}
+
+	// Whether it has a node: one with no position's is its shared state's and
+	// its HUD element's alone, nothing drawn in the world
+	bool wants_node(const Entity &e)
+	{
+		return e.has_pos || (no_position(e) && scene_of(e));
+	}
 
 	main_context::SceneReference scene_of(const Entity &e, ss_ *name = nullptr)
 	{
@@ -2443,6 +2466,12 @@ struct Module: public interface::Module, public Interface
 			}
 			e.comps.push_back(in);
 		}
+		// [KIT_NO_WORLD_TYPES] A position it was given goes (an old save's, a
+		// prefab's)
+		if(no_position(e)){
+			e.has_pos = false;
+			e.pos[0] = e.pos[1] = e.pos[2] = e.yaw = 0;
+		}
 		return true;
 	}
 
@@ -3017,7 +3046,7 @@ struct Module: public interface::Module, public Interface
 		// The nodes that carry the positional entities' shared state, and
 		// the voxels they own
 		for(auto &p : m_entities)
-			if(p.second.has_pos)
+			if(wants_node(p.second))
 				make_node(p.second);
 		own_voxels();
 		pick_provider();
@@ -8179,8 +8208,7 @@ struct Module: public interface::Module, public Interface
 			json::Value players = json::array();
 			// [KIT_CTF] its scene: a player in another is `away`
 			ss_ own_scene;
-			if(e.has_pos)
-				scene_of(e, &own_scene);
+			scene_of(e, &own_scene);
 			for(auto &pl : m_players){
 				auto it = m_entities.find(pl.second);
 				if(it == m_entities.end())
@@ -8860,9 +8888,7 @@ struct Module: public interface::Module, public Interface
 		} else {
 			const sv_<uint64_t> g = group_of(strtoull(ref.c_str() + 7,
 					nullptr, 10));
-			const Entity &src = m_entities[g[0]];
-			if(src.has_pos)
-				world_of(src, base);
+			first_place(g, base);
 			pf = group_prefab(g, base);
 		}
 		const json::Value &pos = s.at(1u);
@@ -8922,7 +8948,7 @@ struct Module: public interface::Module, public Interface
 					for(json::Iterator it(sd); it; ++it)
 						in.state.set(it.key(), (*it).get("default"));
 			}
-			if(n.has_pos)
+			if(wants_node(n))
 				make_node(n);
 			for(size_t i = 0; i < n.comps.size(); i++){
 				Run r;
@@ -9511,6 +9537,16 @@ struct Module: public interface::Module, public Interface
 	// a member under a positioned member keeps its own, its parent's
 	// frame's), links and entity parameters among them made the members',
 	// others left out
+	// Where a group's first member with a place is (base as it was: none)
+	void first_place(const sv_<uint64_t> &ids, double base[3])
+	{
+		for(uint64_t id : ids)
+			if(m_entities[id].has_pos){
+				world_of(m_entities[id], base);
+				return;
+			}
+	}
+
 	json::Value group_prefab(const sv_<uint64_t> &ids, const double base[3])
 	{
 		std::map<uint64_t, int64_t> local;
@@ -9895,8 +9931,8 @@ struct Module: public interface::Module, public Interface
 		if(box){
 			for(int k = 0; k < 3; k++)
 				base[k] = o[k];
-		} else if(m_entities[group[0]].has_pos){
-			world_of(m_entities[group[0]], base);
+		} else {
+			first_place(group, base);
 		}
 		pf = group_prefab(group, base);
 		if(box){
@@ -14694,7 +14730,7 @@ struct Module: public interface::Module, public Interface
 			ss_ es;
 			const bool here = e.first == player || (e.second.parent == 1 &&
 					!e.second.has_pos) || (!scene.empty() &&
-					e.second.has_pos && e.second.kind != "player" &&
+					e.second.kind != "player" &&
 					scene_of(e.second, &es) && es == scene);
 			if(!here)
 				continue;
@@ -15103,7 +15139,7 @@ struct Module: public interface::Module, public Interface
 		for(auto &e : m_entities){
 			ss_ es;
 			const bool here = e.first == p.player || (e.second.parent == 1 &&
-					!e.second.has_pos) || (e.second.has_pos &&
+					!e.second.has_pos) || (
 					e.second.kind != "player" && scene_of(e.second, &es) &&
 					es == p.scene);
 			if(!here)
@@ -16652,7 +16688,7 @@ struct Module: public interface::Module, public Interface
 		for(auto &e : m_entities){
 			ss_ es;
 			const bool here = e.first == pid || (e.second.parent == 1 &&
-					!e.second.has_pos) || (placed && e.second.has_pos &&
+					!e.second.has_pos) || (placed &&
 					scene_of(e.second, &es) && es == scene);
 			if(!here)
 				continue;
@@ -16722,9 +16758,7 @@ struct Module: public interface::Module, public Interface
 		sv_<std::pair<uint64_t, size_t>> list;
 		for(auto &e : m_entities){
 			ss_ es;
-			if(e.second.has_pos ? !scene_of(e.second, &es) || es != scene :
-					!(e.second.parent == 1 || e.second.parent ==
-					scene_entity(scene)))
+			if(scene_of(e.second, &es) ? es != scene : e.second.parent != 1)
 				continue;
 			for(size_t i = 0; i < e.second.comps.size(); i++){
 				const Instance &in = e.second.comps[i];
@@ -16930,11 +16964,8 @@ struct Module: public interface::Module, public Interface
 		for(auto &p : m_entities){
 			const Entity &e = p.second;
 			ss_ scene;
-			if(e.has_pos){
-				scene_of(e, &scene);
-				if(scene != pe.scene)
-					continue;
-			}
+			if(scene_of(e, &scene) && scene != pe.scene)
+				continue;
 			for(size_t i = 0; i < e.comps.size(); i++){
 				const Instance &in = e.comps[i];
 				if(!m_types[in.type].handlers.count("on_action"))
@@ -17057,7 +17088,7 @@ struct Module: public interface::Module, public Interface
 				return refuse("in the tools");
 		}
 		auto it = m_entities.find(id);
-		if(it == m_entities.end() || !it->second.has_pos)
+		if(it == m_entities.end())
 			return refuse("no such button");
 		ss_ scene;
 		scene_of(it->second, &scene);
@@ -18371,7 +18402,7 @@ struct Module: public interface::Module, public Interface
 		// its frame
 		for(auto &r : m_removed){
 			Entity &e = m_entities[r.first];
-			if(e.has_pos)
+			if(wants_node(e))
 				make_node(e);
 		}
 		if(!made.empty() || !m_removed.empty())
@@ -18710,7 +18741,7 @@ struct Module: public interface::Module, public Interface
 				json::Value o = json::object();
 				for(const char *k : {"params", "inputs", "outputs", "gizmo",
 						"usable", "zone", "volume", "grants", "region", "voxel_box", "version",
-						"inventory", "root", "inputs_types", "outputs_types",
+						"inventory", "root", "no_position", "inputs_types", "outputs_types",
 						"inputs_labels", "outputs_labels", "player"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
@@ -18724,7 +18755,7 @@ struct Module: public interface::Module, public Interface
 					json::Value o = json::object();
 					for(const char *k : {"params", "inputs", "outputs", "gizmo",
 							"zone", "volume", "grants", "region", "voxel_box", "version", "inventory",
-							"root", "inputs_types", "outputs_types", "inputs_labels",
+							"root", "no_position", "inputs_types", "outputs_types", "inputs_labels",
 							"outputs_labels", "player"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
@@ -19415,7 +19446,7 @@ struct Module: public interface::Module, public Interface
 		Entity *e = entity_arg(j, "id", why);
 		if(!e)
 			return false;
-		if(!e->has_pos || !e->kind.empty()){
+		if((!e->has_pos && !no_position(*e)) || !e->kind.empty()){
 			why = "entity "+itos(e->id)+" has no position";
 			return false;
 		}
@@ -19438,17 +19469,20 @@ struct Module: public interface::Module, public Interface
 			why = "entity "+itos(e->id)+" is under "+itos(to)+" already";
 			return false;
 		}
-		double w[3], wy;
-		world_of(*e, w, &wy);
-		json::Value after = entity_json(*e), pos = json::array();
-		for(int k = 0; k < 3; k++)
-			pos.append(grid(w[k]));
+		json::Value after = entity_json(*e);
 		after.set("parent", (int64_t)to);
-		after.set("pos", pos);
-		after.set("yaw", wy);
-		localize(after);
-		if(!parent)
-			after.set("yaw", norm_yaw(wy));
+		if(e->has_pos){
+			double w[3], wy;
+			world_of(*e, w, &wy);
+			json::Value pos = json::array();
+			for(int k = 0; k < 3; k++)
+				pos.append(grid(w[k]));
+			after.set("pos", pos);
+			after.set("yaw", wy);
+			localize(after);
+			if(!parent)
+				after.set("yaw", norm_yaw(wy));
+		}
 		change.push_back(std::make_pair(e->id, after));
 		what = "put "+itos(e->id)+" under "+(parent ? itos(parent) :
 				"the scene "+scene);
@@ -19521,6 +19555,8 @@ struct Module: public interface::Module, public Interface
 					(m_types[type].environment && jstr(j, "on") != "root" &&
 					env_at(1));
 			const bool root = m_types[type].root;
+			// [KIT_NO_WORLD_TYPES] The scene's, or under that entity, no position
+			const bool no_pos = m_types[type].no_position;
 			uint64_t scene = 0;
 			for(auto &e : m_entities)
 				if(e.second.kind == "scene" && e.second.name == p.scene)
@@ -19543,7 +19579,7 @@ struct Module: public interface::Module, public Interface
 			json::Value pos = json::array();
 			for(unsigned k = 0; k < 3; k++)
 				pos.append(grid(j.get("pos").at(k).as_number()));
-			if(!root){
+			if(!root && !no_pos){
 				e.set("pos", pos);
 				localize(e);
 			}
@@ -19572,8 +19608,9 @@ struct Module: public interface::Module, public Interface
 			e.set("components", comps);
 			change.push_back(std::make_pair(id, e));
 			what = "placed "+type+" "+itos(id)+(on_scene ? " on the scene "+
-					p.scene : root ? ss_(" on the app root") :
-					" at "+pos.stringify())+(under ? " under "+itos(under) :
+					p.scene : root ? ss_(" on the app root") : no_pos ?
+					ss_(", no position") : " at "+pos.stringify())+
+					(under ? " under "+itos(under) :
 					ss_())+(ps.is_object() ? " with "+
 					comp.get("params").stringify() : ss_());
 			return true;
@@ -19964,7 +20001,7 @@ struct Module: public interface::Module, public Interface
 		}
 		if(had){
 			n.node = it->second.node;
-			if(n.node && (!n.has_pos || scene_of(n) != scene_of(it->second))){
+			if(n.node && (!wants_node(n) || scene_of(n) != scene_of(it->second))){
 				remove_node(it->second);
 				n.node = 0;
 			}
@@ -20004,7 +20041,7 @@ struct Module: public interface::Module, public Interface
 			r.args.append(c.second);
 			queue_run(r);
 		}
-		if(e.has_pos && !e.node){
+		if(wants_node(e) && !e.node){
 			make_node(e);
 		} else if(e.node){
 			main_context::access(m_server, scene_of(e), [&](magic::Scene *scene){
@@ -20515,7 +20552,7 @@ struct Module: public interface::Module, public Interface
 				queue_run(r);
 			}
 		for(auto &p : m_entities)
-			if(p.second.has_pos)
+			if(wants_node(p.second))
 				make_node(p.second);
 		own_voxels();
 		pick_provider();

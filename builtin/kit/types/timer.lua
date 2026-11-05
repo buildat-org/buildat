@@ -1,6 +1,6 @@
 -- A timer: once started ("start", or at once with autostart) it signals
 -- "tick" every `interval` seconds of game time, `repeats` times (0: until
--- "stop"), then "done". The ticks so far are drawn over it.
+-- "stop"), then "done".
 -- scope ([KIT] stage 7b's first part): "shared", one timer for all; or
 -- "per_player", each player who starts it their own (their own ticks,
 -- signalled as by them, a "stop" of theirs stopping only theirs); a start
@@ -51,7 +51,7 @@ end
 
 return {
 	version = 2,
-	look = {shape = "box", size = 0.25, color = "#a060e0", text = "ticks"},
+	no_position = true,
 	params = {
 		interval = {type = "number", default = 2, min = 0.1, max = 3600},
 		repeats = {type = "number", default = 0, min = 0, max = 1000000},

@@ -2421,11 +2421,17 @@ local function inspector(w, e, is_made)
 		if (e.yaw or 0) ~= 0 then
 			text(w, string.format("turned %g", e.yaw), DIM)
 		end
+	end
+	-- ([KIT_NO_WORLD_TYPES] one with no position too: kit/starting_kit under a
+	-- kit/team)
+	local c1 = e.components and e.components[1]
+	if (e.pos or (c1 and type_of(c1.type).no_position)) and not sig then
 		-- [KIT_NESTING] what it is under; what is placed next under it.
 		-- [KIT_REPARENT_BUTTONS] Switch parent arms: the next entity clicked
 		-- (the view's or the list's) is its parent; Un-parent puts it back
 		-- under the scene. The server keeps its place in the world
-		local pe = NT.parent_of(e)
+		local pe = NT.tree().by[e.parent]
+		pe = pe and pe.pos and pe
 		if pe then
 			text(w, "Under " .. NT.entity_label(pe), DIM)
 		end
@@ -2440,6 +2446,8 @@ local function inspector(w, e, is_made)
 				send({op = "parent", id = e.id, parent = 0})
 			end)
 		end
+	end
+	if e.pos and not sig then
 		local on = S.under == e.id
 		button(w, on and "Placing under this: stop" or "Place under this",
 				function()

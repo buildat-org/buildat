@@ -296,7 +296,7 @@ event kit_select $STYLE_TO
 wait_log_any 5000 kit editor: selected $STYLE_TO
 delay 500
 screenshot @T@/inspector.png
-mouse_pos 882 350
+mouse_pos 882 288
 frames 5
 mouse_click left
 delay 500

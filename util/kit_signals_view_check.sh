@@ -6,6 +6,9 @@
 # [KIT_SIGNALS_VIEW] The editor's Signals view on Workbench. kitboss (the
 # admin, 1024x700), a kit/flag with links to three kit/ui_bars and from a
 # kit/timer:
+#   0. [KIT_NO_WORLD_TYPES] The ui_bars, the timer and the logic placed at a
+#      position have none: in the list's Scene group, a kit/starting_kit under
+#      the flag too, a Prefab's in the save with none;
 #   1. F5 from 3D: the list and the links side by side under the bar, the
 #      Inspector button the list and the inspector over its viewport, no
 #      panel, no other window; the 3D camera where it was afterwards;
@@ -18,8 +21,8 @@
 #   5. a rename: the server's edit, undone by Ctrl+Z, again; in the save, and
 #      read in the table by another client after the server's restart;
 #   6. the viewport's camera on the selected entity, the walk camera's on one
-#      with no position; a ui_bar selected: the HUD laid out in its rectangle,
-#      that bar marked; game_rules selected: no HUD;
+#      with no position (a ui_bar: the HUD laid out in its rectangle, that bar
+#      marked; game_rules: no HUD);
 #   7. Escape back to the view before; Walk has its panels and HUD back;
 #   8. a 1800x1000 window: all three columns; a touch client at 600x400: one
 #      column at a time;
@@ -96,6 +99,10 @@ EOF
 	place kit/timer; TIMER=$id
 	place kit/game_rules; RULES=$id
 	place kit/logic; LOGIC=$id
+	id=$((id + 1)); KID=$id
+	edit "{\"op\": \"place\", \"type\": \"kit/starting_kit\", \"pos\": [1, 1, 1], \"parent\": $FLAG}"
+	id=$((id + 2)); PIE=$id
+	edit "{\"op\": \"place\", \"prefab\": \"kit/timer_pie\", \"pos\": [1, 1, 1]}"
 	link $FLAG left $BAR1 value
 	link $FLAG taken $BAR1 show
 	link $FLAG home $BAR1 hide
@@ -105,6 +112,11 @@ EOF
 	link $TIMER done $FLAG home
 	link $FLAG scored $LOGIC a
 	cat <<EOF
+click Button "Entities"
+frames 3
+click Button "Scene (*"
+wait_log_any 5000 kit editor: list Scene
+screenshot @T@/scene_list.png
 event kit_select $FLAG
 frames 3
 event kit_cam3d 40 30 40 0 0 0
@@ -304,6 +316,12 @@ kit() # <log>: Kit's own lines, not the drive's
 {
 	grep -a " I kit " "$1"
 }
+# 0. No position, in the Scene group
+want "$s" "placed kit/ui_bar $BAR1, no position" "placed kit/timer $TIMER, no position" \
+	"placed kit/starting_kit $KID, no position under $FLAG"
+kit "$b" | grep -a "kit editor: list Scene (" | tail -1 | grep -aq " $BAR1, $BAR2, $BAR3, $TIMER, $LOGIC, $KID, $((PIE - 1)), $PIE\$" ||
+	fail "the Scene list ($b)"
+echo "ok: types with no position placed: none, in the Scene list"
 # 1. Two columns side by side, the slot taken by turns, under the bar, inside
 # the window
 kit "$b" > "$t/kit.txt"
@@ -358,7 +376,7 @@ esac
 want "$b" "signals: $BAR1 $BAR1 ui_bar: 0 out, "
 echo "ok: a target's name selects it, its links both ways there"
 # 4.
-wantp "$b" "signals: list \"ui_bar\" \(3\): .*$BAR1, .*$BAR2, .*$BAR3"
+wantp "$b" "signals: list \"ui_bar\" \(4\): .*$BAR1, .*$BAR2, .*$BAR3"
 wantp "$b" "signals: list \"home F\" \(1\): .*$FLAG\$"
 echo "ok: the filter, by type and by name"
 # Marked: from a link and to a link; game_rules and the unlinked third bar not,
@@ -382,7 +400,7 @@ awk 'index($0, "Home flag") { h = 1 } h && !index($0, "Home flag") { u = 1 } u &
 	fail "the rename not undone and done again ($t/names.txt)"
 echo "ok: a rename, undone, again"
 # 6.
-want "$b" "signals: the viewport shows entity $FLAG" "signals: the viewport shows entity $BAR1" \
+want "$b" "signals: the viewport shows entity $FLAG" \
 	"signals: the viewport shows what the walk camera shows" \
 	"signals: the HUD in the viewport on" "signals: the HUD in the viewport off"
 kit "$b" > "$t/kit.txt"
@@ -412,7 +430,7 @@ for p in signals form added target renamed filtered nohud hud game_wide out walk
 done
 # 5. The name after a restart; 8. A wide window, a narrow touch one
 stop_server
-python3 -I - "$t/user/apps/workbench/saves/world/save.sqlite" "$FLAG" "$BAR1" <<'PY' || fail "the save"
+python3 -I - "$t/user/apps/workbench/saves/world/save.sqlite" "$FLAG" "$BAR1" "$TIMER" "$LOGIC" "$KID" "$PIE" <<'PY' || fail "the save"
 import json, sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
 a = json.loads(db.execute("SELECT value FROM store WHERE store = 'kit' AND key = 'authored'").fetchone()[0])
@@ -421,6 +439,10 @@ assert e["name"] == "Home flag", e["name"]
 ls = {(l["output"], l["to"], l["input"]): l.get("visible") for l in e["components"][0]["links"]}
 assert ls[("left", int(sys.argv[3]), "value")] is True, ls
 assert not ls[("home", int(sys.argv[3]), "hide")], ls
+for i in sys.argv[3:]:
+    x = next(e for e in a["entities"] if e["id"] == int(i))
+    assert "pos" not in x, x
+assert next(e for e in a["entities"] if e["id"] == int(sys.argv[6]))["parent"] == int(sys.argv[2])
 PY
 cat > "$t/kitwide.cmds" <<EOF
 wait_log_any 60000 Joined as kitboss

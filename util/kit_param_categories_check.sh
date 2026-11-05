@@ -292,7 +292,7 @@ def of(i):
 # 2. The chips and their filter
 assert of(flag)[0].split(", ")[0].endswith("chips All Behaviour HUD Look Advanced"), of(flag)[0]
 assert ", showing all, 41 of 41:" in of(flag)[0], of(flag)[0]
-assert any("no chips, 5 of 5" in l for l in of(timer)), of(timer)
+assert any("no chips, 4 of 4" in l for l in of(timer)), of(timer)
 look = next(l for l in of(flag) if "showing look" in l)
 assert look.endswith(": color lift marker_color marker_label marker_lift marker_style own_look"), look
 # Kept: Look on the flag, All on the rules (no Look there), Look on the flag

@@ -10,7 +10,7 @@
 return {
 	version = 1,
 	players = true,
-	look = {shape = "box", size = 0.25, color = "#806040"},
+	no_position = true,
 	params = {
 		item = {type = "string", default = "", choices_from = "items"},
 		prefab = {type = "prefab", default = ""},

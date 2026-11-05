@@ -63,11 +63,11 @@ EOF
 	echo "wait_log 10000 kit editor: the server is Ended (by kitboss)"
 	echo 'click Button "Run"'
 	echo "wait_log 10000 kit editor: the server is Running (by kitboss)"
-	echo "wait_log 10000 kit: entity 17 shows \"1\""
+	echo "wait_log 10000 replicated: entity 17 ticks = 1"
 	echo "keypress b"
 	echo "wait_log 10000 replicated: entity 3 presses = 1"
-	echo "wait_log 10000 kit: entity 17 shows \"5\""
-	echo "wait_log_any 40000 kit: entity 19 shows \"1\""
+	echo "wait_log 10000 replicated: entity 17 ticks = 5"
+	echo "wait_log_any 40000 replicated: entity 19 ticks = 1"
 	echo "quit"
 } > "$t/boss.cmds"
 

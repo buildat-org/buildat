@@ -38,8 +38,7 @@ end
 
 return {
 	version = 1,
-	look = {shape = "box", size = 0.2, color = "#606070", state = "out",
-		when = {color = "#40e070"}},
+	no_position = true,
 	params = {
 		mode = {type = "string", default = "and",
 			choices = {"and", "or", "xor", "not", "latch", "pulse"}},

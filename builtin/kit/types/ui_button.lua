@@ -34,6 +34,7 @@ end
 
 return {
 	version = 2,
+	no_position = true,
 	-- (to "team" reads them)
 	teams = true,
 	ui = {kind = "button", text = "param:label", action = "param:action",

@@ -26,6 +26,13 @@ namespace interface
 // The app's world is a tree of entities: the app the root (id 1), scenes
 // under it (the app's main_context scenes, by name), positional entities
 // ("objects") in a scene, and entities with no position under the root.
+// [KIT_NO_WORLD_TYPES] A type with `no_position = true` has nothing at a
+// place (kit/timer, kit/ui_text): an entity with only such types has no
+// position, what it is given is dropped, and nothing of it is drawn or
+// picked in the world, in the editor neither. It is under its scene, or
+// under a positioned entity (kit/starting_kit under a kit/team), and has
+// nothing under it; it runs as one in its scene does; a node of its own
+// still carries its shared state and its HUD element, not at any place.
 // [KIT_NESTING] A positioned entity may be under another one in its scene
 // (MAX_NEST levels): its position and yaw are its parent's frame's, so it
 // moves and turns with it, and while its parent's look slides
