@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~6 min (2026-11-04)
+# cost: ~2.5 min, more with a cold module cache (2026-11-06)
 # covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/types/effect.lua builtin/kit/client_lua/effects.lua builtin/kit/types/flag.lua builtin/kit/types/explosive.lua builtin/kit/types/placer.lua builtin/kit/types/part.lua builtin/kit/types/hut.prefab.json builtin/kit/types/bomb_look.prefab.json builtin/kit/sounds.json builtin/kit/types/arena.lua builtin/kit/types/region.lua builtin/kit/client_lua/hands.lua apps/workbench/**
 # [KIT_CTF] Capture the flag composed on a fresh Workbench save with the
 # editor's ops alone (kitboss, the admin, Stopped), then played by three
@@ -101,7 +101,7 @@ fi
 cd "$here/Build"
 
 start_server "$t/srv.log" "Listening at" 300 auto \
-	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 4 ||
+	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 4 --sim-rate 1 ||
 	fail "the server did not come up ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 client() # <name>: its commands in $t/<name>.cmds; BUILDAT_JOIN_* its login
@@ -556,7 +556,10 @@ if [ -n "$build_only" ]; then
 fi
 
 # ---- The drives. Each waits for the HUD the others' acts change (its own
-# client's log of the texts), so they keep in step
+# client's log of the texts), so they keep in step. The game runs at the
+# wall clock's rate around their delays and screenshots; kitcat's drive, the
+# last to act, has it at CHECK_RATE while all three only wait: the first
+# round's time up and the second's
 SHOWN='shown: "'
 lobby() # <how many in the queue first> <wait_log_any|wait_log>: into it
 {
@@ -729,11 +732,16 @@ screenshot $t/cat_bomb_lying.png
 keypress U
 delay 1000
 look_dir -1 -0.2 1
+game_clock $t/user
+game_rate $CHECK_RATE
 wait_log 200000 Blue wins!
+game_rate 1
 EOF
 	lobby 2 wait_log
 	cat <<EOF
+game_rate $CHECK_RATE
 wait_log 60000 Overtime
+game_rate 1
 keypress P
 delay 300
 look_dir 0 0.25 -1
