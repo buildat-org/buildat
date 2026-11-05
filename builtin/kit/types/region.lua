@@ -132,7 +132,7 @@ return {
 	inputs = {enable = "none", disable = "none", set_owner = "any",
 		dig = "bool", place = "bool", enter = "bool", pvp = "bool",
 		damage = "bool", use = "bool", resize = "position", dig_out = "none"},
-	outputs = {changed = "string"},
+	outputs = {changed = "string:change"},
 	on_start = function(c)
 		-- (the state at its start: a fresh one's defaults, or Stop's)
 		c.state.owners = owners_of(c)

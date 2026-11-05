@@ -292,13 +292,13 @@ end
 -- says any; "" where the input takes no value (a trigger, whatever is sent)
 local function carries(x)
 	local c = x.from and x.from.components and x.from.components[x.ci]
-	local ot = c and type_of(c.type).outputs_types
-	local out = type(ot) == "table" and ot[x.l.output] or "any"
+	local out = c and A.signal_kind(type_of(c.type), "outputs", x.l.output) or
+			"any"
 	local inn = "any"
 	for _, tc in ipairs(x.to and x.to.components or {}) do
-		local t = type_of(tc.type)
-		if type(t.inputs_types) == "table" and t.inputs_types[x.l.input] then
-			inn = t.inputs_types[x.l.input]
+		local kind = A.signal_kind(type_of(tc.type), "inputs", x.l.input)
+		if kind then
+			inn = kind
 			break
 		end
 	end

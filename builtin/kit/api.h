@@ -228,6 +228,8 @@ namespace interface
 //   any, none (no value), number, bool, string, entity, position. A link
 //   joins an output to an input that takes its values; an emitted or
 //   delivered value not of its type is logged and not sent.
+//   "string:player" is a string the editor calls a player; a link does not
+//   look at the label.
 //   `by` is "player:<id>", the player's entity (a login keeps it), or
 //   "app"; c:name(by) the player's name, c.player their entity's id.
 //   Players are entities: each player has one in their scene (kind

@@ -36,7 +36,7 @@ return {
 	params = {title = {cat = "hud", type = "string", default = "Score"}},
 	state = {text = {default = "", shared = true}},
 	inputs = {add = "none", reset = "none"},
-	outputs = {changed = "string"},
+	outputs = {changed = "string:text"},
 	on_start = show,
 	on_input = function(c, input, value, by)
 		if input == "reset" then

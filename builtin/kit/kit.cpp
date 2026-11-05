@@ -984,13 +984,27 @@ static const char *SIGNAL_TYPES[] = {"any", "none", "number", "bool",
 // A type's inputs or outputs as its file gives them, {"a", b = "number"}
 // (an array, or an object whose number keys are names of type "any"):
 // the names, each one's type; the declaration's key made the array of the
-// names and "<key>_types" an object of their types
+// names and "<key>_types" an object of their types. "string:player" is a
+// string, its label ("<key>_labels") what the editor calls it: a link looks
+// at the type alone, so that a text element still takes a player's name
 static bool signals(json::Value &decl, const char *key, std::set<ss_> &names,
 		sm_<ss_, ss_> &types, ss_ &why)
 {
 	const json::Value &v = decl.get(key);
-	json::Value list = json::array(), typed = json::object();
-	auto add = [&](const ss_ &name, const ss_ &type) -> bool {
+	json::Value list = json::array(), typed = json::object(),
+			labels = json::object();
+	auto add = [&](const ss_ &name, const ss_ &declared) -> bool {
+		const size_t colon = declared.find(':');
+		const ss_ type = declared.substr(0, colon);
+		if(colon != ss_::npos){
+			const ss_ label = declared.substr(colon + 1);
+			if(type != "string" || !name_ok(label)){
+				why = ss_(key)+": "+name+": only a string has a label, of "
+						"letters, digits and _ (not \""+declared.substr(0, 32)+"\")";
+				return false;
+			}
+			labels.set(name, label);
+		}
 		if(!name_ok(name)){
 			why = ss_(key)+": a name is letters, digits and _: \""+
 					name.substr(0, 64)+"\"";
@@ -1031,6 +1045,7 @@ static bool signals(json::Value &decl, const char *key, std::set<ss_> &names,
 	}
 	decl.set(key, list);
 	decl.set(ss_(key)+"_types", typed);
+	decl.set(ss_(key)+"_labels", labels);
 	return true;
 }
 
@@ -18696,7 +18711,7 @@ struct Module: public interface::Module, public Interface
 				for(const char *k : {"params", "inputs", "outputs", "gizmo",
 						"usable", "zone", "volume", "grants", "region", "voxel_box", "version",
 						"inventory", "root", "inputs_types", "outputs_types",
-						"player"})
+						"inputs_labels", "outputs_labels", "player"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
 				pal.set(t, o);
@@ -18709,7 +18724,8 @@ struct Module: public interface::Module, public Interface
 					json::Value o = json::object();
 					for(const char *k : {"params", "inputs", "outputs", "gizmo",
 							"zone", "volume", "grants", "region", "voxel_box", "version", "inventory",
-							"root", "inputs_types", "outputs_types", "player"})
+							"root", "inputs_types", "outputs_types", "inputs_labels",
+							"outputs_labels", "player"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
 					types.set(t.first, o);

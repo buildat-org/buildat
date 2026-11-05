@@ -405,9 +405,10 @@ return {
 		emitted = {default = {}},
 	},
 	inputs = {enable = "none", disable = "none", home = "none"},
-	outputs = {taken = "string", placed = "string", home = "string",
+	outputs = {taken = "string:player", placed = "string:player",
+		home = "string:reason",
 		left = "number", progress = "number", immune = "number",
-		holder_team = "string", scored = "string"},
+		holder_team = "string:team", scored = "string:team"},
 	on_start = function(c)
 		-- Home: the start's (a Save as start while it was away), else
 		-- its place in the composition, snapped to the cell; it starts

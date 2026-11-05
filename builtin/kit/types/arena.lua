@@ -373,8 +373,8 @@ return {
 	-- Its pad, the zone's first cell's floor, seen in play
 	look = {shape = "box", size = {1, 0.1, 1}, color = "#f0a030"},
 	inputs = {["end"] = "none", win = "any"},
-	outputs = {started = "number", ended = "number", result = "string",
-		status = "string"},
+	outputs = {started = "number", ended = "number", result = "string:team",
+		status = "string:text"},
 	-- Version 1 started at once and had no results to show
 	migrate = function(params, from)
 		if from < 2 then

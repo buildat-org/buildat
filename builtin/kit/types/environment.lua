@@ -116,13 +116,14 @@ return {
 		time_set = {default = 0, shared = true},
 	},
 	inputs = {set_time = "number", set_day_minutes = "number",
-		set_weather = "string", set_season = "string", set_sky = "string",
-		set_fog = "number", set_ambient = "string", set_gravity = "number",
+		set_weather = "string:weather", set_season = "string:season",
+		set_sky = "string:color",
+		set_fog = "number", set_ambient = "string:color", set_gravity = "number",
 		set_clouds = "number", set_cloud_height = "number",
 		set_wind = "number", set_wind_dir = "number", set_sun = "bool",
 		set_moon = "bool", set_stars = "bool", set_intensity = "number"},
-	outputs = {dawn = "none", dusk = "none", weather_changed = "string",
-		season_changed = "string"},
+	outputs = {dawn = "none", dusk = "none", weather_changed = "string:weather",
+		season_changed = "string:season"},
 	on_start = function(c)
 		c.state.set = {}
 	end,

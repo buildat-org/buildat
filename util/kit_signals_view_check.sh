@@ -93,6 +93,7 @@ EOF
 	place kit/ui_bar; BAR3=$id
 	place kit/timer; TIMER=$id
 	place kit/game_rules; RULES=$id
+	place kit/logic; LOGIC=$id
 	link $FLAG left $BAR1 value
 	link $FLAG taken $BAR1 show
 	link $FLAG home $BAR1 hide
@@ -100,6 +101,7 @@ EOF
 	link $FLAG home $BAR2 hide
 	link $FLAG placed $BAR2 show
 	link $TIMER done $FLAG home
+	link $FLAG scored $LOGIC a
 	cat <<EOF
 event kit_select $FLAG
 frames 3
@@ -473,6 +475,8 @@ stop_server
 want "$t/kitwide.log" "signals: $FLAG $FLAG Home flag: " "signals: columns in 1800x1000 "
 # What the arrow says: a value's type, nothing for a trigger
 wantp "$t/kitwide.log" "signals: $FLAG $FLAG Home flag: .*left>value number"
+# A string's label
+wantp "$t/kitwide.log" "signals: $FLAG $FLAG Home flag: .*scored>a team"
 if grep -a "signals: $FLAG $FLAG Home flag: " "$t/kitwide.log" | grep -aq "home>hide"; then
 	fail "a trigger shown as carrying a value ($t/kitwide.log)"
 fi

@@ -2115,8 +2115,15 @@ local function field(name, d, values)
 end
 
 -- A signal's value's type as a label says it ("" for any)
+-- A signal's type as the editor calls it: "string:player" reads as player
+local function signal_kind(t, kind, name)
+	local labels, types = t[kind .. "_labels"], t[kind .. "_types"]
+	return type(labels) == "table" and labels[name] or
+			type(types) == "table" and types[name] or nil
+end
+
 local function typed(t, kind, name)
-	local ty = t[kind .. "_types"] and t[kind .. "_types"][name]
+	local ty = signal_kind(t, kind, name)
 	return (ty and ty ~= "any") and " (" .. ty .. ")" or ""
 end
 
@@ -4133,7 +4140,8 @@ do
 			tostring(err))
 	install({K = K, S = S, W = W, NT = NT, IV = IV, send = send, window = window,
 		find = find, entities = entities, all_entities = all_entities,
-		type_of = type_of, typed = typed, drawn_at = drawn_at, narrow = narrow,
+		type_of = type_of, typed = typed, signal_kind = signal_kind,
+		drawn_at = drawn_at, narrow = narrow,
 		refresh = function() refresh() end})
 end
 
