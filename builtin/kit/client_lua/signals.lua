@@ -15,8 +15,9 @@
 --   - Right: the inspector (editor.lua's: in this view its parameters and Try
 --     alone), under it a View3D of the scene from a camera of its own, on
 --     the selected entity; one with no position (or none): what the walk
---     camera sees. "Show HUD" lays Kit's HUD out in that rectangle (ui.lua's
---     hud_box, by kit.hud_area()) and over it, shown and not clicked
+--     camera sees. With an entity of a HUD element selected, Kit's HUD is laid
+--     out in that rectangle (ui.lua's hud_box, by kit.hud_area()) and over it,
+--     shown and not clicked, the element on an amber rectangle
 --   - Where an entity is listed its name stands after its id; one still
 --     named as placed ("kit/flag 16", or nothing) reads as its type
 --   - A narrow window (a phone): one column at a time, by the bar's buttons
@@ -36,7 +37,7 @@
 -- it; a scrollbar or a filter of its own is the upgrade.
 return function(A)
 local K, S, W, NT, IV = A.K, A.S, A.W, A.NT, A.IV
-local M, E, O = K.M, K.E, K.O
+local M, E, O, P = K.M, K.E, K.O, K.P
 local magic = require("buildat/extension/urho3d")
 local ui_utils = require("buildat/extension/ui_utils")
 local log = K.log
@@ -45,7 +46,7 @@ local send, window, find, type_of, typed = A.send, A.window, A.find, A.type_of,
 local row, text, label, button, edit = K.row, K.text, K.label, K.button, K.edit
 local WARN, DIM = K.WARN, K.DIM
 
--- filter: the list's; hud: Show HUD; add: the Add link form ({id, out, to,
+-- filter: the list's; hud: the HUD in the viewport as logged; add: the Add link form ({id, out, to,
 -- input}); tab: the narrow window's column; area: where the viewport is
 local SG = {filter = "", hud = false, add = nil, tab = "links", area = nil}
 NT.sg = SG
@@ -484,14 +485,6 @@ function SG.world_viewport()
 	w.priority = -9000
 	w.opacity = 1
 	SG.view_win = w
-	local _, t = button(w, "Show HUD", function()
-		SG.hud = not SG.hud
-		log:info("kit editor: signals: the HUD in the viewport " ..
-				(SG.hud and "on" or "off"))
-		SG.hud_text:SetColor(SG.hud and magic.Color(1.0, 0.85, 0.3) or
-				magic.Color(ui_utils.rgb("text")))
-	end)
-	SG.hud_text = t
 	local v = w:CreateChild("View3D")
 	v:SetFixedSize(160, 120)
 	v:SetView(O.scene, (SG.node() and SG.cam), false)
@@ -518,7 +511,14 @@ function SG.world_viewport()
 end
 
 function M.hud_area()
-	return SG.hud and SG.area or nil
+	local n = SG.area and M.selected and P.nodes[M.selected()]
+	local on = n and type(n.show) == "table" and type(n.show.ui) == "table"
+	if (on or false) ~= SG.hud then
+		SG.hud = on or false
+		log:info("kit editor: signals: the HUD in the viewport " ..
+				(SG.hud and "on" or "off"))
+	end
+	return on and SG.area or nil
 end
 
 -- Each frame: the camera; the layout as the window or the bar changes
@@ -606,7 +606,7 @@ function SG.layout(force)
 		fit(W.sg_links, SG.links_view, SG.links_body, mx, top, mw, h)
 	end
 	-- The viewport's height: a 4:3 picture of the column, at most 45 percent
-	local vh = math.floor(math.min(h * 0.45, (rcw - 12) * 0.75)) + 12 + 28
+	local vh = math.floor(math.min(h * 0.45, (rcw - 12) * 0.75)) + 12
 	local on_right = shown("inspector")
 	-- A short narrow window (a phone held sideways): the inspector alone
 	local no_view = SG.is_narrow and h < 320
@@ -616,7 +616,7 @@ function SG.layout(force)
 	if W.sg_view then
 		W.sg_view.visible = on_right and not no_view
 		fit(W.sg_view, nil, nil, rx, top + h - vh, rcw, vh)
-		SG.view3d:SetFixedSize(rcw - 12, math.max(1, vh - 12 - 28))
+		SG.view3d:SetFixedSize(rcw - 12, math.max(1, vh - 12))
 	end
 	if W.inspector and IV.view then
 		W.inspector.visible = on_right

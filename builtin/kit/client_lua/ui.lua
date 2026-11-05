@@ -124,7 +124,7 @@ local function num(v, d, lo, hi)
 end
 
 -- [KIT_SIGNALS_VIEW] The box the HUD is laid out in (screen UI units): the
--- Signals view's viewport with its Show HUD on, else the root
+-- Signals view's viewport with a HUD element selected, else the root
 local function hud_box()
 	local a = M.hud_area and M.hud_area()
 	if a then
@@ -186,6 +186,10 @@ local function drop(r)
 		pcall(function() r.el:Remove() end)
 	end
 	r.el, r.t, r.parts, r.edge, r.px, r.wrap = nil, nil, nil, nil, nil, nil
+	if r.mark then
+		r.mark:Remove()
+		r.mark = nil
+	end
 	r.geom, r.step, r.over = nil, nil, nil
 end
 
@@ -218,6 +222,7 @@ end
 
 local function make(r, id, parent, in_panel)
 	local u, el = r.ui, nil
+	r.host = parent
 	local shapes = u.style ~= "plain"
 	if u.kind == "button" then
 		el = parent:CreateChild("Button")
@@ -936,6 +941,24 @@ local function update()
 			local selected = sel == id or (own_sel and own_sel.name == r.own)
 			local col = selected and M.HOVER or (r.own and
 					magic.Color(0.55, 0.8, 1) or magic.Color(0.8, 0.8, 0.8))
+			-- [KIT_SIGNALS_VIEW] In the Signals viewport the selected one on an
+			-- amber rectangle a little larger: beside it, not in it (a bar and
+			-- a button clip their children)
+			local marked = selected and M.hud_area ~= nil and M.hud_area() ~= nil
+			if marked and not r.mark then
+				r.mark = r.host:CreateChild("BorderImage")
+				r.mark.blendMode = magic.BLEND_ALPHA
+				r.mark.color = magic.Color(1, 0.65, 0.05, 0.9)
+			end
+			if r.mark then
+				r.mark.visible = marked and true or false
+				if marked then
+					r.mark.priority = r.el.priority - 1
+					local p = r.el.position
+					rect(r.mark, p.x - 4, p.y - 4, math.floor(w) + 8,
+							math.floor(h) + 8)
+				end
+			end
 			local bars = {{0, 0, w, 1}, {0, h - 1, w, 1}, {0, 0, 1, h},
 				{w - 1, 0, 1, h}}
 			for i, b in ipairs(r.edge) do
@@ -966,7 +989,8 @@ local function update()
 					r.frac and string.format(", %.2f full", r.frac) or "",
 					r.pie and ", pie step " .. tostring(r.step) .. " of 32" or "",
 					(r.fill_at and not r.pie) and ", fill " .. r.fill_at or "",
-					r.blinking and ", blinks" or "",
+					(r.blinking and ", blinks" or "") ..
+							(r.mark and r.mark.visible and ", marked" or ""),
 					(r.text:gsub("\n", " | ")))
 			if line ~= r.log then
 				r.log = line

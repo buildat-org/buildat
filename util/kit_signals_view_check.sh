@@ -17,8 +17,8 @@
 #   5. a rename: the server's edit, undone by Ctrl+Z, again; in the save, and
 #      read in the table by another client after the server's restart;
 #   6. the viewport's camera on the selected entity, the walk camera's on one
-#      with no position; Show HUD lays a ui_bar out in its rectangle and takes
-#      it away again; no HUD otherwise;
+#      with no position; a ui_bar selected: the HUD laid out in its rectangle,
+#      that bar marked; game_rules selected: no HUD;
 #   7. Escape back to the view before; Walk has its panels and HUD back;
 #   8. a 1800x1000 window, and a touch client at 600x400: one column at a time.
 # Screenshots kept with KEEP_TMP=1: $t/signals.png, $t/added.png, $t/hud.png,
@@ -227,15 +227,13 @@ frames 5
 EOF
 	# 6. The viewport; its HUD
 	cat <<EOF
-event kit_select $BAR1
+event kit_select $RULES
 frames 5
 screenshot @T@/nohud.png
-click Button "Show HUD"
+event kit_select $BAR1
 frames 5
 screenshot @T@/hud.png
 event kit_ui_where hud
-click Button "Show HUD"
-frames 5
 event kit_select $RULES
 frames 5
 screenshot @T@/game_wide.png
@@ -349,24 +347,21 @@ python3 -I - "$t/kit.txt" "$BAR1" <<'PY' || fail "the HUD in the viewport ($t/ki
 import re, sys
 bar = sys.argv[2]
 lines = open(sys.argv[1], errors="replace").read().split("\n")
-on = next(i for i, l in enumerate(lines) if "the HUD in the viewport on" in l)
-off = next(i for i, l in enumerate(lines) if "the HUD in the viewport off" in l)
+ui = re.compile(r"kit: ui %s bar at (\d+),(\d+) (\d+)x(\d+) in (\d+)x(\d+) .* (shown|hidden)" % bar)
+on = [i for i, l in enumerate(lines) if ", marked" in l and ui.search(l)][-1]
 cols = [l for l in lines[:on] if "signals: columns in 1024x700" in l][-1]
 x, y, w, h = map(int, re.search(r"sg_view (\d+) (\d+) (\d+) (\d+)", cols).groups())
-# Before: hidden. With it on: shown, inside the viewport's rectangle
-ui = re.compile(r"kit: ui %s bar at (\d+),(\d+) (\d+)x(\d+) in (\d+)x(\d+) .* (shown|hidden)" % bar)
-before = [ui.search(l) for l in lines[:on] if ui.search(l)]
-assert before and before[-1][7] == "hidden", before[-1:]
-during = [ui.search(l) for l in lines[on:off] if ui.search(l)]
-assert during and during[-1][7] == "shown", during[-1:]
-m = during[-1]
+# Selected: shown and marked, inside the viewport's rectangle
+m = ui.search(lines[on])
+assert m[7] == "shown", m[0]
 bx, by, bw, bh, aw, ah = map(int, m.groups()[:6])
 assert aw < w and ah < h and aw > 100 and ah > 50, (aw, ah, w, h)
 assert x <= bx and bx + bw <= x + w and y <= by and by + bh <= y + h, (m[0], x, y, w, h)
-after = [ui.search(l) for l in lines[off:] if ui.search(l)]
-assert after and after[0][7] == "hidden", after[:1]
+# Then game_rules selected: hidden, not marked
+after = [l for l in lines[on + 1:] if ui.search(l) and ", marked" not in l]
+assert after and ui.search(after[0])[7] == "hidden", after[:1]
 PY
-echo "ok: the viewport's camera; Show HUD lays the HUD out in its rectangle"
+echo "ok: the viewport's camera; a HUD element selected lays the HUD out in its rectangle, marked"
 # 7. The Walk view's panels back
 wantp "$b" "kit: ui $BAR1 bar at .* in 1024x700 .* shown"
 for p in signals form added target renamed filtered nohud hud game_wide out walk; do
@@ -395,8 +390,6 @@ event kit_select $FLAG
 frames 3
 keypress F5
 frames 8
-click Button "Show HUD"
-frames 5
 screenshot @T@/wide.png
 sync 3000
 quit
