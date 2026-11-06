@@ -16,8 +16,10 @@
 --     (Delete); the checkbox is whether it is shown in play; an entity's name
 --     selects it. "+ Add link" picks an output, a target and an input here
 --     (dropdowns)
---   - Right: the inspector (editor.lua's: in this view its parameters and Try
---     alone), under it a View3D of the scene from a camera of its own, on
+--   - Right: the inspector (editor.lua's: in this view its parameters, Switch
+--     parent and Un-parent, and Try alone; armed, a click in the list picks the
+--     parent, over the list what it says), under it a View3D of the scene from
+--     a camera of its own, on
 --     the selected entity; one with no position (or none): what the walk
 --     camera sees. With an entity of a HUD element selected, Kit's HUD is laid
 --     out in that rectangle (ui.lua's hud_box, by kit.hud_area()) and over it,
@@ -205,7 +207,9 @@ function SG.rows()
 					local on = e.id == S.primary
 					local own_color = on and magic.Color(1.0, 0.85, 0.3) or nil
 					local b, t = item(body, clipped(short_name(e)), function()
-						M.select(e.id)
+						if not NT.pick_parent(e.id) then
+							M.select(e.id)
+						end
 					end, own_color, on)
 					-- The symbol a Text of its own, for its own colour
 					local m = text(b, K.ENTITY, linked[e.id] and
@@ -641,7 +645,7 @@ function SG.links()
 	SG.links_body = put_body(SG.links_view, function(body)
 		text(body, title, magic.Color(1.0, 0.85, 0.3))
 		SG.status_text = text(body, E.status or "", WARN)
-		SG.status_text.visible = (E.status or "") ~= ""
+		SG.status_text.visible = (E.status or "") ~= "" and not S.reparent
 		if not e then
 			return
 		end
@@ -698,16 +702,33 @@ function SG.links()
 	end)
 end
 
--- A refusal or what a form lacks, as people() would have said it
+-- A refusal or what a form lacks, as people() would have said it. With Switch
+-- parent armed over the list, which it is picked from: the one column up
+-- whichever others take turns
 function SG.status()
 	if SG.status_text then
 		SG.status_text.text = E.status or ""
-		SG.status_text.visible = (E.status or "") ~= ""
+		SG.status_text.visible = (E.status or "") ~= "" and not S.reparent
+	end
+	local t = SG.armed_text
+	if t then
+		local was = SG.filter_h
+		t.visible = S.reparent ~= nil
+		t.text = S.reparent and E.status or ""
+		t:SetFixedWidth(W.sg_list.width - 12)
+		SG.filter_h = 60 + (S.reparent and t.height + 4 or 0)
+		if SG.filter_h ~= was then
+			SG.layout(true)
+		end
 	end
 end
 
--- Escape: the form first; true when taken
+-- Escape: a Switch parent armed, the form; true when taken
 function SG.escape()
+	if S.reparent then
+		NT.arm_parent(nil)
+		return true
+	end
 	if SG.add then
 		SG.add = nil
 		SG.links()
@@ -992,7 +1013,7 @@ local function close()
 	end
 	if W.sg_list then
 		W.sg_list:Remove()
-		W.sg_list, SG.list_view, SG.list_body = nil, nil, nil
+		W.sg_list, SG.list_view, SG.list_body, SG.armed_text = nil, nil, nil, nil
 	end
 	if W.sg_links then
 		W.sg_links:Remove()
@@ -1093,6 +1114,9 @@ function SG.refresh()
 		f:SetName("signals filter")
 		f.minWidth = 40
 		SG.filter_h = 60
+		SG.armed_text = text(w, "", WARN)
+		SG.armed_text:SetWordwrap(true)
+		SG.armed_text.visible = false
 		SG.list_view = new_view(w)
 	end
 	if not W.sg_links then
@@ -1104,6 +1128,7 @@ function SG.refresh()
 	SG.layout(true)
 	SG.rows()
 	SG.links()
+	SG.status()
 	SG.layout(true)
 end
 end
