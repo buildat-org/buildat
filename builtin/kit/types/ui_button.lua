@@ -73,6 +73,18 @@ return {
 		shown = {default = true, shared = true},
 		own = {default = {}, per_player = true},
 	},
+	about = {
+		what = "A button on the players' screens.",
+		inputs = {
+			show = "Shows it.",
+			hide = "Hides it.",
+			toggle = "Shows it if hidden, else hides it.",
+		},
+		outputs = {
+			pressed = "A player pressed it.",
+			released = "A player let go of it.",
+		},
+	},
 	inputs = {show = "none", hide = "none", toggle = "none"},
 	outputs = {pressed = "none", released = "none"},
 	-- [KIT_HUD_STYLE] Version 1's pixels as percents of the shorter side,

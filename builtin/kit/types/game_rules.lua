@@ -111,6 +111,12 @@ return {
 		respawn = {type = "string", default = "at_once",
 			choices = {"at_once", "on_signal"}},
 	},
+	about = {
+		what = "The game's rules: damage, building, the inventory, respawns, Kit's HUD.",
+		inputs = {
+			respawn = "Respawns every player waiting. Value: not read; respawn must be on_signal.",
+		},
+	},
 	inputs = {respawn = "any"},
 	on_input = function(c, input)
 		if input == "respawn" then

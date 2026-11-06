@@ -47,6 +47,16 @@ return {
 		max = {type = "number", default = 5, min = 1, max = 100},
 		every = {type = "number", default = 0, min = 0, max = 3600},
 	},
+	about = {
+		what = "Where players appear, and where copies are made.",
+		inputs = {
+			spawn = "Makes a copy; with nothing to copy, puts who set it off here.",
+			clear = "Takes its copies away.",
+		},
+		outputs = {
+			spawned = "A copy was made or a player put here. Value: the copy's id; none for a player.",
+		},
+	},
 	inputs = {spawn = "none", clear = "none"},
 	outputs = {spawned = "any"},
 	on_start = every,

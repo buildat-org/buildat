@@ -8,6 +8,12 @@ return {
 		sound = {cat = "look", type = "sound", default = "kit/click"},
 		everywhere = {cat = "look", type = "bool", default = false},
 	},
+	about = {
+		what = "Plays a sound at it, or as loud for everyone in its scene.",
+		inputs = {
+			play = "Plays it.",
+		},
+	},
 	inputs = {play = "none"},
 	on_input = function(c, input, value, by)
 		c:sound(c.params.sound, {everywhere = c.params.everywhere})

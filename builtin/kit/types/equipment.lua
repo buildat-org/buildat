@@ -38,6 +38,12 @@ return {
 		slot = {default = 0, shared = true},
 		held = {default = {}, shared = true},
 	},
+	about = {
+		what = "The item a player holds and its wear; on each player, not placed.",
+		outputs = {
+			broke = "The held item wore out. Value: the item's name.",
+		},
+	},
 	outputs = {broke = "any"},
 	on_tool = function(c, item, cost, uses, drop, shot)
 		if drop then

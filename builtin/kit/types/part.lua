@@ -7,6 +7,9 @@
 -- In the editor Shift and the arrows move it a quarter of a cell
 return {
 	version = 1,
+	about = {
+		what = "Plain geometry off the voxel grid: a box, a wedge or a sphere.",
+	},
 	params = {
 		shape = {cat = "look", type = "string", default = "box",
 			choices = {"box", "wedge", "sphere"}},

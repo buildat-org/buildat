@@ -85,6 +85,15 @@ namespace interface
 //              player who ever set it off); dropping a gone player's is
 //              the upgrade
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
+//   about    = {what = "...", inputs = {name = "..."}, outputs = {name = "..."}}
+//                            -- [KIT_SIGNALS_DOCS] For the builders, all of it
+//                               optional: what the type is, and for each
+//                               signal what sets an output off or what an
+//                               input does. A signal's first sentence is the
+//                               line under it in the Signals view, the whole
+//                               text (a line or two; at most 200 bytes shown)
+//                               its hover. One with a value says it in a
+//                               sentence "Value: ..."
 //   usable   = true          -- a client may "use" it (in range); with an
 //                               on_use, the clients point it out as
 //                               used by a click ([KIT] stage 4e2).

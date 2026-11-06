@@ -77,6 +77,17 @@ return {
 		shown = {default = false, shared = true},
 		own = {default = {}, per_player = true},
 	},
+	about = {
+		what = "A box on the players' screens, holding the UI elements under it.",
+		inputs = {
+			show = "Shows it.",
+			hide = "Hides it.",
+			toggle = "Shows it if hidden, else hides it.",
+		},
+		outputs = {
+			shown = "Show, hide or toggle came. Value: true shown, false hidden.",
+		},
+	},
 	inputs = {show = "none", hide = "none", toggle = "none"},
 	outputs = {shown = "bool"},
 	-- [KIT_HUD_STYLE] Version 1's pixels as percents of the shorter side,

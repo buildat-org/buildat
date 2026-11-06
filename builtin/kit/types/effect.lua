@@ -188,6 +188,18 @@ return {
 		value = {default = false},
 		color = {default = ""},
 	},
+	about = {
+		what = "Particles and a light the clients show, on a signal or a world event.",
+		inputs = {
+			burst = "One burst. Value: where, if its where is \"value\": a position, entity, player or team.",
+			on = "A burst now and then every few seconds, until off. Value: as burst's.",
+			off = "Stops the bursts that on started.",
+			color = "Changes its colour from now on. Value: a team's name or #rrggbb; \"\" its own.",
+		},
+		outputs = {
+			fired = "A burst went off. Value: where, a position.",
+		},
+	},
 	inputs = {burst = "any", on = "any", off = "none", color = "string"},
 	outputs = {fired = "position"},
 	on_input = function(c, input, value)

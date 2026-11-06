@@ -14,6 +14,13 @@ return {
 		down = {default = false, shared = true},
 		presses = {default = 0, shared = true},
 	},
+	about = {
+		what = "A plate a player presses by using it; it stays down for its hold time.",
+		outputs = {
+			pressed = "A player pressed it.",
+			released = "It came back up, its hold time later.",
+		},
+	},
 	outputs = {pressed = "none", released = "none"},
 	on_use = function(c, by)
 		if c.state.down then

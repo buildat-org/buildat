@@ -73,6 +73,17 @@ return {
 		lit = {default = false, shared = true},
 		left = {default = 0},
 	},
+	about = {
+		what = "Once armed, waits out its fuse, explodes and is gone.",
+		inputs = {
+			arm = "Starts the fuse.",
+			explode = "Explodes at once.",
+		},
+		outputs = {
+			armed = "The fuse started.",
+			exploded = "It went off, just before it is gone. Value: where, a position.",
+		},
+	},
 	inputs = {arm = "none", explode = "none"},
 	outputs = {armed = "none", exploded = "position"},
 	on_start = function(c)

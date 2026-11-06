@@ -48,6 +48,9 @@
 -- once they exist, not a World parameter.
 return {
 	version = 2,
+	about = {
+		what = "What the world is generated from: generator, seed, materials, biome.",
+	},
 	root = true,
 	world = true,
 	params = {

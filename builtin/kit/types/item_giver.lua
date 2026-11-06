@@ -13,6 +13,13 @@ return {
 	-- Who has had theirs, by their stable `by`: a table changed in place
 	-- ([KIT] stage 4d: Kit sees that too)
 	state = {given = {default = {}}},
+	about = {
+		what = "A player who uses it gets its items.",
+		outputs = {
+			given = "A player got them.",
+			refused = "They did not fit: the inventory refused them.",
+		},
+	},
 	outputs = {given = "none", refused = "none"},
 	on_use = function(c, by)
 		local given = c.state.given

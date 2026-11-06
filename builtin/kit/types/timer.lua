@@ -65,6 +65,19 @@ return {
 		-- per_player: {["player:<id>"] = ticks} of those running
 		per = {default = {}},
 	},
+	about = {
+		what = "Ticks every interval, a set number of times or until stopped.",
+		inputs = {
+			start = "Starts it, or over if it runs.",
+			stop = "Stops it.",
+		},
+		outputs = {
+			tick = "Comes each interval. Value: the tick's number.",
+			done = "Its repeats are done.",
+			left = "Comes at its start and each tick, with repeats only. Value: the seconds left.",
+			progress = "Comes at its start and each tick, with repeats only. Value: 0 up to 1.",
+		},
+	},
 	inputs = {start = "none", stop = "none"},
 	outputs = {tick = "number", done = "none", left = "number",
 		progress = "number"},

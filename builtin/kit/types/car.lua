@@ -31,6 +31,9 @@ end
 
 return {
 	version = 1,
+	about = {
+		what = "A seat that drives: a player who uses it drives with the keys.",
+	},
 	usable = true,
 	seat = true,
 	look = {shape = "box", size = {1.8, 0.7, 3.6}, offset = {0, -0.15, 0},

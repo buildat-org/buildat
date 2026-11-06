@@ -20319,7 +20319,7 @@ struct Module: public interface::Module, public Interface
 				for(const char *k : {"params", "inputs", "outputs", "gizmo",
 						"usable", "zone", "volume", "grants", "region", "voxel_box", "version",
 						"inventory", "root", "no_position", "inputs_types", "outputs_types",
-						"inputs_labels", "outputs_labels", "player"})
+						"inputs_labels", "outputs_labels", "player", "about"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
 				pal.set(t, o);
@@ -20333,7 +20333,7 @@ struct Module: public interface::Module, public Interface
 					for(const char *k : {"params", "inputs", "outputs", "gizmo",
 							"zone", "volume", "grants", "region", "voxel_box", "version", "inventory",
 							"root", "no_position", "inputs_types", "outputs_types", "inputs_labels",
-							"outputs_labels", "player"})
+							"outputs_labels", "player", "about"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
 					types.set(t.first, o);

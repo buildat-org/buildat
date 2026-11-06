@@ -83,6 +83,17 @@ return {
 	},
 	state = {on = {default = false, shared = true}},
 	gizmo = {shape = "box", size = 0.2, color = "#60c060"},
+	about = {
+		what = "A box of cells in one of two recorded patterns, A and B.",
+		inputs = {
+			on = "Writes pattern B.",
+			off = "Writes pattern A.",
+			toggle = "Writes the other pattern.",
+		},
+		outputs = {
+			changed = "It switched. Value: true B, false A.",
+		},
+	},
 	inputs = {on = "none", off = "none", toggle = "none"},
 	outputs = {changed = "bool"},
 	on_start = function(c)

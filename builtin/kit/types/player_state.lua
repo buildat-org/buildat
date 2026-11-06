@@ -11,6 +11,9 @@
 -- The first one counts.
 return {
 	version = 1,
+	about = {
+		what = "What players keep from one round to the next.",
+	},
 	root = true,
 	between_plays = true,
 	params = {

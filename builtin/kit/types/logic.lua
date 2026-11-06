@@ -49,6 +49,20 @@ return {
 		b = {default = false},
 		out = {default = false, shared = true},
 	},
+	about = {
+		what = "A gate between signals: and, or, xor, not, latch or pulse.",
+		inputs = {
+			a = "Sets a. Value: false, 0, \"\" and \"off\" are off, anything else (none too) on.",
+			b = "Sets b, a latch's reset. Value: as a's.",
+			a_off = "Sets a off.",
+			b_off = "Sets b off.",
+		},
+		outputs = {
+			out = "The result changed. Value: true or false.",
+			on = "The result went on.",
+			off = "The result went off.",
+		},
+	},
 	inputs = {a = "any", b = "any", a_off = "none", b_off = "none"},
 	outputs = {out = "bool", on = "none", off = "none"},
 	on_start = function(c)

@@ -5,6 +5,9 @@
 -- of the prefab's model at its place and any turn (kit.cpp's sync_free_objects).
 return {
 	version = 1,
+	about = {
+		what = "A placed prefab's root: where the copy is and how it is turned.",
+	},
 	params = {
 		mode = {type = "string", default = "stamped",
 			choices = {"stamped", "free"}},

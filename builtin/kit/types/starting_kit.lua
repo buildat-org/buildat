@@ -24,6 +24,12 @@ return {
 		when = {type = "string", default = "round", choices = {"round", "spawn"}},
 		clear = {type = "bool", default = false},
 	},
+	about = {
+		what = "Gives players items at a round's start or at each spawn.",
+		outputs = {
+			given = "A player got them.",
+		},
+	},
 	outputs = {given = "none"},
 	-- Kit's call, by the player (an inventory emptied first with clear)
 	on_give = function(c, by)

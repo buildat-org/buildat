@@ -102,6 +102,9 @@ end
 
 return {
 	version = 1,
+	about = {
+		what = "A player's items; on each player, not placed.",
+	},
 	player = true,
 	state = {
 		items = {default = {}},
