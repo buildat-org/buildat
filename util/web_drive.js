@@ -54,6 +54,8 @@
 //                           the left button (or a finger) down at x0, y0,
 //                           moved to x1, y1 over half a second, and up
 //                           (Chrome: a finger only)
+//   ["rdrag", x0, y0, x1, y1] the right button down at x0, y0, moved to x1, y1
+//                           over half a second, and up
 //   ["drag", type, label, x1, y1, "touch"]
 //                           the same from where the click by label would go
 //   ["shot", path]          a PNG of the page
@@ -272,6 +274,14 @@ async function firefox() {
 					duration: 50, x: Math.round(x0 + (x1 - x0) * i / 10),
 					y: Math.round(y0 + (y1 - y0) * i / 10)})),
 				{type: "pointerUp", button: 0}]}]}),
+		rdrag: (x0, y0, x1, y1) => c.send("input.performActions", {
+				context: ctx, actions: [{type: "pointer", id: "m", actions: [
+				{type: "pointerMove", x: x0, y: y0},
+				{type: "pointerDown", button: 2},
+				...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => ({type: "pointerMove",
+					duration: 50, x: Math.round(x0 + (x1 - x0) * i / 10),
+					y: Math.round(y0 + (y1 - y0) * i / 10)})),
+				{type: "pointerUp", button: 2}]}]}),
 		shot: async p => {
 			const r = await c.send("browsingContext.captureScreenshot", {context: ctx});
 			fs.writeFileSync(p, Buffer.from(r.data, "base64"));
@@ -477,6 +487,18 @@ async function chrome() {
 			await new Promise(r => setTimeout(r, 300));
 			await c.send("Input.dispatchTouchEvent", {type: "touchEnd",
 					touchPoints: []});
+		},
+		rdrag: async (x0, y0, x1, y1) => {
+			const mouse = (type, x, y) => c.send("Input.dispatchMouseEvent", {type,
+					x, y, button: "right", buttons: 2, clickCount: 1});
+			await c.send("Input.dispatchMouseEvent", {type: "mouseMoved", x: x0, y: y0});
+			await mouse("mousePressed", x0, y0);
+			for (let i = 1; i <= 10; i++) {
+				await new Promise(r => setTimeout(r, 50));
+				await mouse("mouseMoved", Math.round(x0 + (x1 - x0) * i / 10),
+						Math.round(y0 + (y1 - y0) * i / 10));
+			}
+			await mouse("mouseReleased", x1, y1);
 		},
 		// One finger; a mouse drag is not here yet
 		drag: (x0, y0, x1, y1) => ops.fingers(x0, y0, null, null, x1, y1),

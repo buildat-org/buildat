@@ -40,10 +40,18 @@
 #      stays armed with its status over the list; past an edit, the filter and
 #      another view; the row indented under the new one; Escape and the button
 #      cancel, the view kept; narrow touch: armed, the list's column is up.
+#  13. [KIT_SIGNALS_VIEWPORT] Its inspector's position edits a positioned entity
+#      (the viewport follows, undone by Ctrl+Z, the 3D view's knob with it); the
+#      viewport's camera orbited by a right drag and a finger, zoomed by the wheel
+#      and a pinch, none of them begun outside it, the pitch clamped, kept for
+#      another entity; a HUD element's viewport as it was; the list and the links
+#      scrolled by the wheel and a finger, the camera not moved.
+#  14. [KIT_SIGNALS_UI_GROUP] The list's groups: UI elements in UI, a panel's
+#      under it, the Scene tab of the Entities panel not split.
 # Screenshots kept with KEEP_TMP=1: $t/parent_*.png, $t/popup.png, $t/palette_menu.png, $t/narrow_popup.png, $t/small_popup.png, $t/small_menu.png, $t/menu.png, $t/refit.png, $t/signals.png, $t/added.png, $t/hud.png,
 # $t/game_wide.png, $t/wide.png, $t/narrow_*.png; look at them.
 #   util/kit_signals_view_check.sh
-#   util/kit_signals_view_check.sh web    item 12 in headless Chrome, mouse and finger
+#   util/kit_signals_view_check.sh web    items 12 and 13 (but the list's scrolling) in headless Chrome, mouse and finger
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -53,7 +61,73 @@ if [ "${1:-}" = web ]; then
 	export BUILDAT_WORKBENCH_STONE=1
 	check_tmp kit_signals_web; t=$CHECK_TMP
 	stub="(function(){ var held = null, refuse = false; Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }}); function set(e){ held = e; document.dispatchEvent(new Event('pointerlockchange')); } document.addEventListener('keydown', function(e){ if(e.key === 'Escape') refuse = true; }, true); document.addEventListener('mousedown', function(){ refuse = false; }, true); HTMLCanvasElement.prototype.requestPointerLock = function(){ if(refuse || !window.lockOk){ document.dispatchEvent(new Event('pointerlockerror')); return Promise.reject(new Error('refused')); } if(held !== this) set(this); return Promise.resolve(); }; document.exitPointerLock = function(){ if(held) set(null); }; return 'stub'; })()"
-	steps() # <click|tap> <x1> <y1> <x2> <y2>: the two flags' cells on the screen
+	# [KIT_SIGNALS_VIEWPORT] The viewport's middle and a point over the inspector,
+	# in CSS pixels; entity 3 selected, the Inspector column up. A touch client's
+	# fingers, a mouse's right drag and wheel; its position by the mouse alone
+	viewport_steps() # <click|tap> <cx> <cy> <outside y>
+	{
+		local p=$1 cx=$2 cy=$3 oy=$4
+		cat <<J
+	["$p", "Button", "Inspector"], ["frames", 5],
+	["shot", "\${OUT}/orbit_0.png"],
+J
+		if [ "$p" = click ]; then
+			cat <<J
+	["rdrag", $cx, $oy, $((cx + 80)), $((oy + 20))], ["frames", 3],
+	["mouse", $cx, $oy], ["frames", 3], ["wheel", $cx, $oy, -300], ["frames", 3],
+	["rdrag", $cx, $cy, $((cx + 60)), $((cy + 30))],
+	["waitlog", "the camera on 3 at .*: yaw (?!40.0)", 10], ["frames", 3],
+	["shot", "\${OUT}/orbit_1.png"],
+	["mouse", $cx, $cy], ["frames", 3], ["wheel", $cx, $cy, -100],
+	["waitlog", "the camera on 3 at .*distance (?!6.00)", 10], ["frames", 3],
+	["shot", "\${OUT}/orbit_2.png"],
+	["click", "LineEdit", "position x"], ["frames", 2], ["key", "End"], ["frames", 2],
+	["type", "5"], ["frames", 2], ["click", "Button", "Move"],
+	["waitlog", "moved 1 by .* from the inspector", 10],
+	["waitlog", "the camera on 3 at ", 10], ["frames", 3],
+	["chord", "Ctrl+z"],
+	["waitlog", "the camera on 3 at ", 10], ["wait", 1000],
+J
+		else
+			cat <<J
+	["drag", $cx, $oy, $((cx + 80)), $((oy + 20)), "touch"], ["frames", 3],
+	["drag", $cx, $cy, $((cx + 60)), $((cy + 40)), "touch"],
+	["waitlog", "the camera on 3 at .*: yaw (?!40.0)", 10], ["frames", 3],
+	["shot", "\${OUT}/orbit_1.png"],
+	["fingers", $((cx - 40)), $cy, $((cx + 40)), $cy, $((cx - 80)), $cy, $((cx + 80)), $cy],
+	["waitlog", "the camera on 3 at .*distance (?!6.00)", 10], ["frames", 3],
+	["shot", "\${OUT}/orbit_2.png"],
+J
+		fi
+	}
+	# What the viewport did in a run: none but a gesture begun in it, in the order
+	# asked for
+	viewport_log() # <page.log> <mouse|touch>
+	{
+		python3 -I - "$1" "$2" <<'PY'
+import re, sys
+kind = sys.argv[2]
+cam = re.compile(r"the camera on 3 at (\S+) (\S+) (\S+): yaw ([\d.]+), pitch (-?[\d.]+), distance ([\d.]+)")
+seq = [[float(x) for x in m.groups()] for m in map(cam.search, open(sys.argv[1], errors="replace")) if m]
+assert seq, "no camera line"
+start = seq[0]
+assert start[3:] == [40, 32, 6], seq[:3]
+# The first change is the drag's: what was outside moved nothing
+drag = seq[1]
+assert drag[3] > 40 and drag[4] > 32 and drag[5] == 6, seq[:3]
+zoom = seq[2]
+assert zoom[3:5] == drag[3:5] and zoom[5] < 6, seq[:4]
+if kind == "mouse":
+    # One notch, 100 CSS pixels (the web's wheel is in tenths)
+    assert abs(zoom[5] - 4.8) < 0.01, zoom
+    # The position, moved and undone: the viewport with it, the view kept
+    rest = seq[3:]
+    assert any(l[0] != zoom[0] for l in rest) and rest[-1][:3] == zoom[:3], seq
+    assert all(l[3:] == zoom[3:] for l in rest), seq
+print("the camera:", seq[1:])
+PY
+	}
+	steps() # <click|tap> <x1> <y1> <x2> <y2> <cx> <cy> <outside y>: the two flags' cells on the screen, the viewport's points
 	{
 		local p=$1
 		cat <<J
@@ -131,6 +205,10 @@ J
 	["$p", "Button", "select 4"], ["waitlog", "signals: list \"\" .*, >3", 10], ["frames", 3],
 	["shot", "\${OUT}/under.png"],
 	["$p", "Button", "Inspector"], ["frames", 5],
+J
+		# A short window: the position's row has pushed it off the inspector
+		[ "$p" = click ] || echo '	["drag", 500, 270, 500, 170, "touch"], ["frames", 3],'
+		cat <<J
 	["$p", "Button", "Un-parent"], ["waitlog", "signals: list \"\" [^>]*$", 10], ["frames", 3],
 	["$p", "Button", "Inspector"], ["frames", 5],
 	["$p", "Button", "Switch parent"], ["waitlog", "switch parent of 3: armed", 10], ["frames", 3],
@@ -139,19 +217,23 @@ J
 	["$p", "Button", "Switch parent"], ["waitlog", "switch parent of 3: armed", 10], ["frames", 3],
 	["$p", "Button", "Inspector"], ["frames", 5],
 	["$p", "Button", "Switch parent: Cancel"], ["waitlog", "switch parent cancelled", 10], ["frames", 3],
-	["shot", "\${OUT}/cancelled.png"], ["sync", 5000]
-]
+	["shot", "\${OUT}/cancelled.png"],
 J
+		viewport_steps "$p" "$6" "$7" "$8"
+		echo '	["sync", 5000]'
+		echo ']'
 	}
-	steps click 900 550 650 700 > "$t/mouse.json"
+	steps click 900 550 650 700 711 617 400 > "$t/mouse.json"
 	"$here/util/web_drive.sh" "${WEB_BROWSER:-chrome}" workbench "$t/mouse.json" "$t/mouse" ||
 		fail "the web drive by the mouse ($t/mouse)"
-	echo "ok: by the mouse in the web client; screenshots $t/mouse/armed.png $t/mouse/refused.png $t/mouse/under.png"
-	steps tap 500 300 600 420 > "$t/touch.json"
+	viewport_log "$t/mouse/page.log" mouse || fail "the viewport by the mouse ($t/mouse/page.log)"
+	echo "ok: by the mouse in the web client; screenshots $t/mouse/armed.png $t/mouse/refused.png $t/mouse/under.png $t/mouse/orbit_1.png $t/mouse/orbit_2.png"
+	steps tap 500 300 600 420 500 400 240 > "$t/touch.json"
 	TOUCH=1 WEB_DRIVE_VIEWPORT=1000x500@1 "$here/util/web_drive.sh" chrome workbench "$t/touch.json" "$t/touch" ||
 		fail "the web drive by a finger ($t/touch)"
-	echo "ok: by a finger in the web client; screenshots $t/touch/armed.png $t/touch/refused.png"
-	echo "PASS: Switch parent and Un-parent in the Signals view on the web"
+	viewport_log "$t/touch/page.log" touch || fail "the viewport by a finger ($t/touch/page.log)"
+	echo "ok: by a finger in the web client; screenshots $t/touch/armed.png $t/touch/refused.png $t/touch/orbit_1.png $t/touch/orbit_2.png"
+	echo "PASS: Switch parent and Un-parent, the position and the viewport's orbit and zoom in the Signals view on the web"
 	exit 0
 fi
 export BUILDAT_WORKBENCH_PROJECT=world
@@ -996,6 +1078,334 @@ if grep -aE "attempt to|stack traceback" "$t/kitparent.log" "$t/kitparent2.log" 
 	fail "a Lua error in the logs"
 fi
 echo "ok: Switch parent and Un-parent in Signals: refusals stay armed, past a rebuild and another view, picked in the list, indented, Escape and the button cancel; narrow touch"
+# 13, 14. [KIT_SIGNALS_VIEWPORT], [KIT_SIGNALS_UI_GROUP]
+read -r vx vy vw vh < <(grep -a "signals: columns in 1024x700 .*sg_view" "$b" | tail -1 | sed 's/.*sg_view //')
+cx=$((vx + vw / 2)) cy=$((vy + vh / 2)) oy=$((vy - 40))
+last=$(grep -ahoP "An edit by kitboss: placed kit/\S+ \K\d+" "$t/srv2.log" "$s" | sort -n | tail -1)
+PANEL=$((last + 1))
+mark() { printf 'frames 3\nevent kit_sg_scroll %s\nframes 2\n' "$1"; }
+{
+	echo "$p_join"
+	edit '{"op": "place", "type": "kit/ui_panel", "pos": [1, 1, 1]}'
+	edit "{\"op\": \"parent\", \"id\": $BAR3, \"parent\": $PANEL}"
+	cat <<EOF
+event kit_select $FLAG
+frames 3
+keypress F5
+wait_log 5000 kit editor: the view is Signals
+frames 8
+screenshot @T@/ui_group.png
+click Button "Inspector"
+frames 5
+screenshot @T@/position_fields.png
+EOF
+	mark start
+	cat <<EOF
+click LineEdit "position x"
+frames 2
+keypress End
+keypress Backspace
+keypress Backspace
+keypress Backspace
+text 7
+frames 2
+click Button "Move"
+wait_log 10000 kit editor: state:
+wait_log 5000 signals: the camera on $FLAG at 7.00 1.00 6.00
+EOF
+	mark moved
+	cat <<EOF
+event kit_cam3d 7 6 16 7 1 6
+frames 5
+event kit_knob_where
+frames 2
+screenshot @T@/moved_3d.png
+keypress F5
+wait_log 5000 kit editor: the view is Signals
+frames 5
+keydown ctrl
+keypress Z
+keyup ctrl
+wait_log 10000 kit editor: state:
+wait_log 5000 signals: the camera on $FLAG at 3.00 1.00 6.00
+EOF
+	mark undone
+	cat <<EOF
+event kit_cam3d 7 6 16 7 1 6
+frames 5
+event kit_knob_where
+frames 2
+keypress F5
+wait_log 5000 kit editor: the view is Signals
+frames 5
+mouse_pos $cx $cy
+frames 2
+mouse_down right
+frames 2
+mouse_pos $((cx + 60)) $((cy + 30))
+frames 2
+mouse_up right
+EOF
+	mark drag
+	echo "screenshot @T@/orbit_drag.png"
+	cat <<EOF
+mouse_wheel 2
+EOF
+	mark wheel
+	echo "screenshot @T@/orbit_wheel.png"
+	cat <<EOF
+mouse_pos $cx $oy
+frames 2
+mouse_down right
+frames 2
+mouse_pos $((cx + 80)) $((oy + 10))
+frames 2
+mouse_up right
+frames 2
+mouse_wheel 2
+EOF
+	mark outside
+	cat <<EOF
+mouse_pos $cx $cy
+frames 2
+mouse_down right
+frames 2
+mouse_pos $cx 0
+frames 2
+mouse_up right
+EOF
+	mark clamp
+	cat <<EOF
+mouse_pos $cx $cy
+frames 2
+mouse_down right
+frames 2
+mouse_pos $cx $((cy + 150))
+frames 2
+mouse_up right
+EOF
+	mark back
+	cat <<EOF
+event kit_select $PARENT
+frames 3
+EOF
+	mark other
+	cat <<EOF
+event kit_select $BAR1
+frames 5
+mouse_pos $cx $cy
+frames 2
+mouse_down right
+frames 2
+mouse_pos $((cx + 60)) $((cy + 30))
+frames 2
+mouse_up right
+frames 2
+mouse_wheel 2
+EOF
+	mark hud
+	cat <<EOF
+screenshot @T@/orbit_hud.png
+event kit_select $FLAG
+EOF
+	mark hud_after
+	echo "sync 3000"
+	echo "quit"
+} > "$t/kitorbit.cmds"
+cat > "$t/kitfinger.cmds" <<EOF
+$p_join
+event kit_select $FLAG
+frames 3
+keypress F5
+wait_log 5000 kit editor: the view is Signals
+frames 8
+click Button "Inspector"
+frames 5
+event kit_ui_where where
+frames 3
+EOF
+{
+	mark start
+	cat <<EOF
+finger_down 1 $cx $oy
+frames 2
+finger_move 1 $((cx + 80)) $oy
+frames 2
+finger_up 1
+EOF
+	mark outside
+	cat <<EOF
+finger_down 1 $cx $cy
+frames 2
+finger_move 1 $((cx + 60)) $((cy + 40))
+frames 2
+finger_up 1
+EOF
+	mark drag
+	echo "screenshot @T@/finger_drag.png"
+	cat <<EOF
+finger_down 1 $((cx - 40)) $cy
+finger_down 2 $((cx + 40)) $cy
+frames 2
+finger_move 1 $((cx - 80)) $cy
+frames 2
+finger_move 2 $((cx + 80)) $cy
+frames 2
+finger_up 1
+frames 2
+finger_up 2
+EOF
+	mark pinch
+	echo "screenshot @T@/finger_pinch.png"
+	echo "sync 3000"
+	echo "quit"
+} >> "$t/kitfinger.cmds"
+# A short window, where the list and the links overflow
+{
+	echo "$p_join"
+	cat <<EOF
+event kit_select $FLAG
+frames 3
+keypress F5
+wait_log 5000 kit editor: the view is Signals
+frames 8
+EOF
+	mark s0
+	cat <<EOF
+mouse_pos 60 250
+frames 2
+mouse_wheel -3
+EOF
+	mark s_list
+	cat <<EOF
+mouse_pos 600 250
+frames 2
+mouse_wheel -3
+EOF
+	mark s_links
+	echo "screenshot @T@/scrolled.png"
+	echo "sync 3000"
+	echo "quit"
+} > "$t/kitscroll.cmds"
+{
+	echo "$p_join"
+	cat <<EOF
+event kit_select $FLAG
+frames 3
+keypress F5
+wait_log 5000 kit editor: the view is Signals
+frames 8
+EOF
+	mark s0
+	cat <<EOF
+finger_down 1 60 340
+frames 2
+finger_move 1 60 240
+frames 2
+finger_move 1 60 140
+frames 2
+finger_up 1
+EOF
+	mark s_list
+	cat <<EOF
+finger_down 1 600 340
+frames 2
+finger_move 1 600 240
+frames 2
+finger_move 1 600 140
+frames 2
+finger_up 1
+EOF
+	mark s_links
+	echo "sync 3000"
+	echo "quit"
+} > "$t/kitscrollf.cmds"
+BUILDAT_JOIN_NAME=kitboss client kitorbit 1024x700 -u 1
+BUILDAT_JOIN_NAME=kitboss BUILDAT_TOUCH=1 client kitfinger 1024x700 -u 1
+BUILDAT_JOIN_NAME=kitboss client kitscroll 1024x560 -u 1
+BUILDAT_JOIN_NAME=kitboss BUILDAT_TOUCH=1 client kitscrollf 1024x560 -u 1
+python3 -I - "$t" "$FLAG" "$PARENT" "$BAR1" "$BAR2" "$BAR3" "$PANEL" "$TIMER" "$LOGIC" "$KID" "$RULES" "$cx" "$cy" <<'PY' || fail "the viewport or the groups ($t/kitorbit.log, $t/kitfinger.log, $t/kitscroll.log, $t/kitscrollf.log)"
+import re, sys
+t, FLAG, PARENT, BAR1, BAR2, BAR3, PANEL, TIMER, LOGIC, KID, RULES, cx, cy = sys.argv[1:]
+cam_re = re.compile(r"signals: the camera on (\d+) at (\S+) (\S+) (\S+): yaw ([\d.]+), pitch (-?[\d.]+), distance ([\d.]+)")
+mark_re = re.compile(r"signals: scrolled: list (-?\d+), links (-?\d+) \((\w+)\)")
+def read(name):
+    # At each mark: the last camera line before it, and the scroll
+    cam, r, scroll, lines = None, {}, {}, open("%s/%s.log" % (t, name), errors="replace").read().split("\n")
+    for l in lines:
+        m = cam_re.search(l)
+        if m:
+            cam = (m[1],) + tuple(float(x) for x in m.groups()[1:])
+        m = mark_re.search(l)
+        if m:
+            r[m[3]], scroll[m[3]] = cam, (int(m[1]), int(m[2]))
+    return r, scroll, lines
+o, _, lines = read("kitorbit")
+print("orbit:", o)
+assert o["start"][0] == FLAG and o["start"][4:] == (40, 32, 6), o["start"]
+# The position: the viewport on it, x by what was typed; back by the undo
+assert o["moved"][1] == 7 and o["moved"][2:] == o["start"][2:], (o["start"], o["moved"])
+assert o["undone"] == o["start"], o["undone"]
+knobs = [l for l in lines if "the knob on the screen at" in l or "no knob on the screen" in l]
+assert len(knobs) == 2 and "no knob" not in knobs[0], knobs
+assert knobs[0].split("at ")[-1] != knobs[1].split("at ")[-1], knobs
+# Orbit and zoom
+assert abs(o["drag"][4] - 58) < 0.01 and abs(o["drag"][5] - 41) < 0.01 and o["drag"][6] == 6, o["drag"]
+assert o["wheel"][4:6] == o["drag"][4:6] and abs(o["wheel"][6] - 6 * 0.64) < 0.01, o["wheel"]
+assert o["outside"] == o["wheel"], o["outside"]
+assert o["clamp"][5] == -89, o["clamp"]
+assert abs(o["back"][5] - (-89 + 45)) < 0.01 and o["back"][4] == o["clamp"][4], o["back"]
+# Kept for another, centred on it
+assert o["other"][0] == PARENT and o["other"][4:] == o["back"][4:] and o["other"][1:4] != o["back"][1:4], o["other"]
+# One with no position: none of it, and the walk camera shown
+assert o["hud_after"][0] == FLAG and o["hud_after"][4:] == o["back"][4:], o["hud_after"]
+text = "\n".join(lines)
+assert re.search(r"the viewport shows what the walk camera shows", text), "walk"
+assert "signals: the HUD in the viewport on" in text
+# Fingers
+f, _, flines = read("kitfinger")
+print("fingers:", f)
+assert f["outside"] == f["start"], f["outside"]
+assert abs(f["drag"][4] - 49) < 0.01 and abs(f["drag"][5] - 38) < 0.01 and f["drag"][6] == 6, f["drag"]
+assert f["pinch"][4:6] == f["drag"][4:6] and abs(f["pinch"][6] - 3) < 0.05, f["pinch"]
+m = [re.search(r"sg_view (\d+) (\d+) (\d+) (\d+)", l) for l in flines if "(where)" in l]
+assert m and m[0], "the touch client's viewport"
+vx, vy, vw, vh = map(int, m[0].groups())
+assert vx <= int(cx) < vx + vw and vy <= int(cy) < vy + vh, (m[0][0], cx, cy)
+# The list and the links scroll, by wheel and finger; the camera stays
+for n in ("kitscroll", "kitscrollf"):
+    c, s, _ = read(n)
+    print(n, s, c)
+    assert s["s0"] == (0, 0), s
+    assert s["s_list"][0] > 0 and s["s_list"][1] == 0, s
+    assert s["s_links"][0] == s["s_list"][0] and s["s_links"][1] > 0, s
+    assert c["s_links"] == c["s0"], c
+# 14. The groups, the last as listed
+def group(name):
+    g = [re.search(r"signals: group %s: (.*)" % re.escape(name), l) for l in lines]
+    g = [x[1] for x in g if x]
+    assert g, name
+    return [x.split()[0] for x in g[-1].split(", ")]
+gw, sc, ui, po = group("Game-wide"), group("Scene"), group("UI"), group("Positioned")
+print("groups:", gw, sc, ui, po)
+for x in (BAR1, BAR2, BAR3, PANEL):
+    assert x in ui, x
+for x in (TIMER, LOGIC, KID):
+    assert x in sc and x not in ui, x
+assert RULES in gw
+assert FLAG in po and FLAG not in ui
+assert not set(ui) & set(sc), (ui, sc)
+ids = [re.search(r'signals: list "" \(\d+\): (.*)', l) for l in lines]
+ids = [x[1] for x in ids if x][-1]
+assert re.search(r"\b%s, >%s\b" % (PANEL, BAR3), ids), ids
+# In the order they are shown
+order = [x.lstrip(">") for x in ids.split(", ")]
+assert order == gw + sc + ui + po, (order, gw, sc, ui, po)
+PY
+if grep -aE "attempt to|stack traceback" "$t/kitorbit.log" "$t/kitfinger.log" "$t/kitscroll.log" "$t/kitscrollf.log" | head -5 | grep -a .; then
+	fail "a Lua error in the logs"
+fi
+echo "ok: the position in Signals' inspector, undone, in 3D; orbit and zoom by mouse and fingers begun on the viewport; the list and the links scroll; the UI group. Screenshots $t/position_fields.png $t/moved_3d.png $t/orbit_drag.png $t/orbit_wheel.png $t/orbit_hud.png $t/finger_pinch.png $t/ui_group.png $t/scrolled.png"
 # 9. A real window (no -w: the fit is on) made small and large again: the UI
 # back at its full scale, the Signals view's panels not holding the fit down
 cat > "$t/kitfit.cmds" <<EOF

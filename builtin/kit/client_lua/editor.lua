@@ -2504,13 +2504,13 @@ local function inspector(w, e, is_made)
 	-- [KIT] stage 4l: what it costs, changed in place as "kit:costs" comes
 	S.cost_text = text(w, M.cost_line(e.id), DIM)
 	S.cost_id = e.id
-	-- [KIT_SIGNALS_VIEW] In the Signals view its parameters, its parent's buttons
-	-- and Try alone: the links are the view's own table
+	-- [KIT_SIGNALS_VIEW] In the Signals view its position, its parameters, its
+	-- parent's buttons and Try alone: the links are the view's own table
 	local sig = NT.sig()
 	-- Its position typed in (fine tuning, and where keys are not at hand:
 	-- a touchscreen), Move one edit; with several selected they move by
 	-- what this one moves
-	if e.pos and not sig then
+	if e.pos then
 		local r, at = row(w), {e.pos[1], e.pos[2], e.pos[3]}
 		for i, axis in ipairs({"x", "y", "z"}) do
 			-- One letter's room: the row's layout has already widened it
@@ -2519,6 +2519,8 @@ local function inspector(w, e, is_made)
 				at[i] = tonumber(s)
 			end)
 			f.minWidth = 56
+			-- For a driven click
+			f:SetName("position " .. axis)
 		end
 		button(r, "Move", function()
 			if not (at[1] and at[2] and at[3]) then
