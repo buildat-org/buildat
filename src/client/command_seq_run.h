@@ -475,6 +475,24 @@
 			EM_ASM({ Module.buildatFound = ($0 ? [$1, $2] : UTF8ToString($3)); },
 					ok, x, y, err.c_str());
 		}
+		// web_drive.js's event: a native sequence's event line, its receiver
+		// answering in the log
+		while(char *l = (char*)EM_ASM_PTR({
+				var q = Module.buildatEvents;
+				return q && q.length ? stringToNewUTF8(q.shift()) : 0; })){
+			sv_<client::command_seq::Command> cmds;
+			ss_ err = "not an event line";
+			if(client::command_seq::parse(l, &cmds, &err) && cmds.size() == 1 &&
+					cmds[0].type == client::command_seq::Type::Event){
+				magic::VariantMap data;
+				data["Param"] = magic::String(cmds[0].param.c_str());
+				SendEvent(magic::StringHash(
+						magic::String(("command_seq:"+cmds[0].s).c_str())), data);
+			} else {
+				log_w(MODULE, "web drive: %s: %s", l, cs(err));
+			}
+			free(l);
+		}
 	}
 #endif
 

@@ -621,8 +621,9 @@ local function center(e)
 	return magic.Vector3(e.pos[1], e.pos[2], e.pos[3])
 end
 
--- Where it is drawn: an edit's preview (P.preview[id] = {x, y, z, yaw},
--- till: let go, until the node is there), else its node's, else its row's
+-- Where it is drawn: an edit's preview (P.preview[id] = {x, y, z, yaw, q = its
+-- turn, angles = {yaw, pitch, roll} of a selection's handles, till: let go,
+-- until the node is there), else its node's, else its row's
 local function drawn_at(e)
 	local pv = P.preview[e.id]
 	if pv then
@@ -632,23 +633,48 @@ local function drawn_at(e)
 	return n and n.node.position or center(e)
 end
 
+-- [KIT_FREE_ROTATION] A row's turn in the world, as drawn
+function NT.drawn_turn(e)
+	local pv = P.preview[e.id]
+	if pv then
+		return pv.q or magic.Quaternion(0, pv[4], 0)
+	end
+	return magic.Quaternion(e.pitch or 0, e.yaw or 0, e.roll or 0)
+end
+
 -- A drag's preview of an entity: moved by d, turned by turn about mid (a
 -- Vector3; its own position without one), as the server's move_group
 -- ([KIT_GROUP_TURN_JUMP]: its place on the 1/16 grid; [KIT_NESTING] what
--- is under it with it, turned round the same middle)
-local function preview(e, d, turn, mid)
+-- is under it with it, turned round the same middle). h: the handle turning
+-- (knobs() of editor_input.lua), its axis in the world and which angle; none:
+-- round y
+local function preview(e, d, turn, mid, h)
 	local c = center(e)
-	local q = magic.Quaternion(0, turn, 0)
+	local q
+	if h then
+		local half, a = math.rad(turn) / 2, h.axis
+		local sn = math.sin(half)
+		q = magic.Quaternion(math.cos(half), a.x * sn, a.y * sn, a.z * sn)
+	else
+		q = magic.Quaternion(0, turn, 0)
+	end
+	local which = h and h.which or 1
+	local function row_q(x)
+		return q * magic.Quaternion(x.pitch or 0, x.yaw or 0, x.roll or 0)
+	end
 	mid = mid or c
 	local p = mid + q * (c - mid)
 	local function g(v)
 		return math.floor(v * 16 + 0.5) / 16
 	end
 	local at = magic.Vector3(g(p.x + d[1]), g(p.y + d[2]), g(p.z + d[3]))
-	P.preview[e.id] = {at.x, at.y, at.z, (e.yaw or 0) + turn}
+	local angles = {e.yaw or 0, e.pitch or 0, e.roll or 0}
+	angles[which] = angles[which] + turn
+	P.preview[e.id] = {at.x, at.y, at.z, angles[1], q = row_q(e), angles = angles}
 	for _, x in ipairs(NT.under(e.id)) do
 		local px = at + q * (center(x) - c)
-		P.preview[x.id] = {px.x, px.y, px.z, (x.yaw or 0) + turn}
+		P.preview[x.id] = {px.x, px.y, px.z, (x.yaw or 0) + (which == 1 and turn or 0),
+			q = row_q(x)}
 	end
 end
 
@@ -2536,8 +2562,32 @@ local function inspector(w, e, is_made)
 			log:info(string.format("kit editor: moved %d by %g, %g, %g from "
 					.. "the inspector", n, by[1], by[2], by[3]))
 		end)
-		if (e.yaw or 0) ~= 0 then
-			text(w, string.format("turned %g", e.yaw), DIM)
+		-- [KIT_FREE_ROTATION] Its turn typed in, once it has one or may well get
+		-- one (the rows' angles: in the world, as the position's)
+		if (e.yaw or 0) ~= 0 or (e.pitch or 0) ~= 0 or (e.roll or 0) ~= 0 or
+				NT.pf.is_free(e) then
+			local tr = row(w)
+			local a = {e.yaw or 0, e.pitch or 0, e.roll or 0}
+			for i, axis in ipairs({"yaw", "pitch", "roll"}) do
+				label(tr, axis:sub(1, 1)):SetFixedWidth(12)
+				-- (a place in the field's width; the rows are on a 1/16's grid, a
+				-- parent's turn makes it long)
+				local f = edit(tr, string.format("%.4g", a[i]), function(s)
+					a[i] = tonumber(s)
+				end)
+				f.minWidth = 56
+				f:SetName("turn " .. axis)
+			end
+			button(tr, "Turn", function()
+				if not (a[1] and a[2] and a[3]) then
+					E.status = "Turn: three numbers"
+					return people()
+				end
+				send({op = "move", id = e.id, pos = e.pos, yaw = a[1], pitch = a[2],
+					roll = a[3]})
+				log:info(string.format("kit editor: turned %d to %g, %g, %g from "
+						.. "the inspector", e.id, a[1], a[2], a[3]))
+			end)
 		end
 	end
 	-- ([KIT_NO_WORLD_TYPES] one with no position too: kit/starting_kit under a
@@ -2966,6 +3016,7 @@ magic.SubscribeToEvent("command_seq:kit_tabs", function(_, data)
 	log:info("kit editor: the view " .. S.view .. ", the tabs " .. NT.tab() ..
 			", " .. tostring(S.list_tab) .. ", " .. tostring(S.tab) .. " (" ..
 			data:GetString("Param") .. ")")
+	NT.log_shown()
 end)
 
 -- A check's question: where the editor's windows are on the screen, in
@@ -3018,6 +3069,19 @@ end)
 -- sight they would need inspector() to build into a head and a foot
 local IV = {view = nil, y = 0}
 
+-- [KIT_LAST_ROW_CLIP] For kit_tabs: how far down each unscrolled body is shown
+function NT.log_shown()
+	for _, v in ipairs({{"inspector", IV.view}, {"HUD panel", S.hud_panel_view}}) do
+		local view = v[2]
+		if view and view.visible and not view.verticalScrollBar.visible then
+			local b = view.contentElement
+			log:info(string.format("kit editor: the %s's body ends at %d, shown to %d",
+					v[1], b.screenPosition.y + b.height,
+					view.screenPosition.y + view.height - 2))
+		end
+	end
+end
+
 local function fit_inspector()
 	local w, view = W.inspector, IV.view
 	-- ([KIT_SIGNALS_VIEW] the view's own column there, NT.sg.layout)
@@ -3035,14 +3099,15 @@ local function fit_inspector()
 	if body.height > S.inspector_h0 then
 		body.height = 1
 	end
-	local h = math.max(40, math.min(body.height, room))
-	-- ([KIT_PARAM_CATEGORIES] 4: the view's clip border cut the fields' right edge)
-	local bw = body.width + 4 + (h < body.height and view.verticalScrollBar.width + 4 or 0)
+	-- ([KIT_PARAM_CATEGORIES] 4, [KIT_LAST_ROW_CLIP]: the view's clip border, 2 a
+	-- side, cut the fields' right edge and the last row's foot)
+	local bh = body.height + 4
+	local h = math.max(40, math.min(bh, room))
+	local bw = body.width + 4 + (h < bh and view.verticalScrollBar.width + 4 or 0)
 	if view.height ~= h or view.width ~= bw then
-		view:SetScrollBarsVisible(false, h < body.height)
+		view:SetScrollBarsVisible(false, h < bh)
 		view:SetFixedSize(bw, h)
-		log:info(string.format("kit editor: the inspector %d of %d tall",
-				h, body.height))
+		log:info(string.format("kit editor: the inspector %d of %d tall", h, bh))
 	end
 end
 
@@ -3176,9 +3241,10 @@ function NT.hud_panel_fit(view)
 	if body.height > S.hud_panel_h0 then
 		body.height = 1
 	end
-	local h = math.min(body.height, magic.ui.root.height - 28,
-			S.hud_panel_limit or math.huge)
-	local tall = h < body.height
+	-- (the view's clip border, 2 a side: [KIT_LAST_ROW_CLIP])
+	local bh = body.height + 4
+	local h = math.min(bh, magic.ui.root.height - 28, S.hud_panel_limit or math.huge)
+	local tall = h < bh
 	local bw = body.width + 4 + (tall and view.verticalScrollBar.width + 4 or 0)
 	if view.height ~= h or view.width ~= bw then
 		view:SetScrollBarsVisible(false, tall)

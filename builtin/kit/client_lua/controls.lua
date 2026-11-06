@@ -155,8 +155,10 @@ local function world()
 		if type(show.look) == "table" and id ~= seat and not show.player then
 			local on = show.look.state and K.value(n, show.look.state) == true
 			local p = n.node.position
-			local b = MV.look_box(show.look, on, {p.x, p.y, p.z},
-					n.node.rotation:YawAngle())
+			local q = n.node.rotation
+			local tilted = q.x ~= 0 or q.z ~= 0
+			local b = MV.look_box(show.look, on, {p.x, p.y, p.z}, q:YawAngle(),
+					tilted and q:PitchAngle() or 0, tilted and q:RollAngle() or 0)
 			if b then
 				boxes[#boxes + 1] = b
 			end
@@ -321,6 +323,12 @@ buildat.sub_packet("kit:body", function(data)
 	end
 end)
 
+-- [KIT_FREE_ROTATION] For a page's drive, which has no look_dir: "event kit_face
+-- <yaw> <pitch>"
+magic.SubscribeToEvent("command_seq:kit_face", function(_, data)
+	local y, p = data:GetString("Param"):match("(%S+) (%S+)")
+	C.yaw, C.pitch = tonumber(y) % 360, tonumber(p)
+end)
 magic.SubscribeToEvent("command_seq:kit_body", function()
 	local p = pos_of(C.s) or {0, 0, 0}
 	log:info(string.format("kit: body at %.2f,%.2f,%.2f, %d acks, %d " ..

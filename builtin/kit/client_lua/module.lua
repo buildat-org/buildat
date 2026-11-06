@@ -622,7 +622,7 @@ local function draw_look(id, n, look)
 		local r = type(look.rotation) == "table" and look.rotation or {}
 		n.look_rot = magic.Quaternion(tonumber(r[1]) or 0,
 				tonumber(r[2]) or 0, tonumber(r[3]) or 0)
-		n.at, n.at_yaw = nil, nil
+		n.at, n.at_q = nil, nil
 	end
 	-- A swing turns the body round its hinge: the middle of its thickness
 	-- at its -x end, so the turned box is look_box's
@@ -782,6 +782,14 @@ local function entity_view(id, n)
 	return e
 end
 
+-- A preview's or a pose's turn (a vehicle's: its yaw)
+local function pv_q(v)
+	return v.q or magic.Quaternion(0, v[4], 0)
+end
+local function same_q(a, b)
+	return math.abs(a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z) > 1 - 1e-6
+end
+
 -- [KIT_NESTING] The way an entity's looks are carried by those it is
 -- under ("kit_parent", the entity it is under) as their looks slide
 -- (kit/mover): its node is where the slide ends (the server's), the look
@@ -845,17 +853,18 @@ local function update_play(_, data)
 				end
 			end
 		end
-		-- Where it is, turned by its entity's yaw ([KIT] stage 4e2) over its
-		-- look's own turn, or where an editor's drag has it meanwhile
+		-- Where it is, turned by its entity's turn ([KIT] stage 4e2) over its
+		-- look's own, or where an editor's drag has it meanwhile
 		if n.look then
 			local p = n.node.position
-			local yaw = n.node.rotation:YawAngle()
+			local nr = n.node.rotation
+			local q = magic.Quaternion(nr.w, nr.x, nr.y, nr.z)
 			local pv = P.preview[id]
 			-- An editor's preview: where its drag has it, until the server's
 			-- node is there (or its time is up)
 			if pv and pv.till and (buildat.get_time_us() > pv.till or
 					((p - magic.Vector3(pv[1], pv[2], pv[3])):Length() < 0.01 and
-					math.abs(((yaw - pv[4]) % 360 + 180) % 360 - 180) < 0.1)) then
+					same_q(q, pv_q(pv)))) then
 				P.preview[id] = nil
 				pv = nil
 			end
@@ -864,15 +873,15 @@ local function update_play(_, data)
 			pv = pv or P.pose[id]
 			if pv then
 				p = magic.Vector3(pv[1], pv[2], pv[3])
-				yaw = pv[4]
+				q = pv_q(pv)
 			else
 				p = p + carried(n)
 			end
 			if not n.at or (n.at - p):Length() > 1e-4 or
-					math.abs(yaw - n.at_yaw) > 1e-3 then
-				n.at, n.at_yaw = magic.Vector3(p.x, p.y, p.z), yaw
+					not same_q(q, n.at_q) then
+				n.at, n.at_q = magic.Vector3(p.x, p.y, p.z), q
 				n.look.position = n.at
-				n.look.rotation = magic.Quaternion(0, yaw, 0) * n.look_rot
+				n.look.rotation = q * n.look_rot
 			end
 		end
 		if n.text then
@@ -1207,9 +1216,27 @@ magic.SubscribeToEvent("command_seq:kit_probe", function(_, data)
 		ids[#ids + 1] = id
 	end
 	table.sort(ids)
+	local rg = M.region_at and M.region_at(c[1] or 0, c[2] or 0, c[3] or 0)
 	log:info("kit probe: voxel " .. (def and def.name and
 			tostring(def.name.block_name) or "?") .. ", entities " ..
-			table.concat(ids, ","))
+			table.concat(ids, ",") .. (rg and ", region " ..
+			rg.node:GetVar("kit_id"):GetInt() or ""))
+end)
+-- [KIT_FREE_ROTATION] For a drive: "event kit_pose <id>...": where an entity's
+-- node and look are as drawn
+magic.SubscribeToEvent("command_seq:kit_pose", function(_, data)
+	for id in data:GetString("Param"):gmatch("%d+") do
+		local n = P.nodes[tonumber(id)]
+		local a = n and (n.look or n.node)
+		if a then
+			local p, q = a.position, a.rotation
+			log:info(string.format("kit pose: %s %.4f,%.4f,%.4f turn "
+					.. "%.5f,%.5f,%.5f,%.5f%s", id, p.x, p.y, p.z, q.w, q.x, q.y, q.z,
+					n.look and " look" or ""))
+		else
+			log:info("kit pose: " .. id .. " none")
+		end
+	end
 end)
 -- For a drive: "event kit_select <id>..." selects them in the editor, the
 -- last the primary
@@ -1479,10 +1506,24 @@ local function region_at(x, y, z)
 				e[i] = math.max(1, math.min(384, math.floor(tonumber(sz[i]) or 1)))
 			end
 			local p = n.node.position
-			local ox, oy, oz = math.floor(p.x + 1e-4), math.floor(p.y + 1e-4),
-					math.floor(p.z + 1e-4)
-			if x >= ox and x < ox + e[1] and y >= oy and y < oy + e[2] and
-					z >= oz and z < oz + e[3] then
+			local r = n.node.rotation
+			local inside
+			if math.abs(r.x) + math.abs(r.y) + math.abs(r.z) > 1e-6 then
+				-- [KIT_FREE_ROTATION] Turned with its parent: the cell's middle
+				-- in its frame
+				local l = magic.Quaternion(r.w, -r.x, -r.y, -r.z) *
+						(magic.Vector3(x, y, z) - p)
+				local a, b, c = math.floor(l.x + 0.5), math.floor(l.y + 0.5),
+						math.floor(l.z + 0.5)
+				inside = a >= 0 and a < e[1] and b >= 0 and b < e[2] and c >= 0 and
+						c < e[3]
+			else
+				local ox, oy, oz = math.floor(p.x + 1e-4), math.floor(p.y + 1e-4),
+						math.floor(p.z + 1e-4)
+				inside = x >= ox and x < ox + e[1] and y >= oy and y < oy + e[2] and
+						z >= oz and z < oz + e[3]
+			end
+			if inside then
 				local v = e[1] * e[2] * e[3]
 				if not best or v < best_v then
 					best, best_v = n, v

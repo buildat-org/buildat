@@ -154,22 +154,22 @@ end
 -- ---- Looks as boxes: an object's look (module.lua's look_box: its size,
 -- its middle off the entity, `when` over it while its state is on, a
 -- swing a quarter turn round its -x edge) turned by its look's rotation
--- and the entity's yaw, as the box round it {x0, y0, z0, x1, y1, z1};
--- nil when it is not solid
-local function rotation(rx, ry, rz)
-	local function m3(a, b)
-		local r = {}
-		for i = 0, 2 do
-			for j = 0, 2 do
-				local s = 0
-				for k = 0, 2 do
-					s = s + a[i * 3 + k + 1] * b[k * 3 + j + 1]
-				end
-				r[i * 3 + j + 1] = s
+-- and the entity's turn (yaw, pitch, roll), as the box round it {x0, y0, z0,
+-- x1, y1, z1}; nil when it is not solid
+local function m3(a, b)
+	local r = {}
+	for i = 0, 2 do
+		for j = 0, 2 do
+			local s = 0
+			for k = 0, 2 do
+				s = s + a[i * 3 + k + 1] * b[k * 3 + j + 1]
 			end
+			r[i * 3 + j + 1] = s
 		end
-		return r
 	end
+	return r
+end
+local function rotation(rx, ry, rz)
 	local function ry_(d)
 		local c, s = M.cos(d * PI / 180), M.sin(d * PI / 180)
 		return {c, 0, s, 0, 1, 0, -s, 0, c}
@@ -185,7 +185,7 @@ local function rotation(rx, ry, rz)
 	return m3(ry_(ry), m3(rx_(rx), rz_(rz)))
 end
 
-function M.look_box(look, on, pos, yaw)
+function M.look_box(look, on, pos, yaw, pitch, roll)
 	if type(look) ~= "table" then
 		return nil
 	end
@@ -238,8 +238,15 @@ function M.look_box(look, on, pos, yaw)
 				front + size[3] / 2
 	end
 	local r = type(look.rotation) == "table" and look.rotation or {}
-	local R = rotation(tonumber(r[1]) or 0, (tonumber(r[2]) or 0) +
-			(tonumber(yaw) or 0), tonumber(r[3]) or 0)
+	local R
+	pitch, roll = tonumber(pitch) or 0, tonumber(roll) or 0
+	if pitch == 0 and roll == 0 then
+		R = rotation(tonumber(r[1]) or 0, (tonumber(r[2]) or 0) +
+				(tonumber(yaw) or 0), tonumber(r[3]) or 0)
+	else
+		R = m3(rotation(pitch, tonumber(yaw) or 0, roll), rotation(
+				tonumber(r[1]) or 0, tonumber(r[2]) or 0, tonumber(r[3]) or 0))
+	end
 	-- simplified: the turned box's bounds, the box round it; a wedge is
 	-- its whole box
 	local b = {math.huge, math.huge, math.huge, -math.huge, -math.huge,
@@ -260,6 +267,9 @@ end
 -- [KIT_FREE_PREFAB] The free voxel objects as a world's t.turned: from {x, y, z,
 -- yaw, {x0, y0, z0, x1, y1, z1, ...}} (a place and turn round y, and boxes in
 -- that frame). A body meets them in the object's frame, turned with it.
+-- [KIT_FREE_ROTATION] A pitched or rolled object comes as such boxes too, the
+-- server's bounds of its pieces in the frame its yaw alone turns (kit.cpp's
+-- tilted_boxes; stage 4r3's walker frame replaces it).
 -- simplified: its square footprint turned so, at most r * 0.41 off at a corner;
 -- a footprint swept as it stands is the upgrade
 function M.turned(list)
@@ -1077,7 +1087,8 @@ end
 -- the body, a char each, x fastest, then z, then y: "." air, "?" not
 -- loaded, "A"... its classes {name, solid, friction, surface, boxes (a
 -- shape's, [KIT_VOXEL_FORMAT]; a class a facing)}; the solid
--- looks near {look, on, {x, y, z}, yaw}; a heightmap's samples round it)
+-- looks near {look, on, {x, y, z}, yaw[, pitch, roll]}; a heightmap's samples
+-- round it)
 function M.snapshot(t)
 	local classes = {}
 	for i, c in ipairs(t.classes or {}) do
@@ -1100,7 +1111,7 @@ function M.snapshot(t)
 	end
 	local boxes = {}
 	for _, l in ipairs(t.looks or {}) do
-		local b = M.look_box(l[1], l[2] == true, l[3], l[4])
+		local b = M.look_box(l[1], l[2] == true, l[3], l[4], l[5], l[6])
 		if b then
 			boxes[#boxes + 1] = b
 		end

@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~3 min (2026-11-06)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/prefabs.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/types/prefab_copy.lua builtin/voxel_objects/** apps/workbench/**
+# cost: ~2 min, ~4 min with web (2026-11-07)
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/client_lua/module.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/prefabs.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/types/prefab_copy.lua builtin/kit/types/region.lua builtin/kit/types/trigger_zone.lua builtin/voxel_objects/** apps/workbench/**
 # [KIT_FREE_PREFAB] A voxel prefab as a free object: kit/prefab_copy's mode. A
 # fresh save on Workbench, a flat World, a walker and controls; prefab
 # kitboss/wall: a wall 6x2x1 of stone and a gate before it. The turned wall goes
@@ -19,19 +19,27 @@
 #      the stamped copy merely behind.
 #   4. A switch of the stamped copy to free (its dialog clears its box) and back
 #      (its dialog stamps); at an angle no stamp is offered.
+# [KIT_FREE_ROTATION] A fresh save (rotation(); "rotation" for it alone): a free
+# copy under a turned part, a part under its member: each pose against the rows
+# composed here (python, its own quaternions), on the server and in the client's
+# nodes, a parent's turn taken along, seven quick key presses all counted. A zone
+# under a pitched parent walked through: its edge where the turned box has it. A
+# region under one: cells round its edges against the box, by the server, the client
+# and c:region_at. The three handles of the editor dragged: each one angle of the
+# row. A stamp refused when tilted. Saved, the server restarted: the same poses. A
+# walker up a pitched deck (its steps printed; no corrections). Screenshots of the
+# editor and of play.
 # Screenshots kept with KEEP_TMP=1: $t/*.png
 #   util/kit_free_prefab_check.sh
-#   util/kit_free_prefab_check.sh web    in headless Chrome, on web/'s wasm
+#   util/kit_free_prefab_check.sh rotation
+#   util/kit_free_prefab_check.sh web    in headless Chrome, on web/'s wasm: a
+#      drive of the plan and palette, then this whole check, its sequences turned
+#      into a page's steps (mid-drag screenshots left out)
+#   util/kit_free_prefab_check.sh web rotation   rotation() alone, in the page
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-if [ "${1:-}" = web ]; then
-	# The menu's Place free of kit/hut in the 2D plan, selected: inspector and
-	# box; turned by keys at a step of 1, moved by a key. One placed in the 3D view
-	# and turned there; the editor's view of it, play's, and walked at in play.
-	export BUILDAT_WORKBENCH_STONE=1
-	check_tmp kit_free_prefab_web; t=$CHECK_TMP
-	stub="(function(){ var held = null, refuse = false;
+PAGE_STUB="(function(){ var held = null, refuse = false;
  Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }});
  function set(e){ held = e; document.dispatchEvent(new Event('pointerlockchange')); }
  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') refuse = true; }, true);
@@ -41,11 +49,23 @@ if [ "${1:-}" = web ]; then
   if(held !== this) set(this); return Promise.resolve(); };
  document.exitPointerLock = function(){ if(held) set(null); };
  return 'stub'; })()"
+WEB=
+if [ "${1:-}" = web ]; then
+	WEB=1
+	check_tmp kit_free_prefab_web; t=$CHECK_TMP
+fi
+if [ -n "$WEB" ] && [ "${2:-}" != rotation ]; then
+	# The menu's Place free of kit/hut in the 2D plan, selected: inspector and
+	# box; turned by keys at a step of 1, moved by a key. One placed in the 3D view
+	# and turned there; the editor's view of it, play's, and walked at in play.
+	export BUILDAT_WORKBENCH_STONE=1
+	stub=$PAGE_STUB
 	# A wheel event is one row of the palette, under the pointer; own prefabs come last
 	down="[\"mouse\", 100, 400], [\"frames\", 2],"
 	turn=""
 	for _ in $(seq 7); do
-		turn="$turn [\"key\", \"x\"], [\"waitlog\", \"kit editor: state:\", 10],"
+		# ([KIT_TURN_KEYS_DROP] Nothing waited for: each press counts)
+		turn="$turn [\"key\", \"x\"],"
 	done
 	for _ in $(seq 25); do
 		down="$down [\"wheel\", 100, 400, 100], [\"frames\", 1],"
@@ -88,6 +108,7 @@ if [ "${1:-}" = web ]; then
 	["key", "h"], ["frames", 2], ["key", "h"], ["frames", 2], ["key", "h"], ["frames", 2],
 	["key", "h"], ["waitlog", "kit editor: angle step 1", 10],
 	$turn
+	["sync", 5000],
 	["key", "Right"], ["sync", 5000], ["frames", 5],
 	["shot", "\${OUT}/plan_turned.png"],
 	["key", "F2"], ["waitlog", "kit editor: the view is 3D", 10], ["frames", 5],
@@ -97,7 +118,7 @@ if [ "${1:-}" = web ]; then
 	["click", 800, 600, 50, 2], ["waitlog", "kit editor: placing nothing", 10], ["frames", 3],
 	["click", 800, 600], ["waitlog", "kit editor: selected 4", 10], ["frames", 3],
 	$turn
-	["frames", 5],
+	["sync", 5000], ["frames", 5],
 	["shot", "\${OUT}/view3d.png"],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Play mode", 600, 339], ["waitlog", "kit editor: edit mode off", 10],
@@ -118,26 +139,112 @@ J
 			"set 4's kit/prefab_copy mode to \"stamped\"" ; do
 		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
 	done
-	echo "PASS: a free prefab object in the web client"
-	exit 0
+	echo "ok: a free prefab object in the web client, from the palette"
+	unset BUILDAT_WORKBENCH_STONE
 fi
 export BUILDAT_WORKBENCH_PROJECT=world
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
-check_tmp kit_free_prefab; t=$CHECK_TMP
+[ -n "$WEB" ] || { check_tmp kit_free_prefab; t=$CHECK_TMP; }
 cd "$here/Build"
 
 server() # <n>
 {
 	start_server "$t/srv$1.log" "Listening at" 300 auto \
-		bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 \
-		--sim-rate "$CHECK_RATE" ||
+		bin/buildat_server -m ../apps/workbench -D "${USERDIR:-$t/user}" -l 3 \
+		${WEB:+-W "$here/web"} --sim-rate "$CHECK_RATE" ||
 		fail "the server did not come up ($t/srv$1.log)"
 	CHECK_PIDS+=($SERVER_PID)
+	WEB_SERVER_LOG=$t/srv$1.log
+}
+# A sequence as a page's steps. The first client makes the account as natively.
+# The page's pointer lock stubbed, as headless Chrome has none; the pause menu its
+# first frames open closed. Keys held: over each delay, the events between them run.
+cat > "$t/to_web.py" <<'PY'
+import json, math, re, shlex, sys
+PAUSE = [["waitlog_any", "pause: the menu shown", 10], ["eval", "window.lockOk = true, 'lock'"],
+	["click", 100, 680], ["waitlog", "pause: the menu closed", 10], ["wait", 500]]
+out, held, at, down = json.load(open(sys.argv[2])), None, [512, 350], None
+for line in open(sys.argv[1]):
+	line = line.strip()
+	if not line:
+		continue
+	cmd, _, rest = line.partition(" ")
+	if cmd == "event":
+		out.append(["event", rest])
+	elif cmd in ("wait_log", "wait_log_any"):
+		ms, _, text = rest.partition(" ")
+		out.append(["waitlog" if cmd == "wait_log" else "waitlog_any", re.escape(text), int(ms) / 1000])
+		if "player physics enabled" in text:
+			out += PAUSE
+	elif cmd in ("frames", "sync"):
+		out.append([cmd, int(rest)])
+	elif cmd == "delay":
+		out.append(["holdkey", held, int(rest)] if held else ["wait", int(rest)])
+	elif cmd == "keypress":
+		out.append(["key", rest.lower() if len(rest) == 1 else rest])
+	elif cmd == "keydown":
+		held = rest.lower()
+	elif cmd == "keyup":
+		held = None
+	elif cmd == "screenshot":
+		# (a drag is one step: nothing to see in the middle of it)
+		if not down:
+			out.append(["shot", rest])
+	elif cmd == "mouse_pos":
+		at = list(map(int, rest.split()))
+		if not down:
+			out.append(["mouse", *at])
+	elif cmd == "mouse_down":
+		down = at
+	elif cmd == "mouse_up":
+		out.append(["ldrag", *down, *at])
+		down = None
+	elif cmd == "mouse_click":
+		out.append(["click", *at, 50, 2 if rest == "right" else 0])
+	elif cmd == "mouse_wheel":
+		out.append(["wheel", *at, 100 if int(rest) < 0 else -100])
+	elif cmd == "click":
+		a = shlex.split(rest)
+		out.append(["click", *a[:2], *map(int, a[2:])])
+	elif cmd == "look_dir":
+		x, y, z = map(float, rest.split())
+		out.append(["event", "kit_face %.3f %.3f" % (math.degrees(math.atan2(x, z)),
+			-math.degrees(math.atan2(y, math.hypot(x, z))))])
+	elif cmd == "quit":
+		out.append(["sync", 3000])
+	else:
+		sys.exit("no page's step for: " + line)
+json.dump(out, sys.stdout)
+PY
+web_client() # <name>
+{
+	local log=$t/$1.log login
+	if [ -n "${BUILDAT_JOIN_CREATE:-}" ]; then
+		login=$(web_login_steps kitboss "$WEB_SERVER_LOG") || fail "$login"
+	else
+		# (the login page's first field is the name's)
+		login=' ["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+ ["selall"], ["frames", 2], ["type", "kitboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["type", "checkpass12"], ["frames", 2], ["key", "Enter"], ["waitlog", "Joined as kitboss", 30],'
+	fi
+	# (the UI at the size a native 1024x700 run has: its places the same)
+	printf '[["nav", "${URL}?scale=0.648148"], ["eval", %s], %s ["frames", 2]]' \
+		"$(printf %s "$PAGE_STUB" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
+		"$login" > "$t/$1.head.json"
+	python3 "$t/to_web.py" "$t/$1.cmds" "$t/$1.head.json" > "$t/$1.json" ||
+		fail "the steps of $1"
+	WEB_DRIVE_VIEWPORT=1024x700@1 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
+		"$here/util/web_drive.sh" chrome workbench "$t/$1.json" "$t/drive_$1" \
+		> "$t/drive_$1.txt" 2>&1
+	local st=$?
+	cp "$t/drive_$1/page.log" "$log" 2>/dev/null
+	[ $st = 0 ] || fail "the page's $1 ($(tail -2 "$t/drive_$1.txt"), $log, $t/srv*.log)"
 }
 client() # <name>: its commands in $t/<name>.cmds
 {
+	[ -z "$WEB" ] || { web_client "$1"; return; }
 	run_client 60 "$t/$1.log" timeout 240 bin/buildat -C "$t/client_cache" \
 		-D "$t/cu_$1" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
 		-c @"$t/$1.cmds" ||
@@ -240,6 +347,465 @@ bodies() # <log>: its "body at" lines, x y z corrections
 	grep -aoP 'kit: body at \K[-0-9.,]+, [0-9]+ acks, [0-9]+' "$1" |
 		sed 's/, [0-9]* acks, / /; s/,/ /g'
 }
+# ---- [KIT_FREE_ROTATION]
+rotation()
+{
+	USERDIR=$t/rot/user
+	export BUILDAT_WORKBENCH_TYPES="$USERDIR/apps/workbench/check_types"
+	mkdir -p "$BUILDAT_WORKBENCH_TYPES"
+	cat > "$BUILDAT_WORKBENCH_TYPES/probe.lua" <<'LUA'
+-- c:region_at for the check
+return {
+	version = 1,
+	regions = true,
+	inputs = {region = "position"},
+	on_input = function(c, input, v)
+		local r = c:region_at(v)
+		c:log(r and "region " .. r.id or "no region")
+	end,
+}
+LUA
+	cat > "$t/geo.py" <<'PY'
+# The check's own frames: rows composed, nothing of kit.cpp's
+import json, math, re, sqlite3, sys
+def quat(yaw=0, pitch=0, roll=0):
+	# Urho3D's Quaternion(pitch, yaw, roll): roll, then pitch, then yaw
+	def ax(a, i):
+		q = [math.cos(math.radians(a) / 2), 0, 0, 0]
+		q[i] = math.sin(math.radians(a) / 2)
+		return q
+	return mul(ax(yaw, 2), mul(ax(pitch, 1), ax(roll, 3)))
+def mul(a, b):
+	return [a[0]*b[0]-a[1]*b[1]-a[2]*b[2]-a[3]*b[3], a[0]*b[1]+a[1]*b[0]+a[2]*b[3]-a[3]*b[2],
+		a[0]*b[2]-a[1]*b[3]+a[2]*b[0]+a[3]*b[1], a[0]*b[3]+a[1]*b[2]-a[2]*b[1]+a[3]*b[0]]
+def conj(q):
+	return [q[0], -q[1], -q[2], -q[3]]
+def rot(q, v):
+	return mul(mul(q, [0] + list(v)), conj(q))[1:]
+def add(a, b):
+	return [x + y for x, y in zip(a, b)]
+def sub(a, b):
+	return [x - y for x, y in zip(a, b)]
+def same(a, b):
+	return abs(sum(x * y for x, y in zip(a, b)))
+def g(v):
+	return round(v * 16) / 16
+def rows(db):
+	d = sqlite3.connect(db)
+	r = json.loads(d.execute("select value from store where store='kit' and key='authored'").fetchone()[0])
+	return {e["id"]: e for e in r["entities"]}
+def world(es, i):
+	# Its place and turn through its parents
+	e = es.get(i)
+	if e is None or "pos" not in e:
+		return [0, 0, 0], quat()
+	o, q = world(es, e.get("parent", 0))
+	return add(o, rot(q, e["pos"])), mul(q, quat(e.get("yaw", 0), e.get("pitch", 0), e.get("roll", 0)))
+def holds(o, q, n, p):
+	l = rot(conj(q), sub(p, o))
+	return all(0 <= math.floor(l[k] + 0.5) < n[k] for k in range(3))
+def poses(path, prefix):
+	# "<prefix> id x,y,z turn w,x,y,z"
+	out = {}
+	for m in re.finditer(re.escape(prefix) + r" (\d+) ([-\d.]+),([-\d.]+),([-\d.]+) turn ([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)", open(path, errors="replace").read()):
+		out[int(m[1])] = ([float(m[k]) for k in (2, 3, 4)], [float(m[k]) for k in (5, 6, 7, 8)])
+	return out
+def bodies(path):
+	return [tuple(map(float, m)) for m in re.findall(r"kit: body at ([-0-9.]+),([-0-9.]+),([-0-9.]+), \d+ acks, (\d+)", open(path, errors="replace").read())]
+PY
+	c3() { python3 -c "print($1)"; }
+	# (more edits than the undo counts: each one waited for by a round trip)
+	edit() { ed "$1"; echo "sync 5000"; }
+	# ---- Set up: the world, the prefabs, a walker
+	{
+		cat <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 30000 server window: the page ntfy
+frames 3
+click Button "Don't add"
+EOF
+		joined
+		cat <<'EOF'
+keypress F6
+wait_log 10000 kit editor: state: 1 entities, 0 to undo
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended (by kitboss)
+EOF
+		edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+		edit '{"op": "set", "id": 3, "comp": 0, "param": "biome", "value": "grassland"}'
+		echo "wait_log_any 30000 kit: World: generated again"
+		for y in 1 2; do
+			for x in 3 4 5 6 7 8; do
+				vox $x $y -30 kit/stone
+			done
+		done
+		edit '{"op": "place", "type": "kit/gate", "pos": [3, 1, -29]}'
+		edit '{"op": "save_prefab", "ids": [4], "box": [3, 1, -30, 8, 2, -30], "name": "wall"}'
+		for z in -40 -39 -38 -37 -36 -35 -34 -33; do
+			for x in 3 4 5 6 7 8 9 10; do
+				vox $x 1 $z kit/stone
+			done
+		done
+		edit '{"op": "save_prefab", "ids": [], "box": [3, 1, -40, 10, 1, -33], "name": "deck"}'
+		edit '{"op": "place", "type": "kit/walker", "pos": [0, 1, 0]}'
+		edit '{"op": "place", "type": "kit/controls", "pos": [0, 1, 0]}'
+		edit '{"op": "place", "type": "workbench/probe", "pos": [0, 1, -20]}'
+		walk rot_start | grep -v 'camera first_person'
+		echo quit
+	} > "$t/ro1.cmds"
+	server r1
+	wait_for_log "$t/srvr1.log" "setup code [A-Z0-9]+" 30
+	code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srvr1.log" | head -1)
+	[ -n "$code" ] || fail "no setup code ($t/srvr1.log)"
+	BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 client ro1
+	read -r bx by bz _ < <(bodies "$t/ro1.log" | head -1)
+	[ -n "${bz:-}" ] || fail "no body's place ($t/ro1.log)"
+	bx=$(c3 "round($bx * 16) / 16"); bz=$(c3 "round($bz * 16) / 16"); by=$(c3 "round($by * 16) / 16")
+	echo "the body starts at $bx $by $bz"
+	# Entities from here: 8 ZP, the zone's parent, 9 the zone; 10 RP, the region's
+	# parent, 11 the region; 12 CP a part, 13 F a free root under it, 14 F's gate,
+	# 15 K a part under the gate; 16 G a free root for the handles, 17 its gate; 18
+	# the deck; 19 S, stamped, 20 its gate
+	ZY=45 ZP=15
+	read -r zox zoy zoz <<< "$(python3 - "$t" "$bx" "$by" "$bz" "$ZY" "$ZP" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from geo import *
+bx, by, bz, y, p = map(float, sys.argv[2:7])
+# The box's middle on the way the body walks, 3.5 before it
+o = sub([bx, by + 0.5, bz + 3.5], rot(quat(y, p, 0), [1.5, 2.5, 1.5]))
+print(*map(g, o))
+PY
+)"
+	rx=$(c3 "$bx + 10"); ry=$(c3 "$by + 1"); rz=$(c3 "$bz + 2")
+	cx=$(c3 "$bx - 10"); cy=$(c3 "$by + 4"); cz=$(c3 "$bz + 12")
+	gx=$(c3 "$bx + 6"); gy=$(c3 "$by + 3"); gz=$(c3 "$bz - 8")
+	dx=$(c3 "$bx - 4"); dy=$(c3 "$by - 0.375"); dz=$(c3 "$bz + 6.5")
+	sx=$(c3 "int($bx) + 30")
+	python3 - "$t" "$rx" "$ry" "$rz" > "$t/cells.txt" <<'PY' || fail "the cells"
+import sys
+sys.path.insert(0, sys.argv[1])
+from geo import *
+rx, ry, rz = map(float, sys.argv[2:5])
+q = quat(30, 20, 10)
+o = add([rx, ry, rz], rot(q, [1, 0, 0]))
+n = [6, 3, 4]
+ins, out = [], []
+for x in range(int(rx) - 10, int(rx) + 12):
+	for y in range(max(0, int(ry) - 4), int(ry) + 8):
+		for z in range(int(rz) - 10, int(rz) + 12):
+			l = rot(conj(q), sub([x, y, z], o))
+			# The distance past the box's nearest face, inside negative
+			d = max(max(-0.5 - l[k], l[k] - (n[k] - 0.5)) for k in range(3))
+			if abs(d) < 0.6:
+				(ins if d < 0 else out).append((x, y, z))
+assert len(ins) > 10 and len(out) > 10
+for c in ins[:: max(1, len(ins) // 16)] + out[:: max(1, len(out) // 16)]:
+	print(*c)
+PY
+	{
+		to_edit
+		edit "{\"op\": \"place\", \"type\": \"kit/part\", \"pos\": [$zox, $zoy, $zoz]}"
+		edit '{"op": "set", "id": 8, "comp": 0, "param": "collision", "value": false}'
+		edit "{\"op\": \"place\", \"type\": \"kit/trigger_zone\", \"pos\": [$zox, $zoy, $zoz], \"parent\": 8}"
+		edit '{"op": "set", "id": 9, "comp": 0, "param": "size", "value": [4, 6, 4]}'
+		edit "{\"op\": \"move\", \"id\": 8, \"pos\": [$zox, $zoy, $zoz], \"yaw\": $ZY, \"pitch\": $ZP}"
+		edit "{\"op\": \"place\", \"type\": \"kit/part\", \"pos\": [$rx, $ry, $rz]}"
+		edit '{"op": "set", "id": 10, "comp": 0, "param": "collision", "value": false}'
+		edit "{\"op\": \"place\", \"type\": \"kit/region\", \"pos\": [$(c3 "$rx + 1"), $ry, $rz], \"parent\": 10}"
+		edit '{"op": "set", "id": 11, "comp": 0, "param": "size", "value": [6, 3, 4]}'
+		edit "{\"op\": \"move\", \"id\": 10, \"pos\": [$rx, $ry, $rz], \"yaw\": 30, \"pitch\": 20, \"roll\": 10}"
+		# The chain, level as it is made
+		edit "{\"op\": \"place\", \"type\": \"kit/part\", \"pos\": [$cx, $cy, $cz]}"
+		edit '{"op": "set", "id": 12, "comp": 0, "param": "color", "value": "#3060ff"}'
+		edit "{\"op\": \"place\", \"prefab\": \"kitboss/wall\", \"pos\": [$(c3 "$cx + 1"), $cy, $cz], \"free\": true, \"parent\": 12}"
+		edit "{\"op\": \"place\", \"type\": \"kit/part\", \"pos\": [$(c3 "$cx + 1"), $(c3 "$cy + 1"), $(c3 "$cz + 1")], \"parent\": 14}"
+		edit '{"op": "set", "id": 15, "comp": 0, "param": "color", "value": "#ff2020"}'
+		edit '{"op": "set", "id": 15, "comp": 0, "param": "collision", "value": false}'
+		# F's turn in the world, then its parent's: F's goes along
+		edit "{\"op\": \"move\", \"id\": 13, \"pos\": [$(c3 "$cx + 1"), $cy, $cz], \"yaw\": 70, \"pitch\": 25, \"roll\": 35}"
+		echo "sync 5000"
+		edit "{\"op\": \"move\", \"id\": 12, \"pos\": [$cx, $cy, $cz], \"yaw\": 30, \"pitch\": 15, \"roll\": 350}"
+		echo "sync 5000"
+		edit "{\"op\": \"place\", \"prefab\": \"kitboss/wall\", \"pos\": [$gx, $gy, $gz], \"free\": true}"
+		edit "{\"op\": \"move\", \"id\": 16, \"pos\": [$gx, $gy, $gz], \"yaw\": 40, \"pitch\": 10, \"roll\": 20}"
+		edit "{\"op\": \"place\", \"prefab\": \"kitboss/deck\", \"pos\": [$dx, $dy, $dz], \"free\": true}"
+		edit "{\"op\": \"move\", \"id\": 18, \"pos\": [$dx, $dy, $dz], \"pitch\": 350}"
+		# A stamp is refused at a tilt, and a free one has none
+		ed '{"op": "stamp", "id": 13}'
+		echo "sync 5000"
+		edit "{\"op\": \"place\", \"prefab\": \"kitboss/wall\", \"pos\": [$sx, 1, 0]}"
+		edit "{\"op\": \"move\", \"id\": 19, \"pos\": [$sx, 1, 0], \"pitch\": 20}"
+		ed '{"op": "stamp", "id": 19}'
+		echo "sync 5000"
+		# The cells, three ways (a try needs the game running)
+		echo 'event kit_edit {"op": "play"}'
+		echo "wait_log 10000 kit editor: the server is Running (by kitboss)"
+		while read -r x y z; do
+			echo "event kit_edit {\"op\": \"voxel_info\", \"pos\": [$x, $y, $z]}"
+			echo "event kit_probe $x $y $z"
+			echo "event kit_edit {\"op\": \"try\", \"id\": 7, \"input\": \"region\", \"value\": [$x, $y, $z]}"
+			echo "wait_log 5000 kit editor: tried 7's region"
+			echo "sync 5000"
+		done < "$t/cells.txt"
+		echo 'event kit_edit {"op": "stop"}'
+		echo "wait_log 10000 kit editor: the server is Ended (by kitboss)"
+		# Seven quick presses on the parent: a step of 1
+		echo "event kit_select 12"
+		echo "wait_log_any 5000 kit editor: selected 12"
+		printf 'keypress H\nframes 2\nkeypress H\nframes 2\nkeypress H\nframes 2\nkeypress H\nwait_log 5000 kit editor: angle step 1\nframes 2\n'
+		for _ in 1 2 3 4 5 6 7; do
+			printf 'keypress X\nframes 1\n'
+		done
+		echo "sync 5000"
+		# The screenshots of the editor: the chain, the boxes
+		cat <<EOF
+event kit_cam3d $(c3 "$cx + 12") $(c3 "$cy + 6") $(c3 "$cz - 3") $cx $cy $(c3 "$cz - 2")
+event kit_select 13
+wait_log_any 5000 kit editor: the box of the free copy 13
+frames 10
+screenshot $t/rot_chain.png
+event kit_cam3d $(c3 "$bx + 5") $(c3 "$by + 12") $(c3 "$bz - 12") $(c3 "$bx + 5") $by $(c3 "$bz + 3")
+event kit_select 10
+wait_log_any 5000 kit editor: selected 10
+frames 10
+screenshot $t/rot_boxes.png
+event kit_cam3d $(c3 "$gx + 20") $(c3 "$gy + 14") $(c3 "$gz + 2") $gx $gy $gz
+event kit_select 16
+wait_log_any 5000 kit editor: the box of the free copy 16
+frames 10
+event kit_knob_where
+wait_log_any 5000 kit editor: the knob on the screen at
+screenshot $t/rot_knobs.png
+quit
+EOF
+	} > "$t/ro2.cmds"
+	BUILDAT_JOIN_CREATE= client ro2
+	want "$t/srvr1.log" "is a free object: nothing to stamp" \
+		"is turned yaw 0 pitch 20 roll 0: voxels go by multiples of 90"
+	# ---- The handles, dragged: the roll first, which moves no other knob
+	# Across the radius on the screen (along it a ring seen askew turns little)
+	drag() # <knob's x> <y> <shot>
+	{
+		local ax=$(($2 - m_y)) ay=$((m_x - $1)) l
+		l=$(python3 -c "import math; print(max(1, int(math.hypot($ax, $ay))))")
+		cat <<EOF
+mouse_pos $1 $2
+frames 2
+mouse_down left
+frames 2
+mouse_pos $(($1 + ax * 12 / l)) $(($2 + ay * 12 / l))
+frames 2
+mouse_pos $(($1 + ax * 45 / l)) $(($2 + ay * 45 / l))
+frames 3
+screenshot $t/$3.png
+mouse_up left
+wait_log 5000 kit editor: turned 1 by
+sync 5000
+frames 5
+EOF
+	}
+	knob_at() # <the words before "knob">
+	{
+		grep -aoP "kit editor: the ${1}knob on the screen at \K[0-9]+, [0-9]+" "$t/ro2.log" | tail -1 | sed 's/,//'
+	}
+	k_yaw=$(knob_at ""); k_pitch=$(knob_at "pitch "); k_roll=$(knob_at "roll ")
+	[ -n "$k_yaw" ] && [ -n "$k_pitch" ] && [ -n "$k_roll" ] ||
+		fail "no knobs in $t/ro2.log: $k_yaw; $k_pitch; $k_roll"
+	read -r m_x m_y <<<"$(grep -aoP "kit editor: the middle on the screen at \K[0-9]+, [0-9]+" "$t/ro2.log" | tail -1 | sed 's/,//')"
+	[ -n "$m_y" ] || fail "no middle in $t/ro2.log"
+	echo "the knobs: yaw $k_yaw, pitch $k_pitch, roll $k_roll, round $m_x $m_y"
+	{
+		to_edit
+		cat <<EOF
+event kit_cam3d $(c3 "$gx + 20") $(c3 "$gy + 14") $(c3 "$gz + 2") $gx $gy $gz
+event kit_select 16
+wait_log_any 5000 kit editor: the box of the free copy 16
+frames 10
+keypress H
+frames 2
+keypress H
+frames 2
+keypress H
+frames 2
+keypress H
+wait_log 5000 kit editor: angle step 1
+frames 3
+EOF
+		drag $k_roll rot_drag_roll
+		drag $k_pitch rot_drag_pitch
+		drag $k_yaw rot_drag_yaw
+		# Through the zone, onto the deck: its steps
+		cat <<'EOF'
+event kit_edit {"op": "play"}
+wait_log 10000 kit editor: the server is Running (by kitboss)
+keypress F6
+wait_log 10000 kit editor: edit mode off
+wait_log_any 10000 kit: controls: camera first_person
+frames 10
+look_dir 0 0 1
+frames 10
+event kit_body
+keydown W
+EOF
+		for _ in 1 2 3 4 5 6 7 8; do
+			printf 'delay 500\nevent kit_body\n'
+		done
+		cat <<EOF
+keyup W
+frames 10
+event kit_body
+screenshot $t/rot_deck.png
+look_dir -0.62 0.15 -0.77
+frames 10
+screenshot $t/rot_play_look.png
+look_dir -0.3 0 -1
+frames 10
+screenshot $t/rot_play_deck.png
+EOF
+		back_to_edit
+		echo quit
+	} > "$t/ro3.cmds"
+	BUILDAT_JOIN_CREATE= client ro3
+	stop
+	db=$(find "$USERDIR" -name save.sqlite -path "*/saves/world/*" | head -1)
+	[ -n "$db" ] || fail "no save.sqlite under $USERDIR"
+	# ---- The numbers, before the restart
+	python3 - "$t" "$db" "$t/srvr1.log" "$t/ro2.log" "$t/ro3.log" "$t/cells.txt" <<'PY' || fail "rotation's numbers ($t)"
+import sys
+sys.path.insert(0, sys.argv[1])
+from geo import *
+db, slog, c2, c3, cells = sys.argv[2:7]
+es = rows(db)
+srv = open(slog, errors="replace").read()
+# The composition from the rows: the server's object's node, at the last of its moves
+nodes = re.findall(r"free object[^\n]*entity 13[^\n]*node at ([-\d.]+),([-\d.]+),([-\d.]+) turn ([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)", srv)
+assert len(nodes) >= 3, "the object's moves: %d" % len(nodes)
+o, q = world(es, 13)
+m = nodes[-1]
+assert max(abs(a - float(b)) for a, b in zip(add(o, rot(q, [-0.5, -0.5, -0.5])), m[:3])) < 2e-3, (o, m)
+assert same(q, list(map(float, m[3:]))) > 1 - 1e-5, (q, m)
+print("F's node against the rows composed, its last of %d moves: at %s" % (len(nodes), m[:3]))
+# F given its turn in the world while its parent stood level
+assert re.search(r"free object of entity 13 moved to [^\n]* yaw 70\.\d+ pitch 25\.\d+ roll 35\.\d+", srv), "F's given turn"
+# The seven presses
+assert es[12]["yaw"] == 37, es[12]
+assert es[12].get("pitch") == 15 and es[12].get("roll") == 350, es[12]
+print("the parent's yaw after 7 quick presses from 30:", es[12]["yaw"])
+# Rows are their parents' frames'
+assert es[14]["pos"] == [0, 0, 1], es[14]
+assert es[15]["pos"] == [0, 1, 0], es[15]
+assert es[9]["pos"] == [0, 0, 0], es[9]
+assert "pitch" in es[13] and "roll" in es[13], es[13]
+assert es[19].get("pitch") == 20
+# The handles
+log = open(c3, errors="replace").read()
+by = list(map(float, re.findall(r"kit editor: turned 1 by (-?[\d.]+)", log)))
+assert len(by) == 3 and all(by), by
+e = es[16]
+exp = [(40 + by[2]) % 360, (10 + by[1]) % 360, (20 + by[0]) % 360]
+got = [e.get("yaw", 0), e.get("pitch", 0), e.get("roll", 0)]
+print("the handles: roll by %g, pitch by %g, yaw by %g; the row's yaw %g pitch %g roll %g" % (by[0], by[1], by[2], *got))
+assert all(abs(((a - b) + 180) % 360 - 180) < 0.07 for a, b in zip(exp, got)), (exp, got)
+assert es[17]["pos"] == [0, 0, 1], es[17]
+# The zone: where the walk entered and left against the turned box
+o, q = world(es, 9)
+n = [4, 6, 4]
+z = re.findall(r"Entity 9: kitboss (enters|leaves) its zone at ([-\d.]+),([-\d.]+),([-\d.]+)", srv)
+assert len(z) >= 2 and z[0][0] == "enters" and z[1][0] == "leaves", z
+def face(p):
+	l = rot(conj(q), sub(p, o))
+	return max(max(-0.5 - l[k], l[k] - (n[k] - 0.5)) for k in range(3))
+pe, pl = [list(map(float, x[1:])) for x in z[:2]]
+print("the zone: entered at z %.2f, %.2f past the turned box's face; left at z %.2f, %.2f past it" % (pe[2], -face(pe), pl[2], face(pl)))
+# (a tick's walk past the edge at most)
+assert -0.5 < face(pe) <= 0, ("entered", pe, face(pe))
+assert 0 < face(pl) < 0.5, ("left", pl, face(pl))
+# Regions: three ways, against the box
+o, q = world(es, 11)
+n = [6, 3, 4]
+want = []
+for line in open(cells):
+	c = list(map(int, line.split()))
+	want.append((c, holds(o, q, n, c)))
+assert any(w[1] for w in want) and not all(w[1] for w in want)
+vox = {}
+for m in re.finditer(r"Voxel at \((-?\d+),(-?\d+),(-?\d+)\): [^\n]*?(?:, region (\d+))?\n", srv):
+	vox[tuple(map(int, m.group(1, 2, 3)))] = m.group(4)
+prob = re.findall(r"kit probe: voxel [^\n]*?(?:, region (\d+))?\n", open(c2, errors="replace").read())
+box = re.findall(r"probe 7: (region \d+|no region)", srv)
+assert len(prob) == len(want) and len(box) >= len(want), (len(prob), len(box), len(want))
+bad = 0
+for i, (c, h) in enumerate(want):
+	s = vox.get(tuple(c), "?")
+	if (s == "11") != h or (prob[i] == "11") != h or (box[i] == "region 11") != h:
+		print("a cell", c, "should be", h, "server", s, "client", prob[i], "box", box[i])
+		bad += 1
+assert not bad
+print("the region: %d cells round its edges, %d in it, the same three ways" % (len(want), sum(1 for w in want if w[1])))
+PY
+	# ---- The deck: climbing with no corrections, its steps printed
+	python3 - "$t" "$t/ro3.log" "$dy" "$dz" "$by" <<'PY' || fail "the walk onto the deck ($t/ro3.log)"
+import sys
+sys.path.insert(0, sys.argv[1])
+from geo import *
+log, dy, dz, by = sys.argv[2], *map(float, sys.argv[3:6])
+b = bodies(log)
+t = math.tan(math.radians(10))
+for x in b:
+	true = dy + 0.5 / math.cos(math.radians(10)) + (x[2] - dz) * t if x[2] >= dz - 0.5 else by
+	print("  body z %.2f y %.2f (the deck's top under it %.2f), corrections %d" % (x[2], x[1], true, x[3]))
+assert b[-1][3] == b[0][3], "corrections on the deck"
+assert max(x[1] for x in b) > by + 0.3, "it did not climb"
+PY
+	# ---- A restart: the same poses, from the rows, and the client's nodes
+	{
+		to_edit
+		printf 'event kit_pose 8 9 10 11 12 13 14 15 16 17 18\nframes 5\n'
+		cat <<EOF
+event kit_cam3d $(c3 "$cx + 12") $(c3 "$cy + 6") $(c3 "$cz - 3") $cx $cy $(c3 "$cz - 2")
+event kit_select 13
+wait_log_any 5000 kit editor: the box of the free copy 13
+frames 10
+screenshot $t/rot_loaded.png
+quit
+EOF
+	} > "$t/ro4.cmds"
+	server r2
+	BUILDAT_JOIN_CREATE= client ro4
+	stop
+	python3 - "$t" "$db" "$t/ro4.log" "$t/srvr2.log" <<'PY' || fail "the poses after the load ($t)"
+import sys
+sys.path.insert(0, sys.argv[1])
+from geo import *
+db, cl, slog = sys.argv[2:5]
+es = rows(db)
+got = poses(cl, "kit pose:")
+assert got, "no poses in " + cl
+for i in (8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18):
+	o, q = world(es, i)
+	assert i in got, ("no pose of", i, sorted(got))
+	p, r = got[i]
+	assert max(abs(a - b) for a, b in zip(o, p)) < 2e-3, (i, o, p)
+	assert same(q, r) > 1 - 1e-5, (i, q, r)
+print("the client's nodes against the rows composed: %d poses" % len(got))
+srv = open(slog, errors="replace").read()
+for i in (13, 16, 18):
+	o, q = world(es, i)
+	m = re.search(r"entity %d, model kitfree_\w+, at [^\n]*node at ([-\d.]+),([-\d.]+),([-\d.]+) turn ([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)" % i, srv)
+	assert m, ("no object of", i)
+	assert max(abs(a - float(b)) for a, b in zip(add(o, rot(q, [-0.5, -0.5, -0.5])), m.groups()[:3])) < 2e-3, (i, o, m.groups())
+	assert same(q, list(map(float, m.groups()[3:]))) > 1 - 1e-5, (i, q, m.groups())
+print("the objects from the rows after the restart")
+PY
+	echo "ok: [KIT_FREE_ROTATION] poses, zone, region, handles, keys, a stamp refused, save and load"
+	unset USERDIR BUILDAT_WORKBENCH_TYPES
+}
+if [ "${1:-}" = rotation ] || [ "${2:-}" = rotation ]; then
+	rotation
+	echo "PASS: free rotation"
+	exit 0
+fi
 # ---- Set up: the world, the prefab, a stamped copy, where a body starts
 A=5
 {
@@ -528,7 +1094,7 @@ sync 5000
 frames 3
 EOF
 	cell 10 1 -20
-	pick "$A" 197 stamped
+	pick "$A" 220 stamped
 	cat <<'EOF'
 wait_log 5000 kit editor: the stamp dialog of 5
 frames 3
@@ -552,4 +1118,5 @@ want "$t/srv2.log" "cleared the stamp of kitboss/wall on $A" \
 	"The free object of entity $G is gone"
 grep -aoP 'Voxel at \(10,1,-20\): \K[^,]*' "$t/srv2.log" | tail -3 | tr '\n' ' ' | grep -qF "kit/stone air kit/stone" ||
 	fail "the stamped copy's cell through the switches ($t/srv2.log)"
+rotation
 echo "PASS: a voxel prefab as a free object: placed, moved, turned, members, collision after the move, the save and a load, a prefab's save on all copies, stamped mode, the switch"

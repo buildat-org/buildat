@@ -56,8 +56,11 @@
 //                           (Chrome: a finger only)
 //   ["rdrag", x0, y0, x1, y1] the right button down at x0, y0, moved to x1, y1
 //                           over half a second, and up
+//   ["ldrag", x0, y0, x1, y1] the left button, the same (Chrome only)
 //   ["drag", type, label, x1, y1, "touch"]
 //                           the same from where the click by label would go
+//   ["event", "name param"] the native sequence's event line
+//                           (doc/client_commands.txt): sent in the next frame
 //   ["shot", path]          a PNG of the page
 //   ["eval", js]            print what the expression gives
 //   ["frames", n]           n frames the client rendered
@@ -488,9 +491,11 @@ async function chrome() {
 			await c.send("Input.dispatchTouchEvent", {type: "touchEnd",
 					touchPoints: []});
 		},
-		rdrag: async (x0, y0, x1, y1) => {
+		rdrag: (...a) => ops.mouse_drag("right", 2, ...a),
+		ldrag: (...a) => ops.mouse_drag("left", 1, ...a),
+		mouse_drag: async (button, buttons, x0, y0, x1, y1) => {
 			const mouse = (type, x, y) => c.send("Input.dispatchMouseEvent", {type,
-					x, y, button: "right", buttons: 2, clickCount: 1});
+					x, y, button, buttons, clickCount: 1});
 			await c.send("Input.dispatchMouseEvent", {type: "mouseMoved", x: x0, y: y0});
 			await mouse("mousePressed", x0, y0);
 			for (let i = 1; i <= 10; i++) {
@@ -773,6 +778,9 @@ async function find(b, type, label, hx, hy) {
 					throw new Error(`${over} stretches over ${still} ms with nothing changed`);
 			} else if (op === "frames" || op === "idle" || op === "sync") {
 				await drive_wait(b, op, a);
+			} else if (op === "event") {
+				await b.ops.value("(Module.buildatEvents = Module.buildatEvents || [])" +
+						".push(" + JSON.stringify("event " + a) + ")");
 			} else if (op === "until") {
 				const until = Date.now() + (c || 20) * 1000;
 				while (!await b.ops.value(a).catch(() => false)) {

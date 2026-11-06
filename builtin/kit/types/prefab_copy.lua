@@ -2,7 +2,8 @@
 -- makes it, its members under it as its built children. It does nothing in
 -- play; its place and turn are the copy's. Not in the palette.
 -- [KIT_FREE_PREFAB] mode: its voxels stamped into the world, or a free object
--- of the prefab's model at its place and any turn (kit.cpp's sync_free_objects).
+-- of the prefab's model at its place and any turn (kit.cpp's sync_free_objects):
+-- [KIT_FREE_ROTATION] yaw, pitch and roll free, stamped multiples of 90 of yaw only.
 return {
 	version = 1,
 	about = {

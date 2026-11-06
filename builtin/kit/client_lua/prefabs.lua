@@ -77,28 +77,30 @@ local function free_box(info)
 			info.at[3] + info.size[3] - 0.5}
 end
 
--- A free copy's place and yaw as drawn, its info; nil when it is not one
+-- A free copy's place and turn as drawn, its info, its yaw; nil when it is not
+-- one
 local function free_place(e)
 	local info = e.pos and is_free(e) and info_of(e.prefab.of)
 	if not (info and info.size) then
 		return nil
 	end
 	local pv = P.preview[e.id]
-	return drawn_at(e), pv and pv[4] or e.yaw or 0, info
+	return drawn_at(e), NT.drawn_turn(e), info, pv and pv[4] or e.yaw or 0
 end
+PF.is_free = is_free
 
 -- [editor.lua's pick] How far along the ray (arrays) a free copy's box is
 function PF.pick_t(e, o, v)
-	local c, yaw, info = free_place(e)
+	local c, q, info = free_place(e)
 	if not c then
 		return nil
 	end
-	local a = math.rad(yaw)
-	local cs, sn = math.cos(a), math.sin(a)
-	local dx, dz = o[1] - c.x, o[3] - c.z
+	local inv = magic.Quaternion(q.w, -q.x, -q.y, -q.z)
+	local lp = inv * (magic.Vector3(o[1], o[2], o[3]) - c)
+	local ld = inv * magic.Vector3(v[1], v[2], v[3])
 	local lo_, hi_ = free_box(info)
-	local p = {dx * cs - dz * sn, o[2] - c.y, dx * sn + dz * cs}
-	local d = {v[1] * cs - v[3] * sn, v[2], v[1] * sn + v[3] * cs}
+	local p = {lp.x, lp.y, lp.z}
+	local d = {ld.x, ld.y, ld.z}
 	local t0, t1 = 0, math.huge
 	for i = 1, 3 do
 		if math.abs(d[i]) < 1e-9 then
@@ -125,8 +127,10 @@ function PF.knob_radius(e)
 	local lo_, hi_ = free_box(info)
 	local r = 0
 	for _, x in ipairs({lo_[1], hi_[1]}) do
-		for _, z in ipairs({lo_[3], hi_[3]}) do
-			r = math.max(r, math.sqrt(x * x + z * z))
+		for _, y in ipairs({lo_[2], hi_[2]}) do
+			for _, z in ipairs({lo_[3], hi_[3]}) do
+				r = math.max(r, math.sqrt(x * x + y * y + z * z))
+			end
 		end
 	end
 	return r + 0.6
@@ -232,18 +236,20 @@ K.prefab_moving = function(j)
 		end
 		return
 	end
-	if not j.id or not j.pos then
+	-- ([KIT_TURN_KEYS_DROP] a turn is a group's move, of one here)
+	local id = j.pos and j.id or j.op == "move" and j.ids and #j.ids == 1 and j.ids[1]
+	if not id then
 		return
 	end
-	local e, made = find(j.id)
+	local e, made = find(id)
 	if not e or made or type(e.prefab) ~= "table" or not e.pos or is_free(e) then
 		return
 	end
 	local info = info_of(e.prefab.of)
-	if not (info and info.size) or (PF.pending and PF.pending.id == j.id) then
+	if not (info and info.size) or (PF.pending and PF.pending.id == id) then
 		return
 	end
-	PF.pending = {id = j.id,
+	PF.pending = {id = id, pitch = e.pitch or 0, roll = e.roll or 0,
 		from = {e.pos[1], e.pos[2], e.pos[3], e.yaw or 0}}
 end
 
@@ -360,7 +366,7 @@ local function mode_switched()
 	if not (info and info.size) then
 		return
 	end
-	if (e.yaw or 0) % 90 ~= 0 then
+	if (e.yaw or 0) % 90 ~= 0 or (e.pitch or 0) ~= 0 or (e.roll or 0) ~= 0 then
 		E.status = q.to == "free" and "The stamp's voxels stay: clear them by hand"
 				or "No stamp at this turn: turn it by 90s, then Refresh voxels"
 		log:info("kit editor: " .. E.status)
@@ -398,11 +404,12 @@ function PF.state()
 	end
 	local f = q.from
 	if e.pos[1] == f[1] and e.pos[2] == f[2] and e.pos[3] == f[3] and
-			(e.yaw or 0) == f[4] then
+			(e.yaw or 0) == f[4] and (e.pitch or 0) == q.pitch and
+			(e.roll or 0) == q.roll then
 		return
 	end
 	PF.pending = nil
-	if (e.yaw or 0) % 90 ~= 0 then
+	if (e.yaw or 0) % 90 ~= 0 or (e.pitch or 0) ~= 0 or (e.roll or 0) ~= 0 then
 		E.status = string.format("The voxels stay: turned %g, and a stamp takes "
 				.. "multiples of 90", e.yaw)
 		log:info("kit editor: " .. E.status)
@@ -428,14 +435,13 @@ local function preview_objects()
 	end
 	for id, node in pairs(nodes) do
 		local e = find(tonumber(id))
-		local c, yaw, info
+		local c, q, info
 		if e then
-			c, yaw, info = free_place(e)
+			c, q, info = free_place(e)
 		end
 		local held = e and P.preview[e.id]
 		local n = c and (held or preview_held[id]) and scene:GetNode(node)
 		if n then
-			local q = magic.Quaternion(0, yaw, 0)
 			local lo_ = free_box(info)
 			n.position = c + q * magic.Vector3(lo_[1], lo_[2], lo_[3])
 			n.rotation = q
@@ -444,22 +450,25 @@ local function preview_objects()
 	end
 end
 
--- A free copy's box, turned with it
-local function draw_free(dbg, id, e)
-	local c, yaw, info = free_place(e)
-	local q = magic.Quaternion(0, yaw, 0)
-	local lo_, hi_ = free_box(info)
+-- A box from lo_ to hi_ ({x, y, z}), in the frame at c turned by q
+function PF.draw_box(dbg, c, q, lo_, hi_, col)
 	local function at(i)
 		local p = i % 2 == 1 and hi_[1] or lo_[1]
 		local r = i % 4 >= 2 and hi_[2] or lo_[2]
 		local t = i >= 4 and hi_[3] or lo_[3]
 		return c + q * magic.Vector3(p, r, t)
 	end
-	local col = magic.Color(0.3, 0.9, 0.9)
 	for _, l in ipairs({{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7},
 			{0, 4}, {1, 5}, {2, 6}, {3, 7}}) do
 		dbg:AddLine(at(l[1]), at(l[2]), col, false)
 	end
+end
+
+-- A free copy's box, turned with it
+local function draw_free(dbg, id, e)
+	local c, q, info, yaw = free_place(e)
+	local lo_, hi_ = free_box(info)
+	PF.draw_box(dbg, c, q, lo_, hi_, magic.Color(0.3, 0.9, 0.9))
 	local line = string.format("%d %g,%g,%g yaw %g", id, c.x, c.y, c.z, yaw)
 	if PF.box_logged ~= line then
 		PF.box_logged = line
