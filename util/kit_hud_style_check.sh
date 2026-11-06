@@ -201,8 +201,14 @@ frames 5
 keypress F2
 frames 5
 click Button "[kit/health_bar]"
+wait_log 5000 the palette's menu of [kit/health_bar]
+frames 3
+click Button "Place"
 frames 5
 click Button "[kit/health_bar]"
+wait_log 5000 the palette's menu of [kit/health_bar]
+frames 3
+click Button "Stop placing"
 frames 5
 EOF
 	# The HUD view, from 2D (kitboss's last was Walk). Escape; a double click

@@ -238,6 +238,8 @@ frames 3
 screenshot @T@/a_export.png
 click Button "Yes"
 wait_log 10000 aitta publish: the package page, my_prefabs
+event kit_edit {"op": "prefab_rename", "name": "alice/lamp_post", "to": "lamp2"}
+wait_log 10000 alice/lamp_post is published in a package: its name stays
 delay 300
 screenshot @T@/a_publish.png
 EOF
@@ -333,8 +335,8 @@ click Button "Upgrade"
 wait_log 20000 kit editor: Package: upgraded alice/lamps from 1.0.0 to 2.0.0
 EOF
 BUILDAT_JOIN_CREATE= BUILDAT_JOIN_NAME=carol client carol upgrade
-want "$t/srvb.log" "Entity 3: $fp/lamp's migrate from version 1: {\"level\":70,\"own_look\":true}" \
-	"Entity 3's $fp/lamp upgraded from version 1 to 2" \
+want "$t/srvb.log" "Entity 4: $fp/lamp's migrate from version 1: {\"level\":70,\"own_look\":true}" \
+	"Entity 4's $fp/lamp upgraded from version 1 to 2" \
 	"carol upgraded alice/lamps from 1.0.0 to 2.0.0: 1 types, 0 prefabs, 0 voxel types, 1 entities upgraded"
 stop
 server srvb2 "$t/b"
@@ -346,7 +348,7 @@ wait_for_log "$t/srvb2.log" "Sounds: 10" 60 ||
 	fail "no sound $fp/zap after B's restart ($t/srvb2.log)"
 grep -aq "Item types: .*$fp/wand" "$t/srvb2.log" ||
 	fail "no item type $fp/wand after B's restart ($t/srvb2.log)"
-grep -aq "Entity 3's $fp/lamp upgraded" "$t/srvb2.log" &&
+grep -aq "Entity 4's $fp/lamp upgraded" "$t/srvb2.log" &&
 	fail "upgraded again at the restart ($t/srvb2.log)"
 stop
 echo "ok: upgraded with its migrate, kept over a restart"

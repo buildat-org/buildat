@@ -6,17 +6,17 @@
 # [KIT] stage 4l's starter additions on apps/sample_kit, the server's
 # admin driving Kit's editor (one server, one client). Placed: a kit/logic
 # L (17, a latch), a kit/sign S (18, "Out: {value}, ..." long enough to wrap), a kit/mover M (19,
-# 0.5 s up 2) and a kit/pressure_plate P (20, its zone made big round the
+# 0.5 s up 2) and a kit/pressure_plate P (21, its zone made big round the
 # player). Button 3's pressed to L's a (that link shown in play), L's out
 # to S's value, L's on to M's go, P's entered to L's b. The inspector
 # shows the selection's cost. End, Run, edit mode off: walking a step,
 # the plate's zone sees kitboss in (L's b: off), a press (b) latches L on:
 # the sign shows "Out: true, ...", wrapped and made smaller inside its board ([KIT_SIGN_WRAP]), M slides 2 up and signals arrived, and the
 # link 3>17 is drawn and lit for the player in play. Screenshot of the
-# sign; the sign's board, the mover and a wedge kit/part (21) in the
+# sign; the sign's board, the mover and a wedge kit/part (22) in the
 # stone voxel's texture
 # ([KIT_LOOK_MATERIAL]). Read back from the save: the link's "visible".
-# [KIT_OWN_LOOK] A kit/button (22) under M, M's own_look off: M drawn
+# [KIT_OWN_LOOK] A kit/button (23) under M, M's own_look off: M drawn
 # faded in edit mode, not in play (solid still), the button drawn
 # (own_look_edit.png, own_look.png).
 #
@@ -62,20 +62,21 @@ EOF
 	# [KIT_LOOK_MATERIAL] The sign's board and the mover in voxel materials
 	setp 18 material '"stone"'
 	setp 19 material '"stone"'
+	c=$((c + 1))
 	place '{"op": "place", "prefab": "kit/pressure_plate", "pos": [-30, -10, -30]}'
-	setp 20 size '[60, 40, 60]' 1
-	# [KIT_LOOK_MATERIAL] A wedge kit/part W (21) in stone, its slope
+	setp 21 size '[60, 40, 60]' 1
+	# [KIT_LOOK_MATERIAL] A wedge kit/part W (22) in stone, its slope
 	# towards the player
 	place '{"op": "place", "type": "kit/part", "pos": [-2, 0, 3]}'
-	setp 21 shape '"wedge"'
-	setp 21 size '[2, 1, 2]'
-	setp 21 voxel '"stone"'
+	setp 22 shape '"wedge"'
+	setp 22 size '[2, 1, 2]'
+	setp 22 voxel '"stone"'
 	link 3 pressed 17 a
 	edit '{"op": "link_visible", "id": 3, "comp": 0, "output": "pressed", "to": 17, "input": "a", "visible": true}'
 	link 17 out 18 value
 	link 17 on 19 go
-	link 20 entered 17 b 1
-	# [KIT_OWN_LOOK] A kit/button B (22) under M, M's own look off: a
+	link 21 entered 17 b 1
+	# [KIT_OWN_LOOK] A kit/button B (23) under M, M's own look off: a
 	# moving button
 	place '{"op": "place", "type": "kit/button", "pos": [4, 2, 4], "parent": 19}'
 	setp 19 own_look false
@@ -129,11 +130,11 @@ BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code \
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 s=$t/srv.log b=$t/boss.log
-grep -aE "kit/(logic|sign|mover|trigger_zone) (17|18|19|20)" "$s" |
+grep -aE "kit/(logic|sign|mover|trigger_zone) (17|18|19|21)" "$s" |
 	sed 's/^.* I [a-z_]* *: /  /' | cut -c1-150 | tail -10
 grep -a "kit editor: entity 17: Cost" "$b" | head -1 | sed 's/^.*kit editor/  kit editor/'
 grep -a "kit: entity 19 slid to" "$b" | head -1 | sed 's/^.*kit:/  kit:/'
-grep -aq "kit/trigger_zone 20: kitboss entered" "$s" ||
+grep -aq "kit/trigger_zone 21: kitboss entered" "$s" ||
 	fail "the plate's zone did not see kitboss in ($s)"
 grep -aq "kit/logic 17: latch on by kitboss" "$s" ||
 	fail "the press did not latch the logic on ($s)"
@@ -148,9 +149,9 @@ grep -aq "kit: entity 19 slid to 0,2,0" "$b" ||
 # [KIT_OWN_LOOK] M not drawn in play, its collision kept; B under it drawn
 grep -aqE "kit: entity 19 drawn .*, solid" "$b" ||
 	fail "the mover's box is not solid ($b)"
-grep -aq "kit: entity 22 drawn" "$b" ||
+grep -aq "kit: entity 23 drawn" "$b" ||
 	fail "the button under the mover not drawn ($b)"
-grep -aq "kit: entity 22 \(not drawn\|drawn faded\)" "$b" &&
+grep -aq "kit: entity 23 \(not drawn\|drawn faded\)" "$b" &&
 	fail "the button under the mover hidden ($b)"
 grep -aqE "kit editor: entity 17: Cost(s|:)" "$b" ||
 	fail "the inspector did not show the cost ($b)"
@@ -161,7 +162,7 @@ grep -a "kit: entity 18's text wrapped" "$b" | tail -1 |
 	awk '{ h = $(NF - 4) + 0; bh = $(NF - 2) + 0; exit !(h > 0 && h <= bh) }' ||
 	fail "the sign's text is not inside its board ($b)"
 grep -aq 'kit: entity 18 wears stone' "$b" && grep -aq 'kit: entity 19 wears stone' "$b" &&
-	grep -aq 'kit: entity 21 wears stone' "$b" ||
+	grep -aq 'kit: entity 22 wears stone' "$b" ||
 	fail "the sign, the mover and the wedge do not wear the stone voxel ($b)"
 python3 - "$save/save.sqlite" <<'EOF' || fail "the save's visible link ($save)"
 import json, sqlite3, sys

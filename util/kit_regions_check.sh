@@ -9,15 +9,15 @@
 #      Kit's regions there). Placed: a big kit/region B (17, 5x3x5 round
 #      the pillar, owned by the player "kitalice": dig for owners only), a
 #      kit/region P (18, the pillar's cell alone, no digging), the prefab
-#      sample_kit/guarded_region G (19: a kit/region, digging for all,
+#      sample_kit/guarded_region G (20: a kit/region, digging for all,
 #      and sample_kit/guard, an allow hook refusing digs while on),
-#      buttons 20, 21, 22 and 24 and a kit/logic L (23, "or"). End, Run.
+#      buttons 21, 22, 23 and 25 and a kit/logic L (24, "or"). End, Run.
 #      kitbob digs the pillar after each use:
 #        refused by P, the smallest ("Protected: no digging here");
-#        20 disables P: refused by G's hook ("The guard says no");
-#        21 disables G: refused by B (kitbob among everyone else);
-#        22 turns L on, whose out sets B's dig for everyone: dug;
-#        24 turns L off (B's dig for everyone off again) and sets B's
+#        21 disables P: refused by G's hook ("The guard says no");
+#        22 disables G: refused by B (kitbob among everyone else);
+#        23 turns L on, whose out sets B's dig for everyone: dug;
+#        25 turns L off (B's dig for everyone off again) and sets B's
 #        owner, by kitbob: dug by the owners' column.
 #      Each refusal is told to kitbob's client (kit:warning).
 #   2. apps/workbench (its players moved by Kit's controls). Placed: a
@@ -94,19 +94,20 @@ EOF
 	setp 17 dig '"owners"'
 	place '{"op": "place", "type": "kit/region", "pos": [6, 1, 2]}'
 	setp 18 size '[1, 1, 1]'
+	c=$((c + 1))
 	place '{"op": "place", "prefab": "sample_kit/guarded_region", "pos": [5, 0, 1]}'
 	place '{"op": "place", "type": "kit/button", "pos": [1, 1, 1]}'
 	place '{"op": "place", "type": "kit/button", "pos": [1, 1, -1]}'
 	place '{"op": "place", "type": "kit/button", "pos": [-1, 1, 1]}'
 	place '{"op": "place", "type": "kit/logic", "pos": [-1, 0, -1]}'
-	setp 23 mode '"or"'
+	setp 24 mode '"or"'
 	place '{"op": "place", "type": "kit/button", "pos": [-1, 1, -1]}'
-	link 20 pressed 18 disable
-	link 21 pressed 19 disable
-	link 22 pressed 23 a
-	link 23 out 17 dig
-	link 24 pressed 23 a_off
-	link 24 pressed 17 set_owner
+	link 21 pressed 18 disable
+	link 22 pressed 20 disable
+	link 23 pressed 24 a
+	link 24 out 17 dig
+	link 25 pressed 24 a_off
+	link 25 pressed 17 set_owner
 	cat <<'EOF'
 click Button "End"
 wait_log 10000 kit editor: the server is Ended (by kitboss)
@@ -133,17 +134,17 @@ wait_log_any 60000 replicated: entity 17 owners = ["kitalice"]
 wait_log_any 60000 replicated: entity 18 enabled = true
 EOF
 	dig "Protected: no digging here"
-	echo "event kit_use 20"
+	echo "event kit_use 21"
 	echo "wait_log 10000 replicated: entity 18 enabled = false"
 	dig "The guard says no"
-	echo "event kit_use 21"
-	echo "wait_log 10000 replicated: entity 19 enabled = false"
-	dig "Protected: no digging here"
 	echo "event kit_use 22"
-	echo "wait_log 10000 replicated: entity 23 out = true"
+	echo "wait_log 10000 replicated: entity 20 enabled = false"
+	dig "Protected: no digging here"
+	echo "event kit_use 23"
+	echo "wait_log 10000 replicated: entity 24 out = true"
 	echo "sync 5000"
 	dig ""
-	echo "event kit_use 24"
+	echo "event kit_use 25"
 	echo 'wait_log 10000 replicated: entity 17 owners = ["kitbob"]'
 	echo "sync 5000"
 	dig ""
@@ -161,15 +162,15 @@ BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code \
 BUILDAT_JOIN_NAME=kitbob client kitbob bob1 kit
 stop
 s=$t/srv_kit.log
-grep -a "kit/region 1[789]\|kit/logic 23\|sample_kit/guard 19\|a dig at the pillar" "$s" |
+grep -a "kit/region 1[789]\|kit/region 20\|kit/logic 24\|sample_kit/guard 20\|a dig at the pillar" "$s" |
 	sed 's/^.* I [a-z_]* *: /  /' | cut -c1-150 | tail -16
 want "$s" "kit/region 17: holds dig owners, place none, enter all, pvp all, damage all, use all" \
 	"kit/region 18: holds dig none, place none, enter all, pvp all, damage all, use all" \
-	"kit/region 19: holds dig others, place none, enter all, pvp all, damage all, use all" \
-	"kit/region 18: disabled by kitbob" "kit/region 19: disabled by kitbob" \
-	"sample_kit/guard 19: asked dig at 6,1,2 by kitbob" \
-	"kit/logic 23: or on by kitbob" "kit/region 17: dig on for everyone" \
-	"kit/logic 23: or off by kitbob" "kit/region 17: dig off for everyone" \
+	"kit/region 20: holds dig others, place none, enter all, pvp all, damage all, use all" \
+	"kit/region 18: disabled by kitbob" "kit/region 20: disabled by kitbob" \
+	"sample_kit/guard 20: asked dig at 6,1,2 by kitbob" \
+	"kit/logic 24: or on by kitbob" "kit/region 17: dig on for everyone" \
+	"kit/logic 24: or off by kitbob" "kit/region 17: dig off for everyone" \
 	"kit/region 17: owner by kitbob"
 digs=$(grep -aoP "sample_kit: a dig at the pillar: \K.*" "$s" | tr '\n' '|')
 [ "$digs" = "refused: Protected: no digging here|refused: The guard says no|refused: Protected: no digging here|written|written|" ] ||

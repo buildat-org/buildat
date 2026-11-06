@@ -57,8 +57,8 @@ set_() # <id> <param> <value>
 {
 	ed "{\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}"
 }
-# The ids: 3 the World, the prefab's 4 arena, 5 Red, 6 Blue, 7 and 8
-# their bases, 9 and 10 their buttons; 11 the spawner
+# The ids: 3 the World, the prefab's root 4, 5 arena, 6 Red, 7 Blue, 8 and 9
+# their bases, 10 and 11 their buttons; 12 the spawner
 {
 	cat <<'EOF'
 wait_log_any 60000 Joined as kitboss
@@ -74,21 +74,21 @@ wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
 	ed '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
 	ed '{"op": "place", "prefab": "kit/team_match", "pos": [-2, 1, -2]}'
-	ed '{"op": "move", "id": 5, "pos": [5, 1, 0]}'
-	ed '{"op": "move", "id": 6, "pos": [-5, 1, 0]}'
+	ed '{"op": "move", "id": 6, "pos": [5, 1, 0]}'
+	ed '{"op": "move", "id": 7, "pos": [-5, 1, 0]}'
 	ed '{"op": "place", "type": "kit/spawner", "pos": [0, 1, 0]}'
-	set_ 11 players true
-	set_ 4 size '[5, 3, 5]'
-	set_ 4 players 2
-	set_ 4 max_players 3
-	set_ 4 countdown 24
-	set_ 4 duration 2400
-	set_ 4 results 12
-	set_ 4 score_to_win 3
-	set_ 4 after_round 120
-	set_ 4 late_join '"join_or_parallel"'
-	set_ 4 join_team '"lowest_score"'
-	set_ 4 max_rounds 2
+	set_ 12 players true
+	set_ 5 size '[5, 3, 5]'
+	set_ 5 players 2
+	set_ 5 max_players 3
+	set_ 5 countdown 24
+	set_ 5 duration 2400
+	set_ 5 results 12
+	set_ 5 score_to_win 3
+	set_ 5 after_round 120
+	set_ 5 late_join '"join_or_parallel"'
+	set_ 5 join_team '"lowest_score"'
+	set_ 5 max_rounds 2
 	cat <<'EOF'
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
@@ -99,9 +99,9 @@ wait_log 120000 kit editor: in session 0 default
 keypress F6
 wait_log 10000 kit editor: edit mode on
 EOF
-	set_ 4 max_players 2
-	set_ 4 players 1
-	set_ 4 duration 60
+	set_ 5 max_players 2
+	set_ 5 players 1
+	set_ 5 duration 60
 	cat <<'EOF'
 keypress F6
 wait_log 10000 kit editor: edit mode off
@@ -118,7 +118,7 @@ press() # <times>: both teams' buttons (the other's refused)
 {
 	local i
 	for i in $(seq "$1"); do
-		printf 'event kit_use 9\nevent kit_use 10\nsync 3000\ndelay 1000\n'
+		printf 'event kit_use 10\nevent kit_use 11\nsync 3000\ndelay 1000\n'
 	done
 }
 tail_cmds()
@@ -154,7 +154,7 @@ wait_for_log "$t/srv.log" "kitboss entered; 1 of 2 inside" 240 ||
 	fail "kitboss did not get into the arena's zone ($t/srv.log)"
 BUILDAT_JOIN_NAME=kitbob client bob &
 bob=$!
-wait_for_log "$t/srv.log" "kit/team [56]: score 1 by kitbob" 240 ||
+wait_for_log "$t/srv.log" "kit/team [67]: score 1 by kitbob" 240 ||
 	fail "kitbob did not score ($t/srv.log)"
 BUILDAT_JOIN_NAME=kitcat client cat
 wait $bob || fail "kitbob's client ($t/bob.log)"
@@ -167,7 +167,7 @@ grep -a "kit/arena\|joins team\|Session [0-9]" "$s" | grep -v "s left" |
 python3 - "$s" <<'PY' || fail "the rounds ($s)"
 import re, sys
 log = open(sys.argv[1], errors="replace").read()
-A = "kit/arena 4: "
+A = "kit/arena 5: "
 def part(n):
 	return log.split("Session %d (a game)" % n)[1].split("Session %d ended" % n)[0]
 # 1. the late join by the lower score, the win by the score to win

@@ -21,10 +21,109 @@
 #      what such a copy offers then. Detach. Save to prefab brings it back.
 # Screenshots kept with KEEP_TMP=1: $t/*.png
 #   util/kit_prefab_root_check.sh
+#   util/kit_prefab_root_check.sh web    the new UI in headless Chrome
 set -u
 . "$(dirname "$0")/check_lib.sh"
-export BUILDAT_WORKBENCH_PROJECT=world
 here=$(cd "$(dirname "$0")/.." && pwd)
+if [ "${1:-}" = web ]; then
+	# The new UI in the web client (web/), in headless Chrome at 1200x800: the
+	# palette's menu on a prefab and on a type with no place; kit/hut (voxels
+	# alone) placed, its root's Refresh voxels and a key's move, the dialog
+	# each way, undone; a prefab of one's own renamed and deleted by the menu
+	export BUILDAT_WORKBENCH_STONE=1
+	check_tmp kit_prefab_root_web; t=$CHECK_TMP
+	stub="(function(){ var held = null, refuse = false;
+ Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }});
+ function set(e){ held = e; document.dispatchEvent(new Event('pointerlockchange')); }
+ document.addEventListener('keydown', function(e){ if(e.key === 'Escape') refuse = true; }, true);
+ document.addEventListener('mousedown', function(){ refuse = false; }, true);
+ HTMLCanvasElement.prototype.requestPointerLock = function(){
+  if(refuse || !window.lockOk){ document.dispatchEvent(new Event('pointerlockerror')); return Promise.reject(new Error('refused')); }
+  if(held !== this) set(this); return Promise.resolve(); };
+ document.exitPointerLock = function(){ if(held) set(null); };
+ return 'stub'; })()"
+	# A wheel event is one row of the palette, under the pointer; own prefabs come last
+	down="[\"mouse\", 100, 400], [\"frames\", 2],"
+	for _ in $(seq 25); do
+		down="$down [\"wheel\", 100, 400, 100], [\"frames\", 1],"
+	done
+	cat > "$t/steps.json" <<J
+[
+	["nav", "\${URL}"],
+	["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+	["eval", "$(echo "$stub" | tr "\n" " ")"],
+	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
+	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "\${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
+	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
+	["click", "Button", "Don't add"], ["frames", 3],
+	["waitlog_any", "world_menu: the list shown, 0 worlds", 30], ["frames", 3],
+	["click", "Button", "New project..."],
+	["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
+	["click", "Button", "Create"],
+	["waitlog", "player physics enabled", 120],
+	["waitlog_any", "pause: the menu shown", 10],
+	["eval", "window.lockOk = true, 'lock given from here'"],
+	["click", 100, 700], ["waitlog", "pause: the menu closed", 10], ["wait", 1000],
+	["waitlog_any", "kit editor: edit rights: yes", 10],
+	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
+	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
+	["click", "Button", "kit/environment"], ["waitlog", "the palette's menu of kit/environment", 10], ["frames", 3],
+	["shot", "\${OUT}/menu_positionless.png"],
+	["click", "Button", "Cancel"], ["frames", 3],
+	$down
+	["click", "Button", "[kit/hut]"], ["waitlog", "the palette's menu of .kit/hut", 10], ["frames", 3],
+	["shot", "\${OUT}/menu_prefab.png"],
+	["click", "Button", "Place"], ["waitlog", "kit editor: placing .kit/hut", 10],
+	["click", 900, 550], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
+	["click", 900, 550, 50, 2], ["waitlog", "kit editor: placing nothing", 10], ["frames", 3],
+	["click", 900, 550], ["waitlog", "kit editor: selected 3", 10], ["frames", 3],
+	["shot", "\${OUT}/root.png"],
+	["click", "Button", "Refresh voxels"], ["waitlog", "kit editor: the stamp dialog of 3", 10], ["frames", 3],
+	["shot", "\${OUT}/dialog_refresh.png"],
+	["click", "Button", "Cancel"], ["waitlog", "kit editor: no stamp of 3", 10], ["frames", 3],
+	["key", "Right"], ["waitlog", "kit editor: the stamp dialog of 3 after a move", 10], ["frames", 3],
+	["shot", "\${OUT}/dialog_move.png"],
+	["click", "Button", "Clear the old box, then stamp"], ["waitlog", "kit editor: stamp 3, clearing", 10], ["sync", 5000], ["frames", 3],
+	["click", "Button", "Undo"], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10], ["frames", 3],
+	["click", "Button", "kit/teleporter"], ["waitlog", "kit editor: placing kit/teleporter", 10],
+	["click", 650, 700], ["waitlog", "kit editor: state: 3 entities, 2 to undo", 10],
+	["click", 650, 700, 50, 2], ["waitlog", "kit editor: placing nothing", 10], ["frames", 3],
+	["click", 650, 700], ["waitlog", "kit editor: selected 4", 10], ["frames", 3],
+	["click", 650, 700, 50, 2], ["frames", 3], ["click", "Button", "Make prefab..."], ["frames", 5],
+	["shot", "\${OUT}/make.png"],
+	["click", 680, 400], ["frames", 2], ["type", "bar"], ["frames", 3],
+	["shot", "\${OUT}/make_typed.png"],
+	["click", "Button", "Save prefab"], ["waitlog", "kit editor: state: 3 entities, 3 to undo", 10], ["frames", 3],
+	$down
+	["click", "Button", "[webboss/bar]"], ["waitlog", "the palette's menu of .webboss/bar", 10], ["frames", 3],
+	["click", "Button", "Rename"], ["frames", 3],
+	["shot", "\${OUT}/rename.png"],
+	["click", "LineEdit", "bar"], ["frames", 2], ["key", "End"], ["type", "2"], ["frames", 2],
+	["click", "Button", "Rename it"], ["waitlog", "kit editor: rename webboss/bar to bar2", 10], ["sync", 5000], ["frames", 5],
+	$down
+	["click", "Button", "[webboss/bar2]"], ["waitlog", "the palette's menu of .webboss/bar2", 10], ["frames", 3],
+	["click", "Button", "Delete", 214, 680], ["waitlog", "kit editor: delete webboss/bar2. 0 copies", 10], ["frames", 3],
+	["shot", "\${OUT}/delete.png"],
+	["click", "Button", "Delete it"], ["sync", 5000], ["frames", 3]
+]
+J
+	"$here/util/web_drive.sh" chrome workbench "$t/steps.json" "$t/out" ||
+		fail "the web drive ($t/out)"
+	for w in "placed prefab kit/hut as 3...3" "stamped kit/hut on 3" \
+			"webboss renamed the prefab webboss/bar to webboss/bar2 (0 copies)" \
+			"webboss deleted the prefab webboss/bar2"; do
+		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
+	done
+	echo "PASS: a placed prefab's root in the web client: the palette's menus, the root, Refresh and a move's dialog, rename and delete"
+	exit 0
+fi
+export BUILDAT_WORKBENCH_PROJECT=world
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi

@@ -109,7 +109,7 @@ EOF
 	place kit/logic; LOGIC=$id
 	id=$((id + 1)); KID=$id
 	edit "{\"op\": \"place\", \"type\": \"kit/starting_kit\", \"pos\": [1, 1, 1], \"parent\": $FLAG}"
-	id=$((id + 2)); PIE=$id
+	id=$((id + 3)); PIE=$id
 	edit "{\"op\": \"place\", \"prefab\": \"kit/timer_pie\", \"pos\": [1, 1, 1]}"
 	link $FLAG left $BAR1 value
 	link $FLAG taken $BAR1 show
@@ -478,7 +478,7 @@ wantp "$b" "notification: from y (6[0-9]|7[0-9]), the top's foot at"
 want "$s" "placed kit/ui_bar $BAR1, no position" "placed kit/timer $TIMER, no position" \
 	"placed kit/starting_kit $KID, no position under $FLAG"
 # (as first listed: what the popup and the palette add comes later)
-kit "$b" | sed '/the view is Signals/q' | grep -a "kit editor: list Scene (" | tail -1 | grep -aq " $BAR1, $BAR2, $BAR3, $TIMER, $LOGIC, $KID, $((PIE - 1)), $PIE\$" ||
+kit "$b" | sed '/the view is Signals/q' | grep -a "kit editor: list Scene (" | tail -1 | grep -aq " $BAR1, $BAR2, $BAR3, $TIMER, $LOGIC, $KID, $((PIE - 2)), $((PIE - 1)), $PIE\$" ||
 	fail "the Scene list ($b)"
 echo "ok: types with no position placed: none, in the Scene list"
 # 1. Two columns side by side, the slot taken by turns, under the bar, inside
