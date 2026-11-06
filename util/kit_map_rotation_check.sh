@@ -12,7 +12,7 @@
 # Each has its own text ("Map <name>") and a kit/timer of its own length into
 # its first team's score, that team's win_score reached linked to the
 # arena's "win": a round's winner says whose timer ran, and a map not picked
-# running would end a longer map's round first.
+# running sends the arena a team not in the round, which it logs.
 # The arena (kit/arena, in the lobby's zone round the spawn: back from a
 # round both queue again) has maps "alpha, beta, gamma, nowhere". Played:
 #   1. map_pick round_robin: alpha, beta, gamma, alpha
@@ -296,12 +296,14 @@ for n in range(1, 15):
 		joined = re.findall(r"kit/team \d+: %s joins team (\w+)" % who, p)
 		assert len(joined) == 1 and joined[0] in teams[m], (n, who, m, joined)
 	assert "joins team" in p
-	# Its team the winner: a shorter map's timer running in it would have won
-	# first. (Its log says nothing: the default round's copies log alike)
+	# Its team the winner. (A timer's log says nothing: the default round's
+	# copies log alike)
 	assert A + "round over: %s wins!" % teams[m][0] in p, (n, m)
 	end = log.split("Session %d (a game)" % n)[1].split("Session %d (a game)" % (n + 1))[0]
 	for who in ("kitboss", os.environ["SECOND"]):
 		assert "workbench: %s to scene world" % who in end, (n, who, "back")
+# A map not picked running: its timer's team into "win", none of the round's
+assert "win: no team or player in" not in log, "a map not picked ran"
 print("  rounds:", " ".join(played[n] for n in sorted(played)))
 assert [played[n] for n in (1, 2, 3, 4)] == ["alpha", "beta", "gamma", "alpha"], played
 print("ok: round_robin: alpha, beta, gamma, alpha")
