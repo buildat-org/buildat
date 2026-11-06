@@ -183,7 +183,9 @@ if [ ${#web[@]} -gt 0 ] && command -v google-chrome > /dev/null; then
 		echo '["key", "PageDown"],'; ev p3
 		echo '["key", "PageUp"],'; ev p4
 		echo '["chord", "Shift+PageDown"],'; ev p5
-		echo '["shot", "${OUT}/pages.png"], ["selall"],'
+		# simplified: a key at once after Ctrl+A over this selection was lost, 2 of 4;
+		# with the wait 6 of 6. [WEB_SELALL_KEY_RACE] removes it
+		echo '["shot", "${OUT}/pages.png"], ["selall"], ["wait", 300],'
 		# The goal column's lines and paragraph, as natively; the paragraph
 		# five rows of 12 or 13 words (goal.png): after "w48", "w36"
 		echo '["type", "abcdefghijklmnopqrstuvwx"], ["key", "Enter"], ["type", "ab"], ["key", "Enter"], ["key", "Enter"],'
