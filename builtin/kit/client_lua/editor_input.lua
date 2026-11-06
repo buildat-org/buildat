@@ -1582,7 +1582,11 @@ local function touch_move(id, x, y, dx, dy)
 	local pp = S.palette_press
 	if pp and pp.finger == id then
 		S.mx, S.my = x, y
-		if not S.drag and f.moved and not palette_at(x, y) then
+		-- Out of the panel's view, not off a button: a finger scrolling the
+		-- list crosses the gaps between them
+		local sc = magic.ui.scale
+		if not S.drag and f.moved and not (NT.view and
+				inside(NT.view, x / sc, y / sc)) then
 			S.drag = {kind = "palette", item = pp.item}
 			NT.palette_chosen(pp.item)
 			log:info("kit editor: dragging " .. pp.item.label .. " from the palette")
