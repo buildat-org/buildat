@@ -103,11 +103,18 @@
 # the page with the SDK of the version it runs; it needs the emsdk
 # doc/aitta.txt names at $EMSDK, else ~/emsdk.
 #
-# Environment: AITTA (above), POLL_SECONDS (300), UPDATE_MAX_WAIT (1800),
-# GITHUB_REPO (celeron55/buildat),
+# **The alpha channel** ([ALPHA_BUILDS]): by default this follows GitHub's
+# latest release, which is never a prerelease; an alpha is not run. With
+# CHANNEL=alpha, for a playtest server, it follows the newest v*-alpha.N
+# release instead and never a stable one. A version under BUILDAT_SERVE_DIR
+# of the other channel is not started. Give an alpha server a user directory
+# of its own: alphas keep no compatibility (doc/compatibility.txt).
+#
+# Environment: AITTA (above), CHANNEL (above), POLL_SECONDS (300),
+# UPDATE_MAX_WAIT (1800), GITHUB_REPO (celeron55/buildat),
 # GITHUB_TOKEN (optional; unauthenticated, GitHub allows 60 asks an hour),
-# RELEASES_URL (GitHub's list of the repo's releases; a check serves its
-# own), BUILDS_URL, BUILDS_POLL and BUILDS_MAX_WAIT (above).
+# RELEASES_URL (what GitHub is asked, instead: a list of releases or one, a
+# check serves its own), BUILDS_URL, BUILDS_POLL and BUILDS_MAX_WAIT (above).
 # Needs bash, curl and tar; python3 for the stand-in, which is skipped
 # without it.
 set -u
@@ -183,7 +190,14 @@ base=${BUILDAT_SERVE_DIR:-$HOME/buildat-serve}
 poll=${POLL_SECONDS:-300}
 max_wait=${UPDATE_MAX_WAIT:-1800}
 repo=${GITHUB_REPO:-celeron55/buildat}
-releases_url=${RELEASES_URL:-https://api.github.com/repos/$repo/releases?per_page=10}
+channel=${CHANNEL:-stable}
+case $channel in
+stable) releases_url=${RELEASES_URL:-https://api.github.com/repos/$repo/releases/latest} ;;
+# The list, as "latest" skips prereleases. simplified: its newest 100, which
+# a pruned channel's five alphas are in unless 95 releases came after them
+alpha) releases_url=${RELEASES_URL:-https://api.github.com/repos/$repo/releases?per_page=100} ;;
+*) echo "CHANNEL is stable or alpha, not $channel" >&2; exit 2 ;;
+esac
 asset_re='linux-x86_64-web-precompiled\.tar\.gz'
 builds_poll=${BUILDS_POLL:-30}
 builds_max_wait=${BUILDS_MAX_WAIT:-7200}
@@ -213,17 +227,43 @@ cd "$base" || exit 1
 
 say(){ echo "[serve $(date '+%F %T')] $*"; }
 
-# The newest release's archive URL, or nothing. Releases come newest
-# first, and one still being built has no archive yet: the first URL
-# found is the newest there is.
+# The lines (archives, versions) of this channel: an archive's name carries
+# its version
+of_channel(){
+	if [ "$channel" = alpha ]; then
+		grep -- '-alpha\.'
+	else
+		grep -v -- '-alpha\.'
+	fi
+}
+
+# The newest release's archive URL on this channel, or nothing. Stable: the
+# one release GitHub calls latest, or the first of a list, which comes newest
+# first; one still being built has no archive yet. Alpha: by version, not
+# GitHub's order. sort -V reads alpha.10 as above alpha.9, and the URLs differ
+# first at the version (their tag's or their file's).
 latest_url(){
-	local auth=()
+	local auth=() urls
 	[ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
-	curl -fsSL --max-time 60 "${auth[@]}" \
+	urls=$(curl -fsSL --max-time 60 "${auth[@]}" \
 			"$releases_url" |
 		grep -o '"browser_download_url": *"[^"]*"' |
 		sed 's/.*"\(http[^"]*\)"$/\1/' |
-		grep -E "$asset_re" | head -n 1
+		grep -E "$asset_re" | of_channel)
+	if [ "$channel" = alpha ]; then
+		printf '%s\n' "$urls" | sort -V | tail -n 1
+	else
+		printf '%s\n' "$urls" | head -n 1
+	fi
+}
+
+# An archive's name as its version: buildat-<version>-<hash>-linux-..., and
+# an alpha's version has a - of its own
+release_version(){
+	local v=${1#buildat-}
+	v=${v%%-linux*}
+	[[ $v =~ -([0-9a-f]+|unknown)$ ]] && v=${v%-*}
+	echo "$v"
 }
 
 # Downloads and unpacks a release into versions/<name>; its name, or
@@ -561,7 +601,8 @@ prepare(){ # i release version
 # The release being built onto every server: each once its modules are in
 # (or at once without a build host); every one compiled makes it pending
 build_release(){
-	local i r v=${building#buildat-} ver
+	local i r v ver
+	v=$(release_version "$building")
 	for i in "${!games[@]}"; do
 		[ -n "${built[$i]:-}" ] && continue
 		# An Aitta app's ask says its version, installed first if it is
@@ -573,7 +614,7 @@ build_release(){
 		r=$?
 		if [ "$r" = 2 ]; then
 			[ -z "$current" ] && [ -z "${standins[$i]:-}" ] &&
-				standin_start "$i" "Building ${games[$i]} for ${v%%-*}; this page reloads itself." &&
+				standin_start "$i" "Building ${games[$i]} for $v; this page reloads itself." &&
 				standin_build[$i]=1
 			continue
 		fi
@@ -681,10 +722,10 @@ update(){
 	local old=$current i
 	if [ -n "$pending" ]; then
 		current=$pending
-		# buildat-<version>-<hash>-linux-... said as its version
-		local v=${pending#buildat-}
+		local v
+		v=$(release_version "$pending")
 		for i in "${!games[@]}"; do
-			restart "$i" "updating to ${v%%-*}"
+			restart "$i" "updating to $v"
 		done
 	else
 		for i in "${!games[@]}"; do
@@ -715,8 +756,8 @@ update_when_quiet(){
 	fi
 	if [ "$warned_at" = 0 ] && [ "$now" -ge $((pending_at + max_wait - 60)) ]; then
 		warned_at=$now
-		local v=${pending#buildat-}
-		v=${v%%-*}
+		local v
+		v=$(release_version "$pending")
 		[ -z "$pending" ] && v="a new version"
 		for i in "${on[@]}"; do
 			say "warning ${games[$i]} on port ${ports[$i]}: updating to $v in 60 s"
@@ -825,10 +866,11 @@ trap 'stop_all; say "stopped"; exit 0' INT TERM
 
 # What ran last, else the newest there is
 current=""
-if [ -f current ] && [ -d "versions/$(cat current)" ]; then
+if [ -f current ] && [ -d "versions/$(cat current)" ] &&
+		[ -n "$(of_channel < current)" ]; then
 	current=$(cat current)
 else
-	current=$(ls -1 versions | grep -v '^\.' | sort -V | tail -n 1)
+	current=$(ls -1 versions | grep -v '^\.' | of_channel | sort -V | tail -n 1)
 fi
 
 next_poll=0

@@ -368,6 +368,11 @@ make_installer() {
 	local name="$1"
 	local stage="$root/stage/$name" files="$root/installer-$name"
 	local exe="$out/$name-setup.exe"
+	# [ALPHA_BUILDS] An alpha installs beside a stable one
+	local product=()
+	case "$version" in
+	*-alpha.*) product=(-DPRODUCT="Buildat Alpha" -DDATA_DIR=buildat-alpha) ;;
+	esac
 	rm -rf "$files"; mkdir -p "$files"
 	: > "$files/install.nsh"; : > "$files/remove.nsh"
 	local p n
@@ -386,7 +391,8 @@ make_installer() {
 		fi
 	done
 	makensis -V2 -DVERSION="$version" -DSTAGE="$stage" -DFILES="$files" \
-		-DOUT="$exe" "$here/util/installer.nsi" > "$files/makensis.log" 2>&1 || {
+		-DOUT="$exe" "${product[@]}" "$here/util/installer.nsi" \
+		> "$files/makensis.log" 2>&1 || {
 		echo "makensis failed; see $files/makensis.log" >&2; return 1; }
 	echo "$exe"
 }

@@ -9,7 +9,10 @@
 # opener (an xdg-open of this check's own on PATH).
 # [VERSION_DOWNLOAD]: after it the amber text names the file (a .tar.gz's
 # says extract, an .exe's run) and "Close Buildat" ends the client.
-# The GitHub adapter prints the newest release, when GitHub answers.
+# [ALPHA_BUILDS]: the answer's "prerelease" is carried, a bad one dropped, and
+# a stable client is offered its "version" with one there. On an alpha's
+# canned releases, the adapter's rules: util/alpha_channel_check.sh.
+# The GitHub adapter prints the newest stable release, when GitHub answers.
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -25,7 +28,7 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 cd "$here"
 
-starport() { # version [linux file]
+starport() { # version [linux file] [prerelease's version]
 	[ -n "$pid" ] && kill "$pid" && wait "$pid" 2>/dev/null
 	mkdir -p "$tmp/sp/apps/starport"
 	cat > "$tmp/sp/apps/starport/version_adapter" <<A
@@ -33,7 +36,8 @@ starport() { # version [linux file]
 echo "a warning on stderr" >&2
 echo '{"version": "$1", "url": "https://example.org/releases",
  "platforms": {"linux": {"url": "https://example.org/${2:-linux-$1.tar.gz}"},
-  "win64": {"url": "http://example.org/insecure"}, "bad name": {"url": "https://x"}}}'
+  "win64": {"url": "http://example.org/insecure"}, "bad name": {"url": "https://x"}},
+ "prerelease": {"version": "${3:-9.9.9-alpha.1}", "url": "https://example.org/alpha"}}'
 A
 	chmod +x "$tmp/sp/apps/starport/version_adapter"
 	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
@@ -51,7 +55,9 @@ curl -s -m 10 "localhost:$SP/api/v1/list" | python3 -c '
 import json, sys
 v = json.load(sys.stdin)["version"]
 assert v == {"version": "0.9.0", "url": "https://example.org/releases",
-	"platforms": {"linux": {"url": "https://example.org/linux-0.9.0.tar.gz"}}}, v
+	"platforms": {"linux": {"url": "https://example.org/linux-0.9.0.tar.gz"}},
+	"prerelease": {"version": "9.9.9-alpha.1", "url": "https://example.org/alpha",
+		"platforms": {}}}, v
 ' || fail "/api/v1/list's version not as filtered"
 echo "ok: /api/v1/list carries the adapter's answer, filtered"
 
@@ -89,7 +95,13 @@ launcher "$tmp/c2" "$tmp/cl2.log" || fail "the drive ($tmp/cl2.log)"
 grep -v " __app   : " "$tmp/cl2.log" | grep -q "Offering version" && fail "0.9.0 told again after Not now"
 echo "ok: not told again"
 
-starport 0.9.1
+starport 0.9.1 linux-0.9.1.tar.gz "not a version"
+curl -s -m 10 "localhost:$SP/api/v1/list" | python3 -c '
+import json, sys
+v = json.load(sys.stdin)["version"]
+assert "prerelease" not in v and v["version"] == "0.9.1", v
+' || fail "a bad prerelease not left out, or the rest with it"
+echo "ok: a bad prerelease is left out and the rest stands"
 cat > "$tmp/c3" <<C
 wait_log_any 30000 Offering version 0.9.1
 delay 1000
@@ -176,7 +188,9 @@ if out=$(timeout 60 util/starport_version_github.py 2>&1); then
 	echo "$out" | python3 -c '
 import json, re, sys
 v = json.load(sys.stdin)
-assert re.match(r"^\d+(\.\d+)+$", v["version"]) and v["url"].startswith("https://"), v
+assert re.match(r"^\d+\.\d+\.\d+$", v["version"]) and v["url"].startswith("https://"), v
+p = v.get("prerelease")
+assert p is None or re.match(r"^\d+\.\d+\.\d+-alpha\.\d+$", p["version"]), p
 ' || fail "the GitHub adapter printed $out"
 	echo "ok: the GitHub adapter: $(echo "$out" | cut -c1-60)..."
 else

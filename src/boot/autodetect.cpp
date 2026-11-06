@@ -2,11 +2,13 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "boot/autodetect.h"
 #include "core/log.h"
+#include "core/version.h"
 #include <cstdio>
 #include <algorithm>
 #include "interface/os.h"
 #include "interface/fs.h"
 #include "interface/process.h"
+#include "interface/aitta.h"
 #include "interface/mutex.h"
 #include "interface/debug.h"
 #include <fstream>
@@ -95,25 +97,34 @@ static ss_ home_path()
 #endif
 }
 
+// [ALPHA_BUILDS] An alpha's data apart from a stable build's: it keeps no
+// compatibility, and it installs beside one
+static ss_ data_dir_name(const char *version)
+{
+	return buildat_version_is_alpha(version) ? "buildat-alpha" : "buildat";
+}
+
 ss_ platform_user_path()
 {
+	const ss_ name = data_dir_name(BUILDAT_VERSION);
 #if defined(_WIN32)
-	return env_or("APPDATA", home_path()+"/AppData/Roaming")+"/buildat";
+	return env_or("APPDATA", home_path()+"/AppData/Roaming")+"/"+name;
 #elif defined(__APPLE__)
-	return home_path()+"/Library/Application Support/buildat";
+	return home_path()+"/Library/Application Support/"+name;
 #else
-	return env_or("XDG_DATA_HOME", home_path()+"/.local/share")+"/buildat";
+	return env_or("XDG_DATA_HOME", home_path()+"/.local/share")+"/"+name;
 #endif
 }
 
 ss_ platform_cache_path()
 {
+	const ss_ name = data_dir_name(BUILDAT_VERSION);
 #if defined(_WIN32)
-	return env_or("LOCALAPPDATA", home_path()+"/AppData/Local")+"/buildat/cache";
+	return env_or("LOCALAPPDATA", home_path()+"/AppData/Local")+"/"+name+"/cache";
 #elif defined(__APPLE__)
-	return home_path()+"/Library/Caches/buildat";
+	return home_path()+"/Library/Caches/"+name;
 #else
-	return env_or("XDG_CACHE_HOME", home_path()+"/.cache")+"/buildat";
+	return env_or("XDG_CACHE_HOME", home_path()+"/.cache")+"/"+name;
 #endif
 }
 
@@ -203,30 +214,48 @@ struct ScopedEnv {
 
 static void check_platform_data_paths()
 {
+	if(data_dir_name("0.8.0-alpha.1") != "buildat-alpha" ||
+			data_dir_name("0.8.0-alpha.10") != "buildat-alpha" ||
+			data_dir_name("0.8.0") != "buildat" ||
+			data_dir_name("0.6.90-abc1234") != "buildat" ||
+			data_dir_name("1.0.0-rc.1") != "buildat")
+		throw Exception("data_dir_name");
+	namespace aitta = interface::aitta;
+	for(const char *official : {"https://aitta.buildat.org",
+			"https://aitta.buildat.org/", "http://AITTA.buildat.org:8080",
+			"aitta.buildat.org", "aitta.buildat.org.:443", "x@aitta.buildat.org"})
+		if(aitta::publish_refusal("0.8.0-alpha.1", official).empty() ||
+				!aitta::publish_refusal("0.8.0", official).empty())
+			throw Exception(ss_("publish_refusal: ")+official);
+	for(const char *other : {"https://127.0.0.1:9", "aitta.example.org:8080",
+			"https://aitta.buildat.org.example.org", "http://aitta.buildat.org@x"})
+		if(!aitta::publish_refusal("0.8.0-alpha.1", other).empty())
+			throw Exception(ss_("publish_refusal: ")+other);
 #if !defined(_WIN32) && !defined(__APPLE__)
+	const ss_ name = data_dir_name(BUILDAT_VERSION);
 	{
 		ScopedEnv h("HOME", "/home/u");
 		ScopedEnv d("XDG_DATA_HOME", "/xdg/data");
 		ScopedEnv c("XDG_CACHE_HOME", "/xdg/cache");
-		if(platform_user_path() != "/xdg/data/buildat")
+		if(platform_user_path() != "/xdg/data/"+name)
 			throw Exception("platform_user_path: XDG_DATA_HOME");
-		if(platform_cache_path() != "/xdg/cache/buildat")
+		if(platform_cache_path() != "/xdg/cache/"+name)
 			throw Exception("platform_cache_path: XDG_CACHE_HOME");
 	}
 	{
 		ScopedEnv h("HOME", "/home/u");
 		ScopedEnv d("XDG_DATA_HOME", nullptr);
 		ScopedEnv c("XDG_CACHE_HOME", nullptr);
-		if(platform_user_path() != "/home/u/.local/share/buildat")
+		if(platform_user_path() != "/home/u/.local/share/"+name)
 			throw Exception("platform_user_path: fallback");
-		if(platform_cache_path() != "/home/u/.cache/buildat")
+		if(platform_cache_path() != "/home/u/.cache/"+name)
 			throw Exception("platform_cache_path: fallback");
 	}
 	{
 		// An empty variable is not a path, whatever the shell thinks
 		ScopedEnv h("HOME", "/home/u");
 		ScopedEnv d("XDG_DATA_HOME", "");
-		if(platform_user_path() != "/home/u/.local/share/buildat")
+		if(platform_user_path() != "/home/u/.local/share/"+name)
 			throw Exception("platform_user_path: empty XDG_DATA_HOME");
 	}
 #endif

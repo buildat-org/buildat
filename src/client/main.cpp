@@ -99,6 +99,10 @@ static int aitta_main(int argc, char *argv[])
 			aitta = argv[2];
 		}
 		if(!zip_path.empty()){
+			const ss_ refusal = interface::aitta::publish_refusal(
+					BUILDAT_VERSION, aitta);
+			if(!refusal.empty())
+				throw Exception(refusal);
 			// The release to an Aitta: its .sig first, which says who
 			// signed what, then the archive in the pieces its upload_begin
 			// names; a refusal for the Aitta's rate waits and sends again

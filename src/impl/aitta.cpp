@@ -12,6 +12,7 @@
 #include "interface/sha256.h"
 #include "interface/zip.h"
 #include "core/log.h"
+#include "core/version.h"
 #include "zlib.h"
 #ifdef _WIN32
 	#include <winsock2.h>
@@ -1356,6 +1357,25 @@ ss_ aitta_host(const ss_ &aitta)
 	ss_ h = p == ss_::npos ? aitta : aitta.substr(p + 3);
 	h = h.substr(0, h.find('/'));
 	return h;
+}
+
+ss_ publish_refusal(const ss_ &version, const ss_ &aitta)
+{
+	// client/core/starport/init.lua's DEFAULT_AITTA, as it stands unoverridden
+	static const ss_ OFFICIAL = "aitta.buildat.org";
+	if(!buildat_version_is_alpha(version.c_str()))
+		return "";
+	ss_ h = aitta_host(aitta);
+	h = h.substr(h.rfind('@') + 1);
+	h = h.substr(0, h.find_first_of(":?#"));
+	if(!h.empty() && h.back() == '.')
+		h.pop_back();
+	std::transform(h.begin(), h.end(), h.begin(), ::tolower);
+	if(h != OFFICIAL)
+		return "";
+	return "This is an alpha build ("+version+"): it does not publish to the "
+			"official Aitta, "+OFFICIAL+". Publish with a stable build, or "
+			"name another Aitta.";
 }
 
 void record_vouch(const ss_ &user_path, const ss_ &fp, const ss_ &aitta,
