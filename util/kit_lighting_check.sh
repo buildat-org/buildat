@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min (2026-11-02)
+# cost: ~3 min (2026-11-06)
 # covers: builtin/kit/kit.cpp builtin/kit/types/environment.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/environment.lua builtin/kit/client_lua/controls.lua builtin/kit/client_data/KitVoxel* extensions/cartoon_sky/** extensions/sky_render/** extensions/physical_sky/** apps/workbench/**
 # [KIT_LIGHTING] (kit_plan 4o) kit/environment's lighting, sky and weather
 # on Workbench. A fresh save, the admin Ended, a flat grassland World (no
@@ -85,6 +85,20 @@ ep() # <param> <json value>
 {
 	edit "{\"op\": \"set\", \"id\": 4, \"comp\": 0, \"param\": \"$1\", \"value\": $2}"
 }
+# An edit and the line it brings, tens of ms behind its "to undo": waited
+# for instead of that, from before the edit is sent, as a wait started
+# after the "to undo" line can start after this one too (a slow frame) and
+# then never sees it ([KIT_LIGHTING_CHECK_RACE])
+edit_line() # <json> <ms> <the line>
+{
+	n=$((n + 1))
+	ed "$1"
+	printf 'wait_log %d %s\n' "$2" "$3"
+}
+ep_line() # <param> <json value> <the line>
+{
+	edit_line "{\"op\": \"set\", \"id\": 4, \"comp\": 0, \"param\": \"$1\", \"value\": $2}" 10000 "$3"
+}
 try() # <input> <json value>
 {
 	ed "{\"op\": \"try\", \"id\": 4, \"comp\": 0, \"input\": \"$1\", \"value\": $2}"
@@ -129,8 +143,7 @@ EOF
 	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "biome", "value": "grassland"}'
 	echo "wait_log_any 30000 kit: World: generated again"
-	edit '{"op": "set", "id": 3, "comp": 0, "param": "decorations", "value": false}'
-	echo "wait_log 30000 kit: World: generated again"
+	edit_line '{"op": "set", "id": 3, "comp": 0, "param": "decorations", "value": false}' 30000 "kit: World: generated again"
 	echo "idle 30000"
 	shot plain
 	# 4: the environment, on the root
@@ -190,8 +203,7 @@ EOF
 		PLATE="10 8 16 10 0.5 7.1"
 		shot cartoon_plate "$PLATE"
 		# 3. physical at noon, dusk and night
-		ep lighting '"physical"'
-		echo "wait_log_any 10000 kit: lighting physical"
+		ep_line lighting '"physical"' "kit: lighting physical"
 		sky "physical, 12.0 o'clock, sun 1"
 		sky "sun through 1.00, shadows 1"
 		shot phys_plate "$PLATE"
@@ -214,16 +226,14 @@ EOF
 		done; done; done
 		CAVE="6.6 -4.4 6.6 7.4 -4.7 7.4"
 		shot phys_cave_off "$CAVE"
-		ep lighting '"cartoon"'
-		echo "wait_log_any 10000 kit: lighting cartoon"
+		ep_line lighting '"cartoon"' "kit: lighting cartoon"
 		shot cartoon_cave_off "$CAVE"
 		edit '{"op": "set", "id": 3, "comp": 0, "param": "sky_light", "value": true}'
 		echo "wait_log_any 10000 kit: sky light on"
 		echo "wait_log_any 60000 kit: sky light: the loaded world relit"
 		echo "idle 30000"
 		shot cartoon_cave "$CAVE"
-		ep lighting '"physical"'
-		echo "wait_log 10000 kit: lighting physical"
+		ep_line lighting '"physical"' "kit: lighting physical"
 		shot phys_cave "$CAVE"
 		# A builder's voxel type that gives light, in the room's corner:
 		# physical draws it, cartoon has no light levels
@@ -232,8 +242,7 @@ EOF
 		edit '{"op": "set_voxel", "pos": [6, -5, 7], "voxel": "kitboss/lamp"}'
 		echo "wait_log_any 10000 kit: lamps: 1 lit about the camera"
 		shot phys_cave_lamp "$CAVE"
-		ep lighting '"cartoon"'
-		echo "wait_log 10000 kit: lighting cartoon"
+		ep_line lighting '"cartoon"' "kit: lighting cartoon"
 		shot cartoon_cave_lamp "$CAVE"
 		# 5. The weather over a builder's cover of 0.9 (an overcast clear
 		# day), each change faded over a second (the lines are the settled
@@ -275,21 +284,18 @@ EOF
 		skyn "clouds 0.00 at 120, wind 0.0 toward 180; clear 1.00"
 		ep weather_fade 1
 		# 8. Left physical for the second client
-		ep lighting '"physical"'
-		echo "wait_log 10000 kit: lighting physical"
+		ep_line lighting '"physical"' "kit: lighting physical"
 		# 9. Physical's water over the flat ground (the sea up to 2), and
 		# the ground as voxels and as a heightmap (the same grass), the
 		# sky light off (the heightmap has none)
 		w() { edit "{\"op\": \"set\", \"id\": 3, \"comp\": 0, \"param\": \"$1\", \"value\": $2}"; }
-		w sky_light false
-		echo "wait_log 10000 kit: sky light off"
+		w_line() { edit_line "{\"op\": \"set\", \"id\": 3, \"comp\": 0, \"param\": \"$1\", \"value\": $2}" "$3" "$4"; }
+		w_line sky_light false 10000 "kit: sky light off"
 		LOW="20 6 20 32 0 32"
-		w sea_level 2
-		echo "wait_log 30000 kit: World: generated again"
+		w_line sea_level 2 30000 "kit: World: generated again"
 		echo "idle 30000"
 		shot phys_water "$LOW"
-		w sea_level 0
-		echo "wait_log 30000 kit: World: generated again"
+		w_line sea_level 0 30000 "kit: World: generated again"
 		echo "idle 30000"
 		shot phys_ground_voxels "$LOW"
 		w surface '"heightmap"'
