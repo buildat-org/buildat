@@ -216,6 +216,8 @@ struct Module: public interface::Module, public Interface
 	}
 	bool is_local(PeerId peer){ return peer != 0 && peer == m_local; }
 	bool launched(){ return true; }
+	// A page's server is never opened to the LAN
+	bool lan_open(){ return false; }
 	void set_lan_name(const ss_ &name, bool account){}
 	void kick(PeerId peer, const ss_ &why)
 	{
