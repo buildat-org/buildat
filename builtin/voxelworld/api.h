@@ -510,8 +510,15 @@ namespace voxelworld
 		// world that does not stream (see set_load_points()) also has every
 		// section of it loaded at the start, so a world that wants bounds
 		// bigger than it wants to load has to stream.
+		//
+		// waits_for_save ([SK_REJOIN_SAVE_LOSS]): nothing is loaded until
+		// set_save() has been called, with nullptr for no save. For a game
+		// with a save that makes it in another access than this one: the
+		// tick runs in between (another thread), and a section it loaded
+		// was generated, and its next save wrote it over the save's.
 		virtual void create_instance(SceneReference scene_ref,
-				const pv::Region &region, bool physics_enabled = false) = 0;
+				const pv::Region &region, bool physics_enabled = false,
+				bool waits_for_save = false) = 0;
 		virtual void delete_instance(SceneReference scene_ref) = 0;
 
 		virtual Instance* get_instance(SceneReference scene_ref) = 0;

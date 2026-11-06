@@ -3645,6 +3645,29 @@ grep -aq "the skeleton (1) is in a lamp light of" "$log66" &&
 	! grep -aq "the skeleton (2) burns\|the skeleton (2) is in a lamp" "$log66" ||
 	fail "the torchlight: $(grep -a "lamp light\|dies\|(2) burns" "$log66" | sed 's/.*skeldat: //' | tr '\n' ';') ($log66)"
 torchlight=$(grep -a "the skeleton (1) is in a lamp light of" "$log66" | head -1 | sed 's/.*light of //')
+# 63. A restart reads its save ([SK_REJOIN_SAVE_LOSS]): voxelworld's tick,
+# its own thread, loading between skeldat's making the instance and giving
+# it the save generated the world again and wrote it over the save, the
+# players and the rest of skeldat's rows kept. It took a loaded box to hit
+# the gap; here the gap made long. Two restarts, no client, on ticks that
+# do not wait for skeldat (no --sim-rate): every section out of the save.
+for n in 1 2 3; do
+	BUILDAT_SKELDAT_WORLD=reread BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+		BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+		BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_CREATE_PAUSE_MS=300 \
+		start_server "$t/srv73_$n.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv73" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv73_$n.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	wait_for_log "$t/srv73_$n.log" "skeldat: the world is in" 120 ||
+		fail "the world not in ($t/srv73_$n.log)"
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+done
+[ "$(grep -ac " pocket of " "$t/srv73_1.log")" -gt 0 ] || fail "the new world made no pockets ($t/srv73_1.log)"
+for n in 2 3; do
+	! grep -aqE " pocket of |the first bone piles|sections are loaded already" "$t/srv73_$n.log" ||
+		fail "restart $n generated the world again ($t/srv73_$n.log)"
+done
 # The summary of a full run
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"
