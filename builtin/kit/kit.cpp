@@ -1248,6 +1248,8 @@ struct Module: public interface::Module, public Interface
 	// are built again (rebuilds())
 	ss_ m_follow;
 	uint64_t m_follow_source = 0;
+	// [KIT_PREFAB_BENCH] The prefab this edit saved in a bench
+	ss_ m_bench_saved;
 	// [KIT_GENERATORS] a build's call under way (box_call(): its budget)
 	bool m_building = false;
 	// Those that did not load (logged once), and those loading now (a
@@ -9458,7 +9460,9 @@ struct Module: public interface::Module, public Interface
 						}
 						const interface::VoxelDefinition *d =
 								reg->get(f.id.get(word));
-						const ss_ name = d ? d->name.block_name : ss_("air");
+						// (id 0, a cell no generator wrote, has no name)
+						const ss_ name = d && !d->name.block_name.empty() ?
+								d->name.block_name : ss_("air");
 						uint32_t pm = f.param.bound() ? f.param.get(word) : 0;
 						if(k && is_shape(name))
 							pm = (pm & 4) | ((pm + 4 - k) & 3);
@@ -10445,6 +10449,11 @@ struct Module: public interface::Module, public Interface
 			root = root_arg(j, "root", why);
 			if(!root)
 				return false;
+			// [KIT_PREFAB_BENCH] not of a box its voxels are not in yet
+			if(active_session() && active_session()->stamp.is_object()){
+				why = "its voxels are still being laid out here: a moment";
+				return false;
+			}
 			const ss_ of = jstr(root->prefab, "of");
 			if(of.compare(0, author.size() + 1, author+"/") != 0){
 				why = of+" is "+(of.compare(0, 4, "kit/") == 0 ? ss_("Kit's") :
@@ -10631,6 +10640,8 @@ struct Module: public interface::Module, public Interface
 		}
 		m_follow = name;
 		m_follow_source = root ? root->id : 0;
+		if(active_session() && active_session()->bench)
+			m_bench_saved = name;
 		const json::Value &vx = pf.get("voxels");
 		what = "saved prefab "+name+" version "+itos(version)+" of "+
 				itos(pf.get("entities").size())+" entities"+(vx.is_object() ?
@@ -13292,6 +13303,7 @@ struct Module: public interface::Module, public Interface
 		for(uint64_t id : ids){
 			SessionScope sc(*this, id);
 			tick_round(writes[id]);
+			bench_stamp();
 		}
 		session_ops();
 		rules_watch();
@@ -19844,8 +19856,15 @@ struct Module: public interface::Module, public Interface
 			GameSession *gs = active_session();
 			json::Value sj = json::object();
 			sj.set("id", (int64_t)m_active);
-			sj.set("kind", ss_(!gs ? "default" : gs->draft ? "draft" : "game"));
+			sj.set("kind", ss_(!gs ? "default" : gs->bench ? "bench" :
+					gs->draft ? "draft" : "game"));
 			sj.set("by", gs ? gs->by : ss_());
+			if(gs && gs->bench){
+				sj.set("prefab", gs->prefab);
+				sj.set("root", (int64_t)gs->root);
+				sj.set("box", gs->box);
+				sj.set("ready", !gs->stamp.is_object());
+			}
 			sj.set("clock", (int64_t)(now_us() / 1000000));
 			sj.set("can", (bool)m_host.drop_scene && !m_host.persistent);
 			j.set("session", sj);
@@ -20115,8 +20134,10 @@ struct Module: public interface::Module, public Interface
 				op == "prefab_rename" || op == "prefab_delete" ||
 				op == "hm_regenerate" ||
 				op == "hm_restore" || op == "new_scene" || op == "export" ||
-				op == "draft"))
-			return refuse("in a draft: the default round's");
+				op == "draft" || op == "prefab_bench" ||
+				(gs->bench && op == "publish")))
+			return refuse(gs->bench ? "editing a prefab: the project's; Close "
+					"first" : "in a draft: the default round's");
 		if(op == "draft")
 			return make_draft(p, peer, refuse);
 		if(op == "publish")
@@ -20169,6 +20190,8 @@ struct Module: public interface::Module, public Interface
 			return refuse("not in edit mode");
 		if(op == "focus")
 			return focus(peer, j, refuse);
+		if(op == "prefab_bench")
+			return prefab_bench(p, peer, j, refuse);
 		if(op == "scene")
 			return switch_scene(p, peer, j, refuse);
 		if(op == "terrain")
@@ -20290,6 +20313,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		m_paste = VoxelPaste();
+		m_bench_saved.clear();
 		const uint64_t next0 = m_next_id;
 		if(!build_change(op, j, p, change, what, why) ||
 				!rebuilds(change, p, what, why)){
@@ -20303,8 +20327,10 @@ struct Module: public interface::Module, public Interface
 			for(const auto &c : change)
 				if(world_or_env(c.first, c.second)){
 					m_next_id = next0;
-					return refuse("in a draft: the World and the environment "
-							"are the default round's");
+					return refuse(active_session()->bench ? "editing a prefab: "
+							"the World and the environment are the project's" :
+							"in a draft: the World and the environment are the "
+							"default round's");
 				}
 		two_way_returns(change, what);
 		std::deque<Change> &u = m_undo[p.name];
@@ -20347,6 +20373,8 @@ struct Module: public interface::Module, public Interface
 		}
 		log_i(MODULE, "An edit by %s: %s", cs(p.name), cs(what));
 		world_check(p.name);
+		if(!m_bench_saved.empty())
+			bench_follow(p);
 		// [KIT_SCENES] a new scene: its World, and its maker taken there
 		if(op == "new_scene"){
 			const ss_ name = jstr(j, "name");
@@ -21409,6 +21437,20 @@ struct Module: public interface::Module, public Interface
 		std::set<ss_> written;
 		// [KIT_LATE_JOIN] The players its start took in
 		size_t start_players = 0;
+		// [KIT_PREFAB_BENCH] A prefab's temporary scene (prefab_bench()): which
+		// prefab, its copy's root, its box of voxels ([x0, y0, z0, x1, y1, z1]
+		// or null) and where its builder came from. stamp: its voxels until
+		// they are laid out (null then), retried at stamp_next (time_us)
+		bool bench = false;
+		ss_ prefab;
+		uint64_t root = 0;
+		json::Value box = json::null();
+		ss_ back_scene;
+		double back_pos[3] = {0, 0, 0};
+		double at[3] = {0, 0, 0};
+		json::Value stamp = json::null();
+		int64_t stamp_next = 0;
+		size_t stamped = 0;
 	};
 	std::map<uint64_t, up_<GameSession>> m_sessions;
 	// The default round's members while a session is entered
@@ -21662,7 +21704,9 @@ struct Module: public interface::Module, public Interface
 		s->app_scenes.insert(app_scene(name, m_active));
 		m_ref_session[ref] = m_active;
 		save_sessions();
-		auto bi = m_default_ctx.scenes.find(name);
+		// [KIT_PREFAB_BENCH] a bench's: no source, the voxels' ids its builder's
+		// scene's
+		auto bi = m_default_ctx.scenes.find(s->bench ? s->back_scene : name);
 		const main_context::SceneReference base =
 				bi == m_default_ctx.scenes.end() ? nullptr : bi->second;
 		sp_<SessionSource> src = std::make_shared<SessionSource>();
@@ -21693,7 +21737,8 @@ struct Module: public interface::Module, public Interface
 							cs(itos(m_active)), off, cs(name));
 			}
 			src->base = b;
-			w->set_section_source(src);
+			if(!s->bench)
+				w->set_section_source(src);
 			w->set_writes_alter(true);
 			w->set_save_unaltered(false);
 		});
@@ -21704,7 +21749,8 @@ struct Module: public interface::Module, public Interface
 	// each scene's World as the default's, its on_start runs. 0 with why
 	// when refused. Made at the top (the default round entered)
 	uint64_t make_session(bool draft, const ss_ &by, uint64_t maker,
-			size_t comp, ss_ &why)
+			size_t comp, ss_ &why, const json::Value *bench = nullptr,
+			const ss_ &back_scene = "")
 	{
 		if(!m_host.make_scene || !m_host.drop_scene){
 			why = "the app makes no scenes for sessions";
@@ -21719,7 +21765,7 @@ struct Module: public interface::Module, public Interface
 			return 0;
 		}
 		// A copy: the session's entities are its own
-		const json::Value c = json::load_string(
+		const json::Value c = bench ? *bench : json::load_string(
 				authored_json().stringify().c_str());
 		const uint64_t id = m_next_session++;
 		up_<GameSession> s(new GameSession());
@@ -21733,7 +21779,10 @@ struct Module: public interface::Module, public Interface
 		s->ctx.store = s->store.get();
 		s->ctx.w = &m_none;
 		s->ctx.clock_base = interface::os::game_us();
-		s->ctx.session.running = true;
+		// [KIT_PREFAB_BENCH] a bench's components do not run
+		s->bench = bench != nullptr;
+		s->back_scene = back_scene;
+		s->ctx.session.running = !bench;
 		s->ctx.session.by = by;
 		s->ctx.start = m_start.deepcopy();
 		m_sessions[id] = std::move(s);
@@ -21748,7 +21797,8 @@ struct Module: public interface::Module, public Interface
 			return 0;
 		}
 		log_i(MODULE, "Session %s (%s) by %s: %zu entities from the start",
-				cs(itos(id)), draft ? "a draft" : "a game", cs(by),
+				cs(itos(id)), bench ? "a bench" : draft ? "a draft" : "a game",
+				cs(by),
 				stash_of(id).entities.size());
 		return id;
 	}
@@ -21756,16 +21806,21 @@ struct Module: public interface::Module, public Interface
 	bool session_load(const json::Value &c, ss_ &why)
 	{
 		const uint64_t next = m_next_id;
+		const bool bench = active_session()->bench;
 		for(auto &sc : m_default_ctx.scenes)
-			if(!m_host.scenes.count(sc.first) && !make_scene(sc.first, why))
+			if((!bench || sc.first == m_host.world_scene) &&
+					!m_host.scenes.count(sc.first) && !make_scene(sc.first, why))
 				return false;
+		// [KIT_PREFAB_BENCH] its World its own, not the save's row
+		if(bench)
+			m_store->remove("world");
 		if(!load_composition(c, why))
 			return false;
 		m_next_id = std::max(m_next_id, next);
 		if(!host_world(why))
 			return false;
 		for(auto &pe : m_entities)
-			for(size_t i = 0; i < pe.second.comps.size(); i++){
+			for(size_t i = 0; !bench && i < pe.second.comps.size(); i++){
 				to_start(pe.second, i);
 				Run r;
 				r.entity = pe.first;
@@ -21843,6 +21898,17 @@ struct Module: public interface::Module, public Interface
 						m_host.scenes.begin()->first : m_host.world_scene;
 			if(!to || !map.empty())
 				scene_spawn(scene, pos[0], pos[1], pos[2]);
+			// [KIT_PREFAB_BENCH] Into one: where its copy is seen from; out:
+			// where they came from
+			auto bi = m_sessions.find(to ? to : from);
+			if(bi != m_sessions.end() && bi->second->bench){
+				const GameSession &b = *bi->second;
+				if(to || m_host.scenes.count(b.back_scene)){
+					scene = to ? scene : b.back_scene;
+					for(int k = 0; k < 3; k++)
+						pos[k] = to ? b.at[k] : b.back_pos[k];
+				}
+			}
 		}
 		log_i(MODULE, "Peer %zu from session %s to session %s (scene %s)",
 				peer, cs(itos(from)), cs(itos(to)), cs(app_scene(scene, to)));
@@ -22156,7 +22222,8 @@ struct Module: public interface::Module, public Interface
 			json::Value j = json::object();
 			GameSession *gs = active_session();
 			j.set("id", (int64_t)id);
-			j.set("kind", ss_(!gs ? "default" : gs->draft ? "draft" : "game"));
+			j.set("kind", ss_(!gs ? "default" : gs->bench ? "bench" :
+					gs->draft ? "draft" : "game"));
 			j.set("by", gs ? gs->by : m_session.by);
 			json::Value pl = json::array();
 			for(auto &p : m_peers)
@@ -22215,6 +22282,197 @@ struct Module: public interface::Module, public Interface
 		if(!id)
 			return refuse(why);
 		move_peer(peer, id);
+	}
+
+	// [KIT_PREFAB_BENCH] {"op": "prefab_bench", "prefab": name}: a clean place
+	// to edit a prefab of the builder's own. A session of its own (so its own
+	// entities, undo, peers and voxels, and nothing saved; a restart drops it):
+	// an empty infinite World of their scene's look, the components not running,
+	// one copy at the origin, its voxels laid out as their sections load. Its
+	// Save is the root's save_prefab; the project's copies follow it
+	// (bench_follow()). {"op": "leave_draft"} ends it, as does leaving.
+	// One a builder, for them alone; MAX_SESSIONS with the others
+	void prefab_bench(Peer &p, size_t peer, const json::Value &j,
+			const std::function<void(const ss_&)> &refuse)
+	{
+		if(m_active)
+			return refuse("in a session already");
+		const ss_ name = jstr(j, "prefab");
+		const json::Value *pf = prefab(name);
+		if(!pf)
+			return refuse("no prefab \""+name.substr(0, 130)+"\"");
+		const ss_ author = prefab_author(p);
+		if(author.empty() || name.compare(0, author.size() + 1, author+"/") != 0
+				|| !jstr(*pf, "package").empty())
+			return refuse(name+" is not yours: Make prefab makes one of your "
+					"own of it");
+		const uint64_t from = scene_id(p.scene);
+		if(!from || m_host.world_scene.empty() || !world_named(p.scene))
+			return refuse("not in a scene with a World");
+		json::Value looks;
+		{
+			WorldScope ws(m_w, world_named(p.scene));
+			looks = world_params();
+		}
+		const uint64_t sid = m_next_id;
+		m_next_id += 2;
+		json::Value es = json::array(), sc = json::object(), wo = json::object(),
+				comps = json::array(), comp = json::object(),
+				params = json::object();
+		sc.set("id", (int64_t)sid);
+		sc.set("parent", (int64_t)1);
+		sc.set("name", m_host.world_scene);
+		sc.set("kind", "scene");
+		es.append(sc);
+		for(const char *k : {"biome", "materials", "sky_light"})
+			if(!looks.get(k).is_undefined())
+				params.set(k, looks.get(k));
+		params.set("generator", "empty");
+		params.set("size", "infinite");
+		params.set("surface", "voxels");
+		params.set("decorations", false);
+		params.set("caves", false);
+		comp.set("type", "kit/world");
+		comp.set("params", params);
+		comps.append(comp);
+		wo.set("id", (int64_t)(sid + 1));
+		wo.set("parent", (int64_t)sid);
+		wo.set("name", "World");
+		wo.set("components", comps);
+		es.append(wo);
+		// Its environment too: the same light
+		for(auto &pe : m_entities){
+			if(pe.second.parent != from || pe.second.has_pos)
+				continue;
+			bool env = false;
+			for(const Instance &i : pe.second.comps)
+				env = env || i.type == "kit/environment";
+			if(!env)
+				continue;
+			Entity c = pe.second;
+			c.id = m_next_id++;
+			c.parent = sid;
+			for(Instance &i : c.comps)
+				i.links.clear();
+			es.append(entity_json(c));
+		}
+		json::Value all = json::object();
+		all.set("entities", es);
+		all.set("next_id", (int64_t)m_next_id);
+		ss_ why;
+		const uint64_t id = make_session(true, p.name, 0, 0, why, &all, p.scene);
+		if(!id)
+			return refuse(why);
+		GameSession &gs = *m_sessions[id];
+		gs.prefab = name;
+		for(int k = 0; k < 3; k++)
+			gs.back_pos[k] = p.pos[k];
+		const json::Value &vx = pf->get("voxels");
+		gs.at[0] = 0.5;
+		gs.at[1] = 2;
+		gs.at[2] = -7.5;
+		if(vx.is_object()){
+			const json::Value &a = vx.get("at"), &n = vx.get("size");
+			json::Value box = json::array();
+			for(unsigned k = 0; k < 3; k++)
+				box.append(a.at(k));
+			for(unsigned k = 0; k < 3; k++)
+				box.append(a.at(k).as_number() + n.at(k).as_number() - 1);
+			gs.box = box;
+			gs.stamp = vx.deepcopy();
+			gs.at[0] = a.at(0u).as_number() + n.at(0u).as_number() / 2;
+			gs.at[1] = a.at(1u).as_number() + n.at(1u).as_number() + 2;
+			gs.at[2] = a.at(2u).as_number() - 8;
+		}
+		bool ok = false;
+		{
+			SessionScope scope(*this, id);
+			Peer t;
+			t.name = p.name;
+			t.scene = m_host.world_scene;
+			json::Value a = json::object(), pos = json::array();
+			for(int k = 0; k < 3; k++)
+				pos.append((int64_t)0);
+			a.set("prefab", name);
+			a.set("pos", pos);
+			sv_<std::pair<uint64_t, json::Value>> change;
+			ss_ what;
+			m_paste = VoxelPaste();
+			ok = place_prefab(a, t, change, what, why);
+			m_paste.set = false;
+			if(ok){
+				gs.root = change[0].first;
+				// A prefab with no place too: the box's frame is the root's
+				if(change[0].second.get("pos").is_undefined())
+					change[0].second.set("pos", pos);
+				ok = rebuilds(change, t, what, why);
+			}
+			if(ok)
+				commit(change, nullptr);
+		}
+		if(!ok){
+			end_session(id, "", false);
+			return refuse(why);
+		}
+		log_i(MODULE, "%s edits the prefab %s in session %s", cs(p.name), cs(name),
+				cs(itos(id)));
+		move_peer(peer, id);
+	}
+
+	// The bench's copy's voxels, as their sections are there; a Save waits for
+	// them, or it would lose those not laid out. Entered
+	void bench_stamp()
+	{
+		GameSession *gs = active_session();
+		const int64_t now = interface::os::time_us();
+		if(!gs || !gs->stamp.is_object() || now < gs->stamp_next)
+			return;
+		gs->stamp_next = now + 500000;
+		auto si = m_host.scenes.find(m_host.world_scene);
+		if(si == m_host.scenes.end())
+			return;
+		Change nc;
+		const int base[3] = {0, 0, 0};
+		size_t written = 0, missing = 0, unknown = 0;
+		write_voxels(gs->stamp, si->second, base, 0, nc, gs->by, written, missing,
+				unknown);
+		gs->stamped += written;
+		if(missing)
+			return;
+		gs->stamp = json::null();
+		log_i(MODULE, "The prefab %s's voxels laid out in session %s: %zu",
+				cs(gs->prefab), cs(itos(m_active)), gs->stamped);
+		for(auto &o : m_peers)
+			send_state(o.first);
+		// A Save drops what the scene has no voxel for: said now
+		if(unknown)
+			warn("the prefab "+gs->prefab+" has "+itos(unknown)+" voxels of types "
+					"this scene has not: not shown, and a Save drops them");
+	}
+
+	// A save in a bench: its own round's copies followed in rebuilds(); the
+	// project's follow here. No undo: the temporary scene's history stays its
+	// own, and the project's has nothing of it.
+	// simplified: others' drafts' copies do not follow (as a save from a draft)
+	void bench_follow(Peer &p)
+	{
+		const ss_ name = m_bench_saved;
+		m_bench_saved.clear();
+		SessionScope sc(*this, 0);
+		sv_<std::pair<uint64_t, json::Value>> change;
+		ss_ what, why;
+		m_follow = name;
+		m_follow_source = 0;
+		if(!rebuilds(change, p, what, why)){
+			m_follow.clear();
+			log_w(MODULE, "The copies of %s do not follow: %s", cs(name), cs(why));
+			return;
+		}
+		if(change.empty())
+			return;
+		commit(change, nullptr);
+		world_check(p.name);
+		log_i(MODULE, "The project's copies of %s follow:%s", cs(name), cs(what));
 	}
 
 	// Publish: the entities the draft's edits changed, as the draft has

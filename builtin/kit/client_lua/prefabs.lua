@@ -17,6 +17,11 @@
 --     of what moved, or with others in a selection, the voxels just stay. An Undo
 --     is no move. simplified: the dialog is no modal; answered after more edits,
 --     its stamp is its own undo.
+--   - [KIT_PREFAB_BENCH] The palette menu's Edit, on one's own prefab: the bar's
+--     "Editing prefab X: Save, Close" in a temporary scene (kit.cpp's
+--     prefab_bench()), the view at the copy, the box in the Box tool's handles.
+--     Save is the root's Save to prefab with that box. Close asks only if an edit
+--     was sent or the box moved since the last Save.
 return function(A)
 local K, S, W, NT = A.K, A.S, A.W, A.NT
 local E, P = K.E, K.P
@@ -24,6 +29,7 @@ local magic = require("buildat/extension/urho3d")
 local log = K.log
 local send, window, find, drop, drawn_at = A.send, A.window, A.find, A.drop,
 		A.drawn_at
+local M, BX = K.M, A.BX
 local row, text, label, button, edit = K.row, K.text, K.label, K.button, K.edit
 local DIM = K.DIM
 
@@ -58,8 +64,13 @@ function PF.section(w, e)
 				": follows at its next save", DIM)
 	end
 	if info and info.voxels and (e.prefab.voxels or 0) < info.voxels then
-		text(w, "voxels v" .. tostring(e.prefab.voxels or 0) .. ", prefab v" ..
-				tostring(info.voxels))
+		local behind = "voxels v" .. tostring(e.prefab.voxels or 0) .. ", prefab v" ..
+				tostring(info.voxels)
+		text(w, behind)
+		if PF.behind_logged ~= behind then
+			PF.behind_logged = behind
+			log:info("kit editor: " .. behind)
+		end
 	end
 	-- A deleted one's author is not known here: the server refuses another's
 	if not info or info.own then
@@ -146,8 +157,108 @@ K.prefab_moving = function(j)
 		from = {e.pos[1], e.pos[2], e.pos[3], e.yaw or 0}}
 end
 
+-- [KIT_PREFAB_BENCH] Into the bench: the box, the view on it; what the builder
+-- had, for the way out
+local function box_key()
+	local b = A.vbox()
+	return b and table.concat(b, ",") or ""
+end
+
+local function bench_enter()
+	local ses = E.session
+	PF.bench_was = PF.bench_was or {pos = S.pos, yaw = S.yaw, pitch = S.pitch,
+		view = S.view, tool = S.tool}
+	local lo, hi = {0, 0, 0}, {0, 1, 0}
+	S.sel, S.primary, S.placing = {}, nil, nil
+	if type(ses.box) == "table" then
+		lo = {ses.box[1], ses.box[2], ses.box[3]}
+		hi = {ses.box[4], ses.box[5], ses.box[6]}
+		M.set_tool("box")
+		BX.set_box(lo, hi, "the prefab's")
+	else
+		M.set_tool(nil)
+	end
+	local d = math.max(hi[1] - lo[1], hi[2] - lo[2], hi[3] - lo[3]) + 7
+	S.pos = {x = (lo[1] + hi[1]) / 2 + 0.5, y = (lo[2] + hi[2]) / 2 + 0.5 + d * 0.7,
+		z = (lo[3] + hi[3]) / 2 + 0.5 - d}
+	S.yaw, S.pitch = 0, math.deg(math.atan2(d * 0.7, d))
+	M.set_view("3d")
+	PF.bench = {id = ses.id, prefab = ses.prefab, root = ses.root, box = box_key(),
+		version = (info_of(ses.prefab) or {}).version, dirty = false}
+	log:info("kit editor: editing the prefab " .. tostring(ses.prefab) ..
+			" in session " .. tostring(ses.id))
+end
+
+local function bench_leave()
+	local b = PF.bench_was
+	PF.bench, PF.bench_was = nil, nil
+	S.sel, S.primary, S.placing = {}, nil, nil
+	M.set_tool(b.tool)
+	S.pos, S.yaw, S.pitch = b.pos, b.yaw, b.pitch
+	M.set_view(b.view)
+	log:info("kit editor: the prefab's scene closed")
+end
+
+-- The state's say on the bench: in, out, or a Save come back
+local function bench_state()
+	local q = PF.bench
+	if (E.session or {}).kind == "bench" then
+		if not q or q.id ~= E.session.id then
+			bench_enter()
+			q = PF.bench
+		end
+		if E.session.ready and not q.ready then
+			q.ready = true
+			log:info("kit editor: the prefab's voxels are in")
+		end
+		local v = (info_of(q.prefab) or {}).version
+		if v ~= q.version then
+			q.version, q.dirty, q.box = v, false, box_key()
+		end
+	elseif q then
+		bench_leave()
+	end
+end
+
+function PF.bench_save()
+	local q = PF.bench
+	if q then
+		send({op = "save_prefab", root = q.root, box = A.vbox()})
+		log:info("kit editor: save the prefab " .. tostring(q.prefab))
+	end
+end
+
+function PF.bench_close()
+	local q = PF.bench
+	local function go()
+		close()
+		send({op = "leave_draft"})
+		log:info("kit editor: close the prefab's scene")
+	end
+	if not q or not (q.dirty or q.box ~= box_key()) then
+		return go()
+	end
+	local w = dialog()
+	text(w, "Close without saving " .. tostring(q.prefab) .. "?")
+	text(w, "What was changed since the last Save is dropped, no undo.", DIM)
+	local br = row(w)
+	button(br, "Close it", go)
+	button(br, "Keep editing", close)
+	log:info("kit editor: close unsaved?")
+end
+
+-- [editor.lua's send] What goes out and changes the bench's scene
+local READS = {focus = true, voxel_info = true, mode = true, edited = true,
+	save_prefab = true, leave_draft = true, sessions = true, copy = true}
+K.prefab_bench_sent = function(j)
+	if PF.bench and not READS[j.op] then
+		PF.bench.dirty = true
+	end
+end
+
 -- A new state: the move's dialog, once the row has moved
 function PF.state()
+	bench_state()
 	local q = PF.pending
 	if not q then
 		return
@@ -228,6 +339,13 @@ function PF.menu(it, x, y, redraw)
 			NT.arm(it)
 		end
 	end}}
+	if info.own and (E.session or {}).kind == "default" and (E.session or {}).can
+			then
+		entries[#entries + 1] = {"Edit", function()
+			send({op = "prefab_bench", prefab = name})
+			log:info("kit editor: edit the prefab " .. name)
+		end}
+	end
 	if info.own then
 		entries[#entries + 1] = {"Rename", function() PF.rename_dialog(name) end}
 		entries[#entries + 1] = {"Delete", function() PF.delete_dialog(name) end}
