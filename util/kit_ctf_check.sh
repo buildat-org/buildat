@@ -136,6 +136,10 @@ set_() # <id> <param> <value>
 {
 	ed "{\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}"
 }
+under() # <id> <parent>
+{
+	ed "{\"op\": \"parent\", \"id\": $1, \"parent\": $2}"
+}
 link() # <from> <output> <to> <input>
 {
 	ed "{\"op\": \"link\", \"id\": $1, \"comp\": 0, \"output\": \"$2\", \"to\": $3, \"input\": \"$4\"}"
@@ -153,7 +157,7 @@ sidebar() # <x, y, z> <label> <max> <color>: a bar in the right-hand column
 	place kit/ui_bar "$1"
 	set_ $id style '"shapes"'
 	set_ $id form '"bar"'
-	set_ $id panel $SIDE
+	under $id $SIDE
 	set_ $id label "\"$2\""
 	set_ $id min 0
 	set_ $id max "$3"
@@ -321,7 +325,7 @@ EOF
 	name_ 'Prep pie'
 	set_ $id style '"shapes"'
 	set_ $id form '"pie"'
-	set_ $id panel $PREP_ROW
+	under $id $PREP_ROW
 	set_ $id min 1
 	set_ $id max 0
 	set_ $id start 0
@@ -329,7 +333,7 @@ EOF
 	set_ $id label '""'
 	text '3, 2, 6' 'Prep {value:int} s: stay in your zone' top_left 0; PREP_TEXT=$id
 	name_ 'Prep text'
-	set_ $id panel $PREP_ROW
+	under $id $PREP_ROW
 	set_ $id background '"none"'
 	set_ $id border '"none"'
 	place kit/ui_panel '4, 1, 7'; TOP=$id
@@ -345,10 +349,10 @@ EOF
 	set_ $id shown true
 	text '4, 1, 6' '{value}' top 0; STATUS=$id
 	name_ 'Round status'
-	set_ $id panel $TOP
+	under $id $TOP
 	text '8, 1, 6' 'Flag carried by {value}' top 0; HOLDER_TEXT=$id
 	name_ 'Holder text'
-	set_ $id panel $TOP
+	under $id $TOP
 	set_ $id shown false
 	place kit/ui_panel '5, 1, 7'; SIDE=$id
 	name_ 'Side panel'

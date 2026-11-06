@@ -273,15 +273,15 @@ EOF
 	place kit/ui_panel; COL=$id
 	sets $id layout '"column"' gap 1 width 0 height 0 anchor '"top_right"' x 2 y 10 shown true background '"none"' border '"none"'
 	place kit/ui_text; A=$id
-	sets $id panel $COL text '"First"'
+	edit "{\"op\": \"parent\", \"id\": $id, \"parent\": $COL}"; sets $id text '"First"'
 	place kit/ui_text; B=$id
-	sets $id panel $COL text '"Hidden"' shown false
+	edit "{\"op\": \"parent\", \"id\": $id, \"parent\": $COL}"; sets $id text '"Hidden"' shown false
 	place kit/ui_text; C=$id
-	sets $id panel $COL text '"Third"'
+	edit "{\"op\": \"parent\", \"id\": $id, \"parent\": $COL}"; sets $id text '"Third"'
 	place kit/ui_panel; EMPTY=$id
 	sets $id layout '"row"' width 0 height 0 anchor '"right"' shown true background '"none"' border '"none"'
 	place kit/ui_text; EMPTY_KID=$id
-	sets $id panel $EMPTY text '"Nothing shown"' shown false
+	edit "{\"op\": \"parent\", \"id\": $id, \"parent\": $EMPTY}"; sets $id text '"Nothing shown"' shown false
 	# 7. Blink, a timer's progress
 	place kit/ui_bar; BLINK=$id
 	sets $id x 2 y 52 width 20 height 3 start 10 blink_below 0.25 label '"low"' color '"#d82828"'

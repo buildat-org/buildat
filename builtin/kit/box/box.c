@@ -22,6 +22,7 @@
 **                        [KIT_VOXEL_STATES] box {sx, sy, sz} (its
 **                        voxel_box) and voxels {names, ids} (reads_voxels:
 **                        each cell's name's index, 0 not loaded);
+**                        [KIT_PANEL_PARENT] panel (the panel it is in);
 **                        [KIT_TOOLS_1] is_player (it is on a player's
 **                        entity)}; answers
 **                        its effects, {set = {{key, value}...} (a table
@@ -581,6 +582,8 @@ static const char PRELUDE[] =
 "	-- [KIT_TOOLS_1] whether it is on a player's entity; c:respawn() puts\n"
 "	-- that player at their spawn after the run (kit/health's death)\n"
 "	c.is_player = req.is_player or false\n"
+"	-- [KIT_PANEL_PARENT] the panel it is in (its parent, if a panel)\n"
+"	c.panel = req.panel\n"
 "	function c:respawn() fx.respawn = true end\n"
 "	-- [KIT_CTF] a health's death of its player (c.is_player): Kit's on_died\n"
 "	-- hooks, then kit/game_rules' respawn; every waiting player respawned;\n"

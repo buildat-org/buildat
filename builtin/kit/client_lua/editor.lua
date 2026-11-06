@@ -106,7 +106,8 @@
 --     while Ended; what it emitted is shown a moment ("→ opened");
 --     ([KIT_REPARENT_BUTTONS]) "Switch parent" and then an entity clicked
 --     (the view's or the list's; Escape or the button again cancels) puts
---     it under that one, "Un-parent" back under the scene
+--     it under that one, "Un-parent" back under the scene; a UI element's
+--     new parent may be a panel ([KIT_PANEL_PARENT]), which it is then in
 --   - every entity drawn as a box, the selected ones yellow, links as
 --     lines, and a type's gizmo (a sphere or a box), in edit mode only
 --   - the admin's: who is here, each "Builder: yes/no" to grant or take
@@ -545,6 +546,21 @@ magic.SubscribeToEvent("command_seq:kit_copy_style", function(_, data)
 	end
 end)
 
+-- [KIT_PANEL_PARENT] simplified: kit/ui_panel by name, as NT.is_ui goes; a
+-- builder's own type of ui kind "panel" takes its elements in the server and
+-- on the screen, but Switch parent here and the list's indent miss it
+function NT.is_panel(e)
+	local c1 = e and e.components and e.components[1]
+	return c1 and c1.type == "kit/ui_panel"
+end
+
+-- p, if x stands in its tree: a positioned one under a positioned one, or
+-- ([KIT_PANEL_PARENT]) one with no position in a panel
+function NT.tree_parent(x, p)
+	return p and ((x.pos and p.pos) or (not x.pos and NT.is_panel(p))) and p or
+			nil
+end
+
 function NT.tree()
 	local tree_cache = NT.cache
 	if tree_cache.state ~= E.state then
@@ -553,8 +569,8 @@ function NT.tree()
 			by[x.id] = x
 		end
 		for _, x in ipairs(all_entities()) do
-			local p = by[x.parent]
-			if x.pos and p and p.pos then
+			local p = NT.tree_parent(x, by[x.parent])
+			if p then
 				kids[p.id] = kids[p.id] or {}
 				table.insert(kids[p.id], x)
 			end
@@ -565,10 +581,9 @@ function NT.tree()
 	return tree_cache
 end
 
--- The positioned entity e is under, or nil (a scene)
+-- The positioned entity or the panel e is under, or nil (a scene)
 function NT.parent_of(e)
-	local p = e and NT.tree().by[e.parent]
-	return p and p.pos and e.pos and p or nil
+	return e and NT.tree_parent(e, NT.tree().by[e.parent]) or nil
 end
 
 -- Every entity under id, parents first
@@ -1565,18 +1580,19 @@ end
 -- World, an environment) and Positioned (the scene's, or the root's,
 -- placed), each in the order they were added; the tab kept for the
 -- session. [KIT_NESTING] Positioned in the tree's order, each one under
--- its parent indented ([KIT_REPARENT_BUTTONS]: a Select with Switch
--- parent armed picks the parent)
+-- its parent indented, [KIT_PANEL_PARENT] and a panel's elements under it
+-- ([KIT_REPARENT_BUTTONS]: a Select with Switch parent armed picks the
+-- parent)
 -- The Entities tab's lists, and how deep in the tree each one is
 function NT.entity_lists()
 	local tabs = {["Game-wide"] = {}, Scene = {}, Positioned = {}}
 	local indent = {}
-	local function add_tree(e, d)
-		table.insert(tabs.Positioned, e)
+	local function add_tree(t, e, d)
+		table.insert(tabs[t], e)
 		indent[e.id] = d
 		for _, c in ipairs(NT.tree().kids[e.id] or {}) do
 			if d < 16 then
-				add_tree(c, d + 1)
+				add_tree(t, c, d + 1)
 			end
 		end
 	end
@@ -1584,10 +1600,8 @@ function NT.entity_lists()
 		if e.kind ~= "scene" then
 			local t = e.pos and "Positioned" or scene_name(e) and "Scene" or
 					"Game-wide"
-			if t ~= "Positioned" then
-				table.insert(tabs[t], e)
-			elseif not NT.parent_of(e) then
-				add_tree(e, 0)
+			if not NT.parent_of(e) then
+				add_tree(t, e, 0)
 			end
 		end
 	end
@@ -1611,7 +1625,8 @@ function NT.entities(w)
 				(e.pos and " at " ..
 				table.concat(e.pos, ",") or ""))
 		local sb = button(gr, e.id == S.primary and "Selected" or
-				S.reparent and e.pos and "Parent" or "Select", function()
+				S.reparent and (e.pos or NT.is_panel(e)) and "Parent" or "Select",
+				function()
 			if not NT.pick_parent(e.id) then
 				M.select(e.id)
 			end
@@ -2533,7 +2548,7 @@ local function inspector(w, e, is_made)
 		-- list's) is its parent; Un-parent puts it back under the scene. The
 		-- server keeps its place in the world
 		local pe = NT.tree().by[e.parent]
-		pe = pe and pe.pos and pe
+		pe = pe and (pe.pos or NT.is_panel(pe)) and pe
 		if pe then
 			text(w, "Under " .. NT.entity_label(pe), DIM)
 		end
@@ -2549,7 +2564,7 @@ local function inspector(w, e, is_made)
 			end)
 		end
 	end
-	if e.pos and not sig then
+	if (e.pos or NT.is_panel(e)) and not sig then
 		local on = S.under == e.id
 		button(w, on and "Placing under this: stop" or "Place under this",
 				function()

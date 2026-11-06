@@ -1,6 +1,6 @@
 -- A button on the players' screens ([KIT_UI_COMPONENTS], stage 4m): a
 -- player presses it (a click, a tap) and it signals "pressed" and
--- "released", as by them; with `closes`, a press hides its panel too
+-- "released", as by them; with `closes`, a press hides its parent panel too
 -- (a dialog's OK). Or with `action` (a kit/action's name) it is that
 -- action's button: it presses the action, its own signals silent, and
 -- with no `label` it is called what the action is. A press counts only
@@ -41,8 +41,7 @@ return {
 		anchor = "param:anchor", x = "param:x", y = "param:y",
 		width = "param:width", height = "param:height", color = "param:color",
 		background = "param:background", border = "param:border",
-		style = "param:style", size = "param:size", order = "param:order",
-		panel = "param:panel"},
+		style = "param:style", size = "param:size", order = "param:order"},
 	params = {
 		label = {cat = "hud", type = "string", default = "OK"},
 		action = {type = "string", default = ""},
@@ -66,7 +65,6 @@ return {
 		border = {cat = "hud", type = "string", default = "#808080a0"},
 		order = {cat = "hud", type = "number", default = 0, min = -40,
 			max = 40},
-		panel = {cat = "hud", type = "entity", default = 0},
 		to = {type = "string", default = "everyone",
 			choices = {"everyone", "player", "team"}},
 		shown = {cat = "hud", type = "bool", default = true},
@@ -112,8 +110,8 @@ return {
 	on_ui = function(c, phase, by)
 		c:log(phase, "by", c:name(by))
 		c:emit(phase)
-		if phase == "pressed" and c.params.closes and c.params.panel ~= 0 then
-			c:send(c.params.panel, "hide")
+		if phase == "pressed" and c.params.closes and c.panel then
+			c:send(c.panel, "hide")
 		end
 	end,
 }

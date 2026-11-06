@@ -1851,6 +1851,36 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
+	// [KIT_PANEL_PARENT] A UI element: no position and a `ui` (not a flag's or
+	// an arena's, which stand in the world); is_panel: one of kind "panel",
+	// which those under it are laid out in
+	bool is_ui_element(const Entity &e)
+	{
+		if(!no_position(e))
+			return false;
+		for(const Instance &in : e.comps)
+			if(m_types[in.type].decl.get("ui").is_object())
+				return true;
+		return false;
+	}
+	bool is_panel(const Entity &e)
+	{
+		if(!no_position(e))
+			return false;
+		for(const Instance &in : e.comps){
+			const json::Value &d = m_types[in.type].decl.get("ui");
+			if(d.is_object())
+				return jstr(d, "kind") == "panel";
+		}
+		return false;
+	}
+	// The panel a UI element is in: its parent if one, 0 none
+	uint64_t panel_of(const Entity &e)
+	{
+		auto it = m_entities.find(e.parent);
+		return it != m_entities.end() && is_panel(it->second) ? e.parent : 0;
+	}
+
 	// [KIT_PREFAB_ROOT] Whether it is a placed prefab's root
 	static bool is_root(const Entity &e)
 	{
@@ -8151,6 +8181,9 @@ struct Module: public interface::Module, public Interface
 			if(show.get("ui").is_undefined() && d.get("ui").is_object()){
 				json::Value u = look_of(in, d.get("ui"));
 				u.set("comp", (int64_t)(&in - &e.comps[0]));
+				// [KIT_PANEL_PARENT] (no parents in a player's state)
+				if(const uint64_t pn = panel_of(e))
+					u.set("panel", (int64_t)pn);
 				show.set("ui", u);
 			}
 			// [KIT] stage 4e2: what a click would do, shown on it: it is
@@ -8344,8 +8377,8 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_UI_COMPONENTS] Whether a UI entity (a type with `ui`) is up for
 	// a player (their entity): its state `shown`, everyone's, under their
-	// own ("own": {"player:<id>": {shown}}), and its panel's (the ui's
-	// "panel", an entity id; 0 none) the same way
+	// own ("own": {"player:<id>": {shown}}), and its panel's (its parent,
+	// if a panel) the same way
 	bool ui_visible(uint64_t id, uint64_t player, int depth = 0)
 	{
 		auto it = m_entities.find(id);
@@ -8364,9 +8397,7 @@ struct Module: public interface::Module, public Interface
 			}
 			if(!shown)
 				return false;
-			const json::Value p = look_of(in, d).get("panel");
-			const uint64_t pid = p.is_number() && p.as_number() >= 1 ?
-					(uint64_t)p.as_number() : 0;
+			const uint64_t pid = panel_of(it->second);
 			return !pid || ui_visible(pid, player, depth + 1);
 		}
 		return false;
@@ -8481,6 +8512,9 @@ struct Module: public interface::Module, public Interface
 		o += ",handler=";
 		lua_lit(json::Value(r.handler), o);
 		o += ",id="+itos(e.id);
+		// [KIT_PANEL_PARENT]
+		if(const uint64_t pn = panel_of(e))
+			o += ",panel="+itos(pn);
 		// [KIT_TOOLS_1] a player's entity (kit/health respawns them)
 		if(e.kind == "player")
 			o += ",is_player=true";
@@ -9077,13 +9111,16 @@ struct Module: public interface::Module, public Interface
 
 	// The entities an instance reaches: its own, its links' ends, those its
 	// entity parameters name, the copies it made, the player who set the
-	// run off, and every player for a type that reads them (`players`)
+	// run off, every player for a type that reads them (`players`), and
+	// [KIT_PANEL_PARENT] the panel it is in
 	std::set<uint64_t> reach(const Entity &e, size_t comp, const ss_ &by)
 	{
 		std::set<uint64_t> r;
 		r.insert(e.id);
 		if(comp >= e.comps.size())
 			return r;
+		if(const uint64_t pn = panel_of(e))
+			r.insert(pn);
 		const Instance &in = e.comps[comp];
 		for(const Link &l : in.links)
 			r.insert(l.to);
@@ -10280,8 +10317,23 @@ struct Module: public interface::Module, public Interface
 			m_paste.set = true;
 		}
 		// [KIT_NESTING] "parent": its members under that entity
+		// ([KIT_PANEL_PARENT] a panel: a paste of UI elements only; a
+		// prefab's copy has a root, which is none)
 		uint64_t under = 0;
-		if(!parent_arg(j, p, under, why))
+		bool all_ui = paste;
+		const json::Value &ms = pf->get("entities");
+		for(unsigned i = 0; all_ui && i < ms.size(); i++){
+			if(json::jint(ms.at(i), "parent", 0))
+				continue;
+			const json::Value &cs_ = ms.at(i).get("components");
+			bool ui = false;
+			for(unsigned c = 0; c < cs_.size(); c++){
+				const Type &t = m_types[full_type(jstr(cs_.at(c), "type"))];
+				ui = ui || (t.no_position && t.decl.get("ui").is_object());
+			}
+			all_ui = ui;
+		}
+		if(!parent_arg(j, p, under, why, 1, all_ui))
 			return false;
 		if(!paste){
 			const uint64_t id = m_next_id++;
@@ -21001,9 +21053,11 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_NESTING] An edit's "parent" (optional; 0 or none: the scene):
 	// a positioned authored entity of the editor's scene, room under it
-	// for `height` levels more. false with why
+	// for `height` levels more; [KIT_PANEL_PARENT] or a panel, for a
+	// `ui_child` only (the panel has no position, a UI element no use for
+	// one). false with why
 	bool parent_arg(const json::Value &j, const Peer &p, uint64_t &parent,
-			ss_ &why, int height = 1)
+			ss_ &why, int height = 1, bool ui_child = false)
 	{
 		parent = 0;
 		const json::Value &v = j.get("parent");
@@ -21014,7 +21068,12 @@ struct Module: public interface::Module, public Interface
 			return false;
 		ss_ scene;
 		scene_of(*e, &scene);
-		if(!e->has_pos || !e->kind.empty()){
+		const bool panel = is_panel(*e);
+		if(panel && !ui_child){
+			why = "parent: only a UI element goes under the panel "+itos(e->id);
+			return false;
+		}
+		if((!e->has_pos && !panel) || !e->kind.empty()){
 			why = "parent: entity "+itos(e->id)+" has no position";
 			return false;
 		}
@@ -21064,7 +21123,7 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		uint64_t parent = 0;
-		if(!parent_arg(j, p, parent, why, height_of(e->id)))
+		if(!parent_arg(j, p, parent, why, height_of(e->id), is_ui_element(*e)))
 			return false;
 		if(parent == e->id || under_one_of(parent, {e->id})){
 			why = "parent: entity "+itos(parent)+" is "+(parent == e->id ?
@@ -21182,7 +21241,8 @@ struct Module: public interface::Module, public Interface
 			// [KIT_NESTING] "parent": under that entity, pos the world's
 			// (a type the root or the scene has, as ever)
 			uint64_t under = 0;
-			if(!root && !on_scene && !parent_arg(j, p, under, why))
+			if(!root && !on_scene && !parent_arg(j, p, under, why, 1,
+					no_pos && m_types[type].decl.get("ui").is_object()))
 				return false;
 			const uint64_t id = m_next_id++;
 			json::Value e = json::object();

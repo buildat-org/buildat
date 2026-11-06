@@ -12,7 +12,7 @@
 --   **Layout**: `anchor` (top_left, top, top_right, left, center, right,
 --   bottom_left, bottom, bottom_right), also the element's own reference
 --   point, and x, y in from it (from the centre: right and down), in the
---   UI root (the client's UI fit scales it) or in its `panel`'s box; kept
+--   UI root (the client's UI fit scales it) or in its parent panel's box; kept
 --   inside the box it is in, so nothing goes off a narrow screen. On a
 --   touchscreen a bottom anchor is above Kit's touch bars
 --   (kit.touch_bar_top()).
@@ -367,6 +367,8 @@ local function from_place(u, w, h, pw, ph, px, py, V)
 			math.floor(y / V * 100 + 0.5) / 100
 end
 
+-- [KIT_PANEL_PARENT] The panel it is in: its parent, if a panel (the server
+-- says, in the ui's look: a player's state has no parents)
 local function panel_of(r)
 	local p = tonumber(r.ui.panel) or 0
 	return p >= 1 and math.floor(p) or nil

@@ -147,7 +147,7 @@ namespace interface
 //                               "own_look" parameter is refused
 //   hud = "<shared state key>"  -- that state on every client's screen
 //   ui = {kind = "text"|"bar"|"button"|"panel", anchor =, x =, y =,
-//         panel =, ...}  -- ([KIT_UI_COMPONENTS], stage 4m) drawn on the
+//         ...}  -- ([KIT_UI_COMPONENTS], stage 4m) drawn on the
 //                               players' screens, not in the world
 //                               (client_lua/ui.lua; "param:<name>" as a
 //                               look's): kit/ui_text, ui_bar, ui_button and
@@ -162,8 +162,11 @@ namespace interface
 //                               It is up for a player while its
 //                               state `shown` (shared) is true, or their
 //                               own in `own` (per_player, {shown}) says
-//                               so, and its `panel` (an entity: 0 none) is
-//                               up for them. A button's press: the packet
+//                               so, and its parent, if a panel
+//                               ([KIT_PANEL_PARENT]: of no position, under
+//                               which only such UI types go, and c.panel its
+//                               id, a component reaching it), is up for
+//                               them. A button's press: the packet
 //                               "kit:ui" "<id> 1" (pressed) or "<id> 0"
 //                               (released), from a placed peer out of the
 //                               tools, while Running, in its scene, while
@@ -228,7 +231,8 @@ namespace interface
 // kit:app, AppCall, its native code's to do; 8 a run). A
 // component reaches its own entity and its links, the entities its entity
 // parameters name and the copies it made, and the player who set it off
-// (every player with `players = true`), nothing else.
+// (every player with `players = true`), the panel it is in (c.panel), nothing
+// else.
 //
 // [KIT_PARTICLES], [KIT_FEEDBACK_EFFECTS] What the clients show at a moment,
 // no play reads it. c:effect{...} (32 a run; 240 a second in all, burst 480,
