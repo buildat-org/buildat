@@ -959,8 +959,7 @@
 						throw Exception(why);
 				}
 				lua_pushstring(L, interface::aitta::pack(dir, key,
-						user+"/aitta_releases",
-						app::serverless_wasms(dir)).c_str());
+						user+"/aitta_releases").c_str());
 				return 1;
 			}
 			if(op == "page_read" || op == "page_pack"){
@@ -2684,21 +2683,28 @@
 				continue;
 			const ss_ main = meta.get("client_main").as_string();
 			mains.push_back(m+"/"+main);
-			// [WASM_MAIN_WEB_PATHS] The default client_main's .wasm: the one
-			// the release carries (app::serverless_wasms at its pack), else
-			// built from wasm/ for an app of the tree or the developer's.
-			// Never built for another's package: its build would run
-			// unboxed here, a Rust crate's build scripts with it.
+			// [WASM_MAIN_WEB_PATHS] The default client_main's .wasm: built
+			// from wasm/ for an app of the tree or the developer's; for an
+			// installed package the one its Aitta built from the source a
+			// review reads, in its version's .aitta_wasm/. Never built here
+			// for another's package: its build would run unboxed, a Rust
+			// crate's build scripts with it.
 			if(main != "wasm")
 				continue;
-			ss_ wasm = md+"/"+m+".wasm", wasm_why;
-			if(!interface::fs::path_exists(wasm))
-				wasm = valid_app_name(id) || !dev_app_dir(id).empty() ?
-						build_client_wasm(md, m, &wasm_why) : "";
+			ss_ wasm, wasm_why;
+			if(valid_app_name(id) || !dev_app_dir(id).empty()){
+				wasm = build_client_wasm(md, m, &wasm_why);
+			} else {
+				wasm = interface::fs::strip_file_name(md)+"/"+
+						interface::aitta::BUILT_WASM_DIR+"/"+m+".wasm";
+				if(!interface::fs::path_exists(wasm)){
+					wasm.clear();
+					wasm_why = "its Aitta has not built "+m+".wasm";
+				}
+			}
 			if(wasm.empty()){
 				lua_pushnil(L);
-				lua_pushstring(L, (id+": module "+m+": "+(wasm_why.empty() ?
-						"its release carries no "+m+".wasm" : wasm_why)).c_str());
+				lua_pushstring(L, (id+": module "+m+": "+wasm_why).c_str());
 				return 2;
 			}
 			files.push_back({m+"/"+m+".wasm", wasm});

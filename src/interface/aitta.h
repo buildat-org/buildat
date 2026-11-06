@@ -110,16 +110,17 @@ namespace interface
 				const ss_ &share_path, const ss_ &user_path, ss_ *why);
 
 		// What pack() puts in the archive: every file under dir, '/'
-		// separated, the names starting with '.' and aitta_page/ (the
-		// package's page, pack_page()'s) left out
+		// separated, the names starting with '.', aitta_page/ (the
+		// package's page, pack_page()'s) and any .wasm left out
 		sv_<ss_> package_files(const ss_ &dir);
+
+		// Whether a file's name ends in .wasm, in any case: never packed
+		// or published, an Aitta builds them ([AITTA_WASM_PAST_REVIEW])
+		bool is_wasm_name(const ss_ &name);
 
 		// Packs app_dir (meta.json at its root) into out_dir and signs it
 		// with the key in key_path. Returns the zip's path; throws why not.
-		// built: {name in the archive, file} added to it, over a file of
-		// the same name (a serverless package's .wasm, app::serverless_wasms)
-		ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir,
-				const sv_<std::pair<ss_, ss_>> &built = {});
+		ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir);
 
 		// Checks a release -- the hash, the signature, the manifest, the
 		// engine API -- and unpacks it into

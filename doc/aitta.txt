@@ -78,7 +78,7 @@ Aitta with an SDK, below -- and whose dependencies are its own modules or
 builtins that keep to the web API. Aitta builds such a release's .wasm itself after it is listed, one
 release at a time, taking the authors in turn (round-robin; an author's
 own in the order published), from the release's source (a release
-carries no .wasm for wasm_load: a publish with <module>/client_data/<module>.wasm is refused); a publish while 3 of the author's releases wait to be
+carries no .wasm: `buildat aitta pack` and Publish leave any out, and a publish with one anywhere in its archive is refused); a publish while 3 of the author's releases wait to be
 built is refused: `buildat_server --build-wasm`, as the server builds them (cargo
 or clang to wasm32), in a box of the build's own (Linux: Landlock and
 seccomp) that reads the system's programs and libraries, the toolchain

@@ -917,13 +917,24 @@ static void le(ss_ &o, uint32_t v, int bytes)
 		o += (char)((v >> (8 * i)) & 0xff);
 }
 
+bool is_wasm_name(const ss_ &name)
+{
+	if(name.size() < 5)
+		return false;
+	ss_ end = name.substr(name.size() - 5);
+	for(char &c : end)
+		c = tolower((unsigned char)c);
+	return end == ".wasm";
+}
+
 sv_<ss_> package_files(const ss_ &dir)
 {
 	sv_<ss_> names, out;
 	collect(dir, "", names);
-	// [AITTA_PACKAGE_PAGE] The package's page on Aitta is not in a release
+	// [AITTA_PACKAGE_PAGE] The package's page on Aitta is not in a release,
+	// nor a .wasm ([AITTA_WASM_PAST_REVIEW]): its Aitta builds them
 	for(const ss_ &n : names)
-		if(n.compare(0, 11, "aitta_page/") != 0)
+		if(n.compare(0, 11, "aitta_page/") != 0 && !is_wasm_name(n))
 			out.push_back(n);
 	return out;
 }
@@ -962,16 +973,11 @@ static ss_ zip_entries(const sv_<std::pair<ss_, ss_>> &files)
 	return out;
 }
 
-static ss_ zip_directory(const ss_ &dir,
-		const sv_<std::pair<ss_, ss_>> &built)
+static ss_ zip_directory(const ss_ &dir)
 {
 	sv_<std::pair<ss_, ss_>> files;
 	for(const ss_ &name : package_files(dir))
-		if(std::none_of(built.begin(), built.end(),
-				[&](const std::pair<ss_, ss_> &b){ return b.first == name; }))
-			files.emplace_back(name, read_file(dir+"/"+name));
-	for(const auto &b : built)
-		files.emplace_back(b.first, read_file(b.second));
+		files.emplace_back(name, read_file(dir+"/"+name));
 	return zip_entries(files);
 }
 
@@ -991,8 +997,7 @@ static ss_ write_signed(const ss_ &zip, const ss_ &key, const char *format,
 	return base+".zip";
 }
 
-ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir,
-		const sv_<std::pair<ss_, ss_>> &built)
+ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir)
 {
 	json::json_error_t e;
 	const json::Value m = json::load_file((app_dir+"/meta.json").c_str(), &e);
@@ -1019,7 +1024,7 @@ ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir,
 		if(!why.empty())
 			throw Exception(app_dir+": "+why);
 	}
-	return write_signed(zip_directory(app_dir, built), read_file(key_path),
+	return write_signed(zip_directory(app_dir), read_file(key_path),
 			SIG_FORMAT, out_dir+"/"+m.get("author").as_string()+"-"+
 			m.get("name").as_string()+"-"+m.get("version").as_string());
 }

@@ -16,7 +16,7 @@
 #      the browser, cube drawn by the browser's instance of its .wasm.
 # Its second module, cube, is apps/sample_wasm_only's client: "client_main":
 # "wasm" and a wasm/ in C ([WASM_MAIN_WEB_PATHS]). As dev:sl the client
-# builds the .wasm; the release carries it, built at the pack, and the
+# builds the .wasm; the release carries none, its Aitta builds it, and the
 # installed package runs that one, never building its wasm/.
 #   util/serverless_check.sh
 set -u
@@ -109,10 +109,14 @@ BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass
 	timeout 90 "$b" -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
 	-o sound_mute=1 -s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$t/bind.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
+echo junk > "$app/cube/stray.WASM"
 zip=$("$b" aitta pack "$app" "$t/key" "$t/out" 2>/dev/null) || fail "pack"
-unzip -l "$zip" | grep -q " cube/cube.wasm$" || fail "the release carries no cube/cube.wasm"
+unzip -l "$zip" | grep -qi "\.wasm$" && fail "the pack carries a .wasm: $(unzip -l "$zip" | grep -i '\.wasm$')"
 "$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "listed: tester/sl" ||
 	fail "publish"
+wait_for_log "$t/srv.log" "web build of tester/sl/1.0.0: " 120 || fail "no build of sl"
+grep -aq "web build of tester/sl/1.0.0: built" "$t/srv.log" ||
+	fail "sl was not built: $(grep -a -A20 'web build of tester/sl' "$t/srv.log" | tail -20)"
 echo "{\"aittas\": [\"http://127.0.0.1:$P\"], \"filters\": {\"unreviewed\": true}}" > "$t/managed.json"
 rm -rf "$t/u/dev_apps"
 # The network's question about the Aitta's address, said yes to. It is
@@ -131,7 +135,8 @@ grep -aq "aitta: play tester.sl@1.0.0 serverless" "$t/c.log" &&
 	grep -aq "sl: serverless true" "$t/c.log" || fail "not run from the Aitta"
 [ -f "$t/u/installed/tester/sl/1.0.0/main/client_lua/init.lua" ] || fail "not installed"
 grep -aqE "cube: (built wasm/|wasm/ is built)" "$t/c.log" && fail "the installed package's wasm/ was built"
-echo "ok: installed from the Aitta and run, the .wasm the release's"
+[ -f "$t/u/installed/$fp/sl/1.0.0/.aitta_wasm/cube.wasm" ] || fail "the Aitta's cube.wasm not fetched"
+echo "ok: installed from the Aitta and run, the .wasm its Aitta built"
 
 # 3. On the web, from the same Aitta
 BUILDAT_LUANTI_LIST=http://127.0.0.1:9 BUILDAT_STARPORT_DEFAULT=https://127.0.0.1:9 \
@@ -156,4 +161,4 @@ WEB_DRIVE_URL=http://127.0.0.1:$PP "$here/util/web_drive.sh" chrome play \
 	fail "the web drive ($(tail -3 "$t/web.out"); $t/web)"
 grep -aq "wasm cube: ready (the browser's instance)" "$t/web/page.log" ||
 	fail "not the browser's instance ($t/web/page.log)"
-echo "PASS: run with no server by its id, a packet said once, its texture and storage, its wasm client_main drawn, left to Home; installed from an Aitta by author/name and run, natively and on the web, the .wasm the release's"
+echo "PASS: run with no server by its id, a packet said once, its texture and storage, its wasm client_main drawn, left to Home; installed from an Aitta by author/name and run, natively and on the web, the .wasm its Aitta built"

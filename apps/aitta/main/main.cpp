@@ -1500,21 +1500,14 @@ struct Module: public interface::Module, public moderation::Host
 		put("releases", id, rel);
 	}
 
-	// [AITTA_WASM_PAST_REVIEW] A .wasm in client_data where wasm_load reads
-	// (<module>/<module>.wasm is served from <module>/client_data/): a
-	// compiled binary that would run past a review of the source. Its name,
-	// or "". Any case, for a server on a filesystem that ignores it.
-	static ss_ loadable_wasm_in_data(const ss_ &zip)
+	// [AITTA_WASM_PAST_REVIEW] A .wasm anywhere in the archive: a compiled
+	// binary a review of the source does not read, where this Aitta builds
+	// them itself. Its name, or "". Any case, for a filesystem that ignores it.
+	static ss_ wasm_in_archive(const ss_ &zip)
 	{
-		for(const interface::ZipEntry &e : interface::zip_list(zip)){
-			ss_ low = e.name;
-			for(char &c : low)
-				c = tolower((unsigned char)c);
-			const size_t at = low.find("/client_data/");
-			if(at != ss_::npos && at != 0 && low.find('/') == at &&
-					low.substr(at + 13) == low.substr(0, at)+".wasm")
+		for(const interface::ZipEntry &e : interface::zip_list(zip))
+			if(interface::aitta::is_wasm_name(e.name))
 				return e.name;
-		}
 		return "";
 	}
 
@@ -1912,11 +1905,11 @@ struct Module: public interface::Module, public moderation::Host
 			return refuse(r, "cannot store the archive");
 		json::Value m;
 		sv_<ss_> dotted;
-		ss_ data_wasm;
+		ss_ carried_wasm;
 		try {
 			unpack_upload(zip, dir);
 			dotted = interface::aitta::dotted_root_names(zip);
-			data_wasm = loadable_wasm_in_data(zip);
+			carried_wasm = wasm_in_archive(zip);
 			// The manifest is kept whole and handed out in every list: a
 			// manifest's size, not the archive's
 			const ss_ mt = read_file(dir+"/meta.json");
@@ -1970,10 +1963,10 @@ struct Module: public interface::Module, public moderation::Host
 		if(!dotted.empty())
 			return drop("the archive has "+dotted[0]+" at its root: a name "
 					"under a dot there is an install's, not a package's");
-		if(!data_wasm.empty())
-			return drop("the archive has "+data_wasm+", which wasm_load would "
-					"run: a release's .wasm is built here from its wasm/, so "
-					"that a review reads what runs");
+		if(!carried_wasm.empty())
+			return drop("the archive has "+carried_wasm+": a release's .wasm "
+					"is built here from its source, so that a review reads "
+					"what runs");
 		if(!changelog_there)
 			return drop("meta.json: \"changelog\": "+jstr(m, "changelog")+
 					" is not in the archive");

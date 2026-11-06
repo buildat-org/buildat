@@ -1209,27 +1209,6 @@ static ss_ build_client_wasm(const ss_ &module_dir, const ss_ &module,
 }
 
 namespace app {
-sv_<std::pair<ss_, ss_>> serverless_wasms(const ss_ &app_dir)
-{
-	json::json_error_t err;
-	if(!json::load_file((app_dir+"/meta.json").c_str(), &err).get(
-			"serverless").is_true())
-		return {};
-	sv_<std::pair<ss_, ss_>> out;
-	for(const auto &n : interface::fs::list_directory(app_dir)){
-		const ss_ md = app_dir+"/"+n.name;
-		const json::Value m = json::load_file((md+"/meta.json").c_str(), &err);
-		if(!n.is_directory || !m.get("client_main").is_string() ||
-				m.get("client_main").as_string() != "wasm")
-			continue;
-		ss_ why;
-		const ss_ path = build_client_wasm(md, n.name, &why);
-		if(path.empty())
-			throw Exception(n.name+": "+why);
-		out.push_back({n.name+"/"+n.name+".wasm", path});
-	}
-	return out;
-}
 }
 
 // [APP_CATEGORY] what an app says it is: main/meta.json's "kind", or its

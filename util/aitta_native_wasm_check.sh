@@ -391,28 +391,22 @@ done
 	fail ".aitta_sha256 is the package's"
 echo "ok: planted names refused at publish and dropped at an install from a file"
 
-# [AITTA_WASM_PAST_REVIEW] A binary where wasm_load reads, in any case; another
-# name in client_data is data
-for wname in main.wasm MAIN.Wasm; do
-	rm -f "$t/inblob/main/client_data/main.wasm"
-	mkdir -p "$t/inblob"
-	fixture "$t/inblob"
-	manifest "$t/inblob" inblob
-	mkdir -p "$t/inblob/main/client_data"
-	cp "$dir/.aitta_wasm/main.wasm" "$t/inblob/main/client_data/$wname"
+# [AITTA_WASM_PAST_REVIEW] A .wasm anywhere in the archive, in any case
+mkdir -p "$t/inblob"
+fixture "$t/inblob"
+manifest "$t/inblob" inblob
+for wname in main/client_data/main.wasm main/client_data/MAIN.Wasm \
+		main/client_data/other.wasm main/main.wasm stray.wasm; do
+	mkdir -p "$(dirname "$t/inblob/$wname")"
+	cp "$dir/.aitta_wasm/main.wasm" "$t/inblob/$wname"
 	rawsign "$t/inblob" "$t/key" "$t/raw/tester-inblob-1.0.0" || fail "the $wname release"
 	"$b" aitta publish "$t/raw/tester-inblob-1.0.0.zip" 127.0.0.1:$P > "$t/pub_inblob.out" 2>&1
-	grep -q "which wasm_load would run" "$t/pub_inblob.out" ||
-		fail "main/client_data/$wname was not refused: $(cat "$t/pub_inblob.out")"
+	grep -q "the archive has $wname: a release's .wasm is built here" "$t/pub_inblob.out" ||
+		fail "$wname was not refused: $(cat "$t/pub_inblob.out")"
 	[ -z "$(release inblob)" ] || fail "the $wname release is listed"
+	rm -f "$t/inblob/$wname"
 done
-rm -f "$t/inblob/main/client_data/MAIN.Wasm" "$t/inblob/main/client_data/main.wasm"
-cp "$dir/.aitta_wasm/main.wasm" "$t/inblob/main/client_data/other.wasm"
-rawsign "$t/inblob" "$t/key" "$t/raw/tester-inblob-1.0.0" || fail "the other.wasm release"
-"$b" aitta publish "$t/raw/tester-inblob-1.0.0.zip" 127.0.0.1:$P > "$t/pub_inblob.out" 2>&1
-grep -q "which wasm_load would run" "$t/pub_inblob.out" &&
-	fail "client_data/other.wasm refused: $(cat "$t/pub_inblob.out")"
-echo "ok: <module>/client_data/<module>.wasm refused at publish, another name not"
+echo "ok: a .wasm anywhere in the archive refused at publish"
 
 # 5. A fake Aitta: its list, archives and .wasm from a directory, what was
 # asked in requests.log
