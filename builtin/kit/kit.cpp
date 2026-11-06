@@ -8806,6 +8806,12 @@ struct Module: public interface::Module, public Interface
 					}
 			o += ",teams=";
 			lua_lit(teams, o);
+			// [KIT_MAP_ROTATION] the composition's scenes
+			json::Value scenes = json::array();
+			for(auto &sn : m_host.scenes)
+				scenes.append(sn.first);
+			o += ",scenes=";
+			lua_lit(scenes, o);
 		}
 		// [KIT_VOXEL_STATES] its voxel box's size, and with reads_voxels
 		// its voxels: their names and each cell's index in them (from 1; 0:
@@ -9288,6 +9294,10 @@ struct Module: public interface::Module, public Interface
 			if(m_types[in.type].teams && m_host.scenes.count(
 					jstr(in.params, "map")))
 				scene = jstr(in.params, "map");
+		// [KIT_MAP_ROTATION] Its round's: the map picked for it
+		const GameSession *gs = active_session();
+		if(gs && gs->maker == e.id && !gs->map.empty())
+			scene = gs->map;
 		sv_<uint64_t> all, sib;
 		for(auto &p : m_entities){
 			bool team = false;
@@ -13915,7 +13925,8 @@ struct Module: public interface::Module, public Interface
 		while(!m_queue.empty() && spent < budget && m_box){
 			const Run r = m_queue.front();
 			m_queue.pop_front();
-			spent += run(r);
+			if(!left_out(r.entity))
+				spent += run(r);
 		}
 		if(!m_queue.empty())
 			log_v(MODULE, "%zu runs wait for the next tick", m_queue.size());
@@ -19988,8 +19999,7 @@ struct Module: public interface::Module, public Interface
 			ss_ ms;
 			if(me != m_entities.end() && scene_of(me->second, &ms) &&
 					ms != scene && gs->maker_comp < me->second.comps.size() &&
-					jstr(me->second.comps[gs->maker_comp].params, "map") ==
-					scene){
+					gs->map == scene){
 				Run r;
 				r.entity = gs->maker;
 				r.comp = gs->maker_comp;
@@ -22016,6 +22026,11 @@ struct Module: public interface::Module, public Interface
 		std::set<ss_> written;
 		// [KIT_LATE_JOIN] The players its start took in
 		size_t start_players = 0;
+		// [KIT_CTF] The scene its round is played in ("": the maker's own);
+		// [KIT_MAP_ROTATION] the rotation's other maps: their entities do
+		// not run in it
+		ss_ map;
+		std::set<ss_> left_out;
 		// [KIT_PREFAB_BENCH] A prefab's temporary scene (prefab_bench()): which
 		// prefab, its copy's root, its box of voxels ([x0, y0, z0, x1, y1, z1]
 		// or null) and where its builder came from. stamp: its voxels until
@@ -22056,6 +22071,9 @@ struct Module: public interface::Module, public Interface
 		sv_<size_t> peers;
 		// [KIT_MINIGAMES_1] an end's result, on_session_end's third
 		json::Value result = json::null();
+		// [KIT_MAP_ROTATION] a start's map and the rotation's others
+		ss_ map;
+		std::set<ss_> left_out;
 	};
 	std::deque<SessionOp> m_session_ops;
 	// The round's clock: game time since its start (the default's: the
@@ -22458,9 +22476,8 @@ struct Module: public interface::Module, public Interface
 			m_peer_session.erase(peer);
 		// [KIT_CTF] kit/arena's `map`: into the game in that scene, and
 		// back out in the arena's own
-		ss_ map = maker_param(to ? to : from, "map", "");
-		if(!m_host.scenes.count(map))
-			map.clear();
+		auto msi = m_sessions.find(to ? to : from);
+		const ss_ map = msi == m_sessions.end() ? "" : msi->second->map;
 		if(!map.empty()){
 			if(to)
 				scene = map;
@@ -22653,6 +22670,22 @@ struct Module: public interface::Module, public Interface
 		save_sessions();
 	}
 
+	// [KIT_MAP_ROTATION] Whether an entity is in a map its session was not
+	// picked for: the map's whole content is the copy's, as the start is, and
+	// none of it runs (its timers would reach the arena's "win").
+	// simplified: the map's scene is still made per session, its entities
+	// still loaded; loading only the picked map would make many maps cheaper
+	bool left_out(uint64_t entity)
+	{
+		const GameSession *gs = active_session();
+		if(!gs || gs->left_out.empty())
+			return false;
+		auto it = m_entities.find(entity);
+		ss_ scene;
+		return it != m_entities.end() && scene_of(it->second, &scene) &&
+				gs->left_out.count(scene);
+	}
+
 	// What the tick's runs asked of sessions, at the top
 	void session_ops()
 	{
@@ -22675,6 +22708,21 @@ struct Module: public interface::Module, public Interface
 				for(size_t peer : o.peers)
 					taken += !session_of_peer(peer);
 				m_sessions[id]->start_players = taken;
+				// [KIT_MAP_ROTATION] the map asked for, else the maker's `map`
+				// [KIT_CTF]; of the others never the arena's own scene
+				GameSession &gs = *m_sessions[id];
+				gs.map = o.map.empty() ? maker_param(id, "map", "") : o.map;
+				if(!m_host.scenes.count(gs.map))
+					gs.map.clear();
+				gs.left_out = o.left_out;
+				gs.left_out.erase(gs.map);
+				auto me = m_entities.find(o.maker);
+				ss_ own;
+				if(me != m_entities.end() && scene_of(me->second, &own))
+					gs.left_out.erase(own);
+				if(!gs.map.empty())
+					log_i(MODULE, "Session %s on the map %s", cs(itos(id)),
+							cs(gs.map));
 				for(size_t peer : o.peers)
 					if(!session_of_peer(peer))
 						move_peer(peer, id);
@@ -22754,6 +22802,14 @@ struct Module: public interface::Module, public Interface
 					else if(peer_of_player(pid, peer))
 						so.peers.push_back(peer);
 				}
+				// [KIT_MAP_ROTATION]
+				so.map = jstr_at(o, 2);
+				if(!so.map.empty() && !m_host.scenes.count(so.map))
+					why = "no scene "+so.map.substr(0, 32);
+				const json::Value &others = o.at(3u);
+				for(unsigned k = 0; others.is_array() && k < others.size() &&
+						k < 64; k++)
+					so.left_out.insert(jstr_at(others, k));
 			} else if(op == "move"){
 				const uint64_t pid = o.at(1u).is_number() ?
 						(uint64_t)std::max(0.0, o.at(1u).as_number()) : 0;

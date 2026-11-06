@@ -2423,9 +2423,17 @@ function NT.params_form(w, e, ci, c, t, keep)
 		end, WIDGETS)
 		-- [KIT_ITEMS_TAB] a list of items: one added from the Items
 		-- tab's list (a count typed after it)
+		-- [KIT_MAP_ROTATION] a list of scenes the same way
 		for _, k in ipairs(names) do
-			if decl[k].choices_from == "item_list" then
-				ui_utils.dropdown(row(w), IT.choices(), "", function(x)
+			local list = decl[k].choices_from == "item_list" and IT.choices()
+			if decl[k].choices_from == "scene_list" then
+				list = {{"none", ""}}
+				for _, sn in ipairs(E.state and E.state.scenes or {}) do
+					list[#list + 1] = {sn, sn}
+				end
+			end
+			if list then
+				ui_utils.dropdown(row(w), list, "", function(x)
 					local cur = tostring(values[k] or decl[k].default or "")
 					if x == "" then
 						return

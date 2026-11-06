@@ -59,6 +59,16 @@
 -- fewer than its start took are in now, into the team furthest under its
 -- most). The players a round starts with are split by the fewest, the
 -- first on a tie.
+-- [KIT_MAP_ROTATION] `maps`: scenes of the composition to play the rounds
+-- in, by name, comma separated, `map` used only without them. A round takes
+-- the next map, shown in the lobby's status; `map_pick` says what is next
+-- after a round starts: "round_robin" (the list's next, then its first
+-- again), "random" (any of the list, the same one again too) or "signal"
+-- (the same one until "next_map" or "prev_map"; these step through the list
+-- under the other two as well, in the default round: a round in play is on
+-- its map). A map not picked runs nothing in that round, its timers and
+-- spawners included: only its own map's links can reach "win". A name no
+-- scene has is left out, in the log.
 local function ids_in(list, n)
 	local out = {}
 	for i = 1, math.min(n, #list) do
@@ -95,6 +105,33 @@ local function prune(c)
 	return q
 end
 
+-- [KIT_MAP_ROTATION] The maps in the rotation that are scenes, and the next
+local function maps_of(c, warn)
+	local known, out = {}, {}
+	for _, s in ipairs(c.scenes or {}) do
+		known[s] = true
+	end
+	for s in tostring(c.params.maps):gmatch("[%w_]+") do
+		if known[s] then
+			out[#out + 1] = s
+		elseif warn then
+			c:log("maps: no scene", s)
+		end
+	end
+	return out, out[math.min(c.state.map_at, #out)]
+end
+
+-- by: steps through the list; nil: at random
+local function step_map(c, by)
+	local maps = maps_of(c)
+	if #maps > 0 then
+		c.state.map_at = by and (c.state.map_at - 1 + by) % #maps + 1 or
+				math.random(#maps)
+		local _, nx = maps_of(c)
+		c:log("next map:", nx)
+	end
+end
+
 -- In a session another arena started: nothing to do there
 local function idle(c)
 	return c.session ~= 0 and c.session_maker ~= c.id
@@ -125,12 +162,16 @@ local function lobby_status(c)
 	else
 		s = "Waiting for players: " .. q .. " of " .. p
 	end
+	local _, nx = maps_of(c)
+	if nx then
+		s = s .. "|Next map: " .. nx
+	end
 	if c.state.last ~= "" then
 		s = s .. "|Last round: " .. c.state.last
 	end
 	c.state.status = s
 	c.state.value = s
-	c.state.shown = q > 0 or n > 0 or c.state.last ~= ""
+	c.state.shown = q > 0 or n > 0 or c.state.last ~= "" or nx ~= nil
 end
 
 local function start(c)
@@ -138,8 +179,10 @@ local function start(c)
 	c:after(-1, "count")
 	local ids = ids_in(prune(c), c.params.max_players)
 	c.state.taking = ids
-	c:log("countdown over: a round for", #ids, "players")
-	c:session_start(ids)
+	local maps, map = maps_of(c)
+	c:log("countdown over: a round for", #ids, "players" ..
+			(map and (" on " .. map) or ""))
+	c:session_start(ids, map, map and maps or nil)
 end
 
 local function parallel(c)
@@ -328,6 +371,9 @@ return {
 		at_end = {type = "string", default = "before",
 			choices = {"before", "keep", "clear", "living"}},
 		map = {type = "string", default = "", choices_from = "scenes"},
+		maps = {type = "string", default = "", choices_from = "scene_list"},
+		map_pick = {type = "string", default = "round_robin",
+			choices = {"round_robin", "random", "signal"}},
 		time_up = {type = "string", default = "draw",
 			choices = {"draw", "most"}},
 		score_to_win = {type = "number", default = 0, min = 0,
@@ -350,6 +396,8 @@ return {
 		-- A round ended, no countdown since (for `after_round` seconds)
 		fresh = {default = false},
 		rounds = {default = {}},
+		-- [KIT_MAP_ROTATION] The next round's place in `maps`
+		map_at = {default = 1},
 		-- The players sent into each round ({[id] = {was, n}}: n since its
 		-- count was `was`)
 		sent = {default = {}},
@@ -382,6 +430,8 @@ return {
 		inputs = {
 			["end"] = "Ends the round at once.",
 			win = "Ends the round with a winner. Value: a team's id or name; else the team of who set it off.",
+			next_map = "The next round's map: the next in maps.",
+			prev_map = "The next round's map: the one before in maps.",
 		},
 		outputs = {
 			started = "A round began. Value: its session's id.",
@@ -391,7 +441,8 @@ return {
 			status = "The round's line changed. Value: the text: time left, scores, result.",
 		},
 	},
-	inputs = {["end"] = "none", win = "any"},
+	inputs = {["end"] = "none", win = "any", next_map = "none",
+		prev_map = "none"},
 	outputs = {started = "number", ended = "number", result = "string:team",
 		won = "string:team",
 		status = "string:text"},
@@ -407,6 +458,10 @@ return {
 	end,
 	on_start = function(c)
 		if c.session == 0 then
+			maps_of(c, true)
+			if c.params.map_pick == "random" then
+				step_map(c)
+			end
 			return lobby_status(c)
 		end
 		if idle(c) then
@@ -517,6 +572,12 @@ return {
 		c.state.taking = {}
 		c:log("session", id, "started")
 		c:emit("started", id)
+		-- [KIT_MAP_ROTATION] This round has its map: the next one's
+		if c.params.map_pick == "round_robin" then
+			step_map(c, 1)
+		elseif c.params.map_pick == "random" then
+			step_map(c)
+		end
 		-- Those left waiting: a parallel round
 		try_count(c)
 		lobby_status(c)
@@ -635,6 +696,15 @@ return {
 	end,
 	on_input = function(c, input, value, by)
 		if idle(c) then
+			return
+		end
+		if input == "next_map" or input == "prev_map" then
+			if c.session ~= 0 then
+				c:log(input, "in a round: its map stays")
+			else
+				step_map(c, input == "next_map" and 1 or -1)
+				lobby_status(c)
+			end
 			return
 		end
 		if input == "win" then
