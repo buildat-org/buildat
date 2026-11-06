@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~25 s (2026-11-06)
-# covers: builtin/kit/client_lua/signals.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/input.lua builtin/kit/types/*.lua
+# covers: builtin/kit/client_lua/signals.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/input.lua builtin/kit/types/*.lua builtin/kit/kit.cpp
 # [KIT_SIGNALS_VIEW] The editor's Signals view on Workbench. kitboss (the
 # admin, 1024x700), a kit/flag with links to three kit/ui_bars and from a
 # kit/timer:
@@ -49,6 +49,10 @@
 #      the descriptions shown and hidden by the button, past a selection and into
 #      the next session; the whole text on hover and a finger held; a row pressed
 #      opening the Add link form either way; narrow touch inside the column's width.
+#      [KIT_SIGNALS_LIVE] An output's row lit, with its value, by a real use and a Test;
+#      a timer at most five packets a second, none before a watch or past its stop; Test
+#      opening a gate, setting a counter, Running an Ended game; refused: an undeclared
+#      input, a wrong type, too large a value, and no edit right by raw packets.
 #   util/kit_signals_view_check.sh web    item 12 in headless Chrome, mouse and finger
 #   util/kit_signals_view_check.sh docs   item 13 alone; screenshots $t/docs_*.png
 set -u
@@ -293,7 +297,9 @@ keypress F6
 wait_log_any 10000 kit editor: edit mode on
 frames 5
 EOF
-		place kit/lever; LEVER=$id
+		# (within a use's reach of the spawn)
+		id=$((id + 1)); LEVER=$id
+		edit '{"op": "place", "type": "kit/lever", "pos": [1, 1, 2]}'
 		place kit/counter; COUNTER=$id
 		place kit/gate; GATE=$id
 		place kit/door; DOOR=$id
@@ -306,7 +312,8 @@ EOF
 	wait_for_log "$t/srv.log" "setup code [A-Z0-9]+" 30
 	code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv.log" | head -1)
 	[ -n "$code" ] || fail "no setup code ($t/srv.log)"
-	BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code client kitboss 1024x700 -u 1
+	BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_ADMIN="setting open_registration on" \
+		client kitboss 1024x700 -u 1
 	stop_server
 	# Two components on one entity: no edit makes that, a save may hold it. A door
 	# and a lever: "toggle" in both, "on" and "off" of the lever alone
@@ -499,7 +506,129 @@ assert n >= 3, n
 PY
 	grep -a "signals: a sideways bar: true" "$l" && fail "a sideways bar in 600x400 ($l)"
 	echo "ok: remembered in the next session; narrow touch: a finger held shows the text, not pressing the row; inside the column"
-	if grep -aE "attempt to|stack traceback" "$t/kitdocs1.log" "$l" | head -5 | grep -a .; then
+	# [KIT_SIGNALS_LIVE] Ended; Test Runs it; what fires lights its row with its value
+	big=$(printf 'x%.0s' $(seq 1 600))
+	{
+		echo "$join"
+		cat <<EOF
+event kit_edit {"op": "set", "id": $TIMER, "comp": 0, "param": "interval", "value": 0.1}
+event kit_edit {"op": "stop"}
+wait_log_any 10000 kit editor: the server is Ended
+event kit_select $LEVER
+frames 3
+keypress F5
+wait_log_any 5000 kit editor: signals: $LEVER not linked:
+frames 5
+screenshot @T@/docs_live_ended.png
+click Button "test on"
+wait_log 10000 kit editor: signals: fired $LEVER 0 on: "" x1
+screenshot @T@/docs_live_test.png
+event kit_use $LEVER
+wait_log 5000 kit editor: signals: fired $LEVER 0 off
+screenshot @T@/docs_live_use.png
+frames 3
+event kit_select $COUNTER
+frames 5
+click LineEdit "signals value add"
+frames 2
+text 5
+frames 2
+screenshot @T@/docs_live_field.png
+click Button "test add"
+wait_log 5000 kit editor: signals: fired $COUNTER 0 changed: "6"
+screenshot @T@/docs_live_value.png
+frames 3
+EOF
+		cat <<EOF
+event kit_select $GATE
+frames 5
+click Button "test open"
+wait_log 5000 kit editor: signals: fired $GATE 0 opened
+frames 2
+event kit_edit {"op": "try", "id": $COUNTER, "input": "nosuch"}
+wait_log 5000 kit editor: refused: try: input: entity $COUNTER has no input
+event kit_edit {"op": "try", "id": $COUNTER, "input": "add", "value": "x"}
+wait_log 5000 kit editor: refused: try: value: its input add takes a number
+event kit_edit {"op": "try", "id": $COUNTER, "input": "add", "value": "$big"}
+wait_log 5000 kit editor: refused: try: value: longer than
+event kit_select $TIMER
+frames 5
+click Button "test start"
+wait_log 5000 kit editor: signals: fired $TIMER 0 tick
+delay 1000
+keypress F2
+wait_log 5000 kit editor: the view is 3D
+sync 3000
+delay 500
+sync 3000
+quit
+EOF
+	} > "$t/kitlive.cmds"
+	BUILDAT_JOIN_NAME=kitboss client kitlive 1024x700 -u 1
+	want "$t/srv2.log" "kitboss tries entity $LEVER's on" "kitboss tries entity $COUNTER's add 5" \
+		"kit/gate $GATE: opened by kitboss" "by peer" "An edit (try) by peer" "value: longer than"
+	python3 -I - "$t/srv2.log" "$TIMER" <<'PY' || fail "the rate or the watch ($t/srv2.log)"
+import re, sys
+log = open(sys.argv[1], errors="replace").read().split("\n")
+def at(w, frm=0):
+    return next((i for i in range(frm, len(log)) if w in log[i]), None)
+# Nothing before anyone watched, nothing past the last stop
+fired = [i for i, x in enumerate(log) if "Fired for " in x]
+assert fired and at("watches entity") < fired[0], "fired before a watch"
+stop = [i for i, x in enumerate(log) if "stops watching" in x][-1]
+assert fired[-1] < stop, "fired past the stop"
+# The timer every 0.1 s: at most one packet each 200 ms
+tick = [x for x in log if "Fired for kitboss: entity %s:" % sys.argv[2] in x]
+assert len(tick) >= 3, tick
+def ms(x):
+    h, m, s = re.search(r"(\d+):(\d+):([\d.]+) ", x).groups()
+    return (int(h) * 3600 + int(m) * 60 + float(s)) * 1000
+gaps = [b - a for a, b in zip(map(ms, tick), map(ms, tick[1:]))]
+assert min(gaps) >= 150, gaps
+assert any(re.search(r'"tick","[\d.]+",[2-9]', x) for x in tick) or len(tick) <= 12, tick
+print("ok: at most a packet in", int(min(gaps)), "ms of a timer every 0.1 s, none before a watch or past its stop")
+PY
+	want "$t/kitlive.log" "kit editor: the server is Running"
+	echo "ok: Test Runs an Ended game and lights the output; a use lights it; a counter set by value, a gate opened; refusals: undeclared, wrong type, too large"
+	# A player with no edit right, by raw packets
+	cat > "$t/kitbob.cmds" <<EOF
+wait_log_any 60000 Joined as kitbob
+wait_log_any 60000 player physics enabled
+frames 5
+event kit_edit {"op": "try", "id": $LEVER, "input": "on"}
+wait_log 5000 kit editor: refused: try: no edit rights here
+event kit_edit {"op": "watch", "id": $LEVER}
+wait_log 5000 kit editor: refused: watch: no edit rights here
+sync 3000
+quit
+EOF
+	BUILDAT_JOIN_NAME=kitbob client kitbob 1024x700 -u 1
+	grep -a "kitbob tries\|kitbob watches" "$t/srv2.log" && fail "kitbob's packet taken ($t/srv2.log)"
+	echo "ok: no edit right: try and watch refused"
+	# Narrow: the field, and a lit row's value scrolled to by a finger
+	cat > "$t/kitlive2.cmds" <<EOF
+$join
+event kit_select $COUNTER
+frames 3
+keypress F5
+wait_log_any 5000 kit editor: signals: $COUNTER not linked:
+frames 5
+screenshot @T@/docs_narrow_field.png
+finger_down 1 300 340
+frames 2
+finger_move 1 300 110
+frames 2
+finger_up 1
+frames 5
+event kit_edit {"op": "try", "id": $COUNTER, "input": "add", "value": 5}
+wait_log 5000 kit editor: signals: fired $COUNTER 0 changed
+screenshot @T@/docs_narrow_lit.png
+sync 3000
+quit
+EOF
+	BUILDAT_JOIN_NAME=kitboss BUILDAT_TOUCH=1 client kitlive2 600x400 -u 1
+	grep -a "signals: a sideways bar: true" "$t/kitlive.log" "$t/kitlive2.log" && fail "a sideways bar with the live columns"
+	if grep -aE "attempt to|stack traceback" "$t/kitdocs1.log" "$l" "$t/kitlive.log" "$t/kitlive2.log" "$t/kitbob.log" | head -5 | grep -a .; then
 		fail "a Lua error in the logs"
 	fi
 	stop_server

@@ -30,6 +30,11 @@
 --     view's button hides those (kept with the editor's memory). A pointer resting
 --     on a signal, here or in a link's row, or a finger held on it, shows its whole
 --     about (SG.hover_tick). A signal's row pressed opens the Add link form with it
+--   - [KIT_SIGNALS_LIVE] While the game runs an output's row, and its link's, flash
+--     when it fires, the row keeping its last value (from any player); only the
+--     selected entity's, by the server's "watch" (nothing is sent otherwise). An
+--     input's row has Test, with a field for its value when it takes one: M.try,
+--     the inspector's Try, which Runs an Ended game first
 --   - Where an entity is listed its name stands after its id; one still
 --     named as placed ("kit/flag 16", or nothing) reads as its type
 --   - [KIT_SIGNALS_TOGGLE] Under 1500 UI pixels of width the links and the
@@ -77,6 +82,13 @@ local ABOUT_BESIDE = 220
 local HOVER_US = 300000
 -- A finger further than this from where it came down is scrolling
 local FINGER_PX = 12
+-- [KIT_SIGNALS_LIVE] An output's flash, its last value's column and the most of it
+-- shown; the width of an input's value field
+local FLASH_US = 600000
+local LIVE_W = 96
+local LIVE_CHARS = 12
+local VALUE_W = 72
+local LIVE_COLOR = magic.Color(1.0, 0.85, 0.3)
 -- The longest name a list writes
 local NAME_CHARS = 22
 -- Under this root width the links and the inspector take turns
@@ -442,6 +454,10 @@ local function link_table(body, rows, self_id)
 			c.t:SetPosition(1, 0)
 			c.b:SetName(name .. link_key(x.from_id, x.l))
 			SG.cells[#SG.cells + 1] = c
+			if key == "lsig" and x.from_id == self_id then
+				SG.flasher((x.ci - 1) .. " " .. x.l.output, c.b, c.t,
+						magic.Color(ui_utils.rgb("focus")))
+			end
 			SG.tip(c.b, name .. link_key(x.from_id, x.l), about)
 			cells[key] = c
 			widest[key] = math.max(widest[key], c.t.width + 5)
@@ -761,6 +777,43 @@ local function row_pressed(e, key, s)
 	SG.links()
 end
 
+-- [KIT_SIGNALS_LIVE] An output's last value while the game runs; an input's Test
+-- and value field. Their width
+local function row_extras(e, key, x, typed_in)
+	local s = x.s
+	if key == "outputs" then
+		if not E.running then
+			return 0
+		end
+		local k = (s.ci - 1) .. " " .. s.name
+		x.live = text(x.r, "", magic.Color(ui_utils.rgb("text")))
+		x.live:SetFixedWidth(LIVE_W)
+		x.live:SetName("signals live " .. k)
+		SG.live_text[k] = x.live
+		SG.flasher(k, x.b, x.t, s.linked and magic.Color(ui_utils.rgb("focus")) or DIM)
+		return LIVE_W
+	end
+	local vk = e.id .. "/" .. s.name
+	local w = 0
+	if s.kind ~= "none" then
+		local f = edit(x.r, E.try_values[vk] or "", function(v)
+			E.try_values[vk] = v
+		end)
+		f:SetName("signals value " .. s.name)
+		f:SetFixedWidth(VALUE_W)
+	elseif typed_in then
+		x.r:CreateChild("UIElement"):SetFixedWidth(VALUE_W)
+	end
+	if typed_in then
+		w = VALUE_W
+	end
+	local b = tight(x.r, "Test", function()
+		M.try(e.id, s.name, s.kind, E.try_values[vk])
+	end)
+	b:SetName("test " .. s.name)
+	return w + b.minWidth + 4
+end
+
 -- Rows of signals: its name and type in columns, its first sentence beside them
 -- where that leaves room for it, else under them, both wrapped
 local function signal_rows(body, e, key, list, head)
@@ -770,7 +823,11 @@ local function signal_rows(body, e, key, list, head)
 	text(body, head, DIM)
 	local INDENT, GAP = 8, 6
 	local several = #(e.components or {}) > 1
-	local built, name_w, kind_w = {}, 0, 0
+	local built, name_w, kind_w, extra_w = {}, 0, 0, 0
+	local typed_in = false
+	for _, s in ipairs(list) do
+		typed_in = typed_in or s.kind ~= "none"
+	end
 	for _, s in ipairs(list) do
 		local x = {s = s}
 		x.r = row(body)
@@ -786,8 +843,9 @@ local function signal_rows(body, e, key, list, head)
 		name_w = math.max(name_w, x.t.width + 10)
 		kind_w = math.max(kind_w, x.kind.minWidth + GAP)
 		built[#built + 1] = x
+		extra_w = math.max(extra_w, row_extras(e, key, x, typed_in))
 	end
-	local room = SG.links_w - INDENT - name_w - kind_w
+	local room = SG.links_w - INDENT - name_w - kind_w - extra_w
 	local show = not S.sg_about_hidden
 	for _, x in ipairs(built) do
 		x.b:SetFixedWidth(name_w)
@@ -826,6 +884,78 @@ local function declared_rows(body, e, key, none_either)
 		text(body, "None", DIM)
 	end
 	return table.concat(said, ", ")
+end
+
+-- ---- [KIT_SIGNALS_LIVE] What the selected entity's outputs do
+-- What flashes for an output (key "<comp index> <output>"): built with the table
+function SG.flasher(key, b, t, color)
+	SG.flashers[key] = SG.flashers[key] or {}
+	table.insert(SG.flashers[key], {b = b, t = t, color = color})
+end
+
+local function flash(key, on)
+	for _, f in ipairs(SG.flashers[key] or {}) do
+		local w = f.b.width
+		f.b:SetStyle(on and "ListItemSelected" or "ListItem")
+		f.b.blendMode = magic.BLEND_ALPHA
+		f.b:SetFixedWidth(w)
+		f.t:SetColor(on and LIVE_COLOR or f.color)
+	end
+end
+
+local function show_live(key)
+	local l, t = SG.live[key], SG.live_text[key]
+	if l and t then
+		t.text = #l.v > LIVE_CHARS and cut(l.v, LIVE_CHARS) or l.v
+	end
+	if l and l.till then
+		flash(key, true)
+	end
+end
+
+-- The server told only while this view shows an entity it may watch: again on
+-- each state (force), the server ignoring what it knows; it drops one that left
+-- a session
+function SG.watch(force)
+	local want = 0
+	if NT.sig() and S.primary then
+		local e, made = find(S.primary)
+		want = e and not made and e.kind ~= "scene" and e.id or 0
+	end
+	if want ~= (SG.watching or 0) then
+		SG.live = {}
+	elseif not (force and want ~= 0) then
+		return
+	end
+	SG.watching = want
+	send({op = "watch", id = want})
+end
+
+function SG.fired(a)
+	if type(a) ~= "table" or tonumber(a.id) ~= SG.watching then
+		return
+	end
+	local now = buildat.get_time_us()
+	for _, o in ipairs(type(a.fired) == "table" and a.fired or {}) do
+		if type(o) == "table" then
+			local key = tostring(o[1]) .. " " .. tostring(o[2])
+			local v = tostring(o[3] or "")
+			SG.live[key] = {v = v == "" and "fired" or v, till = now + FLASH_US}
+			log:info("kit editor: signals: fired " .. tostring(a.id) .. " " .. key ..
+					": \"" .. v .. "\" x" .. tostring(o[4]))
+			show_live(key)
+		end
+	end
+end
+
+local function live_tick()
+	local now = buildat.get_time_us()
+	for key, l in pairs(SG.live or {}) do
+		if l.till and now >= l.till then
+			l.till = nil
+			flash(key, false)
+		end
+	end
 end
 
 -- ---- A signal's whole text, on a pointer's rest or a finger held
@@ -931,6 +1061,11 @@ function SG.links()
 	end
 	SG.cells, SG.links_drawn_w, SG.kinds = {}, SG.links_w, {}
 	SG.tips, SG.about_lines, SG.about_rows, SG.form_at = {}, 0, {}, nil
+	SG.flashers, SG.live_text = {}, {}
+	SG.watch()
+	if not E.running then
+		SG.live = {}
+	end
 	SG.links_body = put_body(SG.links_view, function(body)
 		local tr = row(body)
 		local tt = text(tr, title, magic.Color(1.0, 0.85, 0.3))
@@ -1026,6 +1161,9 @@ function SG.links()
 			log:info(said)
 		end
 	end)
+	for key in pairs(SG.live or {}) do
+		show_live(key)
+	end
 	-- A form asked for by a row further down: in view
 	if SG.form_new and SG.form_at then
 		SG.links_view.viewPosition = magic.IntVector2(0, math.max(0,
@@ -1160,6 +1298,7 @@ function SG.tick()
 	end
 	SG.layout()
 	SG.hover_tick()
+	live_tick()
 	local sideways = SG.links_view and SG.links_view.horizontalScrollBar.visible
 	if sideways ~= SG.sideways_said then
 		SG.sideways_said = sideways
@@ -1377,6 +1516,8 @@ local function close()
 	end
 	SG.tip_hide()
 	SG.tips, SG.tip_at, SG.tip_since = nil, nil, nil
+	SG.watch()
+	SG.flashers, SG.live_text = {}, {}
 	SG.area, SG.laid, SG.shows, SG.cells, SG.links_drawn_w = nil, nil, nil, nil, nil
 	SG.inspector_w, SG.mode = nil, nil
 	SG.add = nil
@@ -1481,6 +1622,7 @@ function SG.refresh()
 	SG.layout(true)
 	SG.rows()
 	SG.links()
+	SG.watch(true)
 	SG.status()
 	SG.layout(true)
 end

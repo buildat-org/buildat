@@ -667,7 +667,14 @@ namespace interface
 //       Running only: input i delivered to entity n as a link would, by
 //       the builder, v checked against the input's type; the runs it
 //       makes answered with "kit:tried" {"id", "input", "emitted":
-//       [[output, value], ...]} (a timer's later emits are not)
+//       [[output, value], ...]} (a timer's later emits are not); refused
+//       unless the entity is the builder's scene's or game-wide, a value
+//       past 512 bytes refused
+//   {"op": "watch", "id": n}  -- ([KIT_SIGNALS_LIVE]) what entity n's outputs
+//       emit in this session sent to this builder, as "kit:fired" {"id",
+//       "fired": [[comp, output, value as text, times], ...]}, at most five
+//       a second, each output's last of that time; 0 stops. Dropped when
+//       the builder leaves, leaves the session or stops editing
 //   {"op": "pattern", "id", "comp", "param", "action": "capture"|"show"|
 //    "fill", "voxel": n}  -- ([KIT_VOXEL_STATES]) a "voxels" parameter
 //       of the instance: capture (the voxel_box's cells as they are now;

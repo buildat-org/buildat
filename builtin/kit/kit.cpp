@@ -114,6 +114,11 @@ static const size_t MAX_PATTERN_NAMES = 256;
 static const int64_t MAX_ITEMS = 1000000;
 // What an editor's packet may be and do
 static const size_t MAX_EDIT_PACKET = 4096;
+// [KIT_SIGNALS_LIVE] The most of a value a builder's test sends
+static const size_t MAX_TRY_VALUE = 512;
+// The most of an output's value a watcher is told, and how often
+static const size_t WATCH_VALUE_BYTES = 64;
+static const int64_t WATCH_EVERY_US = 200000;
 static const size_t MAX_STRING = 256;
 static const double MAX_COORD = 30000;
 static const size_t MAX_ENTITIES = 4096;
@@ -5517,6 +5522,13 @@ struct Module: public interface::Module, public Interface
 		json::Value value = j.get("value");
 		if(value.is_undefined())
 			value = json::null();
+		if(value.stringify().size() > MAX_TRY_VALUE)
+			return refuse("value: longer than "+itos(MAX_TRY_VALUE)+" bytes");
+		// [KIT_SIGNALS_LIVE] The scene the builder is in (or none: game-wide)
+		ss_ scene;
+		scene_of(*e, &scene);
+		if(!scene.empty() && scene != p.scene)
+			return refuse("entity "+itos(e->id)+" is in the scene "+scene);
 		bool has = false, ok = false;
 		ss_ type;
 		for(const Instance &in : e->comps){
@@ -5540,6 +5552,120 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "%s tries entity %s's %s %s", cs(p.name), cs(itos(id)),
 				cs(input), cs(value.stringify().substr(0, 64)));
 		add_log(id, "tried: "+input+" by "+p.name);
+	}
+
+	// [KIT_SIGNALS_LIVE] {"op": "watch", "id": n}: this builder is shown what
+	// entity n's outputs emit in their session ("kit:fired", at most every
+	// WATCH_EVERY_US); 0 stops. Nothing is kept or done while nobody watches.
+	// simplified: an output's last value of the period, from any player; a
+	// per-player view of it is the upgrade
+	struct SignalWatch {
+		struct Fired {
+			ss_ value;
+			int n = 0;
+		};
+		uint64_t session = 0;
+		uint64_t id = 0;
+		std::map<std::pair<size_t, ss_>, Fired> fired;
+		int64_t sent = 0;
+	};
+	std::map<size_t, SignalWatch> m_watches;
+
+	void watch_op(Peer &p, size_t peer, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const json::Value &v = j.get("id");
+		if(v.is_number() && v.as_number() == 0){
+			if(m_watches.erase(peer))
+				log_i(MODULE, "%s stops watching", cs(p.name));
+			return;
+		}
+		ss_ why;
+		Entity *e = entity_arg(j, "id", why);
+		if(!e)
+			return refuse(why);
+		auto it = m_watches.find(peer);
+		if(it != m_watches.end() && it->second.id == e->id &&
+				it->second.session == m_active)
+			return;
+		SignalWatch &w = m_watches[peer];
+		w = SignalWatch();
+		w.session = m_active;
+		w.id = e->id;
+		log_i(MODULE, "%s watches entity %s", cs(p.name), cs(itos(e->id)));
+	}
+
+	// An emit, while somebody watches
+	void watch_fired(uint64_t id, size_t comp, const ss_ &output,
+			const json::Value &value)
+	{
+		for(auto &o : m_watches){
+			SignalWatch &w = o.second;
+			if(w.id != id || w.session != m_active)
+				continue;
+			SignalWatch::Fired &f = w.fired[std::make_pair(comp, output)];
+			f.n++;
+			f.value = value.is_null() ? ss_() : value.is_string() ?
+					value.as_string() : value.stringify();
+			if(f.value.size() > WATCH_VALUE_BYTES){
+				// Not ending inside a character
+				size_t n = WATCH_VALUE_BYTES;
+				while(n > 0 && (f.value[n] & 0xC0) == 0x80)
+					n--;
+				f.value.resize(n);
+			}
+		}
+	}
+
+	// What fired since the last time, and whether each may still watch
+	void watch_flush()
+	{
+		const int64_t now = interface::os::time_us();
+		for(auto it = m_watches.begin(); it != m_watches.end();){
+			const size_t peer = it->first;
+			SignalWatch &w = it->second;
+			if(now - w.sent < WATCH_EVERY_US){
+				++it;
+				continue;
+			}
+			if(session_of_peer(peer) != w.session){
+				it = m_watches.erase(it);
+				continue;
+			}
+			SessionScope sc(*this, w.session);
+			auto pi = m_peers.find(peer);
+			if(pi == m_peers.end()){
+				it = m_watches.erase(it);
+				continue;
+			}
+			WorldScope ws(m_w, world_named(pi->second.scene));
+			if(!pi->second.editing || !can_edit(peer)){
+				it = m_watches.erase(it);
+				continue;
+			}
+			w.sent = now;
+			if(!w.fired.empty()){
+				json::Value fired = json::array();
+				for(auto &f : w.fired){
+					json::Value o = json::array();
+					o.append((int64_t)f.first.first);
+					o.append(f.first.second);
+					o.append(f.second.value);
+					o.append((int64_t)f.second.n);
+					fired.append(o);
+				}
+				json::Value a = json::object();
+				a.set("id", (int64_t)w.id);
+				a.set("fired", fired);
+				log_i(MODULE, "Fired for %s: entity %s: %s", cs(pi->second.name),
+						cs(itos(w.id)), cs(fired.stringify().substr(0, 200)));
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->send(peer, "kit:fired", a.stringify());
+				});
+				w.fired.clear();
+			}
+			++it;
+		}
 	}
 
 	// [KIT_HM_ORIGIN] A heightmap's sample (0, 0) as a world cell
@@ -8861,6 +8987,8 @@ struct Module: public interface::Module, public Interface
 			}
 			if(ot == "none")
 				value = json::null();
+			if(!m_watches.empty())
+				watch_fired(e.id, r.comp, output, value);
 			if(r.tried){
 				json::Value o = json::array();
 				o.append(output);
@@ -13665,6 +13793,8 @@ struct Module: public interface::Module, public Interface
 		}
 		session_ops();
 		rules_watch();
+		if(!m_watches.empty())
+			watch_flush();
 		// Sessions nobody is in end: a draft as its builder leaves, a game
 		// session after SESSION_IDLE_US
 		const int64_t now = interface::os::time_us();
@@ -18721,6 +18851,7 @@ struct Module: public interface::Module, public Interface
 	void on_left(const network::OldClient &old)
 	{
 		m_local_peers.erase(old.info.id);
+		m_watches.erase(old.info.id);
 		// [KIT_SESSIONS_1] from their session's round; a guest's entity
 		// in the default goes too
 		const uint64_t id = session_of_peer(old.info.id);
@@ -20552,7 +20683,7 @@ struct Module: public interface::Module, public Interface
 		}
 		GameSession *gs = active_session();
 		if(gs && !gs->draft && op != "voxel_info" && op != "mode" &&
-				op != "focus" && op != "try")
+				op != "focus" && op != "try" && op != "watch")
 			return refuse("in a game session: the tools edit nothing here");
 		if(gs && (op == "play" || op == "stop" || op == "save_start" ||
 				op == "keep" || op == "always_keep" || op == "terrain" ||
@@ -20648,6 +20779,8 @@ struct Module: public interface::Module, public Interface
 		}
 		if(op == "try")
 			return try_input(p, peer, j, refuse);
+		if(op == "watch")
+			return watch_op(p, peer, j, refuse);
 		if(op == "pattern")
 			return pattern_op(p, peer, j, refuse);
 		if(op == "copy")
