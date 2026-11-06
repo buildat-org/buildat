@@ -730,8 +730,9 @@ struct Mobs
 					"(%d %d %d)", MOB_KIND[m.kind], key, cs(p.name), at[0],
 					at[1], at[2]);
 		else
-			log_i(MODULE, "skeldat: a %s (%u) has no clear shot at %s, %s",
-					MOB_KIND[m.kind], key, cs(p.name), none);
+			log_i(MODULE, "skeldat: a %s (%u) has no clear shot at %s, %s, "
+					"world_t %.2f", MOB_KIND[m.kind], key, cs(p.name), none,
+					(double)world.t);
 	}
 
 	void shoot(const Mob &m, const Target &p)
