@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min (2026-11-05)
+# cost: ~20 s (2026-11-06)
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/api.h builtin/kit/client_lua/players.lua
 # [KIT_CARRY_ATTACH] c:attach and c:detach, with a type of the check's own
 # (BUILDAT_WORKBENCH_TYPES: workbench/carry, a box; "grab" attaches it to

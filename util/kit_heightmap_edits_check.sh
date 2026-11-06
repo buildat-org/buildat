@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~3 min (2026-11-02)
+# cost: ~35 s (2026-11-06)
 # covers: builtin/kit/** builtin/heightmap/** apps/workbench/**
 # [KIT_HEIGHTMAP_REGEN_LOSS] A heightmap World's terrain-tool edits kept
 # over regenerations, on Workbench, the admin (kitboss) Ended in edit mode:

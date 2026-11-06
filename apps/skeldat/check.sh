@@ -1365,14 +1365,22 @@ grep -aq "client1 picks up an arrow" "$s1" || fail "the arrow at the feet not pi
 # the user's blip ([SKELDAT_BOW_RELEASE_PICK]) hashed
 b1="$t/bow1.log"
 skel=$(grep -ac "a skeleton shoots at client1" "$s1")
+# The release's sound goes by the client's own hold: a tap of 0.09 here read
+# 0.13 on the server, a shot with no sound of its own (the draws' check above
+# lets the two differ round BOW_MIN). The log's two decimals round 0.095 up,
+# so a hold printed 0.10 may be either
+own=$(grep -ac "skeldat: sound bow (own)" "$b1")
+held=$(grep -a "skeldat: the bow released at" "$b1" | sed 's/.*released at \([0-9.]*\).*/\1/')
+own_least=$(echo "$held" | awk '$1 > 0.1 {n++} END {print n + 0}')
+own_most=$(echo "$held" | awk '$1 >= 0.1 {n++} END {print n + 0}')
 [ "$(grep -ac "skeldat: sound bow_draw (own)" "$b1")" = "$draws" ] &&
 	[ "$(grep -ac "skeldat: sound bow_draw at" "$b1")" = "$(grep -ac "skeleton ([0-9]*) draws at" "$s1")" ] &&
-	[ "$(grep -ac "skeldat: sound bow (own)" "$b1")" = "$#" ] &&
+	[ "$own" -ge "$own_least" ] && [ "$own" -le "$own_most" ] && [ "$own" -ge $(($# - 1)) ] &&
 	[ "$(grep -ac "skeldat: sound bow at" "$b1")" = "$skel" ] && [ "$skel" -ge 1 ] &&
 	grep -aq "skeldat: sound arrow_land at" "$b1" &&
 	grep -aq "skeldat: 184 sounds made" "$b1" &&
 	grep -aq "skeldat: sounds: self-check passed, bow [0-9a-f]\{8\} " "$b1" ||
-	fail "the bow's sounds: $draws draws, $# shots and $skel of the skeleton's, 23 sounds of 8 made ($b1)"
+	fail "the bow's sounds: $draws draws, $# shots, $own own, $skel of the skeleton's, 23 sounds of 8 made ($b1)"
 echo "the bow's sounds: $draws draws, $# shots and $skel of the skeleton's; $(grep -a "sounds: self-check" "$b1" | head -1 | sed 's/.*skeldat: //')"
 [ -n "$kept" ] && grep -aq "client1 picks up an arrow at ${kept% *}.0,[-0-9.]*,${kept#* }.0" "$t/srv26_2.log" ||
 	fail "no stuck-arrow voxel, or not picked up after the restart: ${kept:-none} ($t/srv26_2.log)"
@@ -2926,9 +2934,11 @@ s = open(sys.argv[2], errors="replace").read().split("\n")
 assert not any("shoots at client1" in l for l in s), "a shot out of the sealed box"
 tries = {}
 for l in s:
-    m = re.search(r"a skeleton \((\d+)\) has no clear shot at client1, no spot", l)
+    # The game's time: a tick late under load and the next on time read 0.5 s
+    # short by the log's clock
+    m = re.search(r"a skeleton \((\d+)\) has no clear shot at client1, no spot, world_t ([\d.]+)", l)
     if m:
-        tries.setdefault(m.group(1), []).append(ts(l))
+        tries.setdefault(m.group(1), []).append(float(m.group(2)))
 assert len(tries) >= 10, tries
 gap = min(b - a for v in tries.values() for a, b in zip(v, v[1:]))
 assert gap >= 2.9, gap
@@ -3787,7 +3797,12 @@ print("  Kit's 2D view: mean %.1f saturation %.3f" % (l2, s2))
 assert 40 < l2 < 200 and s2 > 0.3
 PY2
 	fail "Kit's 3D view not as the walk view, or its 2D view empty ($t/kit_edit.png, $t/kit_3d.png, $t/kit_2d.png)"
-BUILDAT_SKELDAT_WORLD=kit BUILDAT_SKELDAT_SKELETONS=0 \
+# The same world: BUILDAT_SKELDAT_SIZE is not in the save, and without it this
+# was a 1024 wide world (its bones spreading and 60 s of making on a loaded box)
+# holding the 8 sections made above
+BUILDAT_SKELDAT_WORLD=kit BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+	BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+	BUILDAT_SKELDAT_SKELETONS=0 \
 	start_server "$log67b" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv67" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log67b)"

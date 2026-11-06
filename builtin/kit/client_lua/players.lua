@@ -446,6 +446,7 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 			if not P.nodes[id] then
 				b.root:Remove()
 				bodies[id] = nil
+				log:info("kit: player " .. id .. "'s body gone")
 			else
 				show_body(b, false)
 			end
