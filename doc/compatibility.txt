@@ -33,6 +33,13 @@ client/core/starport's semver_cmp for precedence).
   minimum and a save's format.
 - A pre-release (1.2.0-rc.1) is offered as an update only to a client
   that runs a pre-release itself.
+- An alpha (0.8.0-alpha.3, "Buildat Alpha", [ALPHA_BUILDS]) keeps none of
+  this: no guarantee between alphas or towards a release, on the wire, in the
+  API or in a save. Its user and cache directories are its own (buildat-alpha,
+  beside a stable build's buildat) and disposable: nothing migrates them, and
+  nothing moves them to a release. Delete them when an alpha misbehaves.
+  What is in them is not read by a stable build, and a release's is not read
+  by an alpha, unless given by -D and -C or in a portable tree's own folder.
 
 The connection
 --------------
