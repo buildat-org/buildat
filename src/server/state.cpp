@@ -40,6 +40,7 @@
 		#define NOMINMAX // std::max below
 	#endif
 	#include <windows.h>
+	#include <process.h>
 #else
 	#include <sched.h>
 	#include <fcntl.h>
@@ -1022,11 +1023,26 @@ struct CState: public State, public interface::Server
 		ss_ init_cpp_path;
 		ss_ build_dst;
 		ss_ hashfile_path;
-		ss_ hash_hex;
+		ss_ hash_text;
 		ss_ extra_cxxflags;
 		ss_ extra_ldflags;
 		bool skip_compile = false;
 	};
+
+	// A .hash file: the build's key in hex, then a line naming the compiler
+	// that built it. A compiler change is a rebuild, but for a build made to
+	// travel: an archive's cache and a build host's tar load under any
+	// compiler, or none. util/package.sh and serve_latest_release.sh drop
+	// the line, which reads as "any". So the compiler is not in the key.
+	static bool build_current(const ss_ &stored, const ss_ &key_hex,
+			const ss_ &compiler)
+	{
+		const size_t nl = stored.find('\n');
+		if(stored.substr(0, nl) != key_hex)
+			return false;
+		const ss_ built_by = nl == ss_::npos ? "" : stored.substr(nl + 1);
+		return built_by.empty() || compiler.empty() || built_by == compiler;
+	}
 
 	BuildJob plan_build_u(const interface::ModuleInfo &info,
 			const sv_<ss_> &includes)
@@ -1041,15 +1057,26 @@ struct CState: public State, public interface::Server
 		extra_ldflags += " -lbuildat_core";
 		// Always include these to make life easier
 		extra_ldflags += " -lwsock32 -lws2_32";
+#else
+		extra_cxxflags += " "+info.meta.cxxflags_linux;
+		extra_ldflags += " "+info.meta.ldflags_linux;
+#endif
+		// What the build's key holds of the flags: the fixed ones, the
+		// meta.json's and the libraries, never a path. A path would tie the
+		// key to where the tree is, and a prebuilt cache has to hold wherever
+		// it is unpacked: so not the include and library directories, nor
+		// wasm/'s sources below, whose contents are hashed.
+		ss_ flags_key = rccpp::cxxflags_fixed()+"\n"+extra_cxxflags+"\n"+
+				extra_ldflags+"\n";
+		for(const ss_ &lib : m_compiler->libraries)
+			flags_key += lib+" ";
+#ifdef _WIN32
 		// Add the path of the current executable to the library search path
 		{
 			ss_ exe_path = interface::os::get_current_exe_path();
 			ss_ exe_dir = interface::fs::strip_file_name(exe_path);
 			extra_ldflags += " -L\""+exe_dir+"\"";
 		}
-#else
-		extra_cxxflags += " "+info.meta.cxxflags_linux;
-		extra_ldflags += " "+info.meta.ldflags_linux;
 #endif
 		log_d(MODULE, "extra_cxxflags: %s", cs(extra_cxxflags));
 		log_d(MODULE, "extra_ldflags: %s", cs(extra_ldflags));
@@ -1088,8 +1115,10 @@ struct CState: public State, public interface::Server
 			std::sort(sources.begin(), sources.end());
 			sv_<ss_> include_dirs = m_compiler->include_directories;
 			include_dirs.push_back(m_modules_path);
-			if(!sources.empty())
+			if(!sources.empty()){
 				extra_cxxflags += " -ffp-contract=off";
+				flags_key += "\n-ffp-contract=off";
+			}
 			for(const ss_ &p : sources){
 				const bool c = p.size() > 2 && p.compare(p.size() - 2, 2, ".c") == 0;
 				extra_cxxflags += c ? " -x c "+p+" -x none" : " "+p;
@@ -1098,10 +1127,9 @@ struct CState: public State, public interface::Server
 					files_to_hash.push_back(i);
 			}
 		}
-		// The optimization flags go in too; without them a cache built at a
-		// different level is kept and silently used
-		ss_ content_hash = hash_files(files_to_hash,
-				rccpp::cxxflags_optimize());
+		// The flags go in too; without them a cache built with others is kept
+		// and silently used
+		ss_ content_hash = hash_files(files_to_hash, flags_key);
 		log_d(MODULE, "Module hash: %s", cs(interface::sha1::hex(content_hash)));
 
 #ifdef _WIN32
@@ -1133,6 +1161,15 @@ struct CState: public State, public interface::Server
 
 		ss_ hashfile_path = build_dst+".hash";
 
+		const ss_ build_dir = g_server_config.get<ss_>("rccpp_build_path");
+		ss_ compiler;
+		if(!skip_compile){
+			interface::fs::create_directories(build_dir);
+			compiler = m_compiler->version(
+					build_dir+"/compiler_version."+itos(getpid())+".tmp");
+		}
+		const ss_ hash_hex = interface::sha1::hex(content_hash);
+
 		// [PROCESS_SANDBOX]: a boxed server builds into its app's own
 		// cache, and the shared build -- what an unboxed run or the
 		// archive made -- is read, never written: a module whose hash
@@ -1149,7 +1186,7 @@ struct CState: public State, public interface::Server
 				previous_hash = ss_((std::istreambuf_iterator<char>(f)),
 						std::istreambuf_iterator<char>());
 			if(std::ifstream(prebuilt).good() &&
-					previous_hash == interface::sha1::hex(content_hash)){
+					build_current(previous_hash, hash_hex, compiler)){
 				log_v(MODULE, "%s: the shared build's is current; loading it",
 						cs(info.name));
 				build_dst = prebuilt;
@@ -1175,7 +1212,7 @@ struct CState: public State, public interface::Server
 				// of fifteen modules' hashes held one and compiled on every
 				// start of the box ([BOX_FIXES] c). An old raw file
 				// mismatches once and is rewritten.
-				if(previous_hash == interface::sha1::hex(content_hash)){
+				if(build_current(previous_hash, hash_hex, compiler)){
 					log_v(MODULE, "No need to recompile %s", cs(info.name));
 					skip_compile = true;
 					// [CACHE_GC] Used; the shared build's, read only, is not
@@ -1184,7 +1221,7 @@ struct CState: public State, public interface::Server
 				} else {
 					log_v(MODULE, "%s: the cached hash differs (%s against %s); "
 							"compiling", cs(info.name), cs(previous_hash.substr(0, 12)),
-							cs(interface::sha1::hex(content_hash).substr(0, 12)));
+							cs(hash_hex.substr(0, 12)));
 				}
 			}
 		}
@@ -1193,7 +1230,7 @@ struct CState: public State, public interface::Server
 		job.init_cpp_path = init_cpp_path;
 		job.build_dst = build_dst;
 		job.hashfile_path = hashfile_path;
-		job.hash_hex = interface::sha1::hex(content_hash);
+		job.hash_text = compiler.empty() ? hash_hex : hash_hex+"\n"+compiler;
 		job.extra_cxxflags = extra_cxxflags;
 		job.extra_ldflags = extra_ldflags;
 		job.skip_compile = skip_compile;
@@ -1280,7 +1317,7 @@ struct CState: public State, public interface::Server
 		// Update hash file
 		if(!skip_compile){
 			std::ofstream f(job.hashfile_path);
-			f<<job.hash_hex;
+			f<<job.hash_text;
 		}
 
 		// Construct instance
@@ -1728,7 +1765,7 @@ struct CState: public State, public interface::Server
 				give_compile_slot(slot);
 				if(ok){
 					std::ofstream f(job.hashfile_path);
-					f<<job.hash_hex;
+					f<<job.hash_text;
 				}
 				std::unique_lock<std::mutex> lock(mutex);
 				running.erase(item.first);

@@ -82,17 +82,18 @@ struct RCCPP_Info {
 // this engine does constantly. -g1, not -g ([MODULE_COMPILE_TIME]): a
 // backtrace keeps its functions and lines, gdb loses the locals and types,
 // and every module compiles about 35% faster (kit.cpp 35 s to 22.5 s).
-// Here rather than beside -fPIC so the module hash covers it.
-ss_ cxxflags_optimize()
+// Here so the module hash covers them.
+ss_ cxxflags_fixed()
 {
+	const ss_ fixed = " -DRCCPP -fPIC -fvisibility=hidden -shared -std=c++11";
 #ifdef BUILDAT_SANITIZE
 	// A sanitizer build's modules are instrumented too: they are where a
 	// client's packet is handled, and a fuzz run against an uninstrumented
 	// module sees a crash and nothing short of one. In the module hash as
 	// well, so neither build is handed the other's.
-	return "-O1 -g1 -fsanitize=" BUILDAT_SANITIZE " -fno-omit-frame-pointer";
+	return "-O1 -g1 -fsanitize=" BUILDAT_SANITIZE " -fno-omit-frame-pointer"+fixed;
 #else
-	return "-O1 -g1";
+	return "-O1 -g1"+fixed;
 #endif
 }
 
@@ -100,6 +101,8 @@ struct CCompiler: public Compiler
 {
 	ss_ m_compiler_command;
 	std::unordered_map<std::string, RCCPP_Info> m_module_info;
+	bool m_version_asked = false;
+	ss_ m_version;
 
 	CCompiler(const ss_ &compiler_command):
 		m_compiler_command(compiler_command)
@@ -122,8 +125,7 @@ struct CCompiler: public Compiler
 		// the difference between an array access and a function call per
 		// voxel. Modules are compiled once at startup, so the extra compile
 		// time is paid once and the code runs for the life of the server.
-		command += " -DRCCPP "+cxxflags_optimize()+" -fPIC -fvisibility=hidden -shared";
-		command += " -std=c++11";
+		command += " "+cxxflags_fixed();
 		if(extra_cxxflags != "")
 			command += ss_()+" "+extra_cxxflags;
 
@@ -251,6 +253,32 @@ struct CCompiler: public Compiler
 			m_module_info.emplace(module_name, std::move(funcs));
 		}
 		return true;
+	}
+
+	ss_ version(const ss_ &scratch_path)
+	{
+		if(m_version_asked)
+			return m_version;
+		m_version_asked = true;
+		if(m_compiler_command.empty())
+			return m_version;
+		interface::process::ExecOptions exec_opts;
+		exec_opts.output_path = scratch_path;
+		const int status = interface::process::shell_exec(
+				m_compiler_command+" --version", exec_opts);
+		ss_ line;
+		{
+			std::ifstream f(scratch_path);
+			std::getline(f, line);
+		}
+		interface::fs::remove_all(scratch_path);
+		if(status != 0)
+			return m_version;
+		if(!line.empty() && line.back() == '\r')
+			line.pop_back();
+		const size_t space = line.find(' ');
+		m_version = space == ss_::npos ? line : line.substr(space + 1);
+		return m_version;
 	}
 
 	void* construct(const char *name, interface::Server *server)
