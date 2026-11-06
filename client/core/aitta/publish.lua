@@ -368,6 +368,10 @@ end
 -- release takes the time the Aitta wants. progress(fraction, waiting) as
 -- it goes, when given.
 local function upload(url, zip_path, done, progress)
+	local refusal = __buildat_aitta_dev("publish_refusal", url)
+	if refusal ~= "" then
+		return done(nil, refusal)
+	end
 	local function read(path)
 		local f = io.open(path, "rb")
 		if not f then

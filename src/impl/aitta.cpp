@@ -11,6 +11,7 @@
 #include "interface/sha256.h"
 #include "interface/zip.h"
 #include "core/log.h"
+#include "core/version.h"
 #include "zlib.h"
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
@@ -1108,6 +1109,27 @@ ss_ pack_page(const ss_ &page_dir, const ss_ &package, const ss_ &key_path,
 	base[base.find('/')] = '-';
 	return write_signed(zip_entries(entries), read_file(key_path),
 			PAGE_FORMAT, out_dir+"/"+base+"-page");
+}
+
+ss_ publish_refusal(const ss_ &version, const ss_ &aitta)
+{
+	// client/core/starport/init.lua's DEFAULT_AITTA, as it stands unoverridden
+	static const ss_ OFFICIAL = "aitta.buildat.org";
+	if(!buildat_version_is_alpha(version.c_str()))
+		return "";
+	const size_t scheme = aitta.find("://");
+	ss_ h = scheme == ss_::npos ? aitta : aitta.substr(scheme + 3);
+	h = h.substr(0, h.find('/'));
+	h = h.substr(h.rfind('@') + 1);
+	h = h.substr(0, h.find_first_of(":?#"));
+	if(!h.empty() && h.back() == '.')
+		h.pop_back();
+	std::transform(h.begin(), h.end(), h.begin(), ::tolower);
+	if(h != OFFICIAL)
+		return "";
+	return "This is an alpha build ("+version+"): it does not publish to the "
+			"official Aitta, "+OFFICIAL+". Publish with a stable build, or "
+			"name another Aitta.";
 }
 
 // A release's .sig read and checked against its archive: the .sig, or

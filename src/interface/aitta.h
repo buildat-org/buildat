@@ -135,6 +135,14 @@ namespace interface
 				const ss_ &user_path, bool review = false,
 				const ss_ &share_path = "");
 
+		// [ALPHA_BUILDS] Why an engine of this version does not publish to
+		// this address, "" when it does: an alpha stays off the official
+		// Aitta, by the actual name and not the BUILDAT_AITTA_DEFAULT a check
+		// or a test Aitta sets. A build could be changed to go past it: it
+		// keeps people's test packages out of the list, and it is no
+		// protection of the list.
+		ss_ publish_refusal(const ss_ &version, const ss_ &aitta);
+
 		// [WORLD_PACKAGES] A world: a save on top of a named app ("kind":
 		// "world", "app", "app_version", "buildat_version"), its save
 		// directory in world/ as the app keeps it. Checked as install()

@@ -1028,6 +1028,13 @@
 						remix_read(arg)).c_str());
 				return 1;
 			}
+			// [ALPHA_BUILDS] Why this build does not publish to the address
+			// arg, "" when it does
+			if(op == "publish_refusal"){
+				lua_pushstring(L, interface::aitta::publish_refusal(
+						BUILDAT_VERSION, arg).c_str());
+				return 1;
+			}
 			if(op == "open"){
 				if(!interface::process::open_with_system(arg))
 					throw Exception("cannot open "+arg);
