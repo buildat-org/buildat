@@ -514,6 +514,8 @@ builds_unpack(){ # tar dir
 		rm -rf "$tmp"
 		return 1
 	fi
+	# Current under this box's compiler too (state.cpp, build_current)
+	sed -i 2d "$tmp"/*.hash 2>/dev/null || true
 	mv -f "$tmp"/* "$2"/ && rm -rf "$tmp"
 }
 

@@ -525,6 +525,8 @@ prebuild_modules() {
 	# Only the built modules stay: no logs, no compile output, no save
 	find "$stage/cache" -mindepth 1 -maxdepth 1 ! -name rccpp_build -exec rm -rf {} +
 	rm -f "$stage"/cache/rccpp_build/*.compile.log
+	# Built for any compiler the archive meets, or none (state.cpp, build_current)
+	sed -i 2d "$stage"/cache/rccpp_build/*.hash 2>/dev/null || true
 	rm -rf "$stage/user/apps/vanilla/saves/prebuild"
 	rm -f "$stage"/user/shared/vanilla/settings.json
 	local n
@@ -733,6 +735,8 @@ prebuild_apps() {
 	done
 	find "$stage/cache" -mindepth 1 -maxdepth 1 ! -name rccpp_build -exec rm -rf {} +
 	rm -f "$stage"/cache/rccpp_build/*.compile.log
+	# Built for any compiler the archive meets, or none (state.cpp, build_current)
+	sed -i 2d "$stage"/cache/rccpp_build/*.hash 2>/dev/null || true
 	if [ -n "$failed" ]; then
 		echo "prebuild: apps that did not start:$failed (see $logs/)"
 		return 1
