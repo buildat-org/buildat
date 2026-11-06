@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min (2026-11-04)
+# cost: ~25 s (2026-11-06)
 # covers: builtin/kit/client_lua/players.lua builtin/kit/client_data/player_model.json builtin/kit/client_lua/controls.lua builtin/kit/kit.cpp
 # [KIT_PLAYER_MODEL] Players see each other: Workbench's stone floor, a
 # fresh save. kitboss places a World and a kit/team (4, "#3060ff") and

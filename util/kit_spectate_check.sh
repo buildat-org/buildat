@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min (2026-11-05)
+# cost: ~15 s (2026-11-06)
 # covers: builtin/kit/client_lua/players.lua builtin/kit/client_lua/controls.lua
 # [KIT_SPECTATE] A player out of play watches. Workbench's stone floor, a
 # fresh save: kitboss places a World (3), kit/game_rules (4, respawn
@@ -133,7 +133,7 @@ cat > "$t/bob.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob
 wait_log_any 60000 player physics enabled
 look_dir 1 -0.2 0.3
-delay 40000
+wait_log_any 120000 kit: player 1000000's body gone
 quit
 EOF
 wait_for_log "$t/srv.log" "setup code [A-Z0-9]+" 30

@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min (2026-11-02)
+# cost: ~30 s (2026-11-06)
 # covers: builtin/kit/** apps/workbench/** client/core/aitta/**
 # [KIT_MATERIAL_SETS] Material set packages on a local Aitta and Workbench:
 #   1. alice's key bound on the Aitta; alice/redland 1.0.0 (a set: its

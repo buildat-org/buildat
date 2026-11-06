@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min, ~3 min with a cold module cache (2026-10-31)
+# cost: ~70 s (2026-11-06)
 # covers: builtin/kit/** apps/workbench/** client/core/aitta/** src/impl/aitta.cpp
 # [KIT] stage 5, publishing, on a local Aitta and two Workbench servers:
 #   1. alice's key is bound on the Aitta; her Kit package alice/lamps
