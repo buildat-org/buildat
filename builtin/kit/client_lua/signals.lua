@@ -6,7 +6,9 @@
 -- a table, over the whole window under the top bar (a flag with 18 links did
 -- not fit the inspector). editor.lua runs this file and puts it at NT.sg.
 --   - Left: the entities as a tree, as the Entities tab's (all three of its
---     lists in one), a filter over them (id, name, type); the symbol of one with
+--     lists in one; [KIT_SIGNALS_UI_GROUP] the Scene tab's UI elements, what is
+--     under a panel with it, in a group of their own), a filter over them (id,
+--     name, type); the symbol of one with
 --     a link, either way, in the signals' cyan. "Add from palette" above them
 --     pops up the palette's items ([KIT_PALETTE_MENU], SG.palette_popup)
 --   - Middle: the selected one's name to edit, and its links, in both
@@ -190,12 +192,42 @@ local function linked_ids()
 	return set, ids
 end
 
-function SG.rows()
+-- [KIT_SIGNALS_UI_GROUP] A UI element as the server's is_ui_element has it: no
+-- position and a type with a `ui`
+local function is_ui_element(e)
+	if e.pos then
+		return false
+	end
+	for _, c in ipairs(e.components or {}) do
+		if type(type_of(c.type).ui) == "table" then
+			return true
+		end
+	end
+	return false
+end
+
+-- The Entities tab's lists, the Scene one's UI elements in a list of their own,
+-- each with what is under it
+local function groups()
 	local tabs, indent = NT.entity_lists()
 	local ids = {}
 	local linked, linked_list = linked_ids()
+	local scene, ui = {}, {}
+	local to = scene
+	for _, e in ipairs(tabs.Scene) do
+		if (indent[e.id] or 0) == 0 then
+			to = is_ui_element(e) and ui or scene
+		end
+		to[#to + 1] = e
+	end
+	tabs.Scene, tabs.UI = scene, ui
+	return tabs, indent
+end
+
+function SG.rows()
+	local tabs, indent = groups()
 	SG.list_body = put_body(SG.list_view, function(body)
-		for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
+		for _, name in ipairs({"Game-wide", "Scene", "UI", "Positioned"}) do
 			local head = false
 			for _, e in ipairs(tabs[name]) do
 				if matches(e) then
@@ -244,6 +276,21 @@ function SG.rows()
 	end
 	said = "kit editor: signals: linked marks: " .. table.concat(linked_list, ", ")
 	if said ~= SG.marks_said then
+	-- For a check: what each group holds, by name
+	SG.groups_said = SG.groups_said or {}
+	for _, name in ipairs(SG.filter == "" and {"Game-wide", "Scene", "UI",
+			"Positioned"} or {}) do
+		local names = {}
+		for _, e in ipairs(tabs[name]) do
+			names[#names + 1] = short_name(e)
+		end
+		said = "kit editor: signals: group " .. name .. ": " ..
+				table.concat(names, ", ")
+		if said ~= SG.groups_said[name] then
+			SG.groups_said[name] = said
+			log:info(said)
+		end
+	end
 		SG.marks_said = said
 		log:info(said)
 	end

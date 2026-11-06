@@ -872,8 +872,8 @@ click Button "Switch parent"
 wait_log 5000 kit editor: switch parent of $FLAG: armed
 frames 3
 screenshot @T@/parent_armed.png
-click Button "select $BAR1"
-wait_log 5000 kit editor: switch parent of $FLAG: not $BAR1
+click Button "select $TIMER"
+wait_log 5000 kit editor: switch parent of $FLAG: not $TIMER
 frames 3
 screenshot @T@/parent_refused.png
 click LineEdit "signals filter"
