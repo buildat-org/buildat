@@ -274,6 +274,7 @@ done
 pgrep -f "installed/tester/pt/1.0.2" > /dev/null && ! pgrep -f "installed/tester/pt/1.0.3" > /dev/null ||
 	fail "not back on 1.0.2 before the switch ($s7)"
 echo "ok: 1.0.3 installed by the new release; a server that died meanwhile back on 1.0.2"
+lis7=$(grep -ac "Listening at" "$slog7")
 : > "$t/built"
 wait_for_log "$s7" "starting tester/pt on port $SP2 on $(n7 0.0.3)" 180 || fail "no switch to 0.0.3 ($s7)"
 for _i in $(seq 300); do
@@ -286,6 +287,11 @@ pgrep -f "installed/tester/pt/1.0.3" > /dev/null || fail "not on 1.0.3 ($s7)"
 c=$(grep -n "compiling tester/pt on $(n7 0.0.3)" "$s7" | head -1 | cut -d: -f1)
 st=$(grep -n "stopping tester/pt" "$s7" | tail -1 | cut -d: -f1)
 [ -n "$c" ] && [ -n "$st" ] && [ "$c" -lt "$st" ] || fail "not compiled before it stopped ($s7)"
+# Its process is up before it listens: the count below starts from that line
+for _i in $(seq 300); do
+	[ "$(grep -ac "Listening at" "$slog7")" -gt "$lis7" ] && break
+	sleep 0.2
+done
 # Two polls after the switch: no second restart, no app update of what it runs
 polls7(){
 	local from n
