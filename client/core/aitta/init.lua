@@ -68,8 +68,8 @@ local function package_id(rel)
 end
 
 -- [AITTA_NATIVE_WASM] An installed release's .wasm its Aitta built, for a
--- local server with no toolchain to build wasm/ with (the web has its own,
--- go_in_page): each name off the list checked, each file its sha256 and
+-- local server with no toolchain to build wasm/ with and for serverless play
+-- (on the web only that: an in-page release has its own, go_in_page): each name off the list checked, each file its sha256 and
 -- 8 MiB at most, kept in the version's .aitta_wasm/. What is not had is a
 -- warning, and that server then refuses the module saying why; a later list
 -- fetches it. done() after them all. As interface::aitta::fetch_built_wasm.
@@ -80,7 +80,8 @@ local function fetch_built_wasm(aitta, dir, rel, done)
 	local wasm_dir = tostring(dir) .. "/.aitta_wasm"
 	local todo = {}
 	for name, sha in pairs(type(rel.web_wasm) == "table" and
-			GetPlatform() ~= "Web" and rel.web_wasm or {}) do
+			(GetPlatform() ~= "Web" or rel.serverless == true) and
+			rel.web_wasm or {}) do
 		local module = type(name) == "string" and
 				(name:match("^([%w_]+)%.server%.wasm$") or
 				name:match("^([%w_]+)%.wasm$"))
@@ -442,9 +443,18 @@ end
 -- over the launcher taken down first; one whose server runs in the page
 -- (rel given), run there
 -- key: "<fp>/<name>" ([AITTA_KEY_IDENTITY])
-local function play_installed(key, version, rel)
+local function play_installed(key, version, rel, fetched)
 	if rel and in_page(rel) then
 		return go_in_page(key, rel)
+	end
+	-- A .wasm its Aitta built after this was installed
+	local fp, name = key:match("^([%w_]+)/([%w_]+)$")
+	if rel and rel.aitta and rel.serverless == true and fp and not fetched then
+		return fetch_built_wasm(rel.aitta, __buildat_get_path("user") ..
+				"/installed/" .. fp .. "/" .. name .. "/" .. tostring(version),
+				rel, function()
+			play_installed(key, version, rel, true)
+		end)
 	end
 	local id = key:gsub("/", ".", 1) .. "@" .. tostring(version)
 	log:info("aitta: play " .. id .. " serverless")
