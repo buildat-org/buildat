@@ -32,6 +32,18 @@
 # log, and it runs on. simplified: no rollback to an older listed version;
 # for one, stop this script, remove the withdrawn version's directory under
 # installed/, and start it again -- the newest one left runs.
+# **Saves across an app's versions** ([SERVE_SAVES_ON_UPDATE]): a save stays
+# with the release that made it, and that is the player's choice on a desk; a
+# server has moved on, so an Aitta app is always started with
+# aitta_move_saves=1 (every start: a save moves when it is opened, which for a
+# world may be long after). Before a version's first start, with the server
+# stopped, saves/ is copied to saves_before/<id>-<port>/ under
+# BUILDAT_SERVE_DIR, the last copy kept; a copy that fails leaves the server on
+# the version before. A version that exits with a failure within
+# APP_TRIAL_SECONDS (300) of its first start goes back to the version before,
+# with the copy, and is not tried again until this script is started again; a
+# newer one is. What it did to the saves in that time is lost. Past the trial a
+# crash is restarted as any other.
 #
 # Each server is a game, a port and a user directory, which holds its
 # saves and accounts. Every version uses it (-D), and it can be one a
@@ -166,7 +178,8 @@ done
 aitta_dir(){
 	local d="${users[$1]}/installed/${games[$1]}" v
 	# Its versions are directories; the key beside them is a file
-	v=$(cd "$d" 2>/dev/null && ls -1d -- */ | tr -d / | sort -V | tail -n 1)
+	v=$(cd "$d" 2>/dev/null && ls -1d -- */ | tr -d / |
+		grep -vxF -- "${app_bad[$1]:-}" | sort -V | tail -n 1)
 	[ -n "$v" ] && echo "$d/$v"
 }
 for i in "${!games[@]}"; do
@@ -336,6 +349,10 @@ declare -A build_jobs=()
 # [SERVE_APP_ON_NEW_RELEASE] By index: the release that has asked for the
 # newest of an Aitta app, and the version it installed, until the switch
 app_asked=() app_fresh=()
+# [SERVE_SAVES_ON_UPDATE] By index: the versions that failed their trial, one a
+# line; when the trial began, and the version to go back to
+app_bad=() trial_since=() trial_from=()
+trial_seconds=${APP_TRIAL_SECONDS:-300}
 # A restarting server's stand-in, by index: its pid, and the log line
 # the server's own "Listening at" is to come after
 standins=() standin_from=()
@@ -440,6 +457,88 @@ app_path(){
 # The Aitta app's directory each server runs, by index
 running=()
 
+# [SERVE_SAVES_ON_UPDATE] The version of server i's app that last outlasted its
+# trial, and where it is kept
+app_last_file(){ echo "$base/app_version-${ids[$1]}-${ports[$1]}"; }
+app_last(){ cat "$(app_last_file "$1")" 2>/dev/null; }
+
+# Server i's saves when it runs app, <dir>/installed/<who>/<name>/<version>:
+# the server calls the app <who>.<name>
+app_saves_dir(){ # i app
+	local a=${2%/*}
+	echo "${users[$1]}/apps/$(basename "${a%/*}").${a##*/}/saves"
+}
+
+# Before server i, stopped, starts app: its first start of that version copies
+# saves/ (-a: a link the app put there stays a link) and begins the trial. False
+# when the copy failed. The copy is made once for a version, so a script started
+# again in a trial keeps the saves from before it.
+app_saves_copy(){ # i app
+	local i=$1 v=${2##*/} last saves keep
+	keep="$base/saves_before/${ids[$i]}-${ports[$i]}"
+	saves=$(app_saves_dir "$i" "$2")
+	last=$(app_last "$i")
+	[ "$last" = "$v" ] && return 0
+	if { [ -d "$saves" ] || [ -L "$saves" ]; } &&
+			[ "$(cat "$keep/for" 2>/dev/null)" != "$v" ]; then
+		say "copying ${games[$i]}'s saves before its first start of $v"
+		rm -rf "$keep.new"
+		mkdir -p "$keep.new"
+		if ! cp -a "$saves" "$keep.new/saves" ||
+				! echo "$v" > "$keep.new/for"; then
+			say "warning: could not copy $saves to $keep.new"
+			rm -rf "$keep.new"
+			return 1
+		fi
+		rm -rf "$keep"
+		mv "$keep.new" "$keep"
+	fi
+	if [ -z "$last" ]; then
+		# Nothing known to go back to: this one is what runs
+		echo "$v" > "$(app_last_file "$i")"
+	else
+		trial_since[$i]=$(date +%s)
+		trial_from[$i]=$last
+	fi
+}
+
+# A version that has outlasted its trial is the one to go back to from now on
+app_trial_tick(){ # i
+	local i=$1
+	[ -n "${trial_since[$i]:-}" ] || return
+	[ $(($(date +%s) - ${trial_since[$i]})) -ge "$trial_seconds" ] || return
+	say "${games[$i]} ${running[$i]##*/} stayed up for $trial_seconds s"
+	echo "${running[$i]##*/}" > "$(app_last_file "$i")"
+	trial_since[$i]=""
+}
+
+# Server i's app failed in its trial: back to the version before, with the saves
+# from before. With that version gone it runs on, restarted as any other.
+app_go_back(){ # i
+	local i=$1 v=${running[$1]##*/} from=${trial_from[$1]}
+	local saves
+	saves=$(app_saves_dir "$i" "${running[$i]}")
+	local keep="$base/saves_before/${ids[$i]}-${ports[$i]}"
+	trial_since[$i]=""
+	if [ ! -d "${running[$i]%/*}/$from" ]; then
+		say "warning: ${games[$i]} $v failed in its trial, and $from is gone"
+		return
+	fi
+	say "${games[$i]} $v failed in its trial; going back to $from"
+	if [ "$(cat "$keep/for" 2>/dev/null)" = "$v" ]; then
+		# Copied first: the saves are not touched unless the copy is whole
+		rm -rf "$keep.back"
+		if cp -a "$keep/saves" "$keep.back"; then
+			rm -rf "$saves"
+			mv "$keep.back" "$saves"
+		else
+			say "warning: could not restore $saves from $keep; they stay as $v left them"
+			rm -rf "$keep.back"
+		fi
+	fi
+	app_bad[$i]+="$v"$'\n'
+}
+
 start(){
 	local i=$1 game=${games[$1]} id=${ids[$1]} port=${ports[$1]}
 	local dir="$base/versions/$current" app
@@ -453,6 +552,25 @@ start(){
 		broken[$i]=$current
 		return 1
 	fi
+	local move=()
+	case $game in
+	*/*)
+		if ! app_saves_copy "$i" "$app"; then
+			local last
+			last=$(app_last "$i")
+			if [ -z "$last" ] || [ "${app##*/}" = "$last" ]; then
+				broken[$i]=$current
+				return 1
+			fi
+			say "staying on $game $last"
+			app_bad[$i]+="${app##*/}"$'\n'
+			app=$(aitta_dir "$i")
+		fi
+		# simplified: a -u in the server's options replaces this one; merging
+		# the two is the upgrade if a served app ever needs a launch
+		move=(-u "aitta_move_saves=1")
+		;;
+	esac
 	local args=()
 	[ -n "${opts[$i]}" ] && mapfile -t args <<< "${opts[$i]%$'\n'}"
 	say "starting $game on port $port on $current, user ${users[$i]}"
@@ -464,7 +582,7 @@ start(){
 		[ -f aitta_sdk/sdk.json ] && export BUILDAT_AITTA_CPP_SDK=$dir/aitta_sdk
 		BUILDAT_SHARE_PORT=1 exec bin/buildat_server \
 			-m "$app" -P "$port" \
-			-D "${users[$i]}" "${args[@]}") \
+			-D "${users[$i]}" "${move[@]}" "${args[@]}") \
 			> >(sed -u "s/^/[$id:$port] /" |
 				tee -a "$base/server-$id-$port.log") 2>&1 &
 	pids[$i]=$!
@@ -912,6 +1030,8 @@ follow_aitta(){
 		[ -z "$d" ] || [ "$d" = "${running[$i]}" ] ||
 			[ "$d" = "${app_new[$i]:-}" ] ||
 			[ "$d" = "${app_building[$i]:-}" ] && continue
+		# Failed its trial: not again until this script starts again
+		grep -qxF -- "${d##*/}" <<< "${app_bad[$i]:-}" && continue
 		# Only a newer one: the newest listed is older when the running one
 		# was delisted, and the start runs the newest installed anyway
 		[ "$(printf '%s\n' "${d##*/}" "${running[$i]##*/}" | sort -V |
@@ -983,12 +1103,14 @@ while true; do
 					standin_start "$i"
 				else
 					say "${games[$i]} on port ${ports[$i]} exited ($status); starting it again in 10 s"
+					[ "$status" != 0 ] && [ -n "${trial_since[$i]:-}" ] && app_go_back "$i"
 					sleep 10
 				fi
 			fi
 			start "$i"
 		fi
 		standin_check "$i"
+		app_trial_tick "$i"
 	done
 	# Quicker while a stand-in waits for its server
 	if [ -n "$(printf '%s' "${standins[@]:-}")" ]; then

@@ -571,6 +571,11 @@ which plays that version and moves the saves another version made to it
 
 On a dedicated server [AITTA_SERVE]
 -----------------------------------
+There the saves follow the version: the script starts an Aitta app with
+aitta_move_saves=1, copies saves/ before a version's first start, and goes
+back to the version before, with the copy, if the new one fails within 5
+minutes ([SERVE_SAVES_ON_UPDATE]; the script's header).
+
 util/serve_latest_release.sh takes <author>/<name> as a game: it runs the
 newest version installed in that server's user directory, as the server
 <author>.<name> (its saves under <user>/apps/<author>.<name>/). Install it
