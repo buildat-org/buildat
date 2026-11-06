@@ -113,7 +113,7 @@ if [ "${1:-}" = web ]; then
 	["click", "Button", "Delete it"], ["sync", 5000], ["frames", 3]
 ]
 J
-	"$here/util/web_drive.sh" chrome workbench "$t/steps.json" "$t/out" ||
+	"$here/util/web_drive.sh" "${WEB_BROWSER:-chrome}" workbench "$t/steps.json" "$t/out" ||
 		fail "the web drive ($t/out)"
 	for w in "placed prefab kit/hut as 3...3" "stamped kit/hut on 3" \
 			"webboss renamed the prefab webboss/bar to webboss/bar2 (0 copies)" \
