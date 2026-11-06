@@ -48,7 +48,9 @@ host(){
 	HOST=$!
 	CHECK_PIDS+=($HOST)
 	for _ in $(seq 450); do
-		grep -aq "Open to LAN: Open to the LAN at" "$t/$1" && break
+		# Its logger's too: the drive's own "command: wait_log" line says the
+		# rest, a moment before the address is there to read
+		grep -aq "accounts: Open to LAN: Open to the LAN at" "$t/$1" && break
 		kill -0 $HOST 2>/dev/null ||
 			fail "the host's drive ended ($(grep -a "Command sequence failed" "$t/$1" | tail -1))"
 		sleep 0.2
