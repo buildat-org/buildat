@@ -138,7 +138,7 @@ m+="screenshot $t/goal.png\nquit\n"
 hearth "$t/multi.log" "" "$m" BUILDAT_HEARTH_OPEN=1
 grep -aq "Lua runtime error" "$t/multi.log" && fail "a Lua error in the multi-line drive"
 # The text's line break is a line break in the log too
-focus(){ grep -a -A1 "scan $1: focus" "$t/multi.log" | grep -av "^--" | tr '\n' '|' | sed 's/.* size [0-9x]* //; s/|loka.*//; s/|$//'; }
+focus(){ grep -a -A1 "scan $1: focus" "$t/multi.log" | grep -av "^--" | tr '\n' '|' | sed 's/.* size [0-9x]* //; s/|[^|]*[0-9:]\{8\}\.[0-9]\{3\} [A-Z] .*//; s/|$//'; }
 wantm(){ [ "$(focus $1)" = "$2" ] || fail "$1: '$(focus $1)', not '$2'"; }
 wantm m1 'text "one two  |three four" cursor 20 selection 0+0'
 wantm m2 'text "one two  |three four" cursor 20 selection 0+20'
