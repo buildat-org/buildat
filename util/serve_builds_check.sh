@@ -7,15 +7,26 @@
 #   1. 0.0.1: the host answers 202 twice, then a tar of a --compile-only
 #      made with another cache: the server starts compiling nothing ("No
 #      need to recompile").
-#   2. 0.0.2: 422, its log said; the server stays on 0.0.1.
+#   2. 0.0.2: 422, its log said; the server stays on 0.0.1, 0.0.2's directory
+#      gone ([SERVE_REJECTED_KEEP]).
 #   3. 0.0.3: a tar with ../x.so: refused, nothing written outside, on
-#      0.0.1 still.
+#      0.0.1 still, 0.0.3's directory gone.
 #   4. [AITTA_KIT_IN_RELEASE] 0.0.4 has an aitta_sdk/ (the host answers
 #      404: compiled here): the server on it has BUILDAT_AITTA_CPP_SDK
 #      naming that version's SDK; on 0.0.1, which has none, it had none.
+#      The copy kept for a rollback is 0.0.1, not a refused one.
+#   5. [SERVE_REJECTED_KEEP] 0.0.5: refused with 0.0.4 running: its directory
+#      gone, 0.0.4 and 0.0.1 kept.
 #   0. First: a BUILDS_URL that is http to a name, not a private address
 #      (127.evil.com, 192.168.1.1.evil.com) or a path that looks like one,
 #      stops the script at once ([SEC_RUN5_LEFTOVERS]).
+#   0b. [SERVE_INSTALL_BACKOFF], archives with a stand-in for the server, so
+#      no Build is needed and no compile waited for: an archive that is not
+#      there is fetched after 1, 2, 4 s (POLL_SECONDS=1), the list read at every
+#      poll meanwhile; another archive, one that does not unpack, one with no
+#      server, are each fetched at the next poll with the wait back at 1 s; one
+#      missing once installs at the next try; a wait stops at 3600 s. A release
+#      refused: its directory gone, the running one kept, fetched once.
 #
 #   util/serve_builds_check.sh
 set -u
@@ -32,6 +43,96 @@ done
 echo "ok: BUILDS_URL to a name that looks private refused"
 groups=()
 trap 'for g in "${groups[@]}"; do kill -- -"$g" 2>/dev/null; done; check_cleanup' EXIT
+
+# 0b.
+HP0=$((29700 + RANDOM % 200))
+n0(){ echo "buildat-$1-check-linux-x86_64-web-precompiled"; }
+fake(){ # <version> [compile's status]: an archive whose server only says it listens
+	local d="$t/fake/$(n0 "$1")"
+	mkdir -p "$d/bin" "$d/apps/demo_board_game"
+	printf '#!/bin/sh\ncase "$*" in *--compile-only*) exit %s ;; esac\necho "Listening at fake"\nexec sleep 1000\n' \
+		"${2:-0}" > "$d/bin/buildat_server"
+	chmod +x "$d/bin/buildat_server"
+	tar -C "$t/fake" -czf "$t/fake/$(n0 "$1").tar.gz" "$(n0 "$1")"
+}
+list0(){ # <version>: the list with it first
+	echo "[{\"browser_download_url\": \"http://127.0.0.1:$HP0/$(n0 "$1").tar.gz\"}]" > "$t/b/l.tmp"
+	mv "$t/b/l.tmp" "$t/b/releases.json"
+}
+gets0(){ grep -c "GET /$(n0 "$1").tar.gz" "$t/b.log"; }
+mkdir -p "$t/b" "$t/fake"
+list0 1.1.1
+setsid python3 -m http.server $HP0 --bind 127.0.0.1 --directory "$t/b" > "$t/b.log" 2>&1 &
+groups+=($!)
+setsid env BUILDAT_SERVE_DIR="$t/s0" POLL_SECONDS=1 \
+	RELEASES_URL="http://127.0.0.1:$HP0/releases.json" \
+	"$here/util/serve_latest_release.sh" demo_board_game $((HP0 + 1)) "$t/u0" > "$t/s0.log" 2>&1 &
+groups+=($!)
+wait_for_log "$t/s0.log" "$(n0 1.1.1) did not install; trying it again in 8 s" 30 ||
+	fail "no 1, 2, 4, 8 s of waits ($t/s0.log)"
+for w in 1 2 4; do
+	grep -q "$(n0 1.1.1) did not install; trying it again in $w s" "$t/s0.log" ||
+		fail "no wait of $w s ($t/s0.log)"
+done
+[ "$(gets0 1.1.1)" = 4 ] || fail "1.1.1 fetched $(gets0 1.1.1) times, not 4 ($t/b.log)"
+# The list read at the polls of the 4 s wait, the archive not
+python3 - "$t/b.log" <<'PY' || fail "the polls in the 4 s wait ($t/b.log)"
+import sys
+gets = [l for l in open(sys.argv[1]) if "GET /" in l]
+at = [i for i, l in enumerate(gets) if ".tar.gz" in l]
+sys.exit(at[3] - at[2] - 1 < 3)
+PY
+echo "ok: an archive that is not there fetched after 1, 2, 4 s, the list read at every poll"
+list0 1.1.2
+echo junk > "$t/b/$(n0 1.1.2).tar.gz"
+wait_for_log "$t/s0.log" "$(n0 1.1.2) did not install; trying it again in 1 s" 5 ||
+	fail "another archive waited on ($t/s0.log)"
+grep -q "the archive would not unpack" "$t/s0.log" || fail "not said it would not unpack"
+mkdir -p "$t/fake/$(n0 1.1.3)/nothing"
+tar -C "$t/fake" -czf "$t/b/$(n0 1.1.3).tar.gz" "$(n0 1.1.3)"
+list0 1.1.3
+wait_for_log "$t/s0.log" "$(n0 1.1.3) did not install; trying it again in 1 s" 5 ||
+	fail "no server in the archive: remembered ($t/s0.log)"
+grep -q "no bin/buildat_server in the archive" "$t/s0.log" || fail "not said it has no server"
+echo "ok: another archive at the next poll, one that does not unpack and one with no server remembered too"
+list0 1.1.4
+wait_for_log "$t/s0.log" "$(n0 1.1.4) did not install; trying it again in 1 s" 5 ||
+	fail "1.1.4 missing not said ($t/s0.log)"
+fake 1.1.4
+mv "$t/fake/$(n0 1.1.4).tar.gz" "$t/b/"
+wait_for_log "$t/s0.log" "new version: $(n0 1.1.4)" 5 || fail "1.1.4 not retried ($t/s0.log)"
+wait_for_log "$t/s0.log" "starting demo_board_game on port .* on $(n0 1.1.4)" 10 ||
+	fail "1.1.4 not started ($t/s0.log)"
+echo "ok: an archive missing once installs at the next try"
+fake 1.1.6 1
+mv "$t/fake/$(n0 1.1.6).tar.gz" "$t/b/"
+list0 1.1.6
+wait_for_log "$t/s0.log" "demo_board_game does not compile on $(n0 1.1.6)" 10 ||
+	fail "1.1.6 not refused ($t/s0.log)"
+[ ! -e "$t/s0/versions/$(n0 1.1.6)" ] || fail "1.1.6's directory kept"
+[ -x "$t/s0/versions/$(n0 1.1.4)/bin/buildat_server" ] || fail "1.1.4 removed"
+# Three more polls of the list, no fetch of it
+from=$(grep -c "GET /releases.json" "$t/b.log")
+for _ in $(seq 50); do
+	[ "$(grep -c "GET /releases.json" "$t/b.log")" -ge $((from + 3)) ] && break
+	sleep 0.2
+done
+[ "$(grep -c "GET /releases.json" "$t/b.log")" -ge $((from + 3)) ] || fail "the polls stopped ($t/b.log)"
+[ "$(gets0 1.1.6)" = 1 ] || fail "1.1.6 fetched $(gets0 1.1.6) times ($t/b.log)"
+echo "ok: a release refused: its directory gone, the running one kept, not fetched again"
+kill -- -"${groups[-1]}"
+unset 'groups[-1]'
+list0 1.1.7
+setsid env BUILDAT_SERVE_DIR="$t/s1" POLL_SECONDS=5000 \
+	RELEASES_URL="http://127.0.0.1:$HP0/releases.json" \
+	"$here/util/serve_latest_release.sh" demo_board_game $((HP0 + 1)) "$t/u1" > "$t/s1.log" 2>&1 &
+groups+=($!)
+wait_for_log "$t/s1.log" "$(n0 1.1.7) did not install; trying it again in 3600 s" 10 ||
+	fail "the wait not at most 3600 s ($t/s1.log)"
+kill -- -"${groups[-1]}"
+unset 'groups[-1]'
+echo "ok: a wait stops at 3600 s"
+
 cd "$here/Build"
 
 # The modules, built with a cache of their own
@@ -78,7 +179,7 @@ class H(BaseHTTPRequestHandler):
 		if "-0.0.1-" in rel:
 			code = 202 if n <= 2 else 200
 			body = open(sys.argv[2], "rb").read() if code == 200 else b""
-		elif "-0.0.2-" in rel:
+		elif "-0.0.2-" in rel or "-0.0.5-" in rel:
 			code, body = 422, b"main.cpp:1: error: a check failing this\n"
 		elif "-0.0.3-" in rel:
 			code, body = 200, open(sys.argv[3], "rb").read()
@@ -123,6 +224,8 @@ wait_for_log "$t/serve.log" "does not compile on buildat-0.0.2" 120 ||
 grep -q "\[build demo_board_game\] main.cpp:1: error: a check failing this" "$t/serve.log" ||
 	fail "the build log not said ($t/serve.log)"
 grep -q "starting demo_board_game on port $P on buildat-0.0.2" "$t/serve.log" && fail "0.0.2 started"
+vers="$t/serve/versions"
+[ ! -e "$vers/buildat-0.0.2-check-linux-x86_64-web-precompiled" ] || fail "0.0.2's directory kept"
 echo "ok: a failed build said, 0.0.1 kept"
 
 # 3.
@@ -131,6 +234,7 @@ wait_for_log "$t/serve.log" "does not compile on buildat-0.0.3" 120 ||
 	fail "0.0.3's tar taken ($t/serve.log)"
 grep -q "0.0.3-.*: failed (not a tar of modules)" "$t/serve.log" || fail "the refusal ($t/serve.log)"
 [ ! -e "$t/servecache/apps/x.so" ] || fail "../x.so written"
+[ ! -e "$vers/buildat-0.0.3-check-linux-x86_64-web-precompiled" ] || fail "0.0.3's directory kept"
 curl -s -m 5 "http://127.0.0.1:$P/health" | grep -q . || fail "not serving"
 echo "ok: a tar reaching outside refused, 0.0.1 still serving"
 
@@ -142,4 +246,17 @@ want="BUILDAT_AITTA_CPP_SDK=$t/serve/versions/buildat-0.0.4-check-linux-x86_64-w
 for _ in $(seq 50); do [ "$(server_sdk)" = "$want" ] && break; sleep 0.2; done
 [ "$(server_sdk)" = "$want" ] || fail "on 0.0.4 the SDK is \"$(server_sdk)\", not $want"
 echo "ok: on 0.0.4 the server's BUILDAT_AITTA_CPP_SDK is that version's SDK"
+# The prune after the switch: the one before is the one that ran
+[ -x "$vers/buildat-0.0.1-check-linux-x86_64-web-precompiled/bin/buildat_server" ] ||
+	fail "the rollback copy, 0.0.1, is gone: $(ls "$vers")"
+
+# 5.
+release 0.0.5
+wait_for_log "$t/serve.log" "does not compile on buildat-0.0.5" 120 ||
+	fail "0.0.5's failure ($t/serve.log)"
+[ ! -e "$vers/buildat-0.0.5-check-linux-x86_64-web-precompiled" ] || fail "0.0.5's directory kept"
+[ -x "$vers/buildat-0.0.4-check-linux-x86_64-web-precompiled/bin/buildat_server" ] &&
+	[ -x "$vers/buildat-0.0.1-check-linux-x86_64-web-precompiled/bin/buildat_server" ] ||
+	fail "the running version or the rollback copy gone: $(ls "$vers")"
+echo "ok: a refused release's directory gone, the running one and the rollback copy kept"
 echo "PASS: every step above held"

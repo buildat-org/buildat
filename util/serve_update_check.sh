@@ -10,7 +10,8 @@
 # nothing; a native client (joined through the launcher) and a web client
 # in floorplanner are told why and are back in their plan without a
 # click. A release whose module does not compile leaves both on the old
-# one, and is not tried again.
+# one, and is not tried again; its directory is gone, t2 and t1 kept
+# ([SERVE_REJECTED_KEEP]).
 # [SERVE_UPDATE_POLITE] (UPDATE_MAX_WAIT 100 s): with the clients on, t2
 # waits; 40 s in both are told "The server updates to t2 in 60 s" and
 # floorplanner's Starport listing says updating; the restart comes 60 s
@@ -256,6 +257,10 @@ echo "$s" | grep -q "stopping" && fail "a server stopped for the broken t3 ($t/s
 [ "$(echo "$s" | grep -c "compiling floorplanner on buildat-t3")" = 1 ] ||
 	fail "t3 tried again ($t/serve.log)"
 grep -q t2 "$t/serve/current" || fail "current is not t2"
+[ ! -e "$t/serve/versions/buildat-t3-linux-x86_64-web-precompiled" ] || fail "t3's directory kept"
+[ -d "$t/serve/versions/buildat-t2-linux-x86_64-web-precompiled" ] &&
+	[ -d "$t/serve/versions/buildat-t1-linux-x86_64-web-precompiled" ] ||
+	fail "the running version or the rollback copy gone: $(ls "$t/serve/versions")"
 curl -s -o /dev/null -m 5 "http://127.0.0.1:$FP/" && curl -s -o /dev/null -m 5 "http://127.0.0.1:$VA/" ||
 	fail "a server is not answering after t3"
 echo "ok: a release that does not compile leaves both on t2, and is not tried again"

@@ -20,7 +20,11 @@
 # installs the app's newest listed release there and restarts onto it as
 # for a new engine release, with the same wait and warning; without it the
 # installed version stays. Not installed and no AITTA: the script says how
-# and stops. **A delisted release** ([SERVE_DELISTED]): each check also
+# and stops. **A new release installs the newest listed itself**
+# ([SERVE_APP_ON_NEW_RELEASE]), with its own bin/buildat, once, before it
+# compiles the app: an older release's may be unable to fetch one that the new
+# release needs. The server stays on what it runs until the switch; if the
+# release is refused, what it installed is removed again. **A delisted release** ([SERVE_DELISTED]): each check also
 # reads the Aitta's list of what it delisted, and why. The running
 # release delisted as malware or CSAM is stopped, a stand-in on its port
 # saying it was withdrawn by its Aitta, until a newer listed release is
@@ -42,7 +46,13 @@
 # **A new release** ([SERVE_UPDATE_SMOOTH]) is downloaded and unpacked,
 # and each server's app compiled on it (--compile-only) while the old one
 # serves. A compile that fails keeps every server on the old version, and
-# that release is not tried again; a newer one is. **The restart waits
+# that release is not tried again; a newer one is. Its directory is deleted
+# ([SERVE_REJECTED_KEEP]), the running version and the one before stay; this
+# script started again downloads it once more, which is the retry after a cause
+# that passed. **A download that fails** ([SERVE_INSTALL_BACKOFF]), or an
+# archive that does not unpack or has no server, is tried again after
+# POLL_SECONDS, then twice that, up to an hour, as the log says; a different
+# archive or a success starts it over. **The restart waits
 # for nobody to be on** ([SERVE_UPDATE_POLITE]): every server's /health
 # says 0 players, or UPDATE_MAX_WAIT seconds (1800) have passed since the
 # release compiled. A minute before that, whoever is on is told
@@ -312,6 +322,9 @@ pids=() broken=()
 app_new=()
 # A release some server's app would not compile on: not tried again
 bad_release=""
+# [SERVE_INSTALL_BACKOFF] The archive that would not install, its wait, and
+# when it is tried next. In memory only: a restart tries it at once
+install_failed="" install_wait=0 install_next=0
 # A release compiled and waiting for a quiet moment: its name, when it
 # was ready, and when whoever was on was warned
 pending="" pending_at=0 warned_at=0
@@ -320,6 +333,9 @@ pending="" pending_at=0 warned_at=0
 # the build host's asks running, by their result file
 building="" built=() app_building=()
 declare -A build_jobs=()
+# [SERVE_APP_ON_NEW_RELEASE] By index: the release that has asked for the
+# newest of an Aitta app, and the version it installed, until the switch
+app_asked=() app_fresh=()
 # A restarting server's stand-in, by index: its pid, and the log line
 # the server's own "Listening at" is to come after
 standins=() standin_from=()
@@ -428,6 +444,10 @@ start(){
 	local i=$1 game=${games[$1]} id=${ids[$1]} port=${ports[$1]}
 	local dir="$base/versions/$current" app
 	app=$(app_path "$i" "$current")
+	# A version a release on its way installed is for that release: it may not
+	# run on this one
+	[ -n "$app" ] && [ "$app" = "${app_fresh[$i]:-}" ] && [ -n "${running[$i]:-}" ] &&
+		app=${running[$i]}
 	if [ -z "$app" ]; then
 		say "$current has no $game"
 		broken[$i]=$current
@@ -582,6 +602,61 @@ prepare(){ # i release version
 	return 2
 }
 
+# [SERVE_APP_ON_NEW_RELEASE] Server i's Aitta app's newest listed version,
+# installed by the release being built, which compiles it next. Its own
+# bin/buildat: the running one's install may be what is broken, and
+# follow_aitta leaves the app alone meanwhile. What the server ran stays what it
+# runs, so that a restart before the switch finds it. A version follow_aitta had
+# waiting is the release's now: its compile on the old release failing would
+# remove it. A failed install: said, and on with what is there.
+app_for_release(){ # i
+	local i=$1 before after
+	case ${games[$i]} in */*) ;; *) return ;; esac
+	[ -n "${AITTA:-}" ] && [ "${app_asked[$i]:-}" != "$building" ] || return
+	app_asked[$i]=$building
+	app_building[$i]="" app_new[$i]=""
+	before=$(aitta_dir "$i")
+	say "installing ${games[$i]}'s newest from $AITTA for $building"
+	"versions/$building/bin/buildat" aitta install "$AITTA" "${games[$i]}" \
+			"${users[$i]}" > /dev/null ||
+		say "warning: $building could not install ${games[$i]} from $AITTA;" \
+			"going on with ${before:-nothing}"
+	after=$(aitta_dir "$i")
+	[ -n "$after" ] && [ "$after" != "$before" ] || return
+	app_fresh[$i]=$after
+	[ -z "${running[$i]:-}" ] && running[$i]=$before
+	say "${games[$i]} ${after##*/} installed for $building; the server stays on" \
+		"${before:+${before##*/} }until the switch"
+}
+
+# [SERVE_REJECTED_KEEP] The release being built, refused: what it fetched goes.
+# Its build host's asks are stopped first, or one unpacks into its directory
+# after it. bad_release is not saved: a restart downloading it once more is the
+# retry after a cause that passed.
+reject_building(){
+	local i f
+	bad_release=$building
+	for f in "${!build_jobs[@]}"; do
+		case $f in *~"$building"~*)
+			kill "${build_jobs[$f]}" 2>/dev/null
+			wait "${build_jobs[$f]}" 2>/dev/null
+			unset "build_jobs[$f]"
+			rm -f "$f" "$f.tmp" "$f.body" "$f.head" ;;
+		esac
+	done
+	for i in "${!games[@]}"; do
+		if [ -n "${app_fresh[$i]:-}" ]; then
+			say "${games[$i]} ${app_fresh[$i]##*/} removed with $building"
+			rm -rf "${app_fresh[$i]}"
+		fi
+		[ -n "${standin_build[$i]:-}" ] && standin_stop "$i"
+	done
+	app_fresh=() app_asked=()
+	# Never the version running
+	[ "$building" != "$current" ] && rm -rf "versions/$building"
+	building="" built=()
+}
+
 # The release being built onto every server: each once its modules are in
 # (or at once without a build host); every one compiled makes it pending
 build_release(){
@@ -589,6 +664,7 @@ build_release(){
 	v=$(release_version "$building")
 	for i in "${!games[@]}"; do
 		[ -n "${built[$i]:-}" ] && continue
+		app_for_release "$i"
 		# An Aitta app's ask says its version, installed first if it is
 		# not: without one the host took it for a release app it does
 		# not know ([BUILDS_AITTA_ASK])
@@ -608,11 +684,7 @@ build_release(){
 		fi
 		say "${games[$i]} does not compile on $building; staying on" \
 			"${current:-nothing} until a newer release"
-		bad_release=$building
-		building="" built=()
-		for i in "${!games[@]}"; do
-			[ -n "${standin_build[$i]:-}" ] && standin_stop "$i"
-		done
+		reject_building
 		return
 	done
 	[ "${#built[@]}" = "${#games[@]}" ] || return
@@ -706,6 +778,7 @@ update(){
 	local old=$current i
 	if [ -n "$pending" ]; then
 		current=$pending
+		app_fresh=() app_asked=()
 		local v
 		v=$(release_version "$pending")
 		for i in "${!games[@]}"; do
@@ -829,6 +902,8 @@ follow_aitta(){
 				delist_said[$i]="${running[$i]##*/} $why" ;;
 			esac
 		fi
+		# A release on its way installs and switches to the newest itself
+		[ -n "$building$pending" ] && continue
 		if ! d=$("$base/versions/$current/bin/buildat" aitta install \
 				"$AITTA" "${games[$i]}" "${users[$i]}" 2>/dev/null); then
 			say "could not read ${games[$i]}'s releases from $AITTA"
@@ -865,14 +940,25 @@ while true; do
 		url=$(latest_url)
 		if [ -z "$url" ]; then
 			say "could not read the releases of $repo; keeping ${current:-nothing}"
-		elif [ "$(basename "$url" .tar.gz)" != "$current" ]; then
+		else
 			name=$(basename "$url" .tar.gz)
-			[ "$name" != "$bad_release" ] && [ "$name" != "$pending" ] &&
-				[ "$name" != "$building" ] &&
-				name=$(install "$url") || name=""
-			if [ -n "$name" ]; then
-				say "new version: $name"
-				building=$name built=()
+			[ "$name" = "$install_failed" ] || install_failed="" install_wait=0 install_next=0
+			if [ "$name" != "$current" ] && [ "$name" != "$bad_release" ] &&
+					[ "$name" != "$pending" ] && [ "$name" != "$building" ] &&
+					[ "$now" -ge "$install_next" ]; then
+				if [ -n "$(install "$url")" ]; then
+					install_failed="" install_wait=0 install_next=0
+					say "new version: $name"
+					building=$name built=()
+				else
+					# From this poll, so that a wait of one poll is the next one
+					install_failed=$name
+					install_wait=$((install_wait ? install_wait * 2 : poll))
+					[ "$install_wait" -gt 3600 ] && install_wait=3600
+					install_next=$((now + install_wait))
+					say "$name did not install; trying it again in $install_wait s," \
+						"at $(date -d "@$install_next" '+%F %T')"
+				fi
 			fi
 		fi
 		[ -n "${AITTA:-}" ] && [ -n "$current" ] && follow_aitta
@@ -907,6 +993,9 @@ while true; do
 	# Quicker while a stand-in waits for its server
 	if [ -n "$(printf '%s' "${standins[@]:-}")" ]; then
 		sleep 1
+	# A poll under the 5 s is kept (a check's)
+	elif [ "$poll" -ge 1 ] && [ "$poll" -lt 5 ]; then
+		sleep "$poll"
 	else
 		sleep 5
 	fi

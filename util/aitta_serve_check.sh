@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~2 min (2026-10-09)
+# cost: ~4 min (2026-11-06)
 # covers: util/serve_latest_release.sh src/client/main.cpp apps/aitta/main/main.cpp src/interface/web_brand.h
 # [AITTA_SERVE]: a local Aitta with tester/pt (apps/demo_board_game) 1.0.0.
 #   1. buildat aitta install by name: the newest, @1.0.0 said installed
@@ -22,6 +22,14 @@
 #      after the releases and before Report, "On the client" (unreviewed:
 #      the setting named) then "On a dedicated server" with the commands,
 #      neither open.
+#   7. [SERVE_APP_ON_NEW_RELEASE] 1.0.2 installed, on a release whose
+#      bin/buildat cannot install (said, and it starts on 1.0.2). 1.0.3
+#      published, and a release that can install: it installs 1.0.3 once while
+#      the build host keeps it waiting, the server that dies meanwhile comes
+#      back on 1.0.2, then it compiles and switches, not called an app update.
+#      A release that does not compile: its directory and the 1.0.4 it
+#      installed gone, fetched once; the running release then installs 1.0.4 as
+#      an app update.
 #
 #   util/aitta_serve_check.sh
 set -u
@@ -116,17 +124,21 @@ echo "ok: refused with the install command"
 # 4. Following the Aitta, with a build host that logs its asks and
 # offers nothing
 setsid python3 -c '
-import sys, urllib.parse
+import os, sys, urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 class H(BaseHTTPRequestHandler):
 	def do_GET(self):
 		q = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
 		print("ask", sorted(q.items()), flush=True)
-		self.send_response(404)
+		# Step 7: 0.0.3 is building until the check says otherwise
+		wait = "-0.0.3-" in q.get("release", "") and not os.path.exists(sys.argv[2])
+		self.send_response(202 if wait else 404)
+		if wait:
+			self.send_header("Retry-After", "1")
 		self.send_header("Content-Length", "0")
 		self.end_headers()
 HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
-' $BP > "$t/builds.log" 2>&1 &
+' $BP "$t/built" > "$t/builds.log" 2>&1 &
 groups+=($!)
 setsid env AITTA=127.0.0.1:$P BUILDS_URL="http://127.0.0.1:$BP/build" \
 	"${serve[@]}" > "$t/serve.log" 2>&1 &
@@ -201,4 +213,107 @@ for x in order:
 if "<details open" in s:
 	sys.exit("a fold open")
 PY
-echo "PASS: install by name and version, refusals listing the versions, the page's commands; the script refuses without an install, installs with AITTA, follows 1.0.1 keeping the save, stays without AITTA; the page's newest, older folded, Install's two folds before Report"
+echo "ok: the page's order"
+
+# 7.
+kill -- -"${groups[-1]}"
+g=${groups[-1]}
+unset 'groups[-1]'
+for _i in $(seq 50); do
+	kill -0 -- -"$g" 2>/dev/null || break
+	sleep 0.2
+done
+release7(){ # <version>: a release of the binaries one by one, each a file of bin/
+	r="$t/rel/buildat-$1-check-linux-x86_64-web-precompiled"
+	mkdir -p "$r/apps" "$r/bin"
+	for e in 3rdparty Build builtin client extensions src VERSION web util; do
+		ln -s "$here/$e" "$r/$e"
+	done
+	ln -s "$here/Build/bin/buildat_server" "$here/Build/bin/buildat" "$r/bin/"
+}
+publish7(){ # the list, the release first
+	tar -C "$t/rel" -czf "$r.tar.gz" "$(basename "$r")"
+	echo "[{\"browser_download_url\": \"http://127.0.0.1:$HP/$(basename "$r").tar.gz\"}]" \
+		> "$t/rel/l.tmp"
+	mv "$t/rel/l.tmp" "$t/rel/releases7.json"
+}
+n7(){ echo "buildat-$1-check-linux-x86_64-web-precompiled"; }
+release7 0.0.2
+rm "$r/bin/buildat"
+printf '#!/bin/sh\n[ "$1" = aitta ] && { echo "this release cannot" >&2; exit 1; }\nexec "%s" "$@"\n' "$b" > "$r/bin/buildat"
+chmod +x "$r/bin/buildat"
+publish7
+"$b" aitta install 127.0.0.1:$P tester/pt@1.0.2 "$t/u2" > /dev/null 2>&1 || fail "the install of 1.0.2"
+SP2=$((P + 4))
+setsid env BUILDAT_SERVE_DIR="$t/serve7" POLL_SECONDS=5 UPDATE_MAX_WAIT=60 AITTA=127.0.0.1:$P \
+	BUILDS_URL="http://127.0.0.1:$BP/build" RELEASES_URL="http://127.0.0.1:$HP/releases7.json" \
+	"$here/util/serve_latest_release.sh" tester/pt $SP2 "$t/u2" > "$t/serve7.log" 2>&1 &
+groups+=($!)
+s7="$t/serve7.log"
+slog7="$t/serve7/server-tester.pt-$SP2.log"
+wait_for_log "$slog7" "Listening at" 180 || fail "1.0.2 did not start ($s7)"
+grep -q "warning: $(n7 0.0.2) could not install tester/pt from 127.0.0.1:$P; going on with .*/1.0.2" "$s7" ||
+	fail "the failed install not said ($s7)"
+pgrep -f "installed/tester/pt/1.0.2" > /dev/null || fail "not on 1.0.2"
+echo "ok: a release that cannot install goes on with what is installed"
+publish 1.0.3
+wait_for_log "$s7" "could not read tester/pt's releases" 30 || fail "the old release's install ($s7)"
+release7 0.0.3
+publish7
+wait_for_log "$s7" "tester/pt 1.0.3 installed for $(n7 0.0.3); the server stays on 1.0.2" 30 ||
+	fail "0.0.3 did not install 1.0.3 ($s7)"
+# Passes of build_release while the host says building, and a server that dies
+wait_for_log "$t/builds.log" "0.0.3-.*'version', '1.0.3'" 30 || fail "not asked for 1.0.3 ($t/builds.log)"
+from=$(grep -ac "Listening at" "$slog7")
+kill "$(pgrep -f "installed/tester/pt/1.0.2" | head -1)" || fail "no server to stop"
+for _i in $(seq 150); do
+	[ "$(grep -ac "Listening at" "$slog7")" -gt "$from" ] && break
+	sleep 0.2
+done
+[ "$(grep -ac "Listening at" "$slog7")" -gt "$from" ] || fail "not back after it died ($s7)"
+pgrep -f "installed/tester/pt/1.0.2" > /dev/null && ! pgrep -f "installed/tester/pt/1.0.3" > /dev/null ||
+	fail "not back on 1.0.2 before the switch ($s7)"
+echo "ok: 1.0.3 installed by the new release; a server that died meanwhile back on 1.0.2"
+: > "$t/built"
+wait_for_log "$s7" "starting tester/pt on port $SP2 on $(n7 0.0.3)" 180 || fail "no switch to 0.0.3 ($s7)"
+for _i in $(seq 300); do
+	pgrep -f "installed/tester/pt/1.0.3" > /dev/null && break
+	sleep 0.2
+done
+pgrep -f "installed/tester/pt/1.0.3" > /dev/null || fail "not on 1.0.3 ($s7)"
+[ "$(grep -c "installing tester/pt's newest from .* for $(n7 0.0.3)" "$s7")" = 1 ] ||
+	fail "installed other than once ($s7)"
+c=$(grep -n "compiling tester/pt on $(n7 0.0.3)" "$s7" | head -1 | cut -d: -f1)
+st=$(grep -n "stopping tester/pt" "$s7" | tail -1 | cut -d: -f1)
+[ -n "$c" ] && [ -n "$st" ] && [ "$c" -lt "$st" ] || fail "not compiled before it stopped ($s7)"
+# Two polls after the switch: no second restart, no app update of what it runs
+polls7(){
+	local from n
+	from=$(grep -c "GET /releases7.json" "$t/http.log")
+	for n in $(seq 100); do
+		[ "$(grep -c "GET /releases7.json" "$t/http.log")" -ge $((from + $1)) ] && return 0
+		sleep 0.2
+	done
+	return 1
+}
+n=$(grep -ac "Listening at" "$slog7")
+polls7 2 || fail "the polls stopped"
+[ "$(grep -ac "Listening at" "$slog7")" = "$n" ] || fail "restarted again ($s7)"
+grep -q "tester/pt 1.0.3 is ready\|does not compile\|tester/pt 1.0.3 removed" "$s7" && fail "misreported ($s7)"
+echo "ok: compiled, then switched to 1.0.3 on 0.0.3, once"
+publish 1.0.4
+release7 0.0.4
+rm "$r/bin/buildat_server"
+printf '#!/bin/sh\ncase "$*" in *--compile-only*) exit 1 ;; esac\nexec "%s_server" "$@"\n' "$b" > "$r/bin/buildat_server"
+chmod +x "$r/bin/buildat_server"
+publish7
+wait_for_log "$s7" "tester/pt does not compile on $(n7 0.0.4)" 60 || fail "0.0.4 not refused ($s7)"
+grep -q "tester/pt 1.0.4 removed with $(n7 0.0.4)" "$s7" || fail "1.0.4 not removed ($s7)"
+[ ! -e "$t/serve7/versions/$(n7 0.0.4)" ] || fail "0.0.4's directory kept"
+[ -d "$t/serve7/versions/$(n7 0.0.3)" ] && [ -d "$t/serve7/versions/$(n7 0.0.2)" ] ||
+	fail "the running version or the rollback copy gone: $(ls "$t/serve7/versions")"
+pgrep -f "installed/tester/pt/1.0.3" > /dev/null || fail "1.0.3 stopped by the refusal"
+wait_for_log "$s7" "tester/pt 1.0.4 is ready" 60 || fail "1.0.4 not followed after the refusal ($s7)"
+[ "$(grep -c "GET /$(n7 0.0.4).tar.gz" "$t/http.log")" = 1 ] || fail "0.0.4 fetched again ($t/http.log)"
+echo "ok: a release that does not compile leaves with what it installed, then the app follows on the running one"
+echo "PASS: install by name and version, refusals listing the versions, the page's commands; the script refuses without an install, installs with AITTA, follows 1.0.1 keeping the save, stays without AITTA; the page's newest, older folded, Install's two folds before Report; a new release installs the newest app itself, once, keeping the server on its own until the switch"
