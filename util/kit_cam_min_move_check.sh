@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~25 s (2026-11-02)
-# covers: builtin/kit/client_lua/editor.lua apps/workbench/**
+# covers: builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua apps/workbench/**
 # [KIT_CAM_MIN_MOVE] The editor's 3D camera under the surface: a fresh
 # save on Workbench, a flat World, the camera put 3 cells under the
 # ground looking level along +z:

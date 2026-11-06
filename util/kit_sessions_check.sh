@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-03)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/arena.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/module.lua builtin/voxelworld/** apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/arena.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/module.lua builtin/voxelworld/** apps/workbench/**
 # [KIT_SESSIONS_1] (kit_plan stage 7, slice 1) Sessions beside the
 # default round. A fresh save on Workbench, the admin:
 #   1. Ended: a World, a stone at (3,1,3), a kit/voxel_replace on that

@@ -3,7 +3,7 @@
 # tier: full
 # cost: ~30 s, more with a cold module cache (2026-11-04)
 # covers: 3rdparty/Urho3D/Source/Urho3D/UI/UIElement.cpp
-# drives: builtin/kit/client_lua/editor.lua
+# drives: builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua
 # An element removed while a DropDownList under it has its popup open
 # ([UI_DROPDOWN_REMOVE_CRASH]): the client crashed (SIGSEGV in
 # ~DropDownList -> Menu::ShowPopup -> UI::SetModalElement). Kit's

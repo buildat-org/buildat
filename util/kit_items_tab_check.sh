@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-04)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua builtin/kit/client_lua/hands.lua builtin/kit/types/region.lua builtin/kit/types/item_giver.lua builtin/kit/types/pickup.lua apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/hands.lua builtin/kit/types/region.lua builtin/kit/types/item_giver.lua builtin/kit/types/pickup.lua apps/workbench/**
 # [KIT_ITEMS_TAB] [KIT_TEAM_LEFTOVERS] The editor's Items tab on a fresh
 # Workbench save, the admin (kitboss) in edit mode, Ended:
 #   1. the tab lists Kit's item types by group (Tools, Weapons, Ammo);

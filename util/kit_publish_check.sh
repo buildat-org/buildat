@@ -320,6 +320,13 @@ echo "ok: the prefab's package installed on another server, its dependency first
 
 # 4. alice/lamps 2.0.0, its migrate; carol upgrades
 lamp 2
+# [KIT_PUBLISH_PREFAB_COUNT] 2.0.0 carries a prefab beside its type: counted
+cat > "$t/lamps/types/lamp_pair.prefab.json" <<'EOF'
+{"format": "kit_prefab", "version": 1, "entities": [
+	{"id": 1, "pos": [0, 0, 0], "components": [{"type": "alice/lamp"}]},
+	{"id": 2, "pos": [2, 0, 0], "components": [{"type": "alice/lamp"}]}
+]}
+EOF
 manifest "$t/lamps" lamps 2.0.0
 publish "$t/lamps"
 # ([WB_EDITOR_VIEW_MEMORY]) carol left B in edit mode: back in it at once
@@ -337,7 +344,7 @@ EOF
 BUILDAT_JOIN_CREATE= BUILDAT_JOIN_NAME=carol client carol upgrade
 want "$t/srvb.log" "Entity 4: $fp/lamp's migrate from version 1: {\"level\":70,\"own_look\":true}" \
 	"Entity 4's $fp/lamp upgraded from version 1 to 2" \
-	"carol upgraded alice/lamps from 1.0.0 to 2.0.0: 1 types, 0 prefabs, 0 voxel types, 1 entities upgraded"
+	"carol upgraded alice/lamps from 1.0.0 to 2.0.0: 1 types, 1 prefabs, 0 voxel types, 1 entities upgraded"
 stop
 server srvb2 "$t/b"
 # Kit hosts after "Listening at"

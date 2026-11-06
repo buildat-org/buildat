@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~40 s (2026-11-04)
-# covers: builtin/kit/client_lua/editor.lua apps/workbench/**
+# covers: builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua apps/workbench/**
 # [WB_EDITOR_VIEW_MEMORY] Workbench remembers how the user left the editor
 # in a project, on the user's machine: kitboss on a fresh project goes to
 # edit mode, stops the game, goes to 3D with the camera put somewhere and

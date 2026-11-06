@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-01)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/world.h builtin/kit/types/world.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_data/KitVoxel* apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/world.h builtin/kit/types/world.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_data/KitVoxel* apps/workbench/**
 # [KIT_VOXEL_FORMAT] (kit_plan 4g2) Kit's voxel format on Workbench: id,
 # param (a shape's facing), tint and sky light in one word; shapes as
 # voxels of their own ("kit/stone:stair"); the World's sky_light. A fresh

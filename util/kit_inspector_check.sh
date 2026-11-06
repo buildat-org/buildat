@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~30 s, more with a cold module cache (2026-10-31)
-# covers: builtin/kit/client_lua/editor.lua extensions/ui_utils/init.lua
-# drives: builtin/kit/client_lua/editor.lua
+# covers: builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua extensions/ui_utils/init.lua
+# drives: builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua
 # Kit's inspector on Workbench, the admin (kitboss, by the setup code) in
 # edit mode with a kit/controls selected (user's playtest, 2026-10-31):
 #   - its 23 parameters fit a 700 px screen: Apply is clicked there

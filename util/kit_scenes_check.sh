@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-02)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/teleporter.lua builtin/kit/client_lua/editor.lua builtin/replicate/** builtin/voxelworld/** builtin/heightmap/** apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/teleporter.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/replicate/** builtin/voxelworld/** builtin/heightmap/** apps/workbench/**
 # [KIT_SCENES] (kit_plan 4k) Scenes, each its own World; portals. A fresh
 # save on Workbench, the admin Ended, a World on the main scene:
 #   1. A stone in the main scene. A new scene "cave" with the World

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-02)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/client_lua/editor.lua apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua apps/workbench/**
 # [KIT_PREFAB_VOXELS] (kit_plan 4i) Prefabs with voxels; a copy and paste
 # of voxels. A fresh save on Workbench, the admin Ended, a World (flat
 # grassland):

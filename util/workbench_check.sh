@@ -3,7 +3,7 @@
 # tier: full
 # cost: ~1 min, ~2 min with a cold module cache (2026-10-30)
 # covers: apps/workbench/** builtin/kit/** extensions/pause_menu/** builtin/world_menu/**
-# drives: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua
+# drives: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua
 # [KIT] stages 4 and 4b, Workbench and Kit's starter set (kit/*), on
 # scripted clients, the server's game clock at CHECK_RATE (the timer's
 # seconds are the game's):
@@ -119,8 +119,10 @@ if [ "${1:-}" = web ]; then
 	# the first Escape puts away) and placed in play, in a region (6, at
 	# about (-1, 1, 2), clicked in from the palette in the plan) letting all
 	# place ([KIT_BUILDER_PLAY_RULES]: out of edit mode the admin plays by
-	# the rules); the palette's NPC dragged by label ([KIT_SCENES]' Scene
-	# dropdown moved its rows)
+	# the rules), under kit/game_rules' building "creative" (8, placed at once
+	# from the palette and set in the inspector: inventory by default,
+	# [KIT_INVENTORY_PLAY], and frost is in no slot); the palette's NPC dragged
+	# by label ([KIT_SCENES]' Scene dropdown moved its rows)
 	check_tmp workbench_web; t=$CHECK_TMP
 	stub="(function(){ var held = null, refuse = false;
  Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }});
@@ -215,6 +217,13 @@ if [ "${1:-}" = web ]; then
 	["mouse", 800, 450], ["frames", 2], $(for _ in $(seq 8); do printf '["wheel", 800, 450, 100], ["frames", 1], '; done)
 	["click", "Button", "Apply"], ["sync", 5000], ["frames", 3],
 	["shot", "\${OUT}/region.png"],
+	["mouse", 100, 400], ["frames", 2], $(for _ in $(seq 8); do printf '["wheel", 100, 400, -100], ["frames", 1], '; done)
+	["click", "Button", "kit/game_rules"], ["waitlog", "the palette.s menu of kit/game_rules", 10], ["frames", 3],
+	["click", "Button", "Place"], ["waitlog", "kit editor: selected 8", 10], ["frames", 3],
+	["click", "Button", "Behaviour"], ["waitlog", "kit editor: parameters 8/1 kit/game_rules: chips All Behaviour HUD, showing behaviour", 10], ["frames", 3],
+	["click", "DropDownList", "▼", 1090, 324], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10], ["frames", 3],
+	["click", "Text", "creative"], ["waitlog", "kit editor: 8/[0-9]+ building = creative", 10],
+	["click", "Button", "Apply"], ["sync", 5000], ["frames", 3],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Play mode", 600, 339], ["waitlog", "kit editor: edit mode off", 10], ["frames", 5],
 	["mouse", 600, 400], ["frames", 2], ["mouse", 600, 560], ["frames", 5],
@@ -237,6 +246,7 @@ J
 			"webboss uploaded texture kit/up/" \
 			"webboss made voxel type webboss/frost version 1 (kit/up/" \
 			"An edit by webboss: set 7's kit/region place to \"all\"" \
+			"An edit by webboss: set 8's kit/game_rules building to \"creative\"" \
 			"workbench: webboss placed webboss/frost ("; do
 		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
 	done

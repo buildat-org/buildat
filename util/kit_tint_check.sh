@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-01)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/world.h builtin/kit/materials.json builtin/kit/client_lua/editor.lua builtin/kit/client_lua/module.lua builtin/kit/client_data/KitVoxel* builtin/kit/client_data/*.png src/impl/mesh.cpp src/interface/voxel*.h apps/workbench/main/main.cpp apps/workbench/main/client_data/brick.png apps/workbench/main/client_data/glass.png
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/world.h builtin/kit/materials.json builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/module.lua builtin/kit/client_data/KitVoxel* builtin/kit/client_data/*.png src/impl/mesh.cpp src/interface/voxel*.h apps/workbench/main/main.cpp apps/workbench/main/client_data/brick.png apps/workbench/main/client_data/glass.png
 # [KIT_TINT_PALETTE] [KIT_TINT_MASK] [KIT_TINT_NATURE] [KIT_TINT_MATERIALS]
 # Tint palettes on Workbench: a fresh save, the admin Ended, a flat World
 # (no decorations). The editor's tints of a material (its dropdown's

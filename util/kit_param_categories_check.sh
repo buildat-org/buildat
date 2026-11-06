@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~30 s, more with a cold module cache (2026-11-05)
-# covers: builtin/kit/client_lua/editor.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/signals.lua builtin/kit/kit.cpp builtin/kit/types/*.lua
+# covers: builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/signals.lua builtin/kit/kit.cpp builtin/kit/types/*.lua
 # [KIT_PARAM_CATEGORIES] The inspector's categories on Workbench. kitboss (the
 # admin, 1024x700), a kit/flag, a kit/timer, a kit/ui_bar, a kit/game_rules and
 # a type of the check's own with a wrong cat:
