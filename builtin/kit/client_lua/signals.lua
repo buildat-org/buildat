@@ -6,7 +6,9 @@
 -- a table, over the whole window under the top bar (a flag with 18 links did
 -- not fit the inspector). editor.lua runs this file and puts it at NT.sg.
 --   - Left: the entities as a tree, as the Entities tab's (all three of its
---     lists in one), a filter over them (id, name, type); the symbol of one with
+--     lists in one; [KIT_SIGNALS_UI_GROUP] the Scene tab's UI elements, what is
+--     under a panel with it, in a group of their own), a filter over them (id,
+--     name, type); the symbol of one with
 --     a link, either way, in the signals' cyan. "Add from palette" above them
 --     pops up the palette's items ([KIT_PALETTE_MENU], SG.palette_popup)
 --   - Middle: the selected one's name to edit, and its links, in both
@@ -17,11 +19,13 @@
 --     selects it. "+ Add link" picks an output, a target and an input here
 --     (dropdowns)
 --   - Right: the inspector (editor.lua's: in this view its parameters, Switch
---     parent and Un-parent, and Try alone; armed, a click in the list picks the
---     parent, over the list what it says), under it a View3D of the scene from
---     a camera of its own, on
---     the selected entity; one with no position (or none): what the walk
---     camera sees. With an entity of a HUD element selected, Kit's HUD is laid
+--     parent and Un-parent, its position, and Try alone; armed, a click in the
+--     list picks the parent, over the list what it says), under it a View3D of
+--     the scene from a camera of its own, on the selected entity
+--     ([KIT_SIGNALS_VIEWPORT] orbited by the right drag or a finger and zoomed by
+--     the wheel or a pinch begun on it; the angle and the distance kept from one
+--     entity to the next); one with no position (or none): what the walk camera
+--     sees, no orbit. With an entity of a HUD element selected, Kit's HUD is laid
 --     out in that rectangle (ui.lua's hud_box, by kit.hud_area()) and over it,
 --     shown and not clicked, the element on an amber rectangle
 --   - Where an entity is listed its name stands after its id; one still
@@ -37,8 +41,8 @@
 -- world is drawn once, in the View3D; under the panels a viewport of an empty
 -- scene, on the same render path: what reads the renderer's first viewport
 -- (voxel_light's, the sky's parameters) reaches the View3D's picture through it.
--- simplified: the camera jumps to the selected entity from one fixed angle,
--- no orbit or zoom, and may stand in a wall; a drag in it is the upgrade.
+-- simplified: the orbit's camera may stand in a wall or under the ground; a ray
+-- from the entity shortening its distance is the upgrade.
 -- The View3D's texture is in UI units, soft under a UI scale above 1.
 -- The entity's log window is not shown in this view.
 -- The HUD in the viewport is shown, not clicked or dragged; the HUD view is for
@@ -190,12 +194,42 @@ local function linked_ids()
 	return set, ids
 end
 
-function SG.rows()
+-- [KIT_SIGNALS_UI_GROUP] A UI element as the server's is_ui_element has it: no
+-- position and a type with a `ui`
+local function is_ui_element(e)
+	if e.pos then
+		return false
+	end
+	for _, c in ipairs(e.components or {}) do
+		if type(type_of(c.type).ui) == "table" then
+			return true
+		end
+	end
+	return false
+end
+
+-- The Entities tab's lists, the Scene one's UI elements in a list of their own,
+-- each with what is under it
+local function groups()
 	local tabs, indent = NT.entity_lists()
+	local scene, ui = {}, {}
+	local to = scene
+	for _, e in ipairs(tabs.Scene) do
+		if (indent[e.id] or 0) == 0 then
+			to = is_ui_element(e) and ui or scene
+		end
+		to[#to + 1] = e
+	end
+	tabs.Scene, tabs.UI = scene, ui
+	return tabs, indent
+end
+
+function SG.rows()
+	local tabs, indent = groups()
 	local ids = {}
 	local linked, linked_list = linked_ids()
 	SG.list_body = put_body(SG.list_view, function(body)
-		for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
+		for _, name in ipairs({"Game-wide", "Scene", "UI", "Positioned"}) do
 			local head = false
 			for _, e in ipairs(tabs[name]) do
 				if matches(e) then
@@ -241,6 +275,21 @@ function SG.rows()
 	if said ~= SG.list_said then
 		SG.list_said = said
 		log:info(said)
+	end
+	-- For a check: what each group holds, by name
+	SG.groups_said = SG.groups_said or {}
+	for _, name in ipairs(SG.filter == "" and {"Game-wide", "Scene", "UI",
+			"Positioned"} or {}) do
+		local names = {}
+		for _, e in ipairs(tabs[name]) do
+			names[#names + 1] = short_name(e)
+		end
+		said = "kit editor: signals: group " .. name .. ": " ..
+				table.concat(names, ", ")
+		if said ~= SG.groups_said[name] then
+			SG.groups_said[name] = said
+			log:info(said)
+		end
 	end
 	said = "kit editor: signals: linked marks: " .. table.concat(linked_list, ", ")
 	if said ~= SG.marks_said then
@@ -775,6 +824,8 @@ function SG.world_viewport()
 	SG.view_win = w
 	local v = w:CreateChild("View3D")
 	v:SetFixedSize(160, 120)
+	-- For a driven press by whose it is
+	v:SetName("signals view")
 	v:SetView(O.scene, (SG.node() and SG.cam), false)
 	SG.view3d = v
 	local vp = v:GetViewport()
@@ -809,6 +860,106 @@ function M.hud_area()
 	return on and SG.area or nil
 end
 
+-- [KIT_SIGNALS_VIEWPORT] The camera round the selected entity, as the 3D view's
+-- orbit reads: the pointer's right drag and fingers, begun on the viewport alone
+-- (nothing over it, an entity with a position shown); the wheel over it. The
+-- angle and the distance stay as another entity is selected
+SG.orbit = {yaw = 40, pitch = 32, dist = 6}
+SG.fingers = {}
+local WEB = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
+
+-- Pixels
+local function orbit_at(x, y)
+	local sc, a = magic.ui.scale, SG.area
+	local e = NT.sig() and S.primary and find(S.primary)
+	x, y = x / sc, y / sc
+	return a and e and e.pos and not W.ctx and not W.dialog and
+			not ui_utils.dropdown_open() and not ui_utils.clicks_wanted() and
+			x >= a.x and y >= a.y and x < a.x + a.w and y < a.y + a.h
+end
+
+local function orbit_turn(dx, dy, k)
+	local o = SG.orbit
+	o.yaw = (o.yaw + dx * k) % 360
+	-- Short of straight up and down: the view does not flip
+	o.pitch = math.max(-89, math.min(89, o.pitch + dy * k))
+end
+
+local function orbit_zoom(f)
+	SG.orbit.dist = math.max(1, math.min(100, SG.orbit.dist * f))
+end
+
+magic.SubscribeToEvent("MouseButtonDown", function(_, data)
+	if data:GetInt("Button") == magic.MOUSEB_RIGHT then
+		local m = magic.input:GetMousePosition()
+		SG.dragging = orbit_at(m.x, m.y)
+	end
+end)
+magic.SubscribeToEvent("MouseButtonUp", function(_, data)
+	if data:GetInt("Button") == magic.MOUSEB_RIGHT then
+		SG.dragging = nil
+	end
+end)
+magic.SubscribeToEvent("MouseMove", function(_, data)
+	if SG.dragging then
+		-- (let go outside the window, the Up may not come)
+		SG.dragging = magic.input:GetMouseButtonDown(magic.MOUSEB_RIGHT)
+		orbit_turn(data:GetInt("DX"), data:GetInt("DY"), 0.3)
+	end
+end)
+magic.SubscribeToEvent("MouseWheel", function(_, data)
+	local m = magic.input:GetMousePosition()
+	if orbit_at(m.x, m.y) then
+		-- In notches; the web's in tenths (its SDL port counts them so)
+		local w = data:GetInt("Wheel")
+		orbit_zoom(0.8 ^ math.max(-10, math.min(10, WEB and w / 10 or w)))
+	end
+end)
+-- One finger orbits, as slowly as a finger does in 3D; two pinch, and what is left
+-- of a pinch moves nothing until all are up
+magic.SubscribeToEvent("TouchBegin", function(_, data)
+	local x, y = data:GetInt("X"), data:GetInt("Y")
+	if orbit_at(x, y) then
+		SG.fingers[data:GetInt("TouchID")] = {x = x, y = y}
+	end
+end)
+magic.SubscribeToEvent("TouchMove", function(_, data)
+	local id = data:GetInt("TouchID")
+	local f = SG.fingers[id]
+	if not f then
+		return
+	end
+	local x, y = data:GetInt("X"), data:GetInt("Y")
+	local o
+	for oid, of in pairs(SG.fingers) do
+		if oid ~= id then
+			o = of
+		end
+	end
+	if o then
+		SG.pinched = true
+		orbit_zoom(math.max(1, math.sqrt((f.x - o.x) ^ 2 + (f.y - o.y) ^ 2)) /
+				math.max(1, math.sqrt((x - o.x) ^ 2 + (y - o.y) ^ 2)))
+	elseif not SG.pinched then
+		orbit_turn(x - f.x, y - f.y, 0.15)
+	end
+	f.x, f.y = x, y
+end)
+magic.SubscribeToEvent("TouchEnd", function(_, data)
+	SG.fingers[data:GetInt("TouchID")] = nil
+	if not next(SG.fingers) then
+		SG.pinched = nil
+	end
+end)
+
+-- A check's question: how far the list and the links are scrolled
+magic.SubscribeToEvent("command_seq:kit_sg_scroll", function(_, data)
+	log:info(string.format("kit editor: signals: scrolled: list %d, links %d (%s)",
+			SG.list_view and SG.list_view.viewPosition.y or -1,
+			SG.links_view and SG.links_view.viewPosition.y or -1,
+			data:GetString("Param")))
+end)
+
 -- Each frame: the camera; the layout as the window or the bar changes
 function SG.tick()
 	if not NT.sig() or not SG.view3d then
@@ -822,10 +973,21 @@ function SG.tick()
 	local shows
 	if e and e.pos then
 		local at = A.drawn_at(e)
-		local q = magic.Quaternion(32, 40, 0)
+		local o = SG.orbit
+		local q = magic.Quaternion(o.pitch, o.yaw, 0)
 		SG.cam_node.rotation = q
-		SG.cam_node.position = at + q * magic.Vector3(0, 0, -6)
+		SG.cam_node.position = at + q * magic.Vector3(0, 0, -o.dist)
 		shows = "entity " .. e.id
+		-- For a check: as a gesture ends, and as the entity moves
+		if not (SG.dragging or next(SG.fingers)) then
+			local said = string.format("kit editor: signals: the camera on %d at " ..
+					"%.2f %.2f %.2f: yaw %.1f, pitch %.1f, distance %.2f", e.id, at.x,
+					at.y, at.z, o.yaw, o.pitch, o.dist)
+			if said ~= SG.camera_said then
+				SG.camera_said = said
+				log:info(said)
+			end
+		end
 	else
 		SG.cam_node.position = walk.worldPosition
 		SG.cam_node.direction = walk.worldDirection
@@ -1027,6 +1189,7 @@ local function close()
 	SG.area, SG.laid, SG.shows, SG.cells, SG.links_drawn_w = nil, nil, nil, nil, nil
 	SG.inspector_w, SG.mode = nil, nil
 	SG.add = nil
+	SG.dragging, SG.fingers, SG.pinched = nil, {}, nil
 end
 
 -- [KIT_PALETTE_MENU] The palette as a big dropdown under the list's button, W.ctx

@@ -527,6 +527,16 @@ extras()
 }
 {
 	compose
+	# [KIT_SIGNALS_UI_GROUP] The map's groups in the Signals list
+	cat <<EOF
+keypress F5
+wait_log 10000 kit editor: the view is Signals
+frames 8
+screenshot $t/signals_groups.png
+keypress Escape
+wait_log 10000 kit editor: the view is
+frames 3
+EOF
 	[ -n "$build_only" ] || extras
 	huts
 	cat <<'EOF'
@@ -866,7 +876,22 @@ assert not any(hint in l and line in l for l in bob[a:b].splitlines()), \
 	"on kitbob's while kitboss held it"
 assert any(hint in l and line in l for l in bob[b:].splitlines()), "not on kitbob's as he held it"
 PY
-for f in boss_carry_fp boss_walk_fp1 boss_walk_fp2 cat_carry_3p cat_bomb_held cat_bomb_lying cat_walk_1 cat_walk_4 bob_confetti cat_trail; do
+python3 -I - "$t/boss.log" <<'PY' || fail "the Signals list's groups ($t/boss.log)"
+import re, sys
+log = open(sys.argv[1], errors="replace").read()
+log = log[log.index("the view is Signals"):]
+def names(group):
+    m = re.search(r"signals: group %s: (.*)" % group, log)
+    return [x.split(" ", 1)[1] for x in m[1].split(", ")] if m[1] else []
+print("Signals' groups:", {g: names(g) for g in ("Game-wide", "Scene", "UI", "Positioned")})
+assert names("Scene") == ["Map world", "Prep timer", "Starting kit", "Bomb placer"], names("Scene")
+ui = names("UI")
+for n in ("Prep row", "Prep pie", "Prep text", "Top panel", "Round status", "Holder text", "Side panel",
+		"Flag home bar", "Scoring bar", "Immune bar"):
+	assert n in ui, n
+assert "Flag" in names("Positioned") and "Flag" not in ui
+PY
+for f in signals_groups boss_carry_fp boss_walk_fp1 boss_walk_fp2 cat_carry_3p cat_bomb_held cat_bomb_lying cat_walk_1 cat_walk_4 bob_confetti cat_trail; do
 	[ -s "$t/$f.png" ] || fail "no screenshot $f ($t)"
 done
 echo "PASS: [KIT_CTF] capture the flag composed by edit ops and played by three clients; screenshots in $t"
