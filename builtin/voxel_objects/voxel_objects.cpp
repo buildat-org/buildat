@@ -62,6 +62,8 @@ struct ModelImpl: public Model
 	int m_sx, m_sy, m_sz;
 	int m_cx, m_cy, m_cz; // chunks each way
 	sv_<VoxelTypeId> m_voxels;
+	// Each voxel's param << 8 | tint; empty until a voxel has either
+	sv_<uint16_t> m_state;
 	bool m_loaded = false;
 	int m_rev = 0;
 	// Chunk index -> written since the last commit (saved, sent, boxes
@@ -109,7 +111,13 @@ struct ModelImpl: public Model
 		return m_voxels[index(x, y, z)];
 	}
 
-	void set_voxel(int x, int y, int z, VoxelTypeId id);
+	void set_voxel(int x, int y, int z, VoxelTypeId id)
+	{
+		set_voxel_state(x, y, z, id, 0, 0);
+	}
+
+	void set_voxel_state(int x, int y, int z, VoxelTypeId id, uint8_t param,
+			uint8_t tint);
 
 	uint32_t content_hash()
 	{
@@ -161,9 +169,17 @@ struct ModelImpl: public Model
 			const int mx = ox + x, my = oy + y, mz = oz + z;
 			VoxelSample v;
 			if(mx >= 0 && my >= 0 && mz >= 0 && mx < m_sx && my < m_sy &&
-					mz < m_sz)
-				fmt.id.set(v, m_voxels[(size_t)mx + (size_t)m_sx *
-						((size_t)my + (size_t)m_sy * mz)]);
+					mz < m_sz){
+				const size_t i = (size_t)mx + (size_t)m_sx *
+						((size_t)my + (size_t)m_sy * mz);
+				fmt.id.set(v, m_voxels[i]);
+				if(!m_state.empty()){
+					if(fmt.param.bound())
+						fmt.param.set(v, m_state[i] >> 8);
+					if(fmt.tint.bound())
+						fmt.tint.set(v, m_state[i] & 0xff);
+				}
+			}
 			// Lit as if out in the open: an object is lit by the scene's
 			// lights, and the mesher's corners still darken what is
 			// enclosed (as volume_from_8bit's models)
@@ -473,6 +489,31 @@ struct World: public Instance
 		return it == m_models.end() ? nullptr : it->second.get();
 	}
 
+	void remove_model(const ss_ &name)
+	{
+		auto it = m_models.find(name);
+		if(it == m_models.end())
+			return;
+		sv_<uint> ids;
+		for(auto &pair : m_objects)
+			if(pair.second == it->second.get())
+				ids.push_back(pair.first);
+		for(uint id : ids)
+			remove_object(id);
+		const bool announced = it->second->m_announced;
+		m_models.erase(it);
+		if(!announced)
+			return;
+		sv_<replicate::PeerId> peers;
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			peers = irep->find_peers_on_scene(m_scene);
+		});
+		network::access(m_server, [&](network::Interface *inet){
+			for(replicate::PeerId peer : peers)
+				inet->send(peer, "voxel_objects:remove_model", name);
+		});
+	}
+
 	void set_boxes(Node *n, ModelImpl *m)
 	{
 		sv_<interface::mesh::TemporaryBox> all;
@@ -549,14 +590,24 @@ struct World: public Instance
 	}
 };
 
-void ModelImpl::set_voxel(int x, int y, int z, VoxelTypeId id)
+void ModelImpl::set_voxel_state(int x, int y, int z, VoxelTypeId id,
+		uint8_t param, uint8_t tint)
 {
 	const size_t i = index(x, y, z);
 	if(id > m_world->m_reg->num_voxels())
 		throw Exception("voxel_objects: voxel id "+itos(id)+" is not in"
 				" the registry");
-	if(m_voxels[i] == id)
+	const uint16_t state = (uint16_t)(param << 8 | tint);
+	if(m_voxels[i] == id && (m_state.empty() ? 0 : m_state[i]) == state)
 		return;
+	if(state && m_state.empty()){
+		if(m_world->m_store)
+			throw Exception("voxel_objects: model \""+m_name+"\" has a save,"
+					" whose format has no param or tint");
+		m_state.assign(m_voxels.size(), 0);
+	}
+	if(!m_state.empty())
+		m_state[i] = state;
 	m_voxels[i] = id;
 	const int cx = x / CHUNK, cy = y / CHUNK, cz = z / CHUNK;
 	m_dirty.insert(chunk_index(cx, cy, cz));

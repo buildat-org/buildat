@@ -216,6 +216,19 @@ buildat.sub_packet("voxel_objects:chunk", function(data)
 	mesh_chunk(name, m, c)
 end)
 
+-- [KIT_FREE_PREFAB] A busy chunk's mesh goes when it is done (meshed(): again)
+buildat.sub_packet("voxel_objects:remove_model", function(name)
+	local m = models[name]
+	if not m then
+		return
+	end
+	for _, c in pairs(m.chunks) do
+		c.data = ""
+		mesh_chunk(name, m, c)
+	end
+	models[name] = nil
+end)
+
 replicate.sub_sync_node_added({}, function(node)
 	local name = node:GetVar("voxel_model"):GetString()
 	if name == "" then

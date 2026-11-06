@@ -37,7 +37,7 @@
 // (interface::serialize_volume_compressed: the chunk and a voxel of its
 // neighbours each way, light_sky full everywhere, ids of the registry the
 // client has), which the client meshes as voxelworld meshes a chunk. rev
-// counts the model's commits.
+// counts the model's commits. "voxel_objects:remove_model" "<model>": gone.
 #pragma once
 #include "interface/event.h"
 #include "interface/server.h"
@@ -76,6 +76,13 @@ namespace voxel_objects
 		// as is an id the registry does not have
 		virtual VoxelTypeId get_voxel(int x, int y, int z) = 0;
 		virtual void set_voxel(int x, int y, int z, VoxelTypeId id) = 0;
+		// [KIT_FREE_PREFAB] A voxel with the registry format's param (which
+		// way a shape faces) and tint; set_voxel is this with both 0.
+		// simplified: the save's format has neither, so a model with a save
+		// refuses them (an exception); format 2 with them in a chunk's names
+		// is the upgrade
+		virtual void set_voxel_state(int x, int y, int z, VoxelTypeId id,
+				uint8_t param, uint8_t tint) = 0;
 		// FNV-1a over every voxel id (little-endian uint32), x, y then z:
 		// what a check compares between a save and a load of one app
 		virtual uint32_t content_hash() = 0;
@@ -96,6 +103,11 @@ namespace voxel_objects
 		virtual Model* create_model(const ss_ &name, int sx, int sy,
 				int sz) = 0;
 		virtual Model* get_model(const ss_ &name) = 0;
+		// [KIT_FREE_PREFAB] A model and its objects gone, here and on the
+		// clients on the scene (their meshes too); what the save has of it
+		// stays, and what was edited since the last commit is lost. No such
+		// model: nothing
+		virtual void remove_model(const ss_ &name) = 0;
 
 		// A node in the scene's root showing the model: replicated, named
 		// "voxel_object", its var "voxel_model" the model's name, a static
