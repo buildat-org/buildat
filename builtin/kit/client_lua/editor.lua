@@ -211,6 +211,7 @@ do
 		if j.op == "move" then
 			K.prefab_moving(j)
 		end
+		K.prefab_bench_sent(j)
 		return send_(j)
 	end
 end
@@ -1084,7 +1085,16 @@ rebuild_bar = function()
 	bar_used = bar_used + math.max(d.minWidth, 90) + 4
 	-- [KIT_SCENES] the scene edited, switched by the list; New scene...
 	local scenes = E.state and E.state.scenes or {}
-	if #scenes > 1 or (E.state and E.state.can_make_scenes) then
+	-- [KIT_PREFAB_BENCH] a prefab's temporary scene: its name and its two buttons
+	-- in the scene list's place
+	if kind == "bench" then
+		place(function(parent)
+			return label(parent, "Editing prefab " .. tostring(E.session.prefab) ..
+					":")
+		end)
+		bar_button("Save", nil, NT.pf.bench_save)
+		bar_button("Close", nil, NT.pf.bench_close)
+	elseif #scenes > 1 or (E.state and E.state.can_make_scenes) then
 		local choices = {}
 		for _, n in ipairs(scenes) do
 			choices[#choices + 1] = {"Scene: " .. n, n}
@@ -1149,7 +1159,9 @@ rebuild_bar = function()
 			send({op = "draft"})
 		end)
 	end
-	bar_button("Play mode", nil, M.toggle_tools)
+	if kind ~= "bench" then
+		bar_button("Play mode", nil, M.toggle_tools)
+	end
 	if NT.sig() then
 		NT.sg.bar(bar_button)
 	elseif narrow() then
@@ -3278,7 +3290,8 @@ people = function()
 	end
 	local b = window(magic.HA_LEFT, magic.VA_BOTTOM, 10, -50)
 	W.people = b
-	text(b, E.persistent and "Edits change the world" or E.running and
+	text(b, (E.session or {}).kind == "bench" and "Only Save reaches the prefab" or
+			E.persistent and "Edits change the world" or E.running and
 			"Running: edits change the start and the round" or
 			"Ended: edits change the start", DIM)
 	if E.status ~= "" then
@@ -4251,7 +4264,7 @@ do
 	assert(ok and type(install) == "function", "kit: prefabs.lua: " ..
 			tostring(err))
 	install({K = K, S = S, W = W, NT = NT, send = send, window = window,
-		find = find, drop = drop, drawn_at = drawn_at, vbox = vbox})
+		find = find, drop = drop, drawn_at = drawn_at, vbox = vbox, BX = BX})
 end
 
 local function place_cameras()

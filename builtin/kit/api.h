@@ -765,6 +765,17 @@ namespace interface
 // "written" and "shared": the default's loaded sections it holds no copy
 // of). Sessions are not saved: a
 // restart drops them and their scenes (the row "sessions").
+// [KIT_PREFAB_BENCH] {"op": "prefab_bench", "prefab": name} takes a builder
+// to a prefab's temporary scene: a draft (kind "bench"; "kit:edit_state"'s
+// session adds prefab, root, box, ready) of an empty World with nothing from
+// the start but the environment, no generator, not running; one copy of the
+// prefab at the origin, its voxels laid out as sections arrive (ready, and
+// save_prefab refused before it). The World is the bench's own, one per
+// builder, under MAX_SESSIONS. Refused: another's prefab, Kit's and packages',
+// from inside a session, an app without sessions. {"op": "save_prefab"} with
+// a root and box there is the Save; the project's own copies of the prefab
+// follow (no undo entry in the project), other drafts' do not. {"op":
+// "leave_draft"} is its Close: nothing else leaves it.
 // [KIT_MINIGAMES_1] c:session_end(id, result) carries a result (JSON, 4
 // KiB at most) to the maker's on_session_end(c, id, result) (nil
 // without one), so a round's outcome reaches the default round.
