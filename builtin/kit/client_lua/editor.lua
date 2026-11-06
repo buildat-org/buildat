@@ -300,6 +300,7 @@ function M.stop()
 	send({op = "stop"})
 end
 
+local people
 -- [KIT_TRY_INPUTS] The inspector's Try: entity id's input sent to it, the
 -- value typed (s) read as the input's type ty takes it; Ended, the game
 -- Run first (as play mode does)
@@ -954,7 +955,7 @@ end
 
 M.over_ui = over_ui
 
-local refresh, people, show_log, rebuild_bar, set_view, terrain_panel
+local refresh, show_log, rebuild_bar, set_view, terrain_panel
 local inspector_window
 local voxel_names
 
