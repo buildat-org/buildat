@@ -107,6 +107,10 @@ function M.UIStack(root)
 		if #self.stack >= 1 then
 			local top = self.stack[#self.stack]
 			focus_paths[top] = focus_path(top)
+			-- A popup is on the UI's root, not under top, and hiding top would
+			-- leave it modal over the new screen ([UISTACK_PUSH_POPUP]).
+			-- Required here and not above: ui_utils requires this file
+			require("buildat/extension/ui_utils").safe.close_dropdowns()
 			top:SetVisible(false)
 		end
 		local element_name =
