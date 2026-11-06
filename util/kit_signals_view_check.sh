@@ -109,7 +109,7 @@ EOF
 	place kit/logic; LOGIC=$id
 	id=$((id + 1)); KID=$id
 	edit "{\"op\": \"place\", \"type\": \"kit/starting_kit\", \"pos\": [1, 1, 1], \"parent\": $FLAG}"
-	id=$((id + 2)); PIE=$id
+	id=$((id + 3)); PIE=$id
 	edit "{\"op\": \"place\", \"prefab\": \"kit/timer_pie\", \"pos\": [1, 1, 1]}"
 	link $FLAG left $BAR1 value
 	link $FLAG taken $BAR1 show
@@ -423,6 +423,26 @@ EOF
 	cat <<EOF
 frames 5
 screenshot @T@/palette_placed.png
+click Button "kit/environment"
+wait_log 5000 the palette's menu of kit/environment
+frames 3
+screenshot @T@/palette_menu_root.png
+click Button "Place"
+EOF
+	state
+	cat <<EOF
+frames 3
+keypress F5
+frames 5
+click Button "Add from palette"
+wait_log 5000 signals: the palette's popup
+frames 3
+click Button "kit/game_rules"
+wait_log 5000 signals: picked kit/game_rules
+EOF
+	state
+	cat <<EOF
+frames 3
 sync 3000
 quit
 EOF
@@ -458,7 +478,7 @@ wantp "$b" "notification: from y (6[0-9]|7[0-9]), the top's foot at"
 want "$s" "placed kit/ui_bar $BAR1, no position" "placed kit/timer $TIMER, no position" \
 	"placed kit/starting_kit $KID, no position under $FLAG"
 # (as first listed: what the popup and the palette add comes later)
-kit "$b" | sed '/the view is Signals/q' | grep -a "kit editor: list Scene (" | tail -1 | grep -aq " $BAR1, $BAR2, $BAR3, $TIMER, $LOGIC, $KID, $((PIE - 1)), $PIE\$" ||
+kit "$b" | sed '/the view is Signals/q' | grep -a "kit editor: list Scene (" | tail -1 | grep -aq " $BAR1, $BAR2, $BAR3, $TIMER, $LOGIC, $KID, $((PIE - 2)), $((PIE - 1)), $PIE\$" ||
 	fail "the Scene list ($b)"
 echo "ok: types with no position placed: none, in the Scene list"
 # 1. Two columns side by side, the slot taken by turns, under the bar, inside
@@ -588,7 +608,7 @@ assert n >= 5, n
 PY
 seq=$(kit "$b" | grep -a "kit editor: the view is " | sed 's/.*view is //' | tr '\n' ' ')
 case $seq in
-*"Walk Signals 3D Signals 3D ") ;;
+*"Walk Signals 3D Signals 3D Signals ") ;;
 *) fail "the views past the popup: $seq ($b)" ;;
 esac
 placed=$(grep -aoP "An edit by kitboss: placed kit/timer \K\d+(?=, no position)" "$s" | tail -1)
@@ -604,6 +624,11 @@ placed=$(grep -aoP "An edit by kitboss: placed kit/logic \K\d+" "$s" | tail -1)
 want "$b" "kit editor: selected $placed " "kit editor: kit/logic a favourite" "kit editor: kit/logic not a favourite" \
 	"kit editor: placing kit/flag"
 echo "ok: a type with no position has the palette's menu: Cancel, Escape, a press elsewhere place nothing, Place at once and selected, Favourite kept; a drag places, a positioned one arms"
+# A type the root or the scene takes: the menu, not armed; a second kit/game_rules is not refused
+wantp "$s" "An edit by kitboss: placed kit/environment \d+ (on the app root|on the scene)"
+[ "$(grep -ac "An edit by kitboss: placed kit/game_rules [0-9]*  *on the app root" "$s")" = 2 ] || fail "the popup's kit/game_rules ($s)"
+kit "$b" | grep -aE "placing kit/(environment|game_rules)" && fail "armed ($b)"
+echo "ok: kit/environment and kit/game_rules have the palette's menu, placed on the root at once; the same from Add from palette"
 # 5. The name after a restart; 8. A wide window, a narrow touch one
 stop_server
 python3 -I - "$t/user/apps/workbench/saves/world/save.sqlite" "$FLAG" "$BAR1" "$TIMER" "$LOGIC" "$KID" "$PIE" <<'PY' || fail "the save"

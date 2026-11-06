@@ -313,10 +313,19 @@ namespace interface
 //   its voxels; a cell's owned data is not in it. Kit's and the
 //   app's are <types dir>/<name>.prefab.json; a builder's ({"op":
 //   "save_prefab"}, author their name) the save's row
-//   "prefab:<author>/<name>", over a file. A copy's members have new ids,
-//   their links and entity parameters among them made the copy's, and
-//   remember the prefab ({"prefab": {"of", "version", "member", "copy"}});
-//   a parameter set on a copy is its override. A parameter type "prefab"
+//   "prefab:<author>/<name>", over a file. [KIT_PREFAB_ROOT] The editor's
+//   place makes a root (kit/prefab_copy, no position if the prefab has no
+//   positioned member and no voxels; {"prefab": {"of", "version", "voxels"}})
+//   and the members its built children, new ids, links and entity parameters
+//   among them made the copy's. A save builds every other copy again:
+//   members, links and parameters follow, a parameter set on a copy (its
+//   override) and a member moved on it kept, a member deleted from it back.
+//   Voxels never follow: a copy's are world cells, written only at its place,
+//   by the op "stamp" (the editor's Refresh voxels, and after a move). The
+//   root's turn is its yaw; a stamp takes multiples of 90. A copy made in
+//   play (c:spawn) has no root, its members remember the prefab
+//   ({"prefab": {"of", "version", "member", "copy"}}).
+//   A parameter type "prefab"
 //   names one; a parameter's `choices` = {...} are the values it takes;
 //   `choices_from = "biomes"` makes the inspector's a dropdown of the
 //   material set's biomes (a string still; the World refuses another).

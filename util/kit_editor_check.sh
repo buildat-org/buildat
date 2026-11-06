@@ -360,7 +360,7 @@ want "$s" "kitboss is in edit mode" \
 [ "$(grep -ac "sample_kit/door 18: opened" "$s")" = 2 ] ||
 	fail "the door moved after the undo took the link away ($s)"
 echo "ok: the admin edits: edit mode, place, move, delete, the inspector, the link, undo; the edit works in play"
-for op in mode place move delete set link unlink undo builder restart save_prefab; do
+for op in mode place move delete set link unlink undo builder restart save_prefab stamp prefab_detach prefab_reset prefab_rename prefab_delete; do
 	grep -aqE "An edit \($op\) by peer [0-9]+ refused: no edit rights here" "$s" ||
 		fail "kitbob's $op was not refused ($s)"
 done

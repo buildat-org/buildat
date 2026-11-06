@@ -89,6 +89,11 @@ local KEYS = {
 			'{"op": "undo"}',
 			'{"op": "restart", "id": 3, "comp": 0}',
 			'{"op": "save_prefab", "ids": [3, 4], "name": "pair"}',
+			'{"op": "stamp", "id": 3}',
+			'{"op": "prefab_detach", "id": 3}',
+			'{"op": "prefab_reset", "id": 3, "comp": 0, "param": "closed"}',
+			'{"op": "prefab_rename", "name": "kit/hut", "to": "x"}',
+			'{"op": "prefab_delete", "name": "kit/hut"}',
 			'{"op": "place", "prefab": "kit/button_door", "pos": [0, 1, -1]}',
 			'{"op": "builder", "name": "kitbob", "on": true}',
 			'not json'}) do

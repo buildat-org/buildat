@@ -197,15 +197,15 @@ expect 6 "(20,1,2): kit/stone, param 0, tint 0, sky light 0"
 expect 7 "(20,2,2): kit/planks:slab, param 5, tint 0, sky light 0"
 echo "ok: a paste turned 90: the cells about the base, the shapes' facings a quarter on (upside down kept)"
 want "$s" "saved prefab kitboss/hut version 1 of 2 entities and a box of [2,2,2] voxels (air replaces)" \
-	"placed prefab kitboss/hut as 10...11, 4 voxels written"
+	"placed prefab kitboss/hut as 10...12, 4 voxels written"
 expect 8 "(30,1,3): kit/stone:stair, param 1, tint 2, sky light 0"
 expect 9 "(30,2,3): air, param 0, tint 0, sky light 0"
 expect 10 "(30,1,3): air, param 0, tint 0, sky light 0"
 expect 11 "(30,2,3): kit/stone, param 0, tint 0, sky light 0"
-want "$s" "An undo by kitboss: a voxel edit, 4 cells" "An undo by kitboss: 2 entities put back"
+want "$s" "An undo by kitboss: a voxel edit, 4 cells" "An undo by kitboss: 3 entities put back"
 echo "ok: the copy named a prefab, air replacing; its place undone whole (entities and voxels)"
 want "$s" "saved prefab kitboss/step version 1 of 0 entities and a box of [2,1,1] voxels" \
-	"placed prefab kitboss/step, turned 180, 2 voxels written"
+	"placed prefab kitboss/step as 13...13, turned 180, 2 voxels written"
 expect 12 "(40,1,3): kit/stone:stair, param 3, tint 2, sky light 0"
 expect 13 "(39,1,3): kit/stone, param 0, tint 0, sky light 0"
 echo "ok: a prefab of voxels alone, placed turned 180"
@@ -228,7 +228,7 @@ assert at(6) == ((10, 1, 4), 0) and at(7) == ((11, 1, 4), 0), (at(6), at(7))
 assert links(7) == [("pressed", 6, "open")], links(7)
 assert at(8) == ((21, 1, 3), 90) and at(9) == ((21, 1, 2), 90), (at(8), at(9))
 assert links(9) == [("pressed", 8, "open")], links(9)
-assert 10 not in ents and 11 not in ents, "the undone place's entities"
+assert 10 not in ents and 11 not in ents and 12 not in ents, "the undone place's entities"
 assert "prefab" not in ents[6], ents[6]
 hut = row("prefab:kitboss/hut")
 assert hut["voxels"]["air"] is True and hut["voxels"]["size"] == [2, 2, 2], hut["voxels"]
@@ -257,7 +257,7 @@ server 2
 BUILDAT_JOIN_CREATE= client boss2
 stop
 s2=$t/srv2.log
-want "$s2" "kitboss/hut" "kitboss/step" "placed prefab kitboss/step, 2 voxels written"
+want "$s2" "kitboss/hut" "kitboss/step" "placed prefab kitboss/step as 14...14, 2 voxels written"
 grep -aq "Prefab kitboss/.* does not load" "$s2" && fail "a voxel prefab did not load ($s2)"
 infos=$(grep -aoP 'Voxel at \K.*' "$s2")
 s=$s2

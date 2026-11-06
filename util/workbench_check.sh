@@ -178,8 +178,10 @@ if [ "${1:-}" = web ]; then
 	["frames", 5], ["shot", "\${OUT}/play.png"],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: state: 2 entities", 10],
-	["click", "Button", "[kit/button_door]"], ["waitlog", "kit editor: placing .kit/button_door", 10],
-	["click", 800, 550], ["waitlog", "kit editor: state: 4 entities", 10],
+	["frames", 5], ["mouse", 300, 300], ["frames", 2], ["mouse", 100, 400], ["frames", 5], $(for _ in $(seq 8); do printf '["wheel", 100, 400, 100], ["frames", 1], '; done)
+	["click", "Button", "[kit/button_door]"], ["waitlog", "the palette's menu of .kit/button_door", 10], ["frames", 3],
+	["click", "Button", "Place"], ["waitlog", "kit editor: placing .kit/button_door", 10],
+	["click", 800, 550], ["waitlog", "kit editor: state: 5 entities", 10],
 	["key", "t"], ["waitlog", "kit editor: tool terrain", 10], ["frames", 3],
 	["drag", 450, 620, 650, 620], ["waitlog", "kit editor: terrain: raise", 10],
 	["waitlog", "kit editor: the stroke ended", 10], ["frames", 5],
@@ -206,10 +208,11 @@ if [ "${1:-}" = web ]; then
 	["click", "Button", "kit/region"], ["waitlog", "kit editor: placing kit/region", 10],
 	["click", 560, 340], ["waitlog", "kit editor: placed kit/region at", 10],
 	["key", "Escape"], ["waitlog", "kit editor: placing nothing", 10],
-	["waitlog_any", "kit editor: state: 5 entities", 10],
-	["click", 560, 340], ["waitlog", "kit editor: selected 6", 10], ["frames", 3],
-	["click", "DropDownList", "▼", 1162, 527], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
-	["key", "Home"], ["key", "Enter"], ["waitlog", "kit editor: 6/1 place = all", 10],
+	["waitlog_any", "kit editor: state: 6 entities", 10],
+	["click", 560, 340], ["waitlog", "kit editor: selected 7", 10], ["frames", 3],
+	["click", "DropDownList", "▼", 1104, 590], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
+	["key", "Home"], ["key", "Enter"], ["waitlog", "kit editor: 7/1 place = all", 10],
+	["mouse", 800, 450], ["frames", 2], $(for _ in $(seq 8); do printf '["wheel", 800, 450, 100], ["frames", 1], '; done)
 	["click", "Button", "Apply"], ["sync", 5000], ["frames", 3],
 	["shot", "\${OUT}/region.png"],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
@@ -228,12 +231,12 @@ J
 	# [KIT] stage 4d: Restart this, the NPC's client part, a prefab placed
 	# from the palette
 	for w in "webboss restarts entity 3's kit/npc from the start" \
-			"placed prefab kit/button_door as 4...5" \
+			"placed prefab kit/button_door as 4...6" \
 			"Terrain by webboss: raise at" \
 			"An undo by webboss: a terrain stroke" \
 			"webboss uploaded texture kit/up/" \
 			"webboss made voxel type webboss/frost version 1 (kit/up/" \
-			"An edit by webboss: set 6's kit/region place to \"all\"" \
+			"An edit by webboss: set 7's kit/region place to \"all\"" \
 			"workbench: webboss placed webboss/frost ("; do
 		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
 	done
@@ -840,39 +843,39 @@ wait_log 10000 kit editor: state: 19 entities
 event kit_edit {"op": "link", "id": 4, "comp": 0, "output": "pressed", "to": 12, "input": "add"}
 wait_log 10000 kit editor: refused: link: pressed sends a none, add takes a number
 event kit_edit {"op": "place", "prefab": "kit/button_door", "pos": [1, 1, -2]}
-wait_log 10000 kit editor: state: 21 entities
-event kit_edit {"op": "set", "id": 21, "comp": 0, "param": "close_after", "value": 7}
-wait_log 10000 kit editor: state: 21 entities
-event kit_edit {"op": "save_prefab", "ids": [21, 22], "name": "door2"}
-wait_log 10000 kit editor: state: 21 entities
+wait_log 10000 kit editor: state: 22 entities
+event kit_edit {"op": "set", "id": 22, "comp": 0, "param": "close_after", "value": 7}
+wait_log 10000 kit editor: state: 22 entities
+event kit_edit {"op": "save_prefab", "ids": [22, 23], "name": "door2"}
+wait_log 10000 kit editor: state: 22 entities
 event kit_edit {"op": "place", "prefab": "kitboss/door2", "pos": [5, 1, 3]}
-wait_log 10000 kit editor: state: 23 entities
-event kit_edit {"op": "set", "id": 23, "comp": 0, "param": "close_after", "value": 4}
-wait_log 10000 kit editor: state: 23 entities
-event kit_edit {"op": "set", "id": 21, "comp": 0, "param": "close_after", "value": 9}
-wait_log 10000 kit editor: state: 23 entities
-event kit_edit {"op": "set", "id": 21, "comp": 0, "param": "hold", "value": 2}
-wait_log 10000 kit editor: refused: set: kit/door has no parameter "hold"
+wait_log 10000 kit editor: state: 25 entities
+event kit_edit {"op": "set", "id": 25, "comp": 0, "param": "close_after", "value": 4}
+wait_log 10000 kit editor: state: 25 entities
+event kit_edit {"op": "set", "id": 22, "comp": 0, "param": "close_after", "value": 9}
+wait_log 10000 kit editor: state: 25 entities
 event kit_edit {"op": "set", "id": 22, "comp": 0, "param": "hold", "value": 2}
-wait_log 10000 kit editor: state: 23 entities
-event kit_edit {"op": "save_prefab", "ids": [21, 22], "name": "door2"}
-wait_log 10000 kit editor: state: 23 entities
+wait_log 10000 kit editor: refused: set: kit/door has no parameter "hold"
+event kit_edit {"op": "set", "id": 23, "comp": 0, "param": "hold", "value": 2}
+wait_log 10000 kit editor: state: 25 entities
+event kit_edit {"op": "save_prefab", "ids": [22, 23], "name": "door2"}
+wait_log 10000 kit editor: state: 25 entities
 event kit_edit {"op": "place", "type": "kit/button", "pos": [-1, 1, -3]}
-wait_log 10000 kit editor: state: 24 entities
-event kit_edit {"op": "set", "id": 25, "comp": 0, "param": "hold", "value": 0.1}
-wait_log 10000 kit editor: state: 24 entities
-event kit_edit {"op": "link", "id": 25, "comp": 0, "output": "pressed", "to": 3, "input": "spawn"}
-wait_log 10000 kit editor: state: 24 entities
+wait_log 10000 kit editor: state: 26 entities
+event kit_edit {"op": "set", "id": 27, "comp": 0, "param": "hold", "value": 0.1}
+wait_log 10000 kit editor: state: 26 entities
+event kit_edit {"op": "link", "id": 27, "comp": 0, "output": "pressed", "to": 3, "input": "spawn"}
+wait_log 10000 kit editor: state: 26 entities
 event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "prefab", "value": "kitboss/door2"}
-wait_log 10000 kit editor: state: 24 entities
+wait_log 10000 kit editor: state: 26 entities
 event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "max", "value": 1}
-wait_log 10000 kit editor: state: 24 entities
+wait_log 10000 kit editor: state: 26 entities
 event kit_edit {"op": "place", "type": "kit/part", "pos": [-2, 1, -6]}
-wait_log 10000 kit editor: state: 25 entities
-event kit_edit {"op": "set", "id": 26, "comp": 0, "param": "shape", "value": "wedge"}
-wait_log 10000 kit editor: state: 25 entities
-event kit_edit {"op": "set", "id": 26, "comp": 0, "param": "size", "value": [2, 1, 1.5]}
-wait_log_any 10000 kit: entity 26 drawn 2x1x1.5 at 0,0,0, solid, a wedge
+wait_log 10000 kit editor: state: 27 entities
+event kit_edit {"op": "set", "id": 28, "comp": 0, "param": "shape", "value": "wedge"}
+wait_log 10000 kit editor: state: 27 entities
+event kit_edit {"op": "set", "id": 28, "comp": 0, "param": "size", "value": [2, 1, 1.5]}
+wait_log_any 10000 kit: entity 28 drawn 2x1x1.5 at 0,0,0, solid, a wedge
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
 wait_log_any 10000 the server put the player at (0, 1.4, -4)
@@ -884,30 +887,30 @@ screenshot @T@/wedge.png
 keypress F6
 wait_log 10000 kit editor: state:
 event kit_edit {"op": "focus", "sel": 3}
-event kit_use 25
-wait_log 10000 kit editor: signal 25.pressed -> 3.spawn
-wait_log_any 10000 kit: entity 28 drawn
+event kit_use 27
+wait_log 10000 kit editor: signal 27.pressed -> 3.spawn
+wait_log_any 10000 kit: entity 30 drawn
 wait_log_any 10000 kit editor: log of 3:
 delay 400
-event kit_use 25
+event kit_use 27
 wait_log 10000 kit editor: log of 3:
 event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "max", "value": 2}
 wait_log 10000 kit editor: log of 3:
 event kit_edit {"op": "restart", "id": 3, "comp": 0}
 wait_log 10000 kit editor: log of 3:
-event kit_use 21
-wait_log 10000 kit: entity 21's client part: swung to -90
+event kit_use 22
+wait_log 10000 kit: entity 22's client part: swung to -90
 # [KIT_DOOR_MIRROR] Mirrored while open, live: drawn at its back, the
 # client part swinging it the other way
-event kit_edit {"op": "set", "id": 21, "comp": 0, "param": "mirror", "value": true}
-wait_log 10000 kit: entity 21 drawn 0.2x2x1 at -0.4,0.5,-0.4
-wait_log 10000 kit: entity 21's client part: swung to 90
+event kit_edit {"op": "set", "id": 22, "comp": 0, "param": "mirror", "value": true}
+wait_log 10000 kit: entity 22 drawn 0.2x2x1 at -0.4,0.5,-0.4
+wait_log 10000 kit: entity 22's client part: swung to 90
 # [KIT_LOOK_MATERIAL] In Kit's planks
-event kit_edit {"op": "set", "id": 21, "comp": 0, "param": "material", "value": "kit/planks"}
-wait_log 10000 kit: entity 21 wears kit/planks
+event kit_edit {"op": "set", "id": 22, "comp": 0, "param": "material", "value": "kit/planks"}
+wait_log 10000 kit: entity 22 wears kit/planks
 sync 5000
-event kit_use 25
-wait_log_any 10000 kit: entity 30 drawn
+event kit_use 27
+wait_log_any 10000 kit: entity 32 drawn
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 sync 5000
@@ -986,20 +989,20 @@ EOF
 # editor), at most max, taken back by "Restart this" (on_remove) after
 # a live edit (on_params), gone at Stop; a wedge part; the door's client
 # part swinging it on use, the other way mirrored
-want "$s2" "placed prefab kit/button_door as 21...22" \
-	"saved prefab kitboss/door2 version 1 of 2 entities (0 entities of other copies follow it)" \
-	"placed prefab kitboss/door2 as 23...24" \
-	"saved prefab kitboss/door2 version 2 of 2 entities (2 entities of other copies follow it)" \
-	"kit/spawner 3: made 27 for kitboss" "kit/spawner 3: has 1 copies: no more" \
+want "$s2" "placed prefab kit/button_door as 21...23" \
+	"saved prefab kitboss/door2 version 1 of 2 entities" \
+	"placed prefab kitboss/door2 as 24...26" \
+	"saved prefab kitboss/door2 version 2 of 2 entities, built 24 again: 2 children (2 kept, 0 new, 0 gone, 1 overrides kept) (1 other copies follow it)" \
+	"kit/spawner 3: made 29 for kitboss" "kit/spawner 3: has 1 copies: no more" \
 	"kit/spawner 3: parameters changed: max" "kit/spawner 3: took away 1 copies" \
-	"kit/spawner 3: made 29 for kitboss" "The round's entities: 2 made gone, 0 removed back"
+	"kit/spawner 3: made 31 for kitboss" "The round's entities: 2 made gone, 0 removed back"
 want "$t/boss.log" "client part: your score 1" \
 	"kit: entity 13's client part: dialog: Ada: Welcome!"
-want "$t/again.log" "kit editor: signal 25.pressed -> 3.spawn" \
-	"kit editor: log of 3: " "kit: entity 21's client part: swung to -90" \
-	"kit: entity 21 drawn 0.2x2x1 at -0.4,0.5,-0.4" \
-	"kit: entity 21's client part: swung to 90" \
-	"kit: entity 21 wears kit/planks"
+want "$t/again.log" "kit editor: signal 27.pressed -> 3.spawn" \
+	"kit editor: log of 3: " "kit: entity 22's client part: swung to -90" \
+	"kit: entity 22 drawn 0.2x2x1 at -0.4,0.5,-0.4" \
+	"kit: entity 22's client part: swung to 90" \
+	"kit: entity 22 wears kit/planks"
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'authored'" > "$t/authored2.json"
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'runtime'" > "$t/runtime2.json"
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'prefab:kitboss/door2'" > "$t/prefab2.json"
@@ -1010,12 +1013,12 @@ e = {x["id"]: x for x in a["entities"]}
 p = lambda i: e[i]["components"][0]["params"]
 assert pf["author"] == "kitboss" and pf["name"] == "door2" and pf["version"] == 2, pf
 assert [m["components"][0]["type"] for m in pf["entities"]] == ["kit/door", "kit/button"], pf
-assert e[23]["prefab"]["of"] == "kitboss/door2" and e[23]["prefab"]["version"] == 2, e[23]
-assert p(21)["close_after"] == 9 and p(23)["close_after"] == 4, (p(21), p(23))
-assert p(24)["hold"] == 2, p(24)
-assert e[24]["components"][0]["links"] == [{"output": "pressed", "to": 23, "input": "open"}], e[24]
-assert p(26)["shape"] == "wedge" and p(26)["size"] == [2, 1, 1.5], p(26)
-assert not any(i in e for i in (27, 28, 29, 30)), sorted(e)
+assert e[24]["prefab"]["of"] == "kitboss/door2" and e[24]["prefab"]["version"] == 2, e[24]
+assert p(22)["close_after"] == 9 and p(25)["close_after"] == 4, (p(22), p(25))
+assert p(26)["hold"] == 2, p(26)
+assert e[26]["components"][0]["links"] == [{"output": "pressed", "to": 25, "input": "open"}], e[26]
+assert p(28)["shape"] == "wedge" and p(28)["size"] == [2, 1, 1.5], p(28)
+assert not any(i in e for i in (29, 30, 31, 32)), sorted(e)
 assert not r.get("made"), r.get("made")
 print("  rows: the prefab's version 2, its copies, the part; nothing made left after Stop")
 EOF
@@ -1264,9 +1267,9 @@ click Button "Move"
 wait_log 5000 kit editor: moved 1 by 2, 0, 0 from the inspector
 wait_log_any 5000 kit editor: state: 5 entities, 7 to undo
 click Button "kit/world"
-wait_log 5000 kit editor: placing kit/world
-mouse_pos 600 450
-mouse_click left
+wait_log 5000 the palette's menu of kit/world
+frames 3
+click Button "Place"
 wait_log_any 5000 kit editor: state: 6 entities, 8 to undo
 frames 3
 click Button "Entities"

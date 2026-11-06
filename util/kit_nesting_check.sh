@@ -21,8 +21,8 @@
 #      three; one of S alone (13) stays under M; a delete of the copy
 #      takes its four, its undo brings them back under it; M saved as a
 #      prefab (its five, their parents and S's own place) and placed
-#      (14...18, S's copy under the copy); a copy and paste of M (19...);
-#      a sign placed under the prefab's copy (24).
+#      (root 14, 15...19, S's copy under M's); a copy and paste of M (20...);
+#      a sign placed under the prefab's copy (25).
 #   3. A restart, an old row (60, under the scene, as saves before
 #      nesting have them) added to the save: it loads where it was, the
 #      editor's rows the world's (S at 12,1,9 turned 90 under 4), its
@@ -193,10 +193,10 @@ EOF
 	edit '{"op": "delete", "id": 9}'
 	n=$((n - 2))
 	edit '{"op": "undo"}'
-	# 14...18: M (and 5, 7, 8, 13) as a prefab, placed
+	# 14 its root, 15...19: M (and 5, 7, 8, 13) as a prefab, placed
 	edit '{"op": "save_prefab", "ids": [4], "name": "lift"}'
 	edit '{"op": "place", "prefab": "kitboss/lift", "pos": [30, 1, 30]}'
-	# 19...23: a copy pasted; 24 a sign under the prefab's copy
+	# 20...24: a copy pasted; 25 a sign under the prefab's copy
 	ed '{"op": "copy", "ids": [4]}'
 	echo "sync 5000"
 	edit '{"op": "place", "clipboard": true, "pos": [40, 1, 40]}'
@@ -255,16 +255,18 @@ at(10, 9, [0, 0, 1])
 # S's copy alone: beside S, under M
 at(13, 4, [-1, 0, 1])
 # the prefab's copy and its members
-at(14, 2, [30, 1, 30], 180)
-at(15, 14, [0, 0, 1])
-assert ents[15]["prefab"]["of"] == "kitboss/lift", ents[15]
+at(14, 2, [30, 1, 30], 0)
+at(15, 14, [0, 0, 0], 180)
+at(16, 15, [0, 0, 1])
+assert ents[14]["prefab"]["of"] == "kitboss/lift", ents[14]
+assert ents[15]["built"]["by"] == 14 and ents[16]["built"]["by"] == 14, ents[16]
 pf = row("prefab:kitboss/lift")
 m = {e["id"]: e for e in pf["entities"]}
 assert len(m) == 5 and m[2]["parent"] == 1 and near(m[2]["pos"], [0, 0, 1]), pf
 # the paste, and the sign under the prefab's copy
-at(19, 2, [40, 1, 40], 180)
-at(20, 19, [0, 0, 1])
-at(24, 14, [0, 0, -3])
+at(20, 2, [40, 1, 40], 180)
+at(21, 20, [0, 0, 1])
+at(25, 14, [0, 0, 3])
 # 3: an old row, as before nesting
 au["entities"].append({"id": 60, "parent": 2, "name": "old sign",
     "pos": [5, 1, 5], "components": [{"type": "kit/sign"}]})
@@ -329,7 +331,7 @@ grep -aqE "kit editor: entity 60 old sign at 5,1,5 links" "$b" ||
 	fail "the old row 60 not where it was ($b)"
 grep -aqE "kit editor: entity 5 [^ ]+ [0-9]+ at 12,1,9 yaw 90 under 4 links" "$b" ||
 	fail "no entity 5 at 12,1,9 under 4 in the editor's rows ($b)"
-w="kit editor: list Positioned (22): 4, >5, >7, >8, >13, 6, 9, >10, >11, >12, 14, >15, >16, >17, >18, >24, 19, >20, >21, >22, >23, 60"
+w="kit editor: list Positioned (23): 4, >5, >7, >8, >13, 6, 9, >10, >11, >12, 14, >15, >>16, >>17, >>18, >>19, >25, 20, >21, >22, >23, >24, 60"
 grep -aqF "$w" "$b" || fail "no \"$w\" in $b"
 echo "ok: an old save loads as it was; the editor's rows are in the world, its list in the tree's order"
 # [KIT_GROUP_TURN_JUMP] 4 (with 5, 7, 8, 13 under it) and 6 turned 90 by

@@ -206,6 +206,10 @@ do
 				touch(id)
 			end
 		end
+		-- [KIT_PREFAB_ROOT] prefabs.lua
+		if j.op == "move" then
+			K.prefab_moving(j)
+		end
 		return send_(j)
 	end
 end
@@ -1785,6 +1789,11 @@ function NT.components(w)
 				local p = b.screenPosition
 				return NT.palette_menu(it, p.x, p.y + b.height)
 			end
+			-- [KIT_PREFAB_ROOT] A prefab: Place (arms), Rename, Delete
+			if it.prefab then
+				local p = b.screenPosition
+				return NT.pf.menu(it, p.x, p.y + b.height, palette)
+			end
 			if armed then
 				S.placing = nil
 				log:info("kit editor: placing nothing")
@@ -1833,9 +1842,14 @@ function NT.palette_items(tab)
 end
 
 -- [KIT_PALETTE_MENU] A type that says no_position: no click on the view
--- places it
+-- places it. Nor the three the root or the scene takes wherever the click
+-- is: by name, as root = true is also on the controls and the movements,
+-- which stay armed
+NT.PLACED_AT_ONCE = {["kit/game_rules"] = true, ["kit/world"] = true,
+	["kit/environment"] = true}
 function NT.positionless(it)
-	return it.type ~= nil and type_of(it.type).no_position == true
+	return it.type ~= nil and (type_of(it.type).no_position == true or
+			NT.PLACED_AT_ONCE[it.type] == true)
 end
 
 function NT.arm(it)
@@ -2397,6 +2411,7 @@ function NT.params_form(w, e, ci, c, t, keep)
 			refresh()
 		end)
 		mark()
+		NT.pf.overrides(w, e, ci)
 	end
 	-- [KIT_VOXEL_STATES] Each pattern: Capture (the box as it is now),
 	-- Show (written into the world, an edit undone as one) and Fill (all
@@ -2661,10 +2676,9 @@ local function inspector(w, e, is_made)
 			refresh()
 		end)
 	end
-	-- [KIT] stage 4d: a prefab's copy
+	-- [KIT_PREFAB_ROOT] a prefab's copy, its root
 	if type(e.prefab) == "table" then
-		text(w, "Prefab " .. tostring(e.prefab.of) .. " " ..
-				tostring(e.prefab.version), DIM)
+		NT.pf.section(w, e)
 	end
 	-- [KIT_GENERATORS] a generator's child: built again as it changes,
 	-- what is set here kept
@@ -4226,6 +4240,16 @@ do
 		type_of = type_of, typed = typed, signal_kind = signal_kind,
 		drawn_at = drawn_at, narrow = narrow,
 		refresh = function() refresh() end})
+end
+
+-- [KIT_PREFAB_ROOT] A placed prefab's root, the palette's menu on a prefab, the
+-- stamp's dialog (prefabs.lua)
+do
+	local ok, err, install = buildat.run_script_file("kit/prefabs.lua")
+	assert(ok and type(install) == "function", "kit: prefabs.lua: " ..
+			tostring(err))
+	install({K = K, S = S, W = W, NT = NT, send = send, window = window,
+		find = find, drop = drop, drawn_at = drawn_at, vbox = vbox})
 end
 
 local function place_cameras()
@@ -6649,6 +6673,7 @@ local function draw()
 					AXIS_COLOURS[h.k], false)
 		end
 	end
+	NT.pf.draw(dbg)
 	-- The round's own entities, orange (players are drawn by the app)
 	for _, e in ipairs(made()) do
 		if e.pos and e.kind ~= "player" then
@@ -6992,6 +7017,7 @@ function M.editor(options)
 				NT.select_new, NT.sg.reveal = nil, id
 				select(id)
 			end
+			NT.pf.state()
 		end
 		refresh()
 		changed()
@@ -7142,6 +7168,7 @@ function M.editor(options)
 		E.status = "Refused: " .. tostring(data)
 		log:info("kit editor: refused: " .. tostring(data))
 		NT.select_new = nil
+		NT.pf.refused()
 		clear_preview()
 		if E.editing then
 			people()
