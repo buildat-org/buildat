@@ -2599,6 +2599,10 @@ function M.editor(options)
 						M.key_name("edit"), 4)
 			end
 		end
+		-- Done: the hint would lie over the inspector's first row
+		if E.editing and not was then
+			ui_utils.close_notification()
+		end
 		for _, p in ipairs(s.people or {}) do
 			log:info("kit editor: people: " .. tostring(p.name) ..
 					(p.admin and " admin" or p.builder and " builder" or " player"))

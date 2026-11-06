@@ -3277,7 +3277,11 @@ show_log = function()
 	if #lines == 0 then
 		return
 	end
-	local lw = window(magic.HA_RIGHT, magic.VA_BOTTOM, -10,
+	-- Beside the inspector, not over its lower rows (a narrow screen's has no
+	-- room beside it)
+	local lw = window(magic.HA_RIGHT, magic.VA_BOTTOM,
+			W.inspector and W.inspector.visible and not narrow() and
+			-(W.inspector.width + 20) or -10,
 			W.touch and -(W.touch.height + 16) or -50)
 	W.log = lw
 	text(lw, "Log of " .. S.primary .. ":", DIM)

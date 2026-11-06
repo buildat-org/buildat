@@ -566,7 +566,8 @@ function PF.delete_dialog(name)
 	local n = (info_of(name) or {}).copies or 0
 	local w = dialog()
 	text(w, "Delete the prefab " .. name .. "?")
-	text(w, n == 1 and "1 copy is placed: it stays as it is, following nothing." or
+	text(w, n == 0 and "No copy of it is placed." or n == 1 and
+			"1 copy is placed: it stays as it is, following nothing." or
 			n .. " copies are placed: they stay as they are, following nothing.", DIM)
 	if ((info_of(name) or {}).free or 0) > 0 then
 		text(w, "A free copy loses its object with the prefab's voxels.", DIM)
