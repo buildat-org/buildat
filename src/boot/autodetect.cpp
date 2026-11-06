@@ -8,6 +8,7 @@
 #include "interface/os.h"
 #include "interface/fs.h"
 #include "interface/process.h"
+#include "interface/aitta.h"
 #include "interface/mutex.h"
 #include "interface/debug.h"
 #include <fstream>
@@ -219,6 +220,17 @@ static void check_platform_data_paths()
 			data_dir_name("0.6.90-abc1234") != "buildat" ||
 			data_dir_name("1.0.0-rc.1") != "buildat")
 		throw Exception("data_dir_name");
+	namespace aitta = interface::aitta;
+	for(const char *official : {"https://aitta.buildat.org",
+			"https://aitta.buildat.org/", "http://AITTA.buildat.org:8080",
+			"aitta.buildat.org", "aitta.buildat.org.:443", "x@aitta.buildat.org"})
+		if(aitta::publish_refusal("0.8.0-alpha.1", official).empty() ||
+				!aitta::publish_refusal("0.8.0", official).empty())
+			throw Exception(ss_("publish_refusal: ")+official);
+	for(const char *other : {"https://127.0.0.1:9", "aitta.example.org:8080",
+			"https://aitta.buildat.org.example.org", "http://aitta.buildat.org@x"})
+		if(!aitta::publish_refusal("0.8.0-alpha.1", other).empty())
+			throw Exception(ss_("publish_refusal: ")+other);
 #if !defined(_WIN32) && !defined(__APPLE__)
 	const ss_ name = data_dir_name(BUILDAT_VERSION);
 	{

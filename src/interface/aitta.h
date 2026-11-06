@@ -192,6 +192,13 @@ namespace interface
 		// The host an Aitta's address names ("aitta.buildat.org",
 		// "127.0.0.1:8080"), for showing whose an author is
 		ss_ aitta_host(const ss_ &aitta);
+		// [ALPHA_BUILDS] Why an engine of this version does not publish to
+		// this address, "" when it does: an alpha stays off the official
+		// Aitta, by the actual name and not the BUILDAT_AITTA_DEFAULT a check
+		// or a test Aitta sets. A build could be changed to go past it: it
+		// keeps people's test packages out of the list, and it is no
+		// protection of the list.
+		ss_ publish_refusal(const ss_ &version, const ss_ &aitta);
 		// An installed key's vouch, <user>/installed/<fp>/.vouch
 		// ({"aitta", "author"}), written by the installing client after
 		// its own vouch() (or a GET of its own to the same address) and
