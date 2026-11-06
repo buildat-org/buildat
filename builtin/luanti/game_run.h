@@ -31,7 +31,8 @@
 		// the only nodes in it are the ones a mod places. The region is the
 		// map's limits; what is loaded of it is what the load points keep.
 		voxelworld::access(m_server, [&](voxelworld::Interface *iv){
-			iv->create_instance(m_scene, m_section_region, m_server_physics);
+			iv->create_instance(m_scene, m_section_region, m_server_physics,
+					true);
 		});
 
 		// Before voxelworld's first tick, which is when a world that has

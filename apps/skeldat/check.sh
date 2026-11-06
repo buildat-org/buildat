@@ -3822,6 +3822,29 @@ grep -aq "skeldat: Kit hosted, persistent" "$log67b" &&
 	[ "${kmobs:-0}" -ge 2 ] ||
 	fail "persistent over a restart: $kmobs mobs ($log67b)"
 echo "Kit in skeldat, persistent: types placed, 2 boars spawned in edit mode, 3 coal given, bones set; over a restart $kmobs mobs, the entities and the cobble kept"
+# 63. A restart reads its save ([SK_REJOIN_SAVE_LOSS]): voxelworld's tick,
+# its own thread, loading between skeldat's making the instance and giving
+# it the save generated the world again and wrote it over the save, the
+# players and the rest of skeldat's rows kept. It took a loaded box to hit
+# the gap; here the gap made long. Two restarts, no client, on ticks that
+# do not wait for skeldat (no --sim-rate): every section out of the save.
+for n in 1 2 3; do
+	BUILDAT_SKELDAT_WORLD=reread BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+		BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+		BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_CREATE_PAUSE_MS=300 \
+		start_server "$t/srv73_$n.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv73" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv73_$n.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	wait_for_log "$t/srv73_$n.log" "skeldat: the world is in" 120 ||
+		fail "the world not in ($t/srv73_$n.log)"
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+done
+[ "$(grep -ac " pocket of " "$t/srv73_1.log")" -gt 0 ] || fail "the new world made no pockets ($t/srv73_1.log)"
+for n in 2 3; do
+	! grep -aqE " pocket of |the first bone piles|sections are loaded already" "$t/srv73_$n.log" ||
+		fail "restart $n generated the world again ($t/srv73_$n.log)"
+done
 # The summary of a full run
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"

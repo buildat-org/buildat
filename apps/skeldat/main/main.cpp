@@ -27,6 +27,8 @@
 // What the client says is trusted for now, apart from the reach and the
 // time a dig takes: its position is taken as it comes until the movement
 // check is in (stage 6).
+#include <chrono>
+#include <thread>
 #include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
@@ -834,11 +836,17 @@ struct Module: public interface::Module, public PlayersHost,
 		voxelworld::access(m_server, [&](voxelworld::Interface *i){
 			// The world's bounds in sections ([SKELDAT_BOUNDED_WORLD])
 			i->create_instance(m_world.scene, pv::Region(-m_world.half, m_world.y0, -m_world.half,
-					m_world.half - 1, m_world.y1, m_world.half - 1));
+					m_world.half - 1, m_world.y1, m_world.half - 1), false, true);
 		});
+		// For a check: what a loaded box's scheduling may do here
+		const char *pause = getenv("BUILDAT_SKELDAT_CREATE_PAUSE_MS");
+		if(pause)
+			std::this_thread::sleep_for(std::chrono::milliseconds(atoi(pause)));
 		// Before voxelworld's first tick, which loads a whole region that
 		// has no load points
 		update_load_points();
+		if(pause)
+			std::this_thread::sleep_for(std::chrono::milliseconds(atoi(pause)));
 		voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
 			interface::VoxelRegistry *reg = w->get_voxel_reg();
 			reg->set_format(m_world.format);

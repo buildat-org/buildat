@@ -524,6 +524,18 @@
 
 	void set_save(storage::Save *save, const ss_ &world_name)
 	{
+		m_waits_for_save = false;
+		// Generated, and to be written over what the save has of them
+		if(save && !m_store){
+			size_t early = 0;
+			for(auto &sector_pair : m_sections)
+				for(auto &section_pair : sector_pair.second)
+					early += section_pair.second.loaded;
+			if(early)
+				log_w(MODULE, "set_save(\"%s\"): %zu sections are loaded "
+						"already, not from the save: waits_for_save?",
+						cs(world_name), early);
+		}
 		m_aliased_save_ids.clear();
 		m_save_path = save ? save->path() : ss_();
 		m_save = save;

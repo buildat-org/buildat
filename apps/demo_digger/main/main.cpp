@@ -336,7 +336,7 @@ struct Module: public interface::Module
 			// points below say where; the sky is above the top of this.
 			pv::Region region(-30000, SECTION_Y_MIN, -30000,
 					30000, SECTION_Y_MAX, 30000);
-			ivoxelworld->create_instance(m_main_scene, region);
+			ivoxelworld->create_instance(m_main_scene, region, false, true);
 		});
 
 		// One save, one world in it. open() and create() are separate calls
@@ -394,8 +394,7 @@ struct Module: public interface::Module
 			// just registered, and sections that are in the save are loaded
 			// instead of generated -- and a section that unloads is written
 			// to it, so what was dug far away is there on the way back.
-			if(m_save)
-				world->set_save(m_save, "main");
+			world->set_save(m_save, "main");
 
 			// Skylight, which is what the voxel shading reads to tell a dug
 			// tunnel apart from a shadow. Enabled after the voxels are

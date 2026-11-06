@@ -396,6 +396,9 @@ struct CInstance: public voxelworld::Instance
 	// The world region's own sections have not been created yet; see the
 	// constructor
 	bool m_initial_sections_pending = true;
+	// create_instance()'s waits_for_save: no section loaded by the tick
+	// until set_save()
+	bool m_waits_for_save = false;
 	// How long the first sections wait for a game to say where it wants
 	// them. A game sets its load points in its own good time -- often one
 	// event after the world is made -- and the first tick can land in
@@ -527,10 +530,11 @@ struct CInstance: public voxelworld::Instance
 
 		// The region's sections are created on the first tick and not here.
 		// A game creates the world, registers its voxels and calls
-		// set_save() in one core:start, in that order, and a section that
-		// comes out of a save must not be generated -- so nothing may be
-		// loaded before the game has had the chance to say whether there is
-		// a save to look in.
+		// set_save(), in that order, and a section that comes out of a save
+		// must not be generated. The tick is on this module's thread and
+		// the game on its own, so between the game's accesses the tick can
+		// run: a game with a save says so (waits_for_save) unless it does
+		// all that in one access.
 
 		check_streaming();
 		check_index();
@@ -1042,7 +1046,7 @@ struct CInstance: public voxelworld::Instance
 				relight_continue(tick_t0 + TICK_RELIGHT_BUDGET_US))
 			commit();
 
-		if(m_initial_sections_pending){
+		if(m_initial_sections_pending && !m_waits_for_save){
 			// A world that streams says where it wants sections; the region
 			// is then its bounds and its sky and not a thing to fill
 			if(m_streaming)
@@ -1055,7 +1059,7 @@ struct CInstance: public voxelworld::Instance
 
 		// Every fourth tick: often enough that a running player stays ahead
 		// of the edge, seldom enough that the work is not the tick
-		if(m_streaming && ((m_stream_tick++) % 4) == 0)
+		if(m_streaming && !m_waits_for_save && ((m_stream_tick++) % 4) == 0)
 			stream_pass();
 		t_stream = interface::os::time_us() - tick_t0 - t_announce - t_initial;
 
@@ -3559,7 +3563,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	// Interface
 
 	void create_instance(SceneReference scene_ref, const pv::Region &region,
-			bool physics_enabled)
+			bool physics_enabled, bool waits_for_save)
 	{
 		auto it = m_instances.find(scene_ref);
 		// TODO: Is an exception the best way to handle this?
@@ -3569,6 +3573,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 		up_<CInstance> instance(new CInstance(m_server, scene_ref, region,
 				physics_enabled));
+		instance->m_waits_for_save = waits_for_save;
 		m_instances[scene_ref] = std::move(instance);
 	}
 
