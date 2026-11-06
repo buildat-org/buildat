@@ -1833,9 +1833,14 @@ function NT.palette_items(tab)
 end
 
 -- [KIT_PALETTE_MENU] A type that says no_position: no click on the view
--- places it
+-- places it. Nor the three the root or the scene takes wherever the click
+-- is: by name, as root = true is also on the controls and the movements,
+-- which stay armed
+NT.PLACED_AT_ONCE = {["kit/game_rules"] = true, ["kit/world"] = true,
+	["kit/environment"] = true}
 function NT.positionless(it)
-	return it.type ~= nil and type_of(it.type).no_position == true
+	return it.type ~= nil and (type_of(it.type).no_position == true or
+			NT.PLACED_AT_ONCE[it.type] == true)
 end
 
 function NT.arm(it)
