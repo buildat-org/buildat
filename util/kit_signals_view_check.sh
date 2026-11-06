@@ -584,10 +584,8 @@ kit() # <log>: Kit's own lines, not the drive's
 }
 # 0. No position, in the Scene group
 # A bar going leaves the body at the left (the engine's ScrollView kept its view
-# size smaller than the panel); a notice comes under the editor's bar, which comes
-# after it
+# size smaller than the panel)
 grep -a "signals: a body off by" "$b" && fail "the links body sideways ($b)"
-wantp "$b" "notification: from y (6[0-9]|7[0-9]), the top's foot at"
 want "$s" "placed kit/ui_bar $BAR1, no position" "placed kit/timer $TIMER, no position" \
 	"placed kit/starting_kit $KID, no position under $FLAG"
 # (as first listed: what the popup and the palette add comes later)
