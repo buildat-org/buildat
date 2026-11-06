@@ -189,6 +189,9 @@ static ss_ check_categories(const json::Value &b)
 		return "name: 1 to 60 characters";
 	if(jstr(b, "description").size() > 500)
 		return "description: at most 500 characters";
+	// semver_ok's own limit; what it says decides who is shown it (listed_servers)
+	if(jstr(b, "version").size() > 40)
+		return "version: at most 40 characters";
 	if(!missing(jstr(b, "kind")) && !word_ok(jstr(b, "kind")))
 		return "kind: world, arena, app or other";
 	if(!missing(jstr(b, "audience")) && !word_ok(jstr(b, "audience")))
@@ -363,8 +366,11 @@ static bool version_link(const json::Value &v)
 
 // The adapter's answer as /api/v1/list carries it, or undefined and why:
 // {version = "0.6.89", url, platforms = {linux = {url}, ...}}, no other
-// keys; a platform that is not a short name or has no good url is left out
-static json::Value version_answer(const json::Value &a, ss_ *why)
+// keys; a platform that is not a short name or has no good url is left out.
+// [ALPHA_BUILDS] with_prerelease: its "prerelease", the same shape, for an
+// alpha client; a bad one is left out and the rest stands
+static json::Value version_answer(const json::Value &a, ss_ *why,
+		bool with_prerelease = true)
 {
 	const ss_ v = a.get("version").is_string() ? a.get("version").as_string() : "";
 	// A pre-release too: the client offers it only to who asks
@@ -394,7 +400,21 @@ static json::Value version_answer(const json::Value &a, ss_ *why)
 		}
 	}
 	out.set("platforms", platforms);
+	if(with_prerelease && a.get("prerelease").is_object()){
+		ss_ ignored;
+		const json::Value pre = version_answer(a.get("prerelease"), &ignored,
+				false);
+		if(pre.is_object())
+			out.set("prerelease", pre);
+	}
 	return out;
+}
+
+// [ALPHA_BUILDS] What a listing's or a client's version says it is. A tag's
+// old hash suffix (0.6.90-abc1234) is no alpha.
+static bool version_is_alpha(const ss_ &v)
+{
+	return v.find("-alpha.") != ss_::npos;
 }
 
 struct VerifyJob {
@@ -1341,7 +1361,7 @@ struct Module: public interface::Module, public moderation::Host
 		json::Value v = json::object();
 		v.set("ok", true);
 		v.set("starport", jstr(m_settings, "name"));
-		v.set("servers", listed_servers());
+		v.set("servers", listed_servers(jstr(b, "version")));
 		v.set("recommends", recommends());
 		v.set("play", play_url());
 		if(m_version.is_object())
@@ -1350,8 +1370,11 @@ struct Module: public interface::Module, public moderation::Host
 	}
 
 	// What /api/v1/list hands out: the listed servers, and those hidden from
-	// filtered views marked restricted
-	json::Value listed_servers()
+	// filtered views marked restricted. [ALPHA_BUILDS] An alpha's listing only
+	// to a client that says it runs that very alpha: what says nothing (an
+	// older client, the page at /, a Hearth) plays with none of them. A client
+	// says its version only if it is an alpha.
+	json::Value listed_servers(const ss_ &client_version = "")
 	{
 		json::Value servers = json::array();
 		for(auto &pair : listings()){
@@ -1360,6 +1383,9 @@ struct Module: public interface::Module, public moderation::Host
 				continue;
 			const ss_ st = served_status(l);
 			if(st != "listed" && st != "hidden from filtered views")
+				continue;
+			if(version_is_alpha(jstr(l, "version")) &&
+					jstr(l, "version") != client_version)
 				continue;
 			json::Value s = json::object();
 			for(const char *k : {"id", "name", "description", "host", "port",

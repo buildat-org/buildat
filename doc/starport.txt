@@ -120,6 +120,15 @@ run their own. The official one is https://starport.buildat.org.
   the link, the notice says what to do next by the file's name (an .exe
   is run, an archive extracted; the saves and settings stay in the user
   directory) and offers "Close Buildat", out of the installer's way.
+- The alpha channel ([ALPHA_BUILDS], doc/compatibility.txt): the adapter's
+  answer may hold "prerelease", the newest alpha in the same shape. A stable
+  client does not read it; an alpha client is offered it within its own
+  MAJOR.MINOR, and any stable "version" newer than itself. A listing whose
+  version has `-alpha.` in it (a server tells its engine's) is shown only to a
+  client that names that same version: an alpha client posts `{"version":
+  "0.8.0-alpha.3"}` to `/api/v1/list`, and only an alpha client says its
+  version there. Anything else, the page at / and a Hearth included, gets no
+  alpha listing.
 - `play_url` (`https://play.buildat.org`; "" for none) is a play page:
   a server serving the web client with no game of its own. The page at /
   links each TLS server to `<play_url>/?server=host:port`; the page joins
