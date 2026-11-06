@@ -16,6 +16,18 @@ return {
 	look = {shape = "box", size = {0.2, 0.6, 0.2}, color = "#a0a0a0",
 		state = "on", when = {color = "#40c040"}},
 	state = {on = {default = false, shared = true}},
+	about = {
+		what = "On or off, flipped by a player's use; green while on.",
+		inputs = {
+			toggle = "Flips it.",
+			on = "Sets it on.",
+			off = "Sets it off.",
+		},
+		outputs = {
+			on = "It flipped on.",
+			off = "It flipped off.",
+		},
+	},
 	inputs = {toggle = "none", on = "none", off = "none"},
 	outputs = {on = "none", off = "none"},
 	on_use = function(c, by)

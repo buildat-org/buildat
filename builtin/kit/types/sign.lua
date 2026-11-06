@@ -41,6 +41,13 @@ return {
 		value = {default = ""},
 		shown = {default = "", shared = true},
 	},
+	about = {
+		what = "Text on a board in the world.",
+		inputs = {
+			value = "Fills {value} in its text. Value: what to show; none empties it.",
+			clear = "Empties {value}.",
+		},
+	},
 	inputs = {value = "any", clear = "none"},
 	on_start = function(c)
 		show(c)

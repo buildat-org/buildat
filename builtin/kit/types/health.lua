@@ -18,6 +18,17 @@ return {
 		max = {default = 20, shared = true},
 		waiting = {default = false, shared = true},
 	},
+	about = {
+		what = "Hit points of a player or of what it is placed on.",
+		inputs = {
+			heal = "Adds hit points. Value: how many; none heals fully.",
+			set = "Sets the hit points. Value: how many; 0 here neither kills nor signals died.",
+		},
+		outputs = {
+			damaged = "A hit landed. Value: the amount.",
+			died = "A hit took its last hit points.",
+		},
+	},
 	inputs = {heal = "any", set = "number"},
 	outputs = {damaged = "number", died = "none"},
 	on_start = function(c)

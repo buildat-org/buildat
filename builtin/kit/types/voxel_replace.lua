@@ -67,6 +67,17 @@ return {
 		changed = {default = ""},
 	},
 	gizmo = {shape = "box", size = 0.2, color = "#a060e0"},
+	about = {
+		what = "A find-and-replace in a box of cells, which off undoes.",
+		inputs = {
+			on = "Makes every find cell replace, remembering them.",
+			off = "Turns back those still holding replace.",
+			toggle = "On if off, else off.",
+		},
+		outputs = {
+			changed = "It switched. Value: true on, false off.",
+		},
+	},
 	inputs = {on = "none", off = "none", toggle = "none"},
 	outputs = {changed = "bool"},
 	on_start = function(c)

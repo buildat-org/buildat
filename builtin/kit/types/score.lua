@@ -7,6 +7,14 @@ return {
 	version = 1,
 	player = true,
 	state = {score = {default = 0, shared = true}},
+	about = {
+		what = "A player's score; on each player, not placed.",
+		inputs = {
+			add = "Adds to the score. Value: a number; none adds 1.",
+			set = "Sets the score. Value: a number.",
+			reset = "Sets it to 0.",
+		},
+	},
 	inputs = {add = "any", set = "number", reset = "none"},
 	on_input = function(c, input, value, by)
 		if input == "reset" then

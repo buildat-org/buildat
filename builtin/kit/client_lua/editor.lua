@@ -4172,7 +4172,8 @@ end
 -- project), in the storage of the server's game (buildat.storage_*, the
 -- client's user directory; never the server's, so never in a published
 -- project): edit mode or play, the view, the 3D camera, the tabs (the
--- panel's, the palette's, the list's) and the parameters' chip. Edit mode is asked for again
+-- panel's, the palette's, the list's), the parameters' chip and whether the
+-- Signals view hides its descriptions. Edit mode is asked for again
 -- once the rights are known; the view and the tab put back as edit mode
 -- comes on. Running or Stopped is not kept here: it is the server's (the
 -- save's session, which a restart resumes), and a Stop asked by a memory
@@ -4235,6 +4236,7 @@ function M.remember(key)
 	if t.palette_tab == "All" or t.palette_tab == "Favourites" then
 		S.tab = t.palette_tab
 	end
+	S.sg_about_hidden = t.sg_about == "hidden" or nil
 	for _, c in ipairs(NT.CATS) do
 		if t.param_cat == c[1] then
 			S.param_cat = c[1]
@@ -4265,6 +4267,7 @@ function MEM.tick(dt)
 	t.list_tab = S.list_tab
 	t.palette_tab = S.tab
 	t.param_cat = S.param_cat
+	t.sg_about = S.sg_about_hidden and "hidden" or nil
 	if S.pos then
 		t.x, t.y, t.z = string.format("%.3f", S.pos.x),
 				string.format("%.3f", S.pos.y), string.format("%.3f", S.pos.z)
@@ -4273,7 +4276,7 @@ function MEM.tick(dt)
 	end
 	local lines = {}
 	for _, k in ipairs({"mode", "view", "tab", "list_tab", "palette_tab",
-			"param_cat", "x", "y", "z", "yaw", "pitch"}) do
+			"param_cat", "sg_about", "x", "y", "z", "yaw", "pitch"}) do
 		if t[k] then
 			lines[#lines + 1] = k .. " " .. t[k]
 		end
@@ -4305,7 +4308,7 @@ do
 	install({K = K, S = S, W = W, NT = NT, IV = IV, send = send, window = window,
 		find = find, entities = entities, all_entities = all_entities,
 		type_of = type_of, typed = typed, signal_kind = signal_kind,
-		drawn_at = drawn_at, narrow = narrow,
+		drawn_at = drawn_at, narrow = narrow, LONG_PRESS_US = LONG_PRESS_US,
 		refresh = function() refresh() end})
 end
 

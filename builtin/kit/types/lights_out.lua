@@ -30,6 +30,15 @@ return {
 	look = {shape = "box", size = {0.6, 0.3, 0.6}, color = "#6040a0",
 		text = "lit"},
 	state = {lit = {default = 0, shared = true}},
+	about = {
+		what = "A puzzle: a board of tiles, a press flips a tile and its neighbours.",
+		inputs = {
+			add = "Changes the lit count. Value: a number; its tiles send 1 or -1.",
+		},
+		outputs = {
+			solved = "A press left no tile lit.",
+		},
+	},
 	inputs = {add = "number"},
 	outputs = {solved = "none"},
 	on_build = function(c)

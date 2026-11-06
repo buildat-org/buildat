@@ -16,6 +16,14 @@ return {
 	actions = {{name = "param:action", key = "param:key",
 		label = "param:label"}},
 	state = {presses = {default = 0, shared = true}},
+	about = {
+		what = "A key the players press; its signals are as by that player.",
+		outputs = {
+			pressed = "The key went down.",
+			released = "The key came up.",
+			held = "Repeats every 0.1 s while the key is down. Value: the seconds held.",
+		},
+	},
 	outputs = {pressed = "none", released = "none", held = "number"},
 	on_action = function(c, name, phase, value, by)
 		if phase == "pressed" then

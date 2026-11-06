@@ -31,6 +31,15 @@ return {
 		at = {default = 0},
 		line = {default = "", shared = true},
 	},
+	about = {
+		what = "Says its lines in turn over its head, as it is used.",
+		inputs = {
+			say = "Says the next line.",
+		},
+		outputs = {
+			said = "It said a line. Value: the line's number.",
+		},
+	},
 	inputs = {say = "none"},
 	outputs = {said = "number"},
 	on_start = function(c)

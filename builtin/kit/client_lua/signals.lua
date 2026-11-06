@@ -28,6 +28,17 @@
 --     sees, no orbit. With an entity of a HUD element selected, Kit's HUD is laid
 --     out in that rectangle (ui.lua's hud_box, by kit.hud_area()) and over it,
 --     shown and not clicked, the element on an amber rectangle
+--   - [KIT_SIGNALS_DOCS] Under each section's links its whole set of signals,
+--     from the types (signal_rows): "Linked" and, dim, "Not linked", each with
+--     its type, and the first sentence of the type's about for it unless the
+--     view's button hides those (kept with the editor's memory). A pointer resting
+--     on a signal, here or in a link's row, or a finger held on it, shows its whole
+--     about (SG.hover_tick). A signal's row pressed opens the Add link form with it
+--   - [KIT_SIGNALS_LIVE] While the game runs an output's row, and its link's, flash
+--     when it fires, the row keeping its last value (from any player); only the
+--     selected entity's, by the server's "watch" (nothing is sent otherwise). An
+--     input's row has Test, with a field for its value when it takes one: M.try,
+--     the inspector's Try, which Runs an Ended game first
 --   - Where an entity is listed its name stands after its id; one still
 --     named as placed ("kit/flag 16", or nothing) reads as its type
 --   - [KIT_SIGNALS_TOGGLE] Under 1500 UI pixels of width the links and the
@@ -65,6 +76,23 @@ local SG = {filter = "", hud = false, add = nil, tab = "links", area = nil}
 NT.sg = SG
 
 local MARGIN = 6
+-- A ScrollView's bar, shown
+local BAR_W = 16
+-- [KIT_SIGNALS_DOCS] The most of a type's about shown, for a package's long text
+local ABOUT_BYTES = 200
+-- A description beside its signal's row, under it with less room than this
+local ABOUT_BESIDE = 220
+-- How long the pointer rests on a signal before its text (a finger: LONG_PRESS_US)
+local HOVER_US = 300000
+-- A finger further than this from where it came down is scrolling
+local FINGER_PX = 12
+-- [KIT_SIGNALS_LIVE] An output's flash, its last value's column and the most of it
+-- shown; the width of an input's value field
+local FLASH_US = 600000
+local LIVE_W = 96
+local LIVE_CHARS = 12
+local VALUE_W = 72
+local LIVE_COLOR = magic.Color(1.0, 0.85, 0.3)
 -- The longest name a list writes
 local NAME_CHARS = 22
 -- Under this root width the links and the inspector take turns
@@ -355,6 +383,7 @@ function SG.pressed(x, y, right)
 	x, y = x / sc, y / sc
 	-- (on its button a click after this does not open the popup again)
 	SG.popup_was_up = W.ctx ~= nil and W.ctx == SG.popup
+	SG.tip_held = nil
 	if W.ctx and not at(W.ctx, x, y) then
 		W.ctx:Remove()
 		W.ctx = nil
@@ -371,8 +400,24 @@ magic.SubscribeToEvent("MouseButtonDown", function(_, data)
 	local m = magic.input:GetMousePosition()
 	SG.pressed(m.x, m.y, data:GetInt("Button") == magic.MOUSEB_RIGHT)
 end)
+-- The fingers down, for the one held on a signal (the editor's are the world's)
+SG.fingers = {}
 magic.SubscribeToEvent("TouchBegin", function(_, data)
-	SG.pressed(data:GetInt("X"), data:GetInt("Y"), false)
+	local x, y = data:GetInt("X"), data:GetInt("Y")
+	SG.pressed(x, y, false)
+	SG.fingers[data:GetInt("TouchID")] = {x = x, y = y, x0 = x, y0 = y,
+		t0 = buildat.get_time_us()}
+end)
+magic.SubscribeToEvent("TouchMove", function(_, data)
+	local f = SG.fingers[data:GetInt("TouchID")]
+	if f then
+		f.x, f.y = data:GetInt("X"), data:GetInt("Y")
+		f.moved = f.moved or math.abs(f.x - f.x0) + math.abs(f.y - f.y0) > FINGER_PX *
+				magic.ui.scale
+	end
+end)
+magic.SubscribeToEvent("TouchEnd", function(_, data)
+	SG.fingers[data:GetInt("TouchID")] = nil
 end)
 
 -- Shown in play: a checkbox and its label, both the button
@@ -448,13 +493,21 @@ local function link_table(body, rows, self_id)
 			cells[key] = c
 			widest[key] = math.max(widest[key], c.t.width + 5)
 		end
-		local function signal(s, key, name)
+		local function signal(s, key, name, about)
 			local c = {id = x.from_id, ci = x.ci, l = x.l}
-			c.b, c.t = item(r, s, function() link_menu(c) end,
-					magic.Color(ui_utils.rgb("focus")))
+			c.b, c.t = item(r, s, function()
+				if not SG.tip_used() then
+					link_menu(c)
+				end
+			end, magic.Color(ui_utils.rgb("focus")))
 			c.t:SetPosition(1, 0)
 			c.b:SetName(name .. link_key(x.from_id, x.l))
 			SG.cells[#SG.cells + 1] = c
+			if key == "lsig" and x.from_id == self_id then
+				SG.flasher((x.ci - 1) .. " " .. x.l.output, c.b, c.t,
+						magic.Color(ui_utils.rgb("focus")))
+			end
+			SG.tip(c.b, name .. link_key(x.from_id, x.l), about)
 			cells[key] = c
 			widest[key] = math.max(widest[key], c.t.width + 5)
 		end
@@ -463,7 +516,9 @@ local function link_table(body, rows, self_id)
 		end
 		entity(x.from, x.from_id, "lname")
 		dot()
-		signal(x.l.output, "lsig", "signal ")
+		local fc = x.from and x.from.components and x.from.components[x.ci]
+		signal(x.l.output, "lsig", "signal ", fc and
+				SG.about_of(type_of(fc.type), "outputs", x.l.output))
 		cells.gap1 = r:CreateChild("UIElement")
 		x.kind = carries(x)
 		-- (a space's width from the arrow)
@@ -477,7 +532,11 @@ local function link_table(body, rows, self_id)
 		cells.gap2 = r:CreateChild("UIElement")
 		entity(x.to, x.to_id, "rname")
 		dot()
-		signal(x.l.input, "rsig", "signal in ")
+		local into
+		for _, tc in ipairs(x.to and x.to.components or {}) do
+			into = into or SG.about_of(type_of(tc.type), "inputs", x.l.input)
+		end
+		signal(x.l.input, "rsig", "signal in ", into)
 		cells.gap3 = r:CreateChild("UIElement")
 		local check, t, w = shown_check(r, x.from_id, x.ci, x.l)
 		cells.check, cells.check_t = check, t
@@ -538,9 +597,6 @@ local function link_table(body, rows, self_id)
 		cells.gap2:SetFixedWidth(around)
 		cells.gap3:SetFixedWidth(spare - 2 * around)
 		cells.check:SetFixedWidth(widest.check)
-	end
-	if #rows == 0 then
-		text(body, "None", DIM)
 	end
 	return #rows
 end
@@ -629,51 +685,413 @@ local function pick(body, what, choices, current, fn)
 	-- A popup goes as tall as its list and past the window's edge: the list
 	-- scrolled within half a window
 	d.listView.maxHeight = math.floor(magic.ui.root.height / 2)
+	-- For a driven click by which it is
+	d:SetName("signals " .. what)
 end
 
+-- [KIT_SIGNALS_DOCS] The form either way: from the selected entity (its output,
+-- a target and its input), or with a.into into it (a source and its output, its
+-- input). a.other: the target or the source
 local function add_form(body, e)
 	local a = SG.add
-	local outs = output_choices(e)
-	a.out = a.out or (outs[1] and outs[1][2])
-	pick(body, "Output", outs, a.out, function(v)
-		a.out = v
-		log:info("kit editor: signals: add link: output " .. tostring(v))
-	end)
-	local targets = {}
-	for _, x in ipairs(A.entities()) do
-		if x.id ~= e.id and x.kind ~= "scene" and #input_choices(x) > 0 then
-			targets[#targets + 1] = {NT.entity_label(x), x.id}
+	SG.form_at = body:CreateChild("UIElement")
+	local function others(what, choices)
+		local r = {}
+		for _, x in ipairs(A.entities()) do
+			if x.id ~= e.id and x.kind ~= "scene" and #choices(x) > 0 then
+				r[#r + 1] = {NT.entity_label(x), x.id}
+			end
 		end
+		pick(body, what, r, a.other, function(v)
+			a.other = v
+			a[what == "From" and "out" or "input"] = nil
+			log:info("kit editor: signals: add link: " .. what:lower() .. " " ..
+					tostring(v))
+			SG.links()
+		end)
 	end
-	pick(body, "Target", targets, a.to, function(v)
-		a.to = v
-		a.input = nil
-		log:info("kit editor: signals: add link: target " .. tostring(v))
-		SG.links()
-	end)
-	local inputs = a.to and input_choices(find(a.to)) or {}
-	a.input = a.input or (inputs[1] and inputs[1][2])
-	pick(body, "Input", inputs, a.input, function(v)
+	local other = a.other and find(a.other)
+	local outs = output_choices(a.into and (other or {}) or e)
+	local inns = input_choices(a.into and e or other)
+	a.out = a.out or (outs[1] and outs[1][2])
+	a.input = a.input or (inns[1] and inns[1][2])
+	local function pick_out()
+		pick(body, "Output", outs, a.out, function(v)
+			a.out = v
+			log:info("kit editor: signals: add link: output " .. tostring(v))
+		end)
+	end
+	if a.into then
+		others("From", output_choices)
+		pick_out()
+	else
+		pick_out()
+		others("Target", input_choices)
+	end
+	pick(body, "Input", inns, a.input, function(v)
 		a.input = v
 		log:info("kit editor: signals: add link: input " .. tostring(v))
 	end)
 	local r = row(body)
 	tight(r, "Link", function()
 		local comp, output = tostring(a.out):match("^(%d+) (.*)$")
-		if not (comp and a.to and a.input) then
-			E.status = "Add link: an output, a target and an input"
+		if not (comp and a.other and a.input) then
+			E.status = "Add link: an output, " .. (a.into and "a source" or "a target") ..
+					" and an input"
 			return SG.status()
 		end
 		E.status = ""
-		log:info("kit editor: signals: linked " .. e.id .. "." .. output .. " -> " ..
-				a.to .. "." .. a.input)
-		send({op = "link", id = e.id, comp = tonumber(comp), output = output,
-			to = a.to, input = a.input})
+		local from, to = a.into and a.other or e.id, a.into and e.id or a.other
+		log:info("kit editor: signals: linked " .. from .. "." .. output .. " -> " ..
+				to .. "." .. a.input)
+		send({op = "link", id = from, comp = tonumber(comp), output = output,
+			to = to, input = a.input})
 	end)
 	tight(r, "Done", function()
 		SG.add = nil
 		SG.links()
 	end)
+end
+
+-- ---- [KIT_SIGNALS_DOCS] What a type says of itself and its signals
+-- key "what" with no name, or "inputs"/"outputs" and the signal's. Text a package
+-- wrote: read as strings only, clipped
+function SG.about_of(t, key, name)
+	local s = type(t.about) == "table" and t.about[key]
+	if name then
+		s = type(s) == "table" and s[name]
+	end
+	if type(s) ~= "string" or s == "" then
+		return nil
+	end
+	return #s > ABOUT_BYTES and cut(s, ABOUT_BYTES) or s
+end
+
+local function first_sentence(s)
+	return s:match("^(.-[.!?])%s") or s
+end
+
+-- An entity's signals of a side as its types declare them (sorted; that is what
+-- the client is sent), each {name, ci, kind, about, owner, linked}. Outputs a
+-- component's own, as a link's; inputs by name, as a link's, as input_choices.
+-- simplified: an input two components share reads as the first's that has one
+function SG.declared(e, key)
+	local r, seen, into = {}, {}, {}
+	if key == "inputs" then
+		for _, src in ipairs(A.all_entities()) do
+			for _, c in ipairs(src.components or {}) do
+				for _, l in ipairs(c.links or {}) do
+					if l.to == e.id then
+						into[l.input] = true
+					end
+				end
+			end
+		end
+	end
+	for ci, c in ipairs(e.components or {}) do
+		local t, out = type_of(c.type), {}
+		for _, l in ipairs(key == "outputs" and c.links or {}) do
+			out[l.output] = true
+		end
+		for _, name in ipairs(t[key] or {}) do
+			local about = SG.about_of(t, key, name)
+			local s = key == "inputs" and seen[name]
+			if s then
+				s.about = s.about or about
+			else
+				s = {name = name, ci = ci, about = about, owner = kit_short(c.type),
+					kind = A.signal_kind(t, key, name) or "any",
+					linked = (key == "inputs" and into[name] or out[name]) or false}
+				seen[name] = s
+				r[#r + 1] = s
+			end
+		end
+	end
+	return r
+end
+
+-- A row's click: the form, with this signal on the selected entity's side
+local function row_pressed(e, key, s)
+	if SG.tip_used() then
+		return
+	end
+	if key == "inputs" then
+		SG.add = {id = e.id, into = true, input = s.name}
+	else
+		SG.add = {id = e.id, out = (s.ci - 1) .. " " .. s.name}
+	end
+	SG.form_new = true
+	log:info("kit editor: signals: add link: " .. (key == "inputs" and "into " or
+			"out of ") .. e.id .. " by its " .. s.name)
+	SG.links()
+end
+
+-- [KIT_SIGNALS_LIVE] An output's last value while the game runs; an input's Test
+-- and value field. Their width
+local function row_extras(e, key, x, typed_in)
+	local s = x.s
+	if key == "outputs" then
+		if not E.running then
+			return 0
+		end
+		local k = (s.ci - 1) .. " " .. s.name
+		x.live = text(x.r, "", magic.Color(ui_utils.rgb("text")))
+		x.live:SetFixedWidth(LIVE_W)
+		x.live:SetName("signals live " .. k)
+		SG.live_text[k] = x.live
+		SG.flasher(k, x.b, x.t, s.linked and magic.Color(ui_utils.rgb("focus")) or DIM)
+		return LIVE_W
+	end
+	local vk = e.id .. "/" .. s.name
+	local w = 0
+	if s.kind ~= "none" then
+		local f = edit(x.r, E.try_values[vk] or "", function(v)
+			E.try_values[vk] = v
+		end)
+		f:SetName("signals value " .. s.name)
+		f:SetFixedWidth(VALUE_W)
+	elseif typed_in then
+		x.r:CreateChild("UIElement"):SetFixedWidth(VALUE_W)
+	end
+	if typed_in then
+		w = VALUE_W
+	end
+	local b = tight(x.r, "Test", function()
+		M.try(e.id, s.name, s.kind, E.try_values[vk])
+	end)
+	b:SetName("test " .. s.name)
+	return w + b.minWidth + 4
+end
+
+-- Rows of signals: its name and type in columns, its first sentence beside them
+-- where that leaves room for it, else under them, both wrapped
+local function signal_rows(body, e, key, list, head)
+	if #list == 0 then
+		return
+	end
+	text(body, head, DIM)
+	local INDENT, GAP = 8, 6
+	local several = #(e.components or {}) > 1
+	local built, name_w, kind_w, extra_w = {}, 0, 0, 0
+	local typed_in = false
+	for _, s in ipairs(list) do
+		typed_in = typed_in or s.kind ~= "none"
+	end
+	for _, s in ipairs(list) do
+		local x = {s = s}
+		x.r = row(body)
+		x.r:SetLayout(magic.LM_HORIZONTAL, 0, magic.IntRect(INDENT, 0, 0, 0))
+		x.b, x.t = item(x.r, s.name, function() row_pressed(e, key, s) end,
+				s.linked and magic.Color(ui_utils.rgb("focus")) or DIM)
+		local name = "row " .. (key == "inputs" and "in " or "out " .. (s.ci - 1) ..
+				" ") .. s.name
+		x.b:SetName(name)
+		x.t:SetPosition(1, 0)
+		SG.tip(x.b, name, s.about)
+		x.kind = text(x.r, s.kind .. (several and " " .. s.owner or ""), DIM)
+		name_w = math.max(name_w, x.t.width + 10)
+		kind_w = math.max(kind_w, x.kind.minWidth + GAP)
+		built[#built + 1] = x
+		extra_w = math.max(extra_w, row_extras(e, key, x, typed_in))
+	end
+	local room = SG.links_w - INDENT - name_w - kind_w - extra_w
+	local show = not S.sg_about_hidden
+	for _, x in ipairs(built) do
+		x.b:SetFixedWidth(name_w)
+		x.kind:SetFixedWidth(kind_w)
+		if show and x.s.about then
+			local beside = room >= ABOUT_BESIDE
+			local parent = x.r
+			if not beside then
+				parent = row(body)
+				parent:SetLayout(magic.LM_HORIZONTAL, 0, magic.IntRect(INDENT * 2, 0, 0, 0))
+			end
+			local d = text(parent, first_sentence(x.s.about), DIM)
+			d:SetWordwrap(true)
+			d:SetFixedWidth(beside and room or SG.links_w - INDENT * 2)
+			SG.about_lines = SG.about_lines + 1
+			SG.about_rows[#SG.about_rows + 1] = d
+		end
+		SG.about_rows[#SG.about_rows + 1] = x.kind
+	end
+end
+
+-- A side's signals, linked and not; its not linked ones for the log
+local function declared_rows(body, e, key, none_either)
+	local list = SG.declared(e, key)
+	local on, off, said = {}, {}, {}
+	for _, s in ipairs(list) do
+		local l = s.linked and on or off
+		l[#l + 1] = s
+		if not s.linked then
+			said[#said + 1] = s.name .. " " .. s.kind
+		end
+	end
+	signal_rows(body, e, key, on, "Linked")
+	signal_rows(body, e, key, off, "Not linked")
+	if #list == 0 and none_either then
+		text(body, "None", DIM)
+	end
+	return table.concat(said, ", ")
+end
+
+-- ---- [KIT_SIGNALS_LIVE] What the selected entity's outputs do
+-- What flashes for an output (key "<comp index> <output>"): built with the table
+function SG.flasher(key, b, t, color)
+	SG.flashers[key] = SG.flashers[key] or {}
+	table.insert(SG.flashers[key], {b = b, t = t, color = color})
+end
+
+local function flash(key, on)
+	for _, f in ipairs(SG.flashers[key] or {}) do
+		local w = f.b.width
+		f.b:SetStyle(on and "ListItemSelected" or "ListItem")
+		f.b.blendMode = magic.BLEND_ALPHA
+		f.b:SetFixedWidth(w)
+		f.t:SetColor(on and LIVE_COLOR or f.color)
+	end
+end
+
+local function show_live(key)
+	local l, t = SG.live[key], SG.live_text[key]
+	if l and t then
+		t.text = #l.v > LIVE_CHARS and cut(l.v, LIVE_CHARS) or l.v
+	end
+	if l and l.till then
+		flash(key, true)
+	end
+end
+
+-- The server told only while this view shows an entity it may watch: again on
+-- each state (force), the server ignoring what it knows; it drops one that left
+-- a session
+function SG.watch(force)
+	local want = 0
+	if NT.sig() and S.primary then
+		local e, made = find(S.primary)
+		want = e and not made and e.kind ~= "scene" and e.id or 0
+	end
+	if want ~= (SG.watching or 0) then
+		SG.live = {}
+	elseif not (force and want ~= 0) then
+		return
+	end
+	SG.watching = want
+	send({op = "watch", id = want})
+end
+
+function SG.fired(a)
+	if type(a) ~= "table" or tonumber(a.id) ~= SG.watching then
+		return
+	end
+	local now = buildat.get_time_us()
+	for _, o in ipairs(type(a.fired) == "table" and a.fired or {}) do
+		if type(o) == "table" then
+			local key = tostring(o[1]) .. " " .. tostring(o[2])
+			local v = tostring(o[3] or "")
+			SG.live[key] = {v = v == "" and "fired" or v, till = now + FLASH_US}
+			log:info("kit editor: signals: fired " .. tostring(a.id) .. " " .. key ..
+					": \"" .. v .. "\" x" .. tostring(o[4]))
+			show_live(key)
+		end
+	end
+end
+
+local function live_tick()
+	local now = buildat.get_time_us()
+	for key, l in pairs(SG.live or {}) do
+		if l.till and now >= l.till then
+			l.till = nil
+			flash(key, false)
+		end
+	end
+end
+
+-- ---- A signal's whole text, on a pointer's rest or a finger held
+function SG.tip(b, name, about)
+	if about then
+		SG.tips[#SG.tips + 1] = {b = b, s = about, name = name}
+	end
+end
+
+-- A click after a finger held to read: not a click. True once
+function SG.tip_used()
+	local used = SG.tip_held
+	SG.tip_held = nil
+	return used
+end
+
+function SG.tip_hide()
+	if SG.tip_win then
+		SG.tip_win:Remove()
+		SG.tip_win, SG.tip_on = nil, nil
+	end
+end
+
+local function tip_show(c)
+	SG.tip_hide()
+	local root = magic.ui.root
+	local w = window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
+	SG.tip_win, SG.tip_on = w, c.name
+	w.priority = 20
+	w.opacity = 1
+	w:SetVar("FollowsRoot", "1")
+	local width = math.min(360, root.width - 2 * MARGIN)
+	local t = text(w, c.s)
+	t:SetWordwrap(true)
+	t:SetFixedWidth(width - 12)
+	w:SetFixedWidth(width)
+	local p = c.b.screenPosition
+	local y = p.y + c.b.height + 2
+	if y + w.height > root.height - MARGIN then
+		y = math.max(MARGIN, p.y - w.height - 2)
+	end
+	w:SetPosition(math.max(MARGIN, math.min(p.x, root.width - width - MARGIN)), y)
+	log:info("kit editor: signals: the text of " .. c.name .. " at " .. w.position.x ..
+			" " .. w.position.y .. " " .. w.width .. " " .. w.height .. " in " ..
+			root.width .. "x" .. root.height .. ": " .. c.s)
+end
+
+-- Each frame: which signal the pointer rests on, or the one finger holds still
+function SG.hover_tick()
+	local x, y, need, t0
+	local f, n = nil, 0
+	for _, g in pairs(SG.fingers) do
+		f, n = g, n + 1
+	end
+	if n == 1 and not f.moved then
+		x, y, need, t0 = f.x, f.y, A.LONG_PRESS_US, f.t0
+	elseif n == 0 and not S.touch then
+		local m = magic.input:GetMousePosition()
+		x, y, need = m.x, m.y, HOVER_US
+	end
+	local c
+	if x and not W.ctx and not ui_utils.dropdown_open() and SG.links_view and
+			W.sg_links and W.sg_links.visible then
+		local sc = magic.ui.scale
+		x, y = x / sc, y / sc
+		if at(SG.links_view, x, y) then
+			for _, k in ipairs(SG.tips or {}) do
+				if at(k.b, x, y) then
+					c = k
+					break
+				end
+			end
+		end
+	end
+	if not c then
+		SG.tip_at, SG.tip_since = nil, nil
+		return SG.tip_hide()
+	end
+	local now = buildat.get_time_us()
+	if SG.tip_at ~= c.name then
+		SG.tip_at, SG.tip_since = c.name, t0 or now
+		SG.tip_hide()
+	end
+	if SG.tip_on ~= c.name and now - SG.tip_since >= need then
+		tip_show(c)
+		SG.tip_held = t0 and true or nil
+	end
 end
 
 function SG.links()
@@ -691,8 +1109,40 @@ function SG.links()
 		SG.add = nil
 	end
 	SG.cells, SG.links_drawn_w, SG.kinds = {}, SG.links_w, {}
+	SG.tips, SG.about_lines, SG.about_rows, SG.form_at = {}, 0, {}, nil
+	SG.flashers, SG.live_text = {}, {}
+	SG.watch()
+	if not E.running then
+		SG.live = {}
+	end
 	SG.links_body = put_body(SG.links_view, function(body)
-		text(body, title, magic.Color(1.0, 0.85, 0.3))
+		local tr = row(body)
+		local tt = text(tr, title, magic.Color(1.0, 0.85, 0.3))
+		if e then
+			local tb = tight(tr, S.sg_about_hidden and "Show descriptions" or
+					"Hide descriptions", function()
+				S.sg_about_hidden = not S.sg_about_hidden or nil
+				log:info("kit editor: signals: descriptions " ..
+						(S.sg_about_hidden and "hidden" or "shown"))
+				SG.links()
+			end)
+			tb:SetName("signals about")
+			tt:SetWordwrap(true)
+			tt:SetFixedWidth(SG.links_w - tb.minWidth - 8)
+			if not S.sg_about_hidden then
+				local several = #(e.components or {}) > 1
+				for _, c in ipairs(e.components or {}) do
+					local what = SG.about_of(type_of(c.type), "what")
+					if what then
+						local d = text(body, (several and kit_short(c.type) .. ": " or "") ..
+								what, DIM)
+						d:SetWordwrap(true)
+						d:SetFixedWidth(SG.links_w)
+						SG.about_lines = SG.about_lines + 1
+					end
+				end
+			end
+		end
 		SG.status_text = text(body, E.status or "", WARN)
 		SG.status_text.visible = (E.status or "") ~= "" and not S.reparent
 		if not e then
@@ -724,7 +1174,11 @@ function SG.links()
 		tight(nr, "Rename", rename)
 		body:CreateChild("UIElement"):SetFixedHeight(8)
 		text(body, "Inputs", magic.Color(ui_utils.rgb("text")))
+		if SG.add and SG.add.into then
+			add_form(body, e)
+		end
 		local inn = inputs(body, e)
+		local unused_in = declared_rows(body, e, "inputs", inn == 0)
 		body:CreateChild("UIElement"):SetFixedHeight(12)
 		local head = row(body)
 		local ol = label(head, "Outputs")
@@ -737,10 +1191,11 @@ function SG.links()
 			SG.links()
 		end, SG.add ~= nil)
 		b:SetName("add link")
-		if SG.add then
+		if SG.add and not SG.add.into then
 			add_form(body, e)
 		end
 		local out = outputs(body, e)
+		local unused_out = declared_rows(body, e, "outputs", out == 0)
 		local said = "kit editor: signals: " .. e.id .. " " .. short_name(e) ..
 				": " .. out .. " out, " .. inn .. " in; " ..
 				table.concat(SG.kinds, ", ")
@@ -748,7 +1203,34 @@ function SG.links()
 			SG.links_said = said
 			log:info(said)
 		end
+		said = "kit editor: signals: " .. e.id .. " not linked: in " .. unused_in ..
+				"; out " .. unused_out
+		if said ~= SG.unused_said then
+			SG.unused_said = said
+			log:info(said)
+		end
 	end)
+	for key in pairs(SG.live or {}) do
+		show_live(key)
+	end
+	-- A form asked for by a row further down: in view
+	if SG.form_new and SG.form_at then
+		SG.links_view.viewPosition = magic.IntVector2(0, math.max(0,
+				SG.form_at.screenPosition.y - SG.links_body.screenPosition.y))
+	end
+	SG.form_new = nil
+	-- For a drive: what the column came to, and whether anything left its width
+	local right, left = 0, SG.links_view.screenPosition.x
+	for _, d in ipairs(SG.about_rows) do
+		right = math.max(right, d.screenPosition.x + d.width - left)
+	end
+	local said = "kit editor: signals: rows of " .. tostring(e and e.id) .. ": " ..
+			SG.about_lines .. " descriptions, " .. #SG.tips .. " texts, to " .. right ..
+			" of " .. SG.links_w + 20 .. ", body " .. SG.links_body.width
+	if said ~= SG.rows_said then
+		SG.rows_said = said
+		log:info(said)
+	end
 end
 
 -- A refusal or what a form lacks, as people() would have said it. With Switch
@@ -865,7 +1347,7 @@ end
 -- (nothing over it, an entity with a position shown); the wheel over it. The
 -- angle and the distance stay as another entity is selected
 SG.orbit = {yaw = 40, pitch = 32, dist = 6}
-SG.fingers = {}
+SG.orbit_fingers = {}
 local WEB = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
 
 -- Pixels
@@ -920,18 +1402,18 @@ end)
 magic.SubscribeToEvent("TouchBegin", function(_, data)
 	local x, y = data:GetInt("X"), data:GetInt("Y")
 	if orbit_at(x, y) then
-		SG.fingers[data:GetInt("TouchID")] = {x = x, y = y}
+		SG.orbit_fingers[data:GetInt("TouchID")] = {x = x, y = y}
 	end
 end)
 magic.SubscribeToEvent("TouchMove", function(_, data)
 	local id = data:GetInt("TouchID")
-	local f = SG.fingers[id]
+	local f = SG.orbit_fingers[id]
 	if not f then
 		return
 	end
 	local x, y = data:GetInt("X"), data:GetInt("Y")
 	local o
-	for oid, of in pairs(SG.fingers) do
+	for oid, of in pairs(SG.orbit_fingers) do
 		if oid ~= id then
 			o = of
 		end
@@ -946,8 +1428,8 @@ magic.SubscribeToEvent("TouchMove", function(_, data)
 	f.x, f.y = x, y
 end)
 magic.SubscribeToEvent("TouchEnd", function(_, data)
-	SG.fingers[data:GetInt("TouchID")] = nil
-	if not next(SG.fingers) then
+	SG.orbit_fingers[data:GetInt("TouchID")] = nil
+	if not next(SG.orbit_fingers) then
 		SG.pinched = nil
 	end
 end)
@@ -966,6 +1448,14 @@ function SG.tick()
 		return
 	end
 	SG.layout()
+	SG.hover_tick()
+	live_tick()
+	local sideways = SG.links_view and SG.links_view.horizontalScrollBar.visible
+	if sideways ~= SG.sideways_said then
+		SG.sideways_said = sideways
+		log:info("kit editor: signals: a sideways bar: " .. tostring(sideways) .. " of " ..
+				tostring(S.primary))
+	end
 	local walk = O.camera
 	local wc = walk:GetComponent("Camera")
 	SG.cam.fov, SG.cam.nearClip, SG.cam.farClip = wc.fov, wc.nearClip, wc.farClip
@@ -979,7 +1469,7 @@ function SG.tick()
 		SG.cam_node.position = at + q * magic.Vector3(0, 0, -o.dist)
 		shows = "entity " .. e.id
 		-- For a check: as a gesture ends, and as the entity moves
-		if not (SG.dragging or next(SG.fingers)) then
+		if not (SG.dragging or next(SG.orbit_fingers)) then
 			local said = string.format("kit editor: signals: the camera on %d at " ..
 					"%.2f %.2f %.2f: yaw %.1f, pitch %.1f, distance %.2f", e.id, at.x,
 					at.y, at.z, o.yaw, o.pitch, o.dist)
@@ -1018,8 +1508,8 @@ end
 
 function SG.body_w(view, body, view_w)
 	if body then
-		-- Room for its bar
-		local w = (view_w or view.width) - view.verticalScrollBar.width - 8
+		-- Room for its bar (hidden, the bar's width is not yet what it is shown at)
+		local w = (view_w or view.width) - math.max(view.verticalScrollBar.width, BAR_W) - 8
 		body.minWidth = w
 		-- A narrower window: the layout keeps a width it had
 		body.width = w
@@ -1076,7 +1566,7 @@ function SG.layout(force)
 		mw = rw - lw - rcw - 4 * MARGIN
 		lx, mx, rx = MARGIN, 2 * MARGIN + lw, 3 * MARGIN + lw + mw
 	end
-	SG.links_w = mw - 12 - 20
+	SG.links_w = mw - 12 - BAR_W - 8
 	if W.sg_list then
 		W.sg_list.visible = shown("list")
 		fit(W.sg_list, SG.list_view, SG.list_body, lx, top, lw, h, SG.filter_h)
@@ -1186,10 +1676,14 @@ local function close()
 		SG.view_win.visible = false
 		W.sg_view = nil
 	end
+	SG.tip_hide()
+	SG.tips, SG.tip_at, SG.tip_since = nil, nil, nil
+	SG.watch()
+	SG.flashers, SG.live_text = {}, {}
 	SG.area, SG.laid, SG.shows, SG.cells, SG.links_drawn_w = nil, nil, nil, nil, nil
 	SG.inspector_w, SG.mode = nil, nil
 	SG.add = nil
-	SG.dragging, SG.fingers, SG.pinched = nil, {}, nil
+	SG.dragging, SG.orbit_fingers, SG.pinched = nil, {}, nil
 end
 
 -- [KIT_PALETTE_MENU] The palette as a big dropdown under the list's button, W.ctx
@@ -1291,6 +1785,7 @@ function SG.refresh()
 	SG.layout(true)
 	SG.rows()
 	SG.links()
+	SG.watch(true)
 	SG.status()
 	SG.layout(true)
 end

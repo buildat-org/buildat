@@ -37,6 +37,18 @@ return {
 		solid = true, state = "open", when = {swing = true,
 		mirror = "param:mirror", solid = false}},
 	state = {open = {default = false, shared = true}},
+	about = {
+		what = "A door a player opens and shuts by using it; solid while shut.",
+		inputs = {
+			open = "Opens it.",
+			close = "Shuts it.",
+			toggle = "Opens it if shut, else shuts it.",
+		},
+		outputs = {
+			opened = "It opened.",
+			closed = "It shut.",
+		},
+	},
 	inputs = {open = "none", close = "none", toggle = "none"},
 	outputs = {opened = "none", closed = "none"},
 	on_use = function(c, by)

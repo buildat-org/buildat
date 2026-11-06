@@ -30,6 +30,15 @@ return {
 		target = {type = "entity", default = 0},
 		two_way = {type = "bool", default = false},
 	},
+	about = {
+		what = "A pad that moves a player who steps on it or uses it.",
+		inputs = {
+			teleport = "Moves who set it off.",
+		},
+		outputs = {
+			teleported = "A player was moved.",
+		},
+	},
 	inputs = {teleport = "none"},
 	outputs = {teleported = "none"},
 	on_enter = function(c, by)

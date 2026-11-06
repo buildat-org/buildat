@@ -30,6 +30,18 @@ return {
 		score = {default = 0, shared = true},
 		status = {default = "", shared = true},
 	},
+	about = {
+		what = "A team: its colour, its spawn pad and a shared score.",
+		inputs = {
+			join = "Who set it off becomes a member, put on its pad.",
+			add = "Adds to the score. Value: a number; none adds 1.",
+			set = "Sets the score. Value: a number.",
+		},
+		outputs = {
+			scored = "add or set came. Value: the new score.",
+			reached = "The score first came to win_score. Value: this team's id, for an arena's win.",
+		},
+	},
 	inputs = {join = "none", add = "any", set = "number"},
 	outputs = {scored = "number", reached = "entity"},
 	on_start = show,

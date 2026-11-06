@@ -31,6 +31,17 @@ return {
 		solid = true, state = "open", when = {swing = true,
 		mirror = "param:mirror", solid = false}},
 	state = {open = {default = false, shared = true}},
+	about = {
+		what = "A door only a player with its key opens; anyone shuts it.",
+		inputs = {
+			close = "Shuts it.",
+		},
+		outputs = {
+			opened = "A player with the key opened it.",
+			closed = "It shut.",
+			refused = "A player without the key tried it.",
+		},
+	},
 	inputs = {close = "none"},
 	outputs = {opened = "none", closed = "none", refused = "none"},
 	on_use = function(c, by)

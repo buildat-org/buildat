@@ -93,6 +93,16 @@ return {
 	},
 	-- Any signal: one without a value is shake 1, fov back, glitch 1 s,
 	-- tint white, the camera's own
+	about = {
+		what = "The players' camera, pointer and movement, for the whole game.",
+		inputs = {
+			shake = "Shakes the camera. Value: an amount (none: 1), or a position to shake from.",
+			fov = "Takes the view's angle over its fov time. Value: the angle; 0 goes back.",
+			glitch = "A glitch on the screen. Value: its seconds (none: 1).",
+			tint = "A flash of a colour. Value: #rrggbb (none: white).",
+			camera = "Changes the camera's mode. Value: first_person, chase or top_down; \"\" its own.",
+		},
+	},
 	inputs = {shake = "any", fov = "any", glitch = "any", tint = "any",
 		camera = "any"},
 	on_input = signal,

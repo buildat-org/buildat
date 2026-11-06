@@ -25,6 +25,12 @@ return {
 		items = {type = "string", default = "", choices_from = "item_list"},
 	},
 	state = {slots = {default = {}}},
+	about = {
+		what = "Slots of its own: a player who uses it moves items in and out.",
+		outputs = {
+			opened = "A player used it.",
+		},
+	},
 	outputs = {opened = "none"},
 	on_start = function(c)
 		local slots = {}

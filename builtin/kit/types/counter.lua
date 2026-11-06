@@ -6,6 +6,18 @@ return {
 	look = {shape = "box", size = 0.25, color = "#e0c040", text = "count"},
 	params = {target = {type = "number", default = 0, min = 0, max = 1000000}},
 	state = {count = {default = 0, shared = true}},
+	about = {
+		what = "Counts, and draws its count over it.",
+		inputs = {
+			count = "Adds one.",
+			add = "Adds to the count. Value: the number to add.",
+			reset = "Sets it to 0.",
+		},
+		outputs = {
+			reached = "It came to its target. Value: the count.",
+			changed = "Any input came. Value: the count.",
+		},
+	},
 	inputs = {count = "none", add = "number", reset = "none"},
 	outputs = {reached = "number", changed = "number"},
 	on_input = function(c, input, value, by)

@@ -11,6 +11,9 @@ local BODY = {r = 0.45, h = 1.7, eye = 1.5487}
 
 return {
 	version = 1,
+	about = {
+		what = "A movement: players walk with the keys and jump.",
+	},
 	root = true,
 	movement = {body = BODY, touch = "stick"},
 	params = {

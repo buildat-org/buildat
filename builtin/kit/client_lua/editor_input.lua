@@ -2763,6 +2763,10 @@ function M.editor(options)
 				tostring(a.input) .. ": " .. t)
 		inspector_window()
 	end)
+	-- [KIT_SIGNALS_LIVE] What the watched entity's outputs emitted
+	buildat.sub_packet("kit:fired", function(data)
+		NT.sg.fired(network.parse_json(data))
+	end)
 	-- [KIT_VOXEL_EDITS] The edited sections, the terrain panel's list
 	buildat.sub_packet("kit:edited", function(data)
 		local a = network.parse_json(data)

@@ -35,6 +35,16 @@ return {
 	no_position = true,
 	params = {title = {cat = "hud", type = "string", default = "Score"}},
 	state = {text = {default = "", shared = true}},
+	about = {
+		what = "The players' scores, on every player's screen.",
+		inputs = {
+			add = "Gives the player who set it off a point.",
+			reset = "Sets every score to 0.",
+		},
+		outputs = {
+			changed = "The scores changed. Value: the board's text, for a kit/ui_text.",
+		},
+	},
 	inputs = {add = "none", reset = "none"},
 	outputs = {changed = "string:text"},
 	on_start = show,

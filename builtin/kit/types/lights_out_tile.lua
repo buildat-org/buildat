@@ -9,6 +9,16 @@ return {
 	look = {shape = "box", size = {0.9, 0.15, 0.9}, color = "#303848",
 		state = "lit", when = {color = "#ffe040"}},
 	state = {lit = {default = false, shared = true}},
+	about = {
+		what = "One tile of a Lights Out board, lit or not.",
+		inputs = {
+			toggle = "Flips it.",
+		},
+		outputs = {
+			pressed = "A player used it; it flips only by its links.",
+			changed = "It flipped. Value: 1 lit, -1 dark.",
+		},
+	},
 	inputs = {toggle = "none"},
 	outputs = {pressed = "none", changed = "number"},
 	on_start = function(c)

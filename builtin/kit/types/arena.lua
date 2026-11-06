@@ -377,6 +377,20 @@ return {
 		order = "param:hud_order", prefix = "hud_"},
 	-- Its pad, the zone's first cell's floor, seen in play
 	look = {shape = "box", size = {1, 0.1, 1}, color = "#f0a030"},
+	about = {
+		what = "Runs rounds: a queue on its pad, a countdown, teams, a timer, a result.",
+		inputs = {
+			["end"] = "Ends the round at once.",
+			win = "Ends the round with a winner. Value: a team's id or name; else the team of who set it off.",
+		},
+		outputs = {
+			started = "A round began. Value: its session's id.",
+			ended = "A round ended. Value: its session's id.",
+			result = "Back in the lobby after a round. Value: the winner's name, \"\" a draw.",
+			won = "The round's results begin, its players still in it. Value: the winner's name.",
+			status = "The round's line changed. Value: the text: time left, scores, result.",
+		},
+	},
 	inputs = {["end"] = "none", win = "any"},
 	outputs = {started = "number", ended = "number", result = "string:team",
 		won = "string:team",

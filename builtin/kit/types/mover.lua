@@ -36,6 +36,18 @@ return {
 	state = {
 		out = {default = false, shared = true},
 	},
+	about = {
+		what = "A box that slides by its offset and back, carrying what is under it.",
+		inputs = {
+			go = "Moves it out.",
+			back = "Moves it home.",
+			toggle = "Moves it the other way.",
+		},
+		outputs = {
+			moving = "It started to move. Value: true going out, false going home.",
+			arrived = "It got there. Value: true out, false home.",
+		},
+	},
 	inputs = {go = "none", back = "none", toggle = "none"},
 	outputs = {moving = "bool", arrived = "bool"},
 	on_start = function(c)

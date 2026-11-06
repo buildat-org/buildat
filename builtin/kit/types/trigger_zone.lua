@@ -8,6 +8,14 @@ return {
 	params = {size = {type = "position", default = {3, 2, 3}}},
 	state = {inside = {default = 0, shared = true}},
 	gizmo = {shape = "sphere", size = 0.2, color = "#40c0ff"},
+	about = {
+		what = "An unseen box that notices players walking in and out.",
+		outputs = {
+			entered = "A player walked in. Value: how many are in it now.",
+			left = "A player walked out. Value: how many are in it now.",
+			empty = "The last one left.",
+		},
+	},
 	outputs = {entered = "number", left = "number", empty = "none"},
 	on_enter = function(c, by)
 		c.state.inside = c.state.inside + 1

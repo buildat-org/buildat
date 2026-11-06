@@ -17,6 +17,9 @@ end
 
 return {
 	version = 1,
+	about = {
+		what = "A movement: players walk to where they click.",
+	},
 	root = true,
 	movement = {body = BODY, touch = "tap", click = true},
 	params = {

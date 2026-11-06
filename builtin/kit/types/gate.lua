@@ -15,6 +15,18 @@ return {
 		solid = true, state = "open",
 		when = {scale = {1, 0.08, 1}, solid = false}},
 	state = {open = {default = false, shared = true}},
+	about = {
+		what = "A wall that only links open and shut; solid while shut.",
+		inputs = {
+			open = "Opens it.",
+			close = "Shuts it.",
+			toggle = "Opens it if shut, else shuts it.",
+		},
+		outputs = {
+			opened = "It opened.",
+			closed = "It shut.",
+		},
+	},
 	inputs = {open = "none", close = "none", toggle = "none"},
 	outputs = {opened = "none", closed = "none"},
 	on_input = function(c, input, value, by)

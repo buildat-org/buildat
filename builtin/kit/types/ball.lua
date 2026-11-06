@@ -10,6 +10,9 @@ local BODY = {r = 0.5, h = 1}
 
 return {
 	version = 1,
+	about = {
+		what = "A seat that rolls: a player who uses it pushes it with the keys.",
+	},
 	usable = true,
 	seat = true,
 	look = {shape = "sphere", size = 0.5, color = "#e05030", solid = true},

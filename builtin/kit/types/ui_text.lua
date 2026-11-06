@@ -75,6 +75,16 @@ return {
 		value = {default = "", shared = true},
 		own = {default = {}, per_player = true},
 	},
+	about = {
+		what = "A text on the players' screens.",
+		inputs = {
+			value = "Fills {value} in its text. Value: what to show; none empties it.",
+			clear = "Empties {value}.",
+			show = "Shows it.",
+			hide = "Hides it.",
+			toggle = "Shows it if hidden, else hides it.",
+		},
+	},
 	inputs = {value = "any", clear = "none", show = "none", hide = "none",
 		toggle = "none"},
 	-- [KIT_HUD_STYLE] Version 1's pixels as percents of the shorter side,

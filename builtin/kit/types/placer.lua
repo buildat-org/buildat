@@ -18,6 +18,12 @@ return {
 		signal = {type = "string", default = "arm"},
 		consume = {type = "bool", default = true},
 	},
+	about = {
+		what = "Using an item puts a copy of a prefab ahead of the player.",
+		outputs = {
+			placed = "A player's use put a copy down. Value: the copy's id.",
+		},
+	},
 	outputs = {placed = "entity"},
 	on_item = function(c, item, action, target, by)
 		if action ~= "use" or item ~= c.params.item or c.params.prefab == "" then
