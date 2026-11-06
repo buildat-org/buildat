@@ -680,7 +680,7 @@ for n in q1 q2 q3 q4 oq; do
 done
 for n in q1 q2 q3; do publish "$t/$n" $n; done
 pack "$t/q4" q4
-grep -q "3 releases of tester wait to be built for the page here already" "$t/pub_q4.out" ||
+grep -q "3 releases of tester wait to be built here already" "$t/pub_q4.out" ||
 	fail "q4 was not refused: $(cat "$t/pub_q4.out")"
 publish "$t/oq" oq other "$t/key2"
 touch "$job/go"

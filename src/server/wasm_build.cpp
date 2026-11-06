@@ -3,6 +3,7 @@
 #include "server/wasm_build.h"
 #include "core/log.h"
 #include "core/config.h"
+#include "core/json.h"
 #include "interface/fs.h"
 #include "interface/process.h"
 #include "interface/sha1.h"
@@ -325,16 +326,48 @@ static sv_<std::pair<ss_, sv_<ss_>>> sibling_crates(const ss_ &module_path,
 	return r;
 }
 
+// [AITTA_NATIVE_WASM] Where this machine has no toolchain: the .wasm the
+// Aitta a module was installed from built from the release's source, kept
+// in the version's directory by the install, by the names --build-wasm
+// gives them. Never for a module not installed from an Aitta. Only what
+// the Aitta builds: a wasm_box's source has none. A wrong file is the
+// validator's to refuse, the client's and the server's. "" for none.
+static ss_ aitta_built(const ss_ &module_name, const ss_ &module_path,
+		const ss_ &source, bool server)
+{
+	const ss_ version = interface::fs::strip_file_name(module_path);
+	if(version.empty() || !interface::fs::path_exists(version+"/.aitta_from"))
+		return "";
+	json::json_error_t e;
+	const json::Value m = json::load_file((module_path+"/meta.json").c_str(), &e);
+	if(source != (server ? json::jstr(m.get("server_wasm"), "source") : "wasm"))
+		return "";
+	const ss_ file = version+"/.aitta_wasm/"+module_name+
+			(server ? ".server" : "")+".wasm";
+	if(!interface::fs::path_exists(file)){
+		log_w(MODULE, "%s: its Aitta's .wasm of %s/ is not here (%s): built "
+				"there yet? Installing it again fetches it", cs(module_name),
+				cs(source), cs(file));
+		return "";
+	}
+	log_i(MODULE, "%s: %s/ was built by the Aitta it came from: %s",
+			cs(module_name), cs(source), cs(file));
+	return file;
+}
+
 // wasm/ as a Rust crate: copied out (cargo writes Cargo.lock beside
 // Cargo.toml), with the module's crates it depends on beside it as in the
 // module, and built by cargo; the .wasm's path, or "" and why logged
 static ss_ build_rust(const core::Config &config, const ss_ &module_name,
 		const ss_ &module_path, const ss_ &source, const sv_<ss_> &files,
-		const ss_ &out_dir, const ss_ &hash)
+		const ss_ &out_dir, const ss_ &hash, bool server)
 {
 	const ss_ interface_path = config.get<ss_>("interface_path");
 	const ss_ cargo = config.get<ss_>("wasm_cargo");
 	if(cargo.empty()){
+		const ss_ aitta = aitta_built(module_name, module_path, source, server);
+		if(!aitta.empty())
+			return aitta;
 		log_e(MODULE, "%s has %s/ in Rust, and this server has no cargo to "
 				"build it (tried %s). Install Rust (rustup) and its %s target, "
 				"or set BUILDAT_CARGO.", cs(module_name), cs(source),
@@ -369,6 +402,12 @@ static ss_ build_rust(const core::Config &config, const ss_ &module_name,
 		while(!dir.empty() && (dir.back() == '\n' || dir.back() == '\r'))
 			dir.pop_back();
 		if(!ok || dir.empty() || !interface::fs::path_exists(dir)){
+			const ss_ aitta = aitta_built(module_name, module_path, source,
+					server);
+			if(!aitta.empty()){
+				interface::fs::remove_all(tmp);
+				return aitta;
+			}
 			ok = false;
 			why = ss_("cargo is there, and Rust's ")+RUST_TARGET+" target is "
 					"not (rustup target add "+RUST_TARGET+")";
@@ -563,10 +602,13 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 #endif
 	if(rust)
 		return build_rust(config, module_name, module_path, source, files,
-				out_dir, hash);
+				out_dir, hash, server);
 	const ss_ cc = config.get<ss_>("wasm_cc");
 	const ss_ ld = config.get<ss_>("wasm_ld");
 	if(cc.empty() || ld.empty()){
+		const ss_ aitta = aitta_built(module_name, module_path, source, server);
+		if(!aitta.empty())
+			return aitta;
 		log_e(MODULE, "%s has %s/, and this server has no clang and wasm "
 				"linker to build it (tried %s). Install clang and lld, or set "
 				"BUILDAT_WASM_CC and BUILDAT_WASM_LD.",

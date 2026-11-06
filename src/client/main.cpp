@@ -217,9 +217,19 @@ static int aitta_main(int argc, char *argv[])
 			const ss_ fp = interface::aitta::fingerprint(
 					pick.get("key").is_string() ? pick.get("key").as_string() : "");
 			const ss_ dir = user+"/installed/"+fp+"/"+n+"/"+v;
+			// [AITTA_NATIVE_WASM] The .wasm its Aitta built, on a server with
+			// no toolchain the only way this runs: a warning where not had
+			auto fetch_wasm = [&](const ss_ &to){
+				for(const ss_ &why : interface::aitta::fetch_built_wasm(base,
+						pick.get("web_wasm"), to))
+					fprintf(stderr, "warning: %s/%s %s: %s\n", a.c_str(),
+							n.c_str(), v.c_str(), why.c_str());
+			};
 			if(interface::fs::path_exists(dir)){
 				fprintf(stderr, "%s/%s %s is installed already\n", a.c_str(),
 						n.c_str(), v.c_str());
+				// One not built when it was installed is built by now
+				fetch_wasm(dir);
 				printf("%s\n", dir.c_str());
 				return 0;
 			}
@@ -253,6 +263,7 @@ static int aitta_main(int argc, char *argv[])
 			}
 			std::remove((tmp+".zip").c_str());
 			std::remove((tmp+".sig").c_str());
+			fetch_wasm(out);
 			printf("%s\n", out.c_str());
 			return 0;
 		}
