@@ -9,9 +9,9 @@ namespace interface {
 
 namespace rccpp
 {
-	// Optimization flags modules are compiled with. Part of the build cache
-	// hash, so changing it rebuilds what is already cached.
-	ss_ cxxflags_optimize();
+	// The flags every module is compiled with. Part of the build cache hash,
+	// so changing them rebuilds what is already cached.
+	ss_ cxxflags_fixed();
 
 	struct Compiler {
 		virtual ~Compiler(){}
@@ -26,6 +26,12 @@ namespace rccpp
 		virtual bool compile(const std::string &in_path,
 				const std::string &out_path,
 				const ss_ &extra_cxxflags, const ss_ &extra_ldflags) = 0;
+
+		// What says which compiler this is, for the build cache: --version's
+		// first line, less the program's name a path or a symlink changes.
+		// Empty without a compiler or when it does not answer. Asked once;
+		// scratch_path is a file to overwrite, removed after.
+		virtual ss_ version(const ss_ &scratch_path) = 0;
 
 		virtual void* construct(const char *name, interface::Server *server) = 0;
 
