@@ -44,7 +44,7 @@ return {
 		border = "param:border", style = "param:style", form = "param:form",
 		direction = "param:direction", size = "param:size",
 		blink_below = "param:blink_below", order = "param:order",
-		source = "param:source", panel = "param:panel"},
+		source = "param:source"},
 	params = {
 		label = {cat = "hud", type = "string", default = "{value}"},
 		min = {type = "number", default = 0, min = -1000000, max = 1000000},
@@ -80,7 +80,6 @@ return {
 			max = 1},
 		order = {cat = "hud", type = "number", default = 0, min = -40,
 			max = 40},
-		panel = {cat = "hud", type = "entity", default = 0},
 		to = {type = "string", default = "everyone",
 			choices = {"everyone", "player", "team"}},
 		shown = {cat = "hud", type = "bool", default = true},

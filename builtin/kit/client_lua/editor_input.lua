@@ -320,6 +320,11 @@ local function place_at(cell, item)
 		S.under = nil
 	end
 	local parent = S.under
+	-- [KIT_PANEL_PARENT] a UI element in the panel selected
+	local sel = S.primary and find(S.primary)
+	if not parent and NT.is_ui(item.type) and NT.is_panel(sel) then
+		parent = sel.id
+	end
 	if item.clipboard then
 		send({op = "place", clipboard = true, pos = cell,
 			turn = item.turn or 0, parent = parent})
@@ -1135,17 +1140,18 @@ function NT.arm_parent(id)
 end
 
 -- The entity clicked while Switch parent is armed: its parent, one of the
--- scene's positioned; true when taken
+-- scene's positioned or a panel (only a UI element under that: the server
+-- says so); true when taken
 function NT.pick_parent(id)
 	local child = S.reparent
 	if not child then
 		return false
 	end
 	local e, is_made = find(id)
-	if id == child or not e or is_made or not e.pos then
+	if id == child or not e or is_made or not (e.pos or NT.is_panel(e)) then
 		E.status = "Switch parent: " .. (id == child and "not itself" or
 				is_made and "not one made in play" or
-				"one with a position") .. "; Escape: cancel"
+				"one with a position or a panel") .. "; Escape: cancel"
 		log:info("kit editor: switch parent of " .. child .. ": not " .. id)
 		people()
 		return true

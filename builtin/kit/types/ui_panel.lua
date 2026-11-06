@@ -1,7 +1,8 @@
 -- A panel on the players' screens ([KIT_UI_COMPONENTS], stage 4m): a box
--- `width` x `height` with a `title`, the UI components whose `panel` it is
--- laid out in it and shown while it is: a dialog (its text, its buttons,
--- one that `closes` it), a prompt, a teacher's panel.
+-- `width` x `height` with a `title`, the UI components under it (its
+-- children, [KIT_PANEL_PARENT]) laid out in it and shown while it is: a
+-- dialog (its text, its buttons, one that `closes` it), a prompt, a teacher's
+-- panel; a panel under a panel too.
 -- [KIT_HUD_STYLE] Sizes in percent of the screen's shorter side; `layout`
 -- "column" or "row" stacks its shown children by `order` with a `gap`, a
 -- hidden one leaving no gap, a width or height of 0 fitting it to them;
@@ -43,7 +44,7 @@ return {
 		height = "param:height", color = "param:color",
 		background = "param:background", border = "param:border",
 		style = "param:style", size = "param:size", order = "param:order",
-		layout = "param:layout", gap = "param:gap", panel = "param:panel"},
+		layout = "param:layout", gap = "param:gap"},
 	params = {
 		title = {cat = "hud", type = "string", default = ""},
 		anchor = {cat = "hud", type = "string", default = "center",
@@ -68,7 +69,6 @@ return {
 		border = {cat = "hud", type = "string", default = "#808080a0"},
 		order = {cat = "hud", type = "number", default = 0, min = -40,
 			max = 40},
-		panel = {cat = "hud", type = "entity", default = 0},
 		to = {type = "string", default = "everyone",
 			choices = {"everyone", "player", "team"}},
 		shown = {cat = "hud", type = "bool", default = false},

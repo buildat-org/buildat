@@ -3,7 +3,7 @@
 -- "value" ({value:time} as m:ss, {value:int} a whole number), [<action>]
 -- each player's key for it, | a new line. Where: `anchor` (a corner, an
 -- edge's middle or the centre) and x, y in from it, on the screen or in
--- its `panel` (a kit/ui_panel: shown while it is). [KIT_HUD_STYLE] x, y,
+-- its parent if a kit/ui_panel (shown while it is). [KIT_HUD_STYLE] x, y,
 -- width, height and size in percent of the screen's shorter side; width
 -- and height 0 from the text; `order` over or under what it overlaps;
 -- `style` "shapes" (`background` and `border` round the text, each a
@@ -44,7 +44,7 @@ return {
 		x = "param:x", y = "param:y", width = "param:width",
 		height = "param:height", size = "param:size", color = "param:color",
 		background = "param:background", border = "param:border",
-		style = "param:style", order = "param:order", panel = "param:panel"},
+		style = "param:style", order = "param:order"},
 	params = {
 		text = {cat = "hud", type = "string", default = "Score: {value}"},
 		anchor = {cat = "hud", type = "string", default = "top",
@@ -66,7 +66,6 @@ return {
 		border = {cat = "hud", type = "string", default = "#808080a0"},
 		order = {cat = "hud", type = "number", default = 0, min = -40,
 			max = 40},
-		panel = {cat = "hud", type = "entity", default = 0},
 		to = {type = "string", default = "everyone",
 			choices = {"everyone", "player", "team"}},
 		shown = {cat = "hud", type = "bool", default = true},
