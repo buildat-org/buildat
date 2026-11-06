@@ -2614,7 +2614,9 @@ struct CApp: public App, public magic::Application
 	void update_ui_fit()
 	{
 		m_fit_settled = true;
-		if(logical_mode())
+		// shutdown() turns logical mode off, and this frame's fit would give
+		// every Text a font on a closed Graphics: ~70 ms each
+		if(m_shutdown_begun || logical_mode())
 			return;
 		magic::Graphics *g = GetSubsystem<magic::Graphics>();
 		magic::UI *ui = GetSubsystem<magic::UI>();
