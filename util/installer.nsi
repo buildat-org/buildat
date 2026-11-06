@@ -1,6 +1,9 @@
 ; [WIN_INSTALLER]: the per-user installer beside the Windows zip, made by
 ; util/package.sh windows with makensis:
 ;   makensis -DVERSION=<v> -DSTAGE=<the zip's stage> -DFILES=<dir> -DOUT=<exe>
+; An alpha ([ALPHA_BUILDS]) adds -DPRODUCT="Buildat Alpha" -DDATA_DIR=buildat-alpha:
+; its name, directory, uninstall key, shortcuts and data are its own, so it
+; sits beside a stable one and upgrades over the previous alpha.
 ; FILES holds install.nsh and remove.nsh, the stage's top-level entries
 ; (but user/ and cache/) as File and RMDir/Delete lines, so that an
 ; upgrade and the uninstall remove only what was installed.
@@ -13,14 +16,21 @@
 ; could name a folder of theirs.
 Unicode true
 SetCompressor /SOLID lzma
-Name "Buildat ${VERSION}"
+!ifndef PRODUCT
+	!define PRODUCT "Buildat"
+!endif
+; autodetect.cpp's data_dir_name()
+!ifndef DATA_DIR
+	!define DATA_DIR "buildat"
+!endif
+Name "${PRODUCT} ${VERSION}"
 OutFile "${OUT}"
 RequestExecutionLevel user
 ; The logo ([WIN_RESOURCES]); the shortcut and DisplayIcon take the exe's
 Icon "${__FILEDIR__}/../client/data/buildat.ico"
 UninstallIcon "${__FILEDIR__}/../client/data/buildat.ico"
-InstallDir "$LOCALAPPDATA\Programs\Buildat"
-!define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Buildat"
+InstallDir "$LOCALAPPDATA\Programs\${PRODUCT}"
+!define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT}"
 
 Page instfiles
 UninstPage uninstConfirm
@@ -34,15 +44,15 @@ Section
 	FileOpen $0 "$INSTDIR\bin\installed" w
 	FileWrite $0 "Installed by the Buildat installer: data in APPDATA and LOCALAPPDATA$\r$\n"
 	FileClose $0
-	SetOutPath "$LOCALAPPDATA\buildat\cache\rccpp_build"
+	SetOutPath "$LOCALAPPDATA\${DATA_DIR}\cache\rccpp_build"
 	File /r "${STAGE}/cache/rccpp_build/*"
 	; The shortcut's working directory is the one last set
 	SetOutPath "$INSTDIR\bin"
-	CreateShortcut "$SMPROGRAMS\Buildat.lnk" "$INSTDIR\bin\buildat.exe"
+	CreateShortcut "$SMPROGRAMS\${PRODUCT}.lnk" "$INSTDIR\bin\buildat.exe"
 	; The folder the log is in ([LOG_REACH]): a tester could not find it
-	CreateShortcut "$SMPROGRAMS\Buildat logs.lnk" "$LOCALAPPDATA\buildat\cache"
+	CreateShortcut "$SMPROGRAMS\${PRODUCT} logs.lnk" "$LOCALAPPDATA\${DATA_DIR}\cache"
 	WriteUninstaller "$INSTDIR\uninstall.exe"
-	WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "Buildat"
+	WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${PRODUCT}"
 	WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
 	WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "Buildat"
 	WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
@@ -59,8 +69,8 @@ Section "Uninstall"
 	RMDir "$INSTDIR"
 	; The modules it put into the cache; the rest of the cache and the
 	; user's directory stay
-	RMDir /r "$LOCALAPPDATA\buildat\cache\rccpp_build"
-	Delete "$SMPROGRAMS\Buildat.lnk"
-	Delete "$SMPROGRAMS\Buildat logs.lnk"
+	RMDir /r "$LOCALAPPDATA\${DATA_DIR}\cache\rccpp_build"
+	Delete "$SMPROGRAMS\${PRODUCT}.lnk"
+	Delete "$SMPROGRAMS\${PRODUCT} logs.lnk"
 	DeleteRegKey HKCU "${UNINST_KEY}"
 SectionEnd
