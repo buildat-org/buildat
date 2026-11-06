@@ -153,6 +153,27 @@ namespace interface
 				const ss_ &user_path, bool review = false,
 				const ss_ &share_path = "", const ss_ &from = "");
 
+		// [AITTA_NATIVE_WASM] What an installed release's .wasm built by its
+		// Aitta are kept in, in the version's directory
+		// (doc/aitta.txt, "A release's .wasm on a native server")
+		static const char *const BUILT_WASM_DIR = ".aitta_wasm";
+		static const size_t BUILT_WASM_MAX = 8 << 20; // wasm/engine.h's cap
+		// The names under a dot at an archive's root, which are an
+		// install's and its Aitta's own, never a package's (pack() leaves
+		// them out): .aitta_wasm, .aitta_from, .aitta_sha256, .web, ...
+		// install() drops them and a publish is refused with one.
+		sv_<ss_> dotted_root_names(const ss_ &zip_path);
+		// A name a release's "web_wasm" may have: <module>.wasm or
+		// <module>.server.wasm, the module [A-Za-z0-9_], 64 at most
+		bool built_wasm_name_ok(const ss_ &name);
+		// A release's "web_wasm" ({name: sha256}) fetched from the Aitta
+		// into version_dir/BUILT_WASM_DIR, each name checked, each file its
+		// sha256 and at most BUILT_WASM_MAX; one there with that hash is
+		// left alone. Blocking. What could not be had, a line each: a failed
+		// fetch is no failed install, the server then says it has no .wasm.
+		sv_<ss_> fetch_built_wasm(const ss_ &aitta,
+				const json::Value &web_wasm, const ss_ &version_dir);
+
 		// [AITTA_KEY_IDENTITY] A package named as its manifests name one
 		// -- "<author>/<name>" (a Kit dependency), "<author>.<name>" (a
 		// base, a world's app), "<author>__<name>" (an extension) --

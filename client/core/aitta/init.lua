@@ -67,13 +67,81 @@ local function package_id(rel)
 	return fp ~= "" and fp .. "/" .. tostring(rel.name) or nil
 end
 
+-- [AITTA_NATIVE_WASM] An installed release's .wasm its Aitta built, for a
+-- local server with no toolchain to build wasm/ with (the web has its own,
+-- go_in_page): each name off the list checked, each file its sha256 and
+-- 8 MiB at most, kept in the version's .aitta_wasm/. What is not had is a
+-- warning, and that server then refuses the module saying why; a later list
+-- fetches it. done() after them all. As interface::aitta::fetch_built_wasm.
+-- simplified: network.http_get's own 64 MiB bounds a fetch; the cap on
+-- what is kept is checked after it
+local WASM_MAX = 8 * 1024 * 1024
+local function fetch_built_wasm(aitta, dir, rel, done)
+	local wasm_dir = tostring(dir) .. "/.aitta_wasm"
+	local todo = {}
+	for name, sha in pairs(type(rel.web_wasm) == "table" and
+			GetPlatform() ~= "Web" and rel.web_wasm or {}) do
+		local module = type(name) == "string" and
+				(name:match("^([%w_]+)%.server%.wasm$") or
+				name:match("^([%w_]+)%.wasm$"))
+		if not module or #module > 64 or type(sha) ~= "string" or
+				#sha ~= 64 or not sha:match("^[0-9a-f]+$") then
+			log:warning("aitta: " .. tostring(rel.name) ..
+					": its Aitta's list names a .wasm wrongly")
+		else
+			local f = io.open(wasm_dir .. "/" .. name, "rb")
+			local have = f and f:read("*a")
+			if f then
+				f:close()
+			end
+			if not have or __buildat_hex(__buildat_sha256(have)) ~= sha then
+				todo[#todo + 1] = {name = name, sha = sha}
+			end
+		end
+	end
+	local function next_one()
+		local w = table.remove(todo)
+		if not w then
+			return done and done()
+		end
+		network.http_get(aitta .. "/api/v1/aitta/wasm/" .. w.sha .. ".wasm",
+				function(body, err)
+			if not body or #body > WASM_MAX or
+					__buildat_hex(__buildat_sha256(body)) ~= w.sha then
+				log:warning("aitta: " .. tostring(rel.name) .. ": " .. w.name ..
+						": " .. (body and "not the one its Aitta listed" or
+						tostring(err)))
+				return next_one()
+			end
+			__buildat_create_directories(wasm_dir)
+			local to = wasm_dir .. "/" .. w.name
+			local f = io.open(to .. ".part", "wb")
+			if f then
+				f:write(body)
+				f:close()
+				os.remove(to)
+			end
+			if not f or not os.rename(to .. ".part", to) then
+				log:warning("aitta: " .. tostring(rel.name) .. ": " .. w.name ..
+						" could not be written")
+			else
+				log:info("aitta: " .. tostring(rel.name) .. ": " .. w.name ..
+						" fetched")
+			end
+			next_one()
+		end, {description = "Aitta (install)"})
+	end
+	next_one()
+end
+
 -- **A release fetched and installed** ([REWORK_1019_FIXES] client 10):
 -- its signature and archive from its Aitta, both checked by their look
 -- before the install -- the signature JSON, the archive a zip ("PK"); a
 -- refusal (a playtest's ticket gone, an error page) is said as `refused`.
 -- done(dir) or done(nil, why, "fetch"|"install"). o: description (the
 -- network's leave), query ("?ticket=..."), review (installed apart),
--- refused, world ({app, code}: a world as a new save of app, done(save)).
+-- refused, world ({app, code}: a world as a new save of app, done(save)),
+-- rel (the list's release: its built .wasm fetched too, before done).
 local function fetch_install(aitta, sha256, o, done)
 	local base = aitta .. "/api/v1/aitta/archive/" .. tostring(sha256)
 	local options = {description = o.description}
@@ -95,6 +163,11 @@ local function fetch_install(aitta, sha256, o, done)
 					(key:match("^%x+$") or ""), function(info)
 				local dir, why = __buildat_aitta_install(zip, sig, aitta,
 						o.review, o.world, info)
+				if dir and o.rel then
+					return fetch_built_wasm(aitta, dir, o.rel, function()
+						done(dir, why, "install")
+					end)
+				end
 				done(dir, why, "install")
 			end, options)
 		end, options)
@@ -578,7 +651,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 					tostring(base.version)
 			say("Fetching its base " .. bk .. "...")
 			return fetch_install(rel.aitta, base.sha256,
-					{description = "Aitta (install)"}, function(dir, why)
+					{description = "Aitta (install)", rel = base}, function(dir, why)
 				if not dir then
 					return say("Not installed: its base " .. bk .. ": " ..
 							tostring(why), WARN)
@@ -598,7 +671,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		end
 		say("Fetching " .. p.label .. "...")
 		fetch_install(rel.aitta, rel.sha256, {description = "Aitta (install)",
-				world = world}, function(dir, why, stage)
+				world = world, rel = rel}, function(dir, why, stage)
 			if stage == "fetch" then
 				return say("Could not fetch: " .. why, WARN)
 			end
@@ -905,6 +978,17 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		end
 		local meta
 		have, meta = aitta_installed()
+		-- [AITTA_NATIVE_WASM] One installed before its Aitta had built its
+		-- .wasm: what is missing, fetched now
+		for _, id in ipairs(order) do
+			local rel = newest[id]
+			local fp, name = id:match("^([%w_]+)/([%w_]+)$")
+			local v = tostring(rel.version)
+			if fp and have[id] and have[id][v] and v:match("^[%w][%w%.%+%-]*$") then
+				fetch_built_wasm(rel.aitta, __buildat_get_path("user") ..
+						"/installed/" .. fp .. "/" .. name .. "/" .. v, rel)
+			end
+		end
 		-- [AITTA_KEY_IDENTITY] A package is its key's: two of one
 		-- author/name (two Aittas' "alice") are two rows, each named with
 		-- its Aitta's host; an installed one no Aitta vouched for says so
@@ -1067,8 +1151,8 @@ function M.run_serverless(key)
 			return play_installed(id, best.version, best)
 		end
 		if best and id then
-			fetch_install(best.aitta, best.sha256, {description = "Aitta (install)"},
-					function(dir, why)
+			fetch_install(best.aitta, best.sha256, {description = "Aitta (install)",
+					rel = best}, function(dir, why)
 				if not dir then
 					return failed(tostring(why))
 				end
