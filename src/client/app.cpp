@@ -1555,7 +1555,13 @@ public:
 			ss_ dest = g_client_config.get<ss_>("cache_path")+
 					"/tmp/"+hex+ext.CString();
 			if(!interface::fs::path_exists(dest)){
-				if(!interface::fs::copy_file(path, dest)){
+				// Whole or not at all, as the store's own files: clients on
+				// one machine share this directory, and one that found the
+				// other's copy half written read it as "unknown image type"
+				std::ifstream in(path, std::ios::binary);
+				const ss_ content((std::istreambuf_iterator<char>(in)),
+						std::istreambuf_iterator<char>());
+				if(!in || !interface::fs::write_file(dest, content)){
 					log_w(MODULE, "Resource route copy failed: %s -> %s",
 							cs(path), cs(dest));
 				} else {
