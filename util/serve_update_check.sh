@@ -96,7 +96,8 @@ cat > "$t/u1/apps/floorplanner/starport.json" <<J
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
   "gambling": "no", "personal_data": "no"}}
 J
-listing() { curl -s -m 10 "localhost:$SP/api/v1/list"; }
+# As a client of this version: an alpha's listing is shown only to that alpha
+listing() { curl -s -m 10 -d "{\"version\":\"$(cat "$here/VERSION")\"}" "localhost:$SP/api/v1/list"; }
 
 rel t1
 setsid python3 -m http.server $HP --bind 127.0.0.1 --directory "$t/rel" \
