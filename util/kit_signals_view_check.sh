@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~25 s (2026-11-06)
+# cost: ~2.5 min (2026-11-06)
 # covers: builtin/kit/client_lua/signals.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/input.lua builtin/kit/types/*.lua builtin/kit/kit.cpp
 # [KIT_SIGNALS_VIEW] The editor's Signals view on Workbench. kitboss (the
 # admin, 1024x700), a kit/flag with links to three kit/ui_bars and from a
@@ -53,7 +53,8 @@
 #      a timer at most five packets a second, none before a watch or past its stop; Test
 #      opening a gate, setting a counter, Running an Ended game; refused: an undeclared
 #      input, a wrong type, too large a value, and no edit right by raw packets.
-#   util/kit_signals_view_check.sh web    item 12 in headless Chrome, mouse and finger
+#   util/kit_signals_view_check.sh web    items 12 and 13 in headless Chrome, mouse and finger
+#   util/kit_signals_view_check.sh web docs   item 13 alone
 #   util/kit_signals_view_check.sh docs   item 13 alone; screenshots $t/docs_*.png
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -112,9 +113,68 @@ if [ "${1:-}" = web ]; then
 	export BUILDAT_WORKBENCH_STONE=1
 	check_tmp kit_signals_web; t=$CHECK_TMP
 	stub="(function(){ var held = null, refuse = false; Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }}); function set(e){ held = e; document.dispatchEvent(new Event('pointerlockchange')); } document.addEventListener('keydown', function(e){ if(e.key === 'Escape') refuse = true; }, true); document.addEventListener('mousedown', function(){ refuse = false; }, true); HTMLCanvasElement.prototype.requestPointerLock = function(){ if(refuse || !window.lockOk){ document.dispatchEvent(new Event('pointerlockerror')); return Promise.reject(new Error('refused')); } if(held !== this) set(this); return Promise.resolve(); }; document.exitPointerLock = function(){ if(held) set(null); }; return 'stub'; })()"
-	steps() # <click|tap> <x1> <y1> <x2> <y2>: the two flags' cells on the screen
+	# [KIT_SIGNALS_DOCS] [KIT_SIGNALS_LIVE] The rows of a counter: its text under a
+	# pointer or a finger held at <x> <y>, a row opening the Add link form each way, the
+	# descriptions' button, a Test with a value lighting an output
+	docs_steps() # <click|tap> <x> <y>
 	{
 		local p=$1
+		cat <<J
+	["$p", "Button", "select 3"], ["waitlog", "signals: 3 not linked", 10], ["frames", 3],
+J
+		[ "$p" = click ] || echo '	["tap", "Button", "Links"], ["frames", 5],'
+		echo '	["shot", "${OUT}/docs_rows.png"],'
+		if [ "$p" = click ]; then
+			cat <<J
+	["mouse", $2, $3], ["waitlog", "signals: the text of row in ", 5], ["frames", 3],
+	["shot", "\${OUT}/docs_hover.png"], ["mouse", 5, 5], ["frames", 3],
+J
+		else
+			echo "	[\"hold\", $2, $3, 800], [\"waitlog\", \"signals: the text of row in \", 5], [\"frames\", 3],"
+		fi
+		cat <<J
+	["$p", "Button", "row in reset"], ["waitlog", "add link: into 3 by its reset", 5], ["frames", 3],
+	["shot", "\${OUT}/docs_form_in.png"],
+	["$p", "DropDownList", "signals From"], ["frames", 3],
+	["$p", "Text", "◆ 5 counter"], ["waitlog", "add link: from 5", 5], ["frames", 3],
+	["$p", "Button", "Link"], ["waitlog", "signals: linked 5.changed -> 3.reset", 5],
+	["waitlog", "kit editor: state:", 10], ["frames", 3],
+	["$p", "Button", "Done"], ["frames", 3],
+J
+		# (the form scrolled itself into view)
+		[ "$p" = click ] || echo '	["drag", 800, 150, 800, 480], ["frames", 5],'
+		cat <<J
+	["$p", "Button", "Hide descriptions"], ["waitlog", "signals: descriptions hidden", 5], ["frames", 3],
+	["shot", "\${OUT}/docs_hidden.png"],
+J
+		# A short window: a finger scrolls to what is off it
+		[ "$p" = click ] || echo '	["drag", 800, 420, 800, 180], ["frames", 5],'
+		cat <<J
+	["$p", "Button", "row out 0 reached"], ["waitlog", "add link: out of 3 by its reached", 5], ["frames", 3],
+	["shot", "\${OUT}/docs_form_out.png"],
+	["$p", "DropDownList", "signals Target"], ["frames", 3],
+	["$p", "Text", "◆ 4 counter"], ["waitlog", "add link: target 4", 5], ["frames", 3],
+	["$p", "Button", "Link"], ["waitlog", "signals: linked 3.reached -> 4.add", 5],
+	["waitlog", "kit editor: state:", 10], ["frames", 3],
+	["$p", "Button", "Done"], ["frames", 3],
+J
+		[ "$p" = click ] || echo '	["drag", 800, 150, 800, 480], ["drag", 800, 150, 800, 480], ["frames", 5],'
+		cat <<J
+	["$p", "Button", "Show descriptions"], ["waitlog", "signals: descriptions shown", 5], ["frames", 5],
+J
+		[ "$p" = click ] || echo '	["drag", 800, 400, 800, 180], ["frames", 5],'
+		cat <<J
+	["$p", "LineEdit", "signals value add"], ["frames", 3], ["type", "5"], ["frames", 3],
+	["shot", "\${OUT}/docs_field.png"],
+	["$p", "Button", "test add"], ["waitlog", "signals: fired 3 0 changed: .5. x1", 20],
+	["shot", "\${OUT}/docs_lit.png"], ["sync", 5000]
+]
+J
+	}
+	steps() # <click|tap> <x1> <y1> <x2> <y2>: the two flags' cells on the screen; [<x3> <y3> <row x> <row y>]: docs_steps, of three counters
+	{
+		local p=$1 ty=kit/flag
+		[ -z "${6:-}" ] || ty=kit/counter
 		cat <<J
 [
 	["nav", "\${URL}"],
@@ -158,16 +218,19 @@ J
 		# A short window: its panels by the bar's buttons, one column at a time
 		[ "$p" = click ] || echo '	["tap", "Button", "Tools"], ["frames", 3],'
 		cat <<J
-	["$p", "Button", "kit/flag"], ["waitlog", "kit editor: placing kit/flag", 10], ["frames", 3],
+	["$p", "Button", "$ty"], ["waitlog", "kit editor: placing $ty", 10], ["frames", 3],
 J
 		[ "$p" = click ] || echo '	["tap", "Button", "Tools"], ["frames", 3],'
 		cat <<J
 	["$p", $2, $3], ["waitlog", "kit editor: state: 2 entities", 10], ["frames", 3],
 	["$p", $4, $5], ["waitlog", "kit editor: state: 3 entities", 10], ["frames", 3],
+J
+		[ -z "${6:-}" ] || echo "	[\"$p\", $6, $7], [\"waitlog\", \"kit editor: state: 4 entities\", 10], [\"frames\", 3],"
+		cat <<J
 	["key", "Escape"], ["frames", 3],
 J
 		# None with a position, for its refusal; off the screen of a short window
-		[ "$p" = tap ] || cat <<J
+		[ "$p" = tap ] || [ -n "${6:-}" ] || cat <<J
 	["click", "Button", "kit/logic"], ["waitlog", "the palette's menu of kit/logic", 10], ["frames", 3],
 	["click", "Button", "Place"], ["waitlog", "kit editor: state: 4 entities", 10], ["frames", 3],
 J
@@ -175,6 +238,10 @@ J
 	["key", "F5"], ["waitlog", "kit editor: the view is Signals", 10], ["frames", 5],
 J
 		[ "$p" = click ] || echo '	["tap", "Button", "Entities"], ["frames", 5],'
+		if [ -n "${6:-}" ]; then
+			docs_steps "$p" "$8" "$9"
+			return
+		fi
 		cat <<J
 	["$p", "Button", "select 3"], ["waitlog", "kit editor: selected 3", 10], ["frames", 3],
 	["$p", "Button", "Inspector"], ["frames", 5],
@@ -202,6 +269,25 @@ J
 ]
 J
 	}
+	web_docs()
+	{
+		steps click 900 550 650 700 800 650 "$WEB_ROW_X" "$WEB_ROW_Y" > "$t/docs_mouse.json"
+		"$here/util/web_drive.sh" "${WEB_BROWSER:-chrome}" workbench "$t/docs_mouse.json" "$t/docs_mouse" ||
+			fail "the web drive of the signals by the mouse ($t/docs_mouse)"
+		grep -a "a sideways bar: true" "$t/docs_mouse/page.log" && fail "a sideways bar ($t/docs_mouse/page.log)"
+		echo "ok: the signals by the mouse in the web client; screenshots $t/docs_mouse/docs_*.png"
+		steps tap 500 300 600 420 700 200 "$WEB_FINGER_X" "$WEB_FINGER_Y" > "$t/docs_touch.json"
+		TOUCH=1 WEB_DRIVE_VIEWPORT=1000x500@1 "$here/util/web_drive.sh" chrome workbench "$t/docs_touch.json" "$t/docs_touch" ||
+			fail "the web drive of the signals by a finger ($t/docs_touch)"
+		grep -a "a sideways bar: true" "$t/docs_touch/page.log" && fail "a sideways bar ($t/docs_touch/page.log)"
+		echo "ok: the signals by a finger in the web client; screenshots $t/docs_touch/docs_*.png"
+	}
+	WEB_ROW_X=300 WEB_ROW_Y=300 WEB_FINGER_X=60 WEB_FINGER_Y=392
+	if [ "${2:-}" = docs ]; then
+		web_docs
+		echo "PASS: the signals on the web"
+		exit 0
+	fi
 	steps click 900 550 650 700 > "$t/mouse.json"
 	"$here/util/web_drive.sh" "${WEB_BROWSER:-chrome}" workbench "$t/mouse.json" "$t/mouse" ||
 		fail "the web drive by the mouse ($t/mouse)"
@@ -210,7 +296,8 @@ J
 	TOUCH=1 WEB_DRIVE_VIEWPORT=1000x500@1 "$here/util/web_drive.sh" chrome workbench "$t/touch.json" "$t/touch" ||
 		fail "the web drive by a finger ($t/touch)"
 	echo "ok: by a finger in the web client; screenshots $t/touch/armed.png $t/touch/refused.png"
-	echo "PASS: Switch parent and Un-parent in the Signals view on the web"
+	web_docs
+	echo "PASS: Switch parent and Un-parent, and the signals' rows, in the Signals view on the web"
 	exit 0
 fi
 export BUILDAT_WORKBENCH_PROJECT=world
