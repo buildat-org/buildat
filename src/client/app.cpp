@@ -1802,9 +1802,12 @@ struct CApp: public App, public magic::Application
 				g_client_config.get<ss_>("user_path")+"/meshdumps").c_str());
 
 		// Set Urho3D engine parameters
-		engineParameters_["WindowTitle"] =
-				g_client_config.get<bool>("command_seq_enabled") ?
-				"Buildat Client (scripted)" : "Buildat Client";
+		// [ALPHA_BUILDS] So that a playtester's report says which it is
+		engineParameters_["WindowTitle"] = (ss_(
+				buildat_version_is_alpha(BUILDAT_VERSION) ?
+				"Buildat Alpha Client" : "Buildat Client")+
+				(g_client_config.get<bool>("command_seq_enabled") ?
+				" (scripted)" : "")).c_str();
 #ifdef __EMSCRIPTEN__
 		// [PAGE_TITLE] SDL's window title is the page's: the one the server
 		// wrote stays
