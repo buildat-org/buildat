@@ -2,9 +2,10 @@
 # way they are made -- util/package_in_docker.sh, the same image as on a
 # desk -- on every tag. util/release.sh tags the development branch's
 # version commit v<version>, so a release builds and lands under Releases
-# with the tarballs and the zips; a tag with a hash in it, as the ones
-# before 2026-10-09 are, is a prerelease. The archives are workflow
-# artifacts as well.
+# with the tarballs and the zips; a tag with a - in it is a prerelease: an
+# alpha ([ALPHA_BUILDS], tag only, its branch is not on GitHub), or one with a
+# hash, as the ones before 2026-10-09 are. The archives are workflow artifacts
+# as well.
 name: package
 on:
   push:
@@ -91,10 +92,11 @@ jobs:
           path: Build/package/out/logs/
           if-no-files-found: ignore
   # One release from both builds: two jobs on one tag would race on
-  # creating it. A tag with a hash in it is a prerelease; a bare
+  # creating it. A tag with a - in it is a prerelease; a bare
   # v<version> is the release. Its notes are the titles of the commits
-  # since the previous plain tag (any tag before there was one), the
-  # version bumps left out.
+  # since the previous plain tag (any tag before there was one), an alpha's
+  # since the previous alpha (the last plain tag for the first), the version
+  # bumps left out.
   release:
     needs: [linux, windows]
     runs-on: ubuntu-latest
@@ -106,7 +108,11 @@ jobs:
           fetch-depth: 0
       - name: Notes
         run: |
-          prev=$(git describe --tags --abbrev=0 --match 'v*' --exclude 'v*-*' HEAD^ 2>/dev/null ||
+          case "$GITHUB_REF_NAME" in
+            *-alpha.*) prev=$(git describe --tags --abbrev=0 --match 'v*-alpha.*' HEAD^ 2>/dev/null) || prev= ;;
+            *) prev= ;;
+          esac
+          [ -n "$prev" ] || prev=$(git describe --tags --abbrev=0 --match 'v*' --exclude 'v*-*' HEAD^ 2>/dev/null ||
               git describe --tags --abbrev=0 HEAD^)
           { echo "Since $prev:"; echo
             git log --no-merges --format='- %s (%h)' "$prev..HEAD" | grep -v '^- version: ' || true
