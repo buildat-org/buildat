@@ -30,7 +30,9 @@ run "$t/shared.log" --unconfined
 run "$t/first.log"
 grep -aq "network: the shared build's is current" "$t/first.log" ||
 	fail "no copy in the app's cache and the shared build not used ($t/first.log)"
-mod=$c/rccpp_build/builtin_network.so
+# -C does not move a tree build's rccpp_build_path: a module compiled here
+# went to the tree's cache, not the warm copy above
+mod=$here/cache/rccpp_build/builtin_network.so
 [ -f "$mod" ] || fail "no $mod"
 cp "$mod" "$own/builtin_network.so"
 echo stale > "$own/builtin_network.so.hash"
