@@ -77,8 +77,9 @@ local function drop(list, x)
 	return false
 end
 
--- The queue less players gone (a guest's entity dropped as they log in
--- tells no leave): c.players has those here
+-- The queue less players gone (a guest's entity dropped: as they log in,
+-- the login's on_enter runs before the dropped entity's on_leave): c.players
+-- has those here
 local function prune(c)
 	local here = {}
 	for _, p in ipairs(c.players or {}) do
@@ -427,6 +428,7 @@ return {
 		local q = prune(c)
 		drop(q, c.player)
 		c.state.queue = q
+		c:log(c:name(by), "left;", #q, "of", c.params.players, "inside")
 		if c.state.count > 0 and #q < c.params.players then
 			c.state.count = 0
 			c:after(-1, "count")

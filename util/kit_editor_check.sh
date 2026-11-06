@@ -46,6 +46,8 @@
 #   6. ([KIT_SHUTDOWN_SAVE]) Part 5 again on its start, sample_kit stopping
 #      the server right after the dig, before a tick: Kit saves the dig's
 #      mark at the stop, and End after the restart discards the build.
+#   7. ([KIT_GUEST_NO_LEAVE]) A guest in an arena's and a trigger zone's
+#      zone logs in: on_leave runs knowing who left (c:name, c.player).
 # KEEP_TMP=1 keeps the screenshots: edit mode with the inspector, a link
 # line, the marker's gizmo, play with none of them, the admin's builders
 # (kitbob's selection in their colour), and the Stopped server.
@@ -547,5 +549,59 @@ stop
 unset USER_DIR
 want "$t/srv6.log" "Stop by kitbob: 2 kept cells (edits, builds always kept) put back in, 1 builds discarded: kitbob 1"
 echo "ok: a dig's mark saved by a stop before the next tick"
-echo "PASS: Kit's editor: the admin's edit rights and builders kept in the accounts, edit mode, place, move, delete, the inspector, links, undo, each edit and grant refused without rights, live edits while Running, two builders' selections, Stop and Play, the authored row and the server's state over a restart, edits in play kept under a game write and a discarded build, a mark saved at a stop before a tick"
+
+# 7. [KIT_GUEST_NO_LEAVE] A guest in a zone logs in: the zones' on_leave
+# for the guest's dropped entity knows who, with c.player (the arena's)
+export USER_DIR="$t/user7"
+server 7
+wait_for_log "$t/srv7.log" "setup code [A-Z0-9]+" 30
+code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv7.log" | head -1)
+cat > "$t/boss7.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 30000 server window: the page ntfy
+frames 3
+click Button "Don't add"
+wait_log_any 60000 kit editor: edit rights: yes
+click Button "Edit"
+wait_log 10000 kit editor: state: 15 entities, 0 to undo
+event kit_edit {"op": "place", "type": "kit/arena", "pos": [-2, 1, -2]}
+wait_log 10000 entities, 1 to undo
+event kit_edit {"op": "place", "type": "kit/trigger_zone", "pos": [-2, 1, -2]}
+wait_log 10000 entities, 2 to undo
+event kit_edit {"op": "set", "id": 17, "comp": 0, "param": "size", "value": [5, 3, 5]}
+wait_log 10000 entities, 3 to undo
+event kit_edit {"op": "set", "id": 18, "comp": 0, "param": "size", "value": [5, 3, 5]}
+wait_log 10000 entities, 4 to undo
+quit
+EOF
+cat > "$t/guest7.cmds" <<'EOF'
+wait_log 60000 replicated: entity 4 open = false
+keypress l
+wait_log 30000 accounts: the login page shown
+frames 3
+click Button "Create a new account"
+frames 3
+text kitbob
+keypress Tab
+text checkpass12
+keypress Tab
+text checkpass12
+keypress Tab
+keypress Return
+wait_log 20000 Joined as kitbob
+sync 3000
+quit
+EOF
+BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code \
+	BUILDAT_JOIN_ADMIN="setting open_registration on" client boss7
+wait_for_log "$t/srv7.log" "kit/arena 17: kitboss left; 0 of 2 inside" 30 ||
+	fail "the admin's leave not seen ($t/srv7.log)"
+client guest7
+stop
+unset USER_DIR
+want "$t/srv7.log" "Guest p2's entity 1000002 dropped" \
+	"kit/arena 17: p2 entered; 1 of 2 inside" "kit/arena 17: p2 left; 1 of 2 inside" \
+	"kit/trigger_zone 18: p2 left; 1 inside" "kit/arena 17: kitbob entered; 1 of 2 inside"
+echo "ok: a guest in a zone logging in: on_leave knows who left"
+echo "PASS: Kit's editor: the admin's edit rights and builders kept in the accounts, edit mode, place, move, delete, the inspector, links, undo, each edit and grant refused without rights, live edits while Running, two builders' selections, Stop and Play, the authored row and the server's state over a restart, edits in play kept under a game write and a discarded build, a mark saved at a stop before a tick, a guest's on_leave as they log in in a zone"
 # vim: set noet ts=4 sw=4:
