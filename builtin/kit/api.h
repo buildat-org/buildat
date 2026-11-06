@@ -265,7 +265,8 @@ namespace interface
 //   "string:player" is a string the editor calls a player; a link does not
 //   look at the label.
 //   `by` is "player:<id>", the player's entity (a login keeps it), or
-//   "app"; c:name(by) the player's name, c.player their entity's id.
+//   "app"; c:name(by) the player's name, c.player their entity's id (on
+//   on_leave, a guest's entity may be gone by then: its id still).
 //   Players are entities: each player has one in their scene (kind
 //   "player", made the first time they come, its id theirs from then on,
 //   1000000 and up),

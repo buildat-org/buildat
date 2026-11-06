@@ -297,11 +297,14 @@ M.safe.main = M.main
 -- nothing under it (Escape there is Quit), and not on an entry pushed with
 -- {tap_outside = false}. "Nothing" is what Urho3D's own click found: no
 -- enabled element there. The cursor hidden (a game holding the mouse),
--- there is no UIMouseClick.
+-- there is no UIMouseClick. A dropdown's popup up ([SETTINGS_TAP_OUTSIDE_CLOSES],
+-- modal: GetElementAt looks in it alone) takes the click for itself: Urho3D's
+-- Menu closes it, and the screen stays.
 magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
 	local stack = M.main.stack
 	local top = stack[#stack]
-	if #stack < 2 or no_tap_outside[top] or element_gone(top) then
+	if #stack < 2 or no_tap_outside[top] or element_gone(top) or
+			ui:HasModalElement() then
 		return
 	end
 	if ui:GetElementAt(IntVector2(event_data:GetInt("X"),

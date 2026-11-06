@@ -8210,6 +8210,12 @@ struct Module: public interface::Module, public Interface
 				lua_lit(pv_->state, o);
 				o += "}";
 			}
+		} else if(r.handler == "on_leave"){
+			// [KIT_GUEST_NO_LEAVE] A guest's entity dropped: who left it, by
+			// the id they had (no inventory: it went with the entity)
+			names.set(r.by, player_of(r.by));
+			o += ",player_id="+r.by.substr(7)+",player=";
+			lua_lit(json::Value(r.by), o);
 		}
 		// [KIT] stage 4d: the copies it made, every player for a type that
 		// reads them, the next ids and what each copy it may make makes

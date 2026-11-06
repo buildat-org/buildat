@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~30 s (2026-11-03)
-# covers: src/client/app.cpp src/client/app_lua.h client/api.lua extensions/launch_menu/preferences.lua
+# covers: src/client/app.cpp src/client/app_lua.h client/api.lua client/core/uistack/init.lua extensions/launch_menu/preferences.lua
 # drives: extensions/launch_menu/preferences.lua
 # [LIGHTING_PREF_LABELS]: the `lighting` preference's values, top first
 # "Automatic" (unset), "Don't override" (game), "Cartoon (lightweight)".
@@ -12,6 +12,9 @@
 # again reads Automatic (a screenshot each, kept on a failure), and the
 # dev app launched from the menu then logs it unset. The parser's "auto"
 # is app.cpp's own self test.
+# [SETTINGS_TAP_OUTSIDE_CLOSES]: with a dropdown of Engine settings open, a
+# tap and a mouse click beside the window close the popup and leave the
+# screen up; one more, the popup gone, is Back.
 #   util/lighting_pref_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -43,6 +46,34 @@ echo "ok: lighting_auto true unset and with auto, false with cartoon"
 
 # The Lighting row's dropdown: the "▼" nearest its place (a row holds
 # 38 px; rows added above it move it -- 2026-11-03 the cache rows did)
+cat > "$t/o.cmds" <<C
+wait_log_any 60000 rows in
+delay 500
+text dis
+wait_log 5000 rows for "dis"
+keypress Return
+wait_log 5000 Engine settings shown
+delay 800
+tap 735 488
+wait_log 5000 open
+tap 100 100
+wait_log 5000 closed
+click DropDownList "▼" 735 488
+wait_log 5000 open
+mouse_pos 100 100
+mouse_click left
+wait_log 5000 closed
+delay 300
+mouse_click left
+delay 300
+keypress Return
+wait_log 5000 Engine settings shown
+quit
+C
+client -o lighting=cartoon -c @"$t/o.cmds" > "$t/o.log" 2>&1 ||
+	fail "a press outside an open dropdown ($t/o.log)"
+echo "ok: a tap or a click beside the screen closes an open dropdown alone; with none open it is Back"
+
 cat > "$t/e.cmds" <<C
 wait_log_any 60000 rows in
 delay 500
