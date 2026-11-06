@@ -54,7 +54,10 @@ rel() { # name [main.cpp line for floorplanner]
 	cp -r apps/floorplanner apps/vanilla "$d/apps/"
 	[ -n "${2:-}" ] && echo "$2" >> "$d/apps/floorplanner/main/main.cpp"
 	tar -C "$t/rel" -czf "$d.tar.gz" "$(basename "$d")"
-	echo "[{\"browser_download_url\": \"http://127.0.0.1:$HP/$(basename "$d").tar.gz\"}]" \
+	# [ALPHA_BUILDS] An alpha first in the list, which has no archive: taking
+	# it would mean no release ever starts
+	echo "[{\"browser_download_url\": \"http://127.0.0.1:$HP/buildat-9.9.9-alpha.1-abc-linux-x86_64-web-precompiled.tar.gz\"},
+		{\"browser_download_url\": \"http://127.0.0.1:$HP/$(basename "$d").tar.gz\"}]" \
 		> "$t/rel/releases.json"
 }
 mkdir -p "$t/rel" "$t/u1" "$t/u2/shared/vanilla"
