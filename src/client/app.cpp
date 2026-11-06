@@ -1555,7 +1555,13 @@ public:
 			ss_ dest = g_client_config.get<ss_>("cache_path")+
 					"/tmp/"+hex+ext.CString();
 			if(!interface::fs::path_exists(dest)){
-				if(!interface::fs::copy_file(path, dest)){
+				// Whole or not at all, as the store's own files: clients on
+				// one machine share this directory, and one that found the
+				// other's copy half written read it as "unknown image type"
+				std::ifstream in(path, std::ios::binary);
+				const ss_ content((std::istreambuf_iterator<char>(in)),
+						std::istreambuf_iterator<char>());
+				if(!in || !interface::fs::write_file(dest, content)){
 					log_w(MODULE, "Resource route copy failed: %s -> %s",
 							cs(path), cs(dest));
 				} else {
@@ -2611,7 +2617,9 @@ struct CApp: public App, public magic::Application
 	void update_ui_fit()
 	{
 		m_fit_settled = true;
-		if(logical_mode())
+		// shutdown() turns logical mode off, and this frame's fit would give
+		// every Text a font on a closed Graphics: ~70 ms each
+		if(m_shutdown_begun || logical_mode())
 			return;
 		magic::Graphics *g = GetSubsystem<magic::Graphics>();
 		magic::UI *ui = GetSubsystem<magic::UI>();

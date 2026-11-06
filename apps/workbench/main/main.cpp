@@ -215,7 +215,7 @@ struct Module: public interface::Module
 		const int XZ = kit::WORLD_SECTIONS_XZ;
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
 			ivw->create_instance(scene, pv::Region(-XZ, kit::WORLD_SECTION_Y0,
-					-XZ, XZ - 1, kit::WORLD_SECTION_Y1, XZ - 1));
+					-XZ, XZ - 1, kit::WORLD_SECTION_Y1, XZ - 1), false, true);
 		});
 		interface::VoxelRegistry *reg = nullptr;
 		voxelworld::access(m_server, scene, [&](voxelworld::Instance *w){
