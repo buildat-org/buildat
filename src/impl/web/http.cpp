@@ -15,6 +15,12 @@ namespace interface
 		throw Exception("HTTP is not available in the web client");
 	}
 
+	ss_ http_get_pinned(const ss_ &url, const ss_ &ip, size_t max_bytes,
+			long timeout_s)
+	{
+		throw Exception("HTTP is not available in the web client");
+	}
+
 	ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type,
 			ss_ *redirect, bool ipv4, const std::atomic<bool> *cancel)
 	{
