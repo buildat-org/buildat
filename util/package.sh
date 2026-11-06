@@ -231,6 +231,17 @@ smoke_test_wine() {
 	kill -9 "$cli" 2>/dev/null || true; wait "$cli" 2>/dev/null || true
 	kill -INT "$srv" 2>/dev/null || true; sleep 3; kill -9 "$srv" 2>/dev/null || true
 	wait "$srv" 2>/dev/null || true
+	# [HC_PREBUILT_WASM] Hillclimb found its .wasm: said as it loads, before
+	# its module compiles, so that compile under Wine is not waited for
+	(cd "$unpacked" && env BUILDAT_UNCONFINED=1 \
+		"$wine" bin/buildat_server.exe -m apps/hillclimb -P "$port" -l 4 --compile-only > "$dir/hc.log" 2>&1) &
+	local hc=$!
+	if ! wait_for_line "$dir/hc.log" "$hc" "main: wasm/ is \(built (cache hit)\|in the shared build\)" 300; then
+		echo "smoke test under Wine: hillclimb's .wasm not served from the archive's cache:" >&2
+		tail -20 "$dir/hc.log" >&2
+		"$wine"server -k 2>/dev/null || true; exit 1
+	fi
+	kill -9 "$hc" 2>/dev/null || true; wait "$hc" 2>/dev/null || true
 	"$wine"server -k 2>/dev/null || true
 	[ -n "$xvfb_pid" ] && kill "$xvfb_pid" 2>/dev/null
 	if ! grep -q "Connect succeeded" "$dir/cli.log" ||
@@ -339,15 +350,17 @@ make_one() {
 # server does; a .wasm is the same on every platform, so the Windows
 # archive's are built here by Linux tools. Linux's image has emsdk's clang
 # and wasm-ld, Windows' Debian's clang and lld.
-# simplified: not the apps' (hillclimb's car): a game's own builds on a
-# server with the tools, as before; its dir in the find is the upgrade
+# [HC_PREBUILT_WASM] And hillclimb's: the loader refuses a non-builtin module
+# whose wasm/ does not build, so without it a server with no tools refuses a
+# game the archive ships. Named, not every app's: sample_wasm has bad modules on
+# purpose; another shipped game with wasm/ is added here.
 prebuild_wasm() {
 	local stage="$1" cc ld d mods=""
 	local em="${EMSDK:-$HOME/emsdk}/upstream/bin"
 	cc=${BUILDAT_WASM_CC:-$(command -v clang || echo "$em/clang")}
 	ld=${BUILDAT_WASM_LD:-$(command -v wasm-ld || ls /usr/lib/llvm-*/bin/wasm-ld 2>/dev/null | tail -1 || true)}
 	[ -n "$ld" ] || ld="$em/wasm-ld"
-	for d in "$stage"/builtin/* "$stage"/extensions/*; do
+	for d in "$stage"/builtin/* "$stage"/extensions/* "$stage"/apps/hillclimb/main; do
 		# A client's wasm/, a server module's .wasm ([SERVER_WASM]) or a
 		# module's own box ([KIT])
 		{ [ -d "$d/wasm" ] || grep -qs '"server_wasm"\|"wasm_box"' "$d/meta.json"; } &&
@@ -898,6 +911,16 @@ smoke_test() {
 		exit 1
 	else
 		echo "smoke test: with no wasm toolchain the server served voxelworld's prebuilt .wasm, the client ran it compiled"
+		# [HC_PREBUILT_WASM] A game's wasm/ refused is a server that does not
+		# start, so this one is started too: its module is called main
+		if ! (cd "$unpacked" && EMSDK="$dir/nowhere" RUSTUP_HOME="$dir/nowhere" BUILDAT_WASM_CC= BUILDAT_WASM_LD= \
+				timeout 600 bin/buildat_server -m apps/hillclimb -P "$port" -l 4 --compile-only > "$dir/hc.log" 2>&1) ||
+				! grep -q "main: wasm/ is \(built (cache hit)\|in the shared build\)" "$dir/hc.log"; then
+			echo "smoke test: hillclimb refused with no wasm toolchain; its log's end:" >&2
+			tail -20 "$dir/hc.log" >&2
+			exit 1
+		fi
+		echo "smoke test: with no wasm toolchain hillclimb started: $(grep -o "main: wasm/ is [a-z ()]*" "$dir/hc.log")"
 	fi
 	local mean
 	mean=$(magick "$dir/shot.png" -format '%[fx:mean]' info: 2>/dev/null || echo 0)
