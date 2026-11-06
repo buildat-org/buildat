@@ -208,7 +208,7 @@ do
 			end
 		end
 		-- [KIT_PREFAB_ROOT] prefabs.lua
-		if j.op == "move" then
+		if j.op == "move" or j.op == "set" then
 			K.prefab_moving(j)
 		end
 		K.prefab_bench_sent(j)
@@ -816,6 +816,7 @@ local function pick(mx, my, skip, nearest)
 			all[#all + 1] = e
 		end
 	end
+	local free_id, ft_at
 	for _, e in ipairs(all) do
 		if e.pos and not (skip and skip[e.id]) then
 			local n = P.nodes[e.id]
@@ -832,6 +833,17 @@ local function pick(mx, my, skip, nearest)
 			if t and (not et or t < et) then
 				id, et = e.id, t
 			end
+			local ft = NT.pf.pick_t(e, oo, dd)
+			if ft and (not ft_at or ft < ft_at) then
+				free_id, ft_at = e.id, ft
+			end
+		end
+	end
+	-- [KIT_FREE_PREFAB] A free copy's box: not over what is in it, its members
+	if free_id and free_id ~= id and (not id or ft_at < et) then
+		local got = find(id)
+		if not (got and type(got.built) == "table" and got.built.by == free_id) then
+			id, et = free_id, ft_at
 		end
 	end
 	local hit, front, vt
@@ -1866,11 +1878,11 @@ function NT.positionless(it)
 			NT.PLACED_AT_ONCE[it.type] == true)
 end
 
-function NT.arm(it)
+function NT.arm(it, free)
 	M.set_tool(nil)
 	S.reparent = nil
 	S.placing = {type = it.type, prefab = it.prefab, label = it.label,
-			key = it.key}
+			key = it.key, free = free}
 	log:info("kit editor: placing " .. it.label)
 	NT.palette_chosen(it)
 	palette()

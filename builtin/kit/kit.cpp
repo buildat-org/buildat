@@ -1243,7 +1243,25 @@ struct Module: public interface::Module, public Interface
 		// the undo the same as the move just before it
 		bool clear = false, merge = false;
 		int clear_at[3] = {0, 0, 0}, clear_size[3] = {0, 0, 0};
+		// [KIT_FREE_PREFAB] the box emptied, nothing written
+		bool only_clear = false;
 	} m_paste;
+	// [KIT_FREE_PREFAB] (sync_free_objects()) by root; each scene's models made;
+	// each model's boxes in its object's frame, x0 y0 z0 x1 y1 z1 each, for the
+	// bodies; what each peer has been sent of those. simplified: a model's boxes
+	// stay here once made, a few KB a saved version until the server stops;
+	// erasing them with the last scene's model is the upgrade
+	struct FreeObject
+	{
+		main_context::SceneReference ref = nullptr;
+		ss_ model;
+		uint node = 0;
+		std::array<double, 4> place = {{0, 0, 0, 0}};
+	};
+	std::map<uint64_t, FreeObject> m_free_objects;
+	std::map<main_context::SceneReference, std::set<ss_>> m_free_models;
+	sm_<ss_, sv_<float>> m_free_boxes;
+	sm_<size_t, std::set<ss_>> m_boxes_sent;
 	// [KIT_PREFAB_ROOT] a save's: the copies of this prefab but that one
 	// are built again (rebuilds())
 	ss_ m_follow;
@@ -3098,6 +3116,7 @@ struct Module: public interface::Module, public Interface
 				make_node(p.second);
 		own_voxels();
 		pick_provider();
+		sync_free_objects();
 		if(m_migrated)
 			m_runtime_dirty = true;
 		if(m_session.running)
@@ -5971,6 +5990,268 @@ struct Module: public interface::Module, public Interface
 		});
 		m_w->decor_models.insert(name);
 		return true;
+	}
+
+	// ---- [KIT_FREE_PREFAB] A prefab's copy as a free object: kit/prefab_copy's
+	// mode "free". Its root's place and turn are the object's, no voxel of it is
+	// in the world; its members are under the root as a stamped copy's. A model
+	// per prefab and voxels_version in each scene with a copy of it, so a save
+	// changes all of them. The objects follow the entities and prefabs here,
+	// after whatever changed them. Not saved: the rows say it all
+
+	static bool is_free(const Entity &e)
+	{
+		if(!is_root(e))
+			return false;
+		for(const Instance &in : e.comps)
+			if(in.type == PREFAB_ROOT)
+				return jstr(in.params, "mode") == "free";
+		return false;
+	}
+
+	// The solid cells merged along x, z, then y, in the object's frame (a
+	// cell's middle its whole coordinates). simplified: past MAX_FREE_BOXES the
+	// model's whole box, a warning said; a sweep through a grid in the object's
+	// frame is the upgrade
+	static const size_t MAX_FREE_BOXES = 4096;
+	struct FreeCells
+	{
+		int n[3], a[3];
+		sv_<char> solid;
+		char& at(int x, int y, int z)
+		{
+			return solid[(size_t)x + (size_t)n[0] * ((size_t)z + (size_t)n[2] * y)];
+		}
+	};
+	static void free_boxes(FreeCells &g, sv_<float> &out)
+	{
+		auto put = [&](int x0, int y0, int z0, int x1, int y1, int z1){
+			out.push_back(g.a[0] + x0 - 0.5f);
+			out.push_back(g.a[1] + y0 - 0.5f);
+			out.push_back(g.a[2] + z0 - 0.5f);
+			out.push_back(g.a[0] + x1 + 0.5f);
+			out.push_back(g.a[1] + y1 + 0.5f);
+			out.push_back(g.a[2] + z1 + 0.5f);
+		};
+		for(int y = 0; y < g.n[1]; y++)
+		for(int z = 0; z < g.n[2]; z++)
+		for(int x = 0; x < g.n[0]; x++){
+			if(g.at(x, y, z) != 1)
+				continue;
+			int x1 = x, z1 = z, y1 = y;
+			while(x1 + 1 < g.n[0] && g.at(x1 + 1, y, z) == 1)
+				x1++;
+			auto row = [&](int zz, int yy){
+				for(int i = x; i <= x1; i++)
+					if(g.at(i, yy, zz) != 1)
+						return false;
+				return true;
+			};
+			while(z1 + 1 < g.n[2] && row(z1 + 1, y))
+				z1++;
+			auto plane = [&](int yy){
+				for(int k = z; k <= z1; k++)
+					if(!row(k, yy))
+						return false;
+				return true;
+			};
+			while(y1 + 1 < g.n[1] && plane(y1 + 1))
+				y1++;
+			for(int j = y; j <= y1; j++)
+			for(int k = z; k <= z1; k++)
+			for(int i = x; i <= x1; i++)
+				g.at(i, j, k) = 2;
+			put(x, y, z, x1, y1, z1);
+		}
+	}
+
+	// The prefab's voxels as a model of the scene's (its registry's ids; a
+	// voxel it has not is empty), made once. A shape's own boxes for the bodies,
+	// as a world cell's
+	void free_model(voxel_objects::Instance *vo, main_context::SceneReference ref,
+			const ss_ &model, const json::Value &vx)
+	{
+		if(vo->get_model(model))
+			return;
+		const json::Value &kinds = vx.get("kinds"), &runs = vx.get("runs");
+		FreeCells g;
+		for(unsigned k = 0; k < 3; k++){
+			g.n[k] = (int)vx.get("size").at(k).as_number();
+			g.a[k] = (int)vx.get("at").at(k).as_number();
+		}
+		g.solid.assign((size_t)g.n[0] * g.n[1] * g.n[2], 0);
+		struct Kind
+		{
+			interface::VoxelTypeId id = 0;
+			uint8_t param = 0, tint = 0;
+			bool solid = false;
+			sv_<float> shape;
+		};
+		sv_<Kind> ks;
+		size_t unknown = 0;
+		voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
+			for(unsigned i = 0; i < kinds.size(); i++){
+				const json::Value &c = kinds.at(i);
+				Kind k;
+				interface::VoxelName vn;
+				vn.block_name = c.at(0u).as_string();
+				k.param = (uint8_t)c.at(1u).as_number();
+				k.tint = (uint8_t)c.at(2u).as_number();
+				const interface::VoxelDefinition *d = w->get_voxel_reg()->get(vn);
+				if(d && vn.block_name != "air"){
+					k.id = d->id;
+					k.solid = d->physically_solid;
+					k.shape = d->collision_boxes;
+					const size_t vi = d->variant_of_param[k.param];
+					if(vi < d->variants.size() &&
+							!d->variants[vi].collision_boxes.empty())
+						k.shape = d->variants[vi].collision_boxes;
+				} else if(!d){
+					unknown++;
+				}
+				ks.push_back(k);
+			}
+		});
+		sv_<float> boxes;
+		voxel_objects::Model *m = vo->create_model(model, g.n[0], g.n[1], g.n[2]);
+		size_t cell = 0;
+		for(unsigned r = 0; r + 1 < runs.size(); r += 2){
+			const size_t count = (size_t)runs.at(r).as_number();
+			const Kind &k = ks[(size_t)runs.at(r + 1).as_number()];
+			for(size_t c = 0; c < count; c++, cell++){
+				if(!k.id)
+					continue;
+				const int x = (int)(cell % g.n[0]);
+				const int z = (int)(cell / g.n[0] % g.n[2]);
+				const int y = (int)(cell / g.n[0] / g.n[2]);
+				m->set_voxel_state(x, y, z, k.id, k.param, k.tint);
+				if(!k.solid)
+					continue;
+				if(k.shape.empty()){
+					g.at(x, y, z) = 1;
+					continue;
+				}
+				for(size_t b = 0; b + 6 <= k.shape.size(); b += 6)
+					for(size_t q = 0; q < 6; q++)
+						boxes.push_back(k.shape[b + q] +
+								g.a[q % 3] + (q % 3 == 0 ? x : q % 3 == 1 ? y : z));
+			}
+		}
+		free_boxes(g, boxes);
+		if(boxes.size() > MAX_FREE_BOXES * 6){
+			log_w(MODULE, "The free object %s has %zu boxes: its whole box is "
+					"what bodies meet", cs(model), boxes.size() / 6);
+			boxes = {g.a[0] - 0.5f, g.a[1] - 0.5f, g.a[2] - 0.5f,
+					g.a[0] + g.n[0] - 0.5f, g.a[1] + g.n[1] - 0.5f,
+					g.a[2] + g.n[2] - 0.5f};
+		}
+		m_free_boxes[model] = boxes;
+		vo->commit();
+		log_i(MODULE, "A free object's model %s: %ix%ix%i, %zu boxes%s", cs(model),
+				g.n[0], g.n[1], g.n[2], boxes.size() / 6, unknown ?
+				", voxels the scene has not left out" : "");
+	}
+
+	void sync_free_objects()
+	{
+		voxel_objects::Interface *iv = nullptr;
+		voxel_objects::access(m_server, [&](voxel_objects::Interface *i){ iv = i; });
+		if(!iv)
+			return;
+		std::set<uint64_t> wanted;
+		std::map<main_context::SceneReference, std::set<ss_>> used;
+		for(auto &x : m_entities){
+			const Entity &e = x.second;
+			if(!authored(e) || !e.has_pos || !is_free(e))
+				continue;
+			const ss_ of = jstr(e.prefab, "of");
+			const json::Value *pf = prefab(of);
+			main_context::SceneReference ref = scene_of(e);
+			if(!pf || !ref || !pf->get("voxels").is_object())
+				continue;
+			bool has_world = false;
+			voxelworld::access(m_server, [&](voxelworld::Interface *w){
+				has_world = w->get_instance(ref) != nullptr;
+			});
+			if(!has_world)
+				continue;
+			voxel_objects::Instance *vo = iv->get_instance(ref);
+			if(!vo)
+				vo = iv->create_instance(ref);
+			uint32_t h = 2166136261u;
+			for(char c : of)
+				h = (h ^ (unsigned char)c) * 16777619u;
+			char hex[16];
+			snprintf(hex, sizeof hex, "%08x", h);
+			const ss_ model = "kitfree_"+ss_(hex)+"_"+itos(voxels_version(*pf));
+			const json::Value &vx = pf->get("voxels");
+			free_model(vo, ref, model, vx);
+			double w[3], wy;
+			world_of(e, w, &wy);
+			const magic::Quaternion q(0, (float)wy, 0);
+			const magic::Vector3 pos = magic::Vector3(w[0], w[1], w[2]) + q *
+					magic::Vector3(vx.get("at").at(0u).as_number() - 0.5f,
+					vx.get("at").at(1u).as_number() - 0.5f,
+					vx.get("at").at(2u).as_number() - 0.5f);
+			auto it = m_free_objects.find(e.id);
+			if(it != m_free_objects.end() && (it->second.ref != ref ||
+					it->second.model != model)){
+				if(iv->get_instance(it->second.ref))
+					iv->get_instance(it->second.ref)->remove_object(it->second.node);
+				m_free_objects.erase(it);
+				it = m_free_objects.end();
+			}
+			const std::array<double, 4> place = {{w[0], w[1], w[2], wy}};
+			if(it == m_free_objects.end()){
+				FreeObject o;
+				o.ref = ref;
+				o.model = model;
+				o.node = vo->create_object(model, pos, q);
+				o.place = place;
+				m_free_objects[e.id] = o;
+				log_i(MODULE, "The free object of %s: entity %s, model %s, at "
+						"%.3f,%.3f,%.3f yaw %.3f", cs(of), cs(itos(e.id)), cs(model),
+						w[0], w[1], w[2], wy);
+			} else if(it->second.place != place){
+				it->second.place = place;
+				const uint node = it->second.node;
+				main_context::access(m_server, ref, [&](magic::Scene *sc){
+					magic::Node *n = sc->GetNode(node);
+					if(n){
+						n->SetPosition(pos);
+						n->SetRotation(q);
+					}
+				});
+				log_i(MODULE, "The free object of entity %s moved to %.3f,%.3f,%.3f "
+						"yaw %.3f", cs(itos(e.id)), w[0], w[1], w[2], wy);
+			}
+			wanted.insert(e.id);
+			used[ref].insert(model);
+			m_free_models[ref].insert(model);
+		}
+		for(auto it = m_free_objects.begin(); it != m_free_objects.end();){
+			if(wanted.count(it->first)){
+				++it;
+				continue;
+			}
+			if(iv->get_instance(it->second.ref))
+				iv->get_instance(it->second.ref)->remove_object(it->second.node);
+			log_i(MODULE, "The free object of entity %s is gone", cs(itos(it->first)));
+			it = m_free_objects.erase(it);
+		}
+		// The versions nothing shows any more
+		for(auto &sm : m_free_models){
+			for(auto it = sm.second.begin(); it != sm.second.end();){
+				if(used[sm.first].count(*it)){
+					++it;
+					continue;
+				}
+				if(iv->get_instance(sm.first))
+					iv->get_instance(sm.first)->remove_model(*it);
+				log_i(MODULE, "A free object's model %s is no longer in use", cs(*it));
+				it = sm.second.erase(it);
+			}
+		}
 	}
 
 	// A decoration's object: its structure's origin cell on (x, y, z),
@@ -9965,6 +10246,8 @@ struct Module: public interface::Module, public Interface
 		}
 		const int turn = tj.is_number() ?
 				(((int)tj.as_number() / 90) % 4 + 4) % 4 : 0;
+		// [KIT_FREE_PREFAB] "free": true: its voxels an object, none stamped
+		const bool free = !paste && j.get("free").is_true();
 		const bool vox = pf->get("voxels").is_object();
 		if(!pos_ok(j.get("pos"))){
 			why = "pos: three numbers within "+itos((int)MAX_COORD);
@@ -9982,9 +10265,10 @@ struct Module: public interface::Module, public Interface
 		}
 		double base[3];
 		for(unsigned k = 0; k < 3; k++)
-			base[k] = vox ? std::floor(j.get("pos").at(k).as_number() + 0.5) :
+			base[k] = vox && !free ?
+					std::floor(j.get("pos").at(k).as_number() + 0.5) :
 					grid(j.get("pos").at(k).as_number());
-		if(vox){
+		if(vox && !free){
 			if(m_host.scenes.find(p.scene) == m_host.scenes.end()){
 				why = "not in a scene of the app's";
 				return false;
@@ -10022,6 +10306,11 @@ struct Module: public interface::Module, public Interface
 					localize(row);
 			}
 			comp.set("type", PREFAB_ROOT);
+			if(free){
+				json::Value ps = json::object();
+				ps.set("mode", "free");
+				comp.set("params", ps);
+			}
 			comps.append(comp);
 			row.set("components", comps);
 			Entity e;
@@ -10515,10 +10804,15 @@ struct Module: public interface::Module, public Interface
 			}
 			const double zero[3] = {0, 0, 0};
 			pf = group_prefab(group, zero, root->id, &numbers);
-			const bool box = !j.get("box").is_undefined();
+			// [KIT_FREE_PREFAB] a free one has no voxels in the world to read:
+			// the prefab's stay as they are
+			const bool free = is_free(*root);
+			const bool box = !free && !j.get("box").is_undefined();
 			const json::Value none;
 			const json::Value &ov = old ? old->get("voxels") : none;
-			if(box || ov.is_object()){
+			if(free && ov.is_object()){
+				pf.set("voxels", ov);
+			} else if(!free && (box || ov.is_object())){
 				int base[3], k = 0, o[3], n[3];
 				if(!root_frame(*root, base, k, why))
 					return false;
@@ -10673,6 +10967,13 @@ struct Module: public interface::Module, public Interface
 			why = "the prefab "+of+" has no voxels";
 			return false;
 		}
+		// [KIT_FREE_PREFAB] "only_clear": what a switch to free leaves, its
+		// box emptied and nothing stamped; else a free one has no stamp
+		const bool only_clear = j.get("only_clear").is_true();
+		if(is_free(*e) && !only_clear){
+			why = "entity "+itos(e->id)+" is a free object: nothing to stamp";
+			return false;
+		}
 		ss_ scene;
 		scene_of(*e, &scene);
 		if(scene != p.scene || !m_host.scenes.count(p.scene)){
@@ -10688,7 +10989,8 @@ struct Module: public interface::Module, public Interface
 		m_paste.turn = k;
 		m_paste.set = true;
 		m_paste.merge = j.get("merge").is_true();
-		m_paste.clear = j.get("clear").is_true();
+		m_paste.clear = j.get("clear").is_true() || only_clear;
+		m_paste.only_clear = only_clear;
 		if(m_paste.clear){
 			int cb[3] = {base[0], base[1], base[2]}, ck = k;
 			const json::Value &from = j.get("from");
@@ -10717,9 +11019,11 @@ struct Module: public interface::Module, public Interface
 		}
 		Entity copy = *e;
 		copy.prefab = e->prefab.deepcopy();
-		copy.prefab.set("voxels", voxels_version(*pf));
+		if(!only_clear)
+			copy.prefab.set("voxels", voxels_version(*pf));
 		change.push_back(std::make_pair(e->id, entity_json(copy)));
-		what = "stamped "+of+" on "+itos(e->id);
+		what = (only_clear ? "cleared the stamp of " : "stamped ")+of+" on "+
+				itos(e->id);
 		return true;
 	}
 
@@ -11005,6 +11309,7 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "%s renamed the prefab %s to %s (%zu copies)", cs(p.name),
 				cs(name), cs(new_name), copies);
 		each_session([&]{
+			sync_free_objects();
 			for(auto &o : m_peers)
 				if(o.second.editing)
 					send_state(o.first);
@@ -11034,6 +11339,7 @@ struct Module: public interface::Module, public Interface
 		m_bad_prefabs.erase(name);
 		log_i(MODULE, "%s deleted the prefab %s", cs(p.name), cs(name));
 		each_session([&]{
+			sync_free_objects();
 			for(auto &o : m_peers)
 				if(o.second.editing)
 					send_state(o.first);
@@ -13707,6 +14013,20 @@ struct Module: public interface::Module, public Interface
 			c.set("seat", (int64_t)b.seat);
 		}
 		c.set("voxels", voxel_extra());
+		// [KIT_FREE_PREFAB] the free objects in its scene
+		auto psi = m_host.scenes.find(pe.scene);
+		json::Value objs = json::array();
+		for(auto &f : m_free_objects){
+			if(psi == m_host.scenes.end() || f.second.ref != psi->second)
+				continue;
+			json::Value r = json::array();
+			r.append(f.second.model);
+			for(double v : f.second.place)
+				r.append(v);
+			objs.append(r);
+		}
+		if(objs.size())
+			c.set("objects", objs);
 		if(m_w->world_scene && m_w->wp.heightmap() && pe.scene == m_host.world_scene)
 			heightmap::access(m_server, [&](heightmap::Interface *ih){
 				heightmap::Instance *map = ih->get_instance(m_w->world_scene);
@@ -13736,6 +14056,19 @@ struct Module: public interface::Module, public Interface
 				continue;
 			sent = s;
 			network::access(m_server, [&](network::Interface *inetwork){
+				// [KIT_FREE_PREFAB] the boxes of a model it has not got
+				auto psi = m_host.scenes.find(p.second.scene);
+				std::set<ss_> &got = m_boxes_sent[p.first];
+				for(auto &f : m_free_objects){
+					if(psi == m_host.scenes.end() || f.second.ref != psi->second ||
+							!got.insert(f.second.model).second)
+						continue;
+					json::Value b = json::array();
+					for(float v : m_free_boxes[f.second.model])
+						b.append((double)v);
+					inetwork->send(p.first, "kit:object_boxes",
+							f.second.model+" "+b.stringify());
+				}
 				inetwork->send(p.first, "kit:controls", s);
 			});
 		}
@@ -14075,6 +14408,36 @@ struct Module: public interface::Module, public Interface
 				o += "},";
 				break;
 			}
+		}
+		o += "}";
+		// [KIT_FREE_PREFAB] The free objects' boxes near it
+		o += ",turned={";
+		for(auto &f : m_free_objects){
+			if(f.second.ref != scene)
+				continue;
+			const std::array<double, 4> &wp = f.second.place;
+			double lx = pos[0] - wp[0], lz = pos[2] - wp[2];
+			turn_xz(-wp[3], lx, lz);
+			const double m = R + 2;
+			const sv_<float> &bx = m_free_boxes[f.second.model];
+			ss_ list;
+			for(size_t i = 0; i + 6 <= bx.size(); i += 6){
+				if(lx + m < bx[i] || lx - m > bx[i + 3] ||
+						lz + m < bx[i + 2] || lz - m > bx[i + 5])
+					continue;
+				for(size_t q = 0; q < 6; q++){
+					lua_lit(json::Value((double)bx[i + q]), list);
+					list += ',';
+				}
+			}
+			if(list.empty())
+				continue;
+			o += "{";
+			for(int k = 0; k < 4; k++){
+				lua_lit(json::Value(wp[k]), o);
+				o += ',';
+			}
+			o += "{"+list+"}},";
 		}
 		o += "}";
 		if(m_w->world_scene && m_w->wp.heightmap() && scene == m_w->world_scene)
@@ -18339,6 +18702,7 @@ struct Module: public interface::Module, public Interface
 			unseat(peer, bi->second, false);
 		m_bodies.erase(peer);
 		m_controls_sent.erase(peer);
+		m_boxes_sent.erase(peer);
 		m_tool_use.erase(peer);
 		m_open_chest.erase(peer);
 		m_peers.erase(peer);
@@ -19562,6 +19926,7 @@ struct Module: public interface::Module, public Interface
 			log_i(MODULE, "The round's entities: %zu made gone, %zu removed "
 					"back", made.size(), m_removed.size());
 		m_removed.clear();
+		sync_free_objects();
 	}
 
 	// Stop: play state thrown away. The sections play wrote to put back as
@@ -19976,6 +20341,10 @@ struct Module: public interface::Module, public Interface
 				for(auto &e : m_entities)
 					if(authored(e.second) && is_root(e.second))
 						copies[jstr(e.second.prefab, "of")]++;
+				std::map<ss_, int64_t> frees;
+				for(auto &e : m_entities)
+					if(authored(e.second) && is_free(e.second))
+						frees[jstr(e.second.prefab, "of")]++;
 				const ss_ author = prefab_author(pi->second);
 				json::Value info = json::object();
 				for(const ss_ &n : m_prefab_palette){
@@ -19985,6 +20354,7 @@ struct Module: public interface::Module, public Interface
 					json::Value o = json::object();
 					o.set("version", json::jint(*pf, "version", 1));
 					o.set("copies", copies[n]);
+					o.set("free", frees[n]);
 					const json::Value &vx = pf->get("voxels");
 					if(vx.is_object()){
 						o.set("voxels", voxels_version(*pf));
@@ -19997,6 +20367,11 @@ struct Module: public interface::Module, public Interface
 					info.set(n, o);
 				}
 				j.set("prefabs_info", info);
+				// [KIT_FREE_PREFAB] each free copy's object's node
+				json::Value fo = json::object();
+				for(auto &f : m_free_objects)
+					fo.set(itos(f.first), (int64_t)f.second.node);
+				j.set("free_objects", fo);
 			}
 			// [KIT_PREFAB_VOXELS] the builder's copy: its entities and
 			// its box's size ([0, 0, 0]: none), from its base
@@ -20346,8 +20721,9 @@ struct Module: public interface::Module, public Interface
 			if(m_paste.clear)
 				clear_voxels(nc.scene, m_paste.clear_at, m_paste.clear_size, nc,
 						p.name, cleared, missing);
-			write_voxels(m_paste.vox, nc.scene, m_paste.base, m_paste.turn,
-					nc, p.name, written, missing, unknown);
+			if(!m_paste.only_clear)
+				write_voxels(m_paste.vox, nc.scene, m_paste.base, m_paste.turn,
+						nc, p.name, written, missing, unknown);
 			what += ", "+(m_paste.clear ? itos(cleared)+" voxels cleared, " :
 					ss_())+itos(written)+" voxels written"+(missing ? ", "+
 					itos(missing)+" not loaded" : ss_())+(unknown ? ", "+
@@ -20375,6 +20751,9 @@ struct Module: public interface::Module, public Interface
 		world_check(p.name);
 		if(!m_bench_saved.empty())
 			bench_follow(p);
+		// [KIT_FREE_PREFAB] every session's objects are the prefab's new model
+		if(op == "save_prefab")
+			each_session([&]{ sync_free_objects(); });
 		// [KIT_SCENES] a new scene: its World, and its maker taken there
 		if(op == "new_scene"){
 			const ss_ name = jstr(j, "name");
@@ -21118,6 +21497,7 @@ struct Module: public interface::Module, public Interface
 		m_runtime_dirty = true;
 		own_voxels();
 		pick_provider();
+		sync_free_objects();
 		m_store->set("authored", authored_json().stringify());
 		for(auto &p : m_peers)
 			if(p.second.editing)
@@ -21366,6 +21746,9 @@ struct Module: public interface::Module, public Interface
 		int64_t actions_at = 0;
 		std::map<std::pair<ss_, ss_>, std::array<double, 3>> scene_pos;
 		std::vector<Projectile> projectiles; // [KIT_TOOLS_2]
+		std::map<uint64_t, FreeObject> free_objects;
+		std::map<main_context::SceneReference, std::set<ss_>> free_models;
+		sm_<size_t, std::set<ss_>> boxes_sent;
 		int64_t clock_base = 0;
 	};
 
@@ -21407,6 +21790,9 @@ struct Module: public interface::Module, public Interface
 		swap(m_costs, c.costs);
 		swap(m_bodies, c.bodies);
 		swap(m_controls_sent, c.controls_sent);
+		swap(m_free_objects, c.free_objects);
+		swap(m_free_models, c.free_models);
+		swap(m_boxes_sent, c.boxes_sent);
 		swap(m_seat_home, c.seat_home);
 		swap(m_attached, c.attached);
 		swap(m_action_names, c.action_names);
@@ -21833,6 +22219,7 @@ struct Module: public interface::Module, public Interface
 				make_node(p.second);
 		own_voxels();
 		pick_provider();
+		sync_free_objects();
 		m_runtime_dirty = true;
 		return true;
 	}

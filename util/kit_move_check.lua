@@ -298,4 +298,38 @@ assert(type_of("door").params.mirror.default == false)
 box_is(door_box(false, false), {-0.5, -0.5, -0.1, 0.5, 1.5, 0.1})
 box_is(door_box(true, false), {-0.5, -0.5, -0.1, -0.3, 1.5, 0.9})
 box_is(door_box(true, true), {-0.5, -0.5, -0.9, -0.3, 1.5, 0.1})
+-- [KIT_FREE_PREFAB] A free object turned 37.5 at (20, 0.5, 0), a wall along its
+-- x and 1 thick: walked into along +z the body stops at it in the object's frame,
+-- with a gap in the wall it passes; a ray and the ground beneath find it
+local function turned_world(boxes)
+	local tw = MV.world{cell = function(_, j)
+		return j <= 0 and STONE or nil
+	end, turned = MV.turned({{20, 0.5, 0, 37.5, boxes}})}
+	return tw
+end
+local function wall_walk(boxes)
+	local a = 37.5 * math.pi / 180
+	-- The wall's middle at (20 + 3 cos, -3 sin), from 5 before it along z
+	local mx, mz = 20 + 3 * math.cos(a), -3 * math.sin(a)
+	local s = {pos = {mx, 0.5, mz - 5}}
+	return run(walker, s, 120, {f = 1, r = 0, yaw = 0, jump = 0, go = 0},
+			turned_world(boxes), wp), mx, mz, a
+end
+local whole = {-0.5, 0, -0.5, 6.5, 2, 0.5}
+local s, mx, mz, a = wall_walk(whole)
+local lx = (s.pos[1] - 20) * math.cos(a) - s.pos[3] * math.sin(a)
+local lz = (s.pos[1] - 20) * math.sin(a) + s.pos[3] * math.cos(a)
+assert(lz < -0.5 and lz > -2 and lx > 0 and lx < 6.5,
+		"stopped at the wall: " .. lx .. " " .. lz)
+assert(s.pos[3] > mz - 4.5, "it did walk: " .. s.pos[3])
+local g = wall_walk({-0.5, 0, -0.5, 1.5, 2, 0.5, 4.5, 0, -0.5, 6.5, 2, 0.5})
+assert(g.pos[3] > mz + 1, "through the gap: " .. g.pos[3])
+local tw = turned_world(whole)
+local t = tw:ray(mx, 1, mz - 3, 0, 0, 1, 10)
+assert(t and t > 1 and t < 3, "a ray meets it: " .. tostring(t))
+assert(tw:ray(mx + 30, 1, mz - 3, 0, 0, 1, 10) == nil, "a ray beside it")
+local d, di = tw:down(mx, 4, mz, 5)
+assert(di == MV.OBJECT and near(d, 1.5), "its top from above: " .. tostring(d))
+assert(tw:blocked({mx - 0.3, 1, mz - 0.3, mx + 0.3, 2, mz + 0.3}), "in it")
+assert(not tw:blocked({mx + 30, 1, mz, mx + 31, 2, mz + 1}), "beside it")
 print("kit_move_check: ok")

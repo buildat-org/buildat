@@ -257,8 +257,32 @@ function M.look_box(look, on, pos, yaw)
 	return b
 end
 
+-- [KIT_FREE_PREFAB] The free voxel objects as a world's t.turned: from {x, y, z,
+-- yaw, {x0, y0, z0, x1, y1, z1, ...}} (a place and turn round y, and boxes in
+-- that frame). A body meets them in the object's frame, turned with it.
+-- simplified: its square footprint turned so, at most r * 0.41 off at a corner;
+-- a footprint swept as it stands is the upgrade
+function M.turned(list)
+	local out = {}
+	for _, o in ipairs(list) do
+		local a = (tonumber(o[4]) or 0) * PI / 180
+		local b, rad = o[5], 0
+		for i = 1, #b, 6 do
+			for _, q in ipairs({{b[i], b[i + 2]}, {b[i], b[i + 5]},
+					{b[i + 3], b[i + 2]}, {b[i + 3], b[i + 5]}}) do
+				local d = sqrt(q[1] * q[1] + q[2] * q[2])
+				rad = d > rad and d or rad
+			end
+		end
+		out[#out + 1] = {x = o[1], y = o[2], z = o[3], c = M.cos(a), s = M.sin(a),
+			rad = rad, b = b}
+	end
+	return out
+end
+
 -- ---- The world: t.cell(i, j, k) -> info or nil, t.boxes ({x0, y0, z0,
--- x1, y1, z1, info = ...}...), t.ground(x, z) -> a heightmap's height
+-- x1, y1, z1, info = ...}...), t.turned (M.turned), t.ground(x, z) -> a
+-- heightmap's height
 -- or nil, t.edge {x0, z0, x1, z1}: a heightmap's extent. [KIT_HM_FREE]
 -- Over a heightmap (t.ground or t.edge) a cell not loaded is air: its
 -- voxels are only what is built, and a body walks on while they come in;
@@ -274,6 +298,7 @@ function M.world(t)
 	end
 	w.cell_fn = t.cell
 	w.boxes = t.boxes or {}
+	w.turned = t.turned or {}
 	w.ground_fn = t.ground
 	w.edge = t.edge
 	w.unknown_air = t.ground ~= nil or t.edge ~= nil
@@ -321,6 +346,87 @@ local function lo_cell(a)
 end
 local function hi_cell(a)
 	return -floor(-(a - EPS + 0.5)) - 1
+end
+
+-- [KIT_FREE_PREFAB] A point of the world in an object's frame
+local function in_object(o, x, z)
+	local dx, dz = x - o.x, z - o.z
+	return dx * o.c - dz * o.s, dx * o.s + dz * o.c
+end
+
+-- The sweep's move d along a past the free objects: as far as they let it
+function W:sweep_turned(b, a, d)
+	local hit = nil
+	local r = (b[4] - b[1]) / 2
+	for _, o in ipairs(self.turned) do
+		local lx, lz = in_object(o, (b[1] + b[4]) / 2, (b[3] + b[6]) / 2)
+		local reach = o.rad + 2 * r + abs(d)
+		if lx * lx + lz * lz <= reach * reach then
+			-- The whole move in its frame; t of it is what is left
+			local mx, mz = 0, 0
+			if a == 1 then
+				mx, mz = d * o.c, d * o.s
+			elseif a == 3 then
+				mx, mz = -d * o.s, d * o.c
+			end
+			local t, f, len = 1, o.b, sqrt(mx * mx + mz * mz)
+			for i = 1, #f, 6 do
+				-- The box grown by the body, its middle what moves; a hair in
+				-- from the faces, so that one touching can go along or away
+				local x0, x1 = f[i] - r + EPS, f[i + 3] + r - EPS
+				local z0, z1 = f[i + 2] - r + EPS, f[i + 5] + r - EPS
+				local y0, y1 = f[i + 1] + o.y, f[i + 4] + o.y
+				local inside = lx > x0 and lx < x1 and lz > z0 and lz < z1
+				if a == 2 then
+					if inside then
+						if d > 0 and y0 >= b[5] - EPS and y0 - b[5] < d then
+							local lim = y0 - b[5]
+							d, hit = lim < 0 and 0 or lim, M.OBJECT
+						elseif d < 0 and y1 <= b[2] + EPS and y1 - b[2] > d then
+							local lim = y1 - b[2]
+							d, hit = lim > 0 and 0 or lim, M.OBJECT
+						end
+					end
+				elseif not inside and y0 < b[5] - EPS and y1 > b[2] + EPS and
+						len > 1e-12 then
+					-- One the body is in already is no wall: it gets out
+					local t0, t1 = 0, 1
+					for q = 1, 2 do
+						local p, m, lo, hi = lx, mx, x0, x1
+						if q == 2 then
+							p, m, lo, hi = lz, mz, z0, z1
+						end
+						if abs(m) < 1e-12 then
+							if p <= lo or p >= hi then
+								t0 = 2
+							end
+						else
+							local e0, e1 = (lo - p) / m, (hi - p) / m
+							if e0 > e1 then
+								e0, e1 = e1, e0
+							end
+							if e0 > t0 then
+								t0 = e0
+							end
+							if e1 < t1 then
+								t1 = e1
+							end
+						end
+					end
+					if t0 <= t1 and t0 < t then
+						-- Short of it by as much again
+						t = t0 - 2 * EPS / len
+						if t < 0 then
+							t = 0
+						end
+						hit = M.OBJECT
+					end
+				end
+			end
+			d = d * t
+		end
+	end
+	return d, hit
 end
 
 -- The box b0..b1 ({x0, y0, z0, x1, y1, z1}) moved by d along axis a (1:
@@ -413,6 +519,8 @@ function W:sweep(b, a, d)
 			end
 		end
 	end end
+	local dt, ht = self:sweep_turned(b, a, d)
+	d, hit = dt, ht or hit
 	-- [KIT_HM_FREE] The heightmap's extent: a wall (one past it already:
 	-- no further out)
 	local e = self.edge
@@ -468,6 +576,18 @@ function W:blocked(b)
 		if o[1] < b[4] - EPS and o[4] > b[1] + EPS and o[2] < b[5] - EPS and
 				o[5] > b[2] + EPS and o[3] < b[6] - EPS and o[6] > b[3] + EPS then
 			return true
+		end
+	end
+	local r = (b[4] - b[1]) / 2
+	for _, o in ipairs(self.turned) do
+		local lx, lz = in_object(o, (b[1] + b[4]) / 2, (b[3] + b[6]) / 2)
+		local f = o.b
+		for i = 1, #f, 6 do
+			if lx > f[i] - r + EPS and lx < f[i + 3] + r - EPS and
+					lz > f[i + 2] - r + EPS and lz < f[i + 5] + r - EPS and
+					f[i + 1] + o.y < b[5] - EPS and f[i + 4] + o.y > b[2] + EPS then
+				return true
+			end
 		end
 	end
 	return false
@@ -660,6 +780,47 @@ function W:ray(ox, oy, oz, dx, dy, dz, len)
 			best, bi, bn = t0, b.info or M.OBJECT, n
 		end
 	end
+	for _, ob in ipairs(self.turned) do
+		local lx, lz = in_object(ob, ox, oz)
+		local lo = {lx, oy - ob.y, lz}
+		local lv = {dx * ob.c - dz * ob.s, dy, dx * ob.s + dz * ob.c}
+		local f = ob.b
+		for i = 1, #f, 6 do
+			local t0, t1, na = 0, len, nil
+			for k = 1, 3 do
+				local b0, b1 = f[i + k - 1], f[i + k + 2]
+				if abs(lv[k]) < 1e-9 then
+					if lo[k] < b0 or lo[k] > b1 then
+						t0 = math.huge
+					end
+				else
+					local a1, a2 = (b0 - lo[k]) / lv[k], (b1 - lo[k]) / lv[k]
+					if a1 > a2 then
+						a1, a2 = a2, a1
+					end
+					if a1 > t0 then
+						t0, na = a1, k
+					end
+					if a2 < t1 then
+						t1 = a2
+					end
+				end
+			end
+			if t0 <= t1 and (not best or t0 < best) then
+				local n = {0, 0, 0}
+				if na == 2 then
+					n[2] = lv[2] > 0 and -1 or 1
+				elseif na == 1 then
+					local q = lv[1] > 0 and -1 or 1
+					n[1], n[3] = q * ob.c, -q * ob.s
+				elseif na == 3 then
+					local q = lv[3] > 0 and -1 or 1
+					n[1], n[3] = q * ob.s, q * ob.c
+				end
+				best, bi, bn = t0, M.OBJECT, n
+			end
+		end
+	end
 	if self.ground_fn then
 		local stp, prev = 0.25, 0
 		local lim = best or len
@@ -739,6 +900,22 @@ function W:down(x, y, z, len)
 			end
 			if d <= len and (not best or d < best) then
 				best, info = d, b.info or M.OBJECT
+			end
+		end
+	end
+	for _, o in ipairs(self.turned) do
+		local lx, lz = in_object(o, x, z)
+		local f = o.b
+		for i = 1, #f, 6 do
+			if lx >= f[i] and lx <= f[i + 3] and lz >= f[i + 2] and lz <= f[i + 5]
+					and f[i + 1] + o.y <= y then
+				local d = y - (f[i + 4] + o.y)
+				if d < 0 then
+					d = 0
+				end
+				if d <= len and (not best or d < best) then
+					best, info = d, M.OBJECT
+				end
 			end
 		end
 	end
@@ -945,7 +1122,8 @@ function M.snapshot(t)
 	-- [KIT_HM_ORIGIN] the map from its origin's world cell
 	local edge = type(hm) == "table" and hm.sx and {hm.ox or 0, hm.oz or 0,
 			(hm.ox or 0) + hm.sx - 1, (hm.oz or 0) + hm.sz - 1} or nil
-	return M.world{cell = cell, boxes = boxes, ground = ground, edge = edge}
+	return M.world{cell = cell, boxes = boxes, ground = ground, edge = edge,
+		turned = M.turned(t.turned or {})}
 end
 
 -- The steps of a batch: each input dt long, in sub steps of its own
