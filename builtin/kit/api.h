@@ -601,7 +601,9 @@ namespace interface
 //       them that far off, their links among them the copies'
 //   [KIT_NESTING] Positions and yaws in edits are the world's (a
 //   child's made its parent's frame's); a place (a type's, a prefab's, a
-//   paste) takes "parent": m, under that positioned entity of the scene;
+//   paste) takes "parent": m, under that positioned entity of the scene
+//   ([KIT_PANEL_PARENT] or a panel, for a UI element or a paste of them: a
+//   UI type with no position, nothing else, refused);
 //   a move, duplicate, delete, copy and save_prefab take the entities
 //   under each one with it (one under another named goes with that one)
 //   {"op": "parent", "id": n, "parent": m}  -- n (and what is under it)
