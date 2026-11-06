@@ -236,18 +236,20 @@ K.prefab_moving = function(j)
 		end
 		return
 	end
-	if not j.id or not j.pos then
+	-- ([KIT_TURN_KEYS_DROP] a turn is a group's move, of one here)
+	local id = j.pos and j.id or j.op == "move" and j.ids and #j.ids == 1 and j.ids[1]
+	if not id then
 		return
 	end
-	local e, made = find(j.id)
+	local e, made = find(id)
 	if not e or made or type(e.prefab) ~= "table" or not e.pos or is_free(e) then
 		return
 	end
 	local info = info_of(e.prefab.of)
-	if not (info and info.size) or (PF.pending and PF.pending.id == j.id) then
+	if not (info and info.size) or (PF.pending and PF.pending.id == id) then
 		return
 	end
-	PF.pending = {id = j.id, pitch = e.pitch or 0, roll = e.roll or 0,
+	PF.pending = {id = id, pitch = e.pitch or 0, roll = e.roll or 0,
 		from = {e.pos[1], e.pos[2], e.pos[3], e.yaw or 0}}
 end
 
