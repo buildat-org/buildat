@@ -152,7 +152,12 @@ local function inputs_of(e)
 end
 
 -- The selection's knob: on a circle round the primary, the way it faces
-local function knob()
+-- [KIT_FREE_ROTATION] The selection's handles, each a ring with a knob, each
+-- turning one of its angles (the rows': Quaternion(pitch, yaw, roll), so roll
+-- first and yaw last): yaw round the world's y, pitch round its right as the
+-- yaw has it, roll round its forward as yaw and pitch have it. A knob at the
+-- angle a is at c + (v0 cos a + u sin a) r. The plan looks down y: yaw only
+local function knobs()
 	local e, is_made = nil, false
 	if S.primary then
 		e, is_made = find(S.primary)
@@ -168,42 +173,80 @@ local function knob()
 	end
 	r = math.max(r, NT.pf.knob_radius(e))
 	local pv = P.preview[e.id]
-	local yaw = pv and pv[4] or (e.yaw or 0)
-	local a = math.rad(yaw)
-	return c + magic.Vector3(math.sin(a) * r, 0, math.cos(a) * r), c, r, yaw
+	local a = pv and pv.angles or {pv and pv[4] or e.yaw or 0, e.pitch or 0,
+		e.roll or 0}
+	local V = magic.Vector3
+	local list = {{which = 1, name = "yaw", axis = V(0, 1, 0), v0 = V(0, 0, 1),
+		u = V(1, 0, 0), angle = a[1], r = r, col = magic.Color(1, 0.9, 0.2)}}
+	if S.view ~= "2d" then
+		local y, yx = magic.Quaternion(0, a[1], 0), magic.Quaternion(a[2], a[1], 0)
+		list[2] = {which = 2, name = "pitch", axis = y * V(1, 0, 0), v0 = V(0, 1, 0),
+			u = y * V(0, 0, 1), angle = a[2], r = r * 1.15,
+			col = magic.Color(1, 0.35, 0.3)}
+		list[3] = {which = 3, name = "roll", axis = yx * V(0, 0, 1), v0 = yx * V(1, 0, 0),
+			u = yx * V(0, 1, 0), angle = a[3], r = r * 1.3,
+			col = magic.Color(0.4, 0.6, 1)}
+	end
+	for _, k in ipairs(list) do
+		local t = math.rad(k.angle)
+		k.at = c + (k.v0 * math.cos(t) + k.u * math.sin(t)) * k.r
+	end
+	return list, c
 end
 
+-- The knob under a point of the screen, the nearest of them
 local function near_knob(mx, my)
-	local k = knob()
-	if not k then
-		return false
+	local list, c = knobs()
+	if not list then
+		return nil
 	end
-	local _, c = knob()
-	local sx, sy = to_screen(k)
 	local cx, cy = to_screen(c)
-	-- Nearer it than the entity's middle: a finger's wide reach on a
-	-- small plan takes the entity
-	return sx ~= nil and math.abs(sx - mx) <= px(SNAP_PX) and
-			math.abs(sy - my) <= px(SNAP_PX) and (cx == nil or
-			(sx - mx) ^ 2 + (sy - my) ^ 2 < (cx - mx) ^ 2 + (cy - my) ^ 2)
+	local best, best_d
+	for _, k in ipairs(list) do
+		local sx, sy = to_screen(k.at)
+		-- Nearer it than the entity's middle: a finger's wide reach on a
+		-- small plan takes the entity
+		if sx ~= nil and math.abs(sx - mx) <= px(SNAP_PX) and
+				math.abs(sy - my) <= px(SNAP_PX) then
+			local dd = (sx - mx) ^ 2 + (sy - my) ^ 2
+			if (cx == nil or dd < (cx - mx) ^ 2 + (cy - my) ^ 2) and
+					(not best or dd < best_d) then
+				best, best_d = k, dd
+			end
+		end
+	end
+	return best
 end
 
 -- [KIT_GROUP_TURN_JUMP] A check's look for the selection's knob: where it
 -- is on the screen
 magic.SubscribeToEvent("command_seq:kit_knob_where", function()
-	local k = knob()
+	local list, c = knobs()
 	local sx, sy
-	if k then
-		sx, sy = to_screen(k)
+	if list then
+		sx, sy = to_screen(list[1].at)
+		local mx, my = to_screen(c)
+		if mx then
+			log:info(string.format("kit editor: the middle on the screen at %d, %d",
+					mx, my))
+		end
 	end
 	log:info(sx and string.format("kit editor: the knob on the screen at "
 			.. "%d, %d", sx, sy) or "kit editor: no knob on the screen")
+	for i = 2, list and #list or 0 do
+		local x, y = to_screen(list[i].at)
+		if x then
+			log:info(string.format("kit editor: the %s knob on the screen at "
+					.. "%d, %d", list[i].name, x, y))
+		end
+	end
 end)
 
 -- ---- What a press would take: the knob, a port, an entity
 local function press_target(mx, my)
-	if near_knob(mx, my) then
-		return {knob = true}
+	local kn = near_knob(mx, my)
+	if kn then
+		return {knob = kn}
 	end
 	local port = port_at("out", mx, my)
 	if port then
@@ -240,9 +283,9 @@ end
 local function start_drag()
 	local t = S.press.target
 	if t.knob then
-		local _, c, _, yaw = knob()
-		S.drag = {kind = "turn", c = c, yaw0 = yaw, turn = 0}
-		log:info("kit editor: turning " .. S.primary)
+		local _, c = knobs()
+		S.drag = {kind = "turn", c = c, h = t.knob, turn = 0}
+		log:info("kit editor: turning " .. S.primary .. " by its " .. t.knob.name)
 		return
 	end
 	if t.port then
@@ -285,14 +328,21 @@ local function update_drag()
 		end
 	elseif d.kind == "turn" then
 		local o, v = M.screen_ray(S.mx, S.my)
-		local hc = plane_at(o, v, d.c.y)
-		if hc then
-			local a = math.deg(math.atan2(hc.x - d.c.x, hc.z - d.c.z))
+		-- The handle's plane through the entity; edge on: as it was
+		local h = d.h
+		local function dot(a, b)
+			return a.x * b.x + a.y * b.y + a.z * b.z
+		end
+		local den = dot(v, h.axis)
+		local hit_t = math.abs(den) > 1e-3 and dot(d.c - o, h.axis) / den
+		if hit_t and hit_t > 0 then
+			local rel = o + v * hit_t - d.c
+			local a = math.deg(math.atan2(dot(rel, h.u), dot(rel, h.v0)))
 			local step = ANGLE_STEPS[S.angle]
 			if step then
 				a = snap(a, step)
 			end
-			d.turn = ((a - d.yaw0) % 360 + 540) % 360 - 180
+			d.turn = ((a - h.angle) % 360 + 540) % 360 - 180
 		end
 		-- About the group's middle, the mean of their positions, as the
 		-- server's move_group
@@ -304,7 +354,7 @@ local function update_drag()
 		end
 		local mid = magic.Vector3(m[1], m[2], m[3])
 		for _, e in ipairs(l) do
-			preview(e, {0, 0, 0}, d.turn, mid)
+			preview(e, {0, 0, 0}, d.turn, mid, d.h)
 		end
 	end
 end
@@ -382,16 +432,13 @@ local function end_drag()
 			clear_preview()
 			return
 		end
-		if #l == 1 then
-			local e = l[1]
-			send({op = "move", id = e.id, pos = e.pos, yaw = (e.yaw or 0) + d.turn})
-		else
-			local ids = {}
-			for _, e in ipairs(l) do
-				ids[#ids + 1] = e.id
-			end
-			send({op = "move", ids = ids, by = {0, 0, 0}, turn = d.turn})
+		local ids = {}
+		for _, e in ipairs(l) do
+			ids[#ids + 1] = e.id
 		end
+		local a = d.h.axis
+		send({op = "move", ids = ids, by = {0, 0, 0}, turn = d.turn,
+			axis = d.h.which ~= 1 and {a.x, a.y, a.z} or nil})
 		-- What was shown at the release, for a check against the rows
 		for id, pv in pairs(P.preview) do
 			log:verbose(string.format("kit editor: turn preview %d at %g,%g,%g "
@@ -1773,12 +1820,11 @@ local function nudge(d)
 	return true
 end
 
+-- [KIT_TURN_KEYS_DROP] By, not to: a press before the last one's state is back
+-- counts
 local function turn_selection(deg)
 	local l = movable()
-	if #l == 1 then
-		local e = l[1]
-		send({op = "move", id = e.id, pos = e.pos, yaw = (e.yaw or 0) + deg})
-	elseif #l > 1 then
+	if #l > 0 then
 		local ids = {}
 		for _, e in ipairs(l) do
 			ids[#ids + 1] = e.id
@@ -2166,10 +2212,10 @@ local function compute_guide()
 		g.note = "Esc: cancel the parent's switch"
 		return g
 	end
-	if near_knob(mx, my) then
-		local k = knob()
-		hover.box(k, magic.Vector3(0.15, 0.15, 0.15), nil, M.HOVER)
-		g.left = "drag: turn the selection (step " .. angle_text() .. ")"
+	local kn = near_knob(mx, my)
+	if kn then
+		hover.box(kn.at, magic.Vector3(0.15, 0.15, 0.15), nil, M.HOVER)
+		g.left = "drag: " .. kn.name .. " of the selection (step " .. angle_text() .. ")"
 		return g
 	end
 	local port = port_at("out", mx, my)
@@ -2291,8 +2337,15 @@ local function draw_play_links()
 			for i = 1, 3 do
 				e[i] = math.max(1, math.min(384, math.floor(tonumber(sz[i]) or 1)))
 			end
-			dbg:AddBoundingBox(magic.BoundingBox(o, magic.Vector3(o.x + e[1],
-					o.y + e[2], o.z + e[3])), magic.Color(1, 0.3, 0.3), true)
+			local r = n.node.rotation
+			if math.abs(r.x) + math.abs(r.y) + math.abs(r.z) > 1e-6 then
+				-- [KIT_FREE_ROTATION] turned with its parent
+				NT.pf.draw_box(dbg, p, r, {-0.5, -0.5, -0.5},
+						{e[1] - 0.5, e[2] - 0.5, e[3] - 0.5}, magic.Color(1, 0.3, 0.3))
+			else
+				dbg:AddBoundingBox(magic.BoundingBox(o, magic.Vector3(o.x + e[1],
+						o.y + e[2], o.z + e[3])), magic.Color(1, 0.3, 0.3), true)
+			end
 			local key = "border " .. id
 			local was = E.play_drawn[key]
 			local now_s = table.concat(e, "x")
@@ -2433,14 +2486,23 @@ local function draw()
 						for i = 1, 3 do
 							ext[i] = math.max(1, math.floor(tonumber(n[i]) or 1))
 						end
-						dbg:AddBoundingBox(magic.BoundingBox(
-								magic.Vector3(x - 0.5, y - 0.5, z - 0.5),
-								magic.Vector3(x + ext[1] - 0.5, y + ext[2] - 0.5,
-								z + ext[3] - 0.5)), k == "zone" and
+						local bc = k == "zone" and
 								magic.Color(0.3, 0.75, 1) or k == "voxel_box" and
 								magic.Color(0.63, 0.38, 0.88) or k == "region" and
-								magic.Color(1, 0.3, 0.3) or magic.Color(1, 0.6, 0.2),
-								false)
+								magic.Color(1, 0.3, 0.3) or magic.Color(1, 0.6, 0.2)
+						local tq = NT.drawn_turn(e)
+						-- [KIT_FREE_ROTATION] a zone and a region turn with it; the
+						-- others are the world's voxels
+						if (k == "zone" or k == "region") and math.abs(tq.x) +
+								math.abs(tq.y) + math.abs(tq.z) > 1e-6 then
+							NT.pf.draw_box(dbg, m, tq, {-0.5, -0.5, -0.5},
+									{ext[1] - 0.5, ext[2] - 0.5, ext[3] - 0.5}, bc)
+						else
+							dbg:AddBoundingBox(magic.BoundingBox(
+									magic.Vector3(x - 0.5, y - 0.5, z - 0.5),
+									magic.Vector3(x + ext[1] - 0.5, y + ext[2] - 0.5,
+									z + ext[3] - 0.5)), bc, false)
+						end
 					end
 				end
 				for _, l in ipairs(c.links or {}) do
@@ -2471,11 +2533,11 @@ local function draw()
 				E.cursor[3]), 0.8, magic.Color(1, 0.4, 1), false)
 	end
 	-- The knob, and the turn being dragged
-	local k, c, r = knob()
-	if k then
-		dbg:AddCircle(c, magic.Vector3(0, 1, 0), r, YELLOW, 32, false)
-		dbg:AddLine(c, k, YELLOW, false)
-		dbg:AddSphere(magic.Sphere(k, 0.12), YELLOW, false)
+	local list, kc = knobs()
+	for _, k in ipairs(list or {}) do
+		dbg:AddCircle(kc, k.axis, k.r, k.col, 32, false)
+		dbg:AddLine(kc, k.at, k.col, false)
+		dbg:AddSphere(magic.Sphere(k.at, 0.12), k.col, false)
 	end
 	-- The ports: the selected one's outputs (none in a drag of another kind)
 	local e = S.primary and find(S.primary)
@@ -2713,7 +2775,9 @@ function M.editor(options)
 				log:verbose("kit editor: entity " .. e.id .. " " ..
 						tostring(e.name) .. (e.pos and " at " ..
 						table.concat(e.pos, ",") or "") .. ((e.yaw or 0) ~= 0 and
-						" yaw " .. e.yaw or "") .. (pe and " under " .. pe.id or
+						" yaw " .. e.yaw or "") .. ((e.pitch or 0) ~= 0 and
+						" pitch " .. e.pitch or "") .. ((e.roll or 0) ~= 0 and
+						" roll " .. e.roll or "") .. (pe and " under " .. pe.id or
 						"") .. " links " .. table.concat(links, " "))
 			end
 			for id in pairs(S.sel) do

@@ -216,8 +216,9 @@ struct Entity
 	bool has_pos = false;
 	double pos[3] = {0, 0, 0};
 	// [KIT] stage 4e2: its turn round y, degrees 0...360 (its node's, its
-	// look turning with it)
-	double yaw = 0;
+	// look turning with it). [KIT_FREE_ROTATION] pitch and roll too, Urho3D's
+	// Quaternion(pitch, yaw, roll) (roll first, then pitch, then yaw)
+	double yaw = 0, pitch = 0, roll = 0;
 	sv_<Instance> comps;
 	uint32_t node = 0; // a positional one's node in its scene
 	// [KIT_PREFAB_ROOT] authored: a placed prefab's root (kit/prefab_copy),
@@ -1261,11 +1262,21 @@ struct Module: public interface::Module, public Interface
 		main_context::SceneReference ref = nullptr;
 		ss_ model;
 		uint node = 0;
-		std::array<double, 4> place = {{0, 0, 0, 0}};
+		// x y z yaw pitch roll
+		std::array<double, 6> place = {{0, 0, 0, 0, 0, 0}};
+		// [KIT_FREE_ROTATION] Pitched or rolled: the boxes bodies meet (see
+		// tilted_boxes), and their name for the clients; level: the model's
+		sv_<float> tilted;
+		ss_ boxes_name;
 	};
+	const sv_<float>& free_body_boxes(const FreeObject &o)
+	{
+		return o.boxes_name.empty() ? m_free_boxes[o.model] : o.tilted;
+	}
 	std::map<uint64_t, FreeObject> m_free_objects;
 	std::map<main_context::SceneReference, std::set<ss_>> m_free_models;
 	sm_<ss_, sv_<float>> m_free_boxes;
+	uint64_t m_free_tilts = 0;
 	sm_<size_t, std::set<ss_>> m_boxes_sent;
 	// [KIT_PREFAB_ROOT] a save's: the copies of this prefab but that one
 	// are built again (rebuilds())
@@ -1943,20 +1954,139 @@ struct Module: public interface::Module, public Interface
 		z = nz;
 	}
 
+	// [KIT_FREE_ROTATION] A turn as a quaternion, in doubles: world poses are
+	// composed in these, rows keep the angles
+	struct Turn
+	{
+		double w = 1, x = 0, y = 0, z = 0;
+		Turn(){}
+		Turn(double w, double x, double y, double z): w(w), x(x), y(y), z(z){}
+		// Degrees, as magic::Quaternion(pitch, yaw, roll)
+		static Turn of(double yaw, double pitch = 0, double roll = 0)
+		{
+			if(yaw == 0 && pitch == 0 && roll == 0)
+				return Turn();
+			const double k = 3.14159265358979323846 / 360;
+			const double sy = std::sin(yaw * k), cy = std::cos(yaw * k);
+			const double sx = std::sin(pitch * k), cx = std::cos(pitch * k);
+			const double sz = std::sin(roll * k), cz = std::cos(roll * k);
+			return Turn(cy * cx * cz + sy * sx * sz, cy * sx * cz + sy * cx * sz,
+					sy * cx * cz - cy * sx * sz, cy * cx * sz - sy * sx * cz);
+		}
+		static Turn of(const Entity &e)
+		{
+			return of(e.yaw, e.pitch, e.roll);
+		}
+		// Round an axis of length 1
+		static Turn around(const double a[3], double degrees)
+		{
+			const double r = degrees * 3.14159265358979323846 / 360;
+			const double sn = std::sin(r);
+			return Turn(std::cos(r), a[0] * sn, a[1] * sn, a[2] * sn);
+		}
+		// This one after b (a parent's * a child's)
+		Turn operator*(const Turn &b) const
+		{
+			return Turn(w * b.w - x * b.x - y * b.y - z * b.z,
+					w * b.x + x * b.w + y * b.z - z * b.y,
+					w * b.y - x * b.z + y * b.w + z * b.x,
+					w * b.z + x * b.y - y * b.x + z * b.w);
+		}
+		Turn inverse() const
+		{
+			return Turn(w, -x, -y, -z);
+		}
+		bool none() const
+		{
+			return std::fabs(x) + std::fabs(y) + std::fabs(z) < 1e-9;
+		}
+		void apply(double v[3]) const
+		{
+			if(x == 0 && y == 0 && z == 0)
+				return;
+			const double tx = 2 * (y * v[2] - z * v[1]);
+			const double ty = 2 * (z * v[0] - x * v[2]);
+			const double tz = 2 * (x * v[1] - y * v[0]);
+			v[0] += w * tx + y * tz - z * ty;
+			v[1] += w * ty + z * tx - x * tz;
+			v[2] += w * tz + x * ty - y * tx;
+		}
+		// Its angles, each 0...360 and to a millionth of a degree (what a yaw
+		// of 90 is tested by). At a pitch of 90 all of it is yaw
+		void angles(double &yaw, double &pitch, double &roll) const
+		{
+			const double d = 180 / 3.14159265358979323846;
+			const double check = 2 * (w * x - y * z);
+			if(std::fabs(check) > 1 - 1e-10){
+				pitch = check > 0 ? 90 : -90;
+				yaw = 2 * std::atan2(y, w) * d;
+				roll = 0;
+			} else {
+				pitch = std::asin(check) * d;
+				yaw = std::atan2(2 * (x * z + w * y), 1 - 2 * (x * x + y * y)) * d;
+				roll = std::atan2(2 * (x * y + w * z), 1 - 2 * (x * x + z * z)) * d;
+			}
+			for(double *a : {&yaw, &pitch, &roll}){
+				*a = std::fmod(std::round(*a * 1e6) / 1e6, 360.0) + 0.0;
+				if(*a < 0)
+					*a += 360;
+			}
+		}
+		// The way it faces on the level: what a spawn looks along
+		double yaw() const
+		{
+			double a, b, c;
+			angles(a, b, c);
+			return a;
+		}
+		magic::Quaternion q() const
+		{
+			return magic::Quaternion((float)w, (float)x, (float)y, (float)z);
+		}
+	};
+
+	// A row's pitch and roll taken from another's
+	static void row_tilt(json::Value &row, const json::Value &from)
+	{
+		for(const char *k : {"pitch", "roll"})
+			if(from.get(k).is_number())
+				row.set(k, norm_yaw(from.get(k).as_number()));
+	}
+	// A row's turn, as kept: yaw always, the others when it has them
+	static void row_turn(json::Value &row, double yaw, double pitch, double roll)
+	{
+		row.set("yaw", norm_yaw(yaw));
+		if(pitch != 0 || row.get("pitch").is_number())
+			row.set("pitch", norm_yaw(pitch));
+		if(roll != 0 || row.get("roll").is_number())
+			row.set("roll", norm_yaw(roll));
+	}
+	static void row_turn(json::Value &row, const Turn &q)
+	{
+		double a, b, c;
+		q.angles(a, b, c);
+		row_turn(row, a, b, c);
+	}
+	static double row_num(const json::Value &row, const char *k)
+	{
+		const json::Value &v = row.get(k);
+		return v.is_number() && std::isfinite(v.as_number()) ? v.as_number() : 0;
+	}
+
 	// The frame the entities under id are in: its place in the world,
 	// moved by what its look carries (kit/mover's offset while out: they
 	// go where it goes, at once, as its box does for the players); the
 	// world's for a scene, the root or one with no position
-	void frame_of(uint64_t id, double o[3], double &yaw, int depth = 0)
+	void frame_of(uint64_t id, double o[3], Turn &q, int depth = 0)
 	{
 		o[0] = o[1] = o[2] = 0;
-		yaw = 0;
+		q = Turn();
 		auto it = m_entities.find(id);
 		if(it == m_entities.end() || !it->second.has_pos ||
 				depth > MAX_NEST + 2)
 			return;
 		const Entity &e = it->second;
-		world_of(e, o, &yaw, depth + 1);
+		world_of(e, o, &q, depth + 1);
 		for(const Instance &in : e.comps){
 			auto ti = m_types.find(in.type);
 			if(ti == m_types.end())
@@ -1970,49 +2100,73 @@ struct Module: public interface::Module, public Interface
 			const json::Value off = look_of(in, d).get("when").get("offset");
 			if(!pos_ok(off))
 				continue;
-			double x = off.at(0u).as_number(), z = off.at(2u).as_number();
-			turn_xz(yaw, x, z);
-			o[0] += x;
-			o[1] += off.at(1u).as_number();
-			o[2] += z;
+			double v[3] = {off.at(0u).as_number(), off.at(1u).as_number(),
+					off.at(2u).as_number()};
+			q.apply(v);
+			for(int k = 0; k < 3; k++)
+				o[k] += v[k];
 			break;
 		}
 	}
 
-	// An entity's place and yaw in the world
-	void world_of(const Entity &e, double w[3], double *wyaw = nullptr,
+	// An entity's place and turn in the world. 4r4's pose, driven by the
+	// shared time, goes over frame_of's and this one's own turn
+	void world_of(const Entity &e, double w[3], Turn *wq = nullptr,
 			int depth = 0)
 	{
-		double o[3], py;
-		frame_of(e.parent, o, py, depth);
-		double x = e.pos[0], z = e.pos[2];
-		turn_xz(py, x, z);
-		w[0] = o[0] + x;
-		w[1] = o[1] + e.pos[1];
-		w[2] = o[2] + z;
-		if(wyaw){
-			*wyaw = std::fmod(py + e.yaw, 360.0);
-			if(*wyaw < 0)
-				*wyaw += 360;
-		}
+		double o[3];
+		Turn pq;
+		frame_of(e.parent, o, pq, depth);
+		double v[3] = {e.pos[0], e.pos[1], e.pos[2]};
+		pq.apply(v);
+		for(int k = 0; k < 3; k++)
+			w[k] = o[k] + v[k];
+		if(wq)
+			*wq = pq * Turn::of(e);
 	}
 
-	// A place and yaw in the world as an entity under `parent` has them
+	// A place and turn in the world as an entity under `parent` has them
 	void to_local(uint64_t parent, const double w[3], double l[3],
-			double wyaw = 0, double *lyaw = nullptr)
+			const Turn *wq = nullptr, Turn *lq = nullptr)
 	{
-		double o[3], py;
-		frame_of(parent, o, py);
-		double x = w[0] - o[0], z = w[2] - o[2];
-		turn_xz(-py, x, z);
-		l[0] = x;
-		l[1] = w[1] - o[1];
-		l[2] = z;
-		if(lyaw)
-			*lyaw = norm_yaw(wyaw - py);
+		double o[3];
+		Turn pq;
+		frame_of(parent, o, pq);
+		for(int k = 0; k < 3; k++)
+			l[k] = w[k] - o[k];
+		const Turn inv = pq.inverse();
+		inv.apply(l);
+		if(wq && lq)
+			*lq = inv * *wq;
 	}
 
-	// A row's "pos" and "yaw", given in the world, made its parent's
+	// [KIT_FREE_ROTATION] Where a zone's or a region's box is: its corner
+	// cell's middle and its turn. Level (no turn in the world) it stays on
+	// voxel_p's cell
+	void box_frame(const Entity &e, double o[3], Turn &q)
+	{
+		world_of(e, o, &q);
+		if(q.none())
+			for(int k = 0; k < 3; k++)
+				o[k] = std::floor(o[k]);
+	}
+
+	// Whether a point (a cell's middle is its whole coordinates) is in a box
+	// of n cells from that corner, along its turned axes
+	static bool box_holds(const double o[3], const Turn &q, const int n[3],
+			const double p[3])
+	{
+		double l[3] = {p[0] - o[0], p[1] - o[1], p[2] - o[2]};
+		q.inverse().apply(l);
+		for(int k = 0; k < 3; k++){
+			const double c = std::floor(l[k] + 0.5);
+			if(c < 0 || c >= n[k])
+				return false;
+		}
+		return true;
+	}
+
+	// A row's "pos" and turn, given in the world, made its parent's
 	// frame's (on the grid; nothing for a row under a scene)
 	void localize(json::Value &row)
 	{
@@ -2021,20 +2175,21 @@ struct Module: public interface::Module, public Interface
 		if(!pos_ok(row.get("pos")) || pi == m_entities.end() ||
 				!pi->second.has_pos)
 			return;
-		double w[3], l[3], ly;
+		double w[3], l[3];
 		for(unsigned k = 0; k < 3; k++)
 			w[k] = row.get("pos").at(k).as_number();
-		const double wy = row.get("yaw").is_number() ?
-				row.get("yaw").as_number() : 0;
-		to_local(parent, w, l, wy, &ly);
+		const Turn wq = Turn::of(row_num(row, "yaw"), row_num(row, "pitch"),
+				row_num(row, "roll"));
+		Turn lq;
+		to_local(parent, w, l, &wq, &lq);
 		json::Value pos = json::array();
 		for(int k = 0; k < 3; k++)
 			pos.append(grid(l[k]));
 		row.set("pos", pos);
-		row.set("yaw", ly);
+		row_turn(row, lq);
 	}
 
-	// An authored row as the editors get it: its place and yaw the
+	// An authored row as the editors get it: its place and turn the
 	// world's
 	json::Value world_row(const Entity &e)
 	{
@@ -2042,13 +2197,21 @@ struct Module: public interface::Module, public Interface
 		auto pi = m_entities.find(e.parent);
 		if(!e.has_pos || pi == m_entities.end() || !pi->second.has_pos)
 			return j;
-		double w[3], wy;
-		world_of(e, w, &wy);
+		double w[3], a, b, c;
+		Turn q;
+		world_of(e, w, &q);
+		q.angles(a, b, c);
 		json::Value pos = json::array();
 		for(int k = 0; k < 3; k++)
 			pos.append(w[k]);
 		j.set("pos", pos);
-		j.set("yaw", wy);
+		j.set("yaw", a);
+		j.del_key("pitch");
+		j.del_key("roll");
+		if(b != 0)
+			j.set("pitch", b);
+		if(c != 0)
+			j.set("roll", c);
 		return j;
 	}
 
@@ -2093,13 +2256,14 @@ struct Module: public interface::Module, public Interface
 			return;
 		Entity &e = it->second;
 		if(e.node){
-			double w[3], wy;
-			world_of(e, w, &wy);
+			double w[3];
+			Turn q;
+			world_of(e, w, &q);
 			main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
 				magic::Node *n = sc->GetNode(e.node);
 				if(n){
 					n->SetPosition(magic::Vector3(w[0], w[1], w[2]));
-					n->SetRotation(magic::Quaternion(0, (float)wy, 0));
+					n->SetRotation(q.q());
 				}
 			});
 		}
@@ -2455,6 +2619,10 @@ struct Module: public interface::Module, public Interface
 		}
 		if(j.get("yaw").is_number())
 			e.yaw = norm_yaw(j.get("yaw").as_number());
+		if(j.get("pitch").is_number())
+			e.pitch = norm_yaw(j.get("pitch").as_number());
+		if(j.get("roll").is_number())
+			e.roll = norm_yaw(j.get("roll").as_number());
 		const json::Value &cs_ = j.get("components");
 		for(unsigned k = 0; k < cs_.size(); k++){
 			const json::Value &cj = cs_.at(k);
@@ -2568,7 +2736,7 @@ struct Module: public interface::Module, public Interface
 		// prefab's)
 		if(no_position(e)){
 			e.has_pos = false;
-			e.pos[0] = e.pos[1] = e.pos[2] = e.yaw = 0;
+			e.pos[0] = e.pos[1] = e.pos[2] = e.yaw = e.pitch = e.roll = 0;
 		}
 		return true;
 	}
@@ -2592,6 +2760,10 @@ struct Module: public interface::Module, public Interface
 			j.set("pos", pos);
 			if(e.yaw != 0)
 				j.set("yaw", e.yaw);
+			if(e.pitch != 0)
+				j.set("pitch", e.pitch);
+			if(e.roll != 0)
+				j.set("roll", e.roll);
 		}
 		json::Value comps = json::array();
 		for(const Instance &in : e.comps){
@@ -2685,8 +2857,22 @@ struct Module: public interface::Module, public Interface
 		return !e.made && e.kind != "player";
 	}
 
+	// What play moved goes back to: its row's place and turn
+	static std::array<double, 6> home_of(const Entity &e)
+	{
+		return {{e.pos[0], e.pos[1], e.pos[2], e.yaw, e.pitch, e.roll}};
+	}
+	static void home_put(Entity &e, const std::array<double, 6> &h)
+	{
+		for(int k = 0; k < 3; k++)
+			e.pos[k] = h[k];
+		e.yaw = h[3];
+		e.pitch = h[4];
+		e.roll = h[5];
+	}
+
 	// The composition: the authored entities, those play removed too.
-	// world: [KIT_NESTING] each one's place and yaw the world's (the
+	// world: [KIT_NESTING] each one's place and turn the world's (the
 	// editors'), else its parent's frame's (the save's)
 	json::Value authored_json(bool world = false)
 	{
@@ -2705,11 +2891,8 @@ struct Module: public interface::Module, public Interface
 			// moved one's frame
 			auto h = m_seat_home.find(p.first);
 			Entity e = *p.second;
-			if(h != m_seat_home.end()){
-				for(int k = 0; k < 3; k++)
-					e.pos[k] = h->second[k];
-				e.yaw = h->second[3];
-			}
+			if(h != m_seat_home.end())
+				home_put(e, h->second);
 			es.append(world ? world_row(e) : entity_json(e));
 		}
 		c.set("entities", es);
@@ -6308,6 +6491,58 @@ struct Module: public interface::Module, public Interface
 				", voxels the scene has not left out" : "");
 	}
 
+	// [KIT_FREE_ROTATION] What a body meets of a pitched or rolled object: its
+	// boxes cut in pieces, each piece's bounds under the pitch and roll, in the
+	// frame the yaw alone turns; move.lua's sweep goes on as for a level object.
+	// simplified: a deck is stairs of pieces, standing on each piece's highest
+	// corner (at most a piece's size * sin(tilt) over the true deck); 1024
+	// pieces at most, larger pieces past that. Kit's stage 4r3, the walker in
+	// the object's frame, replaces this
+	static sv_<float> tilted_boxes(const sv_<float> &bx, double pitch, double roll)
+	{
+		const Turn t = Turn::of(0, pitch, roll);
+		double size = 1;
+		for(;;){
+			double pieces = 0;
+			for(size_t i = 0; i + 6 <= bx.size(); i += 6)
+				pieces += std::ceil((bx[i + 3] - bx[i]) / size) *
+						std::ceil((bx[i + 4] - bx[i + 1]) / size) *
+						std::ceil((bx[i + 5] - bx[i + 2]) / size);
+			if(pieces <= 1024)
+				break;
+			size *= 2;
+		}
+		sv_<float> out;
+		for(size_t i = 0; i + 6 <= bx.size(); i += 6){
+			int n[3];
+			for(int k = 0; k < 3; k++)
+				n[k] = (int)std::ceil((bx[i + 3 + k] - bx[i + k]) / size);
+			for(int a = 0; a < n[0]; a++)
+			for(int b = 0; b < n[1]; b++)
+			for(int c = 0; c < n[2]; c++){
+				const int at[3] = {a, b, c};
+				double lo[3] = {0, 0, 0}, hi[3] = {0, 0, 0};
+				for(int q = 0; q < 8; q++){
+					double v[3];
+					for(int k = 0; k < 3; k++){
+						const double f = bx[i + k] + (at[k] + (q >> k & 1)) * size;
+						v[k] = std::min(f, (double)bx[i + 3 + k]);
+					}
+					t.apply(v);
+					for(int k = 0; k < 3; k++){
+						lo[k] = q ? std::min(lo[k], v[k]) : v[k];
+						hi[k] = q ? std::max(hi[k], v[k]) : v[k];
+					}
+				}
+				for(int k = 0; k < 3; k++)
+					out.push_back((float)lo[k]);
+				for(int k = 0; k < 3; k++)
+					out.push_back((float)hi[k]);
+			}
+		}
+		return out;
+	}
+
 	void sync_free_objects()
 	{
 		voxel_objects::Interface *iv = nullptr;
@@ -6342,13 +6577,17 @@ struct Module: public interface::Module, public Interface
 			const ss_ model = "kitfree_"+ss_(hex)+"_"+itos(voxels_version(*pf));
 			const json::Value &vx = pf->get("voxels");
 			free_model(vo, ref, model, vx);
-			double w[3], wy;
-			world_of(e, w, &wy);
-			const magic::Quaternion q(0, (float)wy, 0);
-			const magic::Vector3 pos = magic::Vector3(w[0], w[1], w[2]) + q *
-					magic::Vector3(vx.get("at").at(0u).as_number() - 0.5f,
-					vx.get("at").at(1u).as_number() - 0.5f,
-					vx.get("at").at(2u).as_number() - 0.5f);
+			double w[3], wy, wp, wr;
+			Turn wq;
+			world_of(e, w, &wq);
+			wq.angles(wy, wp, wr);
+			const magic::Quaternion q = wq.q();
+			double corner[3] = {vx.get("at").at(0u).as_number() - 0.5,
+					vx.get("at").at(1u).as_number() - 0.5,
+					vx.get("at").at(2u).as_number() - 0.5};
+			wq.apply(corner);
+			const magic::Vector3 pos(w[0] + corner[0], w[1] + corner[1],
+					w[2] + corner[2]);
 			auto it = m_free_objects.find(e.id);
 			if(it != m_free_objects.end() && (it->second.ref != ref ||
 					it->second.model != model)){
@@ -6357,19 +6596,34 @@ struct Module: public interface::Module, public Interface
 				m_free_objects.erase(it);
 				it = m_free_objects.end();
 			}
-			const std::array<double, 4> place = {{w[0], w[1], w[2], wy}};
+			const std::array<double, 6> place = {{w[0], w[1], w[2], wy, wp, wr}};
+			// A new name for the clients at each tilt: they keep boxes by name
+			auto tilt = [&](FreeObject &o){
+				const bool level = wp == 0 && wr == 0;
+				o.tilted = level ? sv_<float>() :
+						tilted_boxes(m_free_boxes[model], wp, wr);
+				o.boxes_name = level ? ss_() : model+":"+itos(e.id)+":"+
+						itos(++m_free_tilts);
+			};
 			if(it == m_free_objects.end()){
 				FreeObject o;
 				o.ref = ref;
 				o.model = model;
 				o.node = vo->create_object(model, pos, q);
 				o.place = place;
+				tilt(o);
 				m_free_objects[e.id] = o;
 				log_i(MODULE, "The free object of %s: entity %s, model %s, at "
-						"%.3f,%.3f,%.3f yaw %.3f", cs(of), cs(itos(e.id)), cs(model),
-						w[0], w[1], w[2], wy);
+						"%.3f,%.3f,%.3f yaw %.3f pitch %.3f roll %.3f, node at "
+						"%.4f,%.4f,%.4f turn %.5f,%.5f,%.5f,%.5f", cs(of),
+						cs(itos(e.id)), cs(model), w[0], w[1], w[2], wy, wp, wr,
+						pos.x_, pos.y_, pos.z_, q.w_, q.x_, q.y_, q.z_);
 			} else if(it->second.place != place){
+				const bool retilt = it->second.place[4] != wp ||
+						it->second.place[5] != wr;
 				it->second.place = place;
+				if(retilt)
+					tilt(it->second);
 				const uint node = it->second.node;
 				main_context::access(m_server, ref, [&](magic::Scene *sc){
 					magic::Node *n = sc->GetNode(node);
@@ -6379,7 +6633,9 @@ struct Module: public interface::Module, public Interface
 					}
 				});
 				log_i(MODULE, "The free object of entity %s moved to %.3f,%.3f,%.3f "
-						"yaw %.3f", cs(itos(e.id)), w[0], w[1], w[2], wy);
+						"yaw %.3f pitch %.3f roll %.3f, node at %.4f,%.4f,%.4f turn "
+						"%.5f,%.5f,%.5f,%.5f", cs(itos(e.id)), w[0], w[1], w[2], wy,
+						wp, wr, pos.x_, pos.y_, pos.z_, q.w_, q.x_, q.y_, q.z_);
 			}
 			wanted.insert(e.id);
 			used[ref].insert(model);
@@ -7425,7 +7681,11 @@ struct Module: public interface::Module, public Interface
 		});
 		if(what.empty())
 			return refuse("the cell's section is not loaded");
-		log_i(MODULE, "Voxel at (%i,%i,%i): %s", c[0], c[1], c[2], cs(what));
+		// ([KIT_FREE_ROTATION] and the region deciding it)
+		const Entity *re = nullptr;
+		const Instance *rg = region_at(p.scene, c[0], c[1], c[2], &re);
+		log_i(MODULE, "Voxel at (%i,%i,%i): %s%s", c[0], c[1], c[2], cs(what),
+				rg ? cs(", region "+itos(re->id)) : "");
 	}
 
 	void edit_voxel(Peer &p, size_t peer, const json::Value &j,
@@ -8396,12 +8656,13 @@ struct Module: public interface::Module, public Interface
 	{
 		const json::Value show = show_of(e);
 		main_context::SceneReference ref = scene_of(e);
-		double w[3], wy;
-		world_of(e, w, &wy);
+		double w[3];
+		Turn wq;
+		world_of(e, w, &wq);
 		main_context::access(m_server, ref, [&](magic::Scene *scene){
 			magic::Node *n = scene->CreateChild(("kit:"+itos(e.id)).c_str());
 			n->SetPosition(magic::Vector3(w[0], w[1], w[2]));
-			n->SetRotation(magic::Quaternion(0, (float)wy, 0));
+			n->SetRotation(wq.q());
 			n->SetVar(magic::StringHash("kit_id"), magic::Variant((int)e.id));
 			n->SetVar(magic::StringHash("kit_parent"),
 					magic::Variant((int)parent_node_id(e)));
@@ -8646,15 +8907,16 @@ struct Module: public interface::Module, public Interface
 			o += ",is_player=true";
 		if(e.has_pos){
 			// [KIT_NESTING] the world's
-			double w[3], wy;
-			world_of(e, w, &wy);
+			double w[3];
+			Turn wq;
+			world_of(e, w, &wq);
 			o += ",pos={";
 			for(int k = 0; k < 3; k++){
 				lua_lit(json::Value(w[k]), o);
 				o += ',';
 			}
 			o += "},yaw=";
-			lua_lit(json::Value(wy), o);
+			lua_lit(json::Value(wq.yaw()), o);
 		}
 		o += ",params=";
 		// [KIT_INVENTORY_PLAY] Kit's own inventory stores by the rules
@@ -8771,12 +9033,21 @@ struct Module: public interface::Module, public Interface
 						continue;
 					int n[3];
 					region_extent(ri, rt, n);
-					const pv::Vector3DInt32 c = voxel_p(re);
+					double c[3];
+					Turn rq;
+					box_frame(re, c, rq);
 					json::Value j = json::object(), o = json::array(),
 							nn = json::array();
-					o.append(c.getX());
-					o.append(c.getY());
-					o.append(c.getZ());
+					for(int k = 0; k < 3; k++)
+						o.append(c[k]);
+					// [KIT_FREE_ROTATION] turned: o its corner cell's middle,
+					// q its turn
+					if(!rq.none()){
+						json::Value q = json::array();
+						for(double v : {rq.w, rq.x, rq.y, rq.z})
+							q.append(v);
+						j.set("q", q);
+					}
 					for(int k = 0; k < 3; k++)
 						nn.append(n[k]);
 					j.set("id", (int64_t)re.id);
@@ -9066,15 +9337,41 @@ struct Module: public interface::Module, public Interface
 				else
 					extent(in.params.get(t.grants), n);
 				const pv::Vector3DInt32 o = voxel_p(e);
-				if(n[0] * n[1] * n[2] <= MAX_SET_CELLS)
+				double bo[3];
+				Turn bq;
+				box_frame(e, bo, bq);
+				if(n[0] * n[1] * n[2] > MAX_SET_CELLS){
+					log_w(MODULE, "Entity %s's %s sets %i cells, past %i",
+							cs(itos(e.id)), cs(type), n[0] * n[1] * n[2],
+							MAX_SET_CELLS);
+				} else if(!t.region.empty() && !bq.none()){
+					// [KIT_FREE_ROTATION] the world's cells with their middles in it
+					double lo[3], hi[3];
+					for(int k = 0; k < 3; k++)
+						lo[k] = bo[k], hi[k] = bo[k];
+					for(int c = 0; c < 8; c++){
+						double v[3];
+						for(int k = 0; k < 3; k++)
+							v[k] = c >> k & 1 ? n[k] - 0.5 : -0.5;
+						bq.apply(v);
+						for(int k = 0; k < 3; k++){
+							lo[k] = std::min(lo[k], bo[k] + v[k]);
+							hi[k] = std::max(hi[k], bo[k] + v[k]);
+						}
+					}
+					for(int x = std::floor(lo[0]); x <= std::ceil(hi[0]); x++)
+						for(int y = std::floor(lo[1]); y <= std::ceil(hi[1]); y++)
+							for(int z = std::floor(lo[2]); z <= std::ceil(hi[2]); z++){
+								const double p[3] = {(double)x, (double)y, (double)z};
+								if(box_holds(bo, bq, n, p))
+									cells.push_back(pv::Vector3DInt32(x, y, z));
+							}
+				} else {
 					for(int x = 0; x < n[0]; x++)
 						for(int y = 0; y < n[1]; y++)
 							for(int z = 0; z < n[2]; z++)
 								cells.push_back(o + pv::Vector3DInt32(x, y, z));
-				else
-					log_w(MODULE, "Entity %s's %s sets %i cells, past %i",
-							cs(itos(e.id)), cs(type), n[0] * n[1] * n[2],
-							MAX_SET_CELLS);
+				}
 			}
 			if(cells.empty()){
 				log_w(MODULE, "Entity %s's %s sets a voxel it does not own",
@@ -10104,11 +10401,14 @@ struct Module: public interface::Module, public Interface
 			why = "entity "+itos(e.id)+" has no place, so no voxels' box";
 			return false;
 		}
-		double w[3], wy = 0;
-		world_of(e, w, &wy);
-		if(std::fmod(wy, 90.0) != 0){
-			char deg[32];
-			snprintf(deg, sizeof deg, "%g", wy);
+		double w[3], wy, wp, wr;
+		Turn wq;
+		world_of(e, w, &wq);
+		wq.angles(wy, wp, wr);
+		if(std::fmod(wy, 90.0) != 0 || wp != 0 || wr != 0){
+			char deg[96];
+			snprintf(deg, sizeof deg, wp != 0 || wr != 0 ?
+					"yaw %g pitch %g roll %g" : "%g", wy, wp, wr);
 			why = "entity "+itos(e.id)+" is turned "+deg+": voxels go "
 					"by multiples of 90";
 			return false;
@@ -10199,15 +10499,22 @@ struct Module: public interface::Module, public Interface
 				const bool framed = (member(src.parent) &&
 						m_entities[src.parent].has_pos) ||
 						(frame && src.parent == frame);
-				double w[3], wy = src.yaw;
-				if(!framed)
-					world_of(src, w, &wy);
+				double w[3], wy = src.yaw, wp = src.pitch, wr = src.roll;
+				if(!framed){
+					Turn wq;
+					world_of(src, w, &wq);
+					wq.angles(wy, wp, wr);
+				}
 				json::Value pos = json::array();
 				for(int k = 0; k < 3; k++)
 					pos.append(framed ? src.pos[k] : w[k] - base[k]);
 				j.set("pos", pos);
 				if(wy != 0)
 					j.set("yaw", wy);
+				if(wp != 0)
+					j.set("pitch", wp);
+				if(wr != 0)
+					j.set("roll", wr);
 			}
 			json::Value comps = json::array();
 			for(const Instance &in : src.comps){
@@ -10307,6 +10614,7 @@ struct Module: public interface::Module, public Interface
 				e.set("pos", pos);
 				if(m.get("yaw").is_number())
 					e.set("yaw", norm_yaw(m.get("yaw").as_number()));
+				row_tilt(e, m);
 			} else if(pos_ok(m.get("pos"))){
 				json::Value pos = json::array();
 				double off[3];
@@ -10320,6 +10628,8 @@ struct Module: public interface::Module, public Interface
 						m.get("yaw").as_number() : 0) + 90.0 * (turn & 3);
 				if(m.get("yaw").is_number() || (turn & 3))
 					e.set("yaw", norm_yaw(yaw));
+				// (a yaw over the angles: the turn is round the world's y)
+				row_tilt(e, m);
 			}
 			json::Value comps = json::array();
 			const json::Value &cs_ = m.get("components");
@@ -10725,9 +11035,10 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// [KIT] stage 4e2: {"op": "move", "ids": [n...], "by": [dx, dy, dz],
-	// "turn": degrees}: entities moved together, one edit (an editor's drag
-	// of its selection), turned round y about their middle (the mean of
-	// their positions) and each by as much
+	// "turn": degrees, "axis": [x, y, z]}: entities moved together, one edit
+	// (an editor's drag of its selection), turned about their middle (the mean
+	// of their positions) round a line of the world (y unless axis says) and
+	// each by as much. The turn is by, not to: quick presses all count
 	bool move_group(const json::Value &j,
 			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
 			ss_ &why)
@@ -10746,26 +11057,45 @@ struct Module: public interface::Module, public Interface
 			why = "turn: a number of degrees";
 			return false;
 		}
+		double axis[3] = {0, 1, 0};
+		const json::Value &ax = j.get("axis");
+		if(!ax.is_undefined()){
+			double l = 0;
+			if(pos_ok(ax))
+				for(unsigned k = 0; k < 3; k++){
+					axis[k] = ax.at(k).as_number();
+					l += axis[k] * axis[k];
+				}
+			if(l < 1e-9){
+				why = "axis: three numbers, not all 0";
+				return false;
+			}
+			for(int k = 0; k < 3; k++)
+				axis[k] /= std::sqrt(l);
+		}
 		double d[3] = {0, 0, 0}, mid[3] = {0, 0, 0};
 		for(unsigned k = 0; by.is_array() && k < 3; k++)
 			d[k] = by.at(k).as_number();
 		// [KIT_NESTING] in the world (what is under them goes with them)
-		sm_<uint64_t, std::array<double, 4>> at;
+		struct At { double w[3]; Turn q; };
+		sm_<uint64_t, At> at;
 		for(uint64_t id : group){
-			std::array<double, 4> &w = at[id];
-			world_of(m_entities[id], w.data(), &w[3]);
+			At &w = at[id];
+			world_of(m_entities[id], w.w, &w.q);
 			for(int k = 0; k < 3; k++)
-				mid[k] += w[k] / group.size();
+				mid[k] += w.w[k] / group.size();
 		}
 		const double a = turn.is_number() ? turn.as_number() : 0;
-		// Urho3D's turn round y: +z towards +x
-		const double r = a * 3.14159265358979323846 / 180, c = std::cos(r), sn = std::sin(r);
+		const Turn tq = Turn::around(axis, a);
+		const bool only_turn = group.size() == 1 && d[0] == 0 && d[1] == 0 &&
+				d[2] == 0;
 		for(uint64_t id : group){
 			const Entity &e = m_entities[id];
-			const std::array<double, 4> &w = at[id];
-			const double rx = w[0] - mid[0], rz = w[2] - mid[2];
-			double np[3] = {mid[0] + rx * c + rz * sn + d[0], w[1] + d[1],
-					mid[2] - rx * sn + rz * c + d[2]};
+			const At &w = at[id];
+			double np[3] = {w.w[0] - mid[0], w.w[1] - mid[1], w.w[2] - mid[2]};
+			tq.apply(np);
+			for(int k = 0; k < 3; k++)
+				np[k] += mid[k] + d[k];
 			for(int k = 0; k < 3; k++)
 				if(std::fabs(np[k]) > MAX_COORD){
 					why = "entity "+itos(id)+" would go past "+
@@ -10776,10 +11106,18 @@ struct Module: public interface::Module, public Interface
 			for(int k = 0; k < 3; k++)
 				pos.append(grid(np[k]));
 			after.set("pos", pos);
-			after.set("yaw", norm_yaw(w[3] + a));
+			row_turn(after, tq * w.q);
 			localize(after);
 			if(a == 0)
-				after.set("yaw", e.yaw);
+				row_turn(after, e.yaw, e.pitch, e.roll);
+			// One turning where it is stays where it is in its frame (off the
+			// world's grid under a turned parent)
+			if(only_turn){
+				json::Value own = json::array();
+				for(int k = 0; k < 3; k++)
+					own.append(e.pos[k]);
+				after.set("pos", own);
+			}
 			change.push_back(std::make_pair(id, after));
 		}
 		ss_ list;
@@ -11803,6 +12141,8 @@ struct Module: public interface::Module, public Interface
 					pos.append(oe.pos[k]);
 				row.set("pos", pos);
 				row.set("yaw", oe.yaw);
+				row.set("pitch", oe.pitch);
+				row.set("roll", oe.roll);
 			}
 			row.set("built", bt);
 			json::Value cs_ = row.get("components");
@@ -11931,6 +12271,8 @@ struct Module: public interface::Module, public Interface
 			const json::Value &pos = c.second.get("pos");
 			bool moved = c.second.get("yaw").is_number() &&
 					c.second.get("yaw").as_number() != o.yaw;
+			moved = moved || row_num(c.second, "pitch") != o.pitch ||
+					row_num(c.second, "roll") != o.roll;
 			for(unsigned k = 0; pos_ok(pos) && k < 3; k++)
 				moved = moved || pos.at(k).as_number() != o.pos[k];
 			if(moved){
@@ -12040,8 +12382,10 @@ struct Module: public interface::Module, public Interface
 							"app's)";
 					continue;
 				}
-				double w[3], wy = 0;
-				world_of(n, w, &wy);
+				double w[3];
+				Turn wq;
+				world_of(n, w, &wq);
+				const double wy = wq.yaw();
 				m_paste.vox = pf.get("voxels");
 				for(int k = 0; k < 3; k++)
 					m_paste.base[k] = (int)std::floor(w[k] + 0.5);
@@ -12231,7 +12575,7 @@ struct Module: public interface::Module, public Interface
 		const bool landed = !fall || fall_to(e, w);
 		if(landed){
 			if(!m_seat_home.count(id))
-				m_seat_home[id] = {{e.pos[0], e.pos[1], e.pos[2], e.yaw}};
+				m_seat_home[id] = home_of(e);
 			double l[3];
 			to_local(e.parent, w, l);
 			for(int k = 0; k < 3; k++)
@@ -12399,7 +12743,7 @@ struct Module: public interface::Module, public Interface
 		at.player = pid;
 		at.bone = bone;
 		if(!m_seat_home.count(e.id))
-			m_seat_home[e.id] = {{e.pos[0], e.pos[1], e.pos[2], e.yaw}};
+			m_seat_home[e.id] = home_of(e);
 		m_attached[e.id] = at;
 		log_i(MODULE, "Entity %s attached to %s (%s, %g, %g, %g)",
 				cs(itos(e.id)), cs(pi->second.name), bone.empty() ? "feet" :
@@ -13073,10 +13417,14 @@ struct Module: public interface::Module, public Interface
 					continue;
 				int n[3];
 				region_extent(in, t, n);
-				const pv::Vector3DInt32 o = voxel_p(e);
-				if(x < o.getX() || x >= o.getX() + n[0] || y < o.getY() ||
-						y >= o.getY() + n[1] || z < o.getZ() ||
-						z >= o.getZ() + n[2])
+				// simplified: a turned region decides by the cell's middle, so
+				// its edge has steps of a cell for a player too (the zones use
+				// their place); allows() taking the point is the upgrade
+				double o[3];
+				Turn q;
+				box_frame(e, o, q);
+				const double cell[3] = {(double)x, (double)y, (double)z};
+				if(!box_holds(o, q, n, cell))
 					continue;
 				ss_ sc;
 				scene_of(e, &sc);
@@ -13685,7 +14033,9 @@ struct Module: public interface::Module, public Interface
 				scene_of(e, &scene);
 				int n[3];
 				extent(in.params.get(t.zone), n);
-				const pv::Vector3DInt32 o = voxel_p(e);
+				double o[3];
+				Turn q;
+				box_frame(e, o, q);
 				// Who is in it, by their entity's id; those arriving on it
 				// by a teleport enter it silently
 				std::set<ss_> now, silent;
@@ -13693,12 +14043,11 @@ struct Module: public interface::Module, public Interface
 					const Peer &peer = pp.second;
 					if(peer.scene != scene || !peer.player)
 						continue;
-					bool inside = true;
-					for(int k = 0; k < 3; k++){
-						const double c = std::floor(peer.pos[k] + 0.5) -
-								(k == 0 ? o.getX() : k == 1 ? o.getY() : o.getZ());
-						inside = inside && c >= 0 && c < n[k];
-					}
+					const bool inside = box_holds(o, q, n, peer.pos);
+					if(inside != (in.inside.count(itos(peer.player)) > 0))
+						log_i(MODULE, "Entity %s: %s %s its zone at %.3f,%.3f,%.3f",
+								cs(itos(e.id)), cs(peer.name), inside ? "enters" :
+								"leaves", peer.pos[0], peer.pos[1], peer.pos[2]);
 					if(inside)
 						now.insert(itos(peer.player));
 					auto ar = m_arrive.find(peer.name);
@@ -14025,7 +14374,7 @@ struct Module: public interface::Module, public Interface
 	std::map<size_t, Body> m_bodies;
 	sm_<size_t, ss_> m_controls_sent;
 	// Vehicles moved in play, where they were: back at Stop
-	std::map<uint64_t, std::array<double, 4>> m_seat_home;
+	std::map<uint64_t, std::array<double, 6>> m_seat_home;
 	// [KIT_CARRY_ATTACH] Entities on players (c:attach): the player, the
 	// bone ("" the feet, "head", "body", "hand"), the offset (m, in the
 	// body's turn), the node told and when it was last placed
@@ -14202,9 +14551,10 @@ struct Module: public interface::Module, public Interface
 			if(psi == m_host.scenes.end() || f.second.ref != psi->second)
 				continue;
 			json::Value r = json::array();
-			r.append(f.second.model);
-			for(double v : f.second.place)
-				r.append(v);
+			r.append(f.second.boxes_name.empty() ? f.second.model :
+					f.second.boxes_name);
+			for(int k = 0; k < 4; k++)
+				r.append(f.second.place[k]);
 			objs.append(r);
 		}
 		if(objs.size())
@@ -14242,14 +14592,16 @@ struct Module: public interface::Module, public Interface
 				auto psi = m_host.scenes.find(p.second.scene);
 				std::set<ss_> &got = m_boxes_sent[p.first];
 				for(auto &f : m_free_objects){
+					const ss_ &name = f.second.boxes_name.empty() ? f.second.model :
+							f.second.boxes_name;
 					if(psi == m_host.scenes.end() || f.second.ref != psi->second ||
-							!got.insert(f.second.model).second)
+							!got.insert(name).second)
 						continue;
 					json::Value b = json::array();
-					for(float v : m_free_boxes[f.second.model])
+					for(float v : free_body_boxes(f.second))
 						b.append((double)v);
 					inetwork->send(p.first, "kit:object_boxes",
-							f.second.model+" "+b.stringify());
+							name+" "+b.stringify());
 				}
 				inetwork->send(p.first, "kit:controls", s);
 			});
@@ -14274,13 +14626,21 @@ struct Module: public interface::Module, public Interface
 			if(it != m_entities.end()){
 				Entity &e = it->second;
 				// [KIT_NESTING] the body's place is the world's
-				double w[3], wy;
-				world_of(e, w, &wy);
+				// simplified: a vehicle stays level in the world under a tilted
+				// parent; a pose of its own comes with 4r5's movement
+				double w[3];
+				Turn wq;
+				world_of(e, w, &wq);
 				w[0] = v[0], w[1] = v[1] + 0.5, w[2] = v[2];
 				const json::Value &yaw = b.state.get("yaw");
 				if(yaw.is_number() && std::isfinite(yaw.as_number()))
-					wy = yaw.as_number();
-				to_local(e.parent, w, e.pos, wy, &e.yaw);
+					wq = Turn::of(yaw.as_number());
+				Turn lq;
+				to_local(e.parent, w, e.pos, &wq, &lq);
+				lq.angles(e.yaw, e.pitch, e.roll);
+				e.yaw = norm_yaw(e.yaw);
+				e.pitch = norm_yaw(e.pitch);
+				e.roll = norm_yaw(e.roll);
 				place_nodes(e.id);
 			}
 		}
@@ -14561,8 +14921,9 @@ struct Module: public interface::Module, public Interface
 				continue;
 			// [KIT_NESTING] where it is in the world; what rides on the
 			// seat held none either (simplified: its own children)
-			double w[3], wy;
-			world_of(e, w, &wy);
+			double w[3];
+			Turn wq;
+			world_of(e, w, &wq);
 			if((b.seat && e.parent == b.seat) ||
 					std::fabs(w[0] - pos[0]) > R + 8 ||
 					std::fabs(w[2] - pos[2]) > R + 8 ||
@@ -14586,7 +14947,15 @@ struct Module: public interface::Module, public Interface
 					o += ',';
 				}
 				o += "},";
+				double wy, wp, wr;
+				wq.angles(wy, wp, wr);
 				lua_lit(json::Value(wy), o);
+				if(wp != 0 || wr != 0){
+					o += ",";
+					lua_lit(json::Value(wp), o);
+					o += ",";
+					lua_lit(json::Value(wr), o);
+				}
 				o += "},";
 				break;
 			}
@@ -14597,11 +14966,11 @@ struct Module: public interface::Module, public Interface
 		for(auto &f : m_free_objects){
 			if(f.second.ref != scene)
 				continue;
-			const std::array<double, 4> &wp = f.second.place;
+			const std::array<double, 6> &wp = f.second.place;
 			double lx = pos[0] - wp[0], lz = pos[2] - wp[2];
 			turn_xz(-wp[3], lx, lz);
 			const double m = R + 2;
-			const sv_<float> &bx = m_free_boxes[f.second.model];
+			const sv_<float> &bx = free_body_boxes(f.second);
 			ss_ list;
 			for(size_t i = 0; i + 6 <= bx.size(); i += 6){
 				if(lx + m < bx[i] || lx - m > bx[i + 3] ||
@@ -14814,16 +15183,17 @@ struct Module: public interface::Module, public Interface
 		if(b.seat)
 			unseat(peer, b, false);
 		if(!m_seat_home.count(id))
-			m_seat_home[id] = {{e.pos[0], e.pos[1], e.pos[2], e.yaw}};
+			m_seat_home[id] = home_of(e);
 		b.seat = id;
-		double w[3], wy;
-		world_of(e, w, &wy);
+		double w[3];
+		Turn wq;
+		world_of(e, w, &wq);
 		json::Value st = json::object(), pos = json::array();
 		pos.append(w[0]);
 		pos.append(w[1] - 0.5);
 		pos.append(w[2]);
 		st.set("pos", pos);
-		st.set("yaw", wy);
+		st.set("yaw", wq.yaw());
 		log_i(MODULE, "%s takes the seat of entity %s", cs(m_peers[peer].name),
 				cs(itos(id)));
 		put_body(peer, b, 0, 0, 0, 0, &st);
@@ -14841,9 +15211,10 @@ struct Module: public interface::Module, public Interface
 		if(!put || it == m_entities.end())
 			return;
 		const Entity &e = it->second;
-		double w[3], wy;
-		world_of(e, w, &wy);
-		const double a = wy * 3.14159265358979323846 / 180;
+		double w[3];
+		Turn wq;
+		world_of(e, w, &wq);
+		const double a = wq.yaw() * 3.14159265358979323846 / 180;
 		double r = 1;
 		for(const Instance &in : e.comps)
 			if(is_movement(in.type))
@@ -14887,9 +15258,7 @@ struct Module: public interface::Module, public Interface
 			if(it == m_entities.end())
 				continue;
 			Entity &e = it->second;
-			for(int k = 0; k < 3; k++)
-				e.pos[k] = h.second[k];
-			e.yaw = h.second[3];
+			home_put(e, h.second);
 			place_nodes(e.id);
 		}
 		m_seat_home.clear();
@@ -16743,10 +17112,11 @@ struct Module: public interface::Module, public Interface
 			m_server->emit_event("kit:spawn_player", new SpawnPlayer(peer));
 			return;
 		}
-		double w[3], wy;
-		world_of(*at, w, &wy);
+		double w[3];
+		Turn wq;
+		world_of(*at, w, &wq);
 		log_i(MODULE, "%s respawns at entity %s", cs(who), cs(itos(at->id)));
-		to_scene(peer, "", w[0], w[1], w[2], wy);
+		to_scene(peer, "", w[0], w[1], w[2], wq.yaw());
 		// [KIT_PARTICLES] simplified: not at the app's own spawn, above, whose
 		// place the app decides later
 		json::Value ev = json::object();
@@ -21271,16 +21641,15 @@ struct Module: public interface::Module, public Interface
 		json::Value after = entity_json(*e);
 		after.set("parent", (int64_t)to);
 		if(e->has_pos){
-			double w[3], wy;
-			world_of(*e, w, &wy);
+			double w[3];
+			Turn wq;
+			world_of(*e, w, &wq);
 			json::Value pos = json::array();
 			for(int k = 0; k < 3; k++)
 				pos.append(grid(w[k]));
 			after.set("pos", pos);
-			after.set("yaw", wy);
+			row_turn(after, wq);
 			localize(after);
-			if(!parent)
-				after.set("yaw", norm_yaw(wy));
 		}
 		change.push_back(std::make_pair(e->id, after));
 		what = "put "+itos(e->id)+" under "+(parent ? itos(parent) :
@@ -21437,31 +21806,44 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			const json::Value &yaw = j.get("yaw");
-			if(!yaw.is_undefined() && (!yaw.is_number() ||
-					!std::isfinite(yaw.as_number()))){
-				why = "yaw: a number of degrees";
-				return false;
+			const char *angles[] = {"yaw", "pitch", "roll"};
+			bool turned = false;
+			for(const char *k : angles){
+				const json::Value &v = j.get(k);
+				if(!v.is_undefined() && (!v.is_number() ||
+						!std::isfinite(v.as_number()))){
+					why = ss_(k)+": a number of degrees";
+					return false;
+				}
+				turned = turned || !v.is_undefined();
 			}
 			json::Value after = entity_json(*e);
 			json::Value pos = json::array();
 			for(unsigned k = 0; k < 3; k++)
 				pos.append(grid(j.get("pos").at(k).as_number()));
 			after.set("pos", pos);
-			// [KIT_NESTING] pos and yaw the world's: its parent's frame's
-			// kept (what is under it goes with it)
-			double wy = e->yaw;
-			if(!yaw.is_number()){
-				double w[3];
-				world_of(*e, w, &wy);
-			}
-			after.set("yaw", yaw.is_number() ? norm_yaw(yaw.as_number()) : wy);
+			// [KIT_NESTING] pos and turn the world's: its parent's frame's
+			// kept (what is under it goes with it). An angle left out: as it
+			// is in the world
+			double w[3], wa[3];
+			Turn wq;
+			world_of(*e, w, &wq);
+			wq.angles(wa[0], wa[1], wa[2]);
+			for(int k = 0; k < 3; k++)
+				if(j.get(angles[k]).is_number())
+					wa[k] = j.get(angles[k]).as_number();
+			row_turn(after, wa[0], wa[1], wa[2]);
 			localize(after);
-			if(!yaw.is_number())
-				after.set("yaw", e->yaw);
+			if(!turned)
+				row_turn(after, e->yaw, e->pitch, e->roll);
 			change.push_back(std::make_pair(e->id, after));
 			what = "moved "+itos(e->id)+" to "+pos.stringify()+
 					(yaw.is_number() ? ", turned to "+
 					json::Value(norm_yaw(yaw.as_number())).stringify() : ss_());
+			for(const char *k : {"pitch", "roll"})
+				if(j.get(k).is_number())
+					what += ", "+ss_(k)+" "+json::Value(
+							norm_yaw(j.get(k).as_number())).stringify();
 			return true;
 		}
 		// [KIT_SIGNALS_VIEW] {"op": "rename", "id", "name"}: the name a builder
@@ -21789,7 +22171,9 @@ struct Module: public interface::Module, public Interface
 		if(had)
 			for(int k = 0; k < 3; k++)
 				if(std::fabs(n.pos[k] - it->second.pos[k]) > 1e-6 ||
-						std::fabs(n.yaw - it->second.yaw) > 1e-6)
+						std::fabs(n.yaw - it->second.yaw) > 1e-6 ||
+						std::fabs(n.pitch - it->second.pitch) > 1e-6 ||
+						std::fabs(n.roll - it->second.roll) > 1e-6)
 					m_seat_home.erase(id);
 		sv_<size_t> fresh;
 		// Running, an instance whose parameters changed is told which, and
@@ -21932,7 +22316,7 @@ struct Module: public interface::Module, public Interface
 		json::Value costs = json::object();
 		std::map<size_t, Body> bodies;
 		sm_<size_t, ss_> controls_sent;
-		std::map<uint64_t, std::array<double, 4>> seat_home;
+		std::map<uint64_t, std::array<double, 6>> seat_home;
 		std::map<uint64_t, Attach> attached;
 		std::set<ss_> action_names;
 		ss_ actions_sent;

@@ -38,8 +38,13 @@ namespace interface
 // moves and turns with it, and while its parent's look slides
 // (kit/mover's when.offset) it is carried there too. Zones, regions,
 // grants, owned voxels, use ranges, looks, c.pos and c.yaw are in the
-// world through the parents (zones and regions stay boxes of cells, not
-// turned). Its node is its scene's child at its place in the world (the
+// world through the parents. [KIT_FREE_ROTATION] A row has yaw, pitch and roll
+// (pitch and roll absent at 0), its frame the parents' composed. A zone and a
+// region turn with the parents: their cells are those whose middle is in the
+// turned box, c:region_at and the client's the same way. c.yaw is the yaw of
+// that turn; a walker stands on a tilted free object by its yaw-only stairs
+// (kit.cpp's tilted_boxes). Grants and owned voxels stay boxes of cells, stamped
+// copies at 90 degree turns. Its node is its scene's child at its place in the world (the
 // var "kit_parent": the entity it is under, 0 none). A positioned
 // entity's parent is a scene or a positioned entity; a loop, a missing
 // parent or one with no position is refused, in an edit and in a save.
@@ -335,7 +340,8 @@ namespace interface
 //   override) and a member moved on it kept, a member deleted from it back.
 //   Voxels never follow: a copy's are world cells, written only at its place,
 //   by the op "stamp" (the editor's Refresh voxels, and after a move). The
-//   root's turn is its yaw; a stamp takes multiples of 90. A copy made in
+//   root's turn is its yaw; a stamp takes multiples of 90 of it and refuses a
+//   pitch or a roll ([KIT_FREE_ROTATION]: only a free copy tilts). A copy made in
 //   play (c:spawn) has no root, its members remember the prefab
 //   ({"prefab": {"of", "version", "member", "copy"}}).
 //   A parameter type "prefab"
@@ -603,9 +609,16 @@ namespace interface
 //       "clipboard" {entities, size, at} says it
 //   {"op": "move", "id": n, "pos": [x, y, z], "yaw": degrees}  -- yaw
 //       optional ([KIT] stage 4e2: an entity's turn round y, 0...360, its
-//       look turned with it; zones and grants stay boxes of cells)
-//   {"op": "move", "ids": [n...], "by": [dx, dy, dz], "turn": degrees}
-//       -- entities moved together, one edit, turned about their middle
+//       look turned with it). [KIT_FREE_ROTATION] "pitch" and "roll" as well:
+//       Quaternion(pitch, yaw, roll), roll first and yaw last; each one left
+//       out keeps its value in the world. Zones and regions turn with it;
+//       grants stay boxes of cells
+//   {"op": "move", "ids": [n...], "by": [dx, dy, dz], "turn": degrees,
+//       "axis": [x, y, z]}
+//       -- entities moved together, one edit, turned about their middle;
+//       [KIT_FREE_ROTATION] each by a turn relative to what it has when this
+//       arrives, so quick presses add up. With "axis" (the world's; y when
+//       absent) the turn is about that; one alone keeps its position
 //   {"op": "duplicate", "ids": [n...], "by": [dx, dy, dz]}  -- a copy of
 //       them that far off, their links among them the copies'
 //   [KIT_NESTING] Positions and yaws in edits are the world's (a
