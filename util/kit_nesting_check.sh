@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-03)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/types/mover.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/module.lua apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/types/mover.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/module.lua apps/workbench/**
 # [KIT_NESTING] (kit_plan 4p) Child entities, on a fresh Workbench save:
 #   1. A kit/mover M (4, offset 4 cells along its x) at (10, 1, 10)
 #      turned 90; under it a sign S (5) placed at (11, 1, 10) and a button

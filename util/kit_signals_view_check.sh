@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~25 s (2026-11-06)
-# covers: builtin/kit/client_lua/signals.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/input.lua
+# covers: builtin/kit/client_lua/signals.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/input.lua
 # [KIT_SIGNALS_VIEW] The editor's Signals view on Workbench. kitboss (the
 # admin, 1024x700), a kit/flag with links to three kit/ui_bars and from a
 # kit/timer:

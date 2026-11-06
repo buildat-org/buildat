@@ -3,7 +3,7 @@
 # tier: full
 # cost: ~1 min, ~2 min with a cold module cache (2026-10-30)
 # covers: apps/workbench/** builtin/kit/** extensions/pause_menu/** builtin/world_menu/**
-# drives: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua
+# drives: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua
 # [KIT] stages 4 and 4b, Workbench and Kit's starter set (kit/*), on
 # scripted clients, the server's game clock at CHECK_RATE (the timer's
 # seconds are the game's):

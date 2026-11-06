@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-06)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/client_lua/editor.lua builtin/kit/client_lua/prefabs.lua builtin/kit/types/prefab_copy.lua apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/prefabs.lua builtin/kit/types/prefab_copy.lua apps/workbench/**
 # [KIT_PREFAB_ROOT] A placed prefab's root, by the editor's clicks. A fresh save
 # on Workbench, the admin Ended, a World (flat grassland); prefab kitboss/hut:
 # a gate, a button linked to it, two voxels in a 2x2x2 box.

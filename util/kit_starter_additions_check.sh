@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-01)
-# covers: builtin/kit/kit.cpp builtin/kit/types/logic.lua builtin/kit/types/sign.lua builtin/kit/types/mover.lua builtin/kit/types/pressure_plate.prefab.json builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/move.lua
+# covers: builtin/kit/kit.cpp builtin/kit/types/logic.lua builtin/kit/types/sign.lua builtin/kit/types/mover.lua builtin/kit/types/pressure_plate.prefab.json builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/move.lua
 # [KIT] stage 4l's starter additions on apps/sample_kit, the server's
 # admin driving Kit's editor (one server, one client). Placed: a kit/logic
 # L (17, a latch), a kit/sign S (18, "Out: {value}, ..." long enough to wrap), a kit/mover M (19,

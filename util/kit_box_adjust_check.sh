@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~30 s (2026-11-02)
-# covers: builtin/kit/client_lua/editor.lua builtin/kit/kit.cpp apps/workbench/**
+# covers: builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/kit.cpp apps/workbench/**
 # [KIT_BOX_ADJUST] The Box tool's box adjusted after its two corners. A
 # fresh save on Workbench, the admin Ended, a flat World, a sign placed
 # and selected first (the selection and the box copy together):

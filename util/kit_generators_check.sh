@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-03)
-# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/lights_out.lua builtin/kit/types/lights_out_tile.lua builtin/kit/client_lua/editor.lua apps/sample_kit/main/kit/gen_*.lua
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/lights_out.lua builtin/kit/types/lights_out_tile.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua apps/sample_kit/main/kit/gen_*.lua
 # [KIT_GENERATORS] (kit_plan 4q) Generators, in apps/sample_kit; kitboss
 # builds in Kit's editor, Ended:
 #   1. A kit/lights_out L (17) placed at (0, 1, -3): its build, 25 tiles

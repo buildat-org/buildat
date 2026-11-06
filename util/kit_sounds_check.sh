@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-11-04)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/world.h builtin/kit/box/box.c builtin/kit/sounds.json builtin/kit/materials.json builtin/kit/types/sound.lua builtin/kit/types/door.lua builtin/kit/types/button.lua builtin/kit/types/pickup.lua builtin/kit/types/equipment.lua builtin/kit/types/*.item.json builtin/kit/client_lua/sounds.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/hands.lua builtin/kit/client_lua/module.lua extensions/blip/init.lua apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/world.h builtin/kit/box/box.c builtin/kit/sounds.json builtin/kit/materials.json builtin/kit/types/sound.lua builtin/kit/types/door.lua builtin/kit/types/button.lua builtin/kit/types/pickup.lua builtin/kit/types/equipment.lua builtin/kit/types/*.item.json builtin/kit/client_lua/sounds.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/hands.lua builtin/kit/client_lua/module.lua extensions/blip/init.lua apps/workbench/**
 # [KIT_SOUNDS] The project's sounds on a fresh Workbench save:
 #   1. the admin (kitboss), in edit mode: the Sounds tab lists Kit's 9;
 #      "New sound..." names my_sound and opens blip's designer, its laser

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-10-31)
-# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/voxel_replace.lua builtin/kit/types/voxel_states.lua builtin/kit/client_lua/editor.lua
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/voxel_replace.lua builtin/kit/types/voxel_states.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua
 # [KIT_VOXEL_STATES] Kit's kit/voxel_replace and kit/voxel_states on
 # apps/sample_kit, the server's admin driving Kit's editor (one server,
 # one client). The admin places (kit:edit packets, as the editor sends

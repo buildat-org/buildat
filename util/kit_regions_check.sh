@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-01)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/region.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua apps/sample_kit/main/main.cpp apps/sample_kit/main/kit/guard.lua apps/workbench/main/main.cpp apps/workbench/main/client_lua/init.lua
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/region.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua apps/sample_kit/main/main.cpp apps/sample_kit/main/kit/guard.lua apps/workbench/main/main.cpp apps/workbench/main/client_lua/init.lua
 # [KIT] stage 4j's regions with rules, by a player without edit rights
 # (kitbob) beside the admin (kitboss, who builds them in Kit's editor):
 #   1. apps/sample_kit (its "p" key digs the pillar at (6, 1, 2), asking
