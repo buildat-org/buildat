@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~25 s (2026-11-06)
-# covers: builtin/kit/client_lua/signals.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/input.lua
+# covers: builtin/kit/client_lua/signals.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/input.lua builtin/kit/types/*.lua
 # [KIT_SIGNALS_VIEW] The editor's Signals view on Workbench. kitboss (the
 # admin, 1024x700), a kit/flag with links to three kit/ui_bars and from a
 # kit/timer:
@@ -43,10 +43,65 @@
 # Screenshots kept with KEEP_TMP=1: $t/parent_*.png, $t/popup.png, $t/palette_menu.png, $t/narrow_popup.png, $t/small_popup.png, $t/small_menu.png, $t/menu.png, $t/refit.png, $t/signals.png, $t/added.png, $t/hud.png,
 # $t/game_wide.png, $t/wide.png, $t/narrow_*.png; look at them.
 #   util/kit_signals_view_check.sh
+#  13. [KIT_SIGNALS_DOCS] (the "docs" mode, run at the end too) Every stock type's
+#      and signal's description; the signals not linked with their types, a link
+#      taking one away and its removal bringing it back, an entity of two components;
+#      the descriptions shown and hidden by the button, past a selection and into
+#      the next session; the whole text on hover and a finger held; a row pressed
+#      opening the Add link form either way; narrow touch inside the column's width.
 #   util/kit_signals_view_check.sh web    item 12 in headless Chrome, mouse and finger
+#   util/kit_signals_view_check.sh docs   item 13 alone; screenshots $t/docs_*.png
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
+# [KIT_SIGNALS_DOCS] Every stock type says what it is and what each signal does
+python3 -I - "$here/builtin/kit/types" <<'PY' || fail "a stock type's about"
+import glob, os, re, sys
+def block(src, key):
+    m = re.search(r"^\t%s = \{" % key, src, re.M)
+    if not m:
+        return None
+    i, d = m.end(), 1
+    while d:
+        d += {"{": 1, "}": -1}.get(src[i], 0)
+        i += 1
+    return src[m.end():i - 1]
+def pairs(text):
+    return dict((a or b, c) for a, b, c in re.findall(
+        r'(?:\["(\w+)"\]|(\w+))\s*=\s*"((?:[^"\\]|\\.)*)"', text or ""))
+def sub(text, key):
+    m = re.search(r"^\t\t%s = \{(.*?)^\t\t\}," % key, text or "", re.M | re.S)
+    return pairs(m[1]) if m else {}
+bad, n = [], 0
+for f in sorted(glob.glob(sys.argv[1] + "/*.lua")):
+    if f.endswith(".client.lua"):
+        continue
+    name = os.path.basename(f)[:-4]
+    src = open(f).read()
+    about = block(src, "about")
+    if about is None or not re.search(r'^\t\twhat = "', about, re.M):
+        bad.append(name + ": no about.what")
+    for key in ("inputs", "outputs"):
+        said = sub(about, key)
+        decl = pairs(block(src, key))
+        n += len(decl)
+        for sig, ty in decl.items():
+            t = said.get(sig)
+            if not t:
+                bad.append("%s: %s %s has no description" % (name, key, sig))
+                continue
+            first = re.match(r"(.*?[.!?])(\s|$)", t)
+            if not first or len(first[1]) > 90 or len(t) > 110:
+                bad.append("%s: %s %s: a short sentence, a line or two in all: %s" % (name, key, sig, t))
+            if ty != "none" and "Value: " not in t:
+                bad.append("%s: %s %s is %s: its text says its value: %s" % (name, key, sig, ty, t))
+        for sig in said:
+            if sig not in decl:
+                bad.append("%s: %s %s described, not declared" % (name, key, sig))
+assert n > 150, n
+assert not bad, "\n".join(bad)
+print("ok:", n, "stock signals described")
+PY
 if [ "${1:-}" = web ]; then
 	# [KIT_SIGNALS_PARENT_BUTTONS] Item 12 in the web client, headless Chrome: by
 	# the mouse at 1200x800, then by a finger at 1000x500
@@ -159,6 +214,7 @@ if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
 check_tmp kit_signals_view; t=$CHECK_TMP
+DOCS=${1:-}
 cd "$here/Build"
 export BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1
 
@@ -201,6 +257,255 @@ link() # <from> <output> <to> <input>
 {
 	edit "{\"op\": \"link\", \"id\": $1, \"comp\": 0, \"output\": \"$2\", \"to\": $3, \"input\": \"$4\"}"
 }
+want() # <log> <text>...
+{
+	local log=$1 w
+	shift
+	for w in "$@"; do
+		grep -aqF -- "$w" "$log" || fail "no \"$w\" in $log"
+	done
+}
+wantp() # <log> <perl regex>
+{
+	grep -aqP -- "$2" "$1" || fail "no /$2/ in $1"
+}
+kit() # <log>: Kit's own lines, not the drive's
+{
+	grep -a " I kit " "$1"
+}
+# 13. [KIT_SIGNALS_DOCS]
+join='wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log_any 10000 kit editor: edit mode on
+frames 5'
+if [ "$DOCS" = docs ]; then
+	{
+		cat <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 30000 server window: the page ntfy
+frames 3
+click Button "Don't add"
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log_any 10000 kit editor: edit mode on
+frames 5
+EOF
+		place kit/lever; LEVER=$id
+		place kit/counter; COUNTER=$id
+		place kit/gate; GATE=$id
+		place kit/door; DOOR=$id
+		place kit/timer; TIMER=$id
+		place kit/part; NONE=$id
+		link $LEVER on $COUNTER count
+		printf 'sync 3000\nquit\n'
+	} > "$t/kitboss.cmds"
+	serve "$t/srv.log"
+	wait_for_log "$t/srv.log" "setup code [A-Z0-9]+" 30
+	code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv.log" | head -1)
+	[ -n "$code" ] || fail "no setup code ($t/srv.log)"
+	BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code client kitboss 1024x700 -u 1
+	stop_server
+	# Two components on one entity: no edit makes that, a save may hold it. A door
+	# and a lever: "toggle" in both, "on" and "off" of the lever alone
+	python3 -I - "$t/user/apps/workbench/saves/world/save.sqlite" "$DOOR" <<'PY' || fail "the save"
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+a = json.loads(db.execute("SELECT value FROM store WHERE store = 'kit' AND key = 'authored'").fetchone()[0])
+e = next(e for e in a["entities"] if e["id"] == int(sys.argv[2]))
+e["components"].append({"type": "kit/lever", "version": 2, "params": {}, "links": []})
+db.execute("UPDATE store SET value = ? WHERE store = 'kit' AND key = 'authored'", (json.dumps(a),))
+db.commit()
+PY
+	serve "$t/srv2.log"
+	{
+		echo "$join"
+		cat <<EOF
+event kit_select $LEVER
+frames 3
+keypress F5
+wait_log 5000 kit editor: signals: $LEVER not linked:
+frames 5
+screenshot @T@/docs_wide.png
+click Button "row out 0 off"
+wait_log 5000 kit editor: signals: add link: out of $LEVER by its off
+frames 3
+screenshot @T@/docs_form_out.png
+click DropDownList "signals Target"
+frames 3
+click Text "◆ $COUNTER counter"
+wait_log 5000 kit editor: signals: add link: target $COUNTER
+frames 3
+click DropDownList "signals Input"
+frames 3
+click Text "count*"
+frames 3
+click Button "Link"
+wait_log 10000 kit editor: signals: linked $LEVER.off -> $COUNTER.count
+wait_log 10000 kit editor: state:
+frames 3
+click Button "Done"
+frames 3
+screenshot @T@/docs_linked.png
+click Button "signal $LEVER.off $COUNTER.count"
+wait_log 5000 kit editor: signals: the menu of $LEVER.off $COUNTER.count
+frames 3
+click Button "Delete"
+wait_log 10000 kit editor: signals: unlinked $LEVER.off
+wait_log 10000 kit editor: state:
+frames 3
+click Button "row in toggle"
+wait_log 5000 kit editor: signals: add link: into $LEVER by its toggle
+frames 3
+screenshot @T@/docs_form_in.png
+click DropDownList "signals From"
+frames 3
+click Text "◆ $TIMER timer"
+wait_log 5000 kit editor: signals: add link: from $TIMER
+frames 3
+click Button "Link"
+wait_log 10000 kit editor: signals: linked $TIMER.done -> $LEVER.toggle
+EOF
+	} > "$t/kitdocs.cmds"
+	{
+		cat <<EOF
+wait_log 10000 kit editor: state:
+frames 3
+click Button "Done"
+frames 3
+EOF
+		edit "{\"op\": \"unlink\", \"id\": $TIMER, \"comp\": 0, \"output\": \"done\", \"to\": $LEVER, \"input\": \"toggle\"}"
+		cat <<EOF
+frames 3
+mouse_pos 225 279
+wait_log 3000 kit editor: signals: the text of row in off
+frames 2
+screenshot @T@/docs_hover.png
+mouse_pos 316 430
+wait_log 3000 kit editor: signals: the text of signal $LEVER.on $COUNTER.count
+frames 2
+screenshot @T@/docs_hover_link.png
+mouse_pos 5 5
+frames 3
+click Button "Hide descriptions"
+wait_log 5000 kit editor: signals: descriptions hidden
+frames 3
+screenshot @T@/docs_hidden.png
+event kit_select $COUNTER
+wait_log_any 5000 kit editor: signals: rows of $COUNTER: 0 descriptions
+frames 3
+event kit_select $DOOR
+wait_log_any 5000 kit editor: signals: rows of $DOOR: 0 descriptions
+frames 3
+screenshot @T@/docs_two_hidden.png
+delay 1100
+sync 3000
+quit
+EOF
+	} >> "$t/kitdocs.cmds"
+	BUILDAT_JOIN_NAME=kitboss client kitdocs 1024x700 -u 1
+	l=$t/kitdocs.log
+	python3 -I - "$l" "$LEVER" "$COUNTER" "$TIMER" "$DOOR" <<'PY' || fail "the signals not linked ($l)"
+import re, sys
+log = [x for x in open(sys.argv[1], errors="replace") if " I kit " in x]
+lever, counter, timer, door = sys.argv[2:]
+def at(w, frm=0):
+    return next((i for i in range(frm, len(log)) if w in log[i]), None)
+# Not linked with their types; a link takes one away, its removal brings it back
+free = "signals: %s not linked: in off none, on none, toggle none; out off none" % lever
+a = at(free)
+assert a is not None, free
+b = at("signals: %s not linked: in off none, on none, toggle none; out \n" % lever, a)
+assert b is not None, "off linked"
+c = at(free, b)
+assert c is not None, "off unlinked"
+d = at("signals: %s not linked: in off none, on none; out off none" % lever, c)
+assert d is not None, "toggle linked into it"
+e = at(free, d)
+assert e is not None, "toggle unlinked"
+# Its neighbour: what is linked left out, inputs by name
+assert at("signals: %s not linked: in add number, reset none; out changed number, reached number" % counter) is not None, "the counter"
+# Two components: the door's and the lever's outputs, an input they share once
+m = [x for x in log if "signals: %s not linked: " % door in x][-1]
+ins, outs = re.search(r"in (.*); out (.*)$", m).groups()
+ins, outs = ins.split(", "), outs.split(", ")
+assert ins.count("toggle none") == 1, m
+assert "off none" in ins and "on none" in ins, m
+assert "on none" in outs and "off none" in outs, m
+# The toggle: on, off at the next selections, off in the view's own rebuild
+hide = at("signals: descriptions hidden")
+assert hide is not None and at("rows of %s: 0 descriptions" % lever, hide) is not None
+assert at("rows of %s: 0 descriptions" % door, hide) is not None
+assert at("rows of %s: 0 descriptions" % lever) == at("rows of %s: 0 descriptions" % lever, hide)
+print("ok: signals not linked listed with their types, a link taking one away and its removal back, two components; descriptions hidden past selections")
+PY
+	want "$t/srv2.log" "linked $LEVER.off -> $COUNTER.count" "unlinked $LEVER.off -> $COUNTER.count" \
+		"linked $TIMER.done -> $LEVER.toggle"
+	want "$l" "add link: out of $LEVER by its off" "add link: into $LEVER by its toggle" \
+		"signals: the text of row in off at " "signals: the text of signal $LEVER.on $COUNTER.count at "
+	wantp "$l" "the text of row in off at .*: Sets it off"
+	wantp "$l" "the text of signal $LEVER.on $COUNTER.count at .*: It flipped on"
+	echo "ok: a row opens the Add link form either way; the whole text on hover, of a row and of a link's signal"
+	grep -a "signals: a sideways bar: true" "$l" && fail "a sideways bar in 1024x700 ($l)"
+	mv "$l" "$t/kitdocs1.log"
+	# The next session, its button's choice remembered; a finger on a narrow window
+	cat > "$t/kitdocs.cmds" <<EOF
+$join
+event kit_select $LEVER
+frames 3
+keypress F5
+wait_log_any 5000 kit editor: signals: rows of $LEVER: 0 descriptions
+frames 5
+screenshot @T@/docs_narrow_hidden.png
+click Button "Show descriptions"
+wait_log 5000 kit editor: signals: descriptions shown
+frames 5
+screenshot @T@/docs_narrow.png
+finger_down 1 Button "row in off"
+wait_log 3000 kit editor: signals: the text of row in off
+frames 3
+screenshot @T@/docs_narrow_tip.png
+finger_up 1
+frames 5
+event kit_select $DOOR
+wait_log_any 5000 kit editor: signals: $DOOR not linked:
+frames 5
+screenshot @T@/docs_narrow_two.png
+event kit_select $NONE
+wait_log_any 5000 kit editor: signals: rows of $NONE:
+frames 5
+screenshot @T@/docs_narrow_none.png
+sync 3000
+quit
+EOF
+	BUILDAT_JOIN_NAME=kitboss BUILDAT_TOUCH=1 client kitdocs 600x400 -u 1
+	want "$l" "signals: rows of $LEVER: 0 descriptions"
+	grep -a "add link: into" "$l" && fail "a finger held to read pressed the row too ($l)"
+	python3 -I - "$l" <<'PY' || fail "a row past the column's width ($l)"
+import re, sys
+n = 0
+for x in open(sys.argv[1], errors="replace"):
+    m = re.search(r"rows of \d+: \d+ descriptions, \d+ texts, to (\d+) of (\d+), body", x)
+    if m:
+        assert int(m[1]) <= int(m[2]), x
+        n += 1
+    m = re.search(r"the text of .* at (\d+) (\d+) (\d+) (\d+) in (\d+)x(\d+)", x)
+    if m:
+        a, b, w, h, rw, rh = map(int, m.groups())
+        assert a >= 0 and b >= 0 and a + w <= rw and b + h <= rh, x
+assert n >= 3, n
+PY
+	grep -a "signals: a sideways bar: true" "$l" && fail "a sideways bar in 600x400 ($l)"
+	echo "ok: remembered in the next session; narrow touch: a finger held shows the text, not pressing the row; inside the column"
+	if grep -aE "attempt to|stack traceback" "$t/kitdocs1.log" "$l" | head -5 | grep -a .; then
+		fail "a Lua error in the logs"
+	fi
+	stop_server
+	echo "PASS: the Signals view's signals and their descriptions; screenshots $t/docs_*.png"
+	exit 0
+fi
 {
 	cat <<'EOF'
 wait_log_any 60000 Joined as kitboss
@@ -256,18 +561,18 @@ EOF
 click Button "add link"
 frames 3
 screenshot @T@/form.png
-click DropDownList "▼" 450 293
+click DropDownList "signals Output"
 frames 3
 click Text "progress*"
 frames 3
-click DropDownList "▼" 450 327
+click DropDownList "signals Target"
 frames 3
 screenshot @T@/form_target.png
 click Text "◆ $BAR3 ui_bar"
 frames 3
-click DropDownList "▼" 450 361
+click DropDownList "signals Input"
 frames 3
-click Text "value*"
+click Text "value (number)"
 frames 3
 screenshot @T@/form_input.png
 click Button "Link"
@@ -287,7 +592,7 @@ click Button "signal in $FLAG.taken $BAR2.hide"
 frames 3
 keypress Escape
 frames 3
-mouse_pos 310 409
+mouse_pos 310 613
 frames 2
 mouse_click right
 frames 3
@@ -566,22 +871,6 @@ code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv.log" | head -1)
 [ -n "$code" ] || fail "no setup code ($t/srv.log)"
 BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code client kitboss 1024x700 -u 1
 s=$t/srv.log b=$t/kitboss.log
-want() # <log> <text>...
-{
-	local log=$1 w
-	shift
-	for w in "$@"; do
-		grep -aqF -- "$w" "$log" || fail "no \"$w\" in $log"
-	done
-}
-wantp() # <log> <perl regex>
-{
-	grep -aqP -- "$2" "$1" || fail "no /$2/ in $1"
-}
-kit() # <log>: Kit's own lines, not the drive's
-{
-	grep -a " I kit " "$1"
-}
 # 0. No position, in the Scene group
 # A bar going leaves the body at the left (the engine's ScrollView kept its view
 # size smaller than the panel)
@@ -1049,4 +1338,5 @@ echo "ok: the name after a restart, read by another client; a wide window; one c
 if grep -aE "kit: ui: |kit: ui handles: |attempt to|stack traceback" "$b" "$t/kitwide.log" "$t/kitnarrow.log" | grep -av " I kit editor" | head -5 | grep -a .; then
 	fail "a Lua error in the logs"
 fi
+"$here/util/kit_signals_view_check.sh" docs || fail "item 13"
 echo "PASS: the Signals view: its columns by width, links added, unlinked and hidden, names followed, a rename kept, the filter, the viewport and its HUD; screenshots $t/signals.png $t/added.png $t/hud.png $t/wide.png $t/narrow_links.png"
