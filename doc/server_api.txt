@@ -499,8 +499,9 @@ surface maps beside the diffuse, or not), describe_segments, update().
 
 interface/wasm_api.h -- what a module's wasm/ (C, C++ or Rust) is written
 against ([CLIENT_WASM]): the server builds wasm/ with clang to a .wasm as
-it loads the module (cached by the sources' hash; the module refused when
-there is no clang and wasm linker, but a builtin is loaded without its
+it loads the module (cached by the sources' hash; with no clang and wasm
+linker, an Aitta install uses the .wasm its Aitta built (doc/aitta.txt) and
+the module is refused without one, but a builtin is loaded without its
 .wasm and its client Lua does without), client_data serves it as
 <module>/<module>.wasm, and a client loads it with buildat.wasm_load()
 (client_api.txt). BUILDAT_WASM_EXPORT marks a function Lua may call. The
@@ -542,7 +543,8 @@ dependencies, not crates.io's: the module's other top-level crates
 of wasm/'s files (but target/), those crates' and buildat_wasm's. cargo is BUILDAT_CARGO, then PATH's, then
 $CARGO_HOME/bin's and ~/.cargo/bin's; without it, or without the
 wasm32-unknown-unknown target (rustup target add wasm32-unknown-unknown),
-the module is refused, the log saying which.
+an Aitta install uses the .wasm its Aitta built and otherwise the module
+is refused, the log saying which.
 **The default client_main** ("client_main": "wasm"): the engine's Lua
 loads the module's .wasm, makes a scene -- a camera, a directional light
 and 8 nodes, each with a CustomGeometry whose material shows the vertex
@@ -572,8 +574,9 @@ it on the client's runtime (src/wasm/engine.cpp: checked and capped,
 metered, translated by wasm2c and compiled with the server's compiler
 in a child process, WAMR's interpreter while that runs), on the
 module's own thread as a C++ module runs. A server without the
-toolchain, or a .wasm that does not check, refuses the module by name,
-and the server does not start the app.
+toolchain and without its Aitta's .wasm (doc/aitta.txt), or a .wasm that
+does not check, refuses the module by name, and the server does not start
+the app.
   The .wasm reaches the server only through the header's imports. Those
 in a group are refused at load, by the import's name, unless
 "imports" grants the group: "events" (core:start, core:tick,

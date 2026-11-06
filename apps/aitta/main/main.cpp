@@ -110,8 +110,8 @@ static const size_t MANIFEST_MAX = 16 * 1024;
 // kind, counted from its directory before one is written: a world's cap,
 // far past any app here (skeldat's ~150)
 static const size_t FILES_MAX = interface::aitta::WORLD_FILES_MAX;
-// [AITTA_BUILD_QUEUE] An author's releases waiting to be built for the
-// page at once (builds are one at a time, up to 300 s each); a publish
+// [AITTA_BUILD_QUEUE] An author's releases waiting to be built at once
+// (builds are one at a time, up to 300 s each); a publish
 // past it is refused. simplified: by author, and an account binds one,
 // so many accounts get many times it
 static const int64_t WEB_WAITING_MAX = 3;
@@ -387,6 +387,8 @@ struct Module: public interface::Module, public moderation::Host
 	// [WEB_LOCAL_AITTA] The releases whose .wasm wait to be built, by id,
 	// and the one building: its job's directory and its process
 	std::deque<ss_> m_web_queue;
+	// [AITTA_NATIVE_WASM] Releases from before it, not looked into yet
+	sv_<ss_> m_web_unread;
 	// [AITTA_BUILD_QUEUE] When each author's last build started (a count
 	// of builds): the next is the author's served longest ago
 	sm_<ss_, int64_t> m_web_served;
@@ -586,9 +588,14 @@ struct Module: public interface::Module, public moderation::Host
 			}
 		}
 		// [WEB_LOCAL_AITTA] The builds a stop left undone
+		// [AITTA_NATIVE_WASM] One never looked at: looked into when none
+		// waits, its record then says
 		for(auto &p : releases_map())
 			if(jstr(p.second, "web_build") == "queued")
 				m_web_queue.push_back(p.first);
+			else if(jstr(p.second, "web_build").empty() &&
+					!p.second.get("delisted").is_true())
+				m_web_unread.push_back(p.first);
 	}
 
 	// -----------------------------------------------------------------------
@@ -1436,6 +1443,63 @@ struct Module: public interface::Module, public moderation::Host
 		interface::zip_extract(zip, dir, unpacked_max());
 	}
 
+	static bool plain_module(const ss_ &name)
+	{
+		bool plain = name.size() <= 64;
+		for(char c : name)
+			plain = plain && (isalnum((unsigned char)c) || c == '_');
+		return plain;
+	}
+
+	// [AITTA_NATIVE_WASM] Whether an app or a variant has a module with a
+	// .wasm of its own (wasm/ or "server_wasm"), which a server with no
+	// toolchain gets from here. Another kind runs no module.
+	bool has_wasm_module(const ss_ &dir, const json::Value &m)
+	{
+		const ss_ kind = jstr(m, "kind");
+		if(!kind.empty() && kind != "app")
+			return false;
+		for(const auto &n : interface::fs::list_directory(dir)){
+			if(!n.is_directory || !plain_module(n.name) ||
+					!interface::fs::path_exists(dir+"/"+n.name+"/meta.json"))
+				continue;
+			json::json_error_t e;
+			if(interface::fs::path_exists(dir+"/"+n.name+"/wasm") ||
+					!jstr(json::load_file((dir+"/"+n.name+"/meta.json").c_str(),
+					&e).get("server_wasm"), "source").empty())
+				return true;
+		}
+		return false;
+	}
+
+	// One release from before [AITTA_NATIVE_WASM] looked into: queued if it
+	// has a .wasm to build, and either way its record says it was seen.
+	// simplified: unpacked whole, one a tick while none waits; a restart
+	// does it once for a release
+	void web_read_unread()
+	{
+		const ss_ id = m_web_unread.back();
+		m_web_unread.pop_back();
+		json::Value rel = load("releases", id);
+		if(!rel.is_object() || !jstr(rel, "web_build").empty())
+			return;
+		const ss_ dir = m_tmp+"/unread_"+jstr(rel, "sha256");
+		bool has = false;
+		try {
+			unpack_upload(m_archives+"/"+jstr(rel, "sha256")+".zip", dir);
+			has = has_wasm_module(dir, rel.get("manifest"));
+		} catch(std::exception &e){
+			log_w(MODULE, "web build of %s: %s", cs(id), e.what());
+		}
+		interface::fs::remove_all(dir);
+		rel.set("web_build", has ? "queued" : "none");
+		if(has){
+			rel.set("web_native", true);
+			m_web_queue.push_back(id);
+		}
+		put("releases", id, rel);
+	}
+
 	// [WEB_LOCAL_AITTA] Whether a release can run in the page, with a server
 	// of the engine's own builtins in the page and its modules' .wasm,
 	// which this Aitta builds: "" or why not. An app, not a variant, whose
@@ -1461,10 +1525,7 @@ struct Module: public interface::Module, public moderation::Host
 			if(!n.is_directory || !interface::fs::path_exists(dir+"/"+n.name+
 					"/meta.json"))
 				continue;
-			bool plain = n.name.size() <= 64;
-			for(char c : n.name)
-				plain = plain && (isalnum((unsigned char)c) || c == '_');
-			if(!plain)
+			if(!plain_module(n.name))
 				return "a module's name is not [A-Za-z0-9_]";
 			json::json_error_t e;
 			mods.emplace_back(n.name, json::load_file((dir+"/"+n.name+
@@ -1508,6 +1569,9 @@ struct Module: public interface::Module, public moderation::Host
 	// server looks for it (<module>.server.wasm, <module>.wasm); "web" true
 	// once built. A build that fails leaves the release as it was, not in
 	// the page.
+	// [AITTA_NATIVE_WASM] A release marked "web_native" is built for a
+	// native server with no toolchain, not for the page: its .wasm only,
+	// no C++, and no "web" or "web_cpp" said of it, whatever its modules.
 	// simplified: no build waits past the child's own clock (300 s) and
 	// a margin; a stop forgets the one under way, queued again at start
 	void web_tick()
@@ -1522,6 +1586,8 @@ struct Module: public interface::Module, public moderation::Host
 				m_web_proc = interface::process::Handle();
 			web_done(over);
 		}
+		if(m_web_queue.empty() && !m_web_unread.empty())
+			web_read_unread();
 		if(m_web_queue.empty())
 			return;
 		// [AITTA_BUILD_QUEUE] Round-robin by author: each waits for at
@@ -1546,13 +1612,19 @@ struct Module: public interface::Module, public moderation::Host
 			log_w(MODULE, "web build of %s: %s", cs(m_web_id), e.what());
 			return web_done(false);
 		}
+		const bool native = rel.get("web_native").is_true();
+		// [AITTA_NATIVE_WASM] One from before a publish refused these: the
+		// build sees the source only
+		for(const ss_ &n : interface::aitta::dotted_root_names(m_archives+
+				"/"+sha+".zip"))
+			interface::fs::remove_all(m_web_job+"/src/"+n);
 		// What it is to build, read before the build can change the
-		// source: every server .wasm and wasm/ (web_refusal() took the
-		// names)
+		// source: every server .wasm and wasm/ (--build-wasm takes plain
+		// names only)
 		const ss_ src = m_web_job+"/src";
 		for(const auto &n : interface::fs::list_directory(src)){
-			if(!n.is_directory || !interface::fs::path_exists(
-					src+"/"+n.name+"/meta.json"))
+			if(!n.is_directory || !plain_module(n.name) ||
+					!interface::fs::path_exists(src+"/"+n.name+"/meta.json"))
 				continue;
 			json::json_error_t e;
 			const json::Value mm = json::load_file((src+"/"+n.name+
@@ -1560,7 +1632,7 @@ struct Module: public interface::Module, public moderation::Host
 			if(!jstr(mm.get("server_wasm"), "source").empty())
 				m_web_names.push_back(n.name+".server.wasm");
 			else if(!mm.get("disable_cpp").is_true())
-				m_web_cpp = true;
+				m_web_cpp = !native;
 			if(interface::fs::path_exists(src+"/"+n.name+"/wasm"))
 				m_web_names.push_back(n.name+".wasm");
 		}
@@ -1707,9 +1779,15 @@ struct Module: public interface::Module, public moderation::Host
 				if(m_web_cpp){
 					rel.set("web_server", server);
 					rel.set("web_cpp", true);
-				} else {
+				} else if(!rel.get("web_native").is_true()){
 					rel.set("web", true);
 				}
+			} else if(m_web_cpp && !over && !m_web_names.empty()){
+				// [AITTA_NATIVE_WASM] Its C++ does not build for the page:
+				// its .wasm still go to a native server
+				rel.set("web_build", "queued");
+				rel.set("web_native", true);
+				m_web_queue.push_back(m_web_id);
 			}
 			put("releases", m_web_id, rel);
 		}
@@ -1815,8 +1893,10 @@ struct Module: public interface::Module, public moderation::Host
 		if(!write_file(zip, u.data))
 			return refuse(r, "cannot store the archive");
 		json::Value m;
+		sv_<ss_> dotted;
 		try {
 			unpack_upload(zip, dir);
+			dotted = interface::aitta::dotted_root_names(zip);
 			// The manifest is kept whole and handed out in every list: a
 			// manifest's size, not the archive's
 			const ss_ mt = read_file(dir+"/meta.json");
@@ -1850,6 +1930,10 @@ struct Module: public interface::Module, public moderation::Host
 				media[k] = read_file(dir+"/"+jstr(m, k));
 		// [WEB_LOCAL_AITTA] Whether its server can run in the page
 		const ss_ web_why = m.is_object() ? web_refusal(dir, m, lua51) : "";
+		// [AITTA_NATIVE_WASM] Not in the page, its .wasm built all the same
+		const bool web_native = !web_why.empty() && m.is_object() &&
+				has_wasm_module(dir, m);
+		const bool web_queue = web_why.empty() || web_native;
 		// [APP_REMIX] A remix carries data only: its files by their paths
 		// and bytes (a client checks them against the base again)
 		const ss_ remix_why = m.is_object() &&
@@ -1863,6 +1947,9 @@ struct Module: public interface::Module, public moderation::Host
 		const ss_ why = interface::aitta::check_manifest(m, true);
 		if(!why.empty())
 			return drop("meta.json: "+why);
+		if(!dotted.empty())
+			return drop("the archive has "+dotted[0]+" at its root: a name "
+					"under a dot there is an install's, not a package's");
 		if(!changelog_there)
 			return drop("meta.json: \"changelog\": "+jstr(m, "changelog")+
 					" is not in the archive");
@@ -1886,11 +1973,11 @@ struct Module: public interface::Module, public moderation::Host
 		if(!load("releases", id).is_undefined())
 			return drop(id+" is here already");
 		// [AITTA_BUILD_QUEUE] One author's builds waiting at once
-		if(web_why.empty() && std::count_if(m_web_queue.begin(),
+		if(web_queue && std::count_if(m_web_queue.begin(),
 				m_web_queue.end(), [&](const ss_ &q){
 					return author_of(q) == u.author; }) >= WEB_WAITING_MAX)
 			return drop(itos(WEB_WAITING_MAX)+" releases of "+u.author+
-					" wait to be built for the page here already: publish "
+					" wait to be built here already: publish "
 					"this once one of them is built");
 		if(!media_why.empty())
 			return drop("meta.json: "+media_why);
@@ -1950,13 +2037,18 @@ struct Module: public interface::Module, public moderation::Host
 			rel.set("audience_manifest", jstr(m, "audience"));
 			rel.set("audience", jstr(lock, "audience"));
 		}
-		if(web_why.empty())
-			rel.set("web_build", "queued");
+		// [AITTA_NATIVE_WASM] Every release looked at from here on says so:
+		// "none" is not looked into again at a start
+		rel.set("web_build", web_queue ? "queued" : "none");
+		if(web_native)
+			rel.set("web_native", true);
 		put("releases", id, rel);
-		if(web_why.empty())
+		if(web_queue)
 			m_web_queue.push_back(id);
 		log_i(MODULE, "%s in the page: %s", cs(id), web_why.empty() ?
-				"its .wasm queued to be built" : cs("no, "+web_why));
+				"its .wasm queued to be built" : cs("no, "+web_why+
+				(web_native ? "; its .wasm queued to be built for a native "
+				"server" : "")));
 		if(!changelog.empty()){
 			json::Value c = json::object();
 			c.set("text", changelog);

@@ -5,6 +5,7 @@
 #include "interface/bignum.h"
 #include "interface/compress.h"
 #include "interface/fs.h"
+#include "interface/http.h"
 #include "interface/os.h"
 #include "interface/server.h"
 #include "interface/server_config.h"
@@ -1152,6 +1153,84 @@ static json::Value verified_sig(const ss_ &zip_path, const ss_ &sig_path)
 	return sig;
 }
 
+sv_<ss_> dotted_root_names(const ss_ &zip_path)
+{
+	sv_<ss_> names;
+	for(const ZipEntry &e : zip_list(zip_path)){
+		const ss_ root = e.name.substr(0, e.name.find('/'));
+		if(!root.empty() && root[0] == '.' &&
+				std::find(names.begin(), names.end(), root) == names.end())
+			names.push_back(root);
+	}
+	return names;
+}
+
+bool built_wasm_name_ok(const ss_ &name)
+{
+	static const ss_ server = ".server.wasm", client = ".wasm";
+	size_t n = name.size();
+	if(n > server.size() && name.compare(n - server.size(), ss_::npos,
+			server) == 0)
+		n -= server.size();
+	else if(n > client.size() && name.compare(n - client.size(), ss_::npos,
+			client) == 0)
+		n -= client.size();
+	else
+		return false;
+	if(n > 64)
+		return false;
+	for(size_t i = 0; i < n; i++)
+		if(!isalnum((unsigned char)name[i]) && name[i] != '_')
+			return false;
+	return true;
+}
+
+sv_<ss_> fetch_built_wasm(const ss_ &aitta, const json::Value &web_wasm,
+		const ss_ &version_dir)
+{
+	sv_<ss_> said;
+	if(!web_wasm.is_object())
+		return said;
+	const ss_ dir = version_dir+"/"+BUILT_WASM_DIR;
+	for(json::Iterator it(web_wasm); it.valid(); it.next()){
+		const ss_ name = it.key();
+		const ss_ sha = it.value().is_string() ? it.value().as_string() : "";
+		bool hex = sha.size() == 64;
+		for(char c : sha)
+			hex = hex && ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+		if(!built_wasm_name_ok(name) || !hex){
+			said.push_back("its Aitta's list names a .wasm wrongly");
+			continue;
+		}
+		const ss_ to = dir+"/"+name;
+		try {
+			if(fs::path_exists(to) && sha256::hex(sha256::calculate(
+					read_file(to))) == sha)
+				continue;
+			// simplified: http_get's own 64 MiB bounds the fetch and the
+			// file is refused past the cap after it; a capped http_get is
+			// the upgrade if an Aitta's fetch must cost less
+			const ss_ data = http_get(aitta+"/api/v1/aitta/wasm/"+sha+".wasm");
+			if(data.size() > BUILT_WASM_MAX){
+				said.push_back(name+": more than "+itos((int64_t)BUILT_WASM_MAX)+
+						" bytes");
+				continue;
+			}
+			if(sha256::hex(sha256::calculate(data)) != sha){
+				said.push_back(name+": not the one its Aitta listed");
+				continue;
+			}
+			fs::create_directories(dir);
+			// Whole or not there: the server takes what it finds by name
+			if(!fs::write_file(to, data))
+				said.push_back(name+": cannot write it into "+dir);
+		} catch(std::exception &e){
+			said.push_back(name+": "+e.what());
+		}
+	}
+	return said;
+}
+
 ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 		bool review, const ss_ &share_path)
 {
@@ -1170,6 +1249,9 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 	fs::create_directories(incoming);
 	try {
 		zip_extract(zip_path, incoming);
+		// [AITTA_NATIVE_WASM] Before anything reads it
+		for(const ss_ &n : dotted_root_names(zip_path))
+			fs::remove_all(incoming+"/"+n);
 		const json::Value m = json::load_file((incoming+"/meta.json").c_str(), &e);
 		const ss_ why = check_manifest(m);
 		if(!why.empty())

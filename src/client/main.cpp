@@ -213,9 +213,25 @@ static int aitta_main(int argc, char *argv[])
 			if(!plain(a) || !plain(n) || !plain(v) || !plain(sha))
 				throw Exception("the list's release has a name not taken");
 			const ss_ dir = user+"/installed/"+a+"/"+n+"/"+v;
+			// [AITTA_NATIVE_WASM] The .wasm its Aitta built, on a server with
+			// no toolchain the only way this runs: a warning where not had.
+			// .aitta_from is what lets a server use them (the client's own
+			// install writes it too); this one's name stays the first's
+			auto fetch_wasm = [&](const ss_ &to){
+				if(!interface::fs::path_exists(to+"/.aitta_from") &&
+						!interface::fs::write_file(to+"/.aitta_from", base+"\n"))
+					fprintf(stderr, "warning: %s/%s %s: cannot write its "
+							".aitta_from\n", a.c_str(), n.c_str(), v.c_str());
+				for(const ss_ &why : interface::aitta::fetch_built_wasm(base,
+						pick.get("web_wasm"), to))
+					fprintf(stderr, "warning: %s/%s %s: %s\n", a.c_str(),
+							n.c_str(), v.c_str(), why.c_str());
+			};
 			if(interface::fs::path_exists(dir)){
 				fprintf(stderr, "%s/%s %s is installed already\n", a.c_str(),
 						n.c_str(), v.c_str());
+				// One not built when it was installed is built by now
+				fetch_wasm(dir);
 				printf("%s\n", dir.c_str());
 				return 0;
 			}
@@ -237,6 +253,7 @@ static int aitta_main(int argc, char *argv[])
 			}
 			std::remove((tmp+".zip").c_str());
 			std::remove((tmp+".sig").c_str());
+			fetch_wasm(out);
 			printf("%s\n", out.c_str());
 			return 0;
 		}
