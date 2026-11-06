@@ -35,13 +35,126 @@
 #  11. [KIT_PALETTE_MENU] A type with no position in the palette: its menu, Cancel,
 #      Escape, another's button, a press on the view place nothing; Favourite; Place
 #      at once and selected; a drag still places, a positioned one still arms.
-# Screenshots kept with KEEP_TMP=1: $t/popup.png, $t/palette_menu.png, $t/narrow_popup.png, $t/small_popup.png, $t/small_menu.png, $t/menu.png, $t/refit.png, $t/signals.png, $t/added.png, $t/hud.png,
+#  12. [KIT_SIGNALS_PARENT_BUTTONS] Switch parent and Un-parent in its inspector:
+#      armed, a click in the list picks; a refusal (itself, none with a position)
+#      stays armed with its status over the list; past an edit, the filter and
+#      another view; the row indented under the new one; Escape and the button
+#      cancel, the view kept; narrow touch: armed, the list's column is up.
+# Screenshots kept with KEEP_TMP=1: $t/parent_*.png, $t/popup.png, $t/palette_menu.png, $t/narrow_popup.png, $t/small_popup.png, $t/small_menu.png, $t/menu.png, $t/refit.png, $t/signals.png, $t/added.png, $t/hud.png,
 # $t/game_wide.png, $t/wide.png, $t/narrow_*.png; look at them.
 #   util/kit_signals_view_check.sh
+#   util/kit_signals_view_check.sh web    item 12 in headless Chrome, mouse and finger
 set -u
 . "$(dirname "$0")/check_lib.sh"
-export BUILDAT_WORKBENCH_PROJECT=world
 here=$(cd "$(dirname "$0")/.." && pwd)
+if [ "${1:-}" = web ]; then
+	# [KIT_SIGNALS_PARENT_BUTTONS] Item 12 in the web client, headless Chrome: by
+	# the mouse at 1200x800, then by a finger at 1000x500
+	export BUILDAT_WORKBENCH_STONE=1
+	check_tmp kit_signals_web; t=$CHECK_TMP
+	stub="(function(){ var held = null, refuse = false; Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }}); function set(e){ held = e; document.dispatchEvent(new Event('pointerlockchange')); } document.addEventListener('keydown', function(e){ if(e.key === 'Escape') refuse = true; }, true); document.addEventListener('mousedown', function(){ refuse = false; }, true); HTMLCanvasElement.prototype.requestPointerLock = function(){ if(refuse || !window.lockOk){ document.dispatchEvent(new Event('pointerlockerror')); return Promise.reject(new Error('refused')); } if(held !== this) set(this); return Promise.resolve(); }; document.exitPointerLock = function(){ if(held) set(null); }; return 'stub'; })()"
+	steps() # <click|tap> <x1> <y1> <x2> <y2>: the two flags' cells on the screen
+	{
+		local p=$1
+		cat <<J
+[
+	["nav", "\${URL}"],
+	["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+J
+		[ "$p" = tap ] || echo "	[\"eval\", \"$stub\"],"
+		cat <<J
+	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
+	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "\${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
+	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
+	["$p", "Button", "Don't add"], ["frames", 3],
+	["waitlog_any", "world_menu: the list shown, 0 worlds", 30], ["frames", 3],
+	["$p", "Button", "New project..."],
+	["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
+	["$p", "Button", "Create"],
+	["waitlog", "player physics enabled", 120],
+J
+		if [ "$p" = tap ]; then
+			cat <<J
+	["waitlog_any", "kit editor: edit rights: yes", 10], ["frames", 5],
+	["key", "F6"], ["waitlog", "kit editor: state: 1 entities", 20],
+J
+		else
+			cat <<J
+	["waitlog_any", "pause: the menu shown", 10],
+	["eval", "window.lockOk = true, 'lock given from here'"],
+	["click", 100, 700], ["waitlog", "pause: the menu closed", 10], ["wait", 1000],
+	["waitlog_any", "kit editor: edit rights: yes", 10],
+	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
+J
+		fi
+		cat <<J
+	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
+J
+		# A short window: its panels by the bar's buttons, one column at a time
+		[ "$p" = click ] || echo '	["tap", "Button", "Tools"], ["frames", 3],'
+		cat <<J
+	["$p", "Button", "kit/flag"], ["waitlog", "kit editor: placing kit/flag", 10], ["frames", 3],
+J
+		[ "$p" = click ] || echo '	["tap", "Button", "Tools"], ["frames", 3],'
+		cat <<J
+	["$p", $2, $3], ["waitlog", "kit editor: state: 2 entities", 10], ["frames", 3],
+	["$p", $4, $5], ["waitlog", "kit editor: state: 3 entities", 10], ["frames", 3],
+	["key", "Escape"], ["frames", 3],
+J
+		# None with a position, for its refusal; off the screen of a short window
+		[ "$p" = tap ] || cat <<J
+	["click", "Button", "kit/logic"], ["waitlog", "the palette's menu of kit/logic", 10], ["frames", 3],
+	["click", "Button", "Place"], ["waitlog", "kit editor: state: 4 entities", 10], ["frames", 3],
+J
+		cat <<J
+	["key", "F5"], ["waitlog", "kit editor: the view is Signals", 10], ["frames", 5],
+J
+		[ "$p" = click ] || echo '	["tap", "Button", "Entities"], ["frames", 5],'
+		cat <<J
+	["$p", "Button", "select 3"], ["waitlog", "kit editor: selected 3", 10], ["frames", 3],
+	["$p", "Button", "Inspector"], ["frames", 5],
+	["$p", "Button", "Switch parent"], ["waitlog", "kit editor: switch parent of 3: armed", 10], ["frames", 3],
+	["shot", "\${OUT}/armed.png"],
+J
+		[ "$p" = tap ] || cat <<J
+	["click", "Button", "select 5"], ["waitlog", "switch parent of 3: not 5", 10], ["frames", 3],
+J
+		cat <<J
+	["$p", "Button", "select 3"], ["waitlog", "switch parent of 3: not 3", 10], ["frames", 3],
+	["shot", "\${OUT}/refused.png"],
+	["$p", "Button", "select 4"], ["waitlog", "signals: list \"\" .*, >3", 10], ["frames", 3],
+	["shot", "\${OUT}/under.png"],
+	["$p", "Button", "Inspector"], ["frames", 5],
+	["$p", "Button", "Un-parent"], ["waitlog", "signals: list \"\" [^>]*$", 10], ["frames", 3],
+	["$p", "Button", "Inspector"], ["frames", 5],
+	["$p", "Button", "Switch parent"], ["waitlog", "switch parent of 3: armed", 10], ["frames", 3],
+	["key", "Escape"], ["waitlog", "switch parent cancelled", 10], ["frames", 3],
+	["$p", "Button", "Inspector"], ["frames", 5],
+	["$p", "Button", "Switch parent"], ["waitlog", "switch parent of 3: armed", 10], ["frames", 3],
+	["$p", "Button", "Inspector"], ["frames", 5],
+	["$p", "Button", "Switch parent: Cancel"], ["waitlog", "switch parent cancelled", 10], ["frames", 3],
+	["shot", "\${OUT}/cancelled.png"], ["sync", 5000]
+]
+J
+	}
+	steps click 900 550 650 700 > "$t/mouse.json"
+	"$here/util/web_drive.sh" "${WEB_BROWSER:-chrome}" workbench "$t/mouse.json" "$t/mouse" ||
+		fail "the web drive by the mouse ($t/mouse)"
+	echo "ok: by the mouse in the web client; screenshots $t/mouse/armed.png $t/mouse/refused.png $t/mouse/under.png"
+	steps tap 500 300 600 420 > "$t/touch.json"
+	TOUCH=1 WEB_DRIVE_VIEWPORT=1000x500@1 "$here/util/web_drive.sh" chrome workbench "$t/touch.json" "$t/touch" ||
+		fail "the web drive by a finger ($t/touch)"
+	echo "ok: by a finger in the web client; screenshots $t/touch/armed.png $t/touch/refused.png"
+	echo "PASS: Switch parent and Un-parent in the Signals view on the web"
+	exit 0
+fi
+export BUILDAT_WORKBENCH_PROJECT=world
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
@@ -736,6 +849,155 @@ for x, y, w, h, rw, rh in m:
     assert x >= 0 and y >= 0 and x + w <= rw and y + h <= rh, (x, y, w, h, rw, rh)
 PY
 done
+# 12. [KIT_SIGNALS_PARENT_BUTTONS] Switch parent and Un-parent in this view: the
+# parent picked in its list
+p_join='wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log_any 10000 kit editor: edit mode on
+frames 5'
+last=$(grep -ahoP "An edit by kitboss: placed kit/\S+ \K\d+" "$t/srv2.log" "$s" | sort -n | tail -1)
+PARENT=$((last + 1))
+{
+	echo "$p_join"
+	edit '{"op": "place", "type": "kit/flag", "pos": [9, 1, 9]}'
+	cat <<EOF
+event kit_select $FLAG
+frames 3
+keypress F5
+frames 8
+click Button "Inspector"
+frames 5
+screenshot @T@/parent_buttons.png
+click Button "Switch parent"
+wait_log 5000 kit editor: switch parent of $FLAG: armed
+frames 3
+screenshot @T@/parent_armed.png
+click Button "select $BAR1"
+wait_log 5000 kit editor: switch parent of $FLAG: not $BAR1
+frames 3
+screenshot @T@/parent_refused.png
+click LineEdit "signals filter"
+frames 2
+text flag
+wait_log 5000 kit editor: signals: list "flag"
+frames 3
+click Button "select $FLAG"
+wait_log 5000 kit editor: switch parent of $FLAG: not $FLAG
+frames 3
+EOF
+	# Armed past the filter's rebuild above, an edit's and another view
+	edit '{"op": "place", "type": "kit/timer", "pos": [1, 1, 1]}'
+	cat <<EOF
+frames 3
+keypress F2
+wait_log 5000 kit editor: the view is 3D
+frames 3
+screenshot @T@/parent_armed_3d.png
+keypress F5
+wait_log 5000 kit editor: the view is Signals
+frames 5
+click Button "select $PARENT"
+wait_log 10000 kit editor: signals: list "flag"
+frames 3
+screenshot @T@/parent_under.png
+click Button "Un-parent"
+wait_log 10000 kit editor: signals: list "flag"
+frames 3
+click Button "Switch parent"
+wait_log 5000 kit editor: switch parent of $FLAG: armed
+frames 2
+keypress Escape
+wait_log 5000 kit editor: switch parent cancelled
+frames 3
+click Button "Switch parent"
+wait_log 5000 kit editor: switch parent of $FLAG: armed
+frames 2
+click Button "Switch parent: Cancel"
+wait_log 5000 kit editor: switch parent cancelled
+frames 3
+screenshot @T@/parent_cancelled.png
+event kit_select $BAR1
+frames 3
+click Button "Switch parent"
+wait_log 5000 kit editor: switch parent of $BAR1: armed
+frames 2
+click Button "select $PARENT"
+wait_log 10000 kit editor: state:
+frames 3
+click Button "Un-parent"
+wait_log 10000 kit editor: state:
+sync 3000
+quit
+EOF
+} > "$t/kitparent.cmds"
+{
+	echo "$p_join"
+	cat <<EOF
+event kit_select $FLAG
+frames 3
+keypress F5
+frames 8
+click Button "Entities"
+frames 5
+click LineEdit "signals filter"
+frames 2
+text flag
+wait_log 5000 kit editor: signals: list "flag"
+frames 3
+click Button "Inspector"
+frames 5
+screenshot @T@/parent_narrow_buttons.png
+click Button "Switch parent"
+wait_log 5000 kit editor: switch parent of $FLAG: armed
+frames 5
+screenshot @T@/parent_narrow_armed.png
+click Button "select $FLAG"
+wait_log 5000 kit editor: switch parent of $FLAG: not $FLAG
+frames 3
+screenshot @T@/parent_narrow_refused.png
+click Button "select $PARENT"
+wait_log 10000 kit editor: signals: list "flag"
+frames 5
+click Button "Inspector"
+frames 5
+click Button "Un-parent"
+wait_log 10000 kit editor: signals: list "flag"
+sync 3000
+quit
+EOF
+} > "$t/kitparent2.cmds"
+BUILDAT_JOIN_NAME=kitboss client kitparent 1024x700 -u 1
+BUILDAT_JOIN_NAME=kitboss BUILDAT_TOUCH=1 client kitparent2 600x400 -u 1
+kit "$t/kitparent.log" | grep -a "switch parent\|un-parent\|signals: list \"flag\"\|the view is" > "$t/parent_seq.txt"
+python3 -I - "$t/parent_seq.txt" "$FLAG" "$PARENT" <<'PY' || fail "the Signals list's Switch parent ($t/parent_seq.txt)"
+import sys
+flag, parent = sys.argv[2:]
+ls = open(sys.argv[1], errors="replace").read().split("\n")
+def at(w, frm=0):
+    return next(i for i in range(frm, len(ls)) if w in ls[i])
+armed = at("switch parent of %s: armed" % flag)
+picked = at("switch parent of %s to %s" % (flag, parent), armed)
+assert not any("cancelled" in l for l in ls[armed:picked]), ls[armed:picked]
+under = at('list "flag"', picked)
+ids = ls[under].split("):")[1].split(", ")
+assert ">" + flag in [i.strip() for i in ids], ls[under]
+after = at('list "flag"', at("un-parent " + flag, under))
+assert ">" + flag not in ls[after], ls[after]
+PY
+wantp "$t/kitparent2.log" "signals: list \"flag\".*>$FLAG\b"
+want "$t/kitparent.log" "kit editor: switch parent of $BAR1 to $PARENT" "kit editor: un-parent $BAR1"
+# The view not left by the Escape that cancelled
+seq=$(grep -a "the view is\|cancelled" "$t/parent_seq.txt" | sed 's/.*: //' | tr '\n' ',')
+case $seq in
+*"the view is Signals,switch parent cancelled,switch parent cancelled,") ;;
+*) fail "the cancels or the view: $seq ($t/parent_seq.txt)" ;;
+esac
+if grep -aE "attempt to|stack traceback" "$t/kitparent.log" "$t/kitparent2.log" | head -5 | grep -a .; then
+	fail "a Lua error in the logs"
+fi
+echo "ok: Switch parent and Un-parent in Signals: refusals stay armed, past a rebuild and another view, picked in the list, indented, Escape and the button cancel; narrow touch"
 # 9. A real window (no -w: the fit is on) made small and large again: the UI
 # back at its full scale, the Signals view's panels not holding the fit down
 cat > "$t/kitfit.cmds" <<EOF

@@ -1120,6 +1120,10 @@ function NT.arm_parent(id)
 	S.reparent = id
 	if id then
 		S.placing = nil
+		-- A window with one column at a time: the list it is picked from
+		if NT.sig() and NT.sg.is_narrow then
+			NT.sg.tab = "list"
+		end
 		log:info("kit editor: switch parent of " .. id .. ": armed")
 		E.status = "Switch parent: pick the new parent of " .. id ..
 				" (Escape: cancel)"

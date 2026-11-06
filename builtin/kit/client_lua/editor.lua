@@ -2489,8 +2489,8 @@ local function inspector(w, e, is_made)
 	-- [KIT] stage 4l: what it costs, changed in place as "kit:costs" comes
 	S.cost_text = text(w, M.cost_line(e.id), DIM)
 	S.cost_id = e.id
-	-- [KIT_SIGNALS_VIEW] In the Signals view its parameters and Try alone: the
-	-- links are the view's own table
+	-- [KIT_SIGNALS_VIEW] In the Signals view its parameters, its parent's buttons
+	-- and Try alone: the links are the view's own table
 	local sig = NT.sig()
 	-- Its position typed in (fine tuning, and where keys are not at hand:
 	-- a touchscreen), Move one edit; with several selected they move by
@@ -2526,11 +2526,12 @@ local function inspector(w, e, is_made)
 	-- ([KIT_NO_WORLD_TYPES] one with no position too: kit/starting_kit under a
 	-- kit/team)
 	local c1 = e.components and e.components[1]
-	if (e.pos or (c1 and type_of(c1.type).no_position)) and not sig then
+	if e.pos or (c1 and type_of(c1.type).no_position) then
 		-- [KIT_NESTING] what it is under; what is placed next under it.
 		-- [KIT_REPARENT_BUTTONS] Switch parent arms: the next entity clicked
-		-- (the view's or the list's) is its parent; Un-parent puts it back
-		-- under the scene. The server keeps its place in the world
+		-- (the view's or the list's, [KIT_SIGNALS_PARENT_BUTTONS] the Signals
+		-- list's) is its parent; Un-parent puts it back under the scene. The
+		-- server keeps its place in the world
 		local pe = NT.tree().by[e.parent]
 		pe = pe and pe.pos and pe
 		if pe then
