@@ -191,7 +191,7 @@ local function world()
 			return MV.UNKNOWN
 		end
 		return voxel_info(id, v)
-	end, boxes = boxes, ground = ground,
+	end, boxes = boxes, turned = C.turned, ground = ground,
 		edge = ground and {hm[3] or 0, hm[4] or 0, (hm[3] or 0) + hm[1] - 1,
 			(hm[4] or 0) + hm[2] - 1} or nil}
 end
@@ -368,6 +368,29 @@ local function signal(key, v)
 	end
 end
 
+-- [KIT_FREE_PREFAB] The controls' free objects ({model, x, y, z, yaw}...) and
+-- each model's boxes in its object's frame, as the server's body meets them
+local object_boxes = {}
+local function update_turned()
+	local l = {}
+	local list = C.ctl and C.ctl.objects
+	for _, o in ipairs(type(list) == "table" and list or {}) do
+		if object_boxes[o[1]] then
+			l[#l + 1] = {o[2], o[3], o[4], o[5], object_boxes[o[1]]}
+		end
+	end
+	C.turned = MV.turned(l)
+end
+
+buildat.sub_packet("kit:object_boxes", function(data)
+	local name, list = data:match("^(%S+) (.*)$")
+	local b = list and network.parse_json(list)
+	if type(b) == "table" then
+		object_boxes[name] = b
+		update_turned()
+	end
+end)
+
 buildat.sub_packet("kit:controls", function(data)
 	local c = network.parse_json(data)
 	if type(c) ~= "table" then
@@ -378,6 +401,7 @@ buildat.sub_packet("kit:controls", function(data)
 	C.ctl = c
 	C.on = true
 	C.classes = {}
+	update_turned()
 	local m = move()
 	if m and type(m.src) == "string" and (m.src ~= C.src or m.type ~= C.type) then
 		local ok, def = buildat.eval(m.src, tostring(m.type) .. ".movement")

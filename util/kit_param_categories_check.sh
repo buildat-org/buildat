@@ -21,7 +21,11 @@
 #   6. the flag's inspector, two links on it, not over the window in 3D;
 #   7. the Signals view's column has the chips;
 #   8. a 1800x1000 window; a touch client at 600x400: a tap opens and closes the
-#      panel, its title's tap is its own, two taps leave.
+#      panel, its title's tap is its own, typing in a field, two taps leave;
+#   9. a chip holding an edit not applied marked; the last chip back in a new
+#      session; a warning's height given back; narrowing on the kill feed and
+#      the hint; a drag started on the panel moves nothing; the
+#      panel's Place kit/game_rules with no rules placed.
 # Screenshots kept with KEEP_TMP=1: $t/flag.png, $t/look.png, $t/narrow.png,
 # $t/hud_panel.png, $t/hud_health.png, $t/hud_bar.png, $t/signals.png,
 # $t/wide*.png, $t/touch*.png; look at them.
@@ -147,12 +151,12 @@ keypress Backspace
 frames 2
 text 2
 frames 3
-click Button "Look"
+click Button "Look*"
 frames 5
 screenshot @T@/pending.png
 click LineEdit "#f0f0f1"
 frames 2
-click Button "Advanced"
+click Button "Advanced*"
 frames 5
 click LineEdit "0.2"
 frames 2
@@ -390,6 +394,13 @@ frames 5
 keypress F4
 frames 8
 screenshot @T@/touch_panel.png
+tap LineEdit "#000000a0"
+frames 3
+keypress Backspace
+frames 2
+text 1
+frames 5
+screenshot @T@/touch_typed.png
 tap Text "◆ $BAR *"
 frames 5
 event kit_tabs title
@@ -439,6 +450,136 @@ assert r["hotbar_y"] != 2.8, r
 assert "cat" not in f and "cat" not in r
 PY
 echo "ok: fields edited in two categories applied; the panel's value in the save"
+grep -aqF "chips All Behaviour HUD Look * Advanced *" "$b" ||
+	fail "no chip marked with a pending edit ($b)"
+[ "$(grep -ac "kit editor: $BAR/1 background = " "$t/kittouch.log")" -ge 2 ] ||
+	fail "typing in the panel on touch ($t/kittouch.log)"
+# 9.
+cat > "$t/kitrest.cmds" <<EOF
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log_any 10000 kit editor: edit mode on
+frames 5
+keypress F2
+frames 5
+event kit_select $TIMER
+frames 5
+event kit_tabs warn0
+click LineEdit "2"
+frames 2
+keypress Backspace
+frames 2
+text x
+frames 5
+event kit_tabs warn1
+screenshot @T@/warned.png
+keypress Backspace
+frames 2
+text 2
+frames 5
+event kit_tabs warn2
+screenshot @T@/warning_gone.png
+event kit_select $FLAG
+frames 5
+click Button "Look"
+frames 5
+delay 1200
+event kit_select $TIMER
+frames 5
+keypress F3
+frames 5
+EOF
+{
+	at 940 50
+	at 512 595
+	cat <<EOF
+event kit_edit {"op": "delete", "id": $RULES}
+wait_log 10000 kit editor: state:
+frames 3
+keypress F4
+frames 5
+EOF
+	at 512 619
+	cat <<'EOF'
+frames 3
+event kit_tabs drag0
+click Text "Health bar"
+frames 2
+mouse_down left
+frames 2
+mouse_pos 100 300
+frames 2
+mouse_pos 90 310
+frames 2
+mouse_up left
+frames 5
+event kit_tabs drag1
+screenshot @T@/panel_drag.png
+EOF
+	at 940 50
+	cat <<'EOF'
+frames 3
+screenshot @T@/no_rules.png
+click Button "Place kit/game_rules"
+wait_log 10000 the HUD panel's parameters: feed_
+frames 3
+screenshot @T@/rules_placed.png
+sync 3000
+quit
+EOF
+} >> "$t/kitrest.cmds"
+cat > "$t/kitmem.cmds" <<EOF
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+wait_log_any 10000 kit editor: edit mode on
+frames 5
+event kit_select $FLAG
+frames 5
+sync 3000
+quit
+EOF
+start_server "$t/srv2.log" "Listening at" 300 auto \
+	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 \
+	--sim-rate "$CHECK_RATE" || fail "the server did not come back ($t/srv2.log)"
+CHECK_PIDS+=($SERVER_PID)
+BUILDAT_JOIN_NAME=kitboss client kitrest 1024x700 -u 1
+# (the same user directory: the chip kept on this machine)
+mv "$t/kitrest.log" "$t/kitrest1.log"
+cp "$t/kitmem.cmds" "$t/kitrest.cmds"
+BUILDAT_JOIN_NAME=kitboss client kitrest 1024x700 -u 1
+mv "$t/kitrest.log" "$t/kitmem.log"
+kill -INT "$SERVER_PID" 2>/dev/null
+wait "$SERVER_PID" 2>/dev/null
+grep -aq "parameters $FLAG/1 kit/flag: chips All Behaviour HUD Look Advanced, showing hud" "$t/kitmem.log" ||
+	fail "the chip not remembered ($t/kitmem.log)"
+python3 -I - "$t/kitrest1.log" <<'PY' || fail "the warning, the narrowing, the drag or the Place ($t/kitrest1.log)"
+import re, sys
+lines = open(sys.argv[1], errors="replace").read().split("\n")
+def at(mark):
+	return next(i for i, l in enumerate(lines) if "(" + mark + ")" in l)
+# The warning grew it, and its height came back
+tall = [(i, int(m[1])) for i, m in ((i, re.search(r"the inspector (\d+) of \d+ tall", l))
+	for i, l in enumerate(lines)) if m]
+grown = [h for i, h in tall if at("warn0") < i < at("warn1")]
+back = [h for i, h in tall if at("warn1") < i < at("warn2")]
+before = [h for i, h in tall if i < at("warn0")][-1]
+assert grown and grown[-1] > before, (before, grown)
+assert back and back[-1] == before, (before, grown, back)
+print("the inspector", before, "with the warning", grown[-1], "after it", back[-1])
+# Narrowed on each of Kit's own
+# (not the item line: skipped while Kit draws its hotbar, as on Workbench)
+for own in ("feed", "hint"):
+	assert any("kit: ui: selected Kit's own " + own in l for l in lines), own
+	m = [l for l in lines if "chips [" + own + "]" in l]
+	assert m and "showing " + own + "_*" in m[0], (own, m)
+# The drag on the panel: the element stays, the panel stays open, no click through
+d = "\n".join(lines[at("drag0"):at("drag1")])
+assert "dragged" not in d and "the HUD panel closed" not in d and "selected" not in d, d
+PY
+echo "ok: a warning's height given back; the chip remembered and marked; narrowing on the feed and hint; a drag on the panel; its Place"
 if grep -aE " W kit +: kit: ui|attempt to|stack traceback" "$b" "$t/kitwide.log" "$t/kittouch.log" | head -5 | grep -a .; then
 	fail "a Lua error in the logs"
 fi

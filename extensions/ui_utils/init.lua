@@ -2575,6 +2575,14 @@ function M.safe.show_notification(text, duration_s)
 end
 
 
+-- What it says no longer holds (a hint to do what was just done)
+function M.safe.close_notification()
+	if notification then
+		notification.window:Remove()
+		notification = nil
+	end
+end
+
 -- The half of `event scan` that reads the UI ([SCAN_EVENT], [FIRST_RUN]):
 -- every element under one, with its kind, its rectangle in window pixels
 -- and its text or image, one line each under the label. A form in the

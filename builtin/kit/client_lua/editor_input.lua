@@ -166,6 +166,7 @@ local function knob()
 	if n and n.box then
 		r = math.max(r, math.max(n.box.size[1], n.box.size[3]) / 2 + 0.6)
 	end
+	r = math.max(r, NT.pf.knob_radius(e))
 	local pv = P.preview[e.id]
 	local yaw = pv and pv[4] or (e.yaw or 0)
 	local a = math.rad(yaw)
@@ -324,7 +325,7 @@ local function place_at(cell, item)
 			turn = item.turn or 0, parent = parent})
 	elseif item.prefab then
 		send({op = "place", prefab = item.prefab, pos = cell,
-			turn = item.turn or 0, parent = parent})
+			turn = item.turn or 0, parent = parent, free = item.free})
 	elseif item.pickup then
 		-- [KIT_ITEMS_TAB] an item from the Items tab: a pickup of it
 		send({op = "place", type = "kit/pickup", pos = cell, parent = parent,
@@ -2597,6 +2598,10 @@ function M.editor(options)
 				ui_utils.show_notification("You may edit here: Edit, or " ..
 						M.key_name("edit"), 4)
 			end
+		end
+		-- Done: the hint would lie over the inspector's first row
+		if E.editing and not was then
+			ui_utils.close_notification()
 		end
 		for _, p in ipairs(s.people or {}) do
 			log:info("kit editor: people: " .. tostring(p.name) ..

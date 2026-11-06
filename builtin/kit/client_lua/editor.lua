@@ -208,7 +208,7 @@ do
 			end
 		end
 		-- [KIT_PREFAB_ROOT] prefabs.lua
-		if j.op == "move" then
+		if j.op == "move" or j.op == "set" then
 			K.prefab_moving(j)
 		end
 		K.prefab_bench_sent(j)
@@ -816,6 +816,7 @@ local function pick(mx, my, skip, nearest)
 			all[#all + 1] = e
 		end
 	end
+	local free_id, ft_at
 	for _, e in ipairs(all) do
 		if e.pos and not (skip and skip[e.id]) then
 			local n = P.nodes[e.id]
@@ -832,6 +833,17 @@ local function pick(mx, my, skip, nearest)
 			if t and (not et or t < et) then
 				id, et = e.id, t
 			end
+			local ft = NT.pf.pick_t(e, oo, dd)
+			if ft and (not ft_at or ft < ft_at) then
+				free_id, ft_at = e.id, ft
+			end
+		end
+	end
+	-- [KIT_FREE_PREFAB] A free copy's box: not over what is in it, its members
+	if free_id and free_id ~= id and (not id or ft_at < et) then
+		local got = find(id)
+		if not (got and type(got.built) == "table" and got.built.by == free_id) then
+			id, et = free_id, ft_at
 		end
 	end
 	local hit, front, vt
@@ -1866,11 +1878,11 @@ function NT.positionless(it)
 			NT.PLACED_AT_ONCE[it.type] == true)
 end
 
-function NT.arm(it)
+function NT.arm(it, free)
 	M.set_tool(nil)
 	S.reparent = nil
 	S.placing = {type = it.type, prefab = it.prefab, label = it.label,
-			key = it.key}
+			key = it.key, free = free}
 	log:info("kit editor: placing " .. it.label)
 	NT.palette_chosen(it)
 	palette()
@@ -2240,9 +2252,9 @@ end
 -- (S.param_cat, nil All) is kept between entities: a type without it shows All
 -- and it is chosen again on the next that has it. Kit's own HUD element
 -- selected narrows kit/game_rules to its <name>_*, until a chip is pressed
--- (S.cat_released).
--- simplified: the choice lasts the session (MEM's kit.remember is the upgrade);
--- no chip says it holds a pending edit, Apply's amber alone does
+-- (S.cat_released). A chip holding an edit not applied says so with a " *".
+-- simplified: the marks are read as the inspector is drawn: a value being typed
+-- marks its own chip, the one in view, only on the next draw
 NT.CATS = {{"behaviour", "Behaviour"}, {"hud", "HUD"}, {"look", "Look"},
 	{"physics", "Physics"}, {"advanced", "Advanced"}}
 NT.CAT_ROW_MIN = 8
@@ -2287,7 +2299,12 @@ function NT.cat_row(w, e, ci, c, t)
 			M.own_selected(e.id) or nil
 	local own = sel_own ~= S.cat_released and sel_own or nil
 	local keep, cur = nil, not own and has[S.param_cat] and S.param_cat or nil
-	local chips = {}
+	local chips, held = {}, {}
+	for k in pairs(E.pending[e.id .. "/" .. ci] or {}) do
+		if decl[k] then
+			held[NT.cat_of(decl[k])] = " *"
+		end
+	end
 	if own or (n >= NT.CAT_ROW_MIN and kinds >= 2) then
 		local r = row(w)
 		if own then
@@ -2300,9 +2317,10 @@ function NT.cat_row(w, e, ci, c, t)
 		chips[#chips + 1] = "All"
 		for _, k in ipairs(NT.CATS) do
 			if has[k[1]] then
-				button(r, k[2], function() NT.cat_pick(k[1], sel_own) end,
+				local name = k[2] .. (held[k[1]] or "")
+				button(r, name, function() NT.cat_pick(k[1], sel_own) end,
 						not own and cur == k[1])
-				chips[#chips + 1] = k[2]
+				chips[#chips + 1] = name
 			end
 		end
 		if cur then
@@ -2994,6 +3012,11 @@ local function fit_inspector()
 	-- the root's, the inspector followed the fit and the fit it
 	narrow()
 	local room = screen_ui.h - w.position.y - 12 - foot
+	-- A field's warning grows the body and a layout never shrinks it again by
+	-- itself: asked to, while it is over the height it was built at
+	if body.height > S.inspector_h0 then
+		body.height = 1
+	end
 	local h = math.max(40, math.min(body.height, room))
 	-- ([KIT_PARAM_CATEGORIES] 4: the view's clip border cut the fields' right edge)
 	local bw = body.width + 4 + (h < body.height and view.verticalScrollBar.width + 4 or 0)
@@ -3044,6 +3067,7 @@ inspector_window = function()
 	view.contentElement = body
 	body:SetPosition(0, 0)
 	view:SetFixedSize(body.width, body.height)
+	S.inspector_h0 = body.height
 	IV.view = view
 	if sig then
 		NT.sg.inspector(W.inspector, view)
@@ -3265,7 +3289,11 @@ show_log = function()
 	if #lines == 0 then
 		return
 	end
-	local lw = window(magic.HA_RIGHT, magic.VA_BOTTOM, -10,
+	-- Beside the inspector, not over its lower rows (a narrow screen's has no
+	-- room beside it)
+	local lw = window(magic.HA_RIGHT, magic.VA_BOTTOM,
+			W.inspector and W.inspector.visible and not narrow() and
+			-(W.inspector.width + 20) or -10,
 			W.touch and -(W.touch.height + 16) or -50)
 	W.log = lw
 	text(lw, "Log of " .. S.primary .. ":", DIM)
@@ -4125,8 +4153,8 @@ end
 -- editor, kept on this machine under key (the app's: Workbench's
 -- project), in the storage of the server's game (buildat.storage_*, the
 -- client's user directory; never the server's, so never in a published
--- project): edit mode or play, the view, the 3D camera, and the tabs
--- (the panel's, the palette's, the list's). Edit mode is asked for again
+-- project): edit mode or play, the view, the 3D camera, the tabs (the
+-- panel's, the palette's, the list's) and the parameters' chip. Edit mode is asked for again
 -- once the rights are known; the view and the tab put back as edit mode
 -- comes on. Running or Stopped is not kept here: it is the server's (the
 -- save's session, which a restart resumes), and a Stop asked by a memory
@@ -4189,6 +4217,11 @@ function M.remember(key)
 	if t.palette_tab == "All" or t.palette_tab == "Favourites" then
 		S.tab = t.palette_tab
 	end
+	for _, c in ipairs(NT.CATS) do
+		if t.param_cat == c[1] then
+			S.param_cat = c[1]
+		end
+	end
 	log:info("kit editor: remembered for " .. key .. ": " ..
 			(next(t) and (t.mode or "play") .. ", " .. tostring(t.view) ..
 			", " .. tostring(t.tab) .. (S.pos and string.format(
@@ -4213,6 +4246,7 @@ function MEM.tick(dt)
 	t.tab = live and NT.tab() or (MEM.view or {}).tab or old.tab
 	t.list_tab = S.list_tab
 	t.palette_tab = S.tab
+	t.param_cat = S.param_cat
 	if S.pos then
 		t.x, t.y, t.z = string.format("%.3f", S.pos.x),
 				string.format("%.3f", S.pos.y), string.format("%.3f", S.pos.z)
@@ -4220,8 +4254,8 @@ function MEM.tick(dt)
 				string.format("%.3f", S.pitch)
 	end
 	local lines = {}
-	for _, k in ipairs({"mode", "view", "tab", "list_tab", "palette_tab", "x",
-			"y", "z", "yaw", "pitch"}) do
+	for _, k in ipairs({"mode", "view", "tab", "list_tab", "palette_tab",
+			"param_cat", "x", "y", "z", "yaw", "pitch"}) do
 		if t[k] then
 			lines[#lines + 1] = k .. " " .. t[k]
 		end

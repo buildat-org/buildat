@@ -82,4 +82,49 @@ wait "$SERVER_PID" 2>/dev/null
 # click (the client failed there)
 [ "$(grep -acE "ui_utils: dropdown_[0-9]+ open" "$t/boss.log")" -ge 3 ] ||
 	fail "a dropdown after a removal did not open ($t/boss.log)"
-echo "PASS: an element removed with an open DropDownList under it: the popup closes, the client stays up"
+
+# A screen pushed over an open dropdown ([UISTACK_PUSH_POPUP]): the push only
+# hides the old top, and the popup is on the UI's root. The popup left open
+# stayed modal, so the dialog's Ok could not be clicked. Nothing in the tree
+# pushes on its own with a popup open, so a small app does it on an event.
+mkdir -p "$t/app/main/client_lua"
+cat > "$t/app/main/meta.json" <<'EOF'
+{"engine_api": 2, "kind": "check", "disable_cpp": true, "client_main": "init.lua",
+ "dependencies": [{"module": "network"}, {"module": "client_lua"}, {"module": "client_data"}]}
+EOF
+cat > "$t/app/main/client_lua/init.lua" <<'EOF'
+local log = buildat.Logger("push_popup")
+local magic = require("buildat/extension/urho3d")
+local uistack = require("buildat/extension/uistack")
+local ui_utils = require("buildat/extension/ui_utils")
+local root = uistack.main:push({desc = "under"})
+ui_utils.dropdown(root, {"one", "two", "three"}, "one", function() end)
+magic.SubscribeToEvent("command_seq:push", function()
+	ui_utils.show_message_dialog("pushed", function()
+		log:info("push_popup: the dialog closed")
+	end)
+end)
+log:info("push_popup: ready")
+EOF
+cat > "$t/push.cmds" <<EOF
+wait_log_any 60000 push_popup: ready
+frames 5
+click DropDownList "▼"
+wait_log 5000 open
+event push
+wait_log 5000 closed
+frames 5
+screenshot $t/pushed.png
+click Button "Ok"
+wait_log 5000 push_popup: the dialog closed
+EOF
+start_server "$t/srv2.log" "Listening at" 300 auto \
+	bin/buildat_server -m "$t/app" -D "$t/user2" -l 3 ||
+	fail "the second server did not come up ($t/srv2.log)"
+CHECK_PIDS+=($SERVER_PID)
+run_client 60 "$t/push.log" timeout 120 bin/buildat -C "$t/client_cache" \
+	-D "$t/cu2" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
+	-c @"$t/push.cmds" || fail "a push over an open dropdown ($t/push.log, $t/srv2.log)"
+kill -INT "$SERVER_PID" 2>/dev/null
+wait "$SERVER_PID" 2>/dev/null
+echo "PASS: an element removed with an open DropDownList under it: the popup closes, the client stays up; a push closes it too"

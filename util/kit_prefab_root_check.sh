@@ -113,7 +113,7 @@ if [ "${1:-}" = web ]; then
 	["click", "Button", "Delete it"], ["sync", 5000], ["frames", 3]
 ]
 J
-	"$here/util/web_drive.sh" chrome workbench "$t/steps.json" "$t/out" ||
+	"$here/util/web_drive.sh" "${WEB_BROWSER:-chrome}" workbench "$t/steps.json" "$t/out" ||
 		fail "the web drive ($t/out)"
 	for w in "placed prefab kit/hut as 3...3" "stamped kit/hut on 3" \
 			"webboss renamed the prefab webboss/bar to webboss/bar2 (0 copies)" \
@@ -605,6 +605,29 @@ assert C not in ents and C + 1 not in ents, ents.get(C)
 assert ents[A]["prefab"]["of"] == "kitboss/shed" and ents[A]["prefab"]["version"] == 4, ents[A]
 assert ents[A]["pos"] == [11, 1, 3], ents[A]
 assert ents[E]["prefab"]["of"] == "kitboss/shed", ents[E]
+PY
+# An item whose look is the prefab: a pickup of it gains no root, its own row alone
+n=0
+{
+	joined
+	echo "keypress F6"
+	echo "wait_log_any 10000 kit editor: state:"
+	ed '{"op": "item", "name": "lookitem2", "preset": "kit/sword", "look": "kitboss/shed"}'
+	echo "sync 5000"
+	edit '{"op": "place", "type": "kit/pickup", "pos": [40, 1, 40], "params": {"item": "kitboss/lookitem2"}}'
+	printf 'frames 5\nquit\n'
+} > "$t/boss3.cmds"
+server 3
+BUILDAT_JOIN_CREATE= client boss3
+stop
+python3 - "$(db_of)" <<'PY' || fail "the pickup of an item with a prefab's look"
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+ents = json.loads(db.execute("select value from store where store='kit' and key='authored'").fetchone()[0])["entities"]
+p = [e for e in ents if e.get("pos") == [40, 1, 40]]
+assert len(p) == 1 and p[0]["components"][0]["type"] == "kit/pickup", p
+assert "prefab" not in p[0], p
+assert not [e for e in ents if e.get("parent") == p[0]["id"]], ents
 PY
 echo "ok: a turned copy saved in the prefab's frame; Refresh and a move with each answer, undone in one; the box; rename, delete with copies, detach, save brings it back"
 echo "PASS: a placed prefab's root: copies follow by rebuild keeping their parameters, Save to prefab and Reset from the inspector, Refresh and a move's one dialog with each answer, undo in one, a turned copy's voxels, the palette's Rename and Delete, Detach; the refusals"
