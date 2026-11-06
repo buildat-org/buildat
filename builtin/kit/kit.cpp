@@ -119,6 +119,8 @@ static const double MAX_COORD = 30000;
 static const size_t MAX_ENTITIES = 4096;
 // [KIT_NESTING] The levels of entities under entities a scene has at most
 static const int MAX_NEST = 16;
+// [KIT_PREFAB_ROOT] What a placed prefab's members are under
+static const char *const PREFAB_ROOT = "kit/prefab_copy";
 static const size_t MAX_LINKS = 64;
 // [KIT] stage 4g: the builders' voxel types and uploaded textures a save
 // has at most, and what an upload may be
@@ -213,8 +215,11 @@ struct Entity
 	double yaw = 0;
 	sv_<Instance> comps;
 	uint32_t node = 0; // a positional one's node in its scene
-	// authored: a prefab copy's member, {"of", "version", "member" (its id
-	// in the prefab), "copy" (the copy's first entity)}; undefined if none
+	// [KIT_PREFAB_ROOT] authored: a placed prefab's root (kit/prefab_copy),
+	// {"of", "version", "voxels" (the prefab's voxels_version this copy last
+	// stamped, if it has any)}, its members its built children. Made in play
+	// (c:spawn, no root): each member's {"of", "version", "member", "copy"
+	// (the copy's first entity)}. Undefined if none
 	json::Value prefab;
 	// authored ([KIT_GENERATORS]): a generator's child, {"by" (its id),
 	// "member" (its number in the build), "moved": true (put elsewhere by
@@ -1234,7 +1239,15 @@ struct Module: public interface::Module, public Interface
 		int base[3] = {0, 0, 0};
 		int turn = 0;
 		bool set = false;
+		// [KIT_PREFAB_ROOT] a stamp's: this box's cells emptied first, and
+		// the undo the same as the move just before it
+		bool clear = false, merge = false;
+		int clear_at[3] = {0, 0, 0}, clear_size[3] = {0, 0, 0};
 	} m_paste;
+	// [KIT_PREFAB_ROOT] a save's: the copies of this prefab but that one
+	// are built again (rebuilds())
+	ss_ m_follow;
+	uint64_t m_follow_source = 0;
 	// [KIT_GENERATORS] a build's call under way (box_call(): its budget)
 	bool m_building = false;
 	// Those that did not load (logged once), and those loading now (a
@@ -1807,11 +1820,26 @@ struct Module: public interface::Module, public Interface
 		if(e.comps.empty() || !e.kind.empty())
 			return false;
 		for(const Instance &in : e.comps){
+			// [KIT_PREFAB_ROOT] a copy's root has a place by its prefab: one
+			// with none has no position as these have
+			if(in.type == PREFAB_ROOT && !e.has_pos)
+				continue;
 			auto t = m_types.find(in.type);
 			if(t == m_types.end() || !t->second.no_position)
 				return false;
 		}
 		return true;
+	}
+
+	// [KIT_PREFAB_ROOT] Whether it is a placed prefab's root
+	static bool is_root(const Entity &e)
+	{
+		if(!e.prefab.is_object())
+			return false;
+		for(const Instance &in : e.comps)
+			if(in.type == PREFAB_ROOT)
+				return true;
+		return false;
 	}
 
 	// Whether it has a node: one with no position's is its shared state's and
@@ -2811,6 +2839,9 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		const Type &ty = m_types[t];
+		// [KIT_PREFAB_ROOT] the editor's place of a prefab makes these
+		if(t == PREFAB_ROOT)
+			return;
 		if(ty.player){
 			if(starting)
 				m_player_types.push_back(t);
@@ -4403,6 +4434,17 @@ struct Module: public interface::Module, public Interface
 		j.set("files", files);
 		j.set("hex", hex);
 		j.set("dependencies", deps);
+		// [KIT_PREFAB_ROOT] Others' copies will name these: no renaming them
+		for(auto &pf : pfs){
+			const ss_ name = author+"/"+pf.first;
+			const json::Value *row = prefab(name);
+			if(!row)
+				continue;
+			json::Value marked = row->deepcopy();
+			marked.set("published", true);
+			m_store->set("prefab:"+name, marked.stringify());
+			m_prefabs[name] = marked;
+		}
 		log_i(MODULE, "%s exports %zu files, %zu dependencies", cs(p.name),
 				(size_t)files.size(), (size_t)deps.size());
 		network::access(m_server, [&](network::Interface *inetwork){
@@ -9197,6 +9239,13 @@ struct Module: public interface::Module, public Interface
 				why = "member "+itos(id)+" is no plain entity with a position";
 				return false;
 			}
+			// [KIT_PREFAB_ROOT] another prefab's copy among them
+			const json::Value &ppf = e.get("prefab");
+			if(!ppf.is_undefined() && (!ppf.is_object() ||
+					jstr(ppf, "of").empty() || jstr(ppf, "of").size() > 200)){
+				why = "member "+itos(id)+"'s prefab names none";
+				return false;
+			}
 			ids.insert(id);
 		}
 		for(unsigned i = 0; i < es.size(); i++){
@@ -9371,10 +9420,12 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_PREFAB_VOXELS] A box of a scene's voxels ([o, o + n)) as a
 	// prefab's voxels, at from `base`; null with why if a cell of it is
-	// not loaded or the scene has no voxels
+	// not loaded or the scene has no voxels. [KIT_PREFAB_ROOT] k: the box
+	// is the prefab's, whose copy stands turned k quarter turns about base:
+	// the cells read there, a shape's facing turned back
 	json::Value read_voxels(main_context::SceneReference ref,
 			const int o[3], const int n[3], const int base[3], bool air,
-			ss_ &why, size_t *solid = nullptr)
+			ss_ &why, size_t *solid = nullptr, int k = 0)
 	{
 		json::Value out = json::null();
 		bool any = false;
@@ -9389,7 +9440,10 @@ struct Module: public interface::Module, public Interface
 			for(int y = 0; y < n[1]; y++)
 				for(int z = 0; z < n[2]; z++)
 					for(int x = 0; x < n[0]; x++){
-						const pv::Vector3DInt32 q(o[0] + x, o[1] + y, o[2] + z);
+						int tx = o[0] + x - base[0], tz = o[2] + z - base[2];
+						turn_cell(tx, tz, k);
+						const pv::Vector3DInt32 q(base[0] + tx, o[1] + y,
+								base[2] + tz);
 						uint32_t word = 0;
 						if(!voxel_id(w, q, word)){
 							why = "the cell ("+itos(q.getX())+","+itos(q.getY())+
@@ -9399,7 +9453,9 @@ struct Module: public interface::Module, public Interface
 						const interface::VoxelDefinition *d =
 								reg->get(f.id.get(word));
 						const ss_ name = d ? d->name.block_name : ss_("air");
-						const uint32_t pm = f.param.bound() ? f.param.get(word) : 0;
+						uint32_t pm = f.param.bound() ? f.param.get(word) : 0;
+						if(k && is_shape(name))
+							pm = (pm & 4) | ((pm + 4 - k) & 3);
 						const uint32_t tn = f.tint.bound() ? f.tint.get(word) : 0;
 						if(name != "air")
 							not_air++;
@@ -9528,6 +9584,85 @@ struct Module: public interface::Module, public Interface
 		});
 	}
 
+	// [KIT_PREFAB_ROOT] All cells of a box air, terrain too; each cell's old
+	// word in nc (an undo's) the first time; cells not loaded skipped, counted
+	void clear_voxels(main_context::SceneReference ref, const int o[3],
+			const int n[3], Change &nc, const ss_ &who, size_t &cleared,
+			size_t &missing)
+	{
+		voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			const interface::VoxelFormat &f = reg->get_format();
+			interface::VoxelName vn;
+			vn.block_name = "air";
+			const interface::VoxelDefinition *d = reg->get(vn);
+			if(!d)
+				return;
+			const uint32_t word = (uint32_t)kit::voxel_word(f, d->id, 0, 0) &
+					state_mask(f);
+			for(int y = 0; y < n[1]; y++)
+				for(int z = 0; z < n[2]; z++)
+					for(int x = 0; x < n[0]; x++){
+						const pv::Vector3DInt32 q(o[0] + x, o[1] + y, o[2] + z);
+						uint32_t old = 0;
+						if(!hm_section(w, q) || !voxel_id(w, q, old)){
+							missing++;
+							continue;
+						}
+						if(old == word)
+							continue;
+						nc.cells.insert(std::make_pair(std::make_tuple(q.getX(),
+								q.getY(), q.getZ()), old));
+						set_id(w, q, word);
+						mark(w, ref, q, 'k', who);
+						cleared++;
+					}
+		});
+	}
+
+	// [KIT_PREFAB_ROOT] The cells a prefab's voxels fill with its base at
+	// base, turned k quarter turns: the low corner and the size
+	static void placed_box(const json::Value &vx, const int base[3], int k,
+			int o[3], int n[3])
+	{
+		int x0 = (int)vx.get("at").at(0u).as_number();
+		int z0 = (int)vx.get("at").at(2u).as_number();
+		int x1 = x0 + (int)vx.get("size").at(0u).as_number() - 1;
+		int z1 = z0 + (int)vx.get("size").at(2u).as_number() - 1;
+		turn_cell(x0, z0, k);
+		turn_cell(x1, z1, k);
+		o[0] = base[0] + std::min(x0, x1);
+		o[1] = base[1] + (int)vx.get("at").at(1u).as_number();
+		o[2] = base[2] + std::min(z0, z1);
+		n[0] = std::abs(x1 - x0) + 1;
+		n[1] = (int)vx.get("size").at(1u).as_number();
+		n[2] = std::abs(z1 - z0) + 1;
+	}
+
+	// [KIT_PREFAB_ROOT] A root's base cell and quarter turns, the world's:
+	// false with why where the turn is no multiple of 90 (voxels only turn
+	// so) or it has no place
+	bool root_frame(const Entity &e, int base[3], int &k, ss_ &why)
+	{
+		if(!e.has_pos){
+			why = "entity "+itos(e.id)+" has no place, so no voxels' box";
+			return false;
+		}
+		double w[3], wy = 0;
+		world_of(e, w, &wy);
+		if(std::fmod(wy, 90.0) != 0){
+			char deg[32];
+			snprintf(deg, sizeof deg, "%g", wy);
+			why = "entity "+itos(e.id)+" is turned "+deg+": voxels go "
+					"by multiples of 90";
+			return false;
+		}
+		k = ((int)std::floor(wy / 90 + 0.5) % 4 + 4) % 4;
+		for(int i = 0; i < 3; i++)
+			base[i] = (int)std::floor(w[i] + 0.5);
+		return true;
+	}
+
 	// The placeable prefabs: Kit's and the app's files, the builders' rows
 	void load_prefab_palette()
 	{
@@ -9569,11 +9704,18 @@ struct Module: public interface::Module, public Interface
 			}
 	}
 
-	json::Value group_prefab(const sv_<uint64_t> &ids, const double base[3])
+	// [KIT_PREFAB_ROOT] frame: what those directly under it keep their own
+	// places in, as a member's frame (a root's save); numbers: their ids in
+	// the prefab
+	json::Value group_prefab(const sv_<uint64_t> &ids, const double base[3],
+			uint64_t frame = 0,
+			const std::map<uint64_t, int64_t> *numbers = nullptr)
 	{
 		std::map<uint64_t, int64_t> local;
 		for(size_t i = 0; i < ids.size(); i++)
 			local[ids[i]] = (int64_t)i + 1;
+		if(numbers)
+			local = *numbers;
 		auto member = [&](uint64_t id) -> int64_t {
 			auto it = local.find(id);
 			return it == local.end() ? 0 : it->second;
@@ -9585,6 +9727,9 @@ struct Module: public interface::Module, public Interface
 			j.set("id", member(id));
 			j.set("parent", member(src.parent));
 			j.set("name", src.name);
+			// [KIT_PREFAB_ROOT] another prefab's copy among them: still one
+			if(is_root(src))
+				j.set("prefab", src.prefab);
 			// [KIT_GENERATORS] a child of a generator among them: still its
 			// (a copy's generator's), its overrides kept
 			const bool built = !src.built.is_undefined() &&
@@ -9595,8 +9740,9 @@ struct Module: public interface::Module, public Interface
 				j.set("built", bt);
 			}
 			if(src.has_pos){
-				const bool framed = member(src.parent) &&
-						m_entities[src.parent].has_pos;
+				const bool framed = (member(src.parent) &&
+						m_entities[src.parent].has_pos) ||
+						(frame && src.parent == frame);
 				double w[3], wy = src.yaw;
 				if(!framed)
 					world_of(src, w, &wy);
@@ -9694,6 +9840,8 @@ struct Module: public interface::Module, public Interface
 				b.set("by", map(bt.get("by")));
 				e.set("built", b);
 			}
+			if(m.get("prefab").is_object())
+				e.set("prefab", m.get("prefab").deepcopy());
 			// [KIT_NESTING] under a positioned member: its own place in its
 			// parent's frame (a turn turns it with its parent)
 			if(parent && pos_ok(m.get("pos")) && positioned.count(parent)){
@@ -9768,8 +9916,10 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// {"op": "place", "prefab": name, "pos": [x, y, z], "turn": degrees}:
-	// a copy of the prefab in the editor's scene, its members' ids the
-	// next ones. [KIT_PREFAB_VOXELS] "clipboard": true instead of a
+	// a copy of the prefab in the editor's scene: [KIT_PREFAB_ROOT] its root
+	// (kit/prefab_copy, a place only if the prefab has a positioned member or
+	// voxels; turned, it is what turns), its members its built children, the
+	// next ids. [KIT_PREFAB_VOXELS] "clipboard": true instead of a
 	// prefab: the builder's copy (a paste, its members no prefab's);
 	// turn: a multiple of 90, the copy turned round y about its base
 	// (members, their yaws, its voxels and their shapes' facings); its
@@ -9815,7 +9965,7 @@ struct Module: public interface::Module, public Interface
 			why = "the editor is in no scene of the composition's";
 			return false;
 		}
-		const size_t n = pf->get("entities").size();
+		const size_t n = pf->get("entities").size() + 1;
 		if(m_entities.size() + n > MAX_ENTITIES){
 			why = "the composition has "+itos(MAX_ENTITIES)+" entities";
 			return false;
@@ -9839,29 +9989,81 @@ struct Module: public interface::Module, public Interface
 		uint64_t under = 0;
 		if(!parent_arg(j, p, under, why))
 			return false;
+		if(!paste){
+			const uint64_t id = m_next_id++;
+			json::Value row = json::object(), comps = json::array(),
+					comp = json::object(), pi = json::object();
+			row.set("id", (int64_t)id);
+			row.set("parent", (int64_t)(under ? under : scene));
+			row.set("name", name.substr(name.find('/') + 1)+" "+itos(id));
+			pi.set("of", name);
+			pi.set("version", json::jint(*pf, "version", 1));
+			if(vox)
+				pi.set("voxels", voxels_version(*pf));
+			row.set("prefab", pi);
+			if(needs_place(*pf)){
+				json::Value pos = json::array();
+				for(int k = 0; k < 3; k++)
+					pos.append(base[k]);
+				row.set("pos", pos);
+				if(turn)
+					row.set("yaw", (double)(90 * turn));
+				if(under)
+					localize(row);
+			}
+			comp.set("type", PREFAB_ROOT);
+			comps.append(comp);
+			row.set("components", comps);
+			Entity e;
+			if(!entity_from_json(row, e, why))
+				return false;
+			change.push_back(std::make_pair(id, row));
+			ss_ built;
+			rebuild(e, *pf, change, built);
+			what = "placed prefab "+name+" as "+itos(id)+"..."+
+					itos(m_next_id - 1)+(turn ? ", turned "+itos(turn * 90) :
+					ss_());
+			return true;
+		}
 		sv_<json::Value> rows;
-		instantiate(*pf, name, scene, base, m_next_id, rows, turn);
+		instantiate(*pf, "", scene, base, m_next_id, rows, turn);
 		for(json::Value &row : rows){
 			if(under && json::jint(row, "parent", 0) == (int64_t)scene){
 				row.set("parent", (int64_t)under);
 				localize(row);
 			}
-			if(paste){
-				// Named as a duplicate's are
-				const json::Value &cs_ = row.get("components");
-				if(cs_.size())
-					row.set("name", jstr(cs_.at(0), "type")+" "+
-							itos(json::jint(row, "id", 0)));
-			}
+			// Named as a duplicate's are
+			const json::Value &cs_ = row.get("components");
+			if(cs_.size())
+				row.set("name", jstr(cs_.at(0), "type")+" "+
+						itos(json::jint(row, "id", 0)));
 			change.push_back(std::make_pair((uint64_t)json::jint(row, "id", 0),
 					row));
 		}
-		what = (paste ? ss_("pasted the copy") : "placed prefab "+name)+
-				(rows.empty() ? ss_() : " as "+itos(m_next_id)+"..."+
-				itos(m_next_id + rows.size() - 1))+(turn ? ", turned "+
-				itos(turn * 90) : ss_());
+		what = ss_("pasted the copy")+(rows.empty() ? ss_() : " as "+
+				itos(m_next_id)+"..."+itos(m_next_id + rows.size() - 1))+
+				(turn ? ", turned "+itos(turn * 90) : ss_());
 		m_next_id += rows.size();
 		return true;
+	}
+
+	// [KIT_PREFAB_ROOT] Whether a copy of it has a place: a positioned member,
+	// or voxels
+	static bool needs_place(const json::Value &pf)
+	{
+		if(pf.get("voxels").is_object())
+			return true;
+		const json::Value &es = pf.get("entities");
+		for(unsigned i = 0; i < es.size(); i++)
+			if(!es.at(i).get("pos").is_undefined())
+				return true;
+		return false;
+	}
+
+	// [KIT_PREFAB_ROOT] The version a prefab's voxels last changed in
+	static int64_t voxels_version(const json::Value &pf)
+	{
+		return json::jint(pf, "voxels_version", json::jint(pf, "version", 1));
 	}
 
 	// [KIT_PREFAB_VOXELS] {"box": [x0, y0, z0, x1, y1, z1]} (cells, both
@@ -10189,53 +10391,160 @@ struct Module: public interface::Module, public Interface
 		return d;
 	}
 
-	// A prefab copy's member (its id in the prefab) as an entity, or 0
-	uint64_t copy_member(int64_t copy, int64_t member)
+	// [KIT_PREFAB_ROOT] The name a builder's prefabs are under: "" if none may
+	// be, "kit" being Kit's
+	static ss_ prefab_author(const Peer &p)
 	{
-		for(auto &e : m_entities)
-			if(json::jint(e.second.prefab, "copy", 0) == copy &&
-					json::jint(e.second.prefab, "member", 0) == member)
-				return e.first;
-		return 0;
-	}
-
-	// {"op": "save_prefab", "ids": [n...], "name": n}: those entities a
-	// prefab "<the builder's name>/<n>" (a new version of it if it is
-	// there), in the save, placeable from then on; they are a copy of it,
-	// and every other copy follows it: each member's parameters the
-	// prefab's, but those set on that copy (its overrides)
-	// simplified: a copy follows the parameters; members and links added
-	// or gone are not, nor a prefab of files (Kit's, the app's)
-	bool save_prefab(const json::Value &j, const Peer &p,
-			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
-			ss_ &why)
-	{
-		const ss_ short_name = jstr(j, "name");
-		if(!name_ok(short_name)){
-			why = "name: letters, digits and _";
-			return false;
-		}
 		ss_ author = p.name.substr(0, 64);
 		for(char &c : author)
 			if(!isalnum((unsigned char)c))
 				c = '_';
-		if(author.empty() || author == "kit"){
+		return author == "kit" ? ss_() : author;
+	}
+
+	// [KIT_PREFAB_ROOT] An edit's root of a placed prefab
+	Entity* root_arg(const json::Value &j, const char *key, ss_ &why)
+	{
+		Entity *e = entity_arg(j, key, why);
+		if(e && !is_root(*e)){
+			why = "entity "+itos(e->id)+" is no placed prefab's root";
+			return nullptr;
+		}
+		return e;
+	}
+
+	// {"op": "save_prefab", "ids": [n...], "name": n}: those entities a
+	// prefab "<the builder's name>/<n>" (a new version of it if it is
+	// there), in the save, placeable from then on; those entities stay as
+	// they are. [KIT_PREFAB_ROOT] {"op": "save_prefab", "root": id}: the
+	// new version of that copy's prefab, of what is under it (by its own
+	// member numbers, new ones next, in its frame) and, if the prefab has
+	// voxels or "box" names one (the world's), that box as it stands, turned
+	// back to the prefab's frame ("air" as given, else as it was); it is then
+	// what the prefab says, overrides and moves no more. Whichever: every copy
+	// follows (rebuilds()). A prefab that was deleted comes back so.
+	bool save_prefab(const json::Value &j, const Peer &p,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
+			ss_ &why)
+	{
+		const ss_ author = prefab_author(p);
+		if(author.empty()){
 			why = "a builder's prefabs are under their name, and it is \""+
-					author+"\"";
+					p.name.substr(0, 64)+"\"";
+			return false;
+		}
+		Entity *root = nullptr;
+		ss_ short_name = jstr(j, "name");
+		if(!j.get("root").is_undefined()){
+			root = root_arg(j, "root", why);
+			if(!root)
+				return false;
+			const ss_ of = jstr(root->prefab, "of");
+			if(of.compare(0, author.size() + 1, author+"/") != 0){
+				why = of+" is "+(of.compare(0, 4, "kit/") == 0 ? ss_("Kit's") :
+						"not yours")+": Make prefab makes one of your own of it";
+				return false;
+			}
+			short_name = of.substr(author.size() + 1);
+		}
+		if(!name_ok(short_name)){
+			why = "name: letters, digits and _";
 			return false;
 		}
 		const ss_ name = author+"/"+short_name;
-		const json::Value *had = prefab(name);
-		if(had && !jstr(*had, "package").empty()){
-			why = name+" is the package "+jstr(*had, "package")+"'s";
+		m_bad_prefabs.erase(name);
+		const json::Value *old = prefab(name);
+		if(old && !jstr(*old, "package").empty()){
+			why = name+" is the package "+jstr(*old, "package")+"'s";
 			return false;
 		}
-		// [KIT_PREFAB_VOXELS] "box" (and "air"): a box of voxels in it too;
-		// "clipboard": true: the builder's copy named (no entities of the
-		// composition's become its copy)
 		sv_<uint64_t> group;
 		json::Value pf;
-		if(j.get("clipboard").is_true()){
+		if(root){
+			group = group_of(root->id);
+			if(group.empty()){
+				why = "more than "+itos(MAX_PREFAB)+" entities under it";
+				return false;
+			}
+			group.erase(group.begin());
+			std::sort(group.begin(), group.end(), [&](uint64_t a, uint64_t b){
+				const int da = depth(a), db = depth(b);
+				return da != db ? da < db : a < b;
+			});
+			// Its members' numbers kept (what other copies know them by); a
+			// new one's past any there was, or else the lowest free
+			std::map<uint64_t, int64_t> numbers;
+			std::set<int64_t> used;
+			int64_t next = 1;
+			for(uint64_t id : group){
+				const json::Value &bt = m_entities[id].built;
+				if((uint64_t)json::jint(bt, "by", 0) != root->id)
+					continue;
+				numbers[id] = json::jint(bt, "member", 0);
+				used.insert(numbers[id]);
+				next = std::max(next, numbers[id] + 1);
+			}
+			const json::Value empty = json::array();
+			const json::Value &was = old ? old->get("entities") : empty;
+			for(unsigned i = 0; i < was.size(); i++)
+				next = std::max(next, json::jint(was.at(i), "id", 0) + 1);
+			for(uint64_t id : group){
+				if(numbers.count(id))
+					continue;
+				if(next > (int64_t)MAX_PREFAB)
+					next = 1;
+				while(used.count(next))
+					next++;
+				numbers[id] = next;
+				used.insert(next++);
+			}
+			const double zero[3] = {0, 0, 0};
+			pf = group_prefab(group, zero, root->id, &numbers);
+			const bool box = !j.get("box").is_undefined();
+			const json::Value none;
+			const json::Value &ov = old ? old->get("voxels") : none;
+			if(box || ov.is_object()){
+				int base[3], k = 0, o[3], n[3];
+				if(!root_frame(*root, base, k, why))
+					return false;
+				if(box){
+					int wo[3], wn[3];
+					if(!box_arg(j, wo, wn, why))
+						return false;
+					// Its corners in the prefab's frame
+					int x0 = wo[0] - base[0], z0 = wo[2] - base[2];
+					int x1 = x0 + wn[0] - 1, z1 = z0 + wn[2] - 1;
+					turn_cell(x0, z0, 4 - k);
+					turn_cell(x1, z1, 4 - k);
+					o[0] = base[0] + std::min(x0, x1);
+					o[1] = wo[1];
+					o[2] = base[2] + std::min(z0, z1);
+					n[0] = std::abs(x1 - x0) + 1;
+					n[1] = wn[1];
+					n[2] = std::abs(z1 - z0) + 1;
+				} else {
+					placed_box(ov, base, 0, o, n);
+				}
+				auto si = m_host.scenes.find(p.scene);
+				if(si == m_host.scenes.end()){
+					why = "not in a scene of the app's";
+					return false;
+				}
+				const bool air = j.get("air").is_undefined() ?
+						ov.get("air").is_true() : j.get("air").is_true();
+				const json::Value v = read_voxels(si->second, o, n, base, air, why,
+						nullptr, k);
+				if(v.is_null())
+					return false;
+				pf.set("voxels", v);
+			}
+			if(pf.stringify().size() > MAX_TYPE_SOURCE){
+				why = "it is past "+itos(MAX_TYPE_SOURCE)+" bytes as a prefab";
+				return false;
+			}
+		// [KIT_PREFAB_VOXELS] "box" (and "air"): a box of voxels in it too;
+		// "clipboard": true: the builder's copy named
+		} else if(j.get("clipboard").is_true()){
 			auto ci = m_clipboard.find(p.name);
 			if(ci == m_clipboard.end()){
 				why = "nothing copied (the copy op)";
@@ -10250,14 +10559,30 @@ struct Module: public interface::Module, public Interface
 		} else if(!group_with_voxels(j, p, group, pf, why)){
 			return false;
 		}
-		m_bad_prefabs.erase(name);
-		const json::Value *old = prefab(name);
-		const int64_t version = old ? json::jint(*old, "version", 1) + 1 : 1;
+		const int64_t version = old ? json::jint(*old, "version", 1) + 1 :
+				root ? json::jint(root->prefab, "version", 0) + 1 : 1;
 		pf.set("author", author);
 		pf.set("name", short_name);
 		pf.set("version", version);
+		if(pf.get("voxels").is_object())
+			pf.set("voxels_version", old && old->get("voxels").stringify() ==
+					pf.get("voxels").stringify() ? voxels_version(*old) : version);
+		if(old && old->get("published").is_true())
+			pf.set("published", true);
 		if(!check_prefab(pf, why))
 			return false;
+		// The copies that will follow, at their most
+		size_t follow = 0;
+		for(auto &x : m_entities)
+			if(authored(x.second) && is_root(x.second) &&
+					jstr(x.second.prefab, "of") == name)
+				follow++;
+		if(m_entities.size() + follow * pf.get("entities").size() >
+				MAX_ENTITIES){
+			why = "its "+itos(follow)+" copies would take the composition past "+
+					itos(MAX_ENTITIES)+" entities";
+			return false;
+		}
 		m_store->set("prefab:"+name, pf.stringify());
 		m_prefabs[name] = pf;
 		m_prefab_palette.insert(name);
@@ -10274,67 +10599,428 @@ struct Module: public interface::Module, public Interface
 				send_item_types(-1);
 				break;
 			}
-		std::set<uint64_t> in_group(group.begin(), group.end());
-		for(size_t i = 0; i < group.size(); i++){
-			Entity copy = m_entities[group[i]];
-			json::Value pi = json::object();
-			pi.set("of", name);
-			pi.set("version", version);
-			pi.set("member", (int64_t)i + 1);
-			pi.set("copy", (int64_t)group[0]);
-			copy.prefab = pi;
-			// simplified: a generator's child keeps its overrides, which
-			// keep its values from the prefab's too
-			if(copy.built.is_undefined())
+		// [KIT_PREFAB_ROOT] The copy saved: what it is is what the prefab says
+		if(root){
+			std::set<uint64_t> in_group(group.begin(), group.end());
+			const json::Value &ms = pf.get("entities");
+			for(size_t i = 0; i < group.size(); i++){
+				Entity copy = m_entities[group[i]];
+				if(in_group.count((uint64_t)json::jint(copy.built, "by", 0)))
+					continue;
+				json::Value bt = json::object();
+				bt.set("by", (int64_t)root->id);
+				bt.set("member", json::jint(ms.at((unsigned)i), "id", 0));
+				copy.built = bt;
 				for(Instance &in : copy.comps)
 					in.overrides.clear();
-			change.push_back(std::make_pair(copy.id, entity_json(copy)));
-		}
-		size_t updated = 0;
-		const json::Value &members = pf.get("entities");
-		for(auto &e : m_entities){
-			if(in_group.count(e.first) || !authored(e.second) ||
-					jstr(e.second.prefab, "of") != name)
-				continue;
-			const int64_t lid = json::jint(e.second.prefab, "member", 0);
-			const int64_t copy_id = json::jint(e.second.prefab, "copy", 0);
-			json::Value m;
-			for(unsigned i = 0; i < members.size(); i++)
-				if(json::jint(members.at(i), "id", 0) == lid)
-					m = members.at(i);
-			if(m.is_undefined())
-				continue;
-			Entity copy = e.second;
-			const json::Value &mc = m.get("components");
-			for(size_t c = 0; c < copy.comps.size() && c < mc.size(); c++){
-				Instance &in = copy.comps[c];
-				if(full_type(jstr(mc.at((unsigned)c), "type")) != in.type)
-					continue;
-				const json::Value &np = mc.at((unsigned)c).get("params");
-				const json::Value &decl = m_types[in.type].decl.get("params");
-				if(np.is_object())
-					for(json::Iterator it(np); it; ++it){
-						if(in.overrides.count(it.key()))
-							continue;
-						json::Value v = *it;
-						if(jstr(decl.get(it.key()), "type") == "entity")
-							v = json::Value((int64_t)copy_member(copy_id,
-									v.is_number() ? (int64_t)v.as_number() : 0));
-						in.params.set(it.key(), v);
-					}
+				change.push_back(std::make_pair(copy.id, entity_json(copy)));
 			}
-			copy.prefab = e.second.prefab.deepcopy();
-			copy.prefab.set("version", version);
-			change.push_back(std::make_pair(copy.id, entity_json(copy)));
-			updated++;
+			Entity r = *root;
+			r.prefab = root->prefab.deepcopy();
+			r.prefab.set("of", name);
+			r.prefab.set("version", version);
+			if(pf.get("voxels").is_object())
+				r.prefab.set("voxels", voxels_version(pf));
+			change.push_back(std::make_pair(r.id, entity_json(r)));
 		}
+		m_follow = name;
+		m_follow_source = root ? root->id : 0;
 		const json::Value &vx = pf.get("voxels");
 		what = "saved prefab "+name+" version "+itos(version)+" of "+
 				itos(pf.get("entities").size())+" entities"+(vx.is_object() ?
 				" and a box of "+vx.get("size").stringify()+" voxels"+
-				(vx.get("air").is_true() ? " (air replaces)" : "") : ss_())+
-				" ("+itos(updated)+" entities of other copies follow it)";
+				(vx.get("air").is_true() ? " (air replaces)" : "") : ss_());
 		return true;
+	}
+
+	// [KIT_PREFAB_ROOT] {"op": "stamp", "id": root, "clear": bool, "from":
+	// [x, y, z, yaw] (the world's), "merge": bool}: the prefab's voxels written
+	// at the root's place and turn. clear: all cells of a box emptied first,
+	// terrain too: the box at `from` (a move's, where it was), else the one it
+	// is stamped in. merge: one undo with the root's move just before. Its
+	// voxels are this version's on the root from then on
+	bool stamp(const json::Value &j, const Peer &p,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what, ss_ &why)
+	{
+		Entity *e = root_arg(j, "id", why);
+		if(!e)
+			return false;
+		const ss_ of = jstr(e->prefab, "of");
+		const json::Value *pf = prefab(of);
+		if(!pf){
+			why = "the prefab "+of+" is gone: nothing to stamp";
+			return false;
+		}
+		const json::Value &vx = pf->get("voxels");
+		if(!vx.is_object()){
+			why = "the prefab "+of+" has no voxels";
+			return false;
+		}
+		ss_ scene;
+		scene_of(*e, &scene);
+		if(scene != p.scene || !m_host.scenes.count(p.scene)){
+			why = "entity "+itos(e->id)+" is in another scene";
+			return false;
+		}
+		int base[3], k = 0;
+		if(!root_frame(*e, base, k, why))
+			return false;
+		m_paste.vox = vx;
+		for(int i = 0; i < 3; i++)
+			m_paste.base[i] = base[i];
+		m_paste.turn = k;
+		m_paste.set = true;
+		m_paste.merge = j.get("merge").is_true();
+		m_paste.clear = j.get("clear").is_true();
+		if(m_paste.clear){
+			int cb[3] = {base[0], base[1], base[2]}, ck = k;
+			const json::Value &from = j.get("from");
+			if(!from.is_undefined()){
+				if(!from.is_array() || from.size() != 4){
+					why = "from: [x, y, z, yaw]";
+					return false;
+				}
+				for(unsigned i = 0; i < 4; i++)
+					if(!from.at(i).is_number() ||
+							!std::isfinite(from.at(i).as_number()) ||
+							std::fabs(from.at(i).as_number()) > MAX_COORD){
+						why = "from: [x, y, z, yaw]";
+						return false;
+					}
+				const double fy = from.at(3u).as_number();
+				if(std::fmod(fy, 90.0) != 0){
+					why = "from: a yaw of a multiple of 90";
+					return false;
+				}
+				for(unsigned i = 0; i < 3; i++)
+					cb[i] = (int)std::floor(from.at(i).as_number() + 0.5);
+				ck = (((int)fy / 90) % 4 + 4) % 4;
+			}
+			placed_box(vx, cb, ck, m_paste.clear_at, m_paste.clear_size);
+		}
+		Entity copy = *e;
+		copy.prefab = e->prefab.deepcopy();
+		copy.prefab.set("voxels", voxels_version(*pf));
+		change.push_back(std::make_pair(e->id, entity_json(copy)));
+		what = "stamped "+of+" on "+itos(e->id);
+		return true;
+	}
+
+	// [KIT_PREFAB_ROOT] {"op": "prefab_detach", "id": root}: the root gone,
+	// what is under it plain entities under its parent, where they are; the
+	// voxels stay. (Links to the root: it has no inputs.)
+	bool detach_prefab(const json::Value &j,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what, ss_ &why)
+	{
+		Entity *e = root_arg(j, "id", why);
+		if(!e)
+			return false;
+		const uint64_t id = e->id, up = e->parent;
+		const ss_ of = jstr(e->prefab, "of");
+		size_t n = 0;
+		for(auto &x : m_entities){
+			if(!authored(x.second) || x.first == id)
+				continue;
+			const bool under = x.second.parent == id;
+			const bool by = (uint64_t)json::jint(x.second.built, "by", 0) == id;
+			if(!under && !by)
+				continue;
+			Entity copy = x.second;
+			if(by){
+				copy.built = json::Value();
+				for(Instance &in : copy.comps)
+					in.overrides.clear();
+				n++;
+			}
+			json::Value row = entity_json(copy);
+			if(under){
+				row = world_row(copy);
+				row.set("parent", (int64_t)up);
+				localize(row);
+			}
+			change.push_back(std::make_pair(x.first, row));
+		}
+		change.push_back(std::make_pair(id, json::null()));
+		what = "detached "+itos(n)+" entities from the copy "+itos(id)+" of "+of;
+		return true;
+	}
+
+	// [KIT_PREFAB_ROOT] {"op": "prefab_reset", "id", "comp", "param"}: a copy's
+	// member's parameter the prefab's again, no longer its own
+	bool reset_param(const json::Value &j,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what, ss_ &why)
+	{
+		Entity *e = nullptr;
+		Instance *in = instance_arg(j, e, why);
+		if(!in)
+			return false;
+		const uint64_t by = (uint64_t)json::jint(e->built, "by", 0);
+		auto ri = m_entities.find(by);
+		if(ri == m_entities.end() || !is_root(ri->second)){
+			why = "entity "+itos(e->id)+" is no prefab's member";
+			return false;
+		}
+		const ss_ param = jstr(j, "param"), of = jstr(ri->second.prefab, "of");
+		if(!in->overrides.count(param)){
+			why = "its "+param.substr(0, 64)+" is not its own";
+			return false;
+		}
+		const json::Value *pf = prefab(of);
+		if(!pf){
+			why = "the prefab "+of+" is gone: nothing to reset to";
+			return false;
+		}
+		const size_t ci = in - &e->comps[0];
+		const json::Value &ms = pf->get("entities");
+		const int64_t lid = json::jint(e->built, "member", 0);
+		json::Value decl = m_types[in->type].decl.get("params").get(param);
+		json::Value v = decl.get("default");
+		bool member = false;
+		for(unsigned i = 0; i < ms.size(); i++){
+			if(json::jint(ms.at(i), "id", 0) != lid)
+				continue;
+			const json::Value &cs_ = ms.at(i).get("components");
+			if(ci < cs_.size() && full_type(jstr(cs_.at((unsigned)ci), "type")) ==
+					in->type){
+				member = true;
+				const json::Value &pv = cs_.at((unsigned)ci).get("params").
+						get(param);
+				if(!pv.is_undefined())
+					v = pv;
+			}
+		}
+		if(!member){
+			why = "the prefab "+of+" has no such member now";
+			return false;
+		}
+		// An entity's: the member's number made this copy's
+		if(jstr(decl, "type") == "entity"){
+			int64_t to = 0;
+			for(auto &x : m_entities)
+				if((uint64_t)json::jint(x.second.built, "by", 0) == by &&
+						v.is_number() && json::jint(x.second.built, "member", 0) ==
+						(int64_t)v.as_number())
+					to = (int64_t)x.first;
+			v = json::Value(to);
+		}
+		const ss_ bad = check_param(decl, v);
+		if(!bad.empty()){
+			why = "the prefab's "+param+" is "+bad;
+			return false;
+		}
+		Entity copy = *e;
+		copy.comps[ci].params = in->params.deepcopy();
+		copy.comps[ci].params.set(param, v);
+		copy.comps[ci].overrides.erase(param);
+		change.push_back(std::make_pair(e->id, entity_json(copy)));
+		what = "reset "+itos(e->id)+"'s "+in->type+" "+param+" to the prefab's "+
+				v.stringify();
+		return true;
+	}
+
+	// [KIT_PREFAB_ROOT] A row of an entity or a prefab's member: what it names
+	// of prefab `from` by `to`. Whether it named it
+	bool row_prefab_renamed(json::Value &row, const ss_ &from, const ss_ &to)
+	{
+		bool any = false;
+		if(jstr(row.get("prefab"), "of") == from){
+			json::Value pi = row.get("prefab").deepcopy();
+			pi.set("of", to);
+			row.set("prefab", pi);
+			any = true;
+		}
+		const json::Value &cs0 = row.get("components");
+		if(!cs0.is_array())
+			return any;
+		json::Value cs_ = cs0.deepcopy();
+		bool in_params = false;
+		for(unsigned c = 0; c < cs_.size(); c++){
+			json::Value cj = cs_.at(c), ps = cj.get("params");
+			auto t = m_types.find(full_type(jstr(cj, "type")));
+			if(!ps.is_object() || t == m_types.end())
+				continue;
+			const json::Value &decl = t->second.decl.get("params");
+			for(json::Iterator it(decl); decl.is_object() && it; ++it)
+				if(jstr(*it, "type") == "prefab" && jstr(ps, it.key().c_str()) == from){
+					ps.set(it.key(), to);
+					in_params = true;
+				}
+			cj.set("params", ps);
+			cs_.set_at(c, cj);
+		}
+		if(in_params)
+			row.set("components", cs_);
+		return any || in_params;
+	}
+
+	// [KIT_PREFAB_ROOT] What in a prefab or an entity's parameters names a
+	// prefab, for a refusal; "" none
+	ss_ prefab_named_by(const ss_ &name)
+	{
+		for(const ss_ &k : m_store->list("prefab:")){
+			if(k.substr(7) == name)
+				continue;
+			const json::Value *pf = prefab(k.substr(7));
+			const json::Value empty = json::array();
+			const json::Value &es = pf ? pf->get("entities") : empty;
+			for(unsigned i = 0; i < es.size(); i++){
+				json::Value row = es.at(i).deepcopy();
+				row.del_key("prefab");
+				if(row_prefab_renamed(row, name, name))
+					return "the prefab "+k.substr(7);
+			}
+		}
+		ss_ by;
+		each_session([&]{
+			for(auto &x : m_entities){
+				if(!by.empty() || !authored(x.second))
+					continue;
+				json::Value row = entity_json(x.second);
+				row.del_key("prefab");
+				if(row_prefab_renamed(row, name, name))
+					by = "entity "+itos(x.first);
+			}
+		});
+		return by;
+	}
+
+	// [KIT_PREFAB_ROOT] A prefab that this builder may rename or delete, with
+	// why not: their own, of a row, no package's
+	const json::Value* own_prefab(const Peer &p, const ss_ &name, ss_ &why)
+	{
+		const json::Value *pf = prefab(name);
+		const ss_ author = prefab_author(p);
+		ss_ row;
+		if(!pf)
+			why = "no prefab \""+name.substr(0, 130)+"\"";
+		else if(!jstr(*pf, "package").empty())
+			why = name+" is the package "+jstr(*pf, "package")+"'s";
+		else if(name.compare(0, 4, "kit/") == 0)
+			why = name+" is Kit's";
+		else if(author.empty() || name.compare(0, author.size() + 1,
+				author+"/") != 0 || !m_store->get("prefab:"+name, row))
+			why = name+" is not yours";
+		return why.empty() ? pf : nullptr;
+	}
+
+	// {"op": "prefab_rename", "name": "<author>/<n>", "to": m}: the prefab
+	// under the other name, and what names it: its copies in every session,
+	// their undo, other prefabs, parameters and item types' looks. Refused if
+	// it went into a package (others' copies know it by its name)
+	void rename_prefab(Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const ss_ name = jstr(j, "name"), to = jstr(j, "to");
+		ss_ why;
+		const json::Value *pf = own_prefab(p, name, why);
+		if(!pf)
+			return refuse(why);
+		if(pf->get("published").is_true())
+			return refuse(name+" is published in a package: its name stays");
+		if(!name_ok(to))
+			return refuse("to: letters, digits and _");
+		const ss_ new_name = prefab_author(p)+"/"+to;
+		m_bad_prefabs.erase(new_name);
+		if(prefab(new_name))
+			return refuse("there is a prefab "+new_name+" already");
+		json::Value row = pf->deepcopy();
+		row.set("name", to);
+		m_store->remove("prefab:"+name);
+		m_store->set("prefab:"+new_name, row.stringify());
+		m_prefabs.erase(name);
+		m_prefabs[new_name] = row;
+		m_prefab_palette.erase(name);
+		m_prefab_palette.insert(new_name);
+		for(const ss_ &k : m_store->list("prefab:")){
+			const json::Value *other = prefab(k.substr(7));
+			if(!other)
+				continue;
+			json::Value o = other->deepcopy(), es = o.get("entities");
+			bool any = false;
+			for(unsigned i = 0; es.is_array() && i < es.size(); i++){
+				json::Value m = es.at(i);
+				if(row_prefab_renamed(m, name, new_name)){
+					es.set_at(i, m);
+					any = true;
+				}
+			}
+			if(any){
+				o.set("entities", es);
+				m_store->set(k, o.stringify());
+				m_prefabs[k.substr(7)] = o;
+			}
+		}
+		size_t copies = 0;
+		const ss_ short_old = name.substr(name.find('/') + 1);
+		each_session([&]{
+			sv_<std::pair<uint64_t, json::Value>> change;
+			for(auto &x : m_entities){
+				if(!authored(x.second))
+					continue;
+				json::Value r = entity_json(x.second);
+				if(!row_prefab_renamed(r, name, new_name))
+					continue;
+				if(is_root(x.second)){
+					copies++;
+					// One still named as it was placed
+					if(x.second.name == short_old+" "+itos(x.first))
+						r.set("name", to+" "+itos(x.first));
+				}
+				change.push_back(std::make_pair(x.first, r));
+			}
+			if(!change.empty())
+				commit(change, nullptr);
+			for(auto &u : m_undo)
+				for(Change &c : u.second)
+					for(auto &b : c.before)
+						if(b.second.is_object())
+							row_prefab_renamed(b.second, name, new_name);
+		});
+		bool looks = false;
+		for(auto &it : m_item_types)
+			if(jstr(it.second, "look") == name){
+				it.second.set("look", new_name);
+				m_store->set("item:"+it.first, it.second.stringify());
+				looks = true;
+			}
+		if(looks)
+			send_item_types(-1);
+		log_i(MODULE, "%s renamed the prefab %s to %s (%zu copies)", cs(p.name),
+				cs(name), cs(new_name), copies);
+		each_session([&]{
+			for(auto &o : m_peers)
+				if(o.second.editing)
+					send_state(o.first);
+		});
+	}
+
+	// {"op": "prefab_delete", "name": "<author>/<n>"}: the prefab gone. Copies
+	// placed stay as they are, their "of" naming nothing: they follow nothing,
+	// and a Save to prefab on one makes it again. What must find it (an item's
+	// look, a parameter, another prefab's parameter) refuses it
+	void delete_prefab(Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const ss_ name = jstr(j, "name");
+		ss_ why;
+		if(!own_prefab(p, name, why))
+			return refuse(why);
+		for(auto &it : m_item_types)
+			if(jstr(it.second, "look") == name)
+				return refuse(name+" is the look of the item "+it.first);
+		const ss_ by = prefab_named_by(name);
+		if(!by.empty())
+			return refuse(by+" names "+name+" in a parameter");
+		m_store->remove("prefab:"+name);
+		m_prefabs.erase(name);
+		m_prefab_palette.erase(name);
+		m_bad_prefabs.erase(name);
+		log_i(MODULE, "%s deleted the prefab %s", cs(p.name), cs(name));
+		each_session([&]{
+			for(auto &o : m_peers)
+				if(o.second.editing)
+					send_state(o.first);
+		});
 	}
 	// ---- [KIT_GENERATORS] Generators: a type with on_build makes its own
 	// children from its parameters, in the editor (api.h)
@@ -10479,11 +11165,16 @@ struct Module: public interface::Module, public Interface
 	// member's number, type and parent kept as it was (its id, links from
 	// others to it and its own to others, what is under it by hand, its
 	// overrides, and its place if a builder moved it), the rest gone (what
-	// a builder put under one of those put under g, where it was) or new
+	// a builder put under one of those put under g, where it was) or new.
+	// [KIT_PREFAB_ROOT] g a copy's root, pf its prefab: a member a generator
+	// (or another copy's root) built is its builder's own affair while that
+	// builder stays: no row of it here, it goes with that builder, and comes
+	// new with a new one
 	void rebuild(const Entity &n, const json::Value &pf,
 			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what)
 	{
 		const uint64_t g = n.id;
+		const bool root = is_root(n);
 		std::map<int64_t, uint64_t> old;
 		for(auto &x : m_entities)
 			if(authored(x.second) && (uint64_t)json::jint(x.second.built, "by",
@@ -10492,10 +11183,29 @@ struct Module: public interface::Module, public Interface
 		const json::Value &es = pf.get("entities");
 		std::map<int64_t, uint64_t> ids;
 		std::set<uint64_t> kept;
+		std::set<unsigned> others;
+		std::set<uint64_t> others_ids;
 		for(unsigned i = 0; i < es.size(); i++){
 			const json::Value &m = es.at(i);
 			const int64_t lid = json::jint(m, "id", 0);
 			const int64_t pm = json::jint(m, "parent", 0);
+			const json::Value &mb = m.get("built");
+			if(root && mb.is_object()){
+				auto by = ids.find(json::jint(mb, "by", 0));
+				if(by == ids.end() || !kept.count(by->second)){
+					ids[lid] = m_next_id++;
+					continue;
+				}
+				others.insert(i);
+				for(auto &x : m_entities)
+					if(authored(x.second) && (uint64_t)json::jint(x.second.built,
+							"by", 0) == by->second && json::jint(x.second.built,
+							"member", 0) == json::jint(mb, "member", 0)){
+						ids[lid] = x.first;
+						others_ids.insert(x.first);
+					}
+				continue;
+			}
 			const uint64_t want_parent = pm ? ids[pm] : g;
 			auto o = old.find(lid);
 			const Entity *oe = o == old.end() ? nullptr : &m_entities[o->second];
@@ -10515,14 +11225,31 @@ struct Module: public interface::Module, public Interface
 			if(!kept.count(o.second))
 				gone.insert(o.second);
 		}
+		if(root)
+			for(auto &x : m_entities)
+				if(authored(x.second) && gone.count((uint64_t)json::jint(
+						x.second.built, "by", 0))){
+					gone.insert(x.first);
+					was_built.insert(x.first);
+				}
 		// The rows this writes are this build's alone
 		std::set<uint64_t> mine(gone.begin(), gone.end());
 		for(auto &x : ids)
-			mine.insert(x.second);
+			if(x.second && !others_ids.count(x.second))
+				mine.insert(x.second);
 		const double zero[3] = {0, 0, 0};
 		size_t overrides = 0;
 		sv_<json::Value> rows;
-		instantiate(pf, "", g, zero, 0, rows, 0, &ids);
+		sv_<unsigned> row_member;
+		{
+			sv_<json::Value> all;
+			instantiate(pf, "", g, zero, 0, all, 0, &ids);
+			for(unsigned i = 0; i < all.size(); i++)
+				if(!others.count(i)){
+					rows.push_back(all[i]);
+					row_member.push_back(i);
+				}
+		}
 		const json::Value &self_links = pf.get("to_self");
 		for(unsigned i = 0; i < self_links.size(); i++){
 			const json::Value &sl = self_links.at(i);
@@ -10546,19 +11273,26 @@ struct Module: public interface::Module, public Interface
 			const uint64_t id = (uint64_t)json::jint(row, "id", 0);
 			json::Value bt = json::object();
 			bt.set("by", (int64_t)g);
-			bt.set("member", json::jint(es.at((unsigned)i), "id", 0));
+			bt.set("member", json::jint(es.at(row_member[i]), "id", 0));
 			row.set("name", jstr(row, "name").substr(0, MAX_STRING));
 			if(jstr(row, "name").empty()){
 				const json::Value &cs_ = row.get("components");
 				row.set("name", (cs_.size() ? jstr(cs_.at(0u), "type") :
 						ss_("child"))+" "+itos(id));
 			}
+			// [KIT_PREFAB_ROOT] (new) with its builder, as the prefab has it
+			if(root && es.at(row_member[i]).get("built").is_object())
+				continue;
 			if(!kept.count(id)){
 				row.set("built", bt);
 				continue;
 			}
 			// An old one: what the builder made of it kept
 			const Entity &oe = m_entities[id];
+			// ([KIT_PREFAB_ROOT] a member that is another prefab's copy follows
+			// that prefab, not this one's idea of it)
+			if(is_root(oe))
+				row.set("prefab", oe.prefab);
 			if(oe.built.get("moved").is_true()){
 				bt.set("moved", true);
 				json::Value pos = json::array();
@@ -10701,6 +11435,32 @@ struct Module: public interface::Module, public Interface
 				bt.set("moved", true);
 				c.second.set("built", bt);
 			}
+		}
+		// [KIT_PREFAB_ROOT] The prefab just saved: its other copies built
+		// again, as a generator's children are (here, so that what the build
+		// moves is no builder's moving)
+		if(!m_follow.empty()){
+			const ss_ name = m_follow;
+			m_follow.clear();
+			const json::Value *pf = prefab(name);
+			sv_<uint64_t> roots;
+			for(auto &x : m_entities)
+				if(authored(x.second) && is_root(x.second) && x.first !=
+						m_follow_source && jstr(x.second.prefab, "of") == name)
+					roots.push_back(x.first);
+			for(uint64_t id : roots){
+				Entity e = m_entities[id];
+				e.prefab = e.prefab.deepcopy();
+				e.prefab.set("version", json::jint(*pf, "version", 1));
+				// simplified: a copy that had no place gets the scene's origin
+				// when its prefab comes to need one; moved from there by hand
+				if(!e.has_pos && needs_place(*pf))
+					e.has_pos = true;
+				change.push_back(std::make_pair(id, entity_json(e)));
+				rebuild(e, *pf, change, what);
+			}
+			if(!roots.empty())
+				what += " ("+itos(roots.size())+" other copies follow it)";
 		}
 		sv_<std::pair<Entity, size_t>> gens;
 		for(auto &c : change){
@@ -19183,6 +19943,36 @@ struct Module: public interface::Module, public Interface
 			}
 			j.set("prefabs", pfs);
 			j.set("prefabs_ui", pfs_ui);
+			// [KIT_PREFAB_ROOT] What the inspector and the palette's menu say
+			// of each: its versions, its voxels' box, its copies here, and
+			// whether this builder may rename or delete it
+			{
+				std::map<ss_, int64_t> copies;
+				for(auto &e : m_entities)
+					if(authored(e.second) && is_root(e.second))
+						copies[jstr(e.second.prefab, "of")]++;
+				const ss_ author = prefab_author(pi->second);
+				json::Value info = json::object();
+				for(const ss_ &n : m_prefab_palette){
+					const json::Value *pf = prefab(n);
+					if(!pf)
+						continue;
+					json::Value o = json::object();
+					o.set("version", json::jint(*pf, "version", 1));
+					o.set("copies", copies[n]);
+					const json::Value &vx = pf->get("voxels");
+					if(vx.is_object()){
+						o.set("voxels", voxels_version(*pf));
+						o.set("at", vx.get("at"));
+						o.set("size", vx.get("size"));
+					}
+					if(!author.empty() && jstr(*pf, "package").empty() &&
+							n.compare(0, author.size() + 1, author+"/") == 0)
+						o.set("own", true);
+					info.set(n, o);
+				}
+				j.set("prefabs_info", info);
+			}
 			// [KIT_PREFAB_VOXELS] the builder's copy: its entities and
 			// its box's size ([0, 0, 0]: none), from its base
 			auto ci = m_clipboard.find(pi->second.name);
@@ -19316,6 +20106,7 @@ struct Module: public interface::Module, public Interface
 				op == "keep" || op == "always_keep" || op == "terrain" ||
 				op == "voxel" || op == "item" || op == "sound" ||
 				op == "sound_delete" || op == "regenerate" ||
+				op == "prefab_rename" || op == "prefab_delete" ||
 				op == "hm_regenerate" ||
 				op == "hm_restore" || op == "new_scene" || op == "export" ||
 				op == "draft"))
@@ -19410,6 +20201,11 @@ struct Module: public interface::Module, public Interface
 		// [KIT_ITEMS_TAB]
 		if(op == "item_delete")
 			return delete_item(p, j, refuse);
+		// [KIT_PREFAB_ROOT] (no undo: the server's, as a voxel type's)
+		if(op == "prefab_rename")
+			return rename_prefab(p, j, refuse);
+		if(op == "prefab_delete")
+			return delete_prefab(p, j, refuse);
 		if(op == "give")
 			return give_me(p, j, refuse);
 		if(op == "restart"){
@@ -19487,11 +20283,12 @@ struct Module: public interface::Module, public Interface
 			world_check(p.name);
 			return;
 		}
-		m_paste.set = false;
+		m_paste = VoxelPaste();
 		const uint64_t next0 = m_next_id;
 		if(!build_change(op, j, p, change, what, why) ||
 				!rebuilds(change, p, what, why)){
 			m_paste.set = false;
+			m_follow.clear();
 			// [KIT_GENERATORS] a build refused: its ids not taken
 			m_next_id = next0;
 			return refuse(why);
@@ -19513,12 +20310,34 @@ struct Module: public interface::Module, public Interface
 			Change &nc = u.back();
 			nc.stroke = -3;
 			nc.scene = si->second;
-			size_t written = 0, missing = 0, unknown = 0;
+			size_t written = 0, missing = 0, unknown = 0, cleared = 0;
+			if(m_paste.clear)
+				clear_voxels(nc.scene, m_paste.clear_at, m_paste.clear_size, nc,
+						p.name, cleared, missing);
 			write_voxels(m_paste.vox, nc.scene, m_paste.base, m_paste.turn,
 					nc, p.name, written, missing, unknown);
-			what += ", "+itos(written)+" voxels written"+(missing ? ", "+
+			what += ", "+(m_paste.clear ? itos(cleared)+" voxels cleared, " :
+					ss_())+itos(written)+" voxels written"+(missing ? ", "+
 					itos(missing)+" not loaded" : ss_())+(unknown ? ", "+
 					itos(unknown)+" of voxels the scene has not" : ss_());
+			// [KIT_PREFAB_ROOT] with the root's move just before: one undo,
+			// its own rows first so that the move's older ones are put last
+			if(m_paste.merge && u.size() >= 2){
+				Change &was = u[u.size() - 2];
+				bool moved = false;
+				for(const auto &b : was.before)
+					moved = moved || b.first == (uint64_t)json::jint(j, "id", 0);
+				if(moved && was.stroke == -1 && was.regen.empty()){
+					was.stroke = -3;
+					was.scene = nc.scene;
+					was.cells = nc.cells;
+					was.before.insert(was.before.begin(), nc.before.begin(),
+							nc.before.end());
+					u.pop_back();
+					what += ", one undo with the move";
+					send_state(peer); // commit() sent the count before this
+				}
+			}
 		}
 		log_i(MODULE, "An edit by %s: %s", cs(p.name), cs(what));
 		world_check(p.name);
@@ -19904,6 +20723,13 @@ struct Module: public interface::Module, public Interface
 			return new_scene_change(j, p, change, what, why);
 		if(op == "save_prefab")
 			return save_prefab(j, p, change, what, why);
+		// [KIT_PREFAB_ROOT] (and prefab_rename, prefab_delete: on_edit_u())
+		if(op == "stamp")
+			return stamp(j, p, change, what, why);
+		if(op == "prefab_detach")
+			return detach_prefab(j, change, what, why);
+		if(op == "prefab_reset")
+			return reset_param(j, change, what, why);
 		if(op == "place"){
 			const ss_ type = jstr(j, "type");
 			if(!m_palette.count(type)){
@@ -20112,8 +20938,9 @@ struct Module: public interface::Module, public Interface
 			copy.comps[ci].params.set(param, j.get("value"));
 			// A prefab copy's own value from now on, kept as the prefab
 			// changes ([KIT_GENERATORS] a generator's child's, as it builds
-			// again)
-			if(!copy.prefab.is_undefined() || !copy.built.is_undefined())
+			// again; [KIT_PREFAB_ROOT] a copy's members are its root's children
+			// so)
+			if(!copy.built.is_undefined())
 				copy.comps[ci].overrides.insert(param);
 			change.push_back(std::make_pair(e->id, entity_json(copy)));
 			what = "set "+itos(e->id)+"'s "+in->type+" "+param+" to "+
@@ -20280,9 +21107,23 @@ struct Module: public interface::Module, public Interface
 		std::stable_sort(gone.begin(), gone.end(), [&](size_t a, size_t b){
 			return depth(change[a].first) > depth(change[b].first);
 		});
+		sv_<bool> done(change.size(), false);
+		// [KIT_PREFAB_ROOT] a row coming out from under what goes (a Detach):
+		// before it goes, its way up is how its node's scene is found
+		std::set<uint64_t> going;
+		for(size_t i : gone)
+			going.insert(change[i].first);
+		for(size_t i = 0; i < change.size(); i++){
+			if(change[i].second.is_null())
+				continue;
+			auto ei = m_entities.find(change[i].first);
+			if(ei != m_entities.end() && going.count(ei->second.parent)){
+				done[i] = true;
+				out.push_back(change[i]);
+			}
+		}
 		for(size_t i : gone)
 			out.push_back(change[i]);
-		sv_<bool> done(change.size(), false);
 		std::function<void(size_t, int)> put = [&](size_t i, int d){
 			if(done[i])
 				return;
