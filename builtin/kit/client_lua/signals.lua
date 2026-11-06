@@ -7,7 +7,8 @@
 -- not fit the inspector). editor.lua runs this file and puts it at NT.sg.
 --   - Left: the entities as a tree, as the Entities tab's (all three of its
 --     lists in one), a filter over them (id, name, type); the symbol of one with
---     a link, either way, in the signals' cyan
+--     a link, either way, in the signals' cyan. "Add from palette" above them
+--     pops up the palette's items ([KIT_PALETTE_MENU], SG.palette_popup)
 --   - Middle: the selected one's name to edit, and its links, in both
 --     directions, Inputs first: a row a link, flowing left to right as
 --     object.member on both sides, the arrow after what it carries (the type,
@@ -223,6 +224,14 @@ function SG.rows()
 			text(body, "None", DIM)
 		end
 	end)
+	-- One just placed from the popup: in view
+	local new = SG.reveal and SG.list_body:GetChild("select " .. SG.reveal, true)
+	if new then
+		SG.reveal = nil
+		SG.list_view.viewPosition = magic.IntVector2(0, math.max(0,
+				new.screenPosition.y - SG.list_body.screenPosition.y -
+				math.floor(SG.list_view.height / 2)))
+	end
 	local said = "kit editor: signals: list \"" .. SG.filter .. "\" (" .. #ids ..
 			"): " .. table.concat(ids, ", ")
 	if said ~= SG.list_said then
@@ -291,6 +300,8 @@ function SG.pressed(x, y, right)
 	end
 	local sc = magic.ui.scale
 	x, y = x / sc, y / sc
+	-- (on its button a click after this does not open the popup again)
+	SG.popup_was_up = W.ctx ~= nil and W.ctx == SG.popup
 	if W.ctx and not at(W.ctx, x, y) then
 		W.ctx:Remove()
 		W.ctx = nil
@@ -997,6 +1008,67 @@ local function close()
 	SG.add = nil
 end
 
+-- [KIT_PALETTE_MENU] The palette as a big dropdown under the list's button, W.ctx
+-- as any menu here (Escape, a press outside close it): what is picked closes it.
+-- A type with no position is placed and selected, here; another is armed as by
+-- the palette, in the view this one came from for the click on the world.
+-- simplified: 3 columns, fewer where they do not fit; a label wider than a window
+-- scrolls sideways
+function SG.palette_popup(cols)
+	if W.ctx then
+		W.ctx:Remove()
+	end
+	local w = window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
+	W.ctx, SG.popup = w, w
+	w.priority = 10
+	-- Sized from the root: not to hold the client's fit down (update_ui_fit)
+	w:SetVar("FollowsRoot", "1")
+	local items = NT.palette_items("All")
+	local view = new_view(w)
+	local body = put_body(view, function(b)
+		local r
+		for i, it in ipairs(items) do
+			if i % cols == 1 % cols then
+				r = row(b)
+			end
+			button(r, it.label, function()
+				W.ctx:Remove()
+				W.ctx = nil
+				log:info("kit editor: signals: picked " .. it.label)
+				if NT.positionless(it) then
+					return NT.place_now(it)
+				end
+				M.set_view(S.before_signals or "walk")
+				NT.choose("Components")
+				NT.arm(it)
+			end)
+		end
+		if #items == 0 then
+			text(b, "None", DIM)
+		end
+	end)
+	local root, a = magic.ui.root, SG.add_button
+	local side = 12 + view.verticalScrollBar.width + 8
+	local fw, fh = body.width + side, body.height + 16
+	local room_w, room_h = root.width - 2 * MARGIN, root.height - 2 * MARGIN
+	if fw > room_w and cols > 1 then
+		return SG.palette_popup(cols - 1)
+	end
+	local p = a.screenPosition
+	-- Under the button, scrolled in the room there; a short window: all of it
+	local x, y = math.min(p.x, root.width - fw - MARGIN), p.y + a.height
+	local below = root.height - y - MARGIN
+	if below < 200 then
+		y, below = MARGIN, room_h
+	end
+	fw, fh = math.min(fw, room_w), math.min(fh, below)
+	fit(w, view, body, math.max(MARGIN, x), y, fw, fh)
+	view.viewPosition = magic.IntVector2(0, 0)
+	log:info(string.format("kit editor: signals: the palette's popup, %d items " ..
+			"in %d columns, %d %d %d %d in %dx%d", #items, cols, w.position.x,
+			w.position.y, fw, fh, root.width, root.height))
+end
+
 -- With the editor's other windows, on every state
 function SG.refresh()
 	if not NT.sig() then
@@ -1004,6 +1076,12 @@ function SG.refresh()
 	end
 	if not W.sg_list then
 		local w = column("sg_list")
+		SG.add_button = button(w, "Add from palette", function()
+			if not SG.popup_was_up then
+				SG.palette_popup(3)
+			end
+		end)
+		SG.add_button:SetFixedHeight(26)
 		local r = row(w)
 		r:SetFixedHeight(26)
 		local fl = label(r, "Filter")
@@ -1014,7 +1092,7 @@ function SG.refresh()
 		end)
 		f:SetName("signals filter")
 		f.minWidth = 40
-		SG.filter_h = 30
+		SG.filter_h = 60
 		SG.list_view = new_view(w)
 	end
 	if not W.sg_links then

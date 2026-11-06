@@ -62,7 +62,9 @@
 --     prefab dragged onto the view goes where it is let go (its ghost
 --     there meanwhile), or clicked it is placed by the clicks on the view
 --     until Escape, a right click or a click on it again (floorplanner's
---     Object tool). Voxels: its Voxel list puts a voxel type in hand
+--     Object tool); a type with no position, clicked, has a menu instead:
+--     Place (in the scene edited, at once), Favourite, Cancel
+--     ([KIT_PALETTE_MENU]). Voxels: its Voxel list puts a voxel type in hand
 --     (O.pick_voxel(name), the app's placing) and the voxels tool on,
 --     "none" away; and "New voxel type..." makes a builder's own: a
 --     texture (Kit's or an uploaded PNG), kind, solid, transparent, light,
@@ -1210,7 +1212,8 @@ function M.next_angle()
 end
 
 -- The palette: the types and the prefabs, a click arms one (placed by the
--- clicks on the view), a drag puts one where it is let go
+-- clicks on the view) or, with no position, opens its menu; a drag puts one
+-- where it is let go
 local palette_buttons = {}
 local palette
 
@@ -1729,7 +1732,8 @@ local function new_tab(w)
 end
 
 -- The Components tab: the types and the prefabs, a click arms one (placed
--- by the clicks on the view), a drag puts one where it is let go
+-- by the clicks on the view) or, with no position, opens its menu; a drag
+-- puts one where it is let go
 function NT.components(w)
 	-- [KIT] stage 5: its tabs at its foot (what is above them stays where
 	-- it was): all, the favourites and the New tab, and the credits
@@ -1759,27 +1763,9 @@ function NT.components(w)
 		new_tab(w)
 		return tabs()
 	end
-	local fav = {}
-	if S.tab == "Favourites" then
-		for _, n in ipairs(aitta.kit_favourites()) do
-			fav[n] = true
-		end
-	end
-	local items = {}
-	-- Each by its name (a favourite's), shown as people read it
-	for _, t in ipairs(E.state.palette or {}) do
-		if S.tab ~= "Favourites" or fav[t] then
-			items[#items + 1] = {key = t, label = shown(t), type = t}
-		end
-	end
-	for _, p in ipairs(E.state.prefabs or {}) do
-		if S.tab ~= "Favourites" or fav["[" .. p .. "]"] then
-			items[#items + 1] = {key = "[" .. p .. "]",
-					label = "[" .. shown(p) .. "]", prefab = p}
-		end
-	end
+	local items = NT.palette_items(S.tab)
 	if #items == 0 and S.tab == "Favourites" then
-		text(w, "None yet: arm one, then \"Favourite\"", DIM)
+		text(w, "None yet: click one, then \"Favourite\"", DIM)
 	end
 	local r
 	for i, it in ipairs(items) do
@@ -1787,49 +1773,114 @@ function NT.components(w)
 			r = row(w)
 		end
 		local armed = S.placing ~= nil and S.placing.label == it.label
-		local b = button(r, it.label, function()
+		local b
+		b = button(r, it.label, function()
 			-- A click: armed, or no longer (a drag was not a click)
 			if S.palette_dragged then
 				S.palette_dragged = nil
 				return
 			end
+			-- [KIT_PALETTE_MENU] No click on the view to wait for: a menu
+			if NT.positionless(it) then
+				local p = b.screenPosition
+				return NT.palette_menu(it, p.x, p.y + b.height)
+			end
 			if armed then
 				S.placing = nil
 				log:info("kit editor: placing nothing")
+				palette()
 			else
-				M.set_tool(nil)
-				S.reparent = nil
-				S.placing = {type = it.type, prefab = it.prefab, label = it.label,
-						key = it.key}
-				log:info("kit editor: placing " .. it.label)
-				NT.palette_chosen(it)
+				NT.arm(it)
 			end
-			palette()
 		end, armed)
 		palette_buttons[#palette_buttons + 1] = {button = b, item = it}
 	end
 	-- The armed one starred or not
 	if S.placing then
-		local name, on = S.placing.key or S.placing.label, false
-		for _, n in ipairs(aitta.kit_favourites()) do
-			on = on or n == name
-		end
 		local label = S.placing.label
 		-- [KIT] stage 4l: the type's average cost, its instances' now
 		if S.placing.type then
-			local c = E.costs and E.costs.types and
-					E.costs.types[S.placing.type]
-			text(foot, c and string.format("Costs %.2f%% of Kit's budget an " ..
-					"instance", c) or "Its cost: none running", DIM)
+			text(foot, NT.cost_line(S.placing.type), DIM)
 		end
-		button(foot, (on and "Unfavourite " or "Favourite ") .. label, function()
-			aitta.kit_favourite(name, not on)
-			log:info("kit editor: " .. label .. (on and " not" or "") ..
-					" a favourite")
-			palette()
-		end)
+		local fs, fn = NT.favourite(S.placing.key or label, label, palette)
+		button(foot, fs, fn)
 	end
 	tabs()
+end
+
+-- What the palette lists, in a tab: {key, label, and type or prefab}
+function NT.palette_items(tab)
+	local fav = {}
+	if tab == "Favourites" then
+		for _, n in ipairs(aitta.kit_favourites()) do
+			fav[n] = true
+		end
+	end
+	local items = {}
+	-- Each by its name (a favourite's), shown as people read it
+	for _, t in ipairs(E.state.palette or {}) do
+		if tab ~= "Favourites" or fav[t] then
+			items[#items + 1] = {key = t, label = shown(t), type = t}
+		end
+	end
+	for _, p in ipairs(E.state.prefabs or {}) do
+		if tab ~= "Favourites" or fav["[" .. p .. "]"] then
+			items[#items + 1] = {key = "[" .. p .. "]",
+					label = "[" .. shown(p) .. "]", prefab = p}
+		end
+	end
+	return items
+end
+
+-- [KIT_PALETTE_MENU] A type that says no_position: no click on the view
+-- places it
+function NT.positionless(it)
+	return it.type ~= nil and type_of(it.type).no_position == true
+end
+
+function NT.arm(it)
+	M.set_tool(nil)
+	S.reparent = nil
+	S.placing = {type = it.type, prefab = it.prefab, label = it.label,
+			key = it.key}
+	log:info("kit editor: placing " .. it.label)
+	NT.palette_chosen(it)
+	palette()
+end
+
+-- The type's average cost, its instances' now ([KIT] stage 4l)
+function NT.cost_line(t)
+	local c = E.costs and E.costs.types and E.costs.types[t]
+	return c and string.format("Costs %.2f%% of Kit's budget an instance", c) or
+			"Its cost: none running"
+end
+
+-- A favourite's button: its text and what it does, redraw after
+function NT.favourite(name, label, redraw)
+	local on = false
+	for _, n in ipairs(aitta.kit_favourites()) do
+		on = on or n == name
+	end
+	return (on and "Unfavourite " or "Favourite ") .. label, function()
+		aitta.kit_favourite(name, not on)
+		log:info("kit editor: " .. label .. (on and " not" or "") ..
+				" a favourite")
+		redraw()
+	end
+end
+
+-- [KIT_PALETTE_MENU] A positionless type's menu, in UI units; what the
+-- palette's foot has for an armed one is here, it is never armed
+function NT.palette_menu(it, x, y)
+	local fs, fn = NT.favourite(it.key, it.label, function()
+		palette()
+		NT.palette_menu(it, x, y)
+	end)
+	NT.menu({it.label, NT.cost_line(it.type), {"Place", function()
+		NT.palette_chosen(it)
+		NT.place_now(it)
+	end}, {fs, fn}, {"Cancel", function() end}}, x, y)
+	log:info("kit editor: the palette's menu of " .. it.label)
 end
 
 palette = function()
@@ -2000,8 +2051,9 @@ end
 -- The palette's entry the pointer is on
 local function palette_at(mx, my)
 	local sc = magic.ui.scale
-	-- (one scrolled out of the panel's view is not there)
-	if not NT.view or not inside(NT.view, mx / sc, my / sc) then
+	-- (one scrolled out of the panel's view is not there, nor one under a menu)
+	if not NT.view or not inside(NT.view, mx / sc, my / sc) or
+			(W.ctx and inside(W.ctx, mx / sc, my / sc)) then
 		return nil
 	end
 	for _, pb in ipairs(palette_buttons) do
@@ -2857,7 +2909,7 @@ end)
 magic.SubscribeToEvent("command_seq:kit_ui_where", function(_, data)
 	local sc, r = magic.ui.scale, {}
 	for _, k in ipairs({"bar", "palette", "inspector", "people", "sg_list",
-			"sg_links", "sg_view", "hud_panel"}) do
+			"sg_links", "sg_view", "hud_panel", "ctx"}) do
 		local w = W[k]
 		if w and w.visible then
 			local p = w.screenPosition
@@ -3343,6 +3395,38 @@ end
 -- long press's, for the selection when it is in it
 local function close_menu()
 	drop("ctx")
+end
+
+-- A menu at x, y (UI units), kept on the screen whole. entries: a string is a
+-- dim line, {text, fn} a button that closes the menu and calls fn
+function NT.menu(entries, x, y)
+	close_menu()
+	local w = window(magic.HA_LEFT, magic.VA_TOP, x, y)
+	W.ctx = w
+	w.priority = 10
+	for _, en in ipairs(entries) do
+		if type(en) == "string" then
+			text(w, en, DIM)
+		else
+			button(w, en[1], function()
+				close_menu()
+				en[2]()
+			end)
+		end
+	end
+	local rw, rh = magic.ui.root.width, magic.ui.root.height
+	w:SetPosition(math.max(0, math.min(x, rw - w.width)),
+			math.max(0, math.min(y, rh - w.height)))
+end
+
+-- A press on a panel, past the menu, closes it (in the Signals view
+-- SG.pressed's). A press on the view has its own: it closes the menu and
+-- is swallowed
+function NT.menu_press(mx, my)
+	local sc = magic.ui.scale
+	if W.ctx and not NT.sig() and not inside(W.ctx, mx / sc, my / sc) then
+		close_menu()
+	end
 end
 
 function M.delete_selected()
@@ -3870,38 +3954,23 @@ local function context_menu(id, mx, my)
 	end
 	local ids = sel_ids()
 	local sc = magic.ui.scale
-	local w = window(magic.HA_LEFT, magic.VA_TOP, math.floor(mx / sc),
-			math.floor(my / sc))
-	W.ctx = w
-	w.priority = 10
-	text(w, #ids > 1 and #ids .. " selected" or name_of(e), DIM)
-	button(w, "Delete", function()
-		close_menu()
-		M.delete_selected()
-	end)
-	button(w, "Duplicate", function()
-		close_menu()
-		send({op = "duplicate", ids = ids, by = {1, 0, 0}})
-	end)
-	button(w, "Make prefab...", function()
-		close_menu()
-		prefab_dialog(ids)
-	end)
+	local entries = {#ids > 1 and #ids .. " selected" or name_of(e),
+		{"Delete", M.delete_selected},
+		{"Duplicate", function()
+			send({op = "duplicate", ids = ids, by = {1, 0, 0}})
+		end},
+		{"Make prefab...", function() prefab_dialog(ids) end}}
 	if E.running then
-		button(w, "Restart this", function()
-			close_menu()
+		entries[#entries + 1] = {"Restart this", function()
 			for _, sid in ipairs(ids) do
 				local se = find(sid)
 				for ci in ipairs(se and se.components or {}) do
 					send({op = "restart", id = sid, comp = ci - 1})
 				end
 			end
-		end)
+		end}
 	end
-	-- On the screen whole
-	local rw, rh = magic.ui.root.width, magic.ui.root.height
-	w:SetPosition(math.max(0, math.min(math.floor(mx / sc), rw - w.width)),
-			math.max(0, math.min(math.floor(my / sc), rh - w.height)))
+	NT.menu(entries, math.floor(mx / sc), math.floor(my / sc))
 	log:info("kit editor: the menu of " .. id .. " (" .. #ids .. " selected)")
 end
 
@@ -3993,6 +4062,10 @@ set_view = function(v)
 		close_menu()
 		drop("dialog")
 		E.link, S.placing = nil, nil
+	end
+	-- (a link's menu or the palette's popup do not outlive the view)
+	if S.view == "signals" and v ~= "signals" then
+		close_menu()
 	end
 	for _, w in pairs(W) do
 		w.visible = v ~= "hud"
@@ -4541,6 +4614,18 @@ local function place_at(cell, item)
 	end
 	log:info("kit editor: placed " .. item.label .. " at " ..
 			table.concat(cell, ",") .. (parent and " under " .. parent or ""))
+end
+
+-- [KIT_PALETTE_MENU] A positionless type placed at once, in the scene
+-- edited (the server wants a pos and does not keep it), and selected when
+-- it comes: nothing else shows it placed.
+-- simplified: the first new entity of the next state is taken for it; another
+-- builder's in the same instant selects that one instead
+function NT.place_now(it)
+	S.placing = nil
+	NT.select_new = true
+	place_at({0, 0, 0}, it)
+	palette()
 end
 
 local function end_drag()
@@ -5356,12 +5441,14 @@ local function mouse_down(button_)
 	if button_ == magic.MOUSEB_LEFT and not M.looking() then
 		local item = palette_at(mx, my)
 		if item then
+			NT.menu_press(mx, my)
 			S.palette_press = {item = item, mx = mx, my = my}
 			S.palette_dragged = nil
 			return
 		end
 	end
 	if over_ui(mx, my) and not M.looking() then
+		NT.menu_press(mx, my)
 		return
 	end
 	if W.ctx then
@@ -5724,10 +5811,12 @@ local function touch_begin(id, x, y)
 	S.fingers[id] = {x = x, y = y, x0 = x, y0 = y,
 		t0 = buildat.get_time_us(), ui = ui and not item, item = item}
 	if item then
+		NT.menu_press(x, y)
 		S.palette_press = {item = item, mx = x, my = y, finger = id}
 		return
 	end
 	if ui then
+		NT.menu_press(x, y)
 		return
 	end
 	if W.ctx then
@@ -6809,6 +6898,9 @@ function M.editor(options)
 				known[e.id] = true
 				if S.known and not S.known[e.id] then
 					touch(e.id)
+					if NT.select_new then
+						NT.select_new = e.id
+					end
 				end
 			end
 			S.known = known
@@ -6894,6 +6986,11 @@ function M.editor(options)
 			end
 			if S.reparent and not find(S.reparent) then
 				S.reparent = nil
+			end
+			if type(NT.select_new) == "number" then
+				local id = NT.select_new
+				NT.select_new, NT.sg.reveal = nil, id
+				select(id)
 			end
 		end
 		refresh()
@@ -7044,6 +7141,7 @@ function M.editor(options)
 	buildat.sub_packet("kit:edit_refused", function(data)
 		E.status = "Refused: " .. tostring(data)
 		log:info("kit editor: refused: " .. tostring(data))
+		NT.select_new = nil
 		clear_preview()
 		if E.editing then
 			people()

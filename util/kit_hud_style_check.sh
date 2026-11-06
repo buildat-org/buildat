@@ -190,8 +190,13 @@ frames 2
 $(for i in $(seq 20); do printf 'mouse_wheel -1\nframes 1\n'; done)
 frames 5
 click Button "kit/ui_bar"
+wait_log 5000 the palette's menu of kit/ui_bar
+frames 3
+click Button "Place"
+wait_log 10000 kit editor: state:
 frames 5
-click Button "kit/ui_bar"
+click Button "Undo"
+wait_log 10000 kit editor: state:
 frames 5
 keypress F2
 frames 5
@@ -233,6 +238,7 @@ screenshot @T@/hud_view3.png
 keypress F3
 frames 5
 EOF
+	id=$((id + 1)) # kit/ui_bar, by its palette menu, undone
 	id=$((id + 1)) # kit/game_rules, placed to keep it
 	echo "sync 3000"
 	# 1. Four directions at the left, a pie and a full one
@@ -422,11 +428,11 @@ for v in "3D hidden" "2D hidden" "Walk shown"; do
 done
 echo "ok: in edit mode the HUD in the Walk view only"
 # In order: 3D, one selected, Walk; 2D, kit/flag there, still 2D; its button
-# again; kit/ui_bar armed, Walk; 3D; the prefab armed, Walk
+# again; kit/ui_bar placed by its menu, Walk; 3D; the prefab armed, Walk
 seq=$(grep -a " I kit " "$b" | grep -a "kit editor: the view is \|kit editor: placing \|kit editor: selected $SIZED " |
 	sed 's/.*kit editor: //; s/ (.*//' | tr '\n' ';')
 case $seq in
-*"the view is 3D;selected $SIZED;the view is Walk;the view is 2D;placing kit/flag;placing nothing;placing kit/ui_bar;the view is Walk;placing nothing;the view is 3D;placing [kit/health_bar];the view is Walk;placing nothing;"*) ;;
+*"the view is 3D;selected $SIZED;the view is Walk;the view is 2D;placing kit/flag;placing nothing;the view is Walk;the view is 3D;placing [kit/health_bar];the view is Walk;placing nothing;"*) ;;
 *) fail "choosing and the views: $seq ($b)" ;;
 esac
 seq=$(grep -a " I kit " "$b" | grep -a "kit editor: the view is \|kit editor: a double click\|kit: ui own:hotbar dragged" |
