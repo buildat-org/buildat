@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~4 min (2026-11-07)
+# cost: ~3.5 min (2026-11-07)
 # covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/arena.lua builtin/kit/client_lua/editor.lua apps/workbench/**
 # [KIT_MAP_ROTATION] (kit_plan stage 7b) One composition, a lobby and three
 # maps as scenes of it, composed on a fresh Workbench save with the editor's
@@ -13,6 +13,7 @@
 # its first team's score, that team's win_score reached linked to the
 # arena's "win": a round's winner says whose timer ran, and a map not picked
 # running sends the arena a team not in the round, which it logs.
+# The arena's maps begin by its inspector's "Add to maps" dropdown (add_to_maps.png).
 # The arena (kit/arena, in the lobby's zone round the spawn: back from a
 # round both queue again) has maps "alpha, beta, gamma, nowhere". Played:
 #   1. map_pick round_robin: alpha, beta, gamma, alpha
@@ -133,7 +134,6 @@ EOF
 	set_ $id results 2
 	set_ $id after_round 0
 	set_ $id hud_style '"plain"'
-	set_ $id maps '"alpha, beta, gamma, nowhere"'
 	place kit/button '3, 1, 1'; NEXT=$id
 	set_ $id hold 0.2
 	link $id pressed $ARENA next_map
@@ -157,6 +157,27 @@ event kit_edit {"op": "place", "prefab": "kit/hut", "pos": [12, 1, 5]}
 sync 2000
 event kit_edit {"op": "scene", "name": "world"}
 wait_log 30000 kit editor: in the scene world of
+EOF
+	# The inspector's dropdown adds a scene to the list; the rest by the op
+	cat <<EOF
+event kit_select $ARENA
+wait_log 5000 kit editor: the inspector
+frames 5
+click Button "Behaviour"
+frames 5
+click DropDownList "▼" 925 645
+delay 500
+frames 3
+screenshot $t/add_to_maps.png
+click Text "alpha"
+wait_log 5000 maps = alpha
+click Button "Apply"
+wait_log 10000 kit editor: state:
+EOF
+	set_ $ARENA maps '"alpha, beta, gamma, nowhere"'
+	cat <<'EOF'
+event kit_select
+frames 3
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
 keypress F6
