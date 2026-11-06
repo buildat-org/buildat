@@ -580,6 +580,18 @@ d = "\n".join(lines[at("drag0"):at("drag1")])
 assert "dragged" not in d and "the HUD panel closed" not in d and "selected" not in d, d
 PY
 echo "ok: a warning's height given back; the chip remembered and marked; narrowing on the feed and hint; a drag on the panel; its Place"
+# [KIT_LAST_ROW_CLIP] Each body with no scroll bar shown to its foot
+python3 -I - "$t"/kit*.log <<'PY' || fail "a body cut by its view"
+import re, sys
+n = 0
+for f in sys.argv[1:]:
+	for w, a, b in re.findall(r"the (inspector|HUD panel)'s body ends at (\d+), shown to (\d+)",
+			open(f, errors="replace").read()):
+		n += 1
+		assert int(a) <= int(b), (f, w, a, b)
+assert n >= 3, n
+print("ok: %d bodies shown to their foot" % n)
+PY
 if grep -aE " W kit +: kit: ui|attempt to|stack traceback" "$b" "$t/kitwide.log" "$t/kittouch.log" | head -5 | grep -a .; then
 	fail "a Lua error in the logs"
 fi

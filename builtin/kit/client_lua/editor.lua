@@ -3016,6 +3016,7 @@ magic.SubscribeToEvent("command_seq:kit_tabs", function(_, data)
 	log:info("kit editor: the view " .. S.view .. ", the tabs " .. NT.tab() ..
 			", " .. tostring(S.list_tab) .. ", " .. tostring(S.tab) .. " (" ..
 			data:GetString("Param") .. ")")
+	NT.log_shown()
 end)
 
 -- A check's question: where the editor's windows are on the screen, in
@@ -3068,6 +3069,19 @@ end)
 -- sight they would need inspector() to build into a head and a foot
 local IV = {view = nil, y = 0}
 
+-- [KIT_LAST_ROW_CLIP] For kit_tabs: how far down each unscrolled body is shown
+function NT.log_shown()
+	for _, v in ipairs({{"inspector", IV.view}, {"HUD panel", S.hud_panel_view}}) do
+		local view = v[2]
+		if view and view.visible and not view.verticalScrollBar.visible then
+			local b = view.contentElement
+			log:info(string.format("kit editor: the %s's body ends at %d, shown to %d",
+					v[1], b.screenPosition.y + b.height,
+					view.screenPosition.y + view.height - 2))
+		end
+	end
+end
+
 local function fit_inspector()
 	local w, view = W.inspector, IV.view
 	-- ([KIT_SIGNALS_VIEW] the view's own column there, NT.sg.layout)
@@ -3085,14 +3099,15 @@ local function fit_inspector()
 	if body.height > S.inspector_h0 then
 		body.height = 1
 	end
-	local h = math.max(40, math.min(body.height, room))
-	-- ([KIT_PARAM_CATEGORIES] 4: the view's clip border cut the fields' right edge)
-	local bw = body.width + 4 + (h < body.height and view.verticalScrollBar.width + 4 or 0)
+	-- ([KIT_PARAM_CATEGORIES] 4, [KIT_LAST_ROW_CLIP]: the view's clip border, 2 a
+	-- side, cut the fields' right edge and the last row's foot)
+	local bh = body.height + 4
+	local h = math.max(40, math.min(bh, room))
+	local bw = body.width + 4 + (h < bh and view.verticalScrollBar.width + 4 or 0)
 	if view.height ~= h or view.width ~= bw then
-		view:SetScrollBarsVisible(false, h < body.height)
+		view:SetScrollBarsVisible(false, h < bh)
 		view:SetFixedSize(bw, h)
-		log:info(string.format("kit editor: the inspector %d of %d tall",
-				h, body.height))
+		log:info(string.format("kit editor: the inspector %d of %d tall", h, bh))
 	end
 end
 
@@ -3226,9 +3241,10 @@ function NT.hud_panel_fit(view)
 	if body.height > S.hud_panel_h0 then
 		body.height = 1
 	end
-	local h = math.min(body.height, magic.ui.root.height - 28,
-			S.hud_panel_limit or math.huge)
-	local tall = h < body.height
+	-- (the view's clip border, 2 a side: [KIT_LAST_ROW_CLIP])
+	local bh = body.height + 4
+	local h = math.min(bh, magic.ui.root.height - 28, S.hud_panel_limit or math.huge)
+	local tall = h < bh
 	local bw = body.width + 4 + (tall and view.verticalScrollBar.width + 4 or 0)
 	if view.height ~= h or view.width ~= bw then
 		view:SetScrollBarsVisible(false, tall)
