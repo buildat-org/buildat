@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~20 s (2026-11-05)
+# cost: ~25 s (2026-11-06)
 # covers: builtin/kit/client_lua/signals.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/input.lua
 # [KIT_SIGNALS_VIEW] The editor's Signals view on Workbench. kitboss (the
 # admin, 1024x700), a kit/flag with links to three kit/ui_bars and from a
@@ -27,7 +27,15 @@
 #   8. a 1800x1000 window: all three columns; a touch client at 600x400: one
 #      column at a time;
 #   9. a real window made small and large again: the UI's fit back at x1.
-# Screenshots kept with KEEP_TMP=1: $t/menu.png, $t/refit.png, $t/signals.png, $t/added.png, $t/hud.png,
+#  10. [KIT_PALETTE_MENU] Add from palette, from 3D: the popup in the window;
+#      closed by Escape, a press outside and its button, the view kept; a type
+#      with no position placed at once, none, and selected in the list; a
+#      positioned one back in 3D, armed, placed by the click there; small windows:
+#      600x400 (touch: selected scrolled into view) and 800x500 at UI scale 2;
+#  11. [KIT_PALETTE_MENU] A type with no position in the palette: its menu, Cancel,
+#      Escape, another's button, a press on the view place nothing; Favourite; Place
+#      at once and selected; a drag still places, a positioned one still arms.
+# Screenshots kept with KEEP_TMP=1: $t/popup.png, $t/palette_menu.png, $t/narrow_popup.png, $t/small_popup.png, $t/small_menu.png, $t/menu.png, $t/refit.png, $t/signals.png, $t/added.png, $t/hud.png,
 # $t/game_wide.png, $t/wide.png, $t/narrow_*.png; look at them.
 #   util/kit_signals_view_check.sh
 set -u
@@ -290,6 +298,131 @@ frames 5
 screenshot @T@/walk.png
 keypress F5
 frames 5
+EOF
+	# 10. [KIT_PALETTE_MENU] The list's button, from 3D: its popup, by Escape, a
+	# press outside and the button closed
+	cat <<EOF
+keypress F2
+frames 5
+keypress F5
+frames 5
+click Button "Add from palette"
+wait_log 5000 signals: the palette's popup
+frames 3
+screenshot @T@/popup.png
+event kit_ui_where popup_up
+keypress Escape
+frames 3
+event kit_ui_where popup_escaped
+click Button "Add from palette"
+wait_log 5000 signals: the palette's popup
+frames 3
+mouse_pos 800 600
+mouse_click left
+frames 3
+event kit_ui_where popup_outside
+click Button "Add from palette"
+wait_log 5000 signals: the palette's popup
+frames 3
+click Button "Add from palette"
+frames 3
+event kit_ui_where popup_button
+click Button "Add from palette"
+wait_log 5000 signals: the palette's popup
+frames 3
+click Button "kit/timer"
+wait_log 5000 signals: picked kit/timer
+EOF
+	state
+	cat <<EOF
+frames 5
+screenshot @T@/popup_placed.png
+EOF
+	# A type with a position: armed, the view left, placed by a click there
+	cat <<EOF
+click Button "Add from palette"
+wait_log 5000 signals: the palette's popup
+frames 3
+click Button "kit/flag"
+wait_log 5000 kit editor: placing kit/flag
+frames 5
+screenshot @T@/popup_armed.png
+mouse_pos 550 400
+frames 3
+mouse_click left
+EOF
+	state
+	cat <<EOF
+mouse_click right
+wait_log 5000 kit editor: placing nothing
+frames 3
+EOF
+	# 11. [KIT_PALETTE_MENU] The palette: a type with no position has its menu:
+	# Cancel, Escape, a press on another's button, a press on the view; Favourite
+	# keeps it up; Place is an edit with no click on the view. A drag still places
+	cat <<EOF
+click Button "kit/logic"
+wait_log 5000 the palette's menu of kit/logic
+frames 3
+screenshot @T@/palette_menu.png
+event kit_ui_where menu_up
+click Button "Cancel"
+frames 3
+event kit_ui_where menu_cancelled
+screenshot @T@/palette_cancelled.png
+click Button "kit/logic"
+wait_log 5000 the palette's menu of kit/logic
+frames 3
+keypress Escape
+frames 3
+event kit_ui_where menu_escaped
+click Button "kit/logic"
+wait_log 5000 the palette's menu of kit/logic
+frames 3
+click Button "kit/action"
+wait_log 5000 the palette's menu of kit/action
+frames 3
+screenshot @T@/palette_menu_other.png
+mouse_pos 550 400
+mouse_click left
+frames 3
+event kit_ui_where menu_outside
+screenshot @T@/palette_outside.png
+click Button "kit/flag"
+wait_log 5000 kit editor: placing kit/flag
+frames 3
+screenshot @T@/palette_positioned.png
+click Button "kit/flag"
+wait_log 5000 kit editor: placing nothing
+mouse_pos 114 153
+frames 3
+mouse_down left
+frames 3
+mouse_pos 550 400
+wait_log 5000 kit editor: dragging kit/action from the palette
+frames 3
+mouse_up left
+EOF
+	state
+	cat <<EOF
+frames 3
+event kit_ui_where after_drag
+click Button "kit/logic"
+wait_log 5000 the palette's menu of kit/logic
+frames 3
+click Button "Favourite kit/logic"
+wait_log 5000 kit editor: kit/logic a favourite
+frames 3
+screenshot @T@/palette_favourite.png
+click Button "Unfavourite kit/logic"
+wait_log 5000 kit editor: kit/logic not a favourite
+frames 3
+click Button "Place"
+EOF
+	state
+	cat <<EOF
+frames 5
+screenshot @T@/palette_placed.png
 sync 3000
 quit
 EOF
@@ -324,7 +457,8 @@ grep -a "signals: a body off by" "$b" && fail "the links body sideways ($b)"
 wantp "$b" "notification: from y (6[0-9]|7[0-9]), the top's foot at"
 want "$s" "placed kit/ui_bar $BAR1, no position" "placed kit/timer $TIMER, no position" \
 	"placed kit/starting_kit $KID, no position under $FLAG"
-kit "$b" | grep -a "kit editor: list Scene (" | tail -1 | grep -aq " $BAR1, $BAR2, $BAR3, $TIMER, $LOGIC, $KID, $((PIE - 1)), $PIE\$" ||
+# (as first listed: what the popup and the palette add comes later)
+kit "$b" | sed '/the view is Signals/q' | grep -a "kit editor: list Scene (" | tail -1 | grep -aq " $BAR1, $BAR2, $BAR3, $TIMER, $LOGIC, $KID, $((PIE - 1)), $PIE\$" ||
 	fail "the Scene list ($b)"
 echo "ok: types with no position placed: none, in the Scene list"
 # 1. Two columns side by side, the slot taken by turns, under the bar, inside
@@ -433,6 +567,43 @@ wantp "$b" "kit: ui $BAR1 bar at .* in 1024x700 .* shown"
 for p in signals form added target renamed filtered nohud hud game_wide out walk; do
 	[ -s "$t/$p.png" ] || fail "no screenshot $t/$p.png"
 done
+# 10. The popup: up, closed each way with the view kept, inside the window; a
+# type with no position placed with none and selected, a positioned one armed
+# back in 3D and placed by the click there
+wantp "$b" "the windows at .*ctx 12 \d+ \d+ \d+ \(popup_up\)"
+for w in popup_escaped popup_outside popup_button menu_cancelled menu_escaped menu_outside after_drag; do
+	kit "$b" | grep -a "the windows at .*($w)" | grep -aqv " ctx " || fail "a menu still up: $w ($b)"
+done
+kit "$b" > "$t/kit.txt"
+python3 -I - "$t/kit.txt" 1024 700 <<'PY' || fail "the popup ($t/kit.txt)"
+import re, sys
+n = 0
+for l in open(sys.argv[1], errors="replace"):
+    m = re.search(r"the palette's popup, (\d+) items in (\d+) columns, (\d+) (\d+) (\d+) (\d+) in", l)
+    if m:
+        x, y, w, h = map(int, m.groups()[2:])
+        assert x >= 0 and y >= 0 and x + w <= int(sys.argv[2]) and y + h <= int(sys.argv[3]), l
+        n += 1
+assert n >= 5, n
+PY
+seq=$(kit "$b" | grep -a "kit editor: the view is " | sed 's/.*view is //' | tr '\n' ' ')
+case $seq in
+*"Walk Signals 3D Signals 3D ") ;;
+*) fail "the views past the popup: $seq ($b)" ;;
+esac
+placed=$(grep -aoP "An edit by kitboss: placed kit/timer \K\d+(?=, no position)" "$s" | tail -1)
+[ "$placed" != "$TIMER" ] || fail "the popup's timer not placed ($s)"
+kit "$b" | sed -n '/signals: picked kit\/timer/,$p' | grep -aq "selected $placed " || fail "the popup's timer not selected ($b)"
+wantp "$s" "An edit by kitboss: placed kit/flag \d+ at \[5,1,10\]"
+echo "ok: Add from palette: closed by Escape, a press outside and its button; a type with no position placed and selected; a positioned one armed for the click in the view it came from"
+# 11. The palette's menu: nothing placed until Place; a drag places
+[ "$(grep -ac "An edit by kitboss: placed kit/logic" "$s")" = 2 ] || fail "kit/logic placed but for its Place ($s)"
+[ "$(grep -ac "An edit by kitboss: placed kit/action" "$s")" = 1 ] || fail "kit/action placed but for its drag ($s)"
+wantp "$s" "An edit by kitboss: placed kit/action \d+, no position"
+placed=$(grep -aoP "An edit by kitboss: placed kit/logic \K\d+" "$s" | tail -1)
+want "$b" "kit editor: selected $placed " "kit editor: kit/logic a favourite" "kit editor: kit/logic not a favourite" \
+	"kit editor: placing kit/flag"
+echo "ok: a type with no position has the palette's menu: Cancel, Escape, a press elsewhere place nothing, Place at once and selected, Favourite kept; a drag places, a positioned one arms"
 # 5. The name after a restart; 8. A wide window, a narrow touch one
 stop_server
 python3 -I - "$t/user/apps/workbench/saves/world/save.sqlite" "$FLAG" "$BAR1" "$TIMER" "$LOGIC" "$KID" "$PIE" <<'PY' || fail "the save"
@@ -482,12 +653,64 @@ screenshot @T@/narrow_list.png
 click Button "Inspector"
 frames 5
 screenshot @T@/narrow_inspector.png
+click Button "Entities"
+frames 5
+click Button "Add from palette"
+wait_log 5000 signals: the palette's popup
+frames 3
+screenshot @T@/narrow_popup.png
+click Button "kit/logic"
+wait_log 5000 signals: picked kit/logic
+wait_log 10000 kit editor: state:
+frames 5
+screenshot @T@/narrow_placed.png
+sync 3000
+quit
+EOF
+# A small window at a UI scale of 2: 400x250 of UI
+cat > "$t/kitsmall.cmds" <<EOF
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log_any 10000 kit editor: edit mode on
+frames 5
+screenshot @T@/small_walk.png
+click Button "Tools"
+frames 3
+screenshot @T@/small_tools.png
+click Button "kit/action"
+wait_log 5000 the palette's menu of kit/action
+frames 3
+screenshot @T@/small_menu.png
+keypress Escape
+frames 3
+keypress F5
+frames 8
+click Button "Entities"
+frames 5
+click Button "Add from palette"
+wait_log 5000 signals: the palette's popup
+frames 3
+screenshot @T@/small_popup.png
 sync 3000
 quit
 EOF
 serve "$t/srv2.log"
 BUILDAT_JOIN_NAME=kitboss client kitwide 1800x1000 -u 1
 BUILDAT_JOIN_NAME=kitboss BUILDAT_TOUCH=1 client kitnarrow 600x400 -u 1
+BUILDAT_JOIN_NAME=kitboss client kitsmall 800x500 -u 2
+for l in kitnarrow kitsmall; do
+	kit "$t/$l.log" > "$t/kit.txt"
+	python3 -I - "$t/kit.txt" <<'PY' || fail "the popup in $l ($t/kit.txt)"
+import re, sys
+m = re.findall(r"the palette's popup, \d+ items in \d+ columns, (\d+) (\d+) (\d+) (\d+) in (\d+)x(\d+)", open(sys.argv[1], errors="replace").read())
+assert m
+for x, y, w, h, rw, rh in m:
+    x, y, w, h, rw, rh = map(int, (x, y, w, h, rw, rh))
+    assert x >= 0 and y >= 0 and x + w <= rw and y + h <= rh, (x, y, w, h, rw, rh)
+PY
+done
 # 9. A real window (no -w: the fit is on) made small and large again: the UI
 # back at its full scale, the Signals view's panels not holding the fit down
 cat > "$t/kitfit.cmds" <<EOF
