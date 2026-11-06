@@ -323,6 +323,12 @@ buildat.sub_packet("kit:body", function(data)
 	end
 end)
 
+-- [KIT_FREE_ROTATION] For a page's drive, which has no look_dir: "event kit_face
+-- <yaw> <pitch>"
+magic.SubscribeToEvent("command_seq:kit_face", function(_, data)
+	local y, p = data:GetString("Param"):match("(%S+) (%S+)")
+	C.yaw, C.pitch = tonumber(y) % 360, tonumber(p)
+end)
 magic.SubscribeToEvent("command_seq:kit_body", function()
 	local p = pos_of(C.s) or {0, 0, 0}
 	log:info(string.format("kit: body at %.2f,%.2f,%.2f, %d acks, %d " ..

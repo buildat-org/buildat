@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~3 min (2026-11-06)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/prefabs.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/types/prefab_copy.lua builtin/voxel_objects/** apps/workbench/**
+# cost: ~2 min, ~4 min with web (2026-11-07)
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/client_lua/module.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/prefabs.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/types/prefab_copy.lua builtin/kit/types/region.lua builtin/kit/types/trigger_zone.lua builtin/voxel_objects/** apps/workbench/**
 # [KIT_FREE_PREFAB] A voxel prefab as a free object: kit/prefab_copy's mode. A
 # fresh save on Workbench, a flat World, a walker and controls; prefab
 # kitboss/wall: a wall 6x2x1 of stone and a gate before it. The turned wall goes
@@ -32,17 +32,14 @@
 # Screenshots kept with KEEP_TMP=1: $t/*.png
 #   util/kit_free_prefab_check.sh
 #   util/kit_free_prefab_check.sh rotation
-#   util/kit_free_prefab_check.sh web    in headless Chrome, on web/'s wasm
+#   util/kit_free_prefab_check.sh web    in headless Chrome, on web/'s wasm: a
+#      drive of the plan and palette, then this whole check, its sequences turned
+#      into a page's steps (mid-drag screenshots left out)
+#   util/kit_free_prefab_check.sh web rotation   rotation() alone, in the page
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-if [ "${1:-}" = web ]; then
-	# The menu's Place free of kit/hut in the 2D plan, selected: inspector and
-	# box; turned by keys at a step of 1, moved by a key. One placed in the 3D view
-	# and turned there; the editor's view of it, play's, and walked at in play.
-	export BUILDAT_WORKBENCH_STONE=1
-	check_tmp kit_free_prefab_web; t=$CHECK_TMP
-	stub="(function(){ var held = null, refuse = false;
+PAGE_STUB="(function(){ var held = null, refuse = false;
  Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }});
  function set(e){ held = e; document.dispatchEvent(new Event('pointerlockchange')); }
  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') refuse = true; }, true);
@@ -52,11 +49,23 @@ if [ "${1:-}" = web ]; then
   if(held !== this) set(this); return Promise.resolve(); };
  document.exitPointerLock = function(){ if(held) set(null); };
  return 'stub'; })()"
+WEB=
+if [ "${1:-}" = web ]; then
+	WEB=1
+	check_tmp kit_free_prefab_web; t=$CHECK_TMP
+fi
+if [ -n "$WEB" ] && [ "${2:-}" != rotation ]; then
+	# The menu's Place free of kit/hut in the 2D plan, selected: inspector and
+	# box; turned by keys at a step of 1, moved by a key. One placed in the 3D view
+	# and turned there; the editor's view of it, play's, and walked at in play.
+	export BUILDAT_WORKBENCH_STONE=1
+	stub=$PAGE_STUB
 	# A wheel event is one row of the palette, under the pointer; own prefabs come last
 	down="[\"mouse\", 100, 400], [\"frames\", 2],"
 	turn=""
 	for _ in $(seq 7); do
-		turn="$turn [\"key\", \"x\"], [\"waitlog\", \"kit editor: state:\", 10],"
+		# ([KIT_TURN_KEYS_DROP] Nothing waited for: each press counts)
+		turn="$turn [\"key\", \"x\"],"
 	done
 	for _ in $(seq 25); do
 		down="$down [\"wheel\", 100, 400, 100], [\"frames\", 1],"
@@ -99,6 +108,7 @@ if [ "${1:-}" = web ]; then
 	["key", "h"], ["frames", 2], ["key", "h"], ["frames", 2], ["key", "h"], ["frames", 2],
 	["key", "h"], ["waitlog", "kit editor: angle step 1", 10],
 	$turn
+	["sync", 5000],
 	["key", "Right"], ["sync", 5000], ["frames", 5],
 	["shot", "\${OUT}/plan_turned.png"],
 	["key", "F2"], ["waitlog", "kit editor: the view is 3D", 10], ["frames", 5],
@@ -108,7 +118,7 @@ if [ "${1:-}" = web ]; then
 	["click", 800, 600, 50, 2], ["waitlog", "kit editor: placing nothing", 10], ["frames", 3],
 	["click", 800, 600], ["waitlog", "kit editor: selected 4", 10], ["frames", 3],
 	$turn
-	["frames", 5],
+	["sync", 5000], ["frames", 5],
 	["shot", "\${OUT}/view3d.png"],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Play mode", 600, 339], ["waitlog", "kit editor: edit mode off", 10],
@@ -129,26 +139,112 @@ J
 			"set 4's kit/prefab_copy mode to \"stamped\"" ; do
 		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
 	done
-	echo "PASS: a free prefab object in the web client"
-	exit 0
+	echo "ok: a free prefab object in the web client, from the palette"
+	unset BUILDAT_WORKBENCH_STONE
 fi
 export BUILDAT_WORKBENCH_PROJECT=world
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
-check_tmp kit_free_prefab; t=$CHECK_TMP
+[ -n "$WEB" ] || { check_tmp kit_free_prefab; t=$CHECK_TMP; }
 cd "$here/Build"
 
 server() # <n>
 {
 	start_server "$t/srv$1.log" "Listening at" 300 auto \
 		bin/buildat_server -m ../apps/workbench -D "${USERDIR:-$t/user}" -l 3 \
-		--sim-rate "$CHECK_RATE" ||
+		${WEB:+-W "$here/web"} --sim-rate "$CHECK_RATE" ||
 		fail "the server did not come up ($t/srv$1.log)"
 	CHECK_PIDS+=($SERVER_PID)
+	WEB_SERVER_LOG=$t/srv$1.log
+}
+# A sequence as a page's steps. The first client makes the account as natively.
+# The page's pointer lock stubbed, as headless Chrome has none; the pause menu its
+# first frames open closed. Keys held: over each delay, the events between them run.
+cat > "$t/to_web.py" <<'PY'
+import json, math, re, shlex, sys
+PAUSE = [["waitlog_any", "pause: the menu shown", 10], ["eval", "window.lockOk = true, 'lock'"],
+	["click", 100, 680], ["waitlog", "pause: the menu closed", 10], ["wait", 500]]
+out, held, at, down = json.load(open(sys.argv[2])), None, [512, 350], None
+for line in open(sys.argv[1]):
+	line = line.strip()
+	if not line:
+		continue
+	cmd, _, rest = line.partition(" ")
+	if cmd == "event":
+		out.append(["event", rest])
+	elif cmd in ("wait_log", "wait_log_any"):
+		ms, _, text = rest.partition(" ")
+		out.append(["waitlog" if cmd == "wait_log" else "waitlog_any", re.escape(text), int(ms) / 1000])
+		if "player physics enabled" in text:
+			out += PAUSE
+	elif cmd in ("frames", "sync"):
+		out.append([cmd, int(rest)])
+	elif cmd == "delay":
+		out.append(["holdkey", held, int(rest)] if held else ["wait", int(rest)])
+	elif cmd == "keypress":
+		out.append(["key", rest.lower() if len(rest) == 1 else rest])
+	elif cmd == "keydown":
+		held = rest.lower()
+	elif cmd == "keyup":
+		held = None
+	elif cmd == "screenshot":
+		# (a drag is one step: nothing to see in the middle of it)
+		if not down:
+			out.append(["shot", rest])
+	elif cmd == "mouse_pos":
+		at = list(map(int, rest.split()))
+		if not down:
+			out.append(["mouse", *at])
+	elif cmd == "mouse_down":
+		down = at
+	elif cmd == "mouse_up":
+		out.append(["ldrag", *down, *at])
+		down = None
+	elif cmd == "mouse_click":
+		out.append(["click", *at, 50, 2 if rest == "right" else 0])
+	elif cmd == "mouse_wheel":
+		out.append(["wheel", *at, 100 if int(rest) < 0 else -100])
+	elif cmd == "click":
+		a = shlex.split(rest)
+		out.append(["click", *a[:2], *map(int, a[2:])])
+	elif cmd == "look_dir":
+		x, y, z = map(float, rest.split())
+		out.append(["event", "kit_face %.3f %.3f" % (math.degrees(math.atan2(x, z)),
+			-math.degrees(math.atan2(y, math.hypot(x, z))))])
+	elif cmd == "quit":
+		out.append(["sync", 3000])
+	else:
+		sys.exit("no page's step for: " + line)
+json.dump(out, sys.stdout)
+PY
+web_client() # <name>
+{
+	local log=$t/$1.log login
+	if [ -n "${BUILDAT_JOIN_CREATE:-}" ]; then
+		login=$(web_login_steps kitboss "$WEB_SERVER_LOG") || fail "$login"
+	else
+		# (the login page's first field is the name's)
+		login=' ["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+ ["selall"], ["frames", 2], ["type", "kitboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["type", "checkpass12"], ["frames", 2], ["key", "Enter"], ["waitlog", "Joined as kitboss", 30],'
+	fi
+	# (the UI at the size a native 1024x700 run has: its places the same)
+	printf '[["nav", "${URL}?scale=0.648148"], ["eval", %s], %s ["frames", 2]]' \
+		"$(printf %s "$PAGE_STUB" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
+		"$login" > "$t/$1.head.json"
+	python3 "$t/to_web.py" "$t/$1.cmds" "$t/$1.head.json" > "$t/$1.json" ||
+		fail "the steps of $1"
+	WEB_DRIVE_VIEWPORT=1024x700@1 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
+		"$here/util/web_drive.sh" chrome workbench "$t/$1.json" "$t/drive_$1" \
+		> "$t/drive_$1.txt" 2>&1
+	local st=$?
+	cp "$t/drive_$1/page.log" "$log" 2>/dev/null
+	[ $st = 0 ] || fail "the page's $1 ($(tail -2 "$t/drive_$1.txt"), $log, $t/srv*.log)"
 }
 client() # <name>: its commands in $t/<name>.cmds
 {
+	[ -z "$WEB" ] || { web_client "$1"; return; }
 	run_client 60 "$t/$1.log" timeout 240 bin/buildat -C "$t/client_cache" \
 		-D "$t/cu_$1" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
 		-c @"$t/$1.cmds" ||
@@ -705,7 +801,7 @@ PY
 	echo "ok: [KIT_FREE_ROTATION] poses, zone, region, handles, keys, a stamp refused, save and load"
 	unset USERDIR BUILDAT_WORKBENCH_TYPES
 }
-if [ "${1:-}" = rotation ]; then
+if [ "${1:-}" = rotation ] || [ "${2:-}" = rotation ]; then
 	rotation
 	echo "PASS: free rotation"
 	exit 0
