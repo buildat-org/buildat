@@ -30,6 +30,8 @@ namespace server
 	// set. A Rust crate's path dependencies may be the module's other
 	// directories with a Cargo.toml (a crate both halves use): they are
 	// copied and hashed with it.
+	// [AITTA_NATIVE_WASM] Where there is no toolchain, a module installed
+	// from an Aitta has the .wasm that Aitta built.
 	ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 			const ss_ &module_path, const ss_ &source = "wasm",
 			bool server = false);

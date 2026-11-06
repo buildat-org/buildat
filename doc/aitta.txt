@@ -162,6 +162,35 @@ early what could not run so. An SDK of another engine version links every
 such release again at Aitta's start; until then the page of the new
 version runs none of them.
 
+A release's .wasm on a native server [AITTA_NATIVE_WASM]: an app (not a
+variant, remix or world) that has a module with wasm/ or a server_wasm
+source and cannot run in the page is built the same way, with no SDK,
+under the same queue and the same 3-waiting refusal. A C++ server side
+stays native and is not built. Its record then has "web_wasm" and
+"web_build", and no "web" or "web_cpp": "web" still means it runs in the
+page. A C++ page build that fails is built this way afterwards. At a
+start Aitta looks into the releases it has no "web_build" for, one at a
+time ("none" when there is nothing to build).
+
+`buildat aitta install` and the client's install fetch those files into
+<version directory>/.aitta_wasm/ (<module>.wasm, <module>.server.wasm):
+each is checked against its sha256 and is at most 8 MiB. One that fails is
+a warning, the install stands. An install of a version already there
+fetches what is missing and not the archive, and the client's list does
+the same for the newest versions it shows.
+
+A server builds a module's .wasm from its cache, the shared build, or its
+toolchain. With no toolchain for it, and only in a directory with
+.aitta_from (an install; never a dev app's), it takes the .aitta_wasm file
+and logs "<module>: wasm/ was built by the Aitta it came from". Without
+that file the module is refused as before. A wasm_box source is not built
+by Aitta and still needs a toolchain.
+
+Nothing gates a .wasm by engine version: one importing what this engine
+does not have is refused where it is loaded, naming the import. A name
+under a dot at an archive's root is an install's own: a publish is refused
+with one and an install drops them from a zip before reading anything.
+
 A package of kind "extension" is a client extension: init.lua at its
 root, run in the client's sandbox like extensions/ (an app's client Lua
 requires it, or a launch_ui.txt beside it makes it a launch UI, always
