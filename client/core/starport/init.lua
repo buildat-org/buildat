@@ -330,6 +330,13 @@ end
 local note_recommends
 local note_version
 
+-- [ALPHA_BUILDS] This client's version when it is an alpha, else nil. A tag's
+-- old hash suffix is no alpha.
+local function own_alpha_version()
+	local v = buildat.version()
+	return v:find("-alpha.", 1, true) and v or nil
+end
+
 local function hex(bytes)
 	return (bytes:gsub(".", function(c)
 		return string.format("%02x", c:byte())
@@ -696,9 +703,13 @@ function M.safe.fetch(cb, ask, extra)
 			done()
 		end
 		local options = {description = "Starport (server list)"}
-		if e.send_key then
+		-- [ALPHA_BUILDS] An alpha says which, as Starport shows an alpha's
+		-- servers only to that alpha; any other version says nothing
+		local alpha = own_alpha_version()
+		if e.send_key or alpha then
 			network.http_post(url .. "/api/v1/list", network.write_json(
-					{key = key_for(url)}), got, options)
+					{key = e.send_key and key_for(url) or nil, version = alpha}),
+					got, options)
 		else
 			network.http_get(url .. "/api/v1/list", got, options)
 		end
@@ -1133,25 +1144,75 @@ assert(version_cmp("0.6.10", "0.6.9") == 1 and
 		version_cmp("1.0.0-alpha", "1.0.0-alpha.1") == -1 and
 		version_cmp("1.0.0-alpha.1", "1.0.0-alpha.beta") == -1 and
 		version_cmp("1.0.0-beta.2", "1.0.0-beta.11") == -1 and
+		version_cmp("0.8.0-alpha.10", "0.8.0-alpha.9") == 1 and
+		version_cmp("0.8.0-alpha.1", "0.8.0") == -1 and
 		version_cmp("1.0.0+a", "1.0.0+b") == 0 and
 		version_cmp("0.6", "0.6.0") == nil)
 
+-- What a client of version `own` is offered of a Starport's answer, or nil.
+-- A pre-release in "version" only to a client that runs one. simplified: no
+-- setting asks for them on a release. [ALPHA_BUILDS] "prerelease" only to an
+-- alpha, and only within its own MAJOR.MINOR, as the next minor's alpha is a
+-- choice to make; a stable one newer than it goes to it as to anyone.
+local function version_offer(own, v)
+	if type(v) ~= "table" then
+		return nil
+	end
+	local best = nil
+	local function consider(c)
+		if type(c.version) == "string" and
+				(version_cmp(c.version, own) or 0) > 0 and
+				(not c.version:find("-", 1, true) or own:find("-", 1, true)) and
+				(not best or (version_cmp(c.version, best.version) or 0) > 0) then
+			best = c
+		end
+	end
+	consider(v)
+	local p = v.prerelease
+	if own:find("-alpha.", 1, true) and type(p) == "table" and
+			type(p.version) == "string" and p.version:find("-alpha.", 1, true) and
+			own:match("^%d+%.%d+%.") == p.version:match("^%d+%.%d+%.") then
+		consider(p)
+	end
+	return best
+end
+do
+	local answer = {version = "0.7.99", prerelease = {version = "0.8.0-alpha.4"}}
+	local got = function(own, a)
+		local o = version_offer(own, a or answer)
+		return o and o.version
+	end
+	-- A stable client is not offered an alpha, also not when it is all there is
+	assert(got("0.7.98") == "0.7.99" and got("0.7.99") == nil and
+			got("0.8.0") == nil and
+			got("0.7.0", {prerelease = {version = "0.8.0-alpha.4"}}) == nil)
+	-- An alpha: the same minor's next, alpha.10 above alpha.9; not another
+	-- minor's; not an older one's
+	assert(got("0.8.0-alpha.3") == "0.8.0-alpha.4" and
+			got("0.8.0-alpha.4") == nil and got("0.8.0-alpha.5") == nil and
+			got("0.9.0-alpha.1") == nil and got("0.7.0-alpha.1") == "0.7.99")
+	assert(got("0.8.0-alpha.9", {version = "0.7.99",
+			prerelease = {version = "0.8.0-alpha.10"}}) == "0.8.0-alpha.10")
+	-- A stable one newer: the same minor's final, or later
+	assert(got("0.8.0-alpha.3", {version = "0.8.0",
+			prerelease = {version = "0.8.0-alpha.4"}}) == "0.8.0" and
+			got("0.8.0-alpha.3", {version = "0.9.1"}) == "0.9.1")
+	-- A tag's old hash suffix is no alpha: no "prerelease" for it
+	assert(got("0.6.90-abc1234", {version = "0.6.89",
+			prerelease = {version = "0.6.90-alpha.9"}}) == nil)
+end
+
 note_version = function(url, v)
-	if type(v) ~= "table" or type(v.version) ~= "string" or
-			(version_cmp(v.version, buildat.version()) or 0) <= 0 or
-			-- A pre-release only to a client that runs one.
-			-- simplified: no setting asks for them on a release
-			(v.version:find("-", 1, true) and
-			not buildat.version():find("-", 1, true)) or
-			(newer and (version_cmp(v.version, newer.version) or 0) <= 0) then
+	local o = version_offer((buildat.version()), v)
+	if not o or (newer and (version_cmp(o.version, newer.version) or 0) <= 0) then
 		return
 	end
 	-- This platform's link when the adapter gave one
-	local platforms = type(v.platforms) == "table" and v.platforms or {}
+	local platforms = type(o.platforms) == "table" and o.platforms or {}
 	local p = platforms[({Windows = "win64", Linux = "linux"})[GetPlatform()]
 			or ""]
-	local link = type(p) == "table" and p.url or v.url
-	newer = {version = v.version, url = tostring(link), starport = url}
+	local link = type(p) == "table" and p.url or o.url
+	newer = {version = o.version, url = tostring(link), starport = url}
 end
 
 -- The notice, on the launcher's screen (the trusted overlay calls it as it
@@ -1209,6 +1270,17 @@ function M.offer_version()
 					"from it. Your saves and settings are kept: they are in " ..
 					__buildat_get_path("user") .. ", not in the folder you " ..
 					"extract."
+			-- [ALPHA_BUILDS] An alpha promises nothing of its saves, and a
+			-- stable version is a program apart with saves of its own
+			if own_alpha_version() then
+				local run = file:match("%.exe$") and "run " .. file or
+						"extract " .. file .. " and run bin/buildat from it"
+				next_ = "Let the download finish in your browser. Then close " ..
+						"Buildat and " .. run .. ". " ..
+						(n.version:find("-alpha.", 1, true) and
+						"An alpha's saves and settings may not carry over." or
+						"It keeps its saves and settings apart from this alpha's.")
+			end
 			log:info("Version next: " .. next_)
 			add_text(w, next_, WARN)
 			add_button(add_row(w), "Close Buildat", function()
