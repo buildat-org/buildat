@@ -1640,6 +1640,12 @@ function SG.inspector(win, view)
 	SG.layout(true)
 end
 
+-- [KIT_EDIT_MODE_FPS] What SG.bar's buttons depend on
+function SG.bar_key()
+	local mode = mode_now()
+	return mode .. " " .. tostring(tab_now(mode))
+end
+
 -- The columns that take turns, in the bar
 function SG.bar(bar_button)
 	local mode = mode_now()

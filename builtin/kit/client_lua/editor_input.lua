@@ -2681,6 +2681,28 @@ function M.editor(options)
 		if type(s) ~= "table" then
 			return
 		end
+		-- [KIT_EDIT_MODE_FPS] The keys the same as last time come by name: the
+		-- last state's values kept. None at all yet (Kit loaded again): all of
+		-- it asked for. (A key in "same" the last state lacks was null.)
+		local same = type(s.same) == "table" and s.same or {}
+		s.same = nil
+		if #same > 0 and not NT.raw_state then
+			log:info("kit editor: the whole state asked for")
+			send({op = "state"})
+			return
+		end
+		local kept = {}
+		for _, k in ipairs(same) do
+			kept[k] = true
+			s[k] = NT.raw_state[k]
+		end
+		NT.raw_state = s
+		NT.state_changed = {}
+		for k in pairs(s) do
+			if not kept[k] then
+				NT.state_changed[k] = true
+			end
+		end
 		local was = E.editing
 		E.editing = s.editing == true
 		if E.can_edit ~= (s.can_edit == true) then
@@ -2819,7 +2841,7 @@ function M.editor(options)
 			end
 			NT.pf.state()
 		end
-		refresh()
+		refresh("state")
 		changed()
 		if E.editing and S.tool == "terrain" then
 			send({op = "edited"})

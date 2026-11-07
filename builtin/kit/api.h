@@ -855,7 +855,10 @@ namespace interface
 // and the admin's "people": [{name, admin, builder}] here}, and always
 // "can_edit", "running" and "by" (who started the round). Everyone is
 // sent it as the server's state changes, and a player as the admin grants
-// or takes their rights. The builders with the tools on are sent
+// or takes their rights. [KIT_EDIT_MODE_FPS] A key the same as last sent
+// to that client is not sent again but named in "same": [key...], the
+// client keeping its value; {"op": "state"} asks for all of it again (any
+// client, rights or not). The builders with the tools on are sent
 // "kit:builders" as any of them turns them on or off, selects or moves
 // their cursor: [{"name", "color": "#rrggbb", "sel", "cursor"}]. A type's
 // `gizmo = {shape = "box"|"sphere", size = n, color = "#rrggbb"}` is drawn

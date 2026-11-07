@@ -1140,7 +1140,32 @@ local function angle_text()
 	return a and a .. " deg" or "free"
 end
 
-rebuild_bar = function()
+-- [KIT_EDIT_MODE_FPS] What the bar shows, all of it: built again (8-17 ms)
+-- only as it changes, by refresh()
+local function bar_key()
+	local st = E.state or {}
+	local ses = E.session or {}
+	local keys = {}
+	for _, v in ipairs({"2d", "3d", "walk", "hud", "signals"}) do
+		keys[#keys + 1] = tostring(M.key_name(VIEW_KEYS[v]))
+	end
+	return table.concat({tostring(E.can_edit), tostring(E.editing), tostring(O.bar),
+		tostring(ses.kind), tostring(ses.prefab), tostring(ses.can), tostring(E.persistent),
+		tostring(E.running), tostring(magic.ui.root.width), tostring(S.touch), S.view,
+		table.concat(st.scenes or {}, "\1"), tostring(st.can_make_scenes),
+		tostring(current_scene()), grid_text(), angle_text(), tostring(S.tool),
+		tostring(st.clipboard ~= nil), tostring(NT.sig() and NT.sg.bar_key()),
+		tostring(narrow()), tostring(folded("palette")), tostring(folded("inspector")),
+		table.concat(keys, " "), tostring(M.key_name("copy")),
+		tostring(M.key_name("paste"))}, "\0")
+end
+
+rebuild_bar = function(if_changed)
+	local key = bar_key()
+	if if_changed and key == S.bar_key and (W.bar or not E.can_edit) then
+		return false
+	end
+	S.bar_key = key
 	drop("bar")
 	bar_items, bar_log = {}, false
 	if not E.can_edit or (not E.editing and O.bar == false) then
@@ -3805,9 +3830,28 @@ local function touch_bar()
 	button(b, "Cancel", function() M.escape() end)
 end
 
-refresh = function()
-	rebuild_bar()
-	palette()
+-- [KIT_EDIT_MODE_FPS] Whether the left panel shows nothing a refresh for why
+-- changes: a selection ("select") or a state ("state", NT.state_changed its
+-- keys) leave the Components tab as it is (17 ms to build again)
+local function palette_stays(why)
+	if not W.palette or not why or NT.tab() ~= "Components" or S.tab == "New" then
+		return false
+	end
+	if why == "select" then
+		return true
+	end
+	local c = NT.state_changed or {}
+	return why == "state" and not (c.palette or c.prefabs or c.names or c.editing or
+			c.can_edit)
+end
+
+-- Every panel drawn again ([KIT_EDIT_MODE_FPS] why: "select" or "state", what
+-- stays the same not: the bar unless what it shows changed)
+refresh = function(why)
+	local bar = rebuild_bar(true) ~= false
+	if bar or not palette_stays(why) then
+		palette()
+	end
 	touch_bar()
 	inspector_window()
 	NT.hud_panel(true)
@@ -3989,7 +4033,7 @@ local function select(id, add, by_tab)
 		end
 	end
 	focus()
-	refresh()
+	refresh("select")
 end
 M.select = function(id, add)
 	select(id, add)

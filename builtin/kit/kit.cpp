@@ -493,6 +493,10 @@ struct Peer
 	// ("<entity>:<key>": JSON), and the UI buttons they hold
 	std::map<ss_, ss_> mine_sent;
 	std::set<uint64_t> ui_held;
+	// [KIT_EDIT_MODE_FPS] kit:edit_state's keys as last sent (JSON): one the
+	// same again goes by name in "same", not again (about 100 KB a state
+	// in edit mode, the types' declarations most of it)
+	std::map<ss_, ss_> state_sent;
 };
 
 // A builder's colour while their tools are on: the first one no other
@@ -23382,6 +23386,25 @@ struct Module: public interface::Module, public Interface
 				j.set("people", people);
 			}
 		}
+		// [KIT_EDIT_MODE_FPS] What is as last sent goes by name only
+		if(pi != m_peers.end()){
+			std::map<ss_, ss_> &was = pi->second.state_sent;
+			std::map<ss_, ss_> now;
+			json::Value out = json::object(), same = json::array();
+			for(json::Iterator it(j); it; ++it){
+				const ss_ k = it.key();
+				ss_ v = it.value().stringify();
+				auto wi = was.find(k);
+				if(wi != was.end() && wi->second == v)
+					same.append(k);
+				else
+					out.set(k, it.value());
+				now[k] = std::move(v);
+			}
+			was = std::move(now);
+			out.set("same", same);
+			j = out;
+		}
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "kit:edit_state", j.stringify());
 		});
@@ -23417,6 +23440,12 @@ struct Module: public interface::Module, public Interface
 		if(pi == m_peers.end())
 			return refuse("the app has not placed the player");
 		Peer &p = pi->second;
+		// [KIT_EDIT_MODE_FPS] The whole state again: a client that lacks a
+		// key sent as the same (its Kit loaded again)
+		if(op == "state"){
+			p.state_sent.clear();
+			return send_state(peer);
+		}
 		// [KIT_SCENES] The World of the scene the editor is in
 		WorldScope ws(m_w, world_named(p.scene));
 		// Rights each packet: a revoked editor's next edit is refused
