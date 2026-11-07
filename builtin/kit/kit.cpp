@@ -17052,32 +17052,6 @@ struct Module: public interface::Module, public Interface
 		fire_event(scene, ev, "player:"+itos(player));
 	}
 
-	// [KIT_WALKER_FRAME] A body's state out of its object's frame (move.lua): the
-	// velocity the world's
-	json::Value state_in_world(const json::Value &state)
-	{
-		json::Value st = json::object();
-		for(json::Iterator it(state); it; ++it)
-			if(it.key() != "frame" && it.key() != "at")
-				st.set(it.key(), *it);
-		const json::Value &f = state.get("frame"), &v = state.get("vel");
-		auto o = m_free_objects.end();
-		if(f.is_number())
-			o = m_free_objects.find((uint64_t)f.as_number());
-		if(o != m_free_objects.end() && v.is_array() && v.size() == 3){
-			double w[3];
-			for(unsigned k = 0; k < 3; k++)
-				w[k] = v.at(k).is_number() ? v.at(k).as_number() : 0;
-			Turn::of(o->second.place[3], o->second.place[4],
-					o->second.place[5]).apply(w);
-			json::Value nv = json::array();
-			for(int k = 0; k < 3; k++)
-				nv.append(w[k]);
-			st.set("vel", nv);
-		}
-		return st;
-	}
-
 	// A player's knockback: their body's speed added to, away along the
 	// hit's direction (dx, dz, level) and a little up, put again so the
 	// client steps from it
@@ -17088,14 +17062,17 @@ struct Module: public interface::Module, public Interface
 				bi->second.seat || k <= 0)
 			return;
 		Body &b = bi->second;
-		json::Value st = state_in_world(b.state);
+		json::Value st = b.state.deepcopy();
 		json::Value v = json::array();
 		const json::Value &ov = st.get("vel");
 		const double add[3] = {dx * k, k * 0.4, dz * k};
+		// [KIT_WALKER_FRAME] On an object its velocity is the object's: move.lua
+		// takes the world's knock out of the frame
+		const bool framed = st.get("frame").is_number();
 		for(unsigned i = 0; i < 3; i++)
-			v.append((ov.is_array() && ov.at(i).is_number() ?
+			v.append(framed ? add[i] : (ov.is_array() && ov.at(i).is_number() ?
 					ov.at(i).as_number() : 0) + add[i]);
-		st.set("vel", v);
+		st.set(framed ? "push" : "vel", v);
 		st.set("ground", false);
 		log_i(MODULE, "%s knocked back (%.2f, %.2f, %.2f)",
 				cs(m_peers[peer].name), add[0], add[1], add[2]);

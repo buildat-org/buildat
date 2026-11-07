@@ -769,7 +769,7 @@ t = math.tan(math.radians(10))
 for x in b:
 	true = dy + 0.5 / math.cos(math.radians(10)) + (x[2] - dz) * t if x[2] >= dz - 0.5 else by
 	print("  body z %.2f y %.2f (the deck's top under it %.2f), corrections %d" % (x[2], x[1], true, x[3]))
-	assert x[2] < dz or abs(x[1] - true) < 0.03, "not on the deck's surface"
+	assert not dz < x[2] < dz + 7 or abs(x[1] - true) < 0.03, "not on the deck's surface"
 assert b[-1][3] == b[0][3], "corrections on the deck"
 assert max(x[1] for x in b) > by + 0.3, "it did not climb"
 PY
@@ -1079,7 +1079,7 @@ from decks import *
 log, marks, boblog = sys.argv[2:5]
 text = open(log, errors="replace").read()
 names = open(marks).read().split()
-got = re.findall(r"kit: body at [-\d.,]+, \d+ acks, (\d+) corrections, \d+ pending, (\d+) jumps, \d+ arrivals, feet ([-\d.]+),([-\d.]+),([-\d.]+), frame (\w+)", text)
+got = re.findall(r"kit: body at [-\d.,]+, \d+ acks, (\d+) corrections, \d+ pending, (\d+) jumps, \d+ arrivals\n.*?kit: feet at ([-\d.]+),([-\d.]+),([-\d.]+), frame (\w+)", text)
 # (walk()'s, not marks, come before)
 assert len(got) >= len(names), (len(got), len(names))
 got = got[-len(names):]

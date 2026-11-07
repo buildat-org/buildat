@@ -1226,7 +1226,16 @@ function W:walk(s, b, wx, wz, jump, dt, p)
 				o = t
 			end
 		end
-		if o and self:walk_on(o, s, b, wx, wz, jump, dt, p) then
+		-- A knock from the server (kit.cpp's knock()): out, its speed the world's
+		local push = s.push
+		s.push = nil
+		if o and type(push) == "table" then
+			leave_frame(s, o)
+			for k = 1, 3 do
+				s.vel[k] = s.vel[k] + (tonumber(push[k]) or 0)
+			end
+			s.ground = false
+		elseif o and self:walk_on(o, s, b, wx, wz, jump, dt, p) then
 			return s
 		elseif not o then
 			s.frame, s.at = nil, nil

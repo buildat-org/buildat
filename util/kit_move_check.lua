@@ -540,6 +540,35 @@ do
 	assert(near(s.pos[2], 0.5, 1e-3) and s.pos[3] < -0.5, "stopped at it on the floor: " ..
 			s.pos[2] .. " " .. s.pos[3])
 end
+-- A knock from the server on a deck: out of the frame, its speed the world's; lands
+do
+	local w = deck_world(0, 10, 0)
+	local s = on_deck(w, 3.5, 3.5)
+	local idle = {f = 0, r = 0, yaw = 0, jump = 0, go = 0}
+	run(walker, s, 20, idle, w, wp)
+	assert(s.frame == 7, "on it to be knocked")
+	local x0, z0 = s.pos[1], s.pos[3]
+	s.push, s.ground = {5, 2, 0}, false
+	walker.step(s, idle, 1 / 60, w, wp)
+	assert(s.frame == nil and s.at == nil and s.push == nil, "knocked out of the frame")
+	assert(s.pos[1] > x0 + 0.05 and near(s.pos[3], z0, 1e-6), "the world's x: " .. s.pos[1])
+	run(walker, s, 120, idle, w, wp)
+	assert(s.frame == 7 and s.ground, "landed in the frame")
+end
+-- A heightmap rising under a deck: the ground takes the walker over, at its height
+do
+	local w = MV.world{cell = function() return nil end,
+		ground = function(_, z) return z > 4 and (z - 4) * 2 or 0 end,
+		turned = MV.turned({{0, 2, 0, 0, 0, 5, {-6, -0.5, -6, 6, 0.5, 6}, 7}})}
+	local s = {pos = {0, 2.6, 0}}
+	local idle = {f = 0, r = 0, yaw = 0, jump = 0, go = 0}
+	run(walker, s, 30, idle, w, wp)
+	assert(s.frame == 7, "on the deck over the heightmap")
+	run(walker, s, 90, {f = 1, r = 0, yaw = 0, jump = 0, go = 0}, w, wp)
+	assert(s.frame == nil, "the ground took over at z " .. s.pos[3])
+	assert(s.pos[2] >= w:height(s.pos[1], s.pos[3]) - 1e-3, "not under the ground: " ..
+			s.pos[2] .. " at z " .. s.pos[3])
+end
 -- A deck into the floor: walking down it the floor takes over, and level on, it stands
 do
 	local w = MV.world{cell = function(_, j)

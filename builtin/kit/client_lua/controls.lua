@@ -331,13 +331,13 @@ magic.SubscribeToEvent("command_seq:kit_face", function(_, data)
 end)
 magic.SubscribeToEvent("command_seq:kit_body", function()
 	local p = pos_of(C.s) or {0, 0, 0}
-	-- [KIT_WALKER_FRAME] and the feet to the millimetre, for measuring a deck
 	log:info(string.format("kit: body at %.2f,%.2f,%.2f, %d acks, %d " ..
-			"corrections, %d pending, %d jumps, %d arrivals, feet %.4f,%.4f,%.4f, " ..
-			"frame %s", p[1], p[2], p[3],
+			"corrections, %d pending, %d jumps, %d arrivals", p[1], p[2], p[3],
 			C.acks, C.corrections, #C.pending, tonumber(C.s and C.s.jumps) or 0,
-			tonumber(C.s and C.s.arrived) or 0, p[1], p[2], p[3],
-			tostring(C.s and C.s.frame or "none")))
+			tonumber(C.s and C.s.arrived) or 0))
+	-- [KIT_WALKER_FRAME] To the tenth of a millimetre, for measuring a deck
+	log:info(string.format("kit: feet at %.4f,%.4f,%.4f, frame %s", p[1], p[2],
+			p[3], tostring(C.s and C.s.frame or "none")))
 end)
 
 -- ---- The controls: the movement's file, the signals as they come
