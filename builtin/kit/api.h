@@ -349,7 +349,9 @@ namespace interface
 //   `choices_from = "biomes"` makes the inspector's a dropdown of the
 //   material set's biomes (a string still; the World refuses another).
 //   `choices_from = "scenes"`: a dropdown of the composition's scenes
-//   and "none" (""). [KIT_SOUNDS] A parameter type "sound": a dropdown of
+//   and "none" (""). `choices_from = "scene_list"`: a text of scene names,
+//   comma separated, and a dropdown adding one to it ("item_list" the same
+//   of items). [KIT_SOUNDS] A parameter type "sound": a dropdown of
 //   the project's sounds and "none" ("").
 //   [KIT_PARAM_CATEGORIES] A parameter's `cat` is the inspector's category
 //   it is under: "behaviour" (without one), "hud", "look" (appearance in
@@ -780,7 +782,11 @@ namespace interface
 // run's, any for a type with `players`; nil: those in its zone and the
 // run's), moves a player into one it made or back (c:session_move(player,
 // id), id 0 the default) and ends one it made (c:session_end(id));
-// on_session_start(c, id) and on_session_end(c, id) are its own. In a
+// on_session_start(c, id) and on_session_end(c, id) are its own.
+// [KIT_MAP_ROTATION] c:session_start(players, map, others): `map` the scene
+// its players go into (else the maker's `map` parameter), `others` scenes
+// whose entities run nothing in this session, less `map` and the maker's own
+// scene. c.scenes, for a `teams = true` type, the composition's scenes. In a
 // session c.session is its id (0 in the default) and c:session_end() ends
 // it; none is made from inside one, MAX_SESSIONS (8) at most. Ending one
 // sends its players back to the default round at their scene's spawn.
@@ -852,6 +858,12 @@ namespace interface
 // (checked each second). Its UI is drawn in its own scene only: its
 // output `status` (the round's line as it changes: the time left or
 // "Overtime", the scores, the result) is for a kit/ui_text in the map.
+// [KIT_MAP_ROTATION] `maps` (scene names, comma separated; over `map`) and
+// `map_pick` ("round_robin", "random", "signal"), inputs "next_map" and
+// "prev_map" in the default round: each round's map, shown as "Next map:" in
+// the lobby's status; a round's own c.teams are its map's, and a map of the
+// list not picked runs nothing in that round (not its timers either), so
+// each map can hold its own teams and win conditions.
 // [KIT_FLAG_RIGHT_CLICK] A type's `right_use` names a shared state of its
 // own: the player whose entity id it holds has their right click use the
 // entity (kit:use, its on_use) instead of placing a voxel (the client's
