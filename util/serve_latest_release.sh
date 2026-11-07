@@ -151,7 +151,7 @@ games=() ids=() ports=() users=() opts=()
 while [ $# -gt 0 ]; do
 	[ $# -lt 3 ] && usage
 	games+=("$1")
-	# What the server calls it, and its files here and under <user dir>
+	# Its files here; under <user dir> and the cache, app_id's name
 	ids+=("${1/\//.}")
 	ports+=("$2")
 	mkdir -p "$3" || exit 1
@@ -478,11 +478,26 @@ running=()
 app_last_file(){ echo "$base/app_version-${ids[$1]}-${ports[$1]}"; }
 app_last(){ cat "$(app_last_file "$1")" 2>/dev/null; }
 
-# Server i's saves when it runs app, <dir>/installed/<who>/<name>/<version>:
-# the server calls the app <who>.<name>
+# What the server calls app i, under apps/ and cache/apps/: a game its name, an
+# Aitta app <who>.<name> of <dir>/installed/<who>/<name>/<version> (<who> the
+# key's fingerprint, not the author ids[] has) -- the app given, else the one it
+# runs, else the one installed
+app_id(){ # i [app]
+	case ${games[$1]} in
+	*/*)
+		local a=${2:-${running[$1]:-}}
+		[ -n "$a" ] || a=$(aitta_dir "$1")
+		[ -n "$a" ] || { echo "${ids[$1]}"; return; }
+		a=${a%/*}
+		echo "$(basename "${a%/*}").${a##*/}"
+		;;
+	*) echo "${ids[$1]}" ;;
+	esac
+}
+
+# Server i's saves when it runs app
 app_saves_dir(){ # i app
-	local a=${2%/*}
-	echo "${users[$1]}/apps/$(basename "${a%/*}").${a##*/}/saves"
+	echo "${users[$1]}/apps/$(app_id "$1" "$2")/saves"
 }
 
 # Before server i, stopped, starts app: its first start of that version copies
@@ -647,7 +662,7 @@ compile(){
 builds_ask(){ # i release version result
 	local i=$1 rel=$2 ver=$3 out=$4 first said="" code wait
 	local what="${games[$i]}${ver:+ $ver} on $rel"
-	local dest="${BUILDAT_CACHE_PATH:-$base/versions/$rel/cache}/apps/${ids[$i]}/rccpp_build"
+	local dest="${BUILDAT_CACHE_PATH:-$base/versions/$rel/cache}/apps/$(app_id "$i")/rccpp_build"
 	local q=(--data-urlencode "release=$rel" --data-urlencode "app=${games[$i]}")
 	[ -n "$ver" ] && q+=(--data-urlencode "aitta=$AITTA" --data-urlencode "version=$ver")
 	first=$(date +%s)
@@ -861,8 +876,10 @@ build_aitta(){
 # writes too: the name removed and made anew with noclobber (O_EXCL), so a
 # link the app put there is not followed out of the sandbox
 app_note(){ # i file text
-	local f="${users[$1]}/apps/${ids[$1]}/$2"
-	mkdir -p "${users[$1]}/apps/${ids[$1]}"
+	local d
+	d="${users[$1]}/apps/$(app_id "$1")"
+	local f="$d/$2"
+	mkdir -p "$d"
 	rm -f "$f"
 	( set -o noclobber; printf '%s\n' "$3" > "$f" ) 2>/dev/null ||
 		say "could not write $f"
@@ -878,7 +895,7 @@ restart(){
 	stop "$i"
 	standin_stop "$i"
 	withdrawn[$i]=""
-	rm -f "${users[$i]}/apps/${ids[$i]}/shutdown_reason"
+	rm -f "${users[$i]}/apps/$(app_id "$i")/shutdown_reason"
 	local log="$base/server-${ids[$i]}-${ports[$i]}.log" from n
 	from=$(wc -l 2>/dev/null < "$log" || echo 0)
 	standin_start "$i"
@@ -896,7 +913,7 @@ restart(){
 
 # Who is on server i, by its /health; 0 when it does not answer
 players(){
-	local i=$1 tok="${users[$1]}/apps/${ids[$1]}/health_token.txt" auth=()
+	local i=$1 tok="${users[$1]}/apps/$(app_id "$1")/health_token.txt" auth=()
 	# Not through a link the app put there (dd's nofollow)
 	[ -f "$tok" ] && auth=(-H "Authorization: Bearer $(dd if="$tok" \
 		iflag=nofollow bs=256 count=1 2>/dev/null | head -n 1 | tr -d '\r')")

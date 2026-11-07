@@ -10,7 +10,8 @@
 #   3. serve_latest_release.sh tester/pt with neither AITTA nor an install:
 #      refused with the install command.
 #   4. With AITTA, from a release made from this tree: installs and serves
-#      it as <fp>.pt (/health); 1.0.1 published, it is installed,
+#      it as <fp>.pt (/health); a player on, 1.0.1 published: they are warned
+#      and it waits ([SERVE_KIT_APP_ID]); they leave, and it is installed,
 #      compiled and the server restarted onto it, a save under
 #      apps/<fp>.pt kept. A build host that offers nothing (404) is
 #      asked for the release's build with aitta= and version=1.0.0, the
@@ -149,7 +150,41 @@ curl -s -m 5 "http://127.0.0.1:$SP/health" | grep -q . || fail "no /health"
 [ -d "$t/u1/installed/$fp/pt/1.0.0" ] || fail "not installed by the script"
 echo kept > "$t/u1/apps/$fp.pt/save.txt"
 echo "ok: installed and serving 1.0.0"
+# [SERVE_KIT_APP_ID] A player on: the script finds them in the app's directory,
+# <fp>.pt: the restart waits for them, and the warning reaches them. Gone, it goes
+# The stand-in shares the port until a moment after the server listens, and a
+# join it answers fails: its 503 not seen for a while
+ok=0
+for _i in $(seq 100); do
+	[ "$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://127.0.0.1:$SP/health")" = 200 ] &&
+		ok=$((ok + 1)) || ok=0
+	[ $ok -ge 8 ] && break
+	sleep 0.2
+done
+[ $ok -ge 8 ] || fail "the stand-in stayed ($t/serve.log)"
+cat > "$t/on.cmds" <<C
+wait_log_any 60000 demo_board_game/init.lua loaded
+wait_log 180000 Notice from the server: The server updates to a new version in 60 s
+quit
+C
+timeout 240 bin/buildat -D "$t/cl_on" -s 127.0.0.1:$SP -w 800x600 -l 3 \
+	-c @"$t/on.cmds" > "$t/on.log" 2>&1 &
+on=$!
+CHECK_PIDS+=($on)
+for _i in $(seq 300); do
+	curl -s -m 5 "http://127.0.0.1:$SP/health" | grep -q '"players": *1' && break
+	kill -0 $on 2>/dev/null || fail "the player's client ended ($t/on.log)"
+	sleep 0.2
+done
+curl -s -m 5 "http://127.0.0.1:$SP/health" | grep -q '"players": *1' ||
+	fail "no player on the app ($t/on.log)"
 publish 1.0.1
+wait $on || fail "the player's client: no notice? ($t/on.log, $t/serve.log, $slog)"
+grep -aq "warning tester/pt on port $SP" "$t/serve.log" &&
+	[ "$(grep -ac "Listening at" "$slog")" = 1 ] ||
+	fail "restarted before the player was warned ($t/serve.log)"
+[ -e "$t/u1/apps/tester.pt" ] && fail "a note under <author>.<name>, not <fp>.pt"
+echo "ok: a restart waits for a player on the app, its notice reached them"
 wait_for_log "$t/serve.log" "tester/pt 1.0.1 is ready" 180 ||
 	fail "no update to 1.0.1 ($t/serve.log)"
 for _i in $(seq 300); do
