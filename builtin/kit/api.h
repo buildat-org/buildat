@@ -459,8 +459,9 @@ namespace interface
 //   voxels patterns too). Its zone, region, grants and look extent are
 //   "box" and its volume and voxel_box "cells" unless it says. Kit's
 //   types: kit/teleporter to "world", kit/effect axis and offset
-//   "world", kit/mover offset "offset", kit/part rotation "rotation",
-//   kit/door and kit/key_door mirror "mirror"; centred sizes need none.
+//   "world", kit/mover offset and kit/course course "offset", kit/part
+//   rotation "rotation", kit/door and kit/key_door mirror "mirror";
+//   centred sizes need none.
 //   simplified: a box's image is placed by its entity's first box or
 //   cells parameter; a voxels pattern's shapes keep their facings; a
 //   look's offset (a mover out) is not in a source's place
@@ -483,6 +484,13 @@ namespace interface
 //   simplified: only loaded sections are copied (a finite World is all
 //   loaded near it); copied cells and samples are marked edited; a
 //   generator's voxel_box writes are not mirrored
+//   The editor's view (stage 3; the edit state's "symmetry": its slices'
+//   maps, the authored slice's half-planes, the map, the parity text):
+//   in edit mode the seams and a shade over the other slices; a copy
+//   selected shows its parameters alone (with its overrides and Reset)
+//   and "Go to source"; a kit/symmetry's inspector lists every override
+//   on its copies and the parity warning
+//   (util/kit_symmetry_view_check.sh).
 //   [KIT] stage 5 **Packages**: component types, prefabs and builders'
 //   voxel types published to Aitta as a package of "kind": "kit"
 //   (doc/aitta.txt). [AITTA_KEY_IDENTITY] A package is its key and its

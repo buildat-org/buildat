@@ -162,7 +162,7 @@ local function knobs()
 	if S.primary then
 		e, is_made = find(S.primary)
 	end
-	if not e or not e.pos or is_made then
+	if not e or not e.pos or is_made or NT.sym_copy(e) then
 		return nil
 	end
 	local c = drawn_at(e)
@@ -269,7 +269,9 @@ local function movable()
 	local l = {}
 	for _, id in ipairs(sel_ids()) do
 		local e, is_made = find(id)
-		if e and e.pos and not is_made and not NT.under_one_of(e, S.sel) then
+		-- ([KIT_SYMMETRY] a copy is moved by its source)
+		if e and e.pos and not is_made and not NT.under_one_of(e, S.sel) and
+				not NT.sym_copy(e) then
 			l[#l + 1] = e
 		end
 	end
@@ -2440,6 +2442,7 @@ local function draw()
 		end
 	end
 	NT.pf.draw(dbg)
+	NT.sym_draw(dbg)
 	-- The round's own entities, orange (players are drawn by the app)
 	for _, e in ipairs(made()) do
 		if e.pos and e.kind ~= "player" then

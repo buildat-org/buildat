@@ -10,6 +10,8 @@ return {
 	},
 	component = true,
 	movement = {timed = true, body = {r = 0.5, h = 1}},
+	-- [KIT_SYMMETRY] course is along its own axes (turned with it)
+	space = {course = "offset"},
 	params = {
 		course = {type = "position", default = {0, 0, 0}},
 		course_time = {type = "number", default = 0, min = 0, max = 3600},

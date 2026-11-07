@@ -3517,6 +3517,58 @@ struct Module: public interface::Module, public Interface
 				ids+(n > 8 ? ", ..." : "")+")" : ss_();
 	}
 
+	// The editor's view of its scene's kit/symmetry ([KIT_SYMMETRY] stage 3):
+	// {id, on, why (what its slices can't be), slice, maps [[a, b, c, d]],
+	// planes [[a, b]] (the authored slice: a x + b z >= 0), x0, z0, width,
+	// depth, parity (the entities outside it in the other slices)}
+	json::Value sym_state(const ss_ &scene)
+	{
+		json::Value a = json::array();
+		auto si = m_host.scenes.find(scene);
+		if(si == m_host.scenes.end())
+			return a;
+		for(auto &p : m_entities){
+			const Instance *in = symmetry_in(p.second);
+			if(!in || scene_of(p.second) != si->second)
+				continue;
+			json::Value o = json::object();
+			o.set("id", (int64_t)p.first);
+			const bool on = in->params.get("on").is_true();
+			o.set("on", on);
+			symmetry::Config c;
+			ss_ why;
+			if(!sym_config(p.second, c, why)){
+				o.set("why", why);
+				a.append(o);
+				continue;
+			}
+			o.set("slice", c.slice);
+			json::Value maps = json::array(), planes = json::array();
+			for(const symmetry::Map &m : c.maps){
+				json::Value v = json::array();
+				for(int k : {m.a, m.b, m.c, m.d})
+					v.append((int64_t)k);
+				maps.append(v);
+			}
+			for(auto &pl : c.planes()){
+				json::Value v = json::array();
+				v.append((int64_t)pl.first);
+				v.append((int64_t)pl.second);
+				planes.append(v);
+			}
+			o.set("maps", maps);
+			o.set("planes", planes);
+			o.set("x0", (int64_t)c.x0);
+			o.set("z0", (int64_t)c.z0);
+			o.set("width", (int64_t)c.width);
+			o.set("depth", (int64_t)c.depth);
+			if(on)
+				o.set("parity", sym_parity_entities(p.second, c));
+			a.append(o);
+		}
+		return a;
+	}
+
 	// Whether an entity's place in the tree may be: under one that is
 	// there; one with a position under a scene or a positioned entity (no
 	// player); no loop, MAX_NEST levels under its scene at most. Its own
@@ -23145,6 +23197,7 @@ struct Module: public interface::Module, public Interface
 				j.set("terrain", t);
 			}
 			j.set("undo", (int64_t)m_undo[pi->second.name].size());
+			j.set("symmetry", sym_state(pi->second.scene));
 			// The admin's: who is here with an account, to make builders
 			bool admin = false;
 			account_of(peer, &admin);

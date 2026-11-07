@@ -2753,6 +2753,193 @@ function NT.publish_checked(what, go)
 	end)
 end
 
+-- ---- [KIT_SYMMETRY] stage 3, the editor's view of kit/symmetry (the server's
+-- state.symmetry: kit.cpp's sym_state)
+
+-- A kit/symmetry's copy: its built ({by, source, slice}), or nil
+function NT.sym_copy(e)
+	local b = type(e) == "table" and e.built
+	if type(b) ~= "table" or type(b.slice) ~= "number" then
+		return nil
+	end
+	local g = find(b.by)
+	for _, c in ipairs(g and g.components or {}) do
+		if c.type == "kit/symmetry" then
+			return b
+		end
+	end
+end
+
+-- The state of the kit/symmetry `id` in this scene, or nil
+function NT.sym_state(id)
+	for _, s in ipairs(E.state and E.state.symmetry or {}) do
+		if s.id == id then
+			return s
+		end
+	end
+end
+
+-- A convex polygon {{x, z}...} cut to its part where a x + b z >= 0
+function NT.sym_clip(poly, a, b)
+	local out = {}
+	for i = 1, #poly do
+		local p, q = poly[i], poly[i % #poly + 1]
+		local dp, dq = a * p[1] + b * p[2], a * q[1] + b * q[2]
+		if dp >= 0 then
+			out[#out + 1] = p
+		end
+		if (dp >= 0) ~= (dq >= 0) then
+			local t = dp / (dp - dq)
+			out[#out + 1] = {p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t}
+		end
+	end
+	return out
+end
+
+-- Its seams (the lines a x + b z = 0 across the map) and each slice's polygon,
+-- [1] the authored one: the map's rectangle (cells' edges) cut by the authored
+-- slice's half-planes, those turned by each slice's map for the others
+function NT.sym_shapes(st)
+	local x0, z0 = st.x0 - 0.5, st.z0 - 0.5
+	local x1, z1 = x0 + st.width, z0 + st.depth
+	local rect = {{x0, z0}, {x1, z0}, {x1, z1}, {x0, z1}}
+	local seams, slices = {}, {}
+	for _, pl in ipairs(st.planes or {}) do
+		-- Along (-b, a) from the origin, within the rectangle
+		local d = {-pl[2], pl[1]}
+		local lo, hi = -math.huge, math.huge
+		for k, range in ipairs({{x0, x1}, {z0, z1}}) do
+			if d[k] ~= 0 then
+				local ta, tb = range[1] / d[k], range[2] / d[k]
+				lo, hi = math.max(lo, math.min(ta, tb)), math.min(hi, math.max(ta, tb))
+			end
+		end
+		if lo < hi then
+			seams[#seams + 1] = {{d[1] * lo, d[2] * lo}, {d[1] * hi, d[2] * hi}}
+		end
+	end
+	for i, m in ipairs(st.maps or {}) do
+		local poly = rect
+		for _, pl in ipairs(st.planes or {}) do
+			-- The normal's image: x' = a x + b z, z' = c x + d z
+			poly = NT.sym_clip(poly, m[1] * pl[1] + m[2] * pl[2],
+					m[3] * pl[1] + m[4] * pl[2])
+		end
+		slices[i] = poly
+	end
+	return seams, slices
+end
+
+-- In edit mode: the seams, and a shade over the slices not to be edited (drawn
+-- over everything, at the kit/symmetry's ground)
+function NT.sym_draw(dbg)
+	for _, st in ipairs(E.state and E.state.symmetry or {}) do
+		local se = find(st.id)
+		if st.on and st.planes and se and se.pos then
+			local y = se.pos[2] - 0.45
+			local seams, slices = NT.sym_shapes(st)
+			local V = magic.Vector3
+			-- (three lines a tenth of a cell apart: one is lost in the plan)
+			local seam = magic.Color(1, 0.9, 0.4)
+			for _, s in ipairs(seams) do
+				local dx, dz = s[2][1] - s[1][1], s[2][2] - s[1][2]
+				local l = math.sqrt(dx * dx + dz * dz)
+				for o = -0.1, 0.11, 0.1 do
+					local ox, oz = -dz / l * o, dx / l * o
+					dbg:AddLine(V(s[1][1] + ox, y, s[1][2] + oz),
+							V(s[2][1] + ox, y, s[2][2] + oz), seam, false)
+				end
+			end
+			local shade = magic.Color(0.55, 0.2, 0.6, 0.28)
+			for i = 2, #slices do
+				local p = slices[i]
+				for k = 2, #p - 1 do
+					dbg:AddTriangle(V(p[1][1], y, p[1][2]), V(p[k][1], y, p[k][2]),
+							V(p[k + 1][1], y, p[k + 1][2]), shade, false)
+				end
+			end
+			local said = st.id .. " " .. #seams .. " seams, " .. (#slices - 1) ..
+					" shaded"
+			if NT.sym_drawn ~= said then
+				NT.sym_drawn = said
+				log:info("kit editor: symmetry " .. said)
+			end
+		end
+	end
+end
+
+-- A copy's inspector: what it is a copy of and the way to it
+function NT.sym_copy_section(w, e, b)
+	local src = find(b.source)
+	text(w, "Copy of " .. (src and NT.entity_label(src) or tostring(b.source)) ..
+			", slice " .. b.slice .. ": its parameters only", DIM)
+	button(w, "Go to source " .. b.source, function()
+		local from = drawn_at(e)
+		local fx, fy, fz = from.x, from.y, from.z
+		log:info("kit editor: to copy " .. e.id .. "'s source " .. b.source)
+		M.select(b.source)
+		-- The view moved by what lies between them
+		local s = src and drawn_at(src)
+		if s then
+			local dx, dy, dz = s.x - fx, s.y - fy, s.z - fz
+			S.cx, S.cz = S.cx + dx, S.cz + dz
+			if S.pos then
+				S.pos = {x = S.pos.x + dx, y = S.pos.y + dy, z = S.pos.z + dz}
+			end
+		end
+	end)
+end
+
+-- A kit/symmetry's inspector: why it copies nothing, every override on its
+-- copies, the parity warnings
+function NT.sym_section(w, e)
+	local st = NT.sym_state(e.id)
+	if not st then
+		return
+	end
+	if st.why then
+		NT.warn_text(w, "It copies nothing: " .. st.why)
+	end
+	if not st.on or st.why then
+		return
+	end
+	local lines = {}
+	for _, x in ipairs(entities()) do
+		local b = NT.sym_copy(x)
+		for _, c in ipairs(b and b.by == e.id and x.components or {}) do
+			for _, k in ipairs(c.overrides or {}) do
+				local v = (c.params or {})[k]
+				lines[#lines + 1] = {id = x.id, text = "Copy " .. x.id .. " of " ..
+						b.source .. " (slice " .. b.slice .. "): " .. k .. " = " ..
+						(type(v) == "table" and table.concat(v, ", ") or tostring(v))}
+			end
+		end
+	end
+	table.sort(lines, function(a, b) return a.text < b.text end)
+	local ov = #lines == 1 and "1 override" or #lines .. " overrides"
+	text(w, #lines == 0 and "No overrides: each copy is its source's image" or
+			ov .. ":", DIM)
+	for _, l in ipairs(lines) do
+		local r = row(w)
+		label(r, l.text)
+		button(r, "Select " .. l.id, function()
+			M.select(l.id)
+		end)
+	end
+	if (st.parity or "") ~= "" then
+		NT.warn_text(w, "Parity: " .. st.parity)
+	end
+	local said = ov .. "; parity: " .. (st.parity ~= "" and
+			st.parity or "none")
+	for _, l in ipairs(lines) do
+		said = said .. "\n  " .. l.text
+	end
+	if NT.sym_said ~= said then
+		NT.sym_said = said
+		log:info("kit editor: symmetry " .. e.id .. ": " .. said)
+	end
+end
+
 local function inspector(w, e, is_made)
 	if is_made then
 		return inspect_made(w, e)
@@ -2762,6 +2949,11 @@ local function inspector(w, e, is_made)
 		text(w, n .. " selected", DIM)
 	end
 	text(w, NT.entity_label(e))
+	-- [KIT_SYMMETRY] a copy: its parameters alone, the rest its source's
+	local copy = NT.sym_copy(e)
+	if copy then
+		NT.sym_copy_section(w, e, copy)
+	end
 	-- [KIT_GOALS]
 	local gc = goal_of(e) and NT.goal_check()
 	for _, line in ipairs(gc and gc.warned[e.id] or {}) do
@@ -2782,7 +2974,7 @@ local function inspector(w, e, is_made)
 	-- Its position typed in (fine tuning, and where keys are not at hand:
 	-- a touchscreen), Move one edit; with several selected they move by
 	-- what this one moves
-	if e.pos then
+	if e.pos and not copy then
 		local r, at = row(w), {e.pos[1], e.pos[2], e.pos[3]}
 		for i, axis in ipairs({"x", "y", "z"}) do
 			-- One letter's room: the row's layout has already widened it
@@ -2839,7 +3031,7 @@ local function inspector(w, e, is_made)
 	-- ([KIT_NO_WORLD_TYPES] one with no position too: kit/starting_kit under a
 	-- kit/team)
 	local c1 = e.components and e.components[1]
-	if e.pos or (c1 and type_of(c1.type).no_position) then
+	if not copy and (e.pos or (c1 and type_of(c1.type).no_position)) then
 		-- [KIT_NESTING] what it is under; what is placed next under it.
 		-- [KIT_REPARENT_BUTTONS] Switch parent arms: the next entity clicked
 		-- (the view's or the list's, [KIT_SIGNALS_PARENT_BUTTONS] the Signals
@@ -2862,7 +3054,7 @@ local function inspector(w, e, is_made)
 			end)
 		end
 	end
-	if (e.pos or NT.is_panel(e)) and not sig then
+	if (e.pos or NT.is_panel(e)) and not sig and not copy then
 		local on = S.under == e.id
 		button(w, on and "Placing under this: stop" or "Place under this",
 				function()
@@ -2872,7 +3064,7 @@ local function inspector(w, e, is_made)
 			refresh()
 		end, on)
 	end
-	if not sig then
+	if not sig and not copy then
 		button(w, "Delete", function()
 			M.delete_selected()
 		end)
@@ -2945,7 +3137,7 @@ local function inspector(w, e, is_made)
 			end
 		end
 		NT.params_form(w, e, ci, c, t, NT.cat_row(w, e, ci, c, t))
-		for _, l in ipairs(not sig and c.links or {}) do
+		for _, l in ipairs(not sig and not copy and c.links or {}) do
 			local r = row(w)
 			local to = find(l.to)
 			label(r, l.output .. " -> " .. l.to .. " " .. tostring(to and
@@ -2970,7 +3162,7 @@ local function inspector(w, e, is_made)
 		-- [KIT_PARAM_CATEGORIES] Three a row, as Try's: kit/flag's eight in one
 		-- made the whole inspector over 1000 wide
 		local r
-		for i, o in ipairs(not sig and t.outputs or {}) do
+		for i, o in ipairs(not sig and not copy and t.outputs or {}) do
 			if i % 3 == 1 then
 				r = row(w)
 			end
@@ -3038,13 +3230,15 @@ local function inspector(w, e, is_made)
 			refresh()
 		end)
 	end
+	-- [KIT_SYMMETRY] a kit/symmetry's overrides and parity warnings
+	NT.sym_section(w, e)
 	-- [KIT_PREFAB_ROOT] a prefab's copy, its root
 	if type(e.prefab) == "table" then
 		NT.pf.section(w, e)
 	end
 	-- [KIT_GENERATORS] a generator's child: built again as it changes,
 	-- what is set here kept
-	if type(e.built) == "table" then
+	if type(e.built) == "table" and not copy then
 		local g = find(e.built.by)
 		text(w, "Built by " .. (g and name_of(g) or tostring(e.built.by)) ..
 				" (its " .. tostring(e.built.member) .. ")", DIM)

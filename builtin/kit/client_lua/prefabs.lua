@@ -184,12 +184,14 @@ end
 function PF.overrides(w, e, ci)
 	local c = e.components[ci]
 	local g = type(e.built) == "table" and find(e.built.by)
-	if not (g and type(g.prefab) == "table" and c.overrides) then
+	-- [KIT_SYMMETRY] a kit/symmetry's copy's, the same
+	local sym = NT.sym_copy(e)
+	if not (g and (type(g.prefab) == "table" or sym) and c.overrides) then
 		return
 	end
 	for _, k in ipairs(c.overrides) do
 		local r = row(w)
-		label(r, "* " .. k .. ": its own")
+		label(r, "* " .. k .. ": its own" .. (sym and ", not its source's" or ""))
 		button(r, "Reset " .. k, function()
 			send({op = "prefab_reset", id = e.id, comp = ci - 1, param = k})
 			log:info("kit editor: reset " .. e.id .. "'s " .. k)

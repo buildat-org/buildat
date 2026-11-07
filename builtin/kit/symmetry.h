@@ -69,6 +69,18 @@ struct Config
 		}
 		}
 	}
+	// in() as half-planes a x + b z >= 0 through the origin: their lines
+	// are the seams (the editor's view draws them)
+	sv_<std::pair<int, int>> planes() const
+	{
+		switch(kind){
+		case 0: return {on_z ? std::make_pair(0, s) : std::make_pair(s, 0)};
+		case 1: return {{s, s * t}};
+		case 2: return {{sx, 0}, {0, sz}};
+		default: return on_z ? sv_<std::pair<int, int>>{{-1, s}, {1, s}} :
+				sv_<std::pair<int, int>>{{s, -1}, {s, 1}};
+		}
+	}
 	bool in_map(int x, int z) const
 	{
 		return x >= x0 && x < x0 + width && z >= z0 && z < z0 + depth;
