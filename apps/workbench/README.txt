@@ -9,7 +9,10 @@ Workbench's own, and the builders' own voxel types, made in the editor's
 and a surface tag for what moves on it). main/main.cpp says how it plays.
 Its saves are projects: New, Rename, Delete and Open in Manage
 (builtin/world_menu), which the launcher's "New workbench project",
-"Manage workbench projects" and a project's "Manage..." open.
+"Manage workbench projects" and a project's "Manage..." open. In a
+running project an admin's pause menu has Projects...: the same list, the
+running project marked, its Play on another switching the server to it
+and Close project leaving none running (util/workbench_switch_project_check.sh).
 
 New's "Start from" is Empty, then templates/ here, then the templates
 installed (doc/aitta.txt, Templates). Each directory in templates/ is a

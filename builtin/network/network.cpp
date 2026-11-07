@@ -2501,7 +2501,13 @@ struct Module: public interface::Module, public network::Interface
 		if(it == m_peers.end())
 			return;
 		it->second.closing = true;
-		it->second.close_by_us = interface::os::time_us() + 2000000;
+		const int64_t now = interface::os::time_us();
+		it->second.close_by_us = now + 2000000;
+		// [WORKBENCH_SWITCH_PROJECT] And kept open a moment after its last
+		// byte went: closed at once, what a client sends meanwhile (a
+		// player's inputs) is answered with a reset, which can drop the
+		// goodbye it had not read yet
+		it->second.linger_until_us = now + 500000;
 	}
 
 	// One more listening socket, on another address and the same port --

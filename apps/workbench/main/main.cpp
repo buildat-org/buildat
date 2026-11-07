@@ -32,7 +32,18 @@
 // none of them (a server no launcher started) the project that ran last
 // opens again. BUILDAT_WORKBENCH_PROJECT=<name> opens it, made if it is not
 // there (the checks; a server nobody sits at). A project runs until the
-// server stops.
+// server stops, or until an admin switches or closes it.
+//
+// [WORKBENCH_SWITCH_PROJECT] An admin (world_menu's picker: the launcher's
+// own client, an admin's account) has Projects... in the pause menu: Manage
+// over the running project, it marked. Play on another (New's too) and
+// Close are skeldat's [SKELDAT_WORLD_ADMIN] reload: every client sent off
+// with the goodbye that says the server goes on (a launcher rejoins at
+// once), Kit and this module reloaded, the old instance's scenes saved and
+// taken down once Kit is gone (its rows saved at its core:unload), the
+// new one starting the picked project or, for a close, none (Manage to
+// the picker, the wait to the rest, and no project reopened at a restart).
+// Drafts and sessions go as at a server stop.
 //
 // [KIT_TEMPLATES] New's "Start from": Empty, ours (templates/ beside this
 // module's directory), then those installed. A project from one has its
@@ -48,6 +59,9 @@
 #include "replicate/api.h"
 #include "storage/api.h"
 #include "voxelworld/api.h"
+#include "voxel_objects/api.h"
+#include "heightmap/api.h"
+#include "worldgen/api.h"
 #include "world_menu/api.h"
 #include "interface/aitta.h"
 #include "interface/fs.h"
@@ -127,14 +141,76 @@ struct Module: public interface::Module
 	// Peers logging in before they see Manage, peers shown Manage, peers
 	// in the project (its client run)
 	std::set<size_t> m_joining, m_waiting, m_in;
+	// [WORKBENCH_SWITCH_PROJECT] A switch or a close under way: this
+	// instance is reloaded, and takes its scenes down as it goes
+	bool m_switching = false;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server)
 	{}
 
+	// [WORKBENCH_SWITCH_PROJECT] Kit is unloaded by now (it was asked
+	// first), so nothing ticks on the scenes or writes to the save: each
+	// scene's voxels saved and its instances gone (a heightmap's map saved
+	// as it goes), then the saves closed; the generators went at
+	// on_unload()
+	~Module()
+	{
+		if(!m_switching)
+			return;
+		for(auto &s : m_scenes){
+			main_context::SceneReference ref = s.second;
+			heightmap::access(m_server, [&](heightmap::Interface *i){
+				i->delete_instance(ref);
+			});
+			voxel_objects::access(m_server, [&](voxel_objects::Interface *i){
+				if(i->get_instance(ref))
+					i->delete_instance(ref);
+			});
+			voxelworld::access(m_server, [&](voxelworld::Interface *i){
+				voxelworld::Instance *w = i->get_instance(ref);
+				if(!w)
+					return;
+				w->commit();
+				w->save();
+				w->set_save(nullptr, "");
+				i->delete_instance(ref);
+			});
+			main_context::access(m_server, [&](main_context::Interface *i){
+				i->delete_scene(ref);
+			});
+		}
+		storage::access(m_server, [&](storage::Interface *i){
+			if(m_save)
+				i->close(m_save);
+			if(m_own)
+				i->close(m_own);
+		});
+		log_i(MODULE, "workbench: the project \"%s\" closed for the switch",
+				cs(m_project));
+	}
+
+	// The generators are Kit's (its code): gone while Kit is loaded, at
+	// the reload's core:unload (Kit's comes first, so its rows are saved)
+	void on_unload()
+	{
+		if(!m_switching)
+			return;
+		for(auto &s : m_scenes)
+			worldgen::access(m_server, [&](worldgen::Interface *i){
+				if(i->get_instance(s.second))
+					i->delete_instance(s.second);
+			});
+	}
+
 	void init()
 	{
 		sub(m_server, "core:start", &Module::on_start);
+		sub(m_server, "core:continue", &Module::on_continue);
+		sub(m_server, "core:unload", &Module::on_unload);
+		sub(m_server, "world_menu:close", &Module::on_project_close);
+		sub(m_server, "network:packet_received/main:projects",
+				&Module::on_projects);
 		sub(m_server, "client_file:files_transmitted", &Module::on_files);
 		sub(m_server, "network:packet_received/main:build", &Module::on_build);
 		sub(m_server, "network:client_disconnected", &Module::on_left);
@@ -262,11 +338,125 @@ struct Module: public interface::Module
 	void on_project_play(const world_menu::Play &event)
 	{
 		auto t = event.options.find("template");
-		if(!start_project(event.name, false, event.created,
-				t == event.options.end() ? "" : t->second))
+		const ss_ from = t == event.options.end() ? "" : t->second;
+		if(m_save){
+			// [WORKBENCH_SWITCH_PROJECT] Picked over a running project
+			if(m_switching || !picker(event.peer) || event.name == m_project){
+				log_w(MODULE, "workbench: a switch to \"%s\" by %s refused",
+						cs(event.name), cs(m_names[event.peer]));
+				return;
+			}
+			reload_for(m_names[event.peer]+" switches the project to "+
+					event.name, "play\n"+event.name+"\n"+
+					(event.created ? "1" : "0")+"\n"+from,
+					"The server switches to the project "+event.name);
+			return;
+		}
+		if(!start_project(event.name, false, event.created, from))
 			world_menu::access(m_server, [&](world_menu::Interface *i){
 				i->show(event.peer);
 			});
+	}
+
+	// [WORKBENCH_SWITCH_PROJECT] world_menu's picker
+	bool picker(size_t peer)
+	{
+		bool ok = false;
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			ok = i->is_picker(peer);
+		});
+		return ok;
+	}
+
+	// Projects...: Manage over the running project, to the picker only
+	void on_projects(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		if(!m_save || m_switching || !m_in.count(peer) || !picker(peer)){
+			log_w(MODULE, "workbench: %s's Projects... refused: not an "
+					"admin", cs(m_names[peer]));
+			return;
+		}
+		configure_menu();
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			i->show_running(peer, m_project);
+		});
+	}
+
+	// Tells a peer in the project whether they have Projects...
+	void send_picker(size_t peer)
+	{
+		if(m_server->has_module("world_menu"))
+			network::send(m_server, peer, "main:picker", picker(peer) ? "1" :
+					"");
+	}
+
+	void on_project_close(const world_menu::Close &event)
+	{
+		if(!m_save || m_switching || !picker(event.peer)){
+			log_w(MODULE, "workbench: a close by %s refused",
+					cs(m_names[event.peer]));
+			return;
+		}
+		reload_for(m_names[event.peer]+" closes the project "+m_project,
+				"close", "The project "+m_project+" was closed");
+	}
+
+	// skeldat's reload_for: Kit's rows saved at its core:unload, this
+	// instance's scenes at its destruction (~Module), the next instance
+	// told what to start (on_continue)
+	void reload_for(const ss_ &line, const ss_ &data, const ss_ &goodbye)
+	{
+		m_switching = true;
+		log_i(MODULE, "workbench: %s", cs(line));
+		m_server->tmp_store_data("workbench:switch", data);
+		network::access(m_server, [&](network::Interface *i){
+			for(network::PeerInfo::Id p : i->list_peers()){
+				i->send(p, "network:goodbye", "1"+goodbye);
+				i->disconnect(p);
+			}
+		});
+		m_server->reload_module("kit");
+		m_server->reload_module(MODULE);
+	}
+
+	// The new instance: the switch's project, or none after a close.
+	// simplified: a reload of this module alone (a source edit's, -R) has
+	// no data and starts nothing: Kit still has the old instance's
+	// scenes; a restart is the way
+	void on_continue()
+	{
+		const ss_ sw = m_server->tmp_restore_data("workbench:switch");
+		if(sw.empty()){
+			log_w(MODULE, "workbench: reloaded alone: restart the server");
+			return;
+		}
+		// [REJOIN_FAST_CLICK] skeldat's: a client back before the reload
+		// tells again when its files are in, to this instance
+		network::access(m_server, [&](network::Interface *i){
+			for(network::PeerInfo::Id p : i->list_peers())
+				i->send(p, "core:tell_after_all_files_transferred", "");
+		});
+		std::istringstream ss(sw);
+		ss_ how, name, created, from;
+		std::getline(ss, how);
+		std::getline(ss, name);
+		std::getline(ss, created);
+		std::getline(ss, from);
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			m_scene = imc->create_scene();
+		});
+		configure_menu();
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			i->set_running(false);
+		});
+		if(how == "play" && start_project(name, false, created == "1", from)){
+			log_i(MODULE, "workbench: switched to \"%s\"", cs(name));
+			return;
+		}
+		log_i(MODULE, "workbench: no project runs: Manage");
+		if(server_store())
+			server_store()->remove("running");
 	}
 
 	// A scene's voxels: Kit's World's region, loaded only where Kit's load
@@ -517,6 +707,10 @@ struct Module: public interface::Module
 	void on_files(const client_file::FilesTransmitted &event)
 	{
 		const size_t peer = event.recipient;
+		// [WORKBENCH_SWITCH_PROJECT] A rejoin before the reload: the next
+		// instance's (on_continue())
+		if(m_switching)
+			return;
 		// None in the web client's own server (builtin/accounts is native)
 		bool joined = !m_server->has_module("accounts");
 		if(!joined)
@@ -563,6 +757,7 @@ struct Module: public interface::Module
 			// [WB_EDITOR_VIEW_MEMORY] the editor's memory on the client
 			// is keyed by the project
 			network::send(m_server, peer, "main:project", m_project);
+			send_picker(peer);
 		}
 		replicate::assign_scene_to_peer(m_server, m_scene, peer);
 		m_peer_scene[peer] = "world";
@@ -605,6 +800,8 @@ struct Module: public interface::Module
 	// Kit's edit rights follow the account: the admin's, a builder's
 	void on_login(const accounts::Login &login)
 	{
+		if(m_switching)
+			return;
 		m_names[login.peer] = login.name;
 		if(m_joining.erase(login.peer)){
 			if(m_save)
@@ -615,6 +812,8 @@ struct Module: public interface::Module
 		}
 		log_i(MODULE, "workbench: peer %zu is %s", (size_t)login.peer,
 				cs(login.name));
+		if(m_in.count(login.peer))
+			send_picker(login.peer);
 		// Kit knows them by the new name at once: what they do next is
 		// theirs, not the old name's
 		auto it = m_pos.find(login.peer);
