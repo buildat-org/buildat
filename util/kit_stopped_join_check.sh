@@ -7,6 +7,8 @@
 # kit/spawner of players 3 at 8, 1, 8 and a kit/part 4 wearing a voxel no
 # scene has (kit/nonsense):
 #   - Play warns the builder of the voxel's name;
+#   - leaving a draft made in play, kitboss is put on the spawner (a
+#     Stopped leave: kit_templates_check's logs, "joins Stopped");
 #   - kitboss joining again with the server Stopped is put on the spawner,
 #     not at the World's middle.
 #   util/kit_stopped_join_check.sh
@@ -48,6 +50,12 @@ EOF
 	cat <<'EOF'
 event kit_edit {"op": "play"}
 wait_log 10000 kit: warning: World: entity 4's kit/part voxel: no voxel kit/nonsense
+event kit_edit {"op": "draft"}
+wait_log_any 30000 kit editor: in session 1 draft
+sync 2000
+event kit_edit {"op": "leave_draft"}
+wait_log 30000 kit editor: in session 0 default
+sync 2000
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 sync 2000
@@ -81,5 +89,8 @@ grep -a "no voxel kit/nonsense\|joins Stopped" "$t/srv.log" | sed 's/^.*kit     
 	fail "not one Stopped join on a spawner ($t/srv.log)"
 grep -aq "kitboss joins Stopped: put on spawner 3 at (8, 1, 8)" "$t/srv.log" ||
 	fail "the second join not put on spawner 3 ($t/srv.log)"
+grep -aA12 "from session 1 to session 0" "$t/srv.log" |
+	grep -aq "spawner teleports kitboss to (8, 1, 8)" ||
+	fail "leaving the draft not put on spawner 3 ($t/srv.log)"
 echo "PASS: stopped join: an unknown voxel name warned at Play, a join while Stopped put on the spawner"
 # vim: set noet ts=4 sw=4:
