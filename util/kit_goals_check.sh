@@ -276,6 +276,7 @@ EOF
 	# The prefab: its first goal's check, then gone again
 	ed '{"op": "place", "prefab": "kit/quest", "pos": [-20, 1, 20]}'
 	echo "sync 2000"
+	inspect 19 inspector_quest
 	ed '{"op": "undo"}'
 	# 2. Played
 	cat <<EOF
@@ -500,9 +501,11 @@ if not ui(ses, 7, "shown", ins - 1):
 back = after(ses, ins, "in session 0 default")
 if ui(ses, 6, "shown", back):
 	sys.exit("session: 6 up again back in the default")
-said = [l for l in boss if "goal warnings: " in l and "kit editor: goal warnings" in l]
-if not said or not said[-1].endswith("goal warnings: 0"):
-	sys.exit("boss: the prefab kit/quest warned of something")
+placed = after(boss, 0, '"prefab": "kit/quest"')
+for l in boss[placed:]:
+	m = re.search(r"kit editor: goal warnings: (\d+)$", l)
+	if m and m[1] != "0":
+		sys.exit(f"boss: the prefab kit/quest warned: {l}")
 print("the chain played as linked")
 PY
 [ $? = 0 ] || exit 1

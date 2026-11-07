@@ -168,9 +168,9 @@ return {
 	about = {
 		what = "Something to do, a HUD line and a marker while it is active: reach a box, use an object, or a signal.",
 		inputs = {
-			activate = "Activates it, for who set this off (to everyone: for all).",
-			complete = "Does it, while active, as reaching or using it would.",
-			cancel = "Deactivates it, not done: activate may bring it back.",
+			activate = "Activates it, for who set this off (to everyone: for all). Value: unused.",
+			complete = "Does it, while active, as reaching or using it would. Value: unused.",
+			cancel = "Deactivates it, not done: activate may bring it back. Value: unused.",
 		},
 		outputs = {
 			activated = "It became active.",
