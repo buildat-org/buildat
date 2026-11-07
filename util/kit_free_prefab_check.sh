@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min, ~4 min with web (2026-11-07)
+# cost: ~2.5 min, ~4.5 min with web (2026-11-07)
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/client_lua/module.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/prefabs.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/types/prefab_copy.lua builtin/kit/types/region.lua builtin/kit/types/trigger_zone.lua builtin/voxel_objects/** apps/workbench/**
 # [KIT_FREE_PREFAB] A voxel prefab as a free object: kit/prefab_copy's mode. A
 # fresh save on Workbench, a flat World, a walker and controls; prefab
@@ -1476,4 +1476,5 @@ want "$t/srv2.log" "cleared the stamp of kitboss/wall on $A" \
 grep -aoP 'Voxel at \(10,1,-20\): \K[^,]*' "$t/srv2.log" | tail -3 | tr '\n' ' ' | grep -qF "kit/stone air kit/stone" ||
 	fail "the stamped copy's cell through the switches ($t/srv2.log)"
 rotation
+frame
 echo "PASS: a voxel prefab as a free object: placed, moved, turned, members, collision after the move, the save and a load, a prefab's save on all copies, stamped mode, the switch"
