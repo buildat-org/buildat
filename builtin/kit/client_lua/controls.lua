@@ -361,9 +361,15 @@ buildat.sub_packet("kit:body", function(data)
 			before[3] - after[3]}
 		local l = math.sqrt(d[1] * d[1] + d[2] * d[2] + d[3] * d[3])
 		if l > 0.01 then
-			C.corrections = C.corrections + 1
-			log:info(string.format("kit: the body corrected by %.3f m (%d of %d)",
-					l, C.corrections, C.acks))
+			-- [KIT_PUT_COUNTED_CORRECTION] Play or Stop moved what is under it
+			-- before this client heard: taken, not a correction
+			if b.settle then
+				log:info(string.format("kit: the body settled by %.3f m after Play or Stop", l))
+			else
+				C.corrections = C.corrections + 1
+				log:info(string.format("kit: the body corrected by %.3f m (%d of %d)",
+						l, C.corrections, C.acks))
+			end
 			-- Drawn where it was, the difference going in a tenth of a second
 			if l < 2 then
 				for k = 1, 3 do
@@ -950,6 +956,94 @@ function M.waiting()
 end
 
 local go_next = nil -- a target to send in the next step
+-- [KIT_SHIP] For a drive, what a gunman and a helmsman do by their keys, as drawn
+-- here: "event kit_aim <id> [<speed> <gravity> [fire]]" turns the turret ridden at
+-- that entity (0: off), its facing on its parent against the target's place there
+-- (raised by a shot's fall at that speed and gravity); "kit: aimed at <id>" once
+-- within a degree, and with "fire" its trigger held while within it. "event kit_steer <x> <z>" ("off": off) steers the vehicle
+-- ridden there, slowing to stop on it; "kit: steered to <x> <z>" within 3 m, slow
+local function angles(v)
+	return math.deg(math.atan2(v.x, v.z)),
+			-math.deg(math.atan2(v.y, math.sqrt(v.x * v.x + v.z * v.z)))
+end
+
+local function drive_aid(f, r)
+	local vn = M.riding() and P.nodes[M.riding()]
+	if not vn then
+		return f, r
+	end
+	local n = vn.node
+	if C.steer then
+		local p = n.position
+		local px, pz = p.x, p.z
+		local s = C.steer
+		local dx, dz = s.x - px, s.z - pz
+		local dist = math.sqrt(dx * dx + dz * dz)
+		local fw = n.rotation * magic.Vector3(0, 0, 1)
+		-- (its speed along it as drawn, over a tenth of a second at least)
+		local now = buildat.get_time_us() / 1e6
+		if not s.pt then
+			s.px, s.pz, s.pt, s.along = px, pz, now, 0
+		elseif now - s.pt >= 0.1 then
+			s.along = ((px - s.px) * fw.x + (pz - s.pz) * fw.z) / (now - s.pt)
+			s.px, s.pz, s.pt = px, pz, now
+		end
+		local along = s.along
+		if dist < 3 and math.abs(along) < 0.7 then
+			if not s.done then
+				s.done = true
+				log:info(string.format("kit: steered to %.1f %.1f (%.2f m off)", s.x, s.z, dist))
+			end
+			return 0, 0
+		end
+		local want = math.min(7, dist * 0.4)
+		local hy = angles(fw)
+		local err = (math.deg(math.atan2(dx, dz)) - hy + 180) % 360 - 180
+		return (want - along) * 0.5, err / 20
+	end
+	local gn = C.gun and P.nodes[C.gun.id]
+	if not gn then
+		return f, r
+	end
+	local pv = n:GetVar("kit_parent")
+	local pn = P.nodes[pv:IsEmpty() and 0 or pv:GetInt()]
+	local q = pn and pn.node.rotation or magic.Quaternion(1, 0, 0, 0)
+	local inv = magic.Quaternion(q.w, -q.x, -q.y, -q.z)
+	local to = gn.node.position - n.position
+	if C.gun.speed > 0 then
+		local t = to:Length() / C.gun.speed
+		to = to + magic.Vector3(0, 0.5 * C.gun.gravity * t * t, 0)
+	end
+	local wy, wp = angles(inv * to)
+	local y, p = angles(inv * (n.rotation * magic.Vector3(0, 0, 1)))
+	local dy, dp = (wy - y + 180) % 360 - 180, wp - p
+	if math.abs(dy) < 1 and math.abs(dp) < 1 then
+		if not C.gun.done then
+			C.gun.done = true
+			log:info(string.format("kit: aimed at %d (%.2f, %.2f degrees off)", C.gun.id, dy, dp))
+		end
+	else
+		C.gun.done = false
+	end
+	-- (up is W: its pitch falls)
+	return -dp / 15, dy / 15, C.gun.fire and C.gun.done
+end
+
+magic.SubscribeToEvent("command_seq:kit_aim", function(_, data)
+	local id, speed, g, fire = data:GetString("Param"):match(
+			"^(%d+)%s*([%d.]*)%s*([%d.]*)%s*(%a*)$")
+	id = tonumber(id) or 0
+	C.gun = id > 0 and {id = id, speed = tonumber(speed) or 0, gravity = tonumber(g) or 0,
+		fire = fire == "fire"} or nil
+	log:info("kit: aiming at " .. id)
+end)
+
+magic.SubscribeToEvent("command_seq:kit_steer", function(_, data)
+	local x, z = data:GetString("Param"):match("^(%-?[%d.]+) (%-?[%d.]+)$")
+	C.steer = x and {x = tonumber(x), z = tonumber(z)} or nil
+	log:info("kit: steering to " .. data:GetString("Param"))
+end)
+
 local function gather()
 	local f, r, jump, down = 0, 0, 0, 0
 	if walking() and not paused() and not M.waiting() and
@@ -977,6 +1071,11 @@ local function gather()
 		if C.touch_jump then
 			jump = 1
 		end
+	end
+	local fire
+	f, r, fire = drive_aid(f, r)
+	if fire then
+		jump = 1
 	end
 	f = math.max(-1, math.min(1, f))
 	r = math.max(-1, math.min(1, r))

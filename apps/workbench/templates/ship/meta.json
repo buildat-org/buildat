@@ -1,0 +1,11 @@
+{
+	"kind": "template",
+	"author": "buildat",
+	"name": "ship",
+	"title": "Ship",
+	"version": "1.0.0",
+	"engine_api": 2,
+	"license_code": "CC0-1.0",
+	"license_media": "CC0-1.0",
+	"description": "A ship on a lake: one player steers it from the wheel, another fires its cannon, the rest walk the rolling deck. Sink the five mines and sail back to the harbour. Opens in edit mode, ready to play and to change."
+}

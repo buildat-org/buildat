@@ -32,7 +32,7 @@
 --   (util/kit_hud_atlas.py; the cell floor(f * 32)), tinted. A label wider
 --   than its shape shrinks down to 8 pixels, then is clipped; no wrapping
 --   inside a bar. `blink_below` (a fraction of a bar's range, 0 off) blinks
---   it. In a text: {value}, {value:time} (m:ss), {value:int}.
+--   it. In a text: {value}, {value:time} (m:ss), {value:int} (none yet: 0).
 --   **Stacking**: a panel's `layout` "column" or "row" stacks its shown
 --   children by order (then id) with its `gap`, a hidden one leaving no
 --   gap, their x and y unused; a width or height of 0 fits it to them and
@@ -176,7 +176,8 @@ local function shown_text(s, value)
 		local t = math.max(0, math.floor(n + 0.5))
 		return string.format("%d:%02d", math.floor(t / 60), t % 60)
 	end):gsub("{value:int}", function()
-		return n and string.format("%.0f", n) or v
+		-- ([KIT_SHIP] none yet, a count before its first: 0)
+		return n and string.format("%.0f", n) or (v == "" and "0" or v)
 	end):gsub("{value}", function() return v end)
 	return M.key_text((s:gsub("|", "\n")))
 end

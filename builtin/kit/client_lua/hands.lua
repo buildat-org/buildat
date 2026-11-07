@@ -723,8 +723,10 @@ buildat.sub_packet("kit:projectile", function(data)
 		return
 	end
 	local n = scene:CreateChild("kit_projectile")
-	unit_box(n, {0.04, 0.04, 0.5}, K.color(d.color, magic.Color(0.6, 0.4,
-			0.2)))
+	-- [KIT_SHIP] a size: a ball's (a turret's), else an arrow
+	local s = tonumber(d.size)
+	unit_box(n, s and {s, s, s} or {0.04, 0.04, 0.5}, K.color(d.color,
+			magic.Color(0.6, 0.4, 0.2)))
 	flying[tonumber(d.id) or 0] = {node = n, from = d.from, vel = d.vel,
 		g = tonumber(d.gravity) or 0, at = now_s(), life = tonumber(d.life) or 5}
 	log:info("kit: projectile " .. tostring(d.id))
