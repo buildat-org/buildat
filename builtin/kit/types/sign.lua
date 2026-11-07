@@ -20,7 +20,8 @@ return {
 	version = 1,
 	look = {shape = "box", size = "param:board", color = "param:background",
 		voxel = "param:material",
-		text = "shown", text_size = "param:size", text_color = "param:color",
+		text = "shown", text_idle = "param:text", text_size = "param:size",
+		text_color = "param:color",
 		text_facing = "param:facing", solid = "param:solid"},
 	params = {
 		text = {cat = "look", type = "string", default = "Welcome!"},

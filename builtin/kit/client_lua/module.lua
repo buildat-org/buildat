@@ -886,8 +886,14 @@ local function update_play(_, data)
 		end
 		if n.text then
 			-- [KIT_INPUT_ACTIONS] "[use]": this player's key for it
-			local v = M.key_text(shown(parse(n.node:GetVar("kit:" ..
-					tostring(show.look.text)))))
+			local v = shown(parse(n.node:GetVar("kit:" ..
+					tostring(show.look.text))))
+			-- [KIT_TEMPLATES] look.text_idle: drawn while the state has nothing,
+			-- as while Stopped, when no on_start has written it
+			if (v == nil or v == "") and show.look.text_idle then
+				v = tostring(show.look.text_idle):gsub("{value}", ""):gsub("|", "\n")
+			end
+			v = M.key_text(v)
 			if v ~= n.last_text then
 				n.last_text = v
 				n.text.text = v

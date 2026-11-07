@@ -1020,6 +1020,12 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	rs.add(app_shared, rw);
 	rs.add(app_cache, rw);
 	rs.add(user+"/shared", FS_READ);
+	// [KIT_TEMPLATES] Workbench's New lists the templates installed: packages
+	// off an Aitta and their public keys, read only
+	if(app == "workbench"){
+		interface::fs::create_directories(user+"/installed");
+		rs.add(user+"/installed", FS_READ);
+	}
 	// A variant's base, which may be an installed package under the user
 	// path ([LUANTI_APP_PACKAGES]); the loader refuses one not there
 	{

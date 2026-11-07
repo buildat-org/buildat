@@ -6,10 +6,12 @@ return {
 	usable = true,
 	params = {
 		hold = {type = "number", default = 1, min = 0.1, max = 60},
+		color = {cat = "look", type = "string", default = "#d03030"},
+		color_down = {cat = "look", type = "string", default = "#702020"},
 		sound_press = {cat = "look", type = "sound", default = "kit/click"},
 	},
-	look = {shape = "box", size = {0.4, 0.4, 0.15}, color = "#d03030",
-		state = "down", when = {scale = {1, 1, 0.4}, color = "#702020"}},
+	look = {shape = "box", size = {0.4, 0.4, 0.15}, color = "param:color",
+		state = "down", when = {scale = {1, 1, 0.4}, color = "param:color_down"}},
 	state = {
 		down = {default = false, shared = true},
 		presses = {default = 0, shared = true},

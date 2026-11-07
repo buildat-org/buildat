@@ -1,0 +1,11 @@
+This template (composition.json and meta.json) is a starting point: what you
+build on it is yours, with no conditions.
+
+To the extent possible under law, Perttu Ahola <celeron55@gmail.com> has
+waived all copyright and related or neighboring rights to it. This work is
+dedicated to the public domain under CC0 1.0 Universal:
+https://creativecommons.org/publicdomain/zero/1.0/
+
+The textures and component types it names are not in it: they are Kit's and
+Workbench's own, with their own licences (builtin/kit/README.txt,
+apps/workbench/README.txt).

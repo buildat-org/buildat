@@ -1295,10 +1295,12 @@ static sv_<ss_> installed_app_ids(bool extensions = false)
 			for(const auto &v : interface::fs::list_directory(
 					installed+"/"+a.name+"/"+n.name)){
 				const ss_ id = a.name+"."+n.name+"@"+v.name;
-				if(v.is_directory && !installed_app_dir(id).empty() &&
-						(interface::aitta::kind_of(json::load_file((
-						installed_app_dir(id)+"/meta.json").c_str())) ==
-						"extension") == extensions)
+				if(!v.is_directory || installed_app_dir(id).empty())
+					continue;
+				const ss_ kind = interface::aitta::kind_of(json::load_file((
+						installed_app_dir(id)+"/meta.json").c_str()));
+				// (a template is Workbench's to list, not a tile)
+				if(kind != "template" && (kind == "extension") == extensions)
 					ids.push_back(id);
 			}
 	std::sort(ids.begin(), ids.end());

@@ -452,10 +452,23 @@ local function draw_new(state, preset, typed)
 					value = c[1]
 				end
 			end
+			local note = nil
+			local labels = {}
+			for i, c in ipairs(f.choices) do
+				labels[i] = c[2]
+			end
+			log:info("world_menu: " .. f.key .. " choices: " ..
+					table.concat(labels, ", "))
 			menu:add_dropdown(f.label, list, value, function(v)
 				value = v
 				log:info("world_menu: " .. f.key .. " picked: " .. v)
+				if note then
+					note:SetText((f.notes or {})[v] or "")
+				end
 			end)
+			if next(f.notes or {}) then
+				note = text_on(menu.window, f.notes[value] or "", fit(420))
+			end
 			fields[f.key] = {GetText = function() return value end}
 		elseif f.ask ~= false then
 			text_on(menu.window, f.label .. ((f.hint or "") ~= "" and
@@ -575,6 +588,9 @@ buildat.sub_packet("world_menu:list", function(data)
 		text_on(right, "On disk: " .. M.mb(w.bytes or 0))
 		for _, f in ipairs(state.fields) do
 			local v = w.options and w.options[f.key]
+			for _, c in ipairs(v and f.choices or {}) do
+				v = c[1] == v and c[2] or v
+			end
 			if v then
 				text_on(right, f.label .. ": " .. v, fit(420))
 			end

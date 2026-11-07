@@ -14,7 +14,7 @@ return function(ctx)
 		description = "A blank world for Kit: build, place components, link them and play",
 		run = manage({menu = "projects"})},
 	{id = "new", label = "New workbench project", icon = "icon.png",
-		order = 151, description = "A blank Workbench project, named",
+		order = 151, description = "A Workbench project, named: empty or from a template",
 		run = manage({menu = "new"})},
 	{id = "manage", label = "Manage workbench projects", icon = "icon.png",
 		order = 152, description = "Workbench's projects: open, rename, delete",

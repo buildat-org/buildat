@@ -222,6 +222,26 @@ my prefabs..." writes a builder's prefabs and voxel types into
 <user>/dev_apps/<name> and opens the publish screen on it; a package of
 types is written by hand: meta.json and types/<name>.lua.
 
+Templates [KIT_TEMPLATES]
+-------------------------
+A package of kind "template" is a Kit composition a Workbench project can
+start from: the New screen's "Start from" lists Workbench's own
+(apps/workbench/templates/, each as this, packed by util/pack_templates.sh),
+then the installed ones, and the project made opens Stopped in the editor.
+It is installed as an app is (`buildat aitta install`, or the client's
+Install), and is not a tile. Refused at pack and at install without:
+
+        composition.json              Kit's rows (Host::composition_path in
+                                      builtin/kit/api.h), every component
+                                      type one of Kit's own ("kit/...")
+        LICENSE or LICENCE            a licence file at its root
+
+One more manifest field, and no "dependencies":
+
+        "title": "Puzzle room"        its name in the list, 40 bytes at most
+
+An Aitta lists it as kind "other" with its whole manifest, as a Kit package.
+
 Worlds [WORLD_PACKAGES]
 -----------------------
 A package of kind "world" is a save on top of a named app, as the app keeps
