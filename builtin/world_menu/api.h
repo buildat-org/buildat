@@ -35,7 +35,8 @@
 // world_menu:create ({name, options: {key: value}}), world_menu:rename
 // ({name, to}), world_menu:delete ({name}), world_menu:close. Server to
 // client: world_menu:list (JSON: {title, noun, may_pick, wait, running, note,
-// fields: [{key, label, default, hint, ask, choices: [[value, label]]}],
+// fields: [{key, label, default, hint, ask, choices: [[value, label]],
+// notes: {value: text}}],
 // worlds: [{name, bytes, options}], presets: [{label, options}],
 // selected: the world to select, once (select()), new: the new world
 // screen, once (open_new())}; wait:
@@ -62,6 +63,8 @@ namespace world_menu
 		// One of these (value, label) picked, the first the default; empty,
 		// typed text ([SKELDAT_WORLD_SIZES])
 		std::vector<std::pair<ss_, ss_>> choices;
+		// [KIT_TEMPLATES] A line under the choices, by the choice's value
+		std::map<ss_, ss_> notes;
 	};
 
 	struct Config

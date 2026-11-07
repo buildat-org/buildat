@@ -379,9 +379,19 @@ ss_ check_manifest(const json::Value &m, bool service)
 	};
 	if(!known("audience", {"everyone", "teen", "adult"}))
 		return "\"audience\": \"everyone\", \"teen\" or \"adult\"";
-	if(!known("kind", {"app", "extension", "world", "remix", "kit"}))
-		return "\"kind\": \"app\", \"extension\", \"world\", \"remix\" or "
-				"\"kit\"";
+	if(!known("kind", {"app", "extension", "world", "remix", "kit", "template"}))
+		return "\"kind\": \"app\", \"extension\", \"world\", \"remix\", "
+				"\"kit\" or \"template\"";
+	// [KIT_TEMPLATES] What New shows of a template; it uses Kit's own types.
+	// simplified: no dependencies on Kit packages, whose install is a builder's
+	// into a running save (kit:package); installing them at the project's
+	// first start is the upgrade
+	if(kind_of(m) == "template"){
+		if(str("title").empty() || str("title").size() > 40)
+			return "\"title\": what New lists it as, 40 bytes at most";
+		if(!m.get("dependencies").is_undefined())
+			return "\"dependencies\": a template uses Kit's own types only";
+	}
 	// [KIT] stage 5: a Kit package's dependencies, the Kit packages it
 	// uses, each at a version or newer
 	if(kind_of(m) == "kit" && !m.get("dependencies").is_undefined()){
@@ -631,12 +641,38 @@ ss_ find_base(const json::Value &m, const ss_ &app_dir,
 	return dir+"/"+best;
 }
 
+// [KIT_TEMPLATES] What a template's directory has to hold: its composition,
+// and a licence file of its own (its content's, not the engine's)
+ss_ template_refusal(const ss_ &dir)
+{
+	json::json_error_t e;
+	const json::Value c = json::load_file((dir+"/composition.json").c_str(), &e);
+	const json::Value &es = c.get("entities");
+	if(!es.is_array())
+		return "a template has composition.json at its root, its \"entities\" "
+				"a list";
+	for(unsigned i = 0; i < es.size(); i++){
+		const json::Value &cs = es.at(i).get("components");
+		for(unsigned k = 0; cs.is_array() && k < cs.size(); k++){
+			const json::Value &t = cs.at(k).get("type");
+			if(!t.is_string() || t.as_string().compare(0, 4, "kit/") != 0)
+				return "a template uses Kit's own types only, kit/<name>: "+
+						(t.is_string() ? t.as_string().substr(0, 60) : ss_("no type"));
+		}
+	}
+	for(const fs::Node &n : fs::list_directory(dir))
+		if(!n.is_directory && (n.name.compare(0, 7, "LICENSE") == 0 ||
+				n.name.compare(0, 7, "LICENCE") == 0))
+			return "";
+	return "a template has its own licence file at its root, LICENSE...";
+}
+
 ss_ kind_of(const json::Value &m)
 {
 	const json::Value &k = m.get("kind");
 	return k.is_string() && (k.as_string() == "extension" ||
 			k.as_string() == "world" || k.as_string() == "remix" ||
-			k.as_string() == "kit") ?
+			k.as_string() == "kit" || k.as_string() == "template") ?
 			k.as_string() : "app";
 }
 
@@ -1069,6 +1105,8 @@ ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir)
 	if(kind_of(m) == "world" && !fs::path_exists(app_dir+"/world/save.sqlite"))
 		throw Exception(app_dir+": a world has its save in world/, "
 				"save.sqlite at its root");
+	if(kind_of(m) == "template" && !template_refusal(app_dir).empty())
+		throw Exception(app_dir+": "+template_refusal(app_dir));
 	const ss_ media = check_media(m, app_dir);
 	if(!media.empty())
 		throw Exception(app_dir+"/meta.json: "+media);
@@ -1586,6 +1624,8 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 			throw Exception("already installed: "+dir);
 		if(kind == "extension" && !fs::path_exists(incoming+"/init.lua"))
 			throw Exception("an extension with no init.lua at its root");
+		if(kind == "template" && !template_refusal(incoming).empty())
+			throw Exception(template_refusal(incoming));
 		// A key's name stays the kind it was first installed as
 		for(const auto &n : fs::list_directory(app)){
 			const ss_ was = n.is_directory ? kind_of(json::load_file(

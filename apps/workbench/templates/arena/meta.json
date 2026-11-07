@@ -1,0 +1,11 @@
+{
+	"kind": "template",
+	"author": "buildat",
+	"name": "arena",
+	"title": "Arena",
+	"version": "1.0.0",
+	"engine_api": 2,
+	"license_code": "CC0-1.0",
+	"license_media": "CC0-1.0",
+	"description": "Two teams, two maps and a lobby: players stand on a pad to start a round, and score by pressing the other team's beacon. First to 3 points wins, or the most in 3 minutes. Opens in edit mode, ready to play and to change."
+}

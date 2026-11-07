@@ -40,10 +40,11 @@ return {
 		outputs = {
 			scored = "add or set came. Value: the new score.",
 			reached = "The score first came to win_score. Value: this team's id, for an arena's win.",
+			joined = "A player became a member, as the one who set it off: a goal of their own, a greeting.",
 		},
 	},
 	inputs = {join = "none", add = "any", set = "number"},
-	outputs = {scored = "number", reached = "entity"},
+	outputs = {scored = "number", reached = "entity", joined = "none"},
 	on_start = show,
 	on_params = show,
 	on_input = function(c, input, value, by)
@@ -66,6 +67,7 @@ return {
 			c.state.members = m
 			c:log(c:name(by), "joins team", c.params.name)
 			c:teleport(c.pos, {yaw = c.yaw})
+			c:emit("joined")
 			return
 		end
 		local was = c.state.score

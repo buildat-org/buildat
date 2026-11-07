@@ -33,6 +33,11 @@
 // opens again. BUILDAT_WORKBENCH_PROJECT=<name> opens it, made if it is not
 // there (the checks; a server nobody sits at). A project runs until the
 // server stops.
+//
+// [KIT_TEMPLATES] New's "Start from": Empty, ours (templates/ beside this
+// module's directory), then those installed. A project from one has its
+// composition as its first start (Kit's Host::composition_path), Stopped, the
+// first builder in the tools.
 #include "core/log.h"
 #include "core/json.h"
 #include "accounts/api.h"
@@ -44,6 +49,8 @@
 #include "storage/api.h"
 #include "voxelworld/api.h"
 #include "world_menu/api.h"
+#include "interface/aitta.h"
+#include "interface/fs.h"
 #include "interface/server_config.h"
 #include "interface/module.h"
 #include "interface/server.h"
@@ -148,9 +155,7 @@ struct Module: public interface::Module
 			start_project("world", true);
 			return;
 		}
-		world_menu::access(m_server, [&](world_menu::Interface *i){
-			i->configure({"Workbench", {}, "project"});
-		});
+		configure_menu();
 		const char *env = getenv("BUILDAT_WORKBENCH_PROJECT");
 		if(env && env[0]){
 			if(!start_project(env, true))
@@ -181,6 +186,63 @@ struct Module: public interface::Module
 					cs(last));
 	}
 
+	// [KIT_TEMPLATES] What New starts from, New's "Start from": Empty, ours
+	// (templates/ beside this module: there with no Aitta) and then what is
+	// installed (<user>/installed/<fp>/<name>/<newest version>, its manifest
+	// and files checked as the install did, for a directory is a directory).
+	// By the choice's value, its directory
+	sm_<ss_, ss_> m_templates;
+	void configure_menu()
+	{
+		world_menu::Field f{"template", "Start from", "", "", false};
+		f.choices.push_back({"empty", "Empty"});
+		f.notes["empty"] = "Ground to build on and nothing else.";
+		m_templates.clear();
+		auto add = [&](const ss_ &value, const ss_ &dir, const ss_ &who){
+			json::json_error_t e;
+			const json::Value m = json::load_file((dir+"/meta.json").c_str(), &e);
+			if(interface::aitta::kind_of(m) != "template")
+				return;
+			ss_ why = interface::aitta::check_manifest(m);
+			if(why.empty())
+				why = interface::aitta::template_refusal(dir);
+			if(!why.empty()){
+				log_w(MODULE, "workbench: the template in %s: %s", cs(dir), cs(why));
+				return;
+			}
+			const ss_ title = m.get("title").as_string();
+			f.choices.push_back({value, who == "" ? title :
+					title+" ("+m.get("author").as_string()+who+")"});
+			f.notes[value] = json::jstr(m, "description");
+			m_templates[value] = dir;
+		};
+		namespace fs = interface::fs;
+		const ss_ ours = m_server->get_module_path(MODULE)+"/../templates";
+		for(const auto &n : fs::list_directory(ours))
+			if(n.is_directory)
+				add(n.name, ours+"/"+n.name, "");
+		const ss_ user = m_server->get_config().get<ss_>("user_path");
+		const ss_ in = user+"/installed";
+		for(const auto &k : fs::list_directory(in)){
+			if(!k.is_directory || !interface::aitta::fingerprint_ok(k.name))
+				continue;
+			for(const auto &n : fs::list_directory(in+"/"+k.name)){
+				ss_ best;
+				for(const auto &v : fs::list_directory(in+"/"+k.name+"/"+n.name))
+					if(v.is_directory && (best.empty() ||
+							interface::aitta::version_less(best, v.name)))
+						best = v.name;
+				if(!best.empty())
+					add(k.name+"/"+n.name, in+"/"+k.name+"/"+n.name+"/"+best,
+							interface::aitta::installed_vouch(user, k.name).empty() ?
+							", installed, unverified" : ", installed");
+			}
+		}
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			i->configure({"Workbench", {f}, "project"});
+		});
+	}
+
 	// The save "_workbench" (the server's own, no project): store "server",
 	// "running" the project that ran last
 	storage::Save *m_own = nullptr;
@@ -199,7 +261,9 @@ struct Module: public interface::Module
 	// Manage again
 	void on_project_play(const world_menu::Play &event)
 	{
-		if(!start_project(event.name, false, event.created))
+		auto t = event.options.find("template");
+		if(!start_project(event.name, false, event.created,
+				t == event.options.end() ? "" : t->second))
 			world_menu::access(m_server, [&](world_menu::Interface *i){
 				i->show(event.peer);
 			});
@@ -350,7 +414,13 @@ struct Module: public interface::Module
 	// on; others (from before, BUILDAT_WORKBENCH_PROJECT's) on the stone
 	// floor. BUILDAT_WORKBENCH_STONE=1: New's on stone too (the checks
 	// built on it)
-	bool start_project(const ss_ &name, bool create, bool fresh = false)
+	// [KIT_TEMPLATES] `from`: a template of m_templates, the composition of a
+	// fresh project, which opens in edit mode with what it says (the World its
+	// own). simplified: one that Kit refuses all the same (a type of a newer
+	// Kit) shuts the server down as any composition's refusal does, saying why;
+	// the project then opens empty
+	bool start_project(const ss_ &name, bool create, bool fresh = false,
+			const ss_ &from = "")
 	{
 		if(m_save)
 			return false;
@@ -385,6 +455,12 @@ struct Module: public interface::Module
 		kit::Host h;
 		h.composition_path = m_server->get_module_path(MODULE)+
 				"/composition.json";
+		const auto tmpl = fresh ? m_templates.find(from) : m_templates.end();
+		if(tmpl != m_templates.end()){
+			h.composition_path = tmpl->second+"/composition.json";
+			h.opens_in_edit = true;
+			log_i(MODULE, "workbench: the project from the template %s", cs(from));
+		}
 		h.save = m_save;
 		h.scenes["world"] = m_scene;
 		h.make_scene = [this](const ss_ &name, kit::Interface *k){
@@ -406,7 +482,7 @@ struct Module: public interface::Module
 		// side), the player at its middle (world_spawn); before, stone
 		const char *stone = getenv("BUILDAT_WORKBENCH_STONE");
 		ss_ ground;
-		if(fresh && !(stone && stone[0] == '1'))
+		if(fresh && tmpl == m_templates.end() && !(stone && stone[0] == '1'))
 			m_save->store("workbench")->set("ground", "heightmap");
 		m_save->store("workbench")->get("ground", ground);
 		h.world_scene = "world";
@@ -461,6 +537,7 @@ struct Module: public interface::Module
 
 	void manage(size_t peer)
 	{
+		configure_menu();
 		if(m_waiting.insert(peer).second)
 			world_menu::access(m_server, [&](world_menu::Interface *i){
 				i->show(peer);

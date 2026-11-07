@@ -296,6 +296,11 @@ local ON_WEB = GetPlatform() == "Web"
 -- **A release this client runs** ([COMPAT_BREAK_07] 8c): nil, or why not
 -- for a player. A package's newest is the newest it runs; one it runs none
 -- of is shown with this and nothing to install or play.
+-- [KIT_TEMPLATES] Aitta lists it as "other": Workbench's New lists it, installed
+local function is_template(rel)
+	return type(rel.manifest) == "table" and rel.manifest.kind == "template"
+end
+
 local function cannot_run(rel)
 	local api = tonumber(rel.engine_api) or 0
 	if api < __buildat_aitta_dev("engine_api_min") then
@@ -307,7 +312,8 @@ local function cannot_run(rel)
 		return "a Kit package: installed from Kit's palette, in an app's " ..
 				"edit mode"
 	elseif rel.kind and rel.kind ~= "app" and rel.kind ~= "extension" and
-			rel.kind ~= "world" and rel.kind ~= "remix" then
+			rel.kind ~= "world" and rel.kind ~= "remix" and
+			not is_template(rel) then
 		return "a kind of package this Buildat does not know"
 	end
 end
@@ -734,7 +740,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 				"an extension" or rel.kind == "world" and "a world for " ..
 				tostring(rel.app) .. (rel.app_version and " " ..
 				tostring(rel.app_version) or "") or rel.kind == "remix" and
-				"a version of " .. tostring(rel.base) or "an app") ..
+				"a version of " .. tostring(rel.base) or is_template(rel) and
+				"a template for Workbench" or "an app") ..
 				((rel.serverless == true or
 				rel.web == true or rel.web_cpp == true) and
 				", runs in the browser" or "") .. ", by " ..
@@ -781,6 +788,9 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 			if base == false then
 				ptext("Cannot be installed: " .. why .. ".", WARN)
 			end
+		elseif is_template(rel) then
+			ptext("Installed, Workbench's New lists it: a starting point, no " ..
+					"code.", DIM)
 		elseif rel.kind ~= "extension" then
 			ptext("It runs in the server's sandbox: it cannot reach your " ..
 					"files, only its own saves.", DIM)

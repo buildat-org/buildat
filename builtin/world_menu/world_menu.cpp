@@ -245,6 +245,10 @@ struct Module: public interface::Module, public Interface
 				choices.append(pair);
 			}
 			v.set("choices", choices);
+			json::Value notes = json::object();
+			for(const auto &n : f.notes)
+				notes.set(n.first, n.second);
+			v.set("notes", notes);
 			fields.append(v);
 		}
 		out.set("fields", fields);

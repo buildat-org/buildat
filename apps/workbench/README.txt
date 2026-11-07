@@ -11,6 +11,14 @@ Its saves are projects: New, Rename, Delete and Open in Manage
 (builtin/world_menu), which the launcher's "New workbench project",
 "Manage workbench projects" and a project's "Manage..." open.
 
+New's "Start from" is Empty, then templates/ here, then the templates
+installed (doc/aitta.txt, Templates). Each directory in templates/ is a
+package: meta.json (kind "template"), composition.json, its own LICENSE. It
+works with no Aitta in reach, being in this tree, and changes in the same
+commit as the Kit components it uses; util/kit_templates_check.sh plays each
+to its end, and util/pack_templates.sh packs them for an Aitta with the
+caller's key.
+
 Licenses of textures and other media:
 ------------------------------------
 main/client_data/*.png, launcher/icon.png

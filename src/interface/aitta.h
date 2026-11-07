@@ -97,6 +97,8 @@ namespace interface
 		// "remix" or "kit" ([KIT] stage 5: component types, prefabs and
 		// voxel types, installed into a server's composition by Kit)
 		ss_ kind_of(const json::Value &m);
+		// [KIT_TEMPLATES] Why a directory is no template's, "" when it is one
+		ss_ template_refusal(const ss_ &dir);
 
 		// a < b in SemVer's order (simplified as aitta.cpp says)
 		bool version_less(const ss_ &a, const ss_ &b);

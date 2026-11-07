@@ -124,6 +124,8 @@ namespace interface
 //                               1 + x + sx*(z + sz*y); "" where not loaded)
 //   look = {shape = "box"|"sphere", size = n (half its side) or {x, y, z}
 //           (its sides), color = "#rrggbb", text = "<shared state key>",
+//           text_idle = "param:<name>" (drawn while that state is empty:
+//           a Stopped server has run nothing to set it) [KIT_TEMPLATES],
 //           extent = "<position param>", depth = n, solid = true,
 //           voxel = "<voxel material>",
 //           state = "<shared state key>", when = {color, solid, scale =
@@ -1173,6 +1175,10 @@ namespace kit
 		//    "next_id": 5}
 		// Id 1 is the app (the root); a scene's name is one of `scenes`.
 		ss_ composition_path;
+		// [KIT_TEMPLATES] That composition is a template's: its first start is
+		// Stopped and the first builder to come is put in the tools (the
+		// plan's "opens in: edit"); from then on the save says, as any
+		bool opens_in_edit = false;
 		// The save Kit keeps its rows in (its store "kit")
 		storage::Save *save = nullptr;
 		// The app's scenes by the names the composition gives them; a

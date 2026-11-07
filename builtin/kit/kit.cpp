@@ -2773,6 +2773,9 @@ struct Module: public interface::Module, public Interface
 		return j;
 	}
 
+	// [KIT_TEMPLATES] Host::opens_in_edit's first builder is yet to come
+	bool m_open_tools = false;
+
 	bool load_composition(const json::Value &c, ss_ &why)
 	{
 		Entity root;
@@ -3196,8 +3199,12 @@ struct Module: public interface::Module, public Interface
 								m_session.restore).insert(a.at(i).as_string());
 			}
 		} else {
-			m_session.running = true;
-			log_i(MODULE, "%s", had_runtime ? "A save from before Play and "
+			// [KIT_TEMPLATES] A template's first start: Stopped, the first
+			// builder to come in the tools
+			m_session.running = !(first && host.opens_in_edit);
+			m_open_tools = !m_session.running;
+			log_i(MODULE, "%s", m_open_tools ? "A template: Stopped, in edit mode" :
+					had_runtime ? "A save from before Play and "
 					"Stop: Running, its start its types' defaults" :
 					"A fresh save: Running");
 			save_session();
@@ -19292,6 +19299,16 @@ struct Module: public interface::Module, public Interface
 		if(join){
 			joined(peer);
 			send_all_mine(peer);
+		}
+		if(m_open_tools && can_edit_u(peer)){
+			m_open_tools = false;
+			tools(p, peer, true);
+			log_i(MODULE, "%s opens the template in edit mode", cs(p.name));
+			// Where its players begin, not the World's middle: in a wall, maybe
+			if(p.player)
+				respawn_at(p.player, peer);
+			send_state(peer);
+			send_builders();
 		}
 	}
 
