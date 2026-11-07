@@ -80,6 +80,22 @@ namespace interface
 //                               remove; one movement (`movement` and `step`) an entity.
 //   seat = true              -- ([KIT_COMPONENTS]) a use of the entity (with usable)
 //                               takes the player's controls for its movement
+//                               ([KIT_VEHICLE_MOVEMENTS] the nearest movement on it or
+//                               above it: a seat is a child entity on a deck, one
+//                               holder a vehicle)
+//                            -- [KIT_VEHICLE_MOVEMENTS] A movement on a free object's
+//                               root, or on an entity under something that moves, is
+//                               steered in play: the server steps it (step(s, i, dt, w,
+//                               p), its seat's holder's input as i, else i.f, i.r,
+//                               i.climb from its instance's state throttle, steer,
+//                               climb: an NPC's, a signal's), DRIVE_LEAD ahead of the
+//                               shared time, and sends each client its keys
+//                               ("kit:track"); a holder predicts nothing. Its world is
+//                               the scene's, or under a deck the deck's boxes in its
+//                               parent's frame. movement = {timed = true} is no
+//                               steered one (kit/course: a function of the time).
+//                               Stock: kit/sea_vessel, kit/airship, kit/car,
+//                               kit/turret, kit/course
 //   params   = {name = {type = "voxel"|"number"|"string"|"bool"|"entity"|
 //                "position"|"voxels", default = v}, ...}   -- authored,
 //              per instance; a voxel "" is none (a generic type's, which
@@ -252,7 +268,11 @@ namespace interface
 // own on_timer counted from when it was due, so a chain keeps its period;
 // saved as game time left; the scope is where the component lives,
 // so one on a player's entity follows them), c:teleport({x, y, z}) (the player who set the
-// run off, the app moving them on kit:move_player), c:log(...) (the
+// run off, the app moving them on kit:move_player), c:set_param(id, type,
+// param, value) ([KIT_VEHICLE_MOVEMENTS] a parameter of a component on an
+// entity it reaches, until Stop, checked as an edit's, the row keeping its
+// own; a movement's take it at its next step: an engine upgrade, wind, fuel;
+// 64 a run), c:log(...) (the
 // server's log and the entity's own, which the inspector shows),
 // c:app(what, value) ([KIT] stage 6a; the app's own types only: the event
 // kit:app, AppCall, its native code's to do; 8 a run). A
@@ -716,6 +736,10 @@ namespace interface
 //       nor under it
 //   {"op": "delete", "id": n}
 //   {"op": "set", "id": n, "comp": i, "param": p, "value": v}
+//       ([KIT_WAVE_PIVOT_CENTER] "center": true for "value": a parameter declared
+//       with button = "center" -- kit/wave's pivot -- set to the placed prefab's
+//       centre, its voxels' box's middle in its root's frame; the inspector's
+//       "Center <param>" button. Add component starts such a parameter there)
 //   {"op": "add_component", "id": n, "type": t}, {"op": "remove_component", "id": n,
 //       "comp": i} ([KIT_COMPONENTS]): one undo each. Refused on a prefab's or a
 //       generator's built child (its prefab's to change), a second of a type or a

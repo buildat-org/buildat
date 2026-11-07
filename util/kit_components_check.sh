@@ -160,7 +160,7 @@ in_edit() { printf 'event kit_edit {"op": "mode", "on": true}\nwait_log 5000 kit
 seated() { printf 'event kit_use %s\nwait_log 10000 movement %s, seat %s\nframes 60\ndelay 1000\n' "$1" "$2" "$1"; }
 pick() # <the dropdown's item>: Add component in the inspector, the item clicked
 {
-	printf 'click DropDownList "▼" 950 170\ndelay 300\nclick Text "%s" 950 500\nwait_log 5000 kit editor: add %s to\nsync 3000\nframes 5\n' "$1" "$1"
+	printf 'click DropDownList "▼" 950 170\ndelay 300\nclick Text "%s" 950 500\nwait_log 5000 kit editor: add %s to\nwait_log 5000 kit editor: state:\nsync 3000\nframes 5\n' "$1" "$1"
 }
 # ---- Set up, natively: the account, the world, the walker
 {
@@ -310,7 +310,7 @@ EOF
 	ed '{"op": "remove_component", "id": 11, "comp": 1}'
 	ed '{"op": "add_component", "id": 11, "type": "kit/car"}'
 	ed '{"op": "save_prefab", "ids": [11], "name": "my_car"}'
-	# A free voxel object: a wave yes, not yet a movement. (14 its root)
+	# A free voxel object: a wave and a movement ([KIT_VEHICLE_MOVEMENTS]). (14 its root)
 	ed '{"op": "place", "prefab": "kit/hut", "pos": [-20, 1, -20], "free": true}'
 	ed '{"op": "add_component", "id": 14, "type": "kit/wave"}'
 	ed '{"op": "add_component", "id": 14, "type": "kit/car"}'
@@ -443,7 +443,7 @@ assert abs(pre[0]["p"][1] - RIDE) < 0.002, pre[0]
 for w_ in ("entity 5 has a kit/car", "entity 5 has a movement: kit/car", "kit/part has a place", "kit/car has no place",
 		"kit/wave goes on a placed prefab's root", 'no component "kit/door"', 'no component "kit/starting_kit"',
 		"entity 2 is a scene", "the entity's last component", "kit/seat needs a place: entity 6",
-		"entity 10 is built by 9", "added kit/wave to 14", "a free object is not driven yet", "added kit/seat to 5", "added kit/car to 5", "removed kit/timer from 5"):
+		"entity 10 is built by 9", "added kit/wave to 14", "added kit/car to 14", "added kit/seat to 5", "added kit/car to 5", "removed kit/timer from 5"):
 	assert w_ in srv, w_
 # The live remove: "ear" before "spy" on 8. Removed once, spy's ticks one stream through it
 # and through the undo; spy started once in each round, ear once more for the undo

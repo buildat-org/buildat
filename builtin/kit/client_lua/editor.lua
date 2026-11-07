@@ -2497,6 +2497,19 @@ function NT.params_form(w, e, ci, c, t, keep)
 			log:info("kit editor: " .. key .. " " .. k .. " = " .. tostring(v))
 			mark()
 		end, WIDGETS)
+		-- [KIT_WAVE_PIVOT_CENTER] a parameter's `button = "center"`: the object's
+		-- centre set again (the server's, one edit)
+		for _, k in ipairs(names) do
+			if decl[k].button == "center" then
+				button(w, "Center " .. k, function()
+					log:info("kit editor: " .. key .. " " .. k .. " centred")
+					if E.pending[key] then
+						E.pending[key][k] = nil
+					end
+					send({op = "set", id = e.id, comp = ci - 1, param = k, center = true})
+				end)
+			end
+		end
 		-- [KIT_ITEMS_TAB] a list of items: one added from the Items
 		-- tab's list (a count typed after it)
 		-- [KIT_MAP_ROTATION] a list of scenes the same way

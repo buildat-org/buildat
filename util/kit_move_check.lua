@@ -756,4 +756,90 @@ do
 	end
 	assert(left, "carried into the wall it gets off")
 end
+-- [KIT_VEHICLE_MOVEMENTS] A steered object's track: between two keys, on from the
+-- last for half a second, the yaw the short way round; a link on it in its parent's
+-- frame with the wave on top; a body standing on it is carried
+do
+	MV.tracks[9] = {{1000, 0, 5, 0, 350, 0, 0}, {2000, 10, 5, 0, 10, 0, 0}}
+	local x, y, z, yaw = MV.track_at(9, 1.5)
+	assert(near(x, 5, 1e-9) and near(y, 5, 1e-9) and near(yaw, 360, 1e-9),
+			"halfway, the short way: " .. x .. " " .. yaw)
+	x, _, _, yaw = MV.track_at(9, 2.25)
+	assert(near(x, 12.5, 1e-9) and near(yaw, 375, 1e-9), "on from the last: " .. x)
+	x = MV.track_at(9, 9)
+	assert(near(x, 15, 1e-9), "half a second at most: " .. x)
+	assert(near(MV.track_at(9, 0), 0, 1e-9), "the first before it")
+	assert(MV.track_at(10, 1) == nil, "no keys")
+	-- At rest at (0, 5, 0) yaw 350 in a parent turned 90 at (100, 0, 0): at t 1.5
+	-- the key (5, 5, 0) yaw 0, so in the world (100, 5, -5), turned 90
+	local l = {100, 5, 0, 80, 0, 0, {track = 9, frame = {100, 0, 0, 90, 0, 0}}}
+	local wx, wy, wz, D = MV.link_at(l, 1.5)
+	assert(near(wx, 100, 1e-9) and near(wy, 5, 1e-9) and near(wz, -5, 1e-9),
+			"the track's place in the parent: " .. wx .. " " .. wy .. " " .. wz)
+	-- D: from yaw 80 at rest to 90 now, a turn of 10 about y
+	local a = 10 * math.pi / 180
+	assert(near(D[1], math.cos(a), 1e-9) and near(D[3], math.sin(a), 1e-9), "its turn")
+	-- The wave on top: a roll about the pivot, as a wave alone has it
+	local lw = {100, 5, 0, 90, 0, 0, {track = 9, frame = {100, 0, 0, 90, 0, 0}, wave_roll = 10,
+		wave_roll_period = 4, pivot = {0, 2, 0}}}
+	MV.tracks[9] = {{0, 0, 5, 0, 0, 0, 0}}
+	local w0 = {100, 5, 0, 90, 0, 0, {wave_roll = 10, wave_roll_period = 4, pivot = {0, 2, 0}}}
+	local ax, ay, az, Da = MV.link_at(lw, 1)
+	local bx, by, bz, Db = MV.link_at(w0, 1)
+	assert(near(ax, bx, 1e-9) and near(ay, by, 1e-9) and near(az, bz, 1e-9), "wave on a track")
+	for k = 1, 9 do
+		assert(near(Da[k], Db[k], 1e-9), "the wave's turn on a track")
+	end
+	-- Standing on a deck steered along x: carried, still where it stood on it
+	MV.tracks[7] = {}
+	for n = 0, 40 do
+		MV.tracks[7][n + 1] = {n * 100, n * 0.5, 20, 0, n * 2, 0, 0}
+	end
+	local w = MV.world{cell = function(_, j) return j <= 0 and STONE or nil end,
+		turned = MV.turned({{0, 20, 0, 0, 0, 0, DECK, 7,
+			{{0, 20, 0, 0, 0, 0, {track = 7, frame = {0, 0, 0, 0, 0, 0}}}}}})}
+	w:pose_at(0)
+	local s = on_deck(w, 2, 3)
+	stepped(w, s, {f = 0, r = 0, yaw = 0, jump = 0}, 0, 30)
+	assert(s.frame == 7, "on the steered deck")
+	local at = {s.at[1], s.at[2], s.at[3]}
+	stepped(w, s, {f = 0, r = 0, yaw = 0, jump = 0}, 500, 120)
+	assert(s.frame == 7 and near(s.at[1], at[1], 1e-3) and near(s.at[3], at[3], 1e-3),
+			"stood still on it")
+	assert(s.pos[1] > 10, "carried along: " .. s.pos[1])
+	MV.tracks = {}
+end
+-- The stock movements: a sea vessel floats to its level and goes, an airship holds its
+-- height and climbs, a turret turns within its limits
+do
+	local open = MV.world{cell = function(_, j) return j <= -20 and STONE or nil end}
+	local sv = type_of("sea_vessel")
+	local p = defaults(sv)
+	p.water_level = 0
+	local s = {pos = {0, 3, 0}, vel = {0, 0, 0}, yaw = 0}
+	run(sv, s, 600, {f = 0, r = 0}, open, p)
+	assert(near(s.pos[2], -1, 0.02), "afloat at its draft: " .. s.pos[2])
+	run(sv, s, 600, {f = 1, r = 0}, open, p)
+	assert(s.pos[3] > 40 and near(s.vel[3], p.top_speed, 1.5), "under way: " .. s.vel[3])
+	run(sv, s, 120, {f = 1, r = 1}, open, p)
+	assert(s.yaw > 20 and s.yaw < 90, "the rudder turns it: " .. s.yaw)
+	local as = type_of("airship")
+	p = defaults(as)
+	s = {pos = {0, 10, 0}, vel = {0, 0, 0}, yaw = 0}
+	run(as, s, 300, {f = 0, r = 0}, open, p)
+	assert(near(s.pos[2], 10, 0.05), "it holds its height: " .. s.pos[2])
+	run(as, s, 120, {f = 0, r = 0, jump = 1}, open, p)
+	run(as, s, 300, {f = 0, r = 0}, open, p)
+	assert(near(s.pos[2], 16, 0.3), "climbed 3 m/s for 2 s: " .. s.pos[2])
+	run(as, s, 60, {f = 0, r = 0, down = 1}, open, p)
+	run(as, s, 300, {f = 0, r = 0}, open, p)
+	assert(near(s.pos[2], 13, 0.3), "and down: " .. s.pos[2])
+	local tu = type_of("turret")
+	p = defaults(tu)
+	s = {pos = {0, 0, 0}, yaw = 0}
+	run(tu, s, 30, {f = 1, r = 1}, open, p)
+	assert(near(s.yaw, 30, 1e-6) and near(s.pitch, -15, 1e-6), "turned and raised")
+	run(tu, s, 300, {f = 1, r = 0}, open, p)
+	assert(near(s.pitch, -60, 1e-6), "no higher than pitch_min")
+end
 print("kit_move_check: ok")

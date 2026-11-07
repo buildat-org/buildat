@@ -310,10 +310,59 @@ local function vec3(v)
 	return tonumber(v[1]) or 0, tonumber(v[2]) or 0, tonumber(v[3]) or 0
 end
 
+-- [KIT_VEHICLE_MOVEMENTS] A steered object's track: M.tracks[entity] its keys, each
+-- {t ms, x, y, z, yaw, pitch, roll} (its place and turn in its parent's frame), in
+-- order; the client's from "kit:track", the box's each request's (M.snapshot). At t
+-- (seconds): between the two round it, past the last on from the two last for half
+-- a second at most, before the first the first (kit.cpp's track_at says the same).
+-- nil: no keys
+M.tracks = {}
+function M.track_at(id, t)
+	local k = M.tracks[id]
+	if type(k) ~= "table" or #k == 0 then
+		return nil
+	end
+	local ms = t * 1000
+	if ms <= k[1][1] then
+		local a = k[1]
+		return a[2], a[3], a[4], a[5], a[6], a[7]
+	end
+	local lo, hi = 1, #k
+	while lo < hi do
+		local mid = floor((lo + hi + 1) / 2)
+		if k[mid][1] <= ms then
+			lo = mid
+		else
+			hi = mid - 1
+		end
+	end
+	local a, b, u = k[lo], k[lo + 1], 0
+	if b then
+		u = (ms - a[1]) / (b[1] - a[1])
+	elseif lo > 1 then
+		a, b = k[lo - 1], k[lo]
+		u = ((ms < b[1] + 500 and ms or b[1] + 500) - a[1]) / (b[1] - a[1])
+	else
+		return a[2], a[3], a[4], a[5], a[6], a[7]
+	end
+	local r = {}
+	for i = 2, 7 do
+		local d = b[i] - a[i]
+		if i >= 5 then
+			d = d - 360 * floor((d + 180) / 360)
+		end
+		r[i] = a[i] + d * u
+	end
+	return r[2], r[3], r[4], r[5], r[6], r[7]
+end
+
 -- A link {x, y, z, yaw, pitch, roll, motion} (an object at rest in the world, what
 -- moves it) at t: where its origin is, D, the world's turn it makes round where its
 -- origin was at rest, and the wave's angles (kit.cpp's moved_local says the same in
--- the object's parent)
+-- the object's parent). [KIT_VEHICLE_MOVEMENTS] A steered one's (motion.track its
+-- entity, motion.frame its parent's frame at rest {x, y, z, yaw, pitch, roll}): its
+-- track's place and turn there, the wave on top; then also the track's yaw, pitch
+-- and roll
 function M.link_at(l, t)
 	local R0 = l.R0
 	if not R0 then
@@ -328,6 +377,32 @@ function M.link_at(l, t)
 	local vx = px + cx * u - (W[1] * px + W[2] * py + W[3] * pz)
 	local vy = py + cy * u + h - (W[4] * px + W[5] * py + W[6] * pz)
 	local vz = pz + cz * u - (W[7] * px + W[8] * py + W[9] * pz)
+	local kx, ky, kz, kyaw, kpitch, kroll
+	if m.track and type(m.frame) == "table" then
+		kx, ky, kz, kyaw, kpitch, kroll = M.track_at(m.track, t)
+	end
+	if kx then
+		local f = m.frame
+		local F = l.F
+		if not F then
+			F = rotation(tonumber(f[5]) or 0, tonumber(f[4]) or 0, tonumber(f[6]) or 0)
+			l.F = F
+		end
+		local FK = m3(F, rotation(kpitch, kyaw, kroll))
+		local A = m3(FK, W)
+		local D = {}
+		for i = 0, 2 do
+			for j = 0, 2 do
+				D[i * 3 + j + 1] = A[i * 3 + 1] * R0[j * 3 + 1] + A[i * 3 + 2] * R0[j * 3 + 2]
+						+ A[i * 3 + 3] * R0[j * 3 + 3]
+			end
+		end
+		local fx, fy, fz = vec3(f)
+		return fx + F[1] * kx + F[2] * ky + F[3] * kz + FK[1] * vx + FK[2] * vy + FK[3] * vz,
+				fy + F[4] * kx + F[5] * ky + F[6] * kz + FK[4] * vx + FK[5] * vy + FK[6] * vz,
+				fz + F[7] * kx + F[8] * ky + F[9] * kz + FK[7] * vx + FK[8] * vy + FK[9] * vz,
+				D, wp, wy, wr, kyaw, kpitch, kroll
+	end
 	local A = m3(R0, W)
 	local D = {}
 	for i = 0, 2 do
@@ -459,6 +534,7 @@ function W:pose_at(t)
 					tonumber(l[4]) or 0, tonumber(l[6]) or 0), t)
 			local box = M.look_box(l[1], l[2], {x, y, z}, R)
 			if box then
+				box.links = l[7]
 				b[#b + 1] = box
 			end
 		end
@@ -743,6 +819,22 @@ local function box_of(x, y, z, r, h)
 	return {x - r, y, z - r, x + r, y + h, z + r}
 end
 
+-- [KIT_VEHICLE_MOVEMENTS] A moving look on the skipped object (a seat on the deck the
+-- body stands on): its frame has it; as an axis-aligned box in the world, a turned deck's
+-- look reaches past its sides
+local function on_skipped(w, box)
+	local d = w.skip and w.skip.links and w.skip.links[1]
+	if not d or not box.links then
+		return false
+	end
+	for _, l in ipairs(box.links) do
+		if l[1] == d[1] and l[2] == d[2] and l[3] == d[3] then
+			return true
+		end
+	end
+	return false
+end
+
 -- Whether the box is in anything solid (known_only: not counting a cell not loaded;
 -- self.skip left out)
 function W:blocked(b, known_only)
@@ -766,7 +858,8 @@ function W:blocked(b, known_only)
 	end
 	for _, o in ipairs(self.boxes) do
 		if o[1] < b[4] - EPS and o[4] > b[1] + EPS and o[2] < b[5] - EPS and
-				o[5] > b[2] + EPS and o[3] < b[6] - EPS and o[6] > b[3] + EPS then
+				o[5] > b[2] + EPS and o[3] < b[6] - EPS and o[6] > b[3] + EPS and
+				not on_skipped(self, o) then
 			return true
 		end
 	end
@@ -1552,6 +1645,8 @@ end
 -- looks near {look, on, {x, y, z}, yaw[, pitch, roll]}; a heightmap's samples
 -- round it)
 function M.snapshot(t)
+	-- [KIT_VEHICLE_MOVEMENTS] the steered ones' keys
+	M.tracks = type(t.tracks) == "table" and t.tracks or {}
 	local classes = {}
 	for i, c in ipairs(t.classes or {}) do
 		classes[i] = M.voxel_info(c[1], c[2], c[3], c[4], c[5])
