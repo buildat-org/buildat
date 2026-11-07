@@ -7,8 +7,8 @@
 // in its own frame; an object is a replicated scene node with a position
 // and any rotation showing a model. Every object of a model shares the
 // model's meshes on a client, and its collision boxes on the server.
-// Static: the objects stand where they are put (a static RigidBody);
-// moving ones are later. One instance per scene.
+// The objects' bodies are static RigidBodies, moved only by the node or
+// set_body_pose(); nothing simulates them. One instance per scene.
 //
 // **The registry**: the scene's voxelworld instance's (voxelworld must have
 // one on the scene before create_instance(); an app with no voxel world
@@ -118,6 +118,14 @@ namespace voxel_objects
 				const Urho3D::Quaternion &rotation) = 0;
 		virtual void remove_object(uint node_id) = 0;
 		virtual size_t num_objects() = 0;
+		// [KIT_MOVING_OBJECTS] The object's body (its collision) at a pose with its
+		// node staying: a pose every client computes itself is not sent as
+		// replicated node's changes. Moving the node itself puts the body back
+		virtual void set_body_pose(uint node_id, const Urho3D::Vector3 &position,
+				const Urho3D::Quaternion &rotation) = 0;
+		// What Bullet's bodies in the scene say straight down from the point, within
+		// len: true and the height it hits
+		virtual bool ray_down(const Urho3D::Vector3 &from, float len, float *y) = 0;
 
 		// What was edited since the last commit: the chunks saved, sent to
 		// the clients on the scene, and their boxes rebuilt in every object

@@ -21,6 +21,10 @@
 #include <Scene.h>
 #include <Node.h>
 #include <RigidBody.h>
+#include <PhysicsWorld.h>
+#include <BulletDynamics/Dynamics/btDiscreteDynamicsWorld.h>
+#include <BulletDynamics/Dynamics/btRigidBody.h>
+#include <Ray.h>
 #include <CollisionShape.h>
 #include <algorithm>
 #include <array>
@@ -557,6 +561,41 @@ struct World: public Instance
 	}
 
 	size_t num_objects(){ return m_objects.size(); }
+
+	void set_body_pose(uint node_id, const Vector3 &position,
+			const Quaternion &rotation)
+	{
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->find_scene(m_scene);
+			Node *n = scene ? scene->GetNode(node_id) : nullptr;
+			RigidBody *rb = n ? n->GetComponent<RigidBody>() : nullptr;
+			if(!rb || !rb->GetBody())
+				return;
+			rb->SetTransform(position, rotation);
+			// (a static body's bounds are the world's to update, in a step)
+			PhysicsWorld *pw = scene->GetComponent<PhysicsWorld>();
+			if(pw && pw->GetWorld())
+				pw->GetWorld()->updateSingleAabb(rb->GetBody());
+		});
+	}
+
+	bool ray_down(const Vector3 &from, float len, float *y)
+	{
+		bool hit = false;
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->find_scene(m_scene);
+			PhysicsWorld *pw = scene ? scene->GetComponent<PhysicsWorld>() : nullptr;
+			if(!pw)
+				return;
+			PhysicsRaycastResult r;
+			pw->RaycastSingle(r, Ray(from, Vector3(0, -1, 0)), len);
+			if(r.body_){
+				hit = true;
+				*y = r.position_.y_;
+			}
+		});
+		return hit;
+	}
 
 	void commit();
 	void save_dirty(ModelImpl *m, const std::set<int> &dirty,
