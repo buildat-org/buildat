@@ -21432,6 +21432,8 @@ struct Module: public interface::Module, public Interface
 		const bool back = join && m_tools_back.erase(peer) > 0;
 		if(join && ((s && s->draft && p.name == s->by) || back) &&
 				can_edit(peer) && !p.editing){
+			log_i(MODULE, "%s's tools on in session %s", cs(p.name),
+					cs(itos(session_of_peer(peer))));
 			tools(p, peer, true);
 			send_state(peer);
 			send_builders();

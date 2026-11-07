@@ -248,10 +248,12 @@ keypress F2
 wait_log 5000 kit editor: the view is 3D
 frames 5
 EOF
-	# A draft's Publish lists them, and goes only when answered
+	# A draft's Publish lists them, and goes only when answered (its tools
+	# come in the edit state after the session's: edit mode off, then on)
 	cat <<EOF
 event kit_edit {"op": "draft"}
-wait_log 30000 kit editor: in session 1 draft
+wait_log 30000 kit editor: edit mode on
+wait_log_any 1000 kit editor: in session 1 draft
 frames 5
 click Button "Publish"
 wait_log 5000 kit editor: publish this draft:
@@ -267,7 +269,8 @@ click Button "Publish anyway"
 wait_log 5000 kit editor: published with goal warnings
 sync 3000
 click Button "Leave draft"
-wait_log 30000 kit editor: in session 0 default
+wait_log 30000 kit editor: edit mode on
+wait_log_any 1000 kit editor: in session 0 default
 frames 5
 EOF
 	link 9 done 13 activate

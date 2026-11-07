@@ -214,6 +214,8 @@ frames 10
 EOF
 }
 # What the builder sees; the goals' warnings in the inspector and at Publish
+# (a draft's tools come in the edit state after the session's: edit mode
+# off, then on)
 edit_look() # <prefix> <a goal's id>
 {
 	cat <<EOF
@@ -235,13 +237,15 @@ wait_log_any 5000 kit editor: goal warnings: 0
 frames 5
 screenshot $t/$1_edit_inspector.png
 event kit_edit {"op": "draft"}
-wait_log 30000 kit editor: in session 1 draft
+wait_log 30000 kit editor: edit mode on
+wait_log_any 1000 kit editor: in session 1 draft
 frames 5
 click Button "Publish"
 wait_log 5000 kit editor: publish this draft: 0 goal warnings
 sync 3000
 click Button "Leave draft"
-wait_log 30000 kit editor: in session 0 default
+wait_log 30000 kit editor: edit mode on
+wait_log_any 1000 kit editor: in session 0 default
 frames 5
 EOF
 }
