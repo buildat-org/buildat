@@ -606,7 +606,7 @@ m = re.search(r"world_menu: template choices: (.*)", cl)
 assert m, "no choices"
 got = m[1].strip()
 assert got.startswith("Empty, ") and got.endswith(", Puzzle room (buildat, installed)"), got
-assert sorted(got[7:].split(", ")[:3]) == ["Arena", "Capture the flag", "Puzzle room"], got
+assert {"Arena", "Capture the flag", "Puzzle room", "Ship"} <= set(got[7:].split(", ")[:-1]), got
 assert "A template: Stopped, in edit mode" in srv
 assert "kitboss opens the template in edit mode" in srv
 PY

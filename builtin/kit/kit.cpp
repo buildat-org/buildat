@@ -15990,7 +15990,23 @@ struct Module: public interface::Module, public Interface
 		// or not; the pose last set on the player's node
 		double look_pitch = 0, swings = 0, dig = 0;
 		ss_ pose_sent;
+		// [KIT_PUT_COUNTED_CORRECTION] Play and Stop move what is under a body
+		// before its client hears of it: the acks until then say "settle", a
+		// difference the client takes without counting a correction.
+		// simplified: a fixed time (SETTLE_US); a tick the client acknowledges
+		// would end it exactly
+		int64_t settle_until = 0;
 	};
+	static constexpr int64_t SETTLE_US = 500000;
+	ss_ settle_json(const Body &b) const
+	{
+		return interface::os::time_us() < b.settle_until ? ",\"settle\":true" : "";
+	}
+	void settle_bodies()
+	{
+		for(auto &bp : m_bodies)
+			bp.second.settle_until = interface::os::time_us() + SETTLE_US;
+	}
 	std::map<size_t, Body> m_bodies;
 	sm_<size_t, ss_> m_controls_sent;
 	// [KIT_MOVING_OBJECTS] when each peer last got the shared time (time_us)
@@ -16939,9 +16955,12 @@ struct Module: public interface::Module, public Interface
 				continue;
 			// The input: its holder's, else its own state's (signals)
 			bool held = false;
+			size_t holder = 0;
 			for(auto &bp : m_bodies)
-				held = held || bp.second.ride == dp.first;
+				if(!held && bp.second.ride == dp.first)
+					held = true, holder = bp.first;
 			ss_ in = held ? d.input : ss_();
+			const double shots = row_num(d.state, "shots");
 			if(!held){
 				const json::Value &st = mv->state;
 				in = "{f=";
@@ -16997,6 +17016,10 @@ struct Module: public interface::Module, public Interface
 			}
 			d.state = json::load_string(answer.c_str());
 			d.t += n * dt;
+			// [KIT_SHIP] a gun's shots (kit/turret's): its holder's, at most a few a tick
+			if(held)
+				for(int k = 0; k < 4 && k < row_num(d.state, "shots") - shots; k++)
+					drive_shot(holder, e, d.params);
 			const json::Value &np = d.state.get("pos");
 			if(!pos_ok(np))
 				continue;
@@ -17166,6 +17189,14 @@ struct Module: public interface::Module, public Interface
 					const size_t tp = in.find(",t=");
 					if(tp != ss_::npos)
 						in = in.substr(0, tp)+"}";
+					// [KIT_SHIP] a press anywhere in the batch is the batch's (a
+					// gun's trigger tapped between two ticks)
+					const size_t jp = in.find(",jump=0,");
+					for(auto &q : b.inputs)
+						if(jp != ss_::npos && q.second.find(",jump=1,") != ss_::npos){
+							in[jp + 6] = '1';
+							break;
+						}
 					di->second.input = in;
 				}
 				b.ack = b.inputs.back().first;
@@ -17256,7 +17287,7 @@ struct Module: public interface::Module, public Interface
 			body_moved(bp.first, b);
 			network::access(m_server, [&](network::Interface *inetwork){
 				inetwork->send(bp.first, "kit:body", "{\"ack\":"+itos(b.ack)+
-						",\"s\":"+b.state_json+"}");
+						settle_json(b)+",\"s\":"+b.state_json+"}");
 			});
 		}
 		return spent;
@@ -19936,34 +19967,9 @@ struct Module: public interface::Module, public Interface
 			double d[3];
 			spread_dir(dir, spread, d);
 			if(projectile){
-				// A round's projectiles at once: a ceiling on the ticks' work
-				if(m_projectiles.size() >= MAX_PROJECTILES){
-					log_i(MODULE, "%s's projectile not made: %s in flight",
-							cs(who), cs(itos(MAX_PROJECTILES)));
+				if(!launch(peer, who, item, sheet, eye, d,
+						sheet.get("speed").as_number() * f, damage, me, scene))
 					break;
-				}
-				Projectile pr;
-				pr.id = m_next_shot++;
-				pr.peer = peer;
-				pr.item = item;
-				pr.sheet = sheet;
-				const double v = sheet.get("speed").as_number() * f;
-				for(int k = 0; k < 3; k++)
-					pr.pos[k] = eye[k], pr.vel[k] = d[k] * v;
-				pr.damage = damage;
-				pr.at_us = now_us();
-				pr.until_us = pr.at_us + (int64_t)(sheet.get("lifetime").
-						as_number() * 1e6);
-				json::Value pj = json::object();
-				pj.set("id", (int64_t)pr.id);
-				pj.set("from", point(pr.pos));
-				pj.set("vel", point(pr.vel));
-				pj.set("gravity", sheet.get("gravity"));
-				pj.set("life", sheet.get("lifetime"));
-				pj.set("color", jstr(sheet, "color"));
-				pj.set("by", (int64_t)me);
-				m_projectiles.push_back(pr);
-				send_scene(scene, "kit:projectile", pj.stringify());
 				continue;
 			}
 			const double wall = ray_wall(sref, eye, d, range);
@@ -19997,6 +20003,75 @@ struct Module: public interface::Module, public Interface
 		sj.set("from", point(eye));
 		sj.set("ends", ends);
 		send_scene(scene, "kit:shot", sj.stringify());
+	}
+
+	// A projectile from `from` along d (a unit vector) at speed v, the sheet's
+	// gravity, lifetime, colour and ([KIT_SHIP]) size; drawn by every client in
+	// the scene. False: too many in flight
+	bool launch(size_t peer, const ss_ &who, const ss_ &item, const json::Value &sheet,
+			const double from[3], const double d[3], double v, double damage,
+			uint64_t me, const ss_ &scene)
+	{
+		// A round's projectiles at once: a ceiling on the ticks' work
+		if(m_projectiles.size() >= MAX_PROJECTILES){
+			log_i(MODULE, "%s's projectile not made: %s in flight",
+					cs(who), cs(itos(MAX_PROJECTILES)));
+			return false;
+		}
+		Projectile pr;
+		pr.id = m_next_shot++;
+		pr.peer = peer;
+		pr.item = item;
+		pr.sheet = sheet;
+		for(int k = 0; k < 3; k++)
+			pr.pos[k] = from[k], pr.vel[k] = d[k] * v;
+		pr.damage = damage;
+		pr.at_us = now_us();
+		pr.until_us = pr.at_us + (int64_t)(sheet.get("lifetime").
+				as_number() * 1e6);
+		json::Value pj = json::object();
+		pj.set("id", (int64_t)pr.id);
+		pj.set("from", point(pr.pos));
+		pj.set("vel", point(pr.vel));
+		pj.set("gravity", sheet.get("gravity"));
+		pj.set("life", sheet.get("lifetime"));
+		pj.set("color", jstr(sheet, "color"));
+		if(sheet.get("size").is_number())
+			pj.set("size", sheet.get("size"));
+		pj.set("by", (int64_t)me);
+		m_projectiles.push_back(pr);
+		send_scene(scene, "kit:projectile", pj.stringify());
+		return true;
+	}
+
+	// [KIT_SHIP] A turret's shot (kit/turret's s.shots went up): its holder's, a
+	// cannonball from its front along its facing
+	void drive_shot(size_t peer, const Entity &e, const json::Value &params)
+	{
+		auto pi = m_peers.find(peer);
+		auto mi = pi == m_peers.end() ? m_entities.end() :
+				m_entities.find(pi->second.player);
+		if(mi == m_entities.end() || !m_session.running)
+			return;
+		double w[3], d[3] = {0, 0, 1};
+		Turn q;
+		world_of(e, w, &q);
+		q.apply(d);
+		const double from[3] = {w[0] + d[0], w[1] + d[1], w[2] + d[2]};
+		json::Value sheet = json::object();
+		sheet.set("gravity", num(params, "shot_gravity", 9.8, 0, 100));
+		sheet.set("lifetime", 4.0);
+		sheet.set("color", "#202020");
+		sheet.set("size", 0.3);
+		sheet.set("knockback", 0.0);
+		sheet.set("crit", 1.0);
+		const double v = num(params, "shot_speed", 40, 1, 200);
+		const double damage = num(params, "shot_damage", 10, 0, 1000);
+		const ss_ who = pi->second.name;
+		log_i(MODULE, "%s fires entity %s's %s", cs(who), cs(itos(e.id)),
+				cs(movement_on(e) ? movement_on(e)->type : ss_()));
+		launch(peer, who, "kit/turret", sheet, from, d, v, damage, mi->first,
+				pi->second.scene);
 	}
 
 	// Each tick, Running: the projectiles step on the game's clock (a
@@ -22674,6 +22749,7 @@ struct Module: public interface::Module, public Interface
 				queue_run(r);
 			}
 		m_runtime_dirty = true;
+		settle_bodies();
 		log_i(MODULE, "Play by %s: a round from the start (authored %s, "
 				"start %s)", cs(by), cs(digest(authored_json())),
 				cs(digest(m_start)));
@@ -22851,6 +22927,7 @@ struct Module: public interface::Module, public Interface
 		save_runtime();
 		save_session();
 		m_store->set("authored", authored_json().stringify());
+		settle_bodies();
 		log_i(MODULE, "Stop by %s: %zu sections put back (%zu wait for their "
 				"load), each instance at its start, inventories %s (authored "
 				"%s, start %s, runtime %s)", cs(by), done.size(),

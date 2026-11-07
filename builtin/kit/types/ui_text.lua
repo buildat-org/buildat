@@ -1,6 +1,6 @@
 -- A text on the players' screens ([KIT_UI_COMPONENTS], stage 4m): a
 -- score, a countdown, a hint. In `text`, {value} is the last value on
--- "value" ({value:time} as m:ss, {value:int} a whole number), [<action>]
+-- "value" ({value:time} as m:ss, {value:int} a whole number, 0 before any), [<action>]
 -- each player's key for it, | a new line. Where: `anchor` (a corner, an
 -- edge's middle or the centre) and x, y in from it, on the screen or in
 -- its parent if a kit/ui_panel (shown while it is). [KIT_HUD_STYLE] x, y,
