@@ -163,9 +163,13 @@ function M.safe.new(o)
 			end
 			return a.it.n < b.it.n
 		end)
+		local labels = {}
 		for _, l in ipairs(list) do
 			vm:add(l.label, function() run(l.it) end, l.it.order == 0)
+			labels[#labels + 1] = l.label
 		end
+		-- For a drive: what the menu has (an admin's item, or not)
+		log:info("pause: the items " .. table.concat(labels, ", "))
 		-- A click off the menu is Continue, in the click's own event (the
 		-- gesture a browser grants a pointer lock from)
 		menu.hold(menu.close, w, {no_escape = true, click = function(x, y)

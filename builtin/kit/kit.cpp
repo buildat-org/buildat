@@ -1386,6 +1386,9 @@ struct Module: public interface::Module, public Interface
 		// stop before the next one
 		sub(m_server, "core:shutdown", &Module::on_shutdown);
 		sub(m_server, "core:save", &Module::on_shutdown);
+		// [WORKBENCH_SWITCH_PROJECT] And before a reload (an app's switch):
+		// the app closes its save after
+		sub(m_server, "core:unload", &Module::on_shutdown);
 		// [KIT_DIG_STOP_ORDER] A client's kit packets are handled once
 		// every module has handled what the client sent before them: a dig
 		// (the app's packet, its module's thread) sent just before a Stop

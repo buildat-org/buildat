@@ -300,7 +300,8 @@ namespace network
 		virtual void declare(const ss_ &packet_name, Channel channel) = 0;
 		// The peer is disconnected once what is queued for it has gone, or
 		// in two seconds if it does not read: a packet sent just before,
-		// such as why, still arrives. Nothing more is sent to it.
+		// such as why, still arrives (the connection kept half a second
+		// after, for the client to read it). Nothing more is sent to it.
 		virtual void disconnect(PeerInfo::Id peer) = 0;
 		// The answer to a network:http_request; the connection closes
 		// after it. A peer that has gone, or was answered, is ignored.
