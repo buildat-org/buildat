@@ -85,8 +85,8 @@ return {
 		shown = {cat = "hud", type = "bool", default = true},
 	},
 	state = {
-		shown = {default = true, shared = true},
-		value = {default = 0, shared = true},
+		shown = {default = true, shared = true, param = "shown"},
+		value = {default = 0, shared = true, param = "start"},
 		own = {default = {}, per_player = true},
 	},
 	about = {
@@ -111,10 +111,6 @@ return {
 			end
 		end
 		return params
-	end,
-	on_start = function(c)
-		c.state.shown = c.params.shown
-		c.state.value = c.params.start
 	end,
 	on_params = function(c, changed)
 		if changed.shown ~= nil then

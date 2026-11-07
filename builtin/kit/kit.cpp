@@ -22566,15 +22566,19 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// An instance's state at the start: the row "start"'s, over its
-	// type's defaults; nothing disabled
+	// type's defaults (a key's `param`'s value if it has one); nothing
+	// disabled
 	void to_start(Entity &e, size_t i)
 	{
 		Instance &in = e.comps[i];
 		in.state = json::object();
 		const json::Value &sd = m_types[in.type].decl.get("state");
 		if(sd.is_object())
-			for(json::Iterator it(sd); it; ++it)
-				in.state.set(it.key(), (*it).get("default"));
+			for(json::Iterator it(sd); it; ++it){
+				const json::Value &pv = in.params.get(jstr(*it, "param"));
+				in.state.set(it.key(), (*it).get("param").is_string() &&
+						!pv.is_undefined() ? pv : (*it).get("default"));
+			}
 		in.timers.clear();
 		in.inside.clear();
 		const json::Value &s = m_start.get(itos(e.id)).at((unsigned)i);

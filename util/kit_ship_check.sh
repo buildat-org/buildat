@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min, ~4 min with web (2026-11-07)
-# covers: apps/workbench/templates/ship/** builtin/kit/types/ship.prefab.json builtin/kit/types/turret.lua builtin/kit/types/sea_vessel.lua builtin/kit/types/wave.lua builtin/kit/kit.cpp builtin/kit/client_lua/controls.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/hands.lua builtin/kit/client_lua/move.lua
+# covers: apps/workbench/templates/ship/** builtin/kit/types/ship.prefab.json builtin/kit/types/turret.lua builtin/kit/types/sea_vessel.lua builtin/kit/types/wave.lua builtin/kit/kit.cpp builtin/kit/client_lua/controls.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/hands.lua builtin/kit/client_lua/move.lua builtin/kit/types/ui_text.lua
 # [KIT_SHIP] (kit_plan 4r7) The ship template played through: New's "Ship", opened in
 # edit mode, played by three: kitboss the captain at the wheel, kitbob the gunner at
 # the cannon's seat (its aim by "event kit_aim", its shots Space), kitcat walking the
@@ -10,6 +10,7 @@
 # [KIT_SHIP_VIEW] The gunner's chase view not pulled in by the ship, the sail faded in
 # the captain's view. Measured: the deck's roll, the ship's speed, the walker's corrections and height
 # over the deck, the shots fired and the hits.
+# [KIT_MAP_ROTATION_LEFTOVERS] Its hidden "Well sailed!" text not shown at Play.
 # Native, or "web": kitboss in a page, kitbob and kitcat native.
 # Screenshots with KEEP_TMP=1: $t/*.png
 #   util/kit_ship_check.sh [web]
@@ -363,6 +364,14 @@ print("kitcat on the deck: %d samples, frames %s, feet over the deck %.4f..%.4f 
 	ss[-1]["corr"] - ss[0]["corr"], ss[-1]["acks"] - ss[0]["acks"]))
 assert frames == {"10"}, frames
 assert max(abs(h) for h in over) < 0.05, over
+# [KIT_MAP_ROTATION_LEFTOVERS] "Well sailed!" (shown = false) not shown in play before
+# the five mines are sunk: not for an instant at Play either
+for name in ("bob", "cat"):
+	c = open("%s/%s.log" % (t, name), errors="replace").read()
+	five = c.find('"Mines sunk: 5 / 5')
+	early = [l for l in c[:five].splitlines() if 'shown: "Well sailed' in l]
+	assert five > 0 and not early, (name, early)
+print("ok: \"Well sailed!\" hidden in play until the mines are sunk")
 PY
 echo "PASS: the ship${WEB:+ (web)}"
 # vim: set noet ts=4 sw=4:

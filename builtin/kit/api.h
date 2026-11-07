@@ -107,7 +107,9 @@ namespace interface
 //              (c:voxels'), 4096 cells, 256 names and 32 KiB at most. The
 //              editor hides it from the fields: its op "pattern" sets it
 //   state    = {name = {default = v, shared = true}, ...} -- runtime; a
-//              shared one is replicated to the clients;
+//              shared one is replicated to the clients; param = "<p>":
+//              at a round's start the parameter p's value, not default
+//              (sent as it is from the start, not after on_start);
 //              ([KIT_UI_COMPONENTS]) a per_player = true one is a table
 //              {"player:<id>": v} (a `by`'s key), each client sent only
 //              its own player's v ("kit:mine" {"all": bool, "list":
