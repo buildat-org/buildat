@@ -3041,6 +3041,8 @@ magic.SubscribeToEvent("command_seq:kit_cam_where", function(_, data)
 	local p = S.pos or {x = 0, y = 0, z = 0}
 	log:info(string.format("kit editor: the 3D camera at %.2f %.2f %.2f "
 			.. "(%s)", p.x, p.y, p.z, data:GetString("Param")))
+	log:info(string.format("kit editor: the plan %.2f across (%s)", S.span or 0,
+			data:GetString("Param")))
 end)
 
 -- A check's look for a handle by its name ("+y", "-x"): where it is on

@@ -1530,6 +1530,7 @@ local function wheel_hand(wheel, q)
 	palette()
 end
 
+local WEB = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
 local function mouse_wheel(wheel, q)
 	if not E.editing then
 		return
@@ -1541,7 +1542,8 @@ local function mouse_wheel(wheel, q)
 	if over_ui(S.mx, S.my) then
 		return
 	end
-	local notches = math.max(-10, math.min(10, wheel))
+	-- In notches; the web's in tenths (its SDL port counts them so)
+	local notches = math.max(-10, math.min(10, WEB and wheel / 10 or wheel))
 	local f = 0.8 ^ notches
 	if S.view == "2d" then
 		-- About the pointer: the point under it stays under it
