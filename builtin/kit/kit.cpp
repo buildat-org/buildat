@@ -1467,6 +1467,9 @@ struct Module: public interface::Module, public Interface
 				m_box.reset();
 				return false;
 			}
+			// [KIT_MAP_ROTATION_LEFTOVERS] math.random seeded by the clock
+			if(!box_call("N"+std::to_string(interface::os::time_us()), answer, why))
+				log_w(MODULE, "The box's random seed: %s", cs(why));
 		}
 		for(auto &s : m_sources){
 			ss_ answer;

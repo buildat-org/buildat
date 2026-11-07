@@ -63,6 +63,7 @@
 **                        "p" after it, ahead of the answer
 **   "L<source>"          [KIT] stage 4h: the movement library
 **                        (client_lua/move.lua), before the types
+**   "N<number>"          math.random's seed (the host's clock)
 **   "S<lua literal>"     a body's steps: {type, params, state, inputs, dt,
 **                        sub, world (move.lua's snapshot)}; answers the
 **                        state after them
@@ -193,9 +194,17 @@ static int l_fmod(lua_State *l)
 	lua_pushnumber(l, fmod(luaL_checknumber(l, 1), luaL_checknumber(l, 2)));
 	return 1;
 }
-/* xorshift64*, one sequence for the box. simplified: not seeded per
-** instance, and a box restart starts it over */
+/* xorshift64*, one sequence for the box, seeded by the host's "N" as the
+** box is made (the clock: [KIT_MAP_ROTATION_LEFTOVERS], "random" no longer
+** the same after each start). simplified: not seeded per instance */
 static unsigned long long g_rand = 0x9e3779b97f4a7c15ull;
+static int l_seed(lua_State *l)
+{
+	const unsigned long long s = (unsigned long long)luaL_checknumber(l, 1);
+	/* (never 0: xorshift stays there) */
+	g_rand = (s ^ 0x9e3779b97f4a7c15ull) ? s ^ 0x9e3779b97f4a7c15ull : 1;
+	return 0;
+}
 static int l_random(lua_State *l)
 {
 	g_rand ^= g_rand >> 12;
@@ -738,6 +747,9 @@ static const char PRELUDE[] =
 "			tostring = tostring, tonumber = tonumber, setmetatable = setmetatable})\n"
 "		move = f()\n"
 "		return 'true'\n"
+"	elseif op == 'N' then\n"
+"		box_seed(tonumber(s:sub(2)) or 0)\n"
+"		return 'true'\n"
 "	elseif op == 'S' then\n"
 "		local f = assert(loadstring(s:sub(2), '=request'))\n"
 "		setfenv(f, {})\n"
@@ -799,6 +811,8 @@ static int f_open(lua_State *l)
 	lua_setglobal(l, "box_log");
 	lua_pushcfunction(l, l_mark);
 	lua_setglobal(l, "box_mark");
+	lua_pushcfunction(l, l_seed);
+	lua_setglobal(l, "box_seed");
 	lua_newtable(l);
 	luaL_register(l, NULL, MATH);
 	lua_setglobal(l, "box_math");
