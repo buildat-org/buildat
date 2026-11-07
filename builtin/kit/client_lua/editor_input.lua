@@ -2478,6 +2478,21 @@ local function draw()
 						dbg:AddSphere(magic.Sphere(m, s), col, false)
 					end
 				end
+				-- [KIT_GOALS] A chain's final goal, on the map: gold, its box and a
+				-- post above it
+				if c.type == "kit/goal" and NT.goal_check().final[e.id] then
+					local gold = magic.Color(1, 0.75, 0.1)
+					local ex = type(c.params) == "table" and c.params.size or {}
+					local sx = math.max(1, tonumber(ex[1]) or 1)
+					local sy = math.max(1, tonumber(ex[2]) or 1)
+					local sz = math.max(1, tonumber(ex[3]) or 1)
+					dbg:AddBoundingBox(magic.BoundingBox(
+							magic.Vector3(x - 0.7, y - 0.7, z - 0.7),
+							magic.Vector3(x + sx - 0.3, y + sy - 0.3, z + sz - 0.3)),
+							gold, false)
+					dbg:AddLine(m, magic.Vector3(x, y + sy + 3, z), gold, false)
+					dbg:AddCross(magic.Vector3(x, y + sy + 3, z), 1.5, gold, false)
+				end
 				-- A zone's and an owned volume's extent, from its cell on
 				local t = type_of(c.type)
 				for _, k in ipairs({"zone", "volume", "grants", "voxel_box",
@@ -2765,6 +2780,7 @@ function M.editor(options)
 			local n = #entities()
 			log:info("kit editor: state: " .. n .. " entities, " ..
 					tostring(s.undo) .. " to undo")
+			NT.goal_check()
 			for _, e in ipairs(entities()) do
 				local links = {}
 				for _, c in ipairs(e.components or {}) do

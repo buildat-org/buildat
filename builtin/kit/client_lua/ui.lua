@@ -772,6 +772,10 @@ local function update()
 			else
 				r.on = state(r.n, id, "shown") == true and (not pr or pr.on)
 				value = state(r.n, id, "value")
+				-- [KIT_GOALS] a goal with no line
+				if u.stack and tostring(u.text or "") == "" then
+					r.on, r.empty = false, true
+				end
 				if u.source == "health" then
 					value = hp
 					placed_health = placed_health or (r.on and hp ~= nil)
@@ -861,6 +865,33 @@ local function update()
 			stack(r, V)
 		end
 	end
+	-- [KIT_GOALS] The stacked lines of one place under each other
+	local stacks = {}
+	for _, id in ipairs(list) do
+		local r = U[id]
+		r.dy = nil
+		if r.el and r.ui.stack and not r.empty and (r.on or E.editing) then
+			local u = r.ui
+			local k = tostring(u.anchor) .. " " .. tostring(u.x) .. " " ..
+					tostring(u.y)
+			stacks[k] = stacks[k] or {}
+			table.insert(stacks[k], r)
+		end
+	end
+	for _, l in pairs(stacks) do
+		table.sort(l, function(a, b)
+			local oa, ob = num(a.ui.order, 0, -40, 40), num(b.ui.order, 0, -40, 40)
+			if oa ~= ob then
+				return oa < ob
+			end
+			return a.id < b.id
+		end)
+		local at, up = 0, tostring(l[1].ui.anchor):find("bottom") ~= nil
+		for _, r in ipairs(l) do
+			r.dy = up and -at or at
+			at = at + r.h + math.floor(0.4 * V)
+		end
+	end
 	-- Then each one's place and looks
 	local now = buildat.get_time_us() / 1e6
 	for _, id in ipairs(list) do
@@ -880,12 +911,14 @@ local function update()
 				else
 					x, y = x + bx, y + by
 				end
+				y = y + (r.dy or 0)
 			end
 			-- (no drag in the Signals view's box: bx, by not undone here)
 			r.to_params = function(px, py, nw, nh)
 				if pr then
 					px, py = px - pad, py - pad - r.top
 				end
+				py = py - (r.dy or 0)
 				return from_place(u, nw or w, nh or h, r.pw, r.ph, px, py, V)
 			end
 			if drag and drag.id == id and drag.at then
@@ -1106,6 +1139,24 @@ end
 -- [KIT_HUD_STYLE] style "shapes" (the default) a disc with a ring and the
 -- label on a dark rectangle; "plain" a square and the text alone
 local MK = {}
+-- [KIT_GOALS] Where a marker points: its `kind` "use", at its `target`; "reach",
+-- the middle of its box of cells `box`, turned with its node
+function M.marker_at(n, mk)
+	if mk.kind == "use" then
+		local t = P.nodes[tonumber(mk.target) or 0]
+		return (t and t.node or n.node).worldPosition
+	end
+	local p = n.node.worldPosition
+	if mk.kind == "reach" and type(mk.box) == "table" then
+		local e = {}
+		for i = 1, 3 do
+			e[i] = (math.max(1, math.floor(tonumber(mk.box[i]) or 1)) - 1) / 2
+		end
+		return p + n.node.rotation * magic.Vector3(e[1], e[2], e[3])
+	end
+	return p
+end
+
 local function markers()
 	-- [KIT_SIGNALS_VIEW] Through the viewport's camera, in its box
 	local area = M.hud_area and M.hud_area()
@@ -1170,12 +1221,12 @@ local function markers()
 	local D = math.max(8, math.floor(1.1 * V))
 	for id, r in pairs(MK) do
 		local mk, n = r.mk, P.nodes[id]
-		local on = cam ~= nil and not M.hud_off() and
+		local on = cam ~= nil and not M.hud_off() and mk.on ~= false and
 				(type(mk.state) ~= "string" or
 				state(n, id, mk.state) == true)
 		local where = "hidden"
 		if on then
-			local p = n.node.worldPosition
+			local p = M.marker_at(n, mk)
 			p = magic.Vector3(p.x, p.y + num(mk.lift, 1, -100, 100), p.z)
 			local o, d = cn.worldPosition, cn.worldDirection
 			local behind = not cam.orthographic and (p.x - o.x) * d.x +
@@ -1207,6 +1258,12 @@ local function markers()
 			end
 			x, y = math.floor(cx + dx), math.floor(cy + dy)
 			local label = tostring(mk.label == nil and "" or mk.label):sub(1, 64)
+			-- [KIT_GOALS] the way to it, at the edge
+			if mk.arrow and (behind or k < 1) then
+				label = math.abs(dx) * hh >= math.abs(dy) * hw and
+						(dx < 0 and "< " .. label or label .. " >") or
+						(dy < 0 and "^ " or "v ") .. label
+			end
 			r.dot.color = color(mk.color, magic.Color(1, 0.85, 0.2))
 			r.t:SetColor(r.dot.color)
 			local px = math.max(min_text(), math.floor(1.6 * V + 0.5))

@@ -1,0 +1,20 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "quest",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "first goal", "pos": [0, 0, 0],
+			"components": [{"type": "kit/goal", "params": {"text": "First: reach the marked place",
+				"autostart": true, "validate_reachable": 3,
+				"marker_label": "First"}, "links": [
+				{"output": "done", "to": 2, "input": "activate"}]}]},
+		{"id": 2, "name": "second goal", "pos": [8, 0, 0],
+			"components": [{"type": "kit/goal", "params": {"text": "Then: reach the next place",
+				"marker_label": "Next"}, "links": [
+				{"output": "done", "to": 3, "input": "activate"}]}]},
+		{"id": 3, "name": "final goal", "pos": [16, 0, 0],
+			"components": [{"type": "kit/goal", "params": {"text": "Last: reach the end",
+				"marker_label": "End"}}]}
+	]
+}
