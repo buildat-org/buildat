@@ -120,10 +120,12 @@ EOF
 dig() # <what it is told, or "">
 {
 	echo "keypress p"
-	echo "wait_log 10000 a dig at the pillar sent"
+	# (the warning waited for from the keypress: it can come in the frame
+	# the dig is sent, before a wait for that line's end begins)
 	if [ -n "$1" ]; then
 		echo "wait_log 10000 kit: warning: $1"
 	else
+		echo "wait_log 10000 a dig at the pillar sent"
 		echo "sync 5000"
 	fi
 }
