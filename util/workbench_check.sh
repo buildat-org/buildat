@@ -1410,6 +1410,10 @@ mouse_click left
 wait_log 5000 kit editor: selected 8
 frames 3
 screenshot @T@/buried_link.png
+mouse_pos 770 400
+frames 2
+mouse_wheel -1
+frames 3
 click Button "To enable"
 wait_log 5000 kit editor: state: 7 entities, 12 to undo
 quit
