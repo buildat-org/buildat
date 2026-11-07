@@ -6,8 +6,10 @@
 # drives: builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua
 # Kit's inspector on Workbench, the admin (kitboss, by the setup code) in
 # edit mode with a kit/controls selected (user's playtest, 2026-10-31):
-#   - its 23 parameters fit a 700 px screen: Apply is clicked there
-#     (settings_form drew an empty warning line under every field);
+#   - its parameters (more than a 700 px screen holds since [KIT_FEEDBACK_EFFECTS])
+#     scroll: the wheel over the labels brings Apply into view, where it is
+#     clicked; the body stays near a row's height a parameter (settings_form drew
+#     an empty warning line under every field);
 #   - a camera picked and not applied stays picked when the inspector is
 #     drawn again by an edit's state: the dropdown's Down from "chase"
 #     goes to top_down, which Apply sets (it went back to first_person,
@@ -61,6 +63,17 @@ keypress Return
 wait_log 5000 kit editor: 3/1 camera =
 frames 3
 screenshot @T@/picked.png
+mouse_pos 780 400
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 3
+screenshot @T@/scrolled.png
 click Button "Apply"
 wait_log 10000 entities, 3 to undo
 keypress Tab
@@ -91,9 +104,14 @@ kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 [ "$(grep -acE "ui_utils: dropdown_[0-9]+ open" "$t/boss.log")" -ge 3 ] ||
 	fail "the door's dropdown did not open ($t/boss.log)"
+# simplified: a fixed bound over today's 1162: room for a few more parameters,
+# not for an empty line under each. Many more parameters raise it
+tall=$(grep -aoP 'kit editor: the inspector \d+ of \K\d+(?= tall)' "$t/boss.log" | sort -n | tail -1)
+[ "${tall:-9999}" -le 1400 ] ||
+	fail "the inspector's body is ${tall:-not logged} tall: more than its rows take ($t/boss.log)"
 grep -aqF "An edit by kitboss: moved 4" "$t/srv.log" &&
 	fail "a key in the open dropdown moved the selection too ($t/srv.log)"
 got=$(grep -aoP 'kit: controls: camera \K\w+' "$t/boss.log" | tail -1)
 [ "$got" = top_down ] ||
 	fail "the camera is ${got:-not set}, not top_down: the pick did not stay ($t/picked.png)"
-echo "PASS: Kit's inspector: kit/controls' parameters fit with Apply on the screen; a pick not yet applied stays picked when the inspector is drawn again; a dropdown's keys move no selection"
+echo "PASS: Kit's inspector: kit/controls' parameters scroll to Apply; a pick not yet applied stays picked when the inspector is drawn again; a dropdown's keys move no selection"
