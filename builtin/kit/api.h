@@ -403,6 +403,47 @@ namespace interface
 //   writes none; a copy following its prefab builds again as its
 //   parameters change, its built children's overrides kept over the
 //   prefab's values. A build at each session's start: stage 7.
+//   [KIT_SYMMETRY] **Symmetric maps** (kit/symmetry, kit_plan 7c): one a
+//   scene, right under it, put at its World's middle (x = z = 0, level).
+//   Its slices: halves or quadrants, their seams straight (along x and z)
+//   or at 45 degrees, mirrored or rotational; `slice` names the authored
+//   one (types/symmetry.lua lists the names). The World is finite, and
+//   square where a map turns x into z (a quarter turn, a diagonal's
+//   mirror); an edit turning it on otherwise is refused, why said. On,
+//   what is under it (its sources, each in the authored slice: one put
+//   outside is refused, and so is a kit/wave) has a copy in each other
+//   slice: an authored entity marked {"built": {"by": the kit/symmetry,
+//   "member": source * 8 + slice, "source", "slice"}}, under its source's
+//   parent's copy, made and kept by commit() in the same undo as the edit
+//   (an undo puts the copies back with the rest). A copy's place and turn
+//   are its source's image; a mirror's flips no model: it is the source
+//   turned to the image's facing, flipped along its x, or its z for a
+//   type with a `mirror` space parameter (kit/door: its swing), that
+//   toggled. A source whose image is itself (on a seam, facing along it)
+//   has no copy there. Links and entity parameters to a source become the
+//   same slice's copy's; to elsewhere, the same. A signal from outside
+//   the group to a source reaches each copy too. A copy is edited only by
+//   its parameters (each one set its own, an override, kept as the source
+//   changes; prefab_reset gives it the source's again): a move, a rename,
+//   Add/Remove component, a child, a parent, a delete (but with the
+//   kit/symmetry), a link to or from it are refused. Off or deleted, its
+//   copies go. Entities outside it stay single.
+//   A type's `space` = {<param> = <kind>} says what its parameters are
+//   in space, for the copies: "world" (a position parameter that is a
+//   place or a direction in the world: the image's), "offset" (along its
+//   own axes: flipped with it), "rotation" (degrees round its x, y, z:
+//   mirrored with it), "mirror" (a bool, its own mirror along z:
+//   toggled), "box" (an extent from its corner cell along its axes: the
+//   image's corner), "cells" (a box of the world's cells from its cell:
+//   the image's lowest corner, its sides swapped as x and z are, its
+//   voxels patterns too). Its zone, region, grants and look extent are
+//   "box" and its volume and voxel_box "cells" unless it says. Kit's
+//   types: kit/teleporter to "world", kit/effect axis and offset
+//   "world", kit/mover offset "offset", kit/part rotation "rotation",
+//   kit/door and kit/key_door mirror "mirror"; centred sizes need none.
+//   simplified: a box's image is placed by its entity's first box or
+//   cells parameter; a voxels pattern's shapes keep their facings; a
+//   look's offset (a mover out) is not in a source's place
 //   [KIT] stage 5 **Packages**: component types, prefabs and builders'
 //   voxel types published to Aitta as a package of "kind": "kit"
 //   (doc/aitta.txt). [AITTA_KEY_IDENTITY] A package is its key and its

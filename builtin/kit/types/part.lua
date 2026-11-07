@@ -25,6 +25,8 @@ return {
 		voxel = {cat = "look", type = "voxel", default = "",
 			choices_from = "voxels"},
 	},
+	-- [KIT_SYMMETRY] rotation is its own turn
+	space = {rotation = "rotation"},
 	look = {shape = "param:shape", size = "param:size",
 		rotation = "param:rotation", color = "param:color",
 		material = "param:material", voxel = "param:voxel", solid = "param:collision"},

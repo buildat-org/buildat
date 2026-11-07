@@ -32,6 +32,8 @@ return {
 		sound_open = {cat = "look", type = "sound", default = "kit/door"},
 		sound_close = {cat = "look", type = "sound", default = "kit/door"},
 	},
+	-- [KIT_SYMMETRY] mirror is its mirror along its z
+	space = {mirror = "mirror"},
 	look = {shape = "box", extent = "size", depth = 0.2,
 		voxel = "param:material", color = "#8a5a30",
 		solid = true, state = "open", when = {swing = true,

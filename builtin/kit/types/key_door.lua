@@ -26,6 +26,8 @@ return {
 		key = {type = "string", default = "key"},
 		take = {type = "bool", default = false},
 	},
+	-- [KIT_SYMMETRY] mirror is its mirror along its z
+	space = {mirror = "mirror"},
 	look = {shape = "box", extent = "size", depth = 0.2,
 		voxel = "param:material", color = "#c8a040",
 		solid = true, state = "open", when = {swing = true,

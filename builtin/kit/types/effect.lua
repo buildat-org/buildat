@@ -140,6 +140,8 @@ return {
 	players = true,
 	teams = true,
 	events = "on",
+	-- [KIT_SYMMETRY] axis and offset are the world's
+	space = {axis = "world", offset = "world"},
 	gizmo = {shape = "sphere", size = 0.15, color = "#ffa040"},
 	params = {
 		on = {type = "string", default = "signal", choices = {"signal", "dig",

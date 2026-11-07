@@ -22,6 +22,8 @@ return {
 	look = {shape = "box", size = "param:size", color = "param:color",
 		voxel = "param:material", solid = "param:solid", state = "out",
 		when = {offset = "param:offset", slide = "param:time"}},
+	-- [KIT_SYMMETRY] offset is along its own axes
+	space = {offset = "offset"},
 	params = {
 		offset = {type = "position", default = {0, 2, 0}},
 		time = {type = "number", default = 1, min = 0, max = 600},

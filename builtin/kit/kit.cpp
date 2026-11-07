@@ -27,6 +27,7 @@
 #include "interface/address.h"
 #include "interface/zip.h"
 #include "kit/world.h"
+#include "kit/symmetry.h"
 #include "voxel_objects/api.h"
 #include "client_file/api.h"
 #include <Scene.h>
@@ -128,6 +129,8 @@ static const int MAX_NEST = 16;
 static const char *const PREFAB_ROOT = "kit/prefab_copy";
 // [KIT_COMPONENTS] What moves a free object by a function of the round's time
 static const char *const WAVE_TYPE = "kit/wave";
+// [KIT_SYMMETRY]
+static const char *const SYMMETRY_TYPE = "kit/symmetry";
 static const size_t MAX_LINKS = 64;
 // [KIT_COMPONENTS] Components an entity has at most, by Add component
 static const size_t MAX_COMPONENTS = 16;
@@ -303,6 +306,9 @@ struct Type
 	// box's voxels (reads_voxels = true)
 	ss_ voxel_box;
 	bool reads_voxels = false;
+	// [KIT_SYMMETRY] Its parameters' kinds in space (api.h), as kit/symmetry's
+	// copies take them: declared (space = {}) or of its boxes
+	std::map<ss_, ss_> space;
 };
 
 // [KIT_VOXEL_STATES] A voxel pattern (a "voxels" parameter): a box's
@@ -1833,6 +1839,37 @@ struct Module: public interface::Module, public Interface
 			why = name+": its look's extent names no position parameter";
 			return false;
 		}
+		// [KIT_SYMMETRY] What its parameters are in space (api.h): declared,
+		// and its boxes' by what they are
+		{
+			const json::Value &sp = t.decl.get("space");
+			if(!sp.is_undefined() && !sp.is_object()){
+				why = name+": space is {<param> = <kind>}";
+				return false;
+			}
+			for(json::Iterator it(sp); it; ++it){
+				const ss_ k = (*it).is_string() ? (*it).as_string() : "";
+				const ss_ pt = jstr(t.decl.get("params").get(it.key()), "type");
+				if(k != "world" && k != "offset" && k != "rotation" &&
+						k != "mirror" && k != "box" && k != "cells"){
+					why = name+": space's "+it.key()+": world, offset, rotation, "
+							"mirror, box or cells";
+					return false;
+				}
+				if(pt != (k == "mirror" ? "bool" : "position")){
+					why = name+": space's "+it.key()+" names no "+(k == "mirror" ?
+							"bool" : "position")+" parameter";
+					return false;
+				}
+				t.space[it.key()] = k;
+			}
+			for(const ss_ &b : {t.zone, t.region, t.grants, lx})
+				if(!b.empty() && !t.space.count(b))
+					t.space[b] = "box";
+			for(const ss_ &b : {t.volume, t.voxel_box})
+				if(!b.empty() && !t.space.count(b))
+					t.space[b] = "cells";
+		}
 		t.reads_voxels = t.decl.get("reads_voxels").is_true();
 		if(t.reads_voxels && t.voxel_box.empty()){
 			why = name+": reads_voxels reads its voxel_box, and it has none";
@@ -2338,6 +2375,657 @@ struct Module: public interface::Module, public Interface
 		if(c != 0)
 			j.set("roll", c);
 		return j;
+	}
+
+	// ---- [KIT_SYMMETRY] kit/symmetry (api.h): its sources' copies are
+	// entities commit() keeps as their sources are, each under its source's
+	// parent's copy (or the kit/symmetry), {"by", "member" (source * 8 +
+	// slice), "source", "slice"} its built
+
+	static const Instance *symmetry_in(const Entity &e)
+	{
+		for(const Instance &in : e.comps)
+			if(in.type == SYMMETRY_TYPE)
+				return &in;
+		return nullptr;
+	}
+
+	// The kit/symmetry a copy is of (0: it is none)
+	uint64_t copy_by(const Entity &e)
+	{
+		if(!e.built.is_object() || !e.built.get("slice").is_number())
+			return 0;
+		const uint64_t by = (uint64_t)json::jint(e.built, "by", 0);
+		auto it = m_entities.find(by);
+		return it != m_entities.end() && symmetry_in(it->second) ? by : 0;
+	}
+	uint64_t copy_by(uint64_t id)
+	{
+		auto it = m_entities.find(id);
+		return it == m_entities.end() ? 0 : copy_by(it->second);
+	}
+
+	// The kit/symmetry, on, an entity is a source of (0: none; a copy is
+	// none's)
+	uint64_t sym_source(uint64_t id)
+	{
+		auto it = m_entities.find(id);
+		if(it == m_entities.end() || copy_by(it->second))
+			return 0;
+		for(int i = 0; i <= MAX_NEST + 2; i++){
+			it = m_entities.find(it->second.parent);
+			if(it == m_entities.end() || it->first == 1)
+				return 0;
+			if(const Instance *in = symmetry_in(it->second))
+				return in->params.get("on").is_true() ? it->first : 0;
+		}
+		return 0;
+	}
+
+	// Its slices on its scene's World
+	bool sym_config(const Entity &s, symmetry::Config &c, ss_ &why)
+	{
+		const Instance *in = symmetry_in(s);
+		ss_ scene;
+		scene_of(s, &scene);
+		const World *w = world_named(scene);
+		if(!in || !w){
+			why = "kit/symmetry: its scene has no World";
+			return false;
+		}
+		const json::Value &p = in->params;
+		return symmetry::make(jstr(p, "slices"), jstr(p, "angle"),
+				jstr(p, "mode"), jstr(p, "slice"), w->wp.finite(), w->wp.x0(),
+				w->wp.z0(), w->wp.width, w->wp.depth, c, why);
+	}
+
+	// A source's image by m: its place and turn in the world, its
+	// instances' parameters (their space, api.h). simplified: a mirror's
+	// image is turned from the source flipped along its x (z for a type
+	// with a mirror of its own, kit/door's), its look not flipped; the
+	// first box or cells parameter alone places it
+	void sym_image(const Entity &e, const symmetry::Map &m, double w[3],
+			Turn &q, sv_<json::Value> &params)
+	{
+		AtRest rest(m_at_rest);
+		Turn sq;
+		world_of(e, w, &sq);
+		const int det = m.det();
+		int fx = 1, fz = 1;
+		const Instance *box_in = nullptr, *cells_in = nullptr;
+		ss_ box_p, cells_p;
+		bool own_mirror = false;
+		for(const Instance &in : e.comps)
+			for(auto &s : m_types[in.type].space){
+				own_mirror = own_mirror || s.second == "mirror";
+				if(s.second == "box" && !box_in){
+					box_in = &in;
+					box_p = s.first;
+				}
+				if(s.second == "cells" && !cells_in){
+					cells_in = &in;
+					cells_p = s.first;
+				}
+			}
+		if(det < 0)
+			(own_mirror ? fz : fx) = -1;
+		const pv::Vector3DInt32 cell((int32_t)std::floor(w[0]),
+				(int32_t)std::floor(w[1]), (int32_t)std::floor(w[2]));
+		// A level box is on its corner cell (box_frame())
+		if(box_in && sq.none()){
+			w[0] = cell.getX();
+			w[2] = cell.getZ();
+		}
+		m.apply(w[0], w[2]);
+		// The turn seen in the mirror, then the turn m with the flip is
+		const Turn c(sq.w, det * (m.a * sq.x + m.b * sq.z), det * sq.y,
+				det * (m.c * sq.x + m.d * sq.z));
+		q = c * Turn::of(std::atan2((double)m.b * fz, (double)m.d * fz) * 180 /
+				3.14159265358979323846);
+		// Flipped, a box from its corner reaches the other way
+		if(det < 0 && box_in){
+			int n[3];
+			extent(box_in->params.get(box_p), n);
+			double s[3] = {fx < 0 ? -(n[0] - 1.0) : 0, 0, fz < 0 ?
+					-(n[2] - 1.0) : 0};
+			q.apply(s);
+			for(int k = 0; k < 3; k++)
+				w[k] += s[k];
+		}
+		// A box of the world's cells: its image's lowest corner
+		int cn[3] = {1, 1, 1}, lo[2] = {0, 0};
+		if(cells_in){
+			extent(cells_in->params.get(cells_p), cn);
+			for(int k = 0; k < 4; k++){
+				int x = cell.getX() + (k & 1 ? cn[0] - 1 : 0),
+						z = cell.getZ() + (k & 2 ? cn[2] - 1 : 0);
+				m.apply(x, z);
+				lo[0] = k ? std::min(lo[0], x) : x;
+				lo[1] = k ? std::min(lo[1], z) : z;
+			}
+			w[0] = lo[0];
+			w[2] = lo[1];
+		}
+		for(int k = 0; k < 3; k++)
+			w[k] += 0.0;
+		params.clear();
+		for(const Instance &in : e.comps){
+			json::Value p = in.params.deepcopy();
+			const Type &t = m_types[in.type];
+			auto vec = [&](const ss_ &k, double v[3]){
+				const json::Value &x = p.get(k);
+				if(!pos_ok(x))
+					return false;
+				for(unsigned i = 0; i < 3; i++)
+					v[i] = x.at(i).as_number();
+				return true;
+			};
+			auto put = [&](const ss_ &k, const double v[3]){
+				json::Value a = json::array();
+				for(int i = 0; i < 3; i++)
+					a.append(v[i] + 0.0);
+				p.set(k, a);
+			};
+			for(auto &s : t.space){
+				double v[3];
+				if(s.second == "mirror"){
+					if(det < 0)
+						p.set(s.first, !p.get(s.first).is_true());
+					continue;
+				}
+				if(!vec(s.first, v))
+					continue;
+				if(s.second == "world"){
+					m.apply(v[0], v[2]);
+				} else if(s.second == "offset" && det < 0){
+					v[0] *= fx;
+					v[2] *= fz;
+				} else if(s.second == "rotation" && det < 0){
+					const Turn r = Turn::of(v[1], v[0], v[2]);
+					Turn(r.w, -fx * r.x, -r.y, -fz * r.z).angles(v[1], v[0], v[2]);
+				} else if(s.second == "cells" && m.swaps()){
+					std::swap(v[0], v[2]);
+				} else {
+					continue;
+				}
+				put(s.first, v);
+			}
+			// A pattern of the box's cells, each where its cell's image is
+			if(&in == cells_in){
+				const json::Value &decl = t.decl.get("params");
+				for(json::Iterator it(decl); decl.is_object() && it; ++it){
+					Pattern pt;
+					ss_ why;
+					if(jstr(*it, "type") != "voxels" || !p.get(it.key()).is_string() ||
+							!parse_pattern(p.get(it.key()).as_string(), pt, why) ||
+							pt.n[0] != cn[0] || pt.n[1] != cn[1] || pt.n[2] != cn[2])
+						continue;
+					int nn[3] = {cn[0], cn[1], cn[2]};
+					if(m.swaps())
+						std::swap(nn[0], nn[2]);
+					sv_<ss_> cells(pt.cells.size());
+					size_t i = 0;
+					for(int y = 0; y < cn[1]; y++)
+						for(int z = 0; z < cn[2]; z++)
+							for(int x = 0; x < cn[0]; x++, i++){
+								int gx = cell.getX() + x, gz = cell.getZ() + z;
+								m.apply(gx, gz);
+								cells[(size_t)(gx - lo[0]) + nn[0] * ((size_t)(gz - lo[1]) +
+										(size_t)nn[2] * y)] = pt.names[pt.cells[i]];
+							}
+					p.set(it.key(), encode_pattern(nn, cells));
+				}
+			}
+			params.push_back(p);
+		}
+	}
+
+	// Each on kit/symmetry's copies made as its sources are now (and those
+	// of one gone or off gone), the rows they were in `before`
+	void symmetries(sv_<std::pair<uint64_t, json::Value>> *before)
+	{
+		std::map<uint64_t, sv_<uint64_t>> kids;
+		sv_<uint64_t> syms;
+		std::map<std::pair<uint64_t, int64_t>, uint64_t> have;
+		sv_<uint64_t> stray;
+		for(auto &p : m_entities){
+			if(p.first != 1)
+				kids[p.second.parent].push_back(p.first);
+			if(symmetry_in(p.second))
+				syms.push_back(p.first);
+			const json::Value &bt = p.second.built;
+			if(!bt.is_object() || !bt.get("slice").is_number())
+				continue;
+			const auto key = std::make_pair((uint64_t)json::jint(bt, "by", 0),
+					json::jint(bt, "member", 0));
+			if(!copy_by(p.second) || have.count(key))
+				stray.push_back(p.first);
+			else
+				have[key] = p.first;
+		}
+		sv_<std::pair<uint64_t, json::Value>> out;
+		std::set<std::pair<uint64_t, int64_t>> wanted;
+		for(uint64_t sid : syms){
+			const Entity &s = m_entities[sid];
+			symmetry::Config c;
+			ss_ why;
+			if(!symmetry_in(s)->params.get("on").is_true())
+				continue;
+			if(!sym_config(s, c, why)){
+				log_w(MODULE, "Entity %s's kit/symmetry copies nothing: %s",
+						cs(itos(sid)), cs(why));
+				continue;
+			}
+			// Its sources, those under others after them
+			sv_<uint64_t> src = kids[sid];
+			for(size_t i = 0; i < src.size(); i++){
+				if(copy_by(src[i])){
+					src.erase(src.begin() + i--);
+					continue;
+				}
+				for(uint64_t k : kids[src[i]])
+					src.push_back(k);
+			}
+			struct Img {
+				uint64_t src = 0;
+				size_t i = 0;
+				double w[3] = {0, 0, 0};
+				Turn q;
+				sv_<json::Value> params;
+			};
+			// Each source's copy in each slice (itself where its image is it)
+			std::map<std::pair<uint64_t, size_t>, uint64_t> copy;
+			std::map<uint64_t, std::pair<std::array<double, 3>, Turn>> pose;
+			sv_<Img> imgs;
+			for(size_t i = 1; i < c.maps.size(); i++)
+				for(uint64_t x : src){
+					const Entity &e = m_entities[x];
+					Img im;
+					im.src = x;
+					im.i = i;
+					sym_image(e, c.maps[i], im.w, im.q, im.params);
+					if(e.has_pos){
+						AtRest rest(m_at_rest);
+						double sw[3];
+						Turn sq;
+						world_of(e, sw, &sq);
+						bool same = std::fabs(std::fabs(sq.w * im.q.w + sq.x * im.q.x +
+								sq.y * im.q.y + sq.z * im.q.z) - 1) < 1e-9;
+						for(int k = 0; k < 3; k++)
+							same = same && std::fabs(sw[k] - im.w[k]) < 1e-6;
+						for(size_t k = 0; k < e.comps.size() && same; k++)
+							same = e.comps[k].params.stringify() ==
+									im.params[k].stringify();
+						if(same){
+							copy[std::make_pair(x, i)] = x;
+							continue;
+						}
+					}
+					const int64_t member = (int64_t)x * 8 + (int64_t)i;
+					wanted.insert(std::make_pair(sid, member));
+					auto h = have.find(std::make_pair(sid, member));
+					const uint64_t id = h != have.end() ? h->second : m_next_id++;
+					copy[std::make_pair(x, i)] = id;
+					pose[id] = std::make_pair(std::array<double, 3>{{im.w[0],
+							im.w[1], im.w[2]}}, im.q);
+					imgs.push_back(im);
+				}
+			for(const Img &im : imgs){
+				const Entity &e = m_entities[im.src];
+				const uint64_t id = copy[std::make_pair(im.src, im.i)];
+				json::Value row = entity_json(e).deepcopy();
+				row.set("id", (int64_t)id);
+				row.del_key("prefab");
+				auto pc = copy.find(std::make_pair(e.parent, im.i));
+				const uint64_t parent = pc != copy.end() ? pc->second : e.parent;
+				row.set("parent", (int64_t)parent);
+				row.set("name", e.name+" (copy "+itos(im.i)+")");
+				json::Value bt = json::object();
+				bt.set("by", (int64_t)sid);
+				bt.set("member", (int64_t)im.src * 8 + (int64_t)im.i);
+				bt.set("source", (int64_t)im.src);
+				bt.set("slice", (int64_t)im.i);
+				row.set("built", bt);
+				if(e.has_pos){
+					double o[3], l[3];
+					Turn pq;
+					auto pp = pose.find(parent);
+					if(pp != pose.end()){
+						for(int k = 0; k < 3; k++)
+							o[k] = pp->second.first[k];
+						pq = pp->second.second;
+					} else {
+						AtRest rest(m_at_rest);
+						frame_of(parent, o, pq);
+					}
+					for(int k = 0; k < 3; k++)
+						l[k] = im.w[k] - o[k];
+					pq.inverse().apply(l);
+					json::Value pos = json::array();
+					for(int k = 0; k < 3; k++)
+						pos.append(grid(l[k]) + 0.0);
+					row.set("pos", pos);
+					row.del_key("pitch");
+					row.del_key("roll");
+					row_turn(row, pq.inverse() * im.q);
+				}
+				auto ex = m_entities.find(id);
+				json::Value cs_ = json::array();
+				for(size_t k = 0; k < e.comps.size(); k++){
+					const Instance &in = e.comps[k];
+					json::Value cj = row.get("components").at((unsigned)k).deepcopy();
+					json::Value p = im.params[k];
+					// Its entities and links: the same slice's copies of
+					// sources, the others the same
+					const json::Value &decl = m_types[in.type].decl.get("params");
+					for(json::Iterator it(decl); decl.is_object() && it; ++it){
+						if(jstr(*it, "type") != "entity" || !p.get(it.key()).is_number())
+							continue;
+						auto to = copy.find(std::make_pair((uint64_t)
+								p.get(it.key()).as_number(), im.i));
+						if(to != copy.end())
+							p.set(it.key(), (int64_t)to->second);
+					}
+					json::Value ls = json::array();
+					const json::Value &was = cj.get("links");
+					for(unsigned m = 0; m < was.size(); m++){
+						json::Value l = was.at(m).deepcopy();
+						auto to = copy.find(std::make_pair((uint64_t)json::jint(l,
+								"to", 0), im.i));
+						if(to != copy.end())
+							l.set("to", (int64_t)to->second);
+						ls.append(l);
+					}
+					cj.set("links", ls);
+					// What a builder set on this copy stays its own
+					cj.del_key("overrides");
+					if(ex != m_entities.end())
+						for(const Instance &xin : ex->second.comps){
+							if(xin.type != in.type || xin.overrides.empty())
+								continue;
+							json::Value ov = json::array();
+							for(const ss_ &o : xin.overrides){
+								p.set(o, xin.params.get(o));
+								ov.append(o);
+							}
+							cj.set("overrides", ov);
+						}
+					cj.set("params", p);
+					cs_.append(cj);
+				}
+				row.set("components", cs_);
+				if(ex == m_entities.end() || entity_json(ex->second).stringify() !=
+						row.stringify()){
+					out.push_back(std::make_pair(id, row));
+					double a, b, cr;
+					im.q.angles(a, b, cr);
+					log_v(MODULE, "kit/symmetry %s: copy %s of %s, slice %zu: at "
+							"%.4f,%.4f,%.4f turned %.4f,%.4f,%.4f: %s", cs(itos(sid)),
+							cs(itos(id)), cs(itos(im.src)), im.i, im.w[0], im.w[1],
+							im.w[2], a, b, cr, cs(cs_.stringify()));
+				}
+			}
+		}
+		for(auto &h : have)
+			if(!wanted.count(h.first))
+				out.push_back(std::make_pair(h.second, json::null()));
+		for(uint64_t id : stray)
+			out.push_back(std::make_pair(id, json::null()));
+		if(out.empty())
+			return;
+		for(auto &o : out)
+			if(!o.second.is_null())
+				m_pending_ids.insert(o.first);
+		size_t made = 0, gone = 0;
+		std::set<uint64_t> had;
+		if(before)
+			for(auto &b : *before)
+				had.insert(b.first);
+		for(auto &o : ordered(out)){
+			auto it = m_entities.find(o.first);
+			if(before && had.insert(o.first).second)
+				before->push_back(std::make_pair(o.first, it == m_entities.end() ?
+						json::null() : entity_json(it->second)));
+			// One under a copy gone is gone with it
+			if(o.second.is_null() && it == m_entities.end())
+				continue;
+			apply(o.first, o.second);
+			(o.second.is_null() ? gone : made)++;
+		}
+		log_i(MODULE, "kit/symmetry: %zu copies made or changed, %zu gone",
+				made, gone);
+	}
+
+	// Whether an edit may be: a copy changes only by what a builder sets
+	// on it (an override; its source's edits make the rest) and goes only
+	// with its kit/symmetry, nothing goes under a copy or links to one
+	// newly, a source of an on kit/symmetry stays in its authored slice
+	// (kit/wave none); a kit/symmetry stands at its World's middle (put
+	// there), level, under its scene, one a scene
+	bool sym_check(sv_<std::pair<uint64_t, json::Value>> &change, ss_ &why)
+	{
+		std::set<uint64_t> gone;
+		std::map<uint64_t, json::Value> rows;
+		for(auto &c : change)
+			if(c.second.is_null())
+				gone.insert(c.first);
+		auto bare = [](const json::Value &r0){
+			json::Value r = r0.deepcopy();
+			r.del_key("built");
+			json::Value cs_ = json::array();
+			const json::Value &was = r.get("components");
+			for(unsigned k = 0; k < was.size(); k++){
+				json::Value cj = was.at(k).deepcopy();
+				cj.del_key("params");
+				cj.del_key("overrides");
+				cj.del_key("version");
+				cs_.append(cj);
+			}
+			r.set("components", cs_);
+			return r.stringify();
+		};
+		auto has_sym = [&](const json::Value &row, bool *on){
+			const json::Value &cs_ = row.get("components");
+			for(unsigned k = 0; k < cs_.size(); k++)
+				if(full_type(jstr(cs_.at(k), "type")) == SYMMETRY_TYPE){
+					if(on)
+						*on = cs_.at(k).get("params").get("on").is_true();
+					return true;
+				}
+			return false;
+		};
+		for(auto &c : change){
+			auto ei = m_entities.find(c.first);
+			const uint64_t by = ei == m_entities.end() ? 0 : copy_by(ei->second);
+			if(by){
+				if(c.second.is_null() ? !gone.count(by) :
+						bare(c.second) != bare(entity_json(ei->second))){
+					why = "entity "+itos(c.first)+" is kit/symmetry "+itos(by)+
+							"'s copy of entity "+itos((uint64_t)json::jint(
+							ei->second.built, "source", 0))+": edit its source "
+							"(only parameters set on a copy are its own)";
+					return false;
+				}
+				if(!c.second.is_null())
+					rows[c.first] = c.second;
+				continue;
+			}
+			if(c.second.is_null())
+				continue;
+			json::Value &row = c.second;
+			// A copy's duplicate is no copy
+			if(row.get("built").is_object() && row.get("built").get("slice").
+					is_number())
+				row.del_key("built");
+			const uint64_t parent = (uint64_t)json::jint(row, "parent", 1);
+			if(copy_by(parent)){
+				why = "entity "+itos(parent)+" is a kit/symmetry copy: nothing "
+						"goes under it (put it under the source)";
+				return false;
+			}
+			const json::Value &cs_ = row.get("components");
+			for(unsigned k = 0; k < cs_.size(); k++){
+				const json::Value &ls = cs_.at(k).get("links");
+				for(unsigned m = 0; m < ls.size(); m++){
+					const uint64_t to = (uint64_t)json::jint(ls.at(m), "to", 0);
+					if(!copy_by(to))
+						continue;
+					bool had = false;
+					if(ei != m_entities.end())
+						for(const Instance &in : ei->second.comps)
+							for(const Link &l : in.links)
+								had = had || l.to == to;
+					if(!had){
+						why = "entity "+itos(to)+" is a kit/symmetry copy: link "
+								"to its source (a link from outside reaches each "
+								"copy)";
+						return false;
+					}
+				}
+			}
+			bool on = false;
+			if(has_sym(row, &on)){
+				json::Value pos = json::array();
+				pos.append(0.0);
+				pos.append(pos_ok(row.get("pos")) ? row.get("pos").at(1u) :
+						json::Value(0.0));
+				pos.append(0.0);
+				row.set("pos", pos);
+				row.set("yaw", 0.0);
+				row.del_key("pitch");
+				row.del_key("roll");
+				auto pi = m_entities.find(parent);
+				if(pi == m_entities.end() || pi->second.kind != "scene"){
+					why = "kit/symmetry goes right under its scene";
+					return false;
+				}
+				for(auto &p : m_entities)
+					if(p.first != c.first && p.second.parent == parent &&
+							!gone.count(p.first) && symmetry_in(p.second)){
+						why = "its scene has kit/symmetry "+itos(p.first)+
+								" already: one a scene";
+						return false;
+					}
+				Entity n;
+				symmetry::Config cf;
+				if(on && (!entity_from_json(row, n, why) || !sym_config(n, cf,
+						why)))
+					return false;
+			}
+			rows[c.first] = row;
+		}
+		// The sources as the edit leaves them: each row's under an on
+		// kit/symmetry, and those under them
+		auto parent_of = [&](uint64_t id) -> uint64_t {
+			auto r = rows.find(id);
+			if(r != rows.end())
+				return (uint64_t)json::jint(r->second, "parent", 1);
+			auto it = m_entities.find(id);
+			return it == m_entities.end() ? 0 : it->second.parent;
+		};
+		std::map<uint64_t, sv_<uint64_t>> kids;
+		for(auto &p : m_entities)
+			if(p.first != 1 && !rows.count(p.first) && !gone.count(p.first))
+				kids[p.second.parent].push_back(p.first);
+		for(auto &r : rows)
+			kids[parent_of(r.first)].push_back(r.first);
+		sv_<uint64_t> look;
+		for(auto &r : rows)
+			look.push_back(r.first);
+		std::set<uint64_t> seen;
+		for(size_t i = 0; i < look.size(); i++)
+			if(seen.insert(look[i]).second)
+				for(uint64_t k : kids[look[i]])
+					look.push_back(k);
+		// A place in the world as the edit leaves it (simplified: a look's
+		// offset, a mover's out, left out)
+		std::function<bool(uint64_t, double *, Turn &, int)> at =
+				[&](uint64_t id, double *w, Turn &q, int d){
+			double v[3] = {0, 0, 0};
+			Turn own;
+			auto r = rows.find(id);
+			if(r != rows.end()){
+				const json::Value &p = r->second.get("pos");
+				if(!pos_ok(p))
+					return false;
+				for(unsigned k = 0; k < 3; k++)
+					v[k] = p.at(k).as_number();
+				own = Turn::of(row_num(r->second, "yaw"), row_num(r->second,
+						"pitch"), row_num(r->second, "roll"));
+			} else {
+				auto it = m_entities.find(id);
+				if(it == m_entities.end() || !it->second.has_pos)
+					return false;
+				for(int k = 0; k < 3; k++)
+					v[k] = it->second.pos[k];
+				own = Turn::of(it->second);
+			}
+			double o[3] = {0, 0, 0};
+			Turn pq;
+			if(d < MAX_NEST + 2)
+				at(parent_of(id), o, pq, d + 1);
+			pq.apply(v);
+			for(int k = 0; k < 3; k++)
+				w[k] = o[k] + v[k];
+			q = pq * own;
+			return true;
+		};
+		std::map<uint64_t, std::pair<bool, symmetry::Config>> cfgs;
+		for(uint64_t id : seen){
+			// Its kit/symmetry, if on
+			uint64_t sid = 0, a = id;
+			bool is_copy = copy_by(id) != 0;
+			for(int i = 0; i <= MAX_NEST + 2 && a > 1 && !sid; i++){
+				a = parent_of(a);
+				auto r = rows.find(a);
+				auto it = m_entities.find(a);
+				if(r != rows.end() ? has_sym(r->second, nullptr) :
+						it != m_entities.end() && symmetry_in(it->second))
+					sid = a;
+			}
+			if(!sid || is_copy || gone.count(id))
+				continue;
+			if(!cfgs.count(sid)){
+				auto r = rows.find(sid);
+				Entity n;
+				bool on = false;
+				ss_ w2;
+				if(r != rows.end()){
+					has_sym(r->second, &on);
+					if(on && !entity_from_json(r->second, n, w2))
+						on = false;
+				} else {
+					n = m_entities[sid];
+					on = symmetry_in(n)->params.get("on").is_true();
+				}
+				symmetry::Config cf;
+				cfgs[sid] = std::make_pair(on && sym_config(n, cf, w2), cf);
+			}
+			const auto &cf = cfgs[sid];
+			if(!cf.first)
+				continue;
+			auto r = rows.find(id);
+			const json::Value row = r != rows.end() ? r->second :
+					entity_json(m_entities[id]);
+			const json::Value &cs_ = row.get("components");
+			for(unsigned k = 0; k < cs_.size(); k++)
+				if(full_type(jstr(cs_.at(k), "type")) == WAVE_TYPE){
+					why = "entity "+itos(id)+": a moving object (kit/wave) is "
+							"not copied by kit/symmetry "+itos(sid)+": put it "
+							"outside it";
+					return false;
+				}
+			double w[3];
+			Turn q;
+			if(at(id, w, q, 0) && !cf.second.in(w[0], w[2])){
+				char b[64];
+				snprintf(b, sizeof b, "%g, %g", w[0], w[2]);
+				why = "entity "+itos(id)+" at "+b+" is outside kit/symmetry "+
+						itos(sid)+"'s authored slice "+cf.second.slice;
+				return false;
+			}
+		}
+		return true;
 	}
 
 	// Whether an entity's place in the tree may be: under one that is
@@ -9442,7 +10130,21 @@ struct Module: public interface::Module, public Interface
 						pf->second.append(f);
 					}
 				}
-				deliver(l.to, l.input, value, r.by, r.hops + 1, e.id, output);
+				const uint64_t from = e.id, to = l.to;
+				const ss_ input = l.input;
+				deliver(to, input, value, r.by, r.hops + 1, from, output);
+				// [KIT_SYMMETRY] from outside its group, to each copy too
+				// (simplified: a scan of the entities each such signal)
+				const uint64_t sid = sym_source(to);
+				if(sid && sym_source(from) != sid && copy_by(from) != sid){
+					sv_<uint64_t> copies;
+					for(auto &x : m_entities)
+						if(copy_by(x.second) == sid && (uint64_t)json::jint(
+								x.second.built, "source", 0) == to)
+							copies.push_back(x.first);
+					for(uint64_t c : copies)
+						deliver(c, input, value, r.by, r.hops + 1, from, output);
+				}
 			}
 		}
 		// [KIT_TRY_INPUTS] The Try's answer: what it emitted, nothing too
@@ -11748,6 +12450,28 @@ struct Module: public interface::Module, public Interface
 		if(!in)
 			return false;
 		const uint64_t by = (uint64_t)json::jint(e->built, "by", 0);
+		// [KIT_SYMMETRY] a copy's: commit() gives it its source's again
+		if(copy_by(*e)){
+			const ss_ param = jstr(j, "param");
+			if(!in->overrides.count(param)){
+				why = "its "+param.substr(0, 64)+" is not its own";
+				return false;
+			}
+			const json::Value row = entity_json(*e).deepcopy();
+			json::Value cs_ = row.get("components");
+			json::Value cj = cs_.at((unsigned)(in - &e->comps[0]));
+			json::Value ov = json::array();
+			for(const ss_ &o : in->overrides)
+				if(o != param)
+					ov.append(o);
+			cj.set("overrides", ov);
+			cs_.set_at((unsigned)(in - &e->comps[0]), cj);
+			json::Value out = row;
+			out.set("components", cs_);
+			change.push_back(std::make_pair(e->id, out));
+			what = "entity "+itos(e->id)+"'s "+param+" its source's again";
+			return true;
+		}
 		auto ri = m_entities.find(by);
 		if(ri == m_entities.end() || !is_root(ri->second)){
 			why = "entity "+itos(e->id)+" is no prefab's member";
@@ -12419,7 +13143,8 @@ struct Module: public interface::Module, public Interface
 			if(c.second.is_null() || !c.second.get("built").is_object())
 				continue;
 			auto it = m_entities.find(c.first);
-			if(it == m_entities.end())
+			// [KIT_SYMMETRY] a copy is its source's, not built
+			if(it == m_entities.end() || copy_by(it->second))
 				continue;
 			const Entity &o = it->second;
 			if((uint64_t)json::jint(c.second, "parent", 0) != o.parent){
@@ -12475,6 +13200,8 @@ struct Module: public interface::Module, public Interface
 			if(!entity_from_json(c.second, n, bad))
 				continue;
 			auto it = m_entities.find(n.id);
+			if(it != m_entities.end() && copy_by(it->second))
+				continue;
 			for(size_t ci = 0; ci < n.comps.size(); ci++){
 				if(!m_types[n.comps[ci].type].handlers.count("on_build"))
 					continue;
@@ -21585,7 +22312,7 @@ struct Module: public interface::Module, public Interface
 		m_bench_saved.clear();
 		const uint64_t next0 = m_next_id;
 		if(!build_change(op, j, p, change, what, why) ||
-				!rebuilds(change, p, what, why)){
+				!rebuilds(change, p, what, why) || !sym_check(change, why)){
 			m_paste.set = false;
 			m_follow.clear();
 			// [KIT_GENERATORS] a build refused: its ids not taken
@@ -22517,6 +23244,10 @@ struct Module: public interface::Module, public Interface
 			}
 			apply(c.first, c.second);
 		}
+		// [KIT_SYMMETRY] the copies as their sources are now, one undo (an
+		// undo's rows have them already)
+		if(undo)
+			symmetries(&back.before);
 		m_pending_ids.clear();
 		if(undo){
 			undo->push_back(back);

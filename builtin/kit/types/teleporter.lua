@@ -22,6 +22,8 @@ return {
 	version = 1,
 	usable = true,
 	zone = "pad",
+	-- [KIT_SYMMETRY] to is a place in the world
+	space = {to = "world"},
 	look = {shape = "sphere", size = 0.35, color = "#8050ff"},
 	params = {
 		to = {type = "position", default = {0, 1, 0}},
