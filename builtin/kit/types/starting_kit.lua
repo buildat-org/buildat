@@ -18,6 +18,8 @@ end
 return {
 	version = 1,
 	no_position = true,
+	-- (it reads the team it is under: not a component on one)
+	component = false,
 	params = {
 		items = {type = "string", default = "kit/pickaxe, kit/stone 20",
 			choices_from = "item_list"},

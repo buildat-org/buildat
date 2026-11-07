@@ -126,7 +126,11 @@ static const size_t MAX_ENTITIES = 4096;
 static const int MAX_NEST = 16;
 // [KIT_PREFAB_ROOT] What a placed prefab's members are under
 static const char *const PREFAB_ROOT = "kit/prefab_copy";
+// [KIT_COMPONENTS] What moves a free object by a function of the round's time
+static const char *const WAVE_TYPE = "kit/wave";
 static const size_t MAX_LINKS = 64;
+// [KIT_COMPONENTS] Components an entity has at most, by Add component
+static const size_t MAX_COMPONENTS = 16;
 // [KIT] stage 4g: the builders' voxel types and uploaded textures a save
 // has at most, and what an upload may be
 static const size_t MAX_VOXEL_TYPES = 256, MAX_TEXTURES = 256;
@@ -1907,6 +1911,18 @@ struct Module: public interface::Module, public Interface
 		return false;
 	}
 
+	// [KIT_COMPONENTS] Whether a type goes on an entity through the inspector's
+	// Add component: one without a place (api.h)
+	bool addable(const ss_ &type)
+	{
+		const auto t = m_types.find(type);
+		if(t == m_types.end())
+			return false;
+		const json::Value &c = t->second.decl.get("component");
+		return c.is_boolean() ? c.as_boolean() : t->second.placeable ||
+				(t->second.no_position && !t->second.decl.get("ui").is_object());
+	}
+
 	// Whether it has a node: one with no position's is its shared state's and
 	// its HUD element's alone, nothing drawn in the world
 	bool wants_node(const Entity &e)
@@ -2100,14 +2116,14 @@ struct Module: public interface::Module, public Interface
 	// (motion_t()), so that the clients compute the same and no pose is sent. On each
 	// side it is the object's place and turn over its row's; move.lua's M.link_at says
 	// the same in the world, and that is the one a body steps with. Running only.
-	// kit/prefab_copy's parameters when this entity's object moves; nullptr: it is
-	// where its row says
+	// [KIT_COMPONENTS] kit/wave's parameters when this entity's object moves; nullptr:
+	// it is where its row says
 	const json::Value* motion_of(const Entity &e)
 	{
 		if(!m_session.running || !is_root(e) || !m_free_objects.count(e.id))
 			return nullptr;
 		for(const Instance &in : e.comps){
-			if(in.type != PREFAB_ROOT)
+			if(in.type != WAVE_TYPE)
 				continue;
 			const json::Value &p = in.params;
 			for(const char *k : {"wave_roll", "wave_pitch", "wave_yaw", "wave_heave"})
@@ -3204,9 +3220,9 @@ struct Module: public interface::Module, public Interface
 		} else if(ty.world && m_host.world_scene.empty()){
 			// [KIT] stage 4e: no World where the app has none
 		} else if(!m_host.controls && (ty.decl.get("controls").is_true() ||
-				ty.decl.get("movement").is_object())){
-			// [KIT] stage 4h: the controls and the movements where the
-			// app has Kit's controls
+				ty.decl.get("movement").is_object() || ty.decl.get("seat").is_true())){
+			// [KIT] stage 4h: the controls, the movements and the seats where
+			// the app has Kit's controls
 		} else {
 			m_palette.insert(t);
 		}
@@ -8708,7 +8724,7 @@ struct Module: public interface::Module, public Interface
 			// (a seat: taken by a use, [KIT] stage 4h)
 			// ([KIT_USE_ACCESS] "locked": its use is nobody's, a click
 			// told so)
-			if(use_kind(in)){
+			if(use_kind(e, in)){
 				if(jstr(in.params, "use") != "nobody")
 					show.set("usable", true);
 				else if(!show.get("usable").is_true())
@@ -12284,11 +12300,16 @@ struct Module: public interface::Module, public Interface
 			}
 			row.set("built", bt);
 			json::Value cs_ = row.get("components");
-			for(unsigned c = 0; c < cs_.size() && c < oe.comps.size(); c++){
-				const Instance &oi = oe.comps[c];
+			// [KIT_COMPONENTS] by its type: the prefab's may have gained or lost others
+			for(unsigned c = 0; c < cs_.size(); c++){
 				json::Value cj = cs_.at(c);
-				if(full_type(jstr(cj, "type")) != oi.type)
+				auto oit = std::find_if(oe.comps.begin(), oe.comps.end(),
+						[&](const Instance &x){
+					return x.type == full_type(jstr(cj, "type"));
+				});
+				if(oit == oe.comps.end())
 					continue;
+				const Instance &oi = *oit;
 				json::Value params = cj.get("params").is_object() ?
 						cj.get("params") : json::object();
 				json::Value ov = json::array();
@@ -14543,6 +14564,15 @@ struct Module: public interface::Module, public Interface
 		return t.decl.get("movement").is_object() && t.handlers.count("step");
 	}
 
+	// [KIT_COMPONENTS] An entity's one movement (nullptr: none)
+	const Instance* movement_on(const Entity &e)
+	{
+		for(const Instance &in : e.comps)
+			if(is_movement(in.type))
+				return &in;
+		return nullptr;
+	}
+
 	// The first instance of a type on the app root (nullptr: none)
 	const Instance* root_instance(const ss_ &type)
 	{
@@ -14597,12 +14627,11 @@ struct Module: public interface::Module, public Interface
 		if(b.seat){
 			auto it = m_entities.find(b.seat);
 			if(it != m_entities.end())
-				for(const Instance &in : it->second.comps)
-					if(is_movement(in.type)){
-						type = in.type;
-						params = params_of(in.type, &in);
-						return;
-					}
+				if(const Instance *in = movement_on(it->second)){
+					type = in->type;
+					params = params_of(in->type, in);
+					return;
+				}
 		}
 		type = jstr(controls_params(), "movement", "kit/walker");
 		if(!is_movement(type)){
@@ -14796,7 +14825,7 @@ struct Module: public interface::Module, public Interface
 				Entity &e = it->second;
 				// [KIT_NESTING] the body's place is the world's
 				// simplified: a vehicle stays level in the world under a tilted
-				// parent; a pose of its own comes with 4r5's movement
+				// parent; a pose of its own comes with 4r6's movements
 				double w[3];
 				Turn wq;
 				world_of(e, w, &wq);
@@ -15300,6 +15329,13 @@ struct Module: public interface::Module, public Interface
 			auto pi = m_peers.find(bp.first);
 			if(!b.put || pi == m_peers.end())
 				continue;
+			// [KIT_COMPONENTS] An edit took the seat or the movement off (or the
+			// entity away) under its holder
+			if(b.seat){
+				auto si = m_entities.find(b.seat);
+				if(si == m_entities.end() || !has_seat(si->second))
+					unseat(bp.first, b);
+			}
 			// An edit changed the movement or its parameters: put again where
 			// it is, so the client steps on with the same
 			ss_ type;
@@ -15405,11 +15441,20 @@ struct Module: public interface::Module, public Interface
 	// Possession: a seat (a type with `seat = true` and a movement) used
 	// takes the player's controls until they leave it ("kit:exit")
 	// What a use reaches on it: an on_use, or a seat ([KIT] stage 4h)
-	bool use_kind(const Instance &in)
+	bool use_kind(const Entity &e, const Instance &in)
 	{
 		const Type &ty = m_types[in.type];
 		return ty.usable && (ty.handlers.count("on_use") || (m_host.controls &&
-				ty.decl.get("seat").is_true() && is_movement(in.type)));
+				ty.decl.get("seat").is_true() && movement_on(e)));
+	}
+
+	// [KIT_COMPONENTS] Whether a player can hold it: a seat and a movement on it
+	bool has_seat(const Entity &e)
+	{
+		for(const Instance &in : e.comps)
+			if(m_types[in.type].decl.get("seat").is_true())
+				return movement_on(e) != nullptr;
+		return false;
 	}
 
 	// [KIT_USE_ACCESS] Whether a placed peer may use an instance by its
@@ -15484,11 +15529,8 @@ struct Module: public interface::Module, public Interface
 		Turn wq;
 		world_of(e, w, &wq);
 		const double a = wq.yaw() * 3.14159265358979323846 / 180;
-		double r = 1;
-		for(const Instance &in : e.comps)
-			if(is_movement(in.type))
-				r = num(body_decl(in.type), "r", 1, 0.05, 8);
-		const double d = r + 1;
+		const Instance *mv = movement_on(e);
+		const double d = (mv ? num(body_decl(mv->type), "r", 1, 0.05, 8) : 1) + 1;
 		double x = w[0] + std::cos(a) * d, z = w[2] - std::sin(a) * d;
 		const double y = std::floor(w[1] + 0.5);
 		put_body(peer, b, x, y, z);
@@ -15640,7 +15682,7 @@ struct Module: public interface::Module, public Interface
 		bool any = false, seated = false;
 		for(size_t i = 0; i < e2.comps.size(); i++){
 			const Instance &in = e2.comps[i];
-			if(!use_kind(in))
+			if(!use_kind(e2, in))
 				continue;
 			if(!may_use(peer, e2, in, &why))
 				continue;
@@ -15655,7 +15697,7 @@ struct Module: public interface::Module, public Interface
 			}
 			// [KIT] stage 4h: a seat taken
 			if(!seated && m_host.controls && m_types[in.type].decl.get("seat").
-					is_true() && is_movement(in.type) && m_bodies[peer].put &&
+					is_true() && movement_on(e2) && m_bodies[peer].put &&
 					m_bodies[peer].seat != id){
 				seat(peer, id);
 				seated = any = true;
@@ -21109,9 +21151,12 @@ struct Module: public interface::Module, public Interface
 				for(const char *k : {"params", "inputs", "outputs", "gizmo",
 						"usable", "zone", "volume", "grants", "region", "voxel_box", "version",
 						"inventory", "root", "no_position", "inputs_types", "outputs_types",
-						"inputs_labels", "outputs_labels", "player", "ui", "about"})
+						"inputs_labels", "outputs_labels", "player", "ui", "about", "seat",
+						"movement"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
+				if(addable(t))
+					o.set("addable", true);
 				pal.set(t, o);
 			}
 			// The composition's types that are not in the palette, too:
@@ -21123,9 +21168,11 @@ struct Module: public interface::Module, public Interface
 					for(const char *k : {"params", "inputs", "outputs", "gizmo",
 							"zone", "volume", "grants", "region", "voxel_box", "version", "inventory",
 							"root", "no_position", "inputs_types", "outputs_types", "inputs_labels",
-							"outputs_labels", "player", "ui", "about"})
+							"outputs_labels", "player", "ui", "about", "seat", "movement"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
+					if(addable(t.first))
+						o.set("addable", true);
 					types.set(t.first, o);
 				}
 			// [KIT] stage 4h: the controls, the movements and the seats
@@ -21134,7 +21181,8 @@ struct Module: public interface::Module, public Interface
 			for(int last = 0; last < 2; last++)
 				for(const ss_ &t : m_palette){
 					const json::Value &d = m_types[t].decl;
-					if((d.get("controls").is_true() ||
+					// [KIT_COMPONENTS] (one that only goes on an entity: its inspector's)
+					if(!d.get("component").is_true() && (d.get("controls").is_true() ||
 							d.get("movement").is_object()) == (last == 1))
 						names.append(t);
 				}
@@ -22001,6 +22049,10 @@ struct Module: public interface::Module, public Interface
 				why = "no type \""+type.substr(0, 64)+"\" in the palette";
 				return false;
 			}
+			if(m_types[type].decl.get("component").is_true()){
+				why = type+" has no place: add it to an entity";
+				return false;
+			}
 			if(!pos_ok(j.get("pos"))){
 				why = "pos: three numbers within "+itos((int)MAX_COORD);
 				return false;
@@ -22168,6 +22220,8 @@ struct Module: public interface::Module, public Interface
 			what = "renamed "+itos(e->id)+" to "+name;
 			return true;
 		}
+		if(op == "add_component" || op == "remove_component")
+			return component_change(op, j, change, what, why);
 		if(op == "duplicate")
 			return duplicate(j, p, change, what, why);
 		if(op == "parent")
@@ -22324,6 +22378,91 @@ struct Module: public interface::Module, public Interface
 		return false;
 	}
 
+	// [KIT_COMPONENTS] {"op": "add_component", "id", "type"} and {"op":
+	// "remove_component", "id", "comp"}: a component without a place on an entity, or
+	// off it. A type once an entity, so (entity, type) names a component whatever is
+	// added or removed beside it; a comp index is as the state last said.
+	bool component_change(const ss_ &op, const json::Value &j,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what, ss_ &why)
+	{
+		Entity *e = entity_arg(j, "id", why);
+		if(!e)
+			return false;
+		if(!e->kind.empty()){
+			why = "entity "+itos(e->id)+" is a "+e->kind;
+			return false;
+		}
+		if(!e->built.is_undefined()){
+			why = "entity "+itos(e->id)+" is built by "+itos((uint64_t)json::jint(
+					e->built, "by", 0))+": its components are its prefab's or generator's";
+			return false;
+		}
+		Entity copy = *e;
+		if(op == "remove_component"){
+			Entity *e2 = nullptr;
+			Instance *in = instance_arg(j, e2, why);
+			if(!in)
+				return false;
+			if(!addable(in->type)){
+				why = in->type+" has a place: it is what the entity is";
+				return false;
+			}
+			if(e->comps.size() < 2){
+				why = "it is the entity's last component: delete the entity";
+				return false;
+			}
+			what = "removed "+in->type+" from "+itos(e->id);
+			copy.comps.erase(copy.comps.begin() + (in - &e->comps[0]));
+			change.push_back(std::make_pair(e->id, entity_json(copy)));
+			return true;
+		}
+		const ss_ type = jstr(j, "type");
+		if(!m_palette.count(type) || !addable(type)){
+			why = "no component \""+type.substr(0, 64)+"\" to add";
+			return false;
+		}
+		if(e->comps.size() >= MAX_COMPONENTS){
+			why = "an entity has "+itos(MAX_COMPONENTS)+" components at most";
+			return false;
+		}
+		for(const Instance &in : e->comps)
+			if(in.type == type){
+				why = "entity "+itos(e->id)+" has a "+type;
+				return false;
+			}
+		if(m_types[type].decl.get("component").is_true() && !e->has_pos){
+			why = type+" needs a place: entity "+itos(e->id)+" has none";
+			return false;
+		}
+		if(is_movement(type)){
+			if(const Instance *mv = movement_on(*e)){
+				why = "entity "+itos(e->id)+" has a movement: "+mv->type;
+				return false;
+			}
+			// simplified: a free object's model and shape go where its row says at an
+			// edit, and clients are told once; a steered pose in the time stamps'
+			// scheme is stage 4r6's, which takes this out
+			if(is_free(*e)){
+				why = "a free object is not driven yet (a stamped copy's root is)";
+				return false;
+			}
+		}
+		if(type == WAVE_TYPE && !is_root(*e)){
+			why = type+" goes on a placed prefab's root";
+			return false;
+		}
+		Instance in;
+		in.type = type;
+		const json::Value &decl = m_types[type].decl.get("params");
+		if(decl.is_object())
+			for(json::Iterator it(decl); it; ++it)
+				in.params.set(it.key(), (*it).get("default"));
+		copy.comps.push_back(in);
+		change.push_back(std::make_pair(e->id, entity_json(copy)));
+		what = "added "+type+" to "+itos(e->id);
+		return true;
+	}
+
 	// The entities as the change has them, live: their nodes, runtime state
 	// and owned voxels follow, the authored row is saved, and each editor
 	// is sent the tree. undo: the editor's, which gets what puts it back.
@@ -22345,6 +22484,30 @@ struct Module: public interface::Module, public Interface
 			if(c.second.is_null() && m_session.running &&
 					m_entities.count(c.first))
 				run_now(c.first, "on_remove", "app");
+		// [KIT_COMPONENTS] and a removed component's
+		for(const auto &c : change){
+			auto ei = m_entities.find(c.first);
+			if(c.second.is_null() || !m_session.running || ei == m_entities.end())
+				continue;
+			const json::Value &cs_ = c.second.get("components");
+			for(size_t i = ei->second.comps.size(); i-- > 0;){
+				const ss_ type = ei->second.comps[i].type;
+				bool kept = false;
+				for(unsigned k = 0; k < cs_.size() && !kept; k++)
+					kept = full_type(jstr(cs_.at(k), "type")) == type;
+				if(kept || !m_types[type].handlers.count("on_remove"))
+					continue;
+				Run r;
+				r.entity = c.first;
+				r.comp = i;
+				r.handler = "on_remove";
+				r.by = "app";
+				run(r);
+				ei = m_entities.find(c.first);
+				if(ei == m_entities.end() || i > ei->second.comps.size())
+					break;
+			}
+		}
 		for(const auto &c : change){
 			if(undo){
 				auto it = m_entities.find(c.first);
@@ -22431,6 +22594,36 @@ struct Module: public interface::Module, public Interface
 		});
 	}
 
+	// [KIT_COMPONENTS] What names an instance of `id` by its number, as an edit
+	// moves them (same: each new number's old): the queued runs (one of an instance
+	// gone, dropped), what it made and its sessions
+	void renumber(uint64_t id, const std::map<size_t, size_t> &same, size_t was)
+	{
+		std::map<size_t, size_t> to;
+		bool moved = same.size() != was;
+		for(auto &s : same){
+			to[s.second] = s.first;
+			moved = moved || s.first != s.second;
+		}
+		if(!moved)
+			return;
+		for(auto r = m_queue.begin(); r != m_queue.end();){
+			if(r->entity == id && !to.count(r->comp)){
+				r = m_queue.erase(r);
+				continue;
+			}
+			if(r->entity == id)
+				r->comp = to[r->comp];
+			++r;
+		}
+		for(auto &p : m_entities)
+			if(p.second.made && p.second.maker == id && to.count(p.second.maker_comp))
+				p.second.maker_comp = to[p.second.maker_comp];
+		for(auto &gs : m_sessions)
+			if(gs.second->maker == id && to.count(gs.second->maker_comp))
+				gs.second->maker_comp = to[gs.second->maker_comp];
+	}
+
 	void apply(uint64_t id, const json::Value &after)
 	{
 		auto it = m_entities.find(id);
@@ -22470,12 +22663,23 @@ struct Module: public interface::Module, public Interface
 		// Running, an instance whose parameters changed is told which, and
 		// what each was ([KIT] stage 4d)
 		sv_<std::pair<size_t, json::Value>> changed;
+		// [KIT_COMPONENTS] The same instance is the same type's, wherever Remove or an
+		// undo put it. What named it by its number goes with it
+		std::map<size_t, size_t> same;
+		std::set<size_t> taken;
+		for(size_t i = 0; had && i < n.comps.size(); i++)
+			for(size_t k = 0; k < it->second.comps.size(); k++)
+				if(!taken.count(k) && it->second.comps[k].type == n.comps[i].type){
+					taken.insert(k);
+					same[i] = k;
+					break;
+				}
+		renumber(id, same, had ? it->second.comps.size() : 0);
 		for(size_t i = 0; i < n.comps.size(); i++){
 			Instance &in = n.comps[i];
-			if(had && i < it->second.comps.size() &&
-					it->second.comps[i].type == in.type){
+			if(same.count(i)){
 				// The same instance: its runtime state goes on
-				const Instance &was = it->second.comps[i];
+				const Instance &was = it->second.comps[same[i]];
 				in.state = was.state;
 				in.disabled = was.disabled;
 				in.timers = was.timers;
@@ -22510,6 +22714,11 @@ struct Module: public interface::Module, public Interface
 		// its scene. Stopped, it is at its start
 		ss_ scene;
 		scene_of(e, &scene);
+		// [KIT_COMPONENTS] on a node there already, shared state to tell
+		for(size_t i : fresh)
+			if(had)
+				for(const ss_ &k : m_types[e.comps[i].type].shared)
+					replicate_state(e, i, k);
 		for(size_t i : m_session.running ? fresh : sv_<size_t>()){
 			Run r;
 			r.entity = id;

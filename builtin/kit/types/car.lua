@@ -1,6 +1,7 @@
--- A car ([KIT] stage 4h): a seat (a use takes the player's controls, F
--- or the touch bar's Exit leaves it). W and S (a touchscreen's Gas and
--- Brake) drive and brake, then reverse; A and D (the stick) steer.
+-- A car's movement ([KIT] stage 4h; [KIT_COMPONENTS]: a component on the entity
+-- it moves, its hull: the palette's prefab kit/car is a box with this and a kit/seat).
+-- W and S (a touchscreen's Gas and Brake) drive and brake, then reverse; A and D (the
+-- stick) steer. Its client part puts four wheels under the hull's look.
 -- engine_force (N), brake (m/s²), steering (degrees at the front wheels),
 -- grip (of gravity: the sideways pull the tyres hold before they slip),
 -- suspension (spring stiffness a kilogram, its damping), ride_height (m),
@@ -10,7 +11,7 @@
 -- substeps. Still while no one is in it.
 -- simplified: arcade wheels (four rays down from the corners hold the body
 -- up on springs, a bicycle's steering), drawn level (its yaw only), and
--- it collides as a 2 m square round its middle
+-- it collides as a 2 m square round its middle, whatever its hull's size
 local BODY = {r = 1, h = 1}
 -- The wheels' corners and the wheelbase (m)
 local WX, WZ, BASE = 0.8, 1.3, 2.6
@@ -32,12 +33,9 @@ end
 return {
 	version = 1,
 	about = {
-		what = "A seat that drives: a player who uses it drives with the keys.",
+		what = "A ground vehicle's movement: whoever holds its entity's seat drives it.",
 	},
-	usable = true,
-	seat = true,
-	look = {shape = "box", size = {1.8, 0.7, 3.6}, offset = {0, -0.15, 0},
-		color = "#3060c0", solid = true},
+	component = true,
 	movement = {body = BODY, camera = "chase", touch = "drive"},
 	params = {
 		engine_force = {cat = "physics", type = "number", default = 9000,

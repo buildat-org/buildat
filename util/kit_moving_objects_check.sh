@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2.5 min, ~3 min with web (2026-11-07)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/players.lua builtin/kit/types/prefab_copy.lua builtin/voxel_objects/** apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/players.lua builtin/kit/types/prefab_copy.lua builtin/kit/types/wave.lua builtin/voxel_objects/** apps/workbench/**
 # [KIT_MOVING_OBJECTS] A free object's pose as a function of the shared time, on a
 # fresh Workbench save: deck 7 rolling, pitching, swinging and heaving round its centre,
 # deck 8 on a course, a trigger zone under deck 7; a spawner of players over 7.
@@ -241,8 +241,10 @@ from decks import *
 for i, (o, m) in DECKS.items():
 	print("event kit_edit " + json.dumps({"op": "move", "id": i, "pos": o, "yaw": 0, "pitch": 0, "roll": 0}))
 	print("sync 5000")
+	print("event kit_edit " + json.dumps({"op": "add_component", "id": i, "type": "kit/wave"}))
+	print("sync 5000")
 	for k, v in m.items():
-		print("event kit_edit " + json.dumps({"op": "set", "id": i, "comp": 0, "param": k, "value": v}))
+		print("event kit_edit " + json.dumps({"op": "set", "id": i, "comp": 1, "param": k, "value": v}))
 		print("sync 5000")
 o = DECKS[7][0]
 print("event kit_edit " + json.dumps({"op": "place", "type": "kit/spawner",

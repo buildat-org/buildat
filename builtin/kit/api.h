@@ -69,6 +69,17 @@ namespace interface
 //
 // A component type's file returns a table:
 //   version  = n             -- a whole number from 1 (1 if left out)
+//   component = true         -- ([KIT_COMPONENTS]) it has no place of its own and only
+//                               goes on an entity with one, by the inspector's Add
+//                               component: not in the palette. Types that say
+//                               no_position (no `ui`) and placeable ones are added
+//                               too; component = false says not this one. "Children
+//                               for places, components for properties": what needs an
+//                               offset is a child. A type once an entity, so (entity,
+//                               type, parameter) names a value through any add or
+//                               remove; one movement (`movement` and `step`) an entity.
+//   seat = true              -- ([KIT_COMPONENTS]) a use of the entity (with usable)
+//                               takes the player's controls for its movement
 //   params   = {name = {type = "voxel"|"number"|"string"|"bool"|"entity"|
 //                "position"|"voxels", default = v}, ...}   -- authored,
 //              per instance; a voxel "" is none (a generic type's, which
@@ -645,6 +656,11 @@ namespace interface
 //       nor under it
 //   {"op": "delete", "id": n}
 //   {"op": "set", "id": n, "comp": i, "param": p, "value": v}
+//   {"op": "add_component", "id": n, "type": t}, {"op": "remove_component", "id": n,
+//       "comp": i} ([KIT_COMPONENTS]): one undo each. Refused on a prefab's or a
+//       generator's built child (its prefab's to change), a second of a type or a
+//       second movement, what has a place (it is what the entity is) and an entity's
+//       last. Live while Running: on_start for one added, on_remove for one removed
 //   {"op": "link"|"unlink", "id": n, "comp": i, "output": o, "to": m,
 //    "input": in}
 //   {"op": "undo"}  -- the editor's own last edit, UNDO_MAX of them

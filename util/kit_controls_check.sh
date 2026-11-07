@@ -15,8 +15,9 @@
 #      the floor), a click on the floor walks there (arrived), a click on
 #      the button walks to it and uses it; then first person with
 #      click_to_move, a click at the crosshair walks there.
-#   4. kit/car: used, the player is in its seat (the chase camera), W
-#      drives it forward, F leaves it (put beside it); kit/ball the same.
+#   4. A hull with kit/car and kit/seat ([KIT_COMPONENTS]): used, the player is in its
+#      seat (the chase camera), W drives it forward, F leaves it (put beside it);
+#      kit/ball the same.
 #      ([KIT_TRIGGER_DIG]) The car driven into a trigger zone linked to a
 #      dig zone's dig: the dig zone's box dug out.
 #   5. ([KIT_SLAB_WALK]) Stop and Play, then from the spawn along -z a
@@ -164,7 +165,9 @@ keypress F6
 wait_log 10000 kit editor: state:
 EOF
 	set_p 4 movement '"kit/walker"'
-	edit '{"op": "place", "type": "kit/car", "pos": [-1, 1, 2]}'
+	edit '{"op": "place", "type": "kit/part", "pos": [-1, 1, 2], "params": {"size": [1.8, 0.7, 3.6], "color": "#3060c0"}}'
+	edit '{"op": "add_component", "id": 7, "type": "kit/car"}'
+	edit '{"op": "add_component", "id": 7, "type": "kit/seat"}'
 	edit '{"op": "place", "type": "kit/ball", "pos": [3, 1, 9]}'
 	# [KIT_TRIGGER_DIG] a trigger zone on the car's way, its "entered" to a
 	# region's dig_out ([KIT] 4j: the dig zone's dig)

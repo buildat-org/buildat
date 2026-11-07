@@ -344,7 +344,7 @@ magic.SubscribeToEvent("command_seq:kit_face", function(_, data)
 	local y, p = data:GetString("Param"):match("(%S+) (%S+)")
 	C.yaw, C.pitch = tonumber(y) % 360, tonumber(p)
 end)
-magic.SubscribeToEvent("command_seq:kit_body", function()
+local function log_body()
 	local p = pos_of(C.s) or {0, 0, 0}
 	log:info(string.format("kit: body at %.2f,%.2f,%.2f, %d acks, %d " ..
 			"corrections, %d pending, %d jumps, %d arrivals", p[1], p[2], p[3],
@@ -353,6 +353,12 @@ magic.SubscribeToEvent("command_seq:kit_body", function()
 	-- [KIT_WALKER_FRAME] To the tenth of a millimetre, for measuring a deck
 	log:info(string.format("kit: feet at %.4f,%.4f,%.4f, frame %s", p[1], p[2],
 			p[3], tostring(C.s and C.s.frame or "none")))
+	-- [KIT_COMPONENTS] What a vehicle's numbers are compared by
+	local v = C.s and type(C.s.vel) == "table" and C.s.vel
+	if v then
+		log:info(string.format("kit: vehicle speed %.4f,%.4f,%.4f, yaw %.3f", v[1], v[2], v[3],
+				tonumber(C.s.yaw) or 0))
+	end
 	-- [KIT_MOVING_OBJECTS] The time they were stepped at, and as drawn this frame:
 	-- the time, the body's feet and each moving object's node
 	if C.draw_t then
@@ -370,6 +376,13 @@ magic.SubscribeToEvent("command_seq:kit_body", function()
 		end
 		log:info(table.concat(parts, "; "))
 	end
+end
+magic.SubscribeToEvent("command_seq:kit_body", log_body)
+-- [KIT_COMPONENTS] For a drive: "event kit_body_in <ms>", the same that much later, a
+-- key still held (a page's held key is one step of its sequence)
+local body_logs = {}
+magic.SubscribeToEvent("command_seq:kit_body_in", function(_, data)
+	body_logs[#body_logs + 1] = buildat.get_time_us() + tonumber(data:GetString("Param")) * 1000
 end)
 
 -- ---- The controls: the movement's file, the signals as they come
@@ -1423,6 +1436,12 @@ end
 -- view
 local was_ready = false
 magic.SubscribeToEvent("Update", function(_, data)
+	for i = #body_logs, 1, -1 do
+		if buildat.get_time_us() >= body_logs[i] then
+			table.remove(body_logs, i)
+			log_body()
+		end
+	end
 	if not C.on or not O.camera then
 		return
 	end
