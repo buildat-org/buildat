@@ -4438,8 +4438,11 @@ end
 -- comes on. Running or Stopped is not kept here: it is the server's (the
 -- save's session, which a restart resumes), and a Stop asked by a memory
 -- would throw a round away.
--- simplified: written at most once a second (MEM.every), so a quit within
--- a second of a change loses it; the palette's New tab not restored (its
+-- Written at most once a second (MEM.every), at once when edit mode changes,
+-- and at the client's exit.
+-- simplified: leaving for the launcher within a second of a change of view,
+-- tab or camera loses that change (the game gets no word of a leave; a hook
+-- in leave_to_menu if it matters); the palette's New tab not restored (its
 -- fetch asks about the network)
 local MEM = {every = 1}
 function MEM.name()
@@ -4511,14 +4514,17 @@ function M.remember(key)
 end
 
 -- Each frame: written when it changed, at most every MEM.every seconds
-function MEM.tick(dt)
+-- unless edit mode changed or now (the client's exit)
+function MEM.tick(dt, now)
 	MEM.at = (MEM.at or 0) + dt
-	if not MEM.key or MEM.at < MEM.every then
+	local old = MEM.last or {}
+	local mode = (E.editing or MEM.edit) and "edit" or "play"
+	if not MEM.key or not now and MEM.at < MEM.every and
+			mode == (old.mode or mode) then
 		return
 	end
 	MEM.at = 0
-	local old = MEM.last or {}
-	local t = {mode = (E.editing or MEM.edit) and "edit" or "play"}
+	local t = {mode = mode}
 	-- Until edit mode put them back, the remembered; out of it, the last
 	local live = E.editing and not MEM.view
 	t.view = live and (S.view == "hud" and S.before_hud or S.view) or

@@ -10,7 +10,8 @@
 # and the list's Positioned tab, and quits. The server restarts on the
 # same port (the client's storage is the address's); kitboss joins again
 # and is in edit mode, the game Ended, the view 3D with the camera where
-# it was left, the same tabs. The memory is in the client's user
+# it was left, the same tabs (a wheel just before the quit: the exit writes
+# the memory, not the next of its once-a-second writes). The memory is in the client's user
 # directory and nowhere in the server's (the project's save), so a
 # published or exported project carries none of it.
 # [KIT_TABS_TWO_ROWS] KEEP_TMP=1 keeps left.png (the panel's tabs in two
@@ -87,9 +88,12 @@ frames 3
 click Button "Positioned*"
 frames 5
 screenshot $t/left.png
+mouse_pos 512 400
+frames 2
+mouse_wheel 1
+frames 2
 event kit_tabs left
 event kit_cam_where left
-delay 2500
 quit
 EOF
 server 1 auto

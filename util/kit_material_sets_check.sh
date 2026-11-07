@@ -248,12 +248,14 @@ grep -q stone "$t/redland2/materials.json" && fail "redland 2.0.0 still has ston
 manifest "$t/redland2" redland
 sed -i 's/"1.0.0"/"2.0.0"/' "$t/redland2/meta.json"
 publish "$t/redland2"
+# (Asked for, not F6: the client remembers edit mode, keyed by the port, and
+# a restart can draw the same port; F6 after that answer turns it off)
 cat > "$t/boss2.cmds" <<EOF2
 wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
-keypress F6
-wait_log 10000 kit editor: state:
+event kit_edit {"op": "mode", "on": true}
+wait_log_any 10000 kit editor: edit mode on
 click Button "New"
 wait_log_any 20000 kit editor: package alice/badland 1.0.0
 wait_log_any 20000 kit editor: package alice/redland 2.0.0

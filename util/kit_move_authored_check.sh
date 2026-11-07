@@ -67,14 +67,16 @@ move() # <pos>
 	ed "{\"op\": \"try\", \"id\": 3, \"comp\": 0, \"input\": \"move\", \"value\": $1}"
 	echo "wait_log 10000 kit editor: tried 3's move:"
 }
+# (Asked for, not F6: the client remembers edit mode, keyed by the port, and
+# a restart can draw the same port; F6 after that answer turns it off)
 joined()
 {
 	cat <<'EOF'
 wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
-keypress F6
-wait_log 10000 kit editor: edit mode on
+event kit_edit {"op": "mode", "on": true}
+wait_log_any 10000 kit editor: edit mode on
 EOF
 }
 authored() # <want x,y,z> <want label>: P's in the save

@@ -813,7 +813,7 @@ frames 3
 click Button "Don't add"
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
-keypress F6
+event kit_edit {"op": "mode", "on": true}
 wait_log_any 10000 kit editor: edit mode on
 frames 5
 EOF

@@ -815,10 +815,13 @@ wait_log 10000 kit editor: state: 16 entities, 5 to undo
 event kit_edit {"op": "set", "id": 17, "comp": 0, "param": "keep_inventory", "value": false}
 wait_log 10000 kit editor: state: 16 entities, 6 to undo
 keypress F6
+# The play and the mode off answered in either order: one wait for the
+# Running, the sync past the mode's answer, and F6 turning it on proves that
+# one turned it off (from on, this F6 would give no "on")
 wait_log 10000 kit editor: the server is Running (by kitboss)
-wait_log 10000 kit editor: edit mode off
+sync 5000
 keypress F6
-wait_log 10000 kit editor: state: 16 entities, 6 to undo
+wait_log 10000 kit editor: edit mode on
 frames 10
 event kit_edit {"op": "place", "type": "kit/teleporter", "pos": [2, 1, -2]}
 wait_log 10000 kit editor: state: 17 entities, 7 to undo
