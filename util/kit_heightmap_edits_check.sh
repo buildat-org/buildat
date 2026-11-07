@@ -71,13 +71,15 @@ terrain(){ # <tool> <x> <z> <size> <strength> <stroke>
 column(){ # <x> <z>
 	printf 'event kit_edit {"op": "terrain", "tool": "column", "x": %s, "y": 0, "z": %s}\nwait_log 5000 kit editor: terrain: column at (%s,\n' "$1" "$2" "$1"
 }
+# (Asked for, not F6: the client remembers edit mode, keyed by the port, and
+# a restart can draw the same port; F6 after that answer turns it off)
 joined(){
 	cat <<'EOF'
 wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
-keypress F6
-wait_log 10000 kit editor: state:
+event kit_edit {"op": "mode", "on": true}
+wait_log_any 10000 kit editor: edit mode on
 EOF
 }
 # A sample's heights, in order, as the column reads logged them

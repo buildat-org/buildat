@@ -626,7 +626,7 @@ magic.SubscribeToEvent("command_seq:kit_players", function()
 			local p = b.root.position
 			log:info(string.format("kit: player %d drawn at %.2f,%.2f,%.2f " ..
 					"yaw %.0f, %s, team %s, holding %s", id, p.x, p.y, p.z,
-					b.yaw or 0, b.anim, tostring(b.color), tostring(b.item)))
+					(b.yaw or 0) % 360, b.anim, tostring(b.color), tostring(b.item)))
 			if b.held then
 				local h = b.held.worldPosition
 				log:info(string.format("kit: player %d's %s at %.2f,%.2f,%.2f",
