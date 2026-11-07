@@ -1,0 +1,54 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "airship_core",
+	"version": 1,
+	"entities": [
+		{
+			"id": 1,
+			"name": "the helm",
+			"pos": [0, 0.75, 0],
+			"components": [
+				{
+					"type": "kit/part",
+					"params": {
+						"size": [0.8, 0.5, 0.8],
+						"color": "#3050a0"
+					}
+				},
+				{
+					"type": "kit/seat"
+				}
+			]
+		}
+	],
+	"root": {
+		"components": [
+			{
+				"type": "kit/airship",
+				"params": {
+					"thrust": 4,
+					"top_speed": 9,
+					"turn_rate": 35,
+					"climb": 3,
+					"floor": 2
+				}
+			},
+			{
+				"type": "kit/hull",
+				"params": {
+					"build": "owner",
+					"cost": 1
+				}
+			}
+		]
+	},
+	"voxels": {
+		"at": [0, 0, 0],
+		"size": [1, 1, 1],
+		"kinds": [
+			["kit/core", 0, 0]
+		],
+		"runs": [1, 0]
+	}
+}

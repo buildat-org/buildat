@@ -78,3 +78,6 @@ XSSheep (<https://www.planetminecraft.com/texture_pack/131pixel-perfection/>;
 "Change player texture to Pixel Perfection", Wuzzy, 2017), CC BY-SA 4.0
 by VoxeLibre's LEGAL.md. A team's colour is put on its shirt at run time
 (client_lua/players.lua).
+
+core.png ([KIT_AIRSHIPS], the voxel kit/core: a ship's core) was drawn
+for Kit by a script; CC0 1.0 (public domain).

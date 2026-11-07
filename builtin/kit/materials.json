@@ -66,7 +66,9 @@
 			"texture": "kit/mushroom_brown.png",
 			"kind": "plant"},
 		"kit/snow": {"sound_dig": "kit/dig", "sound_place": "kit/place",
-			"group": "dirt", "texture": "kit/snow.png"}
+			"group": "dirt", "texture": "kit/snow.png"},
+		"kit/core": {"sound_dig": "kit/dig", "sound_place": "kit/place",
+			"group": "stone", "level": 3, "texture": "kit/core.png"}
 	},
 	"palettes": {
 		"grass": [

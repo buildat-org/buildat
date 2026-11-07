@@ -133,6 +133,11 @@ static const char *const WAVE_TYPE = "kit/wave";
 static const char *const SYMMETRY_TYPE = "kit/symmetry";
 // [KIT_VEHICLE_MOVEMENTS] A free object's course there and back, a movement
 static const char *const COURSE_TYPE = "kit/course";
+// [KIT_AIRSHIPS] Who builds on a free copy in play and what a voxel costs; the
+// players' money for the round; a ship's core voxel (one a ship, stage 4's)
+static const char *const HULL_TYPE = "kit/hull";
+static const char *const WALLET_TYPE = "kit/wallet";
+static const char *const CORE_VOXEL = "kit/core";
 static const size_t MAX_LINKS = 64;
 // [KIT_COMPONENTS] Components an entity has at most, by Add component
 static const size_t MAX_COMPONENTS = 16;
@@ -1287,8 +1292,39 @@ struct Module: public interface::Module, public Interface
 		// its node
 		double corner[3] = {0, 0, 0};
 		bool body_moved = false;
+		// [KIT_AIRSHIPS] its boxes' name in m_free_boxes: the model's, or its own
+		// voxels' (a new name each rebuild, so a client is sent them again)
+		ss_ boxes;
 	};
 	std::map<uint64_t, FreeObject> m_free_objects;
+	// [KIT_AIRSHIPS] A free copy's own voxels in play (own_build()): its prefab's
+	// cells copied into a cube of OWN_SIDE about the prefab's box once a player
+	// changes one, shown by a model of its own ("kitown_<id>") with boxes of its own,
+	// made again at most once in OWN_REBUILD_GAP for all copies together. Play
+	// state: gone at Stop, the copy showing its prefab's model again
+	static const int OWN_SIDE = 32;
+	struct OwnCell
+	{
+		interface::VoxelTypeId id = 0;
+		uint8_t param = 0, tint = 0;
+	};
+	struct OwnGrid
+	{
+		int a[3] = {0, 0, 0}; // the entity frame's cell at the cube's (0, 0, 0)
+		sv_<OwnCell> v; // x + OWN_SIDE * (y + OWN_SIDE * z)
+		std::set<int> changed; // since its model last took them
+		bool made = false; // its model and boxes exist
+		bool dirty = false;
+		int64_t since = 0; // the first change waiting, us
+		int rev = 0;
+		ss_ boxes;
+		// The core (kit/core): the cell connection is reckoned from (stage 4);
+		// -1: none
+		int core = -1;
+	};
+	std::map<uint64_t, OwnGrid> m_own;
+	// Not a session's: one budget for every ship of the server
+	int64_t m_own_rebuilt_at = 0;
 	std::map<main_context::SceneReference, std::set<ss_>> m_free_models;
 	sm_<ss_, sv_<float>> m_free_boxes;
 	sm_<size_t, std::set<ss_>> m_boxes_sent;
@@ -1412,6 +1448,8 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "network:packet_received/kit:action", &Module::on_action);
 		sub(m_server, "network:packet_received/kit:ui", &Module::on_ui_press);
 		sub(m_server, "network:packet_received/kit:exit", &Module::on_exit);
+		// [KIT_AIRSHIPS] a place or dig on a free object
+		sub(m_server, "network:packet_received/kit:obuild", &Module::on_obuild);
 		// [KIT_TOOLS_1] the hands, a melee hit, an item's use
 		sub(m_server, "network:packet_received/kit:hold", &Module::on_hold);
 		sub(m_server, "network:packet_received/kit:inv", &Module::on_inv);
@@ -7912,7 +7950,8 @@ struct Module: public interface::Module, public Interface
 		std::map<main_context::SceneReference, std::set<ss_>> used;
 		for(auto &x : m_entities){
 			const Entity &e = x.second;
-			if(!authored(e) || !e.has_pos || !is_free(e))
+			// [KIT_AIRSHIPS] a copy made in play (c:spawn of a prefab with voxels) too
+			if(e.kind == "player" || !e.has_pos || !is_free(e))
 				continue;
 			const ss_ of = jstr(e.prefab, "of");
 			const json::Value *pf = prefab(of);
@@ -7933,9 +7972,8 @@ struct Module: public interface::Module, public Interface
 				h = (h ^ (unsigned char)c) * 16777619u;
 			char hex[16];
 			snprintf(hex, sizeof hex, "%08x", h);
-			const ss_ model = "kitfree_"+ss_(hex)+"_"+itos(voxels_version(*pf));
+			const ss_ shared = "kitfree_"+ss_(hex)+"_"+itos(voxels_version(*pf));
 			const json::Value &vx = pf->get("voxels");
-			free_model(vo, ref, model, vx);
 			double w[3], wy, wp, wr;
 			Turn wq;
 			world_of(e, w, &wq);
@@ -7944,6 +7982,17 @@ struct Module: public interface::Module, public Interface
 			double corner[3] = {vx.get("at").at(0u).as_number() - 0.5,
 					vx.get("at").at(1u).as_number() - 0.5,
 					vx.get("at").at(2u).as_number() - 0.5};
+			// [KIT_AIRSHIPS] its own voxels once their model is made
+			ss_ model = shared, boxes = shared;
+			auto oi = m_own.find(e.id);
+			if(oi != m_own.end() && oi->second.made){
+				model = own_model(e.id);
+				boxes = oi->second.boxes;
+				for(int k = 0; k < 3; k++)
+					corner[k] = oi->second.a[k] - 0.5;
+			} else {
+				free_model(vo, ref, shared, vx);
+			}
 			const double corner0[3] = {corner[0], corner[1], corner[2]};
 			wq.apply(corner);
 			const magic::Vector3 pos(w[0] + corner[0], w[1] + corner[1],
@@ -7961,6 +8010,7 @@ struct Module: public interface::Module, public Interface
 				FreeObject o;
 				o.ref = ref;
 				o.model = model;
+				o.boxes = boxes;
 				o.node = vo->create_object(model, pos, q);
 				o.place = place;
 				std::copy(corner0, corner0 + 3, o.corner);
@@ -7986,6 +8036,7 @@ struct Module: public interface::Module, public Interface
 						"%.5f,%.5f,%.5f,%.5f", cs(itos(e.id)), w[0], w[1], w[2], wy,
 						wp, wr, pos.x_, pos.y_, pos.z_, q.w_, q.x_, q.y_, q.z_);
 			}
+			m_free_objects[e.id].boxes = boxes;
 			wanted.insert(e.id);
 			used[ref].insert(model);
 			m_free_models[ref].insert(model);
@@ -7999,6 +8050,15 @@ struct Module: public interface::Module, public Interface
 				iv->get_instance(it->second.ref)->remove_object(it->second.node);
 			log_i(MODULE, "The free object of entity %s is gone", cs(itos(it->first)));
 			it = m_free_objects.erase(it);
+		}
+		// [KIT_AIRSHIPS] the own voxels of what is no free object any more
+		for(auto it = m_own.begin(); it != m_own.end();){
+			if(wanted.count(it->first)){
+				++it;
+				continue;
+			}
+			m_free_boxes.erase(it->second.boxes);
+			it = m_own.erase(it);
 		}
 		// The versions nothing shows any more
 		for(auto &sm : m_free_models){
@@ -8038,6 +8098,406 @@ struct Module: public interface::Module, public Interface
 						w[1] + c[1], w[2] + c[2]), q.q());
 			});
 		}
+	}
+
+	// ---- [KIT_AIRSHIPS] Voxels on a free object in play (kit_plan 4s stage 1)
+
+	static ss_ own_model(uint64_t id)
+	{
+		return "kitown_"+itos(id);
+	}
+
+	// A voxel's solid shape as an object's boxes take it: solid, and its boxes
+	// about the cell's middle (none: the whole cell)
+	static void cell_shape(interface::VoxelRegistry *reg, interface::VoxelTypeId id,
+			uint8_t param, bool &solid, sv_<float> &shape)
+	{
+		solid = false;
+		shape.clear();
+		const interface::VoxelDefinition *d = id ? reg->get(id) : nullptr;
+		if(!d)
+			return;
+		solid = d->physically_solid;
+		shape = d->collision_boxes;
+		const size_t vi = d->variant_of_param[param];
+		if(vi < d->variants.size() && !d->variants[vi].collision_boxes.empty())
+			shape = d->variants[vi].collision_boxes;
+	}
+
+	// The copy's prefab's cells in a new grid, its box in the cube's middle;
+	// false: a prefab larger than the cube
+	bool own_grid(const Entity &e, OwnGrid &g, ss_ &why)
+	{
+		const json::Value *pf = prefab(jstr(e.prefab, "of"));
+		if(!pf || !pf->get("voxels").is_object()){
+			why = "It has no voxels";
+			return false;
+		}
+		const json::Value &vx = pf->get("voxels");
+		int n[3];
+		for(unsigned k = 0; k < 3; k++){
+			n[k] = (int)vx.get("size").at(k).as_number();
+			if(n[k] > OWN_SIDE){
+				why = "Larger than "+itos(OWN_SIDE)+" voxels a side: not built on";
+				return false;
+			}
+			g.a[k] = (int)vx.get("at").at(k).as_number() - (OWN_SIDE - n[k]) / 2;
+		}
+		const int o[3] = {(OWN_SIDE - n[0]) / 2, (OWN_SIDE - n[1]) / 2,
+				(OWN_SIDE - n[2]) / 2};
+		g.v.assign((size_t)OWN_SIDE * OWN_SIDE * OWN_SIDE, OwnCell());
+		const json::Value &kinds = vx.get("kinds"), &runs = vx.get("runs");
+		sv_<OwnCell> ks;
+		interface::VoxelTypeId core = 0;
+		voxelworld::access(m_server, scene_of(e), [&](voxelworld::Instance *w){
+			for(unsigned i = 0; i < kinds.size(); i++){
+				const json::Value &c = kinds.at(i);
+				interface::VoxelName vn;
+				vn.block_name = c.at(0u).as_string();
+				const interface::VoxelDefinition *d = w->get_voxel_reg()->get(vn);
+				OwnCell k;
+				if(d && vn.block_name != "air"){
+					k.id = d->id;
+					k.param = (uint8_t)c.at(1u).as_number();
+					k.tint = (uint8_t)c.at(2u).as_number();
+				}
+				ks.push_back(k);
+			}
+			interface::VoxelName cn;
+			cn.block_name = CORE_VOXEL;
+			const interface::VoxelDefinition *d = w->get_voxel_reg()->get(cn);
+			core = d ? d->id : 0;
+		});
+		size_t cell = 0;
+		for(unsigned r = 0; r + 1 < runs.size(); r += 2){
+			const size_t count = (size_t)runs.at(r).as_number();
+			const size_t ki = (size_t)runs.at(r + 1).as_number();
+			for(size_t c = 0; c < count; c++, cell++){
+				if(ki >= ks.size() || !ks[ki].id)
+					continue;
+				const int x = (int)(cell % n[0]) + o[0];
+				const int z = (int)(cell / n[0] % n[2]) + o[2];
+				const int y = (int)(cell / n[0] / n[2]) + o[1];
+				const int i = x + OWN_SIDE * (y + OWN_SIDE * z);
+				g.v[i] = ks[ki];
+				if(core && ks[ki].id == core && g.core < 0)
+					g.core = i;
+			}
+		}
+		return true;
+	}
+
+	// Its model and boxes made again from the grid: the model's changed cells
+	// (all of them the first time), the boxes under a new name
+	void own_rebuild(uint64_t id, OwnGrid &g)
+	{
+		auto fi = m_free_objects.find(id);
+		if(fi == m_free_objects.end())
+			return;
+		const int64_t t0 = interface::os::time_us();
+		const main_context::SceneReference ref = fi->second.ref;
+		const ss_ model = own_model(id);
+		const int S = OWN_SIDE;
+		size_t written = 0;
+		interface::VoxelRegistry *reg = nullptr;
+		voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
+			reg = w->get_voxel_reg();
+		});
+		if(!reg)
+			return;
+		voxel_objects::access(m_server, ref, [&](voxel_objects::Instance *vo){
+			voxel_objects::Model *m = vo->get_model(model);
+			auto put = [&](int i){
+				const OwnCell &c = g.v[i];
+				m->set_voxel_state(i % S, i / S % S, i / (S * S), c.id, c.param, c.tint);
+				written++;
+			};
+			if(!m){
+				m = vo->create_model(model, S, S, S);
+				for(int i = 0; i < S * S * S; i++)
+					if(g.v[i].id)
+						put(i);
+			} else {
+				for(int i : g.changed)
+					put(i);
+			}
+			vo->commit();
+		});
+		const int64_t t1 = interface::os::time_us();
+		FreeCells c;
+		for(int k = 0; k < 3; k++){
+			c.n[k] = S;
+			c.a[k] = g.a[k];
+		}
+		c.solid.assign((size_t)S * S * S, 0);
+		sv_<float> boxes, shape;
+		size_t voxels = 0;
+		for(int i = 0; i < S * S * S; i++){
+			const OwnCell &v = g.v[i];
+			if(!v.id)
+				continue;
+			voxels++;
+			bool solid;
+			cell_shape(reg, v.id, v.param, solid, shape);
+			if(!solid)
+				continue;
+			const int x = i % S, y = i / S % S, z = i / (S * S);
+			if(shape.empty()){
+				c.at(x, y, z) = 1;
+				continue;
+			}
+			for(size_t b = 0; b + 6 <= shape.size(); b += 6)
+				for(size_t q = 0; q < 6; q++)
+					boxes.push_back(shape[b + q] + g.a[q % 3] +
+							(q % 3 == 0 ? x : q % 3 == 1 ? y : z));
+		}
+		free_boxes(c, boxes);
+		if(boxes.size() > MAX_FREE_BOXES * 6)
+			boxes = {g.a[0] - 0.5f, g.a[1] - 0.5f, g.a[2] - 0.5f,
+					g.a[0] + S - 0.5f, g.a[1] + S - 0.5f, g.a[2] + S - 0.5f};
+		m_free_boxes.erase(g.boxes);
+		g.boxes = model+"."+itos(++g.rev);
+		m_free_boxes[g.boxes] = boxes;
+		const size_t changed = g.made ? g.changed.size() : voxels;
+		const double waited = (t0 - g.since) / 1000.0;
+		g.made = true;
+		g.dirty = false;
+		g.changed.clear();
+		sync_free_objects();
+		log_i(MODULE, "[KIT_AIRSHIPS] entity %s's own voxels rebuilt (rev %i): %zu "
+				"changed, %zu voxels, %zu written, %zu boxes; model %.1f ms, boxes %.1f "
+				"ms; waited %.0f ms", cs(itos(id)), g.rev, changed, voxels, written,
+				boxes.size() / 6, (t1 - t0) / 1000.0,
+				(interface::os::time_us() - t1) / 1000.0, waited);
+	}
+
+	// Each tick: the copy waiting longest made again, at most one in OWN_REBUILD_GAP
+	// for all of them (the budget: about one collision and mesh rebuild a second
+	// shared by every ship, kit_plan 4s). simplified: a fixed gap, not a measured
+	// cost; a cost per rebuild against a time budget is the upgrade if ships get
+	// dear
+	static constexpr int64_t OWN_REBUILD_GAP = 500000; // us
+	void own_tick()
+	{
+		const int64_t now = interface::os::time_us();
+		if(now - m_own_rebuilt_at < OWN_REBUILD_GAP)
+			return;
+		OwnGrid *best = nullptr;
+		uint64_t best_id = 0;
+		for(auto &o : m_own)
+			if(o.second.dirty && (!best || o.second.since < best->since))
+				best = &o.second, best_id = o.first;
+		if(!best)
+			return;
+		m_own_rebuilt_at = now;
+		own_rebuild(best_id, *best);
+	}
+
+	// The kit/hull on a free copy's root: who builds on it, what a voxel costs
+	const Instance* hull_of(const Entity &e)
+	{
+		for(const Instance &in : e.comps)
+			if(in.type == HULL_TYPE)
+				return &in;
+		return nullptr;
+	}
+
+	// The team a player is in (0: none)
+	uint64_t team_of_player(uint64_t player)
+	{
+		for(auto &p : m_entities)
+			for(const Instance &in : p.second.comps)
+				if(m_types[in.type].team && in_team(player, p.first))
+					return p.first;
+		return 0;
+	}
+
+	// The player's kit/wallet (nullptr: none)
+	Instance* wallet_of(uint64_t player)
+	{
+		auto it = m_entities.find(player);
+		if(it == m_entities.end())
+			return nullptr;
+		for(Instance &in : it->second.comps)
+			if(in.type == WALLET_TYPE)
+				return &in;
+		return nullptr;
+	}
+
+	// "kit:obuild" {"id", "cell": [x, y, z] (the entity's frame: a cell's middle
+	// its whole coordinates), "voxel" (a name, "air" digs), "param", "tint"}: a
+	// placed peer's place or dig on a free object, its kit/hull's rules first.
+	// Refused: told why
+	void on_obuild(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_obuild_u(packet);
+	}
+
+	void on_obuild_u(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || !act_allowed(pi->second))
+			return;
+		auto refuse = [&](const ss_ &why){
+			auto p = m_peers.find(peer);
+			if(p == m_peers.end())
+				return;
+			tell(peer, why);
+			if(log_refusal(p->second, why))
+				log_i(MODULE, "[KIT_AIRSHIPS] a build on an object by %s refused: %s",
+						cs(p->second.name), cs(why));
+		};
+		if(waiting_refused(pi->second, "build"))
+			return;
+		if(!m_session.running)
+			return refuse("The server is not Running");
+		const json::Value j = packet.data.size() < 512 ?
+				json::load_string(packet.data.c_str()) : json::null();
+		const json::Value &cj = j.get("cell");
+		const ss_ voxel = jstr(j, "voxel");
+		const int64_t param = json::jint(j, "param", 0), tint = json::jint(j, "tint", 0);
+		bool ok = j.get("id").is_number() && cj.is_array() && cj.size() == 3 &&
+				param >= 0 && param < 256 && tint >= 0 && tint < 16 && !voxel.empty();
+		int cell[3] = {0, 0, 0};
+		for(unsigned k = 0; ok && k < 3; k++){
+			ok = cj.at(k).is_number() && std::fabs(cj.at(k).as_number()) < 1000;
+			cell[k] = ok ? (int)std::floor(cj.at(k).as_number() + 0.5) : 0;
+		}
+		if(!ok)
+			return refuse("Not a build");
+		const uint64_t id = (uint64_t)std::max(0.0, j.get("id").as_number());
+		auto ei = m_entities.find(id);
+		auto fi = m_free_objects.find(id);
+		if(ei == m_entities.end() || fi == m_free_objects.end())
+			return refuse("Nothing to build on");
+		const Entity &e = ei->second;
+		ss_ scene;
+		scene_of(e, &scene);
+		if(scene != pi->second.scene)
+			return refuse("In another scene");
+		// Within reach: the cell where the object is now (a use's range and the
+		// cube's half, as a client aims from its eye at a moving deck)
+		double w[3];
+		Turn q;
+		world_of(e, w, &q);
+		double cw[3] = {(double)cell[0], (double)cell[1], (double)cell[2]};
+		q.apply(cw);
+		double d2 = 0;
+		for(int k = 0; k < 3; k++){
+			cw[k] += w[k];
+			d2 += (cw[k] - pi->second.pos[k]) * (cw[k] - pi->second.pos[k]);
+		}
+		const double reach = m_host.use_range + 4;
+		if(d2 > reach * reach)
+			return refuse("Too far away");
+		const bool dig = voxel == "air";
+		const Instance *hull = hull_of(e);
+		const uint64_t me = pi->second.player;
+		if(!pi->second.editing){
+			if(!hull)
+				return refuse("Protected: nobody builds on this");
+			const ss_ rule = jstr(hull->params, "build");
+			const uint64_t owner = (uint64_t)std::max<int64_t>(0,
+					json::jint(hull->state, "owner", 0));
+			const bool mine = me && owner == me;
+			const uint64_t team = owner ? team_of_player(owner) : 0;
+			if(!(rule == "anyone" || (rule == "owner" && mine) ||
+					(rule == "team" && (mine || (team && in_team(me, team))))))
+				return refuse(rule == "nobody" ? "Protected: nobody builds on this" :
+						rule == "team" ? "Not your team's" : "Not yours");
+			const json::Value r = game_rules();
+			if(!r.get(dig ? "dig" : "place").is_true())
+				return refuse(dig ? "No digging in this game" : "No placing in this game");
+		}
+		interface::VoxelTypeId vid = 0, core = 0;
+		bool placeable = false;
+		voxelworld::access(m_server, scene_of(e), [&](voxelworld::Instance *vw){
+			interface::VoxelName n;
+			n.block_name = voxel;
+			const interface::VoxelDefinition *d = vw->get_voxel_reg()->get(n);
+			placeable = d != nullptr;
+			vid = d && !dig ? d->id : 0;
+			n.block_name = CORE_VOXEL;
+			d = vw->get_voxel_reg()->get(n);
+			core = d ? d->id : 0;
+		});
+		if(!placeable)
+			return refuse("Not a voxel to build with");
+		auto oi = m_own.find(id);
+		if(oi == m_own.end()){
+			OwnGrid g;
+			ss_ why;
+			if(!own_grid(e, g, why))
+				return refuse(why);
+			oi = m_own.emplace(id, std::move(g)).first;
+			log_i(MODULE, "[KIT_AIRSHIPS] entity %s's voxels are its own from now on "
+					"(its prefab %s's copied)", cs(itos(id)), cs(jstr(e.prefab, "of")));
+		}
+		OwnGrid &g = oi->second;
+		int l[3];
+		for(int k = 0; k < 3; k++){
+			l[k] = cell[k] - g.a[k];
+			if(l[k] < 0 || l[k] >= OWN_SIDE)
+				return refuse("A ship is "+itos(OWN_SIDE)+" voxels a side at most");
+		}
+		const int i = l[0] + OWN_SIDE * (l[1] + OWN_SIDE * l[2]);
+		OwnCell &c = g.v[i];
+		ss_ was;
+		if(dig){
+			if(!c.id)
+				return refuse("Nothing there to dig");
+			if(i == g.core)
+				return refuse("The core stays");
+			voxelworld::access(m_server, scene_of(e), [&](voxelworld::Instance *vw){
+				const interface::VoxelDefinition *d = vw->get_voxel_reg()->get(c.id);
+				was = d ? d->name.block_name : "";
+			});
+		} else {
+			if(c.id)
+				return refuse("Taken");
+			if(core && vid == core)
+				return refuse("One core a ship: it comes with the ship");
+			ss_ why;
+			if(!place_ready(peer, voxel, &why))
+				return refuse(why);
+		}
+		// The cost of a placed voxel, from the placer's wallet
+		const int64_t cost = hull && !dig && !pi->second.editing ?
+				json::jint(hull->params, "cost", 0) : 0;
+		if(cost > 0){
+			Instance *wl = wallet_of(me);
+			const int64_t money = wl ? json::jint(wl->state, "money", 0) : 0;
+			if(!wl || money < cost)
+				return refuse("Not enough money: a voxel costs "+itos(cost)+
+						", you have "+itos(money));
+			wl->state.set("money", money - cost);
+			auto pe = m_entities.find(me);
+			for(size_t k = 0; pe != m_entities.end() && k < pe->second.comps.size(); k++)
+				if(&pe->second.comps[k] == wl)
+					replicate_state(pe->second, k, "money");
+			m_runtime_dirty = true;
+		}
+		c.id = vid;
+		c.param = dig ? 0 : (uint8_t)param;
+		c.tint = dig ? 0 : (uint8_t)tint;
+		g.changed.insert(i);
+		if(!g.dirty){
+			g.dirty = true;
+			g.since = interface::os::time_us();
+		}
+		const pv::Vector3DInt32 at((int)std::floor(cw[0] + 0.5),
+				(int)std::floor(cw[1] + 0.5), (int)std::floor(cw[2] + 0.5));
+		log_i(MODULE, "[KIT_AIRSHIPS] %s %s entity %s's cell (%i,%i,%i)%s; "
+				"the object at %.2f,%.2f,%.2f", cs(pi->second.name), dig ?
+				cs("dug "+was+" from") : cs("placed "+voxel+" on"), cs(itos(id)),
+				cell[0], cell[1], cell[2], cost > 0 ? cs(" for "+itos(cost)) : "",
+				w[0], w[1], w[2]);
+		if(dig)
+			dug(peer, at.getX(), at.getY(), at.getZ(), was);
+		else
+			placed(peer, at.getX(), at.getY(), at.getZ(), voxel);
 	}
 
 	// A decoration's object: its structure's origin cell on (x, y, z),
@@ -11192,8 +11652,10 @@ struct Module: public interface::Module, public Interface
 					continue;
 				const ss_ n = jstr(in.params, it.key().c_str());
 				const json::Value *pf = n.empty() ? nullptr : prefab(n);
+				// [KIT_AIRSHIPS] one with voxels: a free copy, its root first
 				if(pf)
-					out["prefab:"+n] = pf->get("entities").size();
+					out["prefab:"+n] = pf->get("entities").size() +
+							(pf->get("voxels").is_object() ? 1 : 0);
 			}
 		for(uint64_t id : reach(e, comp, "")){
 			auto it = m_entities.find(id);
@@ -11212,6 +11674,47 @@ struct Module: public interface::Module, public Interface
 		for(auto &p : m_entities)
 			n += p.second.made ? 1 : 0;
 		return n;
+	}
+
+	// [KIT_AIRSHIPS] A free copy's root row, as place_prefab's "free": kit/prefab_copy
+	// and the prefab's "root" components ({"root": {"components": [{"type",
+	// "params"}...]}}: what a copy's root carries, a movement, a hull), at base
+	json::Value free_root_row(const json::Value &pf, const ss_ &name, uint64_t id,
+			uint64_t parent, const double base[3])
+	{
+		json::Value row = json::object(), comps = json::array(), comp = json::object(),
+				ps = json::object(), pi = json::object(), pos = json::array();
+		row.set("id", (int64_t)id);
+		row.set("parent", (int64_t)parent);
+		row.set("name", name.substr(name.find('/') + 1)+" "+itos(id));
+		pi.set("of", name);
+		pi.set("version", json::jint(pf, "version", 1));
+		pi.set("voxels", voxels_version(pf));
+		row.set("prefab", pi);
+		for(int k = 0; k < 3; k++)
+			pos.append(grid(base[k]));
+		row.set("pos", pos);
+		comp.set("type", PREFAB_ROOT);
+		ps.set("mode", "free");
+		comp.set("params", ps);
+		comps.append(comp);
+		root_components(pf, comps);
+		row.set("components", comps);
+		return row;
+	}
+
+	// The prefab's root components appended to a copy root's
+	void root_components(const json::Value &pf, json::Value &comps)
+	{
+		const json::Value &rc = pf.get("root").get("components");
+		for(unsigned i = 0; i < rc.size(); i++){
+			json::Value c = json::object();
+			c.set("type", full_type(jstr(rc.at(i), "type")));
+			c.set("params", rc.at(i).get("params").is_object() ?
+					rc.at(i).get("params").deepcopy() : json::object());
+			c.set("links", json::array());
+			comps.append(c);
+		}
 	}
 
 	// c:spawn {ref, pos, id}: a copy of a prefab or of an entity the
@@ -11269,7 +11772,17 @@ struct Module: public interface::Module, public Interface
 		if(first < m_next_id)
 			return refuse("its ids are taken");
 		sv_<json::Value> rows;
-		instantiate(pf, name, sc, base, first, rows);
+		// [KIT_AIRSHIPS] A prefab with voxels: a free copy as the editor's "Place
+		// free" makes, its root (kit/prefab_copy free, the prefab's root components)
+		// at pos and its members under it, its voxels a free object
+		const bool free = !name.empty() && pf.get("voxels").is_object();
+		if(free){
+			rows.push_back(free_root_row(pf, name, first, sc, base));
+			const double zero[3] = {0, 0, 0};
+			instantiate(pf, "", first, zero, first + 1, rows);
+		} else {
+			instantiate(pf, name, sc, base, first, rows);
+		}
 		m_next_id = first + rows.size();
 		const Type &t = m_types[e.comps[comp].type];
 		const uint64_t pid = player_id(by);
@@ -11321,6 +11834,8 @@ struct Module: public interface::Module, public Interface
 		if(keep)
 			m_store->set("authored", authored_json().stringify());
 		m_runtime_dirty = true;
+		if(free)
+			sync_free_objects();
 		ss_ ids;
 		for(uint64_t id : made)
 			ids += (ids.empty() ? "" : ",")+itos(id);
@@ -11491,6 +12006,36 @@ struct Module: public interface::Module, public Interface
 		if(vox && !check_voxels(j.get("voxels"), why)){
 			why = "voxels: "+why;
 			return false;
+		}
+		// [KIT_AIRSHIPS] a free copy's root components: types that go on an
+		// entity with others, their parameters theirs (no entity parameters)
+		const json::Value &rt = j.get("root");
+		if(!rt.is_undefined()){
+			const json::Value &rc = rt.get("components");
+			if(!vox || !rt.is_object() || !rc.is_array() || rc.size() > 8){
+				why = "root: {\"components\": [...]} of at most 8, with voxels";
+				return false;
+			}
+			for(unsigned k = 0; k < rc.size(); k++){
+				const ss_ type = full_type(jstr(rc.at(k), "type"));
+				if(!load_type(type, why) || m_types[type].player){
+					why = "root: "+(why.empty() ? type+" is a player's" : why);
+					return false;
+				}
+				const json::Value &ps = rc.at(k).get("params");
+				const json::Value &decl = m_types[type].decl.get("params");
+				if(ps.is_object())
+					for(json::Iterator it(ps); it; ++it){
+						const json::Value &d = decl.get(it.key());
+						const ss_ bad = !d.is_object() ? "not a parameter of it" :
+								jstr(d, "type") == "entity" ? "an entity parameter" :
+								check_param(d, *it);
+						if(!bad.empty()){
+							why = "root: "+type+"'s "+it.key()+" is "+bad;
+							return false;
+						}
+					}
+			}
 		}
 		const json::Value &es = j.get("entities");
 		if(!es.is_array() || es.size() < (vox ? 0 : 1) ||
@@ -12346,6 +12891,9 @@ struct Module: public interface::Module, public Interface
 				comp.set("params", ps);
 			}
 			comps.append(comp);
+			// [KIT_AIRSHIPS] what a free copy's root carries
+			if(free)
+				root_components(*pf, comps);
 			row.set("components", comps);
 			Entity e;
 			if(!entity_from_json(row, e, why))
@@ -15817,6 +16365,7 @@ struct Module: public interface::Module, public Interface
 		spent += step_drives(budget - spent);
 		send_tracks();
 		free_bodies_tick();
+		own_tick(); // [KIT_AIRSHIPS]
 		send_controls();
 		env_tick();
 		// simplified: the world's actions looked for once a second, not
@@ -16244,7 +16793,7 @@ struct Module: public interface::Module, public Interface
 			if(psi == m_host.scenes.end() || f.second.ref != psi->second)
 				continue;
 			json::Value r = json::array();
-			r.append(f.second.model);
+			r.append(f.second.boxes); // [KIT_AIRSHIPS] its boxes' name
 			for(int k = 0; k < 6; k++)
 				r.append(f.second.place[k]);
 			r.append((int64_t)f.first);
@@ -16313,7 +16862,7 @@ struct Module: public interface::Module, public Interface
 				auto psi = m_host.scenes.find(p.second.scene);
 				std::set<ss_> &got = m_boxes_sent[p.first];
 				for(auto &f : m_free_objects){
-					const ss_ &name = f.second.model;
+					const ss_ &name = f.second.boxes;
 					if(psi == m_host.scenes.end() || f.second.ref != psi->second ||
 							!got.insert(name).second)
 						continue;
@@ -16808,7 +17357,7 @@ struct Module: public interface::Module, public Interface
 			double l[3] = {pos[0] - wp[0], pos[1] - wp[1], pos[2] - wp[2]};
 			Turn::of(wp[3], wp[4], wp[5]).inverse().apply(l);
 			double m = R + 2;
-			const sv_<float> &bx = m_free_boxes[f.second.model];
+			const sv_<float> &bx = m_free_boxes[f.second.boxes];
 			// [KIT_MOVING_OBJECTS] One moving: where it is now, as far again as it can
 			// go by a stamp (on_input_u's window); one this body stands on: from the
 			// feet there, whatever its pose
@@ -17076,7 +17625,7 @@ struct Module: public interface::Module, public Interface
 			(qp.inverse() * qd).inverse().apply(vl);
 			const double m = r + reach + 2;
 			ss_ list;
-			const sv_<float> &bx = m_free_boxes[fi->second.model];
+			const sv_<float> &bx = m_free_boxes[fi->second.boxes];
 			for(size_t i = 0; i + 6 <= bx.size(); i += 6){
 				if(vl[0] + m < bx[i] || vl[0] - m > bx[i + 3] || vl[1] + h + m < bx[i + 1] ||
 						vl[1] - m > bx[i + 4] || vl[2] + m < bx[i + 2] || vl[2] - m > bx[i + 5])
@@ -22818,6 +23367,11 @@ struct Module: public interface::Module, public Interface
 	// (after sort_marks(), which starts the list)
 	void end_round_entities()
 	{
+		// [KIT_AIRSHIPS] the free copies' own voxels gone: their prefabs' again
+		// (sync_free_objects() below)
+		for(auto &o : m_own)
+			m_free_boxes.erase(o.second.boxes);
+		m_own.clear();
 		sv_<uint64_t> made;
 		for(auto &p : m_entities)
 			if(p.second.made)
@@ -22831,8 +23385,11 @@ struct Module: public interface::Module, public Interface
 				m_discarded.push_back(d);
 			}
 			remove_node(e);
-			m_entities.erase(id);
 		}
+		// ([KIT_AIRSHIPS] after every node: a made free copy's members are under
+		// its root, their scene found through it)
+		for(uint64_t id : made)
+			m_entities.erase(id);
 		for(auto &r : m_removed){
 			if(r.second.origin == 'b' && !r.second.by.empty()){
 				Discarded d;
@@ -24969,6 +25526,7 @@ struct Module: public interface::Module, public Interface
 		std::map<std::pair<ss_, ss_>, std::array<double, 3>> scene_pos;
 		std::vector<Projectile> projectiles; // [KIT_TOOLS_2]
 		std::map<uint64_t, FreeObject> free_objects;
+		std::map<uint64_t, OwnGrid> own;
 		std::map<main_context::SceneReference, std::set<ss_>> free_models;
 		sm_<size_t, std::set<ss_>> boxes_sent;
 		int64_t clock_base = 0;
@@ -25014,6 +25572,7 @@ struct Module: public interface::Module, public Interface
 		swap(m_bodies, c.bodies);
 		swap(m_controls_sent, c.controls_sent);
 		swap(m_free_objects, c.free_objects);
+		swap(m_own, c.own);
 		swap(m_free_models, c.free_models);
 		swap(m_boxes_sent, c.boxes_sent);
 		swap(m_seat_home, c.seat_home);

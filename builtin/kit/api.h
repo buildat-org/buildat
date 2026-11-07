@@ -361,8 +361,13 @@ namespace interface
 //   turns its members, their yaws, its cells and a shape's facing (its
 //   param, world.h's Shapes). Links between its entities and the cells
 //   they own stay its own: an owned voxel is its entity's (own_voxels()).
-//   simplified: a prefab copied in play (c:spawn) makes its entities, not
-//   its voxels; a cell's owned data is not in it. Kit's and the
+//   [KIT_AIRSHIPS] A prefab with voxels copied in play (c:spawn) is a free copy
+//   as the editor's Place free makes one: a root (kit/prefab_copy free, at pos,
+//   the returned id) with its members under it, its voxels a free object; a
+//   prefab without voxels makes its entities only. "root": {"components":
+//   [{"type", "params"}...]} (8 at most; voxels only; no player type) are
+//   what such a copy's root carries, placed or spawned (a movement, a
+//   kit/hull). A cell's owned data is not in a copy. Kit's and the
 //   app's are <types dir>/<name>.prefab.json; a builder's ({"op":
 //   "save_prefab"}, author their name) the save's row
 //   "prefab:<author>/<name>", over a file. [KIT_PREFAB_ROOT] The editor's
@@ -376,8 +381,24 @@ namespace interface
 //   by the op "stamp" (the editor's Refresh voxels, and after a move). The
 //   root's turn is its yaw; a stamp takes multiples of 90 of it and refuses a
 //   pitch or a roll ([KIT_FREE_ROTATION]: only a free copy tilts). A copy made in
-//   play (c:spawn) has no root, its members remember the prefab
-//   ({"prefab": {"of", "version", "member", "copy"}}).
+//   play (c:spawn) of a prefab without voxels has no root, its members remember
+//   the prefab ({"prefab": {"of", "version", "member", "copy"}}).
+//   [KIT_AIRSHIPS] Building on a free copy in play: "kit:obuild" {"id", "cell":
+//   [x, y, z] in the root's frame (a cell's middle its whole coordinates),
+//   "voxel" ("air" digs), "param", "tint"}, from a placed peer within its use
+//   range and 4 m. Refused (told why) without a kit/hull on the root, by its
+//   build rule against its state owner (owner, team: the owner's team too,
+//   anyone, nobody), by kit/game_rules' dig and place, outside the 32 cube
+//   centred on the prefab's box, on a taken or empty cell, on the core (the
+//   voxel kit/core: one a ship, never dug or placed), and without the hull's
+//   cost in the placer's kit/wallet (taken from it). Editing skips the hull.
+//   The first change copies the prefab's voxels into the copy's own grid (copy
+//   on write); its model ("kitown_<id>") and boxes ("kitown_<id>.<rev>", sent
+//   as any free object's) are rebuilt for one copy at a time, the one changed
+//   longest ago, at most every OWN_REBUILD_GAP for all of them. A late joiner
+//   gets the copy's model as it is. Stop forgets the grids (play state).
+//   simplified: a fixed 32 cube, no sliding window; the client's aim is the
+//   boxes it has, so a cell placed and not yet rebuilt is not aimed at
 //   A parameter type "prefab"
 //   names one; a parameter's `choices` = {...} are the values it takes;
 //   `choices_from = "biomes"` makes the inspector's a dropdown of the

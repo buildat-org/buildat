@@ -217,6 +217,9 @@ local function act(t, left)
 		kit.swing(a.id)
 	elseif a.kind == "item" then
 		kit.use_item(a.id)
+	elseif a.kind == "dig" and a.object then
+		-- [KIT_AIRSHIPS] a free voxel object's cell, in its frame
+		kit.object_build(a, "air")
 	elseif a.kind == "dig" then
 		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), "air")
 	elseif a.kind == "place" then
@@ -231,7 +234,11 @@ local function act(t, left)
 			end
 			v = item
 		end
-		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), v, a.param)
+		if a.object then
+			kit.object_build(a, v)
+		else
+			build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), v, a.param)
+		end
 	end
 end
 
