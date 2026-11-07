@@ -5,7 +5,8 @@
 -- in the air), coyote_time (s: a jump just after walking off still
 -- counts), jump_buffer (s: one pressed just before landing counts),
 -- step_height (m: climbed walking), slope_limit (degrees: the heightmap's
--- slopes walked up), rate (steps a second) and substeps (a step's).
+-- slopes walked up, and a free voxel object's deck stood on; past it the deck
+-- slides), rate (steps a second) and substeps (a step's).
 -- The keys W A S D and Space; a touchscreen's stick and Jump.
 local BODY = {r = 0.45, h = 1.7, eye = 1.5487}
 

@@ -447,10 +447,11 @@ kit() # <log>: Kit's own lines, not the drive's
 	grep -a " I kit " "$1"
 }
 # 15. [KIT_SIGNALS_DOCS]
+# (Asked for, not F6: the client remembers edit mode, and F6 after that answer turns it off)
 join='wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
-keypress F6
+event kit_edit {"op": "mode", "on": true}
 wait_log_any 10000 kit editor: edit mode on
 frames 5'
 if [ "$DOCS" = docs ]; then
@@ -1439,7 +1440,7 @@ done
 p_join='wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
-keypress F6
+event kit_edit {"op": "mode", "on": true}
 wait_log_any 10000 kit editor: edit mode on
 frames 5'
 last=$(grep -ahoP "An edit by kitboss: placed kit/\S+ \K\d+" "$t/srv2.log" "$s" | sort -n | tail -1)

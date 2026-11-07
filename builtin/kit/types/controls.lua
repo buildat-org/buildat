@@ -3,7 +3,9 @@
 -- top_down: from height above at a fixed angle and yaw, ortho a flat
 -- view), the pointer (crosshair: the view's middle and mouse look;
 -- cursor: a free mouse pointer, the view turned with the right button;
--- auto: a cursor for top_down), the movement (a type stepping the
+-- auto: a cursor for top_down), camera_frame (a walker standing on a free
+-- voxel object: world keeps the horizon level, object tilts the first person
+-- and chase views with the deck), the movement (a type stepping the
 -- players' bodies: kit/walker, kit/click_to_move) and the view's detail:
 -- fov, an offset, smoothing (seconds), roll (degrees), and the effects
 -- tint (#rrggbb) at tint_amount, vignette, blur and glitch (0...1). The
@@ -49,6 +51,8 @@ return {
 			choices = {"first_person", "chase", "top_down"}},
 		pointer = {type = "string", default = "auto",
 			choices = {"auto", "crosshair", "cursor"}},
+		camera_frame = {type = "string", default = "world",
+			choices = {"world", "object"}},
 		movement = {type = "string", default = "kit/walker",
 			choices = {"kit/walker", "kit/click_to_move", "none"}},
 		fov = {cat = "look", type = "number", default = 75, min = 20,

@@ -1264,19 +1264,10 @@ struct Module: public interface::Module, public Interface
 		uint node = 0;
 		// x y z yaw pitch roll
 		std::array<double, 6> place = {{0, 0, 0, 0, 0, 0}};
-		// [KIT_FREE_ROTATION] Pitched or rolled: the boxes bodies meet (see
-		// tilted_boxes), and their name for the clients; level: the model's
-		sv_<float> tilted;
-		ss_ boxes_name;
 	};
-	const sv_<float>& free_body_boxes(const FreeObject &o)
-	{
-		return o.boxes_name.empty() ? m_free_boxes[o.model] : o.tilted;
-	}
 	std::map<uint64_t, FreeObject> m_free_objects;
 	std::map<main_context::SceneReference, std::set<ss_>> m_free_models;
 	sm_<ss_, sv_<float>> m_free_boxes;
-	uint64_t m_free_tilts = 0;
 	sm_<size_t, std::set<ss_>> m_boxes_sent;
 	// [KIT_PREFAB_ROOT] a save's: the copies of this prefab but that one
 	// are built again (rebuilds())
@@ -1941,18 +1932,6 @@ struct Module: public interface::Module, public Interface
 	// simplified: replicate's nodes flat, each placed in the world (the
 	// clients' code reads node.position as the world's); a parent's move
 	// places each node under it again, a scan of the entities a level
-
-	// A turn round y by yaw degrees (Urho3D's: +z towards +x)
-	static void turn_xz(double yaw, double &x, double &z)
-	{
-		if(yaw == 0)
-			return;
-		const double r = yaw * 3.14159265358979323846 / 180;
-		const double c = std::cos(r), s = std::sin(r);
-		const double nx = x * c + z * s, nz = -x * s + z * c;
-		x = nx;
-		z = nz;
-	}
 
 	// [KIT_FREE_ROTATION] A turn as a quaternion, in doubles: world poses are
 	// composed in these, rows keep the angles
@@ -6491,58 +6470,6 @@ struct Module: public interface::Module, public Interface
 				", voxels the scene has not left out" : "");
 	}
 
-	// [KIT_FREE_ROTATION] What a body meets of a pitched or rolled object: its
-	// boxes cut in pieces, each piece's bounds under the pitch and roll, in the
-	// frame the yaw alone turns; move.lua's sweep goes on as for a level object.
-	// simplified: a deck is stairs of pieces, standing on each piece's highest
-	// corner (at most a piece's size * sin(tilt) over the true deck); 1024
-	// pieces at most, larger pieces past that. Kit's stage 4r3, the walker in
-	// the object's frame, replaces this
-	static sv_<float> tilted_boxes(const sv_<float> &bx, double pitch, double roll)
-	{
-		const Turn t = Turn::of(0, pitch, roll);
-		double size = 1;
-		for(;;){
-			double pieces = 0;
-			for(size_t i = 0; i + 6 <= bx.size(); i += 6)
-				pieces += std::ceil((bx[i + 3] - bx[i]) / size) *
-						std::ceil((bx[i + 4] - bx[i + 1]) / size) *
-						std::ceil((bx[i + 5] - bx[i + 2]) / size);
-			if(pieces <= 1024)
-				break;
-			size *= 2;
-		}
-		sv_<float> out;
-		for(size_t i = 0; i + 6 <= bx.size(); i += 6){
-			int n[3];
-			for(int k = 0; k < 3; k++)
-				n[k] = (int)std::ceil((bx[i + 3 + k] - bx[i + k]) / size);
-			for(int a = 0; a < n[0]; a++)
-			for(int b = 0; b < n[1]; b++)
-			for(int c = 0; c < n[2]; c++){
-				const int at[3] = {a, b, c};
-				double lo[3] = {0, 0, 0}, hi[3] = {0, 0, 0};
-				for(int q = 0; q < 8; q++){
-					double v[3];
-					for(int k = 0; k < 3; k++){
-						const double f = bx[i + k] + (at[k] + (q >> k & 1)) * size;
-						v[k] = std::min(f, (double)bx[i + 3 + k]);
-					}
-					t.apply(v);
-					for(int k = 0; k < 3; k++){
-						lo[k] = q ? std::min(lo[k], v[k]) : v[k];
-						hi[k] = q ? std::max(hi[k], v[k]) : v[k];
-					}
-				}
-				for(int k = 0; k < 3; k++)
-					out.push_back((float)lo[k]);
-				for(int k = 0; k < 3; k++)
-					out.push_back((float)hi[k]);
-			}
-		}
-		return out;
-	}
-
 	void sync_free_objects()
 	{
 		voxel_objects::Interface *iv = nullptr;
@@ -6597,21 +6524,12 @@ struct Module: public interface::Module, public Interface
 				it = m_free_objects.end();
 			}
 			const std::array<double, 6> place = {{w[0], w[1], w[2], wy, wp, wr}};
-			// A new name for the clients at each tilt: they keep boxes by name
-			auto tilt = [&](FreeObject &o){
-				const bool level = wp == 0 && wr == 0;
-				o.tilted = level ? sv_<float>() :
-						tilted_boxes(m_free_boxes[model], wp, wr);
-				o.boxes_name = level ? ss_() : model+":"+itos(e.id)+":"+
-						itos(++m_free_tilts);
-			};
 			if(it == m_free_objects.end()){
 				FreeObject o;
 				o.ref = ref;
 				o.model = model;
 				o.node = vo->create_object(model, pos, q);
 				o.place = place;
-				tilt(o);
 				m_free_objects[e.id] = o;
 				log_i(MODULE, "The free object of %s: entity %s, model %s, at "
 						"%.3f,%.3f,%.3f yaw %.3f pitch %.3f roll %.3f, node at "
@@ -6619,11 +6537,7 @@ struct Module: public interface::Module, public Interface
 						cs(itos(e.id)), cs(model), w[0], w[1], w[2], wy, wp, wr,
 						pos.x_, pos.y_, pos.z_, q.w_, q.x_, q.y_, q.z_);
 			} else if(it->second.place != place){
-				const bool retilt = it->second.place[4] != wp ||
-						it->second.place[5] != wr;
 				it->second.place = place;
-				if(retilt)
-					tilt(it->second);
 				const uint node = it->second.node;
 				main_context::access(m_server, ref, [&](magic::Scene *sc){
 					magic::Node *n = sc->GetNode(node);
@@ -14562,10 +14476,10 @@ struct Module: public interface::Module, public Interface
 			if(psi == m_host.scenes.end() || f.second.ref != psi->second)
 				continue;
 			json::Value r = json::array();
-			r.append(f.second.boxes_name.empty() ? f.second.model :
-					f.second.boxes_name);
-			for(int k = 0; k < 4; k++)
+			r.append(f.second.model);
+			for(int k = 0; k < 6; k++)
 				r.append(f.second.place[k]);
+			r.append((int64_t)f.first);
 			objs.append(r);
 		}
 		if(objs.size())
@@ -14603,13 +14517,12 @@ struct Module: public interface::Module, public Interface
 				auto psi = m_host.scenes.find(p.second.scene);
 				std::set<ss_> &got = m_boxes_sent[p.first];
 				for(auto &f : m_free_objects){
-					const ss_ &name = f.second.boxes_name.empty() ? f.second.model :
-							f.second.boxes_name;
+					const ss_ &name = f.second.model;
 					if(psi == m_host.scenes.end() || f.second.ref != psi->second ||
 							!got.insert(name).second)
 						continue;
 					json::Value b = json::array();
-					for(float v : free_body_boxes(f.second))
+					for(float v : m_free_boxes[name])
 						b.append((double)v);
 					inetwork->send(p.first, "kit:object_boxes",
 							name+" "+b.stringify());
@@ -14978,14 +14891,16 @@ struct Module: public interface::Module, public Interface
 			if(f.second.ref != scene)
 				continue;
 			const std::array<double, 6> &wp = f.second.place;
-			double lx = pos[0] - wp[0], lz = pos[2] - wp[2];
-			turn_xz(-wp[3], lx, lz);
+			// [KIT_WALKER_FRAME] The feet in its frame
+			double l[3] = {pos[0] - wp[0], pos[1] - wp[1], pos[2] - wp[2]};
+			Turn::of(wp[3], wp[4], wp[5]).inverse().apply(l);
 			const double m = R + 2;
-			const sv_<float> &bx = free_body_boxes(f.second);
+			const sv_<float> &bx = m_free_boxes[f.second.model];
 			ss_ list;
 			for(size_t i = 0; i + 6 <= bx.size(); i += 6){
-				if(lx + m < bx[i] || lx - m > bx[i + 3] ||
-						lz + m < bx[i + 2] || lz - m > bx[i + 5])
+				if(l[0] + m < bx[i] || l[0] - m > bx[i + 3] ||
+						l[1] + h + m < bx[i + 1] || l[1] - m > bx[i + 4] ||
+						l[2] + m < bx[i + 2] || l[2] - m > bx[i + 5])
 					continue;
 				for(size_t q = 0; q < 6; q++){
 					lua_lit(json::Value((double)bx[i + q]), list);
@@ -14995,11 +14910,11 @@ struct Module: public interface::Module, public Interface
 			if(list.empty())
 				continue;
 			o += "{";
-			for(int k = 0; k < 4; k++){
+			for(int k = 0; k < 6; k++){
 				lua_lit(json::Value(wp[k]), o);
 				o += ',';
 			}
-			o += "{"+list+"}},";
+			o += "{"+list+"},"+itos(f.first)+"},";
 		}
 		o += "}";
 		if(m_w->world_scene && m_w->wp.heightmap() && scene == m_w->world_scene)
@@ -17157,10 +17072,13 @@ struct Module: public interface::Module, public Interface
 		json::Value v = json::array();
 		const json::Value &ov = st.get("vel");
 		const double add[3] = {dx * k, k * 0.4, dz * k};
+		// [KIT_WALKER_FRAME] On an object its velocity is the object's: move.lua
+		// takes the world's knock out of the frame
+		const bool framed = st.get("frame").is_number();
 		for(unsigned i = 0; i < 3; i++)
-			v.append((ov.is_array() && ov.at(i).is_number() ?
+			v.append(framed ? add[i] : (ov.is_array() && ov.at(i).is_number() ?
 					ov.at(i).as_number() : 0) + add[i]);
-		st.set("vel", v);
+		st.set(framed ? "push" : "vel", v);
 		st.set("ground", false);
 		log_i(MODULE, "%s knocked back (%.2f, %.2f, %.2f)",
 				cs(m_peers[peer].name), add[0], add[1], add[2]);

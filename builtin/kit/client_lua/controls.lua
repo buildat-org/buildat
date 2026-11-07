@@ -335,6 +335,9 @@ magic.SubscribeToEvent("command_seq:kit_body", function()
 			"corrections, %d pending, %d jumps, %d arrivals", p[1], p[2], p[3],
 			C.acks, C.corrections, #C.pending, tonumber(C.s and C.s.jumps) or 0,
 			tonumber(C.s and C.s.arrived) or 0))
+	-- [KIT_WALKER_FRAME] To the tenth of a millimetre, for measuring a deck
+	log:info(string.format("kit: feet at %.4f,%.4f,%.4f, frame %s", p[1], p[2],
+			p[3], tostring(C.s and C.s.frame or "none")))
 end)
 
 -- ---- The controls: the movement's file, the signals as they come
@@ -376,15 +379,16 @@ local function signal(key, v)
 	end
 end
 
--- [KIT_FREE_PREFAB] The controls' free objects ({model, x, y, z, yaw}...) and
--- each model's boxes in its object's frame, as the server's body meets them
+-- [KIT_FREE_PREFAB] The controls' free objects ({model, x, y, z, yaw, pitch, roll,
+-- id}...) and each model's boxes in its object's frame, as the server's body
+-- meets them
 local object_boxes = {}
 local function update_turned()
 	local l = {}
 	local list = C.ctl and C.ctl.objects
 	for _, o in ipairs(type(list) == "table" and list or {}) do
 		if object_boxes[o[1]] then
-			l[#l + 1] = {o[2], o[3], o[4], o[5], object_boxes[o[1]]}
+			l[#l + 1] = {o[2], o[3], o[4], o[5], o[6], o[7], object_boxes[o[1]], o[8]}
 		end
 	end
 	C.turned = MV.turned(l)
@@ -516,12 +520,53 @@ local function paused()
 	return (O.paused and O.paused()) or ui_utils.mouse_look_paused()
 end
 
+-- [KIT_WALKER_FRAME] kit/controls' camera_frame: "object" turns the view with the
+-- deck under the body: C.tilt the turn from level to the deck's up, eased; nil
+-- level (the world's). Only its tilt: the mouse's yaw stays the world's heading on
+-- a static object, so nothing jumps on entering; 4r4's object turning round its
+-- own up adds that to C.yaw.
+local function update_tilt(dt)
+	local nx, ny, nz = 0, 1, 0
+	if params().camera_frame == "object" and C.s and C.s.frame then
+		for _, o in ipairs(C.turned or {}) do
+			if o.id == C.s.frame then
+				nx, ny, nz = o.R[2], o.R[5], o.R[8]
+			end
+		end
+	end
+	local u = C.up or {0, 1, 0}
+	local k = 1 - math.exp(-dt / 0.15)
+	u = {u[1] + (nx - u[1]) * k, u[2] + (ny - u[2]) * k, u[3] + (nz - u[3]) * k}
+	local l = math.sqrt(u[1] * u[1] + u[2] * u[2] + u[3] * u[3])
+	u = {u[1] / l, u[2] / l, u[3] / l}
+	C.up = u
+	if u[2] > 0.9999999 then
+		C.tilt = nil
+		return
+	end
+	-- Round up x u, the half angle's: the shortest way from up to u
+	local w, x, z = 1 + u[2], u[3], -u[1]
+	local q = math.sqrt(w * w + x * x + z * z)
+	C.tilt = magic.Quaternion(w / q, x / q, 0, z / q)
+end
+
+-- The heading the view looks along in the world: its yaw, or under a tilt where
+-- that forward goes, level. move.lua's W:walk_on takes it back onto the deck
+local function view_yaw()
+	if not C.tilt then
+		return C.yaw
+	end
+	local a = C.yaw * PI / 180
+	local f = C.tilt * magic.Vector3(math.sin(a), 0, math.cos(a))
+	return math.atan2(f.x, f.z) * 180 / PI
+end
+
 -- The input yaw: the view's (a top-down camera's own)
 local function input_yaw()
 	if camera_mode() == "top_down" then
 		return tonumber(params().yaw) or 0
 	end
-	return C.yaw
+	return view_yaw()
 end
 
 -- [KIT_CTF] Whether this player is dead and waiting to respawn (their
@@ -1062,9 +1107,16 @@ local function place_camera(dt, at)
 		end
 		local pitch = math.max(-10, math.min(80, C.pitch + 15))
 		rot = magic.Quaternion(pitch, yaw, roll)
+		if C.tilt then
+			rot = C.tilt * rot
+		end
 		local d = rot * magic.Vector3(0, 0, 1)
 		local h = tonumber(bd.h) or 1.7
-		local target = magic.Vector3(at[1] + ox, at[2] + h * 0.8 + oy, at[3] + oz)
+		local off = magic.Vector3(ox, h * 0.8 + oy, oz)
+		if C.tilt then
+			off = C.tilt * off
+		end
+		local target = magic.Vector3(at[1] + off.x, at[2] + off.y, at[3] + off.z)
 		-- Not through a wall: in front of what is between
 		local w = world()
 		local t = w:ray(target.x, target.y, target.z, -d.x, -d.y, -d.z, dist)
@@ -1074,8 +1126,12 @@ local function place_camera(dt, at)
 		want_pos = target - d * dist
 	else
 		rot = magic.Quaternion(C.pitch, C.yaw, roll)
-		want_pos = magic.Vector3(at[1] + ox, at[2] +
-				(tonumber(bd.eye) or 1.5487) + oy, at[3] + oz)
+		local off = magic.Vector3(ox, (tonumber(bd.eye) or 1.5487) + oy, oz)
+		if C.tilt then
+			rot = C.tilt * rot
+			off = C.tilt * off
+		end
+		want_pos = magic.Vector3(at[1] + off.x, at[2] + off.y, at[3] + off.z)
 	end
 	-- Smoothed where the camera is not an eye
 	local sm = tonumber(par.smoothing) or 0
@@ -1128,6 +1184,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 		C.ready = true
 		log:info("player physics enabled")
 	end
+	update_tilt(dt)
 	local step_len = 1 / rate()
 	if C.s and C.ready and C.def then
 		C.acc = C.acc + dt
@@ -1161,6 +1218,12 @@ magic.SubscribeToEvent("Update", function(_, data)
 			C.out = {}
 		end
 	end
+	-- [KIT_WALKER_FRAME] For a drive: when the frame changes
+	local fr = C.s and C.s.frame or nil
+	if fr ~= C.was_frame then
+		C.was_frame = fr
+		log:info("kit: the body's frame: " .. tostring(fr or "the world"))
+	end
 	local at = body_at(dt, C.ready and C.acc / step_len or 1)
 	C.draw = at
 	if C.s and tonumber(C.s.yaw) then
@@ -1179,7 +1242,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 	end
 	-- [KIT_PLAYER_MODEL] the players' bodies (players.lua): this one's
 	-- where it is predicted, shown but in first person or in a seat
-	M.draw_players(at, C.yaw, C.pitch, bd_h(), mode ~= "first_person" and
+	M.draw_players(at, view_yaw(), C.pitch, bd_h(), mode ~= "first_person" and
 			not seat and not M.spectating())
 	effects(dt)
 end)
