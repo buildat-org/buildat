@@ -3120,6 +3120,11 @@ inspector_window = function()
 	if S.cat_top then
 		S.cat_top, IV.y = nil, 0
 	end
+	-- [KIT_TOUCH_RULES_INSPECTOR] Another entity's sheet starts at its head: the
+	-- last one's scroll hid kit/game_rules' chips, past the last sheet's rows
+	if IV.of ~= S.primary then
+		IV.of, IV.y = S.primary, 0
+	end
 	IV.view = nil
 	drop("inspector")
 	S.cost_text, S.cost_id = nil, nil

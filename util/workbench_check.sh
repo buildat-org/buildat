@@ -275,9 +275,12 @@ if [ "${1:-}" = web_touch ]; then
 	# its bar's down arrow tapped to the two rows and a finger dragged
 	# to Apply, tapped by label: the
 	# admin plays by the rules out of
-	# edit mode; ([KIT] stage 4f) a finger dragged with the terrain tool (T)
+	# edit mode; ([KIT_TOUCH_RULES_INSPECTOR]) kit/game_rules from the palette,
+	# its inspector 260 of over 1000 tall: the Behaviour chip, building creative
+	# (a dropdown's row by label), a finger on the labels scrolled to Apply;
+	# ([KIT] stage 4f) a finger dragged with the terrain tool (T)
 	# paints a raise stroke, undone; Play mode, and in play a tap uses the button, a tap digs and
-	# a finger held places. The stroke (x -7 to -4, z 1, 50 px a cell
+	# a finger held places (building creative, the voxel of the tool's first pick). The stroke (x -7 to -4, z 1, 50 px a cell
 	# after the pinch, radius 3) keeps off the player at (0.5, 0.5): ground
 	# raised into the body shoved it up to 2 cells aside, the undo did not
 	# put it back, and the play taps pointed past the button. The player
@@ -382,6 +385,24 @@ if [ "${1:-}" = web_touch ]; then
 	["shot", "${OUT}/inspector_foot.png"],
 	["tap", "Button", "Apply"], ["waitlog", "kit editor: state: 4 entities, 7 to undo", 10],
 	["frames", 3], ["shot", "${OUT}/region.png"],
+	["key", "v"], ["waitlog", "kit editor: tool voxels", 5], ["frames", 3],
+	["key", "Escape"], ["waitlog", "kit editor: tool select", 5], ["frames", 3],
+	["tap", "Button", "Tools"], ["frames", 3],
+	["mouse", 250, 380], ["frames", 2],
+	["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1],
+	["frames", 5],
+	["tap", "Button", "kit/game_rules"], ["waitlog", "the palette.s menu of kit/game_rules", 10], ["frames", 3],
+	["tap", "Button", "Place"], ["waitlog", "kit editor: selected 11", 10], ["frames", 3],
+	["tap", "Button", "Inspector"], ["frames", 5],
+	["waitlog", "kit editor: the inspector [0-9]+ of 1[0-9]+ tall", 10],
+	["shot", "${OUT}/rules.png"],
+	["tap", "Button", "Behaviour"], ["waitlog", "kit editor: parameters 11/1 kit/game_rules: chips All Behaviour HUD, showing behaviour", 10], ["frames", 5],
+	["tap", "DropDownList", "▼", 880, 406], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10], ["frames", 5],
+	["tap", "Text", "creative"], ["waitlog", "kit editor: 11/[0-9]+ building = creative", 10], ["frames", 5],
+	["drag", 640, 380, 640, 130, "touch"], ["frames", 10],
+	["drag", 640, 380, 640, 130, "touch"], ["wait", 1000],
+	["shot", "${OUT}/rules_foot.png"],
+	["tap", "Button", "Apply"], ["waitlog", "kit editor: state: 5 entities, 9 to undo", 10], ["frames", 3],
 	["tap", "Button", "Inspector"], ["frames", 3],
 	["fingers", 450, 250, 550, 250, 350, 250, 650, 250],
 	["waitlog", "kit editor: two fingers let go: the plan", 10],
@@ -397,6 +418,7 @@ if [ "${1:-}" = web_touch ]; then
 	["frames", 10], ["shot", "${OUT}/play.png"],
 	["hold", 566, 389, 300], ["waitlog", "kit: use 3", 10],
 	["hold", 575, 470, 300], ["waitlog_any", "kit: points at dig", 10], ["sync", 5000],
+	["frames", 5], ["shot", "${OUT}/dug.png"],
 	["hold", 575, 470, 900], ["sync", 5000],
 	["frames", 5], ["shot", "${OUT}/placed.png"]
 ]
@@ -429,17 +451,17 @@ J
 			"An undo by webboss: a terrain stroke"; do
 		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
 	done
-	# Kit's inventory play (building's default): a finger reaches the dig and
-	# the place, and nothing is written: the ground isn't anyone's and nothing
-	# is in hand. simplified: not driven with building = creative: Kit's rules
-	# in the inspector on this phone's screen answer no click by label (a fit
-	# not settled) and do not scroll; a kit_edit from here would do it.
+	# [KIT_TOUCH_RULES_INSPECTOR] Kit's rules set by finger: building "creative"
+	# in the tall inspector, its foot reached by finger; in play a tap digs, a
+	# finger held places
 	grep -aq "kit: points at dig 1,0,3, place 1,1,3" "$t/out/page.log" ||
 		fail "the finger's point in play ($t/out/page.log)"
-	if grep -aqF "workbench: webboss dug (1,0,3): written" "$t/out/server.log"; then
-		fail "dug under inventory play ($t/out/server.log)"
-	fi
-	echo "PASS: Workbench in the web client by finger: Kit's editor's palette drag, tap, drag, held menu and pinch, a terrain stroke painted and undone; in play a tap uses, a finger reaches the dig and the place"
+	for w in "An edit by webboss: set 11's kit/game_rules building to \"creative\"" \
+			"workbench: webboss dug (1,0,3): written" \
+			"workbench: webboss placed "; do
+		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
+	done
+	echo "PASS: Workbench in the web client by finger: Kit's editor's palette drag, tap, drag, held menu and pinch, a terrain stroke painted and undone; Kit's rules set to creative in their tall inspector; in play a tap uses and digs, a finger held places"
 	exit 0
 fi
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
