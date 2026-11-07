@@ -41,6 +41,7 @@ local ui_utils = require("buildat/extension/ui_utils")
 local network = require("buildat/extension/network")
 local voxelworld = require("buildat/module/voxelworld")
 local heightmap = require("buildat/module/heightmap")
+local replicate = require("buildat/extension/replicate")
 local log = K.log
 local _, mv_err, MV = buildat.run_script_file("kit/move.lua")
 assert(type(MV) == "table", "kit: move.lua: " .. tostring(mv_err))
@@ -149,18 +150,29 @@ end
 local function world()
 	local reg = voxelworld.get_voxel_registry()
 	local boxes = {}
+	local moving_looks = nil
 	local seat = M.seated()
 	for id, n in pairs(P.nodes) do
 		local show = type(n.show) == "table" and n.show or {}
 		if type(show.look) == "table" and id ~= seat and not show.player then
 			local on = show.look.state and K.value(n, show.look.state) == true
-			local p = n.node.position
-			local q = n.node.rotation
-			local tilted = q.x ~= 0 or q.z ~= 0
-			local b = MV.look_box(show.look, on, {p.x, p.y, p.z}, q:YawAngle(),
-					tilted and q:PitchAngle() or 0, tilted and q:RollAngle() or 0)
-			if b then
-				boxes[#boxes + 1] = b
+			local links = M.links_of(id, n)
+			local r = links and n.rest
+			if r then
+				-- [KIT_MOVING_OBJECTS] As each step's time has it, from where it rests
+				local q = magic.Quaternion(r[4], r[5], r[6], r[7])
+				moving_looks = moving_looks or {}
+				moving_looks[#moving_looks + 1] = {show.look, on == true, {r[1], r[2], r[3]},
+					q:YawAngle(), q:PitchAngle(), q:RollAngle(), links}
+			else
+				local p = n.node.position
+				local q = n.node.rotation
+				local tilted = q.x ~= 0 or q.z ~= 0
+				local b = MV.look_box(show.look, on, {p.x, p.y, p.z}, q:YawAngle(),
+						tilted and q:PitchAngle() or 0, tilted and q:RollAngle() or 0)
+				if b then
+					boxes[#boxes + 1] = b
+				end
 			end
 		end
 	end
@@ -195,7 +207,8 @@ local function world()
 		return voxel_info(id, v)
 	end, boxes = boxes, turned = C.turned, ground = ground,
 		edge = ground and {hm[3] or 0, hm[4] or 0, (hm[3] or 0) + hm[1] - 1,
-			(hm[4] or 0) + hm[2] - 1} or nil}
+			(hm[4] or 0) + hm[2] - 1} or nil,
+		moving_looks = moving_looks, t = C.draw_t}
 end
 
 -- ---- The body
@@ -264,6 +277,7 @@ buildat.sub_packet("kit:body", function(data)
 		C.out = {}
 		C.seq = math.max(C.seq, tonumber(b.ack) or 0)
 		C.prev = pos_of(C.s)
+		C.prev_at, C.prev_frame = nil, nil
 		C.prev_yaw = tonumber(C.s.yaw)
 		C.offset = {0, 0, 0}
 		C.acc = 0
@@ -319,6 +333,7 @@ buildat.sub_packet("kit:body", function(data)
 				end
 			end
 			C.prev = after
+			C.prev_at, C.prev_frame = nil, nil
 		end
 	end
 end)
@@ -338,6 +353,23 @@ magic.SubscribeToEvent("command_seq:kit_body", function()
 	-- [KIT_WALKER_FRAME] To the tenth of a millimetre, for measuring a deck
 	log:info(string.format("kit: feet at %.4f,%.4f,%.4f, frame %s", p[1], p[2],
 			p[3], tostring(C.s and C.s.frame or "none")))
+	-- [KIT_MOVING_OBJECTS] The time they were stepped at, and as drawn this frame:
+	-- the time, the body's feet and each moving object's node
+	if C.draw_t then
+		local d = C.draw or p
+		local parts = {string.format("kit: moving: stepped at %.3f, drawn at %.3f, drawn "
+				.. "feet %.4f,%.4f,%.4f, offset of the shared time %.3f", C.last_t or 0,
+				C.draw_t, d[1], d[2], d[3], C.clock_off or 0)}
+		for _, o in ipairs(C.moving_nodes) do
+			local n = replicate.main_scene:GetNode(o.node)
+			if n then
+				local a, q = n.position, n.rotation
+				parts[#parts + 1] = string.format("%d node %.4f,%.4f,%.4f turn "
+						.. "%.5f,%.5f,%.5f,%.5f", o.id, a.x, a.y, a.z, q.w, q.x, q.y, q.z)
+			end
+		end
+		log:info(table.concat(parts, "; "))
+	end
 end)
 
 -- ---- The controls: the movement's file, the signals as they come
@@ -380,18 +412,233 @@ local function signal(key, v)
 end
 
 -- [KIT_FREE_PREFAB] The controls' free objects ({model, x, y, z, yaw, pitch, roll,
--- id}...) and each model's boxes in its object's frame, as the server's body
--- meets them
+-- id, node, links}...) and each model's boxes in its object's frame, as the server's
+-- body meets them. [KIT_MOVING_OBJECTS] C.links by entity: what moves each one that
+-- moves; C.moving_nodes their voxel nodes
 local object_boxes = {}
+C.links, C.moving_nodes = {}, {}
 local function update_turned()
 	local l = {}
 	local list = C.ctl and C.ctl.objects
+	local links, nodes = {}, {}
+	C.turned_by = {}
 	for _, o in ipairs(type(list) == "table" and list or {}) do
+		local li = type(o[10]) == "table" and #o[10] > 0 and o[10] or nil
+		if li then
+			links[o[8]] = li
+			nodes[#nodes + 1] = {id = o[8], node = o[9], links = li}
+		end
 		if object_boxes[o[1]] then
-			l[#l + 1] = {o[2], o[3], o[4], o[5], o[6], o[7], object_boxes[o[1]], o[8]}
+			l[#l + 1] = {o[2], o[3], o[4], o[5], o[6], o[7], object_boxes[o[1]], o[8], li}
 		end
 	end
+	-- (what was moved and is no more goes back in M.moving_tick)
+	C.gone_nodes = C.gone_nodes or {}
+	for _, o in ipairs(C.moving_nodes) do
+		C.gone_nodes[o.node] = o
+	end
+	for _, o in ipairs(nodes) do
+		local was = C.gone_nodes[o.node]
+		if was then
+			o.rest, o.sx, o.sy, o.sz, o.sw, o.sa, o.sb, o.sc = was.rest, was.sx, was.sy, was.sz,
+					was.sw, was.sa, was.sb, was.sc
+			C.gone_nodes[o.node] = nil
+		end
+	end
+	C.links, C.moving_nodes = links, nodes
 	C.turned = MV.turned(l)
+	for _, t in ipairs(C.turned) do
+		C.turned_by[t.id] = t
+	end
+	C.pose_world = MV.world{turned = C.turned}
+end
+
+-- ---- [KIT_MOVING_OBJECTS] The shared time: the server's now and then ("kit:clock",
+-- ms and its rate), the network's delay in it held low (each client draws a little
+-- behind the server, by its own delay; what matters is that a step and the server's
+-- stepping of it share its stamp).
+-- simplified: no round trip measured: two clients differ by the difference of their
+-- delays, a matter of how a deck's phase looks from outside
+buildat.sub_packet("kit:clock", function(data)
+	local t, rate = data:match("^(%S+) (%S+)")
+	t, rate = tonumber(t), tonumber(rate)
+	if not t or not rate then
+		return
+	end
+	local s = t / 1000 - buildat.get_time_us() / 1e6 * rate
+	local off = C.clock_off
+	if not off or rate ~= C.clock_rate or math.abs(s - off) > 0.5 then
+		C.clock_off, C.clock_rate = s, rate
+		log:info(string.format("kit: the shared time is %.3f", t / 1000))
+	elseif s > off then
+		C.clock_off = off + (s - off) * 0.5
+	else
+		C.clock_off = off + (s - off) * 0.05
+	end
+end)
+
+local function shared_time()
+	return (C.clock_off or 0) + buildat.get_time_us() / 1e6 * (C.clock_rate or 1)
+end
+
+-- What moves an entity's node: its own object's links, those of what it is under, or
+-- a body's deck ("kit_frame", kit.cpp's place_player); nil: nothing
+function M.links_of(id, n)
+	if not next(C.links) then
+		return nil
+	end
+	if C.links[id] then
+		return C.links[id]
+	end
+	local v = n.node:GetVar("kit_frame")
+	local pid = v:IsEmpty() and 0 or v:GetInt()
+	if pid == 0 then
+		v = n.node:GetVar("kit_parent")
+		pid = v:IsEmpty() and 0 or v:GetInt()
+	end
+	for _ = 1, 16 do
+		if pid == 0 then
+			return nil
+		end
+		if C.links[pid] then
+			return C.links[pid]
+		end
+		local pn = P.nodes[pid]
+		if not pn then
+			return nil
+		end
+		v = pn.node:GetVar("kit_parent")
+		pid = v:IsEmpty() and 0 or v:GetInt()
+	end
+	return nil
+end
+
+-- A link's change at the draw's time, once a frame
+local function link_now(l)
+	if l.now_t ~= C.draw_t then
+		local xt, yt, zt, _, wp, wy, wr = MV.link_at(l, C.draw_t)
+		if not l.q0 then
+			l.q0 = magic.Quaternion(tonumber(l[5]) or 0, tonumber(l[4]) or 0, tonumber(l[6]) or 0)
+			local q = l.q0
+			l.q0i = magic.Quaternion(q.w, -q.x, -q.y, -q.z)
+		end
+		l.now_t = C.draw_t
+		l.xt, l.yt, l.zt = xt, yt, zt
+		l.d = l.q0 * magic.Quaternion(wp, wy, wr) * l.q0i
+	end
+	return l
+end
+
+-- A place at rest, as the links have it now: a Vector3
+local function moved_point(links, x, y, z)
+	local p = magic.Vector3(x, y, z)
+	for _, l in ipairs(links) do
+		link_now(l)
+		p = l.d * magic.Vector3(p.x - l[1], p.y - l[2], p.z - l[3]) +
+				magic.Vector3(l.xt, l.yt, l.zt)
+	end
+	return p
+end
+
+-- A node (rec: what is kept of it: n, or a row's) where its links have it now. What
+-- it rests at is what the server last set (a value not the one written here): the
+-- server's nodes stay at rest, and nothing but this moves them.
+-- simplified: a node the server moves during play under a moving object (a kit/mover
+-- on a deck) comes through the client's SmoothedTransform, whose blend reads as a new
+-- rest here. The way out is a rest in a variable as a body has it, or a client that
+-- can take the smoothing off a node (no binding for it yet)
+local function place_moving(rec, node, links)
+	local p, q = node.position, node.rotation
+	if not rec.rest or p.x ~= rec.sx or p.y ~= rec.sy or p.z ~= rec.sz or q.w ~= rec.sw or
+			q.x ~= rec.sa or q.y ~= rec.sb or q.z ~= rec.sc then
+		rec.rest = {p.x, p.y, p.z, q.w, q.x, q.y, q.z}
+	end
+	local r = rec.rest
+	local at = moved_point(links, r[1], r[2], r[3])
+	local turn = magic.Quaternion(r[4], r[5], r[6], r[7])
+	for _, l in ipairs(links) do
+		turn = l.d * turn
+	end
+	node.position = at
+	node.rotation = turn
+	p, q = node.position, node.rotation
+	rec.sx, rec.sy, rec.sz = p.x, p.y, p.z
+	rec.sw, rec.sa, rec.sb, rec.sc = q.w, q.x, q.y, q.z
+end
+
+-- No longer moved: at rest, unless the server has since set it
+local function place_rest(rec, node)
+	local p, q = node.position, node.rotation
+	local r = rec.rest
+	if p.x == rec.sx and p.y == rec.sy and p.z == rec.sz and q.w == rec.sw and
+			q.x == rec.sa and q.y == rec.sb and q.z == rec.sc then
+		node.position = magic.Vector3(r[1], r[2], r[3])
+		node.rotation = magic.Quaternion(r[4], r[5], r[6], r[7])
+	end
+	rec.rest = nil
+end
+
+-- Each frame, first: the time everything is drawn at; each moved node there
+function M.moving_tick()
+	if not next(C.links) and not next(C.gone_nodes or {}) and not C.were_moving then
+		C.draw_t = nil
+		return
+	end
+	local any = next(C.links) ~= nil
+	C.draw_t = any and shared_time() or nil
+	C.were_moving = any
+	if any then
+		C.pose_world:pose_at(C.draw_t)
+	end
+	for id, n in pairs(P.nodes) do
+		local links = M.links_of(id, n)
+		-- A body on a deck: its rest in "kit_rest" (kit.cpp's place_player)
+		local fv = links and n.node:GetVar("kit_frame")
+		if fv and not fv:IsEmpty() and fv:GetInt() ~= 0 then
+			local rs = n.node:GetVar("kit_rest"):GetString()
+			if rs ~= n.body_rest_s then
+				local x, y, z = rs:match("^(%S+) (%S+) (%S+)$")
+				n.body_rest_s = rs
+				n.body_rest = x and magic.Vector3(tonumber(x), tonumber(y), tonumber(z)) or nil
+			end
+			if n.body_rest then
+				local r = n.body_rest
+				n.node.position = moved_point(links, r.x, r.y, r.z)
+			end
+		else
+			n.body_rest, n.body_rest_s = nil, nil
+			if links then
+				place_moving(n, n.node, links)
+			elseif n.rest then
+				place_rest(n, n.node)
+			end
+		end
+	end
+	for _, o in ipairs(C.moving_nodes) do
+		local node = replicate.main_scene:GetNode(o.node)
+		if node then
+			place_moving(o, node, o.links)
+		end
+	end
+	for id, o in pairs(C.gone_nodes or {}) do
+		local node = replicate.main_scene:GetNode(id)
+		if node and o.rest then
+			place_rest(o, node)
+		end
+		C.gone_nodes[id] = nil
+	end
+end
+
+-- For players.lua: a body's place at rest, what a moved point is as drawn; the time
+function M.rest_position(n)
+	return n.body_rest or n.node.position
+end
+function M.moved_body(id, n, at)
+	local links = M.links_of(id, n)
+	return links and C.draw_t and moved_point(links, at.x, at.y, at.z) or at
+end
+function M.draw_time()
+	return C.draw_t
 end
 
 buildat.sub_packet("kit:object_boxes", function(data)
@@ -523,17 +770,26 @@ end
 -- [KIT_WALKER_FRAME] kit/controls' camera_frame: "object" turns the view with the
 -- deck under the body: C.tilt the turn from level to the deck's up, eased; nil
 -- level (the world's). Only its tilt: the mouse's yaw stays the world's heading on
--- a static object, so nothing jumps on entering; 4r4's object turning round its
--- own up adds that to C.yaw.
+-- a static object, so nothing jumps on entering; [KIT_MOVING_OBJECTS] one turning
+-- round its own up adds that to C.yaw.
 local function update_tilt(dt)
 	local nx, ny, nz = 0, 1, 0
+	local heading = nil
 	if params().camera_frame == "object" and C.s and C.s.frame then
 		for _, o in ipairs(C.turned or {}) do
 			if o.id == C.s.frame then
 				nx, ny, nz = o.R[2], o.R[5], o.R[8]
+				-- [KIT_MOVING_OBJECTS] An object turning under the body: the view with it
+				if o.links then
+					heading = {o.id, math.atan2(o.R[3], o.R[9]) * 180 / PI}
+				end
 			end
 		end
 	end
+	if heading and C.heading and C.heading[1] == heading[1] then
+		C.yaw = C.yaw + ((heading[2] - C.heading[2] + 180) % 360 - 180)
+	end
+	C.heading = heading
 	local u = C.up or {0, 1, 0}
 	local k = 1 - math.exp(-dt / 0.15)
 	u = {u[1] + (nx - u[1]) * k, u[2] + (ny - u[2]) * k, u[3] + (nz - u[3]) * k}
@@ -1029,6 +1285,20 @@ local function body_at(dt, alpha)
 	for i = 1, 3 do
 		C.offset[i] = C.offset[i] * k
 	end
+	-- [KIT_MOVING_OBJECTS] On a moving deck: its own steps' place on the deck as the
+	-- deck is drawn, so nothing is between the view and the deck
+	local fr = C.s.frame
+	local o = fr and C.draw_t and C.turned_by and C.turned_by[fr]
+	if o and o.links and type(C.s.at) == "table" then
+		local a = C.s.at
+		local b = C.prev_frame == fr and C.prev_at or a
+		local lx, ly, lz = b[1] + (a[1] - b[1]) * alpha, b[2] + (a[2] - b[2]) * alpha,
+				b[3] + (a[3] - b[3]) * alpha
+		local R = o.R
+		return {o.x + R[1] * lx + R[2] * ly + R[3] * lz + C.offset[1],
+			o.y + R[4] * lx + R[5] * ly + R[6] * lz + C.offset[2],
+			o.z + R[7] * lx + R[8] * ly + R[9] * lz + C.offset[3]}
+	end
 	return {q[1] + (p[1] - q[1]) * alpha + C.offset[1],
 		q[2] + (p[2] - q[2]) * alpha + C.offset[2],
 		q[3] + (p[3] - q[3]) * alpha + C.offset[3]}
@@ -1184,7 +1454,6 @@ magic.SubscribeToEvent("Update", function(_, data)
 		C.ready = true
 		log:info("player physics enabled")
 	end
-	update_tilt(dt)
 	local step_len = 1 / rate()
 	if C.s and C.ready and C.def then
 		C.acc = C.acc + dt
@@ -1195,8 +1464,15 @@ magic.SubscribeToEvent("Update", function(_, data)
 			n = n + 1
 			w = w or world()
 			C.prev = pos_of(C.s)
+			C.prev_at = type(C.s.at) == "table" and {C.s.at[1], C.s.at[2], C.s.at[3]} or nil
+			C.prev_frame = C.s.frame
 			C.prev_yaw = tonumber(C.s.yaw)
 			local i = gather()
+			-- [KIT_MOVING_OBJECTS] The time of this step: both sides step it there
+			if C.draw_t then
+				i.t = math.floor((C.draw_t - C.acc * (C.clock_rate or 1)) * 1000)
+				C.last_t = i.t / 1000
+			end
 			C.seq = C.seq + 1
 			step(C.s, i, w)
 			C.pending[#C.pending + 1] = {C.seq, i}
@@ -1205,7 +1481,8 @@ magic.SubscribeToEvent("Update", function(_, data)
 			C.out[#C.out + 1] = string.format("%d %s %s %s %d %d %s %s %s " ..
 					"%s %d %d", C.seq, i.f, i.r, i.yaw, i.jump, i.go, i.tx, i.ty,
 					i.tz, fmt(C.pitch, 1), M.pose_swings or 0,
-					M.dig_progress and M.dig_progress() and 1 or 0)
+					M.dig_progress and M.dig_progress() and 1 or 0) ..
+					(i.t and string.format(" %.0f", i.t) or "")
 			route_tick()
 		end
 		if C.acc > step_len then
@@ -1218,6 +1495,11 @@ magic.SubscribeToEvent("Update", function(_, data)
 			C.out = {}
 		end
 	end
+	-- (a step left what moves at its stamp)
+	if C.draw_t then
+		C.pose_world:pose_at(C.draw_t)
+	end
+	update_tilt(dt)
 	-- [KIT_WALKER_FRAME] For a drive: when the frame changes
 	local fr = C.s and C.s.frame or nil
 	if fr ~= C.was_frame then

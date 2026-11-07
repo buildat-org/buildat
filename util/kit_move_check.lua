@@ -610,4 +610,150 @@ do
 	end
 	assert(a.frame == b.frame)
 end
+-- [KIT_MOVING_OBJECTS] A deck on a function of time: a body in its frame is carried
+-- with no work of its own; a stamped step is the same on both sides whichever batch it
+-- came in; a jump keeps the deck's speed, a landing takes it off; a moving deck catches
+-- what it comes over; carried into the world it gets off.
+local function moving_world(motion, y, boxes, cells)
+	local links = motion and {{0, y or 5, 0, 0, 0, 0, motion}} or nil
+	return MV.world{cell = cells or function(_, j)
+		return j <= 0 and STONE or nil
+	end, turned = MV.turned({{0, y or 5, 0, 0, 0, 0, boxes or DECK, 7, links}})}
+end
+local function stepped(w, s, input, from, n)
+	for k = 0, n - 1 do
+		local i = {f = input.f, r = input.r, yaw = input.yaw, jump = input.jump, go = 0,
+			t = from + k * 1000 / 60}
+		i.t = math.floor(i.t)
+		MV.steps(walker, s, {i}, 1 / 60, 1, w, wp)
+	end
+end
+do
+	local idle = {f = 0, r = 0, yaw = 0, jump = 0, go = 0}
+	-- The pose against the check's own: roll 10 at a period of 4, pivot off the origin
+	local m = {wave_roll = 10, wave_roll_period = 4, pivot = {3, 0, 0}, wave_heave = 2,
+		wave_heave_period = 8}
+	local w = moving_world(m)
+	assert(w.moving, "a world with a moving object knows")
+	w:pose_at(1)
+	local a = 10 * math.pi / 180 -- at t = 1, a quarter of 4: the whole roll
+	local o = w.turned[1]
+	local c, sn = math.cos(a), math.sin(a)
+	assert(near(o.R[1], c, 1e-9) and near(o.R[2], -sn, 1e-9) and near(o.R[4], sn, 1e-9),
+			"the roll's turn")
+	-- pivot + heave - turn * pivot; heave 2 * sin(2 pi / 8)
+	assert(near(o.x, 3 - 3 * c, 1e-9) and near(o.y, 5 + 2 * math.sin(2 * math.pi / 8) - 3 * sn, 1e-9),
+			"the pivot's place stays: " .. o.x .. " " .. o.y)
+	-- A course there and back
+	local mc = {course = {4, 0, 0}, course_time = 2}
+	w = moving_world(mc)
+	for _, q in ipairs({{0, 0}, {1, 2}, {2, 4}, {3, 2}, {4, 0}, {5, 2}}) do
+		w:pose_at(q[1])
+		assert(near(w.turned[1].x, q[2], 1e-9), "the course at " .. q[1])
+	end
+	-- Standing on a rolling, heaving deck: the feet stay on it for minutes of it, and
+	-- the world's place goes with the deck; no stepping of its own
+	w = moving_world({wave_roll = 12, wave_roll_period = 5, wave_pitch = 7,
+		wave_pitch_period = 7, wave_heave = 1, wave_heave_period = 3}, 20)
+	w:pose_at(0)
+	local s = on_deck(w, 2, 3)
+	stepped(w, s, idle, 0, 30)
+	assert(s.frame == 7, "on the deck")
+	local at = {s.at[1], s.at[2], s.at[3]}
+	local went = 0
+	local y0 = s.pos[2]
+	for n = 1, 60 do
+		stepped(w, s, idle, n * 500, 30)
+		assert(s.frame == 7, "still on it at " .. n)
+		for k = 1, 3 do
+			assert(near(s.at[k], at[k], 1e-3), "it stands where it stood " .. n .. " " .. k)
+		end
+		-- The world's place is the deck's point
+		local lx, ly, lz = feet(w, s)
+		assert(near(lx, at[1], 1e-6) and near(ly, at[2], 1e-6) and near(lz, at[3], 1e-6),
+				"s.pos goes with the deck")
+		went = math.max(went, math.abs(s.pos[2] - y0))
+	end
+	assert(went > 0.5, "it was carried: " .. went)
+	-- Walked on a rolling deck: the same way over the deck, whatever the phase; off its
+	-- edge it falls with the deck's speed
+	w = moving_world({wave_roll = 12, wave_roll_period = 5}, 20)
+	w:pose_at(0)
+	s = on_deck(w, -8, 0)
+	stepped(w, s, idle, 0, 30)
+	stepped(w, s, {f = 0, r = 1, yaw = 0, jump = 0}, 500, 120)
+	assert(s.frame == 7 and s.at[1] > -8 + 4, "walked across: " .. s.at[1])
+	-- Client and server: a state stepped by input, wired, the same bits by batches
+	local function replay(batch)
+		local w2 = moving_world({wave_roll = 12, wave_roll_period = 5, wave_pitch = 5,
+			wave_pitch_period = 3}, 20)
+		w2:pose_at(0)
+		local b = on_deck(w2, 0, 0)
+		local inputs = {}
+		for n = 1, 600 do
+			inputs[#inputs + 1] = {f = n % 200 < 150 and 1 or 0, r = n % 60 < 30 and 1 or 0,
+				yaw = n % 360, jump = n % 97 == 0 and 1 or 0, go = 0,
+				t = n * 17 + (n % 7)}
+			if #inputs == batch then
+				-- (the server's own world, built anew each batch at its own time)
+				w2 = moving_world({wave_roll = 12, wave_roll_period = 5, wave_pitch = 5,
+					wave_pitch_period = 3}, 20)
+				w2:pose_at(n * 1.234)
+				MV.steps(walker, b, inputs, 1 / 60, 1, w2, wp)
+				inputs = {}
+			end
+		end
+		return b
+	end
+	local b1, b2 = replay(1), replay(8)
+	for k = 1, 3 do
+		assert(b1.pos[k] == b2.pos[k], "the same bits by batches: " .. b1.pos[k] .. " " .. b2.pos[k])
+	end
+	assert((b1.jumps or 0) > 0, "and it jumped")
+	-- A jump keeps the deck's speed: on a course of 6 m/s it lands where it left
+	w = moving_world({course = {12, 0, 0}, course_time = 2}, 3)
+	w:pose_at(0)
+	s = on_deck(w, 0, 0)
+	stepped(w, s, idle, 0, 30)
+	assert(s.frame == 7, "on the course's deck")
+	local at0 = s.at[1]
+	stepped(w, s, {f = 0, r = 0, yaw = 0, jump = 1}, 500, 1)
+	assert(s.frame == nil and near(s.vel[1], 6, 1e-6), "left with its speed: " .. tostring(s.vel[1]))
+	assert(s.vel[2] > 1, "up")
+	stepped(w, s, idle, 517, 60)
+	assert(s.frame == 7, "landed on it again")
+	assert(near(s.at[1], at0, 0.15), "where it left: " .. s.at[1] .. " " .. at0)
+	assert(near(s.vel[1], 0, 0.5), "the deck's speed off again: " .. s.vel[1])
+	-- A deck rising from under a body on the ground: it is lifted onto it, its frame.
+	-- And one coming down over it pushes it off the bottom or out
+	w = moving_world({wave_heave = 3, wave_heave_period = 8},
+			-0.5 + 0.5 + 1.0 - 3 + 0.1, {-3, -0.5, -3, 3, 0.5, 3})
+	w:pose_at(0)
+	s = {pos = {0, 0.5, 0}, ground = true}
+	local rose = 0
+	for n = 0, 23 do
+		stepped(w, s, idle, n * 167, 10)
+		if s.frame == 7 then
+			rose = math.max(rose, s.pos[2])
+		end
+	end
+	assert(rose > 1.5, "lifted by the deck rising: " .. rose)
+	assert(s.frame == nil and near(s.pos[2], 0.5, 1e-3), "off it as it sinks into the floor: "
+			.. s.pos[2])
+	-- Carried into a wall: off it
+	w = moving_world({course = {20, 0, 0}, course_time = 4}, 3, {-3, -0.5, -3, 3, 0.5, 3},
+		function(i, j)
+			return (j <= 0 or (i >= 10 and i <= 11)) and STONE or nil
+		end)
+	w:pose_at(0)
+	s = on_deck(w, 0, 0)
+	stepped(w, s, idle, 0, 6)
+	assert(s.frame == 7, "on the deck before the wall")
+	local left = false
+	for n = 1, 40 do
+		stepped(w, s, idle, 100 + n * 100, 6)
+		left = left or s.frame == nil
+	end
+	assert(left, "carried into the wall it gets off")
+end
 print("kit_move_check: ok")

@@ -40,6 +40,12 @@
 -- each step). Gravity is the world's turned in: past slope_limit the deck slides.
 -- It enters on landing on an object's top (W:walk's end) and leaves by jumping,
 -- by nothing under it, or by the world's floor under it (W:walk_on).
+-- [KIT_MOVING_OBJECTS] A free object's pose can be a function of the shared time,
+-- so no pose is ever sent: each input carries the time it was stepped at (i.t, ms),
+-- M.steps puts the world's objects where they are at that time on both sides, and a
+-- body in a frame is carried by s.at being local. The motion's parameters are
+-- kit/prefab_copy's (M.wave); a row has its own and those of the moving objects it
+-- is under as links, each in the world at rest (M.turned).
 local M = {}
 local floor, sqrt = math.floor, math.sqrt
 local PI = 3.14159265358979323846
@@ -193,6 +199,7 @@ local function rotation(rx, ry, rz)
 end
 
 function M.look_box(look, on, pos, yaw, pitch, roll)
+	-- ([KIT_MOVING_OBJECTS] or yaw the entity's turn as a matrix)
 	if type(look) ~= "table" then
 		return nil
 	end
@@ -247,7 +254,9 @@ function M.look_box(look, on, pos, yaw, pitch, roll)
 	local r = type(look.rotation) == "table" and look.rotation or {}
 	local R
 	pitch, roll = tonumber(pitch) or 0, tonumber(roll) or 0
-	if pitch == 0 and roll == 0 then
+	if type(yaw) == "table" then
+		R = m3(yaw, rotation(tonumber(r[1]) or 0, tonumber(r[2]) or 0, tonumber(r[3]) or 0))
+	elseif pitch == 0 and roll == 0 then
 		R = rotation(tonumber(r[1]) or 0, (tonumber(r[2]) or 0) +
 				(tonumber(yaw) or 0), tonumber(r[3]) or 0)
 	else
@@ -271,6 +280,80 @@ function M.look_box(look, on, pos, yaw, pitch, roll)
 	return b
 end
 
+-- [KIT_MOVING_OBJECTS] What the object's motion is at t (seconds): the turn over its
+-- own (pitch, yaw, roll, degrees), how far up its own axis, how far along its course
+-- (0...1...0)
+local function swing(amp, period, t)
+	amp, period = tonumber(amp) or 0, tonumber(period) or 0
+	if amp == 0 or period <= 0 then
+		return 0
+	end
+	return amp * M.sin(2 * PI * t / period)
+end
+function M.wave(m, t)
+	local ct, u = tonumber(m.course_time) or 0, 0
+	if ct > 0 then
+		u = t / ct
+		u = u - 2 * floor(u / 2)
+		u = u > 1 and 2 - u or u
+	end
+	return swing(m.wave_pitch, m.wave_pitch_period, t),
+			swing(m.wave_yaw, m.wave_yaw_period, t),
+			swing(m.wave_roll, m.wave_roll_period, t),
+			swing(m.wave_heave, m.wave_heave_period, t), u
+end
+
+local function vec3(v)
+	if type(v) ~= "table" then
+		return 0, 0, 0
+	end
+	return tonumber(v[1]) or 0, tonumber(v[2]) or 0, tonumber(v[3]) or 0
+end
+
+-- A link {x, y, z, yaw, pitch, roll, motion} (an object at rest in the world, what
+-- moves it) at t: where its origin is, D, the world's turn it makes round where its
+-- origin was at rest, and the wave's angles (kit.cpp's moved_local says the same in
+-- the object's parent)
+function M.link_at(l, t)
+	local R0 = l.R0
+	if not R0 then
+		R0 = rotation(tonumber(l[5]) or 0, tonumber(l[4]) or 0, tonumber(l[6]) or 0)
+		l.R0 = R0
+	end
+	local m = l[7]
+	local wp, wy, wr, h, u = M.wave(m, t)
+	local W = rotation(wp, wy, wr)
+	local px, py, pz = vec3(m.pivot)
+	local cx, cy, cz = vec3(m.course)
+	local vx = px + cx * u - (W[1] * px + W[2] * py + W[3] * pz)
+	local vy = py + cy * u + h - (W[4] * px + W[5] * py + W[6] * pz)
+	local vz = pz + cz * u - (W[7] * px + W[8] * py + W[9] * pz)
+	local A = m3(R0, W)
+	local D = {}
+	for i = 0, 2 do
+		for j = 0, 2 do
+			D[i * 3 + j + 1] = A[i * 3 + 1] * R0[j * 3 + 1] + A[i * 3 + 2] * R0[j * 3 + 2]
+					+ A[i * 3 + 3] * R0[j * 3 + 3]
+		end
+	end
+	return l[1] + R0[1] * vx + R0[2] * vy + R0[3] * vz,
+			l[2] + R0[4] * vx + R0[5] * vy + R0[6] * vz,
+			l[3] + R0[7] * vx + R0[8] * vy + R0[9] * vz, D, wp, wy, wr
+end
+
+-- A place and turn at rest as its links have them at t (the nearest link first)
+local function pose_of(links, x, y, z, R, t)
+	for _, l in ipairs(links) do
+		local xt, yt, zt, D = M.link_at(l, t)
+		local dx, dy, dz = x - l[1], y - l[2], z - l[3]
+		x = xt + D[1] * dx + D[2] * dy + D[3] * dz
+		y = yt + D[4] * dx + D[5] * dy + D[6] * dz
+		z = zt + D[7] * dx + D[8] * dy + D[9] * dz
+		R = m3(D, R)
+	end
+	return x, y, z, R
+end
+
 -- A point or direction into an object's frame, and out of it (R: frame to world)
 local function into(o, x, y, z)
 	local R = o.R
@@ -287,7 +370,8 @@ end
 -- yaw, pitch, roll, {x0, y0, z0, x1, y1, z1, ...}, id} (a place, a turn, boxes in
 -- that frame, its entity). [KIT_WALKER_FRAME] A body outside its frame meets one
 -- as a box of the object's axes, from its feet: turned with the object. A body
--- standing on it steps in its frame.
+-- standing on it steps in its frame. [KIT_MOVING_OBJECTS] And o[9], its links
+-- (M.link_at): W:pose_at moves it.
 function M.turned(list)
 	local out = {}
 	for _, o in ipairs(list) do
@@ -306,6 +390,9 @@ function M.turned(list)
 		end
 		local t = {id = o[8], x = o[1], y = o[2], z = o[3], rad = rad, b = boxes,
 			R = rotation(tonumber(o[5]) or 0, tonumber(o[4]) or 0, tonumber(o[6]) or 0)}
+		if type(o[9]) == "table" and #o[9] > 0 then
+			t.links, t.x0, t.y0, t.z0, t.R0 = o[9], t.x, t.y, t.z, t.R
+		end
 		-- What a sweep along y meets on its top: M.OBJECT and the way in
 		t.info = {solid = true, friction = 1, surface = "object", frame = t}
 		out[#out + 1] = t
@@ -336,7 +423,59 @@ function M.world(t)
 	w.edge = t.edge
 	w.unknown_air = t.ground ~= nil or t.edge ~= nil
 	w.cache = {}
+	-- [KIT_MOVING_OBJECTS] t.moving_looks: solid looks on moving objects, each
+	-- {look, on, {x, y, z}, yaw, pitch, roll, links} at rest
+	w.moving_looks = t.moving_looks
+	w.moving = t.moving_looks ~= nil and #t.moving_looks > 0
+	for _, o in ipairs(w.turned) do
+		w.moving = w.moving or o.links ~= nil
+	end
+	if w.moving and t.t then
+		w:pose_at(t.t)
+	end
 	return w
+end
+
+-- [KIT_MOVING_OBJECTS] The moving objects and looks of this world where they are at
+-- t (seconds): both sides, for a step stamped t
+function W:pose_at(t)
+	self.t = t
+	for _, o in ipairs(self.turned) do
+		if o.links then
+			o.x, o.y, o.z, o.R = pose_of(o.links, o.x0, o.y0, o.z0, o.R0, t)
+		end
+	end
+	if self.moving_looks then
+		if not self.static_boxes then
+			self.static_boxes = self.boxes
+		end
+		local b = {}
+		for _, o in ipairs(self.static_boxes) do
+			b[#b + 1] = o
+		end
+		for _, l in ipairs(self.moving_looks) do
+			local p = l[3]
+			local x, y, z, R = pose_of(l[7], p[1], p[2], p[3], rotation(tonumber(l[5]) or 0,
+					tonumber(l[4]) or 0, tonumber(l[6]) or 0), t)
+			local box = M.look_box(l[1], l[2], {x, y, z}, R)
+			if box then
+				b[#b + 1] = box
+			end
+		end
+		self.boxes = b
+	end
+end
+
+-- What a moving object's point goes at, in the world, as it is at self.t: m/s
+function W:deck_velocity(o, x, y, z)
+	if not o.links or not self.t then
+		return 0, 0, 0
+	end
+	local lx, ly, lz = into(o, x - o.x, y - o.y, z - o.z)
+	local dt = 0.02
+	local ax, ay, az, R = pose_of(o.links, o.x0, o.y0, o.z0, o.R0, self.t - dt)
+	local bx, by, bz = outof({R = R}, lx, ly, lz)
+	return (x - bx - ax) / dt, (y - by - ay) / dt, (z - bz - az) / dt
 end
 
 function W:cell(i, j, k)
@@ -604,8 +743,9 @@ local function box_of(x, y, z, r, h)
 	return {x - r, y, z - r, x + r, y + h, z + r}
 end
 
--- Whether the box is in anything solid
-function W:blocked(b)
+-- Whether the box is in anything solid (known_only: not counting a cell not loaded;
+-- self.skip left out)
+function W:blocked(b, known_only)
 	for i = lo_cell(b[1]), hi_cell(b[4]) do
 		for j = lo_cell(b[2]), hi_cell(b[5]) do
 			for k = lo_cell(b[3]), hi_cell(b[6]) do
@@ -618,7 +758,7 @@ function W:blocked(b)
 							return true
 						end
 					end
-				elseif info then
+				elseif info and not (known_only and info == M.UNKNOWN) then
 					return true
 				end
 			end
@@ -634,7 +774,7 @@ function W:blocked(b)
 	for _, o in ipairs(self.turned) do
 		local lx, ly, lz = into(o, (b[1] + b[4]) / 2 - o.x, b[2] - o.y,
 				(b[3] + b[6]) / 2 - o.z)
-		for _, f in ipairs(o.b) do
+		for _, f in ipairs(o ~= self.skip and o.b or {}) do
 			local x0, y0, z0, x1, y1, z1 = grown(f, r, h)
 			if lx > x0 and lx < x1 and ly > y0 and ly < y1 and lz > z0 and lz < z1 then
 				return true
@@ -642,6 +782,46 @@ function W:blocked(b)
 		end
 	end
 	return false
+end
+
+-- [KIT_MOVING_OBJECTS] A moving object has come over a body not on it (its pose
+-- changes between steps, and a sweep starts from one it is in as no wall): the feet
+-- out by its nearest side, a top's up, as far as a step's change can be and not into
+-- the world's; a body on its top is so caught as it lands.
+-- simplified: PUSH_MOST a step, so an object faster than 30 m/s at its surface goes
+-- past. A sweep from the last pose is the upgrade
+local PUSH_MOST = 0.5
+function W:pushed(pos, b)
+	for _, o in ipairs(self.turned) do
+		local lx, ly, lz = into(o, pos[1] - o.x, pos[2] - o.y, pos[3] - o.z)
+		local reach = o.rad + 2 * b.r + b.h
+		if o.links and lx * lx + ly * ly + lz * lz <= reach * reach then
+			for _, f in ipairs(o.b) do
+				local x0, y0, z0, x1, y1, z1 = grown(f, b.r, b.h)
+				if lx > x0 and lx < x1 and ly > y0 and ly < y1 and lz > z0 and lz < z1 then
+					local best, ax, q = lx - x0, 1, -1
+					if x1 - lx < best then best, ax, q = x1 - lx, 1, 1 end
+					if ly - y0 < best then best, ax, q = ly - y0, 2, -1 end
+					if y1 - ly < best then best, ax, q = y1 - ly, 2, 1 end
+					if lz - z0 < best then best, ax, q = lz - z0, 3, -1 end
+					if z1 - lz < best then best, ax, q = z1 - lz, 3, 1 end
+					if best <= PUSH_MOST then
+						local e = q * (best + 2 * EPS)
+						local dx, dy, dz = outof(o, ax == 1 and e or 0, ax == 2 and e or 0,
+								ax == 3 and e or 0)
+						self.skip = o
+						local free = not self:blocked(box_of(pos[1] + dx, pos[2] + dy,
+								pos[3] + dz, b.r, b.h), true)
+						self.skip = nil
+						if free then
+							pos[1], pos[2], pos[3] = pos[1] + dx, pos[2] + dy, pos[3] + dz
+							lx, ly, lz = into(o, pos[1] - o.x, pos[2] - o.y, pos[3] - o.z)
+						end
+					end
+				end
+			end
+		end
+	end
 end
 
 -- A body buried by an edit (voxels or the heightmap raised into it):
@@ -1101,12 +1281,15 @@ end
 
 -- The frame left: the body's velocity the world's. simplified: nothing carries a
 -- walker up off a high edge (its velocity up dropped: a deck is no ramp to launch
--- from); 4r4's moving deck adds its own velocity at the point here
-local function leave_frame(s, o)
+-- from). [KIT_MOVING_OBJECTS] A moving deck's velocity at the feet added: what it
+-- leaves with in the world, kept through the air (s.carry, W:walk) until it lands
+local function leave_frame(w, s, o)
 	local v = s.vel
 	local x, y, z = outof(o, v[1], v[2], v[3])
-	s.vel = {x, y > 0 and 0 or y, z}
+	local dx, dy, dz = w:deck_velocity(o, s.pos[1], s.pos[2], s.pos[3])
+	s.vel = {x + dx, (y > 0 and 0 or y) + dy, z + dz}
 	s.frame, s.at = nil, nil
+	s.carry = o.links and {dx, dz} or nil
 end
 
 -- A step in the frame of o: true; false: it jumped, out of the frame, and the
@@ -1119,6 +1302,23 @@ function W:walk_on(o, s, b, wx, wz, jump, dt, p)
 	local at, v = s.at, s.vel
 	if f:unbury(at, b) and v[2] < 0 then
 		v[2] = 0
+	end
+	-- [KIT_MOVING_OBJECTS] Carried into the world (a deck rolled into the ground, a
+	-- course through a wall): off it, the world's step goes on from there, out by
+	-- unbury. simplified: carrying is no sweep, so a fast deck can take a body
+	-- through a thin wall; a sweep of the feet from the last pose is the upgrade
+	if o.links then
+		local x, y, z = outof(o, at[1], at[2], at[3])
+		x, y, z = x + o.x, y + o.y, z + o.z
+		self.skip = o
+		local in_world = self:blocked(box_of(x, y, z, b.r, b.h), true)
+		self.skip = nil
+		if in_world then
+			s.pos[1], s.pos[2], s.pos[3] = x, y, z
+			leave_frame(self, s, o)
+			s.ground = false
+			return false
+		end
 	end
 	local g = num(p.gravity, 15)
 	-- The world's up in the frame
@@ -1156,8 +1356,10 @@ function W:walk_on(o, s, b, wx, wz, jump, dt, p)
 		ground = false
 	end
 	if jump_taken(s, ground, jump, dt, p) then
-		leave_frame(s, o)
-		s.vel[2] = sqrt(2 * g * num(p.jump_height, 1.6))
+		local x, y, z = outof(o, at[1], at[2], at[3])
+		s.pos[1], s.pos[2], s.pos[3] = x + o.x, y + o.y, z + o.z
+		leave_frame(self, s, o)
+		s.vel[2] = s.vel[2] + sqrt(2 * g * num(p.jump_height, 1.6))
 		s.ground = false
 		return false
 	end
@@ -1200,7 +1402,7 @@ function W:walk_on(o, s, b, wx, wz, jump, dt, p)
 		floor = info ~= nil
 	end
 	if not on or floor then
-		leave_frame(s, o)
+		leave_frame(self, s, o)
 		s.ground, s.friction, s.surface = false, nil, nil
 		return true
 	end
@@ -1230,7 +1432,7 @@ function W:walk(s, b, wx, wz, jump, dt, p)
 		local push = s.push
 		s.push = nil
 		if o and type(push) == "table" then
-			leave_frame(s, o)
+			leave_frame(self, s, o)
 			for k = 1, 3 do
 				s.vel[k] = s.vel[k] + (tonumber(push[k]) or 0)
 			end
@@ -1242,6 +1444,9 @@ function W:walk(s, b, wx, wz, jump, dt, p)
 		end
 	end
 	local pos, v = s.pos, s.vel
+	if self.moving then
+		self:pushed(pos, b)
+	end
 	if self:unbury(pos, b) and v[2] < 0 then
 		v[2] = 0
 	end
@@ -1249,8 +1454,11 @@ function W:walk(s, b, wx, wz, jump, dt, p)
 	local jh = num(p.jump_height, 1.6)
 	local ground = s.ground == true
 	-- Toward the wished velocity: on the ground as its friction lets, in
-	-- the air as air_control does
-	toward(v, wx, wz, num(p.acceleration, 40) * dt * (ground and num(s.friction, 1)
+	-- the air as air_control does ([KIT_MOVING_OBJECTS] over what a moving deck
+	-- gave it, so that a jump keeps up with the deck)
+	local carry = not ground and type(s.carry) == "table" and s.carry or nil
+	toward(v, wx + (carry and num(carry[1], 0) or 0), wz + (carry and num(carry[2], 0) or 0),
+			num(p.acceleration, 40) * dt * (ground and num(s.friction, 1)
 			or num(p.air_control, 0.6)))
 	local jumped = jump_taken(s, ground, jump, dt, p)
 	if jumped then
@@ -1296,15 +1504,20 @@ function W:walk(s, b, wx, wz, jump, dt, p)
 	s.ground = on ~= nil
 	s.friction = on and on.friction or nil
 	s.surface = on and on.surface or nil
+	if on then
+		s.carry = nil
+	end
 	-- [KIT_WALKER_FRAME] On an object's top: into its frame, what it landed with
-	-- going along the deck. simplified: a top only; an object turned over stands a
+	-- going along the deck (past [KIT_MOVING_OBJECTS] a moving deck's own velocity).
+	-- simplified: a top only; an object turned over stands a
 	-- body on its other faces in the world's frame, which holds it where it hit;
 	-- choosing the face nearest the world's up as the frame's floor is the upgrade
 	local o = on and on.frame
 	if o and o.R[5] > 0.02 then
 		s.frame = o.id
 		s.at = {into(o, pos[1] - o.x, pos[2] - o.y, pos[3] - o.z)}
-		s.vel = {into(o, v[1], v[2], v[3])}
+		local dx, dy, dz = self:deck_velocity(o, pos[1], pos[2], pos[3])
+		s.vel = {into(o, v[1] - dx, v[2] - dy, v[3] - dz)}
 		s.vel[2] = 0
 		s.ground = o.R[5] >= M.cos(lim)
 		s.friction = s.ground and 1 or nil
@@ -1358,11 +1571,18 @@ function M.snapshot(t)
 		end
 		return classes[ch - 64]
 	end
-	local boxes = {}
+	local boxes, moving_looks = {}, nil
 	for _, l in ipairs(t.looks or {}) do
-		local b = M.look_box(l[1], l[2] == true, l[3], l[4], l[5], l[6])
-		if b then
-			boxes[#boxes + 1] = b
+		-- [KIT_MOVING_OBJECTS] on a moving object: placed as each step's time has it
+		if l[7] then
+			moving_looks = moving_looks or {}
+			l[2] = l[2] == true
+			moving_looks[#moving_looks + 1] = l
+		else
+			local b = M.look_box(l[1], l[2] == true, l[3], l[4], l[5], l[6])
+			if b then
+				boxes[#boxes + 1] = b
+			end
 		end
 	end
 	local ground = nil
@@ -1383,14 +1603,18 @@ function M.snapshot(t)
 	local edge = type(hm) == "table" and hm.sx and {hm.ox or 0, hm.oz or 0,
 			(hm.ox or 0) + hm.sx - 1, (hm.oz or 0) + hm.sz - 1} or nil
 	return M.world{cell = cell, boxes = boxes, ground = ground, edge = edge,
-		turned = M.turned(t.turned or {})}
+		turned = M.turned(t.turned or {}), moving_looks = moving_looks, t = t.t}
 end
 
 -- The steps of a batch: each input dt long, in sub steps of its own
+-- ([KIT_MOVING_OBJECTS] the world's moving objects as each has them: i.t its stamp, ms)
 function M.steps(def, s, inputs, dt, sub, w, p)
 	sub = sub or 1
 	for _, i in ipairs(inputs) do
-		for _ = 1, sub do
+		for n = 1, sub do
+			if w.moving and i.t then
+				w:pose_at(i.t / 1000 + (n - 1) * dt / sub)
+			end
 			def.step(s, i, dt / sub, w, p)
 		end
 	end

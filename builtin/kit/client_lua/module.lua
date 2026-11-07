@@ -814,6 +814,10 @@ local hud = nil
 local function update_play(_, data)
 	local dt = data:GetFloat("TimeStep")
 	local lines = {}
+	-- [KIT_MOVING_OBJECTS] what moves at this frame's time, before anything reads it
+	if M.moving_tick then
+		M.moving_tick()
+	end
 	for id, n in pairs(P.nodes) do
 		-- What it shows: again as an edit changes it
 		local raw = n.node:GetVar("kit_show")

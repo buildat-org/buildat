@@ -371,7 +371,7 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 					end
 					b.flashing = b.flash_till ~= nil
 				end
-				local at, speed
+				local at, speed, rest_at
 				local item, dig, sw
 				if id == P.you then
 					at = magic.Vector3(own[1], own[2], own[3])
@@ -381,8 +381,16 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 					yaw = yaw or 0
 				else
 					-- Its place: the samples as they came, drawn DELAY back
-					local p = n.node.position
+					-- ([KIT_MOVING_OBJECTS] on a moving deck the place with the deck at
+					-- rest, drawn on the deck as it is now; none between the two)
+					local p = M.rest_position(n)
 					p = magic.Vector3(p.x, p.y - 0.5, p.z)
+					local fv = n.node:GetVar("kit_frame")
+					local fr = fv:IsEmpty() and 0 or fv:GetInt()
+					if fr ~= (b.frame_id or 0) then
+						b.frame_id = fr
+						b.samples = {}
+					end
 					local s = b.samples
 					local last = s[#s]
 					if not last or (last.p - p):Length() > 1e-4 then
@@ -414,13 +422,17 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 							break
 						end
 					end
+					rest_at = at
+					at = M.moved_body(id, n, at)
 					item = pitem or ""
 					dig = flags % 2 == 1
 					sw = tonumber(pswings) or 0
 				end
-				local was = b.at or at
-				local d = at - was
+				-- (its own walking: carried on a deck is no walk)
+				local was = b.rest_at or rest_at or b.at or at
+				local d = (rest_at or at) - was
 				speed = math.sqrt(d.x * d.x + d.z * d.z) / math.max(dt, 1e-3)
+				b.rest_at = rest_at
 				b.at = at
 				local want = id == P.you and yaw or tonumber(pyaw) or 0
 				-- The others' turn eased (the pose comes a tick at a time)
@@ -624,9 +636,10 @@ magic.SubscribeToEvent("command_seq:kit_players", function()
 	for id, b in pairs(bodies) do
 		if b.root.enabled then
 			local p = b.root.position
-			log:info(string.format("kit: player %d drawn at %.2f,%.2f,%.2f " ..
-					"yaw %.0f, %s, team %s, holding %s", id, p.x, p.y, p.z,
-					(b.yaw or 0) % 360, b.anim, tostring(b.color), tostring(b.item)))
+			log:info(string.format("kit: player %d drawn at %.4f,%.4f,%.4f " ..
+					"yaw %.0f, %s, team %s, holding %s, time %.3f", id, p.x, p.y, p.z,
+					(b.yaw or 0) % 360, b.anim, tostring(b.color), tostring(b.item),
+					M.draw_time() or 0))
 			if b.held then
 				local h = b.held.worldPosition
 				log:info(string.format("kit: player %d's %s at %.2f,%.2f,%.2f",

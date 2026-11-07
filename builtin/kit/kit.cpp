@@ -444,6 +444,10 @@ struct Peer
 {
 	ss_ name, scene;
 	double pos[3] = {0, 0, 0};
+	// [KIT_MOVING_OBJECTS] The moving object their body stands on (0: none) and
+	// where they would be with it at rest: what their node says
+	uint64_t frame = 0;
+	double frame_rest[3] = {0, 0, 0};
 	bool editing = false;
 	// The tools' colour (an index of COLORS, -1 while they are off), the
 	// selected entity (0: none) and the cursor (null: none), which the
@@ -1264,6 +1268,10 @@ struct Module: public interface::Module, public Interface
 		uint node = 0;
 		// x y z yaw pitch roll
 		std::array<double, 6> place = {{0, 0, 0, 0, 0, 0}};
+		// [KIT_MOVING_OBJECTS] the node from the root, in its frame; the body is off
+		// its node
+		double corner[3] = {0, 0, 0};
+		bool body_moved = false;
 	};
 	std::map<uint64_t, FreeObject> m_free_objects;
 	std::map<main_context::SceneReference, std::set<ss_>> m_free_models;
@@ -2088,8 +2096,85 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
-	// An entity's place and turn in the world. 4r4's pose, driven by the
-	// shared time, goes over frame_of's and this one's own turn
+	// [KIT_MOVING_OBJECTS] A free object's motion: a function of the round's time
+	// (motion_t()), so that the clients compute the same and no pose is sent. On each
+	// side it is the object's place and turn over its row's; move.lua's M.link_at says
+	// the same in the world, and that is the one a body steps with. Running only.
+	// kit/prefab_copy's parameters when this entity's object moves; nullptr: it is
+	// where its row says
+	const json::Value* motion_of(const Entity &e)
+	{
+		if(!m_session.running || !is_root(e) || !m_free_objects.count(e.id))
+			return nullptr;
+		for(const Instance &in : e.comps){
+			if(in.type != PREFAB_ROOT)
+				continue;
+			const json::Value &p = in.params;
+			for(const char *k : {"wave_roll", "wave_pitch", "wave_yaw", "wave_heave"})
+				if(row_num(p, k) != 0 && row_num(p, (ss_(k)+"_period").c_str()) > 0)
+					return &p;
+			const json::Value &c = p.get("course");
+			if(row_num(p, "course_time") > 0 && pos_ok(c) && (c.at(0u).as_number() != 0 ||
+					c.at(1u).as_number() != 0 || c.at(2u).as_number() != 0))
+				return &p;
+		}
+		return nullptr;
+	}
+
+	double motion_t()
+	{
+		if(!m_motion_base)
+			m_motion_base = now_us();
+		return (now_us() - m_motion_base) / 1e6;
+	}
+
+	static double swing(const json::Value &m, const char *k, double t)
+	{
+		const double period = row_num(m, (ss_(k)+"_period").c_str());
+		return period > 0 ? row_num(m, k) * std::sin(2 *
+				3.14159265358979323846 * t / period) : 0;
+	}
+
+	// v and q, an object's place and turn in its parent, as its motion has them at t
+	static void moved_local(const json::Value &m, double t, double v[3], Turn &q)
+	{
+		const Turn wave = Turn::of(swing(m, "wave_yaw", t), swing(m, "wave_pitch", t),
+				swing(m, "wave_roll", t));
+		double add[3] = {0, swing(m, "wave_heave", t), 0};
+		const double ct = row_num(m, "course_time");
+		const json::Value &c = m.get("course");
+		if(ct > 0 && pos_ok(c)){
+			double u = t / ct;
+			u -= 2 * std::floor(u / 2);
+			u = u > 1 ? 2 - u : u;
+			for(unsigned k = 0; k < 3; k++)
+				add[k] += c.at(k).as_number() * u;
+		}
+		const json::Value &pv = m.get("pivot");
+		if(pos_ok(pv)){
+			double turned[3] = {pv.at(0u).as_number(), pv.at(1u).as_number(),
+					pv.at(2u).as_number()};
+			wave.apply(turned);
+			for(unsigned k = 0; k < 3; k++)
+				add[k] += pv.at(k).as_number() - turned[k];
+		}
+		q.apply(add);
+		for(int k = 0; k < 3; k++)
+			v[k] += add[k];
+		q = q * wave;
+	}
+
+	// While alive, world_of() says where things are at rest: what the replicated
+	// nodes say and the rows' places. The clients turn the rest into now themselves
+	struct AtRest
+	{
+		bool &flag;
+		const bool was;
+		AtRest(bool &f): flag(f), was(f){ flag = true; }
+		~AtRest(){ flag = was; }
+	};
+
+	// An entity's place and turn in the world, moved by its motion and its parents'
 	void world_of(const Entity &e, double w[3], Turn *wq = nullptr,
 			int depth = 0)
 	{
@@ -2097,11 +2182,56 @@ struct Module: public interface::Module, public Interface
 		Turn pq;
 		frame_of(e.parent, o, pq, depth);
 		double v[3] = {e.pos[0], e.pos[1], e.pos[2]};
+		Turn own = Turn::of(e);
+		if(!m_at_rest)
+			if(const json::Value *m = motion_of(e))
+				moved_local(*m, motion_t(), v, own);
 		pq.apply(v);
 		for(int k = 0; k < 3; k++)
 			w[k] = o[k] + v[k];
 		if(wq)
-			*wq = pq * Turn::of(e);
+			*wq = pq * own;
+	}
+
+	// What moves it: its own object's motion and those of the objects it is under,
+	// each {x, y, z, yaw, pitch, roll (at rest, in the world), parameters}, the nearest
+	// first (move.lua's M.link_at; empty: nothing)
+	json::Value links_of(const Entity &e)
+	{
+		AtRest rest(m_at_rest);
+		json::Value out = json::array();
+		const Entity *at = &e;
+		for(int depth = 0; at && depth <= MAX_NEST + 2; depth++){
+			if(const json::Value *m = motion_of(*at)){
+				double w[3], a, b, c;
+				Turn q;
+				world_of(*at, w, &q);
+				q.angles(a, b, c);
+				json::Value l = json::array();
+				for(int k = 0; k < 3; k++)
+					l.append(w[k]);
+				l.append(a);
+				l.append(b);
+				l.append(c);
+				l.append(*m);
+				out.append(l);
+			}
+			auto it = m_entities.find(at->parent);
+			at = it == m_entities.end() ? nullptr : &it->second;
+		}
+		return out;
+	}
+
+	bool moves(const Entity &e)
+	{
+		const Entity *at = &e;
+		for(int depth = 0; at && depth <= MAX_NEST + 2; depth++){
+			if(motion_of(*at))
+				return true;
+			auto it = m_entities.find(at->parent);
+			at = it == m_entities.end() ? nullptr : &it->second;
+		}
+		return false;
 	}
 
 	// A place and turn in the world as an entity under `parent` has them
@@ -2237,7 +2367,11 @@ struct Module: public interface::Module, public Interface
 		if(e.node){
 			double w[3];
 			Turn q;
-			world_of(e, w, &q);
+			{
+				// [KIT_MOVING_OBJECTS] a client moves it from there
+				AtRest rest(m_at_rest);
+				world_of(e, w, &q);
+			}
 			main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
 				magic::Node *n = sc->GetNode(e.node);
 				if(n){
@@ -6483,6 +6617,9 @@ struct Module: public interface::Module, public Interface
 		voxel_objects::access(m_server, [&](voxel_objects::Interface *i){ iv = i; });
 		if(!iv)
 			return;
+		// [KIT_MOVING_OBJECTS] The rows, the nodes: at rest (free_bodies_tick()
+		// moves the collision)
+		AtRest rest(m_at_rest);
 		std::set<uint64_t> wanted;
 		std::map<main_context::SceneReference, std::set<ss_>> used;
 		for(auto &x : m_entities){
@@ -6519,6 +6656,7 @@ struct Module: public interface::Module, public Interface
 			double corner[3] = {vx.get("at").at(0u).as_number() - 0.5,
 					vx.get("at").at(1u).as_number() - 0.5,
 					vx.get("at").at(2u).as_number() - 0.5};
+			const double corner0[3] = {corner[0], corner[1], corner[2]};
 			wq.apply(corner);
 			const magic::Vector3 pos(w[0] + corner[0], w[1] + corner[1],
 					w[2] + corner[2]);
@@ -6537,6 +6675,7 @@ struct Module: public interface::Module, public Interface
 				o.model = model;
 				o.node = vo->create_object(model, pos, q);
 				o.place = place;
+				std::copy(corner0, corner0 + 3, o.corner);
 				m_free_objects[e.id] = o;
 				log_i(MODULE, "The free object of %s: entity %s, model %s, at "
 						"%.3f,%.3f,%.3f yaw %.3f pitch %.3f roll %.3f, node at "
@@ -6545,6 +6684,7 @@ struct Module: public interface::Module, public Interface
 						pos.x_, pos.y_, pos.z_, q.w_, q.x_, q.y_, q.z_);
 			} else if(it->second.place != place){
 				it->second.place = place;
+				std::copy(corner0, corner0 + 3, it->second.corner);
 				const uint node = it->second.node;
 				main_context::access(m_server, ref, [&](magic::Scene *sc){
 					magic::Node *n = sc->GetNode(node);
@@ -6584,6 +6724,31 @@ struct Module: public interface::Module, public Interface
 				log_i(MODULE, "A free object's model %s is no longer in use", cs(*it));
 				it = sm.second.erase(it);
 			}
+		}
+	}
+
+	// [KIT_MOVING_OBJECTS] Each tick the collision of what moves follows, its node
+	// staying where its row says; back there when it stops moving
+	void free_bodies_tick()
+	{
+		for(auto &f : m_free_objects){
+			auto it = m_entities.find(f.first);
+			if(it == m_entities.end())
+				continue;
+			const bool moving = moves(it->second);
+			if(!moving && !f.second.body_moved)
+				continue;
+			f.second.body_moved = moving;
+			double w[3];
+			Turn q;
+			world_of(it->second, w, &q);
+			double c[3] = {f.second.corner[0], f.second.corner[1], f.second.corner[2]};
+			q.apply(c);
+			voxel_objects::access(m_server, f.second.ref,
+					[&](voxel_objects::Instance *vo){
+				vo->set_body_pose(f.second.node, magic::Vector3(w[0] + c[0],
+						w[1] + c[1], w[2] + c[2]), q.q());
+			});
 		}
 	}
 
@@ -7609,6 +7774,30 @@ struct Module: public interface::Module, public Interface
 				rg ? cs(", region "+itos(re->id)) : "");
 	}
 
+	// [KIT_MOVING_OBJECTS] {"op": "body_ray", "pos": [x, y, z]}: what Bullet's bodies
+	// in the builder's scene say straight down from there, and the motion's time,
+	// logged (a check's read-back that the collision goes with a moving object)
+	void body_ray(Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const json::Value &pos = j.get("pos");
+		if(!pos_ok(pos))
+			return refuse("pos: [x, y, z]");
+		auto si = m_host.scenes.find(p.scene);
+		if(si == m_host.scenes.end())
+			return refuse("not in a scene of the app's");
+		const double x = pos.at(0u).as_number(), y = pos.at(1u).as_number(),
+				z = pos.at(2u).as_number();
+		bool hit = false;
+		float at = 0;
+		voxel_objects::access(m_server, [&](voxel_objects::Interface *iv){
+			voxel_objects::Instance *vo = iv->get_instance(si->second);
+			hit = vo && vo->ray_down(magic::Vector3(x, y, z), 256, &at);
+		});
+		log_i(MODULE, "Bullet down from (%.3f,%.3f,%.3f) at %.3f: %s", x, y, z,
+				motion_t(), hit ? cs(ftos(at)) : "nothing");
+	}
+
 	void edit_voxel(Peer &p, size_t peer, const json::Value &j,
 			std::function<void(const ss_&)> refuse)
 	{
@@ -8332,8 +8521,23 @@ struct Module: public interface::Module, public Interface
 		}
 		main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
 			magic::Node *n = sc->GetNode(e.node);
-			if(n)
+			if(!n)
+				return;
+			// [KIT_MOVING_OBJECTS] on a moving deck: the place with the deck at rest
+			// and which deck, so that one standing still sends nothing and the clients
+			// draw it on the deck they draw. In a variable: a client smooths a node's
+			// position towards what it is sent, and it moves this one from the rest itself
+			if(p.frame){
+				char rest[96];
+				snprintf(rest, sizeof rest, "%.5f %.5f %.5f", p.frame_rest[0],
+						p.frame_rest[1], p.frame_rest[2]);
+				n->SetVar(magic::StringHash("kit_rest"), magic::Variant(magic::String(rest)));
+			} else {
 				n->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
+			}
+			const magic::Variant &was = n->GetVar(magic::StringHash("kit_frame"));
+			if(was.IsEmpty() ? p.frame != 0 : (uint64_t)was.GetInt() != p.frame)
+				n->SetVar(magic::StringHash("kit_frame"), magic::Variant((int)p.frame));
 		});
 	}
 
@@ -8579,7 +8783,10 @@ struct Module: public interface::Module, public Interface
 		main_context::SceneReference ref = scene_of(e);
 		double w[3];
 		Turn wq;
-		world_of(e, w, &wq);
+		{
+			AtRest rest(m_at_rest);
+			world_of(e, w, &wq);
+		}
 		main_context::access(m_server, ref, [&](magic::Scene *scene){
 			magic::Node *n = scene->CreateChild(("kit:"+itos(e.id)).c_str());
 			n->SetPosition(magic::Vector3(w[0], w[1], w[2]));
@@ -14129,6 +14336,7 @@ struct Module: public interface::Module, public Interface
 		const int64_t budget = m_box ? m_box->budget() / SLICE_DIV *
 				TICK_SLICES : 0;
 		int64_t spent = step_bodies(budget);
+		free_bodies_tick();
 		send_controls();
 		env_tick();
 		// simplified: the world's actions looked for once a second, not
@@ -14305,6 +14513,8 @@ struct Module: public interface::Module, public Interface
 	};
 	std::map<size_t, Body> m_bodies;
 	sm_<size_t, ss_> m_controls_sent;
+	// [KIT_MOVING_OBJECTS] when each peer last got the shared time (time_us)
+	sm_<size_t, int64_t> m_clock_sent;
 	// Vehicles moved in play, where they were: back at Stop
 	std::map<uint64_t, std::array<double, 6>> m_seat_home;
 	// [KIT_CARRY_ATTACH] Entities on players (c:attach): the player, the
@@ -14487,6 +14697,11 @@ struct Module: public interface::Module, public Interface
 			for(int k = 0; k < 6; k++)
 				r.append(f.second.place[k]);
 			r.append((int64_t)f.first);
+			// [KIT_MOVING_OBJECTS] the node a client moves, what moves it
+			r.append((int64_t)f.second.node);
+			auto ei = m_entities.find(f.first);
+			if(ei != m_entities.end())
+				r.append(links_of(ei->second));
 			objs.append(r);
 		}
 		if(objs.size())
@@ -14507,6 +14722,16 @@ struct Module: public interface::Module, public Interface
 		return c;
 	}
 
+	bool any_moving()
+	{
+		for(auto &f : m_free_objects){
+			auto it = m_entities.find(f.first);
+			if(it != m_entities.end() && moves(it->second))
+				return true;
+		}
+		return false;
+	}
+
 	void send_controls()
 	{
 		if(!m_host.controls)
@@ -14516,6 +14741,19 @@ struct Module: public interface::Module, public Interface
 				continue;
 			const ss_ s = controls_for(p.first).stringify();
 			ss_ &sent = m_controls_sent[p.first];
+			// [KIT_MOVING_OBJECTS] The shared time, with the rows and then once a
+			// second while something moves: all a client needs to place what moves
+			int64_t &clock_at = m_clock_sent[p.first];
+			const int64_t real = interface::os::time_us();
+			if(s != sent || (real - clock_at >= 1000000 && any_moving())){
+				clock_at = real;
+				char clk[64];
+				snprintf(clk, sizeof clk, "%.0f %.9g", motion_t() * 1000,
+						interface::os::game_rate());
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->send(p.first, "kit:clock", clk);
+				});
+			}
 			if(s == sent)
 				continue;
 			sent = s;
@@ -14579,6 +14817,24 @@ struct Module: public interface::Module, public Interface
 		p.pos[0] = v[0];
 		p.pos[1] = v[1] + 0.5;
 		p.pos[2] = v[2];
+		// [KIT_MOVING_OBJECTS] On a moving deck: from its feet in the deck
+		p.frame = 0;
+		const json::Value &fr = b.state.get("frame"), &at = b.state.get("at");
+		if(fr.is_number() && pos_ok(at)){
+			auto di = m_entities.find((uint64_t)fr.as_number());
+			if(di != m_entities.end() && moves(di->second)){
+				AtRest rest(m_at_rest);
+				double o[3], l[3] = {at.at(0u).as_number(), at.at(1u).as_number(),
+						at.at(2u).as_number()};
+				Turn q;
+				world_of(di->second, o, &q);
+				q.apply(l);
+				for(int k = 0; k < 3; k++)
+					p.frame_rest[k] = o[k] + l[k];
+				p.frame_rest[1] += 0.5;
+				p.frame = di->first;
+			}
+		}
 		world_peer(peer, p.scene, p.pos[0], p.pos[1], p.pos[2]);
 		place_player(p);
 	}
@@ -14678,12 +14934,13 @@ struct Module: public interface::Module, public Interface
 			i = e + 1;
 			unsigned n = 0;
 			// [KIT_PLAYER_MODEL] then the pitch, the swings and the dig,
-			// for the body others see (an older client sends none)
-			double v[11] = {0};
+			// for the body others see (an older client sends none);
+			// [KIT_MOVING_OBJECTS] then the time it was stepped at (ms)
+			double v[12] = {0};
 			const int got = sscanf(one.c_str(), "%u %lf %lf %lf %lf %lf %lf "
-					"%lf %lf %lf %lf %lf", &n, &v[0], &v[1], &v[2], &v[3], &v[4],
-					&v[5], &v[6], &v[7], &v[8], &v[9], &v[10]);
-			if(got != 9 && got != 12)
+					"%lf %lf %lf %lf %lf %lf", &n, &v[0], &v[1], &v[2], &v[3], &v[4],
+					&v[5], &v[6], &v[7], &v[8], &v[9], &v[10], &v[11]);
+			if(got != 9 && got != 12 && got != 13)
 				continue;
 			bool ok = n > at;
 			for(int k = 0; k < 11; k++)
@@ -14713,6 +14970,18 @@ struct Module: public interface::Module, public Interface
 			lua_lit(json::Value(v[6]), o);
 			o += ",tz=";
 			lua_lit(json::Value(v[7]), o);
+			// [KIT_MOVING_OBJECTS] Taken within reason of the round's time: the server
+			// steps it against the pose the client stepped it against, so a late
+			// input is no correction. simplified: a client can choose its pose within
+			// the window (a second back, a quarter ahead); its worth is a deck's
+			// fraction of a swing, the window narrower is the upgrade if it is ever
+			// worth more
+			if(got == 13 && std::isfinite(v[11]) && v[11] != 0){
+				const double t_now = motion_t() * 1000;
+				o += ",t=";
+				lua_lit(json::Value(std::floor(std::max(t_now - 1000,
+						std::min(t_now + 250, v[11])))), o);
+			}
 			o += "}";
 			b.inputs.push_back(std::make_pair(n, o));
 			b.look_yaw = v[2];
@@ -14753,6 +15022,28 @@ struct Module: public interface::Module, public Interface
 				n->SetVar(magic::StringHash("kit_pose"),
 						magic::Variant(pose.c_str()));
 		});
+	}
+
+	// [KIT_MOVING_OBJECTS] How fast what links_of() said can take a point at most rad
+	// from the object: m/s
+	static double motion_speed(const json::Value &links, double rad)
+	{
+		double v = 0;
+		const double tau = 2 * 3.14159265358979323846, deg = tau / 360;
+		for(unsigned i = 0; i < links.size(); i++){
+			const json::Value &m = links.at(i).at(6u);
+			for(const char *k : {"wave_roll", "wave_pitch", "wave_yaw", "wave_heave"}){
+				const double period = row_num(m, (ss_(k)+"_period").c_str());
+				if(period > 0)
+					v += std::fabs(row_num(m, k)) * tau / period *
+							(ss_(k) == "wave_heave" ? 1 : deg * rad);
+			}
+			const json::Value &c = m.get("course");
+			if(row_num(m, "course_time") > 0 && pos_ok(c))
+				v += (std::fabs(c.at(0u).as_number()) + std::fabs(c.at(1u).as_number()) +
+						std::fabs(c.at(2u).as_number())) / row_num(m, "course_time");
+		}
+		return v;
 	}
 
 	// The world round a body for a step: its cells, the solid looks near
@@ -14860,6 +15151,12 @@ struct Module: public interface::Module, public Interface
 					std::fabs(w[2] - pos[2]) > R + 8 ||
 					std::fabs(w[1] - pos[1]) > ny + 8)
 				continue;
+			// [KIT_MOVING_OBJECTS] one that moves: at rest, what moves it with it
+			const json::Value links = links_of(e);
+			if(links.size()){
+				AtRest rest(m_at_rest);
+				world_of(e, w, &wq);
+			}
 			ss_ es;
 			if(scene_of(e, &es) != scene || !scene)
 				continue;
@@ -14881,17 +15178,24 @@ struct Module: public interface::Module, public Interface
 				double wy, wp, wr;
 				wq.angles(wy, wp, wr);
 				lua_lit(json::Value(wy), o);
-				if(wp != 0 || wr != 0){
+				if(wp != 0 || wr != 0 || links.size()){
 					o += ",";
 					lua_lit(json::Value(wp), o);
 					o += ",";
 					lua_lit(json::Value(wr), o);
+				}
+				if(links.size()){
+					o += ",";
+					lua_lit(links, o);
 				}
 				o += "},";
 				break;
 			}
 		}
 		o += "}";
+		// [KIT_MOVING_OBJECTS] The time a step with no stamp of its own goes by
+		o += ",t=";
+		lua_lit(json::Value(motion_t()), o);
 		// [KIT_FREE_PREFAB] The free objects' boxes near it
 		o += ",turned={";
 		for(auto &f : m_free_objects){
@@ -14901,8 +15205,35 @@ struct Module: public interface::Module, public Interface
 			// [KIT_WALKER_FRAME] The feet in its frame
 			double l[3] = {pos[0] - wp[0], pos[1] - wp[1], pos[2] - wp[2]};
 			Turn::of(wp[3], wp[4], wp[5]).inverse().apply(l);
-			const double m = R + 2;
+			double m = R + 2;
 			const sv_<float> &bx = m_free_boxes[f.second.model];
+			// [KIT_MOVING_OBJECTS] One moving: where it is now, as far again as it can
+			// go by a stamp (on_input_u's window); one this body stands on: from the
+			// feet there, whatever its pose
+			auto fe = m_entities.find(f.first);
+			json::Value links = json::array();
+			if(fe != m_entities.end())
+				links = links_of(fe->second);
+			if(links.size()){
+				const json::Value &st_at = b.state.get("at");
+				const json::Value &st_fr = b.state.get("frame");
+				if(st_fr.is_number() && (uint64_t)st_fr.as_number() == f.first &&
+						pos_ok(st_at)){
+					for(unsigned k = 0; k < 3; k++)
+						l[k] = st_at.at(k).as_number();
+				} else {
+					double now[3];
+					Turn nq;
+					world_of(fe->second, now, &nq);
+					for(int k = 0; k < 3; k++)
+						l[k] = pos[k] - now[k];
+					nq.inverse().apply(l);
+					double far = 0;
+					for(float c : bx)
+						far = std::max(far, (double)std::fabs(c));
+					m += 1.25 * motion_speed(links, far * std::sqrt(3.0));
+				}
+			}
 			ss_ list;
 			for(size_t i = 0; i + 6 <= bx.size(); i += 6){
 				if(l[0] + m < bx[i] || l[0] - m > bx[i + 3] ||
@@ -14921,7 +15252,12 @@ struct Module: public interface::Module, public Interface
 				lua_lit(json::Value(wp[k]), o);
 				o += ',';
 			}
-			o += "{"+list+"},"+itos(f.first)+"},";
+			o += "{"+list+"},"+itos(f.first);
+			if(links.size()){
+				o += ",";
+				lua_lit(links, o);
+			}
+			o += "},";
 		}
 		o += "}";
 		if(m_w->world_scene && m_w->wp.heightmap() && scene == m_w->world_scene)
@@ -19197,6 +19533,7 @@ struct Module: public interface::Module, public Interface
 			unseat(peer, bi->second, false);
 		m_bodies.erase(peer);
 		m_controls_sent.erase(peer);
+		m_clock_sent.erase(peer);
 		m_boxes_sent.erase(peer);
 		m_tool_use.erase(peer);
 		m_open_chest.erase(peer);
@@ -20346,6 +20683,7 @@ struct Module: public interface::Module, public Interface
 		if(m_session.running)
 			return;
 		m_session.running = true;
+		m_motion_base = now_us();
 		m_session.by = by;
 		m_session.round.clear();
 		// The last Stop's discarded builds are no longer to keep
@@ -21003,7 +21341,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		GameSession *gs = active_session();
-		if(gs && !gs->draft && op != "voxel_info" && op != "mode" &&
+		if(gs && !gs->draft && op != "voxel_info" && op != "body_ray" && op != "mode" &&
 				op != "focus" && op != "try" && op != "watch")
 			return refuse("in a game session: the tools edit nothing here");
 		if(gs && (op == "play" || op == "stop" || op == "save_start" ||
@@ -21034,6 +21372,8 @@ struct Module: public interface::Module, public Interface
 		// In play too: it reads
 		if(op == "voxel_info")
 			return voxel_info(p, j, refuse);
+		if(op == "body_ray")
+			return body_ray(p, j, refuse);
 		if(op == "mode"){
 			tools(p, peer, j.get("on").is_true());
 			log_i(MODULE, "%s %s edit mode", cs(p.name),
@@ -22278,6 +22618,7 @@ struct Module: public interface::Module, public Interface
 		std::map<main_context::SceneReference, std::set<ss_>> free_models;
 		sm_<size_t, std::set<ss_>> boxes_sent;
 		int64_t clock_base = 0;
+		int64_t motion_base = 0;
 	};
 
 	void swap_ctx(Ctx &c)
@@ -22328,6 +22669,7 @@ struct Module: public interface::Module, public Interface
 		swap(m_actions_at, c.actions_at);
 		swap(m_scene_pos, c.scene_pos);
 		swap(m_clock_base, c.clock_base);
+		swap(m_motion_base, c.motion_base);
 		swap(m_projectiles, c.projectiles);
 	}
 
@@ -22404,6 +22746,10 @@ struct Module: public interface::Module, public Interface
 	// The round's clock: game time since its start (the default's: the
 	// server's)
 	int64_t m_clock_base = 0;
+	// [KIT_MOVING_OBJECTS] now_us() where a motion's time begins: at Play, the wave
+	// from where its row says
+	int64_t m_motion_base = 0;
+	bool m_at_rest = false;
 	// Kit's own store (a session's m_store is its overlay)
 	storage::Store *m_kit_store = nullptr;
 	// The start's voxel copies the sessions read, by scene
