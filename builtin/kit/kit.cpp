@@ -538,6 +538,18 @@ struct Removed
 	ss_ by;
 };
 
+// [KIT] stage 4f: a decoration on a heightmap surface: a voxel object of
+// its structure's model, turned about y (degrees)
+struct Decor
+{
+	ss_ structure;
+	float x = 0, y = 0, z = 0, yaw = 0;
+	unsigned node = 0;
+	// [KIT_HEIGHTMAP_REGEN_LOSS] put by a builder (the decorate brush): kept
+	// over a regeneration, as the edited samples are
+	bool hand = false;
+};
+
 // One edit: the entities it changed as they were before (null: not there),
 // in the order an undo puts them back
 struct Change
@@ -567,18 +579,9 @@ struct Change
 	bool hm_restore = false;
 	// [KIT_PREFAB_VOXELS] stroke -3: a prefab's place, its entities in
 	// before and its voxels' cells in cells (scene's), undone together
-};
-
-// [KIT] stage 4f: a decoration on a heightmap surface: a voxel object of
-// its structure's model, turned about y (degrees)
-struct Decor
-{
-	ss_ structure;
-	float x = 0, y = 0, z = 0, yaw = 0;
-	unsigned node = 0;
-	// [KIT_HEIGHTMAP_REGEN_LOSS] put by a builder (the decorate brush): kept
-	// over a regeneration, as the edited samples are
-	bool hand = false;
+	// [KIT_SYMMETRY] the decorations it removed (kit/symmetry's copy over
+	// the other slices), put back by its undo
+	sv_<Decor> decor_gone;
 };
 
 // [KIT] stage 4e: a scene's World (world.h; [KIT_SCENES] one a scene):
@@ -3026,6 +3029,264 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		return true;
+	}
+
+	// ---- [KIT_SYMMETRY] The voxels, the samples and the decorations
+	// (api.h): a builder's edit in the authored slice written into each
+	// other slice too, one undo; elsewhere refused, and what a brush
+	// writes past a seam cut (put back as its source's image is). The
+	// whole authored slice copied over the others as it is turned on and
+	// after each regeneration; at Play only compared
+
+	// The on kit/symmetry of a scene's World and its slices (nullptr: none)
+	const Entity *sym_scene(main_context::SceneReference ref,
+			symmetry::Config &c)
+	{
+		if(!ref)
+			return nullptr;
+		for(auto &p : m_entities){
+			const Instance *in = symmetry_in(p.second);
+			ss_ why;
+			if(in && in->params.get("on").is_true() && scene_of(p.second) == ref &&
+					sym_config(p.second, c, why))
+				return &p.second;
+		}
+		return nullptr;
+	}
+
+	// A cell's state as its image by m: a shape's facing turned
+	static uint32_t sym_word(voxelworld::Instance *w, uint32_t word,
+			const symmetry::Map &m)
+	{
+		const interface::VoxelFormat &f = w->get_voxel_reg()->get_format();
+		if(!f.param.bound())
+			return word;
+		const interface::VoxelDefinition *d = w->get_voxel_reg()->get(
+				f.id.get(word));
+		const ss_ name = d ? d->name.block_name : ss_();
+		if(!is_shape(name))
+			return word;
+		const size_t colon = name.rfind(':');
+		const bool corner = name.compare(colon + 1, ss_::npos, "inner_stair") == 0 ||
+				name.compare(colon + 1, ss_::npos, "outer_stair") == 0;
+		f.param.set(word, symmetry::facing(f.param.get(word), m, corner));
+		return word;
+	}
+
+	// The cells an edit wrote (in w, a scene's): each authored one's
+	// images written as it is, each one past a seam its source's image (or
+	// as it was, `before`'s, with none); the cells' old states into
+	// `before` (the edit's undo) the first time. The images written
+	size_t sym_write(voxelworld::Instance *w, main_context::SceneReference ref,
+			const symmetry::Config &c, const sv_<pv::Vector3DInt32> &wrote,
+			std::map<std::tuple<int, int, int>, uint32_t> *before,
+			const ss_ &who)
+	{
+		size_t n = 0;
+		auto put = [&](const pv::Vector3DInt32 &q, uint32_t word){
+			uint32_t old = 0;
+			if(!hm_section(w, q) || !voxel_id(w, q, old) || old == word)
+				return;
+			if(before)
+				before->emplace(std::make_tuple(q.getX(), q.getY(), q.getZ()), old);
+			set_id(w, q, word);
+			mark(w, ref, q, 'k', who);
+			n++;
+		};
+		sv_<pv::Vector3DInt32> cut;
+		for(const pv::Vector3DInt32 &p : wrote){
+			if(!c.editable(p.getX(), p.getZ())){
+				cut.push_back(p);
+				continue;
+			}
+			uint32_t word = 0;
+			if(!voxel_id(w, p, word))
+				continue;
+			for(size_t i = 1; i < c.maps.size(); i++){
+				int x = p.getX(), z = p.getZ();
+				c.maps[i].apply(x, z);
+				if(x != p.getX() || z != p.getZ())
+					put(pv::Vector3DInt32(x, p.getY(), z), sym_word(w, word,
+							c.maps[i]));
+			}
+		}
+		for(const pv::Vector3DInt32 &p : cut){
+			int sx, sz;
+			size_t i;
+			uint32_t word = 0;
+			if(c.source(p.getX(), p.getZ(), sx, sz, i)){
+				if(i && voxel_id(w, pv::Vector3DInt32(sx, p.getY(), sz), word))
+					put(p, sym_word(w, word, c.maps[i]));
+			} else if(before){
+				auto b = before->find(std::make_tuple(p.getX(), p.getY(), p.getZ()));
+				if(b != before->end() && voxel_id(w, p, word) && word != b->second){
+					set_id(w, p, b->second);
+					mark(w, ref, p, 'k', who);
+				}
+			}
+		}
+		return n;
+	}
+
+	// What the copy over the other slices writes (or, `write` false, would):
+	// each loaded cell of them its source's image; on a heightmap each
+	// sample and the decorations (those outside the authored slice gone,
+	// each authored one's images put). The old ones into c (an undo's)
+	struct SymCounts
+	{
+		size_t cells = 0, samples = 0, decor = 0;
+		ss_ text() const
+		{
+			return itos(cells)+" cells, "+itos(samples)+" samples, "+
+					itos(decor)+" decorations";
+		}
+	};
+	SymCounts sym_copy(main_context::SceneReference ref,
+			const symmetry::Config &cf, bool write, Change *c, const ss_ &who,
+			bool decor_only = false)
+	{
+		WorldScope ws(m_w, world_at(ref));
+		SymCounts n;
+		if(!decor_only)
+			voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
+			const pv::Vector3DInt16 ss = w->get_section_size_voxels();
+			for(const pv::Vector3DInt16 &s : w->get_loaded_sections())
+				for(int y = 0; y < ss.getY(); y++)
+					for(int z = 0; z < ss.getZ(); z++)
+						for(int x = 0; x < ss.getX(); x++){
+							const pv::Vector3DInt32 p(s.getX() * ss.getX() + x,
+									s.getY() * ss.getY() + y, s.getZ() * ss.getZ() + z);
+							int sx, sz;
+							size_t i;
+							uint32_t src = 0, cur = 0;
+							if(!cf.in_map(p.getX(), p.getZ()) || !cf.source(p.getX(),
+									p.getZ(), sx, sz, i) || !i || !voxel_id(w,
+									pv::Vector3DInt32(sx, p.getY(), sz), src) ||
+									!voxel_id(w, p, cur))
+								continue;
+							const uint32_t want = sym_word(w, src, cf.maps[i]);
+							if(want == cur)
+								continue;
+							n.cells++;
+							if(!write)
+								continue;
+							if(c)
+								c->cells.emplace(std::make_tuple(p.getX(), p.getY(),
+										p.getZ()), cur);
+							set_id(w, p, want);
+							mark(w, ref, p, 'k', who);
+						}
+		});
+		if(!m_w || !m_w->wp.heightmap())
+			return n;
+		if(!decor_only)
+			heightmap::access(m_server, m_w->world_scene, [&](heightmap::Instance *map){
+			const int ox = hm_ox(map), oz = hm_oz(map);
+			for(int z = oz; z < oz + map->samples_z(); z++)
+				for(int x = ox; x < ox + map->samples_x(); x++){
+					int sx, sz;
+					size_t i;
+					if(!cf.in_map(x, z) || !cf.source(x, z, sx, sz, i) || !i ||
+							sx < ox || sz < oz || sx >= ox + map->samples_x() ||
+							sz >= oz + map->samples_z())
+						continue;
+					const float h = map->get_height(sx - ox, sz - oz);
+					const heightmap::Weights wt = map->get_weights(sx - ox, sz - oz);
+					if(h == map->get_height(x - ox, z - oz) &&
+							wt == map->get_weights(x - ox, z - oz))
+						continue;
+					n.samples++;
+					if(!write)
+						continue;
+					if(c)
+						c->samples.emplace(std::make_pair(x, z), std::make_pair(
+								map->get_height(x - ox, z - oz),
+								map->get_weights(x - ox, z - oz)));
+					map->set_height(x - ox, z - oz, h);
+					map->set_weights(x - ox, z - oz, wt);
+					hm_mark(x, z, true, h, wt, c);
+				}
+		});
+		// The decorations: an authored one's images where none is
+		auto same = [](const Decor &a, const Decor &b){
+			return a.structure == b.structure && std::fabs(a.x - b.x) < 0.01f &&
+					std::fabs(a.z - b.z) < 0.01f && std::fabs(a.yaw - b.yaw) < 0.01f;
+		};
+		sv_<Decor> want;
+		for(auto &d : m_w->decor){
+			if(!cf.in(d.second.x, d.second.z))
+				continue;
+			for(size_t i = 1; i < cf.maps.size(); i++){
+				Decor im = d.second;
+				im.node = 0;
+				cf.maps[i].apply(im.x, im.z);
+				const symmetry::Map &m = cf.maps[i];
+				const Turn q = Turn::of(d.second.yaw);
+				im.yaw = (float)(Turn(q.w, 0, m.det() * q.y, 0) * Turn::of(
+						std::atan2((double)m.b, (double)m.d) * 180 /
+						3.14159265358979323846)).yaw();
+				if(!same(im, d.second))
+					want.push_back(im);
+			}
+		}
+		sv_<uint64_t> gone;
+		std::set<size_t> there;
+		for(auto &d : m_w->decor){
+			if(cf.in(d.second.x, d.second.z))
+				continue;
+			bool kept = false;
+			for(size_t k = 0; k < want.size() && !kept; k++)
+				if(!there.count(k) && same(want[k], d.second)){
+					there.insert(k);
+					kept = true;
+				}
+			if(!kept)
+				gone.push_back(d.first);
+		}
+		n.decor = gone.size() + want.size() - there.size();
+		if(!write)
+			return n;
+		for(uint64_t id : gone){
+			if(c)
+				c->decor_gone.push_back(m_w->decor[id]);
+			remove_decor(id);
+		}
+		for(size_t k = 0; k < want.size(); k++){
+			if(there.count(k))
+				continue;
+			const uint64_t id = add_decor(want[k].structure, want[k].x, want[k].y,
+					want[k].z, want[k].yaw);
+			m_w->decor[id].hand = want[k].hand;
+			if(c)
+				c->decor.push_back(id);
+		}
+		save_decor();
+		hm_edits_save();
+		return n;
+	}
+
+	// The entities of its scene outside it, in the other slices: single,
+	// unlike the slices (a warning's text; "": none)
+	ss_ sym_parity_entities(const Entity &s, const symmetry::Config &cf)
+	{
+		const main_context::SceneReference ref = scene_of(s);
+		size_t n = 0;
+		ss_ ids;
+		AtRest rest(m_at_rest);
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(!e.has_pos || !e.kind.empty() || copy_by(e) || sym_source(p.first) ||
+					p.first == s.id || scene_of(e) != ref)
+				continue;
+			double w[3];
+			world_of(e, w);
+			if(cf.in(w[0], w[2]))
+				continue;
+			if(n++ < 8)
+				ids += (ids.empty() ? "" : ", ")+itos(p.first);
+		}
+		return n ? itos(n)+" entities outside it in the other slices, not copied ("+
+				ids+(n > 8 ? ", ..." : "")+")" : ss_();
 	}
 
 	// Whether an entity's place in the tree may be: under one that is
@@ -6077,6 +6338,13 @@ struct Module: public interface::Module, public Interface
 				first ? (again ? ", the save's was another" : "") : "",
 				world::VERSION, p.with_caves() && !p.heightmap() ? ", caves" : "",
 				cs(caves), dn, dh, cs(ms.name));
+		// [KIT_SYMMETRY] a heightmap generated again: its authored slice
+		// copied over the others (a voxel World's in on_gen_queue)
+		symmetry::Config scf;
+		if(p.heightmap() && !first && sym_scene(m_w->world_scene, scf))
+			log_i(MODULE, "kit/symmetry: the slice %s copied over the others after "
+					"the heightmap's generation: %s", cs(scf.slice), cs(sym_copy(
+					m_w->world_scene, scf, true, nullptr, by.empty() ? "kit" : by).text()));
 		if(first && !p.heightmap())
 			voxelworld::access(m_server, m_w->world_scene,
 					[&](voxelworld::Instance *w){
@@ -6272,14 +6540,26 @@ struct Module: public interface::Module, public Interface
 		size_t again = 0;
 		std::set<std::tuple<int, int, int>> edited, redo;
 		sv_<pv::Vector3DInt16> wait;
+		// [KIT_SYMMETRY] a section with no authored cell is all copies: it is
+		// generated again, and copied over again after
+		symmetry::Config cf;
+		const bool sym = sym_scene(m_w->world_scene, cf) != nullptr;
 		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			// The edited ones into the save, so its index says them all
 			w->save();
+			const pv::Vector3DInt16 ss = w->get_section_size_voxels();
+			auto copies = [&](const pv::Vector3DInt16 &p){
+				for(int z = 0; z < ss.getZ(); z++)
+					for(int x = 0; x < ss.getX(); x++)
+						if(cf.editable(p.getX() * ss.getX() + x, p.getZ() * ss.getZ() + z))
+							return false;
+				return true;
+			};
 			sv_<pv::Vector3DInt16> forget;
 			for(const auto &s : w->section_stats()){
 				const auto k = std::make_tuple(s.p.getX(), s.p.getY(), s.p.getZ());
-				if(s.altered)
+				if(s.altered && !(sym && copies(s.p)))
 					edited.insert(k);
 				else
 					forget.push_back(s.p);
@@ -7851,6 +8131,17 @@ struct Module: public interface::Module, public Interface
 				biome == "water"))
 			return refuse("biome: one of the material set's"+ss_(tool ==
 					"fill" ? ", or water" : ""));
+		// [KIT_SYMMETRY] a dab in the authored slice (a fill's both corners)
+		{
+			symmetry::Config cf;
+			const Entity *sym = tool == "column" ? nullptr :
+					sym_scene(m_w->world_scene, cf);
+			const int cx = (int)std::floor(x + 0.5), cz = (int)std::floor(z + 0.5);
+			if(sym && (!cf.editable(cx, cz) || (tool == "fill" &&
+					!cf.editable((int)std::floor(x1 + 0.5), (int)std::floor(z1 + 0.5)))))
+				return refuse("("+itos(cx)+","+itos(cz)+") is outside kit/symmetry "+
+						itos(sym->id)+"'s authored slice "+cf.slice);
+		}
 		// The editor's undo: a stroke's dabs one change
 		Change *c = nullptr;
 		if(tool != "column"){
@@ -7911,6 +8202,8 @@ struct Module: public interface::Module, public Interface
 				v = type_of(w, id);
 				return true;
 			};
+			// [KIT_SYMMETRY] the dab's cells, written into the other slices after
+			sv_<pv::Vector3DInt32> dab;
 			br.set = [&](int x, int y, int z, interface::VoxelTypeId v){
 				const pv::Vector3DInt32 q(x, y, z);
 				uint32_t old = 0;
@@ -7920,6 +8213,7 @@ struct Module: public interface::Module, public Interface
 					c->cells.emplace(std::make_tuple(x, y, z), old);
 				set_id(w, q, v);
 				mark(w, m_w->world_scene, q, 'k', p.name);
+				dab.push_back(q);
 			};
 			const world::BiomeIds *sel = &br.world;
 			for(auto &b : br.biomes)
@@ -8089,6 +8383,11 @@ struct Module: public interface::Module, public Interface
 						itos(x1)+","+itos(z1)+") up to "+itos(L)+": "+
 						itos(columns)+" columns, "+itos(br.written)+" cells";
 			}
+			symmetry::Config cf;
+			size_t images = 0;
+			if(!dab.empty() && sym_scene(m_w->world_scene, cf))
+				images = sym_write(w, m_w->world_scene, cf, dab, c ? &c->cells :
+						nullptr, p.name);
 			int t;
 			const bool has = br.top_of(cx, cz, hi, lo, t);
 			if(what.empty() || tool == "decorate")
@@ -8098,6 +8397,8 @@ struct Module: public interface::Module, public Interface
 						itos(br.written)+" cells";
 			what += "; column ("+itos(cx)+","+itos(cz)+"): "+(has ?
 					describe_column(w, br, cx, cz, t + 2, t - 6) : ss_("none"));
+			if(images)
+				what += "; "+itos(images)+" images";
 		});
 		return what;
 	}
@@ -8122,7 +8423,7 @@ struct Module: public interface::Module, public Interface
 		const int cx = (int)std::floor(fx + 0.5), cz = (int)std::floor(fz + 0.5);
 		const world::Biome &sel = m_w->materials.biomes[biome];
 		ss_ what;
-		size_t samples = 0, added = 0;
+		size_t samples = 0, added = 0, images = 0;
 		int bx0 = cx - r - 1, bz0 = cz - r - 1, bx1 = cx + r + 1,
 				bz1 = cz + r + 1;
 		sv_<std::pair<ss_, std::array<float, 4>>> decorate;
@@ -8160,13 +8461,14 @@ struct Module: public interface::Module, public Interface
 			// after (reset's unmarked). [KIT_HM_EDIT_RUNNING_MARKS] A stroke
 			// while Running is a live edit: End puts no heightmap back (Kit
 			// keeps no copy of one), so the stroke and its marks both stay
-			std::set<std::pair<int, int>> touched;
+			std::set<std::pair<int, int>> touched, wrote;
 			auto keep = [&](int x, int z){
 				if(c)
 					c->samples.emplace(std::make_pair(x, z), std::make_pair(
 							HG(x, z), WG(x, z)));
 				if(tool != "reset")
 					touched.insert(std::make_pair(x, z));
+				wrote.insert(std::make_pair(x, z));
 			};
 			auto one_hot = [](int layer){
 				heightmap::Weights w{};
@@ -8332,6 +8634,38 @@ struct Module: public interface::Module, public Interface
 			for(auto &q : touched)
 				hm_mark(q.first, q.second, true, HG(q.first,
 						q.second), WG(q.first, q.second), c);
+			// [KIT_SYMMETRY] each authored sample written into its images,
+			// each one past a seam its source's again
+			symmetry::Config cf;
+			if(sym_scene(m_w->world_scene, cf)){
+				auto put = [&](int tx, int tz, int fx, int fz){
+					if(!in(tx, tz) || !in(fx, fz) || (HG(tx, tz) == HG(fx, fz) &&
+							WG(tx, tz) == WG(fx, fz)))
+						return;
+					keep(tx, tz);
+					HS(tx, tz, HG(fx, fz));
+					WS(tx, tz, WG(fx, fz));
+					hm_mark(tx, tz, true, HG(fx, fz), WG(fx, fz), c);
+					images++;
+					bx0 = std::min(bx0, tx - 1), bz0 = std::min(bz0, tz - 1);
+					bx1 = std::max(bx1, tx + 1), bz1 = std::max(bz1, tz + 1);
+				};
+				const std::set<std::pair<int, int>> dab = wrote;
+				for(auto &q : dab){
+					int sx, sz;
+					size_t i;
+					if(!cf.editable(q.first, q.second)){
+						if(cf.source(q.first, q.second, sx, sz, i) && i)
+							put(q.first, q.second, sx, sz);
+						continue;
+					}
+					for(i = 1; i < cf.maps.size(); i++){
+						int x = q.first, z = q.second;
+						cf.maps[i].apply(x, z);
+						put(x, z, q.first, q.second);
+					}
+				}
+			}
 			if(what.empty())
 				what = tool+" at ("+itos(cx)+","+itos(cz)+") size "+itos(r)+
 						" strength "+itos((int)s);
@@ -8346,8 +8680,16 @@ struct Module: public interface::Module, public Interface
 						cz))+" layer "+itos(best);
 			}
 			what += ", map hash "+itos(map->content_hash());
+			if(images)
+				what += ", "+itos(images)+" images";
 		});
+		// [KIT_SYMMETRY] the decorations in the authored slice alone, and
+		// their images
+		symmetry::Config cf;
+		const bool sym = sym_scene(m_w->world_scene, cf);
 		for(auto &d : decorate){
+			if(sym && !cf.in(d.second[0], d.second[2]))
+				continue;
 			const uint64_t id = add_decor(d.first, d.second[0], d.second[1],
 					d.second[2], d.second[3]);
 			m_w->decor[id].hand = true;
@@ -8355,6 +8697,8 @@ struct Module: public interface::Module, public Interface
 				c->decor.push_back(id);
 			added++;
 		}
+		if(sym && added)
+			added += sym_copy(m_w->world_scene, cf, true, c, p.name, true).decor;
 		if(tool == "decorate")
 			what += ", "+itos(added)+" decorations ("+itos(m_w->decor.size())+
 					" in all, hash "+itos(decor_hash())+")";
@@ -8414,6 +8758,8 @@ struct Module: public interface::Module, public Interface
 		hm_edits_save();
 		for(uint64_t id : c.decor)
 			remove_decor(id);
+		for(const Decor &d : c.decor_gone)
+			m_w->decor[add_decor(d.structure, d.x, d.y, d.z, d.yaw)].hand = d.hand;
 		if(!c.samples.empty())
 			reseat_decor(x0, z0, x1, z1);
 		save_decor();
@@ -8542,6 +8888,13 @@ struct Module: public interface::Module, public Interface
 		uint32_t old = 0;
 		int r = -1;
 		ss_ why;
+		// [KIT_SYMMETRY] in the authored slice, written into the others too
+		symmetry::Config cf;
+		const Entity *sym = sym_scene(si->second, cf);
+		if(sym && !cf.editable(c[0], c[2]))
+			return refuse("("+itos(c[0])+","+itos(c[2])+") is outside kit/symmetry "+
+					itos(sym->id)+"'s authored slice "+cf.slice);
+		std::map<std::tuple<int, int, int>, uint32_t> images;
 		voxelworld::access(m_server, si->second, [&](voxelworld::Instance *w){
 			interface::VoxelName n;
 			n.block_name = voxel;
@@ -8564,6 +8917,8 @@ struct Module: public interface::Module, public Interface
 					"player:"+p.name);
 			if(r == voxelworld::Instance::WRITTEN)
 				mark(w, si->second, q, 'k', p.name);
+			if(r == voxelworld::Instance::WRITTEN && sym)
+				sym_write(w, si->second, cf, {q}, &images, p.name);
 		});
 		if(!why.empty())
 			return refuse(why);
@@ -8585,11 +8940,13 @@ struct Module: public interface::Module, public Interface
 		nc.stroke = -2;
 		nc.scene = si->second;
 		nc.cells[std::make_tuple(c[0], c[1], c[2])] = old;
+		nc.cells.insert(images.begin(), images.end());
 		u.push_back(nc);
 		while(u.size() > UNDO_MAX)
 			u.pop_front();
-		log_i(MODULE, "A voxel edit by %s: %s (%zu to undo)", cs(p.name),
-				cs(what), u.size());
+		log_i(MODULE, "A voxel edit by %s: %s%s (%zu to undo)", cs(p.name),
+				cs(what), sym ? cs(", "+itos(images.size())+" images") : "",
+				u.size());
 		send_state(peer);
 	}
 
@@ -8673,6 +9030,14 @@ struct Module: public interface::Module, public Interface
 		Change nc;
 		nc.stroke = -2;
 		nc.scene = scene_of(*e);
+		// [KIT_SYMMETRY] a box in the authored slice, written into the others
+		symmetry::Config cf;
+		const Entity *sym = sym_scene(nc.scene, cf);
+		if(sym && (!cf.editable(o.getX(), o.getZ()) || !cf.editable(o.getX() + n[0] -
+				1, o.getZ()) || !cf.editable(o.getX(), o.getZ() + n[2] - 1) ||
+				!cf.editable(o.getX() + n[0] - 1, o.getZ() + n[2] - 1)))
+			return refuse(who+": its box is outside kit/symmetry "+itos(sym->id)+
+					"'s authored slice "+cf.slice+" (its source's shows it)");
 		voxelworld::access(m_server, nc.scene, [&](voxelworld::Instance *w){
 			interface::VoxelRegistry *reg = w->get_voxel_reg();
 			sv_<uint32_t> ids;
@@ -8703,6 +9068,13 @@ struct Module: public interface::Module, public Interface
 						set_id(w, q, ids[pt.cells[i]]);
 						mark(w, nc.scene, q, 'k', p.name);
 					}
+			if(sym){
+				sv_<pv::Vector3DInt32> wrote;
+				for(auto &q : nc.cells)
+					wrote.push_back(pv::Vector3DInt32(std::get<0>(q.first),
+							std::get<1>(q.first), std::get<2>(q.first)));
+				sym_write(w, nc.scene, cf, wrote, &nc.cells, p.name);
+			}
 		});
 		if(!nc.cells.empty()){
 			std::deque<Change> &u = m_undo[p.name];
@@ -8998,6 +9370,15 @@ struct Module: public interface::Module, public Interface
 					inetwork->send(peer, "kit:generated", m_w->name);
 			});
 		}
+		// [KIT_SYMMETRY] the authored slice copied over the ground generated
+		// (sections loaded for the first time or a regeneration's; no undo:
+		// a regeneration's undo is its own)
+		symmetry::Config cf;
+		if(const Entity *s = sym_scene(m_w->world_scene, cf))
+			log_i(MODULE, "kit/symmetry %s: the slice %s copied over the others "
+					"after %s: %s", cs(itos(s->id)), cs(cf.slice),
+					m_w->world_regenerating ? "the regeneration" : "a generation",
+					cs(sym_copy(m_w->world_scene, cf, true, nullptr, "kit").text()));
 		// Builders told the regeneration is done: what they read of the
 		// ground after it is the new ground's
 		if(!m_w->world_regenerating)
@@ -21486,6 +21867,23 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "Play by %s: a round from the start (authored %s, "
 				"start %s)", cs(by), cs(digest(authored_json())),
 				cs(digest(m_start)));
+		// [KIT_SYMMETRY] parity verified: each slice its source's image
+		for(auto &pe : m_entities){
+			symmetry::Config cf;
+			ss_ why;
+			if(!symmetry_in(pe.second) || !symmetry_in(pe.second)->params.get(
+					"on").is_true() || !sym_config(pe.second, cf, why))
+				continue;
+			const SymCounts n = sym_copy(scene_of(pe.second), cf, false, nullptr, by);
+			const ss_ ents = sym_parity_entities(pe.second, cf);
+			log_i(MODULE, "kit/symmetry %s at Play: %s differ from their "
+					"source's image%s%s", cs(itos(pe.first)), cs(n.text()),
+					ents.empty() ? "" : "; ", cs(ents));
+			if(n.cells || n.samples || n.decor || !ents.empty())
+				warn("kit/symmetry "+itos(pe.first)+" at Play: "+n.text()+
+						" differ from their source's image"+(ents.empty() ? "" :
+						"; "+ents));
+		}
 		// Each player told first, then through the round's start
 		session_changed(false, by);
 		sv_<size_t> peers;
@@ -22333,8 +22731,61 @@ struct Module: public interface::Module, public Interface
 							"default round's");
 				}
 		two_way_returns(change, what);
+		// [KIT_SYMMETRY] a place's voxels in the authored slice (its sides:
+		// the slice and the map are convex), copied into the others after
+		symmetry::Config scf;
+		auto ssi = m_host.scenes.find(p.scene);
+		const Entity *ssym = ssi == m_host.scenes.end() ? nullptr :
+				sym_scene(ssi->second, scf);
+		if(ssym && m_paste.set){
+			auto box_ok = [&](const int o[3], const int n[3]){
+				for(int k = 0; k < 4; k++)
+					if(!scf.editable(o[0] + (k & 1 ? n[0] - 1 : 0),
+							o[2] + (k & 2 ? n[2] - 1 : 0)))
+						return false;
+				return true;
+			};
+			int o[3], n[3];
+			bool ok = true;
+			if(!m_paste.only_clear && m_paste.vox.is_object()){
+				placed_box(m_paste.vox, m_paste.base, m_paste.turn, o, n);
+				ok = box_ok(o, n);
+			}
+			if(m_paste.clear)
+				ok = ok && box_ok(m_paste.clear_at, m_paste.clear_size);
+			if(!ok){
+				m_paste.set = false;
+				m_follow.clear();
+				m_next_id = next0;
+				return refuse("its voxels go outside kit/symmetry "+itos(ssym->id)+
+						"'s authored slice "+scf.slice);
+			}
+		}
+		// Turned on or changed: its slices' voxels copied after
+		std::map<uint64_t, ss_> sym_was;
+		for(auto &e : m_entities)
+			if(const Instance *si = symmetry_in(e.second))
+				sym_was[e.first] = si->params.get("on").is_true() ?
+						si->params.stringify() : "";
 		std::deque<Change> &u = m_undo[p.name];
 		commit(change, &u);
+		for(auto &e : m_entities){
+			const Instance *si = symmetry_in(e.second);
+			symmetry::Config cf;
+			ss_ cwhy;
+			if(!si || !si->params.get("on").is_true() || sym_was[e.first] ==
+					si->params.stringify() || u.empty() ||
+					!sym_config(e.second, cf, cwhy))
+				continue;
+			Change &nc = u.back();
+			nc.stroke = -3;
+			nc.scene = scene_of(e.second);
+			const SymCounts n = sym_copy(nc.scene, cf, true, &nc, p.name);
+			what += ", the slice "+cf.slice+" copied over the others: "+n.text();
+			ss_ warnings = sym_parity_entities(e.second, cf);
+			if(!warnings.empty())
+				warn("kit/symmetry "+itos(e.first)+": "+warnings);
+		}
 		// [KIT_PREFAB_VOXELS] a place's voxels, with its entities one undo
 		if(m_paste.set){
 			m_paste.set = false;
@@ -22349,6 +22800,17 @@ struct Module: public interface::Module, public Interface
 			if(!m_paste.only_clear)
 				write_voxels(m_paste.vox, nc.scene, m_paste.base, m_paste.turn,
 						nc, p.name, written, missing, unknown);
+			if(ssym){
+				sv_<pv::Vector3DInt32> wrote;
+				for(auto &q : nc.cells)
+					wrote.push_back(pv::Vector3DInt32(std::get<0>(q.first),
+							std::get<1>(q.first), std::get<2>(q.first)));
+				size_t images = 0;
+				voxelworld::access(m_server, nc.scene, [&](voxelworld::Instance *w){
+					images = sym_write(w, nc.scene, scf, wrote, &nc.cells, p.name);
+				});
+				what += ", "+itos(images)+" images";
+			}
 			what += ", "+(m_paste.clear ? itos(cleared)+" voxels cleared, " :
 					ss_())+itos(written)+" voxels written"+(missing ? ", "+
 					itos(missing)+" not loaded" : ss_())+(unknown ? ", "+

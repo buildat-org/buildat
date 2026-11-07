@@ -444,6 +444,25 @@ namespace interface
 //   simplified: a box's image is placed by its entity's first box or
 //   cells parameter; a voxels pattern's shapes keep their facings; a
 //   look's offset (a mover out) is not in a source's place
+//   Its scene's World on (stage 2): a cell (set_voxel, a brush's dab
+//   centre, a fill's corners, a paste's or a pattern's box) is edited
+//   only in the authored slice where its images are on the map (out of
+//   it refused, why said); each cell written writes its images (a
+//   shape's facing turned, an inner or outer stair's mirrored by its
+//   diagonal) in the same undo, and one written past a seam gets its
+//   source's image back. On a heightmap a stroke's samples and its
+//   decorations the same (a decorate stroke scatters in the authored
+//   slice alone). Turned on, or its slices changed, the authored slice
+//   is copied over the others (cells, samples, decorations: one undo
+//   with the edit); after a generation or a regeneration (the voxels'
+//   sections, a heightmap's) the same, with no undo; a section with no
+//   authored column regenerates as unedited. At Play the server counts
+//   the cells, samples and decorations differing from their source's
+//   image and the entities outside it in the other slices: a warning to
+//   the builders where any (util/kit_symmetry_voxels_check.sh).
+//   simplified: only loaded sections are copied (a finite World is all
+//   loaded near it); copied cells and samples are marked edited; a
+//   generator's voxel_box writes are not mirrored
 //   [KIT] stage 5 **Packages**: component types, prefabs and builders'
 //   voxel types published to Aitta as a package of "kind": "kit"
 //   (doc/aitta.txt). [AITTA_KEY_IDENTITY] A package is its key and its
