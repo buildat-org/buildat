@@ -672,8 +672,11 @@ keypress F6
 wait_log 10000 kit editor: edit mode off
 EOF
 	lobby 0 wait_log
+	# Prep 1 s first: the map's text, logged at its load before the timer's
+	# first value, reads "Prep 0 s" ({value:int} is 0 before any value)
 	cat <<EOF
-wait_log 60000 Prep 0 s
+wait_log 60000 Prep 1 s
+wait_log 10000 Prep 0 s
 delay 500
 keypress I
 wait_log 10000 ${SHOWN}Flag carried by
