@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2.5 min, more with a cold module cache (2026-11-06)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/types/effect.lua builtin/kit/client_lua/effects.lua builtin/kit/types/flag.lua builtin/kit/types/explosive.lua builtin/kit/types/placer.lua builtin/kit/types/part.lua builtin/kit/types/hut.prefab.json builtin/kit/types/bomb_look.prefab.json builtin/kit/sounds.json builtin/kit/types/arena.lua builtin/kit/types/region.lua builtin/kit/client_lua/hands.lua apps/workbench/**
+# cost: ~3 min, more with a cold module cache (2026-11-07)
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/types/effect.lua builtin/kit/client_lua/effects.lua builtin/kit/types/flag.lua builtin/kit/types/explosive.lua builtin/kit/types/placer.lua builtin/kit/types/part.lua builtin/kit/types/hut.prefab.json builtin/kit/types/bomb_look.prefab.json builtin/kit/sounds.json builtin/kit/types/arena.lua builtin/kit/types/region.lua builtin/kit/client_lua/hands.lua builtin/kit/symmetry.h builtin/kit/types/symmetry.lua apps/workbench/**
 # [KIT_CTF] Capture the flag composed on a fresh Workbench save with the
 # editor's ops alone (kitboss, the admin, Stopped), then played by three
 # clients. The composition (compose() below; the game's numbers in
@@ -13,15 +13,16 @@
 #     the items kitboss/knife (kit/sword: damage 1000, reach 3, cooldown
 #     5, no knockback) and kitboss/bomb (use "use", the look kit/bomb_look)
 #   the map (scene "map"): a flat 96x96 grassland World (grass 1, dirt 1,
-#     stone: soil_depth 1), huts (kit/hut), teams Red (+x) and Blue (-x) with their zones
-#     (regions under them), a map-wide region allowing dig and place, a
+#     stone: soil_depth 1), huts (kit/hut), a kit/symmetry (halves
+#     mirrored, +x authored) with team Red (+x), its zone (a region under
+#     it) and its pickaxe spawner under it: Blue (-x) its copies, the
+#     team's name and colour overrides; outside it a map-wide region allowing dig and place, a
 #     prep region over the map (enter none) a prep kit/timer disables, the
 #     flag (kit/flag, a pole kit/part under it) at the middle in a
 #     protected column region to the bottom, its timer, scoring bar,
 #     immunity and holder texts, the arena's status in a text, a starting
 #     kit of 10 kit/planks, a kit/placer of kitboss/bomb copies (a saved
-#     prefab of a kit/explosive), spawners of pickaxe (by each zone),
-#     bomb and knife pickups (saved prefabs of kit/pickup)
+#     prefab of a kit/explosive), spawners of bomb and knife pickups (saved prefabs of kit/pickup)
 # Played (the check's own type workbench/warp: keys teleporting their
 # presser to set places, as walking there would): kitboss (Red), kitbob
 # (Blue), kitcat (Red) queue in that order;
@@ -44,6 +45,9 @@
 #   7. a second round 0:0 at its time up runs on as overtime; kitboss
 #      walks with the flag (a screenshot sequence), places it in Red's
 #      zone: Red wins; all back in the lobby
+#   8. multi-flag ([KIT_SYMMETRY]): the flag moved under the kit/symmetry
+#      to Red's side, its copy on Blue's; kitboss alone takes the copy at
+#      home and places it in Red's zone: a point, Red wins (score_to_win 1)
 # Screenshots (look at them): kitboss's first person and kitcat's third
 # person of the carried flag, a walking sequence, the bomb held and lying.
 #   util/kit_ctf_check.sh
@@ -260,19 +264,16 @@ EOF
 	# [KIT_SOIL_DEPTH] grass 1 over dirt 1 over stone: a tunnel needs a
 	# pickaxe
 	set_ $id soil_depth 1
-	place kit/team '30, 1, 0'; RED=$id
+	# [KIT_SYMMETRY] Red's side (+x) under it, mirrored to Blue's: turned on
+	# at the end of compose()
+	place kit/symmetry '0, 1, 0'; SYM=$id
+	name_ 'Symmetry'
+	place kit/team '30, 1, 0' $SYM; RED=$id
 	name_ 'Red team'
 	set_ $id name '"Red"'
 	set_ $id color '"#d03030"'
-	place kit/team '-30, 1, 0'; BLUE=$id
-	name_ 'Blue team'
-	set_ $id name '"Blue"'
-	set_ $id color '"#3050e0"'
 	region '24, -2, -6' '13, 12, 13' all all all $RED
 	name_ 'Red zone'
-	set_ $id owner '"team"'
-	region '-36, -2, -6' '13, 12, 13' all all all $BLUE
-	name_ 'Blue zone'
 	set_ $id owner '"team"'
 	region '-50, -128, -50' '100, 384, 100' all all all
 	name_ 'Map area'
@@ -476,26 +477,33 @@ EOF
 		set_ $id item "\"${p%%:*}\""
 		prefab_of $id "${p##*:}_pickup"
 	done
-	for p in '21, 1, 0:pickaxe:Red pickaxes' '-21, 1, 0:pickaxe:Blue pickaxes' \
-			'0, 1, 20:bomb:Bombs' '0, 1, -20:knife:Knives'; do
-		place kit/spawner "${p%%:*}"
+	for p in '21, 1, 0:pickaxe:Pickaxes' '0, 1, 20:bomb:Bombs' \
+			'0, 1, -20:knife:Knives'; do
+		place kit/spawner "${p%%:*}" $([ "${p##*:}" = Pickaxes ] && echo $SYM)
 		name_ "${p##*:}"
 		p=${p#*:}
 		set_ $id prefab "\"kitboss/${p%%:*}_pickup\""
 		set_ $id every $EVERY
 		set_ $id max 1
 	done
+	# Blue's side: the copies of its sources (by id: the team, the
+	# spawner, then the zone under the team), Blue's name and colour its own
+	set_ $SYM on true
+	BLUE=$((id + 1)); id=$((id + 3))
+	set_ $BLUE name '"Blue"'
+	set_ $BLUE color '"#3050e0"'
 }
 SCENE_MAP='event kit_edit {"op": "scene", "name": "map"}
 wait_log 30000 kit editor: in the scene map of world, map'
 SCENE_LOBBY='event kit_edit {"op": "scene", "name": "world"}
 wait_log 30000 kit editor: in the scene world of world, map'
-# Last (a prefab of voxels alone may take no id): huts in the map
+# Last (a prefab of voxels alone may take no id): huts in the map, on Red's
+# side ([KIT_SYMMETRY] their voxels mirrored to Blue's)
 huts()
 {
 	[ -n "$build_only" ] || echo "$SCENE_MAP"
 	local p
-	for p in '12, 1, 12' '-12, 1, -12' '12, 1, -14' '-12, 1, 14'; do
+	for p in '12, 1, 12' '12, 1, -14'; do
 		printf 'event kit_edit {"op": "place", "prefab": "kit/hut", "pos": [%s]}\nsync 2000\n' "$p"
 	done
 	echo "$SCENE_LOBBY"
@@ -517,6 +525,7 @@ extras()
 {
 	# Each one's: Y U I O P to p1..p5
 	warps kitboss '0, 1, 0' '0, 1, -20' '4, 1, 0' '30, 1, 4' '-30, 1, 2'
+	WARP_BOSS=$id
 	warps kitbob '0, 1, 20' '1, 1, 1' '0, 1, 0' '0, 1, 0' '-30, 1, 2'
 	warps kitcat '0, 1, 0' '21, 1, 0' '-1, 1, 0' '0, 1, 20' '3, 1, 5'
 	ed '{"op": "set_voxel", "pos": [21, 1, 2], "voxel": "kit/stone"}'
@@ -651,6 +660,43 @@ delay 600
 keyup W
 look_dir 1 0 0
 frames 10
+keypress O
+delay 800
+event kit_click_at 0 1 0 right
+wait_log 60000 Red wins!
+wait_log 60000 kit editor: in session 0
+sync 2000
+keypress F6
+wait_log 10000 kit editor: edit mode on
+EOF
+	# [KIT_SYMMETRY] 8. Multi-flag: the flag (and its pole) under the
+	# kit/symmetry at Red's side, its copy at Blue's; kitboss alone, a point
+	# wins. He takes Blue's from its home and places it in Red's zone. Edited
+	# Stopped (live, the flag's join sends it home), then Play
+	cat <<EOF
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended (by kitboss)
+EOF
+	echo "$SCENE_MAP"
+	ed "{\"op\": \"move\", \"id\": $FLAG, \"pos\": [10, 1, 0]}"
+	under $FLAG $SYM
+	echo "$SCENE_LOBBY"
+	for a in "players 1" "score_to_win 1" "duration 90"; do
+		set_ $ARENA $a
+	done
+	set_ $WARP_BOSS p3 '[-10, 1, 0]'
+	cat <<EOF
+event kit_edit {"op": "play"}
+wait_log 10000 kit editor: the server is Running (by kitboss)
+keypress F6
+wait_log 10000 kit editor: edit mode off
+EOF
+	lobby 0 wait_log
+	cat <<EOF
+wait_log 60000 Prep 0 s
+delay 500
+keypress I
+wait_log 10000 ${SHOWN}Flag carried by
 keypress O
 delay 800
 event kit_click_at 0 1 0 right
@@ -792,7 +838,7 @@ wait "$SERVER_PID" 2>/dev/null
 s=$t/srv.log
 grep -a "kit/flag\|kit/explosive\|kit/placer\|joins team\|died\|respawn\|may not enter\|speed x\|wins\|overtime\|dug kit/stone\|A dig by\|explodes" "$s" |
 	grep -v "moves to" | sed 's/^.*\(kit\|wasm\) *: /  /' | cut -c1-170 | head -120
-! grep -a "edit refused\|kit:edit_refused" "$s" "$t/boss.log" | head -5 | grep . ||
+! grep -a "edit refused\|kit:edit_refused\|kit editor: refused" "$s" "$t/boss.log" | head -5 | grep . ||
 	fail "an edit was refused ($s)"
 python3 - "$s" "$FLAG" <<'PY' || fail "the game ($s)"
 import re, sys
@@ -849,7 +895,13 @@ assert "time up, tied: Red 0 : Blue 0 -- overtime" in s2
 assert "refused: Too far away" in s2, "a use from 4 m not refused"
 assert re.search(r"Entity %s used by kitboss[^\0]*?" % sys.argv[2] + re.escape(F) + r"taken by kitboss from home \(Red\)", s2), "not taken by a use from afar"
 assert "Red wins!" in s2
-print("  ok")
+# 8. multi-flag: the flag's copy taken at Blue's side, a point for Red
+s3 = part(3)
+m = re.search(r"kit/flag (\d+): taken by kitboss from home", s3)
+assert m and m.group(1) != sys.argv[2], "the flag's copy not taken: " + (m.group(0) if m else "none")
+c = "kit/flag " + m.group(1) + ": "
+assert s3.index(c + "scores 1 for Red") < s3.index("Red wins!"), "no point by the copy"
+print("  ok (the flag's copy %s)" % m.group(1))
 PY
 want "$s" "column (20,20): air 1..2, kit/grass 0, kit/dirt -1, kit/stone -6..-2" \
 	"kitcat dug kit/stone (level 1) with kit/pickaxe (level 1): drops kit/cobble" \
