@@ -1580,6 +1580,11 @@ magic.SubscribeToEvent("Update", function(_, data)
 	end
 	local step_len = 1 / rate()
 	if C.s and C.ready and (C.def or riding) then
+		-- [KIT_TEMPLATE_ROUGH_EDGES] A jump pressed (down and up) in a frame
+		-- with no step is kept for the next step, as a touch's is
+		if M.key_press("jump") then
+			C.touch_jump = true
+		end
 		C.acc = C.acc + dt
 		local n = 0
 		local w = nil
@@ -1615,7 +1620,9 @@ magic.SubscribeToEvent("Update", function(_, data)
 		if C.acc > step_len then
 			C.acc = 0
 		end
-		C.touch_jump = false
+		if n > 0 then
+			C.touch_jump = false
+		end
 		if #C.out > 0 then
 			buildat.send_packet("kit:input", C.put .. ";" ..
 					table.concat(C.out, ";"))

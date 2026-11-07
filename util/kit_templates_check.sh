@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min, ~5 min with web (2026-11-07)
-# covers: apps/workbench/** builtin/world_menu/** builtin/kit/kit.cpp builtin/kit/types/arena.lua builtin/kit/types/team.lua builtin/kit/types/goal.lua builtin/kit/types/sign.lua builtin/kit/types/button.lua src/impl/aitta.cpp client/core/aitta/init.lua util/pack_templates.sh
+# covers: apps/workbench/** builtin/world_menu/** builtin/kit/kit.cpp builtin/kit/types/arena.lua builtin/kit/types/team.lua builtin/kit/types/goal.lua builtin/kit/types/sign.lua builtin/kit/types/button.lua builtin/kit/types/flag.lua builtin/kit/types/symmetry.lua src/impl/aitta.cpp client/core/aitta/init.lua util/pack_templates.sh util/kit_ctf_warp.lua
 # [KIT_TEMPLATES] (kit_plan stage 7b, Workbench templates) Each template through
 # New, opened in edit mode and played to its end by real clients. A check's
 # default Aitta is a closed port, so all this but part 3 is the offline case.
@@ -15,6 +15,8 @@
 # 2. Arena, likewise (a_edit*.png), then two rounds by kitbob and kitboss, into
 #    the lobby's queue by the pad: its maps in turn; a team's own beacon refused;
 #    three presses of the other's, a win; back in the lobby (a_*.png).
+# 2b. Capture the flag, likewise (c_*.png), shortened by edit ops: kitboss
+#    takes the flag and places it in Red's zone, a point wins.
 # 3. Packed by util/pack_templates.sh with a key made here, the licence file in
 #    the archive and no .wasm, published to a local Aitta, `buildat aitta
 #    install`ed: New lists it after ours, and it opens in edit mode (i_*.png).
@@ -44,12 +46,14 @@ python3 -I - "$here" > "$t/ids.sh" <<'PY' || fail "the templates' files"
 import json, re, sys
 here = sys.argv[1]
 known = set(json.load(open(here + "/builtin/kit/materials.json"))["voxels"])
-for name, pre in (("puzzle_room", "P"), ("arena", "A")):
+for name, pre in (("puzzle_room", "P"), ("arena", "A"), ("ctf", "C")):
 	d = "%s/apps/workbench/templates/%s" % (here, name)
 	m = json.load(open(d + "/meta.json"))
 	assert m["kind"] == "template" and m["name"] == name and m["title"], name
 	assert open(d + "/LICENSE").read().strip(), name
-	rows = json.load(open(d + "/composition.json"))["entities"]
+	comp = json.load(open(d + "/composition.json"))
+	rows = comp["entities"]
+	print("%s_next_id=%d" % (pre, max([comp.get("next_id", 2)] + [r["id"] + 1 for r in rows])))
 	by = {r["id"]: r for r in rows}
 	def scene(r):
 		while r.get("kind") != "scene" and r.get("parent") in by:
@@ -422,6 +426,112 @@ for m in ("a round for 2 players on meadow", "a round for 2 players on dunes"):
 PY
 echo "ok: the arena plays two rounds on its two maps, by a win on score"
 
+# 2b. Capture the flag ([KIT_CTF_TEMPLATE]), likewise (c_edit*.png), then a
+# round by kitbob and kitboss into the lobby's queue by the pad. Shorter for
+# the check by edit ops, Stopped: prep 3 s, a point every 3 s, one wins; and
+# kitboss's warps (kit_ctf_check's type) to the flag and to Red's zone. He
+# takes the flag, places it there: a point, Red wins
+ed() { printf 'event kit_edit %s\nwait_log 10000 kit editor: state:\n' "$1"; }
+set_() { ed "{\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}"; }
+{
+	new_project "Capture the flag" c
+	edit_look c "$C_world_the_arena"
+	set_ "$C_map_prep_timer" repeats 3
+	set_ "$C_map_the_flag" score_interval 3
+	set_ "$C_world_the_arena" countdown 3
+	set_ "$C_world_the_arena" score_to_win 1
+	cat <<'EOF'
+event kit_edit {"op": "scene", "name": "map"}
+wait_log 30000 kit editor: in the scene map of world, map
+event kit_edit {"op": "place", "type": "workbench/warp", "pos": [4, 1, 6]}
+wait_log 10000 kit editor: state:
+EOF
+	w=$C_next_id
+	set_ $w who '"kitboss"'
+	set_ $w p1 '[0, 1, 0]'
+	set_ $w p2 '[30, 1, 4]'
+	cat <<'EOF'
+event kit_edit {"op": "scene", "name": "world"}
+wait_log 30000 kit editor: in the scene world of world, map
+EOF
+	to_play
+	up "Stand on the golden pad to join a round"
+	shot c_lobby
+	echo "wait_log_any 120000 Waiting for players: 1 of 2"
+	walk 1800
+	echo "wait_log_any 60000 The flag is out in 2 s"
+	shot c_prep
+	echo "wait_log_any 30000 The flag is out in 0 s"
+	cat <<'EOF'
+delay 500
+keypress Y
+wait_log 10000 shown: "Flag carried by Red
+look_dir 1 0.3 0
+EOF
+	shot c_carry
+	cat <<'EOF'
+keypress U
+delay 800
+event kit_click_at 0 1 0 right
+wait_log 30000 Red wins!
+EOF
+	shot c_won
+	echo quit
+} > "$t/c_boss.cmds"
+{
+	cat <<'EOF'
+wait_log_any 60000 Joined as kitbob
+wait_log_any 60000 player physics enabled
+wait_log_any 60000 shown: "Stand on the golden pad
+frames 10
+look_dir 0 0 1
+frames 5
+EOF
+	walk 1800
+	cat <<'EOF'
+wait_log_any 60000 The flag is out in 0 s
+wait_log_any 30000 shown: "Flag carried by Red
+wait_log 30000 Red wins!
+EOF
+	shot c_bob_lost
+	echo quit
+} > "$t/c_bob.cmds"
+mkdir -p "$t/ctf/apps/workbench/check_types"
+cp "$here/util/kit_ctf_warp.lua" "$t/ctf/apps/workbench/check_types/warp.lua"
+BUILDAT_WORKBENCH_TYPES=$t/ctf/apps/workbench/check_types server ctf
+admin
+boss c_boss &
+boss_pid=$!
+wait_for_log "$SRV" "kitboss opens the template in edit mode" 180 ||
+	fail "capture the flag did not open ($SRV)"
+wait_for_log "$SRV" "Play by kitboss" 180 ||
+	fail "capture the flag did not start ($SRV)"
+bob c_bob
+wait "$boss_pid" || exit 1
+server_end
+python3 -I - "$t" "$C_map_the_flag" <<'PY' || fail "capture the flag's logs ($t)"
+import re, sys
+t, flag = sys.argv[1:]
+srv = open(t + "/ctf.log", errors="replace").read()
+boss = open(t + "/c_boss.log", errors="replace").read()
+assert "the project from the template ctf" in srv
+assert not re.search(r"goal warnings: [1-9]", boss), "goal warnings"
+assert not re.search(r"edit refused|kit:edit_refused|kit editor: refused", boss + srv), "an edit refused"
+assert "kitboss joins team Red" in srv and "kitbob joins team Blue" in srv
+F = "kit/flag %s: " % flag
+i = srv.index(F + "enabled")
+j = srv.index(F + "taken by kitboss from home (Red)", i)
+k = srv.index(F + "placed by kitboss", j)
+s = srv.index(F + "scores 1 for Red", k)
+assert srv.index("Red wins!", s)
+assert "countdown over: a round for 2 players" in srv
+# Nothing single across the seam: no parity warning at Play
+assert "entities outside it in the other slices" not in srv, "a parity warning"
+for hint in ("Take the flag at the middle", "The flag is out in "):
+	assert 'shown: "' + hint in boss, hint
+PY
+echo "ok: capture the flag plays a round to a capture"
+
 [ -n "$WEB" ] && { echo "PASS: the templates: made, opened and played (web)"; exit 0; }
 
 # 3. Packed, published, installed, listed
@@ -444,9 +554,9 @@ grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind ($t/bind.log)"
 if "$here/util/pack_templates.sh" "$here/util/check_lib.sh" "$t/refused" 2>/dev/null; then
 	fail "pack_templates.sh took a key inside the repo"
 fi
-"$here/util/pack_templates.sh" "$t/key" "$t/out" puzzle_room arena > "$t/zips.txt" 2> "$t/pack.err" ||
+"$here/util/pack_templates.sh" "$t/key" "$t/out" puzzle_room arena ctf > "$t/zips.txt" 2> "$t/pack.err" ||
 	fail "pack_templates.sh ($t/pack.err)"
-for name in puzzle_room arena; do
+for name in puzzle_room arena ctf; do
 	zip=$(grep -a "$name" "$t/zips.txt" | head -1)
 	[ -f "$zip" ] || fail "no archive of $name ($t/zips.txt)"
 	python3 -I - "$zip" <<'PY' || fail "$name's archive"
@@ -496,7 +606,7 @@ m = re.search(r"world_menu: template choices: (.*)", cl)
 assert m, "no choices"
 got = m[1].strip()
 assert got.startswith("Empty, ") and got.endswith(", Puzzle room (buildat, installed)"), got
-assert sorted(got[7:].split(", ")[:2]) == ["Arena", "Puzzle room"], got
+assert sorted(got[7:].split(", ")[:3]) == ["Arena", "Capture the flag", "Puzzle room"], got
 assert "A template: Stopped, in edit mode" in srv
 assert "kitboss opens the template in edit mode" in srv
 PY

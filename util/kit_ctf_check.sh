@@ -78,28 +78,8 @@ if [ -z "$build_only" ]; then
 	# (in its app directory: the sandboxed server reads nothing else of
 	# the run's)
 	mkdir -p "$t/user/apps/workbench/check_types"
-	cat > "$t/user/apps/workbench/check_types/warp.lua" <<'EOF'
--- The check's warps: each action teleports who pressed it (`who` alone,
--- "" anyone) to its p<n>. Five
-local acts, params = {}, {who = {type = "string", default = ""}}
-for i, k in ipairs({"Y", "U", "I", "O", "P"}) do
-	acts[i] = {name = "warp" .. i, key = k, label = "Warp " .. i}
-	params["p" .. i] = {type = "position", default = {0, 1, 0}}
-end
-return {
-	version = 1,
-	actions = acts,
-	params = params,
-	on_action = function(c, name, phase, value, by)
-		local p = c.params["p" .. name:sub(5)]
-		if phase == "pressed" and p and not c.player_away and
-				(c.params.who == "" or c.params.who == c:name(by)) then
-			c:log(c:name(by), name, "to", p[1], p[2], p[3])
-			c:teleport(p)
-		end
-	end,
-}
-EOF
+	# The check's warps (util/kit_ctf_warp.lua)
+	cp "$here/util/kit_ctf_warp.lua" "$t/user/apps/workbench/check_types/warp.lua"
 	export BUILDAT_WORKBENCH_TYPES=$t/user/apps/workbench/check_types
 fi
 cd "$here/Build"

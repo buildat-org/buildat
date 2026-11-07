@@ -1,0 +1,11 @@
+{
+	"kind": "template",
+	"author": "buildat",
+	"name": "ctf",
+	"title": "Capture the flag",
+	"version": "1.0.0",
+	"engine_api": 2,
+	"license_code": "CC0-1.0",
+	"license_media": "CC0-1.0",
+	"description": "Two teams on a mirrored map and a lobby: players stand on a pad to start a round, take the flag from the middle and place it in their own zone, where it scores a point every 10 s. First to 3 points wins, or the most in 10 minutes. Opens in edit mode, ready to play and to change."
+}
