@@ -2985,8 +2985,13 @@ struct Module: public interface::Module, public Interface
 					cs_.append(cj);
 				}
 				row.set("components", cs_);
-				if(ex == m_entities.end() || entity_json(ex->second).stringify() !=
-						row.stringify()){
+				// (compared as entity_json writes it: the row's keys are in
+				// another order, which made every edit make every copy again)
+				Entity ne;
+				ss_ nwhy;
+				if(ex == m_entities.end() || !entity_from_json(row, ne, nwhy) ||
+						entity_json(ex->second).stringify() !=
+						entity_json(ne).stringify()){
 					out.push_back(std::make_pair(id, row));
 					double a, b, cr;
 					im.q.angles(a, b, cr);
