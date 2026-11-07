@@ -282,6 +282,12 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 		g.grant_around(p, holes, READ_RIGHTS);
 	g.grant_around(prebuilt, {norm(app_cache)}, READ_RIGHTS);
 	g.grant(user+"\\shared", READ_RIGHTS);
+	// [KIT_TEMPLATES] Workbench's New lists the templates installed: packages
+	// off an Aitta and their public keys, read only (as confine.cpp)
+	if(app == "workbench"){
+		interface::fs::create_directories(user+"\\installed");
+		g.grant(user+"\\installed", READ_RIGHTS);
+	}
 	g.grant(app_user, FULL_RIGHTS);
 	g.grant(app_shared, FULL_RIGHTS);
 	g.grant(app_cache, FULL_RIGHTS);
