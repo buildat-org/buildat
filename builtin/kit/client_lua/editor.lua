@@ -504,6 +504,52 @@ function NT.style_sources(id, ci)
 	return list
 end
 
+-- [KIT_COMPONENTS] A seat with no movement or a movement with no seat does nothing:
+-- said where it is added
+function NT.component_hint(w, e, t)
+	if not t.seat and not (t.movement and not t.root) then
+		return
+	end
+	local seat, movement = false, false
+	for _, c in ipairs(e.components or {}) do
+		local o = type_of(c.type)
+		seat, movement = seat or o.seat, movement or o.movement
+	end
+	if t.seat and not movement then
+		text(w, "No one can sit: it needs a movement (kit/car)", WARN)
+	elseif t.movement and not seat then
+		text(w, "No one drives it: it needs a kit/seat", WARN)
+	end
+end
+
+-- [KIT_COMPONENTS] "Add component": the types without a place not on it yet (the
+-- server's refusals, a second movement, come back as the status)
+function NT.add_component(w, e)
+	local on, list = {}, {{"pick one", ""}}
+	for _, c in ipairs(e.components or {}) do
+		on[c.type] = true
+	end
+	local names = {}
+	for name, t in pairs(E.state.types or {}) do
+		if t.addable and not on[name] then
+			names[#names + 1] = name
+		end
+	end
+	table.sort(names)
+	for _, name in ipairs(names) do
+		list[#list + 1] = {name, name}
+	end
+	if #names == 0 then
+		return
+	end
+	ui_utils.dropdown(row(w), list, "", function(x)
+		if x and x ~= "" then
+			log:info("kit editor: add " .. tostring(x) .. " to " .. e.id)
+			send({op = "add_component", id = e.id, type = x})
+		end
+	end, {label = "Add component...", fill = true})
+end
+
 function NT.copy_style(from, from_ci, to, to_ci)
 	local f, t = find(from), find(to)
 	local fc = f and f.components and f.components[from_ci]
@@ -2818,9 +2864,25 @@ local function inspector(w, e, is_made)
 			M.delete_selected()
 		end)
 	end
+	-- [KIT_COMPONENTS] A built child's are its prefab's. (Over the components: a
+	-- movement's parameters are longer than the screen)
+	local may_compose = not sig and type(e.built) ~= "table" and not e.kind
+	if may_compose then
+		NT.add_component(w, e)
+	end
 	for ci, c in ipairs(e.components or {}) do
 		local t = type_of(c.type)
-		text(w, c.type, magic.Color(1.0, 0.85, 0.3))
+		if may_compose and t.addable and #e.components > 1 then
+			local tr = row(w)
+			label(tr, c.type).color = magic.Color(1.0, 0.85, 0.3)
+			button(tr, "Remove", function()
+				log:info("kit editor: remove " .. c.type .. " from " .. e.id)
+				send({op = "remove_component", id = e.id, comp = ci - 1})
+			end)
+		else
+			text(w, c.type, magic.Color(1.0, 0.85, 0.3))
+		end
+		NT.component_hint(w, e, t)
 		if E.running then
 			button(w, "Restart this", function()
 				send({op = "restart", id = e.id, comp = ci - 1})

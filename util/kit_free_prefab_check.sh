@@ -136,8 +136,7 @@ if [ -n "$WEB" ] && [ "${2:-}" != rotation ] && [ "${2:-}" != frame ]; then
 	["holdkey", "w", 1500], ["frames", 10], ["shot", "\${OUT}/play_walked.png"],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: edit mode on", 20], ["frames", 5],
-	["click", "Button", "Behaviour"], ["frames", 5],
-	["click", "DropDownList", "▼", 1120, 387], ["waitlog", " open", 5], ["frames", 3],
+	["click", "DropDownList", "▼", 1120, 422], ["waitlog", " open", 5], ["frames", 3],
 	["click", "Text", "stamped"], ["waitlog", "kit editor: 4/1 mode = stamped", 5], ["frames", 3],
 	["click", "Button", "Apply"], ["waitlog_any", "kit editor: state: 3 entities", 10], ["sync", 5000], ["frames", 5],
 	["shot", "\${OUT}/switched.png"]

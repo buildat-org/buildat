@@ -44,7 +44,7 @@
 -- so no pose is ever sent: each input carries the time it was stepped at (i.t, ms),
 -- M.steps puts the world's objects where they are at that time on both sides, and a
 -- body in a frame is carried by s.at being local. The motion's parameters are
--- kit/prefab_copy's (M.wave); a row has its own and those of the moving objects it
+-- kit/wave's (M.wave); a row has its own and those of the moving objects it
 -- is under as links, each in the world at rest (M.turned).
 local M = {}
 local floor, sqrt = math.floor, math.sqrt

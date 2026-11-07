@@ -1,0 +1,13 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "car",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "car", "pos": [0, 0, 0],
+			"components": [
+				{"type": "kit/part", "params": {"size": [1.8, 0.7, 3.6], "color": "#3060c0"}},
+				{"type": "kit/car"},
+				{"type": "kit/seat"}]}
+	]
+}
