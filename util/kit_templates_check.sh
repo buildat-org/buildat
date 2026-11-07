@@ -456,6 +456,17 @@ PY
 		fail "the publish of $name ($t/publish.txt)"
 	grep -q "listed: buildat/$name" "$t/publish.txt" || fail "$name not listed ($t/publish.txt)"
 done
+# (one with no licence file, or with a type not Kit's, is not packed)
+mkdir "$t/bad"
+cp "$here/apps/workbench/templates/arena/meta.json" "$here/apps/workbench/templates/arena/composition.json" "$t/bad/"
+if "$b" aitta pack "$t/bad" "$t/key" "$t/refused" > /dev/null 2>&1; then
+	fail "a template with no licence file packed"
+fi
+cp "$here/apps/workbench/templates/arena/LICENSE" "$t/bad/"
+sed -i 's|"kit/sign"|"alice/sign"|' "$t/bad/composition.json"
+if "$b" aitta pack "$t/bad" "$t/key" "$t/refused" > /dev/null 2>&1; then
+	fail "a template with a type not Kit's packed"
+fi
 echo "ok: packed with the licence and no .wasm, published"
 "$b" aitta install "127.0.0.1:$P" buildat/puzzle_room "$t/inst" > "$t/install.txt" 2>&1 ||
 	fail "the install ($t/install.txt)"

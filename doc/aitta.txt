@@ -20,7 +20,8 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
                                       its feedback and news go
         "changelog": "CHANGELOG.md",  optional: a file in the archive
         "kind": "app",                optional: "app", "extension",
-                                      "world", "remix" or "kit" (below)
+                                      "world", "remix", "kit" or "template"
+                                      (below)
         "audience": "everyone",       optional: "everyone", "teen" or
                                       "adult"; Aitta's page at / lists
                                       only "everyone" and "teen"
