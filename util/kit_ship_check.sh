@@ -2,12 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min, ~4 min with web (2026-11-07)
-# covers: apps/workbench/templates/ship/** builtin/kit/types/ship.prefab.json builtin/kit/types/turret.lua builtin/kit/types/sea_vessel.lua builtin/kit/types/wave.lua builtin/kit/kit.cpp builtin/kit/client_lua/controls.lua builtin/kit/client_lua/hands.lua builtin/kit/client_lua/move.lua
+# covers: apps/workbench/templates/ship/** builtin/kit/types/ship.prefab.json builtin/kit/types/turret.lua builtin/kit/types/sea_vessel.lua builtin/kit/types/wave.lua builtin/kit/kit.cpp builtin/kit/client_lua/controls.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/hands.lua builtin/kit/client_lua/move.lua
 # [KIT_SHIP] (kit_plan 4r7) The ship template played through: New's "Ship", opened in
 # edit mode, played by three: kitboss the captain at the wheel, kitbob the gunner at
 # the cannon's seat (its aim by "event kit_aim", its shots Space), kitcat walking the
 # rolling deck. The five mines sunk, sailed back into the harbour: "Well sailed!".
-# Measured: the deck's roll, the ship's speed, the walker's corrections and height
+# [KIT_SHIP_VIEW] The gunner's chase view not pulled in by the ship, the sail faded in
+# the captain's view. Measured: the deck's roll, the ship's speed, the walker's corrections and height
 # over the deck, the shots fired and the hits.
 # Native, or "web": kitboss in a page, kitbob and kitcat native.
 # Screenshots with KEEP_TMP=1: $t/*.png
@@ -217,6 +218,7 @@ EOF
 	for m in 1 2 3 4 5; do
 		printf 'event kit_aim %s 45 3 fire\n' $((29 + m))
 		up "Mines sunk: $m / 5" 120000
+		printf 'event kit_body\n'
 		[ $m = 1 ] && shot sunk1
 	done
 	printf 'event kit_aim 0\n'
@@ -320,6 +322,13 @@ print("the gun: %d shots, %d hits: %s" % (shots, len(hits), " ".join(hits)))
 assert sorted(set(int(h) for h in hits)) == [30, 31, 32, 33, 34], hits
 assert len(re.findall(r"kit/goal 43: done", srv)) == 1, "the mines' goal"
 assert len(re.findall(r"kit/goal 44: done", srv)) == 1, "the harbour's goal"
+# [KIT_SHIP_VIEW] The gunner's view close over the gun, never pulled in by the ship's
+# rails or mast; the sail faded in the captain's view ahead
+bob = open(t + "/bob.log", errors="replace").read()
+cams = [float(x) for x in re.findall(r"kit: camera ([0-9.]+) m behind", bob)]
+print("the gunner's camera: %s m behind" % " ".join("%.2f" % c for c in cams))
+assert len(cams) >= 5 and min(cams) > 2.4, cams
+assert "kit: entity 14 drawn faded (in the view)" in open(t + "/boss.log", errors="replace").read()
 # The deck as kitcat and kitboss drew it: its roll and pitch, how far it sailed
 rolls, pitches, places = [], [], []
 for s in S["cat"] + S["boss"]:

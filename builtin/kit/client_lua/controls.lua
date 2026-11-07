@@ -136,6 +136,44 @@ local function on_vehicle(id, n)
 end
 M.on_vehicle = on_vehicle
 
+-- [KIT_SHIP_VIEW] The craft ridden: the topmost of the seat, what it is on that
+-- moves (a free object or a member of one) and the vehicle it drives (nil: no seat)
+local function craft()
+	local seat = M.seated()
+	if not seat then
+		return nil
+	end
+	local v = M.vehicle_of(seat)
+	local root, id, n = v, seat, P.nodes[seat]
+	for _ = 1, 17 do
+		if not n then
+			break
+		end
+		if id == v or (C.turned_by and C.turned_by[id]) or (C.links and C.links[id]) then
+			root = id
+		end
+		local pv = n.node:GetVar("kit_parent")
+		id = pv:IsEmpty() and 0 or pv:GetInt()
+		n = P.nodes[id]
+	end
+	return root
+end
+-- Whether an entity is the root or under it
+local function under(root, id, n)
+	for _ = 1, 17 do
+		if id == root then
+			return true
+		end
+		if not n then
+			return false
+		end
+		local pv = n.node:GetVar("kit_parent")
+		id = pv:IsEmpty() and 0 or pv:GetInt()
+		n = P.nodes[id]
+	end
+	return false
+end
+
 -- [KIT_VEHICLE_MOVEMENTS] The steered vehicle ridden (its id; nil: none): the server
 -- steps it, this client sends its inputs and draws it from its track
 function M.riding()
@@ -176,13 +214,24 @@ local function voxel_info(id, v)
 	return c or nil
 end
 
-local function world()
+-- (skip: what is left out, a function of an entity's id and node; the vehicle held)
+local function world(skip)
 	local reg = voxelworld.get_voxel_registry()
 	local boxes = {}
 	local moving_looks = nil
+	local turned = C.turned
+	if skip and turned then
+		turned = {}
+		for _, t in ipairs(C.turned) do
+			if not skip(t.id, P.nodes[t.id]) then
+				turned[#turned + 1] = t
+			end
+		end
+	end
+	skip = skip or on_vehicle
 	for id, n in pairs(P.nodes) do
 		local show = type(n.show) == "table" and n.show or {}
-		if type(show.look) == "table" and not show.player and not on_vehicle(id, n) then
+		if type(show.look) == "table" and not show.player and not skip(id, n) then
 			local on = show.look.state and K.value(n, show.look.state) == true
 			local links = M.links_of(id, n)
 			local r = links and n.rest
@@ -233,7 +282,7 @@ local function world()
 			return MV.UNKNOWN
 		end
 		return voxel_info(id, v)
-	end, boxes = boxes, turned = C.turned, ground = ground,
+	end, boxes = boxes, turned = turned, ground = ground,
 		edge = ground and {hm[3] or 0, hm[4] or 0, (hm[3] or 0) + hm[1] - 1,
 			(hm[4] or 0) + hm[2] - 1} or nil,
 		moving_looks = moving_looks, t = C.draw_t}
@@ -397,6 +446,10 @@ local function log_body()
 	-- [KIT_WALKER_FRAME] To the tenth of a millimetre, for measuring a deck
 	log:info(string.format("kit: feet at %.4f,%.4f,%.4f, frame %s", p[1], p[2],
 			p[3], tostring(C.s and C.s.frame or "none")))
+	-- [KIT_SHIP_VIEW] A chase view's distance from what it looks at
+	if C.chase_dist then
+		log:info(string.format("kit: camera %.2f m behind", C.chase_dist))
+	end
 	-- [KIT_COMPONENTS] What a vehicle's numbers are compared by
 	local v = C.s and type(C.s.vel) == "table" and C.s.vel
 	if v then
@@ -1529,6 +1582,64 @@ local function lerp_yaw(a, b, t)
 	return a + d * t
 end
 
+-- [KIT_SHIP_VIEW] A seated player's lines of sight ({from, direction...}; nil:
+-- none) through the craft ridden: its looks within SEE_MARGIN m of one, up to
+-- SEE_LEN m ahead, drawn faded (module.lua's own_look), but for the seat and the
+-- vehicle it drives (a ship's sail over the captain's view, not the gunner's cannon)
+local SEE_LEN, SEE_MARGIN = 40, 0.5
+local seen = {}
+-- Whether a line from o along dir crosses the box of half sizes h about 0
+local function crosses(o, dir, h)
+	local t0, t1 = 0, SEE_LEN
+	for _, k in ipairs({"x", "y", "z"}) do
+		local lo, hi = -h[k] - SEE_MARGIN, h[k] + SEE_MARGIN
+		if math.abs(dir[k]) < 1e-6 then
+			if o[k] < lo or o[k] > hi then
+				return false
+			end
+		else
+			local a, b = (lo - o[k]) / dir[k], (hi - o[k]) / dir[k]
+			if a > b then
+				a, b = b, a
+			end
+			t0, t1 = math.max(t0, a), math.min(t1, b)
+		end
+	end
+	return t0 <= t1
+end
+local function see_through(sight)
+	local root = sight and craft()
+	local seat = M.seated()
+	local v = seat and M.vehicle_of(seat)
+	local now = {}
+	for id, n in pairs(root and P.nodes or {}) do
+		if n.body and id ~= seat and id ~= v and not (type(n.show) == "table" and
+				n.show.player) and under(root, id, n) then
+			local m = n.body.worldTransform
+			local q = m:Rotation()
+			local inv = magic.Quaternion(q.w, -q.x, -q.y, -q.z)
+			local o = inv * (sight[1] - m:Translation())
+			local h = m:Scale() * 0.5
+			for i = 2, #sight do
+				if crosses(o, inv * sight[i], h) then
+					now[id] = true
+					break
+				end
+			end
+		end
+	end
+	for id in pairs(seen) do
+		local n = P.nodes[id]
+		if n and not now[id] then
+			n.see_through = nil
+		end
+	end
+	for id in pairs(now) do
+		P.nodes[id].see_through = true
+	end
+	seen = now
+end
+
 local function place_camera(dt, at)
 	local node = O.camera
 	local cam = node:GetComponent("Camera")
@@ -1569,7 +1680,8 @@ local function place_camera(dt, at)
 		return (math.random() * 2 - 1) * a
 	end
 	local roll = (tonumber(par.roll) or 0) + jitter(sh * 4)
-	local want_pos, rot
+	local want_pos, rot, sight
+	C.chase_dist = nil
 	cam.orthographic = false
 	if mode == "top_down" then
 		local h = (tonumber(par.height) or 14) * C.zoom
@@ -1583,7 +1695,8 @@ local function place_camera(dt, at)
 			cam.orthoSize = h
 		end
 	elseif mode == "chase" then
-		local dist = (tonumber(par.distance) or 6) * C.zoom
+		local dist = (tonumber(decl().camera_distance) or tonumber(par.distance) or 6) *
+				C.zoom
 		local yaw = C.yaw
 		-- A vehicle's view behind it, turning as it turns
 		if M.seated() and C.s and tonumber(C.s.yaw) then
@@ -1598,18 +1711,23 @@ local function place_camera(dt, at)
 		end
 		local d = rot * magic.Vector3(0, 0, 1)
 		local h = tonumber(bd.h) or 1.7
-		local off = magic.Vector3(ox, h * 0.8 + oy, oz)
+		local off = magic.Vector3(ox, h * 0.8 + oy + (tonumber(decl().camera_up) or 0), oz)
 		if C.tilt then
 			off = C.tilt * off
 		end
 		local target = magic.Vector3(at[1] + off.x, at[2] + off.y, at[3] + off.z)
-		-- Not through a wall: in front of what is between
-		local w = world()
+		-- Not through a wall: in front of what is between ([KIT_SHIP_VIEW] the craft
+		-- ridden not counted: a ship's rail put the gunner's view in at the gun)
+		local root = craft()
+		local w = world(root and function(id, n) return under(root, id, n) end)
 		local t = w:ray(target.x, target.y, target.z, -d.x, -d.y, -d.z, dist)
 		if t then
 			dist = math.max(0.3, t - 0.2)
 		end
 		want_pos = target - d * dist
+		-- (where the camera looks, and level ahead: where a ship goes)
+		sight = {target, d, magic.Vector3(d.x, 0, d.z):Normalized()}
+		C.chase_dist = dist
 	else
 		rot = magic.Quaternion(C.pitch, C.yaw, roll)
 		local off = magic.Vector3(ox, (tonumber(bd.eye) or 1.5487) + oy, oz)
@@ -1618,7 +1736,10 @@ local function place_camera(dt, at)
 			off = C.tilt * off
 		end
 		want_pos = magic.Vector3(at[1] + off.x, at[2] + off.y, at[3] + off.z)
+		local d = rot * magic.Vector3(0, 0, 1)
+		sight = {want_pos, d, magic.Vector3(d.x, 0, d.z):Normalized()}
 	end
+	see_through(sight)
 	-- Smoothed where the camera is not an eye
 	local sm = tonumber(par.smoothing) or 0
 	if mode ~= "first_person" and sm > 0 and C.cam then

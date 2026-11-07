@@ -220,7 +220,7 @@ local function drop_look(n)
 	if n.look then
 		n.look:Remove()
 	end
-	n.wear_wanted, n.ghost, n.hidden = nil, nil, nil
+	n.wear_wanted, n.ghost, n.hidden, n.ghost_alpha = nil, nil, nil, nil
 	n.look, n.hinge, n.body, n.mat, n.text, n.solid, n.box, n.on = nil, nil,
 			nil, nil, nil, nil, nil, nil
 end
@@ -721,19 +721,23 @@ end
 -- drawn there (its text neither; its collision kept); in edit mode a
 -- faded box of its size in its place. simplified: a box (a sphere's a
 -- sphere) whatever its shape or worn material
+-- [KIT_SHIP_VIEW] Also faded where a seated player's line of sight
+-- crosses it on the craft ridden (n.see_through, controls.lua's)
 local function own_look(id, n, look)
 	local hidden = look.hidden == true
-	if not hidden and not n.ghost then
+	local seen = n.see_through == true and not hidden
+	if not hidden and not seen and not n.ghost then
 		return
 	end
-	local ghost = hidden and E.editing
+	local ghost = hidden and E.editing or seen
 	local key = tostring(hidden) .. tostring(ghost)
 	if key ~= n.hidden then
 		n.hidden = key
-		log:info("kit: entity " .. id .. (not hidden and " shown" or ghost and
-				" drawn faded (own look off)" or " not drawn (own look off)"))
+		log:info("kit: entity " .. id .. (seen and " drawn faded (in the view)" or
+				not hidden and " shown" or ghost and " drawn faded (own look off)" or
+				" not drawn (own look off)"))
 	end
-	n.body.enabled = not hidden and n.box.color ~= "none"
+	n.body.enabled = not hidden and not seen and n.box.color ~= "none"
 	if n.text then
 		n.text_node.enabled = not hidden or ghost
 	end
@@ -743,9 +747,13 @@ local function own_look(id, n, look)
 		m.model = magic.cache:GetResource("Model", "Models/" ..
 				(look.shape == "sphere" and "Sphere" or "Box") .. ".mdl")
 		m.material = material("glass")
+		n.ghost_mat = m.material
+	end
+	local a = seen and 0.2 or 0.45
+	if n.ghost and ghost and n.ghost_alpha ~= a then
+		n.ghost_alpha = a
 		local c = color(n.box.color, magic.Color(0.8, 0.8, 0.8))
-		m.material:SetShaderParameter("MatDiffColor",
-				magic.Color(c.r, c.g, c.b, 0.45))
+		n.ghost_mat:SetShaderParameter("MatDiffColor", magic.Color(c.r, c.g, c.b, a))
 	end
 	if n.ghost then
 		n.ghost.enabled = ghost

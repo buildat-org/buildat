@@ -20,7 +20,9 @@ return {
 		},
 	},
 	component = true,
-	movement = {body = BODY, camera = "chase", touch = "drive"},
+	-- [KIT_SHIP_VIEW] the view close behind the gun, over it
+	movement = {body = BODY, camera = "chase", camera_distance = 2.5, camera_up = 1,
+		touch = "drive"},
 	params = {
 		turn_rate = {cat = "physics", type = "number", default = 60, min = 0, max = 720},
 		pitch_rate = {cat = "physics", type = "number", default = 30, min = 0, max = 720},
