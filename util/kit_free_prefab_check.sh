@@ -195,7 +195,7 @@ for line in open(sys.argv[1]):
 	elif cmd == "keypress":
 		out.append(["key", rest.lower() if len(rest) == 1 else rest])
 	elif cmd == "keydown":
-		held = rest.lower()
+		held = rest.lower() if len(rest) == 1 else rest
 	elif cmd == "keyup":
 		held = None
 	elif cmd == "screenshot":
