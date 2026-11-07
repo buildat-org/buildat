@@ -158,7 +158,9 @@ sync 2000
 event kit_edit {"op": "scene", "name": "world"}
 wait_log 30000 kit editor: in the scene world of
 EOF
-	# The inspector's dropdown adds a scene to the list; the rest by the op
+	# The inspector's dropdown adds a scene to the list; the rest by the op.
+	# Apply sits below the 700-high window's inspector: scrolled to, as a
+	# person would
 	cat <<EOF
 event kit_select $ARENA
 wait_log 5000 kit editor: the inspector
@@ -171,6 +173,17 @@ frames 3
 screenshot $t/add_to_maps.png
 click Text "alpha"
 wait_log 5000 maps = alpha
+mouse_pos 800 400
+mouse_wheel -1
+frames 1
+mouse_wheel -1
+frames 1
+mouse_wheel -1
+frames 1
+mouse_wheel -1
+frames 1
+mouse_wheel -1
+frames 3
 click Button "Apply"
 wait_log 10000 kit editor: state:
 EOF
