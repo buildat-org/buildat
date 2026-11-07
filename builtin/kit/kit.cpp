@@ -6046,8 +6046,10 @@ struct Module: public interface::Module, public Interface
 			// The voxel ground it replaces: unloaded and forgotten (the
 			// edited sections stay in the save, unloaded)
 			if(reshape && !m_w->wp.heightmap()){
+				// (not told; [KIT_REGEN_ANSWER_LOST] one under way still is)
+				const bool was = m_w->world_regenerating;
 				regenerate(by, false);
-				m_w->world_regenerating = false;
+				m_w->world_regenerating = was;
 			}
 		} else {
 			set_world_generator(p, ids, std::move(h), lo, hi);
@@ -6313,8 +6315,10 @@ struct Module: public interface::Module, public Interface
 		}
 		log_i(MODULE, "World%s: %zu sections generated again, %zu edited kept",
 				by.empty() ? "" : cs(" by "+by), again, edited.size());
-		m_w->world_regenerating = again > 0;
-		m_w->regen_wait = wait;
+		// [KIT_REGEN_ANSWER_LOST] one under way still is: this one's sections
+		// join its wait (kit:regenerated once all are in)
+		m_w->world_regenerating = m_w->world_regenerating || again > 0;
+		m_w->regen_wait.insert(m_w->regen_wait.end(), wait.begin(), wait.end());
 		if(n && seams_named)
 			warn(itos(n)+" edited sections kept, seams where they meet the "
 					"new ground: "+seams+(n > 8 ? " ..." : ""));
