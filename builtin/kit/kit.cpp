@@ -24229,6 +24229,9 @@ struct Module: public interface::Module, public Interface
 			}
 			const size_t ci = in - &e->comps[0];
 			Entity copy = *e;
+			// (its own params: a copy of the Value shares them with e's, and
+			// the undo's before-row had the new value)
+			copy.comps[ci].params = copy.comps[ci].params.deepcopy();
 			copy.comps[ci].params.set(param, value);
 			// A prefab copy's own value from now on, kept as the prefab
 			// changes ([KIT_GENERATORS] a generator's child's, as it builds
