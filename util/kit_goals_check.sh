@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min, ~4 min with web (2026-11-07)
+# cost: ~1 min, ~2 min with web (2026-11-07)
 # covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/types/goal.lua builtin/kit/types/quest.prefab.json builtin/kit/client_lua/ui.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua apps/workbench/**
 # [KIT_GOALS] (kit_plan stage 7b) kit/goal: a quest of goals with a branch,
 # composed on a fresh Workbench save by the editor's ops and played through.
@@ -181,9 +181,10 @@ EOF
 	set_ 3 surface '"voxels"'
 	set_ 3 generator '"flat"'
 	set_ 3 decorations false
-	# (last: a change regenerating nothing over one under way loses its answer)
 	set_ 3 biome '"grassland"'
-	echo "wait_log_any 30000 kit: World: generated again"
+	# (not kit:regenerated: a change regenerating nothing over one under way loses
+	# that answer, kit.cpp's world_regenerating = again > 0)
+	echo "wait_log_any 30000 chunk node"
 	place kit/walker '0, 1, 0'; id=4
 	place kit/controls '0, 1, 0'; id=5
 	goal '-8, 1, 3' 'Reach the first line' Line
