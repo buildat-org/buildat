@@ -4101,6 +4101,15 @@ struct Module: public interface::Module, public Interface
 			e.has_pos = false;
 			e.pos[0] = e.pos[1] = e.pos[2] = e.yaw = e.pitch = e.roll = 0;
 		}
+		// [KIT_TEMPLATE_ROUGH_EDGES] The World has no position: one given
+		// (a hand-written composition's) goes, said
+		for(const Instance &in : e.comps)
+			if(e.has_pos && e.kind.empty() && m_types[in.type].world){
+				log_w(MODULE, "Entity %s's %s has a position: dropped (the World "
+						"has none)", cs(itos(e.id)), cs(in.type));
+				e.has_pos = false;
+				e.pos[0] = e.pos[1] = e.pos[2] = e.yaw = e.pitch = e.roll = 0;
+			}
 		return true;
 	}
 
@@ -21478,10 +21487,18 @@ struct Module: public interface::Module, public Interface
 		SessionScope sc(*this, id);
 		const bool join = !m_peers.count(peer);
 		set_peer_u(peer, name, scene, x, y, z);
+		// [KIT_TEMPLATE_ROUGH_EDGES] One joining a Stopped server: on its
+		// scene's spawner of players, as Play puts them (a round's join does)
+		double look = NAN;
+		const bool spawned = join && m_hosted && !m_session.running &&
+				stopped_spawn(name, scene, x, y, z, look);
 		// A body first put where the app placed them, but for one the join
 		// put already (a spawner's teleport)
-		if(join && m_host.controls && !m_bodies[peer].put)
-			put_player_u(peer, x, y, z, NAN);
+		if(join && m_host.controls && (!m_bodies[peer].put || spawned))
+			put_player_u(peer, x, y, z, look);
+		else if(spawned)
+			m_server->emit_event("kit:move_player",
+					new MovePlayer(peer, x, y, z, look));
 		// A draft's builder: their tools on there; and back in the default
 		// as they were in the session ([KIT_DRAFT_LEAVE_PLAY])
 		GameSession *s = active_session();
@@ -21495,6 +21512,37 @@ struct Module: public interface::Module, public Interface
 			send_state(peer);
 			send_builders();
 		}
+	}
+
+	// The last spawner of players in the scene (as a round's joins leave
+	// one): its place and facing
+	bool stopped_spawn(const ss_ &who, const ss_ &scene, double &x, double &y,
+			double &z, double &look)
+	{
+		const Entity *at = nullptr;
+		for(auto &p : m_entities){
+			ss_ es;
+			if(!scene_of(p.second, &es) || es != scene)
+				continue;
+			for(auto &in : p.second.comps){
+				const Type &t = m_types[in.type];
+				if(t.spawn && (t.spawn_param.empty() ||
+						in.params.get(t.spawn_param).is_true()))
+					at = &p.second;
+			}
+		}
+		if(!at)
+			return false;
+		double w[3];
+		Turn q;
+		world_of(*at, w, &q);
+		x = w[0];
+		y = w[1];
+		z = w[2];
+		look = norm_yaw(q.yaw());
+		log_i(MODULE, "%s joins Stopped: put on spawner %s at (%g, %g, %g)",
+				cs(who), cs(itos(at->id)), x, y, z);
+		return true;
 	}
 
 	void set_peer_u(size_t peer, const ss_ &name, const ss_ &scene,
@@ -22643,6 +22691,34 @@ struct Module: public interface::Module, public Interface
 						" differ from their source's image"+(ents.empty() ? "" :
 						"; "+ents));
 		}
+		// [KIT_TEMPLATE_ROUGH_EDGES] A voxel parameter naming a voxel no
+		// scene has (it draws grey, writes nothing): said, once a name
+		// simplified: checked at Play only, not as it is set or loaded
+		std::set<ss_> names;
+		for(auto &pe : m_entities)
+			for(const Instance &in : pe.second.comps){
+				auto t = m_types.find(in.type);
+				const json::Value &decl = t == m_types.end() ? json::Value() :
+						t->second.decl.get("params");
+				if(!decl.is_object())
+					continue;
+				for(json::Iterator it(decl); it; ++it){
+					const ss_ v = in.params.get(it.key()).is_string() ?
+							in.params.get(it.key()).as_string() : "";
+					if(jstr(*it, "type") != "voxel" || v.empty() || v == "air" ||
+							!names.insert(v).second)
+						continue;
+					bool known = false;
+					each_registry([&](interface::VoxelRegistry *reg){
+						interface::VoxelName n;
+						n.block_name = v;
+						known = known || reg->has(n);
+					});
+					if(!known)
+						warn("entity "+itos(pe.first)+"'s "+in.type+" "+it.key()+
+								": no voxel "+v+" (drawn grey)");
+				}
+			}
 		// Each player told first, then through the round's start
 		session_changed(false, by);
 		sv_<size_t> peers;
