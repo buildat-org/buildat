@@ -180,8 +180,9 @@ EOF
 	place kit/world '0, 1, 0'; id=3
 	set_ 3 surface '"voxels"'
 	set_ 3 generator '"flat"'
-	set_ 3 biome '"grassland"'
 	set_ 3 decorations false
+	# (last: a change regenerating nothing over one under way loses its answer)
+	set_ 3 biome '"grassland"'
 	echo "wait_log_any 30000 kit: World: generated again"
 	place kit/walker '0, 1, 0'; id=4
 	place kit/controls '0, 1, 0'; id=5
