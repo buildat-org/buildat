@@ -19,6 +19,7 @@
 -- go (0/1: a target), tx, ty, tz (where to go); dt seconds; p its
 -- parameters; w the world:
 --   w:cell(i, j, k) -> info or nil (air): the voxel centred on i, j, k
+--   w:walk(s, b, wx, wz, jump, dt, p): a character's step, s.frame below
 --   w:move(b, dx, dy, dz, step) -> dx, dy, dz moved, hits {x, y, z}
 --     (hit sides: -1, 0 or 1): the body b = {x, y, z, r, h} swept along
 --     y, then x and z, up a step of `step` where blocked, and onto the
@@ -33,6 +34,12 @@
 -- name without the author), an object's ("object"), the heightmap's
 -- ("ground") or a cell not loaded ("unknown", solid; air over a
 -- heightmap, [KIT_HM_FREE]) or a heightmap's edge ("edge").
+-- [KIT_WALKER_FRAME] A walker on a free voxel object steps in the object's
+-- frame, where its boxes are flat: s.frame the object's entity id, s.at the feet
+-- there, s.vel its velocity there (s.pos stays the feet in the world, kept up
+-- each step). Gravity is the world's turned in: past slope_limit the deck slides.
+-- It enters on landing on an object's top (W:walk's end) and leaves by jumping,
+-- by nothing under it, or by the world's floor under it (W:walk_on).
 local M = {}
 local floor, sqrt = math.floor, math.sqrt
 local PI = 3.14159265358979323846
@@ -264,28 +271,44 @@ function M.look_box(look, on, pos, yaw, pitch, roll)
 	return b
 end
 
+-- A point or direction into an object's frame, and out of it (R: frame to world)
+local function into(o, x, y, z)
+	local R = o.R
+	return R[1] * x + R[4] * y + R[7] * z, R[2] * x + R[5] * y + R[8] * z,
+			R[3] * x + R[6] * y + R[9] * z
+end
+local function outof(o, x, y, z)
+	local R = o.R
+	return R[1] * x + R[2] * y + R[3] * z, R[4] * x + R[5] * y + R[6] * z,
+			R[7] * x + R[8] * y + R[9] * z
+end
+
 -- [KIT_FREE_PREFAB] The free voxel objects as a world's t.turned: from {x, y, z,
--- yaw, {x0, y0, z0, x1, y1, z1, ...}} (a place and turn round y, and boxes in
--- that frame). A body meets them in the object's frame, turned with it.
--- [KIT_FREE_ROTATION] A pitched or rolled object comes as such boxes too, the
--- server's bounds of its pieces in the frame its yaw alone turns (kit.cpp's
--- tilted_boxes; stage 4r3's walker frame replaces it).
--- simplified: its square footprint turned so, at most r * 0.41 off at a corner;
--- a footprint swept as it stands is the upgrade
+-- yaw, pitch, roll, {x0, y0, z0, x1, y1, z1, ...}, id} (a place, a turn, boxes in
+-- that frame, its entity). [KIT_WALKER_FRAME] A body outside its frame meets one
+-- as a box of the object's axes, from its feet: turned with the object. A body
+-- standing on it steps in its frame.
 function M.turned(list)
 	local out = {}
 	for _, o in ipairs(list) do
-		local a = (tonumber(o[4]) or 0) * PI / 180
-		local b, rad = o[5], 0
-		for i = 1, #b, 6 do
-			for _, q in ipairs({{b[i], b[i + 2]}, {b[i], b[i + 5]},
-					{b[i + 3], b[i + 2]}, {b[i + 3], b[i + 5]}}) do
-				local d = sqrt(q[1] * q[1] + q[2] * q[2])
-				rad = d > rad and d or rad
+		local b, rad, boxes = o[7], 0, {}
+		for i = 1, #b - 5, 6 do
+			boxes[#boxes + 1] = {b[i], b[i + 1], b[i + 2], b[i + 3], b[i + 4],
+				b[i + 5]}
+			local e = {b[i], b[i + 1], b[i + 2]}
+			for k = 1, 3 do
+				if abs(b[i + k + 2]) > abs(e[k]) then
+					e[k] = b[i + k + 2]
+				end
 			end
+			local d = sqrt(e[1] * e[1] + e[2] * e[2] + e[3] * e[3])
+			rad = d > rad and d or rad
 		end
-		out[#out + 1] = {x = o[1], y = o[2], z = o[3], c = M.cos(a), s = M.sin(a),
-			rad = rad, b = b}
+		local t = {id = o[8], x = o[1], y = o[2], z = o[3], rad = rad, b = boxes,
+			R = rotation(tonumber(o[5]) or 0, tonumber(o[4]) or 0, tonumber(o[6]) or 0)}
+		-- What a sweep along y meets on its top: M.OBJECT and the way in
+		t.info = {solid = true, friction = 1, surface = "object", frame = t}
+		out[#out + 1] = t
 	end
 	return out
 end
@@ -351,6 +374,8 @@ function W:ground_max(x0, z0, x1, z1)
 	return best
 end
 
+local ray_turned
+
 local function lo_cell(a)
 	return floor(a + EPS - 0.5) + 1
 end
@@ -358,78 +383,65 @@ local function hi_cell(a)
 	return -floor(-(a - EPS + 0.5)) - 1
 end
 
--- [KIT_FREE_PREFAB] A point of the world in an object's frame
-local function in_object(o, x, z)
-	local dx, dz = x - o.x, z - o.z
-	return dx * o.c - dz * o.s, dx * o.s + dz * o.c
+-- [KIT_WALKER_FRAME] The feet in an object's box grown by the body, a hair in from
+-- the faces, so that one touching can go along or away: lo and hi
+local function grown(f, r, h)
+	return f[1] - r + EPS, f[2] - h + EPS, f[3] - r + EPS,
+			f[4] + r - EPS, f[5] - EPS, f[6] + r - EPS
 end
 
--- The sweep's move d along a past the free objects: as far as they let it
+-- The sweep's move d along world axis a past the free objects: the body from its
+-- feet along each object's axes, the move turned in. Along x and z any face stops
+-- it. Along y what can hold a body does: an object's top, a face within 60 degrees
+-- of level; a steeper side lets it past and W:shed moves it out, so that nothing
+-- hangs on a leaning wall. On a top the info is the object's own (W:walk's way in).
 function W:sweep_turned(b, a, d)
 	local hit = nil
-	local r = (b[4] - b[1]) / 2
+	local r, h = (b[4] - b[1]) / 2, b[5] - b[2]
+	local fx, fy, fz = (b[1] + b[4]) / 2, b[2], (b[3] + b[6]) / 2
 	for _, o in ipairs(self.turned) do
-		local lx, lz = in_object(o, (b[1] + b[4]) / 2, (b[3] + b[6]) / 2)
-		local reach = o.rad + 2 * r + abs(d)
-		if lx * lx + lz * lz <= reach * reach then
-			-- The whole move in its frame; t of it is what is left
-			local mx, mz = 0, 0
-			if a == 1 then
-				mx, mz = d * o.c, d * o.s
-			elseif a == 3 then
-				mx, mz = -d * o.s, d * o.c
-			end
-			local t, f, len = 1, o.b, sqrt(mx * mx + mz * mz)
-			for i = 1, #f, 6 do
-				-- The box grown by the body, its middle what moves; a hair in
-				-- from the faces, so that one touching can go along or away
-				local x0, x1 = f[i] - r + EPS, f[i + 3] + r - EPS
-				local z0, z1 = f[i + 2] - r + EPS, f[i + 5] + r - EPS
-				local y0, y1 = f[i + 1] + o.y, f[i + 4] + o.y
-				local inside = lx > x0 and lx < x1 and lz > z0 and lz < z1
-				if a == 2 then
-					if inside then
-						if d > 0 and y0 >= b[5] - EPS and y0 - b[5] < d then
-							local lim = y0 - b[5]
-							d, hit = lim < 0 and 0 or lim, M.OBJECT
-						elseif d < 0 and y1 <= b[2] + EPS and y1 - b[2] > d then
-							local lim = y1 - b[2]
-							d, hit = lim > 0 and 0 or lim, M.OBJECT
-						end
-					end
-				elseif not inside and y0 < b[5] - EPS and y1 > b[2] + EPS and
-						len > 1e-12 then
-					-- One the body is in already is no wall: it gets out
-					local t0, t1 = 0, 1
-					for q = 1, 2 do
-						local p, m, lo, hi = lx, mx, x0, x1
-						if q == 2 then
-							p, m, lo, hi = lz, mz, z0, z1
-						end
-						if abs(m) < 1e-12 then
-							if p <= lo or p >= hi then
+		local lx, ly, lz = into(o, fx - o.x, fy - o.y, fz - o.z)
+		local reach = o.rad + 2 * r + h + abs(d)
+		if o ~= self.skip and lx * lx + ly * ly + lz * lz <= reach * reach then
+			local p = {lx, ly, lz}
+			local m = {into(o, a == 1 and d or 0, a == 2 and d or 0,
+					a == 3 and d or 0)}
+			local t, len = 1, abs(d)
+			for _, f in ipairs(len > 1e-12 and o.b or {}) do
+				local x0, y0, z0, x1, y1, z1 = grown(f, r, h)
+				local lo, hi = {x0, y0, z0}, {x1, y1, z1}
+				-- One the body is in already is no wall: it gets out
+				if not (lx > x0 and lx < x1 and ly > y0 and ly < y1 and
+						lz > z0 and lz < z1) then
+					local t0, t1, na = 0, 1, nil
+					for q = 1, 3 do
+						if abs(m[q]) < 1e-12 then
+							if p[q] <= lo[q] or p[q] >= hi[q] then
 								t0 = 2
 							end
 						else
-							local e0, e1 = (lo - p) / m, (hi - p) / m
+							local e0, e1 = (lo[q] - p[q]) / m[q], (hi[q] - p[q]) / m[q]
 							if e0 > e1 then
 								e0, e1 = e1, e0
 							end
-							if e0 > t0 then
-								t0 = e0
+							if e0 >= t0 then
+								t0, na = e0, q
 							end
 							if e1 < t1 then
 								t1 = e1
 							end
 						end
 					end
-					if t0 <= t1 and t0 < t then
-						-- Short of it by as much again
-						t = t0 - 2 * EPS / len
-						if t < 0 then
-							t = 0
+					if na and t0 <= t1 and t0 < t then
+						local top = a == 2 and d < 0 and na == 2 and m[2] < 0
+						if a ~= 2 or top or abs(m[na]) >= 0.5 * len then
+							-- Short of it by as much again
+							t = t0 - 2 * EPS / len
+							if t < 0 then
+								t = 0
+							end
+							hit = top and o.info or M.OBJECT
 						end
-						hit = M.OBJECT
 					end
 				end
 			end
@@ -437,6 +449,36 @@ function W:sweep_turned(b, a, d)
 		end
 	end
 	return d, hit
+end
+
+-- A side passed by the sweep along y, moved: the feet out of it by its nearest
+-- side, no more than the move's own size: x, y, z to add. Level objects have no
+-- such side
+function W:shed(x, y, z, r, h, moved)
+	local sx, sy, sz = 0, 0, 0
+	for _, o in ipairs(self.turned) do
+		local lx, ly, lz = into(o, x - o.x, y - o.y, z - o.z)
+		local reach = o.rad + 2 * r + h
+		if abs(1 - o.R[5]) > 1e-9 and lx * lx + ly * ly + lz * lz <= reach * reach then
+			for _, f in ipairs(o.b) do
+				local x0, y0, z0, x1, y1, z1 = grown(f, r, h)
+				if lx > x0 and lx < x1 and ly > y0 and ly < y1 and lz > z0 and lz < z1 then
+					local best, ax, q = lx - x0, 1, -1
+					if x1 - lx < best then best, ax, q = x1 - lx, 1, 1 end
+					if lz - z0 < best then best, ax, q = lz - z0, 3, -1 end
+					if z1 - lz < best then best, ax, q = z1 - lz, 3, 1 end
+					if best <= abs(moved) + 2 * EPS then
+						local e = q * (best + 2 * EPS)
+						local dx, dy, dz = outof(o, ax == 1 and e or 0, 0,
+								ax == 3 and e or 0)
+						sx, sy, sz = sx + dx, sy + dy, sz + dz
+						lx, ly, lz = into(o, x + sx - o.x, y + sy - o.y, z + sz - o.z)
+					end
+				end
+			end
+		end
+	end
+	return sx, sy, sz
 end
 
 -- The box b0..b1 ({x0, y0, z0, x1, y1, z1}) moved by d along axis a (1:
@@ -588,14 +630,13 @@ function W:blocked(b)
 			return true
 		end
 	end
-	local r = (b[4] - b[1]) / 2
+	local r, h = (b[4] - b[1]) / 2, b[5] - b[2]
 	for _, o in ipairs(self.turned) do
-		local lx, lz = in_object(o, (b[1] + b[4]) / 2, (b[3] + b[6]) / 2)
-		local f = o.b
-		for i = 1, #f, 6 do
-			if lx > f[i] - r + EPS and lx < f[i + 3] + r - EPS and
-					lz > f[i + 2] - r + EPS and lz < f[i + 5] + r - EPS and
-					f[i + 1] + o.y < b[5] - EPS and f[i + 4] + o.y > b[2] + EPS then
+		local lx, ly, lz = into(o, (b[1] + b[4]) / 2 - o.x, b[2] - o.y,
+				(b[3] + b[6]) / 2 - o.z)
+		for _, f in ipairs(o.b) do
+			local x0, y0, z0, x1, y1, z1 = grown(f, r, h)
+			if lx > x0 and lx < x1 and ly > y0 and ly < y1 and lz > z0 and lz < z1 then
 				return true
 			end
 		end
@@ -661,7 +702,12 @@ function W:move(b, dx, dy, dz, step)
 		hits.y = dy < 0 and -1 or 1
 		hits.y_info = hy
 	end
-	local s = {x = b.x, y = b.y + my, z = b.z, r = b.r, h = b.h, slope = b.slope}
+	local sx, sy, sz = 0, 0, 0
+	if my ~= 0 then
+		sx, sy, sz = self:shed(b.x, b.y + my, b.z, b.r, b.h, my)
+	end
+	local s = {x = b.x + sx, y = b.y + my + sy, z = b.z + sz, r = b.r, h = b.h,
+		slope = b.slope}
 	local x, y, z, mx, mz, hx, hz = self:slide(s, dx, dz)
 	-- Up a step where blocked: lifted, slid, put down again; taken if it
 	-- went further
@@ -672,7 +718,10 @@ function W:move(b, dx, dy, dz, step)
 				slope = b.slope}
 			local x2, y2, z2, mx2, mz2, hx2, hz2 = self:slide(s2, dx, dz)
 			local down = self:sweep(box_of(x2, y2, z2, b.r, b.h), 2, -up - EPS)
-			if mx2 * mx2 + mz2 * mz2 > mx * mx + mz * mz + 1e-8 then
+			-- ([KIT_WALKER_FRAME] past a side leaning away it would be coming down
+			-- inside the object)
+			if mx2 * mx2 + mz2 * mz2 > mx * mx + mz * mz + 1e-8 and
+					not self:blocked(box_of(x2, y2 + down, z2, b.r, b.h)) then
 				x, y, z, mx, mz, hx, hz = x2, y2 + down, z2, mx2, mz2, hx2, hz2
 			end
 		end
@@ -684,6 +733,39 @@ function W:move(b, dx, dy, dz, step)
 		hits.z = dz < 0 and -1 or 1
 	end
 	return x - b.x, y - b.y, z - b.z, hits
+end
+
+-- A ray into a free object's frame: the nearest of its boxes, t and the axis it
+-- came in by (nil: inside)
+function ray_turned(ob, ox, oy, oz, dx, dy, dz, len)
+	local lo = {into(ob, ox - ob.x, oy - ob.y, oz - ob.z)}
+	local lv = {into(ob, dx, dy, dz)}
+	local best, ba = nil, nil
+	for _, f in ipairs(ob.b) do
+		local t0, t1, na = 0, len, nil
+		for k = 1, 3 do
+			if abs(lv[k]) < 1e-9 then
+				if lo[k] < f[k] or lo[k] > f[k + 3] then
+					t0 = math.huge
+				end
+			else
+				local a1, a2 = (f[k] - lo[k]) / lv[k], (f[k + 3] - lo[k]) / lv[k]
+				if a1 > a2 then
+					a1, a2 = a2, a1
+				end
+				if a1 > t0 then
+					t0, na = a1, k
+				end
+				if a2 < t1 then
+					t1 = a2
+				end
+			end
+		end
+		if t0 <= t1 and (not best or t0 < best) then
+			best, ba = t0, na
+		end
+	end
+	return best, ba
 end
 
 -- A ray: the first solid cell (Amanatides and Woo), object box or ground
@@ -791,44 +873,16 @@ function W:ray(ox, oy, oz, dx, dy, dz, len)
 		end
 	end
 	for _, ob in ipairs(self.turned) do
-		local lx, lz = in_object(ob, ox, oz)
-		local lo = {lx, oy - ob.y, lz}
-		local lv = {dx * ob.c - dz * ob.s, dy, dx * ob.s + dz * ob.c}
-		local f = ob.b
-		for i = 1, #f, 6 do
-			local t0, t1, na = 0, len, nil
-			for k = 1, 3 do
-				local b0, b1 = f[i + k - 1], f[i + k + 2]
-				if abs(lv[k]) < 1e-9 then
-					if lo[k] < b0 or lo[k] > b1 then
-						t0 = math.huge
-					end
-				else
-					local a1, a2 = (b0 - lo[k]) / lv[k], (b1 - lo[k]) / lv[k]
-					if a1 > a2 then
-						a1, a2 = a2, a1
-					end
-					if a1 > t0 then
-						t0, na = a1, k
-					end
-					if a2 < t1 then
-						t1 = a2
-					end
-				end
+		local t0, na = ray_turned(ob, ox, oy, oz, dx, dy, dz, len)
+		if t0 and (not best or t0 < best) then
+			local n = {0, 0, 0}
+			if na then
+				local lv = {into(ob, dx, dy, dz)}
+				local q = lv[na] > 0 and -1 or 1
+				n = {outof(ob, na == 1 and q or 0, na == 2 and q or 0,
+						na == 3 and q or 0)}
 			end
-			if t0 <= t1 and (not best or t0 < best) then
-				local n = {0, 0, 0}
-				if na == 2 then
-					n[2] = lv[2] > 0 and -1 or 1
-				elseif na == 1 then
-					local q = lv[1] > 0 and -1 or 1
-					n[1], n[3] = q * ob.c, -q * ob.s
-				elseif na == 3 then
-					local q = lv[3] > 0 and -1 or 1
-					n[1], n[3] = q * ob.s, q * ob.c
-				end
-				best, bi, bn = t0, M.OBJECT, n
-			end
+			best, bi, bn = t0, M.OBJECT, n
 		end
 	end
 	if self.ground_fn then
@@ -914,19 +968,9 @@ function W:down(x, y, z, len)
 		end
 	end
 	for _, o in ipairs(self.turned) do
-		local lx, lz = in_object(o, x, z)
-		local f = o.b
-		for i = 1, #f, 6 do
-			if lx >= f[i] and lx <= f[i + 3] and lz >= f[i + 2] and lz <= f[i + 5]
-					and f[i + 1] + o.y <= y then
-				local d = y - (f[i + 4] + o.y)
-				if d < 0 then
-					d = 0
-				end
-				if d <= len and (not best or d < best) then
-					best, info = d, M.OBJECT
-				end
-			end
+		local d = ray_turned(o, x, y, z, 0, -1, 0, len)
+		if d and (not best or d < best) then
+			best, info = d, M.OBJECT
 		end
 	end
 	local h = self:height(x, z)
@@ -975,12 +1019,218 @@ local function num(v, d)
 	return type(v) == "number" and v or d
 end
 
+-- Toward a wish on the plane: at most acc this step
+local function toward(v, wx, wz, acc)
+	local dx, dz = wx - v[1], wz - v[3]
+	local l = sqrt(dx * dx + dz * dz)
+	if l > acc and l > 0 then
+		dx, dz = dx * acc / l, dz * acc / l
+	end
+	v[1], v[3] = v[1] + dx, v[3] + dz
+end
+
+-- A jump pressed up to jump_buffer before the ground, taken up to coyote_time
+-- after it: true when it is taken now, its speed up left to the caller
+local function jump_taken(s, ground, jump, dt, p)
+	if ground then
+		s.coyote = num(p.coyote_time, 0.1)
+	end
+	if jump and (not s.held or ground) then
+		s.buffer = num(p.jump_buffer, 0.12)
+	end
+	s.held = jump and true or false
+	local taken = false
+	if num(p.jump_height, 1.6) > 0 and num(s.buffer, 0) > 0 and
+			num(s.coyote, 0) > 0 then
+		s.buffer, s.coyote = 0, 0
+		s.jumps = num(s.jumps, 0) + 1
+		ground, taken = false, true
+	end
+	s.buffer = num(s.buffer, 0) - dt
+	if s.buffer < 0 then s.buffer = 0 end
+	if not ground then
+		s.coyote = num(s.coyote, 0) - dt
+		if s.coyote < 0 then s.coyote = 0 end
+	end
+	return taken
+end
+
+-- [KIT_WALKER_FRAME] An object's frame as a world: its boxes the flat voxels. The
+-- rest of the world (the cells, looks, heightmap, other objects) has its say on
+-- each move: the body upright at its feet there, swept along the move in the
+-- world; the deck's own frame goes no further. A floor it reaches is remembered
+-- (W:walk_on leaves for it).
+local function frame_sweep(f, b, a, d)
+	local got, hit = W.sweep(f, b, a, d)
+	if got == 0 then
+		return 0, hit
+	end
+	local w, o = f.outer, f.o
+	local x, y, z = outof(o, (b[1] + b[4]) / 2, b[2], (b[3] + b[6]) / 2)
+	local wb = box_of(x + o.x, y + o.y, z + o.z, (b[4] - b[1]) / 2, b[5] - b[2])
+	local m = {outof(o, a == 1 and got or 0, a == 2 and got or 0,
+			a == 3 and got or 0)}
+	local t = 1
+	w.skip = o
+	for q = 1, 3 do
+		if abs(m[q]) > 1e-9 then
+			local g, info = w:sweep(wb, q, m[q])
+			if info and g / m[q] < t then
+				t, hit = g / m[q], info
+			end
+			if info and q == 2 and m[2] < 0 then
+				f.floor = true
+			end
+		end
+	end
+	w.skip = nil
+	return got * t, hit
+end
+
+function W:frame_world(o)
+	self.frames = self.frames or {}
+	local f = self.frames[o]
+	if not f then
+		f = M.world{cell = function() return nil end, boxes = o.b}
+		f.cell, f.sweep, f.outer, f.o = f.cell_fn, frame_sweep, self, o
+		self.frames[o] = f
+	end
+	f.floor = false
+	return f
+end
+
+-- The frame left: the body's velocity the world's. simplified: nothing carries a
+-- walker up off a high edge (its velocity up dropped: a deck is no ramp to launch
+-- from); 4r4's moving deck adds its own velocity at the point here
+local function leave_frame(s, o)
+	local v = s.vel
+	local x, y, z = outof(o, v[1], v[2], v[3])
+	s.vel = {x, y > 0 and 0 or y, z}
+	s.frame, s.at = nil, nil
+end
+
+-- A step in the frame of o: true; false: it jumped, out of the frame, and the
+-- world's step goes on with it
+function W:walk_on(o, s, b, wx, wz, jump, dt, p)
+	local f = self:frame_world(o)
+	if type(s.at) ~= "table" then
+		s.at = {into(o, s.pos[1] - o.x, s.pos[2] - o.y, s.pos[3] - o.z)}
+	end
+	local at, v = s.at, s.vel
+	if f:unbury(at, b) and v[2] < 0 then
+		v[2] = 0
+	end
+	local g = num(p.gravity, 15)
+	-- The world's up in the frame
+	local R = o.R
+	local ux, uy, uz = R[4], R[5], R[6]
+	local flat = uy >= M.cos(num(p.slope_limit, 45) * PI / 180)
+	local ground = s.ground == true
+	-- The wish: what goes that way in the world, level, along the deck, at its
+	-- speed (straight down the world's up onto the deck)
+	local sp = sqrt(wx * wx + wz * wz)
+	local lx, ly, lz = into(o, wx, 0, wz)
+	local lift = uy > 1e-3 and -ly / uy or 0
+	lx, lz = lx + lift * ux, lz + lift * uz
+	local l = sqrt(lx * lx + lz * lz)
+	if l > 1e-9 then
+		lx, lz = lx * sp / l, lz * sp / l
+	end
+	local acc = num(p.acceleration, 40) * dt
+	if flat then
+		toward(v, lx, lz, acc * (ground and num(s.friction, 1) or
+				num(p.air_control, 0.6)))
+	else
+		-- Past the limit: gravity along the deck; no walking up it, sideways as
+		-- in the air
+		local tx, tz = -g * ux, -g * uz
+		v[1], v[3] = v[1] + tx * dt, v[3] + tz * dt
+		local tl = sqrt(tx * tx + tz * tz)
+		if tl > 0 then
+			local sx, sz = -tz / tl, tx / tl
+			local want = lx * sx + lz * sz - v[1] * sx - v[3] * sz
+			local most = acc * num(p.air_control, 0.6)
+			want = want > most and most or want < -most and -most or want
+			v[1], v[3] = v[1] + sx * want, v[3] + sz * want
+		end
+		ground = false
+	end
+	if jump_taken(s, ground, jump, dt, p) then
+		leave_frame(s, o)
+		s.vel[2] = sqrt(2 * g * num(p.jump_height, 1.6))
+		s.ground = false
+		return false
+	end
+	v[2] = v[2] - g * uy * dt
+	local speed = sqrt(v[1] * v[1] + v[2] * v[2] + v[3] * v[3])
+	if speed > 60 then
+		v[1], v[2], v[3] = v[1] * 60 / speed, v[2] * 60 / speed, v[3] * 60 / speed
+	end
+	local body = {x = at[1], y = at[2], z = at[3], r = b.r, h = b.h}
+	local mx, my, mz, hits = f:move(body, v[1] * dt, v[2] * dt, v[3] * dt,
+			ground and num(p.step_height, 0.6) or 0)
+	at[1], at[2], at[3] = at[1] + mx, at[2] + my, at[3] + mz
+	if hits.x ~= 0 then v[1] = 0 end
+	if hits.z ~= 0 then v[3] = 0 end
+	local on = nil
+	if hits.y ~= 0 then
+		v[2] = 0
+		if hits.y < 0 then
+			on = hits.y_info
+		end
+	end
+	if not on then
+		local d, info = f:sweep(box_of(at[1], at[2], at[3], b.r, b.h), 2,
+				-num(p.step_height, 0.6))
+		if info then
+			at[2] = at[2] + d
+			v[2] = 0
+			on = info
+		end
+	end
+	local x, y, z = outof(o, at[1], at[2], at[3])
+	s.pos[1], s.pos[2], s.pos[3] = x + o.x, y + o.y, z + o.z
+	-- The world's floor under the feet, or nothing: the world's again
+	local floor = false
+	if f.floor then
+		self.skip = o
+		local _, info = self:sweep(box_of(s.pos[1], s.pos[2], s.pos[3], b.r, b.h),
+				2, -0.02)
+		self.skip = nil
+		floor = info ~= nil
+	end
+	if not on or floor then
+		leave_frame(s, o)
+		s.ground, s.friction, s.surface = false, nil, nil
+		return true
+	end
+	s.ground = flat
+	s.friction = flat and on.friction or nil
+	s.surface = on.surface
+	return true
+end
+
 function W:walk(s, b, wx, wz, jump, dt, p)
 	if type(s.pos) ~= "table" then
 		s.pos = {0, 0, 0}
 	end
 	if type(s.vel) ~= "table" then
 		s.vel = {0, 0, 0}
+	end
+	-- [KIT_WALKER_FRAME] On an object: in its frame. Its object gone (taken away
+	-- in an edit): the world's, where it stood
+	if s.frame then
+		local o = nil
+		for _, t in ipairs(self.turned) do
+			if t.id == s.frame then
+				o = t
+			end
+		end
+		if o and self:walk_on(o, s, b, wx, wz, jump, dt, p) then
+			return s
+		elseif not o then
+			s.frame, s.at = nil, nil
+		end
 	end
 	local pos, v = s.pos, s.vel
 	if self:unbury(pos, b) and v[2] < 0 then
@@ -991,35 +1241,12 @@ function W:walk(s, b, wx, wz, jump, dt, p)
 	local ground = s.ground == true
 	-- Toward the wished velocity: on the ground as its friction lets, in
 	-- the air as air_control does
-	local acc = num(p.acceleration, 40) * dt * (ground and num(s.friction, 1) or
-			num(p.air_control, 0.6))
-	local dx, dz = wx - v[1], wz - v[3]
-	local l = sqrt(dx * dx + dz * dz)
-	if l > acc and l > 0 then
-		dx, dz = dx * acc / l, dz * acc / l
-	end
-	v[1], v[3] = v[1] + dx, v[3] + dz
-	-- A jump: pressed up to jump_buffer before the ground, taken up to
-	-- coyote_time after it
-	if ground then
-		s.coyote = num(p.coyote_time, 0.1)
-	end
-	if jump and (not s.held or ground) then
-		s.buffer = num(p.jump_buffer, 0.12)
-	end
-	s.held = jump and true or false
-	local jumped = false
-	if jh > 0 and num(s.buffer, 0) > 0 and num(s.coyote, 0) > 0 then
+	toward(v, wx, wz, num(p.acceleration, 40) * dt * (ground and num(s.friction, 1)
+			or num(p.air_control, 0.6)))
+	local jumped = jump_taken(s, ground, jump, dt, p)
+	if jumped then
 		v[2] = sqrt(2 * g * jh)
-		s.buffer, s.coyote = 0, 0
-		s.jumps = num(s.jumps, 0) + 1
-		ground, jumped = false, true
-	end
-	s.buffer = num(s.buffer, 0) - dt
-	if s.buffer < 0 then s.buffer = 0 end
-	if not ground then
-		s.coyote = num(s.coyote, 0) - dt
-		if s.coyote < 0 then s.coyote = 0 end
+		ground = false
 	end
 	v[2] = v[2] - g * dt
 	if v[2] < -60 then v[2] = -60 end
@@ -1060,6 +1287,19 @@ function W:walk(s, b, wx, wz, jump, dt, p)
 	s.ground = on ~= nil
 	s.friction = on and on.friction or nil
 	s.surface = on and on.surface or nil
+	-- [KIT_WALKER_FRAME] On an object's top: into its frame, what it landed with
+	-- going along the deck. simplified: a top only; an object turned over stands a
+	-- body on its other faces in the world's frame, which holds it where it hit;
+	-- choosing the face nearest the world's up as the frame's floor is the upgrade
+	local o = on and on.frame
+	if o and o.R[5] > 0.02 then
+		s.frame = o.id
+		s.at = {into(o, pos[1] - o.x, pos[2] - o.y, pos[3] - o.z)}
+		s.vel = {into(o, v[1], v[2], v[3])}
+		s.vel[2] = 0
+		s.ground = o.R[5] >= M.cos(lim)
+		s.friction = s.ground and 1 or nil
+	end
 	return s
 end
 

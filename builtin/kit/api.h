@@ -42,8 +42,8 @@ namespace interface
 // (pitch and roll absent at 0), its frame the parents' composed. A zone and a
 // region turn with the parents: their cells are those whose middle is in the
 // turned box, c:region_at and the client's the same way. c.yaw is the yaw of
-// that turn; a walker stands on a tilted free object by its yaw-only stairs
-// (kit.cpp's tilted_boxes). Grants and owned voxels stay boxes of cells, stamped
+// that turn; [KIT_WALKER_FRAME] a walker on a free object steps in the object's
+// frame (move.lua's W:walk_on, kit/walker's slope_limit). Grants and owned voxels stay boxes of cells, stamped
 // copies at 90 degree turns. Its node is its scene's child at its place in the world (the
 // var "kit_parent": the entity it is under, 0 none). A positioned
 // entity's parent is a scene or a positioned entity; a loop, a missing

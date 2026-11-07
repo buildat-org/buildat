@@ -27,11 +27,21 @@
 # region under one: cells round its edges against the box, by the server, the client
 # and c:region_at. The three handles of the editor dragged: each one angle of the
 # row. A stamp refused when tilted. Saved, the server restarted: the same poses. A
-# walker up a pitched deck (its steps printed; no corrections). Screenshots of the
+# walker up a pitched deck (on its true surface; no corrections). Screenshots of the
 # editor and of play.
+# [KIT_WALKER_FRAME] A fresh save (frame(); "frame" for it alone): a walker on free
+# decks pitched 10, rolled 350, turned on all three axes, and pitched 60: fallen onto,
+# walked up, down and across, off an edge and back on by the low end's step, stopped
+# by a high end's wall, jumped; past slope_limit it slides off, under a limit raised
+# past the deck it stands. At each mark, in the deck's frame by this check's own
+# quaternions: the feet on the top within 0.02 m, none corrected, the frames entered
+# in the order given. A second player, native, sees the body within 0.1 m. Screenshots:
+# fp_world, fp_object, chase_object, chase_world, chase_edge, seen_by_bob.
 # Screenshots kept with KEEP_TMP=1: $t/*.png
 #   util/kit_free_prefab_check.sh
 #   util/kit_free_prefab_check.sh rotation
+#   util/kit_free_prefab_check.sh frame
+#   util/kit_free_prefab_check.sh web frame   the walking in the page, kitbob native
 #   util/kit_free_prefab_check.sh web    in headless Chrome, on web/'s wasm: a
 #      drive of the plan and palette, then this whole check, its sequences turned
 #      into a page's steps (mid-drag screenshots left out)
@@ -54,7 +64,7 @@ if [ "${1:-}" = web ]; then
 	WEB=1
 	check_tmp kit_free_prefab_web; t=$CHECK_TMP
 fi
-if [ -n "$WEB" ] && [ "${2:-}" != rotation ]; then
+if [ -n "$WEB" ] && [ "${2:-}" != rotation ] && [ "${2:-}" != frame ]; then
 	# The menu's Place free of kit/hut in the 2D plan, selected: inspector and
 	# box; turned by keys at a step of 1, moved by a key. One placed in the 3D view
 	# and turned there; the editor's view of it, play's, and walked at in play.
@@ -347,24 +357,8 @@ bodies() # <log>: its "body at" lines, x y z corrections
 	grep -aoP 'kit: body at \K[-0-9.,]+, [0-9]+ acks, [0-9]+' "$1" |
 		sed 's/, [0-9]* acks, / /; s/,/ /g'
 }
-# ---- [KIT_FREE_ROTATION]
-rotation()
+write_geo()
 {
-	USERDIR=$t/rot/user
-	export BUILDAT_WORKBENCH_TYPES="$USERDIR/apps/workbench/check_types"
-	mkdir -p "$BUILDAT_WORKBENCH_TYPES"
-	cat > "$BUILDAT_WORKBENCH_TYPES/probe.lua" <<'LUA'
--- c:region_at for the check
-return {
-	version = 1,
-	regions = true,
-	inputs = {region = "position"},
-	on_input = function(c, input, v)
-		local r = c:region_at(v)
-		c:log(r and "region " .. r.id or "no region")
-	end,
-}
-LUA
 	cat > "$t/geo.py" <<'PY'
 # The check's own frames: rows composed, nothing of kit.cpp's
 import json, math, re, sqlite3, sys
@@ -413,6 +407,26 @@ def poses(path, prefix):
 def bodies(path):
 	return [tuple(map(float, m)) for m in re.findall(r"kit: body at ([-0-9.]+),([-0-9.]+),([-0-9.]+), \d+ acks, (\d+)", open(path, errors="replace").read())]
 PY
+}
+# ---- [KIT_FREE_ROTATION]
+rotation()
+{
+	USERDIR=$t/rot/user
+	export BUILDAT_WORKBENCH_TYPES="$USERDIR/apps/workbench/check_types"
+	mkdir -p "$BUILDAT_WORKBENCH_TYPES"
+	cat > "$BUILDAT_WORKBENCH_TYPES/probe.lua" <<'LUA'
+-- c:region_at for the check
+return {
+	version = 1,
+	regions = true,
+	inputs = {region = "position"},
+	on_input = function(c, input, v)
+		local r = c:region_at(v)
+		c:log(r and "region " .. r.id or "no region")
+	end,
+}
+LUA
+	write_geo
 	c3() { python3 -c "print($1)"; }
 	# (more edits than the undo counts: each one waited for by a round trip)
 	edit() { ed "$1"; echo "sync 5000"; }
@@ -755,6 +769,7 @@ t = math.tan(math.radians(10))
 for x in b:
 	true = dy + 0.5 / math.cos(math.radians(10)) + (x[2] - dz) * t if x[2] >= dz - 0.5 else by
 	print("  body z %.2f y %.2f (the deck's top under it %.2f), corrections %d" % (x[2], x[1], true, x[3]))
+	assert x[2] < dz or abs(x[1] - true) < 0.03, "not on the deck's surface"
 assert b[-1][3] == b[0][3], "corrections on the deck"
 assert max(x[1] for x in b) > by + 0.3, "it did not climb"
 PY
@@ -801,6 +816,348 @@ PY
 	echo "ok: [KIT_FREE_ROTATION] poses, zone, region, handles, keys, a stamp refused, save and load"
 	unset USERDIR BUILDAT_WORKBENCH_TYPES
 }
+# ---- [KIT_WALKER_FRAME]
+frame()
+{
+	USERDIR=$t/fr/user
+	# (a floor with no trees for a deck to meet)
+	export BUILDAT_WORKBENCH_STONE=1
+	export BUILDAT_WORKBENCH_TYPES="$USERDIR/apps/workbench/check_types"
+	mkdir -p "$BUILDAT_WORKBENCH_TYPES"
+	cat > "$BUILDAT_WORKBENCH_TYPES/tele.lua" <<'LUA'
+-- Puts the player who tries it where a mark starts
+return {
+	version = 1,
+	inputs = {go = "position"},
+	on_input = function(c, input, v)
+		c:teleport(v)
+	end,
+}
+LUA
+	write_geo
+	c3() { python3 -c "print($1)"; }
+	edit() { ed "$1"; echo "sync 5000"; }
+	native() # <name>
+	{
+		run_client 90 "$t/$1.log" timeout 240 bin/buildat -C "$t/client_cache" \
+			-D "$t/cu_$1" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
+			-c @"$t/$1.cmds" || fail "client $1 failed ($t/$1.log, $t/srv*.log)"
+	}
+	# ---- Set up, natively: the world, the deck's prefab, a walker; where it starts
+	{
+		cat <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 30000 server window: the page ntfy
+frames 3
+click Button "Don't add"
+EOF
+		joined
+		cat <<'EOF'
+keypress F6
+wait_log 10000 kit editor: state: 1 entities, 0 to undo
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended (by kitboss)
+EOF
+		edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+		for z in -40 -39 -38 -37 -36 -35 -34 -33; do
+			for x in 3 4 5 6 7 8 9 10; do
+				vox $x 1 $z kit/stone
+			done
+		done
+		edit '{"op": "save_prefab", "ids": [], "box": [3, 1, -40, 10, 1, -33], "name": "deck"}'
+		edit '{"op": "place", "type": "kit/walker", "pos": [0, 1, 0]}'
+		edit '{"op": "place", "type": "kit/controls", "pos": [0, 1, 0]}'
+		edit '{"op": "place", "type": "workbench/tele", "pos": [0, 1, -20]}'
+		walk fr_start | grep -v 'camera first_person'
+		echo quit
+	} > "$t/fr1.cmds"
+	server f1
+	wait_for_log "$t/srvf1.log" "setup code [A-Z0-9]+" 30
+	code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srvf1.log" | head -1)
+	[ -n "$code" ] || fail "no setup code ($t/srvf1.log)"
+	BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
+		BUILDAT_JOIN_ADMIN="setting open_registration on" native fr1
+	read -r bx by bz _ < <(bodies "$t/fr1.log" | head -1)
+	[ -n "${bz:-}" ] || fail "no body's place ($t/fr1.log)"
+	bx=$(c3 "round($bx * 16) / 16"); bz=$(c3 "round($bz * 16) / 16"); by=$(c3 "round($by * 16) / 16")
+	echo "the body starts at $bx $by $bz"
+	# 3 world, 4 walker, 5 controls, 6 tele; 7 the pitched deck: its low end (+z) a
+	# 0.3 step over the floor; 8 rolled; 9 on all axes; 10 past the limit, its low end
+	# in the air
+	cat > "$t/decks.py" <<PY
+BY = $by
+DECKS = {
+	7: ([$(c3 "$bx - 4"), $(c3 "$by + 1.125"), $(c3 "$bz + 5")], 0, 10, 0),
+	8: ([$(c3 "$bx + 20"), $(c3 "$by + 2"), $(c3 "$bz + 5")], 0, 0, 350),
+	9: ([$(c3 "$bx - 24"), $(c3 "$by + 4"), $(c3 "$bz + 5")], 30, 15, 350),
+	10: ([$(c3 "$bx - 4"), $(c3 "$by + 8"), $(c3 "$bz - 24")], 0, 60, 0),
+}
+PY
+	over() # <deck> <local x> <local z>: a place 1.5 over the deck's top, for tele
+	{
+		python3 - "$t" "$1" "$2" "$3" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from geo import *
+from decks import *
+o, y, p, r = DECKS[int(sys.argv[2])]
+w = add(o, rot(quat(y, p, r), [float(sys.argv[3]), 0.5, float(sys.argv[4])]))
+print("[%.3f, %.3f, %.3f]" % (w[0], w[1] + 2, w[2]))
+PY
+	}
+	in_edit() # <event kit_edit's>: an edit or a try takes edit mode, the game running
+	{
+		printf 'keypress F6\nwait_log 5000 kit editor: state:\nevent kit_edit %s\nsync 3000\n' "$1"
+		printf 'keypress F6\nwait_log 5000 kit editor: edit mode off\n'
+	}
+	tele() # <deck> <local x> <local z>: there, and fallen onto it
+	{
+		in_edit "{\"op\": \"try\", \"id\": 6, \"input\": \"go\", \"value\": $(over "$1" "$2" "$3")}"
+		echo "wait_log 10000 kit: the body's frame: $1"
+		echo "frames 3"
+	}
+	mark() # <name>: the body's place at a settled moment, named in order
+	{
+		echo "$1" >> "$t/marks.txt"
+		echo "sync 3000"
+		echo "event kit_body"
+	}
+	walked() # <dir x> <dir z> <ms> <name>
+	{
+		printf 'look_dir %s 0 %s\nframes 2\nkeydown W\ndelay %s\n' "$1" "$2" "$3"
+		mark "$4"
+		printf 'keyup W\ndelay 100\n'
+	}
+	: > "$t/marks.txt"
+	mark_set() # <id> <param> <value>: a parameter while playing
+	{
+		in_edit "{\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}"
+		echo "frames 3"
+	}
+	{
+		to_edit
+		cat <<'EOF'
+event kit_edit {"op": "place", "prefab": "kitboss/deck", "pos": [0, 30, -80], "free": true}
+sync 5000
+event kit_edit {"op": "place", "prefab": "kitboss/deck", "pos": [0, 30, -80], "free": true}
+sync 5000
+event kit_edit {"op": "place", "prefab": "kitboss/deck", "pos": [0, 30, -80], "free": true}
+sync 5000
+event kit_edit {"op": "place", "prefab": "kitboss/deck", "pos": [0, 30, -80], "free": true}
+sync 5000
+EOF
+		python3 - "$t" <<'PY'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from decks import *
+for i, (o, y, p, r) in DECKS.items():
+	print("event kit_edit " + json.dumps({"op": "move", "id": i, "pos": o, "yaw": y, "pitch": p, "roll": r}))
+	print("sync 5000")
+PY
+		# Fresh: in play, kitbob on his way
+		cat <<EOF
+event kit_edit {"op": "play"}
+wait_log 10000 kit editor: the server is Running (by kitboss)
+keypress F6
+wait_log 10000 kit editor: edit mode off
+frames 10
+EOF
+		# The pitched deck: fallen onto, up (-z), down, across, jumped
+		tele 7 3.5 3.5
+		mark p_fall
+		walked 0 -1 300 p_up
+		walked 0 1 500 p_down
+		walked 0 -1 200 p_up2
+		walked 1 0 300 p_across
+		walked -1 0 500 p_across2
+		walked 1 0 200 p_across3
+		printf 'keydown Space\ndelay 100\nkeyup Space\ndelay 1000\n'
+		mark p_jump
+		# Off the low end; back up it by its step; on over the high end, a wall from
+		# the floor there
+		walked 0 1 1200 p_off_low
+		echo "delay 500"
+		mark p_floor
+		walked 0 -1 1000 p_back_on
+		walked 0 -1 1000 p_off_high
+		echo "delay 500"
+		mark p_floor2
+		walked 0 1 800 p_at_wall
+		# Rolled: its top falling away along -x... each way
+		tele 8 3.5 3.5
+		mark r_fall
+		walked 1 0 300 r_x
+		walked -1 0 500 r_x2
+		walked 1 0 200 r_x3
+		walked 0 1 300 r_z
+		walked 0 -1 500 r_z2
+		walked 0 1 200 r_z3
+		walked 1 1 200 r_diag
+		walked -1 -1 200 r_diag2
+		# All three axes
+		tele 9 3.5 3.5
+		mark a_fall
+		walked 0 1 300 a_a
+		walked 0 -1 500 a_b
+		walked 1 0 300 a_c
+		walked -1 0 500 a_d
+		printf 'keydown Space\ndelay 100\nkeyup Space\ndelay 1000\n'
+		mark a_jump
+		# Past the limit: slides
+		tele 10 3.5 1
+		mark s_on
+		echo "delay 300"
+		mark s_lower
+		echo "delay 1500"
+		mark s_floor
+		# The limit past the deck: it stands, and the keys take it up and down
+		mark_set 4 slope_limit 65
+		tele 10 3.5 3.5
+		mark l_on
+		echo "delay 500"
+		mark l_still
+		walked 0 1 200 l_down
+		mark_set 4 slope_limit 50
+		# The views on the pitched deck, across its slope and over the low end
+		tele 7 3.5 3.5
+		printf 'look_dir 1 -0.15 0.6\nframes 10\n'
+		mark v_world
+		echo "screenshot $t/fp_world.png"
+		mark_set 5 camera_frame '"object"'
+		echo "delay 800"
+		mark v_object
+		echo "screenshot $t/fp_object.png"
+		mark_set 5 camera '"chase"'
+		echo "delay 800"
+		echo "screenshot $t/chase_object.png"
+		mark_set 5 camera_frame '"world"'
+		echo "delay 800"
+		echo "screenshot $t/chase_world.png"
+		# The body at the deck's edge, the view from outside it: the feet on the top
+		tele 7 6.9 3.5
+		printf 'look_dir -1 -0.05 0.1\nframes 10\ndelay 400\n'
+		mark v_edge
+		echo "screenshot $t/chase_edge.png"
+		mark_set 5 camera '"first_person"'
+		# Walking under the object's view: where its forward goes on the deck
+		mark_set 5 camera_frame '"object"'
+		echo "delay 500"
+		walked 0 -1 200 v_walk
+		mark_set 5 camera_frame '"world"'
+		# And for kitbob
+		in_edit '{"op": "try", "id": 5, "input": "shake", "value": 0.01}'
+		echo "delay 1500"
+		mark bob_saw
+		echo "sync 3000"
+		echo quit
+	} > "$t/fr2.cmds"
+	# (he stands where the body started, looking at the deck)
+	cat > "$t/frbob.cmds" <<EOF
+wait_log_any 60000 Joined as kitbob
+wait_log_any 60000 player physics enabled
+look_dir -0.5 0.1 1
+wait_log 200000 kit: camera shake 0.01
+event kit_players
+frames 5
+screenshot $t/seen_by_bob.png
+sync 1000
+quit
+EOF
+	# (kitbob first: he must be in when it plays; his client quits by its own)
+	BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE=1 native frbob &
+	bob=$!
+	wait_for_log "$t/frbob.log" "player physics enabled" 120 ||
+		fail "kitbob did not get in ($t/frbob.log)"
+	client fr2
+	wait $bob || fail "kitbob's client ($t/frbob.log)"
+	stop
+	python3 - "$t" "$t/fr2.log" "$t/marks.txt" "$t/frbob.log" <<'PY' || fail "the walker's frame ($t/fr2.log)"
+import sys
+sys.path.insert(0, sys.argv[1])
+from geo import *
+from decks import *
+log, marks, boblog = sys.argv[2:5]
+text = open(log, errors="replace").read()
+names = open(marks).read().split()
+got = re.findall(r"kit: body at [-\d.,]+, \d+ acks, (\d+) corrections, \d+ pending, (\d+) jumps, \d+ arrivals, feet ([-\d.]+),([-\d.]+),([-\d.]+), frame (\w+)", text)
+# (walk()'s, not marks, come before)
+assert len(got) >= len(names), (len(got), len(names))
+got = got[-len(names):]
+M = {}
+for n, g in zip(names, got):
+	f = None if g[5] == "none" else int(g[5])
+	p = [float(g[2]), float(g[3]), float(g[4])]
+	l = None
+	if f is not None:
+		o, y, pi, r = DECKS[f]
+		l = rot(conj(quat(y, pi, r)), sub(p, o))
+	M[n] = {"corr": int(g[0]), "jumps": int(g[1]), "p": p, "f": f, "l": l}
+worst = 0
+for n in names:
+	m = M[n]
+	lt = " in %d, %.4f over its top" % (m["f"], m["l"][1] - 0.5) if m["f"] else ""
+	print("  %-10s %.3f %.3f %.3f%s, corrections %d" % (n, *m["p"], lt, m["corr"]))
+	if m["f"]:
+		worst = max(worst, abs(m["l"][1] - 0.5))
+print("the worst height over a deck's true surface: %.4f m" % worst)
+assert worst < 0.02, worst
+def on(n, f):
+	assert M[n]["f"] == f, (n, M[n]["f"], f)
+for n in "p_fall p_up p_down p_up2 p_across p_across2 p_across3 p_jump p_back_on".split():
+	on(n, 7)
+for n in "r_fall r_x r_x2 r_x3 r_z r_z2 r_z3 r_diag r_diag2".split():
+	on(n, 8)
+for n in "a_fall a_a a_b a_c a_d a_jump".split():
+	on(n, 9)
+for n in "s_on s_lower l_on l_still l_down".split():
+	on(n, 10)
+for n in "v_world v_object v_edge v_walk".split():
+	on(n, 7)
+# Moved as asked, up the deck and down it
+def d(a, b, k):
+	return M[b]["p"][k] - M[a]["p"][k]
+assert d("p_fall", "p_up", 1) > 0.1 and d("p_fall", "p_up", 2) < -0.5, "uphill"
+assert d("p_up", "p_down", 1) < -0.1 and d("p_up", "p_down", 2) > 0.5, "downhill"
+assert abs(d("p_across", "p_across2", 1)) < 0.01 and d("p_across", "p_across2", 0) < -0.5, "across"
+assert d("r_fall", "r_x", 0) > 0.5 and abs(d("r_fall", "r_x", 1)) > 0.05, "roll: along it"
+assert abs(d("r_z", "r_z2", 1)) < 0.01 and d("r_z", "r_z2", 2) < -0.5, "roll: across it"
+# The jumps
+assert M["p_jump"]["jumps"] > M["p_across3"]["jumps"], "the jump"
+assert M["a_jump"]["jumps"] > M["a_d"]["jumps"], "the jump on all axes"
+# Off the low end, on the floor; back on; off the high end; the wall
+for n in "p_floor p_floor2 p_at_wall s_floor".split():
+	assert M[n]["f"] is None and abs(M[n]["p"][1] - BY) < 0.02, (n, M[n])
+o = DECKS[7][0]
+assert M["p_floor"]["p"][2] > o[2] + 7.5, "off the low end"
+assert M["p_floor2"]["p"][2] < o[2] - 0.5, "off the high end"
+assert o[2] - 2 < M["p_at_wall"]["p"][2] < o[2], ("stopped at the high end", M["p_at_wall"])
+# The slide: further down on its own, off it
+assert d("s_on", "s_lower", 1) < -0.2, "it slid"
+# Under a limit past the deck it stands
+assert all(abs(d("l_on", "l_still", k)) < 0.001 for k in range(3)), "it stands at limit 65"
+assert d("l_still", "l_down", 1) < -0.3, "walked down it at limit 65"
+# The order of the frames
+frames = re.findall(r"kit +: kit: the body's frame: (\w+)", text)
+print("the frames in order:", " ".join(frames))
+W = "the"
+assert frames == ["7", W, "7", W, "7", W, "8", W, "9", W, "9", W, "10", W, "10", W, "7", W, "7"], frames
+assert M[names[-1]]["corr"] == 0, ("corrections", M[names[-1]]["corr"])
+print("no corrections in %d acks" % int(re.findall(r"(\d+) acks", text)[-1]))
+# What kitbob saw
+b = re.findall(r"kit: player (\d+) drawn at ([-\d.]+),([-\d.]+),([-\d.]+)", open(boblog, errors="replace").read())
+want = M["bob_saw"]["p"]
+near = min(max(abs(float(x[k + 1]) - want[k]) for k in range(3)) for x in b)
+print("kitbob draws the body %.3f m from where it is (%s)" % (near, want))
+assert near < 0.1, (b, want)
+PY
+	echo "ok: [KIT_WALKER_FRAME] on decks, off and back, jumped, slid; no corrections; seen by another"
+	unset USERDIR BUILDAT_WORKBENCH_TYPES
+}
+if [ "${1:-}" = frame ] || [ "${2:-}" = frame ]; then
+	frame
+	echo "PASS: a walker's frame"
+	exit 0
+fi
 if [ "${1:-}" = rotation ] || [ "${2:-}" = rotation ]; then
 	rotation
 	echo "PASS: free rotation"
