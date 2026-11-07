@@ -1,7 +1,7 @@
 -- A seat ([KIT_COMPONENTS]): a use of the entity it is on takes the player's controls
 -- for that entity's movement (kit/car), F or the touch bar's Exit leaves it. One holder.
--- simplified: on the moved entity itself, with no place of its own; a seat as a child
--- entity on a deck is stage 4r6's.
+-- [KIT_VEHICLE_MOVEMENTS] On the moved entity or on a child of it (a deck's seat, a
+-- turret's): the nearest movement on it or above it is what it drives.
 return {
 	version = 1,
 	about = {

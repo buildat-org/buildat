@@ -34,9 +34,19 @@ return {
 	version = 1,
 	about = {
 		what = "A ground vehicle's movement: whoever holds its entity's seat drives it.",
+		inputs = {
+			throttle = "Gas while nobody holds its seat. Value: 1 gas to -1 brake and back.",
+			steer = "Steers while nobody holds its seat. Value: 1 right to -1 left.",
+		},
 	},
 	component = true,
 	movement = {body = BODY, camera = "chase", touch = "drive"},
+	-- [KIT_VEHICLE_MOVEMENTS] steered in play (on a free object, or on a deck): with
+	-- nobody in its seat, these drive it
+	inputs = {throttle = "number", steer = "number"},
+	on_input = function(c, input, value)
+		c.state[input] = tonumber(value) or 0
+	end,
 	params = {
 		engine_force = {cat = "physics", type = "number", default = 9000,
 			min = 0, max = 1e6},

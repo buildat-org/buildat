@@ -241,7 +241,9 @@ from decks import *
 for i, (o, m) in DECKS.items():
 	print("event kit_edit " + json.dumps({"op": "move", "id": i, "pos": o, "yaw": 0, "pitch": 0, "roll": 0}))
 	print("sync 5000")
-	print("event kit_edit " + json.dumps({"op": "add_component", "id": i, "type": "kit/wave"}))
+	# ([KIT_VEHICLE_MOVEMENTS] a course is kit/course's)
+	print("event kit_edit " + json.dumps({"op": "add_component", "id": i,
+		"type": "kit/course" if "course" in m else "kit/wave"}))
 	print("sync 5000")
 	for k, v in m.items():
 		print("event kit_edit " + json.dumps({"op": "set", "id": i, "comp": 1, "param": k, "value": v}))

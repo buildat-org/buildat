@@ -128,6 +128,8 @@ static const int MAX_NEST = 16;
 static const char *const PREFAB_ROOT = "kit/prefab_copy";
 // [KIT_COMPONENTS] What moves a free object by a function of the round's time
 static const char *const WAVE_TYPE = "kit/wave";
+// [KIT_VEHICLE_MOVEMENTS] A free object's course there and back, a movement
+static const char *const COURSE_TYPE = "kit/course";
 static const size_t MAX_LINKS = 64;
 // [KIT_COMPONENTS] Components an entity has at most, by Add component
 static const size_t MAX_COMPONENTS = 16;
@@ -2118,23 +2120,240 @@ struct Module: public interface::Module, public Interface
 	// the same in the world, and that is the one a body steps with. Running only.
 	// [KIT_COMPONENTS] kit/wave's parameters when this entity's object moves; nullptr:
 	// it is where its row says
+	// [KIT_VEHICLE_MOVEMENTS] Built each tick by sync_motions(): kit/wave's and
+	// kit/course's parameters together, and a steered one's track
 	const json::Value* motion_of(const Entity &e)
 	{
-		if(!m_session.running || !is_root(e) || !m_free_objects.count(e.id))
+		if(!m_session.running)
 			return nullptr;
+		auto it = m_motions.find(e.id);
+		return it == m_motions.end() ? nullptr : &it->second;
+	}
+
+	// A free root's wave and course, one table as move.lua's M.wave reads it (an
+	// object; empty: neither moves it)
+	json::Value timed_motion(const Entity &e)
+	{
+		json::Value m = json::object();
+		if(!is_root(e) || !m_free_objects.count(e.id))
+			return m;
 		for(const Instance &in : e.comps){
-			if(in.type != WAVE_TYPE)
-				continue;
 			const json::Value &p = in.params;
-			for(const char *k : {"wave_roll", "wave_pitch", "wave_yaw", "wave_heave"})
-				if(row_num(p, k) != 0 && row_num(p, (ss_(k)+"_period").c_str()) > 0)
-					return &p;
-			const json::Value &c = p.get("course");
-			if(row_num(p, "course_time") > 0 && pos_ok(c) && (c.at(0u).as_number() != 0 ||
-					c.at(1u).as_number() != 0 || c.at(2u).as_number() != 0))
-				return &p;
+			if(in.type == WAVE_TYPE){
+				bool any = false;
+				for(const char *k : {"wave_roll", "wave_pitch", "wave_yaw", "wave_heave"})
+					any = any || (row_num(p, k) != 0 &&
+							row_num(p, (ss_(k)+"_period").c_str()) > 0);
+				if(any)
+					for(json::Iterator it(p); it; ++it)
+						m.set(it.key(), *it);
+			} else if(in.type == COURSE_TYPE){
+				const json::Value &c = p.get("course");
+				if(row_num(p, "course_time") > 0 && pos_ok(c) && (c.at(0u).as_number() != 0
+						|| c.at(1u).as_number() != 0 || c.at(2u).as_number() != 0)){
+					m.set("course", c);
+					m.set("course_time", p.get("course_time"));
+				}
+			}
 		}
-		return nullptr;
+		return m;
+	}
+
+	// ---- [KIT_VEHICLE_MOVEMENTS] Steered movements. A movement on a free object's
+	// root, or on an entity under one that moves (a turret, a car on a deck), is
+	// stepped here, not by its holder's body: its input from the seat's holder (their
+	// inputs as they come), else its instance's `throttle` and `steer` state (signals,
+	// an NPC's), stepped ahead of the round's time by DRIVE_LEAD. Each batch ends in a
+	// key {t ms, x, y, z, yaw, pitch, roll} (its place in its parent's frame), sent to
+	// every client in its scene ("kit:track"); the pose at a time is the keys'
+	// (move.lua's M.track_at, track_at() here: between two, or on from the last), so a
+	// passenger's step and the server's of it pose the deck alike while the keys came
+	// before the stamp. kit/wave goes on top as on any free object.
+	// simplified: the holder's input takes effect as it comes, a network's delay and
+	// DRIVE_LEAD after it was pressed; a stamped input applied at its stamp plus a
+	// fixed delay is the upgrade if a driver's timing ever matters
+	static constexpr double DRIVE_LEAD = 0.1; // s
+	static constexpr double TRACK_KEEP = 3; // s of keys kept
+	struct Drive
+	{
+		int64_t gen = 0;
+		ss_ type, scene;
+		json::Value params = json::object();
+		json::Value state = json::object();
+		double t = 0; // stepped to, the round's time (s)
+		std::deque<std::array<double, 7>> keys;
+		ss_ input; // the holder's last, fields of a Lua table
+		bool held = false;
+		bool failed = false;
+		uint64_t deck = 0; // under a moving free object: steps on its boxes, in its frame
+		double speed = 0, turn = 0; // m/s, degrees/s: the last batch's
+	};
+	std::map<uint64_t, Drive> m_drives;
+	int64_t m_drive_gen = 0;
+	std::map<uint64_t, json::Value> m_motions;
+	// What each peer has of each track: its gen, its last key's time
+	std::map<size_t, std::map<uint64_t, std::pair<int64_t, double>>> m_track_sent;
+	// [KIT_VEHICLE_MOVEMENTS] c:set_param's: entity, type, parameter, value; play's
+	std::map<uint64_t, std::map<ss_, json::Value>> m_play_params;
+
+	// A track's pose at t (s); false: no key yet
+	static bool track_at(const std::deque<std::array<double, 7>> &k, double t, double v[6])
+	{
+		if(k.empty())
+			return false;
+		const double ms = t * 1000;
+		size_t lo = 0, hi = k.size() - 1;
+		if(ms <= k[0][0]){
+			for(int i = 0; i < 6; i++)
+				v[i] = k[0][i + 1];
+			return true;
+		}
+		while(lo < hi){
+			const size_t mid = (lo + hi + 1) / 2;
+			if(k[mid][0] <= ms)
+				lo = mid;
+			else
+				hi = mid - 1;
+		}
+		const std::array<double, 7> *a = &k[lo], *b = nullptr;
+		double u = 0;
+		if(lo + 1 < k.size()){
+			b = &k[lo + 1];
+			u = (ms - (*a)[0]) / ((*b)[0] - (*a)[0]);
+		} else if(lo > 0){
+			b = &k[lo];
+			a = &k[lo - 1];
+			u = (std::min(ms, (*b)[0] + 500) - (*a)[0]) / ((*b)[0] - (*a)[0]);
+		}
+		for(int i = 0; i < 6; i++){
+			if(!b){
+				v[i] = (*a)[i + 1];
+				continue;
+			}
+			double d = (*b)[i + 1] - (*a)[i + 1];
+			if(i >= 3)
+				d -= 360 * std::floor((d + 180) / 360);
+			v[i] = (*a)[i + 1] + d * u;
+		}
+		return true;
+	}
+
+	// The motions of this tick: each free root's wave and course, each steered
+	// movement's drive (made at its first tick in play, gone with it)
+	void sync_motions()
+	{
+		m_motions.clear();
+		if(!m_session.running){
+			m_drives.clear();
+			return;
+		}
+		for(auto &f : m_free_objects){
+			auto it = m_entities.find(f.first);
+			if(it == m_entities.end())
+				continue;
+			json::Value m = timed_motion(it->second);
+			if(m.size())
+				m_motions[f.first] = m;
+		}
+		// Steered: a movement on a free root, or under what moves (a parent first)
+		std::map<uint64_t, int> memo;
+		std::function<bool(uint64_t, int)> moving = [&](uint64_t id, int depth) -> bool {
+			auto it = m_entities.find(id);
+			if(it == m_entities.end() || depth > MAX_NEST + 2)
+				return false;
+			auto mi = memo.find(id);
+			if(mi != memo.end())
+				return mi->second != 0;
+			const Entity &e = it->second;
+			const bool steered = steerable(e) && (m_free_objects.count(e.id) ||
+					moving(e.parent, depth + 1));
+			const bool r = steered || m_motions.count(id) || moving(e.parent, depth + 1);
+			memo[id] = steered ? 2 : r ? 1 : 0;
+			return r;
+		};
+		for(auto &p : m_entities)
+			moving(p.first, 0);
+		for(auto it = m_drives.begin(); it != m_drives.end();){
+			auto mi = memo.find(it->first);
+			if(mi == memo.end() || mi->second != 2)
+				it = m_drives.erase(it);
+			else
+				++it;
+		}
+		AtRest rest(m_at_rest);
+		for(auto &mp : memo){
+			if(mp.second != 2)
+				continue;
+			const Entity &e = m_entities[mp.first];
+			Drive &d = m_drives[e.id];
+			const Instance *mv = movement_on(e);
+			if(!d.gen){
+				d.gen = ++m_drive_gen;
+				d.t = motion_t();
+				json::Value pos = json::array();
+				pos.append(e.pos[0]);
+				pos.append(e.pos[1] - 0.5);
+				pos.append(e.pos[2]);
+				d.state.set("pos", pos);
+				d.state.set("yaw", e.yaw);
+				d.keys.push_back({{std::floor(d.t * 1000), e.pos[0], e.pos[1], e.pos[2],
+						e.yaw, e.pitch, e.roll}});
+				scene_of(e, &d.scene);
+				log_i(MODULE, "Entity %s's %s steps in play", cs(itos(e.id)),
+						cs(mv->type));
+			}
+			d.type = mv->type;
+			d.params = move_params(e, *mv, d.scene);
+			// On a free object's deck: the nearest moving free root it is under
+			d.deck = 0;
+			for(auto pi = m_entities.find(e.parent); pi != m_entities.end() &&
+					!d.deck; pi = m_entities.find(pi->second.parent))
+				if(m_free_objects.count(pi->first))
+					d.deck = pi->first;
+			json::Value m = m_free_objects.count(e.id) ? timed_motion(e) : json::object();
+			m.set("track", (int64_t)e.id);
+			double o[3], a, b, c;
+			Turn pq;
+			frame_of(e.parent, o, pq);
+			pq.angles(a, b, c);
+			json::Value fr = json::array();
+			for(double x : {o[0], o[1], o[2], a, b, c})
+				fr.append(x);
+			m.set("frame", fr);
+			m_motions[e.id] = m;
+		}
+	}
+
+	// A movement's type stepped here: one with a step and a body, not kit/course
+	// (a function of time)
+	bool steerable(const Entity &e)
+	{
+		const Instance *mv = movement_on(e);
+		return mv && !m_types[mv->type].decl.get("movement").get("timed").is_true();
+	}
+
+	// A movement's parameters, play's (c:set_param) over the row's, the scene's
+	// gravity and sea level in
+	json::Value move_params(const Entity &e, const Instance &in, const ss_ &scene,
+			bool env = true)
+	{
+		json::Value p = params_of(in.type, &in);
+		auto pp = m_play_params.find(e.id);
+		if(pp != m_play_params.end())
+			for(auto &kv : pp->second){
+				const size_t at = kv.first.find('|');
+				if(kv.first.substr(0, at) == in.type)
+					p.set(kv.first.substr(at + 1), kv.second);
+			}
+		// (a body's gravity is body_movement()'s)
+		const json::Value &g = p.get("gravity");
+		const double f = env ? env_gravity(scene) : 1;
+		if(g.is_number() && f != 1)
+			p.set("gravity", g.as_number() * f);
+		if(p.get("water_level").is_number() && jstr(p, "water") == "world")
+			if(World *w = world_named(scene))
+				p.set("water_level", w->wp.sea_level + 0.5);
+		return json::load_string(p.stringify().c_str());
 	}
 
 	double motion_t()
@@ -2152,8 +2371,17 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// v and q, an object's place and turn in its parent, as its motion has them at t
-	static void moved_local(const json::Value &m, double t, double v[3], Turn &q)
+	void moved_local(const json::Value &m, double t, double v[3], Turn &q)
 	{
+		// [KIT_VEHICLE_MOVEMENTS] a steered one's place and turn: its track's
+		if(m.get("track").is_number()){
+			auto di = m_drives.find((uint64_t)m.get("track").as_number());
+			double k[6];
+			if(di != m_drives.end() && track_at(di->second.keys, t, k)){
+				v[0] = k[0], v[1] = k[1], v[2] = k[2];
+				q = Turn::of(k[3], k[4], k[5]);
+			}
+		}
 		const Turn wave = Turn::of(swing(m, "wave_yaw", t), swing(m, "wave_pitch", t),
 				swing(m, "wave_roll", t));
 		double add[3] = {0, swing(m, "wave_heave", t), 0};
@@ -9601,6 +9829,9 @@ struct Module: public interface::Module, public Interface
 		const json::Value &speeds = fx.get("speed");
 		for(unsigned i = 0; i < speeds.size(); i++)
 			speed_fx(e, r.comp, r.by, speeds.at(i));
+		const json::Value &set_params = fx.get("set_param");
+		for(unsigned i = 0; i < set_params.size(); i++)
+			set_param_fx(e, r.comp, r.by, set_params.at(i));
 		// [KIT_CARRY_ATTACH] c:attach, c:detach
 		const json::Value &att = fx.get("attach");
 		if(att.is_array())
@@ -12856,6 +13087,47 @@ struct Module: public interface::Module, public Interface
 		b.speed = f;
 	}
 
+	// [KIT_VEHICLE_MOVEMENTS] c:set_param(id, type, param, value): a parameter of an
+	// entity's component it reaches, from now until Stop (play's; the row keeps its
+	// own). Checked as an edit's. A movement's go into its next step: a steered one's
+	// next batch, a body's next input (its client told, kit:controls)
+	// simplified: movements read them (move_params()); the other types' c.params
+	// stay their rows'
+	void set_param_fx(const Entity &e, size_t comp, const ss_ &by, const json::Value &s)
+	{
+		const uint64_t id = s.at(0u).is_number() ? (uint64_t)s.at(0u).as_number() : 0;
+		const ss_ type = s.at(1u).is_string() ? s.at(1u).as_string() : ss_();
+		const ss_ param = s.at(2u).is_string() ? s.at(2u).as_string() : ss_();
+		auto ti = m_entities.find(id);
+		ss_ why;
+		const Instance *in = nullptr;
+		if(ti == m_entities.end() || !reach(e, comp, by).count(id))
+			why = "not an entity it reaches";
+		else
+			for(const Instance &x : ti->second.comps)
+				if(x.type == type)
+					in = &x;
+		const json::Value &decl = in ? m_types[type].decl.get("params").get(param) :
+				json::Value();
+		if(why.empty() && !in)
+			why = "it has no "+type.substr(0, 64);
+		else if(why.empty() && !decl.is_object())
+			why = type+" has no parameter "+param.substr(0, 64);
+		if(why.empty()){
+			const ss_ bad = check_param(decl, s.at(3u));
+			if(!bad.empty())
+				why = param+" is "+bad;
+		}
+		if(!why.empty()){
+			add_log(e.id, "set_param refused: "+why);
+			log_i(MODULE, "Entity %s: set_param refused: %s", cs(itos(e.id)), cs(why));
+			return;
+		}
+		m_play_params[id][type+"|"+param] = s.at(3u);
+		log_i(MODULE, "Entity %s's %s %s set to %s in play", cs(itos(id)), cs(type),
+				cs(param), cs(s.at(3u).stringify()));
+	}
+
 	// [KIT_CARRY_ATTACH] c:attach(player, {bone, offset}): its own entity
 	// on a player it reaches, in its scene: drawn by every client at the
 	// player's drawn body (the node's "kit_attach": "<player> <bone> <x>
@@ -14356,7 +14628,10 @@ struct Module: public interface::Module, public Interface
 		// tick's budget
 		const int64_t budget = m_box ? m_box->budget() / SLICE_DIV *
 				TICK_SLICES : 0;
+		sync_motions();
 		int64_t spent = step_bodies(budget);
+		spent += step_drives(budget - spent);
+		send_tracks();
 		free_bodies_tick();
 		send_controls();
 		env_tick();
@@ -14520,6 +14795,9 @@ struct Module: public interface::Module, public Interface
 		int64_t puts = 0;
 		double home[3] = {0, 0, 0}; // the last put's cell
 		uint64_t seat = 0; // the seat held (an entity, 0: none)
+		// [KIT_VEHICLE_MOVEMENTS] the steered vehicle it rides (0: none; a seat on
+		// one that is not steered here moves it by this body's steps)
+		uint64_t ride = 0;
 		bool failed = false; // a step's error logged
 		// [KIT_TOOLS_1] the last input's yaw (degrees from +z toward +x):
 		// a hit's knockback where nothing else gives its direction
@@ -14573,6 +14851,25 @@ struct Module: public interface::Module, public Interface
 		return nullptr;
 	}
 
+	// [KIT_VEHICLE_MOVEMENTS] What a seat drives: the nearest of it and what it is
+	// under with a movement, not a course's (nullptr: none)
+	Entity* vehicle_of(const Entity &seat)
+	{
+		auto it = m_entities.find(seat.id);
+		for(int depth = 0; it != m_entities.end() && depth <= MAX_NEST + 2; depth++){
+			if(const Instance *mv = movement_on(it->second))
+				return m_types[mv->type].decl.get("movement").get("timed").is_true() ?
+						nullptr : &it->second;
+			it = m_entities.find(it->second.parent);
+		}
+		return nullptr;
+	}
+	Entity* vehicle_of(uint64_t seat)
+	{
+		auto it = m_entities.find(seat);
+		return it == m_entities.end() ? nullptr : vehicle_of(it->second);
+	}
+
 	// The first instance of a type on the app root (nullptr: none)
 	const Instance* root_instance(const ss_ &type)
 	{
@@ -14624,15 +14921,19 @@ struct Module: public interface::Module, public Interface
 
 	void body_movement_of(Body &b, ss_ &type, json::Value &params)
 	{
-		if(b.seat){
-			auto it = m_entities.find(b.seat);
-			if(it != m_entities.end())
-				if(const Instance *in = movement_on(it->second)){
-					type = in->type;
-					params = params_of(in->type, in);
-					return;
-				}
-		}
+		// [KIT_VEHICLE_MOVEMENTS] the vehicle's, a seat's or what it is on; play's
+		// parameters over its own
+		if(b.seat)
+			if(Entity *v = vehicle_of(b.seat)){
+				const Instance *in = movement_on(*v);
+				type = in->type;
+				ss_ sc;
+				scene_of(*v, &sc);
+				params = move_params(*v, *in, sc, false);
+				b.ride = m_drives.count(v->id) ? v->id : 0;
+				return;
+			}
+		b.ride = 0;
 		type = jstr(controls_params(), "movement", "kit/walker");
 		if(!is_movement(type)){
 			type = "";
@@ -14713,7 +15014,28 @@ struct Module: public interface::Module, public Interface
 			m.set("decl", m_types[b.type].decl.get("movement"));
 			c.set("move", m);
 			c.set("seat", (int64_t)b.seat);
+			// [KIT_VEHICLE_MOVEMENTS] a steered vehicle ridden: its inputs, no steps
+			if(b.ride)
+				c.set("ride", (int64_t)b.ride);
+			if(b.seat)
+				if(Entity *v = vehicle_of(b.seat))
+					c.set("vehicle", (int64_t)v->id);
 		}
+		// [KIT_VEHICLE_MOVEMENTS] the steered ones that are no free object (a
+		// turret, a car on a deck): {id, links}, moved by the clients as objects are
+		json::Value steered = json::array();
+		for(auto &d : m_drives){
+			auto ei = m_entities.find(d.first);
+			if(m_free_objects.count(d.first) || ei == m_entities.end() ||
+					d.second.scene != pe.scene)
+				continue;
+			json::Value r = json::array();
+			r.append((int64_t)d.first);
+			r.append(links_of(ei->second));
+			steered.append(r);
+		}
+		if(steered.size())
+			c.set("steered", steered);
 		c.set("voxels", voxel_extra());
 		// [KIT_FREE_PREFAB] the free objects in its scene
 		auto psi = m_host.scenes.find(pe.scene);
@@ -14819,10 +15141,14 @@ struct Module: public interface::Module, public Interface
 			if(!std::isfinite(v[k]))
 				return;
 		}
+		// [KIT_VEHICLE_MOVEMENTS] a steered one's seat goes with it: the body is there
+		if(b.ride){
+			ride_moved(peer, b);
+			return;
+		}
 		if(b.seat){
-			auto it = m_entities.find(b.seat);
-			if(it != m_entities.end()){
-				Entity &e = it->second;
+			if(Entity *ve = vehicle_of(b.seat)){
+				Entity &e = *ve;
 				// [KIT_NESTING] the body's place is the world's
 				// simplified: a vehicle stays level in the world under a tilted
 				// parent; a pose of its own comes with 4r6's movements
@@ -14864,6 +15190,36 @@ struct Module: public interface::Module, public Interface
 				p.frame = di->first;
 			}
 		}
+		world_peer(peer, p.scene, p.pos[0], p.pos[1], p.pos[2]);
+		place_player(p);
+	}
+
+	// [KIT_VEHICLE_MOVEMENTS] A rider where its seat is now; drawn by the clients on
+	// the seat as it rests, carried by the vehicle's links (kit_frame, kit_rest)
+	void ride_moved(size_t peer, Body &b)
+	{
+		auto si = m_entities.find(b.seat);
+		if(si == m_entities.end())
+			return;
+		Peer &p = m_peers[peer];
+		double w[3];
+		Turn q;
+		world_of(si->second, w, &q);
+		for(int k = 0; k < 3; k++)
+			p.pos[k] = w[k];
+		json::Value pos = json::array();
+		pos.append(w[0]);
+		pos.append(w[1] - 0.5);
+		pos.append(w[2]);
+		b.state.set("pos", pos);
+		b.state.set("yaw", q.yaw());
+		b.state.set("ride", (int64_t)b.ride);
+		b.state_json = b.state.stringify();
+		{
+			AtRest rest(m_at_rest);
+			world_of(si->second, p.frame_rest);
+		}
+		p.frame = b.ride;
 		world_peer(peer, p.scene, p.pos[0], p.pos[1], p.pos[2]);
 		place_player(p);
 	}
@@ -14965,11 +15321,12 @@ struct Module: public interface::Module, public Interface
 			// [KIT_PLAYER_MODEL] then the pitch, the swings and the dig,
 			// for the body others see (an older client sends none);
 			// [KIT_MOVING_OBJECTS] then the time it was stepped at (ms)
-			double v[12] = {0};
+			// [KIT_VEHICLE_MOVEMENTS] then down (0/1: an airship's descent)
+			double v[13] = {0};
 			const int got = sscanf(one.c_str(), "%u %lf %lf %lf %lf %lf %lf "
-					"%lf %lf %lf %lf %lf %lf", &n, &v[0], &v[1], &v[2], &v[3], &v[4],
-					&v[5], &v[6], &v[7], &v[8], &v[9], &v[10], &v[11]);
-			if(got != 9 && got != 12 && got != 13)
+					"%lf %lf %lf %lf %lf %lf %lf", &n, &v[0], &v[1], &v[2], &v[3], &v[4],
+					&v[5], &v[6], &v[7], &v[8], &v[9], &v[10], &v[11], &v[12]);
+			if(got != 9 && got != 12 && got != 13 && got != 14)
 				continue;
 			bool ok = n > at;
 			for(int k = 0; k < 11; k++)
@@ -14999,13 +15356,15 @@ struct Module: public interface::Module, public Interface
 			lua_lit(json::Value(v[6]), o);
 			o += ",tz=";
 			lua_lit(json::Value(v[7]), o);
+			if(got == 14 && v[12] != 0)
+				o += ",down=1";
 			// [KIT_MOVING_OBJECTS] Taken within reason of the round's time: the server
 			// steps it against the pose the client stepped it against, so a late
 			// input is no correction. simplified: a client can choose its pose within
 			// the window (a second back, a quarter ahead); its worth is a deck's
 			// fraction of a swing, the window narrower is the upgrade if it is ever
 			// worth more
-			if(got == 13 && std::isfinite(v[11]) && v[11] != 0){
+			if(got >= 13 && std::isfinite(v[11]) && v[11] != 0){
 				const double t_now = motion_t() * 1000;
 				o += ",t=";
 				lua_lit(json::Value(std::floor(std::max(t_now - 1000,
@@ -15055,12 +15414,18 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_MOVING_OBJECTS] How fast what links_of() said can take a point at most rad
 	// from the object: m/s
-	static double motion_speed(const json::Value &links, double rad)
+	double motion_speed(const json::Value &links, double rad)
 	{
 		double v = 0;
 		const double tau = 2 * 3.14159265358979323846, deg = tau / 360;
 		for(unsigned i = 0; i < links.size(); i++){
 			const json::Value &m = links.at(i).at(6u);
+			// [KIT_VEHICLE_MOVEMENTS] a steered one's last batch's
+			if(m.get("track").is_number()){
+				auto di = m_drives.find((uint64_t)m.get("track").as_number());
+				if(di != m_drives.end())
+					v += di->second.speed + di->second.turn * deg * rad;
+			}
 			for(const char *k : {"wave_roll", "wave_pitch", "wave_yaw", "wave_heave"}){
 				const double period = row_num(m, (ss_(k)+"_period").c_str());
 				if(period > 0)
@@ -15080,8 +15445,17 @@ struct Module: public interface::Module, public Interface
 	void snapshot(ss_ &o, const Peer &pe, const Body &b, const double pos[3],
 			double r, double h, double reach)
 	{
-		WorldScope ws(m_w, world_named(pe.scene));
-		auto si = m_host.scenes.find(pe.scene);
+		const Entity *v = b.seat ? vehicle_of(b.seat) : nullptr;
+		snapshot(o, pe.scene, b.state, v ? v->id : 0, pos, r, h, reach);
+	}
+
+	// [KIT_VEHICLE_MOVEMENTS] own: what is stepping (a vehicle), not met with what is
+	// under it; the tracks of the scene's steered ones
+	void snapshot(ss_ &o, const ss_ &scene_name, const json::Value &state, uint64_t own,
+			const double pos[3], double r, double h, double reach)
+	{
+		WorldScope ws(m_w, world_named(scene_name));
+		auto si = m_host.scenes.find(scene_name);
 		const main_context::SceneReference scene =
 				si == m_host.scenes.end() ? nullptr : si->second;
 		// As far as the batch may go (reach, m) and a cell more: the cells
@@ -15168,15 +15542,14 @@ struct Module: public interface::Module, public Interface
 		o += ",looks={";
 		for(auto &p : m_entities){
 			const Entity &e = p.second;
-			if(!e.has_pos || e.id == b.seat || e.kind == "player")
+			if(!e.has_pos || e.kind == "player" || (own && under_or(e, own)))
 				continue;
 			// [KIT_NESTING] where it is in the world; what rides on the
-			// seat held none either (simplified: its own children)
+			// vehicle stepping none either
 			double w[3];
 			Turn wq;
 			world_of(e, w, &wq);
-			if((b.seat && e.parent == b.seat) ||
-					std::fabs(w[0] - pos[0]) > R + 8 ||
+			if(std::fabs(w[0] - pos[0]) > R + 8 ||
 					std::fabs(w[2] - pos[2]) > R + 8 ||
 					std::fabs(w[1] - pos[1]) > ny + 8)
 				continue;
@@ -15228,7 +15601,7 @@ struct Module: public interface::Module, public Interface
 		// [KIT_FREE_PREFAB] The free objects' boxes near it
 		o += ",turned={";
 		for(auto &f : m_free_objects){
-			if(f.second.ref != scene)
+			if(f.second.ref != scene || f.first == own)
 				continue;
 			const std::array<double, 6> &wp = f.second.place;
 			// [KIT_WALKER_FRAME] The feet in its frame
@@ -15244,8 +15617,8 @@ struct Module: public interface::Module, public Interface
 			if(fe != m_entities.end())
 				links = links_of(fe->second);
 			if(links.size()){
-				const json::Value &st_at = b.state.get("at");
-				const json::Value &st_fr = b.state.get("frame");
+				const json::Value &st_at = state.get("at");
+				const json::Value &st_fr = state.get("frame");
 				if(st_fr.is_number() && (uint64_t)st_fr.as_number() == f.first &&
 						pos_ok(st_at)){
 					for(unsigned k = 0; k < 3; k++)
@@ -15315,7 +15688,248 @@ struct Module: public interface::Module, public Interface
 					}
 				o += "}}";
 			});
+		tracks_lit(o, scene_name);
 		o += "}";
+	}
+
+	// [KIT_VEHICLE_MOVEMENTS] ",tracks={[id]={{t, x, y, z, yaw, pitch, roll}...}}": the
+	// keys of the steered ones in the scene, from TRACK_KEEP back (a stamp is a second
+	// back at most)
+	void tracks_lit(ss_ &o, const ss_ &scene_name)
+	{
+		o += ",tracks={";
+		const double from = (motion_t() - 1.5) * 1000;
+		char buf[48];
+		for(auto &d : m_drives){
+			if(d.second.scene != scene_name || d.second.keys.empty())
+				continue;
+			o += "["+itos(d.first)+"]={";
+			const auto &k = d.second.keys;
+			size_t i = 0;
+			while(i + 2 < k.size() && k[i + 1][0] < from)
+				i++;
+			for(; i < k.size(); i++){
+				o += "{";
+				for(int n = 0; n < 7; n++){
+					snprintf(buf, sizeof buf, "%.17g,", k[i][n]);
+					o += buf;
+				}
+				o += "},";
+			}
+			o += "},";
+		}
+		o += "}";
+	}
+
+	// Whether e is id or under it
+	bool under_or(const Entity &e, uint64_t id)
+	{
+		const Entity *at = &e;
+		for(int depth = 0; at && depth <= MAX_NEST + 2; depth++){
+			if(at->id == id)
+				return true;
+			auto it = m_entities.find(at->parent);
+			at = it == m_entities.end() ? nullptr : &it->second;
+		}
+		return false;
+	}
+
+	// [KIT_VEHICLE_MOVEMENTS] Each drive stepped on to DRIVE_LEAD past the round's
+	// time, one box call, a key at its end: what it spent
+	int64_t step_drives(int64_t budget)
+	{
+		int64_t spent = 0;
+		const double now = motion_t();
+		for(auto &dp : m_drives){
+			Drive &d = dp.second;
+			auto ei = m_entities.find(dp.first);
+			if(ei == m_entities.end() || d.failed || !m_box || spent >= budget)
+				continue;
+			const Entity &e = ei->second;
+			const Instance *mv = movement_on(e);
+			if(!mv)
+				continue;
+			const double rate = num(d.params, "rate", 60, 10, 120), dt = 1 / rate;
+			if(d.t < now - 1)
+				d.t = now - 1;
+			const int n = std::min((int)std::floor((now + DRIVE_LEAD - d.t) * rate),
+					2 * BATCH);
+			if(n <= 0)
+				continue;
+			// The input: its holder's, else its own state's (signals)
+			bool held = false;
+			for(auto &bp : m_bodies)
+				held = held || bp.second.ride == dp.first;
+			ss_ in = held ? d.input : ss_();
+			if(!held){
+				const json::Value &st = mv->state;
+				in = "{f=";
+				lua_lit(json::Value(std::max(-1.0, std::min(1.0, row_num(st, "throttle")))), in);
+				in += ",r=";
+				lua_lit(json::Value(std::max(-1.0, std::min(1.0, row_num(st, "steer")))), in);
+				in += ",climb=";
+				lua_lit(json::Value(std::max(-1.0, std::min(1.0, row_num(st, "climb")))), in);
+				in += ",yaw=0,jump=0,go=0,tx=0,ty=0,tz=0}";
+			}
+			if(in.empty())
+				in = "{f=0,r=0,yaw=0,jump=0,go=0,tx=0,ty=0,tz=0}";
+			const json::Value bd = body_decl(d.type);
+			const double r = num(bd, "r", 0.45, 0.05, 8), h = num(bd, "h", 1.7, 0.05, 16);
+			double pos[3] = {0, 0, 0};
+			const json::Value &sp = d.state.get("pos");
+			for(unsigned k = 0; k < 3 && sp.is_array() && k < sp.size(); k++)
+				pos[k] = sp.at(k).is_number() ? sp.at(k).as_number() : 0;
+			ss_ o = "Sreturn {type=";
+			lua_lit(json::Value(d.type), o);
+			o += ",params=";
+			lua_lit(d.params, o);
+			o += ",state=";
+			lua_lit(d.state, o);
+			o += ",dt=";
+			lua_lit(json::Value(dt), o);
+			o += ",sub="+itos((int64_t)num(d.params, "substeps", 1, 1, 8));
+			o += ",inputs={";
+			for(int k = 0; k < n; k++)
+				o += in.substr(0, in.size() - 1)+",t="+
+						itos((int64_t)std::floor((d.t + k * dt) * 1000))+"},";
+			o += "},world=";
+			double v2 = 0;
+			const json::Value &sv = d.state.get("vel");
+			for(unsigned k = 0; k < 3 && sv.is_array() && k < sv.size(); k++)
+				if(sv.at(k).is_number())
+					v2 += sv.at(k).as_number() * sv.at(k).as_number();
+			const double reach = std::min(16.0, (std::sqrt(v2) + 10) * n / rate);
+			if(d.deck)
+				deck_snapshot(o, d, e, pos, r, h, reach);
+			else
+				snapshot(o, d.scene, d.state, e.id, pos, r, h, reach);
+			o += "}";
+			ss_ answer, why;
+			bool runaway = false;
+			int64_t used = 0;
+			const bool ok = box_call(o, answer, why, &runaway, &used);
+			spent += used;
+			if(!ok){
+				log_w(MODULE, "Entity %s's %s: %s", cs(itos(e.id)), cs(d.type), cs(why));
+				d.failed = true;
+				continue;
+			}
+			d.state = json::load_string(answer.c_str());
+			d.t += n * dt;
+			const json::Value &np = d.state.get("pos");
+			if(!pos_ok(np))
+				continue;
+			auto ang = [&](const char *k, double row){
+				const json::Value &a = d.state.get(k);
+				return a.is_number() && std::isfinite(a.as_number()) ? a.as_number() : row;
+			};
+			const std::array<double, 7> key = {{std::floor(d.t * 1000),
+					np.at(0u).as_number(), np.at(1u).as_number() + 0.5, np.at(2u).as_number(),
+					ang("yaw", e.yaw), ang("pitch", e.pitch), ang("roll", e.roll)}};
+			if(!d.keys.empty()){
+				const std::array<double, 7> &l = d.keys.back();
+				const double s = (key[0] - l[0]) / 1000;
+				if(s > 0){
+					const double dx = key[1] - l[1], dy = key[2] - l[2], dz = key[3] - l[3];
+					double dy2 = key[4] - l[4];
+					dy2 -= 360 * std::floor((dy2 + 180) / 360);
+					d.speed = std::sqrt(dx * dx + dy * dy + dz * dz) / s;
+					d.turn = std::fabs(dy2) / s;
+				}
+			}
+			d.keys.push_back(key);
+			while(d.keys.size() > 2 && d.keys[1][0] < (now - TRACK_KEEP) * 1000)
+				d.keys.pop_front();
+		}
+		return spent;
+	}
+
+	// A drive under a moving free object (d.deck): its world the deck's boxes in its
+	// parent's frame, nothing else (simplified: the world's voxels and other objects
+	// are not met on a deck)
+	void deck_snapshot(ss_ &o, const Drive &d, const Entity &e, const double pos[3],
+			double r, double h, double reach)
+	{
+		o += "{x0=0,y0=0,z0=0,nx=0,ny=0,nz=0,cells=\"\",classes={},looks={},t=";
+		lua_lit(json::Value(motion_t()), o);
+		o += ",turned={";
+		auto fi = m_free_objects.find(d.deck);
+		if(fi != m_free_objects.end()){
+			AtRest rest(m_at_rest);
+			double od[3], op[3];
+			Turn qd, qp;
+			world_of(m_entities[d.deck], od, &qd);
+			frame_of(e.parent, op, qp);
+			double l[3] = {od[0] - op[0], od[1] - op[1], od[2] - op[2]};
+			qp.inverse().apply(l);
+			double a, b, c;
+			(qp.inverse() * qd).angles(a, b, c);
+			// The vehicle in the deck's frame, for the boxes near it
+			double vl[3] = {pos[0] - l[0], pos[1] - l[1], pos[2] - l[2]};
+			(qp.inverse() * qd).inverse().apply(vl);
+			const double m = r + reach + 2;
+			ss_ list;
+			const sv_<float> &bx = m_free_boxes[fi->second.model];
+			for(size_t i = 0; i + 6 <= bx.size(); i += 6){
+				if(vl[0] + m < bx[i] || vl[0] - m > bx[i + 3] || vl[1] + h + m < bx[i + 1] ||
+						vl[1] - m > bx[i + 4] || vl[2] + m < bx[i + 2] || vl[2] - m > bx[i + 5])
+					continue;
+				for(size_t q = 0; q < 6; q++){
+					lua_lit(json::Value((double)bx[i + q]), list);
+					list += ',';
+				}
+			}
+			if(!list.empty()){
+				o += "{";
+				for(double x : {l[0], l[1], l[2], a, b, c}){
+					lua_lit(json::Value(x), o);
+					o += ',';
+				}
+				o += "{"+list+"},"+itos(d.deck)+"},";
+			}
+		}
+		o += "}";
+		tracks_lit(o, d.scene);
+		o += "}";
+	}
+
+	// "kit:track": "<id> <gen> <t> <x> <y> <z> <yaw> <pitch> <roll> ...;..." the keys a
+	// peer in the drive's scene has not had (a new gen: all of them, from the first)
+	void send_tracks()
+	{
+		for(auto &p : m_peers){
+			if(!p.second.player)
+				continue;
+			auto &sent = m_track_sent[p.first];
+			ss_ out;
+			char buf[48];
+			for(auto &dp : m_drives){
+				const Drive &d = dp.second;
+				if(d.scene != p.second.scene || d.keys.empty())
+					continue;
+				auto &s = sent[dp.first];
+				const bool fresh = s.first != d.gen;
+				if(!fresh && s.second >= d.keys.back()[0])
+					continue;
+				if(!out.empty())
+					out += ";";
+				out += itos(dp.first)+" "+itos(d.gen);
+				for(const auto &k : d.keys){
+					if(!fresh && k[0] <= s.second)
+						continue;
+					for(int n = 0; n < 7; n++){
+						snprintf(buf, sizeof buf, " %.17g", k[n]);
+						out += buf;
+					}
+				}
+				s = std::make_pair(d.gen, d.keys.back()[0]);
+			}
+			if(out.empty())
+				continue;
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(p.first, "kit:track", out);
+			});
+		}
 	}
 
 	// The bodies' inputs stepped, the clock's worth for each, within the
@@ -15340,8 +15954,10 @@ struct Module: public interface::Module, public Interface
 			// it is, so the client steps on with the same
 			ss_ type;
 			json::Value params;
+			const uint64_t ride = b.ride;
 			body_movement(b, type, params, pi->second.scene);
-			if(type != b.type || params.stringify() != b.params.stringify()){
+			const bool changed = params.stringify() != b.params.stringify();
+			if(type != b.type || ride != b.ride || (changed && !b.ride)){
 				if(type == b.type && !type.empty()){
 					const json::Value &g = params.get("gravity");
 					log_i(MODULE, "%s's movement %s changed: gravity %s",
@@ -15350,9 +15966,36 @@ struct Module: public interface::Module, public Interface
 				}
 				const json::Value st = b.state.deepcopy();
 				put_body(bp.first, b, 0, 0, 0, 0, &st);
+			} else if(changed){
+				// [KIT_VEHICLE_MOVEMENTS] a rider's vehicle's parameters (c:set_param
+				// while driving): it predicts nothing, so no put (that unseats)
+				b.params = params;
 			}
 			if(b.type.empty())
 				continue;
+			// [KIT_VEHICLE_MOVEMENTS] A rider steps nothing: its inputs are the
+			// vehicle's, it is where its seat is
+			if(b.ride){
+				if(b.inputs.empty())
+					continue;
+				auto di = m_drives.find(b.ride);
+				if(di != m_drives.end()){
+					ss_ in = b.inputs.back().second;
+					// (its own time off: each step of the drive has its own)
+					const size_t tp = in.find(",t=");
+					if(tp != ss_::npos)
+						in = in.substr(0, tp)+"}";
+					di->second.input = in;
+				}
+				b.ack = b.inputs.back().first;
+				b.inputs.clear();
+				ride_moved(bp.first, b);
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->send(bp.first, "kit:body", "{\"ack\":"+itos(b.ack)+
+							",\"s\":"+b.state_json+"}");
+				});
+				continue;
+			}
 			const double rate = num(b.params, "rate", 60, 10, 120);
 			// A twentieth over the clock: a client's that runs a little fast
 			// is not held back
@@ -15445,15 +16088,16 @@ struct Module: public interface::Module, public Interface
 	{
 		const Type &ty = m_types[in.type];
 		return ty.usable && (ty.handlers.count("on_use") || (m_host.controls &&
-				ty.decl.get("seat").is_true() && movement_on(e)));
+				ty.decl.get("seat").is_true() && vehicle_of(e)));
 	}
 
 	// [KIT_COMPONENTS] Whether a player can hold it: a seat and a movement on it
+	// ([KIT_VEHICLE_MOVEMENTS] or on what it is under)
 	bool has_seat(const Entity &e)
 	{
 		for(const Instance &in : e.comps)
 			if(m_types[in.type].decl.get("seat").is_true())
-				return movement_on(e) != nullptr;
+				return vehicle_of(e) != nullptr;
 		return false;
 	}
 
@@ -15487,21 +16131,25 @@ struct Module: public interface::Module, public Interface
 	void seat(size_t peer, uint64_t id)
 	{
 		Body &b = m_bodies[peer];
-		Entity &e = m_entities[id];
+		// [KIT_VEHICLE_MOVEMENTS] one holder a vehicle, whichever of its seats
+		Entity *ve = vehicle_of(id);
+		if(!ve)
+			return;
+		Entity &e = *ve;
 		for(auto &o : m_bodies)
-			if(o.second.seat == id){
+			if(o.second.seat && vehicle_of(o.second.seat) == ve && o.first != peer){
 				log_i(MODULE, "Entity %s: %s is in it already", cs(itos(id)),
 						cs(m_peers[o.first].name));
 				return;
 			}
 		if(b.seat)
 			unseat(peer, b, false);
-		if(!m_seat_home.count(id))
-			m_seat_home[id] = home_of(e);
+		if(!m_seat_home.count(e.id) && !m_drives.count(e.id))
+			m_seat_home[e.id] = home_of(e);
 		b.seat = id;
 		double w[3];
 		Turn wq;
-		world_of(e, w, &wq);
+		world_of(m_drives.count(e.id) ? m_entities[id] : e, w, &wq);
 		json::Value st = json::object(), pos = json::array();
 		pos.append(w[0]);
 		pos.append(w[1] - 0.5);
@@ -15517,14 +16165,62 @@ struct Module: public interface::Module, public Interface
 	// standing; put: the client told
 	void unseat(size_t peer, Body &b, bool put = true)
 	{
-		const uint64_t id = b.seat;
+		const uint64_t id = b.seat, ride = b.ride;
 		b.seat = 0;
-		auto it = m_entities.find(id);
+		b.ride = 0;
 		log_i(MODULE, "%s leaves the seat of entity %s", cs(m_peers[peer].name),
 				cs(itos(id)));
-		if(!put || it == m_entities.end())
+		// The drive's input let go
+		auto di = m_drives.find(ride);
+		if(di != m_drives.end())
+			di->second.input.clear();
+		Entity *ve = vehicle_of(id);
+		if(!put || !ve)
 			return;
-		const Entity &e = it->second;
+		// [KIT_VEHICLE_MOVEMENTS] Off a steered one's seat: a metre to the seat's
+		// right, standing in the frame of the free object it is on
+		if(ride){
+			const Entity &se = m_entities[id];
+			uint64_t deck = 0;
+			for(auto pi = m_entities.find(id); pi != m_entities.end() && !deck;
+					pi = m_entities.find(pi->second.parent))
+				if(m_free_objects.count(pi->first))
+					deck = pi->first;
+			double w[3];
+			Turn q;
+			world_of(se, w, &q);
+			const double a = q.yaw() * 3.14159265358979323846 / 180;
+			w[0] += std::cos(a);
+			w[2] -= std::sin(a);
+			json::Value st = json::object(), pos = json::array();
+			pos.append(w[0]);
+			pos.append(w[1] - 0.45);
+			pos.append(w[2]);
+			st.set("pos", pos);
+			st.set("yaw", 0.0);
+			if(deck){
+				// The feet in the deck's frame: the deck's top under them
+				double o[3], l[3];
+				Turn dq;
+				world_of(m_entities[deck], o, &dq);
+				for(int k = 0; k < 3; k++)
+					l[k] = w[k] - o[k];
+				dq.inverse().apply(l);
+				l[1] -= 0.45;
+				json::Value at = json::array(), vel = json::array();
+				for(int k = 0; k < 3; k++){
+					at.append(l[k]);
+					vel.append(0.0);
+				}
+				st.set("frame", (int64_t)deck);
+				st.set("at", at);
+				st.set("vel", vel);
+				st.set("ground", true);
+			}
+			put_body(peer, b, 0, 0, 0, 0, &st);
+			return;
+		}
+		const Entity &e = *ve;
 		double w[3];
 		Turn wq;
 		world_of(e, w, &wq);
@@ -15573,6 +16269,7 @@ struct Module: public interface::Module, public Interface
 			place_nodes(e.id);
 		}
 		m_seat_home.clear();
+		m_play_params.clear();
 		// [KIT_CARRY_ATTACH] nothing on a player past Stop
 		sv_<uint64_t> on;
 		for(auto &a : m_attached)
@@ -15697,7 +16394,7 @@ struct Module: public interface::Module, public Interface
 			}
 			// [KIT] stage 4h: a seat taken
 			if(!seated && m_host.controls && m_types[in.type].decl.get("seat").
-					is_true() && movement_on(e2) && m_bodies[peer].put &&
+					is_true() && vehicle_of(e2) && m_bodies[peer].put &&
 					m_bodies[peer].seat != id){
 				seat(peer, id);
 				seated = any = true;
@@ -20726,6 +21423,9 @@ struct Module: public interface::Module, public Interface
 			return;
 		m_session.running = true;
 		m_motion_base = now_us();
+		// [KIT_VEHICLE_MOVEMENTS] steered from their rows again, play's parameters gone
+		m_drives.clear();
+		m_play_params.clear();
 		m_session.by = by;
 		m_session.round.clear();
 		// The last Stop's discarded builds are no longer to keep
@@ -22261,14 +22961,22 @@ struct Module: public interface::Module, public Interface
 				why = in->type+" has no parameter \""+param.substr(0, 64)+"\"";
 				return false;
 			}
-			const ss_ bad = check_param(decl, j.get("value"));
+			// [KIT_WAVE_PIVOT_CENTER] "center": true sets a centre button's parameter
+			// to the object's centre
+			const bool centre = j.get("center").is_true();
+			if(centre && jstr(decl, "button") != "center"){
+				why = in->type+"'s "+param+" has no centre";
+				return false;
+			}
+			const json::Value value = centre ? centre_of(*e) : j.get("value");
+			const ss_ bad = check_param(decl, value);
 			if(!bad.empty()){
 				why = in->type+"'s "+param+" is "+bad;
 				return false;
 			}
 			const size_t ci = in - &e->comps[0];
 			Entity copy = *e;
-			copy.comps[ci].params.set(param, j.get("value"));
+			copy.comps[ci].params.set(param, value);
 			// A prefab copy's own value from now on, kept as the prefab
 			// changes ([KIT_GENERATORS] a generator's child's, as it builds
 			// again; [KIT_PREFAB_ROOT] a copy's members are its root's children
@@ -22277,7 +22985,7 @@ struct Module: public interface::Module, public Interface
 				copy.comps[ci].overrides.insert(param);
 			change.push_back(std::make_pair(e->id, entity_json(copy)));
 			what = "set "+itos(e->id)+"'s "+in->type+" "+param+" to "+
-					j.get("value").stringify();
+					value.stringify();
 			return true;
 		}
 		// [KIT] stage 4l {"op": "link_visible", "id", "output", "to", "input",
@@ -22378,6 +23086,21 @@ struct Module: public interface::Module, public Interface
 		return false;
 	}
 
+	// [KIT_WAVE_PIVOT_CENTER] A placed prefab's centre in its root's frame: the middle
+	// of its voxels' box (cells' middles at at...at+size-1); none: its root's place
+	json::Value centre_of(const Entity &e)
+	{
+		json::Value c = json::array();
+		const json::Value *pf = e.prefab.is_object() ? prefab(jstr(e.prefab, "of")) :
+				nullptr;
+		const json::Value &vx = pf ? pf->get("voxels") : json::Value();
+		const bool ok = vx.is_object() && pos_ok(vx.get("at")) && pos_ok(vx.get("size"));
+		for(unsigned k = 0; k < 3; k++)
+			c.append(ok ? vx.get("at").at(k).as_number() +
+					(vx.get("size").at(k).as_number() - 1) / 2 : 0.0);
+		return c;
+	}
+
 	// [KIT_COMPONENTS] {"op": "add_component", "id", "type"} and {"op":
 	// "remove_component", "id", "comp"}: a component without a place on an entity, or
 	// off it. A type once an entity, so (entity, type) names a component whatever is
@@ -22439,27 +23162,25 @@ struct Module: public interface::Module, public Interface
 				why = "entity "+itos(e->id)+" has a movement: "+mv->type;
 				return false;
 			}
-			// simplified: a free object's model and shape go where its row says at an
-			// edit, and clients are told once; a steered pose in the time stamps'
-			// scheme is stage 4r6's, which takes this out
-			if(is_free(*e)){
-				why = "a free object is not driven yet (a stamped copy's root is)";
-				return false;
-			}
 		}
-		if(type == WAVE_TYPE && !is_root(*e)){
+		if((type == WAVE_TYPE || type == COURSE_TYPE) && !is_root(*e)){
 			why = type+" goes on a placed prefab's root";
 			return false;
 		}
 		Instance in;
 		in.type = type;
 		const json::Value &decl = m_types[type].decl.get("params");
+		what = "added "+type+" to "+itos(e->id);
 		if(decl.is_object())
-			for(json::Iterator it(decl); it; ++it)
-				in.params.set(it.key(), (*it).get("default"));
+			for(json::Iterator it(decl); it; ++it){
+				// [KIT_WAVE_PIVOT_CENTER] a centre button's parameter starts there
+				const bool c = jstr((*it), "button") == "center";
+				in.params.set(it.key(), c ? centre_of(*e) : (*it).get("default"));
+				if(c)
+					what += ", its "+it.key()+" "+in.params.get(it.key()).stringify();
+			}
 		copy.comps.push_back(in);
 		change.push_back(std::make_pair(e->id, entity_json(copy)));
-		what = "added "+type+" to "+itos(e->id);
 		return true;
 	}
 
@@ -22817,6 +23538,11 @@ struct Module: public interface::Module, public Interface
 		std::map<size_t, Body> bodies;
 		sm_<size_t, ss_> controls_sent;
 		std::map<uint64_t, std::array<double, 6>> seat_home;
+		// [KIT_VEHICLE_MOVEMENTS]
+		std::map<uint64_t, Drive> drives;
+		std::map<uint64_t, json::Value> motions;
+		std::map<size_t, std::map<uint64_t, std::pair<int64_t, double>>> track_sent;
+		std::map<uint64_t, std::map<ss_, json::Value>> play_params;
 		std::map<uint64_t, Attach> attached;
 		std::set<ss_> action_names;
 		ss_ actions_sent;
@@ -22872,6 +23598,10 @@ struct Module: public interface::Module, public Interface
 		swap(m_free_models, c.free_models);
 		swap(m_boxes_sent, c.boxes_sent);
 		swap(m_seat_home, c.seat_home);
+		swap(m_drives, c.drives);
+		swap(m_motions, c.motions);
+		swap(m_track_sent, c.track_sent);
+		swap(m_play_params, c.play_params);
 		swap(m_attached, c.attached);
 		swap(m_action_names, c.action_names);
 		swap(m_actions_sent, c.actions_sent);

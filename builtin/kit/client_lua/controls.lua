@@ -114,6 +114,35 @@ function M.seated()
 	return s > 0 and s or nil
 end
 
+-- [KIT_VEHICLE_MOVEMENTS] What a seat held drives: it or what it is on
+function M.vehicle_of(seat)
+	return C.ctl and tonumber(C.ctl.vehicle) or seat
+end
+-- Whether a node is the vehicle held or under it (the body meets none of them)
+local function on_vehicle(id, n)
+	local v = M.seated() and M.vehicle_of(M.seated())
+	for _ = 1, 17 do
+		if not v or not n then
+			return false
+		end
+		if id == v then
+			return true
+		end
+		local pv = n.node:GetVar("kit_parent")
+		id = pv:IsEmpty() and 0 or pv:GetInt()
+		n = P.nodes[id]
+	end
+	return false
+end
+M.on_vehicle = on_vehicle
+
+-- [KIT_VEHICLE_MOVEMENTS] The steered vehicle ridden (its id; nil: none): the server
+-- steps it, this client sends its inputs and draws it from its track
+function M.riding()
+	local r = C.ctl and tonumber(C.ctl.ride) or 0
+	return r > 0 and r or nil
+end
+
 -- ---- The world: this client's voxels (not loaded: solid), the solid
 -- looks (the seat held none), a heightmap's samples
 -- ([KIT_VOXEL_FORMAT]) a shape's class is its facing's too: keyed by the
@@ -151,10 +180,9 @@ local function world()
 	local reg = voxelworld.get_voxel_registry()
 	local boxes = {}
 	local moving_looks = nil
-	local seat = M.seated()
 	for id, n in pairs(P.nodes) do
 		local show = type(n.show) == "table" and n.show or {}
-		if type(show.look) == "table" and id ~= seat and not show.player then
+		if type(show.look) == "table" and not show.player and not on_vehicle(id, n) then
 			local on = show.look.state and K.value(n, show.look.state) == true
 			local links = M.links_of(id, n)
 			local r = links and n.rest
@@ -260,6 +288,10 @@ local function floor_ready()
 	if C.ctl and C.ctl.hm and heightmap.terrain then
 		return true
 	end
+	-- [KIT_VEHICLE_MOVEMENTS] put on a deck (out of a seat): the deck's boxes are there
+	if C.s and C.s.frame then
+		return true
+	end
 	local v = voxelworld.get_static_voxel(magic.Vector3(p[1], p[2] - 0.6,
 			p[3]))
 	return voxelworld.get_voxel_registry():id_of(v) ~= 0
@@ -303,6 +335,12 @@ buildat.sub_packet("kit:body", function(data)
 		return
 	end
 	local ack = tonumber(b.ack) or 0
+	-- [KIT_VEHICLE_MOVEMENTS] Riding: nothing predicted, the seat is where it is drawn
+	if M.riding() then
+		C.acks = C.acks + 1
+		C.pending = {}
+		return
+	end
 	local before = pos_of(C.s)
 	local keep = {}
 	for _, q in ipairs(C.pending) do
@@ -372,6 +410,15 @@ local function log_body()
 				local a, q = n.position, n.rotation
 				parts[#parts + 1] = string.format("%d node %.4f,%.4f,%.4f turn "
 						.. "%.5f,%.5f,%.5f,%.5f", o.id, a.x, a.y, a.z, q.w, q.x, q.y, q.z)
+			end
+		end
+		-- [KIT_VEHICLE_MOVEMENTS] and the steered entities' nodes (a turret)
+		for _, o in ipairs(C.ctl and type(C.ctl.steered) == "table" and C.ctl.steered or {}) do
+			local n = P.nodes[o[1]]
+			if n then
+				local a, q = n.node.worldPosition, n.node.worldDirection
+				parts[#parts + 1] = string.format("%d entity %.4f,%.4f,%.4f facing %.4f,%.4f,%.4f",
+						o[1], a.x, a.y, a.z, q.x, q.y, q.z)
 			end
 		end
 		log:info(table.concat(parts, "; "))
@@ -445,6 +492,14 @@ local function update_turned()
 			l[#l + 1] = {o[2], o[3], o[4], o[5], o[6], o[7], object_boxes[o[1]], o[8], li}
 		end
 	end
+	-- [KIT_VEHICLE_MOVEMENTS] the steered ones that are no free object: their nodes
+	-- moved as an object's members are
+	local st = C.ctl and C.ctl.steered
+	for _, o in ipairs(type(st) == "table" and st or {}) do
+		if type(o[2]) == "table" and #o[2] > 0 then
+			links[o[1]] = o[2]
+		end
+	end
 	-- (what was moved and is no more goes back in M.moving_tick)
 	C.gone_nodes = C.gone_nodes or {}
 	for _, o in ipairs(C.moving_nodes) do
@@ -490,6 +545,45 @@ buildat.sub_packet("kit:clock", function(data)
 	end
 end)
 
+-- [KIT_VEHICLE_MOVEMENTS] A steered one's keys (move.lua's M.tracks), as kit.cpp's
+-- send_tracks: "<id> <gen> <t> <x> <y> <z> <yaw> <pitch> <roll>...;..." (a new gen
+-- starts it over); kept for 5 s
+C.track_gen = {}
+buildat.sub_packet("kit:track", function(data)
+	for part in data:gmatch("[^;]+") do
+		local nums = {}
+		for v in part:gmatch("%S+") do
+			nums[#nums + 1] = tonumber(v)
+		end
+		local id, gen = nums[1], nums[2]
+		if id and gen then
+			local k = MV.tracks[id]
+			if C.track_gen[id] ~= gen or not k then
+				k = {}
+				MV.tracks[id] = k
+				C.track_gen[id] = gen
+				log:info("kit: a track for entity " .. id)
+			end
+			for i = 3, #nums - 6, 7 do
+				k[#k + 1] = {nums[i], nums[i + 1], nums[i + 2], nums[i + 3], nums[i + 4],
+					nums[i + 5], nums[i + 6]}
+			end
+			local last = k[#k] and k[#k][1] or 0
+			local drop = 0
+			while drop + 2 < #k and k[drop + 2][1] < last - 5000 do
+				drop = drop + 1
+			end
+			if drop > 0 then
+				local n = {}
+				for i = drop + 1, #k do
+					n[#n + 1] = k[i]
+				end
+				MV.tracks[id] = n
+			end
+		end
+	end
+end)
+
 local function shared_time()
 	return (C.clock_off or 0) + buildat.get_time_us() / 1e6 * (C.clock_rate or 1)
 end
@@ -529,7 +623,7 @@ end
 -- A link's change at the draw's time, once a frame
 local function link_now(l)
 	if l.now_t ~= C.draw_t then
-		local xt, yt, zt, _, wp, wy, wr = MV.link_at(l, C.draw_t)
+		local xt, yt, zt, _, wp, wy, wr, ky, kp, kr = MV.link_at(l, C.draw_t)
 		if not l.q0 then
 			l.q0 = magic.Quaternion(tonumber(l[5]) or 0, tonumber(l[4]) or 0, tonumber(l[6]) or 0)
 			local q = l.q0
@@ -537,7 +631,15 @@ local function link_now(l)
 		end
 		l.now_t = C.draw_t
 		l.xt, l.yt, l.zt = xt, yt, zt
-		l.d = l.q0 * magic.Quaternion(wp, wy, wr) * l.q0i
+		if ky then
+			-- [KIT_VEHICLE_MOVEMENTS] steered: its parent's frame, its track's turn there
+			local f = l[7].frame
+			l.qf = l.qf or magic.Quaternion(tonumber(f[5]) or 0, tonumber(f[4]) or 0,
+					tonumber(f[6]) or 0)
+			l.d = l.qf * magic.Quaternion(kp, ky, kr) * magic.Quaternion(wp, wy, wr) * l.q0i
+		else
+			l.d = l.q0 * magic.Quaternion(wp, wy, wr) * l.q0i
+		end
 	end
 	return l
 end
@@ -849,10 +951,12 @@ end
 
 local go_next = nil -- a target to send in the next step
 local function gather()
-	local f, r, jump = 0, 0, 0
+	local f, r, jump, down = 0, 0, 0, 0
 	if walking() and not paused() and not M.waiting() and
 			not (ui_utils.clicks_wanted() and
 			not M.looking()) then
+		-- [KIT_VEHICLE_MOVEMENTS] down (an airship's descent)
+		if key("down") then down = 1 end
 		if key("forward") then f = f + 1 end
 		if key("back") then f = f - 1 end
 		if key("right") then r = r + 1 end
@@ -877,7 +981,7 @@ local function gather()
 	f = math.max(-1, math.min(1, f))
 	r = math.max(-1, math.min(1, r))
 	local i = {f = fmt(f, 3), r = fmt(r, 3), yaw = fmt(input_yaw() % 360, 2),
-		jump = jump, go = 0, tx = 0, ty = 0, tz = 0}
+		jump = jump, go = 0, tx = 0, ty = 0, tz = 0, down = down}
 	if go_next then
 		i.go, i.tx, i.ty, i.tz = 1, fmt(go_next[1], 2), fmt(go_next[2], 2),
 				fmt(go_next[3], 2)
@@ -1469,19 +1573,20 @@ magic.SubscribeToEvent("Update", function(_, data)
 		C.abar.visible = not E.editing and #M.world_actions() > 0
 	end
 	-- The steps
-	if C.s and not C.ready and floor_ready() then
+	local riding = M.riding()
+	if C.s and not C.ready and (riding or floor_ready()) then
 		C.ready = true
 		log:info("player physics enabled")
 	end
 	local step_len = 1 / rate()
-	if C.s and C.ready and C.def then
+	if C.s and C.ready and (C.def or riding) then
 		C.acc = C.acc + dt
 		local n = 0
 		local w = nil
 		while C.acc >= step_len and n < 8 do
 			C.acc = C.acc - step_len
 			n = n + 1
-			w = w or world()
+			w = w or (not riding and world() or nil)
 			C.prev = pos_of(C.s)
 			C.prev_at = type(C.s.at) == "table" and {C.s.at[1], C.s.at[2], C.s.at[3]} or nil
 			C.prev_frame = C.s.frame
@@ -1493,15 +1598,18 @@ magic.SubscribeToEvent("Update", function(_, data)
 				C.last_t = i.t / 1000
 			end
 			C.seq = C.seq + 1
-			step(C.s, i, w)
-			C.pending[#C.pending + 1] = {C.seq, i}
+			if not riding then
+				step(C.s, i, w)
+				C.pending[#C.pending + 1] = {C.seq, i}
+			end
 			-- [KIT_PLAYER_MODEL] and the pitch, the swings and the dig
 			-- others see on this body
 			C.out[#C.out + 1] = string.format("%d %s %s %s %d %d %s %s %s " ..
 					"%s %d %d", C.seq, i.f, i.r, i.yaw, i.jump, i.go, i.tx, i.ty,
 					i.tz, fmt(C.pitch, 1), M.pose_swings or 0,
 					M.dig_progress and M.dig_progress() and 1 or 0) ..
-					(i.t and string.format(" %.0f", i.t) or "")
+					(i.t and string.format(" %.0f", i.t) or (i.down == 1 and " 0" or "")) ..
+					(i.down == 1 and " 1" or "")
 			route_tick()
 		end
 		if C.acc > step_len then
@@ -1525,6 +1633,16 @@ magic.SubscribeToEvent("Update", function(_, data)
 		C.was_frame = fr
 		log:info("kit: the body's frame: " .. tostring(fr or "the world"))
 	end
+	-- [KIT_VEHICLE_MOVEMENTS] Riding: the body where the seat is drawn
+	local sn = riding and C.s and P.nodes[M.seated()]
+	if sn then
+		local p = sn.node.worldPosition
+		C.s.pos = {p.x, p.y - 0.5, p.z}
+		local d = sn.node.worldDirection
+		C.s.yaw = math.deg(math.atan2(d.x, d.z)) % 360
+		C.s.frame, C.s.at = nil, nil
+		C.prev, C.prev_yaw = C.s.pos, C.s.yaw
+	end
 	local at = body_at(dt, C.ready and C.acc / step_len or 1)
 	C.draw = at
 	if C.s and tonumber(C.s.yaw) then
@@ -1534,8 +1652,9 @@ magic.SubscribeToEvent("Update", function(_, data)
 	-- The seat held drawn where it is predicted
 	P.pose = {}
 	local seat = M.seated()
-	if seat and at then
-		P.pose[seat] = {at[1], at[2] + 0.5, at[3], C.draw_yaw or 0}
+	if seat and at and not riding then
+		-- [KIT_VEHICLE_MOVEMENTS] the vehicle the seat is on or under
+		P.pose[M.vehicle_of(seat)] = {at[1], at[2] + 0.5, at[3], C.draw_yaw or 0}
 	end
 	local mode = camera_mode()
 	if at then
