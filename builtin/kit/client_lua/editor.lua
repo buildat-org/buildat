@@ -3049,6 +3049,8 @@ magic.SubscribeToEvent("command_seq:kit_cam_where", function(_, data)
 	local p = S.pos or {x = 0, y = 0, z = 0}
 	log:info(string.format("kit editor: the 3D camera at %.2f %.2f %.2f "
 			.. "(%s)", p.x, p.y, p.z, data:GetString("Param")))
+	log:info(string.format("kit editor: the plan %.2f across (%s)", S.span or 0,
+			data:GetString("Param")))
 end)
 
 -- A check's look for a handle by its name ("+y", "-x"): where it is on
@@ -3125,6 +3127,11 @@ inspector_window = function()
 	end
 	if S.cat_top then
 		S.cat_top, IV.y = nil, 0
+	end
+	-- [KIT_TOUCH_RULES_INSPECTOR] Another entity's sheet starts at its head: the
+	-- last one's scroll hid kit/game_rules' chips, past the last sheet's rows
+	if IV.of ~= S.primary then
+		IV.of, IV.y = S.primary, 0
 	end
 	IV.view = nil
 	drop("inspector")

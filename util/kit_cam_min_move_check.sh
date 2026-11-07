@@ -10,13 +10,67 @@
 #     one out at least 1 back (the wheel used to stop there);
 #   - a middle drag of 200 pixels pans it at least as a point 6 away
 #     grabbed would.
+# [KIT_WEB_WHEEL_TENTHS] With "web", in headless Chrome: one notch of the wheel,
+# 100 CSS pixels, which the web's SDL counts as 10, is one notch in the 2D plan
+# (span 50 to 40) and in the 3D view (1 to 2 cells along the look, not 10).
 #   util/kit_cam_min_move_check.sh
+#   util/kit_cam_min_move_check.sh web
 set -u
 . "$(dirname "$0")/check_lib.sh"
 export BUILDAT_WORKBENCH_PROJECT=world
 here=$(cd "$(dirname "$0")/.." && pwd)
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
+fi
+if [ "${1:-}" = web ]; then
+	check_tmp kit_cam_wheel_web; t=$CHECK_TMP
+	cat > "$t/steps.json" <<'J'
+[
+	["nav", "${URL}"],
+	["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
+	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
+	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
+	["click", "Button", "Don't add"], ["frames", 3],
+	["waitlog", "player physics enabled", 120],
+	["waitlog_any", "kit editor: edit rights: yes", 10],
+	["waitlog_any", "pause: the menu shown", 10], ["frames", 3],
+	["click", "Button", "Edit*"], ["waitlog", "kit editor: state: 1 entities", 20],
+	["event", "kit_plan 0 0 50 0"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
+	["mouse", 500, 400], ["frames", 2],
+	["event", "kit_cam_where 2d before"], ["sync", 5000],
+	["wheel", 500, 400, -100], ["frames", 3],
+	["event", "kit_cam_where 2d after"], ["sync", 5000],
+	["event", "kit_cam3d 4 -3 0 4 -3 10"], ["waitlog", "kit editor: the view is 3D", 10], ["frames", 3],
+	["mouse", 500, 400], ["frames", 2],
+	["event", "kit_cam_where 3d before"], ["sync", 5000],
+	["wheel", 500, 400, -100], ["frames", 3],
+	["event", "kit_cam_where 3d after"], ["sync", 5000]
+]
+J
+	WEB_DRIVE_VIEWPORT=1024x700@1 "$here/util/web_drive.sh" chrome workbench \
+		"$t/steps.json" "$t/out" > "$t/drive.txt" 2>&1 ||
+		fail "the web drive ($(tail -2 "$t/drive.txt"), $t/out)"
+	c=$t/out/page.log
+	grep -a 'kit editor: the plan .* across\|the 3D camera at' "$c" | grep -a '(.d ' |
+		sed 's/^.*kit editor: /  /'
+	span() { grep -aoP "the plan \K\S+(?= across \(2d $1\))" "$c" | tail -1; }
+	z3d() { grep -aoP "the 3D camera at \S+ \S+ \K\S+(?= \(3d $1\))" "$c" | tail -1; }
+	s0=$(span before) s1=$(span after) z0=$(z3d before) z1=$(z3d after)
+	[ -n "$s0" ] && [ -n "$s1" ] && [ -n "$z0" ] && [ -n "$z1" ] ||
+		fail "no plan spans or camera places ($c)"
+	awk -v a="$s0" -v b="$s1" 'BEGIN { exit !(a == 50 && b > 39.9 && b < 40.1) }' ||
+		fail "one notch in the plan: span $s0 -> $s1, not 50 -> 40"
+	# 0.8 ^ 1 of 10 ahead (nothing hit) or a cell's least; ten notches went 8.9 or 10
+	awk -v a="$z0" -v b="$z1" 'BEGIN { d = b - a; exit !(d >= 0.9 && d <= 2.1) }' ||
+		fail "one notch in 3D: z $z0 -> $z1, not 1 to 2 cells"
+	echo "PASS: in the web client a notch of the wheel zooms the plan and moves the 3D camera by one notch"
+	exit 0
 fi
 check_tmp kit_cam_min_move; t=$CHECK_TMP
 cd "$here/Build"

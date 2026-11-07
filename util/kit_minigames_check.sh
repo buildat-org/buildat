@@ -13,6 +13,9 @@
 # second arena (no countdown, a 10 s round) and two teams of its own
 # (Green, Yellow): the session copies them, and that arena stays idle
 # there (only the one that started it runs a round), its teams nobody's.
+# A link across the scenes, from a kit/logic in the first scene into Green's
+# "join", set off by kitboss: the team refuses them itself (the Try op refuses
+# another scene's entity before it gets there).
 # Then:
 #   1. kitboss in the zone waits alone; kitbob joins (the second): the
 #      countdown starts; kitbob leaves (quits): it is cancelled.
@@ -70,7 +73,7 @@ set_() # <id> <param> <value> <undo count after>
 }
 # The ids: 3 the World, the prefab's root 4, 5 arena, 6 Red, 7 Blue, 8 and 9
 # their bases, 10 and 11 their buttons; 12 the spawner; 13 the scene
-# "other", 14 its arena, 15 and 16 its teams
+# "other", 14 its arena, 15 and 16 its teams; 17 a logic in the first scene
 {
 	cat <<'EOF'
 wait_log_any 60000 Joined as kitboss
@@ -111,9 +114,16 @@ EOF
 	cat <<'EOF'
 event kit_edit {"op": "scene", "name": "world"}
 wait_log 30000 kit editor: in the scene world of world, other
+EOF
+	edit '{"op": "place", "type": "kit/logic", "pos": [0, 1, 0]}' 22
+	set_ 17 mode '"or"' 23
+	edit '{"op": "link", "id": 17, "comp": 0, "output": "on", "to": 15, "input": "join"}' 24
+	cat <<'EOF'
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
 event kit_edit {"op": "try", "id": 15, "comp": 0, "input": "join"}
+wait_log 10000 entity 15 is in the scene other
+event kit_edit {"op": "try", "id": 17, "comp": 0, "input": "a"}
 wait_log 120000 kit editor: in session 1 game
 keypress F6
 wait_log 10000 kit editor: edit mode on

@@ -22,21 +22,19 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 b="$here/Build/bin/buildat"
-t=$(mktemp -d)
-pid=
-trap '[ -n "$pid" ] && kill $pid 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf "${t:?}"' EXIT
-fail(){ echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
+check_tmp aitta_review; t=$CHECK_TMP
 
 cd "$here/Build"
 start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
 	fail "Aitta did not start"
-pid=$SERVER_PID
+CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
 A=http://127.0.0.1:$P
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "no setup code"
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
+fp=$(aitta_fp "$t/pub")
 
 admin(){ env BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin \
 	BUILDAT_AITTA_PASSWORD=checkpass BUILDAT_AITTA_CODE=$code "$@"; }
@@ -128,7 +126,7 @@ click Button "Playtest"
 wait_log 10000 Asking the user about $A
 delay 1000
 click Button "Accept"
-wait_log 20000 playtest: installed review:tester.pt@1.0.1
+wait_log 20000 playtest: installed review:$fp.pt@1.0.1
 wait_log 60000 demo_board_game/init.lua loaded
 delay 2000
 screenshot $t/running.png
@@ -140,7 +138,7 @@ grep -a "demo_board_game/init.lua loaded" "$t/pt.log" | grep -aqv "command: \\|w
 	fail "the playtest did not start ($(grep -a "playtest\|start_local" "$t/pt.log" | tail -2))"
 grep -aq "Command sequence complete" "$t/pt.log" ||
 	fail "the playtest drive ($(grep -a "Command seq\|click:\|aitta: \|playtest" "$t/pt.log" | tail -4))"
-dir=$(find "$t/cl_admin" -path "*/review/tester__pt/1.0.1" -type d)
+dir=$(find "$t/cl_admin" -path "*/review/${fp}__pt/1.0.1" -type d)
 [ -n "$dir" ] || fail "nothing under <user>/review"
 [ -f "$dir/.aitta_from" ] || fail "no .aitta_from"
 
@@ -153,7 +151,7 @@ wait_log 5000 rows for "remove"
 delay 500
 screenshot $t/tile.png
 keypress Return
-wait_log 10000 playtest: removed review:tester.pt@1.0.1: true
+wait_log 10000 playtest: removed review:$fp.pt@1.0.1: true
 delay 1000
 text apps from aitta
 wait_log 5000 apps from aitta"
