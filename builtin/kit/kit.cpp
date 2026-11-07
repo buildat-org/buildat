@@ -15424,6 +15424,12 @@ struct Module: public interface::Module, public Interface
 			return refuse("nothing on it is usable");
 		log_i(MODULE, "Entity %s used by %s", cs(itos(id)),
 				cs(m_peers[peer].name));
+		// [KIT_GOALS] a use, as a world event: kit/goal's "use" is done by it
+		json::Value ev = json::object();
+		ev.set("kind", ss_("use"));
+		ev.set("entity", (int64_t)id);
+		ev.set("player", (int64_t)player_id(by));
+		fire_event(scene, ev, by);
 	}
 
 	// ---- [KIT_TOOLS_1] (stage 7c's first part) Tools and weapons: item

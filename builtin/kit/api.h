@@ -266,6 +266,7 @@ namespace interface
 // keeps 1500 particles at most and drops what is past that.
 // World events: `events = "<a string parameter>"` in a type and on_event(c,
 // ev, by) on every instance in the scene whose parameter names the kind:
+// [KIT_GOALS] "use" (ev.entity the object a player used, ev.player),
 // "dig", "place" (ev.pos, ev.voxels
 // {material}, ev.player), "hit" (ev.pos at the target's body, ev.player a hit
 // player's id, ev.from where it came from, ev.dir the way its spray goes:
@@ -552,6 +553,13 @@ namespace interface
 //   state is true (none: always): a dot and its label `lift` over it,
 //   over the world (seen through walls), at the screen's edge while it
 //   is off the screen or behind the view, following the entity.
+//   [KIT_GOALS] on = false: not drawn (a bool parameter's). arrow: the label
+//   gets a <, >, ^ or v the way to it at the screen's edge. kind "use": at
+//   the entity `target` names instead (its own place while it has none);
+//   kind "reach": at the middle of the box of cells `box` from its own. A
+//   UI's `stack` (kit/goal's): the shown ones of one anchor and place go
+//   under each other (over, at a bottom anchor), a hidden one or one with no
+//   text leaving no gap, by order then id.
 // `by` is who caused it, "player:<name>" or "app", carried along the links
 // it sets off and kept with a timer. Handlers run only while the server
 // is Running (below).

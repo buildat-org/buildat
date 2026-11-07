@@ -483,7 +483,7 @@ end
 NT.STYLE_KEYS = {"style", "form", "direction", "color", "background", "border",
 	"size", "blink_below", "width", "height"}
 NT.STYLE_PREFIX = {["kit/game_rules"] = "health_", ["kit/arena"] = "hud_",
-	["kit/flag"] = "hud_"}
+	["kit/flag"] = "hud_", ["kit/goal"] = "hud_"}
 
 -- The prefix of a component with a style (nil: it has none)
 function NT.style_prefix(ctype)
@@ -1202,7 +1202,9 @@ rebuild_bar = function()
 	-- [KIT_SESSIONS_1] a private draft of the start: made, published, left
 	if kind == "draft" then
 		bar_button("Publish", nil, function()
-			send({op = "publish"})
+			NT.publish_checked("this draft", function()
+				send({op = "publish"})
+			end)
 		end)
 		bar_button("Leave draft", nil, function()
 			send({op = "leave_draft"})
@@ -1798,7 +1800,9 @@ local function new_tab(w)
 		E.package_name = s
 	end)
 	button(w, "Publish my prefabs...", function()
-		send({op = "export"})
+		NT.publish_checked("my prefabs", function()
+			send({op = "export"})
+		end)
 	end)
 end
 
@@ -2526,6 +2530,170 @@ function NT.params_form(w, e, ci, c, t, keep)
 return names
 end
 
+-- [KIT_GOALS] What the links say of the goals (kit/goal; of every scene):
+-- {warned = {id = {lines}}, list = {"<goal>: <line>"...}, final = {id = true},
+-- reachable = {id = "<line>"}}, worked out once a state. An edge is a link into
+-- a goal's activate or into anything else, whatever its output or input: a path
+-- of links, not that it can happen.
+-- simplified: "nothing activates" looks at one goal's links alone: a closed
+-- loop of goals no way in leads to is not warned of; only a named final goal's
+-- walk sees that. c:send from a script counts for nothing (a false warning)
+local function goal_of(e)
+	for _, c in ipairs(e.components or {}) do
+		if c.type == "kit/goal" then
+			return c
+		end
+	end
+end
+-- Each id's depth from `from` along `next_` ({id = {id...}})
+local function walk(next_, from)
+	local depth, queue = {[from] = 0}, {from}
+	for _, id in ipairs(queue) do
+		for _, to in ipairs(next_[id] or {}) do
+			if not depth[to] then
+				depth[to] = depth[id] + 1
+				queue[#queue + 1] = to
+			end
+		end
+	end
+	return depth
+end
+function NT.goal_check()
+	if NT.goal_checked and NT.goal_checked.state == E.state then
+		return NT.goal_checked
+	end
+	local r = {state = E.state, warned = {}, list = {}, final = {}, reachable = {}}
+	NT.goal_checked = r
+	local by, into, from_, activated = {}, {}, {}, {}
+	local all = all_entities()
+	for _, e in ipairs(all) do
+		by[e.id] = e
+	end
+	for _, e in ipairs(all) do
+		for _, c in ipairs(e.components or {}) do
+			for _, l in ipairs(c.links or {}) do
+				local to = by[l.to]
+				local is_goal = to and goal_of(to)
+				if to and l.to ~= e.id and (not is_goal or l.input == "activate") then
+					from_[e.id] = from_[e.id] or {}
+					table.insert(from_[e.id], l.to)
+					into[l.to] = into[l.to] or {}
+					table.insert(into[l.to], e.id)
+				end
+				if is_goal and l.input == "activate" and l.to ~= e.id then
+					activated[l.to] = true
+				end
+			end
+		end
+	end
+	local function warn(e, line)
+		r.warned[e.id] = r.warned[e.id] or {}
+		table.insert(r.warned[e.id], line)
+		r.list[#r.list + 1] = NT.entity_label(e) .. ": " .. line
+	end
+	-- The deepest goal in a walk, the lowest id of those
+	local function deepest(depth)
+		local best
+		for _, e in ipairs(all) do
+			local d = depth[e.id]
+			if d and goal_of(e) and (not best or d > depth[best.id]) then
+				best = e
+			end
+		end
+		return best
+	end
+	for _, e in ipairs(all) do
+		local c = goal_of(e)
+		local p = c and c.params or {}
+		if c and not activated[e.id] and p.autostart ~= true then
+			warn(e, "nothing activates it: no link to its activate, autostart off")
+		end
+		if c and p.kind == "use" and not by[tonumber(p.target) or 0] then
+			warn(e, "a use goal with no object to use (target)")
+		end
+		local fin = tonumber(p.validate_reachable) or 0
+		if c and fin ~= 0 then
+			local fe = by[fin]
+			if not (fe and goal_of(fe)) then
+				warn(e, "validate reachable names no goal")
+			else
+				r.final[fin] = true
+				local depth = walk(from_, e.id)
+				if depth[fin] then
+					r.reachable[e.id] = "Links lead from here to " ..
+							NT.entity_label(fe)
+				else
+					warn(e, "no chain of links reaches " .. NT.entity_label(fe) ..
+							": last reached " .. NT.entity_label(deepest(depth)) ..
+							", first cut off " ..
+							NT.entity_label(deepest(walk(into, fin))))
+				end
+			end
+		end
+	end
+	local said = table.concat(r.list, "\n")
+	if NT.goal_said ~= said then
+		NT.goal_said = said
+		log:info("kit editor: goal warnings: " .. #r.list)
+		for _, line in ipairs(r.list) do
+			log:info("kit editor: goal warning: " .. line)
+		end
+	end
+	return r
+end
+
+-- [KIT_GOALS] Publish: the goals' warnings listed first, go() when answered
+-- (not a refusal: the builder decides). simplified: a draft's Publish and
+-- Publish my prefabs...; the launcher's publishing of a whole app sees no
+-- composition
+-- A warning in lines of about 52 bytes: a long one otherwise sets the width of
+-- the whole inspector
+function NT.warn_text(w, line)
+	local cur = ""
+	for word in line:gmatch("%S+") do
+		if cur ~= "" and #cur + #word > 52 then
+			text(w, cur, WARN)
+			cur = word
+		else
+			cur = cur == "" and word or cur .. " " .. word
+		end
+	end
+	text(w, cur, WARN)
+end
+
+function NT.publish_checked(what, go)
+	local list = NT.goal_check().list
+	log:info("kit editor: publish " .. what .. ": " .. #list .. " goal warnings")
+	if #list == 0 then
+		return go()
+	end
+	if W.goal_dialog then
+		W.goal_dialog:Remove()
+	end
+	local d = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	W.goal_dialog = d
+	d.priority = 10
+	text(d, "Publish " .. what .. "? " .. #list .. " goal warnings:")
+	for _, line in ipairs(list) do
+		log:info("kit editor: at publish: " .. line)
+		NT.warn_text(d, line)
+	end
+	local function close()
+		d:Remove()
+		W.goal_dialog = nil
+	end
+	local r = row(d)
+	button(r, "Publish anyway", function()
+		close()
+		log:info("kit editor: published with goal warnings")
+		go()
+	end)
+	button(r, "Cancel", function()
+		close()
+		log:info("kit editor: publish cancelled")
+	end)
+end
+
 local function inspector(w, e, is_made)
 	if is_made then
 		return inspect_made(w, e)
@@ -2535,6 +2703,17 @@ local function inspector(w, e, is_made)
 		text(w, n .. " selected", DIM)
 	end
 	text(w, NT.entity_label(e))
+	-- [KIT_GOALS]
+	local gc = goal_of(e) and NT.goal_check()
+	for _, line in ipairs(gc and gc.warned[e.id] or {}) do
+		NT.warn_text(w, "Warning: " .. line)
+	end
+	if gc and gc.reachable[e.id] then
+		text(w, gc.reachable[e.id], DIM)
+	end
+	if gc and gc.final[e.id] then
+		text(w, "A final goal: drawn gold on the map", DIM)
+	end
 	-- [KIT] stage 4l: what it costs, changed in place as "kit:costs" comes
 	S.cost_text = text(w, M.cost_line(e.id), DIM)
 	S.cost_id = e.id
