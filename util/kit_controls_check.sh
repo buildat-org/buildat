@@ -6,7 +6,8 @@
 # [KIT] stage 4h, Kit's controls on Workbench, the admin (kitboss, by the
 # setup code) playing:
 #   0. util/kit_move_check.lua: the movements stepped as the box does.
-#   1. kit/walker (Kit's default): a walk and a jump, the client's
+#   1. kit/walker (Kit's default): a walk and a jump (a keypress: down and
+#      up in one frame, [KIT_TEMPLATE_ROUGH_EDGES]), the client's
 #      prediction agreeing with the server's steps (no correction); a
 #      kit/walker on the root with jump_height 0: no jump.
 #   2. kit/controls on the root, a button linked to its shake: the button
@@ -78,9 +79,7 @@ look 0 -10
 keydown W
 delay 1000
 keyup W
-keydown Space
-delay 200
-keyup Space
+keypress Space
 frames 90
 screenshot @T@/walk.png
 event kit_body
