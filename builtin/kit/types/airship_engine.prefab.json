@@ -1,0 +1,29 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "airship_engine",
+	"version": 1,
+	"entities": [
+		{
+			"id": 1,
+			"name": "engine",
+			"pos": [0, 0, 0],
+			"components": [
+				{
+					"type": "kit/part",
+					"params": {
+						"size": [0.8, 0.8, 1],
+						"color": "#505860",
+						"material": "metal"
+					}
+				},
+				{
+					"type": "kit/engine",
+					"params": {
+						"thrust": 3
+					}
+				}
+			]
+		}
+	]
+}

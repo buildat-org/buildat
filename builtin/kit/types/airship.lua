@@ -6,7 +6,14 @@
 -- slows it. Starts holding the height it was placed at, never under `floor` m over
 -- whatever is below it. Driven by whoever holds a seat on it or under it, else by
 -- its inputs throttle, steer and climb (-1...1).
--- simplified: one body round its place meets the world (body below), not its hull
+-- [KIT_AIRSHIPS] stage 3: on a ship (a free object with kit/hull) its numbers come
+-- from its parts, p.parts = {mass, thrust, lift} (kit.cpp's ship_parts(): its
+-- voxels' masses by material, its engines' thrust and lift): with `mass` set (0:
+-- not reckoned), thrust and top speed are for that mass and go down as the ship
+-- gets heavier (thrust / (mass / `mass`)); each engine's thrust adds to `thrust`
+-- and its top speed in proportion, its lift to `climb`.
+-- simplified: one body round its place meets the world (body below), not its hull;
+-- a ship's mass only slows it (no inertia in turns, no centre of mass)
 local BODY = {r = 1.5, h = 2}
 
 return {
@@ -23,6 +30,7 @@ return {
 	movement = {body = BODY, camera = "chase", touch = "drive"},
 	params = {
 		thrust = {cat = "physics", type = "number", default = 4, min = 0, max = 100},
+		mass = {cat = "physics", type = "number", default = 0, min = 0, max = 100000},
 		top_speed = {cat = "physics", type = "number", default = 10, min = 0, max = 100},
 		turn_rate = {cat = "physics", type = "number", default = 30, min = 0, max = 180},
 		climb = {cat = "physics", type = "number", default = 3, min = 0, max = 50},
@@ -49,16 +57,26 @@ return {
 		local f, r = i.f or 0, i.r or 0
 		local up = (i.jump == 1 and 1 or 0) - (i.down == 1 and 1 or 0) + (tonumber(i.climb) or 0)
 		up = up > 1 and 1 or up < -1 and -1 or up
-		local top = p.top_speed or 10
+		-- [KIT_AIRSHIPS] its parts: the mass slows it, the engines push
+		local parts = type(p.parts) == "table" and p.parts or {}
+		local base = p.thrust or 4
+		local thrust = base + (tonumber(parts.thrust) or 0)
+		local m = 1
+		if (p.mass or 0) > 0 and tonumber(parts.mass) then
+			m = parts.mass / p.mass
+			m = m > 0.5 and m or 0.5
+		end
+		local top = (p.top_speed or 10) * (base > 0 and thrust / base or 1) / m
+		top = top < 3 * (p.top_speed or 10) and top or 3 * (p.top_speed or 10)
 		if (f > 0 and along < top) or (f < 0 and along > -top / 2) then
-			along = along + (p.thrust or 4) * f * dt
+			along = along + thrust / m * f * dt
 		end
 		along = along - along * (p.drag or 0.4) * dt
 		across = across - across * (p.drag or 0.4) * 3 * dt
 		yaw = (yaw + r * (p.turn_rate or 30) * dt) % 360
 		s.yaw = yaw
 		-- The height held: moved by the climb, kept off the ground under it
-		local alt = s.alt + up * (p.climb or 3) * dt
+		local alt = s.alt + up * ((p.climb or 3) + (tonumber(parts.lift) or 0)) / m * dt
 		local d = w:down(pos[1], pos[2] + 0.5, pos[3], (p.floor or 2) + 0.5)
 		if d and up <= 0 then
 			local least = pos[2] + 0.5 - d + (p.floor or 2)

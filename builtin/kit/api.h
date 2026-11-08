@@ -401,6 +401,28 @@ namespace interface
 //   gets the copy's model as it is. Stop forgets the grids (play state).
 //   simplified: a fixed 32 cube, no sliding window; the client's aim is the
 //   boxes it has, so a cell placed and not yet rebuilt is not aimed at
+//   [KIT_AIRSHIPS] stages 3 to 5. Parts: a placer whose kit/wallet holds a
+//   part (its state "part", a prefab without voxels, 1 to 8 entities; a
+//   kit/shop with `mount` puts it there) mounts it with a place on an empty
+//   cell beside a ship's voxel (its support: below, above, then the sides):
+//   the prefab made there as children of the root, the wallet's part
+//   cleared. Mounted entities drop (removed, the owner and the shooter told
+//   by a note) as their support goes. A ship's parts sum (mass by its
+//   voxels' material group: stone 3, dirt and sand 2, leaves 0.2, else 1;
+//   thrust and lift of kit/engine under it) is the movement step's
+//   params.parts {mass, thrust, lift, engines}. Damage: a shot from a turret
+//   (not on its own ship) or a blast hits a cell; its toughness (stone 30,
+//   dirt and sand 5, leaves 2, else 10) worn down, then the cell is destroyed
+//   (kept for a repair), the rebuild through the budget; cells no longer
+//   connected to the core are debris (removed); a hit on the core loses the
+//   ship (removed; its owner's note; its shop's "lost" input). A wallet's
+//   "repair" input puts back the destroyed cells, still empty, of the ships
+//   that player owns. A kit/radar's state "contacts" lists the other ships in
+//   its scene within its range. A kit/trigger_zone with `deadly` loses a ship
+//   touching it (8 corners and the middle of its box) and is as large as a
+//   region may be.
+//   simplified: debris and dropped parts vanish; toughness and mass by
+//   material group, not per material; a part's own box is its support's
 //   A parameter type "prefab"
 //   names one; a parameter's `choices` = {...} are the values it takes;
 //   `choices_from = "biomes"` makes the inspector's a dropdown of the

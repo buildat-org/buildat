@@ -28,6 +28,7 @@
 				"type": "kit/airship",
 				"params": {
 					"thrust": 4,
+					"mass": 68,
 					"top_speed": 9,
 					"turn_rate": 35,
 					"climb": 3,

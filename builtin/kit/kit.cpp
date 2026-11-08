@@ -138,6 +138,11 @@ static const char *const COURSE_TYPE = "kit/course";
 static const char *const HULL_TYPE = "kit/hull";
 static const char *const WALLET_TYPE = "kit/wallet";
 static const char *const CORE_VOXEL = "kit/core";
+// [KIT_AIRSHIPS] stages 3-5: a ship's parts summed for its movement, its radar,
+// the zone whose `deadly` loses a ship touching it
+static const char *const ENGINE_TYPE = "kit/engine";
+static const char *const RADAR_TYPE = "kit/radar";
+static const char *const TRIGGER_TYPE = "kit/trigger_zone";
 static const size_t MAX_LINKS = 64;
 // [KIT_COMPONENTS] Components an entity has at most, by Add component
 static const size_t MAX_COMPONENTS = 16;
@@ -1325,8 +1330,20 @@ struct Module: public interface::Module, public Interface
 		// The core (kit/core): the cell connection is reckoned from (stage 4);
 		// -1: none
 		int core = -1;
+		// [KIT_AIRSHIPS] stage 3: its voxels' mass (-1: to be summed again); the
+		// parts mounted on each cell (their first entity's ids). Stage 4: the
+		// damage each cell has taken, and what each destroyed cell was (a repair
+		// puts it back)
+		double mass = -1;
+		int lo[3] = {0, 0, 0}, hi[3] = {-1, -1, -1}; // its voxels' cells, with mass
+		std::map<int, sv_<uint64_t>> mounts;
+		std::map<int, int> mounted_on; // a part's cell: the voxel it is on (a shot there hits that)
+		std::map<int, double> hurt;
+		std::map<int, OwnCell> lost;
 	};
 	std::map<uint64_t, OwnGrid> m_own;
+	// [KIT_AIRSHIPS] stage 3: the radars' contacts last made (us)
+	int64_t m_radar_at = 0;
 	// Not a session's: one budget for every ship of the server
 	int64_t m_own_rebuilt_at = 0;
 	std::map<main_context::SceneReference, std::set<ss_>> m_free_models;
@@ -2275,6 +2292,9 @@ struct Module: public interface::Module, public Interface
 		bool failed = false;
 		uint64_t deck = 0; // under a moving free object: steps on its boxes, in its frame
 		double speed = 0, turn = 0; // m/s, degrees/s: the last batch's
+		// [KIT_AIRSHIPS] a ship's: its parts as last logged, its speed as last logged
+		ss_ parts;
+		double logged_speed = -1;
 	};
 	std::map<uint64_t, Drive> m_drives;
 	int64_t m_drive_gen = 0;
@@ -2392,6 +2412,19 @@ struct Module: public interface::Module, public Interface
 			}
 			d.type = mv->type;
 			d.params = move_params(e, *mv, d.scene);
+			// [KIT_AIRSHIPS] a ship's parts summed for its movement
+			if(hull_of(e) && m_free_objects.count(e.id)){
+				const json::Value parts = ship_parts(e.id);
+				d.params.set("parts", parts);
+				const ss_ ps = parts.stringify();
+				if(ps != d.parts){
+					d.parts = ps;
+					log_i(MODULE, "[KIT_AIRSHIPS] entity %s's parts: mass %g, thrust %g, "
+							"lift %g, %i engines", cs(itos(e.id)), row_num(parts, "mass"),
+							row_num(parts, "thrust"), row_num(parts, "lift"),
+							(int)row_num(parts, "engines"));
+				}
+			}
 			// On a free object's deck: the nearest moving free root it is under
 			d.deck = 0;
 			for(auto pi = m_entities.find(e.parent); pi != m_entities.end() &&
@@ -8429,17 +8462,11 @@ struct Module: public interface::Module, public Interface
 		});
 		if(!placeable)
 			return refuse("Not a voxel to build with");
-		auto oi = m_own.find(id);
-		if(oi == m_own.end()){
-			OwnGrid g;
-			ss_ why;
-			if(!own_grid(e, g, why))
-				return refuse(why);
-			oi = m_own.emplace(id, std::move(g)).first;
-			log_i(MODULE, "[KIT_AIRSHIPS] entity %s's voxels are its own from now on "
-					"(its prefab %s's copied)", cs(itos(id)), cs(jstr(e.prefab, "of")));
-		}
-		OwnGrid &g = oi->second;
+		ss_ gwhy;
+		OwnGrid *gp = own_of(e, gwhy);
+		if(!gp)
+			return refuse(gwhy);
+		OwnGrid &g = *gp;
 		int l[3];
 		for(int k = 0; k < 3; k++){
 			l[k] = cell[k] - g.a[k];
@@ -8448,6 +8475,23 @@ struct Module: public interface::Module, public Interface
 		}
 		const int i = l[0] + OWN_SIDE * (l[1] + OWN_SIDE * l[2]);
 		OwnCell &c = g.v[i];
+		// [KIT_AIRSHIPS] stage 3: a part held (a kit/shop's with mount) goes on
+		// that face instead of a voxel
+		Instance *hw = !dig && !pi->second.editing && hull ? wallet_of(me) : nullptr;
+		if(hw && !jstr(hw->state, "part").empty()){
+			if(c.id)
+				return refuse("Taken");
+			ss_ why;
+			if(!mount_part(e, g, i, jstr(hw->state, "part"), "player:"+itos(me), why))
+				return refuse(why);
+			hw->state.set("part", "");
+			auto pe = m_entities.find(me);
+			for(size_t k = 0; pe != m_entities.end() && k < pe->second.comps.size(); k++)
+				if(&pe->second.comps[k] == hw)
+					replicate_state(pe->second, k, "part");
+			m_runtime_dirty = true;
+			return;
+		}
 		ss_ was;
 		if(dig){
 			if(!c.id)
@@ -8487,9 +8531,17 @@ struct Module: public interface::Module, public Interface
 		c.param = dig ? 0 : (uint8_t)param;
 		c.tint = dig ? 0 : (uint8_t)tint;
 		g.changed.insert(i);
+		g.mass = -1;
+		g.hurt.erase(i);
 		if(!g.dirty){
 			g.dirty = true;
 			g.since = interface::os::time_us();
+		}
+		// [KIT_AIRSHIPS] what was mounted on a dug voxel drops, and what it held to
+		// the core is debris
+		if(dig){
+			drop_mounts(id, g, {i}, "player:"+itos(me));
+			ship_destroy(id, g, {}, "player:"+itos(me), pi->second.name+"'s dig");
 		}
 		const pv::Vector3DInt32 at((int)std::floor(cw[0] + 0.5),
 				(int)std::floor(cw[1] + 0.5), (int)std::floor(cw[2] + 0.5));
@@ -8502,6 +8554,612 @@ struct Module: public interface::Module, public Interface
 			dug(peer, at.getX(), at.getY(), at.getZ(), was);
 		else
 			placed(peer, at.getX(), at.getY(), at.getZ(), voxel);
+	}
+
+	// ---- [KIT_AIRSHIPS] Stages 3 to 5 (kit_plan 4s): parts, damage, death by touch
+
+	// A free copy's own grid, its prefab's cells copied the first time (a build,
+	// a hit, its parts summed): nullptr if it can't have one (why)
+	OwnGrid* own_of(const Entity &e, ss_ &why)
+	{
+		auto oi = m_own.find(e.id);
+		if(oi != m_own.end())
+			return &oi->second;
+		OwnGrid g;
+		if(!own_grid(e, g, why))
+			return nullptr;
+		log_i(MODULE, "[KIT_AIRSHIPS] entity %s's voxels copied from its prefab %s "
+				"(its own from now on)", cs(itos(e.id)), cs(jstr(e.prefab, "of")));
+		return &m_own.emplace(e.id, std::move(g)).first->second;
+	}
+
+	// Which of its components is its kit/hull
+	size_t hull_comp(const Entity &e)
+	{
+		for(size_t k = 0; k < e.comps.size(); k++)
+			if(e.comps[k].type == HULL_TYPE)
+				return k;
+		return 0;
+	}
+
+	interface::VoxelRegistry* registry_of(const Entity &e)
+	{
+		interface::VoxelRegistry *reg = nullptr;
+		voxelworld::access(m_server, scene_of(e), [&](voxelworld::Instance *w){
+			reg = w->get_voxel_reg();
+		});
+		return reg;
+	}
+
+	// A ship voxel's mass and toughness (the damage that destroys it) by its
+	// material's group: stone is the armour.
+	// simplified: by group, not numbers of a material's own; a materials.json
+	// field each is the upgrade
+	void ship_cell_stats(interface::VoxelRegistry *reg, interface::VoxelTypeId id,
+			double &mass, double &tough)
+	{
+		mass = 1;
+		tough = 10;
+		const interface::VoxelDefinition *d = reg && id ? reg->get(id) : nullptr;
+		const world::Material *m = d ? material_named(d->name.block_name) : nullptr;
+		const ss_ g = m ? m->group : ss_();
+		if(g == "stone")
+			mass = 3, tough = 30;
+		else if(g == "dirt" || g == "sand")
+			mass = 2, tough = 5;
+		else if(g == "leaves" || g == "plant")
+			mass = 0.2, tough = 2;
+	}
+
+	// Its voxels' mass, summed again after a change, with the box they fill
+	double ship_mass(uint64_t id, OwnGrid &g)
+	{
+		if(g.mass >= 0)
+			return g.mass;
+		auto ei = m_entities.find(id);
+		interface::VoxelRegistry *reg = ei == m_entities.end() ? nullptr :
+				registry_of(ei->second);
+		const int S = OWN_SIDE;
+		g.mass = 0;
+		for(int k = 0; k < 3; k++)
+			g.lo[k] = S, g.hi[k] = -1;
+		std::map<interface::VoxelTypeId, double> masses;
+		for(int i = 0; i < S * S * S; i++){
+			const interface::VoxelTypeId v = g.v[i].id;
+			if(!v)
+				continue;
+			auto mi = masses.find(v);
+			if(mi == masses.end()){
+				double m, t;
+				ship_cell_stats(reg, v, m, t);
+				mi = masses.emplace(v, m).first;
+			}
+			g.mass += mi->second;
+			const int c[3] = {i % S, i / S % S, i / (S * S)};
+			for(int k = 0; k < 3; k++)
+				g.lo[k] = std::min(g.lo[k], c[k]), g.hi[k] = std::max(g.hi[k], c[k]);
+		}
+		return g.mass;
+	}
+
+	// [KIT_AIRSHIPS] stage 3: the query over a ship's parts its movement reads (p.parts
+	// in airship.lua): its voxels' mass by material, its engines' (kit/engine
+	// anywhere under it) thrust and lift summed.
+	// simplified: the server's only; a drive is stepped here, its rider
+	// predicting nothing (4r6), so the client needs none of it
+	json::Value ship_parts(uint64_t id)
+	{
+		json::Value p = json::object();
+		auto ei = m_entities.find(id);
+		ss_ why;
+		OwnGrid *g = ei == m_entities.end() ? nullptr : own_of(ei->second, why);
+		if(g)
+			p.set("mass", ship_mass(id, *g));
+		double thrust = 0, lift = 0;
+		int64_t engines = 0;
+		for(auto &x : m_entities){
+			if(x.first == id || !under_or(x.second, id))
+				continue;
+			for(const Instance &in : x.second.comps)
+				if(in.type == ENGINE_TYPE && in.disabled.empty()){
+					const json::Value ps = params_of(in.type, &in);
+					thrust += row_num(ps, "thrust");
+					lift += row_num(ps, "lift");
+					engines++;
+				}
+		}
+		p.set("thrust", thrust);
+		p.set("lift", lift);
+		p.set("engines", engines);
+		return p;
+	}
+
+	// A part (a prefab without voxels: kit/airship_engine...) put on a ship's
+	// empty cell i, on the face of a voxel beside it (the one under it first):
+	// made in play under the ship's root, the hull's, mounted on that voxel
+	bool mount_part(const Entity &root, OwnGrid &g, int i, const ss_ &name,
+			const ss_ &by, ss_ &why)
+	{
+		const json::Value *pf = prefab(name);
+		if(!pf || pf->get("voxels").is_object() || pf->get("entities").size() < 1 ||
+				pf->get("entities").size() > 8){
+			why = "Not a part to put on a ship: "+name;
+			return false;
+		}
+		const int S = OWN_SIDE;
+		const int x = i % S, y = i / S % S, z = i / (S * S);
+		static const int off[6][3] = {{0, -1, 0}, {0, 1, 0}, {-1, 0, 0}, {1, 0, 0},
+				{0, 0, -1}, {0, 0, 1}};
+		int on = -1;
+		for(const auto &o : off){
+			const int nx = x + o[0], ny = y + o[1], nz = z + o[2];
+			if(nx < 0 || ny < 0 || nz < 0 || nx >= S || ny >= S || nz >= S)
+				continue;
+			const int j = nx + S * (ny + S * nz);
+			if(g.v[j].id){
+				on = j;
+				break;
+			}
+		}
+		if(on < 0){
+			why = "A part goes on a face of the ship";
+			return false;
+		}
+		const size_t n = pf->get("entities").size();
+		if(made_count() + n > MAX_MADE || m_entities.size() + n > MAX_ENTITIES){
+			why = "The round has made "+itos(MAX_MADE)+" entities";
+			return false;
+		}
+		const double base[3] = {(double)(x + g.a[0]), (double)(y + g.a[1]),
+				(double)(z + g.a[2])};
+		sv_<json::Value> rows;
+		const uint64_t first = m_next_id;
+		instantiate(*pf, name, root.id, base, first, rows);
+		m_next_id = first + rows.size();
+		const size_t hc = hull_comp(root);
+		for(const json::Value &row : rows)
+			m_pending_ids.insert((uint64_t)json::jint(row, "id", 0));
+		sv_<uint64_t> made;
+		for(const json::Value &row : rows){
+			Entity e;
+			ss_ bad;
+			if(!entity_from_json(row, e, bad) || m_entities.count(e.id)){
+				log_w(MODULE, "[KIT_AIRSHIPS] a member of %s does not load: %s",
+						cs(name), cs(bad));
+				continue;
+			}
+			e.made = 'g';
+			e.maker = root.id;
+			e.maker_comp = hc;
+			m_entities[e.id] = e;
+			made.push_back(e.id);
+		}
+		m_pending_ids.clear();
+		for(uint64_t id : made){
+			Entity &e = m_entities[id];
+			for(Instance &in : e.comps){
+				const json::Value &sd = m_types[in.type].decl.get("state");
+				in.state = json::object();
+				if(sd.is_object())
+					for(json::Iterator it(sd); it; ++it)
+						in.state.set(it.key(), (*it).get("default"));
+			}
+			if(wants_node(e))
+				make_node(e);
+			for(size_t k = 0; k < e.comps.size(); k++){
+				Run r;
+				r.entity = id;
+				r.comp = k;
+				r.handler = "on_start";
+				r.by = by;
+				queue_run(r);
+			}
+		}
+		if(made.empty()){
+			why = "Not a part to put on a ship: "+name;
+			return false;
+		}
+		g.mounts[on].push_back(made[0]);
+		g.mounted_on[i] = on;
+		m_runtime_dirty = true;
+		log_i(MODULE, "[KIT_AIRSHIPS] %s mounted %s on entity %s's cell (%i,%i,%i) on "
+				"(%i,%i,%i) as %s", player_id(by) ? cs(m_entities[player_id(by)].name) :
+				cs(by), cs(name), cs(itos(root.id)),
+				x + g.a[0], y + g.a[1], z + g.a[2], on % S + g.a[0], on / S % S + g.a[1],
+				on / (S * S) + g.a[2], cs(itos(made[0])));
+		return true;
+	}
+
+	// What is mounted on those cells drops (simplified: removed, not a falling
+	// object)
+	void drop_mounts(uint64_t root, OwnGrid &g, const sv_<int> &cells, const ss_ &by)
+	{
+		sv_<uint64_t> ids;
+		for(int c : cells){
+			auto it = g.mounts.find(c);
+			if(it == g.mounts.end())
+				continue;
+			ids.insert(ids.end(), it->second.begin(), it->second.end());
+			g.mounts.erase(it);
+			for(auto mo = g.mounted_on.begin(); mo != g.mounted_on.end();)
+				mo = mo->second == c ? g.mounted_on.erase(mo) : std::next(mo);
+		}
+		auto ri = m_entities.find(root);
+		if(ids.empty() || ri == m_entities.end())
+			return;
+		const size_t hc = hull_comp(ri->second);
+		const Instance *hull = hull_of(ri->second);
+		const uint64_t owner = hull ? (uint64_t)std::max<int64_t>(0,
+				json::jint(hull->state, "owner", 0)) : 0;
+		const uint64_t shooter = player_id(by);
+		for(uint64_t id : ids){
+			if(!m_entities.count(id))
+				continue;
+			log_i(MODULE, "[KIT_AIRSHIPS] entity %s, mounted on entity %s, drops "
+					"with its voxel", cs(itos(id)), cs(itos(root)));
+			// (the owner and who did it told)
+			const ss_ note = "A part dropped: "+m_entities[id].name;
+			remove_entity(root, hc, by, id);
+			if(owner)
+				deliver(owner, "note", json::Value(note), "app", 0);
+			if(shooter && shooter != owner)
+				deliver(shooter, "note", json::Value(note), "app", 0);
+		}
+	}
+
+	// [KIT_AIRSHIPS] stage 4: damage on a ship's cells ({cell, amount}...), what a
+	// shot or a blast did: a cell past its toughness destroyed, the core hit the
+	// ship lost
+	void ship_damage(uint64_t root, const sv_<std::pair<int, double>> &hits,
+			const ss_ &by, const ss_ &what)
+	{
+		auto ei = m_entities.find(root);
+		ss_ why;
+		OwnGrid *g = ei == m_entities.end() ? nullptr : own_of(ei->second, why);
+		if(!g)
+			return;
+		interface::VoxelRegistry *reg = registry_of(ei->second);
+		sv_<int> gone;
+		for(auto &h : hits){
+			const int i = h.first;
+			if(i < 0 || i >= (int)g->v.size() || !g->v[i].id)
+				continue;
+			if(i == g->core)
+				return ship_lost(root, by, what+" hit its core");
+			double mass, tough;
+			ship_cell_stats(reg, g->v[i].id, mass, tough);
+			double &hurt = g->hurt[i];
+			hurt += h.second;
+			const int S = OWN_SIDE;
+			log_i(MODULE, "[KIT_AIRSHIPS] entity %s's cell (%i,%i,%i) takes %g from %s: "
+					"%g of %g", cs(itos(root)), i % S + g->a[0], i / S % S + g->a[1],
+					i / (S * S) + g->a[2], h.second, cs(what), hurt, tough);
+			if(hurt >= tough)
+				gone.push_back(i);
+		}
+		if(!gone.empty())
+			ship_destroy(root, *g, gone, by, what);
+	}
+
+	// Those cells gone (what each was kept for a repair), then what no longer
+	// connects to the core (6 ways, from it) as debris: gone too, with what is
+	// mounted on all of them; the model and boxes made again in the budget.
+	// simplified: debris is removed, not a falling free object (the upgrade:
+	// a free object of its cells, falling until it lands, then gone)
+	void ship_destroy(uint64_t root, OwnGrid &g, const sv_<int> &gone, const ss_ &by,
+			const ss_ &what)
+	{
+		const int S = OWN_SIDE;
+		sv_<int> all;
+		auto take = [&](int i){
+			if(!g.v[i].id)
+				return;
+			if(!g.lost.count(i))
+				g.lost[i] = g.v[i];
+			g.v[i] = OwnCell();
+			g.hurt.erase(i);
+			g.changed.insert(i);
+			all.push_back(i);
+		};
+		for(int i : gone)
+			take(i);
+		const size_t destroyed = all.size();
+		if(g.core >= 0 && g.v[g.core].id){
+			sv_<char> seen(g.v.size(), 0);
+			sv_<int> q = {g.core};
+			seen[g.core] = 1;
+			while(!q.empty()){
+				const int i = q.back();
+				q.pop_back();
+				const int c[3] = {i % S, i / S % S, i / (S * S)};
+				for(int k = 0; k < 6; k++){
+					int n[3] = {c[0], c[1], c[2]};
+					n[k / 2] += k % 2 ? 1 : -1;
+					if(n[k / 2] < 0 || n[k / 2] >= S)
+						continue;
+					const int j = n[0] + S * (n[1] + S * n[2]);
+					if(!seen[j] && g.v[j].id){
+						seen[j] = 1;
+						q.push_back(j);
+					}
+				}
+			}
+			for(int i = 0; i < S * S * S; i++)
+				if(g.v[i].id && !seen[i])
+					take(i);
+		}
+		if(all.empty())
+			return;
+		g.mass = -1;
+		if(!g.dirty){
+			g.dirty = true;
+			g.since = interface::os::time_us();
+		}
+		log_i(MODULE, "[KIT_AIRSHIPS] entity %s: %zu voxels destroyed by %s, %zu cut "
+				"off from the core (debris)", cs(itos(root)), destroyed, cs(what),
+				all.size() - destroyed);
+		drop_mounts(root, g, all, by);
+	}
+
+	// A ship lost (its core hit, a deadly zone touched): its root and all under it
+	// gone, its owner told, the shop that sold it ("lost") told
+	void ship_lost(uint64_t root, const ss_ &by, const ss_ &why)
+	{
+		auto ei = m_entities.find(root);
+		if(ei == m_entities.end() || !hull_of(ei->second))
+			return;
+		const Entity &e = ei->second;
+		const Instance *hull = hull_of(e);
+		const uint64_t owner = (uint64_t)std::max<int64_t>(0,
+				json::jint(hull->state, "owner", 0));
+		const uint64_t maker = e.made ? e.maker : 0;
+		const size_t hc = hull_comp(e);
+		log_i(MODULE, "[KIT_AIRSHIPS] entity %s is lost: %s", cs(itos(root)), cs(why));
+		if(owner)
+			deliver(owner, "note", json::Value("Your ship was lost: "+why), "app", 0);
+		if(maker && maker != root)
+			deliver(maker, "lost", json::Value((int64_t)root), by, 0);
+		remove_entity(root, hc, by, root);
+		sync_free_objects();
+	}
+
+	// The nearest ship cell (a free object with kit/hull, not skip) along a ray (d
+	// a unit vector) from o within max, in steps of 5 cm: its root (0: none), t its
+	// distance, cell its index
+	uint64_t ray_ship(main_context::SceneReference sref, const double o[3],
+			const double d[3], double max, uint64_t skip, double &t, int &cell)
+	{
+		uint64_t best = 0;
+		const int S = OWN_SIDE;
+		for(auto &f : m_free_objects){
+			if(f.first == skip || f.second.ref != sref)
+				continue;
+			auto ei = m_entities.find(f.first);
+			ss_ why;
+			OwnGrid *g = ei == m_entities.end() || !hull_of(ei->second) ? nullptr :
+					own_of(ei->second, why);
+			if(!g)
+				continue;
+			ship_mass(f.first, *g);
+			if(g->hi[0] < g->lo[0])
+				continue;
+			double w[3];
+			Turn q;
+			world_of(ei->second, w, &q);
+			double lo[3] = {o[0] - w[0], o[1] - w[1], o[2] - w[2]};
+			double ld[3] = {d[0], d[1], d[2]};
+			q.inverse().apply(lo);
+			q.inverse().apply(ld);
+			double blo[3], bhi[3], t0 = 0;
+			for(int k = 0; k < 3; k++){
+				blo[k] = g->lo[k] + g->a[k] - 0.5;
+				bhi[k] = g->hi[k] + g->a[k] + 0.5;
+			}
+			// (and its mounted parts' cells)
+			for(auto &mo : g->mounted_on){
+				const int c[3] = {mo.first % S, mo.first / S % S, mo.first / (S * S)};
+				for(int k = 0; k < 3; k++){
+					blo[k] = std::min(blo[k], c[k] + g->a[k] - 0.5);
+					bhi[k] = std::max(bhi[k], c[k] + g->a[k] + 0.5);
+				}
+			}
+			if(!ray_box(lo, ld, blo, bhi, t0) || t0 > max)
+				continue;
+			for(double s = t0; s <= max && s <= t0 + 2 * S; s += 0.05){
+				int c[3];
+				bool in = true;
+				for(int k = 0; k < 3; k++){
+					c[k] = (int)std::floor(lo[k] + ld[k] * s + 0.5) - g->a[k];
+					in = in && c[k] >= 0 && c[k] < S;
+				}
+				if(!in)
+					continue;
+				int i = c[0] + S * (c[1] + S * c[2]);
+				// (a mounted part: the voxel it is on takes the hit)
+				auto mo = g->v[i].id ? g->mounted_on.end() : g->mounted_on.find(i);
+				if(!g->v[i].id && mo == g->mounted_on.end())
+					continue;
+				if(mo != g->mounted_on.end())
+					i = mo->second;
+				best = f.first;
+				max = t = s;
+				cell = i;
+				break;
+			}
+		}
+		return best;
+	}
+
+	// A blast's damage on the ships near it: a cell within radius takes power *
+	// (1 - distance / radius) * BLAST_SHIP_DAMAGE (a blast of power 1 at its
+	// middle a shot's 10)
+	static constexpr double BLAST_SHIP_DAMAGE = 10;
+	void ships_blast(main_context::SceneReference sref, const double at[3],
+			double radius, double power, const ss_ &by, const ss_ &who)
+	{
+		if(radius <= 0)
+			return;
+		const int S = OWN_SIDE;
+		std::map<uint64_t, sv_<std::pair<int, double>>> hits;
+		for(auto &f : m_free_objects){
+			if(f.second.ref != sref)
+				continue;
+			auto ei = m_entities.find(f.first);
+			ss_ why;
+			OwnGrid *g = ei == m_entities.end() || !hull_of(ei->second) ? nullptr :
+					own_of(ei->second, why);
+			if(!g)
+				continue;
+			double w[3];
+			Turn q;
+			world_of(ei->second, w, &q);
+			double l[3] = {at[0] - w[0], at[1] - w[1], at[2] - w[2]};
+			q.inverse().apply(l);
+			int lo[3], hi[3];
+			for(int k = 0; k < 3; k++){
+				lo[k] = std::max(0, (int)std::floor(l[k] - radius) - g->a[k]);
+				hi[k] = std::min(S - 1, (int)std::ceil(l[k] + radius) - g->a[k]);
+			}
+			for(int z = lo[2]; z <= hi[2]; z++)
+				for(int y = lo[1]; y <= hi[1]; y++)
+					for(int x = lo[0]; x <= hi[0]; x++){
+						const int i = x + S * (y + S * z);
+						if(!g->v[i].id)
+							continue;
+						const double dx = x + g->a[0] - l[0], dy = y + g->a[1] - l[1],
+								dz = z + g->a[2] - l[2];
+						const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+						if(dist <= radius)
+							hits[f.first].push_back(std::make_pair(i,
+									power * (1 - dist / radius) * BLAST_SHIP_DAMAGE));
+					}
+		}
+		for(auto &h : hits)
+			ship_damage(h.first, h.second, by, who+"'s blast");
+	}
+
+	// [KIT_AIRSHIPS] stage 3: each radar's contacts, twice a second: the other ships
+	// in its scene within its range, nearest first (5 at most), off its ship's
+	// heading
+	void radars_tick()
+	{
+		const int64_t now = interface::os::time_us();
+		if(now - m_radar_at < 500000)
+			return;
+		m_radar_at = now;
+		struct Ship
+		{
+			uint64_t id;
+			ss_ scene;
+			double w[3];
+		};
+		sv_<Ship> ships;
+		for(auto &f : m_free_objects){
+			auto ei = m_entities.find(f.first);
+			if(ei == m_entities.end() || !hull_of(ei->second))
+				continue;
+			Ship s;
+			s.id = f.first;
+			scene_of(ei->second, &s.scene);
+			world_of(ei->second, s.w);
+			ships.push_back(s);
+		}
+		for(auto &p : m_entities){
+			Entity &e = p.second;
+			for(size_t k = 0; k < e.comps.size(); k++){
+				if(e.comps[k].type != RADAR_TYPE || !e.comps[k].disabled.empty())
+					continue;
+				// Its ship: the nearest free object it is under
+				uint64_t mine = 0;
+				for(auto pi = m_entities.find(e.parent); pi != m_entities.end() && !mine;
+						pi = m_entities.find(pi->second.parent))
+					if(m_free_objects.count(pi->first))
+						mine = pi->first;
+				ss_ scene;
+				scene_of(e, &scene);
+				double w[3];
+				Turn q;
+				if(mine)
+					world_of(m_entities[mine], w, &q);
+				else
+					world_of(e, w, &q);
+				const double range = num(params_of(RADAR_TYPE, &e.comps[k]), "range",
+						150, 1, 1000);
+				sv_<std::pair<double, ss_>> list;
+				for(const Ship &s : ships){
+					if(s.id == mine || s.scene != scene)
+						continue;
+					double l[3] = {s.w[0] - w[0], s.w[1] - w[1], s.w[2] - w[2]};
+					const double dist = std::sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
+					if(dist > range)
+						continue;
+					q.inverse().apply(l);
+					const double b = std::atan2(l[0], l[2]) * 180 / 3.14159265358979323846;
+					const Instance *h = hull_of(m_entities[s.id]);
+					const uint64_t owner = h ? (uint64_t)std::max<int64_t>(0,
+							json::jint(h->state, "owner", 0)) : 0;
+					auto oe = m_entities.find(owner);
+					char buf[160];
+					snprintf(buf, sizeof buf, "%s: %.0f m, %.0f %s, %.0f %s",
+							owner && oe != m_entities.end() ? cs(oe->second.name+"'s ship") :
+							cs("ship "+itos(s.id)), dist, std::fabs(b),
+							b >= 0 ? "right" : "left", std::fabs(l[1]), l[1] >= 0 ?
+							"up" : "down");
+					list.push_back(std::make_pair(dist, ss_(buf)));
+				}
+				std::sort(list.begin(), list.end());
+				ss_ text;
+				for(size_t n = 0; n < list.size() && n < 5; n++)
+					text += (n ? "\n" : "")+list[n].second;
+				const ss_ was = jstr(e.comps[k].state, "contacts");
+				if(was == text)
+					continue;
+				const size_t before = was.empty() ? 0 :
+						std::count(was.begin(), was.end(), '\n') + 1;
+				e.comps[k].state.set("contacts", text);
+				replicate_state(e, k, "contacts");
+				m_runtime_dirty = true;
+				if(before != std::min<size_t>(list.size(), 5))
+					log_i(MODULE, "[KIT_AIRSHIPS] entity %s's radar: %zu ships: %s",
+							cs(itos(e.id)), std::min<size_t>(list.size(), 5),
+							cs(text.empty() ? ss_("none") : text.substr(0, text.find('\n'))));
+			}
+		}
+	}
+
+	// [KIT_AIRSHIPS] stage 4: a repair (kit/wallet's "repair"): each ship the player
+	// owns has its destroyed voxels back, as they were, where nothing is now.
+	// simplified: what dropped with them (mounted parts) does not come back
+	void repair_ships(uint64_t player)
+	{
+		for(auto &o : m_own){
+			auto ei = m_entities.find(o.first);
+			const Instance *h = ei == m_entities.end() ? nullptr : hull_of(ei->second);
+			if(!h || json::jint(h->state, "owner", 0) != (int64_t)player)
+				continue;
+			OwnGrid &g = o.second;
+			size_t back = 0;
+			for(auto it = g.lost.begin(); it != g.lost.end();){
+				if(!g.v[it->first].id){
+					g.v[it->first] = it->second;
+					g.changed.insert(it->first);
+					back++;
+				}
+				it = g.lost.erase(it);
+			}
+			g.hurt.clear();
+			if(!back)
+				continue;
+			g.mass = -1;
+			if(!g.dirty){
+				g.dirty = true;
+				g.since = interface::os::time_us();
+			}
+			auto pe = m_entities.find(player);
+			log_i(MODULE, "[KIT_AIRSHIPS] entity %s repaired: %zu voxels back (for %s)",
+					cs(itos(o.first)), back, pe == m_entities.end() ? "?" :
+					cs(pe->second.name));
+		}
 	}
 
 	// A decoration's object: its structure's origin cell on (x, y, z),
@@ -10851,6 +11509,9 @@ struct Module: public interface::Module, public Interface
 						value.stringify().substr(0, 64));
 				continue;
 			}
+			// [KIT_AIRSHIPS] a wallet's repair is Kit's: its player's ships
+			if(in.type == WALLET_TYPE && input == "repair")
+				repair_ships(to);
 			if(from && !flowed && m_flows.size() < MAX_FLOWS){
 				json::Value f = json::array();
 				f.append((int64_t)from);
@@ -16187,6 +16848,9 @@ struct Module: public interface::Module, public Interface
 	// is a restart: those not back yet leave
 	void check_zones()
 	{
+		// [KIT_AIRSHIPS] stage 5: the ships touching a deadly kit/trigger_zone
+		// (lost after the scan)
+		sv_<std::pair<uint64_t, uint64_t>> touched;
 		for(auto &p : m_entities){
 			Entity &e = p.second;
 			if(!e.has_pos)
@@ -16198,11 +16862,17 @@ struct Module: public interface::Module, public Interface
 					continue;
 				ss_ scene;
 				scene_of(e, &scene);
+				// [KIT_AIRSHIPS] a deadly zone as large as a region (the ground
+				// under the islands)
+				const bool deadly = in.type == TRIGGER_TYPE &&
+						in.params.get("deadly").is_true();
 				int n[3];
-				extent(in.params.get(t.zone), n);
+				extent(in.params.get(t.zone), n, deadly ? MAX_REGION_EXTENT : MAX_EXTENT);
 				double o[3];
 				Turn q;
 				box_frame(e, o, q);
+				if(deadly && m_session.running)
+					ships_in_box(e.id, scene, o, q, n, touched);
 				// Who is in it, by their entity's id; those arriving on it
 				// by a teleport enter it silently
 				std::set<ss_> now, silent;
@@ -16245,6 +16915,46 @@ struct Module: public interface::Module, public Interface
 				in.inside.swap(now);
 				m_runtime_dirty = true;
 			}
+		}
+		for(auto &tz : touched)
+			ship_lost(tz.first, "app", "it touched a deadly zone ("+m_entities[tz.second].name+")");
+	}
+
+	// The ships (free objects with kit/hull) in a scene with a corner of their
+	// boxes' bounds, or their middle, in a box (a zone's)
+	void ships_in_box(uint64_t zone, const ss_ &scene, const double o[3], const Turn &q,
+			const int n[3], sv_<std::pair<uint64_t, uint64_t>> &out)
+	{
+		for(auto &f : m_free_objects){
+			auto ei = m_entities.find(f.first);
+			if(ei == m_entities.end() || !hull_of(ei->second))
+				continue;
+			ss_ s;
+			scene_of(ei->second, &s);
+			auto bi = m_free_boxes.find(f.second.boxes);
+			if(s != scene || bi == m_free_boxes.end() || bi->second.size() < 6)
+				continue;
+			const sv_<float> &bx = bi->second;
+			double lo[3] = {1e9, 1e9, 1e9}, hi[3] = {-1e9, -1e9, -1e9};
+			for(size_t b = 0; b + 6 <= bx.size(); b += 6)
+				for(int k = 0; k < 3; k++)
+					lo[k] = std::min(lo[k], (double)bx[b + k]),
+					hi[k] = std::max(hi[k], (double)bx[b + 3 + k]);
+			double w[3];
+			Turn wq;
+			world_of(ei->second, w, &wq);
+			bool in = false;
+			for(int c = 0; c < 9 && !in; c++){
+				double p[3];
+				for(int k = 0; k < 3; k++)
+					p[k] = c == 8 ? (lo[k] + hi[k]) / 2 : (c >> k & 1) ? hi[k] : lo[k];
+				wq.apply(p);
+				for(int k = 0; k < 3; k++)
+					p[k] += w[k];
+				in = box_holds(o, q, n, p);
+			}
+			if(in)
+				out.push_back(std::make_pair(f.first, zone));
 		}
 	}
 
@@ -16370,6 +17080,8 @@ struct Module: public interface::Module, public Interface
 		send_tracks();
 		free_bodies_tick();
 		own_tick(); // [KIT_AIRSHIPS]
+		if(m_session.running)
+			radars_tick();
 		send_controls();
 		env_tick();
 		// simplified: the world's actions looked for once a second, not
@@ -17586,16 +18298,25 @@ struct Module: public interface::Module, public Interface
 			const std::array<double, 7> key = {{std::floor(d.t * 1000),
 					np.at(0u).as_number(), np.at(1u).as_number() + 0.5, np.at(2u).as_number(),
 					ang("yaw", e.yaw), ang("pitch", e.pitch), ang("roll", e.roll)}};
+			double flat = -1; // (along the ground)
 			if(!d.keys.empty()){
 				const std::array<double, 7> &l = d.keys.back();
 				const double s = (key[0] - l[0]) / 1000;
 				if(s > 0){
 					const double dx = key[1] - l[1], dy = key[2] - l[2], dz = key[3] - l[3];
+					flat = std::sqrt(dx * dx + dz * dz) / s;
 					double dy2 = key[4] - l[4];
 					dy2 -= 360 * std::floor((dy2 + 180) / 360);
 					d.speed = std::sqrt(dx * dx + dy * dy + dz * dz) / s;
 					d.turn = std::fabs(dy2) / s;
 				}
+			}
+			// [KIT_AIRSHIPS] a ship's speed along the ground as it changes by half
+			// a metre a second
+			if(!d.parts.empty() && flat >= 0 && std::fabs(flat - d.logged_speed) >= 0.5){
+				d.logged_speed = flat;
+				log_i(MODULE, "[KIT_AIRSHIPS] entity %s flies at %.2f m/s",
+						cs(itos(e.id)), flat);
 			}
 			d.keys.push_back(key);
 			while(d.keys.size() > 2 && d.keys[1][0] < (now - TRACK_KEEP) * 1000)
@@ -18236,6 +18957,8 @@ struct Module: public interface::Module, public Interface
 		double pos[3] = {0, 0, 0}, vel[3] = {0, 0, 0};
 		double damage = 0;
 		int64_t at_us = 0, until_us = 0;
+		// [KIT_AIRSHIPS] the ship it was fired from (a turret's): not hit by it
+		uint64_t ship = 0;
 	};
 	std::vector<Projectile> m_projectiles;
 	uint64_t m_next_shot = 1;
@@ -19784,6 +20507,8 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "%s explodes at (%.2f,%.2f,%.2f) radius %g power %g: "
 				"%zu cells to air, %zu protected", cs(who), at[0], at[1], at[2],
 				radius, power, carved, kept);
+		// [KIT_AIRSHIPS] stage 4: the ships' voxels near it
+		ships_blast(sref, at, radius, power, by, who);
 		// [KIT_PARTICLES] The blast as a world event
 		{
 			sv_<std::pair<int, ss_>> most;
@@ -20626,8 +21351,15 @@ struct Module: public interface::Module, public Interface
 		const ss_ who = pi->second.name;
 		log_i(MODULE, "%s fires entity %s's %s", cs(who), cs(itos(e.id)),
 				cs(movement_on(e) ? movement_on(e)->type : ss_()));
-		launch(peer, who, "kit/turret", sheet, from, d, v, damage, mi->first,
-				pi->second.scene);
+		// [KIT_AIRSHIPS] not into its own ship: the free object it is under
+		uint64_t ship = 0;
+		for(auto si = m_entities.find(e.parent); si != m_entities.end() && !ship;
+				si = m_entities.find(si->second.parent))
+			if(m_free_objects.count(si->first))
+				ship = si->first;
+		if(launch(peer, who, "kit/turret", sheet, from, d, v, damage, mi->first,
+				pi->second.scene))
+			m_projectiles.back().ship = ship;
 	}
 
 	// Each tick, Running: the projectiles step on the game's clock (a
@@ -20667,12 +21399,28 @@ struct Module: public interface::Module, public Interface
 				const double wall = ray_wall(sref, pr.pos, d, len);
 				double t = 0;
 				bool head = false;
-				const uint64_t id = ray_target(scene, pr.pos, d, wall, me, t,
+				uint64_t id = ray_target(scene, pr.pos, d, wall, me, t,
 						head);
-				const double go = id ? t : wall;
+				// [KIT_AIRSHIPS] a ship's voxel before them
+				double st = 0;
+				int sc = -1;
+				const uint64_t ship = ray_ship(sref, pr.pos, d, id ? t : std::min(wall, len),
+						pr.ship, st, sc);
+				if(ship)
+					id = 0, t = st;
+				const double go = id || ship ? t : wall;
 				for(int k = 0; k < 3; k++)
 					pr.pos[k] += d[k] * go;
-				if(id){
+				if(ship){
+					const int S = OWN_SIDE;
+					const OwnGrid &g = m_own[ship];
+					log_i(MODULE, "%s's projectile %s hits entity %s's cell (%i,%i,%i)",
+							cs(pi->second.name), cs(itos(pr.id)), cs(itos(ship)),
+							sc % S + g.a[0], sc / S % S + g.a[1], sc / (S * S) + g.a[2]);
+					ship_damage(ship, {std::make_pair(sc, pr.damage)}, "player:"+itos(me),
+							pi->second.name+"'s shot");
+					ended = hit = true;
+				} else if(id){
 					log_i(MODULE, "%s's projectile %s hits entity %s",
 							cs(pi->second.name), cs(itos(pr.id)), cs(itos(id)));
 					strike(pr.peer, id, pr.item, pr.sheet, pr.damage, head,
@@ -25560,6 +26308,7 @@ struct Module: public interface::Module, public Interface
 		std::vector<Projectile> projectiles; // [KIT_TOOLS_2]
 		std::map<uint64_t, FreeObject> free_objects;
 		std::map<uint64_t, OwnGrid> own;
+		int64_t radar_at = 0;
 		std::map<main_context::SceneReference, std::set<ss_>> free_models;
 		sm_<size_t, std::set<ss_>> boxes_sent;
 		int64_t clock_base = 0;
@@ -25606,6 +26355,7 @@ struct Module: public interface::Module, public Interface
 		swap(m_controls_sent, c.controls_sent);
 		swap(m_free_objects, c.free_objects);
 		swap(m_own, c.own);
+		swap(m_radar_at, c.radar_at);
 		swap(m_free_models, c.free_models);
 		swap(m_boxes_sent, c.boxes_sent);
 		swap(m_seat_home, c.seat_home);

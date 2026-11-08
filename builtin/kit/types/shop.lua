@@ -4,6 +4,13 @@
 -- buyer, so a kit/hull on it makes them its owner. Too little money: the
 -- buyer's wallet notes it, "refused". `start_money` (0: none) is each
 -- player's money at their round start.
+-- [KIT_AIRSHIPS] stage 3: with `mount` the prefab is a part for a ship (a gun,
+-- an engine, a radar: kit/airship_gun...): nothing is made at the pad; the
+-- buyer holds it (their kit/wallet's `part`) until their next place on a ship
+-- they may build on, which puts it on that face instead of a voxel. One held at
+-- a time: buying another replaces it (no money back). Stage 4: a ship it sold
+-- that is lost (its core hit, a deadly kit/trigger_zone touched) is "lost" to
+-- it from Kit, and "lost" signals on (a point for the other team).
 -- simplified: nothing checks the pad is clear; a ship bought onto another
 -- overlaps it
 local function wallet(c)
@@ -25,6 +32,7 @@ return {
 		price = {type = "number", default = 20, min = 0, max = 100000},
 		pad = {type = "position", default = {0, 0, 6}},
 		start_money = {type = "number", default = 0, min = 0, max = 100000},
+		mount = {type = "bool", default = false},
 		title = {type = "string", default = "Skiff"},
 		color = {cat = "look", type = "string", default = "#d0a030"},
 	},
@@ -39,9 +47,18 @@ return {
 		outputs = {
 			bought = "A player bought one. Value: the copy's id.",
 			refused = "A player had too little money.",
+			lost = "A ship it sold was lost (no value: a team's add counts 1).",
+		},
+		inputs = {
+			lost = "Kit's: a ship it sold was lost. Value: the ship's id.",
 		},
 	},
-	outputs = {bought = "entity", refused = "none"},
+	outputs = {bought = "entity", refused = "none", lost = "none"},
+	inputs = {lost = "entity"},
+	on_input = function(c, input, value, by)
+		c:log("its ship", value, "lost")
+		c:emit("lost")
+	end,
 	on_start = function(c)
 		c.state.label = c.params.title .. ": " .. c.params.price
 	end,
@@ -60,6 +77,15 @@ return {
 				" costs " .. p.price .. ", you have " .. money)
 			c:log("refused", c:name(by), "money", money, "price", p.price)
 			c:emit("refused")
+			return
+		end
+		if p.mount then
+			if p.price > 0 then
+				c:send(c.player, "pay", p.price)
+			end
+			c:send(c.player, "hold_part", p.prefab)
+			c.state.sold = c.state.sold + 1
+			c:log("sold the part", p.prefab, "to", c:name(by), "for", p.price)
 			return
 		end
 		local pos = {c.pos[1] + p.pad[1], c.pos[2] + p.pad[2],
