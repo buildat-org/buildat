@@ -402,6 +402,10 @@ EOF
 	terrain decorate 123 163 8 5 9
 	undo
 	terrain decorate 123 163 8 5 10
+	# [KIT_DEDECORATE] the stroke's decorations (and any of the generator's) taken
+	# away, and put back
+	terrain dedecorate 123 163 8 2 11
+	undo
 	cat <<'EOF'
 keypress F6
 wait_log 10000 kit editor: edit mode off
@@ -445,6 +449,10 @@ dec=$(grep -aoP 'decorate at \(123,163\) .*, \K\d+(?= decorations \()' "$s5" | h
 [ "${dec:-0}" -gt 0 ] || fail "the decorate stroke placed none ($s5)"
 grep -aq "An undo by kitboss: a terrain stroke, 0 cells, 0 samples and $dec decorations put back" "$s5" ||
 	fail "the decorate stroke's undo ($dec, $s5)"
+gone=$(grep -aoP 'dedecorate at \(123,163\) .*, \K\d+(?= decorations taken away)' "$s5" | head -1)
+[ "${gone:-0}" -ge "$dec" ] || fail "the dedecorate stroke took ${gone:-none} away, the decorate stroke put $dec there ($s5)"
+grep -aq "An undo by kitboss: a terrain stroke, 0 cells, 0 samples and $gone decorations put back" "$s5" ||
+	fail "the dedecorate stroke's undo ($gone, $s5)"
 # Its decorations by the seed: 4's and 9's differ, the decorate stroke's
 # kept over both ([KIT_HEIGHTMAP_REGEN_LOSS]: a builder's decorations and
 # edited samples stay over a regeneration)
@@ -453,7 +461,7 @@ dd=$(grep -aoP 'World by kitboss: valleys 512x512, seed \d+, .*decorations \K\d+
 	fail "the heightmap's decorations by the seed: $d4, then $dd ($s5)"
 [ "$(grep -ac "decorations on the heightmap (generated), $dec of them a builder's" "$s5")" = 2 ] ||
 	fail "the decorate stroke's $dec decorations not kept over the seed's changes ($s5)"
-echo "ok: the brushes on the heightmap (raise a stroke undone to its hash, its edge stone; lower, smooth, flatten under the sea to the riverbed, paint, fill, water refused, decorate and its undo), its decorations the save's and by the seed ($d4)"
+echo "ok: the brushes on the heightmap (raise a stroke undone to its hash, its edge stone; lower, smooth, flatten under the sea to the riverbed, paint, fill, water refused, decorate and its undo, dedecorate ($gone) and its undo), its decorations the save's and by the seed ($d4)"
 
 # 6. ([KIT] stage 4f) The brushes on voxels: a fresh save, flat grassland
 # (top 0, sea 0), without decorations until they are tested
@@ -511,6 +519,16 @@ EOF
 	terrain decorate -12 -12 4 5 21
 	undo
 	terrain decorate -12 -12 4 5 22
+	# [KIT_DEDECORATE] a builder's stone among the World's decorations, a
+	# dedecorate stroke over it (two dabs, one undo), its undo, again
+	echo 'event kit_edit {"op": "set_voxel", "pos": [-20, 1, 15], "voxel": "kit/stone"}'
+	echo "wait_log 10000 to undo"
+	column -20 15
+	for s in 23 24; do
+		for i in 1 2; do terrain dedecorate -20 15 3 2 $s; done
+		[ $s = 23 ] && undo && column -20 15
+	done
+	column -20 15
 	cat <<'EOF'
 keypress F6
 wait_log 10000 the server put the player at
@@ -602,9 +620,24 @@ grep -aqP "decorate at \(-12,0,-12\) size 4 strength 5: \d+ columns, [1-9]\d* ce
 	fail "the decorate stroke placed nothing ($s6)"
 want "$t/boss6.log" "kit editor: tool terrain" "kit editor: the stroke ended" "kit editor: tool select"
 grep -aq "Terrain by kitboss: raise at .*stroke [0-9]\{6,\}" "$s6" || fail "the mouse's stroke ($s6)"
-[ "$(grep -ac "An undo by kitboss: a terrain stroke" "$s6")" = 3 ] ||
+[ "$(grep -ac "An undo by kitboss: a terrain stroke" "$s6")" = 4 ] ||
 	fail "Ctrl+Z, the undo of the mouse's stroke ($s6)"
-echo "ok: the brushes on voxels (raise, its stroke undone, lower under the sea, paint, fill ground and water, smooth, flatten exposing the layers), decorations and caves by the seed ($w0), a decorate stroke and its undo, the terrain tool by mouse"
+# [KIT_DEDECORATE] each stroke's first dab wrote the decorations' cells
+# back, the second nothing; the builder's stone the one cell left unlike
+# the undecorated ground; the undo put the written cells back; the stone
+# stays
+for s in 23 24; do
+	dd=$(grep -aoP "dedecorate \(1 cells left unlike the undecorated ground\) at \(-20,0,15\) size 3 strength 2: \d+ columns, \K\d+(?= cells; .*, stroke $s )" "$s6" | tr '\n' ' ')
+	[ "${dd%% *}" -gt 0 ] 2>/dev/null && [ "$(echo $dd | cut -d' ' -f2)" = 0 ] ||
+		fail "dedecorate stroke $s: cells written by its dabs: '$dd' ($s6)"
+done
+dd=$(echo $dd | cut -d' ' -f1)
+grep -aq "An undo by kitboss: a terrain stroke, $dd cells" "$s6" || fail "the dedecorate stroke's undo ($dd cells, $s6)"
+cs=$(grep -aoP 'column at \(-20,0,15\) .*; \Kcolumn \(-20,15\): .*' "$s6")
+[ "$(echo "$cs" | sed -n 1p)" = "$(echo "$cs" | sed -n 2p)" ] ||
+	fail "the dedecorate stroke's undo: the column $(echo "$cs" | sed -n 2p), before $(echo "$cs" | sed -n 1p) ($s6)"
+echo "$cs" | tail -1 | grep -qP 'kit/stone 1(,|$)' || fail "the builder's stone not kept: $(echo "$cs" | tail -1) ($s6)"
+echo "ok: the brushes on voxels (raise, its stroke undone, lower under the sea, paint, fill ground and water, smooth, flatten exposing the layers), decorations and caves by the seed ($w0), a decorate stroke and its undo, dedecorate ($dd cells, the builder's stone kept) and its undo, the terrain tool by mouse"
 
 # 7. ([KIT_VOXEL_EDITS]) The voxel edits manager: a fresh save (stone,
 # flat), a cell dug Ended; the terrain tool's list has its section with

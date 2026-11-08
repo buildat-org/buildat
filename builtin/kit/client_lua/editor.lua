@@ -1070,11 +1070,13 @@ local T = {brush = "raise", size = 3, strength = 2, biome = nil,
 -- generator's, no longer edited
 -- [KIT_AIRSHIPS_2] seed: a ball of the biome's ground on the voxel pointed
 -- at, or in the air in front (an island's start)
+-- [KIT_DEDECORATE] dedecorate: the World's decorations under the brush
+-- taken away
 local BRUSHES = {"raise", "lower", "smooth", "flatten", "paint", "fill",
-	"decorate", "reset", "seed"}
+	"decorate", "dedecorate", "reset", "seed"}
 local BRUSH_NAMES = {raise = "Raise", lower = "Lower", smooth = "Smooth",
 	flatten = "Flatten", paint = "Paint", fill = "Fill", decorate = "Decorate",
-	reset = "Reset", seed = "Seed"}
+	dedecorate = "De-decorate", reset = "Reset", seed = "Seed"}
 local MAX_BRUSH = 12
 M.T = T
 -- [KIT_VOXEL_EDITS] The edited sections ("kit:edited": list), the

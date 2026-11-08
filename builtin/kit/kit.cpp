@@ -9583,10 +9583,11 @@ struct Module: public interface::Module, public Interface
 			return refuse("the app has no World");
 		const ss_ tool = jstr(j, "tool");
 		static const std::set<ss_> TOOLS = {"raise", "lower", "smooth",
-			"flatten", "paint", "fill", "decorate", "column", "reset", "seed"};
+			"flatten", "paint", "fill", "decorate", "dedecorate", "column",
+			"reset", "seed"};
 		if(!TOOLS.count(tool))
 			return refuse("tool: raise, lower, smooth, flatten, paint, fill, "
-					"decorate, reset, seed or column");
+					"decorate, dedecorate, reset, seed or column");
 		// [KIT_AIRSHIPS_2] on a heightmap's World, "on": "voxels" works on
 		// its voxels (a floating island) instead of the map; a seed is
 		// always voxels
@@ -9695,6 +9696,14 @@ struct Module: public interface::Module, public Interface
 				cz = (int)std::floor(fz + 0.5);
 		const int L = (int)std::floor(level + 0.5);
 		ss_ what;
+		// [KIT_DEDECORATE] the World's generator with its decorations and
+		// without (made out here: diff_generator())
+		up_<world::Generator> deco, bare;
+		if(tool == "dedecorate"){
+			deco = diff_generator();
+			bare = diff_generator();
+			bare->p.decorations = false;
+		}
 		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			world::Brush br;
@@ -9882,6 +9891,44 @@ struct Module: public interface::Module, public Interface
 									z, sel->decors[k].on == 'w');
 					});
 				}
+			} else if(tool == "dedecorate"){
+				// [KIT_DEDECORATE] the brush's box generated twice, with the
+				// World's decorations and without: a cell that still holds
+				// what the decorated one has, where the bare one differs, gets
+				// the bare one's; what a builder changed stays.
+				// simplified: from 24 under the point to 16 over it (a tree's
+				// crown, a cave's floor near it); a tree crossing the brush's
+				// edge is cut there
+				const int y0 = cy - r - 24, y1 = cy + r + 16;
+				const pv::Region box(pv::Vector3DInt32(cx - r, y0, cz - r),
+						pv::Vector3DInt32(cx + r, y1, cz + r));
+				interface::VoxelVolume dv(box), bv(box);
+				deco->generate(m_w->world_scene, pv::Vector3DInt16(0, 0, 0), dv);
+				bare->generate(m_w->world_scene, pv::Vector3DInt16(0, 0, 0), bv);
+				const uint32_t sm = state_mask(w->get_voxel_reg()->get_format());
+				circle([&](int x, int z, double){
+					columns++;
+					for(int y = y0; y <= y1; y++){
+						const uint32_t d = dv.getVoxelAt(x, y, z).data & sm,
+								b = bv.getVoxelAt(x, y, z).data & sm;
+						uint32_t now = 0;
+						if(d != b && voxel_id(w, pv::Vector3DInt32(x, y, z), now) &&
+								(now & sm) == d)
+							br.put(x, y, z, type_of(w, b));
+					}
+				});
+				// What it left unlike the undecorated ground (a check's: the
+				// builder's cells alone)
+				size_t unlike = 0;
+				circle([&](int x, int z, double){
+					for(int y = y0; y <= y1; y++){
+						uint32_t now = 0;
+						unlike += voxel_id(w, pv::Vector3DInt32(x, y, z), now) &&
+								(now & sm) != (bv.getVoxelAt(x, y, z).data & sm);
+					}
+				});
+				what = "dedecorate ("+itos(unlike)+" cells left unlike the "
+						"undecorated ground)";
 			} else if(tool == "fill"){
 				const int x0 = std::min(cx, (int)std::floor(fx1 + 0.5)),
 						x1 = std::max(cx, (int)std::floor(fx1 + 0.5)),
@@ -9923,7 +9970,7 @@ struct Module: public interface::Module, public Interface
 						nullptr, p.name);
 			int t;
 			const bool has = br.top_of(cx, cz, hi, lo, t);
-			if(what.empty() || tool == "decorate")
+			if(what.empty() || tool == "decorate" || tool == "dedecorate")
 				what = (what.empty() ? tool : what)+" at ("+itos(cx)+","+
 						itos(cy)+","+itos(cz)+") size "+itos(r)+" strength "+
 						itos((int)s)+": "+itos(columns)+" columns, "+
@@ -10235,7 +10282,29 @@ struct Module: public interface::Module, public Interface
 		if(tool == "decorate")
 			what += ", "+itos(added)+" decorations ("+itos(m_w->decor.size())+
 					" in all, hash "+itos(decor_hash())+")";
-		if(tool != "paint" && tool != "decorate" && tool != "column")
+		// [KIT_DEDECORATE] the decorations standing under the brush taken
+		// away (the generator's and a builder's alike), put back by the undo
+		if(tool == "dedecorate"){
+			sv_<uint64_t> gone;
+			for(auto &d : m_w->decor){
+				const double dx = d.second.x - cx, dz = d.second.z - cz;
+				if(dx * dx + dz * dz <= (r + 0.5) * (r + 0.5))
+					gone.push_back(d.first);
+			}
+			for(uint64_t id : gone){
+				if(c)
+					c->decor_gone.push_back(m_w->decor[id]);
+				remove_decor(id);
+			}
+			size_t removed = gone.size();
+			if(sym && removed)
+				removed += sym_copy(m_w->world_scene, cf, true, c, p.name,
+						true).decor;
+			what += ", "+itos(removed)+" decorations taken away ("+
+					itos(m_w->decor.size())+" in all, hash "+itos(decor_hash())+")";
+		}
+		if(tool != "paint" && tool != "decorate" && tool != "dedecorate" &&
+				tool != "column")
 			reseat_decor(bx0, bz0, bx1, bz1);
 		return what;
 	}
@@ -10529,7 +10598,8 @@ struct Module: public interface::Module, public Interface
 				"and %zu decorations put back%s", cs(p.name), c.scene ?
 				"a voxel edit" : !c.regen.empty() ? "a regeneration" :
 				"a terrain stroke", cells,
-				c.samples.size(), c.decor.size(), cs(hash));
+				c.samples.size(), c.decor.size() + c.decor_gone.size(),
+				cs(hash));
 	}
 
 	// [KIT_EDIT_VOXELS] A builder's place or dig in edit mode (api.h's

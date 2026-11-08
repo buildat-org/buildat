@@ -759,13 +759,15 @@ end
 -- What a brush does, in its colour: adding green, taking away red, the
 -- rest the hover's
 local function brush_color()
-	return T.brush == "lower" and M.DIG or (T.brush == "smooth" or
+	return (T.brush == "lower" or T.brush == "dedecorate") and M.DIG or
+			(T.brush == "smooth" or
 			T.brush == "flatten" or T.brush == "reset") and M.HOVER or M.PLACE
 end
 
 local BRUSH_TEXT = {raise = "raise the ground", lower = "lower the ground",
 	smooth = "smooth the ground", flatten = "flatten to the stroke's start",
 	paint = "paint the biome's ground", decorate = "decorate (the biome's)",
+	dedecorate = "take the World's decorations away",
 	fill = "drag: fill a rectangle up to here",
 	reset = "back to the generated ground",
 	seed = "a ball of ground here, in the air too (an island's start)"}

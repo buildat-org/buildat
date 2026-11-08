@@ -842,7 +842,10 @@ namespace interface
 //       a dab of a brush on the World's surface (voxels or a heightmap):
 //       raise, lower, smooth, flatten (toward level), paint (biome b's
 //       ground), decorate (b's scatter; in a cave its floor's and wall's),
-//       fill (the rectangle x, z to x1, z1 up to level, with b's ground or
+//       dedecorate ([KIT_DEDECORATE] the World's decorations under it
+//       taken away: on voxels a cell still as the generator decorated it
+//       gets its undecorated value, an edited one stays; on a heightmap
+//       the decoration objects standing there go), fill (the rectangle x, z to x1, z1 up to level, with b's ground or
 //       "water"; voxels only), or column (nothing changed: the column at
 //       the point said, for a check). Every dab carrying the same stroke
 //       is one undo. On voxels a column's layers follow its biome (by
