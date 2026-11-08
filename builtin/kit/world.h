@@ -118,6 +118,7 @@
 #include <algorithm>
 #include <climits>
 #include <functional>
+#include <unordered_map>
 
 namespace kit {
 namespace world {
@@ -1198,6 +1199,89 @@ struct Generator: public worldgen::GeneratorInterface
 	}
 };
 
+// [KIT_AIRSHIPS_2] A kit/world_region's cells: a generator applied to a box
+// of the world from its corner o (n cells each way), or to the ball
+// inscribed in it. Each column's ground is the generator's (h, its level
+// already the region's) cut by the shape: its highest cell in the shape the
+// biome's top, filler under it, stone deeper; the shape's cells over it
+// air. A column whose ground top lies in the shape gets the biome's surface
+// decorations (into air only; they may reach out of the shape). No water,
+// no caves. Cells packed by key()
+struct Region
+{
+	int o[3] = {0, 0, 0}, n[3] = {1, 1, 1};
+	bool sphere = false, decorate = true;
+	uint32_t seed = 0;
+	Ids ids;
+	Heights *h = nullptr;
+
+	static int64_t key(int x, int y, int z)
+	{
+		return ((int64_t)(x + (1 << 20)) << 42) | ((int64_t)(y + (1 << 20)) << 21) |
+				(int64_t)(z + (1 << 20));
+	}
+	static void unkey(int64_t k, int &x, int &y, int &z)
+	{
+		x = (int)(k >> 42) - (1 << 20);
+		y = (int)((k >> 21) & 0x1fffff) - (1 << 20);
+		z = (int)(k & 0x1fffff) - (1 << 20);
+	}
+	// The shape's cells in column (x, z): y0...y1 (false: none)
+	bool span(int x, int z, int &y0, int &y1) const
+	{
+		y0 = o[1], y1 = o[1] + n[1] - 1;
+		if(!sphere)
+			return true;
+		const double dx = (x + 0.5 - o[0]) / n[0] * 2 - 1,
+				dz = (z + 0.5 - o[2]) / n[2] * 2 - 1;
+		const double r = 1 - dx * dx - dz * dz;
+		if(r < 0)
+			return false;
+		const double hy = std::sqrt(r) * n[1] / 2, cy = o[1] + n[1] / 2.0;
+		y0 = (int)std::ceil(cy - hy - 0.5);
+		y1 = (int)std::floor(cy + hy - 0.5);
+		return y0 <= y1;
+	}
+	void cells(std::unordered_map<int64_t, VoxelTypeId> &out)
+	{
+		sv_<int> tops;
+		h->tops(o[0], o[2], n[0], n[2], tops);
+		sv_<std::array<int, 3>> decor;
+		for(int dz = 0; dz < n[2]; dz++)
+		for(int dx = 0; dx < n[0]; dx++){
+			const int x = o[0] + dx, z = o[2] + dz;
+			int y0, y1;
+			if(!span(x, z, y0, y1))
+				continue;
+			const int top = tops[(size_t)dz * n[0] + dx];
+			const int g = std::min(top, y1);
+			for(int y = y0; y <= y1; y++){
+				VoxelTypeId v = ids.air;
+				if(y <= g)
+					v = y == g ? ids.top : y >= g - ids.filler_depth ?
+							ids.filler : ids.stone;
+				out[key(x, y, z)] = v ? v : ids.air;
+			}
+			if(decorate && top >= y0 && top < y1)
+				decor.push_back({{x, top, z}});
+		}
+		for(const auto &d : decor){
+			int turns = 0;
+			const int k = pick_surface(ids, seed, d[0], d[2], d[1], INT_MIN / 2,
+					1, turns);
+			if(k < 0)
+				continue;
+			ids.structs[ids.decors[k].s].each(turns, [&](int dx, int dy, int dz,
+					VoxelTypeId id){
+				const int64_t c = key(d[0] + dx, d[1] + 1 + dy, d[2] + dz);
+				auto it = out.find(c);
+				if(it == out.end() || it->second == ids.air)
+					out[c] = id;
+			});
+		}
+	}
+};
+
 // FNV-1a over ints: the heights' hash a check compares
 static uint32_t hash_ints(const sv_<int> &v)
 {
@@ -1303,12 +1387,20 @@ struct Brush
 		const int lo = std::min(h, h2) - b.filler_depth - 1;
 		const int hi = std::max(h, h2) + 1;
 		const bool under = h2 < p.sea_level;
+		// [KIT_AIRSHIPS_2] A floating column (an island's: no ground in the 8
+		// cells under the ones written) grows no ground under its old top:
+		// lowered, it is dug from the top
+		bool floating = true;
+		for(int y = lo - 1; y >= lo - 8 && floating; y--)
+			floating = !is_ground(x, y, z);
 		for(int y = lo; y <= hi; y++){
 			VoxelTypeId cur = 0;
 			if(!get(x, y, z, cur))
 				continue;
 			const bool g = ground.count(cur) > 0, s = soft.count(cur) > 0;
 			if(!g && !s)
+				continue;
+			if(floating && s && y <= h && y <= h2)
 				continue;
 			VoxelTypeId want = cur;
 			if(y > h2){

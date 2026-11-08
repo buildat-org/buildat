@@ -536,6 +536,20 @@ namespace interface
 //   and "Go to source"; a kit/symmetry's inspector lists every override
 //   on its copies and the parity warning
 //   (util/kit_symmetry_view_check.sh).
+//   [KIT_AIRSHIPS_2] **World regions** (kit/world_region): a type's
+//   `world_region` names its position parameter, a box of the World's
+//   cells from its cell (the box of `shape` "sphere"'s ball). Kit writes
+//   its cells with the region's own generator (types/world_region.lua) as
+//   it is placed and changed while editing (never in a game session), as
+//   kept edits in the edit's undo, and its symmetry images; the World's
+//   row "regions" holds what was written, so a change writes the
+//   difference and a restart nothing: the cells of a region gone, moved
+//   or reshaped that still hold what it wrote back to the World's
+//   generated ground (air over a heightmap), the others left. A
+//   kit/symmetry copy of a region writes nothing. On a heightmap's World
+//   the regions' sections are its edited voxels (loaded from the save).
+//   simplified: no water or caves; 128 cells a side; a builder's change
+//   inside a region is written over by the region's next change
 //   [KIT] stage 5 **Packages**: component types, prefabs and builders'
 //   voxel types published to Aitta as a package of "kind": "kit"
 //   (doc/aitta.txt). [AITTA_KEY_IDENTITY] A package is its key and its
@@ -827,6 +841,15 @@ namespace interface
 //       sample's layer is stone where steep, the riverbed under the sea,
 //       else its biome's top, and decorations are voxel objects. Answered
 //       with "kit:terrain" {tool, stroke, undo, what}
+//       [KIT_AIRSHIPS_2] "on": "voxels" on a heightmap's World works on its
+//       voxels instead (a floating island), and tool "seed" (always the
+//       voxels) puts a ball of b's ground (radius size - 1) at the point,
+//       in the air too: an island's start. A floating column (no ground in
+//       the 8 cells under those a dab writes) grows no ground under its old
+//       top: lowered past its bottom it is dug away. The editor's terrain
+//       tool sends "on" for a voxel pointed at over a heightmap, and its
+//       Seed brush goes on the cell in front of the voxel pointed at, else
+//       12 cells along the pointer's ray
 //   {"op": "set_voxel", "pos": [x, y, z], "voxel": n}  -- ([KIT_EDIT_VOXELS])
 //       the cell in the builder's scene set to voxel n ("air": a dig),
 //       routed as a player's write (an owned cell goes to its owner's

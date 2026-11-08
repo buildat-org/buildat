@@ -1066,11 +1066,13 @@ local T = {brush = "raise", size = 3, strength = 2, biome = nil,
 	stroke = nil}
 -- [KIT_HEIGHTMAP_REGEN_LOSS] reset: a heightmap's samples back to the
 -- generator's, no longer edited
+-- [KIT_AIRSHIPS_2] seed: a ball of the biome's ground on the voxel pointed
+-- at, or in the air in front (an island's start)
 local BRUSHES = {"raise", "lower", "smooth", "flatten", "paint", "fill",
-	"decorate", "reset"}
+	"decorate", "reset", "seed"}
 local BRUSH_NAMES = {raise = "Raise", lower = "Lower", smooth = "Smooth",
 	flatten = "Flatten", paint = "Paint", fill = "Fill", decorate = "Decorate",
-	reset = "Reset"}
+	reset = "Reset", seed = "Seed"}
 local MAX_BRUSH = 12
 M.T = T
 -- [KIT_VOXEL_EDITS] The edited sections ("kit:edited": list), the

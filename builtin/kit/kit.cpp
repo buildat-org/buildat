@@ -177,6 +177,8 @@ static const size_t MAX_FLOWS = 64;
 // on a heightmap a dab's step a strength (metres) and the slope (rise a
 // metre) its ground turns stone over (builtin/heightmap's generation's)
 static const int MAX_BRUSH = 12;
+// [KIT_AIRSHIPS_2] a kit/world_region's side at most
+static const int MAX_WORLD_REGION = 128;
 static const int MAX_FILL = 64;
 static const double HM_STEP = 0.25;
 static const float HM_ROCK_SLOPE = 0.35f;
@@ -318,6 +320,9 @@ struct Type
 	// box's voxels (reads_voxels = true)
 	ss_ voxel_box;
 	bool reads_voxels = false;
+	// [KIT_AIRSHIPS_2] The position parameter that is its kit/world_region
+	// box ("" none): the World's voxels Kit generates in it
+	ss_ world_region;
 	// [KIT_SYMMETRY] Its parameters' kinds in space (api.h), as kit/symmetry's
 	// copies take them: declared (space = {}) or of its boxes
 	std::map<ss_, ss_> space;
@@ -1882,7 +1887,8 @@ struct Module: public interface::Module, public Interface
 				std::make_pair("volume", &t.volume),
 				std::make_pair("grants", &t.grants),
 				std::make_pair("region", &t.region),
-				std::make_pair("voxel_box", &t.voxel_box)}){
+				std::make_pair("voxel_box", &t.voxel_box),
+				std::make_pair("world_region", &t.world_region)}){
 			const ss_ pn = jstr(t.decl, k.first);
 			if(pn.empty())
 				continue;
@@ -1936,7 +1942,7 @@ struct Module: public interface::Module, public Interface
 			for(const ss_ &b : {t.zone, t.region, t.grants, lx})
 				if(!b.empty() && !t.space.count(b))
 					t.space[b] = "box";
-			for(const ss_ &b : {t.volume, t.voxel_box})
+			for(const ss_ &b : {t.volume, t.voxel_box, t.world_region})
 				if(!b.empty() && !t.space.count(b))
 					t.space[b] = "cells";
 		}
@@ -4805,6 +4811,8 @@ struct Module: public interface::Module, public Interface
 				m_session.copied.size(), m_session.restore.size());
 		sessions_from_save();
 		m_hosted = true;
+		// [KIT_AIRSHIPS_2] the regions a template or another build placed
+		regions_sync(nullptr, "");
 		size_t n = 0, es = 0;
 		for(auto &p : m_entities)
 			if(Module::authored(p.second)){
@@ -9506,10 +9514,16 @@ struct Module: public interface::Module, public Interface
 			return refuse("the app has no World");
 		const ss_ tool = jstr(j, "tool");
 		static const std::set<ss_> TOOLS = {"raise", "lower", "smooth",
-			"flatten", "paint", "fill", "decorate", "column", "reset"};
+			"flatten", "paint", "fill", "decorate", "column", "reset", "seed"};
 		if(!TOOLS.count(tool))
 			return refuse("tool: raise, lower, smooth, flatten, paint, fill, "
-					"decorate, reset or column");
+					"decorate, reset, seed or column");
+		// [KIT_AIRSHIPS_2] on a heightmap's World, "on": "voxels" works on
+		// its voxels (a floating island) instead of the map; a seed is
+		// always voxels
+		const bool on_voxels = tool == "seed" || jstr(j, "on") == "voxels";
+		if(tool == "reset" && on_voxels)
+			return refuse("reset: a heightmap's samples");
 		if(tool == "reset" && !m_w->wp.heightmap())
 			return refuse("reset: a heightmap's (a voxel World's edited "
 					"sections are generated again from their list)");
@@ -9580,7 +9594,7 @@ struct Module: public interface::Module, public Interface
 		const int r = (int)std::floor(size + 0.5);
 		const double s = std::floor(strength + 0.5);
 		ss_ what, why;
-		if(m_w->wp.heightmap())
+		if(m_w->wp.heightmap() && !on_voxels)
 			what = terrain_heightmap(p, tool, x, y, z, x1, z1, r, s, level,
 					biome, c, why);
 		else
@@ -9617,11 +9631,17 @@ struct Module: public interface::Module, public Interface
 			world::Brush br;
 			if(!make_brush(w, br, why))
 				return;
+			// [KIT_AIRSHIPS_2] a heightmap's voxels have no sea
+			if(m_w->wp.heightmap())
+				br.p.sea_level = INT_MIN / 2;
 			br.get = [&](int x, int y, int z, interface::VoxelTypeId &v){
 				uint32_t id = 0;
 				if(!voxel_id(w, pv::Vector3DInt32(x, y, z), id))
 					return false;
 				v = type_of(w, id);
+				// [KIT_AIRSHIPS_2] (a heightmap's cell not loaded: air)
+				if(!v)
+					v = br.air;
 				return true;
 			};
 			// [KIT_SYMMETRY] the dab's cells, written into the other slices after
@@ -9629,7 +9649,7 @@ struct Module: public interface::Module, public Interface
 			br.set = [&](int x, int y, int z, interface::VoxelTypeId v){
 				const pv::Vector3DInt32 q(x, y, z);
 				uint32_t old = 0;
-				if(!voxel_id(w, q, old))
+				if(!hm_section(w, q) || !voxel_id(w, q, old))
 					return;
 				if(c)
 					c->cells.emplace(std::make_tuple(x, y, z), old);
@@ -9663,7 +9683,29 @@ struct Module: public interface::Module, public Interface
 						f(cx + dx, cz + dz, d);
 				}
 			};
-			if(tool == "raise" || tool == "lower"){
+			if(tool == "seed"){
+				// [KIT_AIRSHIPS_2] an island's seed in the air: a ball of the
+				// biome's ground (radius the size, 1 a single cell), its top
+				// cells top, filler under them, stone deeper
+				const int R = r - 1;
+				for(int dz = -R; dz <= R; dz++)
+				for(int dx = -R; dx <= R; dx++){
+					int t = INT_MIN;
+					for(int dy = R; dy >= -R; dy--){
+						if(dx * dx + dy * dy + dz * dz > R * R + R)
+							continue;
+						const int x = cx + dx, y = cy + dy, z = cz + dz;
+						interface::VoxelTypeId v = 0;
+						if(!br.get(x, y, z, v) || !br.soft.count(v))
+							continue;
+						if(t == INT_MIN)
+							t = y;
+						br.put(x, y, z, y == t ? sel->top : y >= t -
+								sel->filler_depth ? sel->filler : sel->stone);
+					}
+					columns += t != INT_MIN;
+				}
+			} else if(tool == "raise" || tool == "lower"){
 				const int sign = tool == "raise" ? 1 : -1;
 				circle([&](int x, int z, double d){
 					int t;
@@ -10127,6 +10169,227 @@ struct Module: public interface::Module, public Interface
 		if(tool != "paint" && tool != "decorate" && tool != "column")
 			reseat_decor(bx0, bz0, bx1, bz1);
 		return what;
+	}
+
+	// ---- [KIT_AIRSHIPS_2] kit/world_region (types/world_region.lua): the
+	// regions' voxels written into the World as they are placed and changed
+	// while editing. Each World's row "regions" is what was written (each
+	// region's corner and parameters): a change writes the difference, the
+	// cells of a region gone or moved that still hold what it wrote back to
+	// the World's generated ground, the new cells as the regions make them
+	// (later ids over earlier), as edits (marked kept) into `back` (the
+	// edit's undo), and kit/symmetry's images of them. A symmetry copy of a
+	// region writes nothing (its source's cells are copied)
+
+
+	// The regions' cells of a World's config (its "regions" row's array)
+	bool region_cells(voxelworld::Instance *w, const json::Value &cfg,
+			std::unordered_map<int64_t, interface::VoxelTypeId> &out,
+			ss_ &why)
+	{
+		interface::VoxelRegistry *reg = w->get_voxel_reg();
+		auto id = [&](const ss_ &name) -> interface::VoxelTypeId {
+			interface::VoxelName n;
+			n.block_name = name;
+			const interface::VoxelDefinition *d = reg->get(n);
+			return d ? d->id : 0;
+		};
+		for(unsigned i = 0; i < cfg.size(); i++){
+			const json::Value &r = cfg.at(i), &pa = r.get("params"),
+					&o = r.get("o"), &n = r.get("n");
+			world::Region rg;
+			for(unsigned k = 0; k < 3; k++){
+				rg.o[k] = o.at(k).is_number() ? (int)o.at(k).as_number() : 0;
+				rg.n[k] = n.at(k).is_number() ? std::max(1, std::min(
+						MAX_WORLD_REGION, (int)n.at(k).as_number())) : 1;
+			}
+			rg.sphere = jstr(pa, "shape") == "sphere";
+			rg.decorate = !pa.get("decorations").is_boolean() ||
+					pa.get("decorations").is_true();
+			const ss_ biome = jstr(pa, "biome", m_w->wp.biome);
+			auto bi = m_w->materials.biomes.find(biome);
+			if(bi == m_w->materials.biomes.end()){
+				why = "entity "+itos(json::jint(r, "id", 0))+": no biome \""+
+						biome+"\" in the material set";
+				continue;
+			}
+			world::resolve_biome(m_w->materials, bi->second, id, rg.ids.structs,
+					rg.ids);
+			rg.ids.air = id("air");
+			const int64_t soil = json::jint(pa, "soil_depth", -1);
+			if(soil >= 0)
+				rg.ids.filler_depth = (int)std::min<int64_t>(soil, 16);
+			if(!rg.ids.top || !rg.ids.filler || !rg.ids.stone){
+				why = "biome "+biome+" has no top, filler or stone";
+				continue;
+			}
+			world::Heights h;
+			h.p.generator = jstr(pa, "generator", "noise");
+			h.p.seed = (uint32_t)json::jint(pa, "seed", 0);
+			rg.seed = h.p.seed;
+			const int64_t lv = json::jint(pa, "level", -1);
+			h.p.level = rg.o[1] + (lv < 0 ? rg.n[1] / 2 - 1 : (int)lv);
+			h.p.height = (int)json::jint(pa, "height", 2);
+			h.p.spread = std::max(1, (int)json::jint(pa, "spread", 12));
+			valleys_query(h);
+			if(h.p.generator == "valleys" && !h.valleys){
+				why = "the valleys generator needs builtin/luanti_mapgen";
+				continue;
+			}
+			rg.h = &h;
+			rg.cells(out);
+		}
+		return why.empty();
+	}
+
+	// The World's regions as the entities have them now
+	json::Value regions_now()
+	{
+		json::Value out = json::array();
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(!e.has_pos || copy_by(e) || scene_of(e) != m_w->world_scene)
+				continue;
+			for(const Instance &in : e.comps){
+				const ss_ &pn = m_types[in.type].world_region;
+				if(pn.empty())
+					continue;
+				int n[3];
+				extent(in.params.get(pn), n, MAX_WORLD_REGION);
+				const pv::Vector3DInt32 o = voxel_p(e);
+				json::Value r = json::object(), oa = json::array(),
+						na = json::array();
+				oa.append((int64_t)o.getX());
+				oa.append((int64_t)o.getY());
+				oa.append((int64_t)o.getZ());
+				for(int k = 0; k < 3; k++)
+					na.append((int64_t)n[k]);
+				r.set("id", (int64_t)e.id);
+				r.set("o", oa);
+				r.set("n", na);
+				r.set("params", in.params.deepcopy());
+				out.append(r);
+			}
+		}
+		return out;
+	}
+
+	// Every World's regions written as they are now (Stopped or not, never
+	// in a session: a round's World is its start's); back: the edit's undo
+	void regions_sync(Change *back, const ss_ &by)
+	{
+		if(!m_hosted || m_active)
+			return;
+		for(auto &wd : m_worlds){
+			if(!wd.second.world_scene || !scene_id(wd.first))
+				continue;
+			WorldScope ws(m_w, &wd.second);
+			region_sync_one(back, by);
+		}
+	}
+
+	void region_sync_one(Change *back, const ss_ &by)
+	{
+		const json::Value now = regions_now();
+		ss_ row;
+		json::Value was = json::array();
+		if(m_store->get(world_row("regions"), row)){
+			const json::Value r = json::load_string(row.c_str());
+			if(r.is_array())
+				was = r.deepcopy();
+		}
+		if(now.stringify() == was.stringify())
+			return;
+		const main_context::SceneReference ref = m_w->world_scene;
+		size_t wrote = 0, cleared = 0, images = 0, kept = 0;
+		ss_ why;
+		voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
+			std::unordered_map<int64_t, interface::VoxelTypeId> a, b;
+			ss_ wwhy;
+			region_cells(w, was, a, wwhy);
+			region_cells(w, now, b, why);
+			const pv::Vector3DInt16 ss = w->get_section_size_voxels();
+			// The generated ground, a section at a time
+			up_<world::Generator> g = diff_generator();
+			std::map<std::tuple<int, int, int>, up_<interface::VoxelVolume>> gen;
+			interface::VoxelName an;
+			an.block_name = "air";
+			const interface::VoxelDefinition *ad = w->get_voxel_reg()->get(an);
+			const uint32_t air = ad ? ad->id : 0;
+			// (a heightmap's voxels are all air: its generator's sea is not)
+			auto base = [&](const pv::Vector3DInt32 &q) -> uint32_t {
+				if(m_w->wp.heightmap())
+					return air;
+				const pv::Vector3DInt16 sp = section_of(w, q);
+				auto &v = gen[std::make_tuple(sp.getX(), sp.getY(), sp.getZ())];
+				if(!v){
+					const pv::Region r = w->get_section_region_voxels(sp);
+					v.reset(new interface::VoxelVolume(r));
+					g->generate(ref, sp, *v);
+				}
+				return v->getVoxelAt(q.getX(), q.getY(), q.getZ()).data;
+			};
+			sv_<pv::Vector3DInt32> done;
+			auto put = [&](const pv::Vector3DInt32 &q, uint32_t v) -> bool {
+				uint32_t old = 0;
+				const bool have = loaded(w, q);
+				if(!have && (v == air || v == 0))
+					return false;
+				if(have && voxel_id(w, q, old) && old == v)
+					return false;
+				const pv::Vector3DInt16 sp = section_of(w, q);
+				if(sp.getY() < WORLD_SECTION_Y0 || sp.getY() > WORLD_SECTION_Y1)
+					return false;
+				if(!hm_section(w, q) && !loaded(w, q))
+					w->load_or_generate_section(sp);
+				if(!voxel_id(w, q, old) || old == v)
+					return false;
+				if(back)
+					back->cells.emplace(std::make_tuple(q.getX(), q.getY(),
+							q.getZ()), old);
+				set_id(w, q, v);
+				mark(w, ref, q, 'k', by);
+				done.push_back(q);
+				return true;
+			};
+			int x, y, z;
+			for(auto &c : a){
+				if(b.count(c.first))
+					continue;
+				world::Region::unkey(c.first, x, y, z);
+				const pv::Vector3DInt32 q(x, y, z);
+				uint32_t cur = 0;
+				if(!voxel_id(w, q, cur))
+					continue;
+				if(type_of(w, cur) != c.second && !(cur == 0 && c.second == air)){
+					kept++;
+					continue;
+				}
+				cleared += put(q, base(q));
+			}
+			for(auto &c : b){
+				auto ai = a.find(c.first);
+				if(ai != a.end() && ai->second == c.second)
+					continue;
+				world::Region::unkey(c.first, x, y, z);
+				wrote += put(pv::Vector3DInt32(x, y, z), c.second);
+			}
+			symmetry::Config cf;
+			if(!done.empty() && sym_scene(ref, cf))
+				images = sym_write(w, ref, cf, done, back ? &back->cells :
+						nullptr, by);
+		});
+		if(!why.empty())
+			warn("kit/world_region: "+why);
+		m_store->set(world_row("regions"), now.stringify());
+		if(back && (wrote || cleared)){
+			back->stroke = -3;
+			back->scene = ref;
+		}
+		log_i(MODULE, "World%s: kit/world_region: %u regions, %zu cells "
+				"written, %zu cleared (%zu changed since kept)%s", cs(by.empty() ?
+				ss_() : " by "+by), (unsigned)now.size(), wrote, cleared, kept,
+				images ? cs(", "+itos(images)+" symmetry images") : "");
 	}
 
 	// An editor's undo of a terrain stroke: its cells, samples and
@@ -24548,7 +24811,8 @@ struct Module: public interface::Module, public Interface
 				const json::Value &d = m_types[t].decl;
 				json::Value o = json::object();
 				for(const char *k : {"params", "inputs", "outputs", "gizmo",
-						"usable", "zone", "volume", "grants", "region", "voxel_box", "version",
+						"usable", "zone", "volume", "grants", "region", "voxel_box",
+						"world_region", "version",
 						"inventory", "root", "no_position", "inputs_types", "outputs_types",
 						"inputs_labels", "outputs_labels", "player", "ui", "about", "seat",
 						"movement"})
@@ -24565,7 +24829,8 @@ struct Module: public interface::Module, public Interface
 				if(!m_palette.count(t.first)){
 					json::Value o = json::object();
 					for(const char *k : {"params", "inputs", "outputs", "gizmo",
-							"zone", "volume", "grants", "region", "voxel_box", "version", "inventory",
+							"zone", "volume", "grants", "region", "voxel_box", "world_region",
+							"version", "inventory",
 							"root", "no_position", "inputs_types", "outputs_types", "inputs_labels",
 							"outputs_labels", "player", "ui", "about", "seat", "movement"})
 						if(!t.second.decl.get(k).is_undefined())
@@ -26035,6 +26300,8 @@ struct Module: public interface::Module, public Interface
 		if(undo)
 			symmetries(&back.before);
 		m_pending_ids.clear();
+		// [KIT_AIRSHIPS_2] the regions' voxels, in the same undo
+		regions_sync(undo ? &back : nullptr, "");
 		if(undo){
 			undo->push_back(back);
 			while(undo->size() > UNDO_MAX)

@@ -767,7 +767,8 @@ local BRUSH_TEXT = {raise = "raise the ground", lower = "lower the ground",
 	smooth = "smooth the ground", flatten = "flatten to the stroke's start",
 	paint = "paint the biome's ground", decorate = "decorate (the biome's)",
 	fill = "drag: fill a rectangle up to here",
-	reset = "back to the generated ground"}
+	reset = "back to the generated ground",
+	seed = "a ball of ground here, in the air too (an island's start)"}
 
 terrain_panel = function(w)
 	local r
@@ -801,7 +802,7 @@ terrain_panel = function(w)
 		T.biome = v
 		log:info("kit editor: brush biome " .. tostring(v))
 	end, {height = 24})
-	text(w, tr.surface == "heightmap" and "On the heightmap" or
+	text(w, tr.surface == "heightmap" and "On the heightmap (and voxel islands)" or
 			"On the voxels", DIM)
 	-- [KIT_VOXEL_EDITS] The sections somebody wrote, which a change of the
 	-- World's parameters keeps: each its cells unlike the generator's
@@ -874,22 +875,38 @@ local function draw_edited(dbg, mx, my)
 end
 
 -- The ground the pointer is on: {x, y, z}, a voxel's cell (its top cell)
--- or a heightmap's point; nil off the ground
+-- or a heightmap's point; nil off the ground. [KIT_AIRSHIPS_2] on = "voxels":
+-- a voxel over a heightmap (a floating island's), which the brush works on
+-- instead of the map; the seed's is the cell in front of the voxel pointed
+-- at (of a heightmap's ground nearer than SEED_AIR), else SEED_AIR cells
+-- along the ray, in the air
+local SEED_AIR = 12
 brush_at = function(mx, my)
 	local o, v = M.screen_ray(mx, my)
+	v = v:Normalized()
 	if O.solid then
-		local hit, _, t = M.voxel_ray({o.x, o.y, o.z}, {v.x, v.y, v.z},
+		local hit, front, t = M.voxel_ray({o.x, o.y, o.z}, {v.x, v.y, v.z},
 				O.solid, MAX_RAY)
-		if hit and heightmap.terrain then
+		local vox = hit and heightmap.terrain and
+				not M.terrain_cell(hit[1], hit[2], hit[3])
+		if T.brush == "seed" and hit and front and (vox or
+				not heightmap.terrain or t < SEED_AIR) then
+			return {x = front[1], y = front[2], z = front[3], on = "voxels"}
+		elseif T.brush == "seed" then
+		elseif hit and heightmap.terrain and not vox then
 			local p = o + v * t
 			local h = heightmap.height_at(p.x, p.z)
 			if h then
 				return {x = p.x, y = h, z = p.z}
 			end
+		elseif hit then
+			return {x = hit[1], y = hit[2], z = hit[3],
+				on = vox and "voxels" or nil}
 		end
-		if hit then
-			return {x = hit[1], y = hit[2], z = hit[3]}
-		end
+	end
+	if T.brush == "seed" then
+		local p = o + v * SEED_AIR
+		return {x = round(p.x), y = round(p.y), z = round(p.z), on = "voxels"}
 	end
 	local g = ground_at(o, v)
 	return g and {x = g[1], y = g[2] - 1, z = g[3]} or nil
@@ -921,7 +938,7 @@ end
 local function dab(pt)
 	send({op = "terrain", tool = T.brush, x = pt.x, y = pt.y, z = pt.z,
 		size = T.size, strength = T.strength, stroke = T.stroke,
-		biome = T.biome, level = T.level})
+		biome = T.biome, level = T.level, on = pt.on})
 	T.last = {x = pt.x, z = pt.z, t = buildat.get_time_us()}
 	T.dabs = T.dabs + 1
 end
@@ -934,8 +951,8 @@ stroke_begin = function(mx, my)
 	-- An id of its own: every dab of it one undo
 	T.stroke = math.floor(buildat.get_time_us()) % 1000000000000
 	T.down, T.level, T.dabs = true, pt.y, 0
-	log:info(string.format("kit editor: a %s stroke at %g, %g, %g", T.brush,
-			pt.x, pt.y, pt.z))
+	log:info(string.format("kit editor: a %s stroke at %g, %g, %g%s", T.brush,
+			pt.x, pt.y, pt.z, pt.on and " (on the " .. pt.on .. ")" or ""))
 	if T.brush == "fill" then
 		T.fill = pt
 		return true
@@ -947,7 +964,8 @@ end
 -- Each frame while it is down: a dab where it moved half the brush, or
 -- where it stays a while
 stroke_move = function(mx, my)
-	if not T.down or T.brush == "fill" then
+	-- (a seed is one a click: held, the next would go on the one before)
+	if not T.down or T.brush == "fill" or T.brush == "seed" then
 		return
 	end
 	local pt = brush_at(mx, my)
@@ -1000,6 +1018,12 @@ draw_brush = function(dbg, mx, my)
 		return
 	end
 	if not pt then
+		return
+	end
+	if T.brush == "seed" then
+		local r = T.size - 0.5
+		dbg:AddBoundingBox(magic.BoundingBox(magic.Vector3(pt.x - r, pt.y - r,
+				pt.z - r), magic.Vector3(pt.x + r, pt.y + r, pt.z + r)), col, false)
 		return
 	end
 	local r = T.size + 0.5
@@ -2499,7 +2523,7 @@ local function draw()
 				-- A zone's and an owned volume's extent, from its cell on
 				local t = type_of(c.type)
 				for _, k in ipairs({"zone", "volume", "grants", "voxel_box",
-						"region"}) do
+						"region", "world_region"}) do
 					local n = t[k] and c.params and c.params[t[k]]
 					if type(n) == "table" then
 						local ext = {}
@@ -2509,7 +2533,8 @@ local function draw()
 						local bc = k == "zone" and
 								magic.Color(0.3, 0.75, 1) or k == "voxel_box" and
 								magic.Color(0.63, 0.38, 0.88) or k == "region" and
-								magic.Color(1, 0.3, 0.3) or magic.Color(1, 0.6, 0.2)
+								magic.Color(1, 0.3, 0.3) or k == "world_region" and
+								magic.Color(0.3, 0.75, 0.3) or magic.Color(1, 0.6, 0.2)
 						local tq = NT.drawn_turn(e)
 						-- [KIT_FREE_ROTATION] a zone and a region turn with it; the
 						-- others are the world's voxels
