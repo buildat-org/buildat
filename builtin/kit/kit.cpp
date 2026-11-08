@@ -11885,6 +11885,11 @@ struct Module: public interface::Module, public Interface
 			if(t.shared.count(k))
 				replicate_state(e, r.comp, k);
 		}
+		// [KIT_TEAM_JOIN_LEAVES_OTHERS] A team joined: the player out of the
+		// scene's other teams (respawn_at takes the last one they are in)
+		if(t.team && pid && r.handler == "on_input" &&
+				jstr_at(r.args, 0) == "join" && in_team(pid, e.id))
+			leave_teams(pid, e);
 		const json::Value &emits = fx.get("emit");
 		json::Value tried_out = json::array();
 		for(unsigned i = 0; i < emits.size(); i++){
@@ -16323,6 +16328,43 @@ struct Module: public interface::Module, public Interface
 			x = it == m_entities.end() ? nullptr : &it->second;
 		}
 		return 0;
+	}
+
+	// [KIT_TEAM_JOIN_LEAVES_OTHERS] A player out of every team in the scene
+	// of the one they joined but it
+	void leave_teams(uint64_t player, const Entity &joined)
+	{
+		ss_ scene;
+		scene_of(joined, &scene);
+		for(auto &x : m_entities){
+			ss_ xs;
+			if(x.first == joined.id || !scene_of(x.second, &xs) || xs != scene)
+				continue;
+			for(size_t c = 0; c < x.second.comps.size(); c++){
+				Instance &o = x.second.comps[c];
+				if(!m_types[o.type].team)
+					continue;
+				const json::Value &m = o.state.get("members");
+				json::Value keep = json::array();
+				bool had = false;
+				for(unsigned i = 0; i < m.size(); i++){
+					if(m.at(i).is_number() &&
+							(uint64_t)m.at(i).as_number() == player)
+						had = true;
+					else
+						keep.append(m.at(i));
+				}
+				if(!had)
+					continue;
+				o.state.set("members", keep);
+				m_runtime_dirty = true;
+				if(m_types[o.type].shared.count("members"))
+					replicate_state(x.second, c, "members");
+				log_i(MODULE, "Entity %s's %s: player %s left it for entity %s",
+						cs(itos(x.first)), cs(o.type), cs(itos(player)),
+						cs(itos(joined.id)));
+			}
+		}
 	}
 
 	bool in_team(uint64_t player, uint64_t team)
