@@ -24,7 +24,23 @@ fi
 image="buildat-package-$target"
 out="$here/Build/package/out"
 mkdir -p "$out"
-docker build -t "$image" "$here/util/docker/$target"
+# [IMAGE_CACHE] With BUILDAT_IMAGE_REGISTRY (CI: ghcr.io/<owner>) the image
+# is pulled by the hash of util/docker/<target>/ as committed, and built and
+# pushed only when that has none: a release needs no toolchain downloads
+# (GitHub's 504 on winlibs failed alpha.6) unless the Dockerfile changed.
+# A failed pull builds as before; a failed push is a warning.
+if [ -n "${BUILDAT_IMAGE_REGISTRY:-}" ]; then
+	remote="$BUILDAT_IMAGE_REGISTRY/$image:$(git -C "$here" rev-parse --short=12 "HEAD:util/docker/$target")"
+	if docker pull "$remote"; then
+		docker tag "$remote" "$image"
+	else
+		docker build -t "$image" "$here/util/docker/$target"
+		docker tag "$image" "$remote"
+		docker push "$remote" || echo "warning: could not push $remote" >&2
+	fi
+else
+	docker build -t "$image" "$here/util/docker/$target"
+fi
 # The tree as committed, including the bundled Urho3D and the other
 # 3rdparty sources; anything uncommitted is not in a release
 tarball=$(mktemp /tmp/buildat_package_in_docker.XXXXXX)
