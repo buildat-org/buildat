@@ -65,7 +65,9 @@ return {
 	version = 1,
 	about = {
 		what = "A bot: it does the goals a player would, one at a time.",
-		outputs = {stuck = "It cannot do its goal. Value: why."},
+		outputs = {
+			stuck = "It cannot do its goal. Value: why.",
+		},
 	},
 	component = true,
 	creature = true,

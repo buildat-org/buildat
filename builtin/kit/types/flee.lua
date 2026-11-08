@@ -39,8 +39,14 @@ return {
 	version = 1,
 	about = {
 		what = "A creature behaviour: it runs away when its health is low or a player is near.",
-		inputs = {enable = "Flees again.", disable = "Flees no more."},
-		outputs = {fleeing = "It began to flee.", calm = "It flees no more."},
+		inputs = {
+			enable = "Flees again.",
+			disable = "Flees no more.",
+		},
+		outputs = {
+			fleeing = "It began to flee.",
+			calm = "It flees no more.",
+		},
 	},
 	component = true,
 	creature = true,

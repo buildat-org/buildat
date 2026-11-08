@@ -19,7 +19,10 @@ return {
 	version = 1,
 	about = {
 		what = "A creature behaviour: it goes after its senses' target, to within a distance.",
-		inputs = {enable = "Follows again.", disable = "Follows no more."},
+		inputs = {
+			enable = "Follows again.",
+			disable = "Follows no more.",
+		},
 	},
 	component = true,
 	creature = true,
