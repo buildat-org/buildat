@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 60s (2026-10-04)
-# covers: apps/hearth/main/meta.json apps/aitta/main/meta.json builtin/starport_announce/**
+# covers: apps/hearth/main/meta.json apps/aitta/main/meta.json apps/workbench/main/meta.json builtin/starport_announce/**
 # [STARPORT_PAGE_WAITS]: Hearth and Aitta answer their admin's Starport page
 # and take a Starport ID. For each: a Starport, the app listed on it by
 # starport.json with IDs on ("ids": "anyone"), the listing claimed by the
@@ -9,7 +9,7 @@
 # the app's setup code -- the ID becomes the app's first admin. The page's
 # packet is starport_announce's; an app that does not depend on it waits
 # for ever there, and refuses every ID.
-#   util/starport_id_join_check.sh [app...]   (default: hearth aitta)
+#   util/starport_id_join_check.sh [app...]   (default: hearth aitta workbench)
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -35,7 +35,7 @@ code=$(grep -o "setup code [A-Z0-9]*" "$tmp/sp.log" | cut -d' ' -f3)
 # The third of BUILDAT_SP_REQS, the claim, answered
 printf 'wait_log_any 30000 sp: {"id":3,\nquit\n' > "$tmp/cmds.txt"
 n=0
-for app in ${@:-hearth aitta}; do
+for app in ${@:-hearth aitta workbench}; do
 	n=$((n + 1))
 	prefix=BUILDAT_$(echo "$app" | tr a-z A-Z)
 	d=$tmp/$app
@@ -66,7 +66,9 @@ EOF
 		timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 		-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_$app.log" 2>&1 ||
 		fail "$app: the admin's run ($(grep -a 'Command sequence failed\|^E' "$tmp/sp_$app.log" | tail -2))"
-	curl -s -m 10 "localhost:$SP/api/v1/list" | grep -q "\"$id\"" ||
+	# [ALPHA_BUILDS] an alpha's listing goes only to a client of that alpha
+	ver=$(grep -ao "buildat_server [^ ]*" "$tmp/$app.log" | head -1 | cut -d' ' -f2)
+	curl -s -m 10 -d "{\"version\": \"$ver\"}" "localhost:$SP/api/v1/list" | grep -q "\"$id\"" ||
 		fail "$app: the claim ($tmp/sp_$app.log)"
 	token=$(python3 - "$SP" "$id" "$app" <<'PY'
 import json, sys, time, urllib.request
@@ -84,7 +86,9 @@ PY
 	) || fail "$app: the ID API"
 	setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/$app.log" | tail -1 | cut -d' ' -f3)
 	printf 'wait_log_any 30000 Joined as grown%s\nquit\n' "$app" > "$tmp/join.txt"
-	env "${prefix}_STARPORT=$token" "${prefix}_CODE=$setup" timeout 90 \
+	# BUILDAT_JOIN: accounts' own prefix, an app's (workbench) that sets none
+	env "${prefix}_STARPORT=$token" "${prefix}_CODE=$setup" \
+		"BUILDAT_JOIN_STARPORT=$token" "BUILDAT_JOIN_CODE=$setup" timeout 90 \
 		Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN \
 		-c @"$tmp/join.txt" > "$tmp/cl_$app.log" 2>&1 ||
 		fail "$app: the ID did not join ($(grep -a 'Command sequence failed\|^E' "$tmp/cl_$app.log" | tail -2))"
@@ -95,4 +99,4 @@ PY
 	echo "ok: $app listed, and a Starport ID joined as its first admin"
 	kill "${pids[-1]}"; wait "${pids[-1]}" 2>/dev/null
 done
-echo "PASS: a Starport ID joins ${*:-hearth aitta}"
+echo "PASS: a Starport ID joins ${*:-hearth aitta workbench}"

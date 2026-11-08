@@ -15,6 +15,7 @@
 		{"module": "worldgen"},
 		{"module": "heightmap"},
 		{"module": "kit"},
+		{"module": "starport_announce"},
 		{"module": "accounts", "optional": true},
 		{"module": "world_menu", "optional": true},
 		{"module": "chat", "optional": true},
