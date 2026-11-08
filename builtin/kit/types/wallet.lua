@@ -8,6 +8,9 @@
 -- on puts it there instead of a voxel (Kit's, which empties it). Stage 4:
 -- "repair" (a kit/supply's) puts back the destroyed voxels of every ship its
 -- player owns (Kit's, kit.cpp's repair_ships())
+-- [KIT_AIRSHIPS_2] `free` (set_free, a kit/shop's free_outside_rounds out
+-- of a round): voxels on a ship cost nothing (Kit's), the money left as it
+-- is; such a shop sells for nothing there too
 return {
 	version = 1,
 	player = true,
@@ -15,6 +18,7 @@ return {
 		money = {default = 0, shared = true},
 		note = {default = "", shared = true},
 		part = {default = "", shared = true},
+		free = {default = false, shared = true},
 	},
 	about = {
 		what = "A player's money for the round; on each player, not placed.",
@@ -25,10 +29,12 @@ return {
 			note = "Shows its player a line. Value: the text.",
 			hold_part = "Its player holds a ship part to put on. Value: its prefab.",
 			repair = "Repairs the ships its player owns (Kit's).",
+			set_free = "Purchases free (true) or paid (false). Value: a bool.",
 		},
 	},
 	inputs = {give = "number", pay = "number", set_money = "number",
-		note = "string", hold_part = "string", repair = "none"},
+		note = "string", hold_part = "string", repair = "none",
+		set_free = "bool"},
 	on_input = function(c, input, value, by)
 		local n = tonumber(value) or 0
 		if input == "hold_part" then
@@ -36,6 +42,9 @@ return {
 			c:log("holds the part", c.state.part)
 			return
 		elseif input == "repair" then
+			return
+		elseif input == "set_free" then
+			c.state.free = value == true
 			return
 		elseif input == "note" then
 			-- a counter in front, so the same line twice is a change

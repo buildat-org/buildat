@@ -21,7 +21,9 @@
 -- only the arena that started it runs a round there, any other is idle.
 -- Its outputs, in the default round: started and ended (the session's
 -- id), result (the winner's name, "" a draw), won (the winner's name, in the
--- round, its players still in the map: as its results begin). Its status is on the
+-- round, its players still in the map: as its results begin);
+-- [KIT_AIRSHIPS_2] began (the session's id, in the round, as it starts:
+-- the round's copies of what it links to hear it). Its status is on the
 -- players' screens (`ui`), their own team's name with it in a round.
 -- [KIT_INVENTORY_PLAY] The inventory at the round's ends (Kit's):
 -- `at_start` "kit" (empty, then the starting kits), "clear" (empty, no
@@ -435,6 +437,7 @@ return {
 		},
 		outputs = {
 			started = "A round began. Value: its session's id.",
+			began = "A round began, in it (its players' copy). Value: its session's id.",
 			ended = "A round ended. Value: its session's id.",
 			result = "Back in the lobby after a round. Value: the winner's name, \"\" a draw.",
 			won = "The round's results begin, its players still in it. Value: the winner's name.",
@@ -443,7 +446,8 @@ return {
 	},
 	inputs = {["end"] = "none", win = "any", next_map = "none",
 		prev_map = "none"},
-	outputs = {started = "number", ended = "number", result = "string:team",
+	outputs = {started = "number", began = "number", ended = "number",
+		result = "string:team",
 		won = "string:team",
 		status = "string:text"},
 	-- Version 1 started at once and had no results to show
@@ -475,6 +479,7 @@ return {
 				(c.params.duration .. " s") or "no time limit")
 		round_status(c)
 		c:after(1, "tick")
+		c:emit("began", c.session)
 	end,
 	on_enter = function(c, by)
 		if c.session ~= 0 or not c.player then

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-11-08)
-# covers: apps/workbench/templates/airships/** builtin/kit/types/airship*.json builtin/kit/types/airship.lua builtin/kit/types/engine.lua builtin/kit/types/radar.lua builtin/kit/types/radar.client.lua builtin/kit/types/supply.lua builtin/kit/types/trigger_zone.lua builtin/kit/types/shop.lua builtin/kit/types/wallet.lua builtin/kit/types/wallet.client.lua builtin/kit/types/turret.lua builtin/kit/kit.cpp
+# covers: apps/workbench/templates/airships/** builtin/kit/types/airship*.json builtin/kit/types/airship.lua builtin/kit/types/engine.lua builtin/kit/types/radar.lua builtin/kit/types/radar.client.lua builtin/kit/types/supply.lua builtin/kit/types/trigger_zone.lua builtin/kit/types/shop.lua builtin/kit/types/wallet.lua builtin/kit/types/wallet.client.lua builtin/kit/types/turret.lua builtin/kit/kit.cpp builtin/kit/types/pause_menu_action.lua builtin/kit/types/arena.lua builtin/kit/client_lua/ui.lua
 # [KIT_AIRSHIPS] (kit_plan 4s, stages 3 to 6) The airships template's round:
 # kitboss steps on the arena's pad, the round starts, he is Red. He buys a
 # skiff, a gun and a radar, mounts the gun on his deck, stacks two voxels and
@@ -16,6 +16,8 @@
 # follows), the engine drops. kitbob jumps over his rail into the zone, dies,
 # respawns on his pad where his repair crate is: the voxel back. kitboss shoots
 # the skiff's core: the ship is lost, Red's second point, Red wins the round.
+# [KIT_AIRSHIPS_2] Purchases in the round are paid (free outside one); the
+# pause menu has no "To the lobby" in the round, and has it again after.
 # Native, or "web": kitboss in a page, kitbob native.
 # Screenshots with KEEP_TMP=1: $t/*.png
 #   util/kit_airship_fight_check.sh [web]
@@ -168,6 +170,9 @@ EOF
 	held W 450
 	printf 'wait_log 60000 left | Red 0 : Blue 0\nsync 3000\n'
 	shot round
+	printf 'keypress Escape\nwait_log 5000 pause: the menu shown\nframes 3\n'
+	shot menu_round
+	printf 'keypress Escape\nwait_log 5000 pause: the menu closed\nframes 3\n'
 	# A skiff and a gun; the gun on (0,0,2); two voxels on the deck before the
 	# helm, (1,1,-1) and (1,2,-1); a radar on the upper's side (all within
 	# reach of the helm)
@@ -208,6 +213,9 @@ EOF
 	shot won
 	printf 'event kit_aim 0\nwait_log 60000 Last round: Red won\n'
 	shot after
+	printf 'frames 30\nkeypress Escape\nwait_log 5000 pause: the menu shown\nframes 3\n'
+	shot menu_after
+	printf 'keypress Escape\nwait_log 5000 pause: the menu closed\n'
 	printf 'sync 3000\nquit\n'
 } > "$t/boss.cmds"
 # kitbob, late: Blue; a skiff, a core ship, an engine
@@ -325,6 +333,11 @@ print("hits:", len(re.findall(r"kitboss's projectile \d+ hits entity %s" % bship
 	"; repaired %s voxels; the round: %s" % (rep[1], over))
 assert over and "Red" in over[-1], over
 assert "Last round: Red won" in log["bob"]
+# [KIT_AIRSHIPS_2] Paid in the round; To the lobby hidden in it, shown after
+assert "purchases paid" in log["boss"], "the round's wallet still free"
+items = re.findall(r"pause: the items ([^\n]*)", log["boss"])
+print("the pause menu in the round and after it:", items)
+assert len(items) == 2 and "To the lobby" not in items[0] and "To the lobby" in items[1], items
 PY
 echo "PASS: an airship fight${WEB:+ (web)}"
 # vim: set noet ts=4 sw=4:

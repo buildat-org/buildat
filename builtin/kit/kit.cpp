@@ -86,9 +86,10 @@ static const size_t MAX_TYPE_SOURCE = 256 << 10;
 static const int MAX_EXTENT = 64;
 static const int MAX_VOLUME = 64;
 // [KIT_CTF] A region's extent each way: the World's whole height, so a
-// map-wide region and a column down to the World's bottom fit
-static const int MAX_REGION_EXTENT = (kit::WORLD_SECTION_Y1 -
-		kit::WORLD_SECTION_Y0 + 1) * kit::WORLD_SECTION;
+// map-wide region and a column down to the World's bottom fit;
+// [KIT_AIRSHIPS_2] the widest World's side (kit/world's width), so one
+// covers a whole 1024 heightmap (the airships template's deadly ground)
+static const int MAX_REGION_EXTENT = 2048;
 // The cells a grants type's c:set_voxel sets at most (its box)
 static const int MAX_SET_CELLS = 4096;
 // [KIT_CTF] c:explode: its radius in cells (a sphere of about 3050 cells
@@ -4811,7 +4812,11 @@ struct Module: public interface::Module, public Interface
 				m_session.copied.size(), m_session.restore.size());
 		sessions_from_save();
 		m_hosted = true;
-		// [KIT_AIRSHIPS_2] the regions a template or another build placed
+		// [KIT_AIRSHIPS_2] a kit/symmetry's copies where the build has none
+		// yet (a template's), then the regions a template or another build
+		// placed
+		symmetries(nullptr);
+		m_store->set("authored", authored_json().stringify());
 		regions_sync(nullptr, "");
 		size_t n = 0, es = 0;
 		for(auto &p : m_entities)
@@ -8519,11 +8524,14 @@ struct Module: public interface::Module, public Interface
 			if(!place_ready(peer, voxel, &why))
 				return refuse(why);
 		}
-		// The cost of a placed voxel, from the placer's wallet
-		const int64_t cost = hull && !dig && !pi->second.editing ?
+		// The cost of a placed voxel, from the placer's wallet;
+		// [KIT_AIRSHIPS_2] none while it is `free` (a kit/shop's
+		// free_outside_rounds, out of a round)
+		Instance *wl = wallet_of(me);
+		const int64_t cost = hull && !dig && !pi->second.editing &&
+				!(wl && wl->state.get("free").is_true()) ?
 				json::jint(hull->params, "cost", 0) : 0;
 		if(cost > 0){
-			Instance *wl = wallet_of(me);
 			const int64_t money = wl ? json::jint(wl->state, "money", 0) : 0;
 			if(!wl || money < cost)
 				return refuse("Not enough money: a voxel costs "+itos(cost)+
@@ -23046,7 +23054,9 @@ struct Module: public interface::Module, public Interface
 		for(size_t i = 0; i < it->second.comps.size() && !button; i++){
 			const Type &t = m_types[it->second.comps[i].type];
 			comp = i;
-			button = jstr(t.decl.get("ui"), "kind") == "button" &&
+			// [KIT_AIRSHIPS_2] a pause menu's item (kit/pause_menu_action)
+			const ss_ kind = jstr(t.decl.get("ui"), "kind");
+			button = (kind == "button" || kind == "menu") &&
 					t.handlers.count("on_ui");
 		}
 		if(!button)

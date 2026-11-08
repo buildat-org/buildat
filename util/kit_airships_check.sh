@@ -2,20 +2,26 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min, ~4 min with web (2026-11-08)
-# covers: apps/workbench/templates/airships/** builtin/kit/types/airship*.json builtin/kit/types/hull.lua builtin/kit/types/wallet.lua builtin/kit/types/wallet.client.lua builtin/kit/types/shop.lua builtin/kit/types/airship.lua builtin/kit/kit.cpp builtin/kit/client_lua/controls.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/module.lua apps/workbench/main/client_lua/init.lua
+# covers: apps/workbench/templates/airships/** builtin/kit/types/airship*.json builtin/kit/types/hull.lua builtin/kit/types/wallet.lua builtin/kit/types/wallet.client.lua builtin/kit/types/shop.lua builtin/kit/types/airship.lua builtin/kit/kit.cpp builtin/kit/client_lua/controls.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/module.lua apps/workbench/main/client_lua/init.lua builtin/kit/types/pause_menu_action.lua builtin/kit/types/world_region.lua builtin/kit/client_lua/ui.lua
 # [KIT_AIRSHIPS] (kit_plan 4s, stages 1 and 2) The airships template played:
-# kitboss joins Red, buys a skiff at Red's shop (his wallet's 40 less 25), is
-# refused a second (15 left), buys a core (10). He builds on the skiff standing
+# kitboss joins Red (on Red's island, a kit/world_region's voxels), buys a
+# skiff and a core at Red's shop, free out of a round ([KIT_AIRSHIPS_2]: his
+# wallet's 40 untouched, a note each). He builds on the skiff standing
 # on its deck: a voxel placed in front of him, which he then jumps onto (the
 # collision rebuilt with it), one dug; takes its seat and flies it, building on
-# it while it moves (a cell in its frame, aimed as it moves). kitbob joins Blue,
+# it while it moves (a cell in its frame, aimed as it moves; each voxel free),
+# leaves its seat at Blue's island and takes the pause menu's "To the lobby"
+# (kit/pause_menu_action): at the lobby's spawn. kitbob joins Blue (its
+# island kit/symmetry's copy of Red's),
 # buys his own skiff and is refused building on kitboss's. Three ships changed
 # within the same seconds: the shared rebuild budget (one rebuild every 0.5 s
 # for all of them) holds. kitcat joins late: he sees the changed cells, buys a
 # core and walks from the island onto it and onto kitbob's deck, never dead
 # ([KIT_AIRSHIP_CORE_DEATH]: the island's look left out of the server's step
 # past 10 m from its middle). Stop
-# puts everything back: the ships gone, the wallets' money with them.
+# puts everything back: the ships gone, the wallets' money with them. Then in
+# the editor a seed in mid air, mirrored. The World's ground: a 1024 x 1024
+# heightmap under the islands.
 # Native, or "web": kitboss in a page, kitbob and kitcat native.
 # Screenshots with KEEP_TMP=1: $t/*.png
 #   util/kit_airships_check.sh [web]
@@ -162,16 +168,18 @@ click Button "Play mode"
 wait_log_any 10000 kit editor: the server is Running (by kitboss)
 wait_log_any 10000 kit: controls: camera first_person
 wait_log_any 10000 your money 40
+wait_log_any 10000 purchases free
+wait_log_any 60000 heightmap: terrain built: 1024x1024
 event kit_use 9
 wait_log 10000 the server put the player at
-look_dir 0 -0.3 1
+frames 30
 EOF
+	body
+	printf 'look_dir 0 -0.3 1\n'
 	shot red
-	printf 'event kit_use 22\nwait_log 10000 your money 15\n'
+	printf 'event kit_use 22\nwait_log 10000 wallet note: Skiff: free outside a round\n'
 	shot bought
-	printf 'event kit_use 22\nwait_log 10000 wallet note: Not enough money\n'
-	shot refused
-	printf 'event kit_use 24\nwait_log 10000 your money 5\n'
+	printf 'event kit_use 24\nwait_log 10000 wallet note: Core: free outside a round\n'
 	# Two ships changed at once from the island (the budget): the core's side
 	# (its seat sits on its top) and the skiff's open stern
 	at 42 0 0 -0.5 right
@@ -197,16 +205,22 @@ EOF
 	printf 'wait_log 10000 object boxes kitown_40.\n'
 	at 40 0 0.5 0 left
 	printf 'wait_log 10000 kit: warning: The core stays\n'
-	# Flown to Blue's island, a voxel placed on the way, then the money is out
+	# Flown to Blue's island, a voxel placed on the way (free)
 	printf 'event kit_point_obj\nevent kit_use 41\nwait_log 10000 seat 41\nevent kit_steer -47 17\nframes 150\n'
 	at 40 -1 0.5 -1 right
 	printf 'wait_log 10000 object boxes kitown_40.\n'
 	shot flying
-	at 40 -1 0.5 0 right
-	printf 'wait_log 10000 kit: warning: Not enough money\nevent kit_point_obj\n'
+	printf 'event kit_point_obj\n'
 	printf 'wait_log 120000 kit: steered to\nevent kit_steer off\nframes 30\n'
 	body
 	shot parked
+	# [KIT_AIRSHIPS_2] Off the seat, the pause menu's To the lobby
+	printf 'keypress F\nwait_log 10000 movement kit/walker\nframes 10\n'
+	printf 'keypress Escape\nwait_log 5000 pause: the menu shown\nframes 3\n'
+	shot menu
+	printf 'click Button "To the lobby"\nwait_log 10000 the server put the player at\nframes 30\n'
+	body
+	shot lobby
 	# kitbob and kitcat come and go; then Stop, everything back
 	printf 'wait_log 300000 object boxes kitown_46.2\nframes 30\n'
 	shot all
@@ -215,6 +229,12 @@ EOF
 	printf 'event kit_obj_cell 40 1 1 -2\nframes 2\n'
 	printf 'event kit_obj_cell 46 0 0 -1\nframes 2\n'
 	shot stopped
+	# [KIT_AIRSHIPS_2] A seed in mid air over the heightmap, in Red's half:
+	# its image in Blue's
+	printf 'event kit_edit {"op": "terrain", "tool": "seed", "on": "voxels", "x": 20, "y": 20, "z": 60, "size": 2, "strength": 2, "stroke": 1}\n'
+	printf 'wait_log 5000 kit editor: terrain: seed\n'
+	printf 'event kit_cam3d 0 30 20 20 20 60\nframes 30\n'
+	shot seed
 	printf 'event kit_edit {"op": "play"}\nwait_log 10000 kit editor: the server is Running (by kitboss)\n'
 	printf 'frames 60\nevent kit_obj_cell 40 1 1 -2\nframes 2\n'
 	printf 'sync 3000\nquit\n'
@@ -238,8 +258,11 @@ wait_log_any 60000 player physics enabled
 wait_log_any 20000 your money 40
 event kit_use 10
 wait_log 10000 the server put the player at
+frames 30
+event kit_body
+frames 2
 event kit_use 32
-wait_log 10000 your money 15
+wait_log 10000 wallet note: Skiff: free outside a round
 event kit_use 45
 wait_log 10000 seat 45
 frames 10
@@ -276,7 +299,7 @@ EOF
 	cells 44 1 1 1
 	printf 'look_dir -0.8 -0.2 0.6\n'
 	shot cat
-	printf 'event kit_use 34\nwait_log 10000 your money 30\n'
+	printf 'event kit_use 34\nwait_log 10000 wallet note: Core: free outside a round\n'
 	at 46 0 0 -0.5 right
 	printf 'wait_log 10000 object boxes kitown_46.1\nevent kit_point_obj\nlook_dir 0.3 -0.4 1\n'
 	shot cat_core
@@ -324,20 +347,19 @@ log = {n: open("%s/%s.log" % (t, n), errors="replace").read() for n in ("boss", 
 def secs(line):
 	h, m, s = re.search(r" (\d\d):(\d\d):(\d\d\.\d+) ", line).groups()
 	return int(h) * 3600 + int(m) * 60 + float(s)
-# Bought, refused, owned
-for w in ("sold kit/airship_skiff to kitboss as 40 for 25", "refused kitboss money 15 price 25",
-		"sold kit/airship_core to kitboss as 42 for 10", "sold kit/airship_skiff to kitbob as 44 for 25",
-		"sold kit/airship_core to kitcat as 46 for 10", "kit/hull 40: owned by kitboss",
+# Bought (free out of a round), owned
+for w in ("sold kit/airship_skiff to kitboss as 40 for 0",
+		"sold kit/airship_core to kitboss as 42 for 0", "sold kit/airship_skiff to kitbob as 44 for 0",
+		"sold kit/airship_core to kitcat as 46 for 0", "kit/hull 40: owned by kitboss",
 		"kitboss takes the seat of entity 41", "kitbob takes the seat of entity 45",
 		"[KIT_AIRSHIPS] a build on an object by kitbob refused: Not yours",
 		"[KIT_AIRSHIPS] a build on an object by kitboss refused: The core stays",
-		"[KIT_AIRSHIPS] a build on an object by kitboss refused: Not enough money: a voxel costs 1, you have 0",
 		"[KIT_AIRSHIPS] kitboss dug kit/stone from entity 40's cell (1,1,1)"):
 	assert w in srv, w
 # Built on while it moved: the object's place at that build between where it was
 # bought and where it parked
 places = {}
-for m in re.finditer(r"\[KIT_AIRSHIPS\] kitboss placed \S+ on entity 40's cell \(([-\d,]+)\) for 1; "
+for m in re.finditer(r"\[KIT_AIRSHIPS\] kitboss placed \S+ on entity 40's cell \(([-\d,]+)\); "
 		r"the object at ([-\d.]+),([-\d.]+),([-\d.]+)", srv):
 	places[m[1]] = [float(m[k]) for k in (2, 3, 4)]
 assert set(places) == {"1,1,1", "1,1,-2", "1,1,-4", "-1,1,-1"}, places
@@ -349,7 +371,7 @@ print("the skiff: bought at %.1f,%.1f,%.1f; built on at %.1f,%.1f,%.1f on its wa
 	"from the start and %.1f m before its end" % tuple(a + b + [moved, left]))
 assert moved > 2 and left > 10, (moved, left)
 # Collision with a placed voxel: kitboss on the deck, then on top of it
-marks = ["before", "jumped", "parked"]  # the bodies boss.cmds logs, in order
+marks = ["red", "before", "jumped", "parked", "lobby"]  # the bodies boss.cmds logs, in order
 feet = re.findall(r"kit: feet at ([-\d.]+),([-\d.]+),([-\d.]+), frame (\S+)", log["boss"])
 assert len(feet) == len(marks), (len(feet), marks)
 f = {k: ([float(x) for x in v[:3]], v[3]) for k, v in zip(marks, feet)}
@@ -357,6 +379,22 @@ print("kitboss's feet: on the deck %.3f, after the jump %.3f (frames %s, %s)" % 
 	f["before"][0][1], f["jumped"][0][1], f["before"][1], f["jumped"][1]))
 assert f["before"][1] == "40" and f["jumped"][1] == "40", f
 assert abs(f["jumped"][0][1] - f["before"][0][1] - 1) < 0.15, f
+# [KIT_AIRSHIPS_2] Red's island (a kit/world_region) walked on, kitbob on
+# Blue's (its kit/symmetry copy); "To the lobby" from Blue's island
+bob = re.findall(r"kit: feet at ([-\d.]+),([-\d.]+),([-\d.]+), frame (\S+)", log["bob"])
+print("on the islands: kitboss %s, kitbob %s; after To the lobby %s" % (f["red"], bob[:1], f["lobby"]))
+for (x, y, z), fr in (f["red"], ([float(v) for v in bob[0][:3]], bob[0][3])):
+	assert fr == "none" and abs(y - 0.5) < 0.05 and 32 <= abs(x) <= 47 and abs(z) < 13, (x, y, z, fr)
+assert x < 0, x
+(x, y, z), fr = f["lobby"]
+assert fr == "none" and math.hypot(x, z + 2) < 1 and abs(y - 0.5) < 0.05, f["lobby"]
+assert f["parked"][0][0] < -20, f["parked"]
+assert re.search(r"pause: the items [^\n]*To the lobby", log["boss"]), "no To the lobby in the menu"
+assert "kit/pause_menu_action 38: pressed by kitboss" in srv, "the press"
+assert "purchases free" in log["boss"], "the wallet not free"
+# The ground: the heightmap; the seed and its image
+assert "heightmap: terrain built: 1024x1024 samples" in log["boss"]
+assert re.search(r"Terrain by kitboss: seed at \(20,20,60\) size 2 strength 2: \d+ columns, [1-9]\d* cells;[^\n]* [1-9]\d* images", srv), "the seed and its image"
 # [KIT_AIRSHIP_CORE_DEATH] kitcat over the island's edge: on his core (its helm,
 # in the world's frame), then on kitbob's deck (its frame); the server never had
 # him elsewhere (a body that fell through the island came back 3 m off and died)

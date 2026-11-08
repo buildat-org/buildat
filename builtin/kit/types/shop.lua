@@ -11,6 +11,9 @@
 -- a time: buying another replaces it (no money back). Stage 4: a ship it sold
 -- that is lost (its core hit, a deadly kit/trigger_zone touched) is "lost" to
 -- it from Kit, and "lost" signals on (a point for the other team).
+-- [KIT_AIRSHIPS_2] `free_outside_rounds`: out of a round (the default one)
+-- its player's kit/wallet is set free (this shop's price and their voxels
+-- nothing), in a round paid again.
 -- simplified: nothing checks the pad is clear; a ship bought onto another
 -- overlaps it
 local function wallet(c)
@@ -23,6 +26,19 @@ local function wallet(c)
 	return 0
 end
 
+local function free(c)
+	return c.params.free_outside_rounds and c.session == 0
+end
+
+-- The price from the buyer's wallet, or a note that it was free
+local function pay(c, price)
+	if price > 0 then
+		c:send(c.player, "pay", price)
+	elseif free(c) then
+		c:send(c.player, "note", c.params.title .. ": free outside a round")
+	end
+end
+
 return {
 	version = 1,
 	usable = true,
@@ -33,6 +49,7 @@ return {
 		pad = {type = "position", default = {0, 0, 6}},
 		start_money = {type = "number", default = 0, min = 0, max = 100000},
 		mount = {type = "bool", default = false},
+		free_outside_rounds = {type = "bool", default = false},
 		title = {type = "string", default = "Skiff"},
 		color = {cat = "look", type = "string", default = "#d0a030"},
 	},
@@ -60,11 +77,15 @@ return {
 		c:emit("lost")
 	end,
 	on_start = function(c)
-		c.state.label = c.params.title .. ": " .. c.params.price
+		c.state.label = c.params.title .. ": " .. (free(c) and "free" or
+				c.params.price)
 	end,
 	on_join = function(c, by)
 		if c.params.start_money > 0 and c.player then
 			c:send(c.player, "set_money", c.params.start_money)
+		end
+		if c.params.free_outside_rounds and c.player then
+			c:send(c.player, "set_free", free(c))
 		end
 	end,
 	on_use = function(c, by)
@@ -72,7 +93,8 @@ return {
 			return
 		end
 		local p, money = c.params, wallet(c)
-		if money < p.price then
+		local price = free(c) and 0 or p.price
+		if money < price then
 			c:send(c.player, "note", "Not enough money: " .. p.title ..
 				" costs " .. p.price .. ", you have " .. money)
 			c:log("refused", c:name(by), "money", money, "price", p.price)
@@ -80,12 +102,10 @@ return {
 			return
 		end
 		if p.mount then
-			if p.price > 0 then
-				c:send(c.player, "pay", p.price)
-			end
+			pay(c, price)
 			c:send(c.player, "hold_part", p.prefab)
 			c.state.sold = c.state.sold + 1
-			c:log("sold the part", p.prefab, "to", c:name(by), "for", p.price)
+			c:log("sold the part", p.prefab, "to", c:name(by), "for", price)
 			return
 		end
 		local pos = {c.pos[1] + p.pad[1], c.pos[2] + p.pad[2],
@@ -95,12 +115,10 @@ return {
 			c:log("could not make", p.prefab)
 			return
 		end
-		if p.price > 0 then
-			c:send(c.player, "pay", p.price)
-		end
+		pay(c, price)
 		c:send(id, "own")
 		c.state.sold = c.state.sold + 1
-		c:log("sold", p.prefab, "to", c:name(by), "as", id, "for", p.price)
+		c:log("sold", p.prefab, "to", c:name(by), "as", id, "for", price)
 		c:emit("bought", id)
 	end,
 }

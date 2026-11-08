@@ -217,7 +217,14 @@ namespace interface
 //                               tools, while Running, in its scene, while
 //                               it is up for them, within kit:action's
 //                               allowance (one bucket a peer); on_ui(c,
-//                               phase, by) on it ("pressed", "released")
+//                               phase, by) on it ("pressed", "released").
+//                               [KIT_AIRSHIPS_2] kind "menu": an item in
+//                               the app's pause menu (extensions/
+//                               pause_menu, through E.menu), not drawn:
+//                               text its label, order its place; listed
+//                               while up for the player and in play, a
+//                               press a button's (pressed, released at
+//                               once): kit/pause_menu_action
 //   actions = {{name = "fire", key = "R", label = "Fire"}, ...}
 //                            -- ([KIT_INPUT_ACTIONS]) keys the players
 //                               press (8 at most; each value a string or
@@ -393,7 +400,10 @@ namespace interface
 //   anyone, nobody), by kit/game_rules' dig and place, outside the 32 cube
 //   centred on the prefab's box, on a taken or empty cell, on the core (the
 //   voxel kit/core: one a ship, never dug or placed), and without the hull's
-//   cost in the placer's kit/wallet (taken from it). Editing skips the hull.
+//   cost in the placer's kit/wallet (taken from it; [KIT_AIRSHIPS_2] none
+//   while the wallet's state `free` is true: a kit/shop's
+//   free_outside_rounds sets it at each join, true in the default round,
+//   false in a game session's). Editing skips the hull.
 //   The first change copies the prefab's voxels into the copy's own grid (copy
 //   on write); its model ("kitown_<id>") and boxes ("kitown_<id>.<rev>", sent
 //   as any free object's) are rebuilt for one copy at a time, the one changed
@@ -492,7 +502,8 @@ namespace interface
 //   changes; prefab_reset gives it the source's again): a move, a rename,
 //   Add/Remove component, a child, a parent, a delete (but with the
 //   kit/symmetry), a link to or from it are refused. Off or deleted, its
-//   copies go. Entities outside it stay single.
+//   copies go. Entities outside it stay single. [KIT_AIRSHIPS_2] Hosting
+//   makes the copies a build has none of yet (a template's on kit/symmetry).
 //   A type's `space` = {<param> = <kind>} says what its parameters are
 //   in space, for the copies: "world" (a position parameter that is a
 //   place or a direction in the world: the image's), "offset" (along its
@@ -1037,6 +1048,10 @@ namespace interface
 // owner "team" is owned by the members of the team it is under (itself or
 // an entity up its parents with a team: a team's base placed under the
 // team). The prefab kit/team_match is a two-team match to place.
+// [KIT_AIRSHIPS_2] kit/arena's "began" (the session's id) is emitted in the
+// round as it starts, so the round's copies of what it links to hear it
+// (kit/pause_menu_action's "hide": "To the lobby" out of a round only);
+// "started" and "ended" stay the default round's.
 // [KIT_CTF] kit/arena's `map` (a scene's name; "" none: the round in the
 // arena's own scene): the session's players go into that scene's copy
 // (its spawn, then their team's pad), its teams the round's (c.teams, a

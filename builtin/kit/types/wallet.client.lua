@@ -5,7 +5,8 @@ local text = nil
 
 return {
 	on_state = function(e, key)
-		if not e.mine or (key ~= "money" and key ~= "note" and key ~= "part") then
+		if not e.mine or (key ~= "money" and key ~= "note" and key ~= "part" and
+				key ~= "free") then
 			return
 		end
 		if not text then
@@ -19,13 +20,18 @@ return {
 		-- [KIT_AIRSHIPS] a part held to put on a ship
 		local part = tostring(e.state.part or "")
 		local held = part:gsub("^.*/", ""):gsub("^airship_", ""):gsub("_", " ")
-		text:SetText("Money: " .. m .. (part ~= "" and "\nHolding: " .. held ..
+		-- [KIT_AIRSHIPS_2] free purchases out of a round
+		local free = e.state.free == true
+		text:SetText("Money: " .. (free and "free" or m) ..
+				(part ~= "" and "\nHolding: " .. held ..
 				" (right click a face of your ship)" or "") ..
 				(note ~= "" and "\n" .. note or ""))
 		if key == "part" then
 			e:log("holding part " .. part)
 		elseif key == "money" then
 			e:log("your money " .. m)
+		elseif key == "free" then
+			e:log(free and "purchases free" or "purchases paid")
 		else
 			e:log("wallet note: " .. note)
 		end

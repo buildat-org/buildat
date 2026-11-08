@@ -640,8 +640,40 @@ function M.hud_off()
 			M.view() ~= "hud" and not (M.hud_area and M.hud_area())
 end
 
+-- [KIT_AIRSHIPS_2] kit/pause_menu_action: an item in the app's pause menu
+-- (E.menu), its label while its entity is here, shown and in play. A press
+-- is a button's (kit:ui), pressed and let go at once.
+-- simplified: the menu takes no item away, so one stays (labelled nil,
+-- not shown) for each such entity this client has seen
+local menu_items = {}
+local function menu_item(id, n, u)
+	local it = menu_items[id]
+	if not it then
+		if not E.menu then
+			return
+		end
+		it = {}
+		menu_items[id] = it
+		E.menu.add(function()
+			if not it.n or not E.running or E.editing or
+					state(it.n, id, "shown") ~= true then
+				return nil
+			end
+			return tostring(it.text or "")
+		end, function()
+			log:info("kit: menu item " .. id .. " pressed")
+			buildat.send_packet("kit:ui", id .. " 1")
+			buildat.send_packet("kit:ui", id .. " 0")
+		end, {order = num(u.order, 50, 1, 99)})
+	end
+	it.n, it.text, it.seen = n, u.text, true
+end
+
 local function update()
 	local root = magic.ui.root
+	for _, it in pairs(menu_items) do
+		it.seen = nil
+	end
 	local play = E.running and not E.editing
 	local V = vmin()
 	local pad = pad_of(V)
@@ -651,7 +683,9 @@ local function update()
 	for id, n in pairs(P.nodes) do
 		local raw = n.show_raw
 		local show = type(n.show) == "table" and n.show or nil
-		if show and type(show.ui) == "table" then
+		if show and type(show.ui) == "table" and show.ui.kind == "menu" then
+			menu_item(id, n, show.ui)
+		elseif show and type(show.ui) == "table" then
 			local r = U[id]
 			if not r or r.raw ~= raw or r.node ~= n.node then
 				if r then
@@ -704,6 +738,11 @@ local function update()
 			U[id] = nil
 		end
 		r.seen = nil
+	end
+	for _, it in pairs(menu_items) do
+		if not it.seen then
+			it.n = nil
+		end
 	end
 	local lift = 0
 	if TOUCH and M.touch_bar_top then
