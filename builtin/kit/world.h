@@ -505,6 +505,13 @@ struct Material
 			def.physically_solid = solid;
 			def.alpha_masked = kind == "leaves" || transparent;
 			def.transmits_light = def.alpha_masked;
+			// [KIT_LEAF_FACES] A cut-out cube draws all its faces, as
+			// skeldat's leaves (Luanti's allfaces): a canopy thick with its
+			// inner faces, fuller in its shadow, and the ground beside it
+			// drawn (the mesher's LEAF_SOLID_FACES; with the edge material
+			// alone it was culled and seen through)
+			if(def.alpha_masked)
+				def.face_draw_type = interface::FaceDrawType::ALWAYS;
 		}
 		return def;
 	}
