@@ -10,7 +10,8 @@
 #      noise generator refused in biome rock (no water role, named), then
 #      noise hills in grassland; seed 7 and back to 0 (the heights' hash
 #      the same, 7's another); Luanti's valleys without rivers, 192 cells
-#      a side with a water border.
+#      a side with a water border; its caves on and off, their mouths
+#      counted and the first one's column carved ([KIT_CAVE_MOUTHS]).
 #   2. A restart: the finite map baked (every section from the save, none
 #      generated, the same hash); then infinite noise: generated round the
 #      player; a cell dug while Stopped (an edit), and a new seed generates
@@ -92,6 +93,9 @@ want() # <log> <text>...
 }
 export BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_NAME=kitboss
 n=0
+# [KIT_CAVE_MOUTHS] the first cave mouth (x z) of part 1's valleys (seed 5,
+# 192 a side, caves on), whose column part 1 reads
+MOUTH="-65 -96"
 # A World parameter set, and the edit's answer: the undo count
 set_w() # <param> <json value>
 {
@@ -170,6 +174,12 @@ EOF
 	set_w width 192
 	set_w depth 192
 	set_w border '"water"'
+	# [KIT_CAVE_MOUTHS] caves on for a look at their mouths (the first's
+	# column, MOUTH below), off again
+	regen_w caves true
+	n=$((n + 1))
+	printf 'event kit_edit {"op": "terrain", "tool": "column", "x": %s, "y": 0, "z": %s}\nwait_log 5000 kit editor: terrain: column at\n' $MOUTH
+	set_w caves false
 	shot valleys
 	# [KIT_EDITED_VALLEYS] the edited sections listed on valleys: its
 	# generator's copy reaches luanti_mapgen, not from inside voxelworld
@@ -204,6 +214,18 @@ dh=$(grep -aoP 'World by kitboss: noise 64x64, seed \d+, .*decorations \d+ \(has
 	fail "noise's decorations by seed: $dh ($s)"
 vh=$(grep -aoP 'World by kitboss: valleys 192x192.*heights hash \K[0-9a-f]+' "$s" | tail -1)
 [ -n "$vh" ] || fail "no valleys hash ($s)"
+# [KIT_CAVE_MOUTHS] the valleys' caves open to the sky in some columns,
+# in none under the sea (those a tunnel reaches the top of kept shut); the
+# first mouth's column carved under its top (its highest ground lower)
+m=$(grep -aoP 'World by kitboss: valleys 192x192, .*; \K\d+ mouths, the first at \(-?\d+,-?\d+\) top -?\d+, \d+(?= under the sea kept shut)' "$s")
+mt=$(echo "$m" | grep -oP 'top \K-?\d+')
+[ -n "$m" ] && [ "${m%% *}" -gt 0 ] || fail "no cave mouths on valleys: $m ($s)"
+echo "$m" | grep -qF "the first at ($(echo $MOUTH | tr ' ' ,))" ||
+	fail "the first mouth moved ($m): MOUTH in this check is the column read"
+mg=$(grep -aoP "column \($(echo $MOUTH | tr ' ' ,)\): (air -?\d+(\.\.-?\d+)?, )?kit/\w+ (-?\d+\.\.)?\K-?\d+" "$s" | head -1)
+[ -n "$mg" ] && [ "$mg" -lt "$mt" ] ||
+	fail "the first mouth's column not carved: its ground at ${mg:-?}, the top $mt ($s)"
+echo "ok: cave mouths: $m under the sea kept shut; the first's ground at $mg under its top $mt"
 want "$t/boss1.log" "kit: warning: World: not applied: the noise generator needs the role water"
 echo "ok: flat, a biome, a role missing refused by name, noise hills (by seed: $h0, $h7, $h0b), valleys without rivers with a water border"
 
@@ -568,7 +590,7 @@ w3=$(grep -aoP 'World by kitboss: flat 64x64, seed 3, .*caves \(\K.*' "$s6" | se
 w0b=$(grep -aoP 'World by kitboss: flat 64x64, seed 0, .*caves \(\K.*' "$s6" | sed -n 2p)
 [ -n "$w0" ] && [ "$w0" = "$w0b" ] && [ "$w0" != "$w3" ] ||
 	fail "decorations and caves by the seed: $w0 / $w3 / $w0b ($s6)"
-echo "$w0" | grep -qP '^[1-9]\d* of \d+ sampled cells\), decorations [1-9]' ||
+echo "$w0" | grep -qP '^[1-9]\d* of \d+ sampled cells; .*\), decorations [1-9]' ||
 	fail "no caves or decorations: $w0 ($s6)"
 grep -aq "[1-9][0-9]* edited sections kept" "$s6" || fail "the edited sections were not kept ($s6)"
 for c in "-20,0,-20" "-10,0,-25" "-25,0,-5" "-6,0,-14"; do

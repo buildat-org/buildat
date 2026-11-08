@@ -6693,7 +6693,26 @@ struct Module: public interface::Module, public Interface
 							y++, of++)
 						n += world::cave_at(p.seed, fx + x, y, fz + z, t);
 				}
-			caves = " ("+itos(n)+" of "+itos(of)+" sampled cells)";
+			// [KIT_CAVE_MOUTHS] the columns open to the sky (every one), the
+			// first of them, and those under the sea a tunnel reaches the
+			// top of, kept shut
+			size_t mouths = 0, shut = 0;
+			ss_ first;
+			for(int z = 0; z < fd; z++)
+				for(int x = 0; x < fw; x++){
+					const int t = tops[(size_t)z * fw + x];
+					if(world::cave_mouth(p, fx + x, fz + z, t)){
+						if(!mouths++)
+							first = ", the first at ("+itos(fx + x)+","+
+									itos(fz + z)+") top "+itos(t);
+					} else if(!world::cave_opens(p, t) && world::cave_at(
+							p.seed, fx + x, t, fz + z, t, true)){
+						shut++;
+					}
+				}
+			caves = " ("+itos(n)+" of "+itos(of)+" sampled cells; "+
+					itos(mouths)+" mouths"+first+", "+itos(shut)+
+					" under the sea kept shut)";
 		}
 		// [KIT_HEIGHTMAP_REGEN_LOSS] A heightmap about to be generated again
 		// or replaced kept as the previous one (regenerate_heightmap() kept
@@ -11030,8 +11049,10 @@ struct Module: public interface::Module, public Interface
 				const int t = tops[(size_t)z * w + x];
 				const int64_t dx = x - w / 2, dz = z - d / 2,
 						d2 = dx * dx + dz * dz;
+				// [KIT_CAVE_MOUTHS] not into a cave's mouth
 				if(t < p.sea_level || (best >= 0 && d2 >= best) ||
-						blocked(x, z))
+						blocked(x, z) || world::cave_mouth(p, (int)dx,
+						(int)dz, t))
 					continue;
 				best = d2;
 				m_w->world_spawn = {{(int)dx, t + 1, (int)dz}};
