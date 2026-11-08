@@ -12,7 +12,9 @@
 --   movement = {body = {r = half width, h = height, eye = eye height},
 --     camera = "first_person"|"chase" (a vehicle's), camera_distance = a
 --     chase view's metres behind (else kit/controls' distance), camera_up =
---     metres its target is raised, touch = "stick"|"tap"|"drive"}
+--     metres its target is raised, touch = "stick"|"tap"|"drive",
+--     touch_buttons = {{"Fire", "jump"}...}: the touch bar's buttons, each
+--     held while pressed as that input (jump or down), for the default Jump}
 --   step = function(s, i, dt, w, p) ... end
 -- s its state (s.pos the body's bottom middle {x, y, z}, s.vel; the rest
 -- its own), changed in place; i this step's input: f (forward, -1...1),

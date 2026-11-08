@@ -31,7 +31,8 @@
 -- (BUILDAT_TOUCH=1, floorplanner's walking): a stick at the lower left
 -- walks (a car: steers), a drag elsewhere turns, a tap is the left click
 -- at the finger and a finger held still the right; the bar at the lower
--- right: Jump (a car: Gas and Brake), Exit in a seat, the world's actions
+-- right: Jump (a car: Gas and Brake; the movement's touch_buttons, held,
+-- for Jump), Exit in a seat, the world's actions
 -- (held while pressed), the app's.
 -- For a drive: "event kit_body" logs the body and the corrections.
 return function(K)
@@ -56,7 +57,8 @@ local C = {on = false, ctl = nil, def = nil, src = nil, s = nil, seq = 0,
 	corrections = 0, signals = {}, shake = 0, fov = nil, fov_tween = nil,
 	glitch = 0, glitch_s = 0, flash = 0, flash_color = nil, cam = nil,
 	route = nil, use_at = nil, fingers = {}, stick = nil, gas = 0,
-	touch_jump = false, bar = nil, bar_kind = nil, classes = {}}
+	touch_jump = false, touch_held = {}, bar = nil, bar_kind = nil,
+	classes = {}}
 local TOUCH = buildat.get_env("BUILDAT_TOUCH") == "1"
 local PI = math.pi
 
@@ -1164,8 +1166,12 @@ local function gather()
 			end
 		end
 		f = f + C.gas
-		if C.touch_jump then
+		if C.touch_jump or C.touch_held.jump then
 			jump = 1
+		end
+		-- [KIT_TOUCH_SEAT_BUTTONS] the movement's buttons, held
+		if C.touch_held.down then
+			down = 1
 		end
 	end
 	local fire
@@ -1456,9 +1462,31 @@ local function labels(list)
 	return table.concat(l, ", ")
 end
 
+-- [KIT_TOUCH_SEAT_BUTTONS] The movement's touch_buttons {{label, input}...}
+-- (input jump or down), nil: none declared
+local function touch_buttons()
+	local tb = decl().touch_buttons
+	if type(tb) ~= "table" then
+		return nil
+	end
+	local l = {}
+	for _, b in ipairs(tb) do
+		if type(b) == "table" and type(b[1]) == "string" and
+				(b[2] == "jump" or b[2] == "down") then
+			l[#l + 1] = {b[1], b[2]}
+		end
+	end
+	return l
+end
+
 local function make_bar()
+	local tb = touch_buttons()
+	local tb_kind = ""
+	for _, b in ipairs(tb or {}) do
+		tb_kind = tb_kind .. ":" .. b[1] .. "=" .. b[2]
+	end
 	local kind = touch_kind() .. (M.seated() and ":seat" or "") .. ":" ..
-			M.keys_version()
+			M.keys_version() .. (tb and ":tb" .. tb_kind or "")
 	if C.bar and C.bar_kind == kind then
 		return
 	end
@@ -1467,13 +1495,21 @@ local function make_bar()
 		C.abar:Remove()
 	end
 	C.bar_kind = kind
+	C.touch_held = {}
 	local list = {}
 	if touch_kind() == "drive" then
 		list[#list + 1] = {"Brake", function() C.gas = -1 end,
 			function() C.gas = 0 end}
 		list[#list + 1] = {"Gas", function() C.gas = 1 end,
 			function() C.gas = 0 end}
-	elseif touch_kind() ~= "tap" then
+	end
+	if tb then
+		for _, b in ipairs(tb) do
+			local input = b[2]
+			list[#list + 1] = {b[1], function() C.touch_held[input] = true end,
+				function() C.touch_held[input] = nil end}
+		end
+	elseif touch_kind() ~= "tap" and touch_kind() ~= "drive" then
 		list[#list + 1] = {"Jump", nil, function() C.touch_jump = true end}
 	end
 	if M.seated() then
