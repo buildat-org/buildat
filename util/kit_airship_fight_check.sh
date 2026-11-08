@@ -172,7 +172,7 @@ EOF
 	shot round
 	printf 'keypress Escape\nwait_log 5000 pause: the menu shown\nframes 3\n'
 	shot menu_round
-	printf 'keypress Escape\nwait_log 5000 pause: the menu closed\nframes 3\n'
+	printf 'click Button "Continue"\nwait_log 5000 pause: the menu closed\nframes 3\n'
 	# A skiff and a gun; the gun on (0,0,2); two voxels on the deck before the
 	# helm, (1,1,-1) and (1,2,-1); a radar on the upper's side (all within
 	# reach of the helm)
@@ -215,7 +215,7 @@ EOF
 	shot after
 	printf 'frames 30\nkeypress Escape\nwait_log 5000 pause: the menu shown\nframes 3\n'
 	shot menu_after
-	printf 'keypress Escape\nwait_log 5000 pause: the menu closed\n'
+	printf 'click Button "Continue"\nwait_log 5000 pause: the menu closed\n'
 	printf 'sync 3000\nquit\n'
 } > "$t/boss.cmds"
 # kitbob, late: Blue; a skiff, a core ship, an engine

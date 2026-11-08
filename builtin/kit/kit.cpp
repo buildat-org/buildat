@@ -10894,6 +10894,26 @@ struct Module: public interface::Module, public Interface
 				z = hm_oz(map) + map->samples_z() / 2 + 0.5;
 				y = map->height_at((float)x, (float)z) + 0.5;
 			});
+			// [KIT_AIRSHIPS_2] on the highest voxel over it (a floating
+			// island of kit/world_region's), not under it
+			voxelworld::access(m_server, m_w->world_scene,
+					[&](voxelworld::Instance *w){
+				interface::VoxelName an;
+				an.block_name = "air";
+				const interface::VoxelDefinition *ad = w->get_voxel_reg()->get(an);
+				const uint32_t air = ad ? ad->id : 0;
+				const int lo = std::max((int)std::floor(y),
+						WORLD_SECTION_Y0 * WORLD_SECTION);
+				for(int vy = (WORLD_SECTION_Y1 + 1) * WORLD_SECTION - 1; vy >= lo; vy--){
+					uint32_t v = 0;
+					if(voxel_id(w, pv::Vector3DInt32((int)std::floor(x), vy,
+							(int)std::floor(z)), v) && v &&
+							type_of(w, v) != air){
+						y = vy + 1;
+						return;
+					}
+				}
+			});
 			return;
 		}
 		x = m_w->world_spawn[0] + 0.5;
