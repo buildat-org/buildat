@@ -106,16 +106,19 @@ try() # <input> <json value>
 	ed "{\"op\": \"try\", \"id\": 4, \"comp\": 0, \"input\": \"$1\", \"value\": $2}"
 	echo "sync 5000"
 }
-# A shot from the editor's 3D camera: settled (the meter adapts at 0.6 a
-# second), the frame the sky's line
+# A shot from the editor's 3D camera: settled, the frame the sky's line;
+# the meter each frame's own ([KIT_LIGHTING_FAST_SKY_FLAKE]: at its 0.6 a
+# second, how far it came back from an overcast was the host's frame rate)
 shot() # <name> [camera: x y z x y z]
 {
 	cat <<EOF
 event kit_cam3d ${2:-20 4 20 48 2 48}
+event kit_meter 1000000
 frames 10
 delay ${SETTLE:-4000}
 frames 3
 screenshot @T@/$1.png
+event kit_meter
 event kit_ui_where $1
 EOF
 }
