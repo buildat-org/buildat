@@ -1,0 +1,26 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "airship_radar",
+	"version": 1,
+	"entities": [
+		{
+			"id": 1,
+			"name": "radar",
+			"pos": [0, 0, 0],
+			"components": [
+				{
+					"type": "kit/part",
+					"params": {
+						"size": [0.9, 0.2, 0.9],
+						"color": "#40a060",
+						"material": "metal"
+					}
+				},
+				{
+					"type": "kit/radar"
+				}
+			]
+		}
+	]
+}

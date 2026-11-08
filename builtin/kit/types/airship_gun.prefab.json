@@ -1,0 +1,39 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "airship_gun",
+	"version": 1,
+	"entities": [
+		{
+			"id": 1,
+			"name": "gun",
+			"pos": [0, 0, 0],
+			"components": [
+				{
+					"type": "kit/part",
+					"params": {
+						"size": [0.4, 0.4, 1.6],
+						"color": "#2a2a2a",
+						"material": "metal"
+					}
+				},
+				{
+					"type": "kit/turret",
+					"params": {
+						"turn_rate": 60,
+						"pitch_rate": 30,
+						"pitch_min": -30,
+						"pitch_max": 20,
+						"cooldown": 0.6,
+						"shot_speed": 45,
+						"shot_gravity": 3,
+						"shot_damage": 10
+					}
+				},
+				{
+					"type": "kit/seat"
+				}
+			]
+		}
+	]
+}

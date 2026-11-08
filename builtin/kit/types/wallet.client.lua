@@ -5,7 +5,7 @@ local text = nil
 
 return {
 	on_state = function(e, key)
-		if not e.mine or (key ~= "money" and key ~= "note") then
+		if not e.mine or (key ~= "money" and key ~= "note" and key ~= "part") then
 			return
 		end
 		if not text then
@@ -16,8 +16,15 @@ return {
 		end
 		local m = tonumber(e.state.money) or 0
 		local note = tostring(e.state.note or ""):gsub("^%d+:", "")
-		text:SetText("Money: " .. m .. (note ~= "" and "\n" .. note or ""))
-		if key == "money" then
+		-- [KIT_AIRSHIPS] a part held to put on a ship
+		local part = tostring(e.state.part or "")
+		local held = part:gsub("^.*/", ""):gsub("^airship_", ""):gsub("_", " ")
+		text:SetText("Money: " .. m .. (part ~= "" and "\nHolding: " .. held ..
+				" (right click a face of your ship)" or "") ..
+				(note ~= "" and "\n" .. note or ""))
+		if key == "part" then
+			e:log("holding part " .. part)
+		elseif key == "money" then
 			e:log("your money " .. m)
 		else
 			e:log("wallet note: " .. note)

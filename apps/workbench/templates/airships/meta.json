@@ -7,5 +7,5 @@
 	"engine_api": 2,
 	"license_code": "CC0-1.0",
 	"license_media": "CC0-1.0",
-	"description": "Two teams on floating islands. Each player starts with money, buys a ship at their team's shop and flies it; building on it costs a voxel's price. A first version: nothing to win yet."
+	"description": "Two teams on floating islands. A round starts on the lobby's gold pad: players buy ships, guns, engines and radars, build on their ships (a voxel costs 1) and fight. A ship is lost when its core is hit or it touches the ground: a point to the other team, 2 win. Crates give money and repairs."
 }
