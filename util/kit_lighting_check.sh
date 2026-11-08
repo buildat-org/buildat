@@ -274,8 +274,8 @@ EOF
 		skyn "clouds 0.40 at 120, wind 0.0 toward 180; rain 0.50: light 0.90, fog 1.00"
 		ep intensity 1
 		skyn "clouds 0.80 at 120, wind 0.0 toward 180; rain 1.00: light 0.80, fog 1.00"
-		ep weather '"snow"'
-		skyn "clouds 0.80 at 120, wind 0.0 toward 180; snow 1.00: light 0.80, fog 1.00"
+		# rain's values: no fade, the line at once (before the "to undo")
+		ep_line weather '"snow"' "clouds 0.80 at 120, wind 0.0 toward 180; snow 1.00: light 0.80, fog 1.00"
 		shot snow
 		ep weather '"storm"'
 		skyn "clouds 0.95 at 120, wind 10.0 toward 180; storm 1.00: light 0.55, fog 0.50"
