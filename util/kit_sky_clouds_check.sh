@@ -71,7 +71,7 @@ EOF
 	ep cloud_wind_speed 0
 	ep time 10
 	for mode in cartoon physical; do
-		# cartoon the default: no line for it
+		# cartoon set after fast_physical, the default: no line waited for
 		ep lighting "\"$mode\""
 		[ $mode = cartoon ] || echo "wait_log_any 10000 kit: lighting $mode"
 		for c in 0.2 0.4 0.8 1; do
