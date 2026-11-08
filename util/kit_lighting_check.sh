@@ -314,6 +314,11 @@ EOF
 		w_line sea_level 0 30000 "kit: World: generated again"
 		echo "idle 30000"
 		shot phys_ground_voxels "$LOW"
+		# [KIT_RELIEF_TINT] a grass voxel's sides under physical, behind
+		# the camera (out of the heightmap's frame)
+		edit '{"op": "set_voxel", "pos": [14, 1, 14], "voxel": "kit/grass"}'
+		echo "idle 30000"
+		shot phys_grass_side "11.5 2.2 11.5 14.5 1.4 14.5"
 		w surface '"heightmap"'
 		echo "wait_log_any 60000 heightmap: terrain built"
 		echo "idle 30000"
@@ -543,6 +548,14 @@ for g in "kit/water 0.00" "kit/sand 0.60" "kit/leaves 0.20" "kit/snow 0.20"; do
 	[[ $rl == *"$g"* ]] || fail "Kit's materials' relief: no $g ($rl)"
 done
 [[ $rl != *"kit/stone "* ]] || fail "Kit's materials' relief: stone not full ($rl)"
+# [KIT_RELIEF_TINT] the grass side's relief from the colour drawn: its
+# green fringe no longer a step over the dirt (phys_grass_side.png)
+gs=$(grep -ah "kit/grass_side.png tinted #" "$t/boss.log" | head -1)
+read gd gf <<<"$(sed -n 's/.*steepest step \([0-9.]*\), untinted \([0-9.]*\).*/\1 \2/p' <<<"$gs")"
+[ -n "${gf:-}" ] || fail "no grass side's tinted relief line in $t/boss.log"
+awk "BEGIN{exit !($gd < $gf * 0.5)}" ||
+	fail "the grass side's relief still steps at its fringe: $gs"
+echo "ok: the grass side's relief from its tinted colour: the steepest step $gd (the file's $gf)"
 read wr wg wb <<<"$(low "$t/phys_water.png")"
 awk "BEGIN{exit !($wr > $wb)}" ||
 	fail "physical's shallow water hides its sand: $wr $wg $wb"

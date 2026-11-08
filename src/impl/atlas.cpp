@@ -32,7 +32,9 @@ bool AtlasSegmentDefinition::operator==(const AtlasSegmentDefinition &other) con
 			translucency == other.translucency &&
 			spots == other.spots &&
 			static_spots == other.static_spots &&
-			animation_length == other.animation_length
+			animation_length == other.animation_length &&
+			tint_mode == other.tint_mode &&
+			tint == other.tint
 	);
 }
 
@@ -458,14 +460,24 @@ struct CAtlasRegistry: public AtlasRegistry
 	}
 
 	// Luminance of a pixel of a segment, wrapped inside the segment so that a
-	// tiling texture's derived maps tile too
+	// tiling texture's derived maps tile too; [KIT_RELIEF_TINT] of the colour
+	// drawn, the segment's tint applied as def.tint_mode says
 	static float segment_luminance(magic::Image *seg_img,
 			const magic::IntVector2 &src_off, const magic::IntVector2 &seg_size,
-			int lx, int ly)
+			int lx, int ly, const AtlasSegmentDefinition &def)
 	{
 		lx = ((lx % seg_size.x_) + seg_size.x_) % seg_size.x_;
 		ly = ((ly % seg_size.y_) + seg_size.y_) % seg_size.y_;
 		magic::Color c = seg_img->GetPixel(src_off.x_ + lx, src_off.y_ + ly);
+		if(def.tint_mode != AtlasSegmentDefinition::TINT_NONE){
+			const float t[3] = {((def.tint >> 16) & 0xff) / 255.0f,
+					((def.tint >> 8) & 0xff) / 255.0f, (def.tint & 0xff) / 255.0f};
+			const float a = def.tint_mode == AtlasSegmentDefinition::TINT_BY_ALPHA ?
+					c.a_ : 1.0f;
+			c.r_ *= 1.0f + (t[0] - 1.0f) * a;
+			c.g_ *= 1.0f + (t[1] - 1.0f) * a;
+			c.b_ *= 1.0f + (t[2] - 1.0f) * a;
+		}
 		return 0.299f * c.r_ + 0.587f * c.g_ + 0.114f * c.b_;
 	}
 
@@ -568,7 +580,8 @@ struct CAtlasRegistry: public AtlasRegistry
 		float mean_lum = 0.0f;
 		for(int ly = 0; ly<seg_size.y_; ly++)
 			for(int lx = 0; lx<seg_size.x_; lx++)
-				mean_lum += segment_luminance(seg_img, src_off, seg_size, lx, ly);
+				mean_lum += segment_luminance(seg_img, src_off, seg_size, lx, ly,
+						def);
 		mean_lum /= (float)(seg_size.x_ * seg_size.y_);
 		// Enough that a texture with any contrast at all spans a visible range
 		// of roughness, and little enough that a flat one stays flat. How
@@ -591,15 +604,15 @@ struct CAtlasRegistry: public AtlasRegistry
 				// tangent frame in the shader is built from the derivatives of
 				// the texture coordinate, so x is +u and y is +v here.
 				float lum = segment_luminance(
-						seg_img, src_off, seg_size, lx, ly);
+						seg_img, src_off, seg_size, lx, ly, def);
 				float dhdx = segment_luminance(
-						seg_img, src_off, seg_size, lx + step, ly) -
+						seg_img, src_off, seg_size, lx + step, ly, def) -
 						segment_luminance(
-						seg_img, src_off, seg_size, lx - step, ly);
+						seg_img, src_off, seg_size, lx - step, ly, def);
 				float dhdy = segment_luminance(
-						seg_img, src_off, seg_size, lx, ly + step) -
+						seg_img, src_off, seg_size, lx, ly + step, def) -
 						segment_luminance(
-						seg_img, src_off, seg_size, lx, ly - step);
+						seg_img, src_off, seg_size, lx, ly - step, def);
 				magic::Vector3 n(-dhdx * def.bumpiness, -dhdy * def.bumpiness,
 						1.0f);
 				if(normal_img){
@@ -635,6 +648,26 @@ struct CAtlasRegistry: public AtlasRegistry
 						magic::Color(roughness, spec_strength,
 						translucency, spots));
 			}
+		}
+		// [KIT_RELIEF_TINT] a masked tint's steepest step in v, the file's
+		// and the drawn colour's: a grass side's fringe over its dirt
+		if(def.tint_mode == AtlasSegmentDefinition::TINT_BY_ALPHA &&
+				def.lod_simulation == 0 && !normal_img){
+			AtlasSegmentDefinition plain = def;
+			plain.tint_mode = AtlasSegmentDefinition::TINT_NONE;
+			float drawn = 0.0f, file = 0.0f;
+			for(int ly = 0; ly<seg_size.y_; ly++)
+				for(int lx = 0; lx<seg_size.x_; lx++){
+					drawn = std::max(drawn, std::fabs(segment_luminance(seg_img,
+							src_off, seg_size, lx, ly + 1, def) - segment_luminance(
+							seg_img, src_off, seg_size, lx, ly - 1, def)));
+					file = std::max(file, std::fabs(segment_luminance(seg_img,
+							src_off, seg_size, lx, ly + 1, plain) - segment_luminance(
+							seg_img, src_off, seg_size, lx, ly - 1, plain)));
+				}
+			log_i(MODULE, "%s tinted #%06x by its alpha: the relief's steepest "
+					"step %.2f, untinted %.2f", cs(def.resource_name),
+					(unsigned)def.tint, drawn, file);
 		}
 	}
 

@@ -496,6 +496,17 @@ struct Material
 			seg.spots = moving;
 			seg.static_spots = still;
 			seg.bumpiness = bump;
+			// [KIT_RELIEF_TINT] its default look (palette entry 0) as the
+			// shader tints it: whole for what draws through KITTINT alone
+			// (leaves, plants, water, glass), by the alpha for a solid cube
+			// (KITTINTMASK), so the relief is of the colour drawn.
+			// simplified: entry 0's; another entry's relief is the same
+			if(!tint.colors.empty() && (tint.colors[0] & 0xffffff) != 0xffffff){
+				seg.tint = tint.colors[0] & 0xffffff;
+				seg.tint_mode = kind == "solid" && !transparent ?
+						interface::AtlasSegmentDefinition::TINT_BY_ALPHA :
+						interface::AtlasSegmentDefinition::TINT_WHOLE;
+			}
 		}
 		def.light_source = (uint8_t)light;
 		def.tint_palette = tint.colors;
