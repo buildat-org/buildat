@@ -23027,7 +23027,8 @@ struct Module: public interface::Module, public Interface
 		Peer &p = m_peers[peer];
 		const bool join = p.name != name || p.scene != scene;
 		const bool moved_scene = !p.scene.empty() && p.scene != scene;
-		if(join)
+		// (a guest logging in stays where they are: their zones swap who)
+		if(p.name.empty() || moved_scene)
 			p.spawning = true;
 		if(p.name != name){
 			const bool was = p.editing;
