@@ -227,7 +227,7 @@ local function sun_toward(h)
 	end
 	local d = env.d or {}
 	return LIT.sun_toward(tonumber(d.latitude) or 25,
-			tonumber(d.north) or 30, 80, h * 60)
+			tonumber(d.north) or 0, 80, h * 60)
 end
 
 -- ---- The sky: sky_render's dome (physical_sky's), drawn by its
@@ -492,15 +492,21 @@ local function phys_light(v)
 	local fe = (tonumber(d.fog_end) or env.orig.fog_end) * v.fog
 	local fs = (tonumber(d.fog_start) or env.orig.fog_start) * v.fog
 	env.zone.fogStart, env.zone.fogEnd = fs, math.max(fe, fs + 1)
+	-- [KIT_PHYS_SUN_PI] sky_render's terms are PBRVoxel's: the sun's and
+	-- the moon's irradiance lit by albedo / pi, the ambient by albedo.
+	-- KitVoxel's diffuse is Urho's (no 1/pi), so the light is given over
+	-- pi here; at their full value the sun stood pi times over the
+	-- ambient, and the shadows were skeldat's darkened that much
 	if s.sun then
 		env.sun.direction = magic.Vector3(-tx, -height, -tz)
-		env.light.brightness = t.sun * s.up * v.light * sun_through(v)
+		env.light.brightness = t.sun * s.up * v.light * sun_through(v) /
+				math.pi
 		env.light.color = magic.Color(t.sun_color.r, t.sun_color.g,
 				t.sun_color.b)
 	else
 		env.sun.direction = magic.Vector3(tx, height, tz)
 		env.light.brightness = s.moon and t.moon * s.moon_up * v.light *
-				sun_through(v) or 0
+				sun_through(v) / math.pi or 0
 		env.light.color = magic.Color(t.moon_color.r, t.moon_color.g,
 				t.moon_color.b)
 	end
@@ -1116,7 +1122,7 @@ buildat.sub_packet("kit:environment", function(data)
 	local was = env.d and env.d.weather
 	local first = env.d == nil
 	env.d = d
-	env.h = (tonumber(d.time) or 12) % 24
+	env.h = (tonumber(d.time) or 15) % 24
 	LIT.lamps = type(d.lamps) == "table" and d.lamps or {}
 	-- At once when the environment comes or the lighting changes, else
 	-- faded

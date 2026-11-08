@@ -16093,7 +16093,7 @@ struct Module: public interface::Module, public Interface
 		const double minutes = std::max(0.0, env_num(v, "day_minutes", 0));
 		if(seq != c.seq){
 			c.seq = seq;
-			c.base = std::fmod(std::max(0.0, env_num(v, "time", 12)), 24.0);
+			c.base = std::fmod(std::max(0.0, env_num(v, "time", 15)), 24.0);
 			c.at = now;
 			c.minutes = minutes;
 			c.last = -1;

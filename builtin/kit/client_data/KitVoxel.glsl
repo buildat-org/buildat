@@ -25,8 +25,8 @@
 //   KITWATER  ([KIT_PHYS_WATER_LOOK]) a translucent face under KITLINEAR,
 //       lit as luanti_client's PBRVoxel.glsl lights skeldat's water
 //       (surface.lua's: roughness 0.35, spec_strength 0.9, so F0 0.072):
-//       the sun's GGX lobe (times pi: Urho's diffuse has no 1/pi, so the
-//       albedo's share is cut by it instead), the sky's light (the
+//       the sun's GGX lobe (times pi: the light is given over pi,
+//       environment.lua's KIT_PHYS_SUN_PI), the sky's light (the
 //       ambient) by EnvBRDFApprox and the specular emphasis of 0.7; the
 //       alpha grown by the reflection, so a grazing look shows the bed
 //       less. simplified: a flat surface, no spots, no cube map; glass
@@ -164,7 +164,8 @@ void VS()
 #if defined(KITWATER) || defined(KITSPOTS)
 // PBRVoxel's sun lobe: GGX, Schlick on the half vector, Smith's
 // height-correlated visibility; rough is perceptual (squared here). Times
-// pi: Urho's diffuse has no 1/pi. Multiplied by n.l (Urho's diff) after.
+// pi: the light is given over pi (environment.lua's KIT_PHYS_SUN_PI), as
+// Urho's diffuse has no 1/pi. Multiplied by n.l (Urho's diff) after.
 float KitGGX(vec3 normal, vec3 lightDir, float rough, float f0)
 {
     vec3 toEye = normalize(cCameraPosPS - vWorldPos.xyz);
@@ -304,9 +305,6 @@ void PS()
         #ifndef KITWATER
             diffColor.a = 1.0 - pow(1.0 - diffColor.a, 2.2);
         #endif
-    #endif
-    #ifdef KITWATER
-        diffColor.rgb *= 1.0 / 3.14159;
     #endif
 
     // Get material specular albedo

@@ -151,6 +151,10 @@ EOF
 	# 4: the environment, on the root
 	edit '{"op": "place", "type": "kit/environment", "pos": [0, 1, 0]}'
 	echo "wait_log_any 10000 kit: environment: from the root, 4,"
+	# The noon sun its references were taken under (the default 15
+	# o'clock and north 0 since [KIT_ENV_DEFAULTS])
+	ep time 12
+	ep north 30
 	# [KIT_FAST_PHYSICAL] its default fast_physical; cartoon set, the
 	# reference's look
 	echo "wait_log_any 10000 kit: lighting fast_physical (HDR, metered; no shadow map, no bloom)"

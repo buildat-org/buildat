@@ -73,6 +73,10 @@ EOF
 	edit '{"op": "set", "id": 4, "comp": 0, "param": "size", "value": [4, 0.5, 4]}'
 	edit_line '{"op": "place", "type": "kit/environment", "pos": [0, 1, 0]}' \
 		"kit: lighting fast_physical (HDR, metered; no shadow map, no bloom)"
+	# The noon sun this check's plate was measured under (the default 15
+	# o'clock and north 0 since [KIT_ENV_DEFAULTS])
+	edit '{"op": "set", "id": 5, "comp": 0, "param": "time", "value": 12}'
+	edit '{"op": "set", "id": 5, "comp": 0, "param": "north", "value": 30}'
 	edit_line '{"op": "set", "id": 5, "comp": 0, "param": "cloud_cover", "value": 0.1}' \
 		"kit: sky: fast_physical, $SKY, shadows 0"
 	shot fast

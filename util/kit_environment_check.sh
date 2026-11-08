@@ -124,11 +124,11 @@ EOF
 	echo "wait_log_any 10000 kit: the far clip: play 250, editor 300 (fog_end 200)"
 	edit '{"op": "set", "id": 4, "comp": 0, "param": "fog_end", "value": 800}'
 	echo "wait_log_any 10000 kit: the far clip: play 880, editor 880 (fog_end 800)"
-	# Latitude and north: the noon sun south, 64.5 degrees up and a north
-	# of 30 off the axes by default; at 60 and north 0, 29.5 up, due -z
-	echo "wait_log_any 10000 0.90 -0.37"
+	# Latitude and north: by default (25, north 0, 15 o'clock) the sun
+	# south-west, 40 degrees up; at 60 and 12 o'clock, 29.5 up, due -z
+	echo "wait_log_any 10000 toward the sun -0.71 0.64 -0.31"
 	edit '{"op": "set", "id": 4, "comp": 0, "param": "latitude", "value": 60}'
-	edit '{"op": "set", "id": 4, "comp": 0, "param": "north", "value": 0}'
+	edit '{"op": "set", "id": 4, "comp": 0, "param": "time", "value": 12}'
 	echo "wait_log_any 10000 0.49 -0.87"
 	cat <<EOF
 wait_log_any 10000 kit: weather drawn: snow
@@ -166,7 +166,7 @@ stop
 s=$t/srv1.log c=$t/boss1.log
 grep -a "Environment of\|Season\|kit/environment\|movement" "$s" | sed 's/^.*\(kit\|main\) *: /  /' | cut -c1-200
 grep -a "kit: environment\|kit: weather\|kit: season" "$c" | sed 's/^.*kit: /  client: /' | cut -c1-200
-want "$c" "kit: environment: from the root, 4, 12.0 o'clock, sky #8cadd9, fog 120-200, gravity 1, weather clear, season summer" \
+want "$c" "kit: environment: from the root, 4, 15.0 o'clock, sky #8cadd9, fog 120-200, gravity 1, weather clear, season summer" \
 	"kit: weather snow" "kit: season winter: registry swapped"
 grep -aqP 'Environment of the scene world: \{.*"entity":4,.*"from":"root"' "$s" ||
 	fail "the main scene's environment not from the root ($s)"
@@ -176,7 +176,7 @@ echo "ok: an environment on the root, its weather and season told; the winter te
 grep -aqP "kitboss's movement kit/walker changed: gravity 10\.0" "$s" ||
 	fail "the movement's gravity not halved ($s)"
 echo "ok: the environment's gravity times the movement's own"
-want "$c" "kit: environment: from the scene, 7, 12.0 o'clock" \
+want "$c" "kit: environment: from the scene, 7, 15.0 o'clock" \
 	"kit: season summer: own registry again" "kit: weather rain"
 grep -aqP 'Environment of the scene cave: \{.*"entity":4,.*"from":"root"' "$s" ||
 	fail "the cave not first given the root's environment ($s)"

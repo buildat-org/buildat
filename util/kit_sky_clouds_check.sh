@@ -46,11 +46,11 @@ ep() # <param> <json value>: the environment's (entity 3)
 {
 	edit "{\"op\": \"set\", \"id\": 3, \"comp\": 0, \"param\": \"$1\", \"value\": $2}"
 }
-# At 10 o'clock the sun is toward (0.246, 0.781, -0.574)
-# (environment.lua's sun_toward, at the default latitude 25 and north 30); the camera looks at it from (20, 4, 20)
+# At 10 o'clock the sun is toward (0.500, 0.781, -0.374)
+# (environment.lua's sun_toward, at the default latitude 25 and north 0); the camera looks at it from (20, 4, 20)
 shot() # <name>
 {
-	printf 'event kit_cam3d 20 4 20 22.46 11.81 14.26\nframes 10\ndelay 3000\nframes 3\nscreenshot @T@/%s.png\n' "$1"
+	printf 'event kit_cam3d 20 4 20 25.00 11.81 16.26\nframes 10\ndelay 3000\nframes 3\nscreenshot @T@/%s.png\n' "$1"
 }
 {
 	cat <<'EOF'
