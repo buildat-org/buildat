@@ -11,8 +11,11 @@ on:
   push:
     tags: ['v*']
 jobs:
+  # [RUNNER_PIN] ubuntu-24.04, not -latest: on 26.04 (ubuntu-latest from
+  # 2026-11) Wine in the container gets no socket ("socket : Function not
+  # implemented") and the Windows prebuild fails; alpha.6 did
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # [IMAGE_CACHE] The packaging images on GHCR by their Dockerfile's hash
     # (util/package_in_docker.sh); no login only means a build from scratch
     permissions:
@@ -67,7 +70,7 @@ jobs:
           path: Build/package/out/logs/
           if-no-files-found: ignore
   windows:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # [IMAGE_CACHE] The packaging images on GHCR by their Dockerfile's hash
     # (util/package_in_docker.sh); no login only means a build from scratch
     permissions:
@@ -125,7 +128,7 @@ jobs:
   # bumps left out.
   release:
     needs: [linux, windows]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
