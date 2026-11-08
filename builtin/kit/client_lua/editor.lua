@@ -761,6 +761,8 @@ local function make_cameras()
 	cam3d.nearClip = 0.05
 	cam3d.farClip = 300
 	cam3d.fov = 60
+	-- [KIT_FAR_CLIP] past the environment's fog_end (environment.lua)
+	M.reach_camera("editor", cam3d)
 	return cam3d_node, cam3d
 end
 

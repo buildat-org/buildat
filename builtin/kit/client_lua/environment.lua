@@ -509,12 +509,56 @@ local function phys_light(v)
 	sky_log(LIT.mode, s)
 end
 
+-- [KIT_FAR_CLIP] The view reaches past the fog: the play camera's and the
+-- editor's 3D camera's far clip a tenth past fog_end (the parameter, not the
+-- weather's thinner fog), never under the app's own, and the zone around it.
+-- Each camera by its slot, its own far clip read once (a wrapper fetched
+-- again is another table)
+local REACH = {}
+function M.reach_camera(slot, cam)
+	REACH[slot] = REACH[slot] or {base = cam.farClip}
+	REACH[slot].cam = cam
+	REACH.want = false -- set again on the next light
+end
+local function reach()
+	-- by the node Kit keeps (GetComponent's wrapper is new each call)
+	if O.camera and REACH.play_node ~= O.camera then
+		local c = O.camera:GetComponent("Camera")
+		if c then
+			REACH.play_node = O.camera
+			M.reach_camera("play", c)
+		end
+	end
+	local fe = env.d and tonumber(env.d.fog_end)
+	local want = fe and fe * 1.1 or nil
+	if want == REACH.want then
+		return
+	end
+	REACH.want = want
+	local said = {}
+	for _, slot in ipairs({"play", "editor"}) do
+		local r = REACH[slot]
+		if r then
+			r.cam.farClip = want and math.max(r.base, want) or r.base
+			said[#said + 1] = slot .. " " .. string.format("%.0f", r.cam.farClip)
+		end
+	end
+	-- simplified: the app's zone grown to the far clip around the origin
+	-- and kept so (a view more than 4 km out is under the default zone)
+	if want and env.zone and not env.made_zone then
+		env.zone.boundingBox = magic.BoundingBox(-(want + 4096), want + 4096)
+	end
+	log:info("kit: the far clip: " .. table.concat(said, ", ") ..
+			" (fog_end " .. tostring(fe) .. ")")
+end
+
 -- The light of the hour h (0 to 24): the sun up from 6 to 18
 local function env_light()
 	local d = env.d
 	if not d or not env_nodes() then
 		return
 	end
+	reach()
 	local v = values()
 	if M.physical() then
 		return phys_light(v)
@@ -569,6 +613,14 @@ end
 LIT.relight = env_light
 
 local function env_restore()
+	-- [KIT_FAR_CLIP] the app's own far clips back
+	for _, slot in ipairs({"play", "editor"}) do
+		local r = REACH[slot]
+		if r then
+			r.cam.farClip = r.base
+		end
+	end
+	REACH.want = false
 	if not env.zone then
 		return
 	end

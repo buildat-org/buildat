@@ -119,6 +119,11 @@ EOF
 	edit '{"op": "set", "id": 4, "comp": 0, "param": "season", "value": "winter"}'
 	echo "wait_log_any 10000 kit: season winter: registry swapped"
 	edit '{"op": "set", "id": 4, "comp": 0, "param": "gravity", "value": 0.5}'
+	# [KIT_FAR_CLIP] the cameras' far clip past the fog: at the default 200
+	# the app's own, at 800 a tenth past it
+	echo "wait_log_any 10000 kit: the far clip: play 250, editor 300 (fog_end 200)"
+	edit '{"op": "set", "id": 4, "comp": 0, "param": "fog_end", "value": 800}'
+	echo "wait_log_any 10000 kit: the far clip: play 880, editor 880 (fog_end 800)"
 	cat <<EOF
 wait_log_any 10000 kit: weather drawn: snow
 frames 60
