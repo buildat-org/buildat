@@ -471,6 +471,9 @@ struct Peer
 	uint64_t frame = 0;
 	double frame_rest[3] = {0, 0, 0};
 	bool editing = false;
+	// [KIT_JOIN_ORIGIN_POSITION] Joined, the join's runs (a spawner's
+	// teleport) not done yet: in no zone, its place the app's
+	bool spawning = false;
 	// The tools' colour (an index of COLORS, -1 while they are off), the
 	// selected entity (0: none) and the cursor (null: none), which the
 	// other builders see
@@ -16880,7 +16883,13 @@ struct Module: public interface::Module, public Interface
 					const Peer &peer = pp.second;
 					if(peer.scene != scene || !peer.player)
 						continue;
-					const bool inside = box_holds(o, q, n, peer.pos);
+					// [KIT_JOIN_ORIGIN_POSITION] One joining or not put yet is
+					// nowhere: the app's place before the spawn's (the origin's
+					// ground on a join and at a session's end) is in no zone
+					auto bi = m_bodies.find(pp.first);
+					const bool inside = !peer.spawning && (!m_host.controls ||
+							(bi != m_bodies.end() && bi->second.put)) &&
+							box_holds(o, q, n, peer.pos);
 					if(inside != (in.inside.count(itos(peer.player)) > 0))
 						log_i(MODULE, "Entity %s: %s %s its zone at %.3f,%.3f,%.3f",
 								cs(itos(e.id)), cs(peer.name), inside ? "enters" :
@@ -17155,6 +17164,10 @@ struct Module: public interface::Module, public Interface
 			log_v(MODULE, "%zu runs wait for the next tick", m_queue.size());
 		else if(!m_kits_due.empty())
 			kits_due();
+		// [KIT_JOIN_ORIGIN_POSITION] the joins' runs done: placed
+		if(m_queue.empty())
+			for(auto &p : m_peers)
+				p.second.spawning = false;
 		// simplified: the runtime row is written after each tick that
 		// changed it; a write per interval is the upgrade if a busy world
 		// makes it a cost
@@ -22972,6 +22985,8 @@ struct Module: public interface::Module, public Interface
 		Peer &p = m_peers[peer];
 		const bool join = p.name != name || p.scene != scene;
 		const bool moved_scene = !p.scene.empty() && p.scene != scene;
+		if(join)
+			p.spawning = true;
 		if(p.name != name){
 			const bool was = p.editing;
 			tools(p, peer, false);
