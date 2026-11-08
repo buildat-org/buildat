@@ -10,6 +10,9 @@
 # metered with no shadow map and no bloom; then physical (the shadow map
 # on), cartoon, and fast_physical again. The lines the client logs for
 # each, and the plate's noon shadow under physical alone.
+# [KIT_LAMP_PROMPT] A builder's lamp voxel placed with the 3D camera still lit
+# within 0.6 s, kitboss's own and kitbob's (a second builder, native), in both
+# views; the chunk scans' cost printed.
 #   util/kit_fast_physical_check.sh [web]
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -78,12 +81,33 @@ EOF
 	lighting cartoon "kit: sky: cartoon, $SKY, shadows 0"
 	shot cartoon
 	lighting fast_physical "kit: sky: fast_physical, $SKY, shadows 0"
+	# [KIT_LAMP_PROMPT] A lamp placed with the camera still lights at once
+	# (the sweep would take up to 3 s), and kitbob's too
+	printf 'event kit_edit {"op": "voxel", "name": "lamp", "texture": "kit/sand.png", "light": 14}\nsync 5000\n'
+	printf 'event kit_cam3d 10 8 16 10 0.5 7.1\nwait_log_any 10000 kit: lamps: 0 lit about the camera\nframes 10\n'
+	edit_line '{"op": "set_voxel", "pos": [10, 7, 13], "voxel": "kitboss/lamp"}' "kit: lamps: 1 lit about the camera"
+	printf 'event kit_edit {"op": "builder", "name": "kitbob", "on": true}\n'
+	echo "wait_log 120000 kit: lamps: 2 lit about the camera"
 	echo quit
 } > "$t/boss.cmds"
+cat > "$t/bob.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitbob
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+event kit_edit {"op": "mode", "on": true}
+wait_log_any 10000 kit editor: edit mode on
+event kit_cam3d 10 8 16 10 0.5 7.1
+wait_log_any 30000 kit: lamps: 1 lit about the camera
+frames 10
+event kit_edit {"op": "set_voxel", "pos": [12, 7, 13], "voxel": "kitboss/lamp"}
+wait_log 10000 kit: lamps: 2 lit about the camera
+sync 3000
+quit
+EOF
 native() # <name>: its commands in $t/<name>.cmds
 {
-	run_client 60 "$t/$1.log" timeout 300 bin/buildat -C "$t/client_cache" \
-		-D "$t/cu_boss" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
+	run_client 60 "$t/$1.log" timeout 300 bin/buildat -C "$t/client_cache_$BUILDAT_JOIN_NAME" \
+		-D "$t/cu_$BUILDAT_JOIN_NAME" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
 		-o lighting=game -c @"$t/$1.cmds" ||
 		fail "the client failed ($t/$1.log, $t/srv.log)"
 }
@@ -96,11 +120,21 @@ click Button "Don't add"
 sync 3000
 quit
 EOF
+printf 'wait_log_any 60000 Joined as kitbob\nsync 3000\nquit\n' > "$t/bob0.cmds"
 wait_for_log "$t/srv.log" "setup code [A-Z0-9]+" 30
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv.log" | head -1)
 [ -n "$code" ] || fail "no setup code ($t/srv.log)"
 export BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_NAME=kitboss
-BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 native admin
+BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
+	BUILDAT_JOIN_ADMIN="setting open_registration on" native admin
+BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE=1 native bob0
+# kitbob once kitboss has made him a builder
+(
+	wait_for_log "$t/srv.log" "kitboss made builder kitbob" 600 &&
+		BUILDAT_JOIN_NAME=kitbob native bob
+) &
+bob=$!
+CHECK_PIDS+=($bob)
 c=$t/boss.log
 if [ -n "$WEB" ]; then
 	# The native sequence as a page's steps; the page asks for the game's
@@ -128,7 +162,7 @@ for line in open(sys.argv[1]):
 		ms, _, text = rest.partition(" ")
 		out.append(["waitlog" if cmd == "wait_log" else "waitlog_any",
 			re.escape(text), int(ms) / 1000])
-	elif cmd in ("frames", "idle"):
+	elif cmd in ("frames", "idle", "sync"):
 		out.append([cmd, int(rest)])
 	elif cmd == "delay":
 		out.append(["wait", int(rest)])
@@ -154,8 +188,32 @@ EOF
 else
 	native boss
 fi
+wait $bob || fail "kitbob ($t/bob.log, $t/srv.log)"
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
+# [KIT_LAMP_PROMPT] From the edit sent to its lamp lit, in each one's log; the
+# chunks' scans' cost
+python3 -I - "$c" "$t/bob.log" <<'EOF' || fail "the lamps ($c, $t/bob.log)"
+import re, sys
+def at(line):
+	h, m, s = re.search(r" (\d\d):(\d\d):(\d\d\.\d+) ", line).groups()
+	return int(h) * 3600 + int(m) * 60 + float(s)
+def first(lines, text, after=0):
+	for l in lines:
+		if text in l and at(l) >= after:
+			return at(l)
+	raise SystemExit("not logged: " + text)
+boss, bob = [open(f, errors="replace").read().splitlines() for f in sys.argv[1:]]
+t0 = first(boss, '{"op": "set_voxel", "pos": [10, 7, 13]')
+own = first(boss, "kit: lamps: 1 lit about the camera", t0) - t0
+t1 = first(bob, '{"op": "set_voxel", "pos": [12, 7, 13]')
+other = first(boss, "kit: lamps: 2 lit about the camera", t1) - t1
+bob_own = first(bob, "kit: lamps: 2 lit about the camera", t1) - t1
+ms = [float(m) for l in boss for m in re.findall(r"kit: lamps: a chunk's \d+ cells scanned in ([0-9.]+) ms", l)]
+print("the lamps lit after %.2f s (kitboss's own), %.2f s (kitbob's in kitboss's view), %.2f s "
+	"(kitbob's own); a chunk's scan %.2f..%.2f ms (%d)" % (own, other, bob_own, min(ms), max(ms), len(ms)))
+assert max(own, other, bob_own) < 0.6, (own, other, bob_own)
+EOF
 # The default's line came before the first edit's of the lighting
 python3 -I - "$c" <<'EOF' || fail "the lines ($c)"
 import sys

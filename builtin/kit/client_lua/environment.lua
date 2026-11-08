@@ -613,7 +613,22 @@ local function lamps_off()
 	for _, n in ipairs(LIT.lamp_nodes) do
 		n:Remove()
 	end
-	LIT.lamp_nodes, LIT.scan = {}, nil
+	LIT.lamp_nodes, LIT.scan, LIT.placed = {}, nil, nil
+end
+
+-- The lamp level of a voxel type's id (nil: none), its name kept in names
+local function lamp_level(reg, names, id)
+	if id == 0 then
+		return nil
+	end
+	local name = names[id]
+	if name == nil then
+		local def = reg:get_by_id(id)
+		name = def and def.name.block_name or false
+		names[id] = name
+	end
+	return name and (LIT.lamps[name] or
+			LIT.lamps[name:match("^(.-):[^/]*$") or ""])
 end
 
 local function lamps_place(found, p)
@@ -649,6 +664,8 @@ local function lamps_place(found, p)
 	end
 end
 
+local lamps_chunk -- below
+
 local function lamps_update(dt)
 	if not M.physical() or not next(LIT.lamps) then
 		if #LIT.lamp_nodes > 0 then
@@ -664,6 +681,10 @@ local function lamps_update(dt)
 	local reg = voxelworld.get_voxel_registry()
 	if not reg then
 		return
+	end
+	if not LIT.lamp_sub then
+		LIT.lamp_sub = true
+		voxelworld.sub_geometry_update(lamps_chunk)
 	end
 	local s = LIT.scan
 	if not s then
@@ -697,21 +718,12 @@ local function lamps_update(dt)
 	for x = s.x, stop do
 		for y = -LAMP_RY, LAMP_RY do
 			for z = -LAMP_R, LAMP_R do
-				local id = reg:id_of(voxelworld.get_static_voxel(
-						magic.Vector3(c[1] + x, c[2] + y, c[3] + z)))
-				if id ~= 0 then
-					local name = s.names[id]
-					if name == nil then
-						local def = reg:get_by_id(id)
-						name = def and def.name.block_name or false
-						s.names[id] = name
-					end
-					local level = name and (LIT.lamps[name] or
-							LIT.lamps[name:match("^(.-):[^/]*$") or ""])
-					if level then
-						s.found[#s.found + 1] = {c[1] + x, c[2] + y,
-							c[3] + z, level}
-					end
+				local level = lamp_level(reg, s.names, reg:id_of(
+						voxelworld.get_static_voxel(
+						magic.Vector3(c[1] + x, c[2] + y, c[3] + z))))
+				if level then
+					s.found[#s.found + 1] = {c[1] + x, c[2] + y,
+						c[3] + z, level}
 				end
 			end
 		end
@@ -719,8 +731,119 @@ local function lamps_update(dt)
 	s.x = stop + 1
 	if s.x > LAMP_R then
 		lamps_place(s.found, p)
+		LIT.placed, LIT.placed_at = s.found, s.at
 		s.at, s.wait = nil, 0.5
 	end
+end
+
+-- [KIT_LAMP_PROMPT] A chunk meshed again (an edit, the client's own
+-- predicted write included, or a chunk streamed in): its cells in the box
+-- the lamps were last found in scanned at once, from its volume, their
+-- lamps in place of the ones found there before; and in a sweep under way,
+-- in the slices it has passed. A chunk off the box (far: streaming) is
+-- left alone. Measured (kit_fast_physical_check, all 2601 cells of the box
+-- in one chunk): 0.6-0.9 ms natively, 2 ms on the web (a VoxelInstance a
+-- cell, as the sweep reads them, was 2.5-5.8 ms natively)
+lamps_chunk = function(node)
+	local voxelworld = require("buildat/module/voxelworld")
+	local size = voxelworld.chunk_size_voxels
+	local reg = voxelworld.get_voxel_registry()
+	if not LIT.placed or not size or not reg or not M.physical() or
+			not next(LIT.lamps) then
+		return
+	end
+	local wp = node.worldPosition
+	local lo = {math.floor(wp.x - size.x / 2 + 1), math.floor(wp.y - size.y / 2 + 1),
+		math.floor(wp.z - size.z / 2 + 1)}
+	local dim = {size.x, size.y, size.z}
+	local reach = {LAMP_R, LAMP_RY, LAMP_R}
+	-- The chunk's cells in the box about c (to x below xmax): nil if none
+	local function within(c, xmax)
+		local a, b = {}, {}
+		for k = 1, 3 do
+			a[k] = math.max(lo[k], c[k] - reach[k])
+			b[k] = math.min(lo[k] + dim[k] - 1, c[k] + reach[k])
+		end
+		b[1] = math.min(b[1], xmax or b[1])
+		if a[1] > b[1] or a[2] > b[2] or a[3] > b[3] then
+			return nil
+		end
+		return a, b
+	end
+	local s = LIT.scan
+	local a, b = within(LIT.placed_at)
+	local sa, sb
+	if s and s.at then
+		sa, sb = within(s.at, s.at[1] + s.x - 1)
+	end
+	if not a and not sa then
+		return
+	end
+	local vol = voxelworld.get_volume(node)
+	if not vol then
+		return
+	end
+	local t0 = buildat.get_time_us()
+	-- The chunk's lamps in the union of both
+	local u0, u1 = a or sa, b or sb
+	if a and sa then
+		u0 = {math.min(a[1], sa[1]), math.min(a[2], sa[2]), math.min(a[3], sa[3])}
+		u1 = {math.max(b[1], sb[1]), math.max(b[2], sb[2]), math.max(b[3], sb[3])}
+	end
+	-- Each first plane's word's level (false: none), kept for these lamps: a
+	-- word read as a number makes no VoxelInstance (half the cost)
+	if LIT.lamp_words_of ~= LIT.lamps then
+		LIT.lamp_words_of, LIT.lamp_words, LIT.lamp_names = LIT.lamps, {}, {}
+	end
+	local words, names, got, n = LIT.lamp_words, LIT.lamp_names, {}, 0
+	for x = u0[1], u1[1] do
+		for y = u0[2], u1[2] do
+			for z = u0[3], u1[3] do
+				n = n + 1
+				local w = vol:get_plane_at(0, x - lo[1], y - lo[2], z - lo[3])
+				local level = words[w]
+				if level == nil then
+					level = lamp_level(reg, names, reg:id_of(buildat.VoxelInstance(w)))
+							or false
+					words[w] = level
+				end
+				if level then
+					got[#got + 1] = {x, y, z, level}
+				end
+			end
+		end
+	end
+	-- A list's lamps in a..b replaced by the chunk's there
+	local function patch(list, a, b)
+		local out = {}
+		local function inside(f)
+			return f[1] >= a[1] and f[1] <= b[1] and f[2] >= a[2] and
+					f[2] <= b[2] and f[3] >= a[3] and f[3] <= b[3]
+		end
+		for _, f in ipairs(list) do
+			if not inside(f) then
+				out[#out + 1] = f
+			end
+		end
+		for _, f in ipairs(got) do
+			if inside(f) then
+				out[#out + 1] = f
+			end
+		end
+		return out
+	end
+	if sa then
+		s.found = patch(s.found, sa, sb)
+	end
+	if a then
+		LIT.placed = patch(LIT.placed, a, b)
+		local p = view_pos()
+		if p then
+			lamps_place(LIT.placed, p)
+		end
+	end
+	log:info(string.format("kit: lamps: a chunk's %d cells scanned in %.2f ms",
+			n, (buildat.get_time_us() - t0) / 1000))
 end
 
 -- The weather's drops: a billboard set about the camera, the drops in the
