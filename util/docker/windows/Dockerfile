@@ -35,7 +35,7 @@ ARG WINLIBS_SHA256=675f79b6fba8d3c8165bd9b5fb8e96ab73370dd8611f13e520cb185357d3d
 RUN dpkg --add-architecture i386 && apt-get -o Acquire::Retries=5 update && apt-get install -y --no-install-recommends unzip \
 	wine wine64 wine32:i386 xvfb xauth libgl1-mesa-dri imagemagick \
 	&& rm -rf /var/lib/apt/lists/* \
-	&& curl -sSL -o /tmp/winlibs.zip "$WINLIBS_URL" \
+	&& curl -sSL --fail --retry 5 --retry-all-errors -o /tmp/winlibs.zip "$WINLIBS_URL" \
 	&& echo "$WINLIBS_SHA256  /tmp/winlibs.zip" | sha256sum -c - \
 	&& mkdir -p /opt/winlibs && unzip -q /tmp/winlibs.zip -d /opt/winlibs \
 	&& rm /tmp/winlibs.zip
@@ -48,7 +48,7 @@ RUN dpkg --add-architecture i386 && apt-get -o Acquire::Retries=5 update && apt-
 # (0xc0000142, [WIN_DLL_INIT]). util/package.sh hands the paths to CMake.
 ARG CURL_URL=https://curl.se/download/curl-8.22.0.tar.xz
 ARG CURL_SHA256=f7ef3ae8a22e521f289803fe93543eb64c329b58aa73a9e224dfd915a2a5f4f7
-RUN curl -sSL -o /tmp/curl.tar.xz "$CURL_URL" \
+RUN curl -sSL --fail --retry 5 --retry-all-errors -o /tmp/curl.tar.xz "$CURL_URL" \
 	&& echo "$CURL_SHA256  /tmp/curl.tar.xz" | sha256sum -c - \
 	&& mkdir -p /tmp/curl && tar -xJf /tmp/curl.tar.xz -C /tmp/curl --strip-components=1 \
 	&& cd /tmp/curl \
