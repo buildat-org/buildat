@@ -1,0 +1,13 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "bot",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "bot", "pos": [0, 0, 0],
+			"components": [
+				{"type": "kit/creature_walker", "params": {"speed": 4, "width": 0.6,
+					"height": 1.8}},
+				{"type": "kit/bot"}]}
+	]
+}

@@ -1277,7 +1277,15 @@ namespace interface
 // (16 nearest, from a 16 m bucket index; `sight = true`: also in_sight),
 // c:nearest(type | "player"). A creature whose section is not loaded
 // sleeps: no steps, no timers (they are pushed on by its sleep), and goes
-// on where it was when the section is back.
+// on where it was when the section is back. The pathfinder's cells: the
+// World's voxels and the solid looks (kit/part's, a shut door's).
+// [KIT_GUIDE_BOTS] Bots: a type with `bot = true` (kit/bot, on a creature)
+// acts as a player for the goals, its `by` "bot:<id>" (c:name: "<name>
+// <id>"): its own goal state as a player's, a goal's zone entered, and
+// c:use(id), a use as a player's (Kit's use range; simplified: no who-may-use
+// rule). It reads c.goal = {id, kind, text, target, via, at, dist}, its
+// active goal (the first by id, not audience "players"). Drawn as a player
+// (show.player, show.bot); it is no peer: in no c.players, team or count.
 // c:explode{at = {x, y, z} (c.pos by default), radius (0...9, 0), power
 // (0...1000, 1), kill (0...32, radius), hurt (0...32, 0), share (0...1,
 // 0.5), friendly_fire (true), type ("blast")}: a blast in the entity's

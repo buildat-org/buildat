@@ -209,6 +209,8 @@ EOF
 	set_ $id autostart true
 	goal '6, 1, -4' 'All of us wait for a signal' Waiting
 	set_ $id kind '"signal"'
+	# ([KIT_GUIDE_BOTS] what a bot would use for it, else a warning)
+	set_ $id via 11
 	set_ $id to '"everyone"'
 	set_ $id marker false
 	# A game session: into the arena beside the spawn by the teleporter

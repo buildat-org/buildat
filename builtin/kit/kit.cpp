@@ -2311,6 +2311,9 @@ struct Module: public interface::Module, public Interface
 		// section is not loaded, since then (us)
 		bool creature = false;
 		int64_t asleep_us = 0;
+		// [KIT_GUIDE_BOTS] a bot's: drawn as a player, its pose as last set
+		bool bot = false;
+		ss_ pose_sent;
 	};
 	std::map<uint64_t, Drive> m_drives;
 	int64_t m_drive_gen = 0;
@@ -2419,6 +2422,7 @@ struct Module: public interface::Module, public Interface
 				double w[3] = {e.pos[0], e.pos[1], e.pos[2]};
 				Turn wq = Turn::of(e);
 				d.creature = creature_movement(e);
+				d.bot = d.creature && is_bot(e);
 				if(d.creature){
 					AtRest rest(m_at_rest);
 					world_of(e, w, &wq);
@@ -11615,6 +11619,12 @@ struct Module: public interface::Module, public Interface
 			// [KIT_SPECTATE] whom a spectator watches
 			show.set("player_name", e.name);
 		}
+		// [KIT_GUIDE_BOTS] a bot is drawn as a player (players.lua)
+		if(is_bot(e)){
+			show.set("player", true);
+			show.set("bot", true);
+			show.set("player_name", bot_name(e));
+		}
 		// [KIT_TOOLS_1] a hit reaches it (hands.lua's pick)
 		for(const Instance &in : e.comps)
 			if(m_types[in.type].health && in.disabled.empty())
@@ -11914,6 +11924,9 @@ struct Module: public interface::Module, public Interface
 		// own kit/inventory (itself, or its type, id, params and state)
 		const uint64_t pid = player_id(r.by);
 		json::Value names = json::object();
+		// [KIT_GUIDE_BOTS] a bot's ("bot:<id>")
+		if(const Entity *be = bot_of(r.by))
+			names.set(r.by, bot_name(*be));
 		if(pid){
 			names.set(r.by, m_entities[pid].name);
 			o += ",player_id="+itos(pid)+",player=";
@@ -11940,7 +11953,7 @@ struct Module: public interface::Module, public Interface
 				lua_lit(pv_->state, o);
 				o += "}";
 			}
-		} else if(r.handler == "on_leave"){
+		} else if(r.handler == "on_leave" && r.by.compare(0, 7, "player:") == 0){
 			// [KIT_GUEST_NO_LEAVE] A guest's entity dropped: who left it, by
 			// the id they had (no inventory: it went with the entity)
 			names.set(r.by, player_of(r.by));
@@ -12009,6 +12022,8 @@ struct Module: public interface::Module, public Interface
 			}
 			if(e.has_pos && ty.decl.get("creature").is_true())
 				creature_lit(e, o);
+			if(e.has_pos && ty.decl.get("bot").is_true())
+				bot_goal_lit(e, o);
 		}
 		// [KIT_CTF] its scene's regions: {id, team, rules, o, n} (the
 		// enabled ones; c:region_at picks the smallest holding a cell)
@@ -12481,6 +12496,9 @@ struct Module: public interface::Module, public Interface
 		const json::Value &pm = fx.get("propose");
 		if(pm.is_object() || pm.is_false())
 			propose_fx(e, type, pm);
+		// [KIT_GUIDE_BOTS] c:use (a bot's)
+		if(fx.get("use").is_number() && m_types[type].decl.get("bot").is_true())
+			bot_use(e.id, (uint64_t)std::max(0.0, fx.get("use").as_number()));
 		// [KIT_CARRY_ATTACH] c:attach, c:detach
 		const json::Value &att = fx.get("attach");
 		if(att.is_array())
@@ -17253,6 +17271,14 @@ struct Module: public interface::Module, public Interface
 		// [KIT_AIRSHIPS] stage 5: the ships touching a deadly kit/trigger_zone
 		// (lost after the scan)
 		sv_<std::pair<uint64_t, uint64_t>> touched;
+		// [KIT_GUIDE_BOTS] the bots: their scenes and places
+		std::map<uint64_t, std::pair<ss_, std::array<double, 3>>> bots;
+		for(auto &p : m_entities)
+			if(p.second.has_pos && is_bot(p.second)){
+				auto &b = bots[p.first];
+				scene_of(p.second, &b.first);
+				world_of(p.second, b.second.data());
+			}
 		for(auto &p : m_entities){
 			Entity &e = p.second;
 			if(!e.has_pos)
@@ -17303,12 +17329,19 @@ struct Module: public interface::Module, public Interface
 						m_arrive.erase(ar);
 					}
 				}
+				// [KIT_GUIDE_BOTS] a goal's zone holds bots too, "bot:<id>"
+				// simplified: only a goal's; a trigger zone or a region
+				// counts no bot
+				if(in.type == "kit/goal")
+					for(const auto &b : bots)
+						if(b.second.first == scene && box_holds(o, q, n, b.second.second.data()))
+							now.insert("bot:"+itos(b.first));
 				auto fire = [&](const char *handler, const ss_ &id){
 					Run r;
 					r.entity = e.id;
 					r.comp = i;
 					r.handler = handler;
-					r.by = "player:"+id;
+					r.by = id.compare(0, 4, "bot:") == 0 ? id : "player:"+id;
 					r.args.append(r.by);
 					queue_run(r);
 				};
@@ -18769,7 +18802,8 @@ struct Module: public interface::Module, public Interface
 				frame_of(e.parent, o, pq);
 				pq.angles(py, pp, pr);
 				key = {{key[0], l[0], l[1], l[2], key[4] - py, 0, 0}};
-			}
+				if(d.bot)
+					bot_pose(e, d, key[4] + py);			}
 			double flat = -1; // (along the ground)
 			if(!d.keys.empty()){
 				const std::array<double, 7> &l = d.keys.back();
@@ -18876,7 +18910,7 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// The scene's cells in a box as the pathfinder reads them
-	void read_grid(main_context::SceneReference ref, creatures::Grid &g)
+	void read_grid(main_context::SceneReference ref, creatures::Grid &g, uint64_t self)
 	{
 		g.c.assign((size_t)g.nx * g.ny * g.nz, creatures::UNKNOWN);
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
@@ -18904,6 +18938,74 @@ struct Module: public interface::Module, public Interface
 				g.c[x + (size_t)g.nx * (z + (size_t)g.nz * y)] = k->second;
 			}
 		});
+		grid_looks(ref, g, self);
+	}
+
+	// [KIT_GUIDE_BOTS] The solid looks in it (a kit/part's walls, a shut door or
+	// gate: move.lua's M.look_box, its `when` by its state), each cell they
+	// overlap by over a tenth solid. simplified: its own size and offset and a
+	// when's solid only (no when offset or scale), turned by quarter turns of
+	// yaw only; what moves (a link) is where it rests
+	void grid_looks(main_context::SceneReference ref, creatures::Grid &g, uint64_t self)
+	{
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(!e.has_pos || e.kind == "player" || e.id == self || scene_of(e) != ref)
+				continue;
+			double w[3];
+			Turn wq;
+			world_of(e, w, &wq);
+			if(w[0] < g.x0 - 40 || w[0] > g.x0 + g.nx + 40 || w[2] < g.z0 - 40 ||
+					w[2] > g.z0 + g.nz + 40)
+				continue;
+			for(const Instance &in : e.comps){
+				const json::Value &d = m_types[in.type].decl.get("look");
+				if(d.is_undefined())
+					continue;
+				const json::Value look = look_of(in, d);
+				const ss_ key = jstr(look, "state");
+				const json::Value &wh = look.get("when");
+				bool solid = look.get("solid").is_true();
+				if(!key.empty() && in.state.get(key).is_true() && wh.is_object() &&
+						wh.get("solid").is_boolean())
+					solid = wh.get("solid").is_true();
+				if(!solid)
+					break;
+				double s[3], off[3] = {0, 0, 0};
+				auto num_at = [](const json::Value &a, int k, double dflt){
+					return k < (int)a.size() && a.at((unsigned)k).is_number() ?
+							a.at((unsigned)k).as_number() : dflt;
+				};
+				const json::Value &sz = look.get("size");
+				for(int k = 0; k < 3; k++){
+					s[k] = sz.is_array() ? num_at(sz, k, 1) : (sz.is_number() ?
+							sz.as_number() : 0.4) * 2;
+					s[k] = std::max(0.02, std::min(64.0, s[k]));
+					if(look.get("offset").is_array())
+						off[k] = num_at(look.get("offset"), k, 0);
+				}
+				double yaw, pitch, roll;
+				wq.angles(yaw, pitch, roll);
+				const int quarter = ((int)std::lround(yaw / 90) % 4 + 4) % 4;
+				if(quarter % 2){
+					std::swap(s[0], s[2]);
+					std::swap(off[0], off[2]);
+				}
+				int lo[3], hi[3];
+				const int g0[3] = {g.x0, g.y0, g.z0}, gn[3] = {g.nx, g.ny, g.nz};
+				for(int k = 0; k < 3; k++){
+					const double c = w[k] + off[k];
+					lo[k] = std::max(g0[k], (int)std::ceil(c - s[k] / 2 - 0.4));
+					hi[k] = std::min(g0[k] + gn[k] - 1, (int)std::floor(c + s[k] / 2 + 0.4));
+				}
+				for(int y = lo[1]; y <= hi[1]; y++)
+				for(int z = lo[2]; z <= hi[2]; z++)
+				for(int x = lo[0]; x <= hi[0]; x++)
+					g.c[(x - g.x0) + (size_t)g.nx * ((z - g.z0) + (size_t)g.nz * (y - g.y0))] =
+							creatures::SOLID;
+				break;
+			}
+		}
 	}
 
 	// Each creature's winning proposal and its way there; the nodes searched charged
@@ -19001,7 +19103,7 @@ struct Module: public interface::Module, public Interface
 			grid.nx = std::abs(goal[0] - from[0]) + 21;
 			grid.nz = std::abs(goal[2] - from[2]) + 21;
 			grid.ny = std::abs(goal[1] - from[1]) + 12 + b.h;
-			read_grid(scene_of(e), grid);
+			read_grid(scene_of(e), grid, e.id);
 			std::vector<creatures::Cell> cells;
 			int expanded = 0;
 			const creatures::Cell start = creatures::ground_of(grid, b, from);
@@ -19179,6 +19281,170 @@ struct Module: public interface::Module, public Interface
 			if(p.is_array() && p.size())
 				o += ",moving=true";
 		}
+	}
+
+	// ---- [KIT_GUIDE_BOTS] Bots (kit_plan 4z7): an entity with a type saying
+	// `bot = true` (kit/bot) on a creature movement. It does the goals a player
+	// would, as "bot:<id>" where a player is "player:<id>": its goal state is
+	// a goal's own["bot:<id>"], it enters goal zones and it uses (c:use). It
+	// is drawn as a player (show.player), is no peer and so in no list of
+	// players, no team, no queue or count of them.
+	const Instance *bot_comp(const Entity &e)
+	{
+		for(const Instance &in : e.comps)
+			if(m_types[in.type].decl.get("bot").is_true())
+				return &in;
+		return nullptr;
+	}
+	bool is_bot(const Entity &e){ return bot_comp(e) != nullptr; }
+
+	ss_ bot_name(const Entity &e)
+	{
+		const Instance *in = bot_comp(e);
+		const ss_ n = in ? jstr(in->params, "name") : ss_();
+		return (n.empty() ? ss_("Bot") : n)+" "+itos(e.id);
+	}
+
+	// The bot a `by` names ("bot:<id>"), or none
+	const Entity *bot_of(const ss_ &by)
+	{
+		if(by.compare(0, 4, "bot:") != 0)
+			return nullptr;
+		auto it = m_entities.find(strtoull(by.c_str() + 4, nullptr, 10));
+		return it != m_entities.end() && is_bot(it->second) ? &it->second : nullptr;
+	}
+
+	// c.goal: the bot's active goal, the first by id in its scene active for it
+	// and not for players only: {id, kind, text, target, via, at (where to go:
+	// the box's middle on its floor, the target's or the via's place), dist}
+	void bot_goal_lit(const Entity &e, ss_ &o)
+	{
+		const ss_ key = "bot:"+itos(e.id);
+		ss_ scene, gs;
+		scene_of(e, &scene);
+		double w[3];
+		world_of(e, w);
+		for(auto &p : m_entities){
+			const Entity &g = p.second;
+			if(!g.has_pos)
+				continue;
+			for(const Instance &in : g.comps){
+				if(in.type != "kit/goal" || !in.disabled.empty() ||
+						jstr(in.params, "audience") == "players")
+					continue;
+				// goal.lua's active(): its own, else everyone's
+				bool shown = in.state.get("shown").is_true();
+				const json::Value &own = in.state.get("own");
+				const json::Value &mine = own.is_object() ? own.get(key) : json::Value();
+				if(mine.is_object() && mine.get("shown").is_boolean())
+					shown = mine.get("shown").is_true();
+				if(!shown)
+					continue;
+				scene_of(g, &gs);
+				if(gs != scene)
+					continue;
+				const ss_ kind = jstr(in.params, "kind");
+				json::Value j = json::object();
+				j.set("id", (int64_t)g.id);
+				j.set("kind", kind);
+				j.set("text", jstr(in.params, "text"));
+				double at[3];
+				if(kind == "reach"){
+					int n[3];
+					extent(in.params.get("size"), n, MAX_EXTENT);
+					Turn q;
+					box_frame(g, at, q);
+					double mid[3] = {(n[0] - 1) / 2.0, 0, (n[2] - 1) / 2.0};
+					q.apply(mid);
+					for(int k = 0; k < 3; k++)
+						at[k] += mid[k];
+				} else {
+					const char *ref = kind == "use" ? "target" : "via";
+					const json::Value &rv = in.params.get(ref);
+					auto ti = rv.is_number() ? m_entities.find((uint64_t)rv.as_number()) :
+							m_entities.end();
+					if(ti == m_entities.end() || !ti->second.has_pos || ti->first == 0){
+						world_of(g, at);
+					} else {
+						world_of(ti->second, at);
+						j.set(ref, (int64_t)ti->first);
+					}
+				}
+				j.set("at", point(at));
+				j.set("dist", std::sqrt((at[0] - w[0]) * (at[0] - w[0]) +
+						(at[1] - w[1]) * (at[1] - w[1]) + (at[2] - w[2]) * (at[2] - w[2])));
+				o += ",goal=";
+				lua_lit(j, o);
+				return;
+			}
+		}
+	}
+
+	// A bot's use of an entity: its usable parts' on_use and the world event
+	// "use" (kit/goal's), as a player's (on_use_u) by "bot:<id>", within Kit's
+	// use range. simplified: no who-may-use rule (a region's, a part's own),
+	// no seat or chest; may_use() for a bot is the upgrade
+	void bot_use(uint64_t bot, uint64_t id)
+	{
+		auto bi = m_entities.find(bot);
+		auto it = m_entities.find(id);
+		if(bi == m_entities.end() || it == m_entities.end() || !it->second.has_pos)
+			return;
+		ss_ scene, ts;
+		scene_of(bi->second, &scene);
+		scene_of(it->second, &ts);
+		double a[3], b[3], d2 = 0;
+		world_of(bi->second, a);
+		world_of(it->second, b);
+		for(int k = 0; k < 3; k++)
+			d2 += (a[k] - b[k]) * (a[k] - b[k]);
+		const ss_ name = bot_name(bi->second);
+		if(ts != scene || d2 > m_host.use_range * m_host.use_range){
+			log_i(MODULE, "[KIT_GUIDE_BOTS] A use of entity %s by %s refused: %s",
+					cs(itos(id)), cs(name), ts != scene ? "in another scene" : "out of range");
+			return;
+		}
+		const ss_ by = "bot:"+itos(bot);
+		bool any = false;
+		const Entity &e = it->second;
+		for(size_t i = 0; i < e.comps.size(); i++){
+			if(!use_kind(e, e.comps[i]) || !m_types[e.comps[i].type].handlers.count("on_use"))
+				continue;
+			any = true;
+			Run r;
+			r.entity = id;
+			r.comp = i;
+			r.handler = "on_use";
+			r.by = by;
+			r.args.append(r.by);
+			queue_run(r);
+		}
+		if(!any){
+			log_i(MODULE, "[KIT_GUIDE_BOTS] A use of entity %s by %s refused: "
+					"nothing on it is usable", cs(itos(id)), cs(name));
+			return;
+		}
+		log_i(MODULE, "Entity %s used by %s", cs(itos(id)), cs(name));
+		json::Value ev = json::object();
+		ev.set("kind", ss_("use"));
+		ev.set("entity", (int64_t)id);
+		fire_event(scene, ev, by);
+	}
+
+	// Its pose for players.lua (set_pose()'s): the way it faces
+	void bot_pose(const Entity &e, Drive &d, double yaw)
+	{
+		char buf[32];
+		snprintf(buf, sizeof buf, "%.0f 0 0 0 ", yaw);
+		const ss_ sent = itos(e.node)+"|"+buf;
+		if(!e.node || sent == d.pose_sent)
+			return;
+		d.pose_sent = sent;
+		main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
+			magic::Node *n = sc->GetNode(e.node);
+			if(n)
+				n->SetVar(magic::StringHash("kit_pose"), magic::Variant(buf));
+		});
 	}
 
 	// A drive under a moving free object (d.deck): its world the deck's boxes in its

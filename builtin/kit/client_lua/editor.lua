@@ -2706,6 +2706,11 @@ function NT.goal_check()
 		if c and p.kind == "use" and not by[tonumber(p.target) or 0] then
 			warn(e, "a use goal with no object to use (target)")
 		end
+		-- [KIT_GUIDE_BOTS] a bot stuck on it
+		if c and p.kind == "signal" and p.audience ~= "players" and
+				not by[tonumber(p.via) or 0] then
+			warn(e, "a signal goal with nothing for bots to use (via)")
+		end
 		local fin = tonumber(p.validate_reachable) or 0
 		if c and fin ~= 0 then
 			local fe = by[fin]

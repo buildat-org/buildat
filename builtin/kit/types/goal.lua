@@ -17,10 +17,18 @@
 -- a signal by no player activates it for everyone, late joiners too, each
 -- doing it themselves. "everyone" (co-op): one goal, the first player to do
 -- it does it for all, a late joiner seeing where it stands.
--- `audience` "players": a bot ignores it (stage 8). "bots": no line, no marker
+-- `audience` "players": a bot does not do it, it passes straight on for one.
+-- "bots": no line, no marker
 -- for a player, and it passes straight on for them, as if done: its chain goes
 -- on. A bot acts on kind, target, size and its place, not on what is written
 -- for players.
+-- [KIT_GUIDE_BOTS] A bot (kit/bot) walks into a reach goal's box, uses a use
+-- goal's target, and for a signal goal uses its `via` (what makes the signal,
+-- a lever) once; a signal goal without one leaves a bot stuck. A guide (the
+-- prefab kit/guide) is a chain whose lines sit in one window at a corner
+-- (hud_anchor top_right, a width): one step at a time, the next as each is
+-- done. simplified: no title or step count on the window; a kit/ui_panel
+-- holds no positioned entity, the upgrade is a panel a goal names.
 -- simplified: a goal is done once a round for whom it was (a chain's branches
 -- may merge on it); a looping objective needs a "repeat" parameter here.
 -- simplified: to "team" is left out (kit/ui_text's way, the members sharing one
@@ -34,8 +42,9 @@
 -- there, the last goal reached and the first cut off named, the final goal
 -- drawn on the map. A path of links, not that it can happen
 local function key(c, by)
+	-- ([KIT_GUIDE_BOTS] a bot's own too, "bot:<id>")
 	return c.params.to == "player" and type(by) == "string" and
-			by:match("^player:") and by or nil
+			(by:match("^player:") or by:match("^bot:")) and by or nil
 end
 
 local function active(c, k)
@@ -67,7 +76,10 @@ local function activate(c, by)
 	if c.state.done or (k and c.state.own[k] and c.state.own[k].done) then
 		return
 	end
-	if c.params.audience == "bots" then
+	-- [KIT_GUIDE_BOTS] a bot does a bots' goal; a players' one passes straight
+	-- on for a bot
+	local bot = k ~= nil and k:match("^bot:") ~= nil
+	if (c.params.audience == "bots") ~= bot and c.params.audience ~= "everyone" then
 		return finish(c, k, by)
 	end
 	if active(c, k) then
@@ -120,6 +132,7 @@ return {
 			choices = {"reach", "use", "signal"}},
 		size = {type = "position", default = {3, 2, 3}},
 		target = {type = "entity", default = 0},
+		via = {type = "entity", default = 0},
 		autostart = {type = "bool", default = false},
 		to = {type = "string", default = "player",
 			choices = {"player", "everyone"}},
