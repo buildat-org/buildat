@@ -22,14 +22,16 @@
 //       KITSKY the light bounced (the mesher's display level) too.
 //       simplified: 2.2, not the sRGB curve. A translucent face's alpha
 //       is made linear's too ([KIT_PHYS_WATER_PINK]).
-//   KITWATER  ([KIT_PHYS_WATER_LOOK]) a translucent face under KITLINEAR:
-//       water's colour is mostly the sky it reflects, not a lit body, so
-//       its diffuse is cut to a half and a Schlick Fresnel (F0 0.02)
-//       reflection of the sky added (the fog's colour at the horizon, the
-//       ambient's at the zenith), and a glint of the sun; the alpha grown
-//       by the reflection, so a grazing look shows the bed less.
-//       simplified: a flat surface, no waves, no cube map; glass (the same
-//       technique) gets water's look. A per-face flag would part them.
+//   KITWATER  ([KIT_PHYS_WATER_LOOK]) a translucent face under KITLINEAR,
+//       lit as luanti_client's PBRVoxel.glsl lights skeldat's water
+//       (surface.lua's: roughness 0.35, spec_strength 0.9, so F0 0.072):
+//       the sun's GGX lobe (times pi: Urho's diffuse has no 1/pi, so the
+//       albedo's share is cut by it instead), the sky's light (the
+//       ambient) by EnvBRDFApprox and the specular emphasis of 0.7; the
+//       alpha grown by the reflection, so a grazing look shows the bed
+//       less. simplified: a flat surface, no spots, no cube map; glass
+//       (the same technique) gets water's look. A per-face flag would
+//       part them.
 //
 // The vertex colour is light, not albedo, so it is not multiplied into the
 // diffuse colour as LitSolid's VERTEXCOLOR does.
@@ -152,23 +154,29 @@ void VS()
 }
 
 #ifdef KITWATER
+const float KITWATER_ROUGH = 0.35;
+const float KITWATER_F0 = 0.072;
 // What a water face draws, blended by its alpha: lit (its body's light),
-// a (its opacity), plus what it reflects (spec: the sun's glint; the sky
-// with the ambient). Out: over the bed, F * reflected + (1 - F) * the body
-// over (1 - F) * the bed, as the blend's (colour, alpha).
+// a (its opacity), plus what it reflects (spec: the sun's; the sky with
+// the ambient). Out: over the bed, the reflected plus (1 - F) of the body
+// over (1 - F) of the bed, as the blend's (colour, alpha).
 vec4 KitWater(vec3 lit, float a, vec3 normal, vec3 spec)
 {
     vec3 toEye = normalize(cCameraPosPS - vWorldPos.xyz);
     float ndv = clamp(abs(dot(normal, toEye)), 0.0, 1.0);
-    float f = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+    // Urho's IBL.glsl EnvBRDFApprox (Karis), F0 a scalar
+    vec4 r = KITWATER_ROUGH * vec4(-1.0, -0.0275, -0.572, 0.022) +
+            vec4(1.0, 0.0425, 1.0, -0.04);
+    float a004 = min(r.x * r.x, exp2(-9.28 * ndv)) * r.x + r.y;
+    vec2 ab = vec2(-1.04, 1.04) * a004 + r.zw;
+    float f = clamp(KITWATER_F0 * ab.x + ab.y, 0.0, 1.0);
     vec3 refl = spec;
     #ifdef AMBIENT
-        vec3 r = reflect(-toEye, normal);
-        vec3 sky = mix(cFogColor, cAmbientColor.rgb, clamp(r.y, 0.0, 1.0));
+        vec3 sky = cAmbientColor.rgb;
         #ifdef KITSKY
             sky *= vColor.a;
         #endif
-        refl += f * sky;
+        refl += 0.7 * f * sky;
     #endif
     float a2 = a + f * (1.0 - a);
     return vec4((refl + (1.0 - f) * a * lit) / max(a2, 0.001), a2);
@@ -220,10 +228,14 @@ void PS()
         // share the bright bed under water (sand: ~0.6 linear against
         // water's ~0.05) outshone the water and read pink.
         // simplified: a's curve alone; no absorption by depth
-        diffColor.a = 1.0 - pow(1.0 - diffColor.a, 2.2);
+        // KITWATER keeps the plain alpha, as skeldat's PBRVoxel does: the
+        // lit bed through it is most of water's look there
+        #ifndef KITWATER
+            diffColor.a = 1.0 - pow(1.0 - diffColor.a, 2.2);
+        #endif
     #endif
     #ifdef KITWATER
-        diffColor.rgb *= 0.5;
+        diffColor.rgb *= 1.0 / 3.14159;
     #endif
 
     // Get material specular albedo
@@ -281,13 +293,24 @@ void PS()
         #endif
 
         #ifdef KITWATER
-            // The sun's glint: Blinn-Phong of a calm surface, normalized,
-            // by the Fresnel at the half vector
+            // The sun's lobe: PBRVoxel's GGX, Schlick on the half vector,
+            // Smith's height-correlated visibility; roughness squared
             vec3 toEyeW = normalize(cCameraPosPS - vWorldPos.xyz);
             vec3 hw = normalize(lightDir + toEyeW);
-            float fh = 0.02 + 0.98 * pow(1.0 - clamp(dot(hw, toEyeW), 0.0, 1.0), 5.0);
-            vec3 glint = diff * lightColor * fh * 40.0 *
-                    pow(clamp(dot(normal, hw), 0.0, 1.0), 400.0);
+            float ndl = clamp(dot(normal, lightDir), 0.0, 1.0);
+            float ndh = clamp(dot(normal, hw), 0.0001, 1.0);
+            float vdh = clamp(dot(toEyeW, hw), 0.0001, 1.0);
+            float ndvw = abs(dot(normal, toEyeW)) + 1e-5;
+            float ga = KITWATER_ROUGH * KITWATER_ROUGH;
+            float ga2 = ga * ga;
+            float dd = ndh * ndh * (ga2 - 1.0) + 1.0;
+            float gD = ga2 / (3.14159 * dd * dd);
+            float gF = KITWATER_F0 + (1.0 - KITWATER_F0) * pow(1.0 - vdh, 5.0);
+            float gv = ndl * sqrt(ndvw * ndvw * (1.0 - ga2) + ga2);
+            float gl = ndvw * sqrt(ndl * ndl * (1.0 - ga2) + ga2);
+            float gV = 0.5 / max(gv + gl, 1e-5);
+            // diff is n.l times the shadow and the sky's gate
+            vec3 glint = diff * lightColor * 3.14159 * gD * gF * gV;
         #endif
         #ifdef AMBIENT
             #ifdef KITSKY

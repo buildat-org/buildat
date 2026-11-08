@@ -512,7 +512,7 @@ want "$f" "kit: lighting physical drawn as cartoon (the client's preference)" \
 ! grep -aqF "kit: lighting physical (HDR" "$f" ||
 	fail "the client with lighting cartoon drew physical ($f)"
 echo "ok: the preference lighting cartoon draws the composition's physical as cartoon"
-# 9. Physical's water blue (its alpha linear; it read pink), the
+# 9. Physical's water (its sand through the shallows, blue deeper), the
 # heightmap's ground at the voxels' level (decoded to linear; it read pale):
 # the frame's lower right, off the panels
 low() # <png>: "r g b" over columns 6-15, rows 7-9
@@ -523,13 +523,22 @@ v = [list(map(int, l.split())) for l in sys.stdin]
 r = [v[y * 16 + x] for y in (7, 8, 9) for x in range(6, 16)]
 print(' '.join('%.0f' % (sum(c[i] for c in r) / len(r)) for i in range(3)))"
 }
+# [KIT_PHYS_WATER_LOOK] the shallow water shows its sand bed (the plain
+# alpha, as skeldat's), the deep water past it blue: row 5, columns 11-14
 read wr wg wb <<<"$(low "$t/phys_water.png")"
-awk "BEGIN{exit !($wb > $wr * 1.3 && $wb > $wg * 1.2)}" ||
-	fail "physical's water not blue: $wr $wg $wb"
+awk "BEGIN{exit !($wr > $wb)}" ||
+	fail "physical's shallow water hides its sand: $wr $wg $wb"
+read dr dg db <<<"$(cells "$t/phys_water.png" | python3 -I -c "
+import sys
+v = [list(map(int, l.split())) for l in sys.stdin]
+r = [v[5 * 16 + x] for x in range(11, 15)]
+print(' '.join('%.0f' % (sum(c[i] for c in r) / len(r)) for i in range(3)))")"
+awk "BEGIN{exit !($db > $dr * 1.25)}" ||
+	fail "physical's deep water not blue: $dr $dg $db"
 read vr vg vb <<<"$(low "$t/phys_ground_voxels.png")"
 read hr hg hb <<<"$(low "$t/phys_ground_heightmap.png")"
 awk "BEGIN{v = $vr + $vg + $vb; h = $hr + $hg + $hb; exit !(h > v * 0.85 && h < v * 1.15)}" ||
 	fail "physical's heightmap ground ($hr $hg $hb) not the voxels' ($vr $vg $vb)"
-echo "ok: physical's water blue ($wr $wg $wb), its heightmap ground ($hr $hg $hb) the voxels' ($vr $vg $vb)"
+echo "ok: physical's water: its sand through the shallows ($wr $wg $wb), deeper blue ($dr $dg $db); its heightmap ground ($hr $hg $hb) the voxels' ($vr $vg $vb)"
 echo "PASS: lighting: cartoon today's look, physical metered, the sky by the hour and its switches, the clouds, the sky light in caves, the weather a modifier that fades, the cover dimming the sun, physical's shadows, the client's force cartoon, physical's water and heightmap ground"
 # vim: set noet ts=4 sw=4:
