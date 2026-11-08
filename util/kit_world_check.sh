@@ -373,9 +373,10 @@ EOF
 	column 123 163
 	echo 'event kit_edit {"op": "terrain", "tool": "fill", "x": 120, "y": 0, "z": 160, "x1": 126, "z1": 166, "level": 30, "biome": "water", "stroke": 8}'
 	echo "wait_log 5000 kit editor: refused: terrain: no water on a heightmap yet"
-	terrain decorate 135 110 8 5 9
+	# [KIT_BEACH] on the fill: the ground about the sea's level is beach, no plants
+	terrain decorate 123 163 8 5 9
 	undo
-	terrain decorate 135 110 8 5 10
+	terrain decorate 123 163 8 5 10
 	cat <<'EOF'
 keypress F6
 wait_log 10000 kit editor: edit mode off
@@ -415,7 +416,7 @@ grep -aq "An undo by kitboss: a terrain stroke, 0 cells, [0-9]* samples and 0 de
 grep -aq "column at (153,150) .*layer 1," "$s5" || fail "the raised hill's edge is not stone ($s5)"
 grep -aq "Terrain by kitboss: paint at (160,125).*(160,125) at [0-9.-]* layer 2" "$s5" ||
 	fail "the desert's paint ($s5)"
-dec=$(grep -aoP 'decorate at \(135,110\) .*, \K\d+(?= decorations \()' "$s5" | head -1)
+dec=$(grep -aoP 'decorate at \(123,163\) .*, \K\d+(?= decorations \()' "$s5" | head -1)
 [ "${dec:-0}" -gt 0 ] || fail "the decorate stroke placed none ($s5)"
 grep -aq "An undo by kitboss: a terrain stroke, 0 cells, 0 samples and $dec decorations put back" "$s5" ||
 	fail "the decorate stroke's undo ($dec, $s5)"

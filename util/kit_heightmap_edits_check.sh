@@ -106,6 +106,8 @@ EOF
 	set_w biome '"grassland"'
 	set_w generator '"noise"'
 	set_w height 3
+	# [KIT_BEACH] over the sea's beach, so the decorate stroke has grass
+	set_w level 3
 	set_w surface '"heightmap"'
 	echo "wait_log_any 20000 heightmap: terrain built"
 	# [KIT_HM_ORIGIN] Voxels on two corners of the voxels' area, seen

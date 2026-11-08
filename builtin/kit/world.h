@@ -64,8 +64,8 @@
 // decorations are one cell (a structure's first).
 //
 // **The generators** are native and fill a column from its top cell: the
-// top role there (riverbed under the sea), filler below it, stone below
-// that, water from over the ground up to sea_level. flat: the top at
+// top role there (riverbed under the sea and BEACH over it), filler below
+// it, stone below that, water from over the ground up to sea_level. flat: the top at
 // level; noise: level + height * fbm(x / spread, z / spread, seed);
 // valleys: Luanti's valleys mapgen's surface (luanti_mapgen's
 // surface_map, mgvalleys_river_size 0: its valleys, no river channels;
@@ -144,6 +144,11 @@ static const unsigned MAX_SET_VOXELS = 256, MAX_SET_BIOMES = 64;
 static const int MAX_FINITE_VOXELS = 512;
 // Sea round a finite map with a water border, and its bed under sea level
 static const int SEA_BORDER = 16, SEA_BED = 4;
+// [KIT_BEACH] How far over the sea's level a column's top is still the
+// riverbed's (sand): the water's line backed by sand above it and below,
+// not grass at the water's own level. A flat World has none (a flat ground
+// at the sea's level would be all sand)
+static const int BEACH = 2;
 // An infinite world's load points round each player, in sections
 static const int LOAD_XZ = 2, GEN_XZ = 2, LOAD_Y = 1;
 // Caves: from this far under the top down to CAVE_DEEP under it
@@ -798,6 +803,12 @@ struct Params
 	// [KIT] stage 4f: caves and the biome's decorations
 	bool caves = false, decorations = true;
 
+	// A column whose top is under this is the riverbed's (KIT_BEACH)
+	int sand_to() const
+	{
+		return sea_level + (generator == "flat" ? 0 : BEACH);
+	}
+
 	void from(const json::Value &j)
 	{
 		generator = json::jstr(j, "generator", generator);
@@ -1011,12 +1022,12 @@ static const uint32_t BRUSH_SALT = 0x5bd1e995u;
 // index of b.decors (-1: none) and its quarter turns. mult scales the
 // densities (the decorate brush's strength)
 static int pick_surface(const BiomeIds &b, uint32_t seed, int x, int z,
-		int top, int sea_level, double mult, int &turns)
+		int top, const Params &p, double mult, int &turns)
 {
 	for(size_t k = 0; k < b.decors.size(); k++){
 		const DecorIds &d = b.decors[k];
-		if(!((d.on == 't' && top >= sea_level) ||
-				(d.on == 'w' && top < sea_level)))
+		if(!((d.on == 't' && top >= p.sand_to()) ||
+				(d.on == 'w' && top < p.sea_level)))
 			continue;
 		const uint32_t h = hash_at(seed, x, 0, z, (uint32_t)k);
 		if(unit(h) < d.density * mult){
@@ -1136,9 +1147,9 @@ struct Generator: public worldgen::GeneratorInterface
 				else if(is_cave(x, y, z))
 					v = ids.air;
 				else if(y == top)
-					v = top < p.sea_level ? ids.riverbed : ids.top;
+					v = top < p.sand_to() ? ids.riverbed : ids.top;
 				else if(y > top - 1 - ids.filler_depth)
-					v = top < p.sea_level ? ids.riverbed : ids.filler;
+					v = top < p.sand_to() ? ids.riverbed : ids.filler;
 				else if(any_cave && ids.cave_floor && is_cave(x, y + 1, z))
 					v = ids.cave_floor;
 				else if(any_cave && ids.cave_wall && (is_cave(x, y - 1, z) ||
@@ -1179,7 +1190,7 @@ struct Generator: public worldgen::GeneratorInterface
 				continue;
 			const int t = top_at(ax, az);
 			int turns = 0;
-			const int k = pick_surface(ids, p.seed, ax, az, t, p.sea_level, 1,
+			const int k = pick_surface(ids, p.seed, ax, az, t, p, 1,
 					turns);
 			if(k < 0)
 				continue;
@@ -1265,9 +1276,11 @@ struct Region
 			if(decorate && top >= y0 && top < y1)
 				decor.push_back({{x, top, z}});
 		}
+		Params nosea;
+		nosea.sea_level = INT_MIN / 2;
 		for(const auto &d : decor){
 			int turns = 0;
-			const int k = pick_surface(ids, seed, d[0], d[2], d[1], INT_MIN / 2,
+			const int k = pick_surface(ids, seed, d[0], d[2], d[1], nosea,
 					1, turns);
 			if(k < 0)
 				continue;
@@ -1306,7 +1319,7 @@ static void scatter_hash(const Params &p, const BiomeIds &b,
 		for(int x = 0; x < w; x++){
 			int turns = 0;
 			const int k = pick_surface(b, p.seed, x0 + x, z0 + z,
-					tops[(size_t)z * w + x], p.sea_level, 1, turns);
+					tops[(size_t)z * w + x], p, 1, turns);
 			if(k < 0)
 				continue;
 			v.insert(v.end(), {x0 + x, z0 + z, k, turns});
@@ -1386,7 +1399,7 @@ struct Brush
 	{
 		const int lo = std::min(h, h2) - b.filler_depth - 1;
 		const int hi = std::max(h, h2) + 1;
-		const bool under = h2 < p.sea_level;
+		const bool under = h2 < p.sand_to();
 		// [KIT_AIRSHIPS_2] A floating column (an island's: no ground in the 8
 		// cells under the ones written) grows no ground under its old top:
 		// lowered, it is dug from the top
