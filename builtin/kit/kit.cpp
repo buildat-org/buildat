@@ -17905,6 +17905,38 @@ struct Module: public interface::Module, public Interface
 		return v;
 	}
 
+	// [KIT_AIRSHIP_CORE_DEATH] How far a look's box reaches from its entity's place
+	// at most (move.lua's M.look_box: its size, a state's scale, the offsets)
+	static double look_reach(const json::Value &look)
+	{
+		auto vec = [](const json::Value &v, double s[3], double def, double lo,
+				double hi){
+			for(unsigned i = 0; i < 3; i++){
+				double x = v.is_array() && i < v.size() && v.at(i).is_number() ?
+						v.at(i).as_number() : def;
+				s[i] = std::isfinite(x) ? std::max(lo, std::min(hi, x)) : def;
+			}
+		};
+		double s[3], k[3], a[3], b[3];
+		const json::Value &sz = look.get("size"), &wh = look.get("when");
+		if(sz.is_array()){
+			vec(sz, s, 1, 0.02, 64);
+		} else {
+			const double v = sz.is_number() && std::isfinite(sz.as_number()) ?
+					sz.as_number() * 2 : 0.8;
+			s[0] = s[1] = s[2] = std::min(128.0, std::fabs(v));
+		}
+		vec(wh.get("scale"), k, 1, 1, 64);
+		vec(look.get("offset"), a, 0, -1e6, 1e6);
+		vec(wh.get("offset"), b, 0, -1e6, 1e6);
+		double d2 = 0, o2 = 0;
+		for(int i = 0; i < 3; i++){
+			d2 += s[i] * k[i] * s[i] * k[i];
+			o2 += (std::fabs(a[i]) + std::fabs(b[i])) * (std::fabs(a[i]) + std::fabs(b[i]));
+		}
+		return std::sqrt(d2) / 2 + std::sqrt(o2);
+	}
+
 	// The world round a body for a step: its cells, the solid looks near
 	// it and a heightmap's samples (move.lua's snapshot)
 	void snapshot(ss_ &o, const Peer &pe, const Body &b, const double pos[3],
@@ -18011,12 +18043,16 @@ struct Module: public interface::Module, public Interface
 				continue;
 			// [KIT_NESTING] where it is in the world; what rides on the
 			// vehicle stepping none either
+			// [KIT_AIRSHIP_CORE_DEATH] each look as far as its own size reaches: an
+			// island's edge is far from its middle (16x4x26: past 10 m from it
+			// the body fell through). simplified: a look is met no further than
+			// 64 m from its entity's place (a 64 m box's corner is 55 m out)
 			double w[3];
 			Turn wq;
 			world_of(e, w, &wq);
-			if(std::fabs(w[0] - pos[0]) > R + 8 ||
-					std::fabs(w[2] - pos[2]) > R + 8 ||
-					std::fabs(w[1] - pos[1]) > ny + 8)
+			const double near[3] = {std::fabs(w[0] - pos[0]) - R - 8,
+					std::fabs(w[1] - pos[1]) - ny - 8, std::fabs(w[2] - pos[2]) - R - 8};
+			if(near[0] > 64 || near[1] > 64 || near[2] > 64)
 				continue;
 			// [KIT_MOVING_OBJECTS] one that moves: at rest, what moves it with it
 			const json::Value links = links_of(e);
@@ -18032,6 +18068,9 @@ struct Module: public interface::Module, public Interface
 				if(d.is_undefined())
 					continue;
 				const json::Value look = look_of(in, d);
+				const double lr = look_reach(look);
+				if(near[0] > lr || near[1] > lr || near[2] > lr)
+					continue;
 				const ss_ key = jstr(look, "state");
 				const bool on = !key.empty() && in.state.get(key).is_true();
 				o += "{";

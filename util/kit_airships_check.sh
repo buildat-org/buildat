@@ -11,7 +11,10 @@
 # it while it moves (a cell in its frame, aimed as it moves). kitbob joins Blue,
 # buys his own skiff and is refused building on kitboss's. Three ships changed
 # within the same seconds: the shared rebuild budget (one rebuild every 0.5 s
-# for all of them) holds. kitcat joins late: he sees the changed cells. Stop
+# for all of them) holds. kitcat joins late: he sees the changed cells, buys a
+# core and walks from the island onto it and onto kitbob's deck, never dead
+# ([KIT_AIRSHIP_CORE_DEATH]: the island's look left out of the server's step
+# past 10 m from its middle). Stop
 # puts everything back: the ships gone, the wallets' money with them.
 # Native, or "web": kitboss in a page, kitbob and kitcat native.
 # Screenshots with KEEP_TMP=1: $t/*.png
@@ -205,7 +208,7 @@ EOF
 	body
 	shot parked
 	# kitbob and kitcat come and go; then Stop, everything back
-	printf 'wait_log 300000 object boxes kitown_46.1\nframes 30\n'
+	printf 'wait_log 300000 object boxes kitown_46.2\nframes 30\n'
 	shot all
 	printf 'event kit_edit {"op": "mode", "on": true}\nwait_log 5000 kit editor: edit mode on\n'
 	printf 'event kit_edit {"op": "stop"}\nwait_log 10000 kit editor: the server is Ended (by kitboss)\nsync 3000\n'
@@ -277,6 +280,16 @@ EOF
 	at 46 0 0 -0.5 right
 	printf 'wait_log 10000 object boxes kitown_46.1\nevent kit_point_obj\nlook_dir 0.3 -0.4 1\n'
 	shot cat_core
+	# [KIT_AIRSHIP_CORE_DEATH] Over the island's edge onto his core (its helm),
+	# back, and onto kitbob's skiff's deck: on them, never dead
+	printf 'look_dir 1 0 0\nframes 3\n'; held W 420
+	printf 'look_dir 0 0 1\nframes 3\n'; held W 600; printf 'frames 30\n'; body
+	printf 'look_dir 0 0 -1\nframes 3\n'; held W 500
+	printf 'look_dir -1 0 0\nframes 3\n'; held W 650
+	printf 'look_dir 0 0 1\nframes 3\n'; held W 1000; printf 'frames 30\n'; body
+	# (kitboss's Stop waits for this one)
+	printf 'event kit_obuild {"id": 46, "cell": [0, 1, -1], "voxel": "kit/stone", "param": 0, "tint": 0}\n'
+	printf 'wait_log 10000 object boxes kitown_46.2\n'
 	printf 'sync 3000\nquit\n'
 } > "$t/cat.cmds"
 if [ -n "$WEB" ]; then
@@ -344,6 +357,17 @@ print("kitboss's feet: on the deck %.3f, after the jump %.3f (frames %s, %s)" % 
 	f["before"][0][1], f["jumped"][0][1], f["before"][1], f["jumped"][1]))
 assert f["before"][1] == "40" and f["jumped"][1] == "40", f
 assert abs(f["jumped"][0][1] - f["before"][0][1] - 1) < 0.15, f
+# [KIT_AIRSHIP_CORE_DEATH] kitcat over the island's edge: on his core (its helm,
+# in the world's frame), then on kitbob's deck (its frame); the server never had
+# him elsewhere (a body that fell through the island came back 3 m off and died)
+feet = re.findall(r"kit: feet at ([-\d.]+),([-\d.]+),([-\d.]+), frame (\S+)", log["cat"])
+print("kitcat's feet: on the core %s, on the skiff %s" % (feet[0] if feet else None, feet[1:]))
+assert len(feet) == 2, feet
+assert abs(float(feet[0][2]) - 15) < 1 and 0.45 < float(feet[0][1]) < 1.05, feet
+assert feet[1][3] == "44" and abs(float(feet[1][1]) - 0.5) < 0.05 and float(feet[1][2]) > 14, feet
+corr = [float(x) for x in re.findall(r"kit: the body corrected by ([\d.]+) m", log["cat"])]
+assert max(corr, default=0) < 1, corr
+assert "kitcat died" not in srv, "kitcat died"
 # The budget: one rebuild every 0.5 s at most for all ships together
 rb = []
 for l in srv.splitlines():
