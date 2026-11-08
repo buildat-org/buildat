@@ -1057,9 +1057,17 @@ end)
 
 -- [KIT_VOXEL_FORMAT] The World's sky light ("kit:sky" {"on": bool}, at
 -- the join and on a change; "relit" once the loaded sections are): the voxels meshed with the light the server
--- keeps in them, drawn by KitVoxelSky*.xml; off, the plain look (the scene's
--- lights alone) at no cost. M.sky_light() is it; M.on_sky(cb) is told.
+-- keeps in them, drawn by KitVoxelSky*.xml. M.sky_light() is it;
+-- M.on_sky(cb) is told. [KIT_SKY_LIGHT_CAVES] Off, the same meshes and
+-- look with the sky taken as full everywhere (the light bits not read,
+-- they are stale then): the corners' shade alone, on the ambient and the
+-- sun. Its cost is a vertex colour on every voxel mesh.
 local sky_on, sky_cbs = false, {}
+do
+	local voxelworld = require("buildat/module/voxelworld")
+	voxelworld.use_skylight = true
+	buildat.set_mesh_sky_full(true)
+end
 function M.sky_light()
 	return sky_on
 end
@@ -1077,9 +1085,8 @@ buildat.sub_packet("kit:sky", function(data)
 	end
 	sky_on = on
 	log:info("kit: sky light " .. (on and "on" or "off"))
-	local voxelworld = require("buildat/module/voxelworld")
-	voxelworld.use_skylight = on
-	voxelworld.remesh_all()
+	buildat.set_mesh_sky_full(not on)
+	require("buildat/module/voxelworld").remesh_all()
 	for _, cb in ipairs(sky_cbs) do
 		cb(on)
 	end
@@ -1091,8 +1098,7 @@ end)
 -- with the tint, and the sky light when the World has it; under physical
 -- lighting ([KIT_LIGHTING], environment.lua) its albedo decoded
 function M.voxel_look(node)
-	local sky = (sky_on and "Sky" or "") ..
-			(M.physical and M.physical() and "Phys" or "")
+	local sky = "Sky" .. (M.physical and M.physical() and "Phys" or "")
 	for child, kind in pairs({[""] = "", alpha = "Alpha",
 			masked = "Masked"}) do
 		local n = child == "" and node or node:GetChild(child)

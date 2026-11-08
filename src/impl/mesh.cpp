@@ -41,6 +41,9 @@ using interface::VoxelSample;
 using interface::VoxelSampleView;
 using interface::VoxelRegistry;
 
+// set_sky_full(); read into each VoxelFmt, so a mesh job sees one value
+static std::atomic<bool> g_sky_full{false};
+
 // The voxel format's fields, read out of the registry once per chunk instead
 // of once per voxel; see VoxelFormat in interface/voxel.h. A format is set
 // before the first voxel is added and never after, so nothing here needs the
@@ -70,10 +73,14 @@ struct VoxelFmt
 	// one field; read once per chunk with the rest
 	interface::VoxelFormat format;
 	interface::VoxelSelector look;
+	// [KIT_SKY_LIGHT_CAVES] the sky's light taken as full, its bits not
+	// read (set_sky_full())
+	bool sky_full = false;
 
 	VoxelFmt(){}
 	VoxelFmt(VoxelRegistry *voxel_reg)
 	{
+		sky_full = g_sky_full;
 		const interface::VoxelFormat &f = voxel_reg->get_format();
 		format = f;
 		look = voxel_reg->get_look_selector();
@@ -146,6 +153,8 @@ struct VoxelFmt
 	}
 	float sky_f(const VoxelSample &v) const
 	{
+		if(sky_full)
+			return 1.0f;
 		return light_sky.bound() ?
 				(float)light_sky.get(v) / sky_div : 0.0f;
 	}
@@ -457,6 +466,12 @@ static bool occludes(VoxelVolume &volume,
 	const interface::CachedVoxelDefinition *def = voxel_reg->get_cached(v);
 	if(def == nullptr)
 		return false;
+	// [KIT_SKY_LIGHT_CAVES] The corner shade alone: a blended voxel (water,
+	// glass) is no crease, a sea's bed read as buried in its every corner.
+	// simplified: only there; with the flood's light the bed under water
+	// is dim anyway, and luanti_client's fitted probes keep the table
+	if(fmt.sky_full && def->translucent)
+		return false;
 	return def->edge_material_id != interface::EDGEMATERIALID_EMPTY;
 }
 
@@ -499,6 +514,11 @@ static std::atomic<bool> alpha_nibbles{false};
 void set_alpha_nibbles(bool on)
 {
 	alpha_nibbles = on;
+}
+
+void set_sky_full(bool on)
+{
+	g_sky_full = on;
 }
 
 static float sky_alpha(float sky_f, float shade, bool packed)

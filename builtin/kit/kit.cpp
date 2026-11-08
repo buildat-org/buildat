@@ -11137,6 +11137,23 @@ struct Module: public interface::Module, public Interface
 		WorldScope ws(m_w, world_at(e.scene));
 		if(e.scene == m_w->world_scene && m_w->world_scene)
 			m_w->world_generated++;
+		// [KIT_SKY_LIGHT_CAVES] The generator writes no light, and a write
+		// without any keeps what was there: a section generated under the
+		// sky light (a World loaded with it on, one walked into, one
+		// generated again) was dark for good, or wore its old ground's
+		// light (caves turned on after the sky: lit as the rock was).
+		// Relit as apply_sky() relights the loaded ones
+		if(!m_w->sky || e.scene != m_w->world_scene || !m_w->world_scene)
+			return;
+		voxelworld::access(m_server, m_w->world_scene,
+				[&](voxelworld::Instance *w){
+			w->relight_region_later(w->get_section_region_voxels(e.section_p));
+		});
+		if(!m_w->sky_relight){
+			m_w->sky_relight_us = m_w->sky_relight_max_us = 0;
+			m_w->sky_relight_t0 = interface::os::time_us();
+		}
+		m_w->sky_relight++;
 	}
 
 	void on_gen_queue(const worldgen::QueueModifiedEvent &e)

@@ -1363,6 +1363,12 @@ void set_mesh_alpha_nibbles(bool on)
 	interface::mesh::set_alpha_nibbles(on);
 }
 
+// set_mesh_sky_full(on): see interface/mesh.h set_sky_full()
+void set_mesh_sky_full(bool on)
+{
+	interface::mesh::set_sky_full(on);
+}
+
 void init_mesh(lua_State *L)
 {
 	using namespace luabind;
@@ -1377,6 +1383,7 @@ void init_mesh(lua_State *L)
 			LUABIND_FUNC(share_geometry),
 			LUABIND_FUNC(set_mesh_bounce),
 			LUABIND_FUNC(set_mesh_alpha_nibbles),
+			LUABIND_FUNC(set_mesh_sky_full),
 			LUABIND_FUNC(set_8bit_voxel_geometry),
 			LUABIND_FUNC(set_voxel_geometry),
 			LUABIND_FUNC(set_voxel_lod_geometry),
