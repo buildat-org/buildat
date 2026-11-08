@@ -201,7 +201,11 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 	if(level > max_level)
 		return;
 	if(line_begin){
-		time_t now = time(NULL);
+		// [LOG_TIMESTAMP_ROUNDING] The second and its milliseconds from one
+		// reading: time() apart from it could still be on the second before
+		// (23.000 printed right after 23.797)
+		const int64_t now_us = get_timeofday_us();
+		time_t now = (time_t)(now_us / 1000000);
 		char timestr[30];
 		if(disable_bloat){
 			timestr[0] = 0;
@@ -210,7 +214,7 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 					"%b %d %H:%M:%S", localtime(&now));
 			if(timestr_len == 0)
 				timestr[0] = '\0';
-			int ms = (get_timeofday_us() % 1000000) / 1000;
+			int ms = (now_us % 1000000) / 1000;
 			timestr_len += snprintf(timestr + timestr_len,
 					sizeof(timestr) - timestr_len, ".%03i", ms);
 		}

@@ -50,6 +50,7 @@
 //   ["tap", type, label]    a tap where the click by label would go
 //   ["tap", type, label, x, y]
 //   ["hold", x, y, ms]      a finger held still there for ms
+//   ["hold", type, label, ms] the same where the click by label would go
 //   ["drag", x0, y0, x1, y1, "touch"]
 //                           the left button (or a finger) down at x0, y0,
 //                           moved to x1, y1 over half a second, and up
@@ -799,6 +800,10 @@ async function find(b, type, label, hx, hy) {
 				const [x, y] = await find(b, a, c, args[2], args[3]);
 				console.log(op + ": " + a + " \"" + c + "\" at " + x + ", " + y);
 				await b.ops[op](x, y);
+			} else if (op === "hold" && typeof a === "string") {
+				const [x, y] = await find(b, a, c);
+				console.log(op + ": " + a + " \"" + c + "\" at " + x + ", " + y);
+				await b.ops.hold(x, y, args[2]);
 			} else if (op === "drag" && typeof a === "string") {
 				const [x, y] = await find(b, a, c);
 				console.log(op + ": " + a + " \"" + c + "\" from " + x + ", " + y);

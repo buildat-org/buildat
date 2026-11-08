@@ -22,6 +22,12 @@ return {
 		local held = part:gsub("^.*/", ""):gsub("^airship_", ""):gsub("_", " ")
 		-- [KIT_AIRSHIPS_2] free purchases out of a round
 		local free = e.state.free == true
+		-- [KIT_WALLET_NOTE_OVERLAP] wrapped before the top centre, where a
+		-- kit/arena's status is (400 wide at most)
+		-- simplified: the width when the text changes, not on a resize; a
+		-- screen under 824 wide still wraps at 200 and may reach under it
+		text:SetWordwrap(true)
+		text.width = math.max(200, math.floor(magic.ui.root.width / 2) - 200 - 12)
 		text:SetText("Money: " .. (free and "free" or m) ..
 				(part ~= "" and "\nHolding: " .. held ..
 				" (right click a face of your ship)" or "") ..

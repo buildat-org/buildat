@@ -477,6 +477,9 @@ struct Peer
 	uint64_t frame = 0;
 	double frame_rest[3] = {0, 0, 0};
 	bool editing = false;
+	// [KIT_JOIN_ORIGIN_POSITION] Joined, the join's runs (a spawner's
+	// teleport) not done yet: in no zone, its place the app's
+	bool spawning = false;
 	// The tools' colour (an index of COLORS, -1 while they are off), the
 	// selected entity (0: none) and the cursor (null: none), which the
 	// other builders see
@@ -12173,6 +12176,11 @@ struct Module: public interface::Module, public Interface
 			if(t.shared.count(k))
 				replicate_state(e, r.comp, k);
 		}
+		// [KIT_TEAM_JOIN_LEAVES_OTHERS] A team joined: the player out of the
+		// scene's other teams (respawn_at takes the last one they are in)
+		if(t.team && pid && r.handler == "on_input" &&
+				jstr_at(r.args, 0) == "join" && in_team(pid, e.id))
+			leave_teams(pid, e);
 		const json::Value &emits = fx.get("emit");
 		json::Value tried_out = json::array();
 		for(unsigned i = 0; i < emits.size(); i++){
@@ -16613,6 +16621,43 @@ struct Module: public interface::Module, public Interface
 		return 0;
 	}
 
+	// [KIT_TEAM_JOIN_LEAVES_OTHERS] A player out of every team in the scene
+	// of the one they joined but it
+	void leave_teams(uint64_t player, const Entity &joined)
+	{
+		ss_ scene;
+		scene_of(joined, &scene);
+		for(auto &x : m_entities){
+			ss_ xs;
+			if(x.first == joined.id || !scene_of(x.second, &xs) || xs != scene)
+				continue;
+			for(size_t c = 0; c < x.second.comps.size(); c++){
+				Instance &o = x.second.comps[c];
+				if(!m_types[o.type].team)
+					continue;
+				const json::Value &m = o.state.get("members");
+				json::Value keep = json::array();
+				bool had = false;
+				for(unsigned i = 0; i < m.size(); i++){
+					if(m.at(i).is_number() &&
+							(uint64_t)m.at(i).as_number() == player)
+						had = true;
+					else
+						keep.append(m.at(i));
+				}
+				if(!had)
+					continue;
+				o.state.set("members", keep);
+				m_runtime_dirty = true;
+				if(m_types[o.type].shared.count("members"))
+					replicate_state(x.second, c, "members");
+				log_i(MODULE, "Entity %s's %s: player %s left it for entity %s",
+						cs(itos(x.first)), cs(o.type), cs(itos(player)),
+						cs(itos(joined.id)));
+			}
+		}
+	}
+
 	bool in_team(uint64_t player, uint64_t team)
 	{
 		auto it = m_entities.find(team);
@@ -17171,7 +17216,13 @@ struct Module: public interface::Module, public Interface
 					const Peer &peer = pp.second;
 					if(peer.scene != scene || !peer.player)
 						continue;
-					const bool inside = box_holds(o, q, n, peer.pos);
+					// [KIT_JOIN_ORIGIN_POSITION] One joining or not put yet is
+					// nowhere: the app's place before the spawn's (the origin's
+					// ground on a join and at a session's end) is in no zone
+					auto bi = m_bodies.find(pp.first);
+					const bool inside = !peer.spawning && (!m_host.controls ||
+							(bi != m_bodies.end() && bi->second.put)) &&
+							box_holds(o, q, n, peer.pos);
 					if(inside != (in.inside.count(itos(peer.player)) > 0))
 						log_i(MODULE, "Entity %s: %s %s its zone at %.3f,%.3f,%.3f",
 								cs(itos(e.id)), cs(peer.name), inside ? "enters" :
@@ -17446,6 +17497,10 @@ struct Module: public interface::Module, public Interface
 			log_v(MODULE, "%zu runs wait for the next tick", m_queue.size());
 		else if(!m_kits_due.empty())
 			kits_due();
+		// [KIT_JOIN_ORIGIN_POSITION] the joins' runs done: placed
+		if(m_queue.empty())
+			for(auto &p : m_peers)
+				p.second.spawning = false;
 		// simplified: the runtime row is written after each tick that
 		// changed it; a write per interval is the upgrade if a busy world
 		// makes it a cost
@@ -23265,6 +23320,9 @@ struct Module: public interface::Module, public Interface
 		Peer &p = m_peers[peer];
 		const bool join = p.name != name || p.scene != scene;
 		const bool moved_scene = !p.scene.empty() && p.scene != scene;
+		// (a guest logging in stays where they are: their zones swap who)
+		if(p.name.empty() || moved_scene)
+			p.spawning = true;
 		if(p.name != name){
 			const bool was = p.editing;
 			tools(p, peer, false);
@@ -25181,6 +25239,19 @@ struct Module: public interface::Module, public Interface
 			return prefab_bench(p, peer, j, refuse);
 		if(op == "scene")
 			return switch_scene(p, peer, j, refuse);
+		// [KIT_WALK_HERE] {"op": "walk_here", "pos": [x, y, z]}: the
+		// builder's body put there (its feet; the client turns its view)
+		if(op == "walk_here"){
+			const json::Value &ps = j.get("pos");
+			if(!pos_ok(ps))
+				return refuse("pos: three numbers within "+
+						itos((int)MAX_COORD));
+			log_i(MODULE, "%s walks here: (%g, %g, %g)", cs(p.name),
+					ps.at(0u).as_number(), ps.at(1u).as_number(),
+					ps.at(2u).as_number());
+			return to_scene(peer, "", ps.at(0u).as_number(),
+					ps.at(1u).as_number(), ps.at(2u).as_number());
+		}
 		if(op == "terrain")
 			return terrain(p, peer, j, refuse);
 		if(op == "voxel")

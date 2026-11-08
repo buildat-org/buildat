@@ -1055,7 +1055,7 @@ end
 
 M.over_ui = over_ui
 
-local refresh, show_log, rebuild_bar, set_view, terrain_panel
+local refresh, show_log, rebuild_bar, set_view, terrain_panel, walk_here
 local inspector_window
 local voxel_names
 
@@ -1203,10 +1203,17 @@ rebuild_bar = function(if_changed)
 		views[#views + 1] = {VIEW_NAMES[v] .. (S.touch and "" or
 				" (" .. M.key_name(VIEW_KEYS[v]) .. ")"), v}
 	end
+	-- [KIT_WALK_HERE] last: the walker put where this view's camera is
+	views[#views + 1] = {"Walk here", "\0walk_here"}
 	-- Not measured on the side (a dropdown made is kept by ui_utils): the
 	-- second thing in the first row
-	local d = ui_utils.dropdown(bar_row, views, S.view, function(v)
-		set_view(v)
+	local d
+	d = ui_utils.dropdown(bar_row, views, S.view, function(v)
+		if v ~= "\0walk_here" then
+			set_view(v)
+		elseif not walk_here() then
+			ui_utils.dropdown_set(d, S.view)
+		end
 	end, {height = 24})
 	bar_used = bar_used + math.max(d.minWidth, 90) + 4
 	-- [KIT_SCENES] the scene edited, switched by the list; New scene...
@@ -3526,6 +3533,10 @@ magic.SubscribeToEvent("command_seq:kit_cam_where", function(_, data)
 			.. "(%s)", p.x, p.y, p.z, data:GetString("Param")))
 	log:info(string.format("kit editor: the plan %.2f across (%s)", S.span or 0,
 			data:GetString("Param")))
+	-- [KIT_WALK_HERE] and the walker's
+	local w, d = O.camera.worldPosition, O.camera.worldDirection
+	log:info(string.format("kit editor: the walk camera at %.2f %.2f %.2f looking "
+			.. "%.3f %.3f %.3f (%s)", w.x, w.y, w.z, d.x, d.y, d.z, data:GetString("Param")))
 end)
 
 -- A check's look for a handle by its name ("+y", "-x"): where it is on
@@ -4740,6 +4751,35 @@ set_view = function(v)
 end
 M.set_view = function(v)
 	set_view(v)
+end
+
+-- [KIT_WALK_HERE] The walker put where the view's camera is, looking as it
+-- does, and the Walk view; in 2D on the ground under the plan's middle,
+-- the walker's yaw kept, level. In Walk and HUD nothing (false).
+-- simplified: the 3D or Signals camera's place as it is, in the air or in a
+-- wall too (the walker falls or is pushed out as the server puts it)
+walk_here = function()
+	local v = S.view
+	if v ~= "2d" and v ~= "3d" and v ~= "signals" then
+		log:info("kit editor: walk here: nothing in " .. VIEW_NAMES[v])
+		return false
+	end
+	local feet
+	if v == "2d" then
+		local p = magic.Vector3(S.cx or 0, S.cut or 0, S.cz or 0)
+		feet = M.walk_here(p, nil, 0)
+		feet[2] = ground_under(p) - 0.5
+	else
+		local node = v == "signals" and NT.sg.node() or active_camera()
+		local p, d = node.worldPosition, node.worldDirection
+		feet = M.walk_here(p, math.deg(math.atan2(d.x, d.z)),
+				math.deg(math.asin(math.max(-1, math.min(1, -d.y)))))
+	end
+	send({op = "walk_here", pos = feet})
+	log:info(string.format("kit editor: walk here from %s at %.2f,%.2f,%.2f",
+			VIEW_NAMES[v], feet[1], feet[2], feet[3]))
+	set_view("walk")
+	return true
 end
 
 -- [WB_EDITOR_VIEW_MEMORY] kit.remember(key): how this user left the

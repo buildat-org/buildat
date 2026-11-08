@@ -27,7 +27,8 @@ return {
 		},
 	},
 	component = true,
-	movement = {body = BODY, camera = "chase", touch = "drive"},
+	movement = {body = BODY, camera = "chase", touch = "drive",
+		touch_buttons = {{"Up", "jump"}, {"Down", "down"}}},
 	params = {
 		thrust = {cat = "physics", type = "number", default = 4, min = 0, max = 100},
 		mass = {cat = "physics", type = "number", default = 0, min = 0, max = 100000},
