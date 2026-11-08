@@ -18,7 +18,9 @@
 --            of the hour by extensions/voxel_light's terms (physical_sky's
 --            radiances), the voxels' albedo decoded (KitVoxel*Phys*.xml),
 --            the voxel types that give light drawn as point lights
---   kit.physical() -> physical is drawn now
+--   fast_physical  ([KIT_FAST_PHYSICAL]) physical without the sun's shadow
+--            map and the bloom
+--   kit.physical() -> physical (or fast_physical) is drawn now
 --   kit.lit_viewport(vp, role, finish, node): the lighting's render path
 --     on a Kit view (role "play": the app's, which makes the look Kit's;
 --     "editor": the editor's 3D and 2D), finish(rp) adding a view's own;
@@ -97,15 +99,21 @@ local function sky_render()
 	return LIT.sky_render
 end
 
--- physical is drawn where the app draws through Kit's views
+-- physical (fast_physical too) is drawn where the app draws through Kit's
+-- views
 function M.physical()
-	return LIT.mode == "physical" and LIT.views.play ~= nil
+	return LIT.mode ~= "cartoon" and LIT.views.play ~= nil
+end
+-- [KIT_FAST_PHYSICAL] physical without the shadow map and the bloom
+local function fast()
+	return LIT.mode == "fast_physical"
 end
 
 local function lit_path(view)
 	local rp
 	if M.physical() then
 		rp = sky_render().render_path(magic, view.base)
+		rp:SetEnabled("BloomHDR", not fast())
 	else
 		rp = view.base:Clone()
 	end
@@ -138,16 +146,17 @@ function M.lit_viewport(vp, role, finish, node)
 end
 
 -- The lighting changed: the views' paths, HDR, the voxels' techniques.
--- [KIT_FORCE_CARTOON] physical drawn as cartoon where the client's
--- preference says so (a weak device; unset, software GL)
+-- [KIT_FORCE_CARTOON] physical (or fast_physical) drawn as cartoon where
+-- the client's preference says so (a weak device; unset, software GL)
+local MODES = {cartoon = true, fast_physical = true, physical = true}
 local function set_lighting(mode)
-	mode = mode == "physical" and "physical" or "cartoon"
-	local forced = mode == "physical" and
+	mode = MODES[mode] and mode or "cartoon"
+	local forced = mode ~= "cartoon" and
 			buildat.get_preference("lighting") == "cartoon"
 	if forced ~= (LIT.forced or false) then
 		LIT.forced = forced
 		if forced then
-			log:info("kit: lighting physical drawn as cartoon (the" ..
+			log:info("kit: lighting " .. mode .. " drawn as cartoon (the" ..
 					" client's preference)")
 		end
 	end
@@ -155,9 +164,11 @@ local function set_lighting(mode)
 	if mode == LIT.mode then
 		return false
 	end
+	local was_phys = M.physical()
 	LIT.mode = mode
 	local phys = M.physical()
-	log:info("kit: lighting " .. mode .. (phys and " (HDR, metered)" or
+	log:info("kit: lighting " .. mode .. (phys and (fast() and
+			" (HDR, metered; no shadow map, no bloom)" or " (HDR, metered)") or
 			LIT.views.play and "" or " (the app draws its own)"))
 	ground_look()
 	if not LIT.views.play then
@@ -167,7 +178,10 @@ local function set_lighting(mode)
 	for _, view in pairs(LIT.views) do
 		lit_path(view)
 	end
-	require("buildat/module/voxelworld").remesh_all()
+	-- The voxels' techniques: the two physicals' the same
+	if phys ~= was_phys then
+		require("buildat/module/voxelworld").remesh_all()
+	end
 	return true
 end
 
@@ -418,13 +432,14 @@ end
 -- [KIT_PHYS_SHADOWS] Under physical the sun (or the moon) casts shadows
 -- from a shadow map, sky_render's (skeldat's): the voxels, the voxel
 -- objects (a heightmap's decorations), the looks and the heightmap's
--- ground. None under cartoon, and none once the clouds took the light.
+-- ground. None under cartoon nor fast_physical, and none once the clouds
+-- took the light.
 -- Only where Kit draws the app's view: another app's own sun stays its own
 local function body_shadows()
 	if not LIT.views.play then
 		return
 	end
-	local on = M.physical() and env.light.brightness > 0
+	local on = M.physical() and not fast() and env.light.brightness > 0
 	if on and not LIT.shadows_set then
 		LIT.shadows_set = true
 		sky_render().cast_shadows(magic, env.light)
@@ -491,7 +506,7 @@ local function phys_light(v)
 		dome:set_indoors(enc, 1)
 	end
 	body_shadows()
-	sky_log("physical", s)
+	sky_log(LIT.mode, s)
 end
 
 -- The light of the hour h (0 to 24): the sun up from 6 to 18
@@ -660,13 +675,25 @@ local function lamps_update(dt)
 		if s.wait > 0 then
 			return
 		end
-		s.at = {math.floor(p.x + 0.5), math.floor(p.y + 0.5),
+		local at = {math.floor(p.x + 0.5), math.floor(p.y + 0.5),
 			math.floor(p.z + 0.5)}
+		-- [KIT_FAST_PHYSICAL] Again where the camera moved to another cell,
+		-- else every 3 s (a lamp placed or dug): scanned every half second
+		-- it was 9 ms of the web's frame and 2.6 of the native's
+		local l = s.last
+		s.still = (s.still or 0) + 0.5
+		if l and l[1] == at[1] and l[2] == at[2] and l[3] == at[3] and
+				s.still < 3 then
+			s.wait = 0.5
+			return
+		end
+		s.at, s.last, s.still = at, at, 0
 		s.x, s.found, s.names = -LAMP_R, {}, s.names or {}
 	end
-	-- A slice of x a frame
+	-- A slice of x a frame ([KIT_FAST_PHYSICAL]: four, 612 cells looked up
+	-- in Lua, were the frame's spikes under physical: p90 30 to 47 ms)
 	local c = s.at
-	local stop = math.min(LAMP_R, s.x + 3)
+	local stop = s.x
 	for x = s.x, stop do
 		for y = -LAMP_RY, LAMP_RY do
 			for z = -LAMP_R, LAMP_R do

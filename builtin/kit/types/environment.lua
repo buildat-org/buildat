@@ -11,10 +11,13 @@
 -- "seasons", materials.json), the voxels unchanged.
 --
 -- [KIT_LIGHTING] Its lighting is the composition's, the root's alone (a
--- scene's says nothing): cartoon (the default; LDR, the ambient, one sun,
--- the fog) or physical (HDR: sky_render's exposure, bloom and tonemap,
--- physical_sky's light by the hour, the voxels' light drawn). The World's
--- sky light darkens caves in both when it is on.
+-- scene's says nothing): cartoon (LDR, the ambient, one sun, the fog),
+-- physical (HDR: sky_render's exposure, bloom and tonemap, physical_sky's
+-- light by the hour and its sky, the sun's shadow map, the voxels' light
+-- drawn) or fast_physical, the default ([KIT_FAST_PHYSICAL]: physical
+-- without the shadow map and the bloom, near cartoon's frame time; the
+-- three a choice of style). The World's sky light darkens caves in all
+-- three when it is on (cartoon where the root has no environment).
 --
 -- The sky, each mode its own (cartoon Luanti's, physical physical_sky's),
 -- by the same parameters: the time places the sun and the moon and fades
@@ -95,8 +98,8 @@ return {
 			max = 600},
 		season = {cat = "look", type = "string", default = "summer",
 			choices = {"spring", "summer", "autumn", "winter"}},
-		lighting = {cat = "look", type = "string", default = "cartoon",
-			choices = {"cartoon", "physical"}},
+		lighting = {cat = "look", type = "string", default = "fast_physical",
+			choices = {"cartoon", "fast_physical", "physical"}},
 		cloud_cover = {cat = "look", type = "number", default = 0.4, min = 0,
 			max = 1},
 		cloud_height = {cat = "look", type = "number", default = 120, min = 10,

@@ -33,6 +33,8 @@
 #   8. [KIT_FORCE_CARTOON] a second client with the preference lighting
 #      cartoon draws the composition's physical as cartoon. The first runs
 #      with lighting game (software GL's default is cartoon).
+#  10. [KIT_FAST_PHYSICAL] the environment's default fast_physical: no
+#      plate's shadow, its noon metered and its sky physical's.
 # The shots are kept with KEEP_TMP=1; look at them.
 #   util/kit_lighting_check.sh
 #   REF=1 util/kit_lighting_check.sh   writes util/kit_lighting_ref.txt
@@ -149,6 +151,10 @@ EOF
 	# 4: the environment, on the root
 	edit '{"op": "place", "type": "kit/environment", "pos": [0, 1, 0]}'
 	echo "wait_log_any 10000 kit: environment: from the root, 4,"
+	# [KIT_FAST_PHYSICAL] its default fast_physical; cartoon set, the
+	# reference's look
+	echo "wait_log_any 10000 kit: lighting fast_physical (HDR, metered; no shadow map, no bloom)"
+	ep_line lighting '"cartoon"' "kit: lighting cartoon"
 	# Under a cover of 0.2 the sun all through, as the reference's frame
 	# ([KIT_CLOUDS_TOO_BRIGHT]: the default 0.4 lets 0.80 of it through)
 	ep cloud_cover 0.2
@@ -213,6 +219,12 @@ EOF
 		ep cloud_cover 0.1
 		sky "physical, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 0.10"
 		shot phys_noon
+		# [KIT_FAST_PHYSICAL] fast_physical: physical's frame, no shadow
+		ep_line lighting '"fast_physical"' "kit: lighting fast_physical"
+		sky "fast_physical, 12.0 o'clock, sun 1, moon 0, stars 0.00, clouds 0.10 at 120, wind 0.0 toward 180; clear 1.00: light 1.00, fog 1.00, sun through 1.00, shadows 0"
+		shot fast_plate "$PLATE"
+		shot fast_noon
+		ep_line lighting '"physical"' "kit: lighting physical"
 		ep time 17.5
 		sky "physical, 17.5 o'clock"
 		shot phys_dusk
@@ -262,8 +274,8 @@ EOF
 		skyn "clouds 0.40 at 120, wind 0.0 toward 180; rain 0.50: light 0.90, fog 1.00"
 		ep intensity 1
 		skyn "clouds 0.80 at 120, wind 0.0 toward 180; rain 1.00: light 0.80, fog 1.00"
-		ep weather '"snow"'
-		skyn "clouds 0.80 at 120, wind 0.0 toward 180; snow 1.00: light 0.80, fog 1.00"
+		# rain's values: no fade, the line at once (before the "to undo")
+		ep_line weather '"snow"' "clouds 0.80 at 120, wind 0.0 toward 180; snow 1.00: light 0.80, fog 1.00"
 		shot snow
 		ep weather '"storm"'
 		skyn "clouds 0.95 at 120, wind 10.0 toward 180; storm 1.00: light 0.55, fog 0.50"
@@ -486,6 +498,13 @@ so=$(shade "$t/phys_plate_overcast.png")
 awk "BEGIN{exit !($sp < 0.6 && $sc > 0.85 && $so > 0.85)}" ||
 	fail "the plate's shadow: physical $sp, cartoon $sc, physical overcast $so (the middle over the sides)"
 echo "ok: the plate's shadow under physical ($sp of the open ground), none under cartoon ($sc) nor physical's full cover ($so)"
+# [KIT_FAST_PHYSICAL] fast_physical: no shadow, physical's metered frame
+# but for the shadows and the bloom
+sf=$(shade "$t/fast_plate.png") fn=$(mean "$t/fast_noon.png" 7 9)
+fd=$(skydiff phys_noon fast_noon)
+awk "BEGIN{exit !($sf > 0.85 && $fn > 40 && $fn < 220 && $fd < 3)}" ||
+	fail "fast_physical: the plate's shadow $sf, its noon's ground $fn, its sky $fd from physical's"
+echo "ok: fast_physical: no plate's shadow ($sf), metered (its noon's ground $fn), its sky $fd from physical's"
 # 8. The preference: physical drawn as cartoon on that client alone
 f=$t/force.log
 want "$f" "kit: lighting physical drawn as cartoon (the client's preference)" \
