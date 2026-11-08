@@ -28,6 +28,7 @@
 #include "interface/zip.h"
 #include "kit/world.h"
 #include "kit/symmetry.h"
+#include "kit/creatures.h"
 #include "voxel_objects/api.h"
 #include "client_file/api.h"
 #include <Scene.h>
@@ -2305,6 +2306,11 @@ struct Module: public interface::Module, public Interface
 		// [KIT_AIRSHIPS] a ship's: its parts as last logged, its speed as last logged
 		ss_ parts;
 		double logged_speed = -1;
+		// [KIT_CREATURES_8A] a creature's (movement = {steered = true}): its state's
+		// pos and yaw the world's, its keys its parent's frame's; asleep while its
+		// section is not loaded, since then (us)
+		bool creature = false;
+		int64_t asleep_us = 0;
 	};
 	std::map<uint64_t, Drive> m_drives;
 	int64_t m_drive_gen = 0;
@@ -2384,7 +2390,7 @@ struct Module: public interface::Module, public Interface
 				return mi->second != 0;
 			const Entity &e = it->second;
 			const bool steered = steerable(e) && (m_free_objects.count(e.id) ||
-					moving(e.parent, depth + 1));
+					moving(e.parent, depth + 1) || creature_movement(e));
 			const bool r = steered || m_motions.count(id) || moving(e.parent, depth + 1);
 			memo[id] = steered ? 2 : r ? 1 : 0;
 			return r;
@@ -2409,11 +2415,19 @@ struct Module: public interface::Module, public Interface
 				d.gen = ++m_drive_gen;
 				d.t = motion_t();
 				json::Value pos = json::array();
-				pos.append(e.pos[0]);
-				pos.append(e.pos[1] - 0.5);
-				pos.append(e.pos[2]);
+				// [KIT_CREATURES_8A] a creature steps in the world
+				double w[3] = {e.pos[0], e.pos[1], e.pos[2]};
+				Turn wq = Turn::of(e);
+				d.creature = creature_movement(e);
+				if(d.creature){
+					AtRest rest(m_at_rest);
+					world_of(e, w, &wq);
+				}
+				pos.append(w[0]);
+				pos.append(w[1] - 0.5);
+				pos.append(w[2]);
 				d.state.set("pos", pos);
-				d.state.set("yaw", e.yaw);
+				d.state.set("yaw", d.creature ? wq.yaw() : e.yaw);
 				d.keys.push_back({{std::floor(d.t * 1000), e.pos[0], e.pos[1], e.pos[2],
 						e.yaw, e.pitch, e.roll}});
 				scene_of(e, &d.scene);
@@ -2453,6 +2467,14 @@ struct Module: public interface::Module, public Interface
 			m.set("frame", fr);
 			m_motions[e.id] = m;
 		}
+	}
+
+	// [KIT_CREATURES_8A] A creature's movement (kit/creature_walker): stepped here
+	// wherever it is, its way the pathfinder's
+	bool creature_movement(const Entity &e)
+	{
+		const Instance *mv = movement_on(e);
+		return mv && m_types[mv->type].decl.get("movement").get("steered").is_true();
 	}
 
 	// A movement's type stepped here: one with a step and a body, not kit/course
@@ -10864,8 +10886,7 @@ struct Module: public interface::Module, public Interface
 				[&](voxelworld::Instance *w){
 			w->set_load_points(pts);
 		});
-		log_v(MODULE, "World: %zu load points", pts.size());
-	}
+		log_v(MODULE, "World: %zu load points", pts.size());	}
 
 	// An infinite World, or a heightmap's voxels, load round a player as
 	// they go (the section they are in changed)
@@ -11974,6 +11995,21 @@ struct Module: public interface::Module, public Interface
 			o += ",players=";
 			lua_lit(players, o);
 		}
+		// [KIT_CREATURES_8A] what is near (a type's `nearby`: a range or
+		// "param:<name>"), and a creature's own
+		{
+			const Type &ty = m_types[in.type];
+			const json::Value &nb = ty.decl.get("nearby");
+			const json::Value &rv = nb.is_string() && nb.as_string().compare(0, 6, "param:") == 0 ?
+					in.params.get(nb.as_string().substr(6)) : nb;
+			if(e.has_pos && rv.is_number() && rv.as_number() > 0){
+				o += ",nearby=";
+				lua_lit(nearby_of(e, std::min(64.0, rv.as_number()),
+						ty.decl.get("sight").is_true()), o);
+			}
+			if(e.has_pos && ty.decl.get("creature").is_true())
+				creature_lit(e, o);
+		}
 		// [KIT_CTF] its scene's regions: {id, team, rules, o, n} (the
 		// enabled ones; c:region_at picks the smallest holding a cell)
 		if(m_types[in.type].regions){
@@ -12441,6 +12477,10 @@ struct Module: public interface::Module, public Interface
 		const json::Value &set_params = fx.get("set_param");
 		for(unsigned i = 0; i < set_params.size(); i++)
 			set_param_fx(e, r.comp, r.by, set_params.at(i));
+		// [KIT_CREATURES_8A] c:propose_move
+		const json::Value &pm = fx.get("propose");
+		if(pm.is_object() || pm.is_false())
+			propose_fx(e, type, pm);
 		// [KIT_CARRY_ATTACH] c:attach, c:detach
 		const json::Value &att = fx.get("attach");
 		if(att.is_array())
@@ -17164,7 +17204,7 @@ struct Module: public interface::Module, public Interface
 	{
 		const int64_t now = now_us();
 		for(auto &p : m_entities)
-			for(size_t i = 0; i < p.second.comps.size(); i++){
+			for(size_t i = 0; i < p.second.comps.size() && !asleep(p.first); i++){
 				Instance &in = p.second.comps[i];
 				// In the order they are due; one set again in its own
 				// on_timer waits for its next due
@@ -17444,6 +17484,7 @@ struct Module: public interface::Module, public Interface
 				TICK_SLICES : 0;
 		sync_motions();
 		int64_t spent = step_bodies(budget);
+		spent += minds_tick(budget - spent); // [KIT_CREATURES_8A]
 		spent += step_drives(budget - spent);
 		send_tracks();
 		free_bodies_tick();
@@ -18626,6 +18667,9 @@ struct Module: public interface::Module, public Interface
 			if(!mv)
 				continue;
 			const double rate = num(d.params, "rate", 60, 10, 120), dt = 1 / rate;
+			// [KIT_CREATURES_8A] far from players: asleep with its section
+			if(d.creature && !creature_awake(e, d, now))
+				continue;
 			if(d.t < now - 1)
 				d.t = now - 1;
 			const int n = std::min((int)std::floor((now + DRIVE_LEAD - d.t) * rate),
@@ -18653,7 +18697,12 @@ struct Module: public interface::Module, public Interface
 			if(in.empty())
 				in = "{f=0,r=0,yaw=0,jump=0,go=0,tx=0,ty=0,tz=0}";
 			const json::Value bd = body_decl(d.type);
-			const double r = num(bd, "r", 0.45, 0.05, 8), h = num(bd, "h", 1.7, 0.05, 16);
+			double r = num(bd, "r", 0.45, 0.05, 8), h = num(bd, "h", 1.7, 0.05, 16);
+			// [KIT_CREATURES_8A] a creature's body its parameters'
+			if(d.creature){
+				r = num(d.params, "width", 2 * r, 0.1, 3) / 2;
+				h = num(d.params, "height", h, 0.1, 4);
+			}
 			double pos[3] = {0, 0, 0};
 			const json::Value &sp = d.state.get("pos");
 			for(unsigned k = 0; k < 3 && sp.is_array() && k < sp.size(); k++)
@@ -18706,9 +18755,21 @@ struct Module: public interface::Module, public Interface
 				const json::Value &a = d.state.get(k);
 				return a.is_number() && std::isfinite(a.as_number()) ? a.as_number() : row;
 			};
-			const std::array<double, 7> key = {{std::floor(d.t * 1000),
+			std::array<double, 7> key = {{std::floor(d.t * 1000),
 					np.at(0u).as_number(), np.at(1u).as_number() + 0.5, np.at(2u).as_number(),
 					ang("yaw", e.yaw), ang("pitch", e.pitch), ang("roll", e.roll)}};
+			// [KIT_CREATURES_8A] the world's into its parent's frame (one at rest).
+			// simplified: a turn about y only
+			if(d.creature){
+				const double w[3] = {key[1], key[2], key[3]};
+				double l[3];
+				to_local(e.parent, w, l);
+				double o[3], py, pp, pr;
+				Turn pq;
+				frame_of(e.parent, o, pq);
+				pq.angles(py, pp, pr);
+				key = {{key[0], l[0], l[1], l[2], key[4] - py, 0, 0}};
+			}
 			double flat = -1; // (along the ground)
 			if(!d.keys.empty()){
 				const std::array<double, 7> &l = d.keys.back();
@@ -18734,6 +18795,390 @@ struct Module: public interface::Module, public Interface
 				d.keys.pop_front();
 		}
 		return spent;
+	}
+
+	// ---- [KIT_CREATURES_8A] Creatures (kit_plan stage 8, slice 8a). A creature is an
+	// entity whose movement says `steered = true` (kit/creature_walker): a drive
+	// wherever it is, its way the pathfinder's (creatures.h). Its behaviours (kit/wander,
+	// kit/follow, kit/flee, kit/attack, a builder's) propose where to go,
+	// c:propose_move{to = {x, y, z}, range = m, speed = factor} (nil takes it back); the
+	// first enabled one in the entity's order of components that proposes wins. Its way
+	// there is found here, again as the goal moves a metre (0.5 s apart at most) or
+	// when it stopped short, and given to its step as the state's `path` (feet points
+	// in the world), which the step walks and empties. Far from players it sleeps: its
+	// section not loaded, it neither steps nor runs its timers, and goes on where it
+	// was when the section is back, its timers as far from due as they were.
+	// simplified: sleep only (no keep running or coarse); paths over the grid's
+	// cells, walk and jump (no swim, fly, climb); a node budget a tick, a search past
+	// it waits for the next tick
+	static constexpr int PATH_NODES_ONE = 4000; // a search's at most
+	static constexpr int PATH_NODES_TICK = 8000; // the tick's for all of them
+	static constexpr int PATH_REACH = 40; // cells a search goes (a goal further: towards it)
+	static constexpr size_t PATH_WAYPOINTS = 64;
+	struct Mind
+	{
+		std::map<ss_, json::Value> props; // by type (a type once an entity)
+		ss_ winner;
+		double goal[3] = {0, 0, 0};
+		int64_t pathed_us = 0, gen = 0;
+		bool walking = false, arrived = false;
+	};
+	std::map<uint64_t, Mind> m_minds;
+
+	// A creature's section loaded (awake) or not (asleep, d.t kept at now): the
+	// changes logged; waking moves its timers on by the time it slept
+	bool creature_awake(const Entity &e, Drive &d, double now)
+	{
+		const json::Value &sp = d.state.get("pos");
+		if(!pos_ok(sp))
+			return true;
+		const double w[3] = {sp.at(0u).as_number(), sp.at(1u).as_number() + 0.5,
+				sp.at(2u).as_number()};
+		const pv::Vector3DInt32 c = cell_of(w);
+		bool loaded = true;
+		if(const main_context::SceneReference ref = scene_of(e))
+			voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+				voxelworld::Instance *vw = ivw->get_instance(ref);
+				if(!vw)
+					return;
+				const pv::Vector3DInt16 ss = vw->get_section_size_voxels();
+				auto div = [](int32_t a, int b){
+					return (int16_t)std::floor((double)a / b);
+				};
+				loaded = vw->is_section_loaded(pv::Vector3DInt16(div(c.getX(), ss.getX()),
+						div(c.getY(), ss.getY()), div(c.getZ(), ss.getZ())));
+			});
+		if(!loaded){
+			if(!d.asleep_us){
+				d.asleep_us = now_us();
+				log_i(MODULE, "[KIT_CREATURES_8A] Entity %s sleeps at (%.2f, %.2f, %.2f): "
+						"its section is not loaded", cs(itos(e.id)), w[0], w[1], w[2]);
+			}
+			d.t = now;
+			return false;
+		}
+		if(d.asleep_us){
+			const int64_t slept = now_us() - d.asleep_us;
+			for(Instance &in : m_entities[e.id].comps)
+				for(Instance::Timer &t : in.timers)
+					t.due_us += slept;
+			d.asleep_us = 0;
+			d.t = now;
+			log_i(MODULE, "[KIT_CREATURES_8A] Entity %s wakes at (%.2f, %.2f, %.2f) "
+					"after %.1f s", cs(itos(e.id)), w[0], w[1], w[2], slept * 1e-6);
+		}
+		return true;
+	}
+	bool asleep(uint64_t id)
+	{
+		auto it = m_drives.find(id);
+		return it != m_drives.end() && it->second.asleep_us;
+	}
+
+	// The scene's cells in a box as the pathfinder reads them
+	void read_grid(main_context::SceneReference ref, creatures::Grid &g)
+	{
+		g.c.assign((size_t)g.nx * g.ny * g.nz, creatures::UNKNOWN);
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			voxelworld::Instance *w = ivw->get_instance(ref);
+			if(!w)
+				return;
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			const auto &fmt = reg->get_format();
+			const interface::VoxelVolume vol = w->get_volume(pv::Region(
+					pv::Vector3DInt32(g.x0, g.y0, g.z0), pv::Vector3DInt32(g.x0 + g.nx - 1,
+					g.y0 + g.ny - 1, g.z0 + g.nz - 1)));
+			std::map<uint32_t, uint8_t> kind;
+			for(int y = 0; y < g.ny; y++)
+			for(int z = 0; z < g.nz; z++)
+			for(int x = 0; x < g.nx; x++){
+				const uint32_t id = (uint32_t)fmt.id.get(vol.getVoxelAt(g.x0 + x,
+						g.y0 + y, g.z0 + z).data);
+				auto k = kind.find(id);
+				if(k == kind.end()){
+					const interface::VoxelDefinition *def = reg->get(id);
+					k = kind.emplace(id, id == interface::VOXELTYPEID_UNDEFINED ?
+							creatures::UNKNOWN : def && def->physically_solid ?
+							creatures::SOLID : creatures::AIR).first;
+				}
+				g.c[x + (size_t)g.nx * (z + (size_t)g.nz * y)] = k->second;
+			}
+		});
+	}
+
+	// Each creature's winning proposal and its way there; the nodes searched charged
+	// to the tick's budget
+	int64_t minds_tick(int64_t budget)
+	{
+		if(!m_session.running){
+			m_minds.clear();
+			return 0;
+		}
+		for(auto it = m_minds.begin(); it != m_minds.end();)
+			if(!m_entities.count(it->first))
+				it = m_minds.erase(it);
+			else
+				++it;
+		const int64_t now = now_us();
+		int nodes = 0;
+		for(auto &dp : m_drives){
+			Drive &d = dp.second;
+			auto ei = m_entities.find(dp.first);
+			if(!d.creature || d.asleep_us || ei == m_entities.end())
+				continue;
+			const Entity &e = ei->second;
+			Mind &m = m_minds[e.id];
+			ss_ win;
+			const json::Value *g = nullptr;
+			for(const Instance &in : e.comps){
+				auto pi = m.props.find(in.type);
+				if(in.disabled.empty() && pi != m.props.end()){
+					win = in.type;
+					g = &pi->second;
+					break;
+				}
+			}
+			const json::Value &path = d.state.get("path");
+			const bool walking = path.is_array() && path.size() > 0;
+			const json::Value &sp = d.state.get("pos");
+			if(win != m.winner){
+				log_i(MODULE, "[KIT_CREATURES_8A] Entity %s: %s", cs(itos(e.id)),
+						win.empty() ? "no move proposed" : cs(win+"'s move wins"));
+				m.winner = win;
+				m.pathed_us = 0;
+			}
+			if(!g || !pos_ok(sp)){
+				if(walking)
+					d.state.set("path", json::array());
+				m.walking = false;
+				continue;
+			}
+			const json::Value &tv = g->get("to");
+			const double to[3] = {tv.at(0u).as_number(), tv.at(1u).as_number(),
+					tv.at(2u).as_number()};
+			const double range = num(*g, "range", 0, 0, 64);
+			const double feet[3] = {sp.at(0u).as_number(), sp.at(1u).as_number(),
+					sp.at(2u).as_number()};
+			auto flat = [](const double a[3], const double b[3]){
+				return std::sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[2] - b[2]) * (a[2] - b[2]));
+			};
+			if(m.walking && !walking){
+				const bool there = flat(feet, to) <= range + 0.75;
+				m.arrived = there;
+				log_i(MODULE, "[KIT_CREATURES_8A] Entity %s stopped at (%.2f, %.2f, %.2f)%s",
+						cs(itos(e.id)), feet[0], feet[1], feet[2],
+						there ? ": arrived" : ", short of its goal");
+			}
+			m.walking = walking;
+			bool again = !m.pathed_us || m.gen != d.gen;
+			if(!again && flat(to, m.goal) > 1 && now - m.pathed_us > 500000)
+				again = true;
+			if(!again && !walking && !m.arrived && now - m.pathed_us > 1000000)
+				again = true;
+			if(!again || nodes >= PATH_NODES_TICK)
+				continue;
+			// The search: from its feet's cell towards the goal's, PATH_REACH at most
+			const double jh = num(d.params, "jump_height", 1.25, 0, 10);
+			creatures::Body b;
+			b.half = num(d.params, "width", 0.8, 0.1, 3) > 1.05 ? 1 : 0;
+			b.h = std::max(1, (int)std::ceil(num(d.params, "height", 0.9, 0.1, 4) - 0.01));
+			b.jump = (int)std::floor(jh + 0.25);
+			b.drop = 3;
+			const creatures::Cell from = {{(int)std::floor(feet[0] + 0.5),
+					(int)std::floor(feet[1] + 0.51), (int)std::floor(feet[2] + 0.5)}};
+			creatures::Cell goal = {{(int)std::floor(to[0] + 0.5), (int)std::floor(to[1] + 0.5),
+					(int)std::floor(to[2] + 0.5)}};
+			const double gd = std::sqrt((double)(goal[0] - from[0]) * (goal[0] - from[0]) +
+					(double)(goal[2] - from[2]) * (goal[2] - from[2]));
+			if(gd > PATH_REACH)
+				for(int k : {0, 2})
+					goal[k] = from[k] + (int)std::round((goal[k] - from[k]) * PATH_REACH / gd);
+			goal[1] = std::max(from[1] - 16, std::min(from[1] + 16, goal[1]));
+			creatures::Grid grid;
+			grid.x0 = std::min(from[0], goal[0]) - 10;
+			grid.z0 = std::min(from[2], goal[2]) - 10;
+			grid.y0 = std::min(from[1], goal[1]) - 6;
+			grid.nx = std::abs(goal[0] - from[0]) + 21;
+			grid.nz = std::abs(goal[2] - from[2]) + 21;
+			grid.ny = std::abs(goal[1] - from[1]) + 12 + b.h;
+			read_grid(scene_of(e), grid);
+			std::vector<creatures::Cell> cells;
+			int expanded = 0;
+			const creatures::Cell start = creatures::ground_of(grid, b, from);
+			const bool got = creatures::find_path(grid, b, start, goal, range,
+					PATH_NODES_ONE, cells, expanded);
+			nodes += expanded;
+			json::Value wps = json::array();
+			for(const creatures::Cell &c : creatures::corners(start, cells)){
+				if(wps.size() >= PATH_WAYPOINTS)
+					break;
+				json::Value p = json::array();
+				p.append((double)c[0]);
+				p.append(c[1] - 0.5);
+				p.append((double)c[2]);
+				wps.append(p);
+			}
+			d.state.set("path", wps);
+			d.state.set("speed_k", num(*g, "speed", 1, 0.1, 3));
+			m.walking = wps.size() > 0;
+			m.arrived = !m.walking && got;
+			m.pathed_us = now;
+			m.gen = d.gen;
+			for(int k = 0; k < 3; k++)
+				m.goal[k] = to[k];
+			log_i(MODULE, "[KIT_CREATURES_8A] Entity %s: %s's way to (%.1f, %.1f, %.1f): "
+					"%u waypoints, %d nodes%s", cs(itos(e.id)), cs(win), to[0], to[1], to[2],
+					wps.size(), expanded, got ? "" : " (towards it)");
+		}
+		return budget * nodes / PATH_NODES_TICK;
+	}
+
+	// c:propose_move's goal checked: {to = {x, y, z}, range, speed}; false: taken back
+	void propose_fx(const Entity &e, const ss_ &type, const json::Value &g)
+	{
+		Mind &m = m_minds[e.id];
+		if(!g.is_object()){
+			m.props.erase(type);
+			return;
+		}
+		const json::Value &to = g.get("to");
+		if(!pos_ok(to) || to.size() != 3){
+			log_w(MODULE, "Entity %s's %s: propose_move: to is {x, y, z}", cs(itos(e.id)),
+					cs(type));
+			return;
+		}
+		m.props[type] = g;
+	}
+
+	// [KIT_CREATURES_8A] Spatial queries: the placed entities and players by their
+	// place in the world, in columns of INDEX_CELL m, made again at most every 50 ms
+	// (a tick's) as one is asked
+	static constexpr double INDEX_CELL = 16;
+	struct Indexed
+	{
+		uint64_t id;
+		double w[3];
+		main_context::SceneReference scene;
+	};
+	sv_<Indexed> m_index_items;
+	std::map<std::pair<int, int>, sv_<size_t>> m_index;
+	int64_t m_index_us = 0;
+	void index_build()
+	{
+		const int64_t t = interface::os::time_us();
+		if(t - m_index_us < 50000)
+			return;
+		m_index_us = t;
+		m_index_items.clear();
+		m_index.clear();
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(!e.has_pos)
+				continue;
+			Indexed it;
+			it.id = e.id;
+			world_of(e, it.w);
+			it.scene = scene_of(e);
+			m_index[std::make_pair((int)std::floor(it.w[0] / INDEX_CELL),
+					(int)std::floor(it.w[2] / INDEX_CELL))].push_back(m_index_items.size());
+			m_index_items.push_back(it);
+		}
+	}
+	// What is within range of e, the nearest first (16 at most): {id, pos, dist,
+	// player, name, alive, types; sight: nothing solid between its eye and their
+	// middle, for a type that says sight}
+	json::Value nearby_of(const Entity &e, double range, bool sight)
+	{
+		index_build();
+		double w[3];
+		world_of(e, w);
+		const main_context::SceneReference ref = scene_of(e);
+		sv_<std::pair<double, size_t>> found;
+		const int r = (int)std::ceil(range / INDEX_CELL);
+		const int cx = (int)std::floor(w[0] / INDEX_CELL), cz = (int)std::floor(w[2] / INDEX_CELL);
+		for(int x = cx - r; x <= cx + r; x++)
+		for(int z = cz - r; z <= cz + r; z++){
+			auto it = m_index.find(std::make_pair(x, z));
+			if(it == m_index.end())
+				continue;
+			for(size_t i : it->second){
+				const Indexed &n = m_index_items[i];
+				const double d = std::sqrt((n.w[0] - w[0]) * (n.w[0] - w[0]) +
+						(n.w[1] - w[1]) * (n.w[1] - w[1]) + (n.w[2] - w[2]) * (n.w[2] - w[2]));
+				if(n.id != e.id && n.scene == ref && d <= range)
+					found.push_back(std::make_pair(d, i));
+			}
+		}
+		std::sort(found.begin(), found.end());
+		json::Value out = json::array();
+		for(size_t k = 0; k < found.size() && k < 16; k++){
+			const Indexed &n = m_index_items[found[k].second];
+			auto ei = m_entities.find(n.id);
+			if(ei == m_entities.end())
+				continue;
+			const Entity &t = ei->second;
+			json::Value j = json::object();
+			j.set("id", (int64_t)n.id);
+			j.set("pos", point(n.w));
+			j.set("dist", found[k].first);
+			json::Value types = json::array();
+			for(const Instance &in : t.comps)
+				types.append(in.type);
+			j.set("types", types);
+			if(t.kind == "player"){
+				j.set("player", true);
+				j.set("name", t.name);
+				j.set("alive", player_alive(t));
+			}
+			if(sight){
+				const double eye[3] = {w[0], w[1] + 0.3, w[2]};
+				const double mid[3] = {n.w[0], n.w[1] + (t.kind == "player" ? 0.9 : 0),
+						n.w[2]};
+				j.set("sight", ref && in_sight(ref, eye, mid));
+			}
+			out.append(j);
+		}
+		return out;
+	}
+
+	// For a type with `creature = true`: its entity's senses' target ({id, pos,
+	// dist, player}), its health's share and whether it walks a way now
+	void creature_lit(const Entity &e, ss_ &o)
+	{
+		double w[3];
+		world_of(e, w);
+		for(const Instance &in : e.comps){
+			if(m_types[in.type].decl.get("senses").is_true()){
+				const json::Value &tv = in.state.get("target");
+				auto ti = tv.is_number() ? m_entities.find((uint64_t)tv.as_number()) :
+						m_entities.end();
+				if(ti != m_entities.end() && ti->second.has_pos){
+					double tw[3];
+					world_of(ti->second, tw);
+					json::Value j = json::object();
+					j.set("id", (int64_t)ti->first);
+					j.set("pos", point(tw));
+					j.set("dist", std::sqrt((tw[0] - w[0]) * (tw[0] - w[0]) +
+							(tw[1] - w[1]) * (tw[1] - w[1]) + (tw[2] - w[2]) * (tw[2] - w[2])));
+					j.set("player", ti->second.kind == "player");
+					o += ",target=";
+					lua_lit(j, o);
+				}
+			}
+			if(m_types[in.type].health){
+				const double hp = row_num(in.state, "hp"), mx = row_num(in.state, "max");
+				if(mx > 0){
+					o += ",health=";
+					lua_lit(json::Value(hp / mx), o);
+				}
+			}
+		}
+		auto di = m_drives.find(e.id);
+		if(di != m_drives.end()){
+			const json::Value &p = di->second.state.get("path");
+			if(p.is_array() && p.size())
+				o += ",moving=true";
+		}
 	}
 
 	// A drive under a moving free object (d.deck): its world the deck's boxes in its
