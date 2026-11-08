@@ -4846,14 +4846,24 @@ struct Module: public interface::Module, public Interface
 			log_e(MODULE, "Kit's materials.json: %s", cs(why));
 			return;
 		}
+		ss_ glints;
 		for(auto &v : set.voxels){
 			interface::VoxelName n;
 			n.block_name = v.first;
 			m_registered.emplace(v.first, v.second);
+			float moving = 0, still = 0;
+			v.second.glints(v.first, moving, still);
+			if(moving > 0 || still > 0){
+				char b[32];
+				snprintf(b, sizeof b, " %.2f/%.2f", moving, still);
+				glints += ss_(glints.empty() ? "" : ", ") + v.first + b;
+			}
 			if(reg->has(n))
 				continue;
 			reg->add_voxel(v.second.definition(v.first));
 		}
+		// [KIT_SPOTS] the set's glints, moving/still
+		log_i(MODULE, "Kit's materials' glints: %s", cs(glints));
 		// [KIT_VOXEL_FORMAT] the shapes of every solid cube there (Kit's,
 		// and the app's own registered before); a material knows
 		for(const interface::VoxelDefinition &d : reg->get_all()){

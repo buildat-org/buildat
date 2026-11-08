@@ -32,6 +32,14 @@
 //       less. simplified: a flat surface, no spots, no cube map; glass
 //       (the same technique) gets water's look. A per-face flag would
 //       part them.
+//   KITSPOTS  ([KIT_SPOTS]) physical lighting's glints, PBRVoxel.glsl's
+//       VOXELSPOTS: the atlas's surface maps carry a material's share of
+//       moving spots (the spec map's alpha: water, leaves) and still ones
+//       (the normal map's alpha: sand's stones, ore); a spot's normal
+//       turned across the face and made glossy (GGX at 0.10, F0 0.08), so
+//       it catches the sun. simplified: the spots' gloss alone -- the rest
+//       of a face has no specular (water's KITWATER lobe aside); the leaves'
+//       light through a spot (translucency) left out.
 //
 // The vertex colour is light, not albedo, so it is not multiplied into the
 // diffuse colour as LitSolid's VERTEXCOLOR does.
@@ -153,6 +161,69 @@ void VS()
     #endif
 }
 
+#if defined(KITWATER) || defined(KITSPOTS)
+// PBRVoxel's sun lobe: GGX, Schlick on the half vector, Smith's
+// height-correlated visibility; rough is perceptual (squared here). Times
+// pi: Urho's diffuse has no 1/pi. Multiplied by n.l (Urho's diff) after.
+float KitGGX(vec3 normal, vec3 lightDir, float rough, float f0)
+{
+    vec3 toEye = normalize(cCameraPosPS - vWorldPos.xyz);
+    vec3 h = normalize(lightDir + toEye);
+    float ndl = clamp(dot(normal, lightDir), 0.0, 1.0);
+    float ndh = clamp(dot(normal, h), 0.0001, 1.0);
+    float vdh = clamp(dot(toEye, h), 0.0001, 1.0);
+    float ndv = abs(dot(normal, toEye)) + 1e-5;
+    float a = rough * rough;
+    float a2 = a * a;
+    float dd = ndh * ndh * (a2 - 1.0) + 1.0;
+    float d = a2 / (3.14159 * dd * dd);
+    float f = f0 + (1.0 - f0) * pow(1.0 - vdh, 5.0);
+    float gv = ndl * sqrt(ndv * ndv * (1.0 - a2) + a2);
+    float gl = ndv * sqrt(ndl * ndl * (1.0 - a2) + a2);
+    return 3.14159 * d * f * 0.5 / max(gv + gl, 1e-5);
+}
+#endif
+
+#ifdef KITSPOTS
+// PBRVoxel.glsl's spots, its constants
+const float KS_CELLS = 16.0;
+const float KS_TILT = 0.06;
+const float KS_STATIC_CELLS = 6.0;
+const float KS_STATIC_TILT = 0.35;
+const float KS_RATE = 0.03;
+const vec3 KS_WIND = vec3(0.35, 0.0, -0.2);
+const float KS_ROUGH = 0.10;
+float KsHash(vec3 cell)
+{
+    vec3 p = fract(cell * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+}
+vec3 KsTilt(vec3 pos, float cells)
+{
+    vec3 cell = floor(pos * cells);
+    return vec3(KsHash(cell + 41.0), KsHash(cell + 67.0),
+        KsHash(cell + 89.0)) * 2.0 - 1.0;
+}
+float KsStill(vec3 pos, float fraction)
+{
+    if (fraction <= 0.0)
+        return 0.0;
+    return KsHash(floor(pos * KS_STATIC_CELLS) + 7.0) < fraction ? 1.0 : 0.0;
+}
+float KsMoving(vec3 pos, float fraction)
+{
+    if (fraction <= 0.0)
+        return 0.0;
+    vec3 cell = floor(pos * KS_CELLS);
+    float rate = KS_RATE * (0.6 + KsHash(cell + 19.0));
+    float u = fract(KsHash(cell) + cElapsedTimePS * rate + dot(pos, KS_WIND));
+    float edge = fraction * 0.25;
+    return smoothstep(0.0, edge, u) *
+        (1.0 - smoothstep(fraction - edge, fraction, u));
+}
+#endif
+
 #ifdef KITWATER
 const float KITWATER_ROUGH = 0.35;
 const float KITWATER_F0 = 0.072;
@@ -253,6 +324,20 @@ void PS()
         vec3 normal = normalize(vNormal);
     #endif
 
+    #ifdef KITSPOTS
+        // A spot is a piece of the face turned: across it, never past
+        // its horizon; glossy by the cube of how far it is in
+        vec3 spotPos = vWorldPos.xyz - normalize(vNormal) * 0.01;
+        float moving = KsMoving(spotPos, texture2D(sSpecMap, vTexCoord.xy).a);
+        float still = KsStill(spotPos, texture2D(sNormalMap, vTexCoord.xy).a);
+        float spotMask = max(moving, still);
+        float spotGloss = spotMask * spotMask * spotMask;
+        vec3 spotTilt = KsTilt(spotPos, KS_CELLS) * (KS_TILT * moving) +
+            KsTilt(spotPos, KS_STATIC_CELLS) * (KS_STATIC_TILT * still);
+        spotTilt -= normal * dot(spotTilt, normal);
+        normal = normalize(normal + spotTilt);
+    #endif
+
     // Get fog factor
     #ifdef HEIGHTFOG
         float fogFactor = GetHeightFogFactor(vWorldPos.w, vWorldPos.y);
@@ -292,25 +377,21 @@ void PS()
             finalColor = diff * lightColor * diffColor.rgb;
         #endif
 
+        vec3 glint = vec3(0.0);
         #ifdef KITWATER
-            // The sun's lobe: PBRVoxel's GGX, Schlick on the half vector,
-            // Smith's height-correlated visibility; roughness squared
-            vec3 toEyeW = normalize(cCameraPosPS - vWorldPos.xyz);
-            vec3 hw = normalize(lightDir + toEyeW);
-            float ndl = clamp(dot(normal, lightDir), 0.0, 1.0);
-            float ndh = clamp(dot(normal, hw), 0.0001, 1.0);
-            float vdh = clamp(dot(toEyeW, hw), 0.0001, 1.0);
-            float ndvw = abs(dot(normal, toEyeW)) + 1e-5;
-            float ga = KITWATER_ROUGH * KITWATER_ROUGH;
-            float ga2 = ga * ga;
-            float dd = ndh * ndh * (ga2 - 1.0) + 1.0;
-            float gD = ga2 / (3.14159 * dd * dd);
-            float gF = KITWATER_F0 + (1.0 - KITWATER_F0) * pow(1.0 - vdh, 5.0);
-            float gv = ndl * sqrt(ndvw * ndvw * (1.0 - ga2) + ga2);
-            float gl = ndvw * sqrt(ndl * ndl * (1.0 - ga2) + ga2);
-            float gV = 0.5 / max(gv + gl, 1e-5);
+            // The sun's lobe; a spot's rougher no more ([KIT_SPOTS])
+            float wRough = KITWATER_ROUGH;
+            #ifdef KITSPOTS
+                wRough = mix(wRough, KS_ROUGH, spotGloss);
+            #endif
             // diff is n.l times the shadow and the sky's gate
-            vec3 glint = diff * lightColor * 3.14159 * gD * gF * gV;
+            glint = diff * lightColor * KitGGX(normal, lightDir, wRough,
+                KITWATER_F0);
+        #elif defined(KITSPOTS)
+            // A spot's glint, at full strength however matte the rest
+            if (spotGloss > 0.0)
+                finalColor += diff * lightColor * spotGloss *
+                    KitGGX(normal, lightDir, KS_ROUGH, 0.08);
         #endif
         #ifdef AMBIENT
             #ifdef KITSKY

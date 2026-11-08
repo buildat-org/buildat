@@ -525,6 +525,13 @@ print(' '.join('%.0f' % (sum(c[i] for c in r) / len(r)) for i in range(3)))"
 }
 # [KIT_PHYS_WATER_LOOK] the shallow water shows its sand bed (the plain
 # alpha, as skeldat's), the deep water past it blue: row 5, columns 11-14
+# [KIT_SPOTS] the set's glints by kind and name (kit/core no ore)
+gl=$(grep -ah "Kit's materials' glints: " "$t"/srv*.log | head -1)
+for g in "kit/leaves 0.03/0.00" "kit/sand 0.00/0.04" "kit/snow 0.00/0.06" "kit/water 0.05/0.00"; do
+	[[ $gl == *"$g"* ]] || fail "Kit's materials' glints: no $g ($gl)"
+done
+[ "$(grep -o 'kit/' <<<"${gl#*glints: }" | wc -l)" = 4 ] ||
+	fail "Kit's materials' glints on others too ($gl)"
 read wr wg wb <<<"$(low "$t/phys_water.png")"
 awk "BEGIN{exit !($wr > $wb)}" ||
 	fail "physical's shallow water hides its sand: $wr $wg $wb"

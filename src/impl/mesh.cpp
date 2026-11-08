@@ -2132,13 +2132,15 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 			// and these two constants are only added on top of them
 			material->SetShaderParameter("Roughness", 0.0f);
 			material->SetShaderParameter("Metallic", 0.0f);
-			material->SetTexture(TU_NORMAL, atlas_cache->normal_texture);
-			material->SetTexture(TU_SPECULAR, atlas_cache->spec_texture);
 		} else {
 			material->SetTechnique(0,
 					cache->GetResource<Technique>("Techniques/Diff.xml"));
 		}
 		material->SetTexture(TU_DIFFUSE, atlas_cache->texture);
+		// Either way: a game's material callback may set a technique that
+		// reads them ([KIT_SPOTS]: Kit's, with no sky light nor tint)
+		material->SetTexture(TU_NORMAL, atlas_cache->normal_texture);
+		material->SetTexture(TU_SPECULAR, atlas_cache->spec_texture);
 		cg->SetMaterial(cg_i, material);
 		cg_i++;
 	}
@@ -2463,13 +2465,15 @@ void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 			// The game sets the technique; see set_voxel_geometry()
 			material->SetShaderParameter("Roughness", 0.0f);
 			material->SetShaderParameter("Metallic", 0.0f);
-			material->SetTexture(TU_NORMAL, atlas_cache->normal_texture);
-			material->SetTexture(TU_SPECULAR, atlas_cache->spec_texture);
 		} else {
 			material->SetTechnique(0,
 					cache->GetResource<Technique>("Techniques/Diff.xml"));
 		}
 		material->SetTexture(TU_DIFFUSE, atlas_cache->texture);
+		// Either way: a game's material callback may set a technique that
+		// reads them ([KIT_SPOTS]: Kit's, with no sky light nor tint)
+		material->SetTexture(TU_NORMAL, atlas_cache->normal_texture);
+		material->SetTexture(TU_SPECULAR, atlas_cache->spec_texture);
 		cg->SetMaterial(cg_i, material);
 		cg_i++;
 	}
