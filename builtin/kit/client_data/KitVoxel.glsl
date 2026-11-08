@@ -22,6 +22,14 @@
 //       KITSKY the light bounced (the mesher's display level) too.
 //       simplified: 2.2, not the sRGB curve. A translucent face's alpha
 //       is made linear's too ([KIT_PHYS_WATER_PINK]).
+//   KITWATER  ([KIT_PHYS_WATER_LOOK]) a translucent face under KITLINEAR:
+//       water's colour is mostly the sky it reflects, not a lit body, so
+//       its diffuse is cut to a half and a Schlick Fresnel (F0 0.02)
+//       reflection of the sky added (the fog's colour at the horizon, the
+//       ambient's at the zenith), and a glint of the sun; the alpha grown
+//       by the reflection, so a grazing look shows the bed less.
+//       simplified: a flat surface, no waves, no cube map; glass (the same
+//       technique) gets water's look. A per-face flag would part them.
 //
 // The vertex colour is light, not albedo, so it is not multiplied into the
 // diffuse colour as LitSolid's VERTEXCOLOR does.
@@ -143,6 +151,30 @@ void VS()
     #endif
 }
 
+#ifdef KITWATER
+// What a water face draws, blended by its alpha: lit (its body's light),
+// a (its opacity), plus what it reflects (spec: the sun's glint; the sky
+// with the ambient). Out: over the bed, F * reflected + (1 - F) * the body
+// over (1 - F) * the bed, as the blend's (colour, alpha).
+vec4 KitWater(vec3 lit, float a, vec3 normal, vec3 spec)
+{
+    vec3 toEye = normalize(cCameraPosPS - vWorldPos.xyz);
+    float ndv = clamp(abs(dot(normal, toEye)), 0.0, 1.0);
+    float f = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+    vec3 refl = spec;
+    #ifdef AMBIENT
+        vec3 r = reflect(-toEye, normal);
+        vec3 sky = mix(cFogColor, cAmbientColor.rgb, clamp(r.y, 0.0, 1.0));
+        #ifdef KITSKY
+            sky *= vColor.a;
+        #endif
+        refl += f * sky;
+    #endif
+    float a2 = a + f * (1.0 - a);
+    return vec4((refl + (1.0 - f) * a * lit) / max(a2, 0.001), a2);
+}
+#endif
+
 void PS()
 {
     // Get material diffuse albedo
@@ -189,6 +221,9 @@ void PS()
         // water's ~0.05) outshone the water and read pink.
         // simplified: a's curve alone; no absorption by depth
         diffColor.a = 1.0 - pow(1.0 - diffColor.a, 2.2);
+    #endif
+    #ifdef KITWATER
+        diffColor.rgb *= 0.5;
     #endif
 
     // Get material specular albedo
@@ -245,6 +280,15 @@ void PS()
             finalColor = diff * lightColor * diffColor.rgb;
         #endif
 
+        #ifdef KITWATER
+            // The sun's glint: Blinn-Phong of a calm surface, normalized,
+            // by the Fresnel at the half vector
+            vec3 toEyeW = normalize(cCameraPosPS - vWorldPos.xyz);
+            vec3 hw = normalize(lightDir + toEyeW);
+            float fh = 0.02 + 0.98 * pow(1.0 - clamp(dot(hw, toEyeW), 0.0, 1.0), 5.0);
+            vec3 glint = diff * lightColor * fh * 40.0 *
+                    pow(clamp(dot(normal, hw), 0.0, 1.0), 400.0);
+        #endif
         #ifdef AMBIENT
             #ifdef KITSKY
                 finalColor += (cAmbientColor.rgb * vColor.a + vColor.rgb) *
@@ -253,9 +297,19 @@ void PS()
                 finalColor += cAmbientColor.rgb * diffColor.rgb;
             #endif
             finalColor += cMatEmissiveColor;
-            gl_FragColor = vec4(GetFog(finalColor, fogFactor), diffColor.a);
+            #ifdef KITWATER
+                vec4 w = KitWater(finalColor, diffColor.a, normal, glint);
+                gl_FragColor = vec4(GetFog(w.rgb, fogFactor), w.a);
+            #else
+                gl_FragColor = vec4(GetFog(finalColor, fogFactor), diffColor.a);
+            #endif
         #else
-            gl_FragColor = vec4(GetLitFog(finalColor, fogFactor), diffColor.a);
+            #ifdef KITWATER
+                vec4 w = KitWater(finalColor, diffColor.a, normal, glint);
+                gl_FragColor = vec4(GetLitFog(w.rgb, fogFactor), w.a);
+            #else
+                gl_FragColor = vec4(GetLitFog(finalColor, fogFactor), diffColor.a);
+            #endif
         #endif
     #elif defined(PREPASS)
         // Fill light pre-pass G-Buffer
@@ -321,6 +375,11 @@ void PS()
             finalColor += cMatEmissiveColor;
         #endif
 
-        gl_FragColor = vec4(GetFog(finalColor, fogFactor), diffColor.a);
+        #ifdef KITWATER
+            vec4 w = KitWater(finalColor, diffColor.a, normal, vec3(0.0));
+            gl_FragColor = vec4(GetFog(w.rgb, fogFactor), w.a);
+        #else
+            gl_FragColor = vec4(GetFog(finalColor, fogFactor), diffColor.a);
+        #endif
     #endif
 }

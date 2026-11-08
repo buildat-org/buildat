@@ -1,6 +1,7 @@
 <!-- [KIT_LIGHTING] KitVoxelSkyAlpha.xml under physical lighting: its albedo decoded
-     to linear (KITLINEAR), the frame being HDR. -->
-<technique vs="kit/KitVoxel" ps="kit/KitVoxel" vsdefines="KITLINEAR KITTINT KITSKY" psdefines="KITLINEAR DIFFMAP KITTINT KITSKY">
+     to linear (KITLINEAR), the frame being HDR; KITWATER
+     ([KIT_PHYS_WATER_LOOK]) its reflection of the sky and the sun. -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" vsdefines="KITLINEAR KITTINT KITSKY" psdefines="KITLINEAR KITWATER DIFFMAP KITTINT KITSKY">
     <pass name="alpha" depthwrite="false" blend="alpha" />
     <pass name="litalpha" depthwrite="false" blend="addalpha" />
     <pass name="shadow" vs="Shadow" ps="Shadow" />
