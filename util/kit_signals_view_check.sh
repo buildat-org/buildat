@@ -1383,8 +1383,8 @@ click Button "Add from palette"
 wait_log 5000 signals: the palette's popup
 frames 3
 screenshot @T@/narrow_popup.png
-click Button "kit/logic"
-wait_log 5000 signals: picked kit/logic
+click Button "kit/action"
+wait_log 5000 signals: picked kit/action
 wait_log 10000 kit editor: state:
 frames 5
 screenshot @T@/narrow_placed.png

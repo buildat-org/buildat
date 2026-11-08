@@ -9,6 +9,13 @@ return {
 				key ~= "free") then
 			return
 		end
+		-- Every player has a wallet: nothing shown until it is used (a
+		-- game without money shows no "Money: 0")
+		if not text and (tonumber(e.state.money) or 0) == 0 and
+				tostring(e.state.part or "") == "" and e.state.free ~= true and
+				tostring(e.state.note or ""):gsub("^%d+:", "") == "" then
+			return
+		end
 		if not text then
 			text = magic.ui.root:CreateChild("Text")
 			text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 18)
