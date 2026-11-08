@@ -340,6 +340,8 @@ int main(int argc, char *argv[])
 			"                       ui_size (auto, or the UI scale 0.5 to 3),\n"
 			"                       page_size (the most items a Page Up or\n"
 			"                       Down moves, 1 to 100),\n"
+			"                       kit_editor_font, floorplanner_font (the\n"
+			"                       editors' text, a percent 50 to 150),\n"
 			"                       cache_keep (days a cache file may go\n"
 			"                       unused: 7, 14, 30 or 90; 0 forever),\n"
 			"                       cache_per_server (1: a server's files\n"

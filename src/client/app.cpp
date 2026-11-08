@@ -531,6 +531,12 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			in_range = (v >= 0.5 && v <= 3.0);
 			opt->ui_size = (float)v;
 			opt->ui_size_auto = false;
+		} else if(key == "kit_editor_font"){
+			in_range = (v >= 50 && v <= 150 && v == (int)v);
+			opt->kit_editor_font = (int)v;
+		} else if(key == "floorplanner_font"){
+			in_range = (v >= 50 && v <= 150 && v == (int)v);
+			opt->floorplanner_font = (int)v;
 		} else if(key == "page_size"){
 			in_range = (v >= 1 && v <= 100 && v == (int)v);
 			opt->page_size = (int)v;
@@ -609,6 +615,11 @@ static void check_parse_preference_options()
 		throw Exception("parse_preference_options: took an out-of-range value");
 	if(app::parse_preference_options("multisampling=3", &o, &err))
 		throw Exception("parse_preference_options: took a bad sample count");
+	if(app::parse_preference_options("kit_editor_font=40", &o, &err) ||
+			app::parse_preference_options("floorplanner_font=80.5", &o, &err) ||
+			!app::parse_preference_options("kit_editor_font=100", &o, &err) ||
+			o.kit_editor_font != 100 || o.floorplanner_font != 80)
+		throw Exception("parse_preference_options: the editors' fonts");
 	if(app::parse_preference_options("page_size=0", &o, &err) ||
 			app::parse_preference_options("page_size=2.5", &o, &err) ||
 			!app::parse_preference_options("page_size=3", &o, &err) ||
@@ -810,6 +821,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jll = o.get("log_level");
 	const json::Value &jsl = o.get("server_log_level");
 	const json::Value &jps = o.get("page_size");
+	const json::Value &jkf = o.get("kit_editor_font");
+	const json::Value &jff = o.get("floorplanner_font");
 	const json::Value &jck = o.get("cache_keep");
 	const json::Value &jcp = o.get("cache_per_server");
 	const json::Value &jlt = o.get("lighting");
@@ -822,6 +835,10 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 		items += ss_()+(items.empty()?"":",")+"server_log_level="+itos(jsl.as_integer());
 	if(jps.is_integer())
 		items += ss_()+(items.empty()?"":",")+"page_size="+itos(jps.as_integer());
+	if(jkf.is_integer())
+		items += ss_()+(items.empty()?"":",")+"kit_editor_font="+itos(jkf.as_integer());
+	if(jff.is_integer())
+		items += ss_()+(items.empty()?"":",")+"floorplanner_font="+itos(jff.as_integer());
 	if(jck.is_integer())
 		items += ss_()+(items.empty()?"":",")+"cache_keep="+itos(jck.as_integer());
 	if(jrs.is_number())
@@ -1046,6 +1063,8 @@ static void save_preferences(const app::Options &opt)
 	o.set("launch_ui", opt.launch_ui);
 	o.set("default_username", opt.default_username);
 	o.set("page_size", opt.page_size);
+	o.set("kit_editor_font", opt.kit_editor_font);
+	o.set("floorplanner_font", opt.floorplanner_font);
 	o.set("cache_keep", opt.cache_keep);
 	o.set("cache_per_server", opt.cache_per_server);
 	if(!opt.lighting.empty())

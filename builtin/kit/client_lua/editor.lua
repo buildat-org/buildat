@@ -188,6 +188,17 @@ M.S = S
 -- made or duplicated first (S.recent, ids), the rest after them by id;
 -- S.tab_at where Tab walks from, the top again at each of those
 S.recent = {}
+-- **The editor's text size** ([KIT_EDITOR_FONT]): the client's preference
+-- kit_editor_font, a percent (default 80) set in the game settings, as a
+-- share; editor_input.lua scales the panels (W) to it each frame, and what
+-- is laid out against the screen's room divides the room by it
+S.font = (buildat.declare_preference and
+		buildat.declare_preference("kit_editor_font", function(v)
+			S.font = v / 100
+			if M.font_changed then
+				M.font_changed()
+			end
+		end) or 80) / 100
 local function touch(id)
 	for i, x in ipairs(S.recent) do
 		if x == id then
@@ -1061,6 +1072,14 @@ local refresh, show_log, rebuild_bar, set_view, terrain_panel, walk_here
 local inspector_window
 local voxel_names
 
+-- [KIT_EDITOR_FONT] A new text size: the panels made again at it (each
+-- build drops its window; one rescaled would keep what its code set on it
+-- since at the old size)
+function M.font_changed()
+	S.bar_key = nil
+	refresh()
+end
+
 -- [KIT] stage 4f: the terrain tool's state: the brush, its size (cells)
 -- and strength, the biome (nil: the World's), the stroke being drawn
 -- (its id, the last dab and when, a fill's corner, the level)
@@ -1193,7 +1212,7 @@ rebuild_bar = function(if_changed)
 	end
 	w:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(6, 6, 6, 6))
 	bar_row, bar_used, bar_first = row(w), 0, true
-	bar_room = magic.ui.root.width - 16 - 12
+	bar_room = (magic.ui.root.width - 16 - 12) / S.font
 	S.bar_root_w = magic.ui.root.width
 	if O.menu then
 		bar_button("Menu", "Esc", function()
@@ -1778,7 +1797,8 @@ function NT.fit_panel()
 	-- The body as the view shows it: inside its panel's clip border
 	-- (DefaultStyle's 2 a side)
 	local bw, bh = body.width + 4, body.height + 4
-	local room_w = math.min(screen_ui.w, magic.ui.root.width) - 16 - 12 - 8
+	local room_w = (math.min(screen_ui.w, magic.ui.root.width) - 16 - 12 - 8) /
+			S.font
 	local hbar = bw > room_w
 	-- [KIT_PALETTE_FOOT] What the window has under the view: its border,
 	-- the palette's foot
@@ -2067,8 +2087,8 @@ palette = function()
 	NT.shown = tab == "Entities" and "Entities/" .. (S.list_tab or "") or tab
 	-- The tabs, NT.TABS's rows, each in as many as the screen's width
 	-- needs (with room for the row's spacing and the scroll bar's)
-	local room = math.min(screen_ui.w or 1e9, magic.ui.root.width) - 16 - 12 -
-			24
+	local room = (math.min(screen_ui.w or 1e9, magic.ui.root.width) - 16 - 12 -
+			24) / S.font
 	for _, names in ipairs(NT.TABS) do
 		local r, used = nil, 0
 		for _, name in ipairs(names) do

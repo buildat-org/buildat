@@ -27,6 +27,9 @@ local keys = load("keys.lua")
 local M = {}
 -- init.lua's chat key, and its way past the T while a key is being bound
 M.keys = keys
+-- The text size's tracking ([KIT_EDITOR_FONT]) for init.lua's and
+-- tutorial.lua's own
+M.panel = panel
 local doc
 M.daylight = load("daylight.lua")
 
@@ -2770,7 +2773,7 @@ local function build_toolbar()
 	-- and a Menu button for Esc's pause menu.
 	toolbar = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, 8)
 	local row, used = panel.row(toolbar), 0
-	local room = magic.ui.root.width - 16 - 12
+	local room = (magic.ui.root.width - 16 - 12) / panel.share()
 	-- make(parent) makes the button
 	local function place(make)
 		-- Measured before it is put in a row: a row a button was taken back
@@ -4323,6 +4326,7 @@ refresh_panels = function()
 	end
 end
 M.refresh_panels = function() refresh_panels() end
+panel.font_changed = M.refresh_panels
 -- [FP_MOVE_FAST] A move's: only the selection's props show what it
 -- changed (the toolbar 20 ms and the palette 30 ms in the large plan,
 -- the props 3-14)
@@ -6294,7 +6298,7 @@ local function place_cameras()
 end
 
 -- What each button would do, above the chat
-local hud = magic.ui.root:CreateChild("Text")
+local hud = panel.track(magic.ui.root:CreateChild("Text"))
 hud:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 15)
 hud:SetAlignment(magic.HA_CENTER, magic.VA_BOTTOM)
 hud:SetPosition(0, -12)
@@ -6321,7 +6325,7 @@ local function world_label(x_mm, y_mm, z_mm, text)
 	label_i = label_i + 1
 	local t = label_nodes[label_i]
 	if not t then
-		t = magic.ui.root:CreateChild("Text")
+		t = panel.track(magic.ui.root:CreateChild("Text"))
 		t:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 13)
 		t:SetTextEffect(magic.TE_SHADOW)
 		-- Of the scene: under every panel and menu, whenever it was made
@@ -7436,6 +7440,7 @@ end
 
 function M.update(dt)
 	panel.flush()
+	panel.scale()
 	if S.suspended then
 		return
 	end

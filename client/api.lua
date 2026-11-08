@@ -2212,6 +2212,20 @@ buildat.safe.declare_fov = function(app, default, on_change)
 		on_change = type(on_change) == "function" and on_change or nil}
 	return __buildat_get_preference("fov." .. app) or default
 end
+-- **A preference an app shows in its settings** ([KIT_EDITOR_FONT]):
+-- declare_preference(name[, on_change]) -> its value; the game settings
+-- window gets its row, and on_change(value) is called when that row
+-- changes it. Only the preferences that are an app's: the editors' text.
+-- Until the connection ends.
+local DECLARABLE = {kit_editor_font = true, floorplanner_font = true}
+local game_declared = {}
+buildat.safe.declare_preference = function(name, on_change)
+	if not DECLARABLE[name] then
+		return nil, "declare_preference: not an app's preference"
+	end
+	game_declared[name] = type(on_change) == "function" and on_change or true
+	return __buildat_get_preference(name)
+end
 buildat.safe.show_game_settings = function(o)
 	if type(o) ~= "table" then
 		return false, "show_game_settings{on_close =, sections =}"
@@ -2223,7 +2237,7 @@ buildat.safe.show_game_settings = function(o)
 	game_settings = game_settings or launch_grid.screens("preferences.lua")
 	game_settings.show_game({on_close = o.on_close,
 		sections = type(o.sections) == "table" and o.sections or nil,
-		fov = game_fov}, served_key_app(), extra)
+		fov = game_fov, declared = game_declared}, served_key_app(), extra)
 	return true
 end
 -- show_game_keys{on_close = f}: the window's keys page alone, for a game
@@ -2255,6 +2269,7 @@ end
 function __buildat_game_settings_reset()
 	game_settings_extra = {}
 	game_fov = nil
+	game_declared = {}
 	if game_settings then
 		game_settings.close_game()
 	end

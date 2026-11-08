@@ -349,6 +349,9 @@ return function(doc)
 		local font = magic.cache:GetResource("Font", buildat.font_sans)
 		local size = touch and 12 or 14
 		win = magic.ui.root:CreateChild("Window")
+		if ed() then
+			ed().panel.track(win)
+		end
 		win:SetStyleAuto()
 		win:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(8, 6, 8, 6))
 		local width = math.min(touch and 260 or 420, magic.ui.root.width - 16)
