@@ -30,7 +30,10 @@
 //        name, "<author>/<name>"; none: itself), [KIT_SPOTS] "spots",
 //        "static_spots": 0...1, the share of its surface glinting under
 //        physical lighting, moving (water, leaves) or still (sand's
-//        stones, ore); none: by its kind and name, as skeldat's)},
+//        stones, ore); none: by its kind and name, as skeldat's),
+//        [KIT_NORMALS] "bumpiness": 0...1, how much of its texture's
+//        brightness is relief under physical lighting (none: by kind and
+//        name, as skeldat's: water and glass 0, sand 0.6, the rest 1)},
 //        ...},
 //    "palettes": {name: [entry, ...], ...} ([KIT_TINT_PALETTE]),
 //    "fallbacks": {role: role, ...},
@@ -264,6 +267,8 @@ struct Material
 	ss_ surface;
 	// [KIT_SPOTS] Its glints under physical lighting (-1: by kind and name)
 	double spots = -1, static_spots = -1;
+	// [KIT_NORMALS] Its relief under physical lighting (-1: by kind and name)
+	double bumpiness = -1;
 	// [KIT_CTF] The blast strength it stands (c:explode: a cell goes to
 	// air where the strength there is past it; 0: any blast)
 	double blast_resist = 0;
@@ -310,6 +315,8 @@ struct Material
 		const json::Value &sp = j.get("spots"), &st = j.get("static_spots");
 		spots = sp.is_number() ? sp.as_number() : -1;
 		static_spots = st.is_number() ? st.as_number() : -1;
+		const json::Value &bu = j.get("bumpiness");
+		bumpiness = bu.is_number() ? bu.as_number() : -1;
 		group = json::jstr(j, "group");
 		sound_dig = json::jstr(j, "sound_dig");
 		sound_place = json::jstr(j, "sound_place");
@@ -364,7 +371,8 @@ struct Material
 				blast_resist <= 1000 && tag_ok && tint_ok &&
 				seasons_ok && spots <= 1 && static_spots <= 1 &&
 				(spots >= 0 || !sp.is_number()) &&
-				(static_spots >= 0 || !st.is_number());
+				(static_spots >= 0 || !st.is_number()) && bumpiness <= 1 &&
+				(bumpiness >= 0 || !bu.is_number());
 	}
 
 	// Its properties as a builder's row has them, for a palette and
@@ -383,6 +391,8 @@ struct Material
 			v.set("spots", spots);
 		if(static_spots >= 0)
 			v.set("static_spots", static_spots);
+		if(bumpiness >= 0)
+			v.set("bumpiness", bumpiness);
 		v.set("group", group);
 		v.set("level", (int64_t)level);
 		v.set("sound_dig", sound_dig);
@@ -416,21 +426,24 @@ struct Material
 	// no light plane), so it draws nothing different. The upgrade:
 	// light_lamp in the app's format, voxelworld's set_light_maintained
 	// and a client technique lit by the vertex colours
+	// A whole word of a name's (between '/' and '_'): kit/core is no ore,
+	// kit/red_sand is sand
+	static bool name_word(const ss_ &name, const char *w)
+	{
+		const size_t n = strlen(w);
+		for(size_t i = name.find(w); i != ss_::npos; i = name.find(w, i + 1))
+			if((i == 0 || name[i - 1] == '/' || name[i - 1] == '_') &&
+					(i + n == name.size() || name[i + n] == '_'))
+				return true;
+		return false;
+	}
+
 	// [KIT_SPOTS] Its glints, moving and still: its own, else by kind and
 	// name as luanti_client's surface.lua guesses skeldat's
 	// simplified: a few names; materials.json's fields for the rest
 	void glints(const ss_ &name, float &moving, float &still) const
 	{
-		// A whole word of the name's (between '/' and '_'): kit/core is
-		// no ore, kit/red_sand is sand
-		auto has = [&](const char *w){
-			const size_t n = strlen(w);
-			for(size_t i = name.find(w); i != ss_::npos; i = name.find(w, i + 1))
-				if((i == 0 || name[i - 1] == '/' || name[i - 1] == '_') &&
-						(i + n == name.size() || name[i + n] == '_'))
-					return true;
-			return false;
-		};
+		auto has = [&](const char *w){ return name_word(name, w); };
 		moving = kind == "water" ? 0.05f : kind == "leaves" ? 0.03f : 0;
 		still = kind == "glass" ? 0.03f : 0;
 		if(has("sand"))
@@ -446,12 +459,31 @@ struct Material
 			still = (float)static_spots;
 	}
 
+	// [KIT_NORMALS] Its relief: its own, else by kind and name as
+	// surface.lua's (the atlas's normal map, its brightness as height)
+	float relief(const ss_ &name) const
+	{
+		if(bumpiness >= 0)
+			return (float)bumpiness;
+		auto has = [&](const char *w){ return name_word(name, w); };
+		if(kind == "water" || kind == "glass")
+			return 0;
+		if(kind == "leaves" || kind == "plant" || has("snow") || has("clay"))
+			return 0.2f;
+		if(has("ice"))
+			return 0.1f;
+		if(has("sand"))
+			return 0.6f;
+		return 1;
+	}
+
 	interface::VoxelDefinition definition(const ss_ &name) const
 	{
 		interface::VoxelDefinition def;
 		def.name.block_name = name;
 		float moving = 0, still = 0;
 		glints(name, moving, still);
+		const float bump = relief(name);
 		// The faces: +y, -y, then the sides
 		for(int f = 0; f < 6; f++){
 			auto &seg = def.textures[f];
@@ -460,6 +492,7 @@ struct Material
 			seg.select_segment = Urho3D::IntVector2(0, 0);
 			seg.spots = moving;
 			seg.static_spots = still;
+			seg.bumpiness = bump;
 		}
 		def.light_source = (uint8_t)light;
 		def.tint_palette = tint.colors;

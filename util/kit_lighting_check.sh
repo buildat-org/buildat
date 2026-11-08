@@ -536,6 +536,13 @@ for g in "kit/leaves 0.03/0.00" "kit/sand 0.00/0.04" "kit/snow 0.00/0.06" "kit/w
 done
 [ "$(grep -o 'kit/' <<<"${gl#*glints: }" | wc -l)" = 4 ] ||
 	fail "Kit's materials' glints on others too ($gl)"
+# [KIT_NORMALS] the set's relief by kind and name: water flat, sand,
+# leaves and snow less, stone (not listed) full
+rl=$(grep -ah "Kit's materials' relief: " "$t"/srv*.log | head -1)
+for g in "kit/water 0.00" "kit/sand 0.60" "kit/leaves 0.20" "kit/snow 0.20"; do
+	[[ $rl == *"$g"* ]] || fail "Kit's materials' relief: no $g ($rl)"
+done
+[[ $rl != *"kit/stone "* ]] || fail "Kit's materials' relief: stone not full ($rl)"
 read wr wg wb <<<"$(low "$t/phys_water.png")"
 awk "BEGIN{exit !($wr > $wb)}" ||
 	fail "physical's shallow water hides its sand: $wr $wg $wb"

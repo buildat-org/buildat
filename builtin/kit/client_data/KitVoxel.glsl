@@ -32,6 +32,12 @@
 //       less. simplified: a flat surface, no spots, no cube map; glass
 //       (the same technique) gets water's look. A per-face flag would
 //       part them.
+//   KITNORMALS  ([KIT_NORMALS]) physical lighting's relief: the atlas's
+//       normal map (a material's bumpiness of its texture's brightness as
+//       height), in a frame from the screen-space derivatives of the world
+//       position and the texture coordinate, as PBRVoxel.glsl's
+//       VOXELNORMALMAP: a voxel face is flat, so it is exact and costs no
+//       vertex attribute (Kit's tangent carries the tint).
 //   KITSPOTS  ([KIT_SPOTS]) physical lighting's glints, PBRVoxel.glsl's
 //       VOXELSPOTS: the atlas's surface maps carry a material's share of
 //       moving spots (the spec map's alpha: water, leaves) and still ones
@@ -318,6 +324,21 @@ void PS()
     #ifdef NORMALMAP
         mat3 tbn = mat3(vTangent.xyz, vec3(vTexCoord.zw, vTangent.w), vNormal);
         vec3 normal = normalize(tbn * DecodeNormal(texture2D(sNormalMap, vTexCoord.xy)));
+    #elif defined(KITNORMALS)
+        vec3 geomNormal = normalize(vNormal);
+        vec3 dpdx = dFdx(vWorldPos.xyz);
+        vec3 dpdy = dFdy(vWorldPos.xyz);
+        vec2 dtdx = dFdx(vTexCoord.xy);
+        vec2 dtdy = dFdy(vTexCoord.xy);
+        vec3 dpdyPerp = cross(dpdy, geomNormal);
+        vec3 dpdxPerp = cross(geomNormal, dpdx);
+        vec3 tangentU = dpdyPerp * dtdx.x + dpdxPerp * dtdy.x;
+        vec3 tangentV = dpdyPerp * dtdx.y + dpdxPerp * dtdy.y;
+        float invMax = inversesqrt(max(dot(tangentU, tangentU),
+            dot(tangentV, tangentV)));
+        vec3 nn = DecodeNormal(texture2D(sNormalMap, vTexCoord.xy));
+        vec3 normal = normalize(mat3(tangentU * invMax, tangentV * invMax,
+            geomNormal) * nn);
     #else
         vec3 normal = normalize(vNormal);
     #endif
