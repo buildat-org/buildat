@@ -13,7 +13,20 @@ on:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    # [IMAGE_CACHE] The packaging images on GHCR by their Dockerfile's hash
+    # (util/package_in_docker.sh); no login only means a build from scratch
+    permissions:
+      contents: read
+      packages: write
+    env:
+      BUILDAT_IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
     steps:
+      - uses: docker/login-action@v3
+        continue-on-error: true
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/checkout@v4
         with:
           # package_in_docker.sh names the archives by the short hash
@@ -55,7 +68,20 @@ jobs:
           if-no-files-found: ignore
   windows:
     runs-on: ubuntu-latest
+    # [IMAGE_CACHE] The packaging images on GHCR by their Dockerfile's hash
+    # (util/package_in_docker.sh); no login only means a build from scratch
+    permissions:
+      contents: read
+      packages: write
+    env:
+      BUILDAT_IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
     steps:
+      - uses: docker/login-action@v3
+        continue-on-error: true
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
