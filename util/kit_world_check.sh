@@ -168,6 +168,10 @@ EOF
 	set_w depth 192
 	set_w border '"water"'
 	shot valleys
+	# [KIT_EDITED_VALLEYS] the edited sections listed on valleys: its
+	# generator's copy reaches luanti_mapgen, not from inside voxelworld
+	echo 'event kit_edit {"op": "edited"}'
+	echo "wait_log 10000 kit editor: edited sections:"
 	echo quit
 } > "$t/boss1.cmds"
 server 1

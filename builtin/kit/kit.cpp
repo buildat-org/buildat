@@ -7055,6 +7055,11 @@ struct Module: public interface::Module, public Interface
 	{
 		json::Value list = json::array();
 		size_t more = 0;
+		// Made out here: its valleys query reaches luanti_mapgen, which
+		// depends on voxelworld and so cannot be accessed from inside it
+		up_<world::Generator> g;
+		if(m_w->world_scene)
+			g = diff_generator();
 		if(m_w->world_scene)
 			voxelworld::access(m_server, m_w->world_scene,
 					[&](voxelworld::Instance *w){
@@ -7073,7 +7078,6 @@ struct Module: public interface::Module, public Interface
 					more = edited.size() - MAX_EDITED_LISTED;
 					edited.resize(MAX_EDITED_LISTED);
 				}
-				up_<world::Generator> g = diff_generator();
 				const auto &owned = m_owned_sections[m_w->world_scene];
 				for(const pv::Vector3DInt16 &s : edited){
 					size_t n = 0;
@@ -7132,6 +7136,9 @@ struct Module: public interface::Module, public Interface
 		nc.stroke = -2;
 		size_t cells = 0, skipped = 0;
 		ss_ why;
+		// Made out here: its valleys query reaches luanti_mapgen, which
+		// depends on voxelworld and so cannot be accessed from inside it
+		up_<world::Generator> g = diff_generator();
 		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			std::set<std::tuple<int, int, int>> want;
@@ -7147,7 +7154,6 @@ struct Module: public interface::Module, public Interface
 				}
 				want = {one};
 			}
-			up_<world::Generator> g = diff_generator();
 			const auto &owned = m_owned_sections[m_w->world_scene];
 			sv_<pv::Vector3DInt16> forget;
 			for(const auto &k : want){
@@ -10314,6 +10320,9 @@ struct Module: public interface::Module, public Interface
 		const main_context::SceneReference ref = m_w->world_scene;
 		size_t wrote = 0, cleared = 0, images = 0, kept = 0;
 		ss_ why;
+		// Made out here: its valleys query reaches luanti_mapgen, which
+		// depends on voxelworld and so cannot be accessed from inside it
+		up_<world::Generator> g = diff_generator();
 		voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
 			std::unordered_map<int64_t, interface::VoxelTypeId> a, b;
 			ss_ wwhy;
@@ -10321,7 +10330,6 @@ struct Module: public interface::Module, public Interface
 			region_cells(w, now, b, why);
 			const pv::Vector3DInt16 ss = w->get_section_size_voxels();
 			// The generated ground, a section at a time
-			up_<world::Generator> g = diff_generator();
 			std::map<std::tuple<int, int, int>, up_<interface::VoxelVolume>> gen;
 			interface::VoxelName an;
 			an.block_name = "air";
