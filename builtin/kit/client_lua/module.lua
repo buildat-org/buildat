@@ -1688,6 +1688,20 @@ function M.play_target(origin, dir, reach, solid)
 	if sheet and sheet.use == "melee" and not id and not hit then
 		t.left = {kind = "swing"}
 	end
+	-- [KIT_AIRSHIPS] A free voxel object's cell nearer than the voxel and the
+	-- entity: dug and placed on in its frame (M.object_build; the server's
+	-- kit/hull says who may)
+	local ot = M.object_target and M.object_target(origin, dir, reach)
+	if ot and (not hit or ot.t < vt) and (not id or ot.t < et) then
+		local n = ot.normal
+		local c = {ot.cell[1] + n[1], ot.cell[2] + n[2], ot.cell[3] + n[3]}
+		t.left = {kind = "dig", object = ot.id, cell = ot.cell,
+			centre = ot.centre, rot = ot.rot}
+		t.right = {kind = "place", object = ot.id, cell = c, on = ot.cell,
+			normal = n, centre = ot.centre, rot = ot.rot,
+			param = M.shape_param({x = ot.dir[1], y = ot.dir[2], z = ot.dir[3]}, n)}
+		return t
+	end
 	-- The object first: what is in front of the voxel is pointed at
 	if id and (not hit or et <= vt + 0.05) then
 		-- [KIT_USE_ACCESS] the region's use rule asked; one used through
@@ -1870,8 +1884,10 @@ function M.highlighter()
 		f.node.position = centre
 		f.node.rotation = rot or magic.Quaternion(0, 0, 0)
 	end
-	-- A voxel's face: the cell and the normal out of it, {x, y, z} each
-	function h.face(cell, normal, col)
+	-- A voxel's face: the cell and the normal out of it, {x, y, z} each;
+	-- [KIT_AIRSHIPS] on a free object, the cell's middle (centre, a Vector3) and
+	-- the object's turn (rot) where it is drawn, normal in its frame
+	function h.face(cell, normal, col, centre, rot)
 		local axis = normal[1] ~= 0 and 1 or normal[2] ~= 0 and 2 or 3
 		local sign = (normal[axis] or 1) > 0 and 1 or -1
 		local d = 0.5 + FRAME_OUT
@@ -1880,8 +1896,8 @@ function M.highlighter()
 		-- Inside the dig frame of the same voxel, so both show
 		put(f, function(cg) frame_geometry(cg, {d, d, d}, {axis, sign},
 				w * 2, w) end)
-		f.node.position = magic.Vector3(cell[1], cell[2], cell[3])
-		f.node.rotation = magic.Quaternion(0, 0, 0)
+		f.node.position = centre or magic.Vector3(cell[1], cell[2], cell[3])
+		f.node.rotation = rot or magic.Quaternion(0, 0, 0)
 	end
 	function h.finish()
 		for i = h.used + 1, #h.pool do
@@ -1921,12 +1937,14 @@ function M.show_target(t)
 			parts[#parts + 1] = "use " .. l.id
 		elseif l and l.kind == "dig" then
 			local d = 0.5
-			play_hl.box(v3(l.cell), magic.Vector3(d, d, d), nil, M.DIG)
-			parts[#parts + 1] = "dig " .. table.concat(l.cell, ",")
+			play_hl.box(l.centre or v3(l.cell), magic.Vector3(d, d, d), l.rot, M.DIG)
+			parts[#parts + 1] = "dig " .. table.concat(l.cell, ",") ..
+					(l.object and " on " .. l.object or "")
 		end
 		if r and r.kind == "place" then
-			play_hl.face(r.on, r.normal, M.PLACE)
-			parts[#parts + 1] = "place " .. table.concat(r.cell, ",")
+			play_hl.face(r.on, r.normal, M.PLACE, r.centre, r.rot)
+			parts[#parts + 1] = "place " .. table.concat(r.cell, ",") ..
+					(r.object and " on " .. r.object or "")
 		end
 		if #parts > 0 then
 			s = table.concat(parts, ", ")
@@ -1938,6 +1956,27 @@ function M.show_target(t)
 		log:info("kit: points at " .. s)
 	end
 end
+
+-- [KIT_AIRSHIPS] A place or dig on a free voxel object (play_target's with
+-- `object`): its cell in its frame; a placing carries the hand's shape and tint
+function M.object_build(a, voxel)
+	local param, tint = 0, 0
+	if voxel ~= "air" then
+		voxel = M.hand_voxel(voxel)
+		param = M.hand.shape ~= "" and (a.param or 0) or 0
+		tint = M.hand.tint or 0
+	end
+	local data = string.format('{"id": %d, "cell": [%d, %d, %d], "voxel": "%s", ' ..
+			'"param": %d, "tint": %d}', a.object, a.cell[1], a.cell[2], a.cell[3],
+			voxel, param, tint)
+	log:info("kit: builds on an object: " .. data)
+	buildat.send_packet("kit:obuild", data)
+end
+-- For a drive: "event kit_obuild <json>" sends it as it is (the server's refusal)
+magic.SubscribeToEvent("command_seq:kit_obuild", function(_, data)
+	log:info("kit: builds on an object: " .. data:GetString("Param"))
+	buildat.send_packet("kit:obuild", data:GetString("Param"))
+end)
 
 -- ---- [KIT_ENVIRONMENT] The environment, the lighting, the sky and the
 -- weather: environment.lua

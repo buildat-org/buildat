@@ -321,7 +321,8 @@ magic.SubscribeToEvent("Update", function()
 	if hold.on and down then
 		local l = M.pointed_target and M.pointed_target.left
 		local now = buildat.get_time_us()
-		if l and l.kind == "dig" and type(l.cell) == "table" then
+		-- ([KIT_AIRSHIPS] a free object's cell is dug at a click, not held)
+		if l and l.kind == "dig" and type(l.cell) == "table" and not l.object then
 			local k = cell_key(l.cell)
 			if k ~= hold.sent and now - hold.at >= 150000 then
 				hold.sent, hold.at = k, now

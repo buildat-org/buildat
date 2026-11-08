@@ -530,9 +530,12 @@ local function signal(key, v)
 	end
 end
 
--- [KIT_FREE_PREFAB] The controls' free objects ({model, x, y, z, yaw, pitch, roll,
--- id, node, links}...) and each model's boxes in its object's frame, as the server's
--- body meets them. [KIT_MOVING_OBJECTS] C.links by entity: what moves each one that
+-- [KIT_FREE_PREFAB] The controls' free objects ({boxes, x, y, z, yaw, pitch, roll,
+-- id, node, links}...) and each boxes name's boxes in its object's frame, as the
+-- server's body meets them ([KIT_AIRSHIPS] a copy with its own voxels: a new name
+-- each rebuild).
+-- simplified: the names a rebuild left behind stay in object_boxes till the client
+-- goes, a few hundred bytes each [KIT_MOVING_OBJECTS] C.links by entity: what moves each one that
 -- moves; C.moving_nodes their voxel nodes
 local object_boxes = {}
 C.links, C.moving_nodes = {}, {}
@@ -645,6 +648,45 @@ end)
 
 local function shared_time()
 	return (C.clock_off or 0) + buildat.get_time_us() / 1e6 * (C.clock_rate or 1)
+end
+
+-- [KIT_AIRSHIPS] The free object a ray meets first, where it is drawn now: {id,
+-- t, cell, normal, dir} (move.lua's W:ray_objects, in its frame), centre (the
+-- cell's middle in the world, a Vector3) and rot (its turn, a Quaternion); nil none
+function M.object_target(origin, dir, len)
+	if not C.pose_world or not C.turned or #C.turned == 0 then
+		return nil
+	end
+	if C.draw_t then
+		C.pose_world:pose_at(C.draw_t)
+	end
+	local t, ob, cell, n, ld = C.pose_world:ray_objects(origin.x, origin.y, origin.z,
+			dir.x, dir.y, dir.z, len)
+	if not t then
+		return nil
+	end
+	local R = ob.R
+	local c = {ob.x + R[1] * cell[1] + R[2] * cell[2] + R[3] * cell[3],
+		ob.y + R[4] * cell[1] + R[5] * cell[2] + R[6] * cell[3],
+		ob.z + R[7] * cell[1] + R[8] * cell[2] + R[9] * cell[3]}
+	-- The rotation matrix (row-major, frame to world) as a quaternion
+	local w, x, y, z
+	local tr = R[1] + R[5] + R[9]
+	if tr > 0 then
+		local s = math.sqrt(tr + 1) * 2
+		w, x, y, z = s / 4, (R[8] - R[6]) / s, (R[3] - R[7]) / s, (R[4] - R[2]) / s
+	elseif R[1] > R[5] and R[1] > R[9] then
+		local s = math.sqrt(1 + R[1] - R[5] - R[9]) * 2
+		w, x, y, z = (R[8] - R[6]) / s, s / 4, (R[2] + R[4]) / s, (R[3] + R[7]) / s
+	elseif R[5] > R[9] then
+		local s = math.sqrt(1 + R[5] - R[1] - R[9]) * 2
+		w, x, y, z = (R[3] - R[7]) / s, (R[2] + R[4]) / s, s / 4, (R[6] + R[8]) / s
+	else
+		local s = math.sqrt(1 + R[9] - R[1] - R[5]) * 2
+		w, x, y, z = (R[4] - R[2]) / s, (R[3] + R[7]) / s, (R[6] + R[8]) / s, s / 4
+	end
+	return {id = ob.id, t = t, cell = cell, normal = n, dir = ld,
+		centre = magic.Vector3(c[1], c[2], c[3]), rot = magic.Quaternion(w, x, y, z)}
 end
 
 -- What moves an entity's node: its own object's links, those of what it is under, or
@@ -820,6 +862,7 @@ buildat.sub_packet("kit:object_boxes", function(data)
 	local b = list and network.parse_json(list)
 	if type(b) == "table" then
 		object_boxes[name] = b
+		log:info("kit: object boxes " .. name .. ": " .. #b / 6)
 		update_turned()
 	end
 end)
@@ -1320,8 +1363,24 @@ function M.pointer_ray(x, y)
 	local node = O.camera
 	local cam = node:GetComponent("Camera")
 	local w, h = screen()
-	if not x and C.aim then
-		local sp = cam:WorldToScreenPoint(C.aim)
+	local aim = C.aim
+	local ob = C.aim_obj and C.turned_by and C.turned_by[C.aim_obj[1]]
+	if ob then
+		if C.draw_t then
+			C.pose_world:pose_at(C.draw_t)
+		end
+		local R, a = ob.R, C.aim_obj
+		aim = magic.Vector3(ob.x + R[1] * a[2] + R[2] * a[3] + R[3] * a[4],
+				ob.y + R[4] * a[2] + R[5] * a[3] + R[6] * a[4],
+				ob.z + R[7] * a[2] + R[8] * a[3] + R[9] * a[4])
+		-- (straight from the camera, wherever it looks)
+		if not x then
+			local o = node.worldPosition
+			return o, (aim - o):Normalized()
+		end
+	end
+	if not x and aim then
+		local sp = cam:WorldToScreenPoint(aim)
 		x, y = sp.x * w, sp.y * h
 	elseif not x then
 		if M.pointer_free() and not TOUCH then
@@ -1916,6 +1975,33 @@ magic.SubscribeToEvent("command_seq:kit_point_at", function(_, data)
 			tonumber(z) or 0) or nil
 	log:info("kit: pointing at " .. (x and x .. "," .. y .. "," .. z or
 			"the pointer's own"))
+end)
+-- [KIT_AIRSHIPS] For a check: "event kit_obj_cell <id> <x> <y> <z>" logs whether that
+-- cell of a free object's frame is solid in the boxes this client has
+magic.SubscribeToEvent("command_seq:kit_obj_cell", function(_, data)
+	local id, x, y, z = data:GetString("Param"):match("^(%d+) (%S+) (%S+) (%S+)")
+	local ob = C.turned_by and C.turned_by[tonumber(id)]
+	local c, solid = {tonumber(x), tonumber(y), tonumber(z)}, false
+	for _, b in ipairs(ob and ob.b or {}) do
+		if c[1] > b[1] and c[1] < b[4] and c[2] > b[2] and c[2] < b[5] and
+				c[3] > b[3] and c[3] < b[6] then
+			solid = true
+		end
+	end
+	log:info(string.format("kit: object %s cell %s,%s,%s %s", tostring(id), x, y, z,
+			not ob and "unknown" or solid and "solid" or "empty"))
+end)
+-- [KIT_AIRSHIPS] "event kit_point_obj <id> <x> <y> <z>": the same at a point in a
+-- free object's frame (a deck's cell), followed as it moves; "event kit_point_obj"
+-- lets go
+magic.SubscribeToEvent("command_seq:kit_point_obj", function(_, data)
+	local id, x, y, z = data:GetString("Param"):match("^(%d+) (%S+) (%S+) (%S+)")
+	C.aim_obj = id and {tonumber(id), tonumber(x) or 0, tonumber(y) or 0,
+		tonumber(z) or 0} or nil
+	local ob = id and C.turned_by and C.turned_by[tonumber(id)]
+	log:info("kit: pointing at " .. (id and x .. "," .. y .. "," .. z .. " on " .. id ..
+			(ob and string.format(" (at %.2f,%.2f,%.2f)", ob.x, ob.y, ob.z) or
+			" (unknown)") or "the pointer's own"))
 end)
 
 -- The app's options

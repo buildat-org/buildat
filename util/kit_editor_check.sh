@@ -194,6 +194,13 @@ wait_log 5000 kit editor: placing sample_kit/door
 mouse_pos 600 271
 mouse_click left
 wait_log 10000 kit editor: state: 17 entities, 2 to undo
+mouse_pos 100 400
+mouse_wheel -1
+frames 1
+mouse_wheel -1
+frames 1
+mouse_wheel -1
+frames 3
 click Button "sample_kit/marker"
 wait_log 5000 kit editor: placing sample_kit/marker
 mouse_pos 512 570

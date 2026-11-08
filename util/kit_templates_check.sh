@@ -46,7 +46,7 @@ python3 -I - "$here" > "$t/ids.sh" <<'PY' || fail "the templates' files"
 import json, re, sys
 here = sys.argv[1]
 known = set(json.load(open(here + "/builtin/kit/materials.json"))["voxels"])
-for name, pre in (("puzzle_room", "P"), ("arena", "A"), ("ctf", "C")):
+for name, pre in (("puzzle_room", "P"), ("arena", "A"), ("ctf", "C"), ("airships", "S")):
 	d = "%s/apps/workbench/templates/%s" % (here, name)
 	m = json.load(open(d + "/meta.json"))
 	assert m["kind"] == "template" and m["name"] == name and m["title"], name
@@ -606,7 +606,7 @@ m = re.search(r"world_menu: template choices: (.*)", cl)
 assert m, "no choices"
 got = m[1].strip()
 assert got.startswith("Empty, ") and got.endswith(", Puzzle room (buildat, installed)"), got
-assert {"Arena", "Capture the flag", "Puzzle room", "Ship"} <= set(got[7:].split(", ")[:-1]), got
+assert {"Airships", "Arena", "Capture the flag", "Puzzle room", "Ship"} <= set(got[7:].split(", ")[:-1]), got
 assert "A template: Stopped, in edit mode" in srv
 assert "kitboss opens the template in edit mode" in srv
 PY

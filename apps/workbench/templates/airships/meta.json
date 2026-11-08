@@ -1,0 +1,11 @@
+{
+	"kind": "template",
+	"author": "buildat",
+	"name": "airships",
+	"title": "Airships",
+	"version": "0.1.0",
+	"engine_api": 2,
+	"license_code": "CC0-1.0",
+	"license_media": "CC0-1.0",
+	"description": "Two teams on floating islands. Each player starts with money, buys a ship at their team's shop and flies it; building on it costs a voxel's price. A first version: nothing to win yet."
+}

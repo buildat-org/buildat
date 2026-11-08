@@ -1042,6 +1042,36 @@ function ray_turned(ob, ox, oy, oz, dx, dy, dz, len)
 	return best, ba
 end
 
+-- [KIT_AIRSHIPS] A ray at the free objects alone: t, the object, the cell hit in
+-- its frame ({i, j, k}, a cell's middle its whole coordinates), the normal out of
+-- that face and the ray's direction, both in its frame
+function W:ray_objects(ox, oy, oz, dx, dy, dz, len)
+	local l = sqrt(dx * dx + dy * dy + dz * dz)
+	if l < 1e-9 then
+		return nil
+	end
+	dx, dy, dz = dx / l, dy / l, dz / l
+	local best, bo, ba
+	for _, ob in ipairs(self.turned) do
+		local t0, na = ray_turned(ob, ox, oy, oz, dx, dy, dz, len)
+		if t0 and na and (not best or t0 < best) then
+			best, bo, ba = t0, ob, na
+		end
+	end
+	if not best then
+		return nil
+	end
+	local lo = {into(bo, ox - bo.x, oy - bo.y, oz - bo.z)}
+	local lv = {into(bo, dx, dy, dz)}
+	local n = {0, 0, 0}
+	n[ba] = lv[ba] > 0 and -1 or 1
+	local cell = {}
+	for k = 1, 3 do
+		cell[k] = floor(lo[k] + lv[k] * best - n[k] * 0.5 + 0.5)
+	end
+	return best, bo, cell, n, lv
+end
+
 -- A ray: the first solid cell (Amanatides and Woo), object box or ground
 -- along it within len: t, info, the normal
 function W:ray(ox, oy, oz, dx, dy, dz, len)
