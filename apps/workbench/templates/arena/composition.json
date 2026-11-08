@@ -1,7 +1,7 @@
 {
 	"entities": [
 		{"id": 2, "name": "world", "kind": "scene"},
-		{"id": 3, "parent": 2, "name": "the ground", "components": [{"type": "kit/world", "params": {"generator": "flat", "surface": "voxels", "biome": "grassland", "decorations": false, "border": "wall", "width": 32, "depth": 32}}]},
+		{"id": 3, "parent": 2, "name": "the ground", "components": [{"type": "kit/terrain", "params": {"generator": "flat", "surface": "voxels", "biome": "grassland", "decorations": false, "border": "wall", "width": 32, "depth": 32}}]},
 		{"id": 4, "parent": 2, "name": "spawn", "pos": [0, 1, -8], "components": [{"type": "kit/spawner", "params": {"players": true}}]},
 		{"id": 5, "parent": 2, "name": "plaza", "pos": [0, 0.53, 0], "components": [{"type": "kit/part", "params": {"size": [24, 0.06, 24], "voxel": "kit/cobble", "collision": false}}]},
 		{"id": 6, "parent": 2, "name": "the pad", "pos": [0, 0.56, 3], "components": [{"type": "kit/part", "params": {"size": [7, 0.06, 7], "color": "#e0b030", "material": "glow", "collision": false}}]},
@@ -13,7 +13,7 @@
 		{"id": 12, "parent": 2, "name": "lobby's corner post", "pos": [11, 2.5, -11], "components": [{"type": "kit/part", "params": {"size": [1, 4, 1], "voxel": "kit/stone"}}]},
 		{"id": 13, "parent": 2, "name": "lobby's corner post", "pos": [11, 2.5, 11], "components": [{"type": "kit/part", "params": {"size": [1, 4, 1], "voxel": "kit/stone"}}]},
 		{"id": 14, "name": "meadow", "kind": "scene"},
-		{"id": 15, "parent": 14, "name": "the ground", "components": [{"type": "kit/world", "params": {"generator": "flat", "surface": "voxels", "biome": "grassland", "decorations": false, "border": "wall", "width": 48, "depth": 48}}]},
+		{"id": 15, "parent": 14, "name": "the ground", "components": [{"type": "kit/terrain", "params": {"generator": "flat", "surface": "voxels", "biome": "grassland", "decorations": false, "border": "wall", "width": 48, "depth": 48}}]},
 		{"id": 16, "parent": 14, "name": "red team", "pos": [0, 1, -16], "components": [{"type": "kit/team", "params": {"name": "Red", "color": "#d03030"}, "links": [{"output": "joined", "to": 45, "input": "activate"}]}]},
 		{"id": 17, "parent": 16, "name": "red team's sword", "components": [{"type": "kit/starting_kit", "params": {"items": "kit/sword"}}]},
 		{"id": 18, "parent": 16, "name": "red base's rules", "pos": [-7, -1, -6], "components": [{"type": "kit/region", "params": {"size": [15, 6, 12], "owner": "team", "use": "others"}}]},
@@ -53,7 +53,7 @@
 		{"id": 52, "parent": 14, "name": "the round's status", "components": [{"type": "kit/ui_text", "params": {"text": "{value}", "anchor": "top", "y": 2, "size": 2.2}}]},
 		{"id": 53, "parent": 14, "name": "the rule", "components": [{"type": "kit/ui_text", "params": {"anchor": "bottom", "y": 16, "size": 1.8, "text": "Press the other team's beacon. Its own team can't. First to 3 wins."}}]},
 		{"id": 54, "name": "dunes", "kind": "scene"},
-		{"id": 55, "parent": 54, "name": "the ground", "components": [{"type": "kit/world", "params": {"generator": "flat", "surface": "voxels", "biome": "desert", "decorations": false, "border": "wall", "width": 48, "depth": 48}}]},
+		{"id": 55, "parent": 54, "name": "the ground", "components": [{"type": "kit/terrain", "params": {"generator": "flat", "surface": "voxels", "biome": "desert", "decorations": false, "border": "wall", "width": 48, "depth": 48}}]},
 		{"id": 56, "parent": 54, "name": "red team", "pos": [0, 1, -16], "components": [{"type": "kit/team", "params": {"name": "Red", "color": "#d03030"}, "links": [{"output": "joined", "to": 85, "input": "activate"}]}]},
 		{"id": 57, "parent": 56, "name": "red team's sword", "components": [{"type": "kit/starting_kit", "params": {"items": "kit/sword"}}]},
 		{"id": 58, "parent": 56, "name": "red base's rules", "pos": [-7, -1, -6], "components": [{"type": "kit/region", "params": {"size": [15, 6, 12], "owner": "team", "use": "others"}}]},

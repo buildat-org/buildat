@@ -115,7 +115,7 @@ event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
 	# 3: the World (the floor)
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	echo "sync 5000"
 	# 4: M, turned 90; under it 5 S, 7 B, 8 Z; 6 the teleporter onto S
 	edit '{"op": "place", "type": "kit/mover", "pos": [10, 1, 10]}'

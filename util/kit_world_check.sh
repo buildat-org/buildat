@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min, more with a cold module cache (luanti_mapgen) (2026-10-31)
-# covers: builtin/kit/** apps/workbench/** builtin/voxelworld/persistence.h builtin/luanti_mapgen/api.h builtin/heightmap/**
-# [KIT] stage 4e, Kit's World (kit/world) on Workbench, the admin (kitboss,
+# covers: builtin/kit/** apps/workbench/** builtin/voxelworld/persistence.h builtin/luanti_mapgen/api.h builtin/heightmap/** util/kit_world_rename.json
+# [KIT] stage 4e, Kit's World (kit/terrain) on Workbench, the admin (kitboss,
 # by the setup code) editing its parameters Stopped and playing each:
 #   1. A fresh save: flat stone (Workbench's default, biome rock); the
 #      World placed and set to grassland (generated again: grass); the
@@ -41,6 +41,9 @@
 #      decorate stroke and its undo; Kit's editor's terrain tool by mouse
 #      in the plan (T, a dragged stroke, Ctrl+Z its undo) and the caves seen
 #      through the plan's cut.
+#   8. ([KIT_WORLD_RENAME]) A save naming kit/world and kit/world_region
+#      (util/kit_world_rename.json) loads as kit/terrain(_region), the same
+#      World as the new names make.
 #   web: the heightmap's save in the web client (headless Chrome).
 # The screenshots (flat, noise, valleys, heightmap_live, heightmap, heightmap_close,
 # heightmap_edited, grass, decorated, brush, stroked, caves, web_heightmap)
@@ -148,7 +151,7 @@ keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
-event kit_edit {"op": "place", "type": "kit/world", "pos": [0, 1, 0]}
+event kit_edit {"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}
 wait_log 10000 entities, 1 to undo
 EOF
 	n=1
@@ -446,7 +449,7 @@ keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
-event kit_edit {"op": "place", "type": "kit/world", "pos": [0, 1, 0]}
+event kit_edit {"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}
 wait_log 10000 entities, 1 to undo
 EOF
 	n=1
@@ -653,6 +656,49 @@ cols=$(grep -aoP 'column at \(5,0,5\) .*; \Kcolumn \(5,5\): .*' "$s7")
 	[ "$(echo "$cols" | sed -n 1p)" != "$(echo "$cols" | sed -n 2p)" ] ||
 	fail "the column through dig, regenerate and undo: $cols ($s7)"
 echo "ok: the voxel edits manager: a dug cell's section listed with its one cell, Regenerate refused Running, Ended the cell generated again, the undo digging it again"
+
+# 8. [KIT_WORLD_RENAME] A save whose composition names kit/world and
+# kit/world_region (util/kit_world_rename.json: the airships template from
+# before the rename) loads as kit/terrain and kit/terrain_region, one log
+# line saying so, and generates what the same composition on the new names
+# does
+server 8a "$t/user8"
+wait_for_log "$t/srv8a.log" "kit *: World: " 60 || fail "no World ($t/srv8a.log)"
+stop
+cp -a "$t/user8" "$t/user8new"
+for d in user8 user8new; do
+	python3 -I - "$t/$d/apps/workbench/saves/world/save.sqlite" "$here/util/kit_world_rename.json" "$d" <<'PY' ||
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+comp = open(sys.argv[2]).read()
+assert '"kit/world"' in comp and '"kit/world_region"' in comp
+if sys.argv[3] == "user8new":
+	comp = comp.replace('"kit/world"', '"kit/terrain"').replace('"kit/world_region"', '"kit/terrain_region"')
+db.execute("delete from store where store = 'voxelworld' or (store = 'kit' and key != 'session')")
+db.execute("insert into store values ('kit', 'authored', ?)", (comp,))
+db.commit()
+PY
+		fail "the save $d"
+done
+server 8b "$t/user8"
+wait_for_log "$t/srv8b.log" "kit *: World: .*terrain_region: " 120 || fail "no World ($t/srv8b.log)"
+stop
+server 8c "$t/user8new"
+wait_for_log "$t/srv8c.log" "kit *: World: .*terrain_region: " 120 || fail "no World ($t/srv8c.log)"
+stop
+want "$t/srv8b.log" "6 kit/world or kit/world_region components made kit/terrain or kit/terrain_region"
+grep -aq "components made kit/terrain" "$t/srv8c.log" && fail "a migration of the new names ($t/srv8c.log)"
+python3 -I - "$t/user8/apps/workbench/saves/world/save.sqlite" <<'PY' || fail "the migrated save ($t/user8)"
+import sqlite3, sys
+au = sqlite3.connect(sys.argv[1]).execute("select value from store where store = 'kit' and key = 'authored'").fetchone()[0]
+au = au.decode() if isinstance(au, bytes) else au
+assert '"kit/world' not in au and '"kit/terrain_region"' in au, au[:300]
+PY
+w8() { grep -a "kit *: World" "$1" | grep -aE "heights hash|terrain_region" | sed 's/^.*kit *: //'; }
+w8 "$t/srv8b.log"
+[ -n "$(w8 "$t/srv8b.log")" ] && [ "$(w8 "$t/srv8b.log")" = "$(w8 "$t/srv8c.log")" ] ||
+	fail "the old names' World is not the new names' ($t/srv8b.log, $t/srv8c.log)"
+echo "ok: a save naming kit/world and kit/world_region loads as kit/terrain and kit/terrain_region, logged once, the same World"
 
 # web: the heightmap in the web client, a player who makes an account
 # ([WB_LAN]: no one in without a login; the registration kitboss opened)

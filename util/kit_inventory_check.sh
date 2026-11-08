@@ -103,7 +103,7 @@ event kit_edit {"op": "item", "name": "blade", "preset": "kit/sword", "damage": 
 wait_log 10000 kit: 8 item types
 sync 3000
 EOF
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/game_rules", "pos": [0, 1, 0]}'
 	set_ 4 slots 5
 	set_ 4 stack 10

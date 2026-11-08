@@ -1,6 +1,6 @@
 -- The World ([KIT] stage 4e): what the app's world is made of, game-wide,
 -- on the app root (an app hosting Kit with a world scene; Kit generates
--- it natively, builtin/kit/world.h). The first one counts; with none the
+-- it natively, builtin/kit/terrain.h). The first one counts; with none the
 -- parameters' defaults (and the app's) are the World.
 --   generator  empty, flat (a ground at level), noise (hills: level +-
 --              height, a feature every spread cells), valleys (Luanti's

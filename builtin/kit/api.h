@@ -368,7 +368,7 @@ namespace interface
 //   (air replaces), cells not loaded and voxels the scene has not
 //   skipped. A copy turned (place's turn, quarter turns about its base)
 //   turns its members, their yaws, its cells and a shape's facing (its
-//   param, world.h's Shapes). Links between its entities and the cells
+//   param, terrain.h's Shapes). Links between its entities and the cells
 //   they own stay its own: an owned voxel is its entity's (own_voxels()).
 //   [KIT_AIRSHIPS] A prefab with voxels copied in play (c:spawn) is a free copy
 //   as the editor's Place free makes one: a root (kit/prefab_copy free, at pos,
@@ -547,10 +547,10 @@ namespace interface
 //   and "Go to source"; a kit/symmetry's inspector lists every override
 //   on its copies and the parity warning
 //   (util/kit_symmetry_view_check.sh).
-//   [KIT_AIRSHIPS_2] **World regions** (kit/world_region): a type's
+//   [KIT_AIRSHIPS_2] **World regions** (kit/terrain_region): a type's
 //   `world_region` names its position parameter, a box of the World's
 //   cells from its cell (the box of `shape` "sphere"'s ball). Kit writes
-//   its cells with the region's own generator (types/world_region.lua) as
+//   its cells with the region's own generator (types/terrain_region.lua) as
 //   it is placed and changed while editing (never in a game session), as
 //   kept edits in the edit's undo, and its symmetry images; the World's
 //   row "regions" holds what was written, so a change writes the
@@ -577,7 +577,7 @@ namespace interface
 //                    or textures/<file>.png in the package)
 //     types/<n>.sound.json            ([KIT_SOUNDS]) the sound <author>/<n>,
 //                    {"params": "blip1:..."}
-//     materials.json ([KIT_MATERIAL_SETS]) a material set (world.h): its
+//     materials.json ([KIT_MATERIAL_SETS]) a material set (terrain.h): its
 //                    voxels its voxel types, "extends" kit/default or a
 //                    dependency's set; a World's "materials" may name it
 //                    (Host::material_sets), the row's "materials" holding
@@ -900,7 +900,7 @@ namespace interface
 //       -- ([KIT] stage 4g) the
 //       builder's voxel type "<their name>/<n>" (the store's row
 //       "voxel:<their name>/<n>", its "version" counted up by each),
-//       world.h's Material's fields: registered in every scene at once and
+//       terrain.h's Material's fields: registered in every scene at once and
 //       sent to the clients connected (voxelworld's registry), placed by
 //       its name, saved by it. Texture t is a registered voxel's or an
 //       upload's. A new version of a registered one is drawn so at the
@@ -1287,8 +1287,8 @@ namespace interface
 // kit/bomb_look; the sound kit/hiss. util/kit_ctf_check.sh composes a
 // capture the flag of them.
 //
-// **The World** ([KIT] stage 4e; world.h says how it is made): one
-// game-wide kit/world on the app root, its parameters the choices -- the
+// **The World** ([KIT] stage 4e; terrain.h says how it is made): one
+// game-wide kit/terrain on the app root, its parameters the choices -- the
 // generator (empty, flat, noise, valleys), the seed, the biome, the size
 // (finite width x depth round the origin, baked; or infinite, only edited
 // sections saved, the generator's version pinned in the row "world"), a
@@ -1318,7 +1318,7 @@ namespace kit
 	// hosting Kit's World sets on its registry before the first voxel:
 	// plane 0 is `id` 0..15 (material and shape: "kit/stone" and
 	// "kit/stone:stair" are two ids, the shapes made by Kit's registering,
-	// world.h), `param` 16..23 (what the definition says: a shape's
+	// terrain.h), `param` 16..23 (what the definition says: a shape's
 	// facing, see world::SHAPE_PARAMS), `tint` 24..27 (16 steps of the
 	// material's tint ramp, albedo) and `light_sky` 28..31, maintained
 	// only while the World's "sky_light" is on (dark caves; off, nothing
@@ -1402,9 +1402,9 @@ namespace kit
 		// refused
 		bool moves_players = false;
 		// [KIT] stage 4e: the scene (a name in `scenes`) the World makes,
-		// "" for none (kit/world not in the palette)
+		// "" for none (kit/terrain not in the palette)
 		ss_ world_scene;
-		// The material set (JSON, world.h's format) binding the roles to
+		// The material set (JSON, terrain.h's format) binding the roles to
 		// the app's voxels; "": Kit's own (materials.json)
 		ss_ materials;
 		// [KIT_MATERIAL_SETS] Whether a World may name an installed material
@@ -1612,7 +1612,7 @@ namespace kit
 		// registered, the ones not there yet: before set_save()
 		virtual void register_voxels(interface::VoxelRegistry *reg) = 0;
 		// [KIT_TINT_MATERIALS] An app's own voxel `name` made of a material
-		// as a material set's voxel says it (world.h; its "tint" may name
+		// as a material set's voxel says it (terrain.h; its "tint" may name
 		// one of its own "palettes"), registered when it is not yet: before
 		// register_voxels(), which makes its shapes. False (why says) for
 		// one that does not parse

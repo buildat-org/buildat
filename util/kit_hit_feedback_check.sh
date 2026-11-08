@@ -75,7 +75,7 @@ wait_log 10000 kit editor: the server is Ended (by kitboss)
 event kit_edit {"op": "item", "name": "knife", "preset": "kit/sword", "damage": 10, "knockback": 0, "crit": 1}
 wait_log 10000 kit: 8 item types
 EOF
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/game_rules", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/spawner", "pos": [0, 1, 0]}'
 	set_ 5 players true

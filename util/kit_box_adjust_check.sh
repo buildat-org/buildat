@@ -121,7 +121,7 @@ wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "decorations", "value": false}'
 	echo "wait_log_any 30000 kit: World: generated again"
 	# 4: the sign, selected before the Box tool (the Box tab's fields

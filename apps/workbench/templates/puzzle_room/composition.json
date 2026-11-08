@@ -1,7 +1,7 @@
 {
 	"entities": [
 		{"id": 2, "name": "world", "kind": "scene"},
-		{"id": 3, "parent": 2, "name": "the ground", "components": [{"type": "kit/world", "params": {"generator": "flat", "surface": "voxels", "biome": "grassland", "decorations": false, "border": "wall", "width": 48, "depth": 48}}]},
+		{"id": 3, "parent": 2, "name": "the ground", "components": [{"type": "kit/terrain", "params": {"generator": "flat", "surface": "voxels", "biome": "grassland", "decorations": false, "border": "wall", "width": 48, "depth": 48}}]},
 		{"id": 4, "parent": 1, "name": "game rules", "components": [{"type": "kit/game_rules", "params": {"peaceful": true, "slots": 0, "hotbar": 0, "show_health": false}}]},
 		{"id": 5, "parent": 2, "name": "start", "pos": [0, 1, -8], "components": [{"type": "kit/spawner", "params": {"players": true}}]},
 		{"id": 6, "parent": 2, "name": "floor", "pos": [0, 0.53, 0.5], "components": [{"type": "kit/part", "params": {"size": [11, 0.06, 20], "voxel": "kit/planks", "collision": false}}]},

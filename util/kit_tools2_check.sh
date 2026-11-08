@@ -105,7 +105,7 @@ wait_log 10000 kit: 8 item types
 event kit_edit {"op": "item", "name": "blade", "preset": "kit/sword", "uses": 5, "knockback": 0}
 wait_log 10000 kit: 9 item types
 EOF
-	place kit/world '0, 1, 0'
+	place kit/terrain '0, 1, 0'
 	place kit/spawner '0, 1, 0'
 	set_ 4 players true
 	place kit/region '-12, 0, -12'

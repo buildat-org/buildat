@@ -32,7 +32,7 @@ event kit_edit {"op": "mode", "on": true}
 wait_log_any 10000 kit editor: edit mode on
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
-event kit_edit {"op": "place", "type": "kit/world", "pos": [0, 1, 0]}
+event kit_edit {"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}
 wait_log 10000 entities, 1 to undo
 event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "biome", "value": "grassland"}
 event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "decorations", "value": false}

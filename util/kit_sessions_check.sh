@@ -142,7 +142,7 @@ wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
 	# 3: the World; the stone; 4: a voxel_replace on it; 5: the arena; 6:
 	# a teleporter into it
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}' 1
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}' 1
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "biome", "value": "grassland"}' 2
 	echo "wait_log_any 30000 kit: World: generated again"
 	# 320 x 320: more sections than a session's player has round them

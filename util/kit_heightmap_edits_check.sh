@@ -99,7 +99,7 @@ EOF
 	cat <<'EOF'
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
-event kit_edit {"op": "place", "type": "kit/world", "pos": [0, 1, 0]}
+event kit_edit {"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}
 wait_log 10000 entities, 1 to undo
 EOF
 	n=1

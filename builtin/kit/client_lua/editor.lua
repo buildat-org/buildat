@@ -1998,7 +1998,7 @@ end
 -- places it. Nor the three the root or the scene takes wherever the click
 -- is: by name, as root = true is also on the controls and the movements,
 -- which stay armed
-NT.PLACED_AT_ONCE = {["kit/game_rules"] = true, ["kit/world"] = true,
+NT.PLACED_AT_ONCE = {["kit/game_rules"] = true, ["kit/terrain"] = true,
 	["kit/environment"] = true}
 function NT.positionless(it)
 	return it.type ~= nil and (type_of(it.type).no_position == true or
@@ -3142,7 +3142,7 @@ local function inspector(w, e, is_made)
 		-- kept over every regeneration; generating all anew (discarding
 		-- them) asks first; the map before the last regeneration back
 		local tr = E.state.terrain
-		if c.type == "kit/world" and tr and tr.surface == "heightmap" then
+		if c.type == "kit/terrain" and tr and tr.surface == "heightmap" then
 			text(w, (tr.edited_samples or 0) .. " edited heightmap samples",
 					DIM)
 			if E.regen_ask then

@@ -112,7 +112,7 @@ event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
 	# 3: the main scene's World
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "biome", "value": "grassland"}'
 	echo "wait_log_any 30000 kit: World: generated again"
 	vox 3 1 3 kit/stone

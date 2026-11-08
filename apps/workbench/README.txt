@@ -1,5 +1,5 @@
 Workbench: the blank app that only hosts Kit and its editor ([KIT],
-doc/plan's kit_plan.md). Kit's World (kit/world: a new project's a
+doc/plan's kit_plan.md). Kit's World (kit/terrain: a new project's a
 gentle grassland heightmap 64 cells a side, an older one's a flat stone
 floor; its generator, size, surface and biome set in the editor),
 Kit's starter set of components (builtin/kit/types/) to place, set and link

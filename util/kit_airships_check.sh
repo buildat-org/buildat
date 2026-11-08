@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min, ~4 min with web (2026-11-08)
-# covers: apps/workbench/templates/airships/** builtin/kit/types/airship*.json builtin/kit/types/hull.lua builtin/kit/types/wallet.lua builtin/kit/types/wallet.client.lua builtin/kit/types/shop.lua builtin/kit/types/airship.lua builtin/kit/kit.cpp builtin/kit/client_lua/controls.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/module.lua apps/workbench/main/client_lua/init.lua builtin/kit/types/pause_menu_action.lua builtin/kit/types/world_region.lua builtin/kit/client_lua/ui.lua
+# covers: apps/workbench/templates/airships/** builtin/kit/types/airship*.json builtin/kit/types/hull.lua builtin/kit/types/wallet.lua builtin/kit/types/wallet.client.lua builtin/kit/types/shop.lua builtin/kit/types/airship.lua builtin/kit/kit.cpp builtin/kit/client_lua/controls.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/module.lua apps/workbench/main/client_lua/init.lua builtin/kit/types/pause_menu_action.lua builtin/kit/types/terrain_region.lua builtin/kit/client_lua/ui.lua
 # [KIT_AIRSHIPS] (kit_plan 4s, stages 1 and 2) The airships template played:
-# kitboss joins Red (on Red's island, a kit/world_region's voxels), buys a
+# kitboss joins Red (on Red's island, a kit/terrain_region's voxels), buys a
 # skiff and a core at Red's shop, free out of a round ([KIT_AIRSHIPS_2]: his
 # wallet's 40 untouched, a note each). He builds on the skiff standing
 # on its deck: a voxel placed in front of him, which he then jumps onto (the
@@ -379,7 +379,7 @@ print("kitboss's feet: on the deck %.3f, after the jump %.3f (frames %s, %s)" % 
 	f["before"][0][1], f["jumped"][0][1], f["before"][1], f["jumped"][1]))
 assert f["before"][1] == "40" and f["jumped"][1] == "40", f
 assert abs(f["jumped"][0][1] - f["before"][0][1] - 1) < 0.15, f
-# [KIT_AIRSHIPS_2] Red's island (a kit/world_region) walked on, kitbob on
+# [KIT_AIRSHIPS_2] Red's island (a kit/terrain_region) walked on, kitbob on
 # Blue's (its kit/symmetry copy); "To the lobby" from Blue's island
 bob = re.findall(r"kit: feet at ([-\d.]+),([-\d.]+),([-\d.]+), frame (\S+)", log["bob"])
 print("on the islands: kitboss %s, kitbob %s; after To the lobby %s" % (f["red"], bob[:1], f["lobby"]))

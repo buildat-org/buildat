@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-11-04)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/world.h builtin/kit/box/box.c builtin/kit/types/health.lua builtin/kit/types/game_rules.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/inventory.lua apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/terrain.h builtin/kit/box/box.c builtin/kit/types/health.lua builtin/kit/types/game_rules.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/inventory.lua apps/workbench/**
 # [KIT_CTF] P2: death, respawn, hurts and blasts on a fresh Workbench
 # save, with a check's own type workbench/probe (BUILDAT_WORKBENCH_TYPES:
 # its on_died and on_blast logged; used: c:hurt by a fraction or
@@ -138,7 +138,7 @@ wait_log 10000 kit: 8 item types
 EOF
 	ed '{"op": "voxel", "name": "hard", "texture": "kit/stone.png", "blast_resist": 5}'
 	echo "sync 3000"
-	place kit/world '0, 1, 0'
+	place kit/terrain '0, 1, 0'
 	place kit/game_rules '0, 1, 0'
 	set_ 4 respawn '"on_signal"'
 	place kit/spawner '0, 1, 0'

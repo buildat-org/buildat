@@ -183,7 +183,7 @@ inline bool make(const ss_ &slices, const ss_ &angle, const ss_ &mode,
 	return true;
 }
 
-// A shape's param (world.h: a facing 0...3, its back to +z, +x, -z, -x; 4
+// A shape's param (terrain.h: a facing 0...3, its back to +z, +x, -z, -x; 4
 // and up the same upside down) after a map. corner: an inner or outer
 // stair, whose mirror is another facing (its diagonal's)
 inline uint32_t facing(uint32_t pm, const Map &m, bool corner)

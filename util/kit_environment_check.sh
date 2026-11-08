@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-02)
-# covers: builtin/kit/kit.cpp builtin/kit/world.h builtin/kit/materials.json builtin/kit/types/environment.lua builtin/kit/client_lua/module.lua builtin/voxelworld/client_lua/** apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/terrain.h builtin/kit/materials.json builtin/kit/types/environment.lua builtin/kit/client_lua/module.lua builtin/voxelworld/client_lua/** apps/workbench/**
 # [KIT_ENVIRONMENT] (kit_plan 4k) kit/environment. A fresh save on
 # Workbench, the admin Ended, a World on the main scene (no trees):
 #   - an environment placed goes on the root; the client is told it (the
@@ -105,7 +105,7 @@ event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
 	# 3: the main scene's World
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "biome", "value": "grassland"}'
 	echo "wait_log_any 30000 kit: World: generated again"
 	# No trees: the sky open above the camera

@@ -2,7 +2,7 @@
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 //
 // [KIT] Workbench: the blank app that only hosts Kit and its editor. The
-// world is Kit's World ([KIT] stage 4e, kit/world on the app root): by
+// world is Kit's World ([KIT] stage 4e, kit/terrain on the app root): by
 // default a gentle grassland heightmap 64x64 for a project New made
 // ([WB_NEW_PROJECT_GROUND]), a flat stone floor 64x64 round the origin,
 // its top at y 0, for others (Kit's material set, biome "rock"), the
@@ -89,7 +89,7 @@ static const int WORLD_XZ = kit::WORLD_SECTIONS_XZ * kit::WORLD_SECTION;
 static const int WORLD_Y0 = kit::WORLD_SECTION_Y0 * kit::WORLD_SECTION,
 		WORLD_Y1 = (kit::WORLD_SECTION_Y1 + 1) * kit::WORLD_SECTION - 1;
 // Workbench's own voxels (its textures), Kit's materials as its material
-// set's are (kit/world.h; [KIT_TINT_MATERIALS] their palettes, entry 0
+// set's are (kit/terrain.h; [KIT_TINT_MATERIALS] their palettes, entry 0
 // the texture's own look: the brick's mortar keeps its colour, masked by
 // its alpha, and the glass is blended). Kit's material set's are Kit's
 // (register_voxels), and the builders' theirs ([KIT] stage 4g); a builder
@@ -677,11 +677,11 @@ struct Module: public interface::Module
 		m_save->store("workbench")->get("ground", ground);
 		h.world_scene = "world";
 		h.defaults = ground == "heightmap" ?
-				"{\"kit/world\": {\"surface\": \"heightmap\", \"biome\": "
+				"{\"kit/terrain\": {\"surface\": \"heightmap\", \"biome\": "
 				"\"grassland\", \"generator\": \"noise\", \"level\": 4, "
 				"\"height\": 3, \"width\": 64, \"depth\": 64, "
 				"\"decorations\": false}}" :
-				"{\"kit/world\": {\"biome\": \"rock\"}}";
+				"{\"kit/terrain\": {\"biome\": \"rock\"}}";
 		if(!kit::host(m_server, h)){
 			m_server->shutdown(1, "workbench: Kit is not hosted");
 			return true;

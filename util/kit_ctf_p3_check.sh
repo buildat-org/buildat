@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-04)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/world.h builtin/kit/materials.json builtin/kit/types/arena.lua builtin/kit/types/team.lua builtin/kit/types/timer.lua builtin/kit/types/game_rules.lua apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/terrain.h builtin/kit/materials.json builtin/kit/types/arena.lua builtin/kit/types/team.lua builtin/kit/types/timer.lua builtin/kit/types/game_rules.lua apps/workbench/**
 # [KIT_CTF] (kit_plan 7b; the capture-the-flag work's rounds and digging)
 # On a fresh Workbench save the admin (kitboss) builds a lobby in the
 # scene "world" (kit/game_rules with hand_level 0, a spawner, a region to
 # dig in, a giver of kit/pickaxe, kit/stone and kit/dirt to dig, a timer
 # of 3 repeats whose "left" a ui text shows, a kit/arena placed away from
 # the spawn: 1 player, no countdown, a 120 s round, time_up "most", map
-# "map") and a scene "map" (its own kit/world, teams Red and Blue, a text
+# "map") and a scene "map" (its own kit/terrain, teams Red and Blue, a text
 # the arena's status links into). Then,
 # Running:
 #   1. the timer's left (game seconds): 36, 24, 12, 0 on the screen
@@ -79,7 +79,7 @@ wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/game_rules", "pos": [0, 1, 0]}'
 	set_ 4 hand_level 0
 	edit '{"op": "place", "type": "kit/spawner", "pos": [0, 1, 0]}'
@@ -111,7 +111,7 @@ EOF
 	done
 	edit '{"op": "new_scene", "name": "map"}'
 	echo 'wait_log 30000 kit editor: in the scene map of world, map'
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/team", "pos": [7, 1, 3]}'
 	edit '{"op": "place", "type": "kit/team", "pos": [-7, 1, -3]}'
 	set_ 13 name '"Red"'

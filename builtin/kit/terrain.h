@@ -1,7 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 //
-// [KIT] stage 4e: the World (types/world.lua, api.h's Host::world_scene)
+// [KIT] stage 4e: the World (types/terrain.lua, api.h's Host::world_scene)
 // and the material set it is made of. Part of kit.cpp (one translation
 // unit), included there.
 //
@@ -880,7 +880,7 @@ inline json::Value merge_sets(const json::Value &base, const json::Value &over)
 	return out;
 }
 
-// The World's parameters (types/world.lua)
+// The World's parameters (types/terrain.lua)
 struct Params
 {
 	ss_ generator = "flat", biome, size = "finite", border = "void",
@@ -1298,7 +1298,7 @@ struct Generator: public worldgen::GeneratorInterface
 	}
 };
 
-// [KIT_AIRSHIPS_2] A kit/world_region's cells: a generator applied to a box
+// [KIT_AIRSHIPS_2] A kit/terrain_region's cells: a generator applied to a box
 // of the world from its corner o (n cells each way), or to the ball
 // inscribed in it. Each column's ground is the generator's (h, its level
 // already the region's) cut by the shape: its highest cell in the shape the

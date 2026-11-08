@@ -81,7 +81,7 @@ wait_log_any 10000 kit editor: edit rights: yes
 keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
 EOF
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/game_rules", "pos": [-6, 1, -6]}'
 	edit '{"op": "set", "id": 4, "comp": 0, "param": "respawn", "value": "on_signal"}'
 	edit '{"op": "place", "type": "workbench/doom", "pos": [3, 1, 2]}'

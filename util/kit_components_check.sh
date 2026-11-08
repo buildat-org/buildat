@@ -176,7 +176,7 @@ wait_log_any 10000 kit editor: edit mode on
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
-	ed '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	ed '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	ed '{"op": "place", "type": "kit/walker", "pos": [0, 1, 0]}'
 	printf 'sync 1000\nquit\n'
 } > "$t/setup.cmds"
