@@ -214,13 +214,20 @@ local function clamp01(x)
 	return math.max(0, math.min(1, x))
 end
 
--- Toward the sun at the hour h: up from 6 to 18, east (+x) in the morning,
--- leaning south (-z); its height the sine of its elevation
+-- Toward the sun at the hour h, at the environment's latitude and north
+-- (physical_sky's, floorplanner's): on the equinox, so it rises at 6 and
+-- sets at 18 everywhere; its height the sine of its elevation. A north
+-- off the axes keeps the voxels' faces each lit their own.
 local function sun_toward(h)
-	local a = (h - 6) / 12 * math.pi
-	local x, y, z = math.cos(a), math.sin(a), -0.4
-	local l = math.sqrt(x * x + y * y + z * z)
-	return x / l, y / l, z / l
+	if not LIT.sun_toward then
+		local ok, err, ps = buildat.run_script_file("physical_sky/init.lua")
+		assert(ok and type(ps) == "table", "kit: physical_sky: " ..
+				tostring(err))
+		LIT.sun_toward = ps.sun_toward
+	end
+	local d = env.d or {}
+	return LIT.sun_toward(tonumber(d.latitude) or 25,
+			tonumber(d.north) or 30, 80, h * 60)
 end
 
 -- ---- The sky: sky_render's dome (physical_sky's), drawn by its
@@ -390,11 +397,13 @@ local function sky_log(mode, s)
 	end
 	local line = string.format("kit: sky: %s, %.1f o'clock, sun %d, moon %d,"..
 			" stars %.2f, clouds %.2f at %d, wind %.1f toward %d; %s %.2f:"..
-			" light %.2f, fog %.2f, sun through %.2f, shadows %d", mode, env.h,
+			" light %.2f, fog %.2f, sun through %.2f, shadows %d, toward the sun"..
+			" %.2f %.2f %.2f", mode, env.h,
 			s.sun and 1 or 0, s.moon and 1 or 0, s.stars, s.v.cover,
 			math.floor(s.v.height + 0.5), s.v.wind, math.floor(s.v.dir + 0.5),
 			weather_of(env.d), intensity_of(env.d), s.v.light, s.v.fog,
-			sun_through(s.v), env.light.castShadows and 1 or 0)
+			sun_through(s.v), env.light.castShadows and 1 or 0,
+			sun_toward(env.h))
 	if line ~= LIT.sky_line then
 		LIT.sky_line = line
 		log:info(line)
@@ -563,8 +572,7 @@ local function env_light()
 	if M.physical() then
 		return phys_light(v)
 	end
-	local a = (env.h - 6) / 12 * math.pi
-	local up = math.sin(a)
+	local tx, up, tz = sun_toward(env.h)
 	local day = math.max(0, math.min(1, up * 2 + 0.3))
 	local f = (0.25 + 0.75 * day) * v.light
 	env.zone.fogColor = hex_colour(d.sky, f) or env.orig.fog
@@ -584,13 +592,11 @@ local function env_light()
 	env.light.brightness = 0.8 * math.max(0, math.min(1, up * 1.5 + 0.1)) *
 			v.light * sun_through(v)
 	env.light.color = env.orig.colour
-	env.sun.direction = magic.Vector3(-math.cos(a) * 0.8,
-			-math.max(up, 0.15), 0.5)
+	env.sun.direction = magic.Vector3(-tx, -math.max(up, 0.15), -tz)
 	-- The sky: its horizon the fog's colour, its zenith the sky's colour
 	-- deepened, the clouds lit by the hour
 	local dome = sky_dome(true)
-	local tx, height, tz = sun_toward(env.h)
-	local s = sky_bodies(dome, v, tx, height, tz, day)
+	local s = sky_bodies(dome, v, tx, up, tz, day)
 	if dome then
 		local h = env.zone.fogColor
 		local z = SKY.ZENITH

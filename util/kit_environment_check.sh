@@ -124,6 +124,12 @@ EOF
 	echo "wait_log_any 10000 kit: the far clip: play 250, editor 300 (fog_end 200)"
 	edit '{"op": "set", "id": 4, "comp": 0, "param": "fog_end", "value": 800}'
 	echo "wait_log_any 10000 kit: the far clip: play 880, editor 880 (fog_end 800)"
+	# Latitude and north: the noon sun south, 64.5 degrees up and a north
+	# of 30 off the axes by default; at 60 and north 0, 29.5 up, due -z
+	echo "wait_log_any 10000 0.90 -0.37"
+	edit '{"op": "set", "id": 4, "comp": 0, "param": "latitude", "value": 60}'
+	edit '{"op": "set", "id": 4, "comp": 0, "param": "north", "value": 0}'
+	echo "wait_log_any 10000 0.49 -0.87"
 	cat <<EOF
 wait_log_any 10000 kit: weather drawn: snow
 frames 60
