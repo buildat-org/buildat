@@ -439,6 +439,14 @@ magic.SubscribeToEvent("command_seq:kit_face", function(_, data)
 	local y, p = data:GetString("Param"):match("(%S+) (%S+)")
 	C.yaw, C.pitch = tonumber(y) % 360, tonumber(p)
 end)
+-- [KIT_WALK_HERE] The view turned to yaw and pitch (degrees; nil: kept),
+-- and the feet {x, y, z} for an eye at eye (a Vector3): the editor's
+-- "Walk here" asks the server to put the body there (a put keeps the view)
+function M.walk_here(eye, yaw, pitch)
+	C.yaw = yaw and yaw % 360 or C.yaw
+	C.pitch = pitch and math.max(-89, math.min(89, pitch)) or C.pitch
+	return {eye.x, eye.y - (tonumber(body_decl().eye) or 1.5487), eye.z}
+end
 local function log_body()
 	local p = pos_of(C.s) or {0, 0, 0}
 	log:info(string.format("kit: body at %.2f,%.2f,%.2f, %d acks, %d " ..

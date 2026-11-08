@@ -24886,6 +24886,19 @@ struct Module: public interface::Module, public Interface
 			return prefab_bench(p, peer, j, refuse);
 		if(op == "scene")
 			return switch_scene(p, peer, j, refuse);
+		// [KIT_WALK_HERE] {"op": "walk_here", "pos": [x, y, z]}: the
+		// builder's body put there (its feet; the client turns its view)
+		if(op == "walk_here"){
+			const json::Value &ps = j.get("pos");
+			if(!pos_ok(ps))
+				return refuse("pos: three numbers within "+
+						itos((int)MAX_COORD));
+			log_i(MODULE, "%s walks here: (%g, %g, %g)", cs(p.name),
+					ps.at(0u).as_number(), ps.at(1u).as_number(),
+					ps.at(2u).as_number());
+			return to_scene(peer, "", ps.at(0u).as_number(),
+					ps.at(1u).as_number(), ps.at(2u).as_number());
+		}
 		if(op == "terrain")
 			return terrain(p, peer, j, refuse);
 		if(op == "voxel")
