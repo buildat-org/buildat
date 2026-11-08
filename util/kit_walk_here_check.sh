@@ -8,55 +8,68 @@
 # looking at 0 1 0) the walker is put under the camera, the walk camera looking as the
 # 3D one did, the view Walk, and the 3D camera stays where it was; in 2D (the plan
 # at -4 4) the walker on the ground under the plan's middle; in Signals put too.
-# (HUD hides the bar: no dropdown to pick from there.)
-#   util/kit_walk_here_check.sh
+# (HUD hides the bar: no dropdown to pick from there.) The views by the dropdown
+# too (a page's F5 is the browser's).
+# Native, or "web": kitboss in a page (the account made natively first).
+#   util/kit_walk_here_check.sh [web]
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
+WEB=
+if [ "${1:-}" = web ]; then
+	WEB=1
+	command -v "${CHROME:-google-chrome}" > /dev/null || skip "no Chrome"
+	[ -f "$here/web/buildat.wasm" ] || skip "no web client (util/build_web.sh)"
+fi
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
-check_tmp kit_walk_here; t=$CHECK_TMP
+check_tmp kit_walk_here${WEB:+_web}; t=$CHECK_TMP
 cd "$here/Build"
 export BUILDAT_WORKBENCH_PROJECT=world BUILDAT_WORKBENCH_STONE=1
 export BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_NAME=kitboss
 start_server "$t/srv.log" "Listening at" 300 auto \
-	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 ||
+	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 ${WEB:+-W "$here/web"} ||
 	fail "the server did not come up ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
-pick() # <tag>: Walk here from the view dropdown (the bar's leftmost)
+pick() # <label>: that entry of the view dropdown (the bar's leftmost)
 {
-	printf 'click DropDownList "▼" 0 0\ndelay 300\nframes 3\nclick Text "Walk here"\n'
+	printf 'click DropDownList "▼" 0 0\ndelay 300\nframes 3\nclick Text "%s"\n' "$1"
 }
-cat > "$t/boss.cmds" <<'EOF'
+cat > "$t/admin.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitboss
 wait_log_any 30000 server window: the page ntfy
 frames 3
 click Button "Don't add"
+sync 3000
+quit
+EOF
+cat > "$t/boss.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
 event kit_edit {"op": "mode", "on": true}
 wait_log_any 10000 kit editor: edit mode on
 wait_log_any 10000 kit editor: the server is Running
-keypress F3
-wait_log_any 5000 kit editor: the view is Walk
 frames 5
 EOF
 {
-	pick
+	# (Walk is the view edit mode starts in; picking it again sends nothing)
+	pick "Walk here"
 	printf 'wait_log 5000 kit editor: walk here: nothing in Walk\nframes 5\nevent kit_body\n'
 	printf 'event kit_cam3d 6 8 -6 0 1 0\nframes 5\n'
-	pick
+	pick "Walk here"
 	printf 'wait_log 5000 kit editor: walk here from 3D\n'
 	printf 'wait_log 5000 the server put the player at\nframes 10\nevent kit_cam_where 3d\n'
 	printf 'sync 2000\nframes 30\nevent kit_body\n'
 	printf 'event kit_plan -4 4 20 3\nframes 5\n'
-	pick
+	pick "Walk here"
 	printf 'wait_log 5000 kit editor: walk here from 2D\n'
 	printf 'wait_log 5000 the server put the player at\nsync 2000\nframes 30\nevent kit_body\n'
-	printf 'keypress F5\nwait_log_any 5000 kit editor: the view is Signals\nframes 5\n'
-	pick
+	pick "Signals (F5)"
+	printf 'wait_log 5000 kit editor: the view is Signals\nframes 5\n'
+	pick "Walk here"
 	printf 'wait_log 5000 kit editor: walk here from Signals\n'
 	printf 'wait_log 5000 the server put the player at\nframes 5\n'
 	echo "screenshot $t/end.png"
@@ -65,9 +78,52 @@ EOF
 wait_for_log "$t/srv.log" "setup code [A-Z0-9]+" 30
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv.log" | head -1)
 [ -n "$code" ] || fail "no setup code ($t/srv.log)"
-BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 run_client 60 "$t/boss.log" timeout 180 \
-	bin/buildat -C "$t/client_cache" -D "$t/cu" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
-	-c @"$t/boss.cmds" || fail "the client ($t/boss.log, $t/srv.log)"
+native() # <name>
+{
+	run_client 60 "$t/$1.log" timeout 180 bin/buildat -C "$t/client_cache" -D "$t/cu" \
+		-s localhost:$SERVER_PORT -w 1024x700 -l 3 -c @"$t/$1.cmds" ||
+		fail "the client $1 ($t/$1.log, $t/srv.log)"
+}
+BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 native admin
+if [ -n "$WEB" ]; then
+	python3 -I - "$t/boss.cmds" > "$t/boss.json" <<'EOF' || fail "the page's steps"
+import json, re, shlex, sys
+out = [["nav", "${URL}?scale=0.648148"], ["waitlog", "accounts: the login page shown", 120],
+	["wait", 1000], ["selall"], ["frames", 2], ["type", "kitboss"], ["frames", 2],
+	["key", "Tab"], ["frames", 2], ["type", "checkpass12"], ["frames", 2],
+	["key", "Enter"]]
+for line in open(sys.argv[1]):
+	cmd, _, rest = line.strip().partition(" ")
+	if cmd == "event":
+		out.append(["event", rest])
+	elif cmd in ("wait_log", "wait_log_any"):
+		ms, _, text = rest.partition(" ")
+		out.append(["waitlog" if cmd == "wait_log" else "waitlog_any",
+			re.escape(text), int(ms) / 1000])
+	elif cmd in ("frames", "sync"):
+		out.append([cmd, int(rest)])
+	elif cmd == "delay":
+		out.append(["wait", int(rest)])
+	elif cmd == "screenshot":
+		out.append(["shot", rest])
+	elif cmd == "click":
+		a = shlex.split(rest)
+		out.append(["click", *a[:2], *map(int, a[2:])])
+	elif cmd == "quit":
+		out.append(["sync", 3000])
+	elif cmd:
+		sys.exit("no page's step for: " + line)
+json.dump(out, sys.stdout)
+EOF
+	WEB_DRIVE_VIEWPORT=1024x700@1 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
+		"$here/util/web_drive.sh" chrome workbench "$t/boss.json" "$t/drive" \
+		> "$t/drive.txt" 2>&1
+	st=$?
+	cp "$t/drive/page.log" "$t/boss.log" 2>/dev/null
+	[ $st = 0 ] || fail "the page ($(tail -2 "$t/drive.txt"), $t/boss.log, $t/srv.log)"
+else
+	native boss
+fi
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 python3 -I - "$t" <<'PY' || fail "walk here ($t/boss.log, $t/srv.log)"
@@ -99,5 +155,5 @@ f = feet[2]
 assert abs(f[0] + 4) < 0.3 and abs(f[2] - 4) < 0.3 and abs(f[1] - y) < 0.3, (f, y)
 assert "the server is Ended" not in c
 PY
-echo "PASS: Walk here from 3D, 2D and Signals, nothing in Walk"
+echo "PASS: Walk here from 3D, 2D and Signals, nothing in Walk${WEB:+ (web)}"
 # vim: set noet ts=4 sw=4:
