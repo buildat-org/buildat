@@ -1318,16 +1318,25 @@
 			const pv::Region cr = get_chunk_region_voxels(chunk_p);
 			const pv::Vector3DInt32 lc = cr.getLowerCorner();
 			const pv::Vector3DInt32 uc = cr.getUpperCorner();
+			// [KIT_SESSION_UNDRAWN_HOLD] By rows (a memcpy a plane): voxel
+			// by voxel was 25-30 ms of a sourced section's 30
+			const int x0 = std::max({lc.getX(), vr.getLowerCorner().getX(),
+					sr.getLowerCorner().getX()});
+			const int x1 = std::min({uc.getX(), vr.getUpperCorner().getX(),
+					sr.getUpperCorner().getX()});
 			for(int z = lc.getZ(); z <= uc.getZ(); z++)
-			for(int y = lc.getY(); y <= uc.getY(); y++)
-			for(int x = lc.getX(); x <= uc.getX(); x++){
-				if(!vr.containsPoint(pv::Vector3DInt32(x, y, z)) ||
-						!sr.containsPoint(pv::Vector3DInt32(x, y, z)))
+			for(int y = lc.getY(); y <= uc.getY(); y++){
+				if(x1 < x0 || !vr.containsPoint(pv::Vector3DInt32(x0, y, z)) ||
+						!sr.containsPoint(pv::Vector3DInt32(x0, y, z)))
 					continue;
-				for(size_t pi = 0; pi < std::max<size_t>(planes, 1); pi++)
-					buf->volume->set_plane_at((uint8_t)pi, x - lc.getX(),
-							y - lc.getY(), z - lc.getZ(),
-							volume.plane_at((uint8_t)pi, x, y, z));
+				if(buf->volume->copy_run_from(volume, x0, y, z, x0 - lc.getX(),
+						y - lc.getY(), z - lc.getZ(), (size_t)(x1 - x0 + 1)))
+					continue;
+				for(int x = x0; x <= x1; x++)
+					for(size_t pi = 0; pi < std::max<size_t>(planes, 1); pi++)
+						buf->volume->set_plane_at((uint8_t)pi, x - lc.getX(),
+								y - lc.getY(), z - lc.getZ(),
+								volume.plane_at((uint8_t)pi, x, y, z));
 			}
 			mark_buffer_dirty(section, *buf);
 			dirty_neighbour_padding(chunk_p, lc, uc);

@@ -27138,8 +27138,14 @@ struct Module: public interface::Module, public Interface
 							cs(itos(m_active)), off, cs(name));
 			}
 			src->base = b;
-			if(!s->bench)
+			// [KIT_SESSION_UNDRAWN_HOLD] A sourced section is about 8 ms
+			// with its commit (the copy by rows): 6 a pass costs what the
+			// default's 2 did at 30 ms, and the far side of a 320-wide map
+			// was in 3-4 s after the start at 2
+			if(!s->bench){
 				w->set_section_source(src);
+				w->set_stream_budget(6);
+			}
 			w->set_writes_alter(true);
 			w->set_save_unaltered(false);
 		});
