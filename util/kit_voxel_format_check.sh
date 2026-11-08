@@ -218,7 +218,9 @@ BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
 stop
 s=$t/srv1.log
 grep -a "Voxel at\|sky light\|placed kit\|workbench: kitboss placed" "$s" | sed 's/^.*\(kit\|main\) *: /  /' | cut -c1-150
-infos=$(grep -aoP 'Voxel at \K.*' "$s")
+# (less the region a cell is in, [KIT_FREE_ROTATION]'s: Workbench's
+# play region holds the build packet's cells)
+infos=$(grep -aoP 'Voxel at \K.*' "$s" | sed 's/, region [0-9]*$//')
 line() { echo "$infos" | sed -n "$1p"; }
 want "$s" "placed kit/stone:stair (param 5, tint 3) at (3,1,3)" \
 	"placed kit/planks:slab at (4,1,3)"
@@ -289,7 +291,7 @@ server 2
 client boss2
 stop
 s2=$t/srv2.log
-infos=$(grep -aoP 'Voxel at \K.*' "$s2")
+infos=$(grep -aoP 'Voxel at \K.*' "$s2" | sed 's/, region [0-9]*$//')
 want "$s2" "World: sky light on ("
 want "$t/boss2.log" "kit: sky light on"
 # A shape lets the sky through (transmits_light): lit (the slab under
