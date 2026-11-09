@@ -967,7 +967,7 @@ end
 -- a session
 function SG.watch(force)
 	local want = 0
-	if NT.sig() and S.primary then
+	if E.editing and NT.sig() and S.primary then
 		local e, made = find(S.primary)
 		want = e and not made and e.kind ~= "scene" and e.id or 0
 	end
@@ -977,7 +977,11 @@ function SG.watch(force)
 		return
 	end
 	SG.watching = want
-	send({op = "watch", id = want})
+	-- [KIT_WATCH_REFUSED_PLAY] Out of edit mode the server refuses it and
+	-- has dropped the watch itself (watch_flush)
+	if E.editing then
+		send({op = "watch", id = want})
+	end
 end
 
 function SG.fired(a)

@@ -1384,6 +1384,10 @@ frames 3
 keypress F5
 frames 8
 screenshot @T@/wide.png
+keypress F6
+wait_log 10000 kit editor: edit mode off
+frames 30
+screenshot @T@/wide_play.png
 sync 3000
 quit
 EOF
@@ -1987,6 +1991,10 @@ if grep -a "signals: $FLAG $FLAG Home flag: " "$t/kitwide.log" | grep -aq "home>
 	fail "a trigger shown as carrying a value ($t/kitwide.log)"
 fi
 wantp "$t/kitwide.log" "signals: the HUD in the viewport on"
+# [KIT_WATCH_REFUSED_PLAY] Play mode from the view, an entity selected: no
+# watch asked out of edit mode, so none refused over the guide
+want "$t/kitwide.log" "kit editor: edit mode off"
+grep -aq "refused: watch" "$t/kitwide.log" && fail "a watch refused in play ($t/kitwide.log, $t/wide_play.png)"
 wantp "$t/kitnarrow.log" "signals: columns in 600x400 under \d+: sg_links \d+ \d+ 588 \d+"
 wantp "$t/kitnarrow.log" "signals: columns in 600x400 under \d+: sg_list \d+ \d+ 588 \d+"
 wantp "$t/kitnarrow.log" "signals: columns in 600x400 under \d+: inspector \d+ \d+ 588 \d+$"

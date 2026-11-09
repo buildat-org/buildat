@@ -3029,8 +3029,13 @@ function M.editor(options)
 			files = a.files, hex = a.hex, dependencies = a.dependencies})
 	end)
 	buildat.sub_packet("kit:edit_refused", function(data)
-		E.status = "Refused: " .. tostring(data)
 		log:info("kit editor: refused: " .. tostring(data))
+		-- [KIT_WATCH_REFUSED_PLAY] The Signals view's live values, asked
+		-- in a race with leaving edit mode: nothing the builder did
+		if tostring(data):sub(1, 7) == "watch: " then
+			return
+		end
+		E.status = "Refused: " .. tostring(data)
 		NT.select_new = nil
 		NT.pf.refused()
 		clear_preview()
