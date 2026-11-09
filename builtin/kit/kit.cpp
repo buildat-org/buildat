@@ -2342,6 +2342,15 @@ struct Module: public interface::Module, public Interface
 	};
 	std::map<uint64_t, Drive> m_drives;
 	int64_t m_drive_gen = 0;
+	// [KIT_GUIDE_STATIONS] The bots in seats (by the bot): the seat, its input
+	// there (a holder's fields, kit/bot's c:drive), where it stood before
+	struct BotSeat
+	{
+		uint64_t seat = 0;
+		ss_ input;
+		double from[3] = {0, 0, 0};
+	};
+	std::map<uint64_t, BotSeat> m_bot_seats;
 	std::map<uint64_t, json::Value> m_motions;
 	// What each peer has of each track: its gen, its last key's time
 	std::map<size_t, std::map<uint64_t, std::pair<int64_t, double>>> m_track_sent;
@@ -12712,6 +12721,10 @@ struct Module: public interface::Module, public Interface
 		// [KIT_GOAL_PRIORITIES] c:use_item (a bot's)
 		if(fx.get("use_item").is_string() && m_types[type].decl.get("bot").is_true())
 			bot_use_item(e.id, fx.get("use_item").as_string());
+		// [KIT_GUIDE_STATIONS] c:drive, c:leave_seat (a bot's)
+		if((fx.get("drive").is_array() || fx.get("drive").is_false()) &&
+				m_types[type].decl.get("bot").is_true())
+			bot_drive(e.id, fx.get("drive"));
 		// [KIT_CARRY_ATTACH] c:attach, c:detach
 		const json::Value &att = fx.get("attach");
 		if(att.is_array())
@@ -18958,6 +18971,14 @@ struct Module: public interface::Module, public Interface
 	{
 		int64_t spent = 0;
 		const double now = motion_t();
+		// [KIT_GUIDE_STATIONS] the seats of bots gone (removed, a round over)
+		for(auto it = m_bot_seats.begin(); it != m_bot_seats.end();){
+			auto bi = m_entities.find(it->first);
+			if(bi == m_entities.end() || !bi->second.has_pos || !is_bot(bi->second))
+				it = m_bot_seats.erase(it);
+			else
+				++it;
+		}
 		for(auto &dp : m_drives){
 			Drive &d = dp.second;
 			auto ei = m_entities.find(dp.first);
@@ -18967,6 +18988,11 @@ struct Module: public interface::Module, public Interface
 			const Instance *mv = movement_on(e);
 			if(!mv)
 				continue;
+			// [KIT_GUIDE_STATIONS] a bot in a seat: where the seat is, not stepped
+			if(d.bot && m_bot_seats.count(e.id)){
+				bot_in_seat(e, d, now);
+				continue;
+			}
 			const double rate = num(d.params, "rate", 60, 10, 120), dt = 1 / rate;
 			// [KIT_CREATURES_8A] far from players: asleep with its section
 			if(d.creature && !creature_awake(e, d, now))
@@ -18983,7 +19009,14 @@ struct Module: public interface::Module, public Interface
 			for(auto &bp : m_bodies)
 				if(!held && bp.second.ride == dp.first)
 					held = true, holder = bp.first;
-			ss_ in = held ? d.input : ss_();
+			// ([KIT_GUIDE_STATIONS] or a bot's: its c:drive)
+			uint64_t holder_bot = 0;
+			for(auto &bs : m_bot_seats){
+				const Entity *v = held ? nullptr : vehicle_of(bs.second.seat);
+				if(v && v->id == dp.first)
+					held = true, holder_bot = bs.first;
+			}
+			ss_ in = !held ? ss_() : holder_bot ? m_bot_seats[holder_bot].input : d.input;
 			const double shots = row_num(d.state, "shots");
 			if(!held){
 				const json::Value &st = mv->state;
@@ -19048,7 +19081,7 @@ struct Module: public interface::Module, public Interface
 			// [KIT_SHIP] a gun's shots (kit/turret's): its holder's, at most a few a tick
 			if(held)
 				for(int k = 0; k < 4 && k < row_num(d.state, "shots") - shots; k++)
-					drive_shot(holder, e, d.params);
+					drive_shot(holder, holder_bot, e, d.params);
 			const json::Value &np = d.state.get("pos");
 			if(!pos_ok(np))
 				continue;
@@ -19784,6 +19817,8 @@ struct Module: public interface::Module, public Interface
 		if(std::isfinite(yaw))
 			e.yaw = yaw;
 		m_drives.erase(id);
+		// [KIT_GUIDE_STATIONS] out of its seat
+		m_bot_seats.erase(id);
 		m_runtime_dirty = true;
 		place_nodes(id);
 	}
@@ -19820,8 +19855,11 @@ struct Module: public interface::Module, public Interface
 		const ss_ pick = jstr(in.params, "pick", "entity");
 		// [KIT_GOAL_PRIORITIES] "nearest_item": the nearest kit/pickup of an
 		// item with the tag `item_tag`; "nearest_opponent": the nearest
-		// player or bot of another team (none: of none), alive
-		if(pick == "nearest_item" || pick == "nearest_opponent"){
+		// player or bot of another team (none: of none), alive.
+		// [KIT_GUIDE_STATIONS] "nearest_health": the nearest thing a hit hurts
+		// (kit/health, hp left) that is no player or bot (a mine, a target)
+		if(pick == "nearest_item" || pick == "nearest_opponent" ||
+				pick == "nearest_health"){
 			const ss_ tag = jstr(in.params, "item_tag");
 			const uint64_t own = team_of_player(actor);
 			ss_ scene, ts;
@@ -19854,6 +19892,11 @@ struct Module: public interface::Module, public Interface
 					for(const Instance &ti : t.comps)
 						ok = ok || (ti.type == "kit/pickup" && ti.disabled.empty() &&
 								item_tagged(jstr(ti.params, "item"), tag));
+				} else if(pick == "nearest_health"){
+					for(const Instance &ti : t.comps)
+						ok = ok || (ti.type == "kit/health" && ti.disabled.empty() &&
+								t.kind != "player" && !is_bot(t) &&
+								row_num(ti.state, "hp") > 0);
 				} else {
 					ok = is_bot(t) && opponent(t.id);
 				}
@@ -19965,6 +20008,62 @@ struct Module: public interface::Module, public Interface
 			w[k] = m_peers[pr].pos[k] - (k == 1 ? 0.5 : 0);
 	}
 
+	// [KIT_GUIDE_STATIONS] A reach or an attack goal's via as a station for a
+	// bot: a seat on or under a steered vehicle whose movement declares a
+	// `station` (movement = {station = "helm" | "gun"}): {seat, vehicle,
+	// does, held (the bot in it), at (the seat), dist, board (on a free
+	// object: taken from anywhere, bot_seat()), pos (the vehicle), yaw
+	// (its facing, degrees from +z toward +x), elev (its facing over level,
+	// degrees), pitch (the movement's own: up negative), speed (m/s, its last
+	// batch's), params (the movement's); a gun's muzzle and life (a shot's
+	// seconds)}. 1: one; 0: no station (the goal as without); -1: one held by
+	// another
+	int station_lit(const Entity &bot, const Instance &in, json::Value &out)
+	{
+		const json::Value &rv = in.params.get("via");
+		auto si = rv.is_number() && rv.as_number() >= 2 ?
+				m_entities.find((uint64_t)rv.as_number()) : m_entities.end();
+		if(si == m_entities.end() || !si->second.has_pos || !has_seat(si->second))
+			return 0;
+		const Entity *ve = vehicle_of(si->second);
+		auto di = ve ? m_drives.find(ve->id) : m_drives.end();
+		const Instance *mv = ve ? movement_on(*ve) : nullptr;
+		const ss_ does = mv ? jstr(m_types[mv->type].decl.get("movement"), "station") :
+				ss_();
+		if(di == m_drives.end() || does.empty())
+			return 0;
+		if(!vehicle_holder(ve, bot.id).empty())
+			return -1;
+		auto bs = m_bot_seats.find(bot.id);
+		double b[3], at[3], from[3], d[3];
+		world_of(bot, b);
+		world_of(si->second, at);
+		muzzle_of(*ve, from, d);
+		out = json::object();
+		out.set("seat", (int64_t)si->first);
+		out.set("vehicle", (int64_t)ve->id);
+		out.set("does", does);
+		out.set("held", bs != m_bot_seats.end() && vehicle_of(bs->second.seat) == ve);
+		out.set("board", free_root_of(si->first) != 0);
+		out.set("at", point(at));
+		out.set("dist", std::sqrt((at[0] - b[0]) * (at[0] - b[0]) +
+				(at[1] - b[1]) * (at[1] - b[1]) + (at[2] - b[2]) * (at[2] - b[2])));
+		double w[3];
+		world_of(*ve, w);
+		out.set("pos", point(w));
+		const double deg = 180 / 3.14159265358979323846;
+		out.set("yaw", std::atan2(d[0], d[2]) * deg);
+		out.set("elev", std::atan2(d[1], std::sqrt(d[0] * d[0] + d[2] * d[2])) * deg);
+		out.set("pitch", row_num(di->second.state, "pitch"));
+		out.set("speed", di->second.speed);
+		out.set("params", di->second.params);
+		if(does == "gun"){
+			out.set("muzzle", point(from));
+			out.set("life", SHOT_LIFE);
+		}
+		return 1;
+	}
+
 	// c.goal: the bot's goal, of those in its scene active for it, not for
 	// players only, that it can act on now the one of the highest `priority`
 	// (ties: the first by id): {id, kind, text, target, via, carry, item,
@@ -19975,9 +20074,15 @@ struct Module: public interface::Module, public Interface
 	// place_item while it carries something, or ([KIT_GOAL_PRIORITIES]) with
 	// a when_holding tag, has an item of it; an attack with a target; reach
 	// and signal always. item: the held item of when_holding, its sheet's
-	// damage, reach and cooldown with it
+	// damage, reach and cooldown with it. [KIT_GUIDE_STATIONS] station: a
+	// reach's or an attack's via as station_lit() has it (one held by another:
+	// not acted on); seat: the seat it holds
 	void bot_goal_lit(const Entity &e, ss_ &o)
 	{
+		// [KIT_GUIDE_STATIONS] its seat (c.seat)
+		auto bs = m_bot_seats.find(e.id);
+		if(bs != m_bot_seats.end())
+			o += ",seat="+itos(bs->second.seat);
 		const ss_ key = "bot:"+itos(e.id);
 		ss_ scene, gs;
 		scene_of(e, &scene);
@@ -20024,7 +20129,13 @@ struct Module: public interface::Module, public Interface
 					continue;
 				if(kind == "attack" && !t)
 					continue;
+				// [KIT_GUIDE_STATIONS] a reach or an attack through a station
+				json::Value station;
+				if((kind == "reach" || kind == "attack") && station_lit(e, in, station) < 0)
+					continue;
 				json::Value j = json::object();
+				if(station.is_object())
+					j.set("station", station);
 				j.set("id", (int64_t)g.id);
 				j.set("kind", kind);
 				j.set("text", jstr(in.params, "text"));
@@ -20097,6 +20208,9 @@ struct Module: public interface::Module, public Interface
 		for(int k = 0; k < 3; k++)
 			d2 += (a[k] - b[k]) * (a[k] - b[k]);
 		const ss_ name = bot_name(bi->second);
+		// [KIT_GUIDE_STATIONS] a seat taken
+		if(m_host.controls && has_seat(it->second))
+			return bot_seat(bot, id);
 		if(ts != scene || (d2 > m_host.use_range * m_host.use_range &&
 				bot_carries(bot) != id)){
 			log_i(MODULE, "[KIT_GUIDE_BOTS] A use of entity %s by %s refused: %s",
@@ -20161,6 +20275,150 @@ struct Module: public interface::Module, public Interface
 		scene_of(bi->second, &scene);
 		log_i(MODULE, "%s uses %s on entity 0", cs(name), cs(item));
 		item_hooks_of(bot, "bot:"+itos(bot), scene, item, "use", json::Value((int64_t)0));
+	}
+
+	// ---- [KIT_GUIDE_STATIONS] A bot at a station: a seat (kit/seat) on or under
+	// a steered vehicle, taken by its use as a player takes it; its inputs then
+	// kit/bot's c:drive ({f, r, fire}), what the vehicle's movement does with a
+	// holder's keys (kit/turret fires on fire); c:leave_seat(), a teleport or a
+	// death take it out, back where it stood before it took the seat
+
+	// The free object (a ship) an entity is under (0: none)
+	uint64_t free_root_of(uint64_t id)
+	{
+		for(auto pi = m_entities.find(id); pi != m_entities.end();
+				pi = m_entities.find(pi->second.parent))
+			if(m_free_objects.count(pi->first))
+				return pi->first;
+		return 0;
+	}
+
+	// Who holds a vehicle, a player or a bot, but `bot` ("": nobody)
+	ss_ vehicle_holder(const Entity *ve, uint64_t bot = 0)
+	{
+		for(auto &o : m_bodies)
+			if(o.second.seat && vehicle_of(o.second.seat) == ve)
+				return m_peers[o.first].name;
+		for(auto &bs : m_bot_seats){
+			auto bi = m_entities.find(bs.first);
+			if(bs.first != bot && bi != m_entities.end() &&
+					vehicle_of(bs.second.seat) == ve)
+				return bot_name(bi->second);
+		}
+		return ss_();
+	}
+
+	// A bot's use of a seat: taken while its vehicle steps in play and nobody
+	// holds it, within Kit's use range; one on a free object (a ship, whose
+	// deck the pathfinder does not walk) from anywhere in its scene.
+	// simplified: boarding a ship is a jump into the seat; paths over the
+	// free objects' boxes are the upgrade
+	void bot_seat(uint64_t bot, uint64_t id)
+	{
+		auto bi = m_entities.find(bot);
+		auto si = m_entities.find(id);
+		if(bi == m_entities.end() || si == m_entities.end() || !si->second.has_pos)
+			return;
+		const Entity *ve = vehicle_of(si->second);
+		ss_ why, scene, ss;
+		scene_of(bi->second, &scene);
+		scene_of(si->second, &ss);
+		double a[3], b[3], d2 = 0;
+		world_of(bi->second, a);
+		world_of(si->second, b);
+		for(int k = 0; k < 3; k++)
+			d2 += (a[k] - b[k]) * (a[k] - b[k]);
+		if(!ve || !m_drives.count(ve->id))
+			why = "not a seat of something that moves in play";
+		else if(ss != scene)
+			why = "in another scene";
+		else if(d2 > m_host.use_range * m_host.use_range && !free_root_of(id))
+			why = "out of range";
+		else if(!(why = vehicle_holder(ve, bot)).empty())
+			why += " is in it already";
+		const ss_ name = bot_name(bi->second);
+		if(!why.empty()){
+			log_i(MODULE, "[KIT_GUIDE_STATIONS] %s's use of the seat of entity %s "
+					"refused: %s", cs(name), cs(itos(id)), cs(why));
+			return;
+		}
+		auto it = m_bot_seats.find(bot);
+		BotSeat &st = m_bot_seats[bot];
+		if(it == m_bot_seats.end())
+			for(int k = 0; k < 3; k++)
+				st.from[k] = a[k];
+		st.seat = id;
+		st.input.clear();
+		log_i(MODULE, "%s takes the seat of entity %s", cs(name), cs(itos(id)));
+	}
+
+	void bot_unseat(uint64_t bot, const char *why)
+	{
+		auto it = m_bot_seats.find(bot);
+		auto bi = m_entities.find(bot);
+		if(it == m_bot_seats.end())
+			return;
+		const BotSeat st = it->second;
+		m_bot_seats.erase(it);
+		if(bi == m_entities.end())
+			return;
+		log_i(MODULE, "%s leaves the seat of entity %s: %s", cs(bot_name(bi->second)),
+				cs(itos(st.seat)), why);
+		bot_put(bot, st.from, NAN);
+	}
+
+	// c:drive (a bot's): its seat's input; false: out of it
+	void bot_drive(uint64_t bot, const json::Value &v)
+	{
+		auto it = m_bot_seats.find(bot);
+		if(it == m_bot_seats.end())
+			return;
+		if(!v.is_array())
+			return bot_unseat(bot, "c:leave_seat");
+		ss_ in = "{f=";
+		lua_lit(json::Value(v.at(0u).is_number() ? v.at(0u).as_number() : 0.0), in);
+		in += ",r=";
+		lua_lit(json::Value(v.at(1u).is_number() ? v.at(1u).as_number() : 0.0), in);
+		in += ",yaw=0,jump=";
+		in += v.at(2u).is_true() ? "1" : "0";
+		in += ",go=0,tx=0,ty=0,tz=0}";
+		it->second.input = in;
+	}
+
+	// Each tick (step_drives): a bot in a seat where the seat is, its keys
+	// ahead as a creature's (its seat gone or no longer one: out of it)
+	void bot_in_seat(const Entity &e, Drive &d, double now)
+	{
+		const uint64_t seat = m_bot_seats[e.id].seat;
+		auto si = m_entities.find(seat);
+		const Entity *ve = si == m_entities.end() || !has_seat(si->second) ? nullptr :
+				vehicle_of(si->second);
+		if(!ve || !m_drives.count(ve->id))
+			return bot_unseat(e.id, "the seat is gone");
+		double w[3];
+		Turn q;
+		world_of(si->second, w, &q);
+		json::Value pos = json::array();
+		pos.append(w[0]);
+		pos.append(w[1] - 0.5);
+		pos.append(w[2]);
+		d.state.set("pos", pos);
+		d.state.set("yaw", q.yaw());
+		d.state.set("path", json::array());
+		d.t = std::max(d.t, now + DRIVE_LEAD);
+		double l[3], o[3], py, pp, pr;
+		to_local(e.parent, w, l);
+		Turn pq;
+		frame_of(e.parent, o, pq);
+		pq.angles(py, pp, pr);
+		const std::array<double, 7> key = {{std::floor(d.t * 1000), l[0], l[1], l[2],
+				q.yaw() - py, 0, 0}};
+		if(d.keys.empty() || key[0] > d.keys.back()[0])
+			d.keys.push_back(key);
+		while(d.keys.size() > 2 && d.keys[1][0] < (now - TRACK_KEEP) * 1000)
+			d.keys.pop_front();
+		d.speed = d.turn = 0;
+		bot_pose(e, d, q.yaw());
 	}
 
 	// [KIT_GUIDE_BOTS_2] c:teleport by a bot: it is put there, in its own scene
@@ -20722,6 +20980,15 @@ struct Module: public interface::Module, public Interface
 						cs(m_peers[o.first].name));
 				return;
 			}
+		// ([KIT_GUIDE_STATIONS] or a bot)
+		for(auto &bs : m_bot_seats){
+			auto bi = m_entities.find(bs.first);
+			if(bi != m_entities.end() && vehicle_of(bs.second.seat) == ve){
+				log_i(MODULE, "Entity %s: %s is in it already", cs(itos(id)),
+						cs(bot_name(bi->second)));
+				return;
+			}
+		}
 		if(b.seat)
 			unseat(peer, b, false);
 		if(!m_seat_home.count(e.id) && !m_drives.count(e.id))
@@ -20834,6 +21101,7 @@ struct Module: public interface::Module, public Interface
 	// [KIT_CTF]) back
 	void seats_home()
 	{
+		m_bot_seats.clear(); // [KIT_GUIDE_STATIONS]
 		for(auto &bp : m_bodies){
 			if(bp.second.seat)
 				unseat(bp.first, bp.second);
@@ -21050,6 +21318,8 @@ struct Module: public interface::Module, public Interface
 		int64_t at_us = 0, until_us = 0;
 		// [KIT_AIRSHIPS] the ship it was fired from (a turret's): not hit by it
 		uint64_t ship = 0;
+		// [KIT_GUIDE_STATIONS] a bot's (its seat's gun; peer 0): the bot
+		uint64_t bot = 0;
 	};
 	std::vector<Projectile> m_projectiles;
 	uint64_t m_next_shot = 1;
@@ -23475,30 +23745,48 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
-	// [KIT_SHIP] A turret's shot (kit/turret's s.shots went up): its holder's, a
-	// cannonball from its front along its facing
-	void drive_shot(size_t peer, const Entity &e, const json::Value &params)
+	static constexpr double SHOT_LIFE = 4; // s, a turret's shot's
+	// [KIT_GUIDE_STATIONS] A gun's muzzle (kit/turret's: a metre out of its
+	// front) and its facing, a unit vector, in the world
+	void muzzle_of(const Entity &e, double from[3], double d[3])
 	{
-		auto pi = m_peers.find(peer);
-		auto mi = pi == m_peers.end() ? m_entities.end() :
-				m_entities.find(pi->second.player);
-		if(mi == m_entities.end() || !m_session.running)
-			return;
-		double w[3], d[3] = {0, 0, 1};
+		double w[3];
 		Turn q;
 		world_of(e, w, &q);
+		d[0] = 0, d[1] = 0, d[2] = 1;
 		q.apply(d);
-		const double from[3] = {w[0] + d[0], w[1] + d[1], w[2] + d[2]};
+		for(int k = 0; k < 3; k++)
+			from[k] = w[k] + d[k];
+	}
+
+	// [KIT_SHIP] A turret's shot (kit/turret's s.shots went up): its holder's, a
+	// cannonball from its front along its facing. [KIT_GUIDE_STATIONS] The
+	// holder a bot (peer 0) or a peer
+	void drive_shot(size_t peer, uint64_t bot, const Entity &e,
+			const json::Value &params)
+	{
+		auto pi = m_peers.find(peer);
+		auto mi = bot ? m_entities.find(bot) : pi == m_peers.end() ?
+				m_entities.end() : m_entities.find(pi->second.player);
+		if(mi == m_entities.end() || !m_session.running)
+			return;
+		double from[3], d[3];
+		muzzle_of(e, from, d);
 		json::Value sheet = json::object();
 		sheet.set("gravity", num(params, "shot_gravity", 9.8, 0, 100));
-		sheet.set("lifetime", 4.0);
+		sheet.set("lifetime", SHOT_LIFE);
 		sheet.set("color", "#202020");
 		sheet.set("size", 0.3);
 		sheet.set("knockback", 0.0);
 		sheet.set("crit", 1.0);
 		const double v = num(params, "shot_speed", 40, 1, 200);
 		const double damage = num(params, "shot_damage", 10, 0, 1000);
-		const ss_ who = pi->second.name;
+		const ss_ who = bot ? bot_name(mi->second) : pi->second.name;
+		ss_ scene;
+		if(bot)
+			scene_of(mi->second, &scene);
+		else
+			scene = pi->second.scene;
 		log_i(MODULE, "%s fires entity %s's %s", cs(who), cs(itos(e.id)),
 				cs(movement_on(e) ? movement_on(e)->type : ss_()));
 		// [KIT_AIRSHIPS] not into its own ship: the free object it is under
@@ -23507,9 +23795,33 @@ struct Module: public interface::Module, public Interface
 				si = m_entities.find(si->second.parent))
 			if(m_free_objects.count(si->first))
 				ship = si->first;
-		if(launch(peer, who, "kit/turret", sheet, from, d, v, damage, mi->first,
-				pi->second.scene))
+		if(launch(bot ? 0 : peer, who, "kit/turret", sheet, from, d, v, damage,
+				mi->first, scene)){
 			m_projectiles.back().ship = ship;
+			m_projectiles.back().bot = bot;
+		}
+	}
+
+	// [KIT_GUIDE_STATIONS] A bot's projectile on what has health: a hit as a
+	// player's strike. simplified: no hit rules (a region's damage) and no
+	// knockback, as kit/bot's attack
+	void bot_strike(uint64_t bot, uint64_t id, const ss_ &item,
+			const json::Value &sheet, double amount, const double from[3])
+	{
+		auto bi = m_entities.find(bot);
+		if(bi == m_entities.end() || !m_entities.count(id))
+			return;
+		json::Value hit = json::object();
+		hit.set("amount", amount);
+		hit.set("type", jstr(sheet, "damage_type", "normal"));
+		hit.set("item", item);
+		hit.set("crit", false);
+		hit.set("from", point(from));
+		log_i(MODULE, "%s hits entity %s with %s: %g %s", cs(bot_name(bi->second)),
+				cs(itos(id)), cs(item), amount, cs(jstr(hit, "type")));
+		m_striking = item;
+		apply_hit(id, hit, "bot:"+itos(bot));
+		m_striking.clear();
 	}
 
 	// Each tick, Running: the projectiles step on the game's clock (a
@@ -23522,13 +23834,22 @@ struct Module: public interface::Module, public Interface
 		for(size_t i = 0; i < m_projectiles.size(); ){
 			Projectile pr = m_projectiles[i];
 			auto pi = m_peers.find(pr.peer);
-			auto mi = pi == m_peers.end() ? m_entities.end() :
-					m_entities.find(pi->second.player);
-			bool ended = mi == m_entities.end(), hit = false;
-			const ss_ scene = ended ? ss_() : pi->second.scene;
+			// ([KIT_GUIDE_STATIONS] a bot's: the bot, its scene and name)
+			auto mi = pr.bot ? m_entities.find(pr.bot) : pi == m_peers.end() ?
+					m_entities.end() : m_entities.find(pi->second.player);
+			bool ended = mi == m_entities.end() || (pr.bot && !is_bot(mi->second)),
+					hit = false;
+			ss_ scene;
+			if(!ended && pr.bot)
+				scene_of(mi->second, &scene);
+			else if(!ended)
+				scene = pi->second.scene;
+			const ss_ name = ended ? ss_() : pr.bot ? bot_name(mi->second) :
+					pi->second.name;
 			const main_context::SceneReference sref = ended ?
 					main_context::SceneReference() : scene_of(mi->second);
 			const uint64_t me = ended ? 0 : mi->first;
+			const ss_ by = (pr.bot ? "bot:" : "player:")+itos(me);
 			double left = (std::min(now, pr.until_us) - pr.at_us) / 1e6;
 			while(!ended && left > 1e-6){
 				const double dt = std::min(0.05, left);
@@ -23565,20 +23886,23 @@ struct Module: public interface::Module, public Interface
 					const int S = OWN_SIDE;
 					const OwnGrid &g = m_own[ship];
 					log_i(MODULE, "%s's projectile %s hits entity %s's cell (%i,%i,%i)",
-							cs(pi->second.name), cs(itos(pr.id)), cs(itos(ship)),
+							cs(name), cs(itos(pr.id)), cs(itos(ship)),
 							sc % S + g.a[0], sc / S % S + g.a[1], sc / (S * S) + g.a[2]);
-					ship_damage(ship, {std::make_pair(sc, pr.damage)}, "player:"+itos(me),
-							pi->second.name+"'s shot");
+					ship_damage(ship, {std::make_pair(sc, pr.damage)}, by,
+							name+"'s shot");
 					ended = hit = true;
 				} else if(id){
 					log_i(MODULE, "%s's projectile %s hits entity %s",
-							cs(pi->second.name), cs(itos(pr.id)), cs(itos(id)));
-					strike(pr.peer, id, pr.item, pr.sheet, pr.damage, head,
-							d[0], d[2]);
+							cs(name), cs(itos(pr.id)), cs(itos(id)));
+					if(pr.bot)
+						bot_strike(pr.bot, id, pr.item, pr.sheet, pr.damage, pr.pos);
+					else
+						strike(pr.peer, id, pr.item, pr.sheet, pr.damage, head,
+								d[0], d[2]);
 					ended = hit = true;
 				} else if(wall < len){
 					log_i(MODULE, "%s's projectile %s lands at (%.2f, %.2f, "
-							"%.2f)", cs(pi->second.name), cs(itos(pr.id)),
+							"%.2f)", cs(name), cs(itos(pr.id)),
 							pr.pos[0], pr.pos[1], pr.pos[2]);
 					ended = true;
 				}
@@ -26368,6 +26692,7 @@ struct Module: public interface::Module, public Interface
 		// [KIT_VEHICLE_MOVEMENTS] steered from their rows again, play's parameters gone
 		m_drives.clear();
 		m_play_params.clear();
+		m_bot_seats.clear(); // [KIT_GUIDE_STATIONS]
 		m_session.by = by;
 		m_session.round.clear();
 		// The last Stop's discarded builds are no longer to keep
@@ -28703,6 +29028,7 @@ struct Module: public interface::Module, public Interface
 		// [KIT_VEHICLE_MOVEMENTS]
 		std::map<uint64_t, Drive> drives;
 		std::map<uint64_t, Mind> minds; // [KIT_GUIDE_BOTS_2] a round's creatures
+		std::map<uint64_t, BotSeat> bot_seats; // [KIT_GUIDE_STATIONS]
 		std::map<uint64_t, json::Value> motions;
 		std::map<size_t, std::map<uint64_t, std::pair<int64_t, double>>> track_sent;
 		std::map<uint64_t, std::map<ss_, json::Value>> play_params;
@@ -28767,6 +29093,7 @@ struct Module: public interface::Module, public Interface
 		swap(m_seat_home, c.seat_home);
 		swap(m_drives, c.drives);
 		swap(m_minds, c.minds);
+		swap(m_bot_seats, c.bot_seats);
 		swap(m_motions, c.motions);
 		swap(m_track_sent, c.track_sent);
 		swap(m_play_params, c.play_params);

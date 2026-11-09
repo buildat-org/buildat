@@ -22,8 +22,11 @@ return {
 	component = true,
 	-- [KIT_SHIP_VIEW] the view close behind the gun, over it
 	-- [KIT_TOUCH_SEAT_BUTTONS] the touch stick turns and raises it, Fire held fires
+	-- [KIT_GUIDE_STATIONS] a gun: a bot at its seat turns and raises it onto its
+	-- goal's target by its shot's arc (move.lua's M.aim) and fires; the player
+	-- holding it sees where the shot would land (controls.lua, M.impact)
 	movement = {body = BODY, camera = "chase", camera_distance = 2.5, camera_up = 1,
-		touch = "stick", touch_buttons = {{"Fire", "jump"}}},
+		touch = "stick", touch_buttons = {{"Fire", "jump"}}, station = "gun"},
 	params = {
 		turn_rate = {cat = "physics", type = "number", default = 60, min = 0, max = 720},
 		pitch_rate = {cat = "physics", type = "number", default = 30, min = 0, max = 720},

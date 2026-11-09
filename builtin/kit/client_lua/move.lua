@@ -126,6 +126,69 @@ end
 M.sqrt = sqrt
 M.PI = PI
 
+-- ---- [KIT_GUIDE_STATIONS] A gun's shot (kit/turret's; kit.cpp's projectiles
+-- fly it): its arc's height over the muzzle at d metres out along the ground,
+-- fired at v m/s up at a radians, falling at g. kit/bot aims by it (M.aim, the
+-- box's c.aim), a player's impact marker draws by it (M.impact, controls.lua)
+function M.arc(v, g, a, d)
+	local c = M.cos(a)
+	if c < 1e-6 then
+		return nil
+	end
+	local t = d / (v * c)
+	return v * M.sin(a) * t - 0.5 * g * t * t
+end
+
+-- The flattest elevation (radians, up positive) between lo and hi whose arc
+-- is h over the muzzle d out; nil: out of its reach. A bisection on M.arc up to
+-- the angle of the highest arc at d (tan = v^2 / (g d)), where it rises with a
+function M.aim(v, g, d, h, lo, hi)
+	if v <= 0 or d < 1e-6 then
+		return nil
+	end
+	local top = g > 0 and M.atan2(v * v, g * d) or PI / 2 - 1e-3
+	if top < hi then
+		hi = top
+	end
+	if lo > hi or (M.arc(v, g, lo, d) or -1e9) > h or (M.arc(v, g, hi, d) or -1e9) < h then
+		return nil
+	end
+	for _ = 1, 40 do
+		local m = (lo + hi) / 2
+		if M.arc(v, g, m, d) < h then
+			lo = m
+		else
+			hi = m
+		end
+	end
+	return (lo + hi) / 2
+end
+
+-- Where a shot from o ({x, y, z}) along the unit d at v m/s, falling at g,
+-- first meets a solid cell (solid(i, j, k), a cell's middle its whole
+-- coordinates) within life seconds: x, y, z, true; else its arc's end, false.
+-- Steps of `step` m along the ground (kit.cpp's ray_wall takes 0.1 m)
+function M.impact(v, g, life, o, d, solid, step)
+	local h = sqrt(d[1] * d[1] + d[3] * d[3])
+	if h < 1e-6 then
+		return o[1], o[2], o[3], false
+	end
+	local a = M.atan2(d[2], h)
+	local ux, uz = d[1] / h, d[3] / h
+	local far = v * M.cos(a) * life
+	step = step or 0.25
+	local x, y, z = o[1], o[2], o[3]
+	local s = 0
+	while s < far do
+		s = s + step < far and s + step or far
+		x, y, z = o[1] + ux * s, o[2] + M.arc(v, g, a, s), o[3] + uz * s
+		if solid(floor(x + 0.5), floor(y + 0.5), floor(z + 0.5)) then
+			return x, y, z, true
+		end
+	end
+	return x, y, z, false
+end
+
 -- ---- Infos
 M.UNKNOWN = {solid = true, friction = 1, surface = "unknown"}
 M.OBJECT = {solid = true, friction = 1, surface = "object"}

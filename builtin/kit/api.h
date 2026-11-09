@@ -1337,6 +1337,20 @@ namespace interface
 // item of use kind "use" it has, once a second at most. c:hurt and blasts
 // reach bots. An item's sheet has `tags` (8 names at most; the stock
 // items' weapon, blade, tool, explosive), sent to the clients with it.
+// [KIT_GUIDE_STATIONS] Stations: a movement declares one (movement =
+// {station = "helm" | "gun"}); a reach or an attack goal whose via is a seat
+// of such a vehicle gives c.goal.station = {seat, vehicle, does, held, at,
+// dist, board, pos, yaw, elev, pitch, speed, params, muzzle, life}. A bot's
+// c:use of a seat takes it as a player's use does (one on a free object from
+// anywhere in its scene; simplified: the pathfinder does not walk a deck);
+// c.seat is the seat held (0: none), c:drive{f, r, fire} its inputs there
+// (-1...1; fire: a holder's jump, a turret's trigger), c:leave_seat() back
+// where it stood; a teleport or a death takes it out. A turret held by a bot
+// fires its shots as the bot's. c.aim(speed, gravity, d, h, lo, hi): the
+// flattest elevation (radians) between lo and hi whose arc is h m over the
+// muzzle d m out (move.lua's M.aim, by M.arc, which a gunner's impact
+// marker draws with). Goal pick "nearest_health": the nearest thing with
+// health that is no player or bot.
 // c:explode{at = {x, y, z} (c.pos by default), radius (0...9, 0), power
 // (0...1000, 1), kill (0...32, radius), hurt (0...32, 0), share (0...1,
 // 0.5), friendly_fire (true), type ("blast")}: a blast in the entity's

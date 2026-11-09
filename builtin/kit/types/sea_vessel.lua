@@ -23,7 +23,9 @@ return {
 		},
 	},
 	component = true,
-	movement = {body = BODY, camera = "chase", touch = "drive"},
+	-- [KIT_GUIDE_STATIONS] a helm: a bot at its seat steers it into its goal's box
+	-- (kit/bot, forward and the rudder)
+	movement = {body = BODY, camera = "chase", touch = "drive", station = "helm"},
 	params = {
 		water = {type = "string", default = "world", choices = {"world", "level"}},
 		water_level = {type = "number", default = 0, min = -1000, max = 1000},

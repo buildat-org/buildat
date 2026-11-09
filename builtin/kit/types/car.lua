@@ -40,7 +40,9 @@ return {
 		},
 	},
 	component = true,
-	movement = {body = BODY, camera = "chase", touch = "drive"},
+	-- [KIT_GUIDE_STATIONS] a helm: a bot at its seat steers it into its goal's box
+	-- (kit/bot, forward and the rudder)
+	movement = {body = BODY, camera = "chase", touch = "drive", station = "helm"},
 	-- [KIT_VEHICLE_MOVEMENTS] steered in play (on a free object, or on a deck): with
 	-- nobody in its seat, these drive it
 	inputs = {throttle = "number", steer = "number"},

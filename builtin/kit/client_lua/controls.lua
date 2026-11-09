@@ -1871,6 +1871,97 @@ local function place_camera(dt, at)
 	return mode
 end
 
+-- ---- [KIT_GUIDE_STATIONS] The impact marker: riding a gun (its movement's
+-- station "gun", kit/turret), where its shot would land from the gun as drawn,
+-- its shot_speed and shot_gravity (move.lua's M.impact, by the arc kit/bot
+-- aims with): a disc there, grey where the arc ends meeting nothing, and dots
+-- along the arc. "event kit_impact" logs it: "kit: impact at <x> <y> <z>
+-- (hit|none)". simplified: voxels only (a shot also stops at what has
+-- health, and at another ship's voxels); a cell not loaded stops it
+local IMPACT_DOTS, IMPACT_EVERY = 12, 0.1
+local impact = nil
+local function impact_solid(i, j, k)
+	local v = voxelworld.get_static_voxel(magic.Vector3(i, j, k))
+	local id = voxelworld.get_voxel_registry():id_of(v)
+	return id == 0 or voxel_info(id, v) ~= nil
+end
+-- The gun ridden's shot: its muzzle (a metre out of its front, kit.cpp's
+-- drive_shot), facing, the point and whether it hit; nil: no gun ridden
+local function impact_now()
+	local r = M.riding()
+	local n = r and decl().station == "gun" and P.nodes[r]
+	if not n then
+		return nil
+	end
+	local p = move().params or {}
+	local d = n.node.worldDirection
+	local o = n.node.worldPosition + d
+	local v, g = tonumber(p.shot_speed) or 40, tonumber(p.shot_gravity) or 9.8
+	local x, y, z, hit = MV.impact(v, g, 4, {o.x, o.y, o.z}, {d.x, d.y, d.z},
+			impact_solid, 0.25)
+	return {o = o, d = d, v = v, g = g, at = magic.Vector3(x, y, z), hit = hit}
+end
+local function impact_marker(dt)
+	local scene = replicate.main_scene
+	if impact and impact.t > 0 and M.riding() then
+		impact.t = impact.t - dt
+		return
+	end
+	local i = scene and impact_now()
+	if not i then
+		if impact then
+			impact.node:Remove()
+			impact = nil
+			log:info("kit: impact marker off")
+		end
+		return
+	end
+	if not impact then
+		local node = scene:CreateChild("kit_impact")
+		local function part(size, col)
+			local c = node:CreateChild("part")
+			c.scale = magic.Vector3(size[1], size[2], size[3])
+			local m = c:CreateComponent("StaticModel")
+			m.model = magic.cache:GetResource("Model", size[4] or "Models/Box.mdl")
+			m.material = K.material("glow")
+			m.material:SetShaderParameter("MatDiffColor", col)
+			m.castShadows = false
+			return c, m
+		end
+		impact = {node = node, t = 0, dots = {}}
+		impact.disc, impact.disc_m = part({1.4, 0.06, 1.4, "Models/Cylinder.mdl"},
+				magic.Color(1, 0.6, 0.1))
+		for k = 1, IMPACT_DOTS do
+			impact.dots[k] = part({0.12, 0.12, 0.12}, magic.Color(1, 0.85, 0.4))
+		end
+		log:info("kit: impact marker on")
+	end
+	impact.t = IMPACT_EVERY
+	impact.disc.position = i.at + magic.Vector3(0, 0.05, 0)
+	impact.disc_m.material:SetShaderParameter("MatDiffColor", i.hit and
+			magic.Color(1, 0.6, 0.1) or magic.Color(0.45, 0.45, 0.45))
+	-- The dots along the arc to it
+	local h = math.sqrt(i.d.x * i.d.x + i.d.z * i.d.z)
+	local a = MV.atan2(i.d.y, h)
+	local far = math.sqrt((i.at.x - i.o.x) ^ 2 + (i.at.z - i.o.z) ^ 2)
+	for k, dot in ipairs(impact.dots) do
+		local s = far * k / (IMPACT_DOTS + 1)
+		local y = h > 1e-6 and MV.arc(i.v, i.g, a, s) or 0
+		dot.position = magic.Vector3(i.o.x + i.d.x / math.max(h, 1e-6) * s,
+				i.o.y + y, i.o.z + i.d.z / math.max(h, 1e-6) * s)
+	end
+end
+
+magic.SubscribeToEvent("command_seq:kit_impact", function()
+	local i = impact_now()
+	if not i then
+		log:info("kit: impact: no gun ridden")
+		return
+	end
+	log:info(string.format("kit: impact at %.2f %.2f %.2f (%s) from %.2f %.2f %.2f",
+			i.at.x, i.at.y, i.at.z, i.hit and "hit" or "none", i.o.x, i.o.y, i.o.z))
+end)
+
 -- ---- Each frame: the look turned, the steps at the movement's rate, the
 -- view
 local was_ready = false
@@ -2008,6 +2099,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 	-- where it is predicted, shown but in first person or in a seat
 	M.draw_players(at, view_yaw(), C.pitch, bd_h(), mode ~= "first_person" and
 			not seat and not M.spectating())
+	impact_marker(dt)
 	effects(dt)
 end)
 

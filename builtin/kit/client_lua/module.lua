@@ -2048,7 +2048,7 @@ do
 	assert(ok and type(install) == "function", "kit: controls.lua: " ..
 			tostring(err))
 	install({M = M, E = E, O = O, P = P, log = log, STYLE = STYLE,
-		value = value})
+		value = value, material = material})
 end
 
 -- ---- [KIT_TOOLS_1] The hands, the hotbar, the hit: hands.lua

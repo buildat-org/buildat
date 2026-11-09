@@ -27,8 +27,10 @@ return {
 		},
 	},
 	component = true,
+	-- [KIT_GUIDE_STATIONS] a helm: a bot at its seat steers it into its goal's box
+	-- (kit/bot, forward and the rudder; simplified: not its climb)
 	movement = {body = BODY, camera = "chase", touch = "drive",
-		touch_buttons = {{"Up", "jump"}, {"Down", "down"}}},
+		touch_buttons = {{"Up", "jump"}, {"Down", "down"}}, station = "helm"},
 	params = {
 		thrust = {cat = "physics", type = "number", default = 4, min = 0, max = 100},
 		mass = {cat = "physics", type = "number", default = 0, min = 0, max = 100000},

@@ -55,6 +55,14 @@
 -- its when_holding (its damage, reach and cooldown); "place_item" with a
 -- when_holding tag: a bot uses that item at the target (kit/placer's bomb).
 -- A player's line is a hint: these kinds and picks are done by bots only.
+-- [KIT_GUIDE_STATIONS] A reach or an attack goal's `via` a station (a seat
+-- of a vehicle whose movement declares one: kit/sea_vessel's, kit/car's,
+-- kit/airship's "helm", kit/turret's "gun"): a bot takes the seat and does
+-- it through it, a helm steered into the box, a gun aimed at the target and
+-- fired (kit/bot); one held by another is not acted on. A player does it as
+-- ever: a reach by being in the box (at the helm, the ship takes them
+-- there), an attack by its links. `pick` also "nearest_health": the nearest
+-- thing with health (kit/health, hp left) that is no player or bot.
 -- simplified: a priority list, not a planner; a reach goal with a picked
 -- target other than "entity" is never entered (its box stays at its place)
 -- simplified: to "team" is left out (kit/ui_text's way, the members sharing one
@@ -167,7 +175,7 @@ return {
 		target = {type = "entity", default = 0},
 		pick = {type = "string", default = "entity",
 			choices = {"entity", "own_team", "their_team", "nearest_item",
-			"nearest_opponent"}},
+			"nearest_opponent", "nearest_health"}},
 		item_tag = {type = "string", default = "weapon"},
 		priority = {type = "number", default = 0, min = -100, max = 100},
 		when_holding = {type = "string", default = ""},
