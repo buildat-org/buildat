@@ -11,7 +11,8 @@
 #      noise hills in grassland; seed 7 and back to 0 (the heights' hash
 #      the same, 7's another); Luanti's valleys without rivers, 192 cells
 #      a side with a water border; its caves on and off, their mouths
-#      counted and the first one's column carved ([KIT_CAVE_MOUTHS]).
+#      counted and the first one's column carved ([KIT_CAVE_MOUTHS]);
+#      none of its decorations under the water ([KIT_SEABED_DECOR]).
 #   2. A restart: the finite map baked (every section from the save, none
 #      generated, the same hash); then infinite noise: generated round the
 #      player; a cell dug while Stopped (an edit), and a new seed generates
@@ -214,6 +215,9 @@ dh=$(grep -aoP 'World by kitboss: noise 64x64, seed \d+, .*decorations \d+ \(has
 	fail "noise's decorations by seed: $dh ($s)"
 vh=$(grep -aoP 'World by kitboss: valleys 192x192.*heights hash \K[0-9a-f]+' "$s" | tail -1)
 [ -n "$vh" ] || fail "no valleys hash ($s)"
+# [KIT_SEABED_DECOR] no decorations on its sea's and lakes' floors
+vw=$(grep -aoP 'World by kitboss: valleys 192x192, .*decorations [1-9]\d* \(hash [0-9a-f]+, \K\d+(?= under the water)' "$s" | tail -1)
+[ "$vw" = 0 ] || fail "valleys' decorations under the water: ${vw:-none counted} ($s)"
 # [KIT_CAVE_MOUTHS] the valleys' caves open to the sky in some columns,
 # in none under the sea (those a tunnel reaches the top of kept shut); the
 # first mouth's column carved under its top (its highest ground lower)

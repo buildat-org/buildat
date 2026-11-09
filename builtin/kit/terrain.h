@@ -1438,9 +1438,11 @@ static uint32_t hash_ints(const sv_<int> &v)
 // check compares by seed
 static void scatter_hash(const Params &p, const BiomeIds &b,
 		const sv_<int> &tops, int x0, int z0, int w, int d, size_t &n,
-		uint32_t &hash)
+		uint32_t &hash, size_t *wet = nullptr)
 {
 	sv_<int> v;
+	// [KIT_SEABED_DECOR] those on a column under the sea's level
+	size_t under = 0;
 	for(int z = 0; z < d; z++)
 		for(int x = 0; x < w; x++){
 			int turns = 0;
@@ -1451,10 +1453,13 @@ static void scatter_hash(const Params &p, const BiomeIds &b,
 					turns);
 			if(k < 0)
 				continue;
+			under += t < p.sea_level;
 			v.insert(v.end(), {x0 + x, z0 + z, k, turns});
 		}
 	n = v.size() / 4;
 	hash = hash_ints(v);
+	if(wet)
+		*wet = under;
 }
 
 // ---- [KIT] stage 4f: the brushes on a voxel surface

@@ -221,7 +221,6 @@
 				{"structure": "dandelion", "on": "top", "density": 0.01},
 				{"structure": "poppy", "on": "top", "density": 0.008},
 				{"structure": "tall_grass", "on": "top", "density": 0.1},
-				{"structure": "boulder", "on": "water", "density": 0.01},
 				{"structure": "mushroom_red", "on": "cave", "density": 0.015},
 				{"structure": "mushroom_brown", "on": "cave", "density": 0.025},
 				{"structure": "moss", "on": "cave_wall", "density": 0.05}]},
@@ -229,14 +228,12 @@
 			"stone": "kit/stone", "water": "kit/water", "riverbed": "kit/sand",
 			"decorations": [
 				{"structure": "boulder", "on": "top", "density": 0.003},
-				{"structure": "boulder", "on": "water", "density": 0.01},
 				{"structure": "mushroom_brown", "on": "cave", "density": 0.01}]},
 		"snow": {"top": "kit/snow", "filler": "kit/dirt", "filler_depth": 3,
 			"stone": "kit/stone", "water": "kit/water", "riverbed": "kit/gravel",
 			"decorations": [
 				{"structure": "tree", "on": "top", "density": 0.003},
-				{"structure": "boulder", "on": "top", "density": 0.002},
-				{"structure": "boulder", "on": "water", "density": 0.01}]},
+				{"structure": "boulder", "on": "top", "density": 0.002}]},
 		"rock": {"stone": "kit/stone", "riverbed": "kit/gravel"}
 	}
 }

@@ -6713,10 +6713,10 @@ struct Module: public interface::Module, public Interface
 		if(!p.heightmap())
 			find_spawn(*h, ids);
 		// The decorations over the same ground: how many, their hash
-		size_t dn = 0;
+		size_t dn = 0, dwet = 0;
 		uint32_t dh = 0;
 		if(p.with_decorations() && !p.heightmap())
-			world::scatter_hash(p, ids, tops, fx, fz, fw, fd, dn, dh);
+			world::scatter_hash(p, ids, tops, fx, fz, fw, fd, dn, dh, &dwet);
 		// And its caves, sampled every fourth column each way: a check sees
 		// that they are there and the same by the seed
 		ss_ caves;
@@ -6809,14 +6809,15 @@ struct Module: public interface::Module, public Interface
 		world_load_points();
 		log_i(MODULE, "World%s: %s %s, seed %u, biome %s, %s, %s; ground %i "
 				"to %i, heights hash %08x%s; version %i%s%s, decorations %zu "
-				"(hash %08x); materials %s", by.empty() ? "" : cs(" by "+by),
+				"(hash %08x, %zu under the water); materials %s",
+				by.empty() ? "" : cs(" by "+by),
 				cs(p.generator), cs(p.size == "finite" ? itos(p.width)+"x"+
 				itos(p.depth) : ss_("infinite")), p.seed, cs(p.biome),
 				cs(p.heightmap() ? ss_("a heightmap") : "voxels"),
 				cs("border "+p.border), lo, hi, hash,
 				first ? (again ? ", the save's was another" : "") : "",
 				world::VERSION, p.with_caves() && !p.heightmap() ? ", caves" : "",
-				cs(caves), dn, dh, cs(ms.name));
+				cs(caves), dn, dh, dwet, cs(ms.name));
 		// [KIT_SYMMETRY] a heightmap generated again: its authored slice
 		// copied over the others (a voxel World's in on_gen_queue)
 		symmetry::Config scf;

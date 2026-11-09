@@ -34,9 +34,10 @@
 --              under a heightmap), their floors and walls the biome's
 --              cave roles
 --   decorations  the biome's decorations scattered by the seed: trees,
---              bushes, flowers, grass, a log with mushrooms, boulders under
---              water, mushrooms and moss in caves (on a heightmap: those
---              bigger than a cell, as voxel objects)
+--              bushes, flowers, grass, a log with mushrooms, mushrooms and
+--              moss in caves (on a heightmap: those bigger than a cell, as
+--              voxel objects); none under the water ([KIT_SEABED_DECOR]:
+--              Kit's set has no "water" decorations, a set's own may)
 --   sky_light  ([KIT_VOXEL_FORMAT]) the sky's light in the voxels: a room
 --              with no way out to the sky is dark, a cave mouth's light
 --              fades inward. Off, nothing computes it (the scene's lights
