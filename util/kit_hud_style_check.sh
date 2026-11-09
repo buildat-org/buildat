@@ -119,10 +119,10 @@ drag() # <from x> <from y> <to x> <to y>: the mouse, in steps
 }
 answers() # <n>: that many edits' answers
 {
-	local i
-	for i in $(seq "$1"); do
-		echo "wait_log 10000 kit editor: state:"
-	done
+	# [KIT_EDITOR_WAITLOG_RACE] Not a wait_log each: two states can come
+	# between two waits, the second then waiting for one that never comes.
+	# A sync's answer comes after the edits' (one connection, in order)
+	echo "sync 10000"
 }
 {
 	cat <<'EOF'

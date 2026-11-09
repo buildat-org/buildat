@@ -291,7 +291,8 @@ wait_log 10000 replicated: entity 4 open = false
 click Button "Builder: no"
 wait_log 10000 kit editor: people: kitbob builder
 wait_log 60000 kit editor: state: 19 entities
-wait_log 30000 kit editor: builder kitbob (#4aa0ff) selects 3
+# [KIT_EDITOR_WAITLOG_RACE] (kitbob's select can come before that state)
+wait_log_any 30000 kit editor: builder kitbob (#4aa0ff) selects 3
 wait_log 30000 replicated: entity 4 open = true
 frames 3
 screenshot @T@/builders.png
