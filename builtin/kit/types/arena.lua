@@ -71,6 +71,12 @@
 -- its map). A map not picked runs nothing in that round, its timers and
 -- spawners included: only its own map's links can reach "win". A name no
 -- scene has is left out, in the log.
+-- [KIT_READY_UP] `ready` (0: off, the countdown): instead of the
+-- countdown, the round starts at once when this share of the queue (at
+-- least `players` in it) is ready, rounded up: 1 all of them. "ready" (a
+-- kit/action's or a kit/ui_button's press, by the player) marks its player
+-- in the queue ready, or not ready again; out of the queue no longer
+-- ready, and a round's start makes no one ready.
 local function ids_in(list, n)
 	local out = {}
 	for i = 1, math.min(n, #list) do
@@ -151,11 +157,24 @@ local function clock(s)
 end
 
 -- The default round's side: the queue's status
+local function ready_count(c)
+	local n = 0
+	for _, id in ipairs(c.state.queue) do
+		if c.state.ready["player:" .. id] then
+			n = n + 1
+		end
+	end
+	return n, math.max(1, math.ceil(c.params.ready * #c.state.queue - 1e-9))
+end
+
 local function lobby_status(c)
 	local q, p = #c.state.queue, c.params.players
 	local s
 	local n = #c.state.rounds
-	if c.state.count > 0 then
+	if c.params.ready > 0 and q >= p and n == 0 then
+		local r, need = ready_count(c)
+		s = "Ready: " .. r .. " of " .. need .. " (" .. q .. " here)"
+	elseif c.state.count > 0 then
 		s = "Starting in " .. c.state.count .. " (" .. q .. " of " ..
 				c.params.max_players .. ")"
 	elseif n > 0 then
@@ -181,6 +200,7 @@ local function start(c)
 	c:after(-1, "count")
 	local ids = ids_in(prune(c), c.params.max_players)
 	c.state.taking = ids
+	c.state.ready = {}
 	local maps, map = maps_of(c)
 	c:log("countdown over: a round for", #ids, "players" ..
 			(map and (" on " .. map) or ""))
@@ -197,6 +217,14 @@ local function try_count(c)
 	if c.state.count > 0 or #c.state.queue < c.params.players or
 			(n > 0 and (not parallel(c) or n >= c.params.max_rounds)) then
 		return
+	end
+	if c.params.ready > 0 then
+		local r, need = ready_count(c)
+		if r < need then
+			return
+		end
+		c:log(r, "of", #c.state.queue, "ready")
+		return start(c)
 	end
 	local secs = c.params.countdown
 	if c.state.fresh then
@@ -387,6 +415,7 @@ return {
 		join_team = {type = "string", default = "fewest",
 			choices = {"fewest", "lowest_score", "backfill"}},
 		max_rounds = {type = "number", default = 2, min = 1, max = 8},
+		ready = {type = "number", default = 0, min = 0, max = 1},
 	},
 	state = {
 		-- The default round's: the players in the zone in the order they
@@ -400,6 +429,8 @@ return {
 		rounds = {default = {}},
 		-- [KIT_MAP_ROTATION] The next round's place in `maps`
 		map_at = {default = 1},
+		-- [KIT_READY_UP] {["player:<id>"] = true}
+		ready = {default = {}},
 		-- The players sent into each round ({[id] = {was, n}}: n since its
 		-- count was `was`)
 		sent = {default = {}},
@@ -434,6 +465,7 @@ return {
 			win = "Ends the round with a winner. Value: a team's id or name; else the team of who set it off.",
 			next_map = "The next round's map: the next in maps.",
 			prev_map = "The next round's map: the one before in maps.",
+			ready = "With `ready` on: who set it off, in the queue, ready (or not again).",
 		},
 		outputs = {
 			started = "A round began. Value: its session's id.",
@@ -445,7 +477,7 @@ return {
 		},
 	},
 	inputs = {["end"] = "none", win = "any", next_map = "none",
-		prev_map = "none"},
+		prev_map = "none", ready = "none"},
 	outputs = {started = "number", began = "number", ended = "number",
 		result = "string:team",
 		won = "string:team",
@@ -502,7 +534,14 @@ return {
 		local q = prune(c)
 		drop(q, c.player)
 		c.state.queue = q
+		local rd = c.state.ready
+		rd["player:" .. c.player] = nil
+		c.state.ready = rd
 		c:log(c:name(by), "left;", #q, "of", c.params.players, "inside")
+		-- (those left may all be ready now)
+		if c.params.ready > 0 then
+			try_count(c)
+		end
 		if c.state.count > 0 and #q < c.params.players then
 			c.state.count = 0
 			c:after(-1, "count")
@@ -710,6 +749,27 @@ return {
 				step_map(c, input == "next_map" and 1 or -1)
 				lobby_status(c)
 			end
+			return
+		end
+		if input == "ready" then
+			if c.session ~= 0 or c.params.ready <= 0 or not c.player then
+				return
+			end
+			local inq = false
+			for _, id in ipairs(prune(c)) do
+				inq = inq or id == c.player
+			end
+			if not inq then
+				c:log(c:name(by), "is not in the queue: not ready")
+				return
+			end
+			local k = "player:" .. c.player
+			local rd = c.state.ready
+			rd[k] = not rd[k] or nil
+			c.state.ready = rd
+			c:log(c:name(by), rd[k] and "is ready" or "is not ready")
+			try_count(c)
+			lobby_status(c)
 			return
 		end
 		if input == "win" then
