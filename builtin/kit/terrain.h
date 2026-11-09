@@ -33,7 +33,10 @@
 //        stones, ore); none: by its kind and name, as skeldat's),
 //        [KIT_NORMALS] "bumpiness": 0...1, how much of its texture's
 //        brightness is relief under physical lighting (none: by kind and
-//        name, as skeldat's: water and glass 0, sand 0.6, the rest 1)},
+//        name, as skeldat's: water and glass 0, sand 0.6, the rest 1),
+//        [KIT_LEAF_TRANSLUCENCY] "translucency": 0...1, how much of the sun
+//        behind a face comes through it under physical lighting (none: by
+//        kind, as surface.lua's: leaves and plants 0.12, the rest 0)},
 //        ...},
 //    "palettes": {name: [entry, ...], ...} ([KIT_TINT_PALETTE]),
 //    "fallbacks": {role: role, ...},
@@ -272,6 +275,8 @@ struct Material
 	double spots = -1, static_spots = -1;
 	// [KIT_NORMALS] Its relief under physical lighting (-1: by kind and name)
 	double bumpiness = -1;
+	// [KIT_LEAF_TRANSLUCENCY] Its light through (-1: by kind)
+	double translucency = -1;
 	// [KIT_CTF] The blast strength it stands (c:explode: a cell goes to
 	// air where the strength there is past it; 0: any blast)
 	double blast_resist = 0;
@@ -320,6 +325,8 @@ struct Material
 		static_spots = st.is_number() ? st.as_number() : -1;
 		const json::Value &bu = j.get("bumpiness");
 		bumpiness = bu.is_number() ? bu.as_number() : -1;
+		const json::Value &tl = j.get("translucency");
+		translucency = tl.is_number() ? tl.as_number() : -1;
 		group = json::jstr(j, "group");
 		sound_dig = json::jstr(j, "sound_dig");
 		sound_place = json::jstr(j, "sound_place");
@@ -375,7 +382,8 @@ struct Material
 				seasons_ok && spots <= 1 && static_spots <= 1 &&
 				(spots >= 0 || !sp.is_number()) &&
 				(static_spots >= 0 || !st.is_number()) && bumpiness <= 1 &&
-				(bumpiness >= 0 || !bu.is_number());
+				(bumpiness >= 0 || !bu.is_number()) && translucency <= 1 &&
+				(translucency >= 0 || !tl.is_number());
 	}
 
 	// Its properties as a builder's row has them, for a palette and
@@ -396,6 +404,8 @@ struct Material
 			v.set("static_spots", static_spots);
 		if(bumpiness >= 0)
 			v.set("bumpiness", bumpiness);
+		if(translucency >= 0)
+			v.set("translucency", translucency);
 		v.set("group", group);
 		v.set("level", (int64_t)level);
 		v.set("sound_dig", sound_dig);
@@ -487,6 +497,9 @@ struct Material
 		float moving = 0, still = 0;
 		glints(name, moving, still);
 		const float bump = relief(name);
+		// [KIT_LEAF_TRANSLUCENCY] its own, else by kind (surface.lua's)
+		const float through = translucency >= 0 ? (float)translucency :
+				kind == "leaves" || kind == "plant" ? 0.12f : 0.0f;
 		// The faces: +y, -y, then the sides
 		for(int f = 0; f < 6; f++){
 			auto &seg = def.textures[f];
@@ -496,6 +509,7 @@ struct Material
 			seg.spots = moving;
 			seg.static_spots = still;
 			seg.bumpiness = bump;
+			seg.translucency = through;
 			// [KIT_RELIEF_TINT] its default look (palette entry 0) as the
 			// shader tints it: whole for what draws through KITTINT alone
 			// (leaves, plants, water, glass), by the alpha for a solid cube

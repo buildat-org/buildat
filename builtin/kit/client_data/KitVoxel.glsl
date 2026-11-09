@@ -45,8 +45,15 @@
 //       (the normal map's alpha: sand's stones, ore); a spot's normal
 //       turned across the face and made glossy (GGX at 0.10, F0 0.08), so
 //       it catches the sun. simplified: the spots' gloss alone -- the rest
-//       of a face has no specular (water's KITWATER lobe aside); the leaves'
-//       light through a spot (translucency) left out.
+//       of a face has no specular (water's KITWATER lobe aside).
+//       ([KIT_LEAF_TRANSLUCENCY]) With it, PBRVoxel.glsl's
+//       VOXELTRANSLUCENCY: the sun on a face's back comes through it at its
+//       moving spots (a material with none: all over), by the spec map's b
+//       (a material's translucency: leaves and plants), tinted by
+//       mix(1, albedo, 0.55), backNdl x pow(forward, 6) -- a canopy seen
+//       against the sun flickers yellow-green. simplified, as PBRVoxel's:
+//       not multiplied by the shadow (the face is its own caster); the sun
+//       and the moon alone (a lamp's attenuation is not in lightDir).
 //
 // The vertex colour is light, not albedo, so it is not multiplied into the
 // diffuse colour as LitSolid's VERTEXCOLOR does.
@@ -352,7 +359,8 @@ void PS()
         // A spot is a piece of the face turned: across it, never past
         // its horizon; glossy by the cube of how far it is in
         vec3 spotPos = vWorldPos.xyz - normalize(vNormal) * 0.01;
-        float moving = KsMoving(spotPos, texture2D(sSpecMap, vTexCoord.xy).a);
+        vec4 kitSurface = texture2D(sSpecMap, vTexCoord.xy);
+        float moving = KsMoving(spotPos, kitSurface.a);
         float still = KsStill(spotPos, texture2D(sNormalMap, vTexCoord.xy).a);
         float spotMask = max(moving, still);
         float spotGloss = spotMask * spotMask * spotMask;
@@ -416,6 +424,21 @@ void PS()
             if (spotGloss > 0.0)
                 finalColor += diff * lightColor * spotGloss *
                     KitGGX(normal, lightDir, KS_ROUGH, 0.08);
+        #endif
+        #if defined(KITLINEAR) && defined(KITSPOTS) && defined(DIRLIGHT)
+            // [KIT_LEAF_TRANSLUCENCY] the sun from behind, through the spots
+            if (kitSurface.b > 0.0) {
+                vec3 toEye = normalize(cCameraPosPS - vWorldPos.xyz);
+                float backNdl = max(0.0, -dot(normal, lightDir));
+                float forward = pow(max(0.0, dot(-lightDir, toEye)), 6.0);
+                float through = kitSurface.a > 0.0 ? moving : 1.0;
+                vec3 back = kitSurface.b * through * backNdl * forward *
+                    mix(vec3(1.0), diffColor.rgb, 0.55) * lightColor;
+                #ifdef KITSKY
+                    back *= vColor.a;
+                #endif
+                finalColor += back;
+            }
         #endif
         #ifdef AMBIENT
             #ifdef KITSKY
