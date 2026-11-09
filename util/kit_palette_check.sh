@@ -12,7 +12,10 @@
 #   3. [KIT_PALETTE_MENU_CHOICE] a click on [kit/creature] (no menu: nothing
 #      but Place and Favourite in it) arms it, a click in the plan places it;
 #   4. [KIT_COMPONENT_ORDER] placed detached, a plain entity: kit/follow added,
-#      kit/attack removed, kit/flee moved down by its inspector button (native).
+#      kit/attack removed, kit/flee moved down by its inspector button (native);
+#   5. [KIT_POSITIONLESS_PLACE] [kit/creature] selected once placed;
+#      kit/walker and kit/controls (root types) placed from their menu with
+#      no click on the view, each selected.
 #   util/kit_palette_check.sh          native
 #   util/kit_palette_check.sh web      the same in headless Chrome
 set -u
@@ -68,7 +71,14 @@ J
 		echo ' ["shot", "${OUT}/found.png"],
  ["click", "Button", "[kit/creature]"], ["waitlog_any", "kit editor: placing .kit/creature", 10],
  ["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
- ["click", 600, 400], ["waitlog", "kit editor: state: ", 10], ["sync", 3000]'
+ ["click", 600, 400], ["waitlog", "kit editor: state: ", 10],
+ ["waitlog_any", "kit editor: selected 3 ", 10], ["key", "Escape"], ["frames", 3],'
+		for f in walker controls; do
+			echo " $(pal_find_web "$f") [\"waitlog_any\", \"the palette for \\\"$f\\\"\", 10],"
+			echo " [\"click\", \"Button\", \"kit/$f\"], [\"waitlog\", \"the palette's menu of kit/$f\", 10], [\"frames\", 3],"
+			echo " [\"click\", \"Button\", \"menu Place\"], [\"waitlog\", \"selected [0-9]+ .kit/$f \", 10],"
+		done
+		echo ' ["sync", 3000]'
 		echo ']'
 	} > "$t/web.json"
 	WEB_DRIVE_VIEWPORT=1024x700@1 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
@@ -129,6 +139,12 @@ EOF
 click Button "move down kit/flee"
 wait_log_any 5000 kit editor: state: 2 entities, 4 to undo
 EOF
+		for f in walker controls; do
+			pal_find "$f"
+			printf 'wait_log_any 5000 the palette for "%s"\n' "$f"
+			printf 'click Button "kit/%s"\nwait_log 5000 the palette'"'"'s menu of kit/%s\nframes 3\n' "$f" "$f"
+			printf 'click Button "menu Place"\nwait_log 5000 (kit/%s \nframes 3\n' "$f"
+		done
 		echo quit
 	} > "$t/kitboss.cmds"
 	wait_for_log "$t/srv.log" "setup code [A-Z0-9]+" 30
@@ -177,4 +193,15 @@ if [ "$mode" != web ]; then
 	done
 	echo "ok: placed detached: kit/follow added, kit/attack removed, kit/flee moved down by its button ($t/inspector.png)"
 fi
+# 5. Selected once placed; the root types placed with no click on the view
+sel=$(grep -anF "kit editor: selected 3 " "$b" | head -1 | cut -d: -f1)
+nothing=$(grep -anF "kit editor: placing nothing" "$b" | head -1 | cut -d: -f1)
+[ -n "$sel" ] && { [ -z "$nothing" ] || [ "$sel" -lt "$nothing" ]; } ||
+	fail "[kit/creature] not selected once placed ($b)"
+for f in walker controls; do
+	grep -aq "kit editor: placing kit/$f" "$b" && fail "kit/$f armed, not placed at once ($b)"
+	grep -aqP "kit editor: selected \d+ \(kit/$f \d+\)" "$b" ||
+		fail "kit/$f not placed and selected from its menu ($b)"
+done
+echo "ok: [kit/creature] selected once placed; kit/walker and kit/controls placed from their menu, selected"
 echo "PASS: the Place tab's sections and filter ($mode)"

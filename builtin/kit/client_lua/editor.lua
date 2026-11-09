@@ -2122,14 +2122,21 @@ function NT.palette_filter()
 end
 
 -- [KIT_PALETTE_MENU] A type that says no_position: no click on the view
--- places it. Nor the four the root or the scene takes wherever the click
--- is: by name, as root = true is also on the controls and the movements,
--- which stay armed
-NT.PLACED_AT_ONCE = {["kit/game_rules"] = true, ["kit/terrain"] = true,
-	["kit/environment"] = true, ["kit/player_state"] = true}
+-- places it. [KIT_POSITIONLESS_PLACE] Nor a root type (the rules, the
+-- terrain, the environment, the controls, the movements...): the server
+-- puts it on the root or the scene and keeps no position
 function NT.positionless(it)
-	return it.type ~= nil and (type_of(it.type).no_position == true or
-			NT.PLACED_AT_ONCE[it.type] == true)
+	local t = it.type ~= nil and type_of(it.type)
+	return t and (t.no_position == true or t.root == true) or false
+end
+
+-- [KIT_POSITIONLESS_PLACE] The inspector unfolded (a narrow screen's) for
+-- an entity just placed
+function NT.show_inspector()
+	if folded("inspector") then
+		toggle_fold("inspector")
+		rebuild_bar()
+	end
 end
 
 function NT.arm(it, free)

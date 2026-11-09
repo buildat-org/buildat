@@ -377,6 +377,9 @@ local function place_at(cell, item)
 	if not parent and NT.is_ui(item.type) and NT.is_panel(sel) then
 		parent = sel.id
 	end
+	-- [KIT_POSITIONLESS_PLACE] Whatever was placed is selected when it
+	-- comes, the inspector up: the builder sees it and sets its parameters
+	NT.select_new = true
 	if item.clipboard then
 		send({op = "place", clipboard = true, pos = cell,
 			turn = item.turn or 0, parent = parent})
@@ -397,12 +400,11 @@ end
 
 -- [KIT_PALETTE_MENU] A positionless type placed at once, in the scene
 -- edited (the server wants a pos and does not keep it), and selected when
--- it comes: nothing else shows it placed.
+-- it comes (place_at): nothing else shows it placed.
 -- simplified: the first new entity of the next state is taken for it; another
 -- builder's in the same instant selects that one instead
 function NT.place_now(it)
 	S.placing = nil
-	NT.select_new = true
 	place_at({0, 0, 0}, it)
 	palette()
 end
@@ -2773,7 +2775,8 @@ function M.editor(options)
 				known[e.id] = true
 				if S.known and not S.known[e.id] then
 					touch(e.id)
-					if NT.select_new then
+					-- (the first: a prefab's root, its parts after it)
+					if NT.select_new == true then
 						NT.select_new = e.id
 					end
 				end
@@ -2872,6 +2875,7 @@ function M.editor(options)
 				local id = NT.select_new
 				NT.select_new, NT.sg.reveal = nil, id
 				select(id)
+				NT.show_inspector()
 			end
 			NT.pf.state()
 		end
