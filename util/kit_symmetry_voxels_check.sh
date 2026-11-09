@@ -93,7 +93,7 @@ wait_log_any 10000 kit editor: edit mode on
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	set_w biome '"grassland"'
 	echo 'wait_log 30000 kit: World: generated again'
 	set_w generator '"noise"'

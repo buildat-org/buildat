@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-01)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/world.h builtin/kit/types/world.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_data/KitVoxel* apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/terrain.h builtin/kit/types/terrain.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_data/KitVoxel* apps/workbench/**
 # [KIT_VOXEL_FORMAT] (kit_plan 4g2) Kit's voxel format on Workbench: id,
 # param (a shape's facing), tint and sky light in one word; shapes as
 # voxels of their own ("kit/stone:stair"); the World's sky_light. A fresh
@@ -161,7 +161,7 @@ keypress v
 mouse_wheel -1
 wait_log_absent 1000 kit editor: in hand
 EOF
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "biome", "value": "grassland"}'
 	echo "wait_log_any 30000 kit: World: generated again"
 	vox 3 1 3 kit/stone:stair 5 3
@@ -218,7 +218,9 @@ BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
 stop
 s=$t/srv1.log
 grep -a "Voxel at\|sky light\|placed kit\|workbench: kitboss placed" "$s" | sed 's/^.*\(kit\|main\) *: /  /' | cut -c1-150
-infos=$(grep -aoP 'Voxel at \K.*' "$s")
+# (less the region a cell is in, [KIT_FREE_ROTATION]'s: Workbench's
+# play region holds the build packet's cells)
+infos=$(grep -aoP 'Voxel at \K.*' "$s" | sed 's/, region [0-9]*$//')
 line() { echo "$infos" | sed -n "$1p"; }
 want "$s" "placed kit/stone:stair (param 5, tint 3) at (3,1,3)" \
 	"placed kit/planks:slab at (4,1,3)"
@@ -289,7 +291,7 @@ server 2
 client boss2
 stop
 s2=$t/srv2.log
-infos=$(grep -aoP 'Voxel at \K.*' "$s2")
+infos=$(grep -aoP 'Voxel at \K.*' "$s2" | sed 's/, region [0-9]*$//')
 want "$s2" "World: sky light on ("
 want "$t/boss2.log" "kit: sky light on"
 # A shape lets the sky through (transmits_light): lit (the slab under

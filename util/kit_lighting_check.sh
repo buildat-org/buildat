@@ -21,7 +21,9 @@
 #   3. physical: the frame differs from cartoon's and is metered (noon's
 #      ground neither black nor white; the night's lifted off black).
 #   4. The World's sky light on: a closed room dug under the ground is
-#      dark in both modes, lit as the open air with it off.
+#      dark in both modes, lit as the open air with it off; a tunnel
+#      into a hill, seen from outside under physical, its end much
+#      darker than the hill's face ([KIT_SKY_LIGHT_CAVES]).
 #   5. The weather a modifier: each weather's floors over the builder's
 #      cover (an overcast clear day stays overcast under rain, and after
 #      it), intensity scaling the drops and the floors, a change fading
@@ -106,16 +108,19 @@ try() # <input> <json value>
 	ed "{\"op\": \"try\", \"id\": 4, \"comp\": 0, \"input\": \"$1\", \"value\": $2}"
 	echo "sync 5000"
 }
-# A shot from the editor's 3D camera: settled (the meter adapts at 0.6 a
-# second), the frame the sky's line
+# A shot from the editor's 3D camera: settled, the frame the sky's line;
+# the meter each frame's own ([KIT_LIGHTING_FAST_SKY_FLAKE]: at its 0.6 a
+# second, how far it came back from an overcast was the host's frame rate)
 shot() # <name> [camera: x y z x y z]
 {
 	cat <<EOF
 event kit_cam3d ${2:-20 4 20 48 2 48}
+event kit_meter 1000000
 frames 10
 delay ${SETTLE:-4000}
 frames 3
 screenshot @T@/$1.png
+event kit_meter
 event kit_ui_where $1
 EOF
 }
@@ -142,7 +147,7 @@ event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
 	# 3: the World, flat, no trees
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "set", "id": 3, "comp": 0, "param": "biome", "value": "grassland"}'
 	echo "wait_log_any 30000 kit: World: generated again"
 	edit_line '{"op": "set", "id": 3, "comp": 0, "param": "decorations", "value": false}' 30000 "kit: World: generated again"
@@ -240,16 +245,29 @@ EOF
 		for y in -5 -4; do for z in 6 7; do for x in 6 7; do
 			edit "{\"op\": \"set_voxel\", \"pos\": [$x, $y, $z], \"voxel\": \"air\"}"
 		done; done; done
+		# [KIT_SKY_LIGHT_CAVES] and a hill (8 x 8, up to 6) with a
+		# tunnel 2 x 2 and 6 deep into it, seen from outside: its end
+		# and the hill's face in one frame, so the meter is the open's
+		n=$((n + 1))
+		ed '{"op": "terrain", "tool": "fill", "x": -30, "y": 0, "z": 20, "x1": -23, "z1": 27, "level": 6, "stroke": 1}'
+		echo "wait_log 10000 kit editor: terrain: fill"
+		for x in -30 -29 -28 -27 -26 -25; do for y in 1 2; do for z in 23 24; do
+			edit "{\"op\": \"set_voxel\", \"pos\": [$x, $y, $z], \"voxel\": \"air\"}"
+		done; done; done
+		TUNNEL="-38 2 23.5 -24 1.5 23.5"
 		CAVE="6.6 -4.4 6.6 7.4 -4.7 7.4"
 		shot phys_cave_off "$CAVE"
 		ep_line lighting '"cartoon"' "kit: lighting cartoon"
 		shot cartoon_cave_off "$CAVE"
+		# [KIT_SKY_LIGHT_CAVES] the sky light off: the corners' shade alone
+		shot cartoon_tunnel_off "$TUNNEL"
 		edit '{"op": "set", "id": 3, "comp": 0, "param": "sky_light", "value": true}'
 		echo "wait_log_any 10000 kit: sky light on"
 		echo "wait_log_any 60000 kit: sky light: the loaded world relit"
 		echo "idle 30000"
 		shot cartoon_cave "$CAVE"
 		ep_line lighting '"physical"' "kit: lighting physical"
+		shot phys_tunnel "$TUNNEL"
 		shot phys_cave "$CAVE"
 		# A builder's voxel type that gives light, in the room's corner:
 		# physical draws it, cartoon has no light levels
@@ -306,6 +324,9 @@ EOF
 		# sky light off (the heightmap has none)
 		w() { edit "{\"op\": \"set\", \"id\": 3, \"comp\": 0, \"param\": \"$1\", \"value\": $2}"; }
 		w_line() { edit_line "{\"op\": \"set\", \"id\": 3, \"comp\": 0, \"param\": \"$1\", \"value\": $2}" "$3" "$4"; }
+		# [KIT_SKY_LIGHT_CAVES] generated again under the sky light:
+		# relit (the generator writes no light: dark for good before)
+		w_line seed 1 60000 "kit: sky light: the loaded world relit"
 		w_line sky_light false 10000 "kit: sky light off"
 		LOW="20 6 20 32 0 32"
 		w_line sea_level 2 30000 "kit: World: generated again"
@@ -314,6 +335,11 @@ EOF
 		w_line sea_level 0 30000 "kit: World: generated again"
 		echo "idle 30000"
 		shot phys_ground_voxels "$LOW"
+		# [KIT_RELIEF_TINT] a grass voxel's sides under physical, behind
+		# the camera (out of the heightmap's frame)
+		edit '{"op": "set_voxel", "pos": [14, 1, 14], "voxel": "kit/grass"}'
+		echo "idle 30000"
+		shot phys_grass_side "11.5 2.2 11.5 14.5 1.4 14.5"
 		w surface '"heightmap"'
 		echo "wait_log_any 60000 heightmap: terrain built"
 		echo "idle 30000"
@@ -458,14 +484,44 @@ awk "BEGIN{exit !($pd > 5 && $pn > 40 && $pn < 220 && $pk > 2)}" ||
 	fail "physical not its own metered frame: sky $pd from cartoon's, its noon's ground $pn (cartoon's $cn), its night $pk"
 want "$c" "kit: lighting physical (HDR, metered)"
 echo "ok: physical another frame (sky $pd from cartoon's), metered: its noon's ground $pn (cartoon's $cn), its night $pk"
-# The sky light: the closed room dark in both, lit with it off
+# The sky light: the closed room dark in both, lit with it off (cartoon
+# 0.24 of off before [KIT_SKY_LIGHT_CAVES]; with it off the corners' shade
+# is there too, so off reads 54 for 81 and the ratio is the sky's alone)
 cc=$(mean "$t/cartoon_cave.png" 0 9) co=$(mean "$t/cartoon_cave_off.png" 0 9)
 pc=$(mean "$t/phys_cave.png" 0 9) po=$(mean "$t/phys_cave_off.png" 0 9)
-awk "BEGIN{exit !($cc < $co * 0.3 && $pc < $po * 0.5)}" ||
+awk "BEGIN{exit !($cc < $co * 0.5 && $pc < $po * 0.5)}" ||
 	fail "the sky light did not darken the closed room: cartoon $cc (off $co), physical $pc (off $po)"
 echo "ok: the sky light darkens a closed room: cartoon $cc (off $co), physical $pc (off $po)"
+# [KIT_SKY_LIGHT_CAVES] physical, from outside: the tunnel's end (x
+# 470-550, y 310-390) much darker than the hill's face beside it (x
+# 330-390, y 330-390); 0.25 here, about 0.4 when the sky's share was
+# taken as linear (a probe's)
+tunnel() # <png>: "end face"
+{
+	python3 -I - "$1" <<'EOF'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("L")
+m = lambda b: im.crop(b).resize((1, 1), Image.BOX).getpixel((0, 0))
+print(m((470, 310, 550, 390)), m((330, 330, 390, 390)))
+EOF
+}
+read tb tf <<<"$(tunnel "$t/phys_tunnel.png")"
+awk "BEGIN{exit !($tf > 40 && $tb < $tf * 0.33)}" ||
+	fail "physical's tunnel end not dark under the sky light: $tb against its hill's face $tf"
+echo "ok: physical's tunnel end under the sky light $tb against its hill's face $tf"
+# and with the sky light off, cartoon: the end's corners shaded (it read
+# as the face before, 80 for 79)
+read ob of <<<"$(tunnel "$t/cartoon_tunnel_off.png")"
+awk "BEGIN{exit !($of > 40 && $ob < $of * 0.85)}" ||
+	fail "no corner shade with the sky light off: the tunnel's end $ob against the face $of"
+echo "ok: the corners' shade with the sky light off: the tunnel's end $ob against the face $of"
+rl2=$(grep -aoP 'World: sky light: \K\d+(?= sections relit)' "$t/srv.log" | sed -n 2p)
+[ "${rl2:-0}" -gt 0 ] ||
+	fail "the World generated again under the sky light not relit ($t/srv.log)"
+echo "ok: the World generated again under the sky light: $rl2 sections relit"
 pl=$(mean "$t/phys_cave_lamp.png" 0 9) cl=$(mean "$t/cartoon_cave_lamp.png" 0 9)
-awk "BEGIN{exit !($pl > $pc * 1.5 && $cl < $co * 0.3)}" ||
+awk "BEGIN{exit !($pl > $pc * 1.5 && $cl < $co * 0.5)}" ||
 	fail "the lamp: physical $pl (dark $pc), cartoon $cl"
 echo "ok: a voxel type's light lights the room under physical ($pl, dark $pc), not cartoon ($cl)"
 # The weather: the floors over the builder's cover, the intensity, the
@@ -543,6 +599,14 @@ for g in "kit/water 0.00" "kit/sand 0.60" "kit/leaves 0.20" "kit/snow 0.20"; do
 	[[ $rl == *"$g"* ]] || fail "Kit's materials' relief: no $g ($rl)"
 done
 [[ $rl != *"kit/stone "* ]] || fail "Kit's materials' relief: stone not full ($rl)"
+# [KIT_RELIEF_TINT] the grass side's relief from the colour drawn: its
+# green fringe no longer a step over the dirt (phys_grass_side.png)
+gs=$(grep -ah "kit/grass_side.png tinted #" "$t/boss.log" | head -1)
+read gd gf <<<"$(sed -n 's/.*steepest step \([0-9.]*\), untinted \([0-9.]*\).*/\1 \2/p' <<<"$gs")"
+[ -n "${gf:-}" ] || fail "no grass side's tinted relief line in $t/boss.log"
+awk "BEGIN{exit !($gd < $gf * 0.5)}" ||
+	fail "the grass side's relief still steps at its fringe: $gs"
+echo "ok: the grass side's relief from its tinted colour: the steepest step $gd (the file's $gf)"
 read wr wg wb <<<"$(low "$t/phys_water.png")"
 awk "BEGIN{exit !($wr > $wb)}" ||
 	fail "physical's shallow water hides its sand: $wr $wg $wb"

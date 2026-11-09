@@ -1070,11 +1070,13 @@ local T = {brush = "raise", size = 3, strength = 2, biome = nil,
 -- generator's, no longer edited
 -- [KIT_AIRSHIPS_2] seed: a ball of the biome's ground on the voxel pointed
 -- at, or in the air in front (an island's start)
+-- [KIT_DEDECORATE] dedecorate: the World's decorations under the brush
+-- taken away
 local BRUSHES = {"raise", "lower", "smooth", "flatten", "paint", "fill",
-	"decorate", "reset", "seed"}
+	"decorate", "dedecorate", "reset", "seed"}
 local BRUSH_NAMES = {raise = "Raise", lower = "Lower", smooth = "Smooth",
 	flatten = "Flatten", paint = "Paint", fill = "Fill", decorate = "Decorate",
-	reset = "Reset", seed = "Seed"}
+	dedecorate = "De-decorate", reset = "Reset", seed = "Seed"}
 local MAX_BRUSH = 12
 M.T = T
 -- [KIT_VOXEL_EDITS] The edited sections ("kit:edited": list), the
@@ -1998,7 +2000,7 @@ end
 -- places it. Nor the three the root or the scene takes wherever the click
 -- is: by name, as root = true is also on the controls and the movements,
 -- which stay armed
-NT.PLACED_AT_ONCE = {["kit/game_rules"] = true, ["kit/world"] = true,
+NT.PLACED_AT_ONCE = {["kit/game_rules"] = true, ["kit/terrain"] = true,
 	["kit/environment"] = true}
 function NT.positionless(it)
 	return it.type ~= nil and (type_of(it.type).no_position == true or
@@ -3142,7 +3144,7 @@ local function inspector(w, e, is_made)
 		-- kept over every regeneration; generating all anew (discarding
 		-- them) asks first; the map before the last regeneration back
 		local tr = E.state.terrain
-		if c.type == "kit/world" and tr and tr.surface == "heightmap" then
+		if c.type == "kit/terrain" and tr and tr.surface == "heightmap" then
 			text(w, (tr.edited_samples or 0) .. " edited heightmap samples",
 					DIM)
 			if E.regen_ask then

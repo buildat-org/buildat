@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-11-03)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/world.h builtin/kit/box/box.c builtin/kit/types/health.lua builtin/kit/types/health.client.lua builtin/kit/types/equipment.lua builtin/kit/types/game_rules.lua builtin/kit/types/team.lua builtin/kit/types/*.item.json builtin/kit/client_lua/hands.lua builtin/kit/client_lua/module.lua apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/terrain.h builtin/kit/box/box.c builtin/kit/types/health.lua builtin/kit/types/health.client.lua builtin/kit/types/equipment.lua builtin/kit/types/game_rules.lua builtin/kit/types/team.lua builtin/kit/types/*.item.json builtin/kit/client_lua/hands.lua builtin/kit/client_lua/module.lua apps/workbench/**
 # [KIT_TOOLS_1] (kit_plan stage 7c, its first part) Tools and weapons on
 # a fresh Workbench save. The admin (kitboss), Stopped, in edit mode:
 # makes the item type kitboss/blade from the kit/sword preset (damage 8,
@@ -96,7 +96,7 @@ EOF
 	ed '{"op": "voxel", "name": "rock", "texture": "kit/stone.png", "group": "stone", "level": 1}'
 	ed '{"op": "voxel", "name": "ore", "texture": "kit/sand.png", "group": "stone", "level": 3}'
 	echo "sync 3000"
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/game_rules", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/spawner", "pos": [0, 1, 0]}'
 	set_ 5 players true

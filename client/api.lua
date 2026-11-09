@@ -2925,6 +2925,13 @@ function buildat.safe.set_mesh_alpha_nibbles(on)
 	__buildat_set_mesh_alpha_nibbles(on == true)
 end
 
+-- set_mesh_sky_full(on): the sky's light read as full, the voxels' light
+-- bits not, for meshes made after it. See src/interface/mesh.h
+-- set_sky_full()
+function buildat.safe.set_mesh_sky_full(on)
+	__buildat_set_mesh_sky_full(on == true)
+end
+
 -- horizon_merge(cys, heights, chunk) -> string; see src/lua_bindings/mesh.cpp
 function buildat.safe.horizon_merge(cys, heights, chunk)
 	if type(cys) ~= "string" or type(heights) ~= "string" or

@@ -1140,5 +1140,21 @@ end)
 magic.SubscribeToEvent("Update", function(_, ev)
 	env_update(ev:GetFloat("TimeStep"))
 end)
+-- [KIT_LIGHTING_FAST_SKY_FLAKE] A check's meter: "kit_meter <rate>" the
+-- views' adaptation (a million: each frame metered as it is), none
+-- sky_render's again. At 0.6 a second a shot after a big change (an
+-- overcast's) was metered by how many frames the host drew in the wait.
+-- A lighting change makes the paths anew, at sky_render's rate
+magic.SubscribeToEvent("command_seq:kit_meter", function(_, data)
+	local rate = tonumber(data:GetString("Param")) or (LIT.sky_render and
+			LIT.sky_render.EXPOSURE.adapt_rate)
+	if not rate then
+		return
+	end
+	for _, view in pairs(LIT.views) do
+		view.vp.renderPath:SetShaderParameter("AutoExposureAdaptRate", rate)
+	end
+	log:info("kit: meter adapting at " .. rate)
+end)
 end
 -- vim: set noet ts=4 sw=4:

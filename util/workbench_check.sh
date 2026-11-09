@@ -1120,7 +1120,7 @@ EOF
 # copies, a nudge of one (undone) puts it at the top; 3D (F2), where
 # a right drag orbits and opens no menu, and walking (F3), where a click
 # goes into the crosshair and Escape comes out of it before the menu;
-# the inspector's x typed in and Move, a kit/world placed (game-wide), selected
+# the inspector's x typed in and Move, a kit/terrain placed (game-wide), selected
 # from the list and deleted by the inspector's Delete, and the undo.
 # ([KIT_EDIT_VOXELS]) The voxels tool (V): a voxel placed by a click at the
 # pointer in 3D, and walking at the crosshair as in play
@@ -1318,8 +1318,8 @@ screenshot @T@/inspector_pos.png
 click Button "Move"
 wait_log 5000 kit editor: moved 1 by 2, 0, 0 from the inspector
 wait_log_any 5000 kit editor: state: 5 entities, 7 to undo
-click Button "kit/world"
-wait_log 5000 the palette's menu of kit/world
+click Button "kit/terrain"
+wait_log 5000 the palette's menu of kit/terrain
 frames 3
 click Button "Place"
 wait_log_any 5000 kit editor: state: 6 entities, 8 to undo
@@ -1329,7 +1329,7 @@ frames 3
 click Button "Scene (*"
 wait_log 5000 kit editor: list Scene
 click Button "Select*"
-wait_log 5000 (kit/world
+wait_log 5000 (kit/terrain
 frames 3
 screenshot @T@/inspector_world.png
 click Button "Delete"
@@ -1557,7 +1557,7 @@ want "$t/srv3.log" "An edit by kitboss: placed kit/button 3 at [2,1,2]" \
 	"An edit by kitboss: placed kit/door 4 at [-2,1,2]" \
 	"An edit by kitboss: linked 3.pressed -> 4.toggle" \
 	"An edit by kitboss: moved 3 to [6,1,2]" \
-	"An edit by kitboss: placed kit/world 7 on the scene world" \
+	"An edit by kitboss: placed kit/terrain 7 on the scene world" \
 	"An edit by kitboss: deleted 7" \
 	"An undo by kitboss: 1 entities put back" \
 	"An edit by kitboss: placed kit/region 8 at [2,-1,-2]" \

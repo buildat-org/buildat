@@ -2,15 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min, more with a cold module cache (luanti_mapgen) (2026-10-31)
-# covers: builtin/kit/** apps/workbench/** builtin/voxelworld/persistence.h builtin/luanti_mapgen/api.h builtin/heightmap/**
-# [KIT] stage 4e, Kit's World (kit/world) on Workbench, the admin (kitboss,
+# covers: builtin/kit/** apps/workbench/** builtin/voxelworld/persistence.h builtin/luanti_mapgen/api.h builtin/heightmap/** util/kit_world_rename.json
+# [KIT] stage 4e, Kit's World (kit/terrain) on Workbench, the admin (kitboss,
 # by the setup code) editing its parameters Stopped and playing each:
 #   1. A fresh save: flat stone (Workbench's default, biome rock); the
 #      World placed and set to grassland (generated again: grass); the
 #      noise generator refused in biome rock (no water role, named), then
 #      noise hills in grassland; seed 7 and back to 0 (the heights' hash
 #      the same, 7's another); Luanti's valleys without rivers, 192 cells
-#      a side with a water border.
+#      a side with a water border; its caves on and off, their mouths
+#      counted and the first one's column carved ([KIT_CAVE_MOUTHS]).
 #   2. A restart: the finite map baked (every section from the save, none
 #      generated, the same hash); then infinite noise: generated round the
 #      player; a cell dug while Stopped (an edit), and a new seed generates
@@ -41,6 +42,9 @@
 #      decorate stroke and its undo; Kit's editor's terrain tool by mouse
 #      in the plan (T, a dragged stroke, Ctrl+Z its undo) and the caves seen
 #      through the plan's cut.
+#   8. ([KIT_WORLD_RENAME]) A save naming kit/world and kit/world_region
+#      (util/kit_world_rename.json) loads as kit/terrain(_region), the same
+#      World as the new names make.
 #   web: the heightmap's save in the web client (headless Chrome).
 # The screenshots (flat, noise, valleys, heightmap_live, heightmap, heightmap_close,
 # heightmap_edited, grass, decorated, brush, stroked, caves, web_heightmap)
@@ -89,6 +93,9 @@ want() # <log> <text>...
 }
 export BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_NAME=kitboss
 n=0
+# [KIT_CAVE_MOUTHS] the first cave mouth (x z) of part 1's valleys (seed 5,
+# 192 a side, caves on), whose column part 1 reads
+MOUTH="-65 -96"
 # A World parameter set, and the edit's answer: the undo count
 set_w() # <param> <json value>
 {
@@ -148,7 +155,7 @@ keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
-event kit_edit {"op": "place", "type": "kit/world", "pos": [0, 1, 0]}
+event kit_edit {"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}
 wait_log 10000 entities, 1 to undo
 EOF
 	n=1
@@ -167,6 +174,12 @@ EOF
 	set_w width 192
 	set_w depth 192
 	set_w border '"water"'
+	# [KIT_CAVE_MOUTHS] caves on for a look at their mouths (the first's
+	# column, MOUTH below), off again
+	regen_w caves true
+	n=$((n + 1))
+	printf 'event kit_edit {"op": "terrain", "tool": "column", "x": %s, "y": 0, "z": %s}\nwait_log 5000 kit editor: terrain: column at\n' $MOUTH
+	set_w caves false
 	shot valleys
 	# [KIT_EDITED_VALLEYS] the edited sections listed on valleys: its
 	# generator's copy reaches luanti_mapgen, not from inside voxelworld
@@ -201,6 +214,18 @@ dh=$(grep -aoP 'World by kitboss: noise 64x64, seed \d+, .*decorations \d+ \(has
 	fail "noise's decorations by seed: $dh ($s)"
 vh=$(grep -aoP 'World by kitboss: valleys 192x192.*heights hash \K[0-9a-f]+' "$s" | tail -1)
 [ -n "$vh" ] || fail "no valleys hash ($s)"
+# [KIT_CAVE_MOUTHS] the valleys' caves open to the sky in some columns,
+# in none under the sea (those a tunnel reaches the top of kept shut); the
+# first mouth's column carved under its top (its highest ground lower)
+m=$(grep -aoP 'World by kitboss: valleys 192x192, .*; \K\d+ mouths, the first at \(-?\d+,-?\d+\) top -?\d+, \d+(?= under the sea kept shut)' "$s")
+mt=$(echo "$m" | grep -oP 'top \K-?\d+')
+[ -n "$m" ] && [ "${m%% *}" -gt 0 ] || fail "no cave mouths on valleys: $m ($s)"
+echo "$m" | grep -qF "the first at ($(echo $MOUTH | tr ' ' ,))" ||
+	fail "the first mouth moved ($m): MOUTH in this check is the column read"
+mg=$(grep -aoP "column \($(echo $MOUTH | tr ' ' ,)\): (air -?\d+(\.\.-?\d+)?, )?kit/\w+ (-?\d+\.\.)?\K-?\d+" "$s" | head -1)
+[ -n "$mg" ] && [ "$mg" -lt "$mt" ] ||
+	fail "the first mouth's column not carved: its ground at ${mg:-?}, the top $mt ($s)"
+echo "ok: cave mouths: $m under the sea kept shut; the first's ground at $mg under its top $mt"
 want "$t/boss1.log" "kit: warning: World: not applied: the noise generator needs the role water"
 echo "ok: flat, a biome, a role missing refused by name, noise hills (by seed: $h0, $h7, $h0b), valleys without rivers with a water border"
 
@@ -377,6 +402,10 @@ EOF
 	terrain decorate 123 163 8 5 9
 	undo
 	terrain decorate 123 163 8 5 10
+	# [KIT_DEDECORATE] the stroke's decorations (and any of the generator's) taken
+	# away, and put back
+	terrain dedecorate 123 163 8 2 11
+	undo
 	cat <<'EOF'
 keypress F6
 wait_log 10000 kit editor: edit mode off
@@ -420,6 +449,10 @@ dec=$(grep -aoP 'decorate at \(123,163\) .*, \K\d+(?= decorations \()' "$s5" | h
 [ "${dec:-0}" -gt 0 ] || fail "the decorate stroke placed none ($s5)"
 grep -aq "An undo by kitboss: a terrain stroke, 0 cells, 0 samples and $dec decorations put back" "$s5" ||
 	fail "the decorate stroke's undo ($dec, $s5)"
+gone=$(grep -aoP 'dedecorate at \(123,163\) .*, \K\d+(?= decorations taken away)' "$s5" | head -1)
+[ "${gone:-0}" -ge "$dec" ] || fail "the dedecorate stroke took ${gone:-none} away, the decorate stroke put $dec there ($s5)"
+grep -aq "An undo by kitboss: a terrain stroke, 0 cells, 0 samples and $gone decorations put back" "$s5" ||
+	fail "the dedecorate stroke's undo ($gone, $s5)"
 # Its decorations by the seed: 4's and 9's differ, the decorate stroke's
 # kept over both ([KIT_HEIGHTMAP_REGEN_LOSS]: a builder's decorations and
 # edited samples stay over a regeneration)
@@ -428,7 +461,7 @@ dd=$(grep -aoP 'World by kitboss: valleys 512x512, seed \d+, .*decorations \K\d+
 	fail "the heightmap's decorations by the seed: $d4, then $dd ($s5)"
 [ "$(grep -ac "decorations on the heightmap (generated), $dec of them a builder's" "$s5")" = 2 ] ||
 	fail "the decorate stroke's $dec decorations not kept over the seed's changes ($s5)"
-echo "ok: the brushes on the heightmap (raise a stroke undone to its hash, its edge stone; lower, smooth, flatten under the sea to the riverbed, paint, fill, water refused, decorate and its undo), its decorations the save's and by the seed ($d4)"
+echo "ok: the brushes on the heightmap (raise a stroke undone to its hash, its edge stone; lower, smooth, flatten under the sea to the riverbed, paint, fill, water refused, decorate and its undo, dedecorate ($gone) and its undo), its decorations the save's and by the seed ($d4)"
 
 # 6. ([KIT] stage 4f) The brushes on voxels: a fresh save, flat grassland
 # (top 0, sea 0), without decorations until they are tested
@@ -446,7 +479,7 @@ keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
-event kit_edit {"op": "place", "type": "kit/world", "pos": [0, 1, 0]}
+event kit_edit {"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}
 wait_log 10000 entities, 1 to undo
 EOF
 	n=1
@@ -486,6 +519,16 @@ EOF
 	terrain decorate -12 -12 4 5 21
 	undo
 	terrain decorate -12 -12 4 5 22
+	# [KIT_DEDECORATE] a builder's stone among the World's decorations, a
+	# dedecorate stroke over it (two dabs, one undo), its undo, again
+	echo 'event kit_edit {"op": "set_voxel", "pos": [-20, 1, 15], "voxel": "kit/stone"}'
+	echo "wait_log 10000 to undo"
+	column -20 15
+	for s in 23 24; do
+		for i in 1 2; do terrain dedecorate -20 15 3 2 $s; done
+		[ $s = 23 ] && undo && column -20 15
+	done
+	column -20 15
 	cat <<'EOF'
 keypress F6
 wait_log 10000 the server put the player at
@@ -565,7 +608,7 @@ w3=$(grep -aoP 'World by kitboss: flat 64x64, seed 3, .*caves \(\K.*' "$s6" | se
 w0b=$(grep -aoP 'World by kitboss: flat 64x64, seed 0, .*caves \(\K.*' "$s6" | sed -n 2p)
 [ -n "$w0" ] && [ "$w0" = "$w0b" ] && [ "$w0" != "$w3" ] ||
 	fail "decorations and caves by the seed: $w0 / $w3 / $w0b ($s6)"
-echo "$w0" | grep -qP '^[1-9]\d* of \d+ sampled cells\), decorations [1-9]' ||
+echo "$w0" | grep -qP '^[1-9]\d* of \d+ sampled cells; .*\), decorations [1-9]' ||
 	fail "no caves or decorations: $w0 ($s6)"
 grep -aq "[1-9][0-9]* edited sections kept" "$s6" || fail "the edited sections were not kept ($s6)"
 for c in "-20,0,-20" "-10,0,-25" "-25,0,-5" "-6,0,-14"; do
@@ -577,9 +620,24 @@ grep -aqP "decorate at \(-12,0,-12\) size 4 strength 5: \d+ columns, [1-9]\d* ce
 	fail "the decorate stroke placed nothing ($s6)"
 want "$t/boss6.log" "kit editor: tool terrain" "kit editor: the stroke ended" "kit editor: tool select"
 grep -aq "Terrain by kitboss: raise at .*stroke [0-9]\{6,\}" "$s6" || fail "the mouse's stroke ($s6)"
-[ "$(grep -ac "An undo by kitboss: a terrain stroke" "$s6")" = 3 ] ||
+[ "$(grep -ac "An undo by kitboss: a terrain stroke" "$s6")" = 4 ] ||
 	fail "Ctrl+Z, the undo of the mouse's stroke ($s6)"
-echo "ok: the brushes on voxels (raise, its stroke undone, lower under the sea, paint, fill ground and water, smooth, flatten exposing the layers), decorations and caves by the seed ($w0), a decorate stroke and its undo, the terrain tool by mouse"
+# [KIT_DEDECORATE] each stroke's first dab wrote the decorations' cells
+# back, the second nothing; the builder's stone the one cell left unlike
+# the undecorated ground; the undo put the written cells back; the stone
+# stays
+for s in 23 24; do
+	dd=$(grep -aoP "dedecorate \(1 cells left unlike the undecorated ground\) at \(-20,0,15\) size 3 strength 2: \d+ columns, \K\d+(?= cells; .*, stroke $s )" "$s6" | tr '\n' ' ')
+	[ "${dd%% *}" -gt 0 ] 2>/dev/null && [ "$(echo $dd | cut -d' ' -f2)" = 0 ] ||
+		fail "dedecorate stroke $s: cells written by its dabs: '$dd' ($s6)"
+done
+dd=$(echo $dd | cut -d' ' -f1)
+grep -aq "An undo by kitboss: a terrain stroke, $dd cells" "$s6" || fail "the dedecorate stroke's undo ($dd cells, $s6)"
+cs=$(grep -aoP 'column at \(-20,0,15\) .*; \Kcolumn \(-20,15\): .*' "$s6")
+[ "$(echo "$cs" | sed -n 1p)" = "$(echo "$cs" | sed -n 2p)" ] ||
+	fail "the dedecorate stroke's undo: the column $(echo "$cs" | sed -n 2p), before $(echo "$cs" | sed -n 1p) ($s6)"
+echo "$cs" | tail -1 | grep -qP 'kit/stone 1(,|$)' || fail "the builder's stone not kept: $(echo "$cs" | tail -1) ($s6)"
+echo "ok: the brushes on voxels (raise, its stroke undone, lower under the sea, paint, fill ground and water, smooth, flatten exposing the layers), decorations and caves by the seed ($w0), a decorate stroke and its undo, dedecorate ($dd cells, the builder's stone kept) and its undo, the terrain tool by mouse"
 
 # 7. ([KIT_VOXEL_EDITS]) The voxel edits manager: a fresh save (stone,
 # flat), a cell dug Ended; the terrain tool's list has its section with
@@ -653,6 +711,49 @@ cols=$(grep -aoP 'column at \(5,0,5\) .*; \Kcolumn \(5,5\): .*' "$s7")
 	[ "$(echo "$cols" | sed -n 1p)" != "$(echo "$cols" | sed -n 2p)" ] ||
 	fail "the column through dig, regenerate and undo: $cols ($s7)"
 echo "ok: the voxel edits manager: a dug cell's section listed with its one cell, Regenerate refused Running, Ended the cell generated again, the undo digging it again"
+
+# 8. [KIT_WORLD_RENAME] A save whose composition names kit/world and
+# kit/world_region (util/kit_world_rename.json: the airships template from
+# before the rename) loads as kit/terrain and kit/terrain_region, one log
+# line saying so, and generates what the same composition on the new names
+# does
+server 8a "$t/user8"
+wait_for_log "$t/srv8a.log" "kit *: World: " 60 || fail "no World ($t/srv8a.log)"
+stop
+cp -a "$t/user8" "$t/user8new"
+for d in user8 user8new; do
+	python3 -I - "$t/$d/apps/workbench/saves/world/save.sqlite" "$here/util/kit_world_rename.json" "$d" <<'PY' ||
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+comp = open(sys.argv[2]).read()
+assert '"kit/world"' in comp and '"kit/world_region"' in comp
+if sys.argv[3] == "user8new":
+	comp = comp.replace('"kit/world"', '"kit/terrain"').replace('"kit/world_region"', '"kit/terrain_region"')
+db.execute("delete from store where store = 'voxelworld' or (store = 'kit' and key != 'session')")
+db.execute("insert into store values ('kit', 'authored', ?)", (comp,))
+db.commit()
+PY
+		fail "the save $d"
+done
+server 8b "$t/user8"
+wait_for_log "$t/srv8b.log" "kit *: World: .*terrain_region: " 120 || fail "no World ($t/srv8b.log)"
+stop
+server 8c "$t/user8new"
+wait_for_log "$t/srv8c.log" "kit *: World: .*terrain_region: " 120 || fail "no World ($t/srv8c.log)"
+stop
+want "$t/srv8b.log" "6 kit/world or kit/world_region components made kit/terrain or kit/terrain_region"
+grep -aq "components made kit/terrain" "$t/srv8c.log" && fail "a migration of the new names ($t/srv8c.log)"
+python3 -I - "$t/user8/apps/workbench/saves/world/save.sqlite" <<'PY' || fail "the migrated save ($t/user8)"
+import sqlite3, sys
+au = sqlite3.connect(sys.argv[1]).execute("select value from store where store = 'kit' and key = 'authored'").fetchone()[0]
+au = au.decode() if isinstance(au, bytes) else au
+assert '"kit/world' not in au and '"kit/terrain_region"' in au, au[:300]
+PY
+w8() { grep -a "kit *: World" "$1" | grep -aE "heights hash|terrain_region" | sed 's/^.*kit *: //'; }
+w8 "$t/srv8b.log"
+[ -n "$(w8 "$t/srv8b.log")" ] && [ "$(w8 "$t/srv8b.log")" = "$(w8 "$t/srv8c.log")" ] ||
+	fail "the old names' World is not the new names' ($t/srv8b.log, $t/srv8c.log)"
+echo "ok: a save naming kit/world and kit/world_region loads as kit/terrain and kit/terrain_region, logged once, the same World"
 
 # web: the heightmap in the web client, a player who makes an account
 # ([WB_LAN]: no one in without a login; the registration kitboss opened)

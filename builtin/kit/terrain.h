@@ -1,7 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 //
-// [KIT] stage 4e: the World (types/world.lua, api.h's Host::world_scene)
+// [KIT] stage 4e: the World (types/terrain.lua, api.h's Host::world_scene)
 // and the material set it is made of. Part of kit.cpp (one translation
 // unit), included there.
 //
@@ -79,8 +79,10 @@
 // its parameters and seed alone (the same map, byte for byte, on the
 // same build). ([KIT] stage 4f, version 2) Caves (the World's caves):
 // tunnels where two 3D noises are both near nought and caverns where a
-// third is high, 5 to 100 cells under the top, never open to the sky;
-// the cell under a cave's air its biome's cave_floor, one beside or over
+// third is high, 5 to 100 cells under the top; ([KIT_CAVE_MOUTHS]) a
+// tunnel goes on up through the soil to the top where it rises, a mouth
+// open to the sky, but not in a column under the sea, and no surface
+// decoration stands on a mouth's column (cave_mouth()); the cell under a cave's air its biome's cave_floor, one beside or over
 // it cave_wall. Then the biome's decorations (the World's decorations),
 // each section placing every one whose structure reaches into it, in one
 // order (z, then x), into air (water under water) only: a tree crossing
@@ -107,7 +109,8 @@
 // old ground at once: the heightmap made or deleted, the voxel sections
 // nobody wrote forgotten.
 // simplified: one biome a world (the parameter), no biome noise yet;
-// no dust placed; caves never open to the surface (no entrances).
+// no dust placed; a mouth's column keeps its uncarved top in Heights (the
+// spawn skips mouths, a brush reads the voxels).
 //
 // **The brushes** ([KIT] stage 4f, Brush below) work on columns of a
 // voxel surface: a column's top is the highest ground cell (a role's
@@ -493,6 +496,17 @@ struct Material
 			seg.spots = moving;
 			seg.static_spots = still;
 			seg.bumpiness = bump;
+			// [KIT_RELIEF_TINT] its default look (palette entry 0) as the
+			// shader tints it: whole for what draws through KITTINT alone
+			// (leaves, plants, water, glass), by the alpha for a solid cube
+			// (KITTINTMASK), so the relief is of the colour drawn.
+			// simplified: entry 0's; another entry's relief is the same
+			if(!tint.colors.empty() && (tint.colors[0] & 0xffffff) != 0xffffff){
+				seg.tint = tint.colors[0] & 0xffffff;
+				seg.tint_mode = kind == "solid" && !transparent ?
+						interface::AtlasSegmentDefinition::TINT_BY_ALPHA :
+						interface::AtlasSegmentDefinition::TINT_WHOLE;
+			}
 		}
 		def.light_source = (uint8_t)light;
 		def.tint_palette = tint.colors;
@@ -880,7 +894,7 @@ inline json::Value merge_sets(const json::Value &base, const json::Value &over)
 	return out;
 }
 
-// The World's parameters (types/world.lua)
+// The World's parameters (types/terrain.lua)
 struct Params
 {
 	ss_ generator = "flat", biome, size = "finite", border = "void",
@@ -1140,10 +1154,14 @@ static VoxelTypeId pick_cave(const BiomeIds &b, const sv_<StructIds> &structs,
 	return 0;
 }
 
-// Whether a cell is a cave's: CAVE_TOP..CAVE_DEEP under its column's top
-static bool cave_at(uint32_t seed, int x, int y, int z, int top)
+// Whether a cell is a cave's: CAVE_TOP..CAVE_DEEP under its column's top,
+// and with `open` ([KIT_CAVE_MOUTHS]) a tunnel's up through the soil to
+// the top itself, where a tunnel rises to the surface: a mouth (a cavern
+// stays under CAVE_TOP)
+static bool cave_at(uint32_t seed, int x, int y, int z, int top,
+		bool open = false)
 {
-	if(y > top - CAVE_TOP || y < top - CAVE_DEEP)
+	if(y > (open ? top : top - CAVE_TOP) || y < top - CAVE_DEEP)
 		return false;
 	using interface::noise::fbm3;
 	const float fx = x / 28.0f, fy = y / 18.0f, fz = z / 28.0f;
@@ -1151,7 +1169,23 @@ static bool cave_at(uint32_t seed, int x, int y, int z, int top)
 	const float b = fbm3(fx, fy, fz, seed + 2202, 2, 0.5f);
 	if(a * a + b * b < 0.012f)
 		return true;
+	if(y > top - CAVE_TOP)
+		return false;
 	return fbm3(x / 44.0f, y / 22.0f, z / 44.0f, seed + 3303, 2, 0.5f) > 0.66f;
+}
+
+// [KIT_CAVE_MOUTHS] Whether a column's caves may open to its top: a voxel
+// World's with caves, the column dry (not under the sea: a hole there would
+// be an air pocket under the water)
+static bool cave_opens(const Params &p, int top)
+{
+	return p.with_caves() && !p.heightmap() && top >= p.sea_level;
+}
+// Whether a column's top cell is a cave mouth's (carved): no surface
+// decoration stands on it
+static bool cave_mouth(const Params &p, int x, int z, int top)
+{
+	return cave_opens(p, top) && cave_at(p.seed, x, top, z, top, true);
 }
 
 struct Generator: public worldgen::GeneratorInterface
@@ -1194,10 +1228,11 @@ struct Generator: public worldgen::GeneratorInterface
 				if(!p.in_map(x, z))
 					continue;
 				const int t = top_at(x, z);
+				const bool open = cave_opens(p, t);
 				const int y0 = std::max(lc.getY() - 1, t - CAVE_DEEP);
-				const int y1 = std::min(uc.getY() + 1, t - CAVE_TOP);
+				const int y1 = std::min(uc.getY() + 1, open ? t : t - CAVE_TOP);
 				for(int y = y0; y <= y1; y++)
-					if(cave_at(p.seed, x, y, z, t)){
+					if(cave_at(p.seed, x, y, z, t, open)){
 						cave[ci(x, y, z)] = 1;
 						any_cave = true;
 					}
@@ -1277,6 +1312,9 @@ struct Generator: public worldgen::GeneratorInterface
 			if(!p.in_map(ax, az))
 				continue;
 			const int t = top_at(ax, az);
+			// [KIT_CAVE_MOUTHS] nothing floats over a mouth
+			if(cave_mouth(p, ax, az, t))
+				continue;
 			int turns = 0;
 			const int k = pick_surface(ids, p.seed, ax, az, t, p, 1,
 					turns);
@@ -1298,7 +1336,7 @@ struct Generator: public worldgen::GeneratorInterface
 	}
 };
 
-// [KIT_AIRSHIPS_2] A kit/world_region's cells: a generator applied to a box
+// [KIT_AIRSHIPS_2] A kit/terrain_region's cells: a generator applied to a box
 // of the world from its corner o (n cells each way), or to the ball
 // inscribed in it. Each column's ground is the generator's (h, its level
 // already the region's) cut by the shape: its highest cell in the shape the
@@ -1406,8 +1444,11 @@ static void scatter_hash(const Params &p, const BiomeIds &b,
 	for(int z = 0; z < d; z++)
 		for(int x = 0; x < w; x++){
 			int turns = 0;
-			const int k = pick_surface(b, p.seed, x0 + x, z0 + z,
-					tops[(size_t)z * w + x], p, 1, turns);
+			const int t = tops[(size_t)z * w + x];
+			if(cave_mouth(p, x0 + x, z0 + z, t))
+				continue;
+			const int k = pick_surface(b, p.seed, x0 + x, z0 + z, t, p, 1,
+					turns);
 			if(k < 0)
 				continue;
 			v.insert(v.end(), {x0 + x, z0 + z, k, turns});

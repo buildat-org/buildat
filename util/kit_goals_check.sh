@@ -177,7 +177,7 @@ wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
-	place kit/world '0, 1, 0'; id=3
+	place kit/terrain '0, 1, 0'; id=3
 	set_ 3 surface '"voxels"'
 	set_ 3 generator '"flat"'
 	set_ 3 decorations false

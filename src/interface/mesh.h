@@ -205,6 +205,13 @@ namespace interface
 		// For every mesh made after the call, in this process.
 		void set_alpha_nibbles(bool on);
 
+		// [KIT_SKY_LIGHT_CAVES] The sky's light read as full everywhere,
+		// the voxels' light bits not read: a mesh made with use_skylight
+		// carries the corner shade alone in its colour (a game whose world
+		// keeps no sky light, Kit's with sky_light off). For every mesh
+		// made after the call, in this process.
+		void set_sky_full(bool on);
+
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,
 				AtlasRegistry *atlas_reg);

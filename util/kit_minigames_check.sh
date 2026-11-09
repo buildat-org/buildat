@@ -87,7 +87,7 @@ wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}' 1
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}' 1
 	edit '{"op": "place", "prefab": "kit/team_match", "pos": [-2, 1, -2]}' 2
 	edit '{"op": "move", "id": 6, "pos": [5, 1, 0]}' 3
 	edit '{"op": "move", "id": 7, "pos": [-5, 1, 0]}' 4

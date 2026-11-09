@@ -146,7 +146,7 @@ wait_log_any 10000 kit editor: edit mode on
 EOF
 	echo 'event kit_edit {"op": "stop"}'
 	echo 'wait_log 10000 kit editor: the server is Ended (by kitboss)'
-	ed '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	ed '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	for z in $(seq -40 -29); do
 		for x in $(seq 3 14); do
 			vox $x 1 $z

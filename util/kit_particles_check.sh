@@ -142,7 +142,7 @@ wait_log 10000 kit editor: the server is Ended (by kitboss)
 event kit_edit {"op": "item", "name": "knife", "preset": "kit/sword", "damage": 10, "knockback": 0, "crit": 1, "cooldown": 0.3}
 wait_log 10000 kit: 8 item types
 EOF
-	place kit/world '0, 1, 0'
+	place kit/terrain '0, 1, 0'
 	set_ 'generator="flat"' 'decorations=false' 'biome="grassland"'
 	place kit/game_rules '0, 1, 0'
 	set_ 'respawn="at_once"'

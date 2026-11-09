@@ -350,6 +350,10 @@ buildat.set_mesh_alpha_nibbles(on)
 - The unpacked mesher's vertex alpha as the sky in the high nibble and the
   shade in the low one, for meshes made after it ([CAVE_EXPOSURE_FLOOR];
   luanti_client's pbr reads a sealed cave's corners from it).
+buildat.set_mesh_sky_full(on)
+- The sky's light read as full and the voxels' light bits not, for meshes
+  made after it, process-wide: a mesh made with use_skylight then carries
+  the corner shade alone ([KIT_SKY_LIGHT_CAVES]: Kit's sky_light off).
 buildat.cast_voxel_rays(args) -> results
 - Marches rays through voxel data. args.directions is a flat array of
   numbers, three to a ray. With args.rays_per_cell set, consecutive rays are

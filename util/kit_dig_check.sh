@@ -67,7 +67,7 @@ wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
 	ed '{"op": "voxel", "name": "clay", "texture": "kit/dirt.png", "group": "wood", "level": 0}'
 	echo "sync 3000"
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/spawner", "pos": [0, 1, 0]}'
 	set_ 4 players true
 	edit '{"op": "place", "type": "kit/region", "pos": [-6, 0, -8]}'

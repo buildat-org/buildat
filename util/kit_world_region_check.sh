@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-08)
-# covers: builtin/kit/kit.cpp builtin/kit/world.h builtin/kit/types/world_region.lua builtin/kit/client_lua/editor_input.lua
-# [KIT_AIRSHIPS_2] kit/world_region and the terrain tool on floating islands,
+# covers: builtin/kit/kit.cpp builtin/kit/terrain.h builtin/kit/types/terrain_region.lua builtin/kit/client_lua/editor_input.lua
+# [KIT_AIRSHIPS_2] kit/terrain_region and the terrain tool on floating islands,
 # in Workbench's world project, its World (3) a heightmap 128 x 128 at level
 # -20; kitboss edits in Kit's editor:
 #   1. A region (4) placed in the air at (10, 10, 10), 16 x 8 x 16, flat:
@@ -81,7 +81,7 @@ wait_log 10000 kit editor: the server is Ended (by kitboss)'
 : > "$t/infos"
 {
 	echo "$start"
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	set_w() { set_e 3 "$@"; }
 	set_w biome '"grassland"'
 	set_w decorations false
@@ -91,7 +91,7 @@ wait_log 10000 kit editor: the server is Ended (by kitboss)'
 	set_w surface '"heightmap"'
 	echo 'wait_log_any 20000 heightmap: terrain built'
 	# 1. a region in the air
-	edit '{"op": "place", "type": "kit/world_region", "pos": [10, 10, 10]}'
+	edit '{"op": "place", "type": "kit/terrain_region", "pos": [10, 10, 10]}'
 	set_e 4 generator '"flat"'
 	set_e 4 decorations false
 	info 15 13 15; info 15 12 15; info 15 14 15; info 10 10 10
@@ -144,7 +144,7 @@ BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 client 1
 } > "$t/boss2.cmds"
 server 2
 client 2
-grep -a "kit/world_region\|Terrain by" "$t/srv1.log" "$t/srv2.log" |
+grep -a "kit/terrain_region\|Terrain by" "$t/srv1.log" "$t/srv2.log" |
 	sed 's/^.* [IW] [a-z_]* *: /  /' | cut -c1-200
 python3 - "$t" <<'PY' || fail "the region ($t/srv1.log, $t/boss1.log)"
 import re, sys
@@ -167,13 +167,13 @@ for (x, y, z, v), p, w in zip(reads, asked, want):
 	print("  %s %s: %s%s" % ("ok " if ok else "BAD", p, v, "" if ok else " (wanted %s)" % w))
 	bad += not ok
 # Written as placed and changed, nothing at the restart
-lines = re.findall(r"kit/world_region: (\d+) regions, (\d+) cells written, (\d+) cleared", srv[0])
+lines = re.findall(r"kit/terrain_region: (\d+) regions, (\d+) cells written, (\d+) cleared", srv[0])
 print("  region syncs:", lines)
 # (placed, flat, no decorations, a sphere, the undo -- its cells put back by
 # the undo itself --, moved)
 assert len(lines) == 6 and lines[4] == ("1", "0", "0") and all(
 	int(w) + int(c) > 0 for i, (_, w, c) in enumerate(lines) if i != 4), lines
-assert "kit/world_region:" not in srv[1], "written again at the restart"
+assert "kit/terrain_region:" not in srv[1], "written again at the restart"
 # The raise was the voxels': the column taller, the seed by mouse in the air
 cols = re.findall(r"terrain: column at \(40,-?\d+,40\).*?; column \(40,40\): ([^;(]*)", cli)
 print("  the seed's column before and after the raise:", cols)
@@ -185,5 +185,5 @@ print("  the seeds' heights:", air)
 assert len(air) == 2 and air[1] > 45, air
 sys.exit(1 if bad else 0)
 PY
-echo "PASS: kit/world_region: a floating island made, reshaped, undone and moved; the terrain tool's seed in the air, raise and lower on it; kept over a restart"
+echo "PASS: kit/terrain_region: a floating island made, reshaped, undone and moved; the terrain tool's seed in the air, raise and lower on it; kept over a restart"
 # vim: set noet ts=4 sw=4:

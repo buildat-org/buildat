@@ -177,7 +177,7 @@ region() # <x, y, z> <size> <dig> <place> <enter> [parent]
 }
 world() # <width>: the scene's World, flat grassland
 {
-	place kit/world '0, 1, 0'
+	place kit/terrain '0, 1, 0'
 	set_ $id surface '"voxels"'
 	set_ $id generator '"flat"'
 	set_ $id biome '"grassland"'

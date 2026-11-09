@@ -26,7 +26,7 @@
 #include "interface/aitta.h"
 #include "interface/address.h"
 #include "interface/zip.h"
-#include "kit/world.h"
+#include "kit/terrain.h"
 #include "kit/symmetry.h"
 #include "voxel_objects/api.h"
 #include "client_file/api.h"
@@ -87,7 +87,7 @@ static const int MAX_EXTENT = 64;
 static const int MAX_VOLUME = 64;
 // [KIT_CTF] A region's extent each way: the World's whole height, so a
 // map-wide region and a column down to the World's bottom fit;
-// [KIT_AIRSHIPS_2] the widest World's side (kit/world's width), so one
+// [KIT_AIRSHIPS_2] the widest World's side (kit/terrain's width), so one
 // covers a whole 1024 heightmap (the airships template's deadly ground)
 static const int MAX_REGION_EXTENT = 2048;
 // The cells a grants type's c:set_voxel sets at most (its box)
@@ -178,7 +178,7 @@ static const size_t MAX_FLOWS = 64;
 // on a heightmap a dab's step a strength (metres) and the slope (rise a
 // metre) its ground turns stone over (builtin/heightmap's generation's)
 static const int MAX_BRUSH = 12;
-// [KIT_AIRSHIPS_2] a kit/world_region's side at most
+// [KIT_AIRSHIPS_2] a kit/terrain_region's side at most
 static const int MAX_WORLD_REGION = 128;
 static const int MAX_FILL = 64;
 static const double HM_STEP = 0.25;
@@ -299,7 +299,7 @@ struct Type
 	bool spawn = false, between_plays = false, root = false;
 	// [KIT_NO_WORLD_TYPES]
 	bool no_position = false;
-	// [KIT] stage 4e: it is the World (kit/world; the first on the root)
+	// [KIT] stage 4e: it is the World (kit/terrain; the first on the root)
 	bool world = false;
 	// [KIT_ENVIRONMENT] it is an environment (kit/environment: the root's
 	// for every scene, a scene's own for it)
@@ -321,7 +321,7 @@ struct Type
 	// box's voxels (reads_voxels = true)
 	ss_ voxel_box;
 	bool reads_voxels = false;
-	// [KIT_AIRSHIPS_2] The position parameter that is its kit/world_region
+	// [KIT_AIRSHIPS_2] The position parameter that is its kit/terrain_region
 	// box ("" none): the World's voxels Kit generates in it
 	ss_ world_region;
 	// [KIT_SYMMETRY] Its parameters' kinds in space (api.h), as kit/symmetry's
@@ -609,7 +609,7 @@ struct Change
 	sv_<Decor> decor_gone;
 };
 
-// [KIT] stage 4e: a scene's World (world.h; [KIT_SCENES] one a scene):
+// [KIT] stage 4e: a scene's World (terrain.h; [KIT_SCENES] one a scene):
 // the parameters applied (its row) and parsed, the finite map's lowest and
 // highest ground, the section each player is in (an infinite world loads
 // round them), and the sections generated (logged as worldgen's queue
@@ -1220,6 +1220,9 @@ struct Module: public interface::Module, public Interface
 	std::set<ss_> m_palette;
 	// Bare type names made <author>/<name> as the composition was read
 	size_t m_migrated = 0;
+	// [KIT_WORLD_RENAME] kit/world(_region) components read as
+	// kit/terrain(_region)
+	size_t m_renamed = 0;
 	// [KIT] stage 4j: the entities a load made regions of dig zones
 	std::set<uint64_t> m_from_dig_zone;
 	// A handler's answer (what it returned: [value, reason]), the last run's
@@ -1671,14 +1674,20 @@ struct Module: public interface::Module, public Interface
 
 	// A bare type name (a save from before types had authors) as the
 	// type it was: the app's own if it has one of the name, else Kit's
+	// [KIT_WORLD_RENAME] kit/world and kit/world_region are kit/terrain
+	// and kit/terrain_region now: a composition, prefab or save naming the
+	// old ones reads as the new (an exception to Kit's no-compatibility
+	// rule; load_composition() logs it)
 	ss_ full_type(const ss_ &type)
 	{
+		if(type == "kit/world" || type == "kit/world_region")
+			return "kit/terrain"+type.substr(9);
 		if(type.find('/') != ss_::npos || !name_ok(type))
 			return type;
 		if(!m_host.types_path.empty() &&
 				interface::fs::path_exists(m_host.types_path+"/"+type+".lua"))
 			return m_author+"/"+type;
-		return "kit/"+type;
+		return full_type("kit/"+type);
 	}
 
 	bool load_type(const ss_ &name, ss_ &why)
@@ -4082,7 +4091,10 @@ struct Module: public interface::Module, public Interface
 			const json::Value &cj = cs_.at(k);
 			Instance in;
 			in.type = full_type(jstr(cj, "type"));
-			if(in.type != jstr(cj, "type")){
+			if(in.type != jstr(cj, "type") && in.type.compare(0, 11,
+					"kit/terrain") == 0)
+				m_renamed++;
+			else if(in.type != jstr(cj, "type")){
 				log_i(MODULE, "Entity %s's type %s is %s now", cs(itos(e.id)),
 						cs(jstr(cj, "type")), cs(in.type));
 				m_migrated++;
@@ -4622,7 +4634,10 @@ struct Module: public interface::Module, public Interface
 		if(m_migrated)
 			log_i(MODULE, "%zu bare type names made <author>/<name>",
 					m_migrated);
-		if(first || m_migrated || m_upgraded || !m_migrated_objects.empty())
+		if(m_renamed)
+			log_i(MODULE, "%zu kit/world or kit/world_region components made "
+					"kit/terrain or kit/terrain_region", m_renamed);
+		if(first || m_migrated || m_renamed || m_upgraded || !m_migrated_objects.empty())
 			m_store->set("authored", authored_json().stringify());
 		if(!m_migrated_objects.empty())
 			m_runtime_dirty = true;
@@ -4834,7 +4849,7 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
-	// ---- The World ([KIT] stage 4e; world.h)
+	// ---- The World ([KIT] stage 4e; terrain.h)
 
 	// Kit's own material set's voxels, for an app that builds with them
 	void register_voxels(interface::VoxelRegistry *reg)
@@ -4888,7 +4903,7 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
-	// [KIT_TINT_MATERIALS] An app's own voxel as a material (world.h's
+	// [KIT_TINT_MATERIALS] An app's own voxel as a material (terrain.h's
 	// set's voxel: its palette, its kind), registered unless it is there
 	bool register_material(interface::VoxelRegistry *reg, const ss_ &name,
 			const json::Value &material, ss_ *why)
@@ -5632,7 +5647,7 @@ struct Module: public interface::Module, public Interface
 			t.set(kind == ".lua" ? "source" : "client", f.second);
 			types.set(n, t);
 		}
-		// [KIT_MATERIAL_SETS] materials.json: a material set (world.h's
+		// [KIT_MATERIAL_SETS] materials.json: a material set (terrain.h's
 		// format) a World may be made of. Its own voxels are "<author>/<n>",
 		// installed as its voxel types; "extends": kit/default (Kit's own)
 		// or a set it depends on, the later set winning (world::merge_sets)
@@ -6203,7 +6218,7 @@ struct Module: public interface::Module, public Interface
 					break;
 				}
 		}
-		type = in ? in->type : ss_("kit/world");
+		type = in ? in->type : ss_("kit/terrain");
 		if(!m_types.count(type))
 			return out;
 		const json::Value &pd = m_types[type].decl.get("params");
@@ -6331,7 +6346,7 @@ struct Module: public interface::Module, public Interface
 		return moved;
 	}
 
-	// [KIT_MATERIAL_SETS] A material set as JSON (world.h's format): ""
+	// [KIT_MATERIAL_SETS] A material set as JSON (terrain.h's format): ""
 	// the app's (Host::materials, else Kit's own), "kit/default" Kit's own,
 	// else an installed package's ("<fp>/<name>"), the sets it extends
 	// under it (world::merge_sets). pin: the packages and their versions,
@@ -6678,7 +6693,26 @@ struct Module: public interface::Module, public Interface
 							y++, of++)
 						n += world::cave_at(p.seed, fx + x, y, fz + z, t);
 				}
-			caves = " ("+itos(n)+" of "+itos(of)+" sampled cells)";
+			// [KIT_CAVE_MOUTHS] the columns open to the sky (every one), the
+			// first of them, and those under the sea a tunnel reaches the
+			// top of, kept shut
+			size_t mouths = 0, shut = 0;
+			ss_ first;
+			for(int z = 0; z < fd; z++)
+				for(int x = 0; x < fw; x++){
+					const int t = tops[(size_t)z * fw + x];
+					if(world::cave_mouth(p, fx + x, fz + z, t)){
+						if(!mouths++)
+							first = ", the first at ("+itos(fx + x)+","+
+									itos(fz + z)+") top "+itos(t);
+					} else if(!world::cave_opens(p, t) && world::cave_at(
+							p.seed, fx + x, t, fz + z, t, true)){
+						shut++;
+					}
+				}
+			caves = " ("+itos(n)+" of "+itos(of)+" sampled cells; "+
+					itos(mouths)+" mouths"+first+", "+itos(shut)+
+					" under the sea kept shut)";
 		}
 		// [KIT_HEIGHTMAP_REGEN_LOSS] A heightmap about to be generated again
 		// or replaced kept as the previous one (regenerate_heightmap() kept
@@ -9549,10 +9583,11 @@ struct Module: public interface::Module, public Interface
 			return refuse("the app has no World");
 		const ss_ tool = jstr(j, "tool");
 		static const std::set<ss_> TOOLS = {"raise", "lower", "smooth",
-			"flatten", "paint", "fill", "decorate", "column", "reset", "seed"};
+			"flatten", "paint", "fill", "decorate", "dedecorate", "column",
+			"reset", "seed"};
 		if(!TOOLS.count(tool))
 			return refuse("tool: raise, lower, smooth, flatten, paint, fill, "
-					"decorate, reset, seed or column");
+					"decorate, dedecorate, reset, seed or column");
 		// [KIT_AIRSHIPS_2] on a heightmap's World, "on": "voxels" works on
 		// its voxels (a floating island) instead of the map; a seed is
 		// always voxels
@@ -9661,6 +9696,14 @@ struct Module: public interface::Module, public Interface
 				cz = (int)std::floor(fz + 0.5);
 		const int L = (int)std::floor(level + 0.5);
 		ss_ what;
+		// [KIT_DEDECORATE] the World's generator with its decorations and
+		// without (made out here: diff_generator())
+		up_<world::Generator> deco, bare;
+		if(tool == "dedecorate"){
+			deco = diff_generator();
+			bare = diff_generator();
+			bare->p.decorations = false;
+		}
 		voxelworld::access(m_server, m_w->world_scene,
 				[&](voxelworld::Instance *w){
 			world::Brush br;
@@ -9848,6 +9891,44 @@ struct Module: public interface::Module, public Interface
 									z, sel->decors[k].on == 'w');
 					});
 				}
+			} else if(tool == "dedecorate"){
+				// [KIT_DEDECORATE] the brush's box generated twice, with the
+				// World's decorations and without: a cell that still holds
+				// what the decorated one has, where the bare one differs, gets
+				// the bare one's; what a builder changed stays.
+				// simplified: from 24 under the point to 16 over it (a tree's
+				// crown, a cave's floor near it); a tree crossing the brush's
+				// edge is cut there
+				const int y0 = cy - r - 24, y1 = cy + r + 16;
+				const pv::Region box(pv::Vector3DInt32(cx - r, y0, cz - r),
+						pv::Vector3DInt32(cx + r, y1, cz + r));
+				interface::VoxelVolume dv(box), bv(box);
+				deco->generate(m_w->world_scene, pv::Vector3DInt16(0, 0, 0), dv);
+				bare->generate(m_w->world_scene, pv::Vector3DInt16(0, 0, 0), bv);
+				const uint32_t sm = state_mask(w->get_voxel_reg()->get_format());
+				circle([&](int x, int z, double){
+					columns++;
+					for(int y = y0; y <= y1; y++){
+						const uint32_t d = dv.getVoxelAt(x, y, z).data & sm,
+								b = bv.getVoxelAt(x, y, z).data & sm;
+						uint32_t now = 0;
+						if(d != b && voxel_id(w, pv::Vector3DInt32(x, y, z), now) &&
+								(now & sm) == d)
+							br.put(x, y, z, type_of(w, b));
+					}
+				});
+				// What it left unlike the undecorated ground (a check's: the
+				// builder's cells alone)
+				size_t unlike = 0;
+				circle([&](int x, int z, double){
+					for(int y = y0; y <= y1; y++){
+						uint32_t now = 0;
+						unlike += voxel_id(w, pv::Vector3DInt32(x, y, z), now) &&
+								(now & sm) != (bv.getVoxelAt(x, y, z).data & sm);
+					}
+				});
+				what = "dedecorate ("+itos(unlike)+" cells left unlike the "
+						"undecorated ground)";
 			} else if(tool == "fill"){
 				const int x0 = std::min(cx, (int)std::floor(fx1 + 0.5)),
 						x1 = std::max(cx, (int)std::floor(fx1 + 0.5)),
@@ -9889,7 +9970,7 @@ struct Module: public interface::Module, public Interface
 						nullptr, p.name);
 			int t;
 			const bool has = br.top_of(cx, cz, hi, lo, t);
-			if(what.empty() || tool == "decorate")
+			if(what.empty() || tool == "decorate" || tool == "dedecorate")
 				what = (what.empty() ? tool : what)+" at ("+itos(cx)+","+
 						itos(cy)+","+itos(cz)+") size "+itos(r)+" strength "+
 						itos((int)s)+": "+itos(columns)+" columns, "+
@@ -10201,12 +10282,34 @@ struct Module: public interface::Module, public Interface
 		if(tool == "decorate")
 			what += ", "+itos(added)+" decorations ("+itos(m_w->decor.size())+
 					" in all, hash "+itos(decor_hash())+")";
-		if(tool != "paint" && tool != "decorate" && tool != "column")
+		// [KIT_DEDECORATE] the decorations standing under the brush taken
+		// away (the generator's and a builder's alike), put back by the undo
+		if(tool == "dedecorate"){
+			sv_<uint64_t> gone;
+			for(auto &d : m_w->decor){
+				const double dx = d.second.x - cx, dz = d.second.z - cz;
+				if(dx * dx + dz * dz <= (r + 0.5) * (r + 0.5))
+					gone.push_back(d.first);
+			}
+			for(uint64_t id : gone){
+				if(c)
+					c->decor_gone.push_back(m_w->decor[id]);
+				remove_decor(id);
+			}
+			size_t removed = gone.size();
+			if(sym && removed)
+				removed += sym_copy(m_w->world_scene, cf, true, c, p.name,
+						true).decor;
+			what += ", "+itos(removed)+" decorations taken away ("+
+					itos(m_w->decor.size())+" in all, hash "+itos(decor_hash())+")";
+		}
+		if(tool != "paint" && tool != "decorate" && tool != "dedecorate" &&
+				tool != "column")
 			reseat_decor(bx0, bz0, bx1, bz1);
 		return what;
 	}
 
-	// ---- [KIT_AIRSHIPS_2] kit/world_region (types/world_region.lua): the
+	// ---- [KIT_AIRSHIPS_2] kit/terrain_region (types/terrain_region.lua): the
 	// regions' voxels written into the World as they are placed and changed
 	// while editing. Each World's row "regions" is what was written (each
 	// region's corner and parameters): a change writes the difference, the
@@ -10417,13 +10520,13 @@ struct Module: public interface::Module, public Interface
 						nullptr, by);
 		});
 		if(!why.empty())
-			warn("kit/world_region: "+why);
+			warn("kit/terrain_region: "+why);
 		m_store->set(world_row("regions"), now.stringify());
 		if(back && (wrote || cleared)){
 			back->stroke = -3;
 			back->scene = ref;
 		}
-		log_i(MODULE, "World%s: kit/world_region: %u regions, %zu cells "
+		log_i(MODULE, "World%s: kit/terrain_region: %u regions, %zu cells "
 				"written, %zu cleared (%zu changed since kept)%s", cs(by.empty() ?
 				ss_() : " by "+by), (unsigned)now.size(), wrote, cleared, kept,
 				images ? cs(", "+itos(images)+" symmetry images") : "");
@@ -10495,7 +10598,8 @@ struct Module: public interface::Module, public Interface
 				"and %zu decorations put back%s", cs(p.name), c.scene ?
 				"a voxel edit" : !c.regen.empty() ? "a regeneration" :
 				"a terrain stroke", cells,
-				c.samples.size(), c.decor.size(), cs(hash));
+				c.samples.size(), c.decor.size() + c.decor_gone.size(),
+				cs(hash));
 	}
 
 	// [KIT_EDIT_VOXELS] A builder's place or dig in edit mode (api.h's
@@ -10924,7 +11028,7 @@ struct Module: public interface::Module, public Interface
 				y = map->height_at((float)x, (float)z) + 0.5;
 			});
 			// [KIT_AIRSHIPS_2] on the highest voxel over it (a floating
-			// island of kit/world_region's), not under it
+			// island of kit/terrain_region's), not under it
 			voxelworld::access(m_server, m_w->world_scene,
 					[&](voxelworld::Instance *w){
 				interface::VoxelName an;
@@ -11015,8 +11119,10 @@ struct Module: public interface::Module, public Interface
 				const int t = tops[(size_t)z * w + x];
 				const int64_t dx = x - w / 2, dz = z - d / 2,
 						d2 = dx * dx + dz * dz;
+				// [KIT_CAVE_MOUTHS] not into a cave's mouth
 				if(t < p.sea_level || (best >= 0 && d2 >= best) ||
-						blocked(x, z))
+						blocked(x, z) || world::cave_mouth(p, (int)dx,
+						(int)dz, t))
 					continue;
 				best = d2;
 				m_w->world_spawn = {{(int)dx, t + 1, (int)dz}};
@@ -11031,6 +11137,23 @@ struct Module: public interface::Module, public Interface
 		WorldScope ws(m_w, world_at(e.scene));
 		if(e.scene == m_w->world_scene && m_w->world_scene)
 			m_w->world_generated++;
+		// [KIT_SKY_LIGHT_CAVES] The generator writes no light, and a write
+		// without any keeps what was there: a section generated under the
+		// sky light (a World loaded with it on, one walked into, one
+		// generated again) was dark for good, or wore its old ground's
+		// light (caves turned on after the sky: lit as the rock was).
+		// Relit as apply_sky() relights the loaded ones
+		if(!m_w->sky || e.scene != m_w->world_scene || !m_w->world_scene)
+			return;
+		voxelworld::access(m_server, m_w->world_scene,
+				[&](voxelworld::Instance *w){
+			w->relight_region_later(w->get_section_region_voxels(e.section_p));
+		});
+		if(!m_w->sky_relight){
+			m_w->sky_relight_us = m_w->sky_relight_max_us = 0;
+			m_w->sky_relight_t0 = interface::os::time_us();
+		}
+		m_w->sky_relight++;
 	}
 
 	void on_gen_queue(const worldgen::QueueModifiedEvent &e)
@@ -13235,7 +13358,7 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
-	// Whether a voxel's param is a shape's facing (world.h's shapes:
+	// Whether a voxel's param is a shape's facing (terrain.h's shapes:
 	// "<material>:<shape>")
 	static bool is_shape(const ss_ &name)
 	{
@@ -27772,7 +27895,7 @@ struct Module: public interface::Module, public Interface
 		params.set("surface", "voxels");
 		params.set("decorations", false);
 		params.set("caves", false);
-		comp.set("type", "kit/world");
+		comp.set("type", "kit/terrain");
 		comp.set("params", params);
 		comps.append(comp);
 		wo.set("id", (int64_t)(sid + 1));

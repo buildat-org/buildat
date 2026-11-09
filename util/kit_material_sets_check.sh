@@ -165,7 +165,7 @@ frames 3
 click Button "Install"
 wait_log_any 20000 kit editor: installed alice/redland as $fp/redland
 wait_log_any 20000 kit editor: installed alice/blueland as $fp/blueland
-event kit_edit {"op": "place", "type": "kit/world", "pos": [0, 1, 0]}
+event kit_edit {"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}
 wait_log 10000 entities, 1 to undo
 EOF
 	n=1

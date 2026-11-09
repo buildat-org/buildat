@@ -48,7 +48,7 @@ sym() # <param> <value>
 }
 # What both clients do once in edit mode with the server stopped
 {
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/symmetry", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/sign", "pos": [-10, 2, -10]}'
 	edit '{"op": "place", "type": "kit/part", "pos": [6, 1, 4], "parent": 4}'

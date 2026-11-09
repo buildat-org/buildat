@@ -19,7 +19,8 @@
 //   KITLINEAR  ([KIT_LIGHTING]) physical lighting's: the frame is HDR,
 //       lit in linear and encoded once at its end, so the albedo (tinted)
 //       is decoded here, as luanti_client's PBRVoxel.glsl does, and with
-//       KITSKY the light bounced (the mesher's display level) too.
+//       KITSKY the light bounced and the sky's share (the mesher's
+//       display levels) too.
 //       simplified: 2.2, not the sRGB curve. A translucent face's alpha
 //       is made linear's too ([KIT_PHYS_WATER_PINK]).
 //   KITWATER  ([KIT_PHYS_WATER_LOOK]) a translucent face under KITLINEAR,
@@ -106,7 +107,11 @@ void VS()
     #ifdef KITSKY
         vColor = iColor;
         #ifdef KITLINEAR
-            vColor.rgb = pow(iColor.rgb, vec3(2.2));
+            // [KIT_SKY_LIGHT_CAVES] the sky's share too: a display level
+            // (the flood's level over 15 times the shade), taken as linear
+            // a tunnel's end six cells in kept 0.6 of the sky (and, with
+            // no shadow map, of the sun), lit about as the open
+            vColor = pow(iColor, vec4(2.2));
         #endif
     #endif
     #ifdef KITTINT

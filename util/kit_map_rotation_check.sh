@@ -74,7 +74,7 @@ link() # <from> <output> <to> <input>
 }
 world() # <width> <biome>: the scene's World, flat
 {
-	place kit/world '0, 1, 0'
+	place kit/terrain '0, 1, 0'
 	set_ $id surface '"voxels"'
 	set_ $id generator '"flat"'
 	set_ $id biome "\"$2\""

@@ -78,6 +78,16 @@ namespace interface
 		// 0 is a still one. The atlas draws the frame of the moment into
 		// the segment's place; see update() in impl/atlas.cpp.
 		float animation_length = 0.0f;
+		// [KIT_RELIEF_TINT] The tint the face is drawn with (0xRRGGBB) and
+		// how it applies: TINT_NONE, TINT_WHOLE (the colour times the tint:
+		// Kit's leaves, plants, water), TINT_BY_ALPHA (the texture's alpha
+		// is how much of it applies: Kit's solid cubes, KITTINTMASK). The
+		// derived maps measure the colour drawn, not the file's: an
+		// untinted greyscale texture would read bright where its tint
+		// darkens it (a grass side's fringe over its dirt)
+		enum { TINT_NONE = 0, TINT_WHOLE = 1, TINT_BY_ALPHA = 2 };
+		uint8_t tint_mode = TINT_NONE;
+		uint32_t tint = 0xffffff;
 
 		bool operator==(const AtlasSegmentDefinition &other) const;
 	};

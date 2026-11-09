@@ -72,7 +72,7 @@ wait_log_any 10000 kit editor: edit mode on
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 EOF
-	edit '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 	edit '{"op": "place", "type": "kit/symmetry", "pos": [5, 1, 7]}'
 	edit '{"op": "place", "type": "kit/part", "pos": [3, 1, 2], "parent": 4}'
 	edit '{"op": "move", "id": 5, "pos": [3, 1, 2], "yaw": 30}'
