@@ -232,6 +232,10 @@ namespace interface
 //                               press, the text without control
 //                               characters and cut at 200 bytes; on_ui(c,
 //                               "entered", by, text): kit/ui_input
+//                               [KIT_PLAYER_LIST] kind "players": its
+//                               text a title over rows from its shared
+//                               state `value`, {{name, colour, score}..}:
+//                               kit/ui_player_list
 //   actions ={{name = "fire", key = "R", label = "Fire"}, ...}
 //                            -- ([KIT_INPUT_ACTIONS]) keys the players
 //                               press (8 at most; each value a string or

@@ -190,6 +190,7 @@ local function drop(r)
 		pcall(function() r.el:Remove() end)
 	end
 	r.el, r.t, r.parts, r.edge, r.px, r.wrap = nil, nil, nil, nil, nil, nil
+	r.rows = nil
 	if r.mark then
 		r.mark:Remove()
 		r.mark = nil
@@ -547,6 +548,44 @@ local function fit_text(r, text, px, aw, ah, pw, pad)
 	r.t.width = r.tw
 end
 
+-- [KIT_PLAYER_LIST] A player list's rows ({name, team colour, score}): a
+-- name in its colour and a score each; returns the widest name, the
+-- widest score and a row's height
+local function player_rows(r, rows, px)
+	r.rows = r.rows or {}
+	local font = magic.cache:GetResource("Font", FONT)
+	local white = color(r.ui.color, magic.Color(1, 1, 1))
+	local nw, sw, lh = 0, 0, 0
+	for i = 1, math.max(#rows, #r.rows) do
+		local row, e = rows[i], r.rows[i]
+		if row and not e then
+			e = {n = r.el:CreateChild("Text"), s = r.el:CreateChild("Text")}
+			for _, t in ipairs({e.n, e.s}) do
+				t.priority = 5
+				t:SetTextEffect(magic.TE_SHADOW)
+			end
+			r.rows[i] = e
+		end
+		e.n.visible, e.s.visible = row ~= nil, row ~= nil
+		if row then
+			local key = px .. "|" .. tostring(row[1]) .. "|" ..
+					tostring(row[2]) .. "|" .. tostring(row[3])
+			if e.key ~= key then
+				e.key = key
+				e.n:SetFont(font, px)
+				e.s:SetFont(font, px)
+				e.n.text = tostring(row[1]):sub(1, 40)
+				e.s.text = tostring(row[3])
+				e.n:SetColor(color(row[2], white))
+				e.s:SetColor(white)
+			end
+			nw, sw = math.max(nw, e.n.minWidth), math.max(sw, e.s.minWidth)
+			lh = math.max(lh, e.n.height)
+		end
+	end
+	return nw, sw, lh
+end
+
 local function rect(b, x, y, w, h)
 	b:SetPosition(math.floor(x), math.floor(y))
 	b:SetFixedSize(math.max(0, math.floor(w)), math.max(0, math.floor(h)))
@@ -900,6 +939,26 @@ local function update()
 							(tonumber(M.game_rule("hotbar")) or 0)
 					h = u.height and H or M.hud_unit()
 					fit_text(r, text, px, w - 2, h - 2, pw, pad)
+				elseif u.kind == "players" then
+					-- The title, then the rows; a score at the right
+					fit_text(r, text, px, nil, nil, pw, pad)
+					local rows = type(value) == "table" and value or {}
+					local nw, sw, lh = player_rows(r, rows, px)
+					local th = text ~= "" and r.t.height or 0
+					w = math.min(W > 0 and W or
+							math.max(r.tw, nw + 2 * pad + sw) + 2 * pad, pw)
+					h = math.min(H > 0 and H or th + #rows * lh + 2 * pad, ph)
+					local y = pad + th
+					for i, row in ipairs(rows) do
+						local e = r.rows[i]
+						e.n:SetPosition(pad, math.floor(y))
+						e.s:SetPosition(math.floor(w - pad - e.s.minWidth),
+								math.floor(y))
+						y = y + lh
+						text = text .. " | " .. tostring(row[1]) .. " " ..
+								tostring(row[3]) .. " " .. tostring(row[2])
+					end
+					r.text = text
 				elseif u.kind == "input" then
 					-- The label at the left, the field the rest
 					w = math.min(W > 0 and W or 30 * V, pw)
@@ -997,7 +1056,9 @@ local function update()
 			end
 			r.el:SetPosition(math.floor(x), math.floor(y))
 			r.el:SetFixedSize(math.floor(w), math.floor(h))
-			if u.kind ~= "panel" then
+			if u.kind == "players" then
+				r.t:SetPosition(pad, pad)
+			elseif u.kind ~= "panel" then
 				r.t:SetPosition(math.max(1, math.floor((w - r.tw) / 2)),
 						math.floor((h - r.t.height) / 2))
 			end
