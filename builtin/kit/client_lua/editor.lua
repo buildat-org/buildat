@@ -2135,7 +2135,7 @@ end
 function NT.show_inspector()
 	if folded("inspector") then
 		toggle_fold("inspector")
-		rebuild_bar()
+		refresh()
 	end
 end
 
@@ -4133,11 +4133,16 @@ show_log = function()
 	if #lines == 0 then
 		return
 	end
-	-- Beside the inspector, not over its lower rows (a narrow screen's has no
-	-- room beside it)
+	-- Beside the inspector, not over its lower rows. A narrow screen has no
+	-- room beside it: none while the inspector is open there
+	-- ([KIT_ROOT_LEFTOVERS]: at 1000x500 it covered the inspector's rows and
+	-- its scrollbar)
+	local ins = W.inspector and W.inspector.visible
+	if ins and narrow() then
+		return
+	end
 	local lw = window(magic.HA_RIGHT, magic.VA_BOTTOM,
-			W.inspector and W.inspector.visible and not narrow() and
-			-(W.inspector.width + 20) or -10,
+			ins and -(W.inspector.width + 20) or -10,
 			W.touch and -(W.touch.height + 16) or -50)
 	W.log = lw
 	text(lw, "Log of " .. S.primary .. ":", DIM)
