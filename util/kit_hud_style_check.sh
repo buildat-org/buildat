@@ -200,14 +200,10 @@ keypress F2
 frames 5
 $(pal_find kit/health_bar)
 click Button "[kit/health_bar]"
-wait_log 5000 the palette's menu of [kit/health_bar]
-frames 3
-click Button "menu Place"
+wait_log 5000 kit editor: placing [kit/health_bar]
 frames 5
 click Button "[kit/health_bar]"
-wait_log 5000 the palette's menu of [kit/health_bar]
-frames 3
-click Button "Stop placing"
+wait_log 5000 kit editor: placing nothing
 frames 5
 EOF
 	# The HUD view, from 2D (kitboss's last was Walk). Escape; a double click

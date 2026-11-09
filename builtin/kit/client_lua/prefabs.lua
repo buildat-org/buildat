@@ -515,6 +515,14 @@ function PF.draw(dbg)
 	end
 end
 
+-- [KIT_PALETTE_MENU_CHOICE] Whether a prefab's palette menu has more
+-- than Place and Favourite: Place free (voxels), its owner's Edit, Rename
+-- and Delete
+function PF.has_menu(it)
+	local info = info_of(it.prefab) or {}
+	return info.size ~= nil or info.own == true
+end
+
 -- The palette's menu on a prefab
 function PF.menu(it, x, y, redraw)
 	local name = it.prefab

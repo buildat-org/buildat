@@ -1991,7 +1991,9 @@ function NT.components(w)
 					return NT.palette_menu(it, p.x, p.y + b.height)
 				end
 				-- [KIT_PREFAB_ROOT] A prefab: Place (arms), Rename, Delete
-				if it.prefab then
+				-- ([KIT_PALETTE_MENU_CHOICE] one with no more than Place
+				-- and Favourite armed as a type is, its Favourite the foot's)
+				if it.prefab and NT.pf.has_menu(it) then
 					local p = b.screenPosition
 					return NT.pf.menu(it, p.x, p.y + b.height, palette)
 				end

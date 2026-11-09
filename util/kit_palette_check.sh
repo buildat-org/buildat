@@ -8,7 +8,9 @@
 #   1. its sections (World, Building, ... by about.group, a stock prefab's
 #      group), World folded by its header and opened again;
 #   2. the filter: "light", "fog", "sky" and "rendering" find kit/environment
-#      (its about text, its keywords), "creature" finds [kit/creature].
+#      (its about text, its keywords), "creature" finds [kit/creature];
+#   3. [KIT_PALETTE_MENU_CHOICE] a click on [kit/creature] (no menu: nothing
+#      but Place and Favourite in it) arms it, a click in the plan places it.
 #   util/kit_palette_check.sh          native
 #   util/kit_palette_check.sh web      the same in headless Chrome
 set -u
@@ -61,7 +63,10 @@ J
 		for f in "${finds[@]}" creature; do
 			echo " $(pal_find_web "$f") [\"waitlog_any\", \"the palette for \\\"$f\\\"\", 10],"
 		done
-		echo ' ["shot", "${OUT}/found.png"], ["sync", 3000]'
+		echo ' ["shot", "${OUT}/found.png"],
+ ["click", "Button", "[kit/creature]"], ["waitlog_any", "kit editor: placing .kit/creature", 10],
+ ["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
+ ["click", 600, 400], ["waitlog", "kit editor: state: ", 10], ["sync", 3000]'
 		echo ']'
 	} > "$t/web.json"
 	WEB_DRIVE_VIEWPORT=1024x700@1 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
@@ -91,7 +96,21 @@ EOF
 			pal_find "$f"
 			printf 'wait_log_any 5000 the palette for "%s"\n' "$f"
 		done
-		printf 'screenshot %s\nquit\n' "$t/found.png"
+		printf 'screenshot %s\n' "$t/found.png"
+		cat <<'EOF'
+click Button "[kit/creature]"
+wait_log_any 5000 kit editor: placing [kit/creature]
+keypress F1
+wait_log_any 5000 kit editor: the view is 2D
+frames 3
+mouse_pos 600 400
+frames 2
+mouse_click left
+wait_log 10000 kit editor: state:
+keypress Escape
+wait_log_any 5000 kit editor: placing nothing
+EOF
+		echo quit
 	} > "$t/kitboss.cmds"
 	wait_for_log "$t/srv.log" "setup code [A-Z0-9]+" 30
 	code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv.log" | head -1)
@@ -125,4 +144,9 @@ done
 grep -aP 'kit editor: the palette for "creature": \d+: ' "$b" | grep -qF "[kit/creature]" ||
 	fail "\"creature\" did not find [kit/creature] ($b)"
 echo "ok: the filter finds kit/environment by ${finds[*]}, [kit/creature] by its name ($t/found.png)"
+# 3. Armed by a click, placed by one
+grep -aq "kit editor: placing \[kit/creature\]" "$b" && ! grep -aq "the palette's menu of \[kit/creature\]" "$b" ||
+	fail "[kit/creature] not armed by its click ($b)"
+grep -aq "kit editor: placed \[kit/creature\] at" "$b" || fail "[kit/creature] not placed ($b)"
+echo "ok: [kit/creature] armed by a click (no menu), placed by a click in the plan"
 echo "PASS: the Place tab's sections and filter ($mode)"
