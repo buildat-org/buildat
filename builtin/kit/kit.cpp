@@ -2417,7 +2417,8 @@ struct Module: public interface::Module, public Interface
 			if(mi != memo.end())
 				return mi->second != 0;
 			const Entity &e = it->second;
-			const bool steered = steerable(e) && (m_free_objects.count(e.id) ||
+			// ([KIT_GUIDE_BOTS_2] a bot waiting for its round, unplaced, none)
+			const bool steered = e.has_pos && steerable(e) && (m_free_objects.count(e.id) ||
 					moving(e.parent, depth + 1) || creature_movement(e));
 			const bool r = steered || m_motions.count(id) || moving(e.parent, depth + 1);
 			memo[id] = steered ? 2 : r ? 1 : 0;
@@ -12048,8 +12049,9 @@ struct Module: public interface::Module, public Interface
 		// [KIT_PANEL_PARENT]
 		if(const uint64_t pn = panel_of(e))
 			o += ",panel="+itos(pn);
-		// [KIT_TOOLS_1] a player's entity (kit/health respawns them)
-		if(e.kind == "player")
+		// [KIT_TOOLS_1] a player's entity (kit/health respawns them);
+		// [KIT_GUIDE_BOTS_2] a bot's
+		if(e.kind == "player" || is_bot(e))
 			o += ",is_player=true";
 		if(e.has_pos){
 			// [KIT_NESTING] the world's
@@ -12077,17 +12079,21 @@ struct Module: public interface::Module, public Interface
 		// own kit/inventory (itself, or its type, id, params and state)
 		const uint64_t pid = player_id(r.by);
 		json::Value names = json::object();
-		// [KIT_GUIDE_BOTS] a bot's ("bot:<id>")
-		if(const Entity *be = bot_of(r.by))
-			names.set(r.by, bot_name(*be));
-		if(pid){
-			names.set(r.by, m_entities[pid].name);
-			o += ",player_id="+itos(pid)+",player=";
+		// [KIT_GUIDE_BOTS] a bot's ("bot:<id>"); [KIT_GUIDE_BOTS_2] the
+		// player of its runs, its own inventory
+		const Entity *run_bot = bot_of(r.by);
+		if(run_bot)
+			names.set(r.by, bot_name(*run_bot));
+		if(pid || run_bot){
+			const uint64_t aid = pid ? pid : run_bot->id;
+			if(pid)
+				names.set(r.by, m_entities[pid].name);
+			o += ",player_id="+itos(aid)+",player=";
 			lua_lit(json::Value(r.by), o);
 			uint64_t inv_id = 0;
 			size_t inv_comp = 0;
-			const Instance *pv_ = provider_for(pid, inv_id, inv_comp);
-			if(app_items()){
+			const Instance *pv_ = provider_for(aid, inv_id, inv_comp);
+			if(app_items() && pid){
 				// [KIT] stage 6a: the app's own, as Kit's counts are read
 				o += ",items=";
 				auto ai = m_app_items.find(m_entities[pid].name);
@@ -12155,8 +12161,37 @@ struct Module: public interface::Module, public Interface
 						j.set("away", true);
 				}
 				j.set("alive", player_alive(it->second));
+				j.set("by", "player:"+itos(pl.second));
 				players.append(j);
 				names.set("player:"+itos(pl.second), pl.first);
+			}
+			// [KIT_GUIDE_BOTS_2] the bots of the round, placed (one in a
+			// round elsewhere is not here): `bot` true, `by` "bot:<id>"
+			for(auto &bp : m_entities){
+				const Entity &b = bp.second;
+				if(!b.has_pos || !is_bot(b))
+					continue;
+				json::Value j = json::object(), st = json::object();
+				j.set("id", (int64_t)b.id);
+				j.set("name", bot_name(b));
+				j.set("bot", true);
+				j.set("by", "bot:"+itos(b.id));
+				j.set("here", true);
+				for(const Instance &pi : b.comps)
+					st.set(pi.type, pi.state);
+				j.set("state", st);
+				double w[3];
+				Turn wq;
+				world_of(b, w, &wq);
+				j.set("pos", point(w));
+				j.set("yaw", wq.yaw());
+				ss_ ps;
+				scene_of(b, &ps);
+				if(!own_scene.empty() && ps != own_scene)
+					j.set("away", true);
+				j.set("alive", player_alive(b));
+				players.append(j);
+				names.set("bot:"+itos(b.id), bot_name(b));
 			}
 			o += ",players=";
 			lua_lit(players, o);
@@ -12345,6 +12380,8 @@ struct Module: public interface::Module, public Interface
 		m_ret = json::null();
 		const ss_ request = request_of(e, e.comps[r.comp], r);
 		const uint64_t pid = player_id(r.by);
+		// [KIT_GUIDE_BOTS_2] a bot's inventory and team as a player's
+		const uint64_t aid = actor_id(r.by);
 		uint64_t inv_id = 0;
 		size_t inv_comp = 0;
 		const bool called = box_call(request, answer, error, &runaway, &spent,
@@ -12356,7 +12393,7 @@ struct Module: public interface::Module, public Interface
 				ci->second.comps[r.comp].spent += spent;
 		}
 		if(!called){
-			Instance *pv_ = provider_for(pid, inv_id, inv_comp);
+			Instance *pv_ = provider_for(aid, inv_id, inv_comp);
 			if(runaway && in_provider && pv_){
 				// The inventory's provider ran past it: it is disabled, not
 				// the caller; a replacing one's players have their own
@@ -12366,7 +12403,7 @@ struct Module: public interface::Module, public Interface
 				m_runtime_dirty = true;
 				log_w(MODULE, "Entity %s's %s disabled: %s; the players' "
 						"inventory is %s now", cs(itos(inv_id)), cs(pv_->type),
-						cs(pv_->disabled), inv_id == pid ? "none" :
+						cs(pv_->disabled), inv_id == aid ? "none" :
 						"their entities' own");
 				add_log(inv_id, "disabled: "+pv_->disabled);
 			} else if(runaway){
@@ -12408,9 +12445,9 @@ struct Module: public interface::Module, public Interface
 		}
 		// [KIT_TEAM_JOIN_LEAVES_OTHERS] A team joined: the player out of the
 		// scene's other teams (respawn_at takes the last one they are in)
-		if(t.team && pid && r.handler == "on_input" &&
-				jstr_at(r.args, 0) == "join" && in_team(pid, e.id))
-			leave_teams(pid, e);
+		if(t.team && aid && r.handler == "on_input" &&
+				jstr_at(r.args, 0) == "join" && in_team(aid, e.id))
+			leave_teams(aid, e);
 		const json::Value &emits = fx.get("emit");
 		json::Value tried_out = json::array();
 		for(unsigned i = 0; i < emits.size(); i++){
@@ -12435,6 +12472,13 @@ struct Module: public interface::Module, public Interface
 			}
 			if(ot == "none")
 				value = json::null();
+			// [KIT_GUIDE_BOTS_2] c:emit(output, value, by): as by a player or
+			// bot it reaches (a flag's taker)
+			ss_ eby = r.by;
+			const json::Value &ev3 = emits.at(i).at(2u);
+			if(ev3.is_string() && actor_id(ev3.as_string()) &&
+					reach(e, r.comp, r.by).count(actor_id(ev3.as_string())))
+				eby = ev3.as_string();
 			if(!m_watches.empty())
 				watch_fired(e.id, r.comp, output, value);
 			if(r.tried){
@@ -12471,7 +12515,7 @@ struct Module: public interface::Module, public Interface
 				}
 				const uint64_t from = e.id, to = l.to;
 				const ss_ input = l.input;
-				deliver(to, input, value, r.by, r.hops + 1, from, output);
+				deliver(to, input, value, eby, r.hops + 1, from, output);
 				// [KIT_SYMMETRY] from outside its group, to each copy too
 				// (simplified: a scan of the entities each such signal)
 				const uint64_t sid = sym_source(to);
@@ -12482,7 +12526,7 @@ struct Module: public interface::Module, public Interface
 								x.second.built, "source", 0) == to)
 							copies.push_back(x.first);
 					for(uint64_t c : copies)
-						deliver(c, input, value, r.by, r.hops + 1, from, output);
+						deliver(c, input, value, eby, r.hops + 1, from, output);
 				}
 			}
 		}
@@ -12500,7 +12544,7 @@ struct Module: public interface::Module, public Interface
 			});
 		}
 		// The provider's state, changed by the inventory calls of this run
-		Instance *pv_ = provider_for(pid, inv_id, inv_comp);
+		Instance *pv_ = provider_for(aid, inv_id, inv_comp);
 		const json::Value &inv_set = fx.get("inv_set");
 		if(pv_ && pv_ != &in && inv_set.size()){
 			Entity &pe = m_entities[inv_id];
@@ -12632,9 +12676,15 @@ struct Module: public interface::Module, public Interface
 		}
 		const ss_ who = player_of(r.by);
 		const json::Value &tp = fx.get("teleport");
-		if(tp.is_array())
-			teleport(e, type, who, tp, fx.get("teleport_yaw"),
-					fx.get("teleport_scene"), fx.get("teleport_entity"));
+		if(tp.is_array()){
+			// [KIT_GUIDE_BOTS_2] a bot's run: the bot
+			if(const Entity *tb = bot_of(r.by))
+				bot_teleport(e, type, *tb, tp, fx.get("teleport_yaw"),
+						fx.get("teleport_entity"));
+			else
+				teleport(e, type, who, tp, fx.get("teleport_yaw"),
+						fx.get("teleport_scene"), fx.get("teleport_entity"));
+		}
 		// [KIT_CTF] c:move (its own entity), c:speed (players it reaches)
 		const json::Value &mv = fx.get("move");
 		if(mv.is_array())
@@ -12668,7 +12718,7 @@ struct Module: public interface::Module, public Interface
 		if(!who.empty() && !items.is_undefined())
 			got_items(e, type, who, items);
 		// [KIT_TOOLS_1] kit/health's c:respawn() on a player's entity
-		if(fx.get("respawn").is_true() && e.kind == "player")
+		if(fx.get("respawn").is_true() && (e.kind == "player" || is_bot(e)))
 			respawn_player(e.id);
 		// [KIT_CTF] a health's c:died(by, type) on a player's entity; a
 		// component's c:respawn_waiting(), c:hurt() and c:explode() (each
@@ -12677,12 +12727,13 @@ struct Module: public interface::Module, public Interface
 		const json::Value &died = fx.get("died");
 		const json::Value &hurts = fx.get("hurt");
 		const json::Value &blasts = fx.get("explode");
-		if((died.is_array() && e.kind == "player") ||
+		const bool actor = e.kind == "player" || is_bot(e);
+		if((died.is_array() && actor) ||
 				fx.get("respawn_waiting").is_true() || hurts.size() ||
 				blasts.size()){
 			const json::Value ret = m_ret, hit_ret = m_hit_ret;
 			const uint64_t self = e.id;
-			if(died.is_array() && e.kind == "player")
+			if(died.is_array() && actor)
 				player_death(self, r.by, name_ok(jstr_at(died, 1)) ?
 						jstr_at(died, 1) : ss_("normal"));
 			if(fx.get("respawn_waiting").is_true())
@@ -12762,12 +12813,17 @@ struct Module: public interface::Module, public Interface
 			if(p.second.made && p.second.maker == e.id &&
 					p.second.maker_comp == comp)
 				r.insert(p.first);
-		const uint64_t pid = player_id(by);
+		const uint64_t pid = actor_id(by);
 		if(pid)
 			r.insert(pid);
-		if(m_types[in.type].players)
+		if(m_types[in.type].players){
 			for(auto &p : m_players)
 				r.insert(p.second);
+			// [KIT_GUIDE_BOTS_2]
+			for(auto &p : m_entities)
+				if(p.second.has_pos && is_bot(p.second))
+					r.insert(p.first);
+		}
 		if(m_types[in.type].teams)
 			for(uint64_t tid : teams_of(e))
 				r.insert(tid);
@@ -13007,6 +13063,8 @@ struct Module: public interface::Module, public Interface
 				n.maker = maker;
 				n.maker_comp = comp;
 			}
+			// [KIT_GUIDE_BOTS_2] a bot made: Kit's player types on it
+			bot_player_types(n);
 			m_entities[n.id] = n;
 			made.push_back(n.id);
 		}
@@ -16081,14 +16139,15 @@ struct Module: public interface::Module, public Interface
 	void attach_fx(Entity &e, size_t comp, const ss_ &by, const json::Value &a)
 	{
 		const json::Value &who = a.at(0u);
-		const uint64_t pid = who.is_string() ? player_id(who.as_string()) :
+		const uint64_t pid = who.is_string() ? actor_id(who.as_string()) :
 				who.is_number() && who.as_number() > 0 ?
 				(uint64_t)who.as_number() : 0;
 		const ss_ bone = jstr_at(a, 1);
 		auto pi = m_entities.find(pid);
 		ss_ why, es, ps;
-		if(pi == m_entities.end() || pi->second.kind != "player" ||
-				!pi->second.has_pos)
+		// ([KIT_GUIDE_BOTS_2] or a bot)
+		if(pi == m_entities.end() || (pi->second.kind != "player" &&
+				!is_bot(pi->second)) || !pi->second.has_pos)
 			why = "no placed player";
 		else if(!reach(e, comp, by).count(pid))
 			why = "not a player it reaches";
@@ -16119,7 +16178,8 @@ struct Module: public interface::Module, public Interface
 			m_seat_home[e.id] = home_of(e);
 		m_attached[e.id] = at;
 		log_i(MODULE, "Entity %s attached to %s (%s, %g, %g, %g)",
-				cs(itos(e.id)), cs(pi->second.name), bone.empty() ? "feet" :
+				cs(itos(e.id)), cs(is_bot(pi->second) ? bot_name(pi->second) :
+				pi->second.name), bone.empty() ? "feet" :
 				cs(bone), at.off[0], at.off[1], at.off[2]);
 		attach_tick(e.id);
 	}
@@ -16198,10 +16258,17 @@ struct Module: public interface::Module, public Interface
 			else if(a.bone == "hand")
 				b[0] = 0.3, b[1] = 0.8;
 			const double lx = b[0] + a.off[0], lz = b[2] + a.off[2];
-			// (the player's entity's place is its feet's cell's middle)
-			double w[3] = {pi->second.pos[0] + lx * std::cos(yaw) +
-					lz * std::sin(yaw), pi->second.pos[1] - 0.5 + b[1] + a.off[1],
-					pi->second.pos[2] - lx * std::sin(yaw) + lz * std::cos(yaw)};
+			// (the player's entity's place is its feet's cell's middle;
+			// [KIT_GUIDE_BOTS_2] a bot's in the world, its yaw its own)
+			double pw[3] = {pi->second.pos[0], pi->second.pos[1], pi->second.pos[2]};
+			if(pi->second.kind != "player"){
+				Turn bq;
+				world_of(pi->second, pw, &bq);
+				yaw = bq.yaw() * 0.017453292519943295;
+			}
+			double w[3] = {pw[0] + lx * std::cos(yaw) +
+					lz * std::sin(yaw), pw[1] - 0.5 + b[1] + a.off[1],
+					pw[2] - lx * std::sin(yaw) + lz * std::cos(yaw)};
 			double l[3];
 			to_local(e.parent, w, l);
 			if(std::fabs(l[0] - e.pos[0]) + std::fabs(l[1] - e.pos[1]) +
@@ -17481,6 +17548,16 @@ struct Module: public interface::Module, public Interface
 				double o[3];
 				Turn q;
 				box_frame(e, o, q);
+				// [KIT_GUIDE_BOTS_2] A reach goal with a target: its box round
+				// the target's place, level, following it as it moves
+				if(in.type == "kit/goal" && jstr(in.params, "kind") == "reach" &&
+						jstr(in.params, "pick", "entity") == "entity")
+					if(const Entity *te = goal_target(e, in, 0, o)){
+						world_of(*te, o);
+						q = Turn();
+						for(int k = 0; k < 3; k++)
+							o[k] = std::floor(o[k] + 0.5) - (k == 1 ? 0 : (n[k] - 1) / 2);
+					}
 				if(deadly && m_session.running)
 					ships_in_box(e.id, scene, o, q, n, touched);
 				// Who is in it, by their entity's id; those arriving on it
@@ -17511,13 +17588,11 @@ struct Module: public interface::Module, public Interface
 						m_arrive.erase(ar);
 					}
 				}
-				// [KIT_GUIDE_BOTS] a goal's zone holds bots too, "bot:<id>"
-				// simplified: only a goal's; a trigger zone or a region
-				// counts no bot
-				if(in.type == "kit/goal")
-					for(const auto &b : bots)
-						if(b.second.first == scene && box_holds(o, q, n, b.second.second.data()))
-							now.insert("bot:"+itos(b.first));
+				// [KIT_GUIDE_BOTS] a zone holds bots too, "bot:<id>"
+				// ([KIT_GUIDE_BOTS_2]: every zone, not only a goal's)
+				for(const auto &b : bots)
+					if(b.second.first == scene && box_holds(o, q, n, b.second.second.data()))
+						now.insert("bot:"+itos(b.first));
 				auto fire = [&](const char *handler, const ss_ &id){
 					Run r;
 					r.entity = e.id;
@@ -17655,7 +17730,7 @@ struct Module: public interface::Module, public Interface
 			if(si == m_sessions.end())
 				continue;
 			GameSession &gs = *si->second;
-			if(used.count(id)){
+			if(used.count(id) || gs.bots){
 				gs.empty_since = 0;
 				continue;
 			}
@@ -19470,11 +19545,15 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// ---- [KIT_GUIDE_BOTS] Bots (kit_plan 4z7): an entity with a type saying
-	// `bot = true` (kit/bot) on a creature movement. It does the goals a player
-	// would, as "bot:<id>" where a player is "player:<id>": its goal state is
-	// a goal's own["bot:<id>"], it enters goal zones and it uses (c:use). It
-	// is drawn as a player (show.player), is no peer and so in no list of
-	// players, no team, no queue or count of them.
+	// `bot = true` (kit/bot) on a creature movement. [KIT_GUIDE_BOTS_2] A bot
+	// is a player whose input is a brain, not a client: "bot:<id>" where a
+	// player is "player:<id>", c.player its id in its runs, in c.players
+	// (`bot` true), in zones, teams, queues, sessions, carrying (c:attach),
+	// health (Kit's player types put on it as it is made) and inventory. It
+	// has no peer and no account: not in m_players, so nothing remembers it
+	// (player_state, user_db), it has no edit or admin rights, publishes
+	// nothing and has no chat name; what is sent to a player's client is
+	// sent to no one for it.
 	const Instance *bot_comp(const Entity &e)
 	{
 		for(const Instance &in : e.comps)
@@ -19483,6 +19562,11 @@ struct Module: public interface::Module, public Interface
 		return nullptr;
 	}
 	bool is_bot(const Entity &e){ return bot_comp(e) != nullptr; }
+	bool is_bot_id(uint64_t id)
+	{
+		auto it = m_entities.find(id);
+		return it != m_entities.end() && it->second.has_pos && is_bot(it->second);
+	}
 
 	ss_ bot_name(const Entity &e)
 	{
@@ -19500,9 +19584,135 @@ struct Module: public interface::Module, public Interface
 		return it != m_entities.end() && is_bot(it->second) ? &it->second : nullptr;
 	}
 
-	// c.goal: the bot's active goal, the first by id in its scene active for it
-	// and not for players only: {id, kind, text, target, via, at (where to go:
-	// the box's middle on its floor, the target's or the via's place), dist}
+	// [KIT_GUIDE_BOTS_2] The player or bot a `by` is (0: neither)
+	uint64_t actor_id(const ss_ &by)
+	{
+		if(const uint64_t pid = player_id(by))
+			return pid;
+		const Entity *b = bot_of(by);
+		return b ? b->id : 0;
+	}
+
+	// Kit's player types (kit/inventory, kit/equipment, kit/health...) on a
+	// bot that has not got them: as a player's entity carries them
+	void bot_player_types(Entity &e)
+	{
+		if(!is_bot(e))
+			return;
+		for(const ss_ &t : m_player_types){
+			bool has = false;
+			for(const Instance &in : e.comps)
+				has = has || in.type == t;
+			if(has)
+				continue;
+			Instance in;
+			in.type = t;
+			fresh(in);
+			e.comps.push_back(in);
+		}
+	}
+
+	// A bot put at a world place (yaw: NAN keeps its own), its walk begun
+	// again from there
+	void bot_put(uint64_t id, const double w[3], double yaw)
+	{
+		auto it = m_entities.find(id);
+		if(it == m_entities.end() || !it->second.has_pos)
+			return;
+		Entity &e = it->second;
+		double l[3];
+		to_local(e.parent, w, l);
+		for(int k = 0; k < 3; k++)
+			e.pos[k] = l[k];
+		if(std::isfinite(yaw))
+			e.yaw = yaw;
+		m_drives.erase(id);
+		m_runtime_dirty = true;
+		place_nodes(id);
+	}
+
+	// The entity a bot carries (c:attach'd to it; 0: none)
+	uint64_t bot_carries(uint64_t bot)
+	{
+		for(auto &a : m_attached)
+			if(a.second.player == bot)
+				return a.first;
+		return 0;
+	}
+
+	// The team the region at an entity's place is of (0: none)
+	uint64_t region_team(const Entity &at)
+	{
+		ss_ scene;
+		double w[3];
+		if(!scene_of(at, &scene))
+			return 0;
+		world_of(at, w);
+		const pv::Vector3DInt32 c = cell_of(w);
+		const Entity *on = nullptr;
+		return region_at(scene, c.getX(), c.getY(), c.getZ(), &on) && on ?
+				team_over(*on) : 0;
+	}
+
+	// [KIT_GUIDE_BOTS_2] A goal's target as an actor (a player or a bot at w)
+	// has it: `pick` "entity" its `target` (followed as it moves), "own_team"
+	// the actor's team, "their_team" the nearest other team of its scene
+	const Entity *goal_target(const Entity &g, const Instance &in,
+			uint64_t actor, const double w[3])
+	{
+		const ss_ pick = jstr(in.params, "pick", "entity");
+		if(pick == "own_team" || pick == "their_team"){
+			const uint64_t own = team_of_player(actor);
+			if(pick == "own_team"){
+				auto it = m_entities.find(own);
+				return own && it != m_entities.end() && it->second.has_pos ?
+						&it->second : nullptr;
+			}
+			ss_ scene, ts;
+			scene_of(g, &scene);
+			const Entity *best = nullptr;
+			double bd = 0;
+			for(auto &p : m_entities){
+				const Entity &t = p.second;
+				bool team = false;
+				for(const Instance &ti : t.comps)
+					team = team || (m_types[ti.type].team && ti.disabled.empty());
+				if(!team || !t.has_pos || t.id == own || !scene_of(t, &ts) ||
+						ts != scene)
+					continue;
+				double tw[3];
+				world_of(t, tw);
+				const double d = (tw[0] - w[0]) * (tw[0] - w[0]) +
+						(tw[2] - w[2]) * (tw[2] - w[2]);
+				if(!best || d < bd)
+					best = &t, bd = d;
+			}
+			return best;
+		}
+		const json::Value &rv = in.params.get("target");
+		auto ti = rv.is_number() && rv.as_number() >= 2 ?
+				m_entities.find((uint64_t)rv.as_number()) : m_entities.end();
+		return ti != m_entities.end() && ti->second.has_pos ? &ti->second : nullptr;
+	}
+
+	// Whether an entity takes a use now: its type's use_when state (a flag
+	// while it can be taken); none declared: always
+	bool usable_now(const Entity &t)
+	{
+		for(const Instance &in : t.comps){
+			const json::Value &uw = m_types[in.type].decl.get("use_when");
+			if(uw.is_string() && in.disabled.empty())
+				return in.state.get(uw.as_string()).is_true();
+		}
+		return true;
+	}
+
+	// c.goal: the bot's goal, the first by id in its scene active for it, not
+	// for players only, that it can act on now: {id, kind, text, target, via,
+	// carry, at (where to go: the box's middle on its floor, the target's or
+	// the via's place), dist}. Acting on: a use whose target takes a use now
+	// (and with except_own_zone lies outside its team's region); a place_item
+	// while it carries something; reach and signal always
 	void bot_goal_lit(const Entity &e, ss_ &o)
 	{
 		const ss_ key = "bot:"+itos(e.id);
@@ -19510,6 +19720,8 @@ struct Module: public interface::Module, public Interface
 		scene_of(e, &scene);
 		double w[3];
 		world_of(e, w);
+		const uint64_t carry = bot_carries(e.id);
+		const uint64_t own_team = team_of_player(e.id);
 		for(auto &p : m_entities){
 			const Entity &g = p.second;
 			if(!g.has_pos)
@@ -19530,12 +19742,21 @@ struct Module: public interface::Module, public Interface
 				if(gs != scene)
 					continue;
 				const ss_ kind = jstr(in.params, "kind");
+				const Entity *t = goal_target(g, in, e.id, w);
+				if(kind == "use" && (!t || !usable_now(*t) ||
+						(in.params.get("except_own_zone").is_true() && own_team &&
+						region_team(*t) == own_team)))
+					continue;
+				if(kind == "place_item" && (!carry || !t))
+					continue;
 				json::Value j = json::object();
 				j.set("id", (int64_t)g.id);
 				j.set("kind", kind);
 				j.set("text", jstr(in.params, "text"));
+				if(carry)
+					j.set("carry", (int64_t)carry);
 				double at[3];
-				if(kind == "reach"){
+				if(kind == "reach" && !t){
 					int n[3];
 					extent(in.params.get("size"), n, MAX_EXTENT);
 					Turn q;
@@ -19544,17 +19765,20 @@ struct Module: public interface::Module, public Interface
 					q.apply(mid);
 					for(int k = 0; k < 3; k++)
 						at[k] += mid[k];
-				} else {
-					const char *ref = kind == "use" ? "target" : "via";
-					const json::Value &rv = in.params.get(ref);
+				} else if(kind == "signal"){
+					const json::Value &rv = in.params.get("via");
 					auto ti = rv.is_number() ? m_entities.find((uint64_t)rv.as_number()) :
 							m_entities.end();
 					if(ti == m_entities.end() || !ti->second.has_pos || ti->first == 0){
 						world_of(g, at);
 					} else {
 						world_of(ti->second, at);
-						j.set(ref, (int64_t)ti->first);
+						j.set("via", (int64_t)ti->first);
 					}
+				} else {
+					world_of(t ? *t : g, at);
+					if(t)
+						j.set("target", (int64_t)t->id);
 				}
 				j.set("at", point(at));
 				j.set("dist", std::sqrt((at[0] - w[0]) * (at[0] - w[0]) +
@@ -19568,8 +19792,9 @@ struct Module: public interface::Module, public Interface
 
 	// A bot's use of an entity: its usable parts' on_use and the world event
 	// "use" (kit/goal's), as a player's (on_use_u) by "bot:<id>", within Kit's
-	// use range. simplified: no who-may-use rule (a region's, a part's own),
-	// no seat or chest; may_use() for a bot is the upgrade
+	// use range (what it carries: anywhere). simplified: no who-may-use rule
+	// (a region's, a part's own), no seat or chest; may_use() for a bot is
+	// the upgrade
 	void bot_use(uint64_t bot, uint64_t id)
 	{
 		auto bi = m_entities.find(bot);
@@ -19585,7 +19810,8 @@ struct Module: public interface::Module, public Interface
 		for(int k = 0; k < 3; k++)
 			d2 += (a[k] - b[k]) * (a[k] - b[k]);
 		const ss_ name = bot_name(bi->second);
-		if(ts != scene || d2 > m_host.use_range * m_host.use_range){
+		if(ts != scene || (d2 > m_host.use_range * m_host.use_range &&
+				bot_carries(bot) != id)){
 			log_i(MODULE, "[KIT_GUIDE_BOTS] A use of entity %s by %s refused: %s",
 					cs(itos(id)), cs(name), ts != scene ? "in another scene" : "out of range");
 			return;
@@ -19615,6 +19841,206 @@ struct Module: public interface::Module, public Interface
 		ev.set("kind", ss_("use"));
 		ev.set("entity", (int64_t)id);
 		fire_event(scene, ev, by);
+	}
+
+	// [KIT_GUIDE_BOTS_2] c:teleport by a bot: it is put there, in its own scene
+	// (simplified: not into another scene)
+	void bot_teleport(const Entity &e, const ss_ &type, const Entity &bot,
+			const json::Value &pos, const json::Value &yaw,
+			const json::Value &to_entity)
+	{
+		ss_ scene, bs;
+		scene_of(e, &scene);
+		scene_of(bot, &bs);
+		double w[3] = {0, 0, 0};
+		bool ok = pos_ok(pos);
+		if(to_entity.is_number()){
+			auto it = m_entities.find((uint64_t)to_entity.as_number());
+			ss_ ts;
+			ok = it != m_entities.end() && it->second.has_pos &&
+					scene_of(it->second, &ts) && ts == bs;
+			if(ok)
+				world_of(it->second, w);
+		} else if(ok){
+			for(unsigned k = 0; k < 3; k++)
+				w[k] = pos.at(k).as_number();
+		}
+		const ss_ name = bot_name(bot);
+		if(!ok || bs != scene){
+			log_w(MODULE, "Entity %s's %s: a teleport of %s refused: %s",
+					cs(itos(e.id)), cs(type), cs(name), bs != scene ?
+					"the bot is not in its scene" : "not a place in its scene");
+			return;
+		}
+		log_i(MODULE, "Entity %s's %s teleports %s to (%g, %g, %g)",
+				cs(itos(e.id)), cs(type), cs(name), w[0], w[1], w[2]);
+		bot_put(bot.id, w, yaw.is_number() ? norm_yaw(yaw.as_number()) : NAN);
+	}
+
+	// A bot's respawn after its death: its team's pad, else the scene's
+	// spawner of players, else where it is
+	void bot_respawn(uint64_t bot)
+	{
+		auto bi = m_entities.find(bot);
+		if(bi == m_entities.end())
+			return;
+		ss_ scene;
+		scene_of(bi->second, &scene);
+		const Entity *pad = nullptr, *spawner = nullptr;
+		for(auto &e : m_entities){
+			ss_ es;
+			if(!e.second.has_pos || !scene_of(e.second, &es) || es != scene)
+				continue;
+			for(const Instance &in : e.second.comps){
+				const Type &ty = m_types[in.type];
+				if(ty.team && in_team(bot, e.first))
+					pad = &e.second;
+				else if(ty.spawn && (ty.spawn_param.empty() ||
+						in.params.get(ty.spawn_param).is_true()))
+					spawner = &e.second;
+			}
+		}
+		const Entity *at = pad ? pad : spawner;
+		if(!at)
+			return;
+		double w[3];
+		Turn wq;
+		world_of(*at, w, &wq);
+		log_i(MODULE, "%s respawns at entity %s", cs(bot_name(bi->second)),
+				cs(itos(at->id)));
+		bot_put(bot, w, wq.yaw());
+	}
+
+	// [KIT_GUIDE_BOTS_2] The bots in a round started (c:session_start) or
+	// joined (c:session_move) from the default: each one waits in the default
+	// (no place: drawn nowhere, in no zone) while its copy plays in the
+	// session -- made at the round's map's spawn, joining it as a player does
+	// (the scene's on_join and the maker's: its team, put on its pad) -- and
+	// is back where it was when the session ends. simplified: a copy with the
+	// bot's types and parameters (its state new: its inventory empty), by a
+	// new id and so a new name; a restart while away leaves it waiting
+	// (sessions are not saved)
+	std::map<uint64_t, uint64_t> m_bots_away; // the default's bot -> session
+
+	void bots_into(const sv_<uint64_t> &bots, uint64_t to)
+	{
+		if(m_active || !to || !m_sessions.count(to))
+			return;
+		for(uint64_t bid : bots){
+			auto bi = m_entities.find(bid);
+			if(bi == m_entities.end() || !bi->second.has_pos ||
+					!is_bot(bi->second) || m_bots_away.count(bid))
+				continue;
+			Entity copy = bi->second;
+			ss_ scene;
+			scene_of(copy, &scene);
+			// Waiting in the default
+			{
+				Entity &b = bi->second;
+				remove_node(b);
+				b.node = 0;
+				b.has_pos = false;
+				for(auto it = m_attached.begin(); it != m_attached.end();)
+					it = it->second.player == bid ? m_attached.erase(it) : ++it;
+				m_drives.erase(bid);
+				m_bots_away[bid] = to;
+				m_runtime_dirty = true;
+			}
+			GameSession &gs = *m_sessions[to];
+			if(!gs.map.empty())
+				scene = gs.map;
+			SessionScope sc(*this, to);
+			const uint64_t sid = scene_entity(scene);
+			if(!sid)
+				continue;
+			Entity n;
+			n.id = m_next_id++;
+			n.parent = sid;
+			n.name = copy.name;
+			n.has_pos = true;
+			scene_spawn(scene, n.pos[0], n.pos[1], n.pos[2]);
+			n.yaw = copy.yaw;
+			n.made = 'g';
+			for(const Instance &ci : copy.comps){
+				Instance in;
+				in.type = ci.type;
+				fresh(in);
+				in.params = ci.params.deepcopy();
+				n.comps.push_back(in);
+			}
+			bot_player_types(n);
+			m_entities[n.id] = n;
+			gs.bots++;
+			Entity &ne = m_entities[n.id];
+			if(wants_node(ne))
+				make_node(ne);
+			const ss_ by = "bot:"+itos(n.id);
+			for(size_t i = 0; i < ne.comps.size(); i++){
+				Run r;
+				r.entity = n.id;
+				r.comp = i;
+				r.handler = "on_start";
+				r.by = by;
+				queue_run(r);
+			}
+			// Its join, as a player's (round_join): the scene's on_join, and
+			// the maker's from another scene (an arena's map)
+			for(auto &p : m_entities){
+				ss_ es;
+				if(!scene_of(p.second, &es) || es != scene || p.first == n.id)
+					continue;
+				for(size_t i = 0; i < p.second.comps.size(); i++){
+					if(!m_types[p.second.comps[i].type].handlers.count("on_join"))
+						continue;
+					Run r;
+					r.entity = p.first;
+					r.comp = i;
+					r.handler = "on_join";
+					r.by = by;
+					r.args.append(by);
+					queue_run(r);
+				}
+			}
+			auto me = m_entities.find(gs.maker);
+			ss_ ms;
+			if(me != m_entities.end() && scene_of(me->second, &ms) && ms != scene &&
+					gs.maker_comp < me->second.comps.size()){
+				Run r;
+				r.entity = gs.maker;
+				r.comp = gs.maker_comp;
+				r.handler = "on_join";
+				r.by = by;
+				r.args.append(by);
+				queue_run(r);
+			}
+			m_runtime_dirty = true;
+			log_i(MODULE, "%s into session %s as %s (scene %s)",
+					cs(bot_name(copy)), cs(itos(to)), cs(bot_name(ne)),
+					cs(scene));
+		}
+	}
+
+	// The bots a session had back in the default, as it ends
+	void bots_back(uint64_t from)
+	{
+		SessionScope sc(*this, 0);
+		for(auto it = m_bots_away.begin(); it != m_bots_away.end();){
+			if(it->second != from){
+				++it;
+				continue;
+			}
+			auto bi = m_entities.find(it->first);
+			if(bi != m_entities.end()){
+				Entity &b = bi->second;
+				b.has_pos = true;
+				if(wants_node(b))
+					make_node(b);
+				m_runtime_dirty = true;
+				log_i(MODULE, "%s back from session %s", cs(bot_name(b)),
+						cs(itos(from)));
+			}
+			it = m_bots_away.erase(it);
+		}
 	}
 
 	// Its pose for players.lua (set_pose()'s): the way it faces
@@ -21074,7 +21500,8 @@ struct Module: public interface::Module, public Interface
 		double w[3];
 		world_of(t, w);
 		const pv::Vector3DInt32 c = cell_of(w);
-		if(t.kind != "player")
+		// ([KIT_GUIDE_BOTS_2] a bot as a player)
+		if(t.kind != "player" && !is_bot(t))
 			return allows(peer, "damage", c.getX(), c.getY(), c.getZ(), &why);
 		const Instance *gr = root_instance("kit/game_rules");
 		if(gr && gr->params.get("peaceful").is_true()){
@@ -21485,7 +21912,7 @@ struct Module: public interface::Module, public Interface
 	void respawn_player(uint64_t player)
 	{
 		const size_t peer = peer_of_player(player);
-		if(!peer)
+		if(!peer && !is_bot_id(player))
 			return;
 		// [KIT_INVENTORY_PLAY] the inventory at a death, the kits at a spawn
 		player_died(player);
@@ -21555,6 +21982,8 @@ struct Module: public interface::Module, public Interface
 		const size_t peer = peer_of_player(player);
 		if(peer)
 			respawn_at(player, peer);
+		else if(is_bot_id(player))
+			bot_respawn(player);
 		give_kits(player, true);
 	}
 
@@ -21570,7 +21999,10 @@ struct Module: public interface::Module, public Interface
 		if(pe == m_entities.end() || player_waiting(player))
 			return;
 		const size_t peer = peer_of_player(player);
-		const ss_ scene = peer ? m_peers[peer].scene : ss_();
+		ss_ scene = peer ? m_peers[peer].scene : ss_();
+		// [KIT_GUIDE_BOTS_2] a bot's scene
+		if(!peer && is_bot(pe->second))
+			scene_of(pe->second, &scene);
 		for(auto &e : m_entities){
 			ss_ es;
 			const bool here = e.first == player || (e.second.parent == 1 &&
@@ -21594,14 +22026,16 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		player_died(player);
-		const uint64_t bid = player_id(by);
-		const ss_ bn = bid && m_entities.count(bid) ? m_entities[bid].name : by;
+		const uint64_t bid = actor_id(by);
+		const ss_ bn = !bid || !m_entities.count(bid) ? by :
+				is_bot(m_entities[bid]) ? bot_name(m_entities[bid]) : m_entities[bid].name;
+		const ss_ vname = is_bot(pe->second) ? bot_name(pe->second) : pe->second.name;
 		// [KIT_HIT_FEEDBACK] the kill message to the session's players: who
 		// (a player, else none), whom, with what (the hit's item; none: its
 		// damage type)
 		{
 			json::Value km = json::object();
-			km.set("victim", pe->second.name);
+			km.set("victim", vname);
 			km.set("by", bid && bid != player ? bn : ss_());
 			km.set("item", bid ? m_striking : ss_());
 			km.set("type", type);
@@ -21615,11 +22049,11 @@ struct Module: public interface::Module, public Interface
 		if(jstr(game_rules(), "respawn") == "on_signal"){
 			set_health(player, "waiting", true);
 			log_i(MODULE, "%s died (%s by %s): waiting to respawn",
-					cs(pe->second.name), cs(type), cs(bn));
+					cs(vname), cs(type), cs(bn));
 			return;
 		}
 		log_i(MODULE, "%s died (%s by %s): respawns at once",
-				cs(pe->second.name), cs(type), cs(bn));
+				cs(vname), cs(type), cs(bn));
 		revive(player);
 	}
 
@@ -23227,6 +23661,13 @@ struct Module: public interface::Module, public Interface
 	bool player_at(uint64_t pid, ss_ &scene, double p[3])
 	{
 		const size_t peer = peer_of_player(pid);
+		// [KIT_GUIDE_BOTS_2] a bot's place
+		auto bi = peer ? m_entities.end() : m_entities.find(pid);
+		if(bi != m_entities.end() && bi->second.has_pos && is_bot(bi->second)){
+			scene_of(bi->second, &scene);
+			world_of(bi->second, p);
+			return true;
+		}
 		if(!peer)
 			return false;
 		scene = m_peers[peer].scene;
@@ -27862,6 +28303,7 @@ struct Module: public interface::Module, public Interface
 		std::map<uint64_t, std::array<double, 6>> seat_home;
 		// [KIT_VEHICLE_MOVEMENTS]
 		std::map<uint64_t, Drive> drives;
+		std::map<uint64_t, Mind> minds; // [KIT_GUIDE_BOTS_2] a round's creatures
 		std::map<uint64_t, json::Value> motions;
 		std::map<size_t, std::map<uint64_t, std::pair<int64_t, double>>> track_sent;
 		std::map<uint64_t, std::map<ss_, json::Value>> play_params;
@@ -27925,6 +28367,7 @@ struct Module: public interface::Module, public Interface
 		swap(m_boxes_sent, c.boxes_sent);
 		swap(m_seat_home, c.seat_home);
 		swap(m_drives, c.drives);
+		swap(m_minds, c.minds);
 		swap(m_motions, c.motions);
 		swap(m_track_sent, c.track_sent);
 		swap(m_play_params, c.play_params);
@@ -27958,6 +28401,8 @@ struct Module: public interface::Module, public Interface
 		std::set<ss_> written;
 		// [KIT_LATE_JOIN] The players its start took in
 		size_t start_players = 0;
+		// [KIT_GUIDE_BOTS_2] The bots' copies made in it (one keeps it used)
+		size_t bots = 0;
 		// [KIT_CTF] The scene its round is played in ("": the maker's own);
 		// [KIT_MAP_ROTATION] the rotation's other maps: their entities do
 		// not run in it
@@ -28001,6 +28446,8 @@ struct Module: public interface::Module, public Interface
 		size_t comp = 0;
 		ss_ by;
 		sv_<size_t> peers;
+		// [KIT_GUIDE_BOTS_2] the bots it takes (the default's ids)
+		sv_<uint64_t> bots;
 		// [KIT_MINIGAMES_1] an end's result, on_session_end's third
 		json::Value result = json::null();
 		// [KIT_MAP_ROTATION] a start's map and the rotation's others
@@ -28540,6 +28987,7 @@ struct Module: public interface::Module, public Interface
 				peers.push_back(ps.first);
 		for(size_t peer : peers)
 			move_peer(peer, 0);
+		bots_back(id);
 		{
 			SessionScope sc(*this, id);
 			m_queue.clear();
@@ -28668,6 +29116,7 @@ struct Module: public interface::Module, public Interface
 				for(size_t peer : o.peers)
 					if(!session_of_peer(peer))
 						move_peer(peer, id);
+				bots_into(o.bots, id);
 				Run r;
 				r.entity = o.maker;
 				r.comp = o.comp;
@@ -28678,6 +29127,8 @@ struct Module: public interface::Module, public Interface
 				for(size_t peer : o.peers)
 					if(session_of_peer(peer) == o.from)
 						move_peer(peer, o.target);
+				if(!o.from)
+					bots_into(o.bots, o.target);
 			} else if(o.op == "end"){
 				end_session(o.target, o.by, true, o.result);
 			}
@@ -28693,10 +29144,10 @@ struct Module: public interface::Module, public Interface
 	{
 		const Instance &in = e.comps[comp];
 		const bool any = m_types[in.type].players;
-		const uint64_t run_player = player_id(r.by);
+		const uint64_t run_player = actor_id(r.by);
 		auto may = [&](uint64_t pid){
 			return pid && (any || pid == run_player ||
-					in.inside.count(itos(pid)));
+					in.inside.count(itos(pid)) || in.inside.count("bot:"+itos(pid)));
 		};
 		auto peer_of_player = [&](uint64_t pid, size_t &peer){
 			for(auto &p : m_peers)
@@ -28743,6 +29194,8 @@ struct Module: public interface::Module, public Interface
 						why = "player "+itos(pid)+" is none it reaches";
 					else if(peer_of_player(pid, peer))
 						so.peers.push_back(peer);
+					else if(is_bot_id(pid))
+						so.bots.push_back(pid);
 				}
 				// [KIT_MAP_ROTATION]
 				so.map = jstr_at(o, 2);
@@ -28758,11 +29211,15 @@ struct Module: public interface::Module, public Interface
 				so.target = o.at(2u).is_number() ?
 						(uint64_t)std::max(0.0, o.at(2u).as_number()) : 0;
 				size_t peer = 0;
-				if(!may(pid) || !peer_of_player(pid, peer))
+				// [KIT_GUIDE_BOTS_2] a bot from the default
+				if(may(pid) && !m_active && is_bot_id(pid))
+					so.bots.push_back(pid);
+				else if(!may(pid) || !peer_of_player(pid, peer))
 					why = "player "+itos(pid)+" is none it reaches here";
 				else if(m_active ? so.target != 0 : !made_by(so.target))
 					why = "session "+itos(so.target)+" is none it made";
-				so.peers.push_back(peer);
+				if(peer)
+					so.peers.push_back(peer);
 			} else if(op == "end"){
 				so.target = o.at(1u).is_number() ?
 						(uint64_t)std::max(0.0, o.at(1u).as_number()) : 0;

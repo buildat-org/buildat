@@ -1288,7 +1288,9 @@ local MK = {}
 -- [KIT_GOALS] Where a marker points: its `kind` "use", at its `target`; "reach",
 -- the middle of its box of cells `box`, turned with its node
 function M.marker_at(n, mk)
-	if mk.kind == "use" then
+	-- [KIT_GUIDE_BOTS_2] a target followed: "reach" and "place_item" too
+	if mk.kind == "use" or ((mk.kind == "reach" or mk.kind == "place_item") and
+			(tonumber(mk.target) or 0) >= 2 and P.nodes[tonumber(mk.target)]) then
 		local t = P.nodes[tonumber(mk.target) or 0]
 		return (t and t.node or n.node).worldPosition
 	end

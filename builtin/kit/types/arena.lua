@@ -77,6 +77,8 @@
 -- kit/action's or a kit/ui_button's press, by the player) marks its player
 -- in the queue ready, or not ready again; out of the queue no longer
 -- ready, and a round's start makes no one ready.
+-- [KIT_GUIDE_BOTS_2] Bots are players here (kit/bot): in the queue, the
+-- minimum, the teams and the rounds; a bot in the queue is ready.
 local function ids_in(list, n)
 	local out = {}
 	for i = 1, math.min(n, #list) do
@@ -157,10 +159,14 @@ local function clock(s)
 end
 
 -- The default round's side: the queue's status
+-- [KIT_GUIDE_BOTS_2] a bot in the queue is ready
 local function ready_count(c)
-	local n = 0
+	local n, bots = 0, {}
+	for _, p in ipairs(c.players or {}) do
+		bots[p.id] = p.bot
+	end
 	for _, id in ipairs(c.state.queue) do
-		if c.state.ready["player:" .. id] then
+		if c.state.ready["player:" .. id] or bots[id] then
 			n = n + 1
 		end
 	end

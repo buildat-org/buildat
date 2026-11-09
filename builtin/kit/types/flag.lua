@@ -160,7 +160,8 @@ local function take(c, p)
 	if c.state.left >= 0 then
 		report(c, "left", ceil(c.state.left))
 	end
-	c:emit("taken", p.name)
+	-- ([KIT_GUIDE_BOTS_2] as by the taker: a poll's near take too)
+	c:emit("taken", p.name, p.by)
 end
 
 -- How it is taken where it is now: "click", "near" or nil (not now)
@@ -295,7 +296,7 @@ local function place(c, p)
 	c.state.where = "placed"
 	c:move(p.pos, {fall = true})
 	c:log("placed by", p.name)
-	c:emit("placed", p.name)
+	c:emit("placed", p.name, p.by)
 end
 
 return {

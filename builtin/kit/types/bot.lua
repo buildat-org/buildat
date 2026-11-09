@@ -6,7 +6,10 @@
 -- walks to what makes the signal (the goal's `via`) and uses it once. A signal
 -- goal with no via, or one its via's use did not do in `patience` seconds,
 -- leaves it stuck: a log line and "(stuck)" on its nameplate. Drawn as a
--- player; in no list of players, no team, no count of them.
+-- player. [KIT_GUIDE_BOTS_2] A player everywhere (kit.cpp's bots): in
+-- c.players, teams, queues and rounds; its goal the first it can act on
+-- now; "place_item" walks to the target and uses what it carries there; a
+-- use or a place not done in `patience` seconds is tried again.
 -- simplified: one goal at a time, no combat; a bot's use passes no who-may-use
 -- rule (a region's or a part's own), the upgrade is may_use() for a bot
 local function plate(c)
@@ -47,7 +50,8 @@ local function think(c)
 	elseif g.kind == "reach" then
 		c:propose_move({to = g.at, range = 0.3})
 	else
-		local t = g.kind == "use" and g.target or g.via
+		local t = g.kind == "use" and g.target or g.kind == "place_item" and
+				g.carry or g.via
 		if g.dist > c.params.reach then
 			c:propose_move({to = g.at, range = c.params.reach * 0.6})
 		elseif not c.state.used then
@@ -55,7 +59,8 @@ local function think(c)
 			c.state.used = true
 			c:log("uses", t, "for goal", g.id)
 			c:use(t)
-			c:after(c.params.patience, "patience")
+			c:after(g.kind == "signal" and c.params.patience or
+					math.min(2, c.params.patience), "patience")
 		end
 	end
 	plate(c)
@@ -97,6 +102,11 @@ return {
 		if name == "patience" then
 			local g = c.goal
 			if g and g.id == c.state.goal and c.state.used then
+				-- [KIT_GUIDE_BOTS_2] a use or a place again (a moving target)
+				if g.kind ~= "signal" then
+					c.state.used = false
+					return
+				end
 				stuck(c, g, "using " .. (g.via or g.target) .. " did not do \"" .. g.text .. "\"")
 			end
 			return

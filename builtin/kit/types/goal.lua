@@ -31,8 +31,18 @@
 -- out by the panel (a goal has a place, so it cannot be the panel's child):
 -- kit/guide's window, a column panel at the top right that fits its shown
 -- step and is gone with none. simplified: no title or step count on it.
--- simplified: a goal is done once a round for whom it was (a chain's branches
--- may merge on it); a looping objective needs a "repeat" parameter here.
+-- [KIT_GUIDE_BOTS_2] `target` an entity followed as it moves: a reach goal
+-- with one is its box (`size`, level) round the target's place, wherever it
+-- goes. `pick` says whose target: "entity" (`target`), "own_team" (the team
+-- of the player or bot doing it), "their_team" (the nearest other team);
+-- picked per player, so only a bot acts on one (a player's line is the
+-- same). Kind "place_item": put what one carries (an entity on them, a
+-- flag) at the target: a bot walks there and uses it (a flag's right
+-- click); done by a link (the flag's "placed"). `except_own_zone`: a bot
+-- leaves the target alone while it lies in its own team's region (a flag it
+-- placed). `repeat`: done signals "done" and it stays active, done again
+-- and again (a flag taken each time); off, a goal is done once a round for
+-- whom it was (a chain's branches may merge on it).
 -- simplified: to "team" is left out (kit/ui_text's way, the members sharing one
 -- entry, is the upgrade).
 -- simplified: its zone is watched and drawn whatever its `kind` (Kit has no
@@ -59,6 +69,12 @@ end
 
 -- Done for k (nil: for everyone)
 local function finish(c, k, by)
+	-- [KIT_GUIDE_BOTS_2] done again and again, active still
+	if c.params["repeat"] then
+		c:log("done", k and "for " .. c:name(k) or "for everyone",
+				by and "by " .. c:name(by) or "", "(repeats)")
+		return c:emit("done", by and c:name(by) or "")
+	end
 	if k then
 		c.state.own[k] = {shown = false, done = true}
 	else
@@ -131,9 +147,13 @@ return {
 		style = "param:hud_style", order = "param:hud_order", prefix = "hud_"},
 	params = {
 		kind = {type = "string", default = "reach",
-			choices = {"reach", "use", "signal"}},
+			choices = {"reach", "use", "signal", "place_item"}},
 		size = {type = "position", default = {3, 2, 3}},
 		target = {type = "entity", default = 0},
+		pick = {type = "string", default = "entity",
+			choices = {"entity", "own_team", "their_team"}},
+		except_own_zone = {type = "bool", default = false},
+		["repeat"] = {type = "bool", default = false},
 		via = {type = "entity", default = 0},
 		autostart = {type = "bool", default = false},
 		to = {type = "string", default = "player",

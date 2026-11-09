@@ -2847,6 +2847,11 @@ function NT.goal_check()
 		if c and p.kind == "use" and not by[tonumber(p.target) or 0] then
 			warn(e, "a use goal with no object to use (target)")
 		end
+		-- [KIT_GUIDE_BOTS_2]
+		if c and p.kind == "place_item" and (p.pick or "entity") == "entity" and
+				not by[tonumber(p.target) or 0] then
+			warn(e, "a place_item goal with nowhere to put it (target or pick)")
+		end
 		-- [KIT_GUIDE_BOTS] a bot stuck on it
 		if c and p.kind == "signal" and p.audience ~= "players" and
 				not by[tonumber(p.via) or 0] then
