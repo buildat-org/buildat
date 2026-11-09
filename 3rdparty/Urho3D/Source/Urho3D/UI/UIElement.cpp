@@ -30,6 +30,7 @@
 #include "../Resource/ResourceCache.h"
 #include "../Scene/ObjectAnimation.h"
 #include "../UI/Cursor.h"
+#include "../UI/Menu.h"
 #include "../UI/UI.h"
 #include "../UI/UIElement.h"
 #include "../UI/UIEvents.h"
@@ -142,6 +143,36 @@ UIElement::UIElement(Context* context) :
     pivotSet_(false)
 {
     SetEnabled(false);
+}
+
+// [UI_DROPDOWN_REMOVE_CRASH] The element InsertChild is moving: its removal
+// from the old parent keeps its popups shown
+static UIElement* movingElement = 0;
+
+// [UI_DROPDOWN_REMOVE_CRASH] Hide the shown popups of the Menus (DropDownLists)
+// in a subtree leaving its parent. A shown popup is modal: it and the menu's
+// top-level ancestor sit under the UI's modal root, remembered by raw pointers;
+// a menu removed with it shown left the popup on the screen, and the menu's
+// destruction (~Menu -> ShowPopup(false) -> UI::SetModalElement) touched the
+// freed ancestors: a crash.
+static void HidePopups(UIElement* element)
+{
+    PODVector<UIElement*> all;
+    element->GetChildren(all, true);
+    all.Push(element);
+    Vector<SharedPtr<Menu> > shown;
+    for (unsigned i = 0; i < all.Size(); ++i)
+    {
+        Menu* menu = dynamic_cast<Menu*>(all[i]);
+        if (menu && menu->GetShowPopup())
+            shown.Push(SharedPtr<Menu>(menu));
+    }
+    // The hiding sends E_ITEMSELECTED: a handler may hide or remove others
+    for (unsigned i = 0; i < shown.Size(); ++i)
+    {
+        if (shown[i]->GetShowPopup())
+            shown[i]->ShowPopup(false);
+    }
 }
 
 UIElement::~UIElement()
@@ -1352,7 +1383,9 @@ void UIElement::InsertChild(unsigned index, UIElement* element)
     else
         children_.Insert(children_.Begin() + index, SharedPtr<UIElement>(element));
 
+    movingElement = element;
     element->Remove();
+    movingElement = 0;
 
     if (sortChildren_)
         sortOrderDirty_ = true;
@@ -1384,6 +1417,20 @@ void UIElement::InsertChild(unsigned index, UIElement* element)
 
 void UIElement::RemoveChild(UIElement* element, unsigned index)
 {
+    if (element && element->parent_ == this && element != movingElement && Refs() > 0 &&
+        element->Refs() > 0)
+    {
+        SharedPtr<UIElement> keep(element);
+        HidePopups(element);
+        // A hidden popup may have moved the element back from the modal root
+        if (element->parent_ != this)
+        {
+            if (element->parent_)
+                element->parent_->RemoveChild(element);
+            return;
+        }
+        index = 0;
+    }
     for (unsigned i = index; i < children_.Size(); ++i)
     {
         if (children_[i] == element)
@@ -1412,30 +1459,18 @@ void UIElement::RemoveChild(UIElement* element, unsigned index)
 
 void UIElement::RemoveChildAtIndex(unsigned index)
 {
-    if (index >= children_.Size())
-        return;
-
-    // Send change event if not already being destroyed
-    UIElement* sender = Refs() > 0 ? GetElementEventSender() : 0;
-    if (sender)
-    {
-        using namespace ElementRemoved;
-
-        VariantMap& eventData = GetEventDataMap();
-        eventData[P_ROOT] = GetRoot();
-        eventData[P_PARENT] = this;
-        eventData[P_ELEMENT] = children_[index];
-
-        sender->SendEvent(E_ELEMENTREMOVED, eventData);
-    }
-
-    children_[index]->Detach();
-    children_.Erase(index);
-    UpdateLayout();
+    if (index < children_.Size())
+        RemoveChild(children_[index], index);
 }
 
 void UIElement::RemoveAllChildren()
 {
+    if (Refs() > 0)
+    {
+        Vector<SharedPtr<UIElement> > children = children_;
+        for (unsigned i = 0; i < children.Size(); ++i)
+            HidePopups(children[i]);
+    }
     UIElement* root = GetRoot();
     UIElement* sender = Refs() > 0 ? GetElementEventSender() : 0;
 
