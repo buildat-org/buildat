@@ -321,7 +321,8 @@ assert not re.search(r"goal warnings: [1-9]", cl), "goal warnings"
 uses = [m.start() for m in re.finditer("Entity %s used by kitboss" % lever_b, srv)]
 opened = srv.find("kit/door %s: opened" % door)
 assert len(uses) == 2 and uses[1] < opened, (uses, opened)
-assert len(re.findall(r"kit/goal \d+: done for kitboss", srv)) == 4, "the goals' ends"
+# Five: [KIT_GUIDE_BOTS]' bots-only "Flip lever A" passes on as done for a player
+assert len(re.findall(r"kit/goal \d+: done for kitboss", srv)) == 5, "the goals' ends"
 PY
 echo "ok: the puzzle room opens in edit mode and is solved through to its exit"
 
