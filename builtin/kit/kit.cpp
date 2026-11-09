@@ -4818,10 +4818,7 @@ struct Module: public interface::Module, public Interface
 					to_start(e, i);
 					continue;
 				}
-				const json::Value &sd = m_types[in.type].decl.get("state");
-				if(sd.is_object())
-					for(json::Iterator it(sd); it; ++it)
-						in.state.set(it.key(), (*it).get("default"));
+				state_defaults(in);
 				const json::Value &s = saved.at((unsigned)i);
 				if(full_type(jstr(s, "type")) == in.type){
 					runtime_from(in, s);
@@ -8869,11 +8866,8 @@ struct Module: public interface::Module, public Interface
 		for(uint64_t id : made){
 			Entity &e = m_entities[id];
 			for(Instance &in : e.comps){
-				const json::Value &sd = m_types[in.type].decl.get("state");
 				in.state = json::object();
-				if(sd.is_object())
-					for(json::Iterator it(sd); it; ++it)
-						in.state.set(it.key(), (*it).get("default"));
+				state_defaults(in);
 			}
 			if(wants_node(e))
 				make_node(e);
@@ -11323,10 +11317,21 @@ struct Module: public interface::Module, public Interface
 		if(pd.is_object())
 			for(json::Iterator it(pd); it; ++it)
 				in.params.set(it.key(), (*it).get("default"));
-		const json::Value &sd = decl.get("state");
+		state_defaults(in);
+	}
+
+	// Its state's keys at their defaults: a key's `param`'s value if it has
+	// one ([KIT_HUD_BAR_START] a ui_bar placed in a Running game its start,
+	// not 0)
+	void state_defaults(Instance &in)
+	{
+		const json::Value &sd = m_types[in.type].decl.get("state");
 		if(sd.is_object())
-			for(json::Iterator it(sd); it; ++it)
-				in.state.set(it.key(), (*it).get("default"));
+			for(json::Iterator it(sd); it; ++it){
+				const json::Value &pv = in.params.get(jstr(*it, "param"));
+				in.state.set(it.key(), (*it).get("param").is_string() &&
+						!pv.is_undefined() ? pv : (*it).get("default"));
+			}
 	}
 
 	// A player's entity, made the first time they are seen: kind "player",
@@ -13015,11 +13020,8 @@ struct Module: public interface::Module, public Interface
 			Entity &n = m_entities[id];
 			// Its state its types' defaults, as a new entity's
 			for(Instance &in : n.comps){
-				const json::Value &sd = m_types[in.type].decl.get("state");
 				in.state = json::object();
-				if(sd.is_object())
-					for(json::Iterator it(sd); it; ++it)
-						in.state.set(it.key(), (*it).get("default"));
+				state_defaults(in);
 			}
 			if(wants_node(n))
 				make_node(n);
@@ -25258,13 +25260,7 @@ struct Module: public interface::Module, public Interface
 	{
 		Instance &in = e.comps[i];
 		in.state = json::object();
-		const json::Value &sd = m_types[in.type].decl.get("state");
-		if(sd.is_object())
-			for(json::Iterator it(sd); it; ++it){
-				const json::Value &pv = in.params.get(jstr(*it, "param"));
-				in.state.set(it.key(), (*it).get("param").is_string() &&
-						!pv.is_undefined() ? pv : (*it).get("default"));
-			}
+		state_defaults(in);
 		in.timers.clear();
 		in.inside.clear();
 		const json::Value &s = m_start.get(itos(e.id)).at((unsigned)i);
@@ -27738,10 +27734,7 @@ struct Module: public interface::Module, public Interface
 			// simplified: a new instance (an undone delete's too) starts
 			// with its type's defaults; the runtime state of a deleted one
 			// is not kept for an undo
-			const json::Value &sd = m_types[in.type].decl.get("state");
-			if(sd.is_object())
-				for(json::Iterator si(sd); si; ++si)
-					in.state.set(si.key(), (*si).get("default"));
+			state_defaults(in);
 			fresh.push_back(i);
 		}
 		if(had){
