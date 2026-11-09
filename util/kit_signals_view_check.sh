@@ -364,7 +364,7 @@ J
 		grep -a "a sideways bar: true" "$t/docs_touch/page.log" && fail "a sideways bar ($t/docs_touch/page.log)"
 		echo "ok: the signals by a finger in the web client; screenshots $t/docs_touch/docs_*.png"
 	}
-	WEB_ROW_X=300 WEB_ROW_Y=300 WEB_FINGER_X=60 WEB_FINGER_Y=392
+	WEB_ROW_X=255 WEB_ROW_Y=238 WEB_FINGER_X=45 WEB_FINGER_Y=316
 	if [ "${2:-}" = docs ]; then
 		web_docs
 		echo "PASS: the signals on the web"
@@ -374,6 +374,25 @@ J
 	"$here/util/web_drive.sh" "${WEB_BROWSER:-chrome}" workbench "$t/mouse.json" "$t/mouse" ||
 		fail "the web drive by the mouse ($t/mouse)"
 	viewport_log "$t/mouse/page.log" mouse || fail "the viewport by the mouse ($t/mouse/page.log)"
+	# [KIT_SIGNALS_FONT_FIT] At the web's text size of 80 %: each layout's
+	# columns as the frame's text scaling leaves them, not 80 % of their room
+	python3 -I - "$t/mouse/page.log" <<'PY' || fail "the columns scaled again ($t/mouse/page.log)"
+import re, sys
+def rects(s):
+    return dict((m[1], m[2]) for m in re.finditer(r"(\w+) (\d+ \d+ \d+ \d+)", s))
+laid, n = None, 0
+for l in open(sys.argv[1], errors="replace"):
+    m = re.search(r"signals: columns in \S+ under \d+: (.*)$", l)
+    if m:
+        laid = rects(m[1])
+    m = re.search(r"signals: columns scaled: (.*)$", l)
+    if m and laid:
+        got = rects(m[1])
+        for k, v in laid.items():
+            assert got.get(k, v) == v, f"{k}: laid out {v}, shown {got[k]}"
+        n += 1
+assert n, "no columns scaled line"
+PY
 	echo "ok: by the mouse in the web client; screenshots $t/mouse/armed.png $t/mouse/refused.png $t/mouse/under.png $t/mouse/orbit_1.png $t/mouse/orbit_2.png"
 	steps tap 500 300 600 420 500 400 240 > "$t/touch.json"
 	TOUCH=1 WEB_DRIVE_VIEWPORT=1000x500@1 "$here/util/web_drive.sh" chrome workbench "$t/touch.json" "$t/touch" ||
