@@ -553,6 +553,15 @@ int main(int argc, char *argv[])
 
 	app::Options app_options;
 	app_options.preference_overrides = preference_overrides;
+	// The editors' text size the checks measured their clicks at
+	// (util/check_lib.sh): a default and not an -o, so the preferences
+	// file is still read and written ([KIT_EDITOR_FONT])
+	if(const char *f = getenv("BUILDAT_TEST_EDITOR_FONT")){
+		ss_ err;
+		if(!app::parse_preference_options(ss_()+"kit_editor_font="+f+
+				",floorplanner_font="+f, &app_options, &err))
+			log_w(MODULE, "BUILDAT_TEST_EDITOR_FONT: %s", err.c_str());
+	}
 	if(forced_w > 0){
 		app_options.graphics.window_w = forced_w;
 		app_options.graphics.window_h = forced_h;

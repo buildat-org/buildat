@@ -24,6 +24,9 @@ export BUILDAT_DIE_WITH_PARENT=1
 # builtin/luanti's self-checks (the shapes, the registry, the map's round
 # trip) run only when asked ([LUANTI_SELFCHECKS_OFF]): every check asks
 export BUILDAT_LUANTI_SELFCHECKS=1
+# Kit's and floorplanner's editor text at 100 %, where the checks measured
+# their clicks; the default is 80 ([KIT_EDITOR_FONT]). A native client only.
+export BUILDAT_TEST_EDITOR_FONT="${BUILDAT_TEST_EDITOR_FONT:-100}"
 # The ci mode ([CI_TIER] 3): under BUILDAT_CI a client draws unlit unless
 # the runner names a mode -- a third to a quarter of pbr's cost on
 # llvmpipe (the item's table). Without the variable nothing changes.
