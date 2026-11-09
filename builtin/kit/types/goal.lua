@@ -25,10 +25,12 @@
 -- [KIT_GUIDE_BOTS] A bot (kit/bot) walks into a reach goal's box, uses a use
 -- goal's target, and for a signal goal uses its `via` (what makes the signal,
 -- a lever) once; a signal goal without one leaves a bot stuck. A guide (the
--- prefab kit/guide) is a chain whose lines sit in one window at a corner
--- (hud_anchor top_right, a width): one step at a time, the next as each is
--- done. simplified: no title or step count on the window; a kit/ui_panel
--- holds no positioned entity, the upgrade is a panel a goal names.
+-- prefab kit/guide) is a chain whose lines sit in one window at a corner:
+-- one step at a time, the next as each is done.
+-- [KIT_GUIDE_BOTS_2] `hud_panel`: a kit/ui_panel its line is drawn in, laid
+-- out by the panel (a goal has a place, so it cannot be the panel's child):
+-- kit/guide's window, a column panel at the top right that fits its shown
+-- step and is gone with none. simplified: no title or step count on it.
 -- simplified: a goal is done once a round for whom it was (a chain's branches
 -- may merge on it); a looping objective needs a "repeat" parameter here.
 -- simplified: to "team" is left out (kit/ui_text's way, the members sharing one
@@ -161,6 +163,7 @@ return {
 		hud_border = {cat = "hud", type = "string", default = "#808080a0"},
 		hud_order = {cat = "hud", type = "number", default = 0, min = -40,
 			max = 40},
+		hud_panel = {cat = "hud", type = "entity", default = 0},
 		marker = {cat = "look", type = "bool", default = true},
 		marker_style = {cat = "look", type = "string", default = "shapes",
 			choices = {"shapes", "plain"}},

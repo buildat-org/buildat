@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-11-06)
-# covers: builtin/kit/kit.cpp builtin/kit/types/environment.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/environment.lua builtin/kit/client_lua/controls.lua builtin/kit/client_data/KitVoxel* extensions/cartoon_sky/** extensions/sky_render/** extensions/physical_sky/** apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/terrain.h builtin/kit/types/environment.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/environment.lua builtin/kit/client_lua/controls.lua builtin/kit/client_data/KitVoxel* extensions/cartoon_sky/** extensions/sky_render/** extensions/physical_sky/** apps/workbench/**
 # [KIT_LIGHTING] (kit_plan 4o) kit/environment's lighting, sky and weather
 # on Workbench. A fresh save, the admin Ended, a flat grassland World (no
 # trees); the shots from the editor's 3D camera at (20, 4, 20) toward
@@ -37,6 +37,10 @@
 #      with lighting game (software GL's default is cartoon).
 #  10. [KIT_FAST_PHYSICAL] the environment's default fast_physical: no
 #      plate's shadow, its noon metered and its sky physical's.
+#  11. [KIT_LEAF_TRANSLUCENCY] physical's light through the leaves: two
+#      walls of a builder's leaves, one translucent by its kind, one at
+#      translucency 0, each shot toward the sun: the first brighter, the
+#      light it adds yellow, at spots that move between two frames.
 # The shots are kept with KEEP_TMP=1; look at them.
 #   util/kit_lighting_check.sh
 #   REF=1 util/kit_lighting_check.sh   writes util/kit_lighting_ref.txt
@@ -340,6 +344,29 @@ EOF
 		edit '{"op": "set_voxel", "pos": [14, 1, 14], "voxel": "kit/grass"}'
 		echo "idle 30000"
 		shot phys_grass_side "11.5 2.2 11.5 14.5 1.4 14.5"
+		# 11. [KIT_LEAF_TRANSLUCENCY] the sun at 16 o'clock and north 15
+		# is toward (-0.89, 0.45, 0.01): two walls of leaves 4 x 4 across
+		# it, on (by kind) and off, each shot from 3 m east of it
+		ep north 15
+		ep time 16
+		sky "physical, 16.0 o'clock"
+		ed '{"op": "voxel", "name": "leafon", "texture": "kit/leaves.png", "kind": "leaves"}'
+		echo "sync 5000"
+		ed '{"op": "voxel", "name": "leafoff", "texture": "kit/leaves.png", "kind": "leaves", "translucency": 0}'
+		echo "sync 5000"
+		for z0 in 30 50; do
+			v=kitboss/leafon
+			[ $z0 = 50 ] && v=kitboss/leafoff
+			for y in 1 2 3 4; do for z in $z0 $((z0 + 1)) $((z0 + 2)) $((z0 + 3)); do
+				edit "{\"op\": \"set_voxel\", \"pos\": [30, $y, $z], \"voxel\": \"$v\"}"
+			done; done
+		done
+		echo "idle 30000"
+		shot leaves_on "34 1.2 32 25.07 5.69 32.12"
+		shot leaves_on2 "34 1.2 32 25.07 5.69 32.12"
+		shot leaves_off "34 1.2 52 25.07 5.69 52.12"
+		ep time 12
+		ep north 30
 		w surface '"heightmap"'
 		echo "wait_log_any 60000 heightmap: terrain built"
 		echo "idle 30000"
@@ -622,5 +649,27 @@ read hr hg hb <<<"$(low "$t/phys_ground_heightmap.png")"
 awk "BEGIN{v = $vr + $vg + $vb; h = $hr + $hg + $hb; exit !(h > v * 0.85 && h < v * 1.15)}" ||
 	fail "physical's heightmap ground ($hr $hg $hb) not the voxels' ($vr $vg $vb)"
 echo "ok: physical's water: its sand through the shallows ($wr $wg $wb), deeper blue ($dr $dg $db); its heightmap ground ($hr $hg $hb) the voxels' ($vr $vg $vb)"
-echo "PASS: lighting: cartoon today's look, physical metered, the sky by the hour and its switches, the clouds, the sky light in caves, the weather a modifier that fades, the cover dimming the sun, physical's shadows, the client's force cartoon, physical's water and heightmap ground"
+# 11. [KIT_LEAF_TRANSLUCENCY] the wall's pixels (right of the palette,
+# over the people's list) against the other wall's: brighter by over 30
+# of 765 at many against few darker, the light added yellow (red over
+# blue), at spots mostly elsewhere in the second frame
+read lb ld lr lg lbl lmove <<<"$(python3 -I - "$t" <<'EOF'
+import sys
+from PIL import Image
+t = sys.argv[1]
+px = lambda n: list(Image.open(f"{t}/{n}.png").convert("RGB").crop(
+	(300, 170, 1024, 600)).getdata())
+on, on2, off = px("leaves_on"), px("leaves_on2"), px("leaves_off")
+lit = lambda x: {i for i, (p, q) in enumerate(zip(x, off)) if sum(p) - sum(q) > 30}
+s1, s2 = lit(on), lit(on2)
+dark = sum(1 for p, q in zip(on, off) if sum(p) - sum(q) < -30)
+add = [sum(on[i][k] - off[i][k] for i in s1) / max(1, len(s1)) for k in range(3)]
+print(len(s1), dark, "%.1f %.1f %.1f" % tuple(add),
+	"%.2f" % (len(s1 & s2) / max(1, len(s1 | s2))))
+EOF
+)"
+awk "BEGIN{exit !($lb > 300 && $lb > 2 * $ld && $lr > 1.3 * $lbl && $lmove < 0.5)}" ||
+	fail "the leaves' light through: $lb pixels brighter than the wall at translucency 0, $ld darker; added $lr $lg $lbl; the spots' share in both frames $lmove"
+echo "ok: the leaves' light through: $lb pixels brighter than at translucency 0 ($ld darker), the light added $lr $lg $lbl, the spots' share in both frames $lmove"
+echo "PASS: lighting: cartoon today's look, physical metered, the sky by the hour and its switches, the clouds, the sky light in caves, the weather a modifier that fades, the cover dimming the sun, physical's shadows, the client's force cartoon, physical's water and heightmap ground, the light through the leaves"
 # vim: set noet ts=4 sw=4:

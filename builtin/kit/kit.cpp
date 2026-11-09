@@ -2025,11 +2025,22 @@ struct Module: public interface::Module, public Interface
 		}
 		return false;
 	}
-	// The panel a UI element is in: its parent if one, 0 none
+	// The panel a UI element is in: its parent if one, 0 none.
+	// [KIT_GUIDE_BOTS_2] Or the panel its `hud_panel` names (kit/goal's: a
+	// goal has a place, so no panel is its parent)
 	uint64_t panel_of(const Entity &e)
 	{
 		auto it = m_entities.find(e.parent);
-		return it != m_entities.end() && is_panel(it->second) ? e.parent : 0;
+		if(it != m_entities.end() && is_panel(it->second))
+			return e.parent;
+		for(const Instance &in : e.comps){
+			const json::Value &v = in.params.get("hud_panel");
+			auto pi = v.is_number() ? m_entities.find((uint64_t)std::max(0.0,
+					v.as_number())) : m_entities.end();
+			if(pi != m_entities.end() && is_panel(pi->second))
+				return pi->first;
+		}
+		return 0;
 	}
 
 	// [KIT_PREFAB_ROOT] Whether it is a placed prefab's root
@@ -5122,7 +5133,7 @@ struct Module: public interface::Module, public Interface
 
 	// {"op": "voxel", "name", "texture", "kind", "solid", "transparent",
 	// "light", "friction", "blast_resist", "surface", "group", "level", "sound_dig",
-	// "sound_place", "drop"}: the builder's voxel type "<their name>/<name>", or its
+	// "sound_place", "drop", "translucency"}: the builder's voxel type "<their name>/<name>", or its
 	// next version
 	void make_voxel(const Peer &p, const json::Value &j,
 			std::function<void(const ss_&)> refuse)
@@ -5162,14 +5173,17 @@ struct Module: public interface::Module, public Interface
 		row.set("sound_place", jstr(j, "sound_place"));
 		// [KIT_CTF] what its dig drops ("" itself)
 		row.set("drop", jstr(j, "drop"));
+		// [KIT_LEAF_TRANSLUCENCY] its light through (none: by kind)
+		if(!j.get("translucency").is_undefined())
+			row.set("translucency", j.get("translucency"));
 		world::Material m;
 		if(!m.parse(row) || m.light != row.get("light").as_number())
 			return refuse("a texture, a kind (solid, leaves, plant, water), "
 					"light (a whole number 0...15), friction 0...10, "
 					"blast_resist 0...1000, a "
 					"surface tag and a group (letters, digits and _), a "
-					"level (a whole number 0...15), sounds' names and a "
-					"drop's (<author>/<name>)");
+					"level (a whole number 0...15), sounds' names, a "
+					"drop's (<author>/<name>) and translucency 0...1");
 		if(!texture_choices().count(texture))
 			return refuse("texture: no voxel or upload has "+texture);
 		auto old = m_voxel_types.find(name);

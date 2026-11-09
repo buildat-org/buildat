@@ -3,16 +3,19 @@
 	"author": "kit",
 	"name": "guide",
 	"group": "Game",
-	"version": 1,
+	"version": 2,
 	"entities": [
 		{"id": 1, "name": "guide: first step", "pos": [0, 0, 0],
 			"components": [{"type": "kit/goal", "params": {"text": "First: reach the marked place",
 				"autostart": true, "validate_reachable": 2, "marker_label": "First",
-				"hud_anchor": "top_right", "hud_x": 1, "hud_y": 1, "hud_width": 30},
+				"hud_panel": 3, "hud_width": 30, "hud_background": "none", "hud_border": "none"},
 				"links": [{"output": "done", "to": 2, "input": "activate"}]}]},
 		{"id": 2, "name": "guide: last step", "pos": [8, 0, 0],
 			"components": [{"type": "kit/goal", "params": {"text": "Then: reach the end",
 				"marker_label": "End",
-				"hud_anchor": "top_right", "hud_x": 1, "hud_y": 1, "hud_width": 30}}]}
+				"hud_panel": 3, "hud_width": 30, "hud_background": "none", "hud_border": "none"}}]},
+		{"id": 3, "name": "guide: window",
+			"components": [{"type": "kit/ui_panel", "params": {"anchor": "top_right",
+				"x": 1, "y": 1, "width": 0, "height": 0, "layout": "column", "shown": true}}]}
 	]
 }
