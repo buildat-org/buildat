@@ -3629,7 +3629,71 @@ local function fit_inspector()
 	end
 end
 
-inspector_window = function()
+-- [KIT_INSPECTOR_REBUILD] A state is mostly an edit: drawn again only when
+-- it changed more than the authored entities (and the undo count, the
+-- credits, the round's own, the session's clock: the bar's), or changed the selected entity, one it links
+-- to or that links to it, its parent or a child. A copy's and a kit/
+-- symmetry's sheets read further: built on every state as before, as is
+-- everything after a selection, a click or another packet (a build is
+-- 17-60 ms).
+local IR = {}
+local QUIET = {authored = true, undo = true, credits = true, made = true,
+	session = true}
+local function sel_key()
+	local id = S.primary
+	local e, is_made = find(id)
+	if not e or e.built then
+		return nil
+	end
+	local mine = {}
+	for _, c in ipairs(e.components or {}) do
+		if c.type == "kit/symmetry" then
+			return nil
+		end
+		for _, l in ipairs(c.links or {}) do
+			mine[l.to] = true
+		end
+	end
+	local out = {network.write_json(e), tostring(is_made)}
+	for _, o in ipairs(all_entities()) do
+		local near = o.id ~= id and (mine[o.id] or o.parent == id or
+				o.id == e.parent or (type(o.built) == "table" and
+				(o.built.source == id or o.built.by == id)))
+		for _, c in ipairs(not near and o.components or {}) do
+			for _, l in ipairs(c.links or {}) do
+				near = near or l.to == id
+			end
+		end
+		if near then
+			out[#out + 1] = network.write_json(o)
+		end
+	end
+	return table.concat(out, "\n")
+end
+
+local build_inspector
+-- on_state: from a state (refresh("state")), kept when it changed nothing
+-- the inspector shows
+inspector_window = function(on_state)
+	local now = buildat.get_time_us()
+	if on_state and W.inspector and IR.key and IR.of == S.primary and
+			not (IR.tried and now >= IR.tried) then
+		local quiet = true
+		for k in pairs(NT.state_changed or {}) do
+			quiet = quiet and QUIET[k] == true
+		end
+		if quiet and sel_key() == IR.key then
+			log:info("kit editor: the inspector kept over a state")
+			return
+		end
+	end
+	build_inspector()
+	IR.of = S.primary
+	IR.key = W.inspector and S.primary and sel_key() or nil
+	IR.tried = E.tried and E.tried.till > now and E.tried.till or nil
+end
+
+build_inspector = function()
 	if W.inspector and IV.view then
 		IV.y = IV.view.viewPosition.y
 	end
@@ -3888,7 +3952,7 @@ refresh = function(why)
 		palette()
 	end
 	touch_bar()
-	inspector_window()
+	inspector_window(why == "state")
 	NT.hud_panel(true)
 	NT.sg.refresh()
 	people()
