@@ -8,6 +8,15 @@
 -- [KIT_INVENTORY_PLAY] carry: the state keys of the player's components
 -- whose numbers carry (money, XP, score: "score money"), kept over Stop
 -- and Play and into and out of an arena's rounds.
+-- [KIT_PLAYER_PERSIST] remember: a player who leaves while Running, or
+-- is in when the server stops, comes back where they were (the scene,
+-- the place, the facing; kept in the running state's save) instead of on
+-- a spawn; a place built over since sends them to the spawn as before,
+-- one dug out from under them lets them fall. Their items and carried
+-- numbers stay theirs through a round anyway (and through Stop with
+-- keep_inventory). Stop forgets the places unless keep_position.
+-- simplified: the default session's players only (not an arena's
+-- rounds); a place on a moving deck is the world's where they left it.
 -- The first one counts.
 return {
 	version = 1,
@@ -21,5 +30,6 @@ return {
 		keep_position = {type = "bool", default = false},
 		keep_builds = {type = "bool", default = false},
 		carry = {type = "string", default = ""},
+		remember = {type = "bool", default = false},
 	},
 }

@@ -1276,6 +1276,10 @@ struct Module: public interface::Module, public Interface
 	// what each keeps between plays ("keep inventory": their items)
 	std::map<ss_, uint64_t> m_players;
 	json::Value m_aside = json::object();
+	// [KIT_PLAYER_PERSIST] kit/player_state's remember: where each player
+	// was as they left or the server stopped, {name: {"scene", "pos",
+	// "yaw"}}, the default session's (the runtime row's players' "spot")
+	json::Value m_spots = json::object();
 	// The types each player entity carries (`player = true`), Kit's own
 	// inventory and score among them
 	sv_<ss_> m_player_types;
@@ -4475,6 +4479,8 @@ struct Module: public interface::Module, public Interface
 			j.set("id", (int64_t)p.second);
 			if(m_aside.get(p.first).is_object())
 				j.set("aside", m_aside.get(p.first));
+			if(!m_active && m_spots.get(p.first).is_object())
+				j.set("spot", m_spots.get(p.first));
 			players.set(p.first, j);
 		}
 		r.set("made", made);
@@ -4527,6 +4533,9 @@ struct Module: public interface::Module, public Interface
 		if(!m_hosted)
 			return;
 		size_t n = 0;
+		// [KIT_PLAYER_PERSIST] where the players still here are
+		for(auto &p : m_peers)
+			keep_spot(p.first);
 		auto save = [&](){
 			n += m_runtime_dirty + m_marks_dirty.size();
 			save_runtime();
@@ -11352,6 +11361,8 @@ struct Module: public interface::Module, public Interface
 				m_next_player = std::max(m_next_player, id + 1);
 				if((*it).get("aside").is_object())
 					m_aside.set(it.key(), (*it).get("aside").deepcopy());
+				if(!m_active && (*it).get("spot").is_object())
+					m_spots.set(it.key(), (*it).get("spot").deepcopy());
 			}
 		if(old_aside.is_object())
 			for(json::Iterator it(old_aside); it; ++it){
@@ -24168,6 +24179,8 @@ struct Module: public interface::Module, public Interface
 	// ([KIT_SESSIONS_1]) to another session's (a guest's entity kept)
 	void leave_round(size_t peer, bool gone)
 	{
+		if(gone)
+			keep_spot(peer);
 		const bool was_editing = m_peers.count(peer) && m_peers[peer].editing;
 		const uint64_t player = m_peers.count(peer) ? m_peers[peer].player : 0;
 		const bool guest = m_peers.count(peer) && m_peers[peer].guest;
@@ -25248,6 +25261,101 @@ struct Module: public interface::Module, public Interface
 				}
 	}
 
+	// [KIT_PLAYER_PERSIST] kit/player_state's remember (the first one's)
+	bool remembers()
+	{
+		for(auto &p : m_entities)
+			for(const Instance &in : p.second.comps)
+				if(m_types[in.type].between_plays)
+					return in.params.get("remember").is_true();
+		return false;
+	}
+
+	// Where a player is kept for their return (leaving, the server's stop):
+	// Running, the default session, a named player out of edit mode.
+	// Their items and carried numbers need nothing: their entity keeps them
+	// through the round (and through Stop with keep_inventory)
+	void keep_spot(size_t peer)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end() || m_active || !m_hosted || !m_session.running)
+			return;
+		const Peer &p = pi->second;
+		if(!p.player || p.guest || p.editing || p.name.empty() || !remembers())
+			return;
+		json::Value s = json::object(), pos = json::array();
+		for(int k = 0; k < 3; k++)
+			pos.append(p.pos[k]);
+		s.set("scene", p.scene);
+		s.set("pos", pos);
+		auto bi = m_bodies.find(peer);
+		s.set("yaw", bi != m_bodies.end() ? bi->second.look_yaw : 0.0);
+		m_spots.set(p.name, s);
+		m_runtime_dirty = true;
+		log_i(MODULE, "%s kept at (%g, %g, %g) in %s for their return",
+				cs(p.name), p.pos[0], p.pos[1], p.pos[2], cs(p.scene));
+	}
+
+	// Whether a body fits at a place: its feet's cell and the one over it
+	// not solid (a section not loaded is loaded for it)
+	bool standable(const ss_ &scene, double x, double y, double z)
+	{
+		auto si = m_host.scenes.find(scene);
+		if(si == m_host.scenes.end())
+			return false;
+		const int cx = (int)std::floor(x + 0.5), cy = (int)std::floor(y + 0.5),
+				cz = (int)std::floor(z + 0.5);
+		bool clear = true;
+		voxelworld::access(m_server, si->second, [&](voxelworld::Instance *w){
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			const pv::Vector3DInt16 ss = w->get_section_size_voxels();
+			for(int j = cy; j <= cy + 1; j++){
+				const pv::Vector3DInt16 sp(floor_div(cx, ss.getX()),
+						floor_div(j, ss.getY()), floor_div(cz, ss.getZ()));
+				if(!w->is_section_loaded(sp))
+					w->load_or_generate_section(sp);
+				const interface::VoxelDefinition *d = reg->get((uint32_t)reg->
+						get_format().id.get(w->get_voxel(pv::Vector3DInt32(cx, j,
+						cz), true).data));
+				if(d && d->physically_solid)
+					clear = false;
+			}
+		});
+		return clear;
+	}
+
+	// A returning player put where they were kept (true), the spot used up;
+	// one built over goes to the spawn as before
+	bool put_back(size_t peer)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end() || m_active || !remembers())
+			return false;
+		const ss_ name = pi->second.name;
+		const json::Value s = m_spots.get(name).deepcopy();
+		if(!s.is_object())
+			return false;
+		m_spots.del_key(name);
+		m_runtime_dirty = true;
+		const ss_ scene = jstr(s, "scene");
+		const json::Value &pos = s.get("pos");
+		if(!pos_ok(pos) || !m_host.scenes.count(scene))
+			return false;
+		const double x = pos.at(0u).as_number(), y = pos.at(1u).as_number(),
+				z = pos.at(2u).as_number();
+		if(!standable(scene, x, y, z)){
+			log_i(MODULE, "%s's kept place (%g, %g, %g) is built over: the "
+					"spawn", cs(name), x, y, z);
+			return false;
+		}
+		const double look = s.get("yaw").is_number() ?
+				norm_yaw(s.get("yaw").as_number()) : NAN;
+		log_i(MODULE, "%s back where they were at (%g, %g, %g) in %s facing %g",
+				cs(name), x, y, z, cs(scene), look);
+		to_scene(peer, scene == pi->second.scene ? "" : scene, x, y, z, look);
+		return true;
+	}
+
 	// A player through the round's start, once a round: their entity at its
 	// start (each player type's defaults: no items, no score), the items
 	// they had at the last Stop with "keep inventory"; then, as each time
@@ -25311,6 +25419,8 @@ struct Module: public interface::Module, public Interface
 						json::object(), json::object(), true));
 		}
 		bool placed = false;
+		// [KIT_PLAYER_PERSIST] one returning where they were: no spawn
+		const bool back = !at_play && put_back(peer);
 		for(auto &p : m_entities){
 			ss_ es;
 			if(!scene_of(p.second, &es) || es != scene)
@@ -25320,7 +25430,7 @@ struct Module: public interface::Module, public Interface
 				const bool places = t.spawn && (t.spawn_param.empty() ||
 						p.second.comps[i].params.get(t.spawn_param).is_true());
 				if(!t.handlers.count("on_join") ||
-						(places && at_play && keep_position))
+						(places && ((at_play && keep_position) || back)))
 					continue;
 				placed = placed || places;
 				Run r;
@@ -25569,6 +25679,9 @@ struct Module: public interface::Module, public Interface
 		// What the players had, put aside with "keep inventory"
 		bool keep_inventory = false, keep_position = false;
 		between_plays(keep_inventory, keep_position);
+		// [KIT_PLAYER_PERSIST] the places of those who left, as the others'
+		if(!keep_position)
+			m_spots = json::object();
 		m_aside = json::object();
 		// [KIT_INVENTORY_PLAY] the slots with them ("#slots"), and
 		// kit/player_state's carried numbers ("#numbers")
