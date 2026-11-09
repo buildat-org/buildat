@@ -104,7 +104,7 @@ frames 3
 screenshot $t/b_menu.png
 click Button "My account (lanbob)..."
 wait_log 5000 server window: the page account
-wait_log 120000 kit editor: edit rights: yes
+wait_log_any 120000 kit editor: edit rights: yes
 click Button "Open to LAN"
 quit
 C
@@ -114,9 +114,13 @@ BUILDAT_JOIN_NAME=lanbob BUILDAT_JOIN_PASSWORD=lanpass1234 BUILDAT_JOIN_CREATE=1
 grep -aq "lanbob joined from ${at%:*}" "$t/o.log" ||
 	fail "lanbob did not join over the LAN ($(grep -a "Command seq\|click:" "$t/b.log" | tail -3); $t/b.log)"
 grep -aq "New account lanbob" "$t/o.log" || fail "lanbob made no account ($t/o.log)"
-# None before the grant (the owner's wait for lanbob came after its menu)
-awk '/kit editor: edit rights: yes/ { exit 1 } /pause: the menu shown/ { exit 0 }' \
-	"$t/b.log" || fail "lanbob had edit rights before the grant ($t/b.log)"
+# None before the grant: lanbob's first rights not earlier than the
+# server's grant (one clock; the owner may grant before lanbob's menu).
+# simplified: compares the HH:MM:SS.mmm stamps, wrong across midnight
+granted=$(grep -a "granted builder lanbob" "$t/o.log" | head -1 | grep -oP '\d\d:\d\d:\d\d\.\d+')
+rights=$(grep -a "kit editor: edit rights: yes" "$t/b.log" | head -1 | grep -oP '\d\d:\d\d:\d\d\.\d+')
+[ -n "$granted" ] && [ -n "$rights" ] && ! [[ "$rights" < "$granted" ]] ||
+	fail "lanbob had edit rights before the grant (at ${rights:-never}, granted ${granted:-never}; $t/b.log)"
 grep -aq "kit editor: edit rights: yes" "$t/b.log" ||
 	fail "lanbob not given edit rights ($(grep -a "Command seq" "$t/b.log" | tail -1); $t/o.log)"
 grep -aq 'click: no visible, uncovered Button "Open to LAN"' "$t/b.log" ||
