@@ -1783,10 +1783,13 @@ local function touch_end(id, x, y)
 	if S.gesture then
 		if fingers_n() == 0 then
 			S.gesture = nil
+			-- (S.pos is the 3D camera's: nil in a view never orbited,
+			-- alpha.8's crash on touch)
 			log:info(string.format("kit editor: two fingers let go: %s",
 					S.view == "2d" and string.format("the plan %.1f across",
-					S.span) or string.format("the camera at %.1f,%.1f,%.1f",
-					S.pos.x, S.pos.y, S.pos.z)))
+					S.span) or S.pos and string.format(
+					"the camera at %.1f,%.1f,%.1f", S.pos.x, S.pos.y,
+					S.pos.z) or "in " .. tostring(S.view)))
 		end
 		return
 	end
