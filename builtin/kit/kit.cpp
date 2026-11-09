@@ -2021,11 +2021,22 @@ struct Module: public interface::Module, public Interface
 		}
 		return false;
 	}
-	// The panel a UI element is in: its parent if one, 0 none
+	// The panel a UI element is in: its parent if one, 0 none.
+	// [KIT_GUIDE_BOTS_2] Or the panel its `hud_panel` names (kit/goal's: a
+	// goal has a place, so no panel is its parent)
 	uint64_t panel_of(const Entity &e)
 	{
 		auto it = m_entities.find(e.parent);
-		return it != m_entities.end() && is_panel(it->second) ? e.parent : 0;
+		if(it != m_entities.end() && is_panel(it->second))
+			return e.parent;
+		for(const Instance &in : e.comps){
+			const json::Value &v = in.params.get("hud_panel");
+			auto pi = v.is_number() ? m_entities.find((uint64_t)std::max(0.0,
+					v.as_number())) : m_entities.end();
+			if(pi != m_entities.end() && is_panel(pi->second))
+				return pi->first;
+		}
+		return 0;
 	}
 
 	// [KIT_PREFAB_ROOT] Whether it is a placed prefab's root

@@ -5,7 +5,8 @@
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/bot.lua builtin/kit/types/bot.prefab.json builtin/kit/types/guide.prefab.json builtin/kit/types/goal.lua builtin/kit/types/creature_walker.lua builtin/kit/types/pause_menu_action.lua builtin/kit/types/spawner.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/players.lua apps/workbench/templates/puzzle_room/** apps/workbench/**
 # [KIT_GUIDE_BOTS] (kit_plan 4z7) the puzzle room's guide, done by a bot and seen
 # by a player, on a fresh Workbench project from the template:
-#   1. Played: kitboss sees the guide's first step in its corner window.
+#   1. Played: kitboss sees the guide's first step in its corner window
+#      (a kit/ui_panel its goals name, [KIT_GUIDE_BOTS_2]).
 #   2. "Add bot" in the pause menu: a bot comes, presses the button, runs
 #      through the gate, flips lever A, then lever C (the levers goal's via),
 #      and leaves through the door: each goal done for it, the last one too.
@@ -154,6 +155,15 @@ for g in ("47", "48", "49", "46"):
 		sys.exit(f"kitboss never saw goal {g}'s step: {first}")
 if any(int(x) < 600 for g, x in shown if g in ("47", "48", "49", "46")):
 	sys.exit(f"a step outside the top right window: {shown}")
+# [KIT_GUIDE_BOTS_2] in play the step inside the guide's window (55)
+w = re.search(r"kit: ui 55 panel at (\d+),(\d+) (\d+)x(\d+) .* shown: ", cl)
+g = re.search(r"kit: ui 47 text at (\d+),(\d+) (\d+)x(\d+) .* shown: ", cl)
+if not w or not g:
+	sys.exit("the guide's window or its first step not shown in play")
+wx, wy, ww, wh = map(int, w.groups())
+gx, gy, gw, gh = map(int, g.groups())
+if not (wx <= gx and wy <= gy and gx + gw <= wx + ww and gy + gh <= wy + wh):
+	sys.exit(f"the first step {g.groups()} not in the window {w.groups()}")
 if re.search(r"kit: ui 51 text .* shown(?:: |, edit mode: )", cl):
 	sys.exit("kitboss saw the bots' own goal")
 # A bot is in no list of players
