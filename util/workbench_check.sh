@@ -1506,7 +1506,7 @@ screenshot @T@/t_ghost.png
 finger_up 1
 wait_log 10000 kit editor: state: 5 entities
 wait_log_any 5000 kit: entity 6 drawn
-tap Button "Tools"
+tap Button "Inspector"
 frames 5
 tap 700 300
 wait_log 5000 kit editor: selected 6
