@@ -645,6 +645,39 @@ local function dress(r, w, h, V, f)
 	end
 end
 
+-- [KIT_GOAL_PRIORITIES] Stacked lines: the highest priority (a goal's)
+-- first, then by order, then by id
+local function before(a, b)
+	local pa, pb = num(a.ui.priority, 0, -100, 100), num(b.ui.priority, 0, -100, 100)
+	if pa ~= pb then
+		return pa > pb
+	end
+	local oa, ob = num(a.ui.order, 0, -40, 40), num(b.ui.order, 0, -40, 40)
+	if oa ~= ob then
+		return oa < ob
+	end
+	return a.id < b.id
+end
+
+-- [KIT_GOAL_PRIORITIES] A goal's when_holding for this player: "" always,
+-- "none" no item tagged "weapon" in their hands, else one with that tag
+local function holding(when)
+	when = tostring(when or "")
+	if when == "" then
+		return true
+	end
+	local sheet = M.held_item and M.held_item() or nil
+	local tag = when == "none" and "weapon" or when
+	local has = false
+	for _, t in ipairs(sheet and type(sheet.tags) == "table" and sheet.tags or {}) do
+		has = has or t == tag
+	end
+	if when == "none" then
+		return not has
+	end
+	return has
+end
+
 -- A shown panel's stacked children placed (r.sx, r.sy, in it) and, where
 -- its width or height is 0, its size fitted to them
 local function stack(r, V)
@@ -656,13 +689,7 @@ local function stack(r, V)
 			k.sx, k.sy = 0, 0
 		end
 	end
-	table.sort(kids, function(a, b)
-		local oa, ob = num(a.ui.order, 0, -40, 40), num(b.ui.order, 0, -40, 40)
-		if oa ~= ob then
-			return oa < ob
-		end
-		return a.id < b.id
-	end)
+	table.sort(kids, before)
 	local pad = pad_of(V)
 	local gap = num(u.gap, 0, 0, 100) * V
 	local row = u.layout == "row"
@@ -880,6 +907,10 @@ local function update()
 				if u.stack and tostring(u.text or "") == "" then
 					r.on, r.empty = false, true
 				end
+				-- [KIT_GOAL_PRIORITIES] only while holding what it asks
+				if r.on and not holding(u.holding) then
+					r.on = false
+				end
 				if u.source == "health" then
 					value = hp
 					placed_health = placed_health or (r.on and hp ~= nil)
@@ -1009,13 +1040,7 @@ local function update()
 		end
 	end
 	for _, l in pairs(stacks) do
-		table.sort(l, function(a, b)
-			local oa, ob = num(a.ui.order, 0, -40, 40), num(b.ui.order, 0, -40, 40)
-			if oa ~= ob then
-				return oa < ob
-			end
-			return a.id < b.id
-		end)
+		table.sort(l, before)
 		local at, up = 0, tostring(l[1].ui.anchor):find("bottom") ~= nil
 		for _, r in ipairs(l) do
 			r.dy = up and -at or at

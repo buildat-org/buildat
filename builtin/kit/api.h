@@ -1324,6 +1324,15 @@ namespace interface
 // first by id it can act on now. c:emit(output, value, by): by (a player's
 // or a bot's, one the instance reaches) is the `by` of the runs its links
 // make (kit/flag's taken, credited to the taker).
+// [KIT_GOAL_PRIORITIES] Goals are a priority list (kit/goal's priority,
+// when_holding, item_tag; picks nearest_item and nearest_opponent; kinds
+// attack and place_item with an item): c.goal is the highest priority one
+// a bot can act on, with item, damage, reach and cooldown of the item its
+// when_holding names (a bot holds all it has). c:use_item(name) (a bot's):
+// the item hooks (on_item "use", target 0) as a player's click with it, an
+// item of use kind "use" it has, once a second at most. c:hurt and blasts
+// reach bots. An item's sheet has `tags` (8 names at most; the stock
+// items' weapon, blade, tool, explosive), sent to the clients with it.
 // c:explode{at = {x, y, z} (c.pos by default), radius (0...9, 0), power
 // (0...1000, 1), kill (0...32, radius), hurt (0...32, 0), share (0...1,
 // 0.5), friendly_fire (true), type ("blast")}: a blast in the entity's

@@ -575,6 +575,8 @@ static const char PRELUDE[] =
 "	-- [KIT_GUIDE_BOTS] a bot's use of an entity, as a player's; its goal\n"
 "	c.goal = req.goal\n"
 "	function c:use(id) fx.use = tonumber(id) end\n"
+"	-- [KIT_GOAL_PRIORITIES] a bot's use of an item it has\n"
+"	function c:use_item(name) fx.use_item = tostring(name) end\n"
 "	-- [KIT_CARRY_ATTACH] its own entity on a player (drawn at their body)\n"
 "	function c:attach(player, opts)\n"
 "		if opts ~= nil and type(opts) ~= 'table' then error('attach: options are {bone = name, offset = {x, y, z}}', 2) end\n"

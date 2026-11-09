@@ -43,6 +43,20 @@
 -- placed). `repeat`: done signals "done" and it stays active, done again
 -- and again (a flag taken each time); off, a goal is done once a round for
 -- whom it was (a chain's branches may merge on it).
+-- [KIT_GOAL_PRIORITIES] Goals are a priority list. `priority`: a bot acts
+-- on the active goal of the highest it can act on now (ties: the first by
+-- id); a player's lines stack highest first, the top one the main line.
+-- `when_holding`: only while one holds an item with that tag ("" always,
+-- "none": no "weapon"; a player what is in their hands, a bot anything it
+-- has); a player's line is hidden otherwise. `pick` also "nearest_item"
+-- (the nearest kit/pickup of an item tagged `item_tag`: a reach goal there
+-- picks it up) and "nearest_opponent" (a player or bot of another team).
+-- Kind "attack": a bot walks to the target and hits it with the item of
+-- its when_holding (its damage, reach and cooldown); "place_item" with a
+-- when_holding tag: a bot uses that item at the target (kit/placer's bomb).
+-- A player's line is a hint: these kinds and picks are done by bots only.
+-- simplified: a priority list, not a planner; a reach goal with a picked
+-- target other than "entity" is never entered (its box stays at its place)
 -- simplified: to "team" is left out (kit/ui_text's way, the members sharing one
 -- entry, is the upgrade).
 -- simplified: its zone is watched and drawn whatever its `kind` (Kit has no
@@ -144,14 +158,19 @@ return {
 		width = "param:hud_width", height = "param:hud_height",
 		size = "param:hud_size", color = "param:hud_color",
 		background = "param:hud_background", border = "param:hud_border",
-		style = "param:hud_style", order = "param:hud_order", prefix = "hud_"},
+		style = "param:hud_style", order = "param:hud_order", prefix = "hud_",
+		priority = "param:priority", holding = "param:when_holding"},
 	params = {
 		kind = {type = "string", default = "reach",
-			choices = {"reach", "use", "signal", "place_item"}},
+			choices = {"reach", "use", "signal", "place_item", "attack"}},
 		size = {type = "position", default = {3, 2, 3}},
 		target = {type = "entity", default = 0},
 		pick = {type = "string", default = "entity",
-			choices = {"entity", "own_team", "their_team"}},
+			choices = {"entity", "own_team", "their_team", "nearest_item",
+			"nearest_opponent"}},
+		item_tag = {type = "string", default = "weapon"},
+		priority = {type = "number", default = 0, min = -100, max = 100},
+		when_holding = {type = "string", default = ""},
 		except_own_zone = {type = "bool", default = false},
 		["repeat"] = {type = "bool", default = false},
 		via = {type = "entity", default = 0},

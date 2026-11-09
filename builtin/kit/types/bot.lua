@@ -10,7 +10,11 @@
 -- c.players, teams, queues and rounds; its goal the first it can act on
 -- now; "place_item" walks to the target and uses what it carries there; a
 -- use or a place not done in `patience` seconds is tried again.
--- simplified: one goal at a time, no combat; a bot's use passes no who-may-use
+-- [KIT_GOAL_PRIORITIES] Its goal the highest priority one it can act on
+-- (kit/goal's). "attack": it walks to the target and, within the item's
+-- reach, hurts it for the item's damage once a cooldown; "place_item" with
+-- an item (c.goal.item): it uses the item there (c:use_item).
+-- simplified: one goal at a time; a bot's use passes no who-may-use
 -- rule (a region's or a part's own), the upgrade is may_use() for a bot
 local function plate(c)
 	local p = c.params.name .. " " .. c.id .. (c.state.stuck and "\n(stuck)" or "")
@@ -49,6 +53,25 @@ local function think(c)
 		stuck(c, g, "nothing to use for \"" .. g.text .. "\" (no via)")
 	elseif g.kind == "reach" then
 		c:propose_move({to = g.at, range = 0.3})
+	elseif g.kind == "attack" then
+		local reach = math.max(1, g.reach or 2)
+		c:propose_move({to = g.at, range = reach * 0.6})
+		if g.dist <= reach and not c.state.cooling then
+			c:hurt(g.target, {amount = g.damage or 1, type = "normal"})
+			c:log("hits", g.target, "with", g.item or "a hand", "for goal", g.id)
+			c.state.cooling = true
+			c:after(math.max(0.3, g.cooldown or 0.5), "cool")
+		end
+	elseif g.kind == "place_item" and g.item then
+		if g.dist > c.params.reach then
+			c:propose_move({to = g.at, range = c.params.reach * 0.6})
+		elseif not c.state.used then
+			c:propose_move(nil)
+			c.state.used = true
+			c:log("uses", g.item, "for goal", g.id)
+			c:use_item(g.item)
+			c:after(math.min(2, c.params.patience), "patience")
+		end
 	else
 		local t = g.kind == "use" and g.target or g.kind == "place_item" and
 				g.carry or g.via
@@ -90,14 +113,20 @@ return {
 		goal = {default = 0},
 		used = {default = false},
 		stuck = {default = false},
+		cooling = {default = false},
 	},
 	outputs = {stuck = "string"},
 	on_start = function(c)
 		c.state.goal, c.state.used, c.state.stuck = 0, false, false
+		c.state.cooling = false
 		plate(c)
 		c:after(0.25)
 	end,
 	on_timer = function(c, name)
+		if name == "cool" then
+			c.state.cooling = false
+			return
+		end
 		-- Its via used and the goal still there
 		if name == "patience" then
 			local g = c.goal

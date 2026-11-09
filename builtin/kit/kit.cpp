@@ -12702,6 +12702,9 @@ struct Module: public interface::Module, public Interface
 		// [KIT_GUIDE_BOTS] c:use (a bot's)
 		if(fx.get("use").is_number() && m_types[type].decl.get("bot").is_true())
 			bot_use(e.id, (uint64_t)std::max(0.0, fx.get("use").as_number()));
+		// [KIT_GOAL_PRIORITIES] c:use_item (a bot's)
+		if(fx.get("use_item").is_string() && m_types[type].decl.get("bot").is_true())
+			bot_use_item(e.id, fx.get("use_item").as_string());
 		// [KIT_CARRY_ATTACH] c:attach, c:detach
 		const json::Value &att = fx.get("attach");
 		if(att.is_array())
@@ -19661,6 +19664,52 @@ struct Module: public interface::Module, public Interface
 			uint64_t actor, const double w[3])
 	{
 		const ss_ pick = jstr(in.params, "pick", "entity");
+		// [KIT_GOAL_PRIORITIES] "nearest_item": the nearest kit/pickup of an
+		// item with the tag `item_tag`; "nearest_opponent": the nearest
+		// player or bot of another team (none: of none), alive
+		if(pick == "nearest_item" || pick == "nearest_opponent"){
+			const ss_ tag = jstr(in.params, "item_tag");
+			const uint64_t own = team_of_player(actor);
+			ss_ scene, ts;
+			scene_of(g, &scene);
+			const Entity *best = nullptr;
+			double bd = 0;
+			auto consider = [&](const Entity &t, const double tw[3]){
+				const double d = (tw[0] - w[0]) * (tw[0] - w[0]) +
+						(tw[2] - w[2]) * (tw[2] - w[2]);
+				if(!best || d < bd)
+					best = &t, bd = d;
+			};
+			auto opponent = [&](uint64_t id){
+				return id != actor && !player_waiting(id) && !(own && in_team(id, own));
+			};
+			// (a player's place is their peer's)
+			if(pick == "nearest_opponent")
+				for(auto &pp : m_peers){
+					auto pe = m_entities.find(pp.second.player);
+					if(pp.second.player && pp.second.scene == scene &&
+							pe != m_entities.end() && opponent(pp.second.player))
+						consider(pe->second, pp.second.pos);
+				}
+			for(auto &p : m_entities){
+				const Entity &t = p.second;
+				if(!t.has_pos || t.id == actor || !scene_of(t, &ts) || ts != scene)
+					continue;
+				bool ok = false;
+				if(pick == "nearest_item"){
+					for(const Instance &ti : t.comps)
+						ok = ok || (ti.type == "kit/pickup" && ti.disabled.empty() &&
+								item_tagged(jstr(ti.params, "item"), tag));
+				} else {
+					ok = is_bot(t) && opponent(t.id);
+				}
+				double tw[3];
+				world_of(t, tw);
+				if(ok)
+					consider(t, tw);
+			}
+			return best;
+		}
 		if(pick == "own_team" || pick == "their_team"){
 			const uint64_t own = team_of_player(actor);
 			if(pick == "own_team"){
@@ -19707,12 +19756,72 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
-	// c.goal: the bot's goal, the first by id in its scene active for it, not
-	// for players only, that it can act on now: {id, kind, text, target, via,
-	// carry, at (where to go: the box's middle on its floor, the target's or
-	// the via's place), dist}. Acting on: a use whose target takes a use now
-	// (and with except_own_zone lies outside its team's region); a place_item
-	// while it carries something; reach and signal always
+	// [KIT_GOAL_PRIORITIES] Whether an item type has a tag (its sheet's tags)
+	bool item_tagged(const ss_ &item, const ss_ &tag)
+	{
+		auto it = m_item_types.find(item);
+		if(it == m_item_types.end())
+			return false;
+		const json::Value &tags = it->second.get("tags");
+		for(unsigned i = 0; i < tags.size(); i++)
+			if(tags.at(i).is_string() && tags.at(i).as_string() == tag)
+				return true;
+		return false;
+	}
+
+	// A goal's when_holding for a player or a bot: "" always; "none" no
+	// item tagged "weapon"; else an item with that tag. A player holds what
+	// is in their hands, a bot all it has (no hands to choose with). item:
+	// the one that has it (a bot's first by name)
+	bool holds(uint64_t actor, const ss_ &when, ss_ *item = nullptr)
+	{
+		if(when.empty())
+			return true;
+		const ss_ tag = when == "none" ? ss_("weapon") : when;
+		ss_ got;
+		auto ei = m_entities.find(actor);
+		if(ei != m_entities.end() && is_bot(ei->second)){
+			const Instance *inv = own_inventory(actor);
+			const json::Value &items = inv ? inv->state.get("items") : json::Value();
+			if(items.is_object())
+				for(json::Iterator it(items); it && got.empty(); ++it)
+					if((*it).is_number() && (*it).as_number() >= 1 &&
+							item_tagged(it.key(), tag))
+						got = it.key();
+		} else {
+			const ss_ h = hands_of(actor);
+			if(!h.empty() && item_tagged(h, tag))
+				got = h;
+		}
+		if(item)
+			*item = got;
+		return when == "none" ? got.empty() : !got.empty();
+	}
+
+	// Where a goal's target is: a player's entity at their peer's place
+	// (Peer::pos, the feet + 0.5), anything else its own
+	void place_of(const Entity &t, double w[3])
+	{
+		const size_t pr = t.kind == "player" ? peer_of_player(t.id) : 0;
+		if(!pr){
+			world_of(t, w);
+			return;
+		}
+		for(int k = 0; k < 3; k++)
+			w[k] = m_peers[pr].pos[k] - (k == 1 ? 0.5 : 0);
+	}
+
+	// c.goal: the bot's goal, of those in its scene active for it, not for
+	// players only, that it can act on now the one of the highest `priority`
+	// (ties: the first by id): {id, kind, text, target, via, carry, item,
+	// damage, reach, cooldown, at (where to go: the box's middle on its
+	// floor, the target's or the via's place), dist}. Acting on: one whose
+	// when_holding it holds (holds()), and then a use whose target takes a
+	// use now (and with except_own_zone lies outside its team's region); a
+	// place_item while it carries something, or ([KIT_GOAL_PRIORITIES]) with
+	// a when_holding tag, has an item of it; an attack with a target; reach
+	// and signal always. item: the held item of when_holding, its sheet's
+	// damage, reach and cooldown with it
 	void bot_goal_lit(const Entity &e, ss_ &o)
 	{
 		const ss_ key = "bot:"+itos(e.id);
@@ -19722,6 +19831,8 @@ struct Module: public interface::Module, public Interface
 		world_of(e, w);
 		const uint64_t carry = bot_carries(e.id);
 		const uint64_t own_team = team_of_player(e.id);
+		json::Value best;
+		double best_p = 0;
 		for(auto &p : m_entities){
 			const Entity &g = p.second;
 			if(!g.has_pos)
@@ -19729,6 +19840,9 @@ struct Module: public interface::Module, public Interface
 			for(const Instance &in : g.comps){
 				if(in.type != "kit/goal" || !in.disabled.empty() ||
 						jstr(in.params, "audience") == "players")
+					continue;
+				const double pri = num(in.params, "priority", 0, -100, 100);
+				if(best.is_object() && pri <= best_p)
 					continue;
 				// goal.lua's active(): its own, else everyone's
 				bool shown = in.state.get("shown").is_true();
@@ -19741,20 +19855,33 @@ struct Module: public interface::Module, public Interface
 				scene_of(g, &gs);
 				if(gs != scene)
 					continue;
+				const ss_ when = jstr(in.params, "when_holding");
+				ss_ item;
+				if(!holds(e.id, when, &item))
+					continue;
 				const ss_ kind = jstr(in.params, "kind");
 				const Entity *t = goal_target(g, in, e.id, w);
 				if(kind == "use" && (!t || !usable_now(*t) ||
 						(in.params.get("except_own_zone").is_true() && own_team &&
 						region_team(*t) == own_team)))
 					continue;
-				if(kind == "place_item" && (!carry || !t))
+				const bool by_item = kind == "place_item" && !item.empty();
+				if(kind == "place_item" && (!t || (!carry && !by_item)))
+					continue;
+				if(kind == "attack" && !t)
 					continue;
 				json::Value j = json::object();
 				j.set("id", (int64_t)g.id);
 				j.set("kind", kind);
 				j.set("text", jstr(in.params, "text"));
-				if(carry)
+				if(carry && !by_item)
 					j.set("carry", (int64_t)carry);
+				if(!item.empty()){
+					j.set("item", item);
+					const json::Value &sh = m_item_types[item];
+					for(const char *k : {"damage", "reach", "cooldown"})
+						j.set(k, sh.get(k).is_number() ? sh.get(k).as_number() : 0.0);
+				}
 				double at[3];
 				if(kind == "reach" && !t){
 					int n[3];
@@ -19776,18 +19903,24 @@ struct Module: public interface::Module, public Interface
 						j.set("via", (int64_t)ti->first);
 					}
 				} else {
-					world_of(t ? *t : g, at);
+					if(t)
+						place_of(*t, at);
+					else
+						world_of(g, at);
 					if(t)
 						j.set("target", (int64_t)t->id);
 				}
 				j.set("at", point(at));
 				j.set("dist", std::sqrt((at[0] - w[0]) * (at[0] - w[0]) +
 						(at[1] - w[1]) * (at[1] - w[1]) + (at[2] - w[2]) * (at[2] - w[2])));
-				o += ",goal=";
-				lua_lit(j, o);
-				return;
+				best = j;
+				best_p = pri;
 			}
 		}
+		if(!best.is_object())
+			return;
+		o += ",goal=";
+		lua_lit(best, o);
 	}
 
 	// A bot's use of an entity: its usable parts' on_use and the world event
@@ -19841,6 +19974,39 @@ struct Module: public interface::Module, public Interface
 		ev.set("kind", ss_("use"));
 		ev.set("entity", (int64_t)id);
 		fire_event(scene, ev, by);
+	}
+
+	// [KIT_GOAL_PRIORITIES] A bot's use of an item it has of use kind "use"
+	// (kit/bot's c:use_item, a place_item goal's): the item hooks as a
+	// player's click of it on nothing (kit/placer's), at most once a second.
+	// simplified: no item cooldown of its own (a second for all), no target
+	std::map<uint64_t, int64_t> m_bot_item_at;
+	void bot_use_item(uint64_t bot, const ss_ &item)
+	{
+		auto bi = m_entities.find(bot);
+		if(bi == m_entities.end() || !bi->second.has_pos)
+			return;
+		const ss_ name = bot_name(bi->second);
+		auto ti = m_item_types.find(item);
+		const Instance *inv = own_inventory(bot);
+		const json::Value &n = inv ? inv->state.get("items").get(item.c_str()) :
+				json::Value();
+		const char *why = ti == m_item_types.end() || jstr(ti->second, "use") != "use" ?
+				"not an item of use kind \"use\"" : !n.is_number() || n.as_number() < 1 ?
+				"it has none" : !m_session.running ? "the server is Stopped" : nullptr;
+		int64_t &at = m_bot_item_at[bot];
+		if(!why && now_us() - at < 1000000)
+			why = "too soon";
+		if(why){
+			log_i(MODULE, "[KIT_GOAL_PRIORITIES] %s's use of %s refused: %s", cs(name),
+					cs(item), why);
+			return;
+		}
+		at = now_us();
+		ss_ scene;
+		scene_of(bi->second, &scene);
+		log_i(MODULE, "%s uses %s on entity 0", cs(name), cs(item));
+		item_hooks_of(bot, "bot:"+itos(bot), scene, item, "use", json::Value((int64_t)0));
 	}
 
 	// [KIT_GUIDE_BOTS_2] c:teleport by a bot: it is put there, in its own scene
@@ -20858,6 +21024,32 @@ struct Module: public interface::Module, public Interface
 		out.set("grip", grip);
 		const json::Value &ic = field("icon");
 		out.set("icon", ic.is_string() ? ic.as_string().substr(0, 128) : ss_());
+		// [KIT_GOAL_PRIORITIES] its tags (["weapon", "blade"] or "weapon,
+		// blade"): what a goal's when_holding and pick "nearest_item" ask for
+		const json::Value &tv = field("tags");
+		sv_<ss_> tl;
+		if(tv.is_string()){
+			std::istringstream is(tv.as_string());
+			ss_ t;
+			while(std::getline(is, t, ','))
+				if(std::istringstream(t) >> t)
+					tl.push_back(t);
+		} else if(tv.is_array()){
+			for(unsigned i = 0; i < tv.size(); i++)
+				tl.push_back(tv.at(i).is_string() ? tv.at(i).as_string() : ss_());
+		} else if(!tv.is_undefined() && !tv.is_null()){
+			why = "tags: [\"name\", ...] or \"name, ...\"";
+			return false;
+		}
+		json::Value tags = json::array();
+		for(const ss_ &t : tl){
+			if(!name_ok(t) || tags.size() >= 8){
+				why = "tags: 8 names at most (\""+t.substr(0, 32)+"\")";
+				return false;
+			}
+			tags.append(t);
+		}
+		out.set("tags", tags);
 		if(out.get("damage_type").as_string().empty())
 			out.set("damage_type", ss_("normal"));
 		// Digging: its speed a material group, {group: speed} or the text
@@ -22102,10 +22294,13 @@ struct Module: public interface::Module, public Interface
 				(uint64_t)pv.as_number() : 0;
 		auto it = m_entities.find(id);
 		const ss_ who = "Entity "+itos(e.id)+"'s "+ctype;
-		if(it == m_entities.end() || it->second.kind != "player"){
+		// ([KIT_GOAL_PRIORITIES] a bot too: kit/bot's attack)
+		if(it == m_entities.end() || (it->second.kind != "player" &&
+				!is_bot_id(id))){
 			log_w(MODULE, "%s: hurt: %s is no player", cs(who), cs(itos(id)));
 			return;
 		}
+		const ss_ tname = is_bot(it->second) ? bot_name(it->second) : it->second.name;
 		const json::Value &a = h.at(1u);
 		const json::Value &f = h.at(2u);
 		double amount = a.is_number() ? a.as_number() : 0;
@@ -22116,7 +22311,7 @@ struct Module: public interface::Module, public Interface
 		ss_ why;
 		if(!takes_damage(id, why)){
 			log_i(MODULE, "%s: hurt of %s refused: %s", cs(who),
-					cs(it->second.name), cs(why));
+					cs(tname), cs(why));
 			return;
 		}
 		json::Value hit = json::object();
@@ -22124,7 +22319,7 @@ struct Module: public interface::Module, public Interface
 		hit.set("type", name_ok(jstr_at(h, 3)) ? jstr_at(h, 3) : ss_("hurt"));
 		hit.set("item", ss_());
 		hit.set("crit", false);
-		log_i(MODULE, "%s hurts %s: %g %s", cs(who), cs(it->second.name),
+		log_i(MODULE, "%s hurts %s: %g %s", cs(who), cs(tname),
 				amount, cs(jstr(hit, "type")));
 		apply_hit(id, hit, by);
 	}
@@ -22269,17 +22464,32 @@ struct Module: public interface::Module, public Interface
 			fire_event(scene, ev, by);
 		}
 		// The players: their bodies' middle (Peer::pos is the bottom + 0.5)
-		const uint64_t me = player_id(by);
+		const uint64_t me = actor_id(by);
 		sv_<std::pair<uint64_t, double>> hits;
-		for(auto &p : m_peers){
-			if(!p.second.player || p.second.scene != scene)
-				continue;
-			const double dx = p.second.pos[0] - at[0], dy = p.second.pos[1] +
-					0.4 - at[1], dz = p.second.pos[2] - at[2];
+		auto within = [&](uint64_t id, const double mid[3]){
+			const double dx = mid[0] - at[0], dy = mid[1] - at[1], dz = mid[2] - at[2];
 			const double d = std::sqrt(dx * dx + dy * dy + dz * dz);
 			const double f = d <= kill ? 1 : d <= hurt_r ? share : 0;
 			if(f > 0)
-				hits.push_back(std::make_pair(p.second.player, f));
+				hits.push_back(std::make_pair(id, f));
+		};
+		for(auto &p : m_peers){
+			if(!p.second.player || p.second.scene != scene)
+				continue;
+			const double mid[3] = {p.second.pos[0], p.second.pos[1] + 0.4,
+					p.second.pos[2]};
+			within(p.second.player, mid);
+		}
+		// [KIT_GOAL_PRIORITIES] the bots (their feet + 0.9)
+		for(auto &p : m_entities){
+			ss_ bs;
+			if(!p.second.has_pos || !is_bot(p.second) || !scene_of(p.second, &bs) ||
+					bs != scene)
+				continue;
+			double mid[3];
+			world_of(p.second, mid);
+			mid[1] += 0.9;
+			within(p.first, mid);
 		}
 		for(auto &h : hits){
 			auto pe = m_entities.find(h.first);
@@ -22289,7 +22499,7 @@ struct Module: public interface::Module, public Interface
 			if(!takes_damage(h.first, why) || (!ff && me && me != h.first &&
 					spared(me, h.first, why))){
 				log_i(MODULE, "%s's blast spares %s: %s", cs(who),
-						cs(pe->second.name), cs(why));
+						cs(is_bot(pe->second) ? bot_name(pe->second) : pe->second.name), cs(why));
 				continue;
 			}
 			json::Value hit = json::object();
@@ -22300,7 +22510,8 @@ struct Module: public interface::Module, public Interface
 			hit.set("from", point(at));
 			hit.set("away", true);
 			log_i(MODULE, "%s's blast hits %s: %g %s", cs(who),
-					cs(pe->second.name), hit.get("amount").as_number(),
+					cs(is_bot(pe->second) ? bot_name(pe->second) : pe->second.name),
+					hit.get("amount").as_number(),
 					cs(htype));
 			apply_hit(h.first, hit, by);
 		}
@@ -22450,13 +22661,19 @@ struct Module: public interface::Module, public Interface
 			const json::Value &target)
 	{
 		const Peer &p = m_peers[peer];
-		const ss_ by = "player:"+itos(p.player);
+		item_hooks_of(p.player, "player:"+itos(p.player), p.scene, item, action,
+				target);
+	}
+	// ([KIT_GOAL_PRIORITIES] a bot's too: bot_use_item)
+	void item_hooks_of(uint64_t actor, const ss_ &by, const ss_ &scene,
+			const ss_ &item, const ss_ &action, const json::Value &target)
+	{
 		for(auto &e : m_entities){
 			ss_ es;
-			const bool here = e.first == p.player || (e.second.parent == 1 &&
+			const bool here = e.first == actor || (e.second.parent == 1 &&
 					!e.second.has_pos) || (
 					e.second.kind != "player" && scene_of(e.second, &es) &&
-					es == p.scene);
+					es == scene);
 			if(!here)
 				continue;
 			for(size_t i = 0; i < e.second.comps.size(); i++){

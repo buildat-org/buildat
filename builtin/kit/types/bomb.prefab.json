@@ -1,0 +1,12 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "bomb",
+	"group": "Items",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "bomb", "pos": [0, 0, 0],
+			"components": [{"type": "kit/explosive", "params": {"fuse": 3,
+				"radius": 2, "kill": 2, "hurt": 4, "blink_color": "#ff3020", "friendly_fire": false}}]}
+	]
+}
