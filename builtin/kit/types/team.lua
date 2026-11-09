@@ -31,6 +31,7 @@ return {
 		status = {default = "", shared = true},
 	},
 	about = {
+		group = "Game",
 		what = "A team: its colour, its spawn pad and a shared score.",
 		inputs = {
 			join = "Who set it off becomes a member, put on its pad.",

@@ -84,6 +84,7 @@ return {
 		key = {default = ""},
 	},
 	about = {
+		group = "UI",
 		what = "The players, their teams' colours and scores, on the screen.",
 		inputs = {
 			show = "Shows it.",

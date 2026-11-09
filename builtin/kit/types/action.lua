@@ -17,6 +17,7 @@ return {
 		label = "param:label"}},
 	state = {presses = {default = 0, shared = true}},
 	about = {
+		group = "Players",
 		what = "A key the players press; its signals are as by that player.",
 		outputs = {
 			pressed = "The key went down.",

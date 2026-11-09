@@ -15,7 +15,7 @@
 # directory and nowhere in the server's (the project's save), so a
 # published or exported project carries none of it.
 # [KIT_TABS_TWO_ROWS] KEEP_TMP=1 keeps left.png (the panel's tabs in two
-# rows: Components, Terrain, Voxels; Box, Entities).
+# rows: Place, Terrain, Voxels; Box, Entities).
 # [KIT_PALETTE_FOOT] One armed, the list taller than its room: its Favourite
 # and the palette's tabs stay in view under the scrolled list, the panel's
 # window above the builders' panel. KEEP_TMP=1 keeps foot.png.
@@ -62,13 +62,15 @@ wait_log_any 10000 kit editor: edit rights: yes
 wait_log_any 10000 kit editor: remembered for workbench_world: nothing
 keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
+$(pal_find kit/flag)
 click Button "kit/flag"
 wait_log 5000 kit editor: placing kit/flag
+click Button "palette filter clear"
 frames 5
 screenshot $t/foot.png
 click Button "Favourite kit/flag"
 wait_log 5000 kit editor: kit/flag a favourite
-click Button "kit/flag"
+keypress Escape
 wait_log 5000 kit editor: placing nothing
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)

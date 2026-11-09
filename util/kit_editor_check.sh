@@ -81,8 +81,10 @@ if [ "${1:-}" = web ]; then
 	["click", "Button", "Don't add"], ["frames", 3],
 	["key", "F6"], ["waitlog", "kit editor: state: 15 entities, 0 to undo", 20],
 	["click", 1067, 243], ["waitlog", "kit editor: cursor at 6,2,2", 10],
+	["click", "Button", "palette filter clear"], ["frames", 2], ["click", "LineEdit", "palette filter"], ["frames", 2], ["type", "sample_kit/button"], ["frames", 3],
 	["click", "Button", "sample_kit/button"], ["waitlog", "kit editor: placing sample_kit/button", 10],
 	["click", 723, 400], ["waitlog", "kit editor: state: 16 entities, 1 to undo", 10],
+	["click", "Button", "palette filter clear"], ["frames", 2], ["click", "LineEdit", "palette filter"], ["frames", 2], ["type", "sample_kit/door"], ["frames", 3],
 	["click", "Button", "sample_kit/door"], ["waitlog", "kit editor: placing sample_kit/door", 10],
 	["click", 700, 310], ["waitlog", "kit editor: state: 17 entities, 2 to undo", 10],
 	["click", 700, 310, 100, 2], ["waitlog", "kit editor: placing nothing", 10],
@@ -182,6 +184,12 @@ screenshot @T@/pillar.png
 mouse_pos 620 350
 mouse_click left
 wait_log 5000 kit editor: cursor at 3,1,1
+click Button "palette filter clear"
+frames 2
+click LineEdit "palette filter"
+frames 2
+text sample_kit/button
+frames 3
 click Button "sample_kit/button"
 wait_log 5000 kit editor: placing sample_kit/button
 mouse_pos 620 350
@@ -189,17 +197,22 @@ frames 3
 screenshot @T@/placing.png
 mouse_click left
 wait_log 10000 kit editor: state: 16 entities, 1 to undo
+click Button "palette filter clear"
+frames 2
+click LineEdit "palette filter"
+frames 2
+text sample_kit/door
+frames 3
 click Button "sample_kit/door"
 wait_log 5000 kit editor: placing sample_kit/door
 mouse_pos 600 271
 mouse_click left
 wait_log 10000 kit editor: state: 17 entities, 2 to undo
-mouse_pos 100 400
-mouse_wheel -1
-frames 1
-mouse_wheel -1
-frames 1
-mouse_wheel -1
+click Button "palette filter clear"
+frames 2
+click LineEdit "palette filter"
+frames 2
+text sample_kit/marker
 frames 3
 click Button "sample_kit/marker"
 wait_log 5000 kit editor: placing sample_kit/marker

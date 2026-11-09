@@ -17,6 +17,7 @@ return {
 		presses = {default = 0, shared = true},
 	},
 	about = {
+		group = "Logic",
 		what = "A plate a player presses by using it; it stays down for its hold time.",
 		outputs = {
 			pressed = "A player pressed it.",

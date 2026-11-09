@@ -12,6 +12,7 @@
 return {
 	version = 1,
 	about = {
+		group = "World",
 		what = "Copies what is under it, and the voxels, into the map's other slices.",
 	},
 	params = {

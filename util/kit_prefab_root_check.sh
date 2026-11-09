@@ -42,11 +42,6 @@ if [ "${1:-}" = web ]; then
   if(held !== this) set(this); return Promise.resolve(); };
  document.exitPointerLock = function(){ if(held) set(null); };
  return 'stub'; })()"
-	# A wheel event is one row of the palette, under the pointer; own prefabs come last
-	down="[\"mouse\", 100, 400], [\"frames\", 2],"
-	for _ in $(seq 25); do
-		down="$down [\"wheel\", 100, 400, 100], [\"frames\", 1],"
-	done
 	cat > "$t/steps.json" <<J
 [
 	["nav", "\${URL}"],
@@ -73,13 +68,14 @@ if [ "${1:-}" = web ]; then
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
 	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
+	$(pal_find_web kit/environment click)
 	["click", "Button", "kit/environment"], ["waitlog", "the palette's menu of kit/environment", 10], ["frames", 3],
 	["shot", "\${OUT}/menu_positionless.png"],
 	["click", "Button", "Cancel"], ["frames", 3],
-	$down
+	$(pal_find_web kit/hut click)
 	["click", "Button", "[kit/hut]"], ["waitlog", "the palette's menu of .kit/hut", 10], ["frames", 3],
 	["shot", "\${OUT}/menu_prefab.png"],
-	["click", "Button", "Place"], ["waitlog", "kit editor: placing .kit/hut", 10],
+	["click", "Button", "menu Place"], ["waitlog", "kit editor: placing .kit/hut", 10],
 	["click", 900, 550], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
 	["click", 900, 550, 50, 2], ["waitlog", "kit editor: placing nothing", 10], ["frames", 3],
 	["click", 900, 550], ["waitlog", "kit editor: selected 3", 10], ["frames", 3],
@@ -91,6 +87,7 @@ if [ "${1:-}" = web ]; then
 	["shot", "\${OUT}/dialog_move.png"],
 	["click", "Button", "Clear the old box, then stamp"], ["waitlog", "kit editor: stamp 3, clearing", 10], ["sync", 5000], ["frames", 3],
 	["click", "Button", "Undo"], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10], ["frames", 3],
+	$(pal_find_web kit/teleporter click)
 	["click", "Button", "kit/teleporter"], ["waitlog", "kit editor: placing kit/teleporter", 10],
 	["click", 650, 700], ["waitlog", "kit editor: state: 3 entities, 2 to undo", 10],
 	["click", 650, 700, 50, 2], ["waitlog", "kit editor: placing nothing", 10], ["frames", 3],
@@ -100,13 +97,13 @@ if [ "${1:-}" = web ]; then
 	["click", 680, 400], ["frames", 2], ["type", "bar"], ["frames", 3],
 	["shot", "\${OUT}/make_typed.png"],
 	["click", "Button", "Save prefab"], ["waitlog", "kit editor: state: 3 entities, 3 to undo", 10], ["frames", 3],
-	$down
+	$(pal_find_web webboss/bar click)
 	["click", "Button", "[webboss/bar]"], ["waitlog", "the palette's menu of .webboss/bar", 10], ["frames", 3],
 	["click", "Button", "Rename"], ["frames", 3],
 	["shot", "\${OUT}/rename.png"],
 	["click", "LineEdit", "bar"], ["frames", 2], ["key", "End"], ["type", "2"], ["frames", 2],
 	["click", "Button", "Rename it"], ["waitlog", "kit editor: rename webboss/bar to bar2", 10], ["sync", 5000], ["frames", 5],
-	$down
+	$(pal_find_web webboss/bar2 click)
 	["click", "Button", "[webboss/bar2]"], ["waitlog", "the palette's menu of .webboss/bar2", 10], ["frames", 3],
 	["click", "Button", "Delete", 214, 680], ["waitlog", "kit editor: delete webboss/bar2. 0 copies", 10], ["frames", 3],
 	["shot", "\${OUT}/delete.png"],
@@ -210,13 +207,7 @@ clicked() # <button>
 # A palette prefab's menu
 menu() # <label>
 {
-	# Own prefabs come last: the list scrolled to its end, however many
-	# types
-	echo "frames 2"
-	echo "mouse_pos 100 400"
-	for _ in $(seq 16); do
-		printf 'mouse_wheel -1\nframes 1\n'
-	done
+	pal_find "$1"
 	printf 'click Button "[%s]"\nwait_log 5000 the palette'"'"'s menu of [%s]\nframes 3\n' "$1" "$1"
 }
 # A move by the key, up to its dialog; then answer() it
@@ -278,7 +269,7 @@ EOF
 	menu kitboss/hut
 	echo "screenshot $t/palette_menu.png"
 	cat <<'EOF'
-click Button "Place"
+click Button "menu Place"
 wait_log 5000 kit editor: placing [kitboss/hut]
 mouse_pos 614 306
 mouse_click left

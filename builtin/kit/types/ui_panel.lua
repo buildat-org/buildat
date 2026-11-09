@@ -78,6 +78,7 @@ return {
 		own = {default = {}, per_player = true},
 	},
 	about = {
+		group = "UI",
 		what = "A box on the players' screens, holding the UI elements under it.",
 		inputs = {
 			show = "Shows it.",

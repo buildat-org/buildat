@@ -2,6 +2,7 @@
 	"format": "kit_prefab",
 	"author": "kit",
 	"name": "health_bar",
+	"group": "UI",
 	"version": 1,
 	"entities": [
 		{"id": 1, "name": "health bar",

@@ -181,18 +181,16 @@ event kit_select $SIZED
 frames 5
 keypress F1
 frames 5
+$(pal_find kit/flag)
 click Button "kit/flag"
 frames 5
 click Button "kit/flag"
 frames 5
-mouse_pos 60 300
-frames 2
-$(for i in $(seq 20); do printf 'mouse_wheel -1\nframes 1\n'; done)
-frames 5
+$(pal_find kit/ui_bar)
 click Button "kit/ui_bar"
 wait_log 5000 the palette's menu of kit/ui_bar
 frames 3
-click Button "Place"
+click Button "menu Place"
 wait_log 10000 kit editor: state:
 frames 5
 click Button "Undo"
@@ -200,10 +198,11 @@ wait_log 10000 kit editor: state:
 frames 5
 keypress F2
 frames 5
+$(pal_find kit/health_bar)
 click Button "[kit/health_bar]"
 wait_log 5000 the palette's menu of [kit/health_bar]
 frames 3
-click Button "Place"
+click Button "menu Place"
 frames 5
 click Button "[kit/health_bar]"
 wait_log 5000 the palette's menu of [kit/health_bar]
@@ -308,7 +307,7 @@ event kit_select $STYLE_TO
 wait_log_any 5000 kit editor: selected $STYLE_TO
 delay 500
 screenshot @T@/inspector.png
-mouse_pos 882 288
+mouse_pos 882 323
 frames 5
 mouse_click left
 delay 500

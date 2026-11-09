@@ -34,6 +34,7 @@ return {
 		mirror = "param:mirror", solid = false}},
 	state = {open = {default = false, shared = true}},
 	about = {
+		group = "Building",
 		what = "A door only a player with its key opens; anyone shuts it.",
 		inputs = {
 			close = "Shuts it.",

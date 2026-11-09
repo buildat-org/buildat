@@ -36,6 +36,7 @@ return {
 	params = {title = {cat = "hud", type = "string", default = "Score"}},
 	state = {text = {default = "", shared = true}},
 	about = {
+		group = "UI",
 		what = "The players' scores, on every player's screen.",
 		inputs = {
 			add = "Gives the player who set it off a point.",

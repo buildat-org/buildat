@@ -10,6 +10,7 @@ return {
 		state = "lit", when = {color = "#ffe040"}},
 	state = {lit = {default = false, shared = true}},
 	about = {
+		group = "Logic",
 		what = "One tile of a Lights Out board, lit or not.",
 		inputs = {
 			toggle = "Flips it.",

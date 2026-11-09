@@ -12,6 +12,7 @@
 return {
 	version = 1,
 	about = {
+		group = "Players",
 		what = "What players keep from one round to the next.",
 	},
 	root = true,

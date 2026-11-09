@@ -43,6 +43,7 @@ return {
 		shown = {default = "", shared = true},
 	},
 	about = {
+		group = "Building",
 		what = "Text on a board in the world.",
 		inputs = {
 			value = "Fills {value} in its text. Value: what to show; none empties it.",

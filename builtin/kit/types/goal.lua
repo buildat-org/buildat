@@ -179,6 +179,7 @@ return {
 		inside = {default = {}},
 	},
 	about = {
+		group = "Game",
 		what = "Something to do, a HUD line and a marker while it is active: reach a box, use an object, or a signal.",
 		inputs = {
 			activate = "Activates it, for who set this off (to everyone: for all). Value: unused.",

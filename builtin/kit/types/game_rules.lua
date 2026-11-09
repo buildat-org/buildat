@@ -112,6 +112,8 @@ return {
 			choices = {"at_once", "on_signal"}},
 	},
 	about = {
+		group = "World",
+		keywords = "settings",
 		what = "The game's rules: damage, building, the inventory, respawns, Kit's HUD.",
 		inputs = {
 			respawn = "Respawns every player waiting. Value: not read; respawn must be on_signal.",

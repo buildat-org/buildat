@@ -60,6 +60,7 @@ return {
 		sold = {default = 0, shared = true},
 	},
 	about = {
+		group = "Game",
 		what = "A counter that sells a copy of a prefab for money from the buyer's wallet.",
 		outputs = {
 			bought = "A player bought one. Value: the copy's id.",

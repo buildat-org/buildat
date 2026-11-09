@@ -8,6 +8,7 @@ return {
 	player = true,
 	state = {score = {default = 0, shared = true}},
 	about = {
+		group = "Players",
 		what = "A player's score; on each player, not placed.",
 		inputs = {
 			add = "Adds to the score. Value: a number; none adds 1.",

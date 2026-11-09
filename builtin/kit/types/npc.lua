@@ -32,6 +32,7 @@ return {
 		line = {default = "", shared = true},
 	},
 	about = {
+		group = "Creatures",
 		what = "Says its lines in turn over its head, as it is used.",
 		inputs = {
 			say = "Says the next line.",

@@ -38,11 +38,9 @@ if [ "${1:-}" = web ]; then
   if(held !== this) set(this); return Promise.resolve(); };
  document.exitPointerLock = function(){ if(held) set(null); };
  return 'stub'; })()"
-	# A wheel event is one row of the palette, under the pointer; own prefabs come last
-	down="[\"mouse\", 100, 400], [\"frames\", 2],"
-	for _ in $(seq 25); do
-		down="$down [\"wheel\", 100, 400, 100], [\"frames\", 1],"
-	done
+	# The plan zoomed out to ~520 across by 12 notches over the view (the
+	# palette's wheel events used to reach it), so the box's two clicks span
+	# over 10 cells in x
 	cat > "$t/steps.json" <<J
 [
 	["nav", "\${URL}"],
@@ -69,7 +67,8 @@ if [ "${1:-}" = web ]; then
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
 	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
-	$down
+	["mouse", 800, 400], ["frames", 2], $(for _ in $(seq 12); do printf '["wheel", 800, 400, 100], ["frames", 1], '; done)
+	$(pal_find_web kit/hut click)
 	["click", "Button", "[kit/hut]"], ["waitlog", "the palette's menu of .kit/hut", 10], ["frames", 3],
 	["shot", "\${OUT}/menu_kit.png"],
 	["click", "Button", "Cancel"], ["frames", 3],
@@ -80,8 +79,8 @@ if [ "${1:-}" = web ]; then
 	["click", 680, 400], ["frames", 2], ["type", "bar"], ["frames", 3],
 	["shot", "\${OUT}/make.png"],
 	["click", "Button", "Save prefab"], ["waitlog", "entities, 1 to undo", 10], ["frames", 3],
-	["click", "Button", "Components"], ["frames", 3],
-	$down
+	["click", "Button", "Place"], ["frames", 3],
+	$(pal_find_web webboss/bar click)
 	["click", "Button", "[webboss/bar]"], ["waitlog", "the palette's menu of .webboss/bar", 10], ["frames", 3],
 	["shot", "\${OUT}/menu_own.png"],
 	["click", "Button", "Edit"], ["waitlog", "kit editor: editing the prefab webboss/bar", 10],
@@ -104,8 +103,11 @@ J
 			"Session 1 ended by webboss"; do
 		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
 	done
-	grep -aE "saved prefab webboss/bar version 2 .*a box of .1[5-9],1,11" "$t/out/server.log" >/dev/null ||
-		fail "the handle's box did not reach Save ($t/out/server.log)"
+	# The handle's drag: the box 2 wider in x at the second Save
+	b1=$(grep -aoP "saved prefab webboss/bar version 1 .*a box of \[\K\d+(?=,)" "$t/out/server.log")
+	b2=$(grep -aoP "saved prefab webboss/bar version 2 .*a box of \[\K\d+(?=,)" "$t/out/server.log")
+	[ -n "$b1" ] && [ "$b1" -ge 10 ] && [ "${b2:-0}" = $((b1 + 2)) ] ||
+		fail "the handle's box did not reach Save: $b1 then $b2 wide ($t/out/server.log)"
 	echo "PASS: a prefab's temporary scene in the web client: Edit by the menu, the box's handle, Save, Close"
 	exit 0
 fi
@@ -175,13 +177,7 @@ cells_are() # <server log>
 }
 menu() # <label>: a palette prefab's menu
 {
-	# Own prefabs come last: the list scrolled to its end, however many
-	# types
-	echo "frames 2"
-	echo "mouse_pos 100 400"
-	for _ in $(seq 16); do
-		printf 'mouse_wheel -1\nframes 1\n'
-	done
+	pal_find "$1"
 	printf 'click Button "[%s]"\nwait_log 5000 the palette'"'"'s menu of [%s]\nframes 3\n' "$1" "$1"
 }
 into_bench() # <prefab>

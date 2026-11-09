@@ -10,6 +10,7 @@ return {
 	params = {item = {type = "string", default = "kit/sword"}},
 	state = {inside = {default = {}}},
 	about = {
+		group = "Items",
 		what = "Holds one item, its wear kept: a player puts one in or takes it out.",
 		outputs = {
 			put = "A player put one in.",

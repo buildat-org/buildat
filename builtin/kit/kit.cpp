@@ -25940,6 +25940,9 @@ struct Module: public interface::Module, public Interface
 					o.set("version", json::jint(*pf, "version", 1));
 					o.set("copies", copies[n]);
 					o.set("free", frees[n]);
+					// [KIT_PALETTE_SECTIONS] its palette section
+					if(pf->get("group").is_string())
+						o.set("group", pf->get("group"));
 					const json::Value &vx = pf->get("voxels");
 					if(vx.is_object()){
 						o.set("voxels", voxels_version(*pf));

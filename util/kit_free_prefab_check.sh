@@ -70,15 +70,14 @@ if [ -n "$WEB" ] && [ "${2:-}" != rotation ] && [ "${2:-}" != frame ]; then
 	# and turned there; the editor's view of it, play's, and walked at in play.
 	export BUILDAT_WORKBENCH_STONE=1
 	stub=$PAGE_STUB
-	# A wheel event is one row of the palette, under the pointer; own prefabs come last
-	down="[\"mouse\", 100, 400], [\"frames\", 2],"
+	# The plan zoomed out by 12 notches over the view, as the palette's
+	# wheel events past its end used to (the copies' clicks below are
+	# where that view puts them)
+	zoom=$(for _ in $(seq 12); do printf '["wheel", 800, 400, 100], ["frames", 1], '; done)
 	turn=""
 	for _ in $(seq 7); do
 		# ([KIT_TURN_KEYS_DROP] Nothing waited for: each press counts)
 		turn="$turn [\"key\", \"x\"],"
-	done
-	for _ in $(seq 25); do
-		down="$down [\"wheel\", 100, 400, 100], [\"frames\", 1],"
 	done
 	cat > "$t/steps.json" <<J
 [
@@ -106,7 +105,8 @@ if [ -n "$WEB" ] && [ "${2:-}" != rotation ] && [ "${2:-}" != frame ]; then
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
 	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
-	$down
+	["mouse", 800, 400], ["frames", 2], $zoom
+	$(pal_find_web kit/hut click)
 	["click", "Button", "[kit/hut]"], ["waitlog", "the palette's menu of .kit/hut", 10], ["frames", 3],
 	["shot", "\${OUT}/menu.png"],
 	["click", "Button", "Place free"], ["waitlog", "kit editor: placing .kit/hut", 10],
@@ -218,6 +218,8 @@ for line in open(sys.argv[1]):
 	elif cmd == "click":
 		a = shlex.split(rest)
 		out.append(["click", *a[:2], *map(int, a[2:])])
+	elif cmd == "text":
+		out.append(["type", rest])
 	elif cmd == "look_dir":
 		x, y, z = map(float, rest.split())
 		out.append(["event", "kit_face %.3f %.3f" % (math.degrees(math.atan2(x, z)),
@@ -294,12 +296,7 @@ cell() # <x> <y> <z>: asked here, its answers compared at the end
 }
 menu() # <label>: a palette prefab's menu
 {
-	echo "frames 2"
-	echo "mouse_pos 100 400"
-	# (to the palette's end, its prefabs last, however many types)
-	for _ in $(seq 16); do
-		printf 'mouse_wheel -1\nframes 1\n'
-	done
+	pal_find "$1"
 	printf 'click Button "[%s]"\nwait_log 5000 the palette'"'"'s menu of [%s]\nframes 3\n' "$1" "$1"
 }
 joined()

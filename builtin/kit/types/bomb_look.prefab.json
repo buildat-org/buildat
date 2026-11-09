@@ -2,6 +2,7 @@
 	"format": "kit_prefab",
 	"author": "kit",
 	"name": "bomb_look",
+	"group": "Items",
 	"version": 1,
 	"entities": [
 		{"id": 1, "name": "ball", "pos": [0, 0.15, 0],

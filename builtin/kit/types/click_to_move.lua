@@ -18,6 +18,7 @@ end
 return {
 	version = 1,
 	about = {
+		group = "Players",
 		what = "A movement: players walk to where they click.",
 	},
 	root = true,

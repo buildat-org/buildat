@@ -39,6 +39,7 @@ return {
 		out = {default = false, shared = true},
 	},
 	about = {
+		group = "Building",
 		what = "A box that slides by its offset and back, carrying what is under it.",
 		inputs = {
 			go = "Moves it out.",

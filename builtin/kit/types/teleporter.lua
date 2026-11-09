@@ -33,6 +33,7 @@ return {
 		two_way = {type = "bool", default = false},
 	},
 	about = {
+		group = "Building",
 		what = "A pad that moves a player who steps on it or uses it.",
 		inputs = {
 			teleport = "Moves who set it off.",

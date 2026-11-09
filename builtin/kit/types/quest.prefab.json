@@ -2,6 +2,7 @@
 	"format": "kit_prefab",
 	"author": "kit",
 	"name": "quest",
+	"group": "Game",
 	"version": 1,
 	"entities": [
 		{"id": 1, "name": "first goal", "pos": [0, 0, 0],

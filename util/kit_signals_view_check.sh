@@ -292,6 +292,7 @@ J
 		# A short window: its panels by the bar's buttons, one column at a time
 		[ "$p" = click ] || echo '	["tap", "Button", "Tools"], ["frames", 3],'
 		cat <<J
+	$(pal_find_web "$ty" "$p")
 	["$p", "Button", "$ty"], ["waitlog", "kit editor: placing $ty", 10], ["frames", 3],
 J
 		[ "$p" = click ] || echo '	["tap", "Button", "Tools"], ["frames", 3],'
@@ -305,8 +306,9 @@ J
 J
 		# None with a position, for its refusal; off the screen of a short window
 		[ "$p" = tap ] || [ -n "${9:-}" ] || cat <<J
+	$(pal_find_web kit/logic)
 	["click", "Button", "kit/logic"], ["waitlog", "the palette's menu of kit/logic", 10], ["frames", 3],
-	["click", "Button", "Place"], ["waitlog", "kit editor: state: 4 entities", 10], ["frames", 3],
+	["click", "Button", "menu Place"], ["waitlog", "kit editor: state: 4 entities", 10], ["frames", 3],
 J
 		cat <<J
 	["key", "F5"], ["waitlog", "kit editor: the view is Signals", 10], ["frames", 5],
@@ -1077,7 +1079,10 @@ EOF
 	# 11. [KIT_PALETTE_MENU] The palette: a type with no position has its menu:
 	# Cancel, Escape, a press on another's button, a press on the view; Favourite
 	# keeps it up; Place is an edit with no click on the view. A drag still places
+	# ("signals" finds kit/logic and kit/action both, kit/action under it: its
+	# menu is the one a press on the other's button goes past)
 	cat <<EOF
+$(pal_find signals)
 click Button "kit/logic"
 wait_log 5000 the palette's menu of kit/logic
 frames 3
@@ -1093,11 +1098,11 @@ frames 3
 keypress Escape
 frames 3
 event kit_ui_where menu_escaped
-click Button "kit/logic"
-wait_log 5000 the palette's menu of kit/logic
-frames 3
 click Button "kit/action"
 wait_log 5000 the palette's menu of kit/action
+frames 3
+click Button "kit/logic"
+wait_log 5000 the palette's menu of kit/logic
 frames 3
 screenshot @T@/palette_menu_other.png
 mouse_pos 550 400
@@ -1105,13 +1110,15 @@ mouse_click left
 frames 3
 event kit_ui_where menu_outside
 screenshot @T@/palette_outside.png
+$(pal_find kit/flag)
 click Button "kit/flag"
 wait_log 5000 kit editor: placing kit/flag
 frames 3
 screenshot @T@/palette_positioned.png
 click Button "kit/flag"
 wait_log 5000 kit editor: placing nothing
-mouse_pos 114 153
+$(pal_find kit/action)
+mouse_pos 114 187
 frames 3
 mouse_down left
 frames 3
@@ -1124,6 +1131,7 @@ EOF
 	cat <<EOF
 frames 3
 event kit_ui_where after_drag
+$(pal_find kit/logic)
 click Button "kit/logic"
 wait_log 5000 the palette's menu of kit/logic
 frames 3
@@ -1134,17 +1142,18 @@ screenshot @T@/palette_favourite.png
 click Button "Unfavourite kit/logic"
 wait_log 5000 kit editor: kit/logic not a favourite
 frames 3
-click Button "Place"
+click Button "menu Place"
 EOF
 	state
 	cat <<EOF
 frames 5
 screenshot @T@/palette_placed.png
+$(pal_find kit/environment)
 click Button "kit/environment"
 wait_log 5000 the palette's menu of kit/environment
 frames 3
 screenshot @T@/palette_menu_root.png
-click Button "Place"
+click Button "menu Place"
 EOF
 	state
 	cat <<EOF
@@ -1403,6 +1412,7 @@ screenshot @T@/small_walk.png
 click Button "Tools"
 frames 3
 screenshot @T@/small_tools.png
+$(pal_find kit/action)
 click Button "kit/action"
 wait_log 5000 the palette's menu of kit/action
 frames 3

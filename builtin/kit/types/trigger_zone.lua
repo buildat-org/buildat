@@ -18,6 +18,7 @@ return {
 	state = {inside = {default = 0, shared = true}},
 	gizmo = {shape = "sphere", size = 0.2, color = "#40c0ff"},
 	about = {
+		group = "Logic",
 		what = "An unseen box that notices players walking in and out.",
 		outputs = {
 			entered = "A player walked in. Value: how many are in it now.",

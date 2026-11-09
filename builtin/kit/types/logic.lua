@@ -50,6 +50,7 @@ return {
 		out = {default = false, shared = true},
 	},
 	about = {
+		group = "Logic",
 		what = "A gate between signals: and, or, xor, not, latch or pulse.",
 		inputs = {
 			a = "Sets a. Value: false, 0, \"\" and \"off\" are off, anything else (none too) on.",

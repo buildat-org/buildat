@@ -2,6 +2,7 @@
 	"format": "kit_prefab",
 	"author": "kit",
 	"name": "pressure_plate",
+	"group": "Logic",
 	"version": 1,
 	"entities": [
 		{"id": 1, "name": "plate", "pos": [0, 0, 0],

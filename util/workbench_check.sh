@@ -161,6 +161,7 @@ if [ "${1:-}" = web ]; then
 	["shot", "\${OUT}/menu.png"],
 	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
 	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
+	$(pal_find_web kit/npc)
 	["drag", "Button", "kit/npc", 616, 250], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
 	["frames", 3], ["click", 616, 250], ["waitlog", "kit editor: selected 3", 10],
 	["key", "PageUp"], ["waitlog", "kit editor: state: 2 entities, 2 to undo", 10],
@@ -180,9 +181,9 @@ if [ "${1:-}" = web ]; then
 	["frames", 5], ["shot", "\${OUT}/play.png"],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: state: 2 entities", 10],
-	["frames", 5], ["mouse", 300, 300], ["frames", 2], ["mouse", 100, 400], ["frames", 5], $(for _ in $(seq 8); do printf '["wheel", 100, 400, 100], ["frames", 1], '; done)
+	["frames", 5], ["mouse", 300, 300], ["frames", 2], ["mouse", 100, 400], ["frames", 5], $(pal_find_web kit/button_door)
 	["click", "Button", "[kit/button_door]"], ["waitlog", "the palette's menu of .kit/button_door", 10], ["frames", 3],
-	["click", "Button", "Place"], ["waitlog", "kit editor: placing .kit/button_door", 10],
+	["click", "Button", "menu Place"], ["waitlog", "kit editor: placing .kit/button_door", 10],
 	["click", 800, 550], ["waitlog", "kit editor: state: 5 entities", 10],
 	["key", "t"], ["waitlog", "kit editor: tool terrain", 10], ["frames", 3],
 	["drag", 450, 620, 650, 620], ["waitlog", "kit editor: terrain: raise", 10],
@@ -207,6 +208,7 @@ if [ "${1:-}" = web ]; then
 	["click", "Text", "webboss/frost"],
 	["waitlog", "kit editor: in hand webboss/frost", 10],
 	["key", "Escape"], ["waitlog", "kit editor: tool select", 10],
+	$(pal_find_web kit/region)
 	["click", "Button", "kit/region"], ["waitlog", "kit editor: placing kit/region", 10],
 	["click", 560, 340], ["waitlog", "kit editor: placed kit/region at", 10],
 	["key", "Escape"], ["waitlog", "kit editor: placing nothing", 10],
@@ -217,9 +219,9 @@ if [ "${1:-}" = web ]; then
 	["mouse", 800, 450], ["frames", 2], $(for _ in $(seq 8); do printf '["wheel", 800, 450, 100], ["frames", 1], '; done)
 	["click", "Button", "Apply"], ["sync", 5000], ["frames", 3],
 	["shot", "\${OUT}/region.png"],
-	["mouse", 100, 400], ["frames", 2], $(for _ in $(seq 8); do printf '["wheel", 100, 400, -100], ["frames", 1], '; done)
+	$(pal_find_web kit/game_rules)
 	["click", "Button", "kit/game_rules"], ["waitlog", "the palette.s menu of kit/game_rules", 10], ["frames", 3],
-	["click", "Button", "Place"], ["waitlog", "kit editor: selected 8", 10], ["frames", 3],
+	["click", "Button", "menu Place"], ["waitlog", "kit editor: selected 8", 10], ["frames", 3],
 	["click", "Button", "Behaviour"], ["waitlog", "kit editor: parameters 8/1 kit/game_rules: chips All Behaviour HUD, showing behaviour", 10], ["frames", 3],
 	["click", "DropDownList", "▼", 1090, 324], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10], ["frames", 3],
 	["click", "Text", "creative"], ["waitlog", "kit editor: 8/[0-9]+ building = creative", 10],
@@ -318,6 +320,7 @@ if [ "${1:-}" = web_touch ]; then
 	["tap", "Button", "Tools"],
 	["waitlog", "kit editor: the panel ", 5], ["frames", 3],
 	["shot", "${OUT}/palette.png"],
+	["tap", "Button", "palette filter clear"], ["frames", 2], ["tap", "LineEdit", "palette filter"], ["frames", 2], ["type", "plate a player presses"], ["frames", 3],
 	["drag", "Button", "kit/button", 572, 198, "touch"],
 	["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
 	["tap", "Button", "Tools"], ["frames", 3],
@@ -347,9 +350,8 @@ if [ "${1:-}" = web_touch ]; then
 	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 4 entities", 10],
 	["chord", "Ctrl+z"], ["waitlog", "kit editor: state: 3 entities", 10],
 	["frames", 3],
-	["tap", "Button", "Components"], ["frames", 3],
-	["mouse", 250, 380], ["frames", 2],
-	["wheel", 250, 380, 100], ["frames", 1], ["wheel", 250, 380, 100], ["frames", 1], ["wheel", 250, 380, 100], ["frames", 1], ["wheel", 250, 380, 100], ["frames", 1], ["wheel", 250, 380, 100], ["frames", 1], ["wheel", 250, 380, 100], ["frames", 1], ["wheel", 250, 380, 100], ["frames", 1], ["wheel", 250, 380, 100], ["frames", 1], 
+	["tap", "Button", "Place"], ["frames", 3],
+	["tap", "Button", "palette filter clear"], ["frames", 2], ["tap", "LineEdit", "palette filter"], ["frames", 2], ["type", "kit/region"], ["frames", 3],
 	["frames", 5], ["shot", "${OUT}/palette_scrolled.png"],
 	["tap", "Button", "kit/region"], ["waitlog", "kit editor: placing kit/region", 10],
 	["tap", "Button", "Tools"], ["frames", 3],
@@ -388,11 +390,10 @@ if [ "${1:-}" = web_touch ]; then
 	["key", "v"], ["waitlog", "kit editor: tool voxels", 5], ["frames", 3],
 	["key", "Escape"], ["waitlog", "kit editor: tool select", 5], ["frames", 3],
 	["tap", "Button", "Tools"], ["frames", 3],
-	["mouse", 250, 380], ["frames", 2],
-	["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1], ["wheel", 250, 380, -100], ["frames", 1],
+	["tap", "Button", "palette filter clear"], ["frames", 2], ["tap", "LineEdit", "palette filter"], ["frames", 2], ["type", "kit/game_rules"], ["frames", 3],
 	["frames", 5],
 	["tap", "Button", "kit/game_rules"], ["waitlog", "the palette.s menu of kit/game_rules", 10], ["frames", 3],
-	["tap", "Button", "Place"], ["waitlog", "kit editor: selected 11", 10], ["frames", 3],
+	["tap", "Button", "menu Place"], ["waitlog", "kit editor: selected 11", 10], ["frames", 3],
 	["tap", "Button", "Inspector"], ["frames", 5],
 	["waitlog", "kit editor: the inspector [0-9]+ of 1[0-9]+ tall", 10],
 	["shot", "${OUT}/rules.png"],
@@ -1151,8 +1152,13 @@ keypress F6
 wait_log 10000 kit editor: state: 1 entities
 keypress F1
 wait_log 5000 kit editor: the view is 2D
+click Button "palette filter clear"
+frames 2
+click LineEdit "palette filter"
+frames 2
+text plate a player presses
 frames 3
-mouse_pos 70 107
+mouse_pos 70 109
 mouse_down left
 frames 2
 mouse_pos 300 200
@@ -1194,6 +1200,12 @@ mouse_up left
 wait_log_any 10000 kit editor: state: 2 entities, 3 to undo
 frames 20
 screenshot @T@/turned.png
+click Button "palette filter clear"
+frames 2
+click LineEdit "palette filter"
+frames 2
+text kit/door
+frames 3
 click Button "kit/door"
 wait_log 5000 kit editor: placing kit/door
 mouse_pos 439 306
@@ -1318,10 +1330,16 @@ screenshot @T@/inspector_pos.png
 click Button "Move"
 wait_log 5000 kit editor: moved 1 by 2, 0, 0 from the inspector
 wait_log_any 5000 kit editor: state: 5 entities, 7 to undo
+click Button "palette filter clear"
+frames 2
+click LineEdit "palette filter"
+frames 2
+text kit/terrain
+frames 3
 click Button "kit/terrain"
 wait_log 5000 the palette's menu of kit/terrain
 frames 3
-click Button "Place"
+click Button "menu Place"
 wait_log_any 5000 kit editor: state: 6 entities, 8 to undo
 frames 3
 click Button "Entities"
@@ -1474,6 +1492,12 @@ wait_log 5000 kit editor: the view is 2D
 frames 3
 tap Button "Tools"
 frames 5
+click Button "palette filter clear"
+frames 2
+click LineEdit "palette filter"
+frames 2
+text plate a player presses
+frames 3
 finger_down 1 Button "kit/button"
 frames 2
 finger_move 1 300 250

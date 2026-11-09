@@ -26,6 +26,7 @@ return {
 	},
 	state = {slots = {default = {}}},
 	about = {
+		group = "Items",
 		what = "Slots of its own: a player who uses it moves items in and out.",
 		outputs = {
 			opened = "A player used it.",

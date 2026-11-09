@@ -128,6 +128,13 @@ namespace interface
 //                               text (a line or two; at most 200 bytes shown)
 //                               its hover. One with a value says it in a
 //                               sentence "Value: ..."
+//                               [KIT_PALETTE_SECTIONS] group = "World" (or
+//                               Building, Logic, Game, Players, Creatures,
+//                               Vehicles, Items, UI): its section in the
+//                               editor's Place tab (none: Other); keywords =
+//                               "a b c": words its filter also finds it by,
+//                               beside its name and what. A prefab's
+//                               "group" is its section the same way
 //   usable   = true          -- a client may "use" it (in range); with an
 //                               on_use, the clients point it out as
 //                               used by a click ([KIT] stage 4e2).

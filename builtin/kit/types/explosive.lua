@@ -74,6 +74,7 @@ return {
 		left = {default = 0},
 	},
 	about = {
+		group = "Game",
 		what = "Once armed, waits out its fuse, explodes and is gone.",
 		inputs = {
 			arm = "Starts the fuse.",

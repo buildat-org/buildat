@@ -1723,7 +1723,7 @@ function SG.palette_popup(cols)
 					return NT.place_now(it)
 				end
 				M.set_view(S.before_signals or "walk")
-				NT.choose("Components")
+				NT.choose("Place")
 				NT.arm(it)
 			end)
 		end
