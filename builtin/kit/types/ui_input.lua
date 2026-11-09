@@ -76,7 +76,7 @@ return {
 			toggle = "Shows it if hidden, else hides it.",
 		},
 		outputs = {
-			entered = "A player entered a line: the text.",
+			entered = "A player entered a line. Value: the text.",
 		},
 	},
 	inputs = {show = "none", hide = "none", toggle = "none"},
