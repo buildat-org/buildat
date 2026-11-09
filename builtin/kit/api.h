@@ -1301,7 +1301,11 @@ namespace interface
 // state target). A type's `nearby = n | "param:name"` (m, 64 at most)
 // reads c.nearby = {{id, pos, dist, types, player, name, alive[, sight]}}
 // (16 nearest, from a 16 m bucket index; `sight = true`: also in_sight),
-// c:nearest(type | "player"). A creature whose section is not loaded
+// c:nearest(type | "player"). [KIT_SPAWN_RULE] A type's `spawn_spots = true`
+// reads, in on_timer, c.spots = {{x, y, z}...} (a spot by each player its
+// parameters allow: prefab, radius, on, light_min, light_max, apart,
+// apart_any) and c.far = {id...} (its copies no player is within despawn
+// m of); kit.cpp's spawn_spots_lit, kit/spawn_rule. A creature whose section is not loaded
 // sleeps: no steps, no timers (they are pushed on by its sleep), and goes
 // on where it was when the section is back. The pathfinder's cells: the
 // World's voxels and the solid looks (kit/part's, a shut door's).

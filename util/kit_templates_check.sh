@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min, ~5 min with web (2026-11-07)
-# covers: apps/workbench/** builtin/world_menu/** builtin/kit/kit.cpp builtin/kit/types/player_state.lua builtin/kit/types/walker.lua builtin/kit/types/arena.lua builtin/kit/types/team.lua builtin/kit/types/goal.lua builtin/kit/types/sign.lua builtin/kit/types/button.lua builtin/kit/types/flag.lua builtin/kit/types/symmetry.lua src/impl/aitta.cpp client/core/aitta/init.lua util/pack_templates.sh util/kit_ctf_warp.lua
+# covers: apps/workbench/** builtin/world_menu/** builtin/kit/kit.cpp builtin/kit/types/player_state.lua builtin/kit/types/walker.lua builtin/kit/types/spawn_rule.lua builtin/kit/types/arena.lua builtin/kit/types/team.lua builtin/kit/types/goal.lua builtin/kit/types/sign.lua builtin/kit/types/button.lua builtin/kit/types/flag.lua builtin/kit/types/symmetry.lua src/impl/aitta.cpp client/core/aitta/init.lua util/pack_templates.sh util/kit_ctf_warp.lua
 # [KIT_TEMPLATES] (kit_plan stage 7b, Workbench templates) Each template through
 # New, opened in edit mode and played to its end by real clients. A check's
 # default Aitta is a closed port, so all this but part 3 is the offline case.
@@ -19,7 +19,7 @@
 #    takes the flag and places it in Red's zone, a point wins.
 # 2c. Survival ([KIT_SURVIVAL_TEMPLATE]): opened (v_edit.png), its clock set
 #    to just before dusk, played; kitbob digs two cells into his inventory
-#    and places one back, the dusk's creature chases and bites him; he
+#    and places one back, a creature of the night's spawn rule chases and bites him; he
 #    leaves and rejoins where he was (v_*.png). [KIT_SURVIVAL_TUNING] Before,
 #    kitboss falls 14 m and is hurt; Stop and Play leave him where he is.
 # 3. Packed by util/pack_templates.sh with a key made here, the licence file in
@@ -551,7 +551,8 @@ echo "ok: capture the flag plays a round to a capture"
 # minute day), Played, kitboss gone. kitbob at the World's spawn (0.5, 189,
 # 0.5; valleys seed 1) digs the grass and the dirt under it at (1, 188, 2),
 # (1, 187, 2) (a hand's 1 s each: asked again), places the grass back; the
-# dusk's creature (8 m off) spots him and bites. He leaves and comes back
+# night's spawn rule (enabled at dusk; here every 3 s, 4-8 m out) makes
+# creatures by him and kitboss, one spots him and bites. He leaves and comes back
 # where he left
 dig2() # <x, y, z>: a dig asked twice (it waits)
 {
@@ -577,6 +578,8 @@ wait_log 10000 kit editor: the server is
 EOF
 	ed '{"op": "mode", "on": true}'
 	ed "{\"op\": \"set\", \"id\": $V__game_rules_the_day_and_the_night, \"comp\": 1, \"param\": \"time\", \"value\": 17.98}"
+	ed "{\"op\": \"set\", \"id\": $V_world_creatures_come_at_night, \"comp\": 0, \"param\": \"every\", \"value\": 3}"
+	ed "{\"op\": \"set\", \"id\": $V_world_creatures_come_at_night, \"comp\": 0, \"param\": \"radius\", \"value\": 8}"
 	cat <<'EOF'
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running
@@ -635,7 +638,7 @@ back = open(t + "/v_back.log", errors="replace").read()
 for want in ("the project from the template survival", "kitboss opens the template in edit mode",
 		"workbench: kitbob dug (1,188,2): written", "workbench: kitbob dug (1,187,2): written",
 		"kitbob placed kit/grass at (1,187,2): one taken from slot 3",
-		"kit/spawner %s: made" % spawner, "hurts kitbob: 2 bite"):
+		"kit/spawn_rule %s: made" % spawner, "hurts kitbob: 2 bite"):
 	assert want in srv, want
 assert re.search(r"kit/environment \d+: dusk", srv), "no dusk"
 # [KIT_SURVIVAL_TUNING] the fall's damage; Stop and Play put him nowhere

@@ -417,6 +417,8 @@ static const char PRELUDE[] =
 "		player = req.player_id, made = req.made or {}, players = req.players, teams = req.teams, scenes = req.scenes}\n"
 "	-- [KIT_CREATURES_8A] what is near (a type's nearby), a creature's own (creature)\n"
 "	c.nearby, c.target, c.health, c.moving = req.nearby or {}, req.target, req.health, req.moving or false\n"
+"	-- [KIT_SPAWN_RULE] a spawn_spots type's spots and far copies (on_timer)\n"
+"	c.spots, c.far = req.spots, req.far\n"
 "	c.state = proxy(state, sets)\n"
 "	local state_done = in_place(state, sets)\n"
 "	local inv = inventory(req, fx, c)\n"
