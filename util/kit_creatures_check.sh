@@ -83,7 +83,7 @@ step 10 "the server is Ended" 'event kit_edit {"op": "stop"}'
 # (all past 128 m: the spawn's load point keeps its 64 m sections round x 0)
 # 3 world, 4 walker, 5 the players' spawner, 6 the prefab's root, 7 the creature,
 # 8 and 9 teleporters out and back, 10 a spawner of creatures
-ed '{"op": "place", "type": "kit/world", "pos": [0, 1, 0]}'
+ed '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
 set_ 3 0 size '"infinite"'
 set_ 3 0 generator '"flat"'
 set_ 3 0 decorations false
