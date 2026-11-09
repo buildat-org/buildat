@@ -13,6 +13,10 @@
 -- the editor has it whatever this says. The client asks for it in its
 -- inputs (auto), so the server steps the same.
 -- simplified: not on a free object's deck (W:walk_on).
+-- [KIT_SURVIVAL_TUNING] fall_damage: hit points a metre fallen past
+-- fall_safe metres (0, the default: none), a hit of type "fall" while
+-- Running (kit.cpp's fall_hurt; the height from the landing's speed).
+-- simplified: not a landing on a free object's deck while on one (walk_on)
 -- The keys W A S D and Space; a touchscreen's stick and Jump.
 local BODY = {r = 0.45, h = 1.7, eye = 1.5487}
 
@@ -49,6 +53,10 @@ return {
 			max = 8},
 		auto_jump = {cat = "physics", type = "string", default = "touchscreen",
 			choices = {"off", "touchscreen", "all"}},
+		fall_damage = {cat = "physics", type = "number", default = 0, min = 0,
+			max = 100},
+		fall_safe = {cat = "physics", type = "number", default = 3, min = 0,
+			max = 100},
 	},
 	step = function(s, i, dt, w, p)
 		local a = (tonumber(i.yaw) or 0) * w.PI / 180

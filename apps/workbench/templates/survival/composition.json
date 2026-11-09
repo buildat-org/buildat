@@ -2,10 +2,9 @@
 	"entities": [
 		{"id": 2, "name": "world", "kind": "scene"},
 		{"id": 3, "parent": 2, "name": "the land", "components": [{"type": "kit/terrain", "params": {"generator": "valleys", "seed": 1, "size": "infinite", "biome": "grassland", "caves": true, "decorations": true, "dig": "all", "place": "all"}}]},
-		{"id": 4, "parent": 1, "name": "game rules, the day and the night", "components": [{"type": "kit/game_rules", "params": {"peaceful": false, "building": "inventory", "on_death": "keep", "show_health": true}}, {"type": "kit/environment", "params": {"time": 8, "day_minutes": 20}, "links": [{"output": "dusk", "to": 7, "input": "spawn"}, {"output": "dusk", "to": 6, "input": "start"}, {"output": "dawn", "to": 6, "input": "stop"}, {"output": "dawn", "to": 7, "input": "clear"}]}]},
-		{"id": 5, "parent": 1, "name": "players and builds kept", "components": [{"type": "kit/player_state", "params": {"remember": true, "keep_builds": true, "keep_inventory": true}}]},
-		{"id": 6, "parent": 2, "name": "night: another creature", "components": [{"type": "kit/timer", "params": {"interval": 30}, "links": [{"output": "tick", "to": 7, "input": "spawn"}]}]},
-		{"id": 7, "parent": 2, "name": "creatures come at night", "pos": [8, 192, 8], "components": [{"type": "kit/spawner", "params": {"prefab": "kit/creature", "max": 4}}]},
+		{"id": 4, "parent": 1, "name": "game rules, the day and the night", "components": [{"type": "kit/game_rules", "params": {"peaceful": false, "building": "inventory", "on_death": "keep", "show_health": true}}, {"type": "kit/environment", "params": {"time": 8, "day_minutes": 20}, "links": [{"output": "dusk", "to": 7, "input": "enable"}, {"output": "dawn", "to": 7, "input": "disable"}, {"output": "dawn", "to": 7, "input": "clear"}]}, {"type": "kit/walker", "params": {"fall_damage": 1}}]},
+		{"id": 5, "parent": 1, "name": "players and builds kept", "components": [{"type": "kit/player_state", "params": {"remember": true, "keep_position": true, "keep_builds": true, "keep_inventory": true}}]},
+		{"id": 7, "parent": 2, "name": "creatures come at night", "components": [{"type": "kit/spawn_rule", "params": {"prefab": "kit/creature", "enabled": false, "every": 15, "max": 6, "radius": 24, "apart": 12, "on": "kit/grass, kit/dirt, kit/stone, kit/sand, kit/gravel"}}]},
 		{"id": 8, "parent": 2, "name": "a pickaxe and a sword", "components": [{"type": "kit/starting_kit", "params": {"items": "kit/pickaxe, kit/sword"}}]},
 		{"id": 9, "parent": 2, "name": "how to play", "components": [{"type": "kit/ui_text", "params": {"text": "Dig, and build with what you dig.|Creatures come at night.|You come back where you left. F6: the tools.", "anchor": "bottom_left", "x": 2, "y": 7, "size": 1.5}}]}
 	],

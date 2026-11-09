@@ -12217,6 +12217,8 @@ struct Module: public interface::Module, public Interface
 				creature_lit(e, o);
 			if(e.has_pos && ty.decl.get("bot").is_true())
 				bot_goal_lit(e, o);
+			if(ty.decl.get("spawn_spots").is_true() && r.handler == "on_timer")
+				spawn_spots_lit(e, in, ci, o);
 		}
 		// [KIT_CTF] its scene's regions: {id, team, rules, o, n} (the
 		// enabled ones; c:region_at picks the smallest holding a cell)
@@ -19509,6 +19511,156 @@ struct Module: public interface::Module, public Interface
 		return out;
 	}
 
+	// [KIT_SPAWN_RULE] For a type with `spawn_spots = true` (kit/spawn_rule):
+	// spots = {{x, y, z}...}, at most one a player of its scene (here, alive), a
+	// cell's middle on a solid voxel with two free over it, radius / 2 to
+	// radius from them across, 8 up to 16 down: the voxel one of `on` (names,
+	// "," or " " between; none: any), the sky light in the cell over it within
+	// light_min...light_max (the World's sky light off: 15), none of the kind
+	// (copies of its prefab; apart_any: any creature) within `apart` m, nor
+	// another spot; and far = {id...}, its copies with no such player within
+	// `despawn` m (0: never).
+	// simplified: a dozen random tries a player a call; no block light (the
+	// voxels' own), no free objects' decks; the kind by the prefab only
+	void spawn_spots_lit(const Entity &e, const Instance &in, size_t ci,
+			ss_ &o)
+	{
+		static std::mt19937 rng(std::random_device{}());
+		std::uniform_real_distribution<double> u(0, 1);
+		const json::Value &p = in.params;
+		const ss_ prefab = jstr(p, "prefab");
+		const double radius = num(p, "radius", 24, 4, 64);
+		const double apart = num(p, "apart", 0, 0, 128);
+		const double despawn = num(p, "despawn", 0, 0, 512);
+		const int lmin = (int)num(p, "light_min", 0, 0, 15);
+		const int lmax = (int)num(p, "light_max", 15, 0, 15);
+		const bool any = p.get("apart_any").is_true();
+		std::set<ss_> on;
+		{
+			ss_ s = jstr(p, "on");
+			for(char &ch : s)
+				if(ch == ',')
+					ch = ' ';
+			std::istringstream is(s);
+			for(ss_ w; is >> w; )
+				on.insert(w);
+		}
+		const main_context::SceneReference ref = scene_of(e);
+		typedef std::array<double, 3> P;
+		sv_<P> players, kind;
+		json::Value far = json::array(), spots = json::array();
+		for(auto &pl : m_players){
+			auto it = m_entities.find(pl.second);
+			if(it == m_entities.end() || !peer_of_player(pl.second) ||
+					!player_alive(it->second) || scene_of(it->second) != ref)
+				continue;
+			P w;
+			world_of(it->second, w.data());
+			players.push_back(w);
+		}
+		for(auto &mp : m_entities){
+			const Entity &m = mp.second;
+			if(!m.has_pos || scene_of(m) != ref)
+				continue;
+			const bool mine = made_head(m, e.id, ci);
+			auto di = m_drives.find(m.id);
+			const bool of_kind = any ? di != m_drives.end() && di->second.creature :
+					(mine || (m.made && !prefab.empty() &&
+					jstr(m.prefab, "of") == prefab));
+			if(!of_kind && !mine)
+				continue;
+			P w;
+			world_of(m, w.data());
+			if(of_kind)
+				kind.push_back(w);
+			if(!mine || despawn <= 0)
+				continue;
+			bool near = false;
+			for(const P &q : players)
+				near = near || (w[0] - q[0]) * (w[0] - q[0]) + (w[2] - q[2]) *
+						(w[2] - q[2]) + (w[1] - q[1]) * (w[1] - q[1]) <= despawn * despawn;
+			if(!near)
+				far.append((int64_t)m.id);
+		}
+		World *wd = world_at(ref);
+		const bool sky = wd && wd->sky;
+		auto spaced = [&](const P &s){
+			for(const P &k : kind)
+				if((s[0] - k[0]) * (s[0] - k[0]) + (s[1] - k[1]) * (s[1] - k[1]) +
+						(s[2] - k[2]) * (s[2] - k[2]) < apart * apart)
+					return false;
+			return true;
+		};
+		if(ref && !players.empty())
+		voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
+			const interface::VoxelFormat &f = w->get_voxel_reg()->get_format();
+			// (0: not loaded, 1: free, 2: solid)
+			auto cell = [&](int x, int y, int z, ss_ *name, int *light){
+				const pv::Vector3DInt32 q(x, y, z);
+				if(!loaded(w, q))
+					return 0;
+				const uint32_t word = w->get_voxel(q, true).data;
+				const interface::VoxelDefinition *d =
+						w->get_voxel_reg()->get(f.id.get(word));
+				if(light)
+					*light = !sky ? 15 : f.light_sky.bound() ?
+							(int)f.light_sky.get(word) : 0;
+				if(!d || d->name.block_name.empty())
+					return 0; // (a section not generated yet)
+				if(name)
+					*name = d->name.block_name;
+				return d->physically_solid ? 2 : 1;
+			};
+			for(const P &pp : players){
+				for(int t = 0; t < 12; t++){
+					const double a = u(rng) * 2 * 3.14159265358979323846;
+					const double r = radius * (0.5 + 0.5 * u(rng));
+					// (cells centred on whole numbers, as cell_of())
+					const int x = (int)std::floor(pp[0] + std::sin(a) * r + 0.5);
+					const int z = (int)std::floor(pp[2] + std::cos(a) * r + 0.5);
+					const int y0 = (int)std::floor(pp[1] + 0.5);
+					int above = 0, light = 0;
+					bool found = false;
+					for(int y = y0 + 8; y >= y0 - 16 && !found; y--){
+						ss_ name;
+						int l = 0;
+						const int c = cell(x, y, z, &name, &l);
+						if(c == 0){
+							above = 0;
+							continue;
+						}
+						if(c == 1){
+							light = l; // (the one over the ground, at the end)
+							above++;
+							continue;
+						}
+						if(above >= 2 && (on.empty() || on.count(name)) &&
+								light >= lmin && light <= lmax){
+							const P s = {{(double)x, (double)y + 1, (double)z}};
+							// (too near one: not the cave under it either)
+							if(!spaced(s))
+								break;
+							kind.push_back(s);
+							json::Value j = json::array();
+							for(double v : s)
+								j.append(v);
+							spots.append(j);
+							found = true;
+						}
+						// (a floor that does not do: on down, a cave's under it)
+						above = 0;
+					}
+					if(found)
+						break;
+				}
+			}
+		});
+		o += ",spots=";
+		lua_lit(spots, o);
+		o += ",far=";
+		lua_lit(far, o);
+	}
+
 	// For a type with `creature = true`: its entity's senses' target ({id, pos,
 	// dist, player}), its health's share and whether it walks a way now
 	void creature_lit(const Entity &e, ss_ &o)
@@ -20315,6 +20467,41 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
+	// [KIT_SURVIVAL_TUNING] Fall damage: a landing's speed (move.lua's
+	// s.impact, taken here) as the height fallen (v^2 / 2g); past the
+	// movement's fall_safe metres, fall_damage hit points a metre (0: none),
+	// a hit of type "fall" while Running (not a builder in edit mode)
+	void fall_hurt(size_t peer, Body &b)
+	{
+		const double v = num(b.state, "impact", 0, 0, 1000);
+		if(v <= 0)
+			return;
+		b.state.set("impact", 0);
+		const double scale = num(b.params, "fall_damage", 0, 0, 1000);
+		const double g = num(b.params, "gravity", 15, 0.01, 1000);
+		const double fell = v * v / (2 * g);
+		const double amount = std::floor((fell -
+				num(b.params, "fall_safe", 3, 0, 1000)) * scale);
+		const uint64_t player = m_peers[peer].player;
+		if(amount < 1 || !running() || m_peers[peer].editing ||
+				!m_entities.count(player))
+			return;
+		ss_ why;
+		if(!takes_damage(player, why)){
+			log_i(MODULE, "%s's fall of %.1f m: %s", cs(m_peers[peer].name),
+					fell, cs(why));
+			return;
+		}
+		json::Value hit = json::object();
+		hit.set("amount", amount);
+		hit.set("type", ss_("fall"));
+		hit.set("item", ss_());
+		hit.set("crit", false);
+		log_i(MODULE, "%s fell %.1f m: %g damage", cs(m_peers[peer].name), fell,
+				amount);
+		apply_hit(player, hit, "");
+	}
+
 	// The bodies' inputs stepped, the clock's worth for each, within the
 	// tick's budget: what it spent
 	int64_t step_bodies(int64_t budget)
@@ -20468,6 +20655,8 @@ struct Module: public interface::Module, public Interface
 				inetwork->send(bp.first, "kit:body", "{\"ack\":"+itos(b.ack)+
 						settle_json(b)+",\"s\":"+b.state_json+"}");
 			});
+			// (last: a death in it may put the body back at a spawn)
+			fall_hurt(bp.first, b);
 		}
 		return spent;
 	}

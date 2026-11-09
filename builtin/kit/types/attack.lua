@@ -18,7 +18,9 @@ local function think(c)
 		c.state.chasing = true
 		c:log("chases", t.id)
 	end
-	c:propose_move({to = t.pos, range = 1})
+	-- (range 0.5: into their cell; at 1 the path could end a cell off, the
+	-- creature 1.85 m from them, out of a 1.8 m reach for good)
+	c:propose_move({to = t.pos, range = 0.5})
 	if t.dist <= c.params.reach and not c.state.cooling then
 		c:hurt(t.id, {amount = c.params.damage, type = "bite"})
 		c:log("hits", t.id, "for", c.params.damage)

@@ -1402,6 +1402,19 @@ local function markers()
 	end
 	local MARGIN = 2 * V
 	local D = math.max(8, math.floor(1.1 * V))
+	-- [KIT_TEMPLATE_ROUGH_EDGES_2] The HUD's top boxes (a top anchor's, not in
+	-- a panel, in the box's top quarter): {x0, x1, bottom} in the box
+	local tops = {}
+	for _, u in pairs(U) do
+		if u.el and u.el.visible and not u.pr and u.ui and
+				tostring(u.ui.anchor or "top_left"):find("^top") then
+			local p = u.el.screenPosition
+			if p.y - by < H / 4 then
+				tops[#tops + 1] = {p.x - bx, p.x - bx + u.el.width,
+					p.y - by + u.el.height}
+			end
+		end
+	end
 	for id, r in pairs(MK) do
 		local mk, n = r.mk, P.nodes[id]
 		local on = cam ~= nil and not M.hud_off() and mk.on ~= false and
@@ -1459,6 +1472,17 @@ local function markers()
 			end
 			-- The dot on the point, the label over it, both on the screen
 			local tw, th = r.t.minWidth, r.t.height
+			-- [KIT_TEMPLATE_ROUGH_EDGES_2] one at the edge goes below a top box
+			-- it would sit under (the arena's status)
+			if behind or k < 1 then
+				local half = math.max(D, math.floor(tw / 2) + 3)
+				for _, b in ipairs(tops) do
+					if x + half > b[1] and x - half < b[2] and
+							y - math.floor(D / 2) - 2 - th < b[3] then
+						y = math.min(H - MARGIN, b[3] + th + math.floor(D / 2) + 2)
+					end
+				end
+			end
 			r.el:SetPosition(bx, by)
 			r.dot:SetFixedSize(D, D)
 			r.dot:SetPosition(x - math.floor(D / 2), y - math.floor(D / 2))
