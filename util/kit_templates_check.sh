@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min, ~5 min with web (2026-11-07)
-# covers: apps/workbench/** builtin/world_menu/** builtin/kit/kit.cpp builtin/kit/types/arena.lua builtin/kit/types/team.lua builtin/kit/types/goal.lua builtin/kit/types/sign.lua builtin/kit/types/button.lua builtin/kit/types/flag.lua builtin/kit/types/symmetry.lua src/impl/aitta.cpp client/core/aitta/init.lua util/pack_templates.sh util/kit_ctf_warp.lua
+# covers: apps/workbench/** builtin/world_menu/** builtin/kit/kit.cpp builtin/kit/types/player_state.lua builtin/kit/types/arena.lua builtin/kit/types/team.lua builtin/kit/types/goal.lua builtin/kit/types/sign.lua builtin/kit/types/button.lua builtin/kit/types/flag.lua builtin/kit/types/symmetry.lua src/impl/aitta.cpp client/core/aitta/init.lua util/pack_templates.sh util/kit_ctf_warp.lua
 # [KIT_TEMPLATES] (kit_plan stage 7b, Workbench templates) Each template through
 # New, opened in edit mode and played to its end by real clients. A check's
 # default Aitta is a closed port, so all this but part 3 is the offline case.
@@ -17,6 +17,10 @@
 #    three presses of the other's, a win; back in the lobby (a_*.png).
 # 2b. Capture the flag, likewise (c_*.png), shortened by edit ops: kitboss
 #    takes the flag and places it in Red's zone, a point wins.
+# 2c. Survival ([KIT_SURVIVAL_TEMPLATE]): opened (v_edit.png), its clock set
+#    to just before dusk, played; kitbob digs two cells into his inventory
+#    and places one back, the dusk's creature chases and bites him; he
+#    leaves and rejoins where he was (v_*.png).
 # 3. Packed by util/pack_templates.sh with a key made here, the licence file in
 #    the archive and no .wasm, published to a local Aitta, `buildat aitta
 #    install`ed: New lists it after ours, and it opens in edit mode (i_*.png).
@@ -46,7 +50,8 @@ python3 -I - "$here" > "$t/ids.sh" <<'PY' || fail "the templates' files"
 import json, re, sys
 here = sys.argv[1]
 known = set(json.load(open(here + "/builtin/kit/materials.json"))["voxels"])
-for name, pre in (("puzzle_room", "P"), ("arena", "A"), ("ctf", "C"), ("airships", "S")):
+for name, pre in (("puzzle_room", "P"), ("arena", "A"), ("ctf", "C"), ("airships", "S"),
+		("survival", "V")):
 	d = "%s/apps/workbench/templates/%s" % (here, name)
 	m = json.load(open(d + "/meta.json"))
 	assert m["kind"] == "template" and m["name"] == name and m["title"], name
@@ -58,7 +63,8 @@ for name, pre in (("puzzle_room", "P"), ("arena", "A"), ("ctf", "C"), ("airships
 	def scene(r):
 		while r.get("kind") != "scene" and r.get("parent") in by:
 			r = by[r["parent"]]
-		return r.get("name", "")
+		# (one on the app root: "", so V__game_rules_...)
+		return r.get("name", "") if r.get("kind") == "scene" else ""
 	for r in rows:
 		for c in r.get("components", []):
 			v = c.get("params", {}).get("voxel", "")
@@ -540,6 +546,87 @@ for hint in ("Take the flag at the middle", "The flag is out in "):
 PY
 echo "ok: capture the flag plays a round to a capture"
 
+# 2c. Survival: the clock set to 17.98 (dusk a second into Play at its 20
+# minute day), Played, kitboss gone. kitbob at the World's spawn (0.5, 189,
+# 0.5; valleys seed 1) digs the grass and the dirt under it at (1, 188, 2),
+# (1, 187, 2) (a hand's 1 s each: asked again), places the grass back; the
+# dusk's creature (8 m off) spots him and bites. He leaves and comes back
+# where he left
+dig2() # <x, y, z>: a dig asked twice (it waits)
+{
+	printf 'event workbench_build {"p": [%s], "voxel": "air"}\nsync 2000\ndelay 1000\n' "$1"
+	printf 'event workbench_build {"p": [%s], "voxel": "air"}\nsync 2000\n' "$1"
+}
+{
+	new_project Survival v
+	shot v_edit
+	ed "{\"op\": \"set\", \"id\": $V__game_rules_the_day_and_the_night, \"comp\": 1, \"param\": \"time\", \"value\": 17.98}"
+	to_play
+	echo quit
+} > "$t/v_boss.cmds"
+{
+	cat <<'EOF'
+wait_log_any 60000 Joined as kitbob
+wait_log_any 60000 player physics enabled
+wait_log_any 20000 kit: slots: 1:kit/pickaxe x1, 2:kit/sword x1
+EOF
+	dig2 "1, 188, 2"
+	echo "wait_log_any 5000 3:kit/grass x1"
+	dig2 "1, 187, 2"
+	cat <<'EOF'
+wait_log_any 5000 4:kit/dirt x1
+event kit_slot 3
+wait_log 5000 held 3 kit/grass
+sync 2000
+event workbench_build {"p": [1, 187, 2], "voxel": "kit/grass"}
+wait_log 5000 kit: slots: 1:kit/pickaxe x1, 2:kit/sword x1, 4:kit/dirt x1
+EOF
+	echo "wait_log_any 60000 health 18/20"
+	shot v_bitten
+	walk 600
+	echo quit
+} > "$t/v_bob.cmds"
+{
+	cat <<'EOF'
+wait_log_any 60000 Joined as kitbob
+wait_log_any 60000 player physics enabled
+sync 3000
+EOF
+	shot v_back
+	echo quit
+} > "$t/v_back.cmds"
+server surv
+admin
+boss v_boss
+bob v_bob
+if [ -n "$WEB" ]; then
+	page v_back ' ["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+ ["selall"], ["frames", 2], ["type", "kitbob"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["type", "checkpass12"], ["frames", 2], ["key", "Enter"], ["waitlog", "Joined as kitbob", 30],'
+else
+	BUILDAT_JOIN_NAME=kitbob native v_back
+fi
+server_end
+python3 -I - "$t" "$V_world_creatures_come_at_night" <<'PY' || fail "survival's logs ($t)"
+import re, sys
+t, spawner = sys.argv[1:]
+srv = open(t + "/surv.log", errors="replace").read()
+back = open(t + "/v_back.log", errors="replace").read()
+for want in ("the project from the template survival", "kitboss opens the template in edit mode",
+		"workbench: kitbob dug (1,188,2): written", "workbench: kitbob dug (1,187,2): written",
+		"kitbob placed kit/grass at (1,187,2): one taken from slot 3",
+		"kit/spawner %s: made" % spawner, "hurts kitbob: 2 bite"):
+	assert want in srv, want
+assert re.search(r"kit/environment \d+: dusk", srv), "no dusk"
+assert re.search(r"kit/attack \d+: chases \d+", srv), "no chase"
+kept = re.findall(r"kitbob kept at \(([^)]*)\)", srv)
+assert kept, "kitbob not kept"
+assert "kitbob back where they were at (%s) in world" % kept[0] in srv, kept
+x = kept[0].split(", ")[0]
+assert "the server put the player at (%s, " % x in back, (x, "not put back")
+PY
+echo "ok: survival: dug and placed from the inventory, chased at dusk, back where he left"
+
 [ -n "$WEB" ] && { echo "PASS: the templates: made, opened and played (web)"; exit 0; }
 
 # 3. Packed, published, installed, listed
@@ -614,7 +701,7 @@ m = re.search(r"world_menu: template choices: (.*)", cl)
 assert m, "no choices"
 got = m[1].strip()
 assert got.startswith("Empty, ") and got.endswith(", Puzzle room (buildat, installed)"), got
-assert {"Airships", "Arena", "Capture the flag", "Puzzle room", "Ship"} <= set(got[7:].split(", ")[:-1]), got
+assert {"Airships", "Arena", "Capture the flag", "Puzzle room", "Ship", "Survival"} <= set(got[7:].split(", ")[:-1]), got
 assert "A template: Stopped, in edit mode" in srv
 assert "kitboss opens the template in edit mode" in srv
 PY

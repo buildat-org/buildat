@@ -1,0 +1,11 @@
+{
+	"kind": "template",
+	"author": "buildat",
+	"name": "survival",
+	"title": "Survival",
+	"version": "1.0.0",
+	"engine_api": 2,
+	"license_code": "CC0-1.0",
+	"license_media": "CC0-1.0",
+	"description": "An endless land of valleys and caves to dig and build in: what you dig goes into your inventory, creatures come out at night, and each player comes back where they left. Opens in edit mode, ready to play and to change."
+}
