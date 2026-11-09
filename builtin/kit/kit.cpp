@@ -19721,6 +19721,41 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
+	// [KIT_SURVIVAL_TUNING] Fall damage: a landing's speed (move.lua's
+	// s.impact, taken here) as the height fallen (v^2 / 2g); past the
+	// movement's fall_safe metres, fall_damage hit points a metre (0: none),
+	// a hit of type "fall" while Running (not a builder in edit mode)
+	void fall_hurt(size_t peer, Body &b)
+	{
+		const double v = num(b.state, "impact", 0, 0, 1000);
+		if(v <= 0)
+			return;
+		b.state.set("impact", 0);
+		const double scale = num(b.params, "fall_damage", 0, 0, 1000);
+		const double g = num(b.params, "gravity", 15, 0.01, 1000);
+		const double fell = v * v / (2 * g);
+		const double amount = std::floor((fell -
+				num(b.params, "fall_safe", 3, 0, 1000)) * scale);
+		const uint64_t player = m_peers[peer].player;
+		if(amount < 1 || !running() || m_peers[peer].editing ||
+				!m_entities.count(player))
+			return;
+		ss_ why;
+		if(!takes_damage(player, why)){
+			log_i(MODULE, "%s's fall of %.1f m: %s", cs(m_peers[peer].name),
+					fell, cs(why));
+			return;
+		}
+		json::Value hit = json::object();
+		hit.set("amount", amount);
+		hit.set("type", ss_("fall"));
+		hit.set("item", ss_());
+		hit.set("crit", false);
+		log_i(MODULE, "%s fell %.1f m: %g damage", cs(m_peers[peer].name), fell,
+				amount);
+		apply_hit(player, hit, "");
+	}
+
 	// The bodies' inputs stepped, the clock's worth for each, within the
 	// tick's budget: what it spent
 	int64_t step_bodies(int64_t budget)
@@ -19874,6 +19909,8 @@ struct Module: public interface::Module, public Interface
 				inetwork->send(bp.first, "kit:body", "{\"ack\":"+itos(b.ack)+
 						settle_json(b)+",\"s\":"+b.state_json+"}");
 			});
+			// (last: a death in it may put the body back at a spawn)
+			fall_hurt(bp.first, b);
 		}
 		return spent;
 	}

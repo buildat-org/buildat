@@ -1601,6 +1601,7 @@ function W:walk(s, b, wx, wz, jump, dt, p, auto)
 	end
 	v[2] = v[2] - g * dt
 	if v[2] < -60 then v[2] = -60 end
+	local vy = v[2]
 	local lim = num(p.slope_limit, 45) * PI / 180
 	local body = {x = pos[1], y = pos[2], z = pos[3], r = b.r, h = b.h,
 		slope = M.sin(lim) / M.cos(lim)}
@@ -1650,6 +1651,11 @@ function W:walk(s, b, wx, wz, jump, dt, p, auto)
 			on = M.GROUND
 			v[2] = 0
 		end
+	end
+	-- [KIT_SURVIVAL_TUNING] a landing's speed (the fastest of the steps since
+	-- the server last took it: kit.cpp's fall_hurt)
+	if on and not ground and -vy > num(s.impact, 0) then
+		s.impact = -vy
 	end
 	s.ground = on ~= nil
 	s.friction = on and on.friction or nil
