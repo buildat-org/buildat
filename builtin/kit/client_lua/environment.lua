@@ -104,6 +104,36 @@ end
 function M.physical()
 	return LIT.mode ~= "cartoon" and LIT.views.play ~= nil
 end
+-- [KIT_HOVER_BOX_NIGHT] The light of the hour on a white face turned to the
+-- sun, over noon's (cartoon: as drawn, 1 at most), for what is drawn unlit
+-- (the hover frames): 1 with no environment. Floored so a frame still shows
+-- in the dark: under physical the meter's gain is 12x at most
+-- (sky_render's lum_range), so 0.05 is a dim colour on the screen at night
+-- (fast_physical, the place frame's green: 44 of 255 on a field at
+-- midnight, 145 in a tunnel; unlit full green was white).
+-- simplified: the sky's light outside, not the voxel light where the frame
+-- is; a cave by day draws it as bright as outside (seen, but bright)
+local function lum(c)
+	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+end
+function M.light_level()
+	if not env.zone or not env.light then
+		return 1
+	end
+	local l = lum(env.zone.ambientColor) + env.light.brightness *
+			lum(env.light.color)
+	if not M.physical() then
+		return math.max(0.25, math.min(1, l))
+	end
+	if not LIT.noon then
+		local sr = sky_render()
+		local t = sr.terms(1, sr.dome(sr.sky_radiance(sr.PHYS.day_zenith,
+				sr.PHYS.day_horizon, 1)))
+		LIT.noon = lum(t.ambient) + t.sun * lum(t.sun_color) / math.pi
+	end
+	return math.max(0.05, math.min(1, l / LIT.noon))
+end
+
 -- [KIT_FAST_PHYSICAL] physical without the shadow map and the bloom
 local function fast()
 	return LIT.mode == "fast_physical"

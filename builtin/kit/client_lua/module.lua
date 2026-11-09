@@ -1874,9 +1874,16 @@ function M.highlighter()
 			f.key = key
 			f.fresh = true
 		end
-		if f.col ~= tostring(col) then
-			f.col = tostring(col)
-			f.mat:SetShaderParameter("MatDiffColor", col)
+		-- [KIT_HOVER_BOX_NIGHT] unlit, so dimmed with the scene's light
+		local k = math.floor(M.light_level() * 100 + 0.5) / 100
+		if math.floor(k * 20) ~= M.frames_light then
+			M.frames_light = math.floor(k * 20)
+			log:info("kit: the frames' light " .. k)
+		end
+		if f.col ~= tostring(col) .. k then
+			f.col = tostring(col) .. k
+			f.mat:SetShaderParameter("MatDiffColor",
+					magic.Color(col.r * k, col.g * k, col.b * k))
 		end
 		return f
 	end
