@@ -90,6 +90,7 @@ return {
 		own = {default = {}, per_player = true},
 	},
 	about = {
+		group = "UI",
 		what = "A bar or a pie on the players' screens.",
 		inputs = {
 			value = "Sets what it shows. Value: a number, within its min and max.",

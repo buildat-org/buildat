@@ -66,6 +66,7 @@ return {
 		per = {default = {}},
 	},
 	about = {
+		group = "Logic",
 		what = "Ticks every interval, a set number of times or until stopped.",
 		inputs = {
 			start = "Starts it, or over if it runs.",

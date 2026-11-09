@@ -27,6 +27,7 @@ return {
 		clear = {type = "bool", default = false},
 	},
 	about = {
+		group = "Players",
 		what = "Gives players items at a round's start or at each spawn.",
 		outputs = {
 			given = "A player got them.",

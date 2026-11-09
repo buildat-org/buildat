@@ -68,6 +68,7 @@ return {
 	},
 	gizmo = {shape = "box", size = 0.2, color = "#a060e0"},
 	about = {
+		group = "World",
 		what = "A find-and-replace in a box of cells, which off undoes.",
 		inputs = {
 			on = "Makes every find cell replace, remembering them.",

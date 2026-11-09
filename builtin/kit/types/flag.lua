@@ -409,6 +409,7 @@ return {
 		emitted = {default = {}},
 	},
 	about = {
+		group = "Game",
 		what = "An objective players carry and put down, which scores for a team.",
 		inputs = {
 			enable = "Players can take it again.",

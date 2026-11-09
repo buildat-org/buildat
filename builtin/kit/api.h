@@ -128,6 +128,13 @@ namespace interface
 //                               text (a line or two; at most 200 bytes shown)
 //                               its hover. One with a value says it in a
 //                               sentence "Value: ..."
+//                               [KIT_PALETTE_SECTIONS] group = "World" (or
+//                               Building, Logic, Game, Players, Creatures,
+//                               Vehicles, Items, UI): its section in the
+//                               editor's Place tab (none: Other); keywords =
+//                               "a b c": words its filter also finds it by,
+//                               beside its name and what. A prefab's
+//                               "group" is its section the same way
 //   usable   = true          -- a client may "use" it (in range); with an
 //                               on_use, the clients point it out as
 //                               used by a click ([KIT] stage 4e2).
@@ -787,7 +794,9 @@ namespace interface
 //   {"op": "place", "prefab": name, "pos": [x, y, z], "turn": degrees}
 //       -- a prefab's copy, turned a multiple of 90 about its base
 //       ([KIT_PREFAB_VOXELS]); "clipboard": true instead of a prefab: the
-//       builder's copy pasted (its members no prefab's)
+//       builder's copy pasted (its members no prefab's); [KIT_COMPONENT_ORDER]
+//       "detached": true: its entities plain ones as a paste's (the editor's
+//       for a stock prefab with no voxels)
 //   {"op": "save_prefab", "ids": [n...], "name": n, "box": [x0, y0, z0,
 //    x1, y1, z1], "air": bool}  -- those entities a prefab of the
 //       builder's, they a copy of it; other copies follow its parameters
@@ -833,7 +842,10 @@ namespace interface
 //       "comp": i} ([KIT_COMPONENTS]): one undo each. Refused on a prefab's or a
 //       generator's built child (its prefab's to change), a second of a type or a
 //       second movement, what has a place (it is what the entity is) and an entity's
-//       last. Live while Running: on_start for one added, on_remove for one removed
+//       last. Live while Running: on_start for one added, on_remove for one removed.
+//       [KIT_COMPONENT_ORDER] {"op": "move_component", "id": n, "comp": i, "by": -1
+//       or 1}: swapped with that neighbour, both without a place; the order is the
+//       behaviours' priority (the first to propose a move wins)
 //   {"op": "link"|"unlink", "id": n, "comp": i, "output": o, "to": m,
 //    "input": in}
 //   {"op": "undo"}  -- the editor's own last edit, UNDO_MAX of them

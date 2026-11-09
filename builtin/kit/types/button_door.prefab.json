@@ -2,6 +2,7 @@
 	"format": "kit_prefab",
 	"author": "kit",
 	"name": "button_door",
+	"group": "Building",
 	"version": 1,
 	"entities": [
 		{"id": 1, "name": "door", "pos": [0, 0, 0],

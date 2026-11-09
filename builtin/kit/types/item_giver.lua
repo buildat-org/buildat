@@ -14,6 +14,7 @@ return {
 	-- ([KIT] stage 4d: Kit sees that too)
 	state = {given = {default = {}}},
 	about = {
+		group = "Items",
 		what = "A player who uses it gets its items.",
 		outputs = {
 			given = "A player got them.",

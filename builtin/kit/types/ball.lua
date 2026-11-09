@@ -11,6 +11,7 @@ local BODY = {r = 0.5, h = 1}
 return {
 	version = 1,
 	about = {
+		group = "Vehicles",
 		what = "A seat that rolls: a player who uses it pushes it with the keys.",
 	},
 	usable = true,

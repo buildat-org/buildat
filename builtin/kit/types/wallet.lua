@@ -21,6 +21,7 @@ return {
 		free = {default = false, shared = true},
 	},
 	about = {
+		group = "Players",
 		what = "A player's money for the round; on each player, not placed.",
 		inputs = {
 			give = "Adds money. Value: a number.",

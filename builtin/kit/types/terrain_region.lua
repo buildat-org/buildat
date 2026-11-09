@@ -37,6 +37,7 @@ return {
 	},
 	gizmo = {shape = "box", size = 0.3, color = "#50c050"},
 	about = {
+		group = "World",
 		what = "Generates the World's ground in a box or a ball of cells: in the air, a floating island.",
 	},
 }

@@ -17,6 +17,7 @@ return {
 		state = "on", when = {color = "#40c040"}},
 	state = {on = {default = false, shared = true}},
 	about = {
+		group = "Logic",
 		what = "On or off, flipped by a player's use; green while on.",
 		inputs = {
 			toggle = "Flips it.",

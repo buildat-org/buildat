@@ -74,6 +74,7 @@ return {
 		own = {default = {}, per_player = true},
 	},
 	about = {
+		group = "UI",
 		what = "A button on the players' screens.",
 		inputs = {
 			show = "Shows it.",

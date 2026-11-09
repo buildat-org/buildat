@@ -2,6 +2,7 @@
 	"format": "kit_prefab",
 	"author": "kit",
 	"name": "creature",
+	"group": "Creatures",
 	"version": 1,
 	"entities": [
 		{"id": 1, "name": "creature", "pos": [0, 0, 0],

@@ -19,6 +19,7 @@ return {
 		consume = {type = "bool", default = true},
 	},
 	about = {
+		group = "Items",
 		what = "Using an item puts a copy of a prefab ahead of the player.",
 		outputs = {
 			placed = "A player's use put a copy down. Value: the copy's id.",

@@ -8,6 +8,7 @@
 return {
 	version = 1,
 	about = {
+		group = "Building",
 		what = "Plain geometry off the voxel grid: a box, a wedge or a sphere.",
 	},
 	params = {

@@ -103,6 +103,7 @@ end
 return {
 	version = 1,
 	about = {
+		group = "Players",
 		what = "A player's items; on each player, not placed.",
 	},
 	player = true,

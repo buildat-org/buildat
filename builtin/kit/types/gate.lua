@@ -16,6 +16,7 @@ return {
 		when = {scale = {1, 0.08, 1}, solid = false}},
 	state = {open = {default = false, shared = true}},
 	about = {
+		group = "Building",
 		what = "A wall that only links open and shut; solid while shut.",
 		inputs = {
 			open = "Opens it.",

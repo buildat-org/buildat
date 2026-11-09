@@ -459,6 +459,7 @@ return {
 	-- Its pad, the zone's first cell's floor, seen in play
 	look = {shape = "box", size = {1, 0.1, 1}, color = "#f0a030"},
 	about = {
+		group = "Game",
 		what = "Runs rounds: a queue on its pad, a countdown, teams, a timer, a result.",
 		inputs = {
 			["end"] = "Ends the round at once.",

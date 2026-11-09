@@ -356,6 +356,19 @@ J
 		echo ' ["type", "'"$code"'"], ["frames", 2], ["key", "Tab"], ["frames", 2],'
 	echo ' ["key", "Enter"], ["waitlog", "Joined as '"$1"'", 30],'
 }
+# [KIT_PALETTE_SECTIONS] The Kit editor's Place tab narrowed by its filter to
+# <text> (an entry's name; a prefab's without its brackets), so a click on
+# the entry finds it whatever the palette's length or sections. The filter
+# runs as the text changes, the frames are its rebuild's.
+#   pal_find <text>                  a native drive's lines
+#   pal_find_web <text> [click|tap]  web_drive steps, a comma after
+pal_find(){
+	printf 'click Button "palette filter clear"\nframes 2\nclick LineEdit "palette filter"\nframes 2\ntext %s\nframes 3\n' "$1"
+}
+pal_find_web(){
+	local c=${2:-click}
+	echo "[\"$c\", \"Button\", \"palette filter clear\"], [\"frames\", 2], [\"$c\", \"LineEdit\", \"palette filter\"], [\"frames\", 2], [\"type\", \"$1\"], [\"frames\", 3],"
+}
 fail(){ echo "FAIL: $*"; exit 1; }
 skip() { echo "SKIP: $*"; exit $SKIP; }
 

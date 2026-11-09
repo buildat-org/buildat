@@ -76,6 +76,7 @@ return {
 		own = {default = {}, per_player = true},
 	},
 	about = {
+		group = "UI",
 		what = "A text on the players' screens.",
 		inputs = {
 			value = "Fills {value} in its text. Value: what to show; none empties it.",

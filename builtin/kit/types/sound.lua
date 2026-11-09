@@ -9,6 +9,7 @@ return {
 		everywhere = {cat = "look", type = "bool", default = false},
 	},
 	about = {
+		group = "World",
 		what = "Plays a sound at it, or as loud for everyone in its scene.",
 		inputs = {
 			play = "Plays it.",

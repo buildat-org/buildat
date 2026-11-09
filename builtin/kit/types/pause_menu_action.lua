@@ -20,6 +20,7 @@ return {
 		shown = {default = true, shared = true, param = "shown"},
 	},
 	about = {
+		group = "UI",
 		what = "A button in the players' pause menu.",
 		inputs = {
 			show = "Puts it in the menu.",

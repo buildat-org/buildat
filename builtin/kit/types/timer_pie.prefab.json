@@ -2,6 +2,7 @@
 	"format": "kit_prefab",
 	"author": "kit",
 	"name": "timer_pie",
+	"group": "UI",
 	"version": 1,
 	"entities": [
 		{"id": 1, "name": "timer",

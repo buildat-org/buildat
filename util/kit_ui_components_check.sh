@@ -296,16 +296,13 @@ EOF
 place_ui() # <type>: from the palette's menu, with what is selected as it is
 {
 	cat <<EOF
-click Button "Components"
+click Button "Place"
 frames 5
-mouse_pos 60 300
-frames 2
-$(for i in $(seq 20); do printf 'mouse_wheel -1\nframes 1\n'; done)
-frames 5
+$(pal_find "$1")
 click Button "$1"
 wait_log 5000 the palette's menu of $1
 frames 3
-click Button "Place"
+click Button "menu Place"
 EOF
 	edited
 	printf 'frames 3\n'

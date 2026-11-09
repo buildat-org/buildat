@@ -2,6 +2,7 @@
 	"format": "kit_prefab",
 	"author": "kit",
 	"name": "ship",
+	"group": "Vehicles",
 	"version": 1,
 	"entities": [],
 	"voxels": {

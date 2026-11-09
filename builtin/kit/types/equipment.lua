@@ -39,6 +39,7 @@ return {
 		held = {default = {}, shared = true},
 	},
 	about = {
+		group = "Players",
 		what = "The item a player holds and its wear; on each player, not placed.",
 		outputs = {
 			broke = "The held item wore out. Value: the item's name.",

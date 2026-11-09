@@ -67,6 +67,7 @@ return {
 	},
 	state = {joins = {default = 0}},
 	about = {
+		group = "Game",
 		what = "Where players appear, and where copies are made.",
 		inputs = {
 			spawn = "Makes a copy; with nothing to copy, puts who set it off here.",

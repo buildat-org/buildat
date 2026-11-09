@@ -19,6 +19,7 @@ return {
 		waiting = {default = false, shared = true},
 	},
 	about = {
+		group = "Players",
 		what = "Hit points of a player or of what it is placed on.",
 		inputs = {
 			heal = "Adds hit points. Value: how many; none heals fully.",

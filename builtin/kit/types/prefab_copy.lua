@@ -8,6 +8,7 @@
 return {
 	version = 1,
 	about = {
+		group = "Building",
 		what = "A placed prefab's root: where the copy is and how it is turned.",
 	},
 	params = {

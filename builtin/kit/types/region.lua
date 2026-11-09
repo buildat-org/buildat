@@ -131,6 +131,8 @@ return {
 	},
 	gizmo = {shape = "box", size = 0.2, color = "#c08040"},
 	about = {
+		group = "World",
+		keywords = "protect",
 		what = "A box of cells with rules: who may dig, place, enter, fight and use.",
 		inputs = {
 			enable = "It decides again.",

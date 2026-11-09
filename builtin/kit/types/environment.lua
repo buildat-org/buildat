@@ -123,6 +123,8 @@ return {
 		time_set = {default = 0, shared = true},
 	},
 	about = {
+		group = "World",
+		keywords = "light fog sky sun weather season rendering",
 		what = "The sky, the light, the time of day, the weather and the season.",
 		inputs = {
 			set_time = "Sets the hour. Value: 0 to 24.",

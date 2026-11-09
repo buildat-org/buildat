@@ -2,6 +2,7 @@
 	"format": "kit_prefab",
 	"author": "kit",
 	"name": "paintball_look",
+	"group": "Items",
 	"version": 1,
 	"entities": [
 		{"id": 1, "name": "body", "pos": [0, 0.08, 0.1],

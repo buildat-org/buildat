@@ -210,6 +210,7 @@ event kit_edit {"op": "save_prefab", "ids": [3], "name": "lamp_post"}
 wait_log 10000 entities, 3 to undo
 click Button "All"
 wait_log 5000 kit editor: the palette's All tab
+$(pal_find alice/lamp)
 click Button "alice/lamp"
 wait_log 5000 kit editor: placing alice/lamp
 click Button "Favourite alice/lamp"
@@ -415,6 +416,7 @@ event kit_edit {"op": "place", "type": "$fp2/lamp", "pos": [4, 1, 2]}
 wait_log 10000 entities, 2 to undo
 click Button "All"
 wait_log 5000 kit editor: the palette's All tab
+$(pal_find "alice/lamp @127.0.0.1:$P2")
 click Button "alice/lamp @127.0.0.1:$P2"
 wait_log 5000 kit editor: placing alice/lamp @127.0.0.1:$P2
 mouse_click right

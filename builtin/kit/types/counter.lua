@@ -7,6 +7,7 @@ return {
 	params = {target = {type = "number", default = 0, min = 0, max = 1000000}},
 	state = {count = {default = 0, shared = true}},
 	about = {
+		group = "Logic",
 		what = "Counts, and draws its count over it.",
 		inputs = {
 			count = "Adds one.",

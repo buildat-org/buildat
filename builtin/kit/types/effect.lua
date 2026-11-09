@@ -191,6 +191,7 @@ return {
 		color = {default = ""},
 	},
 	about = {
+		group = "World",
 		what = "Particles and a light the clients show, on a signal or a world event.",
 		inputs = {
 			burst = "One burst. Value: where, if its where is \"value\": a position, entity, player or team.",

@@ -69,6 +69,7 @@ return {
 		own = {default = {}, per_player = true},
 	},
 	about = {
+		group = "UI",
 		what = "A line of text a player enters on their screen.",
 		inputs = {
 			show = "Shows it.",

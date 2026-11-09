@@ -1494,6 +1494,14 @@ end
 -- ---- The columns
 -- simplified: the columns' shares fixed; dragging their edges is the upgrade
 local function fit(win, view, body, x, y, w, h, above)
+	-- [KIT_SIGNALS_FONT_FIT] What is new in it scaled to the editor's text
+	-- size first (as the frame would after this), so the sizes below,
+	-- the screen's room and right at any text size, are not scaled again
+	-- (a new column was 80 % of its room at a text size of 80 % until the
+	-- next layout)
+	if magic.ui_text_scale then
+		magic.ui_text_scale(win, S.font or 1)
+	end
 	win:SetPosition(x, y)
 	win:SetFixedSize(w, h)
 	-- Sized from the root: not to hold the client's fit down (update_ui_fit)
@@ -1723,7 +1731,7 @@ function SG.palette_popup(cols)
 					return NT.place_now(it)
 				end
 				M.set_view(S.before_signals or "walk")
-				NT.choose("Components")
+				NT.choose("Place")
 				NT.arm(it)
 			end)
 		end

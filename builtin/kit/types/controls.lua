@@ -98,6 +98,7 @@ return {
 	-- Any signal: one without a value is shake 1, fov back, glitch 1 s,
 	-- tint white, the camera's own
 	about = {
+		group = "Players",
 		what = "The players' camera, pointer and movement, for the whole game.",
 		inputs = {
 			shake = "Shakes the camera. Value: an amount (none: 1), or a position to shake from.",

@@ -2,6 +2,7 @@
 	"format": "kit_prefab",
 	"author": "kit",
 	"name": "team_match",
+	"group": "Game",
 	"version": 1,
 	"entities": [
 		{"id": 1, "name": "lobby", "pos": [0, 0, 0],

@@ -54,12 +54,12 @@
 --     accessed (clicked on, edited, made or duplicated: the top; Tab's
 --     own selection moves nothing), Shift+Tab the other way
 --   - **The panel** (left; [KIT_EDITOR_PANELS]): its tabs are the tools,
---     each tab's body (it scrolls) the tool's options -- Components,
+--     each tab's body (it scrolls) the tool's options -- Place,
 --     Terrain (T), Voxels (V); Box (B), Entities, Items and Sounds, in
 --     two rows
 --     ([KIT_TABS_TWO_ROWS]); the tabs and the 3D camera as the builder
 --     left them in the project, kit.remember ([WB_EDITOR_VIEW_MEMORY]).
---     Components: a type or
+--     Place: a type or
 --     prefab dragged onto the view goes where it is let go (its ghost
 --     there meanwhile), or clicked it is placed by the clicks on the view
 --     until Escape, a right click or a click on it again (floorplanner's
@@ -1394,15 +1394,15 @@ local palette_buttons = {}
 local palette
 
 -- [KIT_EDITOR_PANELS] The left panel (user, 2026-11-03): one window,
--- its tabs the tools -- Components (the types and the prefabs to place),
+-- its tabs the tools -- Place (the types and the prefabs to place),
 -- Terrain, Voxels, Box and Entities (the list) -- each tab's body the
 -- tool's options, in a view that scrolls (NT.view), bounded each frame
 -- above the builders' panel or the screen's foot (NT.fit_panel). A tab
 -- chosen is its tool on; a tool on (its key: T, V, B) is its tab; put away
--- (Escape, a right click) the panel goes back to Components or Entities,
+-- (Escape, a right click) the panel goes back to Place or Entities,
 -- whichever was last (S.panel_tab)
 -- [KIT_TABS_TWO_ROWS] in two rows, the panel as narrow as its content
-NT.TABS = {{"Components", "Terrain", "Voxels"},
+NT.TABS = {{"Place", "Terrain", "Voxels"},
 	{"Box", "Entities", "Items", "Sounds"}}
 NT.TOOL_TAB = {terrain = "Terrain", voxels = "Voxels", box = "Box"}
 NT.TAB_KEY = {Terrain = "terrain", Voxels = "voxels", Box = "box"}
@@ -1422,8 +1422,8 @@ function NT.tab_shown(name)
 end
 
 function NT.tab()
-	local t = NT.TOOL_TAB[S.tool or ""] or S.panel_tab or "Components"
-	return NT.tab_shown(t) and t or "Components"
+	local t = NT.TOOL_TAB[S.tool or ""] or S.panel_tab or "Place"
+	return NT.tab_shown(t) and t or "Place"
 end
 
 function NT.choose(name)
@@ -1910,9 +1910,9 @@ local function new_tab(w)
 	end)
 end
 
--- The Components tab: the types and the prefabs, a click arms one (placed
--- by the clicks on the view) or, with no position, opens its menu; a drag
--- puts one where it is let go
+-- The Place tab ([KIT_PALETTE_SECTIONS] was Components): the types and the
+-- prefabs, a click arms one (placed by the clicks on the view) or, with no
+-- position, opens its menu; a drag puts one where it is let go
 function NT.components(w)
 	-- [KIT] stage 5: its tabs at its foot (what is above them stays where
 	-- it was): all, the favourites and the New tab, and the credits
@@ -1946,38 +1946,76 @@ function NT.components(w)
 	if #items == 0 and S.tab == "Favourites" then
 		text(w, "None yet: click one, then \"Favourite\"", DIM)
 	end
-	local r
-	for i, it in ipairs(items) do
-		if i % 2 == 1 then
-			r = row(w)
+	-- [KIT_PALETTE_SECTIONS] Each section (the type's about.group, a
+	-- prefab's group) under its header, which folds it; in Favourites one
+	-- list. The filter is above the view (palette())
+	local sections = {}
+	for _, it in ipairs(items) do
+		local g = S.tab == "Favourites" and "" or it.group
+		if not sections[g] then
+			sections[g] = {}
 		end
-		local armed = S.placing ~= nil and S.placing.label == it.label
-		local b
-		b = button(r, it.label, function()
-			-- A click: armed, or no longer (a drag was not a click)
-			if S.palette_dragged then
-				S.palette_dragged = nil
-				return
-			end
-			-- [KIT_PALETTE_MENU] No click on the view to wait for: a menu
-			if NT.positionless(it) then
-				local p = b.screenPosition
-				return NT.palette_menu(it, p.x, p.y + b.height)
-			end
-			-- [KIT_PREFAB_ROOT] A prefab: Place (arms), Rename, Delete
-			if it.prefab then
-				local p = b.screenPosition
-				return NT.pf.menu(it, p.x, p.y + b.height, palette)
-			end
-			if armed then
-				S.placing = nil
-				log:info("kit editor: placing nothing")
+		table.insert(sections[g], it)
+	end
+	NT.pal_rows, NT.pal_heads, NT.pal_body = {}, {}, w
+	local said = {}
+	local r
+	for _, g in ipairs(S.tab == "Favourites" and {""} or NT.GROUPS) do
+		local closed = S.palette_closed[g]
+		if sections[g] and g ~= "" then
+			NT.pal_heads[g] = button(w, (closed and "+ " or "- ") .. g ..
+					" (" .. #sections[g] .. ")", function()
+				S.palette_closed[g] = not closed or nil
+				log:info("kit editor: the palette's section " .. g ..
+						(closed and " open" or " closed"))
 				palette()
-			else
-				NT.arm(it)
+			end)
+			NT.pal_heads[g]:SetName("section " .. g)
+			said[#said + 1] = g .. " " .. #sections[g]
+		end
+		for i, it in ipairs(sections[g] or {}) do
+			if i % 2 == 1 then
+				r = row(w)
 			end
-		end, armed)
-		palette_buttons[#palette_buttons + 1] = {button = b, item = it}
+			local armed = S.placing ~= nil and S.placing.label == it.label
+			local b
+			b = button(r, it.label, function()
+				-- A click: armed, or no longer (a drag was not a click)
+				if S.palette_dragged then
+					S.palette_dragged = nil
+					return
+				end
+				-- [KIT_PALETTE_MENU] No click on the view to wait for: a menu
+				if NT.positionless(it) then
+					local p = b.screenPosition
+					return NT.palette_menu(it, p.x, p.y + b.height)
+				end
+				-- [KIT_PREFAB_ROOT] A prefab: Place (arms), Rename, Delete
+				-- ([KIT_PALETTE_MENU_CHOICE] one with no more than Place
+				-- and Favourite armed as a type is, its Favourite the foot's)
+				if it.prefab and NT.pf.has_menu(it) then
+					local p = b.screenPosition
+					return NT.pf.menu(it, p.x, p.y + b.height, palette)
+				end
+				if armed then
+					S.placing = nil
+					log:info("kit editor: placing nothing")
+					palette()
+				else
+					NT.arm(it)
+				end
+			end, armed)
+			local pb = {button = b, item = it, row = r, group = g}
+			palette_buttons[#palette_buttons + 1] = pb
+			NT.pal_rows[#NT.pal_rows + 1] = pb
+		end
+	end
+	NT.palette_filter()
+	local line = "kit editor: the palette's sections: " ..
+			table.concat(said, ", ")
+	if #said > 0 and line ~= NT.sections_said then
+		NT.sections_said = line
+		log:info(line)
 	end
 	-- The armed one starred or not
 	if S.placing then
@@ -1992,7 +2030,21 @@ function NT.components(w)
 	tabs()
 end
 
--- What the palette lists, in a tab: {key, label, and type or prefab}
+-- [KIT_PALETTE_SECTIONS] The palette's sections in order: a type's
+-- about.group, a stock prefab's group; a builder's own prefabs are
+-- Prefabs, a type that names none (or another) Other
+NT.GROUPS = {"World", "Building", "Logic", "Game", "Players", "Creatures",
+	"Vehicles", "Items", "UI", "Prefabs", "Other"}
+local GROUP_KNOWN = {}
+for _, g in ipairs(NT.GROUPS) do
+	GROUP_KNOWN[g] = true
+end
+-- The sections folded (by the header), this session's
+-- simplified: not remembered over a rejoin (MEM's lines are the upgrade)
+S.palette_closed = {}
+
+-- What the palette lists, in a tab: {key, label, type or prefab, group,
+-- find: the lower case text the filter looks in}
 function NT.palette_items(tab)
 	local fav = {}
 	if tab == "Favourites" then
@@ -2004,16 +2056,69 @@ function NT.palette_items(tab)
 	-- Each by its name (a favourite's), shown as people read it
 	for _, t in ipairs(E.state.palette or {}) do
 		if tab ~= "Favourites" or fav[t] then
-			items[#items + 1] = {key = t, label = shown(t), type = t}
+			local about = type_of(t).about
+			about = type(about) == "table" and about or {}
+			local g = GROUP_KNOWN[about.group] and about.group or "Other"
+			items[#items + 1] = {key = t, label = shown(t), type = t, group = g,
+				find = (t .. " " .. shown(t) .. " " .. tostring(about.what or "") ..
+						" " .. tostring(about.keywords or "")):lower()}
 		end
 	end
+	local info = E.state.prefabs_info or {}
 	for _, p in ipairs(E.state.prefabs or {}) do
 		if tab ~= "Favourites" or fav["[" .. p .. "]"] then
+			local g = (info[p] or {}).group
 			items[#items + 1] = {key = "[" .. p .. "]",
-					label = "[" .. shown(p) .. "]", prefab = p}
+					label = "[" .. shown(p) .. "]", prefab = p,
+					group = GROUP_KNOWN[g] and g or "Prefabs",
+					find = (p .. " " .. shown(p)):lower()}
 		end
 	end
 	return items
+end
+
+-- [KIT_PALETTE_SECTIONS] The entries the filter finds (all of an open
+-- section's with none typed), a row with none hidden, the headers with
+-- anything typed (what it finds one list). simplified: an entry found keeps its row's place, so a
+-- row may show one of its two
+function NT.palette_filter()
+	local q = (S.palette_filter or ""):lower()
+	local n, names = 0, {}
+	for _, pb in ipairs(NT.pal_rows or {}) do
+		local on
+		if q == "" then
+			on = not S.palette_closed[pb.group]
+		else
+			on = pb.item.find:find(q, 1, true) ~= nil
+		end
+		pb.hidden = not on
+		pb.button.visible = on
+		if on then
+			n = n + 1
+			names[#names + 1] = pb.item.label
+		end
+	end
+	local rows = {}
+	for _, pb in ipairs(NT.pal_rows or {}) do
+		rows[pb.row] = rows[pb.row] or not pb.hidden
+	end
+	for r, any in pairs(rows) do
+		r.visible = any
+	end
+	for _, h in pairs(NT.pal_heads or {}) do
+		h.visible = q == ""
+	end
+	-- (a layout only grows, stretching what is left: the body shrunk to
+	-- what it shows, the panel after it, NT.fit_panel)
+	if NT.pal_body then
+		NT.pal_body.height = 0
+	end
+	local line = "kit editor: the palette for \"" .. q .. "\": " .. n ..
+			(n > 0 and n <= 12 and ": " .. table.concat(names, ", ") or "")
+	if line ~= NT.filtered then
+		NT.filtered = line
+		log:info(line)
+	end
 end
 
 -- [KIT_PALETTE_MENU] A type that says no_position: no click on the view
@@ -2109,6 +2214,20 @@ palette = function()
 				used = used + bw
 			end
 		end
+	end
+	-- [KIT_PALETTE_SECTIONS] The filter over the list, out of its scroll:
+	-- in sight in a window with room for a row of it
+	if tab == "Place" and S.tab ~= "New" then
+		local fr = row(w)
+		label(fr, "Filter", 50)
+		local fe = edit(fr, S.palette_filter or "", function(s)
+			S.palette_filter = s
+			NT.palette_filter()
+		end)
+		fe:SetName("palette filter")
+		button(fr, "x", function()
+			fe:SetText("")
+		end):SetName("palette filter clear")
 	end
 	local view = w:CreateChild("ScrollView")
 	local body = view:CreateChild("UIElement")
@@ -2246,7 +2365,7 @@ local function palette_at(mx, my)
 		return nil
 	end
 	for _, pb in ipairs(palette_buttons) do
-		if inside(pb.button, mx / sc, my / sc) then
+		if not pb.hidden and inside(pb.button, mx / sc, my / sc) then
 			return pb.item
 		end
 	end
@@ -3147,6 +3266,20 @@ local function inspector(w, e, is_made)
 				log:info("kit editor: remove " .. c.type .. " from " .. e.id)
 				send({op = "remove_component", id = e.id, comp = ci - 1})
 			end)
+			-- [KIT_COMPONENT_ORDER] Swapped with a neighbour that is also
+			-- addable: the order is the behaviours' priority (the first to
+			-- propose a move wins)
+			for _, mv in ipairs({{"up", -1}, {"down", 1}}) do
+				local nb = e.components[ci + mv[2]]
+				if nb and type_of(nb.type).addable then
+					button(tr, "Move " .. mv[1], function()
+						log:info("kit editor: move " .. mv[1] .. " " .. c.type ..
+								" on " .. e.id)
+						send({op = "move_component", id = e.id, comp = ci - 1,
+								by = mv[2]})
+					end):SetName("move " .. mv[1] .. " " .. c.type)
+				end
+			end
 		else
 			text(w, c.type, magic.Color(1.0, 0.85, 0.3))
 		end
@@ -3938,9 +4071,9 @@ end
 
 -- [KIT_EDIT_MODE_FPS] Whether the left panel shows nothing a refresh for why
 -- changes: a selection ("select") or a state ("state", NT.state_changed its
--- keys) leave the Components tab as it is (17 ms to build again)
+-- keys) leave the Place tab as it is (17 ms to build again)
 local function palette_stays(why)
-	if not W.palette or not why or NT.tab() ~= "Components" or S.tab == "New" then
+	if not W.palette or not why or NT.tab() ~= "Place" or S.tab == "New" then
 		return false
 	end
 	if why == "select" then
@@ -4162,10 +4295,12 @@ function NT.menu(entries, x, y)
 		if type(en) == "string" then
 			text(w, en, DIM)
 		else
+			-- (named "menu <label>": the Place tab's button reads as the
+			-- palette menu's Place, a drive's click by name tells them apart)
 			button(w, en[1], function()
 				close_menu()
 				en[2]()
-			end)
+			end):SetName("menu " .. en[1])
 		end
 	end
 	local rw, rh = magic.ui.root.width, magic.ui.root.height
@@ -4919,7 +5054,14 @@ function MEM.restore(was)
 		if VIEW_NAMES[t.view or ""] then
 			set_view(t.view)
 		end
-		if t.tab and NT.tab_shown(t.tab) and t.tab ~= NT.tab() then
+		-- (a tab of that name still: "Components" is Place now)
+		local known = false
+		for _, names in ipairs(NT.TABS) do
+			for _, n in ipairs(names) do
+				known = known or n == t.tab
+			end
+		end
+		if known and NT.tab_shown(t.tab) and t.tab ~= NT.tab() then
 			NT.choose(t.tab)
 		end
 	end

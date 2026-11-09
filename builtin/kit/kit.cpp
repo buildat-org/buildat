@@ -13999,6 +13999,9 @@ struct Module: public interface::Module, public Interface
 				(((int)tj.as_number() / 90) % 4 + 4) % 4 : 0;
 		// [KIT_FREE_PREFAB] "free": true: its voxels an object, none stamped
 		const bool free = !paste && j.get("free").is_true();
+		// [KIT_COMPONENT_ORDER] "detached": true: its entities plain ones, as a
+		// paste's (the editor's for a stock prefab with no voxels)
+		const bool detached = !paste && !free && j.get("detached").is_true();
 		const bool vox = pf->get("voxels").is_object();
 		if(!pos_ok(j.get("pos"))){
 			why = "pos: three numbers within "+itos((int)MAX_COORD);
@@ -14049,7 +14052,7 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!parent_arg(j, p, under, why, 1, all_ui))
 			return false;
-		if(!paste){
+		if(!paste && !detached){
 			const uint64_t id = m_next_id++;
 			json::Value row = json::object(), comps = json::array(),
 					comp = json::object(), pi = json::object();
@@ -14096,19 +14099,25 @@ struct Module: public interface::Module, public Interface
 		sv_<json::Value> rows;
 		instantiate(*pf, "", scene, base, m_next_id, rows, turn);
 		for(json::Value &row : rows){
-			if(under && json::jint(row, "parent", 0) == (int64_t)scene){
+			const bool top = json::jint(row, "parent", 0) == (int64_t)scene;
+			if(under && top){
 				row.set("parent", (int64_t)under);
 				localize(row);
 			}
-			// Named as a duplicate's are
+			// Named as a duplicate's are; a detached prefab's top ones as a
+			// copy's root is
 			const json::Value &cs_ = row.get("components");
-			if(cs_.size())
+			if(detached && top)
+				row.set("name", name.substr(name.find('/') + 1)+" "+
+						itos(json::jint(row, "id", 0)));
+			else if(cs_.size())
 				row.set("name", jstr(cs_.at(0), "type")+" "+
 						itos(json::jint(row, "id", 0)));
 			change.push_back(std::make_pair((uint64_t)json::jint(row, "id", 0),
 					row));
 		}
-		what = ss_("pasted the copy")+(rows.empty() ? ss_() : " as "+
+		what = ss_(detached ? "placed prefab "+name+" detached" :
+				"pasted the copy")+(rows.empty() ? ss_() : " as "+
 				itos(m_next_id)+"..."+itos(m_next_id + rows.size() - 1))+
 				(turn ? ", turned "+itos(turn * 90) : ss_());
 		m_next_id += rows.size();
@@ -26101,6 +26110,9 @@ struct Module: public interface::Module, public Interface
 					o.set("version", json::jint(*pf, "version", 1));
 					o.set("copies", copies[n]);
 					o.set("free", frees[n]);
+					// [KIT_PALETTE_SECTIONS] its palette section
+					if(pf->get("group").is_string())
+						o.set("group", pf->get("group"));
 					const json::Value &vx = pf->get("voxels");
 					if(vx.is_object()){
 						o.set("voxels", voxels_version(*pf));
@@ -27179,7 +27191,8 @@ struct Module: public interface::Module, public Interface
 			what = "renamed "+itos(e->id)+" to "+name;
 			return true;
 		}
-		if(op == "add_component" || op == "remove_component")
+		if(op == "add_component" || op == "remove_component" ||
+				op == "move_component")
 			return component_change(op, j, change, what, why);
 		if(op == "duplicate")
 			return duplicate(j, p, change, what, why);
@@ -27383,6 +27396,33 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		Entity copy = *e;
+		// [KIT_COMPONENT_ORDER] {"op": "move_component", "id", "comp", "by": -1
+		// or 1}: swapped with that neighbour, both without a place
+		if(op == "move_component"){
+			Entity *e2 = nullptr;
+			Instance *in = instance_arg(j, e2, why);
+			if(!in)
+				return false;
+			const json::Value &bj = j.get("by");
+			const int by = bj.is_number() ? (int)bj.as_number() : 0;
+			const size_t i = in - &e->comps[0];
+			if((by != 1 && by != -1) || (by < 0 && i == 0) ||
+					(by > 0 && i + 1 >= e->comps.size())){
+				why = "by: -1 or 1, to a component beside it";
+				return false;
+			}
+			const ss_ &nb = e->comps[i + by].type;
+			if(!addable(in->type) || !addable(nb)){
+				why = (addable(in->type) ? nb : in->type)+
+						" has a place: it stays where it is";
+				return false;
+			}
+			std::swap(copy.comps[i], copy.comps[i + by]);
+			what = "moved "+in->type+(by < 0 ? " up" : " down")+" on "+
+					itos(e->id);
+			change.push_back(std::make_pair(e->id, entity_json(copy)));
+			return true;
+		}
 		if(op == "remove_component"){
 			Entity *e2 = nullptr;
 			Instance *in = instance_arg(j, e2, why);

@@ -20,6 +20,7 @@ return {
 		label = {default = "", shared = true},
 	},
 	about = {
+		group = "Game",
 		what = "A crate a player walks into for money or to repair their ships.",
 		outputs = {
 			taken = "A player took it.",
