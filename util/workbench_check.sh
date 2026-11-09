@@ -24,7 +24,7 @@
 #      scores the players who walk in and counts them, the counter at two
 #      makes the NPC speak), and presses Play.
 #   2. The admin plays it, by the play rules out of edit mode
-#      ([KIT_BUILDER_PLAY_RULES]: a dig sent outside the region refused;
+#      ([KIT_BUILDER_PLAY_RULES]: a dig sent past the map's edge refused, [KIT_TERRAIN_PLAY_RULES];
 #      the region, 16, a big box round the spawn, digging and placing for
 #      all but owners, of whom it has none): looks at the button, shown as used (E opens
 #      the inventory screen and uses nothing, [KIT] stage 4e2;
@@ -38,7 +38,7 @@
 #      puts them in the zone: scored, counted.
 #   3. A second player (kitbob) joins mid-round and is put on the spawner,
 #      is shown nothing to click on the floor (no edit rights), is refused
-#      a dig sent anyway, but digs in the dig zone, is refused
+#      a dig sent past the map's edge, but digs in the dig zone, is refused
 #      by the key door, takes a key from the item giver and opens the door
 #      with it (the key taken), takes the teleporter into the zone
 #      (scored, counted: the counter reaches two and the NPC speaks), and
@@ -584,7 +584,7 @@ keypress Escape
 wait_log 10000 pause: the menu shown
 click Button "Play mode" 512 350
 wait_log 10000 kit editor: edit mode off
-event workbench_build {"p": [6, 0, 6], "voxel": "air"}
+event workbench_build {"p": [6, 0, 40], "voxel": "air"}
 look_dir 1.5 -1.1 1.5
 wait_log_any 5000 kit: points at use 4
 frames 3
@@ -634,7 +634,7 @@ look_dir 1 -0.25 0
 wait_log_any 5000 kit: points at nothing
 frames 3
 screenshot @T@/point_none.png
-event workbench_build {"p": [6, 0, 6], "voxel": "air"}
+event workbench_build {"p": [6, 0, 40], "voxel": "air"}
 look_dir 0 -1 -0.5
 wait_log_any 5000 kit: points at dig 0,0,-5
 mouse_down left
@@ -705,14 +705,14 @@ grep -aq "workbench: kitboss dug .*: written" "$s" ||
 	fail "the admin's dig past the button was not written ($s)"
 # [KIT_BUILDER_PLAY_RULES] out of edit mode the admin plays by the rules:
 # a dig outside the region refused
-grep -aq "workbench: a build by kitboss refused: not in edit mode and not allowed at (6,0,6): Protected: no digging here" "$s" ||
+grep -aq "workbench: a build by kitboss refused: not in edit mode and not allowed at (6,0,40): Protected: no digging here" "$s" ||
 	fail "the admin out of edit mode was let dig outside every region ($s)"
 grep -aq "routed to its owner" "$s" && fail "a write was routed: the starter objects own no voxels ($s)"
 echo "ok: the admin plays it: the button opens the gate and starts the timer, which flips the lever, which moves the door; the NPC, the item giver, the teleporter into the zone"
 want "$s" "kitbob goes through the round's start: inventory reset" \
 	"kit/spawner 3: spawns kitbob" \
 	"Entity 3's kit/spawner teleports kitbob to (0, 1, -4) facing 90" \
-	"workbench: a build by kitbob refused: not in edit mode and not allowed at (6,0,6): Protected: no " \
+	"workbench: a build by kitbob refused: not in edit mode and not allowed at (6,0,40): Protected: no " \
 	"kit/region 16: holds dig others, place others, enter all, pvp all, damage all, use all" \
 	"kit/key_door 15: locked to kitbob who has no key" \
 	"kit/item_giver 14: gives kitbob 1 key" \

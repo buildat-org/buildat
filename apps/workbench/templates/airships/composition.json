@@ -1,7 +1,7 @@
 {
 	"entities": [
 		{"id": 2, "name": "world", "kind": "scene"},
-		{"id": 3, "parent": 2, "name": "the ground", "components": [{"type": "kit/terrain", "params": {"surface": "heightmap", "size": "finite", "width": 1024, "depth": 1024, "generator": "noise", "biome": "grassland", "level": -60, "height": 20, "spread": 200, "sea_level": -100, "decorations": false}}]},
+		{"id": 3, "parent": 2, "name": "the ground", "components": [{"type": "kit/terrain", "params": {"dig": "none", "place": "none", "surface": "heightmap", "size": "finite", "width": 1024, "depth": 1024, "generator": "noise", "biome": "grassland", "level": -60, "height": 20, "spread": 200, "sea_level": -100, "decorations": false}}]},
 		{"id": 4, "parent": 1, "name": "game rules, the sky and the fog", "components": [{"type": "kit/game_rules", "params": {"peaceful": false, "building": "creative", "slots": 0, "show_health": true}}, {"type": "kit/environment", "params": {"fog_start": 500, "fog_end": 1000}}]},
 		{"id": 5, "parent": 2, "name": "the islands stay", "pos": [-512, -64, -512], "components": [{"type": "kit/region", "params": {"size": [1024, 192, 1024], "dig": "none", "place": "none"}}]},
 		{"id": 6, "parent": 2, "name": "the ground kills", "pos": [-512, -120, -512], "components": [{"type": "kit/trigger_zone", "params": {"size": [1024, 100, 1024], "deadly": true}}]},

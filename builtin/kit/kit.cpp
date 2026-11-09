@@ -6845,6 +6845,9 @@ struct Module: public interface::Module, public Interface
 			return params.stringify();
 		json::Value c = params.deepcopy();
 		c.del_key("sky_light");
+		// [KIT_TERRAIN_PLAY_RULES] who may build generates nothing
+		c.del_key("dig");
+		c.del_key("place");
 		// [KIT_SOIL_DEPTH] the biome's (-1), the key from before it
 		if(json::jint(c, "soil_depth", -1) < 0)
 			c.del_key("soil_depth");
@@ -16899,8 +16902,8 @@ struct Module: public interface::Module, public Interface
 	// holding it decides (the smallest): a component on its entity with an
 	// allow handler first (true or false decides, nil leaves it), then its
 	// rules, the owners' column or everyone else's. Outside every region
-	// the World's default: digging and placing by a type's grants alone
-	// (none: no), entering, pvp and damage yes. Edit mode is not in it
+	// digging and placing by the World's dig and place (terrain_rule()) or
+	// a type's grants, entering, pvp and damage yes. Edit mode is not in it
 	bool allows(size_t peer, const ss_ &action, int x, int y, int z, ss_ *why)
 	{
 		SessionScope sc(*this, session_of_peer(peer));
@@ -16951,9 +16954,7 @@ struct Module: public interface::Module, public Interface
 		const Entity *re = nullptr;
 		const Instance *rg = region_at(pi->second.scene, x, y, z, &re);
 		if(!rg){
-			if(!build)
-				return true;
-			if(granted(peer, action.c_str(), x, y, z))
+			if(!build || terrain_allows(peer, action, x, y, z))
 				return true;
 			if(why)
 				*why = refusal(action);
@@ -16994,7 +16995,7 @@ struct Module: public interface::Module, public Interface
 		// (the hook may have changed the tree: the region again)
 		rg = region_at(pi->second.scene, x, y, z, &re);
 		if(!rg){
-			if(!build || granted(peer, action.c_str(), x, y, z))
+			if(!build || terrain_allows(peer, action, x, y, z))
 				return true;
 			if(why)
 				*why = refusal(action);
@@ -17017,6 +17018,28 @@ struct Module: public interface::Module, public Interface
 		if(!yes && why)
 			*why = refusal(action);
 		return yes;
+	}
+
+	// [KIT_TERRAIN_PLAY_RULES] Who may dig or place outside every region:
+	// the World's dig or place ("all", "builders" or "none") over the
+	// cells it covers (a finite map's area, an infinite one's all), none
+	// past a finite map's edge
+	ss_ terrain_rule(const ss_ &scene, const ss_ &action, int x, int z)
+	{
+		const World *w = world_named(scene);
+		if(!w || !w->world_applied.is_object() || !w->wp.in_map(x, z))
+			return "none";
+		const json::Value &v = w->world_applied.get(action);
+		return v.is_string() ? v.as_string() : "all";
+	}
+
+	// The World's rule, or a type's grants
+	bool terrain_allows(size_t peer, const ss_ &action, int x, int y, int z)
+	{
+		if(granted(peer, action.c_str(), x, y, z))
+			return true;
+		const ss_ who = terrain_rule(m_peers[peer].scene, action, x, z);
+		return who == "all" || (who == "builders" && can_edit(peer));
 	}
 
 	// [KIT_INVENTORY_PLAY] Whether a player placed the voxel at a cell in
@@ -25813,6 +25836,26 @@ struct Module: public interface::Module, public Interface
 		}
 		// [KIT] stage 5: the credits, everyone's
 		j.set("credits", credits());
+		// [KIT_TERRAIN_PLAY_RULES] the World's dig and place (terrain_rule())
+		// and a finite map's area, for the client's M.allows()
+		{
+			json::Value tr = json::object();
+			const bool w = m_w->world_applied.is_object();
+			for(const char *a : {"dig", "place"}){
+				const json::Value &v = w ? m_w->world_applied.get(a) :
+						json::Value();
+				tr.set(a, !w ? ss_("none") : v.is_string() ? v.as_string() :
+						ss_("all"));
+			}
+			if(m_w->wp.finite()){
+				json::Value box = json::array();
+				for(int v : {m_w->wp.x0(), m_w->wp.z0(), m_w->wp.width,
+						m_w->wp.depth})
+					box.append((int64_t)v);
+				tr.set("map", box);
+			}
+			j.set("terrain_rules", tr);
+		}
 		if(editing){
 			// The installed packages' versions, by name
 			json::Value pk = json::object();

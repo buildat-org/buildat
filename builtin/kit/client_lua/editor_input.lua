@@ -2821,6 +2821,9 @@ function M.editor(options)
 					"Ended") .. " (by " .. E.by .. ")" ..
 					(E.persistent and ", persistent" or ""))
 		end
+		-- [KIT_TERRAIN_PLAY_RULES] who builds outside every region
+		E.terrain_rules = type(s.terrain_rules) == "table" and
+				s.terrain_rules or {}
 		-- [KIT_SESSIONS_1] the session they are in: a draft's bar has
 		-- Publish and Leave draft, a session's no Run/End
 		E.session = type(s.session) == "table" and s.session or {}

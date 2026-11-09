@@ -23,7 +23,7 @@
 #   2. apps/workbench (its players moved by Kit's controls). Placed: a
 #      kit/spawner (3, at (0, 1, -4), players on) and a kit/region E (4, 5x3x3 ahead of
 #      it, entering for owners only, show_border on). kitbob, put on the
-#      spawner, sees E's border drawn in play, a click at the floor there
+#      spawner, sees E's border drawn in play, a click at the floor there (the World's dig none)
 #      refused in the client and why ("Protected: no digging here"), walks
 #      into E and is put back out and told ("Protected: no entering here").
 #      A region (5) placed round the admin is not one they are put back
@@ -208,6 +208,9 @@ EOF
 	# stands at (0.5, 1, 0.5): not put back (its rules unpublished read
 	# as none for a moment)
 	place '{"op": "place", "type": "kit/region", "pos": [-2, 0, -2]}'
+	# [KIT_TERRAIN_PLAY_RULES] outside every region the World's dig: none
+	place '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'
+	setp 6 dig '"none"'
 	cat <<'EOF'
 keypress Escape
 wait_log 10000 pause: the menu shown

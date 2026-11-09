@@ -42,6 +42,12 @@
 --              fades inward. Off, nothing computes it (the scene's lights
 --              alone, the look before it); not on a heightmap. Changing it
 --              generates nothing again
+--   dig, place ([KIT_TERRAIN_PLAY_RULES]) who digs and places in play
+--              outside every kit/region, on the cells the World covers
+--              (a finite map's area, an infinite one's every cell): all,
+--              builders (edit rights), none. Past a finite map's edge
+--              nobody; a region decides inside its box, kit/game_rules'
+--              dig and place still turn building off. Generates nothing
 -- Changing them while editing generates again every section nobody
 -- edited; edited ones stay, a warning names the seams.
 -- Voxel objects ([VOXEL_OBJECTS]) on a heightmap are their own entities
@@ -78,5 +84,9 @@ return {
 		caves = {type = "bool", default = false},
 		decorations = {cat = "look", type = "bool", default = true},
 		sky_light = {cat = "look", type = "bool", default = false},
+		dig = {type = "string", default = "all",
+			choices = {"all", "builders", "none"}},
+		place = {type = "string", default = "all",
+			choices = {"all", "builders", "none"}},
 	},
 }

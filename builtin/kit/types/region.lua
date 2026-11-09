@@ -9,8 +9,9 @@
 -- kit/team it is under (a team's base: its region placed under its
 -- team), as the team has them now. Where regions overlap the
 -- smallest holding the cell decides; outside every region the World's
--- default holds: no digging or placing (a builder in edit mode only), entering, pvp,
--- damage and use for all.
+-- default holds: digging and placing by kit/terrain's dig and place (all
+-- by default; [KIT_TERRAIN_PLAY_RULES]), entering, pvp, damage and use
+-- for all.
 --
 -- Its signals: enable and disable (a disabled region decides nothing),
 -- set_owner (the player who set it off owns it: a capture point; a value,

@@ -1583,6 +1583,17 @@ function M.allows(action, x, y, z)
 		if granted(action, x, y, z) then
 			return true
 		end
+		-- [KIT_TERRAIN_PLAY_RULES] the World's dig and place, over its map
+		local tr = E.terrain_rules or {}
+		local m = tr.map
+		local who = tr[action] or "none"
+		if type(m) == "table" and not (x >= m[1] and x < m[1] + m[3] and
+				z >= m[2] and z < m[2] + m[4]) then
+			who = "none"
+		end
+		if who == "all" or (who == "builders" and E.can_edit) then
+			return true
+		end
 		return false, REFUSED[action]
 	end
 	local o = value(n, "owners")
