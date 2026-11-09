@@ -8,6 +8,23 @@
 -- set the signal off (a way back to the start), facing so too. Its copies are play
 -- state, gone at Stop; "Restart this" and deleting it take them away.
 -- Several spawners of players: a joining player ends on the last placed
+-- [KIT_TEMPLATE_ROUGH_EDGES] With `spread` (metres, 0 off) the players it
+-- puts in a round go round it, the first on it and the next eight that far
+-- out, so two do not stand in one spot.
+-- simplified: that far out can be in a wall beside it; picking the free
+-- cells around it is the upgrade
+local function spot(c)
+	local k = c.params.spread > 0 and c.state.joins % 9 or 0
+	c.state.joins = c.state.joins + 1
+	local p = c.pos
+	if k == 0 then
+		return p
+	end
+	local a = (k - 1) * math.pi / 4
+	local r = c.params.spread
+	return {p[1] + r * math.sin(a), p[2], p[3] + r * math.cos(a)}
+end
+
 local function copying(c)
 	return c.params.prefab ~= "" or c.params.copy ~= 0
 end
@@ -46,7 +63,9 @@ return {
 		prefab = {type = "prefab", default = ""},
 		max = {type = "number", default = 5, min = 1, max = 100},
 		every = {type = "number", default = 0, min = 0, max = 3600},
+		spread = {type = "number", default = 0, min = 0, max = 4},
 	},
+	state = {joins = {default = 0}},
 	about = {
 		what = "Where players appear, and where copies are made.",
 		inputs = {
@@ -65,7 +84,7 @@ return {
 			return
 		end
 		c:log("spawns", c:name(by))
-		c:teleport(c.pos, {yaw = c.yaw})
+		c:teleport(spot(c), {yaw = c.yaw})
 		c:emit("spawned")
 	end,
 	on_input = function(c, input, value, by)

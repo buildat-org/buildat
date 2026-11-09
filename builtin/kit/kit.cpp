@@ -24492,6 +24492,14 @@ struct Module: public interface::Module, public Interface
 				queue_run(r);
 			}
 		}
+		// [KIT_TEMPLATE_ROUGH_EDGES] At Play, one a spawn type puts is in no
+		// zone until its run did (an arena's pad they stood on at Play
+		// counted them in, then out at once)
+		if(at_play && placed){
+			auto pp = m_peers.find(peer);
+			if(pp != m_peers.end())
+				pp->second.spawning = true;
+		}
 		if(at_play && !keep_position && !placed){
 			log_i(MODULE, "%s to the app's default spawn", cs(name));
 			m_server->emit_event("kit:spawn_player", new SpawnPlayer(peer));
