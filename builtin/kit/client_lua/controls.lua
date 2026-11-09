@@ -1196,6 +1196,18 @@ local function gather()
 				fmt(go_next[3], 2)
 		go_next = nil
 	end
+	-- [KIT_AUTO_JUMP] the movement's auto_jump (kit/walker's): all, or
+	-- touchscreen on a touch client; a touch builder's Walk view always
+	local m = move()
+	local aj = m and type(m.params) == "table" and m.params.auto_jump
+	if aj == "all" or (TOUCH and (aj == "touchscreen" or
+			(E.editing and M.view() == "walk"))) then
+		i.auto = 1
+	end
+	if C.auto_said ~= (i.auto == 1) then
+		C.auto_said = i.auto == 1
+		log:info("kit: auto jump " .. (C.auto_said and "on" or "off"))
+	end
 	return i
 end
 
@@ -1936,8 +1948,10 @@ magic.SubscribeToEvent("Update", function(_, data)
 					"%s %d %d", C.seq, i.f, i.r, i.yaw, i.jump, i.go, i.tx, i.ty,
 					i.tz, fmt(C.pitch, 1), M.pose_swings or 0,
 					M.dig_progress and M.dig_progress() and 1 or 0) ..
-					(i.t and string.format(" %.0f", i.t) or (i.down == 1 and " 0" or "")) ..
-					(i.down == 1 and " 1" or "")
+					(i.t and string.format(" %.0f", i.t) or ((i.down == 1 or
+					i.auto == 1) and " 0" or "")) ..
+					((i.down == 1 or i.auto == 1) and " " .. (i.down or 0) or "") ..
+					(i.auto == 1 and " 1" or "")
 			route_tick()
 		end
 		if C.acc > step_len then

@@ -18391,11 +18391,13 @@ struct Module: public interface::Module, public Interface
 			// for the body others see (an older client sends none);
 			// [KIT_MOVING_OBJECTS] then the time it was stepped at (ms)
 			// [KIT_VEHICLE_MOVEMENTS] then down (0/1: an airship's descent)
-			double v[13] = {0};
+			// [KIT_AUTO_JUMP] then auto (0/1: the walker's auto jump)
+			double v[14] = {0};
 			const int got = sscanf(one.c_str(), "%u %lf %lf %lf %lf %lf %lf "
-					"%lf %lf %lf %lf %lf %lf %lf", &n, &v[0], &v[1], &v[2], &v[3], &v[4],
-					&v[5], &v[6], &v[7], &v[8], &v[9], &v[10], &v[11], &v[12]);
-			if(got != 9 && got != 12 && got != 13 && got != 14)
+					"%lf %lf %lf %lf %lf %lf %lf %lf", &n, &v[0], &v[1], &v[2], &v[3],
+					&v[4], &v[5], &v[6], &v[7], &v[8], &v[9], &v[10], &v[11], &v[12],
+					&v[13]);
+			if(got != 9 && got != 12 && got != 13 && got != 14 && got != 15)
 				continue;
 			bool ok = n > at;
 			for(int k = 0; k < 11; k++)
@@ -18425,8 +18427,10 @@ struct Module: public interface::Module, public Interface
 			lua_lit(json::Value(v[6]), o);
 			o += ",tz=";
 			lua_lit(json::Value(v[7]), o);
-			if(got == 14 && v[12] != 0)
+			if(got >= 14 && v[12] != 0)
 				o += ",down=1";
+			if(got == 15 && v[13] != 0)
+				o += ",auto=1";
 			// [KIT_MOVING_OBJECTS] Taken within reason of the round's time: the server
 			// steps it against the pose the client stepped it against, so a late
 			// input is no correction. simplified: a client can choose its pose within

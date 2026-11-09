@@ -7,6 +7,12 @@
 -- step_height (m: climbed walking), slope_limit (degrees: the heightmap's
 -- slopes walked up, and a free voxel object's deck stood on; past it the deck
 -- slides), rate (steps a second) and substeps (a step's).
+-- [KIT_AUTO_JUMP] auto_jump: walking into a one-voxel step jumps up it
+-- without Jump (skeldat's, Luanti's autojump) -- off, touchscreen (a
+-- touch client's, the default) or all. A touch builder's Walk view in
+-- the editor has it whatever this says. The client asks for it in its
+-- inputs (auto), so the server steps the same.
+-- simplified: not on a free object's deck (W:walk_on).
 -- The keys W A S D and Space; a touchscreen's stick and Jump.
 local BODY = {r = 0.45, h = 1.7, eye = 1.5487}
 
@@ -40,6 +46,8 @@ return {
 			max = 120},
 		substeps = {cat = "advanced", type = "number", default = 1, min = 1,
 			max = 8},
+		auto_jump = {cat = "physics", type = "string", default = "touchscreen",
+			choices = {"off", "touchscreen", "all"}},
 	},
 	step = function(s, i, dt, w, p)
 		local a = (tonumber(i.yaw) or 0) * w.PI / 180
@@ -51,6 +59,6 @@ return {
 		end
 		local sp = p.speed or 6
 		w:walk(s, BODY, (sn * f + cs * r) * sp, (cs * f - sn * r) * sp,
-				i.jump == 1, dt, p)
+				i.jump == 1, dt, p, i.auto == 1)
 	end,
 }

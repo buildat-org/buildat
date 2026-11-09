@@ -1538,7 +1538,10 @@ function W:walk_on(o, s, b, wx, wz, jump, dt, p)
 	return true
 end
 
-function W:walk(s, b, wx, wz, jump, dt, p)
+-- [KIT_AUTO_JUMP] auto (the input's): up a one-voxel step without Jump
+M.AUTOJUMP_HEIGHT = 1.1
+M.AUTOJUMP_S = 0.1
+function W:walk(s, b, wx, wz, jump, dt, p, auto)
 	if type(s.pos) ~= "table" then
 		s.pos = {0, 0, 0}
 	end
@@ -1583,6 +1586,11 @@ function W:walk(s, b, wx, wz, jump, dt, p)
 	-- the air as air_control does ([KIT_MOVING_OBJECTS] over what a moving deck
 	-- gave it, so that a jump keeps up with the deck)
 	local carry = not ground and type(s.carry) == "table" and s.carry or nil
+	-- [KIT_AUTO_JUMP] the jump auto jump chose, held a moment
+	if num(s.auto_t, 0) > 0 then
+		s.auto_t = s.auto_t - dt
+		jump = true
+	end
 	toward(v, wx + (carry and num(carry[1], 0) or 0), wz + (carry and num(carry[2], 0) or 0),
 			num(p.acceleration, 40) * dt * (ground and num(s.friction, 1)
 			or num(p.air_control, 0.6)))
@@ -1598,6 +1606,22 @@ function W:walk(s, b, wx, wz, jump, dt, p)
 		slope = M.sin(lim) / M.cos(lim)}
 	local mx, my, mz, hits = self:move(body, v[1] * dt, v[2] * dt, v[3] * dt,
 			ground and num(p.step_height, 0.6) or 0)
+	-- [KIT_AUTO_JUMP] Walking on the ground into what the step does not take:
+	-- a jump when the same move from AUTOJUMP_HEIGHT up (room over the head)
+	-- gets further (Luanti's LocalPlayer::handleAutojump), held AUTOJUMP_S
+	if auto and ground and not jump and not jumped and (hits.x ~= 0 or
+			hits.z ~= 0) and (wx ~= 0 or wz ~= 0) then
+		local up = self:sweep(box_of(body.x, body.y, body.z, b.r, b.h), 2,
+				M.AUTOJUMP_HEIGHT)
+		if up >= M.AUTOJUMP_HEIGHT - EPS then
+			local _, _, _, jx, jz = self:slide({x = body.x, y = body.y + up,
+				z = body.z, r = b.r, h = b.h, slope = body.slope}, v[1] * dt,
+				v[3] * dt)
+			if jx * jx + jz * jz > (mx * mx + mz * mz) * 1.01 + 1e-12 then
+				s.auto_t = M.AUTOJUMP_S
+			end
+		end
+	end
 	pos[1], pos[2], pos[3] = pos[1] + mx, pos[2] + my, pos[3] + mz
 	if hits.x ~= 0 then v[1] = 0 end
 	if hits.z ~= 0 then v[3] = 0 end
