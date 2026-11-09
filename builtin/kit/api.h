@@ -225,7 +225,14 @@ namespace interface
 //                               while up for the player and in play, a
 //                               press a button's (pressed, released at
 //                               once): kit/pause_menu_action
-//   actions = {{name = "fire", key = "R", label = "Fire"}, ...}
+//                               [KIT_TEXT_INPUT] kind "input": a line
+//                               a player enters (text the label,
+//                               max_length its field's): the packet
+//                               "kit:ui_text" "<id> <text>", checked as a
+//                               press, the text without control
+//                               characters and cut at 200 bytes; on_ui(c,
+//                               "entered", by, text): kit/ui_input
+//   actions ={{name = "fire", key = "R", label = "Fire"}, ...}
 //                            -- ([KIT_INPUT_ACTIONS]) keys the players
 //                               press (8 at most; each value a string or
 //                               "param:<name>", kit/action's): name

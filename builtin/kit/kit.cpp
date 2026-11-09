@@ -1477,6 +1477,7 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "network:packet_received/kit:input", &Module::on_input);
 		sub(m_server, "network:packet_received/kit:action", &Module::on_action);
 		sub(m_server, "network:packet_received/kit:ui", &Module::on_ui_press);
+		sub(m_server, "network:packet_received/kit:ui_text", &Module::on_ui_text);
 		sub(m_server, "network:packet_received/kit:exit", &Module::on_exit);
 		// [KIT_AIRSHIPS] a place or dig on a free object
 		sub(m_server, "network:packet_received/kit:obuild", &Module::on_obuild);
@@ -23178,6 +23179,80 @@ struct Module: public interface::Module, public Interface
 		r.by = by_of(pe.name);
 		r.args.append(down ? "pressed" : "released");
 		r.args.append(r.by);
+		queue_run(r);
+	}
+
+	// [KIT_TEXT_INPUT] "kit:ui_text" "<id> <text>": a line a player
+	// entered in a UI text input (a `ui` of kind "input" with on_ui) on
+	// their screen, checked as a press is; on_ui(c, "entered", by, text),
+	// the text without control characters, 200 bytes at most (the type cuts
+	// it to its own max_length)
+	void on_ui_text(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_ui_text_u(packet);
+	}
+
+	void on_ui_text_u(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		const ss_ &d = packet.data;
+		const size_t sp = d.find(' ');
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || pi->second.name.empty() ||
+				!pi->second.player || !act_allowed(pi->second))
+			return;
+		Peer &pe = pi->second;
+		auto refuse = [&](const ss_ &why){
+			if(log_refusal(pe, why))
+				log_i(MODULE, "A UI text of %s from peer %zu refused: %s",
+						cs(d.substr(0, 32)), peer, cs(why));
+		};
+		char *end = nullptr;
+		const uint64_t id = sp == ss_::npos || sp == 0 || sp > 20 ? 0 :
+				strtoull(d.substr(0, sp).c_str(), &end, 10);
+		if(!id || !end || *end)
+			return refuse("not \"<id> <text>\"");
+		if(!m_session.running)
+			return refuse("the server is Stopped");
+		if(pe.editing)
+			return refuse("in the tools");
+		auto it = m_entities.find(id);
+		if(it == m_entities.end())
+			return refuse("no such input");
+		ss_ scene;
+		scene_of(it->second, &scene);
+		if(scene != pe.scene)
+			return refuse("in another scene");
+		size_t comp = 0;
+		bool input = false;
+		for(size_t i = 0; i < it->second.comps.size() && !input; i++){
+			const Type &t = m_types[it->second.comps[i].type];
+			comp = i;
+			input = jstr(t.decl.get("ui"), "kind") == "input" &&
+					t.handlers.count("on_ui");
+		}
+		if(!input)
+			return refuse("no such input");
+		if(!ui_visible(id, pe.player))
+			return refuse("not on their screen");
+		// simplified: bytes, not characters: a cut can split a UTF-8
+		// character at the end (the type's own max_length counts
+		// characters)
+		ss_ text;
+		for(size_t i = sp + 1; i < d.size() && text.size() < 200; i++)
+			if((unsigned char)d[i] >= 0x20 && d[i] != 0x7f)
+				text += d[i];
+		log_i(MODULE, "UI input %s entered by %s (%zu bytes)", cs(itos(id)),
+				cs(pe.name), text.size());
+		Run r;
+		r.entity = id;
+		r.comp = comp;
+		r.handler = "on_ui";
+		r.by = by_of(pe.name);
+		r.args.append("entered");
+		r.args.append(r.by);
+		r.args.append(text);
 		queue_run(r);
 	}
 

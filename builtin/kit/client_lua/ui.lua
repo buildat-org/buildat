@@ -42,7 +42,10 @@
 --   the tools (Stopped, the components do not run: none shown); a button's press is the action's (kit.press_action) or
 --   "kit:ui" "<id> 1|0", the server checking it is on this player's
 --   screen; while a panel with a button is up the pointer is free
---   (ui_utils.wants_clicks) for a player in mouse look.
+--   (ui_utils.wants_clicks) for a player in mouse look. [KIT_TEXT_INPUT]
+--   An input (kit/ui_input) is a label and a LineEdit named
+--   "kit input <id>", its Enter "kit:ui_text" "<id> <text>"; in a panel
+--   it frees the pointer as a button does.
 --   **Edit mode**: every one drawn where it would be (one hidden dimmed),
 --   framed (the selected one in kit.HOVER) with its id; a click selects
 --   it, a drag moves it (its x and y set, one edit each) in whole percents
@@ -280,8 +283,30 @@ local function make(r, id, parent, in_panel)
 	end
 	r.has_bg = (p.bg or p.disc) and true or false
 	-- A fitted label cut at the shape's edge
-	el.clipChildren = u.kind == "bar" or u.kind == "button" or
+	el.clipChildren = u.kind == "bar" or u.kind == "button" or u.kind == "input" or
 			(u.kind == "text" and num(u.width, 0, 0, 400) > 0)
+	-- [KIT_TEXT_INPUT] An input's field (a focused LineEdit gets the IME and,
+	-- on the web, the page's text input): Enter sends its line
+	-- ("kit:ui_text" "<id> <text>"), empties it and gives the keys back
+	if u.kind == "input" then
+		local f = el:CreateChild("LineEdit")
+		f.defaultStyle = K.STYLE
+		f:SetStyleAuto()
+		f.priority = 6
+		f:SetName("kit input " .. id)
+		f.maxLength = math.floor(num(u.max_length, 100, 1, 200))
+		r.edit = f
+		magic.SubscribeToEvent(f, "TextFinished", function()
+			local s = f.text
+			f.text = ""
+			magic.ui:SetFocusElement(nil)
+			if E.editing or s == "" then
+				return
+			end
+			buildat.send_packet("kit:ui_text", id .. " " .. s)
+			log:info("kit: ui input " .. id .. " entered (" .. #s .. " bytes)")
+		end)
+	end
 	r.t = el:CreateChild("Text")
 	r.t.priority = 5
 	r.t:SetTextEffect(magic.TE_SHADOW)
@@ -875,6 +900,12 @@ local function update()
 							(tonumber(M.game_rule("hotbar")) or 0)
 					h = u.height and H or M.hud_unit()
 					fit_text(r, text, px, w - 2, h - 2, pw, pad)
+				elseif u.kind == "input" then
+					-- The label at the left, the field the rest
+					w = math.min(W > 0 and W or 30 * V, pw)
+					fit_text(r, text, px, w / 2, nil, pw, pad)
+					h = H > 0 and math.min(H, ph) or math.max(r.t.height +
+							math.floor(pad * 0.7) * 2, TOUCH and 36 or math.floor(2.8 * V))
 				elseif W > 0 then
 					fit_text(r, text, px, W - 2 * pad, H > 0 and H - 2 or nil, pw, pad)
 					w = math.min(W, pw)
@@ -970,6 +1001,19 @@ local function update()
 				r.t:SetPosition(math.max(1, math.floor((w - r.tw) / 2)),
 						math.floor((h - r.t.height) / 2))
 			end
+			if r.edit then
+				local lx = r.text ~= "" and r.tw + 2 * pad or pad
+				r.t:SetPosition(pad, math.floor((h - r.t.height) / 2))
+				local fh = math.max(8, math.floor(h - pad))
+				r.edit:SetPosition(math.floor(lx), math.floor((h - fh) / 2))
+				r.edit:SetFixedSize(math.max(8, math.floor(w - lx - pad)), fh)
+				if r.edit_px ~= r.px then
+					r.edit_px = r.px
+					r.edit.textElement:SetFont(magic.cache:GetResource("Font", FONT),
+							r.px)
+				end
+				r.edit.enabled = not E.editing
+			end
 			r.frac = nil
 			if u.kind == "bar" then
 				local lo, hi = tonumber(u.min) or 0, tonumber(u.max) or 100
@@ -1047,7 +1091,8 @@ local function update()
 			end
 			if play and r.on and r.kind == "panel" then
 				for _, o in pairs(U) do
-					if o.kind == "button" and panel_of(o) == id then
+					if (o.kind == "button" or o.kind == "input") and
+							panel_of(o) == id then
 						wants = true
 					end
 				end
@@ -1378,6 +1423,10 @@ magic.SubscribeToEvent("command_seq:kit_ui_flood", function(_, data)
 		buildat.send_packet("kit:ui", id .. " 0")
 	end
 end)
+-- "event kit_ui_text <id> <text>": that line sent as entered in it
+magic.SubscribeToEvent("command_seq:kit_ui_text", function(_, data)
+	buildat.send_packet("kit:ui_text", data:GetString("Param"))
+end)
 
 -- The one at x, y (pixels): the innermost, of those the smallest
 local own_check = false
@@ -1390,7 +1439,7 @@ local function hit(x, y)
 	local best, area = nil, nil
 	for id, r in pairs(U) do
 		if r.el and r.el.visible and (E.editing or r.kind == "button" or
-				(r.kind == "panel" and r.has_bg)) then
+				r.kind == "input" or (r.kind == "panel" and r.has_bg)) then
 			local ok, a = pcall(function()
 				local p, s = r.el.screenPosition, r.el.size
 				return x >= p.x and y >= p.y and x < p.x + s.x and
