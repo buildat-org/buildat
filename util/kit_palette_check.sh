@@ -10,7 +10,9 @@
 #   2. the filter: "light", "fog", "sky" and "rendering" find kit/environment
 #      (its about text, its keywords), "creature" finds [kit/creature];
 #   3. [KIT_PALETTE_MENU_CHOICE] a click on [kit/creature] (no menu: nothing
-#      but Place and Favourite in it) arms it, a click in the plan places it.
+#      but Place and Favourite in it) arms it, a click in the plan places it;
+#   4. [KIT_COMPONENT_ORDER] placed detached, a plain entity: kit/follow added,
+#      kit/attack removed, kit/flee moved down by its inspector button (native).
 #   util/kit_palette_check.sh          native
 #   util/kit_palette_check.sh web      the same in headless Chrome
 set -u
@@ -109,6 +111,23 @@ mouse_click left
 wait_log 10000 kit editor: state:
 keypress Escape
 wait_log_any 5000 kit editor: placing nothing
+event kit_select 3
+wait_log_any 5000 kit editor: selected 3
+event kit_edit {"op": "add_component", "id": 3, "type": "kit/follow"}
+wait_log_any 5000 kit editor: state: 2 entities, 2 to undo
+event kit_edit {"op": "remove_component", "id": 3, "comp": 5}
+wait_log_any 5000 kit editor: state: 2 entities, 3 to undo
+frames 5
+mouse_pos 780 400
+frames 2
+EOF
+		# (the inspector scrolled to kit/flee's header)
+		for _ in $(seq 40); do printf 'mouse_wheel -1\nframes 1\n'; done
+		echo "frames 3"
+		echo "screenshot $t/inspector.png"
+		cat <<'EOF'
+click Button "move down kit/flee"
+wait_log_any 5000 kit editor: state: 2 entities, 4 to undo
 EOF
 		echo quit
 	} > "$t/kitboss.cmds"
@@ -149,4 +168,13 @@ grep -aq "kit editor: placing \[kit/creature\]" "$b" && ! grep -aq "the palette'
 	fail "[kit/creature] not armed by its click ($b)"
 grep -aq "kit editor: placed \[kit/creature\] at" "$b" || fail "[kit/creature] not placed ($b)"
 echo "ok: [kit/creature] armed by a click (no menu), placed by a click in the plan"
+# 4. Detached: its components its own
+s=$t/srv.log
+grep -aq "placed prefab kit/creature detached as 3" "$s" || fail "kit/creature not placed detached as 3 ($s)"
+if [ "$mode" != web ]; then
+	for w in "added kit/follow to 3" "removed kit/attack from 3" "moved kit/flee down on 3"; do
+		grep -aqF "$w" "$s" || fail "no \"$w\" in $s"
+	done
+	echo "ok: placed detached: kit/follow added, kit/attack removed, kit/flee moved down by its button ($t/inspector.png)"
+fi
 echo "PASS: the Place tab's sections and filter ($mode)"

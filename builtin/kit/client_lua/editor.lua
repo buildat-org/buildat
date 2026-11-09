@@ -3266,6 +3266,20 @@ local function inspector(w, e, is_made)
 				log:info("kit editor: remove " .. c.type .. " from " .. e.id)
 				send({op = "remove_component", id = e.id, comp = ci - 1})
 			end)
+			-- [KIT_COMPONENT_ORDER] Swapped with a neighbour that is also
+			-- addable: the order is the behaviours' priority (the first to
+			-- propose a move wins)
+			for _, mv in ipairs({{"up", -1}, {"down", 1}}) do
+				local nb = e.components[ci + mv[2]]
+				if nb and type_of(nb.type).addable then
+					button(tr, "Move " .. mv[1], function()
+						log:info("kit editor: move " .. mv[1] .. " " .. c.type ..
+								" on " .. e.id)
+						send({op = "move_component", id = e.id, comp = ci - 1,
+								by = mv[2]})
+					end):SetName("move " .. mv[1] .. " " .. c.type)
+				end
+			end
 		else
 			text(w, c.type, magic.Color(1.0, 0.85, 0.3))
 		end

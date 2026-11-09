@@ -382,7 +382,8 @@ local function place_at(cell, item)
 			turn = item.turn or 0, parent = parent})
 	elseif item.prefab then
 		send({op = "place", prefab = item.prefab, pos = cell,
-			turn = item.turn or 0, parent = parent, free = item.free})
+			turn = item.turn or 0, parent = parent, free = item.free,
+			detached = NT.pf.detached(item) or nil})
 	elseif item.pickup then
 		-- [KIT_ITEMS_TAB] an item from the Items tab: a pickup of it
 		send({op = "place", type = "kit/pickup", pos = cell, parent = parent,

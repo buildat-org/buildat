@@ -9,7 +9,9 @@
 #      found, walked, arrived. A spawner makes a second one, which steps too.
 #   2. Its senses on: it spots kitboss, its attack's move wins over wander, it
 #      chases and hits him through his health.
-#   3. Its health set low: flee wins, it runs off, further from him than it was.
+#   3. Its health set low: flee wins, it runs off, further from him than it was;
+#      [KIT_COMPONENT_ORDER] (placed and detached) flee moved under wander:
+#      attack wins; moved back: flee again.
 #   4. kitboss teleported 650 m away: it loses him, its section unloads and it
 #      sleeps; teleported back: it wakes where it slept and walks on.
 # A screenshot of it chasing, kept with KEEP_TMP=1: $t/chase.png
@@ -96,6 +98,9 @@ ed '{"op": "place", "prefab": "kit/creature", "pos": [260, 1, 8]}'
 set_ 7 3 enabled false
 set_ 7 3 range 30
 set_ 7 3 angle 360
+# [KIT_COMPONENT_ORDER] detached, as the editor places a stock prefab: its
+# components its own (the root gone, the ids kept)
+ed '{"op": "prefab_detach", "id": 6}'
 ed '{"op": "place", "type": "kit/teleporter", "pos": [248, 1, -8]}'
 set_ 8 0 to '[900, 1, 0]'
 ed '{"op": "place", "type": "kit/teleporter", "pos": [900, 1, 8]}'
@@ -130,6 +135,16 @@ srv_mark
 try 7 set 2
 srv 10 "Entity 7: kit/flee's move wins"
 srv 10 "kit/flee 7: flees from [0-9]+ \(health low\)"
+# [KIT_COMPONENT_ORDER] The order is the priority: flee under wander, attack's
+# move wins; back over attack, flee's again
+srv_mark
+ed '{"op": "move_component", "id": 7, "comp": 4, "by": 1}'
+ed '{"op": "move_component", "id": 7, "comp": 5, "by": 1}'
+srv 10 "Entity 7: kit/attack's move wins"
+srv_mark
+ed '{"op": "move_component", "id": 7, "comp": 6, "by": -1}'
+ed '{"op": "move_component", "id": 7, "comp": 5, "by": -1}'
+srv 10 "Entity 7: kit/flee's move wins"
 # (out of its senses' 30 m: it lost him)
 srv 30 "kit/senses 7: lost"
 # 4. Far away: it sleeps; back: it wakes where it slept
@@ -152,8 +167,8 @@ srv = open(f"{t}/srv.log", errors="replace").read()
 def pos(m):
 	return tuple(float(v) for v in m.groups())
 # 3. Away from him: its flight's goals, each further from his spawn (250, 0) than
-# the last, to past 20 m before it lost him
-f = srv.find("kit/flee 7: flees from")
+# the last, to past 20 m before it lost him (from flee moved back over attack)
+f = srv.rfind("moved kit/flee up on 7")
 lost = srv.find("kit/senses 7: lost", f)
 goals = [pos(m) for m in re.finditer(r"Entity 7: kit/flee's way to \(([-\d.]+), ([-\d.]+), ([-\d.]+)\)",
 	srv[f:lost])]

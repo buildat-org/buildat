@@ -103,7 +103,7 @@ if [ "${1:-}" = web ]; then
 	# it with E: the server Running from the start, the NPC placed live
 	# ([KIT] stage 4d: restarted by the inspector's "Restart this", its
 	# dialog drawn by kit/npc's client part; then kit/button_door placed
-	# from the palette). The pause menu ([KIT] 4c, extensions/pause_menu): up at
+	# from the palette, armed by its click, detached: [KIT_COMPONENT_ORDER]). The pause menu ([KIT] 4c, extensions/pause_menu): up at
 	# once for the pointer lock not given (skeldat's web_lock_check
 	# stand-in in the page from the login on, refusing until the click off
 	# the menu that closes it: Chromium under a window manager gave the
@@ -182,9 +182,8 @@ if [ "${1:-}" = web ]; then
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Edit", 600, 339], ["waitlog", "kit editor: state: 2 entities", 10],
 	["frames", 5], ["mouse", 300, 300], ["frames", 2], ["mouse", 100, 400], ["frames", 5], $(pal_find_web kit/button_door)
-	["click", "Button", "[kit/button_door]"], ["waitlog", "the palette's menu of .kit/button_door", 10], ["frames", 3],
-	["click", "Button", "menu Place"], ["waitlog", "kit editor: placing .kit/button_door", 10],
-	["click", 800, 550], ["waitlog", "kit editor: state: 5 entities", 10],
+	["click", "Button", "[kit/button_door]"], ["waitlog", "kit editor: placing .kit/button_door", 10],
+	["click", 800, 550], ["waitlog", "kit editor: state: 4 entities", 10],
 	["key", "t"], ["waitlog", "kit editor: tool terrain", 10], ["frames", 3],
 	["drag", 450, 620, 650, 620], ["waitlog", "kit editor: terrain: raise", 10],
 	["waitlog", "kit editor: the stroke ended", 10], ["frames", 5],
@@ -212,19 +211,19 @@ if [ "${1:-}" = web ]; then
 	["click", "Button", "kit/region"], ["waitlog", "kit editor: placing kit/region", 10],
 	["click", 560, 340], ["waitlog", "kit editor: placed kit/region at", 10],
 	["key", "Escape"], ["waitlog", "kit editor: placing nothing", 10],
-	["waitlog_any", "kit editor: state: 6 entities", 10],
-	["click", 560, 340], ["waitlog", "kit editor: selected 7", 10], ["frames", 3],
+	["waitlog_any", "kit editor: state: 5 entities", 10],
+	["click", 560, 340], ["waitlog", "kit editor: selected 6", 10], ["frames", 3],
 	["click", "DropDownList", "▼", 1104, 590], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10],
-	["key", "Home"], ["key", "Enter"], ["waitlog", "kit editor: 7/1 place = all", 10],
+	["key", "Home"], ["key", "Enter"], ["waitlog", "kit editor: 6/1 place = all", 10],
 	["mouse", 800, 450], ["frames", 2], $(for _ in $(seq 8); do printf '["wheel", 800, 450, 100], ["frames", 1], '; done)
 	["click", "Button", "Apply"], ["sync", 5000], ["frames", 3],
 	["shot", "\${OUT}/region.png"],
 	$(pal_find_web kit/game_rules)
 	["click", "Button", "kit/game_rules"], ["waitlog", "the palette.s menu of kit/game_rules", 10], ["frames", 3],
-	["click", "Button", "menu Place"], ["waitlog", "kit editor: selected 8", 10], ["frames", 3],
-	["click", "Button", "Behaviour"], ["waitlog", "kit editor: parameters 8/1 kit/game_rules: chips All Behaviour HUD, showing behaviour", 10], ["frames", 3],
+	["click", "Button", "menu Place"], ["waitlog", "kit editor: selected 7", 10], ["frames", 3],
+	["click", "Button", "Behaviour"], ["waitlog", "kit editor: parameters 7/1 kit/game_rules: chips All Behaviour HUD, showing behaviour", 10], ["frames", 3],
 	["click", "DropDownList", "▼", 1090, 324], ["waitlog", "ui_utils: dropdown_[0-9]+ open", 10], ["frames", 3],
-	["click", "Text", "creative"], ["waitlog", "kit editor: 8/[0-9]+ building = creative", 10],
+	["click", "Text", "creative"], ["waitlog", "kit editor: 7/[0-9]+ building = creative", 10],
 	["click", "Button", "Apply"], ["sync", 5000], ["frames", 3],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", "Button", "Play mode", 600, 339], ["waitlog", "kit editor: edit mode off", 10], ["frames", 5],
@@ -242,13 +241,13 @@ J
 	# [KIT] stage 4d: Restart this, the NPC's client part, a prefab placed
 	# from the palette
 	for w in "webboss restarts entity 3's kit/npc from the start" \
-			"placed prefab kit/button_door as 4...6" \
+			"placed prefab kit/button_door detached as 4...5" \
 			"Terrain by webboss: raise at" \
 			"An undo by webboss: a terrain stroke" \
 			"webboss uploaded texture kit/up/" \
 			"webboss made voxel type webboss/frost version 1 (kit/up/" \
-			"An edit by webboss: set 7's kit/region place to \"all\"" \
-			"An edit by webboss: set 8's kit/game_rules building to \"creative\"" \
+			"An edit by webboss: set 6's kit/region place to \"all\"" \
+			"An edit by webboss: set 7's kit/game_rules building to \"creative\"" \
 			"workbench: webboss placed webboss/frost ("; do
 		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
 	done
