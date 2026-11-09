@@ -67,12 +67,12 @@
 		{"id": 66, "parent": 15, "name": "goal: bomb their base", "pos": [0, 1, 0], "components": [{"type": "kit/goal", "params": {"kind": "place_item", "pick": "their_team", "when_holding": "explosive", "priority": 5, "text": "Bomb their base: click with the bomb in their zone", "marker": false, "hud_panel": 60, "hud_width": 30, "hud_background": "none", "hud_border": "none", "autostart": true, "repeat": true}}]},
 		{"id": 67, "parent": 15, "name": "goal: stab an opponent", "pos": [0, 1, 0], "components": [{"type": "kit/goal", "params": {"kind": "attack", "pick": "nearest_opponent", "when_holding": "blade", "priority": 5, "text": "Stab an opponent", "marker": false, "hud_panel": 60, "hud_width": 30, "hud_background": "none", "hud_border": "none", "autostart": true, "repeat": true}}]},
 		{"id": 68, "parent": 15, "name": "bomb placer", "components": [{"type": "kit/placer", "params": {"item": "kit/bomb", "prefab": "kit/bomb"}}]},
-		{"id": 69, "parent": 15, "name": "sword", "pos": [10, 1, 4], "components": [{"type": "kit/pickup", "params": {"item": "kit/sword", "count": 1}}]},
-		{"id": 70, "parent": 15, "name": "sword", "pos": [-10, 1, 4], "components": [{"type": "kit/pickup", "params": {"item": "kit/sword", "count": 1}}]},
-		{"id": 71, "parent": 15, "name": "bombs", "pos": [22, 1, -5], "components": [{"type": "kit/pickup", "params": {"item": "kit/bomb", "count": 2}}]},
-		{"id": 72, "parent": 15, "name": "bombs", "pos": [-22, 1, -5], "components": [{"type": "kit/pickup", "params": {"item": "kit/bomb", "count": 2}}]},
-		{"id": 73, "parent": 15, "name": "sword", "pos": [10, 1, -5], "components": [{"type": "kit/pickup", "params": {"item": "kit/sword", "count": 1}}]},
-		{"id": 74, "parent": 15, "name": "sword", "pos": [-10, 1, -5], "components": [{"type": "kit/pickup", "params": {"item": "kit/sword", "count": 1}}]}
+		{"id": 69, "parent": 17, "name": "sword", "pos": [10, 0, 4], "components": [{"type": "kit/pickup", "params": {"item": "kit/sword", "count": 1}}]},
+		{"id": 70, "parent": 17, "name": "sword (copy 1)", "pos": [-10, 0, 4], "built": {"by": 17, "member": 553, "slice": 1, "source": 69}, "components": [{"type": "kit/pickup", "params": {"item": "kit/sword", "count": 1}}]},
+		{"id": 71, "parent": 17, "name": "bombs", "pos": [22, 0, -5], "components": [{"type": "kit/pickup", "params": {"item": "kit/bomb", "count": 2}}]},
+		{"id": 72, "parent": 17, "name": "bombs (copy 1)", "pos": [-22, 0, -5], "built": {"by": 17, "member": 569, "slice": 1, "source": 71}, "components": [{"type": "kit/pickup", "params": {"item": "kit/bomb", "count": 2}}]},
+		{"id": 73, "parent": 17, "name": "sword", "pos": [10, 0, -5], "components": [{"type": "kit/pickup", "params": {"item": "kit/sword", "count": 1}}]},
+		{"id": 74, "parent": 17, "name": "sword (copy 1)", "pos": [-10, 0, -5], "built": {"by": 17, "member": 585, "slice": 1, "source": 73}, "components": [{"type": "kit/pickup", "params": {"item": "kit/sword", "count": 1}}]}
 	],
 	"next_id": 75
 }

@@ -100,7 +100,7 @@ wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 event kit_edit {"op": "item", "name": "blade", "preset": "kit/sword", "damage": 20, "knockback": 0}
-wait_log 10000 kit: 8 item types
+wait_log 10000 kit: 9 item types
 sync 3000
 EOF
 	edit '{"op": "place", "type": "kit/terrain", "pos": [0, 1, 0]}'

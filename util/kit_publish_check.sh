@@ -232,7 +232,7 @@ wait_log 20000 kit editor: package alice/lamps 1.0.0
 event kit_edit {"op": "sound", "name": "zap", "params": "blip1:AAALvAABrNYAAf_f_AAAAf_AAUNf_AAf_f___f_AAGaf_gA4DbW"}
 wait_log 10000 kit: 10 sounds
 event kit_edit {"op": "item", "name": "wand", "preset": "kit/sword", "damage": 9, "sound_hit": "alice/zap"}
-wait_log 10000 kit: 8 item types
+wait_log 10000 kit: 9 item types
 click Button "Publish my prefabs..."
 wait_log 10000 aitta publish: Kit's export asked, 3 files
 frames 3

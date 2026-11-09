@@ -10,7 +10,7 @@
 # teleporter into it, plays and leaves. kitbob joins, uses the teleporter:
 # the arena makes session 1 with kitbob in it. kitboss joins again (the
 # default round) and makes the item type kitboss/blade: kitbob's client,
-# in session 1, gets it (8 item types, the presets 7).
+# in session 1, gets it (9 item types, the presets 8).
 #   util/kit_broadcast_session_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -77,9 +77,9 @@ EOF
 cat > "$t/bob.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob
 wait_log_any 60000 player physics enabled
-wait_log_any 30000 kit: 7 item types
+wait_log_any 30000 kit: 8 item types
 event kit_use 5
-wait_log 120000 kit: 8 item types
+wait_log 120000 kit: 9 item types
 sync 2000
 quit
 EOF
@@ -90,7 +90,7 @@ wait_log_any 10000 kit editor: edit rights: yes
 keypress F6
 wait_log 10000 kit editor: edit mode on
 event kit_edit {"op": "item", "name": "blade", "preset": "kit/sword"}
-wait_log 10000 kit: 8 item types
+wait_log 10000 kit: 9 item types
 sync 2000
 quit
 EOF

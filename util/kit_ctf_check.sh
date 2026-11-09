@@ -202,9 +202,9 @@ wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 event kit_edit {"op": "item", "name": "knife", "preset": "kit/sword", "damage": 1000, "reach": 3, "cooldown": 5, "knockback": 0}
-wait_log 10000 kit: 8 item types
-event kit_edit {"op": "item", "name": "bomb", "preset": "kit/arrow", "use": "use", "stack": 16, "cooldown": 1, "look": "kit/bomb_look", "color": "#101010", "grip": [0.15, -0.15, 0.25]}
 wait_log 10000 kit: 9 item types
+event kit_edit {"op": "item", "name": "bomb", "preset": "kit/arrow", "use": "use", "stack": 16, "cooldown": 1, "look": "kit/bomb_look", "color": "#101010", "grip": [0.15, -0.15, 0.25]}
+wait_log 10000 kit: 10 item types
 EOF
 	# The lobby
 	world 32; LOBBY_WORLD=$id

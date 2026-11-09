@@ -140,7 +140,7 @@ wait_log 10000 kit editor: state: 1 entities, 0 to undo
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 event kit_edit {"op": "item", "name": "knife", "preset": "kit/sword", "damage": 10, "knockback": 0, "crit": 1, "cooldown": 0.3}
-wait_log 10000 kit: 8 item types
+wait_log 10000 kit: 9 item types
 EOF
 	place kit/terrain '0, 1, 0'
 	set_ 'generator="flat"' 'decorations=false' 'biome="grassland"'

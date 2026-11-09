@@ -5,7 +5,7 @@
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/bot.lua builtin/kit/types/goal.lua builtin/kit/types/pickup.lua builtin/kit/types/placer.lua builtin/kit/types/explosive.lua builtin/kit/types/*.item.json builtin/kit/types/bomb.prefab.json builtin/kit/client_lua/ui.lua builtin/kit/client_lua/hands.lua apps/workbench/templates/ctf/**
 # [KIT_GOAL_PRIORITIES] (kit_plan 4z7c) goals as a priority list: capture the
 # flag with kitboss and three bots, two against two, on a fresh Workbench
-# project from the template, set by edit ops (prep 3 s, a point every
+# project from the template, set by edit ops (prep 8 s: the bots arm first; a point every
 # 8 s, 4 to win (a round long enough for a bomb), 4 a round, the bomb goal's
 # pick the nearest opponent; the lobby's spawn moved onto the pad; kitboss's
 # starting kit a sword and a bomb):
@@ -85,7 +85,7 @@ cmd "frames 3" 'click DropDownList "▼"' "delay 300" "frames 3"
 step 10 "world_menu: template picked" 'click Text "Capture the flag"'
 step 60 "player physics enabled" "frames 3" 'click Button "Create"'
 await "$t/boss.log" 0 20 "kit editor: edit mode on"
-set_ 30 repeats 3
+set_ 30 repeats 8
 set_ 28 score_interval 8
 set_ 7 score_to_win 4
 set_ 7 players 4
