@@ -1090,8 +1090,9 @@ frames 3
 mouse_click left
 EOF
 	state
+	# (Escape: the placed one's inspector is up where the right click was)
 	cat <<EOF
-mouse_click right
+keypress Escape
 wait_log 5000 kit editor: placing nothing
 frames 3
 EOF
@@ -1099,7 +1100,8 @@ EOF
 	# Cancel, Escape, a press on another's button, a press on the view; Favourite
 	# keeps it up; Place is an edit with no click on the view. A drag still places
 	# ("signals" finds kit/logic and kit/action both, kit/action under it: its
-	# menu is the one a press on the other's button goes past)
+	# menu is the one a press on the other's button goes past). The view
+	# pressed at 300,400: the placed flag's inspector is up over 550,400
 	cat <<EOF
 $(pal_find signals)
 click Button "kit/logic"
@@ -1124,7 +1126,7 @@ click Button "kit/logic"
 wait_log 5000 the palette's menu of kit/logic
 frames 3
 screenshot @T@/palette_menu_other.png
-mouse_pos 550 400
+mouse_pos 300 400
 mouse_click left
 frames 3
 event kit_ui_where menu_outside
@@ -1141,7 +1143,7 @@ mouse_pos 114 187
 frames 3
 mouse_down left
 frames 3
-mouse_pos 550 400
+mouse_pos 300 400
 wait_log 5000 kit editor: dragging kit/action from the palette
 frames 3
 mouse_up left
@@ -1453,8 +1455,28 @@ screenshot @T@/small_popup.png
 sync 3000
 quit
 EOF
+# [KIT_SIGNALS_HSCROLL] Long parameter lists at the editor's default text size
+cat > "$t/kitwide80.cmds" <<EOF
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log_any 10000 kit editor: edit mode on
+frames 5
+event kit_select $RULES
+frames 3
+keypress F5
+frames 10
+screenshot @T@/wide80_rules.png
+event kit_select $FLAG
+frames 10
+screenshot @T@/wide80_flag.png
+sync 3000
+quit
+EOF
 serve "$t/srv2.log"
 BUILDAT_JOIN_NAME=kitboss client kitwide 1800x1000 -u 1
+BUILDAT_JOIN_NAME=kitboss BUILDAT_TEST_EDITOR_FONT=80 client kitwide80 1600x1000 -u 1
 BUILDAT_JOIN_NAME=kitboss BUILDAT_TOUCH=1 client kitnarrow 600x400 -u 1
 BUILDAT_JOIN_NAME=kitboss client kitsmall 800x500 -u 2
 for l in kitnarrow kitsmall; do
@@ -1980,6 +2002,15 @@ xdotool windowsize "$win" 1400 900
 wait "$fit_pid" || fail "the UI's scale did not come back in a larger window ($t/kitfit.log)"
 grep -a "I __app   : UI scale [0-9]" "$t/kitfit.log" | tail -1 | grep -q "UI scale 0.833333 (1400x900)" || fail "the last scale ($t/kitfit.log)"
 echo "ok: a window made small and large again has the UI at its full scale"
+# [KIT_SIGNALS_HSCROLL] [KIT_SIGNALS_INSPECTOR_HBAR] No sideways bar in the
+# inspector: long lists at 100 and 80 %, and after the refit
+want "$t/kitwide80.log" "the inspector's sideways bar: false of $RULES" \
+	"the inspector's sideways bar: false of $FLAG"
+grep -a "the inspector's sideways bar: true" "$t/kitwide.log" "$t/kitwide80.log" &&
+	fail "a sideways bar in the inspector ($t/wide80_*.png)"
+grep -a "the inspector's sideways bar: " "$t/kitfit.log" | tail -1 | grep -q "bar: false" ||
+	fail "a sideways bar in the inspector after the refit ($t/kitfit.log, $t/refit.png)"
+echo "ok: no sideways bar in the inspector at 100 and 80 %, nor after a refit"
 stop_server
 want "$t/kitwide.log" "signals: $FLAG $FLAG Home flag: " "signals: columns in 1800x1000 "
 wantp "$t/kitwide.log" "signals: columns in 1800x1000 under \d+: sg_list \d+ \d+ \d+ \d+, sg_links \d+ \d+ \d+ \d+, inspector \d+ \d+ \d+ \d+, sg_view "

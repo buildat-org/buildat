@@ -1460,6 +1460,16 @@ function SG.tick()
 		log:info("kit editor: signals: a sideways bar: " .. tostring(sideways) .. " of " ..
 				tostring(S.primary))
 	end
+	-- [KIT_SIGNALS_HSCROLL] the inspector's, for a check
+	local iv = W.inspector and W.inspector.visible and IV.view
+	local isw = iv and iv.horizontalScrollBar.visible
+	if tostring(isw) .. " " .. tostring(S.primary) ~= SG.insp_sideways_said then
+		SG.insp_sideways_said = tostring(isw) .. " " .. tostring(S.primary)
+		local b = iv and iv.contentElement
+		log:info("kit editor: signals: the inspector's sideways bar: " .. tostring(isw) ..
+				" of " .. tostring(S.primary) .. (b and string.format(", body %d in %d",
+				b.width, iv.width) or ""))
+	end
 	local walk = O.camera
 	local wc = walk:GetComponent("Camera")
 	SG.cam.fov, SG.cam.nearClip, SG.cam.farClip = wc.fov, wc.nearClip, wc.farClip
@@ -1602,7 +1612,15 @@ function SG.layout(force)
 	end
 	if W.inspector and IV.view then
 		W.inspector.visible = on_right
+		-- (free while fit sets its least, which may have grown)
+		IV.view.contentElement.maxWidth = 2147483647
 		fit(W.inspector, IV.view, IV.view.contentElement, rx, top, rcw, h - vh - MARGIN)
+		-- [KIT_SIGNALS_HSCROLL] The inspector's body no wider either: the layout
+		-- grew it a frame later to the view's inner width, its fields under
+		-- the vertical bar and a sideways bar for them (the links' table may
+		-- scroll sideways, its body stays free)
+		local b = IV.view.contentElement
+		b.maxWidth = b.minWidth
 	end
 	SG.area_update()
 	if SG.links_view and SG.links_drawn_w and SG.links_drawn_w ~= SG.links_w then
