@@ -167,7 +167,18 @@ wait_log 5000 kit editor: the inspector
 frames 5
 click Button "Behaviour"
 frames 5
-click DropDownList "▼" 925 645
+mouse_pos 800 400
+mouse_wheel -1
+frames 1
+mouse_wheel -1
+frames 1
+mouse_wheel -1
+frames 1
+mouse_wheel -1
+frames 1
+mouse_wheel -1
+frames 3
+click DropDownList "▼" 925 685
 delay 500
 frames 3
 screenshot $t/add_to_maps.png
