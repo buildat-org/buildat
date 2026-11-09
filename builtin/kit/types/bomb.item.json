@@ -1,0 +1,11 @@
+{
+	"version": 1,
+	"tags": ["weapon", "explosive"],
+	"icon": "",
+	"stack": 16,
+	"use": "use",
+	"cooldown": 1,
+	"look": "kit/bomb_look",
+	"color": "#101010",
+	"grip": [0.15, -0.15, 0.25]
+}

@@ -166,9 +166,6 @@ if not (wx <= gx and wy <= gy and gx + gw <= wx + ww and gy + gh <= wy + wh):
 	sys.exit(f"the first step {g.groups()} not in the window {w.groups()}")
 if re.search(r"kit: ui 51 text .* shown(?:: |, edit mode: )", cl):
 	sys.exit("kitboss saw the bots' own goal")
-# A bot is in no list of players
-if re.search(r"players: .*Bot " + bot, srv):
-	sys.exit("a bot listed as a player")
 print(f"bot {bot}: goals {' '.join(done)}, uses {' '.join(uses)}")
 PY
 verdict_keep

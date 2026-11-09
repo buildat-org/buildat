@@ -55,7 +55,7 @@ set_() # <id> <param> <value>
 {
 	edit "{\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}"
 }
-KIT='Tools kit/pickaxe, Weapons kit/bow, Weapons kit/paintball, Weapons kit/pistol, Weapons kit/shotgun, Weapons kit/sword, Ammo kit/arrow'
+KIT='Tools kit/bomb, Tools kit/pickaxe, Weapons kit/bow, Weapons kit/paintball, Weapons kit/pistol, Weapons kit/shotgun, Weapons kit/sword, Ammo kit/arrow'
 # The ids: 3 the World, 4 the item giver, 5 the team, 6 the region, 7 the
 # button, 8 the pickup dragged in
 {
@@ -82,7 +82,7 @@ EOF
 	# 1. The tab, the search, a sheet
 	cat <<EOF
 click Button "Items"
-wait_log 5000 kit editor: items (7): $KIT
+wait_log 5000 kit editor: items (8): $KIT
 frames 3
 screenshot @T@/items.png
 click LineEdit "item search"
@@ -94,7 +94,7 @@ keypress BackSpace
 keypress BackSpace
 keypress BackSpace
 keypress BackSpace
-wait_log 5000 kit editor: items for "": 7
+wait_log 5000 kit editor: items for "": 8
 click Button "item kit/sword"
 wait_log 5000 kit editor: item kit/sword selected
 frames 3
@@ -107,20 +107,20 @@ EOF
 	cat <<'EOF'
 click Button "copy kit/sword"
 wait_log 5000 kit editor: item kit/sword copied as kitboss/sword
-wait_log 10000 kit editor: items (8): Tools kit/pickaxe, Weapons kitboss/sword,
+wait_log 10000 kit editor: items (9): Tools kit/bomb, Tools kit/pickaxe, Weapons kitboss/sword,
 frames 3
 click Button "Save"
 wait_log 5000 kit editor: item kitboss/sword saved
-wait_log 10000 kit: 8 item types
+wait_log 10000 kit: 9 item types
 click Button "delete kitboss/sword"
 wait_log 5000 kit editor: item kitboss/sword deleted
-wait_log 10000 kit editor: items (7):
+wait_log 10000 kit editor: items (8):
 click Button "New item type..."
 wait_log 5000 kit editor: a new item type
 frames 3
 click Button "Make"
 wait_log 5000 kit editor: item kitboss/my_item made
-wait_log 10000 kit editor: items (8):
+wait_log 10000 kit editor: items (9):
 EOF
 	# 3. A drag from the tab into the 3D view
 	n=$((n + 1))
