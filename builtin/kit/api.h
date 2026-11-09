@@ -1264,6 +1264,31 @@ namespace interface
 // default), by the run's by; Kit refuses it (logged) for a player waiting,
 // under game_rules' peaceful, or where the region at them refuses them
 // damage. 16 a run.
+// [KIT_CREATURES_8A] Creatures: an entity with a creature movement
+// (kit/creature_walker's `movement.steered`, the server's drive) and
+// behaviours, types with `creature = true`. A behaviour proposes a goal,
+// c:propose_move{to = {x, y, z}, range (m, 0...64, 0), speed (a share of
+// the walker's, 0.1...3, 1)}, or none, c:propose_move(nil); of the enabled ones that
+// propose, the first in the entity's component order wins. The server
+// paths the body (creatures.h: A* over the World's cells, walking, a jump
+// of jump_height, a drop of 3; PATH_NODES_ONE a path, PATH_NODES_TICK a
+// tick, charged to the meter) and hands the walker its waypoints. A
+// creature type reads c.moving (its drive has a way to walk), c.health
+// (its kit/health's share, 0...1), c.target (a `senses = true` type's
+// state target). A type's `nearby = n | "param:name"` (m, 64 at most)
+// reads c.nearby = {{id, pos, dist, types, player, name, alive[, sight]}}
+// (16 nearest, from a 16 m bucket index; `sight = true`: also in_sight),
+// c:nearest(type | "player"). A creature whose section is not loaded
+// sleeps: no steps, no timers (they are pushed on by its sleep), and goes
+// on where it was when the section is back. The pathfinder's cells: the
+// World's voxels and the solid looks (kit/part's, a shut door's).
+// [KIT_GUIDE_BOTS] Bots: a type with `bot = true` (kit/bot, on a creature)
+// acts as a player for the goals, its `by` "bot:<id>" (c:name: "<name>
+// <id>"): its own goal state as a player's, a goal's zone entered, and
+// c:use(id), a use as a player's (Kit's use range; simplified: no who-may-use
+// rule). It reads c.goal = {id, kind, text, target, via, at, dist}, its
+// active goal (the first by id, not audience "players"). Drawn as a player
+// (show.player, show.bot); it is no peer: in no c.players, team or count.
 // c:explode{at = {x, y, z} (c.pos by default), radius (0...9, 0), power
 // (0...1000, 1), kill (0...32, radius), hurt (0...32, 0), share (0...1,
 // 0.5), friendly_fire (true), type ("blast")}: a blast in the entity's

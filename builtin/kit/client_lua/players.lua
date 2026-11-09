@@ -423,7 +423,10 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 						end
 					end
 					rest_at = at
-					at = M.moved_body(id, n, at)
+					-- [KIT_GUIDE_BOTS] a bot's node is moved by its track already
+					if not show.bot then
+						at = M.moved_body(id, n, at)
+					end
 					item = pitem or ""
 					dig = flags % 2 == 1
 					sw = tonumber(pswings) or 0

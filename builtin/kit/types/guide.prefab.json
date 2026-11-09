@@ -1,0 +1,17 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "guide",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "guide: first step", "pos": [0, 0, 0],
+			"components": [{"type": "kit/goal", "params": {"text": "First: reach the marked place",
+				"autostart": true, "validate_reachable": 2, "marker_label": "First",
+				"hud_anchor": "top_right", "hud_x": 1, "hud_y": 1, "hud_width": 30},
+				"links": [{"output": "done", "to": 2, "input": "activate"}]}]},
+		{"id": 2, "name": "guide: last step", "pos": [8, 0, 0],
+			"components": [{"type": "kit/goal", "params": {"text": "Then: reach the end",
+				"marker_label": "End",
+				"hud_anchor": "top_right", "hud_x": 1, "hud_y": 1, "hud_width": 30}}]}
+	]
+}

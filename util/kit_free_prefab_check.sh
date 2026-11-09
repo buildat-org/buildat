@@ -296,7 +296,8 @@ menu() # <label>: a palette prefab's menu
 {
 	echo "frames 2"
 	echo "mouse_pos 100 400"
-	for _ in 1 2 3 4 5 6 7 8; do
+	# (to the palette's end, its prefabs last, however many types)
+	for _ in $(seq 16); do
 		printf 'mouse_wheel -1\nframes 1\n'
 	done
 	printf 'click Button "[%s]"\nwait_log 5000 the palette'"'"'s menu of [%s]\nframes 3\n' "$1" "$1"
