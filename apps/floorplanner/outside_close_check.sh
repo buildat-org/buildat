@@ -7,7 +7,8 @@
 # A local plan at 1100x1000: the pause menu (Escape), a click on the plan
 # at its left closes it; opened again, a click on its title keeps it.
 # The layouts menu from the toolbar's "Ground floor", the same (a click
-# on its title row).
+# on its title row). The text at 100 %, where the clicks were measured
+# ([KIT_EDITOR_FONT]).
 #   apps/floorplanner/outside_close_check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -53,7 +54,7 @@ delay 800
 quit
 C
 BUILDAT_FP_NAME=owner BUILDAT_FP_PLAN=oc timeout 240 "$here/Build/bin/buildat" \
-	-o launch_ui=launch_menu -w 1100x1000 -u 1 -l 3 -o sound_mute=1 \
+	-o launch_ui=launch_menu -w 1100x1000 -u 1 -l 3 -o sound_mute=1 -o floorplanner_font=100 \
 	-C "$t/c" -D "$t/u" -a app/floorplanner/play -c @"$t/cmds" > "$t/f.log" 2>&1 ||
 	fail "the drive ($t/f.log: $(grep -a "Command sequence failed" "$t/f.log" | tail -1))"
 # The app's lines, not the drive's waits that quote them

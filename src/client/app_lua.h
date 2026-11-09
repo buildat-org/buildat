@@ -1865,7 +1865,7 @@
 				"multisampling", "sound_volume_db", "sound_mute", "ui_size", "lan_discovery",
 				"launch_ui",
 				"default_username", "page_size", "lighting", "cache_keep",
-				"cache_per_server",
+				"cache_per_server", "kit_editor_font", "floorplanner_font",
 #ifdef __EMSCRIPTEN__
 				// Only where it does something
 				"web_idle_fps",
@@ -1972,6 +1972,10 @@
 			lua_pushstring(L, o.default_username.c_str());
 		else if(name == "page_size")
 			lua_pushinteger(L, o.page_size);
+		else if(name == "kit_editor_font")
+			lua_pushinteger(L, o.kit_editor_font);
+		else if(name == "floorplanner_font")
+			lua_pushinteger(L, o.floorplanner_font);
 		else if(name == "cache_keep")
 			lua_pushinteger(L, o.cache_keep);
 		else if(name == "cache_per_server")

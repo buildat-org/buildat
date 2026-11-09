@@ -24,6 +24,9 @@
 #include <RenderSurface.h>
 #include <Texture2D.h>
 #include <UIElement.h>
+#include <Text.h>
+#include <DropDownList.h>
+#include <Font.h>
 #include <Viewport.h>
 #define MODULE "lua_bindings"
 
@@ -533,6 +536,74 @@ static int l_tree_height(lua_State *L)
 	return 1;
 }
 
+// [KIT_EDITOR_FONT] An element and all under it drawn at a share of its
+// text size: each Text's font, and every other element's min, max and
+// current size (what code or a style set) and its layout's spacing and
+// border; a dropdown's popup with it. Children first: a layout grows to
+// its children but never shrinks by itself. Each element keeps the share
+// it was given in a var, so a call each frame scales only what is new or
+// what the share changed for.
+// simplified: a share changed again is a ratio of the rounded sizes, so a
+// size can drift by a pixel; a size code sets again on a scaled element
+// stays as it set it
+static const StringHash UI_SCALE_VAR("buildat_text_scale");
+static void ui_text_scale(UIElement *e, float f, int limit)
+{
+	if(limit < 0)
+		return;
+	// A copy: a font change may lay the children out again
+	const Vector<SharedPtr<UIElement>> children = e->GetChildren();
+	for(const SharedPtr<UIElement> &c : children)
+		ui_text_scale(c.Get(), f, limit - 1);
+	if(DropDownList *d = dynamic_cast<DropDownList*>(e))
+		if(d->GetPopup() && d->GetPopup()->GetParent() != e)
+			ui_text_scale(d->GetPopup(), f, limit - 1);
+	const Variant &had = e->GetVar(UI_SCALE_VAR);
+	const float r = f / (had.IsEmpty() ? 1.0f : had.GetFloat());
+	if(r > 0.999f && r < 1.001f)
+		return;
+	e->SetVar(UI_SCALE_VAR, f);
+	auto s = [&](int v){
+		return v >= M_MAX_INT || v <= 0 ? v : std::max(1, (int)lroundf(v * r));
+	};
+	if(Text *t = dynamic_cast<Text*>(e)){
+		const bool fw = t->IsFixedWidth();
+		const int w = t->GetWidth(), h = t->GetHeight();
+		if(t->GetFont())
+			t->SetFont(t->GetFont(), t->GetFontSize() * r);
+		// A width or a height code fixed (a dropdown's label, its rows) as
+		// the text; a Text's height is always fixed, its own rows' or not
+		if(fw)
+			t->SetFixedWidth(s(w));
+		t->SetFixedHeight(s(h));
+		return;
+	}
+	const IntVector2 mn = e->GetMinSize(), mx = e->GetMaxSize();
+	const IntVector2 sz = e->GetSize();
+	e->SetMinSize(s(mn.x_), s(mn.y_));
+	e->SetMaxSize(s(mx.x_), s(mx.y_));
+	if(e->GetLayoutMode() != LM_FREE){
+		const IntRect b = e->GetLayoutBorder();
+		e->SetLayoutSpacing(s(e->GetLayoutSpacing()));
+		e->SetLayoutBorder(IntRect(s(b.left_), s(b.top_),
+				s(b.right_), s(b.bottom_)));
+	}
+	// Down to what its min and its children allow
+	e->SetSize(s(sz.x_), s(sz.y_));
+}
+
+// ui_text_scale(element, share)
+static int l_ui_text_scale(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(element, 1, UIElement);
+	const float f = (float)luaL_checknumber(L, 2);
+	if(!(f >= 0.25f && f <= 4.0f))
+		return luaL_error(L, "ui_text_scale: a share 0.25 to 4");
+	ui_text_scale(element, f, MAX_TREE_DEPTH);
+	return 0;
+}
+
 void init_misc_urho3d(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
@@ -555,6 +626,7 @@ void init_misc_urho3d(lua_State *L)
 	DEF_BUILDAT_FUNC(hold_ref);
 	DEF_BUILDAT_FUNC(tree_depth);
 	DEF_BUILDAT_FUNC(tree_height);
+	DEF_BUILDAT_FUNC(ui_text_scale);
 }
 
 } // namespace lua_bindingss

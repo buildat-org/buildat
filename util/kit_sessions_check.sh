@@ -112,7 +112,9 @@ tools_back() # <label>
 }
 settle() # a session's sections (the start's: none generated) in
 {
-	echo "delay 5000"
+	# simplified: a delay, the server's streaming is no packet a sync
+	# waits for; about 0.5 s since [KIT_SESSION_UNDRAWN_HOLD] (was 3-4 s)
+	echo "delay 1500"
 }
 try() # <id> <input>
 {

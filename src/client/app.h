@@ -145,6 +145,11 @@ namespace app
 		// cartoon on this client (a weak device); empty is the device's
 		// default, cartoon on software GL (soft_gl()), set as "auto"
 		ss_ lighting;
+		// **The editors' text size** ([KIT_EDITOR_FONT], user 2026-11-08):
+		// a percent of the default, 50 to 150, Kit's editor panels'
+		// (Workbench) and floorplanner's; the play HUD keeps its size
+		int kit_editor_font = 80;
+		int floorplanner_font = 80;
 	};
 
 	// Parses "k=v[,k=v...]" on top of whatever *opt already holds. Returns

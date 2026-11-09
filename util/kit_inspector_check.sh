@@ -16,7 +16,9 @@
 #     whose Down is chase);
 #   - the keys in an open dropdown are its alone: with the kit/door (4)
 #     selected by Tab and one of its dropdowns open, Down and Up do not
-#     move it too ([KIT_DROPDOWN_ARROWS_MOVE]).
+#     move it too ([KIT_DROPDOWN_ARROWS_MOVE]);
+#   - [KIT_INSPECTOR_REBUILD] the door's placing leaves the inspector as it
+#     is (kept over its state), Apply's edit of 3 draws it again.
 #
 #   util/kit_inspector_check.sh
 set -u
@@ -113,9 +115,19 @@ wait "$SERVER_PID" 2>/dev/null
 tall=$(grep -aoP 'kit editor: the inspector \d+ of \K\d+(?= tall)' "$t/boss.log" | sort -n | tail -1)
 [ "${tall:-9999}" -le 1400 ] ||
 	fail "the inspector's body is ${tall:-not logged} tall: more than its rows take ($t/boss.log)"
+# The state after an edit: kept or drawn again before the next state
+kept_after() # <undo count>: 0 when the inspector was kept over that state
+{
+	awk -v u="entities, $1 to undo" 'BEGIN { r = 1 } index($0, u) { on = 1; next }
+		on && /kit editor: state:/ { exit }
+		on && /kit editor: the inspector kept over a state/ { r = 0; exit }
+		END { exit r }' "$t/boss.log"
+}
+kept_after 2 || fail "placing the door drew the inspector again ($t/boss.log)"
+kept_after 3 && fail "Apply's edit kept the inspector as it was ($t/boss.log)"
 grep -aqF "An edit by kitboss: moved 4" "$t/srv.log" &&
 	fail "a key in the open dropdown moved the selection too ($t/srv.log)"
 got=$(grep -aoP 'kit: controls: camera \K\w+' "$t/boss.log" | tail -1)
 [ "$got" = top_down ] ||
 	fail "the camera is ${got:-not set}, not top_down: the pick did not stay ($t/picked.png)"
-echo "PASS: Kit's inspector: kit/controls' parameters scroll to Apply; a pick not yet applied stays picked when the inspector is drawn again; a dropdown's keys move no selection"
+echo "PASS: Kit's inspector: kit/controls' parameters scroll to Apply; a pick not yet applied stays picked when the inspector is drawn again; a dropdown's keys move no selection; an unrelated edit keeps the inspector, one of the selected draws it again"

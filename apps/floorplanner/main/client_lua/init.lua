@@ -834,6 +834,9 @@ local function open_chat(initial)
 		return
 	end
 	chat_input = magic.ui.root:CreateChild("LineEdit")
+	if editor then
+		editor.panel.track(chat_input)
+	end
 	chat_input.textCopyable = true
 	chat_input.textSelectable = true
 	chat_input:SetStyleAuto()
@@ -1629,6 +1632,7 @@ function doc.joined()
 		end
 		editor = m
 		doc.editor = m
+		editor.panel.track(msg_text)
 		editor.start(doc)
 	end
 	-- Where this client was in the plan, last time: once a visit, since a

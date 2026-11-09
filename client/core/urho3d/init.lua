@@ -645,6 +645,14 @@ function Safe.UnsubscribeFromEvent(sub_event_type, cb_name)
 	return unsubscribe(sub_event_type, cb_name, getfenv(2), true)
 end
 
+-- [KIT_EDITOR_FONT] ui_text_scale(element, share): its text and the sizes
+-- laid out for it drawn at share (0.25 to 4), the rest of the UI as it is;
+-- called again (each frame) it scales only what is new or changed share.
+-- See l_ui_text_scale() in src/lua_bindings/misc_urho3d.cpp.
+Safe.ui_text_scale = wrap_function({"UIElement", "number"}, function(e, f)
+	__buildat_ui_text_scale(e, f)
+end)
+
 -- A scene drawn into a texture instead of into the window, for a thumbnail:
 -- see l_render_scene_to_texture() in src/lua_bindings/misc_urho3d.cpp for what
 -- the texture does and does not do.

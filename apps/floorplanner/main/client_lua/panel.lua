@@ -8,9 +8,44 @@ local magic = require("buildat/extension/urho3d")
 local ui_utils = require("buildat/extension/ui_utils")
 local M = {}
 
+-- **The editor's text size** ([KIT_EDITOR_FONT]): the client's preference
+-- floorplanner_font, a percent (default 80), set in the game settings;
+-- every window and text the editor puts on the screen is drawn at it,
+-- by M.scale() each frame (only what is new or changed is scaled)
+local font = buildat.declare_preference and
+		buildat.declare_preference("floorplanner_font", function(v)
+			font = v
+			-- Made again at it: a panel rescaled would keep what its code
+			-- set on it since at the old one
+			if M.font_changed then
+				M.font_changed()
+			end
+		end) or 80
+local scaled = {}
+function M.track(e)
+	scaled[#scaled + 1] = e
+	return e
+end
+function M.share()
+	return font / 100
+end
+function M.scale()
+	if not magic.ui_text_scale then
+		return
+	end
+	local kept = {}
+	for _, e in ipairs(scaled) do
+		-- Gone (removed) reads as an error
+		if pcall(magic.ui_text_scale, e, font / 100) then
+			kept[#kept + 1] = e
+		end
+	end
+	scaled = kept
+end
+
 -- A window at a corner of the screen: halign/valign as SetAlignment takes
 function M.window(halign, valign, x, y, horizontal)
-	local w = magic.ui.root:CreateChild("Window")
+	local w = M.track(magic.ui.root:CreateChild("Window"))
 	w:SetStyleAuto()
 	w:SetLayout(horizontal and magic.LM_HORIZONTAL or magic.LM_VERTICAL, 4,
 			magic.IntRect(6, 6, 6, 6))

@@ -188,6 +188,17 @@ M.S = S
 -- made or duplicated first (S.recent, ids), the rest after them by id;
 -- S.tab_at where Tab walks from, the top again at each of those
 S.recent = {}
+-- **The editor's text size** ([KIT_EDITOR_FONT]): the client's preference
+-- kit_editor_font, a percent (default 80) set in the game settings, as a
+-- share; editor_input.lua scales the panels (W) to it each frame, and what
+-- is laid out against the screen's room divides the room by it
+S.font = (buildat.declare_preference and
+		buildat.declare_preference("kit_editor_font", function(v)
+			S.font = v / 100
+			if M.font_changed then
+				M.font_changed()
+			end
+		end) or 80) / 100
 local function touch(id)
 	for i, x in ipairs(S.recent) do
 		if x == id then
@@ -1061,6 +1072,14 @@ local refresh, show_log, rebuild_bar, set_view, terrain_panel, walk_here
 local inspector_window
 local voxel_names
 
+-- [KIT_EDITOR_FONT] A new text size: the panels made again at it (each
+-- build drops its window; one rescaled would keep what its code set on it
+-- since at the old size)
+function M.font_changed()
+	S.bar_key = nil
+	refresh()
+end
+
 -- [KIT] stage 4f: the terrain tool's state: the brush, its size (cells)
 -- and strength, the biome (nil: the World's), the stroke being drawn
 -- (its id, the last dab and when, a fill's corner, the level)
@@ -1195,7 +1214,7 @@ rebuild_bar = function(if_changed)
 	end
 	w:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(6, 6, 6, 6))
 	bar_row, bar_used, bar_first = row(w), 0, true
-	bar_room = magic.ui.root.width - 16 - 12
+	bar_room = (magic.ui.root.width - 16 - 12) / S.font
 	S.bar_root_w = magic.ui.root.width
 	if O.menu then
 		bar_button("Menu", "Esc", function()
@@ -1780,7 +1799,8 @@ function NT.fit_panel()
 	-- The body as the view shows it: inside its panel's clip border
 	-- (DefaultStyle's 2 a side)
 	local bw, bh = body.width + 4, body.height + 4
-	local room_w = math.min(screen_ui.w, magic.ui.root.width) - 16 - 12 - 8
+	local room_w = (math.min(screen_ui.w, magic.ui.root.width) - 16 - 12 - 8) /
+			S.font
 	local hbar = bw > room_w
 	-- [KIT_PALETTE_FOOT] What the window has under the view: its border,
 	-- the palette's foot
@@ -2069,8 +2089,8 @@ palette = function()
 	NT.shown = tab == "Entities" and "Entities/" .. (S.list_tab or "") or tab
 	-- The tabs, NT.TABS's rows, each in as many as the screen's width
 	-- needs (with room for the row's spacing and the scroll bar's)
-	local room = math.min(screen_ui.w or 1e9, magic.ui.root.width) - 16 - 12 -
-			24
+	local room = (math.min(screen_ui.w or 1e9, magic.ui.root.width) - 16 - 12 -
+			24) / S.font
 	for _, names in ipairs(NT.TABS) do
 		local r, used = nil, 0
 		for _, name in ipairs(names) do
@@ -3616,7 +3636,71 @@ local function fit_inspector()
 	end
 end
 
-inspector_window = function()
+-- [KIT_INSPECTOR_REBUILD] A state is mostly an edit: drawn again only when
+-- it changed more than the authored entities (and the undo count, the
+-- credits, the round's own, the session's clock: the bar's), or changed the selected entity, one it links
+-- to or that links to it, its parent or a child. A copy's and a kit/
+-- symmetry's sheets read further: built on every state as before, as is
+-- everything after a selection, a click or another packet (a build is
+-- 17-60 ms).
+local IR = {}
+local QUIET = {authored = true, undo = true, credits = true, made = true,
+	session = true}
+local function sel_key()
+	local id = S.primary
+	local e, is_made = find(id)
+	if not e or e.built then
+		return nil
+	end
+	local mine = {}
+	for _, c in ipairs(e.components or {}) do
+		if c.type == "kit/symmetry" then
+			return nil
+		end
+		for _, l in ipairs(c.links or {}) do
+			mine[l.to] = true
+		end
+	end
+	local out = {network.write_json(e), tostring(is_made)}
+	for _, o in ipairs(all_entities()) do
+		local near = o.id ~= id and (mine[o.id] or o.parent == id or
+				o.id == e.parent or (type(o.built) == "table" and
+				(o.built.source == id or o.built.by == id)))
+		for _, c in ipairs(not near and o.components or {}) do
+			for _, l in ipairs(c.links or {}) do
+				near = near or l.to == id
+			end
+		end
+		if near then
+			out[#out + 1] = network.write_json(o)
+		end
+	end
+	return table.concat(out, "\n")
+end
+
+local build_inspector
+-- on_state: from a state (refresh("state")), kept when it changed nothing
+-- the inspector shows
+inspector_window = function(on_state)
+	local now = buildat.get_time_us()
+	if on_state and W.inspector and IR.key and IR.of == S.primary and
+			not (IR.tried and now >= IR.tried) then
+		local quiet = true
+		for k in pairs(NT.state_changed or {}) do
+			quiet = quiet and QUIET[k] == true
+		end
+		if quiet and sel_key() == IR.key then
+			log:info("kit editor: the inspector kept over a state")
+			return
+		end
+	end
+	build_inspector()
+	IR.of = S.primary
+	IR.key = W.inspector and S.primary and sel_key() or nil
+	IR.tried = E.tried and E.tried.till > now and E.tried.till or nil
+end
+
+build_inspector = function()
 	if W.inspector and IV.view then
 		IV.y = IV.view.viewPosition.y
 	end
@@ -3875,7 +3959,7 @@ refresh = function(why)
 		palette()
 	end
 	touch_bar()
-	inspector_window()
+	inspector_window(why == "state")
 	NT.hud_panel(true)
 	NT.sg.refresh()
 	people()

@@ -48,9 +48,10 @@ client() {
 		done <<< "$waits" > "$cmds"
 		echo quit >> "$cmds"
 	fi
+	# (the text at 100 %, where its clicks were measured: [KIT_EDITOR_FONT])
 	env BUILDAT_FP_NAME=$n BUILDAT_FP_PASSWORD=${n}pass1234 "$@" \
 		timeout 120 Build/bin/buildat -o launch_ui=launch_menu -s 127.0.0.1:$port \
-		-D "$tmp/cl_$n" -w 640x400 -l 3 -o sound_mute=1 -c @"$cmds" \
+		-D "$tmp/cl_$n" -w 640x400 -l 3 -o sound_mute=1 -o floorplanner_font=100 -c @"$cmds" \
 		> "$tmp/$log" 2>&1 || [ -n "${MAY_FAIL:-}" ] ||
 		fail "the client $n's drive ($tmp/$log)"
 }

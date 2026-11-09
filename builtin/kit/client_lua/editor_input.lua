@@ -3106,6 +3106,9 @@ function M.editor(options)
 	magic.SubscribeToEvent("ExitRequested", function()
 		MEM.tick(0, true)
 	end)
+	-- [KIT_EDITOR_FONT] The editor's panels at the editor's text size
+	-- (S.font; the play HUD as it is): each frame, which scales only what
+	-- is new
 	magic.SubscribeToEvent("Update", function(_, data)
 		local dt = data:GetFloat("TimeStep")
 		MEM.tick(dt)
@@ -3143,6 +3146,11 @@ function M.editor(options)
 		draw_guide()
 		hover.finish()
 		draw_builders(O.debug)
+		if magic.ui_text_scale then
+			for _, w in pairs(W) do
+				magic.ui_text_scale(w, S.font)
+			end
+		end
 	end)
 end
 return terrain_panel

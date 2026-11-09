@@ -145,6 +145,22 @@ local PREFERENCES = {
 		values = {3, 5, 10, 15, 20, 30, 50, 100},
 		show = function(v) return v .. " items" end,
 	},
+	-- The editors' text ([KIT_EDITOR_FONT]): a row in the game settings of
+	-- the app that declares it (buildat.declare_preference), not here
+	{
+		name = "kit_editor_font",
+		label = "Editor text size",
+		declared = true,
+		values = {60, 70, 80, 90, 100, 110, 125},
+		show = function(v) return v .. " %" end,
+	},
+	{
+		name = "floorplanner_font",
+		label = "Editor text size",
+		declared = true,
+		values = {60, 70, 80, 90, 100, 110, 125},
+		show = function(v) return v .. " %" end,
+	},
 	-- The web page's address bar while playing ([WEB_ADDRESS_BAR]); the
 	-- web client's only, and no row natively
 	{
@@ -356,8 +372,8 @@ function M.show()
 
 	for _, pref in ipairs(PREFERENCES) do
 		local value = pref.get and pref.get() or api.get_preference(pref.name)
-		if value == nil and pref.web then
-			-- Natively: not a preference here
+		if value == nil and pref.web or pref.declared then
+			-- Natively: not a preference here; or an app's
 		elseif value == nil then
 			-- A build whose preferences this one does not have: leave the
 			-- row out rather than showing a control that does nothing
@@ -717,7 +733,8 @@ end
 local GAME_ROWS = {
 	{"Sound", {"sound_volume_db", "sound_mute"}},
 	{"Video", {"render_scale", "max_fps", "vsync", "multisampling",
-		"lighting", "ui_size", "page_size", "web_address_bar", "screen_orientation", "web_idle_fps"}},
+		"lighting", "ui_size", "page_size", "web_address_bar", "screen_orientation", "web_idle_fps",
+		"kit_editor_font", "floorplanner_font"}},
 }
 local game = nil
 
@@ -854,7 +871,8 @@ function M.show_game(o, app_key, extra)
 		local rows = {}
 		for _, name in ipairs(group[2]) do
 			for _, pref in ipairs(PREFERENCES) do
-				if pref.name == name and api.get_preference(name) ~= nil then
+				if pref.name == name and api.get_preference(name) ~= nil and
+						(not pref.declared or (o.declared or {})[name]) then
 					rows[#rows + 1] = pref
 				end
 			end
@@ -872,6 +890,14 @@ function M.show_game(o, app_key, extra)
 					local ok, err = api.set_preference(pref.name, pref.values[i])
 					if not ok then
 						log:warning(pref.name .. ": " .. tostring(err))
+					end
+					local f = ok and (o.declared or {})[pref.name]
+					if type(f) == "function" then
+						local ok2, err2 = pcall(f, pref.values[i])
+						if not ok2 then
+							log:warning("declare_preference's on_change: " ..
+									tostring(err2))
+						end
 					end
 				end)
 				local note = pref.note and pref.note()

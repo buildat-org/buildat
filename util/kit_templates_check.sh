@@ -428,7 +428,9 @@ PY
 echo "ok: the arena plays two rounds on its two maps, by a win on score"
 
 # 2b. Capture the flag ([KIT_CTF_TEMPLATE]), likewise (c_edit*.png), then a
-# round by kitbob and kitboss into the lobby's queue by the pad. Shorter for
+# round by kitbob and kitboss into the lobby's queue by the pad, started
+# when both are ready ([KIT_READY_UP]: kitboss by the key, kitbob by the
+# button). Shorter for
 # the check by edit ops, Stopped: prep 3 s, a point every 3 s, one wins; and
 # kitboss's warps (kit_ctf_check's type) to the flag and to Red's zone. He
 # takes the flag, places it there: a point, Red wins
@@ -456,10 +458,11 @@ event kit_edit {"op": "scene", "name": "world"}
 wait_log 30000 kit editor: in the scene world of world, map
 EOF
 	to_play
-	up "Stand on the golden pad to join a round"
+	up "Stand on the golden pad and press Ready"
 	shot c_lobby
 	echo "wait_log_any 120000 Waiting for players: 1 of 2"
 	walk 1800
+	printf 'wait_log_any 30000 Ready: 0 of 2\nkeypress K\n'
 	echo "wait_log_any 60000 The flag is out in 2 s"
 	shot c_prep
 	echo "wait_log_any 30000 The flag is out in 0 s"
@@ -490,6 +493,8 @@ frames 5
 EOF
 	walk 1800
 	cat <<'EOF'
+wait_log_any 60000 Ready: 1 of 2
+click Button "Ready"
 wait_log_any 60000 The flag is out in 0 s
 wait_log_any 30000 shown: "Flag carried by Red
 wait_log 30000 Red wins!
@@ -526,6 +531,8 @@ k = srv.index(F + "placed by kitboss", j)
 s = srv.index(F + "scores 1 for Red", k)
 assert srv.index("Red wins!", s)
 assert "countdown over: a round for 2 players" in srv
+for m in ("kitboss is ready", "kitbob is ready", "2 of 2 ready"):
+	assert m in srv, m
 # Nothing single across the seam: no parity warning at Play
 assert "entities outside it in the other slices" not in srv, "a parity warning"
 for hint in ("Take the flag at the middle", "The flag is out in "):
