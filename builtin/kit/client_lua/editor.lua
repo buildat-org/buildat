@@ -3446,6 +3446,13 @@ local function inspector(w, e, is_made)
 		text(w, "Built by " .. (g and name_of(g) or tostring(e.built.by)) ..
 				" (its " .. tostring(e.built.member) .. ")", DIM)
 	end
+	-- [KIT_HUD_BUTTONS_MOUSE_LOOK] a button out of a panel (ui.lua)
+	local c1 = e.components and e.components[1]
+	if c1 and c1.type == "kit/ui_button" and not NT.is_panel(NT.parent_of(e)) then
+		NT.warn_text(w, "Out of a panel: shown only on a touchscreen or with " ..
+				"a free pointer (top-down). In mouse look a key (a kit/action) " ..
+				"or a panel a key opens reaches it.")
+	end
 end
 
 -- [KIT_BOX_ADJUST] The Box tool's box adjusted once its two corners are

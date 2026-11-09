@@ -500,7 +500,7 @@ EOF
 	walk 1800
 	cat <<'EOF'
 wait_log_any 60000 Ready: 1 of 2
-click Button "Ready"
+keypress K
 wait_log_any 60000 The flag is out in 0 s
 wait_log_any 30000 shown: "Flag carried by Red
 wait_log 30000 Red wins!

@@ -7,9 +7,10 @@
 -- while it is on that player's screen, within their acts a second (as
 -- an action's). Where, who sees it and "show", "hide" and "toggle" as
 -- kit/ui_text's ([KIT_HUD_STYLE] its `style`, colours and sizes too).
--- simplified: out of a panel, a player in mouse look (the pointer
--- captured) cannot click it: an action's key, a touchscreen, a free
--- pointer (top-down) or a panel (which frees the pointer) reach it
+-- [KIT_HUD_BUTTONS_MOUSE_LOOK] Out of a panel it is drawn only on a
+-- touchscreen or with a free pointer (top-down): in mouse look nothing
+-- could click it, an action's key or a panel (which frees the pointer,
+-- opened by a key's kit/action) is the way there
 local function view(c, by)
 	if (c.params.to ~= "player" and c.params.to ~= "team") or
 			not c.player then

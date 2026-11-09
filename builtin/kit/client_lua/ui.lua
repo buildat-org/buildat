@@ -42,7 +42,9 @@
 --   the tools (Stopped, the components do not run: none shown); a button's press is the action's (kit.press_action) or
 --   "kit:ui" "<id> 1|0", the server checking it is on this player's
 --   screen; while a panel with a button is up the pointer is free
---   (ui_utils.wants_clicks) for a player in mouse look. [KIT_TEXT_INPUT]
+--   (ui_utils.wants_clicks) for a player in mouse look; a button out of
+--   a panel is not drawn in mouse look on a desktop
+--   ([KIT_HUD_BUTTONS_MOUSE_LOOK]). [KIT_TEXT_INPUT]
 --   An input (kit/ui_input) is a label and a LineEdit named
 --   "kit input <id>", its Enter "kit:ui_text" "<id> <text>"; in a panel
 --   it frees the pointer as a button does.
@@ -875,6 +877,14 @@ local function update()
 				value = hp
 			else
 				r.on = state(r.n, id, "shown") == true and (not pr or pr.on)
+				-- [KIT_HUD_BUTTONS_MOUSE_LOOK] No button out of a panel in mouse
+				-- look (nothing clicks it there): a touchscreen's, a free
+				-- pointer's (top-down); a key (its kit/action) or a panel the
+				-- way to it otherwise
+				if u.kind == "button" and not pid and not TOUCH and
+						not (M.pointer_free and M.pointer_free()) then
+					r.on = false
+				end
 				value = state(r.n, id, "value")
 				-- [KIT_GOALS] a goal with no line
 				if u.stack and tostring(u.text or "") == "" then

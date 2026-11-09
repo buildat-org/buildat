@@ -10,14 +10,16 @@
 #   "Hello" for the player (to "player"), under it 8 a kit/ui_text with
 #   "[fire]" and 9 kit/ui_button "Close" (closes), 10 kit/action fire
 #   (key R) and 11 a kit/ui_button bound to it (no label: "Fire");
-#   4 pressed -> 5 count and -> 7 show, 5 changed -> 3 value and 6 value;
+#   4 pressed -> 5 count and -> 7 show, 10 pressed -> 7 show, 5 changed ->
+#   3 value and 6 value;
 # and the checks:
 #   1. edit mode draws every UI component framed, the hidden dialog too
 #      (overlay.png); a click on "Press me" selects it, a drag moves it;
-#   2. play: kitboss clicks "Press me": the text says "Presses: 1", the bar
-#      0.25 full, the dialog his (play.png), no crosshair over it
-#      ([KIT_UI_CROSSHAIR]); "Close" hides it; the bound
-#      button presses the action (the server's "Action fire pressed");
+#   2. play, in mouse look: [KIT_HUD_BUTTONS_MOUSE_LOOK] the buttons out of
+#      a panel (4, 11) not drawn (play_look.png); R (the action) opens the
+#      dialog, no crosshair over it ([KIT_UI_CROSSHAIR]), its "Close" clicked
+#      with the freed pointer hides it; 4 pressed by a packet: the text says
+#      "Presses: 1", the bar 0.25 full, the dialog his (play.png);
 #   3. a flood of 2000 presses of 4: at most the acts' burst reaches it
 #      (the counter), as kit:action's;
 #   4. kitbob (a second player, 1024x700) is not shown kitboss's dialog,
@@ -127,6 +129,7 @@ EOF
 	set_p 11 x 1.1
 	link 4 pressed 5 count
 	link 4 pressed 7 show
+	link 10 pressed 7 show
 	link 5 changed 3 value
 	link 5 changed 6 value
 	cat <<'EOF'
@@ -150,13 +153,20 @@ EOF
 keypress F6
 wait_log 10000 kit editor: edit mode off
 frames 10
-click Button "Press me"
+screenshot @T@/play_look.png
+keypress R
+wait_log 10000 kit: action fire released
+wait_log 10000 shown: "Hello"
+frames 10
+click Button "Close"
+wait_log 10000 kit: ui button 9 pressed
+wait_log 10000 hidden: "Hello"
+frames 10
+event kit_ui_flood 4 1
 wait_log 10000 shown: "Hello"
 wait_log_any 10000 shown: "Presses: 1"
 frames 10
 screenshot @T@/play.png
-click Button "Fire"
-wait_log 10000 kit: action fire released
 click Button "Close"
 wait_log 10000 kit: ui button 9 pressed
 sync 3000
@@ -174,7 +184,7 @@ wait_log_any 10000 kit: ui 9 button
 frames 10
 event kit_ui_flood 9 1
 sync 3000
-click Button "Press me"
+event kit_ui_flood 4 1
 wait_log 10000 shown: "Hello"
 frames 10
 screenshot @T@/bob.png
@@ -233,7 +243,14 @@ grep -aqP 'kit: ui 7 panel at .* shown, edit mode, hidden in play: "Hello"' "$b"
 want "$s" "set 4's kit/ui_button x to"
 echo "ok: edit mode: every UI component drawn, the hidden dialog too; a click selects one, a drag moves it"
 # 2. Play
-want "$b" 'kit: ui 3 text' '"Presses: 1"' 'kit: ui button 11 pressed (action fire)'
+want "$b" 'kit: ui 3 text' '"Presses: 1"' 'kit: action fire pressed'
+# [KIT_HUD_BUTTONS_MOUSE_LOOK] In mouse look no button out of a panel is
+# drawn (4, 11): pressed by a key and by packets here, and tapped on the
+# touchscreen below
+grep -aqP 'kit: ui 4 button at .* hidden: "Press me"' "$b" ||
+	fail "no hidden lone button in mouse look ($b)"
+grep -aP 'kit: ui (4|11) button at .* shown: ' "$b" "$o" &&
+	fail "a lone button drawn in mouse look ($b $o, $t/play_look.png)"
 grep -aP 'kit: ui 6 bar .*0\.25 full' "$b" | grep -q . || fail "the bar did not follow the count ($b)"
 want "$s" "UI button 4 pressed by kitboss" "kit/counter 5: count 1 by kitboss" \
 	"Action fire pressed by kitboss" "UI button 9 pressed by kitboss" \
@@ -242,7 +259,7 @@ grep -aq 'kit: ui 8 text .*"Only you see this. \[R\] fires."' "$b" ||
 	fail "the dialog's text has no [R] for [fire] ($b)"
 # [KIT_UI_CROSSHAIR] No crosshair over the dialog (a panel with a button
 # wants the clicks), back once Close hid it
-awk '/kit: ui button 4 pressed/ && !p { p = 1 }
+awk '/kit: action fire pressed/ && !p { p = 1 }
 	p == 1 && /workbench: the crosshair hidden/ { p = 2 }
 	p == 2 && /kit: ui button 9 pressed/ { p = 3 }
 	p == 3 && /workbench: the crosshair shown/ { p = 4 }
@@ -431,7 +448,7 @@ click Button "Close"
 wait_log 10000 hidden: "Hello"
 frames 10
 screenshot @T@/closed.png
-click Button "Press me"
+keypress R
 wait_log 10000 shown: "Hello"
 frames 10
 screenshot @T@/dialog.png

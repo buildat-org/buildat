@@ -6,6 +6,7 @@
 # [KIT_PLAYER_LIST] A kit/ui_player_list on Workbench. kitboss (the admin)
 # places 3 kit/team Red, 4 kit/ui_button "Join red" -> 3 join, 5
 # kit/scoreboard, 6 kit/ui_button "Score" -> 5 add and 7 the list, then
+# 8 kit/controls with a free pointer (cursor), and
 # comes back beside kitbob: he joins Red and scores twice. Both see
 # "kitboss 2" in Red's colour over "kitbob 0" in none (boss.png).
 # simplified: no bot yet ([KIT_BOTS] is not in this tree); a bot is a
@@ -58,6 +59,10 @@ EOF
 	place kit/ui_player_list 4
 	link 4 pressed 3 join
 	link 6 pressed 5 add
+	# [KIT_HUD_BUTTONS_MOUSE_LOOK] A free pointer: buttons out of a panel
+	# drawn and clicked (in mouse look there are none)
+	place kit/controls 5
+	set_p 8 pointer '"cursor"'
 	cat <<'EOF'
 keypress F6
 wait_log 10000 kit editor: edit mode off
