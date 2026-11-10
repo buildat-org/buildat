@@ -167,8 +167,10 @@ end
 -- Where a shot from o ({x, y, z}) along the unit d at v m/s, falling at g,
 -- first meets a solid cell (solid(i, j, k), a cell's middle its whole
 -- coordinates) within life seconds: x, y, z, true; else its arc's end, false.
--- Steps of `step` m along the ground (kit.cpp's ray_wall takes 0.1 m)
-function M.impact(v, g, life, o, d, solid, step)
+-- Steps of `step` m along the ground (kit.cpp's ray_wall takes 0.1 m).
+-- [KIT_STATIONS_LEFTOVERS] seg(ax, ay, az, bx, by, bz), if given: what else
+-- a step's chord meets first (entities, ships), its fraction 0...1 or nil
+function M.impact(v, g, life, o, d, solid, step, seg)
 	local h = sqrt(d[1] * d[1] + d[3] * d[3])
 	if h < 1e-6 then
 		return o[1], o[2], o[3], false
@@ -181,7 +183,12 @@ function M.impact(v, g, life, o, d, solid, step)
 	local s = 0
 	while s < far do
 		s = s + step < far and s + step or far
+		local px, py, pz = x, y, z
 		x, y, z = o[1] + ux * s, o[2] + M.arc(v, g, a, s), o[3] + uz * s
+		local f = seg and seg(px, py, pz, x, y, z)
+		if f then
+			return px + (x - px) * f, py + (y - py) * f, pz + (z - pz) * f, true
+		end
 		if solid(floor(x + 0.5), floor(y + 0.5), floor(z + 0.5)) then
 			return x, y, z, true
 		end
@@ -1109,8 +1116,9 @@ end
 
 -- [KIT_AIRSHIPS] A ray at the free objects alone: t, the object, the cell hit in
 -- its frame ({i, j, k}, a cell's middle its whole coordinates), the normal out of
--- that face and the ray's direction, both in its frame
-function W:ray_objects(ox, oy, oz, dx, dy, dz, len)
+-- that face and the ray's direction, both in its frame; skip: an object's id
+-- passed through
+function W:ray_objects(ox, oy, oz, dx, dy, dz, len, skip)
 	local l = sqrt(dx * dx + dy * dy + dz * dz)
 	if l < 1e-9 then
 		return nil
@@ -1118,7 +1126,10 @@ function W:ray_objects(ox, oy, oz, dx, dy, dz, len)
 	dx, dy, dz = dx / l, dy / l, dz / l
 	local best, bo, ba
 	for _, ob in ipairs(self.turned) do
-		local t0, na = ray_turned(ob, ox, oy, oz, dx, dy, dz, len)
+		local t0, na = nil, nil
+		if ob.id ~= skip then
+			t0, na = ray_turned(ob, ox, oy, oz, dx, dy, dz, len)
+		end
 		if t0 and na and (not best or t0 < best) then
 			best, bo, ba = t0, ob, na
 		end

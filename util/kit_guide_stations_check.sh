@@ -12,6 +12,9 @@
 #      an attack through it, priority 10), the other, the cannon taken, the
 #      wheel (a reach through it, priority 5): the gunner fires and hits a
 #      mine, the helmsman sails into the marked box out among the mines.
+#      [KIT_STATIONS_LEFTOVERS] They land on the water, not the seabed; a
+#      mine moved under the marker stops it and takes the shot; a shot past
+#      the server's loaded terrain is no hit to the marker and none landed.
 #   3. kitboss sees the same steps as HUD lines: the mines' and the sailing
 #      out's shown, the sailing out's hidden once it is done.
 # Screenshots, kept with KEEP_TMP=1: $t/marker.png, $t/bots.png
@@ -122,9 +125,35 @@ for k in 1 2 3; do
 	srv_mark
 	step 5 "kit: impact at" "event kit_impact" "keypress Space"
 	srv 10 "kitboss's projectile [0-9]+ (lands|hits)"
-	# (250 ms put the third 127 m out, past the terrain loaded: no landing)
-	held W 60
+	held W 100
 done
+# [KIT_STATIONS_LEFTOVERS] An entity on the marker: mine 34 moved onto the
+# arc 6 m out (the deck's waves move the arc least there), the marker on it
+# and the shot into it. The arc: a parabola from the muzzle to the impact,
+# bent by g / 2v^2 (shot_speed 40; the elevation's cosine taken as 1)
+step 5 "kit: impact at" "event kit_impact"
+read -r mx my mz < <(grep -a 'kit: impact at' "$t/boss.log" | tail -1 | python3 -Ic '
+import re, sys, math
+x, y, z, ox, oy, oz = map(float, re.search(r"at (\S+) (\S+) (\S+) .* from (\S+) (\S+) (\S+)", sys.stdin.read()).groups())
+d = math.hypot(x - ox, z - oz); s = 6
+print(ox + (x - ox) * s / d, oy + (y - oy) * s / d + 9.8 / 3200 * s * (d - s), oz + (z - oz) * s / d)')
+[ -n "$mz" ] || fail "no impact reading ($t/boss.log)"
+step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
+srv_mark
+cmd "event kit_edit {\"op\": \"move\", \"id\": 34, \"pos\": [$mx, $my, $mz]}"
+srv 10 "An edit by kitboss: .*34"
+step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
+cmd "frames 10"
+srv_mark
+step 5 "kit: impact at" "event kit_impact" "keypress Space"
+srv 10 "kitboss's projectile [0-9]+ (lands|hits)"
+# A shot past the terrain the server has loaded (~127 m out): the marker
+# says no hit, the shot goes at its lifetime
+held W 300
+cmd "frames 10"
+srv_mark
+step 5 "kit: impact at" "event kit_impact" "keypress Space"
+srv 10 "Projectile [0-9]+ gone at its lifetime|kitboss's projectile [0-9]+ (lands|hits)"
 step 10 "kit: controls: camera first_person" "keypress F"
 await "$t/boss.log" 0 10 "kit: impact marker off"
 # 2. Two bots: the gun, then the wheel
@@ -150,12 +179,32 @@ t = sys.argv[1]
 srv = open(f"{t}/srv.log", errors="replace").read()
 cl = open(f"{t}/boss.log", errors="replace").read()
 # 1. Marker and landing, shot by shot
-said = [tuple(map(float, m)) for m in re.findall(
-	r"kit: impact at ([-0-9.]+) ([-0-9.]+) ([-0-9.]+) \(hit\)", cl)]
+# (the readings in order: three shots, the mine's place, the mine, the far one)
+reads = [(tuple(map(float, m[:3])), m[3]) for m in re.findall(
+	r"kit: impact at ([-0-9.]+) ([-0-9.]+) ([-0-9.]+) \((hit|none)\)", cl)]
+said = [p for p, h in reads[:3] if h == "hit"]
 landed = [tuple(map(float, m)) for m in re.findall(
 	r"kitboss's projectile \d+ lands at \(([-0-9.]+), ([-0-9.]+), ([-0-9.]+)\)", srv)]
-if len(said) != 3 or len(landed) != 3:
-	sys.exit(f"the marker said {said}, the shots landed {landed}")
+if len(reads) != 6 or len(said) != 3 or len(landed) != 3:
+	sys.exit(f"the marker said {reads}, the shots landed {landed}")
+# [KIT_STATIONS_LEFTOVERS] at sea the shots land on the water, not the seabed
+# (the World's water level 0: its top at 0.5)
+print("landed at heights " + ", ".join(f"{p[1]:.2f}" for p in landed))
+if any(not 0 < p[1] <= 0.55 for p in landed):
+	sys.exit(f"a shot landed off the water's surface: {landed}")
+# The mine on the marker: the marker on its box, the shot hits it
+mine, mh = reads[4]
+at = tuple(map(float, re.search(r"moved 34 to \[([-0-9.]+),([-0-9.]+),([-0-9.]+)\]", srv).groups()))
+# (on its box: within its corner's 0.87 m of its middle)
+if mh != "hit" or math.dist(mine, at) > 0.9:
+	sys.exit(f"the marker did not stop at the mine ({at}) on the arc: {reads[3:5]}")
+if not re.search(r"kitboss's projectile \d+ hits entity 34\b", srv):
+	sys.exit("the shot at the mine on the marker did not hit it")
+# Past the loaded terrain: no hit either side (the three landings above are
+# all kitboss's)
+if reads[5][1] != "none" or "gone at its lifetime" not in srv:
+	sys.exit(f"the far shot: the marker said {reads[5]}, the server no lifetime end")
+print(f"the mine: marker {mine}; the far shot: marker none, gone at its lifetime")
 off = [math.dist(a, b) for a, b in zip(said, landed)]
 print("marker vs landing: " + ", ".join(f"{d:.2f} m ({math.dist(b, landed[0]):.0f} m past the first)"
 	for d, b in zip(off, landed)))

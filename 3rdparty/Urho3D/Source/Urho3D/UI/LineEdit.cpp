@@ -390,11 +390,13 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
     // here as well would paste twice
     if ((key == KEY_X || key == KEY_C || key == KEY_V) && (qualifiers & QUAL_CTRL))
         return;
-    // buildat [TEXT_KEYS]: and the word keys and select all, which the
-    // browser does in the textarea and the page does Alt+Backspace by the
-    // same rule; done here too, a word would go twice. Undo is this field's
-    // ([TEXT_UNDO]): the page keeps the browser's own from it.
-    if ((qualifiers & (QUAL_CTRL | QUAL_ALT)) && (key == KEY_A || key == KEY_LEFT ||
+    // buildat [TEXT_KEYS]: and the word keys, which the browser does in the
+    // textarea and the page does Alt+Backspace by the same rule; done here
+    // too, a word would go twice. Undo and select all are this field's
+    // ([TEXT_UNDO], [WEB_SELALL_KEY_RACE]): the page keeps the browser's own
+    // from them (the browser's select all came back a frame late, after the
+    // key typed next).
+    if ((qualifiers & (QUAL_CTRL | QUAL_ALT)) && (key == KEY_LEFT ||
         key == KEY_RIGHT || key == KEY_BACKSPACE || key == KEY_DELETE))
         return;
 #endif

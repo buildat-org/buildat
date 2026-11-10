@@ -112,7 +112,7 @@ EOF
 	set_p 7 title '"Hello"'
 	place kit/ui_text 5
 	edit '{"op": "parent", "id": 8, "parent": 7}'
-	set_p 8 anchor '"top_left"'
+	set_p 8 anchor '"left"'
 	set_p 8 y 0
 	set_p 8 text '"Only you see this. [fire] fires."'
 	place kit/ui_button 6
@@ -554,8 +554,8 @@ bars=$(grep -aoP 'kit: ui touch bars at y \K\d+' "$pl" | tail -1)
 [ -n "$foot" ] && [ -n "$bars" ] && [ "$foot" -le "$bars" ] ||
 	fail "the bottom button (foot $foot) not over the touch bars ($bars; $pl)"
 [ -s "$t/drive/touch.png" ] || fail "no screenshot $t/drive/touch.png"
-# [KIT_PANEL_LEFTOVERS] The dialog's text (8) clear of its Close (9): the panel
-# taller than its default 15 vmin for the touch-sized button
+# [KIT_PANEL_LEFTOVERS] The dialog's text (8, at the middle's height: [KIT_HUD_LEFTOVERS]) clear of
+# its Close (9): the panel taller than its default 15 vmin for the touch-sized button
 python3 -I - "$pl" <<'PY' || fail "the dialog's Close over its text ($pl, $t/drive/touch.png)"
 import re, sys
 at = {}

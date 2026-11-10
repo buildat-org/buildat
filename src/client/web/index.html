@@ -1073,7 +1073,7 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 	function units(s, chars){ return Array.from(s).slice(0, chars).join('').length; }
 	function chars(s, u){ return Array.from(s.slice(0, u)).length; }
 	function selected(){
-		// The user's own selection (Ctrl+A, the menu's Select All) is the field's
+		// The user's own selection (the menu's Select All) is the field's
 		var v = el.value;
 		if(!active || composing || document.activeElement !== el)
 			return;
@@ -1257,8 +1257,12 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 		e.addEventListener('keydown', function(ev){
 			// Undo and redo are the field's own ([TEXT_UNDO], LineEdit
 			// hears the keys too): the browser's would undo the syncs
+			// [WEB_SELALL_KEY_RACE] So is Ctrl+A (LineEdit.cpp): the
+			// browser's select all came back as an "s" a frame late, after
+			// the key typed next, and selected what that key had typed for
+			// the one after it to replace
 			var k = ev.key.toLowerCase();
-			if((ev.ctrlKey || ev.metaKey) && (k === 'z' || k === 'y')){
+			if((ev.ctrlKey || ev.metaKey) && (k === 'z' || k === 'y' || k === 'a')){
 				ev.preventDefault();
 				return;
 			}

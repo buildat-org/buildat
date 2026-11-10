@@ -1043,7 +1043,9 @@ local function update()
 		-- vmin height shrinks, a touch button's not, and a bottom Close
 		-- covered the end of the text)
 		if r.el and r.kind == "panel" and r.grow and r.kids then
-			local tops, bottoms = 0, 0
+			-- ([KIT_HUD_LEFTOVERS] and one at the middle's height, centred:
+			-- clear of both ends' by the larger)
+			local tops, bottoms, mids = 0, 0, 0
 			for _, k in ipairs(r.kids) do
 				local a = tostring(k.ui.anchor or "top_left")
 				local e = num(k.ui.y, 0, -400, 400) * V + k.h
@@ -1051,10 +1053,13 @@ local function update()
 					bottoms = math.max(bottoms, e)
 				elseif a:find("top") then
 					tops = math.max(tops, e)
+				else
+					mids = math.max(mids, k.h)
 				end
 			end
-			local need = math.min(r.grow, r.title_h + 3 * pad + tops + bottoms)
-			if bottoms > 0 and need > r.h then
+			local need = math.min(r.grow, r.title_h + 3 * pad + math.max(tops + bottoms,
+					mids > 0 and mids + 2 * math.max(tops, bottoms) or 0))
+			if (bottoms > 0 or tops > 0 and mids > 0) and need > r.h then
 				for _, k in ipairs(r.kids) do
 					k.ph = k.ph + need - r.h
 				end

@@ -1879,14 +1879,78 @@ end
 -- its shot_speed and shot_gravity (move.lua's M.impact, by the arc kit/bot
 -- aims with): a disc there, grey where the arc ends meeting nothing, and dots
 -- along the arc. "event kit_impact" logs it: "kit: impact at <x> <y> <z>
--- (hit|none)". simplified: voxels only (a shot also stops at what has
--- health, and at another ship's voxels); a cell not loaded stops it
+-- (hit|none)". [KIT_STATIONS_LEFTOVERS] As kit.cpp's projectiles: a solid
+-- voxel or water stops it, a cell not loaded does not (past the server's
+-- loaded terrain the shot flies on: no hit), nor does the gun's own ship;
+-- another ship's hull and an entity with health or a player do (kit.cpp
+-- ray_target's boxes). simplified: a player or bot standing on the gun's own
+-- ship stops the marker (the server's shot passes them); add kit.cpp's
+-- aboard() here if crews stand in front of their guns
 local IMPACT_DOTS, IMPACT_EVERY = 12, 0.1
 local impact = nil
+local impact_water = {}
 local function impact_solid(i, j, k)
 	local v = voxelworld.get_static_voxel(magic.Vector3(i, j, k))
-	local id = voxelworld.get_voxel_registry():id_of(v)
-	return id == 0 or voxel_info(id, v) ~= nil
+	local reg = voxelworld.get_voxel_registry()
+	local id = reg:id_of(v)
+	if id == 0 then
+		return false
+	end
+	if impact_water[id] == nil then
+		-- Kit's water kind: edge material 10 (terrain.h)
+		local def = reg:get_by_id(id)
+		impact_water[id] = def ~= nil and def.edge_material_id == 10
+	end
+	return impact_water[id] or voxel_info(id, v) ~= nil
+end
+-- What else a shot meets on a chord from a to b: its fraction 0...1 or nil
+local function impact_seg()
+	local root = craft()
+	local boxes = {}
+	for id, n in pairs(P.nodes) do
+		local s = type(n.show) == "table" and n.show or {}
+		if (s.health or s.player) and id ~= P.you and
+				not (root and under(root, id, n)) then
+			local p = n.node.worldPosition
+			local r = s.player and 0.35 or 0.5
+			boxes[#boxes + 1] = {p.x - r, p.y - (s.player and 0.5 or r), p.z - r,
+				p.x + r, p.y + (s.player and 1.2 or r), p.z + r}
+		end
+	end
+	local w = C.pose_world
+	if w and C.draw_t then
+		w:pose_at(C.draw_t)
+	end
+	return function(ax, ay, az, bx, by, bz)
+		local o, d = {ax, ay, az}, {bx - ax, by - ay, bz - az}
+		local len = math.sqrt(d[1] * d[1] + d[2] * d[2] + d[3] * d[3])
+		local best = nil
+		if w and #w.turned > 0 and len > 1e-9 then
+			local t = w:ray_objects(ax, ay, az, d[1], d[2], d[3], len, root)
+			best = t and t / len
+		end
+		for _, b in ipairs(boxes) do
+			-- The chord's entry into the box (slabs: t along d, 0...1)
+			local t0, t1 = 0, 1
+			for q = 1, 3 do
+				if math.abs(d[q]) < 1e-9 then
+					if o[q] < b[q] or o[q] > b[q + 3] then
+						t0 = 2
+					end
+				else
+					local a1, a2 = (b[q] - o[q]) / d[q], (b[q + 3] - o[q]) / d[q]
+					if a1 > a2 then
+						a1, a2 = a2, a1
+					end
+					t0, t1 = math.max(t0, a1), math.min(t1, a2)
+				end
+			end
+			if t0 <= t1 and (not best or t0 < best) then
+				best = t0
+			end
+		end
+		return best
+	end
 end
 -- The gun ridden's shot: its muzzle (a metre out of its front, kit.cpp's
 -- drive_shot), facing, the point and whether it hit; nil: no gun ridden
@@ -1901,7 +1965,7 @@ local function impact_now()
 	local o = n.node.worldPosition + d
 	local v, g = tonumber(p.shot_speed) or 40, tonumber(p.shot_gravity) or 9.8
 	local x, y, z, hit = MV.impact(v, g, 4, {o.x, o.y, o.z}, {d.x, d.y, d.z},
-			impact_solid, 0.25)
+			impact_solid, 0.25, impact_seg())
 	return {o = o, d = d, v = v, g = g, at = magic.Vector3(x, y, z), hit = hit}
 end
 local function impact_marker(dt)
