@@ -294,9 +294,21 @@ wait_for_log "$t/srv.log" "kitboss entered; 1 of 2 inside" 240 ||
 	fail "kitboss did not get into the arena's zone ($t/srv.log)"
 if [ -n "$web" ]; then
 	steps=$(web_login_steps webbie) || fail "$steps"
+	lock_stub="(function(){ var held = null;
+ Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }});
+ function set(e){ held = e; document.dispatchEvent(new Event('pointerlockchange')); }
+ HTMLCanvasElement.prototype.requestPointerLock = function(){ if(held !== this) set(this); return Promise.resolve(); };
+ document.exitPointerLock = function(){ if(held) set(null); };
+ return 'stub'; })()"
 	{
 		printf '[\n ["nav", "${URL}"],\n%s\n' "$steps"
 		echo ' ["waitlog", "player physics enabled", 120],'
+		# [KIT_MAP_ROTATION_LEFTOVERS] Headless Chrome grants no pointer
+		# lock, so Workbench opened its menu for the lock not given and it
+		# stayed over each map's shot: a stand-in lock (web_mouse_look_check's)
+		# and the menu's Continue, as a person's click takes the lock
+		printf ' ["waitlog", "pause: the menu shown", 30], ["eval", "%s"],\n' "$(printf '%s' "$lock_stub" | tr '\n' ' ')"
+		echo ' ["click", "Button", "Continue"], ["waitlog", "pause: the menu closed", 10],'
 		for m in alpha beta gamma; do
 			printf ' ["waitlog", "shown: .Map %s", 120], ["wait", 2000], ["frames", 5],\n' $m
 			printf ' ["shot", "${OUT}/web_%s.png"],\n' $m
@@ -384,6 +396,11 @@ for m in alpha beta gamma lobby; do
 	[ -s "$t/$m.png" ] || fail "no screenshot $m ($t)"
 done
 [ -z "$web" ] || cp "$t"/drive/web_*.png "$t"/ || fail "no web screenshots ($t/drive)"
+# (the lock taken: no menu again over the maps)
+if [ -n "$web" ] && sed -n '/pause: the menu closed/,$p' "$t/drive/page.log" |
+		grep -aq "pause: the menu shown"; then
+	fail "the web player's menu up again after the lock was taken ($t/drive/page.log)"
+fi
 python3 - "$t" "" ${web:+web_} <<'PY' || fail "the ground's colours ($t)"
 import sys
 from PIL import Image
