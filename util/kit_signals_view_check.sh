@@ -1392,6 +1392,17 @@ keypress F6
 wait_log 10000 kit editor: edit mode off
 frames 30
 screenshot @T@/wide_play.png
+keypress F6
+wait_log 10000 kit editor: edit mode on
+event kit_edit {"op": "place", "type": "kit/voxel_replace", "pos": [2, 1, 2], "params": {"find": "kit/nonesuch"}}
+wait_log 10000 kit editor: state:
+event kit_edit {"op": "stop"}
+sync 3000
+event kit_edit {"op": "play"}
+wait_log 10000 kit: warning: World: entity
+frames 3
+screenshot @T@/wide_notice.png
+event kit_edit {"op": "stop"}
 sync 3000
 quit
 EOF
@@ -2042,6 +2053,13 @@ wantp "$t/kitwide.log" "signals: the HUD in the viewport on"
 # watch asked out of edit mode, so none refused over the guide
 want "$t/kitwide.log" "kit editor: edit mode off"
 grep -aq "refused: watch" "$t/kitwide.log" && fail "a watch refused in play ($t/kitwide.log, $t/wide_play.png)"
+# [KIT_SIGNALS_PARENT_LEFTOVERS] A notice in edit mode (Play's warning of a
+# voxel parameter naming no voxel) under the editor's bar: 4 px below its foot
+notice=$(sed -n '/kit: warning: World: entity/,$p' "$t/kitwide.log" |
+	grep -aoP 'notification: from y \K\d+, the top.s foot at \d+' | tail -1)
+[ -n "$notice" ] && [ "${notice#*foot at }" -gt 0 ] &&
+	[ "${notice%%,*}" = "$((${notice#*foot at } + 4))" ] ||
+	fail "the notice not under the editor's bar: '$notice' ($t/kitwide.log, $t/wide_notice.png)"
 wantp "$t/kitnarrow.log" "signals: columns in 600x400 under \d+: sg_links \d+ \d+ 588 \d+"
 wantp "$t/kitnarrow.log" "signals: columns in 600x400 under \d+: sg_list \d+ \d+ 588 \d+"
 wantp "$t/kitnarrow.log" "signals: columns in 600x400 under \d+: inspector \d+ \d+ 588 \d+$"
