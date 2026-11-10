@@ -20162,6 +20162,15 @@ struct Module: public interface::Module, public Interface
 				if(!holds(e.id, when, &item))
 					continue;
 				const ss_ kind = jstr(in.params, "kind");
+				// [KIT_AIRSHIPS_BOTS_2] its team's ship crewed: what to do now
+				if(kind == "crew"){
+					json::Value j;
+					if(!crew_lit(e, g, w, j))
+						continue;
+					best = j;
+					best_p = pri;
+					continue;
+				}
 				const Entity *t = goal_target(g, in, e.id, w);
 				if(kind == "use" && (!t || !usable_now(*t) ||
 						(in.params.get("except_own_zone").is_true() && own_team &&
@@ -20235,7 +20244,11 @@ struct Module: public interface::Module, public Interface
 	// [KIT_AIRSHIPS_BOTS_LEFTOVERS] A bot attacked in the last FOE_US (it or the
 	// ship it crews hit, bot_attacked()): before any goal, an attack on its foe
 	// (id -1, "fight back") through the gun of that ship if one is free.
-	// simplified: a ship's gun only; a bot on foot does not fight back
+	// [KIT_AIRSHIPS_BOTS_2] Hurt on foot (no ship): it walks to the foe and
+	// hits them with its weapon (its first by name), else a hand; not while
+	// seated, nor at a foe aboard a ship (out of reach).
+	// simplified: the gun of the ship it was on, or its hands, no other
+	// way (a ship's gun from the deck at a foe on foot is the upgrade)
 	void bot_foe_lit(const Entity &e, const double w[3], const ss_ &scene,
 			json::Value &best)
 	{
@@ -20248,9 +20261,32 @@ struct Module: public interface::Module, public Interface
 		if(ti != m_entities.end() && ti->second.has_pos)
 			scene_of(ti->second, &ts);
 		if(now_us() - f.at_us > FOE_US || ts.empty() || ts != scene ||
-				!m_entities.count(f.ship)){
+				(f.ship && !m_entities.count(f.ship)) || !player_alive(ti->second)){
 			log_i(MODULE, "%s stops fighting back", cs(bot_name(e)));
 			m_bot_foes.erase(fi);
+			return;
+		}
+		if(!f.ship){
+			if(m_bot_seats.count(e.id) || ship_of(f.foe))
+				return;
+			double at[3];
+			place_of(ti->second, at);
+			json::Value j = json::object();
+			j.set("id", (int64_t)-1);
+			j.set("kind", ss_("attack"));
+			j.set("text", ss_("fight back"));
+			j.set("target", (int64_t)f.foe);
+			ss_ item;
+			if(holds(e.id, "weapon", &item)){
+				j.set("item", item);
+				const json::Value &sh = m_item_types[item];
+				for(const char *k : {"damage", "reach", "cooldown"})
+					j.set(k, sh.get(k).is_number() ? sh.get(k).as_number() : 0.0);
+			}
+			j.set("at", point(at));
+			j.set("dist", std::sqrt((at[0] - w[0]) * (at[0] - w[0]) +
+					(at[1] - w[1]) * (at[1] - w[1]) + (at[2] - w[2]) * (at[2] - w[2])));
+			best = j;
 			return;
 		}
 		for(auto &p : m_entities){
@@ -20281,6 +20317,297 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
+	// ---- [KIT_AIRSHIPS_BOTS_2] Kind "crew" (kit/goal, bots only): its team's ship
+	// (a free object whose kit/hull's owner is of its team) bought, armed and
+	// crewed, fought with against the other teams' ships. One step at a time,
+	// as c.goal of a kind kit/bot knows:
+	//   a part held and a ship it may build on: "use" the ship (bot_mount())
+	//   no ship: "use" its team's shop of ships (the dearest it can pay)
+	//   a ship with no gun it may arm: "use" its team's shop of guns
+	//   the gun, its helm held by another or, alone, the foe within CREW_RANGE:
+	//     "attack" through it (no foe ship: aimed at their team, `hold` fire)
+	//   the helm: "reach" through it toward the nearest foe ship (else their
+	//     team), stopping CREW_KEEP from it (`keep`)
+	//   both held by others: another ship bought if it can, else nothing.
+	// A shop is its team's when that team (kit/team) is the nearest one to it.
+	// simplified: a priority list, not a plan; the helm steers level (no
+	// climb); a lone bot leaves the helm for the gun (the ship coasting); two
+	// bots of a team that buy at once may buy two ships; out of money (a lost
+	// ship) it has nothing to do. Picks for review: the two ranges.
+	static constexpr double CREW_RANGE = 35; // m (pick)
+	static constexpr double CREW_KEEP = 25; // m (pick)
+
+	// Whether a player or a bot may build on a ship (its hull's `build`)
+	bool may_build(uint64_t who, const Entity &root)
+	{
+		const Instance *hull = hull_of(root);
+		if(!hull)
+			return false;
+		const ss_ rule = jstr(hull->params, "build");
+		const uint64_t owner = (uint64_t)std::max<int64_t>(0,
+				json::jint(hull->state, "owner", 0));
+		const uint64_t team = owner ? team_of_player(owner) : 0;
+		return rule == "anyone" || (owner == who && (rule == "owner" || rule == "team")) ||
+				(rule == "team" && team && in_team(who, team));
+	}
+
+	// Whether a prefab has a station of that kind (a part's turret: "gun")
+	bool prefab_station(const ss_ &name, const ss_ &does)
+	{
+		const json::Value *pf = prefab(name);
+		const json::Value &es = pf ? pf->get("entities") : json::Value();
+		for(unsigned i = 0; i < es.size(); i++){
+			const json::Value &cs = es.at(i).get("components");
+			for(unsigned k = 0; k < cs.size(); k++){
+				auto ti = m_types.find(jstr(cs.at(k), "type"));
+				if(ti != m_types.end() &&
+						jstr(ti->second.decl.get("movement"), "station") == does)
+					return true;
+			}
+		}
+		return false;
+	}
+
+	bool crew_lit(const Entity &bot, const Entity &g, const double w[3], json::Value &j)
+	{
+		const uint64_t team = team_of_player(bot.id);
+		if(!team)
+			return false;
+		ss_ scene, ts;
+		scene_of(bot, &scene);
+		auto d2 = [](const double a[3], const double b[3]){
+			return (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) +
+					(a[2] - b[2]) * (a[2] - b[2]);
+		};
+		// The teams' places, for whose a shop is
+		sv_<std::pair<uint64_t, std::array<double, 3>>> teams;
+		for(auto &p : m_entities){
+			bool is_team = false;
+			for(const Instance &in : p.second.comps)
+				is_team = is_team || (m_types[in.type].team && in.disabled.empty());
+			if(!is_team || !p.second.has_pos || !scene_of(p.second, &ts) || ts != scene)
+				continue;
+			std::array<double, 3> tw;
+			world_of(p.second, tw.data());
+			teams.push_back({p.first, tw});
+		}
+		// The ships: its team's and the others'
+		sv_<uint64_t> own, foes;
+		for(auto &fo : m_free_objects){
+			auto si = m_entities.find(fo.first);
+			if(si == m_entities.end() || !si->second.has_pos ||
+					!scene_of(si->second, &ts) || ts != scene)
+				continue;
+			const Instance *h = hull_of(si->second);
+			const int64_t owner = h ? json::jint(h->state, "owner", 0) : 0;
+			const uint64_t ot = owner > 0 ? team_of_player((uint64_t)owner) : 0;
+			if(ot)
+				(ot == team ? own : foes).push_back(fo.first);
+		}
+		const Instance *wl = wallet_of(bot.id);
+		const int64_t money = wl ? json::jint(wl->state, "money", 0) : 0;
+		const bool free = wl && wl->state.get("free").is_true();
+		const ss_ part = wl ? jstr(wl->state, "part") : ss_();
+		auto set_at = [&](const double at[3]){
+			j.set("at", point(at));
+			j.set("dist", std::sqrt(d2(at, w)));
+		};
+		auto use = [&](uint64_t id, const char *text, bool anywhere){
+			j = json::object();
+			j.set("id", (int64_t)g.id);
+			j.set("kind", ss_("use"));
+			j.set("text", ss_(text));
+			j.set("target", (int64_t)id);
+			double at[3];
+			world_of(m_entities[id], at);
+			set_at(at);
+			// (a ship is boarded from anywhere, as bot_seat())
+			if(anywhere)
+				j.set("dist", 0.0);
+			return true;
+		};
+		// Its team's shop of ships (gun false: the dearest it can pay) or of
+		// guns (the cheapest); 0 none
+		auto shop = [&](bool gun){
+			uint64_t best = 0;
+			double bp = 0;
+			for(auto &p : m_entities){
+				if(!p.second.has_pos || !scene_of(p.second, &ts) || ts != scene)
+					continue;
+				for(const Instance &in : p.second.comps){
+					if(in.type != "kit/shop" || !in.disabled.empty() ||
+							in.params.get("mount").is_true() != gun)
+						continue;
+					const double price = free ? 0 : num(in.params, "price", 20, 0, 100000);
+					if(price > money || (gun && !prefab_station(jstr(in.params, "prefab"), "gun")))
+						continue;
+					double sw[3];
+					world_of(p.second, sw);
+					uint64_t near = 0;
+					double nd = 0;
+					for(auto &t : teams)
+						if(!near || d2(t.second.data(), sw) < nd)
+							near = t.first, nd = d2(t.second.data(), sw);
+					if(near == team && (!best || (gun ? price < bp : price > bp)))
+						best = p.first, bp = price;
+				}
+			}
+			return best;
+		};
+		// The ship: the one it is seated on, else its team's nearest
+		auto bs = m_bot_seats.find(bot.id);
+		uint64_t ship = bs != m_bot_seats.end() ? free_root_of(bs->second.seat) : 0;
+		if(std::find(own.begin(), own.end(), ship) == own.end())
+			ship = 0;
+		const bool kept = ship != 0;
+		double bd = -1;
+		for(uint64_t s : own){
+			double o[3];
+			world_of(m_entities[s], o);
+			if(!kept && (bd < 0 || d2(o, w) < bd))
+				ship = s, bd = d2(o, w);
+		}
+		double sw[3] = {0, 0, 0};
+		if(ship)
+			world_of(m_entities[ship], sw);
+		if(!ship){
+			const uint64_t sh = shop(false);
+			return sh && use(sh, "buy a ship", false);
+		}
+		const Entity &se = m_entities[ship];
+		const bool armable = may_build(bot.id, se);
+		if(!part.empty() && armable)
+			return use(ship, "put on the part", true);
+		// Its stations: the helm, a gun (a free one first)
+		json::Value helm, gun;
+		int hr = 0, gr = 0;
+		for(auto &p : m_entities){
+			if(!p.second.has_pos || !has_seat(p.second) || free_root_of(p.first) != ship)
+				continue;
+			Instance via;
+			via.params.set("via", (int64_t)p.first);
+			json::Value st;
+			const int r = station_lit(bot, via, st);
+			const ss_ does = r > 0 ? jstr(st, "does") : ss_();
+			if(r < 0){
+				// (held by another: which it is, from the seat's vehicle)
+				const Entity *ve = vehicle_of(p.second);
+				const Instance *mv = ve ? movement_on(*ve) : nullptr;
+				const ss_ d = mv ? jstr(m_types[mv->type].decl.get("movement"), "station") :
+						ss_();
+				if(d == "helm" && !hr)
+					hr = -1;
+				if(d == "gun" && !gr)
+					gr = -1;
+			} else if(does == "helm" && hr <= 0){
+				helm = st, hr = 1;
+			} else if(does == "gun" && gr <= 0){
+				gun = st, gr = 1;
+			}
+		}
+		if(!gr && armable){
+			if(const uint64_t sh = shop(true))
+				return use(sh, "buy a gun", false);
+		}
+		// The foe: the nearest other team's ship, else their team's place
+		const Entity *foe = nullptr;
+		double fd = 0;
+		for(uint64_t s : foes){
+			double o[3];
+			world_of(m_entities[s], o);
+			if(!foe || d2(o, sw) < fd)
+				foe = &m_entities[s], fd = d2(o, sw);
+		}
+		double at[3] = {sw[0], sw[1], sw[2]};
+		if(foe){
+			world_of(*foe, at);
+		} else {
+			uint64_t near = 0;
+			double nd = 0;
+			for(auto &t : teams)
+				if(t.first != team && (!near || d2(t.second.data(), sw) < nd))
+					near = t.first, nd = d2(t.second.data(), sw), std::copy(t.second.begin(),
+							t.second.end(), at);
+		}
+		const bool at_gun = gr > 0 && gun.get("held").is_true();
+		const double range = CREW_RANGE * (at_gun ? 1.3 : 1);
+		if(gr > 0 && (hr <= 0 || (foe && fd < range * range))){
+			j = json::object();
+			j.set("station", gun);
+			j.set("id", (int64_t)g.id);
+			j.set("kind", ss_("attack"));
+			j.set("text", ss_("the gun"));
+			if(foe)
+				j.set("target", (int64_t)foe->id);
+			else
+				j.set("hold", true);
+			set_at(at);
+			return true;
+		}
+		if(hr > 0){
+			j = json::object();
+			j.set("station", helm);
+			j.set("id", (int64_t)g.id);
+			j.set("kind", ss_("reach"));
+			j.set("text", ss_("the helm"));
+			j.set("keep", CREW_KEEP);
+			set_at(at);
+			return true;
+		}
+		const uint64_t sh = shop(false);
+		return sh && use(sh, "buy a ship", false);
+	}
+
+	// [KIT_AIRSHIPS_BOTS_2] A bot's part (its kit/wallet's, a shop's with mount)
+	// put on a ship it may build on, from anywhere in its scene (as it boards):
+	// on the empty cell over a voxel that is highest, then nearest the
+	// middle across, then furthest along +z (a skiff's bow).
+	// simplified: a fixed place, not one the bot chooses for a reason
+	void bot_mount(uint64_t bot, uint64_t id)
+	{
+		auto bi = m_entities.find(bot);
+		auto ri = m_entities.find(id);
+		Instance *wl = wallet_of(bot);
+		const ss_ part = wl ? jstr(wl->state, "part") : ss_();
+		if(bi == m_entities.end() || ri == m_entities.end() || part.empty())
+			return;
+		const ss_ name = bot_name(bi->second);
+		ss_ why, scene, ss;
+		scene_of(bi->second, &scene);
+		scene_of(ri->second, &ss);
+		OwnGrid *g = nullptr;
+		if(ss != scene)
+			why = "in another scene";
+		else if(!may_build(bot, ri->second))
+			why = "not its ship to build on";
+		else
+			g = own_of(ri->second, why);
+		int best = -1;
+		if(g){
+			ship_mass(id, *g);
+			const int S = OWN_SIDE, mid2 = g->lo[0] + g->hi[0];
+			auto key = [&](int i){
+				return std::make_tuple(i / S % S, -std::abs(2 * (i % S) - mid2), i / (S * S));
+			};
+			for(int i = S; i < S * S * S; i++)
+				if(!g->v[i].id && g->v[i - S].id && !g->mounted_on.count(i) &&
+						i / S % S && (best < 0 || key(i) > key(best)))
+					best = i;
+			if(best < 0)
+				why = "no empty place on it";
+		}
+		if(best < 0 || !mount_part(ri->second, *g, best, part, "bot:"+itos(bot), why)){
+			log_i(MODULE, "[KIT_AIRSHIPS_BOTS_2] %s's part %s on entity %s refused: %s",
+					cs(name), cs(part), cs(itos(id)), cs(why));
+			return;
+		}
+		wl->state.set("part", "");
+		for(size_t k = 0; k < bi->second.comps.size(); k++)
+			if(&bi->second.comps[k] == wl)
+				replicate_state(bi->second, k, "part");
+		log_i(MODULE, "%s puts %s on entity %s", cs(name), cs(part), cs(itos(id)));
+	}
+
 	// A bot's use of an entity: its usable parts' on_use and the world event
 	// "use" (kit/goal's), as a player's (on_use_u) by "bot:<id>", within Kit's
 	// use range (what it carries: anywhere). simplified: no who-may-use rule
@@ -20304,6 +20631,12 @@ struct Module: public interface::Module, public Interface
 		// [KIT_GUIDE_STATIONS] a seat taken
 		if(m_host.controls && has_seat(it->second))
 			return bot_seat(bot, id);
+		// [KIT_AIRSHIPS_BOTS_2] a ship part it holds put on a ship
+		if(m_free_objects.count(id) && hull_of(it->second)){
+			const Instance *wl = wallet_of(bot);
+			if(wl && !jstr(wl->state, "part").empty())
+				return bot_mount(bot, id);
+		}
 		if(ts != scene || (d2 > m_host.use_range * m_host.use_range &&
 				bot_carries(bot) != id)){
 			log_i(MODULE, "[KIT_GUIDE_BOTS] A use of entity %s by %s refused: %s",
@@ -20407,6 +20740,25 @@ struct Module: public interface::Module, public Interface
 		return false;
 	}
 
+	// [KIT_AIRSHIPS_BOTS_2] The ship a player or a bot is aboard (0: none),
+	// as aboard() has it
+	uint64_t ship_of(uint64_t id)
+	{
+		auto bs = m_bot_seats.find(id);
+		if(bs != m_bot_seats.end())
+			return free_root_of(bs->second.seat);
+		for(auto &p : m_peers){
+			if(p.second.player != id)
+				continue;
+			if(const uint64_t s = p.second.frame ? free_root_of(p.second.frame) : 0)
+				return s;
+			auto bi = m_bodies.find(p.first);
+			return bi != m_bodies.end() && bi->second.seat ?
+					free_root_of(bi->second.seat) : 0;
+		}
+		return 0;
+	}
+
 	// [KIT_AIRSHIPS_BOTS_LEFTOVERS] Who last hurt a bot or the ship it crews
 	// (by its entity), that ship and when (now_us): for FOE_US it fights back
 	// from that ship's gun (bot_foe_lit)
@@ -20425,8 +20777,9 @@ struct Module: public interface::Module, public Interface
 		const uint64_t foe = c == ss_::npos ? 0 : strtoull(by.c_str() + c + 1, nullptr, 10);
 		if(!foe || !m_entities.count(foe))
 			return;
+		// ([KIT_AIRSHIPS_BOTS_2] s 0: on foot)
 		auto mark = [&](uint64_t b, uint64_t s){
-			if(b == foe || !s || aboard(foe, s))
+			if(b == foe || (s && aboard(foe, s)))
 				return;
 			BotFoe &f = m_bot_foes[b];
 			if(f.foe != foe)
@@ -23956,8 +24309,10 @@ struct Module: public interface::Module, public Interface
 			scene_of(mi->second, &scene);
 		else
 			scene = pi->second.scene;
-		log_i(MODULE, "%s fires entity %s's %s", cs(who), cs(itos(e.id)),
-				cs(movement_on(e) ? movement_on(e)->type : ss_()));
+		// ([KIT_AIRSHIPS_BOTS_2] from where: a check sees a ship move)
+		log_i(MODULE, "%s fires entity %s's %s from (%.1f, %.1f, %.1f)", cs(who),
+				cs(itos(e.id)), cs(movement_on(e) ? movement_on(e)->type : ss_()),
+				from[0], from[1], from[2]);
 		// [KIT_AIRSHIPS] not into its own ship: the free object it is under
 		uint64_t ship = 0;
 		for(auto si = m_entities.find(e.parent); si != m_entities.end() && !ship;

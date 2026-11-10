@@ -120,8 +120,8 @@ shot() { printf 'frames 10\nscreenshot %s\n' "$t/$1.png"; }
 at() { printf 'event kit_point_obj %s %s %s %s\nframes 3\nmouse_click %s\n' "$@"; }
 held() { printf 'keydown %s\ndelay %s\nkeyup %s\nframes 3\n' "$1" "$2" "$1"; }
 # The round's entities, in the order bought (the session's ids follow the start's)
-BOSS_SHIP=53 BOSS_HELM=54 GUN=55 RADAR=56
-BOB_SHIP=57 BOB_HELM=58 BOB_CORE=59 BOB_CORE_HELM=60 ENGINE=61
+BOSS_SHIP=55 BOSS_HELM=56 GUN=57 RADAR=58
+BOB_SHIP=59 BOB_HELM=60 BOB_CORE=61 BOB_CORE_HELM=62 ENGINE=63
 
 # The admin's account and open registration, natively, on a fresh server
 server

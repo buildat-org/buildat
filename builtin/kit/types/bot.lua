@@ -36,6 +36,11 @@
 -- not aboard: for 30 s its goal is "fight back" (id -1, before any other), an
 -- attack on them through that ship's gun if nobody else holds it (kit.cpp's
 -- bot_foe_lit). A ship's gun's shots pass its own crew.
+-- [KIT_AIRSHIPS_BOTS_2] Hurt on foot: the "fight back" goal is an attack on
+-- them on foot (kit.cpp's bot_foe_lit). Kind "crew" (kit.cpp's crew_lit) comes
+-- as the step it is on, each its own text (a new step a new goal here): a
+-- helm's `keep` (m) is how far from the goal's place it stops, a gun's
+-- `hold` aims without firing.
 -- simplified: one goal at a time; a bot's use passes no who-may-use
 -- rule (a region's or a part's own), the upgrade is may_use() for a bot
 local DEG = 180 / math.pi
@@ -69,7 +74,7 @@ local function helm(g, s)
 	local dx, dz = g.at[1] - s.at[1], g.at[3] - s.at[3]
 	local err = wrap(math.atan2(dx, dz) * DEG - s.yaw)
 	local want = math.min(tonumber(s.params.top_speed) or 8,
-			math.sqrt(dx * dx + dz * dz) * 0.4)
+			math.max(0, math.sqrt(dx * dx + dz * dz) - (g.keep or 0)) * 0.4)
 	return {f = clamp((want - s.speed) * 0.5), r = clamp(err / 20)}
 end
 
@@ -89,7 +94,8 @@ local function gun(c, g, s)
 	end
 	local eerr = a and a * DEG + st.off_e - s.elev or 0
 	local tol = math.max(0.25, math.min(2, math.atan2(0.4, d) * DEG))
-	local fire = a ~= nil and math.abs(yerr) < tol and math.abs(eerr) < tol
+	local fire = a ~= nil and not g.hold and math.abs(yerr) < tol and
+			math.abs(eerr) < tol
 	if fire then
 		-- [KIT_BOT_DIFFICULTY] the next shot's error
 		local m = AIM_OFF * (100 - st.aim) / 100
@@ -98,6 +104,11 @@ local function gun(c, g, s)
 	return {f = clamp(eerr / ((tonumber(p.pitch_rate) or 30) * CLOSE)),
 		r = clamp(yerr / ((tonumber(p.turn_rate) or 60) * CLOSE)),
 		fire = fire}
+end
+
+-- A goal's key: its id and its text (a "crew" goal's step)
+local function gkey(g)
+	return g.id .. " " .. g.text
 end
 
 local function plate(c)
@@ -139,8 +150,8 @@ local function think(c)
 		c:leave_seat()
 		return plate(c)
 	end
-	if g.id ~= c.state.goal then
-		c.state.goal, c.state.used, c.state.stuck = g.id, false, false
+	if gkey(g) ~= c.state.goal then
+		c.state.goal, c.state.used, c.state.stuck = gkey(g), false, false
 		c:log("goal", g.id, g.kind, "\"" .. g.text .. "\"")
 		c.state.ready = c.state.reaction <= 0
 		if not c.state.ready then
@@ -322,7 +333,7 @@ return {
 		-- Its via used and the goal still there
 		if name == "patience" then
 			local g = c.goal
-			if g and g.id == c.state.goal and c.state.used then
+			if g and gkey(g) == c.state.goal and c.state.used then
 				-- [KIT_GUIDE_BOTS_2] a use or a place again (a moving target)
 				if g.kind ~= "signal" then
 					c.state.used = false

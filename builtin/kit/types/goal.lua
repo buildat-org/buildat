@@ -66,6 +66,12 @@
 -- [KIT_AIRSHIPS_BOTS_LEFTOVERS] A reach goal through a station on a ship,
 -- the station held: whoever aboard enters the box enters it as the holder
 -- (kit.cpp's via_holder: the helm took them there, not the gunner).
+-- [KIT_AIRSHIPS_BOTS_2] Kind "crew", a bot's in a team: crew its team's
+-- ship (a free object whose kit/hull's owner is of the team): buy one at
+-- the team's kit/shop (the nearest team's), buy a gun and put it on, take
+-- the helm toward the nearest other team's ship or its gun, and fight
+-- (kit.cpp's crew_lit). Not acted on out of a team; a player's line is a
+-- hint.
 -- simplified: a priority list, not a planner; a reach goal with a picked
 -- target other than "entity" is never entered (its box stays at its place)
 -- simplified: to "team" is left out (kit/ui_text's way, the members sharing one
@@ -173,7 +179,7 @@ return {
 		priority = "param:priority", holding = "param:when_holding"},
 	params = {
 		kind = {type = "string", default = "reach",
-			choices = {"reach", "use", "signal", "place_item", "attack"}},
+			choices = {"reach", "use", "signal", "place_item", "attack", "crew"}},
 		size = {type = "position", default = {3, 2, 3}},
 		target = {type = "entity", default = 0},
 		pick = {type = "string", default = "entity",
