@@ -333,9 +333,11 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 	// not up, which then brings the bar back). Entering takes a tap, so
 	// each tap asks; leaving is at once.
 	// **The address bar is a preference** ([WEB_ADDRESS_BAR]):
-	// buildatAddressBar is "hide", "show", or empty for the default --
-	// hidden on a small touchscreen (a coarse pointer, a short side under
-	// 600 CSS pixels), shown on a desktop
+	// buildatAddressBar is "hide", "show", "landscape" (hidden only while
+	// the screen is landscape: in portrait it costs little, and fullscreen
+	// there fought the keyboard and the menu; user, 2026-11-10) or empty
+	// for the default -- "landscape" on a small touchscreen (a coarse
+	// pointer, a short side under 600 CSS pixels), shown on a desktop
 	var coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
 	function hide_by_default(){
 		return coarse && Math.min(screen.width, screen.height) < 600;
@@ -378,14 +380,40 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 	document.addEventListener('fullscreenchange', function(){
 		orientation_applied = null;
 		apply_orientation();
+		// Entered on a tap whose game took the wish back meanwhile (the
+		// tap opened a menu): out again
+		sync_fullscreen();
 	});
-	function sync_fullscreen(){
-		var pref = Module.buildatAddressBar;
-		var want = (Module.buildatFullscreen || orientation() !== '') &&
-				(pref ? pref === 'hide' : hide_by_default());
+	// Turned to portrait under "landscape": out at once (entering waits for
+	// a tap)
+	if(screen.orientation && screen.orientation.addEventListener)
+		screen.orientation.addEventListener('change', function(){ sync_fullscreen(); });
+	else
+		window.addEventListener('orientationchange', function(){ sync_fullscreen(); });
+	// The screen's, not the viewport's: an open keyboard makes a portrait
+	// viewport wide
+	function landscape(){
+		var so = screen.orientation;
+		return so && so.type ? so.type.indexOf('landscape') === 0 :
+				screen.width > screen.height;
+	}
+	function want_fullscreen(){
+		var pref = Module.buildatAddressBar ||
+				(hide_by_default() ? 'landscape' : 'show');
+		return (Module.buildatFullscreen || orientation() !== '') &&
+				(pref === 'hide' || (pref === 'landscape' &&
+				// a landscape lock is taken only fullscreen, from portrait too
+				(landscape() || orientation() === 'landscape')));
+	}
+	// `e`: a tap. One on a text field asks no fullscreen: the resize it
+	// brings can keep the field's keyboard from opening
+	function sync_fullscreen(e){
+		var want = want_fullscreen();
 		var el = document.documentElement;
+		var t = e && e.changedTouches && e.changedTouches[0];
 		try {
-			if(want && !document.fullscreenElement && el.requestFullscreen)
+			if(want && !document.fullscreenElement && el.requestFullscreen &&
+					!(t && field_at(t)))
 				el.requestFullscreen().catch(function(){});
 			// Only the page's own: the client's fullscreen setting is the
 			// same API, on the canvas
@@ -1131,24 +1159,28 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 		if(window.Module)
 			Module.buildatTouched = 1;
 	}, true);
-	canvas.addEventListener('touchend', function(e){
-		var t = e.changedTouches[0];
-		if(!t || !fields.length)
-			return;
+	// The topmost field under a touch, or null
+	function field_at(t){
 		var r = canvas.getBoundingClientRect();
 		var x = (t.clientX - r.left) * canvas.width / canvas.clientWidth,
 				y = (t.clientY - r.top) * canvas.height / canvas.clientHeight;
 		for(var i = fields.length - 1; i >= 0; i--){
 			var f = fields[i];
-			if(x >= f[0] && x < f[0] + f[2] && y >= f[1] && y < f[1] + f[3]){
-				place(f[4] === 1, f[0], f[1], f[2], f[3], true);
-				held = 10;
-				tapped = f.slice(0, 4).join(',');
-				console.log('buildatText: a field focused in the tap: ' +
-						(document.activeElement === el ? el.id : 'not focused'));
-				return;
-			}
+			if(x >= f[0] && x < f[0] + f[2] && y >= f[1] && y < f[1] + f[3])
+				return f;
 		}
+		return null;
+	}
+	canvas.addEventListener('touchend', function(e){
+		var t = e.changedTouches[0];
+		var f = t && field_at(t);
+		if(!f)
+			return;
+		place(f[4] === 1, f[0], f[1], f[2], f[3], true);
+		held = 10;
+		tapped = f.slice(0, 4).join(',');
+		console.log('buildatText: a field focused in the tap: ' +
+				(document.activeElement === el ? el.id : 'not focused'));
 	}, true);
 	window.buildatText = {
 		take: function(){ return actions.length ? actions.shift() : null; },

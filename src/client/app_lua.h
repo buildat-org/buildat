@@ -1804,12 +1804,12 @@
 		else if(name == "web_idle_fps")
 			lua_pushinteger(L, o.graphics.web_idle_fps);
 #ifdef __EMSCRIPTEN__
-		// Unset is what the page makes of it: the bar hidden or shown
+		// Unset is what the page makes of it: hidden in landscape or shown
 		else if(name == "web_address_bar")
 			lua_pushstring(L, !o.graphics.web_address_bar.empty() ?
 					o.graphics.web_address_bar.c_str() :
 					EM_ASM_INT({ return Module['buildatHideBarByDefault'](); }) ?
-					"hide" : "show");
+					"landscape" : "show");
 		else if(name == "screen_orientation")
 			lua_pushstring(L, o.graphics.screen_orientation.c_str());
 		// Not a preference: why the page's last lock was refused, or nil
