@@ -120,8 +120,8 @@ shot() { printf 'frames 10\nscreenshot %s\n' "$t/$1.png"; }
 at() { printf 'event kit_point_obj %s %s %s %s\nframes 3\nmouse_click %s\n' "$@"; }
 held() { printf 'keydown %s\ndelay %s\nkeyup %s\nframes 3\n' "$1" "$2" "$1"; }
 # The round's entities, in the order bought (the session's ids follow the start's)
-BOSS_SHIP=40 BOSS_HELM=41 GUN=42 RADAR=43
-BOB_SHIP=44 BOB_HELM=45 BOB_CORE=46 BOB_CORE_HELM=47 ENGINE=48
+BOSS_SHIP=53 BOSS_HELM=54 GUN=55 RADAR=56
+BOB_SHIP=57 BOB_HELM=58 BOB_CORE=59 BOB_CORE_HELM=60 ENGINE=61
 
 # The admin's account and open registration, natively, on a fresh server
 server
@@ -189,7 +189,8 @@ EOF
 	printf 'event kit_use 27\nwait_log 10000 holding part kit/airship_radar\n'
 	at $BOSS_SHIP 0.5 2 -1 right
 	printf 'wait_log 10000 holding part \nevent kit_point_obj\n'
-	printf 'wait_log 120000 radar shown: Radar: kitbob\nlook_dir 0.5 0.1 1\n'
+	# (after the bots' airship, nearer)
+	printf "wait_log 120000 kitbob's ship: \\nlook_dir 0.5 0.1 1\\n"
 	shot radar
 	# Debris: the lower voxel dug from its side, the upper cut off from the
 	# core, the radar on it dropped
@@ -294,7 +295,7 @@ for w in ("sold kit/airship_skiff to kitboss as %s" % ship, "sold kit/airship_sk
 # (on the upper voxel's side)
 assert re.search(r"kitboss mounted kit/airship_radar on entity %s's cell \(\S+\) on \(1,2,-1\) as %s" % (ship, radar), srv)
 # The radar's contacts
-r = re.search(r"radar shown: (Radar: kitbob's ship[^\n]*)", log["boss"])
+r = re.search(r"radar shown: (Radar: [^\n]*kitbob's ship[^\n]*)", log["boss"])
 assert r, "the radar"
 print("kitboss's radar:", r[1])
 # Debris: the upper voxel cut off, the radar on it dropped

@@ -1,16 +1,20 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min (2026-11-10)
-# covers: builtin/kit/kit.cpp builtin/kit/types/bot.lua builtin/kit/types/bot.client.lua builtin/kit/types/spawner.lua builtin/kit/types/pause_menu_action.lua builtin/kit/client_lua/module.lua apps/workbench/templates/ctf/**
+# cost: ~4 min (2026-11-10)
+# covers: builtin/kit/kit.cpp builtin/kit/types/bot.lua builtin/kit/types/bot.client.lua builtin/kit/types/spawner.lua builtin/kit/types/pause_menu_action.lua builtin/kit/types/goal.lua builtin/kit/types/turret.lua builtin/kit/types/airship.lua builtin/kit/client_lua/module.lua apps/workbench/templates/ctf/** apps/workbench/templates/airships/**
 # [KIT_BOT_DIFFICULTY] "Add bot" asks for the bot's knobs, on two fresh
-# Workbench project:
+# Workbench projects:
 #   1. Capture the flag (a round for 2): "Add bot" in the pause menu opens
 #      the dialog, the pointer free; aim, reaction and speed stepped
 #      (50 %, 0.8 s, 70 %) and Add: the bot has them. A second one's dialog
 #      starts at them; Cancel takes that bot away. A third, Add: the two
 #      walk onto the pad, and in the round each one's copy has its knobs.
-# Screenshots, kept with KEEP_TMP=1: $t/dialog.png
+#   2. [KIT_AIRSHIPS_BOTS] Airships: two bots from the pause menu (the
+#      dialog's defaults): one takes the bots' airship's gun (the balloons'
+#      goal, priority 10), the other its helm (priority 5); the gunner fires
+#      and hits a balloon, the helmsman flies out to them.
+# Screenshots, kept with KEEP_TMP=1: $t/dialog.png, $t/airship.png
 #   util/kit_bot_knobs_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -141,6 +145,24 @@ srv 30 "Bot $B1 into session [0-9]+ as Bot"
 srv 30 "Bot $B3 into session [0-9]+ as Bot"
 srv 10 "knobs: aim 50%, reaction 0.8 s, speed 70%"
 close
+# 2. Airships: a crew of two bots on the bots' airship
+open air "Airships"
+play
+srv 20 "Entity 42's kit/turret steps in play"
+for i in 1 2; do
+	add_bot 50
+	srv_mark
+	cmd 'click Button "bot add"'
+	srv 10 "kit/bot $BOT: knobs: aim 75%, reaction 0.4 s, speed 90% by kitboss"
+done
+SM=0
+srv 30 "Bot [0-9]+ takes the seat of entity 42"
+srv 30 "Bot [0-9]+ takes the seat of entity 41"
+cmd "frames 30" "screenshot $t/airship.png"
+srv 60 "Bot [0-9]+ fires entity 42's kit/turret"
+srv 150 "Bot [0-9]+'s projectile [0-9]+ hits entity 4[3-7]"
+srv 150 "kit/goal 49: done"
+close
 python3 -I - "$t" <<'PY' || fail "the logs say otherwise ($t)"
 import re, sys
 t = sys.argv[1]
@@ -165,9 +187,20 @@ if sorted(into) != sorted([b1, b3]):
 for b, c in into.items():
 	if not re.search(rf"kit/bot {c}: knobs: {K}", srv):
 		sys.exit(f"Bot {b}'s copy {c} has not its knobs")
-print(f"ctf: bots {b1} {b3} into the round as {into[b1]} {into[b3]} with {K}, {b2} cancelled")
+# Airships: the gunner and the helmsman are two
+srv = open(f"{t}/air_srv.log", errors="replace").read()
+gun = re.search(r"(Bot \d+) takes the seat of entity 42", srv).group(1)
+helm = re.search(r"(Bot \d+) takes the seat of entity 41", srv).group(1)
+if gun == helm:
+	sys.exit(f"one bot at both stations: {gun}")
+shots = len(re.findall(rf"{gun} fires entity 42's kit/turret", srv))
+hits = re.findall(rf"{gun}'s projectile \d+ hits entity (4[3-7])", srv)
+if not hits:
+	sys.exit(f"the gunner {gun} hit no balloon in {shots} shots")
+print(f"ctf: bots {b1} {b3} into the round as {into[b1]} {into[b3]} with {K}, {b2} cancelled; "
+	f"airships: gunner {gun} {shots} shots, hits {hits}; helmsman {helm} flew out")
 PY
 verdict_keep
-[ "$verdict_rc" = 0 ] && echo "PASS: Add bot's dialog sets a bot's knobs, its round copy has them"
+[ "$verdict_rc" = 0 ] && echo "PASS: Add bot's dialog sets a bot's knobs, its round copy has them; an airship crewed by bots"
 verdict_exit
 # vim: set noet ts=4 sw=4:
