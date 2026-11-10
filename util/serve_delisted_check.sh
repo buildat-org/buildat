@@ -9,6 +9,8 @@
 #      server still up.
 #   2. Delisted for malware: stopped, the stand-in on its port saying it
 #      was withdrawn and why, and the server not started again.
+#   2b. [SERVE_LEFTOVERS] A new engine release meanwhile: compiled and
+#      switched to, and 1.0.0 still not started on it.
 #   3. 1.0.1 published: installed and served, the stand-in gone.
 #   4. The Aitta stopped: its list unreadable is said, and 1.0.1 runs on
 #      (fail open, the user's call 2026-10-14).
@@ -101,6 +103,20 @@ curl -s -m 5 "http://127.0.0.1:$SP/" | grep -q "withdrawn by the Aitta it came f
 [ "$(grep -ac "Listening at" "$slog")" = "$n" ] && ! pgrep -f "installed/tester/pt/1.0.0" > /dev/null ||
 	fail "started again ($slog)"
 echo "ok: delisted for malware, stopped, the stand-in says why"
+
+# 2b.
+r2="$t/rel/buildat-0.0.2-check-linux-x86_64-web-precompiled"
+cp -a "$r" "$r2"
+tar -C "$t/rel" -czf "$r2.tar.gz" "$(basename "$r2")"
+echo "[{\"browser_download_url\": \"http://127.0.0.1:$HP/$(basename "$r2").tar.gz\"}]" \
+	> "$t/rel/releases.json"
+wait_for_log "$t/serve.log" "tester/pt 1.0.0 on port $SP stays withdrawn" 300 ||
+	fail "not kept withdrawn over a new release ($t/serve.log)"
+[ "$(grep -ac "Listening at" "$slog")" = "$n" ] && ! pgrep -f "installed/tester/pt/1.0.0" > /dev/null ||
+	fail "started again on the new release ($slog)"
+curl -s -m 5 "http://127.0.0.1:$SP/" | grep -q "withdrawn by the Aitta it came from" ||
+	fail "the stand-in gone: $(curl -s -m 5 "http://127.0.0.1:$SP/")"
+echo "ok: a new release meanwhile keeps it withdrawn"
 
 # 3.
 publish 1.0.1

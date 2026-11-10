@@ -344,7 +344,7 @@ pending="" pending_at=0 warned_at=0
 # [SERVE_BUILDS] A new release being built, and by index the servers whose
 # app is compiled on it; an Aitta app's new version being built, by index;
 # the build host's asks running, by their result file
-building="" built=() app_building=()
+building="" built=() app_building=() building_kept=""
 declare -A build_jobs=()
 # [SERVE_APP_ON_NEW_RELEASE] By index: the release that has asked for the
 # newest of an Aitta app, and the version it installed, until the switch
@@ -770,8 +770,9 @@ reject_building(){
 		[ -n "${standin_build[$i]:-}" ] && standin_stop "$i"
 	done
 	app_fresh=() app_asked=()
-	# Never the version running
-	[ "$building" != "$current" ] && rm -rf "versions/$building"
+	# Never the version running, nor one that was here before (the one kept
+	# for a rollback, which the latest moved back to)
+	[ "$building" != "$current" ] && [ -z "$building_kept" ] && rm -rf "versions/$building"
 	building="" built=()
 }
 
@@ -788,6 +789,14 @@ build_release(){
 		# not know ([BUILDS_AITTA_ASK])
 		ver=""
 		case ${games[$i]} in */*) ver=$(app_path "$i" "$building"); ver=${ver##*/} ;; esac
+		# [SERVE_LEFTOVERS] Nothing installed and the Aitta not answering is
+		# not the release's fault: asked again at the next check
+		if [ -z "$ver" ] && [[ ${games[$i]} = */* ]]; then
+			say "${games[$i]} could not be installed for $building; trying again" \
+				"at the next check"
+			app_asked=() building="" built=()
+			return
+		fi
 		prepare "$i" "$building" "$ver"
 		r=$?
 		if [ "$r" = 2 ]; then
@@ -856,6 +865,13 @@ app_note(){ # i file text
 # waited for until it listens (or exits, or 10 minutes pass)
 restart(){
 	local i=$1 why=$2
+	# [SERVE_LEFTOVERS] Withdrawn stays withdrawn until a newer version is
+	# installed: the start would run the newest installed, the withdrawn one
+	if [ -n "${withdrawn[$i]:-}" ] &&
+			[ "$(basename "$(aitta_dir "$i")")" = "${withdrawn[$i]}" ]; then
+		say "${games[$i]} ${withdrawn[$i]} on port ${ports[$i]} stays withdrawn"
+		return
+	fi
 	if [ -n "${pids[$i]:-}" ] && kill -0 "${pids[$i]}" 2>/dev/null; then
 		app_note "$i" shutdown_reason "$why"
 	fi
@@ -1063,13 +1079,15 @@ while true; do
 		else
 			name=$(basename "$url" .tar.gz)
 			[ "$name" = "$install_failed" ] || install_failed="" install_wait=0 install_next=0
+			kept=""
+			[ -x "versions/$name/bin/buildat_server" ] && kept=1
 			if [ "$name" != "$current" ] && [ "$name" != "$bad_release" ] &&
 					[ "$name" != "$pending" ] && [ "$name" != "$building" ] &&
 					[ "$now" -ge "$install_next" ]; then
 				if [ -n "$(install "$url")" ]; then
 					install_failed="" install_wait=0 install_next=0
 					say "new version: $name"
-					building=$name built=()
+					building=$name built=() building_kept=$kept
 				else
 					# From this poll, so that a wait of one poll is the next one
 					install_failed=$name
