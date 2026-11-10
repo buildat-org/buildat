@@ -1039,7 +1039,13 @@ function sub_events()
 						end
 					end end end
 				end
-				log:warning(string.format("mesh queue: %d undrawn within 2 " ..
+				-- [KIT_TEMPLATE_ROUGH_EDGES_2] None of the undrawn has a node:
+				-- no data came for them, nothing the queue holds; a finite
+				-- world's cells past its map never come (Kit's after Play).
+				-- Said, not warned. simplified: the world's extent on the
+				-- client would leave those out of the count
+				local say = near_id == "none" and log.info or log.warning
+				say(log, string.format("mesh queue: %d undrawn within 2 " ..
 						"for %d s: %d queued, front f=%s fw=%s %s " ..
 						"node %s; %d pops in the window, %d distinct, last %s " ..
 						"node %s f=%s at %.0f; nearest undrawn node %s at %.0f%s; " ..

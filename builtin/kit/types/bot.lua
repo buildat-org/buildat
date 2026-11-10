@@ -32,6 +32,10 @@
 -- (bot.client.lua), the bot standing until they answer ("kit:ui_text"
 -- "<id> <aim> <reaction> <speed>", or "cancel": it is gone) or ASK_S pass.
 -- A round's copy of it carries them (kit.cpp's bots_into, its state).
+-- [KIT_AIRSHIPS_BOTS_LEFTOVERS] Hurt, or the ship it crews hit, by someone
+-- not aboard: for 30 s its goal is "fight back" (id -1, before any other), an
+-- attack on them through that ship's gun if nobody else holds it (kit.cpp's
+-- bot_foe_lit). A ship's gun's shots pass its own crew.
 -- simplified: one goal at a time; a bot's use passes no who-may-use
 -- rule (a region's or a part's own), the upgrade is may_use() for a bot
 local DEG = 180 / math.pi
