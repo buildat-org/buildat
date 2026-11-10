@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
-# cost: ~2 min (2026-10-11)
-# covers: src/client/web/index.html apps/vanilla/main/client_lua/pause.lua extensions/launch_menu/preferences.lua
+# cost: ~3 min (2026-11-10)
+# covers: src/client/web/index.html util/web_drive.js apps/vanilla/main/client_lua/pause.lua extensions/launch_menu/preferences.lua
 # [SCREEN_ORIENTATION]: the screen orientation preference, picked in
 # vanilla's pause menu on a touchscreen. Vanilla (the minimal game) in
 # Chrome as a phone (400x800, density 2, touch), the pause menu by
@@ -10,6 +10,10 @@
 #     it), its lock("landscape") logged and buildatOrientation landscape;
 #   - Portrait: lock("portrait");
 #   - Auto: unlock(), and the page out of fullscreen with the menu up.
+# With the address bar "hide" (the old default). Then the default,
+# "landscape" ([WEB_ADDRESS_BAR], user 2026-11-10): in portrait the page
+# stays windowed after a tap, turned landscape a tap takes it fullscreen,
+# turned back to portrait it leaves, and the pause menu takes it out.
 # simplified: headless Chrome refuses the lock itself; the turn is read on
 # a phone.
 #   util/screen_orientation_check.sh
@@ -48,7 +52,7 @@ login=$(web_login_steps soplayer "$t/srv.log") || fail "$login"
 state='["eval", "Module.buildatOrientation + (document.fullscreenElement ? \" fullscreen\" : \" windowed\")"]'
 cat > "$t/steps.json" <<J
 [
- ["nav", "\${URL}"],
+ ["nav", "\${URL}?pref=web_address_bar=hide"],
 $login
  ["waitlog", "chat: so: ready", 120], ["wait", 1000],
  ["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["wait", 500],
@@ -76,4 +80,25 @@ calls=$(sed -n '/pause: the menu shown/,$p' "$t/drive/page.log" |
 	sed 's/orientation: //' | uniq | tr '\n' ',')
 [ "$calls" = "lock landscape,lock portrait,unlock," ] ||
 	fail "the page's calls \"$calls\" ($t/drive/page.log)"
-echo "PASS: the pause menu's pick sets the preference, the page locks it while fullscreen and keeps fullscreen with the menu up; Auto unlocks and leaves"
+# The default, "hidden in landscape"
+login=$(web_login_steps soturn) || fail "$login"
+full='["eval", "screen.orientation.type.slice(0, 4) + (document.fullscreenElement ? \" fullscreen\" : \" windowed\")"]'
+cat > "$t/turn.json" <<J
+[
+ ["nav", "\${URL}"],
+$login
+ ["waitlog", "chat: so: ready", 120], ["wait", 1000],
+ ["tap", 200, 300], ["wait", 1000], $full,
+ ["turn", "landscape"], ["wait", 1000], ["tap", 400, 150], ["wait", 1000], $full,
+ ["turn", "portrait"], ["wait", 1000], $full,
+ ["turn", "landscape"], ["wait", 1000], ["tap", 400, 150], ["wait", 1000], $full,
+ ["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["wait", 1000], $full
+]
+J
+TOUCH=1 WEB_DRIVE_VIEWPORT=400x800@2 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
+	"$here/util/web_drive.sh" chrome vanilla "$t/turn.json" "$t/turn" \
+	> "$t/turn.txt" 2>&1 || fail "the turn's drive: $(tail -2 "$t/turn.txt")"
+got=$(grep -ao '^eval: "[a-z]* [a-z]*"' "$t/turn.txt" | sed 's/eval: "//; s/"//' | tr '\n' ',')
+[ "$got" = "port windowed,land fullscreen,port windowed,land fullscreen,land windowed," ] ||
+	fail "hidden in landscape: the states \"$got\" ($t/turn.txt)"
+echo "PASS: the pause menu's pick sets the preference, the page locks it while fullscreen and keeps fullscreen with the menu up; Auto unlocks and leaves; hidden in landscape: windowed in portrait, fullscreen turned landscape but under the menu, out turned back"

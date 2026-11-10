@@ -167,8 +167,11 @@ local PREFERENCES = {
 		name = "web_address_bar",
 		label = "Address bar while playing",
 		web = true,
-		values = {"hide", "show"},
-		show = function(v) return v == "hide" and "hidden" or "shown" end,
+		values = {"landscape", "hide", "show"},
+		show = function(v)
+			return ({landscape = "hidden in landscape", hide = "hidden",
+					show = "shown"})[v]
+		end,
 	},
 	-- The screen's orientation while the page is fullscreen
 	-- ([SCREEN_ORIENTATION]); the web client's only. note() is said under
@@ -186,7 +189,9 @@ local PREFERENCES = {
 			if api.get_preference("screen_orientation_error") then
 				return "Not supported by this browser"
 			elseif api.get_preference("screen_orientation") ~= "auto" and
-					api.get_preference("web_address_bar") == "show" then
+					(api.get_preference("web_address_bar") == "show" or
+					api.get_preference("web_address_bar") == "landscape" and
+					api.get_preference("screen_orientation") == "portrait") then
 				return "Held only with the address bar hidden"
 			end
 		end,

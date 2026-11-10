@@ -9,7 +9,10 @@
 #      server still up.
 #   2. Delisted for malware: stopped, the stand-in on its port saying it
 #      was withdrawn and why, and the server not started again.
-#   3. 1.0.1 published: installed and served, the stand-in gone.
+#   2b. [SERVE_LEFTOVERS] A new engine release meanwhile: compiled and
+#      switched to, and 1.0.0 still not started on it.
+#   3. 1.0.1 published: installed and served, the stand-in gone, within
+#      0.3 s of its "Listening at" ([SERVE_STANDIN_RACE]).
 #   4. The Aitta stopped: its list unreadable is said, and 1.0.1 runs on
 #      (fail open, the user's call 2026-10-14).
 #
@@ -103,6 +106,20 @@ curl -s -m 5 "http://127.0.0.1:$SP/" | grep -q "withdrawn by the Aitta it came f
 	fail "started again ($slog)"
 echo "ok: delisted for malware, stopped, the stand-in says why"
 
+# 2b.
+r2="$t/rel/buildat-0.0.2-check-linux-x86_64-web-precompiled"
+cp -a "$r" "$r2"
+tar -C "$t/rel" -czf "$r2.tar.gz" "$(basename "$r2")"
+echo "[{\"browser_download_url\": \"http://127.0.0.1:$HP/$(basename "$r2").tar.gz\"}]" \
+	> "$t/rel/releases.json"
+wait_for_log "$t/serve.log" "tester/pt 1.0.0 on port $SP stays withdrawn" 300 ||
+	fail "not kept withdrawn over a new release ($t/serve.log)"
+[ "$(grep -ac "Listening at" "$slog")" = "$n" ] && ! pgrep -f "installed/$fp/pt/1.0.0" > /dev/null ||
+	fail "started again on the new release ($slog)"
+curl -s -m 5 "http://127.0.0.1:$SP/" | grep -q "withdrawn by the Aitta it came from" ||
+	fail "the stand-in gone: $(curl -s -m 5 "http://127.0.0.1:$SP/")"
+echo "ok: a new release meanwhile keeps it withdrawn"
+
 # 3.
 publish 1.0.1
 for _i in $(seq 600); do
@@ -110,6 +127,15 @@ for _i in $(seq 600); do
 	sleep 0.2
 done
 [ "$(grep -ac "Listening at" "$slog")" -gt "$n" ] || fail "1.0.1 did not start ($t/serve.log)"
+# [SERVE_STANDIN_RACE] The stand-in gone soon after "Listening at": a
+# connection then is the server's, not the stand-in's 503. simplified: the
+# stand-in polled once a second fails this most runs, not every one
+sleep 0.3
+for _i in $(seq 10); do
+	[ "$(curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SP/")" = 503 ] &&
+		fail "the stand-in still answers after the server's Listening at"
+	sleep 0.05
+done
 pgrep -f "installed/$fp/pt/1.0.1" > /dev/null || fail "not on 1.0.1"
 for _i in $(seq 50); do
 	curl -s -m 2 "http://127.0.0.1:$SP/health" | grep -q . && break

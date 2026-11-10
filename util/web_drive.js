@@ -91,6 +91,9 @@
 //                           while a stack is carried (Chrome only)
 //   ["viewport", w, h]      the page that size from here on, as a phone's
 //                           on-screen keyboard makes it (Chrome only)
+//   ["turn", o]             the phone turned: o "landscape" or "portrait",
+//                           its screen and page sides swapped to match
+//                           (Chrome only)
 //   ["cpu", rate]           the page's CPU that many times slower, as a
 //                           phone's (Chrome only)
 //   ["watch", regex, s, ms] until a console line from here on matches, the
@@ -355,10 +358,19 @@ async function chrome() {
 	if (!vp)
 		throw new Error("WEB_DRIVE_VIEWPORT is WxH or WxH@dpr");
 	const touch = process.env.TOUCH === "1";
-	const metrics = (w, h) => c.send("Emulation.setDeviceMetricsOverride", {
+	// The screen's sides and orientation, kept over a "viewport"
+	let sw = +vp[1], sh = +vp[2], so = null;
+	const metrics = (w, h, o) => {
+		so = o || so;
+		return c.send("Emulation.setDeviceMetricsOverride", {
 			width: w, height: h, deviceScaleFactor: +(vp[3] || 1),
-			mobile: touch, screenWidth: +vp[1], screenHeight: +vp[2]});
-	await metrics(+vp[1], +vp[2]);
+			mobile: touch, screenWidth: sw, screenHeight: sh,
+			screenOrientation: so});
+	};
+	// The screen's orientation by its sides: Chrome's own default reads
+	// landscape for a tall phone
+	await metrics(sw, sh, {type: sw > sh ? "landscapePrimary" :
+			"portraitPrimary", angle: 0});
 	// The picker answered here with the "file" step's path, or with nothing
 	let file = null;
 	await c.send("Page.setInterceptFileChooserDialog", {enabled: true});
@@ -524,6 +536,13 @@ async function chrome() {
 					touchPoints: []});
 		},
 		viewport: (w, h) => metrics(w, h),
+		turn: o => {
+			const land = o === "landscape";
+			const a = Math.min(sw, sh), b = Math.max(sw, sh);
+			[sw, sh] = land ? [b, a] : [a, b];
+			return metrics(sw, sh, {type: land ? "landscapePrimary" :
+					"portraitPrimary", angle: land ? 90 : 0});
+		},
 		cpu: rate => c.send("Emulation.setCPUThrottlingRate", {rate}),
 		// The screen and #status, or the loading stripe's line while it is
 		// up ([JOIN_STRIPES]), for watch

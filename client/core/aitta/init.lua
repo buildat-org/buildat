@@ -657,7 +657,13 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		end
 		return best
 	end
+	-- [AITTA_WEB_BUILD_LEFTOVERS] One install at a time from a page: a
+	-- double-click's second is dropped
+	local installing = false
 	local function install(p, play)
+		if installing then
+			return log:info("aitta: " .. p.key .. ": an install runs already")
+		end
 		local rel, k = p.rel, p.key
 		local base, why_not = base_release(rel)
 		if base == false then
@@ -666,8 +672,13 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 			local bk = base.author .. "/" .. base.name .. " " ..
 					tostring(base.version)
 			say("Fetching its base " .. bk .. "...")
+			installing = true
 			return fetch_install(rel.aitta, base.sha256,
 					{description = "Aitta (install)", rel = base}, function(dir, why)
+				installing = false
+				if not is_open(root) then
+					return log:info("aitta: the base " .. bk .. " done, its page gone")
+				end
 				if not dir then
 					return say("Not installed: its base " .. bk .. ": " ..
 							tostring(why), WARN)
@@ -686,8 +697,16 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 			world = {app = app, code = wp.code}
 		end
 		say("Fetching " .. p.label .. "...")
+		installing = true
 		fetch_install(rel.aitta, rel.sha256, {description = "Aitta (install)",
 				world = world, rel = rel}, function(dir, why, stage)
+			installing = false
+			-- [AITTA_WEB_BUILD_LEFTOVERS] Done after its page went (Escape
+			-- while it fetched)
+			if not is_open(root) then
+				return log:info("aitta: " .. k .. " done, its page gone: " ..
+						tostring(dir or why))
+			end
 			if stage == "fetch" then
 				return say("Could not fetch: " .. why, WARN)
 			end

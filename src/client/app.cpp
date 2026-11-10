@@ -425,8 +425,8 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			continue;
 		}
 		if(key == "web_address_bar"){
-			if(value != "hide" && value != "show"){
-				*error = "web_address_bar: hide or show";
+			if(value != "hide" && value != "show" && value != "landscape"){
+				*error = "web_address_bar: hide, show or landscape";
 				return false;
 			}
 			opt->graphics.web_address_bar = value;
@@ -631,7 +631,9 @@ static void check_parse_preference_options()
 		throw Exception("parse_preference_options: web_idle_fps's choices");
 	if(app::parse_preference_options("web_address_bar=auto", &o, &err) ||
 			!app::parse_preference_options("web_address_bar=show", &o, &err) ||
-			o.graphics.web_address_bar != "show")
+			o.graphics.web_address_bar != "show" ||
+			!app::parse_preference_options("web_address_bar=landscape", &o, &err) ||
+			o.graphics.web_address_bar != "landscape")
 		throw Exception("parse_preference_options: web_address_bar's choices");
 	if(app::parse_preference_options("ui_size=4", &o, &err) ||
 			!app::parse_preference_options("ui_size=1.25", &o, &err) ||

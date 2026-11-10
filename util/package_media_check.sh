@@ -71,8 +71,11 @@ out=$(pack m1 wide.png shot.jpg shot.jpg) && fail "a 64x32 icon packed"
 echo "$out" | grep -q "icon.png: 64x32, not square" || fail "64x32: $out"
 out=$(pack m1 icon.png shot.gif shot.gif) && fail "a GIF packed"
 echo "$out" | grep -q "shot.gif: not a PNG or a JPEG" || fail "GIF: $out"
-z1=$(pack m1 icon.png shot.jpg shot.jpg 2>/dev/null) || fail "pack m1: $z1"
-z2=$(pack m2 icon.png shot.png shot.jpg 2>/dev/null) || fail "pack m2: $z2"
+# pack's 2>&1 brings the log lines along: the zip's path is the last line
+z1=$(pack m1 icon.png shot.jpg shot.jpg) || fail "pack m1: $z1"
+z1=${z1##*$'\n'}
+z2=$(pack m2 icon.png shot.png shot.jpg) || fail "pack m2: $z2"
+z2=${z2##*$'\n'}
 echo "ok: pack refuses a 300 px icon, a 64x32 one and a GIF"
 
 # 2.
