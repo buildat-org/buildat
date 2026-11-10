@@ -9,8 +9,7 @@
 # 8 kit/controls with a free pointer (cursor), and
 # comes back beside kitbob: he joins Red and scores twice. Both see
 # "kitboss 2" in Red's colour over "kitbob 0" in none (boss.png).
-# simplified: no bot yet ([KIT_BOTS] is not in this tree); a bot is a
-# player entity and would be listed as one
+# Bots, listed with " (bot)": kit_bot_knobs_check
 #   util/kit_player_list_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"

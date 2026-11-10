@@ -1,8 +1,8 @@
 -- The players on everyone's screen ([KIT_PLAYER_LIST]): under `title`, a
 -- row a player here, the name in their team's colour (`color` in no team)
 -- and their score (kit/score, what a kit/scoreboard adds to) at the
--- right, the highest first. Where and its looks as kit/ui_text's;
--- "show", "hide" and "toggle" for everyone.
+-- right, the highest first; a bot's name with " (bot)". Where and its
+-- looks as kit/ui_text's; "show", "hide" and "toggle" for everyone.
 -- simplified: read again each second, so a join or a score shows up to a
 -- second late; a player's join or a score's change as an event is the
 -- upgrade
@@ -17,7 +17,8 @@ local function rows(c)
 	for _, p in ipairs(c.players or {}) do
 		if p.here then
 			local s = p.state["kit/score"] and p.state["kit/score"].score or 0
-			l[#l + 1] = {p.name, col[p.id] or "", s}
+			-- ([KIT_AIRSHIPS_BOTS_2] a bot marked: a pick)
+			l[#l + 1] = {p.name .. (p.bot and " (bot)" or ""), col[p.id] or "", s}
 		end
 	end
 	table.sort(l, function(a, b)

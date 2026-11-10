@@ -182,33 +182,33 @@ EOF
 	printf 'event kit_use 24\nwait_log 10000 wallet note: Core: free outside a round\n'
 	# Two ships changed at once from the island (the budget): the core's side
 	# (its seat sits on its top) and the skiff's open stern
-	at 55 0 0 -0.5 right
+	at 57 0 0 -0.5 right
 	# (sent with the click, not aimed: a page's clicks come 0.5 s apart)
-	printf 'event kit_obuild {"id": 53, "cell": [1, 1, -4], "voxel": "kit/stone", "param": 0, "tint": 0}\n'
-	printf 'wait_log_any 10000 object boxes kitown_55.1\nwait_log_any 10000 object boxes kitown_53.1\nevent kit_point_obj\n'
+	printf 'event kit_obuild {"id": 55, "cell": [1, 1, -4], "voxel": "kit/stone", "param": 0, "tint": 0}\n'
+	printf 'wait_log_any 10000 object boxes kitown_57.1\nwait_log_any 10000 object boxes kitown_55.1\nevent kit_point_obj\n'
 	shot two
-	# The skiff's seat (54), then off it onto the deck
-	printf 'event kit_use 54\nwait_log 10000 seat 54\nframes 10\n'
+	# The skiff's seat (56), then off it onto the deck
+	printf 'event kit_use 56\nwait_log 10000 seat 56\nframes 10\n'
 	printf 'keypress F\nwait_log 10000 movement kit/walker\nframes 20\n'
 	shot deck
 	# A voxel placed beside him, one in front of him: he jumps onto that one
-	at 53 1 0.5 1 right
-	printf 'wait_log 10000 object boxes kitown_53.\n'
-	at 53 1 0.5 -2 right
-	printf 'wait_log 10000 object boxes kitown_53.\nevent kit_point_obj\nlook_dir 0 0 1\nframes 10\n'
+	at 55 1 0.5 1 right
+	printf 'wait_log 10000 object boxes kitown_55.\n'
+	at 55 1 0.5 -2 right
+	printf 'wait_log 10000 object boxes kitown_55.\nevent kit_point_obj\nlook_dir 0 0 1\nframes 10\n'
 	body
 	printf 'keydown Space\nkeydown W\ndelay 250\nkeyup W\nkeyup Space\nframes 60\n'
 	body
 	shot jumped
 	# The first dug again; the core refused
-	at 53 1 1.5 1 left
-	printf 'wait_log 10000 object boxes kitown_53.\n'
-	at 53 0 0.5 0 left
+	at 55 1 1.5 1 left
+	printf 'wait_log 10000 object boxes kitown_55.\n'
+	at 55 0 0.5 0 left
 	printf 'wait_log 10000 kit: warning: The core stays\n'
 	# Flown to Blue's island, a voxel placed on the way (free)
-	printf 'event kit_point_obj\nevent kit_use 54\nwait_log 10000 seat 54\nevent kit_steer -47 17\nframes 150\n'
-	at 53 -1 0.5 -1 right
-	printf 'wait_log 10000 object boxes kitown_53.\n'
+	printf 'event kit_point_obj\nevent kit_use 56\nwait_log 10000 seat 56\nevent kit_steer -47 17\nframes 150\n'
+	at 55 -1 0.5 -1 right
+	printf 'wait_log 10000 object boxes kitown_55.\n'
 	shot flying
 	printf 'event kit_point_obj\n'
 	printf 'wait_log 120000 kit: steered to\nevent kit_steer off\nframes 30\n'
@@ -222,12 +222,12 @@ EOF
 	body
 	shot lobby
 	# kitbob and kitcat come and go; then Stop, everything back
-	printf 'wait_log 300000 object boxes kitown_59.2\nframes 30\n'
+	printf 'wait_log 300000 object boxes kitown_61.2\nframes 30\n'
 	shot all
 	printf 'event kit_edit {"op": "mode", "on": true}\nwait_log 5000 kit editor: edit mode on\n'
 	printf 'event kit_edit {"op": "stop"}\nwait_log 10000 kit editor: the server is Ended (by kitboss)\nsync 3000\n'
-	printf 'event kit_obj_cell 53 1 1 -2\nframes 2\n'
-	printf 'event kit_obj_cell 59 0 0 -1\nframes 2\n'
+	printf 'event kit_obj_cell 55 1 1 -2\nframes 2\n'
+	printf 'event kit_obj_cell 61 0 0 -1\nframes 2\n'
 	shot stopped
 	# [KIT_AIRSHIPS_2] A seed in mid air over the heightmap, in Red's half:
 	# its image in Blue's
@@ -236,7 +236,7 @@ EOF
 	printf 'event kit_cam3d 0 30 20 20 20 60\nframes 30\n'
 	shot seed
 	printf 'event kit_edit {"op": "play"}\nwait_log 10000 kit editor: the server is Running (by kitboss)\n'
-	printf 'frames 60\nevent kit_obj_cell 53 1 1 -2\nframes 2\n'
+	printf 'frames 60\nevent kit_obj_cell 55 1 1 -2\nframes 2\n'
 	printf 'sync 3000\nquit\n'
 } > "$t/boss.cmds"
 cells() # <id> <x y z>...: each logged as this client has it
@@ -263,26 +263,26 @@ event kit_body
 frames 2
 event kit_use 32
 wait_log 10000 wallet note: Skiff: free outside a round
-event kit_use 58
-wait_log 10000 seat 58
+event kit_use 60
+wait_log 10000 seat 60
 frames 10
 keypress F
 wait_log 10000 movement kit/walker
 frames 20
 EOF
-	at 57 1 0.5 1 right
-	printf 'wait_log 10000 object boxes kitown_57.1\nevent kit_point_obj\n'
+	at 59 1 0.5 1 right
+	printf 'wait_log 10000 object boxes kitown_59.1\nevent kit_point_obj\n'
 	# to his deck's side by kitboss's ship, its core (refused before the core's rule)
 	printf 'look_dir -1 0 0\nframes 3\n'
 	held W 600
-	printf 'event kit_obuild {"id": 53, "cell": [0, 0, 0], "voxel": "air", "param": 0, "tint": 0}\n'
+	printf 'event kit_obuild {"id": 55, "cell": [0, 0, 0], "voxel": "air", "param": 0, "tint": 0}\n'
 	printf 'wait_log 10000 kit: warning: Not yours\n'
-	cells 53 $SHIP40
-	cells 55 0 0 -1
+	cells 55 $SHIP40
+	cells 57 0 0 -1
 	printf 'look_dir -1 -0.2 0.3\n'
 	shot bob
-	printf 'wait_log 300000 object boxes kitown_59.1\n'
-	cells 59 0 0 -1
+	printf 'wait_log 300000 object boxes kitown_61.1\n'
+	cells 61 0 0 -1
 	printf 'sync 3000\nquit\n'
 } > "$t/bob.cmds"
 # kitcat, late: Blue; every change as he gets it at his join; a core of his own
@@ -294,14 +294,14 @@ wait_log_any 20000 your money 40
 event kit_use 10
 wait_log 10000 the server put the player at
 EOF
-	cells 53 $SHIP40
-	cells 55 0 0 -1
-	cells 57 1 1 1
+	cells 55 $SHIP40
+	cells 57 0 0 -1
+	cells 59 1 1 1
 	printf 'look_dir -0.8 -0.2 0.6\n'
 	shot cat
 	printf 'event kit_use 34\nwait_log 10000 wallet note: Core: free outside a round\n'
-	at 59 0 0 -0.5 right
-	printf 'wait_log 10000 object boxes kitown_59.1\nevent kit_point_obj\nlook_dir 0.3 -0.4 1\n'
+	at 61 0 0 -0.5 right
+	printf 'wait_log 10000 object boxes kitown_61.1\nevent kit_point_obj\nlook_dir 0.3 -0.4 1\n'
 	shot cat_core
 	# [KIT_AIRSHIP_CORE_DEATH] Over the island's edge onto his core (its helm),
 	# back, and onto kitbob's skiff's deck: on them, never dead
@@ -311,8 +311,8 @@ EOF
 	printf 'look_dir -1 0 0\nframes 3\n'; held W 650
 	printf 'look_dir 0 0 1\nframes 3\n'; held W 1000; printf 'frames 30\n'; body
 	# (kitboss's Stop waits for this one)
-	printf 'event kit_obuild {"id": 59, "cell": [0, 1, -1], "voxel": "kit/stone", "param": 0, "tint": 0}\n'
-	printf 'wait_log 10000 object boxes kitown_59.2\n'
+	printf 'event kit_obuild {"id": 61, "cell": [0, 1, -1], "voxel": "kit/stone", "param": 0, "tint": 0}\n'
+	printf 'wait_log 10000 object boxes kitown_61.2\n'
 	printf 'sync 3000\nquit\n'
 } > "$t/cat.cmds"
 if [ -n "$WEB" ]; then
@@ -333,7 +333,7 @@ until_seen "$t/${WEB:+drive_}boss${WEB:+/page}.log" "kit: steered to -47.0" $bos
 	"kitboss's ship did not arrive"
 BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE=1 native bob &
 bob=$!
-until_seen "$t/bob.log" "kit: object 55 cell" $bob "kitbob did not get to his checks"
+until_seen "$t/bob.log" "kit: object 57 cell" $bob "kitbob did not get to his checks"
 BUILDAT_JOIN_NAME=kitcat BUILDAT_JOIN_CREATE=1 native cat
 wait $bob || fail "kitbob's client ($t/bob.log)"
 wait $boss || fail "kitboss's client ($t/boss.log)"
@@ -348,18 +348,18 @@ def secs(line):
 	h, m, s = re.search(r" (\d\d):(\d\d):(\d\d\.\d+) ", line).groups()
 	return int(h) * 3600 + int(m) * 60 + float(s)
 # Bought (free out of a round), owned
-for w in ("sold kit/airship_skiff to kitboss as 53 for 0",
-		"sold kit/airship_core to kitboss as 55 for 0", "sold kit/airship_skiff to kitbob as 57 for 0",
-		"sold kit/airship_core to kitcat as 59 for 0", "kit/hull 53: owned by kitboss",
-		"kitboss takes the seat of entity 54", "kitbob takes the seat of entity 58",
+for w in ("sold kit/airship_skiff to kitboss as 55 for 0",
+		"sold kit/airship_core to kitboss as 57 for 0", "sold kit/airship_skiff to kitbob as 59 for 0",
+		"sold kit/airship_core to kitcat as 61 for 0", "kit/hull 55: owned by kitboss",
+		"kitboss takes the seat of entity 56", "kitbob takes the seat of entity 60",
 		"[KIT_AIRSHIPS] a build on an object by kitbob refused: Not yours",
 		"[KIT_AIRSHIPS] a build on an object by kitboss refused: The core stays",
-		"[KIT_AIRSHIPS] kitboss dug kit/stone from entity 53's cell (1,1,1)"):
+		"[KIT_AIRSHIPS] kitboss dug kit/stone from entity 55's cell (1,1,1)"):
 	assert w in srv, w
 # Built on while it moved: the object's place at that build between where it was
 # bought and where it parked
 places = {}
-for m in re.finditer(r"\[KIT_AIRSHIPS\] kitboss placed \S+ on entity 53's cell \(([-\d,]+)\); "
+for m in re.finditer(r"\[KIT_AIRSHIPS\] kitboss placed \S+ on entity 55's cell \(([-\d,]+)\); "
 		r"the object at ([-\d.]+),([-\d.]+),([-\d.]+)", srv):
 	places[m[1]] = [float(m[k]) for k in (2, 3, 4)]
 assert set(places) == {"1,1,1", "1,1,-2", "1,1,-4", "-1,1,-1"}, places
@@ -377,7 +377,7 @@ assert len(feet) == len(marks), (len(feet), marks)
 f = {k: ([float(x) for x in v[:3]], v[3]) for k, v in zip(marks, feet)}
 print("kitboss's feet: on the deck %.3f, after the jump %.3f (frames %s, %s)" % (
 	f["before"][0][1], f["jumped"][0][1], f["before"][1], f["jumped"][1]))
-assert f["before"][1] == "53" and f["jumped"][1] == "53", f
+assert f["before"][1] == "55" and f["jumped"][1] == "55", f
 assert abs(f["jumped"][0][1] - f["before"][0][1] - 1) < 0.15, f
 # [KIT_AIRSHIPS_2] Red's island (a kit/terrain_region) walked on, kitbob on
 # Blue's (its kit/symmetry copy); "To the lobby" from Blue's island
@@ -402,7 +402,7 @@ feet = re.findall(r"kit: feet at ([-\d.]+),([-\d.]+),([-\d.]+), frame (\S+)", lo
 print("kitcat's feet: on the core %s, on the skiff %s" % (feet[0] if feet else None, feet[1:]))
 assert len(feet) == 2, feet
 assert abs(float(feet[0][2]) - 15) < 1 and 0.45 < float(feet[0][1]) < 1.05, feet
-assert feet[1][3] == "57" and abs(float(feet[1][1]) - 0.5) < 0.05 and float(feet[1][2]) > 14, feet
+assert feet[1][3] == "59" and abs(float(feet[1][1]) - 0.5) < 0.05 and float(feet[1][2]) > 14, feet
 corr = [float(x) for x in re.findall(r"kit: the body corrected by ([\d.]+) m", log["cat"])]
 assert max(corr, default=0) < 1, corr
 assert "kitcat died" not in srv, "kitcat died"
@@ -418,16 +418,16 @@ gaps = [b[0] - a[0] for a, b in zip(rb, rb[1:])]
 print("rebuilds: %d of %s; gaps %.3f s at least; model %.1f ms, boxes %.1f ms at most; "
 	"waited %d ms at most" % (len(rb), sorted(set(r[1] for r in rb)), min(gaps),
 	max(r[3] for r in rb), max(r[4] for r in rb), max(r[5] for r in rb)))
-assert {53, 55, 57, 59} <= set(r[1] for r in rb), rb
+assert {55, 57, 59, 61} <= set(r[1] for r in rb), rb
 assert min(gaps) > 0.49, gaps
 # The two changed at once: the second waited its turn
-i55 = [i for i, r in enumerate(rb) if r[1] == 55][0]
-pair = [r for r in rb[max(i55 - 1, 0):i55 + 2] if r[1] in (53, 55)]
+i55 = [i for i, r in enumerate(rb) if r[1] == 57][0]
+pair = [r for r in rb[max(i55 - 1, 0):i55 + 2] if r[1] in (55, 57)]
 assert max(r[5] for r in pair) >= 350, pair
 # The cells as kitbob (on at the start) and kitcat (a late joiner) have them
-want = {"53 cell 1,1,1": "empty", "53 cell 1,1,-2": "solid", "53 cell 1,1,-4": "solid",
-	"53 cell -1,1,-1": "solid", "53 cell 0,0,0": "solid", "55 cell 0,0,-1": "solid"}
-for n, extra in (("bob", {"59 cell 0,0,-1": "solid"}), ("cat", {"57 cell 1,1,1": "solid"})):
+want = {"55 cell 1,1,1": "empty", "55 cell 1,1,-2": "solid", "55 cell 1,1,-4": "solid",
+	"55 cell -1,1,-1": "solid", "55 cell 0,0,0": "solid", "57 cell 0,0,-1": "solid"}
+for n, extra in (("bob", {"61 cell 0,0,-1": "solid"}), ("cat", {"59 cell 1,1,1": "solid"})):
 	got = dict(re.findall(r"kit: object (\d+ cell \S+) (\w+)", log[n]))
 	w = dict(want, **extra)
 	assert all(got.get(k) == v for k, v in w.items()), (n, got)
@@ -435,7 +435,7 @@ for n, extra in (("bob", {"59 cell 0,0,-1": "solid"}), ("cat", {"57 cell 1,1,1":
 # logged lines, not the drive's wait_log echo)
 stopped = log["boss"].split(" : kit editor: the server is Ended (by kitboss)")[1]
 got = re.findall(r"kit: object (\d+) cell \S+ (\w+)", stopped)
-assert got == [("53", "unknown"), ("59", "unknown"), ("53", "unknown")], got
+assert got == [("55", "unknown"), ("61", "unknown"), ("55", "unknown")], got
 assert "your money 40" in stopped.split(" : kit editor: the server is Running (by kitboss)")[1]
 PY
 echo "PASS: the airships${WEB:+ (web)}"
