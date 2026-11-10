@@ -554,4 +554,18 @@ bars=$(grep -aoP 'kit: ui touch bars at y \K\d+' "$pl" | tail -1)
 [ -n "$foot" ] && [ -n "$bars" ] && [ "$foot" -le "$bars" ] ||
 	fail "the bottom button (foot $foot) not over the touch bars ($bars; $pl)"
 [ -s "$t/drive/touch.png" ] || fail "no screenshot $t/drive/touch.png"
+# [KIT_PANEL_LEFTOVERS] The dialog's text (8) clear of its Close (9): the panel
+# taller than its default 15 vmin for the touch-sized button
+python3 -I - "$pl" <<'PY' || fail "the dialog's Close over its text ($pl, $t/drive/touch.png)"
+import re, sys
+at = {}
+for l in open(sys.argv[1], errors="replace"):
+    m = re.search(r"kit: ui ([789]) \w+ at (-?\d+),(-?\d+) (\d+)x(\d+) .* shown", l)
+    if m:
+        at[m[1]] = list(map(int, m.groups()[1:]))
+assert set(at) == {"7", "8", "9"}, at
+(x0, y0, w0, h0), (x1, y1, w1, h1) = at["8"], at["9"]
+print("  the dialog %s, its text %s, its Close %s" % (at["7"], at["8"], at["9"]))
+assert x0 + w0 <= x1 or x1 + w1 <= x0 or y0 + h0 <= y1 or y1 + h1 <= y0, at
+PY
 echo "PASS: Kit's UI components: the overlay, a text and a bar following a signal, a button's press linked and flooded, a per-player dialog, on the screen natively and on the web by finger; screenshots $t/overlay.png $t/play.png $t/bob.png $t/drive/touch.png"

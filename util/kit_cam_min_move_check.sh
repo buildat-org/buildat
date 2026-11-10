@@ -13,6 +13,8 @@
 # [KIT_WEB_WHEEL_TENTHS] With "web", in headless Chrome: one notch of the wheel,
 # 100 CSS pixels, which the web's SDL counts as 10, is one notch in the 2D plan
 # (span 50 to 40) and in the 3D view (1 to 2 cells along the look, not 10).
+# [KIT_WHEEL_TRACKPAD] Walking with the voxels tool, ten wheel events of 10 CSS
+# pixels, a trackpad's notch: one step of the voxel in hand.
 #   util/kit_cam_min_move_check.sh
 #   util/kit_cam_min_move_check.sh web
 set -u
@@ -24,16 +26,16 @@ if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 fi
 if [ "${1:-}" = web ]; then
 	check_tmp kit_cam_wheel_web; t=$CHECK_TMP
-	cat > "$t/steps.json" <<'J'
+	cat > "$t/steps.json" <<J
 [
-	["nav", "${URL}"],
+	["nav", "\${URL}"],
 	["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
 	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
 	["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
 	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
 	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
 	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
-	["type", "${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "\${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
 	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
 	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
 	["click", "Button", "Don't add"], ["frames", 3],
@@ -50,7 +52,12 @@ if [ "${1:-}" = web ]; then
 	["mouse", 500, 400], ["frames", 2],
 	["event", "kit_cam_where 3d before"], ["sync", 5000],
 	["wheel", 500, 400, -100], ["frames", 3],
-	["event", "kit_cam_where 3d after"], ["sync", 5000]
+	["event", "kit_cam_where 3d after"], ["sync", 5000],
+	["key", "F3"], ["waitlog", "kit editor: the view is Walk", 10], ["frames", 3],
+	["key", "v"], ["waitlog", "kit editor: in hand", 10], ["frames", 3],
+	["mouse", 500, 400], ["frames", 2],
+	$(for _ in $(seq 10); do printf '["wheel", 500, 400, 10], ["frames", 1], '; done)
+	["sync", 5000], ["frames", 3]
 ]
 J
 	WEB_DRIVE_VIEWPORT=1024x700@1 "$here/util/web_drive.sh" chrome workbench \
@@ -69,7 +76,12 @@ J
 	# 0.8 ^ 1 of 10 ahead (nothing hit) or a cell's least; ten notches went 8.9 or 10
 	awk -v a="$z0" -v b="$z1" 'BEGIN { d = b - a; exit !(d >= 0.9 && d <= 2.1) }' ||
 		fail "one notch in 3D: z $z0 -> $z1, not 1 to 2 cells"
-	echo "PASS: in the web client a notch of the wheel zooms the plan and moves the 3D camera by one notch"
+	# [KIT_WHEEL_TRACKPAD] Ten events of a tenth each, as a trackpad sends a
+	# notch: the voxel in hand steps once (it stepped at each)
+	hand=$(grep -ac "kit editor: in hand" "$c")
+	[ "$hand" = 2 ] ||
+		fail "a notch in ten small wheel events: $((hand - 1)) steps of the voxel in hand, not 1 ($c)"
+	echo "PASS: in the web client a notch of the wheel zooms the plan and moves the 3D camera by one notch; a notch in ten small events steps the voxel in hand once"
 	exit 0
 fi
 check_tmp kit_cam_min_move; t=$CHECK_TMP

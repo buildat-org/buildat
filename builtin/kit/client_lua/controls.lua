@@ -1331,8 +1331,11 @@ magic.SubscribeToEvent("MouseWheel", function(_, data)
 	if not C.on or E.editing or paused() or camera_mode() == "first_person" then
 		return
 	end
-	C.zoom = math.max(0.3, math.min(3, C.zoom * (data:GetInt("Wheel") > 0 and
-			0.9 or 1 / 0.9)))
+	-- ([KIT_WHEEL_TRACKPAD] by the notch, the web's in tenths: a trackpad's
+	-- many small events zoom as far as a notch's)
+	local w = data:GetInt("Wheel")
+	local notches = math.max(-10, math.min(10, M.wheel_left.web and w / 10 or w))
+	C.zoom = math.max(0.3, math.min(3, C.zoom * 0.9 ^ notches))
 end)
 
 local function exit_seat()
