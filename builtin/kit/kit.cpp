@@ -23578,7 +23578,9 @@ struct Module: public interface::Module, public Interface
 
 	// Where a ray (d a unit vector) from o meets a solid voxel of the
 	// scene: its distance, max if none within it. Steps of a tenth of a
-	// metre (2000 at most)
+	// metre (2000 at most). [KIT_STATIONS_LEFTOVERS] Water stops it too
+	// (Kit's water kind: edge material 10, terrain.h); a cell not loaded
+	// does not (controls.lua's impact marker reads both the same)
 	double ray_wall(main_context::SceneReference scene, const double o[3],
 			const double d[3], double max)
 	{
@@ -23596,7 +23598,7 @@ struct Module: public interface::Module, public Interface
 				const interface::VoxelDefinition *def = reg->get(
 						(uint32_t)fmt.id.get(w->get_voxel(cell_of(p),
 						true).data));
-				if(def && def->physically_solid){
+				if(def && (def->physically_solid || def->edge_material_id == 10)){
 					hit = t;
 					return;
 				}
