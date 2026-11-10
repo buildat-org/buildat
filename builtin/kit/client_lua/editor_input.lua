@@ -679,7 +679,8 @@ function M.show_credits(menu)
 end
 
 -- Kit's items in an app's pause menu (extensions/pause_menu), a builder's:
--- Edit ("Play mode" while the tools are on) and Run or End; everyone's
+-- Edit ("Play mode" while the tools are on), Run or End, End all rounds
+-- and Remove all bots; everyone's
 -- Credits...; and the tools' Escape first
 function M.add_menu_items(menu)
 	E.menu = menu
@@ -692,6 +693,15 @@ function M.add_menu_items(menu)
 	end, function()
 		if E.running then M.stop() else M.play() end
 	end, {order = 11})
+	-- [KIT_BUILDER_ROUND_CONTROLS] a builder's, in edit mode too and in a
+	-- round: every round ended, every bot made in play gone (the server's
+	-- refusal says when there is none)
+	menu.add(function()
+		return E.can_edit and "End all rounds" or nil
+	end, function() send({op = "end_rounds"}) end, {order = 12})
+	menu.add(function()
+		return E.can_edit and "Remove all bots" or nil
+	end, function() send({op = "remove_bots"}) end, {order = 13})
 	menu.add("Credits...", function() M.show_credits(menu) end,
 			{order = 70, page = true})
 	menu.on_escape(M.escape)

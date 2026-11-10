@@ -27464,6 +27464,11 @@ struct Module: public interface::Module, public Interface
 			log_i(MODULE, "Sessions: %s", cs(session_stats().stringify()));
 			return;
 		}
+		// [KIT_BUILDER_ROUND_CONTROLS] From anywhere, the tools on or not
+		if(op == "end_rounds")
+			return end_rounds(p, refuse);
+		if(op == "remove_bots")
+			return remove_bots(p, refuse);
 		GameSession *gs = active_session();
 		if(gs && !gs->draft && op != "voxel_info" && op != "body_ray" && op != "mode" &&
 				op != "focus" && op != "try" && op != "watch")
@@ -30234,6 +30239,69 @@ struct Module: public interface::Module, public Interface
 		commit(change, nullptr);
 		world_check(p.name);
 		log_i(MODULE, "The project's copies of %s follow:%s", cs(name), cs(what));
+	}
+
+	// [KIT_BUILDER_ROUND_CONTROLS] A builder's "End all rounds": every game
+	// session (no draft, no bench) ended as an "end" of its own, its
+	// players and bots back in the default round
+	void end_rounds(const Peer &p, const std::function<void(const ss_&)> &refuse)
+	{
+		size_t n = 0;
+		for(auto &s : m_sessions){
+			if(s.second->draft || s.second->bench)
+				continue;
+			SessionOp so;
+			so.op = "end";
+			so.target = s.first;
+			so.by = p.name;
+			m_session_ops.push_back(so);
+			n++;
+		}
+		if(!n)
+			return refuse("no round is running");
+		log_i(MODULE, "%s ends all rounds (%zu)", cs(p.name), n);
+	}
+
+	// [KIT_BUILDER_ROUND_CONTROLS] A builder's "Remove all bots": every bot
+	// made in play (a spawner's copy, a round's copy of one), in the default
+	// and in each game session, gone with what is under it. An authored bot
+	// stays. simplified: no on_remove runs (a bot's types have none)
+	void remove_bots(const Peer &p, const std::function<void(const ss_&)> &refuse)
+	{
+		sv_<uint64_t> sids = {0};
+		for(auto &s : m_sessions)
+			if(!s.second->draft && !s.second->bench)
+				sids.push_back(s.first);
+		size_t n = 0;
+		for(uint64_t sid : sids){
+			SessionScope sc(*this, sid);
+			sv_<uint64_t> bots;
+			for(auto &e : m_entities)
+				if(e.second.made && is_bot(e.second))
+					bots.push_back(e.first);
+			for(uint64_t bid : bots){
+				for(uint64_t x : group_of(bid, MAX_ENTITIES)){
+					auto it = m_entities.find(x);
+					if(it == m_entities.end())
+						continue;
+					remove_node(it->second);
+					m_entities.erase(it);
+				}
+				for(auto it = m_attached.begin(); it != m_attached.end();)
+					it = it->second.player == bid ? m_attached.erase(it) : ++it;
+				m_drives.erase(bid);
+				if(!sid)
+					m_bots_away.erase(bid);
+			}
+			if(GameSession *gs = active_session())
+				gs->bots -= std::min(gs->bots, bots.size());
+			if(!bots.empty())
+				m_runtime_dirty = true;
+			n += bots.size();
+		}
+		if(!n)
+			return refuse("no bots made in play");
+		log_i(MODULE, "%s removed all bots (%zu)", cs(p.name), n);
 	}
 
 	// Publish: the entities the draft's edits changed, as the draft has

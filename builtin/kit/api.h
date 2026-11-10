@@ -854,6 +854,10 @@ namespace interface
 //   {"op": "play"}, {"op": "stop"}, {"op": "save_start"}  -- the server's
 //       state, below (a builder's, the tools on or not; refused in a
 //       persistent world, Host::persistent)
+//   {"op": "end_rounds"}, {"op": "remove_bots"}  -- [KIT_BUILDER_ROUND_CONTROLS]
+//       a builder's, from anywhere (a round's session too, the tools on or
+//       not): every game session ended; every bot made in play gone, in
+//       the default and in each game session
 //   {"op": "restart", "id": n, "comp": i}  -- Running: the instance's
 //       state from the start again, and its on_start
 //   {"op": "focus", "sel": n (0: none), "cursor": [x, y, z] or null}  --
