@@ -589,10 +589,23 @@ frames 10
 event kit_knob_where
 wait_log_any 5000 kit editor: the knob on the screen at
 screenshot $t/rot_knobs.png
+event kit_cam3d $(c3 "$gx + 20") $gy $gz $gx $gy $gz
+frames 3
+event kit_knob_where
+wait_log_any 5000 kit editor: the rings shown:
+screenshot $t/rot_level.png
 quit
 EOF
 	} > "$t/ro2.cmds"
 	BUILDAT_JOIN_CREATE= client ro2
+	# A ring seen edge-on is not shown: from above-ish the yaw's, level not
+	rings=$(grep -ao "kit editor: the rings shown: [a-z0-9 .()]*;" "$t/ro2.log" | tr '\n' '|')
+	case "$rings" in
+		*"shown: yaw"*"|"*"shown: "*) ;;
+		*) fail "the rings shown: $rings ($t/ro2.log)";;
+	esac
+	[ "$(grep -ao "kit editor: the rings shown: [a-z0-9 .()]*;" "$t/ro2.log" | tail -1 | grep -c yaw)" = 0 ] ||
+		fail "the yaw ring shown edge-on: $rings ($t/ro2.log)"
 	want "$t/srvr1.log" "is a free object: nothing to stamp" \
 		"is turned yaw 0 pitch 20 roll 0: voxels go by multiples of 90"
 	# ---- The handles, dragged: the roll first, which moves no other knob
@@ -619,12 +632,12 @@ EOF
 	}
 	knob_at() # <the words before "knob">
 	{
-		grep -aoP "kit editor: the ${1}knob on the screen at \K[0-9]+, [0-9]+" "$t/ro2.log" | tail -1 | sed 's/,//'
+		grep -aoP "kit editor: the ${1}knob on the screen at \K[0-9]+, [0-9]+" "$t/ro2.log" | head -1 | sed 's/,//'
 	}
 	k_yaw=$(knob_at ""); k_pitch=$(knob_at "pitch "); k_roll=$(knob_at "roll ")
 	[ -n "$k_yaw" ] && [ -n "$k_pitch" ] && [ -n "$k_roll" ] ||
 		fail "no knobs in $t/ro2.log: $k_yaw; $k_pitch; $k_roll"
-	read -r m_x m_y <<<"$(grep -aoP "kit editor: the middle on the screen at \K[0-9]+, [0-9]+" "$t/ro2.log" | tail -1 | sed 's/,//')"
+	read -r m_x m_y <<<"$(grep -aoP "kit editor: the middle on the screen at \K[0-9]+, [0-9]+" "$t/ro2.log" | head -1 | sed 's/,//')"
 	[ -n "$m_y" ] || fail "no middle in $t/ro2.log"
 	echo "the knobs: yaw $k_yaw, pitch $k_pitch, roll $k_roll, round $m_x $m_y"
 	{

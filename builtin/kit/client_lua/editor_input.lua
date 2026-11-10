@@ -187,6 +187,28 @@ local function knobs()
 			u = yx * V(0, 1, 0), angle = a[3], r = r * 1.3,
 			col = magic.Color(0.4, 0.6, 1)}
 	end
+	-- A ring seen edge-on (its axis over ~80 degrees from the line of sight)
+	-- is left out: its turn cannot be seen from there (user, 2026-11-10).
+	-- The one being dragged stays
+	local sx, sy = to_screen(c)
+	local v
+	if sx then
+		local _
+		_, v = M.screen_ray(sx, sy)
+	end
+	local d = S.drag and S.drag.kind == "turn" and S.drag.h
+	local l = v and math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z) or 0
+	for i = #list, 1, -1 do
+		local k = list[i]
+		-- |cos| of the angle between its axis and the line of sight (the
+		-- sandbox's Vector3 has no DotProduct)
+		local a = k.axis
+		k.cos = l > 0 and math.abs(a.x * v.x + a.y * v.y + a.z * v.z) / l or 1
+		if k.cos < 0.17 and
+				not (d and d.which == k.which) then
+			table.remove(list, i)
+		end
+	end
 	for _, k in ipairs(list) do
 		local t = math.rad(k.angle)
 		k.at = c + (k.v0 * math.cos(t) + k.u * math.sin(t)) * k.r
@@ -223,6 +245,11 @@ end
 magic.SubscribeToEvent("command_seq:kit_knob_where", function()
 	local list, c = knobs()
 	local sx, sy
+	local names = {}
+	for _, k in ipairs(list or {}) do
+		names[#names + 1] = string.format("%s (cos %.2f)", k.name, k.cos)
+	end
+	log:info("kit editor: the rings shown: " .. table.concat(names, " ") .. ";")
 	if list then
 		sx, sy = to_screen(list[1].at)
 		local mx, my = to_screen(c)
