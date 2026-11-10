@@ -45,6 +45,10 @@ cargo=$(command -v cargo || echo "$HOME/.cargo/bin/cargo")
 	skip "no wasm32-unknown-unknown target"
 python3 -c 'import cryptography' 2>/dev/null || skip "no python3 cryptography"
 check_tmp aitta_native_wasm; t=$CHECK_TMP
+# The tester.* apps' compiled wasm from an earlier run in this tree would be
+# a cache hit where the check wants Aitta's .wasm: theirs only, the
+# builtins' cache kept warm
+rm -rf "$BUILDAT_CACHE_PATH"/apps/tester.*
 b="$here/Build/bin/buildat"
 cd "$here/Build"
 
