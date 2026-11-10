@@ -352,7 +352,7 @@ async function chrome() {
 	// The screen's orientation by its sides: Chrome's own default reads
 	// landscape for a tall phone
 	await metrics(sw, sh, {type: sw > sh ? "landscapePrimary" :
-			"portraitPrimary", angle: sw > sh ? 90 : 0});
+			"portraitPrimary", angle: 0});
 	// The picker answered here with the "file" step's path, or with nothing
 	let file = null;
 	await c.send("Page.setInterceptFileChooserDialog", {enabled: true});
