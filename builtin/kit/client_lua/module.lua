@@ -1627,6 +1627,22 @@ function M.may_place(x, y, z)
 	return (M.allows("place", x, y, z))
 end
 
+-- [KIT_WHEEL_TRACKPAD] Whole wheel notches for a stepping use (key: whose),
+-- signed as the event's Wheel. A native wheel event is whole notches; the
+-- web's are tenths (the SDL port's), and a trackpad or a smooth scroll
+-- sends a notch in many small events: they add up here, a step a notch.
+-- A turn the other way drops what was left over
+M.wheel_left = {web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil}
+function M.wheel_steps(key, wheel)
+	-- (in the event's own units, integers: tenths added as 0.1 miss a notch)
+	local unit = M.wheel_left.web and 10 or 1
+	local acc = M.wheel_left[key] or 0
+	acc = acc * wheel < 0 and wheel or acc + wheel
+	local n = acc < 0 and -math.floor(-acc / unit) or math.floor(acc / unit)
+	M.wheel_left[key] = acc - n * unit
+	return n
+end
+
 -- A refusal told (a click the rules refuse), not more than once a second
 -- for the same reason
 local told, told_at = nil, 0

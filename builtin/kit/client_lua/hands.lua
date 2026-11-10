@@ -355,11 +355,15 @@ magic.SubscribeToEvent("MouseWheel", function(_, data)
 			M.camera_mode() ~= "first_person" or M.pointer_free() then
 		return
 	end
-	local step = data:GetInt("Wheel") > 0 and -1 or 1
-	if M.slots_own and M.slots_own() then
-		M.pick_slot(step)
-	else
-		pick(step)
+	-- ([KIT_WHEEL_TRACKPAD] a step a notch, a trackpad's small events added)
+	local n = M.wheel_steps("hands", data:GetInt("Wheel"))
+	local step = n > 0 and -1 or 1
+	for _ = 1, math.abs(n) do
+		if M.slots_own and M.slots_own() then
+			M.pick_slot(step)
+		else
+			pick(step)
+		end
 	end
 end)
 

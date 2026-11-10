@@ -1612,7 +1612,13 @@ local function mouse_wheel(wheel, q)
 	end
 	if S.view == "walk" and S.tool == "voxels" and wheel ~= 0 and
 			(M.looking() or not over_ui(S.mx, S.my)) then
-		return wheel_hand(wheel, q or 0)
+		-- ([KIT_WHEEL_TRACKPAD] a step a notch, a trackpad's small events
+		-- added)
+		local n = M.wheel_steps("hand", wheel)
+		for _ = 1, math.abs(n) do
+			wheel_hand(n, q or 0)
+		end
+		return
 	end
 	if over_ui(S.mx, S.my) then
 		return
