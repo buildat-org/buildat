@@ -18,7 +18,10 @@
 #     selected by Tab and one of its dropdowns open, Down and Up do not
 #     move it too ([KIT_DROPDOWN_ARROWS_MOVE]);
 #   - [KIT_INSPECTOR_REBUILD] the door's placing leaves the inspector as it
-#     is (kept over its state), Apply's edit of 3 draws it again.
+#     is (kept over its state), Apply's edit of 3 draws it again;
+#   - [KIT_FREE_ROTATION_LEFTOVERS] a kit/part under a turned one: its position
+#     fields (composed: long) show at most three decimals, from their start
+#     (x -7.4055 showed "4055").
 #
 #   util/kit_inspector_check.sh
 set -u
@@ -91,6 +94,18 @@ keypress Down
 keypress Up
 keypress Escape
 frames 5
+event kit_edit {"op": "place", "type": "kit/part", "pos": [0, 1, 6]}
+wait_log 10000 entities, 4 to undo
+event kit_edit {"op": "move", "id": 5, "pos": [0, 1, 6], "yaw": 37, "pitch": 11}
+wait_log 10000 entities, 5 to undo
+event kit_edit {"op": "place", "type": "kit/part", "pos": [2, 2, 8], "parent": 5}
+wait_log 10000 entities, 6 to undo
+event kit_select 6
+wait_log_any 5000 kit editor: selected 6
+frames 5
+event kit_ui_where long
+wait_log_any 5000 kit editor: the field position z shows
+screenshot @T@/long.png
 keypress F6
 wait_log_any 10000 kit: controls: camera
 EOF
@@ -127,6 +142,11 @@ kept_after 2 || fail "placing the door drew the inspector again ($t/boss.log)"
 kept_after 3 && fail "Apply's edit kept the inspector as it was ($t/boss.log)"
 grep -aqF "An edit by kitboss: moved 4" "$t/srv.log" &&
 	fail "a key in the open dropdown moved the selection too ($t/srv.log)"
+# [KIT_FREE_ROTATION_LEFTOVERS] A long position rounded and shown from its start
+fields=$(grep -aoP 'the field position \w shows .*' "$t/boss.log")
+[ "$(grep -cP '"-?\d+(\.\d{1,3})?" scrolled 0$' <<<"$fields")" = 3 ] &&
+	grep -qP '\.\d' <<<"$fields" ||
+	fail "the position fields: $(tr '\n' ' ' <<<"$fields") ($t/long.png)"
 got=$(grep -aoP 'kit: controls: camera \K\w+' "$t/boss.log" | tail -1)
 [ "$got" = top_down ] ||
 	fail "the camera is ${got:-not set}, not top_down: the pick did not stay ($t/picked.png)"

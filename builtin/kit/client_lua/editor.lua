@@ -3178,11 +3178,17 @@ local function inspector(w, e, is_made)
 		for i, axis in ipairs({"x", "y", "z"}) do
 			-- One letter's room: the row's layout has already widened it
 			label(r, axis):SetFixedWidth(12)
-			local f = edit(r, string.format("%g", at[i]), function(s)
+			-- ([KIT_FREE_ROTATION_LEFTOVERS] Shown to a thousandth and from its
+			-- start: a member under a turned parent has a long one, which the
+			-- field showed by its end, "4055" of -7.4055. Moved unedited, the
+			-- exact value goes)
+			local f = edit(r, string.format("%.10g",
+					math.floor(at[i] * 1000 + 0.5) / 1000), function(s)
 				at[i] = tonumber(s)
 			end)
+			f.cursorPosition = 0
 			f.minWidth = 56
-			-- For a driven click
+			-- For a driven click, and kit_ui_where
 			f:SetName("position " .. axis)
 		end
 		button(r, "Move", function()
@@ -3212,6 +3218,7 @@ local function inspector(w, e, is_made)
 				local f = edit(tr, string.format("%.4g", a[i]), function(s)
 					a[i] = tonumber(s)
 				end)
+				f.cursorPosition = 0
 				f.minWidth = 56
 				f:SetName("turn " .. axis)
 			end
@@ -3710,6 +3717,24 @@ magic.SubscribeToEvent("command_seq:kit_ui_where", function(_, data)
 	end
 	log:info("kit editor: the windows at " .. table.concat(r, ", ") ..
 			" (" .. data:GetString("Param") .. ")")
+	-- The inspector's position fields: the text and how far it is scrolled
+	-- (0: shown from its start)
+	local function fields(el)
+		for i = 0, el:GetNumChildren() - 1 do
+			local f = el:GetChild(i)
+			local axis = f and f:GetName():match("^position (%a)$")
+			if axis then
+				log:info(string.format("kit editor: the field position %s shows "
+						.. "\"%s\" scrolled %d", axis, f:GetText(),
+						f.textElement.position.x - f.clipBorder.left))
+			elseif f then
+				fields(f)
+			end
+		end
+	end
+	if W.inspector and W.inspector.visible then
+		fields(W.inspector)
+	end
 end)
 
 -- A check's question: where the 3D camera is
