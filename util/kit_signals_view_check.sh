@@ -253,7 +253,7 @@ J
 		[ -z "${9:-}" ] || ty=kit/counter
 		cat <<J
 [
-	["nav", "\${URL}"],
+	["nav", "\${URL}?pref=kit_editor_font=100"],
 	["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
 J
 		[ "$p" = tap ] || echo "	[\"eval\", \"$stub\"],"
@@ -360,13 +360,13 @@ J
 			fail "the web drive of the signals by the mouse ($t/docs_mouse)"
 		grep -a "a sideways bar: true" "$t/docs_mouse/page.log" && fail "a sideways bar ($t/docs_mouse/page.log)"
 		echo "ok: the signals by the mouse in the web client; screenshots $t/docs_mouse/docs_*.png"
-		steps tap 500 300 250 250 700 200 "$WEB_FINGER_X" "$WEB_FINGER_Y" > "$t/docs_touch.json"
+		steps tap 500 300 250 250 120 150 "$WEB_FINGER_X" "$WEB_FINGER_Y" > "$t/docs_touch.json"
 		TOUCH=1 WEB_DRIVE_VIEWPORT=1000x500@1 "$here/util/web_drive.sh" chrome workbench "$t/docs_touch.json" "$t/docs_touch" ||
 			fail "the web drive of the signals by a finger ($t/docs_touch)"
 		grep -a "a sideways bar: true" "$t/docs_touch/page.log" && fail "a sideways bar ($t/docs_touch/page.log)"
 		echo "ok: the signals by a finger in the web client; screenshots $t/docs_touch/docs_*.png"
 	}
-	WEB_ROW_X=255 WEB_ROW_Y=238 WEB_FINGER_X=45 WEB_FINGER_Y=316
+	WEB_ROW_X=268 WEB_ROW_Y=347 WEB_FINGER_X=57 WEB_FINGER_Y=434
 	if [ "${2:-}" = docs ]; then
 		web_docs
 		echo "PASS: the signals on the web"
@@ -376,7 +376,7 @@ J
 	"$here/util/web_drive.sh" "${WEB_BROWSER:-chrome}" workbench "$t/mouse.json" "$t/mouse" ||
 		fail "the web drive by the mouse ($t/mouse)"
 	viewport_log "$t/mouse/page.log" mouse || fail "the viewport by the mouse ($t/mouse/page.log)"
-	# [KIT_SIGNALS_FONT_FIT] At the web's text size of 80 %: each layout's
+	# [KIT_SIGNALS_FONT_FIT] At the drive's text size (100 %, its nav's pref): each layout's
 	# columns as the frame's text scaling leaves them, not 80 % of their room
 	python3 -I - "$t/mouse/page.log" <<'PY' || fail "the columns scaled again ($t/mouse/page.log)"
 import re, sys
