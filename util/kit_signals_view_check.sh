@@ -360,7 +360,7 @@ J
 			fail "the web drive of the signals by the mouse ($t/docs_mouse)"
 		grep -a "a sideways bar: true" "$t/docs_mouse/page.log" && fail "a sideways bar ($t/docs_mouse/page.log)"
 		echo "ok: the signals by the mouse in the web client; screenshots $t/docs_mouse/docs_*.png"
-		steps tap 500 300 600 420 700 200 "$WEB_FINGER_X" "$WEB_FINGER_Y" > "$t/docs_touch.json"
+		steps tap 500 300 250 250 700 200 "$WEB_FINGER_X" "$WEB_FINGER_Y" > "$t/docs_touch.json"
 		TOUCH=1 WEB_DRIVE_VIEWPORT=1000x500@1 "$here/util/web_drive.sh" chrome workbench "$t/docs_touch.json" "$t/docs_touch" ||
 			fail "the web drive of the signals by a finger ($t/docs_touch)"
 		grep -a "a sideways bar: true" "$t/docs_touch/page.log" && fail "a sideways bar ($t/docs_touch/page.log)"
@@ -396,7 +396,7 @@ for l in open(sys.argv[1], errors="replace"):
 assert n, "no columns scaled line"
 PY
 	echo "ok: by the mouse in the web client; screenshots $t/mouse/armed.png $t/mouse/refused.png $t/mouse/under.png $t/mouse/orbit_1.png $t/mouse/orbit_2.png"
-	steps tap 500 300 600 420 500 400 240 > "$t/touch.json"
+	steps tap 500 300 250 250 500 400 240 > "$t/touch.json"
 	TOUCH=1 WEB_DRIVE_VIEWPORT=1000x500@1 "$here/util/web_drive.sh" chrome workbench "$t/touch.json" "$t/touch" ||
 		fail "the web drive by a finger ($t/touch)"
 	viewport_log "$t/touch/page.log" touch || fail "the viewport by a finger ($t/touch/page.log)"
