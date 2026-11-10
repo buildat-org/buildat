@@ -20495,7 +20495,8 @@ struct Module: public interface::Module, public Interface
 	// session -- made at the round's map's spawn, joining it as a player does
 	// (the scene's on_join and the maker's: its team, put on its pad) -- and
 	// is back where it was when the session ends. simplified: a copy with the
-	// bot's types and parameters (its state new: its inventory empty), by a
+	// bot's types and parameters (their state new but the bot type's, which
+	// holds kit/bot's knobs: its inventory empty), by a
 	// new id and so a new name; a restart while away leaves it waiting
 	// (sessions are not saved)
 	std::map<uint64_t, uint64_t> m_bots_away; // the default's bot -> session
@@ -20544,6 +20545,10 @@ struct Module: public interface::Module, public Interface
 				in.type = ci.type;
 				fresh(in);
 				in.params = ci.params.deepcopy();
+				// [KIT_BOT_DIFFICULTY] the bot's own state (its knobs; its
+				// on_start resets the rest)
+				if(m_types[ci.type].decl.get("bot").is_true())
+					in.state = ci.state.deepcopy();
 				n.comps.push_back(in);
 			}
 			bot_player_types(n);
@@ -25294,16 +25299,19 @@ struct Module: public interface::Module, public Interface
 		if(scene != pe.scene)
 			return refuse("in another scene");
 		size_t comp = 0;
-		bool input = false;
+		bool input = false, own = false;
 		for(size_t i = 0; i < it->second.comps.size() && !input; i++){
 			const Type &t = m_types[it->second.comps[i].type];
 			comp = i;
-			input = jstr(t.decl.get("ui"), "kind") == "input" &&
+			// [KIT_BOT_DIFFICULTY] or a type's own (`takes_text`: kit/bot's
+			// dialog, its client part's), which checks who itself
+			own = t.decl.get("takes_text").is_true();
+			input = (own || jstr(t.decl.get("ui"), "kind") == "input") &&
 					t.handlers.count("on_ui");
 		}
 		if(!input)
 			return refuse("no such input");
-		if(!ui_visible(id, pe.player))
+		if(!own && !ui_visible(id, pe.player))
 			return refuse("not on their screen");
 		// simplified: bytes, not characters: a cut can split a UTF-8
 		// character at the end (the type's own max_length counts

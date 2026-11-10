@@ -238,7 +238,11 @@ namespace interface
 //                               "kit:ui_text" "<id> <text>", checked as a
 //                               press, the text without control
 //                               characters and cut at 200 bytes; on_ui(c,
-//                               "entered", by, text): kit/ui_input
+//                               "entered", by, text): kit/ui_input.
+//                               [KIT_BOT_DIFFICULTY] A type with
+//                               `takes_text = true` takes it with no
+//                               ui (not checked as on the screen; its
+//                               on_ui checks who): kit/bot's dialog
 //                               [KIT_PLAYER_LIST] kind "players": its
 //                               text a title over rows from its shared
 //                               state `value`, {{name, colour, score}..}:

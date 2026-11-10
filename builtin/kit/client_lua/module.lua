@@ -168,7 +168,8 @@ end
 --   e.id, e.node (its replicated node), e.look, e.hinge, e.body (its look's
 --   nodes: the body turns with the hinge), e.swing (a swing's open angle:
 --   -90, or 90 when.mirror), e.state (the server's), e.mine
---   (this player's own entity), e:shown(key) (the state as drawn),
+--   (this player's own entity), e.you (this player's entity's id,
+--   [KIT_BOT_DIFFICULTY]), e:shown(key) (the state as drawn),
 --   e:near(d) (this player's entity within d of it),
 --   e:predict(key, value, seconds) (drawn so at once, until the server's
 --   value changes or the seconds, 1, pass), e:log(text)
@@ -955,6 +956,7 @@ local function update_play(_, data)
 			local e = n.e
 			e.look, e.hinge, e.body, e.mine = n.look, n.hinge, n.body,
 					id == P.you
+			e.you = P.you
 			e.swing = n.swing
 			if not n.added then
 				n.added, n.vals = true, {}
