@@ -13,6 +13,8 @@
 -- out, so two do not stand in one spot.
 -- simplified: that far out can be in a wall beside it; picking the free
 -- cells around it is the upgrade
+-- [KIT_BOT_DIFFICULTY] A copy made for a player is sent "ask" (kit/bot: a
+-- dialog of its knobs on their screen).
 local function spot(c)
 	local k = c.params.spread > 0 and c.state.joins % 9 or 0
 	c.state.joins = c.state.joins + 1
@@ -37,6 +39,11 @@ local function make(c, by)
 	local id = c:spawn(c.params.prefab ~= "" and {prefab = c.params.prefab} or
 			{entity = c.params.copy})
 	c:log("made", id, "for", c:name(by))
+	-- [KIT_BOT_DIFFICULTY] a copy made for a player asks them what it asks
+	-- (a kit/bot its knobs; one without the input ignores it)
+	if id and tostring(by):match("^player:") then
+		c:send(id, "ask")
+	end
 	c:emit("spawned", id)
 end
 

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~4 min (2026-11-09)
-# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/bot.lua builtin/kit/types/goal.lua builtin/kit/types/pickup.lua builtin/kit/types/placer.lua builtin/kit/types/explosive.lua builtin/kit/types/*.item.json builtin/kit/types/bomb.prefab.json builtin/kit/client_lua/ui.lua builtin/kit/client_lua/hands.lua apps/workbench/templates/ctf/**
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/bot.lua builtin/kit/types/bot.client.lua builtin/kit/types/goal.lua builtin/kit/types/pickup.lua builtin/kit/types/placer.lua builtin/kit/types/explosive.lua builtin/kit/types/*.item.json builtin/kit/types/bomb.prefab.json builtin/kit/client_lua/ui.lua builtin/kit/client_lua/hands.lua apps/workbench/templates/ctf/**
 # [KIT_GOAL_PRIORITIES] (kit_plan 4z7c) goals as a priority list: capture the
 # flag with kitboss and three bots, two against two, on a fresh Workbench
 # project from the template, set by edit ops (prep 8 s: the bots arm first; a point every
@@ -77,6 +77,24 @@ pause() # <button>: pressed in the pause menu
 	step 10 "pause: the menu shown" "keypress Escape"
 	cmd "frames 3" "click Button \"$1\""
 }
+# [KIT_BOT_DIFFICULTY] "Add bot" from the pause menu, its dialog's Add (with
+# the knobs stepped first: "<knob> <-|+>"...)
+add_bot() # <spawner> [<knob> <-|+>]...
+{
+	local m=$(mark "$t/boss.log") s=$1
+	shift
+	srv_mark
+	pause "Add bot"
+	srv 10 "kit/spawner $s: made [0-9]+"
+	await "$t/boss.log" "$m" 10 "client part: bot dialog shown"
+	cmd "frames 3"
+	while [ $# -ge 2 ]; do
+		step 5 "bot dialog: $1 " "click Button \"bot $1 $2\"" "frames 2"
+		shift 2
+	done
+	cmd 'click Button "bot add"'
+	srv 10 "kit/bot [0-9]+: knobs: .* by kitboss"
+}
 await "$t/boss.log" 0 120 "Joined as kitboss"
 cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
 step 30 "world_menu: the list shown" "frames 3"
@@ -102,9 +120,7 @@ srv 30 "kit/arena 7: kitboss entered"
 cmd "frames 10" "keypress K"
 srv 10 "kit/arena 7: kitboss is ready"
 for i in 1 2 3; do
-	srv_mark
-	pause "Add bot"
-	srv 10 "kit/spawner 61: made [0-9]+"
+	add_bot 61
 done
 srv_mark
 srv 90 "kit/arena 7: countdown over: a round for 4 players"

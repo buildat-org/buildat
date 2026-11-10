@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-11-09)
-# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/bot.lua builtin/kit/types/goal.lua builtin/kit/types/arena.lua builtin/kit/types/team.lua builtin/kit/types/flag.lua builtin/kit/types/spawner.lua builtin/kit/types/pause_menu_action.lua apps/workbench/templates/ctf/**
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/bot.lua builtin/kit/types/bot.client.lua builtin/kit/types/goal.lua builtin/kit/types/arena.lua builtin/kit/types/team.lua builtin/kit/types/flag.lua builtin/kit/types/spawner.lua builtin/kit/types/pause_menu_action.lua apps/workbench/templates/ctf/**
 # [KIT_GUIDE_BOTS_2] (kit_plan 4z7a) bots are players: capture the flag played
 # by four bots, two against two, on a fresh Workbench project from the
 # template, shortened by edit ops (prep 3 s, a point every 4 s, 2 to win, 4 a round):
@@ -74,6 +74,24 @@ pause() # <button>: pressed in the pause menu
 	step 10 "pause: the menu shown" "keypress Escape"
 	cmd "frames 3" "click Button \"$1\""
 }
+# [KIT_BOT_DIFFICULTY] "Add bot" from the pause menu, its dialog's Add (with
+# the knobs stepped first: "<knob> <-|+>"...)
+add_bot() # <spawner> [<knob> <-|+>]...
+{
+	local m=$(mark "$t/boss.log") s=$1
+	shift
+	srv_mark
+	pause "Add bot"
+	srv 10 "kit/spawner $s: made [0-9]+"
+	await "$t/boss.log" "$m" 10 "client part: bot dialog shown"
+	cmd "frames 3"
+	while [ $# -ge 2 ]; do
+		step 5 "bot dialog: $1 " "click Button \"bot $1 $2\"" "frames 2"
+		shift 2
+	done
+	cmd 'click Button "bot add"'
+	srv 10 "kit/bot [0-9]+: knobs: .* by kitboss"
+}
 await "$t/boss.log" 0 120 "Joined as kitboss"
 cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
 step 30 "world_menu: the list shown" "frames 3"
@@ -92,9 +110,7 @@ step 15 "the server is Running" 'event kit_edit {"op": "play"}'
 step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
 # 1. Four bots from the pause menu, onto the pad, into a round
 for i in 1 2 3 4; do
-	srv_mark
-	pause "Add bot"
-	srv 10 "kit/spawner 61: made [0-9]+"
+	add_bot 61
 done
 cmd "frames 60" "screenshot $t/lobby.png"
 srv_mark

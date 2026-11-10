@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~4 min (2026-11-09)
-# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/bot.lua builtin/kit/types/goal.lua builtin/kit/types/turret.lua builtin/kit/types/sea_vessel.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/module.lua apps/workbench/templates/ship/**
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/bot.lua builtin/kit/types/bot.client.lua builtin/kit/types/goal.lua builtin/kit/types/turret.lua builtin/kit/types/sea_vessel.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/module.lua apps/workbench/templates/ship/**
 # [KIT_GUIDE_STATIONS] (kit_plan 4z7b) bots at a ship's stations, and the
 # gunner's impact marker, on a fresh Workbench project from the Ship template:
 #   1. The marker: kitboss at the cannon's seat sets three elevations and
@@ -71,6 +71,24 @@ pause() # <button>: pressed in the pause menu
 	step 10 "pause: the menu shown" "keypress Escape"
 	cmd "frames 3" "click Button \"$1\""
 }
+# [KIT_BOT_DIFFICULTY] "Add bot" from the pause menu, its dialog's Add (with
+# the knobs stepped first: "<knob> <-|+>"...)
+add_bot() # <spawner> [<knob> <-|+>]...
+{
+	local m=$(mark "$t/boss.log") s=$1
+	shift
+	srv_mark
+	pause "Add bot"
+	srv 10 "kit/spawner $s: made [0-9]+"
+	await "$t/boss.log" "$m" 10 "client part: bot dialog shown"
+	cmd "frames 3"
+	while [ $# -ge 2 ]; do
+		step 5 "bot dialog: $1 " "click Button \"bot $1 $2\"" "frames 2"
+		shift 2
+	done
+	cmd 'click Button "bot add"'
+	srv 10 "kit/bot [0-9]+: knobs: .* by kitboss"
+}
 held() { cmd "keydown $1" "delay $2" "keyup $1" "frames 3"; }
 await "$t/boss.log" 0 120 "Joined as kitboss"
 cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
@@ -111,9 +129,7 @@ step 10 "kit: controls: camera first_person" "keypress F"
 await "$t/boss.log" 0 10 "kit: impact marker off"
 # 2. Two bots: the gun, then the wheel
 for i in 1 2; do
-	srv_mark
-	pause "Add bot"
-	srv 10 "kit/spawner 48: made [0-9]+"
+	add_bot 48
 done
 cmd "frames 30" "screenshot $t/bots.png"
 SM=0

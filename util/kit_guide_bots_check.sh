@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-09)
-# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/bot.lua builtin/kit/types/bot.prefab.json builtin/kit/types/guide.prefab.json builtin/kit/types/goal.lua builtin/kit/types/creature_walker.lua builtin/kit/types/pause_menu_action.lua builtin/kit/types/spawner.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/players.lua apps/workbench/templates/puzzle_room/** apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/bot.lua builtin/kit/types/bot.client.lua builtin/kit/types/bot.prefab.json builtin/kit/types/guide.prefab.json builtin/kit/types/goal.lua builtin/kit/types/creature_walker.lua builtin/kit/types/pause_menu_action.lua builtin/kit/types/spawner.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/players.lua apps/workbench/templates/puzzle_room/** apps/workbench/**
 # [KIT_GUIDE_BOTS] (kit_plan 4z7) the puzzle room's guide, done by a bot and seen
 # by a player, on a fresh Workbench project from the template:
 #   1. Played: kitboss sees the guide's first step in its corner window
@@ -77,6 +77,24 @@ pause() # <button>: pressed in the pause menu
 	step 10 "pause: the menu shown" "keypress Escape"
 	cmd "frames 3" "click Button \"$1\""
 }
+# [KIT_BOT_DIFFICULTY] "Add bot" from the pause menu, its dialog's Add (with
+# the knobs stepped first: "<knob> <-|+>"...)
+add_bot() # <spawner> [<knob> <-|+>]...
+{
+	local m=$(mark "$t/boss.log") s=$1
+	shift
+	srv_mark
+	pause "Add bot"
+	srv 10 "kit/spawner $s: made [0-9]+"
+	await "$t/boss.log" "$m" 10 "client part: bot dialog shown"
+	cmd "frames 3"
+	while [ $# -ge 2 ]; do
+		step 5 "bot dialog: $1 " "click Button \"bot $1 $2\"" "frames 2"
+		shift 2
+	done
+	cmd 'click Button "bot add"'
+	srv 10 "kit/bot [0-9]+: knobs: .* by kitboss"
+}
 await "$t/boss.log" 0 120 "Joined as kitboss"
 cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
 step 30 "world_menu: the list shown" "frames 3"
@@ -94,8 +112,8 @@ ui "$m" 47 'shown: "Press the red button"'
 cmd "frames 30" "screenshot $t/guide.png"
 # 2. A bot from the pause menu does the chain
 srv_mark
-pause "Add bot"
-srv 10 "kit/spawner 52: made [0-9]+"
+add_bot 52 reaction - reaction - speed +
+srv 10 "kit/bot [0-9]+: knobs: aim 75%, reaction 0 s, speed 100% by kitboss"
 bot=$(tail -c +$((SM + 1)) "$t/srv.log" | grep -aoP 'kit/spawner 52: made \K[0-9]+' | head -1)
 cmd "frames 40" "screenshot $t/walk.png"
 srv 30 "kit/goal 47: done for Bot $bot"
@@ -121,8 +139,7 @@ ed '{"op": "set", "id": 49, "comp": 0, "param": "via", "value": 0}'
 srv_mark
 step 15 "the server is Running" 'event kit_edit {"op": "play"}'
 step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
-pause "Add bot"
-srv 10 "kit/spawner 52: made [0-9]+"
+add_bot 52
 srv 60 "kit/bot [0-9]+: stuck on goal 49: nothing to use"
 cmd "frames 10" "screenshot $t/stuck.png"
 srv_mark
