@@ -94,7 +94,12 @@ step 15 "the server is Running" 'event kit_edit {"op": "play"}'
 step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
 # 1. Two bots into a round
 for i in 1 2; do
+	m=$(mark "$t/boss.log")
 	pressed "Add bot" "kit/spawner 61: made [0-9]+"
+	await "$t/boss.log" "$m" 10 "client part: bot dialog shown"
+	srv_mark
+	cmd "frames 3" 'click Button "bot add"'
+	srv 10 "kit/bot [0-9]+: knobs: .* by kitboss"
 done
 srv_mark
 srv 60 "Session 1 \(a game\)"
