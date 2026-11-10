@@ -18979,6 +18979,7 @@ struct Module: public interface::Module, public Interface
 			else
 				++it;
 		}
+		std::vector<uint64_t> unseat;
 		for(auto &dp : m_drives){
 			Drive &d = dp.second;
 			auto ei = m_entities.find(dp.first);
@@ -18988,9 +18989,11 @@ struct Module: public interface::Module, public Interface
 			const Instance *mv = movement_on(e);
 			if(!mv)
 				continue;
-			// [KIT_GUIDE_STATIONS] a bot in a seat: where the seat is, not stepped
+			// [KIT_GUIDE_STATIONS] a bot in a seat: where the seat is, not stepped;
+			// out of a seat gone after the loop (bot_put erases its drive)
 			if(d.bot && m_bot_seats.count(e.id)){
-				bot_in_seat(e, d, now);
+				if(!bot_in_seat(e, d, now))
+					unseat.push_back(e.id);
 				continue;
 			}
 			const double rate = num(d.params, "rate", 60, 10, 120), dt = 1 / rate;
@@ -19129,6 +19132,8 @@ struct Module: public interface::Module, public Interface
 			while(d.keys.size() > 2 && d.keys[1][0] < (now - TRACK_KEEP) * 1000)
 				d.keys.pop_front();
 		}
+		for(uint64_t id : unseat)
+			bot_unseat(id, "the seat is gone");
 		return spent;
 	}
 
@@ -20386,15 +20391,16 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// Each tick (step_drives): a bot in a seat where the seat is, its keys
-	// ahead as a creature's (its seat gone or no longer one: out of it)
-	void bot_in_seat(const Entity &e, Drive &d, double now)
+	// ahead as a creature's. false: its seat gone or no longer one, for
+	// the caller to bot_unseat() once out of its m_drives loop
+	bool bot_in_seat(const Entity &e, Drive &d, double now)
 	{
 		const uint64_t seat = m_bot_seats[e.id].seat;
 		auto si = m_entities.find(seat);
 		const Entity *ve = si == m_entities.end() || !has_seat(si->second) ? nullptr :
 				vehicle_of(si->second);
 		if(!ve || !m_drives.count(ve->id))
-			return bot_unseat(e.id, "the seat is gone");
+			return false;
 		double w[3];
 		Turn q;
 		world_of(si->second, w, &q);
@@ -20419,6 +20425,7 @@ struct Module: public interface::Module, public Interface
 			d.keys.pop_front();
 		d.speed = d.turn = 0;
 		bot_pose(e, d, q.yaw());
+		return true;
 	}
 
 	// [KIT_GUIDE_BOTS_2] c:teleport by a bot: it is put there, in its own scene

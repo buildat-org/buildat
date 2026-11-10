@@ -13,7 +13,8 @@
 #   2. [KIT_AIRSHIPS_BOTS] Airships: two bots from the pause menu (the
 #      dialog's defaults): one takes the bots' airship's gun (the balloons'
 #      goal, priority 10), the other its helm (priority 5); the gunner fires
-#      and hits a balloon, the helmsman flies out to them.
+#      and hits a balloon, the helmsman flies out to them; the airship
+#      deleted under them, both out of their seats and the server up.
 # Screenshots, kept with KEEP_TMP=1: $t/dialog.png, $t/airship.png
 #   util/kit_bot_knobs_check.sh
 set -u
@@ -162,6 +163,15 @@ cmd "frames 30" "screenshot $t/airship.png"
 srv 60 "Bot [0-9]+ fires entity 42's kit/turret"
 srv 150 "Bot [0-9]+'s projectile [0-9]+ hits entity 4[3-7]"
 srv 150 "kit/goal 49: done"
+# The bots' airship deleted under its helmsman (in the user's playtest it
+# was shot down): out of the seat, the server up (the drive loop erased
+# the drive it was on and crashed)
+srv_mark
+cmd 'event kit_edit {"op": "mode", "on": true}'
+ed '{"op": "delete", "id": 40}'
+srv 10 "Bot [0-9]+ leaves the seat of entity 4[12]: the seat is gone"
+# Still up: it answers an edit
+step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
 close
 python3 -I - "$t" <<'PY' || fail "the logs say otherwise ($t)"
 import re, sys
