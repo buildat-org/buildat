@@ -41,10 +41,13 @@ BUILDAT_FP_CODE=$code run_client 40 "$t/mk.log" timeout 40 \
 	fail "the account's client ($t/mk.log): $(grep -a "Command sequence failed" "$t/mk.log" | tail -1)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 server "$t/s2.log" -W "$here/web"
-# CSS pixels in web_drive's 1200x800 as a phone: the name field and the
-# password (FIELD_NAME, FIELD_PASS, "x y")
+# The name field and the password, tapped where the client finds them
+# ([WEB_TAP_CHECKS_DRIFT]: fixed pixels missed by a few as the page moved):
+# the LineEdit nearest each of these CSS pixels in web_drive's 1200x800
 read nx ny <<< "${FIELD_NAME:-600 345}"
 read px py <<< "${FIELD_PASS:-600 454}"
+name="\"LineEdit\", \"*\", $nx, $ny"
+pass="\"LineEdit\", \"*\", $px, $py"
 # [WEB_TAP_KEYBOARD_IOS] And 10 frames on: what has the focus, whether the
 # tapped stand-in is still shown, and its blurs in between (iOS closes the
 # keyboard on a blur, and opens none for the engine's later focus)
@@ -57,7 +60,7 @@ watch="window.inTap = 0; document.addEventListener('touchend', function(){ windo
 # twice in a row, three rounds
 taps=""
 for i in 1 2 3; do
-	for xy in "$nx, $ny" "$nx, $ny" "$px, $py" "$px, $py"; do
+	for xy in "$name" "$name" "$pass" "$pass"; do
 		taps="$taps [\"tap\", $xy], [\"waitlog\", \"ten frames on: \", 5], [\"wait\", 200],"
 	done
 done
@@ -70,9 +73,9 @@ cat > "$t/steps.json" <<J
  ["shot", "$t/login.png"],
  ["eval", "window.tenOn = true; 'on'"],
 $taps
- ["tap", $nx, $ny], ["waitlog", "in the tap: ", 5], ["wait", 500],
+ ["tap", $name], ["waitlog", "in the tap: ", 5], ["wait", 500],
  ["type", "erin"], ["wait", 300],
- ["tap", $px, $py], ["waitlog", "in the tap: ", 5], ["wait", 500],
+ ["tap", $pass], ["waitlog", "in the tap: ", 5], ["wait", 500],
  ["type", "rightpass123"], ["key", "Enter"],
  ["waitlog", "Joined as erin", 30]
 ]

@@ -2,6 +2,7 @@
 # tier: full
 # cost: ~3 min (2026-10-11)
 # covers: extensions/ui_utils/init.lua 3rdparty/Urho3D/Source/Urho3D/UI/Menu.cpp
+# drives: extensions/launch_menu/preferences.lua
 # [TAP_DROPDOWN]: a tap on a dropdown opens it on a phone. In Chrome with
 # real touch events (which Chrome follows with its emulated mouse events,
 # as a phone's browser does) at a phone's 400x800 CSS pixels, device
@@ -106,18 +107,24 @@ y1=$(echo "$out" | grep '^at ' | tail -1 | awk '{print $2}')
 [ -n "$y0" ] && [ "$y1" -lt $((y0 - 30)) ] || fail "scroll: the drag did not scroll ($y0, then $y1)"
 echo "ok: in a scroll view 20 taps open and a tap outside closes, a tap and a click pick, a drag scrolls ($y0 to $y1) and opens nothing"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-# Outside a scroll view: Home's Settings (at y 497 since Home's Browse
-# got "Get more" on the web, 9d7a5f7cf), "Display and sound", the
-# Antialiasing dropdown at (306, 326), outside it the title at (100, 217)
+# Outside a scroll view: Home's Settings, "Display and sound", a
+# dropdown (the topmost), outside it the window's title. Found by their
+# labels, as the client finds them ([WEB_TAP_CHECKS_DRIFT]: fixed pixels
+# missed by a few as the rows moved), the x y only picking among several.
+# simplified: tapped at the dropdown's centre, no jitter as in the scroll
+# view's (the place a page step finds cannot feed a later step's pixels)
 # The waits after a line are the page's next frames, the menu laid out;
 # the last one only ends the list after the taps' trailing comma
 cat > "$t/plain.json" <<J
 [
  ["nav", "\${URL}"],
  ["waitlog", "launch_menu: ", 60], ["wait", 1000],
- ["tap", 200, 497], ["waitlog", "launch_menu: settings, ", 10], ["wait", 500],
- ["tap", 180, 275], ["waitlog", "Engine settings shown", 10], ["wait", 500],
-$(taps 306 326 100 217)
+ ["tap", "Button", "Settings", 200, 497], ["waitlog", "launch_menu: settings, ", 10], ["wait", 500],
+ ["tap", "Button", "Display and sound"], ["waitlog", "Engine settings shown", 10], ["wait", 500],
+$(for i in $(seq 20); do
+	echo ' ["tap", "DropDownList", "*", 306, 0], ["waitlog", "dropdown_\\d+ open", 10],'
+	echo ' ["tap", "Text", "Engine settings"], ["waitlog", "dropdown_\\d+ closed", 10],'
+done)
  ["wait", 200]
 ]
 J
