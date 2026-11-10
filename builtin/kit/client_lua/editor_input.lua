@@ -1244,14 +1244,21 @@ function NT.arm_parent(id)
 		if NT.sig() and NT.sg.is_narrow then
 			NT.sg.tab = "list"
 		end
-		log:info("kit editor: switch parent of " .. id .. ": armed")
+		log:info("kit editor: switch parent of " .. id .. ": armed (" ..
+				NT.parent_cancel() .. ")")
 		E.status = "Switch parent: pick the new parent of " .. id ..
-				" (Escape: cancel)"
+				" (" .. NT.parent_cancel() .. ")"
 	else
 		log:info("kit editor: switch parent cancelled")
 		E.status = ""
 	end
 	refresh()
+end
+
+-- ([KIT_SIGNALS_PARENT_LEFTOVERS] A touchscreen has no Escape: the
+-- Inspector's "Switch parent: Cancel" button)
+function NT.parent_cancel()
+	return S.touch and "Cancel: the Inspector's button" or "Escape: cancel"
 end
 
 -- The entity clicked while Switch parent is armed: its parent, one of the
@@ -1266,7 +1273,7 @@ function NT.pick_parent(id)
 	if id == child or not e or is_made or not (e.pos or NT.is_panel(e)) then
 		E.status = "Switch parent: " .. (id == child and "not itself" or
 				is_made and "not one made in play" or
-				"one with a position or a panel") .. "; Escape: cancel"
+				"one with a position or a panel") .. "; " .. NT.parent_cancel()
 		log:info("kit editor: switch parent of " .. child .. ": not " .. id)
 		people()
 		return true

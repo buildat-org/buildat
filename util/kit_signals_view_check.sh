@@ -40,6 +40,8 @@
 #      stays armed with its status over the list; past an edit, the filter and
 #      another view; the row indented under the new one; Escape and the button
 #      cancel, the view kept; narrow touch: armed, the list's column is up.
+#      [KIT_SIGNALS_PARENT_LEFTOVERS] A name in the links table picks while armed;
+#      the status's cancel says Escape, on touch the Inspector's button.
 #  13. [KIT_SIGNALS_VIEWPORT] Its inspector's position edits a positioned entity
 #      (the viewport follows, undone by Ctrl+Z, the 3D view's knob with it); the
 #      viewport's camera orbited by a right drag and a finger, zoomed by the wheel
@@ -1569,6 +1571,14 @@ wait_log 10000 kit editor: state:
 frames 3
 click Button "Un-parent"
 wait_log 10000 kit editor: state:
+frames 3
+click Button "Switch parent"
+wait_log 5000 kit editor: switch parent of $BAR1: armed
+frames 2
+click Button "Links"
+frames 5
+click Button "goto $FLAG"
+wait_log 5000 kit editor: switch parent of $BAR1 to $FLAG
 sync 3000
 quit
 EOF
@@ -1629,6 +1639,12 @@ assert ">" + flag not in ls[after], ls[after]
 PY
 wantp "$t/kitparent2.log" "signals: list \"flag\".*>$FLAG\b"
 want "$t/kitparent.log" "kit editor: switch parent of $BAR1 to $PARENT" "kit editor: un-parent $BAR1"
+# [KIT_SIGNALS_PARENT_LEFTOVERS] A name in the links table picked, not selected;
+# the cancel worded for the keyboard, and on touch for the Inspector's button
+want "$t/kitparent.log" "switch parent of $FLAG: armed (Escape: cancel)"
+want "$t/kitparent2.log" "switch parent of $FLAG: armed (Cancel: the Inspector's button)"
+grep -aq "kit editor: selected $FLAG " <(sed -n "/switch parent of $BAR1 to $FLAG/,\$p" "$t/kitparent.log") &&
+	fail "the links table's name selected while armed ($t/kitparent.log)"
 # The view not left by the Escape that cancelled
 seq=$(grep -a "the view is\|cancelled" "$t/parent_seq.txt" | sed 's/.*: //' | tr '\n' ',')
 case $seq in

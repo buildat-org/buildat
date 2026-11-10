@@ -480,7 +480,10 @@ local function link_table(body, rows, self_id)
 			local c = {s = e and NT.entity_label(e) or K.ENTITY .. tostring(id),
 				own = goal == self_id, short = K.ENTITY .. tostring(goal)}
 			c.b, c.t = item(r, e and shown_name(e) or c.s, function()
-				M.select(goal)
+				-- ([KIT_SIGNALS_PARENT_LEFTOVERS] Switch parent armed: picked)
+				if not NT.pick_parent(goal) then
+					M.select(goal)
+				end
 			end)
 			c.t:SetAlignment(magic.HA_RIGHT, magic.VA_CENTER)
 			c.t:SetPosition(-1, 0)
