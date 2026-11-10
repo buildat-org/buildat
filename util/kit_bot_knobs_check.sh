@@ -15,6 +15,11 @@
 #      goal, priority 10), the other its helm (priority 5); the gunner fires
 #      and hits a balloon, the helmsman flies out to them; the airship
 #      deleted under them, both out of their seats and the server up.
+#      [KIT_AIRSHIPS_BOTS_LEFTOVERS] The gunner's shots never hit its own
+#      crew; the fly-out goal (49) is the helmsman's even when the gunner
+#      enters its box first. kitboss, at the gun of a copy of their airship,
+#      shoots at their helm: the bots fight back from their gun and hit him
+#      or his ship.
 # Screenshots, kept with KEEP_TMP=1: $t/dialog.png, $t/airship.png
 #   util/kit_bot_knobs_check.sh
 set -u
@@ -148,8 +153,13 @@ srv 10 "knobs: aim 50%, reaction 0.8 s, speed 70%"
 close
 # 2. Airships: a crew of two bots on the bots' airship
 open air "Airships"
+BOSS=$(grep -aoP 'kitboss is entity \K[0-9]+' "$SL" | tail -1)
+# kitboss's gunboat: a copy of the bots' airship beside it (53, its gun 55)
+ed '{"op": "copy", "ids": [40]}'
+ed '{"op": "place", "clipboard": true, "pos": [4, 3, -14]}'
 play
 srv 20 "Entity 42's kit/turret steps in play"
+srv 20 "Entity 55's kit/turret steps in play"
 for i in 1 2; do
 	add_bot 50
 	srv_mark
@@ -163,6 +173,18 @@ cmd "frames 30" "screenshot $t/airship.png"
 srv 60 "Bot [0-9]+ fires entity 42's kit/turret"
 srv 150 "Bot [0-9]+'s projectile [0-9]+ hits entity 4[3-7]"
 srv 150 "kit/goal 49: done"
+# kitboss at his gun shoots at their helm: they fight back
+srv_mark
+cmd 'event kit_edit {"op": "mode", "on": true}'
+cmd 'event kit_edit {"op": "walk_here", "pos": [4, 4.5, -11]}'
+srv 10 "kitboss walks here"
+step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
+step 10 "kit: aiming at 41" "event kit_use 55" "frames 10" "event kit_aim 41 45 3 fire"
+srv 30 "kitboss's projectile [0-9]+ hits entity (40|4[12])"
+srv 20 "Bot [0-9]+ is attacked by player:$BOSS \(kitboss\)"
+srv 30 "kit/bot [0-9]+: goal -1 attack \"fight back\""
+srv 60 "Bot [0-9]+'s projectile [0-9]+ hits entity (53's cell|$BOSS\$)"
+cmd "event kit_aim 0" "frames 10" "screenshot $t/fight_back.png"
 # The bots' airship deleted under its helmsman (in the user's playtest it
 # was shot down): out of the seat, the server up (the drive loop erased
 # the drive it was on and crashed)
@@ -207,8 +229,17 @@ shots = len(re.findall(rf"{gun} fires entity 42's kit/turret", srv))
 hits = re.findall(rf"{gun}'s projectile \d+ hits entity (4[3-7])", srv)
 if not hits:
 	sys.exit(f"the gunner {gun} hit no balloon in {shots} shots")
+# [KIT_AIRSHIPS_BOTS_LEFTOVERS] its own crew never hit; 49 the helmsman's
+crew = re.findall(rf"Bot \d+'s projectile \d+ hits entity ({gun[4:]}|{helm[4:]})$", srv, re.M)
+if crew:
+	sys.exit(f"a bot's shot hit its own crew: {crew}")
+by = re.findall(r"kit/goal 49: done for everyone by (Bot \d+)", srv)
+if by != [helm]:
+	sys.exit(f"goal 49 done by {by}, not the helmsman {helm}")
+back = re.findall(r"(Bot \d+)'s projectile \d+ hits entity (53's cell \S+|\d+)$", srv[srv.find("is attacked by player:"):], re.M)
 print(f"ctf: bots {b1} {b3} into the round as {into[b1]} {into[b3]} with {K}, {b2} cancelled; "
-	f"airships: gunner {gun} {shots} shots, hits {hits}; helmsman {helm} flew out")
+	f"airships: gunner {gun} {shots} shots, hits {hits}; helmsman {helm} flew out; "
+	f"fighting back: {back[:4]}")
 PY
 verdict_keep
 [ "$verdict_rc" = 0 ] && echo "PASS: Add bot's dialog sets a bot's knobs, its round copy has them; an airship crewed by bots"

@@ -8953,6 +8953,7 @@ struct Module: public interface::Module, public Interface
 		OwnGrid *g = ei == m_entities.end() ? nullptr : own_of(ei->second, why);
 		if(!g)
 			return;
+		bot_attacked(0, root, by);
 		interface::VoxelRegistry *reg = registry_of(ei->second);
 		sv_<int> gone;
 		for(auto &h : hits){
@@ -17613,6 +17614,11 @@ struct Module: public interface::Module, public Interface
 				for(const auto &b : bots)
 					if(b.second.first == scene && box_holds(o, q, n, b.second.second.data()))
 						now.insert("bot:"+itos(b.first));
+				// [KIT_AIRSHIPS_BOTS_LEFTOVERS] a reach goal through a station:
+				// those aboard its ship are in it as the station's holder (the
+				// helm took them there, not the gunner)
+				if(in.type == "kit/goal" && jstr(in.params, "kind") == "reach")
+					via_holder(in, now);
 				auto fire = [&](const char *handler, const ss_ &id){
 					Run r;
 					r.entity = e.id;
@@ -17636,6 +17642,38 @@ struct Module: public interface::Module, public Interface
 		}
 		for(auto &tz : touched)
 			ship_lost(tz.first, "app", "it touched a deadly zone ("+m_entities[tz.second].name+")");
+	}
+
+	// A reach goal's via a seat on a ship, held: who of `now` (a zone's, by
+	// entity id or "bot:<id>") is aboard that ship counts as its holder
+	void via_holder(const Instance &in, std::set<ss_> &now)
+	{
+		const json::Value &rv = in.params.get("via");
+		auto si = rv.is_number() && rv.as_number() >= 2 ?
+				m_entities.find((uint64_t)rv.as_number()) : m_entities.end();
+		if(now.empty() || si == m_entities.end() || !has_seat(si->second))
+			return;
+		const uint64_t ship = free_root_of(si->first);
+		const Entity *ve = vehicle_of(si->second);
+		if(!ship || !ve)
+			return;
+		uint64_t hid = 0;
+		ss_ holder;
+		for(auto &o : m_bodies)
+			if(o.second.seat && vehicle_of(o.second.seat) == ve)
+				hid = m_peers[o.first].player, holder = itos(hid);
+		for(auto &bs : m_bot_seats)
+			if(vehicle_of(bs.second.seat) == ve)
+				hid = bs.first, holder = "bot:"+itos(hid);
+		if(holder.empty())
+			return;
+		std::set<ss_> out;
+		for(const ss_ &id : now){
+			const bool bot = id.compare(0, 4, "bot:") == 0;
+			const uint64_t n = strtoull(id.c_str() + (bot ? 4 : 0), nullptr, 10);
+			out.insert(n != hid && aboard(n, ship) ? holder : id);
+		}
+		now.swap(out);
 	}
 
 	// The ships (free objects with kit/hull) in a scene with a corner of their
@@ -20187,10 +20225,60 @@ struct Module: public interface::Module, public Interface
 				best_p = pri;
 			}
 		}
+		bot_foe_lit(e, w, scene, best);
 		if(!best.is_object())
 			return;
 		o += ",goal=";
 		lua_lit(best, o);
+	}
+
+	// [KIT_AIRSHIPS_BOTS_LEFTOVERS] A bot attacked in the last FOE_US (it or the
+	// ship it crews hit, bot_attacked()): before any goal, an attack on its foe
+	// (id -1, "fight back") through the gun of that ship if one is free.
+	// simplified: a ship's gun only; a bot on foot does not fight back
+	void bot_foe_lit(const Entity &e, const double w[3], const ss_ &scene,
+			json::Value &best)
+	{
+		auto fi = m_bot_foes.find(e.id);
+		if(fi == m_bot_foes.end())
+			return;
+		const BotFoe f = fi->second;
+		auto ti = m_entities.find(f.foe);
+		ss_ ts;
+		if(ti != m_entities.end() && ti->second.has_pos)
+			scene_of(ti->second, &ts);
+		if(now_us() - f.at_us > FOE_US || ts.empty() || ts != scene ||
+				!m_entities.count(f.ship)){
+			log_i(MODULE, "%s stops fighting back", cs(bot_name(e)));
+			m_bot_foes.erase(fi);
+			return;
+		}
+		for(auto &p : m_entities){
+			const Entity &s = p.second;
+			if(!s.has_pos || !has_seat(s) || free_root_of(s.id) != f.ship)
+				continue;
+			Instance via;
+			via.params.set("via", (int64_t)s.id);
+			json::Value station;
+			if(station_lit(e, via, station) < 1 || jstr(station, "does") != "gun")
+				continue;
+			double at[3];
+			place_of(ti->second, at);
+			// (a player's place is under its feet: its body's middle)
+			if(ti->second.kind == "player")
+				at[1] += 0.85;
+			json::Value j = json::object();
+			j.set("station", station);
+			j.set("id", (int64_t)-1);
+			j.set("kind", ss_("attack"));
+			j.set("text", ss_("fight back"));
+			j.set("target", (int64_t)f.foe);
+			j.set("at", point(at));
+			j.set("dist", std::sqrt((at[0] - w[0]) * (at[0] - w[0]) +
+					(at[1] - w[1]) * (at[1] - w[1]) + (at[2] - w[2]) * (at[2] - w[2])));
+			best = j;
+			return;
+		}
 	}
 
 	// A bot's use of an entity: its usable parts' on_use and the world event
@@ -20296,6 +20384,69 @@ struct Module: public interface::Module, public Interface
 			if(m_free_objects.count(pi->first))
 				return pi->first;
 		return 0;
+	}
+
+	// [KIT_AIRSHIPS_BOTS_LEFTOVERS] Whether a player's or a bot's entity is
+	// aboard a ship: in a seat under it, or (a player) on its deck
+	bool aboard(uint64_t id, uint64_t ship)
+	{
+		if(!ship)
+			return false;
+		auto bs = m_bot_seats.find(id);
+		if(bs != m_bot_seats.end())
+			return free_root_of(bs->second.seat) == ship;
+		for(auto &p : m_peers){
+			if(p.second.player != id)
+				continue;
+			if(p.second.frame && free_root_of(p.second.frame) == ship)
+				return true;
+			auto bi = m_bodies.find(p.first);
+			return bi != m_bodies.end() && bi->second.seat &&
+					free_root_of(bi->second.seat) == ship;
+		}
+		return false;
+	}
+
+	// [KIT_AIRSHIPS_BOTS_LEFTOVERS] Who last hurt a bot or the ship it crews
+	// (by its entity), that ship and when (now_us): for FOE_US it fights back
+	// from that ship's gun (bot_foe_lit)
+	struct BotFoe
+	{
+		uint64_t foe = 0, ship = 0;
+		int64_t at_us = 0;
+	};
+	std::map<uint64_t, BotFoe> m_bot_foes;
+	static constexpr int64_t FOE_US = 30000000;
+	// A hit by `by` ("player:<entity>" or "bot:<id>") on a bot (bot) or on a
+	// ship's cells (ship, bot 0: its crew of bots)
+	void bot_attacked(uint64_t bot, uint64_t ship, const ss_ &by)
+	{
+		const size_t c = by.find(':');
+		const uint64_t foe = c == ss_::npos ? 0 : strtoull(by.c_str() + c + 1, nullptr, 10);
+		if(!foe || !m_entities.count(foe))
+			return;
+		auto mark = [&](uint64_t b, uint64_t s){
+			if(b == foe || !s || aboard(foe, s))
+				return;
+			BotFoe &f = m_bot_foes[b];
+			if(f.foe != foe)
+				log_i(MODULE, "%s is attacked by %s", cs(bot_name(m_entities[b])),
+						cs(by_text(by)));
+			f.foe = foe, f.ship = s, f.at_us = now_us();
+		};
+		if(bot){
+			auto bs = m_bot_seats.find(bot);
+			const uint64_t s = bs != m_bot_seats.end() ? free_root_of(bs->second.seat) : 0;
+			auto fi = m_bot_foes.find(bot);
+			mark(bot, s ? s : fi != m_bot_foes.end() ? fi->second.ship : 0);
+			return;
+		}
+		sv_<uint64_t> crew;
+		for(auto &bs : m_bot_seats)
+			if(free_root_of(bs.second.seat) == ship)
+				crew.push_back(bs.first);
+		for(uint64_t b : crew)
+			mark(b, ship);
 	}
 
 	// Who holds a vehicle, a player or a bot, but `bot` ("": nobody)
@@ -22553,6 +22704,8 @@ struct Module: public interface::Module, public Interface
 					cs(itos(target)), cs(by_text(by)));
 			return 0;
 		}
+		if(is_bot(it->second))
+			bot_attacked(target, 0, by);
 		for(size_t i = 0; i < it->second.comps.size(); i++){
 			const Instance &in = it->second.comps[i];
 			if(!m_types[in.type].health || !in.disabled.empty())
@@ -23480,10 +23633,12 @@ struct Module: public interface::Module, public Interface
 	// The nearest entity with health in the scene along a ray (d a unit
 	// vector) from o within max, skip not: a player's body a box 0.7 wide
 	// from its node's 0.5 down to 1.2 up (its head the top 0.3), another's
-	// a cell round it. 0 for none; t its distance, head a player's head
+	// a cell round it. 0 for none; t its distance, head a player's head.
+	// [KIT_AIRSHIPS_BOTS_LEFTOVERS] ship: a shot from that ship's gun passes
+	// its crew (aboard())
 	uint64_t ray_target(const ss_ &scene, const double o[3],
 			const double d[3], double max, uint64_t skip, double &t,
-			bool &head)
+			bool &head, uint64_t ship = 0)
 	{
 		uint64_t best = 0;
 		for(auto &e : m_entities){
@@ -23496,6 +23651,8 @@ struct Module: public interface::Module, public Interface
 						in.disabled.empty());
 			ss_ es;
 			if(!health || !scene_of(en, &es) || es != scene)
+				continue;
+			if(ship && (en.kind == "player" || is_bot(en)) && aboard(e.first, ship))
 				continue;
 			double w[3], et = 0;
 			world_of(en, w);
@@ -23883,7 +24040,7 @@ struct Module: public interface::Module, public Interface
 				double t = 0;
 				bool head = false;
 				uint64_t id = ray_target(scene, pr.pos, d, wall, me, t,
-						head);
+						head, pr.ship);
 				// [KIT_AIRSHIPS] a ship's voxel before them
 				double st = 0;
 				int sc = -1;
@@ -26708,6 +26865,7 @@ struct Module: public interface::Module, public Interface
 		m_drives.clear();
 		m_play_params.clear();
 		m_bot_seats.clear(); // [KIT_GUIDE_STATIONS]
+		m_bot_foes.clear(); // [KIT_AIRSHIPS_BOTS_LEFTOVERS]
 		m_session.by = by;
 		m_session.round.clear();
 		// The last Stop's discarded builds are no longer to keep

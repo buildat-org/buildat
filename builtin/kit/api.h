@@ -1359,6 +1359,11 @@ namespace interface
 // muzzle d m out (move.lua's M.aim, by M.arc, which a gunner's impact
 // marker draws with). Goal pick "nearest_health": the nearest thing with
 // health that is no player or bot.
+// [KIT_AIRSHIPS_BOTS_LEFTOVERS] A shot from a ship's gun passes its crew
+// (seated under the ship, or a player on its deck). A bot hurt, or the ship
+// it crews hit, fights back: c.goal {id = -1, kind = "attack", text = "fight
+// back", target, station} through that ship's free gun for 30 s. A reach
+// goal through a held station counts whoever aboard enters as the holder.
 // c:explode{at = {x, y, z} (c.pos by default), radius (0...9, 0), power
 // (0...1000, 1), kill (0...32, radius), hurt (0...32, 0), share (0...1,
 // 0.5), friendly_fire (true), type ("blast")}: a blast in the entity's

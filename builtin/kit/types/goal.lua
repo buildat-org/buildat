@@ -63,6 +63,9 @@
 -- ever: a reach by being in the box (at the helm, the ship takes them
 -- there), an attack by its links. `pick` also "nearest_health": the nearest
 -- thing with health (kit/health, hp left) that is no player or bot.
+-- [KIT_AIRSHIPS_BOTS_LEFTOVERS] A reach goal through a station on a ship,
+-- the station held: whoever aboard enters the box enters it as the holder
+-- (kit.cpp's via_holder: the helm took them there, not the gunner).
 -- simplified: a priority list, not a planner; a reach goal with a picked
 -- target other than "entity" is never entered (its box stays at its place)
 -- simplified: to "team" is left out (kit/ui_text's way, the members sharing one
