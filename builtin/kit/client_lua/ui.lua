@@ -965,6 +965,9 @@ local function update()
 				if tostring(u.layout or "none") == "none" and H <= 0 then
 					h = math.min(15 * V, ph)
 				end
+				-- (grown below for what it holds; not while its size is dragged)
+				r.grow = tostring(u.layout or "none") == "none" and
+						not (drag and drag.id == id and drag.size) and ph
 			else
 				if r.pie then
 					local s = (W > 0 and H > 0) and math.min(W, H) or
@@ -1034,6 +1037,29 @@ local function update()
 		if r.el and r.kind == "panel" and (r.ui.layout == "column" or
 				r.ui.layout == "row") then
 			stack(r, V)
+		end
+		-- ([KIT_PANEL_LEFTOVERS] A panel not stacking taller than its height
+		-- for what is at its top and its bottom: on a small touchscreen its
+		-- vmin height shrinks, a touch button's not, and a bottom Close
+		-- covered the end of the text)
+		if r.el and r.kind == "panel" and r.grow and r.kids then
+			local tops, bottoms = 0, 0
+			for _, k in ipairs(r.kids) do
+				local a = tostring(k.ui.anchor or "top_left")
+				local e = num(k.ui.y, 0, -400, 400) * V + k.h
+				if a:find("bottom") then
+					bottoms = math.max(bottoms, e)
+				elseif a:find("top") then
+					tops = math.max(tops, e)
+				end
+			end
+			local need = math.min(r.grow, r.title_h + 3 * pad + tops + bottoms)
+			if bottoms > 0 and need > r.h then
+				for _, k in ipairs(r.kids) do
+					k.ph = k.ph + need - r.h
+				end
+				r.h = need
+			end
 		end
 	end
 	-- [KIT_GOALS] The stacked lines of one place under each other
