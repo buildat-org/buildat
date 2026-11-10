@@ -883,13 +883,17 @@ restart(){
 	from=$(wc -l 2>/dev/null < "$log" || echo 0)
 	standin_start "$i"
 	if start "$i"; then
-		for n in $(seq 600); do
+		# [SERVE_STANDIN_RACE] Looked at often: a native client the stand-in
+		# takes fails to join. simplified: for up to 0.1 s after the server's
+		# "Listening at" the stand-in still takes some; none would need the
+		# server to tell the stand-in itself
+		for n in $(seq 6000); do
 			tail -n +"$((from + 1))" "$log" 2>/dev/null |
 				grep -q "Listening at\|Failed to bind" && break
 			kill -0 "${pids[$i]}" 2>/dev/null || break
-			sleep 1
+			sleep 0.1
 		done
-		[ "$n" = 600 ] && say "${games[$i]} is not listening after 10 minutes; going on"
+		[ "$n" = 6000 ] && say "${games[$i]} is not listening after 10 minutes; going on"
 	fi
 	standin_stop "$i"
 }
@@ -1131,7 +1135,16 @@ while true; do
 		app_trial_tick "$i"
 	done
 	# Quicker while a stand-in waits for its server
-	if [ -n "$(printf '%s' "${standins[@]:-}")" ]; then
+	# Quickest while one waits for its server's "Listening at"
+	# ([SERVE_STANDIN_RACE])
+	waiting=""
+	for i in "${!games[@]}"; do
+		[ -n "${standins[$i]:-}" ] &&
+			[ -z "${withdrawn[$i]:-}${standin_build[$i]:-}" ] && waiting=1
+	done
+	if [ -n "$waiting" ]; then
+		sleep 0.1
+	elif [ -n "$(printf '%s' "${standins[@]:-}")" ]; then
 		sleep 1
 	# A poll under the 5 s is kept (a check's)
 	elif [ "$poll" -ge 1 ] && [ "$poll" -lt 5 ]; then
