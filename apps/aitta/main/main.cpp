@@ -1647,6 +1647,10 @@ struct Module: public interface::Module, public moderation::Host
 			if(interface::fs::path_exists(src+"/"+n.name+"/wasm"))
 				m_web_names.push_back(n.name+".wasm");
 		}
+		// [AITTA_WEB_BUILD_LEFTOVERS] Nothing to build (one for the page with
+		// no .wasm and no C++): built as it is
+		if(m_web_names.empty() && !m_web_cpp)
+			return web_done(false, true);
 #ifdef __linux__
 		m_web_started = now_s();
 		sv_<ss_> args = {"--build-wasm", m_web_job, m_server->get_config()
@@ -1754,12 +1758,12 @@ struct Module: public interface::Module, public moderation::Host
 		return "";
 	}
 
-	void web_done(bool over)
+	void web_done(bool over, bool nothing_to_build = false)
 	{
 		json::Value rel = load("releases", m_web_id);
 		json::Value built = json::object();
 		bool ok = !over && rel.is_object() && (!m_web_names.empty() ||
-				m_web_cpp);
+				m_web_cpp || nothing_to_build);
 		for(const ss_ &f : m_web_names){
 			// The engine refuses a .wasm past 8 MiB (wasm/engine.h)
 			const ss_ data = ok ? read_built(m_web_job, "out", f,

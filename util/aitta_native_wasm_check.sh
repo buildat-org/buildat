@@ -9,14 +9,16 @@
 #      no SDK: "web_wasm", "web_native", no "web" or "web_cpp", and no
 #      "runs in the browser". apps/sample_rust: "web", as before. A package
 #      with no .wasm of its own, a variant, a remix and a world with a
-#      module's wasm/ in them are not built. While a build runs, three more
+#      module's wasm/ in them are not built; one for the page with no .wasm
+#      at all is, as it is ("web", "web_wasm" empty). While a build runs, three more
 #      of the author's wait and a fourth is refused, not for the page too.
 #   2. `buildat aitta install` with the toolchain hidden: .aitta_wasm/ has
 #      each by its sha256; a server with the toolchain hidden starts it and
 #      says Aitta built it (Rust too); a client gets the .wasm and runs it.
 #      A server that has the toolchain builds from source.
 #   3. The client's own install (Apps from Aitta) fetches them, and fetches
-#      them again from the list when they are gone.
+#      them again from the list when they are gone. Install clicked twice:
+#      one install; Escape then: done after its page went, it leaves it alone.
 #   4. A zip with .aitta_wasm, .aitta_from, .aitta_sha256 and .web at its
 #      root: refused at publish, dropped at each install, from a file and
 #      from an Aitta.
@@ -254,6 +256,20 @@ EOF
 done
 echo "ok: a package with no .wasm of its own, a variant, a remix and a world are not built"
 
+# [AITTA_WEB_BUILD_LEFTOVERS] For the page with nothing to build: built as it
+# is. Named after nativeapp, which 3. finds first on the page
+mkdir -p "$t/pagenowasm/main"
+echo '{"engine_api": 2, "disable_cpp": true}' > "$t/pagenowasm/main/meta.json"
+publish "$t/pagenowasm" pagenowasm
+built pagenowasm "$t/srv.log"
+release pagenowasm > "$t/rel_pagenowasm.json"
+python3 - "$t/rel_pagenowasm.json" <<'EOF' || fail "pagenowasm is not in the page ($t/rel_pagenowasm.json)"
+import json, sys
+r = json.load(open(sys.argv[1]))
+assert r["web"] is True and r["web_build"] == "built" and r["web_wasm"] == {}, r
+EOF
+echo "ok: one for the page with no .wasm is built and in the page"
+
 # 2. Installed with the toolchain hidden, and run
 "${NT[@]}" "$b" aitta install "$A" tester/nativeapp "$t/u" > "$t/inst.out" 2> "$t/inst.err" ||
 	fail "the install: $(cat "$t/inst.err")"
@@ -318,12 +334,20 @@ wait_log 20000 aitta page: tester/nativeapp
 delay 500
 wait_log_any 5000 aitta panel: tester/nativeapp 1.0.0
 click Button "Install"
-wait_log 20000 aitta status: Installed tester/nativeapp 1.0.0
+click Button "Install"
+keypress Escape
+wait_log 20000 aitta: tester/nativeapp done, its page gone
 quit
 EOF
 timeout 120 "$b" -o launch_ui=launch_menu -D "$t/u2" -C "$t/c_u2" -w 800x600 -l 3 \
 	-o sound_mute=1 -c @"$t/gui.cmds" > "$t/gui.log" 2>&1 ||
 	fail "the install's drive ($t/gui.log): $(grep -ao 'Command sequence failed.*' "$t/gui.log" | head -1)"
+# [AITTA_WEB_BUILD_LEFTOVERS] A double-click: one install; Escape: done
+# after its page went, which it leaves alone
+[ "$(grep -ac "aitta status: Fetching tester/nativeapp" "$t/gui.log")" = 1 ] &&
+	grep -aq "aitta: tester/nativeapp: an install runs already" "$t/gui.log" ||
+	fail "a double-click installed twice ($t/gui.log)"
+grep -a "was removed" "$t/gui.log" && fail "the install touched its page gone ($t/gui.log)"
 installed_as_listed "$t/u2/installed/$fp/nativeapp/1.0.0" nativeapp ||
 	fail "the client's install did not fetch them ($t/gui.log)"
 mv "$t/u2/installed/$fp/nativeapp/1.0.0/.aitta_wasm" "$t/gui_wasm_was"

@@ -23,16 +23,16 @@ run() # <log> <flags...>
 {
 	local log=$1; shift
 	timeout 300 bin/buildat_server --compile-only -m "../apps/$app" -C "$c" \
-			-D "$t/user" -l 4 "$@" > "$log" 2>&1 ||
+			-r "$c/rccpp_build" -D "$t/user" -l 4 "$@" > "$log" 2>&1 ||
 		fail "the server failed ($log)"
 }
 run "$t/shared.log" --unconfined
 run "$t/first.log"
 grep -aq "network: the shared build's is current" "$t/first.log" ||
 	fail "no copy in the app's cache and the shared build not used ($t/first.log)"
-# -C does not move a tree build's rccpp_build_path: a module compiled here
-# went to the tree's cache, not the warm copy above
-mod=$here/cache/rccpp_build/builtin_network.so
+# -C does not move a tree build's rccpp_build_path, -r does: without it the
+# shared build is the tree's own cache/rccpp_build (the desk's)
+mod=$c/rccpp_build/builtin_network.so
 [ -f "$mod" ] || fail "no $mod"
 cp "$mod" "$own/builtin_network.so"
 echo stale > "$own/builtin_network.so.hash"
