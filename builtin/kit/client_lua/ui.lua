@@ -256,6 +256,10 @@ local function make(r, id, parent, in_panel)
 	el.priority = math.floor(in_panel and 60 + order or
 			u.kind == "panel" and -100 + order or -1000 + order)
 	el.bringToFront = false
+	-- [KIT_PHONE_EDITING] Placed from the root's size (the hotbar centred
+	-- held to the left): counted by the client's fit, a fit down moved it
+	-- out as the root grew and held the UI small
+	el:SetVar("FollowsRoot", "1")
 	r.el = el
 	r.parts = {}
 	local p = r.parts
