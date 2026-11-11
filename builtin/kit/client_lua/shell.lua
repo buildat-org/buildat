@@ -35,16 +35,38 @@
 --     (editor_input.lua's draw_guide); the Walk view's HUD laid out in the
 --     world's rect (kit.hud_area). builtin/accounts' Server button is
 --     hidden meanwhile (the pause menu's settings have its window).
--- The pointer is the desktop's (a click selects and places, the right drag
--- turns, the middle pans, the wheel zooms), the fingers as before, both in
--- the world's rect (editor.lua's screen_size).
+-- Stage 3, the world's gestures (editor_input.lua), in the world's rect
+-- (editor.lua's screen_size): the tool decides what one finger does, two
+-- fingers move the view (pan and pinch; in 3D orbit and pinch). One finger:
+--   - select (no tool): a tap selects (an entity the finger's half touch
+--     size away too), on nothing deselects; a drag on the selection moves
+--     it, on a knob turns it, on nothing pans; under Select+ a tap adds or
+--     takes out and a drag on nothing boxes (adding);
+--   - placing: a tap places (the view then panned to keep it off the
+--     world's edge, NT.reveal), a drag pans;
+--   - voxels: in each view as Walk's and play's, a tap digs and a finger
+--     held places;
+--   - Box: a tap is a corner, a face's handle dragged moves the face;
+--   - terrain: a drag is a stroke (2D, 3D), as before.
+-- A finger held still is the right click (the entity's menu), as before.
+-- Walk is the app's: a drag turns (and its stick), a tap the tool's.
+-- The mouse: the left button a finger (a click a tap, a drag one finger's),
+-- the right drag the two fingers' (the plan pans, 3D orbits, Walk turns),
+-- the middle dragged a pinch (up zooms in), the wheel zooms; no crosshair.
+-- The ports are hidden (beside a finger-sized entity they took its taps): a
+-- link is begun by the inspector's Link <output>, and a tap on an entity of
+-- one input ends it (of more, it is selected: the inspector's To buttons).
+-- The foot's buttons: Select+, Turn - and + (Z, X), Up and Down (PageUp,
+-- PageDown), Duplicate, Undo, Delete, Cancel, in rows as they fit.
 -- simplified: Scenes, the voxel dialog, the HUD editor, the blip designer,
 -- the builders' box and the Log open as on the desktop, and the dialogs
 -- still count in the UI fit (stage 4 makes them panes); Tools does not
 -- scroll (a pane's room is the UI half less its header and foot); landscape
 -- typing is as on the desktop (stage 2's field entry mode); a world of no
 -- height is drawn a pixel high under the UI half (a rect of nothing is the
--- whole screen to Urho3D)
+-- whole screen to Urho3D). Stage 3's: no two-finger twist (the plan does
+-- not turn); the ports hidden in each view, not only the plan; Walk's two
+-- fingers each turn the eye (the app's own)
 return function(A)
 local S, W, E, NT, M, O = A.S, A.W, A.E, A.NT, A.M, A.O
 local magic, log, send, window, drop = A.magic, A.log, A.send, A.window, A.drop
@@ -212,9 +234,28 @@ function SH.build()
 	SH.more_b = button(w, "...", SH.more)
 	SH.more_b:SetName("shell more")
 	SH.empty = text(w, "")
-	SH.acts = {button(w, "Undo", function() send({op = "undo"}) end),
+	-- [KIT_PHONE_EDITING] stage 3: the world's mouse- and keyboard-only work
+	-- (Select more, Z/X, PageUp/PageDown, Ctrl+D) as buttons
+	local more_b, more_t = button(w, "Select+", function()
+		SH.multi = not SH.multi
+		log:info("kit editor: touch shell: select more " ..
+				(SH.multi and "on" or "off"))
+	end)
+	SH.multi_t, SH.multi_shown = more_t, 0
+	SH.acts = {more_b,
+		button(w, "Turn -", function() NT.turn_step(-1) end),
+		button(w, "Turn +", function() NT.turn_step(1) end),
+		button(w, "Up", function() NT.raise(1) end),
+		button(w, "Down", function() NT.raise(-1) end),
+		button(w, "Duplicate", function() NT.duplicate() end),
+		button(w, "Undo", function() send({op = "undo"}) end),
 		button(w, "Delete", function() M.delete_selected() end),
 		(button(w, "Cancel", function() M.escape() end))}
+	-- (by name for a drive: "Up" is not the only one)
+	for i, n in ipairs({"select more", "turn -", "turn +", "up", "down",
+			"duplicate", "undo", "delete", "cancel"}) do
+		SH.acts[i]:SetName("shell " .. n)
+	end
 	SH.status = text(w, "")
 	SH.status_said = nil
 end
@@ -233,11 +274,33 @@ local function place_shell()
 	SH.title:SetPosition(PAD + T + 8, PAD + math.floor((T - SH.title.height) / 2))
 	local sy = u[4] - PAD - SH.status.height
 	SH.status:SetPosition(PAD, sy)
-	local ay = sy - 4 - T
-	local bw = math.floor((u[3] - 2 * PAD - 8) / 3)
+	-- The buttons in rows as they fit (each its label's width, at least the
+	-- touch size), each row stretched across. The world's (the first six)
+	-- not in the palette's pane: a landscape phone's had room for one row of
+	-- its list
+	-- simplified: so a prefab being placed is turned by Z and X only
+	local room, rows = u[3] - 2 * PAD, {{used = -4}}
 	for i, b in ipairs(SH.acts) do
-		b:SetFixedSize(bw, T)
-		b:SetPosition(PAD + (i - 1) * (bw + 4), ay)
+		local bw, r = math.max(T, b:GetChild(0).width + 16), rows[#rows]
+		b.visible = i > 6 or SH.pane ~= "palette"
+		if not b.visible then
+			bw = nil
+		elseif #r > 0 and r.used + 4 + bw > room then
+			r = {used = -4}
+			rows[#rows + 1] = r
+		end
+		if bw then
+			r[#r + 1], r.used = {b = b, w = bw}, r.used + 4 + bw
+		end
+	end
+	local ay = sy - #rows * (T + 4)
+	for i, r in ipairs(rows) do
+		local x, extra = PAD, math.floor((room - r.used) / #r)
+		for _, c in ipairs(r) do
+			c.b:SetFixedSize(c.w + extra, T)
+			c.b:SetPosition(x, ay + (i - 1) * (T + 4))
+			x = x + c.w + extra + 4
+		end
 	end
 	local top = PAD + T + 4
 	SH.empty:SetPosition(PAD, top + 4)
@@ -413,7 +476,8 @@ function SH.tick()
 	if W.shell:GetVar("KitTouch") ~= "1" then
 		return
 	end
-	local lk = table.concat(ui, " ") .. " " .. W.shell.width
+	local lk = table.concat(ui, " ") .. " " .. W.shell.width .. " " ..
+			tostring(SH.pane == "palette")
 	if lk ~= SH.laid then
 		SH.laid = lk
 		place_shell()
@@ -445,6 +509,12 @@ function SH.tick()
 			"Nothing selected: tap an entity" or ""
 	if SH.empty.text ~= e then
 		SH.empty.text = e
+	end
+	-- Select+ on in the bar buttons' yellow
+	if SH.multi ~= SH.multi_shown then
+		SH.multi_shown = SH.multi
+		SH.multi_t:SetColor(SH.multi and magic.Color(1.0, 0.85, 0.3) or
+				magic.Color(1, 1, 1))
 	end
 	local s = status_text()
 	if s ~= SH.status_said then
