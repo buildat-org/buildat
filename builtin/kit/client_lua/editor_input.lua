@@ -3104,6 +3104,7 @@ function M.editor(options)
 			return
 		end
 		E.status = "Refused: " .. tostring(data)
+		NT.fe.refused(E.status)
 		NT.select_new = nil
 		NT.pf.refused()
 		clear_preview()
@@ -3255,6 +3256,7 @@ function M.editor(options)
 		end
 		-- [KIT_PHONE_EDITING] The touch mode's layout after the scaling
 		NT.sh.tick()
+		NT.fe.tick()
 	end)
 end
 return terrain_panel

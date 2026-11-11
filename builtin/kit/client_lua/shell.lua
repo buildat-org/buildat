@@ -42,7 +42,8 @@
 -- the builders' box and the Log open as on the desktop, and the dialogs
 -- still count in the UI fit (stage 4 makes them panes); Tools does not
 -- scroll (a pane's room is the UI half less its header and foot); landscape
--- typing is as on the desktop (stage 2's field entry mode); a world of no
+-- typing outside the inspector's parameters is as on the desktop (theirs is
+-- field_entry.lua's mode); a world of no
 -- height is drawn a pixel high under the UI half (a rect of nothing is the
 -- whole screen to Urho3D)
 return function(A)

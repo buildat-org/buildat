@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~5 min, four web drives (2026-11-11)
-# covers: builtin/kit/client_lua/shell.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua
+# cost: ~6 min, four web drives (2026-11-11)
+# covers: builtin/kit/client_lua/shell.lua builtin/kit/client_lua/field_entry.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua
 # [KIT_PHONE_EDITING] stage 1, the touch mode's split screen: Workbench's
 # web client in headless Chrome by finger (TOUCH=1), the editor's UI mode
 # left to the device (kit_ui_mode=0, touch on a touchscreen), as a phone in
@@ -19,6 +19,19 @@
 #   - portrait: the inspector's "position x" tapped and a stand-in keyboard
 #     up (buildatKeyboard.test, 42 % of the height): the UI half above it,
 #     the world shorter by as much, the field above the keyboard.
+# Stage 2, the field entry mode (field_entry.lua); the inspector scrolled to
+# a field by the event kit_inspector_show:
+#   - landscape (915x412): kit/button's hold (a number) typed with the
+#     stand-in keyboard up: 99 refused in place, the mode kept, 2.5 applied
+#     (the server's log); typed again and Cancelled (not sent); Next and
+#     Prev through own_look (a yes/no list), sound_press (a choice list) and
+#     back past hold to color_down; color (text) applied; sound_press picked
+#     from its list, no keyboard; the inspector's + stepper and Apply; a
+#     kit/door placed: mirror Yes applied; a size past the world refused by
+#     the server, in place, and Cancelled; the field and the buttons above
+#     the keyboard;
+#   - portrait (412x915): the x/y/z row and Move inside the pane; a kit/npc
+#     placed, its lines (long text) open the mode and are applied.
 # And a mouse at 1600x900 (no TOUCH): the desktop's layout (the bar, the
 # palette at the left, no shell), a click on the palette and one on the
 # plan place the button.
@@ -43,7 +56,7 @@ for r in $runs; do
 	esac
 	mkdir -p "$t/$r"
 	python3 -I - "$t/$r/steps.json" "$w" "$h" "$mode" "$touch" <<'PY' || fail "steps of $r"
-import json, sys
+import json, re, sys
 path, W, H, mode, touch = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4], sys.argv[5] == "1"
 S = []
 def a(*s): S.append(list(s))
@@ -123,6 +136,84 @@ if H > W:
     a("shot", "${OUT}/05_keyboard.png")
     dump("keyboard")
     a("eval", "buildatKeyboard.test = null, 'no keyboard'"); fr(5)
+# Stage 2: the field entry mode. Another entity placed from the palette's
+# pane, beside the first
+def place(t):
+    a("tap", "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
+    a("tap", "Button", "menu Palette"); a("waitlog", "touch shell: the palette pane", 10); fr(10)
+    a("tap", "Button", "palette filter clear"); fr(2)
+    a("tap", "LineEdit", "palette filter"); fr(2); a("type", t); fr(5)
+    a("tap", "Button", t); a("waitlog", "kit editor: placing " + t, 10); fr(10)
+    a("tap", x, y + 60 if H > W else y - 60)
+    a("waitlog", "touch shell: the inspector pane", 20); fr(10)
+    a("tap", "Button", "Cancel"); fr(5)
+def tapf(t, name):
+    # The inspector scrolled to it first: the pane is a few rows high
+    a("event", "kit_inspector_show " + name)
+    a("waitlog", "the inspector shows " + re.escape(name) + "$", 10); fr(3)
+    a("tap", t, name)
+def entry(field, kind):
+    a("waitlog", r"field entry: \d+/\d+ %s \(%s\)" % (field, kind), 10)
+    a("waitlog", "field entry: laid out", 10); fr(5)
+kb = "buildatKeyboard.test = %d, 'keyboard'" % int(H * 0.42)
+if H > W:
+    # Long text opens the mode upright too
+    place("kit/npc")
+    tapf("LineEdit", "field lines"); entry("lines", "long text")
+    a("eval", kb); a("waitlog", "field entry: laid out", 10); fr(5)
+    a("shot", "${OUT}/06_long_text.png")
+    a("selall"); fr(2); a("type", "Hello there|A second line, long enough to wrap in the box"); fr(3)
+    a("tap", "Button", "entry apply"); a("waitlog", "field entry: closed, applied", 10)
+    a("eval", "buildatKeyboard.test = null, 'no keyboard'"); fr(5)
+elif mode == "0":
+    a("shot", "${OUT}/05_inspector.png")
+    # A number typed: refused in place (over its range), then applied
+    tapf("LineEdit", "field hold"); fr(3); a("eval", kb); entry("hold", "number")
+    a("shot", "${OUT}/06_entry_number.png")
+    a("selall"); fr(2); a("type", "99"); fr(2)
+    a("tap", "Button", "entry apply"); a("waitlog", "refused in place: hold: at most 60", 10); fr(5)
+    a("shot", "${OUT}/07_entry_refused.png")
+    a("selall"); fr(2); a("type", "2.5"); fr(2)
+    a("tap", "Button", "entry apply"); a("waitlog", "field entry: closed, applied", 10); fr(5)
+    # Cancel: typed and left
+    tapf("LineEdit", "field hold"); fr(3); entry("hold", "number")
+    a("selall"); fr(2); a("type", "7"); fr(2)
+    a("tap", "Button", "entry cancel"); a("waitlog", "field entry: closed, cancelled", 10); fr(5)
+    # Next and Prev: hold's neighbours (by name: color, color_down, hold,
+    # own_look, sound_press, use)
+    tapf("LineEdit", "field hold"); fr(3); entry("hold", "number")
+    a("tap", "Button", "entry next"); entry("own_look", "bool")
+    a("tap", "Button", "entry next"); entry("sound_press", "choice")
+    a("shot", "${OUT}/08_entry_choice_next.png")
+    a("tap", "Button", "entry prev"); entry("own_look", "bool")
+    a("tap", "Button", "entry prev"); entry("hold", "number")
+    a("tap", "Button", "entry prev"); entry("color_down", "text")
+    a("tap", "Button", "entry cancel"); a("waitlog", "field entry: closed, cancelled", 10); fr(5)
+    # Text
+    tapf("LineEdit", "field color"); fr(3); entry("color", "text")
+    a("selall"); fr(2); a("type", "#00ff00"); fr(2)
+    a("tap", "Button", "entry apply"); a("waitlog", "field entry: closed, applied", 10); fr(5)
+    # A choice: a list, no keyboard
+    a("eval", "buildatKeyboard.test = null, 'no keyboard'")
+    tapf("Button", "field sound_press"); entry("sound_press", "choice")
+    a("shot", "${OUT}/09_choice_list.png")
+    a("tap", "Button", "choice none"); a("waitlog", "field entry: picked none", 10)
+    a("tap", "Button", "entry apply"); a("waitlog", "field entry: closed, applied", 10); fr(5)
+    # The inspector's stepper, and its Apply
+    tapf("Button", "field hold +"); a("waitlog", "field entry: stepped .* hold to 3.5", 10); fr(5)
+    a("shot", "${OUT}/10_steppers.png")
+    tapf("Button", "kit apply"); a("waitlog", r'kit editor: sent .*"hold".*3\.5', 10); fr(5)
+    # A yes/no, and a refusal of the server's (a size past the world)
+    place("kit/door")
+    tapf("Button", "field mirror"); entry("mirror", "bool")
+    a("tap", "Button", "choice Yes"); a("tap", "Button", "entry apply")
+    a("waitlog", "field entry: closed, applied", 10); fr(5)
+    tapf("LineEdit", "field size"); fr(3); a("eval", kb); entry("size", "text")
+    a("selall"); fr(2); a("type", "1 2 99999"); fr(2)
+    a("tap", "Button", "entry apply"); a("waitlog", "refused in place: Refused: set", 10); fr(5)
+    a("shot", "${OUT}/11_entry_server_refused.png")
+    a("tap", "Button", "entry cancel"); a("waitlog", "field entry: closed, cancelled", 10); fr(5)
+    a("eval", "buildatKeyboard.test = null, 'no keyboard'"); fr(5)
 json.dump(S, open(path, "w"), indent=0)
 PY
 	echo "kit_touch_mode: $r"
@@ -193,8 +284,49 @@ if H > W:
     wr, ur, kbh = rect(g[1]), rect(g[2]), int(g[3])
     assert ur[1] + ur[3] <= H - kbh + 2, f"the UI half {ur} under the keyboard {kbh}"
     print(f"ok: the field {f0}-{f1} above the keyboard from {kb}; the world {wr}, the UI {ur}")
+    # Stage 2: the x/y/z row inside the pane; long text in the mode, applied
+    # (each against the pane of its time, less the inspector's scroll bar)
+    pane, row = None, {}
+    for l in page:
+        m = re.search(r"touch shell: pixels: .*the pane ([\d ]+),", l)
+        if m:
+            pane = rect(m[1])
+        m = re.search(r"the position row's (\w+) at ([\d ]+)", l)
+        if m:
+            r = row[m[1]] = rect(m[2])
+            assert r[0] >= pane[0] and r[0] + r[2] <= pane[0] + pane[2] - 12, \
+                f"the position row's {m[1]} {r} out of the pane {pane}"
+    assert set(row) == {"x", "y", "z", "move"}, f"the position row: {row}"
+    assert re.search(r"set \d+'s kit/npc lines to \"Hello there\|A second line", server), \
+        "the long text not applied (server.log)"
+    print(f"ok: the position row {row} in the pane {pane}; the long text applied")
+if W > H and "lh" not in d:
+    t = "\n".join(page)
+    def sets(what): return re.search(r"An edit by webboss: set \d+'s " + what, server)
+    for what in [r"kit/button hold to 2\.5", r'kit/button color to "#00ff00"',
+            r'kit/button sound_press to ""', r"kit/button hold to 3\.5", r"kit/door mirror to true"]:
+        assert sets(what), f"not applied: {what} (server.log)"
+    for what in [r"kit/button hold to 7\b", r"kit/button hold to 99\b"]:
+        assert not sets(what), f"applied: {what} (server.log)"
+    assert re.search(r"An edit \(set\) by peer \d+ refused: kit/door's size", server), \
+        "the size not refused (server.log)"
+    # A refusal keeps the mode: Apply again, not a close, after each
+    ev = [l for l in page if "field entry: " in l]
+    for i, l in enumerate(ev):
+        if "refused in place" in l:
+            nxt = next((m for m in ev[i + 1:] if "closed" in m or "applied, waiting" in m), "")
+            assert "closed" not in nxt or "cancelled" in nxt, f"closed by a refusal: {l} / {nxt}"
+    order = re.findall(r"field entry: \d+/\d+ (\w+) \(", t)
+    assert "hold own_look sound_press own_look hold color_down" in " ".join(order), f"Prev/Next: {order}"
+    # The typed field and the buttons above the stand-in keyboard
+    for l in ev:
+        m = re.search(r"laid out (\d+)x(\d+), the field (\d+) to (\d+), the buttons (\d+) to (\d+), the keyboard (\d+)", l)
+        if m and int(m[7]) > 0:
+            top = int(m[2]) - int(m[7])
+            assert int(m[4]) <= top and int(m[6]) <= top, f"under the keyboard: {l}"
+    print(f"ok: the field entry mode: {len(order)} fields entered, applied and cancelled as asked, refusals in place")
 print(f"ok: {seen['targets']} target dumps, {seen['windows']} window dumps, the button placed; "
         f"the world {geo['world']}, the UI {geo['ui']}, the touch size {geo['touch']}")
 PY
 done
-echo "PASS: Kit's touch mode ($runs): no UI fit, the targets at the touch size, the panes off the world, a palette tap and a world tap placed, the field above the keyboard; the desktop's layout unchanged ($t)"
+echo "PASS: Kit's touch mode ($runs): no UI fit, the targets at the touch size, the panes off the world, a palette tap and a world tap placed, the field above the keyboard, the field entry mode applying, cancelling and refusing in place; the desktop's layout unchanged ($t)"
