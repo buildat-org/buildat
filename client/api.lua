@@ -2216,10 +2216,28 @@ end
 -- declare_preference(name[, on_change]) -> its value; the game settings
 -- window gets its row, and on_change(value) is called when that row
 -- changes it. Only the preferences that are an app's: the editors' text,
--- Kit's editor layout.
+-- Kit's editor layout and its fullscreen.
 -- Until the connection ends.
 local DECLARABLE = {kit_editor_font = true, floorplanner_font = true,
-	kit_ui_mode = true}
+	kit_ui_mode = true, kit_fullscreen = true}
+-- **A layout an app's own gesture sets** ([KIT_PHONE_EDITING]: Kit's touch
+-- mode's divider dragged, kept per device rather than per game):
+-- get_app_preference(name), set_app_preference(name, value) -> true, or
+-- false and why. Only these names, never the user's choices; the client's
+-- parser range checks the value
+local APP_WRITABLE = {kit_ui_split = true}
+buildat.safe.get_app_preference = function(name)
+	if not APP_WRITABLE[name] then
+		return nil
+	end
+	return __buildat_get_preference(name)
+end
+buildat.safe.set_app_preference = function(name, value)
+	if not APP_WRITABLE[name] or type(value) ~= "string" then
+		return false, "set_app_preference: not an app's layout"
+	end
+	return __buildat_set_preference(name, value)
+end
 local game_declared = {}
 buildat.safe.declare_preference = function(name, on_change)
 	if not DECLARABLE[name] then

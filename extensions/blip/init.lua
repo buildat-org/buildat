@@ -19,7 +19,9 @@
 -- (node's scene's listener hears it; near and far its distances, 2 and
 -- 32 m). blip.design(sound, on_save) opens the designer with the sound,
 -- its Save calling on_save(the sound packed, "blip1:...") and closing it
--- ([KIT_SOUNDS]). blip.gen and blip.mix are
+-- ([KIT_SOUNDS]); blip.design(sound, on_save, {rect = {x, y, w, h},
+-- world = {x, y, w, h}}) puts its controls in rect and the code in world
+-- (UI units; Kit's touch mode: its UI half and its world's). blip.gen and blip.mix are
 -- the generator and the mixer, which an app may also copy into itself.
 -- Its versioning is its formats' (blip1), not the engine's.
 local api = buildat.safe or buildat
@@ -364,7 +366,8 @@ local designer = nil
 
 -- sound and on_save: [KIT_SOUNDS] the designer on that sound, a Save
 -- button calling on_save(the sound packed) and closing it
-local function open_designer(sound, on_save)
+local function open_designer(sound, on_save, opts)
+	opts = opts or {}
 	if designer then
 		return
 	end
@@ -396,7 +399,28 @@ local function open_designer(sound, on_save)
 	-- resized while it is open keeps the layout it opened with
 	local ui_w, ui_h = magic.ui.root.width, magic.ui.root.height
 	local col, code_col = win, nil
-	if ui_w >= 820 and ui_w > ui_h then
+	local rect = opts.rect
+	if rect then
+		-- Placed by the caller: the controls clipped to rect, the code in a
+		-- window of its own in opts.world
+		-- simplified: the controls keep their desktop sizes (28 high)
+		root:SetLayout(magic.LM_FREE, 0, magic.IntRect(0, 0, 0, 0))
+		root:SetAlignment(magic.HA_LEFT, magic.VA_TOP)
+		root:SetPosition(0, 0)
+		root:SetFixedSize(ui_w, ui_h)
+		win:SetPosition(rect[1], rect[2])
+		win:SetFixedSize(rect[3], rect[4])
+		win.clipChildren = true
+		local wr = opts.world
+		if wr and wr[3] >= 120 and wr[4] >= 80 then
+			code_col = root:CreateChild("Window")
+			code_col:SetStyleAuto()
+			code_col:SetName("blip code")
+			code_col:SetPosition(wr[1], wr[2])
+			code_col:SetFixedSize(wr[3], wr[4])
+			code_col.clipChildren = true
+		end
+	elseif ui_w >= 820 and ui_w > ui_h then
 		win:SetLayout(LM_HORIZONTAL, 12, magic.IntRect(10, 10, 10, 10))
 		-- On the left, the layout's order; filled below
 		code_col = win:CreateChild("UIElement")
@@ -675,7 +699,7 @@ local function open_designer(sound, on_save)
 	-- As wide as the column (its layout stretches it); the rows are
 	-- made as wide below, once the column has its width
 	view:SetFixedHeight(math.min(260,
-			math.max(120, magic.ui.root.height - 430)))
+			math.max(120, (rect and rect[4] or magic.ui.root.height) - 430)))
 	-- The layer's offset first, in seconds: up to 1 here, up to
 	-- gen.MAX_AT in the formats; the first layer's is 0
 	local defs = {{"at", 0, 1, 0}}
@@ -889,7 +913,7 @@ local function open_designer(sound, on_save)
 	end
 
 	status = text(col, "")
-	status:SetFixedWidth(360)
+	status:SetFixedWidth(rect and math.max(40, rect[3] - 24) or 360)
 	if code_col then
 		-- As tall as the controls beside it: a horizontal layout gives a
 		-- child with no fixed height the window's. As wide as the room
@@ -908,18 +932,37 @@ local function open_designer(sound, on_save)
 		code.clipBorder = magic.IntRect(3, 3, 3, 3)
 		code.textSelectable = true
 		code.textCopyable = true
-		code:SetFixedWidth(math.max(360, math.min(720, ui_w - 460)))
+		if rect then
+			code_col:SetLayout(LM_VERTICAL, 6, magic.IntRect(10, 10, 10, 10))
+			code:SetFixedSize(opts.world[3] - 20, math.max(40, opts.world[4] - 50))
+		else
+			code:SetFixedWidth(math.max(360, math.min(720, ui_w - 460)))
+		end
 	end
 	-- The rows as wide as the view, less its scroll bar
-	page:SetFixedWidth(view.width - 24)
+	page:SetFixedWidth((rect and rect[3] - 20 or view.width) - 24)
 	show_values()
 	show_code()
 	log:info("designer shown")
 end
 
-function M.safe.design(sound, on_save)
+function M.safe.design(sound, on_save, opts)
 	assert(type(on_save) == "function", "blip.design: on_save a function")
-	open_designer(gen.params(sound), on_save)
+	local function rect(r)
+		if r == nil then
+			return nil
+		end
+		assert(type(r) == "table" and #r == 4, "blip.design: a rect {x, y, w, h}")
+		local o = {}
+		for i = 1, 4 do
+			assert(type(r[i]) == "number", "blip.design: a rect's numbers")
+			o[i] = math.floor(math.max(0, math.min(100000, r[i])))
+		end
+		return o
+	end
+	opts = type(opts) == "table" and opts or {}
+	open_designer(gen.params(sound), on_save, {rect = rect(opts.rect),
+		world = opts.rect and rect(opts.world)})
 end
 
 -- The launch tile's way in (launcher/init.lua); params as a server's

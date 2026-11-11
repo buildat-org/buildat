@@ -154,6 +154,13 @@ namespace app
 		// a touchscreen, else desktop), 1 desktop, 2 touch with the UI on the
 		// right, 3 touch with it on the left (in landscape)
 		int kit_ui_mode = 0;
+		// Its touch mode's divider, kept per device: "<tall> <wide>", the
+		// world's share of a tall screen's height and the UI half's of a
+		// wide one's width, each 0.2 to 0.8; empty is the defaults
+		ss_ kit_ui_split;
+		// Kit's editor fullscreen (on the web the page, which also holds
+		// screen_orientation then); a check run pins it off
+		bool kit_fullscreen = false;
 	};
 
 	// Parses "k=v[,k=v...]" on top of whatever *opt already holds. Returns

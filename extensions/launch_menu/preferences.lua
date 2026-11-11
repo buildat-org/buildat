@@ -174,6 +174,16 @@ local PREFERENCES = {
 					"Touch, left-handed"})[v]
 		end,
 	},
+	-- [KIT_PHONE_EDITING] Kit's editor fullscreen, the web page's (the
+	-- Screen orientation row is held while it is); no row natively, where
+	-- the client's own key (F11) is fullscreen
+	{
+		name = "kit_fullscreen",
+		label = "Fullscreen",
+		declared = true,
+		web = true,
+		values = {false, true},
+	},
 	-- The web page's address bar while playing ([WEB_ADDRESS_BAR]); the
 	-- web client's only, and no row natively
 	{
@@ -202,6 +212,7 @@ local PREFERENCES = {
 			if api.get_preference("screen_orientation_error") then
 				return "Not supported by this browser"
 			elseif api.get_preference("screen_orientation") ~= "auto" and
+					not api.get_preference("kit_fullscreen") and
 					(api.get_preference("web_address_bar") == "show" or
 					api.get_preference("web_address_bar") == "landscape" and
 					api.get_preference("screen_orientation") == "portrait") then
@@ -752,7 +763,7 @@ local GAME_ROWS = {
 	{"Sound", {"sound_volume_db", "sound_mute"}},
 	{"Video", {"render_scale", "max_fps", "vsync", "multisampling",
 		"lighting", "ui_size", "page_size", "web_address_bar", "screen_orientation", "web_idle_fps",
-		"kit_editor_font", "floorplanner_font", "kit_ui_mode"}},
+		"kit_editor_font", "floorplanner_font", "kit_ui_mode", "kit_fullscreen"}},
 }
 local game = nil
 

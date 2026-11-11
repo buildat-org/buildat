@@ -22,6 +22,9 @@
 -- sends every component's pending edits made meanwhile as the inspector's
 -- Apply does, and leaves once the server's state has the value (a refusal
 -- shown in place, the mode kept open); Cancel puts them back as they were.
+-- Stage 4: a field of another form by the same rules, FE.extra[its name]:
+-- a rec with apply(text), which Apply calls and leaves (no Prev or Next;
+-- the Signals view's Name, signals.lua).
 -- simplified: a long text is a string parameter whose value or default is
 -- over 40 characters (no Kit type declares a multi-line one; a newline typed
 -- is refused, Kit's strings are one line); the old value is shown to 30
@@ -32,7 +35,7 @@ local S, W, E, NT = A.S, A.W, A.E, A.NT
 local magic, ui_utils, log, find = A.magic, A.ui_utils, A.log, A.find
 local window, drop, button, text, edit, row = A.window, A.drop, A.button,
 		A.text, A.edit, A.row
-local FE = {list = {}}
+local FE = {list = {}, extra = {}}
 NT.fe = FE
 local LONG = 40
 local GOLD = magic.Color(1.0, 0.85, 0.3)
@@ -218,7 +221,7 @@ end
 
 local function go(by)
 	local s = FE.s
-	if s.waiting or not keep(s) then
+	if s.rec.apply or s.waiting or not keep(s) then
 		return
 	end
 	local n = #FE.list
@@ -231,6 +234,10 @@ end
 
 function FE.apply()
 	local s = FE.s
+	if s and s.rec.apply then
+		s.rec.apply(s.edit:GetText())
+		return close("applied")
+	end
 	if not s or s.waiting or not keep(s) then
 		return
 	end
@@ -487,13 +494,18 @@ function FE.tick()
 		return
 	end
 	local name = f:GetName()
+	local function maybe(rec)
+		if rec.long or (not NT.sh.tall and buildat.keyboard_height() > 0) then
+			FE.open(rec)
+		end
+	end
 	for _, rec in ipairs(FE.list) do
 		if rec.name == name then
-			if rec.long or (not NT.sh.tall and buildat.keyboard_height() > 0) then
-				FE.open(rec)
-			end
-			return
+			return maybe(rec)
 		end
+	end
+	if FE.extra[name] then
+		maybe(FE.extra[name])
 	end
 end
 end

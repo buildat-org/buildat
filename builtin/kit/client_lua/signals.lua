@@ -161,6 +161,11 @@ local function put_body(view, build)
 	local body = view:CreateChild("UIElement")
 	body:SetLayout(magic.LM_VERTICAL, 3, magic.IntRect(0, 0, 2, 0))
 	build(body)
+	-- ([KIT_PHONE_EDITING] stage 4: a body built again in a window the touch
+	-- mode sized already)
+	if NT.sh.on() then
+		NT.sh.touch_size(body)
+	end
 	-- Its width first: wider than the view, a sideways bar comes for a moment
 	-- and leaves the view's position past the top
 	SG.body_w(view, body)
@@ -692,10 +697,93 @@ local function pick(body, what, choices, current, fn)
 	d:SetName("signals " .. what)
 end
 
+-- [KIT_PHONE_EDITING] stage 4, the touch mode's form: steps, each a list of
+-- buttons (named "link <step> <value>", an entity's "link <step> <type> <id>",
+-- for a drive): an output, its target,
+-- the target's input, which links them; from an input's row (a.into) a
+-- source, then its output
+local function add_steps(body, e)
+	local a = SG.add
+	SG.form_at = body:CreateChild("UIElement")
+	local function others(choices)
+		local r = {}
+		for _, x in ipairs(A.entities()) do
+			if x.id ~= e.id and x.kind ~= "scene" and #choices(x) > 0 then
+				r[#r + 1] = {NT.entity_label(x), x.id,
+					kit_short(main_type(x)) .. " " .. x.id}
+			end
+		end
+		return r
+	end
+	local other = a.other and find(a.other)
+	local steps = a.into and {
+		{"source", "its source", function() return others(output_choices) end,
+			"other"},
+		{"output", "the source's output", function()
+			return output_choices(other or {})
+		end, "out"},
+	} or {
+		{"output", "an output", function() return output_choices(e) end, "out"},
+		{"target", "its target", function() return others(input_choices) end,
+			"other"},
+		{"input", "the target's input", function()
+			return input_choices(other)
+		end, "input"},
+	}
+	local n, step = 0, nil
+	for i, st in ipairs(steps) do
+		if a[st[4]] == nil then
+			n, step = i, st
+			break
+		end
+	end
+	local function link()
+		local comp, output = tostring(a.out):match("^(%d+) (.*)$")
+		local from, to = a.into and a.other or e.id, a.into and e.id or a.other
+		SG.add = nil
+		if comp and from and to and a.input then
+			log:info("kit editor: signals: linked " .. from .. "." .. output ..
+					" -> " .. to .. "." .. a.input)
+			send({op = "link", id = from, comp = tonumber(comp), output = output,
+				to = to, input = a.input})
+		end
+		SG.links()
+	end
+	if not step then
+		SG.add = nil
+		return
+	end
+	text(body, "Add link, " .. n .. " of " .. #steps .. ": " .. step[2],
+			LIVE_COLOR)
+	local choices = step[3]()
+	for _, c in ipairs(choices) do
+		button(body, c[1], function()
+			a[step[4]] = c[2]
+			log:info("kit editor: signals: add link: " .. step[1] .. " " ..
+					tostring(c[2]))
+			if n == #steps then
+				return link()
+			end
+			SG.form_new = true
+			SG.links()
+		end):SetName("link " .. step[1] .. " " .. tostring(c[3] or c[2]))
+	end
+	if #choices == 0 then
+		text(body, "None", DIM)
+	end
+	tight(row(body), "Cancel", function()
+		SG.add = nil
+		SG.links()
+	end):SetName("link cancel")
+end
+
 -- [KIT_SIGNALS_DOCS] The form either way: from the selected entity (its output,
 -- a target and its input), or with a.into into it (a source and its output, its
 -- input). a.other: the target or the source
 local function add_form(body, e)
+	if NT.sh.on() then
+		return add_steps(body, e)
+	end
 	local a = SG.add
 	SG.form_at = body:CreateChild("UIElement")
 	local function others(what, choices)
@@ -1177,6 +1265,15 @@ function SG.links()
 			SG.name_text = s
 		end)
 		f:SetName("signals name")
+		-- ([KIT_PHONE_EDITING] stage 4: the touch mode's field entry rules)
+		NT.fe.extra["signals name"] = NT.sh.on() and {name = "signals name",
+			key = "signals name", k = "name", e = e, kind = "text", d = {},
+			long = false,
+			f = {name = "name", type = "text", max_length = 64},
+			old = own_name(e) or "", apply = function(v)
+				SG.name_text = v
+				rename()
+			end} or nil
 		magic.SubscribeToEvent(f, "TextFinished", rename)
 		tight(nr, "Rename", rename)
 		body:CreateChild("UIElement"):SetFixedHeight(8)
@@ -1193,6 +1290,8 @@ function SG.links()
 		local b = tight(head, SG.add and "+ Add link: close" or "+ Add link",
 				function()
 			SG.add = not SG.add and {id = e.id} or nil
+			-- (the touch mode's steps below a pane's foot: in view)
+			SG.form_new = SG.add ~= nil and NT.sh.on() or nil
 			log:info("kit editor: signals: add link " ..
 					(SG.add and "open" or "closed"))
 			SG.links()
@@ -1569,7 +1668,15 @@ function SG.layout(force)
 	local was_mode = SG.mode
 	SG.mode = mode_now()
 	SG.is_narrow = SG.mode == "narrow"
+	-- [KIT_PHONE_EDITING] stage 4, the touch mode's: the list, the links and
+	-- the inspector each the shell's pane (one at a time), the viewport the
+	-- world's rect (shell.lua)
+	local pr = NT.sh.on() and NT.sh.pane_rect
 	local key = table.concat({rw, rh, top, SG.mode, tab_now(SG.mode)}, " ")
+	if pr then
+		key = table.concat(pr, " ") .. " " .. table.concat(NT.sh.world, " ") ..
+				" " .. NT.sh.pane
+	end
 	if key == SG.laid and not force then
 		SG.area_update()
 		return
@@ -1577,53 +1684,80 @@ function SG.layout(force)
 	SG.laid = key
 	local h = rh - top - MARGIN
 	local lx, lw, mx, mw, rx, rcw
-	if SG.is_narrow then
-		lx, mx, rx = MARGIN, MARGIN, MARGIN
-		lw, mw, rcw = rw - 2 * MARGIN, rw - 2 * MARGIN, rw - 2 * MARGIN
-	elseif SG.mode == "two" then
-		lw = math.floor(math.max(180, math.min(360, rw * 0.18)))
-		mw = rw - lw - 3 * MARGIN
-		rcw = mw
-		lx, mx, rx = MARGIN, 2 * MARGIN + lw, 2 * MARGIN + lw
+	if pr then
+		local pane, wr = NT.sh.pane, NT.sh.world
+		local x, y, pw, ph = pr[1], pr[2], pr[3], pr[4]
+		rcw = pw
+		SG.links_w = pw - 12 - BAR_W - 8
+		if W.sg_list then
+			W.sg_list.visible = pane == "sg_list"
+			fit(W.sg_list, SG.list_view, SG.list_body, x, y, pw, ph, SG.filter_h)
+		end
+		if W.sg_links then
+			W.sg_links.visible = pane == "sg_links"
+			fit(W.sg_links, SG.links_view, SG.links_body, x, y, pw, ph)
+		end
+		if W.sg_view then
+			W.sg_view.visible = wr[4] > 12
+			fit(W.sg_view, nil, nil, wr[1], wr[2], wr[3], math.max(13, wr[4]))
+			SG.view3d:SetFixedSize(math.max(1, wr[3] - 12), math.max(1, wr[4] - 12))
+		end
+		if W.inspector and IV.view then
+			W.inspector.visible = pane == "inspector"
+			IV.view.contentElement.maxWidth = 2147483647
+			fit(W.inspector, IV.view, IV.view.contentElement, x, y, pw, ph)
+			local b = IV.view.contentElement
+			b.maxWidth = b.minWidth
+		end
 	else
-		lw = math.floor(math.max(180, math.min(360, rw * 0.18)))
-		rcw = math.floor(math.max(420, math.min(640, rw * 0.36)))
-		mw = rw - lw - rcw - 4 * MARGIN
-		lx, mx, rx = MARGIN, 2 * MARGIN + lw, 3 * MARGIN + lw + mw
-	end
-	SG.links_w = mw - 12 - BAR_W - 8
-	if W.sg_list then
-		W.sg_list.visible = shown("list")
-		fit(W.sg_list, SG.list_view, SG.list_body, lx, top, lw, h, SG.filter_h)
-	end
-	if W.sg_links then
-		W.sg_links.visible = shown("links")
-		fit(W.sg_links, SG.links_view, SG.links_body, mx, top, mw, h)
-	end
-	-- The viewport's height: a 4:3 picture of the column, at most 45 percent
-	local vh = math.floor(math.min(h * 0.45, (rcw - 12) * 0.75)) + 12
-	local on_right = shown("inspector")
-	-- A short narrow window (a phone held sideways): the inspector alone
-	local no_view = SG.is_narrow and h < 320
-	if no_view then
-		vh = -MARGIN
-	end
-	if W.sg_view then
-		W.sg_view.visible = on_right and not no_view
-		fit(W.sg_view, nil, nil, rx, top + h - vh, rcw, vh)
-		SG.view3d:SetFixedSize(rcw - 12, math.max(1, vh - 12))
-	end
-	if W.inspector and IV.view then
-		W.inspector.visible = on_right
-		-- (free while fit sets its least, which may have grown)
-		IV.view.contentElement.maxWidth = 2147483647
-		fit(W.inspector, IV.view, IV.view.contentElement, rx, top, rcw, h - vh - MARGIN)
-		-- [KIT_SIGNALS_HSCROLL] The inspector's body no wider either: the layout
-		-- grew it a frame later to the view's inner width, its fields under
-		-- the vertical bar and a sideways bar for them (the links' table may
-		-- scroll sideways, its body stays free)
-		local b = IV.view.contentElement
-		b.maxWidth = b.minWidth
+		if SG.is_narrow then
+			lx, mx, rx = MARGIN, MARGIN, MARGIN
+			lw, mw, rcw = rw - 2 * MARGIN, rw - 2 * MARGIN, rw - 2 * MARGIN
+		elseif SG.mode == "two" then
+			lw = math.floor(math.max(180, math.min(360, rw * 0.18)))
+			mw = rw - lw - 3 * MARGIN
+			rcw = mw
+			lx, mx, rx = MARGIN, 2 * MARGIN + lw, 2 * MARGIN + lw
+		else
+			lw = math.floor(math.max(180, math.min(360, rw * 0.18)))
+			rcw = math.floor(math.max(420, math.min(640, rw * 0.36)))
+			mw = rw - lw - rcw - 4 * MARGIN
+			lx, mx, rx = MARGIN, 2 * MARGIN + lw, 3 * MARGIN + lw + mw
+		end
+		SG.links_w = mw - 12 - BAR_W - 8
+		if W.sg_list then
+			W.sg_list.visible = shown("list")
+			fit(W.sg_list, SG.list_view, SG.list_body, lx, top, lw, h, SG.filter_h)
+		end
+		if W.sg_links then
+			W.sg_links.visible = shown("links")
+			fit(W.sg_links, SG.links_view, SG.links_body, mx, top, mw, h)
+		end
+		-- The viewport's height: a 4:3 picture of the column, at most 45 percent
+		local vh = math.floor(math.min(h * 0.45, (rcw - 12) * 0.75)) + 12
+		local on_right = shown("inspector")
+		-- A short narrow window (a phone held sideways): the inspector alone
+		local no_view = SG.is_narrow and h < 320
+		if no_view then
+			vh = -MARGIN
+		end
+		if W.sg_view then
+			W.sg_view.visible = on_right and not no_view
+			fit(W.sg_view, nil, nil, rx, top + h - vh, rcw, vh)
+			SG.view3d:SetFixedSize(rcw - 12, math.max(1, vh - 12))
+		end
+		if W.inspector and IV.view then
+			W.inspector.visible = on_right
+			-- (free while fit sets its least, which may have grown)
+			IV.view.contentElement.maxWidth = 2147483647
+			fit(W.inspector, IV.view, IV.view.contentElement, rx, top, rcw, h - vh - MARGIN)
+			-- [KIT_SIGNALS_HSCROLL] The inspector's body no wider either: the layout
+			-- grew it a frame later to the view's inner width, its fields under
+			-- the vertical bar and a sideways bar for them (the links' table may
+			-- scroll sideways, its body stays free)
+			local b = IV.view.contentElement
+			b.maxWidth = b.minWidth
+		end
 	end
 	SG.area_update()
 	if SG.links_view and SG.links_drawn_w and SG.links_drawn_w ~= SG.links_w then
@@ -1682,7 +1816,8 @@ end
 -- The columns that take turns, in the bar
 function SG.bar(bar_button)
 	local mode = mode_now()
-	if mode == "wide" then
+	-- (the touch mode's are panes, its "...")
+	if mode == "wide" or NT.sh.on() then
 		return
 	end
 	for _, c in ipairs({{"list", "Entities"}, {"links", "Links"},
