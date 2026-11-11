@@ -344,6 +344,8 @@ int main(int argc, char *argv[])
 			"                       editors' text, a percent 50 to 150),\n"
 			"                       kit_ui_mode (Kit's editor: 0 the device's,\n"
 			"                       1 desktop, 2 touch RH, 3 touch LH),\n"
+			"                       fp_ui_mode (floorplanner's editor, the\n"
+			"                       same),\n"
 			"                       cache_keep (days a cache file may go\n"
 			"                       unused: 7, 14, 30 or 90; 0 forever),\n"
 			"                       cache_per_server (1: a server's files\n"

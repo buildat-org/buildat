@@ -174,6 +174,17 @@ local PREFERENCES = {
 					"Touch, left-handed"})[v]
 		end,
 	},
+	-- And floorplanner's (4z11 stage 5)
+	{
+		name = "fp_ui_mode",
+		label = "Editor UI mode",
+		declared = true,
+		values = {0, 1, 2, 3},
+		show = function(v)
+			return ({[0] = "Automatic", "Desktop", "Touch, right-handed",
+					"Touch, left-handed"})[v]
+		end,
+	},
 	-- [KIT_PHONE_EDITING] Kit's editor fullscreen, the web page's (the
 	-- Screen orientation row is held while it is); no row natively, where
 	-- the client's own key (F11) is fullscreen
@@ -763,7 +774,8 @@ local GAME_ROWS = {
 	{"Sound", {"sound_volume_db", "sound_mute"}},
 	{"Video", {"render_scale", "max_fps", "vsync", "multisampling",
 		"lighting", "ui_size", "page_size", "web_address_bar", "screen_orientation", "web_idle_fps",
-		"kit_editor_font", "floorplanner_font", "kit_ui_mode", "kit_fullscreen"}},
+		"kit_editor_font", "floorplanner_font", "kit_ui_mode", "fp_ui_mode",
+		"kit_fullscreen"}},
 }
 local game = nil
 

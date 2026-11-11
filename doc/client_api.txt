@@ -538,15 +538,15 @@ buildat.declare_preference(name[, on_change]) -> value
   touch on a touchscreen, else desktop; 1 desktop; 2 touch, the UI on the
   right; 3 touch, on the left) and kit_fullscreen (the web client's only:
   Kit's editor puts the page fullscreen with set_web_fullscreen("always"))
-  -- read, and a row for it put in the game
+  and fp_ui_mode, floorplanner's editor layout (as kit_ui_mode's) -- read, and a row for it put in the game
   settings window's Video section until the connection ends; on_change(value)
   is called when that row changes it. Any other name: nil and why.
 - extensions/launch_menu/preferences.lua is the screen over these.
 buildat.get_app_preference(name) -> value or nil
 buildat.set_app_preference(name, value) -> true, or false and why
 - A layout the app's own gesture sets, kept per device: kit_ui_split, Kit's
-  touch mode's divider ("<tall> <wide>", each share 0.2 to 0.8). No other
-  name.
+  touch mode's divider ("<tall> <wide>", each share 0.2 to 0.8), and
+  fp_ui_split, floorplanner's the same. No other name.
 
 buildat.read_image(resource_name) -> width, height, rgba
 - The pixels of an image, as one string of four bytes per pixel, row by row.

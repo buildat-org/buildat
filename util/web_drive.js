@@ -12,7 +12,8 @@
 // A steps file is a JSON list of steps, each a list:
 //   ["nav", url]            open the page, and wait for it to load; the
 //                           address gets pref=web_idle_fps=60,
-//                           pref=kit_ui_mode=1 and pref=kit_fullscreen=0
+//                           pref=kit_ui_mode=1, pref=fp_ui_mode=1 and
+//                           pref=kit_fullscreen=0
 //                           (full_rate)
 //   ["wait", ms]
 //   ["waitlog", regex, s]   until a line of the page's console matches, one
@@ -118,7 +119,8 @@ const fs = require("fs");
 // nav's address asks for 60 unless it names web_idle_fps itself.
 // [KIT_PHONE_EDITING] Kit's editor in its desktop layout, where the drives
 // measured their taps, unless the address names kit_ui_mode (the touch
-// mode's checks), as util/check_lib.sh's BUILDAT_TEST_KIT_UI_MODE natively
+// mode's checks), as util/check_lib.sh's BUILDAT_TEST_KIT_UI_MODE natively;
+// floorplanner's fp_ui_mode the same
 // And Kit's editor's Fullscreen off whatever the address says: a run never
 // takes the screen
 function full_rate(u) {
@@ -132,6 +134,8 @@ function full_rate(u) {
 		url.searchParams.append("pref", "web_idle_fps=60");
 	if (!prefs.some(p => p.startsWith("kit_ui_mode=")))
 		url.searchParams.append("pref", "kit_ui_mode=1");
+	if (!prefs.some(p => p.startsWith("fp_ui_mode=")))
+		url.searchParams.append("pref", "fp_ui_mode=1");
 	url.searchParams.append("pref", "kit_fullscreen=0");
 	return url.toString();
 }
