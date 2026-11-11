@@ -2685,6 +2685,32 @@ function M.hud_picked()
 	NT.hud_panel(true)
 end
 
+-- A position parameter's text as three numbers, nil when it is not
+function NT.position_of(v)
+	local x, y, z = tostring(v):match(
+			"^%s*(%-?[%d.]+)[%s,]+(%-?[%d.]+)[%s,]+(%-?[%d.]+)%s*$")
+	return x and {tonumber(x), tonumber(y), tonumber(z)}
+end
+
+-- What Apply does: e's component ci's pending values sent and dropped.
+-- Returns the client's own refusal (a position not three numbers), if any
+function NT.apply_params(e, ci, decl)
+	local key, bad = e.id .. "/" .. ci, nil
+	for k, v in pairs(E.pending[key] or {}) do
+		if decl[k] and decl[k].type == "position" then
+			v = NT.position_of(v)
+		end
+		if v == nil then
+			bad = k .. ": three numbers"
+			E.status = bad
+		else
+			send({op = "set", id = e.id, comp = ci - 1, param = k, value = v})
+		end
+	end
+	E.pending[key] = nil
+	return bad
+end
+
 -- [KIT_PARAM_CATEGORIES] A component's parameters, keep(name, decl) saying which
 -- (all without one), with Apply. Pending values and Apply cover every parameter
 -- of it, shown or not: the inspector's and the HUD view's panel's share them
@@ -2728,12 +2754,15 @@ function NT.params_form(w, e, ci, c, t, keep)
 						magic.Color(ui_utils.rgb("text")))
 			end
 		end
+		-- [KIT_PHONE_EDITING] The touch mode's: choices as a list and number
+		-- steppers, each field reached by the field entry mode (field_entry.lua)
 		ui_utils.settings_form(w, fields, values, function(k, v)
 			E.pending[key] = E.pending[key] or {}
 			E.pending[key][k] = v
 			log:info("kit editor: " .. key .. " " .. k .. " = " .. tostring(v))
 			mark()
-		end, WIDGETS)
+		end, NT.sh.on() and NT.fe.widgets(e, ci, c, decl, fields, WIDGETS) or
+				WIDGETS)
 		-- [KIT_WAVE_PIVOT_CENTER] a parameter's `button = "center"`: the object's
 		-- centre set again (the server's, one edit)
 		for _, k in ipairs(names) do
@@ -2775,20 +2804,7 @@ function NT.params_form(w, e, ci, c, t, keep)
 		end
 		local apply_b
 		apply_b, apply_text = button(w, "Apply", function()
-			for k, v in pairs(E.pending[key] or {}) do
-				if decl[k] and decl[k].type == "position" then
-					local x, y, z = tostring(v):match(
-							"^%s*(%-?[%d.]+)[%s,]+(%-?[%d.]+)[%s,]+(%-?[%d.]+)%s*$")
-					v = x and {tonumber(x), tonumber(y), tonumber(z)}
-				end
-				if v == nil then
-					E.status = k .. ": three numbers"
-				else
-					send({op = "set", id = e.id, comp = ci - 1, param = k,
-						value = v})
-				end
-			end
-			E.pending[key] = nil
+			NT.apply_params(e, ci, decl)
 			refresh()
 		end)
 		-- [KIT_PHONE_EDITING] what fit_inspector keeps above the keyboard
@@ -3230,6 +3246,12 @@ local function inspector(w, e, is_made)
 	-- what this one moves
 	if e.pos and not copy then
 		local r, at = row(w), {e.pos[1], e.pos[2], e.pos[3]}
+		-- [KIT_PHONE_EDITING] The touch mode's: Move and Turn on a row of their
+		-- own under the three, which share the pane's width less its scroll
+		-- bar (a field's 120 cut Move off at 412 wide)
+		local sh = NT.sh.on()
+		local fw = sh and math.floor(((NT.sh.pane_w() - 12 - 24) / S.font -
+				3 * 16 - 24) / 3)
 		for i, axis in ipairs({"x", "y", "z"}) do
 			-- One letter's room: the row's layout has already widened it
 			label(r, axis):SetFixedWidth(12)
@@ -3243,10 +3265,13 @@ local function inspector(w, e, is_made)
 			end)
 			f.cursorPosition = 0
 			f.minWidth = 56
+			if fw then
+				f:SetFixedWidth(fw)
+			end
 			-- For a driven click, and kit_ui_where
 			f:SetName("position " .. axis)
 		end
-		button(r, "Move", function()
+		local mv = button(sh and row(w) or r, "Move", function()
 			if not (at[1] and at[2] and at[3]) then
 				E.status = "Move: three numbers"
 				return people()
@@ -3260,6 +3285,11 @@ local function inspector(w, e, is_made)
 			log:info(string.format("kit editor: moved %d by %g, %g, %g from "
 					.. "the inspector", n, by[1], by[2], by[3]))
 		end)
+		mv:SetName("position move")
+		-- (its own width: a wide inspector stretched it past the pane)
+		if sh then
+			mv.maxWidth = mv.minWidth
+		end
 		-- [KIT_FREE_ROTATION] Its turn typed in, once it has one or may well get
 		-- one (the rows' angles: in the world, as the position's)
 		if (e.yaw or 0) ~= 0 or (e.pitch or 0) ~= 0 or (e.roll or 0) ~= 0 or
@@ -3275,9 +3305,12 @@ local function inspector(w, e, is_made)
 				end)
 				f.cursorPosition = 0
 				f.minWidth = 56
+				if fw then
+					f:SetFixedWidth(fw)
+				end
 				f:SetName("turn " .. axis)
 			end
-			button(tr, "Turn", function()
+			local tb = button(sh and row(w) or tr, "Turn", function()
 				if not (a[1] and a[2] and a[3]) then
 					E.status = "Turn: three numbers"
 					return people()
@@ -3287,6 +3320,9 @@ local function inspector(w, e, is_made)
 				log:info(string.format("kit editor: turned %d to %g, %g, %g from "
 						.. "the inspector", e.id, a[1], a[2], a[3]))
 			end)
+			if sh then
+				tb.maxWidth = tb.minWidth
+			end
 		end
 	end
 	-- ([KIT_NO_WORLD_TYPES] one with no position too: kit/starting_kit under a
@@ -3778,6 +3814,13 @@ magic.SubscribeToEvent("command_seq:kit_ui_where", function(_, data)
 		for i = 0, el:GetNumChildren() - 1 do
 			local f = el:GetChild(i)
 			local axis = f and f:GetName():match("^position (%a)$")
+			-- [KIT_PHONE_EDITING] the touch mode's row: where each is (pixels)
+			local pn = f and NT.sh.on() and f:GetName():match("^position (%a+)$")
+			if pn then
+				local p = f.screenPosition
+				log:info(string.format("kit editor: the position row's %s at %d %d "
+						.. "%d %d", pn, p.x * sc, p.y * sc, f.width * sc, f.height * sc))
+			end
 			if axis then
 				log:info(string.format("kit editor: the field position %s shows "
 						.. "\"%s\" scrolled %d", axis, f:GetText(),
@@ -4016,6 +4059,7 @@ build_inspector = function()
 	end
 	IV.view = nil
 	drop("inspector")
+	NT.fe.list = {}
 	S.cost_text, S.cost_id = nil, nil
 	local e, is_made = nil, false
 	if S.primary then
@@ -4054,6 +4098,33 @@ build_inspector = function()
 	fit_inspector()
 	view.viewPosition = magic.IntVector2(0, IV.y)
 end
+
+-- A check's ("event kit_inspector_show <name>"): the inspector scrolled to
+-- its element of that name, as a finger would
+magic.SubscribeToEvent("command_seq:kit_inspector_show", function(_, data)
+	local name, view = data:GetString("Param"), IV.view
+	local body = view and view.contentElement
+	local function at(el)
+		for i = 0, el:GetNumChildren() - 1 do
+			local c = el:GetChild(i)
+			if c:GetName() == name then
+				return c
+			end
+			c = at(c)
+			if c then
+				return c
+			end
+		end
+	end
+	local el = body and at(body)
+	if el then
+		view.viewPosition = magic.IntVector2(0, math.max(0, math.min(
+				el.screenPosition.y - body.screenPosition.y - 8,
+				body.height - view.height)))
+	end
+	log:info("kit editor: the inspector shows " .. name .. (el and "" or
+			": none"))
+end)
 
 -- [KIT_PARAM_CATEGORIES] The HUD view's one panel: the selected HUD element's
 -- HUD parameters, beside it; a click on the background closes it
@@ -5384,6 +5455,16 @@ do
 		refresh = function() refresh() end, people = function() people() end,
 		show_log = function() show_log() end,
 		set_view = function(v) set_view(v) end})
+end
+-- Its field entry mode (field_entry.lua)
+do
+	local ok, err, install = buildat.run_script_file("kit/field_entry.lua")
+	assert(ok and type(install) == "function", "kit: field_entry.lua: " ..
+			tostring(err))
+	install({S = S, W = W, E = E, NT = NT, magic = magic, ui_utils = ui_utils,
+		log = log, window = window, drop = drop, button = button, text = text,
+		edit = edit, row = row, DIM = DIM, WARN = WARN, find = find,
+		refresh = function() refresh() end})
 end
 
 -- [KIT_PREFAB_ROOT] A placed prefab's root, the palette's menu on a prefab, the
