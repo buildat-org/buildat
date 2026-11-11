@@ -2483,9 +2483,12 @@ local function draw()
 	end
 	-- [KIT_BAR_SERVER_OVERLAP] Wrapped again at a new screen width (the
 	-- root's at the client's fit x1; see rebuild_bar)
-	if W.bar and S.bar_root_w ~= math.floor(magic.ui.root.width *
-			(tonumber(magic.ui.root:GetVar("FitFactor")) or 1) + 0.5) then
+	if W.bar and S.bar_root_w ~= NT.fit1_w() then
 		rebuild_bar()
+	end
+	-- (after the text size's scaling, which scaled the cap people() set)
+	if W.people and NT.cap_w(20) then
+		W.people.maxWidth = NT.cap_w(20)
 	end
 	NT.fit_panel()
 	fit_inspector()

@@ -458,6 +458,21 @@ end
 -- frame). In one table: the file's locals are at Lua's 200
 local NT = {cache = {}}
 
+-- [KIT_PHONE_EDITING] The root's width at the client's UI fit x1 (its
+-- FitFactor): what a panel is laid out to does not follow the fit, which
+-- it would push down further as the root grew
+function NT.fit1_w()
+	return math.floor(magic.ui.root.width *
+			(tonumber(magic.ui.root:GetVar("FitFactor")) or 1) + 0.5)
+end
+
+-- [KIT_PHONE_EDITING] On a touchscreen a panel at most the screen's width
+-- at the fit x1 less margin: one wider (the builders' box, the inspector,
+-- for a frame before the editor's text size scales them) fitted the UI down
+function NT.cap_w(margin)
+	return S.touch and NT.fit1_w() - margin or nil
+end
+
 -- [KIT_SIGNALS_VIEW] Whether the Signals table has the window now
 function NT.sig()
 	return E.editing and S.view == "signals"
@@ -1217,9 +1232,9 @@ rebuild_bar = function(if_changed)
 	-- [KIT_PHONE_EDITING] Wrapped to the root's width at the client's fit
 	-- x1, not the current one: the root grows as the fit shrinks, and a bar
 	-- wrapped wider at each fit down ratcheted the UI down on a phone
-	S.bar_root_w = math.floor(magic.ui.root.width *
-			(tonumber(magic.ui.root:GetVar("FitFactor")) or 1) + 0.5)
-	bar_room = (S.bar_root_w - 16 - 12) / S.font
+	S.bar_root_w = NT.fit1_w()
+	-- (the client's fit leaves 2 % of the screen; 8 to the left, 12 border)
+	bar_room = (math.floor(S.bar_root_w * 0.98) - 16 - 12) / S.font
 	if O.menu then
 		bar_button("Menu", "Esc", function()
 			O.menu()
@@ -3829,7 +3844,10 @@ local function fit_inspector()
 	local bh = body.height + 4
 	local h = math.max(40, math.min(bh, room))
 	local bw = body.width + 4 + (h < bh and view.verticalScrollBar.width + 4 or 0)
-	if view.height ~= h or view.width ~= bw then
+	-- (its window 12 wider, 8 from the right; NT.cap_w)
+	-- (and the window itself: a layout does not shrink it by itself)
+	bw = math.min(bw, NT.cap_w(28) or bw)
+	w.maxWidth = NT.cap_w(16) or w.maxWidth	if view.height ~= h or view.width ~= bw then
 		view:SetScrollBarsVisible(false, h < bh)
 		view:SetFixedSize(bw, h)
 		log:info(string.format("kit editor: the inspector %d of %d tall", h, bh))
@@ -4268,6 +4286,8 @@ people = function()
 	end
 	local b = window(magic.HA_LEFT, magic.VA_BOTTOM, 10, -50)
 	W.people = b
+	b.maxWidth = NT.cap_w(20) or b.maxWidth
+	b.clipChildren = true
 	if slim then
 		text(b, E.status, WARN)
 		return
