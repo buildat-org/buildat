@@ -2628,6 +2628,21 @@ struct CApp: public App, public magic::Application
 		magic::Input *in = GetSubsystem<magic::Input>();
 		if(!g || !ui || !in)
 			return;
+		// **No refit under a finger's typing** ([KIT_PHONE_EDITING]): a
+		// field focused or the on-screen keyboard up holds the scale, so
+		// the field stays where it was tapped
+		const char *touch = getenv("BUILDAT_TOUCH");
+		if(touch && touch[0] == '1'){
+			magic::UIElement *f = ui->GetFocusElement();
+			int kb = 0;
+#ifdef __EMSCRIPTEN__
+			kb = EM_ASM_INT({
+				return window.buildatKeyboard ? buildatKeyboard.height() : 0;
+			});
+#endif
+			if(kb > 0 || (f && f->GetType() == magic::LineEdit::GetTypeStatic()))
+				return;
+		}
 		const int64_t now = get_timeofday_us();
 		bool busy = in->GetMouseButtonDown(magic::MOUSEB_LEFT |
 				magic::MOUSEB_MIDDLE | magic::MOUSEB_RIGHT) ||
@@ -2720,6 +2735,14 @@ struct CApp: public App, public magic::Application
 		// list opened off the screen): it is counted there
 		scan(ui->GetRootModalElement(), 0);
 		float f = std::max(FIT_FLOOR, std::min(1.f, need / base));
+		// **The root's FitHold** ([KIT_PHONE_EDITING]): set by a game while
+		// its windows come and go (Kit's editor on a touchscreen), the fit
+		// only goes down, so it does not flip as each opens and closes.
+		// simplified: one wide window keeps the UI small until the var is
+		// cleared; per-window sizing to the screen is the upgrade
+		if(f > m_fit_factor &&
+				root->GetVar(magic::StringHash("FitHold")).GetString() == "1")
+			f = m_fit_factor;
 		if(std::fabs(f - m_fit_factor) > 0.02f){
 			m_fit_factor = f;
 			m_fit_prev_root = rs;

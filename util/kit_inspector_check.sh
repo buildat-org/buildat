@@ -22,12 +22,87 @@
 #   - [KIT_FREE_ROTATION_LEFTOVERS] a kit/part under a turned one: its position
 #     fields (composed: long) show at most three decimals, from their start
 #     (x -7.4055 showed "4055").
+#   - web: [KIT_PHONE_EDITING] in headless Chrome as a phone in portrait
+#     (412x915, touch), kit/terrain's inspector scrolled to its end and its
+#     width field tapped, a stand-in keyboard (buildatKeyboard.test) of 380:
+#     the field and its Apply above the keyboard, the builders' box not under
+#     the inspector, Apply reached; the UI scale logged no new value while
+#     the field is focused, nor as Tools and the Inspector are swapped.
 #
-#   util/kit_inspector_check.sh
+#   util/kit_inspector_check.sh [web]
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
+if [ "${1:-}" = web ]; then
+	command -v "${CHROME:-google-chrome}" > /dev/null && [ -f "$here/web/buildat.wasm" ] ||
+		skip "no Chrome or web/"
+	check_tmp kit_inspector_web; t=$CHECK_TMP
+	cat > "$t/phone.json" <<'J'
+[
+	["nav", "${URL}?pref=kit_editor_font=100"],
+	["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
+	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
+	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
+	["tap", "Button", "Don't add"], ["frames", 3],
+	["waitlog_any", "world_menu: the list shown, 0 worlds", 30], ["frames", 3],
+	["tap", "Button", "New project..."],
+	["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
+	["tap", "Button", "Create"],
+	["waitlog", "player physics enabled", 120],
+	["waitlog_any", "kit editor: edit rights: yes", 10], ["frames", 5],
+	["key", "F6"], ["waitlog", "kit editor: state: 1 entities", 20], ["frames", 5],
+	["event", "kit_edit {\"op\": \"place\", \"type\": \"kit/terrain\", \"pos\": [0, 1, 0]}"],
+	["waitlog", "kit editor: state: 2 entities", 20],
+	["event", "kit_select 3"], ["waitlog", "kit editor: selected 3", 10], ["frames", 5],
+	["tap", "Button", "Inspector"], ["frames", 10], ["wait", 800],
+	["event", "kit_ui_where open"], ["frames", 3],
+	["tap", "Button", "Tools"], ["frames", 10],
+	["tap", "Button", "Inspector"], ["frames", 10],
+	["shot", "${OUT}/inspector.png"],
+	["drag", 200, 700, 200, 150, "touch"], ["frames", 5],
+	["drag", 200, 700, 200, 150, "touch"], ["frames", 5],
+	["tap", "LineEdit", "64", 300, 760], ["frames", 5],
+	["eval", "buildatKeyboard.test = 380, 'keyboard'"],
+	["waitlog", "kit editor: typing in the inspector", 10],
+	["type", "8"], ["frames", 5],
+	["shot", "${OUT}/typing.png"],
+	["event", "kit_ui_where typing"], ["frames", 3],
+	["tap", "Button", "Apply"], ["waitlog", "entities, 2 to undo", 10],
+	["eval", "buildatKeyboard.test = null, 'no keyboard'"], ["frames", 5]
+]
+J
+	TOUCH=1 WEB_DRIVE_VIEWPORT=412x915@1 "$here/util/web_drive.sh" chrome workbench "$t/phone.json" "$t/phone" ||
+		fail "the web drive as a phone ($t/phone)"
+	python3 -I - "$t/phone/page.log" <<'PY' || fail "as a phone: see above ($t/phone/typing.png, $t/phone/page.log)"
+import re, sys
+lines = open(sys.argv[1], errors="replace").read().splitlines()
+def at(s):
+    return next(i for i, l in enumerate(lines) if s in l)
+# The scale settled before the inspector's first look, and kept after it
+scales = [l for l in lines[at("(open)"):] if re.search(r"UI scale [\d.]+ \(", l)]
+assert not scales, f"the UI scale changed in edit mode: {scales}"
+m = re.search(r"typing in the inspector: the field (\d+) to (\d+), its Apply (\d+) to (\d+), "
+        r"the view (\d+) to (\d+), the keyboard from (\d+)", "\n".join(lines))
+assert m, "no typing line"
+f0, f1, a0, a1, v0, v1, kb = map(int, m.groups())
+assert v0 <= f0 and f1 <= v1 <= kb, f"the field {f0}-{f1} out of the view {v0}-{v1} or under the keyboard at {kb}"
+assert v0 <= a0 and a1 <= v1, f"Apply {a0}-{a1} out of the view {v0}-{v1}"
+w = re.search(r"the windows at (.*) \(typing\)", "\n".join(lines))[1]
+r = dict((k, list(map(int, v.split()))) for k, v in re.findall(r"(\w+) (\d+ \d+ \d+ \d+)", w))
+ins = r["inspector"]
+assert "people" not in r or r["people"][1] >= ins[1] + ins[3], f"the builders' box over the inspector: {w}"
+print(f"ok: the field {f0}-{f1}, Apply {a0}-{a1}, the keyboard from {kb}; {w}")
+PY
+	echo "PASS: Kit's inspector as a phone on the web: the typed field and its Apply above the keyboard, clear of the builders' box, the UI scale held ($t/phone/typing.png)"
+	exit 0
+fi
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi

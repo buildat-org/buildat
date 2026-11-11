@@ -2465,6 +2465,14 @@ local function draw_play_links()
 end
 
 local function draw()
+	-- [KIT_PHONE_EDITING] On a touchscreen the client's fit only goes down
+	-- while editing (the root's FitHold): the panels coming and going
+	-- flipped the UI's size
+	local hold = E.editing and S.touch and "1" or ""
+	if S.fit_hold ~= hold then
+		S.fit_hold = hold
+		magic.ui.root:SetVar("FitHold", hold)
+	end
 	if not E.editing and S.view == "hud" then
 		set_view(S.before_hud)
 	end
