@@ -532,9 +532,11 @@ buildat.declare_fov(app, default[, on_change]) -> degrees
 buildat.declare_preference(name[, on_change]) -> value
 - [KIT_EDITOR_FONT] A preference that is an app's own -- kit_editor_font
   and floorplanner_font, the editors' text size, a percent 50 to 150
-  (default 80) -- read, and a row for it put in the game settings window's
-  Video section until the connection ends; on_change(value) is called when
-  that row changes it. Any other name: nil and why.
+  (default 80) -- and kit_ui_mode, Kit's editor layout (0 the device's:
+  touch on a touchscreen, else desktop; 1 desktop; 2 touch, the UI on the
+  right; 3 touch, on the left) -- read, and a row for it put in the game
+  settings window's Video section until the connection ends; on_change(value)
+  is called when that row changes it. Any other name: nil and why.
 - extensions/launch_menu/preferences.lua is the screen over these.
 
 buildat.read_image(resource_name) -> width, height, rgba

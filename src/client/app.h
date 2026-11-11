@@ -150,6 +150,10 @@ namespace app
 		// (Workbench) and floorplanner's; the play HUD keeps its size
 		int kit_editor_font = 80;
 		int floorplanner_font = 80;
+		// [KIT_PHONE_EDITING] Kit's editor layout: 0 the device's (touch on
+		// a touchscreen, else desktop), 1 desktop, 2 touch with the UI on the
+		// right, 3 touch with it on the left (in landscape)
+		int kit_ui_mode = 0;
 	};
 
 	// Parses "k=v[,k=v...]" on top of whatever *opt already holds. Returns

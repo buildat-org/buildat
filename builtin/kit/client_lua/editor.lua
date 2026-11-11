@@ -792,9 +792,15 @@ local function make_cameras()
 	return cam3d_node, cam3d
 end
 
+-- The world's view in pixels: its width, height and left top ([KIT_PHONE_EDITING]
+-- the touch mode's rect beside the UI half, shell.lua; else the window)
 local function screen_size()
+	local r = NT.sh.world_px()
+	if r then
+		return r[3], r[4], r[1], r[2]
+	end
 	local sc = magic.ui.scale
-	return magic.ui.root.width * sc, magic.ui.root.height * sc
+	return magic.ui.root.width * sc, magic.ui.root.height * sc, 0, 0
 end
 
 local function active_camera()
@@ -817,8 +823,8 @@ function M.screen_ray(mx, my, node, cam)
 	if not node then
 		node, cam = active_camera()
 	end
-	local w, h = screen_size()
-	local fx, fy = mx / w, my / h
+	local w, h, ox, oy = screen_size()
+	local fx, fy = (mx - ox) / w, (my - oy) / h
 	if M.looking() then
 		fx, fy = 0.5, 0.5
 	end
@@ -859,8 +865,8 @@ local function to_screen(p)
 		return nil
 	end
 	local s = cam:WorldToScreenPoint(p)
-	local w, h = screen_size()
-	return s.x * w, s.y * h
+	local w, h, ox, oy = screen_size()
+	return s.x * w + ox, s.y * h + oy
 end
 
 local function round(x)
@@ -1014,6 +1020,10 @@ local function narrow()
 end
 
 local function folded(key)
+	-- [KIT_PHONE_EDITING] The touch mode's: the pane shown only (shell.lua)
+	if NT.sh.on() then
+		return NT.sh.pane ~= key
+	end
 	if not narrow() then
 		return false
 	end
@@ -1196,6 +1206,7 @@ local function bar_key()
 		tostring(current_scene()), grid_text(), angle_text(), tostring(S.tool),
 		tostring(st.clipboard ~= nil), tostring(NT.sig() and NT.sg.bar_key()),
 		tostring(narrow()), tostring(folded("palette")), tostring(folded("inspector")),
+		tostring(NT.sh.on() and NT.sh.pane .. " " .. NT.sh.pane_w()),
 		table.concat(keys, " "), tostring(M.key_name("copy")),
 		tostring(M.key_name("paste"))}, "\0")
 end
@@ -1209,6 +1220,11 @@ rebuild_bar = function(if_changed)
 	drop("bar")
 	bar_items, bar_log = {}, false
 	if not E.can_edit or (not E.editing and O.bar == false) then
+		return
+	end
+	-- [KIT_PHONE_EDITING] The touch mode's Tools pane (shell.lua places it)
+	local sh = NT.sh.on()
+	if sh and NT.sh.pane ~= "tools" then
 		return
 	end
 	-- The tools' at the top left, as floorplanner's toolbar
@@ -1235,6 +1251,10 @@ rebuild_bar = function(if_changed)
 	S.bar_root_w = NT.fit1_w()
 	-- (the client's fit leaves 2 % of the screen; 8 to the left, 12 border)
 	bar_room = (math.floor(S.bar_root_w * 0.98) - 16 - 12) / S.font
+	if sh then
+		-- (its window's border, and a target's width more than probed)
+		bar_room, bar_first = (NT.sh.pane_w() - 12 - 24) / S.font, false
+	end
 	if O.menu then
 		bar_button("Menu", "Esc", function()
 			O.menu()
@@ -1341,7 +1361,7 @@ rebuild_bar = function(if_changed)
 	end
 	if NT.sig() then
 		NT.sg.bar(bar_button)
-	elseif narrow() then
+	elseif narrow() and not sh then
 		for _, p in ipairs({{"palette", "Tools"}, {"inspector", "Inspector"}}) do
 			bar_button(p[2], nil, function()
 				toggle_fold(p[1])
@@ -1820,6 +1840,11 @@ function NT.fit_panel()
 	local bw, bh = body.width + 4, body.height + 4
 	local room_w = (math.min(screen_ui.w, magic.ui.root.width) - 16 - 12 - 8) /
 			S.font
+	-- [KIT_PHONE_EDITING] The touch mode's pane: its rect (shell.lua)
+	local pr = NT.sh.on() and NT.sh.pane_rect
+	if pr then
+		bottom, room_w = pr[2] + pr[4], pr[3] - 12
+	end
 	local hbar = bw > room_w
 	-- [KIT_PALETTE_FOOT] What the window has under the view: its border,
 	-- the palette's foot
@@ -1828,7 +1853,7 @@ function NT.fit_panel()
 			(hbar and view.horizontalScrollBar.height + 4 or 0)
 	local h = math.max(40, math.min(bh, room_h))
 	local vbar = h < bh
-	local vw = math.min(bw + (vbar and sb or 0), room_w)
+	local vw = pr and room_w or math.min(bw + (vbar and sb or 0), room_w)
 	local vh = h + (hbar and view.horizontalScrollBar.height + 4 or 0)
 	if view.height ~= vh or view.width ~= vw then
 		view:SetScrollBarsVisible(hbar, vbar)
@@ -1942,7 +1967,10 @@ function NT.components(w)
 	-- their room)
 	-- simplified: the foot's rows do not wrap; a screen narrower than the
 	-- tabs or a long name's Favourite runs off it (wrap as palette()'s tabs)
-	local foot = W.palette
+	-- [KIT_PHONE_EDITING] The touch mode's pane: in the body, after the list
+	-- (a short pane has no room for a foot beside it: the list was squeezed
+	-- under its rows)
+	local foot = NT.sh.on() and w or W.palette
 	local function tabs()
 		local tr = row(foot)
 		for _, tab in ipairs({"All", "Favourites", "New"}) do
@@ -2152,6 +2180,9 @@ end
 -- [KIT_POSITIONLESS_PLACE] The inspector unfolded (a narrow screen's) for
 -- an entity just placed
 function NT.show_inspector()
+	if NT.sh.on() then
+		return NT.sh.show("inspector")
+	end
 	if folded("inspector") then
 		toggle_fold("inspector")
 		refresh()
@@ -2222,6 +2253,9 @@ palette = function()
 	-- needs (with room for the row's spacing and the scroll bar's)
 	local room = (math.min(screen_ui.w or 1e9, magic.ui.root.width) - 16 - 12 -
 			24) / S.font
+	if NT.sh.on() then
+		room = (NT.sh.pane_w() - 12 - 24) / S.font
+	end
 	for _, names in ipairs(NT.TABS) do
 		local r, used = nil, 0
 		for _, name in ipairs(names) do
@@ -3728,7 +3762,7 @@ end)
 magic.SubscribeToEvent("command_seq:kit_ui_where", function(_, data)
 	local sc, r = magic.ui.scale, {}
 	for _, k in ipairs({"bar", "palette", "inspector", "people", "sg_list",
-			"sg_links", "sg_view", "hud_panel", "ctx"}) do
+			"sg_links", "sg_view", "hud_panel", "ctx", "shell", "log"}) do
 		local w = W[k]
 		if w and w.visible then
 			local p = w.screenPosition
@@ -3825,13 +3859,18 @@ local function fit_inspector()
 	-- [KIT_PHONE_EDITING] Above a narrow screen's refusal box (people()), and
 	-- above the on-screen keyboard while one of its fields is typed in
 	local p, f = W.people, magic.ui.focusElement
-	if p and p.visible and narrow() then
+	-- The touch mode's pane: its rect, which a tall screen's keyboard moved
+	-- already (shell.lua)
+	local pr = NT.sh.on() and NT.sh.pane_rect
+	if pr then
+		room = pr[4] - (w.height - view.height)
+	elseif p and p.visible and narrow() then
 		room = math.min(room, p.screenPosition.y - w.screenPosition.y - 12)
 	end
 	local kb = f ~= nil and f:GetTypeName() == "LineEdit" and
 			inside(body, f.screenPosition.x, f.screenPosition.y) and
 			buildat.keyboard_height() or 0
-	if kb > 0 then
+	if kb > 0 and not (pr and NT.sh.tall) then
 		room = math.min(room, magic.ui.root.height - kb - w.position.y - 16)
 	end
 	-- A field's warning grows the body and a layout never shrinks it again by
@@ -3846,8 +3885,12 @@ local function fit_inspector()
 	local bw = body.width + 4 + (h < bh and view.verticalScrollBar.width + 4 or 0)
 	-- (its window 12 wider, 8 from the right; NT.cap_w)
 	-- (and the window itself: a layout does not shrink it by itself)
-	bw = math.min(bw, NT.cap_w(28) or bw)
-	w.maxWidth = NT.cap_w(16) or w.maxWidth	if view.height ~= h or view.width ~= bw then
+	if pr then
+		bw = pr[3] - 12
+	else
+		bw = math.min(bw, NT.cap_w(28) or bw)
+		w.maxWidth = NT.cap_w(16) or w.maxWidth
+	end	if view.height ~= h or view.width ~= bw then
 		view:SetScrollBarsVisible(false, h < bh)
 		view:SetFixedSize(bw, h)
 		log:info(string.format("kit editor: the inspector %d of %d tall", h, bh))
@@ -4185,7 +4228,8 @@ end
 -- the lower right
 local function touch_bar()
 	drop("touch")
-	if not E.editing or not S.touch or NT.sig() then
+	-- ([KIT_PHONE_EDITING] the touch mode's are its UI half's, shell.lua)
+	if not E.editing or not S.touch or NT.sig() or NT.sh.on() then
 		return
 	end
 	local b = window(magic.HA_RIGHT, magic.VA_BOTTOM, -8, -8, true)
@@ -4240,8 +4284,9 @@ end
 -- about it, its last ones, below on the right. Rebuilt alone as it grows
 show_log = function()
 	drop("log")
+	-- ([KIT_PHONE_EDITING] the touch mode's by its "...", shell.lua)
 	local lines = E.editing and not NT.sig() and S.primary and
-			E.logs[S.primary] or {}
+			(NT.sh.log or not NT.sh.on()) and E.logs[S.primary] or {}
 	if #lines == 0 then
 		return
 	end
@@ -4250,7 +4295,7 @@ show_log = function()
 	-- ([KIT_ROOT_LEFTOVERS]: at 1000x500 it covered the inspector's rows and
 	-- its scrollbar)
 	local ins = W.inspector and W.inspector.visible
-	if ins and narrow() then
+	if ins and narrow() and not NT.sh.on() then
 		return
 	end
 	local lw = window(magic.HA_RIGHT, magic.VA_BOTTOM,
@@ -4273,14 +4318,17 @@ people = function()
 	if NT.sig() then
 		return NT.sg.status()
 	end
-	-- A narrow screen's panel opened is where it was
-	if not E.editing or (narrow() and not folded("palette")) then
+	-- A narrow screen's panel opened is where it was. ([KIT_PHONE_EDITING]
+	-- the touch mode's by its "...": its status line has the gist, shell.lua)
+	local sh = NT.sh.on()
+	if not E.editing or (sh and not NT.sh.people) or
+			(not sh and narrow() and not folded("palette")) then
 		return
 	end
 	-- [KIT_PHONE_EDITING] Under a narrow screen's open inspector only a
 	-- refusal, its lower rows kept clear of it (fit_inspector)
 	-- simplified: the builders and the rest come back as the inspector folds
-	local slim = narrow() and W.inspector ~= nil and W.inspector.visible
+	local slim = not sh and narrow() and W.inspector ~= nil and W.inspector.visible
 	if slim and E.status == "" then
 		return
 	end
@@ -5008,15 +5056,26 @@ local function context_menu(id, mx, my)
 end
 
 -- ---- The views ([FP] Views): set_view, the cameras placed each frame
+-- ([KIT_PHONE_EDITING] each frame too: the touch mode's world in its rect,
+-- shell.lua; the whole window's otherwise)
 local function apply_viewport()
 	local want = E.editing and S.view or "walk"
 	if want == "hud" then
 		want = "walk"
 	end
+	local r = NT.sh.world_px()
+	local rect = r and magic.IntRect(r[1], r[2], r[1] + r[3], r[2] + r[4]) or
+			magic.IntRect(0, 0, 0, 0)
+	local rk = r and table.concat(r, " ") or ""
 	if S.shown_view == want then
+		if S.vp and S.vp_rect ~= rk then
+			S.vp_rect = rk
+			S.vp:SetRect(rect)
+			magic.set_preferred_viewports({S.vp})
+		end
 		return
 	end
-	S.shown_view = want
+	S.shown_view, S.vp = want, nil
 	-- [KIT_SIGNALS_VIEW] The world in the view's own View3D
 	if want == "signals" then
 		magic.set_preferred_viewports({NT.sg.world_viewport()})
@@ -5044,6 +5103,8 @@ local function apply_viewport()
 			M.lit_viewport(vp, "editor", nil, node)
 		end
 	end
+	vp:SetRect(rect)
+	S.vp, S.vp_rect = vp, rk
 	magic.set_preferred_viewports({vp})
 	if O.set_camera then
 		O.set_camera(node)
@@ -5310,6 +5371,19 @@ do
 		type_of = type_of, typed = typed, signal_kind = signal_kind,
 		drawn_at = drawn_at, narrow = narrow, LONG_PRESS_US = LONG_PRESS_US,
 		refresh = function() refresh() end})
+end
+
+-- [KIT_PHONE_EDITING] The touch mode's split screen (shell.lua)
+do
+	local ok, err, install = buildat.run_script_file("kit/shell.lua")
+	assert(ok and type(install) == "function", "kit: shell.lua: " ..
+			tostring(err))
+	install({S = S, W = W, E = E, NT = NT, M = M, O = O, magic = magic,
+		log = log, send = send, window = window, drop = drop, button = button,
+		text = text, apply_viewport = apply_viewport,
+		refresh = function() refresh() end, people = function() people() end,
+		show_log = function() show_log() end,
+		set_view = function(v) set_view(v) end})
 end
 
 -- [KIT_PREFAB_ROOT] A placed prefab's root, the palette's menu on a prefab, the

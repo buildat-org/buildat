@@ -1866,6 +1866,7 @@
 				"launch_ui",
 				"default_username", "page_size", "lighting", "cache_keep",
 				"cache_per_server", "kit_editor_font", "floorplanner_font",
+				"kit_ui_mode",
 #ifdef __EMSCRIPTEN__
 				// Only where it does something
 				"web_idle_fps",
@@ -1976,6 +1977,8 @@
 			lua_pushinteger(L, o.kit_editor_font);
 		else if(name == "floorplanner_font")
 			lua_pushinteger(L, o.floorplanner_font);
+		else if(name == "kit_ui_mode")
+			lua_pushinteger(L, o.kit_ui_mode);
 		else if(name == "cache_keep")
 			lua_pushinteger(L, o.cache_keep);
 		else if(name == "cache_per_server")

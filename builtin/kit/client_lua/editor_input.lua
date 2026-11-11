@@ -1410,8 +1410,8 @@ local function mouse_up(button_)
 				-- The menu wants the pointer
 				S.crosshair = false
 				changed()
-				local w, h = screen_size()
-				rc.mx, rc.my = w / 2, h / 2
+				local w, h, ox, oy = screen_size()
+				rc.mx, rc.my = ox + w / 2, oy + h / 2
 			end
 			right_click(rc)
 		elseif orbited and S.from_plan and plan_aligned() then
@@ -1756,8 +1756,8 @@ local function touch_move(id, x, y, dx, dy)
 		local mdx, mdy = (x - px_) / 2, (y - py_) / 2
 		if S.view == "2d" then
 			-- About the point between the fingers, which follows them
-			local w, h = screen_size()
-			local ax, ay = (px_ + o.x) / 2, (py_ + o.y) / 2
+			local w, h, ox, oy = screen_size()
+			local ax, ay = (px_ + o.x) / 2 - ox, (py_ + o.y) / 2 - oy
 			local k = S.span / h
 			local wx, wz = S.cx + (ax - w / 2) * k, S.cz - (ay - h / 2) * k
 			S.span = math.max(4, math.min(400, S.span * d0 / d1))
@@ -2138,8 +2138,8 @@ local function compute_guide()
 	local g = {}
 	local mx, my = S.mx, S.my
 	if M.looking() then
-		local w, h = screen_size()
-		mx, my = w / 2, h / 2
+		local w, h, ox, oy = screen_size()
+		mx, my = ox + w / 2, oy + h / 2
 	end
 	-- Walking at the pointer, where the app looks: a click goes up into
 	-- the crosshair
@@ -2382,6 +2382,12 @@ local function draw_guide()
 	else
 		ghost(nil)
 	end
+	-- [KIT_PHONE_EDITING] The touch mode's: one line, at the foot of the
+	-- world's rect (shell.lua)
+	local sh = NT.sh.on() and NT.sh.world
+	if sh then
+		s = s:match("^[^\n]*")
+	end
 	if s ~= guide_shown then
 		guide_shown = s
 		guide_hud:SetText(s)
@@ -2389,6 +2395,15 @@ local function draw_guide()
 			log:info("kit editor: guide: " .. s:gsub("\n", " | "))
 		end
 	end
+	if sh then
+		guide_hud:SetAlignment(magic.HA_LEFT, magic.VA_TOP)
+		guide_hud:SetVar("FollowsRoot", "1")
+		guide_hud:SetPosition(sh[1] + math.floor((sh[3] - guide_hud.width) / 2),
+				sh[2] + sh[4] - guide_hud.height - 8)
+		return
+	end
+	guide_hud:SetAlignment(magic.HA_CENTER, magic.VA_BOTTOM)
+	guide_hud:SetVar("FollowsRoot", "")
 	-- Over the touch bar, and on a narrow screen over the people's panel
 	local y = W.touch and W.touch.height + 20 or 12
 	if narrow() and W.people then
@@ -2673,8 +2688,8 @@ local function draw()
 	if not (E.menu and E.menu.held()) then
 		local mx, my = S.mx, S.my
 		if M.looking() then
-			local w, h = screen_size()
-			mx, my = w / 2, h / 2
+			local w, h, ox, oy = screen_size()
+			mx, my = ox + w / 2, oy + h / 2
 		end
 		draw_brush(dbg, mx, my)
 	end
@@ -3238,6 +3253,8 @@ function M.editor(options)
 				end
 			end
 		end
+		-- [KIT_PHONE_EDITING] The touch mode's layout after the scaling
+		NT.sh.tick()
 	end)
 end
 return terrain_panel

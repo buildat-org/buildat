@@ -11,7 +11,8 @@
 //
 // A steps file is a JSON list of steps, each a list:
 //   ["nav", url]            open the page, and wait for it to load; the
-//                           address gets pref=web_idle_fps=60 (full_rate)
+//                           address gets pref=web_idle_fps=60 and
+//                           pref=kit_ui_mode=1 (full_rate)
 //   ["wait", ms]
 //   ["waitlog", regex, s]   until a line of the page's console matches, one
 //                           after the last waitlog's, at most s seconds
@@ -110,10 +111,16 @@ const fs = require("fs");
 // browser's page counts as unfocused and ran at web_idle_fps (5 frames a
 // second), and a streaming world's packets reached it minutes late. A
 // nav's address asks for 60 unless it names web_idle_fps itself.
+// [KIT_PHONE_EDITING] Kit's editor in its desktop layout, where the drives
+// measured their taps, unless the address names kit_ui_mode (the touch
+// mode's checks), as util/check_lib.sh's BUILDAT_TEST_KIT_UI_MODE natively
 function full_rate(u) {
 	const url = new URL(u);
-	if (!url.searchParams.getAll("pref").some(p => p.startsWith("web_idle_fps=")))
+	const prefs = url.searchParams.getAll("pref");
+	if (!prefs.some(p => p.startsWith("web_idle_fps=")))
 		url.searchParams.append("pref", "web_idle_fps=60");
+	if (!prefs.some(p => p.startsWith("kit_ui_mode=")))
+		url.searchParams.append("pref", "kit_ui_mode=1");
 	return url.toString();
 }
 

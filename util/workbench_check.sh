@@ -867,6 +867,8 @@ frames 2
 mouse_wheel -5
 frames 2
 mouse_wheel -5
+frames 2
+mouse_wheel -5
 frames 3
 click Button "Always keep builds: no"
 wait_log_any 10000 kit editor: always keep builds: yes

@@ -342,6 +342,8 @@ int main(int argc, char *argv[])
 			"                       Down moves, 1 to 100),\n"
 			"                       kit_editor_font, floorplanner_font (the\n"
 			"                       editors' text, a percent 50 to 150),\n"
+			"                       kit_ui_mode (Kit's editor: 0 the device's,\n"
+			"                       1 desktop, 2 touch RH, 3 touch LH),\n"
 			"                       cache_keep (days a cache file may go\n"
 			"                       unused: 7, 14, 30 or 90; 0 forever),\n"
 			"                       cache_per_server (1: a server's files\n"
@@ -561,6 +563,14 @@ int main(int argc, char *argv[])
 		if(!app::parse_preference_options(ss_()+"kit_editor_font="+f+
 				",floorplanner_font="+f, &app_options, &err))
 			log_w(MODULE, "BUILDAT_TEST_EDITOR_FONT: %s", err.c_str());
+	}
+	// [KIT_PHONE_EDITING] Kit's editor layout the checks measured their
+	// clicks in (util/check_lib.sh: desktop), a default as the font's
+	if(const char *m = getenv("BUILDAT_TEST_KIT_UI_MODE")){
+		ss_ err;
+		if(!app::parse_preference_options(ss_()+"kit_ui_mode="+m,
+				&app_options, &err))
+			log_w(MODULE, "BUILDAT_TEST_KIT_UI_MODE: %s", err.c_str());
 	}
 	if(forced_w > 0){
 		app_options.graphics.window_w = forced_w;
