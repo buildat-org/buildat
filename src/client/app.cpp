@@ -537,6 +537,9 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 		} else if(key == "floorplanner_font"){
 			in_range = (v >= 50 && v <= 150 && v == (int)v);
 			opt->floorplanner_font = (int)v;
+		} else if(key == "kit_ui_mode"){
+			in_range = (v >= 0 && v <= 3 && v == (int)v);
+			opt->kit_ui_mode = (int)v;
 		} else if(key == "page_size"){
 			in_range = (v >= 1 && v <= 100 && v == (int)v);
 			opt->page_size = (int)v;
@@ -620,6 +623,10 @@ static void check_parse_preference_options()
 			!app::parse_preference_options("kit_editor_font=100", &o, &err) ||
 			o.kit_editor_font != 100 || o.floorplanner_font != 80)
 		throw Exception("parse_preference_options: the editors' fonts");
+	if(app::parse_preference_options("kit_ui_mode=4", &o, &err) ||
+			!app::parse_preference_options("kit_ui_mode=3", &o, &err) ||
+			o.kit_ui_mode != 3)
+		throw Exception("parse_preference_options: kit_ui_mode");
 	if(app::parse_preference_options("page_size=0", &o, &err) ||
 			app::parse_preference_options("page_size=2.5", &o, &err) ||
 			!app::parse_preference_options("page_size=3", &o, &err) ||
@@ -825,6 +832,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jps = o.get("page_size");
 	const json::Value &jkf = o.get("kit_editor_font");
 	const json::Value &jff = o.get("floorplanner_font");
+	const json::Value &jkm = o.get("kit_ui_mode");
 	const json::Value &jck = o.get("cache_keep");
 	const json::Value &jcp = o.get("cache_per_server");
 	const json::Value &jlt = o.get("lighting");
@@ -841,6 +849,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 		items += ss_()+(items.empty()?"":",")+"kit_editor_font="+itos(jkf.as_integer());
 	if(jff.is_integer())
 		items += ss_()+(items.empty()?"":",")+"floorplanner_font="+itos(jff.as_integer());
+	if(jkm.is_integer())
+		items += ss_()+(items.empty()?"":",")+"kit_ui_mode="+itos(jkm.as_integer());
 	if(jck.is_integer())
 		items += ss_()+(items.empty()?"":",")+"cache_keep="+itos(jck.as_integer());
 	if(jrs.is_number())
@@ -1067,6 +1077,7 @@ static void save_preferences(const app::Options &opt)
 	o.set("page_size", opt.page_size);
 	o.set("kit_editor_font", opt.kit_editor_font);
 	o.set("floorplanner_font", opt.floorplanner_font);
+	o.set("kit_ui_mode", opt.kit_ui_mode);
 	o.set("cache_keep", opt.cache_keep);
 	o.set("cache_per_server", opt.cache_per_server);
 	if(!opt.lighting.empty())

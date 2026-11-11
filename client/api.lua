@@ -2215,9 +2215,11 @@ end
 -- **A preference an app shows in its settings** ([KIT_EDITOR_FONT]):
 -- declare_preference(name[, on_change]) -> its value; the game settings
 -- window gets its row, and on_change(value) is called when that row
--- changes it. Only the preferences that are an app's: the editors' text.
+-- changes it. Only the preferences that are an app's: the editors' text,
+-- Kit's editor layout.
 -- Until the connection ends.
-local DECLARABLE = {kit_editor_font = true, floorplanner_font = true}
+local DECLARABLE = {kit_editor_font = true, floorplanner_font = true,
+	kit_ui_mode = true}
 local game_declared = {}
 buildat.safe.declare_preference = function(name, on_change)
 	if not DECLARABLE[name] then

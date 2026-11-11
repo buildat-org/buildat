@@ -161,6 +161,19 @@ local PREFERENCES = {
 		values = {60, 70, 80, 90, 100, 110, 125},
 		show = function(v) return v .. " %" end,
 	},
+	-- [KIT_PHONE_EDITING] Kit's editor layout: the desktop's floating
+	-- windows, or the touch mode's split screen (the UI half on the right
+	-- or the left in landscape); 0 is touch on a touchscreen
+	{
+		name = "kit_ui_mode",
+		label = "Editor UI mode",
+		declared = true,
+		values = {0, 1, 2, 3},
+		show = function(v)
+			return ({[0] = "Automatic", "Desktop", "Touch, right-handed",
+					"Touch, left-handed"})[v]
+		end,
+	},
 	-- The web page's address bar while playing ([WEB_ADDRESS_BAR]); the
 	-- web client's only, and no row natively
 	{
@@ -739,7 +752,7 @@ local GAME_ROWS = {
 	{"Sound", {"sound_volume_db", "sound_mute"}},
 	{"Video", {"render_scale", "max_fps", "vsync", "multisampling",
 		"lighting", "ui_size", "page_size", "web_address_bar", "screen_orientation", "web_idle_fps",
-		"kit_editor_font", "floorplanner_font"}},
+		"kit_editor_font", "floorplanner_font", "kit_ui_mode"}},
 }
 local game = nil
 
