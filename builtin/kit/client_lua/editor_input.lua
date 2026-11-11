@@ -1737,6 +1737,10 @@ local function mouse_wheel(wheel, q)
 	-- In notches; the web's in tenths (its SDL port counts them so)
 	zoom_at(math.max(-10, math.min(10, WEB and wheel / 10 or wheel)), S.mx,
 			S.my)
+	log:info("kit editor: the wheel: " .. (S.view == "2d" and
+			string.format("the plan %.1f across", S.span) or S.pos and
+			string.format("the camera at %.1f,%.1f,%.1f", S.pos.x, S.pos.y,
+			S.pos.z) or "in " .. tostring(S.view)))
 end
 
 -- The wheel's zoom by notches (up, in) about a point of the screen
@@ -3370,7 +3374,8 @@ function M.editor(options)
 				data:GetInt("DY"))
 	end)
 	magic.SubscribeToEvent("MouseWheel", function(_, data)
-		if S.touch or NT.world_off() then
+		-- (on a touchscreen too: a mouse plugged in; fingers send no wheel)
+		if NT.world_off() then
 			return
 		end
 		mouse_wheel(data:GetInt("Wheel"), data:GetInt("Qualifiers"))

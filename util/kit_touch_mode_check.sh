@@ -140,6 +140,7 @@ def gestures():
         a("rdrag", *at(-2, 1), *at(1, 3)); a("waitlog", "the right drag let go", 10); fr(3)
         a("mouse_drag", "middle", 4, *at(0, 1), *at(0, 3))
         a("waitlog", "the middle let go", 10)
+        a("wheel", *at(0, 1), -300); a("waitlog", "kit editor: the wheel: the plan", 10); fr(3)
     a("event", "kit_mode viewed"); a("waitlog", r"the mode: edit \(viewed\)", 10); fr(5)
     a("shot", "${OUT}/14_view_moved.png")
     # Voxels: held (a right click) places, a tap digs
