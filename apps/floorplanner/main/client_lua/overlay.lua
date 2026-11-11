@@ -564,8 +564,8 @@ local function draw_overlay()
 			return S.cx + (px / w - 0.5) * S.span * w / h,
 					S.cz - (py / h - 0.5) * S.span
 		end
-		local ax, az = pz(S.press.mx, S.press.my)
-		local bx, bz = pz(S.mx, S.my)
+		local ax, az = pz(E.world_xy(S.press.mx, S.press.my))
+		local bx, bz = pz(E.world_xy(S.mx, S.my))
 		outline({{ax, az}, {bx, az}, {bx, bz}, {ax, bz}}, accent)
 	elseif d and d.kind == "footprint" then
 		outline({{d.x0, d.z0}, {d.x1, d.z0}, {d.x1, d.z1}, {d.x0, d.z1}},

@@ -16,8 +16,23 @@ local room_ceiling, wall_between, wall_span = E.room_ceiling, E.wall_between, E.
 --
 -- Screen and plan
 --
+-- [KIT_PHONE_EDITING] The view is the touch mode's world rect where it is
+-- on (E.world_rect, pixels, shell.lua), else the window
 local function screen_size()
+	local r = E.world_rect
+	if r then
+		return r[3], r[4]
+	end
 	return magic.graphics.width, magic.graphics.height
+end
+
+-- A point of the window in the view's pixels
+function E.world_xy(x, y)
+	local r = E.world_rect
+	if r then
+		return x - r[1], y - r[2]
+	end
+	return x, y
 end
 
 -- **A field of view is of the screen's short side** (user, the sixth
@@ -41,9 +56,10 @@ end
 -- The ray under the cursor: origin and direction in world metres
 local function cursor_ray()
 	local w, h = screen_size()
+	local mx, my = E.world_xy(S.mx, S.my)
 	if S.view == "2d" then
-		local x = S.cx + (S.mx / w - 0.5) * S.span * w / h
-		local z = S.cz - (S.my / h - 0.5) * S.span
+		local x = S.cx + (mx / w - 0.5) * S.span * w / h
+		local z = S.cz - (my / h - 0.5) * S.span
 		return {x = W(x), y = 100, z = W(z)}, {x = 0, y = -1, z = 0}
 	end
 	local yaw, pitch = math.rad(S.yaw), math.rad(S.pitch)
@@ -53,8 +69,8 @@ local function cursor_ray()
 	local u = {x = math.sin(yaw) * math.sin(pitch), y = math.cos(pitch),
 			z = math.cos(yaw) * math.sin(pitch)}
 	local tan = math.tan(math.rad(cam3d.fov) / 2)
-	local nx = (2 * S.mx / w - 1) * tan * w / h
-	local ny = (1 - 2 * S.my / h) * tan
+	local nx = (2 * mx / w - 1) * tan * w / h
+	local ny = (1 - 2 * my / h) * tan
 	if S.looking then
 		nx, ny = 0, 0
 	end
