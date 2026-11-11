@@ -2008,10 +2008,9 @@ frames 3
 keypress F5
 wait_log_any 10000 signals: columns in
 wait_log_any 20000 screen mode: 500x400
-wait_log_any 20000 UI scale fitted to the screen: x0
+frames 30
 wait_log_any 20000 screen mode: 1400x900
-wait_log_any 20000 UI scale fitted to the screen: x1
-frames 5
+frames 31
 screenshot @T@/refit.png
 quit
 EOF
@@ -2024,7 +2023,10 @@ wait_for_log "$t/kitfit.log" "signals: columns in" 60
 win=$(xdotool search --pid "$(pgrep -P "$fit_pid")" 2>/dev/null | tail -1)
 [ -n "$win" ] || fail "no window of the client to resize"
 xdotool windowsize "$win" 500 400
-wait_for_log "$t/kitfit.log" "I __app   : UI scale fitted to the screen: x0" 20
+# (a fit down there is not asked for: the bar wraps within the window at
+# the fit x1 since [KIT_PHONE_EDITING], and nothing else need be wider;
+# one made is undone in the larger window, the last scale below says)
+wait_for_log "$t/kitfit.log" "command: wait_log_any 20000 screen mode: 1400x900" 20
 xdotool windowsize "$win" 1400 900
 wait "$fit_pid" || fail "the UI's scale did not come back in a larger window ($t/kitfit.log)"
 grep -a "I __app   : UI scale [0-9]" "$t/kitfit.log" | tail -1 | grep -q "UI scale 0.833333 (1400x900)" || fail "the last scale ($t/kitfit.log)"
