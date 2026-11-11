@@ -13,9 +13,11 @@
 -- play is as on the desktop.
 --   - The screen's aspect picks the split: tall, the world above and the UI
 --     half below (45 % / 55 %); wide, side by side (50 %), the UI half on
---     the handed side. The header's grip ("=" or "||") dragged moves the
---     divider, remembered on this device (the app preference kit_ui_split).
---   - The UI half: a header (Back, the pane's title, the grip, "..."), the
+--     the handed side. The header dragged (its title or its empty part)
+--     moves the divider, 0.2-0.8, remembered on this device (the app
+--     preference kit_ui_split).
+--   - The UI half: a header ("< <the pane's title>" for Back, the views
+--     Walk | 3D | 2D with the one on lit, "..."; stage 4b), the
 --     pane, Undo, Delete and Cancel, and a status line (Running or Ended,
 --     the builders, the last refusal) in the corner boxes' place. The panes:
 --     the palette (the left panel: Place and the tools' tabs), the
@@ -49,7 +51,14 @@
 --   - Box: a tap is a corner, a face's handle dragged moves the face;
 --   - terrain: a drag is a stroke (2D, 3D), as before.
 -- A finger held still is the right click (the entity's menu), as before.
--- Walk is the app's: a drag turns (and its stick), a tap the tool's.
+-- Walk (stage 4b; the touch mode starts in 3D): controls.lua's stick at the
+-- world's lower left (0.45 of its width, 0.45 of its height) walks, its
+-- touch bar (Jump, a movement's touch_buttons) at the world's lower right;
+-- a drag begun on the selected entity (the finger's half touch size
+-- round it too) or its knob moves or turns it, any other drag turns the
+-- eye; a tap the tool's, a hold places (voxels) or the menu; no zoom. By
+-- mouse Walk is the desktop mode's (a click into the crosshair, the right
+-- drag turns).
 -- The mouse: the left button a finger (a click a tap, a drag one finger's),
 -- the right drag the two fingers' (the plan pans, 3D orbits, Walk turns),
 -- the middle dragged a pinch (up zooms in), the wheel zooms; no crosshair.
@@ -206,6 +215,9 @@ function SH.world_px()
 		math.max(1, math.floor(r[3] * sc + 0.5)),
 		math.max(1, math.floor(r[4] * sc + 0.5))}
 end
+
+-- (controls.lua's: its touch bar at this rect's lower right, walking)
+M.touch_world = SH.world_px
 
 function SH.show(p)
 	SH.placed = {}
@@ -374,21 +386,32 @@ function SH.build()
 	end
 	local w = window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
 	W.shell = w
-	SH.laid = nil
+	SH.laid, SH.gap = nil, nil
 	w:SetName("kit: touch shell")
 	w:SetLayout(magic.LM_FREE, 0, magic.IntRect(0, 0, 0, 0))
 	-- Under the panes (-1), opaque: the world is not under it
 	w.priority = -2
 	w.opacity = 1
 	w.clipChildren = true
-	SH.back_b = button(w, "<", SH.back)
-	SH.back_b:SetName("shell back")
-	SH.title = text(w, "")
-	SH.grip = button(w, SH.tall and "=" or "||", function() end)
-	SH.grip:SetName("shell divider")
-	magic.SubscribeToEvent(SH.grip, "Pressed", function()
-		SH.drag = true
+	-- Stage 4b: the header. Back carries the pane's title; a press on it or
+	-- on the row's empty part (the window's own, not a target) may drag the
+	-- divider, and a drag is then no Back
+	SH.back_b, SH.title = button(w, "<", function()
+		if not SH.divider_moved then
+			SH.back()
+		end
 	end)
+	SH.back_b:SetName("shell back")
+	magic.SubscribeToEvent(SH.back_b, "Pressed", function()
+		SH.drag, SH.divider_moved = true, nil
+	end)
+	SH.views_b = {}
+	for _, v in ipairs({{"walk", "Walk"}, {"3d", "3D"}, {"2d", "2D"}}) do
+		local b, t = button(w, v[2], function() A.set_view(v[1]) end)
+		b:SetName("shell view " .. v[1])
+		SH.views_b[#SH.views_b + 1] = {v = v[1], b = b, t = t}
+	end
+	SH.header_said = nil
 	SH.more_b = button(w, "...", SH.more)
 	SH.more_b:SetName("shell more")
 	SH.empty = text(w, "")
@@ -429,13 +452,7 @@ local function place_shell()
 	local u, w, T = SH.ui, W.shell, SH.TOUCH
 	w:SetPosition(u[1], u[2])
 	w:SetFixedSize(u[3], u[4])
-	for _, b in ipairs({SH.back_b, SH.grip, SH.more_b}) do
-		b:SetFixedSize(T, T)
-	end
-	SH.back_b:SetPosition(PAD, PAD)
-	SH.more_b:SetPosition(u[3] - PAD - T, PAD)
-	SH.grip:SetPosition(u[3] - PAD - 2 * T - 4, PAD)
-	SH.title:SetPosition(PAD + T + 8, PAD + math.floor((T - SH.title.height) / 2))
+	SH.title_set = nil
 	local sy = u[4] - PAD - SH.status.height
 	SH.status:SetPosition(PAD, sy)
 	-- The buttons in rows as they fit (each its label's width, at least the
@@ -471,6 +488,47 @@ local function place_shell()
 	local top = PAD + T + 4
 	SH.empty:SetPosition(PAD, top + 4)
 	SH.pane_rect = {u[1] + PAD, u[2] + top, u[3] - 2 * PAD, ay - 4 - top}
+end
+
+-- The header (stage 4b): "< <title>" at the left, as wide as its text,
+-- the title cut to leave the rest their room; the row's empty part (gap)
+-- after it; Walk | 3D | 2D and "..." at the right
+-- simplified: a UI half under about 290 UI px across (the divider dragged
+-- to 0.2 in landscape) has the view buttons narrower than the touch size,
+-- not in a second row
+local function place_header(t)
+	local u, T = SH.ui, SH.TOUCH
+	local x = u[3] - PAD - T
+	SH.more_b:SetFixedSize(T, T)
+	SH.more_b:SetPosition(x, PAD)
+	local vw, need = {}, 0
+	for i, e in ipairs(SH.views_b) do
+		vw[i] = math.max(T, e.t.width + 16)
+		need = need + vw[i] + 4
+	end
+	local room = x - 2 * PAD - T - 4
+	local k = need > room and room / need or 1
+	for i = #SH.views_b, 1, -1 do
+		local bw = math.floor(vw[i] * k)
+		x = x - 4 - bw
+		SH.views_b[i].b:SetFixedSize(bw, T)
+		SH.views_b[i].b:SetPosition(x, PAD)
+	end
+	local most, n = x - 4 - PAD, #t
+	SH.title.text = "< " .. t
+	while SH.title.width + 16 > most and n > 0 do
+		n = n - 1
+		SH.title.text = "< " .. t:sub(1, n) .. ".."
+	end
+	if SH.title.width + 16 > most then
+		SH.title.text = "<"
+	end
+	local bw = math.max(T, math.min(most, SH.title.width + 16))
+	SH.back_b:SetFixedSize(bw, T)
+	SH.back_b:SetPosition(PAD, PAD)
+	-- (the empty part, UI units in the window: a press there drags the
+	-- divider, UIMouseClick below)
+	SH.gap = {PAD + bw, x}
 end
 
 -- Each target in a window at the touch size: a button, a field, a dropdown
@@ -526,8 +584,9 @@ local function title()
 	return TITLES[SH.pane]
 end
 
--- The divider dragged by the grip: by as much as the pointer moved since
--- the grip was pressed (a finger is the left button too); let go, kept
+-- The divider dragged by the header (its title or its empty part): by as
+-- much as the pointer moved since it was pressed (a finger is the left
+-- button too), once that is a quarter of the touch size; let go, kept
 local function drag_divider()
 	local input = magic.input
 	local p = input:GetMousePosition()
@@ -536,8 +595,16 @@ local function drag_divider()
 		d = {x = p.x, y = p.y, tall = SH.split.tall, wide = SH.split.wide}
 		SH.drag = d
 	end
+	local r, sc = magic.ui.root, magic.ui.scale
+	if not SH.divider_moved and math.abs(p.x - d.x) + math.abs(p.y - d.y) >
+			SH.TOUCH / 4 * sc then
+		SH.divider_moved = true
+	end
 	if not input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
 		SH.drag = nil
+		if not SH.divider_moved then
+			return
+		end
 		if buildat.set_app_preference then
 			buildat.set_app_preference("kit_ui_split", string.format("%.3f %.3f",
 					SH.split.tall, SH.split.wide))
@@ -546,7 +613,9 @@ local function drag_divider()
 				SH.split.tall, SH.split.wide))
 		return
 	end
-	local r, sc = magic.ui.root, magic.ui.scale
+	if not SH.divider_moved then
+		return
+	end
 	local dx, dy = (p.x - d.x) / sc / r.width, (p.y - d.y) / sc / r.height
 	local function clamp(v)
 		return math.max(0.2, math.min(0.8, v))
@@ -779,9 +848,29 @@ function SH.tick()
 	if view then
 		SH.fit_view(pw, view, pr, tall)
 	end
+	-- The header: its title and the view on lit (a drive's line as either
+	-- changes)
 	local t = title() or ""
-	if SH.title.text ~= t then
-		SH.title.text = t
+	local hk = t .. "\0" .. tostring(S.view) .. "\0" .. ui[3]
+	if SH.title_set ~= hk then
+		SH.title_set = hk
+		place_header(t)
+		local names, on = {}, "none"
+		for _, e in ipairs(SH.views_b) do
+			local lit = S.view == e.v
+			e.t:SetColor(lit and magic.Color(1.0, 0.85, 0.3) or magic.Color(1, 1, 1))
+			names[#names + 1] = e.t.text
+			on = lit and e.t.text or on
+		end
+		local sc = magic.ui.scale
+		local hl = string.format("kit editor: touch shell: the header: \"%s\", " ..
+				"%s, the empty part %d to %d at %d, lit %s", SH.title.text,
+				table.concat(names, " | "), (ui[1] + SH.gap[1]) * sc,
+				(ui[1] + SH.gap[2]) * sc, (ui[2] + PAD + SH.TOUCH / 2) * sc, on)
+		if hl ~= SH.header_said then
+			SH.header_said = hl
+			log:info(hl)
+		end
 	end
 	local e = ""
 	if not W[PANE_W[SH.pane]] then
@@ -816,6 +905,20 @@ function SH.tick()
 		log:info("kit editor: touch shell: status: " .. s)
 	end
 end
+
+-- A press on the header's empty part (UI units; the window's own, no
+-- target there): the divider may be dragged
+magic.SubscribeToEvent("UIMouseClick", function(_, data)
+	local w, g = W.shell, SH.gap
+	if not (SH.on() and w and w.visible and g) or W.ctx then
+		return
+	end
+	local p = w.screenPosition
+	local x, y = data:GetInt("X") - p.x, data:GetInt("Y") - p.y
+	if x > g[1] and x < g[2] and y >= 0 and y < 2 * PAD + SH.TOUCH then
+		SH.drag, SH.divider_moved = true, nil
+	end
+end)
 
 -- For a check ("event kit_touch_targets <what>"): each target shown, a
 -- button, a field, a dropdown or a check box, its rect in pixels

@@ -62,6 +62,10 @@
 //   ["ldrag", x0, y0, x1, y1] the left button, the same (Chrome only)
 //   ["drag", type, label, x1, y1, "touch"]
 //                           the same from where the click by label would go
+//   ["at_log", regex, "tap"]  a tap where the last console line matching
+//                           regex says: its two groups x, y (pixels)
+//   ["at_log", regex, "drag", dx, dy]
+//                           a finger's drag from there by dx, dy (Chrome)
 //   ["event", "name param"] the native sequence's event line
 //                           (doc/client_commands.txt): sent in the next frame
 //   ["shot", path]          a PNG of the page
@@ -842,6 +846,19 @@ async function find(b, type, label, hx, hy) {
 				const [x, y] = await find(b, a, c);
 				console.log(op + ": " + a + " \"" + c + "\" from " + x + ", " + y);
 				await b.ops.drag(x, y, ...args.slice(2));
+			} else if (op === "at_log") {
+				// The last console line matching a: its two numbers (pixels)
+				const re = new RegExp(a);
+				const l = [...lines].reverse().find(l => re.test(l));
+				const m = l && l.match(re);
+				if (!m || m.length < 3)
+					throw new Error("no console line with a place: /" + a + "/");
+				const x = Number(m[1]), y = Number(m[2]);
+				console.log(c + " at " + x + ", " + y + " (the page's line)");
+				if (c === "tap")
+					await b.ops.tap(x, y);
+				else
+					await b.ops.drag(x, y, x + args[2], y + args[3]);
 			} else if (op === "nav") {
 				await b.ops.nav(full_rate(args[0]));
 			} else if (b.ops[op]) {
