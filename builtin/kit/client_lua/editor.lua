@@ -1214,7 +1214,7 @@ rebuild_bar = function(if_changed)
 	end
 	w:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(6, 6, 6, 6))
 	bar_row, bar_used, bar_first = row(w), 0, true
-	bar_room = (magic.ui.root.width - 16 - 12) / S.font
+	bar_room = (magic.ui.root.width - 16 - 12 - (S.bar_trim or 0)) / S.font
 	S.bar_root_w = magic.ui.root.width
 	if O.menu then
 		bar_button("Menu", "Esc", function()

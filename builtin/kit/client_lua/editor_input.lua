@@ -2494,6 +2494,17 @@ local function draw()
 	-- under the Server button at the top right
 	if W.bar and S.bar_root_w ~= magic.ui.root.width then
 		rebuild_bar()
+	elseif W.bar and S.touch and W.bar.width + 8 > magic.ui.root.width * 0.98 and
+			(S.bar_trim or 0) < magic.ui.root.width / 2 then
+		-- [KIT_PHONE_EDITING] On a touchscreen, laid out wider than the client's fit allows
+		-- (its 98 %): wrapped again narrower. Too wide, the fit shrank the
+		-- UI, the root grew, the bar wrapped wider: the scale flipped
+		-- simplified: the trim is kept and only grows
+		local over = W.bar.width + 8 - math.floor(magic.ui.root.width * 0.98)
+		S.bar_trim = (S.bar_trim or 0) + over
+		log:info(string.format("kit editor: the bar %d wide in a root of %d: "
+				.. "wrapped %d narrower", W.bar.width, magic.ui.root.width, S.bar_trim))
+		rebuild_bar()
 	end
 	NT.fit_panel()
 	fit_inspector()
