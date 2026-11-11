@@ -16,7 +16,8 @@
 --     the handed side. The header dragged (its title or its empty part)
 --     moves the divider, 0.2-0.8, remembered on this device (the app
 --     preference kit_ui_split).
---   - The UI half: a header ("< <the pane's title>" for Back, the views
+--   - The UI half: a header ("< <the pane's title>" for Back, the title
+--     alone where Back goes nowhere, the views
 --     Walk | 3D | 2D with the one on lit, "..."; stage 4b), the
 --     pane, Undo, Delete and Cancel, and a status line (Running or Ended,
 --     the builders, the last refusal) in the corner boxes' place. The panes:
@@ -234,6 +235,19 @@ function SH.show(p)
 	A.refresh()
 end
 
+-- Where Back goes now (SH.back's), nil where it would do nothing
+function SH.back_to()
+	for i = #SH.stack, 1, -1 do
+		local p = SH.stack[i]
+		if p ~= SH.pane and available(p) then
+			return p
+		end
+	end
+	local p = S.primary and "inspector" or available("palette") and "palette" or
+			"tools"
+	return p ~= SH.pane and p or nil
+end
+
 -- The pane before, past those with nothing to show now (a dialog closed)
 function SH.back()
 	local p
@@ -402,6 +416,8 @@ function SH.build()
 		end
 	end)
 	SH.back_b:SetName("shell back")
+	-- (the title alone, no "<", where Back has nowhere to go)
+	SH.label = text(w, "")
 	magic.SubscribeToEvent(SH.back_b, "Pressed", function()
 		SH.drag, SH.divider_moved = true, nil
 	end)
@@ -515,13 +531,24 @@ local function place_header(t)
 		SH.views_b[i].b:SetPosition(x, PAD)
 	end
 	local most, n = x - 4 - PAD, #t
-	SH.title.text = "< " .. t
-	while SH.title.width + 16 > most and n > 0 do
+	local can = SH.back_to() ~= nil
+	local tx, pre = can and SH.title or SH.label, can and "< " or ""
+	tx.text = pre .. t
+	while tx.width + 16 > most and n > 0 do
 		n = n - 1
-		SH.title.text = "< " .. t:sub(1, n) .. ".."
+		tx.text = pre .. t:sub(1, n) .. ".."
 	end
-	if SH.title.width + 16 > most then
-		SH.title.text = "<"
+	if tx.width + 16 > most then
+		tx.text = can and "<" or ""
+	end
+	SH.back_b.visible, SH.label.visible = can, not can
+	SH.shown_title = tx.text
+	if not can then
+		-- A label: the row's empty part from the left (a press on the text
+		-- is the window's too)
+		SH.label:SetPosition(PAD + 8, PAD + math.floor((T - SH.label.height) / 2))
+		SH.gap = {PAD - 1, x}
+		return
 	end
 	local bw = math.max(T, math.min(most, SH.title.width + 16))
 	SH.back_b:SetFixedSize(bw, T)
@@ -532,11 +559,15 @@ local function place_header(t)
 end
 
 -- Each target in a window at the touch size: a button, a field, a dropdown
--- at least SH.TOUCH high (a button as wide), a check box SH.TOUCH square
+-- at least SH.TOUCH high (a button as wide), a check box SH.TOUCH square;
+-- in a row (module.lua's, its var KitRow) in a scroll view (the pane's
+-- body, which the pane's width) free to grow, so the row's layout spreads
+-- them across it
 -- simplified: once a window (its var KitTouch), so a row added to a window
 -- built already keeps its size (the palette's filter only hides rows)
-local function touch_size(el, depth)
+local function touch_size(el, depth, scrolled)
 	local T = SH.TOUCH
+	local in_row = scrolled and el:GetVar("KitRow") == "1"
 	for i = 0, el:GetNumChildren() - 1 do
 		local c = el:GetChild(i)
 		local t = c and c:GetTypeName()
@@ -555,9 +586,17 @@ local function touch_size(el, depth)
 				end
 				c.minWidth = T
 			end
+			if in_row then
+				c.maxWidth = 100000
+			end
 		elseif c and t ~= "ScrollBar" and t ~= "Text" and depth < 40 then
-			touch_size(c, depth + 1)
+			touch_size(c, depth + 1, scrolled or t == "ScrollView")
 		end
+	end
+	-- (laid out again as module.lua's row(): its targets' new maximum is
+	-- not applied by itself, and the sandbox has no UpdateLayout)
+	if in_row then
+		el:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
 	end
 end
 
@@ -851,7 +890,8 @@ function SH.tick()
 	-- The header: its title and the view on lit (a drive's line as either
 	-- changes)
 	local t = title() or ""
-	local hk = t .. "\0" .. tostring(S.view) .. "\0" .. ui[3]
+	local hk = t .. "\0" .. tostring(S.view) .. "\0" .. ui[3] .. "\0" ..
+			tostring(SH.back_to())
 	if SH.title_set ~= hk then
 		SH.title_set = hk
 		place_header(t)
@@ -864,7 +904,7 @@ function SH.tick()
 		end
 		local sc = magic.ui.scale
 		local hl = string.format("kit editor: touch shell: the header: \"%s\", " ..
-				"%s, the empty part %d to %d at %d, lit %s", SH.title.text,
+				"%s, the empty part %d to %d at %d, lit %s", SH.shown_title,
 				table.concat(names, " | "), (ui[1] + SH.gap[1]) * sc,
 				(ui[1] + SH.gap[2]) * sc, (ui[2] + PAD + SH.TOUCH / 2) * sc, on)
 		if hl ~= SH.header_said then

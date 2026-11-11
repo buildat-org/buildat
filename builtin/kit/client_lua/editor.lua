@@ -1548,9 +1548,11 @@ function NT.voxels(w)
 			end, {label = "Tint", fill = true})
 		end
 	end
-	button(w, "New voxel type...", function()
+	-- (by name for a check: kit_inspector_show)
+	local nv = button(w, "New voxel type...", function()
 		M.voxel_dialog()
 	end)
+	nv:SetName("voxel new")
 	if O.solid then
 		text(w, S.touch and "Walking: a tap digs, a finger held places" or
 				"Left: place, Shift+left: dig; walking: left digs, right places",
@@ -1860,7 +1862,7 @@ function NT.fit_panel()
 	if pr then
 		bottom, room_w = pr[2] + pr[4], pr[3] - 12
 	end
-	local hbar = bw > room_w
+	local hbar = bw > room_w and not pr
 	-- [KIT_PALETTE_FOOT] What the window has under the view: its border,
 	-- the palette's foot
 	local under = w.height - view.position.y - view.height
@@ -1870,6 +1872,12 @@ function NT.fit_panel()
 	local vbar = h < bh
 	local vw = pr and room_w or math.min(bw + (vbar and sb or 0), room_w)
 	local vh = h + (hbar and view.horizontalScrollBar.height + 4 or 0)
+	-- The touch mode's: the body the view's width, its rows' targets spread
+	-- across it (shell.lua's touch_size), no scrolling sideways
+	local inner = pr and vw - 4 - (vbar and sb or 0)
+	if inner and body.width ~= inner then
+		body:SetFixedWidth(inner)
+	end
 	if view.height ~= vh or view.width ~= vw then
 		view:SetScrollBarsVisible(hbar, vbar)
 		view:SetFixedSize(vw, vh)
@@ -3262,11 +3270,9 @@ local function inspector(w, e, is_made)
 	if e.pos and not copy then
 		local r, at = row(w), {e.pos[1], e.pos[2], e.pos[3]}
 		-- [KIT_PHONE_EDITING] The touch mode's: Move and Turn on a row of their
-		-- own under the three, which share the pane's width less its scroll
-		-- bar (a field's 120 cut Move off at 412 wide)
+		-- own under the three, which share the pane's width (a field's 120 cut
+		-- Move off at 412 wide; the row stretches them, shell.lua)
 		local sh = NT.sh.on()
-		local fw = sh and math.floor(((NT.sh.pane_w() - 12 - 24) / S.font -
-				3 * 16 - 24) / 3)
 		for i, axis in ipairs({"x", "y", "z"}) do
 			-- One letter's room: the row's layout has already widened it
 			label(r, axis):SetFixedWidth(12)
@@ -3280,9 +3286,6 @@ local function inspector(w, e, is_made)
 			end)
 			f.cursorPosition = 0
 			f.minWidth = 56
-			if fw then
-				f:SetFixedWidth(fw)
-			end
 			-- For a driven click, and kit_ui_where
 			f:SetName("position " .. axis)
 		end
@@ -3320,9 +3323,6 @@ local function inspector(w, e, is_made)
 				end)
 				f.cursorPosition = 0
 				f.minWidth = 56
-				if fw then
-					f:SetFixedWidth(fw)
-				end
 				f:SetName("turn " .. axis)
 			end
 			local tb = button(sh and row(w) or tr, "Turn", function()
@@ -3949,6 +3949,12 @@ local function fit_inspector()
 	-- (and the window itself: a layout does not shrink it by itself)
 	if pr then
 		bw = pr[3] - 12
+		-- The body the view's width (its rows' targets then spread across,
+		-- shell.lua's touch_size)
+		local inner = bw - 4 - (h < bh and view.verticalScrollBar.width + 4 or 0)
+		if body.width ~= inner then
+			body:SetFixedWidth(inner)
+		end
 	else
 		bw = math.min(bw, NT.cap_w(28) or bw)
 		w.maxWidth = NT.cap_w(16) or w.maxWidth
@@ -4130,8 +4136,8 @@ build_inspector = function()
 	view.viewPosition = magic.IntVector2(0, IV.y)
 end
 
--- A check's ("event kit_inspector_show <name>"): the inspector scrolled to
--- its element of that name, as a finger would
+-- A check's ("event kit_inspector_show <name>"): the inspector (else the
+-- palette) scrolled to its element of that name, as a finger would
 magic.SubscribeToEvent("command_seq:kit_inspector_show", function(_, data)
 	local name, view = data:GetString("Param"), IV.view
 	local body = view and view.contentElement
@@ -4148,6 +4154,11 @@ magic.SubscribeToEvent("command_seq:kit_inspector_show", function(_, data)
 		end
 	end
 	local el = body and at(body)
+	if not el and NT.view then
+		view = NT.view
+		body = view.contentElement
+		el = at(body)
+	end
 	if el then
 		view.viewPosition = magic.IntVector2(0, math.max(0, math.min(
 				el.screenPosition.y - body.screenPosition.y - 8,

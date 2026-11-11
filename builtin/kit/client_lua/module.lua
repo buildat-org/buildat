@@ -91,6 +91,8 @@ end
 local function row(parent)
 	local r = parent:CreateChild("UIElement")
 	r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
+	-- (the touch mode's panes stretch a row's targets across it, shell.lua)
+	r:SetVar("KitRow", "1")
 	return r
 end
 

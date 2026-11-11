@@ -180,6 +180,8 @@ a("sync", 5000); fr(10)
 # New voxel type, typed with the keyboard up
 more("Palette", "touch shell: the palette pane")
 a("tap", "Button", "Voxels*"); a("waitlog", "kit editor: tool voxels", 10); fr(5)
+# (below the view in landscape: its rows at the touch size)
+a("event", "kit_inspector_show voxel new"); a("waitlog", "the inspector shows voxel new", 10); fr(5)
 a("tap", "Button", "New voxel type..."); a("waitlog", "touch shell: the dialog pane", 10); fr(10)
 a("tap", "LineEdit", "my_voxel"); fr(2); a("selall"); fr(2); a("type", "v1"); fr(2)
 a("eval", kb); a("waitlog", "touch shell: typing in the dialog", 10); fr(10)
