@@ -423,7 +423,7 @@ if H > W:
     assert re.search(r"set \d+'s kit/npc lines to \"Hello there\|A second line", server), \
         "the long text not applied (server.log)"
     print(f"ok: the position row {row} in the pane {pane}; the long text applied")
-if W > H and "lh" not in d:
+if W > H and touch and mode == "0":
     t = "\n".join(page)
     def sets(what): return re.search(r"An edit by webboss: set \d+'s " + what, server)
     for what in [r"kit/button hold to 2\.5", r'kit/button color to "#00ff00"',
