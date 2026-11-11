@@ -1,15 +1,15 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~8 min, five web drives (2026-11-11)
-# covers: builtin/kit/client_lua/shell.lua builtin/kit/client_lua/field_entry.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua
+# cost: ~9 min, five web drives (2026-11-11)
+# covers: builtin/kit/client_lua/shell.lua builtin/kit/client_lua/field_entry.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/controls.lua
 # [KIT_PHONE_EDITING] stage 1, the touch mode's split screen: Workbench's
 # web client in headless Chrome by finger (TOUCH=1), the editor's UI mode
 # left to the device (kit_ui_mode=0, touch on a touchscreen), as a phone in
 # portrait (412x915) and in landscape (915x412), and left-handed in
 # landscape (kit_ui_mode=3). In each: edit mode by the play bar's Menu and
-# the pause menu's Edit, the 2D view by the "..." menu's Tools pane, a
-# kit/button tapped in the palette's pane and the world tapped:
+# the pause menu's Edit, the 2D view by the header's 2D, a kit/button
+# tapped in the palette's pane and the world tapped:
 #   - no "UI scale" line from edit mode on (a fixed scale, no fit);
 #   - every target in the UI half (a button, field, dropdown, check box:
 #     kit_touch_targets) at least the touch size (48 UI px) each way;
@@ -49,6 +49,18 @@
 #     the keyboard;
 #   - portrait (412x915): the x/y/z row and Move inside the pane; a kit/npc
 #     placed, its lines (long text) open the mode and are applied.
+# Stage 4b, the views and Walk:
+#   - edit mode begins in 3D (also m1600x900); the header's Walk, 3D and 2D
+#     in each target dump, tapped in turn and lit as they are (its line);
+#   - p412x915 and l915x412, Walk by finger: a kit/button placed ahead; a
+#     drag from its middle while it is not selected, and one from the sky,
+#     turn the view (controls.lua's line) with nothing selected or edited;
+#     tapped, it is selected, and a drag from its middle moves it (the
+#     server's log); the stick at the world's lower left walks (the body
+#     moved); the touch bar (Jump) in the world's lower right;
+#   - a drag from the header's empty part (after "< Log") moves the
+#     divider (the world taller, the UI half wider);
+#   - m1600x900: Walk by mouse as the desktop's, a click into the crosshair.
 # And a mouse at 1600x900 (no TOUCH): the desktop's layout (the bar, the
 # palette at the left, no shell), a click on the palette and one on the
 # plan place the button.
@@ -200,6 +212,10 @@ if not touch and mode == "2":
     a("click", "Button", "Cancel"); fr(5)
     gestures()
     dump("gestures")
+    # Stage 4b: Walk by mouse as the desktop mode's: a click goes up into
+    # the crosshair
+    a("click", "Button", "shell view walk"); a("waitlog", "kit editor: the view is Walk", 10); fr(5)
+    a("click", W // 4, H // 2); a("waitlog", "kit editor: into the crosshair", 10); fr(5)
     json.dump(S, open(path, "w"), indent=0)
     sys.exit(0)
 if not touch:
@@ -224,11 +240,16 @@ a("waitlog", "kit editor: touch shell on", 20)
 a("waitlog", "kit editor: touch shell: pixels", 10); fr(10)
 a("shot", "${OUT}/01_edit.png")
 dump("edit")
-# Walk to 2D by the Tools pane, the "..." menu's
+# Stage 4b: begun in 3D; the header's views lit and switching (Walk, 3D,
+# then 2D for what follows); the Tools pane
+a("waitlog_any", "kit editor: the view is 3D", 10)
+a("waitlog_any", r'touch shell: the header: .*, lit 3D', 10); fr(5)
+a("shot", "${OUT}/02_header.png")
+for v, n in [("walk", "Walk"), ("3d", "3D"), ("2d", "2D")]:
+    a("tap", "Button", "shell view " + v); a("waitlog", "kit editor: the view is " + n, 10)
+    a("waitlog", r'touch shell: the header: .*, lit ' + n, 10); fr(5)
 a("tap", "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
 a("tap", "Button", "menu Tools"); a("waitlog", "touch shell: the tools pane", 10); fr(10)
-a("tap", "DropDownList", "▼"); a("waitlog", "ui_utils: dropdown_[0-9]+ open", 10); fr(3)
-a("tap", "Text", "2D"); a("waitlog", "kit editor: the view is 2D", 10); fr(10)
 a("shot", "${OUT}/02_tools.png")
 dump("tools")
 a("tap", "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
@@ -335,6 +356,60 @@ elif mode == "0":
     a("shot", "${OUT}/11_entry_server_refused.png")
     a("tap", "Button", "entry cancel"); a("waitlog", "field entry: closed, cancelled", 10); fr(5)
     a("eval", "buildatKeyboard.test = null, 'no keyboard'"); fr(5)
+# Stage 4b, Walk by finger: a kit/button E1 placed ahead (the view 8
+# degrees down: the tap about 10 m out, E1 where it was tapped); its middle
+# found (selected, kit_knob_where), let go of; a drag from its middle and
+# one back from the sky turn (nothing selected or moved; the view as it
+# was); E1 tapped there and dragged from its middle (moved); the stick; Jump
+if gest:
+    if H > W: wx, wy, ww, wh = 0, 0, W, round(H * 0.45)
+    else: wx, wy, ww, wh = 0, 0, W - round(W * 0.5), H
+    def wp(fx, fy): return [round(wx + fx * ww), round(wy + fy * wh)]
+    Q1, SKY = wp(0.6, 0.5), wp(0.6, 0.08)
+    MID = r"the middle on the screen at (\d+), (\d+)"
+    a("tap", "Button", "shell view walk"); a("waitlog", "kit editor: the view is Walk", 10)
+    a("event", "kit_face 0 8"); fr(10)
+    a("tap", "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
+    a("tap", "Button", "menu Palette"); a("waitlog", "touch shell: the palette pane", 10); fr(10)
+    a("tap", "Button", "palette filter clear"); fr(2)
+    a("tap", "LineEdit", "palette filter"); fr(2); a("type", "kit/button"); fr(5)
+    a("tap", "Button", "kit/button"); a("waitlog", "kit editor: placing kit/button", 10); fr(5)
+    a("tap", *Q1); a("waitlog", "kit editor: placed kit/button at", 10)
+    a("waitlog", r"kit editor: selected \d+ \(", 20); fr(5)
+    a("tap", "Button", "shell cancel"); a("waitlog", "kit editor: placing nothing", 10); fr(5)
+    a("event", "kit_knob_where"); a("waitlog", "kit editor: the middle on the screen at", 10)
+    a("tap", *SKY); a("waitlog", "kit editor: selected none", 10); fr(5)
+    a("event", "kit_mode walk look")
+    a("at_log", MID, "drag", -80, 0); a("waitlog", "kit: a look let go", 10); fr(5)
+    a("drag", *SKY, SKY[0] + 80, SKY[1]); a("waitlog", "kit: a look let go", 10); fr(5)
+    a("sync", 5000)
+    a("event", "kit_mode walk looked")
+    a("at_log", MID, "tap"); a("waitlog", r"kit editor: selected \d+ \(", 10); fr(10)
+    a("shot", "${OUT}/20_walk_selected.png")
+    # (from its middle: a knob nearer the finger turns it)
+    a("event", "kit_knob_where"); a("waitlog", "kit editor: the middle on the screen at", 10)
+    a("at_log", MID, "drag", 60, 0); a("waitlog", "kit editor: moving 1", 10)
+    a("sync", 5000); fr(10)
+    a("shot", "${OUT}/21_walk_dragged.png")
+    a("event", "kit_mode walk stick")
+    st = wp(0.2, 0.8)
+    a("drag", *st, st[0], st[1] - 60); a("waitlog", "kit: the stick let go", 10); fr(10)
+    a("tap", "Button", "touch bar Jump"); fr(10)
+    a("shot", "${OUT}/22_walk_stick_jump.png")
+    dump("walk")
+# Stage 4b: the header dragged by its empty part (after "< Log", a short
+# title) moves the divider
+if touch:
+    a("tap", "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
+    a("tap", "Button", "menu Log"); a("waitlog", "touch shell: the log pane", 10); fr(10)
+    a("shot", "${OUT}/23_header_log.png")
+    if H > W: x0, y0, x1, y1 = 90, round(H * 0.45) + 30, 90, round(H * 0.56)
+    elif mode == "3": x0, y0, x1, y1 = 90, 30, 240, 30
+    else: x0, y0, x1, y1 = W - (W + 1) // 2 + 90, 30, W - (W + 1) // 2 - 60, 30
+    a("event", "kit_mode divider %d" % x0)
+    a("drag", x0, y0, x1, y1); a("waitlog", "kit editor: touch shell: the split", 10); fr(10)
+    a("shot", "${OUT}/23_divider.png")
+    dump("divider")
 json.dump(S, open(path, "w"), indent=0)
 PY
 	echo "kit_touch_mode: $r"
@@ -343,7 +418,7 @@ PY
 			"$t/$r/steps.json" "$t/$r" > "$t/$r/drive.log" 2>&1 ||
 		fail "the drive $r: $t/$r/drive.log"
 	python3 -I - "$t/$r" "$w" "$h" "$touch" "$mode" "$gest" <<'PY' || fail "$r: see above ($t/$r)"
-import json, re, sys
+import json, math, re, sys
 d, W, H, touch = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4] == "1"
 mode, gest = sys.argv[5], sys.argv[6] == "1"
 page = open(d + "/page.log", errors="replace").read().splitlines()
@@ -499,8 +574,79 @@ if gest:
     print(f"ok: stage 3: {C} revealed; {B} tapped where {A}'s ports are on the desktop, selected; {A} added by "
         f"Select+, both moved, boxed; {A} turned and raised; the view moved with no edit; "
         f"a voxel placed and dug at ({cell})")
+if touch or mode == "2":
+    # [KIT_PHONE_EDITING] stage 4b: the touch mode's edit mode begun in 3D
+    v = next(l for l in page[on:] if "kit editor: the view is " in l)
+    assert v.endswith("the view is 3D"), f"edit mode begun not in 3D: {v}"
+    print("ok: edit mode begun in 3D")
+if touch:
+    # The header: its views, lit as they were tapped; in each target dump;
+    # its empty part dragged moved the divider
+    hd = [l for l in page if "touch shell: the header: " in l]
+    assert hd and all("Walk | 3D | 2D" in l for l in hd), f"the header's views: {hd[:2]}"
+    lits = " ".join(re.search(r", lit (\w+)$", l)[1] for l in hd)
+    assert re.search(r"^3D( \S+)* Walk( \S+)* 3D( \S+)* 2D", lits), f"lit in turn: {lits}"
+    for l in page:
+        m = re.search(r"touch targets \((\w+)\): (.*)", l)
+        if m:
+            got = set(re.findall(r'Button "(Walk|3D|2D|\.\.\.)"', m[2]))
+            assert got == {"Walk", "3D", "2D", "..."}, f"the header's buttons in {m[1]}: {got}"
+    m = re.search(r"touch shell: the split ([\d.]+) ([\d.]+)", "\n".join(page))
+    assert m, "the divider not moved by the header"
+    # (begun on the empty part: between the title and the views)
+    dv = next(i for i, l in enumerate(page) if "the mode: edit (divider " in l)
+    x0 = int(re.search(r"divider (\d+)", page[dv])[1])
+    e = re.search(r"the empty part (\d+) to (\d+)", next(l for l in reversed(page[:dv])
+        if "touch shell: the header: " in l))
+    assert int(e[1]) < x0 < int(e[2]), f"the drag at {x0} not on the empty part {e[0]}"
+    if H > W:
+        assert float(m[1]) > 0.5, f"the world not taller: {m[0]}"
+    else:
+        assert float(m[2]) > 0.55, f"the UI half not wider: {m[0]}"
+    print(f"ok: the header's views lit in turn ({lits}); {m[0]}")
+if touch and gest:
+    # Walk by finger: between the looks' marks no edit, the guide on E1 (the
+    # last kit/button), the yaw turned from kit_face's 0 and back; after
+    # them E1 selected by a tap and dragged; the stick walked; the touch bar
+    # at the world's lower right
+    def at(pat, start=0):
+        return next((i for i in range(start, len(page)) if re.search(pat, page[i])), None)
+    wl, wd = at(r"the mode: edit \(walk look\)"), at(r"the mode: edit \(walk looked\)")
+    e1 = re.findall(r"An edit by webboss: placed kit/button (\d+) at", server)[-1]
+    edits = [l for l in page[wl:wd] if re.search(r"kit editor: (moved|selected|placed|place |dig |"
+        r"turning|moving|a box|linking)|the menu of", l)]
+    assert not edits, f"the looks edited: {edits}"
+    assert any(re.search(r"kit editor: guide: Tap: select .*\b" + e1 + r"\b", l) for l in page[wl:wd]), \
+            f"the look's drag not begun on {e1} (no guide line of it)"
+    yaws = [float(re.search(r"yaw ([\d.]+)", l)[1]) for l in page[wl:wd] if "kit: a look let go" in l]
+    assert len(yaws) == 2 and min(yaws[0], 360 - yaws[0]) > 2 and abs(yaws[1] - yaws[0]) > 2, \
+            f"the looks did not turn (from 0): {yaws}"
+    sel = at(r"kit editor: selected \d+ \(", wd)
+    assert re.search(r"selected " + e1 + r" \(", page[sel]), f"not {e1} selected by its tap: {page[sel]}"
+    assert at(r"kit editor: moved 1 by", sel) and \
+            re.search(r"An edit by webboss: moved " + e1 + r" to \[", server), \
+            f"{e1} not dragged in Walk (server.log)"
+
+    def xyz(pat):
+        m = re.search(pat + r" (-?[\d.]+),(-?[\d.]+),(-?[\d.]+)", "\n".join(page[wd:]))
+        assert m, f"no {pat}"
+        return [float(v) for v in m.groups()]
+    p0, p1 = xyz(r"kit: the stick down, the body at"), xyz(r"kit: the stick let go: the body at")
+    walked = math.hypot(p1[0] - p0[0], p1[2] - p0[2])
+    assert walked > 0.3, f"the stick walked {walked:.2f} m: {p0} to {p1}"
+    bi = [i for i, l in enumerate(page) if "kit: the touch bar in the world at" in l]
+    assert bi, "no touch bar in the world"
+    b = [page[bi[-1]]]
+    bx, by, bw, bh = map(int, re.search(r"at (\d+) (\d+) (\d+) (\d+)", b[-1]).groups())
+    wr = rect(re.search(r"the world ([\d ]+), the UI", next(l for l in reversed(page[:bi[-1]])
+        if "touch shell: pixels: " in l))[1])
+    assert bx >= wr[0] and by >= wr[1] and bx + bw <= wr[0] + wr[2] + 1 and \
+            by + bh <= wr[1] + wr[3] + 1 and bx + bw > wr[0] + wr[2] / 2, \
+            f"the touch bar {b[-1]} not at the world's lower right {wr}"
+    print(f"ok: Walk: {e1} tapped and dragged; the looks turned {yaws} with no edit; "
+        f"the stick walked {walked:.2f} m; {b[-1].split('kit: ')[-1]}")
 print(f"ok: {seen['targets']} target dumps, {seen['windows']} window dumps, the button placed; "
         f"the world {geo['world']}, the UI {geo['ui']}, the touch size {geo['touch']}")
 PY
 done
-echo "PASS: Kit's touch mode ($runs): no UI fit, the targets at the touch size, the panes off the world, a palette tap and a world tap placed, the field above the keyboard; select, Select+, move, box, turn, raise, dig and place by finger and by mouse, the view moved with no edit; the field entry mode applying, cancelling and refusing in place; the desktop's layout unchanged ($t)"
+echo "PASS: Kit's touch mode ($runs): no UI fit, the targets at the touch size, the panes off the world, a palette tap and a world tap placed, the field above the keyboard; select, Select+, move, box, turn, raise, dig and place by finger and by mouse, the view moved with no edit; the field entry mode applying, cancelling and refusing in place; begun in 3D, the header's views and divider, Walk by finger (the stick, the looks, a selected entity moved); the desktop's layout unchanged ($t)"

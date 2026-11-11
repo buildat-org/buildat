@@ -388,8 +388,17 @@ magic.SubscribeToEvent("Update", function()
 		crosshair.shown = cross
 		log:info("workbench: the crosshair " .. (cross and "shown" or "hidden"))
 	end
+	-- ([KIT_PHONE_EDITING] in the middle of the world's rect: Kit's touch
+	-- mode walking by mouse)
+	local a = cross and editing and kit.hud_area and kit.hud_area()
+	local r = magic.ui.root
+	local ox = a and math.floor(a.x + a.w / 2 - r.width / 2) or 0
+	local oy = a and math.floor(a.y + a.h / 2 - r.height / 2) or 0
 	for _, bar in ipairs(crosshair) do
 		bar.visible = cross
+		if bar.position.x ~= ox or bar.position.y ~= oy then
+			bar:SetPosition(ox, oy)
+		end
 	end
 	show_pointed()
 	local p = kit.body_pos()

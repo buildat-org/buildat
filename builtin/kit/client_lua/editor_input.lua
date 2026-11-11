@@ -379,7 +379,8 @@ local function start_drag()
 	-- A finger's drag on what is not selected moves the view
 	-- ([FP_TOUCH] 3): no box. ([KIT_PHONE_EDITING] The touch mode's, the
 	-- mouse's too, but under Select more)
-	if (S.touch or NT.sh.on()) and not (S.press.shift and more()) then
+	if (S.touch or (NT.sh.on() and S.view ~= "walk")) and
+			not (S.press.shift and more()) then
 		return
 	end
 	S.drag = {kind = "box"}
@@ -1367,11 +1368,12 @@ local function mouse_down(button_)
 		return
 	end
 	-- Walking, a click on the view goes up into the crosshair, where the
-	-- app has a mouse look ([FP_ESC]). ([KIT_PHONE_EDITING] Not in the touch
-	-- mode, where the left click is a finger's tap and the right drag turns)
-	local sh = NT.sh.on()
+	-- app has a mouse look ([FP_ESC]). ([KIT_PHONE_EDITING] The touch mode's
+	-- mouse is the desktop's walking (stage 4b), a finger's in the other
+	-- views)
+	local sh = NT.sh.on() and S.view ~= "walk"
 	if O.mouse_look and S.view == "walk" and not S.crosshair and
-			button_ == magic.MOUSEB_LEFT and not sh then
+			button_ == magic.MOUSEB_LEFT then
 		S.crosshair = true
 		S.swallow_up = button_
 		log:info("kit editor: into the crosshair")
@@ -1642,7 +1644,7 @@ local function mouse_move(x, y, dx, dy)
 		start_drag()
 		-- ([KIT_PHONE_EDITING] the touch mode's: as a finger's, a drag on
 		-- nothing moves the view)
-		if not S.drag and NT.sh.on() then
+		if not S.drag and NT.sh.on() and S.view ~= "walk" then
 			S.press.cam = true
 			if S.view == "3d" then
 				S.pan3d = pan3d_start(x, y)
@@ -1783,6 +1785,28 @@ local function fingers_n()
 	return n
 end
 
+-- [KIT_PHONE_EDITING] stage 4b: what a finger down at x, y does walking in
+-- the touch mode, for this file and controls.lua alike: "stick" (the
+-- world's lower left), "edit" (on the selected entity, the finger's
+-- fallback too, or its knob: its drag moves or turns it), "look" (else: a
+-- drag turns the eye, a tap or a hold the tool's); nil: not that (no
+-- touch shell walking, or not in the world's rect)
+-- simplified: the stick's corner wins over a selected entity drawn in it
+function M.walk_finger(x, y)
+	local r = S.touch and S.view == "walk" and NT.sh.on() and NT.sh.world_px()
+	if not r or x < r[1] or y < r[2] or x >= r[1] + r[3] or y >= r[2] + r[4] then
+		return nil
+	end
+	if x < r[1] + r[3] * 0.45 and y >= r[2] + r[4] * 0.55 then
+		return "stick"
+	end
+	local t = press_target(x, y)
+	if t.knob or (t.id and S.sel[t.id]) then
+		return "edit"
+	end
+	return "look"
+end
+
 local function touch_begin(id, x, y)
 	if not E.editing then
 		return
@@ -1803,6 +1827,13 @@ local function touch_begin(id, x, y)
 	if W.ctx then
 		close_menu()
 		S.fingers[id].ui = true
+		return
+	end
+	-- (walking in the touch mode: the stick's finger is controls.lua's)
+	local wk = M.walk_finger(x, y)
+	if wk == "stick" then
+		S.fingers[id].ui, S.fingers[id].stick = true, true
+		log:info("kit editor: walking: the stick")
 		return
 	end
 	S.mx, S.my = x, y
@@ -1834,7 +1865,7 @@ local function touch_begin(id, x, y)
 		S.fingers[id].box = true
 		return
 	end
-	if S.view ~= "walk" then
+	if S.view ~= "walk" or wk == "edit" then
 		S.press = {mx = x, my = y, target = press_target(x, y), finger = id,
 			shift = more()}
 	end
@@ -1874,7 +1905,8 @@ local function touch_move(id, x, y, dx, dy)
 		end
 		return
 	end
-	if S.view == "walk" then
+	-- (walking: only a drag begun on the selection, the touch mode's)
+	if S.view == "walk" and (S.gesture or not S.press) then
 		return
 	end
 	if S.gesture then
@@ -2014,9 +2046,12 @@ local function long_press_tick()
 		return
 	end
 	local only, n = nil, 0
+	-- (walking: a finger on the stick meanwhile is not counted)
 	for fid, f in pairs(S.fingers) do
-		only, n = f, n + 1
-		only.id = fid
+		if not f.stick then
+			only, n = f, n + 1
+			only.id = fid
+		end
 	end
 	if n == 1 and not only.ui and not only.item and not only.moved and
 			not only.held and not only.stroke and
@@ -2603,8 +2638,10 @@ local function draw_guide()
 	if sh then
 		guide_hud:SetAlignment(magic.HA_LEFT, magic.VA_TOP)
 		guide_hud:SetVar("FollowsRoot", "1")
+		-- (walking, above the touch bar's Jump: stage 4b)
+		local top = S.view == "walk" and M.touch_bar_top() or sh[2] + sh[4]
 		guide_hud:SetPosition(sh[1] + math.floor((sh[3] - guide_hud.width) / 2),
-				sh[2] + sh[4] - guide_hud.height - 8)
+				math.min(sh[2] + sh[4], top) - guide_hud.height - 8)
 		return
 	end
 	guide_hud:SetAlignment(magic.HA_CENTER, magic.VA_BOTTOM)
@@ -3080,6 +3117,15 @@ function M.editor(options)
 				E.builders = {}
 			end
 			apply_viewport()
+			-- [KIT_PHONE_EDITING] stage 4b: the touch mode's first edit mode
+			-- in 3D (the user: "less surprising than walk mode"); a view
+			-- remembered still put back after (MEM.restore)
+			if E.editing and not S.view_started then
+				S.view_started = true
+				if NT.sh.on() and S.view == "walk" then
+					set_view("3d")
+				end
+			end
 		end
 		E.credits = type(s.credits) == "table" and s.credits or {}
 		E.discarded = type(s.discarded) == "table" and s.discarded or {}

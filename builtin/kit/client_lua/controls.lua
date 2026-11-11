@@ -1451,7 +1451,7 @@ end
 
 -- A row of buttons {label, pressed or nil, released} at the lower right,
 -- y up from the bottom
-local function button_row(list, y)
+local function button_row(list, y, least)
 	local bar = magic.ui.root:CreateChild("Window")
 	bar.defaultStyle = K.STYLE
 	bar:SetStyleAuto()
@@ -1463,12 +1463,13 @@ local function button_row(list, y)
 	for _, b in ipairs(list) do
 		local btn = bar:CreateChild("Button")
 		btn:SetStyleAuto()
-		btn.minHeight = 24
+		btn.minHeight = least or 24
 		local t = btn:CreateChild("Text")
 		t:SetStyleAuto()
 		t:SetText(b[1])
 		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-		btn.minWidth = t.width + 16
+		btn.minWidth = math.max(least or 0, t.width + 16)
+		btn:SetName("touch bar " .. b[1])
 		if b[2] then
 			magic.SubscribeToEvent(btn, "Pressed", b[2])
 		end
@@ -1502,14 +1503,19 @@ local function touch_buttons()
 	return l
 end
 
-local function make_bar()
+-- [KIT_PHONE_EDITING] stage 4b: edit, the editor's touch mode walking
+-- (wr, the world's rect in pixels): the movement's own buttons only, at
+-- the touch size, at the world's lower right
+local function make_bar(wr)
 	local tb = touch_buttons()
 	local tb_kind = ""
 	for _, b in ipairs(tb or {}) do
 		tb_kind = tb_kind .. ":" .. b[1] .. "=" .. b[2]
 	end
+	local edit = wr ~= nil
 	local kind = touch_kind() .. (M.seated() and ":seat" or "") .. ":" ..
-			M.keys_version() .. (tb and ":tb" .. tb_kind or "")
+			M.keys_version() .. (tb and ":tb" .. tb_kind or "") ..
+			(edit and ":edit" or "")
 	if C.bar and C.bar_kind == kind then
 		return
 	end
@@ -1538,20 +1544,21 @@ local function make_bar()
 	if M.seated() then
 		list[#list + 1] = {"Exit", nil, exit_seat}
 	end
-	for _, b in ipairs(O.buttons or {}) do
+	for _, b in ipairs(not edit and O.buttons or {}) do
 		list[#list + 1] = {b[1], nil, b[2]}
 	end
 	-- [KIT_INPUT_ACTIONS] the world's actions, held while pressed: a row
 	-- of their own above (the bar not reaching into the app's help line)
 	local acts = {}
-	for _, a in ipairs(M.world_actions()) do
+	for _, a in ipairs(not edit and M.world_actions() or {}) do
 		local name = a.name
 		acts[#acts + 1] = {a.label ~= "" and a.label or name,
 			function() M.press_action(name, true) end,
 			function() M.press_action(name, false) end}
 	end
-	C.bar = button_row(list, 8)
+	C.bar = button_row(list, 8, edit and 48)
 	C.abar = button_row(acts, 8 + C.bar.height + 6)
+	C.bar_at = nil
 	log:info("kit: the touch bar: " .. labels(list) .. "; the world's: " ..
 			labels(acts))
 end
@@ -1595,6 +1602,23 @@ if TOUCH then
 			f.ui = true
 			return
 		end
+		-- [KIT_PHONE_EDITING] stage 4b: walking in the editor's touch mode,
+		-- the stick in the world's lower left, a finger on the selection
+		-- the editor's (editor_input.lua's walk_finger)
+		local wk = E.editing and M.walk_finger(x, y)
+		if wk == "edit" then
+			f.ui = true
+			return
+		elseif wk then
+			if wk == "stick" and not C.stick and touch_kind() ~= "tap" then
+				f.stick = true
+				C.stick = {f = 0, r = 0}
+				local p = pos_of(C.s)
+				log:info(string.format("kit: the stick down, the body at %s",
+						p and string.format("%.2f,%.2f,%.2f", p[1], p[2], p[3]) or "none"))
+			end
+			return
+		end
 		local w, h = screen()
 		if not C.stick and touch_kind() ~= "tap" and x < w * 0.45 and
 				y > h * 0.55 then
@@ -1635,6 +1659,13 @@ if TOUCH then
 		end
 		if f.stick then
 			C.stick = nil
+		end
+		-- (the editor's touch mode walking: for a check)
+		if E.editing and (f.stick or (f.moved and not f.ui)) then
+			local p = pos_of(C.s)
+			log:info(string.format("kit: %s let go: the body at %s, the view's yaw %.1f, pitch %.1f",
+					f.stick and "the stick" or "a look", p and string.format(
+					"%.2f,%.2f,%.2f", p[1], p[2], p[3]) or "none", C.yaw % 360, C.pitch))
 		end
 		-- A tap: the left click at the finger, in play (Kit's editor takes
 		-- its own)
@@ -2061,9 +2092,26 @@ magic.SubscribeToEvent("Update", function(_, data)
 	C.yaw = (C.yaw + mx * 0.1) % 360
 	C.pitch = math.max(-89, math.min(89, C.pitch + my * 0.1))
 	if TOUCH then
-		make_bar()
-		C.bar.visible = not E.editing
+		local wr = E.editing and M.view() == "walk" and M.touch_world and
+				M.touch_world() or nil
+		make_bar(wr)
+		C.bar.visible = not E.editing or (wr ~= nil and C.bar:GetNumChildren() > 0)
 		C.abar.visible = not E.editing and #M.world_actions() > 0
+		-- (alignment right and bottom: from the root's corner, UI units)
+		local sc, r = magic.ui.scale, magic.ui.root
+		local at = wr and string.format("%d %d",
+				-math.floor(r.width - (wr[1] + wr[3]) / sc + 8),
+				-math.floor(r.height - (wr[2] + wr[4]) / sc + 8)) or "-8 -8"
+		if C.bar_at ~= at then
+			C.bar_at = at
+			local bx, by = at:match("(%S+) (%S+)")
+			C.bar:SetPosition(tonumber(bx), tonumber(by))
+			if wr then
+				local p = C.bar.screenPosition
+				log:info(string.format("kit: the touch bar in the world at %d %d %d %d",
+						p.x * sc, p.y * sc, C.bar.width * sc, C.bar.height * sc))
+			end
+		end
 	end
 	-- The steps
 	local riding = M.riding()
@@ -2229,6 +2277,18 @@ function M.controls(o)
 	if TOUCH then
 		make_bar()
 	end
+end
+
+-- [KIT_PHONE_EDITING] stage 4b: whether x, y (pixels) is on the touch bar
+-- (the editor's over_ui: Jump is not a tap on the world)
+function M.touch_bar_at(x, y)
+	local b, sc = C.bar, magic.ui.scale
+	if not (b and b.visible) then
+		return false
+	end
+	local p, s = b.screenPosition, b.size
+	return x / sc >= p.x and y / sc >= p.y and x / sc < p.x + s.x and
+			y / sc < p.y + s.y
 end
 end
 -- vim: set noet ts=4 sw=4:

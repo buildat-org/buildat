@@ -1092,6 +1092,7 @@ local function over_ui(mx, my)
 	end
 	return ui_utils.dropdown_open() or ui_utils.clicks_wanted() or
 			(E.menu ~= nil and E.menu.held()) or (M.ui_at ~= nil and M.ui_at(mx, my))
+			or (M.touch_bar_at ~= nil and M.touch_bar_at(mx, my))
 end
 
 M.over_ui = over_ui
@@ -1265,6 +1266,13 @@ rebuild_bar = function(if_changed)
 			O.menu()
 		end)
 	end
+	-- ([KIT_PHONE_EDITING] stage 4b: the touch mode's views are its
+	-- header's, "..."'s; here Walk here alone)
+	if sh and (S.view == "2d" or S.view == "3d") then
+		bar_button("Walk here", nil, function()
+			walk_here()
+		end)
+	end
 	local views = {}
 	for _, v in ipairs({"2d", "3d", "walk", "hud", "signals"}) do
 		views[#views + 1] = {VIEW_NAMES[v] .. (S.touch and "" or
@@ -1275,14 +1283,16 @@ rebuild_bar = function(if_changed)
 	-- Not measured on the side (a dropdown made is kept by ui_utils): the
 	-- second thing in the first row
 	local d
-	d = ui_utils.dropdown(bar_row, views, S.view, function(v)
+	d = not sh and ui_utils.dropdown(bar_row, views, S.view, function(v)
 		if v ~= "\0walk_here" then
 			set_view(v)
 		elseif not walk_here() then
 			ui_utils.dropdown_set(d, S.view)
 		end
 	end, {height = 24})
-	bar_used = bar_used + math.max(d.minWidth, 90) + 4
+	if d then
+		bar_used = bar_used + math.max(d.minWidth, 90) + 4
+	end
 	-- [KIT_SCENES] the scene edited, switched by the list; New scene...
 	local scenes = E.state and E.state.scenes or {}
 	-- [KIT_PREFAB_BENCH] a prefab's temporary scene: its name and its two buttons
