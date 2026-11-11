@@ -1214,7 +1214,7 @@ rebuild_bar = function(if_changed)
 	end
 	w:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(6, 6, 6, 6))
 	bar_row, bar_used, bar_first = row(w), 0, true
-	bar_room = (magic.ui.root.width - 16 - 12) / S.font
+	bar_room = (magic.ui.root.width - 16 - 12 - (S.bar_trim or 0)) / S.font
 	S.bar_root_w = magic.ui.root.width
 	if O.menu then
 		bar_button("Menu", "Esc", function()
@@ -2720,8 +2720,8 @@ function NT.params_form(w, e, ci, c, t, keep)
 				end, {label = "Add to " .. k, fill = true})
 			end
 		end
-		local _
-		_, apply_text = button(w, "Apply", function()
+		local apply_b
+		apply_b, apply_text = button(w, "Apply", function()
 			for k, v in pairs(E.pending[key] or {}) do
 				if decl[k] and decl[k].type == "position" then
 					local x, y, z = tostring(v):match(
@@ -2738,6 +2738,8 @@ function NT.params_form(w, e, ci, c, t, keep)
 			E.pending[key] = nil
 			refresh()
 		end)
+		-- [KIT_PHONE_EDITING] what fit_inspector keeps above the keyboard
+		apply_b:SetName("kit apply")
 		mark()
 		NT.pf.overrides(w, e, ci)
 	end
@@ -3801,6 +3803,18 @@ local function fit_inspector()
 	-- the root's, the inspector followed the fit and the fit it
 	narrow()
 	local room = screen_ui.h - w.position.y - 12 - foot
+	-- [KIT_PHONE_EDITING] Above a narrow screen's refusal box (people()), and
+	-- above the on-screen keyboard while one of its fields is typed in
+	local p, f = W.people, magic.ui.focusElement
+	if p and p.visible and narrow() then
+		room = math.min(room, p.screenPosition.y - w.screenPosition.y - 12)
+	end
+	local kb = f ~= nil and f:GetTypeName() == "LineEdit" and
+			inside(body, f.screenPosition.x, f.screenPosition.y) and
+			buildat.keyboard_height() or 0
+	if kb > 0 then
+		room = math.min(room, magic.ui.root.height - kb - w.position.y - 16)
+	end
 	-- A field's warning grows the body and a layout never shrinks it again by
 	-- itself: asked to, while it is over the height it was built at
 	if body.height > S.inspector_h0 then
@@ -3815,6 +3829,47 @@ local function fit_inspector()
 		view:SetScrollBarsVisible(false, h < bh)
 		view:SetFixedSize(bw, h)
 		log:info(string.format("kit editor: the inspector %d of %d tall", h, bh))
+	end
+	-- The typed field scrolled into the view once (a finger's own scroll
+	-- after is left alone), with the Apply under it where both fit, else the
+	-- field at the top and the rows after it
+	-- simplified: Apply out of the view when it is more than a view below
+	local key = kb > 0 and (f.screenPosition.y - body.screenPosition.y) .. " " .. kb
+	if key and IV.kb_key ~= key then
+		IV.kb_key, IV.kb_told = key, false
+		local fy = f.screenPosition.y - body.screenPosition.y
+		local ay
+		for i = 0, body:GetNumChildren() - 1 do
+			local c = body:GetChild(i)
+			local cy = c.screenPosition.y - body.screenPosition.y
+			if c:GetName() == "kit apply" and cy > fy and (not ay or cy < ay) then
+				ay = cy + c.height
+			end
+		end
+		local y = ay and ay - fy <= h - 8 and ay - h + 6 or fy - 6
+		view.viewPosition = magic.IntVector2(0,
+				math.max(0, math.min(y, bh - h)))
+	elseif key and not IV.kb_told then
+		-- A frame on, where they are drawn, for a check (pixels)
+		IV.kb_told = true
+		local sc, a = magic.ui.scale, nil
+		for i = 0, body:GetNumChildren() - 1 do
+			local c = body:GetChild(i)
+			if c:GetName() == "kit apply" and c.screenPosition.y > f.screenPosition.y and
+					(not a or c.screenPosition.y < a.screenPosition.y) then
+				a = c
+			end
+		end
+		local vy = view.screenPosition.y
+		log:info(string.format("kit editor: typing in the inspector: the field "
+				.. "%d to %d, its Apply %s, the view %d to %d, the keyboard from %d",
+				f.screenPosition.y * sc, (f.screenPosition.y + f.height) * sc,
+				a and string.format("%d to %d", a.screenPosition.y * sc,
+				(a.screenPosition.y + a.height) * sc) or "none",
+				vy * sc, (vy + view.height) * sc,
+				(magic.ui.root.height - kb) * sc))
+	elseif not key then
+		IV.kb_key = nil
 	end
 end
 
@@ -4200,8 +4255,19 @@ people = function()
 	if not E.editing or (narrow() and not folded("palette")) then
 		return
 	end
+	-- [KIT_PHONE_EDITING] Under a narrow screen's open inspector only a
+	-- refusal, its lower rows kept clear of it (fit_inspector)
+	-- simplified: the builders and the rest come back as the inspector folds
+	local slim = narrow() and W.inspector ~= nil and W.inspector.visible
+	if slim and E.status == "" then
+		return
+	end
 	local b = window(magic.HA_LEFT, magic.VA_BOTTOM, 10, -50)
 	W.people = b
+	if slim then
+		text(b, E.status, WARN)
+		return
+	end
 	text(b, (E.session or {}).kind == "bench" and "Only Save reaches the prefab" or
 			E.persistent and "Edits change the world" or E.running and
 			"Running: edits change the start and the round" or
