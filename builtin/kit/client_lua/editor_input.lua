@@ -2465,14 +2465,6 @@ local function draw_play_links()
 end
 
 local function draw()
-	-- [KIT_PHONE_EDITING] On a touchscreen the client's fit only goes down
-	-- while editing (the root's FitHold): the panels coming and going
-	-- flipped the UI's size
-	local hold = E.editing and S.touch and "1" or ""
-	if S.fit_hold ~= hold then
-		S.fit_hold = hold
-		magic.ui.root:SetVar("FitHold", hold)
-	end
 	if not E.editing and S.view == "hud" then
 		set_view(S.before_hud)
 	end
@@ -2489,22 +2481,14 @@ local function draw()
 		draw_play_links()
 		return
 	end
-	-- [KIT_BAR_SERVER_OVERLAP] Wrapped again at a new width: the UI fit's
-	-- scale changes the root's, and a bar wrapped for the old one ran
-	-- under the Server button at the top right
-	if W.bar and S.bar_root_w ~= magic.ui.root.width then
+	-- [KIT_BAR_SERVER_OVERLAP] Wrapped again at a new screen width (the
+	-- root's at the client's fit x1; see rebuild_bar)
+	if W.bar and S.bar_root_w ~= NT.fit1_w() then
 		rebuild_bar()
-	elseif W.bar and S.touch and W.bar.width + 8 > magic.ui.root.width * 0.98 and
-			(S.bar_trim or 0) < magic.ui.root.width / 2 then
-		-- [KIT_PHONE_EDITING] On a touchscreen, laid out wider than the client's fit allows
-		-- (its 98 %): wrapped again narrower. Too wide, the fit shrank the
-		-- UI, the root grew, the bar wrapped wider: the scale flipped
-		-- simplified: the trim is kept and only grows
-		local over = W.bar.width + 8 - math.floor(magic.ui.root.width * 0.98)
-		S.bar_trim = (S.bar_trim or 0) + over
-		log:info(string.format("kit editor: the bar %d wide in a root of %d: "
-				.. "wrapped %d narrower", W.bar.width, magic.ui.root.width, S.bar_trim))
-		rebuild_bar()
+	end
+	-- (after the text size's scaling, which scaled the cap people() set)
+	if W.people and NT.cap_w(20) then
+		W.people.maxWidth = NT.cap_w(20)
 	end
 	NT.fit_panel()
 	fit_inspector()

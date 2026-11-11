@@ -604,6 +604,7 @@ BUILDAT_CLIENT_IMPORT("UIElement:GetName():string", buildat_c_UIElement_GetName)
 BUILDAT_CLIENT_IMPORT("UIElement:GetNumChildren():number", buildat_c_UIElement_GetNumChildren)
 BUILDAT_CLIENT_IMPORT("UIElement:GetText():any", buildat_c_UIElement_GetText)
 BUILDAT_CLIENT_IMPORT("UIElement:GetTypeName():string", buildat_c_UIElement_GetTypeName)
+BUILDAT_CLIENT_IMPORT("UIElement:GetVar(string):any", buildat_c_UIElement_GetVar)
 BUILDAT_CLIENT_IMPORT("UIElement:HasFocus():boolean", buildat_c_UIElement_HasFocus)
 BUILDAT_CLIENT_IMPORT("UIElement:HasRecursiveFocus():any", buildat_c_UIElement_HasRecursiveFocus)
 BUILDAT_CLIENT_IMPORT("UIElement:IsCaretOnLastRow():boolean", buildat_c_UIElement_IsCaretOnLastRow)
@@ -3229,6 +3230,8 @@ public:
 	::buildat::Value GetText() const;
 	// UIElement:GetTypeName():string
 	::buildat::Str GetTypeName() const;
+	// UIElement:GetVar(string):any
+	::buildat::Value GetVar(::buildat::Str a1) const;
 	// UIElement:HasFocus():boolean
 	bool HasFocus() const;
 	// UIElement:HasRecursiveFocus():any
@@ -5382,6 +5385,7 @@ inline ::buildat::Str UIElement::GetName() const{ ::buildat::detail::Reply r = :
 inline double UIElement::GetNumChildren() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_GetNumChildren, *this); return r.number(); }
 inline ::buildat::Value UIElement::GetText() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_GetText, *this); return r.value(); }
 inline ::buildat::Str UIElement::GetTypeName() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_GetTypeName, *this); return r.string(); }
+inline ::buildat::Value UIElement::GetVar(::buildat::Str a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_GetVar, *this, a1); return r.value(); }
 inline bool UIElement::HasFocus() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_HasFocus, *this); return r.boolean(); }
 inline ::buildat::Value UIElement::HasRecursiveFocus() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_HasRecursiveFocus, *this); return r.value(); }
 inline bool UIElement::IsCaretOnLastRow() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_IsCaretOnLastRow, *this); return r.boolean(); }

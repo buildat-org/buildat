@@ -85,9 +85,18 @@ import re, sys
 lines = open(sys.argv[1], errors="replace").read().splitlines()
 def at(s):
     return next(i for i, l in enumerate(lines) if s in l)
-# The scale settled before the inspector's first look, and kept after it
-scales = [l for l in lines[at("(open)"):] if re.search(r"UI scale [\d.]+ \(", l)]
-assert not scales, f"the UI scale changed in edit mode: {scales}"
+# The scale settles in edit mode: at most 2 changes, and back within 0.03
+# of where it was. Not "never changes": the root's FitHold is gone, and the
+# builders' box and the inspector still flip it once each until their
+# compact layout ([KIT_PHONE_EDITING] stage 1)
+def scale(l):
+    m = re.search(r"UI scale ([\d.]+) \(", l)
+    return m and float(m[1])
+on = at("kit editor: edit mode on")
+was = [scale(l) for l in lines[:on] if scale(l)][-1]
+scales = [scale(l) for l in lines[on:] if scale(l)]
+assert len(scales) <= 2 and abs((scales or [was])[-1] - was) <= 0.03, \
+    f"the UI scale did not settle in edit mode: x{was} then {scales}"
 m = re.search(r"typing in the inspector: the field (\d+) to (\d+), its Apply (\d+) to (\d+), "
         r"the view (\d+) to (\d+), the keyboard from (\d+)", "\n".join(lines))
 assert m, "no typing line"

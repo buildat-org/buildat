@@ -1710,6 +1710,9 @@ struct CApp: public App, public magic::Application
 	// ([WB_TOUCH_NEW_PROJECT]: web_drive.js's tap by label found "New
 	// project..." at the old scale, and the fit moved it before the tap)
 	bool m_fit_settled = true;
+	// The frame update_ui_fit() last wanted a new scale in: one is made
+	// only when two frames running want one; see there
+	int64_t m_fit_wanted_frame = -2;
 	bool m_restore_maximized = false;
 	Options m_options;
 	bool m_draw_debug_geometry = false;
@@ -2573,6 +2576,11 @@ struct CApp: public App, public magic::Application
 		// A scripted client keeps its logical size, which is what its
 		// pictures are compared at; update_ui_fit() leaves it at 1 there
 		s *= m_fit_factor;
+		// The fit read by a game ([KIT_PHONE_EDITING]): what it lays out to
+		// the root's width at x1 (Kit's bar) does not follow the fit, which
+		// wrapped it wider at each fit down and ratcheted the scale down
+		ui->GetRoot()->SetVar(magic::StringHash("FitFactor"),
+				magic::String(m_fit_factor));
 		if(logical_mode()){
 			// The root stays the logical size over the game's own UI scale,
 			// drawn at that scale times the window's, and sits in the
@@ -2735,14 +2743,16 @@ struct CApp: public App, public magic::Application
 		// list opened off the screen): it is counted there
 		scan(ui->GetRootModalElement(), 0);
 		float f = std::max(FIT_FLOOR, std::min(1.f, need / base));
-		// **The root's FitHold** ([KIT_PHONE_EDITING]): set by a game while
-		// its windows come and go (Kit's editor on a touchscreen), the fit
-		// only goes down, so it does not flip as each opens and closes.
-		// simplified: one wide window keeps the UI small until the var is
-		// cleared; per-window sizing to the screen is the upgrade
-		if(f > m_fit_factor &&
-				root->GetVar(magic::StringHash("FitHold")).GetString() == "1")
-			f = m_fit_factor;
+		// **Wanted two frames running** ([KIT_PHONE_EDITING]): a window
+		// made in an input's handler is seen before its game's Update
+		// scales it (Kit's editor text, 80 %), for a frame at its full
+		// size, and the UI went down and back up at each tap
+		if(std::fabs(f - m_fit_factor) > 0.02f &&
+				m_fit_wanted_frame != m_frame_count - 1){
+			m_fit_wanted_frame = m_frame_count;
+			m_fit_settled = false;
+			return;
+		}
 		if(std::fabs(f - m_fit_factor) > 0.02f){
 			m_fit_factor = f;
 			m_fit_prev_root = rs;

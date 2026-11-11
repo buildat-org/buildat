@@ -2064,6 +2064,12 @@ function M.define(dst, util)
 					self:SetVar(StringHash(name), Variant(value))
 				end
 			),
+			-- The root's "FitFactor", the client's UI fit
+			GetVar = util.wrap_function({"UIElement", "string"},
+				function(self, name)
+					return self:GetVar(StringHash(name)):GetString()
+				end
+			),
 			CreateChild = util.wrap_function({"UIElement", "string",
 					{"string", "__nil"}},
 				function(self, element_type, name)
