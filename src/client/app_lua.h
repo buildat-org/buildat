@@ -1866,10 +1866,10 @@
 				"launch_ui",
 				"default_username", "page_size", "lighting", "cache_keep",
 				"cache_per_server", "kit_editor_font", "floorplanner_font",
-				"kit_ui_mode",
+				"kit_ui_mode", "kit_ui_split",
 #ifdef __EMSCRIPTEN__
 				// Only where it does something
-				"web_idle_fps",
+				"web_idle_fps", "kit_fullscreen",
 				"web_address_bar",
 				"screen_orientation",
 #endif
@@ -1979,6 +1979,10 @@
 			lua_pushinteger(L, o.floorplanner_font);
 		else if(name == "kit_ui_mode")
 			lua_pushinteger(L, o.kit_ui_mode);
+		else if(name == "kit_ui_split")
+			lua_pushstring(L, o.kit_ui_split.c_str());
+		else if(name == "kit_fullscreen")
+			lua_pushboolean(L, o.kit_fullscreen);
 		else if(name == "cache_keep")
 			lua_pushinteger(L, o.cache_keep);
 		else if(name == "cache_per_server")
@@ -3188,6 +3192,8 @@
 	// set_web_fullscreen(bool): on a touchscreen's web page, whether the
 	// page is fullscreen, which is what puts a phone browser's address bar
 	// away. Entering waits for the next tap; nothing natively.
+	// "always": fullscreen whatever the address bar preference says, on a
+	// desktop too (Kit's editor's Fullscreen, [KIT_PHONE_EDITING])
 	static int l_set_web_fullscreen(lua_State *L)
 	{
 #ifdef __EMSCRIPTEN__
@@ -3195,10 +3201,12 @@
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 		self->push_web_address_bar();
+		const bool always = lua_type(L, 1) == LUA_TSTRING &&
+				ss_(lua_tostring(L, 1)) == "always";
 		EM_ASM({
-			Module['buildatFullscreen'] = !!$0;
+			Module['buildatFullscreen'] = $0 == 2 ? 'always' : !!$0;
 			Module['buildatSyncFullscreen']();
-		}, lua_toboolean(L, 1) ? 1 : 0);
+		}, always ? 2 : lua_toboolean(L, 1) ? 1 : 0);
 #endif
 		(void)L;
 		return 0;

@@ -11,8 +11,9 @@
 //
 // A steps file is a JSON list of steps, each a list:
 //   ["nav", url]            open the page, and wait for it to load; the
-//                           address gets pref=web_idle_fps=60 and
-//                           pref=kit_ui_mode=1 (full_rate)
+//                           address gets pref=web_idle_fps=60,
+//                           pref=kit_ui_mode=1 and pref=kit_fullscreen=0
+//                           (full_rate)
 //   ["wait", ms]
 //   ["waitlog", regex, s]   until a line of the page's console matches, one
 //                           after the last waitlog's, at most s seconds
@@ -114,13 +115,20 @@ const fs = require("fs");
 // [KIT_PHONE_EDITING] Kit's editor in its desktop layout, where the drives
 // measured their taps, unless the address names kit_ui_mode (the touch
 // mode's checks), as util/check_lib.sh's BUILDAT_TEST_KIT_UI_MODE natively
+// And Kit's editor's Fullscreen off whatever the address says: a run never
+// takes the screen
 function full_rate(u) {
 	const url = new URL(u);
-	const prefs = url.searchParams.getAll("pref");
+	const prefs = url.searchParams.getAll("pref").filter(
+		p => !p.startsWith("kit_fullscreen="));
+	url.searchParams.delete("pref");
+	for (const p of prefs)
+		url.searchParams.append("pref", p);
 	if (!prefs.some(p => p.startsWith("web_idle_fps=")))
 		url.searchParams.append("pref", "web_idle_fps=60");
 	if (!prefs.some(p => p.startsWith("kit_ui_mode=")))
 		url.searchParams.append("pref", "kit_ui_mode=1");
+	url.searchParams.append("pref", "kit_fullscreen=0");
 	return url.toString();
 }
 

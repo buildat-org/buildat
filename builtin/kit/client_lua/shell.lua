@@ -9,12 +9,12 @@
 -- The client's preference kit_ui_mode (the game settings' "Editor UI
 -- mode") picks it: 0 the device's (touch on a touchscreen), 1 desktop (the
 -- floating windows), 2 touch with the UI half on the right in landscape, 3
--- on the left. In edit mode's 2D, 3D and Walk views only; play, Signals and
--- the HUD view are as on the desktop.
+-- on the left. In edit mode only (stage 4: its Signals and HUD views too);
+-- play is as on the desktop.
 --   - The screen's aspect picks the split: tall, the world above and the UI
 --     half below (45 % / 55 %); wide, side by side (50 %), the UI half on
 --     the handed side. The header's grip ("=" or "||") dragged moves the
---     divider, remembered in this game's storage (kit_ui_split).
+--     divider, remembered on this device (the app preference kit_ui_split).
 --   - The UI half: a header (Back, the pane's title, the grip, "..."), the
 --     pane, Undo, Delete and Cancel, and a status line (Running or Ended,
 --     the builders, the last refusal) in the corner boxes' place. The panes:
@@ -58,29 +58,56 @@
 -- one input ends it (of more, it is selected: the inspector's To buttons).
 -- The foot's buttons: Select+, Turn - and + (Z, X), Up and Down (PageUp,
 -- PageDown), Duplicate, Undo, Delete, Cancel, in rows as they fit.
--- simplified: Scenes, the voxel dialog, the HUD editor, the blip designer,
--- the builders' box and the Log open as on the desktop, and the dialogs
--- still count in the UI fit (stage 4 makes them panes); Tools does not
--- scroll (a pane's room is the UI half less its header and foot); landscape
--- typing outside the inspector's parameters is as on the desktop (theirs is
--- field_entry.lua's mode); a world of no
+-- Stage 4, the rest as panes, each opened from "...":
+--   - a dialog (W.dialog: a new scene, a voxel type, a prefab, a sound's
+--     name) is the dialog pane while it is up, its buttons above its form,
+--     which scrolls (NT.dialog in editor.lua); Scenes lists the scenes (a
+--     tap switches) with New scene...; Builders and the Log are the
+--     builders' box and the selected entity's log;
+--   - the Signals view: its entities, the selected one's links (Add link as
+--     steps: an output, a target, an input) and the inspector as panes, its
+--     3D view in the world's rect (signals.lua); the HUD view: the HUD laid
+--     out in the world's rect, the selected element's panel the HUD pane;
+--     the blip designer in the UI half, its code in the world's rect;
+--   - Server (an app's kit.editor{server = fn}: Workbench's accounts'
+--     Server window) and the app's Menu;
+--   - Tools and the panes above scroll (SH.scroll); with a wide screen's
+--     keyboard up a pane's view ends above it, and the field typed in is
+--     scrolled into it;
+--   - Turn - and + at the foot while a prefab or a paste is being placed;
+--   - Kit's Fullscreen (the preference kit_fullscreen, the web page's,
+--     set_web_fullscreen("always")); the screen's orientation is the
+--     client's own preference, held while the page is fullscreen.
+-- simplified: a world of no
 -- height is drawn a pixel high under the UI half (a rect of nothing is the
 -- whole screen to Urho3D). Stage 3's: no two-finger twist (the plan does
 -- not turn); the ports hidden in each view, not only the plan; Walk's two
--- fingers each turn the eye (the app's own)
+-- fingers each turn the eye (the app's own). Stage 4's: an app with
+-- builtin/accounts' Server button and no kit.editor{server} has no Server
+-- in "..." (the button stays hidden; the app's menu has its window); the
+-- Builders and Log panes clip a line wider than the pane; the "..." menu
+-- goes in columns where it is taller than the screen
 return function(A)
 local S, W, E, NT, M, O = A.S, A.W, A.E, A.NT, A.M, A.O
 local magic, log, send, window, drop = A.magic, A.log, A.send, A.window, A.drop
-local button, text = A.button, A.text
-local SH = {pane = "palette", stack = {}}
+local button, text, row = A.button, A.text, A.row
+-- views: SH.scroll's, by their window ({view, fitted}; the sandbox has no
+-- weak tables: those of windows gone are dropped as one is added)
+local SH = {pane = "palette", stack = {}, views = {}}
 NT.sh = SH
 
 -- A target's least side, UI pixels (the user's 48, 2026-11-11)
 SH.TOUCH = 48
 local PAD = 6
 -- The panes' windows
-local PANE_W = {palette = "palette", inspector = "inspector", tools = "bar"}
-local TITLES = {inspector = "Inspector", tools = "Tools"}
+local PANE_W = {palette = "palette", inspector = "inspector", tools = "bar",
+	dialog = "dialog", scenes = "scenes", people = "people", log = "log",
+	sg_list = "sg_list", sg_links = "sg_links", hud = "hud_panel"}
+local TITLES = {inspector = "Inspector", tools = "Tools", scenes = "Scenes",
+	people = "Builders", log = "Log", sg_list = "Signals", sg_links = "Links",
+	hud = "HUD element"}
+-- The Signals view's own: placed by its layout (signals.lua)
+local SG_PANES = {sg_list = true, sg_links = true, inspector = true}
 
 S.ui_mode = (buildat.declare_preference and
 		buildat.declare_preference("kit_ui_mode", function(v)
@@ -89,12 +116,27 @@ S.ui_mode = (buildat.declare_preference and
 		end)) or 0
 
 -- The world's share of a tall screen's height, the UI half's of a wide one's
--- width
+-- width: this device's (an app preference, not this game's storage)
 do
-	local t, w = (buildat.storage_read("kit_ui_split") or ""):match(
+	local t, w = tostring(buildat.get_app_preference and
+			buildat.get_app_preference("kit_ui_split") or ""):match(
 			"^([%d.]+) ([%d.]+)")
 	SH.split = {tall = tonumber(t) or 0.45, wide = tonumber(w) or 0.5}
 end
+
+-- Kit's Fullscreen: the web page's whatever its address bar preference is.
+-- Off, the page is left as the app has it (never set by Kit unless it was
+-- on). A check's run has it off (util/web_drive.js pins it)
+function SH.fullscreen(v)
+	S.fullscreen = v == true
+	if S.fullscreen or SH.fs_set then
+		buildat.set_web_fullscreen(S.fullscreen and "always" or false)
+		SH.fs_set = S.fullscreen
+	end
+	log:info("kit editor: fullscreen " .. (S.fullscreen and "on" or "off"))
+end
+SH.fullscreen(buildat.declare_preference and
+		buildat.declare_preference("kit_fullscreen", SH.fullscreen))
 
 function SH.mode()
 	local m = tonumber(S.ui_mode) or 0
@@ -105,8 +147,21 @@ function SH.mode()
 end
 
 function SH.on()
-	return E.editing == true and SH.mode() ~= "desktop" and
-			(S.view == "walk" or S.view == "2d" or S.view == "3d")
+	return E.editing == true and SH.mode() ~= "desktop"
+end
+
+-- Whether pane p has something to show in this view
+local function available(p)
+	if p == "dialog" then
+		return W.dialog ~= nil
+	elseif p == "sg_list" or p == "sg_links" then
+		return NT.sig()
+	elseif p == "hud" then
+		return S.view == "hud"
+	elseif p == "palette" then
+		return not NT.world_off()
+	end
+	return true
 end
 
 -- The world's and the UI half's rects ({x, y, w, h}, UI units), whether the
@@ -153,6 +208,7 @@ function SH.world_px()
 end
 
 function SH.show(p)
+	SH.placed = {}
 	if p == SH.pane then
 		return
 	end
@@ -166,46 +222,147 @@ function SH.show(p)
 	A.refresh()
 end
 
+-- The pane before, past those with nothing to show now (a dialog closed)
 function SH.back()
-	local p = table.remove(SH.stack)
+	local p
+	repeat
+		p = table.remove(SH.stack)
+	until not p or (p ~= SH.pane and available(p))
 	if not p then
-		return
+		p = S.primary and "inspector" or available("palette") and "palette" or
+				"tools"
+		if p == SH.pane then
+			return
+		end
 	end
-	SH.pane = p
+	SH.pane, SH.placed = p, {}
 	log:info("kit editor: touch shell: back to the " .. p .. " pane")
 	S.bar_key = nil
 	A.refresh()
 end
 
--- "...": every pane, and what is not one yet
+-- A view that scrolls in a pane's window, after the window's own rows (the
+-- shell sizes it each frame, tick): its body, where the rest goes. Off the
+-- touch mode the window itself
+function SH.scroll(w)
+	if not SH.on() then
+		return w
+	end
+	local view = w:CreateChild("ScrollView")
+	view:SetStyleAuto()
+	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
+	view.scrollBarsAutoVisible = false
+	view:SetScrollBarsVisible(false, false)
+	local body = view:CreateChild("UIElement")
+	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+	view.contentElement = body
+	body:SetPosition(0, 0)
+	view:SetFixedSize(SH.TOUCH, SH.TOUCH)
+	local live = {}
+	for _, x in pairs(W) do
+		live[x] = true
+	end
+	for k in pairs(SH.views) do
+		if not live[k] then
+			SH.views[k] = nil
+		end
+	end
+	SH.views[w] = {view = view}
+	return body
+end
+
+-- The Scenes pane: each scene (a tap goes there), and New scene...
+function SH.scenes()
+	drop("scenes")
+	if not (SH.on() and SH.pane == "scenes") then
+		return
+	end
+	local w = window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
+	W.scenes = w
+	w:SetName("kit: scenes")
+	local body = SH.scroll(w)
+	local st = E.state or {}
+	local cur = st.scene or ""
+	for _, n in ipairs(st.scenes or {}) do
+		button(body, n == cur and n .. " (here)" or n, function()
+			if n ~= cur then
+				M.switch_scene(n)
+			end
+		end, n == cur):SetName("scene " .. n)
+	end
+	if #(st.scenes or {}) == 0 then
+		text(body, "One scene", A.DIM)
+	end
+	if st.can_make_scenes then
+		button(body, "New scene...", function()
+			M.scene_dialog()
+		end):SetName("scenes new")
+	end
+end
+
+-- "...": the panes this view has, the views, the Server window, the app's
+-- menu. A window as NT.menu's (W.ctx), in columns where one is taller than
+-- the screen; kept on it in the UI half each frame (tick: its size changes
+-- with the text size's scaling and the touch size)
 function SH.more()
 	local e = {}
-	for _, p in ipairs({{"palette", "Palette"}, {"inspector", "Inspector"},
-			{"tools", "Tools"}}) do
-		e[#e + 1] = {p[2], function() SH.show(p[1]) end}
+	local function pane(p, label)
+		if available(p) then
+			e[#e + 1] = {label, function() SH.show(p) end}
+		end
 	end
-	e[#e + 1] = {SH.people and "Hide builders" or "Builders", function()
-		SH.people = not SH.people
-		A.people()
-	end}
-	e[#e + 1] = {SH.log and "Hide log" or "Log", function()
-		SH.log = not SH.log
-		A.show_log()
-	end}
-	e[#e + 1] = {"Signals view", function() A.set_view("signals") end}
-	e[#e + 1] = {"HUD view", function() A.set_view("hud") end}
+	pane("sg_list", "Signals: entities")
+	pane("sg_links", "Signals: links")
+	pane("hud", "HUD element")
+	pane("palette", "Palette")
+	pane("inspector", "Inspector")
+	pane("tools", "Tools")
+	pane("dialog", SH.dialog_title or "Dialog")
+	pane("scenes", "Scenes")
+	pane("people", "Builders")
+	pane("log", "Log")
+	if NT.world_off() then
+		e[#e + 1] = {"World view", function()
+			A.set_view(S.view == "hud" and S.before_hud or
+					S.before_signals or "walk")
+		end}
+	end
+	if not NT.sig() then
+		e[#e + 1] = {"Signals view", function() A.set_view("signals") end}
+	end
+	if S.view ~= "hud" then
+		e[#e + 1] = {"HUD view", function() A.set_view("hud") end}
+	end
+	if O.server then
+		e[#e + 1] = {"Server", function() O.server() end}
+	end
 	if O.menu then
 		e[#e + 1] = {"Menu", function() O.menu() end}
 	end
-	local u = SH.ui
-	NT.menu(e, u[1] + u[3], u[2] + PAD + SH.TOUCH)
-	-- In the UI half, at its right
-	local c = W.ctx
-	if c then
-		c:SetPosition(math.max(u[1], u[1] + u[3] - c.width - PAD),
-				c.position.y)
+	drop("ctx")
+	local w = window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
+	W.ctx = w
+	w.priority = 10
+	w.visible = true
+	local per = math.max(1, math.floor((magic.ui.root.height - 2 * PAD - 12) /
+			(SH.TOUCH + 4)))
+	local cols = math.ceil(#e / per)
+	local r
+	local names = {}
+	for i, en in ipairs(e) do
+		if (i - 1) % cols == 0 then
+			r = row(w)
+		end
+		-- (named "menu <label>" as NT.menu's, for a drive)
+		button(r, en[1], function()
+			drop("ctx")
+			en[2]()
+		end):SetName("menu " .. en[1])
+		names[i] = en[1]
 	end
-	log:info("kit editor: touch shell: the ... menu")
+	SH.more_w = w
+	log:info("kit editor: touch shell: the ... menu, " .. #e .. " in " .. cols ..
+			(cols == 1 and " column: " or " columns: ") .. table.concat(names, ", "))
 end
 
 -- The shell's window: the UI half's background, header, foot and status
@@ -261,6 +418,12 @@ function SH.build()
 	SH.status_said = nil
 end
 
+-- Whether what is being placed turns (NT.turn_step's): a prefab, a paste
+function SH.turning()
+	local p = S.placing
+	return p ~= nil and (p.prefab ~= nil or p.clipboard ~= nil)
+end
+
 -- Its parts where the UI half is now (after the text size's scaling)
 local function place_shell()
 	local u, w, T = SH.ui, W.shell, SH.TOUCH
@@ -278,12 +441,14 @@ local function place_shell()
 	-- The buttons in rows as they fit (each its label's width, at least the
 	-- touch size), each row stretched across. The world's (the first six)
 	-- not in the palette's pane: a landscape phone's had room for one row of
-	-- its list
-	-- simplified: so a prefab being placed is turned by Z and X only
+	-- its list; but Turn - and + while a prefab or a paste is placed (stage
+	-- 4). None of them in the Signals and HUD views (no world to edit)
 	local room, rows = u[3] - 2 * PAD, {{used = -4}}
+	local turning = SH.turning()
 	for i, b in ipairs(SH.acts) do
 		local bw, r = math.max(T, b:GetChild(0).width + 16), rows[#rows]
-		b.visible = i > 6 or SH.pane ~= "palette"
+		b.visible = i > 6 or (not NT.world_off() and (SH.pane ~= "palette" or
+				(turning and (i == 2 or i == 3))))
 		if not b.visible then
 			bw = nil
 		elseif #r > 0 and r.used + 4 + bw > room then
@@ -338,6 +503,10 @@ local function touch_size(el, depth)
 	end
 end
 
+function SH.touch_size(el)
+	touch_size(el, 0)
+end
+
 local function status_text()
 	local ses = E.session or {}
 	local s = ses.kind == "bench" and "Prefab" or E.persistent and
@@ -369,8 +538,10 @@ local function drag_divider()
 	end
 	if not input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
 		SH.drag = nil
-		buildat.storage_write("kit_ui_split", string.format("%.3f %.3f",
-				SH.split.tall, SH.split.wide))
+		if buildat.set_app_preference then
+			buildat.set_app_preference("kit_ui_split", string.format("%.3f %.3f",
+					SH.split.tall, SH.split.wide))
+		end
 		log:info(string.format("kit editor: touch shell: the split %.2f %.2f",
 				SH.split.tall, SH.split.wide))
 		return
@@ -388,13 +559,13 @@ local function drag_divider()
 end
 
 -- [KIT_PHONE_EDITING] The Walk view's HUD in the world's rect, as the
--- Signals view's in its viewport (ui.lua's hud_box)
+-- Signals view's in its viewport (ui.lua's hud_box); the HUD view's too
 do
 	local sg_area = M.hud_area
 	SH.area = {}
 	function M.hud_area()
 		local a = sg_area and sg_area()
-		if a or not (SH.world and S.view == "walk") then
+		if a or not (SH.world and (S.view == "walk" or S.view == "hud")) then
 			return a
 		end
 		local w, b = SH.world, SH.area
@@ -408,6 +579,71 @@ end
 local function px_rect(r)
 	local sc = magic.ui.scale
 	return string.format("%d %d %d %d", r[1] * sc, r[2] * sc, r[3] * sc, r[4] * sc)
+end
+
+-- A pane's view (SH.scroll) in the pane: as tall as its body, at most to
+-- the pane's foot and, with a wide screen's keyboard up, to above it; its
+-- body the view's width. The field typed in scrolled into it once (a
+-- finger's own scroll after is left alone)
+function SH.fit_view(pw, rec, pr, tall)
+	local view = rec.view
+	local body = view.contentElement
+	local f = magic.ui.focusElement
+	local typing = f ~= nil and f:GetTypeName() == "LineEdit"
+	local kb = typing and buildat.keyboard_height() or 0
+	local vy = view.screenPosition.y
+	local room = pr[2] + pr[4] - vy - 8
+	if kb > 0 and not tall then
+		room = math.min(room, magic.ui.root.height - kb - vy - 4)
+	end
+	local bh = body.height + 4
+	local h = math.max(SH.TOUCH, math.min(bh, room))
+	local more = h < bh
+	local vw = pr[3] - 12
+	local bw = vw - 4 - (more and view.verticalScrollBar.width + 4 or 0)
+	local key = h .. " " .. vw .. " " .. bw .. " " .. tostring(more)
+	if rec.fitted ~= key then
+		rec.fitted = key
+		-- A dialog's buttons a row of the touch size: a shorter view's room
+		-- went to them, under the keyboard
+		local br = pw:GetChild("dialog buttons")
+		if br then
+			br:SetFixedHeight(SH.TOUCH)
+		end
+		view:SetScrollBarsVisible(false, more)
+		body:SetFixedWidth(bw)
+		view:SetFixedSize(vw, h)
+	end
+	if kb == 0 then
+		return
+	end
+	local fp, bp = f.screenPosition, body.screenPosition
+	if fp.x < bp.x or fp.x >= bp.x + body.width or fp.y < bp.y or
+			fp.y >= bp.y + body.height then
+		return
+	end
+	local fy = fp.y - bp.y
+	local k = fy .. " " .. kb
+	if SH.kb_key ~= k then
+		SH.kb_key = k
+		view.viewPosition = magic.IntVector2(0, math.max(0, math.min(fy - 8,
+				bh - h)))
+	end
+	-- For a check: the field, the dialog's buttons and the keyboard (pixels)
+	local br = SH.pane == "dialog" and pw:GetChild("dialog buttons")
+	if br then
+		local sc = magic.ui.scale
+		local line = string.format("kit editor: touch shell: typing in the " ..
+				"dialog %s: the field %d to %d, its buttons %d to %d, the keyboard " ..
+				"from %d (pixels)", tostring(SH.dialog_title), fp.y * sc,
+				(fp.y + f.height) * sc,
+				br.screenPosition.y * sc, (br.screenPosition.y + br.height) * sc,
+				(magic.ui.root.height - kb) * sc)
+		if line ~= SH.typing_said then
+			SH.typing_said = line
+			log:info(line)
+		end
+	end
 end
 
 -- Each frame, after the text size's scaling (editor_input.lua's Update)
@@ -446,25 +682,48 @@ function SH.tick()
 		drag_divider()
 	end
 	SH.ui = ui
-	-- The pane follows the activity: a placing armed, a selection made
+	-- Into a view of its own panes (Signals, HUD) and out: laid out again
+	local sig = NT.sig()
+	if S.view ~= SH.view then
+		local was = SH.view
+		SH.view, SH.laid, SH.placed = S.view, nil, {}
+		if sig then
+			SH.show(S.primary and "sg_links" or "sg_list")
+		elseif S.view == "hud" then
+			SH.show("hud")
+		elseif was and not available(SH.pane) then
+			SH.show(S.primary and "inspector" or "palette")
+		end
+	end
+	-- The pane follows the activity: a placing armed, a selection made, a
+	-- dialog up (gone, the pane before it)
 	local placing = S.placing ~= nil
-	if placing and not SH.was_placing then
+	if placing and not SH.was_placing and available("palette") then
 		SH.show("palette")
 	end
 	SH.was_placing = placing
 	if S.primary ~= SH.was_primary and S.primary ~= nil then
-		SH.show("inspector")
+		SH.show(sig and "sg_links" or S.view == "hud" and "hud" or "inspector")
 	end
 	SH.was_primary = S.primary
+	local dw = W.dialog
+	if dw and dw ~= SH.dialog_w then
+		SH.show("dialog")
+	end
+	SH.dialog_w = dw
+	if not dw and SH.pane == "dialog" then
+		SH.back()
+	end
 	-- The windows out of the fit, and a frame after they are first seen (the
 	-- text size's scaling then done) at the touch size and in their place:
 	-- what is set before the scaling is scaled too
 	for k, w in pairs(W) do
-		local v = k ~= "dialog" and w:GetVar("KitTouch")
+		local v = w:GetVar("KitTouch")
 		if v == "" then
 			w:SetVar("KitTouch", "0")
 			w:SetVar("FollowsRoot", "1")
-			if k == "shell" or k == PANE_W[SH.pane] then
+			if k == "shell" or (k == PANE_W[SH.pane] and
+					not (sig and SG_PANES[SH.pane])) then
 				w.visible = false
 			end
 		elseif v == "0" then
@@ -477,21 +736,33 @@ function SH.tick()
 	if W.shell:GetVar("KitTouch") ~= "1" then
 		return
 	end
+	-- The other panes' windows away (the Signals view's own columns are its
+	-- layout's, signals.lua)
+	for p, k in pairs(PANE_W) do
+		local w = W[k]
+		if w and p ~= SH.pane and not (sig and SG_PANES[p]) and w.visible then
+			w.visible = false
+		end
+	end
 	local lk = table.concat(ui, " ") .. " " .. W.shell.width .. " " ..
-			tostring(SH.pane == "palette")
+			tostring(SH.pane == "palette") .. " " .. tostring(SH.turning()) ..
+			" " .. tostring(NT.world_off())
 	if lk ~= SH.laid then
 		SH.laid = lk
 		place_shell()
-		W.shell.visible = true
 		SH.placed = {}
 		log:info("kit editor: touch shell: pixels: the world " .. px_rect(world) ..
 				", the UI " .. px_rect(ui) .. ", the pane " .. px_rect(SH.pane_rect) ..
 				", the keyboard " .. math.floor(kb * magic.ui.scale) ..
 				", the touch size " .. math.floor(SH.TOUCH * magic.ui.scale))
 	end
+	-- (the HUD view hides every window as it comes, editor.lua's set_view)
+	if not W.shell.visible then
+		W.shell.visible = true
+	end
 	local pr = SH.pane_rect
 	local pw = W[PANE_W[SH.pane]]
-	if pw and pw:GetVar("KitTouch") ~= "1" then
+	if pw and (pw:GetVar("KitTouch") ~= "1" or (sig and SG_PANES[SH.pane])) then
 		pw = nil
 	elseif pw and SH.placed.w ~= pw then
 		SH.placed.w = pw
@@ -500,16 +771,37 @@ function SH.tick()
 		pw:SetFixedWidth(pr[3])
 		pw.maxHeight = pr[4]
 		pw.clipChildren = true
+	end
+	if pw and not pw.visible then
 		pw.visible = true
+	end
+	local view = pw and SH.views[pw]
+	if view then
+		SH.fit_view(pw, view, pr, tall)
 	end
 	local t = title() or ""
 	if SH.title.text ~= t then
 		SH.title.text = t
 	end
-	local e = not W[PANE_W[SH.pane]] and SH.pane == "inspector" and
-			"Nothing selected: tap an entity" or ""
+	local e = ""
+	if not W[PANE_W[SH.pane]] then
+		e = SH.pane == "inspector" and "Nothing selected: tap an entity" or
+				SH.pane == "hud" and "Tap a HUD element in the world" or
+				SH.pane == "log" and "No log lines of the selected entity" or ""
+	end
 	if SH.empty.text ~= e then
 		SH.empty.text = e
+	end
+	-- "..." in the UI half at its right, under the header, on the screen
+	local c = W.ctx
+	if c and c == SH.more_w and c:GetVar("KitTouch") == "1" then
+		local r = magic.ui.root
+		local x = math.max(0, math.min(ui[1] + ui[3] - c.width - PAD,
+				r.width - c.width))
+		local y = math.max(0, math.min(ui[2] + PAD + SH.TOUCH, r.height - c.height))
+		if c.position.x ~= x or c.position.y ~= y then
+			c:SetPosition(x, y)
+		end
 	end
 	-- Select+ on in the bar buttons' yellow
 	if SH.multi ~= SH.multi_shown then

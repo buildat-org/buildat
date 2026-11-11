@@ -253,6 +253,10 @@ kit.editor{scene = scene, camera = camera_node, ground_y = 1, bar = false,
 	pick_voxel = function(name)
 		hand = name
 	end,
+	-- [KIT_PHONE_EDITING] stage 4: the touch mode's "..." has Server
+	server = accounts and function()
+		accounts.server_window("account", function() end)
+	end,
 	-- The heightmap's ground (Kit's cells under it, [KIT_HM_VOXELS]) and
 	-- the voxels
 	solid = function(x, y, z)

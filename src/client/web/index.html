@@ -398,6 +398,10 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 				screen.width > screen.height;
 	}
 	function want_fullscreen(){
+		// [KIT_PHONE_EDITING] Kit's editor's Fullscreen: whatever the
+		// address bar preference is
+		if(Module.buildatFullscreen === 'always')
+			return true;
 		var pref = Module.buildatAddressBar ||
 				(hide_by_default() ? 'landscape' : 'show');
 		return (Module.buildatFullscreen || orientation() !== '') &&

@@ -568,12 +568,15 @@ function NT.add_component(w, e)
 	if #names == 0 then
 		return
 	end
+	-- ([KIT_PHONE_EDITING] stage 4: the touch mode's at least a narrow one, not
+	-- the longest type's: that widened a portrait pane's inspector body past it)
 	ui_utils.dropdown(row(w), list, "", function(x)
 		if x and x ~= "" then
 			log:info("kit editor: add " .. tostring(x) .. " to " .. e.id)
 			send({op = "add_component", id = e.id, type = x})
 		end
-	end, {label = "Add component...", fill = true})
+	end, {label = "Add component...", fill = true,
+		width = NT.sh.on() and 100 or nil})
 end
 
 function NT.copy_style(from, from_ci, to, to_ci)
@@ -1147,7 +1150,7 @@ local function place(make)
 	-- The first row clear of the server button at the top right
 	-- (builtin/accounts')
 	if bar_used > 0 and bar_used + wd > bar_room - (bar_first and 110 or 0) then
-		bar_row, bar_used, bar_first = row(W.bar), 0, false
+		bar_row, bar_used, bar_first = row(S.bar_body or W.bar), 0, false
 	end
 	local e = make(bar_row)
 	e.maxWidth = e.minWidth
@@ -1244,7 +1247,9 @@ rebuild_bar = function(if_changed)
 		return
 	end
 	w:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(6, 6, 6, 6))
-	bar_row, bar_used, bar_first = row(w), 0, true
+	-- ([KIT_PHONE_EDITING] stage 4: the Tools pane's rows scroll)
+	S.bar_body = NT.sh.scroll(w)
+	bar_row, bar_used, bar_first = row(S.bar_body), 0, true
 	-- [KIT_PHONE_EDITING] Wrapped to the root's width at the client's fit
 	-- x1, not the current one: the root grows as the fit shrinks, and a bar
 	-- wrapped wider at each fit down ratcheted the UI down on a phone
@@ -3453,6 +3458,9 @@ local function inspector(w, e, is_made)
 			local to = find(l.to)
 			label(r, l.output .. " -> " .. l.to .. " " .. tostring(to and
 					to.name or "?") .. ": " .. l.input)
+			-- ([KIT_PHONE_EDITING] stage 4: the touch mode's buttons under the
+			-- text, which made a portrait pane's body wider than the pane)
+			r = NT.sh.on() and row(w) or r
 			button(r, "Unlink", function()
 				send({op = "unlink", id = e.id, comp = ci - 1,
 					output = l.output, to = l.to, input = l.input})
@@ -3798,7 +3806,8 @@ end)
 magic.SubscribeToEvent("command_seq:kit_ui_where", function(_, data)
 	local sc, r = magic.ui.scale, {}
 	for _, k in ipairs({"bar", "palette", "inspector", "people", "sg_list",
-			"sg_links", "sg_view", "hud_panel", "ctx", "shell", "log"}) do
+			"sg_links", "sg_view", "hud_panel", "ctx", "shell", "log", "dialog",
+			"scenes"}) do
 		local w = W[k]
 		if w and w.visible then
 			local p = w.screenPosition
@@ -3937,6 +3946,18 @@ local function fit_inspector()
 		view:SetScrollBarsVisible(false, h < bh)
 		view:SetFixedSize(bw, h)
 		log:info(string.format("kit editor: the inspector %d of %d tall", h, bh))
+	end
+	-- [KIT_PHONE_EDITING] stage 4: for a check, whether the body fits the
+	-- pane's view (pixels)
+	if pr then
+		local sc = magic.ui.scale
+		local said = string.format("kit editor: touch shell: the inspector's " ..
+				"body %d wide in its view's %d (pixels)", body.width * sc,
+				view.width * sc)
+		if said ~= IV.body_said then
+			IV.body_said = said
+			log:info(said)
+		end
 	end
 	-- The typed field scrolled into the view once (a finger's own scroll
 	-- after is left alone), with the Apply under it where both fit, else the
@@ -4211,8 +4232,14 @@ function NT.hud_panel_fit(view)
 	-- (the view's clip border, 2 a side: [KIT_LAST_ROW_CLIP])
 	local bh = body.height + 4
 	local h = math.min(bh, magic.ui.root.height - 28, S.hud_panel_limit or math.huge)
+	-- ([KIT_PHONE_EDITING] stage 4: the touch mode's HUD pane, shell.lua)
+	local pr = NT.sh.on() and NT.sh.pane_rect
+	if pr then
+		h = math.max(40, math.min(bh, pr[4] - 12))
+	end
 	local tall = h < bh
-	local bw = body.width + 4 + (tall and view.verticalScrollBar.width + 4 or 0)
+	local bw = pr and pr[3] - 12 or
+			body.width + 4 + (tall and view.verticalScrollBar.width + 4 or 0)
 	if view.height ~= h or view.width ~= bw then
 		view:SetScrollBarsVisible(false, tall)
 		view:SetFixedSize(bw, h)
@@ -4292,7 +4319,9 @@ function NT.hud_panel(rebuild)
 		NT.hud_panel_build(key, own)
 	end
 	NT.hud_panel_fit(S.hud_panel_view)
-	NT.hud_panel_place(x, y, w, h)
+	if not NT.sh.on() then
+		NT.hud_panel_place(x, y, w, h)
+	end
 end
 
 -- A touchscreen's keys ([FP_TOUCH] 4): Undo, Delete and Escape's Cancel, at
@@ -4328,6 +4357,7 @@ end
 -- Every panel drawn again ([KIT_EDIT_MODE_FPS] why: "select" or "state", what
 -- stays the same not: the bar unless what it shows changed)
 refresh = function(why)
+	NT.sh.scenes()
 	local bar = rebuild_bar(true) ~= false
 	if bar or not palette_stays(why) then
 		palette()
@@ -4355,9 +4385,9 @@ end
 -- about it, its last ones, below on the right. Rebuilt alone as it grows
 show_log = function()
 	drop("log")
-	-- ([KIT_PHONE_EDITING] the touch mode's by its "...", shell.lua)
+	-- ([KIT_PHONE_EDITING] the touch mode's Log pane, shell.lua)
 	local lines = E.editing and not NT.sig() and S.primary and
-			(NT.sh.log or not NT.sh.on()) and E.logs[S.primary] or {}
+			(NT.sh.pane == "log" or not NT.sh.on()) and E.logs[S.primary] or {}
 	if #lines == 0 then
 		return
 	end
@@ -4390,9 +4420,9 @@ people = function()
 		return NT.sg.status()
 	end
 	-- A narrow screen's panel opened is where it was. ([KIT_PHONE_EDITING]
-	-- the touch mode's by its "...": its status line has the gist, shell.lua)
+	-- the touch mode's Builders pane: its status line has the gist, shell.lua)
 	local sh = NT.sh.on()
-	if not E.editing or (sh and not NT.sh.people) or
+	if not E.editing or (sh and NT.sh.pane ~= "people") or
 			(not sh and narrow() and not folded("palette")) then
 		return
 	end
@@ -4512,6 +4542,8 @@ local function select(id, add, by_tab)
 		else
 			S.sel[id] = true
 			S.primary = id
+			-- (the touch shell's pane follows a selection made again too)
+			NT.sh.was_primary = nil
 			if not by_tab then
 				touch(id)
 			end
@@ -4601,11 +4633,33 @@ local function vbox()
 	return {b.a[1], b.a[2], b.a[3], b.b[1], b.b[2], b.b[3]}
 end
 
-local function prefab_dialog(ids)
+-- A dialog's window, W.dialog: on the desktop centred, its form and
+-- buttons in it. ([KIT_PHONE_EDITING] stage 4) The touch mode's dialog pane
+-- (shell.lua), title its "..." entry: its buttons' row first (above a
+-- keyboard) and the form after it in a view that scrolls. Returns where the
+-- form goes and the buttons' row (nil: one made after the form)
+local function dialog(title, width)
 	drop("dialog")
-	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	local w
+	if NT.sh.on() then
+		w = window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
+		W.dialog = w
+		NT.sh.dialog_title = title
+		local br = row(w)
+		br:SetName("dialog buttons")
+		return NT.sh.scroll(w), br
+	end
+	w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
 	W.dialog = w
 	w.priority = 10
+	if width then
+		w:SetFixedWidth(math.min(width, magic.ui.root.width - 16))
+	end
+	return w, nil
+end
+
+local function prefab_dialog(ids)
+	local w, br = dialog("Make a prefab")
 	-- [KIT_PREFAB_VOXELS] the Box tool's voxels too, their air replacing
 	-- what is there or not
 	local box = vbox()
@@ -4615,7 +4669,7 @@ local function prefab_dialog(ids)
 	label(r, "Prefab name:")
 	edit(r, E.prefab_name, function(s)
 		E.prefab_name = s
-	end)
+	end):SetName("prefab name")
 	if box then
 		button(row(w), "Air replaces: " .. (E.prefab_air and "on" or "off"),
 				function()
@@ -4623,7 +4677,7 @@ local function prefab_dialog(ids)
 			prefab_dialog(ids)
 		end, E.prefab_air)
 	end
-	local br = row(w)
+	br = br or row(w)
 	button(br, "Save prefab", function()
 		send({op = "save_prefab", ids = #ids > 0 and ids or nil,
 			box = box, air = box and (E.prefab_air or false) or nil,
@@ -4654,22 +4708,19 @@ end
 E.scene_name = E.scene_name or ""
 E.scene_copy = E.scene_copy ~= false
 function M.scene_dialog()
-	drop("dialog")
-	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
-	W.dialog = w
-	w.priority = 10
+	local w, br = dialog("New scene")
 	text(w, "A new scene: its own World and entities")
 	local r = row(w)
 	label(r, "Scene name:")
 	edit(r, E.scene_name, function(s)
 		E.scene_name = s
-	end)
+	end):SetName("scene name")
 	button(row(w), E.scene_copy and "World: a copy of " .. current_scene() ..
 			"'s" or "World: a blank one", function()
 		E.scene_copy = not E.scene_copy
 		M.scene_dialog()
 	end, E.scene_copy)
-	local br = row(w)
+	br = br or row(w)
 	button(br, "Make scene", function()
 		M.new_scene(E.scene_name, E.scene_copy)
 		drop("dialog")
@@ -4720,16 +4771,12 @@ end
 
 -- A name asked (a builder's sound, "<their name>/<name>"), then ok(name)
 function NT.sound_name_dialog(title, name, ok)
-	drop("dialog")
-	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
-	W.dialog = w
-	w.priority = 10
-	w:SetFixedWidth(math.min(360, magic.ui.root.width - 16))
+	local w, br = dialog("Sound name", 360)
 	text(w, title)
 	local f = {name = name}
 	ui_utils.settings_form(w, {{name = "name", type = "text",
 		max_length = 64}}, f, function(k, v) f[k] = v end, WIDGETS)
-	local br = row(w)
+	br = br or row(w)
 	button(br, "OK", function()
 		drop("dialog")
 		ok(f.name)
@@ -4742,9 +4789,12 @@ end
 -- The designer (blip's) on a sound; its Save sends it as name
 function NT.design(name, params)
 	log:info("kit editor: designing sound " .. name)
+	-- ([KIT_PHONE_EDITING] stage 4: the touch mode's controls in the UI half,
+	-- the code in the world's rect)
+	local sh = NT.sh.on() and NT.sh.ui
 	require("buildat/extension/blip").design(params, function(packed)
 		send({op = "sound", name = name, params = packed})
-	end)
+	end, sh and {rect = sh, world = NT.sh.world})
 end
 
 -- A short name for a copy of `of`, one no sound has: <name>_2, _3...
@@ -4837,18 +4887,14 @@ local VOXEL_FIELDS = {
 }
 
 function M.voxel_dialog()
-	drop("dialog")
-	local w = window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
-	W.dialog = w
-	w.priority = 10
 	-- A fixed width: the form's rows widen it past the screen otherwise
-	w:SetFixedWidth(math.min(480, magic.ui.root.width - 16))
+	local w, br = dialog("New voxel type", 480)
 	local f = E.voxel_form
 	text(w, "A voxel type of yours")
 	ui_utils.settings_form(w, M.with_sounds(VOXEL_FIELDS, f), f, function(k, v)
 		f[k] = v
 	end, WIDGETS, {texture = E.state.textures or {}})
-	local br = row(w)
+	br = br or row(w)
 	button(br, "Upload a PNG...", function()
 		S.uploading = buildat.pick_file(".png")
 	end)
@@ -5451,10 +5497,8 @@ do
 			tostring(err))
 	install({S = S, W = W, E = E, NT = NT, M = M, O = O, magic = magic,
 		log = log, send = send, window = window, drop = drop, button = button,
-		text = text, apply_viewport = apply_viewport,
-		refresh = function() refresh() end, people = function() people() end,
-		show_log = function() show_log() end,
-		set_view = function(v) set_view(v) end})
+		text = text, row = row, DIM = DIM, apply_viewport = apply_viewport,
+		refresh = function() refresh() end, set_view = function(v) set_view(v) end})
 end
 -- Its field entry mode (field_entry.lua)
 do
