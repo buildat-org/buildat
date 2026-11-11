@@ -154,9 +154,7 @@ def gestures():
     a(tap, *V); a("waitlog", "kit editor: dig at", 10); a("sync", 5000); fr(5)
     a(tap, "Button", "shell cancel"); a("waitlog", "kit editor: tool select", 10); fr(3)
     # A (a kit/button) selected again: stage 2's steps begin in its inspector
-    a(tap, *A2); a("waitlog", r"kit editor: selected \d+ \(", 10); fr(3)
-    a(tap, "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
-    a(tap, "Button", "menu Inspector"); a("waitlog", "touch shell: the inspector pane", 10); fr(10)
+    a(tap, *A2); a("waitlog", "touch shell: the inspector pane", 10); fr(10)
 a("nav", "${URL}?pref=kit_editor_font=100&pref=kit_ui_mode=" + mode)
 a("waitlog", "accounts: the login page shown", 120); a("wait", 1000)
 for _ in range(3): a("key", "Tab"); fr(2)
