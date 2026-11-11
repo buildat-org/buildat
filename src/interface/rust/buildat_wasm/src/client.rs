@@ -3497,6 +3497,11 @@ impl UIElement {
 		let mut r = call(imports::buildat_c_UIElement_GetTypeName, &[&H(self.handle()) as &dyn Put]);
 		r.value().string()
 	}
+	/// UIElement:GetVar(string):any
+	pub fn GetVar(&self, a1: impl Put) -> Value {
+		let mut r = call(imports::buildat_c_UIElement_GetVar, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		r.value()
+	}
 	/// UIElement:HasFocus():boolean
 	pub fn HasFocus(&self) -> bool {
 		let mut r = call(imports::buildat_c_UIElement_HasFocus, &[&H(self.handle()) as &dyn Put]);
@@ -8023,6 +8028,8 @@ mod imports {
 		pub fn buildat_c_UIElement_GetText(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "UIElement:GetTypeName():string"]
 		pub fn buildat_c_UIElement_GetTypeName(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "UIElement:GetVar(string):any"]
+		pub fn buildat_c_UIElement_GetVar(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "UIElement:HasFocus():boolean"]
 		pub fn buildat_c_UIElement_HasFocus(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "UIElement:HasRecursiveFocus():any"]

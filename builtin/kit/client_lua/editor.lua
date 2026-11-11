@@ -1214,8 +1214,12 @@ rebuild_bar = function(if_changed)
 	end
 	w:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(6, 6, 6, 6))
 	bar_row, bar_used, bar_first = row(w), 0, true
-	bar_room = (magic.ui.root.width - 16 - 12 - (S.bar_trim or 0)) / S.font
-	S.bar_root_w = magic.ui.root.width
+	-- [KIT_PHONE_EDITING] Wrapped to the root's width at the client's fit
+	-- x1, not the current one: the root grows as the fit shrinks, and a bar
+	-- wrapped wider at each fit down ratcheted the UI down on a phone
+	S.bar_root_w = math.floor(magic.ui.root.width *
+			(tonumber(magic.ui.root:GetVar("FitFactor")) or 1) + 0.5)
+	bar_room = (S.bar_root_w - 16 - 12) / S.font
 	if O.menu then
 		bar_button("Menu", "Esc", function()
 			O.menu()

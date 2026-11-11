@@ -3157,7 +3157,7 @@ magic.TextureCube: GetRenderSurface, SetData, SetSize, new
 magic.Time: GetElapsedTime, frameNumber, timeStep
 magic.ToolTip: delay
 magic.UI: GetScale, SetClipboardText, SetFocusElement, SetUseSystemClipboard, focusElement, root, scale
-magic.UIElement: CreateChild, GetCaret, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, HasRecursiveFocus, IsCaretOnLastRow, IsDrawnOver, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyle, SetStyleAuto, SetText, SetVar, SetVisible, WheelTakenAt, ar, br, bringToFront, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, t, verticalAlignment, visible, width
+magic.UIElement: CreateChild, GetCaret, GetChild, GetName, GetNumChildren, GetText, GetTypeName, GetVar, HasFocus, HasRecursiveFocus, IsCaretOnLastRow, IsDrawnOver, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyle, SetStyleAuto, SetText, SetVar, SetVisible, WheelTakenAt, ar, br, bringToFront, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, t, verticalAlignment, visible, width
 magic.UnsubscribeFromEvent: 
 magic.VAR_BOOL: 
 magic.VAR_BUFFER: 
@@ -3769,6 +3769,7 @@ UIElement:GetName():string  ->  Str UIElement::GetName()
 UIElement:GetNumChildren():number  ->  double UIElement::GetNumChildren()
 UIElement:GetText():any  ->  Value UIElement::GetText()
 UIElement:GetTypeName():string  ->  Str UIElement::GetTypeName()
+UIElement:GetVar(string):any  ->  Value UIElement::GetVar(Str)
 UIElement:HasFocus():boolean  ->  bool UIElement::HasFocus()
 UIElement:HasRecursiveFocus():any  ->  Value UIElement::HasRecursiveFocus()
 UIElement:IsCaretOnLastRow():boolean  ->  bool UIElement::IsCaretOnLastRow()
