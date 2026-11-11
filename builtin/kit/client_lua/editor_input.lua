@@ -49,7 +49,7 @@ local text, to_screen, touch, type_of, typing =
 local ui_utils, v3, vbox, VIEW_KEYS, voxel_names =
 		A.ui_utils, A.v3, A.vbox, A.VIEW_KEYS, A.voxel_names
 local W, window = A.W, A.window
-local terrain_panel
+local terrain_panel, zoom_at
 local brush_at, stroke_begin, stroke_move, stroke_end, draw_brush
 local cam3d_node, cam3d
 
@@ -269,6 +269,21 @@ magic.SubscribeToEvent("command_seq:kit_knob_where", function()
 	end
 end)
 
+-- [KIT_PHONE_EDITING] stage 3, a check's look for entities ("event
+-- kit_entity_where <id> ..."): where each is drawn on the screen, pixels
+magic.SubscribeToEvent("command_seq:kit_entity_where", function(_, data)
+	for id in data:GetString("Param"):gmatch("%d+") do
+		local e = find(tonumber(id))
+		local sx, sy = nil, nil
+		if e and e.pos then
+			sx, sy = to_screen(drawn_at(e))
+		end
+		log:info(sx and string.format("kit editor: entity %s on the screen at "
+				.. "%d, %d", id, sx, sy) or "kit editor: entity " .. id ..
+				" not on the screen")
+	end
+end)
+
 -- ---- What a press would take: the knob, a port, an entity
 local function press_target(mx, my)
 	local kn = near_knob(mx, my)
@@ -283,7 +298,33 @@ local function press_target(mx, my)
 	if p and p.id then
 		return {id = p.id}
 	end
+	-- [KIT_PHONE_EDITING] stage 3: the touch mode's finger: else the entity
+	-- drawn nearest, within half the touch size (a 30 px box in the plan is
+	-- smaller than a finger)
+	-- simplified: by its middle on the screen, not its drawn box
+	if S.touch and NT.sh.on() then
+		local best, bd = nil, (NT.sh.TOUCH / 2 * magic.ui.scale) ^ 2
+		for _, e in ipairs(entities()) do
+			local sx, sy = nil, nil
+			if e.pos then
+				sx, sy = to_screen(drawn_at(e))
+			end
+			local d = sx and (sx - mx) ^ 2 + (sy - my) ^ 2
+			if d and d <= bd then
+				best, bd = e.id, d
+			end
+		end
+		if best then
+			return {id = best}
+		end
+	end
 	return {pick = p}
+end
+
+-- [KIT_PHONE_EDITING] stage 3: Select more (the touch mode's toggle): a tap
+-- adds to the selection, a drag on nothing boxes
+local function more()
+	return NT.sh.on() and NT.sh.multi == true
 end
 
 local function snap(v, g)
@@ -336,8 +377,9 @@ local function start_drag()
 		end
 	end
 	-- A finger's drag on what is not selected moves the view
-	-- ([FP_TOUCH] 3): no box
-	if S.touch then
+	-- ([FP_TOUCH] 3): no box. ([KIT_PHONE_EDITING] The touch mode's, the
+	-- mouse's too, but under Select more)
+	if (S.touch or NT.sh.on()) and not (S.press.shift and more()) then
 		return
 	end
 	S.drag = {kind = "box"}
@@ -544,6 +586,21 @@ local function click()
 			place_at(c, S.placing)
 		end
 		return
+	end
+	-- [KIT_PHONE_EDITING] stage 3, the touch mode's (no ports): a link begun
+	-- by the inspector's Link <output> ended by a tap on an entity of one
+	-- input (of more, it is selected: the inspector's To buttons)
+	local link = NT.sh.on() and t.id and E.link
+	if link and t.id ~= link.id and not S.reparent then
+		local ins = inputs_of(find(t.id))
+		if #ins == 1 then
+			send({op = "link", id = link.id, comp = link.comp,
+				output = link.output, to = t.id, input = ins[1].name})
+			log:info("kit editor: link tapped on " .. t.id .. " " .. ins[1].name)
+			E.link, E.status = nil, ""
+			refresh()
+			return
+		end
 	end
 	if t.id and NT.pick_parent(t.id) then
 		return
@@ -1310,9 +1367,11 @@ local function mouse_down(button_)
 		return
 	end
 	-- Walking, a click on the view goes up into the crosshair, where the
-	-- app has a mouse look ([FP_ESC])
+	-- app has a mouse look ([FP_ESC]). ([KIT_PHONE_EDITING] Not in the touch
+	-- mode, where the left click is a finger's tap and the right drag turns)
+	local sh = NT.sh.on()
 	if O.mouse_look and S.view == "walk" and not S.crosshair and
-			button_ == magic.MOUSEB_LEFT then
+			button_ == magic.MOUSEB_LEFT and not sh then
 		S.crosshair = true
 		S.swallow_up = button_
 		log:info("kit editor: into the crosshair")
@@ -1336,9 +1395,10 @@ local function mouse_down(button_)
 		return
 	end
 	if S.tool == "voxels" and button_ == magic.MOUSEB_LEFT then
-		-- Walking, the left button digs as in play
-		voxel_click(mx, my, S.view == "walk" or key_held(magic.KEY_LSHIFT) or
-				key_held(magic.KEY_RSHIFT))
+		-- Walking, the left button digs as in play (the touch mode's in each
+		-- view, as a finger's tap)
+		voxel_click(mx, my, S.view == "walk" or sh or
+				key_held(magic.KEY_LSHIFT) or key_held(magic.KEY_RSHIFT))
 		return
 	end
 	if button_ == magic.MOUSEB_RIGHT then
@@ -1353,7 +1413,10 @@ local function mouse_down(button_)
 		return
 	end
 	if button_ == magic.MOUSEB_MIDDLE then
-		if S.view == "2d" then
+		-- ([KIT_PHONE_EDITING] the touch mode's: a pinch, up zooming in)
+		if sh then
+			S.pinch = {mx = mx, my = my}
+		elseif S.view == "2d" then
 			S.panning = true
 		elseif S.view == "3d" then
 			S.pan3d = pan3d_start(mx, my)
@@ -1361,7 +1424,8 @@ local function mouse_down(button_)
 		return
 	end
 	if button_ == magic.MOUSEB_LEFT then
-		local shift = key_held(magic.KEY_LSHIFT) or key_held(magic.KEY_RSHIFT)
+		local shift = key_held(magic.KEY_LSHIFT) or key_held(magic.KEY_RSHIFT) or
+				more()
 		S.press = {mx = mx, my = my, shift = shift,
 			target = press_target(mx, my)}
 	end
@@ -1402,8 +1466,9 @@ local function mouse_up(button_)
 		local orbited = S.orbit
 		S.orbit = nil
 		if rc and rc.moved < RIGHT_CLICK_PX and S.tool == "voxels" and
-				S.view == "walk" then
-			-- Walking, the right button places as in play
+				(S.view == "walk" or NT.sh.on()) then
+			-- Walking, the right button places as in play (the touch mode's in
+			-- each view, as a finger held)
 			voxel_click(rc.mx, rc.my, false)
 		elseif rc and rc.moved < RIGHT_CLICK_PX then
 			if M.looking() then
@@ -1423,6 +1488,12 @@ local function mouse_up(button_)
 			S.span = math.max(4, math.min(400, math.abs(o.y - (S.cut or 0)) *
 					2 * math.tan(math.rad(cam3d.fov) / 2)))
 			set_view("2d")
+		elseif rc and NT.sh.on() then
+			-- (the touch mode's: a right drag moved the view, for a check)
+			local p = S.pos or {x = 0, y = 0, z = 0}
+			log:info(string.format("kit editor: the right drag let go: the plan "
+					.. "at %.1f,%.1f, the camera at %.1f,%.1f,%.1f", S.cx or 0,
+					S.cz or 0, p.x, p.y, p.z))
 		end
 		return
 	end
@@ -1433,10 +1504,22 @@ local function mouse_up(button_)
 					.. " to %.2f,%.2f,%.2f", f.x, f.y, f.z, S.pos.x, S.pos.y,
 					S.pos.z))
 		end
-		S.panning, S.pan3d = false, nil
+		if S.pinch then
+			log:info("kit editor: the middle let go: " .. (S.view == "2d" and
+					string.format("the plan %.1f across", S.span) or S.pos and
+					string.format("the camera at %.1f,%.1f,%.1f", S.pos.x,
+					S.pos.y, S.pos.z) or "in " .. tostring(S.view)))
+		end
+		S.panning, S.pan3d, S.pinch = false, nil, nil
 		return
 	end
 	if button_ ~= magic.MOUSEB_LEFT or not S.press then
+		return
+	end
+	if S.press.cam then
+		-- ([KIT_PHONE_EDITING] the touch mode's left drag on nothing: the
+		-- view moved)
+		S.press, S.pan3d = nil, nil
 		return
 	end
 	if S.drag then
@@ -1453,6 +1536,22 @@ local function mouse_move(x, y, dx, dy)
 		return
 	end
 	local rc = S.right_click
+	-- [KIT_PHONE_EDITING] stage 3, the touch mode's mouse: the middle a
+	-- pinch (up zooms in, about where it was pressed), the right drag the
+	-- two fingers' (the plan pans; 3D orbits and Walk turns as before)
+	if S.pinch then
+		zoom_at(-dy / 20, S.pinch.mx, S.pinch.my)
+		return
+	end
+	if rc and S.view == "2d" and NT.sh.on() then
+		rc.moved = rc.moved + math.abs(dx) + math.abs(dy)
+		if rc.moved >= RIGHT_CLICK_PX then
+			local _, h = screen_size()
+			local k = S.span / h
+			S.cx, S.cz = S.cx - dx * k, S.cz + dy * k
+		end
+		return
+	end
 	if rc then
 		rc.moved = rc.moved + math.abs(dx) + math.abs(dy)
 		if S.view == "2d" and rc.moved >= RIGHT_CLICK_PX and
@@ -1538,12 +1637,24 @@ local function mouse_move(x, y, dx, dy)
 		NT.palette_chosen(pp.item)
 		log:info("kit editor: dragging " .. pp.item.label .. " from the palette")
 	end
-	if S.press and not S.drag and math.abs(x - S.press.mx) +
+	if S.press and not S.drag and not S.press.cam and math.abs(x - S.press.mx) +
 			math.abs(y - S.press.my) > px(DRAG_PX) then
 		start_drag()
+		-- ([KIT_PHONE_EDITING] the touch mode's: as a finger's, a drag on
+		-- nothing moves the view)
+		if not S.drag and NT.sh.on() then
+			S.press.cam = true
+			if S.view == "3d" then
+				S.pan3d = pan3d_start(x, y)
+			end
+		end
 	end
 	if S.drag then
 		update_drag()
+	elseif S.press and S.press.cam and S.view == "2d" then
+		local _, h = screen_size()
+		local k = S.span / h
+		S.cx, S.cz = S.cx - dx * k, S.cz + dy * k
 	end
 end
 
@@ -1624,18 +1735,23 @@ local function mouse_wheel(wheel, q)
 		return
 	end
 	-- In notches; the web's in tenths (its SDL port counts them so)
-	local notches = math.max(-10, math.min(10, WEB and wheel / 10 or wheel))
+	zoom_at(math.max(-10, math.min(10, WEB and wheel / 10 or wheel)), S.mx,
+			S.my)
+end
+
+-- The wheel's zoom by notches (up, in) about a point of the screen
+zoom_at = function(notches, mx, my)
 	local f = 0.8 ^ notches
 	if S.view == "2d" then
 		-- About the pointer: the point under it stays under it
-		local o0 = M.screen_ray(S.mx, S.my)
+		local o0 = M.screen_ray(mx, my)
 		S.span = math.max(4, math.min(400, S.span * f))
 		place_cameras()
-		local o1 = M.screen_ray(S.mx, S.my)
+		local o1 = M.screen_ray(mx, my)
 		S.cx, S.cz = S.cx + o0.x - o1.x, S.cz + o0.z - o1.z
 	elseif S.view == "3d" then
-		local o, v = M.screen_ray(S.mx, S.my)
-		local p = pick(S.mx, S.my, nil, true)
+		local o, v = M.screen_ray(mx, my)
+		local p = pick(mx, my, nil, true)
 		local dist = p and p.t or 10
 		local step = math.min(dist * (1 - f), math.max(0, dist - 0.3))
 		-- [KIT_CAM_MIN_MOVE] at least a cell a notch: close to a surface,
@@ -1705,8 +1821,18 @@ local function touch_begin(id, x, y)
 		S.fingers[id].stroke = stroke_begin(x, y)
 		return
 	end
+	-- [KIT_PHONE_EDITING] stage 3, the touch mode's Box tool: a face's
+	-- handle dragged (a tap is a corner, touch_end)
+	local h = NT.sh.on() and S.tool == "box" and BX.box_handle_at(x, y)
+	if h then
+		local sx, sy = to_screen(h.at)
+		BX.box_grab(h, sx, sy, false)
+		S.fingers[id].box = true
+		return
+	end
 	if S.view ~= "walk" then
-		S.press = {mx = x, my = y, target = press_target(x, y), finger = id}
+		S.press = {mx = x, my = y, target = press_target(x, y), finger = id,
+			shift = more()}
 	end
 end
 
@@ -1736,6 +1862,12 @@ local function touch_move(id, x, y, dx, dy)
 	end
 	if f.stroke then
 		S.mx, S.my = x, y
+		return
+	end
+	if f.box then
+		if S.box_drag then
+			BX.box_drag_move(x, y)
+		end
 		return
 	end
 	if S.view == "walk" then
@@ -1830,6 +1962,12 @@ local function touch_end(id, x, y)
 		stroke_end(x, y)
 		return
 	end
+	if f.box then
+		if S.box_drag then
+			BX.box_drop()
+		end
+		return
+	end
 	if f.ui or f.held then
 		return
 	end
@@ -1847,15 +1985,19 @@ local function touch_end(id, x, y)
 		return
 	end
 	S.mx, S.my = x, y
+	local sh = NT.sh.on()
 	if S.drag then
 		end_drag()
 	elseif not f.moved and not S.touch_cam and S.tool == "voxels" and
-			S.view == "walk" then
-		-- Walking with the voxels tool, as play's: a tap digs
+			(S.view == "walk" or sh) then
+		-- Walking with the voxels tool, as play's: a tap digs (the touch
+		-- mode's in each view)
 		voxel_click(x, y, true)
+	elseif not f.moved and not S.touch_cam and sh and S.tool == "box" then
+		box_click(x, y)
 	elseif not f.moved and not S.touch_cam then
 		-- A tap: the left click at the finger
-		S.press = S.press or {mx = x, my = y}
+		S.press = S.press or {mx = x, my = y, shift = more()}
 		S.press.target = S.press.target or press_target(x, y)
 		click()
 	end
@@ -1877,8 +2019,9 @@ local function long_press_tick()
 			buildat.get_time_us() - only.t0 > LONG_PRESS_US then
 		only.held = true
 		S.press, S.drag = nil, nil
-		if S.tool == "voxels" and S.view == "walk" then
-			-- Walking with the voxels tool, as play's: held, it places
+		if S.tool == "voxels" and (S.view == "walk" or NT.sh.on()) then
+			-- Walking with the voxels tool, as play's: held, it places (the
+			-- touch mode's in each view)
 			voxel_click(only.x, only.y, false)
 		else
 			right_click({mx = only.x, my = only.y})
@@ -1917,6 +2060,69 @@ local function turn_selection(deg)
 		end
 		send({op = "move", ids = ids, by = {0, 0, 0}, turn = deg})
 	end
+end
+
+-- Z and X (dir -1 and 1), the touch mode's turn buttons: a prefab or a
+-- paste being placed a quarter, else the selection by the angle step
+function NT.turn_step(dir)
+	if S.placing and (S.placing.prefab or S.placing.clipboard) then
+		-- [KIT_PREFAB_VOXELS] a prefab or a paste turned a quarter
+		S.placing.turn = ((S.placing.turn or 0) + dir * 90) % 360
+		log:info("kit editor: placing turned " .. S.placing.turn)
+	else
+		turn_selection(dir * (ANGLE_STEPS[S.angle] or 15))
+	end
+end
+
+-- [KIT_PHONE_EDITING] stage 3, the touch mode's buttons: up or down a grid
+-- step (PageUp, PageDown), and Ctrl+D's duplicate
+function NT.raise(dir)
+	nudge({0, dir * GRID_STEPS[S.grid], 0})
+end
+
+function NT.duplicate()
+	local ids = sel_ids()
+	if #ids > 0 then
+		send({op = "duplicate", ids = ids, by = {1, 0, 0}})
+	end
+end
+
+-- [KIT_PHONE_EDITING] stage 3: an entity just placed near the world's
+-- edge in the touch mode (the UI half's beside it): the plan or the 3D
+-- camera panned so that it is the touch size inside it, its height kept
+-- simplified: not in Walk (the player's eye); by its middle, not its box
+function NT.reveal(id)
+	local r = NT.sh.on() and S.view ~= "walk" and NT.sh.world_px()
+	local e = r and find(id)
+	local sx, sy = nil, nil
+	if e and e.pos then
+		sx, sy = to_screen(drawn_at(e))
+	end
+	if not sx then
+		return
+	end
+	local m = math.min(NT.sh.TOUCH * magic.ui.scale, r[3] / 2, r[4] / 2)
+	local tx = math.max(r[1] + m, math.min(r[1] + r[3] - m, sx))
+	local ty = math.max(r[2] + m, math.min(r[2] + r[4] - m, sy))
+	if math.abs(tx - sx) < 1 and math.abs(ty - sy) < 1 then
+		return
+	end
+	local o0, v0 = M.screen_ray(sx, sy)
+	local o1, v1 = M.screen_ray(tx, ty)
+	-- (the plan's rays are straight down from its camera, which may be under
+	-- the entity: any height below it)
+	local y = S.view == "2d" and o0.y - 1 or drawn_at(e).y
+	local a, b = plane_at(o0, v0, y), plane_at(o1, v1, y)
+	if not a or not b then
+		return
+	end
+	if S.view == "2d" then
+		S.cx, S.cz = S.cx + a.x - b.x, S.cz + a.z - b.z
+	else
+		S.pos = {x = S.pos.x + a.x - b.x, y = S.pos.y, z = S.pos.z + a.z - b.z}
+	end
+	log:info(string.format("kit editor: touch shell: panned to show %d, from "
+			.. "%d,%d to %d,%d on the screen", id, sx, sy, tx, ty))
 end
 
 -- [KIT_HUD_VIEW] A click or a tap: two on nothing of the HUD leave the view.
@@ -2002,10 +2208,7 @@ local function key_down(key, ctrl, shift)
 	elseif is("paste") and ctrl then
 		M.paste()
 	elseif is("duplicate") and ctrl then
-		local ids = sel_ids()
-		if #ids > 0 then
-			send({op = "duplicate", ids = ids, by = {1, 0, 0}})
-		end
+		NT.duplicate()
 	elseif is("delete") then
 		M.delete_selected()
 	elseif ctrl then
@@ -2027,15 +2230,8 @@ local function key_down(key, ctrl, shift)
 		M.next_grid()
 	elseif is("angle") then
 		M.next_angle()
-	elseif (is("turn_left") or is("turn_right")) and S.placing and
-			(S.placing.prefab or S.placing.clipboard) then
-		-- [KIT_PREFAB_VOXELS] a prefab or a paste turned a quarter
-		S.placing.turn = ((S.placing.turn or 0) +
-				(is("turn_left") and -90 or 90)) % 360
-		log:info("kit editor: placing turned " .. S.placing.turn)
 	elseif is("turn_left") or is("turn_right") then
-		turn_selection((is("turn_left") and -1 or 1) *
-				(ANGLE_STEPS[S.angle] or 15))
+		NT.turn_step(is("turn_left") and -1 or 1)
 	else
 		local g = shift and 0.25 or GRID_STEPS[S.grid]
 		local d = nil
@@ -2235,8 +2431,9 @@ local function compute_guide()
 				"box away") or nil
 		return g
 	end
-	if S.tool == "voxels" and S.view == "walk" then
+	if S.tool == "voxels" and (S.view == "walk" or NT.sh.on()) then
 		-- [KIT_PLAYTEST_TWEAKS] walking as in play: left digs, right places
+		-- ([KIT_PHONE_EDITING] the touch mode's in each view)
 		ghost(nil)
 		local t = voxel_target(mx, my)
 		if t then
@@ -2317,22 +2514,26 @@ local function compute_guide()
 	if e then
 		M.frame_entity(hover, e.id, M.HOVER)
 		local name = name_of(e)
-		local shift = key_held(magic.KEY_LSHIFT) or key_held(magic.KEY_RSHIFT)
+		local shift = key_held(magic.KEY_LSHIFT) or key_held(magic.KEY_RSHIFT) or
+				more()
 		if shift then
 			g.left = (S.sel[e.id] and "take " .. name .. " out of" or "add " ..
 					name .. " to") .. " the selection"
 		elseif S.sel[e.id] then
 			g.left = "keep " .. name .. " selected; drag: move the selection"
 		else
-			g.left = "select " .. name .. (S.touch and "" or
+			g.left = "select " .. name .. ((S.touch or NT.sh.on()) and "" or
 					"; drag: select by a box")
 		end
 		local _, is_made = find(e.id)
 		g.right = (is_made and "" or "its menu; ") .. right_drag
 	else
-		g.left = S.touch and (next(S.sel) and "let go of the selection") or
-				(next(S.sel) and "let go of the selection; drag: select by a box" or
-				"drag: select by a box")
+		-- ([KIT_PHONE_EDITING] the touch mode's drag on nothing pans but
+		-- under Select+, where a tap keeps the selection)
+		local let = next(S.sel) and not more() and "let go of the selection"
+		local box = (not (S.touch or NT.sh.on()) or more()) and
+				"drag: select by a box"
+		g.left = let and box and let .. "; " .. box or let or box or nil
 		g.right = (next(S.sel) and "let go of the selection; " or "") .. right_drag
 	end
 	if S.view ~= "walk" then
@@ -2667,7 +2868,10 @@ local function draw()
 		_, is_made = find(S.primary)
 	end
 	local d = S.drag
-	if e and not is_made and (not d or d.kind == "link") and not M.looking() then
+	-- ([KIT_PHONE_EDITING] stage 3: none in the touch mode: beside a
+	-- finger-sized entity they took its taps; the inspector's Link <output>)
+	if e and not is_made and (not d or d.kind == "link") and not M.looking() and
+			not NT.sh.on() then
 		show_ports("out", e.id, outputs_of(e))
 	else
 		show_ports("out", nil)
@@ -2944,6 +3148,7 @@ function M.editor(options)
 				NT.select_new, NT.sg.reveal = nil, id
 				select(id)
 				NT.show_inspector()
+				NT.reveal(id)
 			end
 			NT.pf.state()
 		end
