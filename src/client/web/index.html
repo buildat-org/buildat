@@ -390,6 +390,7 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 		if(document.fullscreenElement && document.fullscreenElement !== canvas)
 			e.stopImmediatePropagation();
 		resize_again();
+		keyboard_overlay();
 		orientation_applied = null;
 		apply_orientation();
 		// Entered on a tap whose game took the wish back meanwhile (the
@@ -1096,16 +1097,29 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 	// virtualKeyboard, which with overlaysContent leaves the page its size
 	// under the keyboard, else what the visual viewport lost. `test`, set by
 	// a check, stands in for a keyboard.
-	if(navigator.virtualKeyboard)
-		navigator.virtualKeyboard.overlaysContent = true;
+	// [KIT_PHONE_EDITING] **Fullscreen, the visual viewport**: there, with
+	// overlaysContent, Chrome on Android kept boundingRect 0x0 under Gboard
+	// and sent no geometrychange, and the page kept its size: the keyboard
+	// read 0 and nothing moved. With overlaysContent off the visual
+	// viewport loses the keyboard (Chrome 866 to 554 CSS pixels, the page
+	// staying 866; Vivaldi 865 to 529, the page 841). So overlaysContent
+	// only while not fullscreen, and the larger of the rect and what the
+	// visual viewport lost.
+	function keyboard_overlay(){
+		if(navigator.virtualKeyboard)
+			navigator.virtualKeyboard.overlaysContent = !document.fullscreenElement;
+	}
+	keyboard_overlay();
 	window.buildatKeyboard = {
 		test: null,
 		height: function(){
 			var h = this.test;
-			if(h === null && navigator.virtualKeyboard)
-				h = navigator.virtualKeyboard.boundingRect.height;
-			else if(h === null && window.visualViewport)
-				h = Math.max(0, innerHeight - visualViewport.height);
+			if(h === null){
+				h = navigator.virtualKeyboard ?
+						navigator.virtualKeyboard.boundingRect.height : 0;
+				if(window.visualViewport)
+					h = Math.max(h, innerHeight - visualViewport.height);
+			}
 			return Math.round((h || 0) * canvas.height / canvas.clientHeight);
 		},
 	};
