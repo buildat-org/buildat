@@ -21,6 +21,14 @@ mkdir -p "$BUILDAT_USER_PATH/shared/vanilla" "$BUILDAT_CACHE_PATH"
 # server running. Started under `timeout N`, the parent is timeout, which
 # lives on up to N seconds.
 export BUILDAT_DIE_WITH_PARENT=1
+# A client's SDL without RandR: its X11 RandR init probes every output at
+# each start (4 bursts), and on a laptop's panel a probe is EDID/AUX
+# traffic that powers the panel and its backlight up, also while the screen
+# is locked and DPMS off -- checks starting clients every second or so kept
+# it lit (user, 2026-11-12; 0 probes with this). SDL falls back to core X
+# for the desktop's size, which the client reads only for a default window
+# size; the checks give -w.
+export SDL_VIDEO_X11_XRANDR=0
 # builtin/luanti's self-checks (the shapes, the registry, the map's round
 # trip) run only when asked ([LUANTI_SELFCHECKS_OFF]): every check asks
 export BUILDAT_LUANTI_SELFCHECKS=1
