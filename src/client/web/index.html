@@ -1168,10 +1168,44 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 			active = true;
 			st.display = 'block';
 		}
+		// let_go()'s, or the focus would open no keyboard
+		el.removeAttribute('virtualkeyboardpolicy');
 		if(tap && document.activeElement === el)
 			el.blur();
 		if(document.activeElement !== el)
 			el.focus({preventScroll: true});
+	}
+	// The stand-in away, the engine's field gone. [KIT_PHONE_EDITING] **The
+	// keyboard put away while the stand-in still has the focus** (user,
+	// Vivaldi on Android with Gboard and others: a scroll of Kit's inspector
+	// took the field's focus, the UI went back down, the keyboard stayed
+	// over it): a focus moved off the stand-in leaves the hiding to the
+	// browser, which did not. virtualKeyboard.hide() under
+	// virtualkeyboardpolicy "manual" asks for it while the stand-in is still
+	// the focused editable (an emulator's Vivaldi 8.3 and Chrome 133: the
+	// keyboard went with the focus still on it); the focus leaves 100 ms
+	// later, unless a field came back meanwhile. Only with a keyboard
+	// shown: without one (a desktop's Chrome has the API too) the canvas
+	// takes the focus at once, as before, and so the next key.
+	// simplified: the phone's case was not reproduced on the emulator,
+	// where the plain focus move closed the keyboard in every one of some
+	// 30 scrolls; a phone that still keeps it up needs a trace from there
+	function let_go(){
+		var e = el;
+		var go = function(){
+			e.removeAttribute('virtualkeyboardpolicy');
+			if(active)
+				return;
+			e.style.display = 'none';
+			e.value = '';
+			canvas.focus();
+		};
+		if(!navigator.virtualKeyboard || document.activeElement !== e ||
+				!(window.buildatKeyboard.height() > 0))
+			return go();
+		e.setAttribute('virtualkeyboardpolicy', 'manual');
+		navigator.virtualKeyboard.hide();
+		setTimeout(go, 100);
 	}
 	// **A tap on a field focuses its stand-in in the tap's own event**
 	// ([WEB_TAP_KEYBOARD]): a phone's browser opens its keyboard only for a
@@ -1233,9 +1267,7 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 			if(x === null){
 				if(active){
 					active = false;
-					el.style.display = 'none';
-					el.value = '';
-					canvas.focus();
+					let_go();
 				}
 				return;
 			}
