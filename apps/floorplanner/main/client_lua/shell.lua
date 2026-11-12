@@ -33,12 +33,17 @@
 --     SH.TOUCH UI pixels; out of the client's UI fit (FollowsRoot).
 --   - Tall, a field typed in with the on-screen keyboard up: the UI half
 --     moves up by the keyboard's height, unresized, and the world loses as
---     much (Kit's).
--- simplified: the world's gestures are [FP_TOUCH] 3's, put in the world's
--- rect (5b maps the mouse and the keyboard's field entry); the chat's lines
--- and a viewport's hidden menus are as on the desktop; the colour sheet is
--- wider than a phone's pane (it clips); a world of no height is drawn a
--- pixel high under the UI half (a rect of nothing is the whole screen)
+--     much (Kit's); a keyboard taller than the world shortens the UI half,
+--     its view scrolled to the field. Wide: the field entry mode
+--     (field_entry.lua).
+--   - Stage 5b: the world's gestures are [FP_TOUCH] 3's in its rect, a
+--     press begun in the UI half none (editor.lua); the mouse is a finger's
+--     (left a finger, a right drag two fingers', the middle a pinch, the
+--     wheel zooming in 2D and 3D, not in Walk; Walk's mouse the desktop's).
+-- simplified: the chat's lines and a viewport's hidden menus are as on the
+-- desktop; the colour sheet is wider than a phone's pane (it clips); a
+-- world of no height is drawn a pixel high under the UI half (a rect of
+-- nothing is the whole screen)
 return function(A)
 local S, E, M, magic, log, panel = A.S, A.E, A.M, A.magic, A.log, A.panel
 local SH = {pane = "tools", stack = {}, views = {}, placed = {}}
@@ -79,11 +84,11 @@ function SH.on()
 end
 
 -- Whether a point in pixels is off the world's rect (nothing is with the
--- shell off): the UI half's
+-- shell off): the UI half's, and anywhere under the field entry mode
 function SH.off_world(x, y)
 	local r = E.world_rect
-	return r ~= nil and (x < r[1] or y < r[2] or x >= r[1] + r[3] or
-			y >= r[2] + r[4])
+	return r ~= nil and (M.fe.s ~= nil or x < r[1] or y < r[2] or
+			x >= r[1] + r[3] or y >= r[2] + r[4])
 end
 
 local function available(p)
@@ -516,7 +521,8 @@ local function fit_view(rec, pr, tall)
 	local h = math.max(SH.TOUCH, math.min(bh, room))
 	local more = h < bh
 	local vw = pr[3] - 12
-	local bw = vw - 4 - (more and view.verticalScrollBar.width + 4 or 0)
+	-- (a gap before the scroll bar: the view's frame takes some of the 4)
+	local bw = vw - 4 - (more and view.verticalScrollBar.width + 12 or 0)
 	local key = h .. " " .. vw .. " " .. bw .. " " .. tostring(more)
 	if rec.fitted ~= key then
 		rec.fitted = key
@@ -538,6 +544,15 @@ local function fit_view(rec, pr, tall)
 		SH.kb_key = k
 		view.viewPosition = magic.IntVector2(0, math.max(0, math.min(fy - 8,
 				bh - h)))
+	end
+	-- (for a check, as it moves: pixels)
+	local sc = magic.ui.scale
+	local said = string.format("fp shell: typing: the field %d to %d, the " ..
+			"keyboard from %d", fp.y * sc, (fp.y + f.height) * sc,
+			(magic.ui.root.height - kb) * sc)
+	if said ~= SH.typing_said then
+		SH.typing_said = said
+		log:info(said)
 	end
 end
 
