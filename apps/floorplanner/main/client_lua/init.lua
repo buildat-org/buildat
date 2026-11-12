@@ -738,6 +738,8 @@ msg_text.verticalAlignment = magic.VA_BOTTOM
 msg_text:SetPosition(10, -44)
 msg_text:SetTextEffect(magic.TE_SHADOW)
 msg_text.priority = 100
+-- (put in the touch mode's world, the editor's shell.lua)
+doc.msg_text = msg_text
 
 local function redraw_messages()
 	local now = buildat.get_time_us()

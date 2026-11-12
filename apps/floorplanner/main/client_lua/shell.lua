@@ -40,8 +40,9 @@
 --     press begun in the UI half none (editor.lua); the mouse is a finger's
 --     (left a finger, a right drag two fingers', the middle a pinch, the
 --     wheel zooming in 2D and 3D, not in Walk; Walk's mouse the desktop's).
--- simplified: the chat's lines and a viewport's hidden menus are as on the
--- desktop; the colour sheet is wider than a phone's pane (it clips); a
+-- simplified: the chat's lines at the world's lower left are as wide as on
+-- the desktop (a long one runs over the UI half); a viewport's hidden menus
+-- are as on the desktop; the colour sheet is wider than a phone's pane (it clips); a
 -- world of no height is drawn a pixel high under the UI half (a rect of
 -- nothing is the whole screen)
 return function(A)
@@ -521,8 +522,7 @@ local function fit_view(rec, pr, tall)
 	local h = math.max(SH.TOUCH, math.min(bh, room))
 	local more = h < bh
 	local vw = pr[3] - 12
-	-- (a gap before the scroll bar: the view's frame takes some of the 4)
-	local bw = vw - 4 - (more and view.verticalScrollBar.width + 12 or 0)
+	local bw = vw - 4 - (more and view.verticalScrollBar.width + 4 or 0)
 	local key = h .. " " .. vw .. " " .. bw .. " " .. tostring(more)
 	if rec.fitted ~= key then
 		rec.fitted = key
@@ -556,10 +556,12 @@ local function fit_view(rec, pr, tall)
 	end
 end
 
--- The guide line, the crosshair and the time-lapse's clock in the world's
--- rect (after editor.lua's own placing, M.update)
+-- The guide line, the crosshair, the time-lapse's clock and the chat's
+-- lines (init.lua's) in the world's rect (after editor.lua's own placing,
+-- M.update)
 function SH.place_overlays(hud, crosshair, clock)
 	local r = SH.world
+	local msg = E.doc and E.doc.msg_text
 	if not r then
 		if SH.overlaid then
 			SH.overlaid = nil
@@ -568,11 +570,17 @@ function SH.place_overlays(hud, crosshair, clock)
 			if clock then
 				clock:SetPosition(0, 40)
 			end
+			if msg then
+				msg:SetPosition(10, -44)
+			end
 		end
 		return
 	end
 	SH.overlaid = true
 	local root = magic.ui.root
+	if msg then
+		msg:SetPosition(r[1] + 10, r[2] + r[4] - root.height - 44)
+	end
 	local dx = math.floor(r[1] + r[3] / 2 - root.width / 2)
 	if S.touch then
 		hud:SetFixedWidth(math.max(SH.TOUCH, r[3] - 24))
