@@ -681,6 +681,11 @@ do
 		b.cam = O.camera and O.camera:GetComponent("Camera")
 		return b
 	end
+	-- [KIT_HUD_OUTLINES] Walk's HUD as in play: no frames, no boxes of Kit's
+	-- own over the world (ui.lua's framed; the HUD view frames them)
+	function M.hud_plain()
+		return SH.world ~= nil and S.view == "walk"
+	end
 end
 
 -- The rects in pixels, for a check: "x y w h"

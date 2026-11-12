@@ -684,12 +684,20 @@ local function holding(when)
 	return has
 end
 
+-- [KIT_HUD_OUTLINES] The HUD as edit mode draws it: all of it, a hidden
+-- one dimmed, framed, Kit's own as boxes; but in the touch mode's Walk as in
+-- play (shell.lua's M.hud_plain: its world shows only what is edited, the
+-- HUD view the HUD)
+local function framed()
+	return E.editing and not (M.hud_plain and M.hud_plain())
+end
+
 -- A shown panel's stacked children placed (r.sx, r.sy, in it) and, where
 -- its width or height is 0, its size fitted to them
 local function stack(r, V)
 	local u, kids = r.ui, {}
 	for _, k in ipairs(r.kids or {}) do
-		if k.on or E.editing then
+		if k.on or framed() then
 			kids[#kids + 1] = k
 		else
 			k.sx, k.sy = 0, 0
@@ -772,6 +780,9 @@ local function update()
 		it.seen = nil
 	end
 	local play = E.running and not E.editing
+	-- (edit mode unframed: what is shown as in play)
+	local frame = framed()
+	local live = play or (E.editing and not frame)
 	local V = vmin()
 	local pad = pad_of(V)
 	local bx, by, bw, bh = hud_box()
@@ -1076,7 +1087,7 @@ local function update()
 	for _, id in ipairs(list) do
 		local r = U[id]
 		r.dy = nil
-		if r.el and r.ui.stack and not r.empty and (r.on or E.editing) then
+		if r.el and r.ui.stack and not r.empty and (r.on or frame) then
 			local u = r.ui
 			local k = tostring(u.anchor) .. " " .. tostring(u.x) .. " " ..
 					tostring(u.y)
@@ -1162,14 +1173,14 @@ local function update()
 			end
 			dress(r, math.floor(w), math.floor(h), V, r.frac or 0)
 			-- Play: as its state says; edit mode: all, a hidden one dimmed,
-			-- framed
+			-- framed (framed())
 			r.el.visible = not M.hud_off() and not r.skip and
-					not (r.empty and not E.editing) and ((play and r.on) or E.editing or (r.own ~= nil and r.on))
-			r.el.enabled = E.editing or r.kind ~= "text"
+					not (r.empty and not frame) and ((live and r.on) or frame or (r.own ~= nil and r.on))
+			r.el.enabled = frame or r.kind ~= "text"
 			local blink = tonumber(u.blink_below) or 0
 			r.blinking = not E.editing and r.frac ~= nil and blink > 0 and
 					r.frac < blink
-			if E.editing then
+			if frame then
 				r.el.opacity = (r.on or r.own) and 0.95 or 0.45
 			elseif r.blinking then
 				r.el.opacity = (now * 2) % 1 < 0.5 and 1 or 0.25
@@ -1212,8 +1223,8 @@ local function update()
 			local bars = {{0, 0, w, 1}, {0, h - 1, w, 1}, {0, 0, 1, h},
 				{w - 1, 0, 1, h}}
 			for i, b in ipairs(r.edge) do
-				b.visible = E.editing
-				if E.editing then
+				b.visible = frame
+				if frame then
 					b.color = col
 					b:SetPosition(math.floor(bars[i][1]), math.floor(bars[i][2]))
 					b:SetFixedSize(math.max(1, math.floor(bars[i][3])),
