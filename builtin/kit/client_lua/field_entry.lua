@@ -28,8 +28,8 @@
 -- simplified: a long text is a string parameter whose value or default is
 -- over 40 characters (no Kit type declares a multi-line one; a newline typed
 -- is refused, Kit's strings are one line); the old value is shown to 30
--- characters, a choice's button to 60; the inspector's position, turn and
--- Try fields type as before
+-- characters, a choice's button to 60; the inspector's Try fields type as
+-- before (its position and turn are FE.extra's, their Apply a Move or Turn)
 return function(A)
 local S, W, E, NT = A.S, A.W, A.E, A.NT
 local magic, ui_utils, log, find = A.magic, A.ui_utils, A.log, A.find

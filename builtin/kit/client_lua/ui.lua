@@ -1671,6 +1671,9 @@ local function press(x, y)
 	if not r then
 		return
 	end
+	-- A finger's on one not selected selects it only, as an entity's tap:
+	-- the phone test of 2026-11-12 had one selected and moved by one drag
+	local was = selected_rec() == r
 	if r.own then
 		local rid = M.rules_entity()
 		if rid and M.select then
@@ -1683,6 +1686,9 @@ local function press(x, y)
 	end
 	if M.hud_picked then
 		M.hud_picked()
+	end
+	if TOUCH and not was then
+		return
 	end
 	drag = {id = id, x0 = x, y0 = y, px = r.el.position.x,
 		py = r.el.position.y, stacked = r.sx ~= nil}

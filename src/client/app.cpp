@@ -341,9 +341,13 @@ static void web_text_sync(magic::UI *ui)
 // after it. So on a page with a touchscreen the editable LineEdits shown
 // are given to the page whenever they change, "x,y,w,h,secret;" each in
 // the canvas's pixels, the topmost last; index.html's touchend focuses the
-// stand-in for the one tapped, inside the event.
-// simplified: a field under another window counts as tapped; the next
-// frame's sync takes the stand-in away again if the engine did not focus it
+// stand-in for the one tapped, inside the event. Each by what of it is in
+// sight: clipped by what it scrolls in (a ScrollView, its window), and none
+// under another element at that part's middle -- the phone test of
+// 2026-11-12 had a field scrolled out of a pane take the taps over it.
+// simplified: a field partly under another element counts by its middle;
+// the next frame's sync takes the stand-in away again if the engine did not
+// focus it
 static void web_fields_publish(magic::UI *ui)
 {
 	// A touchscreen by what the page says, or by a touch it has seen
@@ -370,8 +374,29 @@ static void web_fields_publish(magic::UI *ui)
 				continue;
 			magic::LineEdit *e = static_cast<magic::LineEdit*>(c);
 			const magic::IntVector2 p = e->GetScreenPosition(), s = e->GetSize();
-			snprintf(buf, sizeof buf, "%d,%d,%d,%d,%d;", (int)(p.x_ * k),
-					(int)(p.y_ * k), (int)(s.x_ * k), (int)(s.y_ * k),
+			magic::IntRect r(p.x_, p.y_, p.x_ + s.x_, p.y_ + s.y_);
+			for(magic::UIElement *a = e->GetParent(); a; a = a->GetParent()){
+				if(!a->GetClipChildren())
+					continue;
+				const magic::IntVector2 ap = a->GetScreenPosition(),
+						as = a->GetSize();
+				const magic::IntRect b = a->GetClipBorder();
+				r.left_ = std::max(r.left_, ap.x_ + b.left_);
+				r.top_ = std::max(r.top_, ap.y_ + b.top_);
+				r.right_ = std::min(r.right_, ap.x_ + as.x_ - b.right_);
+				r.bottom_ = std::min(r.bottom_, ap.y_ + as.y_ - b.bottom_);
+			}
+			if(r.left_ >= r.right_ || r.top_ >= r.bottom_)
+				continue;
+			magic::UIElement *hit = ui->GetElementAt(magic::IntVector2(
+					(r.left_ + r.right_) / 2, (r.top_ + r.bottom_) / 2), true);
+			while(hit && hit != e)
+				hit = hit->GetParent();
+			if(!hit)
+				continue;
+			snprintf(buf, sizeof buf, "%d,%d,%d,%d,%d;", (int)(r.left_ * k),
+					(int)(r.top_ * k), (int)((r.right_ - r.left_) * k),
+					(int)((r.bottom_ - r.top_) * k),
 					!e->IsTextCopyable() || e->GetEchoCharacter() ? 1 : 0);
 			out += buf;
 		}

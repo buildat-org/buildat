@@ -1574,7 +1574,8 @@ local message_handle = nil
 -- longest choice's, at least min_width), height (28), label (a text
 -- before it, label_width wide), none (what it says in red while nothing
 -- is chosen), on_dismiss (called when it closes with no pick), fill (as
--- wide as its row lets it, at least that).
+-- wide as its row lets it, at least that), name (its, and its rows' after
+-- it, for a drive; else dropdown_<n>).
 -- By the keyboard (keyboard_page takes it as a button): Enter or Space
 -- opens it, Up and Down move, Enter picks; Escape or a press outside it
 -- closes it with the choice as it was, and the page does not see that
@@ -1612,7 +1613,7 @@ function M.safe.dropdown(parent, choices, current, on_choose, options)
 	end
 	local drop = parent:CreateChild("DropDownList")
 	drop_serial = drop_serial + 1
-	drop:SetName("dropdown_" .. drop_serial)
+	drop:SetName(options.name or "dropdown_" .. drop_serial)
 	if row and not options.label_width then
 		local l = row:GetChild(0)
 		drop_labels[drop:GetName()] = {l, row, options.fill, l.width}
