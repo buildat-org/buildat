@@ -538,7 +538,10 @@ function PF.menu(it, x, y, redraw)
 	local placing = S.placing ~= nil and S.placing.prefab == name
 	local fs, fn = NT.favourite(it.key, it.label, function()
 		redraw()
-		PF.menu(it, x, y, redraw)
+		-- (the touch mode's closed, as NT.palette_menu's)
+		if not NT.sh.on() then
+			PF.menu(it, x, y, redraw)
+		end
 	end)
 	local entries = {it.label, {placing and "Stop placing" or "Place", function()
 		if placing then

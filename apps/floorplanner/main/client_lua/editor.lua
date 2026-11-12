@@ -4400,6 +4400,12 @@ load("shell.lua")({S = S, E = E, M = M, magic = magic, log = log,
 		return {tools = toolbar, props = props, palette = palette_win,
 			layouts = place.win, dialog = picker_win}
 	end})
+-- (and its field entry mode: M.fe)
+load("field_entry.lua")({S = S, E = E, M = M, magic = magic, log = log,
+	panel = panel, wins = function()
+		return {tools = toolbar, props = props, palette = palette_win,
+			layouts = place.win, dialog = picker_win}
+	end})
 
 local function over_ui()
 	local s = magic.ui.scale
@@ -5236,6 +5242,11 @@ do
 		if S.paused then
 			return
 		end
+		-- [KIT_PHONE_EDITING] A press in the touch mode's UI half is the UI's:
+		-- no button of it reaches the world
+		if M.sh.off_world(S.mx, S.my) then
+			return
+		end
 		-- Walking on a touchscreen is the fingers' (M.touch_begin)
 		if S.touch and S.view == "walk" and not over_ui() then
 			return
@@ -5347,7 +5358,9 @@ do
 				local id, kind = M.use_pointed()
 				S.right_click = {moved = 0, use = id, kind = kind}
 			end
-			if S.view == "2d" and not over_ui() then
+			-- ([KIT_PHONE_EDITING] the touch mode's: two fingers', the plan
+			-- pans, mouse_move)
+			if S.view == "2d" and not over_ui() and not M.sh.on() then
 				-- Into 3D as if it had been 3D all along ([FP_ORBIT_2D]): the
 				-- camera straight above the plan's middle, looking down, as
 				-- high as makes its floor the plan's; then this is an orbit
@@ -5363,8 +5376,10 @@ do
 				magic.input:SetMouseMode(magic.MM_RELATIVE)
 			end
 			if S.view == "3d" then
-				-- Orbiting what is pointed, or the volume on its own
-				local p = S.alone and M.alone_center() or camera_pivot(true)
+				-- Orbiting what is pointed, or the volume on its own (the
+				-- touch mode's round the plan's middle, as two fingers)
+				local p = S.alone and M.alone_center() or
+						M.sh.on() and M.plan_middle() or camera_pivot(true)
 				if p then
 					S.orbit = p
 					magic.input:SetMouseMode(magic.MM_RELATIVE)
@@ -5373,8 +5388,11 @@ do
 			return
 		end
 		if button == magic.MOUSEB_MIDDLE then
-			-- The plan and the 3D camera pan
-			if S.view == "2d" then
+			-- The plan and the 3D camera pan; the touch mode's a pinch (up
+			-- zooms in, about where it was pressed: mouse_move)
+			if M.sh.on() and S.view ~= "walk" then
+				S.pinch = true
+			elseif S.view == "2d" then
 				S.panning = true
 			elseif S.view == "walk" and not S.captured then
 				-- And a middle drag walks, as WASD do: up is forward
@@ -5412,9 +5430,18 @@ do
 			end
 			return
 		end
+		if button == magic.MOUSEB_MIDDLE and S.pinch then
+			S.pinch = nil
+			log:info("fp editor: the middle let go: " .. M.view_text())
+			return
+		end
 		if button == magic.MOUSEB_RIGHT and S.right_click then
 			local rc = S.right_click
 			S.right_click = nil
+			-- (the touch mode's: a right drag moved the view, for a check)
+			if rc.moved >= 5 and M.sh.on() then
+				log:info("fp editor: the right drag let go: " .. M.view_text())
+			end
 			if rc.use and rc.moved < 5 and doc.ents[rc.use] then
 				S.orbit, S.pan3d = nil, nil
 				if S.looking then
@@ -5441,6 +5468,9 @@ do
 		-- The first finger's lift: a drag of the view, or a gesture of two,
 		-- ends without a click
 		if S.touch_cam or S.gesture then
+			if S.touch_cam then
+				log:info("fp editor: the view dragged: " .. M.view_text())
+			end
 			S.touch_cam, S.panning, S.orbit, S.press = nil, false, nil, nil
 			S.pan3d = nil
 			return
@@ -5458,7 +5488,10 @@ do
 			local orbited = S.orbit
 			S.orbit, S.pan3d = nil, nil
 			magic.input:SetMouseMode(magic.MM_ABSOLUTE)
-			if orbited and plan_aligned() and not S.no_plan_return then
+			-- (not the touch mode's: its views are the header's, and two
+			-- fingers' orbit does not either)
+			if orbited and plan_aligned() and not S.no_plan_return and
+					not M.sh.on() then
 				-- Back to the plan, where its floor is the view's: the middle
 				-- where the view's middle meets the floor, the span what the
 				-- camera's height sees
@@ -5504,6 +5537,19 @@ do
 	function M.mouse_move(x, y, dx, dy)
 		if S.right_click then
 			S.right_click.moved = S.right_click.moved + math.abs(dx) + math.abs(dy)
+		end
+		-- [KIT_PHONE_EDITING] The touch mode's mouse: the middle a pinch, the
+		-- right drag in the plan two fingers' pan (3D orbits as ever)
+		if S.pinch then
+			M.zoom(-dy / 20)
+			return
+		end
+		if S.right_click and S.view == "2d" and M.sh.on() then
+			if S.right_click.moved >= 5 then
+				local k = mm_per_px()
+				S.cx, S.cz = S.cx - dx * k, S.cz + dy * k
+			end
+			return
 		end
 		if S.orbit then
 			-- The camera goes round the point with the view: its offset from
@@ -5563,8 +5609,10 @@ do
 		end
 		-- [FP_TOUCH] 3: a finger dragged anywhere but on the selection moves
 		-- the view: the plan pans, the 3D camera orbits. The object tool's
-		-- drag is its footprint's.
-		if S.touch and S.press and not S.drag and S.tool ~= "box" and
+		-- drag is its footprint's. ([KIT_PHONE_EDITING] The touch mode's left
+		-- button is a finger.)
+		if (S.touch or M.sh.on()) and S.press and not S.drag and
+				S.tool ~= "box" and
 				geom.len(x - S.press.mx, y - S.press.my) > M.px(DRAG_PX) then
 			local t = S.press.target
 			if not (t and (S.sel[t.id] or S.nodes[t.id])) then
@@ -5619,14 +5667,27 @@ do
 		-- the web's in tenths (its SDL port counts them so)
 		local notches = math.max(-10, math.min(10,
 				S.web and wheel / 10 or wheel))
-		local f = 0.8 ^ (notches * S.wheel_speed / 100)
+		if S.view == "walk" and M.sh.on() then
+			-- [KIT_PHONE_EDITING] The touch mode's Walk has no zoom
+			log:info("fp editor: the wheel: not in Walk")
+			return
+		end
 		if S.view == "walk" then
 			-- Walking: a metre a notch along the look, as it was
 			local yaw, pitch = math.rad(S.yaw), math.rad(S.pitch)
 			S.pos = {x = S.pos.x + math.sin(yaw) * math.cos(pitch) * notches,
 					y = S.pos.y - math.sin(pitch) * notches,
 					z = S.pos.z + math.cos(yaw) * math.cos(pitch) * notches}
-		elseif S.alone and S.alone.dist then
+			return
+		end
+		M.zoom(notches)
+		log:info("fp editor: the wheel: " .. M.view_text())
+	end
+
+	-- The wheel's zoom by notches (up, in) about the pointer, in 2D and 3D
+	function M.zoom(notches)
+		local f = 0.8 ^ (notches * S.wheel_speed / 100)
+		if S.alone and S.alone.dist then
 			S.alone.dist = M.alone_clamp(S.alone.dist * f)
 		elseif S.view == "2d" then
 			-- Zoom about the cursor: the point under it stays under it
@@ -5664,6 +5725,17 @@ do
 			S.pos = {x = S.pos.x + dx * step, y = S.pos.y + dy * step,
 					z = S.pos.z + dz * step}
 		end
+	end
+
+	-- Where the view is, for a check's line: "<view>: the plan at x, z, w mm
+	-- across" or "<view>: the camera at x, y, z m, yaw a, pitch b"
+	function M.view_text()
+		if S.view == "2d" then
+			return string.format("2d: the plan at %.0f, %.0f, %.0f mm across",
+					S.cx, S.cz, S.span)
+		end
+		return string.format("%s: the camera at %.2f, %.2f, %.2f m, yaw %.1f, " ..
+				"pitch %.1f", S.view, S.pos.x, S.pos.y, S.pos.z, S.yaw, S.pitch)
 	end
 
 	-- **Fingers** ([FP_TOUCH] 3). The first is also the left mouse button,
@@ -5832,6 +5904,9 @@ do
 			end
 		end
 		if not next(S.fingers) then
+			if S.gesture then
+				log:info("fp editor: two fingers let go: " .. M.view_text())
+			end
 			S.gesture = nil
 		end
 	end
@@ -7506,6 +7581,7 @@ function M.update(dt)
 	panel.scale()
 	-- (off under the plans page too: the viewport the whole window)
 	M.sh.tick()
+	M.fe.tick()
 	if S.suspended then
 		return
 	end
@@ -7807,6 +7883,9 @@ function M.start(d)
 	local function probe_id()
 		return S.tool == "node" and next(S.nodes) or S.primary
 	end
+	magic.SubscribeToEvent("command_seq:fp_view", function(_, d)
+		log:info("fp_view (" .. d:GetString("Param") .. "): " .. M.view_text())
+	end)
 	magic.SubscribeToEvent("command_seq:fp_where", function()
 		local e = doc.ents[probe_id() or 0]
 		if e then

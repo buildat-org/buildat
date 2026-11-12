@@ -313,7 +313,7 @@ function M.stop()
 	send({op = "stop"})
 end
 
-local people
+local people, people_key, people_rows
 -- [KIT_TRY_INPUTS] The inspector's Try: entity id's input sent to it, the
 -- value typed (s) read as the input's type ty takes it; Ended, the game
 -- Run first (as play mode does)
@@ -1212,7 +1212,7 @@ local function bar_key()
 		tostring(narrow()), tostring(folded("palette")), tostring(folded("inspector")),
 		tostring(NT.sh.on() and NT.sh.pane .. " " .. NT.sh.pane_w()),
 		table.concat(keys, " "), tostring(M.key_name("copy")),
-		tostring(M.key_name("paste"))}, "\0")
+		tostring(M.key_name("paste")), NT.sh.on() and people_key() or ""}, "\0")
 end
 
 rebuild_bar = function(if_changed)
@@ -1261,17 +1261,26 @@ rebuild_bar = function(if_changed)
 		-- (its window's border, and a target's width more than probed)
 		bar_room, bar_first = (NT.sh.pane_w() - 12 - 24) / S.font, false
 	end
+	-- ([KIT_PHONE_EDITING] the touch mode's Server too, first: "..." had
+	-- them, gone after the phone test of 2026-11-12)
+	if sh and O.server then
+		bar_button("Server", nil, O.server)
+	end
 	if O.menu then
 		bar_button("Menu", "Esc", function()
 			O.menu()
 		end)
 	end
 	-- ([KIT_PHONE_EDITING] stage 4b: the touch mode's views are its
-	-- header's, "..."'s; here Walk here alone)
+	-- header's dropdown; here Walk here and the 3D camera's To the surface,
+	-- out of a cave or the ground, where a pinch had no room)
 	if sh and (S.view == "2d" or S.view == "3d") then
 		bar_button("Walk here", nil, function()
 			walk_here()
 		end)
+	end
+	if sh and S.view == "3d" then
+		bar_button("To the surface", nil, NT.to_surface)
 	end
 	local views = {}
 	for _, v in ipairs({"2d", "3d", "walk", "hud", "signals"}) do
@@ -1304,7 +1313,7 @@ rebuild_bar = function(if_changed)
 		end)
 		bar_button("Save", nil, NT.pf.bench_save)
 		bar_button("Close", nil, NT.pf.bench_close)
-	elseif #scenes > 1 or (E.state and E.state.can_make_scenes) then
+	elseif not sh and (#scenes > 1 or (E.state and E.state.can_make_scenes)) then
 		local choices = {}
 		for _, n in ipairs(scenes) do
 			choices[#choices + 1] = {"Scene: " .. n, n}
@@ -1339,18 +1348,21 @@ rebuild_bar = function(if_changed)
 			log:info("kit editor: cut at " .. S.cut)
 		end)
 	end
-	bar_button("Undo", nil, function()
-		send({op = "undo"})
-	end)
+	if not sh then
+		bar_button("Undo", nil, function()
+			send({op = "undo"})
+		end)
+	end
 	-- [KIT_PREFAB_VOXELS] the Box tool's: the box (and the selection)
-	-- copied or a prefab, the copy pasted
-	if S.tool == "box" then
+	-- copied or a prefab, the copy pasted ([KIT_PHONE_EDITING] the touch
+	-- mode's in the Box pane, BX.box_section)
+	if S.tool == "box" and not sh then
 		bar_button("Copy", "Ctrl+" .. M.key_name("copy"), M.copy)
 		bar_button("Make prefab...", nil, function()
 			M.prefab_dialog(sel_ids())
 		end)
 	end
-	if E.state and E.state.clipboard then
+	if E.state and E.state.clipboard and not sh then
 		bar_button("Paste", "Ctrl+" .. M.key_name("paste"), M.paste)
 	end
 	if rounds then
@@ -1386,6 +1398,11 @@ rebuild_bar = function(if_changed)
 	end
 	if E.running and rounds then
 		bar_button("Save as start", nil, M.save_as_start)
+	end
+	-- ([KIT_PHONE_EDITING] the touch mode's builders' box: Tools' last
+	-- section, the Builders pane gone after the phone test of 2026-11-12)
+	if sh and not NT.sig() then
+		people(S.bar_body)
 	end
 	bar_log = true
 end
@@ -1554,7 +1571,9 @@ function NT.voxels(w)
 	end)
 	nv:SetName("voxel new")
 	if O.solid then
-		text(w, S.touch and "Walking: a tap digs, a finger held places" or
+		-- ([KIT_PHONE_EDITING] the touch mode's in each view)
+		text(w, NT.sh.on() and "A tap digs, a finger held places" or
+				S.touch and "Walking: a tap digs, a finger held places" or
 				"Left: place, Shift+left: dig; walking: left digs, right places",
 				DIM)
 	end
@@ -1680,12 +1699,15 @@ function NT.items(w)
 		log:info("kit editor: a new item type")
 		refresh()
 	end)
-	local sr = row(w)
-	label(sr, "Search", 60)
-	edit(sr, IT.search or "", function(s)
-		IT.search = s
-		IT.filter()
-	end):SetName("item search")
+	-- (the touch mode's beside the palette's tabs, palette())
+	if not NT.sh.on() then
+		local sr = row(w)
+		label(sr, "Search", 60)
+		edit(sr, IT.search or "", function(s)
+			IT.search = s
+			IT.filter()
+		end):SetName("item search")
+	end
 	local ammo, groups = {}, {}
 	for _, sh in pairs(M.item_types or {}) do
 		if type(sh.ammo) == "string" and sh.ammo ~= "" then
@@ -1799,18 +1821,34 @@ function NT.entities(w)
 	local tabs, indent = NT.entity_lists()
 	local tab = S.list_tab or "Game-wide"
 	local tr = row(w)
-	for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
-		button(tr, name .. " (" .. #tabs[name] .. ")", function()
+	if NT.sh.on() then
+		-- ([KIT_PHONE_EDITING] a dropdown: the three ran off a phone's pane)
+		local c = {}
+		for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
+			c[#c + 1] = {name .. " (" .. #tabs[name] .. ")", name}
+		end
+		ui_utils.dropdown(tr, c, tab, function(name)
 			S.list_tab = name
 			palette()
-		end, name == tab)
+		end, {name = "entity lists", fill = true})
+	else
+		for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
+			button(tr, name .. " (" .. #tabs[name] .. ")", function()
+				S.list_tab = name
+				palette()
+			end, name == tab)
+		end
 	end
 	local n, ids = 0, {}
 	for _, e in ipairs(tabs[tab]) do
 		local gr = row(w)
+		-- (to a hundredth: a member under a turned parent showed 1.0124,5,-3.02947)
+		local at = {}
+		for i, v in ipairs(e.pos or {}) do
+			at[i] = string.format("%.10g", math.floor(v * 100 + 0.5) / 100)
+		end
 		label(gr, string.rep("    ", indent[e.id] or 0) .. NT.entity_label(e) ..
-				(e.pos and " at " ..
-				table.concat(e.pos, ",") or ""))
+				(e.pos and " at " .. table.concat(at, ",") or ""))
 		local sb = button(gr, e.id == S.primary and "Selected" or
 				S.reparent and (e.pos or NT.is_panel(e)) and "Parent" or "Select",
 				function()
@@ -1864,8 +1902,12 @@ function NT.fit_panel()
 	end
 	local hbar = bw > room_w and not pr
 	-- [KIT_PALETTE_FOOT] What the window has under the view: its border,
-	-- the palette's foot
-	local under = w.height - view.position.y - view.height
+	-- the palette's foot. The touch mode's view is its window's only child,
+	-- the border as wide under it as above: the window held at the pane's
+	-- height read it short, and the view shrank 2 px a frame (the sweep of
+	-- 2026-11-12)
+	local under = pr and view.position.y or
+			w.height - view.position.y - view.height
 	local room_h = bottom - view.screenPosition.y - under - 2 -
 			(hbar and view.horizontalScrollBar.height + 4 or 0)
 	local h = math.max(40, math.min(bh, room_h))
@@ -1887,6 +1929,17 @@ function NT.fit_panel()
 		log:info(string.format("kit editor: the panel %d of %d tall, %d of " ..
 				"%d wide, its window down to %d of %d", h, bh, vw, bw,
 				w.screenPosition.y + w.height, bottom))
+	end
+	-- The touch mode's scroll put back once its window is at the touch size:
+	-- palette()'s was clamped to the body before it grew (the sweep of
+	-- 2026-11-12: a Favourite scrolled the list to its top)
+	if pr and NT.want_y and w:GetVar("KitTouch") == "1" then
+		view.viewPosition = magic.IntVector2(0, NT.want_y)
+		if NT.want_y > 0 then
+			log:info(string.format("kit editor: the panel scrolled back to " ..
+					"%d (%d)", NT.want_y, view.viewPosition.y))
+		end
+		NT.want_y = nil
 	end
 end
 
@@ -1995,6 +2048,10 @@ function NT.components(w)
 	-- under its rows)
 	local foot = NT.sh.on() and w or W.palette
 	local function tabs()
+		-- (the touch mode's in the palette's dropdown, palette())
+		if NT.sh.on() then
+			return
+		end
 		local tr = row(foot)
 		for _, tab in ipairs({"All", "Favourites", "New"}) do
 			button(tr, tab, function()
@@ -2030,6 +2087,10 @@ function NT.components(w)
 	NT.pal_rows, NT.pal_heads, NT.pal_body = {}, {}, w
 	local said = {}
 	local r
+	-- [KIT_PHONE_EDITING] The touch mode's pane: two to a row where they fit
+	-- its width (its view's body, scroll bar out), else one (two long names
+	-- held the body wider than the pane, the rows off its right)
+	local room = NT.sh.on() and (NT.sh.pane_w() - 36) / S.font
 	for _, g in ipairs(S.tab == "Favourites" and {""} or NT.GROUPS) do
 		local closed = S.palette_closed[g]
 		if sections[g] and g ~= "" then
@@ -2043,12 +2104,18 @@ function NT.components(w)
 			NT.pal_heads[g]:SetName("section " .. g)
 			said[#said + 1] = g .. " " .. #sections[g]
 		end
+		local used
 		for i, it in ipairs(sections[g] or {}) do
-			if i % 2 == 1 then
+			if room then
+				if i == 1 or used == nil then
+					r = row(w)
+				end
+			elseif i % 2 == 1 then
 				r = row(w)
 			end
 			local armed = S.placing ~= nil and S.placing.label == it.label
 			local b
+			local function make(r)
 			b = button(r, it.label, function()
 				-- A click: armed, or no longer (a drag was not a click)
 				if S.palette_dragged then
@@ -2075,6 +2142,16 @@ function NT.components(w)
 					NT.arm(it)
 				end
 			end, armed)
+			end
+			make(r)
+			if room and used and used + 4 + b.minWidth > room then
+				b:Remove()
+				r = row(w)
+				make(r)
+				used = nil
+			end
+			-- (the second of a row ends it)
+			used = room and not used and b.minWidth or nil
 			local pb = {button = b, item = it, row = r, group = g}
 			palette_buttons[#palette_buttons + 1] = pb
 			NT.pal_rows[#NT.pal_rows + 1] = pb
@@ -2248,7 +2325,11 @@ end
 function NT.palette_menu(it, x, y)
 	local fs, fn = NT.favourite(it.key, it.label, function()
 		palette()
-		NT.palette_menu(it, x, y)
+		-- (the touch mode's closed: it was opened again over the pane, the
+		-- sweep of 2026-11-12)
+		if not NT.sh.on() then
+			NT.palette_menu(it, x, y)
+		end
 	end)
 	NT.menu({it.label, NT.cost_line(it.type), {"Place", function()
 		NT.palette_chosen(it)
@@ -2259,7 +2340,7 @@ end
 
 palette = function()
 	if NT.view then
-		NT.y[NT.shown or ""] = NT.view.viewPosition.y
+		NT.y[NT.shown or ""] = NT.want_y or NT.view.viewPosition.y
 	end
 	NT.view, ED.rows, ED.hover = nil, {}, nil
 	drop("palette")
@@ -2276,10 +2357,66 @@ palette = function()
 	-- needs (with room for the row's spacing and the scroll bar's)
 	local room = (math.min(screen_ui.w or 1e9, magic.ui.root.width) - 16 - 12 -
 			24) / S.font
-	if NT.sh.on() then
+	-- [KIT_PHONE_EDITING] The touch mode's pane is one view that scrolls: the
+	-- tabs and the filter in it too, the list given the pane's height (the
+	-- phone test of 2026-11-12: two rows of it showed under them)
+	local sh = NT.sh.on()
+	local view, body
+	if sh then
 		room = (NT.sh.pane_w() - 12 - 24) / S.font
+		view = w:CreateChild("ScrollView")
+		body = view:CreateChild("UIElement")
+		body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
 	end
-	for _, names in ipairs(NT.TABS) do
+	local top = body or w
+	-- (the touch mode's: the tabs, the Place tab's own and Credits... one
+	-- dropdown, the filter beside it: the sweep of 2026-11-12, two rows of
+	-- tabs and the Place tab's under its list)
+	local fr = sh and row(top)
+	if sh then
+		local c = {}
+		for _, names in ipairs(NT.TABS) do
+			for _, name in ipairs(names) do
+				if NT.tab_shown(name) then
+					c[#c + 1] = {name, name}
+					if name == "Place" then
+						c[#c + 1] = {"Place: Favourites", "\1Favourites"}
+						c[#c + 1] = {"Place: New", "\1New"}
+					end
+				end
+			end
+		end
+		c[#c + 1] = {"Credits...", "\0credits"}
+		local cur = tab ~= "Place" and tab or (S.tab == "Favourites" or
+				S.tab == "New") and "\1" .. S.tab or "Place"
+		local d = ui_utils.dropdown(fr, c, cur, function(v)
+			if v == "\0credits" then
+				palette()
+				return M.show_credits()
+			end
+			local sub = v:sub(1, 1) == "\1" and v:sub(2) or "All"
+			if S.tab ~= sub then
+				S.tab = sub
+				log:info("kit editor: the palette's " .. sub .. " tab")
+				if sub == "New" then
+					M.fetch_packages()
+				end
+			end
+			if sub ~= "All" or v == "Place" then
+				v = "Place"
+			end
+			if v ~= tab then
+				NT.choose(v)
+			else
+				palette()
+			end
+		end, {name = "palette tabs"})
+		-- (the filter the rest of the row: the dropdown's own width, its
+		-- longest choice's, left the field 120 and pushed x off the pane)
+		d:SetVar("KitNarrow", "1")
+		d:SetFixedWidth(math.floor(room * 0.45))
+	end
+	for _, names in ipairs(sh and {} or NT.TABS) do
 		local r, used = nil, 0
 		for _, name in ipairs(names) do
 			if NT.tab_shown(name) then
@@ -2291,7 +2428,7 @@ palette = function()
 				local bw = probe.minWidth + 4
 				probe:Remove()
 				if not r or used > 0 and used + bw > room then
-					r, used = row(w), 0
+					r, used = row(top), 0
 				end
 				button(r, s, function() NT.choose(name) end, name == tab)
 				used = used + bw
@@ -2299,22 +2436,40 @@ palette = function()
 		end
 	end
 	-- [KIT_PALETTE_SECTIONS] The filter over the list, out of its scroll:
-	-- in sight in a window with room for a row of it
-	if tab == "Place" and S.tab ~= "New" then
-		local fr = row(w)
-		label(fr, "Filter", 50)
-		local fe = edit(fr, S.palette_filter or "", function(s)
+	-- in sight in a window with room for a row of it. ([KIT_PHONE_EDITING]
+	-- The touch mode's Items' search the same, beside the tabs: the sweep of
+	-- 2026-11-12 had it a labelled row in the list)
+	local items = sh and tab == "Items"
+	if (tab == "Place" and S.tab ~= "New") or items then
+		fr = fr or row(top)
+		if not sh then
+			label(fr, "Filter", 50)
+		end
+		local name = items and "item search" or "palette filter"
+		local fe = edit(fr, items and (IT.search or "") or S.palette_filter or "",
+				function(s)
+			if items then
+				IT.search = s
+				return IT.filter()
+			end
 			S.palette_filter = s
 			NT.palette_filter()
 		end)
-		fe:SetName("palette filter")
-		button(fr, "x", function()
+		fe:SetName(name)
+		local x = button(fr, "x", function()
 			fe:SetText("")
-		end):SetName("palette filter clear")
+		end)
+		x:SetName(name .. " clear")
+		x:SetVar("KitNarrow", "1")
+		if sh then
+			x:SetFixedWidth(math.ceil(NT.sh.TOUCH / S.font))
+		end
 	end
-	local view = w:CreateChild("ScrollView")
-	local body = view:CreateChild("UIElement")
-	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+	if not sh then
+		view = w:CreateChild("ScrollView")
+		body = view:CreateChild("UIElement")
+		body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+	end
 	local fill = tab == "Items" and NT.items or
 			tab == "Terrain" and terrain_panel or tab == "Voxels" and
 			NT.voxels or tab == "Box" and NT.box_section or
@@ -2331,6 +2486,8 @@ palette = function()
 	NT.view = view
 	NT.fit_panel()
 	view.viewPosition = magic.IntVector2(0, NT.y[NT.shown] or 0)
+	-- (the touch mode's again at the touch size, NT.fit_panel)
+	NT.want_y = sh and NT.y[NT.shown] or nil
 end
 
 -- The voxels to place: the World's material set's first
@@ -2827,6 +2984,7 @@ function NT.params_form(w, e, ci, c, t, keep)
 		end
 		local apply_b
 		apply_b, apply_text = button(w, "Apply", function()
+			NT.sh.let_go("Apply")
 			NT.apply_params(e, ci, decl)
 			refresh()
 		end)
@@ -3233,6 +3391,53 @@ function NT.sym_section(w, e)
 	end
 end
 
+-- [KIT_PHONE_EDITING] The touch mode's inspector's rare buttons as one
+-- dropdown: Switch parent (Un-parent), Place under this, each component's
+-- Restart (the sweep of 2026-11-12). parented: whether it may have a
+-- parent, pe the one it has, under: whether it may take placings
+function NT.actions(w, e, parented, pe, under)
+	local c, fns = {{"Actions...", 0}}, {}
+	local function add(label, fn)
+		fns[#fns + 1] = fn
+		c[#c + 1] = {label, #fns}
+	end
+	if parented then
+		local armed = S.reparent == e.id
+		add(armed and "Switch parent: cancel" or "Switch parent", function()
+			NT.arm_parent(not armed and e.id or nil)
+		end)
+	end
+	if pe then
+		add("Un-parent", function()
+			log:info("kit editor: un-parent " .. e.id)
+			send({op = "parent", id = e.id, parent = 0})
+		end)
+	end
+	if under then
+		local on = S.under == e.id
+		add(on and "Placing under this: stop" or "Place under this", function()
+			S.under = not on and e.id or nil
+			log:info("kit editor: placing under " .. tostring(S.under or "the scene"))
+			refresh()
+		end)
+	end
+	for ci, cc in ipairs(E.running and e.components or {}) do
+		add("Restart " .. cc.type, function()
+			send({op = "restart", id = e.id, comp = ci - 1})
+		end)
+	end
+	if #fns == 0 then
+		return
+	end
+	local d
+	d = ui_utils.dropdown(row(w), c, 0, function(i)
+		ui_utils.dropdown_set(d, 0)
+		if fns[i] then
+			fns[i]()
+		end
+	end, {name = "inspector actions", fill = true})
+end
+
 local function inspector(w, e, is_made)
 	if is_made then
 		return inspect_made(w, e)
@@ -3264,15 +3469,46 @@ local function inspector(w, e, is_made)
 	-- [KIT_SIGNALS_VIEW] In the Signals view its position, its parameters, its
 	-- parent's buttons and Try alone: the links are the view's own table
 	local sig = NT.sig()
+	-- [KIT_PHONE_EDITING] The touch mode's: its parameters first, its
+	-- position after them, the rare buttons one dropdown (the sweep of
+	-- 2026-11-12: the parameters started 450 px down); Delete the foot's
+	local sh = NT.sh.on()
 	-- Its position typed in (fine tuning, and where keys are not at hand:
 	-- a touchscreen), Move one edit; with several selected they move by
 	-- what this one moves
+	local function pos_rows()
+	-- [KIT_PHONE_EDITING] The touch mode's field entry rules for the fields
+	-- below (field_entry.lua; the sweep of 2026-11-12: a wide screen's
+	-- keyboard covered them): its Apply moves or turns at once
+	local function entry(f, vals, i, go)
+		local name = f:GetName()
+		NT.fe.extra[name] = sh and {name = name, key = name, k = name, e = e,
+			kind = "number", d = {}, long = false,
+			f = {name = name, type = "number"}, old = vals[i], apply = function(v)
+				vals[i] = tonumber(v)
+				f:SetText(v)
+				go()
+			end} or nil
+	end
 	if e.pos and not copy then
 		local r, at = row(w), {e.pos[1], e.pos[2], e.pos[3]}
+		local function move()
+			if not (at[1] and at[2] and at[3]) then
+				E.status = "Move: three numbers"
+				return people()
+			end
+			local by = {at[1] - e.pos[1], at[2] - e.pos[2], at[3] - e.pos[3]}
+			if n > 1 then
+				send({op = "move", ids = sel_ids(), by = by})
+			else
+				send({op = "move", id = e.id, pos = at})
+			end
+			log:info(string.format("kit editor: moved %d by %g, %g, %g from "
+					.. "the inspector", n, by[1], by[2], by[3]))
+		end
 		-- [KIT_PHONE_EDITING] The touch mode's: Move and Turn on a row of their
 		-- own under the three, which share the pane's width (a field's 120 cut
 		-- Move off at 412 wide; the row stretches them, shell.lua)
-		local sh = NT.sh.on()
 		for i, axis in ipairs({"x", "y", "z"}) do
 			-- One letter's room: the row's layout has already widened it
 			label(r, axis):SetFixedWidth(12)
@@ -3288,20 +3524,11 @@ local function inspector(w, e, is_made)
 			f.minWidth = 56
 			-- For a driven click, and kit_ui_where
 			f:SetName("position " .. axis)
+			entry(f, at, i, move)
 		end
 		local mv = button(sh and row(w) or r, "Move", function()
-			if not (at[1] and at[2] and at[3]) then
-				E.status = "Move: three numbers"
-				return people()
-			end
-			local by = {at[1] - e.pos[1], at[2] - e.pos[2], at[3] - e.pos[3]}
-			if n > 1 then
-				send({op = "move", ids = sel_ids(), by = by})
-			else
-				send({op = "move", id = e.id, pos = at})
-			end
-			log:info(string.format("kit editor: moved %d by %g, %g, %g from "
-					.. "the inspector", n, by[1], by[2], by[3]))
+			NT.sh.let_go("Move")
+			move()
 		end)
 		mv:SetName("position move")
 		-- (its own width: a wide inspector stretched it past the pane)
@@ -3314,6 +3541,21 @@ local function inspector(w, e, is_made)
 				NT.pf.is_free(e) then
 			local tr = row(w)
 			local a = {e.yaw or 0, e.pitch or 0, e.roll or 0}
+			local function turn()
+				if not (a[1] and a[2] and a[3]) then
+					E.status = "Turn: three numbers"
+					return people()
+				end
+				send({op = "move", id = e.id, pos = e.pos, yaw = a[1], pitch = a[2],
+					roll = a[3]})
+				log:info(string.format("kit editor: turned %d to %g, %g, %g from "
+						.. "the inspector", e.id, a[1], a[2], a[3]))
+			end
+			-- (the touch mode's row named: its y beside the position's y read
+			-- as one, the sweep of 2026-11-12)
+			if sh then
+				label(tr, "turn")
+			end
 			for i, axis in ipairs({"yaw", "pitch", "roll"}) do
 				label(tr, axis:sub(1, 1)):SetFixedWidth(12)
 				-- (a place in the field's width; the rows are on a 1/16's grid, a
@@ -3324,33 +3566,39 @@ local function inspector(w, e, is_made)
 				f.cursorPosition = 0
 				f.minWidth = 56
 				f:SetName("turn " .. axis)
+				entry(f, a, i, turn)
 			end
 			local tb = button(sh and row(w) or tr, "Turn", function()
-				if not (a[1] and a[2] and a[3]) then
-					E.status = "Turn: three numbers"
-					return people()
-				end
-				send({op = "move", id = e.id, pos = e.pos, yaw = a[1], pitch = a[2],
-					roll = a[3]})
-				log:info(string.format("kit editor: turned %d to %g, %g, %g from "
-						.. "the inspector", e.id, a[1], a[2], a[3]))
+				NT.sh.let_go("Turn")
+				turn()
 			end)
 			if sh then
 				tb.maxWidth = tb.minWidth
 			end
 		end
 	end
+	end
 	-- ([KIT_NO_WORLD_TYPES] one with no position too: kit/starting_kit under a
 	-- kit/team)
 	local c1 = e.components and e.components[1]
-	if not copy and (e.pos or (c1 and type_of(c1.type).no_position)) then
+	local parented = not copy and (e.pos or (c1 and type_of(c1.type).no_position))
+	local pe = parented and NT.tree().by[e.parent]
+	pe = pe and (pe.pos or NT.is_panel(pe)) and pe
+	local under = (e.pos or NT.is_panel(e)) and not sig and not copy
+	if sh then
+		if pe then
+			text(w, "Under " .. NT.entity_label(pe), DIM)
+		end
+		NT.actions(w, e, parented, pe, under)
+	else
+		pos_rows()
+	end
+	if not sh and parented then
 		-- [KIT_NESTING] what it is under; what is placed next under it.
 		-- [KIT_REPARENT_BUTTONS] Switch parent arms: the next entity clicked
 		-- (the view's or the list's, [KIT_SIGNALS_PARENT_BUTTONS] the Signals
 		-- list's) is its parent; Un-parent puts it back under the scene. The
 		-- server keeps its place in the world
-		local pe = NT.tree().by[e.parent]
-		pe = pe and (pe.pos or NT.is_panel(pe)) and pe
 		if pe then
 			text(w, "Under " .. NT.entity_label(pe), DIM)
 		end
@@ -3366,7 +3614,7 @@ local function inspector(w, e, is_made)
 			end)
 		end
 	end
-	if (e.pos or NT.is_panel(e)) and not sig and not copy then
+	if under and not sh then
 		local on = S.under == e.id
 		button(w, on and "Placing under this: stop" or "Place under this",
 				function()
@@ -3376,7 +3624,7 @@ local function inspector(w, e, is_made)
 			refresh()
 		end, on)
 	end
-	if not sig and not copy then
+	if not sig and not copy and not sh then
 		button(w, "Delete", function()
 			M.delete_selected()
 		end)
@@ -3384,7 +3632,7 @@ local function inspector(w, e, is_made)
 	-- [KIT_COMPONENTS] A built child's are its prefab's. (Over the components: a
 	-- movement's parameters are longer than the screen)
 	local may_compose = not sig and type(e.built) ~= "table" and not e.kind
-	if may_compose then
+	if may_compose and not sh then
 		NT.add_component(w, e)
 	end
 	for ci, c in ipairs(e.components or {}) do
@@ -3414,7 +3662,7 @@ local function inspector(w, e, is_made)
 			text(w, c.type, magic.Color(1.0, 0.85, 0.3))
 		end
 		NT.component_hint(w, e, t)
-		if E.running then
+		if E.running and not sh then
 			button(w, "Restart this", function()
 				send({op = "restart", id = e.id, comp = ci - 1})
 			end)
@@ -3520,6 +3768,12 @@ local function inspector(w, e, is_made)
 			button(tr, input, function()
 				M.try(e.id, input, ty, E.try_values[vk])
 			end)
+		end
+	end
+	if sh then
+		pos_rows()
+		if may_compose then
+			NT.add_component(w, e)
 		end
 	end
 	-- What the last Try's runs emitted, for a while
@@ -3711,9 +3965,24 @@ end
 function BX.box_section(w)
 	local lo, hi = BX.box_lh()
 	text(w, "Box")
+	-- [KIT_PHONE_EDITING] The touch mode's Copy, Paste and Make prefab of
+	-- the box (the bar's elsewhere act on the selection too, out of sight
+	-- here: the sweep of 2026-11-12 made a prefab of "1 entity")
+	local paste = E.state and E.state.clipboard
+	local acts = NT.sh.on() and (lo or paste) and row(w)
+	if acts and lo then
+		button(acts, "Copy", function() M.copy(true) end):SetName("box copy")
+		button(acts, "Make prefab...", function()
+			M.prefab_dialog({})
+		end):SetName("box prefab")
+	end
+	if acts and paste then
+		button(acts, "Paste", M.paste):SetName("box paste")
+	end
+	local verb = S.touch and "Tap" or "Click"
 	if not lo then
-		text(w, S.vbox and "Click its second corner." or
-				"Click its first corner.", DIM)
+		text(w, verb .. (S.vbox and " its second corner." or
+				" its first corner."), DIM)
 		return
 	end
 	local at = {lo[1], lo[2], lo[3]}
@@ -3741,7 +4010,9 @@ function BX.box_section(w)
 			f.minWidth = 48
 		end
 	end
-	text(w, "Drag a face's handle; Shift: the whole box", DIM)
+	-- (no Shift under a finger)
+	text(w, S.touch and "Drag a face's handle" or
+			"Drag a face's handle; Shift: the whole box", DIM)
 end
 NT.box_section = BX.box_section
 
@@ -3816,8 +4087,7 @@ end)
 magic.SubscribeToEvent("command_seq:kit_ui_where", function(_, data)
 	local sc, r = magic.ui.scale, {}
 	for _, k in ipairs({"bar", "palette", "inspector", "people", "sg_list",
-			"sg_links", "sg_view", "hud_panel", "ctx", "shell", "log", "dialog",
-			"scenes"}) do
+			"sg_links", "sg_view", "hud_panel", "ctx", "shell", "log", "dialog"}) do
 		local w = W[k]
 		if w and w.visible then
 			local p = w.screenPosition
@@ -4061,6 +4331,14 @@ local function sel_key()
 end
 
 local build_inspector
+-- The selected entity's last log lines, under a title (show_log's)
+local function log_rows(b, lines)
+	text(b, "Log of " .. S.primary .. ":", DIM)
+	for i = math.max(1, #lines - 7), #lines do
+		text(b, tostring(lines[i]))
+	end
+end
+
 -- on_state: from a state (refresh("state")), kept when it changed nothing
 -- the inspector shows
 inspector_window = function(on_state)
@@ -4115,11 +4393,24 @@ build_inspector = function()
 	local view = W.inspector:CreateChild("ScrollView")
 	local body = view:CreateChild("UIElement")
 	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+	-- ([KIT_PHONE_EDITING] the touch mode's Signals view: its links' pane
+	-- from here, "..." gone after the phone test of 2026-11-12)
+	if sig and NT.sh.on() then
+		button(body, "Links", function()
+			NT.sh.show("sg_links")
+		end):SetName("inspector links")
+	end
 	if item then
 		IT.sheet(body)
 	else
 		inspector(body, e, is_made)
 	end
+	-- ([KIT_PHONE_EDITING] the touch mode's log of it, show_log)
+	local lines = NT.sh.on() and not item and not sig and E.logs[S.primary] or {}
+	if #lines > 0 then
+		log_rows(body, lines)
+	end
+	S.log_last = lines[#lines]
 	view:SetStyleAuto()
 	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
 	view.scrollBarsAutoVisible = false
@@ -4378,7 +4669,6 @@ end
 -- Every panel drawn again ([KIT_EDIT_MODE_FPS] why: "select" or "state", what
 -- stays the same not: the bar unless what it shows changed)
 refresh = function(why)
-	NT.sh.scenes()
 	local bar = rebuild_bar(true) ~= false
 	if bar or not palette_stays(why) then
 		palette()
@@ -4406,9 +4696,19 @@ end
 -- about it, its last ones, below on the right. Rebuilt alone as it grows
 show_log = function()
 	drop("log")
-	-- ([KIT_PHONE_EDITING] the touch mode's Log pane, shell.lua)
+	-- ([KIT_PHONE_EDITING] the touch mode's at the inspector's foot,
+	-- build_inspector: the phone test of 2026-11-12 found a Log pane of its
+	-- own mostly empty. Not while a field is typed in, which it would lose)
 	local lines = E.editing and not NT.sig() and S.primary and
-			(NT.sh.pane == "log" or not NT.sh.on()) and E.logs[S.primary] or {}
+			E.logs[S.primary] or {}
+	if NT.sh.on() then
+		local f = magic.ui.focusElement
+		if W.inspector and lines[#lines] ~= S.log_last and
+				not (f and f:GetTypeName() == "LineEdit") then
+			build_inspector()
+		end
+		return
+	end
 	if #lines == 0 then
 		return
 	end
@@ -4424,33 +4724,35 @@ show_log = function()
 			ins and -(W.inspector.width + 20) or -10,
 			W.touch and -(W.touch.height + 16) or -50)
 	W.log = lw
-	text(lw, "Log of " .. S.primary .. ":", DIM)
-	for i = math.max(1, #lines - 7), #lines do
-		text(lw, tostring(lines[i]))
-	end
+	log_rows(lw, lines)
 end
 
 -- Below at the left, out of the view's way ([KIT_EDITOR_PANELS]: the
 -- builders' panel, small): the server's state, a refusal, the builds the
 -- last End discarded, who edits and who may. Rebuilt alone as the
 -- builders move (the inspector being typed in is left as it is)
-people = function()
+people = function(into)
+	if into then
+		return people_rows(into)
+	end
 	drop("people")
 	-- [KIT_SIGNALS_VIEW] A refusal over the table; the rest not in that view
 	if NT.sig() then
 		return NT.sg.status()
 	end
-	-- A narrow screen's panel opened is where it was. ([KIT_PHONE_EDITING]
-	-- the touch mode's Builders pane: its status line has the gist, shell.lua)
-	local sh = NT.sh.on()
-	if not E.editing or (sh and NT.sh.pane ~= "people") or
-			(not sh and narrow() and not folded("palette")) then
+	-- ([KIT_PHONE_EDITING] the touch mode's: Tools' last section, made again
+	-- as what it shows changes, people_key)
+	if NT.sh.on() then
+		return rebuild_bar(true)
+	end
+	-- A narrow screen's panel opened is where it was
+	if not E.editing or (narrow() and not folded("palette")) then
 		return
 	end
 	-- [KIT_PHONE_EDITING] Under a narrow screen's open inspector only a
 	-- refusal, its lower rows kept clear of it (fit_inspector)
 	-- simplified: the builders and the rest come back as the inspector folds
-	local slim = not sh and narrow() and W.inspector ~= nil and W.inspector.visible
+	local slim = narrow() and W.inspector ~= nil and W.inspector.visible
 	if slim and E.status == "" then
 		return
 	end
@@ -4462,15 +4764,54 @@ people = function()
 		text(b, E.status, WARN)
 		return
 	end
-	text(b, (E.session or {}).kind == "bench" and "Only Save reaches the prefab" or
+	people_rows(b)
+end
+
+-- What the builders' box shows, for the touch mode's Tools to be made again
+-- by (bar_key)
+people_key = function()
+	local t = {tostring((E.session or {}).kind), tostring(E.persistent),
+		tostring(E.running), tostring(E.status), tostring(S.under),
+		tostring(E.choose)}
+	local names = {}
+	for name in pairs(E.discarded) do
+		names[#names + 1] = name
+	end
+	table.sort(names)
+	for _, n in ipairs(names) do
+		t[#t + 1] = n .. " " .. tostring(E.discarded[n])
+	end
+	for _, bd in ipairs(E.builders or {}) do
+		t[#t + 1] = table.concat({tostring(bd.name), tostring(bd.color),
+			tostring(bd.you), tostring(bd.sel)}, " ")
+	end
+	for _, p in ipairs(E.state and E.state.admin and E.state.people or {}) do
+		t[#t + 1] = table.concat({tostring(p.name), tostring(p.admin),
+			tostring(p.builder)}, " ")
+	end
+	return table.concat(t, "\1")
+end
+
+-- The builders' box's rows, into b
+people_rows = function(b)
+	-- (the touch mode's Tools: wrapped to the pane; a longer line widened
+	-- the scroll's body, and the rows over it ran off the pane)
+	local function para(s, c)
+		local t = text(b, s, c)
+		if NT.sh.on() then
+			t:SetWordwrap(true)
+			t:SetFixedWidth((NT.sh.pane_w() - 36) / S.font)
+		end
+	end
+	para((E.session or {}).kind == "bench" and "Only Save reaches the prefab" or
 			E.persistent and "Edits change the world" or E.running and
 			"Running: edits change the start and the round" or
 			"Ended: edits change the start", DIM)
 	if E.status ~= "" then
-		text(b, E.status, WARN)
+		para(E.status, WARN)
 	end
 	if S.under and find(S.under) then
-		text(b, "New entities go under " .. S.under .. " (its inspector's " ..
+		para("New entities go under " .. S.under .. " (its inspector's " ..
 				"Place under this)", DIM)
 	end
 	-- The builds the last End discarded, to keep until the next Run: all,
@@ -4684,7 +5025,8 @@ local function prefab_dialog(ids)
 	-- [KIT_PREFAB_VOXELS] the Box tool's voxels too, their air replacing
 	-- what is there or not
 	local box = vbox()
-	text(w, "Make a prefab of " .. #ids .. (#ids == 1 and " entity" or
+	text(w, #ids == 0 and box and "Make a prefab of the box's voxels" or
+			"Make a prefab of " .. #ids .. (#ids == 1 and " entity" or
 			" entities") .. (box and " and the box's voxels" or ""))
 	local r = row(w)
 	label(r, "Prefab name:")
@@ -5253,19 +5595,34 @@ end
 -- over the app's voxels (or the heightmap) below it, else ground_y. The
 -- plan's first cut is from it: skeldat's ground is at 6, under the
 -- constant ground_y's cut of 1.5, and its plan was empty.
--- simplified: 64 cells down at most
-local function ground_under(p)
+-- simplified: 64 cells down at most (or depth)
+local function ground_under(p, depth)
 	if O.solid then
 		local solid = M.with_terrain(O.solid)
 		local x, z = math.floor(p.x + 0.5), math.floor(p.z + 0.5)
 		local y0 = math.floor(p.y + 0.5)
-		for y = y0, y0 - 64, -1 do
+		for y = y0, y0 - (depth or 64), -1 do
 			if solid(x, y, z) then
 				return y + 1
 			end
 		end
 	end
 	return O.ground_y
+end
+
+-- [KIT_PHONE_EDITING] The touch shell's "To the surface": the 3D camera
+-- out of a cave or the ground, where a pinch has no room to zoom from (the
+-- phone test of 2026-11-12): 8 over the first solid cell down from 128
+-- over it (else ground_y), looking down at 45, its yaw kept
+-- simplified: the camera's column only; a mountain over 128 above it is
+-- landed in (the pinch then backs out)
+function NT.to_surface()
+	local p = S.pos or {x = 0, y = 0, z = 0}
+	local y = ground_under({x = p.x, y = p.y + 128, z = p.z}, 192) + 8
+	S.pos, S.pitch = {x = p.x, y = y, z = p.z}, 45
+	log:info(string.format("kit editor: to the surface: the 3D camera at " ..
+			"%.2f %.2f %.2f", p.x, y, p.z))
+	changed()
 end
 
 -- The free camera from the app's: where it is, looking as it does
@@ -5519,7 +5876,9 @@ do
 	install({S = S, W = W, E = E, NT = NT, M = M, O = O, magic = magic,
 		log = log, send = send, window = window, drop = drop, button = button,
 		text = text, row = row, DIM = DIM, apply_viewport = apply_viewport,
-		refresh = function() refresh() end, set_view = function(v) set_view(v) end})
+		find = find,
+		refresh = function() refresh() end, set_view = function(v) set_view(v) end,
+		ui_utils = ui_utils, VIEW_NAMES = VIEW_NAMES})
 end
 -- Its field entry mode (field_entry.lua)
 do

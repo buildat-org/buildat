@@ -1,27 +1,31 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~9 min, five web drives (2026-11-11)
+# cost: ~9 min, five web drives (2026-11-12)
 # covers: builtin/kit/client_lua/shell.lua builtin/kit/client_lua/field_entry.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/controls.lua
 # [KIT_PHONE_EDITING] stage 1, the touch mode's split screen: Workbench's
 # web client in headless Chrome by finger (TOUCH=1), the editor's UI mode
 # left to the device (kit_ui_mode=0, touch on a touchscreen), as a phone in
 # portrait (412x915) and in landscape (915x412), and left-handed in
 # landscape (kit_ui_mode=3). In each: edit mode by the play bar's Menu and
-# the pause menu's Edit, the 2D view by the header's 2D, a kit/button
-# tapped in the palette's pane and the world tapped:
+# the pause menu's Edit, the 2D view by the header's views' dropdown, a
+# kit/button tapped in the palette's pane and the world tapped:
 #   - no "UI scale" line from edit mode on (a fixed scale, no fit);
 #   - every target in the UI half (a button, field, dropdown, check box:
-#     kit_touch_targets) at least the touch size (48 UI px) each way;
+#     kit_touch_targets) at least the touch size (32 UI px) each way;
 #   - the world's rect and the UI half's apart, and no pane's window
 #     (kit_ui_where) over the world;
-#   - the world tap placed the kit/button (the server's log);
+#   - the world tap placed the kit/button (the server's log), and it is
+#     selected, the placing ended;
+#   - the world's hint one line (its lines);
 #   - portrait: the inspector's "position x" tapped and a stand-in keyboard
 #     up (buildatKeyboard.test, 42 % of the height): the UI half above it,
 #     the world shorter by as much, the field above the keyboard.
 # Stage 3, the world's gestures, by finger in p412x915 and l915x412, in the
 # plan at a known camera (kit_plan 0 0 16 8):
-#   - a kit/button placed at the world's foot: the plan panned to show it;
+#   - a kit/button placed at the world's foot: the plan panned to show it
+#     (each placed one armed again from the palette, Back from the
+#     inspector);
 #   - two more placed side by side, B where A's out ports are on the
 #     desktop: a tap on A, then on B selects B; nothing links, no port is
 #     shown;
@@ -45,21 +49,25 @@
 #     back past hold to color_down; color (text) applied; sound_press picked
 #     from its list, no keyboard; the inspector's + stepper and Apply; a
 #     kit/door placed: mirror Yes applied; a size past the world refused by
-#     the server, in place, and Cancelled; the field and the buttons above
-#     the keyboard;
+#     the server, in place, and Cancelled; the door's position x typed in
+#     the mode (the sweep of 2026-11-12: a wide screen's keyboard covered
+#     the row) and applied, a move; the field and the buttons above the
+#     keyboard;
 #   - portrait (412x915): the x/y/z row and Move inside the pane; a kit/npc
 #     placed, its lines (long text) open the mode and are applied.
 # Stage 4b, the views and Walk:
-#   - edit mode begins in 3D (also m1600x900); the header's Walk, 3D and 2D
-#     in each target dump, tapped in turn and lit as they are (its line);
+#   - edit mode begins in 3D (also m1600x900); the header's Tools in each
+#     target dump, no "..."; Walk, 3D and 2D picked in turn from its views'
+#     dropdown, the header showing each (its line); in 3D Tools' To the
+#     surface (the camera put above the ground);
 #   - p412x915 and l915x412, Walk by finger: a kit/button placed ahead; a
 #     drag from its middle while it is not selected, and one from the sky,
 #     turn the view (controls.lua's line) with nothing selected or edited;
 #     tapped, it is selected, and a drag from its middle moves it (the
 #     server's log); the stick at the world's lower left walks (the body
 #     moved); the touch bar (Jump) in the world's lower right;
-#   - a drag from the header's empty part (after "< Log") moves the
-#     divider (the world taller, the UI half wider);
+#   - a drag from the header's empty part (the palette's, its title a
+#     label) moves the divider (the world taller, the UI half wider);
 #   - m1600x900: Walk by mouse as the desktop's, a click into the crosshair.
 # And a mouse at 1600x900 (no TOUCH): the desktop's layout (the bar, the
 # palette at the left, no shell), a click on the palette and one on the
@@ -109,17 +117,21 @@ def gestures():
     def plan():
         a("event", "kit_plan 0 0 16 8"); a("waitlog", "kit editor: the view is 2D", 10); fr(5)
     A, B, A2, V = at(-4, -4), at(-2, -4), at(-1, -4), at(4, 3)
+    def arm():
+        # (the palette Back from the inspector of the one placed before)
+        a(tap, "Button", "shell back"); a("waitlog", "touch shell: back to the palette pane", 10); fr(10)
+        a(tap, "Button", "kit/button"); a("waitlog", "kit editor: placing kit/button", 10); fr(5)
     plan()
-    a(tap, "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
-    a(tap, "Button", "menu Palette"); a("waitlog", "touch shell: the palette pane", 10); fr(10)
-    a(tap, "Button", "kit/button"); a("waitlog", "kit editor: placing kit/button", 10); fr(5)
+    arm()
     a(tap, round(cx + 3 * c), wy + wh - 5); a("waitlog", "kit editor: state: 3 entities", 20)
     a("waitlog", "touch shell: panned to show", 10); fr(5)
     a("shot", "${OUT}/10_revealed.png")
     plan()
+    arm()
     a(tap, *A); a("waitlog", "kit editor: state: 4 entities", 20); fr(3)
-    a(tap, *B); a("waitlog", "kit editor: state: 5 entities", 20); fr(3)
-    a(tap, "Button", "shell cancel"); a("waitlog", "kit editor: placing nothing", 10); fr(5)
+    arm()
+    a(tap, *B); a("waitlog", "kit editor: state: 5 entities", 20)
+    a("waitlog", "touch shell: the inspector pane", 10); fr(5)
     # A, then B where A's ports would be on the desktop
     a(tap, *A); a("waitlog", r"kit editor: selected \d+ \(", 10); fr(3)
     a(tap, *B); a("waitlog", r"kit editor: selected \d+ \(", 10); fr(3)
@@ -157,9 +169,9 @@ def gestures():
     a("shot", "${OUT}/14_view_moved.png")
     # Voxels: held (a right click) places, a tap digs
     plan()
-    a(tap, "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
-    a(tap, "Button", "menu Palette"); a("waitlog", "touch shell: the palette pane", 10); fr(10)
-    a(tap, "Button", "Voxels*"); a("waitlog", "kit editor: tool voxels", 10); fr(5)
+    a(tap, "Button", "shell back"); a("waitlog", "touch shell: back to the palette pane", 10); fr(10)
+    a(tap, "DropDownList", "palette tabs"); a("waitlog", "palette tabs open", 10); fr(3)
+    a(tap, "Text", "palette tabs: Voxels"); a("waitlog", "kit editor: tool voxels", 10); fr(5)
     if touch: a("hold", *V, 800)
     else: a("click", *V, 0, 2)
     a("waitlog", r"kit editor: place \S+ at", 10); a("sync", 5000); fr(5)
@@ -189,6 +201,11 @@ def dump(name):
     fr(3)
     a("event", "kit_touch_targets " + name); a("event", "kit_ui_where " + name)
     a("waitlog", r"the windows at .*\(" + name + r"\)", 10)
+def view(label):
+    # The header's dropdown: its list, a pick ("3D" the "3D · <scene>" too)
+    a(tap, "DropDownList", "shell views"); a("waitlog", "shell views open", 10); fr(3)
+    a(tap, "Text", "shell views: " + label + "*")
+    a("waitlog", "kit editor: the view is " + label, 10); fr(5)
 if not touch and mode == "2":
     # The touch mode by mouse: the pause menu's Edit, the plan, the palette's
     # filter, a click on the world, then stage 3's
@@ -209,12 +226,11 @@ if not touch and mode == "2":
     a("waitlog", "touch shell: the inspector pane", 10); fr(10)
     a("shot", "${OUT}/04_placed.png")
     dump("placed")
-    a("click", "Button", "Cancel"); fr(5)
     gestures()
     dump("gestures")
     # Stage 4b: Walk by mouse as the desktop mode's: a click goes up into
     # the crosshair
-    a("click", "Button", "shell view walk"); a("waitlog", "kit editor: the view is Walk", 10); fr(5)
+    view("Walk")
     a("click", W // 4, H // 2); a("waitlog", "kit editor: into the crosshair", 10); fr(5)
     json.dump(S, open(path, "w"), indent=0)
     sys.exit(0)
@@ -240,20 +256,21 @@ a("waitlog", "kit editor: touch shell on", 20)
 a("waitlog", "kit editor: touch shell: pixels", 10); fr(10)
 a("shot", "${OUT}/01_edit.png")
 dump("edit")
-# Stage 4b: begun in 3D; the header's views lit and switching (Walk, 3D,
-# then 2D for what follows); the Tools pane
+# Stage 4b: begun in 3D; the header's views picked from its dropdown
+# (Walk, 3D, then 2D for what follows), the header showing each; the Tools
+# pane, its To the surface in 3D (item 2 of the phone test of 2026-11-12:
+# the camera in a cave)
 a("waitlog_any", "kit editor: the view is 3D", 10)
-a("waitlog_any", r'touch shell: the header: .*, lit 3D', 10); fr(5)
+a("waitlog_any", r'touch shell: the header: "[^"]*", 3D', 10); fr(5)
 a("shot", "${OUT}/02_header.png")
-for v, n in [("walk", "Walk"), ("3d", "3D"), ("2d", "2D")]:
-    a("tap", "Button", "shell view " + v); a("waitlog", "kit editor: the view is " + n, 10)
-    a("waitlog", r'touch shell: the header: .*, lit ' + n, 10); fr(5)
-a("tap", "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
-a("tap", "Button", "menu Tools"); a("waitlog", "touch shell: the tools pane", 10); fr(10)
+for n in ["Walk", "3D"]:
+    view(n); a("waitlog", r'touch shell: the header: "[^"]*", ' + n, 10); fr(5)
+a("tap", "Button", "shell tools"); a("waitlog", "touch shell: the tools pane", 10); fr(10)
+a("tap", "Button", "To the surface"); a("waitlog", "kit editor: to the surface: the 3D camera at", 10); fr(5)
 a("shot", "${OUT}/02_tools.png")
 dump("tools")
-a("tap", "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
-a("tap", "Button", "menu Palette"); a("waitlog", "touch shell: the palette pane", 10); fr(10)
+a("tap", "Button", "shell back"); a("waitlog", "touch shell: back to the palette pane", 10); fr(10)
+view("2D"); a("waitlog", r'touch shell: the header: "[^"]*", 2D', 10); fr(5)
 a("tap", "Button", "palette filter clear"); fr(2)
 a("tap", "LineEdit", "palette filter"); fr(2); a("type", "kit/button"); fr(5)
 a("tap", "Button", "kit/button"); a("waitlog", "kit editor: placing kit/button", 10); fr(10)
@@ -267,8 +284,9 @@ a("tap", x, y); a("waitlog", "kit editor: state: 2 entities", 20)
 a("waitlog", "touch shell: the inspector pane", 10); fr(10)
 a("shot", "${OUT}/04_placed.png")
 dump("placed")
-a("tap", "Button", "Cancel"); fr(5)
 if H > W:
+    # (the inspector's position after its parameters: scrolled to)
+    a("event", "kit_inspector_show position x"); a("waitlog", "the inspector shows position x$", 10); fr(3)
     a("tap", "LineEdit", "position x"); fr(5)
     a("eval", "buildatKeyboard.test = %d, 'keyboard'" % int(H * 0.42))
     a("waitlog", "kit editor: typing in the inspector", 10)
@@ -281,14 +299,13 @@ if gest:
 # Stage 2: the field entry mode. Another entity placed from the palette's
 # pane, beside the first
 def place(t):
-    a("tap", "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
-    a("tap", "Button", "menu Palette"); a("waitlog", "touch shell: the palette pane", 10); fr(10)
+    # (the palette Back from the inspector)
+    a("tap", "Button", "shell back"); a("waitlog", "touch shell: back to the palette pane", 10); fr(10)
     a("tap", "Button", "palette filter clear"); fr(2)
     a("tap", "LineEdit", "palette filter"); fr(2); a("type", t); fr(5)
     a("tap", "Button", t); a("waitlog", "kit editor: placing " + t, 10); fr(10)
     a("tap", x, y + 60 if H > W else y - 60)
     a("waitlog", "touch shell: the inspector pane", 20); fr(10)
-    a("tap", "Button", "Cancel"); fr(5)
 def tapf(t, name):
     # The inspector scrolled to it first: the pane is a few rows high
     a("event", "kit_inspector_show " + name)
@@ -355,6 +372,12 @@ elif mode == "0":
     a("tap", "Button", "entry apply"); a("waitlog", "refused in place: Refused: set", 10); fr(5)
     a("shot", "${OUT}/11_entry_server_refused.png")
     a("tap", "Button", "entry cancel"); a("waitlog", "field entry: closed, cancelled", 10); fr(5)
+    tapf("LineEdit", "position x"); fr(3)
+    a("waitlog", r"field entry: position x position x \(number\)", 10)
+    a("waitlog", "field entry: laid out", 10); fr(5)
+    a("shot", "${OUT}/12_entry_position.png")
+    a("selall"); fr(2); a("type", "5"); fr(2)
+    a("tap", "Button", "entry apply"); a("waitlog", "field entry: closed, applied", 10); fr(5)
     a("eval", "buildatKeyboard.test = null, 'no keyboard'"); fr(5)
 # Stage 4b, Walk by finger: a kit/button E1 placed ahead (the view 8
 # degrees down: the tap about 10 m out, E1 where it was tapped); its middle
@@ -367,16 +390,14 @@ if gest:
     def wp(fx, fy): return [round(wx + fx * ww), round(wy + fy * wh)]
     Q1, SKY = wp(0.6, 0.5), wp(0.6, 0.08)
     MID = r"the middle on the screen at (\d+), (\d+)"
-    a("tap", "Button", "shell view walk"); a("waitlog", "kit editor: the view is Walk", 10)
+    view("Walk")
     a("event", "kit_face 0 8"); fr(10)
-    a("tap", "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
-    a("tap", "Button", "menu Palette"); a("waitlog", "touch shell: the palette pane", 10); fr(10)
+    a("tap", "Button", "shell back"); a("waitlog", "touch shell: back to the palette pane", 10); fr(10)
     a("tap", "Button", "palette filter clear"); fr(2)
     a("tap", "LineEdit", "palette filter"); fr(2); a("type", "kit/button"); fr(5)
     a("tap", "Button", "kit/button"); a("waitlog", "kit editor: placing kit/button", 10); fr(5)
     a("tap", *Q1); a("waitlog", "kit editor: placed kit/button at", 10)
     a("waitlog", r"kit editor: selected \d+ \(", 20); fr(5)
-    a("tap", "Button", "shell cancel"); a("waitlog", "kit editor: placing nothing", 10); fr(5)
     a("event", "kit_knob_where"); a("waitlog", "kit editor: the middle on the screen at", 10)
     a("tap", *SKY); a("waitlog", "kit editor: selected none", 10); fr(5)
     a("event", "kit_mode walk look")
@@ -397,12 +418,11 @@ if gest:
     a("tap", "Button", "touch bar Jump"); fr(10)
     a("shot", "${OUT}/22_walk_stick_jump.png")
     dump("walk")
-# Stage 4b: the header dragged by its empty part (after "< Log", a short
-# title) moves the divider
+# Stage 4b: the header dragged by its empty part (the palette's, its title
+# a label) moves the divider
 if touch:
-    a("tap", "Button", "shell more"); a("waitlog", "touch shell: the ... menu", 10); fr(5)
-    a("tap", "Button", "menu Log"); a("waitlog", "touch shell: the log pane", 10); fr(10)
-    a("shot", "${OUT}/23_header_log.png")
+    a("tap", "Button", "shell back"); a("waitlog", "touch shell: back to the palette pane", 10); fr(10)
+    a("shot", "${OUT}/23_header_palette.png")
     if H > W: x0, y0, x1, y1 = 90, round(H * 0.45) + 30, 90, round(H * 0.56)
     elif mode == "3": x0, y0, x1, y1 = 90, 30, 240, 30
     else: x0, y0, x1, y1 = W - (W + 1) // 2 + 90, 30, W - (W + 1) // 2 - 60, 30
@@ -505,6 +525,9 @@ if W > H and touch and mode == "0":
         assert sets(what), f"not applied: {what} (server.log)"
     for what in [r"kit/button hold to 7\b", r"kit/button hold to 99\b"]:
         assert not sets(what), f"applied: {what} (server.log)"
+    door = re.findall(r"An edit by webboss: placed kit/door (\d+)", server)[-1]
+    assert re.search(r"An edit by webboss: moved " + door + r" to \[5,", server), \
+        f"the door {door}'s position x not applied from the field entry mode (server.log)"
     assert re.search(r"An edit \(set\) by peer \d+ refused: kit/door's size", server), \
         "the size not refused (server.log)"
     # A refusal keeps the mode: Apply again, not a close, after each
@@ -580,17 +603,24 @@ if touch or mode == "2":
     assert v.endswith("the view is 3D"), f"edit mode begun not in 3D: {v}"
     print("ok: edit mode begun in 3D")
 if touch:
-    # The header: its views, lit as they were tapped; in each target dump;
-    # its empty part dragged moved the divider
+    # The header: its views' dropdown showing each as it was picked; Tools
+    # in each target dump, no "..."; its empty part dragged moved the divider
     hd = [l for l in page if "touch shell: the header: " in l]
-    assert hd and all("Walk | 3D | 2D" in l for l in hd), f"the header's views: {hd[:2]}"
-    lits = " ".join(re.search(r", lit (\w+)$", l)[1] for l in hd)
-    assert re.search(r"^3D( \S+)* Walk( \S+)* 3D( \S+)* 2D", lits), f"lit in turn: {lits}"
+    assert hd and all(re.search(r"\(Walk[^|]* \| 3D[^|]* \| 2D[^|]* \| Signals", l) for l in hd), \
+        f"the header's views: {hd[:2]}"
+    lits = " ".join(re.search(r'the header: "[^"]*", (\w+)', l)[1] for l in hd)
+    assert re.search(r"^3D( \S+)* Walk( \S+)* 3D( \S+)* 2D", lits), f"shown in turn: {lits}"
     for l in page:
         m = re.search(r"touch targets \((\w+)\): (.*)", l)
         if m:
-            got = set(re.findall(r'Button "(Walk|3D|2D|\.\.\.)"', m[2]))
-            assert got == {"Walk", "3D", "2D", "..."}, f"the header's buttons in {m[1]}: {got}"
+            got = set(re.findall(r'Button "(Tools|\.\.\.)"', m[2]))
+            assert got == {"Tools"}, f"the header's buttons in {m[1]}: {got}"
+    assert re.search(r"kit editor: to the surface: the 3D camera at", "\n".join(page)), \
+        "not put above the ground by To the surface"
+    # The world's hint one line (item 7 of the phone test of 2026-11-12:
+    # two lines of the desktop's over the edit)
+    gl = [l for l in page[on:] if "kit editor: guide: " in l and "its font" not in l]
+    assert gl and not any(" | " in l for l in gl), f"the guide not one line: {gl[:3]}"
     m = re.search(r"touch shell: the split ([\d.]+) ([\d.]+)", "\n".join(page))
     assert m, "the divider not moved by the header"
     # (begun on the empty part: between the title and the views)
@@ -603,7 +633,7 @@ if touch:
         assert float(m[1]) > 0.5, f"the world not taller: {m[0]}"
     else:
         assert float(m[2]) > 0.55, f"the UI half not wider: {m[0]}"
-    print(f"ok: the header's views lit in turn ({lits}); {m[0]}")
+    print(f"ok: the header's views shown in turn ({lits}), Tools in each dump; {m[0]}")
 if touch and gest:
     # Walk by finger: between the looks' marks no edit, the guide on E1 (the
     # last kit/button), the yaw turned from kit_face's 0 and back; after
@@ -649,4 +679,4 @@ print(f"ok: {seen['targets']} target dumps, {seen['windows']} window dumps, the 
         f"the world {geo['world']}, the UI {geo['ui']}, the touch size {geo['touch']}")
 PY
 done
-echo "PASS: Kit's touch mode ($runs): no UI fit, the targets at the touch size, the panes off the world, a palette tap and a world tap placed, the field above the keyboard; select, Select+, move, box, turn, raise, dig and place by finger and by mouse, the view moved with no edit; the field entry mode applying, cancelling and refusing in place; begun in 3D, the header's views and divider, Walk by finger (the stick, the looks, a selected entity moved); the desktop's layout unchanged ($t)"
+echo "PASS: Kit's touch mode ($runs): no UI fit, the targets at the touch size, the panes off the world, a palette tap and a world tap placed, the field above the keyboard; select, Select+, move, box, turn, raise, dig and place by finger and by mouse, the view moved with no edit; the field entry mode applying, cancelling and refusing in place, the position too; begun in 3D, the header's views' dropdown, Tools and divider, To the surface; Walk by finger (the stick, the looks, a selected entity moved); the desktop's layout unchanged ($t)"

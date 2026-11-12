@@ -346,6 +346,11 @@ function M.field(parent, label, value, on_finish, width, keep, step)
 		numeric[name] = {on_finish = on_finish, step = step or
 				label:find("mm") and 10 or label:find("Kelvin") and 100 or 1}
 	end
+	-- (the touch mode's field entry mode's, field_entry.lua)
+	if M.on_field then
+		M.on_field(e, parent, label, value, on_finish,
+				numeric[e:GetName()] and numeric[e:GetName()].step)
+	end
 	local done = e:GetText()
 	if keep or type(value) == "number" then
 		magic.SubscribeToEvent(e, "Defocused", function()

@@ -33,12 +33,18 @@
 --     SH.TOUCH UI pixels; out of the client's UI fit (FollowsRoot).
 --   - Tall, a field typed in with the on-screen keyboard up: the UI half
 --     moves up by the keyboard's height, unresized, and the world loses as
---     much (Kit's).
--- simplified: the world's gestures are [FP_TOUCH] 3's, put in the world's
--- rect (5b maps the mouse and the keyboard's field entry); the chat's lines
--- and a viewport's hidden menus are as on the desktop; the colour sheet is
--- wider than a phone's pane (it clips); a world of no height is drawn a
--- pixel high under the UI half (a rect of nothing is the whole screen)
+--     much (Kit's); a keyboard taller than the world shortens the UI half,
+--     its view scrolled to the field. Wide: the field entry mode
+--     (field_entry.lua).
+--   - Stage 5b: the world's gestures are [FP_TOUCH] 3's in its rect, a
+--     press begun in the UI half none (editor.lua); the mouse is a finger's
+--     (left a finger, a right drag two fingers', the middle a pinch, the
+--     wheel zooming in 2D and 3D, not in Walk; Walk's mouse the desktop's).
+-- simplified: the chat's lines at the world's lower left are as wide as on
+-- the desktop (a long one runs over the UI half); a viewport's hidden menus
+-- are as on the desktop; the colour sheet is wider than a phone's pane (it clips); a
+-- world of no height is drawn a pixel high under the UI half (a rect of
+-- nothing is the whole screen)
 return function(A)
 local S, E, M, magic, log, panel = A.S, A.E, A.M, A.magic, A.log, A.panel
 local SH = {pane = "tools", stack = {}, views = {}, placed = {}}
@@ -79,11 +85,11 @@ function SH.on()
 end
 
 -- Whether a point in pixels is off the world's rect (nothing is with the
--- shell off): the UI half's
+-- shell off): the UI half's, and anywhere under the field entry mode
 function SH.off_world(x, y)
 	local r = E.world_rect
-	return r ~= nil and (x < r[1] or y < r[2] or x >= r[1] + r[3] or
-			y >= r[2] + r[4])
+	return r ~= nil and (M.fe.s ~= nil or x < r[1] or y < r[2] or
+			x >= r[1] + r[3] or y >= r[2] + r[4])
 end
 
 local function available(p)
@@ -230,6 +236,9 @@ function SH.more()
 	local w = panel.window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
 	w.priority = 10
 	w.opacity = 1
+	-- Hidden until sized and placed (tick): it showed at the top left at the
+	-- text size for a frame (the sweep of 2026-11-12)
+	w.visible = false
 	local names = {}
 	for i, en in ipairs(e) do
 		-- (named "menu <label>" as Kit's, for a drive)
@@ -539,12 +548,23 @@ local function fit_view(rec, pr, tall)
 		view.viewPosition = magic.IntVector2(0, math.max(0, math.min(fy - 8,
 				bh - h)))
 	end
+	-- (for a check, as it moves: pixels)
+	local sc = magic.ui.scale
+	local said = string.format("fp shell: typing: the field %d to %d, the " ..
+			"keyboard from %d", fp.y * sc, (fp.y + f.height) * sc,
+			(magic.ui.root.height - kb) * sc)
+	if said ~= SH.typing_said then
+		SH.typing_said = said
+		log:info(said)
+	end
 end
 
--- The guide line, the crosshair and the time-lapse's clock in the world's
--- rect (after editor.lua's own placing, M.update)
+-- The guide line, the crosshair, the time-lapse's clock and the chat's
+-- lines (init.lua's) in the world's rect (after editor.lua's own placing,
+-- M.update)
 function SH.place_overlays(hud, crosshair, clock)
 	local r = SH.world
+	local msg = E.doc and E.doc.msg_text
 	if not r then
 		if SH.overlaid then
 			SH.overlaid = nil
@@ -553,11 +573,17 @@ function SH.place_overlays(hud, crosshair, clock)
 			if clock then
 				clock:SetPosition(0, 40)
 			end
+			if msg then
+				msg:SetPosition(10, -44)
+			end
 		end
 		return
 	end
 	SH.overlaid = true
 	local root = magic.ui.root
+	if msg then
+		msg:SetPosition(r[1] + 10, r[2] + r[4] - root.height - 44)
+	end
 	local dx = math.floor(r[1] + r[3] / 2 - root.width / 2)
 	if S.touch then
 		hud:SetFixedWidth(math.max(SH.TOUCH, r[3] - 24))
@@ -761,6 +787,12 @@ function SH.tick()
 		local y = math.max(0, math.min(ui[2] + PAD + SH.TOUCH, r.height - c.height))
 		if c.position.x ~= x or c.position.y ~= y then
 			c:SetPosition(x, y)
+		end
+		if not c.visible then
+			c.visible = true
+			local sc = magic.ui.scale
+			log:info(string.format("fp shell: the ... menu shown at %d %d %d %d " ..
+					"(pixels)", x * sc, y * sc, c.width * sc, c.height * sc))
 		end
 	end
 	local s = status_text()

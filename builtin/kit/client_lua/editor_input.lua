@@ -706,6 +706,14 @@ function M.escape()
 	return false
 end
 
+-- Whether M.escape has something to give up but a dialog or a menu (their
+-- own buttons close them): the touch shell's Cancel shown by it
+function NT.cancellable()
+	return S.view == "hud" or NT.sig() or S.drag ~= nil or T.down or
+			S.reparent ~= nil or S.tool ~= nil or S.placing ~= nil or
+			E.link ~= nil or M.looking()
+end
+
 -- A pending link cancelled: true if there was one (the tools' Escape
 -- takes it before the app's pause menu)
 function M.cancel_link()
@@ -825,9 +833,15 @@ function M.set_tool(tool)
 	if S.tool == tool then
 		return
 	end
-	-- [KIT_PREFAB_VOXELS] the Box tool's box goes with it
+	-- [KIT_PREFAB_VOXELS] the Box tool's box goes with it; the touch mode's
+	-- comes back with the tool (the sweep of 2026-11-12: a paste from the
+	-- Box pane lost it)
 	if S.tool == "box" then
+		S.box_kept = NT.sh.on() and S.vbox or nil
 		S.vbox, S.box_drag = nil, nil
+	elseif tool == "box" and S.box_kept then
+		S.vbox, S.box_kept = S.box_kept, nil
+		log:info("kit editor: the box kept " .. table.concat(vbox() or {}, ","))
 	end
 	S.tool = tool
 	T.down, T.fill = false, nil
@@ -1238,9 +1252,10 @@ local function box_click(mx, my)
 end
 
 -- [KIT_PREFAB_VOXELS] The copy (the server's, the builder's): the
--- selected entities and the Box tool's voxels
-function M.copy()
-	local ids, box = sel_ids(), vbox()
+-- selected entities and the Box tool's voxels; box_only, the voxels alone
+-- (the touch mode's Box pane: the selection is not in sight there)
+function M.copy(box_only)
+	local ids, box = box_only == true and {} or sel_ids(), vbox()
 	if #ids == 0 and not box then
 		log:info("kit editor: copy: nothing selected and no box")
 		return
@@ -1846,6 +1861,13 @@ local function touch_begin(id, x, y)
 		S.press, S.drag, S.panning, S.pan3d = nil, nil, false, nil
 		clear_preview()
 		local p = S.view == "3d" and camera_pivot(x, y) or nil
+		-- (none or past 32: 16 ahead. One at the horizon swung the camera far
+		-- off and into the ground, where nothing moved it again: the sweep of
+		-- 2026-11-12)
+		if S.view == "3d" and (not p or (p - cam3d_node.position):Length() > 32) then
+			local _, v = M.screen_ray(x, y)
+			p = cam3d_node.position + v * 16
+		end
 		S.gesture = {pivot = p, dist = p and (p - cam3d_node.position):Length()
 			or 5}
 		return
@@ -1938,14 +1960,29 @@ local function touch_move(id, x, y, dx, dy)
 				local q0 = rot3d()
 				local inv = magic.Quaternion(q0.w, -q0.x, -q0.y, -q0.z)
 				local off = inv * (magic.Vector3(S.pos.x, S.pos.y, S.pos.z) - p)
+				local yaw0, pitch0 = S.yaw, S.pitch
 				S.yaw = S.yaw + mdx * 0.15
 				S.pitch = math.max(-90, math.min(90, S.pitch + mdy * 0.15))
 				local wp = p + rot3d() * off
-				S.pos = {x = wp.x, y = wp.y, z = wp.z}
+				-- (not swung into the ground from out of it: the sweep's)
+				local solid = O.solid and M.with_terrain(O.solid)
+				local function inside(q)
+					return solid and solid(math.floor(q.x + 0.5), math.floor(q.y + 0.5),
+							math.floor(q.z + 0.5))
+				end
+				if inside(wp) and not inside(S.pos) then
+					S.yaw, S.pitch = yaw0, pitch0
+				else
+					S.pos = {x = wp.x, y = wp.y, z = wp.z}
+				end
 			end
 			local fw = rot3d() * magic.Vector3(0, 0, 1)
-			local zoom = S.gesture.dist * (1 - d0 / d1)
-			S.gesture.dist = S.gesture.dist - zoom
+			-- [KIT_CAM_MIN_MOVE] by at least what 8 away would: in a cave or
+			-- the ground the pivot is at the camera, and a pinch had nothing to
+			-- move by (the phone test of 2026-11-12)
+			local base = math.max(S.gesture.dist, 8)
+			local zoom = base * (1 - d0 / d1)
+			S.gesture.dist = base - zoom
 			S.pos = {x = S.pos.x + fw.x * zoom, y = S.pos.y + fw.y * zoom,
 				z = S.pos.z + fw.z * zoom}
 		end
@@ -2122,6 +2159,13 @@ end
 function NT.duplicate()
 	local ids = sel_ids()
 	if #ids > 0 then
+		-- ([KIT_PHONE_EDITING] the touch mode's: the copy selected as it
+		-- comes, place_at's, so that the foot's Delete takes it, not the
+		-- original: the sweep of 2026-11-12)
+		-- simplified: the first copy only, of several
+		if NT.sh.on() then
+			NT.select_new = true
+		end
 		send({op = "duplicate", ids = ids, by = {1, 0, 0}})
 	end
 end
@@ -2295,7 +2339,7 @@ end
 -- ---- What the pointer would do ([FP_GUIDES]): what it is on, framed in
 -- the action's colour, and what each button does, said at the bottom
 local hover = M.highlighter()
-local guide_hud, guide_shown = nil, nil
+local guide_hud, guide_shown, guide_fs = nil, nil, 15
 local box_bars = {}
 
 -- The box being dragged, four thin bars
@@ -2434,6 +2478,11 @@ local function compute_guide()
 		return g
 	end
 	if over_ui(mx, my) then
+		-- (a placing ended from the UI, Cancel: its name left over the world,
+		-- the sweep of 2026-11-12)
+		if not S.placing then
+			ghost(nil)
+		end
 		return nil
 	end
 	if S.tool == "terrain" then
@@ -2597,7 +2646,10 @@ local function guide_text(g)
 				t = nil
 			end
 		end
-		if t then
+		-- (a finger down: its own "let go: ...", no "Tap:" before it)
+		if t and S.touch and b[1] == "left" and t:sub(1, 7) == "let go:" then
+			lines[#lines + 1] = t:sub(1, 1):upper() .. t:sub(2)
+		elseif t then
 			lines[#lines + 1] = b[2] .. ": " .. t
 		end
 	end
@@ -2623,14 +2675,31 @@ local function draw_guide()
 		ghost(nil)
 	end
 	-- [KIT_PHONE_EDITING] The touch mode's: one line, at the foot of the
-	-- world's rect (shell.lua)
+	-- world's rect (shell.lua), the status line's size and cut to the
+	-- world's width (the phone test of 2026-11-12: two lines of 15 over the
+	-- edit)
 	local sh = NT.sh.on() and NT.sh.world
+	local fs = sh and math.floor(15 * (S.font or 1) + 0.5) or 15
+	if fs ~= guide_fs then
+		guide_fs, guide_shown = fs, nil
+		guide_hud:SetFont(magic.cache:GetResource("Font", buildat.font_sans), fs)
+		log:info("kit editor: guide: its font " .. fs)
+	end
 	if sh then
 		s = s:match("^[^\n]*")
 	end
-	if s ~= guide_shown then
-		guide_shown = s
+	local key = s .. (sh and "\0" .. sh[3] or "")
+	if key ~= guide_shown then
+		guide_shown = key
 		guide_hud:SetText(s)
+		local n = #s
+		while sh and n > 0 and guide_hud.width > sh[3] - 16 do
+			-- (back to a whole UTF-8 character)
+			repeat
+				n = n - 1
+			until n <= 0 or (s:byte(n + 1) or 0) < 0x80 or s:byte(n + 1) >= 0xC0
+			guide_hud:SetText(s:sub(1, n) .. "..")
+		end
 		if s ~= "" then
 			log:info("kit editor: guide: " .. s:gsub("\n", " | "))
 		end
@@ -3055,8 +3124,11 @@ function M.editor(options)
 			E.can_edit = s.can_edit == true
 			log:info("kit editor: edit rights: " .. (E.can_edit and "yes" or "no"))
 			if E.can_edit and not E.editing and MEM.edit ~= "want" then
-				ui_utils.show_notification("You may edit here: Edit, or " ..
-						M.key_name("edit"), 4)
+				-- (a touchscreen's by its Menu: no key, and the play bar's Edit
+				-- may be hidden, the sweep of 2026-11-12)
+				ui_utils.show_notification(S.touch and
+						"You may edit here: Menu, then Edit" or
+						"You may edit here: Edit, or " .. M.key_name("edit"), 4)
 			end
 		end
 		-- Done: the hint would lie over the inspector's first row

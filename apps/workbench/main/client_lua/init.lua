@@ -421,11 +421,20 @@ magic.SubscribeToEvent("Update", function()
 			"dig  right: place  " .. (kit.building() == "inventory" and
 			"[inventory]: inventory  " or "[voxel1]-[voxel10]: voxel  ") ..
 			"[edit]: edit  Esc: menu"))
-	local right = kit.touch_bar_left() or magic.ui.root.width
+	-- [KIT_PHONE_EDITING] A touchscreen's over the hotbar and what stands on
+	-- it, the bars' width free (the sweep of 2026-11-12: it ran into the
+	-- hotbar's slots)
+	local top = TOUCH and kit.own_stack_top and kit.own_stack_top()
+	local right = not top and kit.touch_bar_left() or magic.ui.root.width
 	local w = math.max(100, right - 10 - 12)
 	if help_text.width ~= w then
 		help_text:SetFixedWidth(w)
 	end
-	status_text:SetPosition(10, -10 - help_text.height - 5)
+	local bottom = top and top - magic.ui.root.height - 4 or -10
+	if help_text.position.y ~= bottom then
+		help_text:SetPosition(10, bottom)
+		log:info("the hint's bottom at " .. bottom .. " (UI units)")
+	end
+	status_text:SetPosition(10, bottom - help_text.height - 5)
 end)
 -- vim: set noet ts=4 sw=4:
