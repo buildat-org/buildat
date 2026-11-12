@@ -19,7 +19,9 @@
 #     off the world's rect, and those in the UI half at least the touch
 #     size (48 UI px) each way; no pane's window over the world;
 #   - the room made (the server's log), and the tap in it selected it and
-#     showed the Properties pane.
+#     showed the Properties pane;
+#   - the "..." menu shown only once placed, whole on the screen under the
+#     header.
 # And a mouse at 1600x900 (no TOUCH, the same fp_ui_mode=0): the desktop's
 # layout (no shell, the toolbar at the top left with Menu (Esc)), a room
 # drawn by clicks.
@@ -193,9 +195,15 @@ mk = next(i for i, l in enumerate(page) if "touch targets (mark)" in l)
 sel = next((i for i in range(mk, len(page)) if re.search(r"fp shell: selected \d+ \(room\)", page[i])), None)
 assert sel is not None, "the room not selected by the tap"
 assert any("fp shell: the props pane" in l for l in page[sel:]), "no Properties pane after the selection"
+# The "..." menu shown once sized and placed, whole on the screen under the
+# header (the sweep of 2026-11-12: a frame of it at the top left first)
+mm = [list(map(int, m)) for m in re.findall(r"fp shell: the \.\.\. menu shown at (\d+) (\d+) (\d+) (\d+)",
+    "\n".join(page))]
+assert mm and all(x > 0 and y > 0 and x + w <= W + 1 and y + h <= H + 1
+    for x, y, w, h in mm), f"the ... menu shown: {mm}"
 print(f"ok: {seen['targets']} target dumps, {seen['windows']} window dumps; the world {geo['world']}, "
     f"the UI {geo['ui']}, the touch size {geo['touch']}; the header lit {lits}; a room made by taps, "
-    f"selected by one, Properties shown")
+    f"selected by one, Properties shown; the ... menu shown placed {mm[-1]}")
 PY
 done
 echo "PASS: floorplanner's touch mode ($runs): no UI fit, the world and the UI half apart, the header's views, the targets at the touch size and off the world, a room drawn by finger and selected into Properties; the desktop's layout unchanged ($t)"

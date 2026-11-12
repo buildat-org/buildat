@@ -236,6 +236,9 @@ function SH.more()
 	local w = panel.window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
 	w.priority = 10
 	w.opacity = 1
+	-- Hidden until sized and placed (tick): it showed at the top left at the
+	-- text size for a frame (the sweep of 2026-11-12)
+	w.visible = false
 	local names = {}
 	for i, en in ipairs(e) do
 		-- (named "menu <label>" as Kit's, for a drive)
@@ -784,6 +787,12 @@ function SH.tick()
 		local y = math.max(0, math.min(ui[2] + PAD + SH.TOUCH, r.height - c.height))
 		if c.position.x ~= x or c.position.y ~= y then
 			c:SetPosition(x, y)
+		end
+		if not c.visible then
+			c.visible = true
+			local sc = magic.ui.scale
+			log:info(string.format("fp shell: the ... menu shown at %d %d %d %d " ..
+					"(pixels)", x * sc, y * sc, c.width * sc, c.height * sc))
 		end
 	end
 	local s = status_text()
