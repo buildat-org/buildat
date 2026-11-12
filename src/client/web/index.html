@@ -377,13 +377,26 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 			}
 		});
 	}
-	document.addEventListener('fullscreenchange', function(){
+	// **The page's own fullscreen is not the engine's** ([KIT_PHONE_EDITING]):
+	// SDL takes any fullscreenchange for its window going fullscreen, and
+	// from then on drops every resize (SDL_emscriptenevents.c,
+	// Emscripten_HandleResize): the canvas kept a size read mid-entry
+	// (Vivaldi on Android 1078x2661 for 1078x2271 shown, Chrome 2420 tall for
+	// 2273), squashed into the screen, and the UI and the keyboard's
+	// numbers with it. So SDL hears only of the canvas's own (the client's
+	// fullscreen setting), and the size is read again once in or out (the
+	// emulator's: 2270 and 2273 tall within 200 ms of the entry).
+	window.addEventListener('fullscreenchange', function(e){
+		if(document.fullscreenElement && document.fullscreenElement !== canvas)
+			e.stopImmediatePropagation();
+		resize_again();
+		keyboard_overlay();
 		orientation_applied = null;
 		apply_orientation();
 		// Entered on a tap whose game took the wish back meanwhile (the
 		// tap opened a menu): out again
 		sync_fullscreen();
-	});
+	}, true);
 	// Turned to portrait under "landscape": out at once (entering waits for
 	// a tap)
 	if(screen.orientation && screen.orientation.addEventListener)
@@ -1084,16 +1097,29 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 	// virtualKeyboard, which with overlaysContent leaves the page its size
 	// under the keyboard, else what the visual viewport lost. `test`, set by
 	// a check, stands in for a keyboard.
-	if(navigator.virtualKeyboard)
-		navigator.virtualKeyboard.overlaysContent = true;
+	// [KIT_PHONE_EDITING] **Fullscreen, the visual viewport**: there, with
+	// overlaysContent, Chrome on Android kept boundingRect 0x0 under Gboard
+	// and sent no geometrychange, and the page kept its size: the keyboard
+	// read 0 and nothing moved. With overlaysContent off the visual
+	// viewport loses the keyboard (Chrome 866 to 554 CSS pixels, the page
+	// staying 866; Vivaldi 865 to 529, the page 841). So overlaysContent
+	// only while not fullscreen, and the larger of the rect and what the
+	// visual viewport lost.
+	function keyboard_overlay(){
+		if(navigator.virtualKeyboard)
+			navigator.virtualKeyboard.overlaysContent = !document.fullscreenElement;
+	}
+	keyboard_overlay();
 	window.buildatKeyboard = {
 		test: null,
 		height: function(){
 			var h = this.test;
-			if(h === null && navigator.virtualKeyboard)
-				h = navigator.virtualKeyboard.boundingRect.height;
-			else if(h === null && window.visualViewport)
-				h = Math.max(0, innerHeight - visualViewport.height);
+			if(h === null){
+				h = navigator.virtualKeyboard ?
+						navigator.virtualKeyboard.boundingRect.height : 0;
+				if(window.visualViewport)
+					h = Math.max(h, innerHeight - visualViewport.height);
+			}
 			return Math.round((h || 0) * canvas.height / canvas.clientHeight);
 		},
 	};
@@ -1142,10 +1168,44 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 			active = true;
 			st.display = 'block';
 		}
+		// let_go()'s, or the focus would open no keyboard
+		el.removeAttribute('virtualkeyboardpolicy');
 		if(tap && document.activeElement === el)
 			el.blur();
 		if(document.activeElement !== el)
 			el.focus({preventScroll: true});
+	}
+	// The stand-in away, the engine's field gone. [KIT_PHONE_EDITING] **The
+	// keyboard put away while the stand-in still has the focus** (user,
+	// Vivaldi on Android with Gboard and others: a scroll of Kit's inspector
+	// took the field's focus, the UI went back down, the keyboard stayed
+	// over it): a focus moved off the stand-in leaves the hiding to the
+	// browser, which did not. virtualKeyboard.hide() under
+	// virtualkeyboardpolicy "manual" asks for it while the stand-in is still
+	// the focused editable (an emulator's Vivaldi 8.3 and Chrome 133: the
+	// keyboard went with the focus still on it); the focus leaves 100 ms
+	// later, unless a field came back meanwhile. Only with a keyboard
+	// shown: without one (a desktop's Chrome has the API too) the canvas
+	// takes the focus at once, as before, and so the next key.
+	// simplified: the phone's case was not reproduced on the emulator,
+	// where the plain focus move closed the keyboard in every one of some
+	// 30 scrolls; a phone that still keeps it up needs a trace from there
+	function let_go(){
+		var e = el;
+		var go = function(){
+			e.removeAttribute('virtualkeyboardpolicy');
+			if(active)
+				return;
+			e.style.display = 'none';
+			e.value = '';
+			canvas.focus();
+		};
+		if(!navigator.virtualKeyboard || document.activeElement !== e ||
+				!(window.buildatKeyboard.height() > 0))
+			return go();
+		e.setAttribute('virtualkeyboardpolicy', 'manual');
+		navigator.virtualKeyboard.hide();
+		setTimeout(go, 100);
 	}
 	// **A tap on a field focuses its stand-in in the tap's own event**
 	// ([WEB_TAP_KEYBOARD]): a phone's browser opens its keyboard only for a
@@ -1207,9 +1267,7 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 			if(x === null){
 				if(active){
 					active = false;
-					el.style.display = 'none';
-					el.value = '';
-					canvas.focus();
+					let_go();
 				}
 				return;
 			}
