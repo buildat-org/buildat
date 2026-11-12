@@ -419,6 +419,20 @@ cam3d.farClip = 500
 -- Vertical, in degrees; walking has S.walk_fov (set_view)
 cam3d.fov = 60
 
+-- The view's viewport in the touch mode's world rect (shell.lua, each
+-- frame), the whole window otherwise
+function M.apply_viewport()
+	local r = E.world_rect
+	local k = r and table.concat(r, " ") or ""
+	if not M.world_vp or M.world_vp_rect == k then
+		return
+	end
+	M.world_vp_rect = k
+	M.world_vp:SetRect(r and magic.IntRect(r[1], r[2], r[1] + r[3],
+			r[2] + r[4]) or magic.IntRect(0, 0, 0, 0))
+	magic.set_preferred_viewports({M.world_vp})
+end
+
 -- A viewport for a view, made new each time: the engine frees one when the
 -- viewports it is shown in are replaced, so one kept in Lua to show again
 -- would be a dangling pointer. So would a render path.
@@ -2513,7 +2527,9 @@ local function set_view(v)
 			lighting ~= S.shown_lighting then
 		S.shown, S.shown_2d, S.shown_lighting = true, v == "2d", lighting
 		magic.renderer.HDRRendering = lighting ~= "unlit"
-		magic.set_preferred_viewports({viewport_for(v)})
+		-- Kept for the touch mode's world rect (M.apply_viewport)
+		M.world_vp, M.world_vp_rect = viewport_for(v), nil
+		M.apply_viewport()
 		S.daylight_key = nil
 		-- The lamps' brightness and the ground go with it
 		S.dirty = true
@@ -2771,15 +2787,21 @@ local function build_toolbar()
 	-- Rows of buttons, as many as the screen's width needs ([FP_TOUCH] 2);
 	-- one on a desktop's. A touchscreen has no keys: no key in the names,
 	-- and a Menu button for Esc's pause menu.
-	toolbar = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, 8)
+	-- [KIT_PHONE_EDITING] In the touch mode the Tools pane (shell.lua): its
+	-- width, buttons of the touch size, no views (the header's) and no Menu
+	-- (its "..."'s)
+	local sh = M.sh.on()
+	toolbar = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, 8, false, "tools")
 	local row, used = panel.row(toolbar), 0
-	local room = (magic.ui.root.width - 16 - 12) / panel.share()
+	local room = ((sh and M.sh.pane_w() - 24) or
+			(magic.ui.root.width - 16 - 12)) / panel.share()
 	-- make(parent) makes the button
 	local function place(make)
 		-- Measured before it is put in a row: a row a button was taken back
 		-- out of keeps the width it had with it
 		local probe = make(magic.ui.root)
-		local w = probe.minWidth + 4
+		local w = math.max(probe.minWidth, sh and M.sh.TOUCH / panel.share() or
+				0) + 4
 		probe:Remove()
 		if used > 0 and used + w > room then
 			row, used = panel.row(toolbar), 0
@@ -2799,7 +2821,9 @@ local function build_toolbar()
 	end
 	-- The pause menu's own button, and on a desktop the key it is on: a
 	-- phone has no Esc, and a newcomer does not know it yet (user)
-	add("Menu", S.touch and nil or "Esc", function() M.open_pause() end)
+	if not sh then
+		add("Menu", S.touch and nil or "Esc", function() M.open_pause() end)
+	end
 	local views = {}
 	for i, v in ipairs({"2d", "3d", "walk"}) do
 		views[i] = {VIEW_NAMES[v] .. (S.touch and "" or
@@ -2820,17 +2844,30 @@ local function build_toolbar()
 	for _, e in ipairs(M.viewports()) do
 		views[#views + 1] = {e.strs.name, "vp:" .. e.id}
 	end
-	place(function(parent)
-		return panel.dropdown(parent, nil, views,
-				S.vp and "vp:" .. S.vp or S.view, M.pick_view, 40, function()
-			if S.vp then
-				M.hide_ui()
+	if sh then
+		-- The views from where the view is and the viewports as buttons
+		for _, v in ipairs(views) do
+			if not VIEW_NAMES[v[2]] then
+				add(v[1], nil, function() M.pick_view(v[2]) end)
 			end
+		end
+	else
+		place(function(parent)
+			return panel.dropdown(parent, nil, views,
+					S.vp and "vp:" .. S.vp or S.view, M.pick_view, 40, function()
+				if S.vp then
+					M.hide_ui()
+				end
+			end)
 		end)
-	end)
+	end
 	-- The layout edited, and the window that picks another
 	local l = S.layout and doc.ents[S.layout]
 	add(l and l.strs.name or "Layouts", nil, function()
+		if sh then
+			M.sh.show("layouts")
+			return
+		end
 		S.layouts_open = not S.layouts_open
 		log:info("Layouts menu " .. (S.layouts_open and "shown" or "closed"))
 		refresh_panels()
@@ -2853,7 +2890,7 @@ local function build_toolbar()
 		end
 	end
 	-- The panels folded away on a narrow screen, opened here
-	if panel.narrow() then
+	if panel.narrow() and not sh then
 		for _, p in ipairs({{"palette", "Palette"}, {"props", "Properties"}}) do
 			add(p[2], nil, function()
 				panel.toggle_fold(p[1])
@@ -2879,7 +2916,8 @@ local function build_toolbar()
 		S.touch_bar:Remove()
 		S.touch_bar = nil
 	end
-	if S.touch then
+	-- (the touch mode's at its foot)
+	if S.touch and not sh then
 		local b = panel.window(magic.HA_RIGHT, magic.VA_BOTTOM, -8, -8, true)
 		S.touch_bar = b
 		if doc.can("edit") then
@@ -2954,7 +2992,8 @@ local function build_props()
 	if props then
 		panel.discard(props)
 	end
-	props = panel.window(magic.HA_RIGHT, magic.VA_TOP, -8, S.panel_y or 50)
+	props = panel.window(magic.HA_RIGHT, magic.VA_TOP, -8, S.panel_y or 50,
+			false, "props")
 	if panel.folded("props") then
 		props.visible = false
 		return
@@ -3682,7 +3721,8 @@ local function build_replace()
 	if not rp.from and used == 1 then
 		rp.from = next(counts)
 	end
-	local w = panel.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	local w = panel.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0, false,
+			"dialog")
 	picker_win = w
 	w.minWidth = 320
 	panel.label(w, "Replace a material in these voxels")
@@ -3783,7 +3823,8 @@ local function build_fit(pk, e)
 		rgbs[i] = smp.rgb
 	end
 	local r = fit.fit(e.ints, rgbs, woods)
-	local w = panel.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	local w = panel.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0, false,
+			"dialog")
 	picker_win = w
 	w.minWidth = 340
 	panel.label(w, e.strs.name .. ": fit to samples")
@@ -3888,7 +3929,8 @@ build_palette = function()
 		panel.discard(palette_win)
 	end
 	M.palette_view = nil
-	palette_win = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, S.panel_y or 50)
+	palette_win = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, S.panel_y or 50,
+			false, "palette")
 	if panel.folded("palette") then
 		palette_win.visible = false
 		return
@@ -4146,7 +4188,8 @@ place.build_window = function()
 	if not S.layouts_open then
 		return
 	end
-	local w = panel.window(magic.HA_CENTER, magic.VA_TOP, 0, S.panel_y or 50)
+	local w = panel.window(magic.HA_CENTER, magic.VA_TOP, 0, S.panel_y or 50,
+			false, "layouts")
 	place.win = w
 	local function set(id, fields)
 		send({{op = "set", ent = {id = id, ints = fields.ints,
@@ -4348,9 +4391,21 @@ E.send, E.set_view, E.update_capture = send, set_view, update_capture
 load("pause.lua")(E)
 local open_pause, close_pause = E.open_pause, E.close_pause
 
+-- [KIT_PHONE_EDITING] The touch mode's split screen (shell.lua): M.sh
+load("shell.lua")({S = S, E = E, M = M, magic = magic, log = log,
+	panel = panel, refresh = function() refresh_panels() end,
+	apply_viewport = M.apply_viewport, open_pause = open_pause,
+	delete_selected = function() delete_selected() end,
+	wins = function()
+		return {tools = toolbar, props = props, palette = palette_win,
+			layouts = place.win, dialog = picker_win}
+	end})
+
 local function over_ui()
 	local s = magic.ui.scale
-	return panel.popup_open() or panel.over({toolbar, props, palette_win,
+	-- (the touch mode's UI half all of it)
+	return M.sh.off_world(S.mx, S.my) or
+			panel.popup_open() or panel.over({toolbar, props, palette_win,
 			E.pause_win, picker_win, place.win, S.touch_bar, doc.accounts.page,
 			doc.accounts.frame}, S.mx / s, S.my / s)
 end
@@ -4749,7 +4804,8 @@ do
 		local cam = S.view == "2d" and cam2d or cam3d
 		local p = cam:WorldToScreenPoint(magic.Vector3(W(x), 0, W(z)))
 		local w, h = screen_size()
-		return p.x * w, p.y * h
+		local r = E.world_rect
+		return p.x * w + (r and r[1] or 0), p.y * h + (r and r[2] or 0)
 	end
 
 	-- simplified: a drag is sent when it is released, so others see it land
@@ -5621,7 +5677,8 @@ do
 			return
 		end
 		local sc = magic.ui.scale
-		local on_ui = panel.popup_open() or panel.over({toolbar, props,
+		local on_ui = M.sh.off_world(x, y) or panel.popup_open() or
+				panel.over({toolbar, props,
 				palette_win, E.pause_win, picker_win, place.win, S.touch_bar,
 				doc.accounts.page, doc.accounts.frame}, x / sc, y / sc)
 		S.fingers[id] = {x = x, y = y, x0 = x, y0 = y, t0 = buildat.get_time_us(),
@@ -5631,7 +5688,8 @@ do
 		end
 		local w, h = screen_size()
 		if S.view == "walk" then
-			if not S.stick and x < w * 0.45 and y > h * 0.55 then
+			local wx, wy = E.world_xy(x, y)
+			if not S.stick and wx < w * 0.45 and wy > h * 0.55 then
 				S.fingers[id].stick = true
 				S.stick = {f = 0, r = 0}
 			end
@@ -6342,6 +6400,13 @@ local function world_label(x_mm, y_mm, z_mm, text)
 	end
 	t.visible = true
 	local root = magic.ui.root
+	-- (the touch mode's world rect's, in UI units)
+	local r, sc = E.world_rect, magic.ui.scale
+	if r then
+		t:SetPosition(math.floor((r[1] + p.x * r[3]) / sc) + 8,
+				math.floor((r[2] + p.y * r[4]) / sc) - 18)
+		return
+	end
 	t:SetPosition(math.floor(p.x * root.width) + 8,
 			math.floor(p.y * root.height) - 18)
 end
@@ -7046,10 +7111,8 @@ function M.suspend()
 	for _, n in ipairs(SCENE_PARTS) do
 		n.enabled = false
 	end
-	for _, w in ipairs({toolbar, props, palette_win, S.touch_bar}) do
-		if w then
-			w.visible = false
-		end
+	for _, w in pairs({toolbar, props, palette_win, S.touch_bar}) do
+		panel.top(w).visible = false
 	end
 	for _, t in ipairs(label_nodes) do
 		t.visible = false
@@ -7441,6 +7504,8 @@ end
 function M.update(dt)
 	panel.flush()
 	panel.scale()
+	-- (off under the plans page too: the viewport the whole window)
+	M.sh.tick()
 	if S.suspended then
 		return
 	end
@@ -7543,6 +7608,7 @@ function M.update(dt)
 		hud:SetFixedWidth(magic.ui.root.width - 24)
 		hud:SetPosition(0, -(S.touch_bar and S.touch_bar.height + 20 or 12))
 	end
+	M.sh.place_overlays(hud, crosshair, M.clock)
 	local text = guide_text(S.guide)
 	if hud.text ~= text then
 		hud:SetText(text)
@@ -7575,7 +7641,7 @@ function M.update(dt)
 		-- (pairs: any of them may be nil, where ipairs would stop)
 		for _, w in pairs({toolbar, props, palette_win, picker_win, place.win,
 				E.pause_win, S.touch_bar, hud, crosshair}) do
-			w.visible = false
+			panel.top(w).visible = false
 		end
 		for i = 1, label_i do
 			label_nodes[i].visible = false
@@ -7860,7 +7926,8 @@ function M.start(d)
 		local ux, uy = S.mx / sc, S.my / sc
 		if S.paused and E.pause_win and not panel.over({E.pause_win}, ux, uy) then
 			S.close_on_up = "pause menu"
-		elseif not S.paused and place.win and not over_ui() then
+		elseif not S.paused and place.win and not over_ui() and
+				not M.sh.on() then
 			S.close_on_up = "layouts menu"
 		end
 		if S.close_on_up then

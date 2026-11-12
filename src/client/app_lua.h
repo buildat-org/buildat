@@ -1866,7 +1866,7 @@
 				"launch_ui",
 				"default_username", "page_size", "lighting", "cache_keep",
 				"cache_per_server", "kit_editor_font", "floorplanner_font",
-				"kit_ui_mode", "kit_ui_split",
+				"kit_ui_mode", "kit_ui_split", "fp_ui_mode", "fp_ui_split",
 #ifdef __EMSCRIPTEN__
 				// Only where it does something
 				"web_idle_fps", "kit_fullscreen",
@@ -1981,6 +1981,10 @@
 			lua_pushinteger(L, o.kit_ui_mode);
 		else if(name == "kit_ui_split")
 			lua_pushstring(L, o.kit_ui_split.c_str());
+		else if(name == "fp_ui_mode")
+			lua_pushinteger(L, o.fp_ui_mode);
+		else if(name == "fp_ui_split")
+			lua_pushstring(L, o.fp_ui_split.c_str());
 		else if(name == "kit_fullscreen")
 			lua_pushboolean(L, o.kit_fullscreen);
 		else if(name == "cache_keep")

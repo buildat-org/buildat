@@ -3904,6 +3904,13 @@ struct Module: public interface::Module
 				broadcast_changes(*plan, batch.seq, packet.sender, changed,
 						deleted);
 				note_edit(peer.name);
+				// What an edit made, for a check (util/fp_touch_mode_check.sh)
+				ss_ made;
+				for(const Op &op : batch.ops)
+					if(op.op == 0 && made.size() < 200)
+						made += (made.empty() ? "" : " ")+op.ent.type;
+				log_i(MODULE, "An edit by %s: %zu ops%s%s", cs(peer.name),
+						batch.ops.size(), made.empty() ? "" : ", made: ", cs(made));
 				if(ghost_on(plan) != plan->m_ghost_on)
 					send_ghost(plan);
 			}

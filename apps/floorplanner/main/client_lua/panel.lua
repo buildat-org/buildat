@@ -43,8 +43,24 @@ function M.scale()
 	scaled = kept
 end
 
--- A window at a corner of the screen: halign/valign as SetAlignment takes
-function M.window(halign, valign, x, y, horizontal)
+-- A window at a corner of the screen: halign/valign as SetAlignment takes.
+-- pane (a pane's window: the editor's own): in the touch mode a body in a
+-- view that scrolls is given instead (shell.lua's M.pane_wrap), and M.top
+-- of it is the window
+M.outer = {}
+function M.top(w)
+	return M.outer[w] or w
+end
+function M.window(halign, valign, x, y, horizontal, pane)
+	local w = M.window_of(halign, valign, x, y, horizontal)
+	local body = pane and M.pane_wrap and M.pane_wrap(w)
+	if body then
+		M.outer[body] = w
+		return body
+	end
+	return w
+end
+function M.window_of(halign, valign, x, y, horizontal)
 	local w = M.track(magic.ui.root:CreateChild("Window"))
 	w:SetStyleAuto()
 	w:SetLayout(horizontal and magic.LM_HORIZONTAL or magic.LM_VERTICAL, 4,
@@ -70,7 +86,8 @@ function M.narrow()
 end
 
 function M.folded(key)
-	if not M.narrow() then
+	-- (the touch mode's panes never are: shell.lua)
+	if not M.narrow() or M.no_folds then
 		return false
 	end
 	if M.folds[key] == nil then
@@ -94,6 +111,8 @@ end
 function M.row(parent)
 	local r = parent:CreateChild("UIElement")
 	r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
+	-- (spread across a touch mode's pane, shell.lua's touch_size)
+	r:SetVar("FpRow", "1")
 	return r
 end
 
@@ -541,6 +560,11 @@ end)
 -- removed at once, it stayed there, a second panel on top of the palette
 local discarded = {}
 function M.discard(w)
+	local o = M.outer[w]
+	if o then
+		M.outer[w] = nil
+		w = o
+	end
 	w.visible = false
 	discarded[#discarded + 1] = w
 end
@@ -623,7 +647,7 @@ end
 -- is drawn again from the value that comes back.
 local NAMED_SHOWN = 72
 function M.color_picker(o)
-	local w = M.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	local w = M.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0, false, true)
 	w.minWidth = 340
 	M.label(w, o.title)
 	sheet = nil
@@ -754,7 +778,8 @@ end
 -- through to the view behind.
 function M.over(elements, ux, uy)
 	for _, el in pairs(elements) do
-		if el and el.visible then
+		-- (a pane's body by its window, which is what is hidden)
+		if el and el.visible and M.top(el).visible then
 			local p = el.screenPosition
 			local s = el.size
 			if ux >= p.x and uy >= p.y and ux < p.x + s.x and uy < p.y + s.y then

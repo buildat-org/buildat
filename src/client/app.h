@@ -158,6 +158,9 @@ namespace app
 		// world's share of a tall screen's height and the UI half's of a
 		// wide one's width, each 0.2 to 0.8; empty is the defaults
 		ss_ kit_ui_split;
+		// The same two of floorplanner's editor (4z11 stage 5)
+		int fp_ui_mode = 0;
+		ss_ fp_ui_split;
 		// Kit's editor fullscreen (on the web the page, which also holds
 		// screen_orientation then); a check run pins it off
 		bool kit_fullscreen = false;

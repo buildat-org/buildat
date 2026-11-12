@@ -449,15 +449,15 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			opt->graphics.screen_orientation = value;
 			continue;
 		}
-		if(key == "kit_ui_split"){
+		if(key == "kit_ui_split" || key == "fp_ui_split"){
 			float t = 0, w = 0;
 			char rest = 0;
 			if(sscanf(value.c_str(), "%f %f%c", &t, &w, &rest) != 2 ||
 					t < 0.2f || t > 0.8f || w < 0.2f || w > 0.8f){
-				*error = "kit_ui_split: two shares, 0.2 to 0.8";
+				*error = key+": two shares, 0.2 to 0.8";
 				return false;
 			}
-			opt->kit_ui_split = value;
+			(key == "kit_ui_split" ? opt->kit_ui_split : opt->fp_ui_split) = value;
 			continue;
 		}
 		if(key == "default_username"){
@@ -551,6 +551,9 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 		} else if(key == "kit_ui_mode"){
 			in_range = (v >= 0 && v <= 3 && v == (int)v);
 			opt->kit_ui_mode = (int)v;
+		} else if(key == "fp_ui_mode"){
+			in_range = (v >= 0 && v <= 3 && v == (int)v);
+			opt->fp_ui_mode = (int)v;
 		} else if(key == "kit_fullscreen"){
 			opt->kit_fullscreen = (v != 0);
 		} else if(key == "page_size"){
@@ -645,6 +648,12 @@ static void check_parse_preference_options()
 			!app::parse_preference_options("kit_ui_split=0.300 0.600", &o, &err) ||
 			o.kit_ui_split != "0.300 0.600")
 		throw Exception("parse_preference_options: kit_ui_split");
+	if(app::parse_preference_options("fp_ui_mode=4", &o, &err) ||
+			!app::parse_preference_options("fp_ui_mode=2,fp_ui_split=0.4 0.7",
+				&o, &err) ||
+			o.fp_ui_mode != 2 || o.fp_ui_split != "0.4 0.7" ||
+			o.kit_ui_split != "0.300 0.600")
+		throw Exception("parse_preference_options: fp_ui_mode, fp_ui_split");
 	if(app::parse_preference_options("page_size=0", &o, &err) ||
 			app::parse_preference_options("page_size=2.5", &o, &err) ||
 			!app::parse_preference_options("page_size=3", &o, &err) ||
@@ -852,6 +861,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jff = o.get("floorplanner_font");
 	const json::Value &jkm = o.get("kit_ui_mode");
 	const json::Value &jks = o.get("kit_ui_split");
+	const json::Value &jfm = o.get("fp_ui_mode");
+	const json::Value &jfs = o.get("fp_ui_split");
 	const json::Value &jkfs = o.get("kit_fullscreen");
 	const json::Value &jck = o.get("cache_keep");
 	const json::Value &jcp = o.get("cache_per_server");
@@ -875,6 +886,11 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	if(jks.is_string() && !jks.as_string().empty() &&
 			ss_(jks.as_string()).find(',') == ss_::npos)
 		items += ss_()+(items.empty()?"":",")+"kit_ui_split="+jks.as_string();
+	if(jfm.is_integer())
+		items += ss_()+(items.empty()?"":",")+"fp_ui_mode="+itos(jfm.as_integer());
+	if(jfs.is_string() && !jfs.as_string().empty() &&
+			ss_(jfs.as_string()).find(',') == ss_::npos)
+		items += ss_()+(items.empty()?"":",")+"fp_ui_split="+jfs.as_string();
 	if(jkfs.is_boolean())
 		items += ss_()+(items.empty()?"":",")+"kit_fullscreen="+(jkfs.as_boolean()?"1":"0");
 	if(jck.is_integer())
@@ -1106,6 +1122,9 @@ static void save_preferences(const app::Options &opt)
 	o.set("kit_ui_mode", opt.kit_ui_mode);
 	if(!opt.kit_ui_split.empty())
 		o.set("kit_ui_split", opt.kit_ui_split);
+	o.set("fp_ui_mode", opt.fp_ui_mode);
+	if(!opt.fp_ui_split.empty())
+		o.set("fp_ui_split", opt.fp_ui_split);
 	o.set("kit_fullscreen", opt.kit_fullscreen);
 	o.set("cache_keep", opt.cache_keep);
 	o.set("cache_per_server", opt.cache_per_server);
