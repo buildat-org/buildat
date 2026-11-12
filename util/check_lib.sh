@@ -355,6 +355,10 @@ web_login_steps(){
 		wait_for_log "$2" "setup code [A-Z0-9]+" 30
 		code=$(grep -ao "setup code [A-Z0-9]*" "$2" | head -1 | cut -d' ' -f3)
 		[ -n "$code" ] || { echo "no setup code ($2)"; return 1; }
+		# An admin made meanwhile (a check's native clients joined first):
+		# the make page has no code field, and the code's Tab would land on
+		# "Back to login" ([CHAT_TOP_WEB_RED])
+		! grep -aq "The server has an admin: not offered to be claimed" "$2" || code=""
 	fi
 	cat <<J
  ["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
