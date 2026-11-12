@@ -833,9 +833,15 @@ function M.set_tool(tool)
 	if S.tool == tool then
 		return
 	end
-	-- [KIT_PREFAB_VOXELS] the Box tool's box goes with it
+	-- [KIT_PREFAB_VOXELS] the Box tool's box goes with it; the touch mode's
+	-- comes back with the tool (the sweep of 2026-11-12: a paste from the
+	-- Box pane lost it)
 	if S.tool == "box" then
+		S.box_kept = NT.sh.on() and S.vbox or nil
 		S.vbox, S.box_drag = nil, nil
+	elseif tool == "box" and S.box_kept then
+		S.vbox, S.box_kept = S.box_kept, nil
+		log:info("kit editor: the box kept " .. table.concat(vbox() or {}, ","))
 	end
 	S.tool = tool
 	T.down, T.fill = false, nil
@@ -1246,9 +1252,10 @@ local function box_click(mx, my)
 end
 
 -- [KIT_PREFAB_VOXELS] The copy (the server's, the builder's): the
--- selected entities and the Box tool's voxels
-function M.copy()
-	local ids, box = sel_ids(), vbox()
+-- selected entities and the Box tool's voxels; box_only, the voxels alone
+-- (the touch mode's Box pane: the selection is not in sight there)
+function M.copy(box_only)
+	local ids, box = box_only == true and {} or sel_ids(), vbox()
 	if #ids == 0 and not box then
 		log:info("kit editor: copy: nothing selected and no box")
 		return
@@ -2471,6 +2478,11 @@ local function compute_guide()
 		return g
 	end
 	if over_ui(mx, my) then
+		-- (a placing ended from the UI, Cancel: its name left over the world,
+		-- the sweep of 2026-11-12)
+		if not S.placing then
+			ghost(nil)
+		end
 		return nil
 	end
 	if S.tool == "terrain" then
@@ -2634,7 +2646,10 @@ local function guide_text(g)
 				t = nil
 			end
 		end
-		if t then
+		-- (a finger down: its own "let go: ...", no "Tap:" before it)
+		if t and S.touch and b[1] == "left" and t:sub(1, 7) == "let go:" then
+			lines[#lines + 1] = t:sub(1, 1):upper() .. t:sub(2)
+		elseif t then
 			lines[#lines + 1] = b[2] .. ": " .. t
 		end
 	end
@@ -3109,8 +3124,11 @@ function M.editor(options)
 			E.can_edit = s.can_edit == true
 			log:info("kit editor: edit rights: " .. (E.can_edit and "yes" or "no"))
 			if E.can_edit and not E.editing and MEM.edit ~= "want" then
-				ui_utils.show_notification("You may edit here: Edit, or " ..
-						M.key_name("edit"), 4)
+				-- (a touchscreen's by its Menu: no key, and the play bar's Edit
+				-- may be hidden, the sweep of 2026-11-12)
+				ui_utils.show_notification(S.touch and
+						"You may edit here: Menu, then Edit" or
+						"You may edit here: Edit, or " .. M.key_name("edit"), 4)
 			end
 		end
 		-- Done: the hint would lie over the inspector's first row

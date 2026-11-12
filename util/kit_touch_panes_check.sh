@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~6 min, two web drives (2026-11-12)
-# covers: builtin/kit/client_lua/shell.lua builtin/kit/client_lua/signals.lua builtin/kit/client_lua/field_entry.lua builtin/kit/client_lua/editor.lua extensions/launch_menu/preferences.lua src/client/web/index.html
+# covers: builtin/kit/client_lua/shell.lua builtin/kit/client_lua/signals.lua builtin/kit/client_lua/field_entry.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua extensions/launch_menu/preferences.lua src/client/web/index.html apps/workbench/main/client_lua/init.lua
 # [KIT_PHONE_EDITING] stage 4, the touch mode's panes: Workbench's web
 # client in headless Chrome by finger (TOUCH=1) as a phone in portrait
 # (412x915) and in landscape (915x412), in the plan (kit_plan 0 0 16 8),
@@ -35,6 +35,14 @@
 #     a drag begun on its pane's button keeps the field's focus;
 #   - the game settings by Tools' Menu: Fullscreen (kit_fullscreen) listed,
 #     off (the drive pins it), never turned on.
+# And from the sweep of 2026-11-12: in play Workbench's hint over the
+# hotbar; a placing (a type, a paste, Place under this) said in the status
+# line before the world is tapped, Place under this stopped by Cancel;
+# portrait: Enter and Move let a typed field go; landscape: the foot one row; a
+# favourite made from a scrolled list keeps it there; the link's Shown at
+# the touch size; the Signals viewport never the walk camera's, each Add
+# link step scrolled to; the Box pane's Copy and Paste on the box, the box
+# kept through a paste; the Items tab's search beside its dropdown.
 #
 #   util/kit_touch_panes_check.sh [p412x915 l915x412]
 #
@@ -85,7 +93,8 @@ def place(t, x, y):
     # (from the palette's pane: the one placed selected, the inspector up)
     a("tap", "Button", "palette filter clear"); fr(2)
     a("tap", "LineEdit", "palette filter"); fr(2); a("type", t); fr(5)
-    a("tap", "Button", t); a("waitlog", "kit editor: placing " + t, 10); fr(5)
+    a("tap", "Button", t); a("waitlog", "kit editor: placing " + t, 10)
+    a("waitlog", "touch shell: status: Placing " + t + ": tap the world", 10); fr(5)
     a("tap", x, y); a("waitlog", "touch shell: the inspector pane", 20); fr(10)
 a("nav", "${URL}?pref=kit_editor_font=100&pref=kit_ui_mode=0")
 a("waitlog", "accounts: the login page shown", 120); a("wait", 1000)
@@ -104,6 +113,7 @@ a("waitlog", "world_menu: the name screen shown", 10); fr(3)
 a("tap", "Button", "Create")
 a("waitlog", "player physics enabled", 120)
 a("waitlog_any", "kit editor: edit rights: yes", 10); fr(5)
+a("shot", "${OUT}/00_play.png")
 a("tap", "Button", "Menu", W, H); a("waitlog", "pause: the menu shown", 10); fr(3)
 a("tap", "Button", "Edit*")
 a("waitlog", "kit editor: touch shell on", 20)
@@ -126,10 +136,21 @@ if H > W:
     a("drag", "Button", "position move", W // 2, int(H * 0.3), "touch"); fr(10)
     a("shot", "${OUT}/02b_dragged.png"); dump("dragged")
     a("eval", nokb); a("waitlog", "touch shell: the keyboard closed: the field let go", 10); fr(10)
+    # Enter lets the field go (the LineEdit itself, the screen keyboard on),
+    # and so does Move (the touch shell's let_go, as Apply and Turn)
+    a("tap", "LineEdit", "position x"); a("waitlog", "buildatText: a field focused in the tap", 10); fr(3)
+    a("key", "Enter"); a("waitlog", "buildatText: text blurred", 10); fr(5)
+    a("tap", "LineEdit", "position x"); fr(3)
+    a("tap", "Button", "position move"); a("waitlog", "touch shell: Move: the field let go", 10); fr(5)
 back("palette")
 place("kit/button", *B)
 a("shot", "${OUT}/02_inspector.png")
 dump("inspector")
+a("tap", "DropDownList", "inspector actions"); a("waitlog", "inspector actions open", 10); fr(3)
+a("tap", "Text", "inspector actions: Place under this"); a("waitlog", "kit editor: placing under", 10)
+a("waitlog", r"touch shell: status: Placing under .* \(Cancel: stop\)", 10); fr(5)
+a("shot", "${OUT}/03_under.png")
+a("tap", "Button", "shell cancel"); a("waitlog", "kit editor: placing under the scene", 10); fr(5)
 # The button a prefab: its menu by a finger held, Make prefab...
 a("hold", *B, 800); a("waitlog", "kit editor: the menu of", 10)
 a("waitlog", "touch shell: a menu shown at", 10); fr(5)
@@ -148,6 +169,19 @@ a("shot", "${OUT}/07_turning.png")
 dump("turning")
 a("tap", "Button", "shell turn +"); a("waitlog", "kit editor: placing turned 90", 10); fr(3)
 a("tap", "Button", "shell cancel"); a("waitlog", "kit editor: placing nothing", 10); fr(5)
+# A favourite made from the list's menu, scrolled to its end (the
+# prefab, the last row): the list stays there
+a("tap", "Button", "palette filter clear"); fr(5)
+lx = round(W * (0.5 if H > W else 0.75))
+for _ in range(12):
+    a("drag", lx, round(H * (0.85 if H > W else 0.75)), lx, round(H * (0.6 if H > W else 0.2)), "touch"); fr(10)
+a("tap", "Button", "[webboss/pf1]"); a("waitlog", "the palette.s menu of", 10); fr(5)
+a("tap", "Button", "menu Favourite*"); a("waitlog", "webboss/pf1.? a favourite", 10)
+a("waitlog", "kit editor: the panel scrolled back to [1-9]", 10); fr(5)
+a("shot", "${OUT}/07b_favourite.png")
+# (back to its top: the tabs' dropdown scrolls with it)
+for _ in range(12):
+    a("drag", lx, round(H * (0.6 if H > W else 0.2)), lx, round(H * (0.85 if H > W else 0.75)), "touch"); fr(10)
 # The Signals view by the dropdown, on its entities; the button's
 # inspector by its row, its links by the inspector's Links
 view("Signals", "touch shell: the sg_list pane")
@@ -170,6 +204,7 @@ a("tap", "Button", "link target door*"); a("waitlog", "add link: target", 10); f
 a("tap", "Button", "link input open"); a("waitlog", "kit editor: signals: linked", 10)
 a("sync", 5000); fr(10)
 a("shot", "${OUT}/10_signals_linked.png")
+dump("sg_linked")
 scroll(0.17, 0.75)
 if W > H:
     a("tap", "LineEdit", "signals name"); fr(3); a("eval", kb)
@@ -195,11 +230,25 @@ a("eval", nokb); a("waitlog", "touch shell: the keyboard closed: the field let g
 a("tap", "LineEdit", "scene name"); a("waitlog", "buildatText: a field focused in the tap: text", 10); fr(5)
 a("tap", "Button", "Make scene"); a("waitlog", "kit editor: a new scene second", 10)
 a("sync", 5000); fr(10)
+back("palette")
+def tab(name):
+    a("tap", "DropDownList", "palette tabs"); a("waitlog", "palette tabs open", 10); fr(3)
+    a("tap", "Text", "palette tabs: " + name); fr(10)
+# The Box pane's Copy and Paste on the box, the box kept through a paste
+tab("Box"); a("waitlog", "kit editor: tool box", 10)
+a("tap", *at(-2, -2)); fr(10); a("tap", *at(2, 2)); a("waitlog", r"kit editor: box -?\d+,", 10); fr(10)
+a("tap", "Button", "box copy"); a("waitlog", "copy of 0 entities and the box", 10); fr(5)
+a("tap", "Button", "box paste"); a("waitlog", "touch shell: status: Placing Paste: tap the world", 10)
+a("shot", "${OUT}/14_box_paste.png")
+a("tap", "Button", "shell cancel"); fr(5)
+tab("Box"); a("waitlog", "kit editor: the box kept", 10); fr(5)
+# The Items tab's search beside its dropdown
+tab("Items")
+a("tap", "LineEdit", "item search"); fr(2); a("type", "bow"); a("waitlog", 'kit editor: items for "bow": [1-9]', 10)
+a("shot", "${OUT}/14b_items.png")
 # New voxel type, typed with the keyboard up (Voxels by the palette's
 # tabs' dropdown)
-back("palette")
-a("tap", "DropDownList", "palette tabs"); a("waitlog", "palette tabs open", 10); fr(3)
-a("tap", "Text", "palette tabs: Voxels"); a("waitlog", "kit editor: tool voxels", 10); fr(5)
+tab("Voxels"); a("waitlog", "kit editor: tool voxels", 10); fr(5)
 # (below the view in landscape: its rows at the touch size)
 a("event", "kit_inspector_show voxel new"); a("waitlog", "the inspector shows voxel new", 10); fr(5)
 a("tap", "Button", "New voxel type..."); a("waitlog", "touch shell: the dialog pane", 10); fr(10)
@@ -235,7 +284,7 @@ def overlap(a, b):
     return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
 # Each pane's window in its dump
 PANE = {"palette": "palette", "inspector": "inspector", "tools": "bar",
-    "prefab_dialog": "dialog", "sg_links": "sg_links", "sg_step": "sg_links",
+    "prefab_dialog": "dialog", "sg_links": "sg_links", "sg_step": "sg_links", "sg_linked": "sg_links",
     "sg_list": "sg_list", "scene_dialog": "dialog", "voxel_dialog": "dialog"}
 geo, seen, rows = None, {}, None
 for l in page[on:]:
@@ -336,6 +385,28 @@ if H > W:
     d = next(i for i, l in enumerate(page) if "touch targets (dragged)" in l)
     px = next(l for l in reversed(page[:d]) if "touch shell: pixels:" in l)
     assert not re.search(r"the keyboard 0,", px), f"the focus gone with a drag: {px}"
+# Workbench's hint over the hotbar (the sweep of 2026-11-12: its lines ran
+# into the slots), in UI units
+hb = [l for l in page[:on] if "the hint's bottom at" in l]
+hot = [re.search(r"ui own:hotbar own at \d+,(\d+) \d+x\d+ in \d+x(\d+)", l) for l in page[:on]]
+hot = [m for m in hot if m]
+assert hb and hot, "no hint's place or no hotbar in play"
+bottom = int(re.search(r"at (-?\d+)", hb[-1])[1])
+assert int(hot[-1][2]) + bottom <= int(hot[-1][1]), f"the hint over the hotbar: {hb[-1]} / {hot[-1][0]}"
+# Landscape: the foot one row (the sweep: two with something selected)
+if W > H:
+    feet = [l for l in page[on:] if "touch shell: the foot:" in l]
+    one = re.compile(r"\((0 rows|1 row)[,)]")
+    assert feet and all(one.search(l) for l in feet), \
+        f"the foot in rows: {[l for l in feet if not one.search(l)][:2]}"
+    # (all nine, Place under this with the button selected: smaller text)
+    nine = [l for l in feet if "Select+" in l and "Cancel" in l]
+    assert nine, "never all nine in the foot"
+# The Signals viewport never the walk camera's (the sweep: it read as Walk),
+# and the Add link form's steps scrolled in view as each came
+assert "the viewport shows what the walk camera shows" not in text, "the Signals viewport the walk camera's"
+forms = re.findall(r"signals: the form in view, from (\d+), scrolled to (\d+)", text)
+assert len(forms) >= 2, f"the add link form's steps not scrolled to: {forms}"
 # Fullscreen: in the settings, never on
 m = re.search(r"Game settings shown: (.*)", text)
 assert m and "kit_fullscreen" in m[1], f"no Fullscreen in the settings: {m and m[1]}"
@@ -346,7 +417,9 @@ print(f"ok: {len(seen)} dumps ({', '.join(sorted(seen))}), every target the touc
     f"in Tools; {len(menus)} menus on the screen; the inspector's body {b[-1][0]} in {b[-1][1]}; a "
     f"prefab turned while placed; a link by the steps; a scene and a voxel type made, the dialogs' "
     f"field and buttons above the keyboard ({len(typing)}), the field let go as it closed and "
-    f"focused again{'; a field kept through a drag' if H > W else ''}; Fullscreen listed and off")
+    f"focused again{'; a field kept through a drag' if H > W else ''}; Fullscreen listed and off; the "
+    f"hint over the hotbar ({bottom}); {len(forms)} add link steps scrolled to"
+    f"{('; the foot one row: ' + nine[-1].split('the foot: ')[1]) if W > H else ''}")
 PY
 done
 echo "PASS: Kit's touch mode's panes ($runs): Tools, the palette, the inspector, Signals and its links, HUD and the dialogs reached without \"...\", at the touch size off the world; the palette's list rows; Server and Menu first in Tools; a menu on the screen; a link by steps; a prefab turned while placed; a scene and a voxel type made with the keyboard up, the field let go as it closed; in portrait a field kept through a drag on a button; Fullscreen listed and off ($t)"

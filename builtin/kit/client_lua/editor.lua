@@ -1354,14 +1354,15 @@ rebuild_bar = function(if_changed)
 		end)
 	end
 	-- [KIT_PREFAB_VOXELS] the Box tool's: the box (and the selection)
-	-- copied or a prefab, the copy pasted
-	if S.tool == "box" then
+	-- copied or a prefab, the copy pasted ([KIT_PHONE_EDITING] the touch
+	-- mode's in the Box pane, BX.box_section)
+	if S.tool == "box" and not sh then
 		bar_button("Copy", "Ctrl+" .. M.key_name("copy"), M.copy)
 		bar_button("Make prefab...", nil, function()
 			M.prefab_dialog(sel_ids())
 		end)
 	end
-	if E.state and E.state.clipboard then
+	if E.state and E.state.clipboard and not sh then
 		bar_button("Paste", "Ctrl+" .. M.key_name("paste"), M.paste)
 	end
 	if rounds then
@@ -1570,7 +1571,9 @@ function NT.voxels(w)
 	end)
 	nv:SetName("voxel new")
 	if O.solid then
-		text(w, S.touch and "Walking: a tap digs, a finger held places" or
+		-- ([KIT_PHONE_EDITING] the touch mode's in each view)
+		text(w, NT.sh.on() and "A tap digs, a finger held places" or
+				S.touch and "Walking: a tap digs, a finger held places" or
 				"Left: place, Shift+left: dig; walking: left digs, right places",
 				DIM)
 	end
@@ -1696,12 +1699,15 @@ function NT.items(w)
 		log:info("kit editor: a new item type")
 		refresh()
 	end)
-	local sr = row(w)
-	label(sr, "Search", 60)
-	edit(sr, IT.search or "", function(s)
-		IT.search = s
-		IT.filter()
-	end):SetName("item search")
+	-- (the touch mode's beside the palette's tabs, palette())
+	if not NT.sh.on() then
+		local sr = row(w)
+		label(sr, "Search", 60)
+		edit(sr, IT.search or "", function(s)
+			IT.search = s
+			IT.filter()
+		end):SetName("item search")
+	end
 	local ammo, groups = {}, {}
 	for _, sh in pairs(M.item_types or {}) do
 		if type(sh.ammo) == "string" and sh.ammo ~= "" then
@@ -1815,18 +1821,34 @@ function NT.entities(w)
 	local tabs, indent = NT.entity_lists()
 	local tab = S.list_tab or "Game-wide"
 	local tr = row(w)
-	for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
-		button(tr, name .. " (" .. #tabs[name] .. ")", function()
+	if NT.sh.on() then
+		-- ([KIT_PHONE_EDITING] a dropdown: the three ran off a phone's pane)
+		local c = {}
+		for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
+			c[#c + 1] = {name .. " (" .. #tabs[name] .. ")", name}
+		end
+		ui_utils.dropdown(tr, c, tab, function(name)
 			S.list_tab = name
 			palette()
-		end, name == tab)
+		end, {name = "entity lists", fill = true})
+	else
+		for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
+			button(tr, name .. " (" .. #tabs[name] .. ")", function()
+				S.list_tab = name
+				palette()
+			end, name == tab)
+		end
 	end
 	local n, ids = 0, {}
 	for _, e in ipairs(tabs[tab]) do
 		local gr = row(w)
+		-- (to a hundredth: a member under a turned parent showed 1.0124,5,-3.02947)
+		local at = {}
+		for i, v in ipairs(e.pos or {}) do
+			at[i] = string.format("%.10g", math.floor(v * 100 + 0.5) / 100)
+		end
 		label(gr, string.rep("    ", indent[e.id] or 0) .. NT.entity_label(e) ..
-				(e.pos and " at " ..
-				table.concat(e.pos, ",") or ""))
+				(e.pos and " at " .. table.concat(at, ",") or ""))
 		local sb = button(gr, e.id == S.primary and "Selected" or
 				S.reparent and (e.pos or NT.is_panel(e)) and "Parent" or "Select",
 				function()
@@ -1907,6 +1929,17 @@ function NT.fit_panel()
 		log:info(string.format("kit editor: the panel %d of %d tall, %d of " ..
 				"%d wide, its window down to %d of %d", h, bh, vw, bw,
 				w.screenPosition.y + w.height, bottom))
+	end
+	-- The touch mode's scroll put back once its window is at the touch size:
+	-- palette()'s was clamped to the body before it grew (the sweep of
+	-- 2026-11-12: a Favourite scrolled the list to its top)
+	if pr and NT.want_y and w:GetVar("KitTouch") == "1" then
+		view.viewPosition = magic.IntVector2(0, NT.want_y)
+		if NT.want_y > 0 then
+			log:info(string.format("kit editor: the panel scrolled back to " ..
+					"%d (%d)", NT.want_y, view.viewPosition.y))
+		end
+		NT.want_y = nil
 	end
 end
 
@@ -2292,7 +2325,11 @@ end
 function NT.palette_menu(it, x, y)
 	local fs, fn = NT.favourite(it.key, it.label, function()
 		palette()
-		NT.palette_menu(it, x, y)
+		-- (the touch mode's closed: it was opened again over the pane, the
+		-- sweep of 2026-11-12)
+		if not NT.sh.on() then
+			NT.palette_menu(it, x, y)
+		end
 	end)
 	NT.menu({it.label, NT.cost_line(it.type), {"Place", function()
 		NT.palette_chosen(it)
@@ -2303,7 +2340,7 @@ end
 
 palette = function()
 	if NT.view then
-		NT.y[NT.shown or ""] = NT.view.viewPosition.y
+		NT.y[NT.shown or ""] = NT.want_y or NT.view.viewPosition.y
 	end
 	NT.view, ED.rows, ED.hover = nil, {}, nil
 	drop("palette")
@@ -2399,21 +2436,30 @@ palette = function()
 		end
 	end
 	-- [KIT_PALETTE_SECTIONS] The filter over the list, out of its scroll:
-	-- in sight in a window with room for a row of it
-	if tab == "Place" and S.tab ~= "New" then
+	-- in sight in a window with room for a row of it. ([KIT_PHONE_EDITING]
+	-- The touch mode's Items' search the same, beside the tabs: the sweep of
+	-- 2026-11-12 had it a labelled row in the list)
+	local items = sh and tab == "Items"
+	if (tab == "Place" and S.tab ~= "New") or items then
 		fr = fr or row(top)
 		if not sh then
 			label(fr, "Filter", 50)
 		end
-		local fe = edit(fr, S.palette_filter or "", function(s)
+		local name = items and "item search" or "palette filter"
+		local fe = edit(fr, items and (IT.search or "") or S.palette_filter or "",
+				function(s)
+			if items then
+				IT.search = s
+				return IT.filter()
+			end
 			S.palette_filter = s
 			NT.palette_filter()
 		end)
-		fe:SetName("palette filter")
+		fe:SetName(name)
 		local x = button(fr, "x", function()
 			fe:SetText("")
 		end)
-		x:SetName("palette filter clear")
+		x:SetName(name .. " clear")
 		x:SetVar("KitNarrow", "1")
 		if sh then
 			x:SetFixedWidth(math.ceil(NT.sh.TOUCH / S.font))
@@ -2440,6 +2486,8 @@ palette = function()
 	NT.view = view
 	NT.fit_panel()
 	view.viewPosition = magic.IntVector2(0, NT.y[NT.shown] or 0)
+	-- (the touch mode's again at the touch size, NT.fit_panel)
+	NT.want_y = sh and NT.y[NT.shown] or nil
 end
 
 -- The voxels to place: the World's material set's first
@@ -2936,6 +2984,7 @@ function NT.params_form(w, e, ci, c, t, keep)
 		end
 		local apply_b
 		apply_b, apply_text = button(w, "Apply", function()
+			NT.sh.let_go("Apply")
 			NT.apply_params(e, ci, decl)
 			refresh()
 		end)
@@ -3477,7 +3526,10 @@ local function inspector(w, e, is_made)
 			f:SetName("position " .. axis)
 			entry(f, at, i, move)
 		end
-		local mv = button(sh and row(w) or r, "Move", move)
+		local mv = button(sh and row(w) or r, "Move", function()
+			NT.sh.let_go("Move")
+			move()
+		end)
 		mv:SetName("position move")
 		-- (its own width: a wide inspector stretched it past the pane)
 		if sh then
@@ -3499,6 +3551,11 @@ local function inspector(w, e, is_made)
 				log:info(string.format("kit editor: turned %d to %g, %g, %g from "
 						.. "the inspector", e.id, a[1], a[2], a[3]))
 			end
+			-- (the touch mode's row named: its y beside the position's y read
+			-- as one, the sweep of 2026-11-12)
+			if sh then
+				label(tr, "turn")
+			end
 			for i, axis in ipairs({"yaw", "pitch", "roll"}) do
 				label(tr, axis:sub(1, 1)):SetFixedWidth(12)
 				-- (a place in the field's width; the rows are on a 1/16's grid, a
@@ -3511,7 +3568,10 @@ local function inspector(w, e, is_made)
 				f:SetName("turn " .. axis)
 				entry(f, a, i, turn)
 			end
-			local tb = button(sh and row(w) or tr, "Turn", turn)
+			local tb = button(sh and row(w) or tr, "Turn", function()
+				NT.sh.let_go("Turn")
+				turn()
+			end)
 			if sh then
 				tb.maxWidth = tb.minWidth
 			end
@@ -3905,9 +3965,24 @@ end
 function BX.box_section(w)
 	local lo, hi = BX.box_lh()
 	text(w, "Box")
+	-- [KIT_PHONE_EDITING] The touch mode's Copy, Paste and Make prefab of
+	-- the box (the bar's elsewhere act on the selection too, out of sight
+	-- here: the sweep of 2026-11-12 made a prefab of "1 entity")
+	local paste = E.state and E.state.clipboard
+	local acts = NT.sh.on() and (lo or paste) and row(w)
+	if acts and lo then
+		button(acts, "Copy", function() M.copy(true) end):SetName("box copy")
+		button(acts, "Make prefab...", function()
+			M.prefab_dialog({})
+		end):SetName("box prefab")
+	end
+	if acts and paste then
+		button(acts, "Paste", M.paste):SetName("box paste")
+	end
+	local verb = S.touch and "Tap" or "Click"
 	if not lo then
-		text(w, S.vbox and "Click its second corner." or
-				"Click its first corner.", DIM)
+		text(w, verb .. (S.vbox and " its second corner." or
+				" its first corner."), DIM)
 		return
 	end
 	local at = {lo[1], lo[2], lo[3]}
@@ -3935,7 +4010,9 @@ function BX.box_section(w)
 			f.minWidth = 48
 		end
 	end
-	text(w, "Drag a face's handle; Shift: the whole box", DIM)
+	-- (no Shift under a finger)
+	text(w, S.touch and "Drag a face's handle" or
+			"Drag a face's handle; Shift: the whole box", DIM)
 end
 NT.box_section = BX.box_section
 
@@ -4948,7 +5025,8 @@ local function prefab_dialog(ids)
 	-- [KIT_PREFAB_VOXELS] the Box tool's voxels too, their air replacing
 	-- what is there or not
 	local box = vbox()
-	text(w, "Make a prefab of " .. #ids .. (#ids == 1 and " entity" or
+	text(w, #ids == 0 and box and "Make a prefab of the box's voxels" or
+			"Make a prefab of " .. #ids .. (#ids == 1 and " entity" or
 			" entities") .. (box and " and the box's voxels" or ""))
 	local r = row(w)
 	label(r, "Prefab name:")
@@ -5798,6 +5876,7 @@ do
 	install({S = S, W = W, E = E, NT = NT, M = M, O = O, magic = magic,
 		log = log, send = send, window = window, drop = drop, button = button,
 		text = text, row = row, DIM = DIM, apply_viewport = apply_viewport,
+		find = find,
 		refresh = function() refresh() end, set_view = function(v) set_view(v) end,
 		ui_utils = ui_utils, VIEW_NAMES = VIEW_NAMES})
 end

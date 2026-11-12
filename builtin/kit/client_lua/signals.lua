@@ -436,8 +436,15 @@ local function shown_check(r, id, ci, l)
 	c.enabled = false
 	c:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
 	c:SetPosition(4, 0)
-	t:SetPosition(24, 0)
-	return b, t, t.width + 28
+	-- The touch mode's box at the touch size (the sweep of 2026-11-12: 13
+	-- pixels; touch_size does not go into a button)
+	local T = NT.sh.on() and NT.sh.TOUCH
+	if T then
+		c:SetFixedSize(T, T)
+	end
+	local cw = T and T + 4 or 20
+	t:SetPosition(cw + 4, 0)
+	return b, t, t.width + cw + 8, cw + 6
 end
 
 -- What a link passes on: the output's type, or the input's where the output
@@ -546,8 +553,8 @@ local function link_table(body, rows, self_id)
 		end
 		signal(x.l.input, "rsig", "signal in ", into)
 		cells.gap3 = r:CreateChild("UIElement")
-		local check, t, w = shown_check(r, x.from_id, x.ci, x.l)
-		cells.check, cells.check_t = check, t
+		local check, t, w, box_w = shown_check(r, x.from_id, x.ci, x.l)
+		cells.check, cells.check_t, cells.box_w = check, t, box_w
 		widest.check = math.max(widest.check, w)
 		built[i] = cells
 		if x.kind ~= "" then
@@ -573,7 +580,7 @@ local function link_table(body, rows, self_id)
 	end
 	-- Then the checkbox alone: a name says more than a label on every row
 	if spare_now() < 0 then
-		widest.check = 26
+		widest.check = built[1].box_w
 		for _, cells in ipairs(built) do
 			cells.check_t.visible = false
 		end
@@ -980,6 +987,12 @@ local function signal_rows(body, e, key, list, head)
 		x.t:SetPosition(1, 0)
 		SG.tip(x.b, name, s.about)
 		x.kind = text(x.r, s.kind .. (several and " " .. s.owner or ""), DIM)
+		-- A row for its description under it, hidden (out of the layout) when
+		-- that goes beside it (the sweep of 2026-11-12: made after all the rows,
+		-- the descriptions were listed after them)
+		x.under = row(body)
+		x.under:SetLayout(magic.LM_HORIZONTAL, 0, magic.IntRect(INDENT * 2, 0, 0, 0))
+		x.under.visible = false
 		name_w = math.max(name_w, x.t.width + 10)
 		kind_w = math.max(kind_w, x.kind.minWidth + GAP)
 		built[#built + 1] = x
@@ -992,11 +1005,8 @@ local function signal_rows(body, e, key, list, head)
 		x.kind:SetFixedWidth(kind_w)
 		if show and x.s.about then
 			local beside = room >= ABOUT_BESIDE
-			local parent = x.r
-			if not beside then
-				parent = row(body)
-				parent:SetLayout(magic.LM_HORIZONTAL, 0, magic.IntRect(INDENT * 2, 0, 0, 0))
-			end
+			local parent = beside and x.r or x.under
+			x.under.visible = not beside
 			local d = text(parent, first_sentence(x.s.about), DIM)
 			d:SetWordwrap(true)
 			d:SetFixedWidth(beside and room or SG.links_w - INDENT * 2)
@@ -1189,6 +1199,25 @@ function SG.hover_tick()
 	end
 end
 
+-- The form's top at the view's, again each frame until it stays put: the
+-- body's new texts are scaled to the text size in the frame after (the sweep
+-- of 2026-11-12: the touch mode's step heading half above the view)
+function SG.form_in_view()
+	local at, body = SG.form_at, SG.links_body
+	if not (SG.form_scroll and at and body and SG.links_view) then
+		SG.form_scroll = nil
+		return
+	end
+	local y = math.max(0, at.screenPosition.y - body.screenPosition.y)
+	SG.links_view.viewPosition = magic.IntVector2(0, y)
+	if y == SG.form_y then
+		SG.form_scroll = nil
+		log:info("kit editor: signals: the form in view, from " .. y .. ", scrolled to " ..
+				SG.links_view.viewPosition.y)
+	end
+	SG.form_y = y
+end
+
 function SG.links()
 	local e, is_made = nil, false
 	if S.primary then
@@ -1321,8 +1350,8 @@ function SG.links()
 	end
 	-- A form asked for by a row further down: in view
 	if SG.form_new and SG.form_at then
-		SG.links_view.viewPosition = magic.IntVector2(0, math.max(0,
-				SG.form_at.screenPosition.y - SG.links_body.screenPosition.y))
+		SG.form_scroll, SG.form_y = true, nil
+		SG.form_in_view()
 	end
 	SG.form_new = nil
 	-- For a drive: what the column came to, and whether anything left its width
@@ -1456,12 +1485,37 @@ SG.orbit = {yaw = 40, pitch = 32, dist = 6}
 SG.orbit_fingers = {}
 local WEB = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
 
+-- [KIT_PHONE_EDITING] The touch mode's viewport with no entity of a position
+-- selected: round the middle of those placed, back far enough for them all
+-- (the sweep of 2026-11-12: the walk camera's picture read as the Walk view).
+-- The middle and the box's diagonal, or nil
+local function scene_middle()
+	local lo, hi
+	for _, x in ipairs(A.entities()) do
+		if x.pos then
+			local p = A.drawn_at(x)
+			local v = {p.x, p.y, p.z}
+			lo, hi = lo or {v[1], v[2], v[3]}, hi or {v[1], v[2], v[3]}
+			for i = 1, 3 do
+				lo[i], hi[i] = math.min(lo[i], v[i]), math.max(hi[i], v[i])
+			end
+		end
+	end
+	if not lo then
+		return nil
+	end
+	return magic.Vector3((lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2,
+			(lo[3] + hi[3]) / 2), math.sqrt((hi[1] - lo[1]) ^ 2 +
+			(hi[2] - lo[2]) ^ 2 + (hi[3] - lo[3]) ^ 2)
+end
+
 -- Pixels
 local function orbit_at(x, y)
 	local sc, a = magic.ui.scale, SG.area
 	local e = NT.sig() and S.primary and find(S.primary)
 	x, y = x / sc, y / sc
-	return a and e and e.pos and not W.ctx and not W.dialog and
+	local round = e and e.pos or NT.sig() and NT.sh.on() and scene_middle()
+	return a and round and not W.ctx and not W.dialog and
 			not ui_utils.dropdown_open() and not ui_utils.clicks_wanted() and
 			x >= a.x and y >= a.y and x < a.x + a.w and y < a.y + a.h
 end
@@ -1554,6 +1608,7 @@ function SG.tick()
 		return
 	end
 	SG.layout()
+	SG.form_in_view()
 	SG.hover_tick()
 	live_tick()
 	local sideways = SG.links_view and SG.links_view.horizontalScrollBar.visible
@@ -1577,7 +1632,17 @@ function SG.tick()
 	SG.cam.fov, SG.cam.nearClip, SG.cam.farClip = wc.fov, wc.nearClip, wc.farClip
 	local e = S.primary and find(S.primary)
 	local shows
-	if e and e.pos then
+	local mid, size
+	if not (e and e.pos) and NT.sh.on() then
+		mid, size = scene_middle()
+	end
+	if mid then
+		local o = SG.orbit
+		local q = magic.Quaternion(o.pitch, o.yaw, 0)
+		SG.cam_node.rotation = q
+		SG.cam_node.position = mid + q * magic.Vector3(0, 0, -math.max(o.dist, size))
+		shows = "the middle of the scene"
+	elseif e and e.pos then
 		local at = A.drawn_at(e)
 		local o = SG.orbit
 		local q = magic.Quaternion(o.pitch, o.yaw, 0)

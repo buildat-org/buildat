@@ -406,7 +406,15 @@ function SH.build()
 		button(w, "Duplicate", function() NT.duplicate() end),
 		button(w, "Undo", function() send({op = "undo"}) end),
 		button(w, "Delete", function() M.delete_selected() end),
-		(button(w, "Cancel", function() M.escape() end))}
+		(button(w, "Cancel", function()
+			-- (the inspector's Place under this, its last: the sweep of
+			-- 2026-11-12 armed it by a mis-tap, with no sign of it)
+			if not M.escape() and S.under then
+				S.under = nil
+				log:info("kit editor: placing under the scene")
+				A.refresh()
+			end
+		end))}
 	-- (by name for a drive: "Up" is not the only one)
 	for i, n in ipairs({"select more", "turn -", "turn +", "up", "down",
 			"duplicate", "undo", "delete", "cancel"}) do
@@ -414,6 +422,12 @@ function SH.build()
 	end
 	SH.status = text(w, "")
 	SH.status_said = nil
+	-- At the text size now, not in the next frame: place_shell sets the
+	-- foot's font size against it (foot_font)
+	SH.foot_px = nil
+	if magic.ui_text_scale then
+		magic.ui_text_scale(w, S.font)
+	end
 end
 
 -- Whether what is being placed turns (NT.turn_step's): a prefab, a paste
@@ -427,7 +441,8 @@ end
 -- Select+ where selecting (no tool, nothing being placed; on, to turn it
 -- off), Turn - and +, Up, Down and Duplicate with a selection, Turn too
 -- while a prefab or a paste is placed; Undo always; Delete with a
--- selection; Cancel with something for Escape to give up (NT.cancellable).
+-- selection; Cancel with something for Escape to give up (NT.cancellable)
+-- or Place under this armed.
 -- The world's (the first six) not in the palette's pane but the placing's
 -- Turn (a landscape phone's had room for one row of its list), nor in the
 -- Signals and HUD views (no world to edit). Only under the palette and the
@@ -442,7 +457,38 @@ local function foot_shown(kb)
 	local turn = (world and sel) or (not NT.world_off() and SH.turning())
 	return {world and (SH.multi or (S.tool == nil and S.placing == nil)), turn,
 		turn, world and sel, world and sel, world and sel, true, sel,
-		NT.cancellable()}
+		NT.cancellable() or S.under ~= nil}
+end
+
+-- The foot's labels (SH.acts' order): the names, then shorter ones for a
+-- row that does not fit (the sweep of 2026-11-12: two rows in landscape
+-- with something selected), then with less room round their text (pad)
+-- and in a smaller font (k; the user: a button's size matters more than
+-- its text's, the text shrinks and the button stays at the touch size)
+-- simplified: past the smallest, two rows of the names
+local SHORTEST = {"Sel+", "T-", "T+", "Up", "Down", "Dup", "Undo", "Del", "Cancel"}
+local FOOT = {{"Select+", "Turn -", "Turn +", "Up", "Down", "Duplicate", "Undo",
+		"Delete", "Cancel"},
+	{"Select+", "T-", "T+", "Up", "Down", "Dup", "Undo", "Del", "Cancel"},
+	{pad = 6}, {pad = 6, k = 0.8}, {pad = 4, k = 0.65}}
+for i = 3, #FOOT do
+	for j, s in ipairs(SHORTEST) do
+		FOOT[i][j] = s
+	end
+end
+
+-- The foot's texts at k of the editor's text size
+-- simplified: the style's Text size (15) taken as theirs: the sandbox's
+-- Text has no font size to read
+local function foot_font(k)
+	local px = math.max(6, math.floor(15 * S.font * k + 0.5))
+	-- (by the share too: the scaler scales them again when it changes)
+	if SH.foot_px ~= px .. " " .. S.font then
+		SH.foot_px = px .. " " .. S.font
+		for _, b in ipairs(SH.acts) do
+			b:GetChild(0):SetFontSize(px)
+		end
+	end
 end
 
 -- Its parts where the UI half is now (after the text size's scaling)
@@ -456,21 +502,43 @@ local function place_shell(shown)
 	local sy = u[4] - PAD - SH.status.height
 	SH.status:SetPosition(PAD, sy)
 	-- The buttons in rows as they fit (each its label's width, at least the
-	-- touch size), each row stretched across
-	local room, rows = u[3] - 2 * PAD, {}
-	for i, b in ipairs(SH.acts) do
-		local bw, r = math.max(T, b:GetChild(0).width + 12), rows[#rows]
-		b.visible = shown[i] and true or false
-		if not b.visible then
-			bw = nil
-		elseif not r or r.used + 4 + bw > room then
-			r = {used = -4}
-			rows[#rows + 1] = r
+	-- touch size), each row stretched across: in one row by the first
+	-- labels that fit it, else the names in two
+	local room = u[3] - 2 * PAD
+	local function rows_of(labels)
+		local rows = {}
+		foot_font(labels.k or 1)
+		SH.foot_k = labels.k or 1
+		for i, b in ipairs(SH.acts) do
+			local t = b:GetChild(0)
+			if t.text ~= labels[i] then
+				t.text = labels[i]
+			end
+			local bw, r = math.max(T, t.width + (labels.pad or 12)), rows[#rows]
+			b.visible = shown[i] and true or false
+			if not b.visible then
+				bw = nil
+			elseif not r or r.used + 4 + bw > room then
+				r = {used = -4}
+				rows[#rows + 1] = r
+			end
+			if bw then
+				r[#r + 1], r.used = {b = b, w = bw}, r.used + 4 + bw
+			end
 		end
-		if bw then
-			r[#r + 1], r.used = {b = b, w = bw}, r.used + 4 + bw
+		return rows
+	end
+	local rows
+	for _, labels in ipairs(FOOT) do
+		rows = rows_of(labels)
+		if #rows <= 1 then
+			break
 		end
 	end
+	if #rows > 1 then
+		rows = rows_of(FOOT[1])
+	end
+	SH.foot_rows = #rows
 	local ay = sy - #rows * (T + 4)
 	for i, r in ipairs(rows) do
 		local x, extra = PAD, math.floor((room - r.used) / #r)
@@ -559,15 +627,35 @@ local function drop_rows(d)
 	end
 end
 
+-- A dropdown's own texts (its arrow) in the middle of its height
+local function drop_center(d)
+	for i = 0, d:GetNumChildren() - 1 do
+		local c = d:GetChild(i)
+		if c and c:GetTypeName() == "Text" then
+			c.verticalAlignment = magic.VA_CENTER
+		end
+	end
+end
+
 -- simplified: once a window (its var KitTouch), so a row added to a window
 -- built already keeps its size (the palette's filter only hides rows)
 local function touch_size(el, depth, scrolled)
 	local T = SH.TOUCH
-	local in_row = scrolled and el:GetVar("KitRow") == "1"
+	local row_el = el:GetVar("KitRow") == "1"
+	local in_row = scrolled and row_el
+	-- A row of a fixed height lower than its targets' (the sweep of
+	-- 2026-11-12: the Signals list's filter, 22 pixels)
+	if row_el and el.maxHeight < T then
+		el:SetFixedHeight(T)
+	end
 	for i = 0, el:GetNumChildren() - 1 do
 		local c = el:GetChild(i)
 		local t = c and c:GetTypeName()
-		if t == "CheckBox" then
+		if t == "Text" and row_el then
+			-- A row's label in the middle of its height, as its targets' text
+			-- (the sweep of 2026-11-12: "x" at the top of its field's row)
+			c.verticalAlignment = magic.VA_CENTER
+		elseif t == "CheckBox" then
 			c:SetFixedSize(T, T)
 		elseif t == "Button" or t == "LineEdit" or t == "DropDownList" then
 			if c.maxHeight < T then
@@ -594,6 +682,7 @@ local function touch_size(el, depth, scrolled)
 			end
 			if t == "DropDownList" then
 				drop_rows(c)
+				drop_center(c)
 			end
 		elseif c and t ~= "ScrollBar" and t ~= "Text" and depth < 40 then
 			touch_size(c, depth + 1, scrolled or t == "ScrollView")
@@ -610,10 +699,39 @@ function SH.touch_size(el)
 	touch_size(el, 0)
 end
 
+-- A typed field let go, so that the page closes its keyboard: by Apply (the
+-- inspector's, Move, Turn; Enter's LineEdit lets go by itself with the
+-- screen keyboard on). A pane's buttons take no focus (touch_size), so a
+-- scroll's drag and the - / + steppers keep it; the field entry mode keeps
+-- its own field (a refusal types again)
+function SH.let_go(why)
+	local f = magic.ui.focusElement
+	if SH.on() and f and f:GetTypeName() == "LineEdit" and not NT.fe.s then
+		magic.ui:SetFocusElement(nil)
+		log:info("kit editor: touch shell: " .. why .. ": the field let go")
+	end
+end
+
+-- What a tap on the world does now, before the first (the sweep of
+-- 2026-11-12: a placing or a paste armed, or Place under this, said
+-- nothing until the world was tapped), first in the status line
+local function armed_text()
+	local under = S.under and A.find(S.under)
+	under = under and " under " .. NT.entity_label(under) or ""
+	if S.placing then
+		return "Placing " .. tostring(S.placing.label) .. under .. ": tap the world"
+	end
+	return under ~= "" and "Placing" .. under .. " (Cancel: stop)" or nil
+end
+
 local function status_text()
 	local ses = E.session or {}
 	local s = ses.kind == "bench" and "Prefab" or E.persistent and
 			"Persistent" or E.running and "Running" or "Ended"
+	local armed = not NT.world_off() and armed_text()
+	if armed then
+		s = armed .. " · " .. s
+	end
 	local n = #(E.builders or {})
 	s = s .. " · " .. n .. (n == 1 and " builder" or " builders")
 	if (E.status or "") ~= "" then
@@ -895,9 +1013,9 @@ function SH.tick()
 		end
 	end
 	local shown, names = foot_shown(kbh), {}
-	for i, b in ipairs(SH.acts) do
+	for i in ipairs(SH.acts) do
 		if shown[i] then
-			names[#names + 1] = b:GetChild(0).text
+			names[#names + 1] = FOOT[1][i]
 		end
 	end
 	local foot = table.concat(names, ", ")
@@ -906,7 +1024,9 @@ function SH.tick()
 		SH.laid = lk
 		place_shell(shown)
 		SH.placed = {}
-		log:info("kit editor: touch shell: the foot: " .. foot)
+		log:info("kit editor: touch shell: the foot: " .. foot .. " (" ..
+				SH.foot_rows .. (SH.foot_rows == 1 and " row" or " rows") ..
+				(SH.foot_k < 1 and ", its text at " .. SH.foot_k * 100 .. "%)" or ")"))
 		log:info("kit editor: touch shell: pixels: the world " .. px_rect(world) ..
 				", the UI " .. px_rect(ui) .. ", the pane " .. px_rect(SH.pane_rect) ..
 				", the keyboard " .. math.floor(kb * magic.ui.scale) ..
@@ -949,6 +1069,7 @@ function SH.tick()
 		end
 		SH.view_d = A.ui_utils.dropdown(W.shell_views, vc, S.view, pick_view,
 				{height = SH.TOUCH, name = "shell views"})
+		drop_center(SH.view_d)
 		SH.view_dw, SH.title_set = SH.view_d.width, nil
 	end
 	-- Its popup's rows at the touch size (the sweep of 2026-11-12: the text
@@ -1035,6 +1156,10 @@ magic.SubscribeToEvent("command_seq:kit_touch_targets", function(_, data)
 				end
 				out[#out + 1] = string.format("%s \"%s\" %d %d %d %d", t, label,
 						p.x * sc, p.y * sc, c.width * sc, c.height * sc)
+				-- (a check box in a button: the Signals view's link's Shown)
+				if t == "Button" and depth < 40 then
+					walk(c, depth + 1)
+				end
 			elseif t and t ~= "ScrollBar" and depth < 40 then
 				walk(c, depth + 1)
 			end

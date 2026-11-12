@@ -465,6 +465,20 @@ local function own_lift(name, V)
 	return over and lift + M.hud_unit() + 4 + (over - 1) * (line + 4) or lift
 end
 
+-- [KIT_PHONE_EDITING] The top (UI y) of what stands on a finger's bars (the
+-- hotbar, its item line, the health), for an app's own lines over them; nil
+-- with no bars (the sweep of 2026-11-12: Workbench's hint ran into the
+-- hotbar). simplified: by own_lift's default order, the hotbar's room kept
+-- with no hotbar
+function M.own_stack_top()
+	local lift = own_lift("hint", vmin())
+	if lift == 0 then
+		return nil
+	end
+	local _, by, _, bh = hud_box()
+	return by + bh - lift - 4
+end
+
 function M.own_place(name, w, h)
 	local bx, by, bw, bh = hud_box()
 	local V = vmin()
@@ -1205,7 +1219,11 @@ local function update()
 			-- [KIT_SIGNALS_VIEW] In the Signals viewport the selected one on an
 			-- amber rectangle a little larger: beside it, not in it (a bar and
 			-- a button clip their children)
-			local marked = selected and M.hud_area ~= nil and M.hud_area() ~= nil
+			-- ([KIT_PHONE_EDITING] none unframed: the touch mode's Walk has a
+			-- HUD area too, and the HUD view's selection stayed marked over
+			-- it, the sweep of 2026-11-12)
+			local marked = selected and frame and M.hud_area ~= nil and
+					M.hud_area() ~= nil
 			if marked and not r.mark then
 				r.mark = r.host:CreateChild("BorderImage")
 				r.mark.blendMode = magic.BLEND_ALPHA
