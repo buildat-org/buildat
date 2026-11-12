@@ -377,13 +377,25 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 			}
 		});
 	}
-	document.addEventListener('fullscreenchange', function(){
+	// **The page's own fullscreen is not the engine's** ([KIT_PHONE_EDITING]):
+	// SDL takes any fullscreenchange for its window going fullscreen, and
+	// from then on drops every resize (SDL_emscriptenevents.c,
+	// Emscripten_HandleResize): the canvas kept a size read mid-entry
+	// (Vivaldi on Android 1078x2661 for 1078x2271 shown, Chrome 2420 tall for
+	// 2273), squashed into the screen, and the UI and the keyboard's
+	// numbers with it. So SDL hears only of the canvas's own (the client's
+	// fullscreen setting), and the size is read again once in or out (the
+	// emulator's: 2270 and 2273 tall within 200 ms of the entry).
+	window.addEventListener('fullscreenchange', function(e){
+		if(document.fullscreenElement && document.fullscreenElement !== canvas)
+			e.stopImmediatePropagation();
+		resize_again();
 		orientation_applied = null;
 		apply_orientation();
 		// Entered on a tap whose game took the wish back meanwhile (the
 		// tap opened a menu): out again
 		sync_fullscreen();
-	});
+	}, true);
 	// Turned to portrait under "landscape": out at once (entering waits for
 	// a tap)
 	if(screen.orientation && screen.orientation.addEventListener)
