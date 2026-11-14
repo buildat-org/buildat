@@ -286,6 +286,11 @@ end)
 
 -- ---- What a press would take: the knob, a port, an entity
 local function press_target(mx, my)
+	-- [KIT_PLANE] stage 3: a selected polygon's point or edge's middle (NT.pg)
+	local ph = NT.pg.handle_at(mx, my)
+	if ph then
+		return {poly = ph}
+	end
 	local kn = near_knob(mx, my)
 	if kn then
 		return {knob = kn}
@@ -352,6 +357,10 @@ end
 
 local function start_drag()
 	local t = S.press.target
+	if t.poly then
+		S.drag = NT.pg.start(t.poly)
+		return
+	end
 	if t.knob then
 		local _, c = knobs()
 		S.drag = {kind = "turn", c = c, h = t.knob, turn = 0}
@@ -406,6 +415,8 @@ local function update_drag()
 		for _, e in ipairs(d.ids) do
 			preview(e, {d.dx, d.dy, d.dz}, 0)
 		end
+	elseif d.kind == "poly" then
+		NT.pg.update(d)
 	elseif d.kind == "turn" then
 		local o, v = M.screen_ray(S.mx, S.my)
 		-- The handle's plane through the entity; edge on: as it was
@@ -490,7 +501,9 @@ end
 local function end_drag()
 	local d = S.drag
 	S.drag = nil
-	if d.kind == "move" then
+	if d.kind == "poly" then
+		NT.pg.finish(d)
+	elseif d.kind == "move" then
 		if d.dx == 0 and d.dy == 0 and d.dz == 0 then
 			clear_preview()
 			return
@@ -589,6 +602,10 @@ end
 -- A click (a press let go where it was)
 local function click()
 	local t = S.press.target
+	-- [KIT_PLANE] stage 3: a polygon's point drawn, or its edge's middle added
+	if NT.pg.click(S.press.mx, S.press.my, t) then
+		return
+	end
 	if S.placing then
 		local c = place_cell(S.press.mx, S.press.my)
 		if c then
@@ -639,6 +656,10 @@ end
 -- The right button let go where it was pressed: placing stops; on an
 -- entity its menu, on nothing the selection goes ([FP]'s)
 local function right_click(rc)
+	-- [KIT_PLANE] stage 3: a selected polygon's point taken away
+	if NT.pg.right(rc.mx, rc.my) then
+		return
+	end
 	if S.tool == "terrain" then
 		M.set_tool(nil)
 		return
@@ -2284,7 +2305,10 @@ end
 local function key_down(key, ctrl, shift)
 	-- [KIT_INPUT_ACTIONS] the keys by their actions (input.lua)
 	local is = function(id) return M.key(id, key) end
-	if is("view_hud") then
+	-- ([KIT_PLANE] stage 3: a polygon being drawn takes Enter and Backspace)
+	if NT.pg.key(key) then
+		return
+	elseif is("view_hud") then
 		return set_view("hud")
 	elseif is("view_signals") then
 		return set_view("signals")
@@ -2524,6 +2548,8 @@ local function compute_guide()
 				ghost(nil)
 				g.left = "let go on the view to place " .. d.item.label
 			end
+		elseif d.kind == "poly" then
+			g.left = "let go: the polygon's point " .. d.at .. " here"
 		end
 		return g
 	end
@@ -2616,6 +2642,10 @@ local function compute_guide()
 				S.view == "front" and "drag: pan the view" or "drag: turn")
 		g.note = not S.touch and M.key_text("[voxels] or Esc: put the voxels " ..
 				"away") or nil
+		return g
+	end
+	if S.placing and NT.pg.guide(g, mx, my) then
+		ghost(nil)
 		return g
 	end
 	if S.placing then
@@ -2911,6 +2941,7 @@ local function draw()
 		end
 	end
 	NT.pf.draw(dbg)
+	NT.pg.draw(dbg)
 	NT.sym_draw(dbg)
 	-- The round's own entities, orange (players are drawn by the app)
 	for _, e in ipairs(made()) do

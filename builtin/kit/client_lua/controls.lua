@@ -225,7 +225,7 @@ end
 -- (skip: what is left out, a function of an entity's id and node; the vehicle held)
 local function world(skip)
 	local reg = voxelworld.get_voxel_registry()
-	local boxes = {}
+	local boxes, polys = {}, {}
 	local moving_looks = nil
 	local turned = C.turned
 	if skip and turned then
@@ -257,6 +257,13 @@ local function world(skip)
 						tilted and q:PitchAngle() or 0, tilted and q:RollAngle() or 0)
 				if b then
 					boxes[#boxes + 1] = b
+				end
+				-- [KIT_PLANE] stage 3: a polygon's prism
+				local pg = show.look.shape == "polygon" and MV.look_poly(show.look, on,
+						{p.x, p.y, p.z}, q:YawAngle(), tilted and q:PitchAngle() or 0,
+						tilted and q:RollAngle() or 0)
+				if pg then
+					polys[#polys + 1] = pg
 				end
 			end
 		end
@@ -293,7 +300,7 @@ local function world(skip)
 	end, boxes = boxes, turned = turned, ground = ground,
 		edge = ground and {hm[3] or 0, hm[4] or 0, (hm[3] or 0) + hm[1] - 1,
 			(hm[4] or 0) + hm[2] - 1} or nil,
-		moving_looks = moving_looks, t = C.draw_t,
+		moving_looks = moving_looks, t = C.draw_t, polys = polys,
 		plane = C.ctl and tonumber(C.ctl.plane)} -- [KIT_PLANE] the body's z held
 end
 
@@ -1892,14 +1899,18 @@ local function place_camera(dt, at)
 		want_pos = target - d * h
 		if par.ortho == true then
 			cam.orthographic = true
-			cam.orthoSize = h
+			-- (set only as it changes: the side camera's below says why)
+			if math.abs(cam.orthoSize - h) > 1e-4 then
+				cam.orthoSize = h
+			end
 		end
 	elseif mode == "side" then
 		-- [KIT_PLANE] Across the plane from the body, looking along +z (x right, y
 		-- up), level, never turning; following once the body is dead_zone m off
-		-- the view's middle (half that up and down); what is in front of the
-		-- plane's layer clipped (the near clip there). Ortho: the height
-		-- perspective shows at the plane.
+		-- the view's middle (half that up and down); what is nearer than side_clip
+		-- in front of the plane clipped (the near clip there; 0.55: the plane's
+		-- layer's front, stage 3's foreground polygons want more). Ortho: the
+		-- height perspective shows at the plane.
 		-- simplified: as the editor's Front view, no caps: a cell of the layer
 		-- behind a solid one has no face toward the view
 		local dist = (tonumber(par.distance) or 6) * C.zoom
@@ -1913,6 +1924,7 @@ local function place_camera(dt, at)
 		f[2] = math.max(by - dz * 0.5, math.min(by + dz * 0.5, f[2]))
 		C.side_at = f
 		local pz = C.ctl and tonumber(C.ctl.plane) or at[3]
+		local clip = math.min(dist, tonumber(par.side_clip) or 0.55)
 		rot = magic.Quaternion(0, 0, roll)
 		want_pos = magic.Vector3(f[1] + ox, f[2] + oy, pz - dist + oz)
 		if par.ortho == true then
@@ -1924,10 +1936,10 @@ local function place_camera(dt, at)
 			if math.abs(cam.orthoSize - size) > 1e-4 then
 				cam.orthoSize = size
 			end
-			want_pos = magic.Vector3(want_pos.x, want_pos.y, pz - 0.55)
+			want_pos = magic.Vector3(want_pos.x, want_pos.y, pz - clip)
 		else
 			C.near0 = cam.nearClip
-			cam.nearClip = math.max(C.near0, dist - oz - 0.55)
+			cam.nearClip = math.max(C.near0, dist - oz - clip)
 		end
 	elseif mode == "chase" then
 		local dist = (tonumber(decl().camera_distance) or tonumber(par.distance) or 6) *

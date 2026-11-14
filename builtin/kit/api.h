@@ -468,6 +468,10 @@ namespace interface
 //   nor timed) and "none", an edit or c:set_param of another refused (a load
 //   takes it: the players then stand). [KIT_SOUNDS] A parameter type "sound": a dropdown of
 //   the project's sounds and "none" ("").
+//   [KIT_PLANE] A parameter type "points": a closed shape [[x, y]...] of 3 to
+//   128 points (|x|, |y| <= 32, its edges not crossing nor touching, its area
+//   not 0; any winding), edited in the Front view, not the inspector
+//   (kit/polygon's).
 //   [KIT_PARAM_CATEGORIES] A parameter's `cat` is the inspector's category
 //   it is under: "behaviour" (without one), "hud", "look" (appearance in
 //   the world and sounds), "physics" or "advanced" (technical: poll, rate,
@@ -675,7 +679,13 @@ namespace interface
 //   same each run) leaves it out of the box, its entities' runs failing
 //   Looks: shape "wedge", rotation {x, y, z} (degrees), material (plain,
 //   metal, glass, glow), and "param:<name>" anywhere in a look is that
-//   parameter's value (kit/part).
+//   parameter's value (kit/part). [KIT_PLANE] shape "polygon", points (a
+//   "points" value in the entity's x and y), depth (along its z, centred on
+//   its position): a prism, its mesh built on the clients; solid, it is met by
+//   the movements (move.lua) where it lies flat (turned by yaw 0 or 180 and any
+//   roll), not by the clients' physics; with kit/controls' plane vertical only
+//   where its depth spans the plane's z (others background or foreground).
+//   Its size and offset are its points' box (kit.cpp's).
 //   Debugging: the builders with the tools on are sent each tick's signals
 //   along links ("kit:flow" [[from, output, to, input]...], their lines
 //   lit) and their selection's log ("kit:log" {"id", "lines"}).

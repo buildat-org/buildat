@@ -4,9 +4,10 @@
 -- (m/s²), jump_height (m, 0: no jump), air_control (of the acceleration,
 -- in the air), coyote_time (s: a jump just after walking off still
 -- counts), jump_buffer (s: one pressed just before landing counts),
--- step_height (m: climbed walking), slope_limit (degrees: the heightmap's
--- slopes walked up, and a free voxel object's deck stood on; past it the deck
--- slides), rate (steps a second) and substeps (a step's).
+-- step_height (m: climbed walking), slope_limit (degrees: the heightmap's and
+-- kit/polygon's slopes walked up, a polygon's past it a wall, and a free voxel
+-- object's deck stood on; past it the deck slides), rate (steps a second) and
+-- substeps (a step's).
 -- [KIT_AUTO_JUMP] auto_jump: walking into a one-voxel step jumps up it
 -- without Jump (skeldat's, Luanti's autojump) -- off, touchscreen (a
 -- touch client's, the default) or all. A touch builder's Walk view in

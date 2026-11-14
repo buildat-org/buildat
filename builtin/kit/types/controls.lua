@@ -3,9 +3,11 @@
 -- top_down: from height above at a fixed angle and yaw, ortho a flat
 -- view; [KIT_PLANE] side: distance across the plane looking along +z, x
 -- right and y up, following once the body is dead_zone m off the middle,
--- never turning, ortho flat, what is in front of the plane's layer
--- clipped; left and right walk along x, the body facing that way, the
--- pointer aims in the plane), the pointer (crosshair: the view's middle and
+-- never turning, ortho flat, what is nearer than side_clip m in front of
+-- the plane clipped (0.55: all in front of the plane's layer; more for
+-- kit/polygon's foreground); left and right walk along x, the body facing
+-- that way, the pointer aims in the plane), the pointer (crosshair: the
+-- view's middle and
 -- mouse look; cursor: a free mouse pointer, the view turned with the right
 -- button; auto: a cursor for top_down and side), camera_frame (a walker
 -- standing on a free voxel object: world keeps the horizon level, object
@@ -77,6 +79,8 @@ return {
 		ortho = {cat = "look", type = "bool", default = false},
 		dead_zone = {cat = "look", type = "number", default = 1, min = 0,
 			max = 20},
+		side_clip = {cat = "look", type = "number", default = 0.55, min = 0.05,
+			max = 60},
 		smoothing = {cat = "look", type = "number", default = 0.1, min = 0,
 			max = 2},
 		offset_x = {cat = "look", type = "number", default = 0, min = -10,
