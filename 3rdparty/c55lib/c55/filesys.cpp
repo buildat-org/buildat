@@ -168,11 +168,12 @@ bool RecursiveDelete(std::string path)
 
 	//return false;
 
-	// This silly function needs a double-null terminated string...
-	// Well, we'll just make sure it has at least two, then.
-	path += "\0\0";
+	// pFrom is a list ended by an empty name: a second null after the one
+	// c_str() has. (+= "\0\0" appended nothing, so SHFileOperation read on
+	// into the heap and could delete whatever path the leftover bytes named.)
+	path += '\0';
 
-	SHFILEOPSTRUCT sfo;
+	SHFILEOPSTRUCT sfo = {};
 	sfo.hwnd = NULL;
 	sfo.wFunc = FO_DELETE;
 	sfo.pFrom = path.c_str();
