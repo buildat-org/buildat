@@ -632,7 +632,9 @@ local function aim(id, dir)
 		return dir
 	end
 	local cam = O.camera
-	local d = cam and cam.worldDirection or magic.Vector3(0, 0, 1)
+	-- ([KIT_PLANE] a side camera's: at the pointer, in the plane)
+	local d = M.side_aim and M.side_aim() or cam and cam.worldDirection or
+			magic.Vector3(0, 0, 1)
 	local n = id and P.nodes[id]
 	if n and cam then
 		local to = n.node.position + magic.Vector3(0, (type(n.show) == "table"

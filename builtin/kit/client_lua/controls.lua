@@ -98,6 +98,12 @@ end
 
 -- [KIT_TOOLS_1] hands.lua's wheel picks in first person
 M.camera_mode = function() return camera_mode() end
+-- Whether the mouse or a drag turns the view (a top-down's and [KIT_PLANE] a
+-- side camera's never turn)
+function M.view_turns()
+	local m = camera_mode()
+	return m ~= "top_down" and m ~= "side"
+end
 -- [KIT_TOOLS_2] A shot's recoil: the view kicked up by deg degrees
 function M.kick(deg)
 	C.pitch = math.max(-89, C.pitch - (tonumber(deg) or 0))
@@ -106,7 +112,7 @@ end
 function M.pointer_free()
 	local p = params().pointer or "auto"
 	if p == "auto" then
-		return camera_mode() == "top_down"
+		return camera_mode() == "top_down" or camera_mode() == "side"
 	end
 	return p == "cursor"
 end
@@ -287,7 +293,8 @@ local function world(skip)
 	end, boxes = boxes, turned = turned, ground = ground,
 		edge = ground and {hm[3] or 0, hm[4] or 0, (hm[3] or 0) + hm[1] - 1,
 			(hm[4] or 0) + hm[2] - 1} or nil,
-		moving_looks = moving_looks, t = C.draw_t}
+		moving_looks = moving_looks, t = C.draw_t,
+		plane = C.ctl and tonumber(C.ctl.plane)} -- [KIT_PLANE] the body's z held
 end
 
 -- ---- The body
@@ -920,7 +927,7 @@ buildat.sub_packet("kit:controls", function(data)
 	log:info("kit: controls: camera " .. camera_mode() .. ", pointer " ..
 			(M.pointer_free() and "cursor" or "crosshair") .. ", movement " ..
 			tostring(m and m.type or "none") .. (M.seated() and ", seat " ..
-			M.seated() or ""))
+			M.seated() or "") .. (c.plane and ", plane z " .. tostring(c.plane) or ""))
 end)
 
 -- ---- Effects: Kit's render path (kit_effects.xml), on a viewport of
@@ -1044,10 +1051,14 @@ local function view_yaw()
 	return math.atan2(f.x, f.z) * 180 / PI
 end
 
--- The input yaw: the view's (a top-down camera's own)
+-- The input yaw: the view's (a top-down camera's own; [KIT_PLANE] a side camera's
+-- the way the body faces, gather()'s)
 local function input_yaw()
 	if camera_mode() == "top_down" then
 		return tonumber(params().yaw) or 0
+	end
+	if camera_mode() == "side" then
+		return C.face or 90
 	end
 	return view_yaw()
 end
@@ -1189,6 +1200,15 @@ local function gather()
 	end
 	f = math.max(-1, math.min(1, f))
 	r = math.max(-1, math.min(1, r))
+	-- [KIT_PLANE] The side camera looks along +z: left and right go along x, the
+	-- body facing the way it last went (yaw 90: +x, 270: -x); forward and back,
+	-- across the plane, go nowhere
+	if camera_mode() == "side" and not M.riding() then
+		if r ~= 0 then
+			C.face = r > 0 and 90 or 270
+		end
+		f, r = math.abs(r), 0
+	end
 	local i = {f = fmt(f, 3), r = fmt(r, 3), yaw = fmt(input_yaw() % 360, 2),
 		jump = jump, go = 0, tx = 0, ty = 0, tz = 0, down = down}
 	if go_next then
@@ -1419,7 +1439,34 @@ function M.pointer_ray(x, y)
 			x, y = w / 2, h / 2
 		end
 	end
-	return M.screen_ray(x, y, node, cam)
+	local o, d = M.screen_ray(x, y, node, cam)
+	-- [KIT_PLANE] A side camera's from a hair inside the plane's layer: what is
+	-- clipped in front of it is not met, a voxel of the layer is (to dig), and a
+	-- free cell of it is placed in against what is behind it.
+	-- simplified: a solid cell of the layer pointed at has no place (before its
+	-- face is off the plane)
+	local pz = camera_mode() == "side" and C.ctl and tonumber(C.ctl.plane)
+	if pz and d.z > 1e-6 and o.z < pz - 0.499 then
+		o = o + d * ((pz - 0.499 - o.z) / d.z)
+	end
+	return o, d
+end
+
+-- [KIT_PLANE] A side camera's aim (hands.lua's shots): from the body's eye to where
+-- the pointer meets the plane, along it (nil: no side camera)
+function M.side_aim()
+	local pz = C.ctl and tonumber(C.ctl.plane)
+	if camera_mode() ~= "side" or not C.draw or not pz then
+		return nil
+	end
+	local o, d = M.pointer_ray()
+	if d.z < 1e-6 then
+		return nil
+	end
+	local t = (pz - o.z) / d.z
+	local v = magic.Vector3(o.x + d.x * t - C.draw[1], o.y + d.y * t - C.draw[2] -
+			(tonumber(body_decl().eye) or 1.5487), 0)
+	return v:Length() > 1e-6 and v:Normalized() or nil
 end
 
 function M.body_pos()
@@ -1645,7 +1692,7 @@ if TOUCH then
 			return
 		end
 		-- The mouse sensitivity's, at half of 0.2 (floorplanner's)
-		if camera_mode() ~= "top_down" then
+		if M.view_turns() then
 			C.yaw = C.yaw + data:GetInt("DX") * 0.1
 			C.pitch = math.max(-89, math.min(89, C.pitch + data:GetInt("DY") * 0.1))
 		end
@@ -1794,6 +1841,10 @@ local function place_camera(dt, at)
 	local cam = node:GetComponent("Camera")
 	local par = params()
 	local mode = camera_mode()
+	-- (the near clip a side camera moved)
+	if C.near0 then
+		cam.nearClip, C.near0 = C.near0, nil
+	end
 	-- [KIT_SPECTATE] out of play: a free camera or a player's view
 	-- (players.lua)
 	local sp, sr = M.spectate_view(dt, node.position, C.yaw, C.pitch)
@@ -1842,6 +1893,41 @@ local function place_camera(dt, at)
 		if par.ortho == true then
 			cam.orthographic = true
 			cam.orthoSize = h
+		end
+	elseif mode == "side" then
+		-- [KIT_PLANE] Across the plane from the body, looking along +z (x right, y
+		-- up), level, never turning; following once the body is dead_zone m off
+		-- the view's middle (half that up and down); what is in front of the
+		-- plane's layer clipped (the near clip there). Ortho: the height
+		-- perspective shows at the plane.
+		-- simplified: as the editor's Front view, no caps: a cell of the layer
+		-- behind a solid one has no face toward the view
+		local dist = (tonumber(par.distance) or 6) * C.zoom
+		local dz = tonumber(par.dead_zone) or 1
+		local bx, by = at[1], at[2] + (tonumber(bd.h) or 1.7) * 0.5
+		local f = C.side_at
+		if not f or math.abs(bx - f[1]) > 30 or math.abs(by - f[2]) > 30 then
+			f = {bx, by}
+		end
+		f[1] = math.max(bx - dz, math.min(bx + dz, f[1]))
+		f[2] = math.max(by - dz * 0.5, math.min(by + dz * 0.5, f[2]))
+		C.side_at = f
+		local pz = C.ctl and tonumber(C.ctl.plane) or at[3]
+		rot = magic.Quaternion(0, 0, roll)
+		want_pos = magic.Vector3(f[1] + ox, f[2] + oy, pz - dist + oz)
+		if par.ortho == true then
+			-- (an ortho camera's near clip is 0 in Urho3D: it sits at the clip.
+			-- Its size set only as it changes: a set makes its aspect 1 until the
+			-- next frame's view, and kit_point_at's WorldToScreenPoint was off)
+			cam.orthographic = true
+			local size = 2 * dist * math.tan(math.rad(cam.fov) / 2)
+			if math.abs(cam.orthoSize - size) > 1e-4 then
+				cam.orthoSize = size
+			end
+			want_pos = magic.Vector3(want_pos.x, want_pos.y, pz - 0.55)
+		else
+			C.near0 = cam.nearClip
+			cam.nearClip = math.max(C.near0, dist - oz - 0.55)
 		end
 	elseif mode == "chase" then
 		local dist = (tonumber(decl().camera_distance) or tonumber(par.distance) or 6) *
@@ -2076,7 +2162,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 	local dt = data:GetFloat("TimeStep")
 	-- The look: the mouse in the crosshair, the right drag with a cursor
 	local mx, my = 0, 0
-	if walking() and not paused() and not TOUCH and camera_mode() ~= "top_down" then
+	if walking() and not paused() and not TOUCH and M.view_turns() then
 		if not M.pointer_free() and (not E.editing or M.looking()) then
 			mx, my = ui_utils.mouse_look_move()
 		elseif magic.input:GetMouseButtonDown(magic.MOUSEB_RIGHT) then
@@ -2085,7 +2171,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 		end
 	end
 	-- The gamepad's right stick: 120 degrees a second at full
-	if walking() and not paused() and camera_mode() ~= "top_down" then
+	if walking() and not paused() and M.view_turns() then
 		mx = mx + M.pad_axis(2) * 1200 * dt
 		my = my + M.pad_axis(3) * 1200 * dt
 	end
@@ -2212,7 +2298,9 @@ magic.SubscribeToEvent("Update", function(_, data)
 	end
 	-- [KIT_PLAYER_MODEL] the players' bodies (players.lua): this one's
 	-- where it is predicted, shown but in first person or in a seat
-	M.draw_players(at, view_yaw(), C.pitch, bd_h(), mode ~= "first_person" and
+	-- ([KIT_PLANE] a side camera's facing the way it last went)
+	M.draw_players(at, mode == "side" and input_yaw() or view_yaw(), C.pitch, bd_h(),
+			mode ~= "first_person" and
 			not seat and not M.spectating())
 	impact_marker(dt)
 	effects(dt)

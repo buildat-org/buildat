@@ -462,7 +462,10 @@ namespace interface
 //   `choices_from = "scenes"`: a dropdown of the composition's scenes
 //   and "none" (""). `choices_from = "scene_list"`: a text of scene names,
 //   comma separated, and a dropdown adding one to it ("item_list" the same
-//   of items). [KIT_SOUNDS] A parameter type "sound": a dropdown of
+//   of items). [KIT_PLANE] `choices_from = "movements"`: a dropdown of the
+//   types that step players' bodies (a `movement` and a step, not steered
+//   nor timed) and "none", an edit or c:set_param of another refused (a load
+//   takes it: the players then stand). [KIT_SOUNDS] A parameter type "sound": a dropdown of
 //   the project's sounds and "none" ("").
 //   [KIT_PARAM_CATEGORIES] A parameter's `cat` is the inspector's category
 //   it is under: "behaviour" (without one), "hud", "look" (appearance in

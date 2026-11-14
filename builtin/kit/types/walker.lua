@@ -18,6 +18,9 @@
 -- Running (kit.cpp's fall_hurt; the height from the landing's speed).
 -- simplified: not a landing on a free object's deck while on one (walk_on)
 -- The keys W A S D and Space; a touchscreen's stick and Jump.
+-- [KIT_PLANE] kit/controls' plane vertical holds it at one z (move.lua: no
+-- wish and no move across, M.steps' W:hold), its knobs the same along x (a
+-- side camera's left and right); a voxel off the plane's layer is not met.
 local BODY = {r = 0.45, h = 1.7, eye = 1.5487}
 
 return {

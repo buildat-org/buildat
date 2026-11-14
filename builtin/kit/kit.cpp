@@ -16157,7 +16157,7 @@ struct Module: public interface::Module, public Interface
 		else if(why.empty() && !decl.is_object())
 			why = type+" has no parameter "+param.substr(0, 64);
 		if(why.empty()){
-			const ss_ bad = check_param(decl, s.at(3u));
+			const ss_ bad = check_set_param(decl, s.at(3u));
 			if(!bad.empty())
 				why = param+" is "+bad;
 		}
@@ -18053,6 +18053,9 @@ struct Module: public interface::Module, public Interface
 		// simplified: a fixed time (SETTLE_US); a tick the client acknowledges
 		// would end it exactly
 		int64_t settle_until = 0;
+		// [KIT_PLANE] the z it is held at (plane_depth(); NaN: kit/controls'
+		// plane is none)
+		double plane_z = NAN;
 	};
 	static constexpr int64_t SETTLE_US = 500000;
 	ss_ settle_json(const Body &b) const
@@ -18094,6 +18097,26 @@ struct Module: public interface::Module, public Interface
 			return false;
 		const Type &t = m_types[type];
 		return t.decl.get("movement").is_object() && t.handlers.count("step");
+	}
+
+	// A value an edit or c:set_param sets: check_param's, and [KIT_PLANE] for
+	// choices_from "movements" (kit/controls' movement) "none" or a type stepping
+	// players (not a creature's, not a course's). Not checked at a load: a movement
+	// gone would refuse the whole composition (the players then stand)
+	ss_ check_set_param(const json::Value &decl, const json::Value &v)
+	{
+		const ss_ bad = check_param(decl, v);
+		if(!bad.empty() || jstr(decl, "choices_from") != "movements" ||
+				v.as_string() == "none")
+			return bad;
+		const ss_ t = v.as_string();
+		if(!is_movement(t))
+			return "none or a movement (a type with `movement` and a step), not \""+
+					t.substr(0, 64)+"\"";
+		const json::Value &md = m_types[t].decl.get("movement");
+		if(md.get("steered").is_true() || md.get("timed").is_true())
+			return "a players' movement ("+t+" steps creatures or a course)";
+		return "";
 	}
 
 	// [KIT_COMPONENTS] An entity's one movement (nullptr: none)
@@ -18159,6 +18182,39 @@ struct Module: public interface::Module, public Interface
 		if(!load_type("kit/controls", why))
 			return json::object();
 		return params_of("kit/controls", root_instance("kit/controls"));
+	}
+
+	// [KIT_PLANE] The plane's depth in a scene: the cell's middle (a whole z) of
+	// the spawn, the last placed spawn type there that puts players (as a joining
+	// player ends on the last placed), else the World's spawn. kit/controls'
+	// plane "vertical" holds the bodies there (move.lua's W:hold, both sides); the
+	// editor's front view places there.
+	// simplified: one plane a scene; a team's pad at another depth has its players
+	// put onto this one (zones of their own are [KIT_PLANE]'s later stage)
+	double plane_depth(const ss_ &scene)
+	{
+		uint64_t best = 0;
+		double z = 0;
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			ss_ es;
+			if(p.first < best || !e.has_pos || !scene_of(e, &es) || es != scene)
+				continue;
+			for(const Instance &in : e.comps){
+				const Type &t = m_types[in.type];
+				if(t.spawn && (t.spawn_param.empty() ||
+						in.params.get(t.spawn_param).is_true())){
+					double w[3];
+					world_of(e, w);
+					best = p.first, z = w[2];
+				}
+			}
+		}
+		if(!best){
+			double x, y;
+			scene_spawn(scene, x, y, z);
+		}
+		return std::floor(z + 0.5);
 	}
 
 	// The movement a body has: its seat's, else the controls' choice
@@ -18268,6 +18324,9 @@ struct Module: public interface::Module, public Interface
 			m.set("decl", m_types[b.type].decl.get("movement"));
 			c.set("move", m);
 			c.set("seat", (int64_t)b.seat);
+			// [KIT_PLANE] the z it is held at, the client predicting as the box steps
+			if(!std::isnan(b.plane_z))
+				c.set("plane", b.plane_z);
 			// [KIT_VEHICLE_MOVEMENTS] a steered vehicle ridden: its inputs, no steps
 			if(b.ride)
 				c.set("ride", (int64_t)b.ride);
@@ -18499,6 +18558,17 @@ struct Module: public interface::Module, public Interface
 			b.home[0] = x;
 			b.home[1] = y;
 			b.home[2] = z;
+		}
+		// [KIT_PLANE] onto the plane: its depth, no speed across (a rider is
+		// where its seat is)
+		b.plane_z = NAN;
+		if(jstr(controls_params(), "plane") == "vertical")
+			b.plane_z = plane_depth(m_peers[peer].scene);
+		if(!std::isnan(b.plane_z) && !b.ride && b.state.get("pos").is_array() &&
+				b.state.get("pos").size() == 3){
+			b.state["pos"].set_at(2, b.plane_z);
+			if(b.state.get("vel").is_array() && b.state.get("vel").size() == 3)
+				b.state["vel"].set_at(2, 0.0);
 		}
 		b.state = json::load_string(b.state.stringify().c_str());
 		b.state_json = b.state.stringify();
@@ -18736,13 +18806,15 @@ struct Module: public interface::Module, public Interface
 			double r, double h, double reach)
 	{
 		const Entity *v = b.seat ? vehicle_of(b.seat) : nullptr;
-		snapshot(o, pe.scene, b.state, v ? v->id : 0, pos, r, h, reach);
+		snapshot(o, pe.scene, b.state, v ? v->id : 0, pos, r, h, reach, b.plane_z);
 	}
 
 	// [KIT_VEHICLE_MOVEMENTS] own: what is stepping (a vehicle), not met with what is
 	// under it; the tracks of the scene's steered ones
+	// [KIT_PLANE] plane: the z the body is held at (NaN: none)
 	void snapshot(ss_ &o, const ss_ &scene_name, const json::Value &state, uint64_t own,
-			const double pos[3], double r, double h, double reach)
+			const double pos[3], double r, double h, double reach,
+			double plane = NAN)
 	{
 		WorldScope ws(m_w, world_named(scene_name));
 		auto si = m_host.scenes.find(scene_name);
@@ -18986,6 +19058,8 @@ struct Module: public interface::Module, public Interface
 				o += "}}";
 			});
 		tracks_lit(o, scene_name);
+		if(!std::isnan(plane))
+			o += ",plane="+json::Value(plane).stringify();
 		o += "}";
 	}
 
@@ -21310,6 +21384,10 @@ struct Module: public interface::Module, public Interface
 	{
 		int64_t spent = 0;
 		const int64_t now = interface::os::time_us();
+		// [KIT_PLANE] each scene's plane depth, once a tick
+		const bool plane_on = !m_bodies.empty() &&
+				jstr(controls_params(), "plane") == "vertical";
+		sm_<ss_, double> depths;
 		for(auto &bp : m_bodies){
 			Body &b = bp.second;
 			auto pi = m_peers.find(bp.first);
@@ -21329,8 +21407,26 @@ struct Module: public interface::Module, public Interface
 			const uint64_t ride = b.ride;
 			body_movement(b, type, params, pi->second.scene);
 			const bool changed = params.stringify() != b.params.stringify();
-			if(type != b.type || ride != b.ride || (changed && !b.ride)){
-				if(type == b.type && !type.empty()){
+			// [KIT_PLANE] The plane turned on or off, or its spawn moved: put again
+			// onto it (a rider holds nothing: its vehicle steps here)
+			double pz = NAN;
+			if(plane_on){
+				auto di = depths.find(pi->second.scene);
+				if(di == depths.end())
+					di = depths.insert(std::make_pair(pi->second.scene,
+							plane_depth(pi->second.scene))).first;
+				pz = di->second;
+			}
+			const bool plane_moved = std::isnan(pz) != std::isnan(b.plane_z) ||
+					(!std::isnan(pz) && pz != b.plane_z);
+			if(plane_moved && b.ride)
+				b.plane_z = pz;
+			else if(plane_moved)
+				log_i(MODULE, "%s's plane: %s", cs(pi->second.name), std::isnan(pz) ?
+						"none" : cs("z "+json::Value(pz).stringify()));
+			if(type != b.type || ride != b.ride || (changed && !b.ride) ||
+					(plane_moved && !b.ride)){
+				if(type == b.type && !type.empty() && (changed || ride != b.ride)){
 					const json::Value &g = params.get("gravity");
 					log_i(MODULE, "%s's movement %s changed: gravity %s",
 							cs(pi->second.name), cs(type), cs(g.is_number() ?
@@ -28896,6 +28992,9 @@ struct Module: public interface::Module, public Interface
 				scenes.append(e.second.name);
 		j.set("scenes", scenes);
 		j.set("scene", pi != m_peers.end() ? pi->second.scene : ss_());
+		// [KIT_PLANE] the depth of its scene's plane (the editor's Front view's)
+		if(editing)
+			j.set("plane_depth", plane_depth(pi->second.scene));
 		j.set("can_make_scenes", (bool)m_host.make_scene);
 		// [KIT_SESSIONS_1] the session they are in: {id, kind, by, clock}
 		{
@@ -30211,7 +30310,7 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			const json::Value value = centre ? centre_of(*e) : j.get("value");
-			const ss_ bad = check_param(decl, value);
+			const ss_ bad = check_set_param(decl, value);
 			if(!bad.empty()){
 				why = in->type+"'s "+param+" is "+bad;
 				return false;

@@ -49,6 +49,21 @@
 -- body in a frame is carried by s.at being local. The motion's parameters are
 -- kit/wave's (M.wave); a row has its own and those of the moving objects it
 -- is under as links, each in the world at rest (M.turned).
+-- [KIT_PLANE] w.plane (kit/controls' plane "vertical": the spawn's depth, a whole z;
+-- nil: none): x right, y up, the camera on the -z side looking +z. M.steps holds the
+-- body at that z after each step (both sides: the bits agree); W:walk and W:move go
+-- nowhere across it. The 2D queries, in the plane at z (default w.plane, else 0), what
+-- a movement of its own collides with:
+--   w:circle(x, y, r, z) -> {{depth = d, nx = , ny = , info = }...}: what overlaps
+--     the circle, the deepest first, each with its normal out toward the circle's
+--     middle and how far in it reaches ({}: free)
+--   w:segment(x0, y0, x1, y1, z) -> t (0...1 of the way), nx, ny, info: the first
+--     solid the segment meets, the normal out of it toward the start (nil: none)
+-- They meet the voxels of the plane's layer (a whole cell's side against a solid
+-- neighbour is no surface: nothing catches on a floor's seams), the shapes' and the
+-- solid looks' boxes through z, the heightmap's profile along z and W:plane_edges'
+-- (where stage 3's polygons come in); the segment the free objects too (W:ray's).
+-- simplified: the circle meets no free voxel object
 local M = {}
 local floor, sqrt = math.floor, math.sqrt
 local PI = 3.14159265358979323846
@@ -571,6 +586,8 @@ function M.world(t)
 	w.edge = t.edge
 	w.unknown_air = t.ground ~= nil or t.edge ~= nil
 	w.cache = {}
+	-- [KIT_PLANE] the plane's z (nil: none)
+	w.plane = type(t.plane) == "number" and t.plane or nil
 	-- [KIT_MOVING_OBJECTS] t.moving_looks: solid looks on moving objects, each
 	-- {look, on, {x, y, z}, yaw, pitch, roll, links} at rest
 	w.moving_looks = t.moving_looks
@@ -1042,6 +1059,10 @@ end
 
 function W:move(b, dx, dy, dz, step)
 	local hits = {x = 0, y = 0, z = 0}
+	-- [KIT_PLANE] nothing across the plane (no wall met there, no step up from one)
+	if self.plane then
+		dz = 0
+	end
 	local bb = box_of(b.x, b.y, b.z, b.r, b.h)
 	local my, hy = self:sweep(bb, 2, dy)
 	if hy then
@@ -1149,8 +1170,8 @@ function W:ray_objects(ox, oy, oz, dx, dy, dz, len, skip)
 end
 
 -- A ray: the first solid cell (Amanatides and Woo), object box or ground
--- along it within len: t, info, the normal
-function W:ray(ox, oy, oz, dx, dy, dz, len)
+-- along it within len: t, info, the normal (no_ground: the heightmap left out)
+function W:ray(ox, oy, oz, dx, dy, dz, len, no_ground)
 	local l = sqrt(dx * dx + dy * dy + dz * dz)
 	if l < 1e-9 then
 		return nil
@@ -1265,7 +1286,7 @@ function W:ray(ox, oy, oz, dx, dy, dz, len)
 			best, bi, bn = t0, M.OBJECT, n
 		end
 	end
-	if self.ground_fn then
+	if self.ground_fn and not no_ground then
 		local stp, prev = 0.25, 0
 		local lim = best or len
 		local tt = 0
@@ -1386,6 +1407,183 @@ function W:contacts(b)
 		end
 	end
 	return out
+end
+
+-- ---- [KIT_PLANE] The plane (the top of this file says what)
+-- The body held to it after a step: its depth, its speed across; on a free object's
+-- deck its feet there follow. simplified: the speed in a deck's frame is the deck's
+-- own (a turned deck's across is left; the depth is put back each step)
+function W:hold(s)
+	local p, v = s.pos, s.vel
+	if type(p) ~= "table" then
+		return
+	end
+	p[3] = self.plane
+	if s.frame and type(s.at) == "table" then
+		for _, o in ipairs(self.turned) do
+			if o.id == s.frame then
+				s.at = {into(o, p[1] - o.x, p[2] - o.y, p[3] - o.z)}
+			end
+		end
+	elseif type(v) == "table" then
+		v[3] = 0
+	end
+end
+
+-- The edges in the plane at z, each {ax, ay, bx, by, info} with the solid on its
+-- right going from a to b, for x0...x1, y0...y1: the heightmap's profile along z (a
+-- vertex at each whole x: exact at a whole z, as the plane's is).
+-- [KIT_PLANE] stage 3: kit/polygon's outlines at z are added here, and both 2D
+-- queries meet them
+function W:plane_edges(z, x0, y0, x1, y1)
+	local out = {}
+	if self.ground_fn then
+		local px, ph = nil, nil
+		for ix = floor(x0), floor(x1) + 1 do
+			local h = self.ground_fn(ix, z)
+			if h and ph then
+				out[#out + 1] = {px, ph, ix, h, M.GROUND}
+			end
+			px, ph = ix, h
+		end
+	end
+	return out
+end
+
+-- The circle's contacts, the deepest first (the same one twice once)
+function W:circle(x, y, r, z)
+	z = z or self.plane or 0
+	local k = floor(z + 0.5)
+	local out = {}
+	local function add(d, nx, ny, info)
+		local at = #out + 1
+		for i, c in ipairs(out) do
+			if abs(c.depth - d) < 1e-9 and abs(c.nx - nx) < 1e-9 and
+					abs(c.ny - ny) < 1e-9 then
+				return
+			end
+			if at > #out and d > c.depth then
+				at = i
+			end
+		end
+		for i = #out, at, -1 do
+			out[i + 1] = out[i]
+		end
+		out[at] = {depth = d, nx = nx, ny = ny, info = info}
+	end
+	-- A box x0...x1, y0...y1; f: its sides that are surfaces ({-x, +x, -y, +y}: past
+	-- one that is not, against a solid neighbour, the box goes on)
+	local ALL = {true, true, true, true}
+	local function box(x0, y0, x1, y1, f, info)
+		local qx = x < x0 and f[1] and x0 or x > x1 and f[2] and x1 or x
+		local qy = y < y0 and f[3] and y0 or y > y1 and f[4] and y1 or y
+		local dx, dy = x - qx, y - qy
+		local d2 = dx * dx + dy * dy
+		if d2 > 0 then
+			if d2 < r * r then
+				local d = sqrt(d2)
+				add(r - d, dx / d, dy / d, info)
+			end
+			return
+		end
+		if x < x0 or x > x1 or y < y0 or y > y1 then
+			return
+		end
+		-- The middle in it: out by its nearest surface (buried: its nearest side)
+		local best, nx, ny = nil, 0, 0
+		for pass = 1, 2 do
+			for q, s in ipairs({{x - x0, -1, 0}, {x1 - x, 1, 0}, {y - y0, 0, -1},
+					{y1 - y, 0, 1}}) do
+				if (f[q] or pass == 2) and (not best or s[1] < best) then
+					best, nx, ny = s[1], s[2], s[3]
+				end
+			end
+			if best then
+				break
+			end
+		end
+		add(r + best, nx, ny, info)
+	end
+	local function full(i, j)
+		local c = self:cell(i, j, k)
+		return c ~= nil and not c.boxes
+	end
+	for i = lo_cell(x - r), hi_cell(x + r) do
+		for j = lo_cell(y - r), hi_cell(y + r) do
+			local info = self:cell(i, j, k)
+			if info and info.boxes then
+				for _, b in ipairs(cell_boxes(info, i, j, k)) do
+					if b[3] < z and b[6] > z then
+						box(b[1], b[2], b[4], b[5], ALL, info)
+					end
+				end
+			elseif info then
+				box(i - 0.5, j - 0.5, i + 0.5, j + 0.5, {not full(i - 1, j),
+					not full(i + 1, j), not full(i, j - 1), not full(i, j + 1)}, info)
+			end
+		end
+	end
+	for _, b in ipairs(self.boxes) do
+		if b[3] < z and b[6] > z and b[1] < x + r and b[4] > x - r and b[2] < y + r and
+				b[5] > y - r then
+			box(b[1], b[2], b[4], b[5], ALL, b.info or M.OBJECT)
+		end
+	end
+	-- The edges: from in front as from a box's corner; from behind (inside the solid,
+	-- over the edge's span) out along its normal
+	for _, e in ipairs(self:plane_edges(z, x - r, y - r, x + r, y + r)) do
+		local ax, ay, ex, ey = e[1], e[2], e[3] - e[1], e[4] - e[2]
+		local l2 = ex * ex + ey * ey
+		if l2 > 1e-18 then
+			local u = ((x - ax) * ex + (y - ay) * ey) / l2
+			local cu = u < 0 and 0 or u > 1 and 1 or u
+			local dx, dy = x - ax - ex * cu, y - ay - ey * cu
+			local l = sqrt(l2)
+			local nx, ny = -ey / l, ex / l
+			local side = dx * nx + dy * ny
+			local d2 = dx * dx + dy * dy
+			if side > 0 and d2 < r * r then
+				local d = sqrt(d2)
+				add(r - d, dx / d, dy / d, e[5])
+			elseif side <= 0 and u >= 0 and u <= 1 then
+				add(r - side, nx, ny, e[5])
+			end
+		end
+	end
+	return out
+end
+
+-- The first solid along the segment
+function W:segment(x0, y0, x1, y1, z)
+	z = z or self.plane or 0
+	local dx, dy = x1 - x0, y1 - y0
+	local len = sqrt(dx * dx + dy * dy)
+	if len < 1e-12 then
+		return nil
+	end
+	local t, info, nx, ny = self:ray(x0, y0, z, dx, dy, 0, len, true)
+	local best = t and t / len
+	for _, e in ipairs(self:plane_edges(z, x0 < x1 and x0 or x1, y0 < y1 and y0 or y1,
+			x0 < x1 and x1 or x0, y0 < y1 and y1 or y0)) do
+		local ex, ey = e[3] - e[1], e[4] - e[2]
+		local den = dx * ey - dy * ex
+		if abs(den) > 1e-12 then
+			local ax, ay = e[1] - x0, e[2] - y0
+			local s = (ax * ey - ay * ex) / den
+			local u = (ax * dy - ay * dx) / den
+			if s >= 0 and s <= 1 and u >= 0 and u <= 1 and (not best or s < best) then
+				local l = sqrt(ex * ex + ey * ey)
+				best, info, nx, ny = s, e[5], -ey / l, ex / l
+				if nx * dx + ny * dy > 0 then
+					nx, ny = -nx, -ny
+				end
+			end
+		end
+	end
+	if not best then
+		return nil
+	end
+	return best, nx, ny, info
 end
 
 -- ---- A character: kit/walker's and kit/click_to_move's step. s the
@@ -1622,6 +1820,10 @@ function W:walk(s, b, wx, wz, jump, dt, p, auto)
 	if type(s.vel) ~= "table" then
 		s.vel = {0, 0, 0}
 	end
+	-- [KIT_PLANE] no wish across the plane
+	if self.plane then
+		wz = 0
+	end
 	-- [KIT_WALKER_FRAME] On an object: in its frame. Its object gone (taken away
 	-- in an edit): the world's, where it stood
 	if s.frame then
@@ -1835,7 +2037,8 @@ function M.snapshot(t)
 	local edge = type(hm) == "table" and hm.sx and {hm.ox or 0, hm.oz or 0,
 			(hm.ox or 0) + hm.sx - 1, (hm.oz or 0) + hm.sz - 1} or nil
 	return M.world{cell = cell, boxes = boxes, ground = ground, edge = edge,
-		turned = M.turned(t.turned or {}), moving_looks = moving_looks, t = t.t}
+		turned = M.turned(t.turned or {}), moving_looks = moving_looks, t = t.t,
+		plane = t.plane}
 end
 
 -- The steps of a batch: each input dt long, in sub steps of its own
@@ -1848,6 +2051,9 @@ function M.steps(def, s, inputs, dt, sub, w, p)
 				w:pose_at(i.t / 1000 + (n - 1) * dt / sub)
 			end
 			def.step(s, i, dt / sub, w, p)
+			if w.plane then
+				w:hold(s)
+			end
 		end
 	end
 	return s
