@@ -1,12 +1,20 @@
 -- The players' controls ([KIT] stage 4h), game-wide, on the app root: the
 -- camera (first_person: the eye; chase: behind the player, distance away;
 -- top_down: from height above at a fixed angle and yaw, ortho a flat
--- view), the pointer (crosshair: the view's middle and mouse look;
--- cursor: a free mouse pointer, the view turned with the right button;
--- auto: a cursor for top_down), camera_frame (a walker standing on a free
--- voxel object: world keeps the horizon level, object tilts the first person
--- and chase views with the deck), the movement (a type stepping the
--- players' bodies: kit/walker, kit/click_to_move) and the view's detail:
+-- view; [KIT_PLANE] side: distance across the plane looking along +z, x
+-- right and y up, following once the body is dead_zone m off the middle,
+-- never turning, ortho flat, what is in front of the plane's layer
+-- clipped; left and right walk along x, the body facing that way, the
+-- pointer aims in the plane), the pointer (crosshair: the view's middle and
+-- mouse look; cursor: a free mouse pointer, the view turned with the right
+-- button; auto: a cursor for top_down and side), camera_frame (a walker
+-- standing on a free voxel object: world keeps the horizon level, object
+-- tilts the first person and chase views with the deck), the movement (a type
+-- stepping the players' bodies: kit/walker, kit/click_to_move, any other
+-- with a step but a creature's or a course's; "none"), [KIT_PLANE] plane
+-- (vertical: the players' bodies held at one z, the depth of the spawn a
+-- joining player ends on, a whole z, both sides stepping so; none) and the
+-- view's detail:
 -- fov, an offset, smoothing (seconds), roll (degrees), and the effects
 -- tint (#rrggbb) at tint_amount, vignette, blur and glitch (0...1). The
 -- inputs play for everyone (to = player: the player who set them off):
@@ -48,13 +56,14 @@ return {
 	controls = true,
 	params = {
 		camera = {type = "string", default = "first_person",
-			choices = {"first_person", "chase", "top_down"}},
+			choices = {"first_person", "chase", "top_down", "side"}},
 		pointer = {type = "string", default = "auto",
 			choices = {"auto", "crosshair", "cursor"}},
 		camera_frame = {type = "string", default = "world",
 			choices = {"world", "object"}},
 		movement = {type = "string", default = "kit/walker",
-			choices = {"kit/walker", "kit/click_to_move", "none"}},
+			choices_from = "movements"},
+		plane = {type = "string", default = "none", choices = {"none", "vertical"}},
 		fov = {cat = "look", type = "number", default = 75, min = 20,
 			max = 150},
 		distance = {cat = "look", type = "number", default = 6, min = 1,
@@ -66,6 +75,8 @@ return {
 		yaw = {cat = "look", type = "number", default = 0, min = -360,
 			max = 360},
 		ortho = {cat = "look", type = "bool", default = false},
+		dead_zone = {cat = "look", type = "number", default = 1, min = 0,
+			max = 20},
 		smoothing = {cat = "look", type = "number", default = 0.1, min = 0,
 			max = 2},
 		offset_x = {cat = "look", type = "number", default = 0, min = -10,
@@ -105,7 +116,7 @@ return {
 			fov = "Takes the view's angle over its fov time. Value: the angle; 0 goes back.",
 			glitch = "A glitch on the screen. Value: its seconds (none: 1).",
 			tint = "A flash of a colour. Value: #rrggbb (none: white).",
-			camera = "Changes the camera's mode. Value: first_person, chase or top_down; \"\" its own.",
+			camera = "Changes the camera's mode. Value: first_person, chase, top_down or side; \"\" its own.",
 		},
 	},
 	inputs = {shake = "any", fov = "any", glitch = "any", tint = "any",

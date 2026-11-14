@@ -48,7 +48,7 @@ local text, to_screen, touch, type_of, typing =
 		A.text, A.to_screen, A.touch, A.type_of, A.typing
 local ui_utils, v3, vbox, VIEW_KEYS, voxel_names =
 		A.ui_utils, A.v3, A.vbox, A.VIEW_KEYS, A.voxel_names
-local W, window = A.W, A.window
+local W, window, front_at = A.W, A.window, A.front_at
 local terrain_panel, zoom_at
 local brush_at, stroke_begin, stroke_move, stroke_end, draw_brush
 local cam3d_node, cam3d
@@ -368,10 +368,13 @@ local function start_drag()
 		local e = find(t.id)
 		local o, v = M.screen_ray(S.press.mx, S.press.my)
 		local y = e.pos and e.pos[2] or O.ground_y
-		local hp = plane_at(o, v, y)
+		-- ([KIT_PLANE] the Front view's in x and y, on the plane through it)
+		local front = S.view == "front"
+		local z = e.pos and e.pos[3] or 0
+		local hp = front and front_at(o, v, z) or not front and plane_at(o, v, y)
 		if hp then
-			S.drag = {kind = "move", y = y, hp = hp, dx = 0, dz = 0,
-				ids = movable()}
+			S.drag = {kind = "move", y = y, z = front and z or nil, hp = hp, dx = 0,
+				dy = 0, dz = 0, ids = movable()}
 			log:info("kit editor: moving " .. #S.drag.ids)
 			return
 		end
@@ -390,13 +393,18 @@ local function update_drag()
 	local d = S.drag
 	if d.kind == "move" then
 		local o, v = M.screen_ray(S.mx, S.my)
-		local hc = plane_at(o, v, d.y)
+		local hc = d.z and front_at(o, v, d.z) or not d.z and plane_at(o, v, d.y)
 		if hc then
 			local g = GRID_STEPS[S.grid]
-			d.dx, d.dz = snap(hc.x - d.hp.x, g), snap(hc.z - d.hp.z, g)
+			d.dx = snap(hc.x - d.hp.x, g)
+			if d.z then
+				d.dy = snap(hc.y - d.hp.y, g)
+			else
+				d.dz = snap(hc.z - d.hp.z, g)
+			end
 		end
 		for _, e in ipairs(d.ids) do
-			preview(e, {d.dx, 0, d.dz}, 0)
+			preview(e, {d.dx, d.dy, d.dz}, 0)
 		end
 	elseif d.kind == "turn" then
 		local o, v = M.screen_ray(S.mx, S.my)
@@ -483,24 +491,24 @@ local function end_drag()
 	local d = S.drag
 	S.drag = nil
 	if d.kind == "move" then
-		if d.dx == 0 and d.dz == 0 then
+		if d.dx == 0 and d.dy == 0 and d.dz == 0 then
 			clear_preview()
 			return
 		end
 		if #d.ids == 1 then
 			local e = d.ids[1]
-			send({op = "move", id = e.id, pos = {e.pos[1] + d.dx, e.pos[2],
+			send({op = "move", id = e.id, pos = {e.pos[1] + d.dx, e.pos[2] + d.dy,
 				e.pos[3] + d.dz}})
 		else
 			local ids = {}
 			for _, e in ipairs(d.ids) do
 				ids[#ids + 1] = e.id
 			end
-			send({op = "move", ids = ids, by = {d.dx, 0, d.dz}})
+			send({op = "move", ids = ids, by = {d.dx, d.dy, d.dz}})
 		end
 		release_preview()
 		log:info(string.format("kit editor: moved %d by %g, %g", #d.ids, d.dx,
-				d.dz))
+				d.z and d.dy or d.dz))
 	elseif d.kind == "turn" then
 		local l = movable()
 		if d.turn == 0 or #l == 0 then
@@ -1173,6 +1181,13 @@ local function voxel_target(mx, my)
 	end
 	local o, v = M.screen_ray(mx, my)
 	v = v:Normalized()
+	-- [KIT_PLANE] The Front view's: the plane's cell under the pointer (dug),
+	-- and it or the first free one over it (placed in)
+	if S.view == "front" then
+		local p = front_at(o, v, E.state and tonumber(E.state.plane_depth) or 0)
+		return p and {cell = {round(p.x), round(p.y), round(p.z)},
+			front = place_cell(mx, my), y = p.y} or nil
+	end
 	local reach = MAX_RAY
 	if S.view == "walk" then
 		-- A camera away from the eye reaches as far past the player
@@ -1433,7 +1448,7 @@ local function mouse_down(button_)
 		-- ([KIT_PHONE_EDITING] the touch mode's: a pinch, up zooming in)
 		if sh then
 			S.pinch = {mx = mx, my = my}
-		elseif S.view == "2d" then
+		elseif S.view == "2d" or S.view == "front" then
 			S.panning = true
 		elseif S.view == "3d" then
 			S.pan3d = pan3d_start(mx, my)
@@ -1547,6 +1562,23 @@ local function mouse_up(button_)
 	S.press = nil
 end
 
+-- The plan's pan by the pointer's pixels, or [KIT_PLANE] the Front view's;
+-- whether the view is one of them
+local function pan_flat(dx, dy)
+	if S.view ~= "2d" and S.view ~= "front" then
+		return false
+	end
+	local _, h = screen_size()
+	if S.view == "front" then
+		local k = S.fspan / h
+		S.fx, S.fy = S.fx - dx * k, S.fy + dy * k
+	else
+		local k = S.span / h
+		S.cx, S.cz = S.cx - dx * k, S.cz + dy * k
+	end
+	return true
+end
+
 local function mouse_move(x, y, dx, dy)
 	if S.box_drag then
 		BX.box_drag_move(x, y)
@@ -1560,17 +1592,20 @@ local function mouse_move(x, y, dx, dy)
 		zoom_at(-dy / 20, S.pinch.mx, S.pinch.my)
 		return
 	end
-	if rc and S.view == "2d" and NT.sh.on() then
+	if rc and (S.view == "2d" or S.view == "front") and NT.sh.on() then
 		rc.moved = rc.moved + math.abs(dx) + math.abs(dy)
 		if rc.moved >= RIGHT_CLICK_PX then
-			local _, h = screen_size()
-			local k = S.span / h
-			S.cx, S.cz = S.cx - dx * k, S.cz + dy * k
+			pan_flat(dx, dy)
 		end
 		return
 	end
 	if rc then
 		rc.moved = rc.moved + math.abs(dx) + math.abs(dy)
+		-- ([KIT_PLANE] the Front view's pans: it never turns)
+		if S.view == "front" and rc.moved >= RIGHT_CLICK_PX then
+			pan_flat(dx, dy)
+			return
+		end
 		if S.view == "2d" and rc.moved >= RIGHT_CLICK_PX and
 				not M.looking() then
 			-- Into 3D as if it had been 3D all along ([FP_ORBIT_2D]): the
@@ -1641,10 +1676,8 @@ local function mouse_move(x, y, dx, dy)
 		return
 	end
 	S.mx, S.my = x, y
-	if S.panning and S.view == "2d" then
-		local _, h = screen_size()
-		local k = S.span / h
-		S.cx, S.cz = S.cx - dx * k, S.cz + dy * k
+	if S.panning then
+		pan_flat(dx, dy)
 	end
 	local pp = S.palette_press
 	if pp and not S.drag and math.abs(x - pp.mx) + math.abs(y - pp.my) >
@@ -1668,10 +1701,8 @@ local function mouse_move(x, y, dx, dy)
 	end
 	if S.drag then
 		update_drag()
-	elseif S.press and S.press.cam and S.view == "2d" then
-		local _, h = screen_size()
-		local k = S.span / h
-		S.cx, S.cz = S.cx - dx * k, S.cz + dy * k
+	elseif S.press and S.press.cam then
+		pan_flat(dx, dy)
 	end
 end
 
@@ -1755,7 +1786,8 @@ local function mouse_wheel(wheel, q)
 	zoom_at(math.max(-10, math.min(10, WEB and wheel / 10 or wheel)), S.mx,
 			S.my)
 	log:info("kit editor: the wheel: " .. (S.view == "2d" and
-			string.format("the plan %.1f across", S.span) or S.pos and
+			string.format("the plan %.1f across", S.span) or S.view == "front" and
+			string.format("the front %.1f high", S.fspan) or S.pos and
 			string.format("the camera at %.1f,%.1f,%.1f", S.pos.x, S.pos.y,
 			S.pos.z) or "in " .. tostring(S.view)))
 end
@@ -1770,6 +1802,13 @@ zoom_at = function(notches, mx, my)
 		place_cameras()
 		local o1 = M.screen_ray(mx, my)
 		S.cx, S.cz = S.cx + o0.x - o1.x, S.cz + o0.z - o1.z
+	elseif S.view == "front" then
+		-- [KIT_PLANE] as the plan's, in x and y
+		local o0 = M.screen_ray(mx, my)
+		S.fspan = math.max(4, math.min(400, S.fspan * f))
+		place_cameras()
+		local o1 = M.screen_ray(mx, my)
+		S.fx, S.fy = S.fx + o0.x - o1.x, S.fy + o0.y - o1.y
 	elseif S.view == "3d" then
 		local o, v = M.screen_ray(mx, my)
 		local p = pick(mx, my, nil, true)
@@ -1954,6 +1993,16 @@ local function touch_move(id, x, y, dx, dy)
 			k = S.span / h
 			ax, ay = ax + mdx, ay + mdy
 			S.cx, S.cz = wx - (ax - w / 2) * k, wz + (ay - h / 2) * k
+		elseif S.view == "front" then
+			-- [KIT_PLANE] as the plan's, in x and y
+			local w, h, ox, oy = screen_size()
+			local ax, ay = (px_ + o.x) / 2 - ox, (py_ + o.y) / 2 - oy
+			local k = S.fspan / h
+			local wx, wy = S.fx + (ax - w / 2) * k, S.fy - (ay - h / 2) * k
+			S.fspan = math.max(4, math.min(400, S.fspan * d0 / d1))
+			k = S.fspan / h
+			ax, ay = ax + mdx, ay + mdy
+			S.fx, S.fy = wx - (ax - w / 2) * k, wy + (ay - h / 2) * k
 		else
 			local p = S.gesture.pivot
 			if p then
@@ -2002,10 +2051,8 @@ local function touch_move(id, x, y, dx, dy)
 	if S.drag then
 		update_drag()
 	elseif S.touch_cam then
-		if S.view == "2d" then
-			local _, h = screen_size()
-			local k = S.span / h
-			S.cx, S.cz = S.cx - dx * k, S.cz + dy * k
+		if pan_flat(dx, dy) then
+			-- (the plan's or the Front view's)
 		elseif S.pan3d then
 			mouse_move(x, y, dx, dy)
 		end
@@ -2196,10 +2243,12 @@ function NT.reveal(id)
 	-- the entity: any height below it)
 	local y = S.view == "2d" and o0.y - 1 or drawn_at(e).y
 	local a, b = plane_at(o0, v0, y), plane_at(o1, v1, y)
-	if not a or not b then
+	if S.view == "front" then
+		-- ([KIT_PLANE] flat along +z: the rays' origins)
+		S.fx, S.fy = S.fx + o0.x - o1.x, S.fy + o0.y - o1.y
+	elseif not a or not b then
 		return
-	end
-	if S.view == "2d" then
+	elseif S.view == "2d" then
 		S.cx, S.cz = S.cx + a.x - b.x, S.cz + a.z - b.z
 	else
 		S.pos = {x = S.pos.x + a.x - b.x, y = S.pos.y, z = S.pos.z + a.z - b.z}
@@ -2242,12 +2291,14 @@ local function key_down(key, ctrl, shift)
 	elseif S.view == "signals" and is("undo") and ctrl then
 		return send({op = "undo"})
 	elseif NT.world_off() and not (is("view_2d") or is("view_3d") or
-			is("view_walk")) then
+			is("view_walk") or is("view_front")) then
 		return
 	elseif is("view_2d") then
 		return set_view("2d")
 	elseif is("view_3d") then
 		return set_view("3d")
+	elseif is("view_front") then
+		return set_view("front")
 	elseif is("view_walk") then
 		return set_view("walk")
 	elseif is("next") then
@@ -2325,7 +2376,12 @@ local function key_down(key, ctrl, shift)
 				S.view == "2d" and {"left", -1, 0, 0} or {},
 				S.view == "2d" and {"right", 1, 0, 0} or {},
 				S.view == "2d" and {"forward", 0, 0, 1} or {},
-				S.view == "2d" and {"back", 0, 0, -1} or {}}) do
+				S.view == "2d" and {"back", 0, 0, -1} or {},
+				-- ([KIT_PLANE] the Front view's: forward up)
+				S.view == "front" and {"left", -1, 0, 0} or {},
+				S.view == "front" and {"right", 1, 0, 0} or {},
+				S.view == "front" and {"forward", 0, 1, 0} or {},
+				S.view == "front" and {"back", 0, -1, 0} or {}}) do
 			if not d and n[1] and is(n[1]) then
 				d = {n[2], n[3], n[4]}
 			end
@@ -2488,7 +2544,8 @@ local function compute_guide()
 	if S.tool == "terrain" then
 		ghost(nil)
 		local right = S.view == "2d" and "drag: into 3D, orbiting" or
-				S.view == "3d" and "drag: orbit" or "drag: turn"
+				S.view == "3d" and "drag: orbit" or S.view == "front" and
+				"drag: pan the view" or "drag: turn"
 		if brush_at(mx, my) then
 			g.left = BRUSH_TEXT[T.brush] .. (T.brush == "fill" and "" or
 					string.format(" (size %d, strength %d%s); drag: a stroke",
@@ -2513,7 +2570,8 @@ local function compute_guide()
 					or "the box's first corner") .. " at " .. table.concat(c, ",")
 		end
 		g.right = S.view == "2d" and "drag: into 3D, orbiting" or
-				S.view == "3d" and "drag: orbit" or "drag: turn"
+				S.view == "3d" and "drag: orbit" or S.view == "front" and
+				"drag: pan the view" or "drag: turn"
 		g.note = not S.touch and M.key_text("Ctrl+[copy]: copy the box (and " ..
 				"the selection), Ctrl+[paste]: paste, [box] or Esc: put the " ..
 				"box away") or nil
@@ -2555,7 +2613,7 @@ local function compute_guide()
 		local p = pick(mx, my)
 		g.right = (p and p.id and "its menu; " or "") .. (S.view == "2d" and
 				"drag: into 3D, orbiting" or S.view == "3d" and "drag: orbit" or
-				"drag: turn")
+				S.view == "front" and "drag: pan the view" or "drag: turn")
 		g.note = not S.touch and M.key_text("[voxels] or Esc: put the voxels " ..
 				"away") or nil
 		return g
@@ -2598,7 +2656,7 @@ local function compute_guide()
 	local e = p and p.id and find(p.id)
 	local right_drag = S.view == "2d" and "drag: into 3D, orbiting" or
 			S.view == "3d" and "drag: orbit round what the pointer is on" or
-			"drag: turn"
+			S.view == "front" and "drag: pan the view" or "drag: turn"
 	if e then
 		M.frame_entity(hover, e.id, M.HOVER)
 		local name = name_of(e)

@@ -146,8 +146,17 @@
 -- menu, a drag, placing, a pending link, the crosshair; true when taken).
 -- [KIT_SIGNALS_VIEW] F5 or the dropdown: Signals, the composition's links as a
 -- table over the whole window (signals.lua).
--- kit.view() ("2d", "3d", "walk", "hud" or "signals": the app walks only in
+-- kit.view() ("2d", "3d", "front", "walk", "hud" or "signals": the app walks only in
 -- "walk" while editing), kit.looking() (the editor's crosshair: the app's mouse looks).
+-- [KIT_PLANE] F7 or the dropdown: Front, flat along +z at kit/controls' plane
+-- (the server's plane_depth: the spawn's, a whole z), what is in front of its
+-- layer clipped; a placing goes in the plane's cell under the pointer (the
+-- first free one up), a drag moves in x and y; it pans and zooms as 2D does
+-- (and pans with the right drag), the voxels tool digs the plane's cell under
+-- the pointer and places in it or the first free one over it.
+-- simplified: no caps as the plan's (caps.lua): a cell of the layer with a
+-- solid one in front of it has no face toward the view (Workbench's floor
+-- shows nothing in the layer); caps.lua cutting along z is the upgrade
 -- kit.selected(): the id last selected, kept after edit mode.
 -- simplified: one edit per entity for a Delete of several; a duplicate
 -- one cell along +x; the windows rebuilt whole on each state
@@ -243,10 +252,13 @@ local RIGHT_CLICK_PX = 5
 local PLAN_3D_MAX_H = 100
 local LONG_PRESS_US = 500000
 local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk", hud = "HUD",
-	signals = "Signals"}
+	signals = "Signals", front = "Front"}
 -- [KIT_INPUT_ACTIONS] each view's key's action (input.lua)
 local VIEW_KEYS = {["2d"] = "view_2d", ["3d"] = "view_3d", walk = "view_walk",
-	hud = "view_hud", signals = "view_signals"}
+	hud = "view_hud", signals = "view_signals", front = "view_front"}
+-- The views in the bar's list ([KIT_PLANE] Front: the plane's, kit/controls'
+-- plane, looked at along +z from in front of its layer)
+local VIEW_ORDER = {"2d", "3d", "front", "walk", "hud", "signals"}
 -- How far a click looks for a voxel, in cells
 local MAX_RAY = 128
 
@@ -780,7 +792,7 @@ local function sel_ids()
 end
 
 -- ---- The cameras ([FP] Views), made in the app's scene by kit.editor
-local cam2d_node, cam2d, cam3d_node, cam3d
+local cam2d_node, cam2d, cam3d_node, cam3d, camf_node, camf
 local function make_cameras()
 	cam2d_node = O.scene:CreateChild("kit_camera_2d")
 	cam2d = cam2d_node:CreateComponent("Camera")
@@ -788,6 +800,13 @@ local function make_cameras()
 	cam2d.nearClip = 0.001
 	cam2d.farClip = 200
 	cam2d_node.rotation = magic.Quaternion(90, 0, 0)
+	-- [KIT_PLANE] The Front view's: flat, along +z, a hair in front of the
+	-- plane's layer (what is in front of it clipped)
+	camf_node = O.scene:CreateChild("kit_camera_front")
+	camf = camf_node:CreateComponent("Camera")
+	camf.orthographic = true
+	camf.nearClip = 0.001
+	camf.farClip = 200
 	cam3d_node = O.scene:CreateChild("kit_camera_3d")
 	cam3d = cam3d_node:CreateComponent("Camera")
 	cam3d.nearClip = 0.05
@@ -815,8 +834,23 @@ local function active_camera()
 		return O.camera, O.camera:GetComponent("Camera")
 	elseif S.view == "2d" then
 		return cam2d_node, cam2d
+	elseif S.view == "front" then
+		return camf_node, camf
 	end
 	return cam3d_node, cam3d
+end
+
+-- [KIT_PLANE] The plane's depth (the server's plane_depth: the spawn's, a whole z)
+local function plane_z()
+	return E.state and tonumber(E.state.plane_depth) or 0
+end
+
+-- [KIT_PLANE] Where a ray meets the plane z (the Front view's), nil: along it
+local function front_at(o, v, z)
+	if math.abs(v.z) < 1e-6 then
+		return nil
+	end
+	return o + v * ((z - o.z) / v.z)
 end
 
 local function rot3d()
@@ -992,6 +1026,25 @@ end
 -- ground's (entities left out)
 local function place_cell(mx, my)
 	local o, v = M.screen_ray(mx, my)
+	-- [KIT_PLANE] The Front view's: the plane's cell under the pointer, or
+	-- the first free one over it (on what is there)
+	-- simplified: 64 cells up at most; a solid cell past that is placed in
+	if S.view == "front" then
+		local z = plane_z()
+		local p = front_at(o, v, z)
+		if not p then
+			return nil
+		end
+		local c = {round(p.x), round(p.y), z}
+		local solid = O.solid and M.with_terrain(O.solid)
+		for _ = 1, 64 do
+			if not (solid and solid(c[1], c[2], c[3])) then
+				break
+			end
+			c[2] = c[2] + 1
+		end
+		return c
+	end
 	if O.solid then
 		local solid = M.with_terrain(O.solid)
 		local hit, front, t = M.voxel_ray({o.x, o.y, o.z}, {v.x, v.y, v.z},
@@ -1203,7 +1256,7 @@ local function bar_key()
 	local st = E.state or {}
 	local ses = E.session or {}
 	local keys = {}
-	for _, v in ipairs({"2d", "3d", "walk", "hud", "signals"}) do
+	for _, v in ipairs(VIEW_ORDER) do
 		keys[#keys + 1] = tostring(M.key_name(VIEW_KEYS[v]))
 	end
 	return table.concat({tostring(E.can_edit), tostring(E.editing), tostring(O.bar),
@@ -1286,7 +1339,7 @@ rebuild_bar = function(if_changed)
 		bar_button("To the surface", nil, NT.to_surface)
 	end
 	local views = {}
-	for _, v in ipairs({"2d", "3d", "walk", "hud", "signals"}) do
+	for _, v in ipairs(VIEW_ORDER) do
 		views[#views + 1] = {VIEW_NAMES[v] .. (S.touch and "" or
 				" (" .. M.key_name(VIEW_KEYS[v]) .. ")"), v}
 	end
@@ -2667,6 +2720,29 @@ local function field(name, d, values)
 		for _, s in ipairs(E.state.terrain.material_sets or {}) do
 			f.choices[#f.choices + 1] = {s[1], s[2]}
 			has = has or s[2] == values[name]
+		end
+		if not has and type(values[name]) == "string" then
+			f.choices[#f.choices + 1] = {values[name], values[name]}
+		end
+	elseif d.choices_from == "movements" then
+		-- [KIT_PLANE] The types stepping players' bodies (a `movement` and not a
+		-- creature's or a course's: kit.cpp's check_set_param), and none; the
+		-- value too when it is none of them
+		f.type = "choice"
+		local names = {}
+		for t, o in pairs(E.state and E.state.types or {}) do
+			local mv = type(o) == "table" and o.movement
+			if type(mv) == "table" and not mv.steered and not mv.timed then
+				names[#names + 1] = t
+			end
+		end
+		table.sort(names)
+		names[#names + 1] = "none"
+		f.choices = {}
+		local has = values[name] == nil
+		for _, t in ipairs(names) do
+			f.choices[#f.choices + 1] = {t, t}
+			has = has or t == values[name]
 		end
 		if not has and type(values[name]) == "string" then
 			f.choices[#f.choices + 1] = {values[name], values[name]}
@@ -5818,6 +5894,11 @@ set_view = function(v)
 		S.cx, S.cz = p.x, p.z
 		S.cut = ground_under(p) + 1.5
 	end
+	-- [KIT_PLANE] the Front view first round the walk camera, 16 m high
+	if v == "front" and not S.fx then
+		local p = O.camera.worldPosition
+		S.fx, S.fy, S.fspan = p.x, p.y, 16
+	end
 	if v ~= S.view then
 		S.crosshair = false
 		S.from_plan = nil
@@ -6066,6 +6147,12 @@ local function place_cameras()
 		cam3d_node.position = magic.Vector3(S.pos.x, S.pos.y, S.pos.z)
 		cam3d_node.rotation = rot3d()
 	end
+	-- [KIT_PLANE] the Front view's (S.fx, S.fy its middle, S.fspan its height)
+	if S.fx then
+		camf.orthoSize = S.fspan
+		camf.aspectRatio = w / math.max(1, h)
+		camf_node.position = magic.Vector3(S.fx, S.fy, plane_z() - 0.55)
+	end
 end
 
 local function typing()
@@ -6100,6 +6187,15 @@ local function move_camera(dt)
 		end
 		local k = S.span * dt
 		S.cx, S.cz = S.cx + r * k, S.cz + f * k
+		return
+	end
+	-- [KIT_PLANE] the Front view pans as the plan does, forward up
+	if S.view == "front" then
+		if next(S.sel) then
+			return
+		end
+		local k = S.fspan * dt
+		S.fx, S.fy = S.fx + r * k, S.fy + f * k
 		return
 	end
 	if S.view ~= "3d" then
@@ -6172,7 +6268,7 @@ do
 		context_menu = context_menu, DIM = DIM, DRAG_PX = DRAG_PX,
 		drawn_at = drawn_at, drop = drop, E = E, ED = ED, entities = entities,
 		find = find, fit_inspector = fit_inspector, focus = focus,
-		GRID_STEPS = GRID_STEPS, grid_text = grid_text, ground_at = ground_at,
+		front_at = front_at, GRID_STEPS = GRID_STEPS, grid_text = grid_text, ground_at = ground_at,
 		inside = inside, inspector_window = inspector_window, K = K,
 		key_held = key_held, label = label, log = log, log_bar = log_bar,
 		LONG_PRESS_US = LONG_PRESS_US, M = M, made = made, magic = magic,

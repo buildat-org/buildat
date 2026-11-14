@@ -17,7 +17,7 @@
 --     preference kit_ui_split).
 --   - The UI half: a header ("< <the pane's title>" for Back, the title
 --     alone where Back goes nowhere; a dropdown of the views, Walk, 3D, 2D,
---     Signals, HUD, then the scenes, a pick going there in this view, and
+--     Front ([KIT_PLANE]), Signals, HUD, then the scenes, a pick going there in this view, and
 --     New scene...; Tools. The user's of 2026-11-12, for stage 4b's
 --     Walk | 3D | 2D and "..."), the pane, the foot's buttons under the
 --     palette and the inspector, and a status line (Running or Ended, the
@@ -311,7 +311,8 @@ local function view_choices()
 			st.can_make_scenes) and st.scenes or nil
 	local cur = st.scene or ""
 	local c = {}
-	for _, v in ipairs({"walk", "3d", "2d", "signals", "hud"}) do
+	-- ([KIT_PLANE] Front: the plane's)
+	for _, v in ipairs({"walk", "3d", "2d", "front", "signals", "hud"}) do
 		local l = A.VIEW_NAMES[v]
 		c[#c + 1] = {v == S.view and scenes and cur ~= "" and l .. " · " .. cur or
 				l, v}
