@@ -118,7 +118,11 @@ launcher "$tmp/c3" "$tmp/cl3.log"
 rc=$?
 [ "$(cat "$tmp/opened" 2>/dev/null)" = "https://example.org/linux-0.9.1.tar.gz" ] ||
 	fail "Download did not open the link ($tmp/cl3.log)"
-grep -q "Version next: .*extract linux-0.9.1.tar.gz and run bin/buildat.*they are in $tmp/cl," "$tmp/cl3.log" ||
+# An alpha's own next steps (client/core/starport, [ALPHA_BUILDS]): a
+# stable version keeps its saves apart from the alpha's
+kept="they are in $tmp/cl,"
+case $(cat "$here/VERSION") in *-alpha.*) kept="apart from this alpha's" ;; esac
+grep -q "Version next: .*extract linux-0.9.1.tar.gz and run bin/buildat.*$kept" "$tmp/cl3.log" ||
 	fail "the next steps: $(grep "Version next" "$tmp/cl3.log")"
 # 1: a scripted client that ends before its sequence does says so
 [ $rc = 1 ] && grep -q "Version: closing for the update" "$tmp/cl3.log" &&
@@ -136,7 +140,9 @@ delay 500
 quit
 C
 launcher "$tmp/c3b" "$tmp/cl3b.log" || fail "the drive ($tmp/cl3b.log)"
-grep -q "Version next: .*close Buildat and run buildat-0.9.2-setup.exe: it updates" "$tmp/cl3b.log" ||
+updates="buildat-0.9.2-setup.exe: it updates"
+case $(cat "$here/VERSION") in *-alpha.*) updates="buildat-0.9.2-setup.exe\\..*$kept" ;; esac
+grep -q "Version next: .*close Buildat and run $updates" "$tmp/cl3b.log" ||
 	fail "an .exe's next steps: $(grep "Version next" "$tmp/cl3b.log")"
 echo "ok: an .exe's text"
 
