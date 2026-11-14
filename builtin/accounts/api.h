@@ -41,7 +41,9 @@ namespace accounts
 	// admin changed; their game says so to their client. A peer leaves as
 	// network:client_disconnected says. accounts:deleted: the account
 	// `name` is gone (peer 0), and an app drops what was the account's
-	// ([FP_ABUSE] 4).
+	// ([FP_ABUSE] 4). [KIT_AGENTS] accounts:agent_revoked: the agent token
+	// whose id (AgentToken::id) is `name` stands no more; "": none does
+	// (agent access turned off).
 	struct Login: public interface::Event::Private
 	{
 		PeerId peer = 0;

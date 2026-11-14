@@ -19,7 +19,17 @@
 #      no token, a wrong one, bad JSON, a version not spoken, a batch.
 #      The edits logged as "kitboss's agent", who is in kitboss's builders
 #      list;
-#   3. the builder token revoked on the page: 401, its agent gone;
+#   2b. the rest of the tools: the guide in the instructions (within Claude
+#      Code's 4096 characters) and get_guide's per type; two counters placed,
+#      renamed, moved, a component added and removed, linked (get_links),
+#      one put under the other, duplicated, saved as the prefab
+#      kitboss/agentpair (the account's, not its agent's) and placed; a box
+#      of voxels by the player set, read back and undone as one; a kit/goal
+#      warned of until linked; Running, a try_input through the link and a
+#      watch read back by get_events, get_log and the state; a new scene
+#      taking the agent's edits there and back; every edit of it undone, the
+#      entities as before;
+#   3. the builder token revoked on the page: its agent gone at once, 401;
 #   4. Agents (MCP) off on the Accounts page: the admin token refused with
 #      that said; on again: its set_builder done, and past 120 requests a
 #      minute, 429.
@@ -192,8 +202,13 @@ if phase == "main":
     assert rpc(tok, "ping")["result"] == {}
     tools = rpc(tok, "tools/list")["result"]["tools"]
     names = [t["name"] for t in tools]
-    assert names == ["get_state", "list_types", "place", "set_param", "link",
-        "delete", "undo", "start", "stop", "set_builder"], names
+    assert names == ["get_state", "list_types", "get_guide", "get_links",
+        "get_log", "get_events", "get_goal_warnings", "list_prefabs",
+        "list_items", "list_voxel_types", "get_voxels", "place", "set_param",
+        "link", "delete", "unlink", "move", "rename", "add_component",
+        "remove_component", "set_parent", "duplicate", "place_prefab",
+        "save_prefab", "set_voxels", "new_scene", "switch_scene", "undo",
+        "start", "stop", "try_input", "watch", "keep", "set_builder"], names
     for t in tools:
         assert t["description"] and t["inputSchema"]["type"] == "object", t
     st = state(tok)
@@ -246,6 +261,116 @@ if phase == "main":
     refused(400, -32600, tok, {"jsonrpc": "2.0", "id": 1, "method": "ping"},
         headers={"MCP-Protocol-Version": "2099-01-01"})
     print("ids", T, C)
+elif phase == "build":
+    tok = sys.argv[3]
+    init = {"protocolVersion": "2025-11-25", "capabilities": {},
+            "clientInfo": {"name": "kit_agents_check", "version": "1"}}
+    ins = rpc(tok, "initialize", init)["result"]["instructions"]
+    # The guide: within the 4096 characters Claude Code keeps, whole by tool
+    assert len(ins) <= 4096 and "kitboss's agent" in ins and "kit/counter" in ins, ins
+    guide = call(tok, "get_guide")
+    assert re.search(r"\n- kit/counter: [^\n]*In: [^\n]*add \(number\)", guide), guide[:3000]
+    print("instructions", len(ins), "characters, get_guide", len(guide))
+    st = state(tok)
+    if st["running"]:
+        call(tok, "stop")
+    undo0, first = st["undo"], st["scene"]
+    before = sorted(e["id"] for e in st["entities"])
+    assert first in st["scenes"], st
+    def placed(text):
+        return int(re.search(r"placed \S+ (\d+)", text)[1])
+    def ent(i):
+        return entity(state(tok), i)
+    A = placed(call(tok, "place", {"type": "kit/counter", "pos": [4, 1, 4],
+        "params": {"target": 3}}))
+    B = placed(call(tok, "place", {"type": "kit/counter", "pos": [6, 1, 4]}))
+    call(tok, "rename", {"id": A, "name": "Score"})
+    call(tok, "move", {"id": B, "pos": [6, 1, 8], "yaw": 90})
+    e = ent(B)
+    assert ent(A)["name"] == "Score" and e["pos"] == [6, 1, 8] and e.get("yaw") == 90, (ent(A), e)
+    call(tok, "add_component", {"id": B, "type": "kit/health"})
+    assert [c["type"] for c in ent(B)["components"]] == ["kit/counter", "kit/health"]
+    call(tok, "remove_component", {"id": B, "comp": 1})
+    call(tok, "remove_component", {"id": B, "comp": 0}, error=True)
+    call(tok, "link", {"id": A, "output": "reached", "to": B, "input": "count"})
+    links = json.loads(call(tok, "get_links", {"id": B}))
+    assert links == [{"id": A, "comp": 0, "output": "reached", "to": B,
+        "input": "count", "sends": "number", "takes": "none"}], links
+    call(tok, "set_parent", {"id": B, "parent": A})
+    assert ent(B)["parent"] == A
+    assert re.search(r"duplicated 2 as \d+\.\.\.\d+", call(tok, "duplicate",
+        {"ids": [A], "by": [0, 0, 3]}))
+    # A prefab under the account's name (not its agent's)
+    assert "saved prefab kitboss/agentpair version 1 of 2 entities" in call(tok,
+        "save_prefab", {"ids": [A], "name": "agentpair"})
+    pf = {p["prefab"]: p for p in json.loads(call(tok, "list_prefabs"))}
+    assert pf["kitboss/agentpair"].get("own") and pf["kitboss/agentpair"]["entities"] == 2, pf
+    assert len(json.loads(call(tok, "list_prefabs", {"prefab": "kitboss/agentpair"}))["entities"]) == 2
+    assert "placed prefab kitboss/agentpair" in call(tok, "place_prefab",
+        {"prefab": "kitboss/agentpair", "pos": [12, 1, 4]})
+    assert isinstance(json.loads(call(tok, "list_items")), dict)
+    # Voxels in a box by the player, read back, undone as one
+    V = [v["name"] for v in json.loads(call(tok, "list_voxel_types"))
+        if v.get("solid") and v.get("kind") == "solid"][0]
+    box = {"at": [2, 20, 2], "size": [2, 1, 2]}
+    assert json.loads(call(tok, "get_voxels", box))["layers"] == [["..", ".."]]
+    assert "in 4 of 4 cells" in call(tok, "set_voxels", dict(box, voxel=V))
+    g = json.loads(call(tok, "get_voxels", box))
+    k = [c for c, n in g["key"].items() if n == V][0]
+    assert g["layers"] == [[k * 2, k * 2]], g
+    assert "Undone" in call(tok, "undo")
+    assert json.loads(call(tok, "get_voxels", box))["layers"] == [["..", ".."]]
+    assert "512 cells" in call(tok, "set_voxels", {"voxel": V, "at": [0, 0, 0],
+        "size": [8, 8, 9]}, error=True)
+    call(tok, "get_voxels", {"at": [0, 0, 0], "size": [17, 16, 16]}, error=True)
+    # A goal nothing activates, warned of until linked
+    G = placed(call(tok, "place", {"type": "kit/goal", "pos": [8, 1, 8]}))
+    def warned():
+        return any(w.startswith("entity %d " % G) and "nothing activates" in w
+            for w in json.loads(call(tok, "get_goal_warnings")))
+    assert warned()
+    call(tok, "link", {"id": A, "output": "reached", "to": G, "input": "activate"})
+    assert not warned()
+    # Run: a Try through the link, the watched one's emits, the log
+    assert "Ended" in call(tok, "try_input", {"id": A, "input": "add", "value": 3}, error=True)
+    assert call(tok, "start") == "Running"
+    call(tok, "watch", {"id": B})
+    call(tok, "get_events")
+    call(tok, "try_input", {"id": A, "input": "add", "value": 3})
+    tried = fired = None
+    for i in range(50):
+        for ev in json.loads(call(tok, "get_events")):
+            if ev["event"] == "tried":
+                tried = ev["data"]
+            elif ev["event"] == "fired":
+                fired = ev["data"]
+        if tried and fired:
+            break
+        time.sleep(0.2)
+    assert tried and tried["id"] == A and ["reached", 3] in tried["emitted"], tried
+    assert fired and fired["id"] == B and any(f[1] == "changed" for f in fired["fired"]), fired
+    assert any("tried: add by kitboss's agent" in l for l in
+        json.loads(call(tok, "get_log", {"id": A})))
+    assert ent(B)["components"][0]["state"]["count"] == 1, ent(B)
+    call(tok, "watch", {"id": 0})
+    call(tok, "get_log", {"id": 999999}, error=True)
+    assert call(tok, "stop").startswith("Ended")
+    assert "no builds discarded" in call(tok, "keep", error=True)
+    # A new scene takes the agent's edits there; back again
+    if st["can_make_scenes"]:
+        call(tok, "new_scene", {"name": "agents2"})
+        assert state(tok)["scene"] == "agents2"
+        placed(call(tok, "place", {"type": "kit/counter", "pos": [0, 1, 0]}))
+        assert call(tok, "switch_scene", {"name": first}) == "In the scene " + first
+    call(tok, "switch_scene", {"name": first}, error=True)
+    call(tok, "unlink", {"id": A, "output": "reached", "to": B, "input": "count"})
+    assert json.loads(call(tok, "get_links", {"id": B})) == []
+    # Every edit of this phase taken back
+    st = state(tok)
+    while st["undo"] > undo0:
+        assert "Undone" in call(tok, "undo")
+        st = state(tok)
+    assert sorted(e["id"] for e in st["entities"]) == before, st["entities"]
 elif phase == "gone":
     refused(401, -32001, sys.argv[3], {"jsonrpc": "2.0", "id": 1, "method": "ping"})
 elif phase == "off":
@@ -272,15 +397,26 @@ for re in "An edit by kitboss's agent: placed kit/timer [0-9]+" \
 		"An undo by kitboss's agent: " "kitboss's agent \(\"Claude Code\", builder token\) is here"; do
 	grep -aqE "$re" "$SL" || fail "no \"$re\" in $SL"
 done
+python3 -I "$t/mcp.py" build "$url" "$tok" > "$t/build.log" 2>&1 ||
+	fail "the MCP build run: $(tail -5 "$t/build.log") ($t/build.log, $SL)"
+cat "$t/build.log"
+for re in "An edit by kitboss's agent: saved prefab kitboss/agentpair " \
+		"kitboss's agent: placed .* in 4 of 4 cells .*, one undo" \
+		"kitboss's agent tries entity [0-9]+'s add 3" \
+		"kitboss's agent watches entity [0-9]+" \
+		"kitboss's agent goes to the scene "; do
+	grep -aqE "$re" "$SL" || fail "no \"$re\" in $SL"
+done
 await "$CL" 0 5 "kit editor: builder kitboss's agent "
 # 3. Revoked on the page
 step 10 "pause: the menu shown" "keypress Escape"
 step 10 "accounts: agents: 2 tokens, on" "frames 3" 'click Button "My account*"' \
 	"frames 5" 'click Button "Connect an agent..."'
+m=$(mark "$SL")
 step 10 "accounts: agents: revoked Claude Code" "frames 3" 'click Button "Revoke Claude Code"'
+# (gone at once, not at its next request)
+await "$SL" "$m" 5 "kitboss's agent left: its token was revoked"
 python3 -I "$t/mcp.py" gone "$url" "$tok" || fail "the revoked token not refused"
-grep -aq "kitboss's agent left: its token stands no more" "$SL" ||
-	fail "the revoked token's agent did not leave ($SL)"
 # 4. The admin's switch
 step 10 "[0-9]+ accounts listed" "frames 3" 'click Button "Accounts*"'
 # (the page drawn again by the list after the result)
@@ -308,4 +444,4 @@ done
 for p in token tokens switch; do
 	[ -s "$t/$p.png" ] || fail "no screenshot $t/$p.png"
 done
-echo "PASS: an agent token made, copied and revoked on My account; Kit's MCP endpoint edits, runs and undoes as kitboss's agent, refuses what it should; screenshots $t/token.png $t/tokens.png $t/switch.png"
+echo "PASS: an agent token made, copied and revoked on My account; Kit's MCP endpoint edits, runs, reads back and undoes as kitboss's agent with all its tools and its guide, refuses what it should; screenshots $t/token.png $t/tokens.png $t/switch.png"
