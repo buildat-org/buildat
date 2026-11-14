@@ -264,6 +264,9 @@ struct Module: public interface::Module, public Interface
 	{
 		return REFUSED;
 	}
+	// [KIT_AGENTS] no HTTP in a page, so no agents
+	ss_ check_agent(const ss_ &token, AgentToken &out){ return REFUSED; }
+	bool agents_on(){ return false; }
 };
 
 extern "C" {

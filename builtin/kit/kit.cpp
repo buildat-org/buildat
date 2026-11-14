@@ -15,6 +15,7 @@
 #include "interface/wasm_box.h"
 #include "core/log.h"
 #include "core/json.h"
+#include "core/version.h"
 #include "interface/fs.h"
 #include "interface/module.h"
 #include "interface/server.h"
@@ -1419,6 +1420,15 @@ struct Module: public interface::Module, public Interface
 	{
 		if(m_early_box.valid())
 			delete m_early_box.get().first;
+		// [KIT_AGENTS]
+		if(!m_agent_peers.empty()) try {
+			network::access(m_server, [&](network::Interface *i){
+				for(auto &a : m_agent_peers)
+					i->remove_local_peer(a.first);
+			});
+		} catch(std::exception &e){
+			log_w(MODULE, "The agents' peers not taken back: %s", e.what());
+		}
 		// The owner handlers hold pointers into this module. Nothing is
 		// saved here: the runtime row is written after each tick that
 		// changed it, and the app's save may be closed by now
@@ -1501,6 +1511,7 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "network:packet_received/kit:reload",
 				&Module::on_reload);
 		sub(m_server, "accounts:privs", &Module::on_privs);
+		sub(m_server, "network:http_request", &Module::on_http);
 		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
 		sub(m_server, "worldgen:section_generated", &Module::on_generated);
 		sub(m_server, "worldgen:queue_modified", &Module::on_gen_queue);
@@ -17750,6 +17761,12 @@ struct Module: public interface::Module, public Interface
 
 	void on_tick(const interface::TickEvent &event)
 	{
+		// [KIT_AGENTS] an agent idle so long leaves
+		for(auto it = m_agents.begin(); it != m_agents.end();){
+			const ss_ id = (it++)->first;
+			if(interface::os::time_us() - m_agents[id].last_us > AGENT_IDLE_US)
+				drop_agent(id, "idle");
+		}
 		if(!m_hosted || !m_box)
 			return;
 		m_box->poll();
@@ -26120,6 +26137,463 @@ struct Module: public interface::Module, public Interface
 		return v.is_undefined() ? "" : v.stringify();
 	}
 
+	// ---- [KIT_AGENTS] A builder's agent, by MCP (apps/workbench/README.txt)
+	//
+	// POST /api/v1/mcp: JSON-RPC 2.0 as MCP's Streamable HTTP transport has
+	// it, protocol 2025-11-25 and the two before, a JSON answer to each
+	// request (no SSE stream, no session id), from a builder's own agentic
+	// tool with an agent token of theirs (accounts/api.h) as its bearer
+	// token. Its tools are Kit's edit ops, run as a peer of the network's
+	// with no socket (add_local_peer()) named "<account>'s agent": its edits
+	// logged and undone as that name's, in the default session's live round;
+	// in the builders' list from its first call to AGENT_IDLE_US after its
+	// last. Its rights are its account's at each call, an admin's only with
+	// an admin token (account_of(), can_edit_u()); what Kit refuses it is
+	// the tool's error text. No CORS: a request with an Origin (a page in a
+	// browser) is refused.
+	// simplified: an account's tokens share one agent name, so one undo
+	// stack; a revoked token's agent leaves at its next request or idle
+	struct Agent
+	{
+		size_t peer = 0;
+		ss_ account, scope, label;
+		int64_t last_us = 0;
+	};
+	static const int64_t AGENT_IDLE_US = 300 * 1000000LL;
+	// Requests a token makes a minute; refused tries an address's network
+	static const int AGENT_CALLS = 120, AGENT_FAILS = 30;
+	// By the token's id (its sha256), and the peers' token ids
+	sm_<ss_, Agent> m_agents;
+	sm_<size_t, ss_> m_agent_peers;
+	// What the network sends an agent's peer during its call (on the
+	// sender's thread); nothing at other times
+	struct AgentBox
+	{
+		std::mutex m;
+		size_t want = 0;
+		sv_<std::pair<ss_, ss_>> got;
+	};
+	sp_<AgentBox> m_agent_box = std::make_shared<AgentBox>();
+	network::RateTable m_agent_rates;
+	// The last edit's or undo's text, as its log line says it
+	ss_ m_edit_what;
+
+	// A tool: Kit's edit op it is and the arguments it passes on (its
+	// schema's properties, over the defaults), or a read ("=...")
+	struct AgentTool
+	{
+		const char *name, *op, *about, *schema, *defaults;
+	};
+	static const sv_<AgentTool> &agent_tools()
+	{
+		static const sv_<AgentTool> t = {
+			{"get_state", "=state", "The composition as built: each authored "
+				"entity's id, parent, name, position (x, y, z; y up, a cell 1) "
+				"and components (type, params, links to other entities' "
+				"inputs); whether the round is Running, each component's state "
+				"then; how many of your edits there are to undo.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"list_types", "=types", "The types an entity is placed of: each "
+				"one's name, group and what it is. With type: its declaration, "
+				"its params (each one's type, default, min, max, choices), its "
+				"inputs and outputs (their values' types) and what each does.",
+				R"J({"type": "object", "properties": {"type": {"type": "string",
+				"description": "A type, as \"kit/counter\""}}})J", ""},
+			{"place", "place", "Places an entity of a type at pos, its params "
+				"set at once if given (each checked as set_param checks it), "
+				"under parent if given. The answer names its new id. A type "
+				"with no_position takes a pos too and has none.",
+				R"J({"type": "object", "properties": {
+				"type": {"type": "string", "description": "From list_types"},
+				"pos": {"type": "array", "items": {"type": "number"},
+					"minItems": 3, "maxItems": 3, "description": "x, y, z"},
+				"params": {"type": "object",
+					"description": "Parameter values by name"},
+				"parent": {"type": "integer",
+					"description": "An entity to put it under (0: the scene)"}},
+				"required": ["type", "pos"]})J", ""},
+			{"set_param", "set", "Sets a parameter of an entity's component "
+				"to value, checked against its type's declaration.",
+				R"J({"type": "object", "properties": {
+				"id": {"type": "integer"},
+				"comp": {"type": "integer", "description":
+					"The component's index on the entity, 0 (the first) unless given"},
+				"param": {"type": "string"},
+				"value": {"description":
+					"A number, string, boolean, array or object, as the parameter's type is"}},
+				"required": ["id", "param", "value"]})J", R"J({"comp": 0})J"},
+			{"link", "link", "Links an output of an entity's component to an "
+				"input of entity `to`: each time the output signals, the input "
+				"gets its value. Their value types must meet.",
+				R"J({"type": "object", "properties": {
+				"id": {"type": "integer", "description": "The entity whose output it is"},
+				"comp": {"type": "integer", "description":
+					"Its component's index, 0 (the first) unless given"},
+				"output": {"type": "string"},
+				"to": {"type": "integer", "description": "The entity whose input it is"},
+				"input": {"type": "string"}},
+				"required": ["id", "output", "to", "input"]})J", R"J({"comp": 0})J"},
+			{"delete", "delete", "Deletes an entity, those under it and the "
+				"links to them.",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
+				"required": ["id"]})J", ""},
+			{"undo", "undo", "Takes back your last edit (yours only).",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"start", "play", "Starts the round (Play): the composition runs, "
+				"live, with the players in it. Edits go on while it runs.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"stop", "stop", "Ends the round (Stop): the world back at its "
+				"start, what play made gone.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"set_builder", "builder", "Grants (on: true) or takes an "
+				"account's edit rights. The Host's only: an admin token's.",
+				R"J({"type": "object", "properties": {
+				"name": {"type": "string", "description": "The account"},
+				"on": {"type": "boolean"}}, "required": ["name", "on"]})J", ""},
+		};
+		return t;
+	}
+
+	static bool mcp_version_ok(const ss_ &v)
+	{
+		return v == "2025-11-25" || v == "2025-06-18" || v == "2025-03-26";
+	}
+
+	const Agent *agent_of(size_t peer)
+	{
+		auto it = m_agent_peers.find(peer);
+		auto a = it == m_agent_peers.end() ? m_agents.end() :
+				m_agents.find(it->second);
+		return a == m_agents.end() ? nullptr : &a->second;
+	}
+
+	void on_http(const network::HttpRequest &r)
+	{
+		if(r.path != "/api/v1/mcp")
+			return;
+		auto respond = [&](int status, const ss_ &body, const ss_ &extra){
+			network::access(m_server, [&](network::Interface *i){
+				i->http_respond(r.peer, status, "application/json", body, extra);
+			});
+		};
+		auto reply = [&](const json::Value &id, const char *key,
+				const json::Value &v, int status, const ss_ &extra){
+			json::Value o = json::object();
+			o.set("jsonrpc", "2.0");
+			o.set("id", id);
+			o.set(key, v);
+			respond(status, o.stringify(), extra);
+		};
+		auto error = [&](int status, const json::Value &id, int code,
+				const ss_ &message, const ss_ &extra = ""){
+			json::Value e = json::object();
+			e.set("code", (int64_t)code);
+			e.set("message", message);
+			reply(id, "error", e, status, extra);
+		};
+		if(r.method != "POST")
+			return error(405, json::null(), -32600, "POST only: this server "
+					"opens no stream", "Allow: POST\r\n");
+		if(!r.origin.empty())
+			return error(403, json::null(), -32600, "Not from a page in a "
+					"browser: an agent token is for an agent's tool");
+		ss_ host = r.address, port;
+		interface::split_host_port(r.address, &host, &port, "0");
+		const ss_ bin = network::address_bin(host);
+		if(!m_agent_rates.ok("mcp_fail", bin, AGENT_FAILS, 60, false))
+			return error(429, json::null(), -32000, "Too many refused tries "
+					"from your network: wait a minute");
+		const ss_ auth = r.header("authorization");
+		ss_ token;
+		if(auth.size() > 7 && (auth.compare(0, 7, "Bearer ") == 0 ||
+				auth.compare(0, 7, "bearer ") == 0))
+			token = auth.substr(7);
+		while(!token.empty() && token.back() == ' ')
+			token.pop_back();
+		accounts::Interface::AgentToken at;
+		ss_ why = "no accounts on this server";
+		accounts::access(m_server, [&](accounts::Interface *i){
+			why = i->check_agent(token, at);
+		});
+		if(why == "off"){
+			while(!m_agents.empty())
+				drop_agent(m_agents.begin()->first, "agent access is off");
+			return error(403, json::null(), -32001, "Agent access is off on "
+					"this server: its Host turned it off on the Accounts page");
+		}
+		if(!why.empty()){
+			m_agent_rates.ok("mcp_fail", bin, AGENT_FAILS, 60);
+			if(!token.empty())
+				drop_agent(interface::sha256::hex(interface::sha256::calculate(
+						token)), "its token stands no more");
+			log_i(MODULE, "MCP: a request from %s refused: %s", cs(r.address),
+					token.empty() ? "no bearer token" : cs(why));
+			return error(401, json::null(), -32001, "Not an agent token of "
+					"this server's (revoked, its account gone, or mistyped): "
+					"make one on My account, Connect an agent...",
+					"WWW-Authenticate: Bearer error=\"invalid_token\"\r\n");
+		}
+		const ss_ pv = r.header("mcp-protocol-version");
+		if(!pv.empty() && !mcp_version_ok(pv))
+			return error(400, json::null(), -32600, "MCP-Protocol-Version "+
+					pv.substr(0, 32)+": this server speaks 2025-11-25, "
+					"2025-06-18 and 2025-03-26");
+		const json::Value j = json::load_string(r.body.c_str());
+		if(j.is_undefined())
+			return error(400, json::null(), -32700, "Not JSON");
+		if(!j.is_object() || jstr(j, "jsonrpc") != "2.0")
+			return error(400, json::null(), -32600, "One JSON-RPC 2.0 message, "
+					"an object (no batches)");
+		const json::Value &id = j.get("id");
+		// A notification (notifications/initialized) or a response: taken
+		if(id.is_undefined() || !j.get("method").is_string())
+			return respond(202, "", "");
+		if(!id.is_string() && !id.is_number())
+			return error(400, json::null(), -32600, "id: a string or a number");
+		const ss_ method = jstr(j, "method");
+		const json::Value &params = j.get("params");
+		const bool calls_ok = m_agent_rates.ok("mcp", at.id, AGENT_CALLS, 60);
+		if(!calls_ok && method != "tools/call")
+			return error(429, id, -32000, "Over "+itos(AGENT_CALLS)+" requests "
+					"a minute: wait");
+		if(method == "initialize"){
+			const ss_ want = params.is_object() ?
+					jstr(params, "protocolVersion") : "";
+			json::Value res = json::object(), caps = json::object(),
+					tl = json::object(), info = json::object();
+			res.set("protocolVersion", mcp_version_ok(want) ? want :
+					ss_("2025-11-25"));
+			tl.set("listChanged", false);
+			caps.set("tools", tl);
+			res.set("capabilities", caps);
+			info.set("name", "buildat-kit");
+			info.set("version", ss_(BUILDAT_VERSION));
+			res.set("serverInfo", info);
+			res.set("instructions", "Kit on a Buildat server: the composition "
+					"its builders build, live. get_state reads it, list_types "
+					"what can be placed; place, set_param, link and delete edit "
+					"it as your account's agent, logged so; undo takes back your "
+					"last edit; start and stop run the round. Positions are x, "
+					"y, z in cells, y up.");
+			log_i(MODULE, "MCP: %s's agent (\"%s\", %s token) from %s, protocol "
+					"%s", cs(at.name), cs(at.label), cs(at.scope), cs(r.address),
+					cs(res.get("protocolVersion").as_string()));
+			return reply(id, "result", res, 200, "");
+		}
+		if(method == "ping")
+			return reply(id, "result", json::object(), 200, "");
+		if(method == "tools/list"){
+			json::Value list = json::array(), res = json::object();
+			for(const AgentTool &t : agent_tools()){
+				json::Value o = json::object();
+				o.set("name", t.name);
+				o.set("description", t.about);
+				o.set("inputSchema", json::load_string(t.schema));
+				list.append(o);
+			}
+			res.set("tools", list);
+			return reply(id, "result", res, 200, "");
+		}
+		if(method == "tools/call"){
+			const ss_ name = params.is_object() ? jstr(params, "name") : "";
+			const json::Value &args = params.is_object() ?
+					params.get("arguments") : json::Value();
+			const AgentTool *t = nullptr;
+			for(const AgentTool &x : agent_tools())
+				if(name == x.name)
+					t = &x;
+			if(!t)
+				return error(200, id, -32602, "No tool \""+name.substr(0, 64)+
+						"\"");
+			if(!args.is_undefined() && !args.is_object())
+				return error(200, id, -32602, "arguments: an object");
+			bool failed = !calls_ok;
+			const ss_ text = failed ? "Over "+itos(AGENT_CALLS)+" calls a "
+					"minute: wait" : agent_tool(at, *t, args, failed);
+			json::Value res = json::object(), content = json::array(),
+					c = json::object();
+			c.set("type", "text");
+			c.set("text", text);
+			content.append(c);
+			res.set("content", content);
+			res.set("isError", failed);
+			return reply(id, "result", res, 200, "");
+		}
+		// A client of MCP's stateless versions after 2025-11-25 asks this
+		// first; refused, it falls back to initialize
+		return error(method == "server/discover" ? 400 : 200, id, -32601,
+				"No method \""+method.substr(0, 64)+"\" (this server speaks "
+				"MCP 2025-11-25 and before)");
+	}
+
+	// The agent's peer, made at its first call
+	size_t agent_peer(const accounts::Interface::AgentToken &at)
+	{
+		Agent &a = m_agents[at.id];
+		a.account = at.name;
+		a.scope = at.scope;
+		a.label = at.label;
+		a.last_us = interface::os::time_us();
+		if(a.peer)
+			return a.peer;
+		sp_<AgentBox> box = m_agent_box;
+		sp_<size_t> self = std::make_shared<size_t>(0);
+		network::access(m_server, [&](network::Interface *i){
+			a.peer = i->add_local_peer([box, self](const ss_ &name,
+					const ss_ &data){
+				std::lock_guard<std::mutex> lock(box->m);
+				if(box->want && box->want == *self)
+					box->got.push_back(std::make_pair(name, data));
+			});
+		});
+		if(!a.peer){
+			m_agents.erase(at.id);
+			return 0;
+		}
+		{
+			std::lock_guard<std::mutex> lock(box->m);
+			*self = a.peer;
+		}
+		m_agent_peers[a.peer] = at.id;
+		Peer &p = m_peers[a.peer];
+		p.name = at.name+"'s agent";
+		p.scene = !m_host.world_scene.empty() || m_host.scenes.empty() ?
+				m_host.world_scene : m_host.scenes.begin()->first;
+		log_i(MODULE, "%s (\"%s\", %s token) is here, peer %zu", cs(p.name),
+				cs(at.label), cs(at.scope), a.peer);
+		return a.peer;
+	}
+
+	void drop_agent(const ss_ &id, const char *why)
+	{
+		auto it = m_agents.find(id);
+		if(it == m_agents.end())
+			return;
+		const size_t peer = it->second.peer;
+		m_agents.erase(it);
+		m_agent_peers.erase(peer);
+		{
+			SessionScope sc(*this, 0);
+			auto pi = m_peers.find(peer);
+			if(pi != m_peers.end()){
+				log_i(MODULE, "%s left: %s", cs(pi->second.name), why);
+				leave_round(peer, false);
+			}
+		}
+		network::access(m_server, [&](network::Interface *i){
+			i->remove_local_peer(peer);
+		});
+	}
+
+	ss_ agent_tool(const accounts::Interface::AgentToken &at,
+			const AgentTool &t, const json::Value &args, bool &failed)
+	{
+		SessionScope sc(*this, 0);
+		failed = true;
+		if(!m_hosted)
+			return "Kit is not hosted by this server's app";
+		const size_t peer = agent_peer(at);
+		if(!peer)
+			return "This server runs no agents";
+		Peer &p = m_peers[peer];
+		if(!can_edit_u(peer))
+			return "No edit rights here: "+at.name+" is not a builder";
+		if(!p.editing){
+			tools(p, peer, true);
+			send_builders();
+		}
+		failed = false;
+		const ss_ op = t.op;
+		if(op == "=state")
+			return agent_state(p);
+		if(op == "=types")
+			return agent_types(args.is_object() ? jstr(args, "type") : "",
+					failed);
+		// The edit as an editor's client sends it
+		json::Value e = t.defaults[0] ? json::load_string(t.defaults) :
+				json::object();
+		const json::Value schema = json::load_string(t.schema);
+		for(json::Iterator it(schema.get("properties")); it; ++it)
+			if(args.is_object() && !args.get(it.key()).is_undefined())
+				e.set(it.key(), args.get(it.key()));
+		e.set("op", op);
+		{
+			std::lock_guard<std::mutex> lock(m_agent_box->m);
+			m_agent_box->want = peer;
+			m_agent_box->got.clear();
+		}
+		m_edit_what.clear();
+		const bool ran = m_session.running;
+		on_edit(network::Packet(peer, "kit:edit", e.stringify()));
+		sv_<std::pair<ss_, ss_>> got;
+		{
+			std::lock_guard<std::mutex> lock(m_agent_box->m);
+			m_agent_box->want = 0;
+			got.swap(m_agent_box->got);
+		}
+		ss_ refused, warnings;
+		for(auto &g : got){
+			if(g.first == "kit:edit_refused")
+				refused += (refused.empty() ? "" : "\n")+g.second;
+			else if(g.first == "kit:warning")
+				warnings += "\n"+g.second;
+		}
+		if(!refused.empty()){
+			failed = true;
+			return "Refused: "+refused+warnings;
+		}
+		return (!m_edit_what.empty() ? m_edit_what : m_session.running != ran ?
+				ss_(m_session.running ? "Running" : "Ended: the world at its "
+				"start") : ss_("Done"))+warnings;
+	}
+
+	ss_ agent_state(const Peer &p)
+	{
+		json::Value s = json::object();
+		s.set("running", m_session.running);
+		s.set("scene", p.scene);
+		s.set("undo", (int64_t)m_undo[p.name].size());
+		json::Value es = authored_json(true).get("entities");
+		for(unsigned i = 0; m_session.running && i < es.size(); i++){
+			auto it = m_entities.find((uint64_t)json::jint(es.at(i), "id", 0));
+			if(it == m_entities.end())
+				continue;
+			json::Value &cs_ = es[i]["components"];
+			for(unsigned c = 0; c < cs_.size() && c < it->second.comps.size(); c++)
+				cs_[c].set("state", it->second.comps[c].state);
+		}
+		s.set("entities", es);
+		return s.stringify();
+	}
+
+	ss_ agent_types(const ss_ &type, bool &failed)
+	{
+		if(!type.empty()){
+			if(!m_palette.count(type)){
+				failed = true;
+				return "No type \""+type.substr(0, 64)+"\" in the palette";
+			}
+			json::Value o = json::object();
+			const json::Value &d = m_types[type].decl;
+			o.set("type", type);
+			for(const char *k : {"about", "params", "inputs", "outputs",
+					"no_position", "component", "root", "player", "zone"})
+				if(!d.get(k).is_undefined())
+					o.set(k, d.get(k));
+			return o.stringify();
+		}
+		json::Value list = json::array();
+		for(const ss_ &t : m_palette){
+			const json::Value &about = m_types[t].decl.get("about");
+			json::Value o = json::object();
+			o.set("type", t);
+			o.set("group", jstr(about, "group"));
+			o.set("what", jstr(about, "what"));
+			list.append(o);
+		}
+		return list.stringify();
+	}
+
 	// ---- The editor (api.h: edit mode, the packet kit:edit)
 
 	void set_editor(const ss_ &player, bool can)
@@ -26136,6 +26610,16 @@ struct Module: public interface::Module, public Interface
 	{
 		ss_ name;
 		bool a = false;
+		// [KIT_AGENTS] an agent's: an admin with an admin token only
+		if(const Agent *ag = agent_of(peer)){
+			if(ag->scope == "admin")
+				accounts::access(m_server, [&](accounts::Interface *i){
+					a = i->is_admin(ag->account);
+				});
+			if(admin)
+				*admin = a;
+			return ag->account;
+		}
 		if(m_server->has_module("accounts"))
 			accounts::access(m_server, [&](accounts::Interface *i){
 				name = i->name_of(peer);
@@ -26171,11 +26655,17 @@ struct Module: public interface::Module, public Interface
 		auto pi = m_peers.find(peer);
 		if(pi == m_peers.end())
 			return false;
-		auto o = m_rights.find(pi->second.name);
+		// [KIT_AGENTS] an agent's: its account's (an admin token or not)
+		const Agent *ag = agent_of(peer);
+		auto o = m_rights.find(ag ? ag->account : pi->second.name);
 		if(o != m_rights.end())
 			return o->second;
 		bool admin = false;
 		const ss_ name = account_of(peer, &admin);
+		if(ag && m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *i){
+				admin = i->is_admin(name);
+			});
 		return admin || is_builder(name);
 	}
 
@@ -27089,7 +27579,9 @@ struct Module: public interface::Module, public Interface
 	void round_join(size_t peer, bool at_play)
 	{
 		auto pi = m_peers.find(peer);
-		if(pi == m_peers.end() || pi->second.name.empty())
+		// [KIT_AGENTS] an agent has no player
+		if(pi == m_peers.end() || pi->second.name.empty() ||
+				m_agent_peers.count(peer))
 			return;
 		const ss_ name = pi->second.name, scene = pi->second.scene;
 		const uint64_t pid = ensure_player(name);
@@ -27625,14 +28117,19 @@ struct Module: public interface::Module, public Interface
 		});
 		if(!why.empty())
 			return refuse(why);
-		log_i(MODULE, "%s %s builder %s", by.empty() ? "The local user" :
-				cs(by), on ? "made" : "took", cs(name));
+		log_i(MODULE, "%s %s builder %s", agent_of(peer) ?
+				cs(m_peers[peer].name) : by.empty() ? "The local user" : cs(by),
+				on ? "made" : "took", cs(name));
+		m_edit_what = name+(on ? " is a builder" : " is no longer a builder");
 	}
 
 	// What an editor's client shows: the palette and the authored tree, or
 	// that it is not editing
 	void send_state(size_t peer)
 	{
+		// [KIT_AGENTS] an agent reads what it asks for (agent_state())
+		if(m_agent_peers.count(peer))
+			return;
 		WorldScope ws(m_w, world_of_peer(peer));
 		auto pi = m_peers.find(peer);
 		json::Value j = json::object();
@@ -27904,7 +28401,7 @@ struct Module: public interface::Module, public Interface
 				for(auto &o : m_peers){
 					bool o_admin = false;
 					const ss_ n = account_of(o.first, &o_admin);
-					if(o.first == peer || n.empty())
+					if(o.first == peer || n.empty() || m_agent_peers.count(o.first))
 						continue;
 					json::Value r = json::object();
 					r.set("name", n);
@@ -28202,6 +28699,8 @@ struct Module: public interface::Module, public Interface
 			commit(c.before, nullptr);
 			log_i(MODULE, "An undo by %s: %zu entities put back (%zu more "
 					"to undo)", cs(p.name), c.before.size(), u.size());
+			m_edit_what = "Undone: "+itos(c.before.size())+" entities put back, "+
+					itos(u.size())+" more to undo";
 			world_check(p.name);
 			return;
 		}
@@ -28330,6 +28829,7 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		log_i(MODULE, "An edit by %s: %s", cs(p.name), cs(what));
+		m_edit_what = what;
 		world_check(p.name);
 		if(!m_bench_saved.empty())
 			bench_follow(p);

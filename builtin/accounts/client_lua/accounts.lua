@@ -55,7 +55,9 @@ local HELLO = {"object", {"local", "byte"}, {"setup", "byte"},
 		{"open_registration", "byte"}, {"starport", "byte"},
 		{"announce", "byte"}, {"version", "string"},
 		-- [HC_GUEST_PLAY] the app lets a guest in
-		{"guests", "byte"}}
+		{"guests", "byte"},
+		-- [KIT_AGENTS] the server has Kit's MCP endpoint
+		{"agents", "byte"}}
 local ADMIN = {"object", {"cmd", "string"}, {"name", "string"},
 		{"arg", "string"}, {"on", "byte"}}
 local USERS = {"object",
@@ -78,6 +80,8 @@ local USERS = {"object",
 	-- [FP_ABUSE] 3: the storage budget in MB, and what all apps keep
 	{"budget_mb", "int32_t"},
 	{"storage", "string"},
+	-- [KIT_AGENTS] the admin's switch
+	{"agents", "byte"},
 }
 
 -- [TRUST_LADDER] The trust levels' names, as builtin/accounts/api.h's
@@ -1637,6 +1641,11 @@ account_page = function(back, message)
 	if M.users and M.users.level >= 30 then
 		button(w, "Notify me by ntfy...", function() M.ntfy_page(here) end)
 	end
+	-- [KIT_AGENTS] A token for one's own agentic tool (a guest has no
+	-- account to give it)
+	if M.hello.agents == 1 and how ~= "guest" then
+		button(w, "Connect an agent...", function() M.agents_page(here) end)
+	end
 	-- [STARPORT] 10g: this account the one a Starport ID logs in as
 	if M.hello.starport == 1 then
 		page_text(w, "A linked Starport ID logs in as this account.", DIM)
@@ -1759,6 +1768,149 @@ end
 local function admin_public_address()
 	return buildat.connection_encrypted() and
 			public_https(buildat.server_address() or "") or nil
+end
+
+-- [KIT_AGENTS] **Connect an agent** (user, 2026-11-14: streamlined, "to not
+-- make users give up on it"): a token for the user's own agentic tool
+-- (Claude Code, Codex, Cursor, Gemini CLI...), local or in the cloud, which
+-- reaches Kit's MCP endpoint on this server's own port with it. Builder
+-- scope, or Admin for an admin who asks; a label; then one block to copy
+-- -- the endpoint's address, a ready `claude mcp add` line and a generic
+-- MCP config -- shown once. The account's tokens under it, with their
+-- last use and Revoke. No answer is logged: a make's holds the token.
+-- The address is the one this client joined by, whose port serves the web
+-- too; joined by TLS (a hosted server's HTTPS proxy, which passes /api/),
+-- https, which is what a cloud agent reaches.
+-- simplified: a Windows client's boxed local server ("pipe:...") has no
+-- address a tool reaches, and the block says a wrong one
+local ag = {scope = "builder", label = "Claude Code"}
+function M.mcp_url(address, tls)
+	local a = address:gsub("^%a+://", ""):gsub("/.*$", "")
+	local host = a:match("^%[.-%]") or a:match("^[^:]*")
+	local port = a:sub(#host + 2)
+	if port == "" then
+		port = tls and "443" or "29500"
+	end
+	return (tls and "https://" or "http://") .. host ..
+			((tls and port == "443") and "" or ":" .. port) .. "/api/v1/mcp"
+end
+assert(M.mcp_url("https://wb.example.org", true) ==
+		"https://wb.example.org/api/v1/mcp")
+assert(M.mcp_url("wb.example.org:8443", true) ==
+		"https://wb.example.org:8443/api/v1/mcp")
+assert(M.mcp_url("localhost:29731", false) ==
+		"http://localhost:29731/api/v1/mcp")
+assert(M.mcp_url("[::1]", false) == "http://[::1]:29500/api/v1/mcp")
+function ag.block(url, token)
+	return "Server: " .. url .. "\n\nClaude Code:\nclaude mcp add " ..
+			"--transport http buildat " .. url .. " --header \"Authorization: " ..
+			"Bearer " .. token .. "\"\n\nOther tools (an MCP config):\n" ..
+			'{"mcpServers": {"buildat": {"type": "http", "url": "' .. url ..
+			'", "headers": {"Authorization": "Bearer ' .. token .. '"}}}}'
+end
+function ag.redraw()
+	if page_kind == "agents" then
+		ag.draw()
+	end
+end
+ag.req = M.requester("accounts:agent", function(why)
+	ag.error = why
+	log:info("accounts: agents: " .. why)
+	ag.redraw()
+end)
+function ag.answer(res)
+	ag.res = res
+	log:info("accounts: agents: " .. #res.tokens .. " tokens, " ..
+			(res.on and "on" or "off"))
+	ag.redraw()
+end
+function ag.draw()
+	local w = open_page("agents", "Connect an agent", ag.back)
+	local r = ag.res
+	if ag.error then
+		page_text(w, ag.error, WARN)
+	end
+	if not r then
+		page_text(w, "Waiting for the server...")
+		button(w, "Back", go_back)
+		return
+	end
+	if ag.token then
+		local tls = buildat.connection_encrypted()
+		local url = M.mcp_url(buildat.server_address() or "", tls)
+		local text = ag.block(url, ag.token)
+		page_text(w, "For your agent, shown once: copy it now. If it leaks, " ..
+				"revoke the token on this page.", WARN)
+		page_text(w, text)
+		local rr = row(w)
+		button(rr, "Copy", function()
+			magic.ui:SetClipboardText(text)
+			notice("Copied: paste it into your agent's terminal or config")
+			log:info("accounts: agents: the block copied")
+		end, true)
+		button(rr, "Done", function()
+			ag.token = nil
+			ag.draw()
+		end)
+		if not tls then
+			page_text(w, "Plain HTTP: the token goes unencrypted. Fine on " ..
+					"this machine or a LAN you trust; a server for others " ..
+					"wants HTTPS.", DIM)
+		end
+		if not public_https(url) then
+			page_text(w, "This address is this machine's or its LAN's: an " ..
+					"agent here reaches it, a cloud agent does not.", DIM)
+		end
+		return
+	end
+	if not r.on then
+		page_text(w, "Agent access is off on this server (its admin turns " ..
+				"it on in Accounts).", WARN)
+	else
+		page_text(w, "Your own agentic tool (Claude Code, Codex, Cursor, " ..
+				"Gemini CLI...) works here through MCP as " ..
+				tostring(M.who()) .. "'s agent, with your rights: its edits " ..
+				"go straight into the live round, logged as its own.", DIM)
+		if r.admin then
+			button(w, ag.scope == "admin" and "Scope: Admin (all you may do)" or
+					"Scope: Builder (edits; no admin's rights)", function()
+				ag.scope = ag.scope == "admin" and "builder" or "admin"
+				ag.draw()
+			end)
+		else
+			ag.scope = "builder"
+			page_text(w, "Scope: Builder")
+		end
+		local label = field(w, "Label", false, function() end, ag.label)
+		button(w, "Make a token", function()
+			ag.label, ag.error = label:GetText(), nil
+			ag.req("make", {scope = ag.scope, label = ag.label}, function(res)
+				ag.token = res.token
+				log:info("accounts: agents: a token made, " .. ag.scope)
+				ag.answer(res)
+			end)
+		end, true)
+	end
+	if #r.tokens > 0 then
+		page_text(w, "Your agent tokens:")
+	end
+	for _, t in ipairs(r.tokens) do
+		page_text(w, t.label .. " (" .. t.scope .. "): made " .. t.made ..
+				", last used " .. t.used, DIM)
+		button(w, "Revoke " .. t.label, function()
+			ag.error = nil
+			ag.req("revoke", {token_id = t.id}, function(res)
+				log:info("accounts: agents: revoked " .. t.label)
+				ag.answer(res)
+			end)
+		end)
+	end
+	button(w, "Back", go_back)
+end
+function M.agents_page(back)
+	ag.back, ag.res, ag.token, ag.error = back, nil, nil, nil
+	ag.req("list", {}, ag.answer)
+	ag.draw()
 end
 
 -- A page of fields under the users page: a password for an account, or a
@@ -1972,6 +2124,13 @@ users_page = function(back)
 			ask_page("The storage budget in MB", {"MB"},
 					function(mb) M.admin("setting", "storage_budget", mb) end)
 		end)
+		-- [KIT_AGENTS] on by default; off, no agent token works
+		if M.hello.agents == 1 then
+			button(w, u.agents == 1 and "Agents (MCP): on, with the tokens "..
+					"users made" or "Agents (MCP): off", function()
+				M.admin("setting", "agents", "", u.agents ~= 1)
+			end)
+		end
 	end
 	if back then
 		button(w, "Back", go_back)

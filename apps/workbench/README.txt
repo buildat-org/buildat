@@ -22,6 +22,17 @@ commit as the Kit components it uses; util/kit_templates_check.sh plays each
 to its end, and util/pack_templates.sh packs them for an Aitta with the
 caller's key.
 
+A builder's own agentic tool (Claude Code, Codex, Cursor, Gemini CLI...)
+edits a project through MCP ([KIT_AGENTS]): the pause menu's My account,
+Connect an agent... makes a token (Builder, or Admin for an admin), shown
+once in a block to copy with the server's address, a `claude mcp add` line
+and an MCP config; the page lists the tokens with their last use and
+Revoke. The tool then reaches POST /api/v1/mcp on the server's port as
+"<name>'s agent", with that account's rights, its edits in the live round
+and logged as the agent's. The tools and the rules: [KIT_AGENTS] in
+builtin/kit/kit.cpp. The admin turns it off on the Accounts page
+(util/kit_agents_check.sh).
+
 Licenses of textures and other media:
 ------------------------------------
 main/client_data/*.png, launcher/icon.png

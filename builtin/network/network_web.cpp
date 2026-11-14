@@ -377,6 +377,9 @@ struct Module: public interface::Module, public network::Interface
 	void set_ws_origins(const ss_ &by, const sv_<ss_> &origins){}
 	ss_ health_json(){ return "{}"; }
 	void set_has_admin(bool admin){}
+	// simplified: no HTTP here, so no agent peers ([KIT_AGENTS]); 0 is no peer
+	PeerInfo::Id add_local_peer(Sink sink){ return 0; }
+	void remove_local_peer(PeerInfo::Id peer){}
 };
 
 void PumpThread::run(interface::Thread *thread)
