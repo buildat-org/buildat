@@ -352,6 +352,15 @@ event <name> [param]
         so a sequence does not have to know which mode it left the room
         in.
 
+window <w> <h>
+    The window made that size, windowed, the way F11 changes the mode: the
+    window and the GL context made again, every GPU object lost and
+    restored ([KIT_RESIZE_CRASH]). The new mode is logged ("screen mode:
+    WxH") within the command, so wait for it with wait_log_any. Wants
+    BUILDAT_TEST_REAL_WINDOW=1: in -w's fixed-size mode the UI keeps the -w
+    size. A size near the screen's covers someone's desktop:
+    util/kit_resize_check.sh runs it in a headless weston of its own.
+
 quit
     Stop the sequence early. The client always exits at the end of -c anyway.
 

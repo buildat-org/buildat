@@ -142,7 +142,17 @@ void Text3D::UpdateGeometry(const FrameInfo& frame)
     if (fontDataLost_)
     {
         // Re-evaluation of the text triggers the font face to reload itself
+        unsigned queued = batches_.Size();
         UpdateTextBatches();
+        // The views have queued this frame's batches already, with raw
+        // pointers to their geometries and materials: a face reloaded on
+        // fewer pages must not free them before the draw (buildat
+        // [KIT_RESIZE_CRASH]). Empty batches keep the count, drawn as
+        // nothing.
+        // simplified: they stay until the next UpdateTextBatches (a text,
+        // font or style change); a deferred shrink would need a member
+        while (uiBatches_.Size() < queued)
+            uiBatches_.Push(UIBatch());
         UpdateTextMaterials();
         fontDataLost_ = false;
     }

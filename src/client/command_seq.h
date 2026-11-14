@@ -86,6 +86,11 @@ namespace command_seq
 		// sim_clock file (the offset kept): 1 around inputs timed on the
 		// wall clock, faster while the drive only waits
 		GameRate,
+		// window <w> <h>: the window made that size, windowed, by
+		// Graphics::SetMode as F11 does it: the window and the GL context
+		// made again, every GPU object lost and restored
+		// ([KIT_RESIZE_CRASH]). In x, y
+		Window,
 	};
 
 	struct Command

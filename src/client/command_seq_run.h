@@ -588,6 +588,12 @@
 		case Type::Text:
 			ok = client::command_seq::inject_text(input, c.s, &err);
 			break;
+		case Type::Window:
+			m_options.graphics.fullscreen = false;
+			m_options.graphics.window_w = c.x;
+			m_options.graphics.window_h = c.y;
+			m_options.graphics.apply(GetSubsystem<magic::Graphics>());
+			break;
 		case Type::Event:
 			{
 				// Sent now, in the sequence's own frame; the receiver
