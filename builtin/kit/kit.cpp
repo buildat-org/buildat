@@ -518,7 +518,16 @@ struct Peer
 	// same again goes by name in "same", not again (about 100 KB a state
 	// in edit mode, the types' declarations most of it)
 	std::map<ss_, ss_> state_sent;
+	// [KIT_AGENTS] An agent's: its account, whose name its prefabs and voxel
+	// types are under ("" for everyone else: theirs are under `name`)
+	ss_ account;
 };
+
+// Whose name a peer's prefabs, voxel and item types are under
+static const ss_ &author_of(const Peer &p)
+{
+	return p.account.empty() ? p.name : p.account;
+}
 
 // A builder's colour while their tools are on: the first one no other
 // builder has
@@ -1512,6 +1521,8 @@ struct Module: public interface::Module, public Interface
 				&Module::on_reload);
 		sub(m_server, "accounts:privs", &Module::on_privs);
 		sub(m_server, "network:http_request", &Module::on_http);
+		sub(m_server, "accounts:agent_revoked", &Module::on_agent_revoked);
+		sub(m_server, "accounts:deleted", &Module::on_account_deleted);
 		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
 		sub(m_server, "worldgen:section_generated", &Module::on_generated);
 		sub(m_server, "worldgen:queue_modified", &Module::on_gen_queue);
@@ -5157,7 +5168,7 @@ struct Module: public interface::Module, public Interface
 			std::function<void(const ss_&)> refuse)
 	{
 		const ss_ short_name = jstr(j, "name");
-		const ss_ author = builder_author(p.name);
+		const ss_ author = builder_author(author_of(p));
 		if(!name_ok(short_name))
 			return refuse("name: letters, digits and _");
 		if(author.empty())
@@ -6123,7 +6134,7 @@ struct Module: public interface::Module, public Interface
 	void export_package(size_t peer, const Peer &p,
 			std::function<void(const ss_&)> refuse)
 	{
-		const ss_ author = builder_author(p.name);
+		const ss_ author = builder_author(author_of(p));
 		if(author.empty())
 			return refuse("a builder's prefabs are under their name, and it "
 					"is \""+p.name.substr(0, 64)+"\"");
@@ -14604,7 +14615,7 @@ struct Module: public interface::Module, public Interface
 	// be, "kit" being Kit's
 	static ss_ prefab_author(const Peer &p)
 	{
-		ss_ author = p.name.substr(0, 64);
+		ss_ author = author_of(p).substr(0, 64);
 		for(char &c : author)
 			if(!isalnum((unsigned char)c))
 				c = '_';
@@ -22240,7 +22251,7 @@ struct Module: public interface::Module, public Interface
 			std::function<void(const ss_&)> refuse)
 	{
 		const ss_ short_name = jstr(j, "name");
-		const ss_ author = builder_author(p.name);
+		const ss_ author = builder_author(author_of(p));
 		if(!name_ok(short_name))
 			return refuse("name: letters, digits and _");
 		if(author.empty())
@@ -22357,7 +22368,7 @@ struct Module: public interface::Module, public Interface
 					"at most "+itos(MAX_SOUND)+" characters");
 		auto old = m_sounds.find(name);
 		if(old == m_sounds.end()){
-			const ss_ author = builder_author(p.name);
+			const ss_ author = builder_author(author_of(p));
 			if(!name_ok(name))
 				return refuse("name: letters, digits and _ (or a sound's "
 						"whole name)");
@@ -26150,9 +26161,16 @@ struct Module: public interface::Module, public Interface
 	// last. Its rights are its account's at each call, an admin's only with
 	// an admin token (account_of(), can_edit_u()); what Kit refuses it is
 	// the tool's error text. No CORS: a request with an Origin (a page in a
-	// browser) is refused.
+	// browser) is refused. Its reads are what the account's editor shows;
+	// its prefabs and voxel types are under the account's name. The guide
+	// (agent_guide()) is the initialize answer's instructions, which Claude
+	// Code puts into the model's context (a resource it only lists), cut to
+	// its 4096 characters; get_guide gives it whole.
+	// A revoked token's agent leaves at once (accounts:agent_revoked), and a
+	// deleted account's.
 	// simplified: an account's tokens share one agent name, so one undo
-	// stack; a revoked token's agent leaves at its next request or idle
+	// stack. An agent has no body: voxels are edited and read only where a
+	// player has their sections loaded
 	struct Agent
 	{
 		size_t peer = 0;
@@ -26166,13 +26184,16 @@ struct Module: public interface::Module, public Interface
 	sm_<ss_, Agent> m_agents;
 	sm_<size_t, ss_> m_agent_peers;
 	// What the network sends an agent's peer during its call (on the
-	// sender's thread); nothing at other times
+	// sender's thread); between its calls, its Try's answers, its watch's
+	// emits and warnings (get_events), the last AGENT_EVENTS of them
 	struct AgentBox
 	{
 		std::mutex m;
 		size_t want = 0;
 		sv_<std::pair<ss_, ss_>> got;
+		std::map<size_t, std::deque<std::pair<ss_, ss_>>> later;
 	};
+	static const size_t AGENT_EVENTS = 50, AGENT_EVENT_BYTES = 2000;
 	sp_<AgentBox> m_agent_box = std::make_shared<AgentBox>();
 	network::RateTable m_agent_rates;
 	// The last edit's or undo's text, as its log line says it
@@ -26199,6 +26220,51 @@ struct Module: public interface::Module, public Interface
 				"inputs and outputs (their values' types) and what each does.",
 				R"J({"type": "object", "properties": {"type": {"type": "string",
 				"description": "A type, as \"kit/counter\""}}})J", ""},
+			// The reads (agent_read())
+			{"get_guide", "=guide", "How Kit's compositions are built and run, "
+				"and every type of this server's with its inputs, outputs and "
+				"params' names. Read it first.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"get_links", "=links", "The links: each one's entity, component, "
+				"output, the entity it goes to and its input, with their value "
+				"types. With id: those from it and to it.",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"}}})J",
+				""},
+			{"get_log", "=log", "An entity's log, the last 50 lines: what its "
+				"components logged (c:log) and what came to it, with the game "
+				"clock's minutes and seconds.",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
+				"required": ["id"]})J", ""},
+			{"get_events", "=events", "What came for you since you last asked "
+				"(the last 50): your try_input's answers (what its runs emitted), "
+				"what the entity you watch emitted (every 0.2 s at most: each "
+				"output's last value and how many times), warnings.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"get_goal_warnings", "=goals", "What the links leave a kit/goal "
+				"missing, as the editor warns at Publish: nothing activates it, "
+				"no target, no via, no chain of links to its validate_reachable.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"list_prefabs", "=prefabs", "The prefabs to place: each one's "
+				"version, copies placed, its voxels' box and whether it is yours "
+				"(save_prefab makes a new version). With prefab: its entities.",
+				R"J({"type": "object", "properties": {"prefab": {"type": "string",
+				"description": "A prefab, as \"kit/hut\""}}})J", ""},
+			{"list_items", "=items", "The item types (what a kit/pickup, a shop "
+				"or a starting kit gives): each one's declaration.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"list_voxel_types", "=voxel_types", "The voxels set_voxels places: "
+				"each one's name, kind and whether it is solid.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"get_voxels", "=voxels", "The voxels of a box of your scene, at "
+				"most 4096 cells: a key of characters to voxel names (\".\" "
+				"air, \"?\" not loaded), then each layer from y up, each row of "
+				"it from z up, each character x from at's.",
+				R"J({"type": "object", "properties": {
+				"at": {"type": "array", "items": {"type": "integer"},
+					"minItems": 3, "maxItems": 3, "description": "Its lowest corner"},
+				"size": {"type": "array", "items": {"type": "integer"},
+					"minItems": 3, "maxItems": 3, "description": "Cells each way"}},
+				"required": ["at", "size"]})J", ""},
 			{"place", "place", "Places an entity of a type at pos, its params "
 				"set at once if given (each checked as set_param checks it), "
 				"under parent if given. The answer names its new id. A type "
@@ -26237,6 +26303,102 @@ struct Module: public interface::Module, public Interface
 				"links to them.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
 				"required": ["id"]})J", ""},
+			{"unlink", "unlink", "Takes a link away (as link names it).",
+				R"J({"type": "object", "properties": {
+				"id": {"type": "integer"}, "comp": {"type": "integer"},
+				"output": {"type": "string"}, "to": {"type": "integer"},
+				"input": {"type": "string"}},
+				"required": ["id", "output", "to", "input"]})J", R"J({"comp": 0})J"},
+			{"move", "move", "Moves entity id to pos (the world's), turned to "
+				"yaw, pitch and roll (degrees; each left out kept); or entities "
+				"ids together by [dx, dy, dz], turned turn degrees round axis "
+				"(default y) about their middle. What is under them goes along.",
+				R"J({"type": "object", "properties": {
+				"id": {"type": "integer"},
+				"pos": {"type": "array", "items": {"type": "number"},
+					"minItems": 3, "maxItems": 3},
+				"yaw": {"type": "number"}, "pitch": {"type": "number"},
+				"roll": {"type": "number"},
+				"ids": {"type": "array", "items": {"type": "integer"}},
+				"by": {"type": "array", "items": {"type": "number"},
+					"minItems": 3, "maxItems": 3},
+				"turn": {"type": "number"},
+				"axis": {"type": "array", "items": {"type": "number"},
+					"minItems": 3, "maxItems": 3}}})J", ""},
+			{"rename", "rename", "Names an entity as builders read it (\"\": "
+				"its type and id again).",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"},
+				"name": {"type": "string"}}, "required": ["id", "name"]})J", ""},
+			{"add_component", "add_component", "Adds a component of an "
+				"addable type (list_types with type says) to an entity, its "
+				"params at their defaults. One of a type an entity.",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"},
+				"type": {"type": "string"}}, "required": ["id", "type"]})J", ""},
+			{"remove_component", "remove_component", "Takes component comp "
+				"(its index) off an entity; not the first, what it is.",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"},
+				"comp": {"type": "integer"}}, "required": ["id", "comp"]})J", ""},
+			{"set_parent", "parent", "Puts an entity (and what is under it) "
+				"under parent, a positioned entity of your scene (0: the scene), "
+				"where it is in the world kept; it then moves with its parent.",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"},
+				"parent": {"type": "integer"}}, "required": ["id", "parent"]})J",
+				""},
+			{"duplicate", "duplicate", "Copies entities ids (each with what is "
+				"under it) by [dx, dy, dz], the links and entity params among "
+				"them the copies'. The answer names the new ids.",
+				R"J({"type": "object", "properties": {
+				"ids": {"type": "array", "items": {"type": "integer"}},
+				"by": {"type": "array", "items": {"type": "number"},
+					"minItems": 3, "maxItems": 3}},
+				"required": ["ids", "by"]})J", ""},
+			{"place_prefab", "place", "Places a copy of a prefab (list_prefabs) "
+				"at pos, turned turn degrees (a multiple of 90), its voxels "
+				"written into the world; it follows the prefab's new versions. "
+				"free: its voxels a moving object instead; detached: plain "
+				"entities that follow nothing.",
+				R"J({"type": "object", "properties": {
+				"prefab": {"type": "string"},
+				"pos": {"type": "array", "items": {"type": "number"},
+					"minItems": 3, "maxItems": 3},
+				"turn": {"type": "number"}, "parent": {"type": "integer"},
+				"free": {"type": "boolean"}, "detached": {"type": "boolean"}},
+				"required": ["prefab", "pos"]})J", ""},
+			{"save_prefab", "save_prefab", "Makes entities ids the prefab "
+				"\"<your account>/<name>\" (a new version if there is one), "
+				"placeable from then on; they stay as they are. Or root, a "
+				"placed copy of a prefab of yours: what is under it the "
+				"prefab's new version, every copy following. Either with the "
+				"voxels of box (air: its air cells too clear where it is placed).",
+				R"J({"type": "object", "properties": {
+				"ids": {"type": "array", "items": {"type": "integer"}},
+				"name": {"type": "string", "description": "Letters, digits and _"},
+				"root": {"type": "integer"},
+				"box": {"type": "array", "items": {"type": "integer"},
+					"minItems": 6, "maxItems": 6,
+					"description": "x0, y0, z0, x1, y1, z1: two corners"},
+				"air": {"type": "boolean"}}})J", ""},
+			{"set_voxels", "set_voxel", "Places voxel (list_voxel_types; "
+				"\"air\" digs) in each cell of a box of your scene, at most 512 "
+				"cells, one undo. param: a shape's facing, tint: 0...15. Stops "
+				"at a refused cell (one not loaded: no player near it).",
+				R"J({"type": "object", "properties": {
+				"voxel": {"type": "string"},
+				"at": {"type": "array", "items": {"type": "integer"},
+					"minItems": 3, "maxItems": 3},
+				"size": {"type": "array", "items": {"type": "integer"},
+					"minItems": 3, "maxItems": 3, "description": "[1, 1, 1] unless given"},
+				"param": {"type": "integer"}, "tint": {"type": "integer"}},
+				"required": ["voxel", "at"]})J", ""},
+			{"new_scene", "new_scene", "Makes a scene (letters, digits and _) "
+				"and takes your edits there; copy: true copies your scene's "
+				"World into it.",
+				R"J({"type": "object", "properties": {"name": {"type": "string"},
+				"copy": {"type": "boolean"}}, "required": ["name"]})J", ""},
+			{"switch_scene", "scene", "Takes your edits to another scene "
+				"(get_state lists them).",
+				R"J({"type": "object", "properties": {"name": {"type": "string"}},
+				"required": ["name"]})J", ""},
 			{"undo", "undo", "Takes back your last edit (yours only).",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"start", "play", "Starts the round (Play): the composition runs, "
@@ -26245,6 +26407,21 @@ struct Module: public interface::Module, public Interface
 			{"stop", "stop", "Ends the round (Stop): the world back at its "
 				"start, what play made gone.",
 				R"J({"type": "object", "properties": {}})J", ""},
+			{"try_input", "try", "Running: sends value to entity id's input "
+				"as a link would; what its runs emit comes in get_events.",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"},
+				"input": {"type": "string"}, "value": {"description":
+					"As the input's type is; none for a none"}},
+				"required": ["id", "input"]})J", ""},
+			{"watch", "watch", "Watches entity id's outputs (one entity at a "
+				"time; 0 stops): what they emit comes in get_events.",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
+				"required": ["id"]})J", ""},
+			{"keep", "keep", "Stopped: puts the builds the last Stop discarded "
+				"(what players built and made in play) into the start, all or "
+				"those of names.",
+				R"J({"type": "object", "properties": {"names": {"type": "array",
+				"items": {"type": "string"}}}})J", ""},
 			{"set_builder", "builder", "Grants (on: true) or takes an "
 				"account's edit rights. The Host's only: an admin token's.",
 				R"J({"type": "object", "properties": {
@@ -26369,12 +26546,11 @@ struct Module: public interface::Module, public Interface
 			info.set("name", "buildat-kit");
 			info.set("version", ss_(BUILDAT_VERSION));
 			res.set("serverInfo", info);
-			res.set("instructions", "Kit on a Buildat server: the composition "
-					"its builders build, live. get_state reads it, list_types "
-					"what can be placed; place, set_param, link and delete edit "
-					"it as your account's agent, logged so; undo takes back your "
-					"last edit; start and stop run the round. Positions are x, "
-					"y, z in cells, y up.");
+			// The guide, as Claude Code puts it into the model's context (a
+			// resource it only lists): get_guide has it whole
+			res.set("instructions", m_hosted ? agent_guide(at.name+"'s agent",
+					false) : ss_("Kit is not hosted by this server's app: its "
+					"tools refuse"));
 			log_i(MODULE, "MCP: %s's agent (\"%s\", %s token) from %s, protocol "
 					"%s", cs(at.name), cs(at.label), cs(at.scope), cs(r.address),
 					cs(res.get("protocolVersion").as_string()));
@@ -26442,8 +26618,19 @@ struct Module: public interface::Module, public Interface
 			a.peer = i->add_local_peer([box, self](const ss_ &name,
 					const ss_ &data){
 				std::lock_guard<std::mutex> lock(box->m);
-				if(box->want && box->want == *self)
+				if(!*self)
+					return;
+				const bool now = box->want == *self;
+				if(now && name != "kit:tried" && name != "kit:fired"){
 					box->got.push_back(std::make_pair(name, data));
+				} else if(name == "kit:tried" || name == "kit:fired" ||
+						name == "kit:warning"){
+					auto &q = box->later[*self];
+					q.push_back(std::make_pair(name.substr(4),
+							data.substr(0, AGENT_EVENT_BYTES)));
+					while(q.size() > AGENT_EVENTS)
+						q.pop_front();
+				}
 			});
 		});
 		if(!a.peer){
@@ -26457,11 +26644,40 @@ struct Module: public interface::Module, public Interface
 		m_agent_peers[a.peer] = at.id;
 		Peer &p = m_peers[a.peer];
 		p.name = at.name+"'s agent";
+		p.account = at.name;
 		p.scene = !m_host.world_scene.empty() || m_host.scenes.empty() ?
 				m_host.world_scene : m_host.scenes.begin()->first;
 		log_i(MODULE, "%s (\"%s\", %s token) is here, peer %zu", cs(p.name),
 				cs(at.label), cs(at.scope), a.peer);
 		return a.peer;
+	}
+
+	// A token revoked, all of them (agent access off) or an account's
+	// (deleted): their agents gone at once
+	void on_agent_revoked(const accounts::Login &l)
+	{
+		drop_agents(l.name.empty() ? "agent access is off" :
+				"its token was revoked", [&](const ss_ &id, const Agent &){
+			return l.name.empty() || id == l.name;
+		});
+	}
+
+	void on_account_deleted(const accounts::Login &l)
+	{
+		drop_agents("its account was deleted", [&](const ss_ &, const Agent &a){
+			return a.account == l.name;
+		});
+	}
+
+	void drop_agents(const char *why,
+			const std::function<bool(const ss_&, const Agent&)> &which)
+	{
+		sv_<ss_> ids;
+		for(auto &a : m_agents)
+			if(which(a.first, a.second))
+				ids.push_back(a.first);
+		for(const ss_ &id : ids)
+			drop_agent(id, why);
 	}
 
 	void drop_agent(const ss_ &id, const char *why)
@@ -26483,6 +26699,9 @@ struct Module: public interface::Module, public Interface
 		network::access(m_server, [&](network::Interface *i){
 			i->remove_local_peer(peer);
 		});
+		m_watches.erase(peer);
+		std::lock_guard<std::mutex> lock(m_agent_box->m);
+		m_agent_box->later.erase(peer);
 	}
 
 	ss_ agent_tool(const accounts::Interface::AgentToken &at,
@@ -26504,26 +26723,43 @@ struct Module: public interface::Module, public Interface
 		}
 		failed = false;
 		const ss_ op = t.op;
-		if(op == "=state")
-			return agent_state(p);
-		if(op == "=types")
-			return agent_types(args.is_object() ? jstr(args, "type") : "",
-					failed);
+		const json::Value a = args.is_object() ? args : json::object();
+		if(op[0] == '=')
+			return agent_read(p, peer, op, a, failed);
+		if(op == "set_voxel")
+			return agent_voxels(p, peer, a, failed);
 		// The edit as an editor's client sends it
 		json::Value e = t.defaults[0] ? json::load_string(t.defaults) :
 				json::object();
 		const json::Value schema = json::load_string(t.schema);
 		for(json::Iterator it(schema.get("properties")); it; ++it)
-			if(args.is_object() && !args.get(it.key()).is_undefined())
-				e.set(it.key(), args.get(it.key()));
+			if(!a.get(it.key()).is_undefined())
+				e.set(it.key(), a.get(it.key()));
 		e.set("op", op);
+		m_edit_what.clear();
+		const bool ran = m_session.running;
+		ss_ refused, warnings;
+		if(!agent_edit(peer, e, refused, warnings)){
+			failed = true;
+			return "Refused: "+refused+warnings;
+		}
+		return (!m_edit_what.empty() ? m_edit_what : m_session.running != ran ?
+				ss_(m_session.running ? "Running" : "Ended: the world at its "
+				"start") : op == "scene" ? "In the scene "+p.scene :
+				op == "try" || op == "watch" ? ss_("Done: get_events reads "
+				"what comes") : ss_("Done"))+warnings;
+	}
+
+	// An edit through on_edit() as the agent's peer, what Kit sends it then
+	// (its refusal, warnings) read back
+	bool agent_edit(size_t peer, const json::Value &e, ss_ &refused,
+			ss_ &warnings)
+	{
 		{
 			std::lock_guard<std::mutex> lock(m_agent_box->m);
 			m_agent_box->want = peer;
 			m_agent_box->got.clear();
 		}
-		m_edit_what.clear();
-		const bool ran = m_session.running;
 		on_edit(network::Packet(peer, "kit:edit", e.stringify()));
 		sv_<std::pair<ss_, ss_>> got;
 		{
@@ -26531,27 +26767,97 @@ struct Module: public interface::Module, public Interface
 			m_agent_box->want = 0;
 			got.swap(m_agent_box->got);
 		}
-		ss_ refused, warnings;
 		for(auto &g : got){
 			if(g.first == "kit:edit_refused")
 				refused += (refused.empty() ? "" : "\n")+g.second;
 			else if(g.first == "kit:warning")
 				warnings += "\n"+g.second;
 		}
-		if(!refused.empty()){
-			failed = true;
-			return "Refused: "+refused+warnings;
+		return refused.empty();
+	}
+
+	// set_voxels: Kit's set_voxel each cell of the box, its undos one
+	ss_ agent_voxels(Peer &p, size_t peer, const json::Value &a, bool &failed)
+	{
+		static const int64_t MAX_CELLS = 512;
+		failed = true;
+		int at[3], n[3] = {1, 1, 1};
+		const json::Value &aj = a.get("at"), &nj = a.get("size");
+		for(unsigned k = 0; k < 3; k++){
+			if(!aj.is_array() || aj.size() != 3 || !aj.at(k).is_number() ||
+					std::fabs(aj.at(k).as_number()) > MAX_COORD)
+				return "at: three whole numbers within "+itos((int)MAX_COORD);
+			at[k] = (int)std::floor(aj.at(k).as_number());
+			if(nj.is_undefined())
+				continue;
+			if(!nj.is_array() || nj.size() != 3 || !nj.at(k).is_number() ||
+					nj.at(k).as_number() < 1 || nj.at(k).as_number() > MAX_CELLS)
+				return "size: three whole numbers 1 or more";
+			n[k] = (int)nj.at(k).as_number();
 		}
-		return (!m_edit_what.empty() ? m_edit_what : m_session.running != ran ?
-				ss_(m_session.running ? "Running" : "Ended: the world at its "
-				"start") : ss_("Done"))+warnings;
+		if((int64_t)n[0] * n[1] * n[2] > MAX_CELLS)
+			return "size: "+itos(MAX_CELLS)+" cells at most";
+		json::Value e = json::object();
+		e.set("op", "set_voxel");
+		e.set("voxel", jstr(a, "voxel").substr(0, 130));
+		for(const char *k : {"param", "tint"})
+			if(!a.get(k).is_undefined())
+				e.set(k, a.get(k));
+		std::deque<Change> &u = m_undo[p.name];
+		const Change *mine = nullptr;
+		ss_ refused, warnings;
+		int64_t done = 0;
+		for(int y = 0; y < n[1] && refused.empty(); y++)
+		for(int z = 0; z < n[2] && refused.empty(); z++)
+		for(int x = 0; x < n[0] && refused.empty(); x++){
+			json::Value pos = json::array();
+			for(int c : {at[0] + x, at[1] + y, at[2] + z})
+				pos.append((int64_t)c);
+			e.set("pos", pos);
+			const Change *was = u.empty() ? nullptr : &u.back();
+			if(!agent_edit(peer, e, refused, warnings))
+				break;
+			done++;
+			// (none if routed to an owner)
+			Change *now = u.empty() || &u.back() == was ? nullptr : &u.back();
+			if(!now)
+				continue;
+			if(!mine){
+				mine = now;
+				continue;
+			}
+			// The older one of a cell kept (its images may meet this box)
+			Change &m = u[u.size() - 2];
+			for(auto &c : now->cells)
+				m.cells.insert(c);
+			u.pop_back();
+		}
+		failed = done == 0;
+		json::Value from = json::array(), size = json::array();
+		for(int k = 0; k < 3; k++){
+			from.append((int64_t)at[k]);
+			size.append((int64_t)n[k]);
+		}
+		const ss_ voxel = jstr(e, "voxel");
+		const ss_ what = (voxel == "air" ? ss_("dug ") : "placed "+voxel+
+				" in ")+itos(done)+" of "+itos((int64_t)n[0] * n[1] * n[2])+
+				" cells of the box "+size.stringify()+" at "+from.stringify()+
+				(done ? ", one undo" : ss_());
+		if(done)
+			log_i(MODULE, "%s: %s", cs(p.name), cs(what));
+		return what+(refused.empty() ? ss_() : "; refused: "+refused)+warnings;
 	}
 
 	ss_ agent_state(const Peer &p)
 	{
-		json::Value s = json::object();
+		json::Value s = json::object(), scenes = json::array();
 		s.set("running", m_session.running);
 		s.set("scene", p.scene);
+		for(auto &e : m_entities)
+			if(e.second.kind == "scene")
+				scenes.append(e.second.name);
+		s.set("scenes", scenes);
+		s.set("can_make_scenes", (bool)m_host.make_scene);
 		s.set("undo", (int64_t)m_undo[p.name].size());
 		json::Value es = authored_json(true).get("entities");
 		for(unsigned i = 0; m_session.running && i < es.size(); i++){
@@ -26580,6 +26886,7 @@ struct Module: public interface::Module, public Interface
 					"no_position", "component", "root", "player", "zone"})
 				if(!d.get(k).is_undefined())
 					o.set(k, d.get(k));
+			o.set("addable", addable(type));
 			return o.stringify();
 		}
 		json::Value list = json::array();
@@ -26592,6 +26899,444 @@ struct Module: public interface::Module, public Interface
 			list.append(o);
 		}
 		return list.stringify();
+	}
+
+	// The reads ("=..." tools): what the account's editor shows, of its
+	// session and the agent's scene
+	ss_ agent_read(Peer &p, size_t peer, const ss_ &op, const json::Value &a,
+			bool &failed)
+	{
+		WorldScope ws(m_w, world_named(p.scene));
+		uint64_t id = 0;
+		const json::Value &iv = a.get("id");
+		const bool id_ok = iv.is_number() && iv.as_number() >= 1 &&
+				iv.as_number() <= 9e15 && iv.as_number() == std::floor(iv.as_number());
+		if(id_ok)
+			id = (uint64_t)iv.as_number();
+		if(op == "=state")
+			return agent_state(p);
+		if(op == "=types")
+			return agent_types(jstr(a, "type"), failed);
+		if(op == "=guide")
+			return agent_guide(p.name, true);
+		if(op == "=goals")
+			return agent_goals().stringify();
+		if(op == "=voxels")
+			return agent_get_voxels(p, a, failed);
+		if(op == "=links"){
+			if(!iv.is_undefined() && !id_ok){
+				failed = true;
+				return "id: an entity's";
+			}
+			auto takes = [&](uint64_t to, const ss_ &input){
+				auto e = m_entities.find(to);
+				for(size_t c = 0; e != m_entities.end() && c < e->second.comps.size(); c++){
+					auto t = m_types.find(e->second.comps[c].type);
+					if(t != m_types.end() && t->second.in_types.count(input))
+						return t->second.in_types.at(input);
+				}
+				return ss_("?");
+			};
+			json::Value out = json::array();
+			for(auto &x : m_entities){
+				if(!authored(x.second))
+					continue;
+				for(size_t c = 0; c < x.second.comps.size(); c++){
+					const Instance &in = x.second.comps[c];
+					auto t = m_types.find(in.type);
+					for(const Link &l : in.links){
+						if(id && x.first != id && l.to != id)
+							continue;
+						json::Value o = json::object();
+						o.set("id", (int64_t)x.first);
+						o.set("comp", (int64_t)c);
+						o.set("output", l.output);
+						o.set("to", (int64_t)l.to);
+						o.set("input", l.input);
+						o.set("sends", t != m_types.end() &&
+								t->second.out_types.count(l.output) ?
+								t->second.out_types.at(l.output) : ss_("?"));
+						o.set("takes", takes(l.to, l.input));
+						out.append(o);
+					}
+				}
+			}
+			return out.stringify();
+		}
+		if(op == "=log"){
+			auto it = m_logs.find(id);
+			if(!id_ok || (!m_entities.count(id) && it == m_logs.end())){
+				failed = true;
+				return "id: an entity's";
+			}
+			json::Value lines = json::array();
+			for(size_t i = 0; it != m_logs.end() && i < it->second.size(); i++)
+				lines.append(it->second[i]);
+			return lines.stringify();
+		}
+		if(op == "=events"){
+			std::deque<std::pair<ss_, ss_>> q;
+			{
+				std::lock_guard<std::mutex> lock(m_agent_box->m);
+				auto it = m_agent_box->later.find(peer);
+				if(it != m_agent_box->later.end()){
+					q.swap(it->second);
+					m_agent_box->later.erase(it);
+				}
+			}
+			json::Value out = json::array();
+			for(auto &e : q){
+				json::Value o = json::object();
+				o.set("event", e.first);
+				const json::Value v = e.first == "warning" ? json::Value() :
+						json::load_string(e.second.c_str());
+				if(v.is_undefined())
+					o.set("text", e.second);
+				else
+					o.set("data", v);
+				out.append(o);
+			}
+			return out.stringify();
+		}
+		if(op == "=prefabs"){
+			const ss_ name = jstr(a, "prefab");
+			if(!name.empty()){
+				const json::Value *pf = m_prefab_palette.count(name) ?
+						prefab(name) : nullptr;
+				if(!pf){
+					failed = true;
+					return "No prefab \""+name.substr(0, 130)+"\" in the palette";
+				}
+				json::Value o = json::object(), v = json::object();
+				o.set("prefab", name);
+				for(const char *k : {"version", "group", "entities"})
+					if(!pf->get(k).is_undefined())
+						o.set(k, pf->get(k));
+				const json::Value &vx = pf->get("voxels");
+				for(const char *k : {"at", "size", "air"})
+					if(vx.is_object() && !vx.get(k).is_undefined())
+						v.set(k, vx.get(k));
+				if(vx.is_object())
+					o.set("voxels", v);
+				return o.stringify();
+			}
+			const ss_ author = prefab_author(p);
+			std::map<ss_, int64_t> copies;
+			for(auto &e : m_entities)
+				if(authored(e.second) && is_root(e.second))
+					copies[jstr(e.second.prefab, "of")]++;
+			json::Value out = json::array();
+			for(const ss_ &n : m_prefab_palette){
+				const json::Value *pf = prefab(n);
+				if(!pf)
+					continue;
+				json::Value o = json::object();
+				o.set("prefab", n);
+				o.set("version", json::jint(*pf, "version", 1));
+				o.set("entities", (int64_t)pf->get("entities").size());
+				o.set("copies", copies[n]);
+				if(pf->get("group").is_string())
+					o.set("group", pf->get("group"));
+				if(pf->get("voxels").is_object())
+					o.set("voxels", pf->get("voxels").get("size"));
+				if(!author.empty() && jstr(*pf, "package").empty() &&
+						n.compare(0, author.size() + 1, author+"/") == 0)
+					o.set("own", true);
+				out.append(o);
+			}
+			return out.stringify();
+		}
+		if(op == "=items"){
+			json::Value out = json::object();
+			for(auto &it : m_item_types)
+				out.set(it.first, it.second);
+			return out.stringify();
+		}
+		if(op == "=voxel_types"){
+			const json::Value all = voxel_palette();
+			json::Value out = json::array();
+			for(unsigned i = 0; i < all.size(); i++){
+				json::Value o = json::object();
+				for(const char *k : {"name", "kind", "solid", "transparent",
+						"light"})
+					if(!all.at(i).get(k).is_undefined())
+						o.set(k, all.at(i).get(k));
+				out.append(o);
+			}
+			return out.stringify();
+		}
+		failed = true;
+		return "No read "+op;
+	}
+
+	// get_voxels: a box's voxels as characters, a key of them to names
+	ss_ agent_get_voxels(const Peer &p, const json::Value &a, bool &failed)
+	{
+		static const int64_t MAX_CELLS = 4096;
+		static const char KEYS[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOP"
+				"QRSTUVWXYZ0123456789";
+		failed = true;
+		int at[3], n[3];
+		const json::Value &aj = a.get("at"), &nj = a.get("size");
+		for(unsigned k = 0; k < 3; k++){
+			if(!aj.is_array() || aj.size() != 3 || !aj.at(k).is_number() ||
+					std::fabs(aj.at(k).as_number()) > MAX_COORD)
+				return "at: three whole numbers within "+itos((int)MAX_COORD);
+			if(!nj.is_array() || nj.size() != 3 || !nj.at(k).is_number() ||
+					nj.at(k).as_number() < 1 || nj.at(k).as_number() > MAX_CELLS)
+				return "size: three whole numbers 1 or more";
+			at[k] = (int)std::floor(aj.at(k).as_number());
+			n[k] = (int)nj.at(k).as_number();
+		}
+		if((int64_t)n[0] * n[1] * n[2] > MAX_CELLS)
+			return "size: "+itos(MAX_CELLS)+" cells at most";
+		auto si = m_host.scenes.find(p.scene);
+		if(si == m_host.scenes.end())
+			return "not in a scene of the app's";
+		std::map<ss_, char> key = {{"air", '.'}};
+		json::Value layers = json::array();
+		bool any = false;
+		voxelworld::access(m_server, si->second, [&](voxelworld::Instance *w){
+			any = true;
+			const interface::VoxelFormat &f = w->get_voxel_reg()->get_format();
+			for(int y = 0; y < n[1]; y++){
+				json::Value rows = json::array();
+				for(int z = 0; z < n[2]; z++){
+					ss_ row;
+					for(int x = 0; x < n[0]; x++){
+						const pv::Vector3DInt32 q(at[0] + x, at[1] + y, at[2] + z);
+						char ch = '?';
+						const interface::VoxelDefinition *d = !loaded(w, q) ?
+								nullptr : w->get_voxel_reg()->get(
+								f.id.get(w->get_voxel(q, true).data));
+						if(d){
+							// [KIT_SCENES_EMPTY_CELL] not generated yet
+							const ss_ name = d->name.block_name.empty() ?
+									ss_("undefined") : d->name.block_name;
+							auto ki = key.find(name);
+							if(ki != key.end()){
+								ch = ki->second;
+							} else if(key.size() - 1 < sizeof KEYS - 1){
+								ch = KEYS[key.size() - 1];
+								key[name] = ch;
+							} else {
+								ch = '*';
+							}
+						}
+						row += ch;
+					}
+					rows.append(row);
+				}
+				layers.append(rows);
+			}
+		});
+		if(!any)
+			return "the scene has no voxels";
+		failed = false;
+		json::Value o = json::object(), from = json::array(), size = json::array(),
+				names = json::object();
+		for(int k = 0; k < 3; k++){
+			from.append((int64_t)at[k]);
+			size.append((int64_t)n[k]);
+		}
+		for(auto &k : key)
+			names.set(ss_(1, k.second), k.first);
+		if(key.size() - 1 >= sizeof KEYS - 1)
+			names.set("*", "another voxel (more than "+itos(sizeof KEYS - 1)+
+					" in the box)");
+		o.set("at", from);
+		o.set("size", size);
+		o.set("key", names);
+		o.set("layers", layers);
+		return o.stringify();
+	}
+
+	// [KIT_GOALS] The editor's goal warnings (editor.lua's NT.goal_check(), of
+	// the authored entities of every scene)
+	json::Value agent_goals()
+	{
+		auto goal_of = [&](uint64_t id) -> const Instance* {
+			auto it = m_entities.find(id);
+			for(size_t c = 0; it != m_entities.end() && authored(it->second) &&
+					c < it->second.comps.size(); c++)
+				if(it->second.comps[c].type == "kit/goal")
+					return &it->second.comps[c];
+			return nullptr;
+		};
+		auto there = [&](const json::Value &v){
+			if(!v.is_number() || v.as_number() < 1 || v.as_number() > 9e15)
+				return false;
+			auto it = m_entities.find((uint64_t)v.as_number());
+			return it != m_entities.end() && authored(it->second);
+		};
+		typedef std::map<uint64_t, sv_<uint64_t>> Next;
+		Next from, into;
+		std::set<uint64_t> activated;
+		for(auto &x : m_entities){
+			if(!authored(x.second))
+				continue;
+			for(const Instance &c : x.second.comps)
+				for(const Link &l : c.links){
+					auto to = m_entities.find(l.to);
+					if(to == m_entities.end() || !authored(to->second) ||
+							l.to == x.first)
+						continue;
+					const bool goal = goal_of(l.to);
+					if(!goal || l.input == "activate"){
+						from[x.first].push_back(l.to);
+						into[l.to].push_back(x.first);
+					}
+					if(goal && l.input == "activate")
+						activated.insert(l.to);
+				}
+		}
+		auto walk = [](Next &next, uint64_t start){
+			std::map<uint64_t, int> depth = {{start, 0}};
+			std::deque<uint64_t> q = {start};
+			while(!q.empty()){
+				const uint64_t id = q.front();
+				q.pop_front();
+				const int d = depth[id] + 1;
+				for(uint64_t to : next[id])
+					if(depth.emplace(to, d).second)
+						q.push_back(to);
+			}
+			return depth;
+		};
+		// The deepest goal of a walk, the lowest id of those
+		auto deepest = [&](const std::map<uint64_t, int> &depth){
+			uint64_t best = 0;
+			int bd = -1;
+			for(auto &x : depth)
+				if(goal_of(x.first) && x.second > bd){
+					best = x.first;
+					bd = x.second;
+				}
+			return best;
+		};
+		auto label = [&](uint64_t id){
+			auto it = m_entities.find(id);
+			return "entity "+itos(id)+(it == m_entities.end() ? ss_() :
+					" ("+it->second.name+")");
+		};
+		json::Value out = json::array();
+		for(auto &x : m_entities){
+			const Instance *c = goal_of(x.first);
+			if(!c)
+				continue;
+			const json::Value &ps = c->params;
+			const ss_ kind = jstr(ps, "kind"), pick = jstr(ps, "pick", "entity");
+			auto warn = [&](const ss_ &line){
+				out.append(label(x.first)+": "+line);
+			};
+			if(!activated.count(x.first) && !ps.get("autostart").is_true())
+				warn("nothing activates it: no link to its activate, autostart off");
+			if(kind == "use" && !there(ps.get("target")))
+				warn("a use goal with no object to use (target)");
+			if(kind == "place_item" && pick == "entity" && !there(ps.get("target")))
+				warn("a place_item goal with nowhere to put it (target or pick)");
+			if(kind == "attack" && pick == "entity" && !there(ps.get("target")))
+				warn("an attack goal with no one to attack (target or pick)");
+			if(kind == "signal" && jstr(ps, "audience") != "players" &&
+					!there(ps.get("via")))
+				warn("a signal goal with nothing for bots to use (via)");
+			const json::Value &vr = ps.get("validate_reachable");
+			if(!vr.is_number() || vr.as_number() == 0)
+				continue;
+			const uint64_t fin = there(vr) ? (uint64_t)vr.as_number() : 0;
+			if(!goal_of(fin)){
+				warn("validate reachable names no goal");
+				continue;
+			}
+			const std::map<uint64_t, int> depth = walk(from, x.first);
+			if(!depth.count(fin))
+				warn("no chain of links reaches "+label(fin)+": last reached "+
+						label(deepest(depth))+", first cut off "+
+						label(deepest(walk(into, fin))));
+		}
+		return out;
+	}
+
+	// The guide: how a composition is built and run, then the palette's
+	// types by group; full (get_guide) with each one's what, inputs, outputs
+	// and params' names, else (initialize's instructions, which Claude Code
+	// cuts at 4096 characters) their names only, cut to fit
+	ss_ agent_guide(const ss_ &who, bool full)
+	{
+		static const size_t MAX_INSTRUCTIONS = 4000;
+		ss_ s = "Kit on a Buildat server: a game (the composition) its "
+			"builders build together, live. You edit it as "+who+", with that "
+			"account's rights; your edits are logged so and undo takes them "
+			"back, yours only (the last 50).\n"
+			"- An entity: an id, a name, a place (x, y, z in cells, y up) and "
+			"components; place makes one of a type, its first component. "
+			"add_component adds more of the addable types. A component's "
+			"params: set_param, checked against its type's declaration "
+			"(list_types with type: each param's type, default, min, max, "
+			"choices; each input and output and what it does).\n"
+			"- Links carry signals: link an output of an entity's component to "
+			"an input of another entity, and each time the output fires the "
+			"input gets its value. The value types must meet (none, number, "
+			"string, ...). get_links lists them; unlink takes one away.\n"
+			"- Nothing runs while the round is Ended. start runs it (Play), "
+			"the players in it, edits still live; stop ends it, the world "
+			"back at its start. Running: try_input sends an input as a link "
+			"would; watch an entity to see its outputs fire; get_events reads "
+			"both; get_log reads an entity's log; get_state each component's "
+			"state.\n"
+			"- Prefabs place groups of entities and voxels as one "
+			"(list_prefabs, place_prefab; save_prefab makes yours). Voxels: "
+			"list_voxel_types, set_voxels, get_voxels. Scenes: get_state "
+			"names them and yours (where you edit); switch_scene, new_scene. "
+			"move, rename, set_parent, duplicate, delete edit entities; "
+			"get_goal_warnings checks kit/goal chains.\n"
+			"- Work in small steps and read back: get_state (or list_types) "
+			"first, then place, set_param, link, start, try_input, get_events "
+			"and get_log, stop, fix, again. An edit's arguments are 4 KB at "
+			"most. Kit's refusals come back as tool errors saying why.\n";
+		std::map<ss_, sv_<ss_>> groups;
+		for(const ss_ &t : m_palette){
+			const ss_ g = jstr(m_types[t].decl.get("about"), "group");
+			groups[g.empty() ? "Other" : g].push_back(t);
+		}
+		s += full ? "\nThe types by group:\n" : "\nThe types by group "
+				"(get_guide: each one's inputs, outputs and params):\n";
+		auto ports = [](const sm_<ss_, ss_> &typed){
+			ss_ r;
+			for(auto &x : typed)
+				r += (r.empty() ? "" : ", ")+x.first+(x.second != "none" ?
+						" ("+x.second+")" : ss_());
+			return r;
+		};
+		for(auto &g : groups){
+			if(!full){
+				ss_ line = g.first+":";
+				for(const ss_ &t : g.second)
+					line += " "+t;
+				line += "\n";
+				if(s.size() + line.size() > MAX_INSTRUCTIONS - 40)
+					return s+"... (get_guide lists them all)\n";
+				s += line;
+				continue;
+			}
+			s += "## "+g.first+"\n";
+			for(const ss_ &t : g.second){
+				const Type &ty = m_types[t];
+				ss_ params;
+				const json::Value &ps = ty.decl.get("params");
+				for(json::Iterator it(ps); ps.is_object() && it; ++it)
+					params += (params.empty() ? "" : ", ")+it.key();
+				s += "- "+t+(addable(t) ? " (addable)" : "")+": "+
+						jstr(ty.decl.get("about"), "what");
+				for(auto &k : {std::make_pair(" In: ", ports(ty.in_types)),
+						std::make_pair(" Out: ", ports(ty.out_types)),
+						std::make_pair(" Params: ", params)})
+					if(!k.second.empty())
+						s += k.first+k.second+".";
+				s += "\n";
+			}
+		}
+		return s;
 	}
 
 	// ---- The editor (api.h: edit mode, the packet kit:edit)
@@ -28690,6 +29435,8 @@ struct Module: public interface::Module, public Interface
 			}
 			if(c.stroke != -1 && c.stroke != -3){
 				undo_terrain(c, p);
+				m_edit_what = "Undone: a voxel or terrain edit, "+itos(u.size())+
+						" more to undo";
 				send_state(peer);
 				return;
 			}
@@ -28991,6 +29738,12 @@ struct Module: public interface::Module, public Interface
 	// in it, else its World's spawn
 	void go_to_scene(Peer &p, size_t peer, const ss_ &name)
 	{
+		// [KIT_AGENTS] an agent has no body: the scene its edits are in
+		if(m_agent_peers.count(peer)){
+			log_i(MODULE, "%s goes to the scene %s", cs(p.name), cs(name));
+			p.scene = name;
+			return;
+		}
 		m_scene_pos[std::make_pair(p.name, p.scene)] =
 				{{p.pos[0], p.pos[1], p.pos[2]}};
 		auto it = m_scene_pos.find(std::make_pair(p.name, name));

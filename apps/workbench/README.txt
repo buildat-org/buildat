@@ -29,9 +29,10 @@ once in a block to copy with the server's address, a `claude mcp add` line
 and an MCP config; the page lists the tokens with their last use and
 Revoke. The tool then reaches POST /api/v1/mcp on the server's port as
 "<name>'s agent", with that account's rights, its edits in the live round
-and logged as the agent's. The tools and the rules: [KIT_AGENTS] in
-builtin/kit/kit.cpp. The admin turns it off on the Accounts page
-(util/kit_agents_check.sh).
+and logged as the agent's. Its guide, made from the server's own types, is
+in the MCP initialize answer (get_guide gives it whole). The tools and the
+rules: [KIT_AGENTS] in builtin/kit/kit.cpp. The admin turns it off on the
+Accounts page (util/kit_agents_check.sh).
 
 Licenses of textures and other media:
 ------------------------------------

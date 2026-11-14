@@ -2511,6 +2511,8 @@ struct Module: public interface::Module, public Interface
 				m_store->set("access/agents_off", "1");
 			log_i(MODULE, "%s turned agent access %s", cs(by),
 					r.on ? "on" : "off");
+			if(!r.on)
+				m_server->emit_event("accounts:agent_revoked", new Login(0, ""));
 			result(ss_("Agent access is ")+(r.on ? "on" : "off"));
 		} else if(r.cmd == "setting"){
 			if(r.name != "open_registration")
@@ -2788,6 +2790,7 @@ struct Module: public interface::Module, public Interface
 				log_i(MODULE, "%s revoked the agent token %s (\"%s\")",
 						cs(name), cs(id.substr(0, 8)),
 						cs(it->second.label));
+				m_server->emit_event("accounts:agent_revoked", new Login(0, id));
 				mine.erase(it);
 				found = true;
 				break;
