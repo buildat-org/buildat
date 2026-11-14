@@ -87,6 +87,9 @@ static const size_t MAX_TYPE_SOURCE = 256 << 10;
 // a volume has at most
 static const int MAX_EXTENT = 64;
 static const int MAX_VOLUME = 64;
+// [KIT_PLANE] stage 3: kit/polygon's points at most (its edit, 18 bytes a point
+// written to the 1/16, within the 4096-byte edit packet)
+static const size_t MAX_POLYGON_POINTS = 128;
 // [KIT_CTF] A region's extent each way: the World's whole height, so a
 // map-wide region and a column down to the World's bottom fit;
 // [KIT_AIRSHIPS_2] the widest World's side (kit/terrain's width), so one
@@ -3994,7 +3997,102 @@ struct Module: public interface::Module, public Interface
 		}
 		if(t == "position")
 			return pos_ok(v) ? "" : "a position, three numbers";
+		if(t == "points")
+			return points_ok(v);
 		return "a type of parameter Kit has (\""+t.substr(0, 32)+"\" is none)";
+	}
+
+	// [KIT_PLANE] stage 3: kit/polygon's outline ("points": [[x, y]...] in its own x
+	// and y): "" when it is a simple polygon of 3...MAX_POLYGON_POINTS points within
+	// MAX_EXTENT / 2 of its place (its look's box within a look's 64), else what
+	// it should be. Every pair of edges is checked (128 points: 8128 pairs)
+	static ss_ points_ok(const json::Value &v)
+	{
+		const ss_ what = "a polygon: 3 to "+itos(MAX_POLYGON_POINTS)+
+				" points [x, y] within "+itos(MAX_EXTENT / 2)+" of its place";
+		if(!v.is_array() || v.size() < 3 || v.size() > MAX_POLYGON_POINTS)
+			return what;
+		const size_t n = v.size();
+		sv_<double> x(n), y(n);
+		for(unsigned i = 0; i < n; i++){
+			const json::Value &p = v.at(i);
+			if(!p.is_array() || p.size() != 2 || !p.at(0u).is_number() ||
+					!p.at(1u).is_number())
+				return what;
+			x[i] = p.at(0u).as_number();
+			y[i] = p.at(1u).as_number();
+			if(!std::isfinite(x[i]) || !std::isfinite(y[i]) ||
+					std::fabs(x[i]) > MAX_EXTENT / 2 || std::fabs(y[i]) > MAX_EXTENT / 2)
+				return what;
+		}
+		auto cross = [&](size_t o, size_t a, size_t b){
+			return (x[a] - x[o]) * (y[b] - y[o]) - (y[a] - y[o]) * (x[b] - x[o]);
+		};
+		// (c on segment ab, given they are on one line)
+		auto on = [&](size_t a, size_t b, size_t c){
+			return std::min(x[a], x[b]) <= x[c] && x[c] <= std::max(x[a], x[b]) &&
+					std::min(y[a], y[b]) <= y[c] && y[c] <= std::max(y[a], y[b]);
+		};
+		double area = 0;
+		for(size_t i = 0; i < n; i++){
+			const size_t j = (i + 1) % n;
+			if(x[i] == x[j] && y[i] == y[j])
+				return "a polygon with no point twice in a row";
+			area += x[i] * y[j] - x[j] * y[i];
+		}
+		if(area == 0)
+			return "a polygon with an area";
+		for(size_t i = 0; i < n; i++){
+			const size_t i2 = (i + 1) % n;
+			for(size_t j = i + 1; j < n; j++){
+				const size_t j2 = (j + 1) % n;
+				if(j == i2 || j2 == i){
+					// Neighbours meet at their point alone: not folded back
+					const size_t a = j == i2 ? i : j, m = j == i2 ? i2 : i,
+							b = j == i2 ? j2 : i2;
+					if(n > 3 && cross(m, a, b) == 0 &&
+							(x[a] - x[m]) * (x[b] - x[m]) + (y[a] - y[m]) * (y[b] - y[m]) > 0)
+						return "a polygon whose edges do not cross (edges "+
+								itos(i + 1)+" and "+itos(j + 1)+" fold back)";
+					continue;
+				}
+				const double d1 = cross(i, i2, j), d2 = cross(i, i2, j2),
+						d3 = cross(j, j2, i), d4 = cross(j, j2, i2);
+				if((((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+						((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) ||
+						(d1 == 0 && on(i, i2, j)) || (d2 == 0 && on(i, i2, j2)) ||
+						(d3 == 0 && on(j, j2, i)) || (d4 == 0 && on(j, j2, i2)))
+					return "a polygon whose edges do not cross (edges "+itos(i + 1)+
+							" and "+itos(j + 1)+" meet)";
+			}
+		}
+		return "";
+	}
+
+	// [KIT_PLANE] stage 3: a polygon look's box round its points (size, offset), as
+	// a box look's: its reach and the inspector's outline, its depth the z side
+	static void polygon_box(json::Value &l)
+	{
+		const json::Value &pts = l.get("points");
+		double lo[2] = {0, 0}, hi[2] = {0, 0};
+		for(unsigned i = 0; pts.is_array() && i < pts.size(); i++)
+			for(unsigned k = 0; k < 2; k++){
+				const json::Value &c = pts.at(i).is_array() && pts.at(i).size() > k ?
+						pts.at(i).at(k) : json::Value(0.0);
+				const double v = c.is_number() ? c.as_number() : 0;
+				lo[k] = i == 0 || v < lo[k] ? v : lo[k];
+				hi[k] = i == 0 || v > hi[k] ? v : hi[k];
+			}
+		const double d = l.get("depth").is_number() ? l.get("depth").as_number() : 1;
+		json::Value size = json::array(), off = json::array();
+		size.append(std::max(0.02, hi[0] - lo[0]));
+		size.append(std::max(0.02, hi[1] - lo[1]));
+		size.append(d);
+		off.append((lo[0] + hi[0]) / 2);
+		off.append((lo[1] + hi[1]) / 2);
+		off.append(0.0);
+		l.set("size", size);
+		l.set("offset", off);
 	}
 
 	// An editor's coordinate: on a 1/16 cell's grid ([KIT] stage 4d: off
@@ -11671,6 +11769,8 @@ struct Module: public interface::Module, public Interface
 				o.set(s.first, s.second);
 		};
 		params(l, 0);
+		if(jstr(l, "shape") == "polygon")
+			polygon_box(l);
 		const ss_ ext = jstr(decl, "extent");
 		if(ext.empty())
 			return l;
@@ -28992,9 +29092,12 @@ struct Module: public interface::Module, public Interface
 				scenes.append(e.second.name);
 		j.set("scenes", scenes);
 		j.set("scene", pi != m_peers.end() ? pi->second.scene : ss_());
-		// [KIT_PLANE] the depth of its scene's plane (the editor's Front view's)
-		if(editing)
+		// [KIT_PLANE] the depth of its scene's plane (the editor's Front view's) and
+		// how far in front of it the view begins (kit/controls' side_clip)
+		if(editing){
 			j.set("plane_depth", plane_depth(pi->second.scene));
+			j.set("plane_clip", controls_params().get("side_clip"));
+		}
 		j.set("can_make_scenes", (bool)m_host.make_scene);
 		// [KIT_SESSIONS_1] the session they are in: {id, kind, by, clock}
 		{

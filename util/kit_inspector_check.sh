@@ -169,6 +169,8 @@ frames 2
 mouse_wheel -1
 frames 2
 mouse_wheel -1
+frames 2
+mouse_wheel -1
 frames 3
 screenshot @T@/scrolled.png
 click Button "Apply"

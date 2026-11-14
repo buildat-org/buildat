@@ -223,7 +223,7 @@ local function drop_look(n)
 	if n.look then
 		n.look:Remove()
 	end
-	n.wear_wanted, n.ghost, n.hidden, n.ghost_alpha = nil, nil, nil, nil
+	n.wear_wanted, n.ghost, n.hidden, n.ghost_alpha, n.poly = nil, nil, nil, nil, nil
 	n.look, n.hinge, n.body, n.mat, n.text, n.solid, n.box, n.on = nil, nil,
 			nil, nil, nil, nil, nil, nil
 end
@@ -350,6 +350,75 @@ local function wedge(node)
 	tri({b, a, a}, {b, b, b}, {b, a, b}, magic.Vector3(1, 0, 0))
 	cg:Commit()
 	return cg
+end
+
+-- [KIT_PLANE] stage 3: a polygon look's mesh in its own frame: its points (x, y)
+-- extruded its depth along z round 0, its two faces (move.lua's triangles) and a
+-- side an edge; n.poly its points and half depth (entity_t's)
+local polygon_mesh
+do
+	local MV
+	polygon_mesh = function(node, look, n)
+		if not MV then
+			local _, err, m = buildat.run_script_file("kit/move.lua")
+			assert(type(m) == "table", "kit: move.lua: " .. tostring(err))
+			MV = m
+		end
+		local pts = {}
+		for _, p in ipairs(type(look.points) == "table" and look.points or {}) do
+			pts[#pts + 1] = type(p) == "table" and tonumber(p[1]) or 0
+			pts[#pts + 1] = type(p) == "table" and tonumber(p[2]) or 0
+		end
+		local d = math.max(0.02, math.min(64, tonumber(look.depth) or 1)) / 2
+		n.poly = {pts = pts, d = d}
+		local cg = node:CreateComponent("CustomGeometry")
+		cg:SetNumGeometries(1)
+		cg:BeginGeometry(0, magic.TRIANGLE_LIST)
+		local function tri(p1, p2, p3, nr)
+			-- Wound so it faces its normal (voxel_mesh's)
+			local e1x, e1y, e1z = p2[1] - p1[1], p2[2] - p1[2], p2[3] - p1[3]
+			local e2x, e2y, e2z = p3[1] - p1[1], p3[2] - p1[2], p3[3] - p1[3]
+			if (e1y * e2z - e1z * e2y) * nr[1] + (e1z * e2x - e1x * e2z) * nr[2] +
+					(e1x * e2y - e1y * e2x) * nr[3] < 0 then
+				p2, p3 = p3, p2
+			end
+			local nv = magic.Vector3(nr[1], nr[2], nr[3])
+			for _, p in ipairs({p1, p2, p3}) do
+				cg:DefineVertex(magic.Vector3(p[1], p[2], p[3]))
+				cg:DefineNormal(nv)
+				cg:DefineTexCoord(magic.Vector2(0, 0))
+			end
+		end
+		local tris = MV.triangulate(pts)
+		for q = 1, #tris - 2, 3 do
+			local a, b, c = tris[q], tris[q + 1], tris[q + 2]
+			for _, z in ipairs({-d, d}) do
+				tri({pts[2 * a - 1], pts[2 * a], z}, {pts[2 * b - 1], pts[2 * b], z},
+						{pts[2 * c - 1], pts[2 * c], z}, {0, 0, z < 0 and -1 or 1})
+			end
+		end
+		-- The sides, each its edge's normal out (counter-clockwise: to the right)
+		local k, area = #pts / 2, 0
+		for i = 1, k do
+			local j = i % k + 1
+			area = area + pts[2 * i - 1] * pts[2 * j] - pts[2 * j - 1] * pts[2 * i]
+		end
+		local sg = area > 0 and 1 or -1
+		for i = 1, k do
+			local j = i % k + 1
+			local ax, ay, bx, by = pts[2 * i - 1], pts[2 * i], pts[2 * j - 1], pts[2 * j]
+			local ex, ey = bx - ax, by - ay
+			local l = math.sqrt(ex * ex + ey * ey)
+			if l > 0 then
+				local nr = {sg * ey / l, -sg * ex / l, 0}
+				tri({ax, ay, -d}, {bx, by, -d}, {bx, by, d}, nr)
+				tri({ax, ay, -d}, {bx, by, d}, {ax, ay, d}, nr)
+			end
+		end
+		cg:Commit()
+		cg.castShadows = true
+		return cg, #tris / 3
+	end
 end
 
 -- A look's material ([KIT] stage 4d): plain, metal, glass or glow
@@ -580,6 +649,10 @@ local function draw_look(id, n, look)
 		n.wear_wanted = wants and not def and wants or nil
 		if worn then
 			-- (drawn)
+		elseif look.shape == "polygon" then
+			local cg, nt = polygon_mesh(n.body, look, n)
+			cg:SetMaterial(0, n.mat)
+			n.poly.tris = nt
 		elseif look.shape == "wedge" then
 			wedge(n.body):SetMaterial(0, n.mat)
 		else
@@ -629,7 +702,11 @@ local function draw_look(id, n, look)
 	end
 	-- A swing turns the body round its hinge: the middle of its thickness
 	-- at its -x end, so the turned box is look_box's
-	if type(look.when) == "table" and look.when.swing then
+	if n.poly then
+		-- ([KIT_PLANE] stage 3: a polygon's mesh is in its own frame, b the box round)
+		n.body.position = magic.Vector3(0, 0, 0)
+		n.body.scale = magic.Vector3(1, 1, 1)
+	elseif type(look.when) == "table" and look.when.swing then
 		local c = look_box(look, false)
 		local px = c.off[1] - c.size[1] / 2 + c.size[3] / 2
 		n.hinge.position = magic.Vector3(px, 0, c.off[3])
@@ -689,7 +766,8 @@ local function draw_look(id, n, look)
 		n.solid:Remove()
 		n.solid = nil
 	end
-	if b.solid then
+	-- (a polygon's collision is move.lua's prism)
+	if b.solid and not n.poly then
 		n.solid = n.look:CreateChild("Solid")
 		local function box(pos, size, rot)
 			local s = n.solid:CreateChild("Box")
@@ -717,7 +795,9 @@ local function draw_look(id, n, look)
 	log:info(string.format("kit: entity %d drawn %gx%gx%g at %g,%g,%g%s", id,
 			b.size[1], b.size[2], b.size[3], b.off[1], b.off[2], b.off[3],
 			b.solid and ", solid" or "") ..
-			(look.shape == "wedge" and ", a wedge" or ""))
+			(look.shape == "wedge" and ", a wedge" or "") ..
+			(n.poly and ", a polygon of " .. #n.poly.pts / 2 .. " points, " ..
+			tostring(n.poly.tris) .. " triangles" or ""))
 end
 
 -- [KIT_OWN_LOOK] A look hidden in play (its type's own_look off): not
@@ -1336,6 +1416,28 @@ end
 -- How far along the ray it meets the entity (its node n), or nil
 local function entity_t(n, origin, dir)
 	local c, half, rot = look_frame(n)
+	if c and n.poly then
+		-- [KIT_PLANE] stage 3: a polygon's faces where its points have them.
+		-- simplified: not its sides (a ray along its face misses it)
+		local o, d = ray_in(origin, dir, n.look.position, rot)
+		local best, q, k = nil, n.poly.pts, #n.poly.pts / 2
+		for _, z in ipairs(math.abs(d[3]) > 1e-9 and {-n.poly.d, n.poly.d} or {}) do
+			local t = (z - o[3]) / d[3]
+			local x, y = o[1] + d[1] * t, o[2] + d[2] * t
+			local inside = false
+			for i = 1, k do
+				local j = i % k + 1
+				if (q[2 * i] > y) ~= (q[2 * j] > y) and x < q[2 * i - 1] + (y - q[2 * i]) *
+						(q[2 * j - 1] - q[2 * i - 1]) / (q[2 * j] - q[2 * i]) then
+					inside = not inside
+				end
+			end
+			if inside and t >= 0 and (not best or t < best) then
+				best = t
+			end
+		end
+		return best
+	end
 	if c then
 		-- A little larger than drawn (a thin button: as thick as a third of a
 		-- cell)
