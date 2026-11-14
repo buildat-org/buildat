@@ -137,6 +137,13 @@ namespace network
 		// from on every cross-origin request; "" from anything else
 		ss_ origin;
 		ss_ host;  // the Host header: what the request was sent to
+		// [KIT_AGENTS] Every header, by its name in lower case
+		// (Authorization, MCP-Protocol-Version); set on an /api/ request
+		sm_<ss_, ss_> headers;
+		ss_ header(const ss_ &lower_name) const {
+			auto it = headers.find(lower_name);
+			return it == headers.end() ? ss_() : it->second;
+		}
 		HttpRequest(PeerInfo::Id peer, const ss_ &method, const ss_ &path,
 				const ss_ &query, const ss_ &body, const ss_ &address,
 				const ss_ &origin = "", const ss_ &host = ""):
@@ -376,6 +383,16 @@ namespace network
 		virtual void send_bulk(PeerInfo::Id recipient, const ss_ &name,
 				const sp_<const ss_> &data) = 0;
 		virtual size_t bulk_bytes(PeerInfo::Id peer) = 0;
+
+		// [KIT_AGENTS] **A peer with no socket**: a fresh id, never a
+		// socket's, whose packets (send(), send_bulk()) go to `sink` on the
+		// sender's thread instead. Not in list_peers(), no
+		// network:client_connected or _disconnected; disconnect() and
+		// remove_local_peer() end it. A module running a peer of its own (Kit's
+		// agents) reads what it is sent so.
+		typedef std::function<void(const ss_ &name, const ss_ &data)> Sink;
+		virtual PeerInfo::Id add_local_peer(Sink sink) = 0;
+		virtual void remove_local_peer(PeerInfo::Id peer) = 0;
 	};
 
 	inline bool access(interface::Server *server,

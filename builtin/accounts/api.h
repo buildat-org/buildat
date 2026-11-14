@@ -187,6 +187,28 @@ namespace accounts
 		virtual bool has_priv(const ss_ &name, const ss_ &priv) = 0;
 		virtual ss_ set_priv(const ss_ &name, const ss_ &priv, bool on,
 				const ss_ &by = "") = 0;
+
+		// [KIT_AGENTS] **An agent token**: one a user made on My account
+		// ("Connect an agent...") for their own agentic tool, which reaches
+		// Kit's MCP endpoint (POST /api/v1/mcp) with it as a bearer token.
+		// 256 random bits, stored as agent/<its sha256> and never itself,
+		// shown once. Its scope is "builder", or "admin" when an admin asked
+		// for it; the account's rights at each use cap it. Its label is the
+		// tool's name, the user's choice. Listed with its making and last
+		// use, revocable; it stands no more once revoked, once its account is
+		// gone, or while agent access is off (the admin's switch on the
+		// Accounts page, on by default).
+		struct AgentToken
+		{
+			ss_ id;    // its sha256 in hex: what names it, not it
+			ss_ name;  // the account
+			ss_ scope; // "builder" or "admin"
+			ss_ label;
+		};
+		// "" with `out` filled when the token stands (its last use noted),
+		// else why not: "off" while agent access is off
+		virtual ss_ check_agent(const ss_ &token, AgentToken &out) = 0;
+		virtual bool agents_on() = 0;
 	};
 
 	inline bool access(interface::Server *server,

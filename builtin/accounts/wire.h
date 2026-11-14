@@ -36,10 +36,13 @@ struct Hello
 	ss_ version;
 	// [HC_GUEST_PLAY] the app lets a peer in as a guest (set_guests)
 	uint8_t guests = 0;
+	// [KIT_AGENTS] the server has Kit's MCP endpoint: My account offers
+	// "Connect an agent..."
+	uint8_t agents = 0;
 	template<class Archive>
 	void serialize(Archive &archive){
 		archive(local, setup, open_registration, starport, announce, version,
-				guests);
+				guests, agents);
 	}
 };
 

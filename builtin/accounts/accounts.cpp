@@ -444,6 +444,23 @@ struct KeptLogin
 };
 static const int64_t KEEP_US = 90LL * 24 * 3600 * 1000000;
 
+// [KIT_AGENTS] **An agent token's record** (api.h's AgentToken), stored as
+// agent/<the token's sha256>: its account, scope and label, when it was
+// made and last used (wall_us(); 0: never). The last use is written once
+// a minute at most.
+struct AgentRecord
+{
+	ss_ name, scope, label;
+	int64_t made_us = 0, used_us = 0;
+	template<class Archive>
+	void serialize(Archive &archive){
+		interface::Record<Archive> r(archive, "AgentToken", 1, 0);
+		r.ar(name, scope, label, made_us, used_us);
+		r.end();
+	}
+};
+static const size_t AGENTS_A_USER = 20;
+
 // **A login waiting on its TOTP code** ([LOGIN_UNLOADED]), stored as
 // totp_wait/<the token's sha256>: the password was right, and the token
 // stands for it with a code for totp_wait_s, three codes at most. The
@@ -506,10 +523,12 @@ struct UsersInfo
 	// [FP_ABUSE] 3: the storage budget in MB, and what all apps keep
 	int32_t budget_mb = 0;
 	ss_ storage;
+	// [KIT_AGENTS] the admin's switch: agent tokens stand
+	uint8_t agents = 1;
 	template<class Archive>
 	void serialize(Archive &archive){
 		archive(users, invites, access, bans, starport_ids, approvals, level,
-				budget_mb, storage);
+				budget_mb, storage, agents);
 	}
 };
 
@@ -669,7 +688,7 @@ struct Module: public interface::Module, public Interface
 				"accounts:admin", "accounts:passwd", "accounts:logout",
 				"accounts:totp", "accounts:link_starport",
 				"accounts:unlink_starport", "accounts:open_lan",
-				"accounts:ntfy", "accounts:guest"})
+				"accounts:ntfy", "accounts:guest", "accounts:agent:req"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -706,6 +725,8 @@ struct Module: public interface::Module, public Interface
 				on_open_lan, network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:guest", on_guest,
 				network::Packet)
+		EVENT_TYPEN("network:packet_received/accounts:agent:req",
+				on_agent_req, network::Packet)
 	}
 
 	// One key of what the launcher asked for through the server's -u
@@ -1480,6 +1501,14 @@ struct Module: public interface::Module, public Interface
 		m_store->set("deleted/"+name, "");
 		m_store->remove("made/"+name);
 		m_store->remove("seen/"+name);
+		// [KIT_AGENTS] its agent tokens: a new account of the name is
+		// another's
+		for(const ss_ &key : m_store->list("agent/")){
+			ss_ data;
+			AgentRecord a;
+			if(m_store->get(key, data) && unpack(data, a) && a.name == name)
+				m_store->remove(key);
+		}
 		for(auto &app : m_storage)
 			app.second.erase(name);
 		m_server->emit_event("accounts:deleted", new Login(0, name));
@@ -1688,6 +1717,7 @@ struct Module: public interface::Module, public Interface
 		h.open_registration = m_access.open_registration;
 		h.version = ss_(BUILDAT_VERSION) + "-" + BUILDAT_GIT_HASH;
 		h.guests = m_guests;
+		h.agents = m_server->has_module("kit");
 		starport_announce::access(m_server,
 				[&](starport_announce::Interface *s){
 			h.starport = s->accepts_ids() ? 1 : 0;
@@ -2246,6 +2276,7 @@ struct Module: public interface::Module, public Interface
 		for(const ss_ &key : m_store->list("approval/"))
 			info.approvals.push_back(key.substr(9));
 		info.level = level(name_of(peer));
+		info.agents = agents_on();
 		send(peer, "accounts:users", pack(info));
 	}
 
@@ -2472,6 +2503,15 @@ struct Module: public interface::Module, public Interface
 			log_i(MODULE, "%s set the storage budget to %s MB", cs(by), cs(a));
 			send_users(packet.sender);
 			return result("The storage budget is "+a+" MB");
+		} else if(r.cmd == "setting" && r.name == "agents"){
+			// [KIT_AGENTS] on by default; off, no agent token stands
+			if(r.on)
+				m_store->remove("access/agents_off");
+			else
+				m_store->set("access/agents_off", "1");
+			log_i(MODULE, "%s turned agent access %s", cs(by),
+					r.on ? "on" : "off");
+			result(ss_("Agent access is ")+(r.on ? "on" : "off"));
 		} else if(r.cmd == "setting"){
 			if(r.name != "open_registration")
 				return result("No such setting");
@@ -2619,6 +2659,158 @@ struct Module: public interface::Module, public Interface
 		send_links(packet.sender, name);
 		send(packet.sender, "accounts:link_result",
 				pack("The Starport ID of "+packet.data+" is unlinked"));
+	}
+
+	// -- [KIT_AGENTS] Agent tokens (api.h)
+
+	bool agents_on()
+	{
+		ss_ v;
+		return !(m_store && m_store->get("access/agents_off", v));
+	}
+
+	static ss_ agent_key(const ss_ &token)
+	{
+		return "agent/"+interface::sha256::hex(
+				interface::sha256::calculate(token));
+	}
+
+	ss_ check_agent(const ss_ &token, AgentToken &out)
+	{
+		if(!m_store)
+			return "the server is starting";
+		if(!agents_on())
+			return "off";
+		AgentRecord a;
+		ss_ data;
+		const ss_ key = agent_key(token);
+		if(token.size() < 32 || token.size() > 100 ||
+				!m_store->get(key, data) || !unpack(data, a) || !exists(a.name))
+			return "not an agent token of this server's (revoked, or its "
+					"account gone)";
+		const int64_t now = interface::os::wall_us();
+		if(now - a.used_us > 60LL * 1000000){
+			a.used_us = now;
+			m_store->set(key, pack(a));
+		}
+		out.id = key.substr(6);
+		out.name = a.name;
+		out.scope = a.scope;
+		out.label = a.label;
+		return "";
+	}
+
+	static ss_ utc_text(int64_t us)
+	{
+		if(!us)
+			return "never";
+		char buf[40];
+		const struct tm tm_ = interface::os::utc_tm(us / 1000000);
+		strftime(buf, sizeof buf, "%Y-%m-%d %H:%M UTC", &tm_);
+		return buf;
+	}
+
+	// My account's "Connect an agent..." (accounts.lua's agents_page), by
+	// network::answer_request: {"cmd": "list"}, {"cmd": "make", "scope",
+	// "label"} (the one answer with "token" in it) or {"cmd": "revoke",
+	// "token_id"} ("id" is the request's); each answered with {"on",
+	// "admin", "tokens": [{"id", "label", "scope", "made", "used"}]}
+	void on_agent_req(const network::Packet &packet)
+	{
+		auto it = m_peers.find(packet.sender);
+		const ss_ name = it == m_peers.end() || it->second.guest ? "" :
+				it->second.name;
+		network::answer_request(m_server, packet, "accounts:agent:res", name,
+				m_store ? "" : "the server is starting",
+				[&](const json::Value &req){ return agent_request(name, req); });
+	}
+
+	json::Value agent_request(const ss_ &name, const json::Value &req)
+	{
+		const ss_ cmd = jstr(req, "cmd");
+		json::Value out = json::object();
+		// By their making, oldest first
+		std::map<std::pair<int64_t, ss_>, AgentRecord> mine;
+		for(const ss_ &key : m_store->list("agent/")){
+			ss_ data;
+			AgentRecord a;
+			if(m_store->get(key, data) && unpack(data, a) && a.name == name)
+				mine[std::make_pair(a.made_us, key.substr(6))] = a;
+		}
+		if(cmd == "make"){
+			const ss_ scope = jstr(req, "scope");
+			if(!agents_on())
+				throw Exception("Agent access is off on this server");
+			if(scope != "builder" && scope != "admin")
+				throw Exception("A scope is builder or admin");
+			if(scope == "admin" && !is_admin(name))
+				throw Exception("Only the "+level_name(LV_ADMIN)+
+						" makes an admin token");
+			if(mine.size() >= AGENTS_A_USER)
+				throw Exception("You have "+itos(AGENTS_A_USER)+" agent "
+						"tokens: revoke one first");
+			// A line of text, at most 40 bytes (not cut inside a UTF-8
+			// sequence)
+			ss_ label;
+			for(char c : jstr(req, "label"))
+				if((unsigned char)c >= 32 && c != 127)
+					label += c;
+			size_t end = std::min<size_t>(label.size(), 40);
+			while(end < label.size() && end > 0 &&
+					((unsigned char)label[end] & 0xc0) == 0x80)
+				end--;
+			label = label.substr(0, end);
+			if(label.empty())
+				label = "agent";
+			std::random_device rd;
+			ss_ bits(32, '\0');
+			for(char &c : bits)
+				c = (char)(rd() & 0xff);
+			const ss_ token = "bat_"+interface::sha256::hex(bits);
+			AgentRecord a;
+			a.name = name;
+			a.scope = scope;
+			a.label = label;
+			a.made_us = interface::os::wall_us();
+			const ss_ key = agent_key(token);
+			m_store->set(key, pack(a));
+			mine[std::make_pair(a.made_us, key.substr(6))] = a;
+			log_i(MODULE, "%s made an agent token %s (%s, \"%s\")", cs(name),
+					cs(key.substr(6, 8)), cs(scope), cs(label));
+			out.set("token", token);
+		} else if(cmd == "revoke"){
+			const ss_ id = jstr(req, "token_id");
+			bool found = false;
+			for(auto it = mine.begin(); it != mine.end(); ++it){
+				if(it->first.second != id || id.empty())
+					continue;
+				m_store->remove("agent/"+id);
+				log_i(MODULE, "%s revoked the agent token %s (\"%s\")",
+						cs(name), cs(id.substr(0, 8)),
+						cs(it->second.label));
+				mine.erase(it);
+				found = true;
+				break;
+			}
+			if(!found)
+				throw Exception("No such agent token of yours");
+		} else if(cmd != "list"){
+			throw Exception("No such request");
+		}
+		json::Value tokens = json::array();
+		for(auto &m : mine){
+			json::Value t = json::object();
+			t.set("id", m.first.second);
+			t.set("label", m.second.label);
+			t.set("scope", m.second.scope);
+			t.set("made", utc_text(m.second.made_us));
+			t.set("used", utc_text(m.second.used_us));
+			tokens.append(t);
+		}
+		out.set("on", agents_on());
+		out.set("admin", is_admin(name));
+		out.set("tokens", tokens);
+		return out;
 	}
 
 	// -- TOTP ([STARPORT] 10a)

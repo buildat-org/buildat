@@ -650,6 +650,8 @@ struct Module: public interface::Module, public network::Interface
 	sm_<Peer::Id, Peer> m_peers;
 	sm_<int, Peer*> m_peers_by_socket;
 	size_t m_next_peer_id = 1;
+	// [KIT_AGENTS] add_local_peer()'s, by their ids from the same count
+	sm_<Peer::Id, Sink> m_local_peers;
 	// When the listening socket is waited on again (on_listen_event)
 	int64_t m_accept_paused_until_us = 0;
 	int64_t m_peers_full_logged_us = 0;
@@ -1508,10 +1510,12 @@ struct Module: public interface::Module, public network::Interface
 				(claimed(target) && !ws_upgrade)){
 			peer.api_waiting = true;
 			const ss_ address = forwarded_for(peer, headers["x-forwarded-for"]);
-			m_server->emit_event("network:http_request", new HttpRequest(
+			HttpRequest *r = new HttpRequest(
 					peer.id, method, target, query, rest.substr(0, body_len),
 					address.empty() ? peer.socket->get_remote_address() :
-					address, headers["origin"], headers["host"]));
+					address, headers["origin"], headers["host"]);
+			r->headers = headers;
+			m_server->emit_event("network:http_request", r);
 			return true;
 		}
 		if(method != "GET"){
@@ -2288,6 +2292,11 @@ struct Module: public interface::Module, public network::Interface
 		// Grab Peer (which contains socket)
 		auto it = m_peers.find(recipient);
 		if(it == m_peers.end() || !it->second.playing()){
+			auto li = m_local_peers.find(recipient);
+			if(li != m_local_peers.end()){
+				li->second(name, data);
+				return;
+			}
 			log_w(MODULE, "network::send(): Peer %i doesn't exist",
 					recipient);
 			return;
@@ -2295,6 +2304,18 @@ struct Module: public interface::Module, public network::Interface
 		Peer &peer = it->second;
 
 		send_u(peer, name, data);
+	}
+
+	PeerInfo::Id add_local_peer(Sink sink)
+	{
+		const PeerInfo::Id id = m_next_peer_id++;
+		m_local_peers[id] = sink;
+		return id;
+	}
+
+	void remove_local_peer(PeerInfo::Id peer)
+	{
+		m_local_peers.erase(peer);
 	}
 
 	// Interface for NetworkThread
@@ -2453,6 +2474,11 @@ struct Module: public interface::Module, public network::Interface
 			const sp_<const ss_> &data)
 	{
 		auto it = m_peers.find(recipient);
+		auto li = m_local_peers.find(recipient);
+		if(li != m_local_peers.end() && data){
+			li->second(name, *data);
+			return;
+		}
 		if(it == m_peers.end() || !it->second.playing() || !data){
 			log_w(MODULE, "network::send_bulk(): Peer %zu doesn't exist",
 					recipient);
@@ -2497,6 +2523,7 @@ struct Module: public interface::Module, public network::Interface
 
 	void disconnect(PeerInfo::Id id)
 	{
+		m_local_peers.erase(id);
 		auto it = m_peers.find(id);
 		if(it == m_peers.end())
 			return;
@@ -2670,8 +2697,10 @@ struct Module: public interface::Module, public network::Interface
 		Peer &peer = it->second;
 		peer.api_waiting = false;
 		peer.closing = true;
-		const char *text = status == 200 ? "OK" : status == 400 ?
-				"Bad Request" : status == 403 ? "Forbidden" : status == 404 ?
+		const char *text = status == 200 ? "OK" : status == 202 ? "Accepted" :
+				status == 400 ? "Bad Request" : status == 401 ? "Unauthorized" :
+				status == 405 ? "Method Not Allowed" : status == 413 ?
+				"Payload Too Large" : status == 403 ? "Forbidden" : status == 404 ?
 				"Not Found" : status == 429 ? "Too Many Requests" : status == 503 ?
 				"Service Unavailable" : "Error";
 		peer.queue_raw(web::response(itos(status)+" "+text, content_type,
