@@ -550,7 +550,10 @@ prebuild_modules() {
 	rm -f "$stage"/cache/rccpp_build/*.compile.log
 	# Built for any compiler the archive meets, or none (state.cpp, build_current)
 	sed -i 2d "$stage"/cache/rccpp_build/*.hash 2>/dev/null || true
-	rm -rf "$stage/user/apps/vanilla/saves/prebuild"
+	# The run's own user data: its saves (chat, server, the world), the
+	# /health token every archive would share, the path probe's file
+	rm -rf "$stage/user/apps/vanilla/saves"
+	rm -f "$stage"/user/apps/*/health_token.txt "$stage/user/write.test"
 	rm -f "$stage"/user/shared/vanilla/settings.json
 	local n
 	n=$(ls "$stage"/cache/rccpp_build/ 2>/dev/null | grep -c "\.\(so\|dll\)$" || true)
