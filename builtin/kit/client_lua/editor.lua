@@ -2050,6 +2050,7 @@ function NT.components(w)
 	-- (a short pane has no room for a foot beside it: the list was squeezed
 	-- under its rows)
 	local foot = NT.sh.on() and w or W.palette
+	NT.pal_new = nil
 	local function tabs()
 		-- (the touch mode's in the palette's dropdown, palette())
 		if NT.sh.on() then
@@ -2076,11 +2077,13 @@ function NT.components(w)
 	if #items == 0 and S.tab == "Favourites" then
 		text(w, "None yet: click one, then \"Favourite\"", DIM)
 	end
-	-- [KIT_CUSTOM_TYPES] a type of the project's own, local/<name>
+	-- [KIT_CUSTOM_TYPES] a type of the project's own, local/<name>; not
+	-- while the filter finds (the entries where they were)
 	if (S.tab or "All") == "All" then
-		button(w, "New type...", function()
+		NT.pal_new = button(w, "New type...", function()
 			NT.type_dialog(nil)
-		end):SetName("type new")
+		end)
+		NT.pal_new:SetName("type new")
 	end
 	-- [KIT_PALETTE_SECTIONS] Each section (the type's about.group, a
 	-- prefab's group) under its header, which folds it; in Favourites one
@@ -2263,6 +2266,9 @@ function NT.palette_filter()
 	end
 	for _, h in pairs(NT.pal_heads or {}) do
 		h.visible = q == ""
+	end
+	if NT.pal_new then
+		NT.pal_new.visible = q == ""
 	end
 	-- (a layout only grows, stretching what is left: the body shrunk to
 	-- what it shows, the panel after it, NT.fit_panel)
