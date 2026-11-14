@@ -24,7 +24,8 @@
 -- shown in place, the mode kept open); Cancel puts them back as they were.
 -- Stage 4: a field of another form by the same rules, FE.extra[its name]:
 -- a rec with apply(text), which Apply calls and leaves (no Prev or Next;
--- the Signals view's Name, signals.lua).
+-- the Signals view's Name, signals.lua; [KIT_CUSTOM_TYPES] a custom type's
+-- files, long, rec.title over them).
 -- simplified: a long text is a string parameter whose value or default is
 -- over 40 characters (no Kit type declares a multi-line one; a newline typed
 -- is refused, Kit's strings are one line); the old value is shown to 30
@@ -328,7 +329,9 @@ function FE.open(rec)
 	w.visible = false
 	w:SetVar("FollowsRoot", "1")
 	s.win = w
-	s.title = text(w, NT.entity_label(rec.e) .. " · " .. rec.k, GOLD)
+	-- ([KIT_CUSTOM_TYPES] an extra's own: a custom type's files)
+	s.title = text(w, rec.title or NT.entity_label(rec.e) .. " · " .. rec.k,
+			GOLD)
 	-- (one line, above a landscape keyboard)
 	local was = shown(rec, rec.old)
 	s.info = text(w, "Was: " .. (#was > 30 and was:sub(1, 27) .. "..." or was) ..

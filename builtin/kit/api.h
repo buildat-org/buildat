@@ -62,7 +62,8 @@ namespace interface
 // author "kit", in every hosting app; the app's are <types_path>/<name>.lua
 // under its author (Host::author, the app's id); other authors' come in
 // packages (below), named "<fp>/<name>" by the package's key
-// ([AITTA_KEY_IDENTITY]: fp the key's fingerprint, doc/aitta.txt). An instance records its type and the type's version
+// ([AITTA_KEY_IDENTITY]: fp the key's fingerprint, doc/aitta.txt); the
+// project's own are custom types, "local/<name>" (below). An instance records its type and the type's version
 // (the file's `version`). A save from before, its types bare names, is
 // read as the app's type of that name if it has one, else Kit's, and
 // written back so.
@@ -646,6 +647,36 @@ namespace interface
 //   "license_code", "license_media" (a package's), "of": "kit"|"app",
 //   "uses": [types, "[prefab]"]}], what the composition uses by who made
 //   it (kit.show_credits(), the palette's Credits).
+//   [KIT_CUSTOM_TYPES] **Custom types**: a project's own, "local/<name>"
+//   (name letters, digits and _), each a type's file and an optional
+//   client part as above, run as a package's are (the box, the clients'
+//   sandbox). Kit's store's rows "type:local/<name>" {"source", "client",
+//   "by"}; at most 64 of them, 64 KiB a server part (its declaration
+//   too, as JSON), 32 KiB a client part. Any builder with the tools on
+//   puts, reads and deletes them, in the default round, each an undo:
+//   "kit:type" {"op": "get"|"put"|"delete", "name" ("bike" is
+//   local/bike), "source", "client"} (outside "kit:edit"'s 4096 bytes),
+//   answered with "kit:type" {"op", "name", "ok", "what"|"why"}; a get's
+//   with "source", "client" and "custom" (Kit's own types, installed
+//   packages' and custom ones read; never the app's own, which may be
+//   private).
+//   A put loads at once, Running or not: refused (a syntax or load error;
+//   the client part's syntax compiled in the box, not run), the version
+//   before runs on and the error is said in the Log of each entity on it.
+//   Taken, each entity on it keeps its params and state (the new
+//   version's state keys and params added at their defaults, its errors
+//   forgotten; a param or a link's output the file no longer takes
+//   dropped, here and when a composition loads, not the project),
+//   its next runs the new handlers; the bodies on a movement step with
+//   the new one, and the clients load the new client part. A newer
+//   `version` migrates the authored instances as a package's upgrade. A
+//   delete is refused while anything uses it. A put that takes long
+//   holds its builder's next for a while. Agents: put_type, get_type,
+//   delete_type. A template's types/<name>.lua are its project's from
+//   its first start (Host::local_types_path); an export (below) takes
+//   those its prefabs use as the builder's own <author>/<name>.
+//   simplified: a start that finds one no longer loading (a file not the
+//   same each run) leaves it out of the box, its entities' runs failing
 //   Looks: shape "wedge", rotation {x, y, z} (degrees), material (plain,
 //   metal, glass, glow), and "param:<name>" anywhere in a look is that
 //   parameter's value (kit/part). [KIT_PLANE] shape "polygon", points (a
@@ -1551,6 +1582,10 @@ namespace kit
 		// as Running's do. A save from round hosting is Running from here
 		// on, the voxels as they stand, its copies and marks dropped
 		bool persistent = false;
+		// [KIT_CUSTOM_TYPES] With composition_path a template's: its types
+		// directory (<name>.lua, <name>.client.lua), the project's custom
+		// types local/<name> from its first start ("": none)
+		ss_ local_types_path;
 	};
 
 	// kit:items ([KIT] stage 6a, Host::app_items): a player's inventory as

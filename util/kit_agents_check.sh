@@ -202,13 +202,14 @@ if phase == "main":
     assert rpc(tok, "ping")["result"] == {}
     tools = rpc(tok, "tools/list")["result"]["tools"]
     names = [t["name"] for t in tools]
-    assert names == ["get_state", "list_types", "get_guide", "get_links",
-        "get_log", "get_events", "get_goal_warnings", "list_prefabs",
-        "list_items", "list_voxel_types", "get_voxels", "place", "set_param",
-        "link", "delete", "unlink", "move", "rename", "add_component",
-        "remove_component", "set_parent", "duplicate", "place_prefab",
-        "save_prefab", "set_voxels", "new_scene", "switch_scene", "undo",
-        "start", "stop", "try_input", "watch", "keep", "set_builder"], names
+    assert names == ["get_state", "list_types", "get_type", "get_guide",
+        "get_links", "get_log", "get_events", "get_goal_warnings",
+        "list_prefabs", "list_items", "list_voxel_types", "get_voxels", "place",
+        "set_param", "link", "delete", "unlink", "move", "rename",
+        "add_component", "remove_component", "set_parent", "duplicate",
+        "place_prefab", "save_prefab", "set_voxels", "put_type", "delete_type",
+        "new_scene", "switch_scene", "undo", "start", "stop", "try_input",
+        "watch", "keep", "set_builder"], names
     for t in tools:
         assert t["description"] and t["inputSchema"]["type"] == "object", t
     st = state(tok)

@@ -648,6 +648,8 @@ struct Module: public interface::Module
 		const auto tmpl = fresh ? m_templates.find(from) : m_templates.end();
 		if(tmpl != m_templates.end()){
 			h.composition_path = tmpl->second+"/composition.json";
+			// [KIT_CUSTOM_TYPES] its own types the project's
+			h.local_types_path = tmpl->second+"/types";
 			h.opens_in_edit = true;
 			log_i(MODULE, "workbench: the project from the template %s", cs(from));
 		}

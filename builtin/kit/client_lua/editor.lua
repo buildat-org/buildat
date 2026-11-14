@@ -65,7 +65,10 @@
 --     until Escape, a right click or a click on it again (floorplanner's
 --     Object tool); a type with no position, clicked, has a menu instead:
 --     Place (in the scene edited, at once), Favourite, Cancel
---     ([KIT_PALETTE_MENU]). Voxels: its Voxel list puts a voxel type in hand
+--     ([KIT_PALETTE_MENU]). [KIT_CUSTOM_TYPES] "New type..." over the
+--     list, and the inspector's "Edit type" on a local/<name> component:
+--     the custom type's files in two fields, Save putting it live (its
+--     error said under them). Voxels: its Voxel list puts a voxel type in hand
 --     (O.pick_voxel(name), the app's placing) and the voxels tool on,
 --     "none" away; and "New voxel type..." makes a builder's own: a
 --     texture (Kit's or an uploaded PNG), kind, solid, transparent, light,
@@ -2102,6 +2105,7 @@ function NT.components(w)
 	-- (a short pane has no room for a foot beside it: the list was squeezed
 	-- under its rows)
 	local foot = NT.sh.on() and w or W.palette
+	NT.pal_new = nil
 	local function tabs()
 		-- (the touch mode's in the palette's dropdown, palette())
 		if NT.sh.on() then
@@ -2127,6 +2131,14 @@ function NT.components(w)
 	local items = NT.palette_items(S.tab)
 	if #items == 0 and S.tab == "Favourites" then
 		text(w, "None yet: click one, then \"Favourite\"", DIM)
+	end
+	-- [KIT_CUSTOM_TYPES] a type of the project's own, local/<name>; not
+	-- while the filter finds (the entries where they were)
+	if (S.tab or "All") == "All" then
+		NT.pal_new = button(w, "New type...", function()
+			NT.type_dialog(nil)
+		end)
+		NT.pal_new:SetName("type new")
 	end
 	-- [KIT_PALETTE_SECTIONS] Each section (the type's about.group, a
 	-- prefab's group) under its header, which folds it; in Favourites one
@@ -2309,6 +2321,9 @@ function NT.palette_filter()
 	end
 	for _, h in pairs(NT.pal_heads or {}) do
 		h.visible = q == ""
+	end
+	if NT.pal_new then
+		NT.pal_new.visible = q == ""
 	end
 	-- (a layout only grows, stretching what is left: the body shrunk to
 	-- what it shows, the panel after it, NT.fit_panel)
@@ -2725,6 +2740,12 @@ local function field(name, d, values)
 		end
 		table.sort(names)
 		names[#names + 1] = "none"
+		-- (said once as it changes: a check's, a custom movement in it)
+		local said = "kit editor: the movements: " .. table.concat(names, ", ")
+		if said ~= NT.movements_said then
+			NT.movements_said = said
+			log:info(said)
+		end
 		f.choices = {}
 		local has = values[name] == nil
 		for _, t in ipairs(names) do
@@ -3742,6 +3763,12 @@ local function inspector(w, e, is_made)
 			text(w, c.type, magic.Color(1.0, 0.85, 0.3))
 		end
 		NT.component_hint(w, e, t)
+		-- [KIT_CUSTOM_TYPES] the project's own: its files
+		if tostring(c.type):sub(1, 6) == "local/" then
+			button(w, "Edit type", function()
+				NT.type_dialog(c.type)
+			end):SetName("edit type " .. c.type)
+		end
 		if E.running and not sh then
 			button(w, "Restart this", function()
 				send({op = "restart", id = e.id, comp = ci - 1})
@@ -5302,6 +5329,136 @@ function NT.sounds(w)
 		end
 	end
 end
+
+-- ---- [KIT_CUSTOM_TYPES] A custom type's files (api.h): its name, its
+-- server part and its client part in multi-line fields (the touch mode's
+-- through the field entry mode), Save putting it ("kit:type") and the
+-- answer under them: what it did or the error, the version before running
+-- on. type_dialog(nil): a new one, from a type that runs; (name): its files
+-- asked first. simplified: plain text fields, no highlighting, line numbers
+-- or search; Tab moves the focus, not a tab character; a file's tabs come
+-- as four spaces (the field draws none), and a Save keeps them so
+E.type_form = E.type_form or {name = "my_type", source = "", client = "",
+	status = ""}
+NT.TYPE_STARTER = [[
+-- A type of this project's: what the file returns (get_type kit/counter
+-- and the others for more)
+return {
+	version = 1,
+	about = {group = "Logic", what = "Counts the times it is used.",
+		outputs = {used = "Used. Value: how many times."}},
+	usable = true,
+	look = {shape = "box", size = 0.25, color = "#40c0e0", text = "n"},
+	state = {n = {default = 0, shared = true}},
+	outputs = {used = "number"},
+	on_use = function(c, by)
+		c.state.n = c.state.n + 1
+		c:log("used by", c:name(by))
+		c:emit("used", c.state.n)
+	end,
+}
+]]
+function NT.type_dialog(name)
+	local f = E.type_form
+	f.existing, f.status, f.ok = name ~= nil, "", true
+	if name then
+		f.name, f.source, f.client, f.status = name, "", "", "Reading..."
+		buildat.send_packet("kit:type", network.write_json({op = "get",
+			name = name}))
+	else
+		f.name, f.source, f.client = "my_type",
+				NT.TYPE_STARTER:gsub("\t", "    "), ""
+	end
+	log:info("kit editor: the type dialog, " .. tostring(name or "new"))
+	NT.type_window()
+end
+
+function NT.type_window()
+	local f = E.type_form
+	local w, br = dialog(f.existing and "Edit type" or "New type", 640)
+	f.win = W.dialog
+	text(w, f.existing and "The project's type " .. f.name or
+			"A type of this project's own, local/<name>: Lua run in Kit's box")
+	local r = row(w)
+	label(r, "Name:")
+	edit(r, f.name, function(s)
+		f.name = s
+	end):SetName("type name")
+	local function field(key, title, h)
+		text(w, title, DIM)
+		local rec
+		local e = edit(w, f[key], function(s)
+			f[key] = s
+			rec.old = s
+		end)
+		e:SetName("type " .. key)
+		e.multiLine = true
+		e.textSelectable = true
+		e.textCopyable = true
+		e:SetFixedHeight(h)
+		-- The touch mode's: the field entry mode on it, its Apply the text
+		rec = {name = "type " .. key, key = "type", k = key, e = {},
+			title = tostring(f.name) .. " · " .. title, kind = "text",
+			long = true, d = {}, f = {max_length = 65536}, old = f[key],
+			apply = function(t)
+				f[key] = t
+				NT.type_window()
+			end}
+		NT.fe.extra["type " .. key] = rec
+	end
+	field("source", "Server part: returns the type's table", 280)
+	field("client", "Client part (none if empty): the clients' handlers", 110)
+	f.status_text = text(w, f.status ~= "" and f.status or " ",
+			f.ok and DIM or WARN)
+	br = br or row(w)
+	button(br, "Save", function()
+		f.status, f.ok = "Saving...", true
+		f.status_text:SetText(f.status)
+		buildat.send_packet("kit:type", network.write_json({op = "put",
+			name = f.name, source = f.source, client = f.client}))
+		log:info("kit editor: type: put " .. tostring(f.name) .. ", " ..
+				#f.source .. " bytes")
+	end):SetName("type save")
+	button(br, "Close", function()
+		drop("dialog")
+	end):SetName("type close")
+end
+
+-- The server's answer ("kit:type"): a get's files into the form, a put's
+-- or delete's text under it
+buildat.sub_packet("kit:type", function(data)
+	local a = network.parse_json(data)
+	if type(a) ~= "table" then
+		return
+	end
+	local f = E.type_form
+	if a.op == "get" and a.ok then
+		-- (a field draws no tab: shown, and saved, as four spaces)
+		f.name, f.source, f.client, f.status, f.ok = tostring(a.type),
+				tostring(a.source or ""):gsub("\t", "    "),
+				(tostring(a.client or ""):gsub("\t", "    ")),
+				a.custom and "" or "Not this project's: Save makes a copy under "
+				.. "the name you give it", true
+		f.existing = a.custom == true
+	else
+		f.ok = a.ok == true
+		f.status = a.ok and "Saved: " .. tostring(a.what) or
+				"Refused: " .. tostring(a.why)
+		if a.ok and a.op == "put" then
+			f.existing, f.name = true, tostring(a.name)
+		end
+	end
+	log:info("kit editor: type: " .. tostring(a.op) .. " " .. tostring(a.name) ..
+			": " .. (f.status ~= "" and f.status or "read"))
+	if W.dialog and W.dialog == f.win then
+		if a.op == "get" then
+			NT.type_window()
+		else
+			f.status_text:SetText(f.status)
+			f.status_text:SetColor(f.ok and DIM or WARN)
+		end
+	end
+end)
 
 -- [KIT] stage 4g: a builder's voxel type ("<their name>/<name>"), made or
 -- its next version: a registered voxel's texture or an uploaded PNG's
