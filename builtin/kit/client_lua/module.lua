@@ -1012,14 +1012,46 @@ local function update_play(_, data)
 end
 magic.SubscribeToEvent("Update", update_play)
 
--- The types' client parts, run as this module's own Lua is ([KIT] 4d)
+-- The types' client parts, run as this module's own Lua is ([KIT] 4d).
+-- [KIT_CUSTOM_TYPES] One sent again with another source (a custom type
+-- edited) replaces it on the entities that have it (the old one's
+-- on_remove, the new one's on_add); an empty one takes it away
+P.part_src = P.part_src or {}
+local function swap_part(t, old, new)
+	for _, n in pairs(P.nodes) do
+		local show = type(n.show) == "table" and n.show or {}
+		local has = false
+		for _, c in ipairs(type(show.client) == "table" and show.client or {}) do
+			has = has or c == t
+		end
+		if n.added and has then
+			if old then
+				call(n, old, "on_remove")
+			end
+			if new then
+				call(n, new, "on_add")
+			end
+		end
+	end
+end
 buildat.sub_packet("kit:client_parts", function(data)
 	local parts = network.parse_json(data)
 	for t, src in pairs(type(parts) == "table" and parts or {}) do
-		if type(src) == "string" and not P.parts[t] then
+		if src == "" then
+			if P.parts[t] then
+				swap_part(t, P.parts[t], nil)
+				log:info("kit: the client part of " .. tostring(t) .. " gone")
+			end
+			P.parts[t], P.part_src[t] = nil, nil
+		elseif type(src) == "string" and P.part_src[t] ~= src then
+			P.part_src[t] = src
 			local ok, part = buildat.eval(src, tostring(t) .. ".client")
 			if ok and type(part) == "table" then
+				local old = P.parts[t]
 				P.parts[t] = part
+				if old then
+					swap_part(t, old, part)
+				end
 				log:info("kit: the client part of " .. tostring(t))
 			else
 				log:warning("kit: the client part of " .. tostring(t) ..

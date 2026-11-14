@@ -219,7 +219,8 @@ asks the Aitta the client named whose key it is. One more manifest field:
 
 An Aitta lists it as kind "other" with its whole manifest (no change to
 an Aitta was needed); a client reads "manifest"."kind". Kit's "Publish
-my prefabs..." writes a builder's prefabs and voxel types into
+my prefabs..." writes a builder's prefabs and voxel types (and the
+project's custom types they use, local/<n> made <author>/<n>) into
 <user>/dev_apps/<name> and opens the publish screen on it; a package of
 types is written by hand: meta.json and types/<name>.lua.
 
@@ -234,8 +235,20 @@ Install), and is not a tile. Refused at pack and at install without:
 
         composition.json              Kit's rows (Host::composition_path in
                                       builtin/kit/api.h), every component
-                                      type one of Kit's own ("kit/...")
+                                      type one of Kit's own ("kit/...") or
+                                      its own ("local/<name>", below)
         LICENSE or LICENCE            a licence file at its root
+
+Its own types, if any [KIT_CUSTOM_TYPES], are in types/, refused there
+as well past these or with anything else in it:
+
+        types/<name>.lua              a component type (api.h), the
+                                      project's custom type local/<name>
+                                      from its first start, run sandboxed
+                                      as a Kit package's; name lowercase
+                                      letters, digits and _, 64 KiB, 64
+                                      types at most
+        types/<name>.client.lua       its client part, 32 KiB at most
 
 One more manifest field, and no "dependencies":
 

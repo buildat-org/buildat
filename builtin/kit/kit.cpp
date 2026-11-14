@@ -83,6 +83,11 @@ static const double ACTION_RATE = 20, ACTION_BURST = 40;
 static const double BUILD_RATE = 0.2, BUILD_BURST = 1, BUILD_MIN = 0.05;
 static const int64_t HELD_EVERY_US = 100000;
 static const size_t MAX_TYPE_SOURCE = 256 << 10;
+// [KIT_CUSTOM_TYPES] A project's own types (local/<name>): how many, each
+// part's bytes (its declaration's too), and a "kit:type" packet's
+static const size_t MAX_LOCAL_TYPES = 64, MAX_LOCAL_SOURCE = 64 << 10,
+		MAX_LOCAL_CLIENT = 32 << 10,
+		MAX_TYPE_PACKET = MAX_LOCAL_SOURCE * 2 + MAX_LOCAL_CLIENT * 2 + 1024;
 // A zone's or an owned volume's extent in cells, each way, and the cells
 // a volume has at most
 static const int MAX_EXTENT = 64;
@@ -618,6 +623,10 @@ struct Change
 	// [KIT_SYMMETRY] the decorations it removed (kit/symmetry's copy over
 	// the other slices), put back by its undo
 	sv_<Decor> decor_gone;
+	// [KIT_CUSTOM_TYPES] a custom type's put or delete: its name ("" none)
+	// and its row before (not an object: there was none)
+	ss_ local_type;
+	json::Value local_before;
 };
 
 // [KIT] stage 4e: a scene's World (terrain.h; [KIT_SCENES] one a scene):
@@ -1224,6 +1233,9 @@ struct Module: public interface::Module, public Interface
 	// may be on its loopback too
 	std::set<size_t> m_local_peers;
 	sm_<ss_, json::Value> m_package_types;
+	// [KIT_CUSTOM_TYPES] The project's own types, {"source", "client",
+	// "by"} by local/<name>: Kit's store's type:<name> rows
+	sm_<ss_, json::Value> m_local_types;
 	// [KIT_SET_UPGRADE_BREAKS] set_breaks()'s set, by package, while it tries
 	sm_<ss_, json::Value> m_set_trial;
 	// The app's defaults for parameters, {type: {param: value}}
@@ -1496,6 +1508,8 @@ struct Module: public interface::Module, public Interface
 				&Module::on_texture);
 		sub(m_server, "network:packet_received/kit:package",
 				&Module::on_package);
+		// [KIT_CUSTOM_TYPES] a custom type's get, put or delete
+		sub(m_server, "network:packet_received/kit:type", &Module::on_type);
 		sub(m_server, "kit:use_through", &Module::on_use);
 		sub(m_server, "kit:edit_through", &Module::on_edit);
 		sub(m_server, "network:client_disconnected", &Module::on_left);
@@ -1573,13 +1587,28 @@ struct Module: public interface::Module, public Interface
 			if(!box_call("N"+std::to_string(interface::os::time_us()), answer, why))
 				log_w(MODULE, "The box's random seed: %s", cs(why));
 		}
-		for(auto &s : m_sources){
+		for(auto s = m_sources.begin(); s != m_sources.end();){
 			ss_ answer;
-			if(!define(s.first, s.second, answer, why)){
-				m_starting = false;
-				m_box.reset();
-				return false;
+			if(define(s->first, s->second, answer, why)){
+				++s;
+				continue;
 			}
+			m_starting = false;
+			// [KIT_CUSTOM_TYPES] A custom type that loaded when put and not
+			// now (its file is not the same each run): left out of the box
+			// (its entities' runs fail), not the box. The box again if it
+			// went (a runaway): each time one fewer
+			if(s->first.compare(0, 6, "local/") == 0){
+				log_w(MODULE, "%s left out of the new box: %s", cs(s->first),
+						cs(why));
+				s = m_sources.erase(s);
+				if(!m_box)
+					return start_box(why);
+				m_starting = true;
+				continue;
+			}
+			m_box.reset();
+			return false;
 		}
 		m_starting = false;
 		return true;
@@ -1733,14 +1762,19 @@ struct Module: public interface::Module, public Interface
 		// [KIT] stage 5: an installed package's, else the author's files
 		const ss_ dir = author_path(author);
 		auto pt = m_package_types.find(name);
-		if(dir.empty() && pt == m_package_types.end()){
+		// [KIT_CUSTOM_TYPES] or the project's own, its save's
+		auto lt = author == "local" ? m_local_types.find(name) :
+				m_local_types.end();
+		const bool local = lt != m_local_types.end();
+		if(dir.empty() && pt == m_package_types.end() && !local){
 			why = "no component type "+name+" (no types of "+author+" here)";
 			return false;
 		}
 		const bool pkg = pt != m_package_types.end();
-		const ss_ path = pkg ? "package "+jstr(pt->second, "package") :
-				dir+"/"+short_name+".lua";
-		const ss_ src = pkg ? jstr(pt->second, "source") : read_file(path);
+		const ss_ path = local ? "the project's own" : pkg ? "package "+
+				jstr(pt->second, "package") : dir+"/"+short_name+".lua";
+		const ss_ src = local ? jstr(lt->second, "source") : pkg ?
+				jstr(pt->second, "source") : read_file(path);
 		if(src.empty() || src.size() > MAX_TYPE_SOURCE){
 			why = "no component type "+name+" ("+path+")";
 			return false;
@@ -1748,6 +1782,11 @@ struct Module: public interface::Module, public Interface
 		ss_ decl_json;
 		if(!define(name, src, decl_json, why))
 			return false;
+		if(local && decl_json.size() > MAX_LOCAL_SOURCE){
+			why = name+": its declaration is past "+itos(MAX_LOCAL_SOURCE)+
+					" bytes as JSON";
+			return false;
+		}
 		m_sources[name] = src;
 		Type t;
 		t.decl = json::load_string(decl_json.c_str());
@@ -1773,7 +1812,8 @@ struct Module: public interface::Module, public Interface
 		t.regions = t.decl.get("regions").is_true();
 		t.events = jstr(t.decl, "events");
 		// Its client part, beside it
-		const ss_ client = pkg ? jstr(pt->second, "client") :
+		const ss_ client = local ? jstr(lt->second, "client") : pkg ?
+				jstr(pt->second, "client") :
 				read_file(dir+"/"+short_name+".client.lua");
 		if(client.size() > MAX_TYPE_SOURCE / 4){
 			why = name+": its client part is past "+itos(MAX_TYPE_SOURCE / 4)+
@@ -4197,6 +4237,7 @@ struct Module: public interface::Module, public Interface
 			if(!load_type(in.type, why))
 				return false;
 			const Type &t = m_types[in.type];
+			const bool lenient = in.type.compare(0, 6, "local/") == 0;
 			// The version it was made with; the type's own for a new one
 			const json::Value &ver = cj.get("version");
 			in.version = ver.is_number() && ver.as_number() >= 1 &&
@@ -4237,12 +4278,22 @@ struct Module: public interface::Module, public Interface
 							it.key() == "own_look") &&
 							!decl.get(it.key()).is_object())
 						continue;
+					const ss_ bad = !decl.get(it.key()).is_object() ? "" :
+							check_param(decl.get(it.key()), *it);
+					// [KIT_CUSTOM_TYPES] A custom type's file edited under
+					// what was placed: what it no longer takes is dropped, not
+					// the project
+					if(lenient && (!decl.get(it.key()).is_object() || !bad.empty())){
+						log_w(MODULE, "Entity %s: %s's %s dropped (its file has %s)",
+								cs(itos(e.id)), cs(in.type), cs(it.key()),
+								bad.empty() ? "no such parameter" : cs("it "+bad));
+						continue;
+					}
 					if(!decl.get(it.key()).is_object()){
 						why = "entity "+itos(e.id)+": "+in.type+
 								" has no parameter "+it.key();
 						return false;
 					}
-					const ss_ bad = check_param(decl.get(it.key()), *it);
 					if(!bad.empty()){
 						why = "entity "+itos(e.id)+": "+in.type+"'s "+
 								it.key()+" is "+bad;
@@ -4263,6 +4314,12 @@ struct Module: public interface::Module, public Interface
 				l.input = jstr(ls.at(m), "input");
 				l.visible = ls.at(m).get("visible").is_boolean() &&
 						ls.at(m).get("visible").as_boolean();
+				if(!t.outputs.count(l.output) && lenient){
+					log_w(MODULE, "Entity %s: %s's link from %s dropped (no "
+							"such output in its file)", cs(itos(e.id)), cs(in.type),
+							cs(l.output.substr(0, 64)));
+					continue;
+				}
 				if(!t.outputs.count(l.output)){
 					why = "entity "+itos(e.id)+": "+in.type+
 							" has no output "+l.output;
@@ -4671,9 +4728,9 @@ struct Module: public interface::Module, public Interface
 				if(!isalnum((unsigned char)c))
 					c = '_';
 		}
-		if(!name_ok(m_author) || m_author == "kit"){
-			why = "the app's author is letters, digits and _, not kit: \""+
-					m_author.substr(0, 64)+"\"";
+		if(!name_ok(m_author) || m_author == "kit" || m_author == "local"){
+			why = "the app's author is letters, digits and _, not kit or "
+					"local: \""+m_author.substr(0, 64)+"\"";
 			return false;
 		}
 		if(!host.defaults.empty()){
@@ -4700,7 +4757,11 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			first = true;
+			// [KIT_CUSTOM_TYPES] and its template's types
+			if(!host.local_types_path.empty())
+				import_local_types(host.local_types_path);
 		}
+		load_local_types();
 		json::json_error_t err;
 		err.line = -1;
 		const json::Value c = json::load_string(authored.c_str(), &err);
@@ -4739,6 +4800,9 @@ struct Module: public interface::Module, public Interface
 		// [KIT] stage 5: and the installed packages'
 		for(const auto &pt : m_package_types)
 			palette_add(pt.first, true);
+		// [KIT_CUSTOM_TYPES] and the project's own
+		for(const auto &lt : m_local_types)
+			palette_add(lt.first, true);
 		std::sort(m_player_types.begin(), m_player_types.end());
 		ss_ names;
 		for(const ss_ &t : m_palette)
@@ -5343,6 +5407,431 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "Texture kit/up/%s.png (%ux%u, %zu bytes)", cs(hash), w,
 				h, png.size());
 		return "kit/up/"+hash+".png";
+	}
+
+	// ---- [KIT_CUSTOM_TYPES] The project's own types (api.h, "Custom
+	// types"): local/<name>, Kit's store's rows type:local/<name>, put and
+	// deleted by any builder ("kit:type", the agents' put_type and
+	// delete_type), each an undo. They run as a package's types do: the
+	// server part in the box, the client part in the clients' sandbox
+
+	void load_local_types()
+	{
+		for(const ss_ &k : m_kit_store->list("type:local/")){
+			ss_ row;
+			const ss_ name = k.substr(5);
+			const json::Value r = m_kit_store->get(k, row) ?
+					json::load_string(row.c_str()) : json::Value();
+			if(!r.is_object() || !local_refusal(name, jstr(r, "source"),
+					jstr(r, "client")).empty()){
+				log_w(MODULE, "The custom type %s: not a type's row", cs(name));
+				continue;
+			}
+			m_local_types[name] = r;
+		}
+		log_i(MODULE, "Custom types: %zu", m_local_types.size());
+	}
+
+	// [KIT_CUSTOM_TYPES] A fresh project's types from its template
+	// (Host::local_types_path): <name>.lua and its <name>.client.lua
+	void import_local_types(const ss_ &dir)
+	{
+		for(const auto &n : interface::fs::list_directory(dir)){
+			const size_t dot = n.name.find('.');
+			if(n.is_directory || dot == ss_::npos ||
+					n.name.substr(dot) != ".lua")
+				continue;
+			const ss_ name = "local/"+n.name.substr(0, dot);
+			const ss_ src = read_file(dir+"/"+n.name);
+			const ss_ client = read_file(dir+"/"+n.name.substr(0, dot)+
+					".client.lua");
+			const ss_ why = local_refusal(name, src, client);
+			if(!why.empty()){
+				log_w(MODULE, "The template's type %s: %s", cs(n.name), cs(why));
+				continue;
+			}
+			json::Value r = json::object();
+			r.set("source", src);
+			r.set("client", client);
+			r.set("by", "the template");
+			m_kit_store->set("type:"+name, r.stringify());
+			log_i(MODULE, "The template's type %s (%zu bytes)", cs(name),
+					src.size());
+		}
+	}
+
+	// "bike" is local/bike
+	static ss_ local_name(const ss_ &s)
+	{
+		return s.find('/') == ss_::npos ? "local/"+s.substr(0, 80) :
+				s.substr(0, 80);
+	}
+
+	// Why a custom type is not one to keep ("": it is)
+	ss_ local_refusal(const ss_ &name, const ss_ &source, const ss_ &client)
+	{
+		if(name.compare(0, 6, "local/") != 0 || !name_ok(name.substr(6)))
+			return "a custom type is local/<name>, its name 1 to 64 letters, "
+					"digits and _";
+		if(source.empty() || source.size() > MAX_LOCAL_SOURCE)
+			return "its server part: 1 to "+itos(MAX_LOCAL_SOURCE)+" bytes";
+		if(client.size() > MAX_LOCAL_CLIENT)
+			return "its client part: "+itos(MAX_LOCAL_CLIENT)+" bytes at most";
+		for(const ss_ *s : {&source, &client}){
+			if(!s->empty() && (*s)[0] == 27)
+				return "a precompiled chunk is refused";
+			if(s->find('\0') != ss_::npos)
+				return "a 0 byte in its source";
+		}
+		if(!m_local_types.count(name) &&
+				m_local_types.size() >= MAX_LOCAL_TYPES)
+			return itos(MAX_LOCAL_TYPES)+" custom types at most";
+		return "";
+	}
+
+	// Who may: a builder with the tools on, in the default round
+	ss_ local_rights(size_t peer)
+	{
+		auto pi = m_peers.find(peer);
+		if(!m_hosted)
+			return "Kit is not hosted";
+		if(pi == m_peers.end() || !can_edit(peer))
+			return "no edit rights here";
+		if(!pi->second.editing)
+			return "not in edit mode";
+		if(active_session())
+			return "in a session: the project's types are the default round's";
+		return "";
+	}
+
+	// A type's files: a custom type's, or any loaded one's (Kit's to read
+	// as examples)
+	bool get_local(const ss_ &name, json::Value &out, ss_ &why)
+	{
+		auto lt = m_local_types.find(name);
+		auto src = m_sources.find(name);
+		if(lt == m_local_types.end() && src == m_sources.end()){
+			why = "no type "+name.substr(0, 80)+" (list_types names them)";
+			return false;
+		}
+		auto ty = m_types.find(name);
+		out.set("type", name);
+		out.set("custom", lt != m_local_types.end());
+		out.set("source", lt != m_local_types.end() ? jstr(lt->second,
+				"source") : src->second);
+		out.set("client", lt != m_local_types.end() ? jstr(lt->second,
+				"client") : ty != m_types.end() ? ty->second.client : "");
+		if(lt != m_local_types.end())
+			out.set("by", jstr(lt->second, "by"));
+		return true;
+	}
+
+	// Where a type is in use (""): an entity of any round's, the start, a
+	// prefab, the controls' movement
+	// simplified: a prefab or the start naming it as a string anywhere (a
+	// parameter's value too) counts as a use
+	ss_ local_used(const ss_ &name)
+	{
+		ss_ where;
+		each_session([&]{
+			for(auto &e : m_entities)
+				for(const Instance &in : e.second.comps)
+					if(where.empty() && in.type == name)
+						where = "entity "+itos(e.first)+" has it";
+		});
+		const ss_ q = "\""+name+"\"";
+		if(where.empty() && m_start.stringify().find(q) != ss_::npos)
+			where = "the round's start has it";
+		for(auto &pf : m_prefabs)
+			if(where.empty() && pf.second.stringify().find(q) != ss_::npos)
+				where = "the prefab "+pf.first+" has it";
+		if(where.empty() && jstr(controls_params(), "movement") == name)
+			where = "kit/controls moves the players with it";
+		return where;
+	}
+
+	// row: {"source", "client", "by"}, or not an object to take it away.
+	// Installed at once, Running or not; refused, the version before
+	// stays (its error in the Log of each entity it is on). what: the
+	// edit's text
+	ss_ install_local(const ss_ &name, const json::Value &row, ss_ &what)
+	{
+		auto old = m_local_types.find(name);
+		const json::Value was = old == m_local_types.end() ? json::Value() :
+				old->second;
+		const int64_t old_version = m_types.count(name) ?
+				m_types[name].version : 0;
+		ss_ why;
+		// The client part's syntax, compiled in the box (never run there)
+		const ss_ client = row.is_object() ? jstr(row, "client") : "";
+		if(!client.empty()){
+			ss_ request = "C"+name+".client", answer;
+			request += '\0';
+			request += client;
+			if(!box_call(request, answer, why))
+				why = name+".client: "+why;
+		}
+		if(why.empty()){
+			m_types.erase(name);
+			m_sources.erase(name);
+			if(row.is_object())
+				m_local_types[name] = row;
+			else
+				m_local_types.erase(name);
+			if(row.is_object() && !load_type(name, why)){
+				m_types.erase(name);
+				m_sources.erase(name);
+				m_local_types.erase(name);
+				if(was.is_object()){
+					m_local_types[name] = was;
+					ss_ ignore;
+					if(!load_type(name, ignore))
+						log_w(MODULE, "%s as it was: %s", cs(name), cs(ignore));
+				}
+			}
+		}
+		if(!why.empty()){
+			each_session([&]{
+				for(auto &e : m_entities)
+					for(const Instance &in : e.second.comps)
+						if(in.type == name){
+							add_log(e.first, name+" not reloaded, the version "
+									"before runs: "+why);
+							break;
+						}
+			});
+			return why;
+		}
+		m_palette.erase(name);
+		if(row.is_object()){
+			m_kit_store->set("type:"+name, row.stringify());
+			palette_add(name, false);
+		} else {
+			m_kit_store->remove("type:"+name);
+			m_player_types.erase(std::remove(m_player_types.begin(),
+					m_player_types.end(), name), m_player_types.end());
+		}
+		const size_t reloaded = row.is_object() ?
+				local_reloaded(name, jstr(row, "by")) : 0;
+		json::Value parts = json::object();
+		parts.set(name, client);
+		each_session([&]{
+			network::access(m_server, [&](network::Interface *inetwork){
+				for(auto &p : m_peers)
+					inetwork->send(p.first, "kit:client_parts", parts.stringify());
+			});
+		});
+		// A new version: its authored instances made the new one's
+		// (entity_from_json() migrates them), as a package's upgrade
+		sv_<std::pair<uint64_t, json::Value>> change;
+		const int64_t version = m_types.count(name) ? m_types[name].version : 0;
+		for(auto &e : m_entities){
+			bool older = false;
+			for(const Instance &in : e.second.comps)
+				older = older || (in.type == name && in.version < version);
+			if(older && authored(e.second))
+				change.push_back(std::make_pair(e.first, entity_json(e.second)));
+		}
+		if(!change.empty())
+			commit(change, nullptr);
+		what = !row.is_object() ? "the type "+name+" deleted" :
+				(was.is_object() ? "the type "+name+" changed" : "the type "+name+
+				" put")+(version != old_version && old_version ? " (version "+
+				itos(old_version)+" to "+itos(version)+")" : ss_())+": "+
+				itos(jstr(row, "source").size())+" bytes"+(client.empty() ? ss_() :
+				", its client part "+itos(client.size()))+(reloaded ? ", "+
+				itos(reloaded)+" entities reloaded" : ss_());
+		send_state_all();
+		return "";
+	}
+
+	// The entities of a custom type just put, in every round: its new
+	// handlers from their next run, their params and their state kept (the
+	// new version's state keys added at their defaults), its errors
+	// forgotten, its look drawn again; the players' bodies on it step
+	// with it (step_bodies() and send_controls() see the new source)
+	size_t local_reloaded(const ss_ &name, const ss_ &by)
+	{
+		size_t n = 0;
+		each_session([&]{
+			for(auto &ep : m_entities){
+				Entity &e = ep.second;
+				bool on = false;
+				for(size_t i = 0; i < e.comps.size(); i++){
+					Instance &in = e.comps[i];
+					if(in.type != name)
+						continue;
+					on = true;
+					Instance d = in;
+					d.state = json::object();
+					state_defaults(d);
+					for(json::Iterator it(d.state); it; ++it)
+						if(in.state.get(it.key()).is_undefined())
+							in.state.set(it.key(), *it);
+					// Its params as the file has them: a new one at its
+					// default, one it no longer has or takes dropped
+					const json::Value &decl = m_types[name].decl.get("params");
+					sv_<ss_> gone;
+					for(json::Iterator it(in.params); it; ++it)
+						if(!decl.get(it.key()).is_object() ||
+								!check_param(decl.get(it.key()), *it).empty())
+							gone.push_back(it.key());
+					for(const ss_ &k : gone)
+						in.params.del_key(k);
+					if(decl.is_object())
+						for(json::Iterator it(decl); it; ++it)
+							if(in.params.get(it.key()).is_undefined())
+								in.params.set(it.key(), (*it).get("default"));
+					in.links.erase(std::remove_if(in.links.begin(),
+							in.links.end(), [&](const Link &l){
+						return !m_types[name].outputs.count(l.output);
+					}), in.links.end());
+					in.disabled.clear();
+					for(const ss_ &k : m_types[name].shared)
+						replicate_state(e, i, k);
+				}
+				if(!on)
+					continue;
+				n++;
+				add_log(e.id, name+" reloaded, "+by+"'s edit");
+				if(e.node && !wants_node(e)){
+					remove_node(e);
+					e.node = 0;
+				} else if(wants_node(e) && !e.node){
+					make_node(e);
+				} else if(e.node){
+					const ss_ show = show_of(e).stringify();
+					main_context::access(m_server, scene_of(e),
+							[&](magic::Scene *scene){
+						if(magic::Node *nd = scene->GetNode(e.node))
+							nd->SetVar(magic::StringHash("kit_show"),
+									magic::Variant(show.c_str()));
+					});
+				}
+			}
+			for(auto &bp : m_bodies)
+				if(bp.second.type == name)
+					bp.second.failed = false;
+			m_runtime_dirty = true;
+		});
+		return n;
+	}
+
+	// A put (client "" for none) or a delete (delete true) by builder p,
+	// one undo: what it did or why not
+	bool put_local(Peer &p, const ss_ &name, bool del, const ss_ &source,
+			const ss_ &client, ss_ &what, ss_ &why)
+	{
+		// A put that took long (a file that runs to the box's budget): the
+		// builder's next ones wait a while, so a loop of them does not
+		// hold the server
+		// simplified: by the clock, the builder's name
+		const int64_t now = interface::os::time_us();
+		auto slow = m_type_slow.find(p.name);
+		if(slow != m_type_slow.end() && now < slow->second){
+			why = "your last type took long to load: wait "+itos((slow->second -
+					now) / 1000000 + 1)+" s";
+			return false;
+		}
+		const bool had = m_local_types.count(name);
+		json::Value row;
+		if(del){
+			if(!had){
+				why = "no custom type "+name.substr(0, 80);
+				return false;
+			}
+			why = local_used(name);
+			if(!why.empty()){
+				why = name+" is in use: "+why;
+				return false;
+			}
+		} else {
+			why = local_refusal(name, source, client);
+			if(!why.empty())
+				return false;
+			row = json::object();
+			row.set("source", source);
+			row.set("client", client);
+			row.set("by", p.name);
+		}
+		const json::Value before = had ? m_local_types[name] : json::Value();
+		why = install_local(name, row, what);
+		// (a plain type loads in a few ms; a loop to the budget's end
+		// takes about 100, the box's restart after it as much again)
+		const int64_t took = interface::os::time_us() - now;
+		if(took > 50000)
+			m_type_slow[p.name] = interface::os::time_us() + 5 * took;
+		if(!why.empty())
+			return false;
+		std::deque<Change> &u = m_undo[p.name];
+		Change c;
+		c.local_type = name;
+		c.local_before = before;
+		u.push_back(c);
+		while(u.size() > UNDO_MAX)
+			u.pop_front();
+		log_i(MODULE, "An edit by %s: %s", cs(p.name), cs(what));
+		m_edit_what = what;
+		return true;
+	}
+	sm_<ss_, int64_t> m_type_slow;
+
+	// Its undo: the row before put back, or none
+	bool undo_local(const Change &c, Peer &p, ss_ &why)
+	{
+		if(!c.local_before.is_object()){
+			why = local_used(c.local_type);
+			if(!why.empty()){
+				why = c.local_type+" is in use: "+why;
+				return false;
+			}
+		}
+		ss_ what;
+		why = install_local(c.local_type, c.local_before, what);
+		if(!why.empty())
+			return false;
+		m_edit_what = "Undone: "+what+", "+itos(m_undo[p.name].size())+
+				" more to undo";
+		log_i(MODULE, "An undo by %s: %s", cs(p.name), cs(what));
+		return true;
+	}
+
+	// "kit:type": {"op": "get"|"put"|"delete", "name", "source", "client"}
+	// from a builder's editor (local_rights()); answered with "kit:type"
+	// {"op", "name", "ok", "what" | "why"}, a get's with its files
+	void on_type(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		const size_t peer = packet.sender;
+		const json::Value j = packet.data.size() <= MAX_TYPE_PACKET ?
+				json::load_string(packet.data.c_str()) : json::null();
+		const ss_ op = j.is_object() ? jstr(j, "op").substr(0, 16) : "";
+		const ss_ name = j.is_object() ? local_name(jstr(j, "name")) : "";
+		json::Value a = json::object();
+		a.set("op", op);
+		a.set("name", name);
+		ss_ why = j.is_object() ? local_rights(peer) : "not a JSON object of "
+				"at most "+itos(MAX_TYPE_PACKET)+" bytes";
+		ss_ what;
+		bool ok = false;
+		if(why.empty()){
+			Peer &p = m_peers[peer];
+			if(op == "get")
+				ok = get_local(name, a, why);
+			else if(op == "put" || op == "delete")
+				ok = put_local(p, name, op == "delete", jstr(j, "source"),
+						jstr(j, "client"), what, why);
+			else
+				why = "op: get, put or delete";
+		}
+		a.set("ok", ok);
+		if(!ok || op != "get")
+			a.set(ok ? "what" : "why", ok ? what : why);
+		log_i(MODULE, "A type %s (%s) by peer %zu %s%s", cs(op.empty() ? "?" :
+				op), cs(name), peer, ok ? "done" : "refused: ", cs(ok ? "" : why));
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:type", a.stringify());
+		});
 	}
 
 	// ---- Packages ([KIT] stage 5): api.h says what one is
@@ -6110,7 +6599,8 @@ struct Module: public interface::Module, public Interface
 				c.set("license_code", jstr(mf, "license_code"));
 				c.set("license_media", jstr(mf, "license_media"));
 			} else {
-				c.set("author", n);
+				// [KIT_CUSTOM_TYPES] "Built here by" them
+				c.set("author", n == "local" ? ss_("this project's builders") : n);
 				if(n == "kit" || n == m_author)
 					c.set("of", ss_(n == "kit" ? "kit" : "app"));
 			}
@@ -6125,7 +6615,8 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// {"op": "export"}: the builder's own prefabs and voxel types (under
-	// their name, not a package's) as a Kit package's files, answered with
+	// their name, not a package's), and the custom types the prefabs use
+	// (local/<n> made <author>/<n>), as a Kit package's files, answered with
 	// "kit:export", {"author", "files": {path: text}, "hex": {path: bytes
 	// as hex}, "dependencies": [{"kit", "version"}]}: the packages their
 	// prefabs' types came in, at the versions here
@@ -6140,7 +6631,7 @@ struct Module: public interface::Module, public Interface
 					"is \""+p.name.substr(0, 64)+"\"");
 		json::Value files = json::object(), hex = json::object(),
 				deps = json::array();
-		std::set<ss_> dep_names;
+		std::set<ss_> dep_names, locals;
 		sm_<ss_, json::Value> pfs;
 		for(const ss_ &k : m_store->list("prefab:"+author+"/")){
 			ss_ src;
@@ -6155,6 +6646,10 @@ struct Module: public interface::Module, public Interface
 					auto pt = m_package_types.find(jstr(cs_.at(c), "type"));
 					if(pt != m_package_types.end())
 						dep_names.insert(jstr(pt->second, "package"));
+					// [KIT_CUSTOM_TYPES] the project's own go along, its
+					// author's from then on
+					if(m_local_types.count(jstr(cs_.at(c), "type")))
+						locals.insert(jstr(cs_.at(c), "type").substr(6));
 				}
 			}
 			// [KIT_PREFAB_VOXELS] its voxels' packages too
@@ -6179,6 +6674,14 @@ struct Module: public interface::Module, public Interface
 						"by two keys");
 			authors[n.substr(0, n.find('/'))] = da;
 			named.insert(da);
+		}
+		if(!locals.empty())
+			authors["local"] = author;
+		for(const ss_ &n : locals){
+			const json::Value &lt = m_local_types["local/"+n];
+			files.set("types/"+n+".lua", jstr(lt, "source"));
+			if(!jstr(lt, "client").empty())
+				files.set("types/"+n+".client.lua", jstr(lt, "client"));
 		}
 		for(auto &pf : pfs){
 			resolve_names(pf.second, authors);
@@ -26220,6 +26723,14 @@ struct Module: public interface::Module, public Interface
 				"inputs and outputs (their values' types) and what each does.",
 				R"J({"type": "object", "properties": {"type": {"type": "string",
 				"description": "A type, as \"kit/counter\""}}})J", ""},
+			// [KIT_CUSTOM_TYPES]
+			{"get_type", "=type", "A type's files: {type, custom, source, "
+				"client (its client part, \"\" none)}, a custom type's by (who "
+				"put it last). Kit's own read as examples: kit/counter, kit/timer, "
+				"kit/door, kit/walker (a movement), kit/ball (a seat that rolls).",
+				R"J({"type": "object", "properties": {"type": {"type": "string",
+				"description": "As \"kit/counter\"; \"bike\" is local/bike"}},
+				"required": ["type"]})J", ""},
 			// The reads (agent_read())
 			{"get_guide", "=guide", "How Kit's compositions are built and run, "
 				"and every type of this server's with its inputs, outputs and "
@@ -26390,6 +26901,53 @@ struct Module: public interface::Module, public Interface
 					"minItems": 3, "maxItems": 3, "description": "[1, 1, 1] unless given"},
 				"param": {"type": "integer"}, "tint": {"type": "integer"}},
 				"required": ["voxel", "at"]})J", ""},
+			// [KIT_CUSTOM_TYPES]
+			{"put_type", "type_put", "Puts a custom type of this project's, "
+				"local/<name> (any builder edits any; one undo), loaded at once, "
+				"Running or not. Its error (syntax, load) is the answer and the "
+				"version before runs on. Taken, the entities on it keep their "
+				"params and state and run its new handlers; a movement's bodies "
+				"step with its new step. source: Lua 5.1 run in Kit's box (base, "
+				"string, table, math; no os, io, require, pcall or loadstring), "
+				"returning a table: version = n (raise it to migrate placed "
+				"ones: migrate(params, from)); about = {what, group = \"Logic\" "
+				"(or World, Building, Game, Players, Vehicles, Items, UI), inputs "
+				"= {name = \"what it does\"}, outputs = {...}}; params = {name = "
+				"{type = \"number\"|\"string\"|\"bool\"|\"voxel\"|\"entity\"|"
+				"\"position\", default, min, max, choices = {...}}}; state = {name "
+				"= {default, shared = true (sent to the clients)}}; inputs = {name "
+				"= \"none\"|\"number\"|\"string\"|\"bool\"|\"entity\"|\"position\"|"
+				"\"any\"}, outputs likewise; usable = true (players use it: "
+				"on_use); look = {shape = \"box\"|\"sphere\", size = n or {x, y, z}, "
+				"color = \"#rrggbb\", solid = true, text = \"<shared state key>\"}. "
+				"Handlers: on_start(c) (the round starts or it is placed "
+				"Running), on_input(c, input, value, by), on_use(c, by), "
+				"on_timer(c, name), on_params(c, changed), on_remove(c). c: c.id, "
+				"c.pos, c.params, c.state (read and write), c:emit(output, value), "
+				"c:after(seconds, name) (then on_timer), c:log(...) (get_log), "
+				"c:name(by), c:teleport({x, y, z}) (who set the run off). A "
+				"movement (a seat's: seat = true, usable = true): movement = {body = {r = 0.45, h = 1.7, eye = 1.55}, "
+				"camera = \"chase\"} and step = function(s, i, dt, w, p): s its "
+				"state (s.pos {x, y, z} the feet, s.vel, kept between steps), i "
+				"the input (i.f, i.r forward and right -1...1, i.jump 1 held, "
+				"i.yaw degrees), w the world (w:move({x, y, z, r, h}, dx, dy, dz, "
+				"step_up) -> mx, my, mz, hits; w.sin, w.cos, w.sqrt, w.PI), p its "
+				"params; it runs on the server and on each client (get_type "
+				"kit/ball). client: an optional client part the clients run "
+				"(sandboxed): a table of on_add(e), on_state(e, key), "
+				"on_update(e, dt), on_remove(e); e.state, e.node, e:log(text).",
+				R"J({"type": "object", "properties": {
+				"name": {"type": "string", "description":
+					"local/<name> or <name>: letters, digits and _"},
+				"source": {"type": "string", "description":
+					"The type's file, 64 KiB at most"},
+				"client": {"type": "string", "description":
+					"Its client part (\"\" or left out: none), 32 KiB at most"}},
+				"required": ["name", "source"]})J", ""},
+			{"delete_type", "type_delete", "Deletes a custom type nothing uses "
+				"(no entity, prefab or round's start has it). One undo.",
+				R"J({"type": "object", "properties": {"name": {"type": "string"}},
+				"required": ["name"]})J", ""},
 			{"new_scene", "new_scene", "Makes a scene (letters, digits and _) "
 				"and takes your edits there; copy: true copies your scene's "
 				"World into it.",
@@ -26728,6 +27286,15 @@ struct Module: public interface::Module, public Interface
 			return agent_read(p, peer, op, a, failed);
 		if(op == "set_voxel")
 			return agent_voxels(p, peer, a, failed);
+		// [KIT_CUSTOM_TYPES] outside kit:edit (its 4096 bytes)
+		if(op == "type_put" || op == "type_delete"){
+			ss_ what, why;
+			m_edit_what.clear();
+			failed = !put_local(p, local_name(jstr(a, "name")),
+					op == "type_delete", jstr(a, "source"), jstr(a, "client"),
+					what, why);
+			return failed ? "Refused: "+why : what;
+		}
 		// The edit as an editor's client sends it
 		json::Value e = t.defaults[0] ? json::load_string(t.defaults) :
 				json::object();
@@ -26887,6 +27454,9 @@ struct Module: public interface::Module, public Interface
 				if(!d.get(k).is_undefined())
 					o.set(k, d.get(k));
 			o.set("addable", addable(type));
+			// [KIT_CUSTOM_TYPES] the project's own (get_type, put_type)
+			if(m_local_types.count(type))
+				o.set("custom", true);
 			return o.stringify();
 		}
 		json::Value list = json::array();
@@ -26896,6 +27466,8 @@ struct Module: public interface::Module, public Interface
 			o.set("type", t);
 			o.set("group", jstr(about, "group"));
 			o.set("what", jstr(about, "what"));
+			if(m_local_types.count(t))
+				o.set("custom", true);
 			list.append(o);
 		}
 		return list.stringify();
@@ -26917,6 +27489,15 @@ struct Module: public interface::Module, public Interface
 			return agent_state(p);
 		if(op == "=types")
 			return agent_types(jstr(a, "type"), failed);
+		if(op == "=type"){
+			json::Value o = json::object();
+			ss_ why;
+			if(!get_local(local_name(jstr(a, "type")), o, why)){
+				failed = true;
+				return why;
+			}
+			return o.stringify();
+		}
 		if(op == "=guide")
 			return agent_guide(p.name, true);
 		if(op == "=goals")
@@ -27290,6 +27871,10 @@ struct Module: public interface::Module, public Interface
 			"names them and yours (where you edit); switch_scene, new_scene. "
 			"move, rename, set_parent, duplicate, delete edit entities; "
 			"get_goal_warnings checks kit/goal chains.\n"
+			"- Custom types: put_type writes a type of this project's own, "
+			"local/<name> (its description says the file), live at once; "
+			"get_type reads any type's file (Kit's are examples), "
+			"delete_type takes one away.\n"
 			"- Work in small steps and read back: get_state (or list_types) "
 			"first, then place, set_param, link, start, try_input, get_events "
 			"and get_log, stop, fix, again. An edit's arguments are 4 KB at "
@@ -27326,7 +27911,8 @@ struct Module: public interface::Module, public Interface
 				const json::Value &ps = ty.decl.get("params");
 				for(json::Iterator it(ps); ps.is_object() && it; ++it)
 					params += (params.empty() ? "" : ", ")+it.key();
-				s += "- "+t+(addable(t) ? " (addable)" : "")+": "+
+				s += "- "+t+(addable(t) ? " (addable)" : "")+
+						(m_local_types.count(t) ? " (custom)" : "")+": "+
 						jstr(ty.decl.get("about"), "what");
 				for(auto &k : {std::make_pair(" In: ", ports(ty.in_types)),
 						std::make_pair(" Out: ", ports(ty.out_types)),
@@ -29424,6 +30010,15 @@ struct Module: public interface::Module, public Interface
 						"again yet");
 			const Change c = u.back();
 			u.pop_back();
+			// [KIT_CUSTOM_TYPES] a custom type's put or delete: the version
+			// before back (kept to undo if refused)
+			if(!c.local_type.empty()){
+				if(!undo_local(c, p, why)){
+					m_undo[p.name].push_back(c);
+					return refuse(why);
+				}
+				return;
+			}
 			// [KIT_HEIGHTMAP_REGEN_LOSS] a regeneration of all: the
 			// heightmap before it back
 			if(c.hm_restore){

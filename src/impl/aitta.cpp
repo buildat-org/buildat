@@ -31,6 +31,7 @@
 #include <cctype>
 #include <cstring>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <tuple>
 
@@ -642,9 +643,31 @@ ss_ find_base(const json::Value &m, const ss_ &app_dir,
 }
 
 // [KIT_TEMPLATES] What a template's directory has to hold: its composition,
-// and a licence file of its own (its content's, not the engine's)
+// and a licence file of its own (its content's, not the engine's).
+// [KIT_CUSTOM_TYPES] Its own types in types/, <name>.lua and its
+// <name>.client.lua (Kit's caps: 64 of them, 64 and 32 KiB), the project's
+// local/<name> once made from it
 ss_ template_refusal(const ss_ &dir)
 {
+	std::set<ss_> own;
+	for(const fs::Node &n : fs::list_directory(dir+"/types")){
+		const size_t dot = n.name.find('.');
+		const ss_ ext = dot == ss_::npos ? "" : n.name.substr(dot);
+		const ss_ base = n.name.substr(0, dot);
+		if(n.is_directory || (ext != ".lua" && ext != ".client.lua") ||
+				!plain_name(base, false))
+			return "a template's types/ holds <name>.lua and <name>.client.lua "
+					"only, a name lowercase letters, digits and _: "+
+					n.name.substr(0, 60);
+		if(fs::file_size(dir+"/types/"+n.name) > (uint64_t)(ext == ".lua" ?
+				64 : 32) << 10)
+			return "types/"+n.name+": past "+(ext == ".lua" ? "64" : "32")+
+					" KiB";
+		if(ext == ".lua")
+			own.insert(base);
+	}
+	if(own.size() > 64)
+		return "a template has 64 types at most";
 	json::json_error_t e;
 	const json::Value c = json::load_file((dir+"/composition.json").c_str(), &e);
 	const json::Value &es = c.get("entities");
@@ -655,9 +678,12 @@ ss_ template_refusal(const ss_ &dir)
 		const json::Value &cs = es.at(i).get("components");
 		for(unsigned k = 0; cs.is_array() && k < cs.size(); k++){
 			const json::Value &t = cs.at(k).get("type");
-			if(!t.is_string() || t.as_string().compare(0, 4, "kit/") != 0)
-				return "a template uses Kit's own types only, kit/<name>: "+
-						(t.is_string() ? t.as_string().substr(0, 60) : ss_("no type"));
+			const ss_ s = t.is_string() ? t.as_string() : "";
+			if(s.compare(0, 4, "kit/") != 0 && !(s.compare(0, 6, "local/") == 0 &&
+					own.count(s.substr(6))))
+				return "a template uses Kit's own types, kit/<name>, and its "
+						"own, local/<name> with types/<name>.lua: "+
+						(t.is_string() ? s.substr(0, 60) : ss_("no type"));
 		}
 	}
 	for(const fs::Node &n : fs::list_directory(dir))
