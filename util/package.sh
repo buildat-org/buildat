@@ -163,9 +163,13 @@ smoke_test_wine() {
 	local dir
 	dir=$(mktemp -d "/tmp/buildat_package_smoke_test_wine.XXXXXX")
 	PKG_TMP_DIRS="$PKG_TMP_DIRS $dir"
-	(cd "$dir" && unzip -q "$archive")
+	# Under a directory with a space, as an alpha installs ("Buildat
+	# Alpha") and a user's name may have: the compiler's command line split
+	# such a path, and no module built ([WIN_INSTALL_SPACE])
+	mkdir "$dir/with space"
+	(cd "$dir/with space" && unzip -q "$archive")
 	local unpacked
-	unpacked=$(ls -d "$dir"/*/ | head -1)
+	unpacked=$(ls -d "$dir/with space"/*/ | head -1)
 	local port=$(( 29600 + (RANDOM % 90) ))
 	echo "smoke test under Wine in $unpacked"
 	export WINEDEBUG=-all WINEPREFIX="$dir/wine"

@@ -319,7 +319,8 @@ static bool check_path(const core::Config &config, const PathDefinition &def,
 		}
 		return ok;
 	} else if(def.type == PD_RUN){
-		bool ok = check_runnable(base_path + def.check_path);
+		bool ok = check_runnable(
+				interface::process::quote_arg(base_path) + def.check_path);
 		if(!ok && log_issues){
 			log_e(MODULE, "%s not runnable in %s=[%s]",
 					def.description, def.path_name, cs(base_path));

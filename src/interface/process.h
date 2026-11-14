@@ -24,6 +24,12 @@ namespace interface
 		int shell_exec(const std::string &command,
 				const ExecOptions &opts = ExecOptions());
 
+		// One argument of shell_exec()'s command line, quoted as the
+		// platform reads it back: sh's single quotes, or the double quotes
+		// of Windows' argv rules. A path with a space in it ("Buildat
+		// Alpha", a user's name) was split into two ([WIN_INSTALL_SPACE]).
+		std::string quote_arg(const std::string &arg);
+
 		// The system's opener on a link or a folder: ShellExecute on
 		// Windows (no cmd.exe; its "start" is not a program), open on
 		// macOS, xdg-open elsewhere, not waited for. False where it could

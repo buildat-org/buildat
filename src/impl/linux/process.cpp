@@ -65,6 +65,14 @@ int shell_exec(const ss_ &command, const ExecOptions &opts)
 	return exit_status;
 }
 
+ss_ quote_arg(const ss_ &arg)
+{
+	ss_ r = "'";
+	for(char c : arg)
+		r += c == '\'' ? ss_("'\\''") : ss_(1, c);
+	return r+"'";
+}
+
 bool open_with_system(const ss_ &target)
 {
 	if(target.find_first_of("'\"") != ss_::npos)
