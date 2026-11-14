@@ -27,6 +27,7 @@
 #include "interface/debug.h"
 #include "interface/select_handler.h"
 #include "interface/os.h"
+#include "interface/process.h"
 #include <iostream>
 #include <algorithm>
 #include <fstream>
@@ -1074,7 +1075,7 @@ struct CState: public State, public interface::Server
 		{
 			ss_ exe_path = interface::os::get_current_exe_path();
 			ss_ exe_dir = interface::fs::strip_file_name(exe_path);
-			extra_ldflags += " -L\""+exe_dir+"\"";
+			extra_ldflags += " -L"+interface::process::quote_arg(exe_dir);
 		}
 #endif
 		log_d(MODULE, "extra_cxxflags: %s", cs(extra_cxxflags));
@@ -1120,7 +1121,8 @@ struct CState: public State, public interface::Server
 			}
 			for(const ss_ &p : sources){
 				const bool c = p.size() > 2 && p.compare(p.size() - 2, 2, ".c") == 0;
-				extra_cxxflags += c ? " -x c "+p+" -x none" : " "+p;
+				const ss_ q = interface::process::quote_arg(p);
+				extra_cxxflags += c ? " -x c "+q+" -x none" : " "+q;
 				files_to_hash.push_back(p);
 				for(const ss_ &i : list_includes(p, include_dirs))
 					files_to_hash.push_back(i);
