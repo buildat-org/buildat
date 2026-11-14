@@ -5442,9 +5442,18 @@ struct Module: public interface::Module, public Interface
 					n.name.substr(dot) != ".lua")
 				continue;
 			const ss_ name = "local/"+n.name.substr(0, dot);
+			// Regular files only (file_size() is 0 for a link or anything
+			// else, as aitta's template_refusal() says at pack and install)
+			const ss_ cp = dir+"/"+n.name.substr(0, dot)+".client.lua";
+			const bool has_client = interface::fs::path_exists(cp);
+			if(interface::fs::file_size(dir+"/"+n.name) == 0 ||
+					(has_client && interface::fs::file_size(cp) == 0)){
+				log_w(MODULE, "The template's type %s: refused, not a regular "
+						"file of some bytes (or its client part not)", cs(n.name));
+				continue;
+			}
 			const ss_ src = read_file(dir+"/"+n.name);
-			const ss_ client = read_file(dir+"/"+n.name.substr(0, dot)+
-					".client.lua");
+			const ss_ client = has_client ? read_file(cp) : "";
 			const ss_ why = local_refusal(name, src, client);
 			if(!why.empty()){
 				log_w(MODULE, "The template's type %s: %s", cs(n.name), cs(why));
@@ -5504,13 +5513,15 @@ struct Module: public interface::Module, public Interface
 		return "";
 	}
 
-	// A type's files: a custom type's, or any loaded one's (Kit's to read
-	// as examples)
+	// A type's files: a custom type's, Kit's own (examples) or an installed
+	// package's; never the app's own (its logic may be private)
 	bool get_local(const ss_ &name, json::Value &out, ss_ &why)
 	{
 		auto lt = m_local_types.find(name);
 		auto src = m_sources.find(name);
-		if(lt == m_local_types.end() && src == m_sources.end()){
+		if(lt == m_local_types.end() && (src == m_sources.end() ||
+				(name.compare(0, 4, "kit/") != 0 &&
+				!m_package_types.count(name)))){
 			why = "no type "+name.substr(0, 80)+" (list_types names them)";
 			return false;
 		}
@@ -26820,7 +26831,8 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {"type": {"type": "string",
 				"description": "A type, as \"kit/counter\""}}})J", ""},
 			// [KIT_CUSTOM_TYPES]
-			{"get_type", "=type", "A type's files: {type, custom, source, "
+			{"get_type", "=type", "A type's files (Kit's own, an installed "
+				"package's or a custom one's): {type, custom, source, "
 				"client (its client part, \"\" none)}, a custom type's by (who "
 				"put it last). Kit's own read as examples: kit/counter, kit/timer, "
 				"kit/door, kit/walker (a movement), kit/ball (a seat that rolls).",
@@ -27022,7 +27034,8 @@ struct Module: public interface::Module, public Interface
 				"c.pos, c.params, c.state (read and write), c:emit(output, value), "
 				"c:after(seconds, name) (then on_timer), c:log(...) (get_log), "
 				"c:name(by), c:teleport({x, y, z}) (who set the run off). A "
-				"movement (a seat's: seat = true, usable = true): movement = {body = {r = 0.45, h = 1.7, eye = 1.55}, "
+				"movement (a seat's: seat = true, usable = true; or kit/controls' "
+				"movement): movement = {body = {r = 0.45, h = 1.7, eye = 1.55}, "
 				"camera = \"chase\"} and step = function(s, i, dt, w, p): s its "
 				"state (s.pos {x, y, z} the feet, s.vel, kept between steps), i "
 				"the input (i.f, i.r forward and right -1...1, i.jump 1 held, "
@@ -27969,7 +27982,7 @@ struct Module: public interface::Module, public Interface
 			"get_goal_warnings checks kit/goal chains.\n"
 			"- Custom types: put_type writes a type of this project's own, "
 			"local/<name> (its description says the file), live at once; "
-			"get_type reads any type's file (Kit's are examples), "
+			"get_type reads a type's file (Kit's are examples), "
 			"delete_type takes one away.\n"
 			"- Work in small steps and read back: get_state (or list_types) "
 			"first, then place, set_param, link, start, try_input, get_events "

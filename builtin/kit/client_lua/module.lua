@@ -182,7 +182,8 @@ end
 -- playing were discarded." (who built how many when others did too), and
 -- for a builder "Keep them" (the tools' panel has it until the next Play).
 -- For a drive (doc/client_commands.txt's event): "event kit_edit <json>"
--- sends an edit as the editor would, "event kit_use <id>" a use.
+-- sends an edit as the editor would, "event kit_use <id>" a use,
+-- "event kit_type <json>" a custom type's "kit:type".
 local replicate = require("buildat/extension/replicate")
 local P = {nodes = {}, items = "", parts = {}, you = 0, preview = {},
 	pose = {}}
@@ -1246,6 +1247,11 @@ magic.SubscribeToEvent("command_seq:kit_edit", function(_, data)
 	local text = data:GetString("Param")
 	log:info("kit editor: sent " .. text)
 	buildat.send_packet("kit:edit", text)
+end)
+-- [KIT_CUSTOM_TYPES] "event kit_type <json>": a "kit:type" as the editor's,
+-- from any client (a check's refusals)
+magic.SubscribeToEvent("command_seq:kit_type", function(_, data)
+	buildat.send_packet("kit:type", data:GetString("Param"))
 end)
 magic.SubscribeToEvent("command_seq:kit_use", function(_, data)
 	M.use(data:GetString("Param"))

@@ -4,19 +4,20 @@
 # cost: ~2 min (2026-11-15)
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/client_lua/editor.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/field_entry.lua src/impl/aitta.cpp apps/workbench/main/main.cpp
 # [KIT_CUSTOM_TYPES] A project's own types, local/<name>, on Workbench; one
-# server, kitboss (the admin) on a headless weston's Xwayland of the check's
+# server, kitboss (the admin) and kitbob on a headless weston's Xwayland of the check's
 # own (its clipboard carries the agent token):
 #   0. a template carrying its own types (types/lamp.lua with a client part,
 #      types/chair.lua, a seat whose movement says its version in s.jumps)
 #      packed and installed (`buildat aitta pack`, `install`); one with a
-#      types/ name that is not plain, and one using a local/ type it lacks,
-#      refused at pack;
+#      types/ name that is not plain, one using a local/ type it lacks and
+#      one with a link in types/, refused at pack;
 #   1. New from it: its types imported, the lamp's client part run;
 #   2. the editor's "New type...": the name typed, Save, the type in the
 #      palette and armed (new_type.png, palette.png);
 #   3. an agent's token by My account, then the MCP tools: list_types and the
 #      guide say custom; get_type round-trips the template's files and reads
-#      Kit's; names, sizes and bytecode refused; a type of 6 KB (past the
+#      Kit's, not the app's own (workbench/secret, BUILDAT_WORKBENCH_TYPES);
+#      names, sizes and bytecode refused; a type of 6 KB (past the
 #      edit packet's 4096 bytes) put, placed, linked from a timer and Run;
 #      put again while Running: its count kept, the new on_input counting;
 #      a syntax error, a load error and a broken client part refused with
@@ -27,10 +28,14 @@
 #      kit:type (edit_type.png);
 #   5. the chair used: the client's body steps with version 1, the agent
 #      puts version 2, the body steps with it (the client takes the new
-#      movement) and the server says the entity reloaded;
+#      movement) and the server says the entity reloaded; the chair in
+#      kit/controls' movement list;
 #   6. delete_type refused while in use, then done; a define that never
 #      ends refused (the box's budget), the agent's next put held back, the
-#      server and the other types fine.
+#      server and the other types fine;
+#   7. kitbob, no builder (registration open): his kit:type put and get
+#      refused, and his agent's token gets no put_type, get_type or
+#      delete_type.
 # Screenshots, kept with KEEP_TMP=1: $t/new_type.png, $t/palette.png,
 # $t/edit_type.png
 #   util/kit_custom_types_check.sh
@@ -128,7 +133,10 @@ refused "$t/bad1" "types/ holds <name>.lua and <name>.client.lua only"
 cp -r "$d0" "$t/bad2"
 sed -i 's|"local/chair"|"local/sofa"|' "$t/bad2/composition.json"
 refused "$t/bad2" "its own, local/<name> with types/<name>.lua"
-echo "ok: the template packed and installed with its types; the bad ones refused"
+cp -r "$d0" "$t/bad3"
+ln -sf "$t/key" "$t/bad3/types/lamp.lua"
+refused "$t/bad3" "types/lamp.lua: not a regular file of some bytes (a link is refused)"
+echo "ok: the template packed and installed with its types; the bad ones (a link too) refused"
 
 sock=buildat-types-$$
 weston --backend=headless --xwayland --socket=$sock --width=1100 \
@@ -140,8 +148,16 @@ for i in $(seq 50); do
 	sleep 0.2
 done
 [ -n "$d" ] || fail "weston's Xwayland ($t/weston.log)"
-SL=$t/srv.log CL=$t/boss.log
+SL=$t/srv.log CL=$t/boss.log FD=3
 mark() { wc -c < "$1"; }
+as() # <boss|bob>: the client the next commands drive
+{
+	if [ "$1" = bob ]; then
+		CL=$t/bob.log CLIENT=$BOB FD=4
+	else
+		CL=$t/boss.log CLIENT=$BOSS FD=3
+	fi
+}
 await() # <log> <offset> <seconds> <regex>
 {
 	local i
@@ -152,7 +168,7 @@ await() # <log> <offset> <seconds> <regex>
 	done
 	fail "no \"$4\" in $1 in $3 s ($SL, $CL)"
 }
-cmd() { printf '%s\n' "$@" >&3; }
+cmd() { printf '%s\n' "$@" >&$FD; }
 step() # <seconds> <regex in the client's log> <command>...
 {
 	local s=$1 re=$2 m
@@ -161,6 +177,11 @@ step() # <seconds> <regex in the client's log> <command>...
 	cmd "$@"
 	await "$CL" "$m" "$s" "$re"
 }
+# An app's own type: listed, its file not served (an app's logic may be private)
+mkdir -p "$t/user/apps/workbench/check_types"
+echo 'return {version = 1, look = {shape = "box", size = 0.2}} -- secret' \
+	> "$t/user/apps/workbench/check_types/secret.lua"
+export BUILDAT_WORKBENCH_TYPES=$t/user/apps/workbench/check_types
 start_server "$SL" "Listening at" 300 auto \
 	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 \
 	--sim-rate "$CHECK_RATE" || fail "the server did not come up ($SL)"
@@ -168,17 +189,23 @@ CHECK_PIDS+=($SERVER_PID)
 wait_for_log "$SL" "setup code [A-Z0-9]+" 30
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$SL" | head -1)
 [ -n "$code" ] || fail "no setup code ($SL)"
-mkfifo "$t/cmd"
-sleep 900 > "$t/cmd" &
-CHECK_PIDS+=($!)
-DISPLAY=$d WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 BUILDAT_JOIN_NAME=kitboss \
-	BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
-	timeout 600 bin/buildat -C "$t/client_cache" -D "$t/cu" \
-	-s localhost:$SERVER_PORT -w 1024x700 -l 3 -o sound_mute=1 -c - \
-	< "$t/cmd" > "$CL" 2>&1 &
-CLIENT=$!
-CHECK_PIDS+=($CLIENT)
-exec 3> "$t/cmd"
+client() # <name>: its commands from the fifo $t/<name>.cmd, its log $t/<name>.log
+{
+	mkfifo "$t/$1.cmd"
+	sleep 900 > "$t/$1.cmd" &
+	CHECK_PIDS+=($!)
+	DISPLAY=$d WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 BUILDAT_JOIN_NAME=kit$1 \
+		timeout 600 bin/buildat -C "$t/client_cache_$1" -D "$t/cu_$1" \
+		-s localhost:$SERVER_PORT -w 1024x700 -l 3 -o sound_mute=1 -c - \
+		< "$t/$1.cmd" > "$t/$1.log" 2>&1 &
+	CHECK_PIDS+=($!)
+}
+# (registration open for kitbob, who is no builder)
+BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
+	BUILDAT_JOIN_ADMIN="setting open_registration on" client boss
+BOSS=$!
+exec 3> "$t/boss.cmd"
+as boss
 await "$CL" 0 120 "Joined as kitboss"
 cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
 # 1. New from the template
@@ -223,22 +250,28 @@ menu() # Escape until the pause menu is up (the editor's own Escapes first)
 	done
 	fail "no pause menu ($CL)"
 }
-menu
-step 10 "accounts: agents: 0 tokens, on" "frames 3" 'click Button "My account*"' \
-	"frames 5" 'click Button "Connect an agent..."'
-step 10 "accounts: agents: a token made, builder" "frames 3" 'click Button "Make a token"'
-step 10 "accounts: agents: the block copied" "frames 3" 'click Button "Copy"'
-for i in $(seq 50); do
-	block=$(DISPLAY=$d xclip -selection clipboard -o 2>/dev/null)
-	case $block in *"Bearer bat_"*) break;; esac
-	sleep 0.2
-done
-url=$(grep -aoP '^Server: \K\S+' <<< "$block")
-tok=$(grep -aoP 'Bearer \Kbat_[0-9a-f]{64}' <<< "$block" | head -1)
-[ -n "$url" ] && [ -n "$tok" ] || fail "no token on the clipboard: $block"
-cmd "frames 3" 'click Button "Done"'
-step 10 "pause: the menu shown" "frames 3" "keypress Escape"
-step 10 "pause: the menu closed" "frames 3" "keypress Escape"
+token() # the driven client's agent token, by My account, into $tok
+{
+	local i block old=${tok:-}
+	menu
+	step 10 "accounts: agents: 0 tokens, on" "frames 3" 'click Button "My account*"' \
+		"frames 5" 'click Button "Connect an agent..."'
+	step 10 "accounts: agents: a token made, builder" "frames 3" 'click Button "Make a token"'
+	step 10 "accounts: agents: the block copied" "frames 3" 'click Button "Copy"'
+	for i in $(seq 50); do
+		block=$(DISPLAY=$d xclip -selection clipboard -o 2>/dev/null)
+		tok=$(grep -aoP 'Bearer \Kbat_[0-9a-f]{64}' <<< "$block" | head -1)
+		[ -n "$tok" ] && [ "$tok" != "$old" ] && break
+		sleep 0.2
+	done
+	url=$(grep -aoP '^Server: \K\S+' <<< "$block")
+	[ -n "$url" ] && [ -n "$tok" ] && [ "$tok" != "$old" ] ||
+		fail "no new token on the clipboard: $block"
+	cmd "frames 3" 'click Button "Done"'
+	step 10 "pause: the menu shown" "frames 3" "keypress Escape"
+	step 10 "pause: the menu closed" "frames 3" "keypress Escape"
+}
+token
 cat > "$t/mcp.py" <<'PY'
 import json, re, sys, time, urllib.error, urllib.request
 phase, url, tok, tmpl = sys.argv[1:5]
@@ -332,6 +365,8 @@ if phase == "main":
     k = json.loads(call("get_type", {"type": "kit/counter"}))
     assert k["custom"] is False and "on_input" in k["source"], k
     call("get_type", {"type": "nope"}, error=True)
+    assert "workbench/secret" in [t["type"] for t in json.loads(call("list_types"))]
+    assert call("get_type", {"type": "workbench/secret"}, error=True).startswith("no type")
     # Refused, before anything is run
     ok = "return {version = 1}"
     for args, why in (
@@ -403,10 +438,23 @@ elif phase == "seat":
     r = call("put_type", {"name": "chair", "source": ch["source"].replace(
         "s.jumps = 1", "s.jumps = 2")})
     assert r.endswith(", 1 entities reloaded"), r
+elif phase == "controls":
+    # A custom movement is kit/controls' movement too
+    C = placed(call("place", {"type": "kit/controls", "pos": [0, 1, 0]}))
+    assert "local/chair" in call("set_param", {"id": C, "param": "movement",
+        "value": "local/chair"})
+    json.dump(dict(ids(), C=C), open(tmpl + "/../ids.json", "w"))
+elif phase == "bob":
+    # No builder: his agent gets nothing
+    for name, args in (("put_type", {"name": "bob_type", "source": "return {version = 1}"}),
+            ("get_type", {"type": "lamp"}), ("delete_type", {"name": "lamp"})):
+        assert "No edit rights here" in call(name, args, error=True)
 elif phase == "end":
     B = ids()["B"]
     T = ids()["T"]
     assert call("stop").startswith("Ended")
+    if any(e["id"] == ids()["C"] for e in state()["entities"]):
+        call("delete", {"id": ids()["C"]})
     # A param the file no longer has: dropped from the entity, the round's
     # start still loading
     knob = "return {version = 1, look = {shape = \"box\", size = 0.2}, params = {%s}}"
@@ -483,15 +531,49 @@ grep -aq "An edit by kitboss's agent: the type local/chair changed: [0-9]* bytes
 step 10 "kit: controls: camera [a-z_]+, pointer crosshair, movement kit/walker" "frames 3" "keypress F"
 step 10 "kit editor: edit mode on" "frames 3" "keypress F6"
 echo "ok: the chair's body stepped with its new version"
+# (and it is in kit/controls' movement list)
+mcp controls
+C=$(grep -aoP '"C": \K[0-9]+' "$t/tmpl/ids.json")
+step 10 "kit editor: the movements: .*local/chair" "event kit_select $C"
+echo "ok: local/chair in kit/controls' movement list"
 # 6. Deleted, and one that never ends
 mcp end
 grep -aq "A new box after: past its budget" "$SL" || fail "no new box after the endless one ($SL)"
-cmd "sync 2000" quit
-exec 3>&-
-wait $CLIENT 2>/dev/null
+# 7. kitbob, no builder: his kit:type refused, and his agent's tools
+boss_tok=$tok
+BUILDAT_JOIN_CREATE=1 client bob
+BOB=$!
+exec 4> "$t/bob.cmd"
+as bob
+await "$CL" 0 120 "Joined as kitbob"
+await "$CL" 0 60 "player physics enabled"
+m=$(mark "$SL")
+cmd 'event kit_type {"op": "put", "name": "bob_type", "source": "return {version = 1}"}' \
+	"frames 3" 'event kit_type {"op": "get", "name": "lamp"}'
+await "$SL" "$m" 10 "A type get \(local/lamp\) by peer [0-9]+ refused: no edit rights here"
+tail -c +$((m + 1)) "$SL" | grep -aqE "A type put \(local/bob_type\) by peer [0-9]+ refused: no edit rights here" ||
+	fail "kitbob's put not refused ($SL)"
+# (My account once first: its first page is drawn before the hello comes,
+# without "Connect an agent...", and not redrawn; accounts.lua)
+menu
+step 10 "accounts: hello: logged in already" "frames 3" 'click Button "My account*"'
+step 10 "pause: the menu shown" "frames 3" "keypress Escape"
+step 10 "pause: the menu closed" "frames 3" "keypress Escape"
+token
+[ "$tok" != "$boss_tok" ] || fail "kitbob's token is kitboss's"
+mcp bob
+grep -aq "An edit by kitbob" "$SL" && fail "an edit by kitbob ($SL)"
+echo "ok: kitbob, no builder, refused by kit:type and as an agent"
+for f in 3 4; do
+	FD=$f cmd "sync 2000" quit
+done
+exec 3>&- 4>&-
+wait $BOSS $BOB 2>/dev/null
 for p in new_type palette edit_type; do
 	[ -s "$t/$p.png" ] || fail "no screenshot $t/$p.png"
 done
-grep -aqF "${tok#bat_}" "$SL" "$CL" && fail "the token is in a log"
-echo "PASS: custom types from a template, the editor and an agent: put, run, reloaded while Running, refused while the old ran, read back, undone, a movement's body switched, deleted; screenshots $t/new_type.png $t/palette.png $t/edit_type.png"
+for k in "$tok" "$boss_tok"; do
+	grep -aqF "${k#bat_}" "$SL" "$t/boss.log" "$t/bob.log" && fail "a token is in a log"
+done
+echo "PASS: custom types from a template, the editor and an agent: put, run, reloaded while Running, refused while the old ran, read back, undone, a movement's body switched and in kit/controls' list, deleted; a non-builder refused; screenshots $t/new_type.png $t/palette.png $t/edit_type.png"
 # vim: set noet ts=4 sw=4:

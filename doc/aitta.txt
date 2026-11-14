@@ -240,7 +240,8 @@ Install), and is not a tile. Refused at pack and at install without:
         LICENSE or LICENCE            a licence file at its root
 
 Its own types, if any [KIT_CUSTOM_TYPES], are in types/, refused there
-as well past these or with anything else in it:
+as well past these or with anything else in it (a link, an empty file
+or a directory too):
 
         types/<name>.lua              a component type (api.h), the
                                       project's custom type local/<name>

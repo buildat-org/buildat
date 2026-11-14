@@ -653,7 +653,9 @@ namespace interface
 //   "kit:type" {"op": "get"|"put"|"delete", "name" ("bike" is
 //   local/bike), "source", "client"} (outside "kit:edit"'s 4096 bytes),
 //   answered with "kit:type" {"op", "name", "ok", "what"|"why"}; a get's
-//   with "source", "client" and "custom" (any loaded type's files read).
+//   with "source", "client" and "custom" (Kit's own types, installed
+//   packages' and custom ones read; never the app's own, which may be
+//   private).
 //   A put loads at once, Running or not: refused (a syntax or load error;
 //   the client part's syntax compiled in the box, not run), the version
 //   before runs on and the error is said in the Log of each entity on it.

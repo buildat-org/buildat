@@ -2738,6 +2738,12 @@ local function field(name, d, values)
 		end
 		table.sort(names)
 		names[#names + 1] = "none"
+		-- (said once as it changes: a check's, a custom movement in it)
+		local said = "kit editor: the movements: " .. table.concat(names, ", ")
+		if said ~= NT.movements_said then
+			NT.movements_said = said
+			log:info(said)
+		end
 		f.choices = {}
 		local has = values[name] == nil
 		for _, t in ipairs(names) do

@@ -659,8 +659,15 @@ ss_ template_refusal(const ss_ &dir)
 			return "a template's types/ holds <name>.lua and <name>.client.lua "
 					"only, a name lowercase letters, digits and _: "+
 					n.name.substr(0, 60);
-		if(fs::file_size(dir+"/types/"+n.name) > (uint64_t)(ext == ".lua" ?
-				64 : 32) << 10)
+		// (0 for a link, or anything but a regular file). simplified: on
+		// Windows file_size() follows a link (a reparse point is a cloud
+		// file too); a check of FILE_ATTRIBUTE_REPARSE_POINT here is the
+		// upgrade if templates are made there by hand
+		const uint64_t size = fs::file_size(dir+"/types/"+n.name);
+		if(size == 0)
+			return "types/"+n.name.substr(0, 60)+": not a regular file of "
+					"some bytes (a link is refused)";
+		if(size > (uint64_t)(ext == ".lua" ? 64 : 32) << 10)
 			return "types/"+n.name+": past "+(ext == ".lua" ? "64" : "32")+
 					" KiB";
 		if(ext == ".lua")
