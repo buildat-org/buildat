@@ -349,6 +349,10 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			} else if(c.param != "up" && (sp == ss_::npos ||
 					!parse_xy(rest.substr(sp + 1), &c.x, &c.y, error)))
 				return fail(cmd+" <id 1-9> <x> <y>");
+		} else if(cmd == "window"){
+			c.type = Type::Window;
+			if(!parse_xy(rest, &c.x, &c.y, error) || c.x < 64 || c.y < 64)
+				return fail("window <w> <h> (pixels, 64 or more)");
 		} else if(cmd == "mouse_wheel"){
 			c.type = Type::MouseWheel;
 			if(!parse_i64(rest, &c.n))
@@ -601,6 +605,8 @@ ss_ dump_command(const Command &c)
 		return "text "+c.s;
 	case Type::Quit:
 		return "quit";
+	case Type::Window:
+		return "window "+itos(c.x)+" "+itos(c.y);
 	case Type::Look:
 		{
 			char buf[64];
