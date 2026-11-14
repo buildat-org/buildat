@@ -5,6 +5,11 @@
 -- not go across with W, jumps onto the ledge, the same bits twice; a step that
 -- moves across is put back; w:circle and w:segment against the cells (a floor's
 -- seams no wall), the off-plane wall (not met) and a heightmap's slope.
+-- Stage 3, kit/polygon's prisms (M.look_poly): the walker up a polygon slope and
+-- stopped under an overhang (either winding), back down, a 70-degree one a wall,
+-- the same bits twice; the plane off: climbing, passing beside it, stopped by its
+-- face along z; w:circle and w:segment against an edge, a polygon at another
+-- depth not met, w:down on its top, M.triangulate of a concave shape.
 -- Run: lua util/kit_plane_check.lua (Lua 5.1 or LuaJIT), from the source tree's root.
 local function load_env(path, env)
 	local f = assert(loadfile(path))
@@ -134,4 +139,101 @@ t, nx, ny, info = hw:segment(2, 5, 2, -5)
 assert(near(t, 0.4) and near(nx, -1 / math.sqrt(5)) and near(ny, 2 / math.sqrt(5)) and
 		info == MV.GROUND, tostring(t))
 print("ok: w:circle and w:segment in the plane: the floor (its seams no wall), the ledge's side, a corner, the wall off the plane not met, a heightmap's slope")
+
+-- [KIT_PLANE] stage 3: kit/polygon's prisms over the floor (top 0.5): a slope (x 6...12
+-- up to 3.5, then level to 20), an overhang over its top (its underside from 6 at
+-- x 15 down to 5 at x 20), a wall at another depth (z 3, x 2...3), a steep one (70
+-- degrees, x 4...5) in a world of its own
+local function poly(points, at, depth)
+	return MV.look_poly({shape = "polygon", points = points, depth = depth or 1,
+		solid = true}, false, at or {0, 0, 0}, 0)
+end
+local function rev(l)
+	local o = {}
+	for i = #l, 1, -1 do
+		o[#o + 1] = l[i]
+	end
+	return o
+end
+local SLOPE = {{6, 0.5}, {12, 3.5}, {20, 3.5}, {20, 0.5}}
+local OVER = {{15, 6}, {20, 5}, {24, 5}, {24, 8}, {15, 8}}
+local function pworld(polys, plane)
+	return MV.world{cell = function(i, j, k)
+		return j <= 0 and STONE or nil
+	end, plane = plane, polys = polys}
+end
+local function walk(w, s, n, i)
+	for _ = 1, n do
+		MV.steps(walker, s, {i}, 1 / 60, 1, w, wp)
+	end
+	return s
+end
+local RIGHT = {f = 0, r = 1, yaw = 0, jump = 0}
+local pw = pworld({poly(SLOPE), poly(OVER), poly({{2, 0.5}, {3, 0.5}, {3, 2.5},
+	{2, 2.5}}, {0, 0, 3})}, 0)
+s = walk(pw, {pos = {0, 0.55, 0}}, 300, RIGHT)
+assert(near(s.pos[1], 18.55, 1e-3) and near(s.pos[2], 3.5, 1e-6) and s.ground and
+		s.surface == "polygon", "up the slope, under the overhang: " .. s.pos[1] .. "," ..
+		s.pos[2])
+-- The other way round the points: the same
+local pw2 = pworld({poly(rev(SLOPE)), poly(rev(OVER))}, 0)
+local s2 = walk(pw2, {pos = {0, 0.55, 0}}, 300, RIGHT)
+assert(s2.pos[1] == s.pos[1] and s2.pos[2] == s.pos[2], "wound the other way: " ..
+		s2.pos[1])
+-- Back down the slope to the floor, on the ground all the way
+walk(pw, s, 200, {f = 0, r = -1, yaw = 0, jump = 0})
+assert(near(s.pos[2], 0.5) and s.pos[1] < 5 and s.ground, "down: " .. s.pos[2])
+-- Past slope_limit (70 degrees): a wall, no step up it
+local steep = pworld({poly({{4, 0.5}, {5, 3.25}, {8, 3.25}, {8, 0.5}})}, 0)
+local s5 = walk(steep, {pos = {0, 0.55, 0}}, 120, RIGHT)
+assert(near(s5.pos[1], 3.55, 1e-3) and near(s5.pos[2], 0.5), "the steep one: " ..
+		s5.pos[1] .. "," .. s5.pos[2])
+-- The same bits twice
+local function ptrace()
+	local ww, ss, out = pworld({poly(SLOPE), poly(OVER)}, 0), {pos = {0, 0.55, 0}}, {}
+	for n = 1, 400 do
+		MV.steps(walker, ss, {{f = 0, r = n < 300 and 1 or -1, yaw = 0,
+			jump = (n > 100 and n < 110) and 1 or 0}}, 1 / 60, 1, ww, wp)
+		out[#out + 1] = string.format("%.17g %.17g", ss.pos[1], ss.pos[2])
+	end
+	return table.concat(out, ";")
+end
+assert(ptrace() == ptrace(), "not the same bits over polygons")
+-- The plane off: a body at z 0 climbs it as well; one at z 2 is past its depth
+local s6 = walk(pworld({poly(SLOPE)}), {pos = {0, 0.55, 0}}, 120, RIGHT)
+assert(s6.pos[2] > 1 and near(s6.pos[3], 0), "3D up the slope: " .. s6.pos[2])
+local s7 = walk(pworld({poly(SLOPE)}), {pos = {0, 0.55, 2}}, 120, RIGHT)
+assert(near(s7.pos[2], 0.5) and s7.pos[1] > 7, "3D past its depth met: " .. s7.pos[1])
+-- ... and walking along z into its face (x 9, its area there 0.5...2) stops there
+local s8 = walk(pworld({poly(SLOPE)}), {pos = {9, 0.55, -3}}, 120,
+	{f = 1, r = 0, yaw = 0, jump = 0})
+assert(near(s8.pos[3], -0.95, 1e-3), "3D its face: " .. s8.pos[3])
+print("ok: kit/walker over polygons: up a slope, stopped under an overhang, either winding, back down, a 70-degree one a wall, one at another depth not met, the same bits twice; the plane off: up it at its depth, past it off it, its face along z")
+
+-- w:circle and w:segment against a polygon's edge; one at another depth not met
+c = pw:circle(9, 2.4, 0.5)
+local dd = 0.5 - 0.8 / math.sqrt(5)
+assert(#c == 1 and near(c[1].depth, dd) and near(c[1].nx, -1 / math.sqrt(5)) and
+		near(c[1].ny, 2 / math.sqrt(5)) and c[1].info.surface == "polygon", #c)
+-- Its middle in the slope, within the radius: out along the edge's normal
+c = pw:circle(9, 1.8, 0.5)
+assert(#c >= 1 and near(c[1].nx, -1 / math.sqrt(5)) and c[1].depth > 0.5, #c)
+assert(#pw:circle(2.5, 2.8, 0.4) == 0, "the wall at another depth met")
+assert(#pw:circle(2.5, 2.8, 0.4, 3) == 1, "the wall at its own depth not met")
+t, nx, ny, info = pw:segment(9, 5, 9, 0)
+assert(near(t, 0.6) and near(nx, -1 / math.sqrt(5)) and near(ny, 2 / math.sqrt(5)) and
+		info.surface == "polygon", tostring(t))
+assert(pw:segment(2.5, 1.5, 2.5, 3) == nil, "the segment met the one at another depth")
+-- w:down onto its top; the triangles of a concave one cover its area
+local dn = pw:down(16, 5, 0, 3)
+assert(near(dn, 1.5), "down: " .. tostring(dn))
+local L = {0, 0, 4, 0, 4, 1, 1, 1, 1, 3, 0, 3}
+local tri, area = MV.triangulate(L), 0
+for q = 1, #tri, 3 do
+	local a, b, e = tri[q], tri[q + 1], tri[q + 2]
+	area = area + ((L[2 * b - 1] - L[2 * a - 1]) * (L[2 * e] - L[2 * a]) -
+			(L[2 * b] - L[2 * a]) * (L[2 * e - 1] - L[2 * a - 1])) / 2
+end
+assert(#tri == 12 and near(area, 6), "triangles: " .. #tri .. ", " .. area)
+print("ok: w:circle, w:segment and w:down against polygon edges, one at another depth not met; a concave one's triangles")
 -- vim: set noet ts=4 sw=4:

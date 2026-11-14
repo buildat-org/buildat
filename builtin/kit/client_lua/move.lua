@@ -61,9 +61,22 @@
 --     solid the segment meets, the normal out of it toward the start (nil: none)
 -- They meet the voxels of the plane's layer (a whole cell's side against a solid
 -- neighbour is no surface: nothing catches on a floor's seams), the shapes' and the
--- solid looks' boxes through z, the heightmap's profile along z and W:plane_edges'
--- (where stage 3's polygons come in); the segment the free objects too (W:ray's).
+-- solid looks' boxes through z, the heightmap's profile along z and the polygons'
+-- outlines (W:plane_edges); the segment the free objects too (W:ray's).
 -- simplified: the circle meets no free voxel object
+-- [KIT_PLANE] stage 3: kit/polygon's look ("polygon": its points {{x, y}...} in its
+-- own x and y, extruded `depth` along its own z round its place) lying flat to the
+-- world's x and y (its yaw 0 or 180, any roll) is a prism (M.look_poly, w.polys):
+-- W:sweep meets its sides along x and y (each edge one-sided: a body coming at it
+-- from outside; a corner of the body along the move onto an edge, an edge's end onto
+-- the body's face) and its faces along z, W:blocked its area, W:plane_edges its
+-- outline, W:down its tops. W:move climbs an edge as the body's slope lets (b.slope,
+-- the heightmap's), else it is a wall: no step up it. With the plane on one is met
+-- where it spans the plane's z; one at another depth is background or foreground.
+-- An edge's info is {solid, friction, surface "polygon", nx, ny: its normal out}.
+-- simplified: one turned otherwise (a yaw off 0 and 180, a pitch) or on a moving
+-- object is not met, nor by W:ray; a circle's middle deeper in one than its radius
+-- meets nothing of it
 local M = {}
 local floor, sqrt = math.floor, math.sqrt
 local PI = 3.14159265358979323846
@@ -288,7 +301,8 @@ end
 
 function M.look_box(look, on, pos, yaw, pitch, roll)
 	-- ([KIT_MOVING_OBJECTS] or yaw the entity's turn as a matrix)
-	if type(look) ~= "table" then
+	-- ([KIT_PLANE] stage 3: a polygon is no box: M.look_poly)
+	if type(look) ~= "table" or look.shape == "polygon" then
 		return nil
 	end
 	local size, off = {}, {0, 0, 0}
@@ -366,6 +380,194 @@ function M.look_box(look, on, pos, yaw, pitch, roll)
 		end
 	end end end
 	return b
+end
+
+-- ---- [KIT_PLANE] stage 3: a polygon look as a prism (the top of this file says
+-- what): {pts = {x1, y1, x2, y2...} in the world, the solid on the right going
+-- round, n, z0, z1, x0, y0, x1, y1 its box, info, inf (its edges' infos)}; nil when
+-- it is not met
+M.POLYGON = {solid = true, friction = 1, surface = "polygon"}
+function M.look_poly(look, on, pos, yaw, pitch, roll)
+	if type(look) ~= "table" or look.shape ~= "polygon" or
+			type(look.points) ~= "table" or type(yaw) == "table" then
+		return nil
+	end
+	local w = on and type(look.when) == "table" and look.when or {}
+	local solid = look.solid == true
+	if w.solid ~= nil then
+		solid = w.solid == true
+	end
+	local R = rotation(tonumber(pitch) or 0, tonumber(yaw) or 0, tonumber(roll) or 0)
+	if not solid or abs(R[9]) < 1 - 1e-9 then
+		return nil
+	end
+	local pts, n = {}, 0
+	for _, p in ipairs(look.points) do
+		local x = type(p) == "table" and tonumber(p[1])
+		local y = type(p) == "table" and tonumber(p[2])
+		if not x or not y then
+			return nil
+		end
+		pts[2 * n + 1] = pos[1] + R[1] * x + R[2] * y
+		pts[2 * n + 2] = pos[2] + R[4] * x + R[5] * y
+		n = n + 1
+	end
+	if n < 3 then
+		return nil
+	end
+	-- Twice its area, counter-clockwise positive: then turned round
+	local a = 0
+	for i = 1, n do
+		local j = i % n + 1
+		a = a + pts[2 * i - 1] * pts[2 * j] - pts[2 * j - 1] * pts[2 * i]
+	end
+	if a == 0 then
+		return nil
+	end
+	if a > 0 then
+		for i = 1, floor(n / 2) do
+			local j = n + 1 - i
+			pts[2 * i - 1], pts[2 * j - 1] = pts[2 * j - 1], pts[2 * i - 1]
+			pts[2 * i], pts[2 * j] = pts[2 * j], pts[2 * i]
+		end
+	end
+	local p = {pts = pts, n = n, info = M.POLYGON, inf = {},
+		x0 = math.huge, y0 = math.huge, x1 = -math.huge, y1 = -math.huge}
+	for i = 1, n do
+		local x, y = pts[2 * i - 1], pts[2 * i]
+		if x < p.x0 then p.x0 = x end
+		if x > p.x1 then p.x1 = x end
+		if y < p.y0 then p.y0 = y end
+		if y > p.y1 then p.y1 = y end
+	end
+	local d = tonumber(look.depth) or 1
+	d = d < 0.02 and 0.02 or d > 64 and 64 or d
+	p.z0, p.z1 = pos[3] - d / 2, pos[3] + d / 2
+	return p
+end
+
+-- A polygon's edge i's info (its normal out of it)
+local function edge_info(p, i)
+	local e = p.inf[i]
+	if not e then
+		local j = i % p.n + 1
+		local ex, ey = p.pts[2 * j - 1] - p.pts[2 * i - 1], p.pts[2 * j] - p.pts[2 * i]
+		local l = sqrt(ex * ex + ey * ey)
+		e = {solid = true, friction = p.info.friction, surface = p.info.surface,
+			nx = l > 0 and -ey / l or 0, ny = l > 0 and ex / l or 0}
+		p.inf[i] = e
+	end
+	return e
+end
+
+-- Whether x, y is inside it (even-odd)
+local function poly_inside(p, x, y)
+	local q, n, inside = p.pts, p.n, false
+	for i = 1, n do
+		local j = i % n + 1
+		local ay, by = q[2 * i], q[2 * j]
+		if (ay > y) ~= (by > y) and x < q[2 * i - 1] + (y - ay) *
+				(q[2 * j - 1] - q[2 * i - 1]) / (by - ay) then
+			inside = not inside
+		end
+	end
+	return inside
+end
+
+-- Whether the rectangle (a hair in from its sides) and its area overlap: an edge
+-- through it, or its middle inside
+local function poly_over(p, x0, y0, x1, y1)
+	x0, y0, x1, y1 = x0 + EPS, y0 + EPS, x1 - EPS, y1 - EPS
+	if p.x1 <= x0 or p.x0 >= x1 or p.y1 <= y0 or p.y0 >= y1 then
+		return false
+	end
+	local q, n = p.pts, p.n
+	for i = 1, n do
+		local j = i % n + 1
+		local ax, ay = q[2 * i - 1], q[2 * i]
+		local dx, dy = q[2 * j - 1] - ax, q[2 * j] - ay
+		-- (Liang and Barsky)
+		local t0, t1 = 0, 1
+		for k = 1, 4 do
+			local pp = k == 1 and -dx or k == 2 and dx or k == 3 and -dy or dy
+			local qq = k == 1 and ax - x0 or k == 2 and x1 - ax or k == 3 and ay - y0 or
+					y1 - ay
+			if pp == 0 then
+				if qq < 0 then
+					t0 = 2
+				end
+			else
+				local r = qq / pp
+				if pp < 0 then
+					if r > t0 then t0 = r end
+				elseif r < t1 then
+					t1 = r
+				end
+			end
+		end
+		if t0 <= t1 then
+			return true
+		end
+	end
+	return poly_inside(p, (x0 + x1) / 2, (y0 + y1) / 2)
+end
+
+-- A simple polygon's triangles (ear clipping; the client's mesh): {i, j, k, ...}
+-- indices of its points ({x1, y1, x2, y2...}), each counter-clockwise
+function M.triangulate(pts)
+	local n = floor(#pts / 2)
+	local a = 0
+	for i = 1, n do
+		local j = i % n + 1
+		a = a + pts[2 * i - 1] * pts[2 * j] - pts[2 * j - 1] * pts[2 * i]
+	end
+	local idx, out = {}, {}
+	for i = 1, n do
+		idx[i] = a >= 0 and i or n + 1 - i
+	end
+	local function cross(i, j, k)
+		return (pts[2 * j - 1] - pts[2 * i - 1]) * (pts[2 * k] - pts[2 * i]) -
+				(pts[2 * j] - pts[2 * i]) * (pts[2 * k - 1] - pts[2 * i - 1])
+	end
+	while #idx > 3 do
+		local m, cut = #idx, nil
+		for c = 1, m do
+			local i, j, k = idx[(c - 2) % m + 1], idx[c], idx[c % m + 1]
+			if cross(i, j, k) > 0 then
+				local ear = true
+				for _, q in ipairs(idx) do
+					if q ~= i and q ~= j and q ~= k and cross(i, j, q) >= 0 and
+							cross(j, k, q) >= 0 and cross(k, i, q) >= 0 then
+						ear = false
+						break
+					end
+				end
+				if ear then
+					out[#out + 1], out[#out + 2], out[#out + 3] = i, j, k
+					cut = c
+					break
+				end
+			end
+		end
+		-- None: a point on a line is dropped; else it is no simple polygon
+		for c = 1, cut and 0 or m do
+			if cross(idx[(c - 2) % m + 1], idx[c], idx[c % m + 1]) == 0 then
+				cut = c
+				break
+			end
+		end
+		if not cut then
+			return out
+		end
+		for c = cut, m - 1 do
+			idx[c] = idx[c + 1]
+		end
+		idx[m] = nil
+	end
+	if #idx == 3 and cross(idx[1], idx[2], idx[3]) > 0 then
+		out[#out + 1], out[#out + 2], out[#out + 3] = idx[1], idx[2], idx[3]
+	end
+	return out
 end
 
 -- [KIT_MOVING_OBJECTS] What the object's motion is at t (seconds): the turn over its
@@ -586,8 +788,9 @@ function M.world(t)
 	w.edge = t.edge
 	w.unknown_air = t.ground ~= nil or t.edge ~= nil
 	w.cache = {}
-	-- [KIT_PLANE] the plane's z (nil: none)
+	-- [KIT_PLANE] the plane's z (nil: none); stage 3: the polygons' prisms
 	w.plane = type(t.plane) == "number" and t.plane or nil
+	w.polys = t.polys or {}
 	-- [KIT_MOVING_OBJECTS] t.moving_looks: solid looks on moving objects, each
 	-- {look, on, {x, y, z}, yaw, pitch, roll, links} at rest
 	w.moving_looks = t.moving_looks
@@ -786,6 +989,80 @@ function W:shed(x, y, z, r, h, moved)
 	return sx, sy, sz
 end
 
+-- [KIT_PLANE] stage 3: whether a polygon's prism is met by the box: in the plane
+-- spanning its z, else the box's z within it
+local function spans(w, p, b)
+	if w.plane then
+		return p.z0 < w.plane and p.z1 > w.plane
+	end
+	return p.z0 < b[6] - EPS and p.z1 > b[3] + EPS
+end
+
+-- The move d cut to dist ahead (s its sign) when that is nearer: d, true
+local function nearer(dist, d, s)
+	if dist > -EPS and dist < s * d then
+		return s * (dist < 0 and 0 or dist), true
+	end
+	return d, false
+end
+
+-- The box's move d along a past the polygons' prisms: d, the info hit
+function W:sweep_polys(b, a, d)
+	local hit, s = nil, d > 0 and 1 or -1
+	if a == 3 then
+		-- Its faces: the box over the polygon's area
+		for _, p in ipairs(self.polys) do
+			local dist = s > 0 and p.z0 - b[6] or b[3] - p.z1
+			if dist > -EPS and dist < s * d and poly_over(p, b[1], b[2], b[4], b[5]) then
+				d, hit = s * (dist < 0 and 0 or dist), p.info
+			end
+		end
+		return d, hit
+	end
+	local v = 3 - a
+	local lead = s > 0 and b[a + 3] or b[a]
+	local v0, v1 = b[v] + EPS, b[v + 3] - EPS
+	for _, p in ipairs(self.polys) do
+		local lo = a == 1 and p.x0 or p.y0
+		local hi = a == 1 and p.x1 or p.y1
+		local plo = v == 1 and p.x0 or p.y0
+		local phi = v == 1 and p.x1 or p.y1
+		if spans(self, p, b) and plo <= v1 and phi >= v0 and
+				(s > 0 and hi >= lead - EPS and lo <= lead + d or
+				s < 0 and lo <= lead + EPS and hi >= lead + d) then
+			local q, n = p.pts, p.n
+			for i = 1, n do
+				local j = i % n + 1
+				local pu, pv = q[2 * i - 2 + a], q[2 * i - 2 + v]
+				local qu, qv = q[2 * j - 2 + a], q[2 * j - 2 + v]
+				local eu, ev = qu - pu, qv - pv
+				-- Its normal out ((-ey, ex)) against the move: coming at it
+				if s * (a == 1 and -ev or ev) < 0 then
+					local was = d
+					-- The body's leading corners along the move onto it
+					if (v0 - pv) * (v0 - qv) <= 0 then
+						d = nearer((pu + (v0 - pv) * eu / ev - lead) * s, d, s)
+					end
+					if (v1 - pv) * (v1 - qv) <= 0 then
+						d = nearer((pu + (v1 - pv) * eu / ev - lead) * s, d, s)
+					end
+					-- Its ends onto the body's leading face
+					if pv > v0 and pv < v1 then
+						d = nearer((pu - lead) * s, d, s)
+					end
+					if qv > v0 and qv < v1 then
+						d = nearer((qu - lead) * s, d, s)
+					end
+					if d ~= was then
+						hit = edge_info(p, i)
+					end
+				end
+			end
+		end
+	end
+	return d, hit
+end
+
 -- The box b0..b1 ({x0, y0, z0, x1, y1, z1}) moved by d along axis a (1:
 -- x, 2: y, 3: z) as far as the solid cells and boxes let it: the move,
 -- and the info hit (nil: none)
@@ -876,6 +1153,10 @@ function W:sweep(b, a, d)
 			end
 		end
 	end end
+	if self.polys[1] then
+		local dp, hp = self:sweep_polys(b, a, d)
+		d, hit = dp, hp or hit
+	end
 	local dt, ht = self:sweep_turned(b, a, d)
 	d, hit = dt, ht or hit
 	-- [KIT_HM_FREE] The heightmap's extent: a wall (one past it already:
@@ -950,6 +1231,11 @@ function W:blocked(b, known_only)
 		if o[1] < b[4] - EPS and o[4] > b[1] + EPS and o[2] < b[5] - EPS and
 				o[5] > b[2] + EPS and o[3] < b[6] - EPS and o[6] > b[3] + EPS and
 				not on_skipped(self, o) then
+			return true
+		end
+	end
+	for _, p in ipairs(self.polys) do
+		if spans(self, p, b) and poly_over(p, b[1], b[2], b[4], b[5]) then
 			return true
 		end
 	end
@@ -1076,6 +1362,15 @@ function W:move(b, dx, dy, dz, step)
 	local s = {x = b.x + sx, y = b.y + my + sy, z = b.z + sz, r = b.r, h = b.h,
 		slope = b.slope}
 	local x, y, z, mx, mz, hx, hz = self:slide(s, dx, dz)
+	-- [KIT_PLANE] stage 3: a polygon's edge is climbed as far as its slope is within
+	-- b.slope (lifted as much as that slope takes over the move), else no step up it
+	local pe = type(hx) == "table" and hx.ny and hx or type(hz) == "table" and hz.ny and hz
+	if pe and step and step > 0 then
+		local k = b.slope or 1
+		local up = sqrt(dx * dx + dz * dz) * k + 2 * EPS
+		step = pe.ny > 0 and abs(pe.nx) <= pe.ny * k + 1e-9 and
+				(up < step and up or step) or 0
+	end
 	-- Up a step where blocked: lifted, slid, put down again; taken if it
 	-- went further
 	if (hx or hz) and step and step > 0 then
@@ -1374,6 +1669,23 @@ function W:down(x, y, z, len)
 			best, info = d, M.OBJECT
 		end
 	end
+	-- [KIT_PLANE] stage 3: the polygons' tops (edges going +x: solid under them)
+	-- through z, under the point
+	for _, p in ipairs(self.polys) do
+		if p.z0 < z and p.z1 > z and p.x0 <= x and p.x1 >= x and p.y0 <= y + EPS then
+			local q = p.pts
+			for i = 1, p.n do
+				local j = i % p.n + 1
+				local ax, bx = q[2 * i - 1], q[2 * j - 1]
+				if ax < bx and ax <= x and bx >= x then
+					local d = y - (q[2 * i] + (x - ax) * (q[2 * j] - q[2 * i]) / (bx - ax))
+					if d > -EPS and d <= len and (not best or d < best) then
+						best, info = d < 0 and 0 or d, edge_info(p, i)
+					end
+				end
+			end
+		end
+	end
 	local h = self:height(x, z)
 	if h then
 		local d = y - h
@@ -1432,11 +1744,24 @@ end
 
 -- The edges in the plane at z, each {ax, ay, bx, by, info} with the solid on its
 -- right going from a to b, for x0...x1, y0...y1: the heightmap's profile along z (a
--- vertex at each whole x: exact at a whole z, as the plane's is).
--- [KIT_PLANE] stage 3: kit/polygon's outlines at z are added here, and both 2D
--- queries meet them
+-- vertex at each whole x: exact at a whole z, as the plane's is) and the outlines of
+-- the polygons spanning z (stage 3)
 function W:plane_edges(z, x0, y0, x1, y1)
 	local out = {}
+	for _, p in ipairs(self.polys) do
+		if p.z0 < z and p.z1 > z and p.x0 <= x1 and p.x1 >= x0 and p.y0 <= y1 and
+				p.y1 >= y0 then
+			local q = p.pts
+			for i = 1, p.n do
+				local j = i % p.n + 1
+				local ax, ay, bx, by = q[2 * i - 1], q[2 * i], q[2 * j - 1], q[2 * j]
+				if (ax < bx and ax or bx) <= x1 and (ax > bx and ax or bx) >= x0 and
+						(ay < by and ay or by) <= y1 and (ay > by and ay or by) >= y0 then
+					out[#out + 1] = {ax, ay, bx, by, edge_info(p, i), poly = true}
+				end
+			end
+		end
+	end
 	if self.ground_fn then
 		local px, ph = nil, nil
 		for ix = floor(x0), floor(x1) + 1 do
@@ -1545,7 +1870,9 @@ function W:circle(x, y, r, z)
 			if side > 0 and d2 < r * r then
 				local d = sqrt(d2)
 				add(r - d, dx / d, dy / d, e[5])
-			elseif side <= 0 and u >= 0 and u <= 1 then
+			elseif side <= 0 and u >= 0 and u <= 1 and (not e.poly or side > -r) then
+				-- (a polygon's: within r behind it; deeper, its far side's would
+				-- push the wrong way)
 				add(r - side, nx, ny, e[5])
 			end
 		end
@@ -2005,7 +2332,7 @@ function M.snapshot(t)
 		end
 		return classes[ch - 64]
 	end
-	local boxes, moving_looks = {}, nil
+	local boxes, moving_looks, polys = {}, nil, {}
 	for _, l in ipairs(t.looks or {}) do
 		-- [KIT_MOVING_OBJECTS] on a moving object: placed as each step's time has it
 		if l[7] then
@@ -2016,6 +2343,11 @@ function M.snapshot(t)
 			local b = M.look_box(l[1], l[2] == true, l[3], l[4], l[5], l[6])
 			if b then
 				boxes[#boxes + 1] = b
+			end
+			-- [KIT_PLANE] stage 3
+			local p = M.look_poly(l[1], l[2] == true, l[3], l[4], l[5], l[6])
+			if p then
+				polys[#polys + 1] = p
 			end
 		end
 	end
@@ -2038,7 +2370,7 @@ function M.snapshot(t)
 			(hm.ox or 0) + hm.sx - 1, (hm.oz or 0) + hm.sz - 1} or nil
 	return M.world{cell = cell, boxes = boxes, ground = ground, edge = edge,
 		turned = M.turned(t.turned or {}), moving_looks = moving_looks, t = t.t,
-		plane = t.plane}
+		plane = t.plane, polys = polys}
 end
 
 -- The steps of a batch: each input dt long, in sub steps of its own

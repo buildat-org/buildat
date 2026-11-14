@@ -146,11 +146,13 @@
 -- kit.view() ("2d", "3d", "front", "walk", "hud" or "signals": the app walks only in
 -- "walk" while editing), kit.looking() (the editor's crosshair: the app's mouse looks).
 -- [KIT_PLANE] F7 or the dropdown: Front, flat along +z at kit/controls' plane
--- (the server's plane_depth: the spawn's, a whole z), what is in front of its
--- layer clipped; a placing goes in the plane's cell under the pointer (the
+-- (the server's plane_depth: the spawn's, a whole z), what is nearer than
+-- kit/controls' side_clip in front of it clipped (0.55: its layer's front);
+-- a placing goes in the plane's cell under the pointer (the
 -- first free one up), a drag moves in x and y; it pans and zooms as 2D does
 -- (and pans with the right drag), the voxels tool digs the plane's cell under
--- the pointer and places in it or the first free one over it.
+-- the pointer and places in it or the first free one over it. kit/polygon is
+-- drawn and edited there (polygon_edit.lua).
 -- simplified: no caps as the plan's (caps.lua): a cell of the layer with a
 -- solid one in front of it has no face toward the view (Workbench's floor
 -- shows nothing in the layer); caps.lua cutting along z is the upgrade
@@ -2995,6 +2997,8 @@ function NT.params_form(w, e, ci, c, t, keep)
 		-- its buttons below
 		if decl[k].type == "voxels" then
 			patterns[#patterns + 1] = k
+		elseif decl[k].type == "points" then
+			-- ([KIT_PLANE] stage 3: kit/polygon's, edited in the Front view)
 		else
 			fields[#fields + 1] = field(k, decl[k], values)
 		end
@@ -6000,7 +6004,9 @@ local function place_cameras()
 	if S.fx then
 		camf.orthoSize = S.fspan
 		camf.aspectRatio = w / math.max(1, h)
-		camf_node.position = magic.Vector3(S.fx, S.fy, plane_z() - 0.55)
+		-- (as near as kit/controls' side_clip has the side camera's view begin)
+		camf_node.position = magic.Vector3(S.fx, S.fy, plane_z() -
+				(E.state and tonumber(E.state.plane_clip) or 0.55))
 	end
 end
 
@@ -6100,6 +6106,18 @@ end
 local function plan_aligned()
 	local off = (S.yaw % 360 + 180) % 360 - 180
 	return S.pitch >= 89.5 and math.abs(off) <= 10
+end
+
+-- [KIT_PLANE] stage 3: kit/polygon drawn and edited in the Front view
+-- (polygon_edit.lua, NT.pg)
+do
+	local ok, err, install = buildat.run_script_file("kit/polygon_edit.lua")
+	assert(ok and type(install) == "function", "kit: polygon_edit.lua: " ..
+			tostring(err))
+	install({S = S, E = E, NT = NT, M = M, magic = magic, log = log, send = send,
+		find = find, front_at = front_at, GRID_STEPS = GRID_STEPS,
+		to_screen = to_screen, px = px, SNAP_PX = SNAP_PX, drawn_at = drawn_at,
+		plane_z = plane_z, type_of = type_of, palette = function() palette() end})
 end
 
 -- [KIT_EDITOR_LOCALS] The rest of the editor: ports, press and drag, the
