@@ -208,18 +208,7 @@ void find_wasm_toolchain(core::Config &config)
 
 static ss_ quote(const ss_ &s)
 {
-#ifdef _WIN32
-	return "\""+s+"\"";
-#else
-	ss_ r = "'";
-	for(char c : s){
-		if(c == '\'')
-			r += "'\\''";
-		else
-			r += c;
-	}
-	return r+"'";
-#endif
+	return interface::process::quote_arg(s);
 }
 
 static ss_ read_file(const ss_ &path)

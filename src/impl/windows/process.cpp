@@ -40,7 +40,7 @@ int shell_exec(const ss_ &command, const ExecOptions &opts)
 	memset(&pi, 0, sizeof(pi));
 
 	char command_c[50000];
-	snprintf(command_c, 50000, cs(command));
+	snprintf(command_c, 50000, "%s", cs(command));
 
 	// The environment block is a null-terminated buffer of null-terminated
 	// strings: the parent's, with opts.env set over it -- not opts.env
@@ -119,6 +119,25 @@ int shell_exec(const ss_ &command, const ExecOptions &opts)
 	CloseHandle(pi.hProcess);
 	CloseHandle(pi.hThread);
 	return exit_code;
+}
+
+// The rules the C runtimes parse a command line by (CommandLineToArgvW's):
+// backslashes are literal, but for those before a quote, which are halved
+ss_ quote_arg(const ss_ &arg)
+{
+	ss_ r = "\"";
+	size_t backslashes = 0;
+	for(char c : arg){
+		if(c == '\\'){
+			backslashes++;
+			continue;
+		}
+		r.append(c == '"' ? backslashes * 2 + 1 : backslashes, '\\');
+		backslashes = 0;
+		r += c;
+	}
+	r.append(backslashes * 2, '\\');
+	return r+"\"";
 }
 
 bool open_with_system(const ss_ &target)

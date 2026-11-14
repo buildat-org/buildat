@@ -2482,6 +2482,8 @@ local function update_capture()
 		S.captured = want
 		S.looking = want
 		magic.input:SetMouseMode(want and magic.MM_RELATIVE or magic.MM_ABSOLUTE)
+		-- What a check reads: a -c run's mouse mode stays absolute
+		log:info(want and "The crosshair holds the mouse" or "The pointer is free")
 	end
 end
 
@@ -6090,8 +6092,8 @@ do
 	-- progress; at the bottom of a view, the pause menu. Esc's, and the
 	-- touch bar's Cancel ([FP_TOUCH] 4).
 	function M.escape()
-		if panel.popup_open() then
-			-- Its popup's, which Urho3D closed
+		if panel.popup_open() or S.paused and S.pause_page == "client settings" then
+			-- Its popup's, which Urho3D closed; the client's settings window's
 			return
 		elseif S.voxel_box then
 			-- The box given up; the button's release does nothing then

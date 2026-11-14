@@ -467,8 +467,16 @@ do
 			again()
 		end)
 	end
+	-- The menu makes way for it and the planner stays paused under it, as
+	-- under an account page ([FP_SETTINGS_MOUSE_GRAB]: a click on the
+	-- window went on into the view, walking's crosshair taking the mouse);
+	-- its Escape is its own
 	client_settings_page = function()
-		close_pause()
+		if E.pause_win then
+			panel.discard(E.pause_win)
+			E.pause_win = nil
+		end
+		S.pause_page = "client settings"
 		buildat.show_game_settings{on_close = open_pause, sections = {
 			{title = "Floor planner", draw = function(w, ui)
 				client_rows(w, ui.redraw)

@@ -143,7 +143,12 @@ jobs:
           esac
           [ -n "$prev" ] || prev=$(git describe --tags --abbrev=0 --match 'v*' --exclude 'v*-*' HEAD^ 2>/dev/null ||
               git describe --tags --abbrev=0 HEAD^)
-          { echo "Since $prev:"; echo
+          # Which Windows download is which, above the files
+          # ([WIN_ZIP_NO_APPS]: the Luanti-only zip, listed first, was taken
+          # for the portable one and had no apps)
+          { echo 'Windows: `-win64-setup.exe` is the installer; `-win64.zip` is the same build to unpack anywhere (run `bin\buildat.exe`). `-win64-luanti.zip` is Luanti only: vanilla and no other app, and no compiler for an app'"'"'s modules.'
+            echo
+            echo "Since $prev:"; echo
             git log --no-merges --format='- %s (%h)' "$prev..HEAD" | grep -v '^- version: ' || true
           } > "$RUNNER_TEMP/notes.md"
       - uses: actions/download-artifact@v4

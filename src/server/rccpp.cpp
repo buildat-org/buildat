@@ -120,7 +120,9 @@ struct CCompiler: public Compiler
 					"Windows, the full archive's compiler/)", cs(in_path));
 			return false;
 		}
-		ss_ command = m_compiler_command;
+		// Every path quoted: a space in one split it ([WIN_INSTALL_SPACE])
+		using interface::process::quote_arg;
+		ss_ command = quote_arg(m_compiler_command);
 		// Without an -O flag gcc defaults to -O0, which for a voxel module is
 		// the difference between an array access and a function call per
 		// voxel. Modules are compiled once at startup, so the extra compile
@@ -129,11 +131,13 @@ struct CCompiler: public Compiler
 		if(extra_cxxflags != "")
 			command += ss_()+" "+extra_cxxflags;
 
-		for(const std::string &dir : include_directories) command += " -I"+dir;
-		for(const std::string &dir : library_directories) command += " -L"+dir;
+		for(const std::string &dir : include_directories)
+			command += " -I"+quote_arg(dir);
+		for(const std::string &dir : library_directories)
+			command += " -L"+quote_arg(dir);
 
-		command += " -o"+out_path;
-		command += " "+in_path;
+		command += " -o"+quote_arg(out_path);
+		command += " "+quote_arg(in_path);
 
 		if(extra_ldflags != "")
 			command += ss_()+" "+extra_ldflags;
@@ -265,7 +269,8 @@ struct CCompiler: public Compiler
 		interface::process::ExecOptions exec_opts;
 		exec_opts.output_path = scratch_path;
 		const int status = interface::process::shell_exec(
-				m_compiler_command+" --version", exec_opts);
+				interface::process::quote_arg(m_compiler_command)+" --version",
+				exec_opts);
 		ss_ line;
 		{
 			std::ifstream f(scratch_path);

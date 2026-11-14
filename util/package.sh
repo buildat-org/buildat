@@ -163,9 +163,13 @@ smoke_test_wine() {
 	local dir
 	dir=$(mktemp -d "/tmp/buildat_package_smoke_test_wine.XXXXXX")
 	PKG_TMP_DIRS="$PKG_TMP_DIRS $dir"
-	(cd "$dir" && unzip -q "$archive")
+	# Under a directory with a space, as an alpha installs ("Buildat
+	# Alpha") and a user's name may have: the compiler's command line split
+	# such a path, and no module built ([WIN_INSTALL_SPACE])
+	mkdir "$dir/with space"
+	(cd "$dir/with space" && unzip -q "$archive")
 	local unpacked
-	unpacked=$(ls -d "$dir"/*/ | head -1)
+	unpacked=$(ls -d "$dir/with space"/*/ | head -1)
 	local port=$(( 29600 + (RANDOM % 90) ))
 	echo "smoke test under Wine in $unpacked"
 	export WINEDEBUG=-all WINEPREFIX="$dir/wine"
@@ -547,7 +551,10 @@ prebuild_modules() {
 	rm -f "$stage"/cache/rccpp_build/*.compile.log
 	# Built for any compiler the archive meets, or none (state.cpp, build_current)
 	sed -i 2d "$stage"/cache/rccpp_build/*.hash 2>/dev/null || true
-	rm -rf "$stage/user/apps/vanilla/saves/prebuild"
+	# The run's own user data: its saves (chat, server, the world), the
+	# /health token every archive would share, the path probe's file
+	rm -rf "$stage/user/apps/vanilla/saves"
+	rm -f "$stage"/user/apps/*/health_token.txt "$stage/user/write.test"
 	rm -f "$stage"/user/shared/vanilla/settings.json
 	local n
 	n=$(ls "$stage"/cache/rccpp_build/ 2>/dev/null | grep -c "\.\(so\|dll\)$" || true)
