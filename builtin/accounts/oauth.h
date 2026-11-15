@@ -314,15 +314,27 @@ static void oauth_self_check()
 // Starport's own window ([WEB_ISOLATED_SIGNIN]: no opener, the answer by
 // this origin's /starport_signin and a BroadcastChannel; the token taken
 // from the Starport by the code, as the web client does, and posted here
-// with the page's form) -- and Deny. Plain forms; the script is the
-// Starport's part only. Phone-sized first.
+// with the page's form) -- and Cancel. Where the server takes Starport IDs
+// the page first asks which (user, 2026-11-15: "Server login" and
+// "Starport ID login", only then the name and password). Plain forms; the
+// script is that choice and the Starport's part. Phone-sized first.
 static const char *oauth_page_css =
 	"body{max-width:34em}input{width:100%;box-sizing:border-box;margin:.2em 0}"
 	"button{min-width:7em;margin:.6em .5em .2em 0;padding:.5em .8em}"
 	"label{display:block;margin:.4em 0}h1{font-size:1.4em}"
-	"form{margin:.4em 0}.sp{width:100%}";
+	"form{margin:.4em 0}.wide{width:100%}";
 static const char *oauth_page_script = R"JS("use strict";
 (function(){
+var c = document.getElementById("choose"), pf = document.getElementById("pw");
+function pick(local){
+	c.hidden = local;
+	pf.hidden = !local;
+	if(local) pf.querySelector("input").focus();
+}
+if(c && pf){
+	document.getElementById("local").onclick = function(){ pick(true); };
+	document.getElementById("back").onclick = function(){ pick(false); };
+}
 var b = document.querySelector("button.sp");
 if(!b) return;
 var f = b.form, state = null;
@@ -377,6 +389,7 @@ struct OAuthPage
 	ss_ totp_name; // the password was right: its code asked for
 	bool off = false; // agent access is off: Deny only
 	bool ended = false; // no sign-in waits: the text only
+	bool by_password = false; // a password tried: its form, not the choice
 	// The tool's redirect with its error, a link the user may follow
 	// (never a redirect before the user acts: RFC 9700 4.11.2)
 	ss_ back;
@@ -421,7 +434,28 @@ static std::pair<ss_, ss_> oauth_page(const OAuthPage &p)
 			"\">";
 	const ss_ action = "<form method=\"post\" action=\"/api/v1/oauth/authorize\"";
 	if(!p.ended && !p.off){
-		h += action+" id=\"pw\">"+rid;
+		// The choice first where a Starport ID signs in too (and back to it
+		// from the name and password); a TOTP code's step has none
+		const bool two = !p.starports.empty() && p.totp_name.empty();
+		const bool choose = two && !p.by_password;
+		if(two){
+			h += "<div id=\"choose\""+ss_(choose ? "" : " hidden")+"><button "
+					"type=\"button\" id=\"local\" class=\"wide\">Server login"
+					"</button>\n";
+			for(size_t i = 0; i < p.starports.size(); i++){
+				ss_ sh;
+				oauth_url_origin(p.starports[i].first, &sh);
+				h += action+">"+rid+"<input type=\"hidden\" name=\"action\" "
+						"value=\"allow\"><input type=\"hidden\" name=\"id_token\">"
+						"<button type=\"button\" class=\"sp wide\" data-sp=\""+
+						html(p.starports[i].second.first)+"\" data-listing=\""+
+						html(p.starports[i].second.second)+"\">Starport ID login"+
+						(p.starports.size() > 1 ? " ("+html(sh)+")" : ss_())+
+						"</button></form>\n";
+			}
+			h += "</div>\n";
+		}
+		h += action+" id=\"pw\""+ss_(choose ? " hidden" : "")+">"+rid;
 		if(!p.totp_name.empty())
 			h += "<p>Signed in as <b>"+html(p.totp_name)+"</b>.</p><label>The "
 					"code from your authenticator app <input name=\"totp\" "
@@ -433,20 +467,13 @@ static std::pair<ss_, ss_> oauth_page(const OAuthPage &p)
 					"autofocus></label><label>Password <input name=\"password\" "
 					"type=\"password\" autocomplete=\"current-password\" "
 					"required></label>";
-		h += "<button name=\"action\" value=\"allow\">Allow</button></form>\n";
-		for(size_t i = 0; i < p.starports.size() && p.totp_name.empty(); i++){
-			ss_ sh;
-			oauth_url_origin(p.starports[i].first, &sh);
-			h += action+">"+rid+"<input type=\"hidden\" name=\"action\" "
-					"value=\"allow\"><input type=\"hidden\" name=\"id_token\">"
-					"<button type=\"button\" class=\"sp\" data-sp=\""+
-					html(p.starports[i].second.first)+"\" data-listing=\""+
-					html(p.starports[i].second.second)+"\">Allow, signing in with "
-					"a Starport ID of "+html(sh)+"</button></form>\n";
-		}
+		h += "<button name=\"action\" value=\"allow\">Allow</button>";
+		if(two)
+			h += "<button type=\"button\" id=\"back\">Back</button>";
+		h += "</form>\n";
 	}
 	if(!p.ended)
-		h += action+">"+rid+"<button name=\"action\" value=\"deny\">Deny"
+		h += action+">"+rid+"<button name=\"action\" value=\"deny\">Cancel"
 				"</button></form>\n";
 	h += "<script>"+ss_(oauth_page_script)+"</script></body></html>\n";
 	ss_ connect;

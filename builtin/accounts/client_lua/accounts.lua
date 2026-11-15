@@ -1772,9 +1772,10 @@ end
 
 -- [KIT_AGENTS] **Connect an agent** (user, 2026-11-14: streamlined, "to not
 -- make users give up on it"): a token for the user's own agentic tool
--- (Claude Code, Codex, Cursor, Gemini CLI...), local or in the cloud, which
--- reaches Kit's MCP endpoint on this server's own port with it. Builder
--- scope, or Admin for an admin who asks; a label; then, shown once, the
+-- that does not sign in by OAuth (Cursor, a script), local or in the cloud,
+-- which reaches Kit's MCP endpoint on this server's own port with it.
+-- Behind "Make a token..." (the URL is all a tool that signs in needs):
+-- builder scope, or Admin for an admin who asks; a label; then, shown once, the
 -- endpoint's address and the token, each with its Copy (user, 2026-11-15:
 -- most only want the address), and behind "Claude Code" and "JSON config"
 -- a ready `claude mcp add` line or a generic MCP config with its Copy. The
@@ -1893,8 +1894,7 @@ function ag.draw()
 		page_text(w, "Agent access is off on this server (its admin turns " ..
 				"it on in Accounts).", WARN)
 	else
-		page_text(w, "Your own agentic tool (Claude Code, Codex, Cursor, " ..
-				"Gemini CLI...) works here through MCP as " ..
+		page_text(w, "Your own agentic tool works here through MCP as " ..
 				tostring(M.who()) .. "'s agent, with your rights: its edits " ..
 				"go straight into the live round, logged as its own.", DIM)
 		-- [KIT_AGENTS_OAUTH] A tool that signs in by OAuth makes its own
@@ -1903,8 +1903,19 @@ function ag.draw()
 		local e, fr = field(w, "MCP URL", false, nil, url)
 		e.cursorPosition = 0
 		ag.copy(fr, "URL", url)
-		page_text(w, "A tool that signs in (claude.ai, ChatGPT...) needs only " ..
-				"this URL. Another needs a token:", DIM)
+		page_text(w, "A tool that signs in (claude.ai, ChatGPT, Claude Code, " ..
+				"Codex, Gemini CLI...) needs only this URL.", DIM)
+		-- (a token for a tool that does not sign in: Cursor, a script; behind
+		-- a button, user, 2026-11-15: the page read as if a token were needed)
+		if not ag.make then
+			button(w, "Make a token...", function()
+				ag.make = true
+				ag.draw()
+			end)
+		end
+	end
+	if r.on and ag.make then
+		page_text(w, "A token, for a tool that does not sign in:", DIM)
 		if r.admin then
 			button(w, ag.scope == "admin" and "Scope: Admin (all you may do)" or
 					"Scope: Builder (edits; no admin's rights)", function()
@@ -1944,6 +1955,7 @@ function ag.draw()
 end
 function M.agents_page(back)
 	ag.back, ag.res, ag.token, ag.error, ag.shown = back, nil, nil, nil, nil
+	ag.make = nil
 	ag.req("list", {}, ag.answer)
 	ag.draw()
 end

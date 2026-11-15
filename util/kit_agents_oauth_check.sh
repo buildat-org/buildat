@@ -44,7 +44,9 @@
 #      sign-in and the token; no token, code, secret or password in the
 #      server's log.
 # Screenshots, kept with KEEP_TMP=1: $t/authorize.png (the page on the
-# phone), $t/authorize_id_window.png (the Starport's window),
+# phone: Server login or Starport ID login), $t/authorize_local.png (the
+# name and password after Server login), $t/authorize_id_window.png (the
+# Starport's window),
 # $t/tokens.png (My account's list with the grant)
 #   util/kit_agents_oauth_check.sh
 set -u
@@ -146,17 +148,29 @@ const [mode, url, redirect, shot, name, password] = process.argv.slice(2);
 	});
 	page.on("pageerror", e => problems.push(e.message));
 	await page.goto(url);
-	await page.waitForSelector("#pw");
+	await page.waitForSelector("#pw", {state: "attached"});
 	await page.waitForLoadState("load");
+	// The choice of logins first, where a Starport ID signs in too
+	const two = await page.$("#choose");
+	if(two && (await page.isVisible("#pw") || !await page.isVisible("#local")))
+		problems.push("not the choice of logins first");
 	if(!await page.evaluate(() => document.querySelector("header img").naturalWidth))
 		problems.push("no logo");
 	await page.screenshot({path: shot});
 	const done = page.waitForURL(u => u.href.startsWith(redirect + "?"),
 		{timeout: 60000});
 	if(mode === "password"){
+		if(two){
+			await page.tap("#local");
+			await page.tap("#back");
+			if(!await page.isVisible("#local"))
+				problems.push("Back not back at the choice");
+			await page.tap("#local");
+			await page.screenshot({path: shot.replace(/\.png$/, "_local.png")});
+		}
 		await page.fill("#pw input[name=name]", name);
 		await page.fill("#pw input[name=password]", password);
-		await page.tap("#pw button");
+		await page.tap("#pw button[value=allow]");
 	} else {
 		const opened = ctx.waitForEvent("page");
 		await page.tap("button.sp");
