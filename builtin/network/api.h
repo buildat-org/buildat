@@ -140,6 +140,10 @@ namespace network
 		// [KIT_AGENTS] Every header, by its name in lower case
 		// (Authorization, MCP-Protocol-Version); set on an /api/ request
 		sm_<ss_, ss_> headers;
+		// [KIT_AGENTS_OAUTH] What the client reached: "https" through a
+		// trusted proxy (web_trusted_proxies) unless its X-Forwarded-Proto
+		// says "http", else "http"; public_origin() below
+		ss_ scheme = "http";
 		ss_ header(const ss_ &lower_name) const {
 			auto it = headers.find(lower_name);
 			return it == headers.end() ? ss_() : it->second;
@@ -245,6 +249,53 @@ namespace network
 	inline ss_ HttpRequest::param(const ss_ &key) const
 	{
 		return query_value(query, key);
+	}
+
+	// [KIT_AGENTS_OAUTH] **The origin a client reached the server by**, as
+	// "https://wb.example.org" or "http://127.0.0.1:29500": the request's
+	// scheme and its Host header, lower case, the scheme's own port left
+	// out; "" for a Host that is not a host name or an address with an
+	// optional port. What OAuth's issuer and the MCP endpoint's resource
+	// URL are built from, the URL the client used: nothing trusted depends
+	// on it (the metadata is the asker's own answer, a code is bound to
+	// the resource its browser's request named).
+	inline ss_ public_origin(const HttpRequest &r)
+	{
+		ss_ h;
+		for(char c : r.host)
+			h += (char)tolower((unsigned char)c);
+		const bool v6 = !h.empty() && h[0] == '[';
+		const size_t end = v6 ? h.find(']') : h.find(':');
+		const ss_ name = h.substr(0, end == ss_::npos ? h.size() :
+				end + (v6 ? 1 : 0));
+		ss_ port = name.size() < h.size() ? h.substr(name.size()) : "";
+		if(name.empty() || name.size() > 255 || port.size() > 6 ||
+				name.find_first_not_of(v6 ? "[]0123456789abcdef:." :
+				"0123456789abcdefghijklmnopqrstuvwxyz.-") != ss_::npos ||
+				(!port.empty() && (port[0] != ':' || port.size() < 2 ||
+				port.find_first_not_of("0123456789", 1) != ss_::npos)))
+			return "";
+		if(port == (r.scheme == "https" ? ":443" : ":80"))
+			port.clear();
+		return r.scheme+"://"+name+port;
+	}
+	inline void public_origin_self_check()
+	{
+		HttpRequest r(0, "GET", "/", "", "", "");
+		auto o = [&](const char *scheme, const char *host){
+			r.scheme = scheme;
+			r.host = host;
+			return public_origin(r);
+		};
+		if(o("https", "WB.example.org") != "https://wb.example.org" ||
+				o("https", "wb.example.org:443") != "https://wb.example.org" ||
+				o("https", "wb.example.org:8443") != "https://wb.example.org:8443" ||
+				o("http", "127.0.0.1:29500") != "http://127.0.0.1:29500" ||
+				o("http", "[::1]:80") != "http://[::1]" ||
+				o("http", "") != "" || o("http", "a b") != "" ||
+				o("http", "x:") != "" || o("http", "x:1a") != "" ||
+				o("http", "evil\"/x") != "" || o("http", "[::1]x") != "")
+			throw Exception("public_origin self-check");
 	}
 
 	// What a server does about a peer that will not read what it is sent.

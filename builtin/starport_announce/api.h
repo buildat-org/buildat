@@ -50,6 +50,10 @@ namespace starport_announce
 		virtual void announce_soon() = 0;
 		// "" when the token is good, else why not
 		virtual ss_ verify_id_token(const ss_ &token, IdLogin *out) = 0;
+		// [KIT_AGENTS_OAUTH] The Starports this server has a listing on
+		// while it takes IDs, as (URL, listing id): where a page of its own
+		// sends an ID to sign in (the Starport's /authorize?listing=)
+		virtual sv_<std::pair<ss_, ss_>> id_listings() = 0;
 	};
 
 	// False, and cb not called, where the app does not have the module:

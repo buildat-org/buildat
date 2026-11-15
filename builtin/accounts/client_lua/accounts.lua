@@ -1857,6 +1857,8 @@ function ag.draw()
 			e.cursorPosition = 0 -- (its start shown)
 			ag.copy(fr, v[2], v[3])
 		end
+		-- (that a tool that signs in needs only the URL is said before a
+		-- token is made: one more line here pushes Done off a phone)
 		page_text(w, "Your tool sends the token as the header " ..
 				"Authorization: Bearer <token>. Examples:", DIM)
 		local rr = row(w)
@@ -1895,6 +1897,14 @@ function ag.draw()
 				"Gemini CLI...) works here through MCP as " ..
 				tostring(M.who()) .. "'s agent, with your rights: its edits " ..
 				"go straight into the live round, logged as its own.", DIM)
+		-- [KIT_AGENTS_OAUTH] A tool that signs in by OAuth makes its own
+		local url = M.mcp_url(buildat.server_address() or "",
+				buildat.connection_encrypted())
+		local e, fr = field(w, "MCP URL", false, nil, url)
+		e.cursorPosition = 0
+		ag.copy(fr, "URL", url)
+		page_text(w, "A tool that signs in (claude.ai, ChatGPT...) needs only " ..
+				"this URL. Another needs a token:", DIM)
 		if r.admin then
 			button(w, ag.scope == "admin" and "Scope: Admin (all you may do)" or
 					"Scope: Builder (edits; no admin's rights)", function()
@@ -1919,7 +1929,8 @@ function ag.draw()
 		page_text(w, "Your agent tokens:")
 	end
 	for _, t in ipairs(r.tokens) do
-		page_text(w, t.label .. " (" .. t.scope .. "): made " .. t.made ..
+		page_text(w, t.label .. " (" .. t.scope ..
+				(t.signed_in and ", signed in" or "") .. "): made " .. t.made ..
 				", last used " .. t.used, DIM)
 		button(w, "Revoke " .. t.label, function()
 			ag.error = nil

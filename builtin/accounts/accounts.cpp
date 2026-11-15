@@ -448,18 +448,29 @@ static const int64_t KEEP_US = 90LL * 24 * 3600 * 1000000;
 // agent/<the token's sha256>: its account, scope and label, when it was
 // made and last used (wall_us(); 0: never). The last use is written once
 // a minute at most.
+// [KIT_AGENTS_OAUTH] Or a sign-in's grant (oauth.h), stored as
+// agent/<grant id>: the client and the resource it is for, and the sha256s
+// of its access token, of its refresh token and of the one before that,
+// with when the two end
 struct AgentRecord
 {
 	ss_ name, scope, label;
 	int64_t made_us = 0, used_us = 0;
+	ss_ client, resource, access, refresh, prev_refresh;
+	int64_t access_until_us = 0, refresh_until_us = 0;
 	template<class Archive>
 	void serialize(Archive &archive){
-		interface::Record<Archive> r(archive, "AgentToken", 1, 0);
+		interface::Record<Archive> r(archive, "AgentToken", 1, 1);
 		r.ar(name, scope, label, made_us, used_us);
+		if(r.minor >= 1)
+			r.ar(client, resource, access, refresh, prev_refresh,
+					access_until_us, refresh_until_us);
 		r.end();
 	}
 };
 static const size_t AGENTS_A_USER = 20;
+
+#include "oauth.h"
 
 // **A login waiting on its TOTP code** ([LOGIN_UNLOADED]), stored as
 // totp_wait/<the token's sha256>: the password was right, and the token
@@ -679,7 +690,10 @@ struct Module: public interface::Module, public Interface
 		totp_self_check();
 		stats_self_check();
 		rate_limit_self_check();
+		network::public_origin_self_check();
+		oauth_self_check();
 		m_server->sub_event(this, Event::t("core:start"));
+		m_server->sub_event(this, Event::t("network:http_request"));
 		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		m_server->sub_event(this, Event::t("core:tick"));
@@ -727,6 +741,7 @@ struct Module: public interface::Module, public Interface
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:agent:req",
 				on_agent_req, network::Packet)
+		EVENT_TYPEN("network:http_request", on_http, network::HttpRequest)
 	}
 
 	// One key of what the launcher asked for through the server's -u
@@ -754,6 +769,14 @@ struct Module: public interface::Module, public Interface
 					"accounts:logged_out"})
 				inetwork->declare(name,
 						network::Interface::Channel::LatestOnly);
+			// [KIT_AGENTS_OAUTH] The metadata, where a tool looks for it,
+			// and the sign-in page's logo and fonts (/api/v1/oauth/ comes
+			// as /api/ does)
+			if(m_server->has_module("kit")){
+				inetwork->claim_http_path("/.well-known/oauth-");
+				inetwork->claim_http_path("/.well-known/openid-configuration");
+				inetwork->claim_http_path("/brand/");
+			}
 		});
 		if(m_store)
 			return;
@@ -2684,13 +2707,26 @@ struct Module: public interface::Module, public Interface
 		if(!agents_on())
 			return "off";
 		AgentRecord a;
-		ss_ data;
-		const ss_ key = agent_key(token);
-		if(token.size() < 32 || token.size() > 100 ||
-				!m_store->get(key, data) || !unpack(data, a) || !exists(a.name))
-			return "not an agent token of this server's (revoked, or its "
-					"account gone)";
+		ss_ data, key, gid, secret;
 		const int64_t now = interface::os::wall_us();
+		const char *gone = "not an agent token of this server's (revoked, or "
+				"its account gone)";
+		// [KIT_AGENTS_OAUTH] A sign-in's access token, its grant's current one
+		if(oauth_split(token, "bao_", gid, secret)){
+			key = "agent/"+gid;
+			if(!m_store->get(key, data) || !unpack(data, a) ||
+					a.access.empty() || !exists(a.name) ||
+					!oauth_same(oauth_sha(secret), a.access))
+				return gone;
+			if(now >= a.access_until_us)
+				return "its access token has expired (the tool refreshes it)";
+		} else {
+			key = agent_key(token);
+			if(token.size() < 32 || token.size() > 100 ||
+					!m_store->get(key, data) || !unpack(data, a) ||
+					!a.access.empty() || !exists(a.name))
+				return gone;
+		}
 		if(now - a.used_us > 60LL * 1000000){
 			a.used_us = now;
 			m_store->set(key, pack(a));
@@ -2700,6 +2736,47 @@ struct Module: public interface::Module, public Interface
 		out.scope = a.scope;
 		out.label = a.label;
 		return "";
+	}
+
+	// A line of text, at most n bytes (not cut inside a UTF-8 sequence)
+	static ss_ line_text(const ss_ &s, size_t n)
+	{
+		ss_ line;
+		for(char c : s)
+			if((unsigned char)c >= 32 && c != 127)
+				line += c;
+		size_t end = std::min<size_t>(line.size(), n);
+		while(end < line.size() && end > 0 &&
+				((unsigned char)line[end] & 0xc0) == 0x80)
+			end--;
+		return line.substr(0, end);
+	}
+
+	// An account's agent tokens by their making, oldest first; a
+	// sign-in's whose refresh token has ended is gone
+	std::map<std::pair<int64_t, ss_>, AgentRecord> agents_of(const ss_ &name)
+	{
+		std::map<std::pair<int64_t, ss_>, AgentRecord> mine;
+		const int64_t now = interface::os::wall_us();
+		for(const ss_ &key : m_store->list("agent/")){
+			ss_ data;
+			AgentRecord a;
+			if(!m_store->get(key, data) || !unpack(data, a) || a.name != name)
+				continue;
+			if(!a.access.empty() && now >= a.refresh_until_us)
+				agent_gone(key.substr(6), a, "ended, unused for 90 days");
+			else
+				mine[std::make_pair(a.made_us, key.substr(6))] = a;
+		}
+		return mine;
+	}
+
+	void agent_gone(const ss_ &id, const AgentRecord &a, const ss_ &why)
+	{
+		m_store->remove("agent/"+id);
+		log_i(MODULE, "%s's agent token %s (\"%s\") %s", cs(a.name),
+				cs(id.substr(0, 8)), cs(a.label), cs(why));
+		m_server->emit_event("accounts:agent_revoked", new Login(0, id));
 	}
 
 	static ss_ utc_text(int64_t us)
@@ -2732,13 +2809,7 @@ struct Module: public interface::Module, public Interface
 		const ss_ cmd = jstr(req, "cmd");
 		json::Value out = json::object();
 		// By their making, oldest first
-		std::map<std::pair<int64_t, ss_>, AgentRecord> mine;
-		for(const ss_ &key : m_store->list("agent/")){
-			ss_ data;
-			AgentRecord a;
-			if(m_store->get(key, data) && unpack(data, a) && a.name == name)
-				mine[std::make_pair(a.made_us, key.substr(6))] = a;
-		}
+		std::map<std::pair<int64_t, ss_>, AgentRecord> mine = agents_of(name);
 		if(cmd == "make"){
 			const ss_ scope = jstr(req, "scope");
 			if(!agents_on())
@@ -2751,17 +2822,7 @@ struct Module: public interface::Module, public Interface
 			if(mine.size() >= AGENTS_A_USER)
 				throw Exception("You have "+itos(AGENTS_A_USER)+" agent "
 						"tokens: revoke one first");
-			// A line of text, at most 40 bytes (not cut inside a UTF-8
-			// sequence)
-			ss_ label;
-			for(char c : jstr(req, "label"))
-				if((unsigned char)c >= 32 && c != 127)
-					label += c;
-			size_t end = std::min<size_t>(label.size(), 40);
-			while(end < label.size() && end > 0 &&
-					((unsigned char)label[end] & 0xc0) == 0x80)
-				end--;
-			label = label.substr(0, end);
+			ss_ label = line_text(jstr(req, "label"), 40);
 			if(label.empty())
 				label = "agent";
 			std::random_device rd;
@@ -2808,12 +2869,692 @@ struct Module: public interface::Module, public Interface
 			t.set("scope", m.second.scope);
 			t.set("made", utc_text(m.second.made_us));
 			t.set("used", utc_text(m.second.used_us));
+			// [KIT_AGENTS_OAUTH] a sign-in's, labelled by its client's name
+			t.set("signed_in", !m.second.access.empty());
 			tokens.append(t);
 		}
 		out.set("on", agents_on());
 		out.set("admin", is_admin(name));
 		out.set("tokens", tokens);
 		return out;
+	}
+
+	// -- [KIT_AGENTS_OAUTH] OAuth for agents (oauth.h)
+	//
+	// MCP's authorization spec (2025-11-25, 2025-06-18's) for Kit's MCP
+	// endpoint, so that a tool that signs in by OAuth only (claude.ai's and
+	// ChatGPT's connectors; Claude Code's or Cursor's remote server with no
+	// header set) connects by the URL alone. This server is the
+	// authorization server, and Kit's endpoint its one protected resource:
+	// - discovery: RFC 9728's metadata of the resource at
+	//   /.well-known/oauth-protected-resource/api/v1/mcp (and without the
+	//   path), which Kit's 401 names; RFC 8414's at
+	//   /.well-known/oauth-authorization-server. The issuer is the origin
+	//   the client reached (network::public_origin()), the endpoints
+	//   /api/v1/oauth/register, /authorize and /token;
+	// - RFC 7591's open registration, capped by count, size and rate, a
+	//   client unused expiring (oauth.h). No Client ID Metadata Documents:
+	//   an outgoing fetch of any URL (SSRF to guard against) for what every
+	//   such client also does by registration;
+	// - the authorization code, PKCE S256 only, RFC 8707's resource being
+	//   this endpoint's URL; the code is good once, for OAUTH_CODE_US, for
+	//   its client, redirect URI, resource and account, and one taken again
+	//   ends what it gave (OAuth 2.1 4.1.3); redirect URIs as registered,
+	//   exactly;
+	// - /authorize's page (oauth_page()): the account's password and then
+	//   its TOTP code, under the address's waits as a join's; or a Starport
+	//   ID through the Starport's own window, an ID linked to an account
+	//   here (the join with it made that); then Allow or Deny;
+	// - what it gives is an agent token of the account's (api.h), its
+	//   rights and limits, listed on My account by the client's name and
+	//   revoked there: an access token for OAUTH_ACCESS_US (MCP: short-
+	//   lived) and a refresh token rotated at each use (MCP: so for a
+	//   public client), for KEEP_US from its last use; the one before used
+	//   again ends the grant (OAuth 2.1 4.3.1: one of the two who have it
+	//   stole it). A new sign-in of the same client and account replaces
+	//   its grant.
+	// The forms are taken from this page's own origin only; /token and
+	// /register answer the tools' servers, which send no Origin, and send
+	// no CORS: a page elsewhere learns nothing by them. No token, code or
+	// form value is logged.
+	// simplified: no revocation endpoint (RFC 7009): a tool removed at its
+	// end leaves its grant on My account until revoked there or ended
+	struct OAuthRequest
+	{
+		ss_ client, redirect, state, challenge, resource, scope;
+		bool redirect_given = false;
+		ss_ totp_name; // its password was right: the code waits
+		int tries = 0;
+		int64_t until_us = 0;
+	};
+	struct OAuthCode
+	{
+		ss_ client, redirect, challenge, resource, scope, name;
+		bool redirect_given = false;
+		ss_ grant; // what it gave, once taken
+		int64_t until_us = 0;
+	};
+	// By the page's id (its forms' rid), by the code's sha256
+	std::map<ss_, OAuthRequest> m_oauth_requests;
+	std::map<ss_, OAuthCode> m_oauth_codes;
+	network::RateTable m_oauth_rates;
+	int64_t m_oauth_swept_us = 0;
+
+	void http_answer(const network::HttpRequest &r, int status,
+			const ss_ &type, const ss_ &body, const ss_ &extra)
+	{
+		network::access(m_server, [&](network::Interface *i){
+			i->http_respond(r.peer, status, type, body, extra);
+		});
+	}
+
+	bool get_client(const ss_ &id, OAuthClient &c)
+	{
+		ss_ data;
+		return interface::sha256::is_hex(id, 32) &&
+				m_store->get("oauth_client/"+id, data) && unpack(data, c);
+	}
+
+	// What has ended: the pages and the codes at each call; the clients
+	// and the grants once an hour (on_tick)
+	void oauth_sweep(bool stored)
+	{
+		const int64_t now = interface::os::wall_us();
+		for(auto it = m_oauth_requests.begin(); it != m_oauth_requests.end();)
+			it = now >= it->second.until_us ? m_oauth_requests.erase(it) :
+					std::next(it);
+		for(auto it = m_oauth_codes.begin(); it != m_oauth_codes.end();)
+			it = now >= it->second.until_us ? m_oauth_codes.erase(it) :
+					std::next(it);
+		if(!stored || !m_store)
+			return;
+		m_oauth_swept_us = now;
+		for(const ss_ &key : m_store->list("oauth_client/")){
+			ss_ data;
+			OAuthClient c;
+			if(!m_store->get(key, data) || !unpack(data, c) || (c.used_us ?
+					now - c.used_us > KEEP_US : now - c.made_us > OAUTH_UNUSED_US))
+				m_store->remove(key);
+		}
+		for(const ss_ &key : m_store->list("agent/")){
+			ss_ data;
+			AgentRecord a;
+			if(m_store->get(key, data) && unpack(data, a) && !a.access.empty() &&
+					now >= a.refresh_until_us)
+				agent_gone(key.substr(6), a, "ended, unused for 90 days");
+		}
+	}
+
+	void on_http(const network::HttpRequest &r)
+	{
+		const ss_ &p = r.path;
+		// The page's logo and fonts, which an app with pages of its own
+		// (Starport, Hearth) serves itself
+		if(p.compare(0, 7, "/brand/") == 0 && m_server->has_module("kit")){
+			if(!network::serve_brand(m_server, r))
+				http_answer(r, 404, "text/plain; charset=utf-8", "Not found\n",
+						"");
+			return;
+		}
+		const bool known = p.compare(0, 13, "/.well-known/") == 0;
+		const bool kit = m_server->has_module("kit");
+		// (another app's /.well-known/ paths are its own)
+		if(known ? !kit : p.compare(0, 14, "/api/v1/oauth/") != 0)
+			return;
+		const ss_ origin = network::public_origin(r);
+		if(!m_store || !kit || origin.empty())
+			return http_answer(r, 404, "text/plain; charset=utf-8",
+					"Not found\n", "");
+		oauth_sweep(false);
+		if(p == "/api/v1/oauth/authorize")
+			return oauth_authorize(r, origin);
+		if(p == "/api/v1/oauth/token")
+			return oauth_token(r, origin);
+		if(p == "/api/v1/oauth/register")
+			return oauth_register(r);
+		json::Value v = json::object();
+		auto list = [](std::initializer_list<const char*> l){
+			json::Value a = json::array();
+			for(const char *s : l)
+				a.append(s);
+			return a;
+		};
+		if(r.method == "GET" && p == "/.well-known/oauth-authorization-server"){
+			v.set("issuer", origin);
+			v.set("authorization_endpoint", origin+"/api/v1/oauth/authorize");
+			v.set("token_endpoint", origin+"/api/v1/oauth/token");
+			v.set("registration_endpoint", origin+"/api/v1/oauth/register");
+			v.set("response_types_supported", list({"code"}));
+			v.set("response_modes_supported", list({"query"}));
+			v.set("grant_types_supported",
+					list({"authorization_code", "refresh_token"}));
+			v.set("code_challenge_methods_supported", list({"S256"}));
+			v.set("token_endpoint_auth_methods_supported",
+					list({"none", "client_secret_post", "client_secret_basic"}));
+			v.set("scopes_supported", list({"builder", "admin"}));
+			v.set("authorization_response_iss_parameter_supported", true);
+		} else if(r.method == "GET" && (p == "/.well-known/oauth-protected-"
+				"resource/api/v1/mcp" || p == "/.well-known/oauth-protected-"
+				"resource")){
+			json::Value as = json::array();
+			as.append(origin);
+			v.set("resource", origin+OAUTH_RESOURCE_PATH);
+			v.set("authorization_servers", as);
+			v.set("bearer_methods_supported", list({"header"}));
+			// What a tool asks for when it is not told: the least
+			v.set("scopes_supported", list({"builder"}));
+			v.set("resource_name", "Buildat Kit (MCP)");
+		} else {
+			return http_answer(r, 404, "text/plain; charset=utf-8",
+					"Not found\n", "");
+		}
+		http_answer(r, 200, "application/json", v.stringify(), "");
+	}
+
+	// POST /api/v1/oauth/register (RFC 7591), JSON: redirect_uris (1 to 5,
+	// oauth_redirect_problem()), client_name, grant_types and
+	// response_types (what this server does only), and
+	// token_endpoint_auth_method ("none" for a public client; a secret is
+	// made for client_secret_post or _basic, the RFC's default)
+	void oauth_register(const network::HttpRequest &r)
+	{
+		auto refuse = [&](int status, const char *error, const ss_ &why){
+			json::Value v = json::object();
+			v.set("error", error);
+			v.set("error_description", why);
+			log_i(MODULE, "OAuth: a registration from %s refused: %s",
+					cs(r.address), cs(why));
+			http_answer(r, status, "application/json", v.stringify(), "");
+		};
+		if(r.method != "POST")
+			return refuse(405, "invalid_request", "POST a client's metadata");
+		if(!m_oauth_rates.ok("register", network::address_bin(r.address),
+				OAUTH_REGISTERS, 3600))
+			return refuse(429, "invalid_client_metadata", "too many "
+					"registrations from your network: try in an hour");
+		const json::Value j = r.body.size() > 8192 ? json::Value() :
+				json::load_string(r.body.c_str());
+		if(!j.is_object())
+			return refuse(400, "invalid_client_metadata",
+					"one JSON object of at most 8 KiB");
+		OAuthClient c;
+		const json::Value &ru = j.get("redirect_uris");
+		if(!ru.is_array() || ru.size() < 1 || ru.size() > 5)
+			return refuse(400, "invalid_redirect_uri",
+					"redirect_uris: 1 to 5 of them");
+		for(unsigned i = 0; i < ru.size(); i++){
+			const ss_ u = ru.at(i).is_string() ? ru.at(i).as_string() : "";
+			const ss_ why = oauth_redirect_problem(u);
+			if(!why.empty())
+				return refuse(400, "invalid_redirect_uri", why);
+			c.redirects.push_back(u);
+		}
+		for(const char *k : {"grant_types", "response_types"}){
+			const json::Value &g = j.get(k);
+			for(unsigned i = 0; g.is_array() && i < g.size(); i++){
+				const ss_ t = g.at(i).is_string() ? g.at(i).as_string() : "";
+				if(k[0] == 'g' ? t != "authorization_code" &&
+						t != "refresh_token" : t != "code")
+					return refuse(400, "invalid_client_metadata", ss_(k)+": "
+							"this server does authorization_code, "
+							"refresh_token and code only");
+			}
+		}
+		c.auth = jstr(j, "token_endpoint_auth_method");
+		if(c.auth.empty())
+			c.auth = "client_secret_basic";
+		if(c.auth != "none" && c.auth != "client_secret_post" &&
+				c.auth != "client_secret_basic")
+			return refuse(400, "invalid_client_metadata",
+					"token_endpoint_auth_method: none, client_secret_post or "
+					"client_secret_basic");
+		c.name = line_text(jstr(j, "client_name"), 100);
+		size_t n = m_store->list("oauth_client/").size();
+		if(n >= OAUTH_CLIENTS){
+			oauth_sweep(true);
+			n = m_store->list("oauth_client/").size();
+		}
+		if(n >= OAUTH_CLIENTS)
+			return refuse(503, "invalid_client_metadata", "this server has "
+					"all the clients it keeps: try later");
+		const ss_ id = oauth_random_hex(16);
+		const ss_ secret = c.auth == "none" ? ss_() : oauth_random_hex(32);
+		c.secret = secret.empty() ? ss_() : oauth_sha(secret);
+		c.made_us = interface::os::wall_us();
+		m_store->set("oauth_client/"+id, pack(c));
+		ss_ rhost;
+		oauth_url_origin(c.redirects[0], &rhost);
+		log_i(MODULE, "OAuth: a client registered from %s: \"%s\", back to %s",
+				cs(r.address), cs(c.name), cs(rhost));
+		json::Value v = json::object(), uris = json::array();
+		for(const ss_ &u : c.redirects)
+			uris.append(u);
+		v.set("client_id", id);
+		v.set("client_id_issued_at", (int64_t)(c.made_us / 1000000));
+		if(!secret.empty()){
+			v.set("client_secret", secret);
+			v.set("client_secret_expires_at", (int64_t)0);
+		}
+		v.set("client_name", c.name);
+		v.set("redirect_uris", uris);
+		json::Value g = json::array(), rt = json::array();
+		g.append("authorization_code");
+		g.append("refresh_token");
+		rt.append("code");
+		v.set("grant_types", g);
+		v.set("response_types", rt);
+		v.set("token_endpoint_auth_method", c.auth);
+		http_answer(r, 201, "application/json", v.stringify(),
+				"Cache-Control: no-store\r\n");
+	}
+
+	// The page's what-asks part, from its sign-in
+	OAuthPage oauth_page_of(const OAuthRequest &q, const ss_ &rid,
+			const ss_ &origin)
+	{
+		OAuthPage page;
+		OAuthClient c;
+		get_client(q.client, c);
+		page.client = c.name;
+		page.redirect = q.redirect;
+		page.scope = q.scope;
+		page.rid = rid;
+		page.server = origin.substr(origin.find("://") + 3);
+		// The Starports this server is listed on, where an ID signs in;
+		// an http one not from an https page (the browser would not fetch)
+		starport_announce::access(m_server,
+				[&](starport_announce::Interface *s){
+			for(auto &l : s->id_listings()){
+				const ss_ o = oauth_url_origin(l.first);
+				if(!o.empty() && (o.compare(0, 8, "https://") == 0 ||
+						origin.compare(0, 7, "http://") == 0))
+					page.starports.push_back(std::make_pair(l.first,
+							std::make_pair(o, l.second)));
+			}
+		});
+		return page;
+	}
+
+	// GET /api/v1/oauth/authorize?response_type=code&client_id&redirect_uri
+	// &state&code_challenge&code_challenge_method=S256&scope&resource: the
+	// page; its forms POST back here (rid, action allow or deny; name and
+	// password, totp, or id_token)
+	void oauth_authorize(const network::HttpRequest &r, const ss_ &origin)
+	{
+		const int64_t now = interface::os::wall_us();
+		OAuthPage page;
+		page.server = origin.substr(origin.find("://") + 3);
+		auto show = [&](int status){
+			const std::pair<ss_, ss_> ph = oauth_page(page);
+			http_answer(r, status, "text/html; charset=utf-8", ph.first,
+					ph.second);
+		};
+		auto ended = [&](const ss_ &why){
+			page.ended = true;
+			page.error = why;
+			show(400);
+		};
+		// Back to the tool, with its state and this server as the issuer
+		// (RFC 9207)
+		auto back = [&](const OAuthRequest &q, const ss_ &query){
+			ss_ to = q.redirect+(q.redirect.find('?') == ss_::npos ? "?" : "&")+
+					query;
+			if(!q.state.empty())
+				to += "&state="+oauth_url_encode(q.state);
+			to += "&iss="+oauth_url_encode(origin);
+			http_answer(r, 303, "text/plain; charset=utf-8", "", "Location: "+to+
+					"\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n");
+		};
+		if(r.method == "GET"){
+			OAuthRequest q;
+			OAuthClient c;
+			q.client = r.param("client_id");
+			if(!get_client(q.client, c))
+				return ended("This tool is not registered here, or its "
+						"registration has ended: connect it again from the tool");
+			q.redirect = r.param("redirect_uri");
+			q.redirect_given = !q.redirect.empty();
+			if(q.redirect.empty() && c.redirects.size() == 1)
+				q.redirect = c.redirects[0];
+			if(std::find(c.redirects.begin(), c.redirects.end(), q.redirect) ==
+					c.redirects.end())
+				return ended("The tool asks to go back to an address it did "
+						"not register: not sent there");
+			// From here a refusal goes back to the tool
+			q.state = r.param("state");
+			if(q.state.size() > 1000)
+				q.state.clear();
+			if(r.param("response_type") != "code")
+				return back(q, "error=unsupported_response_type");
+			q.challenge = r.param("code_challenge");
+			if(r.param("code_challenge_method") != "S256" ||
+					!oauth_pkce_text(q.challenge))
+				return back(q, "error=invalid_request&error_description="+
+						oauth_url_encode("PKCE with S256 is required"));
+			q.resource = origin+OAUTH_RESOURCE_PATH;
+			const ss_ resource = r.param("resource");
+			if(!resource.empty() && oauth_resource_norm(resource) != q.resource)
+				return back(q, "error=invalid_target&error_description="+
+						oauth_url_encode("the resource here is "+q.resource));
+			q.scope = (" "+r.param("scope")+" ").find(" admin ") != ss_::npos ?
+					"admin" : "builder";
+			if(m_oauth_requests.size() >= OAUTH_PENDING)
+				return ended("Too many sign-ins wait on this server: try again "
+						"in a few minutes");
+			q.until_us = now + OAUTH_REQUEST_US;
+			const ss_ rid = oauth_random_hex(16);
+			m_oauth_requests[rid] = q;
+			page = oauth_page_of(q, rid, origin);
+			if(!agents_on()){
+				page.off = true;
+				page.error = "Agent access is off on this server: its Host "
+						"turns it on in Accounts";
+			}
+			return show(200);
+		}
+		if(r.method != "POST")
+			return ended("Not a sign-in");
+		// The forms are this page's: a page of another origin posts nothing
+		if(!r.origin.empty() && r.origin != origin){
+			log_i(MODULE, "OAuth: a sign-in form from %s refused: posted by a "
+					"page of %s", cs(r.address), cs(r.origin.substr(0, 100)));
+			return ended("Not from this server's own page");
+		}
+		auto form = [&](const char *k){ return network::query_value(r.body, k); };
+		const ss_ rid = form("rid");
+		auto it = m_oauth_requests.find(rid);
+		if(rid.empty() || it == m_oauth_requests.end())
+			return ended("This sign-in has ended (each lasts 10 minutes): "
+					"start again from your tool");
+		const OAuthRequest q = it->second;
+		page = oauth_page_of(q, rid, origin);
+		page.totp_name = q.totp_name;
+		if(form("action") == "deny"){
+			m_oauth_requests.erase(it);
+			log_i(MODULE, "OAuth: a sign-in of \"%s\" from %s denied",
+					cs(page.client), cs(r.address));
+			return back(q, "error=access_denied");
+		}
+		if(!agents_on()){
+			page.off = true;
+			page.error = "Agent access is off on this server: its Host turns it "
+					"on in Accounts";
+			return show(403);
+		}
+		ss_ name;
+		const char *how = "a password";
+		const ss_ id_token = form("id_token");
+		if(!id_token.empty()){
+			// A Starport ID's token, from the Starport's window: the account
+			// linked to the ID, as a join by it logs in
+			starport_announce::IdLogin id;
+			ss_ why = "This server does not take Starport IDs";
+			starport_announce::access(m_server,
+					[&](starport_announce::Interface *s){
+				why = s->verify_id_token(id_token, &id);
+			});
+			ss_ linked, pending;
+			if(why.empty() && !m_store->get("starport/"+id.starport+"/"+id.sub,
+					linked))
+				why = "This Starport ID has no account on this server yet: join "
+						"the server with it once, then sign in here";
+			else if(why.empty() && m_store->get("approval/"+linked, pending))
+				why = "Your Starport ID waits for an admin of this server to let "
+						"it in";
+			if(!why.empty()){
+				log_i(MODULE, "OAuth: a Starport ID sign-in from %s refused: %s",
+						cs(r.address), cs(why));
+				page.error = why;
+				return show(403);
+			}
+			name = linked;
+			how = "a Starport ID";
+		} else {
+			// The account's password, then its code: a wrong one waits as
+			// a join's does, by the address's network, and ends the page
+			// after OAUTH_PAGE_TRIES
+			const ss_ bin = network::address_bin(r.address);
+			const int64_t wait = failure_wait(m_address_failures, bin, now);
+			if(wait > 0){
+				page.error = "Too many failed logins: try again in "+
+						itos((int)((wait + 999999) / 1000000))+" s";
+				return show(429);
+			}
+			name = q.totp_name.empty() ? form("name") : q.totp_name;
+			Account account;
+			ss_ why;
+			if(!q.totp_name.empty())
+				why = check_totp(name, form("totp")) ? "" : "TOTP: wrong code";
+			else if(!valid_name(name) || form("password").size() > 100 ||
+					!get_account(name, account) ||
+					!account.password_is(form("password")))
+				why = "Wrong name or password";
+			if(!why.empty()){
+				note_failure(m_address_failures, bin, now);
+				log_i(MODULE, "OAuth: a sign-in as %s from %s failed: %s",
+						valid_name(name) ? cs(name) : "(no name)", cs(r.address),
+						cs(why));
+				if(++it->second.tries >= OAUTH_PAGE_TRIES){
+					m_oauth_requests.erase(it);
+					return ended(why+": that was the last try; start again from "
+							"your tool");
+				}
+				page.error = why;
+				return show(403);
+			}
+			if(q.totp_name.empty() && totp_on(name)){
+				it->second.totp_name = name;
+				page.totp_name = name;
+				return show(200);
+			}
+		}
+		// What a join refuses
+		ss_ why = banned(name, r.address);
+		if(why.empty() && !is_admin(name) && level(name) < LV_MODERATOR &&
+				id_blocked(name))
+			why = "Banned by a blocklist this server follows";
+		size_t others = 0;
+		for(auto &m : agents_of(name))
+			others += m.second.client != q.client;
+		if(why.empty() && others >= AGENTS_A_USER)
+			why = "You have "+itos(AGENTS_A_USER)+" agent tokens: revoke one on "
+					"My account, Connect an agent..., first";
+		if(why.empty() && m_oauth_codes.size() >= OAUTH_PENDING)
+			why = "Too many sign-ins wait on this server: try again in a minute";
+		if(!why.empty()){
+			log_i(MODULE, "OAuth: %s's sign-in from %s refused: %s", cs(name),
+					cs(r.address), cs(why));
+			page.error = why;
+			return show(403);
+		}
+		OAuthCode k;
+		k.client = q.client;
+		k.redirect = q.redirect;
+		k.redirect_given = q.redirect_given;
+		k.challenge = q.challenge;
+		k.resource = q.resource;
+		k.scope = q.scope == "admin" && is_admin(name) ? "admin" : "builder";
+		k.name = name;
+		k.until_us = now + OAUTH_CODE_US;
+		const ss_ code = oauth_random_hex(32);
+		m_oauth_codes[oauth_sha(code)] = k;
+		m_oauth_requests.erase(it);
+		log_i(MODULE, "OAuth: %s allowed \"%s\" (%s) by %s from %s", cs(name),
+				cs(page.client), cs(k.scope), how, cs(r.address));
+		back(q, "code="+code);
+	}
+
+	// A grant's tokens, new; the refresh token before kept to know again
+	std::pair<ss_, ss_> oauth_rotate(AgentRecord &a, const ss_ &gid,
+			int64_t now)
+	{
+		const ss_ as = oauth_random_hex(32), rs = oauth_random_hex(32);
+		a.prev_refresh = a.refresh;
+		a.access = oauth_sha(as);
+		a.refresh = oauth_sha(rs);
+		a.access_until_us = now + OAUTH_ACCESS_US;
+		a.refresh_until_us = now + KEEP_US;
+		m_store->set("agent/"+gid, pack(a));
+		return std::make_pair("bao_"+gid+"_"+as, "bar_"+gid+"_"+rs);
+	}
+
+	// POST /api/v1/oauth/token (OAuth 2.1 3.2, a form): grant_type
+	// authorization_code (code, redirect_uri, code_verifier, resource) or
+	// refresh_token (refresh_token, resource); the client by client_id
+	// with its secret in the form or by HTTP Basic where it has one
+	void oauth_token(const network::HttpRequest &r, const ss_ &origin)
+	{
+		const int64_t now = interface::os::wall_us();
+		const ss_ bin = network::address_bin(r.address);
+		const ss_ no_store = "Cache-Control: no-store\r\nPragma: no-cache\r\n";
+		auto refuse = [&](int status, const char *error, const ss_ &why,
+				const ss_ &extra){
+			if(status != 429)
+				m_oauth_rates.ok("token_fail", bin, OAUTH_TOKEN_FAILS, 60);
+			json::Value v = json::object();
+			v.set("error", error);
+			v.set("error_description", why);
+			log_i(MODULE, "OAuth: a token request from %s refused: %s",
+					cs(r.address), cs(why));
+			http_answer(r, status, "application/json", v.stringify(),
+					no_store+extra);
+		};
+		if(r.method != "POST")
+			return refuse(405, "invalid_request", "POST a form", "");
+		if(!m_oauth_rates.ok("token_fail", bin, OAUTH_TOKEN_FAILS, 60, false))
+			return refuse(429, "invalid_request", "too many refused requests "
+					"from your network: wait a minute", "");
+		auto form = [&](const char *k){ return network::query_value(r.body, k); };
+		ss_ cid = form("client_id"), secret = form("client_secret");
+		const ss_ auth = r.header("authorization");
+		const bool basic = auth.size() > 6 && (auth.compare(0, 6, "Basic ") == 0
+				|| auth.compare(0, 6, "basic ") == 0);
+		const ss_ challenge = basic ? "WWW-Authenticate: Basic\r\n" : "";
+		if(basic){
+			// simplified: taken as it is, not URL-decoded: this server's ids
+			// and secrets are hex
+			const ss_ d = oauth_unbase64(auth.substr(6));
+			const size_t colon = d.find(':');
+			if(colon == ss_::npos)
+				return refuse(401, "invalid_client", "HTTP Basic: id:secret",
+						challenge);
+			cid = d.substr(0, colon);
+			secret = d.substr(colon + 1);
+		}
+		OAuthClient c;
+		if(!get_client(cid, c))
+			return refuse(401, "invalid_client", "no such client: register it "
+					"again", challenge);
+		if(!c.secret.empty() && !oauth_same(oauth_sha(secret), c.secret))
+			return refuse(401, "invalid_client", "not the client's secret",
+					challenge);
+		const ss_ grant = form("grant_type");
+		const ss_ resource = form("resource");
+		AgentRecord a;
+		ss_ gid;
+		if(grant == "authorization_code"){
+			auto it = m_oauth_codes.find(oauth_sha(form("code")));
+			if(it == m_oauth_codes.end())
+				return refuse(400, "invalid_grant", "no such code: one is taken "
+						"once, within "+itos((int)(OAUTH_CODE_US / 1000000))+" s",
+						"");
+			OAuthCode &k = it->second;
+			if(!k.grant.empty()){
+				ss_ data;
+				if(m_store->get("agent/"+k.grant, data) && unpack(data, a))
+					agent_gone(k.grant, a, "revoked: its sign-in's code was "
+							"taken again");
+				m_oauth_codes.erase(it);
+				return refuse(400, "invalid_grant", "the code was taken "
+						"already: what it gave is revoked", "");
+			}
+			const ss_ ru = form("redirect_uri");
+			if(k.client != cid)
+				return refuse(400, "invalid_grant", "the code is another "
+						"client's", "");
+			if((k.redirect_given || !ru.empty()) && ru != k.redirect)
+				return refuse(400, "invalid_grant", "redirect_uri: not the one "
+						"the code was asked with", "");
+			const ss_ v = form("code_verifier");
+			if(!oauth_pkce_text(v) || !oauth_same(oauth_base64(
+					interface::sha256::calculate(v), true), k.challenge))
+				return refuse(400, "invalid_grant", "code_verifier: not the "
+						"code's (PKCE S256)", "");
+			if(!resource.empty() && oauth_resource_norm(resource) != k.resource)
+				return refuse(400, "invalid_target", "resource: the code is for "+
+						k.resource, "");
+			if(!agents_on() || !exists(k.name))
+				return refuse(400, "invalid_grant", "agent access is off here, "
+						"or the account is gone", "");
+			size_t mine = 0;
+			for(auto &m : agents_of(k.name)){
+				if(m.second.client == cid)
+					agent_gone(m.first.second, m.second, "replaced by a new "
+							"sign-in");
+				else
+					mine++;
+			}
+			if(mine >= AGENTS_A_USER)
+				return refuse(400, "invalid_grant", "the account has "+
+						itos(AGENTS_A_USER)+" agent tokens: revoke one on My "
+						"account", "");
+			ss_ rhost;
+			oauth_url_origin(k.redirect, &rhost);
+			a.name = k.name;
+			a.scope = k.scope;
+			a.label = c.name.empty() ? rhost : line_text(c.name, 40);
+			a.made_us = now;
+			a.client = cid;
+			a.resource = k.resource;
+			gid = oauth_random_hex(16);
+			k.grant = gid;
+			if(now - c.used_us > 3600LL * 1000000){
+				c.used_us = now;
+				m_store->set("oauth_client/"+cid, pack(c));
+			}
+			log_i(MODULE, "OAuth: %s's agent token %s (\"%s\", %s) made by a "
+					"sign-in", cs(a.name), cs(gid.substr(0, 8)), cs(a.label),
+					cs(a.scope));
+		} else if(grant == "refresh_token"){
+			ss_ data, rs;
+			if(!oauth_split(form("refresh_token"), "bar_", gid, rs) ||
+					!m_store->get("agent/"+gid, data) || !unpack(data, a) ||
+					a.access.empty() || a.client != cid || !exists(a.name))
+				return refuse(400, "invalid_grant", "not a refresh token of "
+						"this server's (revoked, or the account gone): sign in "
+						"again", "");
+			const ss_ h = oauth_sha(rs);
+			if(!a.prev_refresh.empty() && oauth_same(h, a.prev_refresh)){
+				agent_gone(gid, a, "revoked: a refresh token of before used "
+						"again");
+				return refuse(400, "invalid_grant", "a refresh token used "
+						"twice: revoked; sign in again", "");
+			}
+			if(!oauth_same(h, a.refresh) || now >= a.refresh_until_us)
+				return refuse(400, "invalid_grant", "the refresh token has "
+						"ended: sign in again", "");
+			if(!resource.empty() && oauth_resource_norm(resource) != a.resource)
+				return refuse(400, "invalid_target", "resource: the token is "
+						"for "+a.resource, "");
+			if(!agents_on())
+				return refuse(400, "invalid_grant", "agent access is off here",
+						"");
+			if(now - c.used_us > 3600LL * 1000000){
+				c.used_us = now;
+				m_store->set("oauth_client/"+cid, pack(c));
+			}
+		} else {
+			return refuse(400, "unsupported_grant_type", "authorization_code "
+					"or refresh_token", "");
+		}
+		const std::pair<ss_, ss_> t = oauth_rotate(a, gid, now);
+		json::Value v = json::object();
+		v.set("access_token", t.first);
+		v.set("token_type", "Bearer");
+		v.set("expires_in", (int64_t)(OAUTH_ACCESS_US / 1000000));
+		v.set("refresh_token", t.second);
+		v.set("scope", a.scope);
+		http_answer(r, 200, "application/json", v.stringify(), no_store);
 	}
 
 	// -- TOTP ([STARPORT] 10a)
@@ -3332,6 +4073,8 @@ struct Module: public interface::Module, public Interface
 	{
 		stats_sample();
 		ntfy_tick();
+		if(interface::os::wall_us() - m_oauth_swept_us > 3600LL * 1000000)
+			oauth_sweep(true);
 		std::vector<std::pair<PeerId, ss_>> r;
 		{
 			std::lock_guard<std::mutex> lock(m_mail_results->m);

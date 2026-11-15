@@ -199,10 +199,14 @@ namespace accounts
 		// tool's name, the user's choice. Listed with its making and last
 		// use, revocable; it stands no more once revoked, once its account is
 		// gone, or while agent access is off (the admin's switch on the
-		// Accounts page, on by default).
+		// Accounts page, on by default). [KIT_AGENTS_OAUTH] Or one a tool
+		// got by signing in (OAuth, accounts.cpp): its access token
+		// ("bao_"), an hour's, of a grant stored as agent/<grant id>,
+		// labelled by the tool's name and listed and revoked the same way.
 		struct AgentToken
 		{
-			ss_ id;    // its sha256 in hex: what names it, not it
+			// its sha256 in hex, or a grant's id: what names it, not it
+			ss_ id;
 			ss_ name;  // the account
 			ss_ scope; // "builder" or "admin"
 			ss_ label;

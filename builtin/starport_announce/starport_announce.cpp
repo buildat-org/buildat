@@ -1150,6 +1150,18 @@ struct Module: public interface::Module, public Interface
 		return "";
 	}
 
+	sv_<std::pair<ss_, ss_>> id_listings()
+	{
+		sv_<std::pair<ss_, ss_>> out;
+		if(!accepts_ids())
+			return out;
+		std::lock_guard<std::mutex> lock(m_mutex);
+		for(auto &pair : m_listings)
+			if(!pair.second.id.empty())
+				out.emplace_back(pair.first, pair.second.id);
+		return out;
+	}
+
 	void* get_interface()
 	{
 		return dynamic_cast<Interface*>(this);
