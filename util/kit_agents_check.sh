@@ -6,10 +6,11 @@
 # [KIT_AGENTS] A builder's agent on Workbench, through MCP (POST /api/v1/mcp
 # on the server's port). kitboss (the admin) on a headless weston's Xwayland
 # of the check's own (the user's clipboard is not touched):
-#   1. My account, Connect an agent...: a Builder token made and its block
-#      copied by Copy (xclip reads it: the server's address and a ready
-#      `claude mcp add` line), then an Admin one labelled "admin agent";
-#      neither token in a log;
+#   1. My account, Connect an agent...: a Builder token made (labelled "My
+#      agent"), its address alone copied by its Copy, the token by its own
+#      (xclip reads them), the Claude Code example (a ready `claude mcp add`
+#      line) and the JSON config one each shown by its button and copied;
+#      then an Admin one labelled "admin agent"; neither token in a log;
 #   2. an MCP client (Python's stdlib) with the builder token: initialize
 #      (the version negotiated), notifications/initialized, tools/list, the
 #      state and the types; a kit/timer and a kit/counter placed, the timer
@@ -33,8 +34,11 @@
 #   4. Agents (MCP) off on the Accounts page: the admin token refused with
 #      that said; on again: its set_builder done, and past 120 requests a
 #      minute, 429.
-# Screenshots, kept with KEEP_TMP=1: $t/token.png (the block), $t/tokens.png
-# (the list), $t/switch.png (the Accounts page)
+#   5. On a phone (a touch client, 412x915): a token made, each of the
+#      page's buttons tapped (on the screen, uncovered).
+# Screenshots, kept with KEEP_TMP=1: $t/token.png (the token's page),
+# $t/token_json.png (the JSON config shown), $t/tokens.png (the list),
+# $t/switch.png (the Accounts page), $t/phone.png (the page on the phone)
 #   util/kit_agents_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -51,7 +55,7 @@ export BUILDAT_WORKBENCH_PROJECT=world BUILDAT_JOIN_PASSWORD=checkpass12
 check_build
 sock=buildat-agents-$$
 weston --backend=headless --xwayland --socket=$sock --width=1100 \
-	--height=800 > "$t/weston.log" 2>&1 &
+	--height=1000 > "$t/weston.log" 2>&1 &
 CHECK_PIDS+=($!)
 for i in $(seq 50); do
 	d=$(grep -ao "xserver listening on display :[0-9]*" "$t/weston.log" | grep -o ":[0-9]*$")
@@ -80,13 +84,13 @@ step() # <seconds> <regex in the client's log> <command>...
 	cmd "$@"
 	await "$CL" "$m" "$s" "$re"
 }
-# The clipboard once it holds a block other than <last>
+# The clipboard once it holds something other than <last>
 clip() # <last>
 {
 	local i got
 	for i in $(seq 50); do
 		got=$(DISPLAY=$d xclip -selection clipboard -o 2>/dev/null)
-		case $got in *"Bearer bat_"*) [ "$got" != "$1" ] && break;; esac
+		[ -n "$got" ] && [ "$got" != "$1" ] && break
 		sleep 0.2
 	done
 	printf '%s' "$got"
@@ -118,22 +122,34 @@ step 10 "accounts: agents: 0 tokens, on" "frames 3" 'click Button "My account*"'
 	"frames 5" 'click Button "Connect an agent..."'
 step 10 "accounts: agents: a token made, builder" "frames 3" 'click Button "Make a token"'
 cmd "frames 5" "screenshot $t/token.png"
-step 10 "accounts: agents: the block copied" "frames 3" 'click Button "Copy"'
-block=$(clip "")
-url=$(grep -aoP '^Server: \K\S+' <<< "$block")
-tok=$(grep -aoP 'claude mcp add --transport http buildat \S+ --header "Authorization: Bearer \Kbat_[0-9a-f]{64}(?="$)' <<< "$block")
+# (the address alone: most tools take it and the token apart)
+step 10 "accounts: agents: the URL copied" "frames 3" 'click Button "copy URL"'
+url=$(clip "")
 [ "$url" = "http://localhost:$SERVER_PORT/api/v1/mcp" ] ||
-	fail "the block's address is \"$url\" ($t/token.png): $block"
-[ -n "$tok" ] || fail "no claude mcp add line with a token in the block: $block"
-grep -aqF '{"mcpServers": {"buildat": {"type": "http", "url": "'"$url"'", "headers": {"Authorization": "Bearer '"$tok"'"}}}}' <<< "$block" ||
-	fail "no MCP config in the block: $block"
+	fail "the URL copied is \"$url\" ($t/token.png)"
+step 10 "accounts: agents: the token copied" "frames 3" 'click Button "copy token"'
+tok=$(clip "$url")
+[[ $tok =~ ^bat_[0-9a-f]{64}$ ]] || fail "the token copied is not one: $tok"
+step 10 "accounts: agents: the Claude Code example shown" "frames 3" 'click Button "Claude Code"'
+step 10 "accounts: agents: the Claude Code example copied" "frames 3" \
+	'click Button "copy Claude Code example"'
+ex=$(clip "$tok")
+[ "$ex" = 'claude mcp add --transport http buildat '"$url"' --header "Authorization: Bearer '"$tok"'"' ] ||
+	fail "the Claude Code example: $ex"
+step 10 "accounts: agents: the JSON config example shown" "frames 3" 'click Button "JSON config"'
+step 10 "accounts: agents: the JSON config example copied" "frames 3" \
+	'click Button "copy JSON config example"'
+ex=$(clip "$ex")
+[ "$ex" = '{"mcpServers": {"buildat": {"type": "http", "url": "'"$url"'", "headers": {"Authorization": "Bearer '"$tok"'"}}}}' ] ||
+	fail "the JSON config example: $ex"
+cmd "frames 5" "screenshot $t/token_json.png"
 cmd "frames 3" 'click Button "Done"' "frames 3" 'click Button "Scope: Builder*"' \
-	"frames 3" 'click LineEdit "Claude Code"' "delay 300" "keydown ctrl" \
+	"frames 3" 'click LineEdit "My agent"' "delay 300" "keydown ctrl" \
 	"keypress a" "keyup ctrl" "text admin agent" "frames 2"
 step 10 "accounts: agents: a token made, admin" 'click Button "Make a token"'
-step 10 "accounts: agents: the block copied" "frames 3" 'click Button "Copy"'
-adm=$(clip "$block" | grep -aoP 'Bearer \Kbat_[0-9a-f]{64}' | head -1)
-[ -n "$adm" ] && [ "$adm" != "$tok" ] || fail "no second token on the clipboard"
+step 10 "accounts: agents: the token copied" "frames 3" 'click Button "copy token"'
+adm=$(clip "$ex")
+[[ $adm =~ ^bat_[0-9a-f]{64}$ ]] && [ "$adm" != "$tok" ] || fail "no second token on the clipboard: $adm"
 cmd "frames 3" 'click Button "Done"' "frames 5" "screenshot $t/tokens.png"
 # Out of the window and the menu, into edit mode: the builders' list
 step 10 "pause: the menu shown" "keypress Escape"
@@ -395,7 +411,7 @@ cat "$t/main.log"
 for re in "An edit by kitboss's agent: placed kit/timer [0-9]+" \
 		"An edit by kitboss's agent: set [0-9]+'s kit/timer interval to 0.2" \
 		"An edit by kitboss's agent: linked [0-9]+.tick -> [0-9]+.count" \
-		"An undo by kitboss's agent: " "kitboss's agent \(\"Claude Code\", builder token\) is here"; do
+		"An undo by kitboss's agent: " "kitboss's agent \(\"My agent\", builder token\) is here"; do
 	grep -aqE "$re" "$SL" || fail "no \"$re\" in $SL"
 done
 python3 -I "$t/mcp.py" build "$url" "$tok" > "$t/build.log" 2>&1 ||
@@ -414,7 +430,7 @@ step 10 "pause: the menu shown" "keypress Escape"
 step 10 "accounts: agents: 2 tokens, on" "frames 3" 'click Button "My account*"' \
 	"frames 5" 'click Button "Connect an agent..."'
 m=$(mark "$SL")
-step 10 "accounts: agents: revoked Claude Code" "frames 3" 'click Button "Revoke Claude Code"'
+step 10 "accounts: agents: revoked My agent" "frames 3" 'click Button "Revoke My agent"'
 # (gone at once, not at its next request)
 await "$SL" "$m" 5 "kitboss's agent left: its token was revoked"
 python3 -I "$t/mcp.py" gone "$url" "$tok" || fail "the revoked token not refused"
@@ -438,11 +454,50 @@ grep -aq "kitboss's agent made builder kitboss" "$SL" || fail "no admin edit by 
 cmd "sync 2000" quit
 exec 3>&-
 wait $CLIENT 2>/dev/null
+# 5. On a phone (a touch client, 412x915): a token made, each button of the
+# page tapped (a tap fails on one off the screen or covered)
+cat > "$t/phone.cmds" <<EOF
+wait_log_any 120000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+frames 3
+tap Button "Menu"
+wait_log 10000 pause: the menu shown
+frames 3
+tap Button "My account*"
+frames 5
+tap Button "Connect an agent..."
+wait_log 10000 accounts: agents: 1 tokens, on
+frames 3
+tap Button "Make a token"
+wait_log 10000 accounts: agents: a token made, builder
+tap Button "copy URL"
+wait_log 10000 accounts: agents: the URL copied
+tap Button "copy token"
+wait_log 10000 accounts: agents: the token copied
+tap Button "Claude Code"
+wait_log 10000 accounts: agents: the Claude Code example shown
+tap Button "copy Claude Code example"
+wait_log 10000 accounts: agents: the Claude Code example copied
+tap Button "JSON config"
+wait_log 10000 accounts: agents: the JSON config example shown
+frames 5
+screenshot $t/phone.png
+tap Button "copy JSON config example"
+wait_log 10000 accounts: agents: the JSON config example copied
+tap Button "Done"
+frames 3
+quit
+EOF
+run_client 60 "$t/phone.log" env DISPLAY=$d WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 \
+	BUILDAT_JOIN_NAME=kitboss BUILDAT_TOUCH=1 timeout 240 bin/buildat \
+	-C "$t/client_cache" -D "$t/cu_phone" -s localhost:$SERVER_PORT -w 412x915 \
+	-l 3 -o sound_mute=1 -c @"$t/phone.cmds" || fail "the phone's page ($t/phone.log)"
 for f in "$SL" "$CL" "$t/main.log"; do
 	grep -aqF "${tok#bat_}" "$f" && fail "the builder token is in $f"
 	grep -aqF "${adm#bat_}" "$f" && fail "the admin token is in $f"
 done
-for p in token tokens switch; do
+grep -aqE "bat_[0-9a-f]{64}" "$t/phone.log" && fail "a token in $t/phone.log"
+for p in token token_json tokens switch phone; do
 	[ -s "$t/$p.png" ] || fail "no screenshot $t/$p.png"
 done
-echo "PASS: an agent token made, copied and revoked on My account; Kit's MCP endpoint edits, runs, reads back and undoes as kitboss's agent with all its tools and its guide, refuses what it should; screenshots $t/token.png $t/tokens.png $t/switch.png"
+echo "PASS: an agent token made, its address, the token and the examples copied apart and revoked on My account, the page's buttons tapped on a phone; Kit's MCP endpoint edits, runs, reads back and undoes as kitboss's agent with all its tools and its guide, refuses what it should; screenshots $t/token.png $t/token_json.png $t/tokens.png $t/switch.png $t/phone.png"
