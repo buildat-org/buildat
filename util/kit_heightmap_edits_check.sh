@@ -19,6 +19,9 @@
 #      change would make them): the save's heightmap kept, with a warning.
 #   4. [KIT_HM_ORIGIN] A copy made a save from before maps had an origin:
 #      its map loaded at the world's origin, where it was.
+#   5. [KIT_NO_WORLD] The map made 8 deep (under 16: chunks of 8); then the
+#      surface none: no ground, voxel and terrain edits refused, the
+#      terrain tool too.
 # [KIT_HM_ORIGIN] Part 1's map lies on the voxels' area, centred, and its
 # resize grows both sides; cobble columns on two of the area's corners, seen from
 # above in 2D and 3D, a pixel test at the map's corners (KEEP_TMP=1 keeps
@@ -394,4 +397,30 @@ heights "$s4" 10 10 | grep -q . || fail "no (10,10) on the old save's map ($s4)"
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'world'" | grep -q '"hm_anchor" *: *"corner"' ||
 	fail "the old save's World row not anchored at the corner ($db)"
 echo "ok: a save from before origins loaded with its map where it was"
+# 5. [KIT_NO_WORLD] The map 8 deep (its chunks 8, not 64), then the surface
+# none: no ground; a voxel set and a terrain stroke refused, the terrain
+# tool too
+{
+	joined
+	cat <<'EOF'
+event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "depth", "value": 8}
+wait_log 20000 kit editor: state:
+event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "surface", "value": "none"}
+wait_log 20000 kit editor: state:
+event kit_edit {"op": "set_voxel", "pos": [0, 5, 0], "voxel": "kit/cobble"}
+wait_log 10000 this scene has no voxels
+event kit_edit {"op": "terrain", "tool": "raise", "x": 0, "y": 0, "z": 0, "size": 2, "strength": 5, "stroke": 1}
+wait_log 10000 this scene has no voxels
+keypress T
+wait_log 5000 kit editor: the terrain tool: No voxels in this scene
+quit
+EOF
+} > "$t/boss5.cmds"
+server 5 "$t/user"
+client boss5
+stop
+s5=$t/srv5.log
+want "$s5" "World: the heightmap from (-64,-4) to (63,3)" "no ground, border void"
+grep -a "stack traceback" "$t/boss5.log" && fail "a Lua error with no ground ($t/boss5.log)"
+echo "ok: a heightmap 8 deep; the surface none: no ground, the voxel edits and the terrain tool refused"
 echo "PASS: a heightmap's terrain-tool edits and a builder's decorations kept over a resize, a change of shape and a restart; regenerate all discarding them, undone; the reset brush; the save's map kept where the World's parameters changed under it"

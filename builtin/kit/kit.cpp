@@ -6894,7 +6894,8 @@ struct Module: public interface::Module, public Interface
 
 	// The World's parameters: the first World on the current World's
 	// scene ([KIT_SCENES]; before, on the root), over its type's defaults
-	// (the app's among them); none: the defaults
+	// (the app's among them); none: the defaults, [KIT_NO_WORLD] their
+	// surface "none" (no ground) unless the app's defaults are a World
 	json::Value world_params()
 	{
 		json::Value out = json::object();
@@ -6920,6 +6921,8 @@ struct Module: public interface::Module, public Interface
 						json::Value();
 				out.set(it.key(), v.is_undefined() ? (*it).get("default") : v);
 			}
+		if(!in && !m_host.world_default)
+			out.set("surface", "none");
 		// [KIT_MATERIAL_SETS] A package's set pinned by its version (and
 		// its bases'): an upgrade is a change of the World's, applied as
 		// one (sections nobody wrote generated again)
@@ -7206,28 +7209,32 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
-	// The World's parameters changed (an edit, an undo): applied
-	void world_check(const ss_ &by)
+	// The World's parameters changed (an edit, an undo): applied (true: one
+	// was)
+	bool world_check(const ss_ &by)
 	{
+		bool any = false;
 		// [KIT_SCENES] each scene's
 		for(auto &w : m_worlds){
 			if(!scene_id(w.first))
 				continue;
 			WorldScope ws(m_w, &w.second);
-			world_check_one(by);
+			any = world_check_one(by) || any;
 		}
+		return any;
 	}
 
-	void world_check_one(const ss_ &by)
+	bool world_check_one(const ss_ &by)
 	{
 		if(!m_w->world_scene)
-			return;
+			return false;
 		const json::Value p = world_params();
 		if(p.stringify() == m_w->world_applied.stringify())
-			return;
+			return false;
 		ss_ why;
 		if(!apply_world(p, by, false, why))
 			warn("not applied: "+why);
+		return true;
 	}
 
 	// Why a World of these parameters cannot be made of the set ("": it
@@ -7469,7 +7476,8 @@ struct Module: public interface::Module, public Interface
 				by.empty() ? "" : cs(" by "+by),
 				cs(p.generator), cs(p.size == "finite" ? itos(p.width)+"x"+
 				itos(p.depth) : ss_("infinite")), p.seed, cs(p.biome),
-				cs(p.heightmap() ? ss_("a heightmap") : "voxels"),
+				cs(p.heightmap() ? ss_("a heightmap") : p.none() ? "no ground" :
+				"voxels"),
 				cs("border "+p.border), lo, hi, hash,
 				first ? (again ? ", the save's was another" : "") : "",
 				world::VERSION, p.with_caves() && !p.heightmap() ? ", caves" : "",
@@ -7664,10 +7672,11 @@ struct Module: public interface::Module, public Interface
 			// [KIT_HM_VOXELS] a heightmap's air sections: only the
 			// edited ones saved
 			// [KIT_SESSIONS_1] a session's: only what it changed
-			w->set_save_unaltered(!m_active && p.finite() && !p.heightmap());
+			w->set_save_unaltered(!m_active && p.finite() && !p.heightmap() &&
+					!p.none());
 			m_w->hm_world = p.heightmap() ? w : nullptr;
 			m_w->lean_world = m_active && !in_draft() && p.finite() &&
-					!p.heightmap() ? w : nullptr;
+					!p.heightmap() && !p.none() ? w : nullptr;
 		});
 	}
 
@@ -8473,15 +8482,25 @@ struct Module: public interface::Module, public Interface
 	// even where the World's parameters differ from those it was made by
 	// (a warning): only a builder's change generates it again, and then
 	// only its unedited samples (hm_overlay())
+	static int hm_chunk(const world::Params &p)
+	{
+		int c = 4;
+		while(c < 64 && c < std::min(p.width, p.depth))
+			c *= 2;
+		return c;
+	}
+
 	bool apply_heightmap(const world::Params &p, world::Heights &h,
 			const sv_<int> &layers, const world::Ids &ids, bool again,
 			bool first, uint32_t &hash, ss_ &why)
 	{
 		bool generated = false;
 		heightmap::Size size;
-		size.chunks_x = (p.width + 63) / 64;
-		size.chunks_z = (p.depth + 63) / 64;
-		size.chunk_size = 64;
+		// [KIT_NO_WORLD] chunks of 64, or a side under 64 the next power of
+		// two (4 at least): a 192x8 World's map is 192x8, not 192x64
+		size.chunk_size = hm_chunk(p);
+		size.chunks_x = (p.width + size.chunk_size - 1) / size.chunk_size;
+		size.chunks_z = (p.depth + size.chunk_size - 1) / size.chunk_size;
 		size.cell_size = 1;
 		size.base_y = -100;
 		size.materials = 5;
@@ -11620,7 +11639,9 @@ struct Module: public interface::Module, public Interface
 		auto sec = [&](int v){ return v >= 0 ? v / S : -((-v + S - 1) / S); };
 		const world::Params &p = m_w->wp;
 		const bool lean = m_w->lean_world != nullptr;
-		if(p.heightmap() || !p.finite() || lean){
+		// [KIT_NO_WORLD] no ground: nothing loaded
+		if(p.none()){
+		} else if(p.heightmap() || !p.finite() || lean){
 			// [KIT_HM_WALK] round the spawn and each player; a heightmap's
 			// voxels are air built on over the terrain
 			// [KIT_HM_FREE] A heightmap's: only the sections the save has
@@ -17919,13 +17940,14 @@ struct Module: public interface::Module, public Interface
 		if(!w || !hm_world_of(w) || loaded(w, p))
 			return loaded(w, p);
 		WorldScope ws(m_w, hm_world_of(w));
-		// (the heightmap's samples: whole chunks of 64 from its origin,
+		// (the heightmap's samples: whole chunks from its origin,
 		// apply_heightmap()'s, [KIT_HM_ORIGIN])
 		const int ox = m_w->hm_corner ? 0 : m_w->wp.x0(),
 				oz = m_w->hm_corner ? 0 : m_w->wp.z0();
+		const int c = hm_chunk(m_w->wp);
 		if(p.getX() < ox || p.getZ() < oz ||
-				p.getX() >= ox + (m_w->wp.width + 63) / 64 * 64 ||
-				p.getZ() >= oz + (m_w->wp.depth + 63) / 64 * 64)
+				p.getX() >= ox + (m_w->wp.width + c - 1) / c * c ||
+				p.getZ() >= oz + (m_w->wp.depth + c - 1) / c * c)
 			return false;
 		const pv::Vector3DInt16 ss = w->get_section_size_voxels();
 		auto div = [](int32_t a, int b){
@@ -19031,6 +19053,10 @@ struct Module: public interface::Module, public Interface
 				hm.append(hm_oz(map));
 				c.set("hm", hm);
 			});
+		// [KIT_NO_WORLD] no ground: the client's cells not loaded are air
+		const World *pw = world_named(pe.scene);
+		if(pw && pw->world_scene && pw->wp.none())
+			c.set("void", true);
 		return c;
 	}
 
@@ -19548,6 +19574,8 @@ struct Module: public interface::Module, public Interface
 		json::Value classes = json::array();
 		std::map<uint32_t, char> cls;
 		const json::Value &extra = voxel_extra();
+		// [KIT_NO_WORLD] no ground: a cell not loaded is air
+		const char unknown = m_w->world_scene == scene && m_w->wp.none() ? '.' : '?';
 		if(scene)
 			voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
 				voxelworld::Instance *w = ivw->get_instance(scene);
@@ -19569,7 +19597,7 @@ struct Module: public interface::Module, public Interface
 							(fmt.param.get(word) & 0xff) << 16 : 0);
 					char ch = '.';
 					if(id == interface::VOXELTYPEID_UNDEFINED){
-						ch = '?';
+						ch = unknown;
 					} else {
 						auto c = cls.find(key);
 						if(c != cls.end()){
@@ -30065,7 +30093,7 @@ struct Module: public interface::Module, public Interface
 					bs.append(b.first);
 				t.set("biomes", bs);
 				t.set("biome", m_w->wp.biome);
-				t.set("surface", ss_(m_w->wp.heightmap() ? "heightmap" : "voxels"));
+				t.set("surface", m_w->wp.surface);
 				// [KIT_HEIGHTMAP_REGEN_LOSS] its edited samples, a previous map
 				if(m_w->wp.heightmap()){
 					hm_edits_load();
@@ -30279,6 +30307,16 @@ struct Module: public interface::Module, public Interface
 					ps.at(2u).as_number());
 			return to_scene(peer, "", ps.at(0u).as_number(),
 					ps.at(1u).as_number(), ps.at(2u).as_number());
+		}
+		// [KIT_NO_WORLD] no ground, no voxels to write
+		// simplified: a prefab's or stamp's voxels are left out silently (no
+		// section is loaded to take them: hm_section())
+		if(op == "terrain" || op == "set_voxel" || op == "pattern" ||
+				op == "regenerate"){
+			const World *pw = world_named(p.scene);
+			if(pw && pw->world_scene && pw->wp.none())
+				return refuse("this scene has no voxels: its kit/terrain's "
+						"surface is none (or it has no kit/terrain)");
 		}
 		if(op == "terrain")
 			return terrain(p, peer, j, refuse);
@@ -30539,7 +30577,11 @@ struct Module: public interface::Module, public Interface
 		}
 		log_i(MODULE, "An edit by %s: %s", cs(p.name), cs(what));
 		m_edit_what = what;
-		world_check(p.name);
+		// (commit() sent the state before the World changed: its surface,
+		// [KIT_NO_WORLD]'s none, the editor's tools go by)
+		if(world_check(p.name))
+			for(auto &o : m_peers)
+				send_state(o.first);
 		if(!m_bench_saved.empty())
 			bench_follow(p);
 		// [KIT_FREE_PREFAB] every session's objects are the prefab's new model
@@ -30635,7 +30677,8 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_SCENES] A scene of the composition, a name of letters, digits
 	// and _: its entity, and its World the current scene's copied ("copy")
-	// or the World type's defaults (the app's); the app makes it
+	// or none ([KIT_NO_WORLD]; the World type's defaults where the app says
+	// so, Host::world_default); the app makes it
 	// (Host::make_scene). simplified: an undo takes the entities back, the
 	// app's scene stays (empty, unused)
 	bool new_scene_change(const json::Value &j, const Peer &p,

@@ -8,7 +8,8 @@
 # admin) and kitbob on a headless weston's Xwayland of the check's own:
 #   0. the template packed by util/pack_templates.sh and installed, its
 #      types with it;
-#   1. New from it, F6: the side camera, the bike's movement, its client
+#   1. New from it: the editor in the Front view (edit.png, its kit/controls'
+#      edit_view); F6: the side camera, the bike's movement, its client
 #      part's draw hook drawing the body (start.png);
 #   2. W, then A: the bike up the first ramp's polygon, leaning back, the
 #      head down: the crash (crag_bike's output, linked to the run: its line
@@ -16,14 +17,17 @@
 #   3. back in edit mode (Stopped), a version with a heavy step put over
 #      kit:type: refused, "too slow";
 #   4. played again, W: the old version steps on the server, the first gem's trigger zone
-#      taken (the run's line: Gems 1/3, side.png); the corrections few;
+#      taken (the run's line: Gems 1/3, side.png); the corrections few; the
+#      side camera led ahead in +x, after Space (turned round) in -x
+#      (turned.png, [KIT_SIDE_LEAD]);
 #   5. kitbob joins, his body drawn by the hook on kitboss's screen; his
 #      first My account page drawn again when the hello comes, "Connect an
 #      agent..." on it (accounts.lua).
 # And [KIT_PLAY_HINTS]: Workbench's help line in play the bike's own hints
 # (movement.help), W's and A's gone once used, Space's last after the gem:
 # the line gone, kept in Kit's storage (kit_hints).
-# Screenshots, kept with KEEP_TMP=1: $t/start.png, $t/side.png
+# Screenshots, kept with KEEP_TMP=1: $t/edit.png, $t/start.png, $t/side.png,
+# $t/turned.png
 #   util/kit_bike_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -130,6 +134,10 @@ cmd "frames 3" 'click DropDownList "▼"' "delay 300" "frames 3"
 step 10 "world_menu: template picked" 'click Text "Crag Trial (buildat, installed, unverified)"'
 step 60 "kit editor: edit mode on" "frames 3" 'click Button "Create"'
 await "$CL" 0 30 "player physics enabled"
+# [KIT_EDIT_VIEW] the template's kit/controls: the editor comes up in Front
+await "$CL" 0 10 "kit editor: kit/controls' edit view front"
+cmd "frames 10" "screenshot $t/edit.png"
+echo "ok: the editor came up in the Front view (kit/controls' edit_view)"
 for re in "The template's type local/crag_bike \([0-9]+ bytes\)" "The template's type local/crag_gem " \
 		"The template's type local/crag_run "; do
 	grep -aqE "$re" "$SL" || fail "no \"$re\" in $SL"
@@ -214,8 +222,30 @@ c=$(tail -c 3000 "$CL" | grep -aoP 'kit: body at .*, \K[0-9]+ acks, [0-9]+ corre
 n=$(grep -ac "kit: the body corrected by" "$CL")
 [ "$n" -le 10 ] || fail "$n corrections ($c; $CL)"
 echo "ok: the old version stepping, the first gem taken (a trigger zone); $c"
-# ([KIT_PLAY_HINTS] the last one used: the line gone, kept on this client)
-step 5 'workbench: the hint ""' "keypress Space"
+# [KIT_SIDE_LEAD] The side camera led ahead of the bike riding right (+x);
+# turned round (Space), eased to its other side
+lead() # the side camera's lead along x now, into lx
+{
+	step 5 "kit: side camera at" "event kit_body"
+	lx=$(tail -c 3000 "$CL" | grep -aoP 'kit: side camera at .*, lead \K-?[0-9.]+' | tail -1)
+}
+lead
+awk -v l="$lx" 'BEGIN { exit !(l > 1) }' || fail "the camera not ahead riding right: lead $lx ($CL)"
+l0=$lx
+hm=$(mark "$CL")
+for try in 1 2; do
+	cmd "keydown Space" "delay 200" "keyup Space"
+	for i in $(seq 10); do
+		lead
+		awk -v l="$lx" 'BEGIN { exit !(l < -1) }' && break 2
+		cmd "delay 200"
+	done
+done
+awk -v l="$lx" 'BEGIN { exit !(l < -1) }' || fail "the camera not led to -x after Space: lead $lx ($CL)"
+cmd "frames 10" "screenshot $t/turned.png"
+echo "ok: the side camera led $l0 riding right, $lx turned round"
+# ([KIT_PLAY_HINTS] Space the last one used: the line gone, kept on this client)
+seen "$CL" "$hm" 'workbench: the hint ""' || await "$CL" "$hm" 5 'workbench: the hint ""'
 grep -raq --include=kit_hints "local/crag_bike jump" "$t/cu_boss" || fail "the used hints not kept ($t/cu_boss)"
 echo "ok: Space used, the hint line gone and kept"
 # 5. kitbob: drawn by the hook on kitboss's screen; his first My account page
@@ -249,7 +279,7 @@ for f in 3 4; do
 done
 exec 3>&- 4>&-
 wait $BOSS $BOB 2>/dev/null
-for p in start side; do
+for p in edit start side turned; do
 	[ -s "$t/$p.png" ] || fail "no screenshot $t/$p.png"
 done
 # (the run's teleports, a hazard's or the finish's, from its scene)

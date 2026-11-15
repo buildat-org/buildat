@@ -123,14 +123,14 @@ def gestures():
         a(tap, "Button", "kit/button"); a("waitlog", "kit editor: placing kit/button", 10); fr(5)
     plan()
     arm()
-    a(tap, round(cx + 3 * c), wy + wh - 5); a("waitlog", "kit editor: state: 3 entities", 20)
+    a(tap, round(cx + 3 * c), wy + wh - 5); a("waitlog", "kit editor: state: 4 entities", 20)
     a("waitlog", "touch shell: panned to show", 10); fr(5)
     a("shot", "${OUT}/10_revealed.png")
     plan()
     arm()
-    a(tap, *A); a("waitlog", "kit editor: state: 4 entities", 20); fr(3)
+    a(tap, *A); a("waitlog", "kit editor: state: 5 entities", 20); fr(3)
     arm()
-    a(tap, *B); a("waitlog", "kit editor: state: 5 entities", 20)
+    a(tap, *B); a("waitlog", "kit editor: state: 6 entities", 20)
     a("waitlog", "touch shell: the inspector pane", 10); fr(5)
     # A, then B where A's ports would be on the desktop
     a(tap, *A); a("waitlog", r"kit editor: selected \d+ \(", 10); fr(3)
@@ -222,7 +222,7 @@ if not touch and mode == "2":
     a("click", "Button", "kit/button"); a("waitlog", "kit editor: placing kit/button", 10); fr(10)
     a("shot", "${OUT}/03_placing.png")
     dump("placing")
-    a("click", W // 4, H // 2); a("waitlog", "kit editor: state: 2 entities", 20)
+    a("click", W // 4, H // 2); a("waitlog", "kit editor: state: 3 entities", 20)
     a("waitlog", "touch shell: the inspector pane", 10); fr(10)
     a("shot", "${OUT}/04_placed.png")
     dump("placed")
@@ -238,14 +238,14 @@ if not touch:
     # The desktop's: the pause menu's Edit, the plan, the palette's filter
     # and a click on the plan
     a("waitlog_any", "pause: the menu shown", 10); fr(3)
-    a("click", "Button", "Edit*"); a("waitlog", "kit editor: state: 1 entities", 20); fr(10)
+    a("click", "Button", "Edit*"); a("waitlog", "kit editor: state: 2 entities", 20); fr(10)
     a("event", "kit_plan 0 0 50 0"); a("waitlog", "kit editor: the view is 2D", 10); fr(10)
     a("shot", "${OUT}/01_desktop.png")
     dump("desktop")
     a("click", "Button", "palette filter clear"); fr(2)
     a("click", "LineEdit", "palette filter"); fr(2); a("type", "kit/button"); fr(3)
     a("click", "Button", "kit/button"); a("waitlog", "kit editor: placing kit/button", 10)
-    a("click", W // 2, int(H * 0.6)); a("waitlog", "kit editor: state: 2 entities", 20)
+    a("click", W // 2, int(H * 0.6)); a("waitlog", "kit editor: state: 3 entities", 20)
     fr(10); a("shot", "${OUT}/02_desktop_placed.png")
     json.dump(S, open(path, "w"), indent=0)
     sys.exit(0)
@@ -280,7 +280,7 @@ dump("placing")
 if H > W: x, y = W // 2, int(H * 0.45 / 2)
 elif mode == "3": x, y = int(W * 0.75), H // 2
 else: x, y = W // 4, H // 2
-a("tap", x, y); a("waitlog", "kit editor: state: 2 entities", 20)
+a("tap", x, y); a("waitlog", "kit editor: state: 3 entities", 20)
 a("waitlog", "touch shell: the inspector pane", 10); fr(10)
 a("shot", "${OUT}/04_placed.png")
 dump("placed")
@@ -606,7 +606,7 @@ if touch:
     # The header: its views' dropdown showing each as it was picked; Tools
     # in each target dump, no "..."; its empty part dragged moved the divider
     hd = [l for l in page if "touch shell: the header: " in l]
-    assert hd and all(re.search(r"\(Walk[^|]* \| 3D[^|]* \| 2D[^|]* \| Signals", l) for l in hd), \
+    assert hd and all(re.search(r"\(Walk[^|]* \| 3D[^|]* \| 2D[^|]* \| Front[^|]* \| Signals", l) for l in hd), \
         f"the header's views: {hd[:2]}"
     lits = " ".join(re.search(r'the header: "[^"]*", (\w+)', l)[1] for l in hd)
     assert re.search(r"^3D( \S+)* Walk( \S+)* 3D( \S+)* 2D", lits), f"shown in turn: {lits}"

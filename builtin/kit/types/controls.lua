@@ -2,11 +2,15 @@
 -- camera (first_person: the eye; chase: behind the player, distance away;
 -- top_down: from height above at a fixed angle and yaw, ortho a flat
 -- view; [KIT_PLANE] side: distance across the plane looking along +z, x
--- right and y up, following once the body is dead_zone m off the middle,
--- never turning, ortho flat, what is nearer than side_clip m in front of
--- the plane clipped (0.55: all in front of the plane's layer; more for
--- kit/polygon's foreground); left and right walk along x, the body facing
--- that way, the pointer aims in the plane), the pointer (crosshair: the
+-- right and y up, following once the body is dead_zone m off the middle
+-- (0: always), never turning, ortho flat, what is nearer than side_clip m
+-- in front of the plane clipped (0.55: all in front of the plane's layer;
+-- more for kit/polygon's foreground); [KIT_SIDE_LEAD] the point followed
+-- led look_ahead m along x the way the body faces and its velocity times
+-- look_velocity s, eased over half a second, at most half the view's half
+-- width and height (the body stays in the view's middle half); left and
+-- right walk along x, the body facing that way, the pointer aims in the
+-- plane), the pointer (crosshair: the
 -- view's middle and
 -- mouse look; cursor: a free mouse pointer, the view turned with the right
 -- button; auto: a cursor for top_down and side), camera_frame (a walker
@@ -24,7 +28,10 @@
 -- a position: shake_amount, on each client full within shake_near m of its
 -- camera, nothing from shake_far, 0 everywhere full), fov (to a value
 -- over fov_time; 0: back), glitch (for seconds), tint (a flash of a
--- colour) and camera (a mode: "" the camera's own). Without it an app
+-- colour) and camera (a mode: "" the camera's own). [KIT_EDIT_VIEW]
+-- edit_view: the editor's view at a client's first edit mode (auto: the
+-- editor's own, a remembered one; 2d, 3d, front), over the remembered,
+-- the builder's picks standing after it. Without it an app
 -- with Kit's controls walks with kit/walker in first person.
 local function signal(c, input, value, by)
 	local s = c.state[input]
@@ -77,8 +84,12 @@ return {
 		yaw = {cat = "look", type = "number", default = 0, min = -360,
 			max = 360},
 		ortho = {cat = "look", type = "bool", default = false},
-		dead_zone = {cat = "look", type = "number", default = 1, min = 0,
+		dead_zone = {cat = "look", type = "number", default = 0, min = 0,
 			max = 20},
+		look_ahead = {cat = "look", type = "number", default = 0, min = 0,
+			max = 20},
+		look_velocity = {cat = "look", type = "number", default = 0, min = 0,
+			max = 5},
 		side_clip = {cat = "look", type = "number", default = 0.55, min = 0.05,
 			max = 60},
 		smoothing = {cat = "look", type = "number", default = 0.1, min = 0,
@@ -109,6 +120,8 @@ return {
 		fov_time = {cat = "look", type = "number", default = 0.3, min = 0,
 			max = 10},
 		to = {type = "string", default = "all", choices = {"all", "player"}},
+		edit_view = {type = "string", default = "auto",
+			choices = {"auto", "2d", "3d", "front"}},
 	},
 	-- Any signal: one without a value is shake 1, fov back, glitch 1 s,
 	-- tint white, the camera's own

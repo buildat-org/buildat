@@ -100,6 +100,10 @@ end
 
 -- [KIT_TOOLS_1] hands.lua's wheel picks in first person
 M.camera_mode = function() return camera_mode() end
+-- [KIT_EDIT_VIEW] The editor's first view (nil: the controls not here yet)
+function M.edit_view()
+	return C.ctl and (params().edit_view or "auto") or nil
+end
 -- Whether the mouse or a drag turns the view (a top-down's and [KIT_PLANE] a
 -- side camera's never turn)
 function M.view_turns()
@@ -296,7 +300,8 @@ local function world(skip)
 		local v = voxelworld.get_static_voxel(magic.Vector3(i, j, k))
 		local id = reg:id_of(v)
 		if id == 0 then
-			return MV.UNKNOWN
+			-- ([KIT_NO_WORLD] no ground: air)
+			return not (C.ctl and C.ctl.void) and MV.UNKNOWN or nil
 		end
 		return voxel_info(id, v)
 	end, boxes = boxes, turned = turned, ground = ground,
@@ -366,7 +371,7 @@ local function floor_ready()
 	if not p then
 		return false
 	end
-	if C.ctl and C.ctl.hm and heightmap.terrain then
+	if C.ctl and (C.ctl.hm and heightmap.terrain or C.ctl.void) then
 		return true
 	end
 	-- [KIT_VEHICLE_MOVEMENTS] put on a deck (out of a seat): the deck's boxes are there
@@ -486,6 +491,11 @@ local function log_body()
 	-- [KIT_WALKER_FRAME] To the tenth of a millimetre, for measuring a deck
 	log:info(string.format("kit: feet at %.4f,%.4f,%.4f, frame %s", p[1], p[2],
 			p[3], tostring(C.s and C.s.frame or "none")))
+	-- [KIT_SIDE_LEAD] the side camera's middle and its lead
+	if C.side_at and C.side_lead then
+		log:info(string.format("kit: side camera at %.2f,%.2f, lead %.2f,%.2f",
+				C.side_at[1], C.side_at[2], C.side_lead[1], C.side_lead[2]))
+	end
 	-- [KIT_SHIP_VIEW] A chase view's distance from what it looks at
 	if C.chase_dist then
 		log:info(string.format("kit: camera %.2f m behind", C.chase_dist))
@@ -1993,8 +2003,29 @@ local function place_camera(dt, at)
 		-- simplified: as the editor's Front view, no caps: a cell of the layer
 		-- behind a solid one has no face toward the view
 		local dist = (tonumber(par.distance) or 6) * C.zoom
-		local dz = tonumber(par.dead_zone) or 1
-		local bx, by = at[1], at[2] + (tonumber(bd.h) or 1.7) * 0.5
+		local dz = tonumber(par.dead_zone) or 0
+		-- [KIT_SIDE_LEAD] the point followed led the way the body faces
+		-- (s.yaw: degrees from +z toward +x) and goes (s.vel), at most half the
+		-- view's half width and height off the body, eased toward it
+		-- simplified: a fixed rate (most of the way in half a second), the
+		-- view's size from its perspective at the plane (ortho's is the same)
+		local la, lv = tonumber(par.look_ahead) or 0, tonumber(par.look_velocity) or 0
+		local lx, ly = 0, 0
+		if (la ~= 0 or lv ~= 0) and C.s then
+			lx = math.sin(math.rad(tonumber(C.s.yaw) or 0)) * la
+			local v = type(C.s.vel) == "table" and C.s.vel or {}
+			lx = lx + (tonumber(v[1]) or 0) * lv
+			ly = (tonumber(v[2]) or 0) * lv
+			local hh = dist * math.tan(math.rad(cam.fov) / 2)
+			local hw = hh * magic.ui.root.width / math.max(1, magic.ui.root.height)
+			lx = math.max(-hw / 2, math.min(hw / 2, lx))
+			ly = math.max(-hh / 2, math.min(hh / 2, ly))
+		end
+		local lead = C.side_lead or {lx, ly}
+		local k = 1 - math.exp(-dt / 0.15)
+		lead = {lead[1] + (lx - lead[1]) * k, lead[2] + (ly - lead[2]) * k}
+		C.side_lead = lead
+		local bx, by = at[1] + lead[1], at[2] + (tonumber(bd.h) or 1.7) * 0.5 + lead[2]
 		local f = C.side_at
 		if not f or math.abs(bx - f[1]) > 30 or math.abs(by - f[2]) > 30 then
 			f = {bx, by}

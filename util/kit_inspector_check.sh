@@ -23,7 +23,8 @@
 #     fields (composed: long) show at most three decimals, from their start
 #     (x -7.4055 showed "4055").
 #   - web: [KIT_PHONE_EDITING] in headless Chrome as a phone in portrait
-#     (412x915, touch), kit/terrain's inspector scrolled to its end and its
+#     (412x915, touch), a New project's World's (3, [KIT_NO_WORLD]: its
+#     kit/terrain) inspector scrolled to its end and its
 #     width field tapped, a stand-in keyboard (buildatKeyboard.test) of 380:
 #     the field and its Apply above the keyboard, the builders' box not under
 #     the inspector, Apply reached; the UI scale logged no new value while
@@ -57,9 +58,7 @@ if [ "${1:-}" = web ]; then
 	["tap", "Button", "Create"],
 	["waitlog", "player physics enabled", 120],
 	["waitlog_any", "kit editor: edit rights: yes", 10], ["frames", 5],
-	["key", "F6"], ["waitlog", "kit editor: state: 1 entities", 20], ["frames", 5],
-	["event", "kit_edit {\"op\": \"place\", \"type\": \"kit/terrain\", \"pos\": [0, 1, 0]}"],
-	["waitlog", "kit editor: state: 2 entities", 20],
+	["key", "F6"], ["waitlog", "kit editor: state: 2 entities", 20], ["frames", 5],
 	["event", "kit_select 3"], ["waitlog", "kit editor: selected 3", 10], ["frames", 5],
 	["tap", "Button", "Inspector"], ["frames", 10], ["wait", 800],
 	["event", "kit_ui_where open"], ["frames", 3],
@@ -74,7 +73,7 @@ if [ "${1:-}" = web ]; then
 	["type", "8"], ["frames", 5],
 	["shot", "${OUT}/typing.png"],
 	["event", "kit_ui_where typing"], ["frames", 3],
-	["tap", "Button", "Apply"], ["waitlog", "entities, 2 to undo", 10],
+	["tap", "Button", "Apply"], ["waitlog", "entities, 1 to undo", 10],
 	["eval", "buildatKeyboard.test = null, 'no keyboard'"], ["frames", 5]
 ]
 J
@@ -171,6 +170,14 @@ frames 2
 mouse_wheel -1
 frames 2
 mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
 frames 3
 screenshot @T@/scrolled.png
 click Button "Apply"
@@ -215,10 +222,11 @@ kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 [ "$(grep -acE "ui_utils: dropdown_[0-9]+ open" "$t/boss.log")" -ge 3 ] ||
 	fail "the door's dropdown did not open ($t/boss.log)"
-# simplified: a fixed bound over today's 1162: room for a few more parameters,
-# not for an empty line under each. Many more parameters raise it
+# simplified: a fixed bound over today's 1442 (kit/controls' 2026-11-15):
+# room for a few more parameters, not for an empty line under each. Many
+# more parameters raise it
 tall=$(grep -aoP 'kit editor: the inspector \d+ of \K\d+(?= tall)' "$t/boss.log" | sort -n | tail -1)
-[ "${tall:-9999}" -le 1400 ] ||
+[ "${tall:-9999}" -le 1500 ] ||
 	fail "the inspector's body is ${tall:-not logged} tall: more than its rows take ($t/boss.log)"
 # The state after an edit: kept or drawn again before the next state
 kept_after() # <undo count>: 0 when the inspector was kept over that state

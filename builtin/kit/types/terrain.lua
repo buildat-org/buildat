@@ -1,7 +1,8 @@
 -- The World ([KIT] stage 4e): what the app's world is made of, game-wide,
 -- on the app root (an app hosting Kit with a world scene; Kit generates
--- it natively, builtin/kit/terrain.h). The first one counts; with none the
--- parameters' defaults (and the app's) are the World.
+-- it natively, builtin/kit/terrain.h). The first one counts; with none
+-- ([KIT_NO_WORLD]) the scene has no World: surface none (an app may say
+-- its defaults are one instead, Host::world_default).
 --   generator  empty, flat (a ground at level), noise (hills: level +-
 --              height, a feature every spread cells), valleys (Luanti's
 --              valleys mapgen's surface, without rivers; native servers)
@@ -27,9 +28,13 @@
 --              go; only edited sections saved, the generator pinned)
 --   border     a finite map's edge: void, wall, water
 --   surface    voxels, or heightmap (builtin/heightmap; finite only, on
---              the same area as the voxels, a side a multiple of 64): either
---              replaces the other at once, the voxel sections nobody
---              edited forgotten (the edited ones kept in the save)
+--              the same area as the voxels, its sides whole chunks of 64,
+--              or of the next power of two under 64: a 192x8 map is 8
+--              deep), or ([KIT_NO_WORLD]) none: no ground, nothing generated
+--              or loaded, the voxel and terrain tools refused (the other
+--              parameters then do nothing). Each replaces the other at once,
+--              the voxel sections nobody edited forgotten (the edited ones
+--              kept in the save)
 --   caves      ([KIT] stage 4f) tunnels and caverns under the ground (not
 --              under a heightmap), their floors and walls the biome's
 --              cave roles
@@ -79,11 +84,11 @@ return {
 		size = {type = "string", default = "finite",
 			choices = {"finite", "infinite"}},
 		width = {type = "number", default = 64, min = 16, max = 2048},
-		depth = {type = "number", default = 64, min = 16, max = 2048},
+		depth = {type = "number", default = 64, min = 4, max = 2048},
 		border = {type = "string", default = "void",
 			choices = {"void", "wall", "water"}},
 		surface = {type = "string", default = "voxels",
-			choices = {"voxels", "heightmap"}},
+			choices = {"voxels", "heightmap", "none"}},
 		caves = {type = "bool", default = false},
 		decorations = {cat = "look", type = "bool", default = true},
 		sky_light = {cat = "look", type = "bool", default = false},

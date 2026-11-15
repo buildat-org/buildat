@@ -206,7 +206,8 @@ local function create()
 	M.node.position = magic.Vector3(info.origin_x + info.sx * info.cell / 2,
 			info.base_y, info.origin_z + info.sz * info.cell / 2)
 	M.terrain = M.node:CreateComponent("Terrain")
-	M.terrain.patchSize = 64
+	-- (a chunk under 64 its own patch: Urho3D's Terrain has whole patches)
+	M.terrain.patchSize = math.min(64, info.chunk_size)
 	M.terrain:SetSpacing(magic.Vector3(info.cell, info.step * 256, info.cell))
 	M.terrain:SetCastShadows(true)
 	local material = magic.Material:new()

@@ -32,7 +32,8 @@
 --     and WASD pan, the wheel zooms about the pointer; a right drag goes
 --     into 3D orbiting, let go north-up straight down back into the plan.
 --     3D: the right drag orbits round what the pointer is on, the middle
---     drag pans over the ground (the XZ plane, the point grabbed kept under
+--     drag pans in the world-axis plane nearest the view's ([KIT_PAN_PLANE]:
+--     looking down XZ, from the side XY or YZ; the point grabbed kept under
 --     the pointer), the wheel goes toward it. Walking at the pointer, the
 --     right drag turns; a click on the view goes up into the crosshair
 --     (the mouse looks, the clicks act at the crosshair) and Escape comes
@@ -925,9 +926,11 @@ local function ground_at(o, v)
 	return {round(o.x + v.x * t), O.ground_y, round(o.z + v.z * t)}
 end
 
--- Where the ray meets the level plane at y
-local function plane_at(o, v, y)
-	local t = math.abs(v.y) > 1e-6 and (y - o.y) / v.y or -1
+-- Where the ray meets the level plane at y ([KIT_PAN_PLANE] or the plane
+-- whose ax ("x", "y", "z") is y)
+local function plane_at(o, v, y, ax)
+	ax = ax or "y"
+	local t = math.abs(v[ax]) > 1e-6 and (y - o[ax]) / v[ax] or -1
 	if t <= 0 or t > 300 then
 		return nil
 	end
@@ -3012,14 +3015,16 @@ function NT.params_form(w, e, ci, c, t, keep)
 	for k, v in pairs(E.pending[key] or {}) do
 		values[k] = v
 	end
-	local patterns = {}
+	local patterns, points = {}, {}
 	for _, k in ipairs(names) do
 		-- [KIT_VOXEL_STATES] A pattern of voxels is no text to type:
 		-- its buttons below
 		if decl[k].type == "voxels" then
 			patterns[#patterns + 1] = k
 		elseif decl[k].type == "points" then
-			-- ([KIT_PLANE] stage 3: kit/polygon's, edited in the Front view)
+			-- ([KIT_PLANE] stage 3: kit/polygon's, edited in the Front view;
+			-- [KIT_POLYGON_ROW] its row below)
+			points[#points + 1] = k
 		else
 			fields[#fields + 1] = field(k, decl[k], values)
 		end
@@ -3122,6 +3127,15 @@ function NT.params_form(w, e, ci, c, t, keep)
 				log:info("kit editor: " .. a[2] .. " " .. e.id .. " " .. k)
 			end)
 		end
+	end
+	-- [KIT_POLYGON_ROW] Points: how many, and the Front view round them, where
+	-- they are edited (polygon_edit.lua)
+	for _, k in ipairs(points) do
+		local r, v = row(w), values[k] or decl[k].default
+		label(r, k:upper() .. ": " .. (type(v) == "table" and #v or 0))
+		button(r, "Edit in Front view", function()
+			NT.pg.show(e)
+		end)
 	end
 return names
 end
@@ -5162,8 +5176,8 @@ end
 M.prefab_dialog = prefab_dialog
 
 -- [KIT_SCENES] The scene edited switched (the server takes the builder
--- there), and a new one made: its World the current one's copied, or a
--- blank one (the World's defaults)
+-- there), and a new one made: its World the current one's copied, or none
+-- ([KIT_NO_WORLD]: no kit/terrain, no ground)
 function M.switch_scene(name)
 	log:info("kit editor: to the scene " .. tostring(name))
 	send({op = "scene", name = name})
@@ -5171,7 +5185,7 @@ end
 
 function M.new_scene(name, copy)
 	log:info("kit editor: a new scene " .. tostring(name) ..
-			(copy and ", its World copied" or ", a blank World"))
+			(copy and ", its World copied" or ", no World"))
 	send({op = "new_scene", name = name, copy = copy and true or false})
 end
 
@@ -5186,7 +5200,7 @@ function M.scene_dialog()
 		E.scene_name = s
 	end):SetName("scene name")
 	button(row(w), E.scene_copy and "World: a copy of " .. current_scene() ..
-			"'s" or "World: a blank one", function()
+			"'s" or "World: none (no ground)", function()
 		E.scene_copy = not E.scene_copy
 		M.scene_dialog()
 	end, E.scene_copy)
@@ -5993,7 +6007,8 @@ function MEM.restore(was)
 	local t = MEM.view
 	if t and E.editing and not was then
 		MEM.view = nil
-		if VIEW_NAMES[t.view or ""] then
+		-- ([KIT_EDIT_VIEW] kit/controls' edit_view wins)
+		if VIEW_NAMES[t.view or ""] and (S.edit_view or "auto") == "auto" then
 			set_view(t.view)
 		end
 		-- (a tab of that name still: "Components" is Place now)
@@ -6249,13 +6264,23 @@ local function camera_pivot(mx, my)
 	return plane_at(o, v, O.ground_y - 0.5)
 end
 
--- A 3D pan's start: the height it slides at, the pointer's point's
--- (user's playtest, 2026-10-31: in the XZ plane, as floorplanner's)
+-- A 3D pan's start: the plane it slides in, through the pointer's point
+-- (user's playtest, 2026-10-31: in the XZ plane, as floorplanner's).
+-- [KIT_PAN_PLANE] The world-axis plane nearest the view's: its normal
+-- (ax) the axis the camera looks most along -- down or up: XZ; along z: XY
+-- (the gameplay plane's, seen from the side); along x: YZ. at: its ax's
+-- value; with nothing under the pointer the ground (XZ), the gameplay
+-- plane's depth (XY) or x 0 (YZ)
 local function pan3d_start(mx, my)
-	local p = camera_pivot(mx, my)
-	return {dist = p and (p - cam3d_node.position):Length() or 5,
-		y = p and p.y or O.ground_y - 0.5,
-		from = {x = S.pos.x, y = S.pos.y, z = S.pos.z}}
+	local f = rot3d() * magic.Vector3(0, 0, 1)
+	local x, y, z = math.abs(f.x), math.abs(f.y), math.abs(f.z)
+	local ax = y >= x and y >= z and "y" or z >= x and "z" or "x"
+	local o, v = M.screen_ray(mx, my)
+	local hit = pick(mx, my, nil, true)
+	local c0 = ax == "y" and O.ground_y - 0.5 or ax == "z" and plane_z() or 0
+	local p = hit and hit.t and o + v * hit.t or plane_at(o, v, c0, ax)
+	return {dist = p and (p - cam3d_node.position):Length() or 5, ax = ax,
+		at = p and p[ax] or c0, from = {x = S.pos.x, y = S.pos.y, z = S.pos.z}}
 end
 
 -- Whether the 3D camera looks as the plan does: straight down, north up
