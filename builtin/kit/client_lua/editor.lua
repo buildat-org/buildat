@@ -640,12 +640,13 @@ magic.SubscribeToEvent("command_seq:kit_copy_style", function(_, data)
 	end
 end)
 
--- [KIT_PANEL_PARENT] simplified: kit/ui_panel by name, as NT.is_ui goes; a
--- builder's own type of ui kind "panel" takes its elements in the server and
--- on the screen, but Switch parent here and the list's indent miss it
+-- [KIT_PANEL_PARENT] A panel: its first component's type of ui kind "panel"
+-- (kit/ui_panel, a builder's own), as the server and the screen take one
+-- ([KIT_PANEL_LEFTOVERS])
 function NT.is_panel(e)
 	local c1 = e and e.components and e.components[1]
-	return c1 and c1.type == "kit/ui_panel"
+	local u = c1 and type_of(c1.type).ui
+	return type(u) == "table" and u.kind == "panel"
 end
 
 -- p, if x stands in its tree: a positioned one under a positioned one, or

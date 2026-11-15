@@ -7496,9 +7496,15 @@ struct Module: public interface::Module, public Interface
 				m_store->set("decor"+at, decor.stringify());
 			decors += decor.size();
 		}
-		log_i(MODULE, "The template's export: %zu textures, %zu rows (%zu left "
-				"out), %zu heightmap samples, %zu decorations", textures, took,
-				left, samples, decors);
+		// (a template with none of an export's files says nothing)
+		bool any = false;
+		for(const char *f : {"textures", "voxels.json", "items.json",
+				"sounds.json", "prefabs.json", "edits.bin"})
+			any = any || interface::fs::path_exists(dir+"/"+f);
+		if(any)
+			log_i(MODULE, "The template's export: %zu textures, %zu rows (%zu "
+					"left out), %zu heightmap samples, %zu decorations", textures,
+					took, left, samples, decors);
 		return edits;
 	}
 
@@ -15768,7 +15774,10 @@ struct Module: public interface::Module, public Interface
 
 	// The positional authored entities of `ids` (1 to MAX_PREFAB, none
 	// twice), or false with why
-	bool group_arg(const json::Value &j, sv_<uint64_t> &group, ss_ &why)
+	// ([KIT_PANEL_LEFTOVERS] positionless: one with no position too, a
+	// player's or a bot's not)
+	bool group_arg(const json::Value &j, sv_<uint64_t> &group, ss_ &why,
+			bool positionless = false)
 	{
 		const json::Value &ids = j.get("ids");
 		if(!ids.is_array() || ids.size() < 1 || ids.size() > MAX_PREFAB){
@@ -15781,7 +15790,7 @@ struct Module: public interface::Module, public Interface
 			Entity *e = entity_arg(a, "id", why);
 			if(!e)
 				return false;
-			if(!e->has_pos || !e->kind.empty()){
+			if(!e->kind.empty() || (!e->has_pos && !positionless)){
 				why = "entity "+itos(e->id)+" has no position to move";
 				return false;
 			}
@@ -15911,13 +15920,14 @@ struct Module: public interface::Module, public Interface
 	// [KIT] stage 4e2: {"op": "duplicate", "ids": [n...], "by": [dx, dy,
 	// dz]}: a copy of the entities that far off, their links and entity
 	// parameters among them made the copies' (a prefab copy's copy is a
-	// plain one)
+	// plain one); [KIT_PANEL_LEFTOVERS] one with no position (a panel)
+	// too, its copy under the same parent
 	bool duplicate(const json::Value &j, const Peer &p,
 			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
 			ss_ &why)
 	{
 		sv_<uint64_t> tops;
-		if(!group_arg(j, tops, why))
+		if(!group_arg(j, tops, why, true))
 			return false;
 		// [KIT_NESTING] each with what is under it, the copy beside it
 		// (under its parent)
