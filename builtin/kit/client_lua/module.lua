@@ -166,7 +166,8 @@ end
 -- this client has it:
 --   on_add(e), on_state(e, key) (a shared state changed: e.state[key]),
 --   on_update(e, dt) (each frame), on_use(e) (this player used it, before
---   the server hears of it), on_remove(e)
+--   the server hears of it), on_remove(e); [KIT_PLANE] stage 4: a movement's
+--   draw(s, node) draws the players' bodies (move.lua's top)
 --   e.id, e.node (its replicated node), e.look, e.hinge, e.body (its look's
 --   nodes: the body turns with the hinge), e.swing (a swing's open angle:
 --   -90, or 90 when.mirror), e.state (the server's), e.mine

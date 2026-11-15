@@ -1,0 +1,11 @@
+{
+	"kind": "template",
+	"author": "buildat",
+	"name": "crag_trial",
+	"title": "Crag Trial",
+	"version": "1.0.0",
+	"engine_api": 2,
+	"license_code": "CC0-1.0",
+	"license_media": "CC0-1.0",
+	"description": "A bike trial in the side view: ride over crags, take the three gems and reach the finish against the clock; your head on the rocks is a crash. The bike, the gems and the run are the project's own types (local/crag_bike, local/crag_gem, local/crag_run) to read and change."
+}

@@ -66,7 +66,11 @@
 **   "N<number>"          math.random's seed (the host's clock)
 **   "S<lua literal>"     a body's steps: {type, params, state, inputs, dt,
 **                        sub, world (move.lua's snapshot)}; answers the
-**                        state after them
+**                        state after them ([KIT_PLANE] stage 4: s.events
+**                        the steps' events; a step past STEP_CAP errs
+**                        "too slow"). A movement's file (D) is run with
+**                        move.lua's math; its events are a run of the
+**                        handler "@events" (args: the list), its outputs
 ** A Lua error traps the call (no setjmp in this wasm). The host then calls
 ** box_recover(), which unwinds the Lua state as a longjmp to box_call's
 ** protected call would have, and answers "E" and the message; 0 from it
@@ -229,6 +233,27 @@ static int l_random(lua_State *l)
 	}
 }
 
+/* [KIT_PLANE] stage 4: a movement's step past STEP_CAP Lua instructions (its
+** world's queries counted; kit/walker's are some 5000) errs "too slow": the
+** count hook, set round each step (move.lua's M.steps' guard) */
+#define STEP_CAP 200000
+static void cap_hook(lua_State *l, lua_Debug *ar)
+{
+	(void)ar;
+	lua_sethook(l, NULL, 0, 0);
+	// (no luaL_error: its place would be move.lua's, not the step's)
+	lua_pushfstring(l, "too slow: a step past %d instructions", STEP_CAP);
+	lua_error(l);
+}
+static int l_cap(lua_State *l)
+{
+	if(lua_toboolean(l, 1))
+		lua_sethook(l, cap_hook, LUA_MASKCOUNT, STEP_CAP);
+	else
+		lua_sethook(l, NULL, 0, 0);
+	return 0;
+}
+
 static const luaL_Reg MATH[] = {
 	{"floor", l_floor}, {"ceil", l_ceil}, {"sqrt", l_sqrt}, {"fmod", l_fmod},
 	{"sin", l_sin}, {"cos", l_cos}, {"atan", l_atan}, {"atan2", l_atan2},
@@ -308,12 +333,22 @@ static const char PRELUDE[] =
 "	else out[#out + 1] = 'null' end\n"
 "end\n"
 "local function json(v) local out = {} enc(v, out, 0) return table.concat(out) end\n"
+"-- The movement library (request \"L\"): the steps'; [KIT_GUIDE_STATIONS] c.aim\n"
+"local move\n"
 "local function define(name, src)\n"
 "	if src:byte(1) == 27 then error(name .. ': a precompiled chunk is refused', 0) end\n"
 "	local f = assert(loadstring(src, '=' .. name))\n"
 "	setfenv(f, new_env(name))\n"
 "	local def = f()\n"
 "	if type(def) ~= 'table' then error(name .. ': the file returns no table', 0) end\n"
+"	-- [KIT_PLANE] stage 4: a movement's file again with move.lua's math, as\n"
+"	-- the clients run it (controls.lua), so its steps compute the same there\n"
+"	if move and type(def.movement) == 'table' and type(def.step) == 'function' then\n"
+"		local g = assert(loadstring('return function(math) ' .. src .. '\\nend', '=' .. name))\n"
+"		setfenv(g, new_env(name))\n"
+"		def = g()(copy(move.math))\n"
+"		if type(def) ~= 'table' then error(name .. ': the file returns no table', 0) end\n"
+"	end\n"
 "	types[name] = def\n"
 "	local decl, handlers = {}, {}\n"
 "	for k, v in pairs(def) do\n"
@@ -407,12 +442,17 @@ static const char PRELUDE[] =
 "	end\n"
 "	return inv\n"
 "end\n"
-"-- The movement library (request \"L\"): the steps'; [KIT_GUIDE_STATIONS] c.aim\n"
-"local move\n"
 "local function run(req)\n"
 "	local def = types[req.type]\n"
 "	if not def then error('no component type ' .. tostring(req.type), 0) end\n"
 "	local h = def[req.handler]\n"
+"	-- [KIT_PLANE] stage 4: a movement's events (its steps' s.events), each\n"
+"	-- \"name\" or {name, value}, its outputs\n"
+"	if req.handler == '@events' then h = function(c, list)\n"
+"		for _, e in ipairs(type(list) == 'table' and list or {}) do\n"
+"			if type(e) == 'table' then c:emit(e[1], e[2]) else c:emit(e) end\n"
+"		end\n"
+"	end end\n"
 "	if type(h) ~= 'function' then return '{}' end\n"
 "	local state, sets, emits, fx = req.state or {}, {}, {}, {}\n"
 "	local c = {id = req.id, pos = req.pos, yaw = req.yaw or 0, params = req.params or {},\n"
@@ -772,7 +812,7 @@ static const char PRELUDE[] =
 "	if not move then error('no movement library', 0) end\n"
 "	local w = move.snapshot(req.world or {})\n"
 "	local s = req.state or {}\n"
-"	move.steps(def, s, req.inputs or {}, req.dt or 1/60, req.sub or 1, w, req.params or {})\n"
+"	move.steps(def, s, req.inputs or {}, req.dt or 1/60, req.sub or 1, w, req.params or {}, box_cap)\n"
 "	return json(s)\n"
 "end\n"
 "function box_request(s)\n"
@@ -857,6 +897,8 @@ static int f_open(lua_State *l)
 	lua_setglobal(l, "box_mark");
 	lua_pushcfunction(l, l_seed);
 	lua_setglobal(l, "box_seed");
+	lua_pushcfunction(l, l_cap);
+	lua_setglobal(l, "box_cap");
 	lua_newtable(l);
 	luaL_register(l, NULL, MATH);
 	lua_setglobal(l, "box_math");
@@ -946,6 +988,8 @@ __attribute__((noinline)) static int recover_inner(void)
 			luaD_reallocCI(L, LUAI_MAXCALLS);
 	}
 	L->errfunc = g_entry.errfunc;
+	/* (a step's cap off: the error came inside the step) */
+	lua_sethook(L, NULL, 0, 0);
 	size_t rn = 0;
 	const char *r = lua_tolstring(L, -1, &rn);
 	out('E', r ? r : "?", r ? rn : 1);

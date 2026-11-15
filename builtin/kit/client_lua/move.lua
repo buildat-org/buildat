@@ -16,6 +16,27 @@
 --     touch_buttons = {{"Fire", "jump"}...}: the touch bar's buttons, each
 --     held while pressed as that input (jump or down), for the default Jump}
 --   step = function(s, i, dt, w, p) ... end
+-- [KIT_PLANE] stage 4, a movement of a builder's own (a custom type) has more:
+--   movement.raw_keys = true: the side camera's keys as they are (f forward
+--     and back, r right and left: a bike's throttle and lean), not a walk
+--     along the plane
+--   math in its file is M.math on both sides (controls.lua and box.c's define
+--     run the file with it): floor, ceil, sqrt, abs, fmod, min, max, huge, pi
+--     and this file's sin, cos, atan, atan2, the same bits there; no random
+--   s.events = {"name" | {"name", value}...} set by a step (nil before each,
+--     MAX_EVENTS a batch): the server's steps' are outputs of the movement's
+--     component on the app root (its `outputs`), as by the body's player; the
+--     client's own steps set them too, for its draw to show them at once
+--   s.pose = {n...} (8 at most): what the other clients' draw gets of it
+--   a step past box.c's STEP_CAP Lua instructions errs "too slow": the body
+--     stops (the component's Log says it) till put again or the next version;
+--     put_type steps a new version once (an empty world) and refuses it so,
+--     the version before kept. Three client steps past 50 ms in a row turn
+--     its prediction off
+--   draw = function(s, node) in its .client.lua: each frame, each body drawn
+--     (players.lua): node at its feet as drawn (no turn; its children the
+--     hook's), s this client's predicted state or another's {pos, pose}; the
+--     humanoid not drawn
 -- s its state (s.pos the body's bottom middle {x, y, z}, s.vel; the rest
 -- its own), changed in place; i this step's input: f (forward, -1...1),
 -- r (right), yaw (the camera's, degrees from +z toward +x), jump (0/1),
@@ -153,6 +174,13 @@ function M.atan2(y, x)
 end
 M.sqrt = sqrt
 M.PI = PI
+-- [KIT_PLANE] stage 4: a movement's `math` on both sides (its file is run with it:
+-- controls.lua, box.c's define), the same bits there: what IEEE makes exact and
+-- this file's sin, cos, atan and atan2; no random, nor exp, log or tan.
+-- simplified: x ^ y is each side's own pow (it may differ in the last bit): x * x
+M.math = {floor = floor, ceil = math.ceil, sqrt = sqrt, abs = abs,
+	fmod = math.fmod, min = math.min, max = math.max, huge = math.huge, pi = PI,
+	sin = M.sin, cos = M.cos, atan = atan, atan2 = M.atan2}
 
 -- ---- [KIT_GUIDE_STATIONS] A gun's shot (kit/turret's; kit.cpp's projectiles
 -- fly it): its arc's height over the muzzle at d metres out along the ground,
@@ -2375,19 +2403,40 @@ end
 
 -- The steps of a batch: each input dt long, in sub steps of its own
 -- ([KIT_MOVING_OBJECTS] the world's moving objects as each has them: i.t its stamp, ms)
-function M.steps(def, s, inputs, dt, sub, w, p)
+-- [KIT_PLANE] stage 4: s.events, nil before each step, what the steps set there
+-- after them (MAX_EVENTS at most); guard(true) and guard(false) round each
+-- def.step: the box's per-step cap
+M.MAX_EVENTS = 16
+function M.steps(def, s, inputs, dt, sub, w, p, guard)
 	sub = sub or 1
+	local events = nil
 	for _, i in ipairs(inputs) do
 		for n = 1, sub do
 			if w.moving and i.t then
 				w:pose_at(i.t / 1000 + (n - 1) * dt / sub)
 			end
+			s.events = nil
+			if guard then
+				guard(true)
+			end
 			def.step(s, i, dt / sub, w, p)
+			if guard then
+				guard(false)
+			end
+			if type(s.events) == "table" then
+				events = events or {}
+				for _, e in ipairs(s.events) do
+					if #events < M.MAX_EVENTS then
+						events[#events + 1] = e
+					end
+				end
+			end
 			if w.plane then
 				w:hold(s)
 			end
 		end
 	end
+	s.events = events
 	return s
 end
 

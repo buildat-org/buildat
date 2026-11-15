@@ -3479,6 +3479,17 @@ function M.server_window(key, on_close, on_exit)
 		sw.backdrop = b
 	end
 	ask_hello()
+	-- A game's instance asks for its hello just now: the page is drawn before
+	-- it comes, and again then (My account's "Connect an agent..." is the
+	-- hello's agents)
+	if not M.hello.version then
+		hello_redraw = function()
+			if sw.frame and sw.current then
+				log:info("accounts: the hello came: the page drawn again")
+				M.server_show(sw.current)
+			end
+		end
+	end
 	if not M.users and not M.list_asked then
 		M.list_asked = true
 		M.admin("list")
