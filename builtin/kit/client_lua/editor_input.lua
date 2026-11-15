@@ -2303,12 +2303,21 @@ function NT.reveal(id)
 			.. "%d,%d to %d,%d on the screen", id, sx, sy, tx, ty))
 end
 
--- [KIT_HUD_VIEW] A click or a tap: two on nothing of the HUD leave the view.
+-- [KIT_HUD_VIEW] A click or a tap: two on nothing of the HUD leave the view
+-- (the touch shell's; [KIT_LOBBY] a desktop's lets the selection go).
 -- (ui.lua's own handlers select and drag what is of the HUD)
 function NT.hud_press(x, y)
 	-- ([KIT_PARAM_CATEGORIES] the panel's and its dropdowns' clicks are its own)
 	if over_ui(x, y) then
 		S.hud_click = nil
+		return
+	end
+	-- ([KIT_LOBBY] a desktop's: out by the tool panel's views or a key; a
+	-- click on nothing lets the selection go)
+	if not NT.sh.on() then
+		if S.primary then
+			M.select(nil)
+		end
 		return
 	end
 	-- The first of a double click may close it

@@ -404,8 +404,9 @@ magic.SubscribeToEvent("Update", function()
 	show_pointed()
 	-- [KIT_PLAY_HINTS] None of the lines under the pause menu or its pages
 	-- (they were drawn over it); in play the voxel in hand only where Kit's
-	-- hotbar does not show it, no coordinates
-	local up = not menu.held()
+	-- hotbar does not show it, no coordinates; [KIT_LOBBY] none under a full
+	-- screen (a lobby)
+	local up = not menu.held() and not kit.full_screen()
 	if help_text.visible ~= up then
 		help_text.visible, status_text.visible = up, up
 		log:info("workbench: the HUD lines " .. (up and "shown" or "hidden"))

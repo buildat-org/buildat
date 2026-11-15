@@ -373,8 +373,9 @@ namespace interface
 //   entity it reaches with what is under it, in its scene at pos or its
 //   own position; returns the copy's first id; on_start runs on each),
 //   c:remove(id) (an entity it reaches and what is under it; nil itself:
-//   on_remove first), c:send(id, input, value) (an input to an entity it
-//   reaches), c.made (its copies there now, each by its first id, which
+//   on_remove first), c:send(id, input, value[, by]) (an input to an entity
+//   it reaches; [KIT_LOBBY] by a player or bot it reaches, as c:emit's),
+//   c.made (its copies there now, each by its first id, which
 //   c:remove takes the whole copy by). They are play state: what
 //   play made is gone at Stop and what it removed back; a type with
 //   `builds = true` set off by a player makes builds (Stop's notice, Keep

@@ -533,6 +533,16 @@ end
 -- again. No actions (the server refuses them). A hint of the keys at the
 -- screen's bottom.
 
+-- [KIT_LOBBY] Where player `id`'s body is drawn (its feet; this player's
+-- own the controls'); nil: not drawn
+function M.body_at(id)
+	if id == P.you then
+		return M.body_pos and M.body_pos()
+	end
+	local b = bodies[id]
+	return b and not b.hidden and b.at or nil
+end
+
 function M.spectating()
 	return M.waiting ~= nil and M.waiting()
 end

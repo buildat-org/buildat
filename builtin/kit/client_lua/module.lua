@@ -210,6 +210,12 @@ end
 -- the server's value changes from what it was then, or its time is up
 local function value(n, key)
 	key = tostring(key)
+	-- ([KIT_LOBBY] a per_player state: this player's own, kit:mine's; a
+	-- gem each rider takes for themselves)
+	local own = n.id and M.mine_state and M.mine_state(n.id, key)
+	if own ~= nil then
+		return own
+	end
 	local server = parse(n.node:GetVar("kit:" .. key))
 	local p = n.predicted and n.predicted[key]
 	if p then
@@ -260,7 +266,7 @@ end
 replicate.sub_sync_node_added({}, function(node)
 	local id = tonumber(node:GetName():match("^kit:(%d+)$"))
 	if id then
-		P.nodes[id] = {node = node}
+		P.nodes[id] = {node = node, id = id}
 	end
 end)
 replicate.sub_sync_node_removed(function(node, node_id)
@@ -626,6 +632,10 @@ local function draw_look(id, n, look)
 	end
 	if n.look and n.on == on then
 		return
+	end
+	if look.state then
+		log:info("kit: entity " .. id .. "'s look: " .. tostring(look.state) ..
+				(on and " on" or " off"))
 	end
 	n.on = on
 	local b = look_box(look, on)

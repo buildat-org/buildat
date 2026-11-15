@@ -161,7 +161,8 @@ hud.priority = -1
 local hud_sig = nil
 
 local function shown()
-	return M.slots_own() and not E.editing and P.hands
+	-- ([KIT_LOBBY] none under a full screen)
+	return M.slots_own() and not E.editing and P.hands and not M.hud_off()
 end
 
 -- The hotbar's box (x, y of its first slot, slots, a slot's square), nil

@@ -24,7 +24,8 @@
 #      button does not;
 #      [KIT_HUD_VIEW] F4 from 2D: no panels, the world's keys and clicks not
 #      taken, the HUD still dragged; Escape back to 2D; again, a double click
-#      on nothing back to 2D, one on the hotbar's frame not;
+#      on the hotbar's frame or on nothing stays ([KIT_LOBBY]: a desktop's
+#      tool panel, its frame);
 #  10. copy style from one bar to another: the style's parameters set,
 #      x, y, label and the links not;
 #  11. a save's version 1 kit/ui_text's pixels converted against 1080 p at
@@ -207,7 +208,8 @@ wait_log 5000 kit editor: placing nothing
 frames 5
 EOF
 	# The HUD view, from 2D (kitboss's last was Walk). Escape; a double click
-	# on the hotbar stays, on nothing goes back
+	# on the hotbar stays, on nothing too ([KIT_LOBBY] a desktop's leaves by
+	# a key or the views dropdown); F3
 	cat <<EOF
 keypress F1
 frames 5
@@ -217,14 +219,16 @@ screenshot @T@/hud_view.png
 keypress T
 frames 5
 EOF
-	drag 512 503 512 480
+	# ([KIT_LOBBY] in the frame left of the tool panel, 634x700: its middle
+	# at x 317, its units 634/700 of Walk's from the bottom)
+	drag 317 517 317 480
 	cat <<EOF
 wait_log 10000 kit: ui own:hotbar dragged to
 keypress Escape
 frames 5
 keypress F4
 frames 5
-mouse_pos 512 480
+mouse_pos 317 480
 frames 2
 mouse_click left
 mouse_click left
@@ -439,10 +443,10 @@ esac
 seq=$(grep -a " I kit " "$b" | grep -a "kit editor: the view is \|kit editor: a double click\|kit: ui own:hotbar dragged" |
 	sed 's/.*kit editor: //; s/.*kit: ui //; s/ to .*//' | tr '\n' ';')
 case $seq in
-*"the view is 2D;the view is HUD;own:hotbar dragged;the view is 2D;the view is HUD;a double click out of the HUD view;the view is 2D;the view is Walk;"*) ;;
+*"the view is 2D;the view is HUD;own:hotbar dragged;the view is 2D;the view is HUD;the view is Walk;"*) ;;
 *) fail "the HUD view: $seq ($b)" ;;
 esac
-echo "ok: the HUD view: out by Escape and by a double click on nothing, to the view before"
+echo "ok: the HUD view: out by Escape to the view before; a double click stays"
 echo "ok: a UI component chosen goes to Walk, another type stays"
 # 10. Copy style
 for p in color direction blink_below background width height; do
