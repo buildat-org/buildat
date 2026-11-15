@@ -75,7 +75,8 @@
 -- and the world not drawn (kit.full_screen(), the editor's viewport). Edit
 -- mode draws one layer, kit.hud_layer() (the HUD view's screen picker, else
 -- the selected element's). **kit/ui_chat** (kind "chat"): builtin/chat's
--- last lines over a field whose Enter says a line; **kit/ui_view** (kind
+-- last lines (the app hands it over, kit.use_chat) over a field whose Enter
+-- says a line; **kit/ui_view** (kind
 -- "view"): a View3D of the scene, its camera this client's own (its turn,
 -- its offset from this player's body) at the body of the player its value
 -- names. **Chat while editing**: each new chat line a notification.
@@ -105,18 +106,19 @@ local bars_at = nil
 -- The selected element of Kit's own HUD (with kit/game_rules selected)
 local own_sel = nil
 
--- [KIT_LOBBY] builtin/chat's client half (nil: an app without it), the same
+-- [KIT_LOBBY] builtin/chat's client half, the app's to hand over (nil: an
+-- app without it; a require of a module not served logs an error), the same
 -- chat as the pause menu's; while editing each new line a notification
 local chat = nil
-do
-	local ok, c = pcall(require, "buildat/module/chat")
-	chat = ok and type(c) == "table" and type(c.lines) == "table" and c or nil
-	if chat then
-		chat.listeners[#chat.listeners + 1] = function(line)
-			if E.editing then
-				ui_utils.show_notification(tostring(line), 8)
-				log:info("kit: chat while editing: " .. tostring(line))
-			end
+function M.use_chat(c)
+	if chat or type(c) ~= "table" or type(c.lines) ~= "table" then
+		return
+	end
+	chat = c
+	c.listeners[#c.listeners + 1] = function(line)
+		if E.editing then
+			ui_utils.show_notification(tostring(line), 8)
+			log:info("kit: chat while editing: " .. tostring(line))
 		end
 	end
 end
