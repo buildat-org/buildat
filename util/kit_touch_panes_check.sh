@@ -74,8 +74,9 @@ else: wx, wy, ww, wh = 0, 0, W - round(W * 0.5), H
 cx, cy, c = wx + ww / 2, wy + wh / 2, wh / 16
 def at(x, z): return [round(cx + x * c), round(cy - z * c)]
 D, B = at(-3, 0), at(3, 0)
-# (the button: a new world's second entity placed)
-BUTTON = 4
+# (the button: a new world's second entity placed, after New's World
+# entity, [KIT_NO_WORLD])
+BUTTON = 5
 kb = "buildatKeyboard.test = %d, 'keyboard'" % int(H * 0.42)
 nokb = "buildatKeyboard.test = null, 'no keyboard'"
 def dump(name):
