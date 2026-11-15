@@ -118,7 +118,8 @@ grep -aq "New account lanbob" "$t/o.log" || fail "lanbob made no account ($t/o.l
 # server's grant (one clock; the owner may grant before lanbob's menu).
 # simplified: compares the HH:MM:SS.mmm stamps, wrong across midnight
 granted=$(grep -a "granted builder lanbob" "$t/o.log" | head -1 | grep -oP '\d\d:\d\d:\d\d\.\d+')
-rights=$(grep -a "kit editor: edit rights: yes" "$t/b.log" | head -1 | grep -oP '\d\d:\d\d:\d\d\.\d+')
+# (Kit's own line: the drive's wait_log_any echoes the text earlier)
+rights=$(grep -a "I kit *: kit editor: edit rights: yes" "$t/b.log" | head -1| grep -oP '\d\d:\d\d:\d\d\.\d+')
 [ -n "$granted" ] && [ -n "$rights" ] && ! [[ "$rights" < "$granted" ]] ||
 	fail "lanbob had edit rights before the grant (at ${rights:-never}, granted ${granted:-never}; $t/b.log)"
 grep -aq "kit editor: edit rights: yes" "$t/b.log" ||
