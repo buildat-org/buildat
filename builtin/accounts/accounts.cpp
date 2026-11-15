@@ -2922,7 +2922,10 @@ struct Module: public interface::Module, public Interface
 	// - /authorize's page (oauth_page()): the account's password and then
 	//   its TOTP code, under the address's waits as a join's; or a Starport
 	//   ID through the Starport's own window, an ID linked to an account
-	//   here (the join with it made that); then Allow or Deny;
+	//   here (the join with it made that); then Allow or Deny; an admin
+	//   then has a step of its own, a box "Also allow the Host's actions",
+	//   unticked: the grant's scope admin with it ticked, else builder,
+	//   whatever scope the tool asked for;
 	// - what it gives is an agent token of the account's (api.h), its
 	//   rights and limits, listed on My account by the client's name and
 	//   revoked there: an access token for OAUTH_ACCESS_US (MCP: short-
@@ -2946,9 +2949,11 @@ struct Module: public interface::Module, public Interface
 	// end leaves its grant on My account until revoked there or ended
 	struct OAuthRequest
 	{
-		ss_ client, redirect, state, challenge, resource, scope;
+		ss_ client, redirect, state, challenge, resource;
 		bool redirect_given = false;
 		ss_ totp_name; // its password was right: the code waits
+		// Signed in (how), an admin: the Host's box waits
+		ss_ admin_name, admin_how;
 		int tries = 0;
 		int64_t until_us = 0;
 	};
@@ -3250,7 +3255,6 @@ struct Module: public interface::Module, public Interface
 		get_client(q.client, c);
 		page.client = c.name;
 		page.redirect = q.redirect;
-		page.scope = q.scope;
 		page.rid = rid;
 		page.server = origin.substr(origin.find("://") + 3);
 		// The Starports this server is listed on, where an ID signs in;
@@ -3349,8 +3353,8 @@ struct Module: public interface::Module, public Interface
 			if(!resource.empty() && oauth_resource_norm(resource) != q.resource)
 				return refused(q, "invalid_target", "the resource here is "+
 						q.resource);
-			q.scope = (" "+r.param("scope")+" ").find(" admin ") != ss_::npos ?
-					"admin" : "builder";
+			// (the scope asked for is not read: an admin's box on the page
+			// chooses, [KIT_AGENTS_OAUTH_ADMIN_BOX])
 			if(!m_oauth_rates.ok("page", network::address_bin(r.address),
 					OAUTH_PAGES, OAUTH_REQUEST_US / 1000000)){
 				page.ended = true;
@@ -3387,6 +3391,7 @@ struct Module: public interface::Module, public Interface
 		const OAuthRequest q = it->second;
 		page = oauth_page_of(q, rid, origin);
 		page.totp_name = q.totp_name;
+		page.admin_name = q.admin_name;
 		page.by_password = form("id_token").empty();
 		if(form("action") == "deny"){
 			m_oauth_requests.erase(it);
@@ -3400,10 +3405,13 @@ struct Module: public interface::Module, public Interface
 					"on in Accounts";
 			return show(403);
 		}
-		ss_ name;
-		const char *how = "a password";
+		ss_ name, how = "a password";
 		const ss_ id_token = form("id_token");
-		if(!id_token.empty()){
+		if(!q.admin_name.empty()){
+			// Signed in already: the Host's box answered
+			name = q.admin_name;
+			how = q.admin_how;
+		} else if(!id_token.empty()){
 			// A Starport ID's token, from the Starport's window: the account
 			// linked to the ID, as a join by it logs in
 			starport_announce::IdLogin id;
@@ -3467,6 +3475,16 @@ struct Module: public interface::Module, public Interface
 				return show(200);
 			}
 		}
+		// [KIT_AGENTS_OAUTH_ADMIN_BOX] An admin chooses the Host's actions
+		// (the projects' tools) on a step after the sign-in, the page not
+		// knowing who signs in before it; the grant follows the box, not
+		// the scope the tool asked for; anyone else's is builder's
+		if(q.admin_name.empty() && is_admin(name)){
+			it->second.admin_name = name;
+			it->second.admin_how = how;
+			page.admin_name = name;
+			return show(200);
+		}
 		ss_ why = ban_of(name, r.address);
 		size_t others = 0;
 		for(auto &m : agents_of(name))
@@ -3490,7 +3508,8 @@ struct Module: public interface::Module, public Interface
 		k.redirect_given = q.redirect_given;
 		k.challenge = q.challenge;
 		k.resource = q.resource;
-		k.scope = q.scope == "admin" && is_admin(name) ? "admin" : "builder";
+		k.scope = !q.admin_name.empty() && form("host") == "1" &&
+				is_admin(name) ? "admin" : "builder";
 		k.name = name;
 		k.until_us = now + OAUTH_CODE_US;
 		oauth_make_room(m_oauth_codes, OAUTH_PENDING);
@@ -3498,7 +3517,7 @@ struct Module: public interface::Module, public Interface
 		m_oauth_codes[oauth_sha(code)] = k;
 		m_oauth_requests.erase(it);
 		log_i(MODULE, "OAuth: %s allowed \"%s\" (%s) by %s from %s", cs(name),
-				cs(page.client), cs(k.scope), how, cs(r.address));
+				cs(page.client), cs(k.scope), cs(how), cs(r.address));
 		back(q, "code="+code);
 	}
 
