@@ -142,7 +142,7 @@ local ban_page
 local sw = {}
 local web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
 local draw_sidebar, server_element, server_close, sidebar_need, server_entries
-local health_page, health_capture
+local health_page, health_capture, updates_page
 -- The Starport panel open: "starports", "listing" or "ids"
 local starport_page, sp_panel
 -- [ACCOUNT_BUTTON]: the corner button, whether an app turned it off, and the
@@ -977,6 +977,9 @@ buildat.sub_packet("accounts:admin_result", function(data)
 	end
 	if page_kind == "health" then
 		health_page(page_back)
+	end
+	if page_kind == "updates" then
+		updates_page(page_back)
 	end
 	if M.on_admin_result then
 		M.on_admin_result(M.message)
@@ -2714,6 +2717,17 @@ buildat.sub_packet("accounts:health", function(data)
 	if page_kind == "health" then
 		health_page(page_back)
 	end
+	-- [SERVE_UPDATE_ADMIN] The sidebar's Updates and its count
+	if v.update then
+		log:info("updates: ready " .. tostring(v.update.ready) .. ", policy " ..
+				tostring(v.update.policy) .. ", asked " .. tostring(v.update.asked))
+		if sw.frame then
+			draw_sidebar()
+		end
+		if page_kind == "updates" then
+			updates_page(page_back)
+		end
+	end
 end)
 
 local function bytes(n)
@@ -3162,6 +3176,65 @@ M.health_page = function(back)
 end
 
 --
+-- **Updates** ([SERVE_UPDATE_ADMIN]): an admin's page on a server that
+-- util/serve_latest_release.sh runs: what waits to be restarted onto, Update
+-- now, and when the restart comes by itself. The server sends {"update":
+-- {ready, asked, policy, default_wait}} in "accounts:health", to admins only
+-- and only under the script.
+--
+local UPDATE_CHOICES = {
+	{"When nobody is on, at most 5 min", "quiet_5"},
+	{"When nobody is on, at most 30 min", "quiet_30"},
+	{"When nobody is on, at most 120 min", "quiet_120"},
+	{"At once", "at_once"},
+	{"When nobody is on, or by Update now", "quiet_or_manual"},
+}
+updates_page = function(back)
+	local w = open_page("updates", "Updates", back)
+	local u = type(health.update) == "table" and health.update or {}
+	local ready = tostring(u.ready or "")
+	if ready ~= "" then
+		page_text(w, ready .. " is ready.", WARN)
+		if u.asked then
+			page_text(w, "Update now was asked: everyone on is told, and " ..
+					"the server restarts a minute later.")
+		else
+			button(w, "Update now", function() M.admin("update_now") end, true)
+		end
+	else
+		page_text(w, "No update is waiting. This server runs Buildat " ..
+				tostring(M.hello.version or "?") .. ".", DIM)
+	end
+	-- None chosen: the host's UPDATE_MAX_WAIT, a choice of its own when it
+	-- is none of these
+	local mins = math.floor((tonumber(u.default_wait) or 1800) / 60)
+	local current = (u.policy or "") ~= "" and u.policy or "quiet_" .. mins
+	local choices = {}
+	for i, c in ipairs(UPDATE_CHOICES) do
+		choices[i] = c
+	end
+	if (u.policy or "") == "" and not ({quiet_5 = 1, quiet_30 = 1,
+			quiet_120 = 1})[current] then
+		current = ""
+		table.insert(choices, 1, {"When nobody is on, at most " .. mins ..
+				" min", ""})
+	end
+	ui_utils.dropdown(w, choices, current, function(v)
+		M.admin("setting", "update_policy", v)
+	end, {label = "Updates"})
+	page_text(w, "A new release, or a new version of this app, is made " ..
+			"ready while the server runs on; then the server restarts onto " ..
+			"it, at once when nobody is on. Whoever is on is told a minute " ..
+			"before, with At once and Update now too.", DIM)
+	if M.message and M.message ~= "" then
+		page_text(w, M.message, WARN)
+	end
+	if back then
+		button(w, "Back", go_back)
+	end
+end
+
+--
 -- **The Server window** ([SERVER_ADMIN_PAGE]; user, 2026-10-07): Starport's
 -- window ([STARPORT_UI]) made builtin's. A sidebar of entries under grey
 -- headers, each with a count of what waits on it; the page beside it,
@@ -3267,6 +3340,13 @@ server_entries = function()
 		add("Admin", "Health", "health", function()
 			M.health_page(top_back())
 		end)
+		-- [SERVE_UPDATE_ADMIN] Under util/serve_latest_release.sh only
+		local u = health.update
+		if type(u) == "table" then
+			add("Admin", "Updates", "updates", function()
+				updates_page(top_back())
+			end, (u.ready or "") ~= "" and 1 or 0)
+		end
 	end
 	return list
 end

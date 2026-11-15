@@ -75,6 +75,21 @@
 # which the server tells its clients as it goes (they wait and rejoin),
 # stopped with SIGTERM (a game saves on it), started on the new version,
 # a stand-in on its port meanwhile, and the next once it is listening.
+# **The admins told and choosing** ([SERVE_UPDATE_ADMIN]; user, 2026-11-15:
+# "usually I then don't notice the release went out"): by files in the
+# same app directory, read on every pass (5 s). While a release, or an
+# Aitta app's new version, waits, update_ready says what ("Buildat 0.7.105"),
+# and the server tells its admins on "<it> is ready: Update now in the Server
+# window" (its Updates page, which the server shows only when this script
+# runs it: BUILDAT_SERVE_UPDATES). Update now there writes update_now, and
+# the restart follows as above, a minute after the warning. The page's
+# Updates setting, update_policy: quiet_5, quiet_30, quiet_120 ("when nobody
+# is on, at most N min"), at_once (the warning at once) or quiet_or_manual
+# (when nobody is on or by Update now, never forced); none, UPDATE_MAX_WAIT.
+# A server's game writes there: a file is read through no link, and only
+# those values count. simplified: with more than one server, the latest of
+# their times. The script never replaces itself: a newer one is the host's
+# to install.
 # A server that exits is started again by itself. Every version but
 # the running one and the one before it is deleted. A server that exits with
 # status 20 is a game's own restart (apps/vanilla switching its world), and
@@ -133,7 +148,8 @@
 # of its own: alphas keep no compatibility (doc/compatibility.txt).
 #
 # Environment: AITTA (above), CHANNEL (above), POLL_SECONDS (300),
-# UPDATE_MAX_WAIT (1800), GITHUB_REPO (celeron55/buildat),
+# UPDATE_MAX_WAIT (1800), UPDATE_WARNING (60: the warning's seconds, for a
+# check), GITHUB_REPO (celeron55/buildat),
 # GITHUB_TOKEN (optional; unauthenticated, GitHub allows 60 asks an hour),
 # RELEASES_URL (what GitHub is asked, instead: a list of releases or one, a
 # check serves its own), BUILDS_URL, BUILDS_POLL and BUILDS_MAX_WAIT (above).
@@ -212,6 +228,7 @@ done
 base=${BUILDAT_SERVE_DIR:-$HOME/buildat-serve}
 poll=${POLL_SECONDS:-300}
 max_wait=${UPDATE_MAX_WAIT:-1800}
+warn_s=${UPDATE_WARNING:-60}
 repo=${GITHUB_REPO:-celeron55/buildat}
 channel=${CHANNEL:-stable}
 case $channel in
@@ -247,6 +264,12 @@ fi
 
 mkdir -p "$base/versions"
 cd "$base" || exit 1
+# [SERVE_UPDATE_ADMIN] Nothing waits yet: what a run before left goes
+# (every app's: app_id() is not defined yet, and an Aitta app's directory
+# is its key's; only this script writes these)
+for i in "${!games[@]}"; do
+	rm -f "${users[$i]}"/apps/*/update_ready "${users[$i]}"/apps/*/update_now
+done
 
 say(){ echo "[serve $(date '+%F %T')] $*"; }
 
@@ -357,6 +380,9 @@ install_failed="" install_wait=0 install_next=0
 # A release compiled and waiting for a quiet moment: its name, when it
 # was ready, and when whoever was on was warned
 pending="" pending_at=0 warned_at=0
+# [SERVE_UPDATE_ADMIN] By index: when its admin asked to update now, and
+# what its update_ready says; whether the default wait's end was logged
+asked_at=() ready_said=() held_said=""
 # [SERVE_BUILDS] A new release being built, and by index the servers whose
 # app is compiled on it; an Aitta app's new version being built, by index;
 # the build host's asks running, by their result file
@@ -611,7 +637,7 @@ start(){
 	# servers for the page, where it has one
 	(cd "$dir" || exit 1
 		[ -f aitta_sdk/sdk.json ] && export BUILDAT_AITTA_CPP_SDK=$dir/aitta_sdk
-		BUILDAT_SHARE_PORT=1 exec bin/buildat_server \
+		BUILDAT_SHARE_PORT=1 BUILDAT_SERVE_UPDATES=$max_wait exec bin/buildat_server \
 			-m "$app" -P "$port" \
 			-D "${users[$i]}" "${move[@]}" "${args[@]}") \
 			> >(sed -u "s/^/[$id:$port] /" |
@@ -846,8 +872,8 @@ build_release(){
 		return
 	done
 	[ "${#built[@]}" = "${#games[@]}" ] || return
-	say "$building is ready; updating once nobody is on, in" \
-		"$max_wait s at the latest"
+	say "$building is ready; updating once nobody is on, or as the" \
+		"servers' Updates settings say ($max_wait s at the latest by default)"
 	pending=$building
 	building="" built=()
 	[ "$pending_at" = 0 ] && pending_at=$(date +%s)
@@ -870,7 +896,8 @@ build_aitta(){
 		app_building[$i]=""
 		if [ "$r" = 0 ] && compile "$i" "$current"; then
 			say "${games[$i]} ${d##*/} is ready; updating once nobody is on," \
-				"in $max_wait s at the latest"
+				"or as the servers' Updates settings say ($max_wait s at the" \
+				"latest by default)"
 			app_new[$i]=$d
 			[ "$pending_at" = 0 ] && pending_at=$(date +%s)
 		else
@@ -911,7 +938,11 @@ restart(){
 	stop "$i"
 	standin_stop "$i"
 	withdrawn[$i]=""
-	rm -f "${users[$i]}/apps/$(app_id "$i")/shutdown_reason"
+	# What it was told is over: the new one starts with nothing waiting
+	rm -f "${users[$i]}/apps/$(app_id "$i")/shutdown_reason" \
+		"${users[$i]}/apps/$(app_id "$i")/update_ready" \
+		"${users[$i]}/apps/$(app_id "$i")/update_now"
+	ready_said[$i]=""
 	local log="$base/server-${ids[$i]}-${ports[$i]}.log" from n
 	from=$(wc -l 2>/dev/null < "$log" || echo 0)
 	standin_start "$i"
@@ -961,37 +992,97 @@ update(){
 				restart "$i" "updating to ${games[$i]} ${app_new[$i]##*/}"
 		done
 	fi
-	app_new=()
-	pending="" pending_at=0 warned_at=0
+	app_new=() asked_at=()
+	pending="" pending_at=0 warned_at=0 held_said=""
 	[ -n "$old" ] && [ "$old" != "$current" ] && prune
 }
 
-# Updated once nobody is on, or at the latest max_wait after it was
-# ready; whoever is on warned a minute before that
+# [SERVE_UPDATE_ADMIN] Server i's Updates setting, from the file its server
+# writes: not through a link the app put there (dd's nofollow), and only a
+# value known here; anything else is the default
+update_policy(){ # i
+	local p
+	p=$(dd if="${users[$1]}/apps/$(app_id "$1")/update_policy" iflag=nofollow \
+		bs=64 count=1 2>/dev/null | head -n 1 | tr -d '\r')
+	case $p in
+	quiet_5|quiet_30|quiet_120|at_once|quiet_or_manual) echo "$p" ;;
+	*) echo default ;;
+	esac
+}
+
+# When server i's players may be made to leave for what waits: by its
+# setting, or at its admin's Update now
+due_at(){ # i
+	local d
+	case $(update_policy "$1") in
+	quiet_5) d=$((pending_at + 300)) ;;
+	quiet_30) d=$((pending_at + 1800)) ;;
+	quiet_120) d=$((pending_at + 7200)) ;;
+	at_once) d=$pending_at ;;
+	# Never: the year 2286
+	quiet_or_manual) d=9999999999 ;;
+	*) d=$((pending_at + max_wait)) ;;
+	esac
+	[ -n "${asked_at[$1]:-}" ] && [ "${asked_at[$1]}" -lt "$d" ] && d=${asked_at[$1]}
+	echo "$d"
+}
+
+# Updated once nobody is on, or at the latest when the settings of the
+# servers in use say; whoever is on warned warn_s before that
 update_when_quiet(){
-	[ -z "$pending" ] && [ -z "${app_new[*]:-}" ] && return
-	local i n on=() now
+	local i n on=() now due=0 d what
 	now=$(date +%s)
+	for i in "${!games[@]}"; do
+		# [SERVE_UPDATE_ADMIN] Update now: taken on every pass (rm follows no
+		# link), kept while something waits
+		if rm "${users[$i]}/apps/$(app_id "$i")/update_now" 2>/dev/null &&
+				[ -n "$pending${app_new[*]:-}" ] && [ -z "${asked_at[$i]:-}" ]; then
+			asked_at[$i]=$now
+			say "${games[$i]} on port ${ports[$i]}: its admin asked to update now"
+		fi
+		what=""
+		[ -n "$pending" ] && what="Buildat $(release_version "$pending")"
+		[ -z "$what" ] && [ -n "${app_new[$i]:-}" ] &&
+			what="${games[$i]} ${app_new[$i]##*/}"
+		if [ "$what" != "${ready_said[$i]:-}" ]; then
+			ready_said[$i]=$what
+			if [ -n "$what" ]; then
+				app_note "$i" update_ready "$what"
+			else
+				rm -f "${users[$i]}/apps/$(app_id "$i")/update_ready"
+			fi
+		fi
+	done
+	[ -z "$pending" ] && [ -z "${app_new[*]:-}" ] && return
 	for i in "${!games[@]}"; do
 		n=0
 		[ -n "${pids[$i]:-}" ] && n=$(players "$i")
-		[ "$n" -gt 0 ] && on+=("$i")
+		[ "$n" -gt 0 ] || continue
+		on+=("$i")
+		d=$(due_at "$i")
+		[ "$d" -gt "$due" ] && due=$d
 	done
-	if [ ${#on[@]} = 0 ] || [ "$now" -ge $((pending_at + max_wait)) ]; then
+	if [ ${#on[@]} = 0 ] ||
+			{ [ "$warned_at" != 0 ] && [ "$now" -ge $((warned_at + warn_s)) ]; }; then
 		[ ${#on[@]} -gt 0 ] && say "updating with ${#on[@]} server(s) still in use"
 		update
 		return
 	fi
-	if [ "$warned_at" = 0 ] && [ "$now" -ge $((pending_at + max_wait - 60)) ]; then
+	if [ "$warned_at" = 0 ] && [ "$now" -ge $((due - warn_s)) ]; then
 		warned_at=$now
 		local v
 		v=$(release_version "$pending")
 		[ -z "$pending" ] && v="a new version"
 		for i in "${on[@]}"; do
-			say "warning ${games[$i]} on port ${ports[$i]}: updating to $v in 60 s"
-			app_note "$i" notice "The server updates to $v in 60 s"
+			say "warning ${games[$i]} on port ${ports[$i]}: updating to $v in $warn_s s"
+			app_note "$i" notice "The server updates to $v in $warn_s s"
 			app_note "$i" shutdown_reason "updating to $v"
 		done
+	elif [ "$warned_at" = 0 ] && [ -z "$held_said" ] &&
+			[ "$now" -ge $((pending_at + max_wait)) ]; then
+		held_said=1
+		say "UPDATE_MAX_WAIT is over; waiting as the Updates settings of the" \
+			"servers in use say"
 	fi
 }
 

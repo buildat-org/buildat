@@ -24,6 +24,7 @@
 #include <cereal/types/vector.hpp>
 #include <cereal/types/utility.hpp>
 #include <random>
+#include <fstream>
 #include <algorithm>
 #include <set>
 #include <sstream>
@@ -2198,6 +2199,8 @@ struct Module: public interface::Module, public Interface
 		m_server->emit_event("accounts:login", new Login(packet.sender, name));
 		send_users_to_staff();
 		ntfy_ask(packet.sender, name);
+		if(!m_serve_updates.empty() && level(name) >= LV_ADMIN)
+			tell_update(packet.sender, true);
 	}
 
 	// [HC_GUEST_PLAY] A guest: no account and nothing to type -- the next
@@ -2516,6 +2519,33 @@ struct Module: public interface::Module, public Interface
 				why = "Announcing to the Starports now";
 			});
 			return result(why);
+		} else if(r.cmd == "update_now"){
+			// [SERVE_UPDATE_ADMIN] The script takes it on its next pass
+			if(m_serve_updates.empty() || m_update_ready.empty())
+				return result("No update is waiting");
+			if(!interface::fs::write_file(update_path("update_now"), "now\n"))
+				return result("Could not write update_now");
+			m_update_asked = true;
+			log_i(MODULE, "%s asked to update to %s now", cs(by),
+					cs(m_update_ready));
+			// The page says it, from asked
+			tell_update_admins(false);
+			return result("");
+		} else if(r.cmd == "setting" && r.name == "update_policy"){
+			// "" for the host's default
+			if(m_serve_updates.empty())
+				return result("This server is not run by "
+						"util/serve_latest_release.sh");
+			if(!r.arg.empty() && !update_policy_ok(r.arg))
+				return result("No such choice");
+			const ss_ path = update_path("update_policy");
+			if(r.arg.empty() ? ::remove(path.c_str()) != 0 && errno != ENOENT :
+					!interface::fs::write_file(path, r.arg+"\n"))
+				return result("Could not write update_policy");
+			log_i(MODULE, "%s set the updates to %s", cs(by),
+					r.arg.empty() ? "the host's default" : cs(r.arg));
+			tell_update_admins(false);
+			return result("");
 		} else if(r.cmd == "setting" && r.name == "storage_budget"){
 			// [FP_ABUSE] 3: MB, 0 and up
 			const ss_ &a = r.arg;
@@ -4221,12 +4251,106 @@ struct Module: public interface::Module, public Interface
 		return "Sending to "+to+"...";
 	}
 
+	// **A release ready, told to the admins** ([SERVE_UPDATE_ADMIN]):
+	// util/serve_latest_release.sh runs the server with
+	// BUILDAT_SERVE_UPDATES=<its UPDATE_MAX_WAIT, s>, and while a release
+	// (or the app's new version) waits for the restart onto it writes
+	// <user>/apps/<app>/update_ready, a line ("Buildat 0.7.105"). Looked
+	// for once a second, as network's notice; the admins on are told as it
+	// comes, and an admin at their login while it waits. The Updates page
+	// writes update_policy (one of update_policy_ok's; none: the host's
+	// UPDATE_MAX_WAIT) and update_now, which the script reads on its passes.
+	// Without the variable (no script, or an older one) no Updates page.
+	const ss_ m_serve_updates = getenv("BUILDAT_SERVE_UPDATES") ?
+			getenv("BUILDAT_SERVE_UPDATES") : "";
+	ss_ m_update_ready;
+	bool m_update_asked = false;
+	int64_t m_update_next_us = 0;
+
+	bool update_policy_ok(const ss_ &p)
+	{
+		for(const char *k : {"quiet_5", "quiet_30", "quiet_120", "at_once",
+				"quiet_or_manual"})
+			if(p == k)
+				return true;
+		return false;
+	}
+
+	ss_ update_path(const char *name)
+	{
+		return m_server->get_config().get<ss_>("user_path")+"/apps/"+
+				m_server->get_app_id()+"/"+name;
+	}
+
+	// What update_policy says, "" (the host's default) for anything else
+	ss_ update_policy()
+	{
+		ss_ p;
+		std::ifstream in(update_path("update_policy"));
+		std::getline(in, p);
+		return update_policy_ok(p) ? p : "";
+	}
+
+	// An admin: the Updates page's state, and with `notice` while one waits
+	// "<it> is ready: Update now in the Server window" -- but At once, which
+	// warns everyone on at once
+	void tell_update(PeerId peer, bool notice)
+	{
+		json::Value u = json::object();
+		u.set("ready", m_update_ready);
+		u.set("asked", json::Value(m_update_asked));
+		u.set("policy", update_policy());
+		u.set("default_wait", (int64_t)atoll(m_serve_updates.c_str()));
+		json::Value v = json::object();
+		v.set("update", u);
+		send(peer, "accounts:health", v.stringify());
+		if(notice && !m_update_ready.empty() && update_policy() != "at_once")
+			send(peer, "network:notice", m_update_ready+
+					" is ready: Update now in the Server window");
+	}
+
+	void tell_update_admins(bool notice)
+	{
+		for(auto &pair : m_peers)
+			if(level(pair.second.name) >= LV_ADMIN)
+				tell_update(pair.first, notice);
+	}
+
+	void update_tick()
+	{
+		const int64_t now = interface::os::time_us();
+		if(m_serve_updates.empty() || !m_store || now < m_update_next_us)
+			return;
+		m_update_next_us = now + 1000000;
+		ss_ line, ready;
+		{
+			std::ifstream in(update_path("update_ready"));
+			std::getline(in, line);
+		}
+		// The script's text, up to anything that is not
+		for(char c : line.substr(0, 100)){
+			if((unsigned char)c < 32 || c == 127)
+				break;
+			ready += c;
+		}
+		if(ready == m_update_ready)
+			return;
+		m_update_ready = ready;
+		if(ready.empty())
+			m_update_asked = false;
+		else
+			log_i(MODULE, "%s is ready (util/serve_latest_release.sh)",
+					cs(ready));
+		tell_update_admins(true);
+	}
+
 	void on_tick(const interface::TickEvent &)
 	{
 		stats_sample();
 		ntfy_tick();
 		if(interface::os::wall_us() - m_oauth_swept_us > 3600LL * 1000000)
 			oauth_sweep(true);
+		update_tick();
 		std::vector<std::pair<PeerId, ss_>> r;
 		{
 			std::lock_guard<std::mutex> lock(m_mail_results->m);

@@ -356,7 +356,11 @@ case), host, port, path, port_given}, http and ws defaulting to 80, https
 and wss to 443. util/address_check.sh.
 interface/web_brand.h -- web_brand ([HTML_BRAND]): Buildat's look on the
 HTML an app serves (Hearth's pages, the Starport's): css, logo (an <img>
-of /brand/logo.png); html(s), text escaped for HTML and attributes;
+of /brand/logo.png); a form's first button (form[id]>button) is its main
+one, the client's PrimaryButton ([WEB_MAIN_BUTTON]: a dark amber fill,
+light text, a 2 px amber border, cyan on hover; a solid amber fill on the
+dark ground is not recommended for a main button, as it resembles a
+well-known adult site's look); html(s), text escaped for HTML and attributes;
 cut(s, n) at a UTF-8 character's start with "..."; page(title, name,
 content), a read-only page with the header and the link into the web
 client ([FRONT_PAGES]; content already escaped); file(share_path, name,
@@ -781,7 +785,13 @@ to a client).
 The Server window (builtin/accounts' client Lua, [SERVER_ADMIN_PAGE]):
 a sidebar of pages, Account; for an admin Accounts, the Starport pages
 (when starport_announce is loaded), Statistics and Health (disk, the server's sandbox and a
-check of it, the last 100 warnings and errors, mail, the listings); for a
+check of it, the last 100 warnings and errors, mail, the listings), and
+Updates on a server util/serve_latest_release.sh runs ([SERVE_UPDATE_ADMIN]:
+a release or the app's new version ready, Update now, and the Updates
+setting -- when nobody is on, at most 5, 30 or 120 min; at once; when
+nobody is on or by Update now -- through files in <user>/apps/<app>/ the
+script reads; the admins on are told "<it> is ready: Update now in the
+Server window"; the script's header has the files); for a
 moderator Accounts and Statistics. **Statistics** ([SERVER_STATS]): accounts
 samples the players joined, the peak tick gap and the memory each minute
 into a row an hour (stats/h/, kept eight days; joins, distinct names and
