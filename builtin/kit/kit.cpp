@@ -27048,7 +27048,8 @@ struct Module: public interface::Module, public Interface
 		int64_t last_us = 0;
 	};
 	static const int64_t AGENT_IDLE_US = 300 * 1000000LL;
-	// Requests a token makes a minute; refused tries an address's network
+	// Requests a token makes a minute; tokens matching nothing an address's
+	// network sends
 	static const int AGENT_CALLS = 120, AGENT_FAILS = 30;
 	// By the token's id (its sha256), and the peers' token ids
 	sm_<ss_, Agent> m_agents;
@@ -27443,12 +27444,20 @@ struct Module: public interface::Module, public Interface
 					"this server: its Host turned it off on the Accounts page");
 		}
 		if(!why.empty()){
-			m_agent_rates.ok("mcp_fail", bin, AGENT_FAILS, 60);
-			if(!token.empty())
-				drop_agent(interface::sha256::hex(interface::sha256::calculate(
-						token)), "its token stands no more");
+			// [KIT_AGENTS_OAUTH] A try is a token that matches nothing: none
+			// (a tool's first probe, before it signs in) and a known one
+			// refused (its hour's access token expired, its account banned)
+			// are routine, and a hosted tool's users share its network
+			if(!token.empty() && at.id.empty())
+				m_agent_rates.ok("mcp_fail", bin, AGENT_FAILS, 60);
 			log_i(MODULE, "MCP: a request from %s refused: %s", cs(r.address),
 					token.empty() ? "no bearer token" : cs(why));
+			// The agent of a banned account leaves, told why; an expired
+			// token's stays, its refresh coming
+			if(!at.id.empty() && why != "expired"){
+				drop_agent(at.id, "its account is banned");
+				return error(403, json::null(), -32001, why);
+			}
 			// [KIT_AGENTS_OAUTH] Where a tool that signs in finds how
 			// (builtin/accounts/oauth.h): RFC 9728's metadata of this
 			// endpoint, by the URL the tool used

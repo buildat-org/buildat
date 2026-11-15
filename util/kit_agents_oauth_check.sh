@@ -13,10 +13,11 @@
 #      both paths, the server's; the origin by Host and a trusted proxy's
 #      X-Forwarded-Proto, a bad Host none;
 #   2. registration: a public client and one with a secret; bad redirect
-#      URIs, grant types and sizes refused;
+#      URIs, grant types and sizes refused; a page's /register and /token
+#      (an Origin), a text/plain /register refused;
 #   3. /authorize's refusals: an unknown client and an unregistered
 #      redirect stay on the page; no PKCE S256, another resource, another
-#      response type go back to the tool with the error;
+#      response type too, with a link back with the error (no redirect);
 #   4. boss's password on the page (Chrome): the code back with its state
 #      and iss; a wrong verifier, redirect_uri, resource, client refused;
 #      the tokens, MCP initialize and tools/list by the access token; the
@@ -24,13 +25,24 @@
 #   5. the page's forms by Python: another origin's post refused; an Admin
 #      grant, its refresh token rotated (the old access token gone), the
 #      one before used again ending the grant; Deny back with access_denied;
+#      one two rotations old ending a grant too; a rebound name's Host
+#      (evil.example, its own X-Forwarded-For each time) refused before
+#      any password; a network's 31st page in 10 minutes refused while
+#      another's sign-in goes on; tokenless MCP probes not counted against
+#      a network, bad tokens counted;
 #   6. reader's Starport ID (Chrome, the Starport's own window): the code,
-#      the client by HTTP Basic, MCP;
+#      the client by HTTP Basic, MCP; reader banned by boss's admin script
+#      (a native client): the grant's MCP call and refresh refused, its
+#      agent gone; unbanned;
 #   7. reader's client again: My account, Connect an agent... lists the
 #      grant by the client's name, "signed in"; Revoke; its access and
 #      refresh tokens refused;
-#   8. a wrong password, then the address's wait; registration's cap of 20
-#      an hour; no token, code, secret or password in the server's log.
+#   8. a wrong password, then the address's wait; registration's cap of
+#      100 an hour;
+#   9. starport.json's "address" https://wb.example.org (the Public
+#      address): by a proxy under that name, registration, the page, the
+#      sign-in and the token; no token, code, secret or password in the
+#      server's log.
 # Screenshots, kept with KEEP_TMP=1: $t/authorize.png (the page on the
 # phone), $t/authorize_id_window.png (the Starport's window),
 # $t/tokens.png (My account's list with the grant)
@@ -169,7 +181,7 @@ const [mode, url, redirect, shot, name, password] = process.argv.slice(2);
 JS
 
 cat > "$t/oauth.py" <<'PY'
-import base64, hashlib, http.server, json, os, re, secrets, subprocess, sys
+import base64, hashlib, html, http.server, json, os, re, secrets, subprocess, sys
 import threading, urllib.error, urllib.parse, urllib.request
 phase, B, T = sys.argv[1:4]
 MCP = B + "/api/v1/mcp"
@@ -369,8 +381,21 @@ if phase == "a":
     s, b, h = req("POST", B + "/api/v1/oauth/register", b"[" * 9000,
             {"Content-Type": "application/json"})
     assert s == 400, (s, b)
+    # A page's (any site's visitors filling the cap): by its Origin, and a
+    # no-cors fetch's type; neither counts toward the network's 100 an hour
+    meta = json.dumps({"redirect_uris": [REDIR]}).encode()
+    s, b, h = req("POST", B + "/api/v1/oauth/register", meta,
+            {"Content-Type": "application/json", "Origin": "https://evil.example"})
+    assert s == 403 and json.loads(b)["error"] == "invalid_request", (s, b)
+    s, b, h = req("POST", B + "/api/v1/oauth/register", meta,
+            {"Content-Type": "text/plain"})
+    assert s == 400 and json.loads(b)["error"] == "invalid_client_metadata", (s, b)
+    s, b, h = req("POST", B + "/api/v1/oauth/token", {"grant_type":
+            "refresh_token", "refresh_token": "x"}, {"Origin": "https://evil.example"})
+    assert s == 403 and json.loads(b)["error"] == "invalid_request", (s, b)
     ok("registration: a public client, one with a secret; bad redirect URIs "
-            "(and a custom scheme), grant types and sizes refused")
+            "(and a custom scheme), grant types and sizes refused; a page's "
+            "/register and /token by its Origin, a text/plain one")
 
     # 3. /authorize's refusals
     cid = pub["client_id"]
@@ -380,16 +405,22 @@ if phase == "a":
     s, b, h = req("GET", auth_url(cid, ch, "s0",
             redirect_uri="http://127.0.0.1:1/other"))
     assert s == 400 and "Location" not in h, (s, b)
+    # Before the user acts, never a redirect (anyone's phishing link): the
+    # page says why, with a link back to the tool
     for over, error in (({"code_challenge_method": "plain"}, "invalid_request"),
             ({"code_challenge_method": None, "code_challenge": None},
                 "invalid_request"),
             ({"resource": "http://127.0.0.1:1/api/v1/mcp"}, "invalid_target"),
             ({"response_type": "token"}, "unsupported_response_type")):
         s, b, h = req("GET", auth_url(cid, ch, "s0", **over))
-        assert s == 303, (over, s, b)
-        assert back(h["Location"], "s0")["error"] == error, (over, h["Location"])
+        assert s == 400 and "Location" not in h and \
+                "not one this server takes" in b, (over, s, b, dict(h))
+        link = re.search(r'<a href="([^"]+)">Back to 127\.0\.0\.1</a>', b)
+        assert link and back(html.unescape(link.group(1)), "s0")["error"] == \
+                error, (over, b)
     ok("/authorize: an unknown client and an unregistered redirect stay on "
-            "the page; no S256, another resource or response type go back")
+            "the page; no S256, another resource or response type too, with "
+            "a link back, no redirect")
 
     # 4. boss's password on the page, in Chrome
     v, ch = pkce()
@@ -463,6 +494,88 @@ if phase == "a":
     ok("the page's forms: another origin's refused; an Admin grant, its "
             "refresh token rotated, the one before again ending it; Deny")
 
+    # A thief of R1 rotates twice: the tool's R1, two behind, ends the grant
+    def sign_in(st, hdr={}, origin=B):
+        v, ch = pkce()
+        s, b, h = req("GET", auth_url(cid, ch, st), headers=hdr)
+        assert s == 200, (s, b)
+        s, b, h = req("POST", B + "/api/v1/oauth/authorize", {"rid": rid_of(b),
+                "name": "boss", "password": "checkpass12", "action": "allow"},
+                dict(hdr, Origin=origin))
+        assert s == 303, (s, b)
+        return v, h["Location"]
+    v, loc = sign_in("s5")
+    s, j = token({"grant_type": "authorization_code", "code": back(loc, "s5")["code"],
+            "redirect_uri": REDIR, "code_verifier": v, "client_id": cid})
+    assert s == 200, j
+    r1 = j["refresh_token"]
+    for i in range(2):
+        s, j = token({"grant_type": "refresh_token", "refresh_token":
+                j["refresh_token"], "client_id": cid})
+        assert s == 200, j
+    a3, r3 = j["access_token"], j["refresh_token"]
+    mcp_works(a3)
+    refused({"grant_type": "refresh_token", "refresh_token": r1,
+            "client_id": cid}, "invalid_grant")
+    mcp_refused(a3)
+    refused({"grant_type": "refresh_token", "refresh_token": r3,
+            "client_id": cid}, "invalid_grant")
+    ok("a refresh token two rotations old ends the grant")
+
+    # DNS rebinding: a page of evil.example rebound to 127.0.0.1, its own
+    # origin to the browser, posting with an X-Forwarded-For of its choice
+    # each time (loopback is a trusted proxy): its Host is no name of this
+    # server's, refused before any password is looked at
+    s, b, h = req("GET", auth_url(cid, pkce()[1], "s6"))
+    rid = rid_of(b)
+    evil = "evil.example:" + B.rsplit(":", 1)[1]
+    for i, pw in enumerate(("wrong-1", "wrong-2", "checkpass12")):
+        s, b, h = req("POST", B + "/api/v1/oauth/authorize", {"rid": rid,
+                "name": "boss", "password": pw, "action": "allow"},
+                {"Host": evil, "Origin": "http://" + evil, "X-Forwarded-For":
+                "198.18.%d.1" % i, "X-Forwarded-Proto": "http"})
+        assert s == 403 and "Location" not in h and \
+                "not set up for the name evil.example" in b and \
+                "Wrong name" not in b, (s, b)
+    s, b, h = req("GET", auth_url(cid, pkce()[1], "s6"), headers={"Host": evil})
+    assert s == 403 and "not set up for the name" in b, (s, b)
+    s, b, h = req("POST", B + "/api/v1/oauth/register", meta,
+            {"Content-Type": "application/json", "Host": evil})
+    assert s == 403, (s, b)
+    ok("a rebound name's Host refused on the form, the page and /register")
+
+    # One network's flood of pages refuses that network only: another's
+    # sign-in goes on (both by a trusted proxy's X-Forwarded-For)
+    flood = {"X-Forwarded-For": "203.0.113.7", "X-Forwarded-Proto": "http"}
+    for i in range(31):
+        s, b, h = req("GET", auth_url(cid, pkce()[1], "f%d" % i), headers=flood)
+        assert s == (200 if i < 30 else 429), (i, s, b)
+    assert "Too many sign-ins from your network" in b, b
+    v, loc = sign_in("s7", {"X-Forwarded-For": "198.51.100.7",
+            "X-Forwarded-Proto": "http"})
+    assert "code" in back(loc, "s7"), loc
+    ok("a network's 31st page in 10 minutes refused; another network signs in")
+
+    # MCP: requests with no token (a tool's probe before it signs in) count
+    # as no try of the network's; tokens that match nothing do
+    s, j = token({"grant_type": "authorization_code", "code": back(loc, "s7")["code"],
+            "redirect_uri": REDIR, "code_verifier": v, "client_id": cid})
+    assert s == 200, j
+    good = j["access_token"]
+    def mcp_from(ip, tok):
+        h = {"Accept": "application/json, text/event-stream", "X-Forwarded-For": ip}
+        if tok:
+            h["Authorization"] = "Bearer " + tok
+        return jpost(MCP, {"jsonrpc": "2.0", "id": 1, "method": "ping"}, h)[0]
+    for i in range(35):
+        assert mcp_from("192.0.2.10", None) == 401, i
+    assert mcp_from("192.0.2.10", good) == 200
+    for i in range(30):
+        assert mcp_from("192.0.2.77", "bao_" + "0" * 32 + "_" + "%064d" % i) == 401
+    assert mcp_from("192.0.2.77", good) == 429
+    ok("35 tokenless MCP probes leave a network's valid token working; 30 "
+            "bad tokens do not")
+
     # 6. reader's Starport ID, in the Starport's own window
     v, ch = pkce()
     st = secrets.token_hex(16)
@@ -475,11 +588,25 @@ if phase == "a":
     s, j = token(code, basic)
     assert s == 200 and j["scope"] == "builder", j
     n = mcp_works(j["access_token"])
+    # A call: reader's agent is here (its ban below sends it off)
+    s, b, h = mcp(j["access_token"], "tools/call", {"name": "get_state",
+            "arguments": {}}, 5)
+    assert s == 200 and "result" in json.loads(b), (s, b)
     state.update(access=j["access_token"], refresh=j["refresh_token"],
             basic=basic)
     ok("reader's Starport ID in the Starport's window: the code, the client "
             "by HTTP Basic, MCP (%d tools)" % n)
-else:
+elif phase == "ban":
+    # 6b. reader banned (boss's admin script): its grant's MCP call and its
+    # refresh refused, the grant kept for the unban
+    s, b, h = mcp(state["access"], "tools/list", {}, 4)
+    assert s == 403 and "banned" in json.loads(b)["error"]["message"], (s, b)
+    s, j = token({"grant_type": "refresh_token", "refresh_token":
+            state["refresh"]}, tuple(state["basic"]))
+    assert s == 400 and j["error"] == "invalid_grant" and \
+            "banned" in j["error_description"], j
+    ok("a ban: the grant's MCP call and its refresh refused")
+elif phase == "b":
     # 7. Revoked on My account
     mcp_refused(state["access"])
     refused({"grant_type": "refresh_token", "refresh_token": state["refresh"]},
@@ -496,12 +623,48 @@ else:
     s, b, h = post_form(dict(login, password="checkpass12"))
     assert s == 429 and "Too many failed logins" in b, (s, b)
     ok("a wrong password refused, and the next try waits")
-    # Registration's cap: 20 an hour from a network
-    while state["registers"] < 20:
+    # Registration's cap: 100 an hour from a network
+    while state["registers"] < 100:
         register("Check filler")
     s, b, h = register_raw({"redirect_uris": [REDIR]})
     assert s == 429, (s, b)
-    ok("registration's cap: the 21st in the hour refused")
+    ok("registration's cap: the 101st in the hour refused")
+else:
+    # 9. Behind a TLS proxy by the name the server is set up with (its
+    # Public address, starport.json's "address"): registration, the page,
+    # the sign-in and the token; another name still refused
+    W = "https://wb.example.org"
+    px = {"Host": "wb.example.org", "X-Forwarded-For": "192.0.2.50",
+            "X-Forwarded-Proto": "https"}
+    s, b, h = req("POST", B + "/api/v1/oauth/register", json.dumps(
+            {"redirect_uris": [REDIR], "client_name": "Check proxied",
+            "token_endpoint_auth_method": "none"}).encode(),
+            dict(px, **{"Content-Type": "application/json"}))
+    assert s == 201, (s, b)
+    pcid = json.loads(b)["client_id"]
+    v, ch = pkce()
+    s, b, h = req("GET", auth_url(pcid, ch, "s9", resource=W + "/api/v1/mcp"),
+            headers=px)
+    assert s == 200 and "<b>wb.example.org</b>" in b, (s, b)
+    s, b, h = req("POST", B + "/api/v1/oauth/authorize", {"rid": rid_of(b),
+            "name": "boss", "password": "checkpass12", "action": "allow"},
+            dict(px, Origin=W))
+    assert s == 303, (s, b)
+    q = {k: x[0] for k, x in urllib.parse.parse_qs(
+            urllib.parse.urlparse(h["Location"]).query).items()}
+    assert q.get("iss") == W and q.get("state") == "s9", q
+    keep(q["code"])
+    s, b, h = req("POST", B + "/api/v1/oauth/token", {"grant_type":
+            "authorization_code", "code": q["code"], "redirect_uri": REDIR,
+            "code_verifier": v, "client_id": pcid}, px)
+    assert s == 200, (s, b)
+    j = json.loads(b)
+    keep(j["access_token"], j["refresh_token"])
+    s, b, h = req("GET", auth_url(pcid, ch, "s9"),
+            headers=dict(px, Host="evil.example"))
+    assert s == 403 and "not set up for the name evil.example" in b, (s, b)
+    ok("by the proxy as https://wb.example.org (its Public address): "
+            "registered, signed in, the token; evil.example refused")
     log = open(T + "/wb.log", errors="replace").read()
     for x in state["secrets"]:
         assert x not in log, "in the log: " + x[:12]
@@ -515,6 +678,29 @@ json.dump(state, open(st_path, "w"))
 PY
 python3 "$t/oauth.py" a "http://127.0.0.1:$WB" "$t" || fail "the OAuth client ($t/wb.log)"
 
+# 6b. A ban stops a grant: boss bans reader by an admin script, the grant's
+# MCP call and refresh refused and its agent gone; then unbanned
+admin() # <log> <the admin script>
+{
+	mkdir -p "$t/ub"
+	# (not "admin script: done": a second instance of accounts.lua gets
+	# the result in Workbench, and it counts nothing)
+	printf 'wait_log_any 60000 admin result\nquit\n' > "$t/$1.cmds"
+	DISPLAY=$d WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 BUILDAT_JOIN_NAME=boss \
+		BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_ADMIN="$2" timeout 120 \
+		bin/buildat -C "$t/client_cache" -D "$t/ub" -s 127.0.0.1:$WB \
+		-w 800x600 -l 3 -o sound_mute=1 -c @"$t/$1.cmds" > "$t/$1.log" 2>&1
+}
+admin ban1 "ban reader" || fail "boss's ban ($t/ban1.log)"
+grep -aq "admin result: reader was banned" "$t/ban1.log" ||
+	fail "boss's ban: $(grep -a 'admin result\|refused' "$t/ban1.log" | head -2)"
+python3 "$t/oauth.py" ban "http://127.0.0.1:$WB" "$t" || fail "the OAuth client while banned ($t/wb.log)"
+grep -aq "reader's agent left: its account is banned" "$t/wb.log" ||
+	fail "the banned account's agent stayed ($t/wb.log)"
+admin ban2 "unban reader" || fail "boss's unban ($t/ban2.log)"
+grep -aq "admin result: reader was unbanned" "$t/ban2.log" || fail "boss's unban ($t/ban2.log)"
+echo "ok: reader's ban refused its grant, its agent left; unbanned"
+
 # 7. reader's client, signed in by the ID by itself: the grant on My
 # account, revoked there
 join j2 'wait_log_any 60000 Joined as reader\nwait_log_any 60000 player physics enabled\nframes 5\nkeypress Escape\nwait_log_any 10000 pause: the menu shown\nframes 3\nclick Button "My account*"\nframes 5\nclick Button "Connect an agent..."\nwait_log_any 10000 accounts: agents: 1 tokens, on\nframes 5\nscreenshot '"$t"'/tokens.png\nclick Button "Revoke Check ID tool"\nwait_log_any 10000 accounts: agents: revoked Check ID tool\nquit\n' ||
@@ -523,4 +709,16 @@ grep -aq "reader revoked the agent token [0-9a-f]* (\"Check ID tool\")" "$t/wb.l
 	fail "the revoke not logged ($t/wb.log)"
 echo "ok: My account listed the grant, and revoked it"
 python3 "$t/oauth.py" b "http://127.0.0.1:$WB" "$t" || fail "the OAuth client after the revoke ($t/wb.log)"
-echo "PASS: OAuth for Kit's MCP: discovery, registration, the page by a password and by a Starport ID, PKCE, codes once, refresh rotation, revocation and the limits"
+
+# 9. A hosted server's setting: its Public address names it behind the
+# proxy (no Starport, which would try to verify wb.example.org)
+python3 - "$t/wb/apps/workbench/starport.json" <<'PY'
+import json, sys
+c = json.load(open(sys.argv[1]))
+c.update(starports=[], address="https://wb.example.org")
+json.dump(c, open(sys.argv[1], "w"))
+PY
+wait_for_log "$t/wb.log" "Announcing to 0 Starport" 30 ||
+	fail "starport.json not read again ($t/wb.log)"
+python3 "$t/oauth.py" c "http://127.0.0.1:$WB" "$t" || fail "the OAuth client by the Public address ($t/wb.log)"
+echo "PASS: OAuth for Kit's MCP: discovery, registration, the page by a password and by a Starport ID, PKCE, codes once, refresh rotation and reuse, revocation, bans, a rebound name, the Public address and the limits"

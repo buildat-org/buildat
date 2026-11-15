@@ -198,8 +198,9 @@ namespace accounts
 		// for it; the account's rights at each use cap it. Its label is the
 		// tool's name, the user's choice. Listed with its making and last
 		// use, revocable; it stands no more once revoked, once its account is
-		// gone, or while agent access is off (the admin's switch on the
-		// Accounts page, on by default). [KIT_AGENTS_OAUTH] Or one a tool
+		// gone, while its account is banned, or while agent access is off
+		// (the admin's switch on the Accounts page, on by default).
+		// [KIT_AGENTS_OAUTH] Or one a tool
 		// got by signing in (OAuth, accounts.cpp): its access token
 		// ("bao_"), an hour's, of a grant stored as agent/<grant id>,
 		// labelled by the tool's name and listed and revoked the same way.
@@ -212,7 +213,10 @@ namespace accounts
 			ss_ label;
 		};
 		// "" with `out` filled when the token stands (its last use noted),
-		// else why not: "off" while agent access is off
+		// else why not: "off" while agent access is off, "expired" for a
+		// sign-in's access token past its hour (the tool refreshes it).
+		// out.id is set for a token of this server's that is refused
+		// (expired, or its account banned): a tool's own, not a guess
 		virtual ss_ check_agent(const ss_ &token, AgentToken &out) = 0;
 		virtual bool agents_on() = 0;
 	};

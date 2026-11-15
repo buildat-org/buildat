@@ -1150,6 +1150,19 @@ struct Module: public interface::Module, public Interface
 		return "";
 	}
 
+	ss_ public_host()
+	{
+		const json::Value c = config();
+		const json::Value &a = c.get("address");
+		json::Value body = json::object();
+		if(!a.is_string() || !public_address(a.as_string(), 0, body) ||
+				!body.get("address").is_string())
+			return "";
+		ss_ h = body.get("address").as_string();
+		std::transform(h.begin(), h.end(), h.begin(), ::tolower);
+		return h;
+	}
+
 	sv_<std::pair<ss_, ss_>> id_listings()
 	{
 		sv_<std::pair<ss_, ss_>> out;

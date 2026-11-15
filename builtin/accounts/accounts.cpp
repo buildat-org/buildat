@@ -2700,6 +2700,18 @@ struct Module: public interface::Module, public Interface
 				interface::sha256::calculate(token));
 	}
 
+	// What a join refuses an account: its ban (by name, and by the
+	// address where there is one), a blocklist's this server follows; ""
+	// for none. A sign-in's, a refresh's and each agent token's use.
+	ss_ ban_of(const ss_ &name, const ss_ &address)
+	{
+		ss_ why = banned(name, address);
+		if(why.empty() && !is_admin(name) && level(name) < LV_MODERATOR &&
+				id_blocked(name))
+			why = "Banned by a blocklist this server follows";
+		return why;
+	}
+
 	ss_ check_agent(const ss_ &token, AgentToken &out)
 	{
 		if(!m_store)
@@ -2718,8 +2730,6 @@ struct Module: public interface::Module, public Interface
 					a.access.empty() || !exists(a.name) ||
 					!oauth_same(oauth_sha(secret), a.access))
 				return gone;
-			if(now >= a.access_until_us)
-				return "its access token has expired (the tool refreshes it)";
 		} else {
 			key = agent_key(token);
 			if(token.size() < 32 || token.size() > 100 ||
@@ -2727,11 +2737,19 @@ struct Module: public interface::Module, public Interface
 					!a.access.empty() || !exists(a.name))
 				return gone;
 		}
+		// A token of this server's: refused from here with its id said
+		out.id = key.substr(6);
+		if(!a.access.empty() && now >= a.access_until_us)
+			return "expired";
+		// The account's ban, not an address's: the address here is the
+		// tool's server's, which a builder's ban is not
+		const ss_ ban = ban_of(a.name, "");
+		if(!ban.empty())
+			return ban;
 		if(now - a.used_us > 60LL * 1000000){
 			a.used_us = now;
 			m_store->set(key, pack(a));
 		}
-		out.id = key.substr(6);
 		out.name = a.name;
 		out.scope = a.scope;
 		out.label = a.label;
@@ -2909,14 +2927,21 @@ struct Module: public interface::Module, public Interface
 	//   rights and limits, listed on My account by the client's name and
 	//   revoked there: an access token for OAUTH_ACCESS_US (MCP: short-
 	//   lived) and a refresh token rotated at each use (MCP: so for a
-	//   public client), for KEEP_US from its last use; the one before used
-	//   again ends the grant (OAuth 2.1 4.3.1: one of the two who have it
-	//   stole it). A new sign-in of the same client and account replaces
-	//   its grant.
+	//   public client), for KEEP_US from its last use; any of its grant's
+	//   but the current one used ends the grant (OAuth 2.1 4.3.1: one of
+	//   the two who have it stole it; the one before, or older where the
+	//   thief rotated twice). A new sign-in of the same client and account
+	//   replaces its grant.
 	// The forms are taken from this page's own origin only; /token and
 	// /register answer the tools' servers, which send no Origin, and send
-	// no CORS: a page elsewhere learns nothing by them. No token, code or
-	// form value is logged.
+	// no CORS: a request with an Origin (a page's) is refused there, and
+	// /register takes JSON only (a page's no-cors fetch sends none). A
+	// refusal before the user acts is shown on the page with a link back,
+	// never a redirect (RFC 9700 4.11.2: any registered client's would be
+	// anyone's phishing link); Deny and a sign-in go back by themselves.
+	// From a trusted proxy the Host is checked (oauth_host_problem()). An
+	// account's ban ends what its grant does at the refresh and at each
+	// use (check_agent()). No token, code or form value is logged.
 	// simplified: no revocation endpoint (RFC 7009): a tool removed at its
 	// end leaves its grant on My account until revoked there or ended
 	struct OAuthRequest
@@ -2953,6 +2978,40 @@ struct Module: public interface::Module, public Interface
 		ss_ data;
 		return interface::sha256::is_hex(id, 32) &&
 				m_store->get("oauth_client/"+id, data) && unpack(data, c);
+	}
+
+	// **A name rebound to this server** (DNS rebinding): a page of
+	// evil.example whose name now resolves to 127.0.0.1 is of the same
+	// origin as this server to the browser, and posts its forms from
+	// loopback -- a trusted proxy by default (web_trusted_proxies), so its
+	// own X-Forwarded-For, a new address each time, would be believed and no
+	// failure wait would hold. From a trusted proxy's address (whatever it
+	// sends: a browser on this machine is one) the Host is a loopback name,
+	// an IP address, or the server's own name: starport.json's "address",
+	// the Public address of its Starport settings. "" when it is, else why
+	// not, for the page. simplified: one name; a server behind a proxy under
+	// two names takes OAuth under the one only
+	ss_ oauth_host_problem(const network::HttpRequest &r, const ss_ &origin)
+	{
+		if(!r.proxied)
+			return "";
+		ss_ name = origin.substr(origin.find("://") + 3);
+		if(name[0] != '[')
+			name = name.substr(0, name.find(':'));
+		if(oauth_not_rebindable(name))
+			return "";
+		ss_ own;
+		starport_announce::access(m_server, [&](starport_announce::Interface *s){
+			own = s->public_host();
+		});
+		if(name == own)
+			return "";
+		log_i(MODULE, "OAuth: a request from %s for the name %s refused: not "
+				"this server's (its Public address is \"%s\")", cs(r.address),
+				cs(name), cs(own));
+		return "This server is not set up for the name "+name+": its Host "
+				"enters https://"+name+" as the Public address in its Starport "
+				"settings";
 	}
 
 	// What has ended: the pages and the codes at each call; the clients
@@ -3011,7 +3070,7 @@ struct Module: public interface::Module, public Interface
 		if(p == "/api/v1/oauth/token")
 			return oauth_token(r, origin);
 		if(p == "/api/v1/oauth/register")
-			return oauth_register(r);
+			return oauth_register(r, origin);
 		json::Value v = json::object();
 		auto list = [](std::initializer_list<const char*> l){
 			json::Value a = json::array();
@@ -3056,7 +3115,7 @@ struct Module: public interface::Module, public Interface
 	// response_types (what this server does only), and
 	// token_endpoint_auth_method ("none" for a public client; a secret is
 	// made for client_secret_post or _basic, the RFC's default)
-	void oauth_register(const network::HttpRequest &r)
+	void oauth_register(const network::HttpRequest &r, const ss_ &origin)
 	{
 		auto refuse = [&](int status, const char *error, const ss_ &why){
 			json::Value v = json::object();
@@ -3068,6 +3127,19 @@ struct Module: public interface::Module, public Interface
 		};
 		if(r.method != "POST")
 			return refuse(405, "invalid_request", "POST a client's metadata");
+		// A page's, before the network's count: a site its visitors open
+		// fills nothing
+		if(!r.origin.empty())
+			return refuse(403, "invalid_request", "not from a page in a "
+					"browser: a tool's server registers");
+		ss_ type = r.header("content-type");
+		std::transform(type.begin(), type.end(), type.begin(), ::tolower);
+		if(type.compare(0, 16, "application/json") != 0)
+			return refuse(400, "invalid_client_metadata",
+					"Content-Type: application/json");
+		const ss_ bad_host = oauth_host_problem(r, origin);
+		if(!bad_host.empty())
+			return refuse(403, "invalid_request", bad_host);
 		if(!m_oauth_rates.ok("register", network::address_bin(r.address),
 				OAUTH_REGISTERS, 3600))
 			return refuse(429, "invalid_client_metadata", "too many "
@@ -3114,9 +3186,30 @@ struct Module: public interface::Module, public Interface
 			oauth_sweep(true);
 			n = m_store->list("oauth_client/").size();
 		}
+		if(n >= OAUTH_CLIENTS){
+			// Then the oldest never used in a sign-in (a flood's are such),
+			// not a refusal of every new tool
+			ss_ oldest;
+			int64_t made = INT64_MAX;
+			for(const ss_ &key : m_store->list("oauth_client/")){
+				ss_ data;
+				OAuthClient o;
+				if(m_store->get(key, data) && unpack(data, o) && !o.used_us &&
+						o.made_us < made){
+					made = o.made_us;
+					oldest = key;
+				}
+			}
+			if(!oldest.empty()){
+				m_store->remove(oldest);
+				n--;
+				log_i(MODULE, "OAuth: the clients' cap: %s, never used, removed",
+						cs(oldest.substr(13, 8)));
+			}
+		}
 		if(n >= OAUTH_CLIENTS)
 			return refuse(503, "invalid_client_metadata", "this server has "
-					"all the clients it keeps: try later");
+					"all the clients it keeps, each in use: try later");
 		const ss_ id = oauth_random_hex(16);
 		const ss_ secret = c.auth == "none" ? ss_() : oauth_random_hex(32);
 		c.secret = secret.empty() ? ss_() : oauth_sha(secret);
@@ -3194,17 +3287,36 @@ struct Module: public interface::Module, public Interface
 			page.error = why;
 			show(400);
 		};
-		// Back to the tool, with its state and this server as the issuer
+		// The tool's redirect, with its state and this server as the issuer
 		// (RFC 9207)
-		auto back = [&](const OAuthRequest &q, const ss_ &query){
+		auto back_url = [&](const OAuthRequest &q, const ss_ &query){
 			ss_ to = q.redirect+(q.redirect.find('?') == ss_::npos ? "?" : "&")+
 					query;
 			if(!q.state.empty())
 				to += "&state="+oauth_url_encode(q.state);
-			to += "&iss="+oauth_url_encode(origin);
-			http_answer(r, 303, "text/plain; charset=utf-8", "", "Location: "+to+
-					"\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n");
+			return to+"&iss="+oauth_url_encode(origin);
 		};
+		// Back there: only for what the user did (Deny, Allow)
+		auto back = [&](const OAuthRequest &q, const ss_ &query){
+			http_answer(r, 303, "text/plain; charset=utf-8", "", "Location: "+
+					back_url(q, query)+"\r\nCache-Control: no-store\r\n"
+					"Referrer-Policy: no-referrer\r\n");
+		};
+		// A request refused before the user did anything: the page says so,
+		// with a link back
+		auto refused = [&](const OAuthRequest &q, const ss_ &error,
+				const ss_ &why){
+			page.redirect = q.redirect;
+			page.back = back_url(q, "error="+error+"&error_description="+
+					oauth_url_encode(why));
+			ended("The tool's request is not one this server takes: "+why);
+		};
+		const ss_ bad_host = oauth_host_problem(r, origin);
+		if(!bad_host.empty()){
+			page.ended = true;
+			page.error = bad_host;
+			return show(403);
+		}
 		if(r.method == "GET"){
 			OAuthRequest q;
 			OAuthClient c;
@@ -3220,27 +3332,33 @@ struct Module: public interface::Module, public Interface
 					c.redirects.end())
 				return ended("The tool asks to go back to an address it did "
 						"not register: not sent there");
-			// From here a refusal goes back to the tool
+			// From here a refusal links back to the tool
 			q.state = r.param("state");
 			if(q.state.size() > 1000)
 				q.state.clear();
 			if(r.param("response_type") != "code")
-				return back(q, "error=unsupported_response_type");
+				return refused(q, "unsupported_response_type",
+						"the response type is code");
 			q.challenge = r.param("code_challenge");
 			if(r.param("code_challenge_method") != "S256" ||
 					!oauth_pkce_text(q.challenge))
-				return back(q, "error=invalid_request&error_description="+
-						oauth_url_encode("PKCE with S256 is required"));
+				return refused(q, "invalid_request",
+						"PKCE with S256 is required");
 			q.resource = origin+OAUTH_RESOURCE_PATH;
 			const ss_ resource = r.param("resource");
 			if(!resource.empty() && oauth_resource_norm(resource) != q.resource)
-				return back(q, "error=invalid_target&error_description="+
-						oauth_url_encode("the resource here is "+q.resource));
+				return refused(q, "invalid_target", "the resource here is "+
+						q.resource);
 			q.scope = (" "+r.param("scope")+" ").find(" admin ") != ss_::npos ?
 					"admin" : "builder";
-			if(m_oauth_requests.size() >= OAUTH_PENDING)
-				return ended("Too many sign-ins wait on this server: try again "
-						"in a few minutes");
+			if(!m_oauth_rates.ok("page", network::address_bin(r.address),
+					OAUTH_PAGES, OAUTH_REQUEST_US / 1000000)){
+				page.ended = true;
+				page.error = "Too many sign-ins from your network: try again "
+						"in a few minutes";
+				return show(429);
+			}
+			oauth_make_room(m_oauth_requests, OAUTH_PENDING);
 			q.until_us = now + OAUTH_REQUEST_US;
 			const ss_ rid = oauth_random_hex(16);
 			m_oauth_requests[rid] = q;
@@ -3348,19 +3466,17 @@ struct Module: public interface::Module, public Interface
 				return show(200);
 			}
 		}
-		// What a join refuses
-		ss_ why = banned(name, r.address);
-		if(why.empty() && !is_admin(name) && level(name) < LV_MODERATOR &&
-				id_blocked(name))
-			why = "Banned by a blocklist this server follows";
+		ss_ why = ban_of(name, r.address);
 		size_t others = 0;
 		for(auto &m : agents_of(name))
 			others += m.second.client != q.client;
 		if(why.empty() && others >= AGENTS_A_USER)
 			why = "You have "+itos(AGENTS_A_USER)+" agent tokens: revoke one on "
 					"My account, Connect an agent..., first";
-		if(why.empty() && m_oauth_codes.size() >= OAUTH_PENDING)
-			why = "Too many sign-ins wait on this server: try again in a minute";
+		if(why.empty() && !m_oauth_rates.ok("code", network::address_bin(
+				r.address), OAUTH_CODES, OAUTH_CODE_US / 1000000))
+			why = "Too many sign-ins from your network: try again in a few "
+					"minutes";
 		if(!why.empty()){
 			log_i(MODULE, "OAuth: %s's sign-in from %s refused: %s", cs(name),
 					cs(r.address), cs(why));
@@ -3376,6 +3492,7 @@ struct Module: public interface::Module, public Interface
 		k.scope = q.scope == "admin" && is_admin(name) ? "admin" : "builder";
 		k.name = name;
 		k.until_us = now + OAUTH_CODE_US;
+		oauth_make_room(m_oauth_codes, OAUTH_PENDING);
 		const ss_ code = oauth_random_hex(32);
 		m_oauth_codes[oauth_sha(code)] = k;
 		m_oauth_requests.erase(it);
@@ -3407,9 +3524,11 @@ struct Module: public interface::Module, public Interface
 		const int64_t now = interface::os::wall_us();
 		const ss_ bin = network::address_bin(r.address);
 		const ss_ no_store = "Cache-Control: no-store\r\nPragma: no-cache\r\n";
+		// (a page's, refused by its Origin or Host, is no try of the
+		// network's)
 		auto refuse = [&](int status, const char *error, const ss_ &why,
 				const ss_ &extra){
-			if(status != 429)
+			if(status != 429 && status != 403)
 				m_oauth_rates.ok("token_fail", bin, OAUTH_TOKEN_FAILS, 60);
 			json::Value v = json::object();
 			v.set("error", error);
@@ -3421,6 +3540,12 @@ struct Module: public interface::Module, public Interface
 		};
 		if(r.method != "POST")
 			return refuse(405, "invalid_request", "POST a form", "");
+		if(!r.origin.empty())
+			return refuse(403, "invalid_request", "not from a page in a "
+					"browser: a tool's server asks", "");
+		const ss_ bad_host = oauth_host_problem(r, origin);
+		if(!bad_host.empty())
+			return refuse(403, "invalid_request", bad_host, "");
 		if(!m_oauth_rates.ok("token_fail", bin, OAUTH_TOKEN_FAILS, 60, false))
 			return refuse(429, "invalid_request", "too many refused requests "
 					"from your network: wait a minute", "");
@@ -3523,16 +3648,23 @@ struct Module: public interface::Module, public Interface
 				return refuse(400, "invalid_grant", "not a refresh token of "
 						"this server's (revoked, or the account gone): sign in "
 						"again", "");
+			// The grant's, not its current one: the one before it or older
+			// (a thief's rotations ahead of the tool's), either way had by
+			// two (OAuth 2.1 4.3.1): ended
 			const ss_ h = oauth_sha(rs);
-			if(!a.prev_refresh.empty() && oauth_same(h, a.prev_refresh)){
-				agent_gone(gid, a, "revoked: a refresh token of before used "
-						"again");
-				return refuse(400, "invalid_grant", "a refresh token used "
-						"twice: revoked; sign in again", "");
+			if(!oauth_same(h, a.refresh)){
+				agent_gone(gid, a, ss_("revoked: a refresh token of ")+
+						(oauth_same(h, a.prev_refresh) ? "just before" : "before "
+						"that, or not its own,")+" used");
+				return refuse(400, "invalid_grant", "not the grant's current "
+						"refresh token: revoked; sign in again", "");
 			}
-			if(!oauth_same(h, a.refresh) || now >= a.refresh_until_us)
+			if(now >= a.refresh_until_us)
 				return refuse(400, "invalid_grant", "the refresh token has "
 						"ended: sign in again", "");
+			const ss_ ban = ban_of(a.name, "");
+			if(!ban.empty())
+				return refuse(400, "invalid_grant", ban, "");
 			if(!resource.empty() && oauth_resource_norm(resource) != a.resource)
 				return refuse(400, "invalid_target", "resource: the token is "
 						"for "+a.resource, "");

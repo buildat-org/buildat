@@ -1519,7 +1519,8 @@ struct Module: public interface::Module, public network::Interface
 			r->headers = headers;
 			// [KIT_AGENTS_OAUTH] Through the proxy (production's TLS one) as
 			// https unless it says otherwise; directly, http
-			const ss_ proto = trusted_proxy(peer.socket->get_remote_address()) ?
+			r->proxied = trusted_proxy(peer.socket->get_remote_address());
+			const ss_ proto = r->proxied ?
 					web::lower(headers["x-forwarded-proto"]) : ss_();
 			r->scheme = proto == "http" || proto == "https" ? proto :
 					!address.empty() ? "https" : "http";

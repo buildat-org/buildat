@@ -54,6 +54,11 @@ namespace starport_announce
 		// while it takes IDs, as (URL, listing id): where a page of its own
 		// sends an ID to sign in (the Starport's /authorize?listing=)
 		virtual sv_<std::pair<ss_, ss_>> id_listings() = 0;
+		// [KIT_AGENTS_OAUTH] The host name of starport.json's "address"
+		// (the Starport settings' Public address), lower case and without
+		// its port: the name this server is reached by behind a proxy; ""
+		// for none
+		virtual ss_ public_host() = 0;
 	};
 
 	// False, and cb not called, where the app does not have the module:

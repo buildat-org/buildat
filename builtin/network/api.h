@@ -144,6 +144,10 @@ namespace network
 		// trusted proxy (web_trusted_proxies) unless its X-Forwarded-Proto
 		// says "http", else "http"; public_origin() below
 		ss_ scheme = "http";
+		// From an address web_trusted_proxies names (loopback by default):
+		// the proxy's, or anything on this machine, a browser's page
+		// included -- whose X-Forwarded-For and Host are then its own
+		bool proxied = false;
 		ss_ header(const ss_ &lower_name) const {
 			auto it = headers.find(lower_name);
 			return it == headers.end() ? ss_() : it->second;
