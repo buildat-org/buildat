@@ -25,10 +25,11 @@
 #      taken (the run's line: Gems 1/3, side.png); the corrections few; the
 #      side camera led ahead in +x, after Space (turned round) in -x
 #      (turned.png, [KIT_SIDE_LEAD]);
-#   5. kitbob joins, his body drawn by the hook on kitboss's screen; his
-#      first My account page drawn again when the hello comes, "Connect an
-#      agent..." on it (accounts.lua); [KIT_LOBBY] he in the lobby, the gem
-#      kitboss took still drawn for him (each rider's own);
+#   5. kitbob joins: [KIT_LOBBY] he in the lobby, the gem kitboss took still
+#      drawn for him (each rider's own), [KIT_LOBBY_OUT_OF_PLAY] out of play;
+#      his Play, his body drawn by the hook on kitboss's screen; his first
+#      My account page drawn again when the hello comes, "Connect an
+#      agent..." on it (accounts.lua);
 #   6. [CRAG_BEST_RESET] a fourth gem placed, linked only to the run: the run
 #      counts it (Gems 0/4), the finish refused at 3 of 4 and taken at 4, the
 #      run's reset brings it back; [KIT_LOBBY] the finish the result card
@@ -156,6 +157,26 @@ await "$CL" 0 10 "kit editor: kit/controls' edit view 2d"
 await "$CL" 0 10 "kit editor: the view is 2D \(front\)"
 cmd "frames 10" "screenshot $t/edit.png"
 echo "ok: the editor came up in 2D, the Front view (kit/controls' edit_view 2d)"
+# [KIT_LAYOUT_AUTO] The HUD view as a phone (412x915), the lobby's screen:
+# its chat and view (54, auto) a column, the view the frame's width, the
+# chat under it (hud_lobby.png)
+step 10 "kit editor: the view is HUD" "keypress F4"
+step 10 "hud shape open" "frames 5" 'click DropDownList "hud shape"'
+step 10 "kit editor: the HUD view's shape is 412x915" "frames 3" 'click Text "hud shape: Phone 412x915"'
+step 10 "hud screen open" "frames 5" 'click DropDownList "hud screen"'
+step 10 "kit editor: the HUD view shows screen 45" "frames 3" 'click Text "hud screen: ◆ 45 *"'
+cmd "frames 10" "screenshot $t/hud_lobby.png"
+python3 -I - "$CL" <<'PY' || fail "the lobby's column in the HUD view's phone frame ($CL)"
+import re, sys
+at = {}
+for l in open(sys.argv[1], errors="replace"):
+    m = re.search(r"kit: ui (46|48) \w+ at (-?\d+),(-?\d+) (\d+)x(\d+) in (\d+)x(\d+) ", l)
+    if m and int(m[6]) < int(m[7]):
+        at[m[1]] = tuple(map(int, m.groups()[1:]))
+c, v = at.get("46"), at.get("48")
+assert c and v and c[2] == v[2] and v[2] >= 0.9 * v[4] and c[1] >= v[1] + v[3], (c, v)
+print("ok: the HUD view's phone frame: the view", v, "the chat under it", c)
+PY
 # [KIT_CRAG_PLAYTEST_1] (fault 0a9) Walk in a side game: the view clicked
 # (the mountains, 30), then 7 picked in Entities' Scene list. 7 stays: the
 # free pointer takes no crosshair, which made each click on a panel one at
@@ -294,11 +315,22 @@ echo "ok: the side camera led $l0 riding right, $lx turned round"
 seen "$CL" "$hm" 'workbench: the hint ""' || await "$CL" "$hm" 5 'workbench: the hint ""'
 grep -raq --include=kit_hints "local/crag_bike jump" "$t/cu_boss" || fail "the used hints not kept ($t/cu_boss)"
 echo "ok: Space used, the hint line gone and kept"
-# 5. kitbob: drawn by the hook on kitboss's screen; his first My account page
+# 5. kitbob: in the lobby, then drawn by the hook on kitboss's screen once
+# he plays; his first My account page
 as bob
 await "$CL" 0 120 "Joined as kitbob"
 await "$CL" 0 60 "player physics enabled"
 await "$CL" 0 10 "kit: player [0-9]+'s body drawn by its movement"
+# [KIT_LOBBY] kitbob in the lobby; kitboss's gem still there on his screen;
+# [KIT_LOBBY_OUT_OF_PLAY] out of play there, Play takes him in
+await "$CL" 0 10 "kit: ui full screen 45 up"
+await "$CL" 0 10 "kit: entity 11's look: taken off"
+seen "$CL" 0 "kit: entity 11's look: taken on" && fail "kitboss's gem gone for kitbob ($CL)"
+grep -aq "kit/lobby 44: kitbob: none -> lobby" "$SL" || fail "kitbob not in the lobby ($SL)"
+await "$SL" 0 10 "kitbob is out of play \(a lobby\)"
+m=$(mark "$SL")
+step 10 "kit: ui full screen none" "frames 3" 'click Button "Play"'
+await "$SL" "$m" 5 "kitbob is in play"
 as boss
 two=
 for i in $(seq 25); do
@@ -308,11 +340,6 @@ for i in $(seq 25); do
 done
 [ -n "$two" ] || fail "kitbob's body not drawn by the hook on kitboss's screen ($CL)"
 as bob
-# [KIT_LOBBY] kitbob in the lobby; kitboss's gem still there on his screen
-await "$CL" 0 10 "kit: ui full screen 45 up"
-await "$CL" 0 10 "kit: entity 11's look: taken off"
-seen "$CL" 0 "kit: entity 11's look: taken on" && fail "kitboss's gem gone for kitbob ($CL)"
-grep -aq "kit/lobby 44: kitbob: none -> lobby" "$SL" || fail "kitbob not in the lobby ($SL)"
 for i in 1 2 3; do
 	m=$(mark "$CL")
 	cmd "frames 3" "keypress Escape"
@@ -341,12 +368,12 @@ for i in $(seq 20); do
 done
 awk -v x="$bx" 'BEGIN { exit !(x < -58) }' || fail "the hazard did not take the bike to the start: $bx ($CL)"
 cmd 'event kit_edit {"op": "place", "type": "local/crag_gem", "pos": [-45, 8, 1]}'
-await "$SL" "$m" 5 "An edit by kitboss: placed local/crag_gem 54 "
-step 5 "Gems 0/4" 'event kit_edit {"op": "link", "id": 54, "comp": 0, "output": "collected", "to": 7, "input": "gem"}'
+await "$SL" "$m" 5 "An edit by kitboss: placed local/crag_gem 55 "
+step 5 "Gems 0/4" 'event kit_edit {"op": "link", "id": 55, "comp": 0, "output": "collected", "to": 7, "input": "gem"}'
 # (onto the bike at the start: its zone entered)
-cmd 'event kit_edit {"op": "move", "id": 54, "pos": [-61, 0, 1]}'
+cmd 'event kit_edit {"op": "move", "id": 55, "pos": [-61, 0, 1]}'
 await "$SL" "$m" 5 "local/crag_run 7: kitboss has 1 of 4 gems"
-seen "$SL" "$m" "local/crag_gem 54: kitboss took the gem" || fail "not gem 54's take ($SL)"
+seen "$SL" "$m" "local/crag_gem 55: kitboss took the gem" || fail "not gem 55's take ($SL)"
 try_ gem
 try_ gem
 await "$SL" "$m" 5 "kitboss has 3 of 4 gems"
@@ -357,7 +384,7 @@ await "$SL" "$m" 5 "kitboss has 4 of 4 gems"
 try_ finish
 await "$SL" "$m" 5 "local/crag_run 7: kitboss finished in [0-9.]+ \(best\)"
 best=$(tail -c +$((m + 1)) "$SL" | grep -aoP 'kitboss finished in \K[0-9.]+(?= \(best\))' | tail -1)
-await "$SL" "$m" 5 "local/crag_gem 54: back"
+await "$SL" "$m" 5 "local/crag_gem 55: back"
 echo "ok: a fourth gem linked only to the run: Gems 0/4, its take counted, the finish refused at 3 of 4 and taken at 4 ($best), the gem back by the run's reset"
 # [KIT_LOBBY] The finish kitboss's result card (an over screen): the time,
 # the best; the clock held till Again or the lobby's Play

@@ -6,6 +6,10 @@
 -- [KIT_HUD_STYLE] Sizes in percent of the screen's shorter side; `layout`
 -- "column" or "row" stacks its shown children by `order` with a `gap`, a
 -- hidden one leaving no gap, a width or height of 0 fitting it to them;
+-- [KIT_LAYOUT_AUTO] "auto" a row on a landscape screen (of width 0 across
+-- the whole room, its children spread to its ends) and a column on a
+-- portrait one (a phone's), its children there as wide as it, stacked up
+-- from the bottom when it is anchored there (a lobby's chat and view);
 -- `background` and `border` may be "none" (a layout alone, drawn nowhere).
 -- While
 -- one with a button is up, a player in mouse look has the pointer to
@@ -68,7 +72,7 @@ return {
 		style = {cat = "hud", type = "string", default = "shapes",
 			choices = {"shapes", "plain"}},
 		layout = {cat = "hud", type = "string", default = "none",
-			choices = {"none", "column", "row"}},
+			choices = {"none", "column", "row", "auto"}},
 		gap = {cat = "hud", type = "number", default = 0.6, min = 0, max = 100},
 		color = {cat = "hud", type = "string", default = "#ffffff"},
 		background = {cat = "hud", type = "string", default = "#000000a0"},

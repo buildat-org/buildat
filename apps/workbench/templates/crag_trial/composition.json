@@ -39,14 +39,15 @@
 		{"id": 42, "parent": 2, "name": "rocks, in front", "pos": [40, 0, -1.5], "components": [{"type": "kit/polygon", "params": {"points": [[0, 0], [1.2, 1.3], [2.6, 0.9], [3.6, 0]], "color": "#4a3f35", "depth": 1, "collision": false}}]},
 		{"id": 44, "parent": 2, "name": "the lobby", "components": [{"type": "kit/lobby", "params": {"lobby_screen": 45, "over_screen": 50}, "links": [{"output": "entered", "to": 7, "input": "start"}, {"output": "entered", "to": 48, "input": "follow"}, {"output": "left", "to": 48, "input": "unfollow"}]}]},
 		{"id": 45, "parent": 2, "name": "the lobby screen", "components": [{"type": "kit/ui_panel", "params": {"screen": "full", "to": "player", "title": "Crag Trial", "size": 3, "background": "#1d1f2e"}}]},
-		{"id": 46, "parent": 45, "name": "the lobby's chat", "components": [{"type": "kit/ui_chat"}]},
+		{"id": 54, "parent": 45, "name": "the lobby's chat and view", "components": [{"type": "kit/ui_panel", "params": {"layout": "auto", "anchor": "bottom", "width": 0, "height": 0, "gap": 1, "background": "none", "border": "none", "shown": true}}]},
+		{"id": 46, "parent": 54, "name": "the lobby's chat", "components": [{"type": "kit/ui_chat"}]},
 		{"id": 47, "parent": 45, "name": "Play", "components": [{"type": "kit/ui_button", "params": {"label": "Play", "anchor": "center", "y": 0, "size": 3.2}, "links": [{"output": "pressed", "to": 44, "input": "play"}]}]},
-		{"id": 48, "parent": 45, "name": "the lobby's view", "components": [{"type": "kit/ui_view", "params": {"title": "On the track"}}]},
+		{"id": 48, "parent": 54, "name": "the lobby's view", "components": [{"type": "kit/ui_view", "params": {"title": "On the track"}}]},
 		{"id": 49, "parent": 45, "name": "the lobby's best times", "components": [{"type": "kit/ui_text", "params": {"text": "Best times|{value}", "anchor": "top", "y": 10}}]},
 		{"id": 50, "parent": 2, "name": "the result card", "components": [{"type": "kit/ui_panel", "params": {"screen": "over", "to": "player", "title": "Finished", "layout": "column", "width": 0, "height": 0, "size": 2.2}}]},
 		{"id": 51, "parent": 50, "name": "the result", "components": [{"type": "kit/ui_text", "params": {"to": "player", "text": "{value}", "size": 2.4}}]},
 		{"id": 52, "parent": 50, "name": "Again", "components": [{"type": "kit/ui_button", "params": {"label": "Again", "size": 2.4}, "links": [{"output": "pressed", "to": 44, "input": "again"}]}]},
 		{"id": 53, "parent": 50, "name": "Lobby", "components": [{"type": "kit/ui_button", "params": {"label": "Lobby", "size": 2.4}, "links": [{"output": "pressed", "to": 44, "input": "lobby"}]}]}
 	],
-	"next_id": 54
+	"next_id": 55
 }
