@@ -543,8 +543,9 @@ function M.body_at(id)
 	return b and not b.hidden and b.at or nil
 end
 
+-- ([KIT_LOBBY_OUT_OF_PLAY] in a lobby too, under its screen)
 function M.spectating()
-	return M.waiting ~= nil and M.waiting()
+	return M.out_of_play ~= nil and M.out_of_play()
 end
 
 local function eye_of(id)
@@ -642,7 +643,9 @@ function M.spectate_view(dt, cam_pos, yaw, pitch)
 	if k("left") then v = v - rot * magic.Vector3(1, 0, 0) end
 	if k("jump") then v = v + magic.Vector3(0, 1, 0) end
 	if k("down") then v = v - magic.Vector3(0, 1, 0) end
-	if v:Length() > 0 then
+	-- ([KIT_LOBBY_OUT_OF_PLAY] not under a full screen: no world drawn, and a
+	-- lobby's kit/ui_view follows a rider by this camera's offset)
+	if v:Length() > 0 and not (M.full_screen and M.full_screen()) then
 		SP.pos = SP.pos + v:Normalized() * (8 * dt)
 	end
 	set_hint("Free camera: [" .. tostring(M.key_name("forward")) .. "][" ..

@@ -1115,6 +1115,16 @@ function M.waiting()
 	return v ~= nil and not v:IsEmpty() and v:GetString() == "true"
 end
 
+-- [KIT_LOBBY_OUT_OF_PLAY] Whether this player is out of play: waiting, or
+-- in a kit/lobby's lobby or result (their pose's flag 4, the server's)
+function M.out_of_play()
+	local me = P.nodes[P.you]
+	local v = me and me.node:GetVar("kit_pose")
+	local f = v and not v:IsEmpty() and
+			tonumber(v:GetString():match("^%S+ %S+ %S+ (%S+)"))
+	return M.waiting() or (f or 0) % 8 >= 4
+end
+
 local go_next = nil -- a target to send in the next step
 -- [KIT_SHIP] For a drive, what a gunman and a helmsman do by their keys, as drawn
 -- here: "event kit_aim <id> [<speed> <gravity> [fire]]" turns the turret ridden at
@@ -1255,7 +1265,7 @@ end
 
 local function gather()
 	local f, r, jump, down = 0, 0, 0, 0
-	if walking() and not paused() and not M.waiting() and
+	if walking() and not paused() and not M.out_of_play() and
 			not (ui_utils.clicks_wanted() and
 			not M.looking()) then
 		-- [KIT_VEHICLE_MOVEMENTS] down (an airship's descent)

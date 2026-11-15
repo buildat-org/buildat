@@ -155,6 +155,7 @@ static const char *const CORE_VOXEL = "kit/core";
 static const char *const ENGINE_TYPE = "kit/engine";
 static const char *const RADAR_TYPE = "kit/radar";
 static const char *const TRIGGER_TYPE = "kit/trigger_zone";
+static const char *const LOBBY_TYPE = "kit/lobby"; // [KIT_LOBBY_OUT_OF_PLAY]
 static const size_t MAX_LINKS = 64;
 // [KIT_COMPONENTS] Components an entity has at most, by Add component
 static const size_t MAX_COMPONENTS = 16;
@@ -498,6 +499,9 @@ struct Peer
 	// [KIT_JOIN_ORIGIN_POSITION] Joined, the join's runs (a spawner's
 	// teleport) not done yet: in no zone, its place the app's
 	bool spawning = false;
+	// [KIT_LOBBY_OUT_OF_PLAY] In a kit/lobby's lobby or result (its
+	// out_of_play on), not editing: lobby_out_tick()'s
+	bool lobby_out = false;
 	// The tools' colour (an index of COLORS, -1 while they are off), the
 	// selected entity (0: none) and the cursor (null: none), which the
 	// other builders see
@@ -18475,9 +18479,11 @@ struct Module: public interface::Module, public Interface
 			return !build && pi != m_peers.end();
 		}
 		// [KIT_CTF] a dead player waiting to respawn does nothing but stand
-		if(action != "enter" && player_waiting(pi->second.player)){
+		// ([KIT_LOBBY_OUT_OF_PLAY] nor one in a lobby)
+		if(action != "enter" && out_of_play(pi->second.player)){
 			if(why)
-				*why = "Waiting to respawn";
+				*why = player_waiting(pi->second.player) ? "Waiting to respawn" :
+						"Out of play";
 			return false;
 		}
 		const Entity *re = nullptr;
@@ -18999,9 +19005,10 @@ struct Module: public interface::Module, public Interface
 					// nowhere: the app's place before the spawn's (the origin's
 					// ground on a join and at a session's end) is in no zone
 					auto bi = m_bodies.find(pp.first);
-					const bool inside = !peer.spawning && (!m_host.controls ||
-							(bi != m_bodies.end() && bi->second.put)) &&
-							box_holds(o, q, n, peer.pos);
+					// ([KIT_LOBBY_OUT_OF_PLAY] nor one in a lobby)
+					const bool inside = !peer.spawning && !peer.lobby_out &&
+							(!m_host.controls || (bi != m_bodies.end() &&
+							bi->second.put)) && box_holds(o, q, n, peer.pos);
 					if(inside != (in.inside.count(itos(peer.player)) > 0))
 						log_i(MODULE, "Entity %s: %s %s its zone at %.3f,%.3f,%.3f",
 								cs(itos(e.id)), cs(peer.name), inside ? "enters" :
@@ -19254,6 +19261,7 @@ struct Module: public interface::Module, public Interface
 			radars_tick();
 		send_controls();
 		env_tick();
+		lobby_out_tick();
 		// simplified: the world's actions looked for once a second, not
 		// as the instances and their parameters change; a change hook is
 		// the upgrade if a world of thousands makes the scan a cost
@@ -20050,7 +20058,7 @@ struct Module: public interface::Module, public Interface
 		Body &b = bi->second;
 		const uint32_t last = b.inputs.empty() ? b.ack : b.inputs.back().first;
 		const bool waiting = m_peers.count(packet.sender) &&
-				player_waiting(m_peers[packet.sender].player);
+				out_of_play(m_peers[packet.sender].player);
 		uint32_t at = last;
 		const ss_ &d = packet.data;
 		size_t i = d.find(';');
@@ -20086,8 +20094,9 @@ struct Module: public interface::Module, public Interface
 			at = n;
 			// [KIT_CTF] a dead player waiting to respawn stays where they
 			// fell: no walking, jumping or going (the view turns)
+			// ([KIT_LOBBY_OUT_OF_PLAY] one in a lobby too; nor going down)
 			if(waiting)
-				v[0] = v[1] = v[3] = v[4] = 0;
+				v[0] = v[1] = v[3] = v[4] = v[12] = 0;
 			ss_ o = "{f=";
 			lua_lit(json::Value(std::max(-1.0, std::min(1.0, v[0]))), o);
 			o += ",r=";
@@ -20200,7 +20209,8 @@ struct Module: public interface::Module, public Interface
 	// [KIT_PLAYER_MODEL] What others draw of a player's body that its
 	// node's place does not say, on the node as "kit_pose": "<yaw> <pitch>
 	// <swings> <flags> <held item>" (flags: 1 digging, 2 in a seat, 4 not
-	// in play: waiting to respawn), set as it changes
+	// in play: waiting to respawn, [KIT_LOBBY_OUT_OF_PLAY] in a lobby), set
+	// as it changes
 	void set_pose(size_t peer, Body &b)
 	{
 		auto pi = m_peers.find(peer);
@@ -20210,7 +20220,7 @@ struct Module: public interface::Module, public Interface
 		if(ei == m_entities.end() || !ei->second.node)
 			return;
 		const int flags = (b.dig != 0 ? 1 : 0) | (b.seat ? 2 : 0) |
-				(player_waiting(pi->second.player) ? 4 : 0);
+				(out_of_play(pi->second.player) ? 4 : 0);
 		char buf[64];
 		snprintf(buf, sizeof buf, "%.0f %.0f %.0f %d ", b.look_yaw,
 				b.look_pitch, std::fmod(b.swings, 1000000), flags);
@@ -21509,7 +21519,7 @@ struct Module: public interface::Module, public Interface
 					best = &t, bd = d;
 			};
 			auto opponent = [&](uint64_t id){
-				return id != actor && !player_waiting(id) && !(own && in_team(id, own));
+				return id != actor && !out_of_play(id) && !(own && in_team(id, own));
 			};
 			// (a player's place is their peer's)
 			if(pick == "nearest_opponent")
@@ -23306,13 +23316,15 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_CTF] A dead player waiting to respawn acts on nothing: refused
 	// (logged as other refusals)
+	// ([KIT_LOBBY_OUT_OF_PLAY] nor one in a lobby: "out of play")
 	bool waiting_refused(Peer &pe, const char *what)
 	{
-		if(!player_waiting(pe.player))
+		if(!out_of_play(pe.player))
 			return false;
-		if(log_refusal(pe, ss_("waiting to respawn: ")+what))
-			log_i(MODULE, "%s's %s refused: waiting to respawn", cs(pe.name),
-					what);
+		const char *state = player_waiting(pe.player) ? "waiting to respawn" :
+				"out of play";
+		if(log_refusal(pe, ss_(state)+": "+what))
+			log_i(MODULE, "%s's %s refused: %s", cs(pe.name), what, state);
 		return true;
 	}
 
@@ -24317,6 +24329,10 @@ struct Module: public interface::Module, public Interface
 		// ([KIT_GUIDE_BOTS_2] a bot as a player)
 		if(t.kind != "player" && !is_bot(t))
 			return allows(peer, "damage", c.getX(), c.getY(), c.getZ(), &why);
+		if(lobby_out(t.id)){
+			why = "Out of play";
+			return false;
+		}
 		const Instance *gr = root_instance("kit/game_rules");
 		if(gr && gr->params.get("peaceful").is_true()){
 			why = "Peaceful: players take no damage";
@@ -24776,6 +24792,50 @@ struct Module: public interface::Module, public Interface
 		return h && h->state.get("waiting").is_true();
 	}
 
+	// [KIT_LOBBY_OUT_OF_PLAY] Whether a player is in a kit/lobby's lobby or
+	// result (Peer::lobby_out): their body hidden, not hit, in no zone
+	bool lobby_out(uint64_t player)
+	{
+		const size_t p = player ? peer_of_player(player) : 0;
+		return p && m_peers[p].lobby_out;
+	}
+
+	// Out of play as a dead player waiting to respawn is, or in a lobby:
+	// no walking, no actions, the client spectating
+	bool out_of_play(uint64_t player)
+	{
+		return player_waiting(player) || lobby_out(player);
+	}
+
+	// Each round's tick: every placed player's lobby_out from the kit/lobby
+	// instances' per-player states ("lobby" and "over" out, where its
+	// out_of_play is on), logged as it changes; none while Stopped
+	void lobby_out_tick()
+	{
+		std::set<ss_> out;
+		for(auto &e : m_entities)
+			for(const Instance &in : e.second.comps){
+				const json::Value &st = in.state.get("states");
+				if(in.type != LOBBY_TYPE || !in.disabled.empty() ||
+						in.params.get("out_of_play").is_false() || !st.is_object())
+					continue;
+				for(json::Iterator it(st); it; ++it)
+					if((*it).is_string() && ((*it).as_string() == "lobby" ||
+							(*it).as_string() == "over"))
+						out.insert(it.key());
+			}
+		for(auto &pp : m_peers){
+			Peer &p = pp.second;
+			const bool o = m_session.running && p.player && !p.editing &&
+					out.count("player:"+itos(p.player));
+			if(o == p.lobby_out)
+				continue;
+			p.lobby_out = o;
+			log_i(MODULE, "%s is %s", cs(p.name), o ? "out of play (a lobby)" :
+					"in play");
+		}
+	}
+
 	// The most health a player has (their health's max)
 	double health_max(uint64_t player)
 	{
@@ -24891,8 +24951,8 @@ struct Module: public interface::Module, public Interface
 	// game's peaceful, the region at them (its damage rule for them)
 	bool takes_damage(uint64_t player, ss_ &why)
 	{
-		if(player_waiting(player)){
-			why = "waiting to respawn";
+		if(out_of_play(player)){
+			why = player_waiting(player) ? "waiting to respawn" : "out of play";
 			return false;
 		}
 		const Instance *gr = root_instance("kit/game_rules");
@@ -25493,7 +25553,7 @@ struct Module: public interface::Module, public Interface
 			});
 		}
 		if(came > 0 && tp && m_bodies.count(tp) && m_bodies[tp].puts == puts &&
-				!player_waiting(id)){
+				!out_of_play(id)){
 			// Away from the attacker, or where they look when on top
 			double kx = dx, kz = dz;
 			double l = std::sqrt(kx * kx + kz * kz);
@@ -25653,6 +25713,9 @@ struct Module: public interface::Module, public Interface
 			if(!health || !scene_of(en, &es) || es != scene)
 				continue;
 			if(ship && (en.kind == "player" || is_bot(en)) && aboard(e.first, ship))
+				continue;
+			// ([KIT_LOBBY_OUT_OF_PLAY] one in a lobby is passed through)
+			if(en.kind == "player" && lobby_out(e.first))
 				continue;
 			double w[3], et = 0;
 			world_of(en, w);
@@ -27504,7 +27567,7 @@ struct Module: public interface::Module, public Interface
 	{
 		const int64_t now = now_us();
 		for(auto &pp : m_peers){
-			if(pp.second.editing || player_waiting(pp.second.player))
+			if(pp.second.editing || out_of_play(pp.second.player))
 				continue;
 			for(auto &h : pp.second.held){
 				if(now - h.second.second < HELD_EVERY_US)

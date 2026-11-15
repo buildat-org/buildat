@@ -9,6 +9,12 @@
 -- it (each a panel whose `to` is "player": their own; a screen, `screen`
 -- full or over). A start zone instead (a kit/trigger_zone linked to play)
 -- or beside it works as well.
+-- [KIT_LOBBY_OUT_OF_PLAY] `out_of_play` (on by default): in the lobby and
+-- over a player is out of play as one dead and waiting to respawn is (no
+-- walking, no actions, their client spectating under the screen), their
+-- body hidden from the others, not hit and in no zone; entered puts them
+-- back where they were, for the game to place them (a teleport). Off for
+-- a lobby that is a place in the world.
 local STATES = {lobby = true, playing = true, over = true}
 
 local function screens(c, by, now)
@@ -54,6 +60,7 @@ return {
 	params = {
 		lobby_screen = {type = "entity", default = 0},
 		over_screen = {type = "entity", default = 0},
+		out_of_play = {type = "bool", default = true},
 	},
 	state = {states = {default = {}, per_player = true}},
 	inputs = {play = "none", again = "none", lobby = "none", over = "none"},
