@@ -1585,11 +1585,13 @@ want "$t/srv3.log" "An edit by kitboss: placed kit/button 3 at [2,1,2]" \
 	"An edit by kitboss: placed kit/region 8 at [2,-1,-2]" \
 	"An edit by kitboss: linked 3.pressed -> 8.enable"
 want "$t/ed.log" "kit editor: turned 1 by 90" "kit editor: a box selected 2, 2 in the selection"
-# The 3D middle drag pans over the ground (user's playtest, 2026-10-31):
-# the camera's height kept, its x and z moved
+# The 3D middle drag pans in the world-axis plane nearest the view's
+# ([KIT_PAN_PLANE]; over the ground looking down, user's playtest,
+# 2026-10-31): the camera about level, a vertical plane; the drag (down
+# 100 px, sideways 50 and back) moves it up, its x and z kept
 pan=$(grep -aoP 'kit editor: panned in 3D from \K.*' "$t/ed.log" | head -1)
-echo "$pan" | awk -F'[ ,]' '{d=($1-$5)^2+($3-$7)^2; exit !($2 == $6 && d > 0.01)}' ||
-	fail "the 3D pan is not over the ground: $pan ($t/ed.log)"
+echo "$pan" | awk -F'[ ,]' '{exit !($1 == $5 && $3 == $7 && ($2 - $6)^2 > 0.01)}' ||
+	fail "the 3D pan is not up and down in a vertical plane: $pan ($t/ed.log)"
 # The voxels: the walk's place dug again, and the dig undone
 placed=$(grep -aoP 'A voxel edit by kitboss: placed kit/cobble at \K\([-0-9,]+\)' "$t/srv3.log")
 [ "$(echo "$placed" | wc -l)" = 2 ] || fail "not two voxels placed ($t/srv3.log)"

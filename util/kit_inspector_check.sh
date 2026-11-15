@@ -170,6 +170,14 @@ frames 2
 mouse_wheel -1
 frames 2
 mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
+frames 2
+mouse_wheel -1
 frames 3
 screenshot @T@/scrolled.png
 click Button "Apply"
@@ -214,10 +222,11 @@ kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 [ "$(grep -acE "ui_utils: dropdown_[0-9]+ open" "$t/boss.log")" -ge 3 ] ||
 	fail "the door's dropdown did not open ($t/boss.log)"
-# simplified: a fixed bound over today's 1162: room for a few more parameters,
-# not for an empty line under each. Many more parameters raise it
+# simplified: a fixed bound over today's 1442 (kit/controls' 2026-11-15):
+# room for a few more parameters, not for an empty line under each. Many
+# more parameters raise it
 tall=$(grep -aoP 'kit editor: the inspector \d+ of \K\d+(?= tall)' "$t/boss.log" | sort -n | tail -1)
-[ "${tall:-9999}" -le 1400 ] ||
+[ "${tall:-9999}" -le 1500 ] ||
 	fail "the inspector's body is ${tall:-not logged} tall: more than its rows take ($t/boss.log)"
 # The state after an edit: kept or drawn again before the next state
 kept_after() # <undo count>: 0 when the inspector was kept over that state

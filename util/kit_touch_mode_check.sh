@@ -606,7 +606,7 @@ if touch:
     # The header: its views' dropdown showing each as it was picked; Tools
     # in each target dump, no "..."; its empty part dragged moved the divider
     hd = [l for l in page if "touch shell: the header: " in l]
-    assert hd and all(re.search(r"\(Walk[^|]* \| 3D[^|]* \| 2D[^|]* \| Signals", l) for l in hd), \
+    assert hd and all(re.search(r"\(Walk[^|]* \| 3D[^|]* \| 2D[^|]* \| Front[^|]* \| Signals", l) for l in hd), \
         f"the header's views: {hd[:2]}"
     lits = " ".join(re.search(r'the header: "[^"]*", (\w+)', l)[1] for l in hd)
     assert re.search(r"^3D( \S+)* Walk( \S+)* 3D( \S+)* 2D", lits), f"shown in turn: {lits}"
