@@ -582,7 +582,9 @@ newest version installed in that server's user directory, as the server
 first with the command above, or set AITTA=<the Aitta's address>: then
 the script installs it, and at each update check installs the newest
 listed release, compiles it and restarts onto it as it does for a new
-engine release (the same wait for players, the same warning). Without
+engine release (the same wait for players, the same warning, the same
+Updates setting and Update now in the admin's Server window,
+[SERVE_UPDATE_ADMIN]). Without
 AITTA the installed version stays until one is installed by hand. A
 package's page on the Aitta shows these commands with its name filled in,
 under Install's "On a dedicated server", after "On the client" (Apps
