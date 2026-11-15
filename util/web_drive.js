@@ -87,6 +87,10 @@
 //   ["file", path]          the file the browser's picker gives the next
 //                           time the page opens it ([HEARTH_USABILITY]),
 //                           Chrome only
+//   ["downloaded", name, s] until the page's download of that name is done,
+//                           at most s seconds (default 20): Chrome saves
+//                           downloads into ${OUT}, as ${OUT}/<name>
+//                           ([KIT_EXPORT_WEB_CHECK]), Chrome only
 //   ["fingers", ax0, ay0, bx0, by0, ax1, ay1, bx1, by1]
 //                           two fingers down at a and b, moved together to
 //                           their second places over half a second, and up:
@@ -406,6 +410,18 @@ async function chrome() {
 					backendNodeId: d.params.backendNodeId});
 		file = null;
 	});
+	// Downloads into ${OUT}, not the user's own directory; the paths of
+	// those done, for "downloaded"
+	const downloads = [];
+	if (args.vars.OUT) {
+		await c.send("Browser.setDownloadBehavior", {behavior: "allow",
+				downloadPath: args.vars.OUT, eventsEnabled: true});
+		c.on(d => {
+			if (d.method === "Browser.downloadProgress" &&
+					d.params.state === "completed")
+				downloads.push(d.params.filePath);
+		});
+	}
 	if (touch)
 		await c.send("Emulation.setTouchEmulationEnabled", {enabled: true,
 				maxTouchPoints: 5});
@@ -493,6 +509,15 @@ async function chrome() {
 			if (!fs.existsSync(p))
 				throw new Error("no file " + p);
 			file = p;
+		},
+		downloaded: async (name, s = 20) => {
+			const until = Date.now() + s * 1000;
+			while (!downloads.some(p => p.endsWith("/" + name))) {
+				if (Date.now() > until)
+					throw new Error("no download " + name + " done (" +
+							(downloads.join(", ") || "none") + ")");
+				await new Promise(r => setTimeout(r, 200));
+			}
 		},
 		hold: async (x, y, ms) => {
 			await c.send("Input.dispatchTouchEvent", {type: "touchStart",

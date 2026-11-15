@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~3 min (2026-11-15)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/world_menu/** apps/workbench/main/main.cpp src/impl/aitta.cpp
+# cost: ~5 min (2026-11-15)
+# covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/world_menu/** apps/workbench/main/main.cpp src/impl/aitta.cpp src/client/web/index.html util/web_drive.js
 # [KIT_PROJECT_EXPORT] A Workbench project exported as a template and made
 # a project again, copied and renamed. One server, kitboss (the admin) on a
 # headless weston's Xwayland of the check's own (its clipboard carries the
@@ -23,15 +23,24 @@
 #      picker, the file: the server switches; the project opens Stopped in
 #      the editor, its entities, links, type, rows and voxels the export's,
 #      and its own export semantically the first one (edits.bin's cells and
-#      heightmap samples the same).
+#      heightmap samples the same). Export this project there too.
 #   4. Projects..., "project", Copy...: the name prefilled (project_1), Copy;
 #      the copy's rows the original's. By MCP with the Builder token,
 #      list_projects refused; with the Admin one listed, the running project
 #      copied (its rows), a taken name and the running one's rename refused,
 #      project_1 renamed.
+#   5. [KIT_EXPORT_WEB_CHECK] The web client (headless Chrome; skipped
+#      without web/ or Chrome), kitboss in "imported": Export this project
+#      caught as the browser's download, byte for byte 3.'s native export of
+#      it; Projects..., New "webimport", From a file..., the browser's
+#      picker given the download: the server switches, and the page again
+#      finds it Stopped in the editor, its entities, links, type, rows and
+#      voxels the first export's (as 3.).
 # Screenshots, kept with KEEP_TMP=1: $t/export_entry.png (the palette's
 # New tab), $t/import_page.png (New, From a file...), $t/imported.png (the
-# imported project in the editor), $t/copy.png (Copy...)
+# imported project in the editor), $t/copy.png (Copy...), and the web's:
+# $t/web_export.png (Exported), $t/web_import_page.png,
+# $t/web_imported.png
 #   util/kit_project_export_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -82,8 +91,12 @@ srv() # <seconds> <regex in the server's log after <offset>> <offset>
 {
 	await "$SL" "$3" "$1" "$2"
 }
+web=""
+if command -v "${CHROME:-google-chrome}" > /dev/null && [ -f "$here/web/buildat.wasm" ]; then
+	web="-W $here/web"
+fi
 start_server "$SL" "Listening at" 300 auto \
-	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 \
+	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 $web \
 	--sim-rate "$CHECK_RATE" || fail "the server did not come up ($SL)"
 CHECK_PIDS+=($SERVER_PID)
 wait_for_log "$SL" "setup code [A-Z0-9]+" 30
@@ -314,7 +327,7 @@ elif phase == "export":
     assert len(cells) == 19 and len(brick) == 19 and \
         len([c for c in brick if c[4]]) == 1 and e["hm"], e
 elif phase == "after":
-    first, out, built = args
+    first, out, built, title = args
     built = json.load(open(built))
     st = state()
     assert st["running"] is False, "the import opened Running"
@@ -347,7 +360,7 @@ elif phase == "after":
         assert A == B, (f, A, B)
     assert edits(first) == edits(out), "edits.bin differs"
     ma, mb = json.load(open(first + "/meta.json")), json.load(open(out + "/meta.json"))
-    assert mb["title"] == "imported" and mb["author"] == "kitboss", mb
+    assert mb["title"] == title and mb["author"] == "kitboss", mb
     print("the import's export: types, items, sounds, voxels, prefabs and edits.bin the first's")
 elif phase == "projects":
     admin, saves = args
@@ -471,7 +484,11 @@ client 3
 await "$CL" 0 60 "kit editor: edit mode on"
 await "$CL" 0 30 "kit: entity [0-9]+'s client part: beacon added"
 cmd "delay 1000" "frames 10" "screenshot $t/imported.png"
-mcp after "$tok" "$t/first" "$t/second" "$t/built.json"
+mcp after "$tok" "$t/first" "$t/second" "$t/built.json" imported
+# Its export by the editor, for the web's download (5.)
+step 10 "Asking the user about " "frames 3" 'click Button "New"'
+step 10 "The user declined " "frames 3" 'click Button "Decline"'
+step 20 "kit editor: Exported to .*imported.template.zip" 'click Button "Export this project"'
 echo "ok: imported, opened Stopped in the editor, its export the first's"
 
 # 4. Copy and rename
@@ -486,5 +503,66 @@ srv 10 'workbench: the project "project" copied as "project_1"' $m
 mcp projects "$tok" "$adm" "$t/user/apps/workbench/saves"
 cmd "quit"
 wait $CLIENT
+
+# 5. The web: kitboss's page in "imported", its export the browser's
+# download; then imported from it as "webimport"
+page() # <name>: its steps after the login in $t/<name>.steps, its out dir $t/<name>
+{
+	{
+		printf '[["nav", "${URL}"], ["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+ ["selall"], ["frames", 2], ["type", "kitboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["type", "checkpass12"], ["frames", 2], ["key", "Enter"], ["waitlog", "Joined as kitboss", 30],\n'
+		cat "$t/$1.steps"
+	} > "$t/$1.json"
+	WEB_DRIVE_VIEWPORT=1024x700@1 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
+		"$here/util/web_drive.sh" chrome workbench "$t/$1.json" "$t/$1" > "$t/$1.txt" 2>&1 ||
+		fail "the page's $1: $(tail -2 "$t/$1.txt") ($t/$1/page.log, $SL)"
+}
+webpass=""
+if [ -n "$web" ]; then
+	# (no longer the first builder in "imported": the pause menu's Edit)
+	cat > "$t/web1.steps" <<'J'
+ ["waitlog_any", "pause: the menu shown", 30], ["frames", 3],
+ ["click", "Button", "Edit"], ["waitlog_any", "kit editor: edit mode on", 20], ["frames", 10],
+ ["click", "Button", "New"], ["waitlog", "Asking the user about ", 10], ["frames", 3],
+ ["click", "Button", "Decline"], ["waitlog", "The user declined ", 10], ["frames", 3],
+ ["click", "Button", "Export this project"],
+ ["waitlog", "kit editor: Exported imported.template.zip \\([0-9]+ KiB\\): see your downloads", 20],
+ ["downloaded", "imported.template.zip", 20], ["frames", 3],
+ ["shot", "${OUT}/web_export.png"],
+ ["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+ ["click", "Button", "Projects..."], ["waitlog", "world_menu: the list shown, 5 worlds", 10], ["frames", 3],
+ ["click", "Button", "New project..."], ["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
+ ["selall"], ["frames", 2], ["type", "webimport"], ["frames", 2],
+ ["click", "DropDownList", "▼", 512, 350], ["wait", 300], ["frames", 3],
+ ["click", "Text", "From a file..."], ["waitlog", "world_menu: template picked: file", 10], ["frames", 3],
+ ["shot", "${OUT}/web_import_page.png"],
+ ["file", "${OUT}/imported.template.zip"],
+ ["click", "Button", "Create"],
+ ["waitlog", "world_menu: create webimport from imported.template.zip \\([0-9]+ bytes\\)", 30],
+ ["waitlog", "Disconnected from server: The server switches to the project webimport", 60]
+]
+J
+	page web1
+	cmp "$t/web1/imported.template.zip" "$t/cu/exports/imported.template.zip" ||
+		fail "the web's download is not the native export ($t/web1, $t/cu/exports)"
+	echo "ok: the web's Export this project, the browser's download byte for byte the native export ($(wc -c < "$t/web1/imported.template.zip") bytes)"
+	wait_for_log "$SL" 'workbench: switched to "webimport"' 120 || fail "webimport did not start ($SL)"
+	grep -aqE 'workbench: the project "webimport" from a file \([0-9]+ bytes, "imported"\)' "$SL" ||
+		fail "no web import line ($SL)"
+	cat > "$t/web2.steps" <<'J'
+ ["waitlog_any", "kit editor: edit mode on", 60],
+ ["waitlog_any", "kit: entity [0-9]+'s client part: beacon added", 30],
+ ["frames", 10], ["shot", "${OUT}/web_imported.png"]
+]
+J
+	page web2
+	mcp after "$tok" "$t/first" "$t/third" "$t/built.json" webimport
+	cp "$t"/web1/web_*.png "$t"/web2/web_*.png "$t/"
+	echo "ok: the download imported on the web through New's From a file..., opened Stopped in the editor, its export the first's"
+	webpass=" On the web too: the export the browser's download, byte for byte the native one, imported through the picker."
+else
+	echo "SKIPPED: 5., the web: no Chrome or web/buildat.wasm"
+fi
 grep -aqF "${tok#bat_}" "$SL" "$t"/boss*.log && fail "a token is in a log"
-echo "PASS: a project exported as a template (the editor's and MCP's), imported from the file as a new project (Stopped, in the editor, its export the first's), Crag Trial exported back as in the repo; Copy... and the MCP list, copy and rename; screenshots in $t"
+echo "PASS: a project exported as a template (the editor's and MCP's), imported from the file as a new project (Stopped, in the editor, its export the first's), Crag Trial exported back as in the repo; Copy... and the MCP list, copy and rename.$webpass Screenshots in $t"
