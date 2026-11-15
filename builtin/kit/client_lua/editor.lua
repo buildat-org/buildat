@@ -1908,15 +1908,17 @@ function NT.entities(w)
 		for i, v in ipairs(e.pos or {}) do
 			at[i] = string.format("%.10g", math.floor(v * 100 + 0.5) / 100)
 		end
-		label(gr, string.rep("    ", indent[e.id] or 0) .. NT.entity_label(e) ..
-				(e.pos and " at " .. table.concat(at, ",") or ""))
-		local sb = button(gr, e.id == S.primary and "Selected" or
-				S.reparent and (e.pos or NT.is_panel(e)) and "Parent" or "Select",
-				function()
+		local function pick()
 			if not NT.pick_parent(e.id) then
 				M.select(e.id)
 			end
-		end)
+		end
+		NT.name_item(gr, "palette", e, string.rep("    ", indent[e.id] or 0) ..
+				NT.entity_label(e) .. (e.pos and " at " .. table.concat(at, ",") or ""),
+				pick)
+		local sb = button(gr, e.id == S.primary and "Selected" or
+				S.reparent and (e.pos or NT.is_panel(e)) and "Parent" or "Select",
+				pick)
 		-- For a driven click by whose it is
 		sb:SetName("select " .. e.id)
 		n = n + 1
@@ -2543,6 +2545,7 @@ palette = function()
 		body = view:CreateChild("UIElement")
 		body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
 	end
+	NT.names_list("palette", view)
 	local fill = tab == "Items" and NT.items or
 			tab == "Terrain" and terrain_panel or tab == "Voxels" and
 			NT.voxels or tab == "Box" and NT.box_section or
@@ -2834,7 +2837,7 @@ end
 -- [KIT] stage 4d: an entity of the round's own (made in play) or a
 -- player's, shown and not edited
 local function inspect_made(w, e)
-	text(w, NT.entity_label(e))
+	NT.name_item(w, "inspector", e, NT.entity_label(e), function() end)
 	-- [KIT] stage 4l: what it costs, changed in place as "kit:costs" comes
 	S.cost_text = text(w, M.cost_line(e.id), DIM)
 	S.cost_id = e.id
@@ -3561,7 +3564,7 @@ local function inspector(w, e, is_made)
 	if n > 1 then
 		text(w, n .. " selected", DIM)
 	end
-	text(w, NT.entity_label(e))
+	NT.name_item(w, "inspector", e, NT.entity_label(e), function() end)
 	-- [KIT_SYMMETRY] a copy: its parameters alone, the rest its source's
 	local copy = NT.sym_copy(e)
 	if copy then
@@ -3835,8 +3838,17 @@ local function inspector(w, e, is_made)
 		for _, l in ipairs(not sig and not copy and c.links or {}) do
 			local r = row(w)
 			local to = find(l.to)
-			label(r, l.output .. " -> " .. l.to .. " " .. tostring(to and
-					to.name or "?") .. ": " .. l.input)
+			-- ([KIT_ENTITY_NAMES] the other's name as the Signals view's: its
+			-- mark, its type on a hover, its menu; a click goes to it)
+			label(r, l.output .. " ->")
+			local nb = NT.name_item(r, "inspector", to or {id = l.to}, to and
+					NT.entity_label(to) or K.ENTITY .. l.to .. " ?", function()
+				M.select(l.to)
+			end)
+			nb.maxWidth = nb.minWidth
+			nb:SetVar("KitNarrow", "1")
+			nb:SetName("link to " .. l.to)
+			label(r, ": " .. l.input)
 			-- ([KIT_PHONE_EDITING] stage 4: the touch mode's buttons under the
 			-- text, which made a portrait pane's body wider than the pane)
 			r = NT.sh.on() and row(w) or r
@@ -4512,6 +4524,7 @@ build_inspector = function()
 	W.inspector = sig and window(magic.HA_LEFT, magic.VA_TOP, 0, 0) or
 			window(magic.HA_RIGHT, magic.VA_TOP, -8, y)
 	local view = W.inspector:CreateChild("ScrollView")
+	NT.names_list("inspector", view)
 	local body = view:CreateChild("UIElement")
 	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
 	-- ([KIT_PHONE_EDITING] the touch mode's Signals view: its links' pane
@@ -5264,6 +5277,25 @@ function NT.sound_name_dialog(title, name, ok)
 	button(br, "OK", function()
 		drop("dialog")
 		ok(f.name)
+	end)
+	button(br, "Cancel", function()
+		drop("dialog")
+	end)
+end
+
+-- [KIT_ENTITY_NAMES] An entity's name asked, by its name's menu
+-- (signals.lua's), sent as the Signals view's Name field sends it
+function NT.rename_dialog(e, name)
+	local w, br = dialog("Rename", 360)
+	text(w, "Rename " .. NT.entity_label(e))
+	edit(w, name, function(s)
+		name = s
+	end):SetName("rename name")
+	br = br or row(w)
+	button(br, "OK", function()
+		drop("dialog")
+		log:info("kit editor: renamed " .. e.id .. " to \"" .. name .. "\" by its menu")
+		send({op = "rename", id = e.id, name = name})
 	end)
 	button(br, "Cancel", function()
 		drop("dialog")

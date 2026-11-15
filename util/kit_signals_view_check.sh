@@ -50,7 +50,12 @@
 #      scrolled by the wheel and a finger, the camera not moved.
 #  14. [KIT_SIGNALS_UI_GROUP] The list's groups: UI elements in UI, a panel's
 #      under it, the Scene tab of the Entities panel not split.
-# Screenshots kept with KEEP_TMP=1: $t/parent_*.png, $t/popup.png, $t/palette_menu.png, $t/narrow_popup.png, $t/small_popup.png, $t/small_menu.png, $t/menu.png, $t/refit.png, $t/signals.png, $t/added.png, $t/hud.png,
+#  16. [KIT_SIGNALS_DESKTOP_COLUMNS] 1280x800: the three columns;
+#      [KIT_ENTITY_NAMES] a name in the list: its type on the pointer's rest,
+#      its menu by a right click, Rename there; [KIT_SIGNALS_NEAR_CLIP] with a
+#      side camera's kit/controls the viewport zoomed up to the flag clips
+#      at its own distance's.
+# Screenshots kept with KEEP_TMP=1: $t/desk*.png, $t/parent_*.png, $t/popup.png, $t/palette_menu.png, $t/narrow_popup.png, $t/small_popup.png, $t/small_menu.png, $t/menu.png, $t/refit.png, $t/signals.png, $t/added.png, $t/hud.png,
 # $t/game_wide.png, $t/wide.png, $t/narrow_*.png; look at them.
 #   util/kit_signals_view_check.sh
 #  15. [KIT_SIGNALS_DOCS] (the "docs" mode, run at the end too) Every stock type's
@@ -1994,6 +1999,60 @@ if grep -aE "attempt to|stack traceback" "$t/kitorbit.log" "$t/kitfinger.log" "$
 	fail "a Lua error in the logs"
 fi
 echo "ok: the position in Signals' inspector, undone, in 3D; orbit and zoom by mouse and fingers begun on the viewport; the list and the links scroll; the UI group. Screenshots $t/position_fields.png $t/moved_3d.png $t/orbit_drag.png $t/orbit_wheel.png $t/orbit_hud.png $t/finger_pinch.png $t/ui_group.png $t/scrolled.png"
+# 16. [KIT_SIGNALS_DESKTOP_COLUMNS] A desktop browser's 1280x800: the three
+# columns (two up to 1499 once the UI fit stopped shrinking the UI there,
+# 0a8). [KIT_ENTITY_NAMES] A name in the list: its type on the pointer's
+# rest, its menu by a right click, Rename there (the timer: the flag's name
+# is read above). [KIT_SIGNALS_NEAR_CLIP] A side camera's kit/controls (the
+# Crag Trial's: the walk camera's near clip 8 m): the viewport zoomed up to
+# the flag clips at its distance's, not the walk camera's
+last=$(grep -ahoP "An edit by kitboss: placed kit/\S+ \K\d+" "$t/srv2.log" "$s" | sort -n | tail -1)
+CTL=$((last + 1))
+{
+	echo "$p_join"
+	cat <<EOF
+event kit_select $FLAG
+frames 3
+keypress F5
+wait_log 5000 kit editor: the view is Signals
+frames 8
+screenshot @T@/desk.png
+click Button "select $TIMER"
+wait_log 5000 kit editor: the type of $TIMER (sg_list)
+frames 3
+screenshot @T@/desk_tip.png
+mouse_click right
+wait_log 5000 kit editor: the name menu of $TIMER: kit/timer
+frames 3
+screenshot @T@/desk_menu.png
+click Button "menu Rename"
+frames 3
+click LineEdit "rename name"
+frames 2
+text Clock
+frames 2
+click Button "OK"
+wait_log 5000 kit editor: renamed $TIMER to "Clock" by its menu
+wait_log 10000 kit editor: state:
+EOF
+	edit '{"op": "place", "type": "kit/controls", "pos": [0, 1, 0], "params": {"plane": "vertical", "camera": "side", "distance": 11, "side_clip": 3}}'
+	cat <<EOF
+click Button "select $FLAG"
+frames 5
+mouse_pos 1100 700
+frames 2
+mouse_wheel 10
+frames 10
+screenshot @T@/desk_near.png
+EOF
+	edit "{\"op\": \"delete\", \"id\": $CTL}"
+	printf 'sync 3000\nquit\n'
+} > "$t/kitdesk.cmds"
+BUILDAT_JOIN_NAME=kitboss client kitdesk 1280x800 -u 1
+wantp "$t/kitdesk.log" "signals: columns in 1280x800 under \d+: sg_list \d+ \d+ \d+ \d+, sg_links \d+ \d+ \d+ \d+, inspector \d+ \d+ \d+ \d+, sg_view "
+want "$t/srv2.log" "An edit by kitboss: renamed $TIMER to Clock"
+wantp "$t/kitdesk.log" "signals: the camera on $FLAG at .*distance 1\.00, near 0\.010$"
+echo "ok: three columns at 1280x800; a name's type and menu, renamed by it; the viewport's near clip its own. Screenshots $t/desk.png $t/desk_tip.png $t/desk_menu.png $t/desk_near.png"
 # 9. A real window (no -w: the fit is on) made small and large again: the UI
 # back at its full scale, the Signals view's panels not holding the fit down
 cat > "$t/kitfit.cmds" <<EOF
