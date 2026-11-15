@@ -13506,7 +13506,14 @@ struct Module: public interface::Module, public Interface
 							"not one it reaches"));
 					continue;
 				}
-				deliver(to, input, s.at(2u), r.by, r.hops + 1, self, "send");
+				// [KIT_LOBBY] c:send(id, input, value, by): as by a player or
+				// bot it reaches (kit/lobby's screens to each player's own)
+				ss_ sby = r.by;
+				const json::Value &sb = s.at(3u);
+				if(sb.is_string() && actor_id(sb.as_string()) &&
+						rch.count(actor_id(sb.as_string())))
+					sby = sb.as_string();
+				deliver(to, input, s.at(2u), sby, r.hops + 1, self, "send");
 			}
 		}
 		const json::Value &removes = fx.get("remove");

@@ -4653,9 +4653,10 @@ magic.SubscribeToEvent("command_seq:kit_inspector_show", function(_, data)
 end)
 
 -- [KIT_PARAM_CATEGORIES] The HUD view's one panel: the selected HUD element's
--- HUD parameters, beside it; a click on the background closes it
--- (S.hud_panel_off), a click on an element opens it again. Each frame it follows
--- the element; on each state it is drawn again, as the inspector
+-- HUD parameters ([KIT_LOBBY] on a desktop in the tool panel at the right;
+-- the touch shell's HUD pane, where a tap on the background closes them,
+-- S.hud_panel_off, and one on an element opens them again). On each state it
+-- is drawn again, as the inspector
 function NT.hud_panel_said(names)
 	local line = table.concat(names, " ")
 	if line ~= S.hud_panel_said then
@@ -4703,27 +4704,179 @@ function NT.hud_panel_body(body, own)
 	end
 end
 
+-- [KIT_LOBBY] The desktop HUD view: the play view in a frame, a slim tool
+-- panel on the right (the views, the screen and the shape pickers, the
+-- selected element's parameters, the elements and the screens), nothing over
+-- the frame. Its shape: the room left of the panel, or a desktop's or a
+-- phone's fitted in it (the HUD laid out in it as on that screen: its units
+-- are of the shorter side)
+local HUD_SHAPES = {{"The room left", "fit"}, {"Desktop 1920x1080", "1920x1080"},
+	{"Phone 412x915", "412x915"}, {"Phone 915x412", "915x412"}}
+
+-- (390: Kit's own elements' rows, health_blink_below's, at a desktop's
+-- font; wider for rows that need it, a touchscreen's in the desktop mode,
+-- the widest kept: the frame moves once; half the room at most)
+local function tool_w()
+	local w = magic.ui.root.width
+	return math.min(math.floor(w / 2), math.max(S.hud_tool_need or 0,
+			math.min(390, math.floor(w * 0.4))))
+end
+
+-- The frame {x, y, w, h} (UI units); nil but in the desktop HUD view
+function NT.hud_frame()
+	if S.view ~= "hud" or not E.editing or NT.sh.on() then
+		return nil
+	end
+	local root = magic.ui.root
+	local aw, ah = math.max(1, root.width - tool_w()), math.max(1, root.height)
+	local sw, sh = tostring(S.hud_shape or "fit"):match("^(%d+)x(%d+)$")
+	if not sw then
+		return {0, 0, aw, ah}
+	end
+	local k = math.min(aw / tonumber(sw), ah / tonumber(sh))
+	local w, h = math.max(1, math.floor(sw * k)), math.max(1, math.floor(sh * k))
+	return {math.floor((aw - w) / 2), math.floor((ah - h) / 2), w, h}
+end
+
+-- The layer edit mode draws (ui.lua): the HUD view's screen, else the
+-- selected element's
+function M.hud_layer()
+	if S.view == "hud" then
+		local s = S.hud_screen
+		return s and M.layer_of(s) == s and s or "hud"
+	end
+	return M.layer_of(S.primary) or "hud"
+end
+
+-- The screens there are (kit/ui_panels whose `screen` is full or over)
+local function hud_screens()
+	local l = {}
+	for _, e in ipairs(entities()) do
+		if M.layer_of(e.id) == e.id then
+			l[#l + 1] = e
+		end
+	end
+	table.sort(l, function(a, b) return a.id < b.id end)
+	return l
+end
+
+function NT.hud_screen(id)
+	S.hud_screen = id
+	log:info("kit editor: the HUD view shows " .. (id and "screen " .. id or
+			"the HUD"))
+	-- (one selected on another layer is not drawn: let go)
+	local l = S.primary and M.layer_of(S.primary)
+	if l and l ~= M.hud_layer() then
+		M.select(nil)
+	else
+		refresh()
+	end
+end
+
+-- The tool panel's head: the views (out of the HUD view by it), the screen,
+-- the shape; the touch shell's pane the screen alone
+local function hud_pickers(win, desk)
+	local h = desk and 24 or NT.sh.TOUCH
+	if desk then
+		local views = {}
+		for _, v in ipairs(VIEW_ORDER) do
+			views[#views + 1] = {VIEW_NAMES[v] .. " (" .. M.key_name(VIEW_KEYS[v]) ..
+					")", v}
+		end
+		ui_utils.dropdown(win, views, "hud", function(v)
+			set_view(v)
+		end, {height = h, fill = true, name = "hud views"})
+	end
+	local screens = {{"The HUD", "hud"}}
+	for _, e in ipairs(hud_screens()) do
+		screens[#screens + 1] = {NT.entity_label(e), tostring(e.id)}
+	end
+	ui_utils.dropdown(win, screens, tostring(M.hud_layer()), function(v)
+		NT.hud_screen(tonumber(v))
+	end, {height = h, fill = true, label = "Screen", name = "hud screen"})
+	if desk then
+		ui_utils.dropdown(win, HUD_SHAPES, S.hud_shape or "fit", function(v)
+			S.hud_shape = v
+			log:info("kit editor: the HUD view's shape is " .. v)
+		end, {height = h, fill = true, label = "Shape", name = "hud shape"})
+	end
+end
+
+-- The elements by layer, the HUD's, then each screen's (the screen first);
+-- a click selects one, its layer shown
+local function hud_list(body)
+	local groups = {hud = {}}
+	for _, e in ipairs(entities()) do
+		local ui = false
+		for _, c in ipairs(e.components or {}) do
+			ui = ui or NT.is_ui(c.type)
+		end
+		local l = ui and (M.layer_of(e.id) or "hud")
+		if l then
+			groups[l] = groups[l] or {}
+			table.insert(groups[l], e)
+		end
+	end
+	local function order(e)
+		return M.layer_of(e.id) == e.id and -1 or e.id
+	end
+	local function list(title, l)
+		text(body, title, DIM)
+		table.sort(l, function(a, b) return order(a) < order(b) end)
+		for _, e in ipairs(l) do
+			NT.name_item(body, "hud_panel", e, NT.entity_label(e), function()
+				local layer = M.layer_of(e.id)
+				S.hud_screen = layer ~= "hud" and layer or nil
+				M.select(e.id)
+				M.hud_picked()
+			end, nil, e.id == S.primary)
+		end
+	end
+	list("The HUD", groups.hud)
+	for _, s in ipairs(hud_screens()) do
+		list("Screen " .. NT.entity_label(s), groups[s.id] or {})
+	end
+end
+
 function NT.hud_panel_build(key, own)
 	local view_y = S.hud_panel_key == key and W.hud_panel and
 			S.hud_panel_view.viewPosition.y or 0
+	if key ~= S.hud_panel_key then
+		log:info("kit editor: the HUD panel shows " .. (key ~= "" and key or "nothing"))
+	end
 	drop("hud_panel")
-	local win = window(magic.HA_LEFT, magic.VA_TOP, 0, 0)
+	local desk = not NT.sh.on()
+	local win = window(desk and magic.HA_RIGHT or magic.HA_LEFT, magic.VA_TOP, 0, 0)
 	win.visible = true
 	W.hud_panel = win
+	hud_pickers(win, desk)
 	local view = win:CreateChild("ScrollView")
 	local body = view:CreateChild("UIElement")
 	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
-	NT.hud_panel_body(body, own)
+	NT.names_list("hud_panel", view)
+	if key ~= "" then
+		NT.hud_panel_body(body, own)
+	else
+		text(body, desk and "Click a HUD element in the frame" or
+				"Tap a HUD element in the world", DIM)
+	end
+	if desk then
+		hud_list(body)
+	end
 	view:SetStyleAuto()
 	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
 	view.scrollBarsAutoVisible = false
 	view.contentElement = body
 	body:SetPosition(0, 0)
 	S.hud_panel_h0 = body.height
+	-- (the rows' own width, the view's border and a scroll bar's room)
+	if desk then
+		S.hud_tool_need = math.max(S.hud_tool_need or 0, body.width + 36)
+	end
 	view:SetFixedSize(1, 1)
+	S.hud_panel_view, S.hud_panel_key = view, key
 	NT.hud_panel_fit(view)
 	view.viewPosition = magic.IntVector2(0, view_y)
-	S.hud_panel_view, S.hud_panel_key = view, key
 end
 
 -- Its height the body's, at most the screen's, the rest scrolled. A field's
@@ -4736,97 +4889,115 @@ function NT.hud_panel_fit(view)
 	end
 	-- (the view's clip border, 2 a side: [KIT_LAST_ROW_CLIP])
 	local bh = body.height + 4
-	local h = math.min(bh, magic.ui.root.height - 28, S.hud_panel_limit or math.huge)
 	-- ([KIT_PHONE_EDITING] stage 4: the touch mode's HUD pane, shell.lua)
 	local pr = NT.sh.on() and NT.sh.pane_rect
-	if pr then
-		h = math.max(40, math.min(bh, pr[4] - 12))
+	local h = pr and math.max(40, math.min(bh, pr[4] - 12)) or 0
+	-- ([KIT_LOBBY] the desktop's tool panel the screen's height at the right)
+	local win, tw, rh = W.hud_panel, tool_w(), magic.ui.root.height
+	if not pr then
+		h = math.max(40, rh - view.position.y - 6)
+		if win.width ~= tw or win.height ~= rh then
+			win:SetFixedSize(tw, rh)
+		end
 	end
 	local tall = h < bh
-	local bw = pr and pr[3] - 12 or
-			body.width + 4 + (tall and view.verticalScrollBar.width + 4 or 0)
+	local bw = pr and pr[3] - 12 or tw - 12
 	if view.height ~= h or view.width ~= bw then
 		view:SetScrollBarsVisible(false, tall)
+		if not pr then
+			body:SetFixedWidth(bw - 4 - (tall and view.verticalScrollBar.width + 4 or 0))
+		end
 		view:SetFixedSize(bw, h)
 	end
-end
-
--- Beside the element: of the sides it fits on, the one with most room. On none,
--- above or below scrolled to the room there (a short window), and when that is
--- too little to use, over the element, inside the screen
-function NT.hud_panel_place(x, y, w, h)
-	local win, root, gap = W.hud_panel, magic.ui.root, 6
-	local view = S.hud_panel_view
-	local pw, ph = win.width, win.height
-	-- Its height unscrolled: what the sides are asked for, so that scrolling
-	-- does not change the answer
-	local chrome = ph - view.height
-	local fh = view.contentElement.height + chrome
-	local sides = {{"right", root.width - x - w, pw}, {"left", x, pw},
-		{"below", root.height - y - h, fh}, {"above", y, fh}}
-	local best, best_fits = nil, false
-	for _, s in ipairs(sides) do
-		local fits = s[2] >= s[3] + gap
-		if not best or (fits and not best_fits) or (fits == best_fits and
-				s[2] > best[2]) then
-			best, best_fits = s, fits
-		end
-	end
-	S.hud_panel_limit = nil
-	if not best_fits then
-		local v = sides[3][2] >= sides[4][2] and sides[3] or sides[4]
-		if v[2] - gap - chrome >= 100 then
-			best, S.hud_panel_limit = v, v[2] - gap - chrome
-		end
-	end
-	if S.hud_panel_limit or best_fits then
-		ph = math.min(fh, S.hud_panel_limit and S.hud_panel_limit + chrome or fh)
-	end
-	local px, py = x + math.floor((w - pw) / 2), y + math.floor((h - ph) / 2)
-	if best[1] == "right" then
-		px = x + w + gap
-	elseif best[1] == "left" then
-		px = x - pw - gap
-	elseif best[1] == "below" then
-		py = y + h + gap
-	else
-		py = y - ph - gap
-	end
-	px = math.max(0, math.min(root.width - pw, px))
-	py = math.max(0, math.min(root.height - ph, py))
-	win:SetPosition(px, py)
-	local line = string.format("%s %s %d %d %d %d", S.hud_panel_key, best[1], px, py,
-			pw, ph)
-	if line ~= S.hud_panel_line then
-		S.hud_panel_line = line
-		log:info("kit editor: the HUD panel at " .. line .. string.format(
-				", the element %d %d %d %d", x, y, w, h))
+	local line = not pr and string.format("kit editor: the HUD tool panel %dx%d, " ..
+			"the frame %s", tw, rh, table.concat(NT.hud_frame() or {}, " "))
+	if line and line ~= S.hud_frame_said then
+		S.hud_frame_said = line
+		log:info(line)
 	end
 end
 
--- Up to date with the view and the selection; rebuild: its values too
+-- [KIT_LOBBY] Round the frame, the rest of the room: dark bars, under the HUD
+-- and the editor's panels (a client drawing the world whole, a check's,
+-- still shows the frame's alone)
+local function hud_bars(f)
+	S.hud_bars = S.hud_bars or {}
+	local root = magic.ui.root
+	local aw = f and root.width - tool_w() or 0
+	local rects = f and {{0, 0, aw, f[2]},
+		{0, f[2] + f[4], aw, root.height - f[2] - f[4]},
+		{0, f[2], f[1], f[4]}, {f[1] + f[3], f[2], aw - f[1] - f[3], f[4]}} or {}
+	for i = 1, 4 do
+		local b, r = S.hud_bars[i], rects[i]
+		if not b and r then
+			b = root:CreateChild("BorderImage")
+			b.color = magic.Color(0.1, 0.1, 0.11)
+			b.priority = -1200
+			b.bringToFront = false
+			b.enabled = false
+			S.hud_bars[i] = b
+		end
+		if b then
+			b.visible = r ~= nil and r[3] > 0 and r[4] > 0
+			if b.visible then
+				b:SetPosition(r[1], r[2])
+				b:SetFixedSize(r[3], r[4])
+			end
+		end
+	end
+end
+
+-- The frame in pixels {x, y, w, h} (apply_viewport's), nil with none
+function NT.hud_frame_px()
+	local f = NT.hud_frame()
+	if not f then
+		return nil
+	end
+	local sc = magic.ui.scale
+	return {math.floor(f[1] * sc + 0.5), math.floor(f[2] * sc + 0.5),
+		math.max(1, math.floor(f[3] * sc + 0.5)),
+		math.max(1, math.floor(f[4] * sc + 0.5))}
+end
+
+-- Up to date with the view and the selection; rebuild: its values too.
+-- ([KIT_LOBBY] in the HUD view always: the desktop's tool panel, the touch
+-- shell's pane with its screen picker)
 function NT.hud_panel(rebuild)
-	local x, y, w, h, own
-	if S.view == "hud" and E.editing and not S.hud_panel_off and
-			M.hud_selected_rect then
-		x, y, w, h, own = M.hud_selected_rect()
+	local on = S.view == "hud" and E.editing
+	hud_bars(on and NT.hud_frame())
+	-- builtin/accounts' Server button (the top right) away meanwhile: the
+	-- tool panel's head is there
+	local sb = not NT.sh.on() and magic.ui.root:GetChild("accounts: server button")
+	if sb and on and sb.visible then
+		sb.visible, S.hud_server_hidden = false, true
+	elseif sb and not on and S.hud_server_hidden then
+		sb.visible, S.hud_server_hidden = true, nil
 	end
-	if not x then
+	if not on then
 		if W.hud_panel then
 			drop("hud_panel")
-			S.hud_panel_view, S.hud_panel_line = nil, nil
+			S.hud_panel_view, S.hud_panel_key = nil, nil
 			log:info("kit editor: the HUD panel closed")
 		end
 		return
 	end
-	local key = own and "own:" .. own or tostring(S.primary)
+	local x, own
+	if not S.hud_panel_off and M.hud_selected_rect then
+		local a, _, _, _, o = M.hud_selected_rect()
+		x, own = a, o
+	end
+	local key = not x and "" or own and "own:" .. own or tostring(S.primary)
+	-- (not under an open dropdown, its popup lost: once it closes)
+	if ui_utils.dropdown_open() and W.hud_panel then
+		S.hud_rebuild = S.hud_rebuild or rebuild or key ~= S.hud_panel_key
+		rebuild, key = false, S.hud_panel_key
+	elseif S.hud_rebuild then
+		rebuild, S.hud_rebuild = true, nil
+	end
 	if rebuild or not W.hud_panel or key ~= S.hud_panel_key then
 		NT.hud_panel_build(key, own)
 	end
 	NT.hud_panel_fit(S.hud_panel_view)
-	if not NT.sh.on() then
-		NT.hud_panel_place(x, y, w, h)
-	end
 end
 
 -- A touchscreen's keys ([FP_TOUCH] 4): Undo, Delete and Escape's Cancel, at
@@ -5923,7 +6094,12 @@ local function apply_viewport()
 	if want == "hud" then
 		want = "walk"
 	end
-	local r = NT.sh.world_px()
+	-- ([KIT_LOBBY] the desktop HUD view's frame; a full screen up in play: no
+	-- world drawn, a pixel)
+	local r = NT.sh.world_px() or NT.hud_frame_px()
+	if M.full_screen and M.full_screen() then
+		r = {0, 0, 1, 1}
+	end
 	local rect = r and magic.IntRect(r[1], r[2], r[1] + r[3], r[2] + r[4]) or
 			magic.IntRect(0, 0, 0, 0)
 	local rk = r and table.concat(r, " ") or ""
@@ -6026,6 +6202,9 @@ set_view = function(v)
 	if v == "hud" and S.view ~= "hud" then
 		S.before_hud = S.view
 		S.hud_panel_off = nil
+		-- ([KIT_LOBBY] the selected element's screen shown)
+		local l = M.layer_of and M.layer_of(S.primary)
+		S.hud_screen = l ~= "hud" and l or nil
 		close_menu()
 		drop("dialog")
 	end

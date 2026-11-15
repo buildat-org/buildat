@@ -11,7 +11,13 @@
 -- one with a button is up, a player in mouse look has the pointer to
 -- click with. Hidden at the start by default (`shown`); "show", "hide"
 -- and "toggle", where and who sees it as kit/ui_text's: with `to`
--- "player", a dialog for the player who used something
+-- "player", a dialog for the player who used something.
+-- [KIT_LOBBY] `screen`: "none" (on the HUD, as above), "full" (the whole
+-- screen, the world not drawn under it nor the HUD over it: a lobby, a
+-- menu) or "over" (placed as above, over the play view: a result card); a
+-- screen and its children are a layer of their own in the editor's HUD
+-- view, shown by a signal as any panel (kit/lobby's screens), any number of
+-- them a game
 local function view(c, by)
 	if (c.params.to ~= "player" and c.params.to ~= "team") or
 			not c.player then
@@ -44,7 +50,7 @@ return {
 		height = "param:height", color = "param:color",
 		background = "param:background", border = "param:border",
 		style = "param:style", size = "param:size", order = "param:order",
-		layout = "param:layout", gap = "param:gap"},
+		layout = "param:layout", gap = "param:gap", screen = "param:screen"},
 	params = {
 		title = {cat = "hud", type = "string", default = ""},
 		anchor = {cat = "hud", type = "string", default = "center",
@@ -72,6 +78,8 @@ return {
 		to = {type = "string", default = "everyone",
 			choices = {"everyone", "player", "team"}},
 		shown = {cat = "hud", type = "bool", default = false},
+		screen = {cat = "hud", type = "string", default = "none",
+			choices = {"none", "full", "over"}},
 	},
 	state = {
 		shown = {default = false, shared = true, param = "shown"},

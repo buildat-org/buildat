@@ -55,6 +55,7 @@
 #include "core/log.h"
 #include "core/json.h"
 #include "accounts/api.h"
+#include "chat/api.h"
 #include "client_file/api.h"
 #include "kit/api.h"
 #include "main_context/api.h"
@@ -778,6 +779,11 @@ struct Module: public interface::Module
 		replicate::assign_scene_to_peer(m_server, m_scene, peer);
 		m_peer_scene[peer] = "world";
 		m_names[peer] = name.empty() ? "p"+itos(peer) : name;
+		// [KIT_LOBBY] In builtin/chat (the menu's Chat, kit/ui_chat): its
+		// lines had gone nowhere, nobody joined
+		chat::access(m_server, [&](chat::Interface *c){
+			c->join(peer, m_names[peer]);
+		});
 		spawn(peer);
 	}
 

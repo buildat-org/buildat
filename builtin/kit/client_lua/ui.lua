@@ -68,6 +68,18 @@
 -- stage, draws numbers from it): one image of 4 x 5 equal cells, left to
 -- right from the top: 0 1 2 3 / 4 5 6 7 / 8 9 : "/" / % - . , / and 4 cells
 -- reserved for characters missed. No letters: labels stay in the font.
+-- [KIT_LOBBY] **Screens**: a panel whose `screen` is "full" or "over" and
+-- what is under it are a layer of their own (r.layer: the screen's id, the
+-- rest "hud"). A full one fills the box, over an opaque base: in play, while
+-- one is up, the rest of the HUD (Kit's own too, kit.hud_off()) is hidden
+-- and the world not drawn (kit.full_screen(), the editor's viewport). Edit
+-- mode draws one layer, kit.hud_layer() (the HUD view's screen picker, else
+-- the selected element's). **kit/ui_chat** (kind "chat"): builtin/chat's
+-- last lines (the app hands it over, kit.use_chat) over a field whose Enter
+-- says a line; **kit/ui_view** (kind
+-- "view"): a View3D of the scene, its camera this client's own (its turn,
+-- its offset from this player's body) at the body of the player its value
+-- names. **Chat while editing**: each new chat line a notification.
 return function(K)
 local M, E, P = K.M, K.E, K.P
 local magic = require("buildat/extension/urho3d")
@@ -94,6 +106,25 @@ local bars_at = nil
 -- The selected element of Kit's own HUD (with kit/game_rules selected)
 local own_sel = nil
 
+-- [KIT_LOBBY] builtin/chat's client half, the app's to hand over (nil: an
+-- app without it; a require of a module not served logs an error), the same
+-- chat as the pause menu's; while editing each new line a notification
+local chat = nil
+function M.use_chat(c)
+	if chat or type(c) ~= "table" or type(c.lines) ~= "table" then
+		return
+	end
+	chat = c
+	c.listeners[#c.listeners + 1] = function(line)
+		if E.editing then
+			ui_utils.show_notification(tostring(line), 8)
+			log:info("kit: chat while editing: " .. tostring(line))
+		end
+	end
+end
+-- The full screen up in play (its id), from the last update
+local full_up = nil
+
 buildat.sub_packet("kit:mine", function(data)
 	local m = network.parse_json(data)
 	if type(m) ~= "table" then
@@ -110,6 +141,12 @@ buildat.sub_packet("kit:mine", function(data)
 		end
 	end
 end)
+
+-- [KIT_LOBBY] This player's own of entity id's per_player state key (nil:
+-- none sent)
+function M.mine_state(id, key)
+	return mine[id] and mine[id][key]
+end
 
 -- light: added to each channel and the alpha (a pointer over a button)
 local function color(hex, fallback, light)
@@ -198,6 +235,11 @@ local function drop(r)
 		r.mark = nil
 	end
 	r.geom, r.step, r.over = nil, nil, nil
+	if r.cam_node then
+		pcall(function() r.cam_node:Remove() end)
+	end
+	r.cam_node, r.cam, r.v3d, r.lines, r.lines_key = nil, nil, nil, nil, nil
+	r.edit = nil
 end
 
 -- A layer of a shape: over those of a lower z, under the text (5)
@@ -288,26 +330,59 @@ local function make(r, id, parent, in_panel)
 		local bg = color(u.background, nil)
 		p.bg = bg and part(r, 1, bg)
 	end
-	r.has_bg = (p.bg or p.disc) and true or false
+	-- [KIT_LOBBY] A full screen's opaque base: no world under it
+	r.full = u.kind == "panel" and u.screen == "full"
+	if r.full then
+		p.base = part(r, 0, magic.Color(0, 0, 0, 1))
+	end
+	r.has_bg = (p.bg or p.disc or p.base) and true or false
 	-- A fitted label cut at the shape's edge
 	el.clipChildren = u.kind == "bar" or u.kind == "button" or u.kind == "input" or
+			u.kind == "chat" or u.kind == "view" or r.full or
 			(u.kind == "text" and num(u.width, 0, 0, 400) > 0)
+	-- [KIT_LOBBY] The chat's lines (its field below, as an input's)
+	if u.kind == "chat" then
+		r.lines = el:CreateChild("Text")
+		r.lines.priority = 5
+		r.lines:SetTextEffect(magic.TE_SHADOW)
+		r.lines:SetColor(color(u.color, magic.Color(1, 1, 1)))
+	end
+	-- [KIT_LOBBY] The view: a View3D of the scene by a camera of its own
+	if u.kind == "view" and K.O.scene then
+		r.cam_node = K.O.scene:CreateChild("kit_ui_view " .. id)
+		r.cam = r.cam_node:CreateComponent("Camera")
+		r.v3d = el:CreateChild("View3D")
+		r.v3d.priority = 4
+		r.v3d:SetName("kit view " .. id)
+		r.v3d:SetFixedSize(16, 16)
+		r.v3d:SetView(K.O.scene, r.cam, false)
+		r.v3d.enabled = false
+	end
 	-- [KIT_TEXT_INPUT] An input's field (a focused LineEdit gets the IME and,
 	-- on the web, the page's text input): Enter sends its line
 	-- ("kit:ui_text" "<id> <text>"), empties it and gives the keys back
-	if u.kind == "input" then
+	-- ([KIT_LOBBY] a chat's: the line said in the chat)
+	if u.kind == "input" or u.kind == "chat" then
 		local f = el:CreateChild("LineEdit")
 		f.defaultStyle = K.STYLE
 		f:SetStyleAuto()
 		f.priority = 6
-		f:SetName("kit input " .. id)
-		f.maxLength = math.floor(num(u.max_length, 100, 1, 200))
+		f:SetName("kit " .. u.kind .. " " .. id)
+		f.maxLength = math.floor(num(u.max_length, u.kind == "chat" and 200 or 100,
+				1, 200))
 		r.edit = f
 		magic.SubscribeToEvent(f, "TextFinished", function()
 			local s = f.text
 			f.text = ""
 			magic.ui:SetFocusElement(nil)
 			if E.editing or s == "" then
+				return
+			end
+			if u.kind == "chat" then
+				if chat then
+					chat.say(s)
+				end
+				log:info("kit: ui chat " .. id .. " said (" .. #s .. " bytes)")
 				return
 			end
 			buildat.send_packet("kit:ui_text", id .. " " .. s)
@@ -637,6 +712,7 @@ local function dress(r, w, h, V, f)
 	if p.fill and r.ui.style == "plain" then
 		b = 2
 	end
+	if p.base then rect(p.base, 0, 0, w, h) end
 	if p.bg then rect(p.bg, 0, 0, w, h) end
 	if p.line then
 		rect(p.line[1], 0, 0, w, b)
@@ -728,10 +804,11 @@ local function stack(r, V)
 	end
 	local cw, ch = row and along or across, row and across or along
 	local titled = r.text ~= ""
-	if num(u.width, 0, 0, 400) <= 0 then
+	-- ([KIT_LOBBY] a full screen's size the box's)
+	if num(u.width, 0, 0, 400) <= 0 and not r.full then
 		r.w = math.min(math.max(cw, titled and r.tw or 0) + 2 * pad, r.pw)
 	end
-	if num(u.height, 0, 0, 400) <= 0 then
+	if num(u.height, 0, 0, 400) <= 0 and not r.full then
 		r.h = math.min(ch + 2 * pad + r.title_h, r.ph)
 	end
 	r.empty = #kids == 0 and not titled and num(u.width, 0, 0, 400) <= 0
@@ -754,9 +831,58 @@ end
 
 -- The HUD in edit mode is the Walk and HUD views', and in the Signals view's
 -- viewport with its Show HUD: 2D and 3D draw the world alone
-function M.hud_off()
+local function edit_off()
 	return E.editing and M.view ~= nil and M.view() ~= "walk" and
 			M.view() ~= "hud" and not (M.hud_area and M.hud_area())
+end
+
+-- [KIT_LOBBY] In play none of it under a full screen (the screen's own
+-- drawn here)
+function M.hud_off()
+	return edit_off() or (full_up ~= nil and not E.editing)
+end
+
+-- [KIT_LOBBY] The full screen up in play (its id; nil none): the world is not
+-- drawn under it
+function M.full_screen()
+	return not E.editing and full_up or nil
+end
+
+-- [KIT_LOBBY] The layer a UI element is on: a screen's id, or "hud" (nil: no
+-- such element drawn)
+function M.layer_of(id)
+	local r = id and U[id]
+	return r and r.layer or nil
+end
+
+-- [KIT_LOBBY] kit/ui_view's camera at the body of player `id`, as this
+-- client's own is from its body (its turn, its offset; a side camera's
+-- lead too). False: nobody to follow
+local function follow(r, id)
+	local eye = K.O.camera
+	local at = id > 0 and M.body_at and M.body_at(id)
+	if not at or not eye or not r.cam then
+		return false
+	end
+	local cam = eye:GetComponent("Camera")
+	local own = M.body_pos and M.body_pos()
+	local cp = eye.worldPosition
+	local ox, oy, oz = 0, 2, -6
+	if own then
+		ox, oy, oz = cp.x - own.x, cp.y - own.y, cp.z - own.z
+	end
+	r.cam_node.position = magic.Vector3(at.x + ox, at.y + oy, at.z + oz)
+	-- (its look's direction; no roll)
+	r.cam_node.direction = eye.worldDirection
+	r.cam.fov, r.cam.nearClip, r.cam.farClip = cam.fov, cam.nearClip, cam.farClip
+	r.cam.orthographic, r.cam.orthoSize = cam.orthographic, cam.orthoSize
+	-- (the play view's lighting, where Kit's is drawn)
+	local rp = K.O.viewport and K.O.viewport().renderPath
+	if rp and r.rp ~= rp then
+		r.rp = rp
+		r.v3d:GetViewport().renderPath = rp
+	end
+	return true
 end
 
 -- [KIT_AIRSHIPS_2] kit/pause_menu_action: an item in the app's pause menu
@@ -885,6 +1011,8 @@ local function update()
 	local wants = false
 	-- A placed health bar up instead of the rules' own
 	local placed_health = false
+	-- [KIT_LOBBY] the full screen up (the first of the list's)
+	local up = nil
 	-- First each one's parent, shown state and size
 	for _, id in ipairs(list) do
 		local r = U[id]
@@ -917,6 +1045,9 @@ local function update()
 		end
 		if r.el then
 			r.pr = pr
+			-- [KIT_LOBBY] a screen's own layer, the rest its panel's
+			r.layer = (u.kind == "panel" and (u.screen == "full" or
+					u.screen == "over")) and id or (pr and pr.layer) or "hud"
 			local value
 			if r.own then
 				local rules_on = M.game_rule("show_health") ~= false
@@ -954,6 +1085,9 @@ local function update()
 					value = hp
 					placed_health = placed_health or (r.on and hp ~= nil)
 				end
+				if r.full and r.on and not up then
+					up = id
+				end
 			end
 			r.value = value
 			local pw = pr and pr.w or bw
@@ -972,6 +1106,14 @@ local function update()
 					if a.name == u.action then
 						text = a.label ~= "" and a.label or a.name
 					end
+				end
+			end
+			-- [KIT_LOBBY] a view's camera at the one it follows; nobody: said
+			if r.v3d then
+				r.following = follow(r, tonumber(value) or 0)
+				r.v3d.visible = r.following
+				if not r.following then
+					text = (text ~= "" and text .. "\n" or "") .. "Nobody is playing"
 				end
 			end
 			r.text = text
@@ -993,6 +1135,10 @@ local function update()
 				end
 				if tostring(u.layout or "none") == "none" and H <= 0 then
 					h = math.min(15 * V, ph)
+				end
+				-- [KIT_LOBBY] a full screen the whole box
+				if r.full then
+					w, h = pw, ph
 				end
 				-- (grown below for what it holds; not while its size is dragged)
 				r.grow = tostring(u.layout or "none") == "none" and
@@ -1038,6 +1184,34 @@ local function update()
 					fit_text(r, text, px, w / 2, nil, pw, pad)
 					h = H > 0 and math.min(H, ph) or math.max(r.t.height +
 							math.floor(pad * 0.7) * 2, TOUCH and 36 or math.floor(2.8 * V))
+				elseif u.kind == "chat" then
+					-- [KIT_LOBBY] the last lines over a field as an input's;
+					-- blank ones before them so they sit at the bottom
+					w = math.min(W > 0 and W or 40 * V, pw)
+					fit_text(r, text, px, w / 2, nil, pw, pad)
+					local row = math.max(r.t.height, math.ceil(px * 1.2))
+					r.field_h = math.max(row + math.floor(pad * 0.7) * 2,
+							TOUCH and 36 or math.floor(2.8 * V))
+					local n = math.floor(num(u.lines, 8, 1, 30))
+					local all = chat and chat.lines or {"No chat here"}
+					local s = string.rep("\n", math.max(0, n - #all)) ..
+							table.concat(all, "\n", math.max(1, #all - n + 1))
+					local key = s .. "|" .. px .. "|" .. w
+					if r.lines_key ~= key then
+						r.lines_key = key
+						r.lines:SetFont(magic.cache:GetResource("Font", FONT), px)
+						r.lines:SetWordwrap(true)
+						r.lines.width = math.max(8, math.floor(w - 2 * pad))
+						r.lines.text = s
+					end
+					r.last_line = all[#all] or ""
+					h = H > 0 and math.min(H, ph) or
+							math.min(n * row + r.field_h + 2 * pad, ph)
+				elseif u.kind == "view" then
+					-- [KIT_LOBBY] the picture under its title
+					w = math.min(W > 0 and W or 48 * V, pw)
+					h = math.min(H > 0 and H or 27 * V, ph)
+					fit_text(r, text, px, w - 2 * pad, nil, pw, pad)
 				elseif W > 0 then
 					fit_text(r, text, px, W - 2 * pad, H > 0 and H - 2 or nil, pw, pad)
 					w = math.min(W, pw)
@@ -1059,6 +1233,11 @@ local function update()
 				pr.kids[#pr.kids + 1] = r
 			end
 		end
+	end
+	if (play and up or nil) ~= full_up then
+		full_up = play and up or nil
+		log:info("kit: ui full screen " .. (full_up and tostring(full_up) .. " up"
+				or "none"))
 	end
 	-- Then the stacking panels, the innermost first
 	for i = #list, 1, -1 do
@@ -1129,8 +1308,12 @@ local function update()
 			if r.sx then
 				x, y = r.sx, r.sy
 			else
-				x, y = place(u, w, h, r.pw, r.ph,
-						pr and 0 or r.own and own_lift(r.own, V) or lift, V)
+				if r.full then
+					x, y = 0, 0
+				else
+					x, y = place(u, w, h, r.pw, r.ph,
+							pr and 0 or r.own and own_lift(r.own, V) or lift, V)
+				end
 				if pr then
 					x, y = x + pad, y + pad + r.top
 				else
@@ -1138,10 +1321,12 @@ local function update()
 				end
 				y = y + (r.dy or 0)
 			end
-			-- (no drag in the Signals view's box: bx, by not undone here)
+			-- ([KIT_LOBBY] the HUD view's frame a box too: its bx, by undone)
 			r.to_params = function(px, py, nw, nh)
 				if pr then
 					px, py = px - pad, py - pad - r.top
+				else
+					px, py = px - bx, py - by
 				end
 				py = py - (r.dy or 0)
 				return from_place(u, nw or w, nh or h, r.pw, r.ph, px, py, V)
@@ -1158,10 +1343,13 @@ local function update()
 						math.floor((h - r.t.height) / 2))
 			end
 			if r.edit then
+				-- (a chat's at the bottom, its band the field's height)
+				local band = math.min(h, r.field_h or h)
+				local y0 = h - band
 				local lx = r.text ~= "" and r.tw + 2 * pad or pad
-				r.t:SetPosition(pad, math.floor((h - r.t.height) / 2))
-				local fh = math.max(8, math.floor(h - pad))
-				r.edit:SetPosition(math.floor(lx), math.floor((h - fh) / 2))
+				r.t:SetPosition(pad, math.floor(y0 + (band - r.t.height) / 2))
+				local fh = math.max(8, math.floor(band - pad))
+				r.edit:SetPosition(math.floor(lx), math.floor(y0 + (band - fh) / 2))
 				r.edit:SetFixedSize(math.max(8, math.floor(w - lx - pad)), fh)
 				if r.edit_px ~= r.px then
 					r.edit_px = r.px
@@ -1169,6 +1357,21 @@ local function update()
 							r.px)
 				end
 				r.edit.enabled = not E.editing
+			end
+			if r.lines then
+				r.lines:SetPosition(pad, math.floor(h - (r.field_h or 0) -
+						r.lines.height))
+			end
+			if r.v3d and r.following then
+				local top = pad
+				if r.text ~= "" then
+					r.t:SetPosition(math.max(1, math.floor((w - r.tw) / 2)),
+							math.floor(pad / 2))
+					top = r.t.height + pad
+				end
+				r.v3d:SetPosition(pad, math.floor(top))
+				r.v3d:SetFixedSize(math.max(16, math.floor(w - 2 * pad)),
+						math.max(16, math.floor(h - top - pad)))
 			end
 			r.frac = nil
 			if u.kind == "bar" then
@@ -1188,7 +1391,15 @@ local function update()
 			dress(r, math.floor(w), math.floor(h), V, r.frac or 0)
 			-- Play: as its state says; edit mode: all, a hidden one dimmed,
 			-- framed (framed())
-			r.el.visible = not M.hud_off() and not r.skip and
+			-- ([KIT_LOBBY] edit mode one layer, the HUD view's pick's or the
+			-- selected one's; play under a full screen its layer alone)
+			local layer_on
+			if E.editing then
+				layer_on = r.layer == (M.hud_layer and M.hud_layer() or "hud")
+			else
+				layer_on = up == nil or r.layer == up
+			end
+			r.el.visible = not edit_off() and layer_on and not r.skip and
 					not (r.empty and not frame) and ((live and r.on) or frame or (r.own ~= nil and r.on))
 			r.el.enabled = frame or r.kind ~= "text"
 			local blink = tonumber(u.blink_below) or 0
@@ -1251,8 +1462,8 @@ local function update()
 			end
 			if play and r.on and r.kind == "panel" then
 				for _, o in pairs(U) do
-					if (o.kind == "button" or o.kind == "input") and
-							panel_of(o) == id then
+					if (o.kind == "button" or o.kind == "input" or
+							o.kind == "chat") and panel_of(o) == id then
 						wants = true
 					end
 				end
@@ -1270,8 +1481,12 @@ local function update()
 					r.pie and ", pie step " .. tostring(r.step) .. " of 32" or "",
 					(r.fill_at and not r.pie) and ", fill " .. r.fill_at or "",
 					(r.blinking and ", blinks" or "") ..
-							(r.mark and r.mark.visible and ", marked" or ""),
-					(r.text:gsub("\n", " | ")))
+							(r.mark and r.mark.visible and ", marked" or "") ..
+							(r.layer ~= "hud" and ", layer " .. tostring(r.layer) or "") ..
+							(r.v3d and (r.following and ", follows " ..
+							tostring(r.value) or ", nobody") or ""),
+					((r.text .. (r.last_line and " | " .. r.last_line or "")):gsub(
+							"\n", " | ")))
 			if line ~= r.log then
 				r.log = line
 				local off = sp.x < bx or sp.y < by or sp.x + w > bx + sw or
@@ -1321,7 +1536,7 @@ local function selected_rec()
 end
 
 local function resizable(r)
-	return r and r.el and r.kind ~= "own" and r.el.visible
+	return r and r.el and r.kind ~= "own" and r.el.visible and not r.full
 end
 
 -- [KIT_PARAM_CATEGORIES] Kit's own element selected with entity `id`: its name
@@ -1625,7 +1840,8 @@ local function hit(x, y)
 	local best, area = nil, nil
 	for id, r in pairs(U) do
 		if r.el and r.el.visible and (E.editing or r.kind == "button" or
-				r.kind == "input" or (r.kind == "panel" and r.has_bg)) then
+				r.kind == "input" or r.kind == "chat" or
+				(r.kind == "panel" and r.has_bg)) then
 			local ok, a = pcall(function()
 				local p, s = r.el.screenPosition, r.el.size
 				return x >= p.x and y >= p.y and x < p.x + s.x and
@@ -1705,7 +1921,8 @@ local function press(x, y)
 	if M.hud_picked then
 		M.hud_picked()
 	end
-	if TOUCH and not was then
+	-- ([KIT_LOBBY] a full screen selected, not moved: it is the box)
+	if (TOUCH and not was) or r.full then
 		return
 	end
 	drag = {id = id, x0 = x, y0 = y, px = r.el.position.x,
@@ -1716,7 +1933,6 @@ end
 -- other shown elements' and the screen's
 local function snap_lines(self)
 	local xs, ys = {}, {}
-	local root = magic.ui.root
 	local function add(x, y, w, h)
 		xs[#xs + 1] = x
 		xs[#xs + 1] = x + w / 2
@@ -1725,7 +1941,7 @@ local function snap_lines(self)
 		ys[#ys + 1] = y + h / 2
 		ys[#ys + 1] = y + h
 	end
-	add(0, 0, root.width, root.height)
+	add(hud_box())
 	for _, o in pairs(U) do
 		if o ~= self and o.el and o.el.visible and o.w and o.pr ~= self then
 			local p = o.el.screenPosition
@@ -1802,6 +2018,9 @@ local function move(x, y)
 			0, V)
 	if r.pr then
 		gx, gy = gx + pad_of(V), gy + pad_of(V) + r.top
+	else
+		local bx, by = hud_box()
+		gx, gy = gx + bx, gy + by
 	end
 	drag.at = {gx, gy}
 	drag.snapped = (sx or sy) and true or false

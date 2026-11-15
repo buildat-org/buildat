@@ -14,14 +14,16 @@
 #      and Apply sends both (the save);
 #   4. a click on Kit's own hotbar and health bar in Walk: narrowed to hotbar_*,
 #      health_*; All back to the chips; a click on a ui_bar: the HUD chip;
-#   5. the HUD view: the panel beside the selected element, a value set in it
-#      applied, its own click no background click, following the element as it
-#      is dragged, closed by a click on the background, opened by a click on
-#      the element, a double click leaves the view;
+#   5. the HUD view ([KIT_LOBBY] the tool panel at the right, the frame
+#      left of it): the selected element's parameters in it, a value set in
+#      it applied, its own click no background click, the element dragged, a
+#      click on the background letting it go, one on the element taking it
+#      again, the views dropdown leaving the view;
 #   6. the flag's inspector, two links on it, not over the window in 3D;
 #   7. the Signals view's column has the chips;
-#   8. a 1800x1000 window; a touch client at 600x400: a tap opens and closes the
-#      panel, its title's tap is its own, typing in a field, two taps leave;
+#   8. a 1800x1000 window; a touch client at 600x400 (-u 1: the desktop's
+#      tool panel): a tap lets the element go and takes it again, its
+#      title's tap is its own, typing in a field, the views dropdown leaves;
 #   9. a chip holding an edit not applied marked; the last chip back in a new
 #      session; a warning's height given back; narrowing on the kill feed and
 #      the hint; a drag started on the panel moves nothing; the
@@ -198,11 +200,13 @@ keypress F4
 frames 5
 screenshot @T@/hud_health.png
 EOF
-	at 512 665
+	# ([KIT_LOBBY] the frame the room left of the 390 wide tool panel, 634x700:
+	# its middle at x 317, the HUD's units 634/700 of Walk's)
+	at 317 665
 	cat <<'EOF'
 frames 3
 screenshot @T@/hud_panel.png
-click Text "Hotbar" 400 480
+click Text "Hotbar" 860 60
 frames 5
 click LineEdit "2.8"
 frames 2
@@ -217,7 +221,7 @@ wait_log 10000 kit editor: state:
 frames 8
 screenshot @T@/hud_applied.png
 EOF
-	printf 'mouse_pos 512 658\nframes 2\nmouse_down left\nframes 2\nmouse_pos 512 560\nframes 2\nmouse_pos 512 480\nframes 2\nmouse_up left\nwait_log 10000 kit: ui own:hotbar dragged to\nwait_log 10000 kit editor: state:\nframes 8\n'
+	printf 'mouse_pos 317 658\nframes 2\nmouse_down left\nframes 2\nmouse_pos 317 560\nframes 2\nmouse_pos 317 480\nframes 2\nmouse_up left\nwait_log 10000 kit: ui own:hotbar dragged to\nwait_log 10000 kit editor: state:\nframes 8\n'
 	cat <<'EOF'
 screenshot @T@/hud_dragged.png
 EOF
@@ -225,14 +229,15 @@ EOF
 	cat <<'EOF'
 screenshot @T@/hud_closed.png
 EOF
-	at 512 478
+	at 317 478
 	cat <<'EOF'
 frames 3
 screenshot @T@/hud_reopened.png
-mouse_pos 100 300
-frames 2
-mouse_click left
-mouse_click left
+click DropDownList "hud views"
+wait_log 10000 hud views open
+frames 3
+click Text "hud views: Walk (F3)"
+wait_log 10000 kit editor: the view is Walk
 frames 5
 EOF
 	# 4. The bar's panel from the view; 7. the Signals view
@@ -242,7 +247,7 @@ event kit_tabs out
 keypress F4
 frames 5
 EOF
-	at 512 215
+	at 317 198
 	cat <<EOF
 frames 3
 screenshot @T@/hud_bar.png
@@ -312,34 +317,33 @@ assert hl and re.search(r"showing health_\*, 15 of 42: health_anchor", hl[0]), h
 i = par.index(hb[0])
 assert "chips All Behaviour HUD, showing all, 42 of 42" in par[i + 1], par[i + 1]
 assert "showing hud" in par[i + 2], par[i + 2]
-# The panel: beside, not over, inside; following the drag
-panels = [re.search(r"the HUD panel at (\S+) (\w+) (-?\d+) (-?\d+) (\d+) (\d+), the element (-?\d+) (-?\d+) (\d+) (\d+)", l) for l in lines]
-panels = [m for m in panels if m]
-assert any(m[1] == "own:hotbar" for m in panels) and any(m[1] == "own:health" for m in panels), panels
-for m in panels:
-	x, y, w, h, ex, ey, ew, eh = map(int, m.groups()[2:])
-	assert x >= 0 and y >= 0 and x + w <= 1024 and y + h <= 700, m[0]
-	assert x + w <= ex or ex + ew <= x or y + h <= ey or ey + eh <= y, "over the element: " + m[0]
-ys = {int(m[8]) for m in panels if m[1] == "own:hotbar"}
-assert len(ys) >= 3 and min(ys) <= 485, ("did not follow the applied value and the drag", ys)
+# [KIT_LOBBY] The tool panel at the right, the frame the room left of it;
+# its parameters the selected element's (Kit's own too)
+assert any(l.endswith("the HUD tool panel 390x700, the frame 0 0 634 700") for l in lines), \
+	[l for l in lines if "the HUD tool panel" in l]
+# (Kit's own rows fit it: the frame never moved)
+assert all("390x700" in l for l in lines if "the HUD tool panel" in l), \
+	[l for l in lines if "the HUD tool panel" in l]
+shows = [l.split("the HUD panel shows ")[1] for l in lines if "the HUD panel shows " in l]
+assert "own:hotbar" in shows and "own:health" in shows, shows
 ph = [l.split("parameters: ")[1] for l in lines if "the HUD panel's parameters: " in l]
 assert "hotbar_anchor hotbar_x hotbar_y" in ph, ph
 assert any(p.startswith("anchor background blink_below border color") and "source" not in p for p in ph), ph
-# The order of the clicks on the background
-ev = [l for l in lines if re.search(r"the HUD panel closed|a double click out|the view is |own:hotbar dragged|selected Kit's own", l)]
+# The order of the clicks: on nothing in the frame the selection let go, on
+# the element taken again; out by the views dropdown
+ev = [l for l in lines if re.search(r"the HUD panel shows|the HUD panel closed|the view is |own:hotbar dragged|selected Kit's own", l)]
 ev = [re.sub(r".*kit(: ui:? | editor: )", "", l) for l in ev]
 s = "; ".join(ev)
-want = ("own:hotbar dragged to 0, ", "the HUD panel closed; selected Kit's own hotbar; the HUD panel closed; "
-	"a double click out of the HUD view; the view is Walk")
+want = ("own:hotbar dragged to 0, ", "the HUD panel shows nothing; selected Kit's own hotbar; "
+	"the HUD panel shows own:hotbar; the view is Walk")
 assert want[1] in s, s
 assert s.index(want[0]) < s.index(want[1]), s
-# The panel's own click, its field and Apply closed nothing and dragged nothing
+# The panel's own click, its field and Apply let go of nothing and dragged nothing
 assert s.count("own:hotbar dragged") == 1, s
 d = s.index(want[0])
-assert "closed" not in s[s.rindex("the view is HUD", 0, d):d], s
-print("the panel at", panels[0][0])
+assert "shows nothing" not in s[s.rindex("the view is HUD", 0, d):d], s
 PY
-echo "ok: chips on the flag, none on the timer; a chip kept; narrowing; the panel beside the element and following it"
+echo "ok: chips on the flag, none on the timer; a chip kept; narrowing; the HUD view's tool panel and its frame"
 # 2., 6.
 wid=$(grep -aoP "inspector \K-?\d+ \d+ \d+ \d+(?=.*\(flag\))" "$b" | head -1)
 pal=$(grep -aoP "palette \K-?\d+ \d+ \d+ \d+(?=.*\(flag\))" "$b" | head -1)
@@ -404,14 +408,17 @@ screenshot @T@/touch_typed.png
 tap Text "◆ $BAR *"
 frames 5
 event kit_tabs title
-tap 60 300
+tap 60 200
 frames 5
 screenshot @T@/touch_closed.png
-tap 300 125
+tap 150 93
 frames 8
 screenshot @T@/touch_reopened.png
-tap 60 300
-tap 60 300
+tap DropDownList "hud views"
+wait_log 10000 hud views open
+frames 3
+tap Text "hud views: Walk (F3)"
+wait_log 10000 kit editor: the view is Walk
 frames 5
 event kit_tabs out
 sync 3000
@@ -422,19 +429,23 @@ BUILDAT_JOIN_NAME=kitboss BUILDAT_TOUCH=1 client kittouch 600x400 -u 1
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 grep -a "the windows at .*hud_panel .*(widepanel)" "$t/kitwide.log" >/dev/null || fail "no panel in the wide window ($t/kitwide.log)"
-grep -a " I kit " "$t/kittouch.log" | grep -a "the HUD panel closed\|the HUD panel at\|double click\|the view is \|the tabs" |
+grep -a " I kit " "$t/kittouch.log" | grep -a "the HUD panel shows\|the HUD tool panel\|the view is \|the tabs" |
 	sed 's/.*kit editor: //' > "$t/touch.txt"
-python3 -I - "$t/touch.txt" <<'PY' || fail "the touch client's panel ($t/touch.txt)"
+python3 -I - "$t/touch.txt" "$BAR" <<'PY' || fail "the touch client's panel ($t/touch.txt)"
 import sys
 s = [l.strip() for l in open(sys.argv[1], errors="replace")]
+bar = "the HUD panel shows " + sys.argv[2]
+# ([KIT_LOBBY] -u 1: the desktop's tool panel, at 600x400 half the room for
+# its touch-sized rows)
+assert "the HUD tool panel 300x400, the frame 0 0 300 400" in s, s
 t = next(i for i, l in enumerate(s) if "(title)" in l)
-assert any("the HUD panel at" in l for l in s[:t]), s
-assert not any("closed" in l for l in s[:t]), s
-c = next(i for i, l in enumerate(s) if "closed" in l)
-assert any("the HUD panel at" in l for l in s[c + 1:]), s
-assert any("a double click out" in l for l in s[c + 1:]), s
+assert bar in s[:t], s
+assert not any("shows nothing" in l for l in s[:t]), s
+c = next(i for i, l in enumerate(s) if "shows nothing" in l)
+assert bar in s[c + 1:], s
+assert any("the view is Walk" in l for l in s[c + 1:]), s
 PY
-echo "ok: a wide window; a touch client: a tap opens and closes the panel, two leave the view"
+echo "ok: a wide window; a touch client: a tap lets the element go, one on it takes it again, the views dropdown leaves"
 # 3. and 5. In the save: the fields of two categories, the panel's value
 python3 -I - "$t/user/apps/workbench/saves/world/save.sqlite" "$FLAG" "$RULES" <<'PY' || fail "the save"
 import json, sqlite3, sys
@@ -501,11 +512,11 @@ frames 3
 keypress F4
 frames 5
 EOF
-	at 512 619
+	at 317 627
 	cat <<'EOF'
 frames 3
 event kit_tabs drag0
-click Text "Health bar"
+click Text "Health bar" 860 60
 frames 2
 mouse_down left
 frames 2
@@ -518,7 +529,8 @@ frames 5
 event kit_tabs drag1
 screenshot @T@/panel_drag.png
 EOF
-	at 940 50
+	# (the kill feed at the frame's top right)
+	at 560 45
 	cat <<'EOF'
 frames 3
 screenshot @T@/no_rules.png
@@ -577,7 +589,7 @@ for own in ("feed", "hint"):
 	assert m and "showing " + own + "_*" in m[0], (own, m)
 # The drag on the panel: the element stays, the panel stays open, no click through
 d = "\n".join(lines[at("drag0"):at("drag1")])
-assert "dragged" not in d and "the HUD panel closed" not in d and "selected" not in d, d
+assert "dragged" not in d and "the HUD panel shows nothing" not in d and "selected" not in d, d
 PY
 echo "ok: a warning's height given back; the chip remembered and marked; narrowing on the feed and hint; a drag on the panel; its Place"
 # [KIT_LAST_ROW_CLIP] Each body with no scroll bar shown to its foot

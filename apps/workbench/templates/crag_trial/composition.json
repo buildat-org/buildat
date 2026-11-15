@@ -5,7 +5,7 @@
 		{"id": 4, "parent": 1, "name": "game rules", "components": [{"type": "kit/game_rules", "params": {"peaceful": true, "slots": 0, "hotbar": 0, "show_health": false}}]},
 		{"id": 5, "parent": 1, "name": "controls: the side view", "components": [{"type": "kit/controls", "params": {"plane": "vertical", "camera": "side", "distance": 11, "side_clip": 3, "movement": "local/crag_bike", "look_ahead": 3, "look_velocity": 0.25, "edit_view": "2d"}}]},
 		{"id": 6, "parent": 1, "name": "the bike", "components": [{"type": "local/crag_bike", "links": [{"output": "crash", "to": 7, "input": "crash"}]}]},
-		{"id": 7, "parent": 2, "name": "the run", "components": [{"type": "local/crag_run", "params": {"start": 8}, "links": [{"output": "hud", "to": 9, "input": "value"}, {"output": "board", "to": 43, "input": "value"}]}]},
+		{"id": 7, "parent": 2, "name": "the run", "components": [{"type": "local/crag_run", "params": {"start": 8}, "links": [{"output": "hud", "to": 9, "input": "value"}, {"output": "board", "to": 43, "input": "value"}, {"output": "board", "to": 49, "input": "value"}, {"output": "result", "to": 51, "input": "value"}, {"output": "finished", "to": 44, "input": "over"}]}]},
 		{"id": 8, "parent": 2, "name": "start", "pos": [-60, 0.5, 1], "components": [{"type": "kit/spawner", "params": {"players": true, "own_look": false}}]},
 		{"id": 9, "parent": 2, "name": "the rider's line", "components": [{"type": "kit/ui_text", "params": {"to": "player", "text": "{value}", "anchor": "top", "y": 2, "size": 2.2}}]},
 		{"id": 10, "parent": 2, "name": "sign: the keys", "pos": [-56, 2.9, 3], "components": [{"type": "kit/sign", "params": {"board": [5.2, 1.6, 0.1], "size": 0.3, "background": "#2b2d42", "text": "W gas, S brake, A and D lean, Space turns.|Take every gem, then the finish.|Your head on the rocks is a crash."}}]},
@@ -36,7 +36,17 @@
 		{"id": 39, "parent": 2, "name": "rocks, in front", "pos": [-30, 0, -1.5], "components": [{"type": "kit/polygon", "params": {"points": [[0, 0], [0.6, 1.6], [1.2, 0.8], [1.8, 2], [2.6, 0]], "color": "#3e5a35", "depth": 1, "collision": false}}]},
 		{"id": 40, "parent": 2, "name": "rocks, in front", "pos": [-6, 0, -1.5], "components": [{"type": "kit/polygon", "params": {"points": [[0, 0], [1.4, 0.9], [3, 1.2], [4.2, 0]], "color": "#4a3f35", "depth": 1, "collision": false}}]},
 		{"id": 41, "parent": 2, "name": "rocks, in front", "pos": [22, 0, -1.5], "components": [{"type": "kit/polygon", "params": {"points": [[0, 0], [0.7, 1.8], [1.5, 1], [2.2, 2.2], [3, 0]], "color": "#3e5a35", "depth": 1, "collision": false}}]},
-		{"id": 42, "parent": 2, "name": "rocks, in front", "pos": [40, 0, -1.5], "components": [{"type": "kit/polygon", "params": {"points": [[0, 0], [1.2, 1.3], [2.6, 0.9], [3.6, 0]], "color": "#4a3f35", "depth": 1, "collision": false}}]}
+		{"id": 42, "parent": 2, "name": "rocks, in front", "pos": [40, 0, -1.5], "components": [{"type": "kit/polygon", "params": {"points": [[0, 0], [1.2, 1.3], [2.6, 0.9], [3.6, 0]], "color": "#4a3f35", "depth": 1, "collision": false}}]},
+		{"id": 44, "parent": 2, "name": "the lobby", "components": [{"type": "kit/lobby", "params": {"lobby_screen": 45, "over_screen": 50}, "links": [{"output": "entered", "to": 7, "input": "start"}, {"output": "entered", "to": 48, "input": "follow"}, {"output": "left", "to": 48, "input": "unfollow"}]}]},
+		{"id": 45, "parent": 2, "name": "the lobby screen", "components": [{"type": "kit/ui_panel", "params": {"screen": "full", "to": "player", "title": "Crag Trial", "size": 3, "background": "#1d1f2e"}}]},
+		{"id": 46, "parent": 45, "name": "the lobby's chat", "components": [{"type": "kit/ui_chat"}]},
+		{"id": 47, "parent": 45, "name": "Play", "components": [{"type": "kit/ui_button", "params": {"label": "Play", "anchor": "center", "y": 0, "size": 3.2}, "links": [{"output": "pressed", "to": 44, "input": "play"}]}]},
+		{"id": 48, "parent": 45, "name": "the lobby's view", "components": [{"type": "kit/ui_view", "params": {"title": "On the track"}}]},
+		{"id": 49, "parent": 45, "name": "the lobby's best times", "components": [{"type": "kit/ui_text", "params": {"text": "Best times|{value}", "anchor": "top", "y": 10}}]},
+		{"id": 50, "parent": 2, "name": "the result card", "components": [{"type": "kit/ui_panel", "params": {"screen": "over", "to": "player", "title": "Finished", "layout": "column", "width": 0, "height": 0, "size": 2.2}}]},
+		{"id": 51, "parent": 50, "name": "the result", "components": [{"type": "kit/ui_text", "params": {"to": "player", "text": "{value}", "size": 2.4}}]},
+		{"id": 52, "parent": 50, "name": "Again", "components": [{"type": "kit/ui_button", "params": {"label": "Again", "size": 2.4}, "links": [{"output": "pressed", "to": 44, "input": "again"}]}]},
+		{"id": 53, "parent": 50, "name": "Lobby", "components": [{"type": "kit/ui_button", "params": {"label": "Lobby", "size": 2.4}, "links": [{"output": "pressed", "to": 44, "input": "lobby"}]}]}
 	],
-	"next_id": 44
+	"next_id": 54
 }

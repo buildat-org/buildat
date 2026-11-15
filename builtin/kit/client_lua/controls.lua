@@ -2308,8 +2308,11 @@ magic.SubscribeToEvent("Update", function(_, data)
 		local wr = E.editing and M.view() == "walk" and M.touch_world and
 				M.touch_world() or nil
 		make_bar(wr)
-		C.bar.visible = not E.editing or (wr ~= nil and C.bar:GetNumChildren() > 0)
-		C.abar.visible = not E.editing and #M.world_actions() > 0
+		-- ([KIT_LOBBY] none over a full screen)
+		local full = M.full_screen and M.full_screen()
+		C.bar.visible = (not E.editing and not full) or
+				(wr ~= nil and C.bar:GetNumChildren() > 0)
+		C.abar.visible = not E.editing and not full and #M.world_actions() > 0
 		-- (alignment right and bottom: from the root's corner, UI units)
 		local sc, r = magic.ui.scale, magic.ui.root
 		local at = wr and string.format("%d %d",

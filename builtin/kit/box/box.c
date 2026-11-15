@@ -46,8 +46,8 @@
 **                        (the player's list after inventory calls),
 **                        inv_set = {{key, value}...} (the provider's
 **                        state), spawn = {{ref, pos|null, id}...}, remove
-**                        = {id...}, send = {{id, input, value}...}, log =
-**                        {line...}, app = {{what, value}...}, build =
+**                        = {id...}, send = {{id, input, value[, by]}...},
+**                        log = {line...}, app = {{what, value}...}, build =
 **                        {entities, voxels} (on_build's: a prefab's
 **                        members, [KIT_GENERATORS]), respawn = true
 **                        (c:respawn()), [KIT_CTF] died = {by, type},
@@ -492,9 +492,9 @@ static const char PRELUDE[] =
 "		if #removes >= 64 then error('remove: 64 a run at most', 2) end\n"
 "		removes[#removes + 1] = tonumber(id) or req.id\n"
 "	end\n"
-"	function c:send(id, input, value)\n"
+"	function c:send(id, input, value, by)\n"
 "		if #sends >= 64 then error('send: 64 a run at most', 2) end\n"
-"		sends[#sends + 1] = {tonumber(id) or 0, tostring(input), value == nil and NULL or value}\n"
+"		sends[#sends + 1] = {tonumber(id) or 0, tostring(input), value == nil and NULL or value, type(by) == 'string' and by or nil}\n"
 "	end\n"
 "	function c:count(item, ext) return inv.count(item, ext) end\n"
 "	function c:has(item, n, ext) return inv.count(item, ext) >= (tonumber(n) or 1) end\n"

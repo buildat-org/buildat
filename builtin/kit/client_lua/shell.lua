@@ -791,15 +791,17 @@ end
 
 -- [KIT_PHONE_EDITING] The Walk view's HUD in the world's rect, as the
 -- Signals view's in its viewport (ui.lua's hud_box); the HUD view's too
+-- ([KIT_LOBBY] and on a desktop the HUD view's frame, editor.lua's)
 do
 	local sg_area = M.hud_area
 	SH.area = {}
 	function M.hud_area()
 		local a = sg_area and sg_area()
-		if a or not (SH.world and (S.view == "walk" or S.view == "hud")) then
+		local w = SH.world or NT.hud_frame()
+		if a or not (w and (S.view == "walk" or S.view == "hud")) then
 			return a
 		end
-		local w, b = SH.world, SH.area
+		local b = SH.area
 		b.x, b.y, b.w, b.h, b.node = w[1], w[2], w[3], math.max(1, w[4]), O.camera
 		b.cam = O.camera and O.camera:GetComponent("Camera")
 		return b
