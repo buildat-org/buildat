@@ -19,6 +19,8 @@
 --   kit.pointer_free(): the pointer is a cursor (no mouse look)
 --   kit.body_pos() -> the body's feet as drawn (nil before it is put)
 --   kit.seated() -> the seat's entity id (nil: none)
+--   kit.movement_help() -> the movement's hints not used yet ("" none
+--     left), nil: it declares none ([KIT_PLAY_HINTS], below)
 --   kit.touch_bar_left() -> where the touch bars begin (UI x; nil: none)
 --   kit.viewport(scene, camera) -> a Viewport with Kit's effects
 -- The keys (input.lua's actions, the player's to rebind; these the
@@ -1187,6 +1189,55 @@ magic.SubscribeToEvent("command_seq:kit_steer", function(_, data)
 	log:info("kit: steering to " .. data:GetString("Param"))
 end)
 
+-- [KIT_PLAY_HINTS] The movement's hints for an app's help line: its
+-- movement.help (the keys) or touch_help (a touchscreen's), {{keys, what,
+-- input}...}, keys in key_text's [action] form, input f, r, jump or down.
+-- Each item is gone once its input was used in play, kept on this client
+-- per movement type (Kit's storage kit_hints, "<type> <input>" lines).
+-- kit.movement_help() -> "keys: what  ..." ("" all used), nil: none declared
+local HINTS = nil
+local function hints()
+	if not HINTS then
+		HINTS = {}
+		for ty, k in (buildat.storage_read("kit_hints") or ""):gmatch("(%S+) (%S+)") do
+			HINTS[ty] = HINTS[ty] or {}
+			HINTS[ty][k] = true
+		end
+	end
+	return HINTS
+end
+local function hint_used(ty, k)
+	local h = hints()
+	h[ty] = h[ty] or {}
+	if h[ty][k] then
+		return
+	end
+	h[ty][k] = true
+	local l = {}
+	for t, ks in pairs(h) do
+		for i in pairs(ks) do
+			l[#l + 1] = t .. " " .. i
+		end
+	end
+	local ok, err = buildat.storage_write("kit_hints", table.concat(l, "\n"))
+	log:info("kit: the hint of " .. ty .. "'s " .. k .. " used" ..
+			(ok and "" or ", not kept: " .. tostring(err)))
+end
+function M.movement_help()
+	local m, list = move(), decl()[TOUCH and "touch_help" or "help"]
+	if not m or type(list) ~= "table" then
+		return nil
+	end
+	local used, out = hints()[tostring(m.type)] or {}, {}
+	for _, it in ipairs(list) do
+		if type(it) == "table" and type(it[1]) == "string" and
+				type(it[2]) == "string" and not used[it[3]] then
+			out[#out + 1] = M.key_text(it[1]) .. ": " .. it[2]
+		end
+	end
+	return table.concat(out, "  ")
+end
+
 local function gather()
 	local f, r, jump, down = 0, 0, 0, 0
 	if walking() and not paused() and not M.waiting() and
@@ -1254,6 +1305,14 @@ local function gather()
 	if C.auto_said ~= (i.auto == 1) then
 		C.auto_said = i.auto == 1
 		log:info("kit: auto jump " .. (C.auto_said and "on" or "off"))
+	end
+	-- [KIT_PLAY_HINTS] the inputs used in play, of a movement with hints
+	if m and not E.editing and (decl().help or decl().touch_help) then
+		for _, k in ipairs({"f", "r", "jump", "down"}) do
+			if i[k] ~= 0 then
+				hint_used(tostring(m.type), k)
+			end
+		end
 	end
 	return i
 end

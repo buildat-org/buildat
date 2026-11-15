@@ -20,6 +20,9 @@
 #   5. kitbob joins, his body drawn by the hook on kitboss's screen; his
 #      first My account page drawn again when the hello comes, "Connect an
 #      agent..." on it (accounts.lua).
+# And [KIT_PLAY_HINTS]: Workbench's help line in play the bike's own hints
+# (movement.help), W's and A's gone once used, Space's last after the gem:
+# the line gone, kept in Kit's storage (kit_hints).
 # Screenshots, kept with KEEP_TMP=1: $t/start.png, $t/side.png
 #   util/kit_bike_check.sh
 set -u
@@ -134,6 +137,8 @@ done
 step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
 await "$CL" 0 10 "kit: controls: camera side, pointer [a-z]+, movement local/crag_bike, plane z 1"
 await "$CL" 0 10 "crag_bike: the draw hook draws a bike"
+# ([KIT_PLAY_HINTS] the movement's hints, none of the walker's)
+await "$CL" 0 10 'workbench: the hint "\[W\]/\[S\]: gas, brake  \[A\]/\[D\]: lean  \[Space\]: turn round"'
 await "$CL" 0 10 "kit: player [0-9]+'s body drawn by its movement"
 # (kitbob on his way meanwhile)
 BUILDAT_JOIN_CREATE=1 client bob
@@ -169,7 +174,8 @@ for i in $(seq 20); do
 	cmd "delay 200"
 done
 awk -v x="$bx" 'BEGIN { exit !(x < -58) }' || fail "the bike not back at the start after the crash: $bx ($CL)"
-echo "ok: throttle up the ramp's polygon, the crash an output (the run's line), back at the start"
+seen "$CL" 0 'workbench: the hint "\[Space\]: turn round"' || fail "the used hints not gone ($CL)"
+echo "ok: throttle up the ramp's polygon, the crash an output (the run's line), back at the start; W and A's hints gone"
 # 3. A heavy step: refused, the old version kept
 python3 -I - "$here/apps/workbench/templates/crag_trial/types/crag_bike.lua" > "$t/heavy.cmd" <<'PY'
 import json, sys
@@ -208,6 +214,10 @@ c=$(tail -c 3000 "$CL" | grep -aoP 'kit: body at .*, \K[0-9]+ acks, [0-9]+ corre
 n=$(grep -ac "kit: the body corrected by" "$CL")
 [ "$n" -le 10 ] || fail "$n corrections ($c; $CL)"
 echo "ok: the old version stepping, the first gem taken (a trigger zone); $c"
+# ([KIT_PLAY_HINTS] the last one used: the line gone, kept on this client)
+step 5 'workbench: the hint ""' "keypress Space"
+grep -raq --include=kit_hints "local/crag_bike jump" "$t/cu_boss" || fail "the used hints not kept ($t/cu_boss)"
+echo "ok: Space used, the hint line gone and kept"
 # 5. kitbob: drawn by the hook on kitboss's screen; his first My account page
 as bob
 await "$CL" 0 120 "Joined as kitbob"
