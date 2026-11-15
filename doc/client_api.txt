@@ -1749,7 +1749,11 @@ rgb(name) -> r, g, b
   "focus", "main", "background" (the web page's); magic.Color(ui_utils.rgb("error")).
 The look is ui_utils/res/style.xml, Buildat's (the same as its web
 pages'), each element type styled by SetStyleAuto(); a screen's one main
-button (OK, Join, Play, Log in) is el:SetStyle("PrimaryButton") instead.
+button (OK, Join, Play, Log in) is el:SetStyle("PrimaryButton") instead:
+a dark amber fill, light text and a 2 px amber border, as the web pages'
+main button (web_brand's, [WEB_MAIN_BUTTON]). A solid amber fill on the
+dark ground is not recommended for a main button: it resembles a
+well-known adult site's look.
 add_paged(menu, items, {page, per_page, redraw}) -> pages, page
 - Page buttons for a menu longer than the screen; the caller redraws.
 keyboard_page(win)

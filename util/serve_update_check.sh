@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
-# cost: 4min (2026-10-09)
-# covers: util/serve_latest_release.sh builtin/network/network.cpp src/client/state.cpp src/client/app.cpp client/api.lua client/packet.lua extensions/launch_menu/screens.lua src/client/web/index.html builtin/starport_announce/starport_announce.cpp apps/starport/main/main.cpp
+# cost: 6min (2026-11-16)
+# covers: util/serve_latest_release.sh builtin/network/network.cpp src/client/state.cpp src/client/app.cpp client/api.lua client/packet.lua extensions/launch_menu/screens.lua src/client/web/index.html builtin/starport_announce/starport_announce.cpp apps/starport/main/main.cpp builtin/accounts/accounts.cpp builtin/accounts/client_lua/accounts.lua
 # [SERVE_UPDATE_SMOOTH]: util/serve_latest_release.sh with floorplanner and
 # vanilla, fed "releases" made from this tree (its binaries, each with an
 # apps/ of its own) from a local list in place of GitHub's. A user
@@ -17,6 +17,14 @@
 # floorplanner's Starport listing says updating; the restart comes 60 s
 # after that, and the listing stops saying it. t4 waits while a client is
 # on and goes once it leaves.
+# [SERVE_UPDATE_ADMIN]: t2 ready is in both servers' update_ready and told
+# to the admin on ("Buildat t2 is ready: Update now in the Server window").
+# Then the script again, floorplanner alone (UPDATE_MAX_WAIT 8 s,
+# UPDATE_WARNING 3 s), an admin on throughout: quiet_or_manual set by the
+# admin's request is not forced past the wait; Update now clicked in the
+# Server window's Updates page (screenshots) is taken within a pass, warned
+# and restarted; at_once warns as t6 is ready and restarts with the player
+# on; an update_policy that is a link is not read (t7 forced by default).
 # Not checked: a real release archive (each version's own cache: here the
 # checks' cache is shared, so t2's floorplanner is changed to make its
 # compile real).
@@ -142,7 +150,7 @@ text $FP
 delay 300
 click Button "Join"
 wait_log 30000 Entered the plan p1
-wait_log 300000 Notice from the server
+wait_log 300000 Notice from the server: The server updates
 delay 500
 screenshot $t/warned.png
 wait_log 300000 leave: The server is restarting
@@ -205,6 +213,15 @@ from=$(wc -l < "$t/serve.log")
 rel t2 "// t2"
 until_log "$t/serve.log" "buildat-t2-linux-x86_64-web-precompiled is ready" 120 $spid ||
 	fail "t2 not ready ($t/serve.log)"
+# [SERVE_UPDATE_ADMIN] Said in each server's update_ready, and told to the
+# admin on (both clients are adm), as the server looks once a second
+until_log "$t/u1/apps/floorplanner/update_ready" "^Buildat t2$" 5 &&
+	until_log "$t/u2/apps/vanilla/update_ready" "^Buildat t2$" 5 ||
+	fail "update_ready does not say Buildat t2"
+until_log "$t/c1.log" "Notice from the server: Buildat t2 is ready: Update now in the Server window" 5 &&
+	until_log "$t/web/page.log" "Notice from the server: Buildat t2 is ready" 5 ||
+	fail "the admins were not told t2 is ready ($t/c1.log, $t/web/page.log)"
+echo "ok: t2 ready in update_ready, and the admin on told so"
 until_log "$t/c1.log" "Notice from the server: The server updates to t2 in 60 s" 70 ||
 	fail "the native client not warned ($t/c1.log)"
 warned=$(date +%s)
@@ -238,6 +255,7 @@ echo "$s" | grep -q "\[floorplanner:$FP\] .*STATUS Compiling\|\[vanilla:$VA\] .*
 	fail "a start on t2 compiled again ($t/serve.log)"
 echo "ok: both compiled before either stopped; one at a time; the starts compiled nothing"
 [ -e "$t/u1/apps/floorplanner/shutdown_reason" ] && fail "shutdown_reason left behind"
+[ -e "$t/u1/apps/floorplanner/update_ready" ] && fail "update_ready left behind"
 grep -aq "extensio: reconnect: joined" "$t/c1.log" &&
 	[ "$(grep -ac "floorpla: Entered the plan p1" "$t/c1.log")" -ge 2 ] ||
 	fail "the native client was not back in p1 ($t/c1.log)"
@@ -316,4 +334,133 @@ tail -n +"$from" "$t/serve.log" | grep -q "stopping floorplanner" ||
 	fail "t4 did not go once the client left ($t/serve.log)"
 tail -n +"$from" "$t/serve.log" | grep -q "warning" && fail "warned with nobody on"
 echo "ok: t4 waited while a client was on, and went once it left"
+
+# [SERVE_UPDATE_ADMIN] The script again, floorplanner alone, with a short
+# default wait and warning: each Updates setting with a client on
+kill -- -"$spid"; wait "$spid" 2>/dev/null
+until_log "$t/serve.log" "\] stopped" 30 || fail "the script did not stop ($t/serve.log)"
+setsid env BUILDAT_SERVE_DIR="$t/serve" POLL_SECONDS=5 UPDATE_MAX_WAIT=8 \
+	UPDATE_WARNING=3 RELEASES_URL="http://127.0.0.1:$HP/releases.json" \
+	util/serve_latest_release.sh floorplanner $FP "$t/u1" > "$t/serve2.log" 2>&1 &
+spid=$!
+pids+=($spid)
+until_count() { # file pattern count seconds
+	local n
+	for n in $(seq $(($4 * 5))); do
+		[ "$(grep -ac "$2" "$1" 2>/dev/null)" -ge "$3" ] && return 0
+		sleep 0.2
+	done
+	return 1
+}
+until_log "$t/serve2.log" "\[floorplanner:$FP\] .*Listening at" 120 $spid ||
+	fail "floorplanner did not start again ($t/serve2.log)"
+# An admin who stays on, through the restarts, sets "When nobody is on, or by
+# Update now" from the admin script (the Updates page's request)
+cat > "$t/c3" <<C
+expect_error Disconnected from server: The server is restarting
+wait_log_any 30000 Join a Buildat server: shown
+click LineEdit "29500"
+delay 300
+keypress End
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+keypress Backspace
+text $FP
+delay 300
+click Button "Join"
+# on until the shell kills it
+delay 600000
+C
+mkdir -p "$t/cl3"
+BUILDAT_FP_NAME=adm BUILDAT_FP_PASSWORD=adminpass12 BUILDAT_FP_PLAN=p1 \
+	BUILDAT_FP_ADMIN="setting update_policy quiet_or_manual" \
+	setsid timeout 600 Build/bin/buildat -o launch_ui=launch_menu -D "$t/cl3" \
+	-w 1000x700 -l 3 -o sound_mute=1 -a extension/launch_menu/connect \
+	-c @"$t/c3" > "$t/c3.log" 2>&1 &
+c3=$!
+pids+=($c3)
+until_log "$t/c3.log" "admin script: done" 60 $c3 || fail "the admin's setting ($t/c3.log)"
+[ "$(cat "$t/u1/apps/floorplanner/update_policy")" = quiet_or_manual ] ||
+	fail "update_policy is not quiet_or_manual"
+from=$(wc -l < "$t/serve2.log")
+rel t5
+until_log "$t/serve2.log" "buildat-t5-linux-x86_64-web-precompiled is ready" 120 $spid ||
+	fail "t5 not ready ($t/serve2.log)"
+until_log "$t/c3.log" "Notice from the server: Buildat t5 is ready: Update now in the Server window" 10 ||
+	fail "the admin was not told t5 is ready ($t/c3.log)"
+# Past UPDATE_MAX_WAIT (8 s), which the setting does not force
+until_log "$t/serve2.log" "UPDATE_MAX_WAIT is over" 30 $spid || fail "no wait's end said ($t/serve2.log)"
+tail -n +"$from" "$t/serve2.log" | grep -q "warning\|stopping" &&
+	fail "forced at UPDATE_MAX_WAIT with the setting quiet_or_manual ($t/serve2.log)"
+echo "ok: quiet_or_manual set from the Updates page's request; t5 not forced at UPDATE_MAX_WAIT"
+
+# Update now in the Server window: the login's ntfy question opens it
+cat > "$t/c4" <<C
+expect_error Disconnected from server: The server is restarting
+wait_log_any 30000 accounts: ntfy asked
+wait_log_any 10000 server window: the page ntfy
+wait_log_any 10000 updates: ready Buildat t5
+wait_log_any 10000 Health, Updates
+delay 500
+click Button "Updates*"
+wait_log 5000 server window: the page updates
+delay 500
+screenshot $t/updates_page.png
+click Button "Update now"
+wait_log 10000 updates: ready Buildat t5, policy quiet_or_manual, asked true
+delay 500
+screenshot $t/updates_asked.png
+quit
+C
+mkdir -p "$t/cl4"
+BUILDAT_FP_NAME=adm BUILDAT_FP_PASSWORD=adminpass12 setsid timeout 120 \
+	Build/bin/buildat -D "$t/cl4" -w 1000x700 -l 3 -o sound_mute=1 \
+	-s 127.0.0.1:$FP -c @"$t/c4" > "$t/c4.log" 2>&1 &
+c4=$!
+pids+=($c4)
+until_log "$t/c4.log" "asked true" 60 $c4 || fail "Update now in the Server window ($t/c4.log)"
+asked=$(date +%s)
+until_log "$t/serve2.log" "floorplanner on port $FP: its admin asked to update now" 10 ||
+	fail "Update now not taken ($t/serve2.log)"
+[ $(($(date +%s) - asked)) -le 6 ] || fail "Update now taken $(($(date +%s) - asked)) s after"
+until_log "$t/serve2.log" "warning floorplanner on port $FP: updating to t5 in 3 s" 10 ||
+	fail "no warning after Update now ($t/serve2.log)"
+warned=$(date +%s)
+until_log "$t/serve2.log" "stopping floorplanner" 15 || fail "no restart after Update now"
+[ $(($(date +%s) - warned)) -ge 2 ] || fail "restarted before the warning's 3 s"
+until_log "$t/c3.log" "Notice from the server: The server updates to t5 in 3 s" 1 ||
+	fail "the player on was not warned ($t/c3.log)"
+wait "$c4" || fail "the Server window drive ($t/c4.log)"
+echo "ok: Update now in the Server window taken within a pass, warned, restarted"
+
+# At once (the file as the page writes it): warned as soon as it is ready
+until_count "$t/c3.log" "Entered the plan p1" 2 60 || fail "the player did not rejoin ($t/c3.log)"
+printf 'at_once\n' > "$t/u1/apps/floorplanner/update_policy"
+from=$(wc -l < "$t/serve2.log")
+rel t6
+until_log "$t/serve2.log" "buildat-t6-linux-x86_64-web-precompiled is ready" 120 $spid ||
+	fail "t6 not ready ($t/serve2.log)"
+until_log "$t/serve2.log" "warning floorplanner on port $FP: updating to t6 in 3 s" 6 ||
+	fail "At once did not warn at once ($t/serve2.log)"
+until_count "$t/serve2.log" "updating with 1 server(s) still in use" 2 15 ||
+	fail "At once did not restart with the player on ($t/serve2.log)"
+grep -aq "Buildat t6 is ready" "$t/c3.log" && fail "told Update now under At once"
+echo "ok: At once warned as t6 was ready and restarted with the player on"
+
+# The setting through a link the game put there is not read: the default,
+# forced at UPDATE_MAX_WAIT
+until_count "$t/c3.log" "Entered the plan p1" 3 60 || fail "the player did not rejoin for t7"
+printf 'quiet_or_manual\n' > "$t/policy_elsewhere"
+ln -sf "$t/policy_elsewhere" "$t/u1/apps/floorplanner/update_policy"
+from=$(wc -l < "$t/serve2.log")
+rel t7
+until_log "$t/serve2.log" "buildat-t7-linux-x86_64-web-precompiled is ready" 120 $spid ||
+	fail "t7 not ready ($t/serve2.log)"
+until_log "$t/serve2.log" "updating to t7 in 3 s" 15 ||
+	fail "a linked update_policy was followed ($t/serve2.log)"
+tail -n +"$from" "$t/serve2.log" | grep -q "UPDATE_MAX_WAIT is over" &&
+	fail "a linked update_policy was followed ($t/serve2.log)"
+echo "ok: an update_policy that is a link is not read"
 echo "PASS: every step above held"
