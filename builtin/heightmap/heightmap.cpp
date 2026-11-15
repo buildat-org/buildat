@@ -84,13 +84,16 @@ struct Map: public Instance
 			const Size &size):
 		m_module(module), m_server(server), m_scene(scene), m_size(size)
 	{
-		if(size.chunks_x < 1 || size.chunks_z < 1 || size.chunk_size < 2 ||
-				size.chunk_size % 64 != 0 || size.cell_size <= 0 ||
+		const int cs = size.chunk_size;
+		if(size.chunks_x < 1 || size.chunks_z < 1 || cs < 4 ||
+				(cs % 64 != 0 && (cs > 64 || (cs & (cs - 1)) != 0)) ||
+				size.cell_size <= 0 ||
 				size.chunks_x * size.chunk_size > 8192 ||
 				size.chunks_z * size.chunk_size > 8192 ||
 				size.materials < 1 || size.materials > MAX_MATERIALS)
 			throw Exception("heightmap: a size of whole chunks, chunk_size a"
-					" multiple of 64, 8192 samples a side at most, a cell"
+					" multiple of 64 or a power of two 4...32, 8192 samples a"
+					" side at most, a cell"
 					" over 0, 1 to "+itos(MAX_MATERIALS)+" materials");
 		m_sx = size.chunks_x * size.chunk_size;
 		m_sz = size.chunks_z * size.chunk_size;

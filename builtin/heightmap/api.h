@@ -68,7 +68,9 @@ namespace heightmap
 		int chunks_x = 16;
 		int chunks_z = 16;
 		// Samples a chunk side; a multiple of the client's Terrain patch
-		// (64), so a chunk's change rebuilds whole patches
+		// (64), so a chunk's change rebuilds whole patches, or
+		// ([KIT_NO_WORLD]) a power of two 4...32, the patch that size (a
+		// narrow map: 192x8 is 24 chunks of 8)
 		int chunk_size = 64;
 		float cell_size = 1.0f;
 		float base_y = 0.0f;

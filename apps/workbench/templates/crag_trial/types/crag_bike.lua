@@ -1,7 +1,7 @@
 -- Crag Trial's bike: a movement (kit/controls' movement) for the side view,
 -- stepped in the plane (x right, y up). A frame with an angle and two wheels
 -- on springs under it, gravity; the wheels and the rider's head meet the
--- voxels and the polygons (w:circle). The keys: W (Gas) the back wheel's
+-- ground (a heightmap's or voxels) and the polygons (w:circle). The keys: W (Gas) the back wheel's
 -- motor, S (Brake) both wheels held, A and D lean back and forward (the
 -- frame turned), Space (Turn) faces the other way. The rider's head on
 -- anything is a crash: the event "crash" (its output), the bike still a

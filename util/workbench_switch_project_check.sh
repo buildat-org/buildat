@@ -12,8 +12,9 @@
 #      main:projects sent anyway refused.
 #   3. kitboss again: Projects... lists alpha (running); New "beta":
 #      both clients sent off with the switch's goodbye, beta starts.
-#   4. kitbob joins again: in beta. kitboss: beta's own (1 entity, no
-#      stone floor at the column), then alpha's Play switches back.
+#   4. kitbob joins again: in beta. kitboss: beta's own (2 entities: its
+#      scene and its World, [KIT_NO_WORLD]; no stone floor at the column),
+#      then alpha's Play switches back.
 #   5. kitboss in alpha: its 2 entities and the dug cell kept; Close
 #      project: no project runs, and the next join gets Manage.
 # Screenshots: $t/menu_admin.png, menu_bob.png, list_running.png,
@@ -187,12 +188,12 @@ wait_log 60000 Disconnected from server: The server switches to the project alph
 quit
 EOF
 client boss3 BUILDAT_JOIN_NAME=kitboss || fail "beta, and the switch back ($t/boss3.log)"
-grep -aq "kit editor: state: 1 entities" "$t/boss3.log" ||
+grep -aq "kit editor: state: 2 entities" "$t/boss3.log" ||
 	fail "beta not beta's own: $(grep -ao 'kit editor: state: [0-9]* entities' "$t/boss3.log" | head -1) ($t/boss3.log)"
 b=$(column "$t/boss3.log" 1)
 [ -n "$b" ] && [ "$b" != "$a1" ] || fail "beta's column is alpha's: \"$b\" ($t/boss3.log)"
 wait_for_log "$s" 'workbench: switched to "alpha"' 120 || fail "alpha did not start again ($s)"
-echo "ok: kitbob followed into beta; beta's own (1 entity, column $b); back to alpha"
+echo "ok: kitbob followed into beta; beta's own (2 entities, column $b); back to alpha"
 
 # 5.
 cat > "$t/boss4.cmds" <<EOF

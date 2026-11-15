@@ -1,0 +1,7 @@
+{
+	"entities": [
+		{"id": 2, "name": "world", "kind": "scene"},
+		{"id": 3, "parent": 2, "name": "World", "components": [{"type": "kit/terrain"}]}
+	],
+	"next_id": 4
+}

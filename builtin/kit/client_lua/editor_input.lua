@@ -862,6 +862,15 @@ function M.set_tool(tool)
 	if S.tool == tool then
 		return
 	end
+	-- [KIT_NO_WORLD] no ground: nothing for the voxel and terrain tools
+	local tr = E.state and E.state.terrain
+	if (tool == "terrain" or tool == "voxels") and tr and tr.surface == "none" then
+		E.status = "No voxels in this scene: its kit/terrain's surface is none " ..
+				"(or it has no kit/terrain)"
+		log:info("kit editor: the " .. tool .. " tool: " .. E.status)
+		ui_utils.show_notification(E.status, 4)
+		return refresh()
+	end
 	-- [KIT_PREFAB_VOXELS] the Box tool's box goes with it; the touch mode's
 	-- comes back with the tool (the sweep of 2026-11-12: a paste from the
 	-- Box pane lost it)

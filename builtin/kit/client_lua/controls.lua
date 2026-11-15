@@ -294,7 +294,8 @@ local function world(skip)
 		local v = voxelworld.get_static_voxel(magic.Vector3(i, j, k))
 		local id = reg:id_of(v)
 		if id == 0 then
-			return MV.UNKNOWN
+			-- ([KIT_NO_WORLD] no ground: air)
+			return not (C.ctl and C.ctl.void) and MV.UNKNOWN or nil
 		end
 		return voxel_info(id, v)
 	end, boxes = boxes, turned = turned, ground = ground,
@@ -364,7 +365,7 @@ local function floor_ready()
 	if not p then
 		return false
 	end
-	if C.ctl and C.ctl.hm and heightmap.terrain then
+	if C.ctl and (C.ctl.hm and heightmap.terrain or C.ctl.void) then
 		return true
 	end
 	-- [KIT_VEHICLE_MOVEMENTS] put on a deck (out of a seat): the deck's boxes are there

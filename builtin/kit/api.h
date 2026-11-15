@@ -1454,6 +1454,8 @@ namespace interface
 // exist, not the World's.
 namespace kit
 {
+	// [KIT_NO_WORLD] A scene without kit/terrain has none (surface "none":
+	// no voxels, no heightmap), unless Host::world_default.
 	// The World's voxelworld region, in sections (voxelworld's, WORLD_SECTION
 	// voxels a side): what an infinite world may reach, -16384...16383
 	// each way, -128...255 up
@@ -1551,6 +1553,11 @@ namespace kit
 		// [KIT] stage 4e: the scene (a name in `scenes`) the World makes,
 		// "" for none (kit/terrain not in the palette)
 		ss_ world_scene;
+		// [KIT_NO_WORLD] A scene with no kit/terrain has no World (no voxels,
+		// no heightmap: its surface "none"); true: the World type's defaults
+		// (`defaults`' among them) are its World, as before (Workbench's
+		// projects that neither New nor a template made: the checks')
+		bool world_default = false;
 		// The material set (JSON, terrain.h's format) binding the roles to
 		// the app's voxels; "": Kit's own (materials.json)
 		ss_ materials;

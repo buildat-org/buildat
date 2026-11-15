@@ -1,7 +1,7 @@
 {
 	"entities": [
 		{"id": 2, "name": "world", "kind": "scene"},
-		{"id": 3, "parent": 2, "name": "the ground", "components": [{"type": "kit/terrain", "params": {"generator": "flat", "surface": "voxels", "biome": "rock", "decorations": false, "border": "void", "width": 192, "depth": 32, "dig": "none", "place": "none"}}]},
+		{"id": 3, "parent": 2, "name": "the ground", "components": [{"type": "kit/terrain", "params": {"generator": "flat", "surface": "heightmap", "biome": "rock", "decorations": false, "border": "void", "width": 192, "depth": 16, "dig": "none", "place": "none"}}]},
 		{"id": 4, "parent": 1, "name": "game rules", "components": [{"type": "kit/game_rules", "params": {"peaceful": true, "slots": 0, "hotbar": 0, "show_health": false}}]},
 		{"id": 5, "parent": 1, "name": "controls: the side view", "components": [{"type": "kit/controls", "params": {"plane": "vertical", "camera": "side", "distance": 11, "side_clip": 3, "movement": "local/crag_bike"}}]},
 		{"id": 6, "parent": 1, "name": "the bike", "components": [{"type": "local/crag_bike", "links": [{"output": "crash", "to": 7, "input": "crash"}]}]},

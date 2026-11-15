@@ -4,8 +4,11 @@
 // [KIT] Workbench: the blank app that only hosts Kit and its editor. The
 // world is Kit's World ([KIT] stage 4e, kit/terrain on the app root): by
 // default a gentle grassland heightmap 64x64 for a project New made
-// ([WB_NEW_PROJECT_GROUND]), a flat stone floor 64x64 round the origin,
-// its top at y 0, for others (Kit's material set, biome "rock"), the
+// ([WB_NEW_PROJECT_GROUND]; [KIT_NO_WORLD] its kit/terrain an entity of
+// composition_new.json's), a flat stone floor 64x64 round the origin,
+// its top at y 0, for others (Kit's material set, biome "rock"; where a
+// scene has no kit/terrain only in a project neither New nor a template
+// made, Host::world_default), the
 // players walking on it (Kit's
 // controls, [KIT] stage 4h: kit/controls and kit/walker on the app root
 // set them); its generator, size and surface
@@ -674,9 +677,20 @@ struct Module: public interface::Module
 		// side), the player at its middle (world_spawn); before, stone
 		const char *stone = getenv("BUILDAT_WORKBENCH_STONE");
 		ss_ ground;
-		if(fresh && tmpl == m_templates.end() && !(stone && stone[0] == '1'))
+		if(fresh && tmpl == m_templates.end() && !(stone && stone[0] == '1')){
 			m_save->store("workbench")->set("ground", "heightmap");
+			// [KIT_NO_WORLD] its World an entity of its own (kit/terrain, at
+			// the defaults below): a scene without one has no ground
+			h.composition_path = m_server->get_module_path(MODULE)+
+					"/composition_new.json";
+		}
+		if(fresh && tmpl != m_templates.end())
+			m_save->store("workbench")->set("ground", "template");
 		m_save->store("workbench")->get("ground", ground);
+		// [KIT_NO_WORLD] A project neither New nor a template made (the
+		// checks' BUILDAT_WORKBENCH_PROJECT, BUILDAT_WORKBENCH_STONE's): the
+		// stone floor where a scene has no kit/terrain, as before
+		h.world_default = ground.empty();
 		h.world_scene = "world";
 		h.defaults = ground == "heightmap" ?
 				"{\"kit/terrain\": {\"surface\": \"heightmap\", \"biome\": "

@@ -5162,8 +5162,8 @@ end
 M.prefab_dialog = prefab_dialog
 
 -- [KIT_SCENES] The scene edited switched (the server takes the builder
--- there), and a new one made: its World the current one's copied, or a
--- blank one (the World's defaults)
+-- there), and a new one made: its World the current one's copied, or none
+-- ([KIT_NO_WORLD]: no kit/terrain, no ground)
 function M.switch_scene(name)
 	log:info("kit editor: to the scene " .. tostring(name))
 	send({op = "scene", name = name})
@@ -5171,7 +5171,7 @@ end
 
 function M.new_scene(name, copy)
 	log:info("kit editor: a new scene " .. tostring(name) ..
-			(copy and ", its World copied" or ", a blank World"))
+			(copy and ", its World copied" or ", no World"))
 	send({op = "new_scene", name = name, copy = copy and true or false})
 end
 
@@ -5186,7 +5186,7 @@ function M.scene_dialog()
 		E.scene_name = s
 	end):SetName("scene name")
 	button(row(w), E.scene_copy and "World: a copy of " .. current_scene() ..
-			"'s" or "World: a blank one", function()
+			"'s" or "World: none (no ground)", function()
 		E.scene_copy = not E.scene_copy
 		M.scene_dialog()
 	end, E.scene_copy)

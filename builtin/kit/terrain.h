@@ -101,9 +101,13 @@
 // in Kit's row "world". **A heightmap surface**: builtin/heightmap's map,
 // finite, on the voxels' finite area ([KIT_HM_ORIGIN] its origin x0(),
 // z0(); a World saved before origins at the world's origin, its row's
-// "hm_anchor" "corner") (a side a multiple of 64), the same heights, its layers the biome's
+// "hm_anchor" "corner") (its sides whole chunks: of 64, or [KIT_NO_WORLD] a
+// side under 64 the next power of two, 4 at least, both sides' chunk), the
+// same heights, its layers the biome's
 // top, stone and riverbed's; no water on it yet; its decorations voxel
-// objects (kit.cpp).
+// objects (kit.cpp). [KIT_NO_WORLD] **No surface** ("none"; a scene with no
+// kit/terrain): no ground, nothing generated or loaded, the voxel tools
+// refused; a body meets nothing where no voxel is (as over a heightmap).
 //
 // Changing the parameters generates again every section nobody wrote
 // (voxelworld::set_writes_alter: any write but the generator's); the
@@ -949,9 +953,18 @@ struct Params
 		caves = j.get("caves").is_true();
 		decorations = !j.get("decorations").is_boolean() ||
 				j.get("decorations").is_true();
+		// [KIT_NO_WORLD] No ground at all: the empty generator's (nothing
+		// generated), no sea, border, caves or decorations
+		if(none()){
+			generator = "empty";
+			border = "void";
+			sea_level = INT_MIN / 2;
+			caves = decorations = false;
+		}
 	}
 	bool finite() const { return size != "infinite"; }
 	bool heightmap() const { return surface == "heightmap"; }
+	bool none() const { return surface == "none"; }
 	bool with_caves() const { return caves; }
 	bool with_decorations() const { return decorations; }
 	int x0() const { return -width / 2; }
