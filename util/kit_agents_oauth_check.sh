@@ -7,7 +7,8 @@
 # reaches Kit's MCP endpoint by its URL alone. A local Starport and a
 # Workbench listed on it (IDs taken), boss its admin by first_admin; reader,
 # a Starport ID, joins once from a native client (headless weston) so that
-# it has an account there. A Python client with a loopback redirect, and
+# it has an account there; carl, a builder with a password and no admin,
+# made by boss's admin script. A Python client with a loopback redirect, and
 # headless Chrome (Playwright) where a browser would be, a phone's size:
 #   1. discovery: the 401's resource_metadata, the resource's metadata at
 #      both paths, the server's; the origin by Host and a trusted proxy's
@@ -18,14 +19,20 @@
 #   3. /authorize's refusals: an unknown client and an unregistered
 #      redirect stay on the page; no PKCE S256, another resource, another
 #      response type too, with a link back with the error (no redirect);
-#   4. boss's password on the page (Chrome): the code back with its state
+#   4. boss's password on the page (Chrome), then the admin's step
+#      ([KIT_AGENTS_OAUTH_ADMIN_BOX]): the Host's box unticked, the text
+#      following it ticked and unticked; left unticked (the tool asked for
+#      admin): builder, list_projects refused; the code back with its state
 #      and iss; a wrong verifier, redirect_uri, resource, client refused;
 #      the tokens, MCP initialize and tools/list by the access token; the
 #      code again: refused, and what it gave revoked;
-#   5. the page's forms by Python: another origin's post refused; an Admin
-#      grant, its refresh token rotated (the old access token gone), the
+#   5. the page's forms by Python: another origin's post refused; the box
+#      ticked (the tool asked for builder): an Admin grant, list_projects
+#      answered, its refresh token rotated (the old access token gone), the
 #      one before used again ending the grant; Deny back with access_denied;
-#      one two rotations old ending a grant too; a rebound name's Host
+#      a box's value on the password's form not the step's: builder; one two
+#      rotations old ending a grant too; carl (no admin): no step, back at
+#      once, host=1 posted giving builder; a rebound name's Host
 #      (evil.example, its own X-Forwarded-For each time) refused before
 #      any password; a network's 31st page in 10 minutes refused while
 #      another's sign-in goes on; tokenless MCP probes not counted against
@@ -45,7 +52,8 @@
 #      server's log.
 # Screenshots, kept with KEEP_TMP=1: $t/authorize.png (the page on the
 # phone: Server login or Starport ID login), $t/authorize_local.png (the
-# name and password after Server login), $t/authorize_id_window.png (the
+# name and password after Server login), $t/authorize_host.png (boss's
+# step, the Host's box ticked), $t/authorize_id_window.png (the
 # Starport's window),
 # $t/tokens.png (My account's list with the grant)
 #   util/kit_agents_oauth_check.sh
@@ -133,7 +141,7 @@ cat > "$t/authorize.js" <<'JS'
 // Starport's window; done when it goes back to the tool's redirect
 "use strict";
 const pw = require("playwright");
-const [mode, url, redirect, shot, name, password] = process.argv.slice(2);
+const [mode, url, redirect, shot, name, password, host] = process.argv.slice(2);
 (async () => {
 	const browser = await pw.chromium.launch({executablePath: process.env.CHROME,
 		headless: true});
@@ -171,6 +179,23 @@ const [mode, url, redirect, shot, name, password] = process.argv.slice(2);
 		await page.fill("#pw input[name=name]", name);
 		await page.fill("#pw input[name=password]", password);
 		await page.tap("#pw button[value=allow]");
+		// An admin's step: the Host's box, unticked, the text following it
+		if(host){
+			await page.waitForSelector("#host");
+			const says = () => page.textContent("#rights");
+			if(await page.isChecked("#host") || !/builder rights/.test(await says()))
+				problems.push("the box not unticked first with the builder's text");
+			await page.tap("#host");
+			if(!/the Host's actions included/.test(await says()))
+				problems.push("the text not the ticked box's");
+			await page.screenshot({path: shot.replace(/\.png$/, "_host.png")});
+			if(host === "untick"){
+				await page.tap("#host");
+				if(!/builder rights/.test(await says()))
+					problems.push("the text not back at the builder's");
+			}
+			await page.tap("#pw button[value=allow]");
+		}
 	} else {
 		const opened = ctx.waitForEvent("page");
 		await page.tap("button.sp");
@@ -221,7 +246,7 @@ def ok(what):
     print("ok:", what, flush=True)
 st_path = T + "/oauth_state.json"
 state = json.load(open(st_path)) if os.path.exists(st_path) else \
-        {"registers": 0, "secrets": ["checkpass12", "secret1"]}
+        {"registers": 0, "secrets": ["checkpass12", "secret1", "carlpass123"]}
 def keep(*s):
     state["secrets"].extend(s)
 # The tool's redirect: a loopback listener, as a desktop tool's
@@ -332,6 +357,15 @@ def mcp_refused(tok):
     s, b, h = mcp(tok, "tools/list", {}, 3)
     assert s == 401 and 'error="invalid_token"' in h["WWW-Authenticate"], \
             (s, b, dict(h))
+# list_projects, one of the Host's actions: answered, or refused as an
+# admin's; its text
+def projects(tok, answered):
+    s, b, h = mcp(tok, "tools/call", {"name": "list_projects", "arguments": {}}, 6)
+    assert s == 200, (s, b)
+    r = json.loads(b)["result"]
+    text = r["content"][0]["text"]
+    assert r["isError"] != answered and (answered or "an admin's" in text), text
+    return text
 
 if phase == "a":
     # 1. Discovery, as MCP's spec has a client do it
@@ -436,11 +470,13 @@ if phase == "a":
             "the page; no S256, another resource or response type too, with "
             "a link back, no redirect")
 
-    # 4. boss's password on the page, in Chrome
+    # 4. boss's password on the page, in Chrome; boss, an admin, then has
+    # the Host's box: ticked, its text read, unticked again; builder, the
+    # tool's admin scope not read
     v, ch = pkce()
     st = secrets.token_hex(16)
-    q = browser("password", auth_url(cid, ch, st), T + "/authorize.png", st,
-            "boss", "checkpass12")
+    q = browser("password", auth_url(cid, ch, st, scope="admin"),
+            T + "/authorize.png", st, "boss", "checkpass12", "untick")
     code = {"grant_type": "authorization_code", "code": q["code"],
             "redirect_uri": REDIR, "code_verifier": v, "client_id": cid,
             "resource": MCP}
@@ -453,17 +489,19 @@ if phase == "a":
     s, j = token(code)
     assert s == 200 and j["scope"] == "builder", j
     n = mcp_works(j["access_token"])
+    projects(j["access_token"], False)
     refused(code, "invalid_grant")
     mcp_refused(j["access_token"])
-    ok("boss's password in Chrome: the code; a wrong verifier, redirect_uri, "
-            "resource, client refused; MCP by the token (%d tools); the code "
-            "again revoking what it gave" % n)
+    ok("boss's password in Chrome, the Host's box unticked (the tool asked "
+            "for admin): builder, list_projects refused; the code; a wrong "
+            "verifier, redirect_uri, resource, client refused; MCP by the "
+            "token (%d tools); the code again revoking what it gave" % n)
 
     # 5. The page's forms as a browser posts them
     v, ch = pkce()
-    s, b, h = req("GET", auth_url(cid, ch, "s2", scope="admin"))
+    s, b, h = req("GET", auth_url(cid, ch, "s2"))
     assert s == 200 and "Connect Check &lt;tool&gt;?" in b and \
-            "<tool>" not in b, b
+            "<tool>" not in b and 'name="host"' not in b, b
     csp = h["Content-Security-Policy"]
     assert "frame-ancestors 'none'" in csp and h["X-Frame-Options"] == "DENY", \
             dict(h)
@@ -476,6 +514,10 @@ if phase == "a":
     s, b, h = post_form(login, "https://evil.example")
     assert s == 400 and "Location" not in h, (s, b)
     s, b, h = post_form(login)
+    # The admin's step, the box ticked: the tool asked for builder
+    assert s == 200 and 'name="host"' in b and "Signed in as <b>boss</b>" in b, \
+            (s, b)
+    s, b, h = post_form({"rid": rid, "action": "allow", "host": "1"})
     assert s == 303, (s, b)
     q = back(h["Location"], "s2")
     s, j = token({"grant_type": "authorization_code", "code": q["code"],
@@ -483,6 +525,8 @@ if phase == "a":
     assert s == 200 and j["scope"] == "admin", j
     a1, r1 = j["access_token"], j["refresh_token"]
     mcp_works(a1)
+    text = projects(a1, True)
+    assert '"world"' in text, text
     s, j = token({"grant_type": "refresh_token", "refresh_token": r1,
             "client_id": cid, "resource": MCP})
     assert s == 200 and j["scope"] == "admin", j
@@ -505,23 +549,29 @@ if phase == "a":
             (s, b, dict(h))
     s, b, h = post_form(dict(login, rid=rid))
     assert s == 400 and "has ended" in b, (s, b)
-    ok("the page's forms: another origin's refused; an Admin grant, its "
-            "refresh token rotated, the one before again ending it; Deny")
+    ok("the page's forms: another origin's refused; the admin's step, the "
+            "box ticked: an Admin grant, list_projects listed; its refresh "
+            "token rotated, the one before again ending it; Deny")
 
     # A thief of R1 rotates twice: the tool's R1, two behind, ends the grant
     def sign_in(st, hdr={}, origin=B):
         v, ch = pkce()
         s, b, h = req("GET", auth_url(cid, ch, st), headers=hdr)
         assert s == 200, (s, b)
-        s, b, h = req("POST", B + "/api/v1/oauth/authorize", {"rid": rid_of(b),
-                "name": "boss", "password": "checkpass12", "action": "allow"},
-                dict(hdr, Origin=origin))
+        # (the box's value on the password's form is not the step's)
+        rid = rid_of(b)
+        s, b, h = req("POST", B + "/api/v1/oauth/authorize", {"rid": rid,
+                "name": "boss", "password": "checkpass12", "action": "allow",
+                "host": "1"}, dict(hdr, Origin=origin))
+        assert s == 200 and 'name="host"' in b, (s, b)
+        s, b, h = req("POST", B + "/api/v1/oauth/authorize", {"rid": rid,
+                "action": "allow"}, dict(hdr, Origin=origin))
         assert s == 303, (s, b)
         return v, h["Location"]
     v, loc = sign_in("s5")
     s, j = token({"grant_type": "authorization_code", "code": back(loc, "s5")["code"],
             "redirect_uri": REDIR, "code_verifier": v, "client_id": cid})
-    assert s == 200, j
+    assert s == 200 and j["scope"] == "builder", j
     r1 = j["refresh_token"]
     for i in range(2):
         s, j = token({"grant_type": "refresh_token", "refresh_token":
@@ -535,6 +585,23 @@ if phase == "a":
     refused({"grant_type": "refresh_token", "refresh_token": r3,
             "client_id": cid}, "invalid_grant")
     ok("a refresh token two rotations old ends the grant")
+
+    # carl, no admin, never has the box: back at once, and the box's value
+    # posted (the tool asking for admin too) gives builder
+    v, ch = pkce()
+    s, b, h = req("GET", auth_url(cid, ch, "s8", scope="admin"))
+    assert s == 200 and 'name="host"' not in b, (s, b)
+    s, b, h = post_form({"rid": rid_of(b), "name": "carl", "password":
+            "carlpass123", "action": "allow", "host": "1"})
+    assert s == 303, (s, b)
+    s, j = token({"grant_type": "authorization_code", "code":
+            back(h["Location"], "s8")["code"], "redirect_uri": REDIR,
+            "code_verifier": v, "client_id": cid})
+    assert s == 200 and j["scope"] == "builder", j
+    mcp_works(j["access_token"])
+    projects(j["access_token"], False)
+    ok("carl (no admin): no box, back at once; host=1 posted gives builder, "
+            "list_projects refused")
 
     # DNS rebinding: a page of evil.example rebound to 127.0.0.1, its own
     # origin to the browser, posting with an X-Forwarded-For of its choice
@@ -660,9 +727,13 @@ else:
     s, b, h = req("GET", auth_url(pcid, ch, "s9", resource=W + "/api/v1/mcp"),
             headers=px)
     assert s == 200 and "<b>wb.example.org</b>" in b, (s, b)
-    s, b, h = req("POST", B + "/api/v1/oauth/authorize", {"rid": rid_of(b),
+    rid = rid_of(b)
+    s, b, h = req("POST", B + "/api/v1/oauth/authorize", {"rid": rid,
             "name": "boss", "password": "checkpass12", "action": "allow"},
             dict(px, Origin=W))
+    assert s == 200 and 'name="host"' in b, (s, b)
+    s, b, h = req("POST", B + "/api/v1/oauth/authorize", {"rid": rid,
+            "action": "allow"}, dict(px, Origin=W))
     assert s == 303, (s, b)
     q = {k: x[0] for k, x in urllib.parse.parse_qs(
             urllib.parse.urlparse(h["Location"]).query).items()}
@@ -690,21 +761,26 @@ else:
             len(state["secrets"]))
 json.dump(state, open(st_path, "w"))
 PY
-python3 "$t/oauth.py" a "http://127.0.0.1:$WB" "$t" || fail "the OAuth client ($t/wb.log)"
-
-# 6b. A ban stops a grant: boss bans reader by an admin script, the grant's
-# MCP call and refresh refused and its agent gone; then unbanned
-admin() # <log> <the admin script>
+admin() # <log> <the admin script> [<the result waited for>]
 {
 	mkdir -p "$t/ub"
 	# (not "admin script: done": a second instance of accounts.lua gets
 	# the result in Workbench, and it counts nothing)
-	printf 'wait_log_any 60000 admin result\nquit\n' > "$t/$1.cmds"
+	printf 'wait_log_any 60000 %s\nquit\n' "${3:-admin result}" > "$t/$1.cmds"
 	DISPLAY=$d WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 BUILDAT_JOIN_NAME=boss \
 		BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_ADMIN="$2" timeout 120 \
 		bin/buildat -C "$t/client_cache" -D "$t/ub" -s 127.0.0.1:$WB \
 		-w 800x600 -l 3 -o sound_mute=1 -c @"$t/$1.cmds" > "$t/$1.log" 2>&1
 }
+# carl: a builder with a password, no admin
+admin add1 "add carl carlpass123
+priv carl builder" "admin result: carl is a builder" || fail "boss's add ($t/add1.log)"
+grep -aq "admin result: carl is a builder" "$t/add1.log" ||
+	fail "boss's add: $(grep -a 'admin result\|refused' "$t/add1.log" | head -2)"
+python3 "$t/oauth.py" a "http://127.0.0.1:$WB" "$t" || fail "the OAuth client ($t/wb.log)"
+
+# 6b. A ban stops a grant: boss bans reader by an admin script, the grant's
+# MCP call and refresh refused and its agent gone; then unbanned
 admin ban1 "ban reader" || fail "boss's ban ($t/ban1.log)"
 grep -aq "admin result: reader was banned" "$t/ban1.log" ||
 	fail "boss's ban: $(grep -a 'admin result\|refused' "$t/ban1.log" | head -2)"
@@ -735,4 +811,4 @@ PY
 wait_for_log "$t/wb.log" "Announcing to 0 Starport" 30 ||
 	fail "starport.json not read again ($t/wb.log)"
 python3 "$t/oauth.py" c "http://127.0.0.1:$WB" "$t" || fail "the OAuth client by the Public address ($t/wb.log)"
-echo "PASS: OAuth for Kit's MCP: discovery, registration, the page by a password and by a Starport ID, PKCE, codes once, refresh rotation and reuse, revocation, bans, a rebound name, the Public address and the limits"
+echo "PASS: OAuth for Kit's MCP: discovery, registration, the page by a password and by a Starport ID, an admin's Host box choosing the scope (ticked admin, unticked and a non-admin builder), PKCE, codes once, refresh rotation and reuse, revocation, bans, a rebound name, the Public address and the limits"

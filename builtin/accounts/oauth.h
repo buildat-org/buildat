@@ -316,15 +316,27 @@ static void oauth_self_check()
 // from the Starport by the code, as the web client does, and posted here
 // with the page's form) -- and Cancel. Where the server takes Starport IDs
 // the page first asks which (user, 2026-11-15: "Server login" and
-// "Starport ID login", only then the name and password). Plain forms; the
-// script is that choice and the Starport's part. Phone-sized first.
+// "Starport ID login", only then the name and password). An admin then
+// has a step of its own, the Host's actions' box ([KIT_AGENTS_OAUTH_ADMIN_BOX]),
+// the text above it following the box. Plain forms; the script is that
+// choice, the box's text and the Starport's part. Phone-sized first.
 static const char *oauth_page_css =
 	"body{max-width:34em}input{width:100%;box-sizing:border-box;margin:.2em 0}"
 	"button{min-width:7em;margin:.6em .5em .2em 0;padding:.5em .8em}"
 	"label{display:block;margin:.4em 0}h1{font-size:1.4em}"
-	"form{margin:.4em 0}.wide{width:100%}";
+	"form{margin:.4em 0}.wide{width:100%}.box input{width:auto;margin-right:.5em}";
 static const char *oauth_page_script = R"JS("use strict";
 (function(){
+var hb = document.getElementById("host");
+function rights(){
+	document.getElementById("rights").textContent = hb.checked ?
+		"all your rights, the Host's actions included" :
+		"your builder rights (none of the Host's)";
+}
+if(hb){
+	hb.onchange = rights;
+	rights();
+}
 var c = document.getElementById("choose"), pf = document.getElementById("pw");
 function pick(local){
 	c.hidden = local;
@@ -385,8 +397,9 @@ b.onclick = function(){
 
 struct OAuthPage
 {
-	ss_ client, redirect, scope, server, rid, error;
+	ss_ client, redirect, server, rid, error;
 	ss_ totp_name; // the password was right: its code asked for
+	ss_ admin_name; // signed in, an admin: the Host's box
 	bool off = false; // agent access is off: Deny only
 	bool ended = false; // no sign-in waits: the text only
 	bool by_password = false; // a password tried: its form, not the choice
@@ -416,10 +429,11 @@ static std::pair<ss_, ss_> oauth_page(const OAuthPage &p)
 	if(!p.ended){
 		h += "<h1>Connect "+(p.client.empty() ? ss_("an agent") : html(p.client))+
 				"?</h1>\n<p>"+who+" asks to work on <b>"+html(p.server)+
-				"</b> as your agent: with "+(p.scope == "admin" ?
-				"all your rights, the Host's included if you are the Host" :
-				"your builder rights (none of the Host's)")+", its edits going "
-				"into the live round, logged as your agent's.</p>\n"
+				"</b> as your agent: with "+(p.admin_name.empty() ?
+				ss_("your builder rights (after signing in, an admin may add "
+				"the Host's)") : ss_("<span id=\"rights\">your builder rights "
+				"(none of the Host's)</span>"))+", its edits going into the "
+				"live round, logged as your agent's.</p>\n"
 				"<p class=\"meta\">Allowing it sends you back to <b>"+
 				html(rhost)+"</b>"+(oauth_loopback(rhost) ? ", a program on "
 				"the device you opened this on" : "")+". It is listed on My "
@@ -436,7 +450,8 @@ static std::pair<ss_, ss_> oauth_page(const OAuthPage &p)
 	if(!p.ended && !p.off){
 		// The choice first where a Starport ID signs in too (and back to it
 		// from the name and password); a TOTP code's step has none
-		const bool two = !p.starports.empty() && p.totp_name.empty();
+		const bool two = !p.starports.empty() && p.totp_name.empty() &&
+				p.admin_name.empty();
 		const bool choose = two && !p.by_password;
 		if(two){
 			h += "<div id=\"choose\""+ss_(choose ? "" : " hidden")+"><button "
@@ -456,7 +471,14 @@ static std::pair<ss_, ss_> oauth_page(const OAuthPage &p)
 			h += "</div>\n";
 		}
 		h += action+" id=\"pw\""+ss_(choose ? " hidden" : "")+">"+rid;
-		if(!p.totp_name.empty())
+		if(!p.admin_name.empty())
+			h += "<p>Signed in as <b>"+html(p.admin_name)+"</b>, an admin "
+					"here.</p><label class=\"box\"><input type=\"checkbox\" "
+					"name=\"host\" value=\"1\" id=\"host\">Also allow the Host's "
+					"actions (projects: list, copy, rename...)</label><p "
+					"class=\"meta\">To change it later, connect the tool again."
+					"</p>";
+		else if(!p.totp_name.empty())
 			h += "<p>Signed in as <b>"+html(p.totp_name)+"</b>.</p><label>The "
 					"code from your authenticator app <input name=\"totp\" "
 					"inputmode=\"numeric\" autocomplete=\"one-time-code\" "

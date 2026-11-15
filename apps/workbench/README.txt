@@ -50,15 +50,19 @@ rules: [KIT_AGENTS] in builtin/kit/kit.cpp. The admin turns it off on the
 Accounts page (util/kit_agents_check.sh). export_template answers the
 project's export as text (edits.bin and textures base64); list_projects,
 copy_project and rename_project are Manage's, so an admin's agent with an
-Admin token only, and the running project is not renamed
+Admin token (or a sign-in with the Host's actions allowed) only, and the
+running project is not renamed
 (util/kit_project_export_check.sh).
 
 A tool that signs in by OAuth (claude.ai's or ChatGPT's connectors) needs
 only the URL, https://wb.example.org/api/v1/mcp: it finds the server's
 sign-in by MCP's authorization spec, and its page at /api/v1/oauth/authorize
 takes the account's password (and TOTP code) or a Starport ID the server is
-listed for, then Allow. What the tool gets is an agent token of the account,
-listed and revoked as the others ([KIT_AGENTS_OAUTH] in
+listed for, then Allow. An admin then has a step of its own, a box "Also
+allow the Host's actions (projects: list, copy, rename...)", unticked: the
+grant is Admin with it ticked and Builder without, whatever the tool asked
+for; connecting the tool again chooses again. What the tool gets is an
+agent token of the account, listed and revoked as the others ([KIT_AGENTS_OAUTH] in
 builtin/accounts/accounts.cpp; util/kit_agents_oauth_check.sh). Behind a
 proxy on the same machine (web_trusted_proxies), the sign-in answers only
 under a loopback name, an IP address or the server's Public address
