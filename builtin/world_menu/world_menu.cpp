@@ -20,7 +20,7 @@ namespace world_menu {
 struct Module: public interface::Module, public Interface
 {
 	interface::Server *m_server;
-	Config m_config;
+	Config m_config = Config(); // (copy false until configure())
 	std::vector<Preset> m_presets;
 	bool m_running = false;
 	// The running world's name while a picker has the menu in it
@@ -33,6 +33,8 @@ struct Module: public interface::Module, public Interface
 	std::set<PeerId> m_scripted, m_shown;
 	// What each menu up was sent: list_kind()
 	std::map<PeerId, int> m_kind;
+	// [KIT_PROJECT_EXPORT] Each picker's file for its next create
+	std::map<PeerId, ss_> m_files;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server)
@@ -50,6 +52,8 @@ struct Module: public interface::Module, public Interface
 			{"play", &Module::on_play},
 			{"create", &Module::on_create},
 			{"rename", &Module::on_rename},
+			{"copy", &Module::on_copy},
+			{"file", &Module::on_file},
 			{"delete", &Module::on_delete},
 			{"trash_delete", &Module::on_trash_delete},
 			{"trash_restore", &Module::on_trash_restore},
@@ -122,6 +126,15 @@ struct Module: public interface::Module, public Interface
 		m_new = true;
 	}
 
+	void tell(PeerId peer, const ss_ &note)
+	{
+		if(m_scripted.insert(peer).second)
+			network::send(m_server, peer, "core:run_script",
+					"require(\"buildat/module/world_menu\")");
+		m_shown.insert(peer);
+		send_list(peer, note);
+	}
+
 	void set_running(bool running)
 	{
 		m_running = running;
@@ -139,6 +152,7 @@ struct Module: public interface::Module, public Interface
 		m_scripted.erase(event.info.id);
 		m_shown.erase(event.info.id);
 		m_kind.erase(event.info.id);
+		m_files.erase(event.info.id);
 	}
 
 	// To every menu up: the peer's own may now pick, and the rest's wait
@@ -226,6 +240,7 @@ struct Module: public interface::Module, public Interface
 		out.set("running", m_running ? m_running_name : ss_());
 		out.set("note", note);
 		out.set("may_pick", pick);
+		out.set("copy", m_config.copy);
 		if(!pick)
 			out.set("no_admin", !any_admin());
 		out.set("wait", m_progress);
@@ -249,6 +264,10 @@ struct Module: public interface::Module, public Interface
 			for(const auto &n : f.notes)
 				notes.set(n.first, n.second);
 			v.set("notes", notes);
+			json::Value files = json::object();
+			for(const auto &n : f.files)
+				files.set(n.first, n.second);
+			v.set("files", files);
 			fields.append(v);
 		}
 		out.set("fields", fields);
@@ -376,6 +395,18 @@ struct Module: public interface::Module, public Interface
 			if(!value.empty() && value.size() <= 200)
 				options[f.key] = value;
 		}
+		// [KIT_PROJECT_EXPORT] A file choice's file, sent before
+		ss_ file;
+		for(const Field &f : m_config.fields)
+			if(options.count(f.key) && f.files.count(options[f.key])){
+				auto it = m_files.find(packet.sender);
+				if(it == m_files.end()){
+					send_list(packet.sender, "No file came: pick it again");
+					return;
+				}
+				file.swap(it->second);
+				m_files.erase(it);
+			}
 		bool ok = false;
 		storage::access(m_server, [&](storage::Interface *i){
 			if(!is_world(i, name) || exists(i, name))
@@ -395,8 +426,47 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		log_i(MODULE, "world_menu: made \"%s\"", cs(name));
-		m_server->emit_event("world_menu:play",
-				new Play(packet.sender, name, true, options));
+		Play *play = new Play(packet.sender, name, true, options);
+		play->file.swap(file);
+		m_server->emit_event("world_menu:play", play);
+	}
+
+	// [KIT_PROJECT_EXPORT] A picker's file for the create after it
+	void on_file(const network::Packet &packet)
+	{
+		if(!may_pick(packet))
+			return;
+		if(packet.data.size() > MAX_FILE){
+			log_w(MODULE, "world_menu: a file of %zu bytes from peer %zu "
+					"refused", packet.data.size(), packet.sender);
+			send_list(packet.sender, "The file is past "+
+					std::to_string(MAX_FILE >> 20)+" MiB");
+			return;
+		}
+		log_i(MODULE, "world_menu: a file of %zu bytes from peer %zu",
+				packet.data.size(), packet.sender);
+		m_files[packet.sender] = packet.data;
+	}
+
+	// [KIT_PROJECT_EXPORT] Copy...: the app's (Copy), to a name no world has
+	void on_copy(const network::Packet &packet)
+	{
+		if(!may_pick(packet) || !m_config.copy)
+			return;
+		const json::Value v = read(packet);
+		const ss_ name = jstr(v, "name"), to = jstr(v, "to");
+		bool ok = false;
+		storage::access(m_server, [&](storage::Interface *i){
+			ok = is_world(i, name) && exists(i, name) && is_world(i, to) &&
+					!exists(i, to);
+		});
+		if(!ok){
+			send_list(packet.sender, "Not copied: "+to+" is no free name of a "+
+					m_config.noun);
+			return;
+		}
+		log_i(MODULE, "world_menu: copy \"%s\" as \"%s\"", cs(name), cs(to));
+		m_server->emit_event("world_menu:copy", new Copy(packet.sender, name, to));
 	}
 
 	void on_rename(const network::Packet &packet)

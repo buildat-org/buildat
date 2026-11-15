@@ -52,6 +52,13 @@
 // module's directory), then those installed. A project from one has its
 // composition as its first start (Kit's Host::composition_path), Stopped, the
 // first builder in the tools.
+//
+// [KIT_PROJECT_EXPORT] A project is exported as a template (Kit's Host::
+// project: the editor's Export this project, the agents' export_template),
+// and New's "From a file..." makes one of such a file (a template's zip):
+// the browser's picker on the web, natively <user>/exports. Manage's
+// Copy... copies a project whole (its save); the agents' list_projects,
+// copy_project and rename_project are Manage's, an admin's (Host::projects).
 #include "core/log.h"
 #include "core/json.h"
 #include "accounts/api.h"
@@ -69,6 +76,7 @@
 #include "world_menu/api.h"
 #include "interface/aitta.h"
 #include "interface/fs.h"
+#include "interface/zip.h"
 #include "interface/server_config.h"
 #include "interface/module.h"
 #include "interface/server.h"
@@ -222,6 +230,7 @@ struct Module: public interface::Module
 		sub(m_server, "kit:spawn_player", &Module::on_spawn);
 		sub(m_server, "kit:change_scene", &Module::on_change_scene);
 		sub(m_server, "world_menu:play", &Module::on_project_play);
+		sub(m_server, "world_menu:copy", &Module::on_project_copy);
 	}
 
 	void on_start()
@@ -318,8 +327,13 @@ struct Module: public interface::Module
 							", installed, unverified" : ", installed");
 			}
 		}
+		// [KIT_PROJECT_EXPORT] a template's or an export's zip, picked
+		f.choices.push_back({"file", "From a file..."});
+		f.notes["file"] = "A template or an exported project (a .zip), "
+				"picked at Create.";
+		f.files["file"] = ".zip";
 		world_menu::access(m_server, [&](world_menu::Interface *i){
-			i->configure({"Workbench", {f}, "project"});
+			i->configure({"Workbench", {f}, "project", true});
 		});
 	}
 
@@ -343,13 +357,30 @@ struct Module: public interface::Module
 	{
 		auto t = event.options.find("template");
 		const ss_ from = t == event.options.end() ? "" : t->second;
-		if(m_save){
-			// [WORKBENCH_SWITCH_PROJECT] Picked over a running project
-			if(m_switching || !picker(event.peer) || event.name == m_project){
-				log_w(MODULE, "workbench: a switch to \"%s\" by %s refused",
-						cs(event.name), cs(m_names[event.peer]));
+		// [WORKBENCH_SWITCH_PROJECT] Picked over a running project
+		if(m_save && (m_switching || !picker(event.peer) ||
+				event.name == m_project)){
+			log_w(MODULE, "workbench: a switch to \"%s\" by %s refused",
+					cs(event.name), cs(m_names[event.peer]));
+			return;
+		}
+		// [KIT_PROJECT_EXPORT] From a file: unpacked into the new project
+		// and checked before anything opens it; refused, the project goes
+		if(event.created && from == "file"){
+			const ss_ why = unpack_import(event.name, event.file);
+			if(!why.empty()){
+				storage::access(m_server, [&](storage::Interface *i){
+					i->remove(event.name);
+				});
+				log_w(MODULE, "workbench: the project \"%s\" from a file "
+						"refused: %s", cs(event.name), cs(why));
+				world_menu::access(m_server, [&](world_menu::Interface *i){
+					i->tell(event.peer, "Not made from the file: "+why);
+				});
 				return;
 			}
+		}
+		if(m_save){
 			reload_for(m_names[event.peer]+" switches the project to "+
 					event.name, "play\n"+event.name+"\n"+
 					(event.created ? "1" : "0")+"\n"+from,
@@ -360,6 +391,169 @@ struct Module: public interface::Module
 			world_menu::access(m_server, [&](world_menu::Interface *i){
 				i->show(event.peer);
 			});
+	}
+
+	// [KIT_PROJECT_EXPORT] New's From a file...: the file unpacked into the
+	// new project's <save>/import and checked as a template's install is
+	// (its manifest and kind, aitta's template_refusal(): the sizes, regular
+	// files, types and the caps of an export's files); its first start takes
+	// it as its template (start_project()) and removes it. "" or why not
+	ss_ unpack_import(const ss_ &name, const ss_ &file)
+	{
+		namespace fs = interface::fs;
+		ss_ dir;
+		storage::access(m_server, [&](storage::Interface *i){
+			storage::Save *s = i->open(name);
+			if(s){
+				dir = s->path();
+				i->close(s);
+			}
+		});
+		if(dir.empty())
+			return "no project "+name;
+		const ss_ zip = dir+"/import.zip", to = dir+"/import";
+		ss_ why;
+		if(file.empty() || !fs::write_file(zip, file) ||
+				!fs::create_directories(to))
+			why = "not written into "+dir;
+		try {
+			if(why.empty()){
+				interface::zip_extract(zip, to, 128 << 20);
+				for(const ss_ &n : interface::aitta::dotted_root_names(zip))
+					fs::remove_all(to+"/"+n);
+			}
+		} catch(std::exception &e){
+			why = ss_("not a zip it takes: ")+e.what();
+		}
+		json::json_error_t e;
+		const json::Value m = why.empty() ?
+				json::load_file((to+"/meta.json").c_str(), &e) : json::Value();
+		if(why.empty())
+			why = interface::aitta::check_manifest(m);
+		if(why.empty() && interface::aitta::kind_of(m) != "template")
+			why = "not a template (its meta.json's kind)";
+		if(why.empty())
+			why = interface::aitta::template_refusal(to);
+		fs::remove_all(zip);
+		if(!why.empty())
+			fs::remove_all(to);
+		else
+			log_i(MODULE, "workbench: the project \"%s\" from a file (%zu "
+					"bytes, \"%s\")", cs(name), file.size(),
+					cs(json::jstr(m, "title")));
+		return why;
+	}
+
+	// [KIT_PROJECT_EXPORT] Manage's Copy...: done and said over the menu
+	void on_project_copy(const world_menu::Copy &event)
+	{
+		ss_ why = m_switching || !picker(event.peer) ? "not now, or not an "
+				"admin's" : "";
+		const bool ok = why.empty() && copy_project(event.name, event.to, why);
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			if(ok)
+				i->select(event.to);
+			i->tell(event.peer, ok ? "Copied "+event.name+" as "+event.to :
+					"Not copied: "+why);
+		});
+	}
+
+	// A project copied whole as `to`: its save's database (VACUUM INTO),
+	// the running one's voxels saved first. Kit's rows (a running one's
+	// round and kept state too), the heightmap and the options go with it
+	bool copy_project(const ss_ &name, const ss_ &to, ss_ &why)
+	{
+		if(m_save && name == m_project)
+			for(auto &sc : m_scenes)
+				voxelworld::access(m_server, sc.second,
+						[&](voxelworld::Instance *w){
+					w->commit();
+					w->save();
+				});
+		storage::access(m_server, [&](storage::Interface *i){
+			if(!i->valid_name(name) || name[0] == '_' || !i->valid_name(to) ||
+					to[0] == '_'){
+				why = "a project's name is a directory's, not starting with _";
+				return;
+			}
+			for(const storage::SaveInfo &info : i->list())
+				if(info.name == to){
+					why = to+" is taken";
+					return;
+				}
+			storage::Save *s = m_save && name == m_project ? m_save :
+					i->open(name);
+			if(!s){
+				why = "no project "+name;
+				return;
+			}
+			const ss_ from = s->path(), dir = from.substr(0,
+					from.rfind('/'))+"/"+to;
+			why = !interface::fs::create_directories(dir) ? "cannot make "+dir :
+					s->copy_to(dir+"/save.sqlite");
+			if(!why.empty())
+				interface::fs::remove_all(dir);
+			if(s != m_save)
+				i->close(s);
+		});
+		if(why.empty())
+			log_i(MODULE, "workbench: the project \"%s\" copied as \"%s\"",
+					cs(name), cs(to));
+		else
+			log_w(MODULE, "workbench: a copy of \"%s\" as \"%s\" refused: %s",
+					cs(name), cs(to), cs(why));
+		return why.empty();
+	}
+
+	// [KIT_PROJECT_EXPORT] Kit's Host::projects, the agents' (an admin's),
+	// on Kit's thread
+	bool projects_op(const ss_ &op, const json::Value &a, json::Value &out,
+			ss_ &why)
+	{
+		const ss_ name = json::jstr(a, "name"), to = json::jstr(a, "to");
+		if(op == "list"){
+			out = json::array();
+			storage::access(m_server, [&](storage::Interface *i){
+				for(const storage::SaveInfo &info : i->list()){
+					if(!i->valid_name(info.name) || info.name[0] == '_')
+						continue;
+					json::Value o = json::object();
+					o.set("name", info.name);
+					o.set("bytes", (int64_t)info.bytes);
+					o.set("running", m_save && info.name == m_project);
+					out.append(o);
+				}
+			});
+			return true;
+		}
+		if(op == "copy"){
+			if(!copy_project(name, to, why))
+				return false;
+			out = json::Value("Copied "+name+" as "+to);
+			return true;
+		}
+		if(op != "rename"){
+			why = "no such op";
+			return false;
+		}
+		if(m_save && name == m_project){
+			why = "the running project is not renamed";
+			return false;
+		}
+		bool ok = false;
+		storage::access(m_server, [&](storage::Interface *i){
+			ok = i->valid_name(name) && i->valid_name(to) && name[0] != '_' &&
+					to[0] != '_' && i->rename(name, to);
+		});
+		if(!ok){
+			why = "not renamed: "+name+" is no project, or "+to+" is taken or "
+					"no name";
+			return false;
+		}
+		log_i(MODULE, "workbench: the project \"%s\" renamed \"%s\"",
+				cs(name), cs(to));
+		out = json::Value("Renamed "+name+" to "+to);
+		return true;
 	}
 
 	// [WORKBENCH_SWITCH_PROJECT] world_menu's picker
@@ -650,13 +844,22 @@ struct Module: public interface::Module
 		h.composition_path = m_server->get_module_path(MODULE)+
 				"/composition.json";
 		const auto tmpl = fresh ? m_templates.find(from) : m_templates.end();
-		if(tmpl != m_templates.end()){
-			h.composition_path = tmpl->second+"/composition.json";
+		// [KIT_PROJECT_EXPORT] From a file: unpack_import()'s, in the save
+		const ss_ imported = fresh && from == "file" ? m_save->path()+"/import" :
+				"";
+		if(tmpl != m_templates.end() || !imported.empty()){
+			const ss_ dir = imported.empty() ? tmpl->second : imported;
+			h.composition_path = dir+"/composition.json";
 			// [KIT_CUSTOM_TYPES] its own types the project's
-			h.local_types_path = tmpl->second+"/types";
+			h.local_types_path = dir+"/types";
 			h.opens_in_edit = true;
 			log_i(MODULE, "workbench: the project from the template %s", cs(from));
 		}
+		h.project = name;
+		h.projects = [this](const ss_ &op, const json::Value &a,
+				json::Value &out, ss_ &why){
+			return projects_op(op, a, out, why);
+		};
 		h.save = m_save;
 		h.scenes["world"] = m_scene;
 		h.make_scene = [this](const ss_ &name, kit::Interface *k){
@@ -678,14 +881,15 @@ struct Module: public interface::Module
 		// side), the player at its middle (world_spawn); before, stone
 		const char *stone = getenv("BUILDAT_WORKBENCH_STONE");
 		ss_ ground;
-		if(fresh && tmpl == m_templates.end() && !(stone && stone[0] == '1')){
+		if(fresh && tmpl == m_templates.end() && imported.empty() &&
+				!(stone && stone[0] == '1')){
 			m_save->store("workbench")->set("ground", "heightmap");
 			// [KIT_NO_WORLD] its World an entity of its own (kit/terrain, at
 			// the defaults below): a scene without one has no ground
 			h.composition_path = m_server->get_module_path(MODULE)+
 					"/composition_new.json";
 		}
-		if(fresh && tmpl != m_templates.end())
+		if(fresh && (tmpl != m_templates.end() || !imported.empty()))
 			m_save->store("workbench")->set("ground", "template");
 		m_save->store("workbench")->get("ground", ground);
 		// [KIT_NO_WORLD] A project neither New nor a template made (the
@@ -703,6 +907,8 @@ struct Module: public interface::Module
 			m_server->shutdown(1, "workbench: Kit is not hosted");
 			return true;
 		}
+		if(!imported.empty())
+			interface::fs::remove_all(imported);
 		for(size_t peer : m_waiting)
 			enter(peer);
 		m_waiting.clear();

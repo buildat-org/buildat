@@ -99,6 +99,9 @@ namespace interface
 		ss_ kind_of(const json::Value &m);
 		// [KIT_TEMPLATES] Why a directory is no template's, "" when it is one
 		ss_ template_refusal(const ss_ &dir);
+		// [KIT_PROJECT_EXPORT] A zip of {name, data}, each deflated, as
+		// pack() writes one (unsigned here)
+		ss_ zip_files(const sv_<std::pair<ss_, ss_>> &files);
 
 		// a < b in SemVer's order (simplified as aitta.cpp says)
 		bool version_less(const ss_ &a, const ss_ &b);

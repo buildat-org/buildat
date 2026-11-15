@@ -31,12 +31,19 @@
 // (Config's noun: "world", "project"): nothing the menu says names one
 // itself.
 //
+// [KIT_PROJECT_EXPORT] Config's copy: a world's Copy... (a name no world
+// has), world_menu:copy, the app's to do (Copy); a Field's files: a choice
+// that is a file the picker picks (on the web the browser's picker,
+// natively <user>/exports), sent as world_menu:file before the create and
+// handed on in Play's file.
+//
 // Packets, client to server: world_menu:get, world_menu:play ({name}),
 // world_menu:create ({name, options: {key: value}}), world_menu:rename
-// ({name, to}), world_menu:delete ({name}), world_menu:close. Server to
-// client: world_menu:list (JSON: {title, noun, may_pick, wait, running, note,
-// fields: [{key, label, default, hint, ask, choices: [[value, label]],
-// notes: {value: text}}],
+// ({name, to}), world_menu:copy ({name, to}), world_menu:file (a file's
+// bytes, MAX_FILE at most), world_menu:delete ({name}), world_menu:close.
+// Server to client: world_menu:list (JSON: {title, noun, may_pick, wait,
+// running, note, copy, fields: [{key, label, default, hint, ask, choices:
+// [[value, label]], notes: {value: text}, files: {value: accept}}],
 // worlds: [{name, bytes, options}], presets: [{label, options}],
 // selected: the world to select, once (select()), new: the new world
 // screen, once (open_new())}; wait:
@@ -65,7 +72,11 @@ namespace world_menu
 		std::vector<std::pair<ss_, ss_>> choices;
 		// [KIT_TEMPLATES] A line under the choices, by the choice's value
 		std::map<ss_, ss_> notes;
+		// [KIT_PROJECT_EXPORT] The choices that are a file to pick: what its
+		// name ends in (".zip"), by the choice's value
+		std::map<ss_, ss_> files;
 	};
+	static const size_t MAX_FILE = 64 << 20;
 
 	struct Config
 	{
@@ -73,6 +84,8 @@ namespace world_menu
 		std::vector<Field> fields;
 		// What one save is, in the menu's own lines: "world", "project"
 		ss_ noun;
+		// [KIT_PROJECT_EXPORT] Copy... (left out of a brace list: false)
+		bool copy;
 	};
 	struct Preset
 	{
@@ -88,9 +101,23 @@ namespace world_menu
 		ss_ name;
 		bool created;
 		std::map<ss_, ss_> options;
+		// [KIT_PROJECT_EXPORT] A file choice's file (Field's files), made
+		// with an option of it
+		ss_ file;
 		Play(PeerId peer, const ss_ &name, bool created,
 				const std::map<ss_, ss_> &options):
 			peer(peer), name(name), created(created), options(options){}
+	};
+
+	// [KIT_PROJECT_EXPORT] world_menu:copy: `peer` (a picker) asks for the
+	// world `name` copied as `to` (a name no world has); the app copies it
+	// and shows the menu again
+	struct Copy: public interface::Event::Private
+	{
+		PeerId peer;
+		ss_ name, to;
+		Copy(PeerId peer, const ss_ &name, const ss_ &to):
+			peer(peer), name(name), to(to){}
 	};
 
 	// world_menu:close: `peer` closed the running world
@@ -125,6 +152,9 @@ namespace world_menu
 		// [WORKBENCH_PROJECTS] The next list a picker gets opens the new
 		// world screen, once
 		virtual void open_new() = 0;
+		// [KIT_PROJECT_EXPORT] The menu to a picker again, a refusal or a
+		// result said over it (a file that is no world's, a copy made)
+		virtual void tell(PeerId peer, const ss_ &note) = 0;
 	};
 
 	inline bool access(interface::Server *server,

@@ -3544,6 +3544,26 @@ function M.editor(options)
 		aitta.kit_publish({name = E.package_name, author = a.author,
 			files = a.files, hex = a.hex, dependencies = a.dependencies})
 	end)
+	-- [KIT_PROJECT_EXPORT] Export this project: the file's name, a 0 byte
+	-- and the zip, a download on the web and natively into <user>/exports
+	buildat.sub_packet("kit:project_export", function(data)
+		local z = data:find("\0", 1, true)
+		if not z then
+			return
+		end
+		local name, file = data:sub(1, z - 1), data:sub(z + 1)
+		local path, why = buildat.save_file(name, file)
+		E.status = not path and "Not exported: " .. tostring(why) or
+				path == "" and "Exported " .. name .. " (" ..
+				math.floor(#file / 1024 + 0.5) .. " KiB): see your downloads" or
+				"Exported to " .. path
+		log:info("kit editor: " .. E.status)
+		if E.editing then
+			people()
+		else
+			ui_utils.show_notification(E.status, 4)
+		end
+	end)
 	buildat.sub_packet("kit:edit_refused", function(data)
 		log:info("kit editor: refused: " .. tostring(data))
 		-- [KIT_WATCH_REFUSED_PLAY] The Signals view's live values, asked

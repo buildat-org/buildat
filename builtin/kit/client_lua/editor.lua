@@ -2092,6 +2092,16 @@ local function new_tab(w)
 			send({op = "export"})
 		end)
 	end)
+	-- [KIT_PROJECT_EXPORT] The project's start as a template file, which
+	-- New's "From a file..." makes a project of on another server.
+	-- simplified: here, not on Workbench's Projects page beside Copy,
+	-- which is an admin's and out of a builder's reach
+	if (E.state.project or "") ~= "" then
+		button(w, "Export this project", function()
+			log:info("kit editor: export this project")
+			send({op = "export_project"})
+		end)
+	end
 end
 
 -- The Place tab ([KIT_PALETTE_SECTIONS] was Components): the types and the
