@@ -209,6 +209,8 @@ click Text "hud screen: ◆ 4 ui_panel"
 wait_log 10000 kit editor: the HUD view shows screen 4
 frames 10
 screenshot @T@/hud_lobby.png
+event kit_edit {"op": "set", "id": 14, "comp": 0, "param": "text", "value": "Builder done"}
+wait_log_any 10000 : "Builder done"
 sync 3000
 quit
 EOF
@@ -227,6 +229,9 @@ wait_log_any 10000 kit: ui chat 5 said (10 bytes)
 wait_log_any 10000 hi builder"
 frames 10
 screenshot @T@/bob_lobby.png
+# (gone only after kitboss's HUD view: a leave's state redraws its tool
+# panel, and a dropdown clicked then did not open)
+wait_log_any 120000 : "Builder done"
 sync 3000
 quit
 EOF
