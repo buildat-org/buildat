@@ -1671,35 +1671,43 @@ local function mouse_move(x, y, dx, dy)
 		return
 	end
 	if S.pan3d then
-		-- In the XZ plane: the point grabbed stays under the pointer where
-		-- both rays meet its height; else (looking level) by the view's
-		-- right and its forward along the ground
+		-- In its plane (pan3d_start's, [KIT_PAN_PLANE]): the point grabbed
+		-- stays under the pointer where both rays meet the plane; else (a
+		-- ray along it) by the view's right and up laid in the plane
+		local ax, at = S.pan3d.ax, S.pan3d.at
 		local o0, v0 = M.screen_ray(x - dx, y - dy)
 		local o1, v1 = M.screen_ray(x, y)
-		local a, b = plane_at(o0, v0, S.pan3d.y), plane_at(o1, v1, S.pan3d.y)
+		local a, b = plane_at(o0, v0, at, ax), plane_at(o1, v1, at, ax)
 		-- [KIT_CAM_MIN_MOVE] never slower than a point this far away
 		-- grabbed: close to a surface, or under it, the pan still goes
 		local _, h = screen_size()
 		local kpx = 2 * math.tan(math.rad(cam3d.fov) / 2) / h
 		local least = 6 * kpx * math.sqrt(dx * dx + dy * dy)
-		local mx_, mz_
+		local m3
 		if a and b then
-			mx_, mz_ = b.x - a.x, b.z - a.z
-			local m = math.sqrt(mx_ * mx_ + mz_ * mz_)
+			m3 = b - a
+			local m = m3:Length()
 			if m < 1e-6 then
-				mx_ = nil
+				m3 = nil
 			elseif m < least then
-				mx_, mz_ = mx_ * least / m, mz_ * least / m
+				m3 = m3 * (least / m)
 			end
 		end
-		if not mx_ then
+		if not m3 then
 			local k = math.max(6, S.pan3d.dist) * kpx
-			local yaw = math.rad(S.yaw)
-			local rx, rz = math.cos(yaw), -math.sin(yaw)
-			-- right (rx, rz), forward along the ground (-rz, rx)
-			mx_, mz_ = (rx * dx + rz * dy) * k, (rz * dx - rx * dy) * k
+			local q = rot3d()
+			m3 = (q * magic.Vector3(1, 0, 0) * dx - q * magic.Vector3(0, 1, 0) * dy) * k
+			-- (the plane's normal taken out: the view's up looking level
+			-- along XZ is its forward along the ground, as before)
+			if ax == "y" then
+				local yaw = math.rad(S.yaw)
+				m3 = (magic.Vector3(math.cos(yaw), 0, -math.sin(yaw)) * dx -
+						magic.Vector3(math.sin(yaw), 0, math.cos(yaw)) * dy) * k
+			end
 		end
-		S.pos = {x = S.pos.x - mx_, y = S.pos.y, z = S.pos.z - mz_}
+		local d = {x = m3.x, y = m3.y, z = m3.z}
+		d[ax] = 0
+		S.pos = {x = S.pos.x - d.x, y = S.pos.y - d.y, z = S.pos.z - d.z}
 		return
 	end
 	if M.looking() then

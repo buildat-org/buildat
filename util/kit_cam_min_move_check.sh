@@ -9,7 +9,8 @@
 #   - three wheel notches in move it at least 3 cells along the look,
 #     one out at least 1 back (the wheel used to stop there);
 #   - a middle drag of 200 pixels pans it at least as a point 6 away
-#     grabbed would.
+#     grabbed would; one up pans it along y, not z ([KIT_PAN_PLANE]: the
+#     world-axis plane nearest the view's, here XY).
 # [KIT_WEB_WHEEL_TENTHS] With "web", in headless Chrome: one notch of the wheel,
 # 100 CSS pixels, which the web's SDL counts as 10, is one notch in the 2D plan
 # (span 50 to 40) and in the 3D view (1 to 2 cells along the look, not 10).
@@ -195,6 +196,17 @@ frames 2
 mouse_up middle
 frames 2
 event kit_cam_where panned
+mouse_pos 512 400
+frames 2
+mouse_down middle
+frames 2
+mouse_pos 512 300
+frames 2
+mouse_pos 512 200
+frames 2
+mouse_up middle
+frames 2
+event kit_cam_where panned up
 frames 3
 screenshot $t/under.png
 sync 5000
@@ -225,6 +237,13 @@ echo "ok: under the ground the wheel moved the camera $z0 -> $z1 (3 notches in),
 awk -v a="$x2" -v b="$x3" 'BEGIN { d = a - b; if (d < 0) d = -d; exit !(d >= 0.5) }' ||
 	fail "the middle drag under the ground: x $x2 -> $x3, not at least 0.5 ($c)"
 echo "ok: the middle drag panned it x $x2 -> $x3"
+# [KIT_PAN_PLANE] Looking along +z the pan's plane is XY: a drag up moves the
+# camera along y, not z (it went along the ground before)
+read -r x4 y4 z4 <<<"$(at "panned up")"
+awk -v a="$y3" -v b="$y4" -v c="$z3" -v d="$z4" 'BEGIN { e = a - b; if (e < 0) e = -e
+	f = c - d; if (f < 0) f = -f; exit !(e >= 0.5 && f < 0.01) }' ||
+	fail "the middle drag up looking along +z: y $y3 -> ${y4:-none}, z $z3 -> ${z4:-none}, not along y alone ($c)"
+echo "ok: the middle drag up panned it y $y3 -> $y4 (z $z4: the XY plane)"
 [ -s "$t/under.png" ] || fail "no screenshot ($t/under.png)"
 echo "PASS: the 3D camera under the ground: the wheel moves it a cell a notch at least, a middle drag pans it at least as if 6 away"
 # vim: set noet ts=4 sw=4:

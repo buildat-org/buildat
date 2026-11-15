@@ -32,7 +32,8 @@
 --     and WASD pan, the wheel zooms about the pointer; a right drag goes
 --     into 3D orbiting, let go north-up straight down back into the plan.
 --     3D: the right drag orbits round what the pointer is on, the middle
---     drag pans over the ground (the XZ plane, the point grabbed kept under
+--     drag pans in the world-axis plane nearest the view's ([KIT_PAN_PLANE]:
+--     looking down XZ, from the side XY or YZ; the point grabbed kept under
 --     the pointer), the wheel goes toward it. Walking at the pointer, the
 --     right drag turns; a click on the view goes up into the crosshair
 --     (the mouse looks, the clicks act at the crosshair) and Escape comes
@@ -925,9 +926,11 @@ local function ground_at(o, v)
 	return {round(o.x + v.x * t), O.ground_y, round(o.z + v.z * t)}
 end
 
--- Where the ray meets the level plane at y
-local function plane_at(o, v, y)
-	local t = math.abs(v.y) > 1e-6 and (y - o.y) / v.y or -1
+-- Where the ray meets the level plane at y ([KIT_PAN_PLANE] or the plane
+-- whose ax ("x", "y", "z") is y)
+local function plane_at(o, v, y, ax)
+	ax = ax or "y"
+	local t = math.abs(v[ax]) > 1e-6 and (y - o[ax]) / v[ax] or -1
 	if t <= 0 or t > 300 then
 		return nil
 	end
@@ -6249,13 +6252,23 @@ local function camera_pivot(mx, my)
 	return plane_at(o, v, O.ground_y - 0.5)
 end
 
--- A 3D pan's start: the height it slides at, the pointer's point's
--- (user's playtest, 2026-10-31: in the XZ plane, as floorplanner's)
+-- A 3D pan's start: the plane it slides in, through the pointer's point
+-- (user's playtest, 2026-10-31: in the XZ plane, as floorplanner's).
+-- [KIT_PAN_PLANE] The world-axis plane nearest the view's: its normal
+-- (ax) the axis the camera looks most along -- down or up: XZ; along z: XY
+-- (the gameplay plane's, seen from the side); along x: YZ. at: its ax's
+-- value; with nothing under the pointer the ground (XZ), the gameplay
+-- plane's depth (XY) or x 0 (YZ)
 local function pan3d_start(mx, my)
-	local p = camera_pivot(mx, my)
-	return {dist = p and (p - cam3d_node.position):Length() or 5,
-		y = p and p.y or O.ground_y - 0.5,
-		from = {x = S.pos.x, y = S.pos.y, z = S.pos.z}}
+	local f = rot3d() * magic.Vector3(0, 0, 1)
+	local x, y, z = math.abs(f.x), math.abs(f.y), math.abs(f.z)
+	local ax = y >= x and y >= z and "y" or z >= x and "z" or "x"
+	local o, v = M.screen_ray(mx, my)
+	local hit = pick(mx, my, nil, true)
+	local c0 = ax == "y" and O.ground_y - 0.5 or ax == "z" and plane_z() or 0
+	local p = hit and hit.t and o + v * hit.t or plane_at(o, v, c0, ax)
+	return {dist = p and (p - cam3d_node.position):Length() or 5, ax = ax,
+		at = p and p[ax] or c0, from = {x = S.pos.x, y = S.pos.y, z = S.pos.z}}
 end
 
 -- Whether the 3D camera looks as the plan does: straight down, north up
