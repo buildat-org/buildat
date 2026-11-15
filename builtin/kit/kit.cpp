@@ -27,6 +27,7 @@
 #include "interface/aitta.h"
 #include "interface/address.h"
 #include "interface/zip.h"
+#include "interface/compress.h"
 #include "kit/terrain.h"
 #include "kit/symmetry.h"
 #include "kit/creatures.h"
@@ -4911,6 +4912,12 @@ struct Module: public interface::Module, public Interface
 		if(!m_migrated_objects.empty())
 			m_runtime_dirty = true;
 		clear_migrated();
+		// [KIT_PROJECT_EXPORT] A template's first start: the rest of an
+		// export beside its composition, before the rows load
+		json::Value edits;
+		if(first && host.opens_in_edit)
+			edits = import_export(host.composition_path.substr(0,
+					host.composition_path.rfind('/')));
 		// The palette: every type of Kit's and of the app's that loads
 		for(const ss_ &author : {ss_("kit"), m_author}){
 			const ss_ dir = author_path(author);
@@ -4947,6 +4954,8 @@ struct Module: public interface::Module, public Interface
 		load_sounds();
 		if(!host_world(why))
 			return false;
+		if(edits.is_object())
+			import_cells(edits);
 
 		// The session ([KIT] stage 4c): Stopped or Running. A save from
 		// before has no row; it ran its components, so it is Running, its
@@ -6930,6 +6939,647 @@ struct Module: public interface::Module, public Interface
 		});
 	}
 
+	// ---- [KIT_PROJECT_EXPORT] The project as a template (kit_plan 4z17):
+	// its start (what Stop goes back to) in the template package's format,
+	// unsigned. project_files() makes it:
+	//   meta.json: kind template, its title the project's (Host::project),
+	//   its author the builder's account, all rights reserved (LICENSE says
+	//   so: nothing licenses a project until its author does);
+	//   composition.json: load_composition()'s form, an entity a line by id,
+	//   each param only where it is not its type's default or the app gives
+	//   one (Host::defaults: another project's may differ), a version only
+	//   where it is not the type's;
+	//   types/<n>.lua and <n>.client.lua: the custom types;
+	//   items.json, sounds.json, voxels.json, prefabs.json: {"<author>/<n>":
+	//   its row}, the builders' (a package's left out);
+	//   textures/<hash>.png: the uploads those rows wear;
+	//   edits.bin: zlib's of {"format": "kit_world_edits", "materials":
+	//   heightmap::MAX_MATERIALS, "scenes": {"<scene>": {"names": [voxel...],
+	//   "cells": [x, y, z, its name's index, the rest of its word (param,
+	//   tint)...], "hm": [x, z, the height's float's bits, weights...],
+	//   "decor": [the builders' decorations, the row's]}}}: each World's
+	//   cells that differ from its generator's (in the sections written,
+	//   the start's copy of one the round wrote), its heightmap's edited
+	//   samples. A template's first start takes them all back
+	//   (import_export(), import_cells()).
+	// simplified: the composition's params only, no round state, kept state
+	// or the instance states Save as start keeps; a project using a
+	// package's or the app's own types is refused (a template has Kit's and
+	// its own); a cell of a voxel the importing server lacks (a package's)
+	// is left out there
+
+	// A JSON value on one line, ", " and ": " between, an entity's keys in
+	// the hand-written templates' order (the rest sorted)
+	static ss_ json_line(const json::Value &v)
+	{
+		static const char *FIRST[] = {"id", "parent", "name", "kind", "type",
+				"version", "prefab", "built", "pos", "yaw", "pitch", "roll",
+				"params", "overrides", "output", "to", "input", "visible",
+				"components", "links"};
+		if(v.is_array()){
+			ss_ s = "[";
+			for(unsigned i = 0; i < v.size(); i++)
+				s += (i ? ", " : "")+json_line(v.at(i));
+			return s+"]";
+		}
+		if(!v.is_object())
+			return v.stringify();
+		ss_ s;
+		std::set<ss_> done;
+		auto put = [&](const ss_ &k){
+			s += (s.empty() ? "" : ", ")+json::Value(k).stringify()+": "+
+					json_line(v.get(k));
+			done.insert(k);
+		};
+		for(const char *k : FIRST)
+			if(!v.get(k).is_undefined())
+				put(k);
+		for(json::Iterator it(v); it; ++it)
+			if(!done.count(it.key()))
+				put(it.key());
+		return "{"+s+"}";
+	}
+
+	static ss_ base64(const ss_ &d)
+	{
+		static const char *B = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+				"0123456789+/";
+		ss_ o;
+		for(size_t i = 0; i < d.size(); i += 3){
+			const uint32_t n = (uint32_t)(uint8_t)d[i] << 16 |
+					(i + 1 < d.size() ? (uint32_t)(uint8_t)d[i + 1] << 8 : 0) |
+					(i + 2 < d.size() ? (uint32_t)(uint8_t)d[i + 2] : 0);
+			o += B[n >> 18 & 63];
+			o += B[n >> 12 & 63];
+			o += i + 1 < d.size() ? B[n >> 6 & 63] : '=';
+			o += i + 2 < d.size() ? B[n & 63] : '=';
+		}
+		return o;
+	}
+
+	bool project_files(const Peer &p, sv_<std::pair<ss_, ss_>> &files,
+			ss_ &why)
+	{
+		if(m_host.project.empty()){
+			why = "this app names no project to export";
+			return false;
+		}
+		// A package's names: a-z, 0-9 and _, 40 at most
+		auto plain = [](const ss_ &s, const char *def){
+			ss_ o;
+			for(char c : s)
+				if(o.size() < 40)
+					o += isalnum((unsigned char)c) ?
+							(char)tolower((unsigned char)c) : '_';
+			return o.find_first_not_of('_') == ss_::npos ? ss_(def) : o;
+		};
+		// simplified: cut at 40 bytes on a character's start, the last whole
+		// one dropped with a cut one
+		ss_ title = m_host.project;
+		if(title.size() > 40){
+			title.resize(40);
+			while(!title.empty() && ((uint8_t)title.back() & 0xc0) == 0x80)
+				title.pop_back();
+			if(!title.empty() && (uint8_t)title.back() >= 0xc0)
+				title.pop_back();
+		}
+		const ss_ author = plain(author_of(p), "builder");
+		const std::pair<const char*, json::Value> meta[] = {
+			{"kind", "template"}, {"author", author},
+			{"name", plain(m_host.project, "project")}, {"title", title},
+			{"version", "1.0.0"},
+			{"engine_api", (int64_t)interface::aitta::ENGINE_API},
+			{"license_code", "LicenseRef-All-rights-reserved"},
+			{"license_media", "LicenseRef-All-rights-reserved"},
+			{"description", "The Workbench project "+title+", exported by "+
+					author+"."}};
+		ss_ mj = "{\n";
+		for(const auto &m : meta)
+			mj += ss_(mj.size() > 2 ? ",\n" : "")+"\t\""+m.first+"\": "+
+					m.second.stringify();
+		files.push_back({"meta.json", mj+"\n}\n"});
+		files.push_back({"LICENSE", "The Workbench project "+title+", by "+
+				author+". All rights reserved.\n\nExported with no licence of its "
+				"own: its author gives one by putting it here\nand in meta.json's "
+				"license_code and license_media.\n"});
+		// The composition
+		const json::Value es = authored_json(false).get("entities");
+		ss_ comp = "{\n\t\"entities\": [\n";
+		for(unsigned i = 0; i < es.size(); i++){
+			json::Value e = es.at(i).deepcopy(), comps = json::array();
+			const json::Value &was = es.at(i).get("components");
+			for(unsigned k = 0; k < was.size(); k++){
+				json::Value cj = was.at(k).deepcopy();
+				const ss_ type = jstr(cj, "type");
+				if(type.compare(0, 4, "kit/") != 0 &&
+						type.compare(0, 6, "local/") != 0){
+					why = "entity "+itos(json::jint(e, "id", 0))+" is of "+type+
+							": a template has Kit's types and its own only";
+					return false;
+				}
+				const Type &t = m_types[type];
+				if(json::jint(cj, "version", 0) == t.version)
+					cj.del_key("version");
+				const json::Value &decl = t.decl.get("params"),
+						&app = m_defaults.get(type), &ps = cj.get("params");
+				json::Value kept = json::object();
+				for(json::Iterator it(ps); ps.is_object() && it; ++it)
+					if(!(*it == decl.get(it.key()).get("default")) ||
+							!app.get(it.key()).is_undefined())
+						kept.set(it.key(), *it);
+				if(kept.size())
+					cj.set("params", kept);
+				else
+					cj.del_key("params");
+				if(!cj.get("links").size())
+					cj.del_key("links");
+				comps.append(cj);
+			}
+			if(comps.size())
+				e.set("components", comps);
+			else
+				e.del_key("components");
+			comp += "\t\t"+json_line(e)+(i + 1 < es.size() ? "," : "")+"\n";
+		}
+		// A scene the app's default World stood in for (Host::world_default:
+		// a Workbench project from before New's heightmap) gets it as an
+		// entity, which a template's has to have
+		int64_t next = m_next_id;
+		for(auto &sc : m_entities){
+			if(!m_host.world_default || sc.second.kind != "scene")
+				continue;
+			bool has = false;
+			for(auto &c : m_entities)
+				for(const Instance &in : c.second.comps)
+					has = has || (c.second.parent == sc.first && !c.second.has_pos &&
+							m_types.count(in.type) && m_types[in.type].world);
+			if(has)
+				continue;
+			json::Value e = json::object(), cj = json::object(),
+					comps = json::array();
+			e.set("id", next++);
+			e.set("parent", (int64_t)sc.first);
+			e.set("name", "World");
+			cj.set("type", "kit/terrain");
+			if(m_defaults.get("kit/terrain").size())
+				cj.set("params", m_defaults.get("kit/terrain"));
+			comps.append(cj);
+			e.set("components", comps);
+			comp.insert(comp.size() - 1, ",");
+			comp += "\t\t"+json_line(e)+"\n";
+		}
+		files.push_back({"composition.json", comp+"\t],\n\t\"next_id\": "+
+				json::Value(next).stringify()+"\n}\n"});
+		for(auto &lt : m_local_types){
+			const ss_ n = lt.first.substr(6);
+			files.push_back({"types/"+n+".lua", jstr(lt.second, "source")});
+			if(!jstr(lt.second, "client").empty())
+				files.push_back({"types/"+n+".client.lua",
+						jstr(lt.second, "client")});
+		}
+		// The builders' rows, and the uploads they wear
+		ss_ worn;
+		for(const char *kind : {"item", "sound", "voxel", "prefab"}){
+			const ss_ pre = ss_(kind)+":";
+			ss_ out;
+			for(const ss_ &k : m_store->list(pre)){
+				ss_ src;
+				m_store->get(k, src);
+				const json::Value row = json::load_string(src.c_str());
+				if(!row.is_object() || !jstr(row, "package").empty())
+					continue;
+				out += ss_(out.empty() ? "{\n" : ",\n")+"\t"+
+						json::Value(k.substr(pre.size())).stringify()+": "+
+						json_line(row);
+				worn += src;
+			}
+			if(!out.empty())
+				files.push_back({ss_(kind)+"s.json", out+"\n}\n"});
+		}
+		std::set<ss_> hashes;
+		for(size_t at = worn.find("kit/up/"); at != ss_::npos;
+				at = worn.find("kit/up/", at + 7))
+			hashes.insert(worn.substr(at + 7, 16));
+		for(const ss_ &h : hashes){
+			ss_ png;
+			if(m_store->get("texture:"+h, png))
+				files.push_back({"textures/"+h+".png", png});
+		}
+		// Each World's edits
+		json::Value scenes = json::object();
+		size_t cells_n = 0, samples_n = 0;
+		for(auto &wp : m_worlds){
+			World &wd = wp.second;
+			if(!wd.world_scene || wd.name.find('~') != ss_::npos)
+				continue;
+			WorldScope ws(m_w, &wd);
+			json::Value names = json::array(), cells = json::array(),
+					hm = json::array(), decor = json::array();
+			// Made out here: its valleys query reaches luanti_mapgen, which
+			// depends on voxelworld and so cannot be accessed from inside it
+			up_<world::Generator> g = diff_generator();
+			SessionSource src;
+			src.scene = wd.name;
+			if(m_session.running && !m_host.persistent)
+				src.copies = start_copies(wd.name);
+			voxelworld::access(m_server, wd.world_scene,
+					[&](voxelworld::Instance *w){
+				// The index marks a section altered as it is saved
+				w->save();
+				src.base = w;
+				interface::VoxelRegistry *reg = w->get_voxel_reg();
+				const interface::VoxelFormat &f = reg->get_format();
+				const uint32_t sm = state_mask(f);
+				std::map<uint32_t, int64_t> index;
+				for(const auto &s : w->section_stats()){
+					if(!s.altered)
+						continue;
+					const pv::Region r = w->get_section_region_voxels(s.p);
+					interface::VoxelVolume now(r), gen(r);
+					if(!src.section(w, s.p, now))
+						continue;
+					g->generate(wd.world_scene, s.p, gen);
+					const pv::Vector3DInt32 lc = r.getLowerCorner(),
+							uc = r.getUpperCorner();
+					for(int y = lc.getY(); y <= uc.getY(); y++)
+					for(int z = lc.getZ(); z <= uc.getZ(); z++)
+					for(int x = lc.getX(); x <= uc.getX(); x++){
+						const uint32_t a = now.getVoxelAt(x, y, z).data & sm;
+						if(a == (gen.getVoxelAt(x, y, z).data & sm))
+							continue;
+						const uint32_t id = f.id.get(a);
+						auto in = index.find(id);
+						if(in == index.end()){
+							const interface::VoxelDefinition *d = reg->get(
+									(interface::VoxelTypeId)id);
+							if(!d)
+								continue;
+							in = index.emplace(id, (int64_t)names.size()).first;
+							names.append(d->name.block_name);
+						}
+						uint32_t rest = a;
+						f.id.set(rest, 0);
+						for(int64_t v : {(int64_t)x, (int64_t)y, (int64_t)z,
+								in->second, (int64_t)rest})
+							cells.append(v);
+						cells_n++;
+					}
+				}
+			});
+			hm_edits_load();
+			for(auto &e : m_w->hm_edits){
+				uint32_t bits;
+				memcpy(&bits, &e.second.first, 4);
+				for(int64_t v : {(int64_t)e.first.first, (int64_t)e.first.second,
+						(int64_t)bits})
+					hm.append(v);
+				for(uint8_t c : e.second.second)
+					hm.append((int64_t)c);
+				samples_n++;
+			}
+			ss_ row;
+			const json::Value dj = m_store->get(world_row("decor"), row) ?
+					json::load_string(row.c_str()) : json::array();
+			for(unsigned i = 0; dj.is_array() && i < dj.size(); i++)
+				if(dj.at(i).size() == 6 && dj.at(i).at(5).is_true())
+					decor.append(dj.at(i));
+			if(!cells.size() && !hm.size() && !decor.size())
+				continue;
+			json::Value o = json::object();
+			o.set("names", names);
+			o.set("cells", cells);
+			o.set("hm", hm);
+			o.set("decor", decor);
+			scenes.set(wd.name, o);
+		}
+		if(scenes.size()){
+			json::Value b = json::object();
+			b.set("format", "kit_world_edits");
+			b.set("materials", (int64_t)heightmap::MAX_MATERIALS);
+			b.set("scenes", scenes);
+			std::ostringstream os(std::ios::binary);
+			interface::compress_zlib(b.stringify(), os);
+			files.push_back({"edits.bin", os.str()});
+		}
+		// What a template's install takes (aitta's template_refusal())
+		for(auto &f : files)
+			if(f.second.size() > (size_t)(f.first == "edits.bin" ? 16 : 4) << 20){
+				why = f.first+" would pass "+(f.first == "edits.bin" ? "16" : "4")+
+						" MiB, which an import refuses";
+				return false;
+			}
+		log_i(MODULE, "%s exports the project %s: %zu files, %zu cells, %zu "
+				"heightmap samples", cs(p.name), cs(m_host.project), files.size(),
+				cells_n, samples_n);
+		return true;
+	}
+
+	// {"op": "export_project"}: "kit:project_export", the file's name
+	// ("<project>.template.zip"), a 0 byte and the zip
+	void export_project(size_t peer, const Peer &p,
+			std::function<void(const ss_&)> refuse)
+	{
+		sv_<std::pair<ss_, ss_>> files;
+		ss_ why;
+		if(!project_files(p, files, why))
+			return refuse(why);
+		const ss_ zip = interface::aitta::zip_files(files);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:project_export", m_host.project+
+					".template.zip"+ss_(1, '\0')+zip);
+		});
+	}
+
+	// [KIT_PROJECT_EXPORT] A template's first start: the rest of an export
+	// from its directory (project_files()), each row checked as a builder's
+	// own would be and left out where refused (logged): the textures
+	// (stored as uploads, a row's name for one that comes out other renamed),
+	// voxel types, item types, sounds and prefabs; each scene's heightmap
+	// samples and decorations, rows the World takes as it starts. Its
+	// edits.bin's, for import_cells() after
+	json::Value import_export(const ss_ &dir)
+	{
+		sv_<std::pair<ss_, ss_>> renamed;
+		size_t textures = 0;
+		for(const auto &n : interface::fs::list_directory(dir+"/textures")){
+			ss_ why;
+			const ss_ name = n.is_directory ? ss_() :
+					store_texture(read_file(dir+"/textures/"+n.name), why);
+			if(name.empty()){
+				log_w(MODULE, "The template's texture %s: %s", cs(n.name), cs(why));
+				continue;
+			}
+			textures++;
+			if(name != "kit/up/"+n.name)
+				renamed.push_back({"kit/up/"+n.name, name});
+		}
+		auto rows = [&](const char *file){
+			ss_ s = read_file(dir+"/"+file);
+			for(auto &r : renamed)
+				for(size_t at = s.find(r.first); at != ss_::npos;
+						at = s.find(r.first, at + r.second.size()))
+					s.replace(at, r.first.size(), r.second);
+			const json::Value j = json::load_string(s.c_str());
+			return j.is_object() ? j : json::object();
+		};
+		// "<author>/<n>": a builder's (not Kit's, local or a package's key)
+		auto own = [](const ss_ &k){
+			const size_t sl = k.find('/');
+			const ss_ a = sl == ss_::npos ? ss_() : k.substr(0, sl);
+			return name_ok(a) && name_ok(k.substr(sl + 1)) && a != "local" &&
+					builder_author(a) == a;
+		};
+		const std::set<ss_> choices = texture_choices();
+		auto worn = [&](const json::Value &r, std::initializer_list<const char*>
+				faces){
+			for(const char *f : faces)
+				if(r.get(f).is_string() && !r.get(f).as_string().empty() &&
+						!choices.count(r.get(f).as_string()))
+					return false;
+			return true;
+		};
+		size_t took = 0, left = 0;
+		auto take = [&](const ss_ &what, const ss_ &key, const ss_ &why,
+				const json::Value &row){
+			if(!why.empty()){
+				log_w(MODULE, "The template's %s %s: %s", cs(what),
+						cs(key.substr(0, 129)), cs(why));
+				left++;
+				return;
+			}
+			m_store->set(what+":"+key, row.stringify());
+			took++;
+		};
+		size_t n = m_store->list("voxel:").size();
+		const json::Value vs = rows("voxels.json");
+		for(json::Iterator it(vs); it; ++it){
+			world::Material m;
+			json::Value r = (*it).is_object() ? (*it).deepcopy() : json::object();
+			r.del_key("package");
+			const ss_ why = !own(it.key()) ? "not a builder's <author>/<name>" :
+					m_registered.count(it.key()) ? "the app's or Kit's voxel" :
+					!m.parse(r) ? "not a voxel type's row" :
+					!worn(r, {"texture", "top", "side", "bottom"}) ?
+					"a texture no voxel or upload has" : n >= MAX_VOXEL_TYPES ?
+					"past "+itos(MAX_VOXEL_TYPES)+" voxel types" : "";
+			n += why.empty();
+			take("voxel", it.key(), why, r);
+		}
+		n = m_store->list("item:").size();
+		const json::Value is = rows("items.json");
+		for(json::Iterator it(is); it; ++it){
+			json::Value r = (*it).is_object() ? (*it).deepcopy() : json::object(),
+					sheet;
+			for(const char *f : {"format", "author", "name", "version",
+					"look_data", "package"})
+				r.del_key(f);
+			ss_ why = !own(it.key()) ? "not a builder's <author>/<name>" : "";
+			if(why.empty() && !item_sheet(r, json::object(), sheet, why) &&
+					why.empty())
+				why = "not an item type's row";
+			if(why.empty() && !worn(sheet, {"icon"}))
+				why = "an icon no voxel or upload has";
+			if(why.empty() && n >= MAX_ITEM_TYPES)
+				why = "past "+itos(MAX_ITEM_TYPES)+" item types";
+			if(why.empty()){
+				const size_t sl = it.key().find('/');
+				sheet.set("format", "kit_item");
+				sheet.set("author", it.key().substr(0, sl));
+				sheet.set("name", it.key().substr(sl + 1));
+				sheet.set("version", std::max<int64_t>(1, json::jint(*it,
+						"version", 1)));
+				n++;
+			}
+			take("item", it.key(), why, sheet);
+		}
+		n = m_store->list("sound:").size();
+		const json::Value ss = rows("sounds.json");
+		for(json::Iterator it(ss); it; ++it){
+			const ss_ params = jstr(*it, "params");
+			const ss_ why = !own(it.key()) ? "not a builder's <author>/<name>" :
+					!sound_params_ok(params) ? "no blip1 params" :
+					n >= MAX_SOUNDS ? "past "+itos(MAX_SOUNDS)+" sounds" : "";
+			json::Value r = json::object();
+			const size_t sl = it.key().find('/');
+			r.set("params", params);
+			r.set("author", it.key().substr(0, sl));
+			r.set("name", it.key().substr(sl + 1));
+			r.set("version", std::max<int64_t>(1, json::jint(*it, "version", 1)));
+			n += why.empty();
+			take("sound", it.key(), why, r);
+		}
+		const json::Value ps = rows("prefabs.json");
+		for(json::Iterator it(ps); it; ++it){
+			json::Value r = (*it).is_object() ? (*it).deepcopy() : json::object();
+			r.del_key("package");
+			ss_ why = !own(it.key()) ? "not a builder's <author>/<name>" : "";
+			if(why.empty()){
+				const size_t sl = it.key().find('/');
+				r.set("author", it.key().substr(0, sl));
+				r.set("name", it.key().substr(sl + 1));
+				if(!check_prefab(r, why) && why.empty())
+					why = "not a prefab";
+			}
+			take("prefab", it.key(), why, r);
+		}
+		// edits.bin
+		json::Value edits;
+		const ss_ z = read_file(dir+"/edits.bin");
+		try {
+			std::istringstream is(z, std::ios::binary);
+			std::ostringstream os(std::ios::binary);
+			if(!z.empty())
+				interface::decompress_zlib(is, os, 64 << 20);
+			edits = json::load_string(os.str().c_str());
+		} catch(std::exception &e){
+			log_w(MODULE, "The template's edits.bin: %s", e.what());
+		}
+		if(!z.empty() && (jstr(edits, "format") != "kit_world_edits" ||
+				!edits.get("scenes").is_object())){
+			log_w(MODULE, "The template's edits.bin: not kit_world_edits");
+			edits = json::Value();
+		}
+		const json::Value &sc = edits.get("scenes");
+		const int M = heightmap::MAX_MATERIALS, C = HM_EDIT_CHUNK;
+		size_t samples = 0, decors = 0;
+		for(json::Iterator it(sc); sc.is_object() && it; ++it){
+			if(!name_ok(it.key()))
+				continue;
+			const ss_ at = it.key() == m_host.world_scene ? "" : ":"+it.key();
+			const json::Value &hm = (*it).get("hm");
+			std::map<std::pair<int, int>, ss_> chunks;
+			for(unsigned i = 0; json::jint(edits, "materials", 0) == M &&
+					hm.is_array() && i + 3 + M <= hm.size(); i += 3 + M){
+				int64_t v[3 + heightmap::MAX_MATERIALS];
+				bool ok = true;
+				for(int k = 0; k < 3 + M; k++){
+					const json::Value &x = hm.at(i + k);
+					ok = ok && x.is_number() && x.as_number() == std::floor(
+							x.as_number()) && std::fabs(x.as_number()) < 5e9;
+					v[k] = ok ? (int64_t)x.as_number() : 0;
+					ok = ok && (k < 2 ? std::fabs((double)v[k]) <= MAX_COORD :
+							k == 2 ? v[k] >= 0 && v[k] <= 0xffffffffLL :
+							v[k] >= 0 && v[k] <= 255);
+				}
+				float h = 0;
+				const uint32_t bits = (uint32_t)v[2];
+				memcpy(&h, &bits, 4);
+				if(!ok || !std::isfinite(h) || std::fabs(h) > MAX_COORD)
+					continue;
+				const int x = (int)v[0], zz = (int)v[1];
+				const std::pair<int, int> ch(floor_div(x, C), floor_div(zz, C));
+				char b[6 + heightmap::MAX_MATERIALS];
+				b[0] = (char)(x - ch.first * C);
+				b[1] = (char)(zz - ch.second * C);
+				memcpy(b + 2, &h, 4);
+				for(int k = 0; k < M; k++)
+					b[6 + k] = (char)v[3 + k];
+				chunks[ch].append(b, sizeof b);
+				samples++;
+			}
+			for(auto &c : chunks)
+				m_store->set("hm_edit"+at+"/"+itos(c.first.first)+","+
+						itos(c.first.second), c.second);
+			const json::Value &dj = (*it).get("decor");
+			json::Value decor = json::array();
+			for(unsigned i = 0; dj.is_array() && i < dj.size(); i++){
+				const json::Value &r = dj.at(i);
+				bool ok = r.is_array() && r.size() == 6 && r.at(0).is_string() &&
+						r.at(0).as_string().size() <= 129 && r.at(5).is_true();
+				for(unsigned k = 1; ok && k < 5; k++)
+					ok = r.at(k).is_number() && std::fabs(r.at(k).as_number()) <=
+							MAX_COORD;
+				if(ok)
+					decor.append(r);
+			}
+			if(decor.size())
+				m_store->set("decor"+at, decor.stringify());
+			decors += decor.size();
+		}
+		log_i(MODULE, "The template's export: %zu textures, %zu rows (%zu left "
+				"out), %zu heightmap samples, %zu decorations", textures, took,
+				left, samples, decors);
+		return edits;
+	}
+
+	// [KIT_PROJECT_EXPORT] edits.bin's cells into their Worlds, the World
+	// started: each section the generator's, the cells over it, generated
+	// (no generator over it after) and written (altered: the export's again)
+	void import_cells(const json::Value &edits)
+	{
+		const json::Value &sc = edits.get("scenes");
+		for(json::Iterator it(sc); sc.is_object() && it; ++it){
+			World *wd = world_named(it.key());
+			const json::Value &names = (*it).get("names"),
+					&cells = (*it).get("cells");
+			if(!wd || !wd->world_scene || !names.is_array() || !cells.is_array())
+				continue;
+			WorldScope ws(m_w, wd);
+			up_<world::Generator> g = diff_generator();
+			size_t put = 0, left = 0;
+			std::map<std::tuple<int, int, int>, sv_<std::array<int64_t, 4>>> by;
+			voxelworld::access(m_server, wd->world_scene,
+					[&](voxelworld::Instance *w){
+				interface::VoxelRegistry *reg = w->get_voxel_reg();
+				const interface::VoxelFormat &f = reg->get_format();
+				const uint32_t sm = state_mask(f);
+				sv_<int64_t> ids;
+				for(unsigned i = 0; i < names.size(); i++){
+					interface::VoxelName vn;
+					vn.block_name = names.at(i).is_string() ?
+							names.at(i).as_string() : "";
+					const interface::VoxelDefinition *d = reg->get(vn);
+					ids.push_back(d ? (int64_t)d->id : -1);
+				}
+				const int S = wd->section_size;
+				for(unsigned i = 0; i + 5 <= cells.size(); i += 5){
+					int64_t c[5];
+					bool ok = true;
+					for(unsigned k = 0; k < 5; k++){
+						const json::Value &x = cells.at(i + k);
+						ok = ok && x.is_number() && std::fabs(x.as_number()) < 5e9;
+						c[k] = ok ? (int64_t)x.as_number() : 0;
+					}
+					const int sx = floor_div((int)c[0], S), sy = floor_div((int)c[1],
+							S), sz = floor_div((int)c[2], S);
+					ok = ok && c[3] >= 0 && c[3] < (int64_t)ids.size() &&
+							ids[c[3]] >= 0 && c[4] >= 0 && c[4] <= 0xffffffffLL &&
+							std::fabs((double)c[0]) <= MAX_COORD &&
+							std::fabs((double)c[1]) <= MAX_COORD &&
+							std::fabs((double)c[2]) <= MAX_COORD &&
+							sx >= -WORLD_SECTIONS_XZ && sx < WORLD_SECTIONS_XZ &&
+							sz >= -WORLD_SECTIONS_XZ && sz < WORLD_SECTIONS_XZ &&
+							sy >= WORLD_SECTION_Y0 && sy <= WORLD_SECTION_Y1;
+					if(!ok){
+						left++;
+						continue;
+					}
+					uint32_t word = (uint32_t)c[4] & sm;
+					f.id.set(word, (uint32_t)ids[c[3]]);
+					by[std::make_tuple(sx, sy, sz)].push_back({{c[0], c[1], c[2],
+							(int64_t)word}});
+				}
+				for(auto &s : by){
+					const pv::Vector3DInt16 sp(std::get<0>(s.first),
+							std::get<1>(s.first), std::get<2>(s.first));
+					const pv::Region r = w->get_section_region_voxels(sp);
+					interface::VoxelVolume vol(r);
+					g->generate(wd->world_scene, sp, vol);
+					for(auto &c : s.second)
+						vol.setVoxelAt((int)c[0], (int)c[1], (int)c[2],
+								interface::VoxelInstance((uint32_t)c[3]));
+					put += s.second.size();
+					w->set_section_generated(sp);
+					w->set_volume(vol, true);
+					if(wd->sky)
+						w->relight_region_later(r);
+				}
+			});
+			log_i(MODULE, "World %s: the template's %zu edited cells in %zu "
+					"sections (%zu left out)", cs(it.key()), put, by.size(), left);
+		}
+	}
+
 	// The World's parameters: the first World on the current World's
 	// scene ([KIT_SCENES]; before, on the root), over its type's defaults
 	// (the app's among them); none: the defaults, [KIT_NO_WORLD] their
@@ -7808,10 +8458,19 @@ struct Module: public interface::Module, public Interface
 		g->max_top = m_w->gen_hi;
 		g->h.reset(new world::Heights());
 		g->h->p = m_w->gen_p;
-		if(m_w->gen_voxels)
+		if(m_w->gen_voxels){
 			valleys_query(*g->h);
-		else
-			g->h->p.generator = "empty";
+			return g;
+		}
+		// [KIT_PROJECT_EXPORT] A heightmap's scene's all air, as
+		// set_world_generator() makes it: its sea was a layer of edits in
+		// every section written
+		g->p.generator = "empty";
+		g->p.border = "void";
+		g->p.sea_level = INT_MIN / 2;
+		g->p.caves = false;
+		g->p.decorations = false;
+		g->h->p = g->p;
 		return g;
 	}
 
@@ -27461,6 +28120,31 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string", "description": "The account"},
 				"on": {"type": "boolean"}}, "required": ["name", "on"]})J", ""},
+			// [KIT_PROJECT_EXPORT]
+			{"export_template", "=export", "The project's start (what stop "
+				"goes back to) as a Workbench template, the files the editor's "
+				"Export this project zips: {project, files: {path: text}, "
+				"base64: {path: its bytes}}. meta.json, LICENSE (all rights "
+				"reserved), composition.json, types/<name>.lua and .client.lua, "
+				"items.json, sounds.json, voxels.json, prefabs.json; "
+				"textures/<hash>.png and edits.bin (the World's hand-edited "
+				"voxels and heightmap, zlib) in base64. Zipped, New's Start "
+				"from: From a file... takes them; as a directory, the repo's "
+				"templates/.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"list_projects", "=projects", "The app's projects (its saves): "
+				"each one's name, bytes on disk and whether it runs. An admin "
+				"token's, as the Projects page is an admin's.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"copy_project", "=copy_project", "Copies project name as a new "
+				"project to: all of it, as saved now (a running one's round and "
+				"kept state too). An admin token's.",
+				R"J({"type": "object", "properties": {"name": {"type": "string"},
+				"to": {"type": "string"}}, "required": ["name", "to"]})J", ""},
+			{"rename_project", "=rename_project", "Renames project name to "
+				"to; not the running one. An admin token's.",
+				R"J({"type": "object", "properties": {"name": {"type": "string"},
+				"to": {"type": "string"}}, "required": ["name", "to"]})J", ""},
 		};
 		return t;
 	}
@@ -27984,6 +28668,41 @@ struct Module: public interface::Module, public Interface
 			return agent_state(p);
 		if(op == "=types")
 			return agent_types(jstr(a, "type"), failed);
+		// [KIT_PROJECT_EXPORT]
+		if(op == "=export"){
+			sv_<std::pair<ss_, ss_>> files;
+			ss_ why;
+			failed = !project_files(p, files, why);
+			if(failed)
+				return "Refused: "+why;
+			json::Value o = json::object(), t = json::object(),
+					b = json::object();
+			for(auto &f : files)
+				if(f.first == "edits.bin" || f.first.compare(0, 9, "textures/") == 0)
+					b.set(f.first, base64(f.second));
+				else
+					t.set(f.first, f.second);
+			o.set("project", m_host.project);
+			o.set("files", t);
+			o.set("base64", b);
+			return o.stringify();
+		}
+		if(op == "=projects" || op == "=copy_project" ||
+				op == "=rename_project"){
+			bool admin = false;
+			account_of(peer, &admin);
+			const ss_ what = op == "=projects" ? "list" :
+					op == "=copy_project" ? "copy" : "rename";
+			json::Value out = json::object();
+			ss_ why = !admin ? "the projects are an admin's: an admin token's "
+					"(an admin's account, its scope Admin)" : !m_host.projects ?
+					"this app has no projects" : "";
+			failed = !why.empty() || !m_host.projects(what, a, out, why);
+			log_i(MODULE, "%s: %s %s: %s", cs(p.name), cs(what),
+					cs(a.stringify().substr(0, 200)), failed ? cs("refused, "+why) :
+					"done");
+			return failed ? "Refused: "+why : out.stringify();
+		}
 		if(op == "=type"){
 			json::Value o = json::object();
 			ss_ why;
@@ -30077,6 +30796,8 @@ struct Module: public interface::Module, public Interface
 			}
 			j.set("packages", pk);
 			j.set("names", shown_as);
+			// [KIT_PROJECT_EXPORT] Export this project... under its name
+			j.set("project", m_host.project);
 			json::Value pal = json::object();
 			for(const ss_ &t : m_palette){
 				const json::Value &d = m_types[t].decl;
@@ -30373,6 +31094,7 @@ struct Module: public interface::Module, public Interface
 				op == "prefab_rename" || op == "prefab_delete" ||
 				op == "hm_regenerate" ||
 				op == "hm_restore" || op == "new_scene" || op == "export" ||
+				op == "export_project" ||
 				op == "draft" || op == "prefab_bench" ||
 				(gs->bench && op == "publish")))
 			return refuse(gs->bench ? "editing a prefab: the project's; Close "
@@ -30493,6 +31215,8 @@ struct Module: public interface::Module, public Interface
 			return copy_op(p, peer, j, refuse);
 		if(op == "export")
 			return export_package(peer, p, refuse);
+		if(op == "export_project")
+			return export_project(peer, p, refuse);
 		// [KIT_ITEMS_TAB]
 		if(op == "item_delete")
 			return delete_item(p, j, refuse);

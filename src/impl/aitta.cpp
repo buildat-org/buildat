@@ -693,6 +693,34 @@ ss_ template_refusal(const ss_ &dir)
 						(t.is_string() ? s.substr(0, 60) : ss_("no type"));
 		}
 	}
+	// [KIT_PROJECT_EXPORT] An exported project's rows beside the
+	// composition: items.json, sounds.json, voxels.json and prefabs.json
+	// (4 MiB each), textures/<16 hex digits>.png (Kit's caps: 256 of them,
+	// 64 KiB) and edits.bin (16 MiB), regular files
+	for(const char *f : {"items.json", "sounds.json", "voxels.json",
+			"prefabs.json", "edits.bin"}){
+		const ss_ p = dir+"/"+f;
+		if(!fs::path_exists(p))
+			continue;
+		const uint64_t size = fs::file_size(p);
+		if(size == 0 || size > (uint64_t)(ss_(f) == "edits.bin" ? 16 : 4) << 20)
+			return ss_(f)+": a regular file of at most "+(ss_(f) == "edits.bin" ?
+					"16" : "4")+" MiB (a link is refused)";
+	}
+	const sv_<fs::Node> textures = fs::list_directory(dir+"/textures");
+	if(textures.size() > 256)
+		return "a template has 256 textures at most";
+	for(const fs::Node &n : textures){
+		bool hex = n.name.size() == 20 && n.name.compare(16, 4, ".png") == 0;
+		for(size_t i = 0; hex && i < 16; i++)
+			hex = isdigit((unsigned char)n.name[i]) ||
+					(n.name[i] >= 'a' && n.name[i] <= 'f');
+		const uint64_t size = n.is_directory ? 0 :
+				fs::file_size(dir+"/textures/"+n.name);
+		if(!hex || size == 0 || size > (64 << 10))
+			return "textures/"+n.name.substr(0, 60)+": a template's textures "
+					"are <16 hex digits>.png, regular files of at most 64 KiB";
+	}
 	for(const fs::Node &n : fs::list_directory(dir))
 		if(!n.is_directory && (n.name.compare(0, 7, "LICENSE") == 0 ||
 				n.name.compare(0, 7, "LICENCE") == 0))
@@ -1064,7 +1092,7 @@ sv_<ss_> package_files(const ss_ &dir)
 }
 
 // The files' names and data in a zip
-static ss_ zip_entries(const sv_<std::pair<ss_, ss_>> &files)
+ss_ zip_files(const sv_<std::pair<ss_, ss_>> &files)
 {
 	ss_ out, central;
 	for(const auto &f : files){
@@ -1102,7 +1130,7 @@ static ss_ zip_directory(const ss_ &dir)
 	sv_<std::pair<ss_, ss_>> files;
 	for(const ss_ &name : package_files(dir))
 		files.emplace_back(name, read_file(dir+"/"+name));
-	return zip_entries(files);
+	return zip_files(files);
 }
 
 // <base>.zip and its <base>.sig: the hash, the key and its signature in
@@ -1239,7 +1267,7 @@ ss_ pack_page(const ss_ &page_dir, const ss_ &package, const ss_ &key_path,
 		entries.emplace_back(n, files[n]);
 	ss_ base = package;
 	base[base.find('/')] = '-';
-	return write_signed(zip_entries(entries), read_file(key_path),
+	return write_signed(zip_files(entries), read_file(key_path),
 			PAGE_FORMAT, out_dir+"/"+base+"-page");
 }
 

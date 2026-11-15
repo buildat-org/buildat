@@ -1606,6 +1606,18 @@ namespace kit
 		// directory (<name>.lua, <name>.client.lua), the project's custom
 		// types local/<name> from its first start ("": none)
 		ss_ local_types_path;
+		// [KIT_PROJECT_EXPORT] The project's name: a builder exports it
+		// ("export_project", the agents' export_template) as a template
+		// under it; "": no export. A template's first start also takes the
+		// rest of an export from composition_path's directory (items.json,
+		// sounds.json, voxels.json, prefabs.json, textures/, edits.bin)
+		ss_ project;
+		// [KIT_PROJECT_EXPORT] The app's projects for the agents' tools
+		// (list_projects, copy_project, rename_project), an admin's: op
+		// "list" (out: [{name, bytes, running}]), "copy" or "rename" {name,
+		// to}; false and why not. Called on Kit's thread. Unset: no tools
+		std::function<bool(const ss_ &op, const json::Value &args,
+				json::Value &out, ss_ &why)> projects;
 	};
 
 	// kit:items ([KIT] stage 6a, Host::app_items): a player's inventory as

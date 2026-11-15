@@ -22,6 +22,21 @@ commit as the Kit components it uses; util/kit_templates_check.sh plays each
 to its end, and util/pack_templates.sh packs them for an Aitta with the
 caller's key.
 
+A project moves between servers as a template [KIT_PROJECT_EXPORT]: the
+editor's palette, New tab, Export this project (a builder's) saves its
+start (what Stop goes back to: no round state, no kept state) as
+<project>.template.zip, a download on the web and <user>/exports natively;
+New's "Start from", From a file... (the browser's picker, natively
+<user>/exports) makes a project of one, checked as a template's install is,
+opened Stopped in the editor. The zip is a template package (doc/aitta.txt,
+Templates), all rights reserved by the exporting account; what it carries
+and leaves out: [KIT_PROJECT_EXPORT] in builtin/kit/kit.cpp. Manage's
+Copy... copies a project whole, its save as it is (a running round and kept
+state with it). Into this tree, keeping a template's own meta.json and
+LICENSE (a new one takes the export's and edits them):
+
+        unzip -o X.template.zip -x meta.json LICENSE -d templates/<name>/
+
 A builder's own agentic tool (Claude Code, Codex, Cursor, Gemini CLI...)
 edits a project through MCP ([KIT_AGENTS]): the pause menu's My account,
 Connect an agent... makes a token (Builder, or Admin for an admin), shown
@@ -32,7 +47,11 @@ Revoke. The tool then reaches POST /api/v1/mcp on the server's port as
 and logged as the agent's. Its guide, made from the server's own types, is
 in the MCP initialize answer (get_guide gives it whole). The tools and the
 rules: [KIT_AGENTS] in builtin/kit/kit.cpp. The admin turns it off on the
-Accounts page (util/kit_agents_check.sh).
+Accounts page (util/kit_agents_check.sh). export_template answers the
+project's export as text (edits.bin and textures base64); list_projects,
+copy_project and rename_project are Manage's, so an admin's agent with an
+Admin token only, and the running project is not renamed
+(util/kit_project_export_check.sh).
 
 A tool that signs in by OAuth (claude.ai's or ChatGPT's connectors) needs
 only the URL, https://wb.example.org/api/v1/mcp: it finds the server's

@@ -251,6 +251,28 @@ or a directory too):
                                       types at most
         types/<name>.client.lua       its client part, 32 KiB at most
 
+An exported Workbench project [KIT_PROJECT_EXPORT] is a template too, with
+a builder's rows beside its composition, each optional, each a regular
+file, refused past these. They are taken at the project's first start and
+checked as a Kit package's install checks its rows (a row that fails is
+left out and logged), only rows of authors the importing server would let
+a builder write as:
+
+        items.json                    {"<author>/<name>": item row}, 4 MiB
+        sounds.json                   {"<author>/<name>": {params, ...}}
+        voxels.json                   {"<author>/<name>": voxel type row}
+        prefabs.json                  {"<author>/<name>": prefab row}, each
+                                      4 MiB at most
+        textures/<16 hex>.png         an uploaded texture the rows name
+                                      (kit/up/<hash>.png), re-encoded and
+                                      hashed again at import; 64 KiB, 256
+                                      of them at most
+        edits.bin                     the World's hand edits (zlib JSON:
+                                      voxel cells against the generator,
+                                      heightmap samples, hand-placed
+                                      decorations), applied after the
+                                      generator; 16 MiB, 64 MiB unpacked
+
 One more manifest field, and no "dependencies":
 
         "title": "Puzzle room"        its name in the list, 40 bytes at most

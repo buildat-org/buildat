@@ -19,7 +19,8 @@
 -- label}} (label: the row and what the
 -- filter reads, the name by default); selected (the menu writes it back,
 -- and calls on_select(name)); empty (the text for no worlds); new_label;
--- play(name), new(), rename(name, to) (nil: no Rename), delete(name),
+-- play(name), new(), rename(name, to) (nil: no Rename), copy(name, to)
+-- (nil: no Copy..., [KIT_PROJECT_EXPORT]), delete(name),
 -- delete_text(name), delete_yes; trash = {{entry, name, date}} (what
 -- delete moved to the trash, listed after the worlds), trash_restore(entry)
 -- and trash_delete(entry) ([WORLD_MENU_TRASH]); play_label(name); back() (Escape and the
@@ -184,6 +185,37 @@ local function draw_rename(spec, name)
 	log:info("world_menu: the name screen shown")
 end
 
+-- [KIT_PROJECT_EXPORT] A copy's name, the world's with the first _<n> no
+-- world has (floorplanner's [FP_COPY])
+local function draw_copy(spec, name)
+	local taken = {}
+	for _, w in ipairs(spec.worlds) do
+		taken[w.name] = true
+	end
+	local n = 1
+	while taken[name .. "_" .. n] do
+		n = n + 1
+	end
+	local menu, root = screen(spec, "copy")
+	text_on(menu.window, "Copy " .. name .. " as:")
+	local edit = edit_on(menu.window, name .. "_" .. n)
+	local function ok()
+		local to = edit:GetText():match("^%s*(.-)%s*$")
+		if to == "" or to == name then
+			return
+		end
+		log:info("world_menu: copy " .. name .. " as " .. to)
+		spec.selected = to
+		spec.copy(name, to)
+	end
+	menu:add("Copy", ok, true)
+	menu:add("Back", function() M.open(spec) end)
+	on_escape(menu, root, function() M.open(spec) end)
+	edit:SetFocus(true)
+	magic.input:SetMouseVisible(true, "a menu screen")
+	log:info("world_menu: the copy screen shown")
+end
+
 function M.open(spec)
 	local menu, root = screen(spec, "worlds")
 	text_on(menu.window, spec.title)
@@ -314,6 +346,9 @@ function M.open(spec)
 		if spec.rename then
 			add_right("Rename...", function() draw_rename(spec, name) end)
 		end
+		if spec.copy then
+			add_right("Copy...", function() draw_copy(spec, name) end)
+		end
 		add_right("Delete...", function()
 			ui_utils.show_confirm_dialog(spec.delete_text and
 					spec.delete_text(name) or ("Move the " .. spec.noun .. " " .. name ..
@@ -414,6 +449,9 @@ local served = {}
 -- `typed` the name typed before it was picked
 local function draw_new(state, preset, typed)
 	local menu, root = screen(served, "new world")
+	-- A preset picked (draw_new again), a file being picked
+	-- ([KIT_PROJECT_EXPORT]: {name, options})
+	local picked, picking = nil, nil
 	text_on(menu.window, state.title .. ": a new " .. state.noun .. ", named:")
 	local name = edit_on(menu.window, typed or
 			(#state.worlds == 0 and state.noun or ""))
@@ -426,18 +464,10 @@ local function draw_new(state, preset, typed)
 		end
 		-- Drawn again on the next frame, not inside the dropdown's own
 		-- event, which the redraw removes
-		local picked = nil
 		menu:add_dropdown("From the high scores", list, tostring(preset or 0),
 				function(v)
 			log:info("world_menu: preset " .. v .. " picked")
 			picked = tonumber(v)
-		end)
-		root:SubscribeToStackEvent("Update", function()
-			if picked then
-				local p = picked
-				picked = nil
-				draw_new(state, p ~= 0 and p or nil, name:GetText())
-			end
 		end)
 	end
 	local fields = {}
@@ -485,11 +515,49 @@ local function draw_new(state, preset, typed)
 		for key, e in pairs(fields) do
 			options[key] = e:GetText():match("^%s*(.-)%s*$")
 		end
+		-- [KIT_PROJECT_EXPORT] A choice that is a file: picked, and sent
+		-- before the create
+		for _, f in ipairs(state.fields) do
+			local accept = (f.files or {})[options[f.key]]
+			if accept then
+				log:info("world_menu: pick a file (" .. accept .. ")")
+				picking = {name = n, options = options}
+				buildat.pick_file(accept)
+				return
+			end
+		end
 		log:info("world_menu: create " .. n)
 		served.selected = n
 		send("create", {name = n, options = options})
 		waiting("Creating " .. n .. "...")
 	end
+	local said = nil
+	root:SubscribeToStackEvent("Update", function()
+		if picked then
+			local p = picked
+			picked = nil
+			draw_new(state, p ~= 0 and p or nil, name:GetText())
+		end
+		if not picking then
+			return
+		end
+		local file_name, data = buildat.picked_file()
+		if file_name then
+			local p = picking
+			picking = nil
+			log:info("world_menu: create " .. p.name .. " from " .. file_name ..
+					" (" .. #data .. " bytes)")
+			buildat.send_packet("world_menu:file", data)
+			served.selected = p.name
+			send("create", {name = p.name, options = p.options})
+			waiting("Creating " .. p.name .. " from " .. file_name .. "...")
+		elseif data then
+			picking = nil
+			log:info("world_menu: no file: " .. tostring(data))
+			said = said or text_on(menu.window, "", fit(420))
+			said:SetText("No file: " .. tostring(data))
+		end
+	end)
 	menu:add("Create", ok, true)
 	menu:add("Back", function() M.open(served) end)
 	on_escape(menu, root, function() M.open(served) end)
@@ -558,6 +626,10 @@ buildat.sub_packet("world_menu:list", function(data)
 		send("rename", {name = name, to = to})
 		waiting("Renaming " .. name .. "...")
 	end
+	served.copy = state.copy and function(name, to)
+		send("copy", {name = name, to = to})
+		waiting("Copying " .. name .. "...")
+	end or nil
 	served.delete = function(name)
 		send("delete", {name = name})
 		waiting("Moving " .. name .. " to the trash...")
