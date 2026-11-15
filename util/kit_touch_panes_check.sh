@@ -20,6 +20,9 @@
 #     at least the touch size, no window but the Signals view's viewport
 #     (and a menu) over the world;
 #   - a menu (a finger held) shown whole on the screen;
+#   - [KIT_ENTITY_NAMES] a finger held on a name in the Signals list: its
+#     menu (its type, Go to, Rename) and no tap; Go to: its inspector
+#     (12b_name_menu.png);
 #   - a kit/door and a kit/button placed: the portrait inspector's body no
 #     wider than its view;
 #   - the button made a prefab (its menu by a finger held), the prefab
@@ -190,6 +193,14 @@ for _ in range(12):
 view("Signals", "touch shell: the sg_list pane")
 a("shot", "${OUT}/12_signals_list.png")
 dump("sg_list")
+# [KIT_ENTITY_NAMES] A finger held on a name: its menu, its type first, and
+# no tap; Go to: its inspector
+a("hold", "Button", "select %d" % BUTTON, 800)
+a("waitlog", "kit editor: the name menu of %d: kit/button" % BUTTON, 10); fr(5)
+a("shot", "${OUT}/12b_name_menu.png")
+a("tap", "Button", "menu Go to"); a("waitlog", "kit editor: to %d by its name's menu" % BUTTON, 10)
+a("waitlog", "touch shell: the inspector pane", 10); fr(10)
+back("sg_list")
 a("tap", "Button", "select %d" % BUTTON); a("waitlog", "touch shell: the inspector pane", 10); fr(10)
 a("tap", "Button", "inspector links"); a("waitlog", "touch shell: the sg_links pane", 10); fr(10)
 a("shot", "${OUT}/08_signals_links.png")
@@ -348,6 +359,9 @@ menus = re.findall(r"touch shell: a menu shown at (\d+) (\d+) (\d+) (\d+)", text
 assert menus, "no menu shown"
 for x, y, w, h in (map(int, m) for m in menus):
     assert x + w <= W + 1 and y + h <= H + 1, f"a menu off the screen: {x} {y} {w} {h}"
+# [KIT_ENTITY_NAMES] A name's menu by a finger held on it, no tap with it
+m = re.search(r"kit editor: the name menu of \d+: kit/button\n(.*?)kit editor: to \d+ by its name's menu", text, re.S)
+assert m and "touch shell: the inspector pane" not in m[1], "no name's menu, or the finger held a tap too"
 # The inspector's body in its view
 b = re.findall(r"the inspector's body (\d+) wide in its view's (\d+)", text)
 assert b and all(int(x) <= int(v) for x, v in b), f"the inspector's body wider than its view: {b}"

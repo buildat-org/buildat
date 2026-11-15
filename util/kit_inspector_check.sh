@@ -22,6 +22,10 @@
 #   - [KIT_FREE_ROTATION_LEFTOVERS] a kit/part under a turned one: its position
 #     fields (composed: long) show at most three decimals, from their start
 #     (x -7.4055 showed "4055").
+#   - [KIT_ENTITY_NAMES] a link's other entity in the door's links: its
+#     mark ("◆ 3 controls"), a click goes to it; the title's name: its type
+#     on the pointer's rest, its menu (the type, Go to) by a right click
+#     (link.png, name_tip.png, name_menu.png).
 #   - web: [KIT_PHONE_EDITING] in headless Chrome as a phone in portrait
 #     (412x915, touch), a New project's World's (3, [KIT_NO_WORLD]: its
 #     kit/terrain) inspector scrolled to its end and its
@@ -203,6 +207,27 @@ frames 5
 event kit_ui_where long
 wait_log_any 5000 kit editor: the field position z shows
 screenshot @T@/long.png
+event kit_edit {"op": "link", "id": 4, "comp": 0, "output": "opened", "to": 3, "input": "shake"}
+wait_log 10000 entities, 7 to undo
+event kit_select 4
+wait_log_any 5000 kit editor: selected 4
+frames 5
+event kit_inspector_show link to 3
+frames 3
+screenshot @T@/link.png
+click Button "◆ 3 controls" 860 450
+wait_log 5000 kit editor: selected 3
+frames 5
+click Button "◆ 3 controls" 860 50
+wait_log 5000 kit editor: the type of 3 (inspector)
+frames 3
+screenshot @T@/name_tip.png
+mouse_click right
+wait_log 5000 kit editor: the name menu of 3: kit/controls
+frames 3
+screenshot @T@/name_menu.png
+click Button "menu Go to"
+wait_log 5000 kit editor: to 3 by its name's menu
 keypress F6
 wait_log_any 10000 kit: controls: camera
 EOF
@@ -248,4 +273,4 @@ fields=$(grep -aoP 'the field position \w shows .*' "$t/boss.log")
 got=$(grep -aoP 'kit: controls: camera \K\w+' "$t/boss.log" | tail -1)
 [ "$got" = top_down ] ||
 	fail "the camera is ${got:-not set}, not top_down: the pick did not stay ($t/picked.png)"
-echo "PASS: Kit's inspector: kit/controls' parameters scroll to Apply; a pick not yet applied stays picked when the inspector is drawn again; a dropdown's keys move no selection; an unrelated edit keeps the inspector, one of the selected draws it again"
+echo "PASS: Kit's inspector: kit/controls' parameters scroll to Apply; a pick not yet applied stays picked when the inspector is drawn again; a dropdown's keys move no selection; an unrelated edit keeps the inspector, one of the selected draws it again; a link's other entity marked, its name goes to it; a name's type and menu"

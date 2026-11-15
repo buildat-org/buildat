@@ -96,7 +96,9 @@ local LIVE_COLOR = magic.Color(1.0, 0.85, 0.3)
 -- The longest name a list writes
 local NAME_CHARS = 22
 -- Under this root width the links and the inspector take turns
-local THREE_COLUMNS = 1500
+-- ([KIT_SIGNALS_DESKTOP_COLUMNS] 1500 until 2026-11-15: a desktop browser of
+-- 1280-1499 CSS px had two, once the UI fit stopped shrinking the UI there)
+local THREE_COLUMNS = 1200
 
 local function kit_short(ty)
 	return (tostring(ty):gsub("^kit/", ""))
@@ -199,6 +201,90 @@ local function item(parent, s, fn, color, selected)
 	return b, t
 end
 
+-- ---- [KIT_ENTITY_NAMES] An entity's name where a list shows it (4z15 (6)):
+-- the hover look; its type(s) on a pointer's rest (SG.hover_tick); its menu
+-- (the type, Go to, Rename) by a right click or a finger held; fn on a click.
+-- The Entities tab, the inspector's title and links, Signals' list and links.
+-- A list says first which window (W[key]) and view its names are in, each
+-- time it is made
+local NAMES = {}
+
+local function at(e, x, y)
+	local p = e.screenPosition
+	return x >= p.x and y >= p.y and x < p.x + e.width and y < p.y + e.height
+end
+
+function NT.names_list(key, view)
+	NAMES[key] = {w = W[key], view = view, items = {}}
+end
+
+function NT.name_item(parent, key, e, s, fn, color, selected)
+	local b, t = item(parent, s, function()
+		-- (the finger held for the menu: not a click)
+		if not SG.tip_used() then
+			fn()
+		end
+	end, color, selected)
+	local l = NAMES[key]
+	if l then
+		l.items[#l.items + 1] = {b = b, id = e.id, key = key}
+	end
+	return b, t
+end
+
+local function types_of(e)
+	local t = {}
+	for _, c in ipairs(e.components or {}) do
+		t[#t + 1] = c.type
+	end
+	return #t > 0 and table.concat(t, ", ") or tostring(e.kind or "?")
+end
+
+-- The name at x, y (UI units): one of a list whose window is shown, in its
+-- view, not under a menu or a dialog
+local function name_at(x, y)
+	if (W.ctx and at(W.ctx, x, y)) or (W.dialog and at(W.dialog, x, y)) then
+		return nil
+	end
+	for key, l in pairs(NAMES) do
+		if l.w and W[key] == l.w and l.w.visible and at(l.view or l.w, x, y) then
+			for _, it in ipairs(l.items) do
+				if it.b.visible and at(it.b, x, y) then
+					local e = find(it.id)
+					return e and {b = it.b, id = it.id, s = types_of(e),
+						name = "name " .. key .. " " .. it.id,
+						say = "kit editor: the type of " .. it.id .. " (" .. key .. ")"}
+				end
+			end
+		end
+	end
+end
+
+function SG.go_to(id)
+	if NT.sig() then
+		SG.tab = "inspector"
+	end
+	log:info("kit editor: to " .. id .. " by its name's menu")
+	M.select(id)
+	if NT.sh.on() then
+		NT.sh.show("inspector")
+	end
+end
+
+-- x, y: UI units
+function SG.name_menu(id, x, y)
+	local e, made = find(id)
+	if not e then
+		return
+	end
+	local entries = {types_of(e), {"Go to", function() SG.go_to(id) end}}
+	if not made then
+		entries[3] = {"Rename", function() NT.rename_dialog(e, own_name(e) or "") end}
+	end
+	NT.menu(entries, math.floor(x), math.floor(y))
+	log:info("kit editor: the name menu of " .. id .. ": " .. types_of(e))
+end
+
 -- ---- The list
 local function matches(e)
 	local f = SG.filter:lower()
@@ -261,6 +347,7 @@ function SG.rows()
 	local tabs, indent = groups()
 	local ids = {}
 	local linked, linked_list = linked_ids()
+	NT.names_list("sg_list", SG.list_view)
 	SG.list_body = put_body(SG.list_view, function(body)
 		for _, name in ipairs({"Game-wide", "Scene", "UI", "Positioned"}) do
 			local head = false
@@ -273,7 +360,8 @@ function SG.rows()
 					local d = indent[e.id] or 0
 					local on = e.id == S.primary
 					local own_color = on and magic.Color(1.0, 0.85, 0.3) or nil
-					local b, t = item(body, clipped(short_name(e)), function()
+					local b, t = NT.name_item(body, "sg_list", e,
+							clipped(short_name(e)), function()
 						if not NT.pick_parent(e.id) then
 							M.select(e.id)
 						end
@@ -373,25 +461,26 @@ local function link_menu(c)
 	log:info("kit editor: signals: the menu of " .. link_key(c.id, c.l))
 end
 
-local function at(e, x, y)
-	local p = e.screenPosition
-	return x >= p.x and y >= p.y and x < p.x + e.width and y < p.y + e.height
-end
-
 -- A press anywhere: past the menu it closes it; the right button on a signal
 -- opens that link's (a Button's Released is the left button's alone)
 function SG.pressed(x, y, right)
-	if not NT.sig() then
-		return
-	end
 	local sc = magic.ui.scale
 	x, y = x / sc, y / sc
+	SG.tip_held = nil
+	-- [KIT_ENTITY_NAMES] (in any view; past a menu the editor closes it,
+	-- NT.menu_press, here below)
+	local name = right and E.editing and name_at(x, y)
+	if not NT.sig() then
+		return name and SG.name_menu(name.id, x, y)
+	end
 	-- (on its button a click after this does not open the popup again)
 	SG.popup_was_up = W.ctx ~= nil and W.ctx == SG.popup
-	SG.tip_held = nil
 	if W.ctx and not at(W.ctx, x, y) then
 		W.ctx:Remove()
 		W.ctx = nil
+	end
+	if name then
+		return SG.name_menu(name.id, x, y)
 	end
 	if right and SG.links_view and at(SG.links_view, x, y) then
 		for _, c in ipairs(SG.cells or {}) do
@@ -491,7 +580,8 @@ local function link_table(body, rows, self_id)
 			local goal = e and e.id or id
 			local c = {s = e and NT.entity_label(e) or K.ENTITY .. tostring(id),
 				own = goal == self_id, short = K.ENTITY .. tostring(goal)}
-			c.b, c.t = item(r, e and shown_name(e) or c.s, function()
+			c.b, c.t = NT.name_item(r, "sg_links", e or {id = goal},
+					e and shown_name(e) or c.s, function()
 				-- ([KIT_SIGNALS_PARENT_LEFTOVERS] Switch parent armed: picked)
 				if not NT.pick_parent(goal) then
 					M.select(goal)
@@ -1141,8 +1231,9 @@ local function tip_show(c)
 	w.priority = 20
 	w.opacity = 1
 	w:SetVar("FollowsRoot", "1")
-	local width = math.min(360, root.width - 2 * MARGIN)
 	local t = text(w, c.s)
+	-- (a name's type as wide as it is)
+	local width = math.min(c.id and t.width + 12 or 360, 360, root.width - 2 * MARGIN)
 	t:SetWordwrap(true)
 	t:SetFixedWidth(width - 12)
 	w:SetFixedWidth(width)
@@ -1152,7 +1243,8 @@ local function tip_show(c)
 		y = math.max(MARGIN, p.y - w.height - 2)
 	end
 	w:SetPosition(math.max(MARGIN, math.min(p.x, root.width - width - MARGIN)), y)
-	log:info("kit editor: signals: the text of " .. c.name .. " at " .. w.position.x ..
+	log:info((c.say or "kit editor: signals: the text of " .. c.name) .. " at " ..
+			w.position.x ..
 			" " .. w.position.y .. " " .. w.width .. " " .. w.height .. " in " ..
 			root.width .. "x" .. root.height .. ": " .. c.s)
 end
@@ -1171,11 +1263,11 @@ function SG.hover_tick()
 		x, y, need = m.x, m.y, HOVER_US
 	end
 	local c
-	if x and not W.ctx and not ui_utils.dropdown_open() and SG.links_view and
-			W.sg_links and W.sg_links.visible then
+	if x and E.editing and not W.ctx and not ui_utils.dropdown_open() then
 		local sc = magic.ui.scale
 		x, y = x / sc, y / sc
-		if at(SG.links_view, x, y) then
+		if NT.sig() and SG.links_view and W.sg_links and W.sg_links.visible and
+				at(SG.links_view, x, y) then
 			for _, k in ipairs(SG.tips or {}) do
 				if at(k.b, x, y) then
 					c = k
@@ -1183,6 +1275,7 @@ function SG.hover_tick()
 				end
 			end
 		end
+		c = c or name_at(x, y)
 	end
 	if not c then
 		SG.tip_at, SG.tip_since = nil, nil
@@ -1194,8 +1287,14 @@ function SG.hover_tick()
 		SG.tip_hide()
 	end
 	if SG.tip_on ~= c.name and now - SG.tip_since >= need then
-		tip_show(c)
 		SG.tip_held = t0 and true or nil
+		-- [KIT_ENTITY_NAMES] A finger held on a name: its menu, which says the
+		-- type (the touch mode's long press is the context menu)
+		if t0 and c.id then
+			SG.tip_hide()
+			return SG.name_menu(c.id, x, y)
+		end
+		tip_show(c)
 	end
 end
 
@@ -1239,6 +1338,7 @@ function SG.links()
 	if not E.running then
 		SG.live = {}
 	end
+	NT.names_list("sg_links", SG.links_view)
 	SG.links_body = put_body(SG.links_view, function(body)
 		local tr = row(body)
 		local tt = text(tr, title, magic.Color(1.0, 0.85, 0.3))
@@ -1604,12 +1704,13 @@ end)
 
 -- Each frame: the camera; the layout as the window or the bar changes
 function SG.tick()
+	-- (a name's type in any view, [KIT_ENTITY_NAMES])
+	SG.hover_tick()
 	if not NT.sig() or not SG.view3d then
 		return
 	end
 	SG.layout()
 	SG.form_in_view()
-	SG.hover_tick()
 	live_tick()
 	local sideways = SG.links_view and SG.links_view.horizontalScrollBar.visible
 	if sideways ~= SG.sideways_said then
@@ -1630,7 +1731,12 @@ function SG.tick()
 	local walk = O.camera
 	local wc = walk:GetComponent("Camera")
 	SG.cam.fov, SG.cam.nearClip, SG.cam.farClip = wc.fov, wc.nearClip, wc.farClip
-	local e = S.primary and find(S.primary)
+	-- [KIT_SIGNALS_NEAR_CLIP] Round an entity, a near clip of its distance's:
+	-- the walk camera's was a side camera's (controls.lua's, metres off in the
+	-- Crag Trial, 4z15 (9)) and an entity zoomed up to was gone
+	local function near(d)
+		SG.cam.nearClip = math.max(0.01, d / 100)
+	end	local e = S.primary and find(S.primary)
 	local shows
 	local mid, size
 	if not (e and e.pos) and NT.sh.on() then
@@ -1641,6 +1747,7 @@ function SG.tick()
 		local q = magic.Quaternion(o.pitch, o.yaw, 0)
 		SG.cam_node.rotation = q
 		SG.cam_node.position = mid + q * magic.Vector3(0, 0, -math.max(o.dist, size))
+		near(math.max(o.dist, size))
 		shows = "the middle of the scene"
 	elseif e and e.pos then
 		local at = A.drawn_at(e)
@@ -1648,12 +1755,13 @@ function SG.tick()
 		local q = magic.Quaternion(o.pitch, o.yaw, 0)
 		SG.cam_node.rotation = q
 		SG.cam_node.position = at + q * magic.Vector3(0, 0, -o.dist)
+		near(o.dist)
 		shows = "entity " .. e.id
 		-- For a check: as a gesture ends, and as the entity moves
 		if not (SG.dragging or next(SG.orbit_fingers)) then
 			local said = string.format("kit editor: signals: the camera on %d at " ..
-					"%.2f %.2f %.2f: yaw %.1f, pitch %.1f, distance %.2f", e.id, at.x,
-					at.y, at.z, o.yaw, o.pitch, o.dist)
+					"%.2f %.2f %.2f: yaw %.1f, pitch %.1f, distance %.2f, near %.3f",
+					e.id, at.x, at.y, at.z, o.yaw, o.pitch, o.dist, SG.cam.nearClip)
 			if said ~= SG.camera_said then
 				SG.camera_said = said
 				log:info(said)
