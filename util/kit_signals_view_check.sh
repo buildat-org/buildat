@@ -1146,7 +1146,7 @@ screenshot @T@/palette_positioned.png
 click Button "kit/flag"
 wait_log 5000 kit editor: placing nothing
 $(pal_find kit/action)
-mouse_pos 114 187
+mouse_pos 114 215
 frames 3
 mouse_down left
 frames 3

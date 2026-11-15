@@ -1156,7 +1156,7 @@ click LineEdit "palette filter"
 frames 2
 text plate a player presses
 frames 3
-mouse_pos 70 109
+mouse_pos 70 127
 mouse_down left
 frames 2
 mouse_pos 300 200

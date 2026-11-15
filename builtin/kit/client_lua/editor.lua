@@ -2428,6 +2428,34 @@ palette = function()
 	W.palette = w
 	local tab = NT.tab()
 	NT.shown = tab == "Entities" and "Entities/" .. (S.list_tab or "") or tab
+	-- [KIT_PALETTE_HIDE] Hidden to its title, as floorplanner's palette: the
+	-- world the room; open again by the title or a tab chosen (a tool's key).
+	-- This session's. The touch mode's pane and a narrow screen's Tools fold
+	-- it already
+	if not NT.sh.on() and not narrow() then
+		if tab ~= S.palette_tab then
+			if S.palette_hidden then
+				log:info("kit editor: the palette shown by the " .. tab .. " tab")
+			end
+			S.palette_tab, S.palette_hidden = tab, nil
+		end
+		local hb, ht = button(w, S.palette_hidden and "Palette: " .. tab or "Palette",
+				function()
+			S.palette_hidden = not S.palette_hidden or nil
+			log:info("kit editor: the palette " .. (S.palette_hidden and "hidden" or "shown"))
+			palette()
+		end)
+		hb:SetName("palette hide")
+		-- (its mark at the right end, floorplanner's panel.mark)
+		local m = text(hb, S.palette_hidden and "▼" or "▲")
+		m:SetAlignment(magic.HA_RIGHT, magic.VA_CENTER)
+		m:SetPosition(-6, 0)
+		ht:SetPosition(-(m.width + 16) / 2, 0)
+		hb.minWidth = hb.minWidth + m.width + 16
+		if S.palette_hidden then
+			return
+		end
+	end
 	-- The tabs, NT.TABS's rows, each in as many as the screen's width
 	-- needs (with room for the row's spacing and the scroll bar's)
 	local room = (math.min(screen_ui.w or 1e9, magic.ui.root.width) - 16 - 12 -

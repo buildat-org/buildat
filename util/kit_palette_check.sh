@@ -15,7 +15,9 @@
 #      kit/attack removed, kit/flee moved down by its inspector button (native);
 #   5. [KIT_POSITIONLESS_PLACE] [kit/creature] selected once placed;
 #      kit/walker and kit/controls (root types) placed from their menu with
-#      no click on the view, each selected.
+#      no click on the view, each selected;
+#   6. [KIT_PALETTE_HIDE] the palette hidden to its title (hidden.png), back
+#      by the Box tool's key.
 #   util/kit_palette_check.sh          native
 #   util/kit_palette_check.sh web      the same in headless Chrome
 set -u
@@ -64,6 +66,10 @@ if [ "$mode" = web ]; then
  ["click", "Button", "section World"], ["waitlog", "the palette's section World closed", 10], ["frames", 3],
  ["shot", "${OUT}/closed.png"],
  ["click", "Button", "section World"], ["waitlog", "the palette's section World open", 10], ["frames", 3],
+ ["click", "Button", "palette hide"], ["waitlog", "kit editor: the palette hidden", 10], ["frames", 3],
+ ["shot", "${OUT}/hidden.png"],
+ ["key", "b"], ["waitlog", "kit editor: tool box", 10], ["frames", 3],
+ ["key", "b"], ["waitlog", "kit editor: tool select", 10], ["frames", 3],
 J
 		for f in "${finds[@]}" creature; do
 			echo " $(pal_find_web "$f") [\"waitlog_any\", \"the palette for \\\"$f\\\"\", 10],"
@@ -104,6 +110,10 @@ frames 3
 EOF
 		echo "screenshot $t/closed.png"
 		printf 'click Button "section World"\nwait_log_any 5000 the palette'"'"'s section World open\nframes 3\n'
+		# [KIT_PALETTE_HIDE] Hidden by its title, back by a tool's key
+		printf 'click Button "palette hide"\nwait_log 5000 kit editor: the palette hidden\nframes 3\n'
+		echo "screenshot $t/hidden.png"
+		printf 'keypress B\nwait_log 5000 kit editor: tool box\nframes 3\nkeypress B\nwait_log 5000 kit editor: tool select\nframes 3\n'
 		for f in "${finds[@]}" creature; do
 			pal_find "$f"
 			printf 'wait_log_any 5000 the palette for "%s"\n' "$f"
@@ -183,6 +193,8 @@ echo "ok: the filter finds kit/environment by ${finds[*]}, [kit/creature] by its
 grep -aq "kit editor: placing \[kit/creature\]" "$b" && ! grep -aq "the palette's menu of \[kit/creature\]" "$b" ||
 	fail "[kit/creature] not armed by its click ($b)"
 grep -aq "kit editor: placed \[kit/creature\] at" "$b" || fail "[kit/creature] not placed ($b)"
+sed -n '/kit editor: the palette hidden/,$p' "$b" | grep -aq "kit editor: the palette shown by the Box tab" ||
+	fail "the palette not hidden, or not back by the Box tool ($b, $t/hidden.png)"
 echo "ok: [kit/creature] armed by a click (no menu), placed by a click in the plan"
 # 4. Detached: its components its own
 s=$t/srv.log
