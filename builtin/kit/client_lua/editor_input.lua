@@ -3631,6 +3631,17 @@ function M.editor(options)
 	magic.SubscribeToEvent("Update", function(_, data)
 		local dt = data:GetFloat("TimeStep")
 		MEM.tick(dt)
+		-- [KIT_EDIT_VIEW] kit/controls' edit_view at this client's first edit
+		-- mode, once the controls are here: over a remembered view
+		-- (MEM.restore leaves it), the builder's own picks after it
+		local ev = E.editing and not S.edit_view and M.edit_view()
+		if ev then
+			S.edit_view = ev
+			if ev ~= "auto" then
+				log:info("kit editor: kit/controls' edit view " .. ev)
+				set_view(ev)
+			end
+		end
 		if S.uploading then
 			local name, png = buildat.picked_file()
 			if name then

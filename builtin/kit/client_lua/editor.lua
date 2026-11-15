@@ -5996,7 +5996,8 @@ function MEM.restore(was)
 	local t = MEM.view
 	if t and E.editing and not was then
 		MEM.view = nil
-		if VIEW_NAMES[t.view or ""] then
+		-- ([KIT_EDIT_VIEW] kit/controls' edit_view wins)
+		if VIEW_NAMES[t.view or ""] and (S.edit_view or "auto") == "auto" then
 			set_view(t.view)
 		end
 		-- (a tab of that name still: "Components" is Place now)
