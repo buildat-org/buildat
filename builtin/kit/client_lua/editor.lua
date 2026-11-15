@@ -149,7 +149,9 @@
 -- table over the whole window (signals.lua).
 -- kit.view() ("2d", "3d", "front", "walk", "hud" or "signals": the app walks only in
 -- "walk" while editing), kit.looking() (the editor's crosshair: the app's mouse looks).
--- [KIT_PLANE] F7 or the dropdown: Front, flat along +z at kit/controls' plane
+-- [KIT_PLANE] The Front view ("front"): [KIT_CRAG_PLAYTEST_1] 2D (F1, the
+-- dropdown's 2D) in a game whose kit/controls camera is side, no entry of
+-- its own (game-wide; a scene's own later). Flat along +z at kit/controls' plane
 -- (the server's plane_depth: the spawn's, a whole z), what is nearer than
 -- kit/controls' side_clip in front of it clipped (0.55: its layer's front);
 -- a placing goes in the plane's cell under the pointer (the
@@ -255,13 +257,12 @@ local RIGHT_CLICK_PX = 5
 local PLAN_3D_MAX_H = 100
 local LONG_PRESS_US = 500000
 local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk", hud = "HUD",
-	signals = "Signals", front = "Front"}
+	signals = "Signals", front = "2D (front)"}
 -- [KIT_INPUT_ACTIONS] each view's key's action (input.lua)
 local VIEW_KEYS = {["2d"] = "view_2d", ["3d"] = "view_3d", walk = "view_walk",
-	hud = "view_hud", signals = "view_signals", front = "view_front"}
--- The views in the bar's list ([KIT_PLANE] Front: the plane's, kit/controls'
--- plane, looked at along +z from in front of its layer)
-local VIEW_ORDER = {"2d", "3d", "front", "walk", "hud", "signals"}
+	hud = "view_hud", signals = "view_signals"}
+-- The views in the bar's list (the Front view is 2D's in a side game)
+local VIEW_ORDER = {"2d", "3d", "walk", "hud", "signals"}
 -- How far a click looks for a voxel, in cells
 local MAX_RAY = 128
 
@@ -1352,12 +1353,12 @@ rebuild_bar = function(if_changed)
 	views[#views + 1] = {"Walk here", "\0walk_here"}
 	-- Not measured on the side (a dropdown made is kept by ui_utils): the
 	-- second thing in the first row
-	local d
-	d = not sh and ui_utils.dropdown(bar_row, views, S.view, function(v)
+	local d, sv = nil, S.view == "front" and "2d" or S.view
+	d = not sh and ui_utils.dropdown(bar_row, views, sv, function(v)
 		if v ~= "\0walk_here" then
 			set_view(v)
 		elseif not walk_here() then
-			ui_utils.dropdown_set(d, S.view)
+			ui_utils.dropdown_set(d, sv)
 		end
 	end, {height = 24})
 	if d then
@@ -3129,13 +3130,16 @@ function NT.params_form(w, e, ci, c, t, keep)
 		end
 	end
 	-- [KIT_POLYGON_ROW] Points: how many, and the Front view round them, where
-	-- they are edited (polygon_edit.lua)
+	-- they are edited (polygon_edit.lua): a side game's 2D view.
+	-- simplified: no point editing in other games (their 2D is the plan)
 	for _, k in ipairs(points) do
 		local r, v = row(w), values[k] or decl[k].default
 		label(r, k:upper() .. ": " .. (type(v) == "table" and #v or 0))
-		button(r, "Edit in Front view", function()
-			NT.pg.show(e)
-		end)
+		if M.side_game() then
+			button(r, "Edit in 2D view", function()
+				NT.pg.show(e)
+			end)
+		end
 	end
 return names
 end
@@ -5887,6 +5891,10 @@ end
 set_view = function(v)
 	if not VIEW_NAMES[v] then
 		return
+	end
+	-- [KIT_CRAG_PLAYTEST_1] 2D is the Front view in a side game, and only there
+	if v == "2d" or v == "front" then
+		v = M.side_game() and "front" or "2d"
 	end
 	-- [KIT_HUD_VIEW] Adjusting the HUD: the walk camera held still, no
 	-- panels, the world not to be clicked; out to the view it came from

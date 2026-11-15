@@ -8221,7 +8221,7 @@ struct Module: public interface::Module, public Interface
 	float hm_blended(world::Heights &h, int x, int z,
 			std::map<std::pair<int, int>, float> &deltas)
 	{
-		const float g = h.at((float)x, (float)z) + 0.5f;
+		const float g = h.at((float)x, (float)z);
 		double best = HM_BLEND + 1;
 		float delta = 0;
 		for(int dz = -HM_BLEND; dz <= HM_BLEND; dz++)
@@ -8235,8 +8235,8 @@ struct Module: public interface::Module, public Interface
 				continue;
 			auto dl = deltas.find(k);
 			if(dl == deltas.end())
-				dl = deltas.emplace(k, e->second.first - (h.at((float)k.first,
-						(float)k.second) + 0.5f)).first;
+				dl = deltas.emplace(k, e->second.first - h.at((float)k.first,
+						(float)k.second)).first;
 			best = d;
 			delta = dl->second;
 		}
@@ -8526,12 +8526,15 @@ struct Module: public interface::Module, public Interface
 				generated = true;
 				heightmap::GenerateParams gp;
 				gp.seed = p.seed;
-				// A voxel column's top cell is centred on its whole number
-				gp.height_fn = [&](float x, float z){ return h.at(x, z) + 0.5f; };
+				// [KIT_CRAG_PLAYTEST_1] The ground's height itself: a flat
+				// one at its level, a whole number (the editor's 1 grid),
+				// not a voxel column's top (level + 0.5); a voxel built on
+				// it is the cell its surface cuts through, half sunk
+				gp.height_fn = [&](float x, float z){ return h.at(x, z); };
 				// Sand (the riverbed's layer) where a voxel column's top
 				// is under the sea or a beach over it, as the voxels have
 				// it: a flat ground at the sea's level its top's
-				gp.sand_below = p.sand_to();
+				gp.sand_below = p.sand_to() - 0.5f;
 				map->generate(gp);
 				if(layers != sv_<int>{0, 1, 2})
 					for(int z = 0; z < map->samples_z(); z++)
@@ -10795,7 +10798,7 @@ struct Module: public interface::Module, public Interface
 								h));
 				}
 				const int layer = steep > HM_ROCK_SLOPE ? layer_of(b, "stone") :
-						h < m_w->wp.sand_to() + 0.5f ? layer_of(b, "riverbed") :
+						h < m_w->wp.sand_to() ? layer_of(b, "riverbed") :
 						layer_of(b, "top");
 				const heightmap::Weights w = one_hot(layer);
 				if(w != WG(x, z))

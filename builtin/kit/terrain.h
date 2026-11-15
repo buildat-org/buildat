@@ -103,7 +103,8 @@
 // z0(); a World saved before origins at the world's origin, its row's
 // "hm_anchor" "corner") (its sides whole chunks: of 64, or [KIT_NO_WORLD] a
 // side under 64 the next power of two, 4 at least, both sides' chunk), the
-// same heights, its layers the biome's
+// same heights ([KIT_CRAG_PLAYTEST_1] as its surface: a flat one at level,
+// where a voxel column's top is at level + 0.5), its layers the biome's
 // top, stone and riverbed's; no water on it yet; its decorations voxel
 // objects (kit.cpp). [KIT_NO_WORLD] **No surface** ("none"; a scene with no
 // kit/terrain): no ground, nothing generated or loaded, the voxel tools

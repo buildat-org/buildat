@@ -15,8 +15,9 @@
 #      no more than two corrections. The side view's screenshot.
 #   2. The pointer at a ledge cell with a clipped voxel in front of it: the
 #      ledge's cell is pointed at, not the clipped one.
-#   3. The editor's Front view (F7): its screenshot; kit/button placed from the
-#      palette lands at the plane's depth.
+#   3. The editor's Front view, [KIT_CRAG_PLAYTEST_1] 2D (F1) in a game
+#      whose camera is side, F7 no view: its screenshot; kit/button placed
+#      from the palette lands at the plane's depth.
 #   4. kit/controls' movement refused as a course's (kit/course) and as a
 #      type that is none.
 #   5. The side camera ortho: its screenshot, the clipped voxel not pointed
@@ -32,8 +33,9 @@
 #      ones less its place (z 1); its second point dragged: a set of the
 #      points with that one alone moved. The screenshot. From 3D, its
 #      inspector's points row ([KIT_POLYGON_ROW]): the Front view round it.
-#   8. [KIT_EDIT_VIEW] kit/controls' edit_view front; the next session in
-#      the touch mode (by mouse), 3D remembered: edit mode comes up in Front.
+#   8. [KIT_EDIT_VIEW] kit/controls' edit_view 2d; the next session in
+#      the touch mode (by mouse), 3D remembered: edit mode comes up in 2D,
+#      the Front view.
 # The screenshots (side, front, side_ortho, side_polygons, front_polygon, touch_front)
 # are kept with KEEP_TMP=1; look at them.
 #   util/kit_plane_check.sh
@@ -126,8 +128,11 @@ wait_log 5000 kit: points at dig 9,1,1
 event kit_point_at
 keypress F6
 wait_log 10000 kit editor: state:
+frames 5
 keypress F7
-wait_log 5000 kit editor: the view is Front
+frames 5
+keypress F1
+wait_log 5000 kit editor: the view is 2D (front)
 frames 10
 screenshot @T@/front.png
 EOF
@@ -196,8 +201,8 @@ event kit_body
 screenshot @T@/side_polygons.png
 keypress F6
 wait_log 10000 kit editor: state:
-keypress F7
-wait_log 5000 kit editor: the view is Front
+keypress F1
+wait_log 5000 kit editor: the view is 2D (front)
 click Button "Grid*"
 wait_log 5000 kit editor: grid 1/2
 click Button "Grid*"
@@ -256,25 +261,26 @@ wait_log 5000 kit editor: the view is 3D
 event kit_select 10
 wait_log 5000 kit editor: the inspector
 frames 3
-click Button "Edit in Front view"
+click Button "Edit in 2D view"
 wait_log 5000 kit editor: polygon 10 in the Front view at
 frames 3
 keypress F2
 wait_log 5000 kit editor: the view is 3D
 EOF
 	n=$((n + 1))
-	set_p 3 edit_view '"front"'
+	set_p 3 edit_view '"2d"'
 	echo quit
 } > "$t/boss.cmds"
 # [KIT_EDIT_VIEW] The next session, in the touch mode (by mouse), its view
-# remembered 3D: edit mode comes up in kit/controls' edit_view, Front
+# remembered 3D: edit mode comes up in kit/controls' edit_view, 2D (the
+# Front view)
 cat > "$t/touch.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
 event kit_edit {"op": "mode", "on": true}
 wait_log_any 10000 kit editor: edit mode on
-wait_log_any 10000 kit editor: kit/controls' edit view front
+wait_log_any 10000 kit editor: kit/controls' edit view 2d
 frames 10
 screenshot @T@/touch_front.png
 quit
@@ -330,6 +336,12 @@ echo "ok: the plane at the spawn's depth (z 1): W nowhere, walked past walls off
 echo "ok: the side camera's pointer met the ledge's cell, not the clipped one in front of it (perspective and ortho)"
 grep -aP 'kit editor: placed kit/button at -?[0-9]+,-?[0-9]+,1$' "$c" >/dev/null ||
 	fail "the Front view placed off the plane: $(grep -a 'kit editor: placed kit/button' "$c")"
+# [KIT_CRAG_PLAYTEST_1] No Front view of its own: F7 changes nothing, F1
+# (2D) is the Front view in a game whose camera is side
+v=$(awk '/command: keypress F7/ { f = 1 } f && /command: keypress F1/ { g = 1 }
+	f && /kit editor: the view is / { sub(/.*the view is /, ""); print (g ? "F1 " : "F7 ") $0; exit }' "$c")
+[ "$v" = "F1 2D (front)" ] || fail "F7, then F1: the view ${v:-unchanged}, not F1's 2D (front) ($c)"
+echo "ok: F7 no view; F1 the Front view (2D) in a side game"
 echo "ok: the Front view placed $(grep -aoP 'kit editor: placed \Kkit/button at .*' "$c") (the plane's depth)"
 echo "ok: the movement refused as a course's and as none"
 # Stage 3: up the slope, stopped under the overhang (x 22.05: the body's
@@ -371,11 +383,11 @@ awk -v s="$shown" -v a="$at" 'BEGIN { split(s, p, ","); split(a, q, ",")
 	exit !(p[1] - q[1] < 2 && q[1] - p[1] < 2 && p[2] - q[2] < 2 && q[2] - p[2] < 2) }' ||
 	fail "the points row's Front view not at the polygon ($at): ${shown:-none} ($c)"
 echo "ok: the inspector's points row went to the Front view at $shown (the polygon at $at)"
-# [KIT_EDIT_VIEW] The touch session: 3D remembered, Front last
-v=$(grep -aoP 'kit editor: the view is \K\S+' "$t/touch.log" | tr '\n' ' ')
-[ "$(echo $v | awk '{ print $NF }')" = Front ] &&
+# [KIT_EDIT_VIEW] The touch session: 3D remembered, 2D (front) last
+v=$(grep -aoP 'kit editor: the view is \K.*' "$t/touch.log" | tr '\n' ',')
+[ "$(grep -aoP 'kit editor: the view is \K.*' "$t/touch.log" | tail -1)" = "2D (front)" ] &&
 	grep -aq "remembered for .*: edit, 3d" "$t/touch.log" ||
-	fail "the touch session's views ($v): not Front last over a remembered 3D ($t/touch.log)"
-echo "ok: the touch session's edit mode came up in Front (kit/controls' edit_view) over a remembered 3D: $v"
+	fail "the touch session's views ($v): not 2D (front) last over a remembered 3D ($t/touch.log)"
+echo "ok: the touch session's edit mode came up in 2D, the Front view (kit/controls' edit_view), over a remembered 3D: $v"
 echo "PASS: kit/controls' vertical plane: kit/walker held to it on both sides, the side camera and its pointer, the editor's Front view placing at its depth, the movement list checked; kit/polygon's slope and overhang met, others off the plane not, one drawn and edited in the Front view; the 2D queries (util/kit_plane_check.lua)"
 # vim: set noet ts=4 sw=4:

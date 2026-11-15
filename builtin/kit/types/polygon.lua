@@ -5,7 +5,8 @@
 -- depth is background or foreground (no collision; kit/controls' side_clip lets
 -- the side view show what is in front). With the plane off a body meets its prism
 -- while it lies flat to the world's x and y (yaw 0 or 180, any roll): a 2.5D
--- surface. Drawn and edited in the editor's Front view: placed from the palette
+-- surface. Drawn and edited in the editor's 2D view of a game whose kit/controls
+-- camera is side (its Front view): placed from the palette
 -- there each click is a point, the first one again or Enter closes it; selected,
 -- a point dragged moves it, an edge's middle dragged or clicked adds one there, a
 -- right click (a long press) on a point takes it away. At most 128 points within

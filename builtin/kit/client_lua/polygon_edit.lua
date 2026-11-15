@@ -170,8 +170,8 @@ function G.finish(d)
 	end
 end
 
--- [KIT_POLYGON_ROW] The inspector's "Edit in Front view": the Front view
--- round the polygon's points (their box and a margin), where they are edited
+-- [KIT_POLYGON_ROW] The inspector's "Edit in 2D view": the Front view (a
+-- side game's 2D) round the polygon's points (their box and a margin), where they are edited
 function G.show(e)
 	local _, c = poly_comp(e)
 	if not c or not e.pos then

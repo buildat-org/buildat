@@ -104,6 +104,11 @@ M.camera_mode = function() return camera_mode() end
 function M.edit_view()
 	return C.ctl and (params().edit_view or "auto") or nil
 end
+-- [KIT_CRAG_PLAYTEST_1] kit/controls' camera side, game-wide: the editor's
+-- 2D view is the Front view
+function M.side_game()
+	return params().camera == "side"
+end
 -- Whether the mouse or a drag turns the view (a top-down's and [KIT_PLANE] a
 -- side camera's never turn)
 function M.view_turns()

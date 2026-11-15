@@ -66,7 +66,6 @@ local KIT_KEYS = {
 	{id = "view_walk", label = "Editor: walking", default = "F3"},
 	{id = "view_hud", label = "Editor: adjusting the HUD", default = "F4"},
 	{id = "view_signals", label = "Editor: the signals table", default = "F5"},
-	{id = "view_front", label = "Editor: the front view (the plane's)", default = "F7"},
 	{id = "next", label = "Editor: the next object (Shift: back)",
 		default = "Tab"},
 	{id = "undo", label = "Editor: undo, with Ctrl", default = "Z"},

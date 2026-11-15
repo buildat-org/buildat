@@ -2,15 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~20 s (2026-11-15)
-# covers: apps/workbench/templates/crag_trial/** builtin/kit/box/box.c builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/players.lua builtin/kit/kit.cpp builtin/accounts/client_lua/accounts.lua
+# covers: apps/workbench/templates/crag_trial/** builtin/kit/box/box.c builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/players.lua builtin/kit/kit.cpp builtin/accounts/client_lua/accounts.lua
 # [KIT_PLANE] stage 4: a movement of a project's own, the Crag Trial template
 # (local/crag_bike, its gems and run) on Workbench; one server, kitboss (the
 # admin) and kitbob on a headless weston's Xwayland of the check's own:
 #   0. the template packed by util/pack_templates.sh and installed, its
 #      types with it;
-#   1. New from it: the editor in the Front view (edit.png, its kit/controls'
-#      edit_view); F6: the side camera, the bike's movement, its client
-#      part's draw hook drawing the body (start.png);
+#   1. New from it: the editor in 2D, the Front view in a game whose camera
+#      is side (edit.png, its kit/controls' edit_view 2d); Walk, the view
+#      clicked (30 selected), then 7 picked in Entities: 7 stays selected
+#      ([KIT_CRAG_PLAYTEST_1], fault 0a9); F6: the side camera, the bike's
+#      movement, its client part's draw hook drawing the body (start.png),
+#      the bike on the ground at y 0, the 1 grid ([KIT_CRAG_PLAYTEST_1]);
 #   2. W, then A: the bike up the first ramp's polygon, leaning back, the
 #      head down: the crash (crag_bike's output, linked to the run: its line
 #      says Crashed), the bike back at the start a second later;
@@ -134,10 +137,25 @@ cmd "frames 3" 'click DropDownList "▼"' "delay 300" "frames 3"
 step 10 "world_menu: template picked" 'click Text "Crag Trial (buildat, installed, unverified)"'
 step 60 "kit editor: edit mode on" "frames 3" 'click Button "Create"'
 await "$CL" 0 30 "player physics enabled"
-# [KIT_EDIT_VIEW] the template's kit/controls: the editor comes up in Front
-await "$CL" 0 10 "kit editor: kit/controls' edit view front"
+# [KIT_EDIT_VIEW] the template's kit/controls: the editor comes up in 2D,
+# [KIT_CRAG_PLAYTEST_1] the Front view in a game whose camera is side
+await "$CL" 0 10 "kit editor: kit/controls' edit view 2d"
+await "$CL" 0 10 "kit editor: the view is 2D \(front\)"
 cmd "frames 10" "screenshot $t/edit.png"
-echo "ok: the editor came up in the Front view (kit/controls' edit_view)"
+echo "ok: the editor came up in 2D, the Front view (kit/controls' edit_view 2d)"
+# [KIT_CRAG_PLAYTEST_1] (fault 0a9) Walk in a side game: the view clicked
+# (the mountains, 30), then 7 picked in Entities' Scene list. 7 stays: the
+# free pointer takes no crosshair, which made each click on a panel one at
+# the view's middle, 30 again
+step 5 "kit editor: the view is Walk" "keypress F3"
+cmd "frames 5" 'click Button "Entities"' "frames 3"
+step 5 "kit editor: selected 30 " "mouse_pos 600 350" "frames 3" "mouse_click left"
+step 5 "kit editor: selected 7 " "frames 5" 'click Button "Scene (*"' "frames 5" 'click Button "select 7"'
+m=$(mark "$CL")
+step 5 "kit: body at" "frames 30" "event kit_body"
+seen "$CL" "$m" "kit editor: selected " && fail "7 not kept selected in Walk: $(tail -c +$((m + 1)) "$CL" | grep -a "kit editor: selected" | head -1) ($CL)"
+step 5 "kit editor: the view is 2D \(front\)" "keypress F1"
+echo "ok: Walk: the view clicked, then 7 picked in the list: 7 kept"
 for re in "The template's type local/crag_bike \([0-9]+ bytes\)" "The template's type local/crag_gem " \
 		"The template's type local/crag_run "; do
 	grep -aqE "$re" "$SL" || fail "no \"$re\" in $SL"
@@ -155,7 +173,10 @@ exec 4> "$t/bob.cmd"
 cmd "frames 30" "screenshot $t/start.png"
 body
 awk -v x="$bx" 'BEGIN { exit !(x > -61 && x < -59) }' || fail "the bike not at the start: $bx $by ($CL)"
-echo "ok: a project from it, played: the side view, the bike's movement drawn by its hook"
+# [KIT_CRAG_PLAYTEST_1] The heightmap's flat ground at its level, y 0 (the 1
+# grid), the bike's feet on it
+awk -v y="$by" 'BEGIN { exit !(y > -0.1 && y < 0.1) }' || fail "the bike not on the ground at y 0: $bx $by ($CL)"
+echo "ok: a project from it, played: the side view, the bike's movement drawn by its hook, on the ground at y $by"
 # 2. Up the ramp, leaning back: the crash, back at the start. A held key may
 # read as not held: once again if the bike never left the start
 for try in 1 2; do
@@ -174,7 +195,7 @@ for try in 1 2; do
 	echo "the bike stood still: W and A again"
 done
 tail -c +$((m + 1)) "$CL" | grep -aoP 'kit: body at \K-?[0-9.]+,-?[0-9.]+' | tr , ' ' |
-	awk '$1 > -50 && $1 < -38 && $2 > 1.5 { f = 1 } END { exit !f }' ||
+	awk '$1 > -50 && $1 < -38 && $2 > 1 { f = 1 } END { exit !f }' ||
 	fail "the bike never on the first ramp ($CL)"
 for i in $(seq 20); do
 	body
