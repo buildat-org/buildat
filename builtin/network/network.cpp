@@ -628,14 +628,16 @@ static ss_ frame(int opcode, const ss_ &payload)
 	return r + payload;
 }
 
-// extra: more header lines, each ending in \r\n
+// extra: more header lines, each ending in \r\n; a Cache-Control there is
+// the one
 static ss_ response(const ss_ &status, const ss_ &content_type,
 		size_t content_length, const ss_ &extra = "")
 {
 	return "HTTP/1.1 "+status+"\r\n"
 			"Content-Type: "+content_type+"\r\n"
-			"Content-Length: "+itos((int64_t)content_length)+"\r\n"
-			"Cache-Control: no-cache\r\n"+extra+
+			"Content-Length: "+itos((int64_t)content_length)+"\r\n"+
+			(extra.find("Cache-Control:") == ss_::npos ?
+			"Cache-Control: no-cache\r\n" : "")+extra+
 			"Connection: close\r\n\r\n";
 }
 
@@ -1515,6 +1517,12 @@ struct Module: public interface::Module, public network::Interface
 					address.empty() ? peer.socket->get_remote_address() :
 					address, headers["origin"], headers["host"]);
 			r->headers = headers;
+			// [KIT_AGENTS_OAUTH] Through the proxy (production's TLS one) as
+			// https unless it says otherwise; directly, http
+			const ss_ proto = trusted_proxy(peer.socket->get_remote_address()) ?
+					web::lower(headers["x-forwarded-proto"]) : ss_();
+			r->scheme = proto == "http" || proto == "https" ? proto :
+					!address.empty() ? "https" : "http";
 			m_server->emit_event("network:http_request", r);
 			return true;
 		}
@@ -2697,7 +2705,8 @@ struct Module: public interface::Module, public network::Interface
 		Peer &peer = it->second;
 		peer.api_waiting = false;
 		peer.closing = true;
-		const char *text = status == 200 ? "OK" : status == 202 ? "Accepted" :
+		const char *text = status == 200 ? "OK" : status == 201 ? "Created" :
+				status == 202 ? "Accepted" : status == 303 ? "See Other" :
 				status == 400 ? "Bad Request" : status == 401 ? "Unauthorized" :
 				status == 405 ? "Method Not Allowed" : status == 413 ?
 				"Payload Too Large" : status == 403 ? "Forbidden" : status == 404 ?

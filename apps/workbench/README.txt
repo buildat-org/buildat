@@ -34,6 +34,14 @@ in the MCP initialize answer (get_guide gives it whole). The tools and the
 rules: [KIT_AGENTS] in builtin/kit/kit.cpp. The admin turns it off on the
 Accounts page (util/kit_agents_check.sh).
 
+A tool that signs in by OAuth (claude.ai's or ChatGPT's connectors) needs
+only the URL, https://wb.example.org/api/v1/mcp: it finds the server's
+sign-in by MCP's authorization spec, and its page at /api/v1/oauth/authorize
+takes the account's password (and TOTP code) or a Starport ID the server is
+listed for, then Allow. What the tool gets is an agent token of the account,
+listed and revoked as the others ([KIT_AGENTS_OAUTH] in
+builtin/accounts/accounts.cpp; util/kit_agents_oauth_check.sh).
+
 Licenses of textures and other media:
 ------------------------------------
 main/client_data/*.png, launcher/icon.png

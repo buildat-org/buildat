@@ -27449,10 +27449,21 @@ struct Module: public interface::Module, public Interface
 						token)), "its token stands no more");
 			log_i(MODULE, "MCP: a request from %s refused: %s", cs(r.address),
 					token.empty() ? "no bearer token" : cs(why));
-			return error(401, json::null(), -32001, "Not an agent token of "
-					"this server's (revoked, its account gone, or mistyped): "
-					"make one on My account, Connect an agent...",
-					"WWW-Authenticate: Bearer error=\"invalid_token\"\r\n");
+			// [KIT_AGENTS_OAUTH] Where a tool that signs in finds how
+			// (builtin/accounts/oauth.h): RFC 9728's metadata of this
+			// endpoint, by the URL the tool used
+			const ss_ origin = network::public_origin(r);
+			return error(401, json::null(), -32001, token.empty() ?
+					"No agent token: sign in, or make one on My account, "
+					"Connect an agent..." : "Not an agent token of this "
+					"server's (revoked, expired, its account gone, or "
+					"mistyped): sign in again, or make one on My account, "
+					"Connect an agent...", "WWW-Authenticate: Bearer"+
+					(origin.empty() ? ss_() : " resource_metadata=\""+origin+
+					"/.well-known/oauth-protected-resource/api/v1/mcp\", "
+					"scope=\"builder\"")+(token.empty() ? ss_() :
+					ss_(origin.empty() ? " " : ", ")+"error=\"invalid_token\"")+
+					"\r\n");
 		}
 		const ss_ pv = r.header("mcp-protocol-version");
 		if(!pv.empty() && !mcp_version_ok(pv))
