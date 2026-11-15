@@ -324,14 +324,28 @@ local function pos_of(s)
 	return {tonumber(p[1]) or 0, tonumber(p[2]) or 0, tonumber(p[3]) or 0}
 end
 
+-- [KIT_PLANE] stage 4: three steps in a row longer than this stop the
+-- prediction (the server's places only) till the movement's next version (a
+-- hitch's one is not the step's)
+-- simplified: by the clock after the step (no count hook in the client's
+-- sandbox); one that never returns is the watchdog's (app.cpp)
+local SLOW_US = 50000
 local function step(s, input, w)
 	local m = move()
-	if not C.def or not m then
+	if not C.def or not m or C.slow then
 		return
 	end
 	local sub = math.max(1, math.min(8, tonumber(m.params.substeps) or 1))
+	local t0 = buildat.get_time_us()
 	local ok, err = pcall(MV.steps, C.def, s, {input}, 1 / rate(), sub, w,
 			m.params)
+	local us = buildat.get_time_us() - t0
+	C.slow_n = ok and us > SLOW_US * sub and (C.slow_n or 0) + 1 or 0
+	if C.slow_n >= 3 then
+		C.slow = true
+		log:warning(string.format("kit: the movement %s: too slow: a step of %d ms," ..
+				" its prediction off", tostring(m.type), us / 1000 / sub))
+	end
 	if not ok and not C.failed then
 		C.failed = true
 		log:warning("kit: the movement " .. tostring(m.type) .. ": " ..
@@ -904,9 +918,14 @@ buildat.sub_packet("kit:controls", function(data)
 	update_turned()
 	local m = move()
 	if m and type(m.src) == "string" and (m.src ~= C.src or m.type ~= C.type) then
-		local ok, def = buildat.eval(m.src, tostring(m.type) .. ".movement")
+		-- [KIT_PLANE] stage 4: with move.lua's math, as box.c's define runs it
+		local ok, def = buildat.eval("return function(math) " .. m.src .. "\nend",
+				tostring(m.type) .. ".movement")
+		if ok and type(def) == "function" then
+			ok, def = pcall(def, copy(MV.math))
+		end
 		if ok and type(def) == "table" and type(def.step) == "function" then
-			C.def, C.src, C.type, C.failed = def, m.src, m.type, false
+			C.def, C.src, C.type, C.failed, C.slow = def, m.src, m.type, false, false
 			log:info("kit: the movement " .. tostring(m.type))
 		else
 			C.def, C.src, C.type = nil, nil, nil
@@ -1209,8 +1228,9 @@ local function gather()
 	r = math.max(-1, math.min(1, r))
 	-- [KIT_PLANE] The side camera looks along +z: left and right go along x, the
 	-- body facing the way it last went (yaw 90: +x, 270: -x); forward and back,
-	-- across the plane, go nowhere
-	if camera_mode() == "side" and not M.riding() then
+	-- across the plane, go nowhere ([KIT_PLANE] stage 4: a movement's raw_keys
+	-- takes them as they are, a bike's throttle and lean)
+	if camera_mode() == "side" and not M.riding() and decl().raw_keys ~= true then
 		if r ~= 0 then
 			C.face = r > 0 and 90 or 270
 		end
@@ -2317,6 +2337,17 @@ magic.SubscribeToEvent("Update", function(_, data)
 	impact_marker(dt)
 	effects(dt)
 end)
+
+-- [KIT_PLANE] stage 4: the movement's draw hook (its client part's draw(s,
+-- node): players.lua calls it for each body) and this body's state as
+-- predicted, for it
+function M.movement_draw()
+	local part = C.type and P.parts[C.type]
+	return type(part) == "table" and type(part.draw) == "function" and part.draw or nil
+end
+function M.body_state()
+	return C.s
+end
 
 -- For a drive: "event kit_click_at <x> <y> <z> [right]" clicks (the left
 -- button; the right one) where that point is on the screen

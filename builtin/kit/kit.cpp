@@ -5687,7 +5687,8 @@ struct Module: public interface::Module, public Interface
 				m_local_types[name] = row;
 			else
 				m_local_types.erase(name);
-			if(row.is_object() && !load_type(name, why)){
+			if(row.is_object() && (!load_type(name, why) ||
+					(is_movement(name) && !steps_tried(name, why)))){
 				m_types.erase(name);
 				m_sources.erase(name);
 				m_local_types.erase(name);
@@ -5820,7 +5821,7 @@ struct Module: public interface::Module, public Interface
 			}
 			for(auto &bp : m_bodies)
 				if(bp.second.type == name)
-					bp.second.failed = false;
+					bp.second.failed = bp.second.slow = false;
 			m_runtime_dirty = true;
 		});
 		return n;
@@ -13024,8 +13025,9 @@ struct Module: public interface::Module, public Interface
 			return 0;
 		Entity &e = it->second;
 		const ss_ type = e.comps[r.comp].type;
+		// ([KIT_PLANE] stage 4: "@events", a movement's events, box.c's own)
 		if(!e.comps[r.comp].disabled.empty() ||
-				!m_types[type].handlers.count(r.handler))
+				(!m_types[type].handlers.count(r.handler) && r.handler != "@events"))
 			return 0;
 		ss_ answer, error;
 		bool runaway = false, in_provider = false;
@@ -18651,6 +18653,11 @@ struct Module: public interface::Module, public Interface
 		// one that is not steered here moves it by this body's steps)
 		uint64_t ride = 0;
 		bool failed = false; // a step's error logged
+		// [KIT_PLANE] stage 4: a step was too slow: none stepped till a put or the
+		// type's next version
+		bool slow = false;
+		// [KIT_PLANE] stage 4: s.pose last set on the player's node ("kit_mpose")
+		ss_ mpose_sent;
 		// [KIT_TOOLS_1] the last input's yaw (degrees from +z toward +x):
 		// a hit's knockback where nothing else gives its direction
 		double look_yaw = 0;
@@ -18711,6 +18718,33 @@ struct Module: public interface::Module, public Interface
 			return false;
 		const Type &t = m_types[type];
 		return t.decl.get("movement").is_object() && t.handlers.count("step");
+	}
+
+	// [KIT_PLANE] stage 4: a movement just put, stepped as a body starts: a batch
+	// of inputs (forward, right, a jump) in an empty world, its root instance's
+	// parameters. false and why when a step is past box.c's cap ("too slow") or
+	// the batch past its budget; another error is the step's own (its body's in
+	// play)
+	// simplified: an empty world; a step slow only with much round it is stopped
+	// in play (step_bodies)
+	bool steps_tried(const ss_ &name, ss_ &why)
+	{
+		ss_ o = "Sreturn {type=";
+		lua_lit(json::Value(name), o);
+		o += ",params=";
+		lua_lit(params_of(name, root_instance(name)), o);
+		o += ",state={pos={0,0,0},yaw=0},dt=1/60,sub=1,inputs={";
+		for(int i = 0; i < BATCH; i++)
+			o += ss_("{f=1,r=")+(i % 2 ? "1" : "0")+",yaw=0,jump="+(i == 4 ? "1" : "0")+
+					",go=0,tx=0,ty=0,tz=0},";
+		o += "},world={}}";
+		ss_ answer, err;
+		bool runaway = false;
+		if(box_call(o, answer, err, &runaway) ||
+				(!runaway && err.find("too slow") == ss_::npos))
+			return true;
+		why = runaway ? "too slow: a batch of its steps past the box's budget" : err;
+		return false;
 	}
 
 	// A value an edit or c:set_param sets: check_param's, and [KIT_PLANE] for
@@ -19191,6 +19225,7 @@ struct Module: public interface::Module, public Interface
 		b.allowance = 0;
 		b.last_us = interface::os::time_us();
 		b.failed = false;
+		b.slow = false;
 		const int64_t n = ++b.puts;
 		body_moved(peer, b);
 		// The controls first: the client steps the put with the movement
@@ -19320,6 +19355,73 @@ struct Module: public interface::Module, public Interface
 			b.dig = v[10];
 		}
 		set_pose(packet.sender, b);
+	}
+
+	// [KIT_PLANE] stage 4: the movement's component on the app root (where
+	// root_instance() has its parameters from): its entity and index
+	bool movement_root(const ss_ &type, uint64_t &id, size_t &comp)
+	{
+		for(auto &p : m_entities){
+			if(p.second.parent != 1 || p.second.has_pos)
+				continue;
+			for(size_t i = 0; i < p.second.comps.size(); i++)
+				if(p.second.comps[i].type == type){
+					id = p.first;
+					comp = i;
+					return true;
+				}
+		}
+		return false;
+	}
+
+	// [KIT_PLANE] stage 4: the server's steps' s.events ({"name" | ["name",
+	// value]...}): outputs of the movement's component (none placed: nowhere),
+	// as by the body's player (box.c's "@events")
+	void movement_events(const ss_ &type, const ss_ &player, const json::Value &ev)
+	{
+		uint64_t id = 0;
+		size_t comp = 0;
+		if(!movement_root(type, id, comp))
+			return;
+		Run r;
+		r.entity = id;
+		r.comp = comp;
+		r.handler = "@events";
+		r.by = by_of(player);
+		r.args.append(ev);
+		queue_run(r);
+	}
+
+	// [KIT_PLANE] stage 4: s.pose (8 numbers at most, set by the steps), what the
+	// others' draw hook poses the body by: on the player's node as "kit_mpose",
+	// set as it changes
+	void movement_pose(size_t peer, Body &b)
+	{
+		const json::Value &ps = b.state.get("pose");
+		ss_ pose;
+		for(unsigned k = 0; ps.is_array() && k < ps.size() && k < 8; k++){
+			char buf[32];
+			snprintf(buf, sizeof buf, "%s%.4g", k ? " " : "", ps.at(k).is_number() ?
+					ps.at(k).as_number() : 0.0);
+			pose += buf;
+		}
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end() || !pi->second.player)
+			return;
+		auto ei = m_entities.find(pi->second.player);
+		if(ei == m_entities.end() || !ei->second.node)
+			return;
+		const ss_ sent = itos(ei->second.node)+"|"+pose;
+		if(sent == b.mpose_sent)
+			return;
+		b.mpose_sent = sent;
+		main_context::access(m_server, scene_of(ei->second),
+				[&](magic::Scene *sc){
+			magic::Node *n = sc->GetNode(ei->second.node);
+			if(n)
+				n->SetVar(magic::StringHash("kit_mpose"),
+						magic::Variant(pose.c_str()));
+		});
 	}
 
 	// [KIT_PLAYER_MODEL] What others draw of a player's body that its
@@ -22093,6 +22195,15 @@ struct Module: public interface::Module, public Interface
 					(now - b.last_us) / 1e6 * rate * 1.05);
 			b.last_us = now;
 			bool stepped = false;
+			// (its inputs answered where it stopped)
+			if(b.slow && !b.inputs.empty()){
+				b.ack = b.inputs.back().first;
+				b.inputs.clear();
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->send(bp.first, "kit:body", "{\"ack\":"+itos(b.ack)+
+							",\"s\":"+b.state_json+"}");
+				});
+			}
 			while(!b.inputs.empty() && b.allowance >= 1 && spent < budget &&
 					m_box){
 				const json::Value bd = body_decl(b.type);
@@ -22138,20 +22249,41 @@ struct Module: public interface::Module, public Interface
 				const bool ok = box_call(o, answer, why, &runaway, &used);
 				spent += used;
 				if(!ok){
-					if(!b.failed)
+					// [KIT_PLANE] stage 4: a step past the box's cap (or the batch
+					// past its budget) stops the body, said in the Log of the
+					// movement's component
+					const bool slow = runaway || why.find("too slow") != ss_::npos;
+					if(!b.failed){
 						log_w(MODULE, "%s's body (%s): %s", cs(pi->second.name),
 								cs(b.type), cs(why));
+						uint64_t id = 0;
+						size_t comp = 0;
+						if(slow && movement_root(b.type, id, comp))
+							add_log(id, b.type+" too slow: "+pi->second.name+"'s body "
+									"stopped till put again or the type's next version ("+
+									why+")");
+					}
 					b.failed = true;
+					b.slow = b.slow || slow;
 					b.inputs.clear();
 					break;
 				}
 				b.ack = last;
 				b.state = json::load_string(answer.c_str());
 				b.state_json = answer;
+				// [KIT_PLANE] stage 4: the steps' events, the movement's outputs
+				if(b.state.is_object() && !b.state.get("events").is_undefined()){
+					const json::Value ev = b.state.get("events");
+					b.state.del_key("events");
+					b.state_json = b.state.stringify();
+					if(ev.is_array() && ev.size() && m_session.running)
+						movement_events(b.type, pi->second.name, ev);
+				}
 				stepped = true;
 			}
 			if(!stepped)
 				continue;
+			movement_pose(bp.first, b);
 			// Out of the World's region: back where it was put
 			const json::Value &sp = b.state.get("pos");
 			if(sp.is_array() && sp.size() == 3 && sp.at(1).is_number() &&
@@ -27142,9 +27274,23 @@ struct Module: public interface::Module, public Interface
 				"i.yaw degrees), w the world (w:move({x, y, z, r, h}, dx, dy, dz, "
 				"step_up) -> mx, my, mz, hits; w.sin, w.cos, w.sqrt, w.PI), p its "
 				"params; it runs on the server and on each client (get_type "
-				"kit/ball). client: an optional client part the clients run "
+				"kit/ball). [KIT_PLANE] The side view's: w:circle(x, y, r) -> "
+				"{{depth, nx, ny, info}...}, w:segment(x0, y0, x1, y1) -> t, nx, "
+				"ny, info. Its file's math is w's on both sides (floor, ceil, "
+				"sqrt, abs, fmod, min, max, sin, cos, atan, atan2; no random). "
+				"s.events = {\"name\" | {\"name\", value}...} set in a step: "
+				"outputs of its component on the app root (declare them), as by "
+				"the player; s.pose = {n...} (8): what the other clients draw by. "
+				"A step past 200000 Lua instructions is too slow: a put whose "
+				"step is is refused (the version before runs on), in play the "
+				"body stops. movement.raw_keys = true: the side camera's keys "
+				"as they are (f, r); touch = \"drive\" (Gas, Brake, the stick's "
+				"r), touch_buttons = {{\"Turn\", \"jump\"}}. client: an optional "
+				"client part the clients run "
 				"(sandboxed): a table of on_add(e), on_state(e, key), "
-				"on_update(e, dt), on_remove(e); e.state, e.node, e:log(text).",
+				"on_update(e, dt), on_remove(e); e.state, e.node, e:log(text); "
+				"a movement's draw(s, node) draws each player's body (node at "
+				"its feet, s its state; another's {pos, pose}).",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string", "description":
 					"local/<name> or <name>: letters, digits and _"},
@@ -28083,7 +28229,10 @@ struct Module: public interface::Module, public Interface
 			"- Custom types: put_type writes a type of this project's own, "
 			"local/<name> (its description says the file), live at once; "
 			"get_type reads a type's file (Kit's are examples), "
-			"delete_type takes one away.\n"
+			"delete_type takes one away. A movement of your own steps the "
+			"players (kit/controls' movement): its events are its outputs, "
+			"its client part's draw(s, node) draws them (the Crag Trial "
+			"template's local/crag_bike is one).\n"
 			"- Work in small steps and read back: get_state (or list_types) "
 			"first, then place, set_param, link, start, try_input, get_events "
 			"and get_log, stop, fix, again. An edit's arguments are 4 KB at "

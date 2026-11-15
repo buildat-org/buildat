@@ -554,7 +554,8 @@ await "$SL" "$m" 10 "A type get \(local/lamp\) by peer [0-9]+ refused: no edit r
 tail -c +$((m + 1)) "$SL" | grep -aqE "A type put \(local/bob_type\) by peer [0-9]+ refused: no edit rights here" ||
 	fail "kitbob's put not refused ($SL)"
 # (My account once first: its first page is drawn before the hello comes,
-# without "Connect an agent...", and not redrawn; accounts.lua)
+# without "Connect an agent...", then again with it, and token() clicks at
+# once; accounts.lua)
 menu
 step 10 "accounts: hello: logged in already" "frames 3" 'click Button "My account*"'
 step 10 "pause: the menu shown" "frames 3" "keypress Escape"

@@ -329,10 +329,55 @@ function M.flash_player(id, color, time)
 	end
 end
 
+-- [KIT_PLANE] stage 4: a body the movement draws (its client part's draw(s,
+-- node), controls.lua's M.movement_draw()): a node of its own at the feet as
+-- drawn (no turn; its children the hook's to make and pose), s this player's
+-- predicted state or another's {pos, pose = the numbers of its "kit_mpose"};
+-- the humanoid posed as ever (what is attached follows it) and not shown.
+-- simplified: the others by this client's movement (kit/controls' one: a seat's
+-- body is not drawn), their pose as it came (not 0.1 s back as their place)
+local function hooked(b, id, n, at, draw, shown)
+	if not draw then
+		if b.mnode then
+			b.mnode:Remove()
+			b.mnode = nil
+		end
+		return false
+	end
+	if not b.mnode then
+		b.mnode = O.scene:CreateChild("kit_movement_body")
+		log:info("kit: player " .. id .. "'s body drawn by its movement")
+	end
+	b.mnode.position = at
+	-- (deep: its children with it; the hook's own hidden ones it hides again)
+	if b.mnode.enabled ~= shown then
+		b.mnode:SetDeepEnabled(shown)
+	end
+	if not shown then
+		return true
+	end
+	local s = id == P.you and M.body_state()
+	if not s then
+		local v = n.node:GetVar("kit_mpose")
+		local pose = {}
+		for x in (v:IsEmpty() and "" or v:GetString()):gmatch("%S+") do
+			pose[#pose + 1] = tonumber(x) or 0
+		end
+		s = {pos = {at.x, at.y, at.z}, pose = pose}
+	end
+	local ok, err = pcall(draw, s, b.mnode)
+	if not ok and not b.mfailed then
+		b.mfailed = true
+		log:warning("kit: the movement's draw: " .. tostring(err))
+	end
+	return true
+end
+
 -- Each frame, from controls.lua: this player's body at `own` (its feet;
 -- nil: none yet), yaw and pitch, its height, whether it is shown (posed
 -- all the same: what is attached to it is drawn on it); the others
 function M.draw_players(own, yaw, pitch, h, show_own)
+	local draw = M.movement_draw and M.movement_draw()
 	local dt = M.frame_dt or 1 / 60
 	local t = now_s()
 	local teams = team_colors()
@@ -359,8 +404,8 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 				end
 				b.hidden = false
 				-- (one watched is seen from its eyes)
-				show_body(b, (id ~= P.you or show_own == true) and
-						id ~= SP.target)
+				local shown = (id ~= P.you or show_own == true) and id ~= SP.target
+				show_body(b, shown and not draw)
 				set_skin(b, teams[id])
 				if b.flash_till then
 					if t >= b.flash_till then
@@ -449,9 +494,13 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 				set_item(b, item)
 				draw_body(b, at, b.yaw, math.max(-60, math.min(60, pt or 0)), speed,
 						mining_now(b, sw, dig, t), id == P.you and h or 1.7, dt)
+				hooked(b, id, n, at, draw, shown)
 			elseif b then
 				show_body(b, false)
 				b.hidden = true
+				if b.mnode then
+					b.mnode:SetDeepEnabled(false)
+				end
 			end
 		end
 	end
@@ -460,10 +509,16 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 		if not seen[id] then
 			if not P.nodes[id] then
 				b.root:Remove()
+				if b.mnode then
+					b.mnode:Remove()
+				end
 				bodies[id] = nil
 				log:info("kit: player " .. id .. "'s body gone")
 			else
 				show_body(b, false)
+				if b.mnode then
+					b.mnode:SetDeepEnabled(false)
+				end
 			end
 		end
 	end
