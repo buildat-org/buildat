@@ -727,8 +727,9 @@ srv = open(t + "/inst.log", errors="replace").read()
 m = re.search(r"world_menu: template choices: (.*)", cl)
 assert m, "no choices"
 got = m[1].strip()
-assert got.startswith("Empty, ") and got.endswith(", Puzzle room (buildat, installed)"), got
-assert {"Airships", "Arena", "Capture the flag", "Puzzle room", "Ship", "Survival"} <= set(got[7:].split(", ")[:-1]), got
+# ([KIT_PROJECT_EXPORT] From a file... last)
+assert got.startswith("Empty, ") and got.endswith(", Puzzle room (buildat, installed), From a file..."), got
+assert {"Airships", "Arena", "Capture the flag", "Puzzle room", "Ship", "Survival"} <= set(got[7:].split(", ")[:-2]), got
 assert "A template: Stopped, in edit mode" in srv
 assert "kitboss opens the template in edit mode" in srv
 PY
