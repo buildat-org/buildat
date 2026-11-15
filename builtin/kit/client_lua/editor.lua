@@ -3792,6 +3792,33 @@ local function inspector(w, e, is_made)
 				send({op = "restart", id = e.id, comp = ci - 1})
 			end)
 		end
+		-- [CRAG_BEST_RESET] What play never resets (best times): a builder's
+		-- clear, asked first, one undo
+		if t.kept and not copy then
+			local key = e.id .. " " .. ci
+			if E.kept_ask == key then
+				text(w, "Clear what play keeps (best times)? Undo brings it back.",
+						DIM)
+				local r = row(w)
+				button(r, "Clear it", function()
+					E.kept_ask = nil
+					send({op = "clear_kept", id = e.id, comp = ci - 1})
+					log:info("kit editor: " .. c.type .. "'s kept state on " ..
+							e.id .. " cleared")
+					refresh()
+				end):SetName("clear kept yes")
+				button(r, "Cancel", function()
+					E.kept_ask = nil
+					refresh()
+				end)
+			else
+				button(w, "Clear kept state...", function()
+					E.kept_ask = key
+					log:info("kit editor: clear " .. c.type .. "'s kept state?")
+					refresh()
+				end):SetName("clear kept " .. c.type)
+			end
+		end
 		-- [KIT_HUD_STYLE] "Copy style from..."
 		if NT.style_prefix(c.type) then
 			ui_utils.dropdown(row(w), NT.style_sources(e.id, ci), "", function(x)

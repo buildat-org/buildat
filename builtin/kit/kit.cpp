@@ -279,6 +279,13 @@ struct Type
 	// [KIT_UI_COMPONENTS] The state each player has their own of, {"player:
 	// <id>": value} (per_player = true): each client is sent only theirs
 	std::set<ss_> per_player;
+	// [CRAG_BEST_RESET] The state play never resets (kept = true): Play, Stop,
+	// a round and a restart keep it, the save's runtime row holds it (never
+	// the start's); a builder's op clear_kept puts its defaults back
+	std::set<ss_> kept;
+	// [CRAG_BEST_RESET] It reads the entities linking to it (linked_in =
+	// true: c.linked_in = {input = {id...}}), and reaches them
+	bool linked_in = false;
 	// [KIT] stage 4d: each signal's value's type ("any" where the file
 	// gives none; "none": no value)
 	sm_<ss_, ss_> in_types, out_types;
@@ -630,6 +637,11 @@ struct Change
 	// and its row before (not an object: there was none)
 	ss_ local_type;
 	json::Value local_before;
+	// [CRAG_BEST_RESET] a clear_kept's instance (kept_id 0: none) and its
+	// kept state before
+	uint64_t kept_id = 0;
+	size_t kept_comp = 0;
+	json::Value kept_before;
 };
 
 // [KIT] stage 4e: a scene's World (terrain.h; [KIT_SCENES] one a scene):
@@ -1826,13 +1838,24 @@ struct Module: public interface::Module, public Interface
 		t.client = client;
 		const json::Value &st = t.decl.get("state");
 		if(st.is_object())
-			for(json::Iterator it(st); it; ++it)
+			for(json::Iterator it(st); it; ++it){
+				if((*it).get("kept").is_true()){
+					if((*it).get("per_player").is_true()){
+						why = name+": state "+it.key()+" is kept and per_player"
+								" (kept state is the whole game's; key it by"
+								" c:name(by))";
+						return false;
+					}
+					t.kept.insert(it.key());
+				}
 				if((*it).get("shared").is_true())
 					t.shared.insert(it.key());
 				else if((*it).get("per_player").is_true()){
 					t.per_player.insert(it.key());
 					t.shared.insert(it.key());
 				}
+			}
+		t.linked_in = t.decl.get("linked_in").is_true();
 		t.usable = t.decl.get("usable").is_true();
 		// [KIT_USE_ACCESS] Who may use it, the engine's on every usable type
 		// (on_use() asks it): all, owners (of the region holding it) or
@@ -4626,6 +4649,14 @@ struct Module: public interface::Module, public Interface
 				json::Value j = json::object();
 				j.set("type", in.type);
 				j.set("state", in.state);
+				// [CRAG_BEST_RESET] never the start's
+				if(for_start && !m_types[in.type].kept.empty()){
+					json::Value st = json::object();
+					for(json::Iterator it(in.state); it; ++it)
+						if(!m_types[in.type].kept.count(it.key()))
+							st.set(it.key(), *it);
+					j.set("state", st);
+				}
 				if(!in.disabled.empty())
 					j.set("disabled", in.disabled);
 				if(!in.timers.empty()){
@@ -5009,6 +5040,13 @@ struct Module: public interface::Module, public Interface
 			for(size_t i = 0; i < e.comps.size(); i++){
 				Instance &in = e.comps[i];
 				if(!m_session.running){
+					// [CRAG_BEST_RESET] the save's kept state, which to_start
+					// keeps
+					const json::Value &ks = saved.at((unsigned)i);
+					if(full_type(jstr(ks, "type")) == in.type)
+						for(const ss_ &k : m_types[in.type].kept)
+							if(!ks.get("state").get(k).is_undefined())
+								in.state.set(k, ks.get("state").get(k));
 					to_start(e, i);
 					continue;
 				}
@@ -12872,6 +12910,19 @@ struct Module: public interface::Module, public Interface
 			o += ",players=";
 			lua_lit(players, o);
 		}
+		// [CRAG_BEST_RESET] {input = {id...}}
+		if(m_types[in.type].linked_in){
+			o += ",linked_in={";
+			for(auto &p : linked_in(e.id)){
+				o += "[";
+				lua_lit(json::Value(p.first), o);
+				o += "]={";
+				for(uint64_t id : p.second)
+					o += itos(id)+",";
+				o += "},";
+			}
+			o += "}";
+		}
 		// [KIT_CREATURES_8A] what is near (a type's `nearby`: a range or
 		// "param:<name>"), and a creature's own
 		{
@@ -13513,6 +13564,23 @@ struct Module: public interface::Module, public Interface
 		if(m_types[in.type].teams)
 			for(uint64_t tid : teams_of(e))
 				r.insert(tid);
+		// [CRAG_BEST_RESET]
+		if(m_types[in.type].linked_in)
+			for(auto &p : linked_in(e.id))
+				r.insert(p.second.begin(), p.second.end());
+		return r;
+	}
+
+	// [CRAG_BEST_RESET] The entities with a link to an entity, by the input
+	// it goes to
+	sm_<ss_, std::set<uint64_t>> linked_in(uint64_t id)
+	{
+		sm_<ss_, std::set<uint64_t>> r;
+		for(auto &p : m_entities)
+			for(const Instance &li : p.second.comps)
+				for(const Link &l : li.links)
+					if(l.to == id)
+						r[l.input].insert(p.first);
 		return r;
 	}
 
@@ -27287,7 +27355,11 @@ struct Module: public interface::Module, public Interface
 				"= {name = \"what it does\"}, outputs = {...}}; params = {name = "
 				"{type = \"number\"|\"string\"|\"bool\"|\"voxel\"|\"entity\"|"
 				"\"position\", default, min, max, choices = {...}}}; state = {name "
-				"= {default, shared = true (sent to the clients)}}; inputs = {name "
+				"= {default, shared = true (sent to the clients), kept = true "
+				"(play never resets it: Play, Stop, rounds and restarts keep it, "
+				"only clear_kept clears it; a game's best times by c:name(by))}}; "
+				"linked_in = true: c.linked_in = {input = {id...}}, the entities "
+				"linking to it, which it reaches (c:send); inputs = {name "
 				"= \"none\"|\"number\"|\"string\"|\"bool\"|\"entity\"|\"position\"|"
 				"\"any\"}, outputs likewise; usable = true (players use it: "
 				"on_use); look = {shape = \"box\"|\"sphere\", size = n or {x, y, z}, "
@@ -27365,6 +27437,13 @@ struct Module: public interface::Module, public Interface
 				"time; 0 stops): what they emit comes in get_events.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
 				"required": ["id"]})J", ""},
+			{"clear_kept", "clear_kept", "Puts the kept state (a type's state "
+				"with kept = true: what play never resets, a game's best "
+				"times) of entity id's component comp back at its defaults. "
+				"One undo.",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"},
+				"comp": {"type": "integer", "description": "From 0"}},
+				"required": ["id"]})J", R"J({"comp": 0})J"},
 			{"keep", "keep", "Stopped: puts the builds the last Stop discarded "
 				"(what players built and made in play) into the start, all or "
 				"those of names.",
@@ -28286,7 +28365,8 @@ struct Module: public interface::Module, public Interface
 			"delete_type takes one away. A movement of your own steps the "
 			"players (kit/controls' movement): its events are its outputs, "
 			"its client part's draw(s, node) draws them (the Crag Trial "
-			"template's local/crag_bike is one).\n"
+			"template's local/crag_bike is one). State with kept = true (best "
+			"times) outlives Stop and restarts; clear_kept clears it.\n"
 			"- Work in small steps and read back: get_state (or list_types) "
 			"first, then place, set_param, link, start, try_input, get_events "
 			"and get_log, stop, fix, again. An edit's arguments are 4 KB at "
@@ -29188,10 +29268,14 @@ struct Module: public interface::Module, public Interface
 
 	// An instance's state at the start: the row "start"'s, over its
 	// type's defaults (a key's `param`'s value if it has one); nothing
-	// disabled
+	// disabled. [CRAG_BEST_RESET] Its kept state stays as it is
 	void to_start(Entity &e, size_t i)
 	{
 		Instance &in = e.comps[i];
+		json::Value kept = json::object();
+		for(const ss_ &k : m_types[in.type].kept)
+			if(!in.state.get(k).is_undefined())
+				kept.set(k, in.state.get(k));
 		in.state = json::object();
 		state_defaults(in);
 		in.timers.clear();
@@ -29199,9 +29283,30 @@ struct Module: public interface::Module, public Interface
 		const json::Value &s = m_start.get(itos(e.id)).at((unsigned)i);
 		if(full_type(jstr(s, "type")) == in.type)
 			runtime_from(in, s);
+		for(json::Iterator it(kept); it; ++it)
+			in.state.set(it.key(), *it);
 		in.disabled.clear();
 		for(const ss_ &k : m_types[in.type].shared)
 			replicate_state(e, i, k);
+	}
+
+	// [CRAG_BEST_RESET] An instance's kept state set from values (a
+	// clear_kept's defaults, its undo's state before), saved and logged
+	void set_kept(Entity &e, size_t i, const json::Value &values,
+			const ss_ &how)
+	{
+		Instance &in = e.comps[i];
+		for(const ss_ &k : m_types[in.type].kept){
+			if(values.get(k).is_undefined())
+				continue;
+			in.state.set(k, values.get(k));
+			if(m_types[in.type].shared.count(k))
+				replicate_state(e, i, k);
+		}
+		m_runtime_dirty = true;
+		log_i(MODULE, "Entity %s's %s: its kept state %s", cs(itos(e.id)),
+				cs(in.type), cs(how));
+		add_log(e.id, "kept state "+how);
 	}
 
 	// What players keep between plays: the first instance (by entity id)
@@ -29979,6 +30084,9 @@ struct Module: public interface::Module, public Interface
 						o.set(k, d.get(k));
 				if(addable(t))
 					o.set("addable", true);
+				// [CRAG_BEST_RESET] the inspector's Clear kept state
+				if(!m_types[t].kept.empty())
+					o.set("kept", true);
 				pal.set(t, o);
 			}
 			// The composition's types that are not in the palette, too:
@@ -29996,6 +30104,8 @@ struct Module: public interface::Module, public Interface
 							o.set(k, t.second.decl.get(k));
 					if(addable(t.first))
 						o.set("addable", true);
+					if(!t.second.kept.empty())
+						o.set("kept", true);
 					types.set(t.first, o);
 				}
 			// [KIT] stage 4h: the controls, the movements and the seats
@@ -30418,6 +30528,34 @@ struct Module: public interface::Module, public Interface
 			add_log(id, "restarted by "+p.name);
 			return;
 		}
+		if(op == "clear_kept"){
+			Entity *e = nullptr;
+			ss_ why;
+			Instance *in = instance_arg(j, e, why);
+			if(!in)
+				return refuse(why);
+			if(m_types[in->type].kept.empty())
+				return refuse(in->type+" has no kept state");
+			Change c;
+			c.kept_id = e->id;
+			c.kept_comp = in - &e->comps[0];
+			c.kept_before = json::object();
+			Instance d;
+			d.type = in->type;
+			d.params = in->params;
+			state_defaults(d);
+			for(const ss_ &k : m_types[in->type].kept)
+				if(!in->state.get(k).is_undefined())
+					c.kept_before.set(k, in->state.get(k));
+			set_kept(*e, c.kept_comp, d.state, "cleared by "+p.name);
+			std::deque<Change> &u = m_undo[p.name];
+			u.push_back(c);
+			while(u.size() > UNDO_MAX)
+				u.pop_front();
+			m_edit_what = "Cleared "+in->type+"'s kept state";
+			send_state(peer);
+			return;
+		}
 		sv_<std::pair<uint64_t, json::Value>> change;
 		ss_ why, what;
 		if(op == "undo"){
@@ -30445,6 +30583,20 @@ struct Module: public interface::Module, public Interface
 					m_undo[p.name].push_back(c);
 					return refuse(why);
 				}
+				return;
+			}
+			// [CRAG_BEST_RESET] a clear_kept's: the kept state before back
+			if(c.kept_id){
+				auto it = m_entities.find(c.kept_id);
+				if(it == m_entities.end() ||
+						c.kept_comp >= it->second.comps.size())
+					return refuse("entity "+itos(c.kept_id)+"'s component is "
+							"gone");
+				set_kept(it->second, c.kept_comp, c.kept_before,
+						"put back by "+p.name+"'s undo");
+				m_edit_what = "Undone: a kept state's clear, "+itos(u.size())+
+						" more to undo";
+				send_state(peer);
 				return;
 			}
 			// [KIT_HEIGHTMAP_REGEN_LOSS] a regeneration of all: the

@@ -118,7 +118,15 @@ namespace interface
 //              simplified: a player's entry stays until the round's start
 //              resets the state, in a persistent world for good (one a
 //              player who ever set it off); dropping a gone player's is
-//              the upgrade
+//              the upgrade. [CRAG_BEST_RESET] A kept = true one (not
+//              per_player) play never resets: Play, Stop, a round's start,
+//              Restart and a server restart keep it; it is in the runtime
+//              row, never the start's (Save as start leaves it out); a
+//              builder's op clear_kept puts its default back (best times,
+//              keyed by c:name(by), a high score)
+//   linked_in = true         -- [CRAG_BEST_RESET] c.linked_in = {input =
+//              {id...}}: the entities with a link to it, by its input,
+//              which it reaches (c:send to each: crag_run's gems)
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
 //   about    = {what = "...", inputs = {name = "..."}, outputs = {name = "..."}}
 //                            -- [KIT_SIGNALS_DOCS] For the builders, all of it
@@ -310,8 +318,8 @@ namespace interface
 // kit:app, AppCall, its native code's to do; 8 a run). A
 // component reaches its own entity and its links, the entities its entity
 // parameters name and the copies it made, and the player who set it off
-// (every player with `players = true`), the panel it is in (c.panel), nothing
-// else.
+// (every player with `players = true`), the panel it is in (c.panel), the
+// entities linking to it with `linked_in = true`, nothing else.
 //
 // [KIT_PARTICLES], [KIT_FEEDBACK_EFFECTS] What the clients show at a moment,
 // no play reads it. c:effect{...} (32 a run; 240 a second in all, burst 480,
@@ -907,7 +915,11 @@ namespace interface
 //       not): every game session ended; every bot made in play gone, in
 //       the default and in each game session
 //   {"op": "restart", "id": n, "comp": i}  -- Running: the instance's
-//       state from the start again, and its on_start
+//       state from the start again, and its on_start (its kept state stays)
+//   {"op": "clear_kept", "id": n, "comp": i}  -- [CRAG_BEST_RESET] the
+//       instance's kept state (state.kept) at its defaults, Running or not,
+//       one undo (the values before back); logged, the inspector's "Clear
+//       kept state"
 //   {"op": "focus", "sel": n (0: none), "cursor": [x, y, z] or null}  --
 //       what the builder has selected and where their cursor is, which
 //       the other builders see (no edit, no undo)
