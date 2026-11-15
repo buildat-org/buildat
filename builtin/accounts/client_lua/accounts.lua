@@ -1152,7 +1152,7 @@ local function field(parent, label, secret, on_finish, value)
 		magic.SubscribeToEvent(e, "TextFinished", function() on_finish() end)
 	end
 	e:SetText(value or "")
-	return e
+	return e, r
 end
 -- The same look for a game's pages: Starport's, Aitta's
 M.page_row = row
@@ -1774,16 +1774,18 @@ end
 -- make users give up on it"): a token for the user's own agentic tool
 -- (Claude Code, Codex, Cursor, Gemini CLI...), local or in the cloud, which
 -- reaches Kit's MCP endpoint on this server's own port with it. Builder
--- scope, or Admin for an admin who asks; a label; then one block to copy
--- -- the endpoint's address, a ready `claude mcp add` line and a generic
--- MCP config -- shown once. The account's tokens under it, with their
--- last use and Revoke. No answer is logged: a make's holds the token.
+-- scope, or Admin for an admin who asks; a label; then, shown once, the
+-- endpoint's address and the token, each with its Copy (user, 2026-11-15:
+-- most only want the address), and behind "Claude Code" and "JSON config"
+-- a ready `claude mcp add` line or a generic MCP config with its Copy. The
+-- account's tokens under it, with their last use and Revoke. No answer is
+-- logged: a make's holds the token.
 -- The address is the one this client joined by, whose port serves the web
 -- too; joined by TLS (a hosted server's HTTPS proxy, which passes /api/),
 -- https, which is what a cloud agent reaches.
 -- simplified: a Windows client's boxed local server ("pipe:...") has no
--- address a tool reaches, and the block says a wrong one
-local ag = {scope = "builder", label = "Claude Code"}
+-- address a tool reaches, and the URL shown is a wrong one
+local ag = {scope = "builder", label = "My agent"}
 function M.mcp_url(address, tls)
 	local a = address:gsub("^%a+://", ""):gsub("/.*$", "")
 	local host = a:match("^%[.-%]") or a:match("^[^:]*")
@@ -1801,12 +1803,22 @@ assert(M.mcp_url("wb.example.org:8443", true) ==
 assert(M.mcp_url("localhost:29731", false) ==
 		"http://localhost:29731/api/v1/mcp")
 assert(M.mcp_url("[::1]", false) == "http://[::1]:29500/api/v1/mcp")
-function ag.block(url, token)
-	return "Server: " .. url .. "\n\nClaude Code:\nclaude mcp add " ..
-			"--transport http buildat " .. url .. " --header \"Authorization: " ..
-			"Bearer " .. token .. "\"\n\nOther tools (an MCP config):\n" ..
-			'{"mcpServers": {"buildat": {"type": "http", "url": "' .. url ..
+-- The examples by their buttons' labels
+function ag.example(kind, url, token)
+	if kind == "Claude Code" then
+		return "claude mcp add --transport http buildat " .. url ..
+				" --header \"Authorization: Bearer " .. token .. "\""
+	end
+	return '{"mcpServers": {"buildat": {"type": "http", "url": "' .. url ..
 			'", "headers": {"Authorization": "Bearer ' .. token .. '"}}}}'
+end
+-- A Copy button (named "copy <what>" for a drive) putting text there
+function ag.copy(parent, what, text)
+	button(parent, "Copy", function()
+		magic.ui:SetClipboardText(text)
+		notice("Copied the " .. what)
+		log:info("accounts: agents: the " .. what .. " copied")
+	end):SetName("copy " .. what)
 end
 function ag.redraw()
 	if page_kind == "agents" then
@@ -1838,20 +1850,32 @@ function ag.draw()
 	if ag.token then
 		local tls = buildat.connection_encrypted()
 		local url = M.mcp_url(buildat.server_address() or "", tls)
-		local text = ag.block(url, ag.token)
 		page_text(w, "For your agent, shown once: copy it now. If it leaks, " ..
 				"revoke the token on this page.", WARN)
-		page_text(w, text)
+		for _, v in ipairs({{"MCP URL", "URL", url}, {"Token", "token", ag.token}}) do
+			local e, fr = field(w, v[1], false, nil, v[3])
+			e.cursorPosition = 0 -- (its start shown)
+			ag.copy(fr, v[2], v[3])
+		end
+		page_text(w, "Your tool sends the token as the header " ..
+				"Authorization: Bearer <token>. Examples:", DIM)
 		local rr = row(w)
-		button(rr, "Copy", function()
-			magic.ui:SetClipboardText(text)
-			notice("Copied: paste it into your agent's terminal or config")
-			log:info("accounts: agents: the block copied")
-		end, true)
-		button(rr, "Done", function()
-			ag.token = nil
+		for _, kind in ipairs({"Claude Code", "JSON config"}) do
+			button(rr, kind, function()
+				ag.shown = kind
+				log:info("accounts: agents: the " .. kind .. " example shown")
+				ag.draw()
+			end)
+		end
+		if ag.shown then
+			local text = ag.example(ag.shown, url, ag.token)
+			page_text(w, text)
+			ag.copy(w, ag.shown .. " example", text)
+		end
+		button(w, "Done", function()
+			ag.token, ag.shown = nil, nil
 			ag.draw()
-		end)
+		end, true)
 		if not tls then
 			page_text(w, "Plain HTTP: the token goes unencrypted. Fine on " ..
 					"this machine or a LAN you trust; a server for others " ..
@@ -1908,7 +1932,7 @@ function ag.draw()
 	button(w, "Back", go_back)
 end
 function M.agents_page(back)
-	ag.back, ag.res, ag.token, ag.error = back, nil, nil, nil
+	ag.back, ag.res, ag.token, ag.error, ag.shown = back, nil, nil, nil, nil
 	ag.req("list", {}, ag.answer)
 	ag.draw()
 end

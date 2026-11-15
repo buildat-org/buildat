@@ -252,21 +252,25 @@ menu() # Escape until the pause menu is up (the editor's own Escapes first)
 }
 token() # the driven client's agent token, by My account, into $tok
 {
-	local i block old=${tok:-}
+	local i old=${tok:-}
 	menu
 	step 10 "accounts: agents: 0 tokens, on" "frames 3" 'click Button "My account*"' \
 		"frames 5" 'click Button "Connect an agent..."'
 	step 10 "accounts: agents: a token made, builder" "frames 3" 'click Button "Make a token"'
-	step 10 "accounts: agents: the block copied" "frames 3" 'click Button "Copy"'
+	step 10 "accounts: agents: the URL copied" "frames 3" 'click Button "copy URL"'
 	for i in $(seq 50); do
-		block=$(DISPLAY=$d xclip -selection clipboard -o 2>/dev/null)
-		tok=$(grep -aoP 'Bearer \Kbat_[0-9a-f]{64}' <<< "$block" | head -1)
-		[ -n "$tok" ] && [ "$tok" != "$old" ] && break
+		url=$(DISPLAY=$d xclip -selection clipboard -o 2>/dev/null)
+		[[ $url == http*/api/v1/mcp ]] && break
 		sleep 0.2
 	done
-	url=$(grep -aoP '^Server: \K\S+' <<< "$block")
-	[ -n "$url" ] && [ -n "$tok" ] && [ "$tok" != "$old" ] ||
-		fail "no new token on the clipboard: $block"
+	step 10 "accounts: agents: the token copied" "frames 3" 'click Button "copy token"'
+	for i in $(seq 50); do
+		tok=$(DISPLAY=$d xclip -selection clipboard -o 2>/dev/null)
+		[[ $tok =~ ^bat_[0-9a-f]{64}$ ]] && [ "$tok" != "$old" ] && break
+		sleep 0.2
+	done
+	[[ $url == http*/api/v1/mcp ]] && [[ $tok =~ ^bat_[0-9a-f]{64}$ ]] && [ "$tok" != "$old" ] ||
+		fail "no address or no new token on the clipboard: $url $tok"
 	cmd "frames 3" 'click Button "Done"'
 	step 10 "pause: the menu shown" "frames 3" "keypress Escape"
 	step 10 "pause: the menu closed" "frames 3" "keypress Escape"

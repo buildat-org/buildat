@@ -137,6 +137,7 @@ local help_text = hud_text(-10, 13)
 -- under Jump at 1024 px), the status line kept above it
 help_text:SetWordwrap(true)
 local status_text = hud_text(-30, 15)
+local said_status = nil -- (logged as it changes, the first too)
 local crosshair = {}
 for _, s in ipairs({{15, 1}, {1, 15}}) do
 	local bar = magic.ui.root:CreateChild("BorderImage")
@@ -401,18 +402,25 @@ magic.SubscribeToEvent("Update", function()
 		end
 	end
 	show_pointed()
-	local p = kit.body_pos()
-	status_text.visible = not editing and p ~= nil
-	if p then
-		local _, held = kit.held_item()
-		status_text:SetText(string.format("(%d, %d, %d)  in hand: %s",
-				math.floor(p.x + 0.5), math.floor(p.y + 0.95),
-				math.floor(p.z + 0.5), kit.building() == "inventory" and
-				(held ~= "" and held or "nothing") or hand))
+	-- [KIT_PLAY_HINTS] None of the lines under the pause menu or its pages
+	-- (they were drawn over it); in play the voxel in hand only where Kit's
+	-- hotbar does not show it, no coordinates
+	local up = not menu.held()
+	if help_text.visible ~= up then
+		help_text.visible, status_text.visible = up, up
+		log:info("workbench: the HUD lines " .. (up and "shown" or "hidden"))
+	end
+	local status = not editing and kit.building() ~= "inventory" and
+			"in hand: " .. hand or ""
+	if status ~= said_status then
+		said_status = status
+		status_text:SetText(status)
+		log:info('workbench: the status line "' .. status .. '"')
 	end
 	local seated = kit.seated()
+	-- The movement's hints, those not used yet ([KIT_PLAY_HINTS]), else
 	-- [KIT_INPUT_ACTIONS] the keys as bound
-	help_text:SetText(editing and "" or TOUCH and (seated and
+	local hint = editing and "" or kit.movement_help() or TOUCH and (seated and
 			"Stick: move  Exit: leave the seat" or
 			"Stick: walk  drag: look  tap: use/dig  hold: place") or
 			kit.key_text(seated and "[forward][left][back][right] [jump]: " ..
@@ -420,7 +428,11 @@ magic.SubscribeToEvent("Update", function()
 			"[forward][left][back][right] [jump]: walk, jump  left: use or " ..
 			"dig  right: place  " .. (kit.building() == "inventory" and
 			"[inventory]: inventory  " or "[voxel1]-[voxel10]: voxel  ") ..
-			"[edit]: edit  Esc: menu"))
+			"[edit]: edit  Esc: menu")
+	if hint ~= help_text.text then
+		help_text:SetText(hint)
+		log:info('workbench: the hint "' .. hint .. '"')
+	end
 	-- [KIT_PHONE_EDITING] A touchscreen's over the hotbar and what stands on
 	-- it, the bars' width free (the sweep of 2026-11-12: it ran into the
 	-- hotbar's slots)

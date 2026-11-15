@@ -86,7 +86,12 @@ return {
 	root = true,
 	outputs = {crash = "none"},
 	movement = {body = BODY, raw_keys = true, touch = "drive",
-		touch_buttons = {{"Turn", "jump"}}},
+		touch_buttons = {{"Turn", "jump"}},
+		-- The help line in play, each item gone once its input is used
+		help = {{"[forward]/[back]", "gas, brake", "f"},
+			{"[left]/[right]", "lean", "r"}, {"[jump]", "turn round", "jump"}},
+		touch_help = {{"Gas/Brake", "ride", "f"}, {"Stick", "lean", "r"},
+			{"Turn", "turn round", "jump"}}},
 	params = {
 		gravity = {cat = "physics", type = "number", default = 14, min = 0,
 			max = 100},

@@ -36,8 +36,9 @@
 #   - the game settings by Tools' Menu: Fullscreen (kit_fullscreen) listed,
 #     off (the drive pins it), never turned on.
 # And from the sweep of 2026-11-12: in play Workbench's hint over the
-# hotbar; a placing (a type, a paste, Place under this) said in the status
-# line before the world is tapped, Place under this stopped by Cancel;
+# hotbar ([KIT_PLAY_HINTS] the walker's, no coordinates, none under the
+# pause menu: 00b_menu.png); a placing (a type, a paste, Place under this)
+# said in the status line before the world is tapped, Place under this stopped by Cancel;
 # portrait: Enter and Move let a typed field go; landscape: the foot one row; a
 # favourite made from a scrolled list keeps it there; the link's Shown at
 # the touch size; the Signals viewport never the walk camera's, each Add
@@ -115,6 +116,7 @@ a("waitlog", "player physics enabled", 120)
 a("waitlog_any", "kit editor: edit rights: yes", 10); fr(5)
 a("shot", "${OUT}/00_play.png")
 a("tap", "Button", "Menu", W, H); a("waitlog", "pause: the menu shown", 10); fr(3)
+a("waitlog", "workbench: the HUD lines hidden", 10); a("shot", "${OUT}/00b_menu.png")
 a("tap", "Button", "Edit*")
 a("waitlog", "kit editor: touch shell on", 20)
 a("waitlog", "kit editor: touch shell: pixels", 10); fr(10)
@@ -393,6 +395,16 @@ hot = [m for m in hot if m]
 assert hb and hot, "no hint's place or no hotbar in play"
 bottom = int(re.search(r"at (-?\d+)", hb[-1])[1])
 assert int(hot[-1][2]) + bottom <= int(hot[-1][1]), f"the hint over the hotbar: {hb[-1]} / {hot[-1][0]}"
+# [KIT_PLAY_HINTS] In play the walker's hint (Workbench's own, a
+# touchscreen's), no coordinates, the lines hidden under the pause menu
+pre = "\n".join(page[:on])
+assert 'workbench: the hint "Stick: walk  drag: look  tap: use/dig  hold: place"' in pre, \
+    "no walker's hint in play"
+st = re.findall(r'workbench: the status line "([^"]*)"', pre)
+assert st and st[-1] == "", f"the status line in play: {st[-1:]}"
+m = pre.find("pause: the menu shown")
+assert m >= 0 and pre.find("workbench: the HUD lines hidden", m) > m, \
+    "the HUD lines not hidden under the pause menu"
 # Landscape: the foot one row (the sweep: two with something selected)
 if W > H:
     feet = [l for l in page[on:] if "touch shell: the foot:" in l]

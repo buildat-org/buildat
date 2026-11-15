@@ -14,7 +14,11 @@
 --     chase view's metres behind (else kit/controls' distance), camera_up =
 --     metres its target is raised, touch = "stick"|"tap"|"drive",
 --     touch_buttons = {{"Fire", "jump"}...}: the touch bar's buttons, each
---     held while pressed as that input (jump or down), for the default Jump}
+--     held while pressed as that input (jump or down), for the default Jump,
+--     [KIT_PLAY_HINTS] help = {{"[forward]/[back]", "gas, brake", "f"}...}
+--     and touch_help alike: an app's help line in play (keys, what, the
+--     input: f, r, jump or down), each item gone once its input is used
+--     (controls.lua's kit.movement_help; without them the app's own)}
 --   step = function(s, i, dt, w, p) ... end
 -- [KIT_PLANE] stage 4, a movement of a builder's own (a custom type) has more:
 --   movement.raw_keys = true: the side camera's keys as they are (f forward
