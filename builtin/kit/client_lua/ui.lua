@@ -37,7 +37,13 @@
 --   children by order (then id) with its `gap`, a hidden one leaving no
 --   gap, their x and y unused; a width or height of 0 fits it to them and
 --   with nothing shown and no title it is not drawn. Across a column they
---   go by the panel's anchor's side.
+--   go by the panel's anchor's side. [KIT_LAYOUT_AUTO] "auto": a row on a
+--   landscape screen (across it by the anchor's side too; of width 0 the
+--   room's whole width, its children spread to its ends), a column on a
+--   portrait one, there each child as wide as the panel's room (a view
+--   keeping its shape) and, the panel at the bottom, stacked up from it
+--   (its first child lowest). A field focused with the keyboard up lifts
+--   its group (lift_for_keyboard below).
 --   **Play**: shown while the server is Running and this player is out of
 --   the tools (Stopped, the components do not run: none shown, Kit's
 --   notice of it instead, [KIT_STOPPED_NOTICE] below); a button's press is the action's (kit.press_action) or
@@ -783,6 +789,18 @@ local function framed()
 	return E.editing and not (M.hud_plain and M.hud_plain())
 end
 
+-- [KIT_LAYOUT_AUTO] A panel's layout ("none", "column", "row"): "auto" a
+-- row on a landscape screen (the HUD's box), a column on a portrait one;
+-- and whether it was auto
+local function layout_of(u)
+	local l = tostring(u.layout or "none")
+	if l ~= "auto" then
+		return l, false
+	end
+	local _, _, w, h = hud_box()
+	return w >= h and "row" or "column", true
+end
+
 -- A shown panel's stacked children placed (r.sx, r.sy, in it) and, where
 -- its width or height is 0, its size fitted to them
 local function stack(r, V)
@@ -797,11 +815,40 @@ local function stack(r, V)
 	table.sort(kids, before)
 	local pad = pad_of(V)
 	local gap = num(u.gap, 0, 0, 100) * V
-	local row = u.layout == "row"
+	local lay, auto = layout_of(u)
+	local row = lay == "row"
+	local a = tostring(u.anchor or "")
+	-- [KIT_LAYOUT_AUTO] An auto column: each child as wide as the panel's
+	-- room (a phone's whole width), a view keeping its shape; at the bottom
+	-- it stacks up from there, its first child lowest, as the row's first
+	-- is at its left. simplified: a panel among them is widened, not laid
+	-- out again
+	if auto and not row then
+		local inner = r.w - 2 * pad
+		for _, k in ipairs(kids) do
+			if k.kind == "view" then
+				k.h = math.min(math.floor(k.h * inner / math.max(1, k.w)), r.ph)
+			end
+			k.w = inner
+		end
+		if a:find("bottom") then
+			for i = 1, math.floor(#kids / 2) do
+				kids[i], kids[#kids + 1 - i] = kids[#kids + 1 - i], kids[i]
+			end
+		end
+	end
 	local along, across = 0, 0
 	for i, k in ipairs(kids) do
 		along = along + (row and k.w or k.h) + (i > 1 and gap or 0)
 		across = math.max(across, row and k.h or k.w)
+	end
+	-- (an auto row of no width the room's whole width too, the space between
+	-- its children: the first at its left end, the last at its right, as a
+	-- lobby's chat and view sat in the corners)
+	local spread = 0
+	if auto and row and #kids > 1 and num(u.width, 0, 0, 400) <= 0 then
+		spread = math.max(0, (r.pw - 2 * pad - along) / (#kids - 1))
+		along = along + spread * (#kids - 1)
 	end
 	local cw, ch = row and along or across, row and across or along
 	local titled = r.text ~= ""
@@ -813,13 +860,15 @@ local function stack(r, V)
 		r.h = math.min(ch + 2 * pad + r.title_h, r.ph)
 	end
 	r.empty = #kids == 0 and not titled and num(u.width, 0, 0, 400) <= 0
-	local a = tostring(u.anchor or "")
 	local at = 0
 	for _, k in ipairs(kids) do
 		if row then
 			k.sx = pad + at
-			k.sy = pad + r.title_h + (r.h - 2 * pad - r.title_h - k.h) / 2
-			at = at + k.w + gap
+			-- ([KIT_LAYOUT_AUTO] an auto row's across by its anchor's side)
+			local room = r.h - 2 * pad - r.title_h - k.h
+			k.sy = pad + r.title_h + (not auto and room / 2 or
+					a:find("bottom") and room or a:find("top") and 0 or room / 2)
+			at = at + k.w + gap + spread
 		else
 			local room = r.w - 2 * pad - k.w
 			k.sx = pad + (a:find("left") and 0 or a:find("right") and room or
@@ -913,6 +962,57 @@ local function menu_item(id, n, u)
 		end, {order = num(u.order, 50, 1, 99)})
 	end
 	it.n, it.text, it.seen = n, u.text, true
+end
+
+-- [KIT_LAYOUT_AUTO] **The keyboard**: while a field (an input's, a chat's)
+-- has the focus in play and the on-screen keyboard is up
+-- (buildat.keyboard_height()), the field's top-level group -- the element
+-- under the HUD or the full screen it sits in -- is lifted for the field
+-- to sit above the keyboard, over what is above it (its top off the screen
+-- if it must); back down as either goes. An offset of the group's place
+-- alone, once the frame's layout is done: the UI root's size and the
+-- client's UI fit are left alone (the fit holds while a field is focused
+-- on a touchscreen, and Kit's elements follow the root)
+local lifted, lifted_log = nil, nil
+local function lift_for_keyboard(play)
+	local f = magic.ui.focusElement
+	local fid = play and f and f:GetTypeName() == "LineEdit" and
+			tonumber(f:GetName():match("^kit %a+ (%d+)$"))
+	local r = fid and U[fid]
+	local kb = r and r.edit and r.el and buildat.keyboard_height() or 0
+	local g, dy = r, 0
+	if kb > 0 then
+		while g.pr and not g.pr.full do
+			g = g.pr
+		end
+		local room = magic.ui.root.height - kb - 4
+		dy = math.max(0, math.floor(r.edit.screenPosition.y + r.edit.height - room))
+	end
+	if dy == 0 then
+		g = nil
+	end
+	if lifted and lifted ~= g then
+		if lifted.el then
+			lifted.el.priority = lifted.prio0
+		end
+		lifted.prio0 = nil
+	end
+	lifted = g
+	if g then
+		-- (over the rest of its layer)
+		g.prio0 = g.prio0 or g.el.priority
+		g.el.priority = g.pr and 150 or -2
+		local p = g.el.position
+		g.el:SetPosition(p.x, p.y - dy)
+	end
+	local line = g and string.format("%s by %d, the field %d at %d to %d " ..
+			"over the keyboard at %d", tostring(g.id), dy, fid,
+			r.edit.screenPosition.y, r.edit.screenPosition.y + r.edit.height,
+			magic.ui.root.height - kb) or "none"
+	if line ~= lifted_log then
+		lifted_log = line
+		log:info("kit: ui lifted for the keyboard: " .. line)
+	end
 end
 
 local function update()
@@ -1243,8 +1343,8 @@ local function update()
 	-- Then the stacking panels, the innermost first
 	for i = #list, 1, -1 do
 		local r = U[list[i]]
-		if r.el and r.kind == "panel" and (r.ui.layout == "column" or
-				r.ui.layout == "row") then
+		local lay = r.el and r.kind == "panel" and layout_of(r.ui)
+		if lay == "column" or lay == "row" then
 			stack(r, V)
 		end
 		-- ([KIT_PANEL_LEFTOVERS] A panel not stacking taller than its height
@@ -1360,6 +1460,11 @@ local function update()
 				r.edit.enabled = not E.editing
 			end
 			if r.lines then
+				-- ([KIT_LAYOUT_AUTO] as wide as an auto column made it)
+				local lw = math.max(8, math.floor(w - 2 * pad))
+				if r.lines.width ~= lw then
+					r.lines.width = lw
+				end
 				r.lines:SetPosition(pad, math.floor(h - (r.field_h or 0) -
 						r.lines.height))
 			end
@@ -1496,6 +1601,7 @@ local function update()
 			end
 		end
 	end
+	lift_for_keyboard(play)
 	-- The edits waiting for a kit/game_rules placed
 	if rules_wait and E.editing then
 		local rid, comp = M.rules_entity()
