@@ -353,7 +353,11 @@ case), host, port, path, port_given}, http and ws defaulting to 80, https
 and wss to 443. util/address_check.sh.
 interface/web_brand.h -- web_brand ([HTML_BRAND]): Buildat's look on the
 HTML an app serves (Hearth's pages, the Starport's): css, logo (an <img>
-of /brand/logo.png); html(s), text escaped for HTML and attributes;
+of /brand/logo.png); a form's first button (form[id]>button) is its main
+one, the client's PrimaryButton ([WEB_MAIN_BUTTON]: a dark amber fill,
+light text, a 2 px amber border, cyan on hover; a solid amber fill on the
+dark ground is not recommended for a main button, as it resembles a
+well-known adult site's look); html(s), text escaped for HTML and attributes;
 cut(s, n) at a UTF-8 character's start with "..."; page(title, name,
 content), a read-only page with the header and the link into the web
 client ([FRONT_PAGES]; content already escaped); file(share_path, name,

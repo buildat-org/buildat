@@ -11,8 +11,12 @@ namespace interface
 	// pages and the Starport's ID page. The user's pick of
 	// local/options_for_HTML_BRAND, c_quiet: the launcher's darker ground,
 	// panels with grey borders, purple only on the header's rule and a
-	// quote's bar; cyan on focus and the answered box, amber on a form's
-	// main button, a red for errors. The font and the logo are the app's
+	// quote's bar; cyan on focus and the answered box, a red for errors. A
+	// form's main button is the client's PrimaryButton ([WEB_MAIN_BUTTON];
+	// ui_utils/res/style.png's cells): a dark amber fill, light text and a
+	// 2 px amber border, the border cyan on hover. A solid amber fill on the
+	// dark ground is not recommended for a main button: it resembles a
+	// well-known adult site's look. The font and the logo are the app's
 	// own files under /brand/, so a page loads nothing from another origin.
 	namespace web_brand
 	{
@@ -53,8 +57,12 @@ namespace interface
 			"button:hover{background:#8c8c8c}"
 			"input:focus,button:focus,select:focus,a:focus{"
 			"outline:2px solid #26d9ff;outline-offset:1px}"
-			"form[id]>button:first-of-type{background:#ff9e1f;color:#111;"
-			"border-color:#ff9e1f}"
+			// Over button:hover by specificity; pressed after hover
+			"form[id]>button:first-of-type{background:#7a4f0c;color:#ddd;"
+			"border:2px solid #ff9e1f}"
+			"form[id]>button:first-of-type:hover{background:#94600f;"
+			"border-color:#26d9ff}"
+			"form[id]>button:first-of-type:active{background:#5a3a09}"
 			"fieldset{border:1px solid #3a3a48;border-radius:4px;margin:1em 0}"
 			"#err{color:#ff5c5c}#ok{color:#26d9ff}b{color:#fff}"
 			// [FRONT_PAGES]: a host or a key does not widen a phone's page
