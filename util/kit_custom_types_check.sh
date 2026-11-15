@@ -256,7 +256,8 @@ token() # the driven client's agent token, by My account, into $tok
 	menu
 	step 10 "accounts: agents: 0 tokens, on" "frames 3" 'click Button "My account*"' \
 		"frames 5" 'click Button "Connect an agent..."'
-	step 10 "accounts: agents: a token made, builder" "frames 3" 'click Button "Make a token"'
+	step 10 "accounts: agents: a token made, builder" "frames 3" \
+		'click Button "Make a token..."' "frames 3" 'click Button "Make a token"'
 	step 10 "accounts: agents: the URL copied" "frames 3" 'click Button "copy URL"'
 	for i in $(seq 50); do
 		url=$(DISPLAY=$d xclip -selection clipboard -o 2>/dev/null)

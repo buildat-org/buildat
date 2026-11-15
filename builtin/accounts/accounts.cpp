@@ -3387,6 +3387,7 @@ struct Module: public interface::Module, public Interface
 		const OAuthRequest q = it->second;
 		page = oauth_page_of(q, rid, origin);
 		page.totp_name = q.totp_name;
+		page.by_password = form("id_token").empty();
 		if(form("action") == "deny"){
 			m_oauth_requests.erase(it);
 			log_i(MODULE, "OAuth: a sign-in of \"%s\" from %s denied",

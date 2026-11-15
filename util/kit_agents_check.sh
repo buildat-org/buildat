@@ -120,7 +120,8 @@ await "$CL" 0 120 "player physics enabled"
 step 10 "pause: the menu shown" "frames 3" "keypress Escape"
 step 10 "accounts: agents: 0 tokens, on" "frames 3" 'click Button "My account*"' \
 	"frames 5" 'click Button "Connect an agent..."'
-step 10 "accounts: agents: a token made, builder" "frames 3" 'click Button "Make a token"'
+step 10 "accounts: agents: a token made, builder" "frames 3" \
+	'click Button "Make a token..."' "frames 3" 'click Button "Make a token"'
 cmd "frames 5" "screenshot $t/token.png"
 # (the address alone: most tools take it and the token apart)
 step 10 "accounts: agents: the URL copied" "frames 3" 'click Button "copy URL"'
@@ -467,6 +468,8 @@ tap Button "My account*"
 frames 5
 tap Button "Connect an agent..."
 wait_log 10000 accounts: agents: 1 tokens, on
+frames 3
+tap Button "Make a token..."
 frames 3
 tap Button "Make a token"
 wait_log 10000 accounts: agents: a token made, builder
