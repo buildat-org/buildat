@@ -12,14 +12,21 @@
 static const int64_t OAUTH_REQUEST_US = 600LL * 1000000;
 static const int64_t OAUTH_CODE_US = 120LL * 1000000;
 static const int64_t OAUTH_ACCESS_US = 3600LL * 1000000;
-// Registered clients: at most OAUTH_CLIENTS, OAUTH_REGISTERS an hour from
-// one network; one never used in a sign-in goes after a day, one used
-// KEEP_US after its last use
+// Registered clients: at most OAUTH_CLIENTS, the oldest never used in a
+// sign-in going for a new one past that; OAUTH_REGISTERS an hour from one
+// network -- the tool's server's, which every user of a hosted tool
+// (claude.ai's) shares; one never used goes after a day, one used KEEP_US
+// after its last use
 static const size_t OAUTH_CLIENTS = 1000;
-static const int OAUTH_REGISTERS = 20;
+static const int OAUTH_REGISTERS = 100;
 static const int64_t OAUTH_UNUSED_US = 24LL * 3600 * 1000000;
-// Pages waiting for their sign-in and codes waiting to be taken, in memory
+// Pages waiting for their sign-in and codes waiting to be taken, in
+// memory: OAUTH_PENDING of each, past it the oldest going
+// (oauth_make_room()); a network (address_bin()) opens OAUTH_PAGES pages
+// in their 10 minutes and makes OAUTH_CODES codes in their 2, so one
+// network's flood has a share of the cap and refuses only itself
 static const size_t OAUTH_PENDING = 1000;
+static const int OAUTH_PAGES = 30, OAUTH_CODES = 30;
 // Wrong passwords or codes on one page before it ends, and refused /token
 // calls a minute from one network
 static const int OAUTH_PAGE_TRIES = 5, OAUTH_TOKEN_FAILS = 30;
@@ -183,6 +190,30 @@ static bool oauth_loopback(const ss_ &host)
 	return host.find_first_not_of("0123456789.") == ss_::npos;
 }
 
+// A host no page rebinds (DNS rebinding needs a name of the attacker's):
+// "localhost", an IPv4 address, or an IPv6 one in brackets; lower case
+static bool oauth_not_rebindable(const ss_ &host)
+{
+	return host == "localhost" || (!host.empty() && host[0] == '[') ||
+			(!host.empty() && host.find_first_not_of("0123456789.") == ss_::npos);
+}
+
+// **Room for one more** in a map of pending pages or codes at its cap: the
+// oldest goes (its until_us is when it was made plus the same time), not
+// a refusal of everyone. One network's share is its RateTable's.
+// simplified: a linear scan of at most `max`
+template<class M>
+static void oauth_make_room(M &m, size_t max)
+{
+	if(m.size() < max)
+		return;
+	auto oldest = m.begin();
+	for(auto it = m.begin(); it != m.end(); ++it)
+		if(it->second.until_us < oldest->second.until_us)
+			oldest = it;
+	m.erase(oldest);
+}
+
 // **What a redirect URI may be** (MCP's authorization spec, OAuth 2.1
 // 1.5, 7.12): https, or http on a loopback address for a tool on the
 // builder's own machine; no fragment, no user in it, no white space.
@@ -257,6 +288,24 @@ static void oauth_self_check()
 			"https://wb.example.org/api/v1/mcp" ||
 			oauth_resource_norm("wb.example.org/api/v1/mcp") != "")
 		throw Exception("accounts: OAuth resource self-check");
+	for(const char *h : {"localhost", "127.0.0.1", "10.1.2.3", "[::1]",
+			"[2001:db8::1]"})
+		if(!oauth_not_rebindable(h))
+			throw Exception(ss_("accounts: OAuth host self-check: ")+h);
+	for(const char *h : {"evil.example", "127.0.0.1.evil.example",
+			"localhost.evil.example", "1e100", ""})
+		if(oauth_not_rebindable(h))
+			throw Exception(ss_("accounts: OAuth host self-check: ")+h);
+	// At the cap the oldest goes, whatever its key
+	struct P { int64_t until_us; };
+	std::map<int, P> m;
+	for(int i = 0; i < 4; i++)
+		m[i] = P{i == 2 ? -1 : i};
+	oauth_make_room(m, 5);
+	const bool under = m.size() == 4;
+	oauth_make_room(m, 4);
+	if(!under || m.size() != 3 || m.count(2) || !m.count(0))
+		throw Exception("accounts: OAuth oauth_make_room self-check");
 }
 
 // [KIT_AGENTS_OAUTH] **The /authorize page**: what asks, where it goes
@@ -328,6 +377,9 @@ struct OAuthPage
 	ss_ totp_name; // the password was right: its code asked for
 	bool off = false; // agent access is off: Deny only
 	bool ended = false; // no sign-in waits: the text only
+	// The tool's redirect with its error, a link the user may follow
+	// (never a redirect before the user acts: RFC 9700 4.11.2)
+	ss_ back;
 	// (the Starport's URL, its origin, this server's listing there)
 	sv_<std::pair<ss_, std::pair<ss_, ss_>>> starports;
 };
@@ -362,6 +414,9 @@ static std::pair<ss_, ss_> oauth_page(const OAuthPage &p)
 	}
 	h += "<p id=\"err\" role=\"alert\">"+html(p.error)+"</p><p id=\"ok\" "
 			"role=\"status\"></p>\n";
+	if(!p.back.empty() && !rhost.empty())
+		h += "<p><a href=\""+html(p.back)+"\">Back to "+html(rhost)+
+				"</a></p>\n";
 	const ss_ rid = "<input type=\"hidden\" name=\"rid\" value=\""+html(p.rid)+
 			"\">";
 	const ss_ action = "<form method=\"post\" action=\"/api/v1/oauth/authorize\"";

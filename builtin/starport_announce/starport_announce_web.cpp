@@ -39,6 +39,7 @@ struct Module: public interface::Module, public Interface
 		return "a server in a browser takes no Starport IDs";
 	}
 	sv_<std::pair<ss_, ss_>> id_listings(){ return {}; }
+	ss_ public_host(){ return ""; }
 };
 
 extern "C" {

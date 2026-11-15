@@ -40,7 +40,13 @@ sign-in by MCP's authorization spec, and its page at /api/v1/oauth/authorize
 takes the account's password (and TOTP code) or a Starport ID the server is
 listed for, then Allow. What the tool gets is an agent token of the account,
 listed and revoked as the others ([KIT_AGENTS_OAUTH] in
-builtin/accounts/accounts.cpp; util/kit_agents_oauth_check.sh).
+builtin/accounts/accounts.cpp; util/kit_agents_oauth_check.sh). Behind a
+proxy on the same machine (web_trusted_proxies), the sign-in answers only
+under a loopback name, an IP address or the server's Public address
+(Starport settings; starport.json's "address": "https://wb.example.org"),
+so that a page whose name was rebound to 127.0.0.1 gets nothing: a hosted
+server sets it, the proxy passing the Host, X-Forwarded-For and
+X-Forwarded-Proto.
 
 Licenses of textures and other media:
 ------------------------------------
