@@ -1,6 +1,7 @@
 -- Crag Trial's gem: a crystal a rider takes by riding through it (its zone:
 -- `size` cells from its own on, the crystal over their middle), then gone
--- until "reset" (crag_run's, at a crash or the finish).
+-- until "reset" (crag_run's to every gem linked to it, at a crash, a hazard
+-- or the finish).
 -- simplified: one taken is gone for every rider till the next reset
 return {
 	version = 1,
@@ -29,8 +30,9 @@ return {
 		c:event("pickup")
 	end,
 	on_input = function(c, input)
-		if input == "reset" then
+		if input == "reset" and c.state.taken then
 			c.state.taken = false
+			c:log("back")
 		end
 	end,
 }

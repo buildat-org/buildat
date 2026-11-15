@@ -1403,6 +1403,15 @@ function NT.pick_parent(id)
 	return true
 end
 
+-- Walking, the app's mouse look: the crosshair's. [KIT_WALK_SELECT_REVERT]
+-- Not where kit/controls' pointer is free (a side or top-down camera): the
+-- pointer stays a cursor there, and the crosshair's click went past the
+-- panels to whatever was at the view's middle
+function NT.walk_looks()
+	return O.mouse_look and S.view == "walk" and not S.touch and
+			not (M.pointer_free and M.pointer_free())
+end
+
 -- ---- Input: the mouse ([FP]'s mouse_down, mouse_up, mouse_move)
 local function mouse_down(button_)
 	if not E.editing or S.touch then
@@ -1432,8 +1441,7 @@ local function mouse_down(button_)
 	-- mouse is the desktop's walking (stage 4b), a finger's in the other
 	-- views)
 	local sh = NT.sh.on() and S.view ~= "walk"
-	if O.mouse_look and S.view == "walk" and not S.crosshair and
-			button_ == magic.MOUSEB_LEFT then
+	if NT.walk_looks() and not S.crosshair and button_ == magic.MOUSEB_LEFT then
 		S.crosshair = true
 		S.swallow_up = button_
 		log:info("kit editor: into the crosshair")
@@ -2332,14 +2340,12 @@ local function key_down(key, ctrl, shift)
 	elseif S.view == "signals" and is("undo") and ctrl then
 		return send({op = "undo"})
 	elseif NT.world_off() and not (is("view_2d") or is("view_3d") or
-			is("view_walk") or is("view_front")) then
+			is("view_walk")) then
 		return
 	elseif is("view_2d") then
 		return set_view("2d")
 	elseif is("view_3d") then
 		return set_view("3d")
-	elseif is("view_front") then
-		return set_view("front")
 	elseif is("view_walk") then
 		return set_view("walk")
 	elseif is("next") then
@@ -2519,7 +2525,7 @@ local function compute_guide()
 	end
 	-- Walking at the pointer, where the app looks: a click goes up into
 	-- the crosshair
-	if O.mouse_look and S.view == "walk" and not S.crosshair and not S.touch then
+	if NT.walk_looks() and not S.crosshair then
 		g.left = "into the crosshair to select and place (Esc: back)"
 		g.right = "drag: turn"
 		return g
@@ -3641,6 +3647,12 @@ function M.editor(options)
 				log:info("kit editor: kit/controls' edit view " .. ev)
 				set_view(ev)
 			end
+		end
+		-- [KIT_CRAG_PLAYTEST_1] 2D follows kit/controls' camera as it comes or
+		-- changes: the Front view in a side game, the plan in others
+		if E.editing and (S.view == "2d" or S.view == "front") and
+				(S.view == "front") ~= M.side_game() then
+			set_view("2d")
 		end
 		if S.uploading then
 			local name, png = buildat.picked_file()

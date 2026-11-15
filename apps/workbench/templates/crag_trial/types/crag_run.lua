@@ -1,10 +1,13 @@
 -- Crag Trial's run, each rider's own: a clock from the start (a tenth at a
--- time), the gems taken (all `gems` of them open the finish) and the best
--- time, on their screen (hud, to a kit/ui_text whose to is "player"). A crash
--- (crag_bike's output; the bike goes back by itself), a hazard (a
--- kit/trigger_zone's entered: back to `start`) or the finish with every gem
--- (finished, the time; back to `start`) starts the run over: the clock at 0,
--- the gems back (reset).
+-- time), the gems taken (every entity linked to its input gem: all of them
+-- open the finish) and the best time, on their screen (hud, to a
+-- kit/ui_text whose to is "player"). A crash (crag_bike's output; the bike
+-- goes back by itself), a hazard (a kit/trigger_zone's entered: back to
+-- `start`) or the finish with every gem (finished, the time; back to
+-- `start`) starts the run over: the clock at 0, every linked gem back (and
+-- reset, for more). [CRAG_BEST_RESET] The best times are kept state, by the
+-- rider's name: play never resets them, a builder's "Clear kept state" does;
+-- the five best go out on board (a kit/sign's value) as they change.
 local function view(c, by)
 	local r = c.state.runs[by]
 	if not r then
@@ -18,22 +21,50 @@ local function tenths(t)
 	return string.format("%.1f", math.floor(t * 10 + 0.5) / 10)
 end
 
+local function gems(c)
+	return #(c.linked_in.gem or {})
+end
+
 -- Its line; a note (what just happened) for two seconds
 local function show(c, by, r, note)
 	if note then
 		r.note, r.note_left = note, 2
 	end
-	local all = r.got >= c.params.gems
+	local all = r.got >= gems(c)
+	local best = c.state.bests[c:name(by)]
 	note = (r.note_left or 0) > 0 and r.note or all and "The finish is open" or nil
-	c:emit("hud", "Time " .. tenths(math.max(0, r.t)) .. (r.best and
-			"   Best " .. tenths(r.best) or "") .. "   Gems " .. r.got .. "/" ..
-			c.params.gems .. (note and "   " .. note or ""), by)
+	c:emit("hud", "Time " .. tenths(math.max(0, r.t)) .. (best and
+			"   Best " .. tenths(best) or "") .. "   Gems " .. r.got .. "/" ..
+			gems(c) .. (note and "   " .. note or ""), by)
+end
+
+-- The five best, "1. name 12.3|2. ...", out when it changed
+local function board(c)
+	local all = {}
+	for name, t in pairs(c.state.bests) do
+		all[#all + 1] = {name, t}
+	end
+	table.sort(all, function(a, b)
+		return a[2] < b[2] or a[2] == b[2] and a[1] < b[1]
+	end)
+	local lines = {}
+	for i = 1, math.min(5, #all) do
+		lines[i] = i .. ". " .. all[i][1] .. " " .. tenths(all[i][2])
+	end
+	local text = table.concat(lines, "|")
+	if text ~= c.state.board then
+		c.state.board = text
+		c:emit("board", text)
+	end
 end
 
 -- Over from the start: the clock held a second (the bike's crash, a teleport)
 local function over(c, by, why)
 	local r = view(c, by)
 	r.t, r.got = -1, 0
+	for _, id in ipairs(c.linked_in.gem or {}) do
+		c:send(id, "reset")
+	end
 	c:emit("reset", nil, by)
 	c:log(c:name(by) .. ": " .. why .. ", the run starts over")
 	show(c, by, r, why:sub(1, 1):upper() .. why:sub(2))
@@ -43,28 +74,33 @@ return {
 	version = 1,
 	no_position = true,
 	players = true,
+	linked_in = true,
 	about = {
 		group = "Game",
 		what = "Crag Trial's run: each rider's clock, gems, finish and best time.",
 		inputs = {
-			gem = "A gem taken by the rider.",
+			gem = "A gem taken by the rider. Every entity linked here is a gem the finish needs.",
 			crash = "The rider crashed: the run starts over.",
 			hazard = "The rider touched a hazard: back to the start.",
 			finish = "The rider reached the finish: a time if every gem is taken.",
 		},
 		outputs = {
 			hud = "The rider's line: time, best, gems.",
-			reset = "The gems back (a run over).",
+			reset = "A run over (the linked gems come back by themselves).",
 			finished = "A run done. Value: its time.",
+			board = "The five best times as they change. Value: \"1. name 12.3|2. ...\".",
 		},
 	},
 	params = {
-		gems = {type = "number", default = 3, min = 0, max = 100},
 		start = {type = "entity", default = 0},
 	},
-	state = {runs = {default = {}, per_player = true}},
+	state = {
+		runs = {default = {}, per_player = true},
+		bests = {default = {}, kept = true},
+		board = {default = false},
+	},
 	inputs = {gem = "any", crash = "none", hazard = "none", finish = "none"},
-	outputs = {hud = "string", reset = "none", finished = "number"},
+	outputs = {hud = "string", reset = "none", finished = "number", board = "string"},
 	on_start = function(c)
 		c:after(0.1, "tick")
 	end,
@@ -78,6 +114,7 @@ return {
 				show(c, by, r)
 			end
 		end
+		board(c)
 		c:after(0.1, "tick")
 	end,
 	on_input = function(c, input, value, by)
@@ -87,23 +124,27 @@ return {
 		local r = view(c, by)
 		if input == "gem" then
 			r.got = r.got + 1
-			c:log(c:name(by), "has", r.got, "of", c.params.gems, "gems")
+			c:log(c:name(by), "has", r.got, "of", gems(c), "gems")
 		elseif input == "crash" then
 			over(c, by, "crashed")
 		elseif input == "hazard" then
 			over(c, by, "hit a hazard")
 			c:teleport(nil, {entity = c.params.start, yaw = 90})
 		elseif input == "finish" then
-			if r.got < c.params.gems then
+			if r.got < gems(c) then
 				show(c, by, r, "Take every gem first")
 				return
 			end
 			local t = math.max(0, r.t)
-			local best = not r.best or t < r.best
-			r.best = best and t or r.best
+			local name = c:name(by)
+			local best = not c.state.bests[name] or t < c.state.bests[name]
+			if best then
+				c.state.bests[name] = t
+			end
 			c:emit("finished", t, by)
-			c:log(c:name(by), "finished in", tenths(t), best and "(best)" or "")
+			c:log(name, "finished in", tenths(t), best and "(best)" or "")
 			over(c, by, "finished in " .. tenths(t) .. (best and ", the best" or ""))
+			board(c)
 			c:teleport(nil, {entity = c.params.start, yaw = 90})
 		end
 	end,

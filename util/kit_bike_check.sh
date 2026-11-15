@@ -1,16 +1,19 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~20 s (2026-11-15)
-# covers: apps/workbench/templates/crag_trial/** builtin/kit/box/box.c builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/players.lua builtin/kit/kit.cpp builtin/accounts/client_lua/accounts.lua
+# cost: ~30 s (2026-11-15)
+# covers: apps/workbench/templates/crag_trial/** builtin/kit/box/box.c builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/players.lua builtin/kit/kit.cpp builtin/accounts/client_lua/accounts.lua
 # [KIT_PLANE] stage 4: a movement of a project's own, the Crag Trial template
 # (local/crag_bike, its gems and run) on Workbench; one server, kitboss (the
 # admin) and kitbob on a headless weston's Xwayland of the check's own:
 #   0. the template packed by util/pack_templates.sh and installed, its
 #      types with it;
-#   1. New from it: the editor in the Front view (edit.png, its kit/controls'
-#      edit_view); F6: the side camera, the bike's movement, its client
-#      part's draw hook drawing the body (start.png);
+#   1. New from it: the editor in 2D, the Front view in a game whose camera
+#      is side (edit.png, its kit/controls' edit_view 2d); Walk, the view
+#      clicked (30 selected), then 7 picked in Entities: 7 stays selected
+#      ([KIT_CRAG_PLAYTEST_1], fault 0a9); F6: the side camera, the bike's
+#      movement, its client part's draw hook drawing the body (start.png),
+#      the bike on the ground at y 0, the 1 grid ([KIT_CRAG_PLAYTEST_1]);
 #   2. W, then A: the bike up the first ramp's polygon, leaning back, the
 #      head down: the crash (crag_bike's output, linked to the run: its line
 #      says Crashed), the bike back at the start a second later;
@@ -22,12 +25,20 @@
 #      (turned.png, [KIT_SIDE_LEAD]);
 #   5. kitbob joins, his body drawn by the hook on kitboss's screen; his
 #      first My account page drawn again when the hello comes, "Connect an
-#      agent..." on it (accounts.lua).
+#      agent..." on it (accounts.lua);
+#   6. [CRAG_BEST_RESET] a fourth gem placed, linked only to the run: the run
+#      counts it (Gems 0/4), the finish refused at 3 of 4 and taken at 4, the
+#      run's reset brings it back; the best on the top-5 sign (a kit/sign
+#      fed by the run's board), kitbob's clear_kept refused (no builder),
+#      End then Play: still listed;
+#   7. the server restarted Ended, kitboss back, Play: still listed, his HUD's
+#      best; the inspector's Clear kept state (asked first) empties the
+#      sign, Undo brings it back (sign.png).
 # And [KIT_PLAY_HINTS]: Workbench's help line in play the bike's own hints
 # (movement.help), W's and A's gone once used, Space's last after the gem:
 # the line gone, kept in Kit's storage (kit_hints).
 # Screenshots, kept with KEEP_TMP=1: $t/edit.png, $t/start.png, $t/side.png,
-# $t/turned.png
+# $t/turned.png, $t/sign.png
 #   util/kit_bike_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -108,15 +119,16 @@ wait_for_log "$SL" "setup code [A-Z0-9]+" 30
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$SL" | head -1)
 [ -n "$code" ] || fail "no setup code ($SL)"
 grep -aq "workbench: the template in .*crag_trial" "$SL" && fail "the template refused ($SL)"
-client() # <name>: its commands from the fifo $t/<name>.cmd, its log $t/<name>.log
+client() # <name> [<file>]: its commands from the fifo $t/<file>.cmd, its log $t/<file>.log
 {
-	mkfifo "$t/$1.cmd"
-	sleep 900 > "$t/$1.cmd" &
+	local f=${2:-$1}
+	mkfifo "$t/$f.cmd"
+	sleep 900 > "$t/$f.cmd" &
 	CHECK_PIDS+=($!)
 	DISPLAY=$d WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 BUILDAT_JOIN_NAME=kit$1 \
 		timeout 600 bin/buildat -C "$t/client_cache_$1" -D "$t/cu_$1" \
 		-s localhost:$SERVER_PORT -w 1024x700 -l 3 -o sound_mute=1 -c - \
-		< "$t/$1.cmd" > "$t/$1.log" 2>&1 &
+		< "$t/$f.cmd" > "$t/$f.log" 2>&1 &
 	CHECK_PIDS+=($!)
 }
 # (registration open for kitbob)
@@ -134,10 +146,25 @@ cmd "frames 3" 'click DropDownList "▼"' "delay 300" "frames 3"
 step 10 "world_menu: template picked" 'click Text "Crag Trial (buildat, installed, unverified)"'
 step 60 "kit editor: edit mode on" "frames 3" 'click Button "Create"'
 await "$CL" 0 30 "player physics enabled"
-# [KIT_EDIT_VIEW] the template's kit/controls: the editor comes up in Front
-await "$CL" 0 10 "kit editor: kit/controls' edit view front"
+# [KIT_EDIT_VIEW] the template's kit/controls: the editor comes up in 2D,
+# [KIT_CRAG_PLAYTEST_1] the Front view in a game whose camera is side
+await "$CL" 0 10 "kit editor: kit/controls' edit view 2d"
+await "$CL" 0 10 "kit editor: the view is 2D \(front\)"
 cmd "frames 10" "screenshot $t/edit.png"
-echo "ok: the editor came up in the Front view (kit/controls' edit_view)"
+echo "ok: the editor came up in 2D, the Front view (kit/controls' edit_view 2d)"
+# [KIT_CRAG_PLAYTEST_1] (fault 0a9) Walk in a side game: the view clicked
+# (the mountains, 30), then 7 picked in Entities' Scene list. 7 stays: the
+# free pointer takes no crosshair, which made each click on a panel one at
+# the view's middle, 30 again
+step 5 "kit editor: the view is Walk" "keypress F3"
+cmd "frames 5" 'click Button "Entities"' "frames 3"
+step 5 "kit editor: selected 30 " "mouse_pos 600 350" "frames 3" "mouse_click left"
+step 5 "kit editor: selected 7 " "frames 5" 'click Button "Scene (*"' "frames 5" 'click Button "select 7"'
+m=$(mark "$CL")
+step 5 "kit: body at" "frames 30" "event kit_body"
+seen "$CL" "$m" "kit editor: selected " && fail "7 not kept selected in Walk: $(tail -c +$((m + 1)) "$CL" | grep -a "kit editor: selected" | head -1) ($CL)"
+step 5 "kit editor: the view is 2D \(front\)" "keypress F1"
+echo "ok: Walk: the view clicked, then 7 picked in the list: 7 kept"
 for re in "The template's type local/crag_bike \([0-9]+ bytes\)" "The template's type local/crag_gem " \
 		"The template's type local/crag_run "; do
 	grep -aqE "$re" "$SL" || fail "no \"$re\" in $SL"
@@ -155,7 +182,10 @@ exec 4> "$t/bob.cmd"
 cmd "frames 30" "screenshot $t/start.png"
 body
 awk -v x="$bx" 'BEGIN { exit !(x > -61 && x < -59) }' || fail "the bike not at the start: $bx $by ($CL)"
-echo "ok: a project from it, played: the side view, the bike's movement drawn by its hook"
+# [KIT_CRAG_PLAYTEST_1] The heightmap's flat ground at its level, y 0 (the 1
+# grid), the bike's feet on it
+awk -v y="$by" 'BEGIN { exit !(y > -0.1 && y < 0.1) }' || fail "the bike not on the ground at y 0: $bx $by ($CL)"
+echo "ok: a project from it, played: the side view, the bike's movement drawn by its hook, on the ground at y $by"
 # 2. Up the ramp, leaning back: the crash, back at the start. A held key may
 # read as not held: once again if the bike never left the start
 for try in 1 2; do
@@ -174,7 +204,7 @@ for try in 1 2; do
 	echo "the bike stood still: W and A again"
 done
 tail -c +$((m + 1)) "$CL" | grep -aoP 'kit: body at \K-?[0-9.]+,-?[0-9.]+' | tr , ' ' |
-	awk '$1 > -50 && $1 < -38 && $2 > 1.5 { f = 1 } END { exit !f }' ||
+	awk '$1 > -50 && $1 < -38 && $2 > 1 { f = 1 } END { exit !f }' ||
 	fail "the bike never on the first ramp ($CL)"
 for i in $(seq 20); do
 	body
@@ -274,15 +304,105 @@ seen "$CL" "$m" "pause: the menu shown" || fail "no pause menu ($CL)"
 step 10 "accounts: the hello came: the page drawn again" "frames 3" 'click Button "My account*"'
 step 10 "accounts: agents: " "frames 3" 'click Button "Connect an agent..."'
 echo "ok: kitbob's body drawn by the hook; his first My account page with Connect an agent..."
+# 6. [CRAG_BEST_RESET] A fourth gem, linked only to the run (no reset link):
+# counted (Gems 0/4), the finish refused at 3 of 4, taken at 4; the run's
+# reset brings it back
+as boss
+try_() { cmd "event kit_edit {\"op\": \"try\", \"id\": 7, \"comp\": 0, \"input\": \"$1\"}"; }
+step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
+m=$(mark "$SL")
+try_ hazard
+await "$SL" "$m" 5 "local/crag_run 7: kitboss: hit a hazard"
+for i in $(seq 20); do
+	body
+	awk -v x="$bx" 'BEGIN { exit !(x < -58) }' && break
+	cmd "delay 200"
+done
+awk -v x="$bx" 'BEGIN { exit !(x < -58) }' || fail "the hazard did not take the bike to the start: $bx ($CL)"
+cmd 'event kit_edit {"op": "place", "type": "local/crag_gem", "pos": [-45, 8, 1]}'
+await "$SL" "$m" 5 "An edit by kitboss: placed local/crag_gem 44 "
+step 5 "Gems 0/4" 'event kit_edit {"op": "link", "id": 44, "comp": 0, "output": "collected", "to": 7, "input": "gem"}'
+# (onto the bike at the start: its zone entered)
+cmd 'event kit_edit {"op": "move", "id": 44, "pos": [-61, 0, 1]}'
+await "$SL" "$m" 5 "local/crag_run 7: kitboss has 1 of 4 gems"
+seen "$SL" "$m" "local/crag_gem 44: kitboss took the gem" || fail "not gem 44's take ($SL)"
+try_ gem
+try_ gem
+await "$SL" "$m" 5 "kitboss has 3 of 4 gems"
+try_ finish
+await "$SL" "$m" 5 "Take every gem first"
+try_ gem
+await "$SL" "$m" 5 "kitboss has 4 of 4 gems"
+try_ finish
+await "$SL" "$m" 5 "local/crag_run 7: kitboss finished in [0-9.]+ \(best\)"
+best=$(tail -c +$((m + 1)) "$SL" | grep -aoP 'kitboss finished in \K[0-9.]+(?= \(best\))' | tail -1)
+await "$SL" "$m" 5 "local/crag_gem 44: back"
+echo "ok: a fourth gem linked only to the run: Gems 0/4, its take counted, the finish refused at 3 of 4 and taken at 4 ($best), the gem back by the run's reset"
+# The top-5 sign lists it; kitbob (no builder) may not clear it; End, then
+# Play: still there
+sign() { echo "kit/sign 43: shows \"Best times.$1\" by"; } # (the log's newline a ?)
+await "$SL" "$m" 5 "$(sign "1\. kitboss $best")"
+as bob
+m=$(mark "$SL")
+cmd 'event kit_edit {"op": "clear_kept", "id": 7, "comp": 0}'
+await "$SL" "$m" 5 "An edit \(clear_kept\) by peer [0-9]+ refused: no edit rights here"
+as boss
+seen "$SL" "$m" "kept state cleared" && fail "kitbob cleared the bests ($SL)"
+step 5 "the server is Ended" 'event kit_edit {"op": "stop"}'
+m=$(mark "$SL")
+step 5 "the server is Running" 'event kit_edit {"op": "play"}'
+await "$SL" "$m" 5 "$(sign "1\. kitboss $best")"
+echo "ok: the top-5 sign lists kitboss $best; kitbob's clear refused; End, then Play: still listed"
+# (Ended over the restart: the kept state from the save, not the round's)
+step 5 "the server is Ended" 'event kit_edit {"op": "stop"}'
 for f in 3 4; do
 	FD=$f cmd "sync 2000" quit
 done
 exec 3>&- 4>&-
 wait $BOSS $BOB 2>/dev/null
-for p in edit start side turned; do
+# 7. The server restarted (the project that ran last opens), kitboss back:
+# Play, still listed and his HUD's best; his "Clear kept state" (the
+# inspector's, asked first) empties the sign, Undo brings it back
+kill -INT "$SERVER_PID" 2>/dev/null
+wait "$SERVER_PID" 2>/dev/null
+SL=$t/srv2.log
+start_server "$SL" "Listening at" 300 auto \
+	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 \
+	--sim-rate "$CHECK_RATE" || fail "the server did not come up again ($SL)"
+CHECK_PIDS+=($SERVER_PID)
+client boss boss2
+BOSS=$!
+exec 3> "$t/boss2.cmd"
+as boss
+CL=$t/boss2.log
+await "$CL" 0 120 "Joined as kitboss"
+await "$CL" 0 60 "player physics enabled"
+step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
+m=$(mark "$SL")
+step 5 "the server is Running" 'event kit_edit {"op": "play"}'
+await "$SL" "$m" 5 "$(sign "1\. kitboss $best")"
+await "$CL" 0 5 "Best $best "
+cmd "frames 5" 'click Button "Entities"' "frames 3" 'click Button "Scene (*"' "frames 3"
+step 5 "kit editor: selected 7 " 'click Button "select 7"'
+step 5 "kit editor: clear local/crag_run's kept state\?" "frames 5" 'click Button "clear kept local/crag_run"'
+m=$(mark "$SL")
+cmd "frames 5" 'click Button "clear kept yes"'
+await "$SL" "$m" 5 "Entity 7's local/crag_run: its kept state cleared by kitboss"
+await "$SL" "$m" 5 "$(sign "")"
+m=$(mark "$SL")
+cmd 'event kit_edit {"op": "undo"}'
+await "$SL" "$m" 5 "its kept state put back by kitboss's undo"
+await "$SL" "$m" 5 "$(sign "1\. kitboss $best")"
+step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
+cmd "frames 30" "screenshot $t/sign.png"
+echo "ok: over a server restart (Ended) still listed, the HUD's best $best; kitboss's Clear kept state emptied the sign, Undo brought it back"
+cmd "sync 2000" quit
+exec 3>&-
+wait $BOSS 2>/dev/null
+for p in edit start side turned sign; do
 	[ -s "$t/$p.png" ] || fail "no screenshot $t/$p.png"
 done
 # (the run's teleports, a hazard's or the finish's, from its scene)
-grep -a "a teleport refused" "$SL" && fail "a teleport refused ($SL)"
-echo "PASS: Crag Trial packed, installed and played: the bike's own movement up a polygon ramp, its crash an output and back at the start, a heavy step refused while the old one stepped to a gem's zone, $n corrections, drawn by its hook for both players; kitbob's first My account page drawn again; screenshots $t/start.png $t/side.png"
+grep -a "a teleport refused" "$t/srv.log" "$SL" && fail "a teleport refused ($t/srv.log, $SL)"
+echo "PASS: Crag Trial packed, installed and played: the bike's own movement up a polygon ramp, its crash an output and back at the start, a heavy step refused while the old one stepped to a gem's zone, $n corrections, drawn by its hook for both players; kitbob's first My account page drawn again; the best time kept over End, Play and a restart, on the top-5 sign, cleared by a builder only; screenshots $t/start.png $t/side.png $t/sign.png"
 # vim: set noet ts=4 sw=4:

@@ -149,7 +149,9 @@
 -- table over the whole window (signals.lua).
 -- kit.view() ("2d", "3d", "front", "walk", "hud" or "signals": the app walks only in
 -- "walk" while editing), kit.looking() (the editor's crosshair: the app's mouse looks).
--- [KIT_PLANE] F7 or the dropdown: Front, flat along +z at kit/controls' plane
+-- [KIT_PLANE] The Front view ("front"): [KIT_CRAG_PLAYTEST_1] 2D (F1, the
+-- dropdown's 2D) in a game whose kit/controls camera is side, no entry of
+-- its own (game-wide; a scene's own later). Flat along +z at kit/controls' plane
 -- (the server's plane_depth: the spawn's, a whole z), what is nearer than
 -- kit/controls' side_clip in front of it clipped (0.55: its layer's front);
 -- a placing goes in the plane's cell under the pointer (the
@@ -255,13 +257,12 @@ local RIGHT_CLICK_PX = 5
 local PLAN_3D_MAX_H = 100
 local LONG_PRESS_US = 500000
 local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk", hud = "HUD",
-	signals = "Signals", front = "Front"}
+	signals = "Signals", front = "2D (front)"}
 -- [KIT_INPUT_ACTIONS] each view's key's action (input.lua)
 local VIEW_KEYS = {["2d"] = "view_2d", ["3d"] = "view_3d", walk = "view_walk",
-	hud = "view_hud", signals = "view_signals", front = "view_front"}
--- The views in the bar's list ([KIT_PLANE] Front: the plane's, kit/controls'
--- plane, looked at along +z from in front of its layer)
-local VIEW_ORDER = {"2d", "3d", "front", "walk", "hud", "signals"}
+	hud = "view_hud", signals = "view_signals"}
+-- The views in the bar's list (the Front view is 2D's in a side game)
+local VIEW_ORDER = {"2d", "3d", "walk", "hud", "signals"}
 -- How far a click looks for a voxel, in cells
 local MAX_RAY = 128
 
@@ -1352,12 +1353,12 @@ rebuild_bar = function(if_changed)
 	views[#views + 1] = {"Walk here", "\0walk_here"}
 	-- Not measured on the side (a dropdown made is kept by ui_utils): the
 	-- second thing in the first row
-	local d
-	d = not sh and ui_utils.dropdown(bar_row, views, S.view, function(v)
+	local d, sv = nil, S.view == "front" and "2d" or S.view
+	d = not sh and ui_utils.dropdown(bar_row, views, sv, function(v)
 		if v ~= "\0walk_here" then
 			set_view(v)
 		elseif not walk_here() then
-			ui_utils.dropdown_set(d, S.view)
+			ui_utils.dropdown_set(d, sv)
 		end
 	end, {height = 24})
 	if d then
@@ -3160,13 +3161,16 @@ function NT.params_form(w, e, ci, c, t, keep)
 		end
 	end
 	-- [KIT_POLYGON_ROW] Points: how many, and the Front view round them, where
-	-- they are edited (polygon_edit.lua)
+	-- they are edited (polygon_edit.lua): a side game's 2D view.
+	-- simplified: no point editing in other games (their 2D is the plan)
 	for _, k in ipairs(points) do
 		local r, v = row(w), values[k] or decl[k].default
 		label(r, k:upper() .. ": " .. (type(v) == "table" and #v or 0))
-		button(r, "Edit in Front view", function()
-			NT.pg.show(e)
-		end)
+		if M.side_game() then
+			button(r, "Edit in 2D view", function()
+				NT.pg.show(e)
+			end)
+		end
 	end
 return names
 end
@@ -3818,6 +3822,33 @@ local function inspector(w, e, is_made)
 			button(w, "Restart this", function()
 				send({op = "restart", id = e.id, comp = ci - 1})
 			end)
+		end
+		-- [CRAG_BEST_RESET] What play never resets (best times): a builder's
+		-- clear, asked first, one undo
+		if t.kept and not copy then
+			local key = e.id .. " " .. ci
+			if E.kept_ask == key then
+				text(w, "Clear what play keeps (best times)? Undo brings it back.",
+						DIM)
+				local r = row(w)
+				button(r, "Clear it", function()
+					E.kept_ask = nil
+					send({op = "clear_kept", id = e.id, comp = ci - 1})
+					log:info("kit editor: " .. c.type .. "'s kept state on " ..
+							e.id .. " cleared")
+					refresh()
+				end):SetName("clear kept yes")
+				button(r, "Cancel", function()
+					E.kept_ask = nil
+					refresh()
+				end)
+			else
+				button(w, "Clear kept state...", function()
+					E.kept_ask = key
+					log:info("kit editor: clear " .. c.type .. "'s kept state?")
+					refresh()
+				end):SetName("clear kept " .. c.type)
+			end
 		end
 		-- [KIT_HUD_STYLE] "Copy style from..."
 		if NT.style_prefix(c.type) then
@@ -5177,7 +5208,7 @@ local function dialog(title, width)
 	W.dialog = w
 	w.priority = 10
 	if width then
-		w:SetFixedWidth(math.min(width, magic.ui.root.width - 16))
+		w:SetFixedWidth(math.min(width, magic.ui.root.width / S.font - 16))
 	end
 	return w, nil
 end
@@ -5447,9 +5478,16 @@ function NT.type_dialog(name)
 	NT.type_window()
 end
 
+-- [KIT_CRAG_PLAYTEST_1] The whole window (its room divided by the text
+-- size, as the panels' is): the client part left of the server part where
+-- both are about 80 characters wide, else one at a time under the tabs
+-- Client and Server (f.tab). simplified: a tab rebuilds the window, so the
+-- field left loses its cursor; the touch mode's pane always has the tabs
 function NT.type_window()
 	local f = E.type_form
-	local w, br = dialog(f.existing and "Edit type" or "New type", 640)
+	local touch = NT.sh.on()
+	local rw = math.floor(magic.ui.root.width / S.font) - 16
+	local w, br = dialog(f.existing and "Edit type" or "New type", rw)
 	f.win = W.dialog
 	text(w, f.existing and "The project's type " .. f.name or
 			"A type of this project's own, local/<name>: Lua run in Kit's box")
@@ -5458,10 +5496,29 @@ function NT.type_window()
 	edit(r, f.name, function(s)
 		f.name = s
 	end):SetName("type name")
-	local function field(key, title, h)
-		text(w, title, DIM)
+	local m = text(w, string.rep("abcdefghij", 8))
+	local side = not touch and rw >= 2 * m.minWidth + 40
+	m:Remove()
+	f.tab = f.tab or "source"
+	local tr = not side and row(w)
+	local cols = side and row(w) or w
+	local edits = {}
+	local function field(key, title, tab)
+		if tr then
+			button(tr, tab, function()
+				f.tab = key
+				log:info("kit editor: type: the " .. tab .. " tab")
+				NT.type_window()
+			end, f.tab == key):SetName("type tab " .. tab)
+			if f.tab ~= key then
+				return
+			end
+		end
+		local c = cols:CreateChild("UIElement")
+		c:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+		text(c, title, DIM)
 		local rec
-		local e = edit(w, f[key], function(s)
+		local e = edit(c, f[key], function(s)
 			f[key] = s
 			rec.old = s
 		end)
@@ -5469,7 +5526,11 @@ function NT.type_window()
 		e.multiLine = true
 		e.textSelectable = true
 		e.textCopyable = true
-		e:SetFixedHeight(h)
+		-- (its height the window's room left, below)
+		e:SetFixedHeight(touch and 280 or 100)
+		-- The text's top shown, not its end
+		e.cursorPosition = 0
+		edits[#edits + 1] = e
 		-- The touch mode's: the field entry mode on it, its Apply the text
 		rec = {name = "type " .. key, key = "type", k = key, e = {},
 			title = tostring(f.name) .. " · " .. title, kind = "text",
@@ -5480,8 +5541,9 @@ function NT.type_window()
 			end}
 		NT.fe.extra["type " .. key] = rec
 	end
-	field("source", "Server part: returns the type's table", 280)
-	field("client", "Client part (none if empty): the clients' handlers", 110)
+	field("client", "Client part (none if empty): the clients' handlers",
+			"Client")
+	field("source", "Server part: returns the type's table", "Server")
 	f.status_text = text(w, f.status ~= "" and f.status or " ",
 			f.ok and DIM or WARN)
 	br = br or row(w)
@@ -5496,6 +5558,13 @@ function NT.type_window()
 	button(br, "Close", function()
 		drop("dialog")
 	end):SetName("type close")
+	-- The fields down to the window's foot
+	local grow = math.floor(magic.ui.root.height / S.font) - 16 - w.height
+	for _, e in ipairs(touch and {} or edits) do
+		e:SetFixedHeight(100 + math.max(grow, 0))
+	end
+	log:info("kit editor: type: " .. (side and "side by side" or "tabs, " ..
+			f.tab))
 end
 
 -- The server's answer ("kit:type"): a get's files into the form, a put's
@@ -5947,6 +6016,10 @@ end
 set_view = function(v)
 	if not VIEW_NAMES[v] then
 		return
+	end
+	-- [KIT_CRAG_PLAYTEST_1] 2D is the Front view in a side game, and only there
+	if v == "2d" or v == "front" then
+		v = M.side_game() and "front" or "2d"
 	end
 	-- [KIT_HUD_VIEW] Adjusting the HUD: the walk camera held still, no
 	-- panels, the world not to be clicked; out to the view it came from

@@ -226,7 +226,7 @@ if phase == "main":
         "add_component", "remove_component", "set_parent", "duplicate",
         "place_prefab", "save_prefab", "set_voxels", "put_type", "delete_type",
         "new_scene", "switch_scene", "undo", "start", "stop", "try_input",
-        "watch", "keep", "set_builder"], names
+        "watch", "clear_kept", "keep", "set_builder"], names
     for t in tools:
         assert t["description"] and t["inputSchema"]["type"] == "object", t
     st = state(tok)

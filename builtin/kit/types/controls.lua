@@ -30,7 +30,8 @@
 -- over fov_time; 0: back), glitch (for seconds), tint (a flash of a
 -- colour) and camera (a mode: "" the camera's own). [KIT_EDIT_VIEW]
 -- edit_view: the editor's view at a client's first edit mode (auto: the
--- editor's own, a remembered one; 2d, 3d, front), over the remembered,
+-- editor's own, a remembered one; 2d, 3d; [KIT_CRAG_PLAYTEST_1] 2d is the
+-- Front view where the camera is side), over the remembered,
 -- the builder's picks standing after it. Without it an app
 -- with Kit's controls walks with kit/walker in first person.
 local function signal(c, input, value, by)
@@ -121,7 +122,7 @@ return {
 			max = 10},
 		to = {type = "string", default = "all", choices = {"all", "player"}},
 		edit_view = {type = "string", default = "auto",
-			choices = {"auto", "2d", "3d", "front"}},
+			choices = {"auto", "2d", "3d"}},
 	},
 	-- Any signal: one without a value is shake 1, fov back, glitch 1 s,
 	-- tint white, the camera's own

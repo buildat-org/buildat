@@ -305,17 +305,22 @@ end
 -- the views, then the scenes (a pick goes there, the view kept) and New
 -- scene...; the view it is in "<view> · <scene>" where there are scenes
 -- to tell apart
+-- The view's entry in the list: 2D for the Front view
+function SH.shown_view()
+	return S.view == "front" and "2d" or S.view
+end
+
 local function view_choices()
 	local st, ses = E.state or {}, E.session or {}
 	local scenes = ses.kind ~= "bench" and (#(st.scenes or {}) > 1 or
 			st.can_make_scenes) and st.scenes or nil
 	local cur = st.scene or ""
 	local c = {}
-	-- ([KIT_PLANE] Front: the plane's)
-	for _, v in ipairs({"walk", "3d", "2d", "front", "signals", "hud"}) do
+	-- ([KIT_CRAG_PLAYTEST_1] the Front view is 2D's in a side game)
+	for _, v in ipairs({"walk", "3d", "2d", "signals", "hud"}) do
 		local l = A.VIEW_NAMES[v]
-		c[#c + 1] = {v == S.view and scenes and cur ~= "" and l .. " · " .. cur or
-				l, v}
+		c[#c + 1] = {v == SH.shown_view() and scenes and cur ~= "" and
+				l .. " · " .. cur or l, v}
 	end
 	for _, n in ipairs(scenes or {}) do
 		c[#c + 1] = {"Scene: " .. n, "\1" .. n}
@@ -1060,7 +1065,7 @@ function SH.tick()
 	local vc, names, on = view_choices(), {}, "none"
 	for _, c in ipairs(vc) do
 		names[#names + 1] = c[1]
-		on = c[2] == S.view and c[1] or on
+		on = c[2] == SH.shown_view() and c[1] or on
 	end
 	local vk = table.concat(names, " | ")
 	if SH.view_key ~= vk then
@@ -1068,7 +1073,7 @@ function SH.tick()
 		if SH.view_d then
 			SH.view_d:Remove()
 		end
-		SH.view_d = A.ui_utils.dropdown(W.shell_views, vc, S.view, pick_view,
+		SH.view_d = A.ui_utils.dropdown(W.shell_views, vc, SH.shown_view(), pick_view,
 				{height = SH.TOUCH, name = "shell views"})
 		drop_center(SH.view_d)
 		SH.view_dw, SH.title_set = SH.view_d.width, nil
