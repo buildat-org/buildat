@@ -75,7 +75,11 @@ BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
 	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$t/cmds" > "$t/sp_admin.log" 2>&1 ||
 	fail "the Starport admin's run ($t/sp_admin.log)"
-page $SP/api/v1/list | grep -q "Shop <script>" || fail "the claim ($t/sp_admin.log)"
+# ([ALPHA_BUILDS] an alpha's listing only to a client of that alpha, which
+# says its version)
+curl -s -m 10 -d "{\"version\": \"$(tr -d '\n' < VERSION)\"}" \
+	"http://127.0.0.1:$SP/api/v1/list" | grep -q "Shop <script>" ||
+	fail "the claim ($t/sp_admin.log)"
 Build/bin/buildat aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
 ca=$(grep -ao "setup code [A-Z0-9]*" "$t/ai.log" | cut -d' ' -f3)
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
@@ -133,13 +137,19 @@ echo "ok: Aitta's / and /p/, the release's text escaped, the shorter text"
 
 p=$(page $SP/)
 grep -q "<script>" <<< "$p" && fail "the Starport's / runs a listing's <script>"
+# [ALPHA_BUILDS] The page at / lists no alpha's listing: on an alpha build
+# the listing's own lines are not looked for
+if ! grep -q -- -alpha. VERSION; then
 grep -q "Shop &lt;script&gt;alert(1)&lt;/script&gt;" <<< "$p" ||
 	fail "the Starport's / does not show the listing: $p"
 grep -q "Native client only" <<< "$p" || fail "no Native client only"
+fi
 grep -q 'href="/id"' <<< "$p" || fail "no link to the ID page"
 grep -q '<a href="/index.html">Open in the Buildat client</a> (in the browser)' <<< "$p" ||
 	fail "the Starport's footer"
+if ! grep -q -- -alpha. VERSION; then
 grep -q "Shop &lt;" <<< "$(page "$SP/?kind=app")" || fail "?kind=app lost it"
+fi
 grep -q "Shop &lt;" <<< "$(page "$SP/?kind=world")" && fail "?kind=world kept it"
 grep -qi "adult" <<< "$p" && fail "the Starport's / offers adult listings"
 grep -q "A Starport:" <<< "$(page $SP/index.html)" &&

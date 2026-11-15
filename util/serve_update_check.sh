@@ -358,8 +358,8 @@ until_log "$t/serve2.log" "\[floorplanner:$FP\] .*Listening at" 120 $spid ||
 # Update now" from the admin script (the Updates page's request)
 cat > "$t/c3" <<C
 expect_error Disconnected from server: The server is restarting
-wait_log_any 30000 Join a Buildat server: shown
-click LineEdit "29500"
+wait_log_any 30000 Join by address: shown
+click LineEdit "localhost:29500"
 delay 300
 keypress End
 keypress Backspace
