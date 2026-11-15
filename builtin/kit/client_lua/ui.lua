@@ -39,7 +39,8 @@
 --   with nothing shown and no title it is not drawn. Across a column they
 --   go by the panel's anchor's side.
 --   **Play**: shown while the server is Running and this player is out of
---   the tools (Stopped, the components do not run: none shown); a button's press is the action's (kit.press_action) or
+--   the tools (Stopped, the components do not run: none shown, Kit's
+--   notice of it instead, [KIT_STOPPED_NOTICE] below); a button's press is the action's (kit.press_action) or
 --   "kit:ui" "<id> 1|0", the server checking it is on this player's
 --   screen; while a panel with a button is up the pointer is free
 --   (ui_utils.wants_clicks) for a player in mouse look; a button out of
@@ -1791,10 +1792,74 @@ local function markers()
 	end
 end
 
+-- [KIT_STOPPED_NOTICE] Ended (Stopped), nothing runs but the movement: whoever
+-- is out of the tools is told why, at the top's middle under the play bar
+-- and ui_utils' notice (the bottom is the touch bars' and the hotbar's);
+-- a builder also where Run is when the app has Kit's menu items. Not under
+-- a full screen; the pause menu over it (hidden there, it came back for the
+-- round trip after Run)
+local stopped = {said = nil}
+local function stopped_notice()
+	local s = nil
+	if E.state_seen and not E.running and not E.editing and not M.hud_off() then
+		s = "Stopped: the game is being built.\nIt starts when a builder runs it."
+		if E.can_edit and E.menu then
+			s = s .. "\nYou may run it: " .. (TOUCH and "Menu" or "Esc") ..
+					", then Run"
+		end
+	end
+	if s ~= stopped.said then
+		stopped.said = s
+		log:info("kit: the stopped notice " .. (s and "shown: " ..
+				s:gsub("\n", " | ") or "hidden"))
+	end
+	if s and not stopped.w then
+		local w = magic.ui.root:CreateChild("Window")
+		w.defaultStyle = K.STYLE
+		w:SetStyleAuto()
+		w:SetName("kit: stopped notice")
+		w:SetLayout(magic.LM_VERTICAL, 0, magic.IntRect(10, 6, 10, 6))
+		w:SetAlignment(magic.HA_CENTER, magic.VA_TOP)
+		w:SetFocusMode(magic.FM_NOTFOCUSABLE)
+		-- (a tap goes through; under the menus, as the play bar)
+		w.enabled, w.priority, w.bringToFront = false, -1, false
+		w.opacity = 0.92
+		stopped.w, stopped.t = w, w:CreateChild("Text")
+		stopped.t:SetStyleAuto()
+		stopped.t:SetTextAlignment(magic.HA_CENTER)
+	end
+	if not stopped.w then
+		return
+	end
+	stopped.w.visible = s ~= nil
+	if not s then
+		return
+	end
+	if stopped.t.text ~= s then
+		stopped.t.text = s
+	end
+	local root, foot = magic.ui.root, 0
+	for i = 0, root:GetNumChildren() - 1 do
+		local c = root:GetChild(i)
+		local name = c and c.visible and c:GetName() or ""
+		if name == "kit: bar" or name == "accounts: server button" or
+				name == "show_notification window" then
+			foot = math.max(foot, c.position.y + c.height)
+		end
+	end
+	if stopped.w.position.y ~= foot + 4 then
+		stopped.w:SetPosition(0, foot + 4)
+	end
+end
+
 magic.SubscribeToEvent("Update", function()
 	local ok, err = pcall(update)
 	if not ok then
 		log:warning("kit: ui: " .. tostring(err))
+	end
+	ok, err = pcall(stopped_notice)
+	if not ok then
+		log:warning("kit: the stopped notice: " .. tostring(err))
 	end
 	ok, err = pcall(draw_handles)
 	if not ok then
