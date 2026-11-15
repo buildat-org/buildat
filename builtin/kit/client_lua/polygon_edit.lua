@@ -170,6 +170,28 @@ function G.finish(d)
 	end
 end
 
+-- [KIT_POLYGON_ROW] The inspector's "Edit in Front view": the Front view
+-- round the polygon's points (their box and a margin), where they are edited
+function G.show(e)
+	local _, c = poly_comp(e)
+	if not c or not e.pos then
+		return
+	end
+	local o, q = drawn_at(e), NT.drawn_turn(e)
+	local x0, y0, x1, y1 = o.x, o.y, o.x, o.y
+	for _, p in ipairs(local_points(c)) do
+		local w = o + q * magic.Vector3(tonumber(p[1]) or 0, tonumber(p[2]) or 0, 0)
+		x0, y0 = math.min(x0, w.x), math.min(y0, w.y)
+		x1, y1 = math.max(x1, w.x), math.max(y1, w.y)
+	end
+	local aspect = magic.ui.root.width / math.max(1, magic.ui.root.height)
+	S.fx, S.fy = (x0 + x1) / 2, (y0 + y1) / 2
+	S.fspan = math.max(8, 1.3 * (y1 - y0), 1.3 * (x1 - x0) / aspect)
+	M.set_view("front")
+	log:info(string.format("kit editor: polygon %s in the Front view at %.2f,%.2f",
+			tostring(e.id), S.fx, S.fy))
+end
+
 -- Placing kit/polygon in the Front view: its points drawn so far
 function G.drawing()
 	return S.placing ~= nil and S.placing.type == TYPE and S.view == "front"

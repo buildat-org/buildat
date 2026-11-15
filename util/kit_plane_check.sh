@@ -30,8 +30,11 @@
 #   7. The Front view on a 1/4 grid: a concave polygon of 5 points drawn by
 #      clicks and closed on its first; the server's points are the clicked
 #      ones less its place (z 1); its second point dragged: a set of the
-#      points with that one alone moved. The screenshot.
-# The screenshots (side, front, side_ortho, side_polygons, front_polygon)
+#      points with that one alone moved. The screenshot. From 3D, its
+#      inspector's points row ([KIT_POLYGON_ROW]): the Front view round it.
+#   8. [KIT_EDIT_VIEW] kit/controls' edit_view front; the next session in
+#      the touch mode (by mouse), 3D remembered: edit mode comes up in Front.
+# The screenshots (side, front, side_ortho, side_polygons, front_polygon, touch_front)
 # are kept with KEEP_TMP=1; look at them.
 #   util/kit_plane_check.sh
 set -u
@@ -248,10 +251,35 @@ wait_log 5000 point 2 moved, 5 points
 wait_log_any 10000 entities, $((n + 1)) to undo
 frames 10
 screenshot @T@/front_polygon.png
+keypress F2
+wait_log 5000 kit editor: the view is 3D
+event kit_select 10
+wait_log 5000 kit editor: the inspector
+frames 3
+click Button "Edit in Front view"
+wait_log 5000 kit editor: polygon 10 in the Front view at
+frames 3
+keypress F2
+wait_log 5000 kit editor: the view is 3D
+EOF
+	n=$((n + 1))
+	set_p 3 edit_view '"front"'
+	echo quit
+} > "$t/boss.cmds"
+# [KIT_EDIT_VIEW] The next session, in the touch mode (by mouse), its view
+# remembered 3D: edit mode comes up in kit/controls' edit_view, Front
+cat > "$t/touch.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+event kit_edit {"op": "mode", "on": true}
+wait_log_any 10000 kit editor: edit mode on
+wait_log_any 10000 kit editor: kit/controls' edit view front
+frames 10
+screenshot @T@/touch_front.png
 quit
 EOF
-} > "$t/boss.cmds"
-sed -i "s|@T@|$t|g" "$t/boss.cmds"
+sed -i "s|@T@|$t|g" "$t/boss.cmds" "$t/touch.cmds"
 start_server "$t/srv.log" "Listening at" 300 auto \
 	bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 \
 	--sim-rate "$CHECK_RATE" || fail "the server did not come up ($t/srv.log)"
@@ -264,6 +292,9 @@ BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
 	run_client 60 "$t/boss.log" timeout 180 bin/buildat -C "$t/client_cache" \
 	-D "$t/cu" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
 	-c @"$t/boss.cmds" || fail "the client failed ($t/boss.log, $t/srv.log)"
+BUILDAT_TEST_KIT_UI_MODE=2 run_client 60 "$t/touch.log" timeout 120 bin/buildat \
+	-C "$t/client_cache" -D "$t/cu" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
+	-c @"$t/touch.cmds" || fail "the touch client failed ($t/touch.log, $t/srv.log)"
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 c=$t/boss.log s=$t/srv.log
@@ -333,5 +364,18 @@ paste <(echo "$got") <(echo "$moved") | awk 'NR != 3 && NR != 4 && $1 != $2 { ba
 	fail "not point 2 alone moved: $(echo $got) -> $(echo $moved)"
 echo "ok: a polygon drawn in the Front view, its points [$(echo $got)] at $at in the server's state; point 2 dragged: [$(echo $moved)]"
 echo "ok: a polygon's crossing edges and 129 points refused"
+# [KIT_POLYGON_ROW] The inspector's points row: from 3D to the Front view
+# round the drawn polygon (its points' box, about where it was placed)
+shown=$(grep -aoP 'kit editor: polygon 10 in the Front view at \K\S+' "$c")
+awk -v s="$shown" -v a="$at" 'BEGIN { split(s, p, ","); split(a, q, ",")
+	exit !(p[1] - q[1] < 2 && q[1] - p[1] < 2 && p[2] - q[2] < 2 && q[2] - p[2] < 2) }' ||
+	fail "the points row's Front view not at the polygon ($at): ${shown:-none} ($c)"
+echo "ok: the inspector's points row went to the Front view at $shown (the polygon at $at)"
+# [KIT_EDIT_VIEW] The touch session: 3D remembered, Front last
+v=$(grep -aoP 'kit editor: the view is \K\S+' "$t/touch.log" | tr '\n' ' ')
+[ "$(echo $v | awk '{ print $NF }')" = Front ] &&
+	grep -aq "remembered for .*: edit, 3d" "$t/touch.log" ||
+	fail "the touch session's views ($v): not Front last over a remembered 3D ($t/touch.log)"
+echo "ok: the touch session's edit mode came up in Front (kit/controls' edit_view) over a remembered 3D: $v"
 echo "PASS: kit/controls' vertical plane: kit/walker held to it on both sides, the side camera and its pointer, the editor's Front view placing at its depth, the movement list checked; kit/polygon's slope and overhang met, others off the plane not, one drawn and edited in the Front view; the 2D queries (util/kit_plane_check.lua)"
 # vim: set noet ts=4 sw=4:

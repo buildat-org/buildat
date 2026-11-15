@@ -3015,14 +3015,16 @@ function NT.params_form(w, e, ci, c, t, keep)
 	for k, v in pairs(E.pending[key] or {}) do
 		values[k] = v
 	end
-	local patterns = {}
+	local patterns, points = {}, {}
 	for _, k in ipairs(names) do
 		-- [KIT_VOXEL_STATES] A pattern of voxels is no text to type:
 		-- its buttons below
 		if decl[k].type == "voxels" then
 			patterns[#patterns + 1] = k
 		elseif decl[k].type == "points" then
-			-- ([KIT_PLANE] stage 3: kit/polygon's, edited in the Front view)
+			-- ([KIT_PLANE] stage 3: kit/polygon's, edited in the Front view;
+			-- [KIT_POLYGON_ROW] its row below)
+			points[#points + 1] = k
 		else
 			fields[#fields + 1] = field(k, decl[k], values)
 		end
@@ -3125,6 +3127,15 @@ function NT.params_form(w, e, ci, c, t, keep)
 				log:info("kit editor: " .. a[2] .. " " .. e.id .. " " .. k)
 			end)
 		end
+	end
+	-- [KIT_POLYGON_ROW] Points: how many, and the Front view round them, where
+	-- they are edited (polygon_edit.lua)
+	for _, k in ipairs(points) do
+		local r, v = row(w), values[k] or decl[k].default
+		label(r, k:upper() .. ": " .. (type(v) == "table" and #v or 0))
+		button(r, "Edit in Front view", function()
+			NT.pg.show(e)
+		end)
 	end
 return names
 end
