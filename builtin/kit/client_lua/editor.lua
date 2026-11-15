@@ -5140,7 +5140,7 @@ local function dialog(title, width)
 	W.dialog = w
 	w.priority = 10
 	if width then
-		w:SetFixedWidth(math.min(width, magic.ui.root.width - 16))
+		w:SetFixedWidth(math.min(width, magic.ui.root.width / S.font - 16))
 	end
 	return w, nil
 end
@@ -5391,9 +5391,16 @@ function NT.type_dialog(name)
 	NT.type_window()
 end
 
+-- [KIT_CRAG_PLAYTEST_1] The whole window (its room divided by the text
+-- size, as the panels' is): the client part left of the server part where
+-- both are about 80 characters wide, else one at a time under the tabs
+-- Client and Server (f.tab). simplified: a tab rebuilds the window, so the
+-- field left loses its cursor; the touch mode's pane always has the tabs
 function NT.type_window()
 	local f = E.type_form
-	local w, br = dialog(f.existing and "Edit type" or "New type", 640)
+	local touch = NT.sh.on()
+	local rw = math.floor(magic.ui.root.width / S.font) - 16
+	local w, br = dialog(f.existing and "Edit type" or "New type", rw)
 	f.win = W.dialog
 	text(w, f.existing and "The project's type " .. f.name or
 			"A type of this project's own, local/<name>: Lua run in Kit's box")
@@ -5402,10 +5409,29 @@ function NT.type_window()
 	edit(r, f.name, function(s)
 		f.name = s
 	end):SetName("type name")
-	local function field(key, title, h)
-		text(w, title, DIM)
+	local m = text(w, string.rep("abcdefghij", 8))
+	local side = not touch and rw >= 2 * m.minWidth + 40
+	m:Remove()
+	f.tab = f.tab or "source"
+	local tr = not side and row(w)
+	local cols = side and row(w) or w
+	local edits = {}
+	local function field(key, title, tab)
+		if tr then
+			button(tr, tab, function()
+				f.tab = key
+				log:info("kit editor: type: the " .. tab .. " tab")
+				NT.type_window()
+			end, f.tab == key):SetName("type tab " .. tab)
+			if f.tab ~= key then
+				return
+			end
+		end
+		local c = cols:CreateChild("UIElement")
+		c:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+		text(c, title, DIM)
 		local rec
-		local e = edit(w, f[key], function(s)
+		local e = edit(c, f[key], function(s)
 			f[key] = s
 			rec.old = s
 		end)
@@ -5413,7 +5439,11 @@ function NT.type_window()
 		e.multiLine = true
 		e.textSelectable = true
 		e.textCopyable = true
-		e:SetFixedHeight(h)
+		-- (its height the window's room left, below)
+		e:SetFixedHeight(touch and 280 or 100)
+		-- The text's top shown, not its end
+		e.cursorPosition = 0
+		edits[#edits + 1] = e
 		-- The touch mode's: the field entry mode on it, its Apply the text
 		rec = {name = "type " .. key, key = "type", k = key, e = {},
 			title = tostring(f.name) .. " · " .. title, kind = "text",
@@ -5424,8 +5454,9 @@ function NT.type_window()
 			end}
 		NT.fe.extra["type " .. key] = rec
 	end
-	field("source", "Server part: returns the type's table", 280)
-	field("client", "Client part (none if empty): the clients' handlers", 110)
+	field("client", "Client part (none if empty): the clients' handlers",
+			"Client")
+	field("source", "Server part: returns the type's table", "Server")
 	f.status_text = text(w, f.status ~= "" and f.status or " ",
 			f.ok and DIM or WARN)
 	br = br or row(w)
@@ -5440,6 +5471,13 @@ function NT.type_window()
 	button(br, "Close", function()
 		drop("dialog")
 	end):SetName("type close")
+	-- The fields down to the window's foot
+	local grow = math.floor(magic.ui.root.height / S.font) - 16 - w.height
+	for _, e in ipairs(touch and {} or edits) do
+		e:SetFixedHeight(100 + math.max(grow, 0))
+	end
+	log:info("kit editor: type: " .. (side and "side by side" or "tabs, " ..
+			f.tab))
 end
 
 -- The server's answer ("kit:type"): a get's files into the form, a put's

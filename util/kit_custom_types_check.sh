@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-15)
-# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/client_lua/editor.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/field_entry.lua src/impl/aitta.cpp apps/workbench/main/main.cpp
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/client_lua/editor.lua builtin/kit/client_lua/module.lua builtin/kit/client_lua/field_entry.lua src/impl/aitta.cpp apps/workbench/main/main.cpp 3rdparty/Urho3D/Source/Urho3D/UI/LineEdit.h
 # [KIT_CUSTOM_TYPES] A project's own types, local/<name>, on Workbench; one
 # server, kitboss (the admin) and kitbob on a headless weston's Xwayland of the check's
 # own (its clipboard carries the agent token):
@@ -25,7 +25,9 @@
 #      entity's Log); the lamp's client part changed, the client's swap
 #      seen; undo puts the version before back;
 #   4. "Edit type" on that 6 KB one in the inspector: read and saved over
-#      kit:type (edit_type.png);
+#      kit:type (edit_type.png); [KIT_CRAG_PLAYTEST_1] the dialog the whole
+#      window, the wheel over the server part scrolling its text at kitboss's
+#      editor text of 80 % (edit_type_wheel.png);
 #   5. the chair used: the client's body steps with version 1, the agent
 #      puts version 2, the body steps with it (the client takes the new
 #      movement) and the server says the entity reloaded; the chair in
@@ -36,8 +38,9 @@
 #   7. kitbob, no builder (registration open): his kit:type put and get
 #      refused, and his agent's token gets no put_type, get_type or
 #      delete_type.
+# kitboss's editor text at its default 80 %, a fractional font size.
 # Screenshots, kept with KEEP_TMP=1: $t/new_type.png, $t/palette.png,
-# $t/edit_type.png
+# $t/edit_type.png, $t/edit_type_wheel.png
 #   util/kit_custom_types_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -201,7 +204,7 @@ client() # <name>: its commands from the fifo $t/<name>.cmd, its log $t/<name>.l
 	CHECK_PIDS+=($!)
 }
 # (registration open for kitbob, who is no builder)
-BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
+BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 BUILDAT_TEST_EDITOR_FONT=80 \
 	BUILDAT_JOIN_ADMIN="setting open_registration on" client boss
 BOSS=$!
 exec 3> "$t/boss.cmd"
@@ -515,13 +518,26 @@ B=$(grep -aoP '"B": \K[0-9]+' "$t/tmpl/ids.json")
 step 10 "kit editor: the inspector" "event kit_select $B"
 cmd "event kit_inspector_show edit type local/big_counter" "frames 3"
 step 10 "kit editor: type: get local/big_counter: read" 'click Button "edit type local/big_counter"'
-cmd "frames 5" "screenshot $t/edit_type.png"
+# [KIT_CRAG_PLAYTEST_1] The dialog the whole window (the parts side by side
+# where 2 x 80 characters fit, else under tabs), the server part's text
+# from its top; the wheel over it scrolls it. A fractional font size (80 %)
+# brought the cursor back into view each frame, undoing the wheel
+step 10 "Wrote screenshot $t/edit_type_wheel.png" "frames 5" "screenshot $t/edit_type.png" \
+	"mouse_pos 700 400" "frames 3" "mouse_wheel -5" "frames 5" "screenshot $t/edit_type_wheel.png"
+python3 -I - "$t/edit_type.png" "$t/edit_type_wheel.png" <<'PY2' || fail "the wheel scrolled no text ($t/edit_type.png, $t/edit_type_wheel.png)"
+import sys
+from PIL import Image, ImageChops
+a, b = (Image.open(p).convert("L").crop((520, 150, 1000, 600)) for p in sys.argv[1:3])
+n = sum(1 for v in ImageChops.difference(a, b).getdata() if v > 60)
+print(f"the wheel: {n} pixels of the server part's text changed")
+sys.exit(0 if n > 2000 else 1)
+PY2
 step 10 "kit editor: type: put local/big_counter: Saved: the type local/big_counter changed: [0-9]{4} bytes" \
 	'click Button "type save"'
 grep -aqE "An edit by kitboss: the type local/big_counter changed: [0-9]{4} bytes, 1 entities reloaded" "$SL" ||
 	fail "no edit of big_counter by kitboss ($SL)"
 cmd "frames 3" 'click Button "type close"' "frames 3"
-echo "ok: Edit type: read and saved"
+echo "ok: Edit type: read and saved; $(grep -aoP 'kit editor: type: \K(side by side|tabs, \w+)' "$CL" | tail -1) in the whole window, the wheel scrolled its text at an 80 % text size"
 # 5. The chair: its step, then the agent's next one
 step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
 step 10 "kit: controls: camera chase, pointer crosshair, movement local/chair, seat 6" "frames 10" "event kit_use 6"

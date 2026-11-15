@@ -156,8 +156,10 @@ protected:
     String line_;
     /// Last used text font.
     Font* lastFont_;
-    /// Last used text size.
-    int lastFontSize_;
+    /// Last used text size. buildat: a float as Text's is; an int never
+    /// matched a fractional size (Kit's editor text at 80%), and Update()
+    /// then brought the cursor back into view each frame, undoing the wheel
+    float lastFontSize_;
     /// Text edit cursor position.
     unsigned cursorPosition_;
     /// Drag begin cursor position.
