@@ -974,8 +974,8 @@ struct Module: public interface::Module, public moderation::Host
 	// stable client runs. The pages name its kind, mark it, list it apart
 	// and offer no Install; the list hands it out as any other.
 	// simplified: every Kit kind is an alpha's, and an alpha a 0.8 one,
-	// until 0.8.0 is out; then the kinds and the "0.8" go from here and
-	// from the client's alpha_package()
+	// until 0.8.0 is out; then the kinds and the "0.8" go from here, the
+	// Hearth's and the client's alpha_package()
 	static bool alpha_package(const json::Value &rel)
 	{
 		const json::Value &m = rel.get("manifest");

@@ -501,7 +501,8 @@ alpha's client. The pages list it apart, under "Alpha packages" on / and
 named, marked "Alpha: for Buildat 0.8 alpha" with the version that made
 it, and no Install or links out (the .zip and .sig stay). A client that
 is no alpha does not list it in Apps from Aitta or the launcher's newest
-packages, and does not run it.
+packages, and does not run it. Its release thread on its home Hearth is
+marked the same way (doc/hearth.txt).
 
 Every API answer has Access-Control-Allow-Origin: *, so a play page on
 another origin fetches the list and the archives (and the .wasm, from a
