@@ -106,7 +106,7 @@ BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_admin.log" 2>&1 ||
 	fail "the Starport admin ($tmp/sp_admin.log)"
-list=$(curl -s -m 10 "localhost:$SP/api/v1/list")
+list=$(curl -s -m 10 -d "{\"version\": \"$(tr -d '\n' < VERSION)\"}" "localhost:$SP/api/v1/list")
 echo "$list" | grep -q "Play hearth" && echo "$list" | grep -q "Play aitta" ||
 	fail "the claims ($tmp/sp_admin.log)"
 python3 - "$SP" <<'PY' || fail "the ID API"

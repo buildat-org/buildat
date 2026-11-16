@@ -78,7 +78,7 @@ for _ in $(seq 300); do grep -q "verified ok" "$tmp/sp.log" && break; sleep 0.2;
 grep -q "verified ok" "$tmp/sp.log" || fail "no verified listing ($tmp/sp.log)"
 read -r _ _ id _ < <(grep -v "^#" "$tmp/an/apps/hearth/starport_claim.txt")
 [ -n "$id" ] || fail "no listing id"
-curl -s -m 10 "localhost:$SP/api/v1/list" | grep -q "\"$id\"" &&
+curl -s -m 10 -d "{\"version\": \"$(tr -d '\n' < VERSION)\"}" "localhost:$SP/api/v1/list" | grep -q "\"$id\"" &&
 	fail "the unlisted listing is in the list"
 grep -q "hello: Starport IDs taken" "$tmp/admin.log" ||
 	fail "the joined admin was not told IDs are taken ($tmp/admin.log)"

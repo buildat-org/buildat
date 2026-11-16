@@ -51,7 +51,7 @@ BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"p
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/admin" -w 800x600 -l 3 \
 	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/sp2.txt" > "$tmp/admin.log" 2>&1 ||
 	fail "the admin's drive ($tmp/admin.log)"
-curl -s -m 10 "localhost:$SP/api/v1/list" | grep -q "\"play\":\"$PLAY\"" ||
+curl -s -m 10 -d "{\"version\": \"$(tr -d '\n' < VERSION)\"}" "localhost:$SP/api/v1/list" | grep -q "\"play\":\"$PLAY\"" ||
 	fail "/api/v1/list has no play ($tmp/admin.log)"
 echo "ok: /api/v1/list carries the play page"
 
@@ -74,7 +74,7 @@ BUILDAT_SP_REQS="{\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/admin" -w 800x600 -l 3 \
 	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/sp1.txt" > "$tmp/admin2.log" 2>&1 ||
 	fail "the claim's drive ($tmp/admin2.log)"
-curl -s -m 10 "localhost:$SP/api/v1/list" | grep -q "Linked hearth" ||
+curl -s -m 10 -d "{\"version\": \"$(tr -d '\n' < VERSION)\"}" "localhost:$SP/api/v1/list" | grep -q "Linked hearth" ||
 	fail "the claim ($tmp/admin2.log)"
 ws() { # origin -> the status line
 	curl -s -i -m 3 -H "Connection: Upgrade" -H "Upgrade: websocket" \
@@ -127,7 +127,7 @@ BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_REQS="$reqs" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/admin" -w 800x600 -l 3 \
 	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/sp2.txt" > "$tmp/admin3.log" 2>&1 ||
 	fail "the claims' drive ($tmp/admin3.log)"
-l=$(curl -s -m 10 "localhost:$SP/api/v1/list")
+l=$(curl -s -m 10 -d "{\"version\": \"$(tr -d '\n' < VERSION)\"}" "localhost:$SP/api/v1/list")
 grep -q '"package":"someone/some_app"' <<< "$l" || fail "the app's package not listed: $l"
 grep -q '"game":"contentdb:someone/tgame"' <<< "$l" || fail "the world's game not listed: $l"
 echo "ok: an app's package and a world's game listed"
@@ -159,6 +159,14 @@ BUILDAT_HEARTH_REQS="{\"cmd\":\"new_topic\",\"name\":\"Main\",\"about\":\"x\"}
 grep -aq '"ok":false' "$tmp/hadmin.log" &&
 	fail "the threads: $(grep -ao '"error":"[^"]*"' "$tmp/hadmin.log" | head -1)"
 about() { curl -s -m 5 "http://127.0.0.1:$HE/t/$1" | grep -o '<p class="meta">About.*</p>'; }
+# [ALPHA_BUILDS] The Hearth asks the list with no version, and an alpha's
+# listing is only for a client of that alpha: on an alpha build it sees none
+# of these (all this build's), so the listed servers' play links are looked
+# for on a release build only, as front_pages_check's page at /
+alpha=$(grep -q -- -alpha. VERSION && echo 1)
+plays=("<a href=\"$PLAY/?server=127.0.0.1:$PK\"" "<a href=\"$PLAY/?server=127.0.0.1:$VA\"")
+[ -n "$alpha" ] && plays=("" "")
+if [ -z "$alpha" ]; then
 # The Hearth reads the list each minute
 for _ in $(seq 90); do
 	about 1 | grep -qF "<a href=\"$PLAY/?server=127.0.0.1:$HE\"" && break
@@ -166,15 +174,16 @@ for _ in $(seq 90); do
 done
 about 1 | grep -qF "<a href=\"$PLAY/?server=127.0.0.1:$HE\"" ||
 	fail "the listed server's thread: $(about 1) ($tmp/he.log)"
+fi
 for w in '<a href="/p/someone/some_app">' \
 		"<a href=\"http://127.0.0.1:$FA/p/someone/some_app\">" \
-		"<a href=\"$PLAY/?server=127.0.0.1:$PK\""; do
+		"${plays[0]}"; do
 	about 2 | grep -qF "$w" || fail "the app's thread has no $w: $(about 2)"
 done
 [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$HE/p/someone/some_app")" = 200 ] ||
 	fail "/p/someone/some_app is not there"
 for w in '<a href="https://content.luanti.org/packages/someone/tgame/"' \
-		"<a href=\"$PLAY/?server=127.0.0.1:$VA\""; do
+		"${plays[1]}"; do
 	about 3 | grep -qF "$w" || fail "the ContentDB game's thread has no $w: $(about 3)"
 done
 [ "$(about 4)" = '<p class="meta">About the game mygame</p>' ] ||
