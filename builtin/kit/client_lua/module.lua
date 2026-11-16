@@ -137,6 +137,10 @@ local function edit(parent, value, on_text)
 	e:SetStyleAuto()
 	e.minWidth = 120
 	e.minHeight = 24
+	-- The text inside the style's 4-pixel border: the style gives no
+	-- inset, so the first glyph sat on the border and a focused field's
+	-- highlight hid it (the web's publish form showed "oop" for "loop")
+	e.clipBorder = magic.IntRect(4, 0, 4, 0)
 	e:SetText(value)
 	magic.SubscribeToEvent(e, "TextChanged", function()
 		on_text(e:GetText())
