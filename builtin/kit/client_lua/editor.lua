@@ -3704,9 +3704,10 @@ function NT.actions(w, e, parented, pe, under)
 end
 
 -- [KIT_AGENT_VISUALS] An entity's comments, the builders' notes on it (the
--- server sends them to editors alone): "Comments", its text cyan when there
--- are some, shows the field under it (hidden at first, the choice kept from
--- entity to entity). What is typed is a draft kept by the entity's id until
+-- server sends them to editors alone): "Comments" beside the name (the rows
+-- under it where they were), its text cyan when there are some, shows the
+-- field under the name (hidden at first, the choice kept from entity to
+-- entity). What is typed is a draft kept by the entity's id until
 -- the state has it; Save (amber while it differs) or Ctrl+Enter sends it,
 -- one undo. Enter breaks the line. The touch mode types it in the field
 -- entry mode, its Apply the Save.
@@ -3714,19 +3715,21 @@ end
 -- height whose text scrolls by the wheel and follows the caret, no scroll
 -- bar (Hearth's grows in a ScrollView: that, if notes get long)
 local MAX_COMMENTS = 4096
-local function comments_item(w, e)
+local function comments_item(w, e, title_row)
 	E.comment_drafts = E.comment_drafts or {}
 	local now = e.comments or ""
 	if E.comment_drafts[e.id] == now then
 		E.comment_drafts[e.id] = nil
 	end
-	local b, t = button(w, "Comments", function()
+	local b, t = button(title_row, "Comments", function()
 		S.comments_open = not S.comments_open
 		log:info("kit editor: comments " .. (S.comments_open and "shown" or
 				"hidden"))
 		inspector_window()
 	end)
 	b:SetName("inspector comments")
+	b.maxWidth = b.minWidth
+	b:SetVar("KitNarrow", "1")
 	if now ~= "" then
 		t:SetColor(magic.Color(ui_utils.rgb("focus")))
 	end
@@ -3800,8 +3803,9 @@ local function inspector(w, e, is_made)
 	if n > 1 then
 		text(w, n .. " selected", DIM)
 	end
-	NT.name_item(w, "inspector", e, NT.entity_label(e), function() end)
-	comments_item(w, e)
+	local tr = row(w)
+	NT.name_item(tr, "inspector", e, NT.entity_label(e), function() end)
+	comments_item(w, e, tr)
 	-- [KIT_SYMMETRY] a copy: its parameters alone, the rest its source's
 	local copy = NT.sym_copy(e)
 	if copy then
