@@ -258,6 +258,8 @@ struct Module: public interface::Module, public Interface
 			const std::map<ss_, uint64_t> &bytes){}
 	uint64_t storage_budget(){ return 2048ull * 1024 * 1024; }
 	void notify(int min_level, const ss_ &text, const ss_ &link){}
+	// No Starport ID logins in the page
+	sv_<ss_> starport_ids(const ss_ &name){ return {}; }
 	// The page's one player is the admin, who needs no builder privilege
 	bool has_priv(const ss_ &name, const ss_ &priv){ return false; }
 	ss_ set_priv(const ss_ &name, const ss_ &priv, bool on, const ss_ &by)
