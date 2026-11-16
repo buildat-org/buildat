@@ -143,7 +143,7 @@ mkdir -p "$t/alpha"
 cp "$t/app/CHANGELOG.md" "$t/alpha/"
 for n in crag early; do
 	if [ $n = crag ]; then
-		x='"kind": "scene", "buildat_version": "0.8.0-alpha.26", "game": "tester.trial",
+		x='"kind": "scene", "buildat_version": "0.8.0-alpha.26", "game": "tester/trial", "title": "Crag",
 		"description": "a <script>alert(3)</script> scene",'
 	else
 		x='"buildat_version": "0.8.0-alpha.26<i>", "description": "an early app",'
@@ -161,7 +161,7 @@ rs = {r["name"]: r for r in json.load(sys.stdin)["releases"]}
 c, e = rs["crag"], rs["early"]
 assert c["kind"] == "other" and c["manifest"]["kind"] == "scene", c
 assert c["manifest"]["buildat_version"] == "0.8.0-alpha.26", c
-assert c["manifest"]["game"] == "tester.trial", c
+assert c["manifest"]["game"] == "tester/trial", c
 assert e["kind"] == "app" and e["manifest"]["buildat_version"] == "0.8.0-alpha.26<i>", e' ||
 	fail "the alpha releases are not listed with their manifests whole"
 # / lists them apart after tester/demo (as before), marked, the kind named,
@@ -216,8 +216,11 @@ BUILDAT_STARPORT_MANAGED="$t/managed.json" timeout 90 bin/buildat -m launch_menu
 mine(){ grep -a "$1" "$2" | grep -av "command: \|wait_log: "; }
 mine "aitta page: tester/demo 1.3.0" "$t/page.log" > /dev/null ||
 	fail "Apps from Aitta did not list tester/demo ($(grep -a "aitta page\|Command seq" "$t/page.log" | tail -3))"
+# (an alpha's own client lists them: looked for on a stable build only)
+if ! grep -q -- -alpha. "$here/VERSION"; then
 mine "aitta page: tester/crag\|aitta page: tester/early" "$t/page.log" &&
 	fail "Apps from Aitta lists an alpha's package"
+fi
 
 # A manifest over 16 KiB is refused: it is kept whole and handed out in
 # every list ([SECURITY_RUN_5])
