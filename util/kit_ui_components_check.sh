@@ -37,8 +37,10 @@
 #      it by every way there; a UI element under a door not in a panel; a
 #      panel in a panel; placing in it with it selected and with Place under
 #      this; a copy of it pasted, its delete and undo, a paste into the panel,
-#      a prefab saved and placed keep the tree; a text and a player's dialog in
-#      play (dialog.png, closed.png).
+#      a prefab saved and placed keep the tree; [KIT_PANEL_LEFTOVERS] a
+#      builder's own type of ui kind "panel" (local/menu) a parent by
+#      Switch parent and indented as kit/ui_panel is; a text and a player's
+#      dialog in play (dialog.png, closed.png).
 # Screenshots kept with KEEP_TMP=1: $t/overlay.png, $t/play.png,
 # $t/bob.png, $t/drive/touch.png; look at them.
 #   util/kit_ui_components_check.sh
@@ -429,6 +431,30 @@ EOF
 	edit '{"op": "place", "type": "kit/ui_text", "pos": [0, 0, 0]}'
 	edit '{"op": "place", "type": "kit/ui_panel", "pos": [0, 0, 0]}'
 	edit '{"op": "parent", "id": 35, "parent": 36}'
+	# 37: [KIT_PANEL_LEFTOVERS] a builder's own type of ui kind "panel"; 38 a
+	# text put in it by Switch parent, picked in the list
+	printf 'event kit_type %s\n' '{"op": "put", "name": "menu", "source": "return {version = 1, no_position = true, ui = {kind = \"panel\", text = \"param:title\"}, params = {title = {cat = \"hud\", type = \"string\", default = \"Menu\"}}}"}'
+	# (an undo too, its state line sent before it counts it)
+	printf 'wait_log 10000 kit editor: type: put local/menu: Saved\n'
+	n=$((n + 1))
+	edit '{"op": "place", "type": "local/menu", "pos": [0, 0, 0]}'
+	edit '{"op": "place", "type": "kit/ui_text", "pos": [0, 0, 0]}'
+	cat <<'EOF'
+click Button "Entities"
+frames 3
+click Button "Scene (*"
+frames 3
+event kit_select 38
+frames 3
+click Button "Switch parent"
+wait_log 5000 kit editor: switch parent of 38: armed
+frames 3
+EOF
+	# (its row at the list's end, below the window: the wheel down first)
+	printf 'mouse_pos 143 400\n'
+	for _ in $(seq 20); do printf 'mouse_wheel -1\n'; done
+	printf 'frames 5\nclick Button "select 37"\n'
+	edited
 	cat <<'EOF'
 frames 5
 screenshot @T@/list2.png
@@ -483,9 +509,9 @@ ents = {e["id"]: e for e in au["entities"]}
 parent = lambda i: ents[i]["parent"]
 scene = parent(7)
 # Under the panel, no position given them, no "panel" parameter left
-for i, p in {8: 7, 9: 7, 14: 7, 15: 14, 16: 7, 17: 14, 12: scene, 35: 36, 13: scene}.items():
+for i, p in {8: 7, 9: 7, 14: 7, 15: 14, 16: 7, 17: 14, 12: scene, 35: 36, 13: scene, 38: 37}.items():
     assert parent(i) == p, (i, ents[i])
-for i in (7, 8, 9, 12, 14, 15, 16, 17, 35, 36):
+for i in (7, 8, 9, 12, 14, 15, 16, 17, 35, 36, 37, 38):
     assert "pos" not in ents[i], ents[i]
     assert "panel" not in ents[i]["components"][0].get("params", {}), ents[i]
 # The copy: back by the undo, the same tree beside the panel
@@ -513,6 +539,10 @@ assert any(re.search(r"\b7, >8, >9, 1", l) for l in scene_list(b2)), "un-parent"
 assert any(re.search(r"\b7, >8, >9, >14, >>15\b", l) for l in scene_list(b2)), scene_list(b2)
 assert any(re.search(r"\b7, >8, >9, >14, >>15, >>17, >16\b", l) for l in scene_list(b3)), scene_list(b3)
 assert any(re.search(r"\b36, >35\b", l) for l in scene_list(b3)), scene_list(b3)
+# [KIT_PANEL_LEFTOVERS] the builder's own panel type: its text indented under it
+assert ents[37]["components"][0]["type"] == "local/menu", ents[37]
+assert any(re.search(r"\b37, >38\b", l) for l in scene_list(b2)), scene_list(b2)[-3:]
+assert any(re.search(r"\b37, >38\b", l) for l in scene_list(b3)), scene_list(b3)
 # Laid out in it: the element's box in the panel's, fresh and when switched
 def box(s, i, after=0):
     m = None
@@ -533,8 +563,9 @@ i = b2.index("switch parent of 12 to 7")
 j = b2.index("un-parent 12")
 assert inside(box(b2[:j], 12, i), box(b2[:j], 7)), (box(b2[:j], 12, i), box(b2[:j], 7))
 PY
-want "$t/boss2.log" "kit editor: switch parent of 12 to 7" "kit editor: un-parent 12"
-want "$t/srv2.log" "put 12 under 7" "put 12 under the scene" "placed kit/ui_text 15, no position under 14" \
+want "$t/boss2.log" "kit editor: switch parent of 12 to 7" "kit editor: un-parent 12" \
+	"kit editor: switch parent of 38 to 37"
+want "$t/srv2.log" "put 12 under 7" "put 12 under the scene" "put 38 under 37" "placed kit/ui_text 15, no position under 14" \
 	"placed kit/ui_text 16, no position under 7" "placed kit/ui_bar 17, no position under 14" \
 	"pasted the copy as 18...24" "deleted 18 and 6 under it"
 want "$t/srv3.log" "kit/ui_panel 7: shown for kitboss" "UI button 9 pressed by kitboss" "kit/ui_panel 7: hidden for kitboss"
