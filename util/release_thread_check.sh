@@ -12,6 +12,8 @@
 # opens the composer there with the package and versions; its thread is a
 # problem reported in 1.0.0, which the admin marks fixed in 1.1.0; demo 1.1.0's
 # release thread links it and its reporter is told.
+# [ALPHA_KIT_PACKAGES_PUBLIC] A Buildat alpha's app (its buildat_version
+# an alpha's) gets a thread marked as the Aitta's pages mark it.
 #
 #   util/release_thread_check.sh
 set -u
@@ -62,7 +64,7 @@ BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_a" -w 800x600 -l 3 -o sound_mute=1 \
 	-s 127.0.0.1:$A -c @"$t/cmds" > "$t/cl_a.log" 2>&1 || fail "the Aitta client: $(why "$t/cl_a.log")"
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl_a.log" || fail "the bind did not go through"
-publish(){ # name home [version]
+publish(){ # name home [version] [more keys]
 	local v=${3:-1.0.0}
 	mkdir -p "$t/$1/main"
 	echo 'int x;' > "$t/$1/main/main.cpp"
@@ -70,10 +72,10 @@ publish(){ # name home [version]
 	echo "return function(ctx) return {{id = 'play', label = '$1',
 		run = function() ctx.launch{} end}} end" > "$t/$1/launcher/init.lua"
 	printf '# %s\r\n\r\n- the first **release** of %s\r\n' "$v" "$1" > "$t/$1/CHANGELOG.md"
-	printf '{"author": "tester", "name": "%s", "version": "'$v'",
+	printf '{"author": "tester", "name": "%s", "version": "'$v'",%s
 		"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
 		"description": "a check", "home_hearth": "%s",
-		"changelog": "CHANGELOG.md"}\n' "$1" "$2" > "$t/$1/meta.json"
+		"changelog": "CHANGELOG.md"}\n' "$1" "${4:-}" "$2" > "$t/$1/meta.json"
 	local zip
 	zip=$("$b" aitta pack "$t/$1" "$t/key" "$t/out_$1" 2>/dev/null) || fail "pack $1"
 	"$b" aitta publish "$zip" 127.0.0.1:$A 2>&1 | grep -q "listed: tester/$1/$v" ||
@@ -185,6 +187,11 @@ curl -s "http://127.0.0.1:$H/t/2" | grep -q 'About <a href="/p/tester/demo">' ||
 [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$H/p/tester/demo/x")" = 404 ] ||
 	fail "/p/ took a path of three parts"
 
+# [ALPHA_KIT_PACKAGES_PUBLIC] A Buildat alpha's app (its buildat_version
+# an alpha's, with a stranger's <i>), published now: the restarted
+# Hearth's first read makes its thread, marked
+publish early "http://127.0.0.1:$H/" 1.0.0 ' "buildat_version": "0.8.0-alpha.26<i>",'
+
 # A restart reads the Aitta again and makes no second thread
 # start() ran in $(...): the server is not this shell's child to wait for
 kill $ph
@@ -199,7 +206,15 @@ grep -q "STATUS Listening" "$t/hearth2.log" || fail "Hearth did not start again 
 # The restarted Hearth's first read of the Aitta, posted
 wait_for_log "$t/hearth2.log" "the release sources read" 30 ||
 	fail "the restarted Hearth did not read the Aitta ($(tail -3 "$t/hearth2.log"))"
-grep -q "is the thread" "$t/hearth2.log" && fail "a second thread after the restart"
-n=$(curl -s "http://127.0.0.1:$H/t/6" | grep -c "demo 1\.")
-[ "$n" = 0 ] || fail "a second thread after the restart (/t/6)"
-echo "PASS: demo 1.0.0 is one release thread with its changelog; elsewhere is not; Feedback... reaches the composer"
+grep "is the thread" "$t/hearth2.log" | grep -qv "tester/early/" &&
+	fail "a second thread after the restart"
+e=$(grep -o "tester/early/1.0.0 .* is the thread [0-9]*" "$t/hearth2.log" | grep -o "[0-9]*$")
+[ -n "$e" ] || fail "no thread for the alpha's early 1.0.0 ($(grep -a "elease" "$t/hearth2.log" | tail -3))"
+page=$(curl -s "http://127.0.0.1:$H/t/$e")
+echo "$page" | grep -qF "early 1.0.0 (alpha)" || fail "the alpha's thread title: $page"
+echo "$page" | grep -qF "<strong>Alpha: for Buildat 0.8 alpha</strong>, made with 0.8.0-alpha.26&lt;i&gt;; a stable Buildat does not install it." ||
+	fail "the alpha's thread is not marked, its buildat_version as text: $page"
+curl -s "http://127.0.0.1:$H/t/1" | grep -q "Alpha" && fail "demo 1.0.0's thread is marked an alpha's"
+n=$(curl -s "http://127.0.0.1:$H/t/$((e + 1))" | grep -c "demo 1\.")
+[ "$n" = 0 ] || fail "a second thread after the restart (/t/$((e + 1)))"
+echo "PASS: demo 1.0.0 is one release thread with its changelog; elsewhere is not; an alpha's thread marked; Feedback... reaches the composer"

@@ -42,7 +42,9 @@ and a release whose home_hearth is one of the addresses becomes a thread
 in the "Releases" topic by "author (Aitta)", with its description and
 changelog. Its thread lists the problems marked fixed in its version
 (same package and key), whose reporters and followers are told it is
-out.
+out. A Buildat alpha's package (doc/aitta.txt) has " (alpha)" after its
+title and "Alpha: for Buildat 0.8 alpha, made with <buildat_version>"
+first in its message ([ALPHA_KIT_PACKAGES_PUBLIC]).
 
 Accounts and admins
 -------------------
