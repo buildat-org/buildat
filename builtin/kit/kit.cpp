@@ -7235,6 +7235,35 @@ struct Module: public interface::Module, public Interface
 		return o;
 	}
 
+	// [KIT_AGENT_VISUALS] base64's bytes (whitespace skipped, "=" only at the
+	// end); false: not base64
+	static bool unbase64(const ss_ &s, ss_ &out)
+	{
+		out.clear();
+		uint32_t n = 0;
+		int bits = 0;
+		size_t pad = 0;
+		for(char c : s){
+			if(c == ' ' || c == '\n' || c == '\r' || c == '\t')
+				continue;
+			const int v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ?
+					c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52 : c == '+' ?
+					62 : c == '/' ? 63 : -1;
+			if(c == '=' && ++pad <= 2)
+				continue;
+			if(v < 0 || pad)
+				return false;
+			n = (n << 6 | (uint32_t)v) & 0xffffff;
+			bits += 6;
+			if(bits >= 8){
+				bits -= 8;
+				out += (char)(n >> bits & 255);
+			}
+		}
+		// (a lone sixth bit group is no byte)
+		return bits < 6;
+	}
+
 	// A package's names: a-z, 0-9 and _, 40 at most
 	static ss_ plain_id(const ss_ &s, const char *def)
 	{
@@ -30344,9 +30373,15 @@ struct Module: public interface::Module, public Interface
 			{"get_state", "=state", "The composition as built: each authored "
 				"entity's id, parent, name, position (x, y, z; y up, a cell 1) "
 				"and components (type, params, links to other entities' "
-				"inputs); whether the round is Running, each component's state "
-				"then; how many of your edits there are to undo; the game it "
-				"is (\"<author>/<name>\", list_aitta's filter).",
+				"inputs), its comments (builders' notes); whether the round is "
+				"Running, each component's state then; round: its state "
+				"(Running, Ended), who started it, its phase (ended; playing; "
+				"with a kit/lobby lobby, playing or over, each player's); your "
+				"scene and the scenes; scenes_from: where each scene's "
+				"kit/controls, kit/game_rules and kit/environment come from "
+				"(own, the scene it is under that has one, root or none); how "
+				"many of your edits there are to undo; the game it is "
+				"(\"<author>/<name>\", list_aitta's filter) and its save.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"list_types", "=types", "The types an entity is placed of: each "
 				"one's name, group and what it is. With type: its declaration, "
@@ -30366,8 +30401,12 @@ struct Module: public interface::Module, public Interface
 			// The reads (agent_read())
 			{"get_guide", "=guide", "How Kit's compositions are built and run, "
 				"and every type of this server's with its inputs, outputs and "
-				"params' names. Read it first.",
-				R"J({"type": "object", "properties": {}})J", ""},
+				"params' names. Read it first. topic \"visuals\": how a game "
+				"looks (camera, sky, light, ground, voxels, textures, effects), "
+				"what you can and cannot see of it; read it before changing "
+				"a look.",
+				R"J({"type": "object", "properties": {"topic": {"type": "string",
+				"enum": ["visuals"], "description": "None: the guide"}}})J", ""},
 			{"get_links", "=links", "The links: each one's entity, component, "
 				"output, the entity it goes to and its input, with their value "
 				"types. With id: those from it and to it.",
@@ -30401,12 +30440,32 @@ struct Module: public interface::Module, public Interface
 			{"get_voxels", "=voxels", "The voxels of a box of your scene, at "
 				"most 4096 cells: a key of characters to voxel names (\".\" "
 				"air, \"?\" not loaded), then each layer from y up, each row of "
-				"it from z up, each character x from at's.",
+				"it from z up, each character x from at's. The sections (64 "
+				"cells a side) it reads are loaded for it, 8 a call at most "
+				"(not_loaded says why a \"?\" is left). The ground's height over "
+				"a wide area: get_ground.",
 				R"J({"type": "object", "properties": {
 				"at": {"type": "array", "items": {"type": "integer"},
 					"minItems": 3, "maxItems": 3, "description": "Its lowest corner"},
 				"size": {"type": "array", "items": {"type": "integer"},
 					"minItems": 3, "maxItems": 3, "description": "Cells each way"}},
+				"required": ["at", "size"]})J", ""},
+			// [KIT_AGENT_VISUALS]
+			{"get_ground", "=ground", "The ground's height over an area of "
+				"your scene, from its kit/terrain, nothing loaded or generated: "
+				"rows from z up of heights every step cells from x up (a "
+				"heightmap's surface, or a voxel World's generated top cell; "
+				"null past a finite map), at most 1024 cells a side and 4096 "
+				"heights (step, unless given, the least that fits); the sea "
+				"level, the map's x, z, width and depth, and the voxel "
+				"sections (64 cells a side, [x, y, z]) loaded there. Hand "
+				"edits, caves and decorations are only in get_voxels.",
+				R"J({"type": "object", "properties": {
+				"at": {"type": "array", "items": {"type": "integer"},
+					"minItems": 2, "maxItems": 2, "description": "x, z: its corner"},
+				"size": {"type": "array", "items": {"type": "integer"},
+					"minItems": 2, "maxItems": 2, "description": "Width (x) and depth (z)"},
+				"step": {"type": "integer", "description": "Cells between samples, 1...64"}},
 				"required": ["at", "size"]})J", ""},
 			{"place", "place", "Places an entity of a type at pos, its params "
 				"set at once if given (each checked as set_param checks it), "
@@ -30418,19 +30477,23 @@ struct Module: public interface::Module, public Interface
 					"minItems": 3, "maxItems": 3, "description": "x, y, z"},
 				"params": {"type": "object",
 					"description": "Parameter values by name"},
-				"parent": {"type": "integer",
-					"description": "An entity to put it under (0: the scene)"}},
+				"parent": {"type": "integer", "description":
+					"An entity to put it under (0 or the scene's own id: the scene)"}},
 				"required": ["type", "pos"]})J", ""},
 			{"set_param", "set", "Sets a parameter of an entity's component "
-				"to value, checked against its type's declaration.",
+				"to value, checked against its type's declaration. Or params: "
+				"several of that component's at once, each checked first, all "
+				"or none set, one undo.",
 				R"J({"type": "object", "properties": {
 				"id": {"type": "integer"},
 				"comp": {"type": "integer", "description":
 					"The component's index on the entity, 0 (the first) unless given"},
 				"param": {"type": "string"},
 				"value": {"description":
-					"A number, string, boolean, array or object, as the parameter's type is"}},
-				"required": ["id", "param", "value"]})J", R"J({"comp": 0})J"},
+					"A number, string, boolean, array or object, as the parameter's type is"},
+				"params": {"type": "object", "description":
+					"Instead of param and value: {param: value, ...}"}},
+				"required": ["id"]})J", R"J({"comp": 0})J"},
 			{"link", "link", "Links an output of an entity's component to an "
 				"input of entity `to`: each time the output signals, the input "
 				"gets its value. Their value types must meet.",
@@ -30514,7 +30577,8 @@ struct Module: public interface::Module, public Interface
 				"prefab": {"type": "string"},
 				"pos": {"type": "array", "items": {"type": "number"},
 					"minItems": 3, "maxItems": 3},
-				"turn": {"type": "number"}, "parent": {"type": "integer"},
+				"turn": {"type": "number"}, "parent": {"type": "integer",
+					"description": "0 or the scene's own id: the scene"},
 				"free": {"type": "boolean"}, "detached": {"type": "boolean"}},
 				"required": ["prefab", "pos"]})J", ""},
 			{"save_prefab", "save_prefab", "Makes entities ids the prefab "
@@ -30543,6 +30607,19 @@ struct Module: public interface::Module, public Interface
 					"minItems": 3, "maxItems": 3, "description": "[1, 1, 1] unless given"},
 				"param": {"type": "integer"}, "tint": {"type": "integer"}},
 				"required": ["voxel", "at"]})J", ""},
+			// [KIT_AGENT_VISUALS]
+			{"put_texture", "texture_put", "Uploads a texture, as the editor's "
+				"Upload does: a square PNG, its side a power of two 8...128, 64 "
+				"KiB at most, decoded and saved again. The answer is its name, "
+				"\"kit/up/<hash>.png\" (the same image: the same name). voxel: a "
+				"voxel type of yours wearing it too, \"<your account>/<name>\" "
+				"(a new version if there is one), placeable with set_voxels and "
+				"a kit/part's voxel parameter.",
+				R"J({"type": "object", "properties": {
+				"png": {"type": "string", "description": "The PNG's bytes in base64"},
+				"voxel": {"type": "object", "description":
+					"{name (letters, digits and _), kind (solid, leaves, plant, water; solid unless given), solid (true unless given), transparent, light (0...15), friction (0...10, 1 unless given), surface (a tag)}"}},
+				"required": ["png"]})J", ""},
 			// [KIT_CUSTOM_TYPES]
 			{"put_type", "type_put", "Puts a custom type of this game's, "
 				"local/<name> (any builder edits any; one undo), loaded at once, "
@@ -31100,6 +31177,39 @@ struct Module: public interface::Module, public Interface
 					what, why);
 			return failed ? "Refused: "+why : what;
 		}
+		// [KIT_AGENT_VISUALS] a texture as a client's "kit:texture" uploads
+		// it (store_texture()'s checks), and a voxel type wearing it if asked
+		if(op == "texture_put"){
+			failed = true;
+			ss_ b64 = jstr(a, "png"), png, why;
+			// (a data URL's head too)
+			if(b64.compare(0, 5, "data:") == 0 && b64.find(',') != ss_::npos)
+				b64 = b64.substr(b64.find(',') + 1);
+			if(b64.size() > (MAX_TEXTURE_BYTES + 2) / 3 * 4 + 4096 ||
+					!unbase64(b64, png))
+				return "Refused: png: a PNG's bytes in base64, "+
+						itos(MAX_TEXTURE_BYTES >> 10)+" KiB at most";
+			const ss_ name = store_texture(png, why);
+			if(name.empty())
+				return "Refused: "+why;
+			log_i(MODULE, "%s uploaded texture %s", cs(p.name), cs(name));
+			send_state_all();
+			failed = false;
+			const json::Value &v = a.get("voxel");
+			if(!v.is_object())
+				return name;
+			json::Value e = v.deepcopy();
+			e.set("op", "voxel");
+			e.set("texture", name);
+			ss_ refused, warnings;
+			if(!agent_edit(peer, e, refused, warnings)){
+				failed = true;
+				return "Texture "+name+"; the voxel type refused: "+refused+
+						warnings;
+			}
+			return "Texture "+name+"; voxel type "+builder_author(author_of(p))+
+					"/"+jstr(v, "name")+" wears it"+warnings;
+		}
 		// The edit as an editor's client sends it
 		json::Value e = t.defaults[0] ? json::load_string(t.defaults) :
 				json::object();
@@ -31225,6 +31335,8 @@ struct Module: public interface::Module, public Interface
 		json::Value s = json::object(), scenes = json::array();
 		s.set("running", m_session.running);
 		s.set("scene", p.scene);
+		// [KIT_AGENT_VISUALS] its entity (a parent as 0 is)
+		s.set("scene_id", (int64_t)scene_entity(p.scene));
 		// [KIT_SCENE_TREE] each before those under it; under: the scene
 		// each is under
 		json::Value under = json::object();
@@ -31238,9 +31350,81 @@ struct Module: public interface::Module, public Interface
 		if(under.size())
 			s.set("scenes_under", under);
 		s.set("can_make_scenes", (bool)m_host.make_scene);
+		// [KIT_AGENT_VISUALS] where each scene's controls, rules and
+		// environment come from: its own, a scene's it is under, the root's
+		// or none
+		json::Value from = json::object();
+		auto source = [&](uint64_t holder, const ss_ &scene) -> ss_ {
+			auto h = m_entities.find(holder);
+			if(!holder || h == m_entities.end())
+				return "none";
+			auto up = m_entities.find(h->second.parent);
+			if(h->second.parent == 1 || up == m_entities.end())
+				return "root";
+			return up->second.name == scene ? ss_("own") : up->second.name;
+		};
+		for(unsigned i = 0; i < tree.size(); i++){
+			const ss_ name = jstr(tree.at(i), "name");
+			json::Value f = json::object();
+			uint64_t holder = 0;
+			scene_instance("kit/controls", name, &holder);
+			f.set("controls", source(holder, name));
+			holder = 0;
+			scene_instance("kit/game_rules", name, &holder);
+			f.set("rules", source(holder, name));
+			holder = 0;
+			env_of(name, &holder);
+			f.set("environment", source(holder, name));
+			from.set(name, f);
+		}
+		s.set("scenes_from", from);
+		// The default round: Running or Ended (Stop), a kit/lobby's players'
+		// states (lobby, playing, over); the arenas' rounds beside it
+		json::Value round = json::object(), lobby = json::object();
+		round.set("state", m_session.running ? "Running" : "Ended");
+		if(m_session.running && !m_session.by.empty())
+			round.set("by", m_session.by);
+		std::map<uint64_t, ss_> named;
+		for(auto &pp : m_peers)
+			if(pp.second.player)
+				named[pp.second.player] = pp.second.name;
+		for(auto &e : m_entities)
+			for(const Instance &in : e.second.comps){
+				const json::Value &st = in.state.get("states");
+				if(in.type != LOBBY_TYPE || !in.disabled.empty() || !st.is_object())
+					continue;
+				for(json::Iterator it(st); it; ++it){
+					const ss_ k = it.key();
+					const uint64_t pl = k.compare(0, 7, "player:") == 0 ?
+							(uint64_t)atoll(k.c_str() + 7) : 0;
+					if((*it).is_string())
+						lobby.set(named.count(pl) ? named[pl] : k, *it);
+				}
+			}
+		ss_ phase = m_session.running ? "playing" : "ended";
+		if(m_session.running && lobby.size()){
+			bool playing = false, over = false;
+			for(json::Iterator it(lobby); it; ++it){
+				playing = playing || (*it).as_string() == "playing";
+				over = over || (*it).as_string() == "over";
+			}
+			phase = playing ? "playing" : over ? "over" : "lobby";
+		}
+		round.set("phase", phase);
+		if(lobby.size())
+			round.set("lobby", lobby);
+		int64_t rounds = 0;
+		for(auto &gs : m_sessions)
+			rounds += !gs.second->draft && !gs.second->bench;
+		if(rounds)
+			round.set("arena_rounds", rounds);
+		s.set("round", round);
 		// [WB_RENAME_LEFTOVERS] list_aitta's game filter, as kit:edit_state's
 		if(!m_host.project.empty())
 			s.set("game", game_of(author_of(p)));
+		// [KIT_AGENT_VISUALS] the save it is
+		if(!m_host.project.empty())
+			s.set("save", m_host.project);
 		s.set("undo", (int64_t)m_undo[p.name].size());
 		json::Value es = authored_json(true).get("entities");
 		for(unsigned i = 0; m_session.running && i < es.size(); i++){
@@ -31354,12 +31538,23 @@ struct Module: public interface::Module, public Interface
 		}
 		if(op == "=publish_log")
 			return agent_publish_log(peer, failed);
-		if(op == "=guide")
+		if(op == "=guide"){
+			// [KIT_AGENT_VISUALS]
+			const ss_ topic = jstr(a, "topic");
+			if(topic == "visuals")
+				return agent_visuals();
+			if(!topic.empty()){
+				failed = true;
+				return "topic: \"visuals\" or none (the guide)";
+			}
 			return agent_guide(p.name, true);
+		}
 		if(op == "=goals")
 			return agent_goals().stringify();
 		if(op == "=voxels")
 			return agent_get_voxels(p, a, failed);
+		if(op == "=ground")
+			return agent_get_ground(p, a, failed);
 		if(op == "=links"){
 			if(!iv.is_undefined() && !id_ok){
 				failed = true;
@@ -31536,6 +31731,13 @@ struct Module: public interface::Module, public Interface
 		std::map<ss_, char> key = {{"air", '.'}};
 		json::Value layers = json::array();
 		bool any = false;
+		// [KIT_AGENT_VISUALS] the sections it reads loaded (generated), as a
+		// player near them would, MAX_LOADS a call (each takes a moment)
+		static const int MAX_LOADS = 8;
+		const World *pw = world_named(p.scene);
+		const bool may_load = !(pw && pw->world_scene && pw->wp.none());
+		std::set<std::tuple<int, int, int>> tried;
+		int loads = 0, unloaded = 0, generating = 0;
 		voxelworld::access(m_server, si->second, [&](voxelworld::Instance *w){
 			any = true;
 			const interface::VoxelFormat &f = w->get_voxel_reg()->get_format();
@@ -31545,14 +31747,28 @@ struct Module: public interface::Module, public Interface
 					ss_ row;
 					for(int x = 0; x < n[0]; x++){
 						const pv::Vector3DInt32 q(at[0] + x, at[1] + y, at[2] + z);
+						const pv::Vector3DInt16 sp = section_of(w, q);
+						if(may_load && !loaded(w, q) && loads < MAX_LOADS &&
+								sp.getY() >= WORLD_SECTION_Y0 &&
+								sp.getY() <= WORLD_SECTION_Y1 &&
+								tried.insert(std::make_tuple(sp.getX(), sp.getY(),
+								sp.getZ())).second){
+							if(!hm_section(w, q) && !loaded(w, q))
+								w->load_or_generate_section(sp);
+							loads++;
+						}
 						char ch = '?';
 						const interface::VoxelDefinition *d = !loaded(w, q) ?
 								nullptr : w->get_voxel_reg()->get(
 								f.id.get(w->get_voxel(q, true).data));
+						// [KIT_SCENES_EMPTY_CELL] id 0, nameless: loaded and
+						// not generated yet ("?" as unloaded is)
+						if(d && d->name.block_name.empty()){
+							d = nullptr;
+							generating++;
+						}
 						if(d){
-							// [KIT_SCENES_EMPTY_CELL] not generated yet
-							const ss_ name = d->name.block_name.empty() ?
-									ss_("undefined") : d->name.block_name;
+							const ss_ &name = d->name.block_name;
 							auto ki = key.find(name);
 							if(ki != key.end()){
 								ch = ki->second;
@@ -31563,6 +31779,7 @@ struct Module: public interface::Module, public Interface
 								ch = '*';
 							}
 						}
+						unloaded += ch == '?';
 						row += ch;
 					}
 					rows.append(row);
@@ -31588,6 +31805,161 @@ struct Module: public interface::Module, public Interface
 		o.set("size", size);
 		o.set("key", names);
 		o.set("layers", layers);
+		if(loads)
+			o.set("sections_loaded", (int64_t)loads);
+		if(unloaded)
+			o.set("not_loaded", itos(unloaded)+" cells (\"?\"): "+(generating ?
+					ss_("being generated; ask again in a moment") : !may_load ?
+					ss_("the scene's kit/terrain surface is none") : loads >=
+					MAX_LOADS ? "more sections than "+itos(MAX_LOADS)+" a call "
+					"loads; ask again" : ss_("above or below the world's "
+					"sections")));
+		return o.stringify();
+	}
+
+	// [KIT_AGENT_VISUALS] get_ground: the ground's height over an area of the
+	// agent's scene, every step cells, from its World (the heightmap's
+	// samples, or the generator's ground), nothing loaded; and the voxel
+	// sections loaded there
+	// simplified: a voxel World's is the generator's alone (edits, caves,
+	// decorations and kit/terrain_region's islands not in it); get_voxels
+	// reads those
+	ss_ agent_get_ground(const Peer &p, const json::Value &a, bool &failed)
+	{
+		static const int MAX_SIDE = 1024, MAX_SAMPLES = 4096, MAX_STEP = 64;
+		failed = true;
+		const json::Value &aj = a.get("at"), &nj = a.get("size"),
+				&sj = a.get("step");
+		int at[2], n[2];
+		for(unsigned k = 0; k < 2; k++){
+			if(!aj.is_array() || aj.size() != 2 || !aj.at(k).is_number() ||
+					std::fabs(aj.at(k).as_number()) > MAX_COORD)
+				return "at: [x, z], whole numbers within "+itos((int)MAX_COORD);
+			if(!nj.is_array() || nj.size() != 2 || !nj.at(k).is_number() ||
+					nj.at(k).as_number() < 1 || nj.at(k).as_number() > MAX_SIDE)
+				return "size: [width, depth], each 1..."+itos(MAX_SIDE);
+			at[k] = (int)std::floor(aj.at(k).as_number());
+			n[k] = (int)nj.at(k).as_number();
+		}
+		auto samples = [&](int s){
+			return (int64_t)((n[0] + s - 1) / s) * ((n[1] + s - 1) / s);
+		};
+		int step = 1;
+		if(!sj.is_undefined()){
+			if(!sj.is_number() || sj.as_number() < 1 || sj.as_number() > MAX_STEP)
+				return "step: 1..."+itos(MAX_STEP);
+			step = (int)sj.as_number();
+		} else {
+			while(step < MAX_STEP && samples(step) > MAX_SAMPLES)
+				step++;
+		}
+		if(samples(step) > MAX_SAMPLES)
+			return "size and step: "+itos(MAX_SAMPLES)+" samples at most (a "
+					"larger step)";
+		World *pw = world_named(p.scene);
+		auto si = m_host.scenes.find(p.scene);
+		if(!pw || !pw->world_scene || si == m_host.scenes.end())
+			return "the scene has no World";
+		const world::Params &wp = pw->wp;
+		if(wp.none() || (!wp.heightmap() && wp.generator == "empty"))
+			return "the scene has no ground: its kit/terrain's surface is none "
+					"or its generator empty";
+		json::Value rows = json::array();
+		if(wp.heightmap()){
+			bool any = false;
+			heightmap::access(m_server, pw->world_scene,
+					[&](heightmap::Instance *map){
+				any = true;
+				const int ox = hm_ox(map), oz = hm_oz(map);
+				for(int z = 0; z < n[1]; z += step){
+					json::Value row = json::array();
+					for(int x = 0; x < n[0]; x += step){
+						const int sx = at[0] + x - ox, sz = at[1] + z - oz;
+						if(sx < 0 || sz < 0 || sx >= map->samples_x() ||
+								sz >= map->samples_z())
+							row.append(json::null());
+						else
+							row.append(std::round(map->get_height(sx, sz) * 100) /
+									100);
+					}
+					rows.append(row);
+				}
+			});
+			if(!any)
+				return "the scene's heightmap is not there";
+		} else {
+			world::Heights h;
+			h.p = wp;
+			valleys_query(h);
+			if(h.p.generator == "valleys" && !h.valleys)
+				return "the valleys generator needs builtin/luanti_mapgen";
+			sv_<int> top;
+			for(int z = 0; z < n[1]; z += step){
+				json::Value row = json::array();
+				for(int x = 0; x < n[0]; x += step){
+					const int wx = at[0] + x, wz = at[1] + z;
+					if(wp.finite() && !wp.in_map(wx, wz)){
+						row.append(json::null());
+						continue;
+					}
+					h.tops(wx, wz, 1, 1, top);
+					row.append((int64_t)top[0]);
+				}
+				rows.append(row);
+			}
+		}
+		// The sections loaded over the area (players near, edits, get_voxels)
+		json::Value secs = json::array();
+		size_t more = 0;
+		voxelworld::access(m_server, si->second, [&](voxelworld::Instance *w){
+			const pv::Vector3DInt16 ss = w->get_section_size_voxels();
+			for(const pv::Vector3DInt16 &s : w->get_loaded_sections()){
+				const int x0 = s.getX() * ss.getX(), z0 = s.getZ() * ss.getZ();
+				if(x0 + ss.getX() <= at[0] || x0 >= at[0] + n[0] ||
+						z0 + ss.getZ() <= at[1] || z0 >= at[1] + n[1])
+					continue;
+				if(secs.size() >= 256){
+					more++;
+					continue;
+				}
+				json::Value sv = json::array();
+				sv.append((int64_t)s.getX());
+				sv.append((int64_t)s.getY());
+				sv.append((int64_t)s.getZ());
+				secs.append(sv);
+			}
+		});
+		failed = false;
+		json::Value o = json::object(), from = json::array(), size = json::array();
+		for(int k = 0; k < 2; k++){
+			from.append((int64_t)at[k]);
+			size.append((int64_t)n[k]);
+		}
+		o.set("at", from);
+		o.set("size", size);
+		o.set("step", (int64_t)step);
+		o.set("surface", wp.heightmap() ? "heightmap" : "voxels");
+		o.set("generator", wp.generator);
+		o.set("sea_level", (int64_t)wp.sea_level);
+		if(wp.finite()){
+			json::Value m = json::array();
+			for(int64_t v : {(int64_t)wp.x0(), (int64_t)wp.z0(),
+					(int64_t)wp.width, (int64_t)wp.depth})
+				m.append(v);
+			o.set("map", m);
+		}
+		o.set("heights", rows);
+		o.set("about", wp.heightmap() ? "each row z from at's up, each "
+				"height x from at's, every step cells: the heightmap's surface "
+				"(null: past it)" : "each row z from at's up, each value x from "
+				"at's, every step cells: the top cell of the generated ground "
+				"(null: past the map; water over it up to sea_level). Hand "
+				"edits, caves, decorations and islands are not in it: "
+				"get_voxels reads them");
+		o.set("section_size", (int64_t)WORLD_SECTION);
+		o.set("loaded_sections", secs);
+		if(more)
+			o.set("loaded_sections_more", (int64_t)more);
 		return o.stringify();
 	}
 
@@ -31701,6 +32073,122 @@ struct Module: public interface::Module, public Interface
 	// types by group; full (get_guide) with each one's what, inputs, outputs
 	// and params' names, else (initialize's instructions, which Claude Code
 	// cuts at 4096 characters) their names only, cut to fit
+	// [KIT_AGENT_VISUALS] Whether this server's tools show an agent the view
+	static bool has_view()
+	{
+		for(const AgentTool &t : agent_tools())
+			if(ss_(t.name) == "get_view")
+				return true;
+		return false;
+	}
+
+	// [KIT_AGENT_VISUALS] get_guide's topic "visuals": how Workbench draws a
+	// game and which types decide it (each type's file, get_type, has the
+	// details), what an agent sees of it, and the rules a look's change
+	// follows (a playtester's agent, 2026-11-16, claimed looks it could not
+	// see)
+	ss_ agent_visuals()
+	{
+		return ss_("How a game looks in Workbench (Kit's types decide it; "
+			"get_type kit/<type> reads a type's file, whose comments are the "
+			"facts, and list_types with type its params' ranges and choices: "
+			"read those, never guess a name or a range).\n\n"
+			"## What you can see\n"
+			"- get_state: the entities, their params and comments, the round, "
+			"and scenes_from: where each scene's controls, rules and "
+			"environment come from. get_voxels: the cells of a box (its "
+			"sections loaded for it). get_ground: the ground's height over an "
+			"area, from kit/terrain. list_voxel_types, list_prefabs, get_log, "
+			"get_events.\n")+(has_view() ?
+			"- get_view: a picture of the scene as a player's camera draws "
+			"it. Look before and after a change of the look.\n" :
+			"- No pixels: no tool here shows you the screen. The sky, the "
+			"light, colours as drawn, fog, particles and what a player sees "
+			"are not visible to you.\n")+
+			"\n## Rules for a look's change\n"
+			"- What you have not seen, say so: tell the builder what you set "
+			"(type, params, values) and ask them to look. Never claim a look "
+			"improved or matches a picture unless you saw it.\n"
+			"- export_scene before a big change: its files are the scene as "
+			"it was (undo takes back your last 50 edits, yours only).\n"
+			"- One change at a time, read back with get_state, then the next.\n"
+			"- Ask the builder before start or stop: they move every player "
+			"and stop puts the world back at its start.\n"
+			"- A voxel world is stylized: cells of 1 m, textures 8 to 128 "
+			"pixels a side, simple lights. Promise a style, never "
+			"photorealism.\n"
+			"\n## Per scene or game-wide\n"
+			"A scene's look comes from three root types, each looked up from "
+			"the scene up the scene tree, the nearest copy winning whole (the app "
+			"root's last; a copy is on a scene when it is right under its "
+			"entity with no position): kit/controls, kit/environment and "
+			"kit/game_rules (scenes_from in get_state says whose each scene "
+			"has). Each scene "
+			"has its own World (kit/terrain); a new scene has none (no ground) "
+			"unless new_scene's copy. Game-wide: kit/environment's lighting "
+			"(the root's alone), the voxel types, textures, prefabs and item "
+			"types. Entities (parts, polygons, effects) are their scene's.\n"
+			"\n## kit/controls: the camera\n"
+			"camera first_person (the eye), chase (behind the player, distance "
+			"away), top_down (from height at angle and yaw; ortho: flat) or "
+			"side (across a plane looking along +z; ortho, side_clip, dead_zone, "
+			"look_ahead); fov (20...150), smoothing, offsets and roll; pointer "
+			"auto, crosshair or cursor; plane vertical holds bodies at one z "
+			"(side-scrollers, with kit/polygon); the effects tint and "
+			"tint_amount, vignette, blur and glitch (0...1) colour the whole "
+			"view, and its inputs shake, fov, glitch, tint flash them in play; "
+			"edit_view auto, 2d or 3d is the editor's first view.\n"
+			"\n## kit/environment: sky, fog, light, weather\n"
+			"sky (the sky's and the far fog's colour), fog_start and fog_end "
+			"(cells), ambient (the ambient light's colour), time (hours) and "
+			"day_minutes (0: the time stands), sun, moon and stars (off for "
+			"underground or space), clouds (cover 0...1, height, wind), "
+			"weather clear, cloudy, rain, snow or storm at intensity (it dims "
+			"the light and thickens the fog; weather_fade seconds), season "
+			"(the voxels' season textures), latitude, north, gravity. lighting "
+			"(the root's alone): cartoon (flat, one sun, the fog), "
+			"fast_physical (the default: physical's sky, light of the hour and "
+			"voxel lamps without the shadow map or bloom) or physical (HDR, "
+			"bloom, the sun's shadow map). No kit/environment: cartoon and "
+			"Kit's defaults.\n"
+			"\n## kit/terrain: the World (the ground)\n"
+			"generator empty, flat (at level), noise (level +- height, a "
+			"feature every spread cells) or valleys; seed; materials (a "
+			"material set; \"\" Kit's) and its biome (Kit's: grassland, desert, "
+			"rock), sea_level (water over lower ground), soil_depth; size "
+			"finite (width x depth round the origin, border void, wall or "
+			"water) or infinite; surface voxels, heightmap (a smooth "
+			"terrain, finite) or none (no ground at all: nothing to stand on); "
+			"caves; decorations (the biome's trees, bushes, flowers, grass); "
+			"sky_light (caves and rooms dark, not on a heightmap). Changing them "
+			"generates the unedited sections again. kit/terrain_region adds "
+			"islands in a box or sphere.\n"
+			"\n## Voxels, materials, textures\n"
+			"A cell is a voxel type: its texture (top, side and bottom in a "
+			"set's), kind (solid, water, leaves, plant, glass), light 0...15 "
+			"(fast_physical and physical draw the nearest as lamps: 8 at "
+			"most, within 8 cells of the camera), tint (set_voxels' tint: the type's palette). "
+			"list_voxel_types lists them; set_voxels places them (one "
+			"undo). put_texture uploads a square PNG (8...128 pixels a side, "
+			"64 KiB) and its voxel argument makes your voxel type wearing it.\n"
+			"\n## Shapes and effects off the grid\n"
+			"kit/part: a box, wedge or sphere of any size and rotation, its "
+			"color and material plain, metal, glass or glow (glow: unlit, "
+			"bright, casting no light), or voxel: a voxel type's texture. "
+			"kit/polygon: an extruded outline for side views. kit/effect: "
+			"particle bursts (count, shape, colors, speed, gravity, ttl, size) "
+			"and a short light without shadow, on a signal or a world event "
+			"(dig, place, hit, blast, respawn, pickup). Prefabs group parts "
+			"and voxels as one.\n"
+			"\n## Costs\n"
+			"Every player's computer draws it, phones too. Light is the "
+			"dearest: physical's shadow map most, each voxel lamp and effect "
+			"light (8 at once at most, never shadowed) more; fast_physical or "
+			"cartoon for a big world. Particles: 1500 live at most a client. "
+			"A big fog_end, a wide view and many parts cost frame time; fewer "
+			"larger parts beat many small ones.\n";
+	}
+
 	ss_ agent_guide(const ss_ &who, bool full)
 	{
 		static const size_t MAX_INSTRUCTIONS = 4000;
@@ -31741,7 +32229,13 @@ struct Module: public interface::Module, public Interface
 			"- Work in small steps and read back: get_state (or list_types) "
 			"first, then place, set_param, link, start, try_input, get_events "
 			"and get_log, stop, fix, again. An edit's arguments are 4 KB at "
-			"most. Kit's refusals come back as tool errors saying why.\n";
+			"most. Kit's refusals come back as tool errors saying why.\n"
+			// [KIT_AGENT_VISUALS]
+			"- The look: get_guide topic \"visuals\" first. "+ss_(has_view() ?
+			"Look with get_view before and after a change; " :
+			"You see no pixels: ")+"say what you set, never that a look "
+			"improved unseen. set_comments leaves notes on an entity for the "
+			"builders.\n";
 		// [KIT_SCENE_TREE] (get_guide's: the instructions are cut at 4000)
 		if(full)
 			s += "- Scenes in a tree: a scene may sit under another "
@@ -34607,13 +35101,15 @@ struct Module: public interface::Module, public Interface
 	// a positioned authored entity of the editor's scene, room under it
 	// for `height` levels more; [KIT_PANEL_PARENT] or a panel, for a
 	// `ui_child` only (the panel has no position, a UI element no use for
-	// one). false with why
+	// one). [KIT_AGENT_VISUALS] The editor's scene's own entity is 0 too.
+	// false with why
 	bool parent_arg(const json::Value &j, const Peer &p, uint64_t &parent,
 			ss_ &why, int height = 1, bool ui_child = false)
 	{
 		parent = 0;
 		const json::Value &v = j.get("parent");
-		if(v.is_undefined() || (v.is_number() && v.as_number() == 0))
+		if(v.is_undefined() || (v.is_number() && (v.as_number() == 0 ||
+				v.as_number() == (double)scene_entity(p.scene))))
 			return true;
 		Entity *e = entity_arg(j, "parent", why);
 		if(!e)
@@ -35024,52 +35520,69 @@ struct Module: public interface::Module, public Interface
 			Instance *in = instance_arg(j, e, why);
 			if(!in)
 				return false;
-			const ss_ param = jstr(j, "param");
-			const json::Value &decl = m_types[in->type].decl.get("params").
-					get(param);
-			if(param.empty() || !decl.is_object()){
-				why = in->type+" has no parameter \""+param.substr(0, 64)+"\"";
+			// [KIT_AGENT_VISUALS] "params": {name: value, ...}, several of the
+			// component's at once: each checked first, one change
+			const json::Value &many = j.get("params");
+			if(!many.is_undefined() && (!many.is_object() || !many.size() ||
+					!j.get("param").is_undefined())){
+				why = "params: an object of at least one parameter's value, "
+						"without param";
 				return false;
 			}
-			// [KIT_WAVE_PIVOT_CENTER] "center": true sets a centre button's parameter
-			// to the object's centre
-			const bool centre = j.get("center").is_true();
-			if(centre && jstr(decl, "button") != "center"){
-				why = in->type+"'s "+param+" has no centre";
-				return false;
-			}
-			const json::Value value = centre ? centre_of(*e) : j.get("value");
-			const ss_ bad = check_set_param(decl, value);
-			if(!bad.empty()){
-				why = in->type+"'s "+param+" is "+bad;
-				return false;
-			}
-			// [KIT_SCENE_ADD_LIVE] A scene added Running is listed once its
-			// World has its sections
-			auto se = m_entities.find(e->parent);
-			if(in->type == "kit/scene_info" && param == "listed" &&
-					value.is_true() && se != m_entities.end() &&
-					se->second.kind == "scene" && cell_jobs_of(se->second.name)){
-				why = "the scene "+se->second.name+"'s World is not ready yet ("+
-						itos(cell_jobs_of(se->second.name))+" sections to go): list "
-						"it then";
-				return false;
-			}
+			sv_<std::pair<ss_, json::Value>> sets;
+			if(many.is_object())
+				for(json::Iterator it(many); it; ++it)
+					sets.push_back(std::make_pair(it.key(), *it));
+			else
+				sets.push_back(std::make_pair(jstr(j, "param"), j.get("value")));
 			const size_t ci = in - &e->comps[0];
 			Entity copy = *e;
 			// (its own params: a copy of the Value shares them with e's, and
 			// the undo's before-row had the new value)
 			copy.comps[ci].params = copy.comps[ci].params.deepcopy();
-			copy.comps[ci].params.set(param, value);
-			// A prefab copy's own value from now on, kept as the prefab
-			// changes ([KIT_GENERATORS] a generator's child's, as it builds
-			// again; [KIT_PREFAB_ROOT] a copy's members are its root's children
-			// so)
-			if(!copy.built.is_undefined())
-				copy.comps[ci].overrides.insert(param);
+			for(auto &s : sets){
+				const ss_ &param = s.first;
+				const json::Value &decl = m_types[in->type].decl.get("params").
+						get(param);
+				if(param.empty() || !decl.is_object()){
+					why = in->type+" has no parameter \""+param.substr(0, 64)+"\"";
+					return false;
+				}
+				// [KIT_WAVE_PIVOT_CENTER] "center": true sets a centre button's
+				// parameter to the object's centre
+				const bool centre = !many.is_object() && j.get("center").is_true();
+				if(centre && jstr(decl, "button") != "center"){
+					why = in->type+"'s "+param+" has no centre";
+					return false;
+				}
+				const json::Value value = centre ? centre_of(*e) : s.second;
+				const ss_ bad = check_set_param(decl, value);
+				if(!bad.empty()){
+					why = in->type+"'s "+param+" is "+bad;
+					return false;
+				}
+				// [KIT_SCENE_ADD_LIVE] A scene added Running is listed once its
+				// World has its sections
+				auto se = m_entities.find(e->parent);
+				if(in->type == "kit/scene_info" && param == "listed" &&
+						value.is_true() && se != m_entities.end() &&
+						se->second.kind == "scene" && cell_jobs_of(se->second.name)){
+					why = "the scene "+se->second.name+"'s World is not ready yet ("+
+							itos(cell_jobs_of(se->second.name))+" sections to go): "
+							"list it then";
+					return false;
+				}
+				copy.comps[ci].params.set(param, value);
+				// A prefab copy's own value from now on, kept as the prefab
+				// changes ([KIT_GENERATORS] a generator's child's, as it builds
+				// again; [KIT_PREFAB_ROOT] a copy's members are its root's
+				// children so)
+				if(!copy.built.is_undefined())
+					copy.comps[ci].overrides.insert(param);
+				what += (what.empty() ? "set "+itos(e->id)+"'s "+in->type+" " :
+						ss_(", "))+param+" to "+value.stringify();
+			}
 			change.push_back(std::make_pair(e->id, entity_json(copy)));
-			what = "set "+itos(e->id)+"'s "+in->type+" "+param+" to "+
-					value.stringify();
 			return true;
 		}
 		// [KIT] stage 4l {"op": "link_visible", "id", "output", "to", "input",

@@ -29,7 +29,14 @@
 #      warned of until linked; Running, a try_input through the link and a
 #      watch read back by get_events, get_log and the state; a new scene
 #      taking the agent's edits there and back; every edit of it undone, the
-#      entities as before;
+#      entities as before; get_guide's topic "visuals"; get_state's round;
+#   2c. [KIT_AGENT_VISUALS] by the admin token (a minute's 120 calls are the
+#      builder's): get_state's scene entity and where each scene's root
+#      types come from; that entity as a parent; set_param's params (all or
+#      none, one undo); set_comments (control characters cut, 4096 bytes,
+#      undo, a duplicate's, the scene export's); put_texture (as the
+#      editor's upload is checked, a voxel type wearing it); get_ground;
+#      get_voxels loading a section nobody loaded; every edit undone;
 #   3. the builder token revoked on the page: its agent gone at once, 401;
 #   4. Agents (MCP) off on the Accounts page: the admin token refused with
 #      that said; on again: its set_builder done, and past 120 requests a
@@ -158,7 +165,7 @@ step 10 "pause: the menu closed" "frames 3" "keypress Escape"
 step 20 "kit editor: edit mode on" "frames 3" "keypress F6"
 # 2. The MCP client
 cat > "$t/mcp.py" <<'PY'
-import json, re, sys, time, urllib.error, urllib.request
+import base64, json, re, struct, sys, time, urllib.error, urllib.request, zlib
 phase, url = sys.argv[1], sys.argv[2]
 def post(token, msg=None, headers={}, method="POST", raw=None):
     h = {"Content-Type": "application/json",
@@ -221,10 +228,11 @@ if phase == "main":
     names = [t["name"] for t in tools]
     assert names == ["get_state", "list_types", "get_type", "get_guide",
         "get_links", "get_log", "get_events", "get_goal_warnings",
-        "list_prefabs", "list_items", "list_voxel_types", "get_voxels", "place",
-        "set_param", "link", "delete", "unlink", "move", "rename",
-        "add_component", "remove_component", "set_parent", "duplicate",
-        "place_prefab", "save_prefab", "set_voxels", "put_type", "delete_type",
+        "list_prefabs", "list_items", "list_voxel_types", "get_voxels",
+        "get_ground", "place", "set_param", "link", "delete", "unlink", "move",
+        "rename", "set_comments", "add_component", "remove_component",
+        "set_parent", "duplicate", "place_prefab", "save_prefab", "set_voxels",
+        "put_texture", "put_type", "delete_type",
         "new_scene", "switch_scene", "undo", "start", "stop", "try_input",
         "watch", "clear_kept", "keep", "set_builder", "export_template",
         "export_scene", "list_games", "copy_game", "rename_game",
@@ -291,7 +299,15 @@ elif phase == "build":
     assert len(ins) <= 4096 and "kitboss's agent" in ins and "kit/counter" in ins, ins
     guide = call(tok, "get_guide")
     assert re.search(r"\n- kit/counter: [^\n]*In: [^\n]*add \(number\)", guide), guide[:3000]
-    print("instructions", len(ins), "characters, get_guide", len(guide))
+    # [KIT_AGENT_VISUALS] the look's topic, named in both
+    assert 'topic "visuals"' in ins and 'topic "visuals"' in guide, ins
+    vis = call(tok, "get_guide", {"topic": "visuals"})
+    for w in ("kit/controls", "kit/environment", "kit/terrain", "fast_physical",
+            "export_scene", "photorealism", "put_texture", "get_ground"):
+        assert w in vis, (w, vis)
+    call(tok, "get_guide", {"topic": "nope"}, error=True)
+    print("instructions", len(ins), "characters, get_guide", len(guide),
+        "its visuals", len(vis))
     st = state(tok)
     if st["running"]:
         call(tok, "stop")
@@ -355,6 +371,8 @@ elif phase == "build":
     # Run: a Try through the link, the watched one's emits, the log
     assert "Ended" in call(tok, "try_input", {"id": A, "input": "add", "value": 3}, error=True)
     assert call(tok, "start") == "Running"
+    r = state(tok)["round"]
+    assert r["state"] == "Running" and r["phase"] == "playing" and r["by"], r
     call(tok, "watch", {"id": B})
     call(tok, "get_events")
     call(tok, "try_input", {"id": A, "input": "add", "value": 3})
@@ -392,6 +410,151 @@ elif phase == "build":
         assert "Undone" in call(tok, "undo")
         st = state(tok)
     assert sorted(e["id"] for e in st["entities"]) == before, st["entities"]
+elif phase == "visuals":
+    # [KIT_AGENT_VISUALS] By the admin's token: the builder token's minute
+    # of 120 calls is the main and build phases'
+    tok = sys.argv[3]
+    st = state(tok)
+    undo0, first = st["undo"], st["scene"]
+    before = sorted(e["id"] for e in st["entities"])
+    def placed(text):
+        return int(re.search(r"placed \S+ (\d+)", text)[1])
+    def ent(i):
+        return entity(state(tok), i)
+    # [KIT_AGENT_VISUALS] get_state: the round, the scene's own entity, where
+    # each scene's root types come from
+    st = state(tok)
+    assert st["round"]["state"] == "Ended" and st["round"]["phase"] == "ended", st["round"]
+    S = st["scene_id"]
+    assert S > 1 and entity(st, S)["kind"] == "scene", S
+    sf = st["scenes_from"][first]
+    assert set(sf) == {"controls", "rules", "environment"} and all(v in
+        ("own", "root", "none") or v in st["scenes"] for v in sf.values()), sf
+    print("scenes_from", json.dumps(st["scenes_from"]), "save", st.get("save"))
+    # The scene's own id as a parent, as 0 is
+    P = placed(call(tok, "place", {"type": "kit/timer", "pos": [10, 1, 10],
+        "parent": S}))
+    assert ent(P)["parent"] == S
+    call(tok, "save_prefab", {"ids": [P], "name": "agentone"})
+    assert "placed prefab kitboss/agentone" in call(tok, "place_prefab",
+        {"prefab": "kitboss/agentone", "pos": [16, 1, 4], "parent": S})
+    # set_param's params: each checked first, all or none, one undo
+    u = state(tok)["undo"]
+    call(tok, "set_param", {"id": P, "params": {"interval": 0.5, "autostart": True}})
+    st = state(tok)
+    ps = entity(st, P)["components"][0]["params"]
+    assert st["undo"] == u + 1 and ps["interval"] == 0.5 and ps["autostart"] is True, ps
+    assert "nope" in call(tok, "set_param", {"id": P, "params": {"interval": 0.3,
+        "nope": 1}}, error=True)
+    call(tok, "set_param", {"id": P, "param": "interval", "value": 1,
+        "params": {"interval": 2}}, error=True)
+    call(tok, "set_param", {"id": P, "params": {}}, error=True)
+    assert ent(P)["components"][0]["params"]["interval"] == 0.5
+    # Comments: newlines and tabs kept, control characters not, one undo,
+    # 4096 bytes at most (a packet past kit:edit's 4096); a duplicate's and
+    # the scene's export's
+    note = "Spawn timer.\nTabs\tkept;\x07 bells not; ä"
+    call(tok, "set_comments", {"id": P, "text": note})
+    note = note.replace("\x07", "")
+    assert ent(P)["comments"] == note, ent(P)
+    assert "Undone" in call(tok, "undo")
+    assert "comments" not in ent(P), ent(P)
+    call(tok, "set_comments", {"id": P, "text": "x" * 4097}, error=True)
+    call(tok, "set_comments", {"id": P, "text": "ä" * 2049}, error=True)
+    call(tok, "set_comments", {"id": P, "text": "ä" * 2048})
+    assert ent(P)["comments"] == "ä" * 2048
+    D = int(re.search(r"duplicated 1 as (\d+)", call(tok, "duplicate",
+        {"ids": [P], "by": [0, 0, 2]}))[1])
+    assert ent(D)["comments"] == "ä" * 2048, ent(D)
+    call(tok, "set_comments", {"id": P, "text": note})
+    def has_note(v):
+        if isinstance(v, dict):
+            return v.get("comments") == note or any(has_note(x) for x in v.values())
+        return isinstance(v, list) and any(has_note(x) for x in v)
+    ex = json.loads(call(tok, "export_scene"))
+    assert has_note(json.loads(ex["files"]["composition.json"])), ex["files"]["composition.json"][:2000]
+    call(tok, "set_comments", {"id": 999999, "text": "x"}, error=True)
+    # put_texture: checked as the editor's upload; a voxel type wearing it
+    def png(w, h):
+        def chunk(t, d):
+            return (struct.pack(">I", len(d)) + t + d +
+                struct.pack(">I", zlib.crc32(t + d) & 0xffffffff))
+        rows = b"".join(b"\x00" + b"".join(bytes(((x * 37) & 255, (y * 53) & 255,
+            90)) for x in range(w)) for y in range(h))
+        return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w,
+            h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) +
+            chunk(b"IEND", b""))
+    b64 = lambda b: base64.b64encode(b).decode()
+    tx = call(tok, "put_texture", {"png": b64(png(16, 16))})
+    assert re.fullmatch(r"kit/up/[0-9a-f]{16}\.png", tx), tx
+    assert call(tok, "put_texture", {"png": b64(png(16, 16))}) == tx
+    assert "square" in call(tok, "put_texture", {"png": b64(png(12, 12))}, error=True)
+    call(tok, "put_texture", {"png": "not base64!"}, error=True)
+    call(tok, "put_texture", {"png": b64(b"\x89PNG\r\n\x1a\n" + b"x" * 100)}, error=True)
+    call(tok, "put_texture", {"png": "A" * 200000}, error=True)
+    r = call(tok, "put_texture", {"png": "data:image/png;base64," +
+        b64(png(32, 32)), "voxel": {"name": "agentstone", "light": 3}})
+    assert "voxel type kitboss/agentstone wears it" in r, r
+    vt = {v["name"]: v for v in json.loads(call(tok, "list_voxel_types"))}
+    assert vt["kitboss/agentstone"]["light"] == 3, vt.get("kitboss/agentstone")
+    assert "refused" in call(tok, "put_texture", {"png": b64(png(16, 16)),
+        "voxel": {"name": "bad name"}}, error=True)
+    cell = {"at": [3, 20, 3], "size": [1, 1, 1]}
+    assert "in 1 of 1 cells" in call(tok, "set_voxels", dict(cell, voxel="kitboss/agentstone"))
+    assert json.loads(call(tok, "get_voxels", cell))["key"]["a"] == "kitboss/agentstone"
+    assert "Undone" in call(tok, "undo")
+    # get_ground: the World's heights, every step cells, null past the map;
+    # step unless given the least that fits 4096
+    g = json.loads(call(tok, "get_ground", {"at": [-40, -40], "size": [80, 80],
+        "step": 8}))
+    print("ground", json.dumps({k: g[k] for k in g if k != "heights"}), g["heights"][5])
+    assert g["step"] == 8 and len(g["heights"]) == 10 and all(len(r) == 10
+        for r in g["heights"]), g
+    if "map" in g:
+        x0, z0, mw, md = g["map"]
+        for j, r in enumerate(g["heights"]):
+            for i, h in enumerate(r):
+                x, z = -40 + 8 * i, -40 + 8 * j
+                assert (h is None) == (g["surface"] == "voxels" and not (x0 <= x <
+                    x0 + mw and z0 <= z < z0 + md)), (x, z, h, g["map"])
+    assert json.loads(call(tok, "get_ground", {"at": [0, 0], "size": [1024, 1024]}))["step"] == 16
+    call(tok, "get_ground", {"at": [0, 0], "size": [2000, 10]}, error=True)
+    call(tok, "get_ground", {"at": [0, 0], "size": [100, 100], "step": 1}, error=True)
+    call(tok, "get_ground", {"at": [0, 0, 0], "size": [10, 10]}, error=True)
+    # The ground's top cell is no air; a section nobody loaded is loaded for
+    # get_voxels (generated as a player near it would)
+    h0 = g["heights"][5][5]
+    if g["surface"] == "voxels" and h0 is not None:
+        top = json.loads(call(tok, "get_voxels", {"at": [0, int(h0), 0],
+            "size": [1, 1, 1]}))
+        assert top["layers"][0][0] not in ".?", top
+    loaded = {tuple(s) for s in g["loaded_sections"]}
+    fresh = [(sx, sy, sz) for sy in range(3, -3, -1) for sx in range(-1, 1)
+        for sz in range(-1, 1) if (sx, sy, sz) not in loaded]
+    print("loaded sections", sorted(loaded), "not:", fresh[:4])
+    if fresh:
+        sx, sy, sz = fresh[0]
+        q = {"at": [sx * 64, sy * 64, sz * 64], "size": [1, 1, 1]}
+        v = json.loads(call(tok, "get_voxels", q))
+        assert v.get("sections_loaded") == 1, v
+        # (generated a moment later: "?", being generated, until then)
+        for i in range(40):
+            if v["layers"][0][0] != "?":
+                break
+            assert "being generated" in v["not_loaded"], v
+            time.sleep(0.25)
+            v = json.loads(call(tok, "get_voxels", q))
+        assert v["layers"][0][0] != "?" and v["key"][v["layers"][0][0]] != "undefined", v
+        print("section", (sx, sy, sz), "loaded, read after", i, "more asks:", v["key"])
+        g = json.loads(call(tok, "get_ground", {"at": [sx * 64, sz * 64], "size": [1, 1]}))
+        assert [sx, sy, sz] in g["loaded_sections"], g
+    # Every edit of this phase taken back (no state between: the minute's
+    # calls)
+    left = state(tok)["undo"]
+    while left > undo0:
+        left = int(re.search(r"(\d+) more to undo", call(tok, "undo"))[1])
+    st = state(tok)
+    assert sorted(e["id"] for e in st["entities"]) == before, st["entities"]
 elif phase == "gone":
     refused(401, -32001, sys.argv[3], {"jsonrpc": "2.0", "id": 1, "method": "ping"})
 elif phase == "off":
@@ -421,6 +584,9 @@ done
 python3 -I "$t/mcp.py" build "$url" "$tok" > "$t/build.log" 2>&1 ||
 	fail "the MCP build run: $(tail -5 "$t/build.log") ($t/build.log, $SL)"
 cat "$t/build.log"
+python3 -I "$t/mcp.py" visuals "$url" "$adm" > "$t/visuals.log" 2>&1 ||
+	fail "the MCP visuals run: $(tail -5 "$t/visuals.log") ($t/visuals.log, $SL)"
+cut -c1-300 "$t/visuals.log"
 for re in "An edit by kitboss's agent: saved prefab kitboss/agentpair " \
 		"kitboss's agent: placed .* in 4 of 4 cells .*, one undo" \
 		"kitboss's agent tries entity [0-9]+'s add 3" \
