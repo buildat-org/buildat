@@ -564,6 +564,9 @@ struct Peer
 	bool web = false;
 	int failures = 0;
 	int64_t since_s = 0; // [SERVER_STATS] time joined counted from
+	// [KIT_AGENT_VISUALS] 3: the agent token the client showed, held until
+	// its hello (agent_login()); the token's id once it joined by it
+	ss_ agent_token, agent_id;
 };
 
 struct Module: public interface::Module, public Interface
@@ -703,9 +706,11 @@ struct Module: public interface::Module, public Interface
 				"accounts:admin", "accounts:passwd", "accounts:logout",
 				"accounts:totp", "accounts:link_starport",
 				"accounts:unlink_starport", "accounts:open_lan",
-				"accounts:ntfy", "accounts:guest", "accounts:agent:req"})
+				"accounts:ntfy", "accounts:guest", "accounts:agent:req",
+				"accounts:agent_token"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
+		m_server->sub_event(this, Event::t("accounts:agent_revoked"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -742,6 +747,9 @@ struct Module: public interface::Module, public Interface
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:agent:req",
 				on_agent_req, network::Packet)
+		EVENT_TYPEN("network:packet_received/accounts:agent_token",
+				on_agent_token, network::Packet)
+		EVENT_TYPEN("accounts:agent_revoked", on_agent_revoked, Login)
 		EVENT_TYPEN("network:http_request", on_http, network::HttpRequest)
 	}
 
@@ -1762,9 +1770,23 @@ struct Module: public interface::Module, public Interface
 
 	void on_get_hello(const network::Packet &packet)
 	{
-		if(!m_peers.count(packet.sender))
+		auto pit = m_peers.find(packet.sender);
+		if(pit == m_peers.end())
 			return;
+		// [KIT_AGENT_VISUALS] 3: a join's answer before the hello, so the
+		// dialog is never drawn (the client's script asks for the hello once
+		// it listens for both); a refusal after it, the dialog saying why
+		ss_ refused;
+		if(!pit->second.agent_token.empty()){
+			const ss_ token = pit->second.agent_token;
+			pit->second.agent_token.clear();
+			if(pit->second.name.empty())
+				refused = agent_login(packet.sender, pit->second, token);
+		}
 		send_hello(packet.sender);
+		if(!refused.empty())
+			send(packet.sender, "accounts:login_result", pack(std::make_pair(
+					std::make_pair(refused, ss_()), ss_())));
 		// A window opened again after a reconnect says it is open
 		if(m_lan_open && is_local(packet.sender))
 			send(packet.sender, "accounts:lan", "1");
@@ -2263,6 +2285,115 @@ struct Module: public interface::Module, public Interface
 		send_users_to_staff();
 	}
 
+	// [KIT_AGENT_VISUALS] 3: **A client logged in by an agent token**: an
+	// agent running a release's client itself, headless, to serve Kit's
+	// get_view where its builder runs no client. The client sends the token
+	// it was started with (its -T, or BUILDAT_AGENT_TOKEN) to the server it
+	// was started for, at once (src/client/state.cpp); it is held here until
+	// the client's hello, which joins it as the token's account, checked by
+	// check_agent() as an MCP request is, the address's ban and waits as a
+	// login's. Only what the token's scope allows: an account's rights are
+	// its name's everywhere (is_admin(), level()), so a peer's cannot be
+	// capped below them, and a builder token logs in only an account that
+	// is no admin and below LV_MODERATOR; an admin token any. No kept login
+	// is made, nothing asked (TOTP is the token's making's), and no token is
+	// logged. The account itself is not the token's to change: such a
+	// client is refused as a guest is the password, TOTP, Starport links,
+	// ntfy and agent tokens. The token revoked, its grant ended or agent
+	// access off, its clients are kicked (on_agent_revoked()).
+	// simplified: an OAuth sign-in's access token is checked at the join
+	// only: its client stays past the token's hour, until revoked
+	void on_agent_token(const network::Packet &packet)
+	{
+		auto pit = m_peers.find(packet.sender);
+		if(pit == m_peers.end() || !pit->second.name.empty() ||
+				packet.data.empty() || packet.data.size() > 200)
+			return;
+		pit->second.agent_token = packet.data;
+	}
+
+	// "" joined (its login_result sent), else why not (sent by the caller)
+	ss_ agent_login(PeerId id, Peer &peer, const ss_ &token)
+	{
+		if(!m_store)
+			return "The server is starting";
+		const int64_t now = interface::os::wall_us();
+		const ss_ bin = network::address_bin(peer.address);
+		const int64_t wait = failure_wait(m_address_failures, bin, now);
+		if(wait > 0){
+			log_i(MODULE, "A login by an agent token from %s refused: waiting "
+					"after failures", cs(peer.address));
+			return "Too many failed logins; try again in "+
+					itos((int)((wait + 999999) / 1000000))+" s";
+		}
+		ss_ name;
+		AgentToken at;
+		ss_ why = check_agent(token, at);
+		// A token matching nothing is a guess, as a wrong password is
+		const bool guess = !why.empty() && at.id.empty() && why != "off";
+		if(why == "off")
+			why = "Agent access is off on this server";
+		else if(why == "expired")
+			why = "The agent token has expired: get a new one (a sign-in's "
+					"lasts an hour)";
+		else if(!why.empty())
+			why[0] = (char)toupper((unsigned char)why[0]);
+		if(why.empty()){
+			name = at.name;
+			why = banned(name, peer.address);
+		}
+		if(why.empty() && at.scope != "admin" && (is_admin(name) ||
+				level(name) >= LV_MODERATOR))
+			why = name+" is a "+level_name(level(name))+": an agent's client "
+					"logs in as one with an admin token only (a builder token "
+					"carries none of a Host's or a Steward's rights)";
+		if(why.empty() && find_peer(name) && !m_multiple_logins)
+			why = name+" is already here: an agent's client logs in where "
+					"its builder's own is not";
+		const int max_players = atoi(m_server->get_config().get<ss_>(
+				"max_players").c_str());
+		if(why.empty() && max_players > 0 && !is_admin(name) &&
+				level(name) < LV_MODERATOR){
+			int joined = 0;
+			for(auto &it : m_peers)
+				joined += !it.second.name.empty();
+			if(joined >= max_players)
+				why = "The server is full ("+itos(max_players)+" players)";
+		}
+		if(!why.empty()){
+			if(guess){
+				peer.failures++;
+				note_failure(m_address_failures, bin, now);
+			}
+			log_i(MODULE, "A login by an agent token from %s refused: %s",
+					cs(peer.address), cs(why));
+			return why;
+		}
+		peer.name = name;
+		peer.agent_id = at.id;
+		log_i(MODULE, "%s joined from %s by an agent token (\"%s\", %s token)",
+				cs(name), cs(peer.address), cs(at.label), cs(at.scope));
+		stats_joined(peer);
+		send(id, "accounts:login_result", pack(std::make_pair(
+				std::make_pair(ss_(), ss_()), name)));
+		m_server->emit_event("accounts:login", new Login(id, name));
+		send_users_to_staff();
+		return "";
+	}
+
+	// The token's clients (all agent tokens' for "") kicked
+	void on_agent_revoked(const Login &l)
+	{
+		sv_<PeerId> gone;
+		for(auto &p : m_peers)
+			if(!p.second.agent_id.empty() && (l.name.empty() ||
+					p.second.agent_id == l.name))
+				gone.push_back(p.first);
+		for(PeerId p : gone)
+			kick(p, l.name.empty() ? "Agent access is off on this server" :
+					"Its agent token was revoked");
+	}
+
 	// The admin's
 
 	void send_users(PeerId peer)
@@ -2609,7 +2740,7 @@ struct Module: public interface::Module, public Interface
 		std::pair<ss_, ss_> pw;
 		auto it = m_peers.find(packet.sender);
 		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
-				it->second.guest ||
+				it->second.guest || !it->second.agent_id.empty() ||
 				!unpack(packet.data, pw))
 			return;
 		const ss_ name = it->second.name;
@@ -2668,7 +2799,7 @@ struct Module: public interface::Module, public Interface
 	{
 		auto it = m_peers.find(packet.sender);
 		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
-				it->second.guest)
+				it->second.guest || !it->second.agent_id.empty())
 			return;
 		const ss_ name = it->second.name;
 		auto result = [&](const ss_ &text){
@@ -2709,7 +2840,7 @@ struct Module: public interface::Module, public Interface
 	{
 		auto it = m_peers.find(packet.sender);
 		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
-				it->second.guest)
+				it->second.guest || !it->second.agent_id.empty())
 			return;
 		const ss_ name = it->second.name;
 		const ss_ key = "starport_of/"+name+"/"+packet.data;
@@ -2860,7 +2991,8 @@ struct Module: public interface::Module, public Interface
 	void on_agent_req(const network::Packet &packet)
 	{
 		auto it = m_peers.find(packet.sender);
-		const ss_ name = it == m_peers.end() || it->second.guest ? "" :
+		const ss_ name = it == m_peers.end() || it->second.guest ||
+				!it->second.agent_id.empty() ? "" :
 				it->second.name;
 		network::answer_request(m_server, packet, "accounts:agent:res", name,
 				m_store ? "" : "the server is starting",
@@ -3846,7 +3978,7 @@ struct Module: public interface::Module, public Interface
 		auto it = m_peers.find(packet.sender);
 		TotpRequest req;
 		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
-				it->second.guest ||
+				it->second.guest || !it->second.agent_id.empty() ||
 				!unpack(packet.data, req))
 			return;
 		const ss_ name = it->second.name;
@@ -4054,7 +4186,7 @@ struct Module: public interface::Module, public Interface
 		auto it = m_peers.find(packet.sender);
 		sv_<ss_> q;
 		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
-				it->second.guest ||
+				it->second.guest || !it->second.agent_id.empty() ||
 				!unpack(packet.data, q) || q.empty())
 			return;
 		const ss_ name = it->second.name;
