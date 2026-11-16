@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~3 min (2026-11-16)
+# cost: ~35 s (2026-11-16)
 # covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua client/core/aitta/** src/impl/aitta.cpp
 # [KIT_SCENE_PACKAGES] A scene exported from one Workbench project and
 # added to another, from the file and through a local Aitta. kitboss, the
