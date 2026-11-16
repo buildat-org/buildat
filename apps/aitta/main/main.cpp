@@ -717,14 +717,15 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		v.set("releases", list);
 		// [AITTA_REPORTS] And what is out of it, with why: a client notes
-		// it on the tile of one it has installed
+		// it on the tile of one it has installed ([AITTA_KEY_IDENTITY]: by its
+		// key, which names where it is installed)
 		json::Value out = json::array();
 		for(auto &p : releases_map()){
 			const json::Value &rel = p.second;
 			if(!rel.get("delisted").is_true() && !rel.get("hidden").is_true())
 				continue;
 			json::Value o = json::object();
-			for(const char *f : {"author", "name", "version", "sha256"})
+			for(const char *f : {"author", "name", "version", "sha256", "key"})
 				o.set(f, jstr(rel, f));
 			o.set("why", jstr(rel, "delisted_why"));
 			out.append(o);

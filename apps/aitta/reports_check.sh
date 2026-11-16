@@ -162,7 +162,7 @@ C
 BUILDAT_STARPORT_MANAGED="$t/managed.json" timeout 90 bin/buildat \
 	-m launch_menu -D "$t/cl_lnch" -w 1024x700 -l 3 -c @"$t/note.cmds" \
 	> "$t/note.log" 2>&1
-mine "aitta page: delisted tester.pk@1.0.0: broken: it does not start" "$t/note.log" > /dev/null ||
+mine "aitta page: delisted $(aitta_fp "$t/pub").pk@1.0.0: broken: it does not start" "$t/note.log" > /dev/null ||
 	fail "no note on the installed one ($(grep -a "aitta page\|Command seq" "$t/note.log" | tail -3))"
 
 reqs author1 "$t/st.log" '{"cmd":"statements"}'

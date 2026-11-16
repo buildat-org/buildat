@@ -12,7 +12,7 @@
 #      local/beacon and local/marker; a scene "track" (its own World, a
 #      heightmap), in it a timer linked to Score and to Bell, a teleporter onto
 #      Score, a beacon, a marker, a cell of the voxel type kitboss/brick and
-#      a heightmap stroke. The palette's New tab: Export this scene, the
+#      a heightmap stroke, a kit/scene_info. The palette's New tab: Export this scene, the
 #      file track.scene.zip in <user>/exports (its outside entities named);
 #      Publish this scene..., dev_apps/track, packed and published by the
 #      command line, and a copy of it as "othertrack", made for the game
@@ -26,6 +26,10 @@
 #   3. B's New tab lists both packages: "track" added at once as track_2
 #      (its key vouched for by the Aitta); "othertrack" only after the
 #      question's Add anyway, as track_3.
+#   4. B, Running: track.scene.zip as 0.8.0-alpha.1 made it (its World's
+#      edits over 64 sections): with another kind refused, the refusal
+#      naming both versions; as it is added as track_4, unlisted; its
+#      list_scene refused until its World's sections are in, then done.
 #   B's save after: each scene's entities new ids, the timer's link and the
 #   teleporter's target B's Score, no link to Bell; local/beacon A's,
 #   local/marker B's own; kitboss/brick and the heightmap rows taken.
@@ -166,12 +170,14 @@ added_closed() # the window listing what was left out closed
 {
 	step 10 "kit editor: the scene added closed" "frames 3" 'click Button "OK"'
 }
-pick() # <file in <user>/exports> <regex in the client's log>: Add a scene from a file...
+pick() # <file in <user>/exports> <regex in the client's log> [commands after]: Add a scene from a file...
 {
+	local f=$1 re=$2
+	shift 2
 	# (the bar's second list, the first the view's)
 	cmd "frames 3" 'click DropDownList "▼" 1024 0' "delay 300" "frames 3"
 	step 10 "The file picker at .*/exports" 'click Text "Add a scene from a file..."'
-	step 60 "$2" "frames 3" "click Button \"$1\""
+	step 60 "$re" "frames 3" "click Button \"$f\"" "$@"
 }
 
 # The Aitta, kitboss's key bound there
@@ -238,6 +244,8 @@ edit "set $ID's kit/teleporter target to $SCORE" \
 	"{\"op\": \"set\", \"id\": $ID, \"comp\": 0, \"param\": \"target\", \"value\": $SCORE}"
 placed local/beacon 8 9 4 Beacon
 placed local/marker 10 9 4 Marker
+# (for part 4's list_scene)
+placed kit/scene_info 0 1 10 Info
 # The cell, once its section is loaded in the new scene's World
 for i in $(seq 30); do
 	m=$(mark "$SL")
@@ -372,6 +380,50 @@ m=$(mark "$SL")
 step 30 "kit editor: Added the scene track_3 " "frames 3" 'click Button "Add anyway"'
 await "$SL" "$m" 10 "kitboss adds the scene track_3 \(kitboss/othertrack 0\.1\.0 from "
 added_closed
+echo "ok: from the Aitta (B): track_2 at once, track_3 after Add anyway"
+
+# 4. B, Running: track made by another alpha (its World's edits over 64
+# sections); the same with another kind refused, naming both versions
+python3 -I - "$z" "$t/cu_b/exports" <<'PY' || fail "the other alpha's zips"
+import json, sys, zipfile, zlib
+z, out = sys.argv[1:]
+with zipfile.ZipFile(z) as zi:
+    files = {n: zi.read(n) for n in zi.namelist()}
+m = json.loads(files["meta.json"])
+assert m.get("buildat_version"), m
+m["buildat_version"] = "0.8.0-alpha.1"
+f = json.loads(zlib.decompress(files["edits.bin"]))
+e = f["scenes"]["track"]
+b = e["names"].index("kitboss/brick")
+for i in range(8):
+    for k in range(8):
+        if i or k:
+            e["cells"] += [64 * i + 3, 14, 64 * k + 3, b, 0]
+files["edits.bin"] = zlib.compress(json.dumps(f).encode())
+for name, meta in (("old", m), ("oldkind", dict(m, kind="template"))):
+    with zipfile.ZipFile(out + "/" + name + ".scene.zip", "w") as zo:
+        for n, d in files.items():
+            zo.writestr(n, json.dumps(meta) if n == "meta.json" else d)
+PY
+V=$(cat "$here/VERSION")
+pick oldkind.scene.zip "kit editor: Scene refused: not a scene package \(\"kind\": \"scene\"\) \(made with 0\.8\.0-alpha\.1; this is ${V//./\\.}\)"
+step 10 "kit editor: the server is Running" 'event kit_edit {"op": "play"}'
+m=$(mark "$SL")
+# (listed by the client as soon as it is added: the 64 sections go in at
+# two a tick, some 2 s)
+pick old.scene.zip "kit editor: Added the scene track_4 " \
+	"wait_log 60000 kit editor: Added the scene track_4 " \
+	'event kit_edit {"op": "list_scene", "name": "track_4", "on": true}'
+await "$SL" "$m" 10 "kitboss adds the scene track_4 \(kitboss/track 1\.0\.0\): .*\(Running: unlisted\)"
+await "$SL" "$m" 10 "World track_4: the template's 64 edited cells in 64 sections \(0 left out\), put in over ticks"
+await "$SL" "$m" 10 "An edit by kitboss: set [0-9]+'s kit/scene_info listed|An edit \(list_scene\) by peer [0-9]+ refused"
+tail -c +$((m + 1)) "$SL" | grep -qaE "An edit \(list_scene\) by peer [0-9]+ refused: the scene track_4's World is not ready yet \([0-9]+ sections to go\): list it then" ||
+	fail "track_4's list_scene: $(tail -c +$((m + 1)) "$SL" | grep -a "list_scene\|scene_info listed") ($SL)"
+await "$SL" "$m" 60 "World track_4: ready, its edited sections in"
+edit "An edit by kitboss: set [0-9]+'s kit/scene_info listed to true" \
+	'{"op": "list_scene", "name": "track_4", "on": true}'
+added_closed
+echo "ok: another alpha's (B, Running): the other kind refused, made with 0.8.0-alpha.1; track_4 added, its listing refused until its World's sections were in"
 bye
 python3 -I - "$t/b/apps/workbench/saves/world/save.sqlite" $SCORE_B <<'PY' || fail "B's save"
 import json, sqlite3, sys
@@ -380,13 +432,13 @@ c = sqlite3.connect("file:" + db + "?mode=ro", uri=True)
 rows = dict(((s, k), v) for s, k, v in c.execute("SELECT store, key, value FROM store"))
 es = {e["id"]: e for e in json.loads(rows[("kit", "authored")])["entities"]}
 scenes = {e["name"]: i for i, e in es.items() if e.get("kind") == "scene"}
-assert {"track", "track_2", "track_3"} <= set(scenes), scenes
+assert {"track", "track_2", "track_3", "track_4"} <= set(scenes), scenes
 def top(i):
     while es[i].get("parent", 1) != 1:
         i = es[i]["parent"]
     return i
-for n in ("track", "track_2", "track_3"):
-    by = {e.get("name"): e for i, e in es.items() if top(i) == scenes[n]}
+for n in ("track", "track_2", "track_3", "track_4"):
+    by ={e.get("name"): e for i, e in es.items() if top(i) == scenes[n]}
     assert {"World", "Timer", "Gate", "Beacon", "Marker"} <= set(by), (n, by)
     links = [l for cm in by["Timer"]["components"] for l in cm.get("links", [])]
     assert [l["to"] for l in links] == [score], (n, links)
@@ -395,8 +447,8 @@ for n in ("track", "track_2", "track_3"):
 assert "#40c0ff" in json.loads(rows[("kit", "type:local/beacon")])["source"]
 assert "#40ff40" in json.loads(rows[("kit", "type:local/marker")])["source"]
 assert ("kit", "voxel:kitboss/brick") in rows
-for n in ("track", "track_2", "track_3"):
+for n in ("track", "track_2", "track_3", "track_4"):
     assert any(k[1].startswith("hm_edit:%s/" % n) for k in rows), n
-print("B's save: 3 scenes added, each its timer's link and its gate's target B's Score; beacon A's, marker B's; the brick and heightmap rows")
+print("B's save: 4 scenes added, each its timer's link and its gate's target B's Score; beacon A's, marker B's; the brick and heightmap rows")
 PY
-echo "PASS: a scene exported (its outside entities named), published, added to another project from the file (a bad file refused, a link left out and listed, a missing type added, a differing one kept as the project's, the World's edits the export's) and from the Aitta (vouched for; another game's after a question). Screenshots in $t"
+echo "PASS: a scene exported (its outside entities named), published, added to another project from the file (a bad file refused, a link left out and listed, a missing type added, a differing one kept as the project's, the World's edits the export's) and from the Aitta (vouched for; another game's after a question); another alpha's added while Running, listed once its World was in (another kind's refusal naming both versions). Screenshots in $t"

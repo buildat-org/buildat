@@ -33,8 +33,8 @@
 #      until list_scene, then with The Loop; kitbob's run unbroken. His
 #      finish, the Lobby, The Loop picked: its run entered, the root's
 #      bike's crash by name to its run, its finish the root's lobby's
-#      "over" and result card (loop.png). Remove refused with him on it;
-#      done once he left.
+#      "over" and result card (loop.png). Remove refused with him on it,
+#      the agent's undo of its install too; done once he left.
 #   6. The web client (headless Chrome; skipped without web/ or Chrome),
 #      kitbob: the New tab through the server, The Loop added from the
 #      server's Aitta, then published as the server (1.0.2, its publisher
@@ -261,6 +261,10 @@ elif phase == "add":
     assert m, t
     open(args[1], "w").write(m[1])
     print("ok: install_from_aitta added The Loop while Running, as " + m[1])
+elif phase == "undo":
+    t = call("undo", error=True)
+    assert "the undo takes a scene away: 1 player on it" in t, t
+    print("ok: the agent's undo of its install refused, kitbob on the scene")
 elif phase == "final":
     log_is([("kitbob", "1.0.0"), ("kitboss", "1.0.1"), ("kitbob", "1.0.2")])
     print("ok: the web's release crags/loop 1.0.2 on the Aitta, published_by kitbob; the log's third row")
@@ -497,6 +501,7 @@ echo "ok: The Loop picked in the lobby: its run ($run) entered, the root's bike'
 as boss
 edit 5 "An edit \(remove_scene\) by peer [0-9]+ refused: 1 player on it: unlist it; they leave as they finish" \
 	"{\"op\": \"remove_scene\", \"name\": \"$sc\"}"
+mcp undo
 FD=4 cmd "sync 2000" quit
 exec 4>&-
 wait $BOB 2>/dev/null

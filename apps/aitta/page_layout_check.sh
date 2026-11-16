@@ -128,7 +128,7 @@ echo "ok: the rows, the wheel to the last, its panel; inside the window"
 drive 1280x700 1.4 "$t/inst.log" "${open}click Button \"tester/pkg01\"\nwait_log 10000 aitta panel: tester/pkg01\nclick Button \"Install\"\nwait_log 15000 aitta status: Installed\ndelay 1000\nscreenshot $t/installed.png\nclick DropDownList \"▼\"\nwait_log 5000 dropdown_\nkeypress Down\ndelay 200\nkeypress Return\nwait_log 15000 aitta status: 14 packages, 1 shown\nevent scan filtered\nquit\n"
 grep -aq "aitta status: Installed tester/pkg01 1.0.0" "$t/inst.log" ||
 	fail "the install: $(grep -a 'aitta status' "$t/inst.log" | tail -2)"
-[ -d "$t/cl/installed/tester/pkg01/1.0.0" ] || fail "not installed on disk"
+[ -d "$t/cl/installed/$(aitta_fp "$t/pub")/pkg01/1.0.0" ] || fail "not installed on disk"
 rows=$(grep -a "scan filtered: " "$t/inst.log" | grep -ao 'Text at .* text "tester/[a-z0-9_]*"' | grep -o 'tester/[a-z0-9_]*' | sort -u | tr '\n' ' ')
 [ "$rows" = "tester/pkg01 " ] || fail "Installed lists: $rows"
 echo "ok: installed from the panel; Installed lists it only"
