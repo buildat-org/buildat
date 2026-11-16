@@ -32,7 +32,13 @@
 -- "on_signal": waiting (no actions, their body still, "Waiting to
 -- respawn" on their screen) until the input respawn, which respawns
 -- every player of the round waiting
--- Stage 8's scene override goes beside it
+-- [KIT_SCENE_TREE] One placed on a scene ("on": "scene") is that scene's
+-- and the scenes' under it, whole: a player's rules are the nearest copy's
+-- from their scene up, the root's last. The HUD's parameters go further:
+-- each the nearest copy's that sets it.
+-- simplified: the inventory's size and screen (slots, hotbar, stack,
+-- full, drop_items, screen) are game-wide, the root's in every scene: a
+-- player has one inventory wherever they are
 local ANCHORS = {"top_left", "top", "top_right", "left", "center", "right",
 	"bottom_left", "bottom", "bottom_right"}
 return {

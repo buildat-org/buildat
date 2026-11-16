@@ -1,5 +1,7 @@
 -- Walking ([KIT] stage 4h): a movement (kit/controls' movement, the
--- default) for the players' bodies, on the app root to set its knobs:
+-- default) for the players' bodies, on the app root to set its knobs
+-- ([KIT_SCENE_TREE] or on a scene for its players and those of the scenes
+-- under it, the nearest copy winning):
 -- speed (m/s), acceleration (m/s², times the ground's friction), gravity
 -- (m/s²), jump_height (m, 0: no jump), air_control (of the acceleration,
 -- in the air), coyote_time (s: a jump just after walking off still

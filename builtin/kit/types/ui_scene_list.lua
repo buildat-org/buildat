@@ -4,6 +4,10 @@
 -- that player (linked to a kit/lobby's play: that scene's run). Where, its
 -- looks and "show", "hide" and "toggle" as kit/ui_button's; in a panel it
 -- frees the pointer as a button does.
+-- [KIT_SCENE_TREE] In a scene the listed scenes right under it (on the
+-- root: right under the root); where none are, every listed scene.
+-- simplified: right under, not deeper: a hub lists its groups, a group
+-- its tracks
 -- simplified: read again each second, so a scene listed or retitled shows
 -- up to a second late
 local function update(c)

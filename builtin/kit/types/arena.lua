@@ -71,7 +71,9 @@
 -- its map). A map not picked runs nothing in that round, its timers and
 -- spawners included: only its own map's links can reach "win". A name no
 -- scene has is left out, in the log. [KIT_SCENE_PACKAGES] "*" in it: every
--- listed scene (a kit/scene_info on it), there in the scenes' order.
+-- listed scene (a kit/scene_info on it), there in the scenes' order
+-- ([KIT_SCENE_TREE] those right under its own scene, where any are, as
+-- kit/ui_scene_list's).
 -- [KIT_READY_UP] `ready` (0: off, the countdown): instead of the
 -- countdown, the round starts at once when this share of the queue (at
 -- least `players` in it) is ready, rounded up: 1 all of them. "ready" (a

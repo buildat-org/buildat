@@ -26,6 +26,21 @@ namespace interface
 // The app's world is a tree of entities: the app the root (id 1), scenes
 // under it (the app's main_context scenes, by name), positional entities
 // ("objects") in a scene, and entities with no position under the root.
+// [KIT_SCENE_TREE] A scene may be under another scene (a group: a hub or a
+// menu, a real scene with its own World, its tracks under it). The root
+// types (`root = true`: kit/controls, a movement's parameters,
+// kit/game_rules, kit/environment, a builder's own) are looked up from a
+// player's scene up, the nearest copy winning (one on an entity right under
+// a scene with no position, "on": "scene"), the root's last.
+// simplified: game-wide whatever the scene: the inventory's size and screen
+// (kit/game_rules' slots, hotbar, stack, full, drop_items, screen),
+// kit/player_state and the types on every player (`player = true`: health,
+// inventory, equipment, score). What walks a scene's entities (its World,
+// a session's copy of it, its cell jobs, world_check) stops at a scene
+// under it; a scene with scenes under it is not removed. A scene's World
+// "none" ([KIT_NO_WORLD]) with no spawner of players holds its players
+// where they are (no movement), not dropped into a fall that meets
+// nothing.
 // [KIT_NO_WORLD_TYPES] A type with `no_position = true` has nothing at a
 // place (kit/timer, kit/ui_text): an entity with only such types has no
 // position, what it is given is dropped, and nothing of it is drawn or
@@ -1285,7 +1300,8 @@ namespace interface
 // they hold: Running, out of the tools, a melee item of theirs, past its
 // cooldown (game time), the target with health in their scene within its
 // reach (eye to body) and in sight (no solid voxel between); then Kit's
-// rules (kit/game_rules' peaceful on the root: players take no damage; the
+// rules (kit/game_rules' peaceful on the root, [KIT_SCENE_TREE] the
+// target's scene's nearest: players take no damage; the
 // region at the target: pvp for the attacker on a player, damage for the
 // player hit, damage for the attacker on an entity; kit/team's
 // friendly_fire, off: members do not hurt each other), the item's wear
@@ -1623,7 +1639,8 @@ namespace kit
 		// [KIT] stage 4h: Kit moves the players: each one's body is stepped
 		// by a movement (kit/walker...) on the server and predicted on their
 		// client (kit.controls{} there), the camera, the pointer and the
-		// movement the app root's kit/controls (its defaults with none).
+		// movement the app root's kit/controls (its defaults with none;
+		// [KIT_SCENE_TREE] the nearest copy from the player's scene up).
 		// set_peer()'s position is then only where a player first appears
 		// (their body put there, unless a spawner on the join put it),
 		// put_player() puts them, a teleport puts them without

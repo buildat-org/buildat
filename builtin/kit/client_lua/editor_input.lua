@@ -3731,7 +3731,11 @@ function M.editor(options)
 				S.scene_pick = false
 				log:info("kit editor: adding the scene of " .. name .. " (" ..
 						#zip .. " bytes)")
-				buildat.send_packet("kit:scene", zip)
+				-- [KIT_SCENE_TREE] under the scene picked (Scenes...' Add
+				-- here...)
+				local under = S.scene_pick_under or ""
+				buildat.send_packet("kit:scene", (under ~= "" and "\1" .. under ..
+						"\0" or "") .. zip)
 			elseif zip then
 				S.scene_pick = false
 				E.status = tostring(zip)
