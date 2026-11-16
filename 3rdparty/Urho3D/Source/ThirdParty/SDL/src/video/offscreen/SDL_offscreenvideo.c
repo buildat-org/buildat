@@ -31,6 +31,7 @@
  */
 
 #include "SDL_video.h"
+#include "SDL_hints.h" /* buildat: SDL_HINT_VIDEODRIVER */
 
 #include "SDL_offscreenvideo.h"
 #include "SDL_offscreenevents_c.h"
@@ -55,6 +56,15 @@ static void OFFSCREEN_DeleteDevice(SDL_VideoDevice *device)
 static SDL_VideoDevice *OFFSCREEN_CreateDevice(void)
 {
     SDL_VideoDevice *device;
+    const char *hint = SDL_GetHint(SDL_HINT_VIDEODRIVER);
+
+    /* buildat: only when named (SDL_VIDEODRIVER=offscreen), as the dummy
+       driver is, and not as the one tried when no other driver starts;
+       a client with no display would otherwise come up with a window
+       nobody sees instead of failing to start */
+    if (!hint || !*hint) {
+        return NULL;
+    }
 
     /* Initialize all variables that we clean on shutdown */
     device = (SDL_VideoDevice *)SDL_calloc(1, sizeof(SDL_VideoDevice));
