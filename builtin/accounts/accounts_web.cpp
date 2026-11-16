@@ -269,6 +269,9 @@ struct Module: public interface::Module, public Interface
 	// [KIT_AGENTS] no HTTP in a page, so no agents
 	ss_ check_agent(const ss_ &token, AgentToken &out){ return REFUSED; }
 	bool agents_on(){ return false; }
+	void expect_camera(const ss_ &secret){}
+	bool is_camera(PeerId peer){ return false; }
+	bool camera_on(){ return false; }
 };
 
 extern "C" {

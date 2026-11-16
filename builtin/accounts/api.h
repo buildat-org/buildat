@@ -225,7 +225,21 @@ namespace accounts
 		// (expired, or its account banned): a tool's own, not a guess
 		virtual ss_ check_agent(const ss_ &token, AgentToken &out) = 0;
 		virtual bool agents_on() = 0;
+
+		// [KIT_AGENT_NEXT_1] **The server's camera** (Kit's: a headless
+		// client of the server's own): it joins by a one-time secret Kit
+		// made and armed here ("cam_..." as its agent token), only from
+		// loopback and only once (a second use, or another address, is a
+		// failed login), as CAMERA_NAME, which no account can be: no
+		// account's rights, refused what a guest is, never "local", not in
+		// the counts (max_players, the statistics). "" disarms
+		virtual void expect_camera(const ss_ &secret) = 0;
+		virtual bool is_camera(PeerId peer) = 0;
+		// The Host's switch on the Accounts page (setting server_camera),
+		// on by default
+		virtual bool camera_on() = 0;
 	};
+	static const char CAMERA_NAME[] = "(camera)";
 
 	inline bool access(interface::Server *server,
 			std::function<void(accounts::Interface*)> cb)

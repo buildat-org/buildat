@@ -650,11 +650,14 @@ struct Module: public interface::Module, public Interface
 
 	size_t player_count()
 	{
-		size_t n = 0;
+		// health_json()'s players: the server's camera not counted
+		ss_ h;
 		network::access(m_server, [&](network::Interface *iface){
-			n = iface->list_peers().size();
+			h = iface->health_json();
 		});
-		return n;
+		json::json_error_t err;
+		const json::Value v = json::load_string(h.c_str(), &err);
+		return (size_t)std::max<int64_t>(0, json::jint(v, "players"));
 	}
 
 	// False when the Starport said it was too soon (try again shortly)

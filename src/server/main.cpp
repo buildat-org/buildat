@@ -117,6 +117,11 @@ int main(int argc, char *argv[])
 		config.set("kit_vouch", ss_(getenv("BUILDAT_KIT_VOUCH")));
 	if(getenv("BUILDAT_CONNECT_PORTS"))
 		config.set("connect_ports", ss_(getenv("BUILDAT_CONNECT_PORTS")));
+	// [KIT_AGENT_NEXT_1] --camera-display :N: the X display the server's
+	// camera draws on where its SDL has no offscreen driver (a host's Xvfb);
+	// also BUILDAT_CAMERA_DISPLAY. Never the server's own DISPLAY
+	if(getenv("BUILDAT_CAMERA_DISPLAY"))
+		config.set("camera_display", ss_(getenv("BUILDAT_CAMERA_DISPLAY")));
 	// The launcher's owner token: kept in the config, where no game's Lua
 	// reaches, and out of the environment, where os.getenv() would
 	if(const char *token = getenv("BUILDAT_OWNER_TOKEN")){
@@ -181,6 +186,9 @@ int main(int argc, char *argv[])
 			take = 2;
 		} else if(ss_(argv[i]) == "--connect-ports" && i + 1 < argc){
 			config.set("connect_ports", ss_(argv[i + 1]));
+			take = 2;
+		} else if(ss_(argv[i]) == "--camera-display" && i + 1 < argc){
+			config.set("camera_display", ss_(argv[i + 1]));
 			take = 2;
 		} else if((ss_(argv[i]) == "--max-players" ||
 				ss_(argv[i]) == "--max-view-range" ||
@@ -254,6 +262,10 @@ int main(int argc, char *argv[])
 			"                       beyond 80, 443, 465, 587, 29500 and\n"
 			"                       29595, or \"any\" (also\n"
 			"                       BUILDAT_CONNECT_PORTS)\n"
+			"  --camera-display :N  The X display Kit's server camera draws\n"
+			"                       on where SDL has no offscreen driver\n"
+			"                       (a host's Xvfb; also\n"
+			"                       BUILDAT_CAMERA_DISPLAY)\n"
 			"  --lan-announce NAME  Announce this server to the LAN under\n"
 			"                       NAME (also BUILDAT_LAN_ANNOUNCE)\n"
 			"  --max-players N      Players at once; admins join over it\n"
@@ -541,6 +553,12 @@ int main(int argc, char *argv[])
 	// [CLIENT_WASM] Looked for before the box, which is given their
 	// directories to read
 	server::find_wasm_toolchain(config);
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+	// [KIT_AGENT_NEXT_1] The camera's launcher, outside the box and before
+	// any thread (confine.h)
+	if(!config.get<bool>("compile_only") && !free_run && !boxed)
+		server::start_camera_launcher(config, module_path);
+#endif
 	// [PROCESS_SANDBOX]: the box, before anything of the app is loaded.
 	// Where it cannot be made the server refuses to start (decided
 	// 2026-10-02), and says how to start it anyway.

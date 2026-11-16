@@ -23,6 +23,11 @@ Config::Config()
 	// (within interface::aitta::vouch_guarded()'s limits), "none" none,
 	// else a comma-separated list of origins
 	set_default("kit_vouch", "");
+	// [KIT_AGENT_NEXT_1] The server camera's X display (--camera-display,
+	// BUILDAT_CAMERA_DISPLAY; "": offscreen only) and its launcher's pipes
+	// ("<req fd> <ans fd>", set by start_camera_launcher(); "": none)
+	set_default("camera_display", "");
+	set_default("camera_launcher", "");
 	// Started by a boxed parent, in the box (Windows; --boxed)
 	set_default("boxed", false);
 	// What the box is made of, for an admin's Health page

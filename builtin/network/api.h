@@ -421,6 +421,10 @@ namespace network
 		// [HEALTH_ADMIN] whether any account has the admin priv, as
 		// /health's "admin"; left out until accounts says
 		virtual void set_has_admin(bool admin) = 0;
+		// [KIT_AGENT_NEXT_1] A peer left out of the player counts
+		// (health_json()'s players, the LAN's): the server's camera
+		// (accounts). Still in list_peers()
+		virtual void set_uncounted(PeerInfo::Id peer) = 0;
 
 		// [FILE_TRANSFER_LATENCY] **The bulk lane**: a payload that goes
 		// behind everything else the peer is sent, made into fragments

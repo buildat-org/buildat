@@ -262,6 +262,8 @@ struct Peer
 	}
 	// A game peer the game has heard of
 	bool playing() const { return game() && hello_seen; }
+	// [KIT_AGENT_NEXT_1] set_uncounted()
+	bool uncounted = false;
 
 	// What has been handed to this peer and has not gone down the socket
 	// yet, because the socket does not block any more: a peer that is not
@@ -896,7 +898,7 @@ struct Module: public interface::Module, public network::Interface
 		v.set("version", ss_(BUILDAT_VERSION));
 		v.set("port", (int64_t)atoi(m_server->get_config().get<ss_>(
 				"network_port").c_str()));
-		v.set("players", (int64_t)list_peers().size());
+		v.set("players", player_count());
 		v.set("account", json::Value(m_lan_account));
 		if(!interface::lan_send(m_lan_fd, v.stringify()))
 			log_d(MODULE, "LAN announce not sent");
@@ -959,7 +961,7 @@ struct Module: public interface::Module, public network::Interface
 			n = m_tick_gaps_us.size();
 		}
 		h.uptime_s = (interface::os::time_us() - m_start_us) / 1000000;
-		h.players = (int64_t)list_peers().size();
+		h.players = player_count();
 		h.memory_bytes = interface::os::memory_bytes();
 		// The tick is 1/30 s; a gap well over it is a server falling behind
 		h.tick_gap_ms_avg = n ? (double)sum / n / 1000.0 : 0.0;
@@ -2617,6 +2619,21 @@ struct Module: public interface::Module, public network::Interface
 	void set_has_admin(bool admin)
 	{
 		m_has_admin = admin ? 1 : 0;
+	}
+
+	void set_uncounted(PeerInfo::Id peer)
+	{
+		auto it = m_peers.find(peer);
+		if(it != m_peers.end())
+			it->second.uncounted = true;
+	}
+
+	int64_t player_count()
+	{
+		int64_t n = 0;
+		for(auto &pair : m_peers)
+			n += pair.second.playing() && !pair.second.uncounted;
+		return n;
 	}
 
 	bool ws_claimed(const ss_ &target)
