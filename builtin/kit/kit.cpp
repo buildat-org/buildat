@@ -30028,7 +30028,8 @@ struct Module: public interface::Module, public Interface
 				"entity's id, parent, name, position (x, y, z; y up, a cell 1) "
 				"and components (type, params, links to other entities' "
 				"inputs); whether the round is Running, each component's state "
-				"then; how many of your edits there are to undo.",
+				"then; how many of your edits there are to undo; the game it "
+				"is (\"<author>/<name>\", list_aitta's filter).",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"list_types", "=types", "The types an entity is placed of: each "
 				"one's name, group and what it is. With type: its declaration, "
@@ -30895,6 +30896,9 @@ struct Module: public interface::Module, public Interface
 				scenes.append(e.second.name);
 		s.set("scenes", scenes);
 		s.set("can_make_scenes", (bool)m_host.make_scene);
+		// [WB_RENAME_LEFTOVERS] list_aitta's game filter, as kit:edit_state's
+		if(!m_host.project.empty())
+			s.set("game", game_of(author_of(p)));
 		s.set("undo", (int64_t)m_undo[p.name].size());
 		json::Value es = authored_json(true).get("entities");
 		for(unsigned i = 0; m_session.running && i < es.size(); i++){
