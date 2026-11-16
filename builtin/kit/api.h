@@ -1657,7 +1657,7 @@ namespace kit
 		// its first exporter's "<author>/<its name>"). A builder exports one
 		// scene as a scene package ("export_scene", the agents'
 		// export_scene) and adds one as a new scene ("kit:scene", the
-		// palette's Add a scene from a file... and the New tab's list of the
+		// scene list's Add from a file... and the New tab's list of the
 		// Aittas' scene packages): doc/aitta.txt "Scenes"
 		ss_ project;
 		// [KIT_PROJECT_EXPORT] The app's games for the agents' tools

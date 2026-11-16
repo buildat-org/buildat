@@ -30340,8 +30340,8 @@ struct Module: public interface::Module, public Interface
 				"its game), LICENSE, composition.json (the scene entity and "
 				"those under it; \"outside\": the entities outside it its links "
 				"and entity parameters name, by name), the custom types, rows "
-				"and textures it uses, edits.bin (its World's). The palette's "
-				"Add a scene from a file... takes the zip into another game.",
+				"and textures it uses, edits.bin (its World's). The scene "
+				"list's Add from a file... takes the zip into another game.",
 				R"J({"type": "object", "properties": {"scene": {"type": "string",
 				"description": "Its name; none: the scene the agent is in"}}})J",
 				""},

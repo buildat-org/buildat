@@ -3724,7 +3724,7 @@ function M.editor(options)
 				people()
 			end
 		end
-		-- [KIT_SCENE_PACKAGES] Add a scene from a file...'s
+		-- [KIT_SCENE_PACKAGES] the scene list's Add from a file...'s
 		if S.scene_pick then
 			local name, zip = buildat.picked_file()
 			if name then

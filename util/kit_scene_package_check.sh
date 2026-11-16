@@ -18,7 +18,7 @@
 #      command line, and a copy of it as "othertrack", made for the game
 #      other/game.
 #   2. B (another user dir, the file copied into its exports): in "world" a
-#      counter Score and B's own local/marker. Add a scene from a file...
+#      counter Score and B's own local/marker. Add from a file...
 #      (the scene list), the picker: a zip with a file no scene package has
 #      refused; track.scene.zip added as "track", the window listing the
 #      link to Bell left out. Its export there has the first's World edits
@@ -173,13 +173,13 @@ added_closed() # the window listing what was left out closed
 {
 	step 10 "kit editor: the scene added closed" "frames 3" 'click Button "OK"'
 }
-pick() # <file in <user>/exports> <regex in the client's log> [commands after]: Add a scene from a file...
+pick() # <file in <user>/exports> <regex in the client's log> [commands after]: Add from a file...
 {
 	local f=$1 re=$2
 	shift 2
 	# (the bar's second list, the first the view's)
 	cmd "frames 3" 'click DropDownList "▼" 1024 0' "delay 300" "frames 3"
-	step 10 "The file picker at .*/exports" 'click Text "Add a scene from a file..."'
+	step 10 "The file picker at .*/exports" 'click Text "Add from a file..."'
 	step 60 "$re" "frames 3" "click Button \"$f\"" "$@"
 }
 
