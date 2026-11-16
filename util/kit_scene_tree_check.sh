@@ -19,7 +19,8 @@
 #      t1) has racing's controls in t1.
 #   4. racing exported: t1 in the package, its World's stroke, racing's
 #      parent the root, the root's kit/environment carried ("Rules from
-#      above"), kit/controls not (racing has its own).
+#      above") with its link by name to racing's list, kit/controls not
+#      (racing has its own).
 #   5. racing's kit/controls edited while the builder is in t1: the camera
 #      and the movement change under their body.
 #   6. "menu", a new scene: the scene entity alone, World none: no ground,
@@ -31,7 +32,8 @@
 #      controls in t1, the Scenes window indented so.
 #   8. The web client (headless Chrome; skipped without web/ or Chrome) in
 #      B: the Scenes window the same; t1's Move..., the root: t1 on the
-#      root. B's save after: the tree and the carried environment.
+#      root. B's save after: the tree and the carried environment (B's
+#      root has none), its link by name kept.
 # Screenshots, kept with KEEP_TMP=1: $t/a_tree.png (A's scene list open),
 # $t/a_menu.png (menu, played), $t/a_scenes.png (A's Scenes window),
 # $t/b_scenes.png (B's after the add), $t/web/web_scenes.png,
@@ -206,6 +208,7 @@ m=$(mark "$CL")
 placed kit/controls Controls '"params": {"camera": "top_down"}'
 await "$CL" "$m" 20 "kit: controls: camera top_down, pointer \S+, movement kit/walker"
 placed kit/environment Sky
+SKY=$ID
 step 20 "kit editor: in the scene racing " \
 	'event kit_edit {"op": "new_scene", "name": "racing", "copy": true}'
 m=$(mark "$CL")
@@ -215,6 +218,9 @@ await "$CL" "$m" 20 "kit: controls: camera chase, pointer \S+, movement kit/clic
 placed kit/game_rules "Racing rules" '"on": "scene", "params": {"peaceful": true}'
 placed kit/ui_scene_list "Racing list"
 RL=$ID
+# (a link by name, carried with the Sky in the export)
+edit "An edit by kitboss: linked $SKY\.dawn -> \"Racing list\" in the player's scene\.show" \
+	"{\"op\": \"link\", \"id\": $SKY, \"comp\": 0, \"output\": \"dawn\", \"to_name\": \"Racing list\", \"input\": \"show\"}"
 m=$(mark "$CL")
 ms=$(mark "$SL")
 cmd 'event kit_edit {"op": "new_scene", "name": "t1", "copy": true, "parent": "racing"}'
@@ -283,6 +289,7 @@ types = sorted(cm["type"] for e in under for cm in e.get("components", []))
 assert "kit/controls" in types and "kit/game_rules" in types, types
 up = [e for e in under if e.get("name") == "Rules from above"]
 assert len(up) == 1 and [cm["type"] for cm in up[0]["components"]] == ["kit/environment"], up
+assert up[0]["components"][0]["links"] == [{"output": "dawn", "to_name": "Racing list", "input": "show"}], up
 f = json.loads(zlib.decompress(open(x + "/edits.bin", "rb").read()))
 assert f["scenes"]["t1"]["hm"], sorted(f["scenes"])
 print("A's export: racing and t1 under it, its rules from above %s, t1's stroke" %
@@ -407,7 +414,9 @@ t1_up = sc[sys.argv[2]]["id"] if sys.argv[2] != "root" else 1
 assert sc["t1"].get("parent", 1) == t1_up, (sc["t1"], sys.argv[2])
 up = [e for e in es.values() if e.get("name") == "Rules from above"]
 assert len(up) == 1 and up[0]["parent"] == sc["racing"]["id"], up
+assert [cm["type"] for cm in up[0]["components"]] == ["kit/environment"], up
+assert up[0]["components"][0]["links"] == [{"output": "dawn", "to_name": "Racing list", "input": "show"}], up
 assert any(k[1].startswith("hm_edit:t1/") for k in rows)
-print("B's save: hub > racing, t1 under %s, racing's rules from above, t1's stroke" % sys.argv[2])
+print("B's save: hub > racing, t1 under %s, racing's rules from above with their link by name, t1's stroke" % sys.argv[2])
 PY
 echo "PASS: a scene tree: a group's controls and movement in it and the track under it, the root's in a sibling, each sent as the builder moved and as the group's changed; the group's list its tracks alone; its removal refused; a draft's track the group's; exported with its track and the root's environment, added under another game's scene; an empty scene with no ground holding its player. Screenshots in $t"

@@ -7580,7 +7580,8 @@ struct Module: public interface::Module, public Interface
 	//   with its own World; the scene entity's parent 1 (the root), its
 	//   rules from above (root types it has from the scenes it is under or
 	//   the root, kit/player_state's and a World's left out) on an entity
-	//   of their own on it, "Rules from above";
+	//   of their own on it, "Rules from above" (an import keeps each only
+	//   where the game has none above where it goes);
 	//   types/: the custom types it names;
 	//   items.json, sounds.json, voxels.json, prefabs.json: the builders'
 	//   rows it names (its entities, its World's voxels, the rows so named,
@@ -8127,6 +8128,24 @@ struct Module: public interface::Module, public Interface
 			}
 			json::Value comps = e.get("components").is_array() ?
 					e.get("components").deepcopy() : json::array();
+			// [KIT_SCENE_TREE] Its rules from above (scene_files()) only where
+			// the game has none above where it goes: the game's own kept, as
+			// its types are
+			if(up[was] == sid && en == "Rules from above" &&
+					!e.get("pos").is_array() && jstr(e, "kind").empty()){
+				json::Value own = json::array();
+				for(unsigned k = 0; k < comps.size(); k++){
+					const ss_ t = full_type(jstr(comps.at(k), "type"));
+					if(!scene_instance(t, parent))
+						own.append(comps.at(k));
+					else
+						log_i(MODULE, "The scene %s's %s from above: the game's own "
+								"kept", cs(name), cs(t));
+				}
+				if(!own.size())
+					continue;
+				comps = own;
+			}
 			for(unsigned k = 0; k < comps.size(); k++){
 				json::Value cj = comps.at(k), ls = json::array(),
 						ps = cj.get("params").is_object() ?
@@ -8134,6 +8153,11 @@ struct Module: public interface::Module, public Interface
 				const json::Value &was_ls = cj.get("links");
 				for(unsigned l = 0; l < was_ls.size(); l++){
 					json::Value lj = was_ls.at(l).deepcopy();
+					// (one by name alone, "to_name": as it is)
+					if(!json::jint(lj, "to", 0) && !jstr(lj, "to_name").empty()){
+						ls.append(lj);
+						continue;
+					}
 					const uint64_t to = onto((uint64_t)json::jint(lj, "to", 0),
 							en+"'s link "+jstr(lj, "output").substr(0, 64)+" to");
 					if(!to)
