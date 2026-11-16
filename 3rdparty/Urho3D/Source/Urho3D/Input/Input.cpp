@@ -1170,20 +1170,16 @@ unsigned Input::LoadGestures(Deserializer& source)
 }
 
 
+// buildat: SDL_RemoveDollarTemplate() and SDL_RemoveAllDollarTemplates()
+// were Urho3D's additions to SDL 2.0.5, not carried to 2.32 (nothing in
+// buildat records gestures)
 bool Input::RemoveGesture(unsigned gestureID)
 {
-#ifdef __EMSCRIPTEN__
     return false;
-#else
-    return SDL_RemoveDollarTemplate(gestureID) != 0;
-#endif
 }
 
 void Input::RemoveAllGestures()
 {
-#ifndef __EMSCRIPTEN__
-    SDL_RemoveAllDollarTemplates();
-#endif
 }
 
 SDL_JoystickID Input::OpenJoystick(unsigned index)

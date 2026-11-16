@@ -1101,6 +1101,11 @@ void SDL_PerformWarpMouseInWindow(SDL_Window *window, int x, int y, SDL_bool ign
     } else {
         SDL_PrivateSendMouseMotion(window, mouse->mouseID, 0, x, y);
     }
+
+    /* Urho3D (carried by buildat): the state follows the warp at once, so
+       Input::GetMousePosition() right after SetMousePosition() reads it */
+    mouse->x = x;
+    mouse->y = y;
 }
 
 void SDL_WarpMouseInWindow(SDL_Window *window, int x, int y)
