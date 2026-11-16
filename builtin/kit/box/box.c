@@ -24,13 +24,15 @@
 **                        each cell's name's index, 0 not loaded);
 **                        [KIT_PANEL_PARENT] panel (the panel it is in);
 **                        [KIT_TOOLS_1] is_player (it is on a player's
-**                        entity)}; answers
+**                        entity); [KIT_SCENE_PACKAGES] player_scene,
+**                        listed (a type's `listed`)}; answers
 **                        its effects, {set = {{key, value}...} (a table
 **                        changed in place too), emit = {{output,
 **                        value}...}, voxel = name, voxels = {{x, y, z,
 **                        name}...} (c:set_voxels), after = {{name,
 **                        seconds (-1: taken back), player | null}...},
-**                        teleport = {x, y, z} (or {} with an entity),
+**                        teleport = {x, y, z} (or {} with an entity or
+**                        a scene alone: its spawner),
 **                        teleport_yaw = degrees, teleport_scene = name,
 **                        teleport_entity = id, [KIT_CTF] move = {x, y,
 **                        z, fall} (c:move), speed = {{player, factor}...}
@@ -569,12 +571,13 @@ static const char PRELUDE[] =
 "		if opts ~= nil and type(opts) ~= 'table' then error('teleport: options are {yaw = degrees, scene = name, entity = id}', 2) end\n"
 "		local ent = opts and tonumber(opts.entity)\n"
 "		if ent == 0 then ent = nil end\n"
-"		if type(pos) ~= 'table' and not ent then error('teleport: a position, {x, y, z}, or an entity', 2) end\n"
+"		local scn = opts and type(opts.scene) == 'string' and opts.scene ~= '' and opts.scene or nil\n"
+"		if type(pos) ~= 'table' and not ent and not scn then error('teleport: a position, {x, y, z}, an entity or a scene', 2) end\n"
 "		local t = type(pos) == 'table' and {tonumber(pos[1]) or 0, tonumber(pos[2]) or 0, tonumber(pos[3]) or 0} or {}\n"
 "		local yaw = opts and tonumber(opts.yaw)\n"
 "		fx.teleport = t\n"
 "		fx.teleport_yaw = yaw and yaw - yaw == 0 and yaw or nil\n"
-"		fx.teleport_scene = opts and type(opts.scene) == 'string' and opts.scene ~= '' and opts.scene or nil\n"
+"		fx.teleport_scene = scn\n"
 "		fx.teleport_entity = ent\n"
 "	end\n"
 "	-- [KIT_CTF] its own entity moved (the world's position; fall: down\n"
@@ -716,6 +719,8 @@ static const char PRELUDE[] =
 "		fx.explode = x\n"
 "	end\n"
 "	c.player_away = req.player_away or false\n"
+"	-- [KIT_SCENE_PACKAGES] the scene the player is in, the listed scenes\n"
+"	c.player_scene, c.listed = req.player_scene, req.listed\n"
 "	local sessions = {}\n"
 "	local function session_op(t)\n"
 "		if #sessions >= 8 then error('sessions: 8 calls a run at most', 3) end\n"

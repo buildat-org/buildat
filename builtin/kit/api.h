@@ -33,6 +33,9 @@ namespace interface
 // under a positioned entity (kit/starting_kit under a kit/team), and has
 // nothing under it; it runs as one in its scene does; a node of its own
 // still carries its shared state and its HUD element, not at any place.
+// [KIT_SCENE_PACKAGES] A UI element on the root (or in a panel there) has
+// such a node in every scene, so a hub's lobby and its screens are on every
+// player's screen wherever they are, pressed from any scene.
 // [KIT_NESTING] A positioned entity may be under another one in its scene
 // (MAX_NEST levels): its position and yaw are its parent's frame's, so it
 // moves and turns with it, and while its parent's look slides
@@ -127,6 +130,10 @@ namespace interface
 //   linked_in = true         -- [CRAG_BEST_RESET] c.linked_in = {input =
 //              {id...}}: the entities with a link to it, by its input,
 //              which it reaches (c:send to each: crag_run's gems)
+//   listed = true            -- [KIT_SCENE_PACKAGES] c.listed = {{scene,
+//              title, author}...}: the scenes a kit/scene_info on them
+//              lists (title the scene's name where it gives none), by the
+//              scene's id (kit/ui_scene_list, kit/arena's maps "*")
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
 //   about    = {what = "...", inputs = {name = "..."}, outputs = {name = "..."}}
 //                            -- [KIT_SIGNALS_DOCS] For the builders, all of it
@@ -256,6 +263,12 @@ namespace interface
 //                               text a title over rows from its shared
 //                               state `value`, {{name, colour, score}..}:
 //                               kit/ui_player_list
+//                               [KIT_SCENE_PACKAGES] kind "list": its
+//                               text a title over a button a row of its
+//                               shared state `value`, {{title, author,
+//                               scene}...}; a press "kit:ui" "<id> 1|0
+//                               <row>" (from 1), on_ui(c, phase, by, row):
+//                               kit/ui_scene_list
 //   actions ={{name = "fire", key = "R", label = "Fire"}, ...}
 //                            -- ([KIT_INPUT_ACTIONS]) keys the players
 //                               press (8 at most; each value a string or
@@ -308,7 +321,10 @@ namespace interface
 // own on_timer counted from when it was due, so a chain keeps its period;
 // saved as game time left; the scope is where the component lives,
 // so one on a player's entity follows them), c:teleport({x, y, z}) (the player who set the
-// run off, the app moving them on kit:move_player), c:set_param(id, type,
+// run off, the app moving them on kit:move_player; [KIT_SCENE_PACKAGES]
+// c:teleport(nil, {scene = name}) onto that scene's spawner of players, its
+// last, else its World's spawn; from the root, wherever the player is),
+// c:set_param(id, type,
 // param, value) ([KIT_VEHICLE_MOVEMENTS] a parameter of a component on an
 // entity it reaches, until Stop, checked as an edit's, the row keeping its
 // own; a movement's take it at its next step: an engine upgrade, wind, fuel;
@@ -356,6 +372,12 @@ namespace interface
 //   delivered value not of its type is logged and not sent.
 //   "string:player" is a string the editor calls a player; a link does not
 //   look at the label.
+//   [KIT_SCENE_PACKAGES] A link by name ("to_name" instead of "to"; the op
+//   link's too, refused unless an entity of that name in a scene takes the
+//   input): each signal reaches the entity of that name (the lowest id of
+//   several) in the scene of the player or bot `by` is, now; no player or
+//   no such entity there drops it, logged ("... dropped: why"). A root's
+//   link into each scene's own (a track's run), not shown in play.
 //   `by` is "player:<id>", the player's entity (a login keeps it), or
 //   "app"; c:name(by) the player's name, c.player their entity's id (on
 //   on_leave, a guest's entity may be gone by then: its id still).
@@ -388,7 +410,7 @@ namespace interface
 //      member's id, "name", "pos" (from where a copy is placed; under a
 //      member with a position, [KIT_NESTING], in that member's frame),
 //      "components": [{"type", "version", "params", "links": [{"output",
-//      "to": a member's id, "input"}]}]}],
+//      "to": a member's id (or "to_name", by name), "input"}]}]}],
 //      "voxels": {"at": [x, y, z], "size": [x, y, z], "air": bool,
 //       "kinds": [[voxel, param, tint]...], "runs": [count, kind...]}}
 //   an entity parameter in it a member's id (0: none).
@@ -812,7 +834,9 @@ namespace interface
 // on_start(c) as a round starts from the start (Play, an instance placed
 // or restarted in the round); on_join(c, by) as a player goes through the
 // round's start and each time the app places them in its scene anew
-// (set_peer: the first time, or as another name); on_enter/on_leave as a
+// (set_peer: the first time, or as another name; [KIT_SCENE_PACKAGES] one
+// with no position on the root: in any scene, each scene they come into
+// too); on_enter/on_leave as a
 // player's position (the cell it rounds to) comes into or leaves its zone.
 //
 // Clients act, components react: a client's packet "kit:use" (an entity's
@@ -1113,7 +1137,8 @@ namespace interface
 // without one), so a round's outcome reaches the default round.
 // [KIT_MINIGAMES_FIX] In a session c.session_maker is the entity whose
 // run started it (0: none, a draft); c.player_away is true when the player
-// who set the run off is in another scene than the entity.
+// who set the run off is in another scene than the entity
+// ([KIT_SCENE_PACKAGES] c.player_scene: the scene they are in, "" none).
 // [KIT_LATE_JOIN] In a game session c.session_players is the number of
 // players its start took in; in the default round c.sessions =
 // {[id] = {players, taken, clock}} the game sessions it made: its players

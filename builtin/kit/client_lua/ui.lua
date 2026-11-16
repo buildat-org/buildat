@@ -693,6 +693,65 @@ local function rect(b, x, y, w, h)
 	b:SetFixedSize(math.max(0, math.floor(w)), math.max(0, math.floor(h)))
 end
 
+-- [KIT_SCENE_PACKAGES] A scene list's rows ({title, author, scene}): a
+-- button each ("<title>, by <author>"), its press "kit:ui" "<id> 1|0
+-- <row>"; placed in a column under the title (from y, w wide, rh high each
+-- with a gap); returns the widest label and a row's height
+local function list_rows(r, id, rows, px, V)
+	r.rows = r.rows or {}
+	local font = magic.cache:GetResource("Font", FONT)
+	local white = color(r.ui.color, magic.Color(1, 1, 1))
+	local lw, lh = 0, 0
+	for i = 1, math.max(#rows, #r.rows) do
+		local row, e = rows[i], r.rows[i]
+		if row and not e then
+			local b = r.el:CreateChild("Button")
+			b.color = magic.Color(0, 0, 0, 0)
+			b.priority = 4
+			local bg = b:CreateChild("BorderImage")
+			bg.blendMode = magic.BLEND_ALPHA
+			bg.priority = 1
+			local t = b:CreateChild("Text")
+			t.priority = 5
+			t:SetTextEffect(magic.TE_SHADOW)
+			e = {b = b, bg = bg, t = t}
+			local function press(down)
+				if not E.editing then
+					buildat.send_packet("kit:ui", id .. (down and " 1 " or " 0 ") .. i)
+					if down then
+						log:info("kit: ui list " .. id .. " row " .. i .. " pressed")
+					end
+				end
+			end
+			magic.SubscribeToEvent(b, "Pressed", function() press(true) end)
+			magic.SubscribeToEvent(b, "Released", function() press(false) end)
+			r.rows[i] = e
+		end
+		if e then
+			e.b.visible = row ~= nil
+		end
+		if row then
+			local label = tostring(row[1] or ""):sub(1, 60)
+			local by = tostring(row[2] or "")
+			if by ~= "" then
+				label = label .. ", by " .. by:sub(1, 40)
+			end
+			local key = px .. "|" .. label
+			if e.key ~= key then
+				e.key, e.label = key, label
+				e.t:SetFont(font, px)
+				e.t.text = label
+				e.t:SetColor(white)
+				e.bg.color = color(r.ui.border, magic.Color(0.5, 0.5, 0.5, 0.6))
+			end
+			lw = math.max(lw, e.t.minWidth)
+			lh = math.max(lh, e.t.height)
+		end
+	end
+	return lw, math.max(lh + math.floor(0.7 * V) * 2, TOUCH and 36 or
+			math.floor(2.4 * V))
+end
+
 -- The layers at w x h, a bar's fill at f
 local function dress(r, w, h, V, f)
 	local p = r.parts
@@ -1279,6 +1338,22 @@ local function update()
 								tostring(row[3]) .. " " .. tostring(row[2])
 					end
 					r.text = text
+				elseif u.kind == "list" then
+					-- [KIT_SCENE_PACKAGES] the title, then a button a scene
+					fit_text(r, text, px, nil, nil, pw, pad)
+					local rows = type(value) == "table" and value or {}
+					local lw, rh = list_rows(r, id, rows, px, V)
+					local th = text ~= "" and r.t.height + pad or 0
+					local gap = math.floor(0.6 * V)
+					w = math.min(W > 0 and W or math.max(r.tw, lw + 4 * pad) + 2 * pad,
+							pw)
+					h = math.min(H > 0 and H or th + #rows * (rh + gap) - gap +
+							2 * pad, ph)
+					r.list_th, r.list_rh, r.list_n = th, rh, #rows
+					for i in ipairs(rows) do
+						text = text .. " | " .. r.rows[i].label
+					end
+					r.text = text
 				elseif u.kind == "input" then
 					-- The label at the left, the field the rest
 					w = math.min(W > 0 and W or 30 * V, pw)
@@ -1439,6 +1514,19 @@ local function update()
 			r.el:SetFixedSize(math.floor(w), math.floor(h))
 			if u.kind == "players" then
 				r.t:SetPosition(pad, pad)
+			elseif u.kind == "list" then
+				-- [KIT_SCENE_PACKAGES] the title centred, the rows as wide as
+				-- it under it (its width a layout's too)
+				r.t:SetPosition(math.max(1, math.floor((w - r.tw) / 2)), pad)
+				local y, rh = pad + (r.list_th or 0), r.list_rh or 0
+				for i = 1, r.list_n or 0 do
+					local e = r.rows[i]
+					rect(e.b, pad, y, w - 2 * pad, rh)
+					rect(e.bg, 0, 0, w - 2 * pad, rh)
+					e.t:SetPosition(math.max(1, math.floor((w - 2 * pad -
+							e.t.minWidth) / 2)), math.floor((rh - e.t.height) / 2))
+					y = y + rh + math.floor(0.6 * V)
+				end
 			elseif u.kind ~= "panel" then
 				r.t:SetPosition(math.max(1, math.floor((w - r.tw) / 2)),
 						math.floor((h - r.t.height) / 2))
@@ -1569,7 +1657,8 @@ local function update()
 			if play and r.on and r.kind == "panel" then
 				for _, o in pairs(U) do
 					if (o.kind == "button" or o.kind == "input" or
-							o.kind == "chat") and panel_of(o) == id then
+							o.kind == "chat" or o.kind == "list") and
+							panel_of(o) == id then
 						wants = true
 					end
 				end
@@ -2011,7 +2100,7 @@ local function hit(x, y)
 	local best, area = nil, nil
 	for id, r in pairs(U) do
 		if r.el and r.el.visible and (E.editing or r.kind == "button" or
-				r.kind == "input" or r.kind == "chat" or
+				r.kind == "input" or r.kind == "chat" or r.kind == "list" or
 				(r.kind == "panel" and r.has_bg)) then
 			local ok, a = pcall(function()
 				local p, s = r.el.screenPosition, r.el.size

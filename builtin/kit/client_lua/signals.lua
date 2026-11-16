@@ -302,7 +302,10 @@ local function linked_ids()
 	for _, e in ipairs(A.all_entities()) do
 		for _, c in ipairs(e.components or {}) do
 			for _, l in ipairs(c.links or {}) do
-				set[e.id], set[l.to] = true, true
+				set[e.id] = true
+				if l.to then
+					set[l.to] = true
+				end
 			end
 		end
 	end
@@ -420,22 +423,29 @@ function SG.rows()
 end
 
 -- ---- The links
+-- [KIT_SCENE_PACKAGES] Its target: an id, or "<name>" (to_name: that name in
+-- the player's scene)
+local function to_of(l)
+	return l.to or "\"" .. tostring(l.to_name) .. "\""
+end
+
 local function link_key(id, l)
-	return id .. "." .. l.output .. " " .. l.to .. "." .. l.input
+	return id .. "." .. l.output .. " " .. to_of(l) .. "." .. l.input
 end
 
 local function unlink(id, ci, l)
 	log:info("kit editor: signals: unlinked " .. id .. "." .. l.output ..
-			" -> " .. l.to .. "." .. l.input)
+			" -> " .. to_of(l) .. "." .. l.input)
 	send({op = "unlink", id = id, comp = ci - 1, output = l.output, to = l.to,
-		input = l.input})
+		to_name = l.to_name, input = l.input})
 end
 
 local function toggle_visible(id, ci, l)
-	log:info("kit editor: signals: " .. id .. "." .. l.output .. " -> " .. l.to ..
-			"." .. l.input .. (l.visible and " hidden" or " shown") .. " in play")
+	log:info("kit editor: signals: " .. id .. "." .. l.output .. " -> " ..
+			to_of(l) .. "." .. l.input .. (l.visible and " hidden" or " shown") ..
+			" in play")
 	send({op = "link_visible", id = id, comp = ci - 1, output = l.output,
-		to = l.to, input = l.input, visible = not l.visible})
+		to = l.to, to_name = l.to_name, input = l.input, visible = not l.visible})
 end
 
 -- A link's menu, under the signal: both of a row's signals open it, by either
@@ -582,6 +592,11 @@ local function link_table(body, rows, self_id)
 				own = goal == self_id, short = K.ENTITY .. tostring(goal)}
 			c.b, c.t = NT.name_item(r, "sg_links", e or {id = goal},
 					e and shown_name(e) or c.s, function()
+				-- ([KIT_SCENE_PACKAGES] a name in the player's scene: no one
+				-- entity to go to)
+				if type(goal) ~= "number" then
+					return
+				end
 				-- ([KIT_SIGNALS_PARENT_LEFTOVERS] Switch parent armed: picked)
 				if not NT.pick_parent(goal) then
 					M.select(goal)
@@ -711,10 +726,10 @@ local function outputs(body, e)
 	local order, targets = {}, {}
 	for ci, c in ipairs(e.components or {}) do
 		for _, l in ipairs(c.links or {}) do
-			local g = targets[l.to]
+			local g = targets[to_of(l)]
 			if not g then
-				g = {to = l.to, inputs = {}, by = {}}
-				targets[l.to] = g
+				g = {to = to_of(l), inputs = {}, by = {}}
+				targets[to_of(l)] = g
 				order[#order + 1] = g
 			end
 			local i = g.by[l.input]

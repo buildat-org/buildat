@@ -212,6 +212,9 @@ struct Link
 	ss_ input;
 	// [KIT] stage 4l: its signals are drawn for players too, in play
 	bool visible = false;
+	// [KIT_SCENE_PACKAGES] a target by its name (to 0): the entity of that
+	// name in the scene of the player who set the signal off ("to_name")
+	ss_ name;
 };
 
 struct Instance
@@ -255,6 +258,9 @@ struct Entity
 	double yaw = 0, pitch = 0, roll = 0;
 	sv_<Instance> comps;
 	uint32_t node = 0; // a positional one's node in its scene
+	// [KIT_SCENE_PACKAGES] a UI element on the root: its node in each scene
+	// (node 0), by the scene's name
+	std::map<ss_, uint32_t> nodes;
 	// [KIT_PREFAB_ROOT] authored: a placed prefab's root (kit/prefab_copy),
 	// {"of", "version", "voxels" (the prefab's voxels_version this copy last
 	// stamped, if it has any)}, its members its built children. Made in play
@@ -288,6 +294,9 @@ struct Type
 	// [CRAG_BEST_RESET] It reads the entities linking to it (linked_in =
 	// true: c.linked_in = {input = {id...}}), and reaches them
 	bool linked_in = false;
+	// [KIT_SCENE_PACKAGES] It reads the listed scenes (listed = true:
+	// c.listed, each scene with a kit/scene_info listing it)
+	bool listed = false;
 	// [KIT] stage 4d: each signal's value's type ("any" where the file
 	// gives none; "none": no value)
 	sm_<ss_, ss_> in_types, out_types;
@@ -1861,6 +1870,7 @@ struct Module: public interface::Module, public Interface
 				}
 			}
 		t.linked_in = t.decl.get("linked_in").is_true();
+		t.listed = t.decl.get("listed").is_true();
 		t.usable = t.decl.get("usable").is_true();
 		// [KIT_USE_ACCESS] Who may use it, the engine's on every usable type
 		// (on_use() asks it): all, owners (of the region holding it) or
@@ -2163,7 +2173,51 @@ struct Module: public interface::Module, public Interface
 	// its HUD element's alone, nothing drawn in the world
 	bool wants_node(const Entity &e)
 	{
-		return e.has_pos || (no_position(e) && scene_of(e));
+		return e.has_pos || (no_position(e) && scene_of(e)) || root_ui(e);
+	}
+
+	// [KIT_SCENE_PACKAGES] A UI element on the root (under the app, or under
+	// a panel there): every scene's, a node in each (Entity::nodes) drawn
+	// for the players there, pressed from any of them
+	bool root_ui(const Entity &e)
+	{
+		if(e.has_pos || !e.kind.empty() || !is_ui_element(e))
+			return false;
+		uint64_t id = e.parent;
+		for(int i = 0; i < 16 && id; i++){
+			if(id == 1)
+				return true;
+			auto it = m_entities.find(id);
+			if(it == m_entities.end() || !is_panel(it->second))
+				return false;
+			id = it->second.parent;
+		}
+		return false;
+	}
+
+	static bool has_node(const Entity &e)
+	{
+		return e.node || !e.nodes.empty();
+	}
+
+	// Each node an entity has (its scene's; a root UI element's in each)
+	void each_node(const Entity &e, const std::function<void(magic::Node*)> &f)
+	{
+		if(e.node){
+			main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
+				if(magic::Node *n = sc->GetNode(e.node))
+					f(n);
+			});
+		}
+		for(auto &sn : e.nodes){
+			auto s = m_host.scenes.find(sn.first);
+			if(s == m_host.scenes.end())
+				continue;
+			main_context::access(m_server, s->second, [&](magic::Scene *sc){
+				if(magic::Node *n = sc->GetNode(sn.second))
+					f(n);
+			});
+		}
 	}
 
 	main_context::SceneReference scene_of(const Entity &e, ss_ *name = nullptr)
@@ -4440,6 +4494,10 @@ struct Module: public interface::Module, public Interface
 				l.input = jstr(ls.at(m), "input");
 				l.visible = ls.at(m).get("visible").is_boolean() &&
 						ls.at(m).get("visible").as_boolean();
+				// [KIT_SCENE_PACKAGES] by name (MAX_NAME as an entity's)
+				l.name = jstr(ls.at(m), "to_name").substr(0, 64);
+				if(!l.name.empty())
+					l.to = 0;
 				if(!t.outputs.count(l.output) && lenient){
 					log_w(MODULE, "Entity %s: %s's link from %s dropped (no "
 							"such output in its file)", cs(itos(e.id)), cs(in.type),
@@ -4513,7 +4571,10 @@ struct Module: public interface::Module, public Interface
 			for(const Link &l : in.links){
 				json::Value lj = json::object();
 				lj.set("output", l.output);
-				lj.set("to", (int64_t)l.to);
+				if(l.name.empty())
+					lj.set("to", (int64_t)l.to);
+				else
+					lj.set("to_name", l.name);
 				lj.set("input", l.input);
 				if(l.visible)
 					lj.set("visible", true);
@@ -4576,7 +4637,7 @@ struct Module: public interface::Module, public Interface
 					if(m_from_dig_zone.count(l.to))
 						l.input = l.input == "on" ? "enable" : l.input == "off" ?
 								"disable" : l.input == "dig" ? "dig_out" : l.input;
-					if(!m_entities.count(l.to)){
+					if(l.name.empty() && !m_entities.count(l.to)){
 						why = "entity "+itos(e.id)+": a link to "+itos(l.to)+
 								", which is not there";
 						return false;
@@ -5855,18 +5916,17 @@ struct Module: public interface::Module, public Interface
 					continue;
 				n++;
 				add_log(e.id, name+" reloaded, "+by+"'s edit");
-				if(e.node && !wants_node(e)){
+				if(has_node(e) && !wants_node(e)){
 					remove_node(e);
 					e.node = 0;
-				} else if(wants_node(e) && !e.node){
+					e.nodes.clear();
+				} else if(wants_node(e) && !has_node(e)){
 					make_node(e);
-				} else if(e.node){
+				} else if(has_node(e)){
 					const ss_ show = show_of(e).stringify();
-					main_context::access(m_server, scene_of(e),
-							[&](magic::Scene *scene){
-						if(magic::Node *nd = scene->GetNode(e.node))
-							nd->SetVar(magic::StringHash("kit_show"),
-									magic::Variant(show.c_str()));
+					each_node(e, [&](magic::Node *nd){
+						nd->SetVar(magic::StringHash("kit_show"),
+								magic::Variant(show.c_str()));
 					});
 				}
 			}
@@ -7667,6 +7727,7 @@ struct Module: public interface::Module, public Interface
 			session_scene(name, ref);
 		else if(m_session.running)
 			watch_scene(name, ref, true);
+		root_ui_into(name, ref);
 		log_i(MODULE, "Scene %s made by the app", cs(name));
 		return true;
 	}
@@ -13136,7 +13197,7 @@ struct Module: public interface::Module, public Interface
 					shared.insert(k);
 			// [KIT] stage 4l: its links shown in play, [to id, ...]
 			for(const Link &l : in.links)
-				if(l.visible){
+				if(l.visible && l.name.empty()){
 					if(show.get("links").is_undefined())
 						show.set("links", json::array());
 					json::Value ls = show.get("links");
@@ -13176,9 +13237,50 @@ struct Module: public interface::Module, public Interface
 		return it != m_entities.end() && it->second.has_pos ? e.parent : 0;
 	}
 
+	// [KIT_SCENE_PACKAGES] A root UI element's node in one scene
+	void root_node_in(Entity &e, const ss_ &name,
+			main_context::SceneReference ref, const ss_ &show)
+	{
+		if(e.nodes.count(name))
+			return;
+		main_context::access(m_server, ref, [&](magic::Scene *scene){
+			magic::Node *n = scene->CreateChild(("kit:"+itos(e.id)).c_str());
+			n->SetVar(magic::StringHash("kit_id"), magic::Variant((int)e.id));
+			n->SetVar(magic::StringHash("kit_parent"), magic::Variant(0));
+			n->SetVar(magic::StringHash("kit_show"), magic::Variant(show.c_str()));
+			e.nodes[name] = n->GetID();
+		});
+	}
+
+	// [KIT_SCENE_PACKAGES] A scene made later (a new one, a session's): the
+	// root UI elements' nodes in it too (one of a scene of that name before
+	// it went no longer there)
+	void root_ui_into(const ss_ &name, main_context::SceneReference ref)
+	{
+		for(auto &p : m_entities){
+			Entity &e = p.second;
+			if(!root_ui(e))
+				continue;
+			e.nodes.erase(name);
+			root_node_in(e, name, ref, show_of(e).stringify());
+			for(size_t i = 0; i < e.comps.size(); i++)
+				for(const ss_ &k : m_types[e.comps[i].type].shared)
+					replicate_state(e, i, k);
+		}
+	}
+
 	void make_node(Entity &e)
 	{
 		const json::Value show = show_of(e);
+		if(root_ui(e)){
+			const ss_ s = show.stringify();
+			for(auto &sc : m_host.scenes)
+				root_node_in(e, sc.first, sc.second, s);
+			for(size_t i = 0; i < e.comps.size(); i++)
+				for(const ss_ &k : m_types[e.comps[i].type].shared)
+					replicate_state(e, i, k);
+			return;
+		}
 		main_context::SceneReference ref = scene_of(e);
 		double w[3];
 		Turn wq;
@@ -13204,7 +13306,7 @@ struct Module: public interface::Module, public Interface
 
 	void replicate_state(const Entity &e, size_t comp, const ss_ &key)
 	{
-		if(!e.node)
+		if(!has_node(e))
 			return;
 		if(m_types[e.comps[comp].type].per_player.count(key)){
 			for(auto &p : m_peers)
@@ -13212,11 +13314,9 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		const ss_ v = e.comps[comp].state.get(key).stringify();
-		main_context::access(m_server, scene_of(e), [&](magic::Scene *scene){
-			magic::Node *n = scene->GetNode(e.node);
-			if(n)
-				n->SetVar(magic::StringHash(("kit:"+key).c_str()),
-						magic::Variant(v.c_str()));
+		each_node(e, [&](magic::Node *n){
+			n->SetVar(magic::StringHash(("kit:"+key).c_str()),
+					magic::Variant(v.c_str()));
 		});
 		// [KIT_NESTING] the state that moves its look (kit/mover's out)
 		// moves what is under it
@@ -13235,11 +13335,12 @@ struct Module: public interface::Module, public Interface
 			json::Value *batch = nullptr)
 	{
 		auto pi = m_peers.find(peer);
-		if(pi == m_peers.end() || !pi->second.player || !e.node)
+		if(pi == m_peers.end() || !pi->second.player || !has_node(e))
 			return;
 		ss_ scene;
 		scene_of(e, &scene);
-		if(scene != pi->second.scene)
+		// ([KIT_SCENE_PACKAGES] a root UI element's in every scene)
+		if(e.nodes.empty() && scene != pi->second.scene)
 			return;
 		const json::Value &all = e.comps[comp].state.get(key);
 		json::Value v = all.is_object() ?
@@ -13371,6 +13472,80 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		m_queue.push_back(r);
+	}
+
+	// [KIT_SCENE_PACKAGES] The scenes a kit/scene_info (on the scene, as a
+	// kit/environment is) lists, by the scene's id: {{scene, title (the
+	// scene's name where it gives none), author}...}
+	json::Value listed_scenes()
+	{
+		json::Value r = json::array();
+		for(auto &x : m_entities){
+			const Entity &s = x.second;
+			if(s.kind != "scene" || !m_host.scenes.count(s.name))
+				continue;
+			for(auto &y : m_entities){
+				const Entity &i = y.second;
+				if(i.parent != s.id || i.has_pos)
+					continue;
+				const Instance *in = nullptr;
+				for(const Instance &c : i.comps)
+					if(c.type == "kit/scene_info")
+						in = &c;
+				if(!in || !in->params.get("listed").is_true())
+					continue;
+				json::Value j = json::object();
+				const ss_ title = jstr(in->params, "title");
+				j.set("scene", s.name);
+				j.set("title", title.empty() ? s.name : title);
+				j.set("author", jstr(in->params, "author"));
+				r.append(j);
+				break;
+			}
+		}
+		return r;
+	}
+
+	// [KIT_SCENE_PACKAGES] The scene a player or bot (a `by`) is in now ("":
+	// neither, or nowhere)
+	ss_ actor_scene(const ss_ &by)
+	{
+		ss_ scene;
+		const uint64_t pid = player_id(by);
+		const size_t peer = pid ? peer_of_player(pid) : 0;
+		if(peer)
+			return m_peers[peer].scene;
+		const uint64_t aid = actor_id(by);
+		auto it = aid ? m_entities.find(aid) : m_entities.end();
+		if(it != m_entities.end())
+			scene_of(it->second, &scene);
+		return scene;
+	}
+
+	// [KIT_SCENE_PACKAGES] A link's target by name: the entity of that name
+	// in the scene of the player (or bot) `by` is, the lowest id of several;
+	// 0 and why without one.
+	// simplified: a scan of the entities each such signal; an index of names
+	// by scene is the upgrade if a game sends them often
+	uint64_t named_in_scene(const ss_ &name, const ss_ &by, ss_ &why)
+	{
+		if(!actor_id(by)){
+			why = "no player set it off";
+			return 0;
+		}
+		const ss_ scene = actor_scene(by);
+		if(scene.empty()){
+			why = "the player is in no scene";
+			return 0;
+		}
+		for(auto &x : m_entities){
+			ss_ s;
+			if(x.second.name == name && x.second.kind.empty() &&
+					scene_of(x.second, &s) && s == scene)
+				return x.first;
+		}
+		why = "no \""+name+"\" in the scene "+scene;
+		return 0;
 	}
 
 	// An input to an entity: each of its instances that has it, the value
@@ -13723,6 +13898,15 @@ struct Module: public interface::Module, public Interface
 			scene_of(e, &scene);
 			if(!peer_of(player_of(r.by), scene))
 				o += ",player_away=true";
+			// [KIT_SCENE_PACKAGES] the scene they are in
+			o += ",player_scene=";
+			lua_lit(json::Value(actor_scene(r.by)), o);
+		}
+		// [KIT_SCENE_PACKAGES] the listed scenes (listed = true), by the
+		// scene's id: {{scene, title, author}...}
+		if(m_types[in.type].listed){
+			o += ",listed=";
+			lua_lit(listed_scenes(), o);
 		}
 		o += ",names=";
 		lua_lit(names, o);
@@ -13897,6 +14081,21 @@ struct Module: public interface::Module, public Interface
 							itos(l.to)+"."+l.input);
 					continue;
 				}
+				// [KIT_SCENE_PACKAGES] one by name: that entity in the scene
+				// of the player who set it off, else dropped
+				uint64_t to = l.to;
+				if(!l.name.empty()){
+					ss_ why;
+					to = named_in_scene(l.name, eby, why);
+					if(!to){
+						log_w(MODULE, "Entity %s's %s -> \"%s\".%s dropped: %s",
+								cs(itos(e.id)), cs(output), cs(l.name), cs(l.input),
+								cs(why));
+						add_log(e.id, output+" -> \""+l.name+"\"."+l.input+
+								" dropped: "+why);
+						continue;
+					}
+				}
 				if(l.visible){
 					ss_ scene;
 					scene_of(e, &scene);
@@ -13907,12 +14106,12 @@ struct Module: public interface::Module, public Interface
 						json::Value f = json::array();
 						f.append((int64_t)e.id);
 						f.append(output);
-						f.append((int64_t)l.to);
+						f.append((int64_t)to);
 						f.append(l.input);
 						pf->second.append(f);
 					}
 				}
-				const uint64_t from = e.id, to = l.to;
+				const uint64_t from = e.id;
 				const ss_ input = l.input;
 				deliver(to, input, value, eby, r.hops + 1, from, output);
 				// [KIT_SYMMETRY] from outside its group, to each copy too
@@ -14249,13 +14448,20 @@ struct Module: public interface::Module, public Interface
 
 	// [CRAG_BEST_RESET] The entities with a link to an entity, by the input
 	// it goes to
+	// ([KIT_SCENE_PACKAGES] and one by its name, which may reach it: a
+	// hub's lobby linked to each track's run)
 	sm_<ss_, std::set<uint64_t>> linked_in(uint64_t id)
 	{
 		sm_<ss_, std::set<uint64_t>> r;
+		auto self = m_entities.find(id);
+		ss_ name;
+		if(self != m_entities.end() && self->second.kind.empty() &&
+				scene_of(self->second))
+			name = self->second.name;
 		for(auto &p : m_entities)
 			for(const Instance &li : p.second.comps)
 				for(const Link &l : li.links)
-					if(l.to == id)
+					if(l.to == id || (!name.empty() && l.name == name))
 						r[l.input].insert(p.first);
 		return r;
 	}
@@ -14606,6 +14812,7 @@ struct Module: public interface::Module, public Interface
 				continue;
 			remove_node(it->second);
 			it->second.node = 0;
+			it->second.nodes.clear();
 			if(!it->second.made){
 				if(m_host.persistent || (origin == 'b' && always_keep())){
 					// A build kept as made (in a persistent world any
@@ -15314,11 +15521,15 @@ struct Module: public interface::Module, public Interface
 					cj.set("overrides", ov);
 				}
 				for(const Link &l : in.links){
-					if(!member(l.to))
+					if(l.name.empty() && !member(l.to))
 						continue;
 					json::Value lj = json::object();
 					lj.set("output", l.output);
-					lj.set("to", member(l.to));
+					// [KIT_SCENE_PACKAGES] one by name stays so
+					if(l.name.empty())
+						lj.set("to", member(l.to));
+					else
+						lj.set("to_name", l.name);
 					lj.set("input", l.input);
 					if(l.visible)
 						lj.set("visible", true);
@@ -15429,11 +15640,15 @@ struct Module: public interface::Module, public Interface
 				const json::Value &links = c.get("links");
 				for(unsigned l = 0; l < links.size(); l++){
 					const int64_t to = map(links.at(l).get("to"));
-					if(!to)
+					const ss_ to_name = jstr(links.at(l), "to_name");
+					if(!to && to_name.empty())
 						continue;
 					json::Value lj = json::object();
 					lj.set("output", jstr(links.at(l), "output"));
-					lj.set("to", to);
+					if(to_name.empty())
+						lj.set("to", to);
+					else
+						lj.set("to_name", to_name);
 					lj.set("input", jstr(links.at(l), "input"));
 					if(links.at(l).get("visible").is_boolean() &&
 							links.at(l).get("visible").as_boolean())
@@ -16986,12 +17201,16 @@ struct Module: public interface::Module, public Interface
 					for(unsigned m = 0; !there && m < ls.size(); m++)
 						there = jstr(ls.at(m), "output") == l.output &&
 								(uint64_t)json::jint(ls.at(m), "to", 0) == l.to &&
+								jstr(ls.at(m), "to_name") == l.name &&
 								jstr(ls.at(m), "input") == l.input;
 					if(there)
 						continue;
 					json::Value lj = json::object();
 					lj.set("output", l.output);
-					lj.set("to", (int64_t)l.to);
+					if(l.name.empty())
+						lj.set("to", (int64_t)l.to);
+					else
+						lj.set("to_name", l.name);
 					lj.set("input", l.input);
 					if(l.visible)
 						lj.set("visible", true);
@@ -17305,11 +17524,27 @@ struct Module: public interface::Module, public Interface
 			const json::Value &to_entity = json::Value())
 	{
 		ss_ scene;
-		scene_of(e, &scene);
+		// [KIT_SCENE_PACKAGES] from the root (a kit/lobby there): the player
+		// wherever they are
+		const bool root = !scene_of(e, &scene) && e.parent == 1;
+		if(root && !who.empty())
+			for(auto &p : m_peers)
+				if(p.second.name == who)
+					scene = p.second.scene;
 		const size_t peer = who.empty() ? 0 : peer_of(who, scene);
 		ss_ target = to_scene_v.is_string() ? to_scene_v.as_string() : scene;
 		double x = 0, y = 0, z = 0;
 		const Entity *te = nullptr;
+		// [KIT_SCENE_PACKAGES] a scene and no place: onto its spawner of
+		// players (its last, as a join's), else its World's spawn
+		bool onto_spawn = false;
+		double spawn_look = NAN;
+		if(to_scene_v.is_string() && !pos_ok(pos) && !to_entity.is_number() &&
+				m_host.scenes.count(target)){
+			if(!scene_spawner(target, x, y, z, spawn_look))
+				scene_spawn(target, x, y, z);
+			onto_spawn = true;
+		}
 		if(to_entity.is_number()){
 			auto it = m_entities.find((uint64_t)to_entity.as_number());
 			if(it != m_entities.end() && it->second.has_pos &&
@@ -17338,7 +17573,8 @@ struct Module: public interface::Module, public Interface
 				who.empty() ? "no player set it off" :
 				!peer ? "the player is not in its scene" :
 				to_entity.is_number() && !te ? "the target is no placed entity" :
-				!to_entity.is_number() && !pos_ok(pos) ? "not a position" :
+				!to_entity.is_number() && !pos_ok(pos) && !onto_spawn ?
+						"not a position" :
 				other && !m_host.scenes.count(target) ?
 						"no scene of that name" :
 				other && !m_host.make_scene ?
@@ -17350,7 +17586,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		const double look = yaw.is_number() && std::isfinite(yaw.as_number()) ?
-				norm_yaw(yaw.as_number()) : NAN;
+				norm_yaw(yaw.as_number()) : spawn_look;
 		const ss_ in = other ? " in the scene "+target : "";
 		if(std::isnan(look))
 			log_i(MODULE, "Entity %s's %s teleports %s to (%g, %g, %g)%s",
@@ -19795,7 +20031,9 @@ struct Module: public interface::Module, public Interface
 		}
 		if(objs.size())
 			c.set("objects", objs);
-		if(m_w->world_scene && m_w->wp.heightmap() && pe.scene == m_host.world_scene)
+		// (the peer's scene's own heightmap: [KIT_SCENE_PACKAGES] a track's
+		// scene has one too)
+		if(m_w->world_scene && m_w->wp.heightmap() && m_w == world_named(pe.scene))
 			heightmap::access(m_server, [&](heightmap::Interface *ih){
 				heightmap::Instance *map = ih->get_instance(m_w->world_scene);
 				if(!map)
@@ -27420,7 +27658,22 @@ struct Module: public interface::Module, public Interface
 	void on_ui_press_u(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
-		const ss_ d = packet.data.substr(0, 32);
+		ss_ d = packet.data.substr(0, 40);
+		// [KIT_SCENE_PACKAGES] a list's row: "<id> 1|0 <row>" (from 1)
+		int64_t row = 0;
+		{
+			const size_t s1 = d.find(' '), s2 = s1 == ss_::npos ? s1 :
+					d.find(' ', s1 + 1);
+			if(s2 != ss_::npos){
+				const ss_ rs = d.substr(s2 + 1);
+				if(rs.empty() || rs.size() > 4 ||
+						rs.find_first_not_of("0123456789") != ss_::npos)
+					row = -1;
+				else
+					row = std::atoi(rs.c_str());
+				d = d.substr(0, s2);
+			}
+		}
 		char *end = nullptr;
 		const uint64_t id = strtoull(d.c_str(), &end, 10);
 		const bool down = end && ss_(end) == " 1";
@@ -27434,8 +27687,8 @@ struct Module: public interface::Module, public Interface
 				log_i(MODULE, "A UI press of %s from peer %zu refused: %s",
 						cs(d), peer, cs(why));
 		};
-		if(!end || end == d.c_str() || (!down && ss_(end) != " 0"))
-			return refuse("not \"<id> 1|0\"");
+		if(!end || end == d.c_str() || (!down && ss_(end) != " 0") || row < 0)
+			return refuse("not \"<id> 1|0[ <row>]\"");
 		if(!down){
 			if(!pe.ui_held.erase(id) || !m_session.running)
 				return;
@@ -27452,20 +27705,26 @@ struct Module: public interface::Module, public Interface
 			return refuse("no such button");
 		ss_ scene;
 		scene_of(it->second, &scene);
-		if(scene != pe.scene)
+		// ([KIT_SCENE_PACKAGES] a root UI element's in every scene)
+		if(scene != pe.scene && !root_ui(it->second))
 			return refuse("in another scene");
 		size_t comp = 0;
-		bool button = false;
+		bool button = false, list = false;
 		for(size_t i = 0; i < it->second.comps.size() && !button; i++){
 			const Type &t = m_types[it->second.comps[i].type];
 			comp = i;
-			// [KIT_AIRSHIPS_2] a pause menu's item (kit/pause_menu_action)
+			// [KIT_AIRSHIPS_2] a pause menu's item (kit/pause_menu_action);
+			// [KIT_SCENE_PACKAGES] a list's row
 			const ss_ kind = jstr(t.decl.get("ui"), "kind");
-			button = (kind == "button" || kind == "menu") &&
+			list = kind == "list";
+			button = (kind == "button" || kind == "menu" || list) &&
 					t.handlers.count("on_ui");
 		}
 		if(!button)
 			return refuse("no such button");
+		if(list != (row > 0))
+			return refuse(list ? "a list's press names its row" :
+					"a row of no list");
 		if(down){
 			if(!ui_visible(id, pe.player))
 				return refuse("not on their screen");
@@ -27473,8 +27732,9 @@ struct Module: public interface::Module, public Interface
 				return refuse("too many held");
 			pe.ui_held.insert(id);
 		}
-		log_i(MODULE, "UI button %s %s by %s", cs(itos(id)),
-				down ? "pressed" : "released", cs(pe.name));
+		log_i(MODULE, "UI button %s %s by %s%s", cs(itos(id)),
+				down ? "pressed" : "released", cs(pe.name),
+				row ? cs(", row "+itos(row)) : "");
 		Run r;
 		r.entity = id;
 		r.comp = comp;
@@ -27482,6 +27742,8 @@ struct Module: public interface::Module, public Interface
 		r.by = by_of(pe.name);
 		r.args.append(down ? "pressed" : "released");
 		r.args.append(r.by);
+		if(row)
+			r.args.append(row);
 		queue_run(r);
 	}
 
@@ -27525,7 +27787,7 @@ struct Module: public interface::Module, public Interface
 			return refuse("no such input");
 		ss_ scene;
 		scene_of(it->second, &scene);
-		if(scene != pe.scene)
+		if(scene != pe.scene && !root_ui(it->second))
 			return refuse("in another scene");
 		size_t comp = 0;
 		bool input = false, own = false;
@@ -27697,6 +27959,17 @@ struct Module: public interface::Module, public Interface
 	bool stopped_spawn(const ss_ &who, const ss_ &scene, double &x, double &y,
 			double &z, double &look)
 	{
+		const Entity *at = scene_spawner(scene, x, y, z, look);
+		if(at)
+			log_i(MODULE, "%s joins Stopped: put on spawner %s at (%g, %g, %g)",
+					cs(who), cs(itos(at->id)), x, y, z);
+		return at;
+	}
+
+	// The scene's last spawner of players: its place and facing
+	const Entity* scene_spawner(const ss_ &scene, double &x, double &y,
+			double &z, double &look)
+	{
 		const Entity *at = nullptr;
 		for(auto &p : m_entities){
 			ss_ es;
@@ -27710,7 +27983,7 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		if(!at)
-			return false;
+			return nullptr;
 		double w[3];
 		Turn q;
 		world_of(*at, w, &q);
@@ -27718,9 +27991,7 @@ struct Module: public interface::Module, public Interface
 		y = w[1];
 		z = w[2];
 		look = norm_yaw(q.yaw());
-		log_i(MODULE, "%s joins Stopped: put on spawner %s at (%g, %g, %g)",
-				cs(who), cs(itos(at->id)), x, y, z);
-		return true;
+		return at;
 	}
 
 	void set_peer_u(size_t peer, const ss_ &name, const ss_ &scene,
@@ -28820,6 +29091,9 @@ struct Module: public interface::Module, public Interface
 						o.set("comp", (int64_t)c);
 						o.set("output", l.output);
 						o.set("to", (int64_t)l.to);
+						// [KIT_SCENE_PACKAGES] by name, in the player's scene
+						if(!l.name.empty())
+							o.set("to_name", l.name);
 						o.set("input", l.input);
 						o.set("sends", t != m_types.end() &&
 								t->second.out_types.count(l.output) ?
@@ -30286,7 +30560,10 @@ struct Module: public interface::Module, public Interface
 		const bool back = !at_play && put_back(peer);
 		for(auto &p : m_entities){
 			ss_ es;
-			if(!scene_of(p.second, &es) || es != scene)
+			// ([KIT_SCENE_PACKAGES] and the root's: a kit/lobby there)
+			const bool root = p.second.parent == 1 && !p.second.has_pos &&
+					p.second.kind.empty();
+			if(!root && (!scene_of(p.second, &es) || es != scene))
 				continue;
 			for(size_t i = 0; i < p.second.comps.size(); i++){
 				const Type &t = m_types[p.second.comps[i].type];
@@ -30488,6 +30765,7 @@ struct Module: public interface::Module, public Interface
 			Entity &e = m_entities[r.first];
 			e = r.second.e;
 			e.node = 0;
+			e.nodes.clear();
 		}
 		// [KIT_NESTING] once all are back: one under another is placed in
 		// its frame
@@ -31844,7 +32122,8 @@ struct Module: public interface::Module, public Interface
 			why = "parent: entity "+itos(e->id)+" has no position";
 			return false;
 		}
-		if(scene != p.scene){
+		// ([KIT_SCENE_PACKAGES] a root panel, every scene's, from any)
+		if(scene != p.scene && !(panel && root_ui(*e))){
 			why = "parent: entity "+itos(e->id)+" is in another scene";
 			return false;
 		}
@@ -32231,8 +32510,11 @@ struct Module: public interface::Module, public Interface
 			const size_t ci = in - &e->comps[0];
 			Entity copy = *e;
 			bool found = false;
+			// ([KIT_SCENE_PACKAGES] one by name: its "to_name")
+			const ss_ to_name = jstr(j, "to_name");
 			for(Link &l : copy.comps[ci].links)
-				if(l.output == output && l.to == to && l.input == input){
+				if(l.output == output && l.to == to && l.name == to_name &&
+						l.input == input){
 					l.visible = vis;
 					found = true;
 				}
@@ -32257,20 +32539,44 @@ struct Module: public interface::Module, public Interface
 				why = in->type+" has no output \""+l.output.substr(0, 64)+"\"";
 				return false;
 			}
-			Entity *to = entity_arg(j, "to", why);
-			if(!to)
-				return false;
-			l.to = to->id;
+			// [KIT_SCENE_PACKAGES] "to_name": by name, resolved at each signal
+			// in the scene of the player who set it off; refused unless an
+			// entity of that name in some scene takes the input
+			l.name = jstr(j, "to_name");
+			sv_<const Entity*> targets;
+			if(!l.name.empty()){
+				if(l.name.size() > 64){
+					why = "to_name: a name of 64 bytes at most";
+					return false;
+				}
+				for(auto &x : m_entities){
+					ss_ s;
+					if(x.second.name == l.name && x.second.kind.empty() &&
+							scene_of(x.second, &s))
+						targets.push_back(&x.second);
+				}
+				if(targets.empty() && op == "link"){
+					why = "no entity in a scene is named \""+l.name+"\"";
+					return false;
+				}
+			} else {
+				Entity *to = entity_arg(j, "to", why);
+				if(!to)
+					return false;
+				l.to = to->id;
+				targets.push_back(to);
+			}
 			bool has_input = false;
 			ss_ in_type;
-			for(const Instance &ti : to->comps)
-				if(m_types[ti.type].inputs.count(l.input) && !has_input){
-					has_input = true;
-					in_type = m_types[ti.type].in_types.at(l.input);
-				}
-			if(!has_input){
-				why = "entity "+itos(to->id)+" has no input \""+
-						l.input.substr(0, 64)+"\"";
+			for(const Entity *te : targets)
+				for(const Instance &ti : te->comps)
+					if(m_types[ti.type].inputs.count(l.input) && !has_input){
+						has_input = true;
+						in_type = m_types[ti.type].in_types.at(l.input);
+					}
+			if(!has_input && op == "link"){
+				why = (l.name.empty() ? "entity "+itos(l.to) : "no entity named \""+
+						l.name+"\"")+" has no input \""+l.input.substr(0, 64)+"\"";
 				return false;
 			}
 			// Typed signals ([KIT] stage 4d): the output's values the input's
@@ -32281,7 +32587,8 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			auto same = [&](const Link &o){
-				return o.output == l.output && o.to == l.to && o.input == l.input;
+				return o.output == l.output && o.to == l.to && o.name == l.name &&
+						o.input == l.input;
 			};
 			const bool there = std::any_of(in->links.begin(), in->links.end(),
 					same);
@@ -32307,7 +32614,8 @@ struct Module: public interface::Module, public Interface
 						links.end());
 			}
 			change.push_back(std::make_pair(e->id, entity_json(copy)));
-			what = op+"ed "+itos(e->id)+"."+l.output+" -> "+itos(l.to)+"."+
+			what = op+"ed "+itos(e->id)+"."+l.output+" -> "+(l.name.empty() ?
+					itos(l.to) : "\""+l.name+"\" in the player's scene")+"."+
 					l.input;
 			return true;
 		}
@@ -32566,14 +32874,13 @@ struct Module: public interface::Module, public Interface
 		return out;
 	}
 
+	// (the caller sets node 0 and clears nodes for an entity it keeps)
 	void remove_node(const Entity &e)
 	{
-		if(!e.node)
+		if(!has_node(e))
 			return;
-		main_context::access(m_server, scene_of(e), [&](magic::Scene *scene){
-			magic::Node *n = scene->GetNode(e.node);
-			if(n)
-				n->Remove();
+		each_node(e, [&](magic::Node *n){
+			n->Remove();
 		});
 	}
 
@@ -32630,7 +32937,8 @@ struct Module: public interface::Module, public Interface
 		for(Instance &in : n.comps)
 			in.links.erase(std::remove_if(in.links.begin(), in.links.end(),
 					[&](const Link &l){
-				return !m_entities.count(l.to) && !m_pending_ids.count(l.to);
+				return l.name.empty() && !m_entities.count(l.to) &&
+						!m_pending_ids.count(l.to);
 			}), in.links.end());
 		const bool had = it != m_entities.end();
 		// An edit that puts one play moved elsewhere: that place is its
@@ -32683,9 +32991,15 @@ struct Module: public interface::Module, public Interface
 		}
 		if(had){
 			n.node = it->second.node;
-			if(n.node && (!wants_node(n) || scene_of(n) != scene_of(it->second))){
+			n.nodes = it->second.nodes;
+			// ([KIT_SCENE_PACKAGES] a root UI element's in each scene)
+			const bool ru = root_ui(n);
+			if((n.node && (!wants_node(n) || ru ||
+					scene_of(n) != scene_of(it->second))) ||
+					(!n.nodes.empty() && !ru)){
 				remove_node(it->second);
 				n.node = 0;
+				n.nodes.clear();
 			}
 		}
 		m_entities[id] = n;
@@ -32705,11 +33019,13 @@ struct Module: public interface::Module, public Interface
 			r.comp = i;
 			r.handler = "on_start";
 			queue_run(r);
+			// ([KIT_SCENE_PACKAGES] one on the root: every scene's players)
+			const bool root = e.parent == 1 && !e.has_pos && e.kind.empty();
 			if(!m_types[e.comps[i].type].handlers.count("on_join") ||
-					scene.empty())
+					(scene.empty() && !root))
 				continue;
 			for(auto &p : m_peers){
-				if(p.second.scene != scene || !p.second.player)
+				if((!root && p.second.scene != scene) || !p.second.player)
 					continue;
 				r.handler = "on_join";
 				r.by = "player:"+itos(p.second.player);
@@ -32728,18 +33044,15 @@ struct Module: public interface::Module, public Interface
 			r.args.append(c.second);
 			queue_run(r);
 		}
-		if(wants_node(e) && !e.node){
+		if(wants_node(e) && !has_node(e)){
 			make_node(e);
-		} else if(e.node){
-			main_context::access(m_server, scene_of(e), [&](magic::Scene *scene){
-				magic::Node *nd = scene->GetNode(e.node);
-				if(nd){
-					// A parameter its look is drawn from may have changed
-					nd->SetVar(magic::StringHash("kit_show"), magic::Variant(
-							show_of(e).stringify().c_str()));
-					nd->SetVar(magic::StringHash("kit_parent"),
-							magic::Variant((int)parent_node_id(e)));
-				}
+		} else if(has_node(e)){
+			// A parameter its look is drawn from may have changed
+			const ss_ show = show_of(e).stringify();
+			const int pn = (int)parent_node_id(e);
+			each_node(e, [&](magic::Node *nd){
+				nd->SetVar(magic::StringHash("kit_show"), magic::Variant(show.c_str()));
+				nd->SetVar(magic::StringHash("kit_parent"), magic::Variant(pn));
 			});
 		}
 		// [KIT_NESTING] it and what is under it where it is now

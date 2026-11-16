@@ -3362,7 +3362,9 @@ function M.editor(options)
 				local links = {}
 				for _, c in ipairs(e.components or {}) do
 					for _, l in ipairs(c.links or {}) do
-						links[#links + 1] = l.output .. "->" .. l.to .. "." ..
+						-- ([KIT_SCENE_PACKAGES] or "<name>", by name)
+						links[#links + 1] = l.output .. "->" .. tostring(l.to or
+								"\"" .. tostring(l.to_name) .. "\"") .. "." ..
 								l.input
 					end
 				end
