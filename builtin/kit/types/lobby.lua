@@ -53,7 +53,7 @@ return {
 		what = "Each player's lobby, run and result, and the screens for them.",
 		keywords = "menu start round result card",
 		inputs = {
-			play = "The player who set it off starts a run (from the lobby or a result).",
+			play = "The player who set it off starts a run (from the lobby or a result). Value: a scene to go to first.",
 			again = "The player who set it off starts a run again (from a result, or over in a run).",
 			lobby = "The player who set it off goes back to the lobby.",
 			over = "The player's run is over: their result.",
