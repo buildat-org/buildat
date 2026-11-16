@@ -1,14 +1,15 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~4 min (2026-11-09)
+# cost: ~1 min (2026-11-16)
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/bot.lua builtin/kit/types/bot.client.lua builtin/kit/types/goal.lua builtin/kit/types/pickup.lua builtin/kit/types/placer.lua builtin/kit/types/explosive.lua builtin/kit/types/*.item.json builtin/kit/types/bomb.prefab.json builtin/kit/client_lua/ui.lua builtin/kit/client_lua/hands.lua apps/workbench/templates/ctf/**
 # [KIT_GOAL_PRIORITIES] (kit_plan 4z7c) goals as a priority list: capture the
 # flag with kitboss and three bots, two against two, on a fresh Workbench
 # project from the template, set by edit ops (prep 8 s: the bots arm first; a point every
 # 8 s, 4 to win (a round long enough for a bomb), 4 a round, the bomb goal's
 # pick the nearest opponent; the lobby's spawn moved onto the pad; kitboss's
-# starting kit a sword and a bomb):
+# starting kit a sword and a bomb; the placer's bomb kitboss/dud, which
+# reaches nobody: a bot it hurt fought back, and its hits were no goal's):
 #   1. kitboss is ready on the pad, three bots added: a round for 4.
 #   2. The bots: one picks up a weapon (find a weapon, priority 5, while it
 #      holds none), one uses a bomb at the other team's base (place_item
@@ -111,6 +112,18 @@ set_ 7 players 4
 # to their base is stabbed on the way as often as not
 set_ 66 pick '"nearest_opponent"'
 set_ 42 items '"kit/pickaxe, kit/sword, kit/bomb"'
+# [KIT_GOAL_PRIORITIES_FLAKE] The bomb's blast off the bots: one it hurt
+# fought back (goal -1 for 30 s), so its sword hits were no goal 67's. The
+# placer puts kitboss/dud, kit/bomb's explosive with no kill or hurt reach
+# (75, saved and deleted)
+ed '{"op": "place", "type": "kit/explosive", "pos": [0, 1, 0]}'
+set_ 75 fuse 3
+set_ 75 radius 2
+set_ 75 kill 0
+set_ 75 hurt 0
+ed '{"op": "save_prefab", "ids": [75], "name": "dud"}'
+ed '{"op": "delete", "id": 75}'
+set_ 68 prefab '"kitboss/dud"'
 ed '{"op": "move", "ids": [4], "by": [0, 0, 11]}'
 srv_mark
 step 15 "the server is Running" 'event kit_edit {"op": "play"}'
@@ -123,18 +136,22 @@ for i in 1 2 3; do
 	add_bot 61
 done
 srv_mark
+BM=$(mark "$t/boss.log")
 srv 90 "kit/arena 7: countdown over: a round for 4 players"
-# 3. His lines as he holds each (the round's kit given)
+# 3. His lines as he holds each (the round's kit given). A hold of an item
+# his client has not been told of yet is dropped (and its line never came
+# under load): the items first
 srv 30 "kitboss has .*kit/bomb"
-cmd "event kit_hold kit/pickaxe"
-await "$t/boss.log" 0 30 'kit: ui 65 text at .* shown: "Find a weapon'
-step 10 'kit: ui 67 text at .* shown: "Stab an opponent' "event kit_hold kit/sword"
+await "$t/boss.log" "$BM" 30 "kit: items: .*kit/sword"
+step 30 "kit: holds kit/pickaxe" "event kit_hold kit/pickaxe"
+await "$t/boss.log" "$BM" 30 'kit: ui 65 text at .* shown: "Find a weapon'
+step 30 'kit: ui 67 text at .* shown: "Stab an opponent' "event kit_hold kit/sword"
 cmd "frames 10" "screenshot $t/sword.png"
-step 10 'kit: ui 66 text at .* shown: "Bomb their base' "event kit_hold kit/bomb"
-step 10 'kit: ui 65 text at .* shown: "Find a weapon' "event kit_hold kit/pickaxe"
+step 30 'kit: ui 66 text at .* shown: "Bomb their base' "event kit_hold kit/bomb"
+step 30 'kit: ui 65 text at .* shown: "Find a weapon' "event kit_hold kit/pickaxe"
 # 2. The bots
 srv 120 "kit/pickup [0-9]+: Bot [0-9]+ takes [0-9]+ kit/(sword|bomb)"
-srv 180 "kit/placer 68: Bot [0-9]+ places kit/bomb"
+srv 180 "kit/placer 68: Bot [0-9]+ places kitboss/dud"
 srv 30 "kit/explosive [0-9]+: explodes"
 srv 180 "kit/bot [0-9]+: hits [0-9]+ with kit/sword"
 srv 240 "kit/flag 28: scores 1 for"
@@ -153,6 +170,8 @@ if not re.search(r"kit/bot \d+: uses kit/bomb for goal 66", srv):
 	sys.exit("no bot used a bomb for goal 66")
 if not re.search(r"kit/bot \d+: hits \d+ with kit/sword for goal 67", srv):
 	sys.exit("no bot hit for goal 67")
+if re.search(r"'s blast hits ", srv):
+	sys.exit("a blast hit someone: " + re.search(r".*'s blast hits .*", srv)[0])
 # kitboss's lines: the flag's on top of each of the others in the window
 y = {}
 for m in re.finditer(r"kit: ui (5[67]|6[567]) text at (\d+),(\d+) .* (shown|hidden)", cl):

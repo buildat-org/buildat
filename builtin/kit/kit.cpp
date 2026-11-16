@@ -24709,15 +24709,22 @@ struct Module: public interface::Module, public Interface
 	// (sessions are not saved)
 	std::map<uint64_t, uint64_t> m_bots_away; // the default's bot -> session
 
+	// A bot bots_into() takes: placed in the default, not away already
+	bool bot_free(uint64_t bid)
+	{
+		auto bi = m_entities.find(bid);
+		return bi != m_entities.end() && bi->second.has_pos &&
+				is_bot(bi->second) && !m_bots_away.count(bid);
+	}
+
 	void bots_into(const sv_<uint64_t> &bots, uint64_t to)
 	{
 		if(m_active || !to || !m_sessions.count(to))
 			return;
 		for(uint64_t bid : bots){
-			auto bi = m_entities.find(bid);
-			if(bi == m_entities.end() || !bi->second.has_pos ||
-					!is_bot(bi->second) || m_bots_away.count(bid))
+			if(!bot_free(bid))
 				continue;
+			auto bi = m_entities.find(bid);
 			Entity copy = bi->second;
 			ss_ scene;
 			scene_of(copy, &scene);
@@ -30021,7 +30028,8 @@ struct Module: public interface::Module, public Interface
 				"entity's id, parent, name, position (x, y, z; y up, a cell 1) "
 				"and components (type, params, links to other entities' "
 				"inputs); whether the round is Running, each component's state "
-				"then; how many of your edits there are to undo.",
+				"then; how many of your edits there are to undo; the game it "
+				"is (\"<author>/<name>\", list_aitta's filter).",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"list_types", "=types", "The types an entity is placed of: each "
 				"one's name, group and what it is. With type: its declaration, "
@@ -30888,6 +30896,9 @@ struct Module: public interface::Module, public Interface
 				scenes.append(e.second.name);
 		s.set("scenes", scenes);
 		s.set("can_make_scenes", (bool)m_host.make_scene);
+		// [WB_RENAME_LEFTOVERS] list_aitta's game filter, as kit:edit_state's
+		if(!m_host.project.empty())
+			s.set("game", game_of(author_of(p)));
 		s.set("undo", (int64_t)m_undo[p.name].size());
 		json::Value es = authored_json(true).get("entities");
 		for(unsigned i = 0; m_session.running && i < es.size(); i++){
@@ -35287,7 +35298,7 @@ struct Module: public interface::Module, public Interface
 		int64_t empty_since = 0;
 		// The sections its players and entities wrote ("<scene>:x,y,z")
 		std::set<ss_> written;
-		// [KIT_LATE_JOIN] The players its start took in
+		// [KIT_LATE_JOIN] The players its start took in, bots too
 		size_t start_players = 0;
 		// [KIT_GUIDE_BOTS_2] The bots' copies made in it (one keeps it used)
 		size_t bots = 0;
@@ -35981,10 +35992,13 @@ struct Module: public interface::Module, public Interface
 					continue;
 				}
 				add_log(o.maker, "session "+itos(id)+" started");
-				// (counted first: a move runs its join)
+				// (counted first: a move runs its join); the bots it takes
+				// too, or each one's join is late (a tie at random)
 				size_t taken = 0;
 				for(size_t peer : o.peers)
 					taken += !session_of_peer(peer);
+				for(uint64_t b : o.bots)
+					taken += bot_free(b);
 				m_sessions[id]->start_players = taken;
 				// [KIT_MAP_ROTATION] the map asked for, else the maker's `map`
 				// [KIT_CTF]; of the others never the arena's own scene

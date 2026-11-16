@@ -9,7 +9,9 @@
 #      the dialog, the pointer free; aim, reaction and speed stepped
 #      (50 %, 0.8 s, 70 %) and Add: the bot has them. A second one's dialog
 #      starts at them; Cancel takes that bot away. A third, Add: the two
-#      walk onto the pad, and in the round each one's copy has its knobs.
+#      walk onto the pad, and in the round each one's copy has its knobs;
+#      [KIT_FIXES_27_LEFTOVERS] the round's start counts them, so neither
+#      joins late, and they are in the two teams.
 #   2. [KIT_AIRSHIPS_BOTS] Airships: two bots from the pause menu (the
 #      dialog's defaults): one takes the bots' airship's gun (the balloons'
 #      goal, priority 10), the other its helm (priority 5); the gunner fires
@@ -182,6 +184,7 @@ srv 90 "kit/arena 7: countdown over: a round for 2 players"
 srv 30 "Bot $B1 into session [0-9]+ as Bot"
 srv 30 "Bot $B3 into session [0-9]+ as Bot"
 srv 10 "knobs: aim 50%, reaction 0.8 s, speed 70%"
+srv_n 30 2 "kit/team [0-9]+: Bot [0-9]+ joins team"
 close
 # 2. Airships: a crew of two bots on the bots' airship
 open air "Airships"
@@ -294,6 +297,15 @@ if sorted(into) != sorted([b1, b3]):
 for b, c in into.items():
 	if not re.search(rf"kit/bot {c}: knobs: {K}", srv):
 		sys.exit(f"Bot {b}'s copy {c} has not its knobs")
+# [KIT_FIXES_27_LEFTOVERS] The round's start counts the bots it takes: no
+# join of theirs is late (a late one's tie is at random), and the two are
+# split between the teams
+cteams = dict(re.findall(r"kit/team \d+: Bot (\d+) joins team (Red|Blue)", srv))
+if sorted(cteams.get(c, "") for c in into.values()) != ["Blue", "Red"]:
+	sys.exit(f"the round's bots in the teams {cteams} (copies {into})")
+late = re.findall(r"kit/arena 7: (.*) joins late", srv)
+if late:
+	sys.exit(f"joined late in a round started with them: {late}")
 # [KIT_AIRSHIPS_BOTS_2] on foot: B1 hit by kitboss's sword hits him back by hand
 foot = re.findall(rf"kit/bot {b1}: (hits|misses) (\d+) with a hand for goal -1", srv)
 if not foot or ("hits", foot[0][1]) not in foot:
@@ -345,7 +357,7 @@ if moved > 35:
 helms = re.findall(r"kit/bot (\d+): takes the helm at \d+ for goal 53", r)
 if not helms:
 	sys.exit("no bot took a helm for the crew goal")
-print(f"ctf: bots {b1} {b3} into the round as {into[b1]} {into[b3]} with {K}, {b2} cancelled; "
+print(f"ctf: bots {b1} {b3} into the round as {into[b1]} {into[b3]} with {K}, teams {cteams}, {b2} cancelled; "
 	f"airships: gunner {gun} {shots} shots, hits {hits}; helmsman {helm} flew out; "
 	f"fighting back: {back[:4]}; on foot: {foot[:3]}; round: teams {team}, ships {ship}, "
 	f"{shooter} hit {rhits[0][1]} from |x| {moved}, helms by {helms}")

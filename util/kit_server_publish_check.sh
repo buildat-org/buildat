@@ -20,7 +20,8 @@
 #      Publish this scene..., As this server (crags), the form (form.png),
 #      its licence CC-BY-4.0: crags/loop 1.0.0 on the Aitta.
 #   4. MCP with kitboss's tokens: list_aitta lists it (its
-#      buildat_version); publish_scene the next (1.0.1, unasked); an
+#      buildat_version), also with get_state's game as its filter;
+#      publish_scene the next (1.0.1, unasked); an
 #      unlisted Aitta refused for both a publish and an install; a template's
 #      install refused to the Builder token, publish_log too; the Admin
 #      token's publish_log: kitbob's 1.0.0 and kitboss's 1.0.1; each release
@@ -235,6 +236,10 @@ elif phase == "pub":
     assert len(it) == 1 and it[0]["version"] == "1.0.0" and it[0]["title"] == "The Loop" \
         and it[0]["buildat_version"] and it[0]["aitta"] == aitta, l
     key = it[0]["key"]
+    # [WB_RENAME_LEFTOVERS] its game filter as get_state says the game
+    g = json.loads(call("get_state"))["game"]
+    l = json.loads(call("list_aitta", {"kind": "scene", "game": g}))
+    assert [i["key"] for i in l["items"]] == [key], (g, l)
     t = call("publish_scene", {"scene": "loop", "name": "loop", "license": "MIT",
         "aitta": aitta, "description": "The Loop again, by the agent"})
     assert t.startswith("Published crags/loop 1.0.1 as the server on " + aitta), t
