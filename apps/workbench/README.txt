@@ -80,6 +80,32 @@ so that a page whose name was rebound to 127.0.0.1 gets nothing: a hosted
 server sets it, the proxy passing the Host, X-Forwarded-For and
 X-Forwarded-Proto.
 
+An agent sees what it built with get_view ([KIT_AGENT_VISUALS] in
+builtin/kit/kit.cpp): a client of its own account connected to the server
+draws a camera of its own (a pose, or that client's view) off-screen and
+sends a PNG, which the agent gets as MCP image content; the client's
+window is left as it is and shows "Your agent took a picture". The scene
+drawn is the one that client is in, as far as it has loaded it. No other
+account's client is asked. With no client of the account there, the agent
+runs one itself: a client logs in with an agent token (the token's
+account; a builder token only for an account that is no Host and no
+Steward, an admin token for any; never where that account's own client
+is) from -T <token> or BUILDAT_AGENT_TOKEN, neither of which it logs or
+saves, and on Linux with no display it runs under Xvfb with Mesa's
+software GL:
+
+    # Debian/Ubuntu: apt-get install xvfb libgl1-mesa-dri
+    # from https://github.com/celeron55/buildat/releases, the
+    # linux-x86_64-portable archive, unpacked:
+    cd buildat-*-linux-x86_64-portable
+    BUILDAT_AGENT_TOKEN=bat_... xvfb-run -a -s "-screen 0 1280x800x24" \
+        bin/buildat -s https://wb.example.org -w 640x480 -o sound_mute=1
+
+The token is a bat_ one from My account, Connect an agent...; a sign-in's
+(OAuth) stays inside the tool that made it. The client says "Joined as
+<name>" in its log; get_view then draws from it. Revoking the token kicks
+the client (util/kit_get_view_check.sh).
+
 Licenses of textures and other media:
 ------------------------------------
 main/client_data/*.png, launcher/icon.png

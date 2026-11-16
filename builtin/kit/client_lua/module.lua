@@ -2185,6 +2185,109 @@ magic.SubscribeToEvent("command_seq:kit_obuild", function(_, data)
 	buildat.send_packet("kit:obuild", data:GetString("Param"))
 end)
 
+-- ---- [KIT_AGENT_VISUALS] **An agent's picture** (Kit's get_view): the
+-- server asks a client of the agent's own account, "kit:view" {id, w, h,
+-- pos, look_at or yaw and pitch}, to draw a camera of its own -- at pos,
+-- or where the view the window draws is (its fov, its orthographic) --
+-- into a w x h texture of its own (a RenderSurface: the window's view,
+-- camera and render path are left as they are), read back as a PNG and
+-- sent "kit:view" "<id>\n<PNG>", or "<id>\n<why not>". The scene is this
+-- client's, as far as it has loaded it. The user is told by a notice.
+local VIEW = {}
+buildat.sub_packet("kit:view", function(data)
+	local q = network.parse_json(data)
+	if type(q) ~= "table" or type(q.id) ~= "string" or #q.id > 64 then
+		return
+	end
+	local function answer(why)
+		log:info("kit: no picture for the agent: " .. why)
+		buildat.send_packet("kit:view", q.id .. "\n" .. why)
+	end
+	local w, h = tonumber(q.w) or 0, tonumber(q.h) or 0
+	if w < 16 or h < 16 or w > 1024 or h > 768 then
+		return answer("a size 16x16 to 1024x768")
+	end
+	if VIEW.job then
+		return answer("a picture is being taken")
+	end
+	local main = magic.renderer:GetViewport(0)
+	local from, cam0
+	if O.camera then
+		if M.view_camera then
+			from, cam0 = M.view_camera()
+		else
+			from, cam0 = O.camera, O.camera:GetComponent("Camera")
+		end
+	end
+	local scene = O.scene or replicate.main_scene
+	if not (main and from and cam0 and scene) then
+		return answer("this client draws no view")
+	end
+	local node = scene:CreateChild("kit: agent's camera")
+	local cam = node:CreateComponent("Camera")
+	local play = O.camera and O.camera:GetComponent("Camera") or cam0
+	local function v(t)
+		return type(t) == "table" and tonumber(t[1]) and tonumber(t[2]) and
+				tonumber(t[3]) and magic.Vector3(t[1], t[2], t[3])
+	end
+	local pos = v(q.pos)
+	if pos then
+		-- A pose: the play camera's lens
+		cam.fov, cam.nearClip, cam.farClip = play.fov, play.nearClip, play.farClip
+		node.position = pos
+		if v(q.look_at) then
+			node:LookAt(v(q.look_at))
+		else
+			node.rotation = magic.Quaternion(tonumber(q.pitch) or 0,
+					tonumber(q.yaw) or 0, 0)
+		end
+	else
+		cam.fov, cam.nearClip, cam.farClip = cam0.fov, cam0.nearClip, cam0.farClip
+		cam.orthographic, cam.orthoSize = cam0.orthographic, cam0.orthoSize
+		cam.zoom = cam0.zoom
+		-- simplified: its direction, not its roll (no camera here rolls)
+		node.position = from.worldPosition
+		node.direction = from.worldDirection
+	end
+	local tex = magic.Texture2D:new()
+	tex:SetNumLevels(1)
+	if not tex:SetSize(w, h, magic.Graphics.GetRGBAFormat(),
+			magic.TEXTURE_RENDERTARGET) then
+		node:Remove()
+		return answer("no render target of " .. w .. "x" .. h)
+	end
+	local vp = magic.Viewport:new(scene, cam)
+	vp.renderPath = main.renderPath
+	local surface = tex:GetRenderSurface()
+	surface:SetViewport(0, vp)
+	surface.updateMode = magic.SURFACE_MANUALUPDATE
+	surface:QueueUpdate()
+	VIEW.job = {id = q.id, node = node, tex = tex, vp = vp, frames = 0}
+	log:info(string.format("kit: Your agent took a picture (%dx%d, %s)", w, h,
+			pos and "its pose" or "this view"))
+	ui_utils.show_notification("Your agent took a picture", 3)
+end)
+-- Read the frame after it was drawn (the frame it was queued in draws it)
+magic.SubscribeToEvent("Update", function()
+	local j = VIEW.job
+	if not j then
+		return
+	end
+	j.frames = j.frames + 1
+	if j.frames < 2 then
+		return
+	end
+	VIEW.job = nil
+	local png, why = magic.texture_png(j.tex)
+	j.node:Remove()
+	if not png then
+		log:info("kit: no picture for the agent: " .. tostring(why))
+		return buildat.send_packet("kit:view", j.id .. "\n" .. tostring(why))
+	end
+	log:info("kit: the picture sent, " .. #png .. " bytes")
+	buildat.send_packet("kit:view", j.id .. "\n" .. png)
+end)
+
 -- ---- [KIT_ENVIRONMENT] The environment, the lighting, the sky and the
 -- weather: environment.lua
 do

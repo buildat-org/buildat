@@ -1550,6 +1550,8 @@ struct Module: public interface::Module, public Interface
 			});
 		sub(m_server, "network:packet_received/kit:texture",
 				&Module::on_texture);
+		// [KIT_AGENT_VISUALS] 2 an agent's picture (agent_view())
+		sub(m_server, "network:packet_received/kit:view", &Module::on_view);
 		sub(m_server, "network:packet_received/kit:package",
 				&Module::on_package);
 		// [KIT_SCENE_PACKAGES] a scene added from a file or an Aitta
@@ -8950,7 +8952,9 @@ struct Module: public interface::Module, public Interface
 			m_mcp_defer = peer;
 	}
 
-	void mcp_answer(size_t peer, const ss_ &text, bool failed)
+	// [KIT_AGENT_VISUALS] with png: the text and the picture (get_view)
+	void mcp_answer(size_t peer, const ss_ &text, bool failed,
+			const ss_ &png = "")
 	{
 		auto w = m_mcp_waits.find(peer);
 		if(w == m_mcp_waits.end())
@@ -8960,6 +8964,13 @@ struct Module: public interface::Module, public Interface
 		c.set("type", "text");
 		c.set("text", text);
 		content.append(c);
+		if(!png.empty()){
+			json::Value i = json::object();
+			i.set("type", "image");
+			i.set("data", base64(png));
+			i.set("mimeType", "image/png");
+			content.append(i);
+		}
 		res.set("content", content);
 		res.set("isError", failed);
 		o.set("jsonrpc", "2.0");
@@ -21434,6 +21445,7 @@ struct Module: public interface::Module, public Interface
 		m_box->poll();
 		take_vouches();
 		take_pub_jobs();
+		view_tick();
 		cell_jobs_tick();
 		// [KIT_SESSIONS_1] Writes routed to owned voxels, by the session
 		// whose scene it is; each round's tick in its own members
@@ -29992,6 +30004,7 @@ struct Module: public interface::Module, public Interface
 
 	void on_left(const network::OldClient &old)
 	{
+		view_tick(old.info.id);
 		m_local_peers.erase(old.info.id);
 		m_watches.erase(old.info.id);
 		m_pub_open.erase(old.info.id);
@@ -30337,6 +30350,39 @@ struct Module: public interface::Module, public Interface
 				"clock's minutes and seconds.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
 				"required": ["id"]})J", ""},
+			// [KIT_AGENT_VISUALS] 2 (agent_view())
+			{"get_view", "view", "A picture of the game as it is drawn (a PNG): "
+				"a client of your own account connected to this server draws a "
+				"camera of its own and sends it; its window's view is left as "
+				"it is, and it shows \"Your agent took a picture\". pos and "
+				"look_at, or pos, yaw and pitch (degrees: yaw 0 looks along +z, "
+				"90 along +x; pitch down), in cells (y up); none: that client's "
+				"own view. width and height 512x384 unless given, 1024x768 at "
+				"most. The scene drawn is the one that client is in (scene: "
+				"refused unless one is), as far as it has loaded it: far from "
+				"its player the ground and entities may be missing. Look before "
+				"and after a change of looks, and say so when you could not. "
+				"With no client of your account here it is refused: your "
+				"builder's own, or one you run yourself on Linux with no "
+				"display, from a release (https://github.com/celeron55/buildat"
+				"/releases, the linux-x86_64-portable archive), unpacked, with "
+				"Xvfb and a software GL (Debian: apt-get install xvfb "
+				"libgl1-mesa-dri): BUILDAT_AGENT_TOKEN=<your token> xvfb-run -a "
+				"-s \"-screen 0 1280x800x24\" bin/buildat -s <host:port, or "
+				"https://host> -w 640x480 -o sound_mute=1; it logs in as your "
+				"account (\"Joined as <name>\") while your builder's own client "
+				"is not here; a builder token's for an account that is no Host "
+				"and no Steward. The token: My account, Connect an agent... (a "
+				"sign-in's stays inside your tool).",
+				R"J({"type": "object", "properties": {
+				"pos": {"type": "array", "items": {"type": "number"},
+					"minItems": 3, "maxItems": 3, "description": "The camera, x, y, z"},
+				"look_at": {"type": "array", "items": {"type": "number"},
+					"minItems": 3, "maxItems": 3, "description": "What it looks at"},
+				"yaw": {"type": "number"}, "pitch": {"type": "number"},
+				"width": {"type": "integer"}, "height": {"type": "integer"},
+				"scene": {"type": "string", "description":
+					"Refused unless a client of yours is in it"}}})J", ""},
 			{"get_events", "=events", "What came for you since you last asked "
 				"(the last 50): your try_input's answers (what its runs emitted), "
 				"what the entity you watch emitted (every 0.2 s at most: each "
@@ -31041,6 +31087,8 @@ struct Module: public interface::Module, public Interface
 		const json::Value a = args.is_object() ? args : json::object();
 		if(op[0] == '=')
 			return agent_read(p, peer, op, a, failed);
+		if(op == "view")
+			return agent_view(p, peer, a, failed);
 		if(op == "set_voxel")
 			return agent_voxels(p, peer, a, failed);
 		// [KIT_CUSTOM_TYPES] outside kit:edit (its 4096 bytes)
@@ -31170,6 +31218,224 @@ struct Module: public interface::Module, public Interface
 		if(done)
 			log_i(MODULE, "%s: %s", cs(p.name), cs(what));
 		return what+(refused.empty() ? ss_() : "; refused: "+refused)+warnings;
+	}
+
+	// ---- [KIT_AGENT_VISUALS] 2: **get_view**, an agent's picture. A client
+	// of the agent's own account (joined as it in accounts: the builder's
+	// own, or one the agent runs itself by its token, accounts.cpp's
+	// agent_login()), in the default session, is sent "kit:view" {id, w, h,
+	// pos, look_at, yaw, pitch}; it draws an off-screen camera
+	// (client_lua/module.lua) and answers "kit:view" "<id>\n<PNG>" (or why
+	// not), which answers the agent's call (MCP image content, m_mcp_defer).
+	// The answer is taken only from the client asked, for the id it was
+	// given (a random one), within VIEW_TIMEOUT_US; a PNG of the size asked,
+	// MAX_VIEW_BYTES at most, its IHDR read before it is decoded, decoded
+	// and made again (the agent gets only what decoded). Another account's
+	// client is never asked. One picture an agent at a time.
+	// simplified: a client in the default session (not a round's of its
+	// own); the client in the agent's scene first, else the first
+	struct ViewWait
+	{
+		size_t client = 0, agent = 0;
+		int w = 0, h = 0;
+		ss_ account, scene, what;
+		int64_t since = 0;
+	};
+	std::map<ss_, ViewWait> m_view_waits; // by the request's id
+	static const int VIEW_MAX_W = 1024, VIEW_MAX_H = 768;
+	static const int64_t VIEW_TIMEOUT_US = 5000000;
+	static const size_t MAX_VIEW_BYTES = 4 << 20;
+
+	ss_ agent_view(Peer &p, size_t peer, const json::Value &a, bool &failed)
+	{
+		failed = true;
+		json::Value q = json::object();
+		auto vec = [&](const char *k) -> ss_ {
+			const json::Value &v = a.get(k);
+			if(v.is_undefined())
+				return "";
+			if(!v.is_array() || v.size() != 3)
+				return ss_(k)+": three numbers";
+			json::Value o = json::array();
+			for(unsigned i = 0; i < 3; i++){
+				if(!v.at(i).is_number() || !std::isfinite(v.at(i).as_number()) ||
+						std::fabs(v.at(i).as_number()) > MAX_COORD)
+					return ss_(k)+": three numbers within "+itos((int)MAX_COORD);
+				o.append(v.at(i).as_number());
+			}
+			q.set(k, o);
+			return "";
+		};
+		for(const char *k : {"pos", "look_at"}){
+			const ss_ why = vec(k);
+			if(!why.empty())
+				return why;
+		}
+		for(const char *k : {"yaw", "pitch"}){
+			const json::Value &v = a.get(k);
+			if(v.is_undefined())
+				continue;
+			if(!v.is_number() || !std::isfinite(v.as_number()))
+				return ss_(k)+": a number of degrees";
+			q.set(k, v.as_number());
+		}
+		if(q.get("pos").is_undefined() && (!q.get("look_at").is_undefined() ||
+				!q.get("yaw").is_undefined() || !q.get("pitch").is_undefined()))
+			return "look_at, yaw and pitch go with a pos";
+		int wh[2] = {512, 384};
+		const char *names[2] = {"width", "height"};
+		const int max[2] = {VIEW_MAX_W, VIEW_MAX_H};
+		for(int k = 0; k < 2; k++){
+			const json::Value &v = a.get(names[k]);
+			if(v.is_undefined())
+				continue;
+			if(!v.is_number() || v.as_number() < 16 || v.as_number() > max[k])
+				return ss_(names[k])+": 16 to "+itos(max[k]);
+			wh[k] = (int)v.as_number();
+		}
+		const ss_ account = author_of(p), want = jstr(a, "scene");
+		// The clients joined as the account: what accounts says, so not an
+		// agent's peer (none of its) nor a bot
+		size_t client = 0;
+		ss_ scene;
+		sv_<ss_> elsewhere;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			for(auto &o : m_peers){
+				if(o.first == peer || o.second.guest || agent_of(o.first) ||
+						i->name_of(o.first) != account)
+					continue;
+				if(!want.empty() && o.second.scene != want){
+					elsewhere.push_back(o.second.scene);
+					continue;
+				}
+				if(!client || (o.second.scene == p.scene && scene != p.scene)){
+					client = o.first;
+					scene = o.second.scene;
+				}
+			}
+		});
+		if(!client && !elsewhere.empty())
+			return "No client of "+account+"'s is in the scene "+want+
+					" (yours is in "+elsewhere[0]+"): get_view draws the scene "
+					"its client is in";
+		if(!client)
+			return "No client of "+account+"'s is connected to this server: "
+					"get_view asks one to draw. Ask your builder to join with "
+					"theirs, or run one yourself with your token (this tool's "
+					"description says how: a release's client, headless)";
+		if(m_mcp_waits.count(peer))
+			return "Your last call is still going (a picture or a publish): "
+					"one at a time";
+		std::random_device rd;
+		char id[24];
+		snprintf(id, sizeof id, "%08x%08x", rd(), rd());
+		ViewWait &w = m_view_waits[id];
+		w.client = client;
+		w.agent = peer;
+		w.w = wh[0];
+		w.h = wh[1];
+		w.account = account;
+		w.scene = scene;
+		w.since = interface::os::time_us();
+		w.what = q.get("pos").is_undefined() ? ss_("its own view") : "from "+
+				q.get("pos").stringify()+(!q.get("look_at").is_undefined() ?
+				" looking at "+q.get("look_at").stringify() : " yaw "+
+				json::Value(q.get("yaw").is_undefined() ? 0.0 :
+				q.get("yaw").as_number()).stringify()+" pitch "+
+				json::Value(q.get("pitch").is_undefined() ? 0.0 :
+				q.get("pitch").as_number()).stringify());
+		q.set("id", ss_(id));
+		q.set("w", (int64_t)wh[0]);
+		q.set("h", (int64_t)wh[1]);
+		network::access(m_server, [&](network::Interface *i){
+			i->send(client, "kit:view", q.stringify());
+		});
+		log_i(MODULE, "%s asks %s's client (peer %zu, scene %s) for a picture "
+				"%ix%i, %s", cs(p.name), cs(account), client, cs(scene), wh[0],
+				wh[1], cs(w.what));
+		// The answer comes in on_view() or view_tick()
+		m_mcp_defer = peer;
+		failed = false;
+		return "";
+	}
+
+	// "kit:view" from a client: "<id>\n" and a PNG, or why not
+	void on_view(const network::Packet &packet)
+	{
+		const ss_ &d = packet.data;
+		const size_t nl = d.find('\n');
+		auto it = nl == ss_::npos || nl > 64 ? m_view_waits.end() :
+				m_view_waits.find(d.substr(0, nl));
+		if(it == m_view_waits.end() || it->second.client != packet.sender){
+			log_i(MODULE, "A picture from peer %zu refused: not one asked of "
+					"it (or late)", packet.sender);
+			return;
+		}
+		const ViewWait w = it->second;
+		m_view_waits.erase(it);
+		const ss_ body = d.substr(nl + 1);
+		const ss_ who = w.account+"'s client";
+		auto refuse = [&](const ss_ &why){
+			log_i(MODULE, "A picture from %s (peer %zu) refused: %s", cs(who),
+					packet.sender, cs(why));
+			mcp_answer(w.agent, "No picture: "+why, true);
+		};
+		if(body.compare(0, 8, "\x89PNG\r\n\x1a\n", 8) != 0){
+			// Its why not: a line of text
+			if(body.size() > 300 || body.find('\0') != ss_::npos)
+				return refuse(who+" sent no PNG");
+			return refuse(who+" could not draw it: "+body);
+		}
+		auto be32 = [&](size_t at){
+			return (uint32_t)(uint8_t)body[at] << 24 |
+					(uint32_t)(uint8_t)body[at + 1] << 16 |
+					(uint32_t)(uint8_t)body[at + 2] << 8 | (uint8_t)body[at + 3];
+		};
+		if(body.size() > MAX_VIEW_BYTES || body.size() < 33 ||
+				body.compare(12, 4, "IHDR") != 0 || be32(16) != (uint32_t)w.w ||
+				be32(20) != (uint32_t)w.h)
+			return refuse(who+" sent no PNG of "+itos(w.w)+"x"+itos(w.h)+
+					" within "+itos((int)(MAX_VIEW_BYTES >> 20))+" MiB");
+		ss_ png;
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			magic::Image img(imc->get_context());
+			magic::MemoryBuffer in(body.data(), (unsigned)body.size());
+			if(!img.Load(in) || img.IsCompressed() || img.GetWidth() != w.w ||
+					img.GetHeight() != w.h)
+				return;
+			magic::VectorBuffer buf;
+			if(img.Save(buf))
+				png.assign((const char*)buf.GetData(), buf.GetSize());
+		});
+		if(png.empty())
+			return refuse(who+"'s PNG did not decode");
+		log_i(MODULE, "A picture from %s (peer %zu) for its agent: %ix%i, "
+				"%zu bytes", cs(who), packet.sender, w.w, w.h, png.size());
+		mcp_answer(w.agent, who+" drew this "+itos(w.w)+"x"+itos(w.h)+" "+
+				w.what+", in the scene "+w.scene+" (the scene that client is "
+				"in, as far as it has loaded it).", false, png);
+	}
+
+	// A picture not come in VIEW_TIMEOUT_US, or its client gone (left: the
+	// peer that left)
+	void view_tick(size_t left = 0)
+	{
+		const int64_t now = interface::os::time_us();
+		for(auto it = m_view_waits.begin(); it != m_view_waits.end();){
+			const ViewWait &w = it->second;
+			if(w.client != left && now - w.since < VIEW_TIMEOUT_US){
+				++it;
+				continue;
+			}
+			const ss_ why = w.client == left ? w.account+"'s client left "
+					"before it sent the picture" : "No picture from "+w.account+
+					"'s client in "+itos((int)(VIEW_TIMEOUT_US / 1000000))+
+					" s (it may be busy, minimized or stalled): try again";
+			log_i(MODULE, "A picture for %s's agent: %s", cs(w.account),
+					cs(why));
+			mcp_answer(w.agent, why, true);
+			it = m_view_waits.erase(it);
+		}
 	}
 
 	ss_ agent_state(const Peer &p)

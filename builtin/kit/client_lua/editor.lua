@@ -844,6 +844,8 @@ local function active_camera()
 	end
 	return cam3d_node, cam3d
 end
+-- [KIT_AGENT_VISUALS] the view the window draws, for get_view (module.lua)
+M.view_camera = active_camera
 
 -- [KIT_PLANE] The plane's depth (the server's plane_depth: the spawn's, a whole z)
 local function plane_z()
