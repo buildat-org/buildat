@@ -131,6 +131,8 @@ function M.use_chat(c)
 end
 -- The full screen up in play (its id), from the last update
 local full_up = nil
+-- [KIT_SCENE_PACKAGES] a button of action "pause_menu" shown on it
+local full_menu = false
 
 buildat.sub_packet("kit:mine", function(data)
 	local m = network.parse_json(data)
@@ -419,14 +421,21 @@ local function make(r, id, parent, in_panel)
 			return
 		end
 		local a = tostring(u.action or "")
-		if a ~= "" then
-			M.press_action(a, down)
-		else
-			buildat.send_packet("kit:ui", id .. (down and " 1" or " 0"))
-		end
+		-- (said first: what the press does logs after it)
 		if down then
 			log:info("kit: ui button " .. id .. " pressed" ..
 					(a ~= "" and " (action " .. a .. ")" or ""))
+		end
+		if a == "pause_menu" then
+			-- [KIT_SCENE_PACKAGES] the app's pause menu (Esc's, the touch
+			-- bar's Menu)
+			if down and E.menu then
+				E.menu.open()
+			end
+		elseif a ~= "" then
+			M.press_action(a, down)
+		else
+			buildat.send_packet("kit:ui", id .. (down and " 1" or " 0"))
 		end
 	end
 end
@@ -957,6 +966,12 @@ function M.full_screen()
 	return not E.editing and full_up or nil
 end
 
+-- [KIT_SCENE_PACKAGES] Whether the full screen up shows a button of action
+-- "pause_menu" (the touch overlay's Menu not needed then)
+function M.full_screen_menu()
+	return full_up ~= nil and full_menu
+end
+
 -- [KIT_LOBBY] The layer a UI element is on: a screen's id, or "hud" (nil: no
 -- such element drawn)
 function M.layer_of(id)
@@ -1169,6 +1184,7 @@ local function update()
 		own_sel = nil
 	end
 	local wants = false
+	local menu_on = false
 	-- A placed health bar up instead of the rules' own
 	local placed_health = false
 	-- [KIT_LOBBY] the full screen up (the first of the list's)
@@ -1260,7 +1276,9 @@ local function update()
 			end
 			r.pw, r.ph, r.top = pw, ph, top
 			local text = shown_text(u.text, value)
-			if u.kind == "button" and text == "" and tostring(u.action or "")
+			if u.kind == "button" and text == "" and u.action == "pause_menu" then
+				text = "Menu"
+			elseif u.kind == "button" and text == "" and tostring(u.action or "")
 					~= "" then
 				for _, a in ipairs(M.world_actions()) do
 					if a.name == u.action then
@@ -1487,8 +1505,11 @@ local function update()
 				if r.full then
 					x, y = 0, 0
 				else
+					-- ([KIT_SCENE_PACKAGES] in a full screen above the touch
+					-- Menu over it)
 					x, y = place(u, w, h, r.pw, r.ph,
-							pr and 0 or r.own and own_lift(r.own, V) or lift, V)
+							pr and (pr.full and not E.editing and lift or 0) or
+							r.own and own_lift(r.own, V) or lift, V)
 				end
 				if pr then
 					x, y = x + pad, y + pad + r.top
@@ -1595,6 +1616,10 @@ local function update()
 			end
 			r.el.visible = not edit_off() and layer_on and not r.skip and
 					not (r.empty and not frame) and ((live and r.on) or frame or (r.own ~= nil and r.on))
+			if r.el.visible and up and r.layer == up and r.kind == "button" and
+					u.action == "pause_menu" then
+				menu_on = true
+			end
 			r.el.enabled = frame or r.kind ~= "text"
 			local blink = tonumber(u.blink_below) or 0
 			r.blinking = not E.editing and r.frac ~= nil and blink > 0 and
@@ -1716,6 +1741,7 @@ local function update()
 		end
 	end
 	want.visible = wants
+	full_menu = menu_on
 end
 
 -- ---- The selected one's handles (edit mode)

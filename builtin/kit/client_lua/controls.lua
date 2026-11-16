@@ -1594,7 +1594,7 @@ end
 
 local function on_ui(x, y)
 	local sc = magic.ui.scale
-	for _, b in ipairs({C.bar, C.abar}) do
+	for _, b in ipairs({C.bar, C.abar, C.mbar}) do
 		if b.visible then
 			local p, s = b.screenPosition, b.size
 			if x / sc >= p.x and y / sc >= p.y and x / sc < p.x + s.x and
@@ -1725,7 +1725,8 @@ end
 -- bottom stays over them
 function M.touch_bar_top()
 	local y = nil
-	for _, b in ipairs({C.bar, C.abar}) do
+	-- ([KIT_SCENE_PACKAGES] the Menu over a full screen too: the screen above it)
+	for _, b in ipairs({C.bar, C.abar, C.mbar}) do
 		if b and b.visible then
 			y = math.min(y or b.screenPosition.y, b.screenPosition.y)
 		end
@@ -1738,7 +1739,7 @@ end
 -- line ends before it
 function M.touch_bar_left()
 	local x = nil
-	for _, b in ipairs({C.bar, C.abar}) do
+	for _, b in ipairs({C.bar, C.abar, C.mbar}) do
 		if b and b.visible then
 			x = math.min(x or b.screenPosition.x, b.screenPosition.x)
 		end
@@ -2323,6 +2324,25 @@ magic.SubscribeToEvent("Update", function(_, data)
 		C.bar.visible = (not E.editing and not full) or
 				(wr ~= nil and C.bar:GetNumChildren() > 0)
 		C.abar.visible = not E.editing and not full and #M.world_actions() > 0
+		-- [KIT_SCENE_PACKAGES] Over a full screen (the touch bar hidden) the
+		-- app's pause menu a Menu button of Kit's own at the bar's corner,
+		-- unless the screen has a button of its own for it
+		local mo = full and not E.editing and E.menu and not E.menu.shown() and
+				not (M.full_screen_menu and M.full_screen_menu()) and true or false
+		if mo and not C.mbar then
+			C.mbar = button_row({{"Menu", nil, function()
+				if E.menu then
+					log:info("kit: the touch Menu over the full screen pressed")
+					E.menu.open()
+				end
+			end}}, 8)
+			C.mbar.visible = false
+		end
+		if C.mbar and C.mbar.visible ~= mo then
+			C.mbar.visible = mo
+			log:info("kit: the touch Menu over the full screen " ..
+					(mo and "shown" or "hidden"))
+		end
 		-- (alignment right and bottom: from the root's corner, UI units)
 		local sc, r = magic.ui.scale, magic.ui.root
 		local at = wr and string.format("%d %d",
