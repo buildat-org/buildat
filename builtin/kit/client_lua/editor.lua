@@ -1386,6 +1386,10 @@ rebuild_bar = function(if_changed)
 			-- [KIT_SCENE_PACKAGES]
 			choices[#choices + 1] = {"Add a scene from a file...", "\0file"}
 		end
+		-- [KIT_SCENE_ADD_LIVE]
+		if #scenes > 1 then
+			choices[#choices + 1] = {"Scenes...", "\0scenes"}
+		end
 		-- (in the first row as the view's: a dropdown is not probed)
 		local sd
 		sd = ui_utils.dropdown(bar_row, choices, current_scene(),
@@ -1396,6 +1400,9 @@ rebuild_bar = function(if_changed)
 				-- (the scene shown again: a second pick of it is one)
 				ui_utils.dropdown_set(sd, current_scene())
 				M.add_scene_file()
+			elseif v == "\0scenes" then
+				ui_utils.dropdown_set(sd, current_scene())
+				M.scenes_dialog()
 			elseif v ~= current_scene() then
 				M.switch_scene(v)
 			end
@@ -2021,6 +2028,14 @@ end
 -- the server; and Publish..., the builder's own prefabs and voxel types
 -- written into a package for the publish screen (native)
 function M.fetch_packages()
+	-- [KIT_SERVER_PUBLISH] through the server where it lists Aittas (the
+	-- web client too): its answer kit:aitta_list
+	if (E.state and tonumber(E.state.server_aittas) or 0) > 0 then
+		E.packages_status = "Asking the server's Aittas..."
+		send({op = "aitta_list", kind = "kit"})
+		send({op = "aitta_list", kind = "scene"})
+		return
+	end
 	E.packages_status = "Asking the Aittas..."
 	aitta.kit_packages(function(list)
 		E.packages = list
@@ -2059,10 +2074,15 @@ local function shown(n)
 end
 M.shown = shown
 
-local function install(key, label)
+-- server_aitta: the server fetches it from there ([KIT_SERVER_PUBLISH])
+local function install(key, label, server_aitta)
 	E.status = "Fetching " .. (label or key) .. "..."
 	log:info("kit editor: fetching " .. key)
 	people()
+	if server_aitta then
+		return send({op = "aitta_install", kind = "kit", key = key,
+			aitta = server_aitta})
+	end
 	aitta.kit_fetch(key, function(list, why)
 		if not list then
 			E.status = "Not installed: " .. tostring(why)
@@ -2095,8 +2115,8 @@ local function new_tab(w)
 			text(r, "installed", DIM)
 		else
 			button(r, cur and "Upgrade" or "Install", function()
-				install(p.key, p.label)
-			end)
+				install(p.key, p.label, p.server and p.aitta)
+			end):SetName("install " .. tostring(p.name))
 		end
 		if p.description ~= "" then
 			text(w, p.description:sub(1, 80), DIM)
@@ -2107,20 +2127,32 @@ local function new_tab(w)
 	edit(r, E.package_name, function(s)
 		E.package_name = s
 	end)
+	-- [KIT_SERVER_PUBLISH] each Publish as this server or with the
+	-- builder's own key (NT.publish_as)
 	button(w, "Publish my prefabs...", function()
 		NT.publish_checked("my prefabs", function()
-			send({op = "export"})
+			NT.publish_as("prefabs", nil, function()
+				send({op = "export"})
+			end)
 		end)
-	end)
+	end):SetName("publish prefabs")
 	-- [KIT_PROJECT_EXPORT] The project's start as a template file, which
 	-- New's "From a file..." makes a project of on another server.
 	-- simplified: here, not on Workbench's Projects page beside Copy,
 	-- which is an admin's and out of a builder's reach
 	if (E.state.project or "") ~= "" then
-		button(w, "Export this project", function()
+		local r = row(w)
+		button(r, "Export this project", function()
 			log:info("kit editor: export this project")
 			send({op = "export_project"})
 		end)
+		-- (as the server only: a template with one's own key is the
+		-- launcher's, from the exported file)
+		button(r, "Publish this project...", function()
+			NT.publish_checked("this project", function()
+				NT.publish_as("project")
+			end)
+		end):SetName("publish project")
 	end
 	-- [KIT_SCENE_PACKAGES] The Aittas' scene packages, this project's
 	-- game's first, each added as a new scene; this scene exported as a
@@ -2163,10 +2195,12 @@ local function new_tab(w)
 		end)
 		button(r, "Publish this scene...", function()
 			NT.publish_checked("this scene", function()
-				send({op = "export_scene", scene = current_scene(),
-					publish = true})
+				local scene = current_scene()
+				NT.publish_as("scene", scene, function()
+					send({op = "export_scene", scene = scene, publish = true})
+				end)
 			end)
-		end)
+		end):SetName("publish scene")
 	end
 end
 
@@ -5587,6 +5621,11 @@ function M.add_scene(p)
 		E.status = "Fetching the scene " .. tostring(p.label) .. "..."
 		log:info("kit editor: fetching the scene " .. p.key)
 		people()
+		-- [KIT_SERVER_PUBLISH] the server fetches it (a kit:scene answer)
+		if p.server then
+			return send({op = "aitta_install", kind = "scene", key = p.key,
+				aitta = p.aitta})
+		end
 		aitta.kit_fetch(p.key, function(list, why)
 			if not list or not list[1] then
 				E.status = "Not added: " .. tostring(why)
@@ -5614,6 +5653,37 @@ function M.add_scene(p)
 	end)
 end
 
+-- [KIT_SCENE_ADD_LIVE] The scenes: each listed or not (its kit/scene_info,
+-- for the players' list), and removed (one undo; the server refuses one
+-- with players on it, and the one the builder is in)
+function M.scenes_dialog()
+	local w, br = dialog("Scenes", 480)
+	local listed = {}
+	for _, n in ipairs(E.state and E.state.listed or {}) do
+		listed[n] = true
+	end
+	for _, n in ipairs(E.state and E.state.scenes or {}) do
+		local r = row(w)
+		label(r, n .. (listed[n] and " (listed)" or " (not listed)"))
+		button(r, listed[n] and "Unlist" or "List", function()
+			log:info("kit editor: " .. (listed[n] and "unlist " or "list ") .. n)
+			send({op = "list_scene", name = n, on = not listed[n]})
+			drop("dialog")
+		end):SetName("list " .. n)
+		if n ~= E.state.world_scene and n ~= current_scene() then
+			button(r, "Remove", function()
+				log:info("kit editor: remove the scene " .. n)
+				send({op = "remove_scene", name = n})
+				drop("dialog")
+			end):SetName("remove " .. n)
+		end
+	end
+	br = br or row(w)
+	button(br, "Close", function()
+		drop("dialog")
+	end)
+end
+
 -- What the server left out of an added scene (its links and entity
 -- parameters onto entities this project has no one of that name of, its
 -- types this project's own were kept over)
@@ -5623,7 +5693,7 @@ function M.scene_added(a)
 	for _, d in ipairs(dropped) do
 		log:info("kit editor: left out: " .. tostring(d))
 	end
-	if #dropped == 0 and #kept == 0 then
+	if #dropped == 0 and #kept == 0 and not a.unlisted then
 		return
 	end
 	local w, br = dialog("Scene added", 480)
@@ -5631,6 +5701,11 @@ function M.scene_added(a)
 		local t = text(w, s, c)
 		t:SetWordwrap(true)
 		t:SetFixedWidth(NT.sh.on() and (NT.sh.pane_w() - 36) / S.font or 460)
+	end
+	-- [KIT_SCENE_ADD_LIVE] Running: in unlisted
+	if a.unlisted then
+		para("Added, not listed: try it, then list it (Scenes... in the " ..
+				"scene list).")
 	end
 	para("The scene " .. tostring(a.scene) .. " is added." ..
 			(#dropped > 0 and " Left out, as this project has no entity of " ..
@@ -5652,6 +5727,382 @@ function M.scene_added(a)
 		log:info("kit editor: the scene added closed")
 	end)
 end
+
+-- ---- [KIT_SERVER_PUBLISH] Publishing as the server (kit.cpp's
+-- send_publishing(), which keeps the key, the Aittas and the log): the
+-- Server window's Publishing page, an admin's (Workbench's
+-- accounts.server_menu adds it), and the editor's Publish entries' "As
+-- this server (<author>)" form beside "With my own key" (native; on the
+-- web the form alone). NT.pub: info (the server's last word), accounts
+-- (the page's module), form, templates (Install a template's list).
+-- (A function of its own: this one is at Lua's 200 locals)
+NT.pub = {form = {}}
+NT.pub_init = function()
+local PB = NT.pub
+local WEB = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
+local LICENCES = {"CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0", "MIT",
+	"LicenseRef-All-rights-reserved"}
+
+local function publishing(t)
+	local s = network.write_json(t)
+	log:info("kit editor: publishing " .. s)
+	buildat.send_packet("kit:publishing", s)
+end
+M.publishing = publishing
+
+local function raise(v)
+	local a, b, c = tostring(v):match("^(%d+)%.(%d+)%.(%d+)")
+	return a and a .. "." .. b .. "." .. (tonumber(c) + 1) or "1.0.0"
+end
+
+-- The page: opened from the Server window's entry (accounts, the server
+-- asked again), drawn again as the server says more where it is open
+function M.publishing_page(accounts)
+	PB.accounts = accounts or PB.accounts
+	local acc = PB.accounts
+	if not acc or acc.server_current() ~= "publishing" then
+		return
+	end
+	if accounts then
+		publishing({op = "get"})
+	end
+	local I = PB.info
+	local w = acc.server_open("Publishing as the server")
+	if PB.message then
+		acc.page_text(w, PB.message, WARN)
+		PB.message = nil
+	end
+	if not I then
+		return acc.page_text(w, "Asking the server...", DIM)
+	end
+	if I.key == "" then
+		acc.page_text(w, "The server has no publishing key. Its releases " ..
+				"go under the author name an Aitta binds the key to, once; " ..
+				"neither changes after.", DIM)
+		local a = acc.page_field(w, "Author name (a-z, 0-9, _)")
+		a:SetName("publishing author")
+		acc.page_button(w, "Make the key", function()
+			publishing({op = "keygen", author = a:GetText()})
+		end):SetName("publishing keygen")
+	else
+		acc.page_text(w, "Releases go as " .. I.author .. ", signed with " ..
+				"the server's key (kept on the server, never sent). Bind it on " ..
+				"each Aitta below: join the Aitta, log in there and bind the " ..
+				"author name and this key.")
+		acc.page_field(w, "Author name", false, nil, I.author)
+		acc.page_field(w, "Public key", false, nil, I.key):SetName(
+				"publishing key")
+	end
+	acc.page_text(w, "The Aittas it publishes to and installs from (it " ..
+			"fetches from no other), comma separated:", DIM)
+	local urls = {}
+	for _, a in ipairs(I.aittas or {}) do
+		urls[#urls + 1] = a.url
+	end
+	local f = acc.page_field(w, "Aittas", false, nil, table.concat(urls, ", "))
+	f:SetName("publishing aittas")
+	acc.page_button(w, "Save the list", function()
+		local list = {}
+		for s in f:GetText():gmatch("[^,%s]+") do
+			list[#list + 1] = s
+		end
+		publishing({op = "aittas", list = list})
+	end):SetName("publishing save aittas")
+	-- simplified: "Bind on <Aitta>..." is said, not a button: a server's
+	-- code may not move the user to another server (api.lua refuses it
+	-- join_server); the user joins the Aitta from the launcher
+	for _, a in ipairs(I.aittas or {}) do
+		acc.page_text(w, a.url .. ": " .. (I.key == "" and "no key yet" or
+				a.bound == "" and "binds the key to " .. I.author or
+				"Bind on " .. a.url .. "...: join it, log in, and bind the " ..
+				"author " .. I.author .. " and the public key above (" ..
+				a.bound .. ")"), (I.key == "" or a.bound ~= "") and WARN or
+				nil):SetName(
+				"publishing aitta " .. a.url)
+	end
+	if I.key ~= "" and #(I.aittas or {}) > 0 then
+		acc.page_button(w, "Check again", function()
+			publishing({op = "check"})
+		end)
+	end
+	-- Who may publish as the server
+	acc.page_text(w, "Who may publish as the server (their name in each " ..
+			"release; an admin always):", DIM)
+	for _, p in ipairs(I.people or {}) do
+		local r = acc.page_row(w)
+		acc.page_text(r, p.name .. (p.admin and " (admin)" or
+				p.builder and " (builder)" or ""))
+		if not p.admin then
+			acc.page_button(r, p.publisher and "May publish: on" or
+					"May publish: off", function()
+				publishing({op = "publisher", name = p.name, on = not p.publisher})
+			end):SetName("publisher " .. p.name)
+		end
+	end
+	-- [KIT_SERVER_PUBLISH] Install a template from an Aitta...: into New's
+	-- Start from
+	acc.page_button(w, "Install a template from an Aitta...", function()
+		PB.templates = {}
+		publishing({op = "templates"})
+	end):SetName("publishing templates")
+	for _, t in ipairs(PB.templates or {}) do
+		local r = acc.page_row(w)
+		acc.page_text(r, (t.title ~= "" and t.title or t.name) .. " (" ..
+				t.author .. "/" .. t.name .. " " .. t.version .. ", " .. t.aitta .. ")")
+		acc.page_button(r, "Install", function()
+			publishing({op = "install_template", aitta = t.aitta, key = t.key})
+		end):SetName("install template " .. t.name)
+	end
+	acc.page_text(w, "Published (the log, private):", DIM)
+	local log_rows = I.log or {}
+	for i = #log_rows, math.max(1, #log_rows - 19), -1 do
+		local l = log_rows[i]
+		acc.page_text(w, tostring(l.package) .. " " .. tostring(l.version) ..
+				" by " .. tostring(type(l.builder) == "table" and
+				l.builder.account) .. " on " .. tostring(l.aitta) .. ", sha256 " ..
+				tostring(l.sha256):sub(1, 12), DIM)
+	end
+	log:info("kit editor: the Publishing page, key " .. (I.key ~= "" and
+			"made" or "none") .. ", " .. #(I.aittas or {}) .. " Aittas, " ..
+			#log_rows .. " published")
+end
+
+-- The form: what "scene" (scene its name), "project" or "prefabs"
+function M.server_publish_form(what, scene)
+	local F = PB.form
+	if F.what ~= what or F.scene ~= scene then
+		local pid = function(s)
+			s = tostring(s or ""):lower():gsub("[^a-z0-9_]", "_"):sub(1, 40)
+			return s
+		end
+		F.what, F.scene = what, scene
+		F.name = what == "scene" and pid(scene) or what == "project" and
+				pid(E.state and E.state.project) or pid(E.package_name)
+		F.title = ""
+	end
+	-- (the next of the last published, as the server says it now)
+	F.version, F.version_typed = nil, nil
+	F.licence = F.licence or LICENCES[1]
+	F.description = F.description or ""
+	PB.form_open = true
+	M.draw_publish_form()
+end
+
+function M.draw_publish_form()
+	if not PB.form_open then
+		return
+	end
+	local F, I = PB.form, PB.info or {aittas = {}}
+	-- The next of the name's last published, until the version is typed
+	local function next_of(name)
+		return I.last and I.last[name] and raise(I.last[name]) or "1.0.0"
+	end
+	F.version = F.version or next_of(F.name)
+	local bound = {}
+	for _, a in ipairs(I.aittas or {}) do
+		if a.bound == "" then
+			bound[#bound + 1] = a.url
+		end
+	end
+	local found = false
+	for _, a in ipairs(bound) do
+		found = found or a == F.aitta
+	end
+	F.aitta = found and F.aitta or bound[1]
+	local w, br = dialog("Publish as this server", 520)
+	local t = text(w, "Published as " .. tostring(I.author) .. ", by " ..
+			tostring(I.you) .. ": your name shows in the release")
+	t:SetWordwrap(true)
+	t:SetFixedWidth(NT.sh.on() and (NT.sh.pane_w() - 36) / S.font or 500)
+	local version, setting
+	local function field(l, k, on_text)
+		local r = row(w)
+		label(r, l)
+		local e = edit(r, F[k], function(s)
+			F[k] = s
+			if on_text then
+				on_text(s)
+			end
+		end)
+		e:SetName("publish " .. k)
+		return r, e
+	end
+	field("Name:", "name", function(s)
+		if not F.version_typed then
+			setting = true
+			version:SetText(next_of(s))
+			setting = false
+		end
+	end)
+	local vr
+	vr, version = field("Version:", "version", function()
+		F.version_typed = F.version_typed or not setting
+	end)
+	button(vr, "Raise the version", function()
+		F.version = raise(F.version)
+		M.draw_publish_form()
+	end)
+	if F.what ~= "prefabs" then
+		field("Title (none: as it is):", "title")
+	end
+	button(row(w), "Licence: " .. F.licence, function()
+		for i, l in ipairs(LICENCES) do
+			if l == F.licence then
+				F.licence = LICENCES[i % #LICENCES + 1]
+				break
+			end
+		end
+		M.draw_publish_form()
+	end):SetName("publish licence")
+	field("Description:", "description")
+	button(row(w), "Aitta: " .. tostring(F.aitta or "none bound"), function()
+		for i, a in ipairs(bound) do
+			if a == F.aitta then
+				F.aitta = bound[i % #bound + 1]
+				break
+			end
+		end
+		M.draw_publish_form()
+	end):SetName("publish aitta")
+	br = br or row(w)
+	button(br, "Publish", function()
+		PB.form_open = false
+		drop("dialog")
+		E.status = "Publishing " .. tostring(F.name) .. " " ..
+				tostring(F.version) .. " as the server..."
+		people()
+		send({op = "server_publish", what = F.what, scene = F.scene,
+			name = F.name, version = F.version, license = F.licence,
+			description = F.description, title = F.title ~= "" and F.title or nil,
+			aitta = F.aitta})
+	end):SetName("publish go")
+	button(br, "Cancel", function()
+		PB.form_open = false
+		drop("dialog")
+	end)
+	log:info("kit editor: the publish form, " .. tostring(F.what) .. " " ..
+			tostring(F.name) .. " " .. tostring(F.version) .. " to " ..
+			tostring(F.aitta) .. ", " .. F.licence .. ", as " ..
+			tostring(I.author) .. " by " .. tostring(I.you))
+end
+
+-- A Publish entry: as the server (with the right and a bound key) or with
+-- the builder's own key (own: native, where there is one). The server
+-- asked first; this goes on when its Aittas have answered
+-- (kit:publishing's PB.pending)
+function NT.publish_as(what, scene, own)
+	PB.pending = function()
+		local I = PB.info
+		local can = I.may and I.key ~= "" and I.bound
+		own = not WEB and own or nil
+		if not can and own then
+			return own()
+		end
+		if not can then
+			E.status = "Publishing here is as this server, with the Host's " ..
+					"leave and its key bound on an Aitta (the Publishing page)"
+			log:info("kit editor: " .. E.status)
+			return people()
+		end
+		if not own then
+			return M.server_publish_form(what, scene)
+		end
+		local w, br = dialog("Publish")
+		log:info("kit editor: publish as: this server (" .. I.author ..
+				") or my own key")
+		br = br or row(w)
+		button(br, "As this server (" .. I.author .. ")", function()
+			M.server_publish_form(what, scene)
+		end):SetName("publish as server")
+		button(br, "With my own key", function()
+			drop("dialog")
+			own()
+		end):SetName("publish own key")
+		button(br, "Cancel", function()
+			drop("dialog")
+		end)
+	end
+	publishing({op = "get"})
+end
+
+buildat.sub_packet("kit:publishing", function(data)
+	local a = network.parse_json(data)
+	if type(a) ~= "table" then
+		return
+	end
+	PB.info = a
+	M.publishing_page()
+	local asking = false
+	for _, x in ipairs(a.aittas or {}) do
+		asking = asking or x.bound == "asking..."
+	end
+	if PB.pending and (a.bound or not asking) then
+		local f = PB.pending
+		PB.pending = nil
+		f()
+	end
+end)
+buildat.sub_packet("kit:publishing_refused", function(data)
+	local a = network.parse_json(data) or {}
+	PB.pending = nil
+	PB.message = "Refused: " .. tostring(a.why)
+	E.status = PB.message
+	log:info("kit editor: publishing: " .. PB.message)
+	people()
+	M.publishing_page()
+end)
+buildat.sub_packet("kit:server_publish", function(data)
+	local a = network.parse_json(data) or {}
+	E.status = tostring(a.ok and a.what or a.why)
+	log:info("kit editor: " .. E.status)
+	people()
+end)
+-- The server's lists of the Aittas' packages: the New tab's, the
+-- Publishing page's templates
+buildat.sub_packet("kit:aitta_list", function(data)
+	local a = network.parse_json(data)
+	if type(a) ~= "table" then
+		return
+	end
+	for _, f in ipairs(a.failed or {}) do
+		log:info("kit editor: an Aitta failed: " .. tostring(f))
+	end
+	local list = {}
+	for _, p in ipairs(a.items or {}) do
+		p.label = tostring(p.author) .. "/" .. tostring(p.name)
+		p.server = true
+		p.time = 0
+		list[#list + 1] = p
+		log:info("kit editor: " .. tostring(a.kind) .. " package " .. p.label ..
+				" " .. tostring(p.version) .. " on " .. tostring(p.aitta) ..
+				(p.game ~= "" and " for " .. tostring(p.game) or ""))
+	end
+	if a.kind == "template" then
+		PB.templates = list
+		return M.publishing_page()
+	end
+	if a.kind == "kit" then
+		E.packages = list
+		E.packages_status = #list == 0 and "No Kit packages on the server's " ..
+				"Aittas" or nil
+	else
+		E.scene_packages = list
+	end
+	if S.tab == "New" then
+		palette()
+	end
+end)
+buildat.sub_packet("kit:aitta_install", function(data)
+	local a = network.parse_json(data) or {}
+	E.status = a.ok and "Installed " .. tostring(a.what) or
+			"Not installed: " .. tostring(a.why)
+	PB.message = not a.ok and E.status or nil
+	log:info("kit editor: " .. E.status)
+	people()
+	M.publishing_page()
+end)
+end
+NT.pub_init()
 
 -- ---- [KIT_SOUNDS] The project's sounds (sounds.lua's M.sounds)
 

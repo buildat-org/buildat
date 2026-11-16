@@ -27,12 +27,14 @@
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cctype>
 #include <cstring>
 #include <fstream>
 #include <set>
 #include <sstream>
+#include <thread>
 #include <tuple>
 
 using interface::sha256::unhex;
@@ -1139,12 +1141,27 @@ ss_ zip_files(const sv_<std::pair<ss_, ss_>> &files)
 	return out;
 }
 
-static ss_ zip_directory(const ss_ &dir)
+ss_ release_kind(const ss_ &zip_path)
 {
-	sv_<std::pair<ss_, ss_>> files;
-	for(const ss_ &name : package_files(dir))
-		files.emplace_back(name, read_file(dir+"/"+name));
-	return zip_files(files);
+	const ss_ tmp = zip_path+".kind";
+	fs::remove_all(tmp);
+	ss_ kind;
+	try {
+		bool has = false;
+		for(const ZipEntry &e : zip_list(zip_path))
+			has = has || e.name == "meta.json";
+		if(has){
+			// simplified: the whole release unpacked for its meta.json (the
+			// zip reader has no single entry)
+			zip_extract(zip_path, tmp, 1 << 30);
+			json::json_error_t e;
+			kind = kind_of(json::load_file((tmp+"/meta.json").c_str(), &e));
+		}
+	} catch(std::exception &){
+		kind = "";
+	}
+	fs::remove_all(tmp);
+	return kind;
 }
 
 // <base>.zip and its <base>.sig: the hash, the key and its signature in
@@ -1193,7 +1210,18 @@ ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir)
 		if(!why.empty())
 			throw Exception(app_dir+": "+why);
 	}
-	return write_signed(zip_directory(app_dir), read_file(key_path),
+	// [ALPHA_KIT_PACKAGES_PUBLIC] A Kit kind's says the Buildat that packed
+	// it, as a world's does: a refusal where it loads names it
+	sv_<std::pair<ss_, ss_>> files;
+	for(const ss_ &name : package_files(app_dir)){
+		files.emplace_back(name, read_file(app_dir+"/"+name));
+		if(name == "meta.json" && kit_kind(kind_of(m))){
+			json::Value v = m.deepcopy();
+			v.set("buildat_version", BUILDAT_VERSION);
+			files.back().second = v.stringify()+"\n";
+		}
+	}
+	return write_signed(zip_files(files), read_file(key_path),
 			SIG_FORMAT, out_dir+"/"+m.get("author").as_string()+"-"+
 			m.get("name").as_string()+"-"+m.get("version").as_string());
 }
@@ -1470,6 +1498,121 @@ ss_ vouch_guarded(const ss_ &aitta, const ss_ &public_hex,
 	}
 }
 
+ss_ listed_origin(const ss_ &aitta)
+{
+	Url u;
+	if(aitta.size() > 200 || !parse_url(aitta, &u) || u.host.empty() ||
+			!(u.path.empty() || u.path == "/") ||
+			(u.scheme != "https" && u.scheme != "http"))
+		return "";
+	ss_ host;
+	for(char c : u.host){
+		if(!(isalnum((unsigned char)c) || c == '.' || c == '-' || c == ':'))
+			return "";
+		host += (char)tolower((unsigned char)c);
+	}
+	return u.scheme+"://"+join_host_port(host, u.port_given ? u.port : "");
+}
+
+ss_ listed_get(const ss_ &origin, const ss_ &path, size_t max_bytes,
+		long timeout_s)
+{
+	Url u;
+	if(listed_origin(origin) != origin || !parse_url(origin, &u))
+		throw Exception("not an Aitta's origin: "+origin.substr(0, 80));
+	struct addrinfo hints, *res = nullptr;
+	memset(&hints, 0, sizeof hints);
+	hints.ai_socktype = SOCK_STREAM;
+	if(getaddrinfo(u.host.c_str(), u.port.c_str(), &hints, &res) != 0 || !res)
+		throw Exception("the Aitta's name "+u.host+" does not resolve");
+	ss_ ip;
+	for(struct addrinfo *r = res; r && ip.empty(); r = r->ai_next){
+		char buf[64] = {0};
+		const void *src = r->ai_family == AF_INET ?
+				(const void*)&((struct sockaddr_in*)r->ai_addr)->sin_addr :
+				r->ai_family == AF_INET6 ?
+				(const void*)&((struct sockaddr_in6*)r->ai_addr)->sin6_addr :
+				nullptr;
+		if(src && inet_ntop(r->ai_family, src, buf, sizeof buf))
+			ip = buf;
+	}
+	freeaddrinfo(res);
+	if(ip.empty())
+		throw Exception("the Aitta's name "+u.host+" has no address");
+	return http_get_pinned(origin+path, ip, max_bytes, timeout_s);
+}
+
+ss_ listed_vouch(const ss_ &origin, const ss_ &public_hex, const ss_ &author)
+{
+	if(fingerprint(public_hex).empty())
+		return "not a key";
+	try {
+		return vouch_answer(listed_get(origin, "/api/v1/aitta/info?key="+
+				public_hex, VOUCH_MAX_BYTES, VOUCH_TIMEOUT_S), author);
+	} catch(std::exception &e){
+		return ss_("the Aitta was not reached: ")+e.what();
+	}
+}
+
+ss_ upload(const ss_ &aitta, const ss_ &sig, const ss_ &zip,
+		std::function<void(const ss_&)> note)
+{
+	ss_ base = aitta;
+	if(base.find("://") == ss_::npos)
+		base = "http://"+base;
+	while(!base.empty() && base.back() == '/')
+		base.pop_back();
+	base += "/api/v1/aitta/";
+	json::json_error_t e;
+	const json::Value sigv = json::load_string(sig.c_str(), &e);
+	const ss_ sha = sigv.get("sha256").is_string() ?
+			sigv.get("sha256").as_string() : "";
+	auto call = [&](const ss_ &url, const ss_ &body, const char *type){
+		ss_ out = http_post(url, body, type);
+		json::Value v = json::load_string(out.c_str(), &e);
+		// simplified: waits for the Aitta's rate as long as it takes
+		while(v.get("error").is_string() && v.get("error").as_string().find(
+				"too many requests") != ss_::npos){
+			if(note)
+				note("waiting for the Aitta's limit on uploads a minute");
+			std::this_thread::sleep_for(std::chrono::seconds(5));
+			out = http_post(url, body, type);
+			v = json::load_string(out.c_str(), &e);
+		}
+		if(!v.get("ok").is_true())
+			throw Exception(v.get("error").is_string() ?
+					v.get("error").as_string() : "Aitta said: "+out.substr(0, 200));
+		return v;
+	};
+	const json::Value begun = call(base+"upload_begin?size="+
+			itos((int64_t)zip.size()), sig, "application/json");
+	const size_t piece = begun.get("piece").is_number() &&
+			begun.get("piece").as_number() > 0 ?
+			(size_t)begun.get("piece").as_number() : 60000;
+	for(size_t at = 0; at < zip.size(); at += piece)
+		call(base+"upload_part?sha256="+sha+"&offset="+itos((int64_t)at),
+				zip.substr(at, piece), "application/octet-stream");
+	const json::Value v = call(base+"upload_end?sha256="+sha, "",
+			"application/octet-stream");
+	if(v.get("warning").is_string() && note)
+		note("warning: "+v.get("warning").as_string());
+	return v.get("result").is_string() ? v.get("result").as_string() : "?";
+}
+
+ss_ made_with(const json::Value &m)
+{
+	const json::Value &v = m.get("buildat_version");
+	if(!v.is_string() || v.as_string() == BUILDAT_VERSION)
+		return "";
+	return " (made with "+v.as_string().substr(0, 40)+"; this is "+
+			BUILDAT_VERSION+")";
+}
+
+bool kit_kind(const ss_ &kind)
+{
+	return kind == "kit" || kind == "template" || kind == "scene";
+}
+
 ss_ aitta_host(const ss_ &aitta)
 {
 	size_t p = aitta.find("://");
@@ -1478,11 +1621,13 @@ ss_ aitta_host(const ss_ &aitta)
 	return h;
 }
 
-ss_ publish_refusal(const ss_ &version, const ss_ &aitta)
+ss_ publish_refusal(const ss_ &version, const ss_ &aitta, const ss_ &kind)
 {
 	// client/core/starport/init.lua's DEFAULT_AITTA, as it stands unoverridden
 	static const ss_ OFFICIAL = "aitta.buildat.org";
-	if(!buildat_version_is_alpha(version.c_str()))
+	// [ALPHA_KIT_PACKAGES_PUBLIC] Kit's kinds go: no stable client takes
+	// them (an Aitta lists them as "other")
+	if(!buildat_version_is_alpha(version.c_str()) || kit_kind(kind))
 		return "";
 	ss_ h = aitta_host(aitta);
 	h = h.substr(h.rfind('@') + 1);
@@ -1492,8 +1637,10 @@ ss_ publish_refusal(const ss_ &version, const ss_ &aitta)
 	std::transform(h.begin(), h.end(), h.begin(), ::tolower);
 	if(h != OFFICIAL)
 		return "";
-	return "This is an alpha build ("+version+"): it does not publish to the "
-			"official Aitta, "+OFFICIAL+". Publish with a stable build, or "
+	return "This is an alpha build ("+version+"): it does not publish "+
+			(kind.empty() ? ss_("") : "a package of kind \""+kind.substr(0, 20)+
+			"\" ")+"to the official Aitta, "+OFFICIAL+" (Kit's templates, "
+			"scenes and Kit packages it does). Publish with a stable build, or "
 			"name another Aitta.";
 }
 

@@ -231,6 +231,9 @@ struct Module: public interface::Module
 		sub(m_server, "kit:change_scene", &Module::on_change_scene);
 		sub(m_server, "world_menu:play", &Module::on_project_play);
 		sub(m_server, "world_menu:copy", &Module::on_project_copy);
+		// [KIT_SERVER_PUBLISH] a template an admin installed through the
+		// server: in Start from
+		sub(m_server, "kit:templates_changed", &Module::configure_menu);
 	}
 
 	void on_start()
@@ -296,7 +299,8 @@ struct Module: public interface::Module
 			if(why.empty())
 				why = interface::aitta::template_refusal(dir);
 			if(!why.empty()){
-				log_w(MODULE, "workbench: the template in %s: %s", cs(dir), cs(why));
+				log_w(MODULE, "workbench: the template in %s: %s%s", cs(dir),
+						cs(why), cs(interface::aitta::made_with(m)));
 				return;
 			}
 			const ss_ title = m.get("title").as_string();
@@ -434,6 +438,9 @@ struct Module: public interface::Module
 			why = "not a template (its meta.json's kind)";
 		if(why.empty())
 			why = interface::aitta::template_refusal(to);
+		// [ALPHA_KIT_PACKAGES_PUBLIC] the version that made it, when another
+		if(!why.empty() && m.is_object())
+			why += interface::aitta::made_with(m);
 		fs::remove_all(zip);
 		if(!why.empty())
 			fs::remove_all(to);

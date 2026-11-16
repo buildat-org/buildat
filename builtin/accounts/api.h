@@ -181,9 +181,15 @@ namespace accounts
 		// message text in it: a topic is readable by whoever knows it.
 		virtual void notify(int min_level, const ss_ &text,
 				const ss_ &link = "") = 0;
+		// [KIT_SERVER_PUBLISH] The Starport IDs linked to an account,
+		// "<starport>/<sub>" each (a release published as the server says
+		// who by them)
+		virtual sv_<ss_> starport_ids(const ss_ &name) = 0;
 		// [KIT] An account's privilege other than admin, kept with the
-		// account: "builder" (Kit's edit rights) is the one there is. The
-		// admin grants and takes it (the Accounts page, or Kit's editor).
+		// account: "builder" (Kit's edit rights), and "publisher"
+		// ([KIT_SERVER_PUBLISH]: may publish as the server, Kit's Publishing
+		// page). The admin grants and takes them (the Accounts page, Kit's
+		// editor and Publishing page).
 		// set_priv: "" when done, else why not; with `by`, only an admin
 		// sets it.
 		virtual bool has_priv(const ss_ &name, const ss_ &priv) = 0;
