@@ -1383,8 +1383,9 @@ rebuild_bar = function(if_changed)
 		end
 		if E.state.can_make_scenes then
 			choices[#choices + 1] = {"New scene...", "\0new"}
-			-- [KIT_SCENE_PACKAGES]
-			choices[#choices + 1] = {"Add a scene from a file...", "\0file"}
+			-- [KIT_SCENE_PACKAGES] (short: the list is as wide as its longest
+			-- choice, and the bar's one row at 1280x800 holds it so)
+			choices[#choices + 1] = {"Add from a file...", "\0file"}
 		end
 		-- [KIT_SCENE_ADD_LIVE]
 		if #scenes > 1 then
@@ -2156,7 +2157,7 @@ local function new_tab(w)
 	end
 	-- [KIT_SCENE_PACKAGES] The Aittas' scene packages, this project's
 	-- game's first, each added as a new scene; this scene exported as a
-	-- file (Add a scene from a file... takes it) or published
+	-- file (the scene list's Add from a file... takes it) or published
 	if not E.state.can_make_scenes then
 		return
 	end

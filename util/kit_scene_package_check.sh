@@ -18,18 +18,21 @@
 #      command line, and a copy of it as "othertrack", made for the game
 #      other/game.
 #   2. B (another user dir, the file copied into its exports): in "world" a
-#      counter Score and B's own local/marker. Add a scene from a file...
+#      counter Score and B's own local/marker. Add from a file...
 #      (the scene list), the picker: a zip with a file no scene package has
 #      refused; track.scene.zip added as "track", the window listing the
 #      link to Bell left out. Its export there has the first's World edits
 #      and names only Score outside it.
 #   3. B's New tab lists both packages: "track" added at once as track_2
-#      (its key vouched for by the Aitta); "othertrack" only after the
-#      question's Add anyway, as track_3.
+#      (its key vouched for by the Aitta), its kitboss/brick kept as B's,
+#      not refused; "othertrack" only after the question's Add anyway, as
+#      track_3, its brick giving light: B's kept, the Added line naming it
+#      as differing.
 #   4. B, Running: track.scene.zip as 0.8.0-alpha.1 made it (its World's
-#      edits over 64 sections): with another kind refused, the refusal
-#      naming both versions; as it is added as track_4, unlisted; its
-#      list_scene refused until its World's sections are in, then done.
+#      edits over 64 sections, its brick another version): with another
+#      kind refused, the refusal naming both versions; as it is added as
+#      track_4, unlisted, the brick kept and not named; its list_scene
+#      refused until its World's sections are in, then done.
 #   B's save after: each scene's entities new ids, the timer's link and the
 #   teleporter's target B's Score, no link to Bell; local/beacon A's,
 #   local/marker B's own; kitboss/brick and the heightmap rows taken.
@@ -170,13 +173,13 @@ added_closed() # the window listing what was left out closed
 {
 	step 10 "kit editor: the scene added closed" "frames 3" 'click Button "OK"'
 }
-pick() # <file in <user>/exports> <regex in the client's log> [commands after]: Add a scene from a file...
+pick() # <file in <user>/exports> <regex in the client's log> [commands after]: Add from a file...
 {
 	local f=$1 re=$2
 	shift 2
 	# (the bar's second list, the first the view's)
 	cmd "frames 3" 'click DropDownList "▼" 1024 0' "delay 300" "frames 3"
-	step 10 "The file picker at .*/exports" 'click Text "Add a scene from a file..."'
+	step 10 "The file picker at .*/exports" 'click Text "Add from a file..."'
 	step 60 "$re" "frames 3" "click Button \"$f\"" "$@"
 }
 
@@ -301,6 +304,10 @@ json.dump(dm, open(dev + "/meta.json", "w"))
 shutil.copytree(dev, other)
 dm.update(name="othertrack", title="Other track", game="other/game")
 json.dump(dm, open(other + "/meta.json", "w"))
+# Its copy of kitboss/brick gives light: B keeps its own, named as differing
+vs = json.load(open(other + "/voxels.json"))
+vs["kitboss/brick"]["light"] = 5
+json.dump(vs, open(other + "/voxels.json", "w"))
 # A zip with a file no scene package has
 with zipfile.ZipFile(z) as zi, zipfile.ZipFile(bad, "w") as zo:
     for n in zi.namelist():
@@ -367,7 +374,8 @@ grep -aq "kit editor: scene package kitboss/track 0.1.0 for kitboss/world" "$CL"
 m=$(mark "$SL")
 mc=$(mark "$CL")
 step 30 "kit editor: Added the scene track_2 " "frames 3" 'click Button "Add track"'
-await "$SL" "$m" 10 "kitboss adds the scene track_2 \(kitboss/track 0\.1\.0 from [^)]*\): [0-9]+ entities, 1 links or entity parameters left out, 0 types added, 1 kept"
+# (the brick B took from track: kept as B's, the same row)
+await "$SL" "$m" 10 "kitboss adds the scene track_2 \(kitboss/track 0\.1\.0 from [^)]*\): [0-9]+ entities, 1 links or entity parameters left out, 0 types added, 1 kept as the game's, 0 rows \(1 kept as the game's, 0 refused\), [0-9]+ textures, [0-9]+ heightmap samples, [0-9]+ decorations$"
 await "$SL" "$m" 20 "The scene track_2: by kitboss@[^,]*, its Aitta says"
 await "$CL" "$mc" 10 "kit editor: in the scene track_2 "
 ! tail -c +$((mc + 1)) "$CL" | grep -qa "is made for" ||
@@ -377,8 +385,11 @@ step 10 "kit editor: the scene .*/othertrack is made for other/game, this projec
 	"frames 3" 'click Button "Add Other track"'
 cmd "delay 300" "frames 5" "screenshot $t/b_other.png"
 m=$(mark "$SL")
+mc=$(mark "$CL")
 step 30 "kit editor: Added the scene track_3 " "frames 3" 'click Button "Add anyway"'
-await "$SL" "$m" 10 "kitboss adds the scene track_3 \(kitboss/othertrack 0\.1\.0 from "
+# (its brick gives light: B's kept, named for the builder)
+await "$SL" "$m" 10 "kitboss adds the scene track_3 \(kitboss/othertrack 0\.1\.0 from [^)]*\): .* 0 rows \(1 kept as the game's, 0 refused\), .* decorations; 1 differs from the game's: kitboss/brick$"
+await "$CL" "$mc" 10 "kit editor: Added the scene track_3 .* decorations; 1 differs from the game's: kitboss/brick"
 added_closed
 echo "ok: from the Aitta (B): track_2 at once, track_3 after Add anyway"
 
@@ -400,6 +411,10 @@ for i in range(8):
         if i or k:
             e["cells"] += [64 * i + 3, 14, 64 * k + 3, b, 0]
 files["edits.bin"] = zlib.compress(json.dumps(f).encode())
+# Its brick's row another version of B's, the same otherwise
+vs = json.loads(files["voxels.json"])
+vs["kitboss/brick"]["version"] = 7
+files["voxels.json"] = json.dumps(vs)
 for name, meta in (("old", m), ("oldkind", dict(m, kind="template"))):
     with zipfile.ZipFile(out + "/" + name + ".scene.zip", "w") as zo:
         for n, d in files.items():
@@ -414,7 +429,8 @@ m=$(mark "$SL")
 pick old.scene.zip "kit editor: Added the scene track_4 " \
 	"wait_log 60000 kit editor: Added the scene track_4 " \
 	'event kit_edit {"op": "list_scene", "name": "track_4", "on": true}'
-await "$SL" "$m" 10 "kitboss adds the scene track_4 \(kitboss/track 1\.0\.0\): .*\(Running: unlisted\)"
+# (its brick only another version: kept, not named as differing)
+await "$SL" "$m" 10 "kitboss adds the scene track_4 \(kitboss/track 1\.0\.0\): .* 0 rows \(1 kept as the game's, 0 refused\), .* decorations \(Running: unlisted\)$"
 await "$SL" "$m" 10 "World track_4: the template's 64 edited cells in 64 sections \(0 left out\), put in over ticks"
 await "$SL" "$m" 10 "An edit by kitboss: set [0-9]+'s kit/scene_info listed|An edit \(list_scene\) by peer [0-9]+ refused"
 tail -c +$((m + 1)) "$SL" | grep -qaE "An edit \(list_scene\) by peer [0-9]+ refused: the scene track_4's World is not ready yet \([0-9]+ sections to go\): list it then" ||

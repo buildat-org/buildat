@@ -7871,7 +7871,8 @@ struct Module: public interface::Module, public Interface
 	// "dropped"; its custom types the project lacks added, one it has kept
 	// as the project's ("kept", the difference logged); its rows checked as
 	// a template's (import_rows()), one of a key the project has kept as the
-	// project's; its World's edits put in. One undo takes its entities away
+	// project's (named at the end of what where it differs, the builder's
+	// line and an agent's answer); its World's edits put in. One undo takes its entities away
 	// (its World, rows and types stay, as New scene's World). "" when added
 	// simplified: a refusal after its types went in leaves them (the
 	// builder deletes them in the types' window); a check of its entities
@@ -7980,7 +7981,8 @@ struct Module: public interface::Module, public Interface
 		}
 		// Its rows, loaded
 		size_t textures = 0, took = 0, left = 0, rows_kept = 0;
-		import_rows(dir, true, textures, took, left, rows_kept);
+		std::set<ss_> differ;
+		import_rows(dir, true, textures, took, left, rows_kept, &differ);
 		if(took){
 			load_builder_voxels();
 			load_items();
@@ -8107,7 +8109,7 @@ struct Module: public interface::Module, public Interface
 		// own ticks between
 		import_cells(ed, m_session.running);
 		world_check(p.name);
-		const ss_ what = "the scene "+name+" ("+jstr(m, "author")+"/"+
+		ss_ what = "the scene "+name+" ("+jstr(m, "author")+"/"+
 				jstr(m, "name")+" "+jstr(m, "version")+(aitta.empty() ? ss_() :
 				" from "+interface::aitta::aitta_host(aitta))+"): "+
 				itos(change.size())+" entities, "+itos(dropped.size())+
@@ -8116,6 +8118,18 @@ struct Module: public interface::Module, public Interface
 				itos(took)+" rows ("+itos(rows_kept)+" kept as the game's, "+
 				itos(left)+" refused), "+itos(textures)+" textures, "+
 				itos(samples)+" heightmap samples, "+itos(decors)+" decorations";
+		// The rows kept as the game's that differ from the scene's, for the
+		// builder to edit: the first 5 named
+		if(!differ.empty()){
+			what += "; "+itos(differ.size())+(differ.size() == 1 ? " differs" :
+					" differ")+" from the game's:";
+			size_t i = 0;
+			for(const ss_ &k : differ)
+				if(i++ < 5)
+					what += (i > 1 ? ", " : " ")+k.substr(0, 129);
+			if(differ.size() > 5)
+				what += " and "+itos(differ.size() - 5)+" more";
+		}
 		log_i(MODULE, "%s adds %s%s", cs(p.name), cs(what), unlisted ?
 				" (Running: unlisted)" : "");
 		for(unsigned i = 0; i < dropped.size(); i++)
@@ -9117,11 +9131,12 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// An export's rows (import_export()'s); a row of a key the project has
-	// stays the project's, the export's left out (counted in kept, a
-	// difference logged). keep: a scene's ([KIT_SCENE_PACKAGES]), for the
-	// log's words
+	// stays the project's, the export's left out (counted in kept; one that
+	// differs, its version aside, logged and its key put in differ). keep: a
+	// scene's ([KIT_SCENE_PACKAGES]), for the log's words
 	void import_rows(const ss_ &dir, bool keep, size_t &textures,
-			size_t &took, size_t &left, size_t &kept)
+			size_t &took, size_t &left, size_t &kept,
+			std::set<ss_> *differ = nullptr)
 	{
 		const char *from = keep ? "scene" : "template";
 		sv_<std::pair<ss_, ss_>> renamed;
@@ -9174,11 +9189,23 @@ struct Module: public interface::Module, public Interface
 			// template's either (its first start has none of them)
 			ss_ had;
 			if(m_store->get(what+":"+key, had)){
-				if(had != row.stringify())
+				// (a row that differs only by its version is the same)
+				json::Value h = json::load_string(had.c_str()), r = row.deepcopy();
+				for(json::Value *v : {&h, &r}){
+					v->del_key("version");
+					v->del_key("package");
+				}
+				// simplified: a differing type keeps the game's look, named
+				// for the builder to edit; renaming the scene's type and
+				// remapping its cells is the upgrade, if collisions show up
+				if(h.stringify() != r.stringify()){
 					log_i(MODULE, "The %s's %s %s differs from the project's (%zu "
 							"bytes, the project's %zu): the project's kept", from,
 							cs(what), cs(key.substr(0, 129)), row.stringify().size(),
 							had.size());
+					if(differ)
+						differ->insert(key);
+				}
 				kept++;
 				return;
 			}
@@ -9191,13 +9218,18 @@ struct Module: public interface::Module, public Interface
 			world::Material m;
 			json::Value r = (*it).is_object() ? (*it).deepcopy() : json::object();
 			r.del_key("package");
+			// The game's own type first (m_registered has it too): kept by
+			// take(), not refused as the app's or Kit's
+			ss_ had;
+			const bool game = m_store->get("voxel:"+it.key(), had);
 			const ss_ why = !own(it.key()) ? "not a builder's <author>/<name>" :
+					game ? "" :
 					m_registered.count(it.key()) ? "the app's or Kit's voxel" :
 					!m.parse(r) ? "not a voxel type's row" :
 					!worn(r, {"texture", "top", "side", "bottom"}) ?
 					"a texture no voxel or upload has" : n >= MAX_VOXEL_TYPES ?
 					"past "+itos(MAX_VOXEL_TYPES)+" voxel types" : "";
-			n += why.empty();
+			n += why.empty() && !game;
 			take("voxel", it.key(), why, r);
 		}
 		n = m_store->list("item:").size();
@@ -30308,8 +30340,8 @@ struct Module: public interface::Module, public Interface
 				"its game), LICENSE, composition.json (the scene entity and "
 				"those under it; \"outside\": the entities outside it its links "
 				"and entity parameters name, by name), the custom types, rows "
-				"and textures it uses, edits.bin (its World's). The palette's "
-				"Add a scene from a file... takes the zip into another game.",
+				"and textures it uses, edits.bin (its World's). The scene "
+				"list's Add from a file... takes the zip into another game.",
 				R"J({"type": "object", "properties": {"scene": {"type": "string",
 				"description": "Its name; none: the scene the agent is in"}}})J",
 				""},
