@@ -671,6 +671,9 @@ static EM_BOOL Emscripten_HandleMouseButton(int eventType, const EmscriptenMouse
         }
         sdl_button_state = SDL_PRESSED;
         sdl_event_type = SDL_MOUSEBUTTONDOWN;
+        /* buildat [WEB_CLIENT]: the press is claimed as the release is; a
+           middle press left to Firefox started its autoscroll or paste */
+        prevent_default = SDL_GetEventState(sdl_event_type) == SDL_ENABLE;
     } else {
         sdl_button_state = SDL_RELEASED;
         sdl_event_type = SDL_MOUSEBUTTONUP;
@@ -716,18 +719,24 @@ static EM_BOOL Emscripten_HandleWheel(int eventType, const EmscriptenWheelEvent 
     float deltaY = wheelEvent->deltaY;
     float deltaX = wheelEvent->deltaX;
 
+    /* buildat: in tenths of a notch (a desktop's wheel is whole notches,
+       and the web page's reader divides by ten); SDL_SendMouseWheel adds
+       up the fractions of a smooth scroll's many small events (user,
+       2026-09-30: the floorplanner zoomed far faster on the web, and then
+       in steps of whole notches that Firefox's fewer pixels reached only
+       now and then) */
     switch (wheelEvent->deltaMode) {
     case DOM_DELTA_PIXEL:
-        deltaY /= 100; /* 100 pixels make up a step */
-        deltaX /= 100; /* 100 pixels make up a step */
+        deltaY /= 10; /* 100 pixels make up a step */
+        deltaX /= 10; /* 100 pixels make up a step */
         break;
     case DOM_DELTA_LINE:
-        deltaY /= 3; /* 3 lines make up a step */
-        deltaX /= 3; /* 3 lines make up a step */
+        deltaY *= 10.0f / 3; /* 3 lines make up a step */
+        deltaX *= 10.0f / 3; /* 3 lines make up a step */
         break;
     case DOM_DELTA_PAGE:
-        deltaY *= 80; /* A page makes up 80 steps */
-        deltaX *= 80; /* A page makes up 80 steps */
+        deltaY *= 10; /* A page makes up a step */
+        deltaX *= 10; /* A page makes up a step */
         break;
     }
 
@@ -794,17 +803,6 @@ static EM_BOOL Emscripten_HandleTouch(int eventType, const EmscriptenTouchEvent 
     return preventDefault;
 }
 
-static SDL_bool IsFunctionKey(SDL_Scancode scancode)
-{
-    if (scancode >= SDL_SCANCODE_F1 && scancode <= SDL_SCANCODE_F12) {
-        return SDL_TRUE;
-    }
-    if (scancode >= SDL_SCANCODE_F13 && scancode <= SDL_SCANCODE_F24) {
-        return SDL_TRUE;
-    }
-    return SDL_FALSE;
-}
-
 /* This is a great tool to see web keyboard events live:
  * https://w3c.github.io/uievents/tools/key-event-viewer.html
  */
@@ -812,8 +810,14 @@ static EM_BOOL Emscripten_HandleKey(int eventType, const EmscriptenKeyboardEvent
 {
     const SDL_Keycode keycode = Emscripten_MapKeyCode(keyEvent);
     SDL_Scancode scancode = Emscripten_MapScanCode(keyEvent->code);
-    SDL_bool prevent_default = SDL_FALSE;
-    SDL_bool is_nav_key = SDL_FALSE;
+
+    /* buildat [WEB_KEYS]: a key an IME is composing with (229, "Process")
+       or a dead key is the IME's or the browser's: neither a game key nor
+       claimed */
+    if (keyEvent->keyCode == 229 || SDL_strcmp(keyEvent->key, "Process") == 0 ||
+        SDL_strcmp(keyEvent->key, "Dead") == 0) {
+        return SDL_FALSE;
+    }
 
     if (scancode == SDL_SCANCODE_UNKNOWN) {
         /* KaiOS Left Soft Key and Right Soft Key, they act as OK/Next/Menu and Cancel/Back/Clear */
@@ -825,28 +829,26 @@ static EM_BOOL Emscripten_HandleKey(int eventType, const EmscriptenKeyboardEvent
     }
 
     if (scancode != SDL_SCANCODE_UNKNOWN) {
-        prevent_default = SDL_SendKeyboardKeyAndKeycode(eventType == EMSCRIPTEN_EVENT_KEYDOWN ? SDL_PRESSED : SDL_RELEASED, scancode, keycode);
+        SDL_SendKeyboardKeyAndKeycode(eventType == EMSCRIPTEN_EVENT_KEYDOWN ? SDL_PRESSED : SDL_RELEASED, scancode, keycode);
     }
 
-    /* if TEXTINPUT events are enabled we can't prevent keydown or we won't get keypress
-     * we need to ALWAYS prevent backspace and tab otherwise chrome takes action and does bad navigation UX
-     */
-    if ((scancode == SDL_SCANCODE_BACKSPACE) ||
-        (scancode == SDL_SCANCODE_TAB) ||
-        (scancode == SDL_SCANCODE_LEFT) ||
-        (scancode == SDL_SCANCODE_UP) ||
-        (scancode == SDL_SCANCODE_RIGHT) ||
-        (scancode == SDL_SCANCODE_DOWN) ||
-        IsFunctionKey(scancode) ||
-        keyEvent->ctrlKey) {
-        is_nav_key = SDL_TRUE;
+    /* buildat [WEB_KEYS]: a key is claimed from the browser unless
+       - Ctrl, Alt or Meta is held: the browser's shortcuts stay its own,
+         and Ctrl+C, V and X must, or no copy or paste event comes;
+       - a text field has focus (text input is active only then; see the
+         web client's start) and the key types a character: the keypress
+         that carries the text has to come.
+       So F1 to F12, Tab, Backspace, the arrows, and with no field focused
+       Space, letters and the quick find's '/' are the game's. */
+    if (keyEvent->ctrlKey || keyEvent->altKey || keyEvent->metaKey) {
+        return SDL_FALSE;
     }
-
-    if ((eventType == EMSCRIPTEN_EVENT_KEYDOWN) && (SDL_GetEventState(SDL_TEXTINPUT) == SDL_ENABLE) && !is_nav_key) {
-        prevent_default = SDL_FALSE;
+    if (SDL_IsTextInputActive() && keyEvent->key[0] &&
+        (keyEvent->key[1] == 0 || (unsigned char)keyEvent->key[0] >= 0x80) &&
+        SDL_strlen(keyEvent->key) <= 4) {
+        return SDL_FALSE;
     }
-
-    return prevent_default;
+    return SDL_TRUE;
 }
 
 static EM_BOOL Emscripten_HandleKeyPress(int eventType, const EmscriptenKeyboardEvent *keyEvent, void *userData)
@@ -900,9 +902,10 @@ static EM_BOOL Emscripten_HandleResize(int eventType, const EmscriptenUiEvent *u
             double w = window_data->window->w;
             double h = window_data->window->h;
 
-            if (window_data->external_size) {
-                emscripten_get_element_css_size(window_data->canvas_id, &w, &h);
-            }
+            /* buildat [WEB_CLIENT]: the page sizes the canvas by CSS to the
+               browser window, and at the start the two sizes are the same, so
+               external_size was false and a resize never took */
+            emscripten_get_element_css_size(window_data->canvas_id, &w, &h);
 
             emscripten_set_canvas_element_size(window_data->canvas_id, w * window_data->pixel_ratio, h * window_data->pixel_ratio);
 
