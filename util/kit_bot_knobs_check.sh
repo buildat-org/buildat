@@ -250,7 +250,24 @@ srv 60 "sold kit/airship_skiff to Bot [0-9]+ as [0-9]+"
 srv 60 "Bot [0-9]+ puts kit/airship_gun on entity [0-9]+"
 srv 60 "Bot [0-9]+ takes the seat of entity [0-9]+"
 srv 120 "Bot [0-9]+ fires entity [0-9]+'s kit/turret from"
-srv 150 "Bot [0-9]+'s projectile [0-9]+ hits entity [0-9]+'s cell"
+# [KIT_BOT_TEAMS_RACE] Until a hit on the other team's ship, as the verdict
+# asks: the first cell hit may be one it does not count (a ship of no team,
+# as the gunboat 55, or the shooter's own team's), and the check ended on
+# it. The bots' teams are a coin's: kitboss Red, the first bot Blue, the
+# second at a tie (a late join's "fewest" is at random on a tie)
+python3 -I - "$SL" "$SM" 150 <<'PY' || fail "no bot hit the other team's ship in 150 s ($SL)"
+import re, sys, time
+log, at, end = sys.argv[1], int(sys.argv[2]), time.time() + float(sys.argv[3])
+while time.time() < end:
+	r = open(log, "rb").read()[at:].decode(errors="replace")
+	team = dict(re.findall(r"kit/team \d+: (kitboss|Bot \d+) joins team (Red|Blue)", r))
+	ship = {s: team.get(w) for w, s in re.findall(r"sold kit/airship_skiff to (kitboss|Bot \d+) as (\d+)", r)}
+	if any(ship.get(s) and team.get(b) and ship[s] != team[b] for b, s in
+			re.findall(r"(Bot \d+)'s projectile \d+ hits entity (\d+)'s cell", r)):
+		sys.exit(0)
+	time.sleep(0.2)
+sys.exit(1)
+PY
 cmd "frames 30" "screenshot $t/round.png"
 close
 python3 -I - "$t" <<'PY' || fail "the logs say otherwise ($t)"
