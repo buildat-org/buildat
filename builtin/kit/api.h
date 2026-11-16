@@ -649,7 +649,23 @@ namespace interface
 //   ("kit:export" {"author", "files", "hex", "dependencies"}; the
 //   packages' "<fp>/" its author's name again, a dependency its
 //   "<author>/<name>"), which the editor hands the client's publish
-//   screen. Credits: each client's
+//   screen. [KIT_SCENE_PACKAGES] **Scene packages** (doc/aitta.txt
+//   "Scenes"): {"op": "export_scene", "scene" (none: the builder's),
+//   "publish"}: "kit:scene_export" (its file's name "<scene>.scene.zip", a
+//   0 byte, the zip), or with publish "kit:scene_publish" {"name",
+//   "author", "title", "game", "files", "hex"} for the publish screen
+//   (kit_publish's kind "scene"). "kit:scene" (a scene package's zip, or
+//   the Aitta, a 0 byte, its release's .sig, a 0 byte and its zip, the
+//   signature checked as a package's and the key's vouch asked): a
+//   builder with the tools on, Stopped, adds its scene as a new one, the
+//   next free name of its own; its links and entity parameters onto
+//   entities outside it made this project's entities of the same name, or
+//   left out; its custom types the project lacks added, those it has kept
+//   as they are; its rows checked as an export's (those of a key the
+//   project has kept as they are). Answered with "kit:scene" {"ok": true,
+//   "what", "scene", "game", "dropped": [what was left out], "kept": [its
+//   types kept as the project's]} or {"ok": false, "why"}; "kit:edit_state"
+//   has "game", the project's ("<author>/<name>"). Credits: each client's
 //   "kit:edit_state" has "credits", [{"author" (a package's with its
 //   Aitta's host where it is ambiguous or unverified), "package"
 //   ("<author>/<name>"), "id", "aitta", "verified", "version",
@@ -1610,7 +1626,14 @@ namespace kit
 		// ("export_project", the agents' export_template) as a template
 		// under it; "": no export. A template's first start also takes the
 		// rest of an export from composition_path's directory (items.json,
-		// sounds.json, voxels.json, prefabs.json, textures/, edits.bin)
+		// sounds.json, voxels.json, prefabs.json, textures/, edits.bin) and
+		// [KIT_SCENE_PACKAGES] its game: its meta.json's "game", else its
+		// "<author>/<name>" (Kit's row "game"; a project no template made is
+		// its first exporter's "<author>/<project>"). A builder exports one
+		// scene as a scene package ("export_scene", the agents'
+		// export_scene) and adds one as a new scene ("kit:scene", the
+		// palette's Add a scene from a file... and the New tab's list of the
+		// Aittas' scene packages): doc/aitta.txt "Scenes"
 		ss_ project;
 		// [KIT_PROJECT_EXPORT] The app's projects for the agents' tools
 		// (list_projects, copy_project, rename_project), an admin's: op

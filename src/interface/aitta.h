@@ -95,7 +95,9 @@ namespace interface
 		// extension, run in the client's sandbox under the name
 		// "<author>__<name>", "world" ([WORLD_PACKAGES], install_world()),
 		// "remix" or "kit" ([KIT] stage 5: component types, prefabs and
-		// voxel types, installed into a server's composition by Kit)
+		// voxel types, installed into a server's composition by Kit),
+		// "template" or "scene" ([KIT_SCENE_PACKAGES]: one scene of a
+		// project, added to another by Kit; template_refusal() checks both)
 		ss_ kind_of(const json::Value &m);
 		// [KIT_TEMPLATES] Why a directory is no template's, "" when it is one
 		ss_ template_refusal(const ss_ &dir);

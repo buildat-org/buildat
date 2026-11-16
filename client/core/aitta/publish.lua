@@ -192,7 +192,8 @@ page_package = function(message)
 		names[#names + 1] = {e.name .. (e.kind == "extension" and
 				" (ext.)" or e.kind == "world" and " (world)" or
 				e.kind == "remix" and " (my version)" or
-				e.kind == "kit" and " (Kit)" or ""), e.name}
+				e.kind == "kit" and " (Kit)" or
+				e.kind == "scene" and " (scene)" or ""), e.name}
 	end
 	if #names > 0 then
 		add_dropdown(pr, names, st.selected, function(name)
@@ -795,12 +796,17 @@ end
 -- user says yes in a window of this client's: the files of types/ and
 -- textures/ only, and the manifest's kind, name and dependencies (the
 -- other fields kept, or the author's and a version to start from); then
--- the screen opened on it
+-- the screen opened on it. [KIT_SCENE_PACKAGES] t.kind "scene": a scene
+-- package, its composition, custom types, rows, textures and edits.bin,
+-- the manifest's title and game too; its LICENSE (all rights reserved)
+-- and licences only where the folder has none
 -- simplified: a file the export no longer has stays in the folder
 function M.publish_kit(t)
 	local ui = require("buildat/extension/ui_utils").safe
+	local scene = t.kind == "scene"
+	local what = scene and "the scene" or "Kit's export"
 	local function refuse(why)
-		log:info("aitta publish: Kit's export refused: " .. why)
+		log:info("aitta publish: " .. what .. " refused: " .. why)
 		ui.show_message_dialog("Not published: " .. why)
 	end
 	if GetPlatform() == "Web" then
@@ -812,14 +818,28 @@ function M.publish_kit(t)
 			return refuse("a name is 1 to 40 of a-z, 0-9 and _: " .. n:sub(1, 40))
 		end
 	end
+	local game = tostring(t.game or "")
+	if scene and (not game:match("^[a-z0-9_]+/[a-z0-9_]+$") or #game > 81) then
+		return refuse("a scene's game is <author>/<name>: " .. game:sub(1, 81))
+	end
+	local paths = scene and {files = {"^composition%.json$",
+			"^types/[%w_]+%.lua$", "^types/[%w_]+%.client%.lua$",
+			"^items%.json$", "^sounds%.json$", "^voxels%.json$",
+			"^prefabs%.json$", "^LICENSE$"},
+			hex = {"^textures/%x+%.png$", "^edits%.bin$"}} or
+			{files = {"^types/[%w_]+%.[a-z]+%.json$"},
+			hex = {"^textures/[%w_]+%.png$"}}
 	local writes, total = {}, 0
-	for which, pattern in pairs({files = "^types/[%w_]+%.[a-z]+%.json$",
-			hex = "^textures/[%w_]+%.png$"}) do
+	for which, patterns in pairs(paths) do
 		for path, v in pairs(type(t[which]) == "table" and t[which] or {}) do
-			if type(path) ~= "string" or not path:match(pattern) or
-					type(v) ~= "string" or (which == "hex" and
+			local ok = false
+			for _, pattern in ipairs(patterns) do
+				ok = ok or (type(path) == "string" and path:match(pattern) ~= nil)
+			end
+			if not ok or type(v) ~= "string" or (which == "hex" and
 					(#v % 2 ~= 0 or v:find("[^%x]"))) then
-				return refuse("not a file of a Kit package: " .. tostring(path):sub(1, 60))
+				return refuse("not a file of a " .. (scene and "scene" or "Kit") ..
+						" package: " .. tostring(path):sub(1, 60))
 			end
 			writes[path] = which == "hex" and v:gsub("%x%x", function(h)
 				return string.char(tonumber(h, 16))
@@ -827,8 +847,9 @@ function M.publish_kit(t)
 			total = total + #writes[path]
 		end
 	end
-	if next(writes) == nil or total > 4 * 1024 * 1024 then
-		return refuse("no files, or more than 4 MiB")
+	local max = (scene and 40 or 4) * 1024 * 1024
+	if next(writes) == nil or total > max then
+		return refuse("no files, or more than " .. max / 1024 / 1024 .. " MiB")
 	end
 	local deps = {}
 	for _, d in ipairs(type(t.dependencies) == "table" and t.dependencies or {}) do
@@ -836,16 +857,24 @@ function M.publish_kit(t)
 	end
 	local dir = USER .. "/dev_apps/" .. name
 	local m = read_meta(name)
-	if next(m) ~= nil and m.kind ~= "kit" then
+	local kind = scene and "scene" or "kit"
+	if next(m) ~= nil and m.kind ~= kind then
 		return refuse(dir .. " is a package of another kind")
+	end
+	-- The author's own licence stays
+	local lf = scene and io.open(dir .. "/LICENSE", "rb")
+	if lf then
+		lf:close()
+		writes.LICENSE = nil
 	end
 	local n = 0
 	for _ in pairs(writes) do
 		n = n + 1
 	end
 	local root, w = open_window("aitta kit", 560, nil, {close_glyph = false})
-	add_text(w, "Write " .. n .. " files of " .. author ..
-			"'s prefabs and voxel types into " .. dir ..
+	add_text(w, "Write " .. n .. " files of " .. author .. "'s " ..
+			(scene and "scene " .. tostring(t.title or name):sub(1, 40) or
+			"prefabs and voxel types") .. " into " .. dir ..
 			", and open the publish screen on it?")
 	local r = add_row(w)
 	add_button(r, "Yes", function()
@@ -859,23 +888,31 @@ function M.publish_kit(t)
 				return refuse(tostring(err))
 			end
 		end
-		m.kind, m.name, m.dependencies = "kit", name, deps
+		m.kind, m.name = kind, name
 		m.author = m.author or author
 		m.version = m.version or "0.1.0"
-		m.description = m.description or "Prefabs and voxel types made in Kit"
+		if scene then
+			m.title = tostring(t.title or name):sub(1, 40)
+			m.game = game
+			m.description = m.description or "A scene made in Kit"
+		else
+			m.dependencies = deps
+			m.description = m.description or "Prefabs and voxel types made in Kit"
+		end
 		local ok, err = write_meta(name, m)
 		if not ok then
 			return refuse(tostring(err))
 		end
-		log:info("aitta publish: Kit's export, " .. n .. " files in " .. dir)
+		log:info("aitta publish: " .. what .. ", " .. n .. " files in " .. dir)
 		st.selected, st.result = name, nil
 		refresh_menu()
-		page_package("Kit's export written into " .. dir)
+		page_package((scene and "The scene" or "Kit's export") ..
+				" written into " .. dir)
 	end, nil, true)
 	add_button(r, "Cancel", function()
 		uistack.main:pop(root)
 	end)
-	log:info("aitta publish: Kit's export asked, " .. n .. " files")
+	log:info("aitta publish: " .. what .. " asked, " .. n .. " files")
 end
 end
 -- vim: set noet ts=4 sw=4:

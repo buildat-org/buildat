@@ -277,7 +277,54 @@ One more manifest field, and no "dependencies":
 
         "title": "Puzzle room"        its name in the list, 40 bytes at most
 
-An Aitta lists it as kind "other" with its whole manifest, as a Kit package.
+An exported project's meta.json also names its game, "game" below. An
+Aitta lists it as kind "other" with its whole manifest, as a Kit package.
+
+Scenes [KIT_SCENE_PACKAGES]
+---------------------------
+A package of kind "scene" is one scene of a Workbench project (a track, an
+arena), which a builder adds to another project as a new scene. Its files
+are an exported project's (above), cut to the scene, and refused at pack
+the same:
+
+        composition.json              {"scene": its name, "entities": the
+                                      scene entity and those under it,
+                                      "outside": {"<id>": "<name>"}: each
+                                      entity outside it that a link or an
+                                      entity parameter names, by name}
+        types/                        the custom types it uses
+        items.json, sounds.json,      the builders' rows it uses, and the
+        voxels.json, prefabs.json,    uploads they wear
+        textures/<16 hex>.png
+        edits.bin                     its World's edits, under its name
+        LICENSE or LICENCE
+
+Two more manifest fields, and no "dependencies":
+
+        "title": "Crag run"           its name in the list, 40 bytes at most
+        "game": "buildat/crag_trial"  the game it is made for: the
+                                      template its project was made from
+                                      ("<author>/<name>", or the template's
+                                      own "game"); a project no template
+                                      made is its own game,
+                                      "<author>/<project>"
+
+It is not installed in the client. Kit's "Export this scene" (the
+palette's New tab) writes <scene>.scene.zip, and "Publish this scene..."
+writes it into <user>/dev_apps/<name> and opens the publish screen on it.
+The New tab lists the Aittas' scene packages, the project's game's first;
+one made for another game is added after a yes ("its types may differ").
+"Add a scene from a file..." (the scene list) takes a zip. The server
+checks a fetched one's signature and asks its Aitta whose key it is, as a
+Kit package's, and then: the scene gets the next free name of its own
+(track, track_2, ...) and new ids; a link or entity parameter onto an
+entity outside it goes to this project's entity of that name (the first),
+and with none it is left out and the builder shown the list; a custom
+type the project lacks is added, one it has is kept as it is (the
+difference logged); its rows are checked as an export's, one the project
+has kept as the project's. The types added are the project's own from
+then on: they run in the server's box and on its players' clients. An
+Aitta lists it as kind "other" with its whole manifest, as a Kit package.
 
 Worlds [WORLD_PACKAGES]
 -----------------------
