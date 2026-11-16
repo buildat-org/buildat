@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-16)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/accounts/accounts.cpp builtin/accounts/client_lua/accounts.lua src/client/main.cpp src/client/state.cpp src/lua_bindings/misc_urho3d.cpp client/core/urho3d/init.lua
+# covers: builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/accounts/accounts.cpp builtin/accounts/client_lua/accounts.lua src/client/main.cpp src/client/state.cpp src/lua_bindings/misc_urho3d.cpp client/core/urho3d/init.lua 3rdparty/Urho3D/Source/Urho3D/Graphics/OpenGL/OGLTexture2D.cpp
 # [KIT_AGENT_VISUALS] An agent's picture (Kit's get_view) and a client logged
 # in by an agent token. One Workbench server; kitboss (the admin) and kitbob
 # (made a builder by kitboss's admin token) on a headless weston's Xwayland
@@ -24,13 +24,16 @@
 #      refused (kitboss is the Host), the token gone from its command line;
 #      BUILDAT_AGENT_TOKEN with kitbob's while kitbob is here refused;
 #   5. kitbob's client gone: his agent's get_view refused with the way to
-#      run one; kitboss's client not asked;
+#      run one; kitboss's client not asked; then kitbob's web client
+#      (headless Chrome; skipped without it or web/): its pictures magenta
+#      and upright as in 2, its window the same, and no WebGL warning
+#      ([KIT_GET_VIEW_WEB_BLACK]: "Read buffer is GL_NONE", black);
 #   6. the token client as kitbob: joined, its picture served (magenta);
 #   7. kitboss revokes his builder token: a client with it refused; Agents
 #      (MCP) off: kitbob's token client kicked;
 #   8. no token in any log, the clients' user and cache dirs.
 # Pictures and screenshots, kept with KEEP_TMP=1: $t/view_*.png,
-# $t/agent_*.png, $t/before.png, $t/after.png
+# $t/agent_*.png, $t/web_*.png, $t/before.png, $t/after.png
 #   util/kit_get_view_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -283,6 +286,16 @@ elif phase == "none":
     text = view({"pos": C, "look_at": M}, "", True)[0]
     assert "No client of kitbob's is connected" in text and \
         "run one yourself" in text, text
+elif phase == "web":
+    # kitbob's web client: read back by glReadPixels, not glGetTexImage
+    text, img = view({"pos": C, "look_at": M, "width": 320, "height": 240}, "web_at")
+    assert text.startswith("kitbob's client drew this 320x240 from"), text
+    assert mag(img, 0.5, 0.5), "not magenta in the middle: %s" % (img[2](160, 120),)
+    for x, y in ((0, 0), (1, 0), (0, 1), (1, 1)):
+        assert not mag(img, x, y), ("magenta at a corner", x, y)
+    text, img = view({"pos": C, "look_at": [M[0], M[1] - 3, M[2]]}, "web_below")
+    assert mag(img, 0.5, 0.25) and not mag(img, 0.5, 0.75), \
+        ("not upright", img[2](256, 96), img[2](256, 288))
 elif phase == "agent":
     text, img = view({"pos": C, "look_at": M}, "agent_at")
     assert text.startswith("kitbob's client drew this 512x384 from"), text
@@ -415,6 +428,45 @@ wait $BOB 2>/dev/null
 n=$(pictures "$t/boss.log")
 mcp none "$tok_bob" "$t"
 echo "ok: no client of kitbob's: his agent told how to run one"
+
+# 5b. kitbob's web client (headless Chrome; skipped without web/ or
+# Chrome): its pictures magenta and upright, and no WebGL warning (Chrome's
+# "Read buffer is GL_NONE" was a black picture: web_drive fails on it)
+if command -v "${CHROME:-google-chrome}" > /dev/null && [ -f "$here/web/buildat.wasm" ]; then
+	cat > "$t/web.json" <<'J'
+[
+	["nav", "${URL}"], ["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+	["selall"], ["frames", 2], ["type", "kitbob"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Enter"], ["waitlog", "Joined as kitbob", 30],
+	["waitlog_any", "player physics enabled", 120], ["frames", 30],
+	["shot", "${OUT}/before.png"],
+	["waitlog", "kit: the picture sent", 60], ["waitlog", "kit: the picture sent", 10],
+	["frames", 5], ["shot", "${OUT}/after.png"]
+]
+J
+	m=$(mark "$SL")
+	# (timeout: stopped at a fail, its process group goes, the drive's node too)
+	WEB_DRIVE_VIEWPORT=1024x700@1 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" timeout 300 \
+		"$here/util/web_drive.sh" chrome workbench "$t/web.json" "$t/web" > "$t/web.txt" 2>&1 &
+	CLIENT=$!
+	CHECK_PIDS+=($CLIENT)
+	for i in $(seq 900); do
+		[ -s "$t/web/before.png" ] && break
+		kill -0 $CLIENT 2>/dev/null || break
+		sleep 0.2
+	done
+	[ -s "$t/web/before.png" ] ||
+		fail "kitbob's web client did not come in: $(tail -3 "$t/web.txt") ($t/web/page.log)"
+	mcp web "$tok_bob" "$t"
+	wait $CLIENT || fail "kitbob's web client: $(tail -3 "$t/web.txt") ($t/web/page.log)"
+	mcp same "$tok_bob" "$t" "$t/web/before.png" "$t/web/after.png"
+	# Gone before his token client comes in
+	CLIENT=$SERVER_PID
+	await "$SL" "$m" 10 "workbench: kitbob left"
+	echo "ok: kitbob's web client's pictures, magenta and upright; its window the same; no WebGL warning"
+else
+	echo "(no web part: no web/buildat.wasm or Chrome)"
+fi
 
 # 6. A token client as kitbob: its picture
 headless "$t/agent.log" agent BUILDAT_AGENT_TOKEN=$tok_bob bin/buildat

@@ -352,7 +352,24 @@ bool Texture2D::GetData(unsigned level, void* dest) const
         graphics_->SetRenderTarget(0, const_cast<Texture2D*>(this));
         // Ensure the FBO is current; this viewport is actually never rendered to
         graphics_->SetViewport(IntRect(0, 0, width_, height_));
+        // buildat [KIT_GET_VIEW_WEB_BLACK]: older errors cleared, so that the
+        // one looked at after the read is the read's (GL has fewer than 8)
+        for (unsigned i = 0; i < 8 && glGetError() != GL_NO_ERROR; ++i)
+            ;
+#ifndef URHO3D_GLES2
+        // GLES3: PrepareDraw leaves every FBO's read buffer GL_NONE; read
+        // from the color attachment, then put back what its cache holds
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+#endif
         glReadPixels(0, 0, width_, height_, GetExternalFormat(format_), GetDataType(format_), dest);
+#ifndef URHO3D_GLES2
+        glReadBuffer(GL_NONE);
+#endif
+        if (glGetError() != GL_NO_ERROR)
+        {
+            URHO3D_LOGERROR("Could not read the render target's pixels");
+            return false;
+        }
         return true;
     }
 
