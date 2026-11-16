@@ -3703,6 +3703,98 @@ function NT.actions(w, e, parented, pe, under)
 	end, {name = "inspector actions", fill = true})
 end
 
+-- [KIT_AGENT_VISUALS] An entity's comments, the builders' notes on it (the
+-- server sends them to editors alone): "Comments" beside the name (the rows
+-- under it where they were), its text cyan when there are some, shows the
+-- field under the name (hidden at first, the choice kept from entity to
+-- entity). What is typed is a draft kept by the entity's id until
+-- the state has it; Save (amber while it differs) or Ctrl+Enter sends it,
+-- one undo. Enter breaks the line. The touch mode types it in the field
+-- entry mode, its Apply the Save.
+-- simplified: the multi-line field is the custom type dialog's, a fixed
+-- height whose text scrolls by the wheel and follows the caret, no scroll
+-- bar (Hearth's grows in a ScrollView: that, if notes get long)
+local MAX_COMMENTS = 4096
+local function comments_item(w, e, title_row)
+	E.comment_drafts = E.comment_drafts or {}
+	local now = e.comments or ""
+	if E.comment_drafts[e.id] == now then
+		E.comment_drafts[e.id] = nil
+	end
+	local b, t = button(title_row, "Comments", function()
+		S.comments_open = not S.comments_open
+		log:info("kit editor: comments " .. (S.comments_open and "shown" or
+				"hidden"))
+		inspector_window()
+	end)
+	b:SetName("inspector comments")
+	b.maxWidth = b.minWidth
+	b:SetVar("KitNarrow", "1")
+	if now ~= "" then
+		t:SetColor(magic.Color(ui_utils.rgb("focus")))
+	end
+	-- (for a check: each change of what is shown)
+	local shown = e.id .. ": " .. #now .. " bytes, the button " .. (now ~= "" and
+			"cyan" or "plain") .. ", the field " .. (S.comments_open and "shown"
+			or "hidden")
+	if E.comments_shown ~= shown then
+		E.comments_shown = shown
+		log:info("kit editor: comments of " .. shown)
+	end
+	if not S.comments_open then
+		return
+	end
+	local save_text
+	local function mark()
+		local d = E.comment_drafts[e.id]
+		save_text:SetColor(d and d ~= now and magic.Color(ui_utils.rgb("main"))
+				or magic.Color(ui_utils.rgb("text")))
+	end
+	local function save(s)
+		s = s or E.comment_drafts[e.id] or now
+		if #s > MAX_COMMENTS then
+			E.status = "Comments: " .. MAX_COMMENTS .. " bytes at most, these are "
+					.. #s
+			return people()
+		end
+		log:info("kit editor: comments of " .. e.id .. " saved, " .. #s ..
+				" bytes")
+		send({op = "comments", id = e.id, text = s})
+	end
+	local f = edit(w, E.comment_drafts[e.id] or now, function(s)
+		E.comment_drafts[e.id] = s
+		if save_text then
+			mark()
+		end
+	end)
+	f:SetName("comments")
+	f.multiLine = true
+	f.textSelectable = true
+	f.textCopyable = true
+	f.maxLength = MAX_COMMENTS
+	f:SetFixedHeight(NT.sh.on() and 160 or 120)
+	f.cursorPosition = 0
+	magic.SubscribeToEvent(f, "TextFinished", function()
+		save()
+	end)
+	local sb
+	sb, save_text = button(row(w), "Save comments", function()
+		NT.sh.let_go("Save comments")
+		save()
+	end)
+	sb:SetName("comments save")
+	mark()
+	-- The touch mode's: the field entry mode on it, its Apply the Save
+	NT.fe.extra["comments"] = NT.sh.on() and {name = "comments",
+		key = "comments", k = "comments", e = e, title = NT.entity_label(e) ..
+		" · comments", kind = "text", long = true, d = {},
+		f = {max_length = MAX_COMMENTS}, old = E.comment_drafts[e.id] or now,
+		apply = function(s)
+			E.comment_drafts[e.id] = s
+			save(s)
+		end} or nil
+end
+
 local function inspector(w, e, is_made)
 	if is_made then
 		return inspect_made(w, e)
@@ -3711,7 +3803,9 @@ local function inspector(w, e, is_made)
 	if n > 1 then
 		text(w, n .. " selected", DIM)
 	end
-	NT.name_item(w, "inspector", e, NT.entity_label(e), function() end)
+	local tr = row(w)
+	NT.name_item(tr, "inspector", e, NT.entity_label(e), function() end)
+	comments_item(w, e, tr)
 	-- [KIT_SYMMETRY] a copy: its parameters alone, the rest its source's
 	local copy = NT.sym_copy(e)
 	if copy then
@@ -4450,6 +4544,13 @@ magic.SubscribeToEvent("command_seq:kit_ui_where", function(_, data)
 				local p = f.screenPosition
 				log:info(string.format("kit editor: the position row's %s at %d %d "
 						.. "%d %d", pn, p.x * sc, p.y * sc, f.width * sc, f.height * sc))
+			end
+			-- [KIT_AGENT_VISUALS] the comments' button, field and Save
+			local cn = f and f:GetName()
+			if cn == "inspector comments" or cn == "comments" or cn == "comments save" then
+				local p = f.screenPosition
+				log:info(string.format("kit editor: the %s at %d %d %d %d", cn,
+						p.x * sc, p.y * sc, f.width * sc, f.height * sc))
 			end
 			if axis then
 				log:info(string.format("kit editor: the field position %s shows "

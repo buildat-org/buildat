@@ -1052,6 +1052,18 @@ struct CState: public State
 
 	void handle_packet_(const ss_ &packet_name, const ss_ &data)
 	{
+		// A check's record of what came ([KIT_AGENT_VISUALS]: a visitor is
+		// never sent an entity's comments): BUILDAT_PACKET_DUMP=<file>
+		// appends each packet's name, size and body as it came
+		static FILE *dump = []{
+			const char *p = getenv("BUILDAT_PACKET_DUMP");
+			return p && *p ? fopen(p, "ab") : nullptr;
+		}();
+		if(dump){
+			fprintf(dump, "\n%s %zu\n", packet_name.c_str(), data.size());
+			fwrite(data.data(), 1, data.size(), dump);
+			fflush(dump);
+		}
 		// The connection's own (keepalives) are not something that came,
 		// and another packet does not hide a file or a chunk for a second:
 		// a Luanti world's object packets come every tick. The handlers
