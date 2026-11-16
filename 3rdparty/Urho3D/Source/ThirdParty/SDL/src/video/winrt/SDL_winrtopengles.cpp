@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2016 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -20,7 +20,7 @@
 */
 #include "../../SDL_internal.h"
 
-#if SDL_VIDEO_DRIVER_WINRT && SDL_VIDEO_OPENGL_EGL
+#if defined(SDL_VIDEO_DRIVER_WINRT) && defined(SDL_VIDEO_OPENGL_EGL)
 
 /* EGL implementation of SDL OpenGL support */
 
@@ -28,6 +28,7 @@
 extern "C" {
 #include "SDL_winrtopengles.h"
 #include "SDL_loadso.h"
+#include "../SDL_egl_c.h"
 }
 
 /* Windows includes */
@@ -36,17 +37,16 @@ using namespace Windows::UI::Core;
 
 /* ANGLE/WinRT constants */
 static const int ANGLE_D3D_FEATURE_LEVEL_ANY = 0;
-#define EGL_PLATFORM_ANGLE_ANGLE                        0x3202
-#define EGL_PLATFORM_ANGLE_TYPE_ANGLE                   0x3203
-#define EGL_PLATFORM_ANGLE_MAX_VERSION_MAJOR_ANGLE      0x3204
-#define EGL_PLATFORM_ANGLE_MAX_VERSION_MINOR_ANGLE      0x3205
-#define EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE             0x3208
-#define EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE            0x3209
-#define EGL_PLATFORM_ANGLE_DEVICE_TYPE_WARP_ANGLE       0x320B
-#define EGL_PLATFORM_ANGLE_ENABLE_AUTOMATIC_TRIM_ANGLE  0x320F
+#define EGL_PLATFORM_ANGLE_ANGLE                       0x3202
+#define EGL_PLATFORM_ANGLE_TYPE_ANGLE                  0x3203
+#define EGL_PLATFORM_ANGLE_MAX_VERSION_MAJOR_ANGLE     0x3204
+#define EGL_PLATFORM_ANGLE_MAX_VERSION_MINOR_ANGLE     0x3205
+#define EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE            0x3208
+#define EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE           0x3209
+#define EGL_PLATFORM_ANGLE_DEVICE_TYPE_WARP_ANGLE      0x320B
+#define EGL_PLATFORM_ANGLE_ENABLE_AUTOMATIC_TRIM_ANGLE 0x320F
 
-#define EGL_ANGLE_DISPLAY_ALLOW_RENDER_TO_BACK_BUFFER   0x320B
-
+#define EGL_ANGLE_DISPLAY_ALLOW_RENDER_TO_BACK_BUFFER 0x320B
 
 /*
  * SDL/EGL top-level implementation
@@ -57,12 +57,12 @@ WINRT_GLES_LoadLibrary(_THIS, const char *path)
 {
     SDL_VideoData *video_data = (SDL_VideoData *)_this->driverdata;
 
-    if (SDL_EGL_LoadLibrary(_this, path, EGL_DEFAULT_DISPLAY) != 0) {
+    if (SDL_EGL_LoadLibrary(_this, path, EGL_DEFAULT_DISPLAY, 0) != 0) {
         return -1;
     }
 
     /* Load ANGLE/WinRT-specific functions */
-    CreateWinrtEglWindow_Old_Function CreateWinrtEglWindow = (CreateWinrtEglWindow_Old_Function) SDL_LoadFunction(_this->egl_data->egl_dll_handle, "CreateWinrtEglWindow");
+    CreateWinrtEglWindow_Old_Function CreateWinrtEglWindow = (CreateWinrtEglWindow_Old_Function)SDL_LoadFunction(_this->egl_data->opengl_dll_handle, "CreateWinrtEglWindow");
     if (CreateWinrtEglWindow) {
         /* 'CreateWinrtEglWindow' was found, which means that an an older
          * version of ANGLE/WinRT is being used.  Continue setting up EGL,
@@ -87,40 +87,49 @@ WINRT_GLES_LoadLibrary(_THIS, const char *path)
         Microsoft::WRL::ComPtr<IUnknown> cpp_display = video_data->winrtEglWindow;
         _this->egl_data->egl_display = ((eglGetDisplay_Old_Function)_this->egl_data->eglGetDisplay)(cpp_display);
         if (!_this->egl_data->egl_display) {
-            return SDL_SetError("Could not get Windows 8.0 EGL display");
+            return SDL_EGL_SetError("Could not get Windows 8.0 EGL display", "eglGetDisplay");
         }
 
         if (_this->egl_data->eglInitialize(_this->egl_data->egl_display, NULL, NULL) != EGL_TRUE) {
-            return SDL_SetError("Could not initialize Windows 8.0 EGL");
+            return SDL_EGL_SetError("Could not initialize Windows 8.0 EGL", "eglInitialize");
         }
     } else {
         /* Declare some ANGLE/EGL initialization property-sets, as suggested by
          * MSOpenTech's ANGLE-for-WinRT template apps:
          */
-        const EGLint defaultDisplayAttributes[] =
-        {
-            EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE,
-            EGL_ANGLE_DISPLAY_ALLOW_RENDER_TO_BACK_BUFFER, EGL_TRUE,
-            EGL_PLATFORM_ANGLE_ENABLE_AUTOMATIC_TRIM_ANGLE, EGL_TRUE,
+        const EGLint defaultDisplayAttributes[] = {
+            EGL_PLATFORM_ANGLE_TYPE_ANGLE,
+            EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE,
+            EGL_ANGLE_DISPLAY_ALLOW_RENDER_TO_BACK_BUFFER,
+            EGL_TRUE,
+            EGL_PLATFORM_ANGLE_ENABLE_AUTOMATIC_TRIM_ANGLE,
+            EGL_TRUE,
             EGL_NONE,
         };
 
-        const EGLint fl9_3DisplayAttributes[] =
-        {
-            EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE,
-            EGL_PLATFORM_ANGLE_MAX_VERSION_MAJOR_ANGLE, 9,
-            EGL_PLATFORM_ANGLE_MAX_VERSION_MINOR_ANGLE, 3,
-            EGL_ANGLE_DISPLAY_ALLOW_RENDER_TO_BACK_BUFFER, EGL_TRUE,
-            EGL_PLATFORM_ANGLE_ENABLE_AUTOMATIC_TRIM_ANGLE, EGL_TRUE,
+        const EGLint fl9_3DisplayAttributes[] = {
+            EGL_PLATFORM_ANGLE_TYPE_ANGLE,
+            EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE,
+            EGL_PLATFORM_ANGLE_MAX_VERSION_MAJOR_ANGLE,
+            9,
+            EGL_PLATFORM_ANGLE_MAX_VERSION_MINOR_ANGLE,
+            3,
+            EGL_ANGLE_DISPLAY_ALLOW_RENDER_TO_BACK_BUFFER,
+            EGL_TRUE,
+            EGL_PLATFORM_ANGLE_ENABLE_AUTOMATIC_TRIM_ANGLE,
+            EGL_TRUE,
             EGL_NONE,
         };
 
-        const EGLint warpDisplayAttributes[] =
-        {
-            EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE,
-            EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_DEVICE_TYPE_WARP_ANGLE,
-            EGL_ANGLE_DISPLAY_ALLOW_RENDER_TO_BACK_BUFFER, EGL_TRUE,
-            EGL_PLATFORM_ANGLE_ENABLE_AUTOMATIC_TRIM_ANGLE, EGL_TRUE,
+        const EGLint warpDisplayAttributes[] = {
+            EGL_PLATFORM_ANGLE_TYPE_ANGLE,
+            EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE,
+            EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE,
+            EGL_PLATFORM_ANGLE_DEVICE_TYPE_WARP_ANGLE,
+            EGL_ANGLE_DISPLAY_ALLOW_RENDER_TO_BACK_BUFFER,
+            EGL_TRUE,
+            EGL_PLATFORM_ANGLE_ENABLE_AUTOMATIC_TRIM_ANGLE,
+            EGL_TRUE,
             EGL_NONE,
         };
 
@@ -132,16 +141,16 @@ WINRT_GLES_LoadLibrary(_THIS, const char *path)
          */
         eglGetPlatformDisplayEXT_Function eglGetPlatformDisplayEXT = (eglGetPlatformDisplayEXT_Function)_this->egl_data->eglGetProcAddress("eglGetPlatformDisplayEXT");
         if (!eglGetPlatformDisplayEXT) {
-            return SDL_SetError("Could not retrieve ANGLE/WinRT display function(s)");
+            return SDL_EGL_SetError("Could not retrieve ANGLE/WinRT display function(s)", "eglGetProcAddress");
         }
 
-#if (WINAPI_FAMILY != WINAPI_FAMILY_PHONE_APP)
+#if !SDL_WINAPI_FAMILY_PHONE
         /* Try initializing EGL at D3D11 Feature Level 10_0+ (which is not
          * supported on WinPhone 8.x.
          */
         _this->egl_data->egl_display = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE, EGL_DEFAULT_DISPLAY, defaultDisplayAttributes);
         if (!_this->egl_data->egl_display) {
-            return SDL_SetError("Could not get 10_0+ EGL display");
+            return SDL_EGL_SetError("Could not get EGL display for Direct3D 10_0+", "eglGetPlatformDisplayEXT");
         }
 
         if (_this->egl_data->eglInitialize(_this->egl_data->egl_display, NULL, NULL) != EGL_TRUE)
@@ -153,7 +162,7 @@ WINRT_GLES_LoadLibrary(_THIS, const char *path)
              */
             _this->egl_data->egl_display = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE, EGL_DEFAULT_DISPLAY, fl9_3DisplayAttributes);
             if (!_this->egl_data->egl_display) {
-                return SDL_SetError("Could not get 9_3 EGL display");
+                return SDL_EGL_SetError("Could not get EGL display for Direct3D 9_3", "eglGetPlatformDisplayEXT");
             }
 
             if (_this->egl_data->eglInitialize(_this->egl_data->egl_display, NULL, NULL) != EGL_TRUE) {
@@ -162,11 +171,11 @@ WINRT_GLES_LoadLibrary(_THIS, const char *path)
                  */
                 _this->egl_data->egl_display = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE, EGL_DEFAULT_DISPLAY, warpDisplayAttributes);
                 if (!_this->egl_data->egl_display) {
-                    return SDL_SetError("Could not get WARP EGL display");
+                    return SDL_EGL_SetError("Could not get EGL display for Direct3D WARP", "eglGetPlatformDisplayEXT");
                 }
 
                 if (_this->egl_data->eglInitialize(_this->egl_data->egl_display, NULL, NULL) != EGL_TRUE) {
-                    return SDL_SetError("Could not initialize WinRT 8.x+ EGL");
+                    return SDL_EGL_SetError("Could not initialize WinRT 8.x+ EGL", "eglInitialize");
                 }
             }
         }
@@ -192,11 +201,10 @@ WINRT_GLES_UnloadLibrary(_THIS)
 
 extern "C" {
 SDL_EGL_CreateContext_impl(WINRT)
-SDL_EGL_SwapWindow_impl(WINRT)
-SDL_EGL_MakeCurrent_impl(WINRT)
+    SDL_EGL_SwapWindow_impl(WINRT)
+        SDL_EGL_MakeCurrent_impl(WINRT)
 }
 
 #endif /* SDL_VIDEO_DRIVER_WINRT && SDL_VIDEO_OPENGL_EGL */
 
 /* vi: set ts=4 sw=4 expandtab: */
-

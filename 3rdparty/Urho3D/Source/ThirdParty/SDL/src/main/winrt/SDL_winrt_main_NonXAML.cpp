@@ -40,7 +40,7 @@
    is compiled with C++/CX enabled (via the /ZW compiler flag).
 */
 #ifdef _MSC_VER
-#pragma warning(disable:4447)
+#pragma warning(disable : 4447)
 #endif
 
 /* Make sure the function to initialize the Windows Runtime gets linked in. */
@@ -50,10 +50,5 @@
 
 int CALLBACK WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
-    if (FAILED(Windows::Foundation::Initialize(RO_INIT_MULTITHREADED))) {
-        return 1;
-    }
-
-    SDL_WinRTRunApp(SDL_main, NULL);
-    return 0;
+    return SDL_WinRTRunApp(SDL_main, NULL);
 }

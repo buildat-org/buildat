@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2016 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -19,14 +19,16 @@
   3. This notice may not be removed or altered from any source distribution.
 */
 
-#ifndef _SDL_msctf_h
-#define _SDL_msctf_h
+#ifndef SDL_msctf_h_
+#define SDL_msctf_h_
 
 #include <unknwn.h>
 
-#define     TF_INVALID_COOKIE               (0xffffffff)
-#define     TF_IPSINK_FLAG_ACTIVE           0x0001
-#define     TF_TMAE_UIELEMENTENABLEDONLY    0x00000004
+#define TF_INVALID_COOKIE            (0xffffffff)
+#define TF_IPSINK_FLAG_ACTIVE        0x0001
+#define TF_TMAE_UIELEMENTENABLEDONLY 0x00000004
+
+/* *INDENT-OFF* */ /* clang-format off */
 
 typedef struct ITfThreadMgr ITfThreadMgr;
 typedef struct ITfDocumentMgr ITfDocumentMgr;
@@ -239,4 +241,6 @@ struct ITfSource
     const struct ITfSourceVtbl *lpVtbl;
 };
 
-#endif /* _SDL_msctf_h */
+/* *INDENT-ON* */ /* clang-format on */
+
+#endif /* SDL_msctf_h_ */
