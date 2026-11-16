@@ -492,6 +492,18 @@ for a person. A manifest's key this Aitta does not know is kept in the
 release's "manifest"; a kind it does not know is listed as "other", which
 no client installs, and an audience it does not know as "adult".
 
+A Buildat alpha's package ([ALPHA_KIT_PACKAGES_PUBLIC]): a release whose
+manifest's "buildat_version" is an alpha's ("0.8.0-alpha.26"), or whose
+manifest's kind is one of Kit's ("template", "scene", "kit", listed as
+"other"). The list hands it out as any other, the manifest whole, for an
+alpha's client. The pages list it apart, under "Alpha packages" on / and
+"Alpha releases" on its package's page, after the others: its kind
+named, marked "Alpha: for Buildat 0.8 alpha" with the version that made
+it, and no Install or links out (the .zip and .sig stay). A client that
+is no alpha does not list it in Apps from Aitta or the launcher's newest
+packages, and does not run it. Its release thread on its home Hearth is
+marked the same way (doc/hearth.txt).
+
 Every API answer has Access-Control-Allow-Origin: *, so a play page on
 another origin fetches the list and the archives (and the .wasm, from a
 cross-origin isolated page). A serverless release, or one whose server

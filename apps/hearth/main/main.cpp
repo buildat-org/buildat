@@ -1244,6 +1244,19 @@ struct Module: public interface::Module
 		push();
 	}
 
+	// [ALPHA_KIT_PACKAGES_PUBLIC] A Buildat alpha's package, as the Aitta's
+	// pages tell it (apps/aitta's alpha_package()): its manifest's
+	// buildat_version an alpha's, or of a Kit kind. Its thread says so.
+	// simplified: every Kit kind is an alpha's until 0.8.0 is out; then
+	// the kinds and the "0.8" go from here, the Aitta's and the client's
+	static bool alpha_package(const json::Value &rel)
+	{
+		const json::Value &m = rel.get("manifest");
+		const ss_ k = jstr(m, "kind");
+		return jstr(m, "buildat_version").find("-alpha.") != ss_::npos ||
+				k == "template" || k == "scene" || k == "kit";
+	}
+
 	void post_release(const ReleaseFound &f)
 	{
 		const json::Value &rel = f.rel;
@@ -1253,10 +1266,15 @@ struct Module: public interface::Module
 		if(k.step())
 			return;
 		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name");
-		const ss_ title = jstr(rel, "name")+" "+jstr(rel, "version");
+		const bool alpha = alpha_package(rel);
+		const ss_ title = jstr(rel, "name")+" "+jstr(rel, "version")+
+				(alpha ? " (alpha)" : "");
 		const ss_ author = jstr(rel, "author")+" (Aitta)";
 		const ss_ subject = pkg+" "+jstr(rel, "key");
-		ss_ body = jstr(rel, "description")+"\n\nVersion **"+
+		const ss_ bv = jstr(rel.get("manifest"), "buildat_version");
+		ss_ body = (alpha ? "**Alpha: for Buildat 0.8 alpha**"+(bv.empty() ?
+				ss_() : ", made with "+bv)+"; a stable Buildat does not "
+				"install it.\n\n" : ss_())+jstr(rel, "description")+"\n\nVersion **"+
 				jstr(rel, "version")+"** of `"+pkg+"`, published on "+f.aitta+
 				".\n\n";
 		// The problems marked fixed in this version, by the same package and

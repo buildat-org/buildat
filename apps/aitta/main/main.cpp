@@ -969,6 +969,21 @@ struct Module: public interface::Module, public moderation::Host
 				(v.empty() ? "" : " "+html(v));
 	}
 
+	// [ALPHA_KIT_PACKAGES_PUBLIC] **A Buildat alpha's package**: its
+	// manifest's buildat_version an alpha's, or of a Kit kind, which no
+	// stable client runs. The pages name its kind, mark it, list it apart
+	// and offer no Install; the list hands it out as any other.
+	// simplified: every Kit kind is an alpha's, and an alpha a 0.8 one,
+	// until 0.8.0 is out; then the kinds and the "0.8" go from here, the
+	// Hearth's and the client's alpha_package()
+	static bool alpha_package(const json::Value &rel)
+	{
+		const json::Value &m = rel.get("manifest");
+		const ss_ k = jstr(m, "kind");
+		return jstr(m, "buildat_version").find("-alpha.") != ss_::npos ||
+				k == "template" || k == "scene" || k == "kit";
+	}
+
 	// links: outside_links()'s, under the files' links
 	static ss_ release_box(const json::Value &rel, bool latest,
 			const ss_ &links = "")
@@ -977,6 +992,8 @@ struct Module: public interface::Module, public moderation::Host
 		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name");
 		const ss_ sha = jstr(rel, "sha256");
 		const int64_t size = (int64_t)rel.get("size").as_number();
+		const bool alpha = alpha_package(rel);
+		const ss_ mkind = jstr(rel.get("manifest"), "kind");
 		// [PACKAGE_MEDIA] Its icon before the name
 		const ss_ icon = jstr(rel, "icon");
 		ss_ b = "<div class=\"box\">"+(is_hex(icon, 64) ? "<img src=\""
@@ -985,7 +1002,8 @@ struct Module: public interface::Module, public moderation::Host
 				"<a href=\"/p/"+html(pkg)+
 				"\">"+html(pkg)+"</a>" : html(pkg))+"</b> "+
 				html(jstr(rel, "version"))+" <span class=\"meta\">"+
-				html(jstr(rel, "kind"))+world_of(rel)+
+				html(alpha && !mkind.empty() ? mkind : jstr(rel, "kind"))+
+				world_of(rel)+
 				(rel.get("serverless").is_true() ||
 				rel.get("web").is_true() || rel.get("web_cpp").is_true() ?
 				", runs in the browser" : "")+", for "+html(jstr(rel, "audience"))+
@@ -994,6 +1012,11 @@ struct Module: public interface::Module, public moderation::Host
 				itos(size / 1000)+" kB" :
 				itos(size / 1000000)+" MB")+", "+(jstr(rel, "review") ==
 				"reviewed" ? "reviewed" : "unreviewed")+"</span>";
+		const ss_ bv = jstr(rel.get("manifest"), "buildat_version");
+		if(alpha)
+			b += "<br><b>Alpha: for Buildat 0.8 alpha</b>"+(bv.empty() ? "" :
+					", made with "+html(bv))+"; a stable Buildat does not "
+					"install it";
 		if(!jstr(rel, "description").empty())
 			b += "<br>"+html(jstr(rel, "description"));
 		b += "<br><span class=\"meta\">Licence: code "+
@@ -1108,59 +1131,74 @@ struct Module: public interface::Module, public moderation::Host
 			self = "http://"+r.host;
 		if(r.path.compare(0, 3, "/p/") == 0){
 			const ss_ want = r.path.substr(3);
-			// [AITTA_INSTALL_HELP] The newest, the rest folded
-			sv_<const json::Value*> mine;
+			// [AITTA_INSTALL_HELP] The newest, the rest folded.
+			// [ALPHA_KIT_PACKAGES_PUBLIC] An alpha's releases after the
+			// others, with no Install; the newest of the others heads the
+			// page, else the newest alpha's
+			sv_<const json::Value*> mine, alphas;
 			for(const json::Value &rel : rels)
 				if(pkg(rel) == want)
-					mine.push_back(&rel);
-			if(mine.empty())
+					(alpha_package(rel) ? alphas : mine).push_back(&rel);
+			if(mine.empty() && alphas.empty())
 				return send(404, html_type, interface::web_brand::page(
 						"Not found", "Aitta", "<p>No package of that name is "
 						"listed here. <a href=\"/\">The list</a>.</p>", MANAGE));
-			c = release_box(*mine[0], false);
-			if(mine.size() > 1){
-				c += "<details><summary>Older releases ("+
-						itos(mine.size() - 1)+")</summary>\n";
-				for(size_t i = 1; i < mine.size(); i++)
-					c += release_box(*mine[i], false);
-				c += "</details>\n";
+			const json::Value &top = mine.empty() ? *alphas[0] : *mine[0];
+			auto boxes = [&](const sv_<const json::Value*> &l){
+				ss_ o = release_box(*l[0], false);
+				if(l.size() > 1){
+					o += "<details><summary>Older releases ("+
+							itos(l.size() - 1)+")</summary>\n";
+					for(size_t i = 1; i < l.size(); i++)
+						o += release_box(*l[i], false);
+					o += "</details>\n";
+				}
+				return o;
+			};
+			ss_ pl;
+			if(!mine.empty()){
+				c = boxes(mine);
+				// [AITTA_SERVE] The commands for a dedicated server, filled in
+				ss_ vers;
+				for(const json::Value *rel : mine)
+					vers += "bin/buildat aitta install "+self+" "+want+"@"+
+							jstr(*rel, "version")+" <user dir>\n";
+				const ss_ name = jstr(*mine[0], "name");
+				pl = outside_links(*mine[0], self);
+				c += "<h2>Install</h2>\n"+(pl.empty() ? "" : "<p>"+pl+"</p>")+
+						"<details><summary>On the client</summary>"
+						"<ol><li>In the Buildat client, open <b>Apps from Aitta"
+						"</b>.</li><li>If this Aitta, <code>"+html(self)+"</code>, "
+						"is not one of the client's Aittas, add it in the "
+						"Starport settings (<b>Starport settings...</b> in the "
+						"launcher, then <b>Add Aitta</b>).</li><li>Search for "
+						"<code>"+html(name)+"</code> and pick <b>"+(jstr(*mine[0],
+						"kind") == "world" ? "Install and play" : "Install")+
+						"</b>; the "
+						"client checks the author's signature first.</li>"+
+						(jstr(*mine[0], "review") == "reviewed" ? "" :
+						"<li>The newest release is unreviewed: it shows only "
+						"with <b>Apps from Aitta (unreviewed): shown</b> in the "
+						"same settings.</li>")+"</ol></details>\n";
+				// [WORLD_PACKAGES] A world is a client's save, installed there
+				if(jstr(*mine[0], "kind") != "world")
+					c += "<details><summary>On a dedicated server</summary>"
+						"<div class=\"box\"><span class=\"meta\">In the "
+						"directory of a Buildat release; the newest listed, or a "
+						"version</span><pre>"
+						"bin/buildat aitta install "+html(self)+" "+html(want)+
+						" &lt;user dir&gt;\n"
+						"util/serve_latest_release.sh "+html(want)+
+						" &lt;port&gt; &lt;user dir&gt;\n"
+						"# following its releases here:\n"
+						"AITTA="+html(self)+" util/serve_latest_release.sh "+
+						html(want)+" &lt;port&gt; &lt;user dir&gt;</pre><pre>"+
+						html(vers)+"</pre></div></details>\n";
 			}
-			// [AITTA_SERVE] The commands for a dedicated server, filled in
-			ss_ vers;
-			for(const json::Value *rel : mine)
-				vers += "bin/buildat aitta install "+self+" "+want+"@"+
-						jstr(*rel, "version")+" <user dir>\n";
-			const ss_ name = jstr(*mine[0], "name");
-			const ss_ pl = outside_links(*mine[0], self);
-			c += "<h2>Install</h2>\n"+(pl.empty() ? "" : "<p>"+pl+"</p>")+
-					"<details><summary>On the client</summary>"
-					"<ol><li>In the Buildat client, open <b>Apps from Aitta"
-					"</b>.</li><li>If this Aitta, <code>"+html(self)+"</code>, "
-					"is not one of the client's Aittas, add it in the "
-					"Starport settings (<b>Starport settings...</b> in the "
-					"launcher, then <b>Add Aitta</b>).</li><li>Search for "
-					"<code>"+html(name)+"</code> and pick <b>"+(jstr(*mine[0],
-					"kind") == "world" ? "Install and play" : "Install")+
-					"</b>; the "
-					"client checks the author's signature first.</li>"+
-					(jstr(*mine[0], "review") == "reviewed" ? "" :
-					"<li>The newest release is unreviewed: it shows only "
-					"with <b>Apps from Aitta (unreviewed): shown</b> in the "
-					"same settings.</li>")+"</ol></details>\n";
-			// [WORLD_PACKAGES] A world is a client's save, installed there
-			if(jstr(*mine[0], "kind") != "world")
-				c += "<details><summary>On a dedicated server</summary>"
-					"<div class=\"box\"><span class=\"meta\">In the "
-					"directory of a Buildat release; the newest listed, or a "
-					"version</span><pre>"
-					"bin/buildat aitta install "+html(self)+" "+html(want)+
-					" &lt;user dir&gt;\n"
-					"util/serve_latest_release.sh "+html(want)+
-					" &lt;port&gt; &lt;user dir&gt;\n"
-					"# following its releases here:\n"
-					"AITTA="+html(self)+" util/serve_latest_release.sh "+
-					html(want)+" &lt;port&gt; &lt;user dir&gt;</pre><pre>"+
-					html(vers)+"</pre></div></details>\n";
+			if(!alphas.empty())
+				c += "<h2>Alpha releases</h2>\n<p class=\"meta\">For Buildat "
+						"0.8 alpha, installed with an alpha's client; a stable "
+						"Buildat installs none of them.</p>\n"+boxes(alphas);
 			// [AITTA_REPORTS] A report from the web: anonymous, so it
 			// weighs little alone. [AITTA_HTML_FOLDS] Folded: a visitor is
 			// seldom here to report
@@ -1184,10 +1222,10 @@ struct Module: public interface::Module, public moderation::Host
 			// [PACKAGE_MEDIA] The newest's icon by the heading;
 			// [AITTA_PACKAGE_PAGE] its description, its screenshot and
 			// the page's, each a link to the image, the page's text
-			const ss_ icon = jstr(*mine[0], "icon");
+			const ss_ icon = jstr(top, "icon");
 			sv_<ss_> shots;
-			if(is_hex(jstr(*mine[0], "screenshot"), 64))
-				shots.push_back(jstr(*mine[0], "screenshot"));
+			if(is_hex(jstr(top, "screenshot"), 64))
+				shots.push_back(jstr(top, "screenshot"));
 			const json::Value &ps = pg.get("screenshots");
 			for(unsigned i = 0; ps.is_array() && i < ps.size(); i++)
 				if(ps.at(i).is_string() && is_hex(ps.at(i).as_string(), 64))
@@ -1195,7 +1233,7 @@ struct Module: public interface::Module, public moderation::Host
 			ss_ head = "<h1>"+(is_hex(icon, 64) ? "<img src=\""
 					"/api/v1/aitta/media/"+icon+"\" alt=\"\" width=\"48\" "
 					"height=\"48\" style=\"vertical-align:middle\"> " : "")+
-					html(want)+"</h1><p>"+html(jstr(*mine[0], "description"))+
+					html(want)+"</h1><p>"+html(jstr(top, "description"))+
 					"</p>\n";
 			if(!shots.empty()){
 				head += "<p class=\"shots\">";
@@ -1217,7 +1255,7 @@ struct Module: public interface::Module, public moderation::Host
 				std::set<ss_> had;
 				for(const json::Value &rel : rels)
 					if(jstr(rel, "kind") == "world" && jstr(rel, "app") == app &&
-							had.insert(pkg(rel)).second)
+							!alpha_package(rel) && had.insert(pkg(rel)).second)
 						worlds += release_box(rel, true);
 			}
 			if(!worlds.empty())
@@ -1228,17 +1266,27 @@ struct Module: public interface::Module, public moderation::Host
 					(pl.empty() ? "" : "<p>"+pl+"</p>\n")+c+worlds+
 					f, MANAGE));
 		}
+		// [ALPHA_KIT_PACKAGES_PUBLIC] An alpha's apart, after the others,
+		// with no links out: a package's newest of each
 		std::set<ss_> seen;
-		for(const json::Value &rel : rels)
-			if(seen.insert(pkg(rel)).second)
-				c += release_box(rel, true, outside_links(rel, self));
+		ss_ ca;
+		for(const json::Value &rel : rels){
+			const bool alpha = alpha_package(rel);
+			if(seen.insert(pkg(rel)+(alpha ? " alpha" : "")).second)
+				(alpha ? ca : c) += release_box(rel, true, alpha ? "" :
+						outside_links(rel, self));
+		}
 		ss_ body = "<h1>Aitta</h1><p>A registry of Buildat apps and "
 				"extensions: their authors sign each release with their own "
 				"key, and Aitta lists it. A release is unreviewed until this "
 				"server's reviewers mark it reviewed.</p><p>To install one, "
 				"open the Buildat client and pick <b>Apps from Aitta</b>.</p>\n";
-		body += c.empty() ? "<p>Nothing is published here yet.</p>\n" :
-				"<h2>Packages</h2>\n"+c;
+		body += c.empty() && ca.empty() ? "<p>Nothing is published here "
+				"yet.</p>\n" : c.empty() ? "" : "<h2>Packages</h2>\n"+c;
+		if(!ca.empty())
+			body += "<h2>Alpha packages</h2>\n<p class=\"meta\">For Buildat "
+					"0.8 alpha, installed with an alpha's client; a stable "
+					"Buildat installs none of them.</p>\n"+ca;
 		send(200, html_type, interface::web_brand::page("Aitta", "Aitta",
 				body, MANAGE));
 	}
