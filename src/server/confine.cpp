@@ -45,6 +45,7 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 {
 	return "this platform has no box for a build";
 }
+void start_camera_launcher(core::Config &config, const ss_ &module_path){}
 }
 
 #elif defined(_WIN32)
@@ -54,6 +55,9 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 {
 	return "this platform has no box for a build";
 }
+// simplified: no camera on Windows (Kit says so); a launcher there is a
+// job object's child started before the AppContainer
+void start_camera_launcher(core::Config &config, const ss_ &module_path){}
 }
 #else
 
@@ -82,6 +86,7 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 #include <map>
 #include <algorithm>
 #include <sys/resource.h>
+#include <poll.h>
 #include "interface/process.h"
 
 // What older headers lack: the build box is older than the kernels the
@@ -283,8 +288,10 @@ static ss_ drop_capabilities()
 // use, is refused, and truncate by path (see below). The rest is
 // Landlock's.
 // no_sockets ([WEB_LOCAL_AITTA], a publish's build): no socket of any
-// family, so nothing reaches a network, TCP or UDP or a name server
-static ss_ install_seccomp(bool no_sockets = false)
+// family, so nothing reaches a network, TCP or UDP or a name server.
+// unix_ok ([KIT_AGENT_NEXT_1], the camera client on an X display): unix
+// sockets let through, X11's being one
+static ss_ install_seccomp(bool no_sockets = false, bool unix_ok = false)
 {
 #if defined(__x86_64__)
 	const uint32_t arch = AUDIT_ARCH_X86_64;
@@ -347,7 +354,7 @@ static ss_ install_seccomp(bool no_sockets = false)
 	stmt(BPF_LD | BPF_W | BPF_ABS, arg0_lo);
 	prog.push_back({BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_UNIX, 0, 1),
 			NONE, NONE});
-	stmt(BPF_RET | BPF_K, deny_unix);
+	stmt(BPF_RET | BPF_K, unix_ok ? SECCOMP_RET_ALLOW : deny_unix);
 	stmt(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
 	// The first argument is this pid, all 64 bits of it: not 0 (the
 	// group), not -1 (everyone), not another process
@@ -1114,6 +1121,397 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 				"; signals and abstract sockets not scoped before ABI 6",
 			cs(tcp), cs(app_user), cs(app_shared), cs(user));
 	return "";
+}
+
+// ---- [KIT_AGENT_NEXT_1] The server's camera's launcher (confine.h)
+
+// What the launcher knows from the server's start, before the box: none
+// of it comes from a request
+struct CameraSetup
+{
+	ss_ exe, exe_dir, share, urho3d, user, cache, dir, display;
+	int port = 0;
+	sv_<ss_> env; // NAME=value passed on to the client
+};
+
+// The client's own box, in the child before its exec: the system and
+// the install read, its directory written, the server's port its only
+// TCP; seccomp as the server's, unix sockets let through for X11.
+// simplified: on X11 abstract sockets are not scoped (xcb gives up on the
+// display at the abstract socket's EPERM, never trying its path), so the
+// client could reach any X server of the host's, as through a path socket
+// it could anyway (Landlock ABI 7 does not cover connecting to one);
+// offscreen has no unix socket at all. A display reached only through a
+// socket the launcher opens and passes is the upgrade
+static ss_ camera_box(const CameraSetup &s, bool x11)
+{
+	const int abi = syscall(SYS_landlock_create_ruleset, nullptr, 0,
+			LANDLOCK_CREATE_RULESET_VERSION);
+	if(abi < 1)
+		return ss_("Landlock is not available (")+strerror(errno)+")";
+	RulesetAttr attr;
+	attr.handled_access_fs = FS_ABI1;
+	if(abi >= 2)
+		attr.handled_access_fs |= LANDLOCK_ACCESS_FS_REFER;
+	if(abi >= 3)
+		attr.handled_access_fs |= LANDLOCK_ACCESS_FS_TRUNCATE;
+	if(abi >= 5)
+		attr.handled_access_fs |= LANDLOCK_ACCESS_FS_IOCTL_DEV;
+	attr.handled_access_net = abi >= 4 ? (LANDLOCK_ACCESS_NET_BIND_TCP |
+			LANDLOCK_ACCESS_NET_CONNECT_TCP) : 0;
+	attr.scoped = abi >= 6 ? (x11 ? 0 : LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET) |
+			LANDLOCK_SCOPE_SIGNAL : 0;
+	const size_t attr_size = abi >= 6 ? sizeof(RulesetAttr) :
+			abi >= 4 ? offsetof(RulesetAttr, scoped) :
+			offsetof(RulesetAttr, handled_access_net);
+	Ruleset rs;
+	rs.handled = attr.handled_access_fs;
+	rs.fd = syscall(SYS_landlock_create_ruleset, &attr, attr_size, 0);
+	if(rs.fd < 0)
+		return ss_("Landlock: ")+strerror(errno);
+	for(const char *p : {"/usr", "/lib", "/lib32", "/lib64", "/bin", "/sbin",
+			"/etc", "/opt", "/nix", "/proc", "/sys"})
+		rs.add(p, FS_READ);
+	for(const char *p : {"/dev/null", "/dev/zero", "/dev/full",
+			"/dev/random", "/dev/urandom"})
+		rs.add(p, rs.handled);
+	// The install, without the server's user and cache paths (its saves)
+	const sv_<ss_> holes = {real(s.user), real(s.cache)};
+	for(const ss_ &p : {s.share, s.urho3d, s.exe_dir, s.exe_dir+"/../lib"})
+		if(!p.empty())
+			rs.add_around(p, holes, FS_READ);
+	rs.add(s.dir, rs.handled);
+	if(attr.handled_access_net){
+		struct landlock_net_port_attr a;
+		a.allowed_access = LANDLOCK_ACCESS_NET_CONNECT_TCP;
+		a.port = (uint64_t)s.port;
+		if(syscall(SYS_landlock_add_rule, rs.fd, LANDLOCK_RULE_NET_PORT,
+				&a, 0) != 0)
+			rs.refused.push_back("port "+itos(s.port)+": "+strerror(errno));
+	}
+	const ss_ caps = drop_capabilities();
+	if(!caps.empty()){
+		close(rs.fd);
+		return caps;
+	}
+	if(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0){
+		close(rs.fd);
+		return ss_("no_new_privs: ")+strerror(errno);
+	}
+	if(syscall(SYS_landlock_restrict_self, rs.fd, 0) != 0){
+		const ss_ why = strerror(errno);
+		close(rs.fd);
+		return "Landlock: "+why;
+	}
+	close(rs.fd);
+	const ss_ seccomp = install_seccomp(false, x11);
+	if(!seccomp.empty())
+		return seccomp;
+	for(const ss_ &r : rs.refused)
+		fprintf(stderr, "camera box: no rule for %s\n", r.c_str());
+	fprintf(stderr, "camera box: Landlock ABI %i, %s writable, TCP to port "
+			"%i%s; seccomp (%s)\n", abi, s.dir.c_str(), s.port,
+			attr.handled_access_net ? " only" : " (not limited before ABI 4)",
+			x11 ? "unix sockets for X11, abstract ones too" : "no unix sockets");
+	return "";
+}
+
+// The client started: its stdin `in` (the drive's commands), its output
+// the directory's client.log. Never returns
+static void camera_exec(const CameraSetup &s, int in, bool x11, int w, int h,
+		const ss_ &secret)
+{
+	prctl(PR_SET_PDEATHSIG, SIGKILL);
+	const int log = open((s.dir+"/client.log").c_str(),
+			O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+	if(dup2(in, 0) < 0 || log < 0 || dup2(log, 1) < 0 || dup2(log, 2) < 0)
+		_exit(70);
+	for(int fd = 3; fd < 4096; fd++)
+		close(fd);
+	if(chdir(s.dir.c_str()) != 0)
+		_exit(70);
+	const ss_ why = camera_box(s, x11);
+	if(!why.empty()){
+		fprintf(stderr, "camera box: %s\n", why.c_str());
+		_exit(70);
+	}
+	char size[32];
+	snprintf(size, sizeof size, "%ix%i", w, h);
+	const ss_ addr = "127.0.0.1:"+itos(s.port);
+	sv_<ss_> args = {s.exe, "-s", addr, "-P", s.share, "-U", s.urho3d,
+		"-D", s.dir+"/user", "-C", s.dir+"/cache", "-w", size, "-l", "3",
+		"-o", "sound_mute=1,max_fps=20", "-c", "-"};
+	sv_<ss_> env = s.env;
+	env.push_back("HOME="+s.dir);
+	env.push_back("TMPDIR="+s.dir+"/tmp");
+	env.push_back("PATH=/usr/bin:/bin");
+	env.push_back("MESA_SHADER_CACHE_DIR="+s.dir+"/cache/mesa");
+	// No sound (SDL's dummy driver trips an SDL assertion), and an
+	// assertion never waiting for an answer (its prompt reads stdin, the
+	// commands, or opens a message box)
+	env.push_back("SDL_AUDIODRIVER=none");
+	env.push_back("SDL_ASSERT=abort");
+	env.push_back("BUILDAT_AGENT_TOKEN="+secret);
+	if(x11){
+		env.push_back("SDL_VIDEODRIVER=x11");
+		env.push_back("DISPLAY="+s.display);
+	} else {
+		env.push_back("SDL_VIDEODRIVER=offscreen");
+	}
+	sv_<char*> argv, envp;
+	for(ss_ &a : args)
+		argv.push_back(&a[0]);
+	argv.push_back(nullptr);
+	for(ss_ &e : env)
+		envp.push_back(&e[0]);
+	envp.push_back(nullptr);
+	execve(s.exe.c_str(), argv.data(), envp.data());
+	fprintf(stderr, "camera: exec %s: %s\n", s.exe.c_str(), strerror(errno));
+	_exit(71);
+}
+
+static void camera_say(int fd, const ss_ &line)
+{
+	const ss_ l = line+"\n";
+	if(write(fd, l.data(), l.size()) < 0){}
+}
+
+// "exited (status 0)", "exited (signal 9)"; and the last error the client
+// logged (": ... root cause: 'offscreen not available'"), what Kit tells
+static ss_ camera_status(const CameraSetup &s, int st)
+{
+	ss_ out = WIFEXITED(st) ? "exited (status "+itos(WEXITSTATUS(st))+")" :
+			WIFSIGNALED(st) ? "exited (signal "+itos(WTERMSIG(st))+")" :
+			ss_("exited");
+	const int fd = open((s.dir+"/client.log").c_str(),
+			O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if(fd < 0)
+		return out;
+	const off_t size = lseek(fd, 0, SEEK_END);
+	const off_t from = size > 65536 ? size - 65536 : 0;
+	ss_ tail(size - from, '\0');
+	const ssize_t n = pread(fd, &tail[0], tail.size(), from);
+	close(fd);
+	tail.resize(n > 0 ? n : 0);
+	ss_ last;
+	size_t at = 0;
+	while(at < tail.size()){
+		size_t nl = tail.find('\n', at);
+		if(nl == ss_::npos)
+			nl = tail.size();
+		const ss_ line = tail.substr(at, nl - at);
+		at = nl + 1;
+		const size_t e = line.find("ERROR: ");
+		if(e != ss_::npos && line.find(" E ") != ss_::npos)
+			last = line.substr(e + 7);
+		else if(line.find("camera box: ") == 0)
+			last = line;
+	}
+	ss_ clean;
+	for(char c : last.substr(0, 200))
+		clean += (unsigned char)c >= 32 && (unsigned char)c < 127 ? c : '?';
+	return clean.empty() ? out : out+": "+clean;
+}
+
+// The launcher's life: requests in, the client's end out
+static void camera_loop(const CameraSetup &s, int req, int ans)
+{
+	signal(SIGPIPE, SIG_IGN);
+	pid_t child = 0;
+	int in = -1; // the client's stdin
+	ss_ buf;
+	auto reap = [&](bool wait_for){
+		if(!child)
+			return;
+		int st = 0;
+		const pid_t r = waitpid(child, &st, wait_for ? 0 : WNOHANG);
+		if(r != child)
+			return;
+		child = 0;
+		if(in >= 0)
+			close(in);
+		in = -1;
+		camera_say(ans, camera_status(s, st));
+	};
+	auto stop = [&](){
+		if(!child)
+			return;
+		// End of input ends a -c - run; then asked, then made to
+		if(in >= 0)
+			close(in);
+		in = -1;
+		for(int i = 0; i < 30 && child; i++){
+			usleep(100000);
+			reap(false);
+		}
+		if(child)
+			kill(child, SIGTERM);
+		for(int i = 0; i < 20 && child; i++){
+			usleep(100000);
+			reap(false);
+		}
+		if(child){
+			kill(child, SIGKILL);
+			reap(true);
+		}
+	};
+	for(;;){
+		struct pollfd p = {req, POLLIN, 0};
+		const int n = poll(&p, 1, 200);
+		reap(false);
+		if(n <= 0)
+			continue;
+		char tmp[4096];
+		const ssize_t got = read(req, tmp, sizeof tmp);
+		if(got <= 0){
+			// The server is gone
+			stop();
+			_exit(0);
+		}
+		buf.append(tmp, got);
+		if(buf.size() > 65536)
+			buf.clear();
+		size_t nl;
+		while((nl = buf.find('\n')) != ss_::npos){
+			const ss_ line = buf.substr(0, nl);
+			buf.erase(0, nl + 1);
+			bool clean = line.size() <= 512;
+			for(char c : line)
+				clean = clean && (unsigned char)c >= 32 && (unsigned char)c < 127;
+			if(!clean)
+				continue;
+			if(line.compare(0, 4, "cmd ") == 0){
+				if(in >= 0){
+					const ss_ c = line.substr(4)+"\n";
+					if(write(in, c.data(), c.size()) < 0){}
+				}
+				continue;
+			}
+			if(line == "stop"){
+				stop();
+				continue;
+			}
+			char mode[16] = {0}, secret[96] = {0};
+			int w = 0, h = 0;
+			if(line.compare(0, 6, "start ") != 0 || sscanf(line.c_str(),
+					"start %15s %d %d %95s", mode, &w, &h, secret) != 4)
+				continue;
+			const ss_ m = mode, sec = secret;
+			bool sec_ok = !sec.empty();
+			for(char c : sec)
+				sec_ok = sec_ok && (isalnum((unsigned char)c) || c == '_');
+			const bool x11 = m == "x11";
+			if(child){
+				camera_say(ans, "refused one is running");
+				continue;
+			}
+			if((!x11 && m != "offscreen") || !sec_ok || w < 64 || h < 48 ||
+					w > 1024 || h > 768){
+				camera_say(ans, "refused a malformed start");
+				continue;
+			}
+			if(x11 && s.display.empty()){
+				camera_say(ans, "refused no display");
+				continue;
+			}
+			// Fresh at each start (rm -rf: a link the last client left is
+			// taken, not followed)
+			interface::fs::remove_all(s.dir);
+			for(const char *d : {"", "/user", "/cache", "/tmp"})
+				interface::fs::create_directories(s.dir+d);
+			int pp[2];
+			if(pipe(pp) != 0){
+				camera_say(ans, ss_("refused pipe: ")+strerror(errno));
+				continue;
+			}
+			const pid_t pid = fork();
+			if(pid == 0){
+				close(pp[1]);
+				camera_exec(s, pp[0], x11, w, h, sec);
+			}
+			close(pp[0]);
+			if(pid < 0){
+				close(pp[1]);
+				camera_say(ans, ss_("refused fork: ")+strerror(errno));
+				continue;
+			}
+			child = pid;
+			in = pp[1];
+			fcntl(in, F_SETFL, fcntl(in, F_GETFL) | O_NONBLOCK);
+			camera_say(ans, "started "+itos((int)pid));
+		}
+	}
+}
+
+void start_camera_launcher(core::Config &config, const ss_ &module_path)
+{
+	char exe[PATH_MAX];
+	const ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+	if(n <= 0)
+		return;
+	CameraSetup s;
+	s.exe_dir = interface::fs::strip_file_name(ss_(exe, n));
+	s.exe = s.exe_dir+"/buildat";
+	s.share = real(config.get<ss_>("share_path"));
+	s.urho3d = real(config.get<ss_>("urho3d_path"));
+	s.user = config.get<ss_>("user_path");
+	s.cache = config.get<ss_>("cache_path");
+	// Outside the server's box (its app directory is not), so nothing the
+	// server runs makes it a link elsewhere before the client's box is made
+	s.dir = real(s.user)+"/camera/"+app_of(module_path);
+	if(real(s.user).empty() || s.share.empty() || s.urho3d.empty())
+		return;
+	s.port = atoi(config.get<ss_>("network_port").c_str());
+	if(s.port <= 0)
+		s.port = 29500;
+	// ":N" or ":N.M" only: a display of this machine's
+	const ss_ d = config.get<ss_>("camera_display");
+	bool d_ok = d.size() >= 2 && d.size() < 16 && d[0] == ':';
+	for(size_t i = 1; i < d.size(); i++)
+		d_ok = d_ok && (isdigit((unsigned char)d[i]) || d[i] == '.');
+	if(!d.empty() && !d_ok)
+		log_w(MODULE, "The camera's display \"%s\" is not :N: none used",
+				cs(d));
+	s.display = d_ok ? d : "";
+	// What a check or a host set for every client of theirs
+	for(const char *k : {"BUILDAT_STARPORT_DEFAULT", "BUILDAT_AITTA_DEFAULT",
+			"BUILDAT_HEARTH_DEFAULT", "SDL_VIDEO_X11_XRANDR",
+			"LIBGL_ALWAYS_SOFTWARE", "GALLIUM_DRIVER", "LP_NUM_THREADS"})
+		if(const char *v = getenv(k))
+			s.env.push_back(ss_(k)+"="+v);
+	if(::access(s.exe.c_str(), X_OK) != 0){
+		log_i(MODULE, "No camera: no client at %s", cs(s.exe));
+		return;
+	}
+	int req[2], ans[2];
+	if(pipe(req) != 0 || pipe(ans) != 0)
+		return;
+	const pid_t parent = getpid();
+	const pid_t pid = fork();
+	if(pid < 0){
+		for(int fd : {req[0], req[1], ans[0], ans[1]})
+			close(fd);
+		return;
+	}
+	if(pid == 0){
+		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		if(getppid() != parent)
+			_exit(0);
+		prctl(PR_SET_NAME, "buildat_camera", 0, 0, 0);
+		close(req[1]);
+		close(ans[0]);
+		camera_loop(s, req[0], ans[1]);
+		_exit(0);
+	}
+	close(req[0]);
+	close(ans[1]);
+	for(int fd : {req[1], ans[0]})
+		fcntl(fd, F_SETFD, FD_CLOEXEC);
+	fcntl(ans[0], F_SETFL, fcntl(ans[0], F_GETFL) | O_NONBLOCK);
+	config.set("camera_launcher", itos(req[1])+" "+itos(ans[0]));
+	log_i(MODULE, "The camera's launcher: pid %i, %s, display %s", (int)pid,
+			cs(s.dir), s.display.empty() ? "none (offscreen only)" :
+			cs(s.display));
 }
 
 }

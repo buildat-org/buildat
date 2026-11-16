@@ -330,16 +330,19 @@ pictures() # <log>: the pictures its client has taken
 	grep -ac "kit: Your agent took a picture" "$1"
 }
 
-# 1. The tokens
+# 1. The tokens ([KIT_AGENT_NEXT_1] the server's camera off: the clients
+# here draw, and with none get_view is refused as before it;
+# util/kit_server_camera_check.sh has the camera)
 BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
-	BUILDAT_JOIN_ADMIN="setting open_registration on" client boss
+	BUILDAT_JOIN_ADMIN="setting open_registration on
+setting server_camera off" client boss
 BOSS=$!
 exec 3> "$t/boss.cmd"
 as boss
 await "$CL" 0 120 "Joined as kitboss"
 cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
 await "$CL" 0 120 "player physics enabled"
-await "$CL" 0 30 "accounts: admin result: "
+await "$CL" 0 30 "accounts: admin result: The server.s camera is off"
 menu
 step 10 "accounts: agents: 0 tokens, on" "frames 3" 'click Button "My account*"' \
 	"frames 5" 'click Button "Connect an agent..."'

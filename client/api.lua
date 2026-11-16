@@ -2542,6 +2542,10 @@ function __buildat_idle_pending()
 	table.sort(out)
 	return table.concat(out, ", ")
 end
+-- idle_pending() -> what the idle sources say is still queued ("": none),
+-- as a drive's idle reads it ([KIT_AGENT_NEXT_1]: the server's camera
+-- waits for it before it draws)
+buildat.safe.idle_pending = __buildat_idle_pending
 -- resources() -> {memory_mb, mesh_threads, isolated, touch, platform}: what
 -- this client got to run in ([WEB_MESH_OFF_THREAD]; doc/client_api.txt)
 buildat.safe.resources = __buildat_resources

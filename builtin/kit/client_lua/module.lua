@@ -1167,6 +1167,11 @@ buildat.sub_packet("kit:you", function(data)
 	-- [KIT_TOOLS_1] Kit's hotbar (hands.lua)
 	P.hands = type(y) == "table" and y.hands == true
 	log:info("kit: this player is entity " .. tostring(P.you))
+	-- [KIT_AGENT_NEXT_1] The server's camera: it says it is in
+	if type(y) == "table" and y.camera == true then
+		log:info("kit: the server's camera is in")
+		buildat.send_packet("kit:camera_ready", "")
+	end
 end)
 
 buildat.sub_packet("kit:items", function(data)
@@ -2185,30 +2190,42 @@ magic.SubscribeToEvent("command_seq:kit_obuild", function(_, data)
 	buildat.send_packet("kit:obuild", data:GetString("Param"))
 end)
 
--- ---- [KIT_AGENT_VISUALS] **An agent's picture** (Kit's get_view): the
--- server asks a client of the agent's own account, "kit:view" {id, w, h,
--- pos, look_at or yaw and pitch}, to draw a camera of its own -- at pos,
--- or where the view the window draws is (its fov, its orthographic) --
--- into a w x h texture of its own (a RenderSurface: the window's view,
--- camera and render path are left as they are), read back as a PNG and
--- sent "kit:view" "<id>\n<PNG>", or "<id>\n<why not>". The scene is this
--- client's, as far as it has loaded it. The user is told by a notice.
+-- ---- [KIT_AGENT_VISUALS] **An agent's pictures** (Kit's get_view): the
+-- server asks a client of the agent's own account, or
+-- ([KIT_AGENT_NEXT_1]) the server's camera, "kit:view" {id, camera,
+-- budget, views: [{w, h, pos, look_at or yaw and pitch, ortho, far}]}, to
+-- draw each view with a camera of its own -- at pos, or where the view the
+-- window draws is (its fov, its orthographic) -- into a w x h texture of
+-- its own (a RenderSurface: the window's view, camera and render path are
+-- left as they are), read back as a PNG and sent "kit:view" "<id> <k>
+-- <settled>\n<PNG>", or "<id> <k> 1\n<why not>". The scene is this
+-- client's, as far as it has loaded it. The user is told by a notice. The
+-- server's camera (camera true) meshes round each view first and waits
+-- for its chunks to come and be meshed, budget ms at most for them all.
 local VIEW = {}
-buildat.sub_packet("kit:view", function(data)
-	local q = network.parse_json(data)
-	if type(q) ~= "table" or type(q.id) ~= "string" or #q.id > 64 then
+function VIEW.answer(id, k, settled, body)
+	buildat.send_packet("kit:view", id .. " " .. (k - 1) .. " " ..
+			(settled and 1 or 0) .. "\n" .. body)
+end
+-- The next view of the request set up, or the request done
+function VIEW.next()
+	local q = VIEW.q
+	VIEW.k = VIEW.k + 1
+	local k = VIEW.k
+	local v = q.views[k]
+	if not v then
+		VIEW.q, VIEW.voxel_camera = nil, nil
 		return
 	end
-	local function answer(why)
+	local function skip(why)
 		log:info("kit: no picture for the agent: " .. why)
-		buildat.send_packet("kit:view", q.id .. "\n" .. why)
+		VIEW.answer(q.id, k, true, why)
+		return VIEW.next()
 	end
-	local w, h = tonumber(q.w) or 0, tonumber(q.h) or 0
+	local w, h = type(v) == "table" and tonumber(v.w) or 0,
+			type(v) == "table" and tonumber(v.h) or 0
 	if w < 16 or h < 16 or w > 1024 or h > 768 then
-		return answer("a size 16x16 to 1024x768")
-	end
-	if VIEW.job then
-		return answer("a picture is being taken")
+		return skip("a size 16x16 to 1024x768")
 	end
 	local main = magic.renderer:GetViewport(0)
 	local from, cam0
@@ -2221,25 +2238,31 @@ buildat.sub_packet("kit:view", function(data)
 	end
 	local scene = O.scene or replicate.main_scene
 	if not (main and from and cam0 and scene) then
-		return answer("this client draws no view")
+		return skip("this client draws no view")
 	end
 	local node = scene:CreateChild("kit: agent's camera")
 	local cam = node:CreateComponent("Camera")
 	local play = O.camera and O.camera:GetComponent("Camera") or cam0
-	local function v(t)
+	local function vec(t)
 		return type(t) == "table" and tonumber(t[1]) and tonumber(t[2]) and
 				tonumber(t[3]) and magic.Vector3(t[1], t[2], t[3])
 	end
-	local pos = v(q.pos)
+	local pos = vec(v.pos)
 	if pos then
-		-- A pose: the play camera's lens
+		-- A pose: the play camera's lens, or an orthographic one (a map)
 		cam.fov, cam.nearClip, cam.farClip = play.fov, play.nearClip, play.farClip
+		if tonumber(v.ortho) then
+			cam.orthographic, cam.orthoSize = true, tonumber(v.ortho)
+		end
+		if tonumber(v.far) then
+			cam.farClip = math.max(play.farClip, tonumber(v.far))
+		end
 		node.position = pos
-		if v(q.look_at) then
-			node:LookAt(v(q.look_at))
+		if vec(v.look_at) then
+			node:LookAt(vec(v.look_at))
 		else
-			node.rotation = magic.Quaternion(tonumber(q.pitch) or 0,
-					tonumber(q.yaw) or 0, 0)
+			node.rotation = magic.Quaternion(tonumber(v.pitch) or 0,
+					tonumber(v.yaw) or 0, 0)
 		end
 	else
 		cam.fov, cam.nearClip, cam.farClip = cam0.fov, cam0.nearClip, cam0.farClip
@@ -2254,19 +2277,70 @@ buildat.sub_packet("kit:view", function(data)
 	if not tex:SetSize(w, h, magic.Graphics.GetRGBAFormat(),
 			magic.TEXTURE_RENDERTARGET) then
 		node:Remove()
-		return answer("no render target of " .. w .. "x" .. h)
+		return skip("no render target of " .. w .. "x" .. h)
 	end
 	local vp = magic.Viewport:new(scene, cam)
 	vp.renderPath = main.renderPath
 	local surface = tex:GetRenderSurface()
 	surface:SetViewport(0, vp)
 	surface.updateMode = magic.SURFACE_MANUALUPDATE
-	surface:QueueUpdate()
-	VIEW.job = {id = q.id, node = node, tex = tex, vp = vp, frames = 0}
-	log:info(string.format("kit: Your agent took a picture (%dx%d, %s)", w, h,
-			pos and "its pose" or "this view"))
-	ui_utils.show_notification("Your agent took a picture", 3)
+	-- The server's camera: the chunks round the view meshed first
+	if q.camera and pos then
+		require("buildat/module/voxelworld").set_camera(node)
+	end
+	VIEW.job = {node = node, tex = tex, vp = vp, surface = surface,
+			frames = 0, t = buildat.get_time_us()}
+	if not q.camera then
+		VIEW.job.drawn = 0
+		surface:QueueUpdate()
+	end
+end
+buildat.sub_packet("kit:view", function(data)
+	local q = network.parse_json(data)
+	if type(q) ~= "table" or type(q.id) ~= "string" or #q.id > 64 then
+		return
+	end
+	if type(q.views) ~= "table" or #q.views < 1 or #q.views > 8 then
+		return VIEW.answer(q.id, 1, true, "no views asked")
+	end
+	if VIEW.q then
+		for k = 1, #q.views do
+			VIEW.answer(q.id, k, true, "a picture is being taken")
+		end
+		return
+	end
+	VIEW.q, VIEW.k = q, 0
+	VIEW.t0, VIEW.budget = buildat.get_time_us(), (tonumber(q.budget) or 0) * 1000
+	if q.camera then
+		VIEW.voxel_camera = require("buildat/module/voxelworld").get_camera()
+		log:info(string.format("kit: the server's camera draws %d view(s)",
+				#q.views))
+	else
+		local v = q.views[1]
+		log:info(string.format("kit: Your agent took a picture (%s, %s)",
+				#q.views == 1 and tostring(v.w) .. "x" .. tostring(v.h) or
+				#q.views .. " views", v.pos and "its pose" or "this view"))
+		ui_utils.show_notification("Your agent took a picture", 3)
+	end
+	VIEW.next()
 end)
+-- The server's camera's view has its chunks: none came lately and none
+-- is waiting for its mesh (the first view waits 0.4 s for them to start
+-- coming); out of budget it is drawn as it is
+function VIEW.settled(j)
+	local now = buildat.get_time_us()
+	if now - VIEW.t0 > VIEW.budget then
+		return true, false
+	end
+	if now - j.t < (VIEW.k == 1 and 400000 or 100000) then
+		return false
+	end
+	local a = buildat.last_arrival()
+	if a and a.kind == "chunk" and now - a.t < 300000 then
+		return false
+	end
+	return (buildat.idle_pending and buildat.idle_pending() or "") == "", true
+end
 -- Read the frame after it was drawn (the frame it was queued in draws it)
 magic.SubscribeToEvent("Update", function()
 	local j = VIEW.job
@@ -2274,18 +2348,40 @@ magic.SubscribeToEvent("Update", function()
 		return
 	end
 	j.frames = j.frames + 1
-	if j.frames < 2 then
+	if not j.drawn then
+		local done, settled = VIEW.settled(j)
+		if j.frames < 2 or not done then
+			return
+		end
+		j.drawn, j.settled = j.frames, settled
+		j.surface:QueueUpdate()
+		return
+	end
+	if j.frames < j.drawn + 2 then
 		return
 	end
 	VIEW.job = nil
 	local png, why = magic.texture_png(j.tex)
+	-- (voxelworld's camera back before the node goes)
+	if VIEW.q.camera then
+		require("buildat/module/voxelworld").set_camera(VIEW.voxel_camera)
+	end
 	j.node:Remove()
+	local id, k = VIEW.q.id, VIEW.k
 	if not png then
 		log:info("kit: no picture for the agent: " .. tostring(why))
-		return buildat.send_packet("kit:view", j.id .. "\n" .. tostring(why))
+		VIEW.answer(id, k, true, tostring(why))
+	else
+		log:info("kit: the picture sent, " .. #png .. " bytes" ..
+				(j.settled == false and " (before its loading settled)" or ""))
+		VIEW.answer(id, k, j.settled ~= false, png)
 	end
-	log:info("kit: the picture sent, " .. #png .. " bytes")
-	buildat.send_packet("kit:view", j.id .. "\n" .. png)
+	VIEW.next()
+end)
+-- [KIT_AGENT_NEXT_1] 3a: the server's camera's play_input ran its
+-- commands ("event kit_play_done <id>", the last of them)
+magic.SubscribeToEvent("command_seq:kit_play_done", function(_, data)
+	buildat.send_packet("kit:play_done", data:GetString("Param"))
 end)
 
 -- ---- [KIT_ENVIRONMENT] The environment, the lighting, the sky and the

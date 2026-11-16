@@ -537,10 +537,12 @@ struct UsersInfo
 	ss_ storage;
 	// [KIT_AGENTS] the admin's switch: agent tokens stand
 	uint8_t agents = 1;
+	// [KIT_AGENT_NEXT_1] the admin's switch: the server's camera runs
+	uint8_t camera = 1;
 	template<class Archive>
 	void serialize(Archive &archive){
 		archive(users, invites, access, bans, starport_ids, approvals, level,
-				budget_mb, storage, agents);
+				budget_mb, storage, agents, camera);
 	}
 };
 
@@ -567,6 +569,8 @@ struct Peer
 	// [KIT_AGENT_VISUALS] 3: the agent token the client showed, held until
 	// its hello (agent_login()); the token's id once it joined by it
 	ss_ agent_token, agent_id;
+	// [KIT_AGENT_NEXT_1] the server's camera (camera_login())
+	bool camera = false;
 };
 
 struct Module: public interface::Module, public Interface
@@ -596,6 +600,9 @@ struct Module: public interface::Module, public Interface
 	bool m_lan_account = true;
 	std::set<PeerId> m_owners;
 	std::map<PeerId, Peer> m_peers;
+	// [KIT_AGENT_NEXT_1] The camera's one-time secret, while Kit waits for
+	// it ("": none)
+	ss_ m_camera_secret;
 	// [SERVER_STATS] The hour in progress, written at each minute's sample
 	StatRow m_hour;
 	int64_t m_hour_no = -1;
@@ -840,7 +847,7 @@ struct Module: public interface::Module, public Interface
 		auto it = m_peers.find(client.info.id);
 		if(it == m_peers.end())
 			return;
-		const bool joined = !it->second.name.empty();
+		const bool joined = !it->second.name.empty() && !it->second.camera;
 		if(joined)
 			add_time_joined(it->second);
 		m_peers.erase(it);
@@ -1246,7 +1253,8 @@ struct Module: public interface::Module, public Interface
 	bool is_local(PeerId peer)
 	{
 		auto it = m_peers.find(peer);
-		if(!m_launched || it == m_peers.end() || it->second.web)
+		if(!m_launched || it == m_peers.end() || it->second.web ||
+				it->second.camera)
 			return false;
 		if(!m_owner_token.empty())
 			return m_owners.count(peer) != 0;
@@ -2190,7 +2198,7 @@ struct Module: public interface::Module, public Interface
 				level(name) < LV_MODERATOR){
 			int joined = 0;
 			for(auto &it : m_peers)
-				joined += !it.second.name.empty();
+				joined += !it.second.name.empty() && !it.second.camera;
 			if(joined >= max_players){
 				log_i(MODULE, "Login of %s refused: the server is full",
 						cs(name));
@@ -2266,7 +2274,7 @@ struct Module: public interface::Module, public Interface
 		if(max_players > 0){
 			int joined = 0;
 			for(auto &it : m_peers)
-				joined += !it.second.name.empty();
+				joined += !it.second.name.empty() && !it.second.camera;
 			if(joined >= max_players)
 				return reply("The server is full ("+itos(max_players)+
 						" players)");
@@ -2317,6 +2325,8 @@ struct Module: public interface::Module, public Interface
 	{
 		if(!m_store)
 			return "The server is starting";
+		if(token.compare(0, 4, "cam_") == 0)
+			return camera_login(id, peer, token);
 		const int64_t now = interface::os::wall_us();
 		const ss_ bin = network::address_bin(peer.address);
 		const int64_t wait = failure_wait(m_address_failures, bin, now);
@@ -2356,7 +2366,7 @@ struct Module: public interface::Module, public Interface
 				level(name) < LV_MODERATOR){
 			int joined = 0;
 			for(auto &it : m_peers)
-				joined += !it.second.name.empty();
+				joined += !it.second.name.empty() && !it.second.camera;
 			if(joined >= max_players)
 				why = "The server is full ("+itos(max_players)+" players)";
 		}
@@ -2379,6 +2389,71 @@ struct Module: public interface::Module, public Interface
 		m_server->emit_event("accounts:login", new Login(id, name));
 		send_users_to_staff();
 		return "";
+	}
+
+	// [KIT_AGENT_NEXT_1] **The server's camera's join** (api.h): the
+	// secret Kit armed, compared in constant time, from loopback (not a
+	// web client's: those come through a proxy), used once. A wrong one is
+	// a failed login, as a wrong password is
+	ss_ camera_login(PeerId id, Peer &peer, const ss_ &token)
+	{
+		const int64_t now = interface::os::wall_us();
+		const ss_ bin = network::address_bin(peer.address);
+		ss_ why;
+		if(failure_wait(m_address_failures, bin, now) > 0)
+			why = "Too many failed logins";
+		else if(peer.web || (peer.address != "127.0.0.1" &&
+				peer.address != "::1"))
+			why = "Not from this machine";
+		else if(m_camera_secret.empty())
+			why = "No camera is expected";
+		if(why.empty()){
+			const ss_ &want = m_camera_secret;
+			unsigned diff = token.size() ^ want.size();
+			for(size_t i = 0; i < want.size(); i++)
+				diff |= (unsigned char)want[i] ^
+						(unsigned char)(i < token.size() ? token[i] : 0);
+			if(diff)
+				why = "Not the camera's secret";
+		}
+		if(!why.empty()){
+			peer.failures++;
+			note_failure(m_address_failures, bin, now);
+			log_w(MODULE, "A camera login from %s refused: %s",
+					cs(peer.address), cs(why));
+			return why;
+		}
+		m_camera_secret.clear();
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->set_uncounted(id);
+		});
+		peer.name = CAMERA_NAME;
+		peer.camera = true;
+		// What a guest is refused (the password, TOTP, links, tokens)
+		peer.guest = true;
+		log_i(MODULE, "Peer %zu joined from %s as the server's camera",
+				(size_t)id, cs(peer.address));
+		send(id, "accounts:login_result", pack(std::make_pair(
+				std::make_pair(ss_(), ss_()), peer.name)));
+		m_server->emit_event("accounts:login", new Login(id, peer.name));
+		return "";
+	}
+
+	void expect_camera(const ss_ &secret)
+	{
+		m_camera_secret = secret;
+	}
+
+	bool is_camera(PeerId peer)
+	{
+		auto it = m_peers.find(peer);
+		return it != m_peers.end() && it->second.camera;
+	}
+
+	bool camera_on()
+	{
+		ss_ v;
+		return !(m_store && m_store->get("access/camera_off", v));
 	}
 
 	// The token's clients (all agent tokens' for "") kicked
@@ -2444,6 +2519,7 @@ struct Module: public interface::Module, public Interface
 			info.approvals.push_back(key.substr(9));
 		info.level = level(name_of(peer));
 		info.agents = agents_on();
+		info.camera = camera_on();
 		send(peer, "accounts:users", pack(info));
 	}
 
@@ -2713,6 +2789,16 @@ struct Module: public interface::Module, public Interface
 			if(!r.on)
 				m_server->emit_event("accounts:agent_revoked", new Login(0, ""));
 			result(ss_("Agent access is ")+(r.on ? "on" : "off"));
+		} else if(r.cmd == "setting" && r.name == "server_camera"){
+			// [KIT_AGENT_NEXT_1] on by default; Kit reads it at each need
+			// and stops a running camera at its next tick
+			if(r.on)
+				m_store->remove("access/camera_off");
+			else
+				m_store->set("access/camera_off", "1");
+			log_i(MODULE, "%s turned the server's camera %s", cs(by),
+					r.on ? "on" : "off");
+			result(ss_("The server's camera is ")+(r.on ? "on" : "off"));
 		} else if(r.cmd == "setting"){
 			if(r.name != "open_registration")
 				return result("No such setting");
@@ -4634,7 +4720,7 @@ struct Module: public interface::Module, public Interface
 		});
 		int64_t players = 0;
 		for(auto &it : m_peers)
-			players += !it.second.name.empty();
+			players += !it.second.name.empty() && !it.second.camera;
 		StatRow &r = stats_hour();
 		r.sample(players, jint(h, "tick_gap_ms_max"), jint(h, "memory_bytes"));
 		m_store->set("stats/h/"+itos(m_hour_no), r.str());
@@ -4649,7 +4735,7 @@ struct Module: public interface::Module, public Interface
 		// The peak between samples too
 		int64_t players = 0;
 		for(auto &it : m_peers)
-			players += !it.second.name.empty();
+			players += !it.second.name.empty() && !it.second.camera;
 		r.pmax = std::max(r.pmax, players);
 		m_store->set("stats/n/"+itos(m_hour_no / 24)+"/"+peer.name, "");
 		peer.since_s = now_s();

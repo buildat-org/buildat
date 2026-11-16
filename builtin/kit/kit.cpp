@@ -567,6 +567,9 @@ struct Peer
 	// [KIT_AGENTS] An agent's: its account, whose name its prefabs and voxel
 	// types are under ("" for everyone else: theirs are under `name`)
 	ss_ account;
+	// [KIT_AGENT_NEXT_1] The server's camera while it plays no body: no
+	// entity, no round, no act of its own (act_allowed())
+	bool still = false;
 };
 
 // Whose name a peer's prefabs, voxel and item types are under
@@ -1493,6 +1496,9 @@ struct Module: public interface::Module, public Interface
 	{
 		if(m_early_box.valid())
 			delete m_early_box.get().first;
+		// [KIT_AGENT_NEXT_1] the camera ends with this instance
+		if(m_cam.running)
+			camera_say("stop");
 		// [KIT_AGENTS]
 		if(!m_agent_peers.empty()) try {
 			network::access(m_server, [&](network::Interface *i){
@@ -1560,6 +1566,11 @@ struct Module: public interface::Module, public Interface
 				&Module::on_texture);
 		// [KIT_AGENT_VISUALS] 2 an agent's picture (agent_view())
 		sub(m_server, "network:packet_received/kit:view", &Module::on_view);
+		// [KIT_AGENT_NEXT_1] the server's camera's word and its play's end
+		sub(m_server, "network:packet_received/kit:camera_ready",
+				&Module::on_camera_ready);
+		sub(m_server, "network:packet_received/kit:play_done",
+				&Module::on_play_done);
 		sub(m_server, "network:packet_received/kit:package",
 				&Module::on_package);
 		// [KIT_SCENE_PACKAGES] a scene added from a file or an Aitta
@@ -9016,9 +9027,9 @@ struct Module: public interface::Module, public Interface
 			m_mcp_defer = peer;
 	}
 
-	// [KIT_AGENT_VISUALS] with png: the text and the picture (get_view)
+	// [KIT_AGENT_VISUALS] with pngs: the text and the pictures (get_view)
 	void mcp_answer(size_t peer, const ss_ &text, bool failed,
-			const ss_ &png = "")
+			const sv_<ss_> &pngs = sv_<ss_>())
 	{
 		auto w = m_mcp_waits.find(peer);
 		if(w == m_mcp_waits.end())
@@ -9028,7 +9039,7 @@ struct Module: public interface::Module, public Interface
 		c.set("type", "text");
 		c.set("text", text);
 		content.append(c);
-		if(!png.empty()){
+		for(const ss_ &png : pngs){
 			json::Value i = json::object();
 			i.set("type", "image");
 			i.set("data", base64(png));
@@ -15026,7 +15037,7 @@ struct Module: public interface::Module, public Interface
 	// its node there carrying its shared state (a score)
 	void place_player(Peer &p)
 	{
-		if(p.name.empty())
+		if(p.name.empty() || p.still)
 			return;
 		const uint64_t id = ensure_player(p.name);
 		Entity &e = m_entities[id];
@@ -16156,6 +16167,8 @@ struct Module: public interface::Module, public Interface
 				eby = ev3.as_string();
 			if(!m_watches.empty())
 				watch_fired(e.id, r.comp, output, value);
+			if(m_cam.rec && m_active == m_cam.rec_session)
+				play_fired(e, output, value, eby);
 			if(r.tried){
 				json::Value o = json::array();
 				o.append(output);
@@ -21483,6 +21496,9 @@ struct Module: public interface::Module, public Interface
 		you.set("use_range", m_host.use_range);
 		// [KIT_TOOLS_1] Kit's hotbar (not where the app has its own items)
 		you.set("hands", !m_host.app_items && equipment_of(p.player));
+		// [KIT_AGENT_NEXT_1] the server's camera: it says when it is in
+		if(peer == m_cam.peer)
+			you.set("camera", true);
 		for(auto &t : m_types)
 			if(!t.second.client.empty())
 				parts.set(t.first, t.second.client);
@@ -21495,7 +21511,9 @@ struct Module: public interface::Module, public Interface
 		send_actions((int64_t)peer);
 		send_item_types((int64_t)peer);
 		send_sounds((int64_t)peer);
-		if(m_session.running)
+		if(p.still)
+			;
+		else if(m_session.running)
 			round_join(peer, false);
 		else
 			send_items(p.name);
@@ -21515,6 +21533,7 @@ struct Module: public interface::Module, public Interface
 		m_box->poll();
 		take_vouches();
 		take_pub_jobs();
+		camera_tick();
 		view_tick();
 		cell_jobs_tick();
 		// [KIT_SESSIONS_1] Writes routed to owned voxels, by the session
@@ -21545,7 +21564,8 @@ struct Module: public interface::Module, public Interface
 		const int64_t now = interface::os::time_us();
 		std::set<uint64_t> used;
 		for(auto &ps : m_peer_session)
-			used.insert(ps.second);
+			if(ps.first != m_cam.peer)
+				used.insert(ps.second);
 		for(uint64_t id : ids){
 			auto si = m_sessions.find(id);
 			if(si == m_sessions.end())
@@ -22453,7 +22473,7 @@ struct Module: public interface::Module, public Interface
 	void put_player_u(size_t peer, double x, double y, double z,
 			double look)
 	{
-		if(!m_host.controls || !m_peers.count(peer))
+		if(!m_host.controls || !m_peers.count(peer) || m_peers[peer].still)
 			return;
 		Body &b = m_bodies[peer];
 		if(b.seat)
@@ -22470,6 +22490,9 @@ struct Module: public interface::Module, public Interface
 	void on_input(const network::Packet &packet)
 	{
 		SessionScope sc(*this, session_of_peer(packet.sender));
+		auto pi = m_peers.find(packet.sender);
+		if(pi != m_peers.end() && pi->second.still)
+			return;
 		on_input_u(packet);
 	}
 
@@ -25726,6 +25749,8 @@ struct Module: public interface::Module, public Interface
 	// once; false: dropped, unsaid
 	static bool act_allowed(Peer &pe)
 	{
+		if(pe.still)
+			return false;
 		const int64_t now = interface::os::time_us();
 		pe.action_tokens = std::min(ACTION_BURST, pe.action_tokens +
 				(now - pe.action_at) * 1e-6 * ACTION_RATE);
@@ -30075,6 +30100,14 @@ struct Module: public interface::Module, public Interface
 	void on_left(const network::OldClient &old)
 	{
 		view_tick(old.info.id);
+		if(old.info.id == m_cam.peer){
+			log_i(MODULE, "The server's camera (peer %zu) left", m_cam.peer);
+			m_cam.peer = 0;
+			m_cam.ready = false;
+			play_wait_end("the server's camera left");
+			m_cam.play.clear();
+			m_cam.play_agent = 0;
+		}
 		m_local_peers.erase(old.info.id);
 		m_watches.erase(old.info.id);
 		m_pub_open.erase(old.info.id);
@@ -30137,9 +30170,11 @@ struct Module: public interface::Module, public Interface
 	// [KIT_SESSIONS_1] The app's scene "<scene>~<id>" is session id's
 	// scene: the peer's there once Kit moved them (move_peer()); a place
 	// in another than their session's is from before the move
-	void set_peer(size_t peer, const ss_ &name, const ss_ &app_scene,
+	void set_peer(size_t peer, const ss_ &app_name, const ss_ &app_scene,
 			double x, double y, double z)
 	{
+		// [KIT_AGENT_NEXT_1] the server's camera: still, or its agent's body
+		const ss_ name = camera_name(peer, app_name);
 		ss_ scene;
 		const uint64_t id = split_scene(app_scene, scene);
 		if(id != session_of_peer(peer)){
@@ -30221,6 +30256,7 @@ struct Module: public interface::Module, public Interface
 			double x, double y, double z)
 	{
 		Peer &p = m_peers[peer];
+		p.still = peer == m_cam.peer && m_cam.play.empty();
 		const bool join = p.name != name || p.scene != scene;
 		const bool moved_scene = !p.scene.empty() && p.scene != scene;
 		// (a guest logging in stays where they are: their zones swap who)
@@ -30260,7 +30296,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		// Their entity follows them ([KIT] stage 4d)
 		const uint64_t was = p.player;
-		p.player = name.empty() ? 0 : ensure_player(name);
+		p.player = name.empty() || p.still ? 0 : ensure_player(name);
 		if(was && was != p.player)
 			unplace_player(was);
 		if(renamed && was_guest)
@@ -30350,6 +30386,11 @@ struct Module: public interface::Module, public Interface
 		size_t peer = 0;
 		ss_ account, scope, label;
 		int64_t last_us = 0;
+		// [KIT_AGENT_NEXT_1] its last place (an edit's pos or at, and its
+		// scene): where the server's camera looks with no pose given
+		bool has_at = false;
+		double at[3] = {0, 0, 0};
+		ss_ at_scene;
 	};
 	static const int64_t AGENT_IDLE_US = 300 * 1000000LL;
 	// Requests a token makes a minute; tokens matching nothing an address's
@@ -30431,22 +30472,31 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
 				"required": ["id"]})J", ""},
 			// [KIT_AGENT_VISUALS] 2 (agent_view())
-			{"get_view", "view", "A picture of the game as it is drawn (a PNG): "
-				"a client of your own account connected to this server draws a "
-				"camera of its own and sends it; its window's view is left as "
-				"it is, and it shows \"Your agent took a picture\". pos and "
-				"look_at, or pos, yaw and pitch (degrees: yaw 0 looks along +z, "
-				"90 along +x; pitch down), in cells (y up); none: that client's "
-				"own view. width and height 512x384 unless given, 1024x768 at "
-				"most. The scene drawn is the one that client is in (scene: "
-				"refused unless one is), as far as it has loaded it: far from "
-				"its player the ground and entities may be missing. Look before "
-				"and after a change of looks, and say so when you could not. "
-				"With no client of your account here it is refused: your "
-				"builder's own, or one you run yourself on Linux with no "
-				"display, from a release (https://github.com/celeron55/buildat"
-				"/releases, the linux-x86_64-portable archive), unpacked, with "
-				"Xvfb and a software GL (Debian: apt-get install xvfb "
+			{"get_view", "view", "Pictures of the game as it is drawn (PNGs): "
+				"a client of your own account in your session draws a camera of "
+				"its own and sends it; its window's view is left as it is, and it "
+				"shows \"Your agent took a picture\". With none of yours there, "
+				"the server's camera draws (a client of the server's own, started "
+				"at the first need: the first call may answer that it is starting; "
+				"call again), from what the server has loaded round the pose. "
+				"pos and look_at, or pos, yaw and pitch (degrees: yaw 0 looks "
+				"along +z, 90 along +x; pitch down), in cells (y up); none: that "
+				"client's own view (the server's camera's: over your last place, "
+				"else the spawn). views: several poses in one call. preset: "
+				"\"map\" (top-down, orthographic, +z up; over area [x0, z0, x1, "
+				"z1] or the scene's extent), \"turn\" (count pictures round "
+				"entity id, 4 unless given), \"frame\" (one on entity id's box). "
+				"compare: each pose's last picture before the new one (before "
+				"and after a change). width and height 512x384 unless given, "
+				"1024x768 at most, 8 views and 1572864 pixels a call at most. The "
+				"scene drawn is the one that client is in (scene: refused unless "
+				"one is; the server's camera goes there), as far as it has loaded "
+				"it. Look before and after a change of looks, and say so when you "
+				"could not. With no client of yours and no server camera it is "
+				"refused: your builder's own, or one you run yourself on Linux "
+				"with no display, from a release (https://github.com/celeron55/"
+				"buildat/releases, the linux-x86_64-portable archive), unpacked, "
+				"with Xvfb and a software GL (Debian: apt-get install xvfb "
 				"libgl1-mesa-dri): BUILDAT_AGENT_TOKEN=<your token> xvfb-run -a "
 				"-s \"-screen 0 1280x800x24\" bin/buildat -s <host:port, or "
 				"https://host> -w 640x480 -o sound_mute=1; it logs in as your "
@@ -30462,7 +30512,45 @@ struct Module: public interface::Module, public Interface
 				"yaw": {"type": "number"}, "pitch": {"type": "number"},
 				"width": {"type": "integer"}, "height": {"type": "integer"},
 				"scene": {"type": "string", "description":
-					"Refused unless a client of yours is in it"}}})J", ""},
+					"Refused unless a client of yours is in it, or the server's camera"},
+				"views": {"type": "array", "maxItems": 8, "items": {"type": "object",
+					"description": "A pose: pos, and look_at or yaw and pitch; width, height"}},
+				"preset": {"type": "string", "enum": ["map", "turn", "frame"]},
+				"id": {"type": "integer", "description": "turn's and frame's entity"},
+				"count": {"type": "integer", "description": "turn's pictures, 2 to 8"},
+				"area": {"type": "array", "items": {"type": "number"}, "minItems": 4,
+					"maxItems": 4, "description": "map's [x0, z0, x1, z1]"},
+				"compare": {"type": "boolean"}}})J", ""},
+			// [KIT_AGENT_NEXT_1] 3a: the server's camera plays a body
+			// (agent_play())
+			{"play_join", "play_join", "Play the game yourself: the server's "
+				"camera (get_view's) takes a player body in your scene, a guest's "
+				"named \"<account>'s agent\", put as a joining player is. The "
+				"round must be Running (start). The first call may answer that the "
+				"camera is starting: call again. One agent plays at a time.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"play_input", "play_input", "Your body's input for a time, as a "
+				"player's client sends it (its keys predicted and all): keys held "
+				"(SDL's names: W, A, S, D, Space, Left Shift, ...; up to 6), the "
+				"game's input actions held (actions: up to 4 names), yaw and "
+				"pitch to look first (degrees as get_view's), jump, use (an "
+				"entity's id, as a click on it). seconds 0.1 to 4 (1). Answers "
+				"your body's place before and after, how far it moved, its "
+				"components' states (health, score, inventory...), alive, and "
+				"the outputs entities emitted meanwhile (by \"you\" when your "
+				"body did it); picture: also a picture of its own view at the "
+				"end (width, height).",
+				R"J({"type": "object", "properties": {
+				"keys": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
+				"actions": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+				"seconds": {"type": "number"}, "yaw": {"type": "number"},
+				"pitch": {"type": "number"}, "jump": {"type": "boolean"},
+				"use": {"type": "integer"}, "picture": {"type": "boolean"},
+				"width": {"type": "integer"}, "height": {"type": "integer"}}})J",
+				""},
+			{"play_leave", "play_leave", "Your body gone: the server's camera "
+				"plays no more (as after 120 s unused).",
+				R"J({"type": "object", "properties": {}})J", ""},
 			{"get_events", "=events", "What came for you since you last asked "
 				"(the last 50): your try_input's answers (what its runs emitted), "
 				"what the entity you watch emitted (every 0.2 s at most: each "
@@ -31174,6 +31262,8 @@ struct Module: public interface::Module, public Interface
 		const size_t peer = it->second.peer;
 		m_agents.erase(it);
 		m_agent_peers.erase(peer);
+		if(peer && peer == m_cam.play_agent)
+			play_end("its agent left");
 		{
 			SessionScope sc(*this, 0);
 			auto pi = m_peers.find(peer);
@@ -31210,10 +31300,25 @@ struct Module: public interface::Module, public Interface
 		failed = false;
 		const ss_ op = t.op;
 		const json::Value a = args.is_object() ? args : json::object();
+		// [KIT_AGENT_NEXT_1] its last place
+		const json::Value &lp = a.get("pos").is_array() ? a.get("pos") :
+				a.get("at");
+		if(op != "view" && op[0] != '=' && lp.is_array() && lp.size() == 3 &&
+				lp.at(0).is_number() && lp.at(1).is_number() &&
+				lp.at(2).is_number()){
+			Agent &ag = m_agents[at.id];
+			for(unsigned k = 0; k < 3; k++)
+				ag.at[k] = std::max(-MAX_COORD, std::min(MAX_COORD,
+						lp.at(k).as_number()));
+			ag.has_at = true;
+			ag.at_scene = p.scene;
+		}
 		if(op[0] == '=')
 			return agent_read(p, peer, op, a, failed);
 		if(op == "view")
 			return agent_view(p, peer, a, failed);
+		if(op.compare(0, 5, "play_") == 0)
+			return agent_play(op, p, peer, a, failed);
 		if(op == "set_voxel")
 			return agent_voxels(p, peer, a, failed);
 		// [KIT_CUSTOM_TYPES] outside kit:edit (its 4096 bytes)
@@ -31378,56 +31483,75 @@ struct Module: public interface::Module, public Interface
 		return what+(refused.empty() ? ss_() : "; refused: "+refused)+warnings;
 	}
 
-	// ---- [KIT_AGENT_VISUALS] 2: **get_view**, an agent's picture. A client
-	// of the agent's own account (joined as it in accounts: the builder's
-	// own, or one the agent runs itself by its token, accounts.cpp's
-	// agent_login()), in the default session, is sent "kit:view" {id, w, h,
-	// pos, look_at, yaw, pitch}; it draws an off-screen camera
-	// (client_lua/module.lua) and answers "kit:view" "<id>\n<PNG>" (or why
-	// not), which answers the agent's call (MCP image content, m_mcp_defer).
-	// The answer is taken only from the client asked, for the id it was
-	// given (a random one), within VIEW_TIMEOUT_US; a PNG of the size asked,
-	// MAX_VIEW_BYTES at most, its IHDR read before it is decoded, decoded
-	// and made again (the agent gets only what decoded). Another account's
-	// client is never asked. One picture an agent at a time.
-	// simplified: a client in the default session (not a round's of its
-	// own); the client in the agent's scene first, else the first
+	// ---- [KIT_AGENT_VISUALS] 2: **get_view**, an agent's pictures. A
+	// client of the agent's own account (joined as it in accounts: the
+	// builder's own, or one the agent runs itself by its token, accounts.cpp's
+	// agent_login()) in the agent's session, else ([KIT_AGENT_NEXT_1]) the
+	// server's camera (below), is sent "kit:view" {id, camera, budget, views:
+	// [{w, h, pos, look_at or yaw and pitch, ortho, far}]}; it draws each view
+	// with an off-screen camera of its own (client_lua/module.lua) and
+	// answers "kit:view" "<id> <k> <settled>\n<PNG>" a view (or why not in
+	// place of the PNG); all in, they answer the agent's call (MCP image
+	// content, m_mcp_defer). An answer is taken only from the client asked,
+	// for the id it was given (a random one), within VIEW_TIMEOUT_US (the
+	// camera's: CAMERA_CALL_US from the call); a PNG of the size asked,
+	// MAX_VIEW_BYTES at most, its IHDR read before it is decoded, decoded and
+	// made again (the agent gets only what decoded). Another account's
+	// client is never asked. One call an agent at a time.
+	// simplified: the client in the agent's scene first, else the first
 	struct ViewWait
 	{
 		size_t client = 0, agent = 0;
-		int w = 0, h = 0;
-		ss_ account, scene, what;
-		int64_t since = 0;
+		ss_ account, scene, who;
+		uint64_t session = 0;
+		int64_t since = 0, deadline = 0;
+		// The request (sent once a client is there: the camera's when it is
+		// in), each view's words, PNG or why not, its compare key, whether
+		// it was drawn before its loading settled
+		json::Value q;
+		sv_<ss_> what, png, why, key;
+		std::vector<bool> early;
+		size_t done = 0;
+		bool camera = false, compare = false;
+		// Where the camera loads round
+		double at[3] = {0, 0, 0};
+		// [3a] the play_input answer this picture ends
+		ss_ play;
 	};
 	std::map<ss_, ViewWait> m_view_waits; // by the request's id
 	static const int VIEW_MAX_W = 1024, VIEW_MAX_H = 768;
 	static const int64_t VIEW_TIMEOUT_US = 5000000;
 	static const size_t MAX_VIEW_BYTES = 4 << 20;
-
-	ss_ agent_view(Peer &p, size_t peer, const json::Value &a, bool &failed)
+	// [KIT_AGENT_NEXT_1] The views of a call and their pixels together
+	static const size_t VIEWS_MAX = 8;
+	static const int64_t VIEW_CALL_PIXELS = 1024 * 768 * 2;
+	// compare's: an account's last pictures, the newest last
+	struct LastView
 	{
-		failed = true;
-		json::Value q = json::object();
-		auto vec = [&](const char *k) -> ss_ {
+		ss_ key, png;
+		int64_t at = 0;
+	};
+	std::map<ss_, std::deque<LastView>> m_view_last;
+	static const size_t VIEW_LAST = 8;
+
+	// A pose ({pos, look_at | yaw, pitch}: the arguments' or a views
+	// item's) into o; "" or why not
+	ss_ view_pose(const json::Value &a, json::Value &o)
+	{
+		for(const char *k : {"pos", "look_at"}){
 			const json::Value &v = a.get(k);
 			if(v.is_undefined())
-				return "";
+				continue;
 			if(!v.is_array() || v.size() != 3)
 				return ss_(k)+": three numbers";
-			json::Value o = json::array();
+			json::Value l = json::array();
 			for(unsigned i = 0; i < 3; i++){
 				if(!v.at(i).is_number() || !std::isfinite(v.at(i).as_number()) ||
 						std::fabs(v.at(i).as_number()) > MAX_COORD)
 					return ss_(k)+": three numbers within "+itos((int)MAX_COORD);
-				o.append(v.at(i).as_number());
+				l.append(v.at(i).as_number());
 			}
-			q.set(k, o);
-			return "";
-		};
-		for(const char *k : {"pos", "look_at"}){
-			const ss_ why = vec(k);
-			if(!why.empty())
-				return why;
+			o.set(k, l);
 		}
 		for(const char *k : {"yaw", "pitch"}){
 			const json::Value &v = a.get(k);
@@ -31435,12 +31559,17 @@ struct Module: public interface::Module, public Interface
 				continue;
 			if(!v.is_number() || !std::isfinite(v.as_number()))
 				return ss_(k)+": a number of degrees";
-			q.set(k, v.as_number());
+			o.set(k, v.as_number());
 		}
-		if(q.get("pos").is_undefined() && (!q.get("look_at").is_undefined() ||
-				!q.get("yaw").is_undefined() || !q.get("pitch").is_undefined()))
+		if(o.get("pos").is_undefined() && (!o.get("look_at").is_undefined() ||
+				!o.get("yaw").is_undefined() || !o.get("pitch").is_undefined()))
 			return "look_at, yaw and pitch go with a pos";
-		int wh[2] = {512, 384};
+		return "";
+	}
+
+	// width and height of a, over wh; "" or why not
+	static ss_ view_size(const json::Value &a, int wh[2])
+	{
 		const char *names[2] = {"width", "height"};
 		const int max[2] = {VIEW_MAX_W, VIEW_MAX_H};
 		for(int k = 0; k < 2; k++){
@@ -31451,98 +31580,386 @@ struct Module: public interface::Module, public Interface
 				return ss_(names[k])+": 16 to "+itos(max[k]);
 			wh[k] = (int)v.as_number();
 		}
-		const ss_ account = author_of(p), want = jstr(a, "scene");
-		// The clients joined as the account: what accounts says, so not an
-		// agent's peer (none of its) nor a bot
-		size_t client = 0;
-		ss_ scene;
-		sv_<ss_> elsewhere;
-		accounts::access(m_server, [&](accounts::Interface *i){
-			for(auto &o : m_peers){
-				if(o.first == peer || o.second.guest || agent_of(o.first) ||
-						i->name_of(o.first) != account)
-					continue;
-				if(!want.empty() && o.second.scene != want){
-					elsewhere.push_back(o.second.scene);
-					continue;
-				}
-				if(!client || (o.second.scene == p.scene && scene != p.scene)){
-					client = o.first;
-					scene = o.second.scene;
-				}
+		return "";
+	}
+
+	// "from [x, y, z] looking at [...]", "its own view"
+	static ss_ view_what(const json::Value &v)
+	{
+		if(v.get("pos").is_undefined())
+			return "its own view";
+		auto num = [&](const char *k){
+			return json::Value(v.get(k).is_number() ? v.get(k).as_number() :
+					0.0).stringify();
+		};
+		ss_ s = "from "+v.get("pos").stringify()+(!v.get("look_at").is_undefined() ?
+				" looking at "+v.get("look_at").stringify() : " yaw "+num("yaw")+
+				" pitch "+num("pitch"));
+		if(v.get("ortho").is_number())
+			s += ", orthographic, "+num("ortho")+" cells high";
+		return s;
+	}
+
+	// [KIT_AGENT_NEXT_1] An entity's box, its middle and half its diagonal.
+	// simplified: its own and its descendants' places, each grown by half
+	// its components' "size" (a kit/part's: three numbers or one); a mesh's
+	// or a prefab's voxels' real bounds are the upgrade
+	bool view_bounds(uint64_t id, double c[3], double &r)
+	{
+		double lo[3] = {INFINITY, INFINITY, INFINITY},
+				hi[3] = {-INFINITY, -INFINITY, -INFINITY};
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(!e.has_pos)
+				continue;
+			uint64_t up = e.id;
+			for(int n = 0; up && up != id && n < 64; n++){
+				auto u = m_entities.find(up);
+				up = u == m_entities.end() ? 0 : u->second.parent;
 			}
-		});
-		if(!client && !elsewhere.empty())
-			return "No client of "+account+"'s is in the scene "+want+
-					" (yours is in "+elsewhere[0]+"): get_view draws the scene "
-					"its client is in";
-		if(!client)
-			return "No client of "+account+"'s is connected to this server: "
-					"get_view asks one to draw. Ask your builder to join with "
-					"theirs, or run one yourself with your token (this tool's "
-					"description says how: a release's client, headless)";
+			if(up != id)
+				continue;
+			double w[3], half = 0.5;
+			world_of(e, w);
+			for(const Instance &in : e.comps){
+				const json::Value &sz = in.params.get("size");
+				if(sz.is_number())
+					half = std::max(half, sz.as_number() / 2);
+				for(unsigned k = 0; sz.is_array() && k < sz.size() && k < 3; k++)
+					if(sz.at(k).is_number())
+						half = std::max(half, sz.at(k).as_number() / 2);
+			}
+			half = std::min(half, 512.0);
+			for(int k = 0; k < 3; k++){
+				lo[k] = std::min(lo[k], w[k] - half);
+				hi[k] = std::max(hi[k], w[k] + half);
+			}
+		}
+		if(lo[0] > hi[0])
+			return false;
+		r = 0;
+		for(int k = 0; k < 3; k++){
+			c[k] = (lo[k] + hi[k]) / 2;
+			r += (hi[k] - lo[k]) * (hi[k] - lo[k]) / 4;
+		}
+		r = std::max(1.0, std::sqrt(r));
+		return true;
+	}
+
+	// A map's area of the scene: its entities' places and a finite World's
+	// ground (x0, z0, x1, z1), and the highest place's y
+	void view_extent(const ss_ &scene, double a[4], double &top)
+	{
+		a[0] = a[1] = INFINITY;
+		a[2] = a[3] = -INFINITY;
+		top = 0;
+		auto grow = [&](double x, double z){
+			a[0] = std::min(a[0], x);
+			a[1] = std::min(a[1], z);
+			a[2] = std::max(a[2], x);
+			a[3] = std::max(a[3], z);
+		};
+		for(auto &p : m_entities){
+			ss_ es;
+			if(!p.second.has_pos || !scene_of(p.second, &es) || es != scene)
+				continue;
+			double w[3];
+			world_of(p.second, w);
+			grow(w[0], w[2]);
+			top = std::max(top, w[1]);
+		}
+		WorldScope ws(m_w, world_named(scene));
+		if(m_w && m_w->world_scene && m_w->wp.finite() && !m_w->wp.none()){
+			grow(m_w->wp.x0(), m_w->wp.z0());
+			grow(m_w->wp.x0() + m_w->wp.width, m_w->wp.z0() + m_w->wp.depth);
+		}
+		if(a[0] > a[2]){
+			double x, y, z;
+			scene_spawn(scene, x, y, z);
+			grow(x - 16, z - 16);
+			grow(x + 16, z + 16);
+		}
+	}
+
+	// [KIT_AGENT_NEXT_1] Where a session is, for a refusal
+	ss_ session_where(uint64_t id)
+	{
+		auto it = m_sessions.find(id);
+		if(!id)
+			return "in the main round";
+		if(it == m_sessions.end())
+			return "in session "+itos(id);
+		const GameSession &g = *it->second;
+		return g.draft ? "in a draft of "+g.by+"'s" : g.bench ?
+				"on the prefab bench of "+g.prefab : "in a game session (by "+
+				g.by+")";
+	}
+
+	ss_ agent_view(Peer &p, size_t peer, const json::Value &a, bool &failed)
+	{
+		failed = true;
 		if(m_mcp_waits.count(peer))
 			return "Your last call is still going (a picture or a publish): "
 					"one at a time";
+		int wh[2] = {512, 384};
+		ss_ why = view_size(a, wh);
+		if(!why.empty())
+			return why;
+		const ss_ want = jstr(a, "scene"), preset = jstr(a, "preset");
+		ss_ scene = want.empty() ? p.scene : want;
+		sv_<json::Value> views;
+		double at[3] = {NAN, NAN, NAN};
+		auto add = [&](const json::Value &pose, int w, int h){
+			json::Value v = pose.deepcopy();
+			v.set("w", (int64_t)w);
+			v.set("h", (int64_t)h);
+			views.push_back(v);
+		};
+		// (a preset's places to the hundredth: read as the agent's own)
+		auto vec = [](double x, double y, double z){
+			json::Value l = json::array();
+			for(double c : {x, y, z})
+				l.append(std::round(c * 100) / 100 + 0.0);
+			return l;
+		};
+		if(preset == "map"){
+			double ar[4], top = 0;
+			view_extent(scene, ar, top);
+			const json::Value &av = a.get("area");
+			if(!av.is_undefined()){
+				if(!av.is_array() || av.size() != 4)
+					return "area: [x0, z0, x1, z1]";
+				for(unsigned k = 0; k < 4; k++){
+					if(!av.at(k).is_number() || std::fabs(av.at(k).as_number()) >
+							MAX_COORD)
+						return "area: four numbers within "+itos((int)MAX_COORD);
+					ar[k] = av.at(k).as_number();
+				}
+				if(ar[2] < ar[0])
+					std::swap(ar[0], ar[2]);
+				if(ar[3] < ar[1])
+					std::swap(ar[1], ar[3]);
+			}
+			const double dx = std::max(ar[2] - ar[0], 4.0),
+					dz = std::max(ar[3] - ar[1], 4.0);
+			if(dx > 2048 || dz > 2048)
+				return "area: 2048 cells a side at most";
+			const double y = std::min(top, MAX_COORD - 400) + 60;
+			json::Value v = json::object();
+			v.set("pos", vec((ar[0] + ar[2]) / 2, y, (ar[1] + ar[3]) / 2));
+			v.set("yaw", 0.0);
+			v.set("pitch", 90.0);
+			v.set("ortho", std::max(dz, dx * wh[1] / wh[0]) * 1.05 + 2);
+			v.set("far", y + 300);
+			add(v, wh[0], wh[1]);
+			double sx, sy, sz;
+			scene_spawn(scene, sx, sy, sz);
+			at[0] = (ar[0] + ar[2]) / 2;
+			at[1] = sy;
+			at[2] = (ar[1] + ar[3]) / 2;
+		} else if(preset == "turn" || preset == "frame"){
+			const json::Value &iv = a.get("id");
+			auto e = iv.is_number() ? m_entities.find((uint64_t)iv.as_number()) :
+					m_entities.end();
+			double c[3], r = 1;
+			if(e == m_entities.end() || !view_bounds(e->first, c, r))
+				return "id: a placed entity's, to "+ss_(preset == "turn" ?
+						"turn around" : "frame");
+			ss_ es;
+			if(scene_of(e->second, &es))
+				scene = es;
+			const json::Value &nv = a.get("count");
+			const int n = preset == "frame" ? 1 : nv.is_number() ?
+					(int)nv.as_number() : 4;
+			if(n < 2 && preset == "turn")
+				return "count: 2 to "+itos((int)VIEWS_MAX);
+			if(n > (int)VIEWS_MAX)
+				return "count: 2 to "+itos((int)VIEWS_MAX);
+			// The play camera's 60 degrees or so: its box fills about half
+			const double d = std::max(4.0, r * 2.4);
+			for(int i = 0; i < n; i++){
+				const double pi = 3.14159265358979323846,
+					yaw = preset == "turn" ? i * 2 * pi / n : pi / 4;
+				json::Value v = json::object();
+				v.set("pos", vec(c[0] + std::sin(yaw) * d * 0.9, c[1] + d * 0.45,
+						c[2] + std::cos(yaw) * d * 0.9));
+				v.set("look_at", vec(c[0], c[1], c[2]));
+				add(v, wh[0], wh[1]);
+			}
+			for(int k = 0; k < 3; k++)
+				at[k] = c[k];
+		} else if(!preset.empty()){
+			return "preset: map, turn or frame";
+		} else if(!a.get("views").is_undefined()){
+			const json::Value &vs = a.get("views");
+			if(!vs.is_array() || vs.size() < 1 || vs.size() > VIEWS_MAX)
+				return "views: 1 to "+itos((int)VIEWS_MAX)+" poses";
+			for(unsigned i = 0; i < vs.size(); i++){
+				json::Value o = json::object();
+				int vw[2] = {wh[0], wh[1]};
+				why = !vs.at(i).is_object() ? ss_("views: objects") :
+						view_pose(vs.at(i), o);
+				if(why.empty() && o.get("pos").is_undefined())
+					why = "views: each one's pos";
+				if(why.empty())
+					why = view_size(vs.at(i), vw);
+				if(!why.empty())
+					return "views["+itos(i)+"]: "+why;
+				add(o, vw[0], vw[1]);
+			}
+		} else {
+			json::Value o = json::object();
+			why = view_pose(a, o);
+			if(!why.empty())
+				return why;
+			add(o, wh[0], wh[1]);
+		}
+		if(std::isnan(at[0]) && !views[0].get("pos").is_undefined())
+			for(unsigned k = 0; k < 3; k++)
+				at[k] = views[0].get("pos").at(k).as_number();
+		int64_t px = 0;
+		for(const json::Value &v : views)
+			px += json::jint(v, "w") * json::jint(v, "h");
+		if(px > VIEW_CALL_PIXELS)
+			return itos(views.size())+" pictures of "+itos(px)+" pixels: "+
+					itos(VIEW_CALL_PIXELS)+" at most a call (smaller width and "
+					"height, or fewer)";
+		// The account's clients: what accounts says, so not an agent's peer
+		// (none of its), a bot nor the server's camera; in the agent's
+		// session, the one in its scene first
+		const ss_ account = author_of(p);
+		const uint64_t sid = session_of_peer(peer);
+		const bool any_scene = want.empty() && preset.empty();
+		size_t client = 0;
+		ss_ cscene;
+		sv_<ss_> elsewhere, other_scene;
+		sv_<size_t> theirs;
+		if(m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *i){
+				theirs = i->find_peers(account);
+			});
+		for(size_t c : theirs){
+			if(c == peer || agent_of(c))
+				continue;
+			const uint64_t csid = session_of_peer(c);
+			ss_ sc_name;
+			{
+				SessionScope sc(*this, csid);
+				auto pi = m_peers.find(c);
+				if(pi == m_peers.end() || pi->second.guest)
+					continue;
+				sc_name = pi->second.scene;
+			}
+			if(csid != sid){
+				elsewhere.push_back(session_where(csid));
+				continue;
+			}
+			if(!any_scene && sc_name != scene){
+				other_scene.push_back(sc_name);
+				continue;
+			}
+			if(!client || (sc_name == p.scene && cscene != p.scene)){
+				client = c;
+				cscene = sc_name;
+			}
+		}
+		ss_ where;
+		for(const ss_ &w : elsewhere)
+			where += (where.empty() ? "" : ", ")+w;
+		const bool scene_ok = m_host.scenes.count(scene) != 0;
+		// [KIT_AGENT_NEXT_1] None of theirs: the server's camera, unless it
+		// is off (then as before it was)
+		ss_ cam_why = client ? ss_() : camera_allowed();
+		const bool cam_off = !cam_why.empty() && (!m_host.camera ||
+				cam_why.find(" is off") != ss_::npos);
+		if(!client && (!scene_ok || (cam_off && !other_scene.empty())))
+			return !other_scene.empty() ? "No client of "+account+"'s is in the "
+					"scene "+scene+" (yours is in "+other_scene[0]+"): get_view "
+					"draws the scene its client is in" : "scene: no scene "+scene;
+		if(!client && cam_why.empty() && !m_cam.play.empty() &&
+				(m_cam.play != account || session_of_peer(m_cam.peer) != sid))
+			cam_why = "it plays a body for "+m_cam.play+"'s agent";
+		if(!client && cam_why.empty())
+			cam_why = camera_start();
+		if(!client && !cam_why.empty())
+			return "No client of "+account+"'s is connected to this server"+
+					(where.empty() ? ss_() : " in your session (yours: "+where+")")+
+					(cam_off ? ss_() : ", and the server's camera cannot draw: "+
+					cam_why)+": get_view asks one to draw. Ask your builder to join "
+					"with theirs, or run one yourself with your token (this tool's "
+					"description says how: a release's client, headless)";
+		// The camera with no pose: over what the agent placed last, else the
+		// scene's spawn
+		if(!client && views.size() == 1 && views[0].get("pos").is_undefined()){
+			const Agent *ag = agent_of(peer);
+			double c[3], look = 0;
+			if(ag && ag->has_at && ag->at_scene == scene){
+				for(int k = 0; k < 3; k++)
+					c[k] = ag->at[k];
+			} else if(!scene_spawner(scene, c[0], c[1], c[2], look)){
+				scene_spawn(scene, c[0], c[1], c[2]);
+			}
+			views[0].set("pos", vec(c[0] + 6, c[1] + 5, c[2] + 6));
+			views[0].set("look_at", vec(c[0], c[1] + 1, c[2]));
+			for(int k = 0; k < 3; k++)
+				at[k] = c[k];
+		}
 		std::random_device rd;
 		char id[24];
 		snprintf(id, sizeof id, "%08x%08x", rd(), rd());
+		const int64_t now = interface::os::time_us();
 		ViewWait &w = m_view_waits[id];
-		w.client = client;
 		w.agent = peer;
-		w.w = wh[0];
-		w.h = wh[1];
 		w.account = account;
-		w.scene = scene;
-		w.since = interface::os::time_us();
-		w.what = q.get("pos").is_undefined() ? ss_("its own view") : "from "+
-				q.get("pos").stringify()+(!q.get("look_at").is_undefined() ?
-				" looking at "+q.get("look_at").stringify() : " yaw "+
-				json::Value(q.get("yaw").is_undefined() ? 0.0 :
-				q.get("yaw").as_number()).stringify()+" pitch "+
-				json::Value(q.get("pitch").is_undefined() ? 0.0 :
-				q.get("pitch").as_number()).stringify());
-		q.set("id", ss_(id));
-		q.set("w", (int64_t)wh[0]);
-		q.set("h", (int64_t)wh[1]);
-		network::access(m_server, [&](network::Interface *i){
-			i->send(client, "kit:view", q.stringify());
-		});
-		log_i(MODULE, "%s asks %s's client (peer %zu, scene %s) for a picture "
-				"%ix%i, %s", cs(p.name), cs(account), client, cs(scene), wh[0],
-				wh[1], cs(w.what));
+		w.session = sid;
+		w.scene = client ? cscene : scene;
+		w.since = now;
+		w.camera = !client;
+		w.compare = a.get("compare").is_true();
+		w.deadline = now + (client ? VIEW_TIMEOUT_US : CAMERA_CALL_US);
+		w.who = client ? account+"'s client" : ss_("The server's camera");
+		for(int k = 0; k < 3; k++)
+			w.at[k] = std::isnan(at[k]) ? 0 : at[k];
+		json::Value vl = json::array();
+		for(const json::Value &v : views){
+			vl.append(v);
+			w.what.push_back(itos(json::jint(v, "w"))+"x"+itos(json::jint(v, "h"))+" "+
+					view_what(v));
+			w.key.push_back(w.scene+"|"+itos(sid)+"|"+v.stringify());
+		}
+		w.png.resize(views.size());
+		w.why.resize(views.size());
+		w.early.resize(views.size());
+		w.q = json::object();
+		w.q.set("id", ss_(id));
+		w.q.set("views", vl);
+		if(client){
+			w.client = client;
+			network::access(m_server, [&](network::Interface *i){
+				i->send(client, "kit:view", w.q.stringify());
+			});
+		}
+		log_i(MODULE, "%s asks %s (peer %zu, scene %s) for %s %s", cs(p.name),
+				cs(client ? account+"'s client" : ss_("the server's camera")),
+				client, cs(w.scene), cs(views.size() == 1 ? ss_("a picture") :
+				itos(views.size())+" pictures, the first"), cs(w.what[0]));
 		// The answer comes in on_view() or view_tick()
 		m_mcp_defer = peer;
 		failed = false;
 		return "";
 	}
 
-	// "kit:view" from a client: "<id>\n" and a PNG, or why not
-	void on_view(const network::Packet &packet)
+	// A view's PNG checked and made again; "" or why not
+	ss_ view_png(const ViewWait &w, size_t k, const ss_ &body, ss_ &png)
 	{
-		const ss_ &d = packet.data;
-		const size_t nl = d.find('\n');
-		auto it = nl == ss_::npos || nl > 64 ? m_view_waits.end() :
-				m_view_waits.find(d.substr(0, nl));
-		if(it == m_view_waits.end() || it->second.client != packet.sender){
-			log_i(MODULE, "A picture from peer %zu refused: not one asked of "
-					"it (or late)", packet.sender);
-			return;
-		}
-		const ViewWait w = it->second;
-		m_view_waits.erase(it);
-		const ss_ body = d.substr(nl + 1);
-		const ss_ who = w.account+"'s client";
-		auto refuse = [&](const ss_ &why){
-			log_i(MODULE, "A picture from %s (peer %zu) refused: %s", cs(who),
-					packet.sender, cs(why));
-			mcp_answer(w.agent, "No picture: "+why, true);
-		};
+		const json::Value &v = w.q.get("views").at((unsigned)k);
+		const uint32_t vw = (uint32_t)json::jint(v, "w"), vh = (uint32_t)json::jint(v, "h");
+		const ss_ who = w.who;
 		if(body.compare(0, 8, "\x89PNG\r\n\x1a\n", 8) != 0){
 			// Its why not: a line of text
 			if(body.size() > 300 || body.find('\0') != ss_::npos)
-				return refuse(who+" sent no PNG");
-			return refuse(who+" could not draw it: "+body);
+				return who+" sent no PNG";
+			return who+" could not draw it: "+body;
 		}
 		auto be32 = [&](size_t at){
 			return (uint32_t)(uint8_t)body[at] << 24 |
@@ -31550,50 +31967,817 @@ struct Module: public interface::Module, public Interface
 					(uint32_t)(uint8_t)body[at + 2] << 8 | (uint8_t)body[at + 3];
 		};
 		if(body.size() > MAX_VIEW_BYTES || body.size() < 33 ||
-				body.compare(12, 4, "IHDR") != 0 || be32(16) != (uint32_t)w.w ||
-				be32(20) != (uint32_t)w.h)
-			return refuse(who+" sent no PNG of "+itos(w.w)+"x"+itos(w.h)+
-					" within "+itos((int)(MAX_VIEW_BYTES >> 20))+" MiB");
-		ss_ png;
+				body.compare(12, 4, "IHDR") != 0 || be32(16) != vw ||
+				be32(20) != vh)
+			return who+" sent no PNG of "+itos(vw)+"x"+itos(vh)+" within "+
+					itos((int)(MAX_VIEW_BYTES >> 20))+" MiB";
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			magic::Image img(imc->get_context());
 			magic::MemoryBuffer in(body.data(), (unsigned)body.size());
-			if(!img.Load(in) || img.IsCompressed() || img.GetWidth() != w.w ||
-					img.GetHeight() != w.h)
+			if(!img.Load(in) || img.IsCompressed() || img.GetWidth() != (int)vw ||
+					img.GetHeight() != (int)vh)
 				return;
 			magic::VectorBuffer buf;
 			if(img.Save(buf))
 				png.assign((const char*)buf.GetData(), buf.GetSize());
 		});
-		if(png.empty())
-			return refuse(who+"'s PNG did not decode");
-		log_i(MODULE, "A picture from %s (peer %zu) for its agent: %ix%i, "
-				"%zu bytes", cs(who), packet.sender, w.w, w.h, png.size());
-		mcp_answer(w.agent, who+" drew this "+itos(w.w)+"x"+itos(w.h)+" "+
-				w.what+", in the scene "+w.scene+" (the scene that client is "
-				"in, as far as it has loaded it).", false, png);
+		return png.empty() ? who+"'s PNG did not decode" : ss_();
 	}
 
-	// A picture not come in VIEW_TIMEOUT_US, or its client gone (left: the
-	// peer that left)
+	// "kit:view" from a client: "<id> <k> <settled>\n" and a PNG, or why not
+	void on_view(const network::Packet &packet)
+	{
+		const ss_ &d = packet.data;
+		const size_t nl = d.find('\n');
+		char id[72] = {0};
+		int k = -1, settled = 1;
+		const bool head = nl != ss_::npos && nl < 80 && sscanf(
+				d.substr(0, nl).c_str(), "%64s %d %d", id, &k, &settled) >= 2;
+		auto it = head ? m_view_waits.find(id) : m_view_waits.end();
+		if(it == m_view_waits.end() || it->second.client != packet.sender ||
+				k < 0 || k >= (int)it->second.png.size() ||
+				!it->second.png[k].empty() || !it->second.why[k].empty()){
+			log_i(MODULE, "A picture from peer %zu refused: not one asked of "
+					"it (or late)", packet.sender);
+			return;
+		}
+		ViewWait &w = it->second;
+		ss_ png;
+		const ss_ why = view_png(w, k, d.substr(nl + 1), png);
+		if(!why.empty()){
+			log_i(MODULE, "A picture from %s (peer %zu) refused: %s", cs(w.who),
+					packet.sender, cs(why));
+			w.why[k] = why;
+		} else {
+			log_i(MODULE, "A picture from %s (peer %zu) for its agent: %s, %zu "
+					"bytes%s", cs(w.who), packet.sender, cs(w.what[k]), png.size(),
+					settled ? "" : ", before its loading settled");
+			w.png[k] = png;
+			w.early[k] = !settled;
+		}
+		if(++w.done == w.png.size())
+			view_answer(it, "");
+	}
+
+	// The call's answer: the pictures that came (and with compare the last
+	// of each pose before them), the rest's why not; late: why the rest
+	// did not come
+	void view_answer(std::map<ss_, ViewWait>::iterator it, const ss_ &late)
+	{
+		const ViewWait w = it->second;
+		m_view_waits.erase(it);
+		if(w.camera)
+			m_cam.used = interface::os::time_us();
+		const int64_t now = interface::os::time_us();
+		const size_t n = w.png.size();
+		std::deque<LastView> &last = m_view_last[w.account];
+		sv_<ss_> pngs;
+		ss_ list, first_why;
+		for(size_t k = 0; k < n; k++){
+			const ss_ num = n > 1 ? itos(k + 1)+". " : "";
+			if(w.png[k].empty()){
+				const ss_ why = w.why[k].empty() ? late : w.why[k];
+				if(first_why.empty())
+					first_why = why;
+				list += num+w.what[k]+": none: "+why+"\n";
+				continue;
+			}
+			ss_ before;
+			for(auto l = last.rbegin(); w.compare && l != last.rend(); ++l){
+				if(l->key != w.key[k])
+					continue;
+				pngs.push_back(l->png);
+				before = " (two pictures: before, "+itos((now - l->at) / 1000000)+
+						" s ago, and now)";
+				break;
+			}
+			if(w.compare && before.empty())
+				before = " (no picture of this pose before it)";
+			pngs.push_back(w.png[k]);
+			list += num+w.what[k]+before+(w.early[k] ? " (drawn before its "
+					"loading settled: far parts may be missing)" : "")+"\n";
+			LastView lv;
+			lv.key = w.key[k];
+			lv.png = w.png[k];
+			lv.at = now;
+			for(auto l = last.begin(); l != last.end(); ++l)
+				if(l->key == lv.key){
+					last.erase(l);
+					break;
+				}
+			last.push_back(lv);
+			while(last.size() > VIEW_LAST)
+				last.pop_front();
+		}
+		const ss_ where = ", in the scene "+w.scene+(w.camera ? " (as far as "
+				"this server has it loaded round the pose)." : " (the scene that "
+				"client is in, as far as it has loaded it).");
+		if(pngs.empty()){
+			mcp_answer(w.agent, w.play+(first_why.empty() ? late : first_why),
+					!w.play.size());
+			return;
+		}
+		// One picture as before ([KIT_AGENT_VISUALS]): "<who> drew this ..."
+		const ss_ text = n == 1 && !w.compare ? w.who+" drew this "+w.what[0]+
+				where+(w.early[0] ? " Drawn before its loading settled: far parts "
+				"may be missing." : "") : w.who+" drew "+itos(n)+" view"+
+				(n == 1 ? "" : "s")+where+" The pictures in this order:\n"+list;
+		mcp_answer(w.agent, w.play+text, false, pngs);
+	}
+
+	// A picture not come in time, or its client gone (left: the peer that
+	// left); the camera's waits sent once it is in its place
 	void view_tick(size_t left = 0)
 	{
 		const int64_t now = interface::os::time_us();
-		for(auto it = m_view_waits.begin(); it != m_view_waits.end();){
-			const ViewWait &w = it->second;
-			if(w.client != left && now - w.since < VIEW_TIMEOUT_US){
-				++it;
+		sv_<ss_> ids;
+		for(auto &w : m_view_waits)
+			ids.push_back(w.first);
+		for(const ss_ &id : ids){
+			auto it = m_view_waits.find(id);
+			if(it == m_view_waits.end())
+				continue;
+			ViewWait &w = it->second;
+			if(w.camera && !w.client){
+				if(m_cam.ready && m_cam.peer && now < w.deadline &&
+						camera_place(w)){
+					camera_send(w);
+					continue;
+				}
+				if(m_cam.running && now < w.deadline)
+					continue;
+				const ss_ why = m_cam.running ? "The server's camera is starting "
+						"("+itos((now - m_cam.started) / 1000000)+" s so far; its "
+						"first start loads the game's files): call get_view again "
+						"in a few seconds" : "No client of "+w.account+"'s is "
+						"connected to this server, and the server's camera could "
+						"not start: "+(m_cam.failed.empty() ? ss_("it stopped") :
+						m_cam.failed)+". get_view asks a client to "
+						"draw: ask your builder to join with theirs, or run one "
+						"yourself with your token (this tool's description says "
+						"how: a release's client, headless)";
+				log_i(MODULE, "A picture for %s's agent: %s", cs(w.account),
+						cs(why));
+				mcp_answer(w.agent, w.play+why, !w.play.size());
+				m_view_waits.erase(it);
 				continue;
 			}
-			const ss_ why = w.client == left ? w.account+"'s client left "
-					"before it sent the picture" : "No picture from "+w.account+
-					"'s client in "+itos((int)(VIEW_TIMEOUT_US / 1000000))+
-					" s (it may be busy, minimized or stalled): try again";
-			log_i(MODULE, "A picture for %s's agent: %s", cs(w.account),
-					cs(why));
-			mcp_answer(w.agent, why, true);
-			it = m_view_waits.erase(it);
+			if(w.client != left && now < w.deadline)
+				continue;
+			const ss_ why = w.client == left ? w.who+" left before it sent the "
+					"picture" : w.camera ? "No picture from the server's camera in "
+					"time: try again" : "No picture from "+w.account+"'s client in "+
+					itos((int)(VIEW_TIMEOUT_US / 1000000))+" s (it may be busy, "
+					"minimized or stalled): try again";
+			log_i(MODULE, "A picture for %s's agent: %s", cs(w.account), cs(why));
+			view_answer(it, why);
 		}
+	}
+
+	// ---- [KIT_AGENT_NEXT_1] **The server's camera**: a headless client of
+	// the server's own, which draws an agent's get_view when no client of
+	// its account is in the agent's session, and plays a body for it
+	// (play_join, 3a below). src/server/confine.h's launcher, forked before
+	// the server's box, starts it in a box of its own: offscreen where its
+	// SDL has the driver (tried first; the client's log says when it has
+	// none), else on the X display the host gave (--camera-display), else
+	// refused saying what the host needs. One a server (Host::camera: the
+	// app's), started at the first need, stopped unused for
+	// camera_idle_us() (BUILDAT_CAMERA_IDLE_S, 180) and when the Host turns
+	// it off (accounts' camera_on(), the Accounts page). It logs in by a
+	// secret made here for that start (accounts' expect_camera(): once,
+	// from loopback): no account, no rights, no body unless it plays
+	// (Peer::still), not in the counts. It goes to the agent's session and
+	// scene before it draws, and loads round the pose (world_peer).
+	struct ServerCamera
+	{
+		// The launcher's pipes (-1: none; parsed: looked for)
+		int req = -1, ans = -1;
+		bool parsed = false;
+		ss_ got;
+		// Started (the launcher asked) and its process; its mode (offscreen,
+		// x11) and whether this SDL has no offscreen driver
+		bool running = false;
+		int pid = 0;
+		ss_ mode;
+		bool no_offscreen = false;
+		// Its peer once joined, and in (its Kit module said so)
+		size_t peer = 0;
+		bool ready = false;
+		int64_t started = 0, used = 0, checked = 0, moved = 0;
+		// Why the last start ended
+		ss_ failed;
+		// [3a] whose agent it plays for ("": none) and that agent's peer;
+		// play_input's emits while it runs
+		ss_ play;
+		size_t play_agent = 0;
+		bool rec = false;
+		uint64_t rec_session = 0, rec_player = 0;
+		json::Value events = json::array();
+	} m_cam;
+	// A call's answer within the network's 10 s (take_pub_jobs' 8)
+	static const int64_t CAMERA_CALL_US = 7500000;
+	static const int64_t CAMERA_JOIN_US = 40000000;
+	static const int64_t PLAY_IDLE_US = 120000000;
+
+	static int64_t camera_idle_us()
+	{
+		const char *e = getenv("BUILDAT_CAMERA_IDLE_S");
+		const int s = e ? atoi(e) : 0;
+		return (s > 0 ? s : 180) * 1000000LL;
+	}
+
+	void camera_say(const ss_ &line)
+	{
+		if(m_cam.req < 0)
+			return;
+		const ss_ l = line+"\n";
+		if(write(m_cam.req, l.data(), l.size()) != (ssize_t)l.size())
+			log_w(MODULE, "The camera's launcher took no \"%s\"",
+					cs(line.substr(0, line.find(' '))));
+	}
+
+	// "" when it may run, else why not
+	ss_ camera_allowed()
+	{
+		if(!m_cam.parsed){
+			m_cam.parsed = true;
+			int r = -1, a = -1;
+			if(sscanf(m_server->get_config().get<ss_>("camera_launcher").c_str(),
+					"%d %d", &r, &a) == 2 && r >= 0 && a >= 0){
+				m_cam.req = r;
+				m_cam.ans = a;
+			}
+		}
+		if(!m_host.camera)
+			return "this app has no server camera";
+		if(m_cam.req < 0)
+			return "this server cannot start one (it needs Linux and its client, "
+					"bin/buildat, beside the server; a server in a browser has "
+					"none)";
+		bool on = false;
+		if(m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *i){
+				on = i->camera_on();
+			});
+		if(!on)
+			return "the server's camera is off (its Host's setting on the "
+					"Accounts page)";
+		return "";
+	}
+
+	// Started unless it runs: "" or why not
+	ss_ camera_start()
+	{
+		const ss_ why = camera_allowed();
+		if(!why.empty())
+			return why;
+		m_cam.used = interface::os::time_us();
+		if(m_cam.running)
+			return "";
+		m_cam.mode = m_cam.no_offscreen ? "x11" : "offscreen";
+		std::random_device rd;
+		char secret[48];
+		snprintf(secret, sizeof secret, "cam_%08x%08x%08x%08x", rd(), rd(), rd(),
+				rd());
+		accounts::access(m_server, [&](accounts::Interface *i){
+			i->expect_camera(secret);
+		});
+		m_cam.running = true;
+		m_cam.pid = 0;
+		m_cam.peer = 0;
+		m_cam.ready = false;
+		m_cam.failed.clear();
+		m_cam.started = m_cam.used;
+		camera_say("start "+m_cam.mode+" 320 240 "+secret);
+		log_i(MODULE, "The server's camera starts (%s)", m_cam.mode == "x11" ?
+				"on the host's X display" : "SDL's offscreen driver");
+		return "";
+	}
+
+	void camera_stop(const ss_ &why)
+	{
+		if(!m_cam.running)
+			return;
+		log_i(MODULE, "The server's camera stops: %s", cs(why));
+		play_end(why);
+		camera_say("stop");
+		accounts::access(m_server, [&](accounts::Interface *i){
+			i->expect_camera("");
+		});
+		m_cam.running = false;
+		m_cam.pid = 0;
+		m_cam.ready = false;
+	}
+
+	// The launcher's answers
+	void camera_read()
+	{
+		if(m_cam.ans < 0)
+			return;
+		char buf[512];
+		ssize_t n;
+		while((n = read(m_cam.ans, buf, sizeof buf)) > 0){
+			m_cam.got.append(buf, n);
+			if(m_cam.got.size() > 8192)
+				m_cam.got.erase(0, m_cam.got.size() - 8192);
+		}
+		size_t nl;
+		while((nl = m_cam.got.find('\n')) != ss_::npos){
+			const ss_ line = m_cam.got.substr(0, nl);
+			m_cam.got.erase(0, nl + 1);
+			if(line.compare(0, 8, "started ") == 0){
+				if(m_cam.running && !m_cam.pid){
+					m_cam.pid = atoi(line.c_str() + 8);
+					log_i(MODULE, "The server's camera is process %i", m_cam.pid);
+				}
+			} else if(line.compare(0, 8, "refused ") == 0){
+				if(!m_cam.running)
+					continue;
+				m_cam.running = false;
+				const ss_ why = line.substr(8);
+				m_cam.failed = why != "no display" ? "its launcher refused it: "+
+						why : m_cam.no_offscreen ? "this server's SDL has no "
+						"offscreen driver, and the server was given no X display. "
+						"Its host starts it with --camera-display :N (or "
+						"BUILDAT_CAMERA_DISPLAY=:N), an X server of its own such as "
+						"`Xvfb :N -screen 0 1280x800x24` with Mesa's software GL, or "
+						"runs a build whose SDL has the offscreen driver" :
+						"no X display";
+				log_w(MODULE, "The server's camera did not start: %s", cs(why));
+			} else if(line.compare(0, 7, "exited ") == 0){
+				if(!m_cam.running || !m_cam.pid)
+					continue;
+				const ss_ how = line.substr(7);
+				m_cam.running = false;
+				m_cam.pid = 0;
+				if(!m_cam.ready && m_cam.mode == "offscreen" &&
+						how.find("offscreen") != ss_::npos){
+					m_cam.no_offscreen = true;
+					log_i(MODULE, "The server's camera: no offscreen driver in this "
+							"SDL (%s): the host's X display next", cs(how));
+					camera_start();
+					continue;
+				}
+				m_cam.failed = ss_(m_cam.ready ? "it stopped, " :
+						"it did not start, ")+how;
+				log_w(MODULE, "The server's camera: %s", cs(m_cam.failed));
+			}
+		}
+	}
+
+	bool camera_busy()
+	{
+		for(auto &w : m_view_waits)
+			if(w.second.camera)
+				return true;
+		return !m_play.id.empty();
+	}
+
+	void camera_tick()
+	{
+		camera_read();
+		const int64_t now = interface::os::time_us();
+		if(!m_play.id.empty() && now > m_play.deadline)
+			play_finish("its input had not ended in time");
+		if(!m_cam.running || now - m_cam.checked < 1000000)
+			return;
+		m_cam.checked = now;
+		const ss_ why = camera_allowed();
+		if(!why.empty())
+			camera_stop(why);
+		else if(!m_cam.ready && now - m_cam.started > CAMERA_JOIN_US){
+			camera_stop("not in "+itos(CAMERA_JOIN_US / 1000000)+" s after its "
+					"start");
+			m_cam.failed = "it did not join in "+itos(CAMERA_JOIN_US / 1000000)+
+					" s";
+		} else if(!m_cam.play.empty() && now - m_cam.used > PLAY_IDLE_US)
+			play_end("its agent's play idle");
+		else if(m_cam.ready && m_cam.play.empty() && !camera_busy() &&
+				now - m_cam.used > camera_idle_us())
+			camera_stop("unused for "+itos(camera_idle_us() / 1000000)+" s");
+	}
+
+	// The joined client named CAMERA_NAME that accounts says is the
+	// camera; its name: its own, or while it plays its agent's
+	ss_ camera_name(size_t peer, const ss_ &app_name)
+	{
+		if(app_name != accounts::CAMERA_NAME)
+			return app_name;
+		if(peer != m_cam.peer){
+			bool is = false;
+			if(m_cam.running && m_server->has_module("accounts"))
+				accounts::access(m_server, [&](accounts::Interface *i){
+					is = i->is_camera(peer);
+				});
+			if(!is)
+				return app_name;
+			m_cam.peer = peer;
+			log_i(MODULE, "The server's camera joined, peer %zu", peer);
+		}
+		return m_cam.play.empty() ? app_name : m_cam.play+"'s agent";
+	}
+
+	void on_camera_ready(const network::Packet &packet)
+	{
+		if(packet.sender != m_cam.peer || !m_cam.running || m_cam.ready)
+			return;
+		m_cam.ready = true;
+		log_i(MODULE, "The server's camera is in (peer %zu, %s, %.1f s after its "
+				"start)", m_cam.peer, cs(m_cam.mode), (interface::os::time_us() -
+				m_cam.started) / 1e6);
+	}
+
+	// The camera in a wait's session and scene, loading round its pose: true
+	// once it is there (on its way: asked to go)
+	bool camera_place(ViewWait &w)
+	{
+		const size_t cam = m_cam.peer;
+		if(!m_cam.play.empty()){
+			// Its body stays: drawn where it plays
+			SessionScope sc(*this, session_of_peer(cam));
+			auto pi = m_peers.find(cam);
+			if(pi != m_peers.end())
+				w.scene = pi->second.scene;
+			return pi != m_peers.end();
+		}
+		if(session_of_peer(cam) != w.session){
+			move_peer(cam, w.session);
+			return false;
+		}
+		SessionScope sc(*this, w.session);
+		auto pi = m_peers.find(cam);
+		if(pi == m_peers.end())
+			return false;
+		if(pi->second.scene != w.scene){
+			const int64_t now = interface::os::time_us();
+			if(now - m_cam.moved > 3000000){
+				m_cam.moved = now;
+				log_i(MODULE, "The server's camera to the scene %s",
+						cs(w.scene));
+				m_server->emit_event("kit:change_scene", new ChangeScene(cam,
+						app_scene(w.scene, w.session), w.at[0], w.at[1], w.at[2]));
+			}
+			return false;
+		}
+		world_peer(cam, w.scene, w.at[0], w.at[1], w.at[2]);
+		return true;
+	}
+
+	void camera_send(ViewWait &w)
+	{
+		const int64_t now = interface::os::time_us();
+		w.client = m_cam.peer;
+		w.who = "The server's camera";
+		w.q.set("camera", true);
+		// What it may wait for its loading to settle, all views together
+		w.q.set("budget", (int64_t)std::max<int64_t>(300,
+				(w.deadline - now - 1200000) / 1000));
+		m_cam.used = now;
+		network::access(m_server, [&](network::Interface *i){
+			i->send(w.client, "kit:view", w.q.stringify());
+		});
+	}
+
+	// ---- [KIT_AGENT_NEXT_1] 3a: **Play**: the server's camera plays a
+	// body for an agent (play_join) as a player's client does, its inputs
+	// the client's drive commands (doc/client_commands.txt) sent through
+	// the launcher, so the body moves as a player's would, predicted and
+	// all; Kit's input actions are pressed here, as its client's
+	// "kit:action" would. The round must run in the agent's session. Its
+	// body is "<account>'s agent", a guest's (gone as it leaves): play_leave,
+	// PLAY_IDLE_US unused or its agent gone give it back
+	struct PlayWait
+	{
+		size_t agent = 0;
+		ss_ id;
+		int64_t since = 0, deadline = 0;
+		double from[3] = {0, 0, 0};
+		sv_<ss_> actions;
+		bool picture = false;
+		int wh[2] = {512, 384};
+		double secs = 0;
+	};
+	PlayWait m_play; // id "": none
+
+	// The camera's body now: its place, scene, components' states
+	json::Value play_body()
+	{
+		json::Value r = json::object();
+		SessionScope sc(*this, session_of_peer(m_cam.peer));
+		auto pi = m_peers.find(m_cam.peer);
+		if(pi == m_peers.end())
+			return r;
+		const Peer &p = pi->second;
+		auto e = m_entities.find(p.player);
+		double w[3] = {p.pos[0], p.pos[1], p.pos[2]};
+		r.set("name", p.name);
+		r.set("scene", p.scene);
+		if(e != m_entities.end()){
+			r.set("entity", (int64_t)e->first);
+			if(e->second.has_pos)
+				world_of(e->second, w);
+			json::Value st = json::object();
+			for(const Instance &in : e->second.comps)
+				st.set(in.type, in.state);
+			r.set("state", st);
+			r.set("alive", player_alive(e->second));
+		}
+		json::Value pos = json::array();
+		for(int k = 0; k < 3; k++)
+			pos.append(std::round(w[k] * 100) / 100);
+		r.set("pos", pos);
+		return r;
+	}
+
+	ss_ agent_play(const ss_ &op, Peer &p, size_t peer, const json::Value &a,
+			bool &failed)
+	{
+		failed = true;
+		const ss_ account = author_of(p);
+		if(op == "play_leave"){
+			if(m_cam.play != account)
+				return "You play no body";
+			play_end("play_leave");
+			failed = false;
+			return "Your body is gone; the server's camera plays no more";
+		}
+		if(!m_cam.play.empty() && m_cam.play != account)
+			return "The server's camera plays for "+m_cam.play+"'s agent: one at "
+					"a time";
+		// The round first: the camera not started for nothing
+		const uint64_t sid = session_of_peer(peer);
+		bool running = false;
+		{
+			SessionScope sc(*this, sid);
+			running = m_session.running;
+		}
+		if(!running){
+			if(m_cam.play == account)
+				play_end("the round ended");
+			return "The round is Ended in your session (Stopped): nothing plays. "
+					"start runs it; then "+op;
+		}
+		const ss_ why = camera_start();
+		if(!why.empty())
+			return "The server's camera cannot play: "+why;
+		const int64_t now = interface::os::time_us();
+		if(!m_cam.ready)
+			return m_cam.running ? "The server's camera is starting ("+
+					itos((now - m_cam.started) / 1000000)+" s so far): call "+op+
+					" again in a few seconds" : "The server's camera could not "
+					"start: "+m_cam.failed;
+		const size_t cam = m_cam.peer;
+		if(op == "play_join"){
+			if(m_cam.play == account)
+				return "You play already: "+play_body().stringify();
+			ViewWait w;
+			w.session = sid;
+			w.scene = p.scene;
+			scene_spawn(p.scene, w.at[0], w.at[1], w.at[2]);
+			if(!camera_place(w))
+				return "The server's camera is on its way to your scene: call "
+						"play_join again in a second";
+			double x = w.at[0], y = w.at[1], z = w.at[2], look = 0;
+			{
+				SessionScope sc(*this, sid);
+				scene_spawner(p.scene, x, y, z, look);
+				m_cam.play = account;
+				m_cam.play_agent = peer;
+				leave_round(cam, false);
+			}
+			set_peer(cam, accounts::CAMERA_NAME, app_scene(p.scene, sid), x, y, z);
+			m_cam.used = now;
+			log_i(MODULE, "The server's camera plays for %s's agent", cs(account));
+			failed = false;
+			return "You play a body (a guest's, gone when you leave): "+
+					play_body().stringify()+". play_input moves it; play_leave ends "
+					"it, as do "+itos(PLAY_IDLE_US / 1000000)+" s unused";
+		}
+		// play_input
+		if(m_cam.play != account)
+			return "You play no body: play_join first";
+		if(!m_play.id.empty() || m_mcp_waits.count(peer))
+			return "Your last call is still going: one at a time";
+		const json::Value &sv = a.get("seconds");
+		const double secs = sv.is_undefined() ? 1.0 : sv.is_number() ?
+				sv.as_number() : -1;
+		if(!(secs >= 0.1 && secs <= 4))
+			return "seconds: 0.1 to 4";
+		sv_<ss_> keys, actions;
+		const json::Value &kv = a.get("keys"), &av = a.get("actions");
+		for(unsigned i = 0; kv.is_array() && i < kv.size(); i++){
+			const ss_ k = kv.at(i).is_string() ? kv.at(i).as_string() : "";
+			bool ok = !k.empty() && k.size() <= 16;
+			for(char c : k)
+				ok = ok && (isalnum((unsigned char)c) || c == ' ');
+			if(!ok || keys.size() >= 6)
+				return "keys: up to 6 key names (SDL's: W, A, S, D, Space, Left "
+						"Shift, Up, ...)";
+			keys.push_back(k);
+		}
+		if(!kv.is_undefined() && !kv.is_array())
+			return "keys: a list of key names";
+		{
+			SessionScope sc(*this, sid);
+			for(unsigned i = 0; av.is_array() && i < av.size(); i++){
+				const ss_ n = av.at(i).is_string() ? av.at(i).as_string() : "";
+				if(!m_action_names.count(n) || actions.size() >= 4)
+					return "actions: up to 4 of the game's input actions (get_state "
+							"lists the types' actions; none: "+n.substr(0, 32)+")";
+				actions.push_back(n);
+			}
+		}
+		if(!av.is_undefined() && !av.is_array())
+			return "actions: a list of action names";
+		sv_<ss_> cmds;
+		const json::Value &yv = a.get("yaw"), &pv = a.get("pitch");
+		if(!yv.is_undefined() || !pv.is_undefined()){
+			if((!yv.is_undefined() && (!yv.is_number() ||
+					!std::isfinite(yv.as_number()))) || (!pv.is_undefined() &&
+					(!pv.is_number() || !std::isfinite(pv.as_number()))))
+				return "yaw and pitch: degrees";
+			char l[64];
+			// The drive's pitch is up, get_view's down
+			snprintf(l, sizeof l, "look %.2f %.2f", yv.is_number() ?
+					yv.as_number() : 0.0, pv.is_number() ? -pv.as_number() : 0.0);
+			cmds.push_back(l);
+		}
+		const json::Value &uv = a.get("use");
+		if(!uv.is_undefined()){
+			if(!uv.is_number() || uv.as_number() < 1)
+				return "use: an entity's id";
+			cmds.push_back("event kit_use "+itos((int64_t)uv.as_number()));
+		}
+		for(const ss_ &k : keys)
+			cmds.push_back("keydown "+k);
+		const int ms = (int)(secs * 1000);
+		if(a.get("jump").is_true()){
+			cmds.push_back("keydown Space");
+			cmds.push_back("delay "+itos(std::min(ms, 150)));
+			cmds.push_back("keyup Space");
+			if(ms > 150)
+				cmds.push_back("delay "+itos(ms - 150));
+		} else {
+			cmds.push_back("delay "+itos(ms));
+		}
+		for(const ss_ &k : keys)
+			cmds.push_back("keyup "+k);
+		std::random_device rd;
+		char id[24];
+		snprintf(id, sizeof id, "%08x%08x", rd(), rd());
+		cmds.push_back("event kit_play_done "+ss_(id));
+		PlayWait w;
+		w.agent = peer;
+		w.id = id;
+		w.since = now;
+		w.secs = secs;
+		w.deadline = now + ms * 1000LL + 2500000;
+		w.actions = actions;
+		w.picture = a.get("picture").is_true();
+		const ss_ size_why = view_size(a, w.wh);
+		if(!size_why.empty())
+			return size_why;
+		const json::Value body = play_body();
+		for(unsigned k = 0; k < 3 && body.get("pos").is_array(); k++)
+			w.from[k] = body.get("pos").at(k).as_number();
+		m_play = w;
+		m_cam.rec = true;
+		m_cam.rec_session = sid;
+		m_cam.rec_player = (uint64_t)json::jint(body, "entity");
+		m_cam.events = json::array();
+		m_cam.used = now;
+		for(const ss_ &n : actions)
+			on_action(network::Packet(cam, "kit:action", n+" 1"));
+		for(const ss_ &c : cmds)
+			camera_say("cmd "+c);
+		log_i(MODULE, "%s plays %g s: %zu commands, %zu actions", cs(p.name),
+				secs, cmds.size(), actions.size());
+		m_mcp_defer = peer;
+		failed = false;
+		return "";
+	}
+
+	// An emit while play_input runs, in its session
+	void play_fired(const Entity &e, const ss_ &output, const json::Value &value,
+			const ss_ &by)
+	{
+		if(m_cam.events.size() >= 40)
+			return;
+		json::Value o = json::object();
+		o.set("id", (int64_t)e.id);
+		o.set("name", e.name);
+		o.set("output", output);
+		const ss_ v = value.is_null() ? ss_() : value.is_string() ?
+				value.as_string() : value.stringify();
+		if(!v.empty())
+			o.set("value", v.substr(0, 100));
+		if(!by.empty())
+			o.set("by", by == "player:"+itos(m_cam.rec_player) ? ss_("you") : by);
+		m_cam.events.append(o);
+	}
+
+	void on_play_done(const network::Packet &packet)
+	{
+		if(packet.sender == m_cam.peer && !m_play.id.empty() &&
+				packet.data == m_play.id)
+			play_finish("");
+	}
+
+	// play_input's end: its actions let go, its answer (and its picture)
+	void play_finish(const ss_ &note)
+	{
+		const PlayWait w = m_play;
+		m_play = PlayWait();
+		m_cam.rec = false;
+		for(const ss_ &n : w.actions)
+			on_action(network::Packet(m_cam.peer, "kit:action", n+" 0"));
+		json::Value r = play_body();
+		double d = 0;
+		for(unsigned k = 0; k < 3 && r.get("pos").is_array(); k++)
+			d += std::pow(r.get("pos").at(k).as_number() - w.from[k], 2);
+		json::Value from = json::array();
+		for(int k = 0; k < 3; k++)
+			from.append(w.from[k]);
+		r.set("from", from);
+		r.set("moved", std::round(std::sqrt(d) * 100) / 100);
+		r.set("events", m_cam.events);
+		m_cam.events = json::array();
+		m_cam.used = interface::os::time_us();
+		const ss_ text = "Played "+json::Value(w.secs).stringify()+" s"+
+				(note.empty() ? ss_() : " ("+note+")")+": "+r.stringify();
+		log_i(MODULE, "The server's camera played: %s", cs(text.substr(0, 300)));
+		if(!w.picture || !m_cam.peer || !m_mcp_waits.count(w.agent))
+			return mcp_answer(w.agent, text, false);
+		// Its own view at the end
+		std::random_device rd;
+		char id[24];
+		snprintf(id, sizeof id, "%08x%08x", rd(), rd());
+		const int64_t now = interface::os::time_us();
+		ViewWait &v = m_view_waits[id];
+		v.agent = w.agent;
+		v.account = m_cam.play;
+		v.session = session_of_peer(m_cam.peer);
+		v.scene = jstr(r, "scene");
+		v.since = now;
+		v.deadline = std::max(now + 1000000, w.since + CAMERA_CALL_US);
+		v.camera = true;
+		v.play = text+"\n";
+		json::Value view = json::object(), vl = json::array();
+		view.set("w", (int64_t)w.wh[0]);
+		view.set("h", (int64_t)w.wh[1]);
+		vl.append(view);
+		v.what.push_back(itos(w.wh[0])+"x"+itos(w.wh[1])+" "+view_what(view));
+		v.key.push_back("");
+		v.png.resize(1);
+		v.why.resize(1);
+		v.early.resize(1);
+		v.q = json::object();
+		v.q.set("id", ss_(id));
+		v.q.set("views", vl);
+		camera_send(v);
+	}
+
+	// A play_input waiting answered: why it ends
+	void play_wait_end(const ss_ &why)
+	{
+		if(m_play.id.empty())
+			return;
+		m_cam.rec = false;
+		mcp_answer(m_play.agent, "No answer: "+why, true);
+		m_play = PlayWait();
+	}
+
+	// Its body given back: the camera still again where it was
+	void play_end(const ss_ &why)
+	{
+		if(m_cam.play.empty())
+			return;
+		log_i(MODULE, "The server's camera plays for %s's agent no more: %s",
+				cs(m_cam.play), cs(why));
+		play_wait_end(why);
+		m_cam.play.clear();
+		m_cam.play_agent = 0;
+		const size_t cam = m_cam.peer;
+		if(!cam)
+			return;
+		const uint64_t sid = session_of_peer(cam);
+		ss_ scene, name;
+		double pos[3] = {0, 0, 0};
+		{
+			SessionScope sc(*this, sid);
+			auto pi = m_peers.find(cam);
+			if(pi == m_peers.end())
+				return;
+			scene = pi->second.scene;
+			name = pi->second.name;
+			for(int k = 0; k < 3; k++)
+				pos[k] = pi->second.pos[k];
+			leave_round(cam, false);
+			drop_guest(name);
+		}
+		set_peer(cam, accounts::CAMERA_NAME, app_scene(scene, sid), pos[0],
+				pos[1], pos[2]);
 	}
 
 	ss_ agent_state(const Peer &p)
@@ -32367,7 +33551,12 @@ struct Module: public interface::Module, public Interface
 			"area, from kit/terrain. list_voxel_types, list_prefabs, get_log, "
 			"get_events.\n")+(has_view() ?
 			"- get_view: a picture of the scene as a player's camera draws "
-			"it. Look before and after a change of the look.\n" :
+			"it: your builder's client's, else the server's camera's (a "
+			"client of the server's own; its first call may say it is "
+			"starting). views takes several poses at once; preset map (top "
+			"down), turn (round an entity) and frame (on an entity); compare "
+			"puts each pose's last picture before the new one. Look before "
+			"and after a change of the look.\n" :
 			"- No pixels: no tool here shows you the screen. The sky, the "
 			"light, colours as drawn, fog, particles and what a player sees "
 			"are not visible to you.\n")+
@@ -32517,7 +33706,15 @@ struct Module: public interface::Module, public Interface
 				"scenes under it is not removed. export_scene takes the scenes "
 				"under it, and the rules it has from above. A new scene is empty "
 				"(no ground: its players held still until it has ground or a "
-				"spawner of players).\n";
+				"spawner of players).\n"
+				// [KIT_AGENT_NEXT_1]
+				"- Play it yourself: play_join gives you a body in your scene "
+				"(the round Running), a guest's, by the server's camera; "
+				"play_input holds keys or the game's actions for up to 4 s, "
+				"looks, jumps, uses an entity, and answers where the body went, "
+				"its state (health, score, inventory) and what entities emitted "
+				"meanwhile (picture: its view at the end); play_leave ends it. "
+				"Walk into what you built and read what fired.\n";
 		std::map<ss_, sv_<ss_>> groups;
 		for(const ss_ &t : m_palette){
 			const ss_ g = jstr(m_types[t].decl.get("about"), "group");
@@ -32580,6 +33777,12 @@ struct Module: public interface::Module, public Interface
 	{
 		ss_ name;
 		bool a = false;
+		// [KIT_AGENT_NEXT_1] the server's camera: nobody's
+		if(peer && peer == m_cam.peer){
+			if(admin)
+				*admin = false;
+			return "";
+		}
 		// [KIT_AGENTS] an agent's: an admin with an admin token only
 		if(const Agent *ag = agent_of(peer)){
 			if(ag->scope == "admin")

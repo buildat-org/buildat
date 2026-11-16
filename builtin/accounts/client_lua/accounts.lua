@@ -82,6 +82,8 @@ local USERS = {"object",
 	{"storage", "string"},
 	-- [KIT_AGENTS] the admin's switch
 	{"agents", "byte"},
+	-- [KIT_AGENT_NEXT_1] the admin's switch: the server's camera
+	{"camera", "byte"},
 }
 
 -- [TRUST_LADDER] The trust levels' names, as builtin/accounts/api.h's
@@ -2182,6 +2184,12 @@ users_page = function(back)
 			button(w, u.agents == 1 and "Agents (MCP): on, with the tokens "..
 					"users made" or "Agents (MCP): off", function()
 				M.admin("setting", "agents", "", u.agents ~= 1)
+			end)
+			-- [KIT_AGENT_NEXT_1] the agents' pictures by a client of the
+			-- server's own, when theirs is not here
+			button(w, u.camera == 1 and "Server camera (agents' pictures): "..
+					"on" or "Server camera (agents' pictures): off", function()
+				M.admin("setting", "server_camera", "", u.camera ~= 1)
 			end)
 		end
 	end

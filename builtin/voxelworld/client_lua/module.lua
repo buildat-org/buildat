@@ -1244,6 +1244,11 @@ function M.set_camera(new_camera_node)
 	camera_node = new_camera_node
 end
 
+-- [KIT_AGENT_NEXT_1] (Kit's server camera puts it back after a view)
+function M.get_camera()
+	return camera_node
+end
+
 function M.get_voxel_registry()
 	return voxel_reg
 end

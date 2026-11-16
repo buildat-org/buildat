@@ -52,6 +52,29 @@ namespace server
 	int build_wasm_job(const ss_ &job, const ss_ &interface_path,
 			const ss_ &sdk = "");
 
+	// [KIT_AGENT_NEXT_1] **The server's camera's launcher**: a process
+	// forked from main() before the box and before any thread (Linux
+	// only), which starts the camera client Kit asks for -- this
+	// install's bin/buildat, headless, connecting to this server's own
+	// port on 127.0.0.1 -- in a box of its own: it reads the system and
+	// the install (the server's user and cache paths cut out), writes
+	// only <user>/camera/<app> (made fresh at each start; outside the
+	// server's own box) and connects to the server's port only. The boxed
+	// server cannot start it itself: its seccomp takes unix sockets
+	// (X11's), and its Landlock lets it connect to its own port nowhere.
+	// Requests on config "camera_launcher"'s first fd, a line each:
+	// "start <offscreen|x11> <w> <h> <secret>", "cmd <drive command>"
+	// (the client's -c - input), "stop"; answers on its second
+	// (non-blocking): "started <pid>", "refused <why>", "exited (status
+	// <n>)" or "exited (signal <n>)", then ": <the last error it logged>"
+	// if any. The display for x11 is config "camera_display" (":N", the
+	// host's: --camera-display, BUILDAT_CAMERA_DISPLAY), never the
+	// server's own DISPLAY. The launcher and the client die with the
+	// server (PR_SET_PDEATHSIG). Nothing a request says is run but that
+	// client with those few values checked; the secret goes by its
+	// environment (BUILDAT_AGENT_TOKEN, which it unsets at once).
+	void start_camera_launcher(core::Config &config, const ss_ &module_path);
+
 	// [PROCESS_SANDBOX] B: a boxed child's start, a step at a time, flushed
 	// to the file its parent named in BUILDAT_BOXED_STEPS as well as to
 	// the log, so a hang names its step even where the log's pipe holds

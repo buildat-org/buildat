@@ -1660,6 +1660,11 @@ namespace kit
 		// as Running's do. A save from round hosting is Running from here
 		// on, the voxels as they stand, its copies and marks dropped
 		bool persistent = false;
+		// [KIT_AGENT_NEXT_1] The agents' server camera (kit.cpp): a client
+		// of the server's own draws get_view where no client of the
+		// agent's account is, and plays a body (play_join). The app lets
+		// in a client named accounts::CAMERA_NAME as Kit's (Workbench)
+		bool camera = false;
 		// [KIT_CUSTOM_TYPES] With composition_path a template's: its types
 		// directory (<name>.lua, <name>.client.lua), the game's custom
 		// types local/<name> from its first start ("": none)
