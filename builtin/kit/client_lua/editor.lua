@@ -1383,12 +1383,19 @@ rebuild_bar = function(if_changed)
 		end
 		if E.state.can_make_scenes then
 			choices[#choices + 1] = {"New scene...", "\0new"}
+			-- [KIT_SCENE_PACKAGES]
+			choices[#choices + 1] = {"Add a scene from a file...", "\0file"}
 		end
 		-- (in the first row as the view's: a dropdown is not probed)
-		local sd = ui_utils.dropdown(bar_row, choices, current_scene(),
+		local sd
+		sd = ui_utils.dropdown(bar_row, choices, current_scene(),
 				function(v)
 			if v == "\0new" then
 				M.scene_dialog()
+			elseif v == "\0file" then
+				-- (the scene shown again: a second pick of it is one)
+				ui_utils.dropdown_set(sd, current_scene())
+				M.add_scene_file()
 			elseif v ~= current_scene() then
 				M.switch_scene(v)
 			end
@@ -2028,6 +2035,18 @@ function M.fetch_packages()
 			palette()
 		end
 	end)
+	-- [KIT_SCENE_PACKAGES] and the scene packages
+	aitta.kit_packages(function(list)
+		E.scene_packages = list
+		log:info("kit editor: " .. #list .. " scene packages listed")
+		for _, p in ipairs(list) do
+			log:info("kit editor: scene package " .. tostring(p.label) .. " " ..
+					p.version .. " for " .. p.game)
+		end
+		if S.tab == "New" then
+			palette()
+		end
+	end, "scene")
 end
 
 -- [AITTA_KEY_IDENTITY] A package's thing ("<fp>/<n>") as people read it:
@@ -2101,6 +2120,52 @@ local function new_tab(w)
 		button(w, "Export this project", function()
 			log:info("kit editor: export this project")
 			send({op = "export_project"})
+		end)
+	end
+	-- [KIT_SCENE_PACKAGES] The Aittas' scene packages, this project's
+	-- game's first, each added as a new scene; this scene exported as a
+	-- file (Add a scene from a file... takes it) or published
+	if not E.state.can_make_scenes then
+		return
+	end
+	local game = E.state.game or ""
+	local list = {}
+	for _, p in ipairs(E.scene_packages or {}) do
+		list[#list + 1] = p
+	end
+	table.sort(list, function(a, b)
+		if (a.game == game) ~= (b.game == game) then
+			return a.game == game
+		end
+		return a.time > b.time
+	end)
+	if #list > 0 then
+		text(w, "Scenes:", DIM)
+	end
+	for i, p in ipairs(list) do
+		if i > 8 then
+			break
+		end
+		local r = row(w)
+		button(r, "Add " .. (p.title ~= "" and p.title or p.name), function()
+			M.add_scene(p)
+		end)
+		text(r, tostring(p.label) .. " " .. p.version, DIM)
+		if p.game ~= game then
+			text(w, "made for " .. p.game, DIM)
+		end
+	end
+	if (E.state.project or "") ~= "" then
+		local r = row(w)
+		button(r, "Export this scene", function()
+			log:info("kit editor: export this scene")
+			send({op = "export_scene", scene = current_scene()})
+		end)
+		button(r, "Publish this scene...", function()
+			NT.publish_checked("this scene", function()
+				send({op = "export_scene", scene = current_scene(),
+					publish = true})
+			end)
 		end)
 	end
 end
@@ -5503,6 +5568,88 @@ function M.scene_dialog()
 	end)
 	button(br, "Cancel", function()
 		drop("dialog")
+	end)
+end
+
+-- [KIT_SCENE_PACKAGES] A scene package added (the server's kit:scene):
+-- from a file the builder picks (the zip sent, picked_file() polled in
+-- editor_input.lua), or from the New tab's list of the Aittas' (fetched,
+-- its signature sent with it), the latter after a yes where it is made
+-- for another game
+function M.add_scene_file()
+	log:info("kit editor: add a scene from a file")
+	S.scene_pick = buildat.pick_file(".zip")
+end
+
+function M.add_scene(p)
+	local function go()
+		drop("dialog")
+		E.status = "Fetching the scene " .. tostring(p.label) .. "..."
+		log:info("kit editor: fetching the scene " .. p.key)
+		people()
+		aitta.kit_fetch(p.key, function(list, why)
+			if not list or not list[1] then
+				E.status = "Not added: " .. tostring(why)
+				log:info("kit editor: " .. E.status)
+				return people()
+			end
+			log:info("kit editor: sending the scene " .. p.key .. " " ..
+					list[1].version)
+			buildat.send_packet("kit:scene", list[1].aitta .. "\0" .. list[1].data)
+		end, "scene")
+	end
+	local game = E.state and E.state.game or ""
+	if p.game == game then
+		return go()
+	end
+	log:info("kit editor: the scene " .. p.key .. " is made for " ..
+			tostring(p.game) .. ", this project " .. game)
+	local w, br = dialog("Add a scene")
+	text(w, "Add " .. tostring(p.title ~= "" and p.title or p.name) ..
+			"? It is made for " .. tostring(p.game) .. ": its types may differ")
+	br = br or row(w)
+	button(br, "Add anyway", go)
+	button(br, "Cancel", function()
+		drop("dialog")
+	end)
+end
+
+-- What the server left out of an added scene (its links and entity
+-- parameters onto entities this project has no one of that name of, its
+-- types this project's own were kept over)
+function M.scene_added(a)
+	local dropped = type(a.dropped) == "table" and a.dropped or {}
+	local kept = type(a.kept) == "table" and a.kept or {}
+	for _, d in ipairs(dropped) do
+		log:info("kit editor: left out: " .. tostring(d))
+	end
+	if #dropped == 0 and #kept == 0 then
+		return
+	end
+	local w, br = dialog("Scene added", 480)
+	local function para(s, c)
+		local t = text(w, s, c)
+		t:SetWordwrap(true)
+		t:SetFixedWidth(NT.sh.on() and (NT.sh.pane_w() - 36) / S.font or 460)
+	end
+	para("The scene " .. tostring(a.scene) .. " is added." ..
+			(#dropped > 0 and " Left out, as this project has no entity of " ..
+			"the name:" or ""))
+	for i, d in ipairs(dropped) do
+		if i > 12 then
+			para("and " .. (#dropped - 12) .. " more (see the log)", DIM)
+			break
+		end
+		para(tostring(d), DIM)
+	end
+	if #kept > 0 then
+		para("Its types this project has its own of, kept: " ..
+				table.concat(kept, ", "))
+	end
+	br = br or row(w)
+	button(br, "OK", function()
+		drop("dialog")
+		log:info("kit editor: the scene added closed")
 	end)
 end
 

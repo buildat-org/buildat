@@ -3548,7 +3548,32 @@ function M.editor(options)
 	end)
 	-- [KIT_PROJECT_EXPORT] Export this project: the file's name, a 0 byte
 	-- and the zip, a download on the web and natively into <user>/exports
-	buildat.sub_packet("kit:project_export", function(data)
+	-- [KIT_SCENE_PACKAGES] Export this scene the same, Publish this
+	-- scene... the publish screen's, and a scene added: what was left out
+	-- of it in a window
+	buildat.sub_packet("kit:scene_publish", function(data)
+		local a = network.parse_json(data)
+		if type(a) ~= "table" then
+			return
+		end
+		log:info("kit editor: the scene " .. tostring(a.name) .. " to publish")
+		aitta.kit_publish({kind = "scene", name = a.name, author = a.author,
+			title = a.title, game = a.game, files = a.files, hex = a.hex})
+	end)
+	buildat.sub_packet("kit:scene", function(data)
+		local a = network.parse_json(data)
+		if type(a) ~= "table" then
+			return
+		end
+		E.status = a.ok and "Added " .. tostring(a.what) or
+				"Scene refused: " .. tostring(a.why)
+		log:info("kit editor: " .. E.status)
+		people()
+		if a.ok then
+			M.scene_added(a)
+		end
+	end)
+	local function save_export(data)
 		local z = data:find("\0", 1, true)
 		if not z then
 			return
@@ -3565,7 +3590,9 @@ function M.editor(options)
 		else
 			ui_utils.show_notification(E.status, 4)
 		end
-	end)
+	end
+	buildat.sub_packet("kit:project_export", save_export)
+	buildat.sub_packet("kit:scene_export", save_export)
 	buildat.sub_packet("kit:edit_refused", function(data)
 		log:info("kit editor: refused: " .. tostring(data))
 		-- [KIT_WATCH_REFUSED_PLAY] The Signals view's live values, asked
@@ -3694,6 +3721,20 @@ function M.editor(options)
 			elseif png then
 				S.uploading = false
 				E.status = tostring(png)
+				people()
+			end
+		end
+		-- [KIT_SCENE_PACKAGES] Add a scene from a file...'s
+		if S.scene_pick then
+			local name, zip = buildat.picked_file()
+			if name then
+				S.scene_pick = false
+				log:info("kit editor: adding the scene of " .. name .. " (" ..
+						#zip .. " bytes)")
+				buildat.send_packet("kit:scene", zip)
+			elseif zip then
+				S.scene_pick = false
+				E.status = tostring(zip)
 				people()
 			end
 		end

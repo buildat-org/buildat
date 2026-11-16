@@ -203,6 +203,9 @@ static const int MAX_REMOVE_DEPTH = 4;
 // [KIT] stage 5: what a Kit package may be, packed and unpacked, and the
 // packages a save has at most
 static const size_t MAX_PACKAGE_BYTES = 1 << 20, MAX_PACKAGE_UNPACKED = 4 << 20;
+// [KIT_SCENE_PACKAGES] A scene package's zip and its files unpacked (what
+// template_refusal() lets through, with room for its composition)
+static const size_t MAX_SCENE_BYTES = 40 << 20, MAX_SCENE_UNPACKED = 64 << 20;
 static const size_t MAX_PACKAGES = 128;
 
 struct Link
@@ -1258,6 +1261,9 @@ struct Module: public interface::Module, public Interface
 	std::shared_ptr<VouchResults> m_vouches =
 			std::make_shared<VouchResults>();
 	sm_<ss_, int64_t> m_vouch_asked;
+	// [KIT_SCENE_PACKAGES] a scene's vouch asked: "scene:<name>", the peer
+	// that added it and "<author>@<host>"
+	sm_<ss_, std::pair<size_t, ss_>> m_scene_vouch;
 	// The peers on this machine (a loopback address): the Aitta they name
 	// may be on its loopback too
 	std::set<size_t> m_local_peers;
@@ -1537,6 +1543,9 @@ struct Module: public interface::Module, public Interface
 				&Module::on_texture);
 		sub(m_server, "network:packet_received/kit:package",
 				&Module::on_package);
+		// [KIT_SCENE_PACKAGES] a scene added from a file or an Aitta
+		sub(m_server, "network:packet_received/kit:scene",
+				&Module::on_scene);
 		// [KIT_CUSTOM_TYPES] a custom type's get, put or delete
 		sub(m_server, "network:packet_received/kit:type", &Module::on_type);
 		sub(m_server, "kit:use_through", &Module::on_use);
@@ -4980,9 +4989,12 @@ struct Module: public interface::Module, public Interface
 		// [KIT_PROJECT_EXPORT] A template's first start: the rest of an
 		// export beside its composition, before the rows load
 		json::Value edits;
-		if(first && host.opens_in_edit)
-			edits = import_export(host.composition_path.substr(0,
-					host.composition_path.rfind('/')));
+		if(first && host.opens_in_edit){
+			const ss_ dir = host.composition_path.substr(0,
+					host.composition_path.rfind('/'));
+			edits = import_export(dir);
+			take_game(dir);
+		}
 		// The palette: every type of Kit's and of the app's that loads
 		for(const ss_ &author : {ss_("kit"), m_author}){
 			const ss_ dir = author_path(author);
@@ -5250,6 +5262,18 @@ struct Module: public interface::Module, public Interface
 					d.alpha_masked || d.translucent)
 				continue;
 			register_shapes(reg, d);
+		}
+		// [KIT_SCENE_PACKAGES] and the builders' (register_builder_voxel()'s,
+		// layer -1) for a scene made after the start: New scene's, an added
+		// one's (its cells of them were lost)
+		for(auto &r : m_registered){
+			interface::VoxelName n;
+			n.block_name = r.first;
+			if(r.second.layer != -1 || reg->has(n))
+				continue;
+			reg->add_voxel(r.second.definition(r.first));
+			if(r.second.has_shapes())
+				register_shapes(reg, r.second.definition(r.first));
 		}
 	}
 
@@ -6223,15 +6247,7 @@ struct Module: public interface::Module, public Interface
 		const ss_ aitta = jstr(pk->second, "aitta"),
 				key = jstr(pk->second, "key"),
 				author = jstr(pk->second.get("manifest"), "author");
-		const ss_ allowed = m_server->get_config().get<ss_>("kit_vouch");
-		bool listed = allowed.empty();
-		if(allowed != "none"){
-			std::istringstream list(allowed);
-			ss_ a;
-			while(std::getline(list, a, ','))
-				listed = listed || a == aitta;
-		}
-		if(!listed){
+		if(!vouch_listed(aitta)){
 			log_i(MODULE, "Package %s: unverified, kit_vouch does not "
 					"ask %s", cs(id), cs(aitta));
 			m_vouch_asked[id] = -1;
@@ -6240,6 +6256,26 @@ struct Module: public interface::Module, public Interface
 		m_vouch_asked[id] = now;
 		log_i(MODULE, "Package %s: asking %s whose key it is", cs(id),
 				cs(aitta));
+		vouch_thread(id, aitta, key, author, loopback_ok);
+	}
+
+	bool vouch_listed(const ss_ &aitta)
+	{
+		const ss_ allowed = m_server->get_config().get<ss_>("kit_vouch");
+		bool listed = allowed.empty();
+		if(allowed != "none"){
+			std::istringstream list(allowed);
+			ss_ a;
+			while(std::getline(list, a, ','))
+				listed = listed || a == aitta;
+		}
+		return listed;
+	}
+
+	// The vouch asked on a thread, its answer for take_vouches() under id
+	void vouch_thread(const ss_ &id, const ss_ &aitta, const ss_ &key,
+			const ss_ &author, bool loopback_ok)
+	{
 		std::shared_ptr<VouchResults> results = m_vouches;
 		std::thread([=](){
 			const ss_ why = interface::aitta::vouch_guarded(aitta, key,
@@ -6261,6 +6297,18 @@ struct Module: public interface::Module, public Interface
 		if(got.empty())
 			return;
 		for(auto &g : got){
+			// [KIT_SCENE_PACKAGES] a scene's: said to whoever added it
+			auto sv = m_scene_vouch.find(g.first);
+			if(sv != m_scene_vouch.end()){
+				const ss_ t = "The scene "+g.first.substr(6)+": "+(g.second.empty() ?
+						"by "+sv->second.second+", its Aitta says" :
+						"unverified, "+g.second.substr(0, 200));
+				log_i(MODULE, "%s", cs(t));
+				if(m_peers.count(sv->second.first))
+					tell(sv->second.first, t);
+				m_scene_vouch.erase(sv);
+				continue;
+			}
 			auto pk = m_packages.find(g.first);
 			if(pk == m_packages.end())
 				continue;
@@ -7081,25 +7129,21 @@ struct Module: public interface::Module, public Interface
 		return o;
 	}
 
-	bool project_files(const Peer &p, sv_<std::pair<ss_, ss_>> &files,
-			ss_ &why)
+	// A package's names: a-z, 0-9 and _, 40 at most
+	static ss_ plain_id(const ss_ &s, const char *def)
 	{
-		if(m_host.project.empty()){
-			why = "this app names no project to export";
-			return false;
-		}
-		// A package's names: a-z, 0-9 and _, 40 at most
-		auto plain = [](const ss_ &s, const char *def){
-			ss_ o;
-			for(char c : s)
-				if(o.size() < 40)
-					o += isalnum((unsigned char)c) ?
-							(char)tolower((unsigned char)c) : '_';
-			return o.find_first_not_of('_') == ss_::npos ? ss_(def) : o;
-		};
-		// simplified: cut at 40 bytes on a character's start, the last whole
-		// one dropped with a cut one
-		ss_ title = m_host.project;
+		ss_ o;
+		for(char c : s)
+			if(o.size() < 40)
+				o += isalnum((unsigned char)c) ?
+						(char)tolower((unsigned char)c) : '_';
+		return o.find_first_not_of('_') == ss_::npos ? ss_(def) : o;
+	}
+
+	// simplified: cut at 40 bytes on a character's start, the last whole
+	// one dropped with a cut one
+	static ss_ title_cut(ss_ title)
+	{
 		if(title.size() > 40){
 			title.resize(40);
 			while(!title.empty() && ((uint8_t)title.back() & 0xc0) == 0x80)
@@ -7107,28 +7151,126 @@ struct Module: public interface::Module, public Interface
 			if(!title.empty() && (uint8_t)title.back() >= 0xc0)
 				title.pop_back();
 		}
-		const ss_ author = plain(author_of(p), "builder");
+		return title;
+	}
+
+	// [KIT_SCENE_PACKAGES] The game the project is of, "<author>/<name>"
+	// (an export's meta.json's "game"): its template's, which its first
+	// start took (the row "game": the template's meta.json's game, else its
+	// author/name), else the project's own as its export names it.
+	// simplified: a project no template made is its first exporting
+	// builder's (keep: an export, which stores it); before that each builder
+	// is shown their own (author: the builder's author_of())
+	ss_ game_of(const ss_ &author, bool keep = false)
+	{
+		ss_ g;
+		if(m_kit_store && m_kit_store->get("game", g) && !g.empty())
+			return g;
+		g = plain_id(author, "builder")+"/"+plain_id(m_host.project,
+				"project");
+		if(keep && m_kit_store)
+			m_kit_store->set("game", g);
+		return g;
+	}
+
+	// A template's first start: the game of the template it was made from
+	void take_game(const ss_ &dir)
+	{
+		json::json_error_t e;
+		const json::Value m = json::load_file((dir+"/meta.json").c_str(), &e);
+		ss_ g = jstr(m, "game");
+		const size_t sl = g.find('/');
+		if(sl == ss_::npos || plain_id(g.substr(0, sl), "") != g.substr(0, sl) ||
+				plain_id(g.substr(sl + 1), "") != g.substr(sl + 1))
+			g = jstr(m, "author").empty() || jstr(m, "name").empty() ? "" :
+					plain_id(jstr(m, "author"), "builder")+"/"+
+					plain_id(jstr(m, "name"), "project");
+		if(g.empty())
+			return;
+		m_kit_store->set("game", g);
+		log_i(MODULE, "The project's game: %s (its template's)", cs(g));
+	}
+
+	// An export's meta.json and LICENSE, all rights reserved; what: "The
+	// Workbench project <title>" or so
+	void export_head(sv_<std::pair<ss_, ss_>> &files, const ss_ &kind,
+			const ss_ &author, const ss_ &name, const ss_ &title, const ss_ &what,
+			const ss_ &game)
+	{
 		const std::pair<const char*, json::Value> meta[] = {
-			{"kind", "template"}, {"author", author},
-			{"name", plain(m_host.project, "project")}, {"title", title},
+			{"kind", kind}, {"author", author}, {"name", name}, {"title", title},
 			{"version", "1.0.0"},
 			{"engine_api", (int64_t)interface::aitta::ENGINE_API},
 			{"license_code", "LicenseRef-All-rights-reserved"},
 			{"license_media", "LicenseRef-All-rights-reserved"},
-			{"description", "The Workbench project "+title+", exported by "+
-					author+"."}};
+			{"description", what+", exported by "+author+"."},
+			{"game", game}};
 		ss_ mj = "{\n";
 		for(const auto &m : meta)
 			mj += ss_(mj.size() > 2 ? ",\n" : "")+"\t\""+m.first+"\": "+
 					m.second.stringify();
 		files.push_back({"meta.json", mj+"\n}\n"});
-		files.push_back({"LICENSE", "The Workbench project "+title+", by "+
-				author+". All rights reserved.\n\nExported with no licence of its "
-				"own: its author gives one by putting it here\nand in meta.json's "
-				"license_code and license_media.\n"});
+		files.push_back({"LICENSE", what+", by "+author+". All rights reserved."
+				"\n\nExported with no licence of its own: its author gives one by "
+				"putting it here\nand in meta.json's license_code and "
+				"license_media.\n"});
+	}
+
+	bool project_files(const Peer &p, sv_<std::pair<ss_, ss_>> &files,
+			ss_ &why)
+	{
+		if(m_host.project.empty()){
+			why = "this app names no project to export";
+			return false;
+		}
+		const ss_ title = title_cut(m_host.project);
+		const ss_ author = plain_id(author_of(p), "builder");
+		export_head(files, "template", author, plain_id(m_host.project,
+				"project"), title, "The Workbench project "+title,
+				game_of(author_of(p), true));
 		// The composition
-		const json::Value es = authored_json(false).get("entities");
 		ss_ comp = "{\n\t\"entities\": [\n";
+		if(!export_entities(authored_json(false).get("entities"), comp, why))
+			return false;
+		int64_t next = m_next_id;
+		std::set<uint64_t> scenes;
+		for(auto &sc : m_entities)
+			if(sc.second.kind == "scene")
+				scenes.insert(sc.first);
+		world_stand_in(scenes, next, comp);
+		files.push_back({"composition.json", comp+"\t],\n\t\"next_id\": "+
+				json::Value(next).stringify()+"\n}\n"});
+		for(auto &lt : m_local_types){
+			const ss_ n = lt.first.substr(6);
+			files.push_back({"types/"+n+".lua", jstr(lt.second, "source")});
+			if(!jstr(lt.second, "client").empty())
+				files.push_back({"types/"+n+".client.lua",
+						jstr(lt.second, "client")});
+		}
+		export_rows(files, nullptr);
+		// Each World's edits
+		json::Value scenes_j = json::object();
+		size_t cells_n = 0, samples_n = 0;
+		for(auto &wp : m_worlds){
+			json::Value o;
+			if(world_edits(wp.second, o, cells_n, samples_n))
+				scenes_j.set(wp.second.name, o);
+		}
+		edits_file(files, scenes_j);
+		if(!export_caps(files, why))
+			return false;
+		log_i(MODULE, "%s exports the project %s: %zu files, %zu cells, %zu "
+				"heightmap samples", cs(p.name), cs(m_host.project), files.size(),
+				cells_n, samples_n);
+		return true;
+	}
+
+	// The composition's lines, an entity a line (load_composition()'s form):
+	// each param only where it is not its type's default or the app gives one
+	// (Host::defaults: another project's may differ), a version only where it
+	// is not the type's. Refused: a type not Kit's or the project's own
+	bool export_entities(const json::Value &es, ss_ &comp, ss_ &why)
+	{
 		for(unsigned i = 0; i < es.size(); i++){
 			json::Value e = es.at(i).deepcopy(), comps = json::array();
 			const json::Value &was = es.at(i).get("components");
@@ -7138,7 +7280,7 @@ struct Module: public interface::Module, public Interface
 				if(type.compare(0, 4, "kit/") != 0 &&
 						type.compare(0, 6, "local/") != 0){
 					why = "entity "+itos(json::jint(e, "id", 0))+" is of "+type+
-							": a template has Kit's types and its own only";
+							": an export has Kit's types and the project's own only";
 					return false;
 				}
 				const Type &t = m_types[type];
@@ -7165,12 +7307,17 @@ struct Module: public interface::Module, public Interface
 				e.del_key("components");
 			comp += "\t\t"+json_line(e)+(i + 1 < es.size() ? "," : "")+"\n";
 		}
-		// A scene the app's default World stood in for (Host::world_default:
-		// a Workbench project from before New's heightmap) gets it as an
-		// entity, which a template's has to have
-		int64_t next = m_next_id;
+		return true;
+	}
+
+	// A scene of these the app's default World stood in for
+	// (Host::world_default: a Workbench project from before New's heightmap)
+	// gets it as an entity, which a template's has to have
+	void world_stand_in(const std::set<uint64_t> &scenes, int64_t &next,
+			ss_ &comp)
+	{
 		for(auto &sc : m_entities){
-			if(!m_host.world_default || sc.second.kind != "scene")
+			if(!m_host.world_default || !scenes.count(sc.first))
 				continue;
 			bool has = false;
 			for(auto &c : m_entities)
@@ -7192,16 +7339,15 @@ struct Module: public interface::Module, public Interface
 			comp.insert(comp.size() - 1, ",");
 			comp += "\t\t"+json_line(e)+"\n";
 		}
-		files.push_back({"composition.json", comp+"\t],\n\t\"next_id\": "+
-				json::Value(next).stringify()+"\n}\n"});
-		for(auto &lt : m_local_types){
-			const ss_ n = lt.first.substr(6);
-			files.push_back({"types/"+n+".lua", jstr(lt.second, "source")});
-			if(!jstr(lt.second, "client").empty())
-				files.push_back({"types/"+n+".client.lua",
-						jstr(lt.second, "client")});
-		}
-		// The builders' rows, and the uploads they wear
+	}
+
+	// The builders' rows (items.json, sounds.json, voxels.json,
+	// prefabs.json: {"<author>/<n>": its row}, a package's left out) and
+	// the uploads they wear, textures/<hash>.png; used: only those of these
+	// store keys ("voxel:<author>/<n>")
+	void export_rows(sv_<std::pair<ss_, ss_>> &files,
+			const std::set<ss_> *used)
+	{
 		ss_ worn;
 		for(const char *kind : {"item", "sound", "voxel", "prefab"}){
 			const ss_ pre = ss_(kind)+":";
@@ -7210,7 +7356,8 @@ struct Module: public interface::Module, public Interface
 				ss_ src;
 				m_store->get(k, src);
 				const json::Value row = json::load_string(src.c_str());
-				if(!row.is_object() || !jstr(row, "package").empty())
+				if(!row.is_object() || !jstr(row, "package").empty() ||
+						(used && !used->count(k)))
 					continue;
 				out += ss_(out.empty() ? "{\n" : ",\n")+"\t"+
 						json::Value(k.substr(pre.size())).stringify()+": "+
@@ -7229,113 +7376,686 @@ struct Module: public interface::Module, public Interface
 			if(m_store->get("texture:"+h, png))
 				files.push_back({"textures/"+h+".png", png});
 		}
-		// Each World's edits
-		json::Value scenes = json::object();
-		size_t cells_n = 0, samples_n = 0;
-		for(auto &wp : m_worlds){
-			World &wd = wp.second;
-			if(!wd.world_scene || wd.name.find('~') != ss_::npos)
-				continue;
-			WorldScope ws(m_w, &wd);
-			json::Value names = json::array(), cells = json::array(),
-					hm = json::array(), decor = json::array();
-			// Made out here: its valleys query reaches luanti_mapgen, which
-			// depends on voxelworld and so cannot be accessed from inside it
-			up_<world::Generator> g = diff_generator();
-			SessionSource src;
-			src.scene = wd.name;
-			if(m_session.running && !m_host.persistent)
-				src.copies = start_copies(wd.name);
-			voxelworld::access(m_server, wd.world_scene,
-					[&](voxelworld::Instance *w){
-				// The index marks a section altered as it is saved
-				w->save();
-				src.base = w;
-				interface::VoxelRegistry *reg = w->get_voxel_reg();
-				const interface::VoxelFormat &f = reg->get_format();
-				const uint32_t sm = state_mask(f);
-				std::map<uint32_t, int64_t> index;
-				for(const auto &s : w->section_stats()){
-					if(!s.altered)
+	}
+
+	// A World's edits as edits.bin has them: its cells that differ from its
+	// generator's, its heightmap's edited samples and its builders'
+	// decorations (false: none)
+	bool world_edits(World &wd, json::Value &o, size_t &cells_n,
+			size_t &samples_n)
+	{
+		if(!wd.world_scene || wd.name.find('~') != ss_::npos)
+			return false;
+		WorldScope ws(m_w, &wd);
+		json::Value names = json::array(), cells = json::array(),
+				hm = json::array(), decor = json::array();
+		// Made out here: its valleys query reaches luanti_mapgen, which
+		// depends on voxelworld and so cannot be accessed from inside it
+		up_<world::Generator> g = diff_generator();
+		SessionSource src;
+		src.scene = wd.name;
+		if(m_session.running && !m_host.persistent)
+			src.copies = start_copies(wd.name);
+		voxelworld::access(m_server, wd.world_scene,
+				[&](voxelworld::Instance *w){
+			// The index marks a section altered as it is saved
+			w->save();
+			src.base = w;
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			const interface::VoxelFormat &f = reg->get_format();
+			const uint32_t sm = state_mask(f);
+			std::map<uint32_t, int64_t> index;
+			for(const auto &s : w->section_stats()){
+				if(!s.altered)
+					continue;
+				const pv::Region r = w->get_section_region_voxels(s.p);
+				interface::VoxelVolume now(r), gen(r);
+				if(!src.section(w, s.p, now))
+					continue;
+				g->generate(wd.world_scene, s.p, gen);
+				const pv::Vector3DInt32 lc = r.getLowerCorner(),
+						uc = r.getUpperCorner();
+				for(int y = lc.getY(); y <= uc.getY(); y++)
+				for(int z = lc.getZ(); z <= uc.getZ(); z++)
+				for(int x = lc.getX(); x <= uc.getX(); x++){
+					const uint32_t a = now.getVoxelAt(x, y, z).data & sm;
+					if(a == (gen.getVoxelAt(x, y, z).data & sm))
 						continue;
-					const pv::Region r = w->get_section_region_voxels(s.p);
-					interface::VoxelVolume now(r), gen(r);
-					if(!src.section(w, s.p, now))
-						continue;
-					g->generate(wd.world_scene, s.p, gen);
-					const pv::Vector3DInt32 lc = r.getLowerCorner(),
-							uc = r.getUpperCorner();
-					for(int y = lc.getY(); y <= uc.getY(); y++)
-					for(int z = lc.getZ(); z <= uc.getZ(); z++)
-					for(int x = lc.getX(); x <= uc.getX(); x++){
-						const uint32_t a = now.getVoxelAt(x, y, z).data & sm;
-						if(a == (gen.getVoxelAt(x, y, z).data & sm))
+					const uint32_t id = f.id.get(a);
+					auto in = index.find(id);
+					if(in == index.end()){
+						const interface::VoxelDefinition *d = reg->get(
+								(interface::VoxelTypeId)id);
+						if(!d)
 							continue;
-						const uint32_t id = f.id.get(a);
-						auto in = index.find(id);
-						if(in == index.end()){
-							const interface::VoxelDefinition *d = reg->get(
-									(interface::VoxelTypeId)id);
-							if(!d)
-								continue;
-							in = index.emplace(id, (int64_t)names.size()).first;
-							names.append(d->name.block_name);
-						}
-						uint32_t rest = a;
-						f.id.set(rest, 0);
-						for(int64_t v : {(int64_t)x, (int64_t)y, (int64_t)z,
-								in->second, (int64_t)rest})
-							cells.append(v);
-						cells_n++;
+						in = index.emplace(id, (int64_t)names.size()).first;
+						names.append(d->name.block_name);
 					}
+					uint32_t rest = a;
+					f.id.set(rest, 0);
+					for(int64_t v : {(int64_t)x, (int64_t)y, (int64_t)z,
+							in->second, (int64_t)rest})
+						cells.append(v);
+					cells_n++;
 				}
-			});
-			hm_edits_load();
-			for(auto &e : m_w->hm_edits){
-				uint32_t bits;
-				memcpy(&bits, &e.second.first, 4);
-				for(int64_t v : {(int64_t)e.first.first, (int64_t)e.first.second,
-						(int64_t)bits})
-					hm.append(v);
-				for(uint8_t c : e.second.second)
-					hm.append((int64_t)c);
-				samples_n++;
 			}
-			ss_ row;
-			const json::Value dj = m_store->get(world_row("decor"), row) ?
-					json::load_string(row.c_str()) : json::array();
-			for(unsigned i = 0; dj.is_array() && i < dj.size(); i++)
-				if(dj.at(i).size() == 6 && dj.at(i).at(5).is_true())
-					decor.append(dj.at(i));
-			if(!cells.size() && !hm.size() && !decor.size())
-				continue;
-			json::Value o = json::object();
-			o.set("names", names);
-			o.set("cells", cells);
-			o.set("hm", hm);
-			o.set("decor", decor);
-			scenes.set(wd.name, o);
+		});
+		hm_edits_load();
+		for(auto &e : m_w->hm_edits){
+			uint32_t bits;
+			memcpy(&bits, &e.second.first, 4);
+			for(int64_t v : {(int64_t)e.first.first, (int64_t)e.first.second,
+					(int64_t)bits})
+				hm.append(v);
+			for(uint8_t c : e.second.second)
+				hm.append((int64_t)c);
+			samples_n++;
 		}
-		if(scenes.size()){
-			json::Value b = json::object();
-			b.set("format", "kit_world_edits");
-			b.set("materials", (int64_t)heightmap::MAX_MATERIALS);
-			b.set("scenes", scenes);
-			std::ostringstream os(std::ios::binary);
-			interface::compress_zlib(b.stringify(), os);
-			files.push_back({"edits.bin", os.str()});
-		}
-		// What a template's install takes (aitta's template_refusal())
+		ss_ row;
+		const json::Value dj = m_store->get(world_row("decor"), row) ?
+				json::load_string(row.c_str()) : json::array();
+		for(unsigned i = 0; dj.is_array() && i < dj.size(); i++)
+			if(dj.at(i).size() == 6 && dj.at(i).at(5).is_true())
+				decor.append(dj.at(i));
+		if(!cells.size() && !hm.size() && !decor.size())
+			return false;
+		o = json::object();
+		o.set("names", names);
+		o.set("cells", cells);
+		o.set("hm", hm);
+		o.set("decor", decor);
+		return true;
+	}
+
+	// edits.bin of these {"<scene>": world_edits()'s} (none: no file)
+	static void edits_file(sv_<std::pair<ss_, ss_>> &files,
+			const json::Value &scenes)
+	{
+		if(!scenes.size())
+			return;
+		json::Value b = json::object();
+		b.set("format", "kit_world_edits");
+		b.set("materials", (int64_t)heightmap::MAX_MATERIALS);
+		b.set("scenes", scenes);
+		std::ostringstream os(std::ios::binary);
+		interface::compress_zlib(b.stringify(), os);
+		files.push_back({"edits.bin", os.str()});
+	}
+
+	// What a template's install takes (aitta's template_refusal())
+	static bool export_caps(const sv_<std::pair<ss_, ss_>> &files, ss_ &why)
+	{
 		for(auto &f : files)
 			if(f.second.size() > (size_t)(f.first == "edits.bin" ? 16 : 4) << 20){
 				why = f.first+" would pass "+(f.first == "edits.bin" ? "16" : "4")+
 						" MiB, which an import refuses";
 				return false;
 			}
-		log_i(MODULE, "%s exports the project %s: %zu files, %zu cells, %zu "
-				"heightmap samples", cs(p.name), cs(m_host.project), files.size(),
+		return true;
+	}
+
+	// ---- [KIT_SCENE_PACKAGES] A scene exported and added to a project
+	// (kit_plan 4z20 (4), (5)). A scene package is project_files()'s form
+	// cut to one scene, scene_files() makes it:
+	//   meta.json: kind scene, its title the scene's (a component's "title"
+	//   on the scene, else its name), "game" the project's (game_of());
+	//   composition.json: {"scene": its name, "entities": the scene entity
+	//   and those under it by id, "outside": {"<id>": "<name>"}}: each entity
+	//   outside it that a link or an entity parameter names, by its name
+	//   ("": it has none);
+	//   types/: the custom types it names;
+	//   items.json, sounds.json, voxels.json, prefabs.json: the builders'
+	//   rows it names (its entities, its World's voxels, the rows so named,
+	//   as "<author>/<n>" in quotes), the uploads they wear;
+	//   edits.bin: its World's, under its name.
+	// import_scene() adds one as a new scene. scene_files() and
+	// add_scene_data() need no editor: `author` is whose name the package
+	// is under (a builder's author_of(), or another's as the server
+	// publishes), add_scene_data() takes a zip or a fetched release.
+	// simplified: a name in a custom type's file counts only in double quotes
+
+	// A type's parameters of type "entity"
+	sv_<ss_> entity_params(const ss_ &type)
+	{
+		sv_<ss_> o;
+		auto t = m_types.find(type);
+		if(t == m_types.end())
+			return o;
+		const json::Value &decl = t->second.decl.get("params");
+		for(json::Iterator it(decl); decl.is_object() && it; ++it)
+			if(jstr(*it, "type") == "entity")
+				o.push_back(it.key());
+		return o;
+	}
+
+	bool scene_files(const ss_ &author_in, const ss_ &scene,
+			sv_<std::pair<ss_, ss_>> &files, ss_ &why)
+	{
+		if(m_host.project.empty()){
+			why = "this app names no project to export";
+			return false;
+		}
+		const uint64_t sid = scene_id(scene);
+		if(!sid){
+			why = "no scene "+scene.substr(0, 64);
+			return false;
+		}
+		const json::Value all = authored_json(false).get("entities");
+		std::map<uint64_t, uint64_t> up;
+		std::map<uint64_t, ss_> names;
+		for(unsigned i = 0; i < all.size(); i++){
+			const uint64_t id = (uint64_t)json::jint(all.at(i), "id", 0);
+			up[id] = (uint64_t)json::jint(all.at(i), "parent", 1);
+			names[id] = jstr(all.at(i), "name");
+		}
+		auto inside = [&](uint64_t id){
+			for(int d = 0; d <= MAX_NEST + 2 && id > 1; d++){
+				if(id == sid)
+					return true;
+				auto it = up.find(id);
+				if(it == up.end())
+					return false;
+				id = it->second;
+			}
+			return false;
+		};
+		json::Value es = json::array(), outside = json::object();
+		auto named = [&](uint64_t to){
+			if(to > 1 && !inside(to))
+				outside.set(itos(to), names.count(to) ? names[to] : ss_());
+		};
+		ss_ text, title;
+		for(unsigned i = 0; i < all.size(); i++){
+			const json::Value &e = all.at(i);
+			const uint64_t id = (uint64_t)json::jint(e, "id", 0);
+			if(!inside(id))
+				continue;
+			es.append(e);
+			text += e.stringify();
+			const json::Value &comps = e.get("components");
+			for(unsigned c = 0; c < comps.size(); c++){
+				const json::Value &ls = comps.at(c).get("links"),
+						&ps = comps.at(c).get("params");
+				for(unsigned l = 0; l < ls.size(); l++)
+					named((uint64_t)json::jint(ls.at(l), "to", 0));
+				for(const ss_ &k : entity_params(jstr(comps.at(c), "type")))
+					if(ps.get(k).is_number())
+						named((uint64_t)ps.get(k).as_number());
+				// Its title ([KIT_SCENE_PACKAGES] (1)'s scene_info, or any): on
+				// the scene or an entity right on it with no place
+				const uint64_t at = (uint64_t)json::jint(e, "parent", 1);
+				if(title.empty() && (id == sid || (at == sid &&
+						e.get("pos").is_undefined())))
+					title = jstr(ps, "title");
+			}
+		}
+		title = title_cut(title.empty() ? scene : title);
+		// Its World's edits, which name voxels too
+		json::Value scenes_j = json::object();
+		size_t cells_n = 0, samples_n = 0;
+		World *wd = world_named(scene);
+		json::Value o;
+		if(wd && world_edits(*wd, o, cells_n, samples_n)){
+			scenes_j.set(scene, o);
+			text += o.get("names").stringify();
+		}
+		// The rows and custom types it names, and what those name
+		std::map<ss_, std::pair<ss_, ss_>> rows; // key: its name, its text
+		for(const char *kind : {"item", "sound", "voxel", "prefab"})
+			for(const ss_ &k : m_store->list(ss_(kind)+":")){
+				ss_ src;
+				m_store->get(k, src);
+				rows[k] = std::make_pair(k.substr(strlen(kind) + 1), src);
+			}
+		for(auto &lt : m_local_types)
+			rows["type:"+lt.first] = std::make_pair(lt.first,
+					jstr(lt.second, "source")+jstr(lt.second, "client"));
+		std::set<ss_> used;
+		for(bool more = true; more;){
+			more = false;
+			for(auto &r : rows)
+				if(!used.count(r.first) && text.find("\""+r.second.first+"\"") !=
+						ss_::npos){
+					used.insert(r.first);
+					text += r.second.second;
+					more = true;
+				}
+		}
+		const ss_ author = plain_id(author_in, "builder");
+		export_head(files, "scene", author, plain_id(scene, "scene"), title,
+				"The scene "+scene+" of the Workbench project "+
+				title_cut(m_host.project), game_of(author_in, true));
+		ss_ comp = "{\n\t\"scene\": "+json::Value(scene).stringify()+
+				",\n\t\"entities\": [\n";
+		if(!export_entities(es, comp, why))
+			return false;
+		int64_t next = m_next_id;
+		world_stand_in({sid}, next, comp);
+		files.push_back({"composition.json", comp+"\t],\n\t\"outside\": "+
+				json_line(outside)+"\n}\n"});
+		for(auto &lt : m_local_types){
+			if(!used.count("type:"+lt.first))
+				continue;
+			const ss_ n = lt.first.substr(6);
+			files.push_back({"types/"+n+".lua", jstr(lt.second, "source")});
+			if(!jstr(lt.second, "client").empty())
+				files.push_back({"types/"+n+".client.lua",
+						jstr(lt.second, "client")});
+		}
+		export_rows(files, &used);
+		edits_file(files, scenes_j);
+		if(!export_caps(files, why))
+			return false;
+		log_i(MODULE, "%s exports the scene %s: %zu files, %zu entities (%zu "
+				"named outside it), %zu cells, %zu heightmap samples", cs(author_in),
+				cs(scene), files.size(), (size_t)es.size(), (size_t)outside.size(),
 				cells_n, samples_n);
 		return true;
+	}
+
+	// {"op": "export_scene", "scene" (none: the builder's), "publish": true or
+	// not}: "kit:scene_export", the file's name ("<scene>.scene.zip"), a 0
+	// byte and the zip; publish: "kit:scene_publish", {name, author, title,
+	// game, files: {path: text}, hex: {path: its bytes as hex}}, meta.json
+	// left out, for Aitta's publish screen (kit_publish's kind "scene")
+	void export_scene(size_t peer, const Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const ss_ scene = jstr(j, "scene").empty() ? p.scene :
+				jstr(j, "scene").substr(0, 64);
+		sv_<std::pair<ss_, ss_>> files;
+		ss_ why;
+		if(!scene_files(author_of(p), scene, files, why))
+			return refuse(why);
+		if(!j.get("publish").is_true()){
+			const ss_ zip = interface::aitta::zip_files(files);
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(peer, "kit:scene_export", scene+".scene.zip"+
+						ss_(1, '\0')+zip);
+			});
+			return;
+		}
+		json::Value a = json::object(), t = json::object(), h = json::object();
+		static const char *H = "0123456789abcdef";
+		for(auto &f : files){
+			if(f.first == "meta.json"){
+				const json::Value m = json::load_string(f.second.c_str());
+				for(const char *k : {"name", "author", "title", "game"})
+					a.set(k, jstr(m, k));
+				continue;
+			}
+			if(f.first != "edits.bin" && f.first.compare(0, 9, "textures/") != 0){
+				t.set(f.first, f.second);
+				continue;
+			}
+			ss_ x;
+			for(unsigned char ch : f.second){
+				x += H[ch >> 4];
+				x += H[ch & 15];
+			}
+			h.set(f.first, x);
+		}
+		a.set("files", t);
+		a.set("hex", h);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:scene_publish", a.stringify());
+		});
+	}
+
+	// "kit:scene": a scene package's zip (a file the builder picked), or the
+	// Aitta it came from, a 0 byte, its release's .sig, a 0 byte and its zip
+	// (the palette's New tab, the signature checked as a Kit package's): a
+	// builder with the tools on adds its scene to the project, Stopped
+	// (import_scene()). Answered with "kit:scene", {"ok": true, "what",
+	// "scene", "game", "dropped": [what was left out], "kept": [its types
+	// the project's own were kept over]} or {"ok": false, "why"}
+	void on_scene(const network::Packet &packet)
+	{
+		SessionScope sc(*this, session_of_peer(packet.sender));
+		on_scene_u(packet);
+	}
+
+	void on_scene_u(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		json::Value a = json::object();
+		const ss_ why = add_scene_data(peer, packet.data, a);
+		log_i(MODULE, "A scene by peer %zu %s: %s", peer, why.empty() ?
+				"added" : "refused", cs(why.empty() ? jstr(a, "what") : why));
+		a.set("ok", why.empty());
+		if(!why.empty())
+			a.set("why", why);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:scene", a.stringify());
+		});
+	}
+
+	// "kit:scene"'s data (a zip, or <aitta>\0<sig>\0<zip>: a release the
+	// client fetched, or the server for a builder) added by the builder at
+	// peer; a: the answer's fields. "" when added
+	ss_ add_scene_data(size_t peer, const ss_ &d, json::Value &a)
+	{
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end() || !pi->second.editing ||
+				!can_edit(peer))
+			return "the tools on, with edit rights";
+		if(active_session())
+			return "in a session: the project's scenes are the default round's";
+		if(m_session.running && !m_host.persistent)
+			return "the server is Running: Stop first (a scene is added to the "
+					"project's start)";
+		if(!m_host.make_scene)
+			return "the app makes no scenes";
+		if(d.size() > MAX_SCENE_BYTES)
+			return "past "+itos(MAX_SCENE_BYTES >> 20)+" MiB";
+		ss_ zip = d, aitta;
+		json::Value sig;
+		if(d.compare(0, 2, "PK") != 0){
+			const size_t za = d.find('\0'),
+					z = za == ss_::npos ? za : d.find('\0', za + 1);
+			aitta = za == ss_::npos ? "" : d.substr(0, za);
+			bool plain = !aitta.empty() && aitta.size() <= 200;
+			for(char c : aitta)
+				plain = plain && (unsigned char)c > 32 && c != 127;
+			if(z == ss_::npos || !plain)
+				return "a scene package's zip, or the Aitta, a 0 byte, a "
+						"release's .sig, a 0 byte and its zip";
+			sig = json::load_string(d.substr(za + 1, z - za - 1).c_str());
+			zip = d.substr(z + 1);
+			if(jstr(sig, "format") != interface::aitta::RELEASE_FORMAT ||
+					jstr(sig, "sha256") != interface::sha256::hex(
+					interface::sha256::calculate(zip)) ||
+					!interface::aitta::verify(jstr(sig, "key"), zip,
+					jstr(sig, "signature")))
+				return "the signature does not match the archive";
+			if(interface::aitta::fingerprint(jstr(sig, "key")).empty())
+				return "the signature's key is not a key";
+		}
+		// Unpacked under the cache, read and thrown away
+		const ss_ tmp = m_server->get_config().get<ss_>("cache_path")+
+				"/kit_scene_"+interface::sha256::hex(
+				interface::sha256::calculate(zip)).substr(0, 16);
+		ss_ why;
+		try {
+			interface::fs::create_directories(tmp+"/x");
+			if(!interface::fs::write_file(tmp+"/p.zip", zip))
+				throw Exception("cannot write "+tmp);
+			interface::zip_extract(tmp+"/p.zip", tmp+"/x", MAX_SCENE_UNPACKED);
+			// Its files: a template's (template_refusal() checks them)
+			for(const auto &e : interface::zip_list(tmp+"/p.zip")){
+				const ss_ &n = e.name;
+				const size_t sl = n.find('/');
+				const ss_ top = n.substr(0, sl);
+				if(sl != ss_::npos ? top != "types" && top != "textures" :
+						n != "meta.json" && n != "composition.json" &&
+						n != "items.json" && n != "sounds.json" &&
+						n != "voxels.json" && n != "prefabs.json" &&
+						n != "edits.bin" && n.compare(0, 7, "LICENSE") != 0 &&
+						n.compare(0, 7, "LICENCE") != 0)
+					throw Exception("not a scene package's file: "+n.substr(0, 80));
+			}
+		} catch(std::exception &e){
+			why = ss_("the archive: ")+e.what();
+		}
+		if(why.empty())
+			why = import_scene(pi->second, peer, tmp+"/x", aitta, sig, a);
+		interface::fs::remove_all(tmp);
+		return why;
+	}
+
+	// A scene package unpacked in dir, added as a new scene: its name the
+	// next free one of its own (track, track_2, ...); its entities new ids,
+	// each link and entity parameter onto one outside it made the entity of
+	// that name here (the first by id), none: left out and listed in a's
+	// "dropped"; its custom types the project lacks added, one it has kept
+	// as the project's ("kept", the difference logged); its rows checked as
+	// a template's (import_rows()), one of a key the project has kept as the
+	// project's; its World's edits put in. One undo takes its entities away
+	// (its World, rows and types stay, as New scene's World). "" when added
+	// simplified: a refusal after its types went in leaves them (the
+	// builder deletes them in the types' window); a check of its entities
+	// against the types before any goes in is the upgrade
+	ss_ import_scene(Peer &p, size_t peer, const ss_ &dir, const ss_ &aitta,
+			const json::Value &sig, json::Value &a)
+	{
+		json::json_error_t err;
+		const json::Value m = json::load_file((dir+"/meta.json").c_str(), &err);
+		ss_ why = interface::aitta::check_manifest(m);
+		if(!why.empty())
+			return "meta.json: "+why;
+		if(interface::aitta::kind_of(m) != "scene")
+			return "not a scene package (\"kind\": \"scene\")";
+		why = interface::aitta::template_refusal(dir);
+		if(!why.empty())
+			return why;
+		if(interface::fs::file_size(dir+"/composition.json") > 4 << 20)
+			return "composition.json: past 4 MiB";
+		const json::Value c = json::load_file((dir+"/composition.json").c_str(),
+				&err);
+		const json::Value &es = c.get("entities"), &outside = c.get("outside");
+		// Its scene entity on the root, each other one under it
+		std::map<uint64_t, uint64_t> up;
+		uint64_t sid = 0;
+		for(unsigned i = 0; i < es.size(); i++){
+			const json::Value &e = es.at(i);
+			const int64_t id = json::jint(e, "id", 0);
+			if(!e.is_object() || id < 2 || id > (int64_t)9e15 ||
+					up.count((uint64_t)id))
+				return "composition.json: entity "+itos(i)+": no id of 2 or more, "
+						"or one taken";
+			up[(uint64_t)id] = (uint64_t)json::jint(e, "parent", 1);
+			if(jstr(e, "kind") == "player")
+				return "composition.json: entity "+itos(id)+" is a player's";
+			if(jstr(e, "kind") != "scene")
+				continue;
+			if(sid || json::jint(e, "parent", 1) != 1)
+				return "composition.json: one scene entity, on the root";
+			sid = (uint64_t)id;
+		}
+		if(!sid)
+			return "composition.json: no scene entity";
+		for(auto &u : up){
+			uint64_t at = u.first;
+			for(int k = 0; at != sid && k <= MAX_NEST + 2 && up.count(at); k++)
+				at = up[at];
+			if(at != sid)
+				return "composition.json: entity "+itos(u.first)+" is not under "
+						"its scene";
+		}
+		if(m_entities.size() + up.size() > MAX_ENTITIES)
+			return "the composition would pass "+itos(MAX_ENTITIES)+" entities";
+		// Its name, the next free one: no scene, World or World's rows of it
+		ss_ base = jstr(c, "scene");
+		if(!name_ok(base) || base.size() > 32)
+			base = jstr(m, "name");
+		base = base.substr(0, 28);
+		ss_ name, row;
+		for(int n = 1; n < 1000 && name.empty(); n++){
+			const ss_ s = n == 1 ? base : base+"_"+itos(n);
+			if(!scene_id(s) && !m_host.scenes.count(s) && !m_worlds.count(s) &&
+					s != m_host.world_scene && !m_store->get("world:"+s, row) &&
+					!m_store->get("decor:"+s, row) &&
+					!m_store->get("regions:"+s, row) &&
+					m_store->list("hm_edit:"+s+"/").empty())
+				name = s;
+		}
+		if(name.empty())
+			return "no free name of "+base;
+		// Its custom types
+		json::Value kept = json::array(), dropped = json::array();
+		size_t added = 0;
+		for(const auto &n : interface::fs::list_directory(dir+"/types")){
+			const size_t dot = n.name.find('.');
+			if(dot == ss_::npos || n.name.substr(dot) != ".lua")
+				continue;
+			const ss_ t = "local/"+n.name.substr(0, dot),
+					cp = dir+"/types/"+n.name.substr(0, dot)+".client.lua";
+			const ss_ src = read_file(dir+"/types/"+n.name),
+					client = interface::fs::path_exists(cp) ? read_file(cp) : "";
+			auto lt = m_local_types.find(t);
+			if(lt != m_local_types.end()){
+				if(jstr(lt->second, "source") != src ||
+						jstr(lt->second, "client") != client){
+					log_i(MODULE, "The scene %s's %s differs from the project's "
+							"(%zu bytes, the project's %zu): the project's kept",
+							cs(name), cs(t), src.size(),
+							jstr(lt->second, "source").size());
+					kept.append(t);
+				}
+				continue;
+			}
+			why = local_refusal(t, src, client);
+			if(why.empty()){
+				json::Value r = json::object();
+				r.set("source", src);
+				r.set("client", client);
+				r.set("by", "the scene "+name);
+				ss_ what;
+				why = install_local(t, r, what);
+			}
+			if(!why.empty())
+				return "its type "+t+": "+why;
+			added++;
+		}
+		// Its rows, loaded
+		size_t textures = 0, took = 0, left = 0, rows_kept = 0;
+		import_rows(dir, true, textures, took, left, rows_kept);
+		if(took){
+			load_builder_voxels();
+			load_items();
+			send_item_types(-1);
+			load_sounds();
+			send_sounds(-1);
+			load_prefab_palette();
+		}
+		// Its entities, new ids (not taken if refused)
+		const uint64_t next0 = m_next_id;
+		std::map<uint64_t, uint64_t> ids;
+		for(unsigned i = 0; i < es.size(); i++)
+			ids[(uint64_t)json::jint(es.at(i), "id", 0)] = m_next_id++;
+		auto onto = [&](uint64_t to, const ss_ &label){
+			if(to <= 1 || ids.count(to))
+				return to <= 1 ? to : ids[to];
+			const ss_ n = jstr(outside, itos(to).c_str());
+			for(auto &e : m_entities)
+				if(!n.empty() && e.second.name == n && authored(e.second))
+					return e.first;
+			dropped.append(label+" "+(n.empty() ? "entity "+itos(to) : n));
+			return (uint64_t)0;
+		};
+		sv_<std::pair<uint64_t, json::Value>> change;
+		for(unsigned i = 0; i < es.size(); i++){
+			json::Value e = es.at(i).deepcopy();
+			const uint64_t was = (uint64_t)json::jint(e, "id", 0);
+			const ss_ en = jstr(e, "name").empty() ? "entity "+itos(was) :
+					jstr(e, "name");
+			e.set("id", (int64_t)ids[was]);
+			e.set("parent", (int64_t)(was == sid ? 1 : ids[up[was]]));
+			if(was == sid)
+				e.set("name", name);
+			const json::Value &bt = e.get("built");
+			if(bt.is_object() && ids.count((uint64_t)json::jint(bt, "by", 0))){
+				json::Value b = bt.deepcopy();
+				b.set("by", (int64_t)ids[(uint64_t)json::jint(bt, "by", 0)]);
+				e.set("built", b);
+			} else {
+				e.del_key("built");
+			}
+			json::Value comps = e.get("components").is_array() ?
+					e.get("components").deepcopy() : json::array();
+			for(unsigned k = 0; k < comps.size(); k++){
+				json::Value cj = comps.at(k), ls = json::array(),
+						ps = cj.get("params").is_object() ?
+						cj.get("params").deepcopy() : json::object();
+				const json::Value &was_ls = cj.get("links");
+				for(unsigned l = 0; l < was_ls.size(); l++){
+					json::Value lj = was_ls.at(l).deepcopy();
+					const uint64_t to = onto((uint64_t)json::jint(lj, "to", 0),
+							en+"'s link "+jstr(lj, "output").substr(0, 64)+" to");
+					if(!to)
+						continue;
+					lj.set("to", (int64_t)to);
+					ls.append(lj);
+				}
+				for(const ss_ &pk : entity_params(full_type(jstr(cj, "type")))){
+					const json::Value &v = ps.get(pk);
+					if(v.is_number() && v.as_number() >= 1 && v.as_number() < 9e15)
+						ps.set(pk, (int64_t)onto((uint64_t)v.as_number(),
+								en+"'s "+pk+","));
+				}
+				cj.set("links", ls);
+				cj.set("params", ps);
+				comps.set_at(k, cj);
+			}
+			e.set("components", comps);
+			change.push_back(std::make_pair(ids[was], e));
+		}
+		// Each as Kit takes it, before any goes in
+		for(auto &ch : change)
+			m_pending_ids.insert(ch.first);
+		for(auto &ch : change){
+			Entity n;
+			if(!entity_from_json(ch.second, n, why))
+				break;
+		}
+		m_pending_ids.clear();
+		if(!why.empty() || (!m_host.scenes.count(name) && !make_scene(name,
+				why))){
+			m_next_id = next0;
+			return why;
+		}
+		// Its World's edits, under its name: the heightmap's and the
+		// decorations' rows before its World starts, the cells after
+		const json::Value edits = read_edits(dir);
+		json::Value ed = json::object(), sc = json::object();
+		const ss_ from = jstr(c, "scene");
+		if(edits.get("scenes").get(from).is_object())
+			sc.set(name, edits.get("scenes").get(from));
+		ed.set("materials", edits.get("materials"));
+		ed.set("scenes", sc);
+		size_t samples = 0, decors = 0;
+		import_hm(ed, samples, decors);
+		commit(change, &m_undo[p.name]);
+		ss_ hwhy;
+		if(!m_worlds.count(name) && !m_host.world_scene.empty() &&
+				!host_world_of(name, hwhy))
+			warn("scene "+name+": "+hwhy);
+		import_cells(ed);
+		world_check(p.name);
+		const ss_ what = "the scene "+name+" ("+jstr(m, "author")+"/"+
+				jstr(m, "name")+" "+jstr(m, "version")+(aitta.empty() ? ss_() :
+				" from "+interface::aitta::aitta_host(aitta))+"): "+
+				itos(change.size())+" entities, "+itos(dropped.size())+
+				" links or entity parameters left out, "+itos(added)+
+				" types added, "+itos(kept.size())+" kept as the project's, "+
+				itos(took)+" rows ("+itos(rows_kept)+" kept as the project's, "+
+				itos(left)+" refused), "+itos(textures)+" textures, "+
+				itos(samples)+" heightmap samples, "+itos(decors)+" decorations";
+		log_i(MODULE, "%s adds %s", cs(p.name), cs(what));
+		for(unsigned i = 0; i < dropped.size(); i++)
+			log_i(MODULE, "The scene %s: left out: %s", cs(name),
+					cs(dropped.at(i).as_string()));
+		m_edit_what = "Added "+what;
+		a.set("what", what);
+		a.set("scene", name);
+		a.set("game", jstr(m, "game"));
+		a.set("dropped", dropped);
+		a.set("kept", kept);
+		// The key its Aitta says is its author's, asked on a thread
+		if(!aitta.empty()){
+			const ss_ id = "scene:"+name;
+			if(vouch_listed(aitta)){
+				m_scene_vouch[id] = std::make_pair(peer, jstr(m, "author")+"@"+
+						interface::aitta::aitta_host(aitta));
+				vouch_thread(id, aitta, jstr(sig, "key"), jstr(m, "author"),
+						m_local_peers.count(peer) != 0);
+			} else {
+				log_i(MODULE, "The scene %s: unverified, kit_vouch does not ask "
+						"%s", cs(name), cs(aitta));
+			}
+		}
+		go_to_scene(p, peer, name);
+		return "";
 	}
 
 	// {"op": "export_project"}: "kit:project_export", the file's name
@@ -7363,14 +8083,37 @@ struct Module: public interface::Module, public Interface
 	// edits.bin's, for import_cells() after
 	json::Value import_export(const ss_ &dir)
 	{
+		size_t textures = 0, took = 0, left = 0, kept = 0, samples = 0,
+				decors = 0;
+		import_rows(dir, false, textures, took, left, kept);
+		const json::Value edits = read_edits(dir);
+		import_hm(edits, samples, decors);
+		// (a template with none of an export's files says nothing)
+		bool any = false;
+		for(const char *f : {"textures", "voxels.json", "items.json",
+				"sounds.json", "prefabs.json", "edits.bin"})
+			any = any || interface::fs::path_exists(dir+"/"+f);
+		if(any)
+			log_i(MODULE, "The template's export: %zu textures, %zu rows (%zu "
+					"left out), %zu heightmap samples, %zu decorations", textures,
+					took, left, samples, decors);
+		return edits;
+	}
+
+	// An export's rows (import_export()'s); keep ([KIT_SCENE_PACKAGES]): a
+	// row of a key the project has stays the project's, the export's left
+	// out (counted in kept)
+	void import_rows(const ss_ &dir, bool keep, size_t &textures,
+			size_t &took, size_t &left, size_t &kept)
+	{
+		const char *from = keep ? "scene" : "template";
 		sv_<std::pair<ss_, ss_>> renamed;
-		size_t textures = 0;
 		for(const auto &n : interface::fs::list_directory(dir+"/textures")){
 			ss_ why;
 			const ss_ name = n.is_directory ? ss_() :
 					store_texture(read_file(dir+"/textures/"+n.name), why);
 			if(name.empty()){
-				log_w(MODULE, "The template's texture %s: %s", cs(n.name), cs(why));
+				log_w(MODULE, "The %s's texture %s: %s", from, cs(n.name), cs(why));
 				continue;
 			}
 			textures++;
@@ -7402,13 +8145,17 @@ struct Module: public interface::Module, public Interface
 					return false;
 			return true;
 		};
-		size_t took = 0, left = 0;
 		auto take = [&](const ss_ &what, const ss_ &key, const ss_ &why,
 				const json::Value &row){
 			if(!why.empty()){
-				log_w(MODULE, "The template's %s %s: %s", cs(what),
+				log_w(MODULE, "The %s's %s %s: %s", from, cs(what),
 						cs(key.substr(0, 129)), cs(why));
 				left++;
+				return;
+			}
+			ss_ had;
+			if(keep && m_store->get(what+":"+key, had)){
+				kept++;
 				return;
 			}
 			m_store->set(what+":"+key, row.stringify());
@@ -7486,7 +8233,11 @@ struct Module: public interface::Module, public Interface
 			}
 			take("prefab", it.key(), why, r);
 		}
-		// edits.bin
+	}
+
+	// An export's edits.bin (undefined: none or not one, logged)
+	json::Value read_edits(const ss_ &dir)
+	{
 		json::Value edits;
 		const ss_ z = read_file(dir+"/edits.bin");
 		try {
@@ -7503,9 +8254,15 @@ struct Module: public interface::Module, public Interface
 			log_w(MODULE, "The template's edits.bin: not kit_world_edits");
 			edits = json::Value();
 		}
+		return edits;
+	}
+
+	// read_edits()'s heightmap samples and decorations into each scene's
+	// rows, which its World takes as it starts
+	void import_hm(const json::Value &edits, size_t &samples, size_t &decors)
+	{
 		const json::Value &sc = edits.get("scenes");
 		const int M = heightmap::MAX_MATERIALS, C = HM_EDIT_CHUNK;
-		size_t samples = 0, decors = 0;
 		for(json::Iterator it(sc); sc.is_object() && it; ++it){
 			if(!name_ok(it.key()))
 				continue;
@@ -7560,16 +8317,6 @@ struct Module: public interface::Module, public Interface
 				m_store->set("decor"+at, decor.stringify());
 			decors += decor.size();
 		}
-		// (a template with none of an export's files says nothing)
-		bool any = false;
-		for(const char *f : {"textures", "voxels.json", "items.json",
-				"sounds.json", "prefabs.json", "edits.bin"})
-			any = any || interface::fs::path_exists(dir+"/"+f);
-		if(any)
-			log_i(MODULE, "The template's export: %zu textures, %zu rows (%zu "
-					"left out), %zu heightmap samples, %zu decorations", textures,
-					took, left, samples, decors);
-		return edits;
 	}
 
 	// [KIT_PROJECT_EXPORT] edits.bin's cells into their Worlds, the World
@@ -28476,6 +29223,18 @@ struct Module: public interface::Module, public Interface
 				"from: From a file... takes them; as a directory, the repo's "
 				"templates/.",
 				R"J({"type": "object", "properties": {}})J", ""},
+			// [KIT_SCENE_PACKAGES]
+			{"export_scene", "=export_scene", "One scene of the project's start "
+				"as a scene package, the files the editor's Export this scene "
+				"zips, as export_template gives them: meta.json (kind scene, "
+				"its game), LICENSE, composition.json (the scene entity and "
+				"those under it; \"outside\": the entities outside it its links "
+				"and entity parameters name, by name), the custom types, rows "
+				"and textures it uses, edits.bin (its World's). The palette's "
+				"Add a scene from a file... takes the zip into another project.",
+				R"J({"type": "object", "properties": {"scene": {"type": "string",
+				"description": "Its name; none: the scene the agent is in"}}})J",
+				""},
 			{"list_projects", "=projects", "The app's projects (its saves): "
 				"each one's name, bytes on disk and whether it runs. An admin "
 				"token's, as the Projects page is an admin's.",
@@ -29013,10 +29772,13 @@ struct Module: public interface::Module, public Interface
 		if(op == "=types")
 			return agent_types(jstr(a, "type"), failed);
 		// [KIT_PROJECT_EXPORT]
-		if(op == "=export"){
+		// [KIT_SCENE_PACKAGES] and =export_scene, one scene's
+		if(op == "=export" || op == "=export_scene"){
 			sv_<std::pair<ss_, ss_>> files;
 			ss_ why;
-			failed = !project_files(p, files, why);
+			failed = op == "=export" ? !project_files(p, files, why) :
+					!scene_files(author_of(p), jstr(a, "scene").empty() ? p.scene :
+					jstr(a, "scene").substr(0, 64), files, why);
 			if(failed)
 				return "Refused: "+why;
 			json::Value o = json::object(), t = json::object(),
@@ -31149,6 +31911,9 @@ struct Module: public interface::Module, public Interface
 			j.set("names", shown_as);
 			// [KIT_PROJECT_EXPORT] Export this project... under its name
 			j.set("project", m_host.project);
+			// [KIT_SCENE_PACKAGES] the game its scene packages are for
+			if(!m_host.project.empty())
+				j.set("game", game_of(author_of(pi->second)));
 			json::Value pal = json::object();
 			for(const ss_ &t : m_palette){
 				const json::Value &d = m_types[t].decl;
@@ -31445,7 +32210,7 @@ struct Module: public interface::Module, public Interface
 				op == "prefab_rename" || op == "prefab_delete" ||
 				op == "hm_regenerate" ||
 				op == "hm_restore" || op == "new_scene" || op == "export" ||
-				op == "export_project" ||
+				op == "export_project" || op == "export_scene" ||
 				op == "draft" || op == "prefab_bench" ||
 				(gs->bench && op == "publish")))
 			return refuse(gs->bench ? "editing a prefab: the project's; Close "
@@ -31568,6 +32333,8 @@ struct Module: public interface::Module, public Interface
 			return export_package(peer, p, refuse);
 		if(op == "export_project")
 			return export_project(peer, p, refuse);
+		if(op == "export_scene")
+			return export_scene(peer, p, j, refuse);
 		// [KIT_ITEMS_TAB]
 		if(op == "item_delete")
 			return delete_item(p, j, refuse);

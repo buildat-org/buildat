@@ -380,14 +380,28 @@ ss_ check_manifest(const json::Value &m, bool service)
 	};
 	if(!known("audience", {"everyone", "teen", "adult"}))
 		return "\"audience\": \"everyone\", \"teen\" or \"adult\"";
-	if(!known("kind", {"app", "extension", "world", "remix", "kit", "template"}))
+	if(!known("kind", {"app", "extension", "world", "remix", "kit", "template",
+			"scene"}))
 		return "\"kind\": \"app\", \"extension\", \"world\", \"remix\", "
-				"\"kit\" or \"template\"";
+				"\"kit\", \"template\" or \"scene\"";
+	// [KIT_SCENE_PACKAGES] The game a template or a scene is of, the
+	// template its project was made from: "<author>/<name>"
+	if(!m.get("game").is_undefined()){
+		const ss_ g = str("game");
+		const size_t slash = g.find('/');
+		if(slash == ss_::npos || !plain_name(g.substr(0, slash), false) ||
+				!plain_name(g.substr(slash + 1), false))
+			return "\"game\": the template it is of, \"<author>/<name>\"";
+	}
 	// [KIT_TEMPLATES] What New shows of a template; it uses Kit's own types.
 	// simplified: no dependencies on Kit packages, whose install is a builder's
 	// into a running save (kit:package); installing them at the project's
-	// first start is the upgrade
-	if(kind_of(m) == "template"){
+	// first start is the upgrade. [KIT_SCENE_PACKAGES] A scene's the same,
+	// what the palette's New tab lists, its game named
+	if(kind_of(m) == "scene" && m.get("game").is_undefined())
+		return "\"game\": a scene names the game it is made for, "
+				"\"<author>/<name>\"";
+	if(kind_of(m) == "template" || kind_of(m) == "scene"){
 		if(str("title").empty() || str("title").size() > 40)
 			return "\"title\": what New lists it as, 40 bytes at most";
 		if(!m.get("dependencies").is_undefined())
@@ -733,8 +747,8 @@ ss_ kind_of(const json::Value &m)
 	const json::Value &k = m.get("kind");
 	return k.is_string() && (k.as_string() == "extension" ||
 			k.as_string() == "world" || k.as_string() == "remix" ||
-			k.as_string() == "kit" || k.as_string() == "template") ?
-			k.as_string() : "app";
+			k.as_string() == "kit" || k.as_string() == "template" ||
+			k.as_string() == "scene") ? k.as_string() : "app";
 }
 
 // [APP_REMIX] **An app's settings and a remix of it**
@@ -1166,7 +1180,8 @@ ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir)
 	if(kind_of(m) == "world" && !fs::path_exists(app_dir+"/world/save.sqlite"))
 		throw Exception(app_dir+": a world has its save in world/, "
 				"save.sqlite at its root");
-	if(kind_of(m) == "template" && !template_refusal(app_dir).empty())
+	if((kind_of(m) == "template" || kind_of(m) == "scene") &&
+			!template_refusal(app_dir).empty())
 		throw Exception(app_dir+": "+template_refusal(app_dir));
 	const ss_ media = check_media(m, app_dir);
 	if(!media.empty())
@@ -1651,6 +1666,9 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 		if(kind == "kit")
 			throw Exception("a Kit package is installed into an app's "
 					"composition, from Kit's palette");
+		if(kind == "scene")
+			throw Exception("a scene is added to a Workbench project, from "
+					"Kit's palette");
 		// [APP_REMIX] A stranger's settings and files over an app that is
 		// here: data only, each checked against the base
 		if(kind == "remix"){

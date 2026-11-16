@@ -311,6 +311,10 @@ local function cannot_run(rel)
 		-- [KIT] stage 5: Aitta lists it as "other"; Kit's palette has it
 		return "a Kit package: installed from Kit's palette, in an app's " ..
 				"edit mode"
+	elseif type(rel.manifest) == "table" and rel.manifest.kind == "scene" then
+		-- [KIT_SCENE_PACKAGES] the same, added to a Workbench project
+		return "a scene: added from Kit's palette, in a Workbench project's " ..
+				"edit mode"
 	elseif rel.kind and rel.kind ~= "app" and rel.kind ~= "extension" and
 			rel.kind ~= "world" and rel.kind ~= "remix" and
 			not is_template(rel) then
@@ -1323,17 +1327,21 @@ end
 -- [KIT] stage 5 **Kit's packages** (builtin/kit/api.h), for its palette's
 -- New tab: kit_packages(cb) gives cb({{key = "<fp>/<name>", author,
 -- name, label, aitta, version, description, license_code, license_media,
--- dependencies, time}, ...}), each package's newest release the filters
--- let through, the newest first, once every Aitta in the settings
--- answered or failed. [AITTA_KEY_IDENTITY] A package is its key's
+-- dependencies, time, title, game}, ...}), each package's newest release
+-- the filters let through, the newest first, once every Aitta in the
+-- settings answered or failed. [AITTA_KEY_IDENTITY] A package is its key's
 -- fingerprint and name; label is "author/name", with " @<host>" where two
 -- listed share it. A dependency's {kit = "author/name"} is the one on the
--- depending package's Aitta.
--- simplified: a fetch each call, the last list kept for kit_fetch
-local kit_list, kit_by_aitta = {}, {}
-function M.safe.kit_packages(cb)
-	if type(cb) ~= "function" then
-		error("kit_packages(cb: function)")
+-- depending package's Aitta. [KIT_SCENE_PACKAGES] kit_packages(cb,
+-- "scene"): the scene packages instead, title and game ("<author>/<name>",
+-- the template it is made for) theirs
+-- simplified: a fetch each call, the last list of each kind kept for
+-- kit_fetch
+local kit_lists, kit_by_aittas = {kit = {}, scene = {}}, {kit = {}, scene = {}}
+function M.safe.kit_packages(cb, kind)
+	kind = kind or "kit"
+	if type(cb) ~= "function" or not kit_lists[kind] then
+		error("kit_packages(cb: function, kind: nil, \"kit\" or \"scene\")")
 	end
 	local e = effective()
 	local newest, waiting = {}, 1
@@ -1342,8 +1350,9 @@ function M.safe.kit_packages(cb)
 		if waiting > 0 then
 			return
 		end
-		kit_list = newest
-		kit_by_aitta = {}
+		kit_lists[kind] = newest
+		local kit_by_aitta = {}
+		kit_by_aittas[kind] = kit_by_aitta
 		local named = {}
 		for k, r in pairs(newest) do
 			local an = tostring(r.rel.author) .. "/" .. tostring(r.rel.name)
@@ -1369,10 +1378,13 @@ function M.safe.kit_packages(cb)
 				description = tostring(r.rel.description or ""):sub(1, 300),
 				license_code = tostring(r.rel.license_code or ""),
 				license_media = tostring(r.rel.license_media or ""),
-				dependencies = deps, time = tonumber(r.rel.time) or 0}
+				dependencies = deps, time = tonumber(r.rel.time) or 0,
+				title = tostring(r.rel.manifest.title or ""):sub(1, 40),
+				game = tostring(r.rel.manifest.game or ""):sub(1, 81)}
 		end
 		table.sort(out, function(a, b) return a.time > b.time end)
-		log:info("aitta: " .. #out .. " Kit packages")
+		log:info("aitta: " .. #out .. (kind == "kit" and " Kit packages" or
+				" scene packages"))
 		cb(out)
 	end
 	for _, a in ipairs(e.aittas) do
@@ -1388,7 +1400,7 @@ function M.safe.kit_packages(cb)
 				local api = k and tonumber(rel.engine_api) or 0
 				if k and
 						type(rel.manifest) == "table" and
-						rel.manifest.kind == "kit" and rel.delisted ~= true and
+						rel.manifest.kind == kind and rel.delisted ~= true and
 						type(rel.sha256) == "string" and
 						rel.sha256:match("^%x+$") and
 						(e.filters.unreviewed or rel.review == "reviewed") and
@@ -1410,11 +1422,15 @@ end
 -- cb({{key, aitta, version, data =
 -- <.sig> .. "\0" .. <.zip>}, ...}), the dependencies first, which is what
 -- Kit's "kit:package" takes; or cb(nil, why). The server checks each
--- signature and archive again
-function M.safe.kit_fetch(key, cb)
-	if type(key) ~= "string" or type(cb) ~= "function" then
-		error("kit_fetch(key: string, cb: function)")
+-- signature and archive again. [KIT_SCENE_PACKAGES] kit_fetch(key, cb,
+-- "scene"): a scene package of the last kit_packages(cb, "scene") list
+-- (none has dependencies), for Kit's "kit:scene"
+function M.safe.kit_fetch(key, cb, kind)
+	kind = kind or "kit"
+	if type(key) ~= "string" or type(cb) ~= "function" or not kit_lists[kind] then
+		error("kit_fetch(key: string, cb: function, kind: nil, \"kit\" or \"scene\")")
 	end
+	local kit_list, kit_by_aitta = kit_lists[kind], kit_by_aittas[kind]
 	local order, seen = {}, {}
 	local function want(k, min, on)
 		if on then
@@ -1541,7 +1557,8 @@ function M.safe.open_publish() open_publish() end
 -- {path = hex}, dependencies = {{kit, version}}}: Kit's export of a
 -- builder's prefabs and voxel types as a Kit package in
 -- <user>/dev_apps/<name>, once the user says yes, and the publish screen
--- opened on it (publish.lua's publish_kit checks the paths). Native only
+-- opened on it (publish.lua's publish_kit checks the paths). Native only.
+-- [KIT_SCENE_PACKAGES] kind = "scene", title, game: a scene package
 local publish_kit = M.publish_kit
 function M.safe.kit_publish(t)
 	if type(t) ~= "table" then
