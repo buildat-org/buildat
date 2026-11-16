@@ -322,8 +322,9 @@ local function view_choices()
 		c[#c + 1] = {v == SH.shown_view() and scenes and cur ~= "" and
 				l .. " · " .. cur or l, v}
 	end
-	for _, n in ipairs(scenes or {}) do
-		c[#c + 1] = {"Scene: " .. n, "\1" .. n}
+	-- ([KIT_SCENE_TREE] by its path, "racing/t1")
+	for _, s in ipairs(scenes and M.scene_rows() or {}) do
+		c[#c + 1] = {"Scene: " .. M.scene_label(s), "\1" .. s.name}
 	end
 	if ses.kind ~= "bench" and st.can_make_scenes then
 		c[#c + 1] = {"New scene...", "\0new"}

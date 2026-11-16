@@ -1270,6 +1270,8 @@ local function bar_key()
 		tostring(ses.kind), tostring(ses.prefab), tostring(ses.can), tostring(E.persistent),
 		tostring(E.running), tostring(magic.ui.root.width), tostring(S.touch), S.view,
 		table.concat(st.scenes or {}, "\1"), tostring(st.can_make_scenes),
+		-- ([KIT_SCENE_TREE] a scene moved under another: indented anew)
+		M.scene_tree_key(),
 		tostring(current_scene()), grid_text(), angle_text(), tostring(S.tool),
 		tostring(st.clipboard ~= nil), tostring(NT.sig() and NT.sg.bar_key()),
 		tostring(narrow()), tostring(folded("palette")), tostring(folded("inspector")),
@@ -1377,9 +1379,10 @@ rebuild_bar = function(if_changed)
 		bar_button("Save", nil, NT.pf.bench_save)
 		bar_button("Close", nil, NT.pf.bench_close)
 	elseif not sh and (#scenes > 1 or (E.state and E.state.can_make_scenes)) then
+		-- ([KIT_SCENE_TREE] indented as they are under each other)
 		local choices = {}
-		for _, n in ipairs(scenes) do
-			choices[#choices + 1] = {"Scene: " .. n, n}
+		for _, s in ipairs(M.scene_rows()) do
+			choices[#choices + 1] = {"Scene: " .. M.scene_label(s), s.name}
 		end
 		if E.state.can_make_scenes then
 			choices[#choices + 1] = {"New scene...", "\0new"}
@@ -5575,14 +5578,57 @@ function M.switch_scene(name)
 	send({op = "scene", name = name})
 end
 
-function M.new_scene(name, copy)
+function M.new_scene(name, copy, under)
 	log:info("kit editor: a new scene " .. tostring(name) ..
-			(copy and ", its World copied" or ", no World"))
-	send({op = "new_scene", name = name, copy = copy and true or false})
+			(copy and ", its World copied" or ", no World") ..
+			((under or "") ~= "" and ", under " .. under or ""))
+	send({op = "new_scene", name = name, copy = copy and true or false,
+		parent = under or ""})
 end
 
+-- [KIT_SCENE_TREE] The scenes, each before those under it: {name, id, up
+-- (the scene it is under, "" the root), depth}
+function M.scene_rows()
+	local st = E.state or {}
+	if type(st.scene_tree) == "table" then
+		return st.scene_tree
+	end
+	local r = {}
+	for _, n in ipairs(st.scenes or {}) do
+		r[#r + 1] = {name = n, id = 0, up = "", depth = 0}
+	end
+	return r
+end
+
+-- A scene's path in the tree: "racing/t1" ("t1" under "racing")
+function M.scene_label(s)
+	local up = {}
+	for _, o in ipairs(M.scene_rows()) do
+		up[o.name] = o.up
+	end
+	local path, n = s.name, s.up
+	for _ = 1, 64 do
+		if (n or "") == "" then
+			break
+		end
+		path, n = n .. "/" .. path, up[n]
+	end
+	return path
+end
+
+function M.scene_tree_key()
+	local k = {}
+	for _, s in ipairs(M.scene_rows()) do
+		k[#k + 1] = s.name .. "<" .. tostring(s.up)
+	end
+	return table.concat(k, "\1")
+end
+
+-- [KIT_SCENE_TREE] (none, an empty scene: [KIT_NO_WORLD], the new scene
+-- empty as the user asked of 4z23)
 E.scene_name = E.scene_name or ""
-E.scene_copy = E.scene_copy ~= false
+E.scene_copy = E.scene_copy == true
+E.scene_under = E.scene_under or ""
 function M.scene_dialog()
 	local w, br = dialog("New scene")
 	text(w, "A new scene: its own World and entities")
@@ -5592,13 +5638,28 @@ function M.scene_dialog()
 		E.scene_name = s
 	end):SetName("scene name")
 	button(row(w), E.scene_copy and "World: a copy of " .. current_scene() ..
-			"'s" or "World: none (no ground)", function()
+			"'s" or "World: none (empty, no ground)", function()
 		E.scene_copy = not E.scene_copy
 		M.scene_dialog()
 	end, E.scene_copy)
+	-- [KIT_SCENE_TREE] the scene it goes under, the root first, each
+	-- click the next
+	local unders, at = {""}, 1
+	for _, s in ipairs(M.scene_rows()) do
+		unders[#unders + 1] = s.name
+		if s.name == E.scene_under then
+			at = #unders
+		end
+	end
+	E.scene_under = unders[at]
+	button(row(w), E.scene_under == "" and "Under: the root (top level)" or
+			"Under: " .. E.scene_under, function()
+		E.scene_under = unders[at % #unders + 1]
+		M.scene_dialog()
+	end):SetName("scene under")
 	br = br or row(w)
 	button(br, "Make scene", function()
-		M.new_scene(E.scene_name, E.scene_copy)
+		M.new_scene(E.scene_name, E.scene_copy, E.scene_under)
 		drop("dialog")
 	end)
 	button(br, "Cancel", function()
@@ -5611,8 +5672,11 @@ end
 -- editor_input.lua), or from the New tab's list of the Aittas' (fetched,
 -- its signature sent with it), the latter after a yes where it is made
 -- for another game
-function M.add_scene_file()
-	log:info("kit editor: add a scene from a file")
+-- ([KIT_SCENE_TREE] under: the scene it goes under, "" or none the root)
+function M.add_scene_file(under)
+	S.scene_pick_under = under or ""
+	log:info("kit editor: add a scene from a file" .. (S.scene_pick_under ~= ""
+			and " under " .. S.scene_pick_under or ""))
 	S.scene_pick = buildat.pick_file(".zip")
 end
 
@@ -5657,20 +5721,43 @@ end
 -- [KIT_SCENE_ADD_LIVE] The scenes: each listed or not (its kit/scene_info,
 -- for the players' list), and removed (one undo; the server refuses one
 -- with players on it, and the one the builder is in)
+-- ([KIT_SCENE_TREE] indented as they are under each other; Move... puts
+-- one under another, Add here... adds a scene package under it)
 function M.scenes_dialog()
-	local w, br = dialog("Scenes", 480)
+	local w, br = dialog("Scenes", 600)
 	local listed = {}
 	for _, n in ipairs(E.state and E.state.listed or {}) do
 		listed[n] = true
 	end
-	for _, n in ipairs(E.state and E.state.scenes or {}) do
+	-- (for a drive: each under the one before it with a ">" a level)
+	local shown = {}
+	for _, s in ipairs(M.scene_rows()) do
+		shown[#shown + 1] = string.rep(">", tonumber(s.depth) or 0) .. s.name
+	end
+	log:info("kit editor: the Scenes window: " .. table.concat(shown, ", "))
+	for _, s in ipairs(M.scene_rows()) do
+		local n = s.name
 		local r = row(w)
+		-- (the font's spaces too narrow to indent by)
+		local depth = math.min(tonumber(s.depth) or 0, 8)
+		if depth > 0 then
+			r:CreateChild("UIElement"):SetFixedWidth(20 * depth)
+		end
 		label(r, n .. (listed[n] and " (listed)" or " (not listed)"))
 		button(r, listed[n] and "Unlist" or "List", function()
 			log:info("kit editor: " .. (listed[n] and "unlist " or "list ") .. n)
 			send({op = "list_scene", name = n, on = not listed[n]})
 			drop("dialog")
 		end):SetName("list " .. n)
+		button(r, "Move...", function()
+			M.scene_move_dialog(s)
+		end):SetName("move " .. n)
+		if E.state.can_make_scenes then
+			button(r, "Add here...", function()
+				drop("dialog")
+				M.add_scene_file(n)
+			end):SetName("add under " .. n)
+		end
 		if n ~= E.state.world_scene and n ~= current_scene() then
 			button(r, "Remove", function()
 				log:info("kit editor: remove the scene " .. n)
@@ -5681,6 +5768,40 @@ function M.scenes_dialog()
 	end
 	br = br or row(w)
 	button(br, "Close", function()
+		drop("dialog")
+	end)
+end
+
+-- [KIT_SCENE_TREE] A scene put under another (or the root): each it may go
+-- under, not itself, one under it or where it is
+function M.scene_move_dialog(s)
+	log:info("kit editor: the dialog Move " .. s.name)
+	local w, br = dialog("Move " .. s.name, 360)
+	-- (the scenes under it go with it)
+	text(w, "Put " .. s.name .. " under:")
+	local function go(id, to)
+		log:info("kit editor: the scene " .. s.name .. " under " .. to)
+		send({op = "parent", id = s.id, parent = id})
+		drop("dialog")
+	end
+	if s.up ~= "" then
+		button(row(w), "The root (top level)", function()
+			go(0, "the root")
+		end):SetName("under the root")
+	end
+	local below = {[s.name] = true}
+	for _, o in ipairs(M.scene_rows()) do
+		if o.name == s.name or below[o.up] then
+			below[o.name] = true
+		elseif o.name ~= s.up then
+			button(row(w), o.name .. (o.up ~= "" and " (under " .. o.up .. ")"
+					or ""), function()
+				go(o.id, o.name)
+			end):SetName("under " .. o.name)
+		end
+	end
+	br = br or row(w)
+	button(br, "Cancel", function()
 		drop("dialog")
 	end)
 end
