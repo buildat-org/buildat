@@ -1156,9 +1156,9 @@ namespace interface
 // who set the run off is in another scene than the entity
 // ([KIT_SCENE_PACKAGES] c.player_scene: the scene they are in, "" none).
 // [KIT_LATE_JOIN] In a game session c.session_players is the number of
-// players its start took in; in the default round c.sessions =
+// players its start took in, bots too; in the default round c.sessions =
 // {[id] = {players, taken, clock}} the game sessions it made: its players
-// now, those its start took, its clock (s). As the run began.
+// now (no bots), those its start took, its clock (s). As the run began.
 //
 // **Minigames** ([KIT_MINIGAMES_1], stage 7b's first part): the framework
 // owns a round's lifecycle, each game its goal. kit/arena is the lobby
