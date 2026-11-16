@@ -92,6 +92,17 @@ buildat.sub_packet("main:account", function(data)
 		accounts.logged_in = true
 	end
 end)
+-- [KIT_SERVER_PUBLISH] The Server window's Admin / Publishing: Kit's page
+-- (the server's key, its Aittas, who may publish as it, the log)
+if accounts then
+	accounts.server_menu = function(add)
+		if accounts.users and accounts.users.level >= 40 then
+			add("Admin", "Publishing", "publishing", function()
+				kit.publishing_page(accounts)
+			end)
+		end
+	end
+end
 
 -- A plain light: the world is a workshop, not a scenery
 do

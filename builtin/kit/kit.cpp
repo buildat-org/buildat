@@ -50,6 +50,12 @@
 #include <set>
 #include <sstream>
 #include <thread>
+#ifndef _WIN32
+	// [KIT_SERVER_PUBLISH] the server's key file's mode
+	#include <fcntl.h>
+	#include <sys/stat.h>
+	#include <unistd.h>
+#endif
 #define MODULE "kit"
 
 namespace kit {
@@ -1546,6 +1552,9 @@ struct Module: public interface::Module, public Interface
 		// [KIT_SCENE_PACKAGES] a scene added from a file or an Aitta
 		sub(m_server, "network:packet_received/kit:scene",
 				&Module::on_scene);
+		// [KIT_SERVER_PUBLISH] the Publishing page and the publish form
+		sub(m_server, "network:packet_received/kit:publishing",
+				&Module::on_publishing);
 		// [KIT_CUSTOM_TYPES] a custom type's get, put or delete
 		sub(m_server, "network:packet_received/kit:type", &Module::on_type);
 		sub(m_server, "kit:use_through", &Module::on_use);
@@ -4834,6 +4843,12 @@ struct Module: public interface::Module, public Interface
 
 	void on_shutdown()
 	{
+		// [KIT_SERVER_PUBLISH]
+		if(m_pub_save)
+			storage::access(m_server, [&](storage::Interface *i){
+				i->close(m_pub_save);
+			});
+		m_pub_save = nullptr;
 		if(!m_hosted)
 			return;
 		size_t n = 0;
@@ -6155,14 +6170,25 @@ struct Module: public interface::Module, public Interface
 			return answer(false, "the Aitta, a 0 byte, a release's .sig, a 0 "
 					"byte and its zip, "+itos(MAX_PACKAGE_BYTES >> 10)+
 					" KiB at most");
-		const json::Value sig = json::load_string(d.substr(0, z).c_str());
-		const ss_ zip = d.substr(z + 1);
+		const ss_ why = take_package(pi->second.name,
+				json::load_string(d.substr(0, z).c_str()), d.substr(z + 1), aitta,
+				m_local_peers.count(peer) != 0);
+		if(why.compare(0, 3, "ok ") == 0)
+			return answer(true, why.substr(3));
+		answer(false, why);
+	}
+
+	// A release's .sig and zip checked, unpacked and installed
+	// (install_package()); [KIT_SERVER_PUBLISH] one the server fetched too
+	ss_ take_package(const ss_ &by, const json::Value &sig, const ss_ &zip,
+			const ss_ &aitta, bool loopback_ok)
+	{
 		const ss_ sha = interface::sha256::hex(
 				interface::sha256::calculate(zip));
 		if(jstr(sig, "format") != interface::aitta::RELEASE_FORMAT ||
 				jstr(sig, "sha256") != sha || !interface::aitta::verify(
 				jstr(sig, "key"), zip, jstr(sig, "signature")))
-			return answer(false, "the signature does not match the archive");
+			return "the signature does not match the archive";
 		// Unpacked under the cache, read and thrown away
 		const ss_ tmp = m_server->get_config().get<ss_>("cache_path")+
 				"/kit_package_"+sha.substr(0, 16);
@@ -6181,12 +6207,13 @@ struct Module: public interface::Module, public Interface
 		}
 		interface::fs::remove_all(tmp);
 		if(!why.empty())
-			return answer(false, "the archive: "+why);
-		why = install_package(pi->second.name, sig, files, aitta,
-				m_local_peers.count(peer) != 0);
-		if(why.compare(0, 3, "ok ") == 0)
-			return answer(true, why.substr(3));
-		answer(false, why);
+			return "the archive: "+why;
+		why = install_package(by, sig, files, aitta, loopback_ok);
+		// [ALPHA_KIT_PACKAGES_PUBLIC] the version that made it, when another
+		if(why.compare(0, 3, "ok ") != 0)
+			why += interface::aitta::made_with(json::load_string(
+					files["meta.json"].c_str()));
+		return why;
 	}
 
 	// [AITTA_KEY_IDENTITY] What a package is called where people read
@@ -6261,6 +6288,9 @@ struct Module: public interface::Module, public Interface
 
 	bool vouch_listed(const ss_ &aitta)
 	{
+		// [KIT_SERVER_PUBLISH] one the admin listed, always
+		if(!pub_listed(aitta).empty())
+			return true;
 		const ss_ allowed = m_server->get_config().get<ss_>("kit_vouch");
 		bool listed = allowed.empty();
 		if(allowed != "none"){
@@ -6277,8 +6307,12 @@ struct Module: public interface::Module, public Interface
 			const ss_ &author, bool loopback_ok)
 	{
 		std::shared_ptr<VouchResults> results = m_vouches;
+		// [KIT_SERVER_PUBLISH] one the admin listed asked as typed (LAN,
+		// http)
+		const ss_ listed = pub_listed(aitta);
 		std::thread([=](){
-			const ss_ why = interface::aitta::vouch_guarded(aitta, key,
+			const ss_ why = !listed.empty() ? interface::aitta::listed_vouch(
+					listed, key, author) : interface::aitta::vouch_guarded(aitta, key,
 					author, loopback_ok);
 			std::lock_guard<std::mutex> lock(results->m);
 			results->r.push_back(std::make_pair(id, why));
@@ -6894,6 +6928,25 @@ struct Module: public interface::Module, public Interface
 	void export_package(size_t peer, const Peer &p,
 			std::function<void(const ss_&)> refuse)
 	{
+		json::Value j;
+		ss_ why;
+		if(!prefab_export(p, "", j, why))
+			return refuse(why);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:export", j.stringify());
+		});
+	}
+
+	// export_package()'s answer; as ([KIT_SERVER_PUBLISH]): the package's
+	// author when another than the builder's (the server's), the builder's
+	// own names made its
+	bool prefab_export(const Peer &p, const ss_ &as, json::Value &j,
+			ss_ &why)
+	{
+		auto refuse = [&](const ss_ &s){
+			why = s;
+			return false;
+		};
 		const ss_ author = builder_author(author_of(p));
 		if(author.empty())
 			return refuse("a builder's prefabs are under their name, and it "
@@ -6945,7 +6998,9 @@ struct Module: public interface::Module, public Interface
 			named.insert(da);
 		}
 		if(!locals.empty())
-			authors["local"] = author;
+			authors["local"] = as.empty() ? author : as;
+		if(!as.empty())
+			authors[author] = as;
 		for(const ss_ &n : locals){
 			const json::Value &lt = m_local_types["local/"+n];
 			files.set("types/"+n+".lua", jstr(lt, "source"));
@@ -7028,8 +7083,8 @@ struct Module: public interface::Module, public Interface
 			dj.set("version", jstr(m_packages[n], "version"));
 			deps.append(dj);
 		}
-		json::Value j = json::object();
-		j.set("author", author);
+		j = json::object();
+		j.set("author", as.empty() ? author : as);
 		j.set("files", files);
 		j.set("hex", hex);
 		j.set("dependencies", deps);
@@ -7046,9 +7101,7 @@ struct Module: public interface::Module, public Interface
 		}
 		log_i(MODULE, "%s exports %zu files, %zu dependencies", cs(p.name),
 				(size_t)files.size(), (size_t)deps.size());
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "kit:export", j.stringify());
-		});
+		return true;
 	}
 
 	// ---- [KIT_PROJECT_EXPORT] The project as a template (kit_plan 4z17):
@@ -7204,7 +7257,9 @@ struct Module: public interface::Module, public Interface
 			{"license_code", "LicenseRef-All-rights-reserved"},
 			{"license_media", "LicenseRef-All-rights-reserved"},
 			{"description", what+", exported by "+author+"."},
-			{"game", game}};
+			{"game", game},
+			// [ALPHA_KIT_PACKAGES_PUBLIC] (aitta's made_with())
+			{"buildat_version", BUILDAT_VERSION}};
 		ss_ mj = "{\n";
 		for(const auto &m : meta)
 			mj += ss_(mj.size() > 2 ? ",\n" : "")+"\t\""+m.first+"\": "+
@@ -7741,9 +7796,8 @@ struct Module: public interface::Module, public Interface
 			return "the tools on, with edit rights";
 		if(active_session())
 			return "in a session: the project's scenes are the default round's";
-		if(m_session.running && !m_host.persistent)
-			return "the server is Running: Stop first (a scene is added to the "
-					"project's start)";
+		// [KIT_SCENE_ADD_LIVE] Running too: it goes in unlisted
+		// (import_scene())
 		if(!m_host.make_scene)
 			return "the app makes no scenes";
 		if(d.size() > MAX_SCENE_BYTES)
@@ -7797,8 +7851,15 @@ struct Module: public interface::Module, public Interface
 		} catch(std::exception &e){
 			why = ss_("the archive: ")+e.what();
 		}
-		if(why.empty())
+		if(why.empty()){
 			why = import_scene(pi->second, peer, tmp+"/x", aitta, sig, a);
+			// [ALPHA_KIT_PACKAGES_PUBLIC] the version that made it, when
+			// another
+			json::json_error_t e;
+			if(!why.empty())
+				why += interface::aitta::made_with(json::load_file(
+						(tmp+"/x/meta.json").c_str(), &e));
+		}
 		interface::fs::remove_all(tmp);
 		return why;
 	}
@@ -7990,6 +8051,28 @@ struct Module: public interface::Module, public Interface
 			e.set("components", comps);
 			change.push_back(std::make_pair(ids[was], e));
 		}
+		// [KIT_SCENE_ADD_LIVE] Running: in unlisted (its kit/scene_info's
+		// listed off), for its builder to try and then list
+		bool unlisted = false;
+		for(auto &ch : change){
+			if(!m_session.running || json::jint(ch.second, "parent", 0) !=
+					(int64_t)ids[sid])
+				continue;
+			json::Value comps = ch.second.get("components");
+			for(unsigned k = 0; comps.is_array() && k < comps.size(); k++){
+				json::Value cj = comps.at(k);
+				if(full_type(jstr(cj, "type")) != "kit/scene_info")
+					continue;
+				json::Value ps = cj.get("params");
+				const bool was_listed = !ps.get("listed").is_boolean() ||
+						ps.get("listed").is_true();
+				ps.set("listed", false);
+				cj.set("params", ps);
+				comps.set_at(k, cj);
+				unlisted = unlisted || was_listed;
+			}
+			ch.second.set("components", comps);
+		}
 		// Each as Kit takes it, before any goes in
 		for(auto &ch : change)
 			m_pending_ids.insert(ch.first);
@@ -8020,7 +8103,9 @@ struct Module: public interface::Module, public Interface
 		if(!m_worlds.count(name) && !m_host.world_scene.empty() &&
 				!host_world_of(name, hwhy))
 			warn("scene "+name+": "+hwhy);
-		import_cells(ed);
+		// [KIT_SCENE_ADD_LIVE] Running: its sections over ticks, the round's
+		// own ticks between
+		import_cells(ed, m_session.running);
 		world_check(p.name);
 		const ss_ what = "the scene "+name+" ("+jstr(m, "author")+"/"+
 				jstr(m, "name")+" "+jstr(m, "version")+(aitta.empty() ? ss_() :
@@ -8031,13 +8116,15 @@ struct Module: public interface::Module, public Interface
 				itos(took)+" rows ("+itos(rows_kept)+" kept as the project's, "+
 				itos(left)+" refused), "+itos(textures)+" textures, "+
 				itos(samples)+" heightmap samples, "+itos(decors)+" decorations";
-		log_i(MODULE, "%s adds %s", cs(p.name), cs(what));
+		log_i(MODULE, "%s adds %s%s", cs(p.name), cs(what), unlisted ?
+				" (Running: unlisted)" : "");
 		for(unsigned i = 0; i < dropped.size(); i++)
 			log_i(MODULE, "The scene %s: left out: %s", cs(name),
 					cs(dropped.at(i).as_string()));
 		m_edit_what = "Added "+what;
 		a.set("what", what);
 		a.set("scene", name);
+		a.set("unlisted", unlisted);
 		a.set("game", jstr(m, "game"));
 		a.set("dropped", dropped);
 		a.set("kept", kept);
@@ -8074,6 +8161,935 @@ struct Module: public interface::Module, public Interface
 		});
 	}
 
+	// ---- [KIT_SERVER_PUBLISH] Publishing as the server, and installing
+	// through it (kit_plan 4z20 (10)). The server has one key, which an
+	// admin makes on the Publishing page (Workbench's Server window,
+	// Admin): in Kit's own save "_kit" (its directory's publish.key, made
+	// 0600 and refused when others may read it; never in a log, a packet
+	// or an export), whose store "publish" has "author" (the name the
+	// Aittas bind the key to), "aittas" (the admin's list, trusted as
+	// typed: the Aittas the server publishes to and fetches from, no
+	// other) and "log/<time>", a row a release ({time, builder, package,
+	// version, sha256, aitta}). Who may publish: an admin, and an account
+	// with the privilege "publisher" (accounts' set_priv), checked here at
+	// each publish. A release is the server's (its author, its key), its
+	// meta.json's published_by the builder's account (and Starport ID),
+	// its LICENSE naming the builder as the work's author. Each network
+	// step on a thread (pub_thread()), its end on Kit's (take_pub_jobs()).
+	// simplified: detached threads, as the vouch's: a module unloaded
+	// while one runs (hot reload, off by default) leaves it running
+	struct PubJobs {
+		std::mutex m;
+		sv_<std::function<void()>> done;
+	};
+	sp_<PubJobs> m_pub_jobs = std::make_shared<PubJobs>();
+	storage::Save *m_pub_save = nullptr;
+	// Each listed Aitta's word on the key: "" bound to the author, else why
+	// not ("asking..." while asked)
+	sm_<ss_, ss_> m_pub_bound;
+	// Who has the Publishing page or a publish form open (told again as
+	// the Aittas answer)
+	std::set<size_t> m_pub_open;
+	static const size_t PUB_LIST_MAX = 8 << 20, PUB_TEMPLATE_MAX = 64 << 20;
+	static const long PUB_TIMEOUT_S = 20;
+
+	void pub_thread(std::function<std::function<void()>()> work)
+	{
+		sp_<PubJobs> jobs = m_pub_jobs;
+		std::thread([jobs, work](){
+			std::function<void()> f;
+			try {
+				f = work();
+			} catch(std::exception &e){
+				log_w(MODULE, "Publishing: %s", e.what());
+			}
+			std::lock_guard<std::mutex> lock(jobs->m);
+			jobs->done.push_back(f);
+		}).detach();
+	}
+
+	void take_pub_jobs()
+	{
+		sv_<std::function<void()>> got;
+		{
+			std::lock_guard<std::mutex> lock(m_pub_jobs->m);
+			got.swap(m_pub_jobs->done);
+		}
+		for(auto &f : got)
+			if(f)
+				f();
+		// [KIT_AGENTS] a tool's answer that would come past the network's
+		// ten seconds: said to be on its way
+		const int64_t now = interface::os::time_us();
+		sv_<size_t> late;
+		for(auto &w : m_mcp_waits)
+			if(now - w.second.since > 8000000)
+				late.push_back(w.first);
+		for(size_t peer : late)
+			mcp_answer(peer, "Still going after 8 s: list_aitta, get_state or "
+					"publish_log says when it is done", false);
+	}
+
+	storage::Store* pub_store()
+	{
+		if(!m_pub_save && m_server->has_module("storage"))
+			storage::access(m_server, [&](storage::Interface *i){
+				m_pub_save = i->open("_kit");
+				if(!m_pub_save)
+					m_pub_save = i->create("_kit");
+			});
+		return m_pub_save ? m_pub_save->store("publish") : nullptr;
+	}
+
+	ss_ pub_get(const ss_ &key)
+	{
+		ss_ v;
+		storage::Store *s = pub_store();
+		if(s)
+			s->get(key, v);
+		return v;
+	}
+
+	ss_ pub_key_path()
+	{
+		return pub_store() ? m_pub_save->path()+"/publish.key" : ss_();
+	}
+
+	// The server's key file's text; "" and why: none yet, others may read
+	// it (POSIX), not a key
+	ss_ pub_key(ss_ &why)
+	{
+		const ss_ path = pub_key_path();
+		why = "";
+		if(path.empty()){
+			why = "this server keeps no data of Kit's";
+			return "";
+		}
+		if(!interface::fs::path_exists(path)){
+			why = "the server has no publishing key: an admin makes it on the "
+					"Publishing page (the Server window's Admin)";
+			return "";
+		}
+#ifndef _WIN32
+		struct stat st;
+		if(lstat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode) ||
+				(st.st_mode & 077)){
+			why = "the server's key file is not a plain file only its owner "
+					"reads: chmod 600 "+path;
+			log_w(MODULE, "Publishing: %s", cs(why));
+			return "";
+		}
+#endif
+		const ss_ text = read_file(path);
+		try {
+			if(!interface::aitta::public_of(text).empty())
+				return text;
+		} catch(std::exception &){
+		}
+		why = "the server's key file "+path+" is not a key";
+		return "";
+	}
+
+	ss_ pub_public()
+	{
+		ss_ why;
+		const ss_ k = pub_key(why);
+		return k.empty() ? ss_() : interface::aitta::public_of(k);
+	}
+
+	static bool pub_name_ok(const ss_ &s)
+	{
+		if(s.empty() || s.size() > 40)
+			return false;
+		for(char c : s)
+			if(!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+				return false;
+		return true;
+	}
+
+	// The key made: one per server, its author name with it ("" or why)
+	ss_ pub_keygen(const ss_ &author, const ss_ &by)
+	{
+		if(!pub_name_ok(author))
+			return "the author name: 1 to 40 of a-z, 0-9 and _ (what the Aitta "
+					"binds the key to)";
+		const ss_ path = pub_key_path();
+		if(path.empty())
+			return "this server keeps no data of Kit's";
+		if(interface::fs::path_exists(path))
+			return "the server has its key already (one a server; its file "
+					"is "+path+")";
+		ss_ text, pub;
+		interface::aitta::keygen(text, pub);
+#ifndef _WIN32
+		// Made closed to others (write_file()'s temporary and rename would
+		// leave it the umask's), never over a file or a link there
+		const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL |
+				O_NOFOLLOW | O_CLOEXEC, 0600);
+		bool ok = fd >= 0 && write(fd, text.data(), text.size()) ==
+				(ssize_t)text.size() && fsync(fd) == 0;
+		if(fd >= 0 && close(fd) != 0)
+			ok = false;
+#else
+		// simplified: Windows keeps the user directory's ACL (the
+		// user's own); a key there readable by others is the ACL's
+		const bool ok = interface::fs::write_file(path, text);
+#endif
+		if(!ok){
+			interface::fs::remove_all(path);
+			return "cannot write "+path;
+		}
+		pub_store()->set("author", author);
+		m_pub_bound.clear();
+		log_i(MODULE, "Publishing: %s made the server's key, author %s, its "
+				"public half %s", cs(by), cs(author), cs(pub));
+		return "";
+	}
+
+	sv_<ss_> pub_aittas()
+	{
+		sv_<ss_> out;
+		const json::Value l = json::load_string(pub_get("aittas").c_str());
+		for(unsigned i = 0; l.is_array() && i < l.size(); i++)
+			if(l.at(i).is_string() && interface::aitta::listed_origin(
+					l.at(i).as_string()) == l.at(i).as_string())
+				out.push_back(l.at(i).as_string());
+		return out;
+	}
+
+	// The listed Aitta an address names, as listed; "" for one not listed
+	ss_ pub_listed(const ss_ &aitta)
+	{
+		const ss_ o = interface::aitta::listed_origin(aitta);
+		for(const ss_ &a : pub_aittas())
+			if(!o.empty() && a == o)
+				return a;
+		return "";
+	}
+
+	// Whether peer may publish as the server: an admin's (the server's
+	// own machine's too), or an account with "publisher"
+	bool may_publish(size_t peer, ss_ *account = nullptr)
+	{
+		bool admin = false;
+		const ss_ a = account_of(peer, &admin);
+		if(account)
+			*account = a;
+		bool r = admin;
+		if(!r && !a.empty() && m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *i){
+				r = i->is_admin(a) || i->has_priv(a, "publisher");
+			});
+		return r;
+	}
+
+	// Each listed Aitta asked whether it binds the key to the author (again:
+	// those asked before too); its answer to whoever has the page open
+	void pub_check(bool again)
+	{
+		const ss_ pub = pub_public(), author = pub_get("author");
+		if(pub.empty())
+			return;
+		for(const ss_ &a : pub_aittas()){
+			auto b = m_pub_bound.find(a);
+			if(b != m_pub_bound.end() && (!again || b->second == "asking..."))
+				continue;
+			m_pub_bound[a] = "asking...";
+			pub_thread([this, a, pub, author](){
+				const ss_ why = interface::aitta::listed_vouch(a, pub, author);
+				return std::function<void()>([this, a, pub, why](){
+					if(pub != pub_public())
+						return;
+					m_pub_bound[a] = why;
+					log_i(MODULE, "Publishing: %s %s", cs(a), why.empty() ?
+							cs("binds the server's key to "+pub_get("author")) :
+							cs(why));
+					for(size_t p : m_pub_open)
+						send_publishing(p);
+				});
+			});
+		}
+	}
+
+	static ss_ pub_raise(const ss_ &v)
+	{
+		int n[3] = {0, 0, 0};
+		if(sscanf(v.c_str(), "%d.%d.%d", &n[0], &n[1], &n[2]) != 3)
+			return "1.0.0";
+		return itos(n[0])+"."+itos(n[1])+"."+itos(n[2] + 1);
+	}
+
+	// The log's rows, the oldest first
+	json::Value pub_log()
+	{
+		json::Value out = json::array();
+		storage::Store *s = pub_store();
+		for(const ss_ &k : s ? s->list("log/") : sv_<ss_>()){
+			ss_ v;
+			s->get(k, v);
+			const json::Value r = json::load_string(v.c_str());
+			if(r.is_object())
+				out.append(r);
+		}
+		return out;
+	}
+
+	// What the publish form and the Publishing page show: {author, key
+	// (the public half), aittas: [{url, bound: "" or why}], bound (one
+	// Aitta binds it), may, last: {name: the version last published}};
+	// an admin's page also people: [{name, admin, builder, publisher}] and
+	// the log
+	void send_publishing(size_t peer)
+	{
+		if(!m_peers.count(peer))
+			return;
+		bool admin = false;
+		const ss_ you = account_of(peer, &admin);
+		json::Value j = json::object(), as = json::array(),
+				last = json::object();
+		j.set("you", you.empty() ? m_peers[peer].name : you);
+		j.set("author", pub_get("author"));
+		j.set("key", pub_public());
+		j.set("may", may_publish(peer));
+		bool bound = false;
+		for(const ss_ &a : pub_aittas()){
+			json::Value o = json::object();
+			auto b = m_pub_bound.find(a);
+			o.set("url", a);
+			o.set("bound", b == m_pub_bound.end() ? ss_("not asked") :
+					b->second);
+			bound = bound || (b != m_pub_bound.end() && b->second.empty());
+			as.append(o);
+		}
+		j.set("aittas", as);
+		j.set("bound", bound);
+		const json::Value log = pub_log();
+		for(unsigned i = 0; i < log.size(); i++)
+			last.set(jstr(log.at(i), "package").substr(
+					jstr(log.at(i), "package").find('/') + 1),
+					jstr(log.at(i), "version"));
+		j.set("last", last);
+		j.set("admin", admin);
+		if(admin){
+			json::Value people = json::array(), rows = json::array();
+			accounts::access(m_server, [&](accounts::Interface *i){
+				for(const ss_ &n : i->account_names()){
+					const bool ad = i->is_admin(n), b = i->has_priv(n, "builder"),
+							pu = i->has_priv(n, "publisher");
+					if(!ad && !b && !pu)
+						continue;
+					json::Value o = json::object();
+					o.set("name", n);
+					o.set("admin", ad);
+					o.set("builder", b);
+					o.set("publisher", pu);
+					people.append(o);
+				}
+			});
+			for(unsigned i = log.size() > 50 ? log.size() - 50 : 0;
+					i < log.size(); i++)
+				rows.append(log.at(i));
+			j.set("people", people);
+			j.set("log", rows);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:publishing", j.stringify());
+		});
+	}
+
+	// "kit:publishing" {"op"}: "get" the form's or page's (as
+	// send_publishing()); an admin's: "keygen" {author}, "aittas" {list},
+	// "publisher" {name, on}, "check" (each Aitta asked again), "close"
+	void on_publishing(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		const json::Value j = json::load_string(packet.data.c_str());
+		const ss_ op = jstr(j, "op");
+		bool admin = false;
+		const ss_ by = account_of(peer, &admin);
+		ss_ why;
+		if(!m_peers.count(peer) || !j.is_object())
+			return;
+		if(op == "close"){
+			m_pub_open.erase(peer);
+			return;
+		}
+		auto refuse = [&](const ss_ &s){
+			why = s;
+		};
+		if(op == "get" && !admin && !can_edit(peer))
+			why = "the publish form is a builder's";
+		else if(op != "get" && !admin)
+			why = "the Publishing page is an admin's";
+		// Install a template from an Aitta...: the list, an install
+		else if(op == "templates"){
+			json::Value t = json::object();
+			t.set("kind", "template");
+			aitta_list(peer, t, refuse);
+		} else if(op == "install_template"){
+			json::Value t = j.deepcopy();
+			t.set("kind", "template");
+			aitta_install(peer, m_peers[peer], t, refuse);
+		} else if(op == "keygen")
+			why = pub_keygen(jstr(j, "author"), by.empty() ? "the Host" : by);
+		else if(op == "aittas"){
+			json::Value l = json::array();
+			const json::Value &in = j.get("list");
+			std::set<ss_> had;
+			for(unsigned i = 0; in.is_array() && i < in.size() && why.empty();
+					i++){
+				const ss_ a = in.at(i).is_string() ? in.at(i).as_string() : "";
+				const ss_ o = interface::aitta::listed_origin(a);
+				if(o.empty())
+					why = "not an Aitta's address, http(s)://host[:port]: "+
+							a.substr(0, 80);
+				else if(!had.count(o) && had.size() >= 8)
+					why = "8 Aittas at most";
+				else if(had.insert(o).second)
+					l.append(o);
+			}
+			if(why.empty()){
+				pub_store()->set("aittas", l.stringify());
+				log_i(MODULE, "Publishing: %s set the Aittas: %s", cs(by),
+						cs(l.stringify()));
+				// (the editors' New tabs go through the server from here)
+				send_state_all();
+			}
+		} else if(op == "publisher"){
+			accounts::access(m_server, [&](accounts::Interface *i){
+				why = i->set_priv(jstr(j, "name"), "publisher",
+						j.get("on").is_true(), by);
+			});
+			if(why.empty())
+				log_i(MODULE, "Publishing: %s %s %s the right to publish as the "
+						"server", cs(by), j.get("on").is_true() ? "gave" : "took",
+						cs(jstr(j, "name").substr(0, 64)));
+		} else if(op == "check"){
+			pub_check(true);
+		} else if(op != "get"){
+			why = "no op \""+op.substr(0, 32)+"\"";
+		}
+		if(!why.empty()){
+			log_i(MODULE, "Publishing: %s by %s refused: %s", cs(op), cs(by),
+					cs(why));
+			json::Value a = json::object();
+			a.set("why", why);
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(peer, "kit:publishing_refused", a.stringify());
+			});
+			if(op == "get")
+				return;
+		}
+		m_pub_open.insert(peer);
+		pub_check(false);
+		send_publishing(peer);
+	}
+
+	static const char *const* pub_licences()
+	{
+		static const char *const L[] = {"CC0-1.0", "CC-BY-4.0", "CC-BY-SA-4.0",
+				"MIT", "LicenseRef-All-rights-reserved", nullptr};
+		return L;
+	}
+
+	// {"op": "server_publish", "what": "scene", "project" or "prefabs",
+	// "scene" (none: the builder's), "name", "version" (none: the next of
+	// the last published, else 1.0.0), "license", "description", "title"
+	// (none: the scene's or project's), "aitta" (one listed)}: the release
+	// made as `buildat aitta pack` makes one (its checks), signed with the
+	// server's key and put on the Aitta on a thread; answered
+	// "kit:server_publish" {ok, what or why, name, version, sha256, aitta}
+	void server_publish(size_t peer, Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		ss_ account, why;
+		if(!may_publish(peer, &account))
+			return refuse(p.name+" may not publish as the server (the Host "
+					"gives the right on the Publishing page)");
+		if(m_mcp_waits.count(peer))
+			return refuse("one at a time: the last is still going");
+		if(pub_key(why).empty())
+			return refuse(why);
+		const ss_ author = pub_get("author"),
+				aitta = pub_listed(jstr(j, "aitta"));
+		if(aitta.empty())
+			return refuse("the Aitta \""+jstr(j, "aitta").substr(0, 80)+"\" is "
+					"not one the server publishes to (the Publishing page's list)");
+		const ss_ what = jstr(j, "what");
+		const ss_ kind = what == "scene" ? "scene" : what == "project" ?
+				"template" : what == "prefabs" ? "kit" : "";
+		if(kind.empty())
+			return refuse("what: scene, project or prefabs");
+		why = interface::aitta::publish_refusal(BUILDAT_VERSION, aitta, kind);
+		if(!why.empty())
+			return refuse(why);
+		const ss_ name = jstr(j, "name"), licence = jstr(j, "license");
+		if(!pub_name_ok(name))
+			return refuse("name: 1 to 40 of a-z, 0-9 and _");
+		bool lic_ok = false;
+		for(const char *const *l = pub_licences(); *l; l++)
+			lic_ok = lic_ok || licence == *l;
+		if(!lic_ok)
+			return refuse("license: CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0, MIT or "
+					"LicenseRef-All-rights-reserved");
+		ss_ version = jstr(j, "version");
+		if(version.empty()){
+			const json::Value log = pub_log();
+			for(unsigned i = 0; i < log.size(); i++)
+				if(jstr(log.at(i), "package") == author+"/"+name)
+					version = jstr(log.at(i), "version");
+			version = version.empty() ? ss_("1.0.0") : pub_raise(version);
+		}
+		// Its files, as an export's
+		sv_<std::pair<ss_, ss_>> files;
+		json::Value deps = json::array();
+		const ss_ scene = jstr(j, "scene").empty() ? p.scene :
+				jstr(j, "scene").substr(0, 64);
+		if(kind == "scene" ? !scene_files(author_of(p), scene, files, why) :
+				kind == "template" ? !project_files(p, files, why) : false)
+			return refuse(why);
+		if(kind == "kit"){
+			json::Value x;
+			if(!prefab_export(p, author, x, why))
+				return refuse(why);
+			for(json::Iterator it(x.get("files")); it; ++it)
+				files.push_back({it.key(), (*it).as_string()});
+			for(json::Iterator it(x.get("hex")); it; ++it){
+				const ss_ h = (*it).as_string();
+				ss_ b;
+				for(size_t i = 0; i + 1 < h.size(); i += 2)
+					b += (char)std::stoi(h.substr(i, 2), nullptr, 16);
+				files.push_back({it.key(), b});
+			}
+			deps = x.get("dependencies");
+		}
+		json::Value m = json::object();
+		for(auto it = files.begin(); it != files.end();){
+			if(it->first == "meta.json")
+				m = json::load_string(it->second.c_str());
+			if(it->first == "meta.json" || it->first == "LICENSE")
+				it = files.erase(it);
+			else
+				++it;
+		}
+		const ss_ title = !jstr(j, "title").empty() ?
+				title_cut(jstr(j, "title")) : !jstr(m, "title").empty() ?
+				jstr(m, "title") : name;
+		json::Value by = json::object();
+		by.set("account", account.empty() ? p.name : account);
+		if(!account.empty() && m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *i){
+				const sv_<ss_> ids = i->starport_ids(account);
+				if(!ids.empty())
+					by.set("starport_id", ids[0]);
+			});
+		m.set("kind", kind);
+		m.set("author", author);
+		m.set("name", name);
+		m.set("title", title);
+		m.set("version", version);
+		m.set("engine_api", (int64_t)interface::aitta::ENGINE_API);
+		m.set("license_code", licence);
+		m.set("license_media", licence);
+		m.set("description", jstr(j, "description"));
+		m.set("published_by", by);
+		if(kind == "kit" && deps.size())
+			m.set("dependencies", deps);
+		const ss_ builder = jstr(by, "account");
+		files.push_back({"meta.json", m.stringify()+"\n"});
+		files.push_back({"LICENSE", title+", by "+builder+", published by "+
+				author+" (the server's key) on "+interface::aitta::aitta_host(
+				aitta)+".\n\n"+(licence == "LicenseRef-All-rights-reserved" ?
+				ss_("All rights reserved.") : "Licensed under "+licence+
+				" (https://spdx.org/licenses/"+licence+".html).")+"\n"});
+		// Packed and signed as `buildat aitta pack` does (its checks, the
+		// buildat_version), the key read from its file there
+		const ss_ tmp = m_server->get_config().get<ss_>("cache_path")+
+				"/kit_publish_"+itos(interface::os::time_us());
+		ss_ zip, sig;
+		try {
+			for(auto &f : files){
+				const ss_ path = tmp+"/pkg/"+f.first;
+				interface::fs::create_directories(
+						interface::fs::strip_file_name(path));
+				if(!interface::fs::write_file(path, f.second))
+					throw Exception("cannot write "+path);
+			}
+			const ss_ zp = interface::aitta::pack(tmp+"/pkg", pub_key_path(),
+					tmp+"/out");
+			zip = read_file(zp);
+			sig = read_file(interface::fs::strip_file_extension(zp)+".sig");
+		} catch(std::exception &e){
+			why = e.what();
+		}
+		interface::fs::remove_all(tmp);
+		// (the scratch directory's name left out)
+		for(size_t at; (at = why.find(tmp+"/pkg/")) != ss_::npos;)
+			why.erase(at, tmp.size() + 5);
+		if(!why.empty() || zip.empty() || sig.empty())
+			return refuse("not packed: "+(why.empty() ? ss_("no release") : why));
+		json::Value row = json::object();
+		row.set("time", (int64_t)(interface::os::time_us() / 1000000));
+		row.set("builder", by);
+		row.set("package", author+"/"+name);
+		row.set("kind", kind);
+		row.set("version", version);
+		row.set("sha256", jstr(json::load_string(sig.c_str()), "sha256"));
+		row.set("aitta", aitta);
+		log_i(MODULE, "%s publishes %s/%s %s (%s, %zu bytes, sha256 %s) as the "
+				"server to %s", cs(p.name), cs(author), cs(name), cs(version),
+				cs(kind), zip.size(), cs(jstr(row, "sha256")), cs(aitta));
+		m_edit_what = "Publishing "+author+"/"+name+" "+version+" to "+aitta+
+				"...";
+		pub_wait(peer);
+		pub_thread([this, peer, aitta, sig, zip, row](){
+			ss_ result, err;
+			try {
+				result = interface::aitta::upload(aitta, sig, zip);
+			} catch(std::exception &e){
+				err = e.what();
+			}
+			return std::function<void()>([this, peer, row, result, err](){
+				json::Value a = json::object();
+				const ss_ id = jstr(row, "package")+" "+jstr(row, "version");
+				a.set("ok", err.empty());
+				for(const char *k : {"package", "version", "sha256", "aitta"})
+					a.set(k, jstr(row, k));
+				if(err.empty()){
+					// (17 digits: in order as text)
+					pub_store()->set("log/"+itos(interface::os::time_us() +
+							(int64_t)10000000000000000LL), row.stringify());
+					a.set("what", "Published "+id+" as the server on "+
+							jstr(row, "aitta")+": "+result);
+				} else {
+					a.set("why", "Not published: "+err.substr(0, 300));
+				}
+				log_i(MODULE, "Publishing %s by %s: %s", cs(id),
+						cs(jstr(row.get("builder"), "account")),
+						cs(err.empty() ? result : err));
+				pub_answer(peer, "kit:server_publish", a, err.empty() ?
+						jstr(a, "what")+" (sha256 "+jstr(row, "sha256")+")" :
+						jstr(a, "why"), !err.empty());
+				for(size_t p : m_pub_open)
+					send_publishing(p);
+			});
+		});
+	}
+
+	// [KIT_AGENTS] A tool whose answer comes from a thread: the HTTP
+	// request it came in, answered by mcp_answer() (on_http() keeps it when
+	// m_mcp_defer is set)
+	struct McpWait {
+		size_t http = 0;
+		json::Value id;
+		int64_t since = 0;
+	};
+	std::map<size_t, McpWait> m_mcp_waits;
+	size_t m_mcp_defer = 0;
+
+	void pub_wait(size_t peer)
+	{
+		if(agent_of(peer))
+			m_mcp_defer = peer;
+	}
+
+	void mcp_answer(size_t peer, const ss_ &text, bool failed)
+	{
+		auto w = m_mcp_waits.find(peer);
+		if(w == m_mcp_waits.end())
+			return;
+		json::Value o = json::object(), res = json::object(),
+				content = json::array(), c = json::object();
+		c.set("type", "text");
+		c.set("text", text);
+		content.append(c);
+		res.set("content", content);
+		res.set("isError", failed);
+		o.set("jsonrpc", "2.0");
+		o.set("id", w->second.id);
+		o.set("result", res);
+		const size_t http = w->second.http;
+		m_mcp_waits.erase(w);
+		network::access(m_server, [&](network::Interface *i){
+			i->http_respond(http, 200, "application/json", o.stringify(), "");
+		});
+	}
+
+	// A thread's end said: to an agent its tool's answer (text), to a
+	// client the packet a
+	void pub_answer(size_t peer, const ss_ &packet, const json::Value &a,
+			const ss_ &text, bool failed)
+	{
+		if(m_mcp_waits.count(peer))
+			return mcp_answer(peer, text, failed);
+		if(!m_peers.count(peer) || agent_of(peer))
+			return;
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, packet, a.stringify());
+		});
+	}
+
+	// A listed Aitta's list, its releases of a kind the newest each
+	// (<fp>/<name>), not delisted and of this engine's API: {aitta, key,
+	// author, name, version, title, description, game, sha256, review,
+	// dependencies}. Blocking (a thread's)
+	static json::Value pub_list(const ss_ &aitta, const ss_ &kind)
+	{
+		const json::Value v = json::load_string(interface::aitta::listed_get(
+				aitta, "/api/v1/aitta/list", PUB_LIST_MAX, PUB_TIMEOUT_S).c_str());
+		const json::Value &rs = v.get("releases");
+		sm_<ss_, json::Value> newest;
+		for(unsigned i = 0; rs.is_array() && i < rs.size(); i++){
+			const json::Value &r = rs.at(i);
+			const json::Value &m = r.get("manifest");
+			const ss_ fp = interface::aitta::fingerprint(jstr(r, "key")),
+					name = jstr(r, "name"), sha = jstr(r, "sha256");
+			bool hex = sha.size() == 64;
+			for(char c : sha)
+				hex = hex && isxdigit((unsigned char)c);
+			const int64_t api = json::jint(r, "engine_api", 0);
+			if(fp.empty() || !pub_name_ok(name) || !hex || !m.is_object() ||
+					jstr(m, "kind") != kind || r.get("delisted").is_true() ||
+					api < interface::aitta::ENGINE_API_MIN ||
+					api > interface::aitta::ENGINE_API)
+				continue;
+			const ss_ key = fp+"/"+name;
+			auto had = newest.find(key);
+			if(had != newest.end() && !interface::aitta::version_less(
+					jstr(had->second, "version"), jstr(r, "version")))
+				continue;
+			json::Value o = json::object();
+			o.set("aitta", aitta);
+			o.set("key", key);
+			for(const char *k : {"author", "name", "version", "sha256",
+					"review"})
+				o.set(k, jstr(r, k).substr(0, 80));
+			o.set("title", jstr(m, "title").substr(0, 40));
+			o.set("description", jstr(m, "description").substr(0, 300));
+			o.set("game", jstr(m, "game").substr(0, 81));
+			o.set("buildat_version", jstr(m, "buildat_version").substr(0, 40));
+			o.set("dependencies", m.get("dependencies").is_array() ?
+					m.get("dependencies") : json::array());
+			newest[key] = o;
+		}
+		json::Value out = json::array();
+		for(auto &n : newest)
+			out.append(n.second);
+		return out;
+	}
+
+	// {"op": "aitta_list", "kind": "kit", "scene" or "template", "game"
+	// (none: any)}: each listed Aitta's (pub_list()), on a thread:
+	// "kit:aitta_list" {kind, items, failed: [an Aitta's why]}
+	void aitta_list(size_t peer, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const ss_ kind = jstr(j, "kind"), game = jstr(j, "game");
+		if(kind != "kit" && kind != "scene" && kind != "template")
+			return refuse("kind: kit, scene or template");
+		if(m_mcp_waits.count(peer))
+			return refuse("one at a time: the last is still going");
+		const sv_<ss_> aittas = pub_aittas();
+		if(aittas.empty())
+			return refuse("the server lists no Aittas (the Publishing page)");
+		pub_wait(peer);
+		pub_thread([this, peer, kind, game, aittas](){
+			json::Value items = json::array(), failed = json::array();
+			for(const ss_ &a : aittas){
+				try {
+					const json::Value l = pub_list(a, kind);
+					for(unsigned i = 0; i < l.size(); i++)
+						if(game.empty() || jstr(l.at(i), "game") == game)
+							items.append(l.at(i));
+				} catch(std::exception &e){
+					failed.append(a+": "+ss_(e.what()).substr(0, 200));
+				}
+			}
+			return std::function<void()>([this, peer, kind, items, failed](){
+				json::Value a = json::object();
+				a.set("kind", kind);
+				a.set("items", items);
+				a.set("failed", failed);
+				log_i(MODULE, "The Aittas' %s packages for peer %zu: %zu (%zu "
+						"Aittas failed)", cs(kind), peer, (size_t)items.size(),
+						(size_t)failed.size());
+				pub_answer(peer, "kit:aitta_list", a, a.stringify(), false);
+			});
+		});
+	}
+
+	// A release's .sig and zip off a listed Aitta, the zip max_bytes at
+	// most. Blocking (a thread's)
+	static std::pair<ss_, ss_> pub_fetch(const ss_ &aitta, const ss_ &sha,
+			size_t max_bytes)
+	{
+		const ss_ base = "/api/v1/aitta/archive/"+sha;
+		return std::make_pair(interface::aitta::listed_get(aitta, base+".sig",
+				interface::aitta::VOUCH_MAX_BYTES, PUB_TIMEOUT_S),
+				interface::aitta::listed_get(aitta, base+".zip", max_bytes,
+				PUB_TIMEOUT_S));
+	}
+
+	// {"op": "aitta_install", "aitta" (a listed one), "key" (<fp>/<name>,
+	// as aitta_list gives it), "kind"}: its newest release fetched by the
+	// server on a thread and taken as the client's fetch of it is: a Kit
+	// package (with the packages it depends on, 16 at most, from the same
+	// Aitta) installed, a scene added (add_scene_data()); an admin's
+	// template installed into <user>/installed (New's Start from), its
+	// Aitta's vouch recorded. Answered "kit:aitta_install" {ok, what or
+	// why}; a scene's "kit:scene" too, as an add from a file
+	void aitta_install(size_t peer, Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const ss_ kind = jstr(j, "kind"), key = jstr(j, "key"),
+				aitta = pub_listed(jstr(j, "aitta"));
+		if(kind != "kit" && kind != "scene" && kind != "template")
+			return refuse("kind: kit, scene or template");
+		if(aitta.empty())
+			return refuse("the Aitta \""+jstr(j, "aitta").substr(0, 80)+"\" is "
+					"not one the server fetches from (the Publishing page's list)");
+		bool admin = false;
+		account_of(peer, &admin);
+		if(kind == "template" && !admin)
+			return refuse("a template's install is an admin's (New's Start "
+					"from is the server's)");
+		if(kind == "scene" && !m_host.make_scene)
+			return refuse("the app makes no scenes");
+		if(m_mcp_waits.count(peer))
+			return refuse("one at a time: the last is still going");
+		const ss_ user = m_server->get_config().get<ss_>("user_path"),
+				cache = m_server->get_config().get<ss_>("cache_path");
+		const ss_ by = p.name;
+		log_i(MODULE, "%s installs %s %s from %s", cs(by), cs(kind),
+				cs(key.substr(0, 80)), cs(aitta));
+		m_edit_what = "Fetching "+key.substr(0, 80)+" from "+aitta+"...";
+		pub_wait(peer);
+		pub_thread([this, peer, kind, key, aitta, user, cache, by](){
+			// Each release to take, those it depends on first
+			sv_<std::pair<json::Value, std::pair<ss_, ss_>>> got;
+			ss_ why, done;
+			try {
+				const json::Value l = pub_list(aitta, kind);
+				std::function<void(const ss_&, const ss_&, int)> want =
+						[&](const ss_ &k, const ss_ &min, int depth){
+					// (a dependency by "<author>/<name>", on the same Aitta)
+					json::Value r;
+					for(unsigned i = 0; i < l.size(); i++)
+						if(jstr(l.at(i), "key") == k || (depth > 0 &&
+								jstr(l.at(i), "author")+"/"+jstr(l.at(i), "name") == k))
+							r = l.at(i);
+					if(!r.is_object())
+						throw Exception(k.substr(0, 81)+" is not on "+aitta);
+					if(!min.empty() && interface::aitta::version_less(
+							jstr(r, "version"), min))
+						throw Exception(k.substr(0, 81)+" "+min.substr(0, 40)+
+								" or newer is not on "+aitta);
+					for(auto &g : got)
+						if(jstr(g.first, "key") == jstr(r, "key"))
+							return;
+					if(got.size() >= 16 || depth > 16)
+						throw Exception("more than 16 packages to fetch");
+					const json::Value ds = r.get("dependencies");
+					for(unsigned i = 0; ds.is_array() && i < ds.size(); i++)
+						want(jstr(ds.at(i), "kit"), jstr(ds.at(i), "version"),
+								depth + 1);
+					got.push_back({r, pub_fetch(aitta, jstr(r, "sha256"),
+							kind == "kit" ? MAX_PACKAGE_BYTES : kind == "scene" ?
+							MAX_SCENE_BYTES : PUB_TEMPLATE_MAX)});
+				};
+				want(key, "", 0);
+				// A template into <user>/installed here, on the thread
+				if(kind == "template"){
+					const ss_ tmp = cache+"/kit_template_"+
+							itos(interface::os::time_us());
+					const ss_ zp = tmp+"/r.zip", sp = tmp+"/r.sig";
+					interface::fs::create_directories(tmp);
+					try {
+						if(!interface::fs::write_file(zp, got[0].second.second) ||
+								!interface::fs::write_file(sp, got[0].second.first))
+							throw Exception("cannot write "+tmp);
+						if(interface::aitta::release_kind(zp) != "template")
+							throw Exception("not a template (its meta.json's kind)");
+						const ss_ dir = interface::aitta::install(zp, sp, user,
+								false, "", aitta);
+						const ss_ pub = jstr(json::load_string(
+								got[0].second.first.c_str()), "key");
+						const ss_ vwhy = interface::aitta::listed_vouch(aitta, pub,
+								jstr(got[0].first, "author"));
+						if(vwhy.empty())
+							interface::aitta::record_vouch(user,
+									interface::aitta::fingerprint(pub), aitta,
+									jstr(got[0].first, "author"));
+						done = "the template "+jstr(got[0].first, "title")+" ("+
+								jstr(got[0].first, "author")+"/"+
+								jstr(got[0].first, "name")+" "+
+								jstr(got[0].first, "version")+") in "+dir+(vwhy.empty() ?
+								ss_(", its Aitta vouches") : ", unverified: "+vwhy);
+					} catch(...){
+						interface::fs::remove_all(tmp);
+						throw;
+					}
+					interface::fs::remove_all(tmp);
+				}
+			} catch(std::exception &e){
+				why = e.what();
+			}
+			return std::function<void()>([this, peer, kind, aitta, got, why,
+					done, by](){
+				json::Value a = json::object();
+				ss_ w = why, what = done;
+				if(w.empty() && kind == "template"){
+					// Workbench's New lists it
+					m_server->emit_event(ss_("kit:templates_changed"));
+				} else if(w.empty() && kind == "scene"){
+					SessionScope sc(*this, session_of_peer(peer));
+					json::Value s = json::object();
+					const ss_ sig = got[0].second.first;
+					w = add_scene_data(peer, aitta+ss_(1, '\0')+sig+ss_(1, '\0')+
+							got[0].second.second, s);
+					what = jstr(s, "what");
+					s.set("ok", w.empty());
+					if(!w.empty())
+						s.set("why", w);
+					if(!agent_of(peer) && m_peers.count(peer))
+						network::access(m_server, [&](network::Interface *inetwork){
+							inetwork->send(peer, "kit:scene", s.stringify());
+						});
+				} else if(w.empty()){
+					SessionScope sc(*this, session_of_peer(peer));
+					for(auto &g : got){
+						const ss_ r = take_package(by, json::load_string(
+								g.second.first.c_str()), g.second.second, aitta, true);
+						if(r.compare(0, 3, "ok ") != 0){
+							w = jstr(g.first, "author")+"/"+jstr(g.first, "name")+": "+
+									r;
+							break;
+						}
+						what += (what.empty() ? "" : "; ")+r.substr(3);
+					}
+					if(!got.empty())
+						send_state_all();
+				}
+				a.set("ok", w.empty());
+				a.set(w.empty() ? "what" : "why", w.empty() ? what : w);
+				log_i(MODULE, "An install from %s by %s %s: %s", cs(aitta), cs(by),
+						w.empty() ? "done" : "refused", cs(w.empty() ? what : w));
+				pub_answer(peer, "kit:aitta_install", a, w.empty() ? "Installed: "+
+						what : "Refused: "+w, !w.empty());
+			});
+		});
+	}
+
+	// [KIT_AGENTS] publish_log: the log's rows (an admin token's)
+	ss_ agent_publish_log(size_t peer, bool &failed)
+	{
+		bool admin = false;
+		account_of(peer, &admin);
+		failed = !admin;
+		return admin ? pub_log().stringify() : "Refused: the publishing log "
+				"is an admin's (an admin token's)";
+	}
+
 	// [KIT_PROJECT_EXPORT] A template's first start: the rest of an export
 	// from its directory (project_files()), each row checked as a builder's
 	// own would be and left out where refused (logged): the textures
@@ -8100,9 +9116,10 @@ struct Module: public interface::Module, public Interface
 		return edits;
 	}
 
-	// An export's rows (import_export()'s); keep ([KIT_SCENE_PACKAGES]): a
-	// row of a key the project has stays the project's, the export's left
-	// out (counted in kept)
+	// An export's rows (import_export()'s); a row of a key the project has
+	// stays the project's, the export's left out (counted in kept, a
+	// difference logged). keep: a scene's ([KIT_SCENE_PACKAGES]), for the
+	// log's words
 	void import_rows(const ss_ &dir, bool keep, size_t &textures,
 			size_t &took, size_t &left, size_t &kept)
 	{
@@ -8153,8 +9170,15 @@ struct Module: public interface::Module, public Interface
 				left++;
 				return;
 			}
+			// [KIT_SCENE_ADD_LIVE] Nothing the project has is replaced, a
+			// template's either (its first start has none of them)
 			ss_ had;
-			if(keep && m_store->get(what+":"+key, had)){
+			if(m_store->get(what+":"+key, had)){
+				if(had != row.stringify())
+					log_i(MODULE, "The %s's %s %s differs from the project's (%zu "
+							"bytes, the project's %zu): the project's kept", from,
+							cs(what), cs(key.substr(0, 129)), row.stringify().size(),
+							had.size());
 				kept++;
 				return;
 			}
@@ -8322,7 +9346,66 @@ struct Module: public interface::Module, public Interface
 	// [KIT_PROJECT_EXPORT] edits.bin's cells into their Worlds, the World
 	// started: each section the generator's, the cells over it, generated
 	// (no generator over it after) and written (altered: the export's again)
-	void import_cells(const json::Value &edits)
+	// [KIT_SCENE_ADD_LIVE] Sections import_cells() puts in a few a tick:
+	// each generated, its cells over it
+	struct CellJob {
+		ss_ scene;
+		std::tuple<int, int, int> section;
+		sv_<std::array<int64_t, 4>> cells;
+	};
+	std::deque<CellJob> m_cell_jobs;
+	static const size_t CELL_JOBS_PER_TICK = 2;
+
+	size_t cell_jobs_of(const ss_ &scene)
+	{
+		size_t n = 0;
+		for(const CellJob &c : m_cell_jobs)
+			n += c.scene == scene;
+		return n;
+	}
+
+	// Each section generated and its cells put over it (its World's
+	// diff_generator(), as an export compared them)
+	void put_sections(World *wd, const sv_<CellJob> &jobs)
+	{
+		WorldScope ws(m_w, wd);
+		up_<world::Generator> g = diff_generator();
+		voxelworld::access(m_server, wd->world_scene,
+				[&](voxelworld::Instance *w){
+			for(const CellJob &s : jobs){
+				const pv::Vector3DInt16 sp(std::get<0>(s.section),
+						std::get<1>(s.section), std::get<2>(s.section));
+				const pv::Region r = w->get_section_region_voxels(sp);
+				interface::VoxelVolume vol(r);
+				g->generate(wd->world_scene, sp, vol);
+				for(auto &c : s.cells)
+					vol.setVoxelAt((int)c[0], (int)c[1], (int)c[2],
+							interface::VoxelInstance((uint32_t)c[3]));
+				w->set_section_generated(sp);
+				w->set_volume(vol, true);
+				if(wd->sky)
+					w->relight_region_later(r);
+			}
+		});
+	}
+
+	void cell_jobs_tick()
+	{
+		for(size_t n = 0; n < CELL_JOBS_PER_TICK && !m_cell_jobs.empty(); n++){
+			const CellJob job = m_cell_jobs.front();
+			m_cell_jobs.pop_front();
+			World *wd = world_named(job.scene);
+			if(wd && wd->world_scene)
+				put_sections(wd, {job});
+			if(!cell_jobs_of(job.scene))
+				log_i(MODULE, "World %s: ready, its edited sections in",
+						cs(job.scene));
+		}
+	}
+
+	// later ([KIT_SCENE_ADD_LIVE]): the sections queued for
+	// cell_jobs_tick(), not put in now
+	void import_cells(const json::Value &edits, bool later = false)
 	{
 		const json::Value &sc = edits.get("scenes");
 		for(json::Iterator it(sc); sc.is_object() && it; ++it){
@@ -8331,8 +9414,6 @@ struct Module: public interface::Module, public Interface
 					&cells = (*it).get("cells");
 			if(!wd || !wd->world_scene || !names.is_array() || !cells.is_array())
 				continue;
-			WorldScope ws(m_w, wd);
-			up_<world::Generator> g = diff_generator();
 			size_t put = 0, left = 0;
 			std::map<std::tuple<int, int, int>, sv_<std::array<int64_t, 4>>> by;
 			voxelworld::access(m_server, wd->world_scene,
@@ -8375,25 +9456,19 @@ struct Module: public interface::Module, public Interface
 					f.id.set(word, (uint32_t)ids[c[3]]);
 					by[std::make_tuple(sx, sy, sz)].push_back({{c[0], c[1], c[2],
 							(int64_t)word}});
-				}
-				for(auto &s : by){
-					const pv::Vector3DInt16 sp(std::get<0>(s.first),
-							std::get<1>(s.first), std::get<2>(s.first));
-					const pv::Region r = w->get_section_region_voxels(sp);
-					interface::VoxelVolume vol(r);
-					g->generate(wd->world_scene, sp, vol);
-					for(auto &c : s.second)
-						vol.setVoxelAt((int)c[0], (int)c[1], (int)c[2],
-								interface::VoxelInstance((uint32_t)c[3]));
-					put += s.second.size();
-					w->set_section_generated(sp);
-					w->set_volume(vol, true);
-					if(wd->sky)
-						w->relight_region_later(r);
+					put++;
 				}
 			});
+			sv_<CellJob> jobs;
+			for(auto &s : by)
+				jobs.push_back({it.key(), s.first, s.second});
+			if(later)
+				m_cell_jobs.insert(m_cell_jobs.end(), jobs.begin(), jobs.end());
+			else
+				put_sections(wd, jobs);
 			log_i(MODULE, "World %s: the template's %zu edited cells in %zu "
-					"sections (%zu left out)", cs(it.key()), put, by.size(), left);
+					"sections (%zu left out)%s", cs(it.key()), put, by.size(), left,
+					later && !jobs.empty() ? ", put in over ticks" : "");
 		}
 	}
 
@@ -20157,6 +21232,8 @@ struct Module: public interface::Module, public Interface
 			return;
 		m_box->poll();
 		take_vouches();
+		take_pub_jobs();
+		cell_jobs_tick();
 		// [KIT_SESSIONS_1] Writes routed to owned voxels, by the session
 		// whose scene it is; each round's tick in its own members
 		std::deque<Write> all;
@@ -28602,6 +29679,7 @@ struct Module: public interface::Module, public Interface
 	{
 		m_local_peers.erase(old.info.id);
 		m_watches.erase(old.info.id);
+		m_pub_open.erase(old.info.id);
 		// [KIT_SESSIONS_1] from their session's round; a guest's entity
 		// in the default goes too
 		const uint64_t id = session_of_peer(old.info.id);
@@ -29248,6 +30326,66 @@ struct Module: public interface::Module, public Interface
 				"to; not the running one. An admin token's.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"},
 				"to": {"type": "string"}}, "required": ["name", "to"]})J", ""},
+			// [KIT_SERVER_PUBLISH]
+			{"publish_project", "server_publish", "Publishes the project's start "
+				"as a template on an Aitta the server lists, as the server: its "
+				"author name and key, published_by your account (shown in the "
+				"release), the LICENSE naming you. Needs the right to publish as "
+				"the server (the Host's to give; an admin has it). Answers when "
+				"the Aitta took it.",
+				R"J({"type": "object", "properties": {
+				"name": {"type": "string", "description": "The package's name: a-z, 0-9 and _"},
+				"version": {"type": "string", "description": "SemVer; none: the next of the last published"},
+				"license": {"type": "string", "enum": ["CC0-1.0", "CC-BY-4.0",
+				"CC-BY-SA-4.0", "MIT", "LicenseRef-All-rights-reserved"]},
+				"description": {"type": "string", "description": "300 characters at most"},
+				"title": {"type": "string", "description": "40 bytes at most; none: the project's"},
+				"aitta": {"type": "string", "description": "One of list_aitta's Aittas"}},
+				"required": ["name", "license", "aitta"]})J", R"J({"what": "project"})J"},
+			{"publish_scene", "server_publish", "Publishes one scene as a scene "
+				"package (export_scene's files) on an Aitta the server lists, as "
+				"the server, as publish_project does.",
+				R"J({"type": "object", "properties": {
+				"scene": {"type": "string", "description": "Its name; none: the scene the agent is in"},
+				"name": {"type": "string"}, "version": {"type": "string"},
+				"license": {"type": "string", "enum": ["CC0-1.0", "CC-BY-4.0",
+				"CC-BY-SA-4.0", "MIT", "LicenseRef-All-rights-reserved"]},
+				"description": {"type": "string"}, "title": {"type": "string"},
+				"aitta": {"type": "string"}},
+				"required": ["name", "license", "aitta"]})J", R"J({"what": "scene"})J"},
+			{"publish_kit_package", "server_publish", "Publishes your prefabs, "
+				"voxel, item types and sounds (Publish my prefabs...'s) as a Kit "
+				"package on an Aitta the server lists, as the server, its names "
+				"made the server's author's, as publish_project does.",
+				R"J({"type": "object", "properties": {
+				"name": {"type": "string"}, "version": {"type": "string"},
+				"license": {"type": "string", "enum": ["CC0-1.0", "CC-BY-4.0",
+				"CC-BY-SA-4.0", "MIT", "LicenseRef-All-rights-reserved"]},
+				"description": {"type": "string"}, "aitta": {"type": "string"}},
+				"required": ["name", "license", "aitta"]})J", R"J({"what": "prefabs"})J"},
+			{"list_aitta", "aitta_list", "The packages of a kind on the Aittas "
+				"the server lists (the Host's list; none else), the newest "
+				"release of each: [{aitta, key, author, name, version, title, "
+				"description, game, sha256, review, buildat_version}]. game "
+				"(\"<author>/<name>\", get_state's): only those made for it.",
+				R"J({"type": "object", "properties": {
+				"kind": {"type": "string", "enum": ["scene", "kit", "template"]},
+				"game": {"type": "string"}}, "required": ["kind"]})J", ""},
+			{"install_from_aitta", "aitta_install", "Fetches a package list_aitta "
+				"lists, by its key and Aitta, the server checking its signature "
+				"and asking its Aitta whose key it is: a scene is added to the "
+				"project as a new scene (unlisted while Running), a Kit package "
+				"(and those it depends on) installed into it; a template (an "
+				"admin token's) goes into New's Start from.",
+				R"J({"type": "object", "properties": {
+				"kind": {"type": "string", "enum": ["scene", "kit", "template"]},
+				"key": {"type": "string", "description": "list_aitta's key, <fp>/<name>"},
+				"aitta": {"type": "string"}}, "required": ["kind", "key", "aitta"]})J",
+				""},
+			{"publish_log", "=publish_log", "What was published as the server: "
+				"[{time, builder: {account, starport_id}, package, kind, version, "
+				"sha256, aitta}], the oldest first. An admin token's.",
+				R"J({"type": "object", "properties": {}})J", ""},
 		};
 		return t;
 	}
@@ -29424,8 +30562,19 @@ struct Module: public interface::Module, public Interface
 			if(!args.is_undefined() && !args.is_object())
 				return error(200, id, -32602, "arguments: an object");
 			bool failed = !calls_ok;
+			m_mcp_defer = 0;
 			const ss_ text = failed ? "Over "+itos(AGENT_CALLS)+" calls a "
 					"minute: wait" : agent_tool(at, *t, args, failed);
+			// [KIT_SERVER_PUBLISH] its answer from a thread (mcp_answer())
+			if(m_mcp_defer && !failed){
+				McpWait &w = m_mcp_waits[m_mcp_defer];
+				w.http = r.peer;
+				w.id = id;
+				w.since = interface::os::time_us();
+				m_mcp_defer = 0;
+				return;
+			}
+			m_mcp_defer = 0;
 			json::Value res = json::object(), content = json::array(),
 					c = json::object();
 			c.set("type", "text");
@@ -29818,6 +30967,8 @@ struct Module: public interface::Module, public Interface
 			}
 			return o.stringify();
 		}
+		if(op == "=publish_log")
+			return agent_publish_log(peer, failed);
 		if(op == "=guide")
 			return agent_guide(p.name, true);
 		if(op == "=goals")
@@ -31837,6 +32988,18 @@ struct Module: public interface::Module, public Interface
 			if(e.second.kind == "scene")
 				scenes.append(e.second.name);
 		j.set("scenes", scenes);
+		// [KIT_SCENE_ADD_LIVE] the listed ones, and the World's own (it stays)
+		if(editing){
+			json::Value ls = json::array();
+			const json::Value l = listed_scenes();
+			for(unsigned i = 0; i < l.size(); i++)
+				ls.append(jstr(l.at(i), "scene"));
+			j.set("listed", ls);
+			j.set("world_scene", m_host.world_scene);
+			// [KIT_SERVER_PUBLISH] the palette's installs through the server
+			// when it lists Aittas
+			j.set("server_aittas", (int64_t)pub_aittas().size());
+		}
 		j.set("scene", pi != m_peers.end() ? pi->second.scene : ss_());
 		// [KIT_PLANE] the depth of its scene's plane (the editor's Front view's) and
 		// how far in front of it the view begins (kit/controls' side_clip)
@@ -32209,7 +33372,8 @@ struct Module: public interface::Module, public Interface
 				op == "sound_delete" || op == "regenerate" ||
 				op == "prefab_rename" || op == "prefab_delete" ||
 				op == "hm_regenerate" ||
-				op == "hm_restore" || op == "new_scene" || op == "export" ||
+				op == "hm_restore" || op == "new_scene" ||
+				op == "remove_scene" || op == "export" ||
 				op == "export_project" || op == "export_scene" ||
 				op == "draft" || op == "prefab_bench" ||
 				(gs->bench && op == "publish")))
@@ -32335,6 +33499,13 @@ struct Module: public interface::Module, public Interface
 			return export_project(peer, p, refuse);
 		if(op == "export_scene")
 			return export_scene(peer, p, j, refuse);
+		// [KIT_SERVER_PUBLISH]
+		if(op == "server_publish")
+			return server_publish(peer, p, j, refuse);
+		if(op == "aitta_list")
+			return aitta_list(peer, j, refuse);
+		if(op == "aitta_install")
+			return aitta_install(peer, p, j, refuse);
 		// [KIT_ITEMS_TAB]
 		if(op == "item_delete")
 			return delete_item(p, j, refuse);
@@ -32463,6 +33634,13 @@ struct Module: public interface::Module, public Interface
 						" more to undo";
 				send_state(peer);
 				return;
+			}
+			// [KIT_SCENE_ADD_LIVE] an added scene's taken away as Remove
+			// scene's is
+			why = scene_busy(c.before, p.name);
+			if(!why.empty()){
+				m_undo[p.name].push_back(c);
+				return refuse("the undo takes a scene away: "+why);
 			}
 			// [KIT_PREFAB_VOXELS] a prefab's place: its voxels too
 			if(c.stroke == -3)
@@ -32759,6 +33937,70 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
+	// [KIT_SCENE_ADD_LIVE] Why a change taking a scene away is refused: the
+	// players in it (its sessions' copies too) other than `by`, or `by`
+	// there; "" none
+	ss_ scene_busy(const sv_<std::pair<uint64_t, json::Value>> &change,
+			const ss_ &by)
+	{
+		for(const auto &c : change){
+			auto e = m_entities.find(c.first);
+			if(!c.second.is_null() || e == m_entities.end() ||
+					e->second.kind != "scene")
+				continue;
+			const ss_ &n = e->second.name;
+			size_t on = 0;
+			bool self = false;
+			for(auto &p : m_peers){
+				const ss_ &s = p.second.scene;
+				// (an agent has no body: its edits' scene only)
+				if((s != n && s.compare(0, n.size() + 1, n+"~") != 0) ||
+						m_agent_peers.count(p.first))
+					continue;
+				if(p.second.name == by)
+					self = true;
+				else
+					on++;
+			}
+			if(on)
+				return itos(on)+(on == 1 ? " player" : " players")+" on it: "
+						"unlist it; they leave as they finish";
+			if(self)
+				return "you are in the scene "+n+": go to another first";
+		}
+		return "";
+	}
+
+	// [KIT_SCENE_ADD_LIVE] {"op": "remove_scene", "name"}: a scene and all
+	// under it taken away, one undo (its World, rows and types stay, as an
+	// added one's undo leaves them); the World's own scene stays
+	bool remove_scene_change(const json::Value &j, const Peer &p,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
+			ss_ &why)
+	{
+		const ss_ name = jstr(j, "name").substr(0, 64);
+		const uint64_t sid = scene_id(name);
+		if(!sid){
+			why = "no scene "+name;
+			return false;
+		}
+		if(name == m_host.world_scene){
+			why = "the scene "+name+" is the project's first: it stays";
+			return false;
+		}
+		delete_change(sid, change);
+		if(change.empty()){
+			why = "the scene "+name+" has past "+itos(MAX_ENTITIES)+" entities";
+			return false;
+		}
+		why = scene_busy(change, p.name);
+		if(!why.empty())
+			return false;
+		what = "removed the scene "+name+" ("+itos(change.size())+
+				" entities changed)";
+		return true;
+	}
+
 	// [KIT_SCENES] Where each player last was in each scene, by name and
 	// scene: a builder going back to one comes back there
 	std::map<std::pair<ss_, ss_>, std::array<double, 3>> m_scene_pos;
@@ -33005,6 +34247,31 @@ struct Module: public interface::Module, public Interface
 			return place_prefab(j, p, change, what, why);
 		if(op == "new_scene")
 			return new_scene_change(j, p, change, what, why);
+		if(op == "remove_scene")
+			return remove_scene_change(j, p, change, what, why);
+		// [KIT_SCENE_ADD_LIVE] {"op": "list_scene", "name", "on"}: its
+		// kit/scene_info's listed set, as the inspector's set
+		if(op == "list_scene"){
+			const ss_ name = jstr(j, "name").substr(0, 64);
+			const uint64_t sid = scene_id(name);
+			for(auto &x : m_entities){
+				if(!sid || x.second.parent != sid || x.second.has_pos)
+					continue;
+				for(size_t i = 0; i < x.second.comps.size(); i++){
+					if(x.second.comps[i].type != "kit/scene_info")
+						continue;
+					json::Value s = json::object();
+					s.set("id", (int64_t)x.first);
+					s.set("comp", (int64_t)i);
+					s.set("param", "listed");
+					s.set("value", j.get("on").is_true());
+					return build_change("set", s, p, change, what, why);
+				}
+			}
+			why = sid ? "the scene "+name+" has no kit/scene_info (Game): add "
+					"one to it" : "no scene "+name;
+			return false;
+		}
 		if(op == "save_prefab")
 			return save_prefab(j, p, change, what, why);
 		// [KIT_PREFAB_ROOT] (and prefab_rename, prefab_delete: on_edit_u())
@@ -33244,6 +34511,17 @@ struct Module: public interface::Module, public Interface
 			const ss_ bad = check_set_param(decl, value);
 			if(!bad.empty()){
 				why = in->type+"'s "+param+" is "+bad;
+				return false;
+			}
+			// [KIT_SCENE_ADD_LIVE] A scene added Running is listed once its
+			// World has its sections
+			auto se = m_entities.find(e->parent);
+			if(in->type == "kit/scene_info" && param == "listed" &&
+					value.is_true() && se != m_entities.end() &&
+					se->second.kind == "scene" && cell_jobs_of(se->second.name)){
+				why = "the scene "+se->second.name+"'s World is not ready yet ("+
+						itos(cell_jobs_of(se->second.name))+" sections to go): list "
+						"it then";
 				return false;
 			}
 			const size_t ci = in - &e->comps[0];

@@ -978,7 +978,8 @@ struct Module: public interface::Module, public Interface
 	ss_ set_priv(const ss_ &name, const ss_ &priv, bool on, const ss_ &by)
 	{
 		Account account;
-		if(priv != "builder")
+		// [KIT_SERVER_PUBLISH] "publisher": may publish as the server
+		if(priv != "builder" && priv != "publisher")
 			return "No privilege \""+priv.substr(0, 32)+"\" to set here";
 		if(!by.empty() && !is_admin(by))
 			return "Only the "+level_name(LV_ADMIN)+" grants "+priv;
@@ -1163,6 +1164,15 @@ struct Module: public interface::Module, public Interface
 			if(m_store->get(key, link))
 				out.push_back(link);
 		}
+		return out;
+	}
+
+	sv_<ss_> starport_ids(const ss_ &name)
+	{
+		sv_<ss_> out;
+		for(const ss_ &link : links_of(name))
+			if(link.compare(0, 9, "starport/") == 0)
+				out.push_back(link.substr(9));
 		return out;
 	}
 
@@ -2363,6 +2373,11 @@ struct Module: public interface::Module, public Interface
 			const ss_ why = set_priv(r.name, r.arg, r.on, by);
 			result(!why.empty() ? why : r.name+(r.on ? " is a builder" :
 					" is no longer a builder"));
+		} else if(r.cmd == "priv" && r.arg == "publisher"){
+			// [KIT_SERVER_PUBLISH] Publishing as the server
+			const ss_ why = set_priv(r.name, r.arg, r.on, by);
+			result(!why.empty() ? why : r.name+(r.on ? " may publish as the "
+					"server" : " may no longer publish as the server"));
 		} else if(r.cmd == "priv"){
 			if(!exists || r.arg != "admin")
 				return result("No such account or privilege");

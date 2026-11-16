@@ -184,7 +184,8 @@ end
 -- for a builder "Keep them" (the tools' panel has it until the next Play).
 -- For a drive (doc/client_commands.txt's event): "event kit_edit <json>"
 -- sends an edit as the editor would, "event kit_use <id>" a use,
--- "event kit_type <json>" a custom type's "kit:type".
+-- "event kit_type <json>" a custom type's "kit:type", "event
+-- kit_publishing <json>" a Publishing page's op.
 local replicate = require("buildat/extension/replicate")
 local P = {nodes = {}, items = "", parts = {}, you = 0, preview = {},
 	pose = {}}
@@ -1343,6 +1344,13 @@ end)
 -- from any client (a check's refusals)
 magic.SubscribeToEvent("command_seq:kit_type", function(_, data)
 	buildat.send_packet("kit:type", data:GetString("Param"))
+end)
+-- [KIT_SERVER_PUBLISH] "event kit_publishing <json>": a "kit:publishing"
+-- (the Publishing page's ops) from any client (a check's refusals)
+magic.SubscribeToEvent("command_seq:kit_publishing", function(_, data)
+	local text = data:GetString("Param")
+	log:info("kit editor: publishing " .. text)
+	buildat.send_packet("kit:publishing", text)
 end)
 magic.SubscribeToEvent("command_seq:kit_use", function(_, data)
 	M.use(data:GetString("Param"))

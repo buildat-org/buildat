@@ -96,8 +96,10 @@ static int aitta_main(int argc, char *argv[])
 			aitta = argv[2];
 		}
 		if(!zip_path.empty()){
+			// (a page's kind is not known: refused as an app's)
 			const ss_ refusal = interface::aitta::publish_refusal(
-					BUILDAT_VERSION, aitta);
+					BUILDAT_VERSION, aitta, verb == "publish" ?
+					interface::aitta::release_kind(zip_path) : "");
 			if(!refusal.empty())
 				throw Exception(refusal);
 			// The release to an Aitta: its .sig first, which says who
@@ -105,12 +107,6 @@ static int aitta_main(int argc, char *argv[])
 			// names; a refusal for the Aitta's rate waits and sends again
 			const ss_ sig_path =
 					interface::fs::strip_file_extension(zip_path)+".sig";
-			ss_ base = aitta;
-			if(base.find("://") == ss_::npos)
-				base = "http://"+base;
-			while(!base.empty() && base.back() == '/')
-				base.pop_back();
-			base += "/api/v1/aitta/";
 			auto read_all = [](const ss_ &path){
 				std::ifstream f(path, std::ios::binary);
 				if(!f.good())
@@ -119,41 +115,12 @@ static int aitta_main(int argc, char *argv[])
 				os<<f.rdbuf();
 				return os.str();
 			};
-			const ss_ zip = read_all(zip_path), sig = read_all(sig_path);
-			json::json_error_t e;
-			const json::Value sigv = json::load_string(sig.c_str(), &e);
-			const ss_ sha = sigv.get("sha256").is_string() ?
-					sigv.get("sha256").as_string() : "";
-			auto call = [&](const ss_ &url, const ss_ &body, const char *type){
-				ss_ out = interface::http_post(url, body, type);
-				json::Value v = json::load_string(out.c_str(), &e);
-				while(v.get("error").is_string() && v.get("error").as_string().find(
-						"too many requests") != ss_::npos){
-					printf("waiting for the Aitta's limit on uploads a minute\n");
-					std::this_thread::sleep_for(std::chrono::seconds(5));
-					out = interface::http_post(url, body, type);
-					v = json::load_string(out.c_str(), &e);
-				}
-				if(!v.get("ok").is_true())
-					throw Exception(v.get("error").is_string() ?
-							v.get("error").as_string() : "Aitta said: "+out);
-				return v;
-			};
-			const json::Value begun = call(base+"upload_begin?size="+
-					itos((int64_t)zip.size()), sig, "application/json");
-			const size_t piece = begun.get("piece").is_number() &&
-					begun.get("piece").as_number() > 0 ?
-					(size_t)begun.get("piece").as_number() : 60000;
-			for(size_t at = 0; at < zip.size(); at += piece)
-				call(base+"upload_part?sha256="+sha+"&offset="+itos((int64_t)at),
-						zip.substr(at, piece), "application/octet-stream");
-			const json::Value v = call(base+"upload_end?sha256="+sha, "",
-					"application/octet-stream");
+			const ss_ result = interface::aitta::upload(aitta,
+					read_all(sig_path), read_all(zip_path), [](const ss_ &s){
+				printf("%s\n", s.c_str());
+			});
 			printf("%s: %s\n", verb == "page" ? "page" : "listed",
-					v.get("result").is_string() ?
-					v.get("result").as_cstring() : "?");
-			if(v.get("warning").is_string())
-				printf("warning: %s", v.get("warning").as_cstring());
+					result.c_str());
 			return 0;
 		}
 		if(verb == "install" && argc == 4){

@@ -37,6 +37,15 @@ LICENSE (a new one takes the export's and edits them):
 
         unzip -o X.template.zip -x meta.json LICENSE -d templates/<name>/
 
+The server publishes as itself [KIT_SERVER_PUBLISH]: the Server window's
+Admin / Publishing makes its key (one, kept in its data), lists the Aittas
+it publishes to and installs from, gives builders the right to publish as
+it, shows the log of who published what, and installs a template from a
+listed Aitta into Start from. A builder with the right publishes a project,
+a scene or their prefabs "As this server" from the editor (the web
+client's only way), their account named in the release (doc/aitta.txt,
+Publishing as the server; util/kit_server_publish_check.sh).
+
 A builder's own agentic tool (Claude Code, Codex, Cursor, Gemini CLI...)
 edits a project through MCP ([KIT_AGENTS]): the pause menu's My account,
 Connect an agent... makes a token (Builder, or Admin for an admin), shown

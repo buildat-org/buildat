@@ -231,6 +231,16 @@ static void check_platform_data_paths()
 			"https://aitta.buildat.org.example.org", "http://aitta.buildat.org@x"})
 		if(!aitta::publish_refusal("0.8.0-alpha.1", other).empty())
 			throw Exception(ss_("publish_refusal: ")+other);
+	// [ALPHA_KIT_PACKAGES_PUBLIC] Kit's kinds go there from an alpha; the
+	// rest, and a kind not known, do not
+	for(const char *kind : {"kit", "template", "scene"})
+		if(!aitta::publish_refusal("0.8.0-alpha.1", "https://aitta.buildat.org",
+				kind).empty())
+			throw Exception(ss_("publish_refusal: kind ")+kind);
+	for(const char *kind : {"app", "extension", "world", "remix", ""})
+		if(aitta::publish_refusal("0.8.0-alpha.1", "https://aitta.buildat.org",
+				kind).empty())
+			throw Exception(ss_("publish_refusal: kind ")+kind);
 #if !defined(_WIN32) && !defined(__APPLE__)
 	const ss_ name = data_dir_name(BUILDAT_VERSION);
 	{

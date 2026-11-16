@@ -3,6 +3,7 @@
 #pragma once
 #include "core/types.h"
 #include "core/json.h"
+#include <functional>
 
 namespace interface
 {
@@ -226,8 +227,38 @@ namespace interface
 		// Aitta, by the actual name and not the BUILDAT_AITTA_DEFAULT a check
 		// or a test Aitta sets. A build could be changed to go past it: it
 		// keeps people's test packages out of the list, and it is no
-		// protection of the list.
-		ss_ publish_refusal(const ss_ &version, const ss_ &aitta);
+		// protection of the list. [ALPHA_KIT_PACKAGES_PUBLIC] A release of
+		// Kit's kinds (kit_kind(): kit, template, scene) goes there from an
+		// alpha too: no stable client installs them. kind: the release's
+		// manifest's (kind_of()), "" not known (a page): refused
+		ss_ publish_refusal(const ss_ &version, const ss_ &aitta,
+				const ss_ &kind = "");
+		bool kit_kind(const ss_ &kind);
+		// A release zip's manifest's kind (kind_of()), "" for none
+		ss_ release_kind(const ss_ &zip_path);
+		// A Kit kind's manifest's "buildat_version" (pack() writes it) when
+		// it is another than this engine's: " (made with 0.8.0-alpha.26;
+		// this is 0.8.0-alpha.30)", for a refusal where it loads; else ""
+		ss_ made_with(const json::Value &m);
+		// [KIT_SERVER_PUBLISH] An Aitta a server's admin listed, trusted as
+		// typed (http, LAN and loopback too): listed_origin() its
+		// http(s)://host[:port] as it is compared ("" not one); listed_get()
+		// one GET of origin+path to its name's first address
+		// (http_get_pinned): no redirect, max_bytes, timeout_s. Blocking;
+		// throws as http_get does
+		ss_ listed_origin(const ss_ &aitta);
+		ss_ listed_get(const ss_ &origin, const ss_ &path, size_t max_bytes,
+				long timeout_s);
+		// vouch() through listed_get(): "" when the Aitta binds the key to
+		// author, else why not
+		ss_ listed_vouch(const ss_ &origin, const ss_ &public_hex,
+				const ss_ &author);
+		// A release up to an Aitta (`buildat aitta publish`'s): its .sig,
+		// then the zip in the pieces upload_begin names, a refusal for the
+		// Aitta's rate waited out (note() told). Blocking; the Aitta's
+		// "result" ("listed", ...), or throws its error
+		ss_ upload(const ss_ &aitta, const ss_ &sig, const ss_ &zip,
+				std::function<void(const ss_&)> note = nullptr);
 		// An installed key's vouch, <user>/installed/<fp>/.vouch
 		// ({"aitta", "author"}), written by the installing client after
 		// its own vouch() (or a GET of its own to the same address) and

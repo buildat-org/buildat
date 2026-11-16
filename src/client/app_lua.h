@@ -1082,10 +1082,14 @@
 				return 1;
 			}
 			// [ALPHA_BUILDS] Why this build does not publish to the address
-			// arg, "" when it does
+			// arg, "" when it does; [ALPHA_KIT_PACKAGES_PUBLIC] the third
+			// argument the release zip, whose kind decides
 			if(op == "publish_refusal"){
+				const ss_ zip = lua_isstring(L, 3) ?
+						lua_bindings::lua_tocppstring(L, 3) : "";
 				lua_pushstring(L, interface::aitta::publish_refusal(
-						BUILDAT_VERSION, arg).c_str());
+						BUILDAT_VERSION, arg, zip.empty() ? "" :
+						interface::aitta::release_kind(zip)).c_str());
 				return 1;
 			}
 			if(op == "open"){

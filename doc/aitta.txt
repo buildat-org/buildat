@@ -326,6 +326,27 @@ has kept as the project's. The types added are the project's own from
 then on: they run in the server's box and on its players' clients. An
 Aitta lists it as kind "other" with its whole manifest, as a Kit package.
 
+[KIT_SCENE_ADD_LIVE] A scene is added Stopped or Running. Running, it goes
+in unlisted (its kit/scene_info's listed off) and its World's edited
+sections go in a few a tick; it is listed (the scene list's Scenes...)
+once they are in, and a kit/arena's maps "*" takes it from the next round.
+Nothing the project has is replaced: a type, item, voxel type, sound or
+prefab of the same name stays the project's (the difference logged).
+Scenes... also removes a scene, one undo: refused with players in it ("N
+players on it: unlist it; they leave as they finish"), and so is an undo
+of an add. An update of a scene is a new scene beside the old one: add v2
+(it is unlisted), try it, list it, unlist v1, and remove v1 once nobody
+is on it.
+
+Kit's kinds from an alpha [ALPHA_KIT_PACKAGES_PUBLIC]: an alpha build
+publishes templates, scenes and Kit packages to the official Aitta (its
+apps, extensions, worlds and remixes it does not, [ALPHA_BUILDS]). Every
+such release says the Buildat that packed it, "buildat_version" in its
+meta.json (pack() writes it, and Kit's exports have it), and a refusal
+where one loads names it: "(made with 0.8.0-alpha.26; this is
+0.8.0-alpha.30)". An alpha loads another alpha's package with no refusal
+by version.
+
 Worlds [WORLD_PACKAGES]
 -----------------------
 A package of kind "world" is a save on top of a named app, as the app keeps
@@ -522,6 +543,48 @@ client) does the commands above without a terminal:
     sends it as `aitta page` does.
 util/aitta_publish_check.sh drives all of it; util/package_media_check.sh
 the page.
+
+Publishing as the server [KIT_SERVER_PUBLISH]
+---------------------------------------------
+A Kit server (Workbench) publishes under its own author name and key, so
+that its builders, the web client's too, publish with no key of their own
+and their packages are known as the server's. The Server window's Admin /
+Publishing page (an admin's):
+  - "Make the key": one per server, its author name with it; the key file
+    <saves>/_kit/publish.key, mode 600 (refused when others may read it),
+    never sent, logged or exported. The page shows the public half, and
+    "Bind on <Aitta>..." for each Aitta not binding it: the admin joins
+    the Aitta from the launcher and binds the name and the key there (a
+    server's page may not take the user to another server); "Check again"
+    asks each Aitta's GET /api/v1/aitta/info?key=.
+  - The Aittas, 8 at most, taken as typed (http, a LAN or loopback
+    address): the server publishes to and fetches from these and no other.
+  - Who may publish as the server: the account privilege "publisher", per
+    builder, off by default; an admin always may. Any of them may put out
+    the next version of any of the server's packages.
+  - The log, private: time, builder (account and Starport ID), package,
+    kind, version, sha256, Aitta. Agents read it with publish_log (an
+    admin token).
+  - "Install a template from an Aitta...": a template from a listed Aitta
+    into <user>/installed (New's Start from), its signature checked and
+    its Aitta asked whose key it is.
+The editor's Publish this scene..., Publish this project... and Publish my
+prefabs... offer "As this server (<author>)" with the right and a bound
+key, beside "With my own key" (native; the web client has only the
+server's): name, version (the last published raised; "Raise the
+version"), licence (CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0, MIT or
+LicenseRef-All-rights-reserved), description and a listed Aitta, under
+"Published as <server>, by <you>: your name shows in the release". The
+server packs it as `buildat aitta pack` does (its checks), the release's
+author the server's, meta.json's "published_by" {account, starport_id}
+the builder, the LICENSE naming the builder and the licence. With
+Aittas listed the palette's New tab lists and installs through the
+server (kit, scene), each package's signature and its Aitta's word on its
+key checked there, the sizes capped as a client's fetch. The MCP tools:
+publish_project, publish_scene, publish_kit_package (a Builder token
+with the right), list_aitta (by kind and game), install_from_aitta (a
+scene or Kit package; a template an admin token's), publish_log.
+util/kit_server_publish_check.sh drives it.
 
 The package's page [AITTA_PACKAGE_PAGE]
 ---------------------------------------
