@@ -27,7 +27,7 @@
 #     on the pointer's rest, its menu (the type, Go to) by a right click
 #     (link.png, name_tip.png, name_menu.png).
 #   - web: [KIT_PHONE_EDITING] in headless Chrome as a phone in portrait
-#     (412x915, touch), a New project's World's (3, [KIT_NO_WORLD]: its
+#     (412x915, touch), a New game's World's (3, [KIT_NO_WORLD]: its
 #     kit/terrain) inspector scrolled to its end and its
 #     width field tapped, a stand-in keyboard (buildatKeyboard.test) of 380:
 #     the field and its Apply above the keyboard, the builders' box not under
@@ -57,7 +57,7 @@ if [ "${1:-}" = web ]; then
 	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
 	["tap", "Button", "Don't add"], ["frames", 3],
 	["waitlog_any", "world_menu: the list shown, 0 worlds", 30], ["frames", 3],
-	["tap", "Button", "New project..."],
+	["tap", "Button", "New game..."],
 	["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
 	["tap", "Button", "Create"],
 	["waitlog", "player physics enabled", 120],

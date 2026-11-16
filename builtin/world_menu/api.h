@@ -28,7 +28,7 @@
 // world_menu:close (Close). Back closes the menu.
 //
 // [WORKBENCH_PROJECTS] What a save is called in the menu is the app's
-// (Config's noun: "world", "project"): nothing the menu says names one
+// (Config's noun: "world", "game"): nothing the menu says names one
 // itself.
 //
 // [KIT_PROJECT_EXPORT] Config's copy: a world's Copy... (a name no world
@@ -82,7 +82,7 @@ namespace world_menu
 	{
 		ss_ title;
 		std::vector<Field> fields;
-		// What one save is, in the menu's own lines: "world", "project"
+		// What one save is, in the menu's own lines: "world", "game"
 		ss_ noun;
 		// [KIT_PROJECT_EXPORT] Copy... (left out of a brace list: false)
 		bool copy;

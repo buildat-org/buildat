@@ -323,7 +323,7 @@ pick bad.scene.zip "kit editor: Scene refused: the archive: not a scene package'
 m=$(mark "$SL")
 mc=$(mark "$CL")
 pick track.scene.zip "kit editor: Added the scene track "
-await "$SL" "$m" 10 "kitboss adds the scene track \(kitboss/track 1\.0\.0\): [0-9]+ entities, 1 links or entity parameters left out, 1 types added, 1 kept as the project's, 1 rows \(0 kept as the project's, 0 refused\), 0 textures, [1-9][0-9]* heightmap samples"
+await "$SL" "$m" 10 "kitboss adds the scene track \(kitboss/track 1\.0\.0\): [0-9]+ entities, 1 links or entity parameters left out, 1 types added, 1 kept as the game's, 1 rows \(0 kept as the game's, 0 refused\), 0 textures, [1-9][0-9]* heightmap samples"
 await "$SL" "$m" 10 "World track: the template's [1-9][0-9]* edited cells in [0-9]+ sections \(0 left out\)"
 await "$SL" "$m" 10 "The scene track's local/marker differs from the project's"
 await "$SL" "$m" 10 "The scene track: left out: Timer's link done to Bell"

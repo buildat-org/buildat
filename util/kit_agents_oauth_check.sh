@@ -22,12 +22,12 @@
 #   4. boss's password on the page (Chrome), then the admin's step
 #      ([KIT_AGENTS_OAUTH_ADMIN_BOX]): the Host's box unticked, the text
 #      following it ticked and unticked; left unticked (the tool asked for
-#      admin): builder, list_projects refused; the code back with its state
+#      admin): builder, list_games refused; the code back with its state
 #      and iss; a wrong verifier, redirect_uri, resource, client refused;
 #      the tokens, MCP initialize and tools/list by the access token; the
 #      code again: refused, and what it gave revoked;
 #   5. the page's forms by Python: another origin's post refused; the box
-#      ticked (the tool asked for builder): an Admin grant, list_projects
+#      ticked (the tool asked for builder): an Admin grant, list_games
 #      answered, its refresh token rotated (the old access token gone), the
 #      one before used again ending the grant; Deny back with access_denied;
 #      a box's value on the password's form not the step's: builder; one two
@@ -357,10 +357,10 @@ def mcp_refused(tok):
     s, b, h = mcp(tok, "tools/list", {}, 3)
     assert s == 401 and 'error="invalid_token"' in h["WWW-Authenticate"], \
             (s, b, dict(h))
-# list_projects, one of the Host's actions: answered, or refused as an
+# list_games, one of the Host's actions: answered, or refused as an
 # admin's; its text
 def projects(tok, answered):
-    s, b, h = mcp(tok, "tools/call", {"name": "list_projects", "arguments": {}}, 6)
+    s, b, h = mcp(tok, "tools/call", {"name": "list_games", "arguments": {}}, 6)
     assert s == 200, (s, b)
     r = json.loads(b)["result"]
     text = r["content"][0]["text"]
@@ -493,7 +493,7 @@ if phase == "a":
     refused(code, "invalid_grant")
     mcp_refused(j["access_token"])
     ok("boss's password in Chrome, the Host's box unticked (the tool asked "
-            "for admin): builder, list_projects refused; the code; a wrong "
+            "for admin): builder, list_games refused; the code; a wrong "
             "verifier, redirect_uri, resource, client refused; MCP by the "
             "token (%d tools); the code again revoking what it gave" % n)
 
@@ -550,7 +550,7 @@ if phase == "a":
     s, b, h = post_form(dict(login, rid=rid))
     assert s == 400 and "has ended" in b, (s, b)
     ok("the page's forms: another origin's refused; the admin's step, the "
-            "box ticked: an Admin grant, list_projects listed; its refresh "
+            "box ticked: an Admin grant, list_games listed; its refresh "
             "token rotated, the one before again ending it; Deny")
 
     # A thief of R1 rotates twice: the tool's R1, two behind, ends the grant
@@ -601,7 +601,7 @@ if phase == "a":
     mcp_works(j["access_token"])
     projects(j["access_token"], False)
     ok("carl (no admin): no box, back at once; host=1 posted gives builder, "
-            "list_projects refused")
+            "list_games refused")
 
     # DNS rebinding: a page of evil.example rebound to 127.0.0.1, its own
     # origin to the browser, posting with an X-Forwarded-For of its choice

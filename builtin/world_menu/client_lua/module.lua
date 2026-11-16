@@ -14,7 +14,7 @@
 -- with a menu of its own (vanilla) opens the screen itself:
 --   local world_menu = require("buildat/module/world_menu")
 --   world_menu.open(spec) -> {root, play}  -- the screen, its Play button
--- spec: title; noun (what one is called, "world", "project": the
+-- spec: title; noun (what one is called, "world", "game": the
 -- screen's own lines say it, [WORKBENCH_PROJECTS]); worlds = {{name,
 -- label}} (label: the row and what the
 -- filter reads, the name by default); selected (the menu writes it back,

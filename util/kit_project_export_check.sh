@@ -15,24 +15,24 @@
 #      an item type and a sound by the editor's ops, a heightmap stroke;
 #      by MCP a timer linked to a counter, a custom type local/beacon (a
 #      client part too) placed, a prefab saved, a box of the voxel type set
-#      (one cell tinted). The palette's New tab, Export this project: the
+#      (one cell tinted). The palette's New tab, Export this game: the
 #      file in <user>/exports, its files those export_template answers. The
 #      file unzipped packs (`buildat aitta pack`) and installs; with a
 #      texture not named by its hash, refused at pack.
-#   3. Projects..., New "imported", Start from: From a file..., Create, the
+#   3. Games..., New "imported", Start from: From a file..., Create, the
 #      picker, the file: the server switches; the project opens Stopped in
 #      the editor, its entities, links, type, rows and voxels the export's,
 #      and its own export semantically the first one (edits.bin's cells and
-#      heightmap samples the same). Export this project there too.
-#   4. Projects..., "project", Copy...: the name prefilled (project_1), Copy;
+#      heightmap samples the same). Export this game there too.
+#   4. Games..., "project", Copy...: the name prefilled (project_1), Copy;
 #      the copy's rows the original's. By MCP with the Builder token,
-#      list_projects refused; with the Admin one listed, the running project
+#      list_games refused; with the Admin one listed, the running project
 #      copied (its rows), a taken name and the running one's rename refused,
 #      project_1 renamed.
 #   5. [KIT_EXPORT_WEB_CHECK] The web client (headless Chrome; skipped
-#      without web/ or Chrome), kitboss in "imported": Export this project
+#      without web/ or Chrome), kitboss in "imported": Export this game
 #      caught as the browser's download, byte for byte 3.'s native export of
-#      it; Projects..., New "webimport", From a file..., the browser's
+#      it; Games..., New "webimport", From a file..., the browser's
 #      picker given the download: the server switches, and the page again
 #      finds it Stopped in the editor, its entities, links, type, rows and
 #      voxels the first export's (as 3.).
@@ -120,7 +120,7 @@ client() # <n>: kitboss, its commands from the fifo $t/c<n>.cmd, its log $t/boss
 }
 switched() # <project>: the switch's goodbye, the client gone (it leaves by itself), the project up
 {
-	await "$CL" 0 60 "Disconnected from server: The server switches to the project $1"
+	await "$CL" 0 60 "Disconnected from server: The server switches to the game $1"
 	exec 3>&-
 	wait $CLIENT
 	wait_for_log "$SL" "workbench: switched to \"$1\"" 120 || fail "$1 did not start ($SL)"
@@ -150,7 +150,7 @@ clip() # <last>: the clipboard once it holds a token other than <last>
 }
 new_project() # <name> [<Start from's label> <its value>]: Empty without
 {
-	step 10 "world_menu: the name screen shown" "frames 3" 'click Button "New project..."'
+	step 10 "world_menu: the name screen shown" "frames 3" 'click Button "New game..."'
 	cmd "frames 3" "keydown ctrl" "keypress a" "keyup ctrl" "text $1" "frames 2"
 	[ $# -gt 1 ] || return 0
 	# (the one nearest the middle: the editor's view has one too)
@@ -310,7 +310,7 @@ elif phase == "build":
 elif phase == "export":
     out, gui = args
     export(out)
-    # The file Export this project saved: the same files
+    # The file Export this game saved: the same files
     assert files(out) == files(gui), (files(out), files(gui))
     for f in files(gui):
         assert open(out + "/" + f, "rb").read() == open(gui + "/" + f, "rb").read(), f
@@ -364,24 +364,24 @@ elif phase == "after":
     print("the import's export: types, items, sounds, voxels, prefabs and edits.bin the first's")
 elif phase == "projects":
     admin, saves = args
-    assert "an admin's" in call("list_projects", error=True)
-    assert "an admin's" in call("rename_project", {"name": "project_1", "to": "x"}, error=True)
+    assert "an admin's" in call("list_games", error=True)
+    assert "an admin's" in call("rename_game", {"name": "project_1", "to": "x"}, error=True)
     def listed():
-        return {p["name"]: p for p in json.loads(call("list_projects", token=admin))}
+        return {p["name"]: p for p in json.loads(call("list_games", token=admin))}
     l = listed()
     assert set(l) == {"crag", "project", "project_1", "imported"} and l["imported"]["running"] \
         and not l["project"]["running"] and l["project"]["bytes"] > 0, l
     # The GUI's copy: the rows the original's
     assert rows(saves + "/project_1/save.sqlite") == rows(saves + "/project/save.sqlite")
-    assert "Copied imported as imported_2" in call("copy_project",
+    assert "Copied imported as imported_2" in call("copy_game",
         {"name": "imported", "to": "imported_2"}, token=admin)
     ra, rb = rows(saves + "/imported/save.sqlite"), rows(saves + "/imported_2/save.sqlite")
     # (a row the round wrote since may be in the original only)
     assert ra[("kit", "authored")] == rb[("kit", "authored")] and set(rb) <= set(ra) \
         and len(rb) > 10, set(rb) - set(ra)
-    assert "taken" in call("copy_project", {"name": "project", "to": "crag"}, error=True, token=admin)
-    assert "running" in call("rename_project", {"name": "imported", "to": "x"}, error=True, token=admin)
-    assert "Renamed" in call("rename_project", {"name": "project_1", "to": "renamed"}, token=admin)
+    assert "taken" in call("copy_game", {"name": "project", "to": "crag"}, error=True, token=admin)
+    assert "running" in call("rename_game", {"name": "imported", "to": "x"}, error=True, token=admin)
+    assert "Renamed" in call("rename_game", {"name": "project_1", "to": "renamed"}, token=admin)
     l = listed()
     assert set(l) == {"crag", "project", "renamed", "imported", "imported_2"}, l
     print("projects: list, copy (the running one's rows), rename; the Builder token refused")
@@ -422,7 +422,7 @@ mcp crag "$tok" "$t/crag" "$here/apps/workbench/templates/crag_trial"
 echo "ok: Crag Trial exported back as it is in the repo"
 
 # 2. A project of the builder's, exported
-step 10 "world_menu: the list shown, 1 worlds" "frames 3" 'click Button "Projects..."'
+step 10 "world_menu: the list shown, 1 worlds" "frames 3" 'click Button "Games..."'
 new_project project
 cmd "expect_error Disconnected from server: The server switches" 'click Button "Create"'
 switched project
@@ -445,7 +445,7 @@ mcp build "$tok" "$t/built.json"
 step 10 "Asking the user about " "frames 3" 'click Button "New"'
 step 10 "The user declined " "frames 3" 'click Button "Decline"'
 cmd "frames 5" "screenshot $t/export_entry.png"
-step 20 "kit editor: Exported to " 'click Button "Export this project"'
+step 20 "kit editor: Exported to " 'click Button "Export this game"'
 z=$t/cu/exports/project.template.zip
 [ -s "$z" ] || fail "no $z ($CL)"
 mkdir "$t/gui"
@@ -466,7 +466,7 @@ echo "ok: the project exported (the editor's file and export_template's the same
 
 # 3. Imported from the file
 menu
-step 10 "world_menu: the list shown, 2 worlds" "frames 3" 'click Button "Projects..."'
+step 10 "world_menu: the list shown, 2 worlds" "frames 3" 'click Button "Games..."'
 new_project imported "From a file..." file
 cmd "frames 5" "screenshot $t/import_page.png"
 step 10 "The file picker at .*/exports" 'click Button "Create"'
@@ -488,12 +488,12 @@ mcp after "$tok" "$t/first" "$t/second" "$t/built.json" imported
 # Its export by the editor, for the web's download (5.)
 step 10 "Asking the user about " "frames 3" 'click Button "New"'
 step 10 "The user declined " "frames 3" 'click Button "Decline"'
-step 20 "kit editor: Exported to .*imported.template.zip" 'click Button "Export this project"'
+step 20 "kit editor: Exported to .*imported.template.zip" 'click Button "Export this game"'
 echo "ok: imported, opened Stopped in the editor, its export the first's"
 
 # 4. Copy and rename
 menu
-step 10 "world_menu: the list shown, 3 worlds" "frames 3" 'click Button "Projects..."'
+step 10 "world_menu: the list shown, 3 worlds" "frames 3" 'click Button "Games..."'
 step 10 "world_menu: the list shown" "frames 3" 'click Button "project"'
 step 10 "world_menu: the copy screen shown" "frames 3" 'click Button "Copy..."'
 cmd "frames 5" "screenshot $t/copy.png"
@@ -526,13 +526,13 @@ if [ -n "$web" ]; then
  ["click", "Button", "Edit"], ["waitlog_any", "kit editor: edit mode on", 20], ["frames", 10],
  ["click", "Button", "New"], ["waitlog", "Asking the user about ", 10], ["frames", 3],
  ["click", "Button", "Decline"], ["waitlog", "The user declined ", 10], ["frames", 3],
- ["click", "Button", "Export this project"],
+ ["click", "Button", "Export this game"],
  ["waitlog", "kit editor: Exported imported.template.zip \\([0-9]+ KiB\\): see your downloads", 20],
  ["downloaded", "imported.template.zip", 20], ["frames", 3],
  ["shot", "${OUT}/web_export.png"],
  ["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
- ["click", "Button", "Projects..."], ["waitlog", "world_menu: the list shown, 5 worlds", 10], ["frames", 3],
- ["click", "Button", "New project..."], ["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
+ ["click", "Button", "Games..."], ["waitlog", "world_menu: the list shown, 5 worlds", 10], ["frames", 3],
+ ["click", "Button", "New game..."], ["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
  ["selall"], ["frames", 2], ["type", "webimport"], ["frames", 2],
  ["click", "DropDownList", "▼", 512, 350], ["wait", 300], ["frames", 3],
  ["click", "Text", "From a file..."], ["waitlog", "world_menu: template picked: file", 10], ["frames", 3],
@@ -540,13 +540,13 @@ if [ -n "$web" ]; then
  ["file", "${OUT}/imported.template.zip"],
  ["click", "Button", "Create"],
  ["waitlog", "world_menu: create webimport from imported.template.zip \\([0-9]+ bytes\\)", 30],
- ["waitlog", "Disconnected from server: The server switches to the project webimport", 60]
+ ["waitlog", "Disconnected from server: The server switches to the game webimport", 60]
 ]
 J
 	page web1
 	cmp "$t/web1/imported.template.zip" "$t/cu/exports/imported.template.zip" ||
 		fail "the web's download is not the native export ($t/web1, $t/cu/exports)"
-	echo "ok: the web's Export this project, the browser's download byte for byte the native export ($(wc -c < "$t/web1/imported.template.zip") bytes)"
+	echo "ok: the web's Export this game, the browser's download byte for byte the native export ($(wc -c < "$t/web1/imported.template.zip") bytes)"
 	wait_for_log "$SL" 'workbench: switched to "webimport"' 120 || fail "webimport did not start ($SL)"
 	grep -aqE 'workbench: the project "webimport" from a file \([0-9]+ bytes, "imported"\)' "$SL" ||
 		fail "no web import line ($SL)"

@@ -152,7 +152,7 @@ await "$CL" 0 120 "Joined as kitboss"
 cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
 # 1. New from the installed template, played
 await "$CL" 0 30 "world_menu: the list shown"
-step 10 "world_menu: the name screen shown" "frames 3" 'click Button "New project..."'
+step 10 "world_menu: the name screen shown" "frames 3" 'click Button "New game..."'
 cmd "frames 3" 'click DropDownList "▼"' "delay 300" "frames 3"
 step 10 "world_menu: template picked" 'click Text "Crag Trial (buildat, installed, unverified)"'
 step 60 "kit editor: edit mode on" "frames 3" 'click Button "Create"'

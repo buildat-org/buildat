@@ -1814,7 +1814,7 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 			throw Exception("a Kit package is installed into an app's "
 					"composition, from Kit's palette");
 		if(kind == "scene")
-			throw Exception("a scene is added to a Workbench project, from "
+			throw Exception("a scene is added to a Workbench game, from "
 					"Kit's palette");
 		// [APP_REMIX] A stranger's settings and files over an app that is
 		// here: data only, each checked against the base

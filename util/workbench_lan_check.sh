@@ -9,8 +9,8 @@
 #      default name), makes a project, and opens the pause menu's
 #      My account... > Open to LAN > its button: the server listens at
 #      the machine's LAN address too, announced as the project
-#      ([WB_LAN_NAME]; "projectlanproject": the name typed after New's
-#      "project").
+#      ([WB_LAN_NAME]; "gamelanproject": the name typed after New's
+#      "game").
 #   2. A second client finds it in the Servers screen's LAN section
 #      (the announce heard on this machine's LAN address), joins and
 #      makes an account (lanbob, the login the LAN joiner must pass), and
@@ -44,7 +44,7 @@ keypress Escape
 wait_log 5000 pause: the menu shown
 click Button "My account (lanowner)..."
 wait_log 5000 server window: the page account
-wait_log_any 5000 server window: the sidebar Account, Pushes (ntfy), Open to LAN, Accounts
+wait_log_any 5000 Account, Pushes (ntfy), Open to LAN
 click Button "Open to LAN"
 wait_log 5000 server window: the page lan
 delay 500

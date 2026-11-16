@@ -132,7 +132,7 @@ return {
 		end
 	end,
 	-- Version 1's dig_by_tools gone: building replaces it (nothing is
-	-- released: every project plays by the inventory)
+	-- released: every game plays by the inventory)
 	migrate = function(params, from)
 		params.dig_by_tools = nil
 		return params

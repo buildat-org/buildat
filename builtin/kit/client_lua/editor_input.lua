@@ -3546,7 +3546,7 @@ function M.editor(options)
 		aitta.kit_publish({name = E.package_name, author = a.author,
 			files = a.files, hex = a.hex, dependencies = a.dependencies})
 	end)
-	-- [KIT_PROJECT_EXPORT] Export this project: the file's name, a 0 byte
+	-- [KIT_PROJECT_EXPORT] Export this game: the file's name, a 0 byte
 	-- and the zip, a download on the web and natively into <user>/exports
 	-- [KIT_SCENE_PACKAGES] Export this scene the same, Publish this
 	-- scene... the publish screen's, and a scene added: what was left out

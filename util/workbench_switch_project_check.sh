@@ -6,17 +6,17 @@
 # [WORKBENCH_SWITCH_PROJECT] An admin switches Workbench's project from
 # the pause menu, on a server no launcher started (no local user: the
 # admin is kitboss by the setup code), BUILDAT_WORKBENCH_PROJECT=alpha:
-#   1. kitboss in alpha: the pause menu has Projects...; in the editor a
+#   1. kitboss in alpha: the pause menu has Games...; in the editor a
 #      lever placed and the floor cell (5,0,5) dug.
-#   2. kitbob (no admin) joins alpha: no Projects... in the menu, and a
+#   2. kitbob (no admin) joins alpha: no Games... in the menu, and a
 #      main:projects sent anyway refused.
-#   3. kitboss again: Projects... lists alpha (running); New "beta":
+#   3. kitboss again: Games... lists alpha (running); New "beta":
 #      both clients sent off with the switch's goodbye, beta starts.
 #   4. kitbob joins again: in beta. kitboss: beta's own (2 entities: its
 #      scene and its World, [KIT_NO_WORLD]; no stone floor at the column),
 #      then alpha's Play switches back.
 #   5. kitboss in alpha: its 2 entities and the dug cell kept; Close
-#      project: no project runs, and the next join gets Manage.
+#      game: no game runs, and the next join gets Manage.
 # Screenshots: $t/menu_admin.png, menu_bob.png, list_running.png,
 # alpha_back.png (KEEP_TMP=1 keeps them).
 set -u
@@ -89,12 +89,12 @@ code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$s" | head -1)
 client boss1 BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code \
 	BUILDAT_JOIN_ADMIN="setting open_registration on" ||
 	fail "kitboss in alpha ($t/boss1.log)"
-grep -aq "pause: the items .*Projects\.\.\." "$t/boss1.log" ||
-	fail "no Projects... in the admin's menu ($t/boss1.log)"
+grep -aq "pause: the items .*Games\.\.\." "$t/boss1.log" ||
+	fail "no Games... in the admin's menu ($t/boss1.log)"
 grep -aqF "workbench: kitboss dug (5,0,5): written" "$s" || fail "the dig ($s)"
 a0=$(column "$t/boss1.log" 1) a1=$(column "$t/boss1.log" 2)
 [ -n "$a1" ] && [ "$a0" != "$a1" ] || fail "the dig not seen at the column: \"$a0\", \"$a1\" ($t/boss1.log)"
-echo "ok: kitboss in alpha, Projects... in the menu, a lever placed, (5,0,5) dug ($a0 -> $a1)"
+echo "ok: kitboss in alpha, Games... in the menu, a lever placed, (5,0,5) dug ($a0 -> $a1)"
 
 # 2., held in alpha until the switch sends kitbob off
 cat > "$t/bob1.cmds" <<EOF
@@ -109,7 +109,7 @@ keypress Escape
 wait_log 5000 pause: the menu closed
 event workbench_projects
 expect_error Disconnected from server: The server switches
-wait_log 300000 Disconnected from server: The server switches to the project beta
+wait_log 300000 Disconnected from server: The server switches to the game beta
 quit
 EOF
 client bob1 BUILDAT_JOIN_NAME=kitbob &
@@ -122,10 +122,10 @@ for _ in $(seq 900); do
 done
 grep -aqF "workbench: kitbob's Projects... refused: not an admin" "$s" ||
 	fail "kitbob's main:projects not refused ($s)"
-grep -a "pause: the items " "$t/bob1.log" | grep -q "Projects" &&
-	fail "kitbob has Projects... ($t/bob1.log)"
+grep -a "pause: the items " "$t/bob1.log" | grep -q "Games" &&
+	fail "kitbob has Games... ($t/bob1.log)"
 grep -aq "pause: the items Continue" "$t/bob1.log" || fail "kitbob's menu ($t/bob1.log)"
-echo "ok: kitbob in alpha: no Projects..., the request refused"
+echo "ok: kitbob in alpha: no Games..., the request refused"
 
 # 3.
 cat > "$t/boss2.cmds" <<EOF
@@ -134,16 +134,16 @@ $JOINED
 keypress Escape
 wait_log 5000 pause: the menu shown
 frames 3
-click Button "Projects..."
+click Button "Games..."
 wait_log 10000 world_menu: the list shown, 1 worlds
 frames 3
 screenshot @T@/list_running.png
-click Button "New project..."
+click Button "New game..."
 wait_log 5000 world_menu: the name screen shown
 text beta
 expect_error Disconnected from server: The server switches
 click Button "Create"
-wait_log 60000 Disconnected from server: The server switches to the project beta
+wait_log 60000 Disconnected from server: The server switches to the game beta
 quit
 EOF
 client boss2 BUILDAT_JOIN_NAME=kitboss || fail "the switch to beta ($t/boss2.log)"
@@ -152,7 +152,7 @@ wait_for_log "$s" 'workbench: switched to "beta"' 120 || fail "beta did not star
 want(){ grep -aqF -- "$1" "$s" || fail "no \"$1\" in $s"; }
 want 'workbench: kitboss switches the project to beta'
 want 'workbench: the project "alpha" closed for the switch'
-echo "ok: kitboss made beta from Projects... and the server switched, kitbob sent off"
+echo "ok: kitboss made beta from Games... and the server switched, kitbob sent off"
 
 # 4.
 cat > "$t/bob2.cmds" <<EOF
@@ -176,7 +176,7 @@ wait_log 10000 kit editor: state:
 keypress Escape
 wait_log 5000 pause: the menu shown
 frames 3
-click Button "Projects..."
+click Button "Games..."
 wait_log 10000 world_menu: the list shown, 2 worlds
 frames 3
 click Button "alpha"
@@ -184,7 +184,7 @@ wait_log 5000 world_menu: the list shown
 frames 3
 expect_error Disconnected from server: The server switches
 click Button "Play"
-wait_log 60000 Disconnected from server: The server switches to the project alpha
+wait_log 60000 Disconnected from server: The server switches to the game alpha
 quit
 EOF
 client boss3 BUILDAT_JOIN_NAME=kitboss || fail "beta, and the switch back ($t/boss3.log)"
@@ -212,12 +212,12 @@ wait_log 10000 kit editor: state:
 keypress Escape
 wait_log 5000 pause: the menu shown
 frames 3
-click Button "Projects..."
+click Button "Games..."
 wait_log 10000 world_menu: the list shown, 2 worlds
 frames 3
-expect_error Disconnected from server: The project alpha was closed
-click Button "Close project"
-wait_log 60000 Disconnected from server: The project alpha was closed
+expect_error Disconnected from server: The game alpha was closed
+click Button "Close game"
+wait_log 60000 Disconnected from server: The game alpha was closed
 quit
 EOF
 client boss4 BUILDAT_JOIN_NAME=kitboss || fail "alpha again, and its close ($t/boss4.log)"
@@ -234,5 +234,5 @@ EOF
 client boss5 BUILDAT_JOIN_NAME=kitboss || fail "Manage after the close ($t/boss5.log)"
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
-echo "PASS: an admin switched Workbench from alpha to a new beta and back from the pause menu's Projects..., a second player followed into beta, beta's state its own and alpha's lever and dug cell kept; a non-admin had no Projects... and was refused; Close project left Manage"
+echo "PASS: an admin switched Workbench from alpha to a new beta and back from the pause menu's Games..., a second player followed into beta, beta's state its own and alpha's lever and dug cell kept; a non-admin had no Games... and was refused; Close game left Manage"
 # vim: set noet ts=4 sw=4:

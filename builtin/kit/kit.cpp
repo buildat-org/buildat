@@ -1818,7 +1818,7 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		const bool pkg = pt != m_package_types.end();
-		const ss_ path = local ? "the project's own" : pkg ? "package "+
+		const ss_ path = local ? "the game's own" : pkg ? "package "+
 				jstr(pt->second, "package") : dir+"/"+short_name+".lua";
 		const ss_ src = local ? jstr(lt->second, "source") : pkg ?
 				jstr(pt->second, "source") : read_file(path);
@@ -5758,7 +5758,7 @@ struct Module: public interface::Module, public Interface
 		if(!pi->second.editing)
 			return "not in edit mode";
 		if(active_session())
-			return "in a session: the project's types are the default round's";
+			return "in a session: the game's types are the default round's";
 		return "";
 	}
 
@@ -6903,7 +6903,7 @@ struct Module: public interface::Module, public Interface
 				c.set("license_media", jstr(mf, "license_media"));
 			} else {
 				// [KIT_CUSTOM_TYPES] "Built here by" them
-				c.set("author", n == "local" ? ss_("this project's builders") : n);
+				c.set("author", n == "local" ? ss_("this game's builders") : n);
 				if(n == "kit" || n == m_author)
 					c.set("of", ss_(n == "kit" ? "kit" : "app"));
 			}
@@ -7220,7 +7220,7 @@ struct Module: public interface::Module, public Interface
 		if(m_kit_store && m_kit_store->get("game", g) && !g.empty())
 			return g;
 		g = plain_id(author, "builder")+"/"+plain_id(m_host.project,
-				"project");
+				"game");
 		if(keep && m_kit_store)
 			m_kit_store->set("game", g);
 		return g;
@@ -7237,7 +7237,7 @@ struct Module: public interface::Module, public Interface
 				plain_id(g.substr(sl + 1), "") != g.substr(sl + 1))
 			g = jstr(m, "author").empty() || jstr(m, "name").empty() ? "" :
 					plain_id(jstr(m, "author"), "builder")+"/"+
-					plain_id(jstr(m, "name"), "project");
+					plain_id(jstr(m, "name"), "game");
 		if(g.empty())
 			return;
 		m_kit_store->set("game", g);
@@ -7245,7 +7245,7 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// An export's meta.json and LICENSE, all rights reserved; what: "The
-	// Workbench project <title>" or so
+	// Workbench game <title>" or so
 	void export_head(sv_<std::pair<ss_, ss_>> &files, const ss_ &kind,
 			const ss_ &author, const ss_ &name, const ss_ &title, const ss_ &what,
 			const ss_ &game)
@@ -7275,13 +7275,13 @@ struct Module: public interface::Module, public Interface
 			ss_ &why)
 	{
 		if(m_host.project.empty()){
-			why = "this app names no project to export";
+			why = "this app names no game to export";
 			return false;
 		}
 		const ss_ title = title_cut(m_host.project);
 		const ss_ author = plain_id(author_of(p), "builder");
 		export_head(files, "template", author, plain_id(m_host.project,
-				"project"), title, "The Workbench project "+title,
+				"game"), title, "The Workbench game "+title,
 				game_of(author_of(p), true));
 		// The composition
 		ss_ comp = "{\n\t\"entities\": [\n";
@@ -7335,7 +7335,7 @@ struct Module: public interface::Module, public Interface
 				if(type.compare(0, 4, "kit/") != 0 &&
 						type.compare(0, 6, "local/") != 0){
 					why = "entity "+itos(json::jint(e, "id", 0))+" is of "+type+
-							": an export has Kit's types and the project's own only";
+							": an export has Kit's types and the game's own only";
 					return false;
 				}
 				const Type &t = m_types[type];
@@ -7587,7 +7587,7 @@ struct Module: public interface::Module, public Interface
 			sv_<std::pair<ss_, ss_>> &files, ss_ &why)
 	{
 		if(m_host.project.empty()){
-			why = "this app names no project to export";
+			why = "this app names no game to export";
 			return false;
 		}
 		const uint64_t sid = scene_id(scene);
@@ -7678,7 +7678,7 @@ struct Module: public interface::Module, public Interface
 		}
 		const ss_ author = plain_id(author_in, "builder");
 		export_head(files, "scene", author, plain_id(scene, "scene"), title,
-				"The scene "+scene+" of the Workbench project "+
+				"The scene "+scene+" of the Workbench game "+
 				title_cut(m_host.project), game_of(author_in, true));
 		ss_ comp = "{\n\t\"scene\": "+json::Value(scene).stringify()+
 				",\n\t\"entities\": [\n";
@@ -7795,7 +7795,7 @@ struct Module: public interface::Module, public Interface
 				!can_edit(peer))
 			return "the tools on, with edit rights";
 		if(active_session())
-			return "in a session: the project's scenes are the default round's";
+			return "in a session: the game's scenes are the default round's";
 		// [KIT_SCENE_ADD_LIVE] Running too: it goes in unlisted
 		// (import_scene())
 		if(!m_host.make_scene)
@@ -8112,8 +8112,8 @@ struct Module: public interface::Module, public Interface
 				" from "+interface::aitta::aitta_host(aitta))+"): "+
 				itos(change.size())+" entities, "+itos(dropped.size())+
 				" links or entity parameters left out, "+itos(added)+
-				" types added, "+itos(kept.size())+" kept as the project's, "+
-				itos(took)+" rows ("+itos(rows_kept)+" kept as the project's, "+
+				" types added, "+itos(kept.size())+" kept as the game's, "+
+				itos(took)+" rows ("+itos(rows_kept)+" kept as the game's, "+
 				itos(left)+" refused), "+itos(textures)+" textures, "+
 				itos(samples)+" heightmap samples, "+itos(decors)+" decorations";
 		log_i(MODULE, "%s adds %s%s", cs(p.name), cs(what), unlisted ?
@@ -25911,7 +25911,7 @@ struct Module: public interface::Module, public Interface
 		ss_ row;
 		if(!item_ok(name) || !m_store->get("item:"+name, row) ||
 				!jstr(json::load_string(row.c_str()), "package").empty())
-			return refuse("no item type of the project's own named "+
+			return refuse("no item type of the game's own named "+
 					name.substr(0, 129));
 		m_store->remove("item:"+name);
 		m_item_types.erase(name);
@@ -30177,7 +30177,7 @@ struct Module: public interface::Module, public Interface
 				"param": {"type": "integer"}, "tint": {"type": "integer"}},
 				"required": ["voxel", "at"]})J", ""},
 			// [KIT_CUSTOM_TYPES]
-			{"put_type", "type_put", "Puts a custom type of this project's, "
+			{"put_type", "type_put", "Puts a custom type of this game's, "
 				"local/<name> (any builder edits any; one undo), loaded at once, "
 				"Running or not. Its error (syntax, load) is the answer and the "
 				"version before runs on. Taken, the entities on it keep their "
@@ -30290,9 +30290,9 @@ struct Module: public interface::Module, public Interface
 				"name": {"type": "string", "description": "The account"},
 				"on": {"type": "boolean"}}, "required": ["name", "on"]})J", ""},
 			// [KIT_PROJECT_EXPORT]
-			{"export_template", "=export", "The project's start (what stop "
+			{"export_template", "=export", "The game's start (what stop "
 				"goes back to) as a Workbench template, the files the editor's "
-				"Export this project zips: {project, files: {path: text}, "
+				"Export this game zips: {game (its name), files: {path: text}, "
 				"base64: {path: its bytes}}. meta.json, LICENSE (all rights "
 				"reserved), composition.json, types/<name>.lua and .client.lua, "
 				"items.json, sounds.json, voxels.json, prefabs.json; "
@@ -30302,32 +30302,32 @@ struct Module: public interface::Module, public Interface
 				"templates/.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			// [KIT_SCENE_PACKAGES]
-			{"export_scene", "=export_scene", "One scene of the project's start "
+			{"export_scene", "=export_scene", "One scene of the game's start "
 				"as a scene package, the files the editor's Export this scene "
 				"zips, as export_template gives them: meta.json (kind scene, "
 				"its game), LICENSE, composition.json (the scene entity and "
 				"those under it; \"outside\": the entities outside it its links "
 				"and entity parameters name, by name), the custom types, rows "
 				"and textures it uses, edits.bin (its World's). The palette's "
-				"Add a scene from a file... takes the zip into another project.",
+				"Add a scene from a file... takes the zip into another game.",
 				R"J({"type": "object", "properties": {"scene": {"type": "string",
 				"description": "Its name; none: the scene the agent is in"}}})J",
 				""},
-			{"list_projects", "=projects", "The app's projects (its saves): "
+			{"list_games", "=projects", "The app's games (its saves): "
 				"each one's name, bytes on disk and whether it runs. An admin "
-				"token's, as the Projects page is an admin's.",
+				"token's, as the Games page is an admin's.",
 				R"J({"type": "object", "properties": {}})J", ""},
-			{"copy_project", "=copy_project", "Copies project name as a new "
-				"project to: all of it, as saved now (a running one's round and "
+			{"copy_game", "=copy_project", "Copies game name as a new "
+				"game to: all of it, as saved now (a running one's round and "
 				"kept state too). An admin token's.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"},
 				"to": {"type": "string"}}, "required": ["name", "to"]})J", ""},
-			{"rename_project", "=rename_project", "Renames project name to "
+			{"rename_game", "=rename_project", "Renames game name to "
 				"to; not the running one. An admin token's.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"},
 				"to": {"type": "string"}}, "required": ["name", "to"]})J", ""},
 			// [KIT_SERVER_PUBLISH]
-			{"publish_project", "server_publish", "Publishes the project's start "
+			{"publish_game", "server_publish", "Publishes the game's start "
 				"as a template on an Aitta the server lists, as the server: its "
 				"author name and key, published_by your account (shown in the "
 				"release), the LICENSE naming you. Needs the right to publish as "
@@ -30339,12 +30339,12 @@ struct Module: public interface::Module, public Interface
 				"license": {"type": "string", "enum": ["CC0-1.0", "CC-BY-4.0",
 				"CC-BY-SA-4.0", "MIT", "LicenseRef-All-rights-reserved"]},
 				"description": {"type": "string", "description": "300 characters at most"},
-				"title": {"type": "string", "description": "40 bytes at most; none: the project's"},
+				"title": {"type": "string", "description": "40 bytes at most; none: the game's"},
 				"aitta": {"type": "string", "description": "One of list_aitta's Aittas"}},
 				"required": ["name", "license", "aitta"]})J", R"J({"what": "project"})J"},
 			{"publish_scene", "server_publish", "Publishes one scene as a scene "
 				"package (export_scene's files) on an Aitta the server lists, as "
-				"the server, as publish_project does.",
+				"the server, as publish_game does.",
 				R"J({"type": "object", "properties": {
 				"scene": {"type": "string", "description": "Its name; none: the scene the agent is in"},
 				"name": {"type": "string"}, "version": {"type": "string"},
@@ -30356,7 +30356,7 @@ struct Module: public interface::Module, public Interface
 			{"publish_kit_package", "server_publish", "Publishes your prefabs, "
 				"voxel, item types and sounds (Publish my prefabs...'s) as a Kit "
 				"package on an Aitta the server lists, as the server, its names "
-				"made the server's author's, as publish_project does.",
+				"made the server's author's, as publish_game does.",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string"}, "version": {"type": "string"},
 				"license": {"type": "string", "enum": ["CC0-1.0", "CC-BY-4.0",
@@ -30374,7 +30374,7 @@ struct Module: public interface::Module, public Interface
 			{"install_from_aitta", "aitta_install", "Fetches a package list_aitta "
 				"lists, by its key and Aitta, the server checking its signature "
 				"and asking its Aitta whose key it is: a scene is added to the "
-				"project as a new scene (unlisted while Running), a Kit package "
+				"game as a new scene (unlisted while Running), a Kit package "
 				"(and those it depends on) installed into it; a template (an "
 				"admin token's) goes into New's Start from.",
 				R"J({"type": "object", "properties": {
@@ -30937,7 +30937,7 @@ struct Module: public interface::Module, public Interface
 					b.set(f.first, base64(f.second));
 				else
 					t.set(f.first, f.second);
-			o.set("project", m_host.project);
+			o.set("game", m_host.project);
 			o.set("files", t);
 			o.set("base64", b);
 			return o.stringify();
@@ -30949,9 +30949,9 @@ struct Module: public interface::Module, public Interface
 			const ss_ what = op == "=projects" ? "list" :
 					op == "=copy_project" ? "copy" : "rename";
 			json::Value out = json::object();
-			ss_ why = !admin ? "the projects are an admin's: an admin token's "
+			ss_ why = !admin ? "the games are an admin's: an admin token's "
 					"(an admin's account, its scope Admin)" : !m_host.projects ?
-					"this app has no projects" : "";
+					"this app has no games" : "";
 			failed = !why.empty() || !m_host.projects(what, a, out, why);
 			log_i(MODULE, "%s: %s %s: %s", cs(p.name), cs(what),
 					cs(a.stringify().substr(0, 200)), failed ? cs("refused, "+why) :
@@ -31345,7 +31345,7 @@ struct Module: public interface::Module, public Interface
 			"names them and yours (where you edit); switch_scene, new_scene. "
 			"move, rename, set_parent, duplicate, delete edit entities; "
 			"get_goal_warnings checks kit/goal chains.\n"
-			"- Custom types: put_type writes a type of this project's own, "
+			"- Custom types: put_type writes a type of this game's own, "
 			"local/<name> (its description says the file), live at once; "
 			"get_type reads a type's file (Kit's are examples), "
 			"delete_type takes one away. A movement of your own steps the "
@@ -33072,7 +33072,7 @@ struct Module: public interface::Module, public Interface
 			}
 			j.set("packages", pk);
 			j.set("names", shown_as);
-			// [KIT_PROJECT_EXPORT] Export this project... under its name
+			// [KIT_PROJECT_EXPORT] Export this game... under its name
 			j.set("project", m_host.project);
 			// [KIT_SCENE_PACKAGES] the game its scene packages are for
 			if(!m_host.project.empty())
@@ -33377,7 +33377,7 @@ struct Module: public interface::Module, public Interface
 				op == "export_project" || op == "export_scene" ||
 				op == "draft" || op == "prefab_bench" ||
 				(gs->bench && op == "publish")))
-			return refuse(gs->bench ? "editing a prefab: the project's; Close "
+			return refuse(gs->bench ? "editing a prefab: the game's; Close "
 					"first" : "in a draft: the default round's");
 		if(op == "draft")
 			return make_draft(p, peer, refuse);
@@ -33669,7 +33669,7 @@ struct Module: public interface::Module, public Interface
 				if(world_or_env(c.first, c.second)){
 					m_next_id = next0;
 					return refuse(active_session()->bench ? "editing a prefab: "
-							"the World and the environment are the project's" :
+							"the World and the environment are the game's" :
 							"in a draft: the World and the environment are the "
 							"default round's");
 				}
@@ -33985,7 +33985,7 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		if(name == m_host.world_scene){
-			why = "the scene "+name+" is the project's first: it stays";
+			why = "the scene "+name+" is the game's first: it stays";
 			return false;
 		}
 		delete_change(sid, change);

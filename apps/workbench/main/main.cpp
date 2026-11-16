@@ -38,7 +38,7 @@
 // server stops, or until an admin switches or closes it.
 //
 // [WORKBENCH_SWITCH_PROJECT] An admin (world_menu's picker: the launcher's
-// own client, an admin's account) has Projects... in the pause menu: Manage
+// own client, an admin's account) has Games... in the pause menu: Manage
 // over the running project, it marked. Play on another (New's too) and
 // Close are skeldat's [SKELDAT_WORLD_ADMIN] reload: every client sent off
 // with the goodbye that says the server goes on (a launcher rejoins at
@@ -54,11 +54,11 @@
 // first builder in the tools.
 //
 // [KIT_PROJECT_EXPORT] A project is exported as a template (Kit's Host::
-// project: the editor's Export this project, the agents' export_template),
+// project: the editor's Export this game, the agents' export_template),
 // and New's "From a file..." makes one of such a file (a template's zip):
 // the browser's picker on the web, natively <user>/exports. Manage's
-// Copy... copies a project whole (its save); the agents' list_projects,
-// copy_project and rename_project are Manage's, an admin's (Host::projects).
+// Copy... copies a project whole (its save); the agents' list_games,
+// copy_game and rename_game are Manage's, an admin's (Host::projects).
 #include "core/log.h"
 #include "core/json.h"
 #include "accounts/api.h"
@@ -333,11 +333,11 @@ struct Module: public interface::Module
 		}
 		// [KIT_PROJECT_EXPORT] a template's or an export's zip, picked
 		f.choices.push_back({"file", "From a file..."});
-		f.notes["file"] = "A template or an exported project (a .zip), "
+		f.notes["file"] = "A template or an exported game (a .zip), "
 				"picked at Create.";
 		f.files["file"] = ".zip";
 		world_menu::access(m_server, [&](world_menu::Interface *i){
-			i->configure({"Workbench", {f}, "project", true});
+			i->configure({"Workbench", {f}, "game", true});
 		});
 	}
 
@@ -388,7 +388,7 @@ struct Module: public interface::Module
 			reload_for(m_names[event.peer]+" switches the project to "+
 					event.name, "play\n"+event.name+"\n"+
 					(event.created ? "1" : "0")+"\n"+from,
-					"The server switches to the project "+event.name);
+					"The server switches to the game "+event.name);
 			return;
 		}
 		if(!start_project(event.name, false, event.created, from))
@@ -414,7 +414,7 @@ struct Module: public interface::Module
 			}
 		});
 		if(dir.empty())
-			return "no project "+name;
+			return "no game "+name;
 		const ss_ zip = dir+"/import.zip", to = dir+"/import";
 		ss_ why;
 		if(file.empty() || !fs::write_file(zip, file) ||
@@ -480,7 +480,7 @@ struct Module: public interface::Module
 		storage::access(m_server, [&](storage::Interface *i){
 			if(!i->valid_name(name) || name[0] == '_' || !i->valid_name(to) ||
 					to[0] == '_'){
-				why = "a project's name is a directory's, not starting with _";
+				why = "a game's name is a directory's, not starting with _";
 				return;
 			}
 			for(const storage::SaveInfo &info : i->list())
@@ -491,7 +491,7 @@ struct Module: public interface::Module
 			storage::Save *s = m_save && name == m_project ? m_save :
 					i->open(name);
 			if(!s){
-				why = "no project "+name;
+				why = "no game "+name;
 				return;
 			}
 			const ss_ from = s->path(), dir = from.substr(0,
@@ -544,7 +544,7 @@ struct Module: public interface::Module
 			return false;
 		}
 		if(m_save && name == m_project){
-			why = "the running project is not renamed";
+			why = "the running game is not renamed";
 			return false;
 		}
 		bool ok = false;
@@ -553,7 +553,7 @@ struct Module: public interface::Module
 					to[0] != '_' && i->rename(name, to);
 		});
 		if(!ok){
-			why = "not renamed: "+name+" is no project, or "+to+" is taken or "
+			why = "not renamed: "+name+" is no game, or "+to+" is taken or "
 					"no name";
 			return false;
 		}
@@ -573,7 +573,7 @@ struct Module: public interface::Module
 		return ok;
 	}
 
-	// Projects...: Manage over the running project, to the picker only
+	// Games...: Manage over the running project, to the picker only
 	void on_projects(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
@@ -588,7 +588,7 @@ struct Module: public interface::Module
 		});
 	}
 
-	// Tells a peer in the project whether they have Projects...
+	// Tells a peer in the project whether they have Games...
 	void send_picker(size_t peer)
 	{
 		if(m_server->has_module("world_menu"))
@@ -604,7 +604,7 @@ struct Module: public interface::Module
 			return;
 		}
 		reload_for(m_names[event.peer]+" closes the project "+m_project,
-				"close", "The project "+m_project+" was closed");
+				"close", "The game "+m_project+" was closed");
 	}
 
 	// skeldat's reload_for: Kit's rows saved at its core:unload, this

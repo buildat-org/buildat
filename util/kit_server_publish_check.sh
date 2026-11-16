@@ -287,7 +287,7 @@ as boss
 await "$CL" 0 120 "Joined as kitboss"
 cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
 await "$CL" 0 30 "world_menu: the list shown"
-step 10 "world_menu: the name screen shown" "frames 3" 'click Button "New project..."'
+step 10 "world_menu: the name screen shown" "frames 3" 'click Button "New game..."'
 cmd "frames 3" "keydown ctrl" "keypress a" "keyup ctrl" "text crag" "frames 2"
 cmd 'click DropDownList "▼"' "delay 300" "frames 3"
 step 10 "world_menu: template picked: crag_trial" 'click Text "Crag Trial"'
@@ -411,7 +411,7 @@ edit 5 "An edit by kitboss: removed the scene loop \([0-9]+ entities changed\)" 
 	'{"op": "remove_scene", "name": "loop"}'
 edit 5 "An undo by kitboss: [0-9]+ entities put back" '{"op": "undo"}'
 edit 5 "An edit by kitboss: removed the scene loop" '{"op": "remove_scene", "name": "loop"}'
-edit 5 "An edit \(remove_scene\) by peer [0-9]+ refused: the scene world is the project's first: it stays" \
+edit 5 "An edit \(remove_scene\) by peer [0-9]+ refused: the scene world is the game's first: it stays" \
 	'{"op": "remove_scene", "name": "world"}'
 step 10 "kit editor: the server is Running" 'event kit_edit {"op": "play"}'
 as bob

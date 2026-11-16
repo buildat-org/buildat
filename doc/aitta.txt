@@ -220,16 +220,16 @@ asks the Aitta the client named whose key it is. One more manifest field:
 An Aitta lists it as kind "other" with its whole manifest (no change to
 an Aitta was needed); a client reads "manifest"."kind". Kit's "Publish
 my prefabs..." writes a builder's prefabs and voxel types (and the
-project's custom types they use, local/<n> made <author>/<n>) into
+game's custom types they use, local/<n> made <author>/<n>) into
 <user>/dev_apps/<name> and opens the publish screen on it; a package of
 types is written by hand: meta.json and types/<name>.lua.
 
 Templates [KIT_TEMPLATES]
 -------------------------
-A package of kind "template" is a Kit composition a Workbench project can
+A package of kind "template" is a Kit composition a Workbench game can
 start from: the New screen's "Start from" lists Workbench's own
 (apps/workbench/templates/, each as this, packed by util/pack_templates.sh),
-then the installed ones, and the project made opens Stopped in the editor.
+then the installed ones, and the game made opens Stopped in the editor.
 It is installed as an app is (`buildat aitta install`, or the client's
 Install), and is not a tile. Refused at pack and at install without:
 
@@ -244,16 +244,16 @@ as well past these or with anything else in it (a link, an empty file
 or a directory too):
 
         types/<name>.lua              a component type (api.h), the
-                                      project's custom type local/<name>
+                                      game's custom type local/<name>
                                       from its first start, run sandboxed
                                       as a Kit package's; name lowercase
                                       letters, digits and _, 64 KiB, 64
                                       types at most
         types/<name>.client.lua       its client part, 32 KiB at most
 
-An exported Workbench project [KIT_PROJECT_EXPORT] is a template too, with
+An exported Workbench game [KIT_PROJECT_EXPORT] is a template too, with
 a builder's rows beside its composition, each optional, each a regular
-file, refused past these. They are taken at the project's first start and
+file, refused past these. They are taken at the game's first start and
 checked as a Kit package's install checks its rows (a row that fails is
 left out and logged), only rows of authors the importing server would let
 a builder write as:
@@ -277,14 +277,15 @@ One more manifest field, and no "dependencies":
 
         "title": "Puzzle room"        its name in the list, 40 bytes at most
 
-An exported project's meta.json also names its game, "game" below. An
-Aitta lists it as kind "other" with its whole manifest, as a Kit package.
+An exported game's meta.json also has "game" (below), the "<author>/<name>"
+it goes by. An Aitta lists it as kind "other" with its whole manifest, as
+a Kit package.
 
 Scenes [KIT_SCENE_PACKAGES]
 ---------------------------
-A package of kind "scene" is one scene of a Workbench project (a track, an
-arena), which a builder adds to another project as a new scene. Its files
-are an exported project's (above), cut to the scene, and refused at pack
+A package of kind "scene" is one scene of a Workbench game (a track, an
+arena), which a builder adds to another game as a new scene. Its files
+are an exported game's (above), cut to the scene, and refused at pack
 the same:
 
         composition.json              {"scene": its name, "entities": the
@@ -303,26 +304,26 @@ Two more manifest fields, and no "dependencies":
 
         "title": "Crag run"           its name in the list, 40 bytes at most
         "game": "buildat/crag_trial"  the game it is made for: the
-                                      template its project was made from
+                                      template that game was made from
                                       ("<author>/<name>", or the template's
-                                      own "game"); a project no template
-                                      made is its own game,
-                                      "<author>/<project>"
+                                      own "game"); a game no template
+                                      made goes by its own,
+                                      "<author>/<its name>"
 
 It is not installed in the client. Kit's "Export this scene" (the
 palette's New tab) writes <scene>.scene.zip, and "Publish this scene..."
 writes it into <user>/dev_apps/<name> and opens the publish screen on it.
-The New tab lists the Aittas' scene packages, the project's game's first;
-one made for another game is added after a yes ("its types may differ").
+The New tab lists the Aittas' scene packages, this game's first; one
+made for another game is added after a yes ("its types may differ").
 "Add a scene from a file..." (the scene list) takes a zip. The server
 checks a fetched one's signature and asks its Aitta whose key it is, as a
 Kit package's, and then: the scene gets the next free name of its own
 (track, track_2, ...) and new ids; a link or entity parameter onto an
-entity outside it goes to this project's entity of that name (the first),
+entity outside it goes to this game's entity of that name (the first),
 and with none it is left out and the builder shown the list; a custom
-type the project lacks is added, one it has is kept as it is (the
-difference logged); its rows are checked as an export's, one the project
-has kept as the project's. The types added are the project's own from
+type the game lacks is added, one it has is kept as it is (the
+difference logged); its rows are checked as an export's, one the game
+has kept as the game's. The types added are the game's own from
 then on: they run in the server's box and on its players' clients. An
 Aitta lists it as kind "other" with its whole manifest, as a Kit package.
 
@@ -330,8 +331,8 @@ Aitta lists it as kind "other" with its whole manifest, as a Kit package.
 in unlisted (its kit/scene_info's listed off) and its World's edited
 sections go in a few a tick; it is listed (the scene list's Scenes...)
 once they are in, and a kit/arena's maps "*" takes it from the next round.
-Nothing the project has is replaced: a type, item, voxel type, sound or
-prefab of the same name stays the project's (the difference logged).
+Nothing the game has is replaced: a type, item, voxel type, sound or
+prefab of the same name stays the game's (the difference logged).
 Scenes... also removes a scene, one undo: refused with players in it ("N
 players on it: unlist it; they leave as they finish"), and so is an undo
 of an add. An update of a scene is a new scene beside the old one: add v2
@@ -568,7 +569,7 @@ Publishing page (an admin's):
   - "Install a template from an Aitta...": a template from a listed Aitta
     into <user>/installed (New's Start from), its signature checked and
     its Aitta asked whose key it is.
-The editor's Publish this scene..., Publish this project... and Publish my
+The editor's Publish this scene..., Publish this game... and Publish my
 prefabs... offer "As this server (<author>)" with the right and a bound
 key, beside "With my own key" (native; the web client has only the
 server's): name, version (the last published raised; "Raise the
@@ -581,7 +582,7 @@ the builder, the LICENSE naming the builder and the licence. With
 Aittas listed the palette's New tab lists and installs through the
 server (kit, scene), each package's signature and its Aitta's word on its
 key checked there, the sizes capped as a client's fetch. The MCP tools:
-publish_project, publish_scene, publish_kit_package (a Builder token
+publish_game, publish_scene, publish_kit_package (a Builder token
 with the right), list_aitta (by kind and game), install_from_aitta (a
 scene or Kit package; a template an admin token's), publish_log.
 util/kit_server_publish_check.sh drives it.
