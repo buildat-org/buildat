@@ -227,7 +227,8 @@ if phase == "main":
     tools = rpc(tok, "tools/list")["result"]["tools"]
     names = [t["name"] for t in tools]
     assert names == ["get_state", "list_types", "get_type", "get_guide",
-        "get_links", "get_log", "get_view", "get_events", "get_goal_warnings",
+        "get_links", "get_log", "get_view", "play_join", "play_input",
+        "play_leave", "get_events", "get_goal_warnings",
         "list_prefabs", "list_items", "list_voxel_types", "get_voxels",
         "get_ground", "place", "set_param", "link", "delete", "unlink", "move",
         "rename", "set_comments", "add_component", "remove_component",

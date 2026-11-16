@@ -876,6 +876,8 @@ struct Module: public interface::Module
 			drop_scene(name);
 		};
 		h.controls = true;
+		// [KIT_AGENT_NEXT_1] the agents' server camera
+		h.camera = true;
 		// [KIT_CTF] A check's own component types (a directory), as the
 		// app's; never set but by a check
 		const char *types = getenv("BUILDAT_WORKBENCH_TYPES");
@@ -993,10 +995,12 @@ struct Module: public interface::Module
 		m_peer_scene[peer] = "world";
 		m_names[peer] = name.empty() ? "p"+itos(peer) : name;
 		// [KIT_LOBBY] In builtin/chat (the menu's Chat, kit/ui_chat): its
-		// lines had gone nowhere, nobody joined
-		chat::access(m_server, [&](chat::Interface *c){
-			c->join(peer, m_names[peer]);
-		});
+		// lines had gone nowhere, nobody joined. [KIT_AGENT_NEXT_1] Not the
+		// server's camera
+		if(name != accounts::CAMERA_NAME)
+			chat::access(m_server, [&](chat::Interface *c){
+				c->join(peer, m_names[peer]);
+			});
 		spawn(peer);
 	}
 

@@ -57,6 +57,10 @@ buildat.in_flight() -> nil, or {name, have, size}
 - What is arriving and not yet whole ([LOAD_IN_FLIGHT]): a packet part-read
   (its name, "" for an unknown type; its bytes so far and its length), or
   a large payload whose fragments are coming (size then a little over).
+buildat.idle_pending() -> "" or what is still queued
+- What the idle sources (buildat.idle_source) say they have queued, as a
+  drive's idle command reads it, "" when none has any; Kit's server camera
+  waits for "" before it draws ([KIT_AGENT_NEXT_1]).
 buildat.resources() -> {memory_mb, mesh_threads, isolated, touch, platform}
 - What this client got to run in ([WEB_MESH_OFF_THREAD]), for an app to
   fit its view range, LOD and caches to rather than be ended by the
