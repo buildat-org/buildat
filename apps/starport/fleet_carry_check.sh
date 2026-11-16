@@ -109,9 +109,12 @@ join() {
 		-s 127.0.0.1:$port -c @"$tmp/cmds_j.txt" > "$tmp/$log" 2>&1
 }
 # moved <listing> <python condition on x, the list entry>
+# (the list says this version: an alpha's listings are served only to that
+# alpha, [ALPHA_BUILDS])
 moved() {
 	for _ in $(seq 60); do
-		curl -s -m 5 "localhost:$SP/api/v1/list" | python3 -c "
+		curl -s -m 5 -d "{\"version\":\"$(cat "$here/VERSION")\"}" \
+			"localhost:$SP/api/v1/list" | python3 -c "
 import json, sys
 x = [x for x in json.load(sys.stdin)['servers'] if x['id'] == '$1'][0]
 sys.exit(0 if $2 else 1)" 2>/dev/null && return 0
