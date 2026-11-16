@@ -76,9 +76,9 @@
 #   8. ([KIT] stage 4g) A builder's voxel type made, drawn by a second
 #      client already in, placed and kept over a restart: below.
 #   9. ([WORKBENCH_PROJECTS]) The projects, by the launcher's own client;
-#      a New project's heightmap walked on and built on: below.
-# Parts 1-8 make their project in Manage (New project..., the name
-# "project" it offers when there is none), a restart opening it again.
+#      a New game's heightmap walked on and built on: below.
+# Parts 1-8 make their project in Manage (New game..., the name
+# "game" it offers when there is none), a restart opening it again.
 # KEEP_TMP=1 keeps the screenshots: the contraption in edit mode, in play,
 # after the restart, and after the Stop; what is pointed at in play; part
 # 7's views, drags and menus; part 8's dialog, palette and the type placed.
@@ -149,7 +149,7 @@ if [ "${1:-}" = web ]; then
 	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
 	["click", "Button", "Don't add"], ["frames", 3],
 	["waitlog_any", "world_menu: the list shown, 0 worlds", 30], ["frames", 3],
-	["click", "Button", "New project..."],
+	["click", "Button", "New game..."],
 	["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
 	["click", "Button", "Create"],
 	["waitlog", "player physics enabled", 120],
@@ -307,7 +307,7 @@ if [ "${1:-}" = web_touch ]; then
 	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
 	["tap", "Button", "Don't add"], ["frames", 3],
 	["waitlog_any", "world_menu: the list shown, 0 worlds", 30], ["frames", 3],
-	["tap", "Button", "New project..."],
+	["tap", "Button", "New game..."],
 	["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
 	["tap", "Button", "Create"],
 	["waitlog", "player physics enabled", 120], ["frames", 10],
@@ -465,7 +465,7 @@ if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
 check_tmp workbench; t=$CHECK_TMP
-save="$t/user/apps/workbench/saves/project"
+save="$t/user/apps/workbench/saves/game"
 cd "$here/Build"
 
 server() # <n> [user dir]
@@ -514,7 +514,7 @@ frames 3
 click Button "Don't add"
 wait_log_any 30000 world_menu: the list shown, 0 worlds
 frames 3
-click Button "New project..."
+click Button "New game..."
 wait_log 5000 world_menu: the name screen shown
 click Button "Create"
 wait_log_any 60000 player physics enabled
@@ -1141,7 +1141,7 @@ frames 3
 click Button "Don't add"
 wait_log_any 30000 world_menu: the list shown, 0 worlds
 frames 3
-click Button "New project..."
+click Button "New game..."
 wait_log 5000 world_menu: the name screen shown
 click Button "Create"
 wait_log_any 60000 player physics enabled
@@ -1441,7 +1441,7 @@ frames 3
 click Button "Don't add"
 wait_log_any 30000 world_menu: the list shown, 0 worlds
 frames 3
-click Button "New project..."
+click Button "New game..."
 wait_log 5000 world_menu: the name screen shown
 click Button "Create"
 wait_log_any 60000 player physics enabled
@@ -1617,7 +1617,7 @@ frames 3
 click Button "Don't add"
 wait_log_any 30000 world_menu: the list shown, 0 worlds
 frames 3
-click Button "New project..."
+click Button "New game..."
 wait_log 5000 world_menu: the name screen shown
 click Button "Create"
 wait_log_any 60000 player physics enabled

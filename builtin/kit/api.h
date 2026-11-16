@@ -66,7 +66,7 @@ namespace interface
 // under its author (Host::author, the app's id); other authors' come in
 // packages (below), named "<fp>/<name>" by the package's key
 // ([AITTA_KEY_IDENTITY]: fp the key's fingerprint, doc/aitta.txt); the
-// project's own are custom types, "local/<name>" (below). An instance records its type and the type's version
+// game's own are custom types, "local/<name>" (below). An instance records its type and the type's version
 // (the file's `version`). A save from before, its types bare names, is
 // read as the app's type of that name if it has one, else Kit's, and
 // written back so.
@@ -301,7 +301,7 @@ namespace interface
 //                               they were, so filtered
 // c: c.id, c.pos, c.params (read), c.state (read and written; a table in
 // it changed in place is written too), c:emit(output, value),
-// [KIT_SOUNDS] c:sound(name, {everywhere = true}) (a project's sound at
+// [KIT_SOUNDS] c:sound(name, {everywhere = true}) (a game's sound at
 // it, heard in its scene; everywhere, or an entity with no place: not
 // positional; 8 a run; "" or nil nothing),
 // c:set_voxel(name) (each cell it owns; a `grants` type that owns none:
@@ -498,7 +498,7 @@ namespace interface
 //   types that step players' bodies (a `movement` and a step, not steered
 //   nor timed) and "none", an edit or c:set_param of another refused (a load
 //   takes it: the players then stand). [KIT_SOUNDS] A parameter type "sound": a dropdown of
-//   the project's sounds and "none" ("").
+//   the game's sounds and "none" ("").
 //   [KIT_PLANE] A parameter type "points": a closed shape [[x, y]...] of 3 to
 //   128 points (|x|, |y| <= 32, its edges not crossing nor touching, its area
 //   not 0; any winding), edited in a side game's 2D view, not the inspector
@@ -681,20 +681,20 @@ namespace interface
 //   signature checked as a package's and the key's vouch asked): a
 //   builder with the tools on, Stopped, adds its scene as a new one, the
 //   next free name of its own; its links and entity parameters onto
-//   entities outside it made this project's entities of the same name, or
-//   left out; its custom types the project lacks added, those it has kept
+//   entities outside it made this game's entities of the same name, or
+//   left out; its custom types the game lacks added, those it has kept
 //   as they are; its rows checked as an export's (those of a key the
-//   project has kept as they are). Answered with "kit:scene" {"ok": true,
+//   game has kept as they are). Answered with "kit:scene" {"ok": true,
 //   "what", "scene", "game", "dropped": [what was left out], "kept": [its
-//   types kept as the project's]} or {"ok": false, "why"}; "kit:edit_state"
-//   has "game", the project's ("<author>/<name>"). Credits: each client's
+//   types kept as the game's]} or {"ok": false, "why"}; "kit:edit_state"
+//   has "game" ("<author>/<name>", the running one's). Credits: each client's
 //   "kit:edit_state" has "credits", [{"author" (a package's with its
 //   Aitta's host where it is ambiguous or unverified), "package"
 //   ("<author>/<name>"), "id", "aitta", "verified", "version",
 //   "license_code", "license_media" (a package's), "of": "kit"|"app",
 //   "uses": [types, "[prefab]"]}], what the composition uses by who made
 //   it (kit.show_credits(), the palette's Credits).
-//   [KIT_CUSTOM_TYPES] **Custom types**: a project's own, "local/<name>"
+//   [KIT_CUSTOM_TYPES] **Custom types**: a game's own, "local/<name>"
 //   (name letters, digits and _), each a type's file and an optional
 //   client part as above, run as a package's are (the box, the clients'
 //   sandbox). Kit's store's rows "type:local/<name>" {"source", "client",
@@ -713,13 +713,13 @@ namespace interface
 //   Taken, each entity on it keeps its params and state (the new
 //   version's state keys and params added at their defaults, its errors
 //   forgotten; a param or a link's output the file no longer takes
-//   dropped, here and when a composition loads, not the project),
+//   dropped, here and when a composition loads, not the game),
 //   its next runs the new handlers; the bodies on a movement step with
 //   the new one, and the clients load the new client part. A newer
 //   `version` migrates the authored instances as a package's upgrade. A
 //   delete is refused while anything uses it. A put that takes long
 //   holds its builder's next for a while. Agents: put_type, get_type,
-//   delete_type. A template's types/<name>.lua are its project's from
+//   delete_type. A template's types/<name>.lua are its game's from
 //   its first start (Host::local_types_path); an export (below) takes
 //   those its prefabs use as the builder's own <author>/<name>.
 //   simplified: a start that finds one no longer loading (a file not the
@@ -1046,7 +1046,7 @@ namespace interface
 //       Refused in a draft
 //   {"op": "sound", "name": n, "params": "blip1:..."}  -- [KIT_SOUNDS]
 //       the builder's sound "<their name>/<n>" made or changed, or n a
-//       project's sound's whole name changed (not Kit's, not a
+//       game's sound's whole name changed (not Kit's, not a
 //       package's: those are copied); {"op": "sound_delete", "name": its
 //       whole name}. Refused in a draft. Sounds below
 // "kit:texture", a PNG's bytes ([KIT] stage 4g): a builder with the tools
@@ -1145,8 +1145,8 @@ namespace interface
 // save_prefab refused before it). The World is the bench's own, one per
 // builder, under MAX_SESSIONS. Refused: another's prefab, Kit's and packages',
 // from inside a session, an app without sessions. {"op": "save_prefab"} with
-// a root and box there is the Save; the project's own copies of the prefab
-// follow (no undo entry in the project), other drafts' do not. {"op":
+// a root and box there is the Save; the game's own copies of the prefab
+// follow (no undo entry in the game), other drafts' do not. {"op":
 // "leave_draft"} is its Close: nothing else leaves it.
 // [KIT_MINIGAMES_1] c:session_end(id, result) carries a result (JSON, 4
 // KiB at most) to the maker's on_session_end(c, id, result) (nil
@@ -1216,7 +1216,7 @@ namespace interface
 // (repeats - ticks) * interval, at its start and each tick (none without
 // repeats).
 //
-// **Sounds** ([KIT_SOUNDS]): the project's named sounds, each blip's
+// **Sounds** ([KIT_SOUNDS]): the game's named sounds, each blip's
 // parameters (extensions/blip's compact form, "blip1:...": data, made in
 // its designer, not audio files): Kit's own in sounds.json (kit/click,
 // kit/swing, kit/shot, kit/hit, kit/dig, kit/place, kit/door,
@@ -1255,7 +1255,7 @@ namespace interface
 // colour with its icon), color ("#rrggbb": a shot's, a splat's), grip
 // ([right, up, ahead] m from the eye: where it is held in view).
 // [KIT_SOUNDS] sound_swing, sound_shot, sound_hit, sound_reload,
-// sound_break: a project's sound each ("" none).
+// sound_break: a game's sound each ("" none).
 // Clients get them all as "kit:item_types" {name: sheet}, a look's
 // prefab with it ("look_data" {parts, voxels}; sent again as the prefab
 // is saved). An item in an
@@ -1610,7 +1610,7 @@ namespace kit
 		// [KIT_NO_WORLD] A scene with no kit/terrain has no World (no voxels,
 		// no heightmap: its surface "none"); true: the World type's defaults
 		// (`defaults`' among them) are its World, as before (Workbench's
-		// projects that neither New nor a template made: the checks')
+		// games that neither New nor a template made: the checks')
 		bool world_default = false;
 		// The material set (JSON, terrain.h's format) binding the roles to
 		// the app's voxels; "": Kit's own (materials.json)
@@ -1644,24 +1644,24 @@ namespace kit
 		// on, the voxels as they stand, its copies and marks dropped
 		bool persistent = false;
 		// [KIT_CUSTOM_TYPES] With composition_path a template's: its types
-		// directory (<name>.lua, <name>.client.lua), the project's custom
+		// directory (<name>.lua, <name>.client.lua), the game's custom
 		// types local/<name> from its first start ("": none)
 		ss_ local_types_path;
-		// [KIT_PROJECT_EXPORT] The project's name: a builder exports it
+		// [KIT_PROJECT_EXPORT] The game's name: a builder exports it
 		// ("export_project", the agents' export_template) as a template
 		// under it; "": no export. A template's first start also takes the
 		// rest of an export from composition_path's directory (items.json,
 		// sounds.json, voxels.json, prefabs.json, textures/, edits.bin) and
 		// [KIT_SCENE_PACKAGES] its game: its meta.json's "game", else its
-		// "<author>/<name>" (Kit's row "game"; a project no template made is
-		// its first exporter's "<author>/<project>"). A builder exports one
+		// "<author>/<name>" (Kit's row "game"; a game no template made is
+		// its first exporter's "<author>/<its name>"). A builder exports one
 		// scene as a scene package ("export_scene", the agents'
 		// export_scene) and adds one as a new scene ("kit:scene", the
 		// palette's Add a scene from a file... and the New tab's list of the
 		// Aittas' scene packages): doc/aitta.txt "Scenes"
 		ss_ project;
-		// [KIT_PROJECT_EXPORT] The app's projects for the agents' tools
-		// (list_projects, copy_project, rename_project), an admin's: op
+		// [KIT_PROJECT_EXPORT] The app's games for the agents' tools
+		// (list_games, copy_game, rename_game), an admin's: op
 		// "list" (out: [{name, bytes, running}]), "copy" or "rename" {name,
 		// to}; false and why not. Called on Kit's thread. Unset: no tools
 		std::function<bool(const ss_ &op, const json::Value &args,

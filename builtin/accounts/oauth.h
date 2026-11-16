@@ -475,7 +475,7 @@ static std::pair<ss_, ss_> oauth_page(const OAuthPage &p)
 			h += "<p>Signed in as <b>"+html(p.admin_name)+"</b>, an admin "
 					"here.</p><label class=\"box\"><input type=\"checkbox\" "
 					"name=\"host\" value=\"1\" id=\"host\">Also allow the Host's "
-					"actions (projects: list, copy, rename...)</label><p "
+					"actions (games: list, copy, rename...)</label><p "
 					"class=\"meta\">To change it later, connect the tool again."
 					"</p>";
 		else if(!p.totp_name.empty())

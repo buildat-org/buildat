@@ -203,7 +203,7 @@ new_project() # <label> <shot prefix>
 wait_log_any 60000 Joined as kitboss
 wait_log_any 30000 world_menu: the list shown
 frames 3
-click Button "New project..."
+click Button "New game..."
 wait_log 5000 world_menu: the name screen shown
 frames 3
 screenshot $t/$2_new.png

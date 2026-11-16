@@ -43,7 +43,7 @@ cat > "$t/phone.json" <<'J'
 	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
 	["tap", "Button", "Don't add"], ["frames", 3],
 	["waitlog_any", "world_menu: the list shown, 0 worlds", 30], ["frames", 3],
-	["tap", "Button", "New project..."],
+	["tap", "Button", "New game..."],
 	["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
 	["tap", "DropDownList", "▼"], ["waitlog", "dropdown_[0-9]+ open", 10], ["frames", 3],
 	["tap", "Text", "Crag Trial"], ["waitlog", "world_menu: template picked: crag_trial", 10],

@@ -1,5 +1,5 @@
 -- A sound player ([KIT_SOUNDS]): "play" plays `sound`, one of the
--- project's sounds, at it (heard nearer louder) or, with everywhere, as
+-- game's sounds, at it (heard nearer louder) or, with everywhere, as
 -- loud for every player in its scene
 return {
 	version = 1,

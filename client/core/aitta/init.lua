@@ -326,8 +326,8 @@ local function cannot_run(rel)
 		return "a Kit package: installed from Kit's palette, in an app's " ..
 				"edit mode"
 	elseif type(rel.manifest) == "table" and rel.manifest.kind == "scene" then
-		-- [KIT_SCENE_PACKAGES] the same, added to a Workbench project
-		return "a scene: added from Kit's palette, in a Workbench project's " ..
+		-- [KIT_SCENE_PACKAGES] the same, added to a Workbench game
+		return "a scene: added from Kit's palette, in a Workbench game's " ..
 				"edit mode"
 	elseif rel.kind and rel.kind ~= "app" and rel.kind ~= "extension" and
 			rel.kind ~= "world" and rel.kind ~= "remix" and

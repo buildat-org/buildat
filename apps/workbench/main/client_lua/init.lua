@@ -32,8 +32,8 @@
 --   server Running or Ended, the start put back ([KIT] 4c)
 --   Escape: the pause menu (extensions/pause_menu: Continue, Kit's Edit
 --   and Run/End, Chat, My account (the Server window: Open to LAN for the
---   launcher's own user, an admin's pages), an admin's Projects... (the
---   projects, the running one switched or closed), Settings, Leave); in the tools
+--   launcher's own user, an admin's pages), an admin's Games... (the
+--   games, the running one switched or closed), Settings, Leave); in the tools
 --   Kit's first (a pending link, a drag, the crosshair)
 -- A touchscreen (BUILDAT_TOUCH=1, Kit's controls.lua): a stick at the
 -- lower left, a drag elsewhere turns the view, a tap is the left click at
@@ -321,7 +321,7 @@ buildat.sub_packet("main:picker", function(data)
 	picker = data == "1"
 	menu.refresh()
 end)
-menu.add(function() return picker and "Projects..." or nil end, function()
+menu.add(function() return picker and "Games..." or nil end, function()
 	local world_menu = require("buildat/module/world_menu")
 	world_menu.on_close = function()
 		world_menu.on_close = nil

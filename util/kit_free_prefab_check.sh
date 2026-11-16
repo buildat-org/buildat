@@ -94,7 +94,7 @@ if [ -n "$WEB" ] && [ "${2:-}" != rotation ] && [ "${2:-}" != frame ]; then
 	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
 	["click", "Button", "Don't add"], ["frames", 3],
 	["waitlog_any", "world_menu: the list shown, 0 worlds", 30], ["frames", 3],
-	["click", "Button", "New project..."],
+	["click", "Button", "New game..."],
 	["waitlog", "world_menu: the name screen shown", 10], ["frames", 3],
 	["click", "Button", "Create"],
 	["waitlog", "player physics enabled", 120],

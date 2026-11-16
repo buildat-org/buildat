@@ -2136,20 +2136,20 @@ local function new_tab(w)
 			end)
 		end)
 	end):SetName("publish prefabs")
-	-- [KIT_PROJECT_EXPORT] The project's start as a template file, which
-	-- New's "From a file..." makes a project of on another server.
-	-- simplified: here, not on Workbench's Projects page beside Copy,
+	-- [KIT_PROJECT_EXPORT] The game's start as a template file, which
+	-- New's "From a file..." makes a game of on another server.
+	-- simplified: here, not on Workbench's Games page beside Copy,
 	-- which is an admin's and out of a builder's reach
 	if (E.state.project or "") ~= "" then
 		local r = row(w)
-		button(r, "Export this project", function()
+		button(r, "Export this game", function()
 			log:info("kit editor: export this project")
 			send({op = "export_project"})
 		end)
 		-- (as the server only: a template with one's own key is the
 		-- launcher's, from the exported file)
-		button(r, "Publish this project...", function()
-			NT.publish_checked("this project", function()
+		button(r, "Publish this game...", function()
+			NT.publish_checked("this game", function()
 				NT.publish_as("project")
 			end)
 		end):SetName("publish project")
@@ -5708,7 +5708,7 @@ function M.scene_added(a)
 				"scene list).")
 	end
 	para("The scene " .. tostring(a.scene) .. " is added." ..
-			(#dropped > 0 and " Left out, as this project has no entity of " ..
+			(#dropped > 0 and " Left out, as this game has no entity of " ..
 			"the name:" or ""))
 	for i, d in ipairs(dropped) do
 		if i > 12 then
@@ -5718,7 +5718,7 @@ function M.scene_added(a)
 		para(tostring(d), DIM)
 	end
 	if #kept > 0 then
-		para("Its types this project has its own of, kept: " ..
+		para("Its types this game has its own of, kept: " ..
 				table.concat(kept, ", "))
 	end
 	br = br or row(w)
@@ -6307,8 +6307,8 @@ function NT.type_window()
 	local rw = math.floor(magic.ui.root.width / S.font) - 16
 	local w, br = dialog(f.existing and "Edit type" or "New type", rw)
 	f.win = W.dialog
-	text(w, f.existing and "The project's type " .. f.name or
-			"A type of this project's own, local/<name>: Lua run in Kit's box")
+	text(w, f.existing and "The game's type " .. f.name or
+			"A type of this game's own, local/<name>: Lua run in Kit's box")
 	local r = row(w)
 	label(r, "Name:")
 	edit(r, f.name, function(s)
@@ -6398,7 +6398,7 @@ buildat.sub_packet("kit:type", function(data)
 		f.name, f.source, f.client, f.status, f.ok = tostring(a.type),
 				tostring(a.source or ""):gsub("\t", "    "),
 				(tostring(a.client or ""):gsub("\t", "    ")),
-				a.custom and "" or "Not this project's: Save makes a copy under "
+				a.custom and "" or "Not this game's: Save makes a copy under "
 				.. "the name you give it", true
 		f.existing = a.custom == true
 	else
@@ -6615,7 +6615,7 @@ function IT.sheet(w)
 	text(w, new and "A new item type of yours" or "Item type " ..
 			M.shown(n))
 	text(w, new and "From a preset, its fields changed here" or own and
-			"The project's own: Save makes its next version" or
+			"The game's own: Save makes its next version" or
 			(sheet.package and "A package's" or "Kit's") ..
 			": Copy as new to change it", DIM)
 	local br = row(w)

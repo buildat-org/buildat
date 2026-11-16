@@ -227,8 +227,8 @@ if phase == "main":
         "place_prefab", "save_prefab", "set_voxels", "put_type", "delete_type",
         "new_scene", "switch_scene", "undo", "start", "stop", "try_input",
         "watch", "clear_kept", "keep", "set_builder", "export_template",
-        "export_scene", "list_projects", "copy_project", "rename_project",
-        "publish_project", "publish_scene", "publish_kit_package", "list_aitta",
+        "export_scene", "list_games", "copy_game", "rename_game",
+        "publish_game", "publish_scene", "publish_kit_package", "list_aitta",
         "install_from_aitta", "publish_log"], names
     for t in tools:
         assert t["description"] and t["inputSchema"]["type"] == "object", t

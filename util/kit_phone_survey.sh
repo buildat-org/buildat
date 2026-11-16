@@ -133,7 +133,7 @@ if game == "floorplanner":
 a("waitlog_any", "server window: the page ntfy", 30); fr(3)
 tap("Button", "Don't add"); fr(3)
 a("waitlog_any", "world_menu: the list shown, 0 worlds", 30); fr(3)
-tap("Button", "New project...")
+tap("Button", "New game...")
 a("waitlog", "world_menu: the name screen shown", 10); fr(3)
 tap("Button", "Create")
 a("waitlog", "player physics enabled", 120)
