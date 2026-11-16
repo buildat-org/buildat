@@ -159,7 +159,11 @@ static char *GetSlectionText(_THIS, Atom selection_type)
     window = GetWindow(_this);
     format = X11_GetSDLCutBufferClipboardInternalFormat(display, SDL_X11_CLIPBOARD_MIME_TYPE_STRING);
     owner = X11_XGetSelectionOwner(display, selection_type);
-    if (owner == None) {
+    if (owner == None && selection_type == XA_PRIMARY) {
+        /* buildat [PASTE_PRIMARY]: an unowned primary selection is empty;
+           the cut buffer below is the clipboard's old fallback */
+        return SDL_strdup("");
+    } else if (owner == None) {
         /* Fall back to ancient X10 cut-buffers which do not support UTF8 strings*/
         owner = DefaultRootWindow(display);
         selection = XA_CUT_BUFFER0;
@@ -188,7 +192,11 @@ static char *GetSlectionText(_THIS, Atom selection_type)
                 SDL_SetError("Selection timeout");
                 /* We need to set the selection text so that next time we won't
                    timeout, otherwise we will hang on every call to this function. */
-                SetSelectionText(_this, "", selection_type);
+                /* buildat [PASTE_PRIMARY]: not the primary selection's, or a
+                   slow owner loses its selection to an empty one */
+                if (selection_type != XA_PRIMARY) {
+                    SetSelectionText(_this, "", selection_type);
+                }
                 return SDL_strdup("");
             }
         }
@@ -220,6 +228,9 @@ int X11_SetClipboardText(_THIS, const char *text)
     if (XA_CLIPBOARD == None) {
         return SDL_SetError("Couldn't access X clipboard");
     }
+    /* buildat [PASTE_PRIMARY]: the primary selection too, as SDL 2.0.5
+       did, so a copy pastes by the middle button elsewhere */
+    SetSelectionText(_this, text, XA_PRIMARY);
     return SetSelectionText(_this, text, XA_CLIPBOARD);
 }
 
@@ -231,12 +242,20 @@ int X11_SetPrimarySelectionText(_THIS, const char *text)
 char *X11_GetClipboardText(_THIS)
 {
     SDL_VideoData *videodata = (SDL_VideoData *)_this->driverdata;
+    char *text;
     Atom XA_CLIPBOARD = X11_XInternAtom(videodata->display, "CLIPBOARD", 0);
     if (XA_CLIPBOARD == None) {
         SDL_SetError("Couldn't access X clipboard");
         return SDL_strdup("");
     }
-    return GetSlectionText(_this, XA_CLIPBOARD);
+    text = GetSlectionText(_this, XA_CLIPBOARD);
+    /* buildat [PASTE_PRIMARY]: nothing on the clipboard, the primary
+       selection's */
+    if (text && !text[0]) {
+        SDL_free(text);
+        text = GetSlectionText(_this, XA_PRIMARY);
+    }
+    return text;
 }
 
 char *X11_GetPrimarySelectionText(_THIS)

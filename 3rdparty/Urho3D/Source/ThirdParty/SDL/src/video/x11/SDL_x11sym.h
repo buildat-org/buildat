@@ -91,6 +91,7 @@ SDL_X11_SYM(XFontStruct*,XLoadQueryFont,(Display* a,_Xconst char* b),(a,b),retur
 SDL_X11_SYM(KeySym,XLookupKeysym,(XKeyEvent* a,int b),(a,b),return)
 SDL_X11_SYM(int,XLookupString,(XKeyEvent* a,char* b,int c,KeySym* d,XComposeStatus* e),(a,b,c,d,e),return)
 SDL_X11_SYM(int,XMapRaised,(Display* a,Window b),(a,b),return)
+SDL_X11_SYM(int,XMapWindow,(Display* a,Window b),(a,b),return) /* buildat: BUILDAT_WINDOW_NO_ACTIVATION */
 SDL_X11_SYM(Status,XMatchVisualInfo,(Display* a,int b,int c,int d,XVisualInfo* e),(a,b,c,d,e),return)
 SDL_X11_SYM(int,XMissingExtension,(Display* a,_Xconst char* b),(a,b),return)
 SDL_X11_SYM(int,XMoveWindow,(Display* a,Window b,int c,int d),(a,b,c,d),return)
