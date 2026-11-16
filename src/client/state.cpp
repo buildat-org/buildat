@@ -1192,6 +1192,9 @@ void CState::setup_packet_handlers()
 				send_packet("accounts:owner_token", token);
 				send_packet("launch:untrusted", m_app->local_server_launch());
 			}
+			// [KIT_AGENT_VISUALS] 3: to the server it was given for only
+			if(!g_agent_token.empty() && get_address() == g_agent_address)
+				send_packet("accounts:agent_token", g_agent_token);
 		}
 		// The names and their hashes are the main thread's, because
 		// get_file_path() answers out of this the moment anything asks
@@ -1590,5 +1593,7 @@ State* createState(sp_<app::App> app)
 {
 	return new CState(app);
 }
+
+ss_ g_agent_token, g_agent_address;
 }
 // vim: set noet ts=4 sw=4:

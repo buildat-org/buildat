@@ -14,6 +14,7 @@
 #include <c55/getopt.h>
 #include <Context.h>
 #include <cstdio> // sscanf()
+#include <cstring> // memset()
 #include <cstdlib> // srand()
 #include <fstream>
 #include <thread> // the Aitta publish's wait
@@ -283,7 +284,7 @@ int main(int argc, char *argv[])
 
 	client::Config &config = g_client_config;
 
-	const char opts[100] = "hs:P:C:D:U:l:L:m:u:w:o:c:Ra:";
+	const char opts[100] = "hs:P:C:D:U:l:L:m:u:w:o:c:Ra:T:";
 	const char usagefmt[] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -334,6 +335,11 @@ int main(int argc, char *argv[])
 			"                       the id the app's launcher/init.lua gives\n"
 			"                       its tile; a wrong one logs \"Launch\n"
 			"                       action ... is not here\"\n"
+			"  -T [token]           Log in to the -s server with an agent's MCP\n"
+			"                       token (bat_...: My account, Connect an\n"
+			"                       agent...) as its account; never logged or\n"
+			"                       saved. BUILDAT_AGENT_TOKEN does the same and\n"
+			"                       keeps it out of the process list\n"
 			"\n"
 			"  aitta ...            As the first argument: an app's key, signed\n"
 			"                       release and install, from a file or by\n"
@@ -356,6 +362,16 @@ int main(int argc, char *argv[])
 	int c;
 	// What this is, before anything else, so every log begins with it
 	log_i(MODULE, "%s %s (%s)", "buildat", BUILDAT_VERSION, BUILDAT_GIT_HASH);
+	// [KIT_AGENT_VISUALS] 3: out of the environment before any Lua runs, as
+	// a server's Lua reads BUILDAT_ variables (get_env)
+	if(const char *t = getenv("BUILDAT_AGENT_TOKEN")){
+		client::g_agent_token = t;
+#ifdef _WIN32
+		_putenv("BUILDAT_AGENT_TOKEN=");
+#else
+		unsetenv("BUILDAT_AGENT_TOKEN");
+#endif
+	}
 	while((c = c55_getopt(argc, argv, opts)) != -1)
 	{
 		switch(c)
@@ -496,6 +512,12 @@ int main(int argc, char *argv[])
 		case 'R':
 			config.set("reload_modules", true);
 			break;
+		case 'T':
+			client::g_agent_token = c55_optarg;
+			// Gone from what ps shows of this process from here on (it
+			// points into argv)
+			memset((char*)c55_optarg, '*', strlen(c55_optarg));
+			break;
 		default:
 			fprintf(stderr, "Invalid command-line argument\n");
 			fprintf(stderr, usagefmt, argv[0]);
@@ -556,6 +578,7 @@ int main(int argc, char *argv[])
 
 		if(config.get<ss_>("server_address") != ""){
 			ss_ error;
+			client::g_agent_address = config.get<ss_>("server_address");
 			if(!state->connect(config.get<ss_>("server_address"), &error)){
 				log_e(MODULE, "Connect failed: %s", cs(error));
 				return 1;

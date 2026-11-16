@@ -699,6 +699,15 @@ Safe.image_load_data = wrap_function({"Image", "string", {"number", "__nil"}},
 	return __buildat_image_load_data(image, data, max_side)
 end)
 
+-- **A render target's pixels as a PNG** ([KIT_AGENT_VISUALS]): the bytes
+-- (RGB), or nil and why not. A texture made a render target by the caller
+-- (SetSize with TEXTURE_RENDERTARGET), RGBA or RGB, 2048 a side at most:
+-- what it drew there itself, never the window. See l_texture_png() in
+-- src/lua_bindings/misc_urho3d.cpp.
+Safe.texture_png = wrap_function({"Texture2D"}, function(texture)
+	return __buildat_texture_png(texture)
+end)
+
 -- The viewports the user's graphics preferences are applied to, as against
 -- the raw renderer:SetViewport() ones which are drawn the way the game says
 -- and nothing else. Use this instead of renderer:SetViewport(): the engine

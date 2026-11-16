@@ -76,6 +76,13 @@ namespace client
 	};
 
 	State* createState(sp_<app::App> app);
+
+	// [KIT_AGENT_VISUALS] 3: an agent's MCP token the client was started
+	// with (-T or BUILDAT_AGENT_TOKEN; main.cpp) and the -s address it is
+	// for: sent as accounts:agent_token to that address only, once a
+	// connection, and nowhere else -- never logged, never written, never
+	// where a server's Lua reads it (get_env)
+	extern ss_ g_agent_token, g_agent_address;
 }
 
 // vim: set noet ts=4 sw=4:

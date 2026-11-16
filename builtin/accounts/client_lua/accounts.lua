@@ -882,7 +882,10 @@ local function on_login_result(data)
 	-- [ACCOUNT_WHO] How, as sent. simplified: a TOTP wait's resend
 	-- reads as the kept login
 	local l = last_login or {}
-	M.login_how = M.hello["local"] == 1 and "local" or
+	-- [KIT_AGENT_VISUALS] 3: none sent, the server joined it by the agent
+	-- token the client was started with
+	M.login_how = not last_login and "agent token" or
+			M.hello["local"] == 1 and "local" or
 			(l[6] or "") ~= "" and "Starport ID" or
 			(l[4] or "") ~= "" and "kept login" or
 			(l[3] or "") ~= "" and "password and setup code" or "password"

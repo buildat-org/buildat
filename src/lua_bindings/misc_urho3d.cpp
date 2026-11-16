@@ -15,6 +15,7 @@
 #include <Sound.h>
 #include <Image.h>
 #include <MemoryBuffer.h>
+#include <VectorBuffer.h>
 #include <Profiler.h>
 #include <ResourceCache.h>
 #include <Camera.h>
@@ -411,6 +412,46 @@ static int l_image_load_data(lua_State *L)
 	return 1;
 }
 
+// texture_png(texture) -> a PNG's bytes (RGB), or nil and why not
+// [KIT_AGENT_VISUALS] **A render target's pixels as a PNG**: what Kit's
+// get_view sends an agent, its client having drawn an off-screen camera
+// into a texture of its own (builtin/kit/client_lua/module.lua). A render
+// target of RGBA or RGB only, 2048 a side at most: what its caller drew
+// into it with its own scene and camera, never the window (whose UI shows
+// what a server must not read: another's windows, the user's typing) and
+// never a texture of the cache. The read waits for the GPU.
+static int l_texture_png(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(texture, 1, Texture2D);
+	auto refuse = [&](const char *why){
+		lua_pushnil(L);
+		lua_pushstring(L, why);
+		return 2;
+	};
+	const int w = texture->GetWidth(), h = texture->GetHeight();
+	const unsigned fmt = texture->GetFormat();
+	if(texture->GetUsage() != TEXTURE_RENDERTARGET || w < 1 || h < 1 ||
+			w > 2048 || h > 2048 || (fmt != Graphics::GetRGBAFormat() &&
+			fmt != Graphics::GetRGBFormat()))
+		return refuse("an RGBA or RGB render target 2048 a side at most");
+	const unsigned c = fmt == Graphics::GetRGBAFormat() ? 4 : 3;
+	std::vector<unsigned char> px((size_t)w * h * c);
+	if(!texture->GetData(0, px.data()))
+		return refuse("the texture could not be read");
+	// RGB: a render target's alpha is whatever the passes left in it
+	Image img(texture->GetContext());
+	img.SetSize(w, h, 3);
+	unsigned char *out = img.GetData();
+	for(size_t i = 0, n = (size_t)w * h; i < n; i++)
+		memcpy(out + i * 3, px.data() + i * c, 3);
+	VectorBuffer buf;
+	if(!img.Save(buf))
+		return refuse("the PNG could not be made");
+	lua_pushlstring(L, (const char*)buf.GetData(), buf.GetSize());
+	return 1;
+}
+
 // get_voxel_data(node) -> string, or nil for a node without the var
 static int l_get_voxel_data(lua_State *L)
 {
@@ -622,6 +663,7 @@ void init_misc_urho3d(lua_State *L)
 	DEF_BUILDAT_FUNC(image_set_region);
 	DEF_BUILDAT_FUNC(texture_set_region);
 	DEF_BUILDAT_FUNC(image_load_data);
+	DEF_BUILDAT_FUNC(texture_png);
 	DEF_BUILDAT_FUNC(sound_set_data);
 	DEF_BUILDAT_FUNC(hold_ref);
 	DEF_BUILDAT_FUNC(tree_depth);
