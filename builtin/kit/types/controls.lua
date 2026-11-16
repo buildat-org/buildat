@@ -1,4 +1,7 @@
--- The players' controls ([KIT] stage 4h), game-wide, on the app root: the
+-- The players' controls ([KIT] stage 4h), game-wide, on the app root
+-- ([KIT_SCENE_TREE] or on a scene: its players' and those of the scenes
+-- under it, the nearest copy from a player's scene up winning, whole; a
+-- movement's own parameters likewise, its nearest copy's): the
 -- camera (first_person: the eye; chase: behind the player, distance away;
 -- top_down: from height above at a fixed angle and yaw, ortho a flat
 -- view; [KIT_PLANE] side: distance across the plane looking along +z, x

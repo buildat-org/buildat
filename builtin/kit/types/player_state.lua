@@ -18,6 +18,9 @@
 -- simplified: the default session's players only (not an arena's
 -- rounds); a place on a moving deck is the world's where they left it.
 -- The first one counts.
+-- simplified: [KIT_SCENE_TREE] game-wide, the first one's wherever it is
+-- (a scene's copy is not its scene's): what a player keeps is theirs in
+-- every scene
 return {
 	version = 1,
 	about = {

@@ -1345,6 +1345,9 @@ struct Module: public interface::Module, public Interface
 	json::Value m_spots = json::object();
 	// The types each player entity carries (`player = true`), Kit's own
 	// inventory and score among them
+	// simplified: [KIT_SCENE_TREE] game-wide, the same in every scene (a
+	// player has one health, inventory, equipment, score wherever they
+	// are); per group the chunk after its to weigh
 	sv_<ss_> m_player_types;
 	// Prefabs by "<author>/<name>", as read, and those placeable
 	sm_<ss_, json::Value> m_prefabs;
@@ -3910,15 +3913,26 @@ struct Module: public interface::Module, public Interface
 					" is no scene and has no position";
 			return false;
 		}
+		// [KIT_SCENE_TREE] a scene under the root or a scene
+		if(n.kind == "scene" && n.parent != 1 && pi->second.kind != "scene"){
+			why = "the scene "+n.name+"'s parent "+itos(n.parent)+" is no scene";
+			return false;
+		}
+		// (MAX_NEST levels under its scene; [KIT_SCENE_TREE] the scenes over
+		// it each a level, 64 in all)
 		uint64_t id = n.parent;
-		for(int i = 0; id != 1; i++){
+		bool scene = n.kind == "scene";
+		for(int i = 0, levels = 0; id != 1; i++){
 			auto it = m_entities.find(id);
-			if(id == n.id || it == m_entities.end() || i > MAX_NEST + 2){
+			if(id == n.id || it == m_entities.end() || i > 64 ||
+					(!scene && levels > MAX_NEST + 2)){
 				why = "entity "+itos(n.id)+"'s parent "+itos(n.parent)+
 						(id == n.id ? " is under it" : it == m_entities.end() ?
 						" is not under the root" : " is too deep");
 				return false;
 			}
+			scene = scene || it->second.kind == "scene";
+			levels++;
 			id = it->second.parent;
 		}
 		return true;
@@ -5805,8 +5819,12 @@ struct Module: public interface::Module, public Interface
 		for(auto &pf : m_prefabs)
 			if(where.empty() && pf.second.stringify().find(q) != ss_::npos)
 				where = "the prefab "+pf.first+" has it";
-		if(where.empty() && jstr(controls_params(), "movement") == name)
-			where = "kit/controls moves the players with it";
+		// ([KIT_SCENE_TREE] a scene's kit/controls too)
+		for(auto &e : m_entities)
+			for(const Instance &in : e.second.comps)
+				if(where.empty() && in.type == "kit/controls" &&
+						jstr(in.params, "movement") == name)
+					where = "kit/controls moves the players with it";
 		return where;
 	}
 
@@ -7558,11 +7576,17 @@ struct Module: public interface::Module, public Interface
 	//   and those under it by id, "outside": {"<id>": "<name>"}}: each entity
 	//   outside it that a link or an entity parameter names, by its name
 	//   ("": it has none);
+	//   [KIT_SCENE_TREE] the scenes under it are among those under it, each
+	//   with its own World; the scene entity's parent 1 (the root), its
+	//   rules from above (root types it has from the scenes it is under or
+	//   the root, kit/player_state's and a World's left out) on an entity
+	//   of their own on it, "Rules from above";
 	//   types/: the custom types it names;
 	//   items.json, sounds.json, voxels.json, prefabs.json: the builders'
 	//   rows it names (its entities, its World's voxels, the rows so named,
 	//   as "<author>/<n>" in quotes), the uploads they wear;
-	//   edits.bin: its World's, under its name.
+	//   edits.bin: its World's, under its name (and each scene's under it,
+	//   under that one's).
 	// import_scene() adds one as a new scene. scene_files() and
 	// add_scene_data() need no editor: `author` is whose name the package
 	// is under (a builder's author_of(), or another's as the server
@@ -7595,7 +7619,7 @@ struct Module: public interface::Module, public Interface
 			why = "no scene "+scene.substr(0, 64);
 			return false;
 		}
-		const json::Value all = authored_json(false).get("entities");
+		json::Value all = authored_json(false).get("entities");
 		std::map<uint64_t, uint64_t> up;
 		std::map<uint64_t, ss_> names;
 		for(unsigned i = 0; i < all.size(); i++){
@@ -7603,8 +7627,9 @@ struct Module: public interface::Module, public Interface
 			up[id] = (uint64_t)json::jint(all.at(i), "parent", 1);
 			names[id] = jstr(all.at(i), "name");
 		}
+		// ([KIT_SCENE_TREE] the scenes under it and theirs too)
 		auto inside = [&](uint64_t id){
-			for(int d = 0; d <= MAX_NEST + 2 && id > 1; d++){
+			for(int d = 0; d <= 64 && id > 1; d++){
 				if(id == sid)
 					return true;
 				auto it = up.find(id);
@@ -7619,12 +7644,49 @@ struct Module: public interface::Module, public Interface
 			if(to > 1 && !inside(to))
 				outside.set(itos(to), names.count(to) ? names[to] : ss_());
 		};
+		// [KIT_SCENE_TREE] the rules it has from above (the scenes it is under,
+		// the root), on an entity of its own where it has none: the nearest
+		// copy of each root type but a World's and kit/player_state (game-wide)
+		int64_t next = m_next_id;
+		const sv_<uint64_t> chain = scene_chain(scene);
+		std::set<ss_> types_above;
+		for(auto &x : m_entities)
+			if(!x.second.has_pos && x.second.kind.empty() && x.second.parent !=
+					sid && std::count(chain.begin(), chain.end(), x.second.parent))
+				for(const Instance &in : x.second.comps)
+					types_above.insert(in.type);
+		json::Value carried = json::array();
+		for(const ss_ &t : types_above){
+			const Type &ty = m_types[t];
+			uint64_t holder = 0;
+			size_t ci = 0;
+			if(!ty.root || ty.world || ty.between_plays ||
+					!scene_instance(t, scene, &holder, &ci) ||
+					m_entities[holder].parent == sid)
+				continue;
+			for(unsigned i = 0; i < all.size(); i++)
+				if((uint64_t)json::jint(all.at(i), "id", 0) == holder &&
+						ci < all.at(i).get("components").size())
+					carried.append(all.at(i).get("components").at((unsigned)ci));
+		}
 		ss_ text, title;
+		if(carried.size()){
+			json::Value ce = json::object();
+			ce.set("id", next++);
+			ce.set("parent", (int64_t)sid);
+			ce.set("name", "Rules from above");
+			ce.set("components", carried);
+			all.append(ce);
+			up[(uint64_t)json::jint(ce, "id", 0)] = sid;
+		}
 		for(unsigned i = 0; i < all.size(); i++){
-			const json::Value &e = all.at(i);
-			const uint64_t id = (uint64_t)json::jint(e, "id", 0);
+			const uint64_t id = (uint64_t)json::jint(all.at(i), "id", 0);
 			if(!inside(id))
 				continue;
+			// (its top on the root in the package)
+			json::Value e = id == sid ? all.at(i).deepcopy() : all.at(i);
+			if(id == sid)
+				e.set("parent", (int64_t)1);
 			es.append(e);
 			text += e.stringify();
 			const json::Value &comps = e.get("components");
@@ -7645,14 +7707,22 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		title = title_cut(title.empty() ? scene : title);
-		// Its World's edits, which name voxels too
+		// Its World's edits, which name voxels too ([KIT_SCENE_TREE] and
+		// those of the scenes under it)
 		json::Value scenes_j = json::object();
 		size_t cells_n = 0, samples_n = 0;
-		World *wd = world_named(scene);
-		json::Value o;
-		if(wd && world_edits(*wd, o, cells_n, samples_n)){
-			scenes_j.set(scene, o);
-			text += o.get("names").stringify();
+		std::set<uint64_t> scene_ids;
+		for(unsigned i = 0; i < es.size(); i++){
+			if(jstr(es.at(i), "kind") != "scene")
+				continue;
+			scene_ids.insert((uint64_t)json::jint(es.at(i), "id", 0));
+			const ss_ sn = jstr(es.at(i), "name");
+			World *wd = world_named(sn);
+			json::Value o;
+			if(wd && world_edits(*wd, o, cells_n, samples_n)){
+				scenes_j.set(sn, o);
+				text += o.get("names").stringify();
+			}
 		}
 		// The rows and custom types it names, and what those name
 		std::map<ss_, std::pair<ss_, ss_>> rows; // key: its name, its text
@@ -7684,8 +7754,7 @@ struct Module: public interface::Module, public Interface
 				",\n\t\"entities\": [\n";
 		if(!export_entities(es, comp, why))
 			return false;
-		int64_t next = m_next_id;
-		world_stand_in({sid}, next, comp);
+		world_stand_in(scene_ids, next, comp);
 		files.push_back({"composition.json", comp+"\t],\n\t\"outside\": "+
 				json_line(outside)+"\n}\n"});
 		for(auto &lt : m_local_types){
@@ -7787,9 +7856,20 @@ struct Module: public interface::Module, public Interface
 
 	// "kit:scene"'s data (a zip, or <aitta>\0<sig>\0<zip>: a release the
 	// client fetched, or the server for a builder) added by the builder at
-	// peer; a: the answer's fields. "" when added
-	ss_ add_scene_data(size_t peer, const ss_ &d, json::Value &a)
+	// peer; a: the answer's fields. "" when added. [KIT_SCENE_TREE] parent:
+	// the scene it goes under ("": the root); the packet's data may begin
+	// \1<parent>\0 for it
+	ss_ add_scene_data(size_t peer, const ss_ &d_in, json::Value &a,
+			ss_ parent = "")
 	{
+		ss_ d = d_in;
+		if(!d.empty() && d[0] == '\1'){
+			const size_t z = d.find('\0');
+			if(z == ss_::npos || z > 65)
+				return "\\1, a scene's name, a 0 byte, then the package";
+			parent = d.substr(1, z - 1);
+			d = d.substr(z + 1);
+		}
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || !pi->second.editing ||
 				!can_edit(peer))
@@ -7852,7 +7932,8 @@ struct Module: public interface::Module, public Interface
 			why = ss_("the archive: ")+e.what();
 		}
 		if(why.empty()){
-			why = import_scene(pi->second, peer, tmp+"/x", aitta, sig, a);
+			why = import_scene(pi->second, peer, tmp+"/x", aitta, sig, a,
+					parent);
 			// [ALPHA_KIT_PACKAGES_PUBLIC] the version that made it, when
 			// another
 			json::json_error_t e;
@@ -7878,7 +7959,7 @@ struct Module: public interface::Module, public Interface
 	// builder deletes them in the types' window); a check of its entities
 	// against the types before any goes in is the upgrade
 	ss_ import_scene(Peer &p, size_t peer, const ss_ &dir, const ss_ &aitta,
-			const json::Value &sig, json::Value &a)
+			const json::Value &sig, json::Value &a, const ss_ &parent)
 	{
 		json::json_error_t err;
 		const json::Value m = json::load_file((dir+"/meta.json").c_str(), &err);
@@ -7896,7 +7977,9 @@ struct Module: public interface::Module, public Interface
 				&err);
 		const json::Value &es = c.get("entities"), &outside = c.get("outside");
 		// Its scene entity on the root, each other one under it
+		// ([KIT_SCENE_TREE] the scenes under it too)
 		std::map<uint64_t, uint64_t> up;
+		std::map<uint64_t, ss_> scene_was;
 		uint64_t sid = 0;
 		for(unsigned i = 0; i < es.size(); i++){
 			const json::Value &e = es.at(i);
@@ -7910,15 +7993,20 @@ struct Module: public interface::Module, public Interface
 				return "composition.json: entity "+itos(id)+" is a player's";
 			if(jstr(e, "kind") != "scene")
 				continue;
-			if(sid || json::jint(e, "parent", 1) != 1)
-				return "composition.json: one scene entity, on the root";
+			if(scene_was.size() >= 64)
+				return "composition.json: more than 64 scenes";
+			scene_was[(uint64_t)id] = jstr(e, "name");
+			if(json::jint(e, "parent", 1) != 1)
+				continue;
+			if(sid)
+				return "composition.json: one scene entity on the root";
 			sid = (uint64_t)id;
 		}
 		if(!sid)
-			return "composition.json: no scene entity";
+			return "composition.json: no scene entity on the root";
 		for(auto &u : up){
 			uint64_t at = u.first;
-			for(int k = 0; at != sid && k <= MAX_NEST + 2 && up.count(at); k++)
+			for(int k = 0; at != sid && k <= 64 && up.count(at); k++)
 				at = up[at];
 			if(at != sid)
 				return "composition.json: entity "+itos(u.first)+" is not under "
@@ -7926,23 +8014,36 @@ struct Module: public interface::Module, public Interface
 		}
 		if(m_entities.size() + up.size() > MAX_ENTITIES)
 			return "the composition would pass "+itos(MAX_ENTITIES)+" entities";
+		// [KIT_SCENE_TREE] under the scene asked for (none: the root)
+		const uint64_t under = parent.empty() ? 1 : scene_id(parent);
+		if(!under)
+			return "no scene "+parent.substr(0, 64)+" to add it under";
 		// Its name, the next free one: no scene, World or World's rows of it
-		ss_ base = jstr(c, "scene");
-		if(!name_ok(base) || base.size() > 32)
-			base = jstr(m, "name");
-		base = base.substr(0, 28);
-		ss_ name, row;
-		for(int n = 1; n < 1000 && name.empty(); n++){
-			const ss_ s = n == 1 ? base : base+"_"+itos(n);
-			if(!scene_id(s) && !m_host.scenes.count(s) && !m_worlds.count(s) &&
-					s != m_host.world_scene && !m_store->get("world:"+s, row) &&
-					!m_store->get("decor:"+s, row) &&
-					!m_store->get("regions:"+s, row) &&
-					m_store->list("hm_edit:"+s+"/").empty())
-				name = s;
+		// ([KIT_SCENE_TREE] each of its scenes')
+		std::map<uint64_t, ss_> scene_name;
+		std::set<ss_> taken;
+		for(auto &sw : scene_was){
+			ss_ base = sw.first == sid ? jstr(c, "scene") : sw.second;
+			if(!name_ok(base) || base.size() > 32)
+				base = sw.first == sid ? jstr(m, "name") : "scene";
+			base = base.substr(0, 28);
+			ss_ name, row;
+			for(int n = 1; n < 1000 && name.empty(); n++){
+				const ss_ s = n == 1 ? base : base+"_"+itos(n);
+				if(!taken.count(s) && !scene_id(s) && !m_host.scenes.count(s) &&
+						!m_worlds.count(s) && s != m_host.world_scene &&
+						!m_store->get("world:"+s, row) &&
+						!m_store->get("decor:"+s, row) &&
+						!m_store->get("regions:"+s, row) &&
+						m_store->list("hm_edit:"+s+"/").empty())
+					name = s;
+			}
+			if(name.empty())
+				return "no free name of "+base;
+			taken.insert(name);
+			scene_name[sw.first] = name;
 		}
-		if(name.empty())
-			return "no free name of "+base;
+		const ss_ name = scene_name[sid];
 		// Its custom types
 		json::Value kept = json::array(), dropped = json::array();
 		size_t added = 0;
@@ -8013,9 +8114,9 @@ struct Module: public interface::Module, public Interface
 			const ss_ en = jstr(e, "name").empty() ? "entity "+itos(was) :
 					jstr(e, "name");
 			e.set("id", (int64_t)ids[was]);
-			e.set("parent", (int64_t)(was == sid ? 1 : ids[up[was]]));
-			if(was == sid)
-				e.set("name", name);
+			e.set("parent", (int64_t)(was == sid ? under : ids[up[was]]));
+			if(scene_name.count(was))
+				e.set("name", scene_name[was]);
 			const json::Value &bt = e.get("built");
 			if(bt.is_object() && ids.count((uint64_t)json::jint(bt, "by", 0))){
 				json::Value b = bt.deepcopy();
@@ -8056,9 +8157,12 @@ struct Module: public interface::Module, public Interface
 		// [KIT_SCENE_ADD_LIVE] Running: in unlisted (its kit/scene_info's
 		// listed off), for its builder to try and then list
 		bool unlisted = false;
+		std::set<int64_t> new_scenes;
+		for(auto &sn : scene_name)
+			new_scenes.insert((int64_t)ids[sn.first]);
 		for(auto &ch : change){
-			if(!m_session.running || json::jint(ch.second, "parent", 0) !=
-					(int64_t)ids[sid])
+			if(!m_session.running || !new_scenes.count(json::jint(ch.second,
+					"parent", 0)))
 				continue;
 			json::Value comps = ch.second.get("components");
 			for(unsigned k = 0; comps.is_array() && k < comps.size(); k++){
@@ -8084,32 +8188,43 @@ struct Module: public interface::Module, public Interface
 				break;
 		}
 		m_pending_ids.clear();
-		if(!why.empty() || (!m_host.scenes.count(name) && !make_scene(name,
-				why))){
+		for(auto &sn : scene_name)
+			if(why.empty() && !m_host.scenes.count(sn.second))
+				make_scene(sn.second, why);
+		if(!why.empty()){
 			m_next_id = next0;
 			return why;
 		}
 		// Its World's edits, under its name: the heightmap's and the
 		// decorations' rows before its World starts, the cells after
+		// ([KIT_SCENE_TREE] each scene's, from its name in the package; the
+		// top's the package's "scene")
 		const json::Value edits = read_edits(dir);
 		json::Value ed = json::object(), sc = json::object();
-		const ss_ from = jstr(c, "scene");
-		if(edits.get("scenes").get(from).is_object())
-			sc.set(name, edits.get("scenes").get(from));
+		for(auto &sn : scene_name){
+			const ss_ from = sn.first == sid ? jstr(c, "scene") :
+					scene_was[sn.first];
+			if(edits.get("scenes").get(from).is_object())
+				sc.set(sn.second, edits.get("scenes").get(from));
+		}
 		ed.set("materials", edits.get("materials"));
 		ed.set("scenes", sc);
 		size_t samples = 0, decors = 0;
 		import_hm(ed, samples, decors);
 		commit(change, &m_undo[p.name]);
-		ss_ hwhy;
-		if(!m_worlds.count(name) && !m_host.world_scene.empty() &&
-				!host_world_of(name, hwhy))
-			warn("scene "+name+": "+hwhy);
+		for(auto &sn : scene_name){
+			ss_ hwhy;
+			if(!m_worlds.count(sn.second) && !m_host.world_scene.empty() &&
+					!host_world_of(sn.second, hwhy))
+				warn("scene "+sn.second+": "+hwhy);
+		}
 		// [KIT_SCENE_ADD_LIVE] Running: its sections over ticks, the round's
 		// own ticks between
 		import_cells(ed, m_session.running);
 		world_check(p.name);
-		ss_ what = "the scene "+name+" ("+jstr(m, "author")+"/"+
+		ss_ what = "the scene "+name+(scene_name.size() > 1 ? " (and "+
+				itos(scene_name.size() - 1)+" under it)" : ss_())+
+				(under > 1 ? " under "+parent : ss_())+" ("+jstr(m, "author")+"/"+
 				jstr(m, "name")+" "+jstr(m, "version")+(aitta.empty() ? ss_() :
 				" from "+interface::aitta::aitta_host(aitta))+"): "+
 				itos(change.size())+" entities, "+itos(dropped.size())+
@@ -8138,6 +8253,10 @@ struct Module: public interface::Module, public Interface
 		m_edit_what = "Added "+what;
 		a.set("what", what);
 		a.set("scene", name);
+		json::Value names_j = json::array();
+		for(auto &sn : scene_name)
+			names_j.append(sn.second);
+		a.set("scenes", names_j);
 		a.set("unlisted", unlisted);
 		a.set("game", jstr(m, "game"));
 		a.set("dropped", dropped);
@@ -8974,11 +9093,13 @@ struct Module: public interface::Module, public Interface
 		const ss_ user = m_server->get_config().get<ss_>("user_path"),
 				cache = m_server->get_config().get<ss_>("cache_path");
 		const ss_ by = p.name;
+		// [KIT_SCENE_TREE] a scene's: the scene it goes under ("": the root)
+		const ss_ parent = jstr(j, "parent").substr(0, 64);
 		log_i(MODULE, "%s installs %s %s from %s", cs(by), cs(kind),
 				cs(key.substr(0, 80)), cs(aitta));
 		m_edit_what = "Fetching "+key.substr(0, 80)+" from "+aitta+"...";
 		pub_wait(peer);
-		pub_thread([this, peer, kind, key, aitta, user, cache, by](){
+		pub_thread([this, peer, kind, key, aitta, user, cache, by, parent](){
 			// Each release to take, those it depends on first
 			sv_<std::pair<json::Value, std::pair<ss_, ss_>>> got;
 			ss_ why, done;
@@ -9049,7 +9170,7 @@ struct Module: public interface::Module, public Interface
 				why = e.what();
 			}
 			return std::function<void()>([this, peer, kind, aitta, got, why,
-					done, by](){
+					done, by, parent](){
 				json::Value a = json::object();
 				ss_ w = why, what = done;
 				if(w.empty() && kind == "template"){
@@ -9060,7 +9181,7 @@ struct Module: public interface::Module, public Interface
 					json::Value s = json::object();
 					const ss_ sig = got[0].second.first;
 					w = add_scene_data(peer, aitta+ss_(1, '\0')+sig+ss_(1, '\0')+
-							got[0].second.second, s);
+							got[0].second.second, s, parent);
 					what = jstr(s, "what");
 					s.set("ok", w.empty());
 					if(!w.empty())
@@ -11858,7 +11979,7 @@ struct Module: public interface::Module, public Interface
 					(rule == "team" && (mine || (team && in_team(me, team))))))
 				return refuse(rule == "nobody" ? "Protected: nobody builds on this" :
 						rule == "team" ? "Not your team's" : "Not yours");
-			const json::Value r = game_rules();
+			const json::Value r = game_rules(pi->second.scene);
 			if(!r.get(dig ? "dig" : "place").is_true())
 				return refuse(dig ? "No digging in this game" : "No placing in this game");
 		}
@@ -15330,9 +15451,27 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_SCENE_PACKAGES] The scenes a kit/scene_info (on the scene, as a
 	// kit/environment is) lists, by the scene's id: {{scene, title (the
-	// scene's name where it gives none), author}...}
-	json::Value listed_scenes()
+	// scene's name where it gives none), author}...}. [KIT_SCENE_TREE] of: an
+	// entity whose list it is (a kit/ui_scene_list's, a kit/arena's): those
+	// right under its scene (on the root: right under the root), where none
+	// are every one.
+	// simplified: right under, not deeper: a hub's list names its groups,
+	// each group's its tracks; a list across the tree is the game's own
+	json::Value listed_scenes(const Entity *of = nullptr)
 	{
+		if(of){
+			ss_ own;
+			scene_of(*of, &own);
+			const uint64_t up = own.empty() ? 1 : scene_id(own);
+			json::Value r = json::array();
+			const json::Value all = listed_scenes();
+			for(unsigned i = 0; i < all.size(); i++){
+				auto s = m_entities.find(scene_id(jstr(all.at(i), "scene")));
+				if(s != m_entities.end() && s->second.parent == up)
+					r.append(all.at(i));
+			}
+			return r.size() ? r : all;
+		}
 		json::Value r = json::array();
 		for(auto &x : m_entities){
 			const Entity &s = x.second;
@@ -15760,7 +15899,7 @@ struct Module: public interface::Module, public Interface
 		// scene's id: {{scene, title, author}...}
 		if(m_types[in.type].listed){
 			o += ",listed=";
-			lua_lit(listed_scenes(), o);
+			lua_lit(listed_scenes(&e), o);
 		}
 		o += ",names=";
 		lua_lit(names, o);
@@ -19845,14 +19984,20 @@ struct Module: public interface::Module, public Interface
 		return nullptr;
 	}
 
-	// A scene's: its own, else the root's; from says which
+	// A scene's: its own, else the root's; from says which ([KIT_SCENE_TREE]
+	// a scene's it is under before the root's, the nearest first: "scene")
 	const Instance* env_of(const ss_ &scene, uint64_t *id = nullptr,
 			const char **from = nullptr)
 	{
-		const Instance *in = env_at(scene_id(scene), id);
+		for(uint64_t h : scene_chain(scene))
+			if(const Instance *in = env_at(h, id)){
+				if(from)
+					*from = h == 1 ? "root" : "scene";
+				return in;
+			}
 		if(from)
-			*from = in ? "scene" : "root";
-		return in ? in : env_at(1, id);
+			*from = "root";
+		return nullptr;
 	}
 
 	json::Value env_values(const Instance &in)
@@ -20535,7 +20680,7 @@ struct Module: public interface::Module, public Interface
 		auto pi = m_peers.find(peer);
 		// [KIT_INVENTORY_PLAY] kit/game_rules' dig, place and placed_only
 		if((action == "dig" || action == "place") && pi != m_peers.end()){
-			const json::Value r = game_rules();
+			const json::Value r = game_rules(pi->second.scene);
 			ss_ no;
 			if(!r.get(action).is_true())
 				no = action == "dig" ? "No digging in this game" :
@@ -21667,14 +21812,60 @@ struct Module: public interface::Module, public Interface
 	// The first instance of a type on the app root (nullptr: none)
 	const Instance* root_instance(const ss_ &type)
 	{
-		for(auto &p : m_entities){
-			if(p.second.parent != 1 || p.second.has_pos)
-				continue;
-			for(const Instance &i : p.second.comps)
-				if(i.type == type)
-					return &i;
+		return scene_instance(type, "");
+	}
+
+	// [KIT_SCENE_TREE] Where a scene's game-wide types are looked up: the
+	// scene, each scene it is under (the nearest first), the app root (1)
+	// last; "" or no such scene: the root alone
+	sv_<uint64_t> scene_chain(const ss_ &scene)
+	{
+		sv_<uint64_t> out;
+		uint64_t id = scene_id(scene);
+		for(int i = 0; id > 1 && i < 64; i++){
+			auto it = m_entities.find(id);
+			if(it == m_entities.end())
+				break;
+			if(it->second.kind == "scene")
+				out.push_back(id);
+			id = it->second.parent;
 		}
-		return nullptr;
+		out.push_back(1);
+		return out;
+	}
+
+	// [KIT_SCENE_TREE] The nearest instance of a type to a scene (kit/controls,
+	// a movement's, kit/game_rules, a builder's root type): on an entity right
+	// under the scene with no position (placed "on": "scene"), else under each
+	// scene it is under, the app root's last; the first of them there.
+	// nullptr: none. holder, comp: its entity and index
+	const Instance* scene_instance(const ss_ &type, const ss_ &scene,
+			uint64_t *holder = nullptr, size_t *comp = nullptr)
+	{
+		const sv_<uint64_t> chain = scene_chain(scene);
+		const Instance *best = nullptr;
+		size_t rank = chain.size();
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(e.has_pos || !e.kind.empty())
+				continue;
+			size_t r = 0;
+			while(r < rank && chain[r] != e.parent)
+				r++;
+			if(r >= rank)
+				continue;
+			for(size_t i = 0; i < e.comps.size(); i++)
+				if(e.comps[i].type == type){
+					best = &e.comps[i];
+					rank = r;
+					if(holder)
+						*holder = p.first;
+					if(comp)
+						*comp = i;
+					break;
+				}
+		}
+		return best;
 	}
 
 	// An instance's parameters over its type's defaults (nullptr: the
@@ -21693,12 +21884,13 @@ struct Module: public interface::Module, public Interface
 		return json::load_string(out.stringify().c_str());
 	}
 
-	json::Value controls_params()
+	// [KIT_SCENE_TREE] scene's: its nearest kit/controls ("": the root's)
+	json::Value controls_params(const ss_ &scene = "")
 	{
 		ss_ why;
 		if(!load_type("kit/controls", why))
 			return json::object();
-		return params_of("kit/controls", root_instance("kit/controls"));
+		return params_of("kit/controls", scene_instance("kit/controls", scene));
 	}
 
 	// [KIT_PLANE] The plane's depth in a scene: the cell's middle (a whole z) of
@@ -21738,7 +21930,7 @@ struct Module: public interface::Module, public Interface
 	void body_movement(Body &b, ss_ &type, json::Value &params,
 			const ss_ &scene)
 	{
-		body_movement_of(b, type, params);
+		body_movement_of(b, type, params, scene);
 		// [KIT_ENVIRONMENT] the scene's gravity, times the movement's own
 		const json::Value &g = params.get("gravity");
 		const double f = env_gravity(scene);
@@ -21746,7 +21938,35 @@ struct Module: public interface::Module, public Interface
 			params.set("gravity", g.as_number() * f);
 	}
 
-	void body_movement_of(Body &b, ss_ &type, json::Value &params)
+	// [KIT_SCENE_TREE] A scene with no ground (its World "none":
+	// [KIT_NO_WORLD]) and no spawner of players in it: a menu's or a hub's.
+	// Its players are held where they are (no movement, as kit/controls'
+	// "none"), not dropped into a fall that meets nothing; a spawner (a
+	// level of polygons or objects) walks them as ever
+	bool scene_holds(const ss_ &scene)
+	{
+		const World *w = world_named(scene);
+		if(!w || !w->world_scene || !w->wp.none())
+			return false;
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(!e.has_pos || !e.kind.empty())
+				continue;
+			bool spawns = false;
+			for(const Instance &in : e.comps){
+				const Type &t = m_types[in.type];
+				spawns = spawns || (t.spawn && (t.spawn_param.empty() ||
+						in.params.get(t.spawn_param).is_true()));
+			}
+			ss_ es;
+			if(spawns && scene_of(e, &es) && es == scene)
+				return false;
+		}
+		return true;
+	}
+
+	void body_movement_of(Body &b, ss_ &type, json::Value &params,
+			const ss_ &scene)
 	{
 		// [KIT_VEHICLE_MOVEMENTS] the vehicle's, a seat's or what it is on; play's
 		// parameters over its own
@@ -21761,13 +21981,16 @@ struct Module: public interface::Module, public Interface
 				return;
 			}
 		b.ride = 0;
-		type = jstr(controls_params(), "movement", "kit/walker");
+		// [KIT_SCENE_TREE] the nearest kit/controls' movement, its parameters
+		// the nearest copy's of it
+		type = scene_holds(scene) ? ss_() :
+				jstr(controls_params(scene), "movement", "kit/walker");
 		if(!is_movement(type)){
 			type = "";
 			params = json::object();
 			return;
 		}
-		params = params_of(type, root_instance(type));
+		params = params_of(type, scene_instance(type, scene));
 		// [KIT_CTF] c:speed's factor (a seat's movement is the vehicle's own)
 		const json::Value &sp = params.get("speed");
 		if(b.speed != 1 && sp.is_number()){
@@ -21817,11 +22040,12 @@ struct Module: public interface::Module, public Interface
 	{
 		WorldScope ws(m_w, world_of_peer(peer));
 		json::Value c = json::object();
-		const json::Value p = controls_params();
+		const Peer &pe = m_peers[peer];
+		// [KIT_SCENE_TREE] their scene's nearest kit/controls
+		const json::Value p = controls_params(pe.scene);
 		c.set("params", p);
 		// The signals' state, those for everyone and this player's
-		const Instance *ci = root_instance("kit/controls");
-		const Peer &pe = m_peers[peer];
+		const Instance *ci = scene_instance("kit/controls", pe.scene);
 		json::Value sig = json::object();
 		if(ci && ci->state.is_object())
 			for(json::Iterator it(ci->state); it; ++it){
@@ -22085,7 +22309,7 @@ struct Module: public interface::Module, public Interface
 		// [KIT_PLANE] onto the plane: its depth, no speed across (a rider is
 		// where its seat is)
 		b.plane_z = NAN;
-		if(jstr(controls_params(), "plane") == "vertical")
+		if(jstr(controls_params(m_peers[peer].scene), "plane") == "vertical")
 			b.plane_z = plane_depth(m_peers[peer].scene);
 		if(!std::isnan(b.plane_z) && !b.ride && b.state.get("pos").is_array() &&
 				b.state.get("pos").size() == 3){
@@ -22235,29 +22459,23 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_PLANE] stage 4: the movement's component on the app root (where
 	// root_instance() has its parameters from): its entity and index
-	bool movement_root(const ss_ &type, uint64_t &id, size_t &comp)
+	// ([KIT_SCENE_TREE] the scene's nearest copy, where the body's parameters
+	// are from)
+	bool movement_root(const ss_ &type, const ss_ &scene, uint64_t &id,
+			size_t &comp)
 	{
-		for(auto &p : m_entities){
-			if(p.second.parent != 1 || p.second.has_pos)
-				continue;
-			for(size_t i = 0; i < p.second.comps.size(); i++)
-				if(p.second.comps[i].type == type){
-					id = p.first;
-					comp = i;
-					return true;
-				}
-		}
-		return false;
+		return scene_instance(type, scene, &id, &comp) != nullptr;
 	}
 
 	// [KIT_PLANE] stage 4: the server's steps' s.events ({"name" | ["name",
 	// value]...}): outputs of the movement's component (none placed: nowhere),
 	// as by the body's player (box.c's "@events")
-	void movement_events(const ss_ &type, const ss_ &player, const json::Value &ev)
+	void movement_events(const ss_ &type, const ss_ &player,
+			const ss_ &scene, const json::Value &ev)
 	{
 		uint64_t id = 0;
 		size_t comp = 0;
-		if(!movement_root(type, id, comp))
+		if(!movement_root(type, scene, id, comp))
 			return;
 		Run r;
 		r.entity = id;
@@ -24979,9 +25197,8 @@ struct Module: public interface::Module, public Interface
 	{
 		int64_t spent = 0;
 		const int64_t now = interface::os::time_us();
-		// [KIT_PLANE] each scene's plane depth, once a tick
-		const bool plane_on = !m_bodies.empty() &&
-				jstr(controls_params(), "plane") == "vertical";
+		// [KIT_PLANE] each scene's plane depth, once a tick ([KIT_SCENE_TREE]
+		// NaN: its nearest kit/controls holds no plane)
 		sm_<ss_, double> depths;
 		for(auto &bp : m_bodies){
 			Body &b = bp.second;
@@ -25004,14 +25221,12 @@ struct Module: public interface::Module, public Interface
 			const bool changed = params.stringify() != b.params.stringify();
 			// [KIT_PLANE] The plane turned on or off, or its spawn moved: put again
 			// onto it (a rider holds nothing: its vehicle steps here)
-			double pz = NAN;
-			if(plane_on){
-				auto di = depths.find(pi->second.scene);
-				if(di == depths.end())
-					di = depths.insert(std::make_pair(pi->second.scene,
-							plane_depth(pi->second.scene))).first;
-				pz = di->second;
-			}
+			auto di = depths.find(pi->second.scene);
+			if(di == depths.end())
+				di = depths.insert(std::make_pair(pi->second.scene,
+						jstr(controls_params(pi->second.scene), "plane") ==
+						"vertical" ? plane_depth(pi->second.scene) : NAN)).first;
+			const double pz = di->second;
 			const bool plane_moved = std::isnan(pz) != std::isnan(b.plane_z) ||
 					(!std::isnan(pz) && pz != b.plane_z);
 			if(plane_moved && b.ride)
@@ -25137,7 +25352,7 @@ struct Module: public interface::Module, public Interface
 								cs(b.type), cs(why));
 						uint64_t id = 0;
 						size_t comp = 0;
-						if(slow && movement_root(b.type, id, comp))
+						if(slow && movement_root(b.type, pi->second.scene, id, comp))
 							add_log(id, b.type+" too slow: "+pi->second.name+"'s body "
 									"stopped till put again or the type's next version ("+
 									why+")");
@@ -25156,7 +25371,7 @@ struct Module: public interface::Module, public Interface
 					b.state.del_key("events");
 					b.state_json = b.state.stringify();
 					if(ev.is_array() && ev.size() && m_session.running)
-						movement_events(b.type, pi->second.name, ev);
+						movement_events(b.type, pi->second.name, pi->second.scene, ev);
 				}
 				stepped = true;
 			}
@@ -26427,8 +26642,10 @@ struct Module: public interface::Module, public Interface
 			why = "Out of play";
 			return false;
 		}
-		const Instance *gr = root_instance("kit/game_rules");
-		if(gr && gr->params.get("peaceful").is_true()){
+		// [KIT_SCENE_TREE] the target's scene's rules
+		ss_ ts;
+		scene_of(t, &ts);
+		if(game_rules(ts).get("peaceful").is_true()){
 			why = "Peaceful: players take no damage";
 			return false;
 		}
@@ -27016,7 +27233,7 @@ struct Module: public interface::Module, public Interface
 					inetwork->send(p.first, "kit:kill", data);
 			});
 		}
-		if(jstr(game_rules(), "respawn") == "on_signal"){
+		if(jstr(game_rules(scene), "respawn") == "on_signal"){
 			set_health(player, "waiting", true);
 			log_i(MODULE, "%s died (%s by %s): waiting to respawn",
 					cs(vname), cs(type), cs(bn));
@@ -27049,12 +27266,18 @@ struct Module: public interface::Module, public Interface
 			why = player_waiting(player) ? "waiting to respawn" : "out of play";
 			return false;
 		}
-		const Instance *gr = root_instance("kit/game_rules");
-		if(gr && gr->params.get("peaceful").is_true()){
+		// [KIT_SCENE_TREE] their scene's rules
+		const size_t tp = peer_of_player(player);
+		ss_ ps;
+		auto pe = m_entities.find(player);
+		if(tp)
+			ps = m_peers[tp].scene;
+		else if(pe != m_entities.end())
+			scene_of(pe->second, &ps);
+		if(game_rules(ps).get("peaceful").is_true()){
 			why = "Peaceful: players take no damage";
 			return false;
 		}
-		const size_t tp = peer_of_player(player);
 		if(!tp)
 			return true;
 		const pv::Vector3DInt32 c = cell_of(m_peers[tp].pos);
@@ -28362,9 +28585,9 @@ struct Module: public interface::Module, public Interface
 	// [KIT_DEFAULT_GROUPS] Digging by tools: [KIT_INVENTORY_PLAY]
 	// kit/game_rules' building "inventory" (the default; "creative": every
 	// voxel digs at once and drops nothing, as before groups)
-	bool dig_by_tools()
+	bool dig_by_tools(const ss_ &scene)
 	{
-		return inventory_mode();
+		return inventory_mode(scene);
 	}
 
 	// A bare hand's speed for a material group (1 / the seconds a voxel
@@ -28385,7 +28608,8 @@ struct Module: public interface::Module, public Interface
 		auto pi = m_peers.find(peer);
 		const world::Material *m = material_named(voxel);
 		if(!m_hosted || pi == m_peers.end() || !m || m->group.empty() ||
-				pi->second.editing || !m_session.running || !dig_by_tools())
+				pi->second.editing || !m_session.running ||
+				!dig_by_tools(pi->second.scene))
 			return true;
 		const json::Value *sheet = nullptr;
 		const ss_ item = hands_of(pi->second.player, &sheet);
@@ -28398,7 +28622,8 @@ struct Module: public interface::Module, public Interface
 		}
 		// [KIT_CTF] kit/game_rules' hand_level: a dig at a hand's speed
 		// of a material above it refused
-		if(hand && m->level > json::jint(game_rules(), "hand_level", 15)){
+		if(hand && m->level > json::jint(game_rules(pi->second.scene),
+				"hand_level", 15)){
 			const ss_ why = "A hand does not dig "+voxel;
 			if(log_refusal(pi->second, why)){
 				log_i(MODULE, "A dig by %s refused: %s (level %i)",
@@ -28461,7 +28686,7 @@ struct Module: public interface::Module, public Interface
 		// itself at any level
 		if(!m_hosted || pi == m_peers.end() || voxel.empty() ||
 				voxel == "air" || pi->second.editing || !m_session.running ||
-				!pi->second.player || !dig_by_tools())
+				!pi->second.player || !dig_by_tools(pi->second.scene))
 			return;
 		const int mlevel = m && !m->group.empty() ? m->level : 0;
 		const json::Value *sheet = nullptr;
@@ -28505,7 +28730,7 @@ struct Module: public interface::Module, public Interface
 		SessionScope sc(*this, session_of_peer(peer));
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || pi->second.editing ||
-				!m_session.running || !inventory_mode())
+				!m_session.running || !inventory_mode(pi->second.scene))
 			return true;
 		const ss_ held = pi->second.player ? hands_of(pi->second.player) : "";
 		if(!held.empty() && held == world::material_of(voxel) &&
@@ -28526,7 +28751,8 @@ struct Module: public interface::Module, public Interface
 		voxel_event(peer, "place", x, y, z, voxel);
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || pi->second.editing ||
-				!m_session.running || !inventory_mode() || !pi->second.player)
+				!m_session.running || !inventory_mode(pi->second.scene) ||
+				!pi->second.player)
 			return;
 		const uint64_t pid = pi->second.player;
 		const ss_ item = world::material_of(voxel);
@@ -28564,22 +28790,38 @@ struct Module: public interface::Module, public Interface
 	// ends. Under a replacing provider or the app's own items: counts only,
 	// none of the slot parts
 
-	json::Value game_rules()
+	// [KIT_SCENE_TREE] scene's: its nearest kit/game_rules (the scene's own,
+	// a scene's it is under, the root's last), whole; "" the root's.
+	// simplified: the inventory's size and screen (slots, hotbar, stack,
+	// full, drop_items, screen) are the root's whatever the scene: game-wide,
+	// per group or track the chunk after [KIT_SCENE_TREE]'s to weigh
+	json::Value game_rules(const ss_ &scene = "")
 	{
+		static const char *GAME_WIDE[] = {"slots", "hotbar", "stack", "full",
+				"drop_items", "screen"};
 		json::Value r = json::object();
 		auto ti = m_types.find("kit/game_rules");
 		if(ti != m_types.end() && ti->second.decl.get("params").is_object())
 			for(json::Iterator it(ti->second.decl.get("params")); it; ++it)
 				r.set(it.key(), (*it).get("default"));
-		const Instance *gr = root_instance("kit/game_rules");
+		const json::Value def = r.deepcopy();
+		const Instance *root = root_instance("kit/game_rules"),
+				*gr = scene.empty() ? root : scene_instance("kit/game_rules", scene);
 		if(gr && gr->params.is_object())
 			for(json::Iterator it(gr->params); it; ++it)
 				r.set(it.key(), *it);
+		if(gr != root)
+			for(const char *k : GAME_WIDE){
+				const json::Value &v = root ? root->params.get(k) : json::Value();
+				r.set(k, v.is_undefined() ? def.get(k) : v);
+			}
 		return r;
 	}
 
 	// [KIT_HUD_STYLE] kit/game_rules' parameters of Kit's own HUD: the
 	// root's, a scene's own kit/game_rules over them for that scene
+	// ([KIT_SCENE_TREE] each scene's it is under before it, the outermost
+	// first: each parameter the nearest copy's that sets it)
 	json::Value hud_rules(const ss_ &scene)
 	{
 		const json::Value r = game_rules();
@@ -28594,25 +28836,26 @@ struct Module: public interface::Module, public Interface
 		for(json::Iterator it(r); it; ++it)
 			if(is_hud(it.key()))
 				h.set(it.key(), *it);
-		uint64_t sc = 0;
-		for(auto &e : m_entities)
-			if(e.second.kind == "scene" && e.second.name == scene)
-				sc = e.first;
-		for(auto &p : m_entities){
-			if(!sc || p.second.parent != sc || p.second.has_pos)
-				continue;
-			for(const Instance &i : p.second.comps)
-				if(i.type == "kit/game_rules" && i.params.is_object())
-					for(json::Iterator it(i.params); it; ++it)
-						if(is_hud(it.key()))
-							h.set(it.key(), *it);
+		const sv_<uint64_t> chain = scene_chain(scene);
+		for(size_t c = chain.size() - 1; c-- > 0;){
+			const uint64_t sc = chain[c];
+			for(auto &p : m_entities){
+				if(p.second.parent != sc || p.second.has_pos)
+					continue;
+				for(const Instance &i : p.second.comps)
+					if(i.type == "kit/game_rules" && i.params.is_object())
+						for(json::Iterator it(i.params); it; ++it)
+							if(is_hud(it.key()))
+								h.set(it.key(), *it);
+			}
 		}
 		return h;
 	}
 
-	bool inventory_mode()
+	// [KIT_SCENE_TREE] scene's (kit/game_rules' building)
+	bool inventory_mode(const ss_ &scene)
 	{
-		return jstr(game_rules(), "building") != "creative";
+		return jstr(game_rules(scene), "building") != "creative";
 	}
 
 	// Kit's own slots in play (not under a replacing provider or the app's
@@ -28622,7 +28865,8 @@ struct Module: public interface::Module, public Interface
 		return !provider() && !app_items();
 	}
 
-	// kit/inventory's params: the rules it stores by
+	// kit/inventory's params: the rules it stores by (game-wide: see
+	// game_rules())
 	json::Value inv_params()
 	{
 		const json::Value r = game_rules();
@@ -28820,7 +29064,6 @@ struct Module: public interface::Module, public Interface
 	{
 		auto pl = m_players.find(who);
 		json::Value j = json::object(), l = json::array();
-		const json::Value r = game_rules();
 		if(pl != m_players.end() && own_slots()){
 			const json::Value s = slots_of(pl->second);
 			for(unsigned i = 0; i < s.size(); i++){
@@ -28839,14 +29082,17 @@ struct Module: public interface::Module, public Interface
 			j.set("held", eq ? json::jint(eq->state, "slot", 0) : 0);
 		}
 		j.set("slots", l);
-		json::Value rules = json::object();
-		for(const char *k : {"building", "slots", "hotbar", "screen",
-				"drop_items", "show_health", "dig", "place"})
-			rules.set(k, r.get(k));
-		rules.set("own", own_slots());
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(auto &p : m_peers)
 				if(p.second.name == who){
+					// [KIT_SCENE_TREE] their scene's (the inventory's size and
+					// screen the root's: game_rules())
+					const json::Value r = game_rules(p.second.scene);
+					json::Value rules = json::object();
+					for(const char *k : {"building", "slots", "hotbar", "screen",
+							"drop_items", "show_health", "dig", "place"})
+						rules.set(k, r.get(k));
+					rules.set("own", own_slots());
 					rules.set("hud", hud_rules(p.second.scene));
 					j.set("rules", rules);
 					inetwork->send(p.first, "kit:slots", j.stringify());
@@ -28859,11 +29105,13 @@ struct Module: public interface::Module, public Interface
 	ss_ m_rules_sent;
 	void rules_watch()
 	{
-		// (a scene's own kit/game_rules too: its HUD's override)
+		// (a scene's own kit/game_rules too: its HUD's override;
+		// [KIT_SCENE_TREE] its rules)
 		ss_ r = game_rules().stringify();
 		for(auto &p : m_entities)
 			if(p.second.kind == "scene")
-				r += hud_rules(p.second.name).stringify();
+				r += game_rules(p.second.name).stringify()+
+						hud_rules(p.second.name).stringify();
 		if(r == m_rules_sent)
 			return;
 		m_rules_sent = r;
@@ -29185,7 +29433,11 @@ struct Module: public interface::Module, public Interface
 		if(!own || !own_slots())
 			return;
 		own->state.set("died", true);
-		const ss_ rule = jstr(game_rules(), "on_death");
+		// [KIT_SCENE_TREE] their scene's rules
+		ss_ scene;
+		double at[3];
+		player_at(pid, scene, at);
+		const ss_ rule = jstr(game_rules(scene), "on_death");
 		json::Value kept = slots_of(pid), gone = json::array();
 		if(rule == "drop" || rule == "lose")
 			std::swap(kept, gone);
@@ -30158,7 +30410,10 @@ struct Module: public interface::Module, public Interface
 				"comp": {"type": "integer"}}, "required": ["id", "comp"]})J", ""},
 			{"set_parent", "parent", "Puts an entity (and what is under it) "
 				"under parent, a positioned entity of your scene (0: the scene), "
-				"where it is in the world kept; it then moves with its parent.",
+				"where it is in the world kept; it then moves with its parent. "
+				"A scene's entity: under another scene (0: the root), the scenes "
+				"under it with it; it then has that scene's game-wide types "
+				"where it has none of its own.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
 				"parent": {"type": "integer"}}, "required": ["id", "parent"]})J",
 				""},
@@ -30279,9 +30534,11 @@ struct Module: public interface::Module, public Interface
 				"required": ["name"]})J", ""},
 			{"new_scene", "new_scene", "Makes a scene (letters, digits and _) "
 				"and takes your edits there; copy: true copies your scene's "
-				"World into it.",
+				"World into it (none: it is empty, no ground). parent: the scene "
+				"it goes under (none: the root).",
 				R"J({"type": "object", "properties": {"name": {"type": "string"},
-				"copy": {"type": "boolean"}}, "required": ["name"]})J", ""},
+				"copy": {"type": "boolean"}, "parent": {"type": "string"}},
+				"required": ["name"]})J", ""},
 			{"switch_scene", "scene", "Takes your edits to another scene "
 				"(get_state lists them).",
 				R"J({"type": "object", "properties": {"name": {"type": "string"}},
@@ -30338,9 +30595,11 @@ struct Module: public interface::Module, public Interface
 				"as a scene package, the files the editor's Export this scene "
 				"zips, as export_template gives them: meta.json (kind scene, "
 				"its game), LICENSE, composition.json (the scene entity and "
-				"those under it; \"outside\": the entities outside it its links "
+				"those under it, the scenes under it among them; the rules it "
+				"has from above on an entity \"Rules from above\"; \"outside\": "
+				"the entities outside it its links "
 				"and entity parameters name, by name), the custom types, rows "
-				"and textures it uses, edits.bin (its World's). The scene "
+				"and textures it uses, edits.bin (each scene's World's). The scene "
 				"list's Add from a file... takes the zip into another game.",
 				R"J({"type": "object", "properties": {"scene": {"type": "string",
 				"description": "Its name; none: the scene the agent is in"}}})J",
@@ -30406,13 +30665,16 @@ struct Module: public interface::Module, public Interface
 			{"install_from_aitta", "aitta_install", "Fetches a package list_aitta "
 				"lists, by its key and Aitta, the server checking its signature "
 				"and asking its Aitta whose key it is: a scene is added to the "
-				"game as a new scene (unlisted while Running), a Kit package "
+				"game as a new scene (unlisted while Running) with the scenes "
+				"under it, under parent (none: the root), a Kit package "
 				"(and those it depends on) installed into it; a template (an "
 				"admin token's) goes into New's Start from.",
 				R"J({"type": "object", "properties": {
 				"kind": {"type": "string", "enum": ["scene", "kit", "template"]},
 				"key": {"type": "string", "description": "list_aitta's key, <fp>/<name>"},
-				"aitta": {"type": "string"}}, "required": ["kind", "key", "aitta"]})J",
+				"aitta": {"type": "string"},
+				"parent": {"type": "string", "description": "A scene's: the scene it goes under"}},
+				"required": ["kind", "key", "aitta"]})J",
 				""},
 			{"publish_log", "=publish_log", "What was published as the server: "
 				"[{time, builder: {account, starport_id}, package, kind, version, "
@@ -30883,10 +31145,18 @@ struct Module: public interface::Module, public Interface
 		json::Value s = json::object(), scenes = json::array();
 		s.set("running", m_session.running);
 		s.set("scene", p.scene);
-		for(auto &e : m_entities)
-			if(e.second.kind == "scene")
-				scenes.append(e.second.name);
+		// [KIT_SCENE_TREE] each before those under it; under: the scene
+		// each is under
+		json::Value under = json::object();
+		const json::Value tree = scene_tree();
+		for(unsigned i = 0; i < tree.size(); i++){
+			scenes.append(tree.at(i).get("name"));
+			if(!jstr(tree.at(i), "up").empty())
+				under.set(jstr(tree.at(i), "name"), tree.at(i).get("up"));
+		}
 		s.set("scenes", scenes);
+		if(under.size())
+			s.set("scenes_under", under);
 		s.set("can_make_scenes", (bool)m_host.make_scene);
 		s.set("undo", (int64_t)m_undo[p.name].size());
 		json::Value es = authored_json(true).get("entities");
@@ -31389,6 +31659,22 @@ struct Module: public interface::Module, public Interface
 			"first, then place, set_param, link, start, try_input, get_events "
 			"and get_log, stop, fix, again. An edit's arguments are 4 KB at "
 			"most. Kit's refusals come back as tool errors saying why.\n";
+		// [KIT_SCENE_TREE] (get_guide's: the instructions are cut at 4000)
+		if(full)
+			s += "- Scenes in a tree: a scene may sit under another "
+				"(new_scene's parent, set_parent with a scene's id; get_state's "
+				"scenes_under), a group (a hub or a menu, a real scene with its "
+				"own World) and its tracks. Root types (kit/controls, the "
+				"movement's, kit/game_rules, kit/environment, your own) are "
+				"looked up from a player's scene up, the nearest copy (placed on "
+				"a scene) winning, the root's last; the inventory's size, "
+				"kit/player_state and the types on every player stay game-wide. "
+				"A kit/ui_scene_list or kit/arena (maps \"*\") lists the listed "
+				"scenes right under its scene (none there: all). A scene with "
+				"scenes under it is not removed. export_scene takes the scenes "
+				"under it, and the rules it has from above. A new scene is empty "
+				"(no ground: its players held still until it has ground or a "
+				"spawner of players).\n";
 		std::map<ss_, sv_<ss_>> groups;
 		for(const ss_ &t : m_palette){
 			const ss_ g = jstr(m_types[t].decl.get("about"), "group");
@@ -32342,6 +32628,9 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// [KIT_PLAYER_PERSIST] kit/player_state's remember (the first one's)
+	// simplified: [KIT_SCENE_TREE] kit/player_state is game-wide, the first
+	// copy's wherever it is (not the nearest to a scene); per group the
+	// chunk after its to weigh
 	bool remembers()
 	{
 		for(auto &p : m_entities)
@@ -33015,11 +33304,14 @@ struct Module: public interface::Module, public Interface
 		j.set("always_keep", always_keep());
 		// [KIT_SCENES] The composition's scenes and theirs, and whether
 		// new ones can be made
+		// ([KIT_SCENE_TREE] each before those under it; scene_tree: {name,
+		// id, up, depth} each)
 		json::Value scenes = json::array();
-		for(auto &e : m_entities)
-			if(e.second.kind == "scene")
-				scenes.append(e.second.name);
+		const json::Value tree = scene_tree();
+		for(unsigned i = 0; i < tree.size(); i++)
+			scenes.append(tree.at(i).get("name"));
 		j.set("scenes", scenes);
+		j.set("scene_tree", tree);
 		// [KIT_SCENE_ADD_LIVE] the listed ones, and the World's own (it stays)
 		if(editing){
 			json::Value ls = json::array();
@@ -33037,7 +33329,8 @@ struct Module: public interface::Module, public Interface
 		// how far in front of it the view begins (kit/controls' side_clip)
 		if(editing){
 			j.set("plane_depth", plane_depth(pi->second.scene));
-			j.set("plane_clip", controls_params().get("side_clip"));
+			j.set("plane_clip", controls_params(pi->second.scene).get(
+					"side_clip"));
 		}
 		j.set("can_make_scenes", (bool)m_host.make_scene);
 		// [KIT_SESSIONS_1] the session they are in: {id, kind, by, clock}
@@ -33932,16 +34225,23 @@ struct Module: public interface::Module, public Interface
 			why = "there is a scene "+name+" already";
 			return false;
 		}
+		// [KIT_SCENE_TREE] "parent": under that scene ("" or none: the root)
+		const ss_ up = jstr(j, "parent").substr(0, 64);
+		const uint64_t up_id = up.empty() ? 1 : scene_id(up);
+		if(!up_id){
+			why = "parent: no scene "+up;
+			return false;
+		}
 		if(!m_host.scenes.count(name) && !make_scene(name, why))
 			return false;
 		const uint64_t sid = m_next_id++;
 		json::Value e = json::object();
 		e.set("id", (int64_t)sid);
-		e.set("parent", (int64_t)1);
+		e.set("parent", (int64_t)up_id);
 		e.set("name", name);
 		e.set("kind", "scene");
 		change.push_back(std::make_pair(sid, e));
-		what = "made the scene "+name;
+		what = "made the scene "+name+(up.empty() ? ss_() : " under "+up);
 		if(!j.get("copy").is_true() || m_host.world_scene.empty())
 			return true;
 		// The current scene's World entity, copied
@@ -33967,6 +34267,75 @@ struct Module: public interface::Module, public Interface
 			break;
 		}
 		return true;
+	}
+
+	// [KIT_SCENE_TREE] {"op": "parent", "id": a scene's entity, "parent": a
+	// scene's (0: the root)}: the scene (and what is under it) under that
+	// one; not under itself or a scene under it
+	bool scene_parent_change(const json::Value &j,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what, ss_ &why)
+	{
+		auto si = m_entities.find((uint64_t)json::jint(j, "id", 0));
+		const int64_t to_id = json::jint(j, "parent", 0);
+		const uint64_t to = to_id <= 1 ? 1 : (uint64_t)to_id;
+		auto ti = m_entities.find(to);
+		if(si == m_entities.end() || si->second.kind != "scene"){
+			why = "id: no scene";
+			return false;
+		}
+		const Entity &s = si->second;
+		if(to != 1 && (ti == m_entities.end() || ti->second.kind != "scene")){
+			why = "parent: entity "+itos(to)+" is no scene (a scene goes under "
+					"the root or a scene)";
+			return false;
+		}
+		for(uint64_t id = to; id > 1;){
+			auto it = m_entities.find(id);
+			if(id == s.id){
+				why = "parent: "+(to == s.id ? ss_("the scene itself") :
+						"a scene under "+s.name);
+				return false;
+			}
+			if(it == m_entities.end())
+				break;
+			id = it->second.parent;
+		}
+		if(to == s.parent){
+			why = "the scene "+s.name+" is under "+(to == 1 ? ss_("the root") :
+					ti->second.name)+" already";
+			return false;
+		}
+		json::Value after = entity_json(s);
+		after.set("parent", (int64_t)to);
+		change.push_back(std::make_pair(s.id, after));
+		what = "put the scene "+s.name+" under "+(to == 1 ? ss_("the root") :
+				"the scene "+ti->second.name);
+		return true;
+	}
+
+	// [KIT_SCENE_TREE] The scenes as a tree, each before those under it (by
+	// id among siblings): [{name, id, up (the scene it is under, "" the
+	// root), depth}]
+	json::Value scene_tree()
+	{
+		json::Value out = json::array();
+		std::function<void(uint64_t, const ss_&, int)> under =
+				[&](uint64_t parent, const ss_ &up, int depth){
+			for(auto &e : m_entities){
+				if(e.second.kind != "scene" || e.second.parent != parent ||
+						depth > 64)
+					continue;
+				json::Value s = json::object();
+				s.set("name", e.second.name);
+				s.set("id", (int64_t)e.first);
+				s.set("up", up);
+				s.set("depth", (int64_t)depth);
+				out.append(s);
+				under(e.first, e.second.name, depth + 1);
+			}
+		};
+		under(1, "", 0);
+		return out;
 	}
 
 	// [KIT_SCENE_ADD_LIVE] Why a change taking a scene away is refused: the
@@ -34018,6 +34387,16 @@ struct Module: public interface::Module, public Interface
 		}
 		if(name == m_host.world_scene){
 			why = "the scene "+name+" is the game's first: it stays";
+			return false;
+		}
+		// [KIT_SCENE_TREE] not with scenes under it
+		ss_ under;
+		for(auto &e : m_entities)
+			if(e.second.kind == "scene" && e.second.parent == sid)
+				under += (under.empty() ? "" : ", ")+e.second.name;
+		if(!under.empty()){
+			why = "the scene "+name+" has scenes under it ("+under.substr(0, 200)+
+					"): remove them or put them elsewhere first";
 			return false;
 		}
 		delete_change(sid, change);
@@ -34495,8 +34874,13 @@ struct Module: public interface::Module, public Interface
 			return component_change(op, j, change, what, why);
 		if(op == "duplicate")
 			return duplicate(j, p, change, what, why);
-		if(op == "parent")
+		if(op == "parent"){
+			// [KIT_SCENE_TREE] a scene: under the root or another scene
+			auto si = m_entities.find((uint64_t)json::jint(j, "id", 0));
+			if(si != m_entities.end() && si->second.kind == "scene")
+				return scene_parent_change(j, change, what, why);
 			return parent_change(j, p, change, what, why);
+		}
 		if(op == "delete"){
 			Entity *e = entity_arg(j, "id", why);
 			if(!e)

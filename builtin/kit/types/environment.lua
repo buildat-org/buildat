@@ -4,6 +4,8 @@
 -- stands), gravity (times each movement's own), the weather and the
 -- season. On the app root it is every scene's; a scene with one of its own
 -- (placed while one is on the root) has that instead, whole.
+-- [KIT_SCENE_TREE] and the scenes under it theirs: the nearest copy from a
+-- scene up.
 --
 -- Kit keeps the clock and tells the clients; they draw the light of the
 -- hour, the weather under open sky (rain, snow, a storm: rain and a dark
