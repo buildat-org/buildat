@@ -133,6 +133,10 @@ static const size_t MAX_PATTERN_NAMES = 256;
 static const int64_t MAX_ITEMS = 1000000;
 // What an editor's packet may be and do
 static const size_t MAX_EDIT_PACKET = 4096;
+// [KIT_AGENT_VISUALS] An entity's comments at most, and an edit packet of
+// them (JSON's escapes: a character at most six bytes, as \u001f is)
+static const size_t MAX_COMMENTS = 4096;
+static const size_t MAX_COMMENTS_PACKET = 6 * MAX_COMMENTS + 256;
 // [KIT_SIGNALS_LIVE] The most of a value a builder's test sends
 static const size_t MAX_TRY_VALUE = 512;
 // The most of an output's value a watcher is told, and how often
@@ -280,6 +284,10 @@ struct Entity
 	// "member" (its number in the build), "moved": true (put elsewhere by
 	// a builder: a rebuild keeps its place)}; undefined if none
 	json::Value built;
+	// authored ([KIT_AGENT_VISUALS]): a builder's notes on it, as comments
+	// in code are (MAX_COMMENTS bytes), in the editor state only: never sent
+	// to a client that is not editing
+	ss_ comments;
 	// runtime ([KIT] stage 4d): made in play (0: authored), 'g' a game
 	// change or 'b' a build by made_by (a player's name), and the instance
 	// that made it
@@ -4396,6 +4404,10 @@ struct Module: public interface::Module, public Interface
 		if(bt.is_object() && json::jint(bt, "by", 0) > 1 &&
 				json::jint(bt, "member", 0) > 0)
 			e.built = bt.deepcopy();
+		// [KIT_AGENT_VISUALS] (a file's or package's over the cap: cut)
+		e.comments = clean_comments(jstr(j, "comments"));
+		if(e.comments.size() > MAX_COMMENTS)
+			e.comments = cut_utf8(e.comments, MAX_COMMENTS);
 		const json::Value &p = j.get("pos");
 		if(!p.is_undefined()){
 			if(!pos_ok(p)){
@@ -4563,6 +4575,27 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
+	// [KIT_AGENT_VISUALS] Comments as kept: no control characters but
+	// newlines and tabs ("\r\n" a newline)
+	static ss_ clean_comments(const ss_ &s)
+	{
+		ss_ o;
+		for(char c : s)
+			if((unsigned char)c >= 32 ? c != 127 : c == '\n' || c == '\t')
+				o += c;
+		return o;
+	}
+
+	// At most n bytes, not cut inside a UTF-8 sequence
+	static ss_ cut_utf8(const ss_ &s, size_t n)
+	{
+		if(s.size() <= n)
+			return s;
+		while(n > 0 && ((unsigned char)s[n] & 0xc0) == 0x80)
+			n--;
+		return s.substr(0, n);
+	}
+
 	json::Value entity_json(const Entity &e)
 	{
 		json::Value j = json::object();
@@ -4575,6 +4608,8 @@ struct Module: public interface::Module, public Interface
 			j.set("prefab", e.prefab);
 		if(!e.built.is_undefined())
 			j.set("built", e.built);
+		if(!e.comments.empty())
+			j.set("comments", e.comments);
 		if(e.has_pos){
 			json::Value pos = json::array();
 			for(int k = 0; k < 3; k++)
@@ -17482,6 +17517,9 @@ struct Module: public interface::Module, public Interface
 			j.set("id", member(id));
 			j.set("parent", member(src.parent));
 			j.set("name", src.name);
+			// [KIT_AGENT_VISUALS]
+			if(!src.comments.empty())
+				j.set("comments", src.comments);
 			// [KIT_PREFAB_ROOT] another prefab's copy among them: still one
 			if(is_root(src))
 				j.set("prefab", src.prefab);
@@ -17600,6 +17638,9 @@ struct Module: public interface::Module, public Interface
 			const int64_t parent = map(m.get("parent"));
 			e.set("parent", parent ? parent : (int64_t)scene);
 			e.set("name", jstr(m, "name"));
+			// [KIT_AGENT_VISUALS] (a member's follow the prefab's, as its name)
+			if(m.get("comments").is_string())
+				e.set("comments", m.get("comments"));
 			const json::Value &bt = m.get("built");
 			if(bt.is_object() && map(bt.get("by"))){
 				json::Value b = bt.deepcopy();
@@ -30431,6 +30472,13 @@ struct Module: public interface::Module, public Interface
 				"its type and id again).",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
 				"name": {"type": "string"}}, "required": ["id", "name"]})J", ""},
+			// [KIT_AGENT_VISUALS]
+			{"set_comments", "comments", "Sets an entity's comments (a "
+				"scene's entity's too): notes for builders, as code comments "
+				"are, never sent to players. Newlines kept, 4096 bytes at most, "
+				"\"\" none. One undo. get_state shows them.",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"},
+				"text": {"type": "string"}}, "required": ["id", "text"]})J", ""},
 			{"add_component", "add_component", "Adds a component of an "
 				"addable type (list_types with type says) to an entity, its "
 				"params at their defaults. One of a type an entity.",
@@ -33672,8 +33720,12 @@ struct Module: public interface::Module, public Interface
 	void on_edit_u(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
-		const json::Value j = packet.data.size() <= MAX_EDIT_PACKET ?
+		// ([KIT_AGENT_VISUALS] comments' are longer)
+		json::Value j = packet.data.size() <= MAX_COMMENTS_PACKET ?
 				json::load_string(packet.data.c_str()) : json::null();
+		if(packet.data.size() > MAX_EDIT_PACKET && !(j.is_object() &&
+				jstr(j, "op") == "comments"))
+			j = json::null();
 		const ss_ op = j.is_object() ? jstr(j, "op").substr(0, 16) : "";
 		auto refuse = [&](const ss_ &why){
 			log_i(MODULE, "An edit (%s) by peer %zu refused: %s",
@@ -34902,6 +34954,34 @@ struct Module: public interface::Module, public Interface
 			copy.name = name;
 			change.push_back(std::make_pair(e->id, entity_json(copy)));
 			what = "renamed "+itos(e->id)+" to "+name;
+			return true;
+		}
+		// [KIT_AGENT_VISUALS] {"op": "comments", "id", "text"}: an entity's
+		// comments (a scene's too), "" none, MAX_COMMENTS bytes at most
+		if(op == "comments"){
+			Entity *e = entity_arg(j, "id", why);
+			if(!e)
+				return false;
+			if(!j.get("text").is_string()){
+				why = "text: a string";
+				return false;
+			}
+			const ss_ text = clean_comments(j.get("text").as_string());
+			if(text.size() > MAX_COMMENTS){
+				why = "text: "+itos(MAX_COMMENTS)+" bytes at most, it is "+
+						itos(text.size());
+				return false;
+			}
+			if(text == e->comments){
+				why = "entity "+itos(e->id)+" has those comments already";
+				return false;
+			}
+			Entity copy = *e;
+			copy.comments = text;
+			change.push_back(std::make_pair(e->id, entity_json(copy)));
+			what = text.empty() ? "cleared "+itos(e->id)+"'s comments" :
+					"set "+itos(e->id)+"'s comments ("+itos(text.size())+
+					" bytes)";
 			return true;
 		}
 		if(op == "add_component" || op == "remove_component" ||
