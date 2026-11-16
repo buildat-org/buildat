@@ -269,9 +269,23 @@ local ON_WEB = GetPlatform() == "Web"
 -- **A release this client runs** ([COMPAT_BREAK_07] 8c): nil, or why not
 -- for a player. A package's newest is the newest it runs; one it runs none
 -- of is shown with this and nothing to install or play.
+-- [ALPHA_KIT_PACKAGES_PUBLIC] A Buildat alpha's package (its manifest's
+-- buildat_version an alpha's, or of a Kit kind), to a client that is no
+-- alpha: not run and not listed, so none is taken for a stable one.
+-- simplified: every Kit kind is an alpha's until 0.8.0 is out; then the
+-- kinds go from here and from the Aitta's alpha_package()
+local function alpha_package(rel)
+	local m = type(rel.manifest) == "table" and rel.manifest or {}
+	return not buildat.version():find("-alpha.", 1, true) and
+			(tostring(m.buildat_version):find("-alpha.", 1, true) ~= nil or
+			m.kind == "template" or m.kind == "scene" or m.kind == "kit")
+end
+
 local function cannot_run(rel)
 	local api = tonumber(rel.engine_api) or 0
-	if api < __buildat_aitta_dev("engine_api_min") then
+	if alpha_package(rel) then
+		return "a Buildat alpha's package"
+	elseif api < __buildat_aitta_dev("engine_api_min") then
 		return "made for an older Buildat"
 	elseif api > __buildat_aitta_dev("engine_api") then
 		return "needs a newer Buildat"
@@ -927,7 +941,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 				if type(rel) == "table" and (not only_reviewed or
 						rel.review == "reviewed") and
 						(rel.serverless == true or not ON_WEB or
-						in_page(rel)) then
+						in_page(rel)) and not alpha_package(rel) then
 					-- The Aitta it came from, never the list's own word: a list
 					-- naming another address sent this client's fetches there
 					rel.aitta = a

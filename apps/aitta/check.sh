@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: quick
-# cost: ~25 s (2026-10-13)
-# covers: apps/aitta/** src/impl/aitta.cpp src/client/main.cpp
+# cost: ~35 s (2026-11-16)
+# covers: apps/aitta/** src/impl/aitta.cpp src/client/main.cpp client/core/aitta/init.lua
 # [AITTA_MVP] step 2: **Aitta takes a signed release and serves it**. The
 # admin joins (the setup code), binds the author name "tester" to a key;
 #   1. a key bound to nobody cannot start an upload;
@@ -9,6 +9,10 @@
 #      changelog), downloaded and installed; a key a newer Buildat added
 #      is kept, and a kind it added (zipped and signed by the check, as
 #      pack refuses one) is listed as "other" with its manifest whole;
+#      [ALPHA_KIT_PACKAGES_PUBLIC] an alpha's scene and app are listed
+#      whole too; the pages list them apart, marked, with no Install,
+#      tester/demo as before; the launcher's Apps from Aitta lists them
+#      not;
 #   3. a licence the instance does not take, and a manifest whose author
 #      is not the key's, are refused;
 #   4. the admin delists it: off the list, and its archive not served;
@@ -40,6 +44,7 @@ manifest(){ # author version licence [more keys]
 	printf '{"author": "%s", "name": "demo", "version": "%s",%s
 		"engine_api": 2, "license_code": "%s", "license_media": "CC0-1.0",
 		"description": "a check", "home_hearth": "https://forum.example",
+		"audience": "everyone",
 		"changelog": "CHANGELOG.md"}\n' "$1" "$2" "${4:-}" "$3" > "$t/app/meta.json"
 }
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
@@ -52,14 +57,17 @@ out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1) &&
 	fail "an unbound key published: $out"
 echo "$out" | grep -q "not bound" || fail "the unbound key's refusal: $out"
 
-# The admin binds tester to the key
+# The admin binds tester to the key, and has the pages show a release at
+# once (for the alpha's below)
 # Each admin run is one request; done at its answer ("ai: {"id":1,...")
 printf 'wait_log_any 30000 "id":1,"ok":\nquit\n' > "$t/cmds"
+printf 'wait_log_any 30000 "id":2,"ok":\nquit\n' > "$t/cmds2"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 BUILDAT_AITTA_CODE=$code \
-BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}" \
+BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}
+{\"cmd\":\"set_settings\",\"settings\":{\"page_delay\":0}}" \
 	timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
-	-c @"$t/cmds" > "$t/cl.log" 2>&1
+	-c @"$t/cmds2" > "$t/cl.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl.log" ||
 	fail "the bind did not go through ($(grep -a 'ai:' "$t/cl.log" | head -2))"
 
@@ -128,6 +136,89 @@ assert r["kind"] == "other", r
 assert r["manifest"]["kind"] == "warp" and r["manifest"]["warp_speed"] == 9, r' ||
 	fail "the unknown kind is not listed as \"other\" with its manifest whole"
 
+# [ALPHA_KIT_PACKAGES_PUBLIC] A Buildat alpha's packages, zipped and signed
+# here as the warp one: a scene (a Kit kind) made with 0.8.0-alpha.26, and
+# an app whose buildat_version alone is an alpha's, with a stranger's <i>
+mkdir -p "$t/alpha"
+cp "$t/app/CHANGELOG.md" "$t/alpha/"
+for n in crag early; do
+	if [ $n = crag ]; then
+		x='"kind": "scene", "buildat_version": "0.8.0-alpha.26", "game": "tester.trial",
+		"description": "a <script>alert(3)</script> scene",'
+	else
+		x='"buildat_version": "0.8.0-alpha.26<i>", "description": "an early app",'
+	fi
+	printf '{"author": "tester", "name": "%s", "version": "1.0.0", %s
+		"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
+		"audience": "everyone", "changelog": "CHANGELOG.md"}\n' $n "$x" > "$t/alpha/meta.json"
+	rawsign "$t/alpha" "$t/key" "$t/raw/tester-$n-1.0.0" || fail "the raw $n"
+	out=$("$b" aitta publish "$t/raw/tester-$n-1.0.0.zip" 127.0.0.1:$P 2>&1)
+	echo "$out" | grep -q "listed: tester/$n/1.0.0" || fail "publish $n: $out"
+done
+# The list has them as it had the warp one
+curl -s "http://127.0.0.1:$P/api/v1/aitta/list" | python3 -c 'import json,sys
+rs = {r["name"]: r for r in json.load(sys.stdin)["releases"]}
+c, e = rs["crag"], rs["early"]
+assert c["kind"] == "other" and c["manifest"]["kind"] == "scene", c
+assert c["manifest"]["buildat_version"] == "0.8.0-alpha.26", c
+assert c["manifest"]["game"] == "tester.trial", c
+assert e["kind"] == "app" and e["manifest"]["buildat_version"] == "0.8.0-alpha.26<i>", e' ||
+	fail "the alpha releases are not listed with their manifests whole"
+# / lists them apart after tester/demo (as before), marked, the kind named,
+# the stranger's text as text
+p=$(curl -s "http://127.0.0.1:$P/")
+h='<h2>Alpha packages</h2>'
+grep -qF "$h" <<< "$p" || fail "no Alpha packages on /: $p"
+st=${p%%"$h"*} al=${p#*"$h"}
+grep -q 'href="/p/tester/demo"' <<< "$st" && ! grep -q 'href="/p/tester/demo"' <<< "$al" ||
+	fail "tester/demo is not among the stable packages on /: $p"
+for n in crag early; do
+	grep -q "href=\"/p/tester/$n\"" <<< "$al" && ! grep -q "href=\"/p/tester/$n\"" <<< "$st" ||
+		fail "tester/$n is not listed apart on /: $p"
+done
+grep -q '<span class="meta">scene, ' <<< "$al" || fail "the scene's kind is not named on /: $al"
+grep -qF 'Alpha: for Buildat 0.8 alpha</b>, made with 0.8.0-alpha.26;' <<< "$al" ||
+	fail "the scene is not marked on /: $al"
+grep -qF 'made with 0.8.0-alpha.26&lt;i&gt;;' <<< "$al" ||
+	fail "the app's buildat_version is not shown as text on /: $al"
+grep -qF 'a &lt;script&gt;alert(3)&lt;/script&gt; scene' <<< "$al" ||
+	fail "the scene's description is not shown as text on /: $al"
+grep -q '<script>\|alpha\.26<i>' <<< "$p" && fail "/ has a stranger's markup: $p"
+grep -q '/api/v1/aitta/archive/[0-9a-f]*\.zip' <<< "$al" || fail "no .zip for an alpha's on /"
+# Their pages: marked, no Install; tester/demo's as before
+for n in crag early; do
+	q=$(curl -s "http://127.0.0.1:$P/p/tester/$n")
+	grep -qF "<h1>tester/$n</h1>" <<< "$q" && grep -qF "<h2>Alpha releases</h2>" <<< "$q" &&
+		grep -qF "Alpha: for Buildat 0.8 alpha" <<< "$q" || fail "/p/tester/$n is not marked: $q"
+	grep -q "<h2>Install</h2>\|aitta install\|<b>Install\|Play in the browser" <<< "$q" &&
+		fail "/p/tester/$n offers an install: $q"
+done
+q=$(curl -s "http://127.0.0.1:$P/p/tester/demo")
+grep -qF "<h2>Install</h2>" <<< "$q" && grep -qF "bin/buildat aitta install" <<< "$q" ||
+	fail "/p/tester/demo lost its Install: $q"
+grep -q "Alpha" <<< "$q" && fail "/p/tester/demo is marked an alpha's: $q"
+# A stable client's Apps from Aitta lists tester/demo and not them
+echo "{\"aittas\": [\"http://127.0.0.1:$P\"]}" > "$t/managed.json"
+cat > "$t/page.cmds" <<C
+wait_log_any 30000 rows in
+text apps from aitta
+wait_log 5000 apps from aitta"
+keypress Return
+wait_log 10000 Asking the user about http://127.0.0.1:$P
+delay 1000
+click Button "Accept"
+wait_log 15000 aitta page: tester/demo 1.3.0
+quit
+C
+BUILDAT_STARPORT_MANAGED="$t/managed.json" timeout 90 bin/buildat -m launch_menu \
+	-D "$t/cl_lnch" -w 1024x700 -l 3 -o sound_mute=1 -c @"$t/page.cmds" > "$t/page.log" 2>&1
+# Not the wait_log's own echo of the line
+mine(){ grep -a "$1" "$2" | grep -av "command: \|wait_log: "; }
+mine "aitta page: tester/demo 1.3.0" "$t/page.log" > /dev/null ||
+	fail "Apps from Aitta did not list tester/demo ($(grep -a "aitta page\|Command seq" "$t/page.log" | tail -3))"
+mine "aitta page: tester/crag\|aitta page: tester/early" "$t/page.log" &&
+	fail "Apps from Aitta lists an alpha's package"
+
 # A manifest over 16 KiB is refused: it is kept whole and handed out in
 # every list ([SECURITY_RUN_5])
 manifest tester 1.5.0 MIT " \"pad\": \"$(head -c 17000 /dev/zero | tr '\0' x)\","
@@ -192,7 +283,8 @@ BUILDAT_AITTA_REQS='{"cmd":"delist","release":"tester/demo/1.0.0"}' \
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl2.log" || fail "the delist did not go through"
 # The releases, not the "delisted" beside them ([AITTA_REPORTS])
 curl -s "http://127.0.0.1:$P/api/v1/aitta/list" | python3 -c 'import json,sys
-sys.exit(0 if any(r["version"] == "1.0.0" for r in json.load(sys.stdin)["releases"]) else 1)' &&
+sys.exit(0 if any(r["name"] == "demo" and r["version"] == "1.0.0"
+	for r in json.load(sys.stdin)["releases"]) else 1)' &&
 	fail "a delisted release is listed"
 [ "$(curl -s -o /dev/null -w '%{http_code}' \
 	"http://127.0.0.1:$P/api/v1/aitta/archive/$sha.zip")" = 404 ] ||
@@ -203,4 +295,4 @@ sys.exit(0 if any(r["version"] == "1.0.0" for r in json.load(sys.stdin)["release
 curl -s $(for i in $(seq 490); do echo "http://127.0.0.1:$P/api/v1/aitta/info"; done) |
 	grep -q "too many requests from your network" ||
 	fail "490 reads in a row were not limited"
-echo "PASS: bound, published, listed, installed; a newer key kept; an unbound key, an app of 25000 files, a licence, another author refused; delisted; reads limited"
+echo "PASS: bound, published, listed, installed; a newer key kept; an alpha's packages listed whole, apart on the pages and not in Apps from Aitta; an unbound key, an app of 25000 files, a licence, another author refused; delisted; reads limited"
