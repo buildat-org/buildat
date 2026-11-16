@@ -44,7 +44,7 @@ keypress Escape
 wait_log 5000 pause: the menu shown
 click Button "My account (lanowner)..."
 wait_log 5000 server window: the page account
-wait_log_any 5000 server window: the sidebar Account, Pushes (ntfy), Open to LAN, Accounts
+wait_log_any 5000 Account, Pushes (ntfy), Open to LAN
 click Button "Open to LAN"
 wait_log 5000 server window: the page lan
 delay 500
