@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-15)
-# covers: builtin/kit/types/lobby.lua builtin/kit/types/ui_chat.lua builtin/kit/types/ui_view.lua builtin/kit/types/ui_panel.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/players.lua
+# covers: builtin/kit/types/lobby.lua builtin/kit/types/ui_scene_list.lua builtin/kit/types/scene_info.lua builtin/kit/kit.cpp builtin/kit/types/ui_chat.lua builtin/kit/types/ui_view.lua builtin/kit/types/ui_panel.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/players.lua
 # [KIT_LOBBY] A lobby on Workbench. kitboss (the admin) places 3 kit/lobby,
 # its lobby screen 4 (a kit/ui_panel, screen full, to the player: 5 a
 # kit/ui_chat, 6 Play -> 3 play, 7 a kit/ui_view following 3's entered and
@@ -10,7 +10,10 @@
 # 11 Lobby -> 3 lobby), 12 a HUD panel with 13 Finish -> 3 over and 14 a
 # HUD text, [KIT_LAYOUT_AUTO] 15 a panel of layout auto at the lobby's
 # bottom holding 5 and 7 ([KIT_PANEL_LEFTOVERS] its duplicate 16 under 4
-# as it is, hidden). Back beside kitbob, each in the lobby (a full
+# as it is, hidden); [KIT_SCENE_PACKAGES] 11's link by name (3 renamed
+# "the lobby", the link "to_name" in the save), 19 a kit/scene_info on
+# the scene and 20 a kit/ui_scene_list on the lobby screen listing it
+# ("Yard, by kitboss"). Back beside kitbob, each in the lobby (a full
 # screen: no world, no HUD; the chat left of the view in a row on these
 # landscape screens), kitboss says a line in the lobby's chat, plays (the
 # screen gone, the view following him), finishes (the result card over the
@@ -97,7 +100,9 @@ EOF
 	place kit/ui_button 8
 	in_panel 11 8
 	set_p 11 label '"Lobby"'
-	link 11 pressed 3 lobby
+	# [KIT_SCENE_PACKAGES] by name: 3 "the lobby" in the player's scene
+	edit '{"op": "rename", "id": 3, "name": "the lobby"}'
+	edit '{"op": "link", "id": 11, "comp": 0, "output": "pressed", "to_name": "the lobby", "input": "lobby"}'
 	place kit/ui_panel 9
 	set_p 12 title '"Run"'
 	set_p 12 anchor '"top_left"'
@@ -125,6 +130,14 @@ EOF
 	set_p 16 shown false
 	set_p 3 lobby_screen 4
 	set_p 3 over_screen 8
+	# [KIT_SCENE_PACKAGES] the scene listed (19), its list on the lobby (20)
+	place kit/scene_info 13
+	set_p 19 title '"Yard"'
+	set_p 19 author '"kitboss"'
+	place kit/ui_scene_list 14
+	in_panel 20 4
+	set_p 20 title '"Tracks"'
+	set_p 20 anchor '"top"'
 	cat <<'EOF'
 keypress F6
 wait_log 10000 kit editor: edit mode off
@@ -139,6 +152,7 @@ wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 player physics enabled
 wait_log_any 30000 kit: ui full screen 4 up
 wait_log_any 30000 kit: ui 7 view
+wait_log_any 10000 shown, layer 4: "Tracks | Yard, by kitboss"
 click LineEdit "kit chat 5"
 delay 300
 text hello lobby
@@ -256,6 +270,10 @@ for l in "kit/lobby 3: kitboss: none -> lobby" "kit/lobby 3: kitboss: lobby -> p
 		"kit/lobby 3: kitbob: none -> lobby" "kit/ui_view 7: follows kitboss"; do
 	grep -aqF "$l" "$s" || fail "no \"$l\" ($s)"
 done
+grep -a "dropped: " "$s" && fail "a link by name dropped ($s)"
+grep -a -A1 "Exception on handling packet" "$t"/boss1.log "$t"/boss2.log "$t"/bob.log &&
+	fail "a client's packet handler failed"
+grep -aqF "kit/ui_scene_list 20: scenes: world=Yard/kitboss" "$s" || fail "no listed scene Yard ($s)"
 # Again from the result: over -> playing a second time
 [ "$(grep -acF "kit/lobby 3: kitboss: over -> playing" "$s")" -ge 1 ] ||
 	fail "Again did not start a run ($s)"
@@ -291,6 +309,10 @@ assert e[16]["parent"] == 4 and "pos" not in e[16], e.get(16)
 assert e[17]["parent"] == 16 and e[18]["parent"] == 16, (e.get(17), e.get(18))
 assert e[16]["components"][0]["type"] == "kit/ui_panel", e[16]
 print("ok: the panel's copy under the lobby screen", e[16])
+# [KIT_SCENE_PACKAGES] Lobby's link by name kept as one
+ls = e[11]["components"][0]["links"]
+assert ls == [{"output": "pressed", "to_name": "the lobby", "input": "lobby"}], ls
+print("ok: a link by name saved as to_name", ls)
 PY
 bob=$(grep -aoP 'kit: this player is entity \K[0-9]+' "$t/bob.log" | tail -1)
 [ -n "$bob" ] || fail "no entity of kitbob's ($t/bob.log)"

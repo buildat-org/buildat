@@ -131,6 +131,8 @@ function M.use_chat(c)
 end
 -- The full screen up in play (its id), from the last update
 local full_up = nil
+-- [KIT_SCENE_PACKAGES] a button of action "pause_menu" shown on it
+local full_menu = false
 
 buildat.sub_packet("kit:mine", function(data)
 	local m = network.parse_json(data)
@@ -419,14 +421,21 @@ local function make(r, id, parent, in_panel)
 			return
 		end
 		local a = tostring(u.action or "")
-		if a ~= "" then
-			M.press_action(a, down)
-		else
-			buildat.send_packet("kit:ui", id .. (down and " 1" or " 0"))
-		end
+		-- (said first: what the press does logs after it)
 		if down then
 			log:info("kit: ui button " .. id .. " pressed" ..
 					(a ~= "" and " (action " .. a .. ")" or ""))
+		end
+		if a == "pause_menu" then
+			-- [KIT_SCENE_PACKAGES] the app's pause menu (Esc's, the touch
+			-- bar's Menu)
+			if down and E.menu then
+				E.menu.open()
+			end
+		elseif a ~= "" then
+			M.press_action(a, down)
+		else
+			buildat.send_packet("kit:ui", id .. (down and " 1" or " 0"))
 		end
 	end
 end
@@ -693,6 +702,65 @@ local function rect(b, x, y, w, h)
 	b:SetFixedSize(math.max(0, math.floor(w)), math.max(0, math.floor(h)))
 end
 
+-- [KIT_SCENE_PACKAGES] A scene list's rows ({title, author, scene}): a
+-- button each ("<title>, by <author>"), its press "kit:ui" "<id> 1|0
+-- <row>"; placed in a column under the title (from y, w wide, rh high each
+-- with a gap); returns the widest label and a row's height
+local function list_rows(r, id, rows, px, V)
+	r.rows = r.rows or {}
+	local font = magic.cache:GetResource("Font", FONT)
+	local white = color(r.ui.color, magic.Color(1, 1, 1))
+	local lw, lh = 0, 0
+	for i = 1, math.max(#rows, #r.rows) do
+		local row, e = rows[i], r.rows[i]
+		if row and not e then
+			local b = r.el:CreateChild("Button")
+			b.color = magic.Color(0, 0, 0, 0)
+			b.priority = 4
+			local bg = b:CreateChild("BorderImage")
+			bg.blendMode = magic.BLEND_ALPHA
+			bg.priority = 1
+			local t = b:CreateChild("Text")
+			t.priority = 5
+			t:SetTextEffect(magic.TE_SHADOW)
+			e = {b = b, bg = bg, t = t}
+			local function press(down)
+				if not E.editing then
+					buildat.send_packet("kit:ui", id .. (down and " 1 " or " 0 ") .. i)
+					if down then
+						log:info("kit: ui list " .. id .. " row " .. i .. " pressed")
+					end
+				end
+			end
+			magic.SubscribeToEvent(b, "Pressed", function() press(true) end)
+			magic.SubscribeToEvent(b, "Released", function() press(false) end)
+			r.rows[i] = e
+		end
+		if e then
+			e.b.visible = row ~= nil
+		end
+		if row then
+			local label = tostring(row[1] or ""):sub(1, 60)
+			local by = tostring(row[2] or "")
+			if by ~= "" then
+				label = label .. ", by " .. by:sub(1, 40)
+			end
+			local key = px .. "|" .. label
+			if e.key ~= key then
+				e.key, e.label = key, label
+				e.t:SetFont(font, px)
+				e.t.text = label
+				e.t:SetColor(white)
+				e.bg.color = color(r.ui.border, magic.Color(0.5, 0.5, 0.5, 0.6))
+			end
+			lw = math.max(lw, e.t.minWidth)
+			lh = math.max(lh, e.t.height)
+		end
+	end
+	return lw, math.max(lh + math.floor(0.7 * V) * 2, TOUCH and 36 or
+			math.floor(2.4 * V))
+end
+
 -- The layers at w x h, a bar's fill at f
 local function dress(r, w, h, V, f)
 	local p = r.parts
@@ -896,6 +964,12 @@ end
 -- drawn under it
 function M.full_screen()
 	return not E.editing and full_up or nil
+end
+
+-- [KIT_SCENE_PACKAGES] Whether the full screen up shows a button of action
+-- "pause_menu" (the touch overlay's Menu not needed then)
+function M.full_screen_menu()
+	return full_up ~= nil and full_menu
 end
 
 -- [KIT_LOBBY] The layer a UI element is on: a screen's id, or "hud" (nil: no
@@ -1110,6 +1184,7 @@ local function update()
 		own_sel = nil
 	end
 	local wants = false
+	local menu_on = false
 	-- A placed health bar up instead of the rules' own
 	local placed_health = false
 	-- [KIT_LOBBY] the full screen up (the first of the list's)
@@ -1201,7 +1276,9 @@ local function update()
 			end
 			r.pw, r.ph, r.top = pw, ph, top
 			local text = shown_text(u.text, value)
-			if u.kind == "button" and text == "" and tostring(u.action or "")
+			if u.kind == "button" and text == "" and u.action == "pause_menu" then
+				text = "Menu"
+			elseif u.kind == "button" and text == "" and tostring(u.action or "")
 					~= "" then
 				for _, a in ipairs(M.world_actions()) do
 					if a.name == u.action then
@@ -1277,6 +1354,22 @@ local function update()
 						y = y + lh
 						text = text .. " | " .. tostring(row[1]) .. " " ..
 								tostring(row[3]) .. " " .. tostring(row[2])
+					end
+					r.text = text
+				elseif u.kind == "list" then
+					-- [KIT_SCENE_PACKAGES] the title, then a button a scene
+					fit_text(r, text, px, nil, nil, pw, pad)
+					local rows = type(value) == "table" and value or {}
+					local lw, rh = list_rows(r, id, rows, px, V)
+					local th = text ~= "" and r.t.height + pad or 0
+					local gap = math.floor(0.6 * V)
+					w = math.min(W > 0 and W or math.max(r.tw, lw + 4 * pad) + 2 * pad,
+							pw)
+					h = math.min(H > 0 and H or th + #rows * (rh + gap) - gap +
+							2 * pad, ph)
+					r.list_th, r.list_rh, r.list_n = th, rh, #rows
+					for i in ipairs(rows) do
+						text = text .. " | " .. r.rows[i].label
 					end
 					r.text = text
 				elseif u.kind == "input" then
@@ -1412,8 +1505,11 @@ local function update()
 				if r.full then
 					x, y = 0, 0
 				else
+					-- ([KIT_SCENE_PACKAGES] in a full screen above the touch
+					-- Menu over it)
 					x, y = place(u, w, h, r.pw, r.ph,
-							pr and 0 or r.own and own_lift(r.own, V) or lift, V)
+							pr and (pr.full and not E.editing and lift or 0) or
+							r.own and own_lift(r.own, V) or lift, V)
 				end
 				if pr then
 					x, y = x + pad, y + pad + r.top
@@ -1439,6 +1535,19 @@ local function update()
 			r.el:SetFixedSize(math.floor(w), math.floor(h))
 			if u.kind == "players" then
 				r.t:SetPosition(pad, pad)
+			elseif u.kind == "list" then
+				-- [KIT_SCENE_PACKAGES] the title centred, the rows as wide as
+				-- it under it (its width a layout's too)
+				r.t:SetPosition(math.max(1, math.floor((w - r.tw) / 2)), pad)
+				local y, rh = pad + (r.list_th or 0), r.list_rh or 0
+				for i = 1, r.list_n or 0 do
+					local e = r.rows[i]
+					rect(e.b, pad, y, w - 2 * pad, rh)
+					rect(e.bg, 0, 0, w - 2 * pad, rh)
+					e.t:SetPosition(math.max(1, math.floor((w - 2 * pad -
+							e.t.minWidth) / 2)), math.floor((rh - e.t.height) / 2))
+					y = y + rh + math.floor(0.6 * V)
+				end
 			elseif u.kind ~= "panel" then
 				r.t:SetPosition(math.max(1, math.floor((w - r.tw) / 2)),
 						math.floor((h - r.t.height) / 2))
@@ -1507,6 +1616,10 @@ local function update()
 			end
 			r.el.visible = not edit_off() and layer_on and not r.skip and
 					not (r.empty and not frame) and ((live and r.on) or frame or (r.own ~= nil and r.on))
+			if r.el.visible and up and r.layer == up and r.kind == "button" and
+					u.action == "pause_menu" then
+				menu_on = true
+			end
 			r.el.enabled = frame or r.kind ~= "text"
 			local blink = tonumber(u.blink_below) or 0
 			r.blinking = not E.editing and r.frac ~= nil and blink > 0 and
@@ -1569,7 +1682,8 @@ local function update()
 			if play and r.on and r.kind == "panel" then
 				for _, o in pairs(U) do
 					if (o.kind == "button" or o.kind == "input" or
-							o.kind == "chat") and panel_of(o) == id then
+							o.kind == "chat" or o.kind == "list") and
+							panel_of(o) == id then
 						wants = true
 					end
 				end
@@ -1627,6 +1741,7 @@ local function update()
 		end
 	end
 	want.visible = wants
+	full_menu = menu_on
 end
 
 -- ---- The selected one's handles (edit mode)
@@ -2011,7 +2126,7 @@ local function hit(x, y)
 	local best, area = nil, nil
 	for id, r in pairs(U) do
 		if r.el and r.el.visible and (E.editing or r.kind == "button" or
-				r.kind == "input" or r.kind == "chat" or
+				r.kind == "input" or r.kind == "chat" or r.kind == "list" or
 				(r.kind == "panel" and r.has_bg)) then
 			local ok, a = pcall(function()
 				local p, s = r.el.screenPosition, r.el.size

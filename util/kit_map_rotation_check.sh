@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3.5 min (2026-11-07)
-# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/arena.lua builtin/kit/client_lua/editor.lua apps/workbench/**
+# covers: builtin/kit/kit.cpp builtin/kit/api.h builtin/kit/box/box.c builtin/kit/types/arena.lua builtin/kit/types/scene_info.lua builtin/kit/client_lua/editor.lua apps/workbench/**
 # [KIT_MAP_ROTATION] (kit_plan stage 7b) One composition, a lobby and three
 # maps as scenes of it, composed on a fresh Workbench save with the editor's
 # ops (kitboss, the admin) and played by kitboss and kitbob. The maps:
@@ -22,6 +22,9 @@
 #   3. map_pick signal: alpha, alpha again; the lobby's prev button: gamma
 #      (the use of its button there leaves the round on gamma); next twice:
 #      beta
+#   4. [KIT_SCENE_PACKAGES] maps "*" (Stop, set, Play): the scenes a
+#      kit/scene_info lists (each map has one, the lobby's world none),
+#      round-robin: alpha, beta
 # For each round: the session on the map, both players into that map's copy
 # and its teams, its team the winner, the players
 # back in the lobby; the client's text its map's. Screenshots (look at them):
@@ -108,6 +111,8 @@ map_scene() # <name> <biome> <seconds> <team 1> <color> <team 2> <color>
 	set_ $id text "\"Map $1\""
 	set_ $id anchor '"top_left"'
 	set_ $id size 5
+	# ([KIT_SCENE_PACKAGES] listed: maps "*")
+	place kit/scene_info '0, 1, 10'
 }
 {
 	cat <<'EOF'
@@ -272,6 +277,24 @@ event kit_use $NEXT
 wait_log 3000 Next map: beta
 EOF
 	round 14
+	# 4. [KIT_SCENE_PACKAGES] maps "*": the listed scenes (each map's
+	# kit/scene_info, the lobby's world none), round-robin
+	cat <<'EOF'
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended (by kitboss)
+keypress F6
+wait_log 10000 kit editor: edit mode on
+EOF
+	set_ $ARENA maps '"*"'
+	set_ $ARENA map_pick '"round_robin"'
+	cat <<'EOF'
+event kit_edit {"op": "play"}
+wait_log 10000 kit editor: the server is Running (by kitboss)
+keypress F6
+wait_log 10000 kit editor: edit mode off
+EOF
+	round 15
+	round 16
 	cat <<EOF
 event kit_use $DONE
 sync 3000
@@ -345,7 +368,7 @@ def map_of(n):
 	assert len(m) == 1, ("session", n, m)
 	return m[0]
 played = {}
-for n in range(1, 15):
+for n in range(1, 17):
 	m = played[n] = map_of(n)
 	p = part(n)
 	for who in ("kitboss", os.environ["SECOND"]):
@@ -377,6 +400,9 @@ assert "next_map in a round: its map stays" in part(13)
 print("ok: signal: alpha twice, prev wraps to gamma (a press in its round changes nothing), next twice to beta")
 assert A + "maps: no scene nowhere" in log
 print("ok: a name no scene has is left out, logged")
+assert [played[n] for n in (15, 16)] == ["alpha", "beta"], played
+assert "on the map world" not in log, "the unlisted lobby scene played"
+print('ok: maps "*": the listed scenes alpha, beta in turn')
 # What the clients were shown, in order
 for f in sys.argv[2:]:
 	c = open(f, errors="replace").read()
@@ -421,5 +447,5 @@ echo "ok: each map's ground in its screenshot ($t)"
 if [ -n "${KIT_MAP_KEEP:-}" ]; then
 	mkdir -p "$KIT_MAP_KEEP" && cp "$t"/*.png "$KIT_MAP_KEEP"/
 fi
-echo "PASS: map rotation through scenes: one composition's maps picked round-robin, at random and by signals; each round's players in its map, on its teams, its content alone running"
+echo "PASS: map rotation through scenes: one composition's maps picked round-robin, at random and by signals, and by maps \"*\" the listed scenes; each round's players in its map, on its teams, its content alone running"
 # vim: set noet ts=4 sw=4:

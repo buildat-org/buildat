@@ -3,7 +3,11 @@
 -- "released", as by them; with `closes`, a press hides its parent panel too
 -- (a dialog's OK). Or with `action` (a kit/action's name) it is that
 -- action's button: it presses the action, its own signals silent, and
--- with no `label` it is called what the action is. A press counts only
+-- with no `label` it is called what the action is. [KIT_SCENE_PACKAGES]
+-- `action` "pause_menu": it opens the app's pause menu (Esc's, the touch
+-- bar's Menu), "Menu" with no `label`: a full screen's way to it on a
+-- touchscreen, where Kit's own Menu over the screen is then not drawn
+-- (the touch bar is hidden under a full screen). A press counts only
 -- while it is on that player's screen, within their acts a second (as
 -- an action's). Where, who sees it and "show", "hide" and "toggle" as
 -- kit/ui_text's ([KIT_HUD_STYLE] its `style`, colours and sizes too).

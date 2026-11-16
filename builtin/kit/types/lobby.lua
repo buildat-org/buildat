@@ -15,6 +15,12 @@
 -- body hidden from the others, not hit and in no zone; entered puts them
 -- back where they were, for the game to place them (a teleport). Off for
 -- a lobby that is a place in the world.
+-- [KIT_SCENE_PACKAGES] On the app root it is every scene's (its screens
+-- too, on the root): a play whose value is a scene's name (a
+-- kit/ui_scene_list's picked) takes the player there, onto its spawner of
+-- players, and enters them as they arrive (again: the same scene once
+-- more, where they are); without one, play enters them where they are. On
+-- the root a player who comes into a scene another way is in the lobby.
 local STATES = {lobby = true, playing = true, over = true}
 
 local function screens(c, by, now)
@@ -47,7 +53,7 @@ return {
 		what = "Each player's lobby, run and result, and the screens for them.",
 		keywords = "menu start round result card",
 		inputs = {
-			play = "The player who set it off starts a run (from the lobby or a result).",
+			play = "The player who set it off starts a run (from the lobby or a result). Value: a scene to go to first.",
 			again = "The player who set it off starts a run again (from a result, or over in a run).",
 			lobby = "The player who set it off goes back to the lobby.",
 			over = "The player's run is over: their result.",
@@ -62,13 +68,18 @@ return {
 		over_screen = {type = "entity", default = 0},
 		out_of_play = {type = "bool", default = true},
 	},
-	state = {states = {default = {}, per_player = true}},
-	inputs = {play = "none", again = "none", lobby = "none", over = "none"},
+	state = {states = {default = {}, per_player = true},
+		-- [KIT_SCENE_PACKAGES] the scene a player's play is taking them to
+		going = {default = {}}},
+	inputs = {play = "any", again = "none", lobby = "none", over = "none"},
 	outputs = {entered = "none", left = "none"},
 	on_join = function(c, by)
-		if c.player then
-			set(c, by, "lobby")
+		if not c.player then
+			return
 		end
+		local g = c.state.going[by]
+		c.state.going[by] = nil
+		set(c, by, g and g == c.player_scene and "playing" or "lobby")
 	end,
 	-- (a live edit's screen: each player's shown as their state is, the one
 	-- it replaced hidden)
@@ -96,6 +107,13 @@ return {
 			now = "lobby"
 		end
 		if input == "play" and now ~= "playing" then
+			if type(value) == "string" and value ~= "" and
+					value ~= c.player_scene then
+				c.state.going[by] = value
+				c:log(c:name(by), "goes to", value)
+				c:teleport(nil, {scene = value})
+				return
+			end
 			set(c, by, "playing")
 		elseif input == "again" and (now == "over" or now == "playing") then
 			-- (over in a run: left, then entered again)

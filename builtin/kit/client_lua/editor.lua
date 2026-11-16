@@ -3111,7 +3111,8 @@ function NT.params_form(w, e, ci, c, t, keep)
 		for _, k in ipairs(names) do
 			local list = decl[k].choices_from == "item_list" and IT.choices()
 			if decl[k].choices_from == "scene_list" then
-				list = {{"none", ""}}
+				-- ([KIT_SCENE_PACKAGES] "*": the listed ones)
+				list = {{"none", ""}, {"every listed scene", "*"}}
 				for _, sn in ipairs(E.state and E.state.scenes or {}) do
 					list[#list + 1] = {sn, sn}
 				end
@@ -3907,24 +3908,33 @@ local function inspector(w, e, is_made)
 		NT.params_form(w, e, ci, c, t, NT.cat_row(w, e, ci, c, t))
 		for _, l in ipairs(not sig and not copy and c.links or {}) do
 			local r = row(w)
-			local to = find(l.to)
-			-- ([KIT_ENTITY_NAMES] the other's name as the Signals view's: its
-			-- mark, its type on a hover, its menu; a click goes to it)
 			label(r, l.output .. " ->")
-			local nb = NT.name_item(r, "inspector", to or {id = l.to}, to and
-					NT.entity_label(to) or K.ENTITY .. l.to .. " ?", function()
-				M.select(l.to)
-			end)
-			nb.maxWidth = nb.minWidth
-			nb:SetVar("KitNarrow", "1")
-			nb:SetName("link to " .. l.to)
+			-- [KIT_SCENE_PACKAGES] one by name: the entity of that name in the
+			-- scene of the player who set it off
+			local named = type(l.to_name) == "string" and l.to_name ~= ""
+			local to_s = named and "\"" .. l.to_name .. "\"" or tostring(l.to)
+			if named then
+				label(r, "in the player's scene: " .. l.to_name)
+			else
+				local to = find(l.to)
+				-- ([KIT_ENTITY_NAMES] the other's name as the Signals view's: its
+				-- mark, its type on a hover, its menu; a click goes to it)
+				local nb = NT.name_item(r, "inspector", to or {id = l.to}, to and
+						NT.entity_label(to) or K.ENTITY .. l.to .. " ?", function()
+					M.select(l.to)
+				end)
+				nb.maxWidth = nb.minWidth
+				nb:SetVar("KitNarrow", "1")
+				nb:SetName("link to " .. l.to)
+			end
 			label(r, ": " .. l.input)
 			-- ([KIT_PHONE_EDITING] stage 4: the touch mode's buttons under the
 			-- text, which made a portrait pane's body wider than the pane)
 			r = NT.sh.on() and row(w) or r
 			button(r, "Unlink", function()
 				send({op = "unlink", id = e.id, comp = ci - 1,
-					output = l.output, to = l.to, input = l.input})
+					output = l.output, to = l.to, to_name = l.to_name,
+					input = l.input})
 			end)
 			-- [KIT] stage 4l: drawn for players in play too
 			-- ([KIT_PARAM_CATEGORIES] as short as the Signals view's: a long link's
@@ -3932,10 +3942,10 @@ local function inspector(w, e, is_made)
 			button(r, l.visible and "Shown" or "Hidden",
 					function()
 				send({op = "link_visible", id = e.id, comp = ci - 1,
-					output = l.output, to = l.to, input = l.input,
-					visible = not l.visible})
+					output = l.output, to = l.to, to_name = l.to_name,
+					input = l.input, visible = not l.visible})
 				log:info("kit editor: link " .. e.id .. "." .. l.output ..
-						" -> " .. l.to .. "." .. l.input .. " " ..
+						" -> " .. to_s .. "." .. l.input .. " " ..
 						(l.visible and "hidden" or "shown") .. " in play")
 			end)
 		end
@@ -4007,6 +4017,31 @@ local function inspector(w, e, is_made)
 		end
 		if not next(seen) then
 			text(w, "It has no inputs", WARN)
+		end
+		-- [KIT_SCENE_PACKAGES] by its name: to the entity of that name in the
+		-- scene of the player who sets it off (a root's link into each
+		-- scene's own, a track's run), for one a builder named
+		local nm = tostring(e.name or "")
+		if next(seen) and nm ~= "" and not nm:match("^[%w_]+/[%w_]+ %d+$") then
+			text(w, "Or to \"" .. nm .. "\" in the player's scene:")
+			m = 0
+			for _, c in ipairs(e.components or {}) do
+				for _, i in ipairs(type_of(c.type).inputs or {}) do
+					if seen[i] then
+						seen[i] = nil
+						m = m + 1
+						if m % 3 == 1 then
+							r = row(w)
+						end
+						button(r, "By name " .. i, function()
+							send({op = "link", id = E.link.id, comp = E.link.comp,
+								output = E.link.output, to_name = nm, input = i})
+							E.link = nil
+							E.status = ""
+						end)
+					end
+				end
+			end
 		end
 	end
 	if E.link then
@@ -4513,7 +4548,10 @@ local function sel_key()
 			return nil
 		end
 		for _, l in ipairs(c.links or {}) do
-			mine[l.to] = true
+			-- ([KIT_SCENE_PACKAGES] one by name has no to)
+			if l.to then
+				mine[l.to] = true
+			end
 		end
 	end
 	local out = {network.write_json(e), tostring(is_made)}

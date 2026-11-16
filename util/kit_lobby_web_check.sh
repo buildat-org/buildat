@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~60 s (2026-11-15)
-# covers: builtin/kit/client_lua/ui.lua apps/workbench/templates/crag_trial/composition.json
+# covers: builtin/kit/client_lua/ui.lua builtin/kit/client_lua/controls.lua builtin/kit/types/ui_button.lua builtin/kit/types/ui_scene_list.lua apps/workbench/templates/crag_trial/composition.json
 # [KIT_LAYOUT_AUTO] Crag Trial's lobby on a phone: Workbench's web client in
 # headless Chrome at 412x915 by finger (TOUCH=1), webboss (the admin) New
 # from Crag Trial, F6:
@@ -14,7 +14,14 @@
 #     tapped again, the keyboard gone: back down (down.png); the UI scale
 #     and the root's size (the lines' "in WxH") the same all along;
 #   - turned to landscape: a row across the screen, the chat at its left
-#     end and the view at its right, as before the panel (landscape.png).
+#     end and the view at its right, as before the panel (landscape.png);
+#   - [KIT_SCENE_PACKAGES] back in portrait: the track list (The Crags,
+#     The Loop) and Kit's touch Menu over the full screen (menu_over.png),
+#     tapped: the pause menu (menu.png), Continue; a kit/ui_button of
+#     action pause_menu placed on the lobby screen (93): no touch Menu
+#     over it, the button opening the menu (menu_button.png); The Loop
+#     tapped: its scene (loop.png), its gems and finish by the editor's
+#     try, the result card (result.png).
 #   util/kit_lobby_web_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -60,7 +67,54 @@ cat > "$t/phone.json" <<'J'
 	["eval", "console.log('CHECK: blurred'), 'mark'"],
 	["turn", "landscape"], ["frames", 10], ["wait", 1000],
 	["shot", "${OUT}/landscape.png"],
-	["eval", "console.log('CHECK: end'), 'mark'"]
+	["eval", "console.log('CHECK: end'), 'mark'"],
+	["turn", "portrait"], ["frames", 10], ["wait", 1000],
+	["eval", "console.log('CHECK: menu'), 'mark'"],
+	["waitlog_any", "kit: the touch Menu over the full screen shown", 10],
+	["waitlog_any", "kit: ui 47 list .* shown, layer 45: \"Pick a track \\| The Crags, by buildat \\| The Loop, by celeron55\"", 10],
+	["shot", "${OUT}/menu_over.png"],
+	["tap", "Button", "Menu"],
+	["frames", 3],
+	["waitlog", "kit: the touch Menu over the full screen pressed", 10],
+	["waitlog", "pause: the menu shown", 10],
+	["waitlog", "kit: the touch Menu over the full screen hidden", 10], ["frames", 5],
+	["shot", "${OUT}/menu.png"],
+	["tap", "Button", "Continue"], ["waitlog", "pause: the menu closed", 10],
+	["waitlog", "kit: the touch Menu over the full screen shown", 10],
+	["event", "kit_edit {\"op\": \"mode\", \"on\": true}"],
+	["waitlog", "kit editor: edit mode on", 10],
+	["event", "kit_edit {\"op\": \"place\", \"type\": \"kit/ui_button\", \"pos\": [0, 1, 0], \"parent\": 45, \"params\": {\"action\": \"pause_menu\", \"label\": \"\", \"anchor\": \"top_right\"}}"],
+	["sync", 2000],
+	["eval", "console.log('CHECK: own menu'), 'mark'"],
+	["event", "kit_edit {\"op\": \"mode\", \"on\": false}"],
+	["waitlog", "kit editor: edit mode off", 10],
+	["waitlog", "kit: ui full screen 45 up", 10],
+	["waitlog_any", "kit: ui 93 button .* shown, layer 45: \"Menu\"", 10], ["frames", 10],
+	["shot", "${OUT}/menu_button.png"],
+	["tap", "Button", "Menu"],
+	["waitlog", "kit: ui button 93 pressed \\(action pause_menu\\)", 10],
+	["waitlog", "pause: the menu shown", 10], ["frames", 5],
+	["tap", "Button", "Continue"], ["waitlog", "pause: the menu closed", 10], ["frames", 5],
+	["eval", "console.log('CHECK: tracks'), 'mark'"],
+	["tap", "Button", "The Loop*"],
+	["waitlog", "kit: ui list 47 row 2 pressed", 10],
+	["waitlog", "player physics enabled", 20],
+	["waitlog", "kit: ui 61 text .* shown: \"Time ", 20], ["frames", 10],
+	["shot", "${OUT}/loop.png"],
+	["event", "kit_edit {\"op\": \"mode\", \"on\": true}"],
+	["waitlog", "kit editor: edit mode on", 10],
+	["event", "kit_edit {\"op\": \"try\", \"id\": 59, \"comp\": 0, \"input\": \"gem\"}"],
+	["event", "kit_edit {\"op\": \"try\", \"id\": 59, \"comp\": 0, \"input\": \"gem\"}"],
+	["event", "kit_edit {\"op\": \"try\", \"id\": 59, \"comp\": 0, \"input\": \"gem\"}"],
+	["event", "kit_edit {\"op\": \"try\", \"id\": 59, \"comp\": 0, \"input\": \"gem\"}"],
+	["sync", 2000],
+	["event", "kit_edit {\"op\": \"try\", \"id\": 59, \"comp\": 0, \"input\": \"finish\"}"],
+	["sync", 2000],
+	["event", "kit_edit {\"op\": \"mode\", \"on\": false}"],
+	["waitlog", "kit editor: edit mode off", 10],
+	["waitlog_any", "kit: ui 50 panel .* shown, layer 50: \"Finished\"", 10], ["frames", 10],
+	["shot", "${OUT}/result.png"],
+	["eval", "console.log('CHECK: done'), 'mark'"]
 ]
 J
 TOUCH=1 WEB_DRIVE_VIEWPORT=412x915@1 "$here/util/web_drive.sh" chrome workbench "$t/phone.json" "$t/phone" ||
@@ -101,8 +155,18 @@ c2, v2 = l.get("46"), l.get("48")
 assert c2 and v2 and c2[4] > c2[5] and c2[0] + c2[2] <= v2[0], f"not a row in landscape: chat {c2} view {v2}"
 assert c2[0] < 0.05 * c2[4] and v2[0] + v2[2] > 0.95 * c2[4], f"the row not spread to the ends: chat {c2} view {v2}"
 print(f"ok: portrait chat {c} view {v}; lifted {[m[0] for m in lift]}; landscape chat {c2} view {v2}")
+# [KIT_SCENE_PACKAGES] (9) With the screen's own pause_menu button, no
+# touch Menu over it; the tracks: The Loop's run finished, its card
+om, tr, dn = at("CHECK: own menu"), at("CHECK: tracks"), at("CHECK: done")
+ex = [lines[i + 1] for i, l in enumerate(lines[:-1]) if "Exception on handling packet" in l]
+assert not ex, f"a packet handler failed: {ex[:3]}"
+over = [l for l in lines[om:tr] if "the touch Menu over the full screen shown" in l]
+assert not over, f"the touch Menu over the screen with its own button: {over}"
+assert any("kit: ui 50 panel" in l and "Time " in l or "kit: ui 51 text" in l and "Time " in l
+           for l in lines[tr:dn]), "no result card's time after The Loop"
+print("ok: the touch Menu over the lobby, gone with its own pause_menu button; The Loop picked, its result card")
 PY
-for p in lobby keyboard down landscape; do
+for p in lobby keyboard down landscape menu_over menu menu_button loop result; do
 	[ -s "$t/phone/$p.png" ] || fail "no screenshot $t/phone/$p.png"
 done
-echo "PASS: Crag Trial's lobby as a phone on the web: a column at the bottom, the chat field lifted above the keyboard and back down at the blur and as the keyboard went, the UI scale and the root held, a row across the screen in landscape ($t/phone)"
+echo "PASS: Crag Trial's lobby as a phone on the web: a column at the bottom, the chat field lifted above the keyboard and back down at the blur and as the keyboard went, the UI scale and the root held, a row across the screen in landscape; the touch Menu over the full screen opening the pause menu, not drawn beside the screen's own pause_menu button; The Loop picked from the track list, finished, its result card ($t/phone)"

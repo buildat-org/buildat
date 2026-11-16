@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~30 s (2026-11-15)
-# covers: apps/workbench/templates/crag_trial/** builtin/kit/box/box.c builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/players.lua builtin/kit/kit.cpp builtin/accounts/client_lua/accounts.lua
+# covers: apps/workbench/templates/crag_trial/** builtin/kit/box/box.c builtin/kit/types/lobby.lua builtin/kit/types/ui_scene_list.lua builtin/kit/types/scene_info.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/move.lua builtin/kit/client_lua/controls.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/players.lua builtin/kit/kit.cpp builtin/accounts/client_lua/accounts.lua
 # [KIT_PLANE] stage 4: a movement of a project's own, the Crag Trial template
 # (local/crag_bike, its gems and run) on Workbench; one server, kitboss (the
 # admin) and kitbob on a headless weston's Xwayland of the check's own:
@@ -14,8 +14,10 @@
 #      ([KIT_CRAG_PLAYTEST_1], fault 0a9); F6: the side camera, the bike's
 #      movement, its client part's draw hook drawing the body (start.png),
 #      the bike on the ground at y 0, the 1 grid ([KIT_CRAG_PLAYTEST_1]);
-#      [KIT_LOBBY] first the lobby (a full screen, lobby.png), Play starting
-#      the run;
+#      [KIT_LOBBY] first the lobby (a full screen, lobby.png), [KIT_SCENE_PACKAGES]
+#      its track list (the lobby on the root, a kit/ui_scene_list: The Crags
+#      and The Loop), The Crags starting its run (by name: "the run" in the
+#      player's scene);
 #   2. W, then A: the bike up the first ramp's polygon, leaning back, the
 #      head down: the crash (crag_bike's output, linked to the run: its line
 #      says Crashed), the bike back at the start a second later;
@@ -27,23 +29,27 @@
 #      (turned.png, [KIT_SIDE_LEAD]);
 #   5. kitbob joins: [KIT_LOBBY] he in the lobby, the gem kitboss took still
 #      drawn for him (each rider's own), [KIT_LOBBY_OUT_OF_PLAY] out of play;
-#      his Play, his body drawn by the hook on kitboss's screen; his first
-#      My account page drawn again when the hello comes, "Connect an
-#      agent..." on it (accounts.lua);
+#      his pick of The Crags, his body drawn by the hook on kitboss's screen;
+#      his first My account page drawn again when the hello comes, "Connect
+#      an agent..." on it (accounts.lua);
 #   6. [CRAG_BEST_RESET] a fourth gem placed, linked only to the run: the run
 #      counts it (Gems 0/4), the finish refused at 3 of 4 and taken at 4, the
 #      run's reset brings it back; [KIT_LOBBY] the finish the result card
 #      (an over screen: the time, result.png); the best on the top-5 sign (a kit/sign
-#      fed by the run's board), kitbob's clear_kept refused (no builder),
-#      End then Play: still listed;
+#      fed by the run's board); [KIT_SCENE_PACKAGES] the card's Lobby, then
+#      The Loop: kitboss taken to that scene onto its start, its run (59)
+#      started; W and A: his crash there (the root's bike's crash by name to
+#      the loop's run), its gems and finish (tried) its result card (loop.png)
+#      and its own sign; kitbob's clear_kept refused (no builder), End then
+#      Play: still listed;
 #   7. the server restarted Ended, kitboss back, Play: still listed, his HUD's
 #      best; the inspector's Clear kept state (asked first) empties the
-#      sign, Undo brings it back; the lobby lists it, Play (sign.png).
+#      sign, Undo brings it back; the lobby, The Crags (sign.png).
 # And [KIT_PLAY_HINTS]: Workbench's help line in play the bike's own hints
 # (movement.help), W's and A's gone once used, Space's last after the gem:
 # the line gone, kept in Kit's storage (kit_hints).
 # Screenshots, kept with KEEP_TMP=1: $t/edit.png, $t/lobby.png, $t/start.png,
-# $t/side.png, $t/turned.png, $t/result.png, $t/sign.png
+# $t/side.png, $t/turned.png, $t/result.png, $t/loop.png, $t/sign.png
 #   util/kit_bike_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -200,16 +206,19 @@ await "$CL" 0 10 "crag_bike: the draw hook draws a bike"
 # ([KIT_PLAY_HINTS] the movement's hints, none of the walker's)
 await "$CL" 0 10 'workbench: the hint "\[W\]/\[S\]: gas, brake  \[A\]/\[D\]: lean  \[Space\]: turn round"'
 await "$CL" 0 10 "kit: player [0-9]+'s body drawn by its movement"
-# [KIT_LOBBY] In the lobby (a full screen: its chat, its view, Play), the
-# run's clock still; Play starts it
+# [KIT_LOBBY] In the lobby (a full screen: its chat, its view, the tracks),
+# the run's clock still; [KIT_SCENE_PACKAGES] the root's track list, The
+# Crags (the scene he is in) starts its run
 await "$CL" 0 10 "kit: ui full screen 45 up"
+await "$CL" 0 10 'kit: ui 47 list .* shown, layer 45: "Pick a track \| The Crags, by buildat \| The Loop, by celeron55"'
 grep -aq "kit/lobby 44: kitboss: none -> lobby" "$SL" || fail "kitboss not in the lobby ($SL)"
 cmd "frames 10" "screenshot $t/lobby.png"
 m=$(mark "$SL")
-step 10 "kit: ui full screen none" "frames 3" 'click Button "Play"'
+step 10 "kit: ui full screen none" "frames 3" 'click Button "The Crags*"'
+await "$SL" "$m" 5 "kit/ui_scene_list 47: picked world by kitboss"
 await "$SL" "$m" 5 "kit/lobby 44: kitboss: lobby -> playing"
 await "$SL" "$m" 5 "local/crag_run 7: kitboss: off you go, the run starts over"
-echo "ok: the lobby's full screen, Play: the run started"
+echo "ok: the lobby's full screen, its track list, The Crags: its run started"
 # (kitbob on his way meanwhile)
 BUILDAT_JOIN_CREATE=1 client bob
 BOB=$!
@@ -238,8 +247,10 @@ for try in 1 2; do
 	[ $try = 2 ] && fail "the bike never left the start: the keys not held twice ($CL)"
 	echo "the bike stood still: W and A again"
 done
+# (on the ramp's slope, from x -50, over the flat ground's -0.09: the softer
+# springs crash it low on the slope)
 tail -c +$((m + 1)) "$CL" | grep -aoP 'kit: body at \K-?[0-9.]+,-?[0-9.]+' | tr , ' ' |
-	awk '$1 > -50 && $1 < -38 && $2 > 1 { f = 1 } END { exit !f }' ||
+	awk '$1 > -50 && $1 < -38 && $2 > 0.3 { f = 1 } END { exit !f }' ||
 	fail "the bike never on the first ramp ($CL)"
 for i in $(seq 20); do
 	body
@@ -329,7 +340,7 @@ seen "$CL" 0 "kit: entity 11's look: taken on" && fail "kitboss's gem gone for k
 grep -aq "kit/lobby 44: kitbob: none -> lobby" "$SL" || fail "kitbob not in the lobby ($SL)"
 await "$SL" 0 10 "kitbob is out of play \(a lobby\)"
 m=$(mark "$SL")
-step 10 "kit: ui full screen none" "frames 3" 'click Button "Play"'
+step 10 "kit: ui full screen none" "frames 3" 'click Button "The Crags*"'
 await "$SL" "$m" 5 "kitbob is in play"
 as boss
 two=
@@ -368,12 +379,12 @@ for i in $(seq 20); do
 done
 awk -v x="$bx" 'BEGIN { exit !(x < -58) }' || fail "the hazard did not take the bike to the start: $bx ($CL)"
 cmd 'event kit_edit {"op": "place", "type": "local/crag_gem", "pos": [-45, 8, 1]}'
-await "$SL" "$m" 5 "An edit by kitboss: placed local/crag_gem 55 "
-step 5 "Gems 0/4" 'event kit_edit {"op": "link", "id": 55, "comp": 0, "output": "collected", "to": 7, "input": "gem"}'
+await "$SL" "$m" 5 "An edit by kitboss: placed local/crag_gem 93 "
+step 5 "Gems 0/4" 'event kit_edit {"op": "link", "id": 93, "comp": 0, "output": "collected", "to": 7, "input": "gem"}'
 # (onto the bike at the start: its zone entered)
-cmd 'event kit_edit {"op": "move", "id": 55, "pos": [-61, 0, 1]}'
+cmd 'event kit_edit {"op": "move", "id": 93, "pos": [-61, 0, 1]}'
 await "$SL" "$m" 5 "local/crag_run 7: kitboss has 1 of 4 gems"
-seen "$SL" "$m" "local/crag_gem 55: kitboss took the gem" || fail "not gem 55's take ($SL)"
+seen "$SL" "$m" "local/crag_gem 93: kitboss took the gem" || fail "not gem 93's take ($SL)"
 try_ gem
 try_ gem
 await "$SL" "$m" 5 "kitboss has 3 of 4 gems"
@@ -384,7 +395,7 @@ await "$SL" "$m" 5 "kitboss has 4 of 4 gems"
 try_ finish
 await "$SL" "$m" 5 "local/crag_run 7: kitboss finished in [0-9.]+ \(best\)"
 best=$(tail -c +$((m + 1)) "$SL" | grep -aoP 'kitboss finished in \K[0-9.]+(?= \(best\))' | tail -1)
-await "$SL" "$m" 5 "local/crag_gem 55: back"
+await "$SL" "$m" 5 "local/crag_gem 93: back"
 echo "ok: a fourth gem linked only to the run: Gems 0/4, its take counted, the finish refused at 3 of 4 and taken at 4 ($best), the gem back by the run's reset"
 # [KIT_LOBBY] The finish kitboss's result card (an over screen): the time,
 # the best; the clock held till Again or the lobby's Play
@@ -397,8 +408,61 @@ step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
 echo "ok: the result card: Time $best"
 # The top-5 sign lists it; kitbob (no builder) may not clear it; End, then
 # Play: still there
-sign() { echo "kit/sign 43: shows \"Best times.$1\" by"; } # (the log's newline a ?)
+sign() { echo "kit/sign ${2:-43}: shows \"Best times.$1\" by"; } # (the log's newline a ?)
 await "$SL" "$m" 5 "$(sign "1\. kitboss $best")"
+# [KIT_SCENE_PACKAGES] The card's Lobby, then the other track: The Loop's
+# scene, onto its start, its run; a crash there by the root's bike's link
+# by name, its gems and finish its result card and its own sign
+step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
+m=$(mark "$SL")
+step 10 "kit: ui full screen 45 up" "frames 3" 'click Button "Lobby"'
+await "$SL" "$m" 5 "kit/lobby 44: kitboss: over -> lobby"
+mc=$(mark "$CL")
+step 10 "kit: ui full screen none" "frames 5" 'click Button "The Loop*"'
+await "$SL" "$m" 5 "kit/lobby 44: kitboss goes to loop"
+await "$SL" "$m" 10 "teleports kitboss to \(-60, 0.5, 1\) in the scene loop"
+await "$SL" "$m" 10 "kit/lobby 44: kitboss: lobby -> playing"
+await "$SL" "$m" 5 "local/crag_run 59: kitboss: off you go, the run starts over"
+# (its own heightmap the client's floor, kit/controls' "hm")
+await "$CL" "$mc" 30 "player physics enabled"
+for i in $(seq 20); do
+	body
+	awk -v x="$bx" 'BEGIN { exit !(x > -61 && x < -59) }' && break
+	cmd "delay 200"
+done
+awk -v x="$bx" 'BEGIN { exit !(x > -61 && x < -59) }' || fail "not at the loop's start: $bx $by ($CL)"
+for try in 1 2; do
+	m2=$(mark "$SL")
+	cmd "keydown W" "delay 800" "keydown A"
+	for i in $(seq 25); do
+		cmd "delay 150"
+		seen "$SL" "$m2" "local/crag_run 59: kitboss: crashed" && break
+		sleep 0.2
+	done
+	cmd "keyup A" "keyup W"
+	seen "$SL" "$m2" "local/crag_run 59: kitboss: crashed" && break
+	[ $try = 2 ] && fail "no crash on the loop reaching its run ($SL)"
+	echo "no crash yet: W and A again"
+done
+step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
+cm=$(mark "$CL")
+for g in 1 2 3 4; do
+	cmd 'event kit_edit {"op": "try", "id": 59, "comp": 0, "input": "gem"}'
+done
+await "$SL" "$m" 5 "local/crag_run 59: kitboss has 4 of 4 gems"
+cmd 'event kit_edit {"op": "try", "id": 59, "comp": 0, "input": "finish"}'
+await "$SL" "$m" 5 "local/crag_run 59: kitboss finished in [0-9.]+ \(best\)"
+lbest=$(tail -c +$((m + 1)) "$SL" | grep -aoP 'run 59: kitboss finished in \K[0-9.]+' | tail -1)
+await "$SL" "$m" 5 "kit/lobby 44: kitboss: playing -> over"
+await "$SL" "$m" 5 "$(sign "1\. kitboss $lbest" 63)"
+step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
+await "$CL" "$cm" 5 "kit: ui 50 panel .* shown, layer 50: \"Finished\""
+await "$CL" "$cm" 5 "kit: ui 51 text .*: \"Time $lbest"
+cmd "frames 10" "screenshot $t/loop.png"
+step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
+grep -a "dropped: " "$SL" && fail "a link by name dropped ($SL)"
+grep -a -A1 "Exception on handling packet" "$CL" && fail "a packet handler failed ($CL)"
+echo "ok: the card's Lobby, The Loop: its scene and start, its run; a crash there by name, its finish $lbest its result card and its sign"
 as bob
 m=$(mark "$SL")
 cmd 'event kit_edit {"op": "clear_kept", "id": 7, "comp": 0}'
@@ -451,16 +515,16 @@ cmd 'event kit_edit {"op": "undo"}'
 await "$SL" "$m" 5 "its kept state put back by kitboss's undo"
 await "$SL" "$m" 5 "$(sign "1\. kitboss $best")"
 step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
-# ([KIT_LOBBY] the lobby lists them too; Play, back at the sign)
+# ([KIT_LOBBY] the lobby, The Crags: back at the sign)
 await "$CL" 0 10 "kit: ui full screen 45 up"
-await "$CL" 0 5 "kit: ui 49 text .* shown, layer 45: \"Best times \| 1\. kitboss $best\""
-step 10 "kit: ui full screen none" "frames 3" 'click Button "Play"'
+step 10 "kit: ui full screen none" "frames 3" 'click Button "The Crags*"'
+await "$SL" 0 10 "local/crag_run 7: kitboss: off you go"
 cmd "frames 30" "screenshot $t/sign.png"
 echo "ok: over a server restart (Ended) still listed, the HUD's best $best; kitboss's Clear kept state emptied the sign, Undo brought it back"
 cmd "sync 2000" quit
 exec 3>&-
 wait $BOSS 2>/dev/null
-for p in edit lobby start side turned result sign; do
+for p in edit lobby start side turned result loop sign; do
 	[ -s "$t/$p.png" ] || fail "no screenshot $t/$p.png"
 done
 # (the run's teleports, a hazard's or the finish's, from its scene)

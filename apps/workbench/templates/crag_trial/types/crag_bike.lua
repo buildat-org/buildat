@@ -2,8 +2,9 @@
 -- stepped in the plane (x right, y up). A frame with an angle and two wheels
 -- on springs under it, gravity; the wheels and the rider's head meet the
 -- ground (a heightmap's or voxels) and the polygons (w:circle). The keys: W (Gas) the back wheel's
--- motor, S (Brake) both wheels held, A and D lean back and forward (the
--- frame turned), Space (Turn) faces the other way. The rider's head on
+-- motor, S (Brake) both wheels held, A and D lean the bike as the screen
+-- shows it (A counter-clockwise, D clockwise, whichever way it faces), Space
+-- (Turn) faces the other way. The rider's head on
 -- anything is a crash: the event "crash" (its output), the bike still a
 -- second, then back where it started (its first step's place).
 -- Its state: s.c the frame's middle and velocity {x, y, vx, vy}, s.a its angle
@@ -12,12 +13,12 @@
 -- s.dead the crash's seconds left, s.start; s.pose what the clients draw
 -- (crag_bike.client.lua): {a, dir (2 * dir crashed), the wheels from the feet
 -- (lx, ly, rx, ry), their turns}. s.pos is the frame's middle less LIFT.
+-- The suspension: params stiffness and damping (the springs').
 local R = 0.36 -- a wheel's radius
 local AX, AY = 0.62, -0.36 -- the wheels' springs on the frame, from its middle
 local LIFT = R - AY + 0.02 -- the middle over the feet
 local HX, HY, HR = -0.08, 0.86, 0.22 -- the head, facing +x
 local MC, MW, IC = 2, 0.5, 0.7 -- the frame's mass, a wheel's, the frame's inertia
-local K, D = 900, 30 -- the springs' stiffness and damping
 local REACT = 0.06 -- the motor's turn back on the frame
 local BODY = {r = 1.4, h = 2.2, eye = 0.9}
 
@@ -36,7 +37,7 @@ end
 
 -- A wheel's spring to its place on the frame: the force on it, the frame
 -- pulled back (and turned)
-local function spring(s, wh, lx, ca, sa, dt)
+local function spring(s, wh, lx, ca, sa, dt, K, D)
 	local c = s.c
 	local ox, oy = lx * ca - AY * sa, lx * sa + AY * ca
 	local px, py = c[1] + ox, c[2] + oy
@@ -101,6 +102,10 @@ return {
 			max = 400},
 		lean = {cat = "physics", type = "number", default = 24, min = 0,
 			max = 200},
+		stiffness = {cat = "physics", type = "number", default = 300, min = 20,
+			max = 3000},
+		damping = {cat = "physics", type = "number", default = 30, min = 0,
+			max = 200},
 		rate = {cat = "advanced", type = "number", default = 60, min = 10,
 			max = 120},
 		substeps = {cat = "advanced", type = "number", default = 4, min = 1,
@@ -131,8 +136,9 @@ return {
 			c[4] = c[4] - g * dt
 			wl[4], wr[4] = wl[4] - g * dt, wr[4] - g * dt
 			local ca, sa = math.cos(s.a), math.sin(s.a)
-			spring(s, wl, -AX, ca, sa, dt)
-			spring(s, wr, AX, ca, sa, dt)
+			local K, D = p.stiffness or 300, p.damping or 30
+			spring(s, wl, -AX, ca, sa, dt, K, D)
+			spring(s, wr, AX, ca, sa, dt, K, D)
 			-- The motor on the back wheel, the brake on both
 			local back = s.dir > 0 and wl or wr
 			if f > 0 then
@@ -150,9 +156,10 @@ return {
 							wh[5] + step or 0
 				end
 			end
-			-- Leaning: D forward (the way it faces), A back, the whole bike
-			-- turned round its middle (a wheel off the ground)
-			local dw = -r * (p.lean or 24) * dt * s.dir
+			-- Leaning as the screen shows it: D clockwise, A counter-clockwise,
+			-- whichever way the bike faces; the whole bike turned round its
+			-- middle (a wheel off the ground)
+			local dw = -r * (p.lean or 24) * dt
 			s.av = s.av + dw
 			for _, wh in ipairs({wl, wr}) do
 				wh[3], wh[4] = wh[3] - dw * (wh[2] - c[2]), wh[4] + dw * (wh[1] - c[1])

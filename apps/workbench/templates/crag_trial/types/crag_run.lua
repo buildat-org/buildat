@@ -125,7 +125,8 @@ return {
 		for _, p in ipairs(c.players or {}) do
 			local by = "player:" .. p.id
 			local r = view(c, by)
-			if p.here and (r.playing or not waits(c)) then
+			-- (one on another track: not this run's clock)
+			if p.here and not p.away and (r.playing or not waits(c)) then
 				r.t = r.t + 0.1
 				r.note_left = (r.note_left or 0) - 0.1
 				show(c, by, r)

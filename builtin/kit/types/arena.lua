@@ -70,7 +70,8 @@
 -- under the other two as well, in the default round: a round in play is on
 -- its map). A map not picked runs nothing in that round, its timers and
 -- spawners included: only its own map's links can reach "win". A name no
--- scene has is left out, in the log.
+-- scene has is left out, in the log. [KIT_SCENE_PACKAGES] "*" in it: every
+-- listed scene (a kit/scene_info on it), there in the scenes' order.
 -- [KIT_READY_UP] `ready` (0: off, the countdown): instead of the
 -- countdown, the round starts at once when this share of the queue (at
 -- least `players` in it) is ready, rounded up: 1 all of them. "ready" (a
@@ -121,8 +122,13 @@ local function maps_of(c, warn)
 	for _, s in ipairs(c.scenes or {}) do
 		known[s] = true
 	end
-	for s in tostring(c.params.maps):gmatch("[%w_]+") do
-		if known[s] then
+	for s in tostring(c.params.maps):gmatch("[%w_*]+") do
+		-- [KIT_SCENE_PACKAGES] "*": every listed scene, by the scene's id
+		if s == "*" then
+			for _, l in ipairs(c.listed or {}) do
+				out[#out + 1] = l.scene
+			end
+		elseif known[s] then
 			out[#out + 1] = s
 		elseif warn then
 			c:log("maps: no scene", s)
@@ -371,6 +377,8 @@ return {
 	version = 3,
 	zone = "size",
 	teams = true,
+	-- ([KIT_SCENE_PACKAGES] maps "*")
+	listed = true,
 	-- (every player read: the queue keeps those here)
 	players = true,
 	params = {
