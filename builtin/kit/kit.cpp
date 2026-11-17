@@ -9673,55 +9673,12 @@ struct Module: public interface::Module, public Interface
 		const json::Value &sc = edits.get("scenes");
 		for(json::Iterator it(sc); sc.is_object() && it; ++it){
 			World *wd = world_named(it.key());
-			const json::Value &names = (*it).get("names"),
-					&cells = (*it).get("cells");
-			if(!wd || !wd->world_scene || !names.is_array() || !cells.is_array())
+			if(!wd || !wd->world_scene)
 				continue;
 			size_t put = 0, left = 0;
-			std::map<std::tuple<int, int, int>, sv_<std::array<int64_t, 4>>> by;
-			voxelworld::access(m_server, wd->world_scene,
-					[&](voxelworld::Instance *w){
-				interface::VoxelRegistry *reg = w->get_voxel_reg();
-				const interface::VoxelFormat &f = reg->get_format();
-				const uint32_t sm = state_mask(f);
-				sv_<int64_t> ids;
-				for(unsigned i = 0; i < names.size(); i++){
-					interface::VoxelName vn;
-					vn.block_name = names.at(i).is_string() ?
-							names.at(i).as_string() : "";
-					const interface::VoxelDefinition *d = reg->get(vn);
-					ids.push_back(d ? (int64_t)d->id : -1);
-				}
-				const int S = wd->section_size;
-				for(unsigned i = 0; i + 5 <= cells.size(); i += 5){
-					int64_t c[5];
-					bool ok = true;
-					for(unsigned k = 0; k < 5; k++){
-						const json::Value &x = cells.at(i + k);
-						ok = ok && x.is_number() && std::fabs(x.as_number()) < 5e9;
-						c[k] = ok ? (int64_t)x.as_number() : 0;
-					}
-					const int sx = floor_div((int)c[0], S), sy = floor_div((int)c[1],
-							S), sz = floor_div((int)c[2], S);
-					ok = ok && c[3] >= 0 && c[3] < (int64_t)ids.size() &&
-							ids[c[3]] >= 0 && c[4] >= 0 && c[4] <= 0xffffffffLL &&
-							std::fabs((double)c[0]) <= MAX_COORD &&
-							std::fabs((double)c[1]) <= MAX_COORD &&
-							std::fabs((double)c[2]) <= MAX_COORD &&
-							sx >= -WORLD_SECTIONS_XZ && sx < WORLD_SECTIONS_XZ &&
-							sz >= -WORLD_SECTIONS_XZ && sz < WORLD_SECTIONS_XZ &&
-							sy >= WORLD_SECTION_Y0 && sy <= WORLD_SECTION_Y1;
-					if(!ok){
-						left++;
-						continue;
-					}
-					uint32_t word = (uint32_t)c[4] & sm;
-					f.id.set(word, (uint32_t)ids[c[3]]);
-					by[std::make_tuple(sx, sy, sz)].push_back({{c[0], c[1], c[2],
-							(int64_t)word}});
-					put++;
-				}
-			});
+			CellsBy by;
+			if(!edit_cells(wd, *it, by, put, left))
+				continue;
 			sv_<CellJob> jobs;
 			for(auto &s : by)
 				jobs.push_back({it.key(), s.first, s.second});
@@ -9733,6 +9690,62 @@ struct Module: public interface::Module, public Interface
 					"sections (%zu left out)%s", cs(it.key()), put, by.size(), left,
 					later && !jobs.empty() ? ", put in over ticks" : "");
 		}
+	}
+
+	// A scene's edits.bin cells ({names, cells}) by section, as words of
+	// this World's (false: none to read); put: those taken, left: refused
+	typedef std::map<std::tuple<int, int, int>, sv_<std::array<int64_t, 4>>>
+			CellsBy;
+	bool edit_cells(World *wd, const json::Value &sj, CellsBy &by, size_t &put,
+			size_t &left)
+	{
+		const json::Value &names = sj.get("names"), &cells = sj.get("cells");
+		if(!names.is_array() || !cells.is_array())
+			return false;
+		voxelworld::access(m_server, wd->world_scene,
+				[&](voxelworld::Instance *w){
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			const interface::VoxelFormat &f = reg->get_format();
+			const uint32_t sm = state_mask(f);
+			sv_<int64_t> ids;
+			for(unsigned i = 0; i < names.size(); i++){
+				interface::VoxelName vn;
+				vn.block_name = names.at(i).is_string() ?
+						names.at(i).as_string() : "";
+				const interface::VoxelDefinition *d = reg->get(vn);
+				ids.push_back(d ? (int64_t)d->id : -1);
+			}
+			const int S = wd->section_size;
+			for(unsigned i = 0; i + 5 <= cells.size(); i += 5){
+				int64_t c[5];
+				bool ok = true;
+				for(unsigned k = 0; k < 5; k++){
+					const json::Value &x = cells.at(i + k);
+					ok = ok && x.is_number() && std::fabs(x.as_number()) < 5e9;
+					c[k] = ok ? (int64_t)x.as_number() : 0;
+				}
+				const int sx = floor_div((int)c[0], S), sy = floor_div((int)c[1],
+						S), sz = floor_div((int)c[2], S);
+				ok = ok && c[3] >= 0 && c[3] < (int64_t)ids.size() &&
+						ids[c[3]] >= 0 && c[4] >= 0 && c[4] <= 0xffffffffLL &&
+						std::fabs((double)c[0]) <= MAX_COORD &&
+						std::fabs((double)c[1]) <= MAX_COORD &&
+						std::fabs((double)c[2]) <= MAX_COORD &&
+						sx >= -WORLD_SECTIONS_XZ && sx < WORLD_SECTIONS_XZ &&
+						sz >= -WORLD_SECTIONS_XZ && sz < WORLD_SECTIONS_XZ &&
+						sy >= WORLD_SECTION_Y0 && sy <= WORLD_SECTION_Y1;
+				if(!ok){
+					left++;
+					continue;
+				}
+				uint32_t word = (uint32_t)c[4] & sm;
+				f.id.set(word, (uint32_t)ids[c[3]]);
+				by[std::make_tuple(sx, sy, sz)].push_back({{c[0], c[1], c[2],
+						(int64_t)word}});
+				put++;
+			}
+		});
+		return true;
 	}
 
 	// The World's parameters: the first World on the current World's
@@ -16169,6 +16182,8 @@ struct Module: public interface::Module, public Interface
 				watch_fired(e.id, r.comp, output, value);
 			if(m_cam.rec && m_active == m_cam.rec_session)
 				play_fired(e, output, value, eby);
+			if(m_test.on && m_active == m_test.session)
+				playtest_fired(e, in, output, value, eby);
 			if(r.tried){
 				json::Value o = json::array();
 				o.append(output);
@@ -21525,7 +21540,7 @@ struct Module: public interface::Module, public Interface
 		// [KIT_AGENTS] an agent idle so long leaves
 		for(auto it = m_agents.begin(); it != m_agents.end();){
 			const ss_ id = (it++)->first;
-			if(interface::os::time_us() - m_agents[id].last_us > AGENT_IDLE_US)
+			if(interface::os::time_us() - m_agents[id].last_us > agent_idle_us())
 				drop_agent(id, "idle");
 		}
 		if(!m_hosted || !m_box)
@@ -21556,6 +21571,7 @@ struct Module: public interface::Module, public Interface
 			bench_stamp();
 		}
 		session_ops();
+		playtest_tick();
 		rules_watch();
 		if(!m_watches.empty())
 			watch_flush();
@@ -25116,36 +25132,10 @@ struct Module: public interface::Module, public Interface
 			bot_player_types(n);
 			m_entities[n.id] = n;
 			gs.bots++;
+			bot_joins(n.id, scene);
 			Entity &ne = m_entities[n.id];
-			if(wants_node(ne))
-				make_node(ne);
 			const ss_ by = "bot:"+itos(n.id);
-			for(size_t i = 0; i < ne.comps.size(); i++){
-				Run r;
-				r.entity = n.id;
-				r.comp = i;
-				r.handler = "on_start";
-				r.by = by;
-				queue_run(r);
-			}
-			// Its join, as a player's (round_join): the scene's on_join, and
-			// the maker's from another scene (an arena's map)
-			for(auto &p : m_entities){
-				ss_ es;
-				if(!scene_of(p.second, &es) || es != scene || p.first == n.id)
-					continue;
-				for(size_t i = 0; i < p.second.comps.size(); i++){
-					if(!m_types[p.second.comps[i].type].handlers.count("on_join"))
-						continue;
-					Run r;
-					r.entity = p.first;
-					r.comp = i;
-					r.handler = "on_join";
-					r.by = by;
-					r.args.append(by);
-					queue_run(r);
-				}
-			}
+			// and the maker's from another scene (an arena's map)
 			auto me = m_entities.find(gs.maker);
 			ss_ ms;
 			if(me != m_entities.end() && scene_of(me->second, &ms) && ms != scene &&
@@ -25163,6 +25153,41 @@ struct Module: public interface::Module, public Interface
 					cs(bot_name(copy)), cs(itos(to)), cs(bot_name(ne)),
 					cs(scene));
 		}
+	}
+
+	// A bot just made: its node, its on_start runs and its join, as a
+	// player's (round_join): the scene's on_join runs. Entered
+	void bot_joins(uint64_t id, const ss_ &scene)
+	{
+		Entity &ne = m_entities[id];
+		if(wants_node(ne))
+			make_node(ne);
+		const ss_ by = "bot:"+itos(id);
+		for(size_t i = 0; i < ne.comps.size(); i++){
+			Run r;
+			r.entity = id;
+			r.comp = i;
+			r.handler = "on_start";
+			r.by = by;
+			queue_run(r);
+		}
+		for(auto &p : m_entities){
+			ss_ es;
+			if(!scene_of(p.second, &es) || es != scene || p.first == id)
+				continue;
+			for(size_t i = 0; i < p.second.comps.size(); i++){
+				if(!m_types[p.second.comps[i].type].handlers.count("on_join"))
+					continue;
+				Run r;
+				r.entity = p.first;
+				r.comp = i;
+				r.handler = "on_join";
+				r.by = by;
+				r.args.append(by);
+				queue_run(r);
+			}
+		}
+		m_runtime_dirty = true;
 	}
 
 	// The bots a session had back in the default, as it ends
@@ -27355,6 +27380,9 @@ struct Module: public interface::Module, public Interface
 		const ss_ bn = !bid || !m_entities.count(bid) ? by :
 				is_bot(m_entities[bid]) ? bot_name(m_entities[bid]) : m_entities[bid].name;
 		const ss_ vname = is_bot(pe->second) ? bot_name(pe->second) : pe->second.name;
+		// [KIT_AGENT_NEXT_1] 3b
+		if(m_test.on && m_active == m_test.session && m_test.bots.count(player))
+			playtest_death(player, bid && bid != player ? bn : by, type);
 		// [KIT_HIT_FEEDBACK] the kill message to the session's players: who
 		// (a player, else none), whom, with what (the hit's item; none: its
 		// damage type)
@@ -30202,7 +30230,8 @@ struct Module: public interface::Module, public Interface
 		GameSession *s = active_session();
 		Peer &p = m_peers[peer];
 		const bool back = join && m_tools_back.erase(peer) > 0;
-		if(join && ((s && s->draft && p.name == s->by) || back) &&
+		if(join && ((s && s->draft && (p.name == s->by ||
+				p.name+"'s agent" == s->by)) || back) &&
 				can_edit(peer) && !p.editing){
 			log_i(MODULE, "%s's tools on in session %s", cs(p.name),
 					cs(itos(session_of_peer(peer))));
@@ -30366,11 +30395,12 @@ struct Module: public interface::Module, public Interface
 	// tool with an agent token of theirs (accounts/api.h) as its bearer
 	// token. Its tools are Kit's edit ops, run as a peer of the network's
 	// with no socket (add_local_peer()) named "<account>'s agent": its edits
-	// logged and undone as that name's, in the default session's live round;
-	// in the builders' list from its first call to AGENT_IDLE_US after its
-	// last. Its rights are its account's at each call, an admin's only with
-	// an admin token (account_of(), can_edit_u()); what Kit refuses it is
-	// the tool's error text. No CORS: a request with an Origin (a page in a
+	// logged and undone as that name's, in the default session's live round
+	// ([KIT_AGENT_NEXT_1] 2: or its draft's); in the builders' list from its
+	// first call to agent_idle_us() after its last. Its rights are its
+	// account's at each call, an admin's only with an admin token
+	// (account_of(), can_edit_u()); what Kit refuses it is the tool's error
+	// text. No CORS: a request with an Origin (a page in a
 	// browser) is refused. Its reads are what the account's editor shows;
 	// its prefabs and voxel types are under the account's name. The guide
 	// (agent_guide()) is the initialize answer's instructions, which Claude
@@ -30392,7 +30422,13 @@ struct Module: public interface::Module, public Interface
 		double at[3] = {0, 0, 0};
 		ss_ at_scene;
 	};
-	static const int64_t AGENT_IDLE_US = 300 * 1000000LL;
+	// (BUILDAT_AGENT_IDLE_S for a check, 300)
+	static int64_t agent_idle_us()
+	{
+		const char *e = getenv("BUILDAT_AGENT_IDLE_S");
+		const int s = e ? atoi(e) : 0;
+		return (s > 0 ? s : 300) * 1000000LL;
+	}
 	// Requests a token makes a minute; tokens matching nothing an address's
 	// network sends
 	static const int AGENT_CALLS = 120, AGENT_FAILS = 30;
@@ -30435,8 +30471,11 @@ struct Module: public interface::Module, public Interface
 				"kit/controls, kit/game_rules and kit/environment come from "
 				"(own, the scene it is under that has one, root or none); how "
 				"many of your edits there are to undo; the game it is "
-				"(\"<author>/<name>\", list_aitta's filter) and its save.",
-				R"J({"type": "object", "properties": {}})J", ""},
+				"(\"<author>/<name>\", list_aitta's filter) and its save; "
+				"session: where you are (the main round or your draft). main: "
+				"true reads the main round's from your draft.",
+				R"J({"type": "object", "properties": {"main": {"type": "boolean",
+				"description": "From your draft: the main round's state"}}})J", ""},
 			{"list_types", "=types", "The types an entity is placed of: each "
 				"one's name, group and what it is. With type: its declaration, "
 				"its params (each one's type, default, min, max, choices), its "
@@ -30836,11 +30875,100 @@ struct Module: public interface::Module, public Interface
 				"required": ["name"]})J", ""},
 			{"undo", "undo", "Takes back your last edit (yours only).",
 				R"J({"type": "object", "properties": {}})J", ""},
+			// [KIT_AGENT_NEXT_1] 2: the sandbox (agent_draft() and on)
+			{"draft", "draft", "Moves you into a draft of your own, as the "
+				"editor's Draft does: a copy of the game's start, running, for "
+				"you alone; the main round (the builders' and players') is left "
+				"as it is. Your edits, start and stop (in a draft: its round "
+				"from its start again), get_view (the server's camera follows), "
+				"get_state (its session says where you are) and playtest go "
+				"there. publish puts what you changed into the game's start; "
+				"leave_draft drops it. It ends on leave_draft or after 5 minutes "
+				"without a call of yours, never for want of a connection; 8 "
+				"sessions a server at most, drafts and rounds together. Your "
+				"builder's Draft button takes them into it to see it.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"publish", "publish", "In your draft: writes it over the game's "
+				"start, as the editor's Publish does: the entities you changed "
+				"as the draft has them and the voxels you set, one edit (undo "
+				"in the main round takes it back); the draft goes on. Refused "
+				"while the draft has goal warnings (get_goal_warnings, which the "
+				"editor's Publish asks about) unless anyway: true.",
+				R"J({"type": "object", "properties": {"anyway": {"type": "boolean",
+				"description": "Publish with goal warnings"}}})J", ""},
+			{"leave_draft", "leave_draft", "Back to the main round: your draft "
+				"ends, what publish did not take gone with it (a builder in it "
+				"goes back too).",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"checkpoint", "checkpoint", "Keeps the game's start (what stop "
+				"shows: the main round's, from a draft too) as checkpoint name, "
+				"in the game's save: the composition (entities, components, "
+				"params, links, comments), each component's start state and "
+				"each World's edited voxels, as a save and an export hold them "
+				"(heightmap samples and decorations kept but not put back). The "
+				"same name again replaces it; delete: true deletes it. At most "
+				"16 checkpoints and 32 MiB a game (list_checkpoints): past "
+				"either it is refused, delete one first.",
+				R"J({"type": "object", "properties": {
+				"name": {"type": "string", "description": "1 to 64 bytes"},
+				"delete": {"type": "boolean"}}, "required": ["name"]})J", ""},
+			{"list_checkpoints", "=checkpoints", "The checkpoints: each one's "
+				"name, by, time (UTC), bytes, entities and edited voxel cells; "
+				"their total and the caps.",
+				R"J({"type": "object", "properties": {}})J", ""},
+			{"restore_checkpoint", "restore", "Puts checkpoint name back as "
+				"the game's start: the composition (one edit, which undo takes "
+				"back; the voxels it does not), the start states and the edited "
+				"voxels (each section edited now or then generated again, its "
+				"cells over it). In the main round and Stopped only: from a "
+				"draft it is refused (the draft is a copy and stays as it is: "
+				"leave_draft first), Running too (stop first). The start as it "
+				"was is kept first as the checkpoint \"before restore <name>\" "
+				"(one so named replaced); refused if that passes the caps.",
+				R"J({"type": "object", "properties": {"name": {"type": "string"}},
+				"required": ["name"]})J", ""},
+			{"diff", "=diff", "What changed. In a draft: the draft against the "
+				"game's start as it is now (what publish brings). With "
+				"checkpoint: that checkpoint against the start now. entities: "
+				"added, removed, moved (pos in its parent's frame, yaw, pitch, "
+				"roll), renamed, params (was and now), components added or "
+				"removed, links, comments; voxels: the cells changed, counted "
+				"per 16-cell box (its min and max cell). Each list 40 at most, "
+				"the rest counted (<list>_more); summary sums it up.",
+				R"J({"type": "object", "properties": {"checkpoint": {"type": "string",
+				"description": "None: the draft against the start"}}})J", ""},
+			// [KIT_AGENT_NEXT_1] 3b (playtest_start())
+			{"playtest", "playtest", "Runs bots in your draft for seconds "
+				"(the game's: real time on most servers), from its start again, "
+				"then puts it back at its "
+				"start (as stop: what play made gone; the voxels play wrote "
+				"stay). The bots are the kit/bot prefab's (a walker doing the "
+				"goals a player would, kit/goal's, one at a time), joining as "
+				"players do (a kit/spawner of players puts them, spread round "
+				"it). Outside a draft it is refused, unless main: true and the "
+				"main round is Stopped (it is started for the playtest, every "
+				"player in it, and stopped after). One playtest at a time on a "
+				"server. Answers at once: playtest_report reads the report.",
+				R"J({"type": "object", "properties": {
+				"bots": {"type": "integer", "description": "1 to 8, 2 unless given"},
+				"seconds": {"type": "integer", "description": "5 to 120, 30 unless given"},
+				"main": {"type": "boolean", "description": "The main round, Stopped"}}})J",
+				""},
+			{"playtest_report", "=playtest", "The last playtest's report (while "
+				"it runs, so far): each bot's finish time (a kit/goal done whose "
+				"done links to no other goal) or outcome, its goals done, deaths "
+				"(time, cause: the damage type and by what, place) and stuck "
+				"(kit/bot's stuck output, why); stuck spots (where bots moved "
+				"under 1.5 cells in 4 s, clustered within 3 cells: place, bots, "
+				"times); the goal warnings at its start; a summary.",
+				R"J({"type": "object", "properties": {}})J", ""},
 			{"start", "play", "Starts the round (Play): the composition runs, "
-				"live, with the players in it. Edits go on while it runs.",
+				"live, with the players in it. Edits go on while it runs. In "
+				"your draft (which always runs): its round from its start again.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"stop", "stop", "Ends the round (Stop): the world back at its "
-				"start, what play made gone.",
+				"start, what play made gone. In your draft: its round from its "
+				"start again (your edits kept, the voxels play wrote too).",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"try_input", "try", "Running: sends value to entity id's input "
 				"as a link would; what its runs emit comes in get_events.",
@@ -31260,6 +31388,17 @@ struct Module: public interface::Module, public Interface
 		if(it == m_agents.end())
 			return;
 		const size_t peer = it->second.peer;
+		// [KIT_AGENT_NEXT_1] 2: its draft ends with it (who is in it back in
+		// the default), and it is back there to leave
+		{
+			SessionScope sc(*this, 0);
+			const uint64_t sid = session_of_peer(peer);
+			auto si = m_sessions.find(sid);
+			if(si != m_sessions.end() && si->second->draft &&
+					si->second->by == it->second.account+"'s agent")
+				end_session(sid, it->second.account+"'s agent ("+why+")");
+			agent_move(peer, 0);
+		}
 		m_agents.erase(it);
 		m_agent_peers.erase(peer);
 		if(peer && peer == m_cam.play_agent)
@@ -31283,23 +31422,28 @@ struct Module: public interface::Module, public Interface
 	ss_ agent_tool(const accounts::Interface::AgentToken &at,
 			const AgentTool &t, const json::Value &args, bool &failed)
 	{
-		SessionScope sc(*this, 0);
+		SessionScope top(*this, 0);
 		failed = true;
 		if(!m_hosted)
 			return "Kit is not hosted by this server's app";
 		const size_t peer = agent_peer(at);
 		if(!peer)
 			return "This server runs no agents";
-		Peer &p = m_peers[peer];
-		if(!can_edit_u(peer))
+		if(!can_edit(peer))
 			return "No edit rights here: "+at.name+" is not a builder";
+		const ss_ op = t.op;
+		const json::Value a = args.is_object() ? args : json::object();
+		// [KIT_AGENT_NEXT_1] 2: a draft made or left at the top; the rest in
+		// its session (its draft's)
+		if(op == "draft" || op == "leave_draft")
+			return agent_draft(op == "draft", peer, failed);
+		SessionScope sc(*this, session_of_peer(peer));
+		Peer &p = m_peers[peer];
 		if(!p.editing){
 			tools(p, peer, true);
 			send_builders();
 		}
 		failed = false;
-		const ss_ op = t.op;
-		const json::Value a = args.is_object() ? args : json::object();
 		// [KIT_AGENT_NEXT_1] its last place
 		const json::Value &lp = a.get("pos").is_array() ? a.get("pos") :
 				a.get("at");
@@ -31321,6 +31465,24 @@ struct Module: public interface::Module, public Interface
 			return agent_play(op, p, peer, a, failed);
 		if(op == "set_voxel")
 			return agent_voxels(p, peer, a, failed);
+		// [KIT_AGENT_NEXT_1] 2, 3b
+		if(op == "publish")
+			return agent_publish(peer, a, failed);
+		if(op == "checkpoint" || op == "restore")
+			return agent_checkpoint(op == "restore", p, a, failed);
+		if(op == "playtest")
+			return playtest_start(p, a, failed);
+		if((op == "play" || op == "stop") && in_draft() &&
+				!active_session()->bench){
+			if(m_test.on && m_test.session == m_active){
+				failed = true;
+				return "Refused: a playtest runs in your draft (playtest_report)";
+			}
+			draft_again();
+			return "Your draft's round from its start again (a draft always "
+					"runs): what play made gone, each component at its start, "
+					"your edits kept";
+		}
 		// [KIT_CUSTOM_TYPES] outside kit:edit (its 4096 bytes)
 		if(op == "type_put" || op == "type_delete"){
 			ss_ what, why;
@@ -32869,6 +33031,17 @@ struct Module: public interface::Module, public Interface
 		if(rounds)
 			round.set("arena_rounds", rounds);
 		s.set("round", round);
+		// [KIT_AGENT_NEXT_1] 2: the session it is in: the main round or its
+		// draft
+		{
+			GameSession *gs = active_session();
+			json::Value se = json::object();
+			se.set("id", (int64_t)m_active);
+			se.set("kind", ss_(!gs ? "main" : gs->bench ? "bench" : gs->draft ?
+					"draft" : "game"));
+			se.set("where", session_where(m_active));
+			s.set("session", se);
+		}
 		// [WB_RENAME_LEFTOVERS] list_aitta's game filter, as kit:edit_state's
 		if(!m_host.project.empty())
 			s.set("game", game_of(author_of(p)));
@@ -32928,6 +33101,11 @@ struct Module: public interface::Module, public Interface
 	ss_ agent_read(Peer &p, size_t peer, const ss_ &op, const json::Value &a,
 			bool &failed)
 	{
+		// [KIT_AGENT_NEXT_1] 2: from a draft, the main round's
+		if(op == "=state" && a.get("main").is_true() && m_active){
+			SessionScope sc(*this, 0);
+			return agent_state(p);
+		}
 		WorldScope ws(m_w, world_named(p.scene));
 		uint64_t id = 0;
 		const json::Value &iv = a.get("id");
@@ -32937,6 +33115,13 @@ struct Module: public interface::Module, public Interface
 			id = (uint64_t)iv.as_number();
 		if(op == "=state")
 			return agent_state(p);
+		// [KIT_AGENT_NEXT_1] 2, 3b
+		if(op == "=checkpoints")
+			return checkpoint_list();
+		if(op == "=diff")
+			return agent_diff(a, failed);
+		if(op == "=playtest")
+			return playtest_report(failed);
 		if(op == "=types")
 			return agent_types(jstr(a, "type"), failed);
 		// [KIT_PROJECT_EXPORT]
@@ -33523,6 +33708,1241 @@ struct Module: public interface::Module, public Interface
 	// types by group; full (get_guide) with each one's what, inputs, outputs
 	// and params' names, else (initialize's instructions, which Claude Code
 	// cuts at 4096 characters) their names only, cut to fit
+	// ---- [KIT_AGENT_NEXT_1] 2: the agent's sandbox. draft: its peer into a
+	// draft of its own (make_draft(), the editor's Draft), where its edits,
+	// start and stop (draft_again()), get_view (the server's camera follows
+	// its session) and playtest go. The draft ends on leave_draft and as the
+	// agent leaves (agent_idle_us() without a call, its token revoked:
+	// drop_agent()), never for want of a connection: its peer is the
+	// server's own and in the session as long as it is (the sweep's "nobody
+	// in it" never holds). Its builder's Draft takes them into it
+	// (make_draft()); their Leave draft takes them back alone.
+
+	// The agent's peer into session `to` (0: the default) at once: no client
+	// places it (the app's change_scene knows its own peers only), so its
+	// Peer is made there as agent_peer() made it, in the scene of the same
+	// name (else the World's), its tools on. At the top
+	void agent_move(size_t peer, uint64_t to)
+	{
+		const uint64_t from = session_of_peer(peer);
+		if(from == to || (to && !m_sessions.count(to)))
+			return;
+		ss_ name, account, scene;
+		{
+			SessionScope sc(*this, from);
+			auto pi = m_peers.find(peer);
+			if(pi == m_peers.end())
+				return;
+			name = pi->second.name;
+			account = pi->second.account;
+			scene = pi->second.scene;
+			leave_round(peer, false);
+		}
+		if(to)
+			m_peer_session[peer] = to;
+		else
+			m_peer_session.erase(peer);
+		SessionScope sc(*this, to);
+		if(!m_host.scenes.count(scene))
+			scene = !m_host.world_scene.empty() || m_host.scenes.empty() ?
+					m_host.world_scene : m_host.scenes.begin()->first;
+		Peer &p = m_peers[peer];
+		p.name = name;
+		p.account = account;
+		p.scene = scene;
+		if(can_edit_u(peer))
+			tools(p, peer, true);
+		send_builders();
+		log_i(MODULE, "%s from session %s to session %s (scene %s)", cs(name),
+				cs(itos(from)), cs(itos(to)), cs(scene));
+	}
+
+	// draft and leave_draft, at the top
+	ss_ agent_draft(bool make, size_t peer, bool &failed)
+	{
+		failed = true;
+		const uint64_t sid = session_of_peer(peer);
+		if(make){
+			if(sid)
+				return "Refused: you are "+session_where(sid)+" already "
+						"(leave_draft first)";
+			json::Value e = json::object();
+			e.set("op", "draft");
+			ss_ refused, warnings;
+			if(!agent_edit(peer, e, refused, warnings))
+				return "Refused: "+refused;
+			const uint64_t id = session_of_peer(peer);
+			if(!id)
+				return "Refused: no draft was made";
+			failed = false;
+			return "In your draft (session "+itos(id)+"): a copy of the game's "
+					"start, running, yours alone; the main round goes on as it "
+					"is. diff says what you changed, publish puts it into the "
+					"start, leave_draft drops it"+warnings;
+		}
+		if(!m_sessions.count(sid))
+			return "Refused: not in a draft";
+		const Agent *ag = agent_of(peer);
+		const ss_ by = m_sessions[sid]->by;
+		if(ag && by == ag->account+"'s agent")
+			end_session(sid, by);
+		else
+			agent_move(peer, 0);
+		failed = false;
+		return "Back in the main round: your draft ended, what publish did not "
+				"take gone with it";
+	}
+
+	// publish: the editor's Publish, refused with goal warnings unless
+	// anyway (its dialog's "Publish anyway"). In the draft
+	ss_ agent_publish(size_t peer, const json::Value &a, bool &failed)
+	{
+		failed = true;
+		GameSession *gs = active_session();
+		if(!gs || !gs->draft || gs->bench)
+			return "Refused: not in a draft (draft makes one)";
+		const json::Value gw = agent_goals();
+		if(gw.size() && !a.get("anyway").is_true())
+			return "Refused: "+itos(gw.size())+" goal warnings, which the "
+					"editor's Publish asks about (anyway: true publishes with "
+					"them): "+gw.stringify();
+		size_t cells = 0;
+		for(auto &s : m_marks)
+			cells += s.second.size();
+		const size_t ents = gs->touched.size();
+		json::Value e = json::object();
+		e.set("op", "publish");
+		ss_ refused, warnings;
+		if(!agent_edit(peer, e, refused, warnings))
+			return "Refused: "+refused+warnings;
+		failed = false;
+		return "Published into the game's start: "+itos(ents)+" entities, "+
+				itos(cells)+" voxel cells (one edit; undo in the main round "
+				"takes the entities back); your draft goes on"+(gw.size() ?
+				", with "+itos(gw.size())+" goal warnings" : ss_())+warnings;
+	}
+
+	// A draft's round from its start again (its start and stop; a playtest's
+	// before and after), entered: what play made gone and what it removed
+	// back (end_round_entities()), each component at its start and its
+	// on_start run, as the draft began; its edits kept.
+	// simplified: the cells play wrote stay (a draft's play and edits write
+	// one World); leave_draft and draft again is the clean start
+	void draft_again()
+	{
+		m_queue.clear();
+		end_round_entities();
+		m_discarded.clear();
+		m_drives.clear();
+		m_play_params.clear();
+		m_bot_seats.clear();
+		for(auto &pe : m_entities)
+			for(size_t i = 0; i < pe.second.comps.size(); i++){
+				to_start(pe.second, i);
+				Run r;
+				r.entity = pe.first;
+				r.comp = i;
+				r.handler = "on_start";
+				queue_run(r);
+			}
+		if(GameSession *gs = active_session())
+			gs->bots = 0;
+		m_runtime_dirty = true;
+		settle_bodies();
+		own_voxels();
+		pick_provider();
+		log_i(MODULE, "Draft %s: its round from its start again",
+				cs(itos(m_active)));
+	}
+
+	// ---- Checkpoints: named snapshots of the game's start (the main
+	// round's, what Stop shows), the row "checkpoint:<name>" in the game's
+	// own store (from a draft too): {"by", "time" (Unix seconds), "authored"
+	// (the save's row of that name, load_composition()'s form), "start" (the
+	// row "start": each instance's start state), "edits" (an export's
+	// edits.bin, kit_world_edits zlib'd, in base64; "": none)}, at most
+	// checkpoint_caps() of them. A restore (checkpoint_restore()) writes the
+	// start, in the main round and Stopped only; from a draft it is refused:
+	// the draft is a copy and stays as it is (one rule: a checkpoint holds
+	// the start, a restore writes it).
+	// simplified: heightmap samples and decorations are kept, not put back
+	static void checkpoint_caps(size_t &count, size_t &bytes)
+	{
+		count = 16;
+		bytes = 32 << 20;
+		const char *e = getenv("BUILDAT_CHECKPOINT_CAPS");
+		long c = 0, b = 0;
+		if(e && sscanf(e, "%ld %ld", &c, &b) == 2 && c > 0 && b > 0){
+			count = (size_t)c;
+			bytes = (size_t)b;
+		}
+	}
+
+	// Name -> its row's bytes
+	std::map<ss_, size_t> checkpoints()
+	{
+		std::map<ss_, size_t> r;
+		for(const ss_ &k : m_kit_store->list("checkpoint:")){
+			ss_ v;
+			if(m_kit_store->get(k, v))
+				r[k.substr(11)] = v.size();
+		}
+		return r;
+	}
+
+	// The start as a checkpoint's row. At the top
+	ss_ checkpoint_row(const ss_ &by, size_t &ents, size_t &cells)
+	{
+		json::Value r = json::object();
+		r.set("by", by);
+		r.set("time", (int64_t)time(nullptr));
+		const json::Value au = authored_json();
+		ents = au.get("entities").size();
+		r.set("authored", au);
+		r.set("start", m_start);
+		json::Value scenes = json::object();
+		size_t samples = 0;
+		cells = 0;
+		for(auto &wp : m_worlds){
+			json::Value o;
+			if(world_edits(wp.second, o, cells, samples))
+				scenes.set(wp.second.name, o);
+		}
+		sv_<std::pair<ss_, ss_>> files;
+		edits_file(files, scenes);
+		r.set("edits", files.empty() ? ss_() : base64(files[0].second));
+		return r.stringify();
+	}
+
+	// The start kept as checkpoint name (one so named replaced), within the
+	// caps. At the top
+	bool checkpoint_put(const ss_ &name, const ss_ &by, ss_ &why, size_t &bytes,
+			size_t &ents, size_t &cells)
+	{
+		size_t max_n = 0, max_b = 0;
+		checkpoint_caps(max_n, max_b);
+		const ss_ row = checkpoint_row(by, ents, cells);
+		const std::map<ss_, size_t> have = checkpoints();
+		size_t total = 0;
+		for(auto &c : have)
+			if(c.first != name)
+				total += c.second;
+		if(!have.count(name) && have.size() >= max_n){
+			why = itos(max_n)+" checkpoints a game at most: delete one first "
+					"(checkpoint with delete: true)";
+			return false;
+		}
+		if(total + row.size() > max_b){
+			why = "it would be "+itos(row.size())+" bytes, the others "+
+					itos(total)+", and a game's checkpoints "+itos(max_b)+
+					" bytes at most: delete one first";
+			return false;
+		}
+		m_kit_store->set("checkpoint:"+name, row);
+		bytes = row.size();
+		log_i(MODULE, "%s keeps checkpoint \"%s\": %zu entities, %zu cells, "
+				"%zu bytes", cs(by), cs(name), ents, cells, bytes);
+		return true;
+	}
+
+	// A checkpoint's edits.bin (undefined: none); false: not readable
+	static bool checkpoint_edits(const json::Value &c, json::Value &edits,
+			ss_ &why)
+	{
+		const ss_ b64 = jstr(c, "edits");
+		if(b64.empty())
+			return true;
+		ss_ z;
+		if(!unbase64(b64, z)){
+			why = "its voxels are not base64";
+			return false;
+		}
+		try {
+			std::istringstream is(z, std::ios::binary);
+			std::ostringstream os(std::ios::binary);
+			interface::decompress_zlib(is, os, 64 << 20);
+			edits = json::load_string(os.str().c_str());
+		} catch(std::exception &e){
+			why = "its voxels: "+ss_(e.what());
+			return false;
+		}
+		if(jstr(edits, "format") != "kit_world_edits"){
+			why = "its voxels are not kit_world_edits";
+			return false;
+		}
+		return true;
+	}
+
+	ss_ checkpoint_list()
+	{
+		size_t max_n = 0, max_b = 0, total = 0;
+		checkpoint_caps(max_n, max_b);
+		json::Value o = json::object(), l = json::array();
+		for(auto &c : checkpoints()){
+			ss_ row;
+			m_kit_store->get("checkpoint:"+c.first, row);
+			const json::Value r = json::load_string(row.c_str());
+			json::Value e = json::object();
+			e.set("name", c.first);
+			e.set("by", jstr(r, "by"));
+			char t[32] = "";
+			const struct tm tmv = interface::os::utc_tm(json::jint(r, "time", 0));
+			strftime(t, sizeof t, "%Y-%m-%dT%H:%M:%SZ", &tmv);
+			e.set("time", ss_(t));
+			e.set("bytes", (int64_t)c.second);
+			e.set("entities", (int64_t)r.get("authored").get("entities").size());
+			json::Value edits;
+			ss_ why;
+			int64_t cells = 0;
+			if(checkpoint_edits(r, edits, why))
+				for(json::Iterator it(edits.get("scenes"));
+						edits.get("scenes").is_object() && it; ++it)
+					cells += (*it).get("cells").size() / 5;
+			e.set("cells", cells);
+			l.append(e);
+			total += c.second;
+		}
+		o.set("checkpoints", l);
+		o.set("bytes", (int64_t)total);
+		o.set("max_checkpoints", (int64_t)max_n);
+		o.set("max_bytes", (int64_t)max_b);
+		return o.stringify();
+	}
+
+	// checkpoint (make, delete) and restore_checkpoint, in the agent's
+	// session; the start's, so at the top
+	ss_ agent_checkpoint(bool restore, Peer &p, const json::Value &a,
+			bool &failed)
+	{
+		failed = true;
+		const ss_ name = jstr(a, "name");
+		bool ok = !name.empty() && name.size() <= (restore ? 128 : 64);
+		for(unsigned char c : name)
+			ok = ok && c >= 32 && c != 127;
+		if(!ok)
+			return "Refused: name: 1 to 64 bytes, no control characters";
+		if(restore && m_active)
+			return "Refused: in your draft: a restore writes the main round's "
+					"start, and the draft is a copy that stays as it is "
+					"(leave_draft, or publish, first)";
+		const ss_ who = p.name;
+		SessionScope sc(*this, 0);
+		if(restore)
+			return checkpoint_restore(who, name, failed);
+		if(a.get("delete").is_true()){
+			ss_ v;
+			if(!m_kit_store->get("checkpoint:"+name, v))
+				return "Refused: no checkpoint \""+name+"\" (list_checkpoints)";
+			m_kit_store->remove("checkpoint:"+name);
+			log_i(MODULE, "%s deletes checkpoint \"%s\"", cs(who), cs(name));
+			failed = false;
+			return "Checkpoint \""+name+"\" deleted";
+		}
+		ss_ why;
+		size_t bytes = 0, ents = 0, cells = 0;
+		if(!checkpoint_put(name, who, why, bytes, ents, cells))
+			return "Refused: "+why;
+		failed = false;
+		return "Checkpoint \""+name+"\": the game's start, "+itos(ents)+
+				" entities, "+itos(cells)+" edited voxel cells, "+itos(bytes)+
+				" bytes";
+	}
+
+	// The checkpoint as the game's start, the start before kept as "before
+	// restore <name>". At the top, Stopped
+	ss_ checkpoint_restore(const ss_ &who, const ss_ &name, bool &failed)
+	{
+		failed = true;
+		ss_ row, why;
+		if(!m_kit_store->get("checkpoint:"+name, row))
+			return "Refused: no checkpoint \""+name+"\" (list_checkpoints)";
+		if(m_host.persistent)
+			return "Refused: the world is persistent: it has no start";
+		if(m_session.running)
+			return "Refused: the main round is Running: a restore writes its "
+					"start, which Stop shows (stop first, asking the builder)";
+		if(!m_session.restore.empty())
+			return "Refused: "+itos(m_session.restore.size())+" sections the "
+					"last Stop puts back wait for their load";
+		const json::Value c = json::load_string(row.c_str());
+		const json::Value &au = c.get("authored");
+		json::Value edits;
+		if(!au.get("entities").is_array())
+			return "Refused: checkpoint \""+name+"\" has no composition";
+		if(!checkpoint_edits(c, edits, why))
+			return "Refused: checkpoint \""+name+"\": "+why;
+		const ss_ before = cut_utf8("before restore "+name, 128);
+		size_t bytes = 0, ents = 0, cells = 0;
+		if(!checkpoint_put(before, who, why, bytes, ents, cells))
+			return "Refused: the start as it is is kept first as \""+before+
+					"\", and "+why;
+		// The composition: one edit, one undo
+		std::map<uint64_t, json::Value> want;
+		const json::Value &es = au.get("entities");
+		for(unsigned i = 0; i < es.size(); i++)
+			want[(uint64_t)json::jint(es.at(i), "id", 0)] = es.at(i);
+		std::map<uint64_t, ss_> have;
+		const json::Value now = authored_json();
+		const json::Value &ns = now.get("entities");
+		for(unsigned i = 0; i < ns.size(); i++)
+			have[(uint64_t)json::jint(ns.at(i), "id", 0)] = ns.at(i).stringify();
+		sv_<std::pair<uint64_t, json::Value>> change;
+		for(auto &w : want)
+			if(w.first >= 2 && (!have.count(w.first) ||
+					have[w.first] != w.second.stringify()))
+				change.push_back(std::make_pair(w.first, w.second.deepcopy()));
+		for(auto &h : have)
+			if(!want.count(h.first))
+				change.push_back(std::make_pair(h.first, json::null()));
+		m_next_id = std::max(m_next_id, (uint64_t)json::jint(au, "next_id", 0));
+		if(!change.empty()){
+			commit(change, &m_undo[who]);
+			world_check(who);
+		}
+		// Each instance's start state
+		if(c.get("start").is_object()){
+			m_start = c.get("start").deepcopy();
+			m_store->set("start", m_start.stringify());
+			for(auto &pe : m_entities)
+				for(size_t i = 0; i < pe.second.comps.size(); i++)
+					to_start(pe.second, i);
+			m_runtime_dirty = true;
+			save_runtime();
+		}
+		// The voxels: each section edited now or then generated again, the
+		// checkpoint's cells over it
+		size_t secs = 0, put = 0, left = 0;
+		for(auto &wp : m_worlds){
+			World &wd = wp.second;
+			if(!wd.world_scene || wd.name.find('~') != ss_::npos)
+				continue;
+			CellsBy by;
+			voxelworld::access(m_server, wd.world_scene,
+					[&](voxelworld::Instance *w){
+				w->save();
+				for(const auto &s : w->section_stats())
+					if(s.altered)
+						by[std::make_tuple((int)s.p.getX(), (int)s.p.getY(),
+								(int)s.p.getZ())];
+			});
+			const json::Value &sj = edits.get("scenes").get(wd.name);
+			if(sj.is_object())
+				edit_cells(&wd, sj, by, put, left);
+			sv_<CellJob> jobs;
+			for(auto &s : by)
+				jobs.push_back({wd.name, s.first, s.second});
+			put_sections(&wd, jobs);
+			secs += jobs.size();
+		}
+		log_i(MODULE, "%s restores checkpoint \"%s\": %zu entities changed, "
+				"%zu cells in %zu sections (%zu left out); the start before kept "
+				"as \"%s\"", cs(who), cs(name), change.size(), put, secs, left,
+				cs(before));
+		for(auto &pp : m_peers)
+			if(pp.second.editing)
+				send_state(pp.first);
+		failed = false;
+		return "Checkpoint \""+name+"\" is the game's start again: "+
+				itos(change.size())+" entities changed (one edit: undo takes it "
+				"back, not the voxels), "+itos(put)+" edited voxel cells in "+
+				itos(secs)+" sections generated again"+(left ? " ("+itos(left)+
+				" cells of voxels this server lacks left out)" : ss_())+"; the "
+				"start before is the checkpoint \""+before+"\"";
+	}
+
+	// ---- diff: two compositions (load_composition()'s form), was -> now,
+	// and the voxel cells changed, each list DIFF_LIST at most (the rest
+	// counted in "<list>_more")
+	static const unsigned DIFF_LIST = 40;
+	struct DiffOut
+	{
+		json::Value o = json::object();
+		std::map<ss_, size_t> n;
+		void add(const ss_ &list, const json::Value &v)
+		{
+			if(n[list]++ < DIFF_LIST){
+				if(!o.get(list).is_array())
+					o.set(list, json::array());
+				o[list].append(v);
+			} else {
+				o.set(list+"_more", (int64_t)(n[list] - DIFF_LIST));
+			}
+		}
+	};
+	typedef sv_<std::pair<ss_, std::array<int, 3>>> DiffCells;
+
+	static ss_ jtext(const json::Value &v)
+	{
+		return v.is_undefined() ? ss_() : v.stringify();
+	}
+
+	void diff_entities(const json::Value &was, const json::Value &now,
+			DiffOut &d)
+	{
+		auto by_id = [](const json::Value &c){
+			std::map<uint64_t, json::Value> m;
+			const json::Value &es = c.get("entities");
+			for(unsigned i = 0; i < es.size(); i++)
+				m[(uint64_t)json::jint(es.at(i), "id", 0)] = es.at(i);
+			return m;
+		};
+		auto types = [](const json::Value &e){
+			json::Value t = json::array();
+			const json::Value &cs = e.get("components");
+			for(unsigned i = 0; i < cs.size(); i++)
+				t.append(jstr(cs.at(i), "type"));
+			return t;
+		};
+		auto cut = [](const json::Value &v){
+			const ss_ s = jtext(v);
+			return v.is_undefined() ? json::null() : s.size() <= 200 ? v :
+					json::Value(cut_utf8(s, 200)+"...");
+		};
+		auto head = [](uint64_t id, const json::Value &e){
+			json::Value h = json::object();
+			h.set("id", (int64_t)id);
+			h.set("name", jstr(e, "name"));
+			return h;
+		};
+		auto links = [](const json::Value &cj){
+			std::set<ss_> s;
+			const json::Value &ls = cj.get("links");
+			for(unsigned i = 0; i < ls.size(); i++){
+				const json::Value &l = ls.at(i);
+				s.insert(jstr(l, "output")+" -> "+(l.get("to").is_number() ?
+						itos(json::jint(l, "to", 0)) : jstr(l, "to_name"))+"."+
+						jstr(l, "input"));
+			}
+			return s;
+		};
+		const std::map<uint64_t, json::Value> w = by_id(was), n = by_id(now);
+		for(auto &x : n)
+			if(!w.count(x.first)){
+				json::Value h = head(x.first, x.second);
+				h.set("types", types(x.second));
+				if(x.second.get("pos").is_array())
+					h.set("pos", x.second.get("pos"));
+				d.add("added", h);
+			}
+		for(auto &x : w)
+			if(!n.count(x.first)){
+				json::Value h = head(x.first, x.second);
+				h.set("types", types(x.second));
+				d.add("removed", h);
+			}
+		static const char *PLACE[] = {"pos", "yaw", "pitch", "roll", "parent"};
+		for(auto &x : n){
+			auto wi = w.find(x.first);
+			if(wi == w.end())
+				continue;
+			const json::Value &a = wi->second, &b = x.second;
+			if(a.stringify() == b.stringify())
+				continue;
+			if(jstr(a, "name") != jstr(b, "name")){
+				json::Value h = head(x.first, b);
+				h.set("was", jstr(a, "name"));
+				d.add("renamed", h);
+			}
+			json::Value pw = json::object(), pn = json::object();
+			for(const char *k : PLACE)
+				if(jtext(a.get(k)) != jtext(b.get(k))){
+					pw.set(k, a.get(k).is_undefined() ? json::Value(k[0] == 'p' &&
+							k[1] == 'o' ? json::null() : json::Value(0)) : a.get(k));
+					pn.set(k, b.get(k).is_undefined() ? json::Value(k[0] == 'p' &&
+							k[1] == 'o' ? json::null() : json::Value(0)) : b.get(k));
+				}
+			if(pw.size()){
+				json::Value h = head(x.first, b);
+				h.set("was", pw);
+				h.set("now", pn);
+				d.add("moved", h);
+			}
+			// Its components by type (one of a type an entity)
+			std::map<ss_, json::Value> ca, cb;
+			for(unsigned i = 0; i < a.get("components").size(); i++)
+				ca[jstr(a.get("components").at(i), "type")] =
+						a.get("components").at(i);
+			for(unsigned i = 0; i < b.get("components").size(); i++)
+				cb[jstr(b.get("components").at(i), "type")] =
+						b.get("components").at(i);
+			for(auto &c : cb)
+				if(!ca.count(c.first)){
+					json::Value h = head(x.first, b);
+					h.set("added", c.first);
+					d.add("components", h);
+				}
+			for(auto &c : ca)
+				if(!cb.count(c.first)){
+					json::Value h = head(x.first, b);
+					h.set("removed", c.first);
+					d.add("components", h);
+				}
+			for(auto &c : cb){
+				auto ci = ca.find(c.first);
+				if(ci == ca.end())
+					continue;
+				const json::Value &pa = ci->second.get("params"),
+						&pb = c.second.get("params");
+				std::set<ss_> keys;
+				for(json::Iterator it(pa); pa.is_object() && it; ++it)
+					keys.insert(it.key());
+				for(json::Iterator it(pb); pb.is_object() && it; ++it)
+					keys.insert(it.key());
+				for(const ss_ &k : keys)
+					if(jtext(pa.get(k)) != jtext(pb.get(k))){
+						json::Value h = head(x.first, b);
+						h.set("type", c.first);
+						h.set("param", k);
+						h.set("was", cut(pa.get(k)));
+						h.set("now", cut(pb.get(k)));
+						d.add("params", h);
+					}
+				const std::set<ss_> la = links(ci->second), lb = links(c.second);
+				if(la != lb){
+					json::Value h = head(x.first, b), ad = json::array(),
+							rm = json::array();
+					for(const ss_ &l : lb)
+						if(!la.count(l))
+							ad.append(l);
+					for(const ss_ &l : la)
+						if(!lb.count(l))
+							rm.append(l);
+					h.set("type", c.first);
+					h.set("added", ad);
+					h.set("removed", rm);
+					d.add("links", h);
+				}
+			}
+			if(jstr(a, "comments") != jstr(b, "comments")){
+				json::Value h = head(x.first, b);
+				h.set("was", cut_utf8(jstr(a, "comments"), 120));
+				h.set("now", cut_utf8(jstr(b, "comments"), 120));
+				d.add("comments", h);
+			}
+		}
+	}
+
+	// A scene's edits.bin cells, "<voxel> <rest>" by place
+	static void edit_map(const json::Value &sj,
+			std::map<std::array<int, 3>, ss_> &m)
+	{
+		const json::Value &names = sj.get("names"), &cs = sj.get("cells");
+		for(unsigned i = 0; i + 5 <= cs.size(); i += 5){
+			bool ok = true;
+			for(unsigned k = 0; k < 5; k++)
+				ok = ok && cs.at(i + k).is_number();
+			if(!ok)
+				continue;
+			const std::array<int, 3> p = {{(int)cs.at(i).as_number(),
+					(int)cs.at(i + 1).as_number(), (int)cs.at(i + 2).as_number()}};
+			m[p] = jstr_at(names, (unsigned)cs.at(i + 3).as_number())+" "+
+					itos((int64_t)cs.at(i + 4).as_number());
+		}
+	}
+
+	// The cells changed counted per 16-cell box, the most first
+	void diff_cells(const DiffCells &cells, DiffOut &d)
+	{
+		struct Area
+		{
+			size_t n = 0;
+			std::array<int, 3> lo, hi;
+		};
+		std::map<std::pair<ss_, std::array<int, 3>>, Area> areas;
+		for(auto &c : cells){
+			std::array<int, 3> b;
+			for(int k = 0; k < 3; k++)
+				b[k] = floor_div(c.second[k], 16) * 16;
+			Area &a = areas[std::make_pair(c.first, b)];
+			for(int k = 0; k < 3; k++){
+				a.lo[k] = a.n ? std::min(a.lo[k], c.second[k]) : c.second[k];
+				a.hi[k] = a.n ? std::max(a.hi[k], c.second[k]) : c.second[k];
+			}
+			a.n++;
+		}
+		sv_<std::pair<size_t, json::Value>> list;
+		auto arr = [](const std::array<int, 3> &v){
+			json::Value j = json::array();
+			for(int x : v)
+				j.append((int64_t)x);
+			return j;
+		};
+		for(auto &a : areas){
+			json::Value j = json::object();
+			j.set("scene", a.first.first);
+			j.set("box", arr(a.first.second));
+			j.set("cells", (int64_t)a.second.n);
+			j.set("min", arr(a.second.lo));
+			j.set("max", arr(a.second.hi));
+			list.push_back(std::make_pair(a.second.n, j));
+		}
+		std::stable_sort(list.begin(), list.end(), [](
+				const std::pair<size_t, json::Value> &x,
+				const std::pair<size_t, json::Value> &y){
+			return x.first > y.first;
+		});
+		json::Value v = json::object(), al = json::array();
+		v.set("cells", (int64_t)cells.size());
+		for(size_t i = 0; i < list.size() && i < DIFF_LIST; i++)
+			al.append(list[i].second);
+		v.set("areas", al);
+		if(list.size() > DIFF_LIST)
+			v.set("areas_more", (int64_t)(list.size() - DIFF_LIST));
+		d.o.set("voxels", v);
+		d.n["voxel cells"] = cells.size();
+		d.n["voxel areas"] = list.size();
+	}
+
+	ss_ agent_diff(const json::Value &a, bool &failed)
+	{
+		failed = true;
+		DiffOut d;
+		DiffCells cells;
+		const ss_ cp = jstr(a, "checkpoint");
+		ss_ against;
+		if(!cp.empty()){
+			ss_ row, why;
+			if(!m_kit_store->get("checkpoint:"+cp, row))
+				return "Refused: no checkpoint \""+cp+"\" (list_checkpoints)";
+			const json::Value c = json::load_string(row.c_str());
+			json::Value edits;
+			if(!checkpoint_edits(c, edits, why))
+				return "Refused: checkpoint \""+cp+"\": "+why;
+			SessionScope sc(*this, 0);
+			diff_entities(c.get("authored"), authored_json(), d);
+			// Each World's edited cells then and now
+			std::set<ss_> scenes;
+			for(json::Iterator it(edits.get("scenes"));
+					edits.get("scenes").is_object() && it; ++it)
+				scenes.insert(it.key());
+			std::map<ss_, json::Value> nowe;
+			for(auto &wp : m_worlds){
+				json::Value o;
+				size_t cn = 0, sn = 0;
+				if(world_edits(wp.second, o, cn, sn))
+					nowe[wp.second.name] = o;
+				scenes.insert(wp.second.name);
+			}
+			for(const ss_ &s : scenes){
+				std::map<std::array<int, 3>, ss_> x, y;
+				edit_map(edits.get("scenes").get(s), x);
+				if(nowe.count(s))
+					edit_map(nowe[s], y);
+				for(auto &c : x)
+					if(!y.count(c.first) || y[c.first] != c.second)
+						cells.push_back(std::make_pair(s, c.first));
+				for(auto &c : y)
+					if(!x.count(c.first))
+						cells.push_back(std::make_pair(s, c.first));
+			}
+			against = "checkpoint \""+cp+"\" (was) against the game's start "
+					"now (now)";
+		} else {
+			GameSession *gs = active_session();
+			if(!gs || !gs->draft || gs->bench)
+				return "Refused: not in a draft: draft makes one; checkpoint: "
+						"a checkpoint against the start";
+			json::Value start;
+			{
+				SessionScope sc(*this, 0);
+				start = authored_json();
+			}
+			diff_entities(start, authored_json(), d);
+			// The cells its edits and play wrote that differ from the start's
+			voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+				for(auto &sec : m_marks){
+					const ss_ scene = sec.first.substr(0, sec.first.find(':'));
+					auto si = m_host.scenes.find(scene);
+					auto di = m_default_ctx.scenes.find(scene);
+					voxelworld::Instance *w = si == m_host.scenes.end() ? nullptr :
+							ivw->get_instance(si->second);
+					voxelworld::Instance *dw = di == m_default_ctx.scenes.end() ?
+							nullptr : ivw->get_instance(di->second);
+					for(auto &c : sec.second){
+						const pv::Vector3DInt32 p(std::get<0>(c.first),
+								std::get<1>(c.first), std::get<2>(c.first));
+						if(w && dw && w->get_voxel(p).data == dw->get_voxel(p).data)
+							continue;
+						cells.push_back(std::make_pair(scene, std::array<int, 3>{{
+								p.getX(), p.getY(), p.getZ()}}));
+					}
+				}
+			});
+			against = "the game's start (was) against your draft (now)";
+		}
+		diff_cells(cells, d);
+		ss_ sum;
+		for(const char *k : {"added", "removed", "moved", "renamed", "params",
+				"components", "links", "comments", "voxel cells", "voxel areas"})
+			if(d.n[k])
+				sum += (sum.empty() ? "" : ", ")+itos(d.n[k])+" "+k;
+		d.o.set("against", against);
+		d.o.set("summary", sum.empty() ? ss_("no changes") : sum);
+		failed = false;
+		return d.o.stringify();
+	}
+
+	// ---- [KIT_AGENT_NEXT_1] 3b: a playtest. N bots (the kit/bot prefab's)
+	// made in play, joining as players do (bot_joins(): a spawner of players
+	// puts them), in the agent's draft from its start again (draft_again()),
+	// or in the main round started for it (main, Stopped only), for M seconds
+	// of game time (game_us(): real time, unless the server runs with a
+	// --sim-rate; Kit has no rate of its own); then the world back at its
+	// start (the draft's again, the main round's Stop). One at a time a
+	// server. Each bot's goals done (a kit/goal's done by it: its finish one
+	// whose done links to no other goal), deaths (player_death()), stuck
+	// outputs (kit/bot's), and its place every 0.5 s: a stuck spell where it
+	// moved under STUCK_M in STUCK_US, the spells clustered within 3 cells
+	// as the report's stuck spots; the goal warnings at its start.
+	// simplified: no map picture with the spots marked (get_view's preset
+	// map of the area shows the place)
+	static constexpr double STUCK_M = 1.5;
+	static const int64_t STUCK_US = 4000000;
+	static const unsigned TEST_LIST = 20;
+	struct Playtest
+	{
+		struct Bot
+		{
+			ss_ name, outcome;
+			json::Value goals = json::array(), deaths = json::array(),
+					stuck = json::array();
+			size_t n_goals = 0, n_deaths = 0, n_stuck = 0;
+			double finished = -1;
+			// Its last place, and where and when it last moved STUCK_M
+			double at[3] = {0, 0, 0}, from[3] = {0, 0, 0};
+			int64_t from_us = 0;
+			bool held = false, seen = false;
+		};
+		struct Spot
+		{
+			double p[3];
+			double t;
+			uint64_t bot;
+		};
+		bool on = false, main = false;
+		uint64_t session = 0;
+		ss_ by, scene, ended;
+		int64_t started = 0, until = 0, next = 0, stopped = 0;
+		int seconds = 0;
+		json::Value warnings = json::array();
+		std::map<uint64_t, Bot> bots;
+		sv_<Spot> spots;
+	};
+	Playtest m_test;
+
+	static double round1(double v){ return std::round(v * 10) / 10; }
+	static json::Value vec1(const double p[3])
+	{
+		json::Value j = json::array();
+		for(int k = 0; k < 3; k++)
+			j.append(round1(p[k]));
+		return j;
+	}
+	double test_t()
+	{
+		return round1((interface::os::game_us() - m_test.started) / 1e6);
+	}
+	static void test_add(json::Value &list, size_t &n, const json::Value &v)
+	{
+		if(n++ < TEST_LIST)
+			list.append(v);
+	}
+
+	// In the agent's session
+	ss_ playtest_start(Peer &p, const json::Value &a, bool &failed)
+	{
+		failed = true;
+		const int64_t now = interface::os::game_us();
+		if(m_test.on)
+			return "Refused: a playtest runs ("+itos((m_test.until - now) /
+					1000000)+" s left, by "+m_test.by+"): playtest_report";
+		GameSession *gs = active_session();
+		const bool main = a.get("main").is_true();
+		if(gs && (!gs->draft || gs->bench))
+			return "Refused: not in a draft of yours";
+		if(gs && main)
+			return "Refused: main is the main round's, and you are in your "
+					"draft (leave_draft first)";
+		if(!gs && !main)
+			return "Refused: not in a draft: draft first (a playtest runs in a "
+					"copy of yours), or main: true for the main round, Stopped";
+		if(!gs && m_host.persistent)
+			return "Refused: the world is persistent: no rounds";
+		if(!gs && m_session.running)
+			return "Refused: the main round is Running: a playtest of it starts "
+					"it from its start and stops it after, so Stopped only (stop "
+					"first, asking the builder; or draft)";
+		int n = 2, secs = 30;
+		auto num = [&](const char *k, int lo, int hi, int &v){
+			const json::Value &x = a.get(k);
+			if(x.is_undefined())
+				return true;
+			if(!x.is_number() || x.as_number() != std::floor(x.as_number()) ||
+					x.as_number() < lo || x.as_number() > hi)
+				return false;
+			v = (int)x.as_number();
+			return true;
+		};
+		if(!num("bots", 1, 8, n))
+			return "Refused: bots: 1 to 8";
+		if(!num("seconds", 5, 120, secs))
+			return "Refused: seconds: 5 to 120";
+		if(!prefab("kit/bot"))
+			return "Refused: no kit/bot prefab on this server";
+		if(!scene_entity(p.scene))
+			return "Refused: your scene "+p.scene+" is no scene of the game's";
+		m_test = Playtest();
+		m_test.on = true;
+		m_test.main = main;
+		m_test.session = m_active;
+		m_test.by = p.name;
+		m_test.scene = p.scene;
+		m_test.seconds = secs;
+		m_test.warnings = agent_goals();
+		if(gs)
+			draft_again();
+		else
+			play(p.name);
+		m_test.started = m_test.next = interface::os::game_us();
+		m_test.until = m_test.started + secs * 1000000LL;
+		for(int k = 0; k < n; k++){
+			const uint64_t id = test_bot(p.scene);
+			if(id)
+				m_test.bots[id].name = bot_name(m_entities[id]);
+		}
+		log_i(MODULE, "%s's playtest: %zu bots %s, scene %s, for %d s",
+				cs(p.name), m_test.bots.size(), cs(session_where(m_active)),
+				cs(p.scene), secs);
+		failed = false;
+		return "Playtest: "+itos(m_test.bots.size())+" bots "+(main ? "in the "
+				"main round (started for it)" : "in your draft (from its start "
+				"again)")+" for "+itos(secs)+" s, real time: playtest_report "
+				"then (and meanwhile); get_view shows them";
+	}
+
+	// A bot of the kit/bot prefab's, made in play (gone at Stop and as its
+	// draft starts again), at the spawn, joining the scene. Entered
+	uint64_t test_bot(const ss_ &scene)
+	{
+		const json::Value *pf = prefab("kit/bot");
+		const uint64_t sid = scene_entity(scene);
+		if(!pf || !sid)
+			return 0;
+		const json::Value &cs = pf->get("entities").at(0u).get("components");
+		Entity n;
+		n.id = m_next_id++;
+		n.parent = sid;
+		n.name = "bot";
+		n.has_pos = true;
+		scene_spawn(scene, n.pos[0], n.pos[1], n.pos[2]);
+		n.made = 'g';
+		for(unsigned i = 0; i < cs.size(); i++){
+			Instance in;
+			in.type = jstr(cs.at(i), "type");
+			if(!m_types.count(in.type))
+				continue;
+			fresh(in);
+			const json::Value &ps = cs.at(i).get("params");
+			for(json::Iterator it(ps); ps.is_object() && it; ++it)
+				in.params.set(it.key(), *it);
+			state_defaults(in);
+			n.comps.push_back(in);
+		}
+		if(!is_bot(n))
+			return 0;
+		bot_player_types(n);
+		m_entities[n.id] = n;
+		if(GameSession *gs = active_session())
+			gs->bots++;
+		bot_joins(n.id, scene);
+		return n.id;
+	}
+
+	// At the top
+	void playtest_tick()
+	{
+		if(!m_test.on)
+			return;
+		if(m_test.session && !m_sessions.count(m_test.session))
+			return playtest_end("its draft ended");
+		SessionScope sc(*this, m_test.session);
+		if(m_test.main && !m_session.running)
+			return playtest_end("the main round was stopped");
+		const int64_t now = interface::os::game_us();
+		if(now >= m_test.next){
+			m_test.next = now + 500000;
+			playtest_sample(now);
+		}
+		if(now >= m_test.until)
+			playtest_end("");
+	}
+
+	// Entered
+	void playtest_sample(int64_t now)
+	{
+		for(auto &b : m_test.bots){
+			auto it = m_entities.find(b.first);
+			if(it == m_entities.end() || !it->second.has_pos)
+				continue;
+			Playtest::Bot &tb = b.second;
+			double w[3];
+			world_of(it->second, w);
+			double d2 = 0;
+			for(int k = 0; k < 3; k++){
+				tb.at[k] = w[k];
+				d2 += (w[k] - tb.from[k]) * (w[k] - tb.from[k]);
+			}
+			if(!tb.seen || d2 > STUCK_M * STUCK_M){
+				for(int k = 0; k < 3; k++)
+					tb.from[k] = w[k];
+				tb.from_us = now;
+				tb.held = false;
+				tb.seen = true;
+				continue;
+			}
+			if(!tb.held && tb.finished < 0 && now - tb.from_us >= STUCK_US){
+				tb.held = true;
+				Playtest::Spot s;
+				for(int k = 0; k < 3; k++)
+					s.p[k] = tb.from[k];
+				s.t = round1((tb.from_us - m_test.started) / 1e6);
+				s.bot = b.first;
+				m_test.spots.push_back(s);
+			}
+		}
+	}
+
+	// What a bot is doing (kit/bot's state). Entered
+	ss_ playtest_outcome(uint64_t id, const Playtest::Bot &tb)
+	{
+		if(tb.finished >= 0)
+			return "finished at "+ftos1(tb.finished)+" s";
+		auto it = m_entities.find(id);
+		const Instance *in = it == m_entities.end() ? nullptr :
+				bot_comp(it->second);
+		if(!in)
+			return "gone";
+		const ss_ why = tb.stuck.size() ? jstr(tb.stuck.at(tb.stuck.size() - 1),
+				"why") : ss_();
+		if(in->state.get("stuck").is_true())
+			return "stuck: "+why;
+		// (kit/bot's "<id> <text>", 0: none)
+		const json::Value &g = in->state.get("goal");
+		return g.is_string() && !g.as_string().empty() ? "not there, on goal "+
+				g.as_string() : ss_("no goal");
+	}
+	static ss_ ftos1(double v)
+	{
+		char b[32];
+		snprintf(b, sizeof b, "%.1f", v);
+		return b;
+	}
+
+	// The end: the world back at its start (its draft's again, the main
+	// round's Stop), unless why says it went already
+	void playtest_end(const ss_ &why)
+	{
+		const bool gone = m_test.session && !m_sessions.count(m_test.session);
+		const int64_t now = interface::os::game_us();
+		if(!gone){
+			SessionScope sc(*this, m_test.session);
+			playtest_sample(now);
+			for(auto &b : m_test.bots)
+				b.second.outcome = playtest_outcome(b.first, b.second);
+			if(why.empty() && m_test.main){
+				stop(m_test.by);
+			} else if(why.empty()){
+				for(auto &b : m_test.bots)
+					if(m_entities.count(b.first))
+						remove_bot(b.first);
+				draft_again();
+			}
+		}
+		for(auto &b : m_test.bots)
+			if(b.second.outcome.empty())
+				b.second.outcome = b.second.finished >= 0 ? "finished at "+
+						ftos1(b.second.finished)+" s" : ss_("gone with the draft");
+		m_test.on = false;
+		m_test.stopped = now;
+		m_test.ended = why.empty() ? "after its "+itos(m_test.seconds)+" s, the "
+				"world back at its start" : why;
+		log_i(MODULE, "Playtest by %s ended (%s): %s", cs(m_test.by),
+				cs(m_test.ended), cs(jstr(playtest_json(), "summary")));
+	}
+
+	// A goal done by a bot of the playtest's, and a bot's stuck output
+	void playtest_fired(const Entity &e, const Instance &in, const ss_ &output,
+			const json::Value &value, const ss_ &by)
+	{
+		auto bi = m_test.bots.find(e.id);
+		if(output == "stuck" && bi != m_test.bots.end()){
+			json::Value s = json::object();
+			s.set("t", test_t());
+			s.set("why", value.is_string() ? value : json::Value(""));
+			s.set("at", vec1(bi->second.at));
+			test_add(bi->second.stuck, bi->second.n_stuck, s);
+			return;
+		}
+		if(in.type != "kit/goal" || output != "done")
+			return;
+		const Entity *b = bot_of(by);
+		bi = b ? m_test.bots.find(b->id) : m_test.bots.end();
+		for(auto it = m_test.bots.begin(); bi == m_test.bots.end() &&
+				it != m_test.bots.end(); ++it)
+			if(value.is_string() && value.as_string() == it->second.name)
+				bi = it;
+		if(bi == m_test.bots.end())
+			return;
+		bool last = true;
+		for(const Link &l : in.links){
+			auto to = l.output == "done" ? m_entities.find(l.to) :
+					m_entities.end();
+			for(size_t c = 0; to != m_entities.end() &&
+					c < to->second.comps.size(); c++)
+				last = last && to->second.comps[c].type != "kit/goal";
+		}
+		const double t = test_t();
+		json::Value g = json::object();
+		g.set("t", t);
+		g.set("goal", (int64_t)e.id);
+		g.set("name", e.name);
+		g.set("text", jstr(in.params, "text"));
+		test_add(bi->second.goals, bi->second.n_goals, g);
+		if(last && bi->second.finished < 0)
+			bi->second.finished = t;
+	}
+
+	void playtest_death(uint64_t bot, const ss_ &by, const ss_ &type)
+	{
+		Playtest::Bot &tb = m_test.bots[bot];
+		json::Value d = json::object();
+		d.set("t", test_t());
+		d.set("cause", type);
+		if(!by.empty())
+			d.set("by", by);
+		auto it = m_entities.find(bot);
+		if(it != m_entities.end()){
+			double w[3];
+			world_of(it->second, w);
+			d.set("at", vec1(w));
+		}
+		test_add(tb.deaths, tb.n_deaths, d);
+	}
+
+	json::Value playtest_json()
+	{
+		const int64_t now = interface::os::game_us();
+		json::Value r = json::object(), bots = json::array();
+		r.set("state", m_test.on ? "running" : "done");
+		r.set("where", m_test.main ? ss_("the main round") : "a draft (session "+
+				itos(m_test.session)+")");
+		r.set("by", m_test.by);
+		r.set("scene", m_test.scene);
+		r.set("seconds", round1(((m_test.on ? now : m_test.stopped) -
+				m_test.started) / 1e6));
+		if(m_test.on)
+			r.set("left", round1((m_test.until - now) / 1e6));
+		else
+			r.set("ended", m_test.ended);
+		size_t done = 0, deaths = 0;
+		double first = -1;
+		std::map<ss_, size_t> causes;
+		const bool here = m_test.on && (!m_test.session ||
+				m_sessions.count(m_test.session));
+		SessionScope sc(*this, here ? m_test.session : m_active);
+		for(auto &b : m_test.bots){
+			const Playtest::Bot &tb = b.second;
+			json::Value j = json::object();
+			j.set("name", tb.name);
+			j.set("finished", tb.finished >= 0 ? json::Value(tb.finished) :
+					json::null());
+			j.set("outcome", here ? playtest_outcome(b.first, tb) : tb.outcome);
+			j.set("goals_done", tb.goals);
+			if(tb.n_goals > TEST_LIST)
+				j.set("goals_more", (int64_t)(tb.n_goals - TEST_LIST));
+			j.set("deaths", tb.deaths);
+			if(tb.n_deaths > TEST_LIST)
+				j.set("deaths_more", (int64_t)(tb.n_deaths - TEST_LIST));
+			j.set("stuck", tb.stuck);
+			if(tb.n_stuck > TEST_LIST)
+				j.set("stuck_more", (int64_t)(tb.n_stuck - TEST_LIST));
+			j.set("at", vec1(tb.at));
+			bots.append(j);
+			if(tb.finished >= 0){
+				done++;
+				first = first < 0 ? tb.finished : std::min(first, tb.finished);
+			}
+			deaths += tb.n_deaths;
+			for(unsigned i = 0; i < tb.deaths.size(); i++)
+				causes[jstr(tb.deaths.at(i), "cause")]++;
+		}
+		r.set("bots", bots);
+		// The stuck spells clustered within 3 cells, the most first
+		struct Cluster
+		{
+			double p[3];
+			size_t n = 0;
+			double t = 0;
+			std::set<uint64_t> bots;
+		};
+		sv_<Cluster> cl;
+		for(const Playtest::Spot &s : m_test.spots){
+			Cluster *c = nullptr;
+			for(Cluster &x : cl){
+				double d2 = 0;
+				for(int k = 0; k < 3; k++)
+					d2 += (x.p[k] - s.p[k]) * (x.p[k] - s.p[k]);
+				if(d2 <= 9){
+					c = &x;
+					break;
+				}
+			}
+			if(!c){
+				cl.push_back(Cluster());
+				c = &cl.back();
+				c->t = s.t;
+			}
+			for(int k = 0; k < 3; k++)
+				c->p[k] = (c->p[k] * c->n + s.p[k]) / (c->n + 1);
+			c->n++;
+			c->bots.insert(s.bot);
+		}
+		std::stable_sort(cl.begin(), cl.end(), [](const Cluster &x,
+				const Cluster &y){ return x.n > y.n; });
+		json::Value spots = json::array();
+		for(size_t i = 0; i < cl.size() && i < TEST_LIST; i++){
+			json::Value j = json::object(), names = json::array();
+			j.set("at", vec1(cl[i].p));
+			for(uint64_t b : cl[i].bots)
+				names.append(m_test.bots[b].name);
+			j.set("bots", names);
+			j.set("times", (int64_t)cl[i].n);
+			j.set("first", cl[i].t);
+			spots.append(j);
+		}
+		r.set("stuck_spots", spots);
+		r.set("goal_warnings", m_test.warnings);
+		ss_ sum = itos(done)+" of "+itos(m_test.bots.size())+" bots finished"+
+				(first >= 0 ? " (first at "+ftos1(first)+" s)" : ss_())+"; "+
+				itos(deaths)+" deaths";
+		ss_ cs_;
+		for(auto &c : causes)
+			cs_ += (cs_.empty() ? "" : ", ")+c.first+" "+itos(c.second);
+		sum += (cs_.empty() ? "" : " ("+cs_+")")+"; "+itos(cl.size())+
+				" stuck spots; "+itos(m_test.warnings.size())+" goal warnings";
+		r.set("summary", sum);
+		return r;
+	}
+
+	ss_ playtest_report(bool &failed)
+	{
+		if(!m_test.started){
+			failed = true;
+			return "No playtest yet: playtest runs one";
+		}
+		return playtest_json().stringify();
+	}
+
 	// [KIT_AGENT_VISUALS] Whether this server's tools show an agent the view
 	static bool has_view()
 	{
@@ -33564,11 +34984,15 @@ struct Module: public interface::Module, public Interface
 			"- What you have not seen, say so: tell the builder what you set "
 			"(type, params, values) and ask them to look. Never claim a look "
 			"improved or matches a picture unless you saw it.\n"
-			"- export_scene before a big change: its files are the scene as "
-			"it was (undo takes back your last 50 edits, yours only).\n"
+			"- Before a big change: draft, and make it there (publish takes it "
+			"into the game, leave_draft drops it), or checkpoint the start "
+			"(restore_checkpoint puts it back; diff says what changed since); "
+			"export_scene's files are a copy outside the game. Undo takes back "
+			"only your last 50 edits, yours only.\n"
 			"- One change at a time, read back with get_state, then the next.\n"
-			"- Ask the builder before start or stop: they move every player "
-			"and stop puts the world back at its start.\n"
+			"- Ask the builder before start or stop in the main round: they "
+			"move every player and stop puts the world back at its start (in "
+			"your draft they restart it alone).\n"
 			"- A voxel world is stylized: cells of 1 m, textures 8 to 128 "
 			"pixels a side, simple lights. Promise a style, never "
 			"photorealism.\n"
@@ -33685,6 +35109,10 @@ struct Module: public interface::Module, public Interface
 			"first, then place, set_param, link, start, try_input, get_events "
 			"and get_log, stop, fix, again. An edit's arguments are 4 KB at "
 			"most. Kit's refusals come back as tool errors saying why.\n"
+			// [KIT_AGENT_NEXT_1] 2, 3b
+			"- Big changes in a draft (your own copy; publish or leave_draft), "
+			"a checkpoint of the start before them; playtest runs bots "
+			"through it.\n"
 			// [KIT_AGENT_VISUALS]
 			"- The look: get_guide topic \"visuals\" first. "+ss_(has_view() ?
 			"Look with get_view before and after a change; " :
@@ -33714,7 +35142,26 @@ struct Module: public interface::Module, public Interface
 				"looks, jumps, uses an entity, and answers where the body went, "
 				"its state (health, score, inventory) and what entities emitted "
 				"meanwhile (picture: its view at the end); play_leave ends it. "
-				"Walk into what you built and read what fired.\n";
+				"Walk into what you built and read what fired.\n"
+				// [KIT_AGENT_NEXT_1] 2, 3b
+				"- Your sandbox. draft moves you into a copy of the game's start "
+				"of your own (the editor's Draft), running; your edits, start "
+				"and stop (there: its round from its start again), get_view and "
+				"playtest go there, the main round left as it is, and get_state's "
+				"session says where you are. diff lists what you changed against "
+				"the start; publish writes it into the start (refused with goal "
+				"warnings unless anyway); leave_draft drops it. It ends after 5 "
+				"minutes without a call of yours. checkpoint keeps the start "
+				"under a name (16 and 32 MiB a game), list_checkpoints lists "
+				"them, diff with checkpoint compares one with the start now, "
+				"restore_checkpoint puts one back (in the main round, Stopped; "
+				"the start before kept as \"before restore <name>\"). playtest "
+				"runs 1 to 8 bots (kit/bot: they do the kit/goal chain a "
+				"player would) through your draft for up to 120 s, then puts it "
+				"back at its start; playtest_report says each one's finish time "
+				"or where it is, its deaths and their causes, where bots got "
+				"stuck, and the goal warnings. A course a bot cannot finish is "
+				"often one a player cannot either.\n";
 		std::map<ss_, sv_<ss_>> groups;
 		for(const ss_ &t : m_palette){
 			const ss_ g = jstr(m_types[t].decl.get("about"), "group");
@@ -35765,6 +37212,13 @@ struct Module: public interface::Module, public Interface
 			so.op = "end";
 			so.target = m_active;
 			so.by = p.name;
+			// [KIT_AGENT_NEXT_1] 2: one in their agent's draft leaves it alone
+			if(gs->by != p.name){
+				so.op = "move";
+				so.from = m_active;
+				so.target = 0;
+				so.peers.push_back(peer);
+			}
 			m_session_ops.push_back(so);
 			return;
 		}
@@ -38199,6 +39653,9 @@ struct Module: public interface::Module, public Interface
 	// to its round. At the top
 	void move_peer(size_t peer, uint64_t to)
 	{
+		// [KIT_AGENT_NEXT_1] 2: an agent's at once (no client places it)
+		if(m_agent_peers.count(peer))
+			return agent_move(peer, to);
 		const uint64_t from = session_of_peer(peer);
 		if(from == to || (to && !m_sessions.count(to)))
 			return;
@@ -38684,6 +40141,15 @@ struct Module: public interface::Module, public Interface
 	{
 		if(m_active)
 			return refuse("in a session already");
+		// [KIT_AGENT_NEXT_1] 2: a builder whose agent has a draft goes into
+		// it, to see it (Leave draft takes them back alone)
+		for(auto &s : m_sessions)
+			if(s.second->draft && !s.second->bench && !m_agent_peers.count(peer)
+					&& s.second->by == p.name+"'s agent"){
+				log_i(MODULE, "%s goes into their agent's draft %s", cs(p.name),
+						cs(itos(s.first)));
+				return move_peer(peer, s.first);
+			}
 		ss_ why;
 		const uint64_t id = make_session(true, p.name, 0, 0, why);
 		if(!id)
@@ -38921,16 +40387,7 @@ struct Module: public interface::Module, public Interface
 				if(e.second.made && is_bot(e.second))
 					bots.push_back(e.first);
 			for(uint64_t bid : bots){
-				for(uint64_t x : group_of(bid, MAX_ENTITIES)){
-					auto it = m_entities.find(x);
-					if(it == m_entities.end())
-						continue;
-					remove_node(it->second);
-					m_entities.erase(it);
-				}
-				for(auto it = m_attached.begin(); it != m_attached.end();)
-					it = it->second.player == bid ? m_attached.erase(it) : ++it;
-				m_drives.erase(bid);
+				remove_bot(bid);
 				if(!sid)
 					m_bots_away.erase(bid);
 			}
@@ -38943,6 +40400,21 @@ struct Module: public interface::Module, public Interface
 		if(!n)
 			return refuse("no bots made in play");
 		log_i(MODULE, "%s removed all bots (%zu)", cs(p.name), n);
+	}
+
+	// A bot gone with what is under it, what it carried and drove let go
+	void remove_bot(uint64_t bid)
+	{
+		for(uint64_t x : group_of(bid, MAX_ENTITIES)){
+			auto it = m_entities.find(x);
+			if(it == m_entities.end())
+				continue;
+			remove_node(it->second);
+			m_entities.erase(it);
+		}
+		for(auto it = m_attached.begin(); it != m_attached.end();)
+			it = it->second.player == bid ? m_attached.erase(it) : ++it;
+		m_drives.erase(bid);
 	}
 
 	// Publish: the entities the draft's edits changed, as the draft has
