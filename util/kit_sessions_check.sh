@@ -14,9 +14,10 @@
 #      inside ends it, the admin back in the default round. The stats:
 #      the session's clock and runtime its own, its sections the start's
 #      (sourced) but the one it changed.
-#   2. A draft (2): a plank and a sign there; left unpublished, neither in
-#      the default. Another draft (3), from the start (no plank): a plank
-#      and a sign, Published: both in the default; refusals in a draft.
+#   2. A draft (2): a plank, a sign and the scene's own environment
+#      there; left unpublished, none in the default. Another draft (3),
+#      from the start (no plank): a plank and a sign, Published: both in
+#      the default; refusals in a draft (the World, the root's environment).
 #      ([KIT_DRAFT_LEAVE_PLAY]) Publish, Leave draft and the game's end
 #      keep the builder in edit mode.
 #   3. The arena with a duration: session 4 ends by itself. Session 5 left
@@ -202,12 +203,20 @@ EOF
 	stats
 	refused '{"op": "stop"}' "stop: in a draft: the default round's"
 	refused '{"op": "set", "id": 3, "comp": 0, "param": "level", "value": 3}' \
-		"set: in a draft: the World and the environment are the default round's"
+		"set: in a draft: the World is the default round's (leave the draft to change it)"
+	# [KIT_SIDE_SCENERY] (2) an environment (8): the scene's own, the
+	# draft's; the app root's refused
+	edit '{"op": "place", "type": "kit/environment", "pos": [0, 1, 0]}' 3
+	echo "wait_log_any 10000 kit: environment: from the scene, 8,"
+	refused '{"op": "place", "type": "kit/environment", "pos": [0, 1, 0], "on": "root"}' \
+		"place: in a draft: the app root's environment is the default round's; a scene's own"
 	ed '{"op": "leave_draft"}'
 	in_session 0 default
+	# (the default's, none: told just before the session is)
+	echo "wait_log_any 10000 kit: environment: none"
 	tools_back "draft 2 left"
 	info 7 1 7
-	# Another (3), Published: its plank and sign (8) in the default
+	# Another (3), Published: its plank and sign (9) in the default
 	ed '{"op": "draft"}'
 	in_session 3 draft
 	echo "wait_log_any 10000 kit editor: edit mode on"
@@ -312,6 +321,10 @@ expect 8 7,1,7 kit/planks
 want "$s" "kitboss publishes draft 3: 1 entities, 1 cells" "Session 2 ended by kitboss"
 want "$c" "kit editor: refused: stop: in a draft: the default round's"
 echo "ok: a draft from the start; its edits in the default only by Publish"
+grep -aqP 'An edit by kitboss: placed kit/environment 8 on the scene \S+ \(this scene.s own' "$s" ||
+	fail "the draft's environment not on its scene ($s)"
+want "$c" "kit editor: refused: place: in a draft: the app root's environment is the default round's"
+echo "ok: a draft holds the scene's own environment (gone with it); the app root's refused"
 echo "ok: Publish, Leave draft and a game's end from inside keep the tools on"
 want "$s" "kit/arena 5: session 4 over: its time is up" "Session 4 ended"
 echo "ok: the arena's duration ends its session"
@@ -322,8 +335,8 @@ import json, sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
 row = lambda k: json.loads(db.execute("select value from store where store='kit' and key=?", (k,)).fetchone()[0])
 ents = {e["id"]: e for e in row("authored")["entities"]}
-assert 7 not in ents, "the unpublished draft's sign"
-assert ents[8]["components"][0]["type"] == "kit/sign", ents[8]
+assert 7 not in ents and 8 not in ents, "the unpublished draft's sign or environment"
+assert ents[9]["components"][0]["type"] == "kit/sign", ents[9]
 assert row("sessions")["live"] == ["world~5"], row("sessions")
 n = db.execute("select count(*) from store where store='voxelworld' and key like 'scene_world~5/%'").fetchone()[0]
 assert n > 0, "session 5's voxels not saved"

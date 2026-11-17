@@ -31660,7 +31660,9 @@ struct Module: public interface::Module, public Interface
 				"from its start again), get_view (the server's camera follows), "
 				"get_state (its session says where you are) and playtest go "
 				"there; what is the game's (custom types, scenes, voxel types, "
-				"items, sounds) is refused there. publish puts what you changed "
+				"items, sounds, the World, the app root's environment) is "
+				"refused there; a scene's own kit/environment is the draft's "
+				"(place puts one there). publish puts what you changed "
 				"into the game's start; "
 				"leave_draft drops it. It ends on leave_draft or after 5 minutes "
 				"without a call of yours, never for want of a connection; 8 "
@@ -39491,14 +39493,19 @@ struct Module: public interface::Module, public Interface
 			return refuse(why);
 		}
 		if(in_draft())
-			for(const auto &c : change)
-				if(world_or_env(c.first, c.second)){
-					m_next_id = next0;
-					return refuse(active_session()->bench ? "editing a prefab: "
-							"the World and the environment are the game's" :
-							"in a draft: the World and the environment are the "
-							"default round's");
-				}
+			for(const auto &c : change){
+				const int k = world_or_env(c.first, c.second);
+				if(!k || (k == 3 && !active_session()->bench))
+					continue;
+				m_next_id = next0;
+				return refuse(active_session()->bench ? "editing a prefab: "
+						"the World and the environment are the game's" :
+						k == 1 ? "in a draft: the World is the default round's "
+						"(leave the draft to change it)" : "in a draft: the app "
+						"root's environment is the default round's; a scene's own "
+						"(a kit/environment placed on the scene: on \"scene\") "
+						"is the draft's");
+			}
 		two_way_returns(change, what);
 		// [KIT_SYMMETRY] a place's voxels in the authored slice (its sides:
 		// the slice and the map are convex), copied into the others after
@@ -39642,24 +39649,31 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// [KIT_SESSIONS_1] Whether an entity changed is (or becomes) a World's
-	// or an environment's
-	bool world_or_env(uint64_t id, const json::Value &after)
+	// or an environment's: 0 neither, 1 a World's, 2 the app root's
+	// environment, 3 a scene's ([KIT_SIDE_SCENERY] (2): a draft may hold
+	// that one, its state being the session's as its entities are)
+	int world_or_env(uint64_t id, const json::Value &after)
 	{
+		int k = 0;
+		bool root = after.is_object() && json::jint(after, "parent", 0) == 1;
 		auto is = [&](const ss_ &t){
 			auto ti = m_types.find(t);
-			return t == "kit/environment" ||
-					(ti != m_types.end() && ti->second.world);
+			if(ti != m_types.end() && ti->second.world)
+				k = 1;
+			else if(!k && (t == "kit/environment" ||
+					(ti != m_types.end() && ti->second.environment)))
+				k = 2;
 		};
 		auto it = m_entities.find(id);
-		if(it != m_entities.end())
+		if(it != m_entities.end()){
+			root = root || it->second.parent == 1;
 			for(const Instance &in : it->second.comps)
-				if(is(in.type))
-					return true;
+				is(in.type);
+		}
 		const json::Value &cs = after.get("components");
 		for(unsigned i = 0; cs.is_array() && i < cs.size(); i++)
-			if(is(full_type(jstr(cs.at(i), "type"))))
-				return true;
-		return false;
+			is(full_type(jstr(cs.at(i), "type")));
+		return k == 2 && !root ? 3 : k;
 	}
 
 	// [KIT_SCENES] A two-way teleporter in a change, onto an entity: that
@@ -40292,7 +40306,8 @@ struct Module: public interface::Module, public Interface
 			// [KIT_ENVIRONMENT] an environment on the root, the scene's
 			// own once the root has one. [KIT_SIDE_SCENERY] (1) In a game
 			// of more than one scene the scene's own (placed while editing
-			// one scene, it darkened the others' sky); "on" or parent "root"
+			// one scene, it darkened the others' sky), and in a draft (2):
+			// the root's is the default round's there; "on" or parent "root"
 			// the root's
 			const json::Value &pv = j.get("parent");
 			const bool ask_root = jstr(j, "on") == "root" || (pv.is_string() &&
@@ -40304,7 +40319,8 @@ struct Module: public interface::Module, public Interface
 			const bool env = m_types[type].environment;
 			const bool on_scene = m_types[type].world ||
 					(m_types[type].root && jstr(j, "on") == "scene") ||
-					(env && !ask_root && (env_at(1) || scenes > 1));
+					(env && !ask_root && (env_at(1) || scenes > 1 ||
+					(in_draft() && !active_session()->bench)));
 			const bool root = m_types[type].root;
 			// [KIT_NO_WORLD_TYPES] The scene's, or under that entity, no position
 			const bool no_pos = m_types[type].no_position;
