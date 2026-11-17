@@ -2531,9 +2531,10 @@ function NT.palette_menu(it, x, y)
 		NT.place_now(it)
 	end}}
 	-- [KIT_ROOT_EDIT] one with no position on the app root (a root type
-	-- goes there by Place)
+	-- goes there by Place; [KIT_SIDE_SCENERY] (1) an environment on the
+	-- scene edited in a game of several scenes)
 	local t = type_of(it.type)
-	if it.type and t.no_position and not t.root then
+	if it.type and ((t.no_position and not t.root) or t.environment) then
 		items[#items + 1] = {"Place on the app root", function()
 			NT.palette_chosen(it)
 			NT.place_now(it, "root")

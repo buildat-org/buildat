@@ -3,7 +3,8 @@
 -- how fast it goes (day_minutes: a day's length in minutes, 0: the time
 -- stands), gravity (times each movement's own), the weather and the
 -- season. On the app root it is every scene's; a scene with one of its own
--- (placed while one is on the root) has that instead, whole.
+-- (placed while one is on the root, or in a game of more than one scene:
+-- [KIT_SIDE_SCENERY] (1)) has that instead, whole.
 -- [KIT_SCENE_TREE] and the scenes under it theirs: the nearest copy from a
 -- scene up.
 --

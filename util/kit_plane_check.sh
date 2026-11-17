@@ -45,9 +45,17 @@
 #      view: its face dirt (brown, textured), a grass band along its top;
 #      cut in two at x 0, the same pixels (no seam). A builder's voxel type
 #      (op voxel) worn; glow and glass with a texture drawn, no error.
+#  11. A third session: [KIT_SIDE_SCENERY] (4) an environment (sky
+#      #3070e0, cartoon), the side camera ortho looking 10 m left and 5 up
+#      of the body: the sky's colour over the frame, none of the dome's box
+#      (a cell's square) in its middle; (3) a part placed in the plane, no
+#      notification; moved wholly in front of the clip (z -4, the clip at
+#      1 - 3): the editor's notification, the part not drawn.
+#      [KIT_LEFTOVERS_1116] a kit/creature placed off the plane (z 4)
+#      stops in it (its log, kitboss selecting it), its senses off.
 # The screenshots (side, front, side_ortho, side_polygons, front_polygon,
 # side_wide, front_wide, front_far_end, grass_one, grass_two,
-# grass_materials, touch_front)
+# grass_materials, touch_front, side_sky)
 # are kept with KEEP_TMP=1; look at them.
 #   util/kit_plane_check.sh
 set -u
@@ -440,6 +448,51 @@ BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
 BUILDAT_TEST_KIT_UI_MODE=2 run_client 60 "$t/touch.log" timeout 120 bin/buildat \
 	-C "$t/client_cache" -D "$t/cu" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
 	-c @"$t/touch.cmds" || fail "the touch client failed ($t/touch.log, $t/srv.log)"
+# 9. The next session's entities after the last placed
+id0=$(grep -aoP 'An edit by kitboss: placed \S+ \K[0-9]+' "$t/srv.log" | sort -n | tail -1)
+env=$((id0 + 1)) part=$((id0 + 2)) cre=$((id0 + 4))
+{
+	cat <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+event kit_edit {"op": "mode", "on": true}
+wait_log_any 10000 kit editor: edit mode on
+EOF
+	edit '{"op": "place", "type": "kit/environment", "pos": [0, 1, 0]}'
+	set_p $env lighting '"cartoon"'
+	set_p $env sky '"#3070e0"'
+	set_p 3 ortho true
+	set_p 3 offset_x -10
+	set_p 3 offset_y 5
+	edit '{"op": "place", "type": "kit/part", "pos": [-12, 6, 1]}'
+	echo "wait_log_absent 1000 wholly in front"
+	edit "{\"op\": \"move\", \"id\": $part, \"pos\": [-12, 6, -4]}"
+	cat <<EOF
+wait_log_any 10000 kit: warning: Entity $part is wholly in front of the side view's clip (z -2;
+keypress F6
+wait_log 10000 kit editor: edit mode off
+frames 30
+screenshot $t/side_sky.png
+keypress F6
+wait_log 10000 kit editor: state:
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended
+EOF
+	# (its senses off from its start: it wanders, chasing nobody in the plane)
+	edit '{"op": "place", "prefab": "kit/creature", "pos": [-6, 1, 4]}'
+	edit "{\"op\": \"set\", \"id\": $cre, \"comp\": 3, \"param\": \"enabled\", \"value\": false}"
+	cat <<EOF
+event kit_edit {"op": "play"}
+wait_log 10000 kit editor: the server is Running
+event kit_select $cre
+wait_log 30000 stopped at (
+quit
+EOF
+} > "$t/side.cmds"
+run_client 60 "$t/side.log" timeout 120 bin/buildat -C "$t/client_cache" -D "$t/cu" \
+	-s localhost:$SERVER_PORT -w 1024x700 -l 3 -c @"$t/side.cmds" ||
+	fail "the side client failed ($t/side.log, $t/srv.log)"
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 c=$t/boss.log s=$t/srv.log
@@ -572,5 +625,35 @@ v=$(grep -aoP 'kit editor: the view is \K.*' "$t/touch.log" | tr '\n' ',')
 	grep -aq "remembered for .*: edit, 3d" "$t/touch.log" ||
 	fail "the touch session's views ($v): not 2D (front) last over a remembered 3D ($t/touch.log)"
 echo "ok: the touch session's edit mode came up in 2D, the Front view (kit/controls' edit_view), over a remembered 3D: $v"
-echo "PASS: kit/controls' vertical plane: kit/walker held to it on both sides, the side camera and its pointer, the editor's Front view placing at its depth, the movement list checked; kit/polygon's slope and overhang met, others off the plane not, one drawn and edited in the Front view; the 2D queries (util/kit_plane_check.lua)"
+# [KIT_SIDE_SCENERY] (4) The ortho side view under an environment: its sky
+# colour over most of the frame above the HUD (the 512-wide polygon of 9
+# crosses its top), none of the dome's box (a cell's square of clouds) in
+# its middle; the part moved in front of the clip not drawn there either
+python3 -I - "$t/side_sky.png" <<'PY' || fail "the ortho side view's sky ($t/side_sky.png)"
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB")
+w, h = im.size
+px = im.load()
+def sky(x, y):
+    return all(abs(a - b) <= 40 for a, b in zip(px[x, y], (0x30, 0x70, 0xe0)))
+frame = [sky(x, y) for x in range(0, w, 4) for y in range(0, h - 100, 4)]
+mid = [sky(x, y) for x in range(w // 2 - 40, w // 2 + 40) for y in range(h // 2 - 40, h // 2 + 40)]
+f, m = sum(frame) / len(frame), sum(mid) / len(mid)
+print("  the sky's colour over %.0f%% of the frame, %.0f%% of its middle" % (f * 100, m * 100))
+sys.exit(0 if f > 0.7 and m > 0.99 else 1)
+PY
+echo "ok: the ortho side view's sky is the fog's colour, no dome's box in the middle"
+# (3) The editor's notification: none in the plane, one moved in front of it
+grep -aq "kit: warning: Entity $part is wholly in front of the side view's clip (z -2; it reaches -3.5), never drawn" "$t/side.log" ||
+	fail "no notification of part $part in front of the clip ($t/side.log)"
+echo "ok: the editor told of part $part moved wholly in front of the side view's clip"
+# [KIT_LEFTOVERS_1116] The creature placed at z 4 stopped in the plane (z 1)
+# (unheld, it wanders to within 8 m of z 4)
+stops=$(grep -aoP "kit editor: log of $cre: .*stopped at \\(\\K[-0-9.]+, [-0-9.]+, [-0-9.]+" "$t/side.log")
+[ -n "$stops" ] || fail "no stop of creature $cre ($t/side.log)"
+echo "$stops" | awk -F', ' '$3 != "1.00" { exit 1 }' ||
+	fail "creature $cre (placed at -6, 1, 4) not stopped in the plane (z 1): $(echo $stops) ($t/srv.log)"
+echo "ok: a creature placed at z 4 held to the plane, stopped at $(echo "$stops" | tail -1)"
+echo "PASS: kit/controls' vertical plane: kit/walker held to it on both sides, the side camera and its pointer, the editor's Front view placing at its depth, the movement list checked; kit/polygon's slope and overhang met, others off the plane not, one drawn and edited in the Front view; the 2D queries (util/kit_plane_check.lua); the ortho side view's sky, clipped scenery told, a creature held to the plane"
 # vim: set noet ts=4 sw=4:

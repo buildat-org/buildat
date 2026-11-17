@@ -284,9 +284,13 @@ local SKY = {
 }
 -- The dome, made once there is a sky to draw (where Kit draws the app's
 -- view), its technique the mode's
+-- [KIT_SIDE_SCENERY] (4) none under an orthographic camera (the view's on
+-- screen): Urho3D's Skybox is a unit box about the camera, which ortho
+-- drew as a cell's square in the middle; the sky is the fog's colour the
+-- view clears to there
 local function sky_dome(on)
 	local scene = replicate.main_scene
-	on = on and LIT.views.play ~= nil
+	on = on and LIT.views.play ~= nil and not LIT.ortho
 	if on and not LIT.dome and scene then
 		LIT.dome = sky_render().new_dome(scene, {x = 0, y = -1, z = 0},
 				SKY.defaults, log, SKY.schedule)
@@ -1069,6 +1073,22 @@ local function env_update(dt)
 	local d = env.d
 	if not d then
 		return
+	end
+	-- [KIT_SIDE_SCENERY] (4) the view's camera ortho or not: the dome off or on
+	local _, cam
+	if O.camera then
+		if M.view_camera then
+			_, cam = M.view_camera()
+		else
+			cam = O.camera:GetComponent("Camera")
+		end
+	end
+	local ortho = cam ~= nil and cam.orthographic == true
+	if ortho ~= (LIT.ortho or false) then
+		LIT.ortho = ortho
+		log:info("kit: sky: " .. (ortho and "the fog's colour (an ortho view)" or
+				"the dome"))
+		env_light()
 	end
 	-- [KIT_FORCE_CARTOON] the preference changed in the settings
 	-- simplified: looked at once a second, not told
