@@ -31256,7 +31256,12 @@ struct Module: public interface::Module, public Interface
 				"set at once if given (each checked as set_param checks it), "
 				"under parent if given. The answer names its new id. A type "
 				"with no_position takes a pos too and has none. A root type "
-				"(list_types: root) goes on the app root. parent \"root\": "
+				"(list_types: root) goes on the app root; on \"scene\" puts it "
+				"on your scene (its own copy). kit/environment goes on your "
+				"scene in a game of more than one scene (in a one-scene game "
+				"on the app root while that has none); on \"root\" (or parent "
+				"\"root\") puts it on the app root: every scene's sky but those "
+				"with their own. The answer says which. parent \"root\": "
 				"one with no_position on the app root too, every scene's: a "
 				"game-wide lobby (kit/lobby), its screens (a kit/ui_panel, then "
 				"a kit/ui_scene_list or buttons placed under it), each linking "
@@ -31269,7 +31274,9 @@ struct Module: public interface::Module, public Interface
 				"params": {"type": "object",
 					"description": "Parameter values by name"},
 				"parent": {"description":
-					"An entity's id to put it under (0 or the scene's own id: the scene), or \"root\": the app root"}},
+					"An entity's id to put it under (0 or the scene's own id: the scene), or \"root\": the app root"},
+				"on": {"type": "string", "enum": ["scene", "root"], "description":
+					"A root type's place: your scene's own copy, or the app root"}},
 				"required": ["type", "pos"]})J", ""},
 			{"set_param", "set", "Sets a parameter of an entity's component "
 				"to value, checked against its type's declaration. Or params: "
@@ -36919,7 +36926,9 @@ struct Module: public interface::Module, public Interface
 			"root's last; a copy is on a scene when it is right under its "
 			"entity with no position): kit/controls, kit/environment and "
 			"kit/game_rules (scenes_from in get_state says whose each scene "
-			"has). Each scene "
+			"has). place puts them on the app root, on \"scene\" on your "
+			"scene; kit/environment goes on your scene in a game of more than "
+			"one scene (on \"root\": the app root's, every scene's sky). Each scene "
 			"has its own World (kit/terrain); a new scene has none (no ground) "
 			"unless new_scene's copy. Game-wide: kit/environment's lighting "
 			"(the root's alone), the voxel types, textures, prefabs and item "
@@ -38880,7 +38889,7 @@ struct Module: public interface::Module, public Interface
 						"world_region", "version",
 						"inventory", "root", "no_position", "inputs_types", "outputs_types",
 						"inputs_labels", "outputs_labels", "player", "ui", "about", "seat",
-						"movement", "world"})
+						"movement", "world", "environment"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
 				if(addable(t))
@@ -38901,7 +38910,7 @@ struct Module: public interface::Module, public Interface
 							"version", "inventory",
 							"root", "no_position", "inputs_types", "outputs_types", "inputs_labels",
 							"outputs_labels", "player", "ui", "about", "seat", "movement",
-							"world"})
+							"world", "environment"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
 					if(addable(t.first))
@@ -40281,11 +40290,21 @@ struct Module: public interface::Module, public Interface
 			// and a root type asked "on": "scene" (an environment of the
 			// scene's own)
 			// [KIT_ENVIRONMENT] an environment on the root, the scene's
-			// own once the root has one
+			// own once the root has one. [KIT_SIDE_SCENERY] (1) In a game
+			// of more than one scene the scene's own (placed while editing
+			// one scene, it darkened the others' sky); "on" or parent "root"
+			// the root's
+			const json::Value &pv = j.get("parent");
+			const bool ask_root = jstr(j, "on") == "root" || (pv.is_string() &&
+					pv.as_string() == "root") || (pv.is_number() &&
+					pv.as_number() == 1);
+			size_t scenes = 0;
+			for(auto &e : m_entities)
+				scenes += e.second.kind == "scene";
+			const bool env = m_types[type].environment;
 			const bool on_scene = m_types[type].world ||
 					(m_types[type].root && jstr(j, "on") == "scene") ||
-					(m_types[type].environment && jstr(j, "on") != "root" &&
-					env_at(1));
+					(env && !ask_root && (env_at(1) || scenes > 1));
 			const bool root = m_types[type].root;
 			// [KIT_NO_WORLD_TYPES] The scene's, or under that entity, no position
 			const bool no_pos = m_types[type].no_position;
@@ -40352,7 +40371,10 @@ struct Module: public interface::Module, public Interface
 					ss_(", no position") : " at "+pos.stringify())+
 					(under > 1 ? " under "+itos(under) :
 					ss_())+(ps.is_object() ? " with "+
-					comp.get("params").stringify() : ss_());
+					comp.get("params").stringify() : ss_())+
+					(!env ? ss_() : on_scene ? " (this scene's own environment; "
+					"the lighting stays the app root's)" : " (every scene's "
+					"environment but those with their own)");
 			return true;
 		}
 		if(op == "move" && !j.get("ids").is_undefined())
