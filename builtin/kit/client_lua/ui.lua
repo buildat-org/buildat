@@ -233,16 +233,27 @@ local function shown_text(s, value)
 	return M.key_text((s:gsub("|", "\n")))
 end
 
+-- [KIT_UI_MARK_REMOVED] Whether an element is shown; a removed one is not
+-- there: a rebuilt panel takes its children's elements along, and they are
+-- dropped only at the next update(), which the editor's hit test may run
+-- before
+local function shown(el)
+	local ok, v = pcall(function() return el.visible end)
+	return ok and v
+end
+
 local function drop(r)
 	if r.el then
 		pcall(function() r.el:Remove() end)
 	end
 	r.el, r.t, r.parts, r.edge, r.px, r.wrap = nil, nil, nil, nil, nil, nil
 	r.rows = nil
+	-- ([KIT_UI_MARK_REMOVED] the mark is under its panel's element: a rebuilt
+	-- panel took it along, and a raise here stopped every update after)
 	if r.mark then
-		r.mark:Remove()
-		r.mark = nil
+		pcall(function() r.mark:Remove() end)
 	end
+	r.mark = nil
 	r.geom, r.step, r.over = nil, nil, nil
 	if r.cam_node then
 		pcall(function() r.cam_node:Remove() end)
@@ -1760,7 +1771,7 @@ local function selected_rec()
 end
 
 local function resizable(r)
-	return r and r.el and r.kind ~= "own" and r.el.visible and not r.full
+	return r and r.el and r.kind ~= "own" and shown(r.el) and not r.full
 end
 
 -- [KIT_PARAM_CATEGORIES] Kit's own element selected with entity `id`: its name
@@ -1772,7 +1783,7 @@ end
 -- nil with none on the screen
 function M.hud_selected_rect()
 	local r = selected_rec()
-	if not r or not r.el or not r.el.visible or not r.w then
+	if not r or not r.el or not shown(r.el) or not r.w then
 		return nil
 	end
 	local p = r.el.screenPosition
@@ -1909,7 +1920,7 @@ local function markers()
 	-- a panel, in the box's top quarter): {x0, x1, bottom} in the box
 	local tops = {}
 	for _, u in pairs(U) do
-		if u.el and u.el.visible and not u.pr and u.ui and
+		if u.el and shown(u.el) and not u.pr and u.ui and
 				tostring(u.ui.anchor or "top_left"):find("^top") then
 			local p = u.el.screenPosition
 			if p.y - by < H / 4 then
@@ -2127,7 +2138,7 @@ local function hit(x, y)
 	x, y = x / sc, y / sc
 	local best, area = nil, nil
 	for id, r in pairs(U) do
-		if r.el and r.el.visible and (E.editing or r.kind == "button" or
+		if r.el and shown(r.el) and (E.editing or r.kind == "button" or
 				r.kind == "input" or r.kind == "chat" or r.kind == "list" or
 				(r.kind == "panel" and r.has_bg)) then
 			local ok, a = pcall(function()
@@ -2231,7 +2242,7 @@ local function snap_lines(self)
 	end
 	add(hud_box())
 	for _, o in pairs(U) do
-		if o ~= self and o.el and o.el.visible and o.w and o.pr ~= self then
+		if o ~= self and o.el and shown(o.el) and o.w and o.pr ~= self then
 			local p = o.el.screenPosition
 			add(p.x, p.y, o.w, o.h)
 		end
@@ -2264,7 +2275,7 @@ local function move(x, y)
 	local sc = magic.ui.scale
 	local dx, dy = (x - drag.x0) / sc, (y - drag.y0) / sc
 	local r = U[drag.id]
-	if not r or not r.el then
+	if not r or not r.el or not shown(r.el) then
 		return
 	end
 	local V = vmin()

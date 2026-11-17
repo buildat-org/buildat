@@ -24,7 +24,11 @@
 # plays, W held moving the free camera over the result card but not
 # under the lobby. The desktop HUD view: the frame and the tool panel, its shape a
 # phone's, its screen picker on the lobby (15 a column there: the view the
-# frame's width, the chat under it). Screenshots: lobby.png, result.png,
+# frame's width, the chat under it). [KIT_UI_MARK_REMOVED] There Play (6)
+# selected, marked in the frame: the lobby's title changed (its panel
+# rebuilt), then the lobby put on the root and a scene made (the root's
+# elements rebuilt in it): no warning of Kit's UI, Play there and selected
+# by a click each time. Screenshots: lobby.png, result.png,
 # bob_lobby.png, notify.png, hud.png, hud_412x915.png, hud_lobby.png
 #   util/kit_lobby_check.sh
 set -u
@@ -223,8 +227,33 @@ click Text "hud screen: ◆ 4 ui_panel"
 wait_log 10000 kit editor: the HUD view shows screen 4
 frames 10
 screenshot @T@/hud_lobby.png
+click DropDownList "hud shape"
+wait_log 10000 hud shape open
+frames 3
+click Text "hud shape: The room left"
+wait_log 10000 kit editor: the HUD view's shape is fit
+frames 5
 event kit_edit {"op": "set", "id": 14, "comp": 0, "param": "text", "value": "Builder done"}
 wait_log_any 10000 : "Builder done"
+event kit_select 6
+wait_log 10000 marked, layer 4: "Play"
+event kit_edit {"op": "set", "id": 4, "comp": 0, "param": "title", "value": "Lobby 2"}
+wait_log 10000 layer 4: "Lobby 2"
+event kit_select 15
+frames 3
+click Button "Play"
+wait_log 10000 kit editor: selected 6
+event kit_edit {"op": "parent", "id": 4, "parent": 1}
+wait_log 10000 kit editor: state:
+event kit_select 6
+frames 3
+event kit_edit {"op": "new_scene", "name": "track", "copy": true}
+wait_log 30000 kit editor: in the scene track
+frames 5
+event kit_select 15
+frames 3
+click Button "Play"
+wait_log 10000 kit editor: selected 6
 sync 3000
 quit
 EOF
@@ -285,6 +314,11 @@ grep -aqP "the HUD tool panel 390x720, the frame 0 0 890 720$" "$b" ||
 grep -aqP "the HUD tool panel 390x720, the frame 283 0 324 720$" "$b" ||
 	fail "the 412x915 frame not as wanted ($b)"
 grep -aq "OFF SCREEN" "$b" "$t/bob.log" && fail "a UI component off the screen"
+# [KIT_UI_MARK_REMOVED] No update stopped by a mark its rebuilt panel took
+grep -aE " W kit +: kit: (ui|ui handles|markers): " "$b" | head -3 | grep -a . &&
+	fail "Kit's UI warned ($b)"
+grep -aqF "An edit by kitboss: put 4 on the app root" "$s" ||
+	fail "the lobby screen not moved onto the root ($s)"
 # [KIT_LOBBY_OUT_OF_PLAY] Out of play in the lobby and over, in play as a
 # run starts; kitboss's client spectating as he is out; kitbob's body (in
 # the lobby) not drawn on kitboss's screen while he plays
