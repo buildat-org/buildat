@@ -626,9 +626,9 @@ v=$(grep -aoP 'kit editor: the view is \K.*' "$t/touch.log" | tr '\n' ',')
 	fail "the touch session's views ($v): not 2D (front) last over a remembered 3D ($t/touch.log)"
 echo "ok: the touch session's edit mode came up in 2D, the Front view (kit/controls' edit_view), over a remembered 3D: $v"
 # [KIT_SIDE_SCENERY] (4) The ortho side view under an environment: its sky
-# colour over the frame above the HUD, none of the dome's box (a cell's
-# square of clouds) in its middle; the part moved in front of the clip not
-# drawn there either
+# colour over most of the frame above the HUD (the 512-wide polygon of 9
+# crosses its top), none of the dome's box (a cell's square of clouds) in
+# its middle; the part moved in front of the clip not drawn there either
 python3 -I - "$t/side_sky.png" <<'PY' || fail "the ortho side view's sky ($t/side_sky.png)"
 import sys
 from PIL import Image
@@ -641,7 +641,7 @@ frame = [sky(x, y) for x in range(0, w, 4) for y in range(0, h - 100, 4)]
 mid = [sky(x, y) for x in range(w // 2 - 40, w // 2 + 40) for y in range(h // 2 - 40, h // 2 + 40)]
 f, m = sum(frame) / len(frame), sum(mid) / len(mid)
 print("  the sky's colour over %.0f%% of the frame, %.0f%% of its middle" % (f * 100, m * 100))
-sys.exit(0 if f > 0.85 and m > 0.99 else 1)
+sys.exit(0 if f > 0.7 and m > 0.99 else 1)
 PY
 echo "ok: the ortho side view's sky is the fog's colour, no dome's box in the middle"
 # (3) The editor's notification: none in the plane, one moved in front of it
