@@ -22,6 +22,14 @@
 -- screen and its children are a layer of their own in the editor's HUD
 -- view, shown by a signal as any panel (kit/lobby's screens), any number of
 -- them a game
+-- [KIT_UI_KEYS] `keyboard`: "auto" (a full screen while shown, an over one
+-- while its player is out of play: a lobby, a result card; one on the HUD
+-- never), "on" (while shown) or "off". Such a panel goes by the keys: its
+-- buttons (a scene list's rows too) and fields in order (by `order`, then
+-- as placed), Up and Down, Tab and Shift+Tab through them, Enter or Space
+-- pressing the focused button as a click does; its first button focused as
+-- it comes up. Meanwhile the game gets none of the keys (Escape still opens
+-- the pause menu). Of panels in panels the outermost is the one
 local function view(c, by)
 	if (c.params.to ~= "player" and c.params.to ~= "team") or
 			not c.player then
@@ -54,7 +62,8 @@ return {
 		height = "param:height", color = "param:color",
 		background = "param:background", border = "param:border",
 		style = "param:style", size = "param:size", order = "param:order",
-		layout = "param:layout", gap = "param:gap", screen = "param:screen"},
+		layout = "param:layout", gap = "param:gap", screen = "param:screen",
+		keyboard = "param:keyboard"},
 	params = {
 		title = {cat = "hud", type = "string", default = ""},
 		anchor = {cat = "hud", type = "string", default = "center",
@@ -84,6 +93,8 @@ return {
 		shown = {cat = "hud", type = "bool", default = false},
 		screen = {cat = "hud", type = "string", default = "none",
 			choices = {"none", "full", "over"}},
+		keyboard = {cat = "hud", type = "string", default = "auto",
+			choices = {"auto", "on", "off"}},
 	},
 	state = {
 		shown = {default = false, shared = true, param = "shown"},
@@ -91,7 +102,9 @@ return {
 	},
 	about = {
 		group = "UI",
-		what = "A box on the players' screens, holding the UI elements under it.",
+		what = "A box on the players' screens, holding the UI elements under " ..
+				"it; keyboard \"auto\": a full screen, or an over one out of " ..
+				"play, goes by the arrow keys and Enter.",
 		inputs = {
 			show = "Shows it.",
 			hide = "Hides it.",

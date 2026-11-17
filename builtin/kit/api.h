@@ -245,7 +245,9 @@ namespace interface
 //                               theirs: style, width, height, size, color,
 //                               background, border, order, a bar's form,
 //                               direction, blink_below, source, a panel's
-//                               layout and gap; x, y and the sizes in
+//                               layout, gap and ([KIT_UI_KEYS]) keyboard
+//                               ("auto", "on", "off": it goes by the
+//                               keys); x, y and the sizes in
 //                               percent of the screen's shorter side;
 //                               prefix: its parameters' names' start, for
 //                               edit mode's drags (kit/arena's "hud_").

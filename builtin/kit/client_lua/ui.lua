@@ -87,6 +87,24 @@
 -- "view"): a View3D of the scene, its camera this client's own (its turn,
 -- its offset from this player's body) at the body of the player its value
 -- names. **Chat while editing**: each new chat line a notification.
+-- [KIT_UI_KEYS] **Screens by the keyboard**: a panel's `keyboard` "auto" (a
+-- full screen while shown, an over one while this player is out of play,
+-- one on the HUD never), "on" (while shown) or "off". In play the outermost
+-- shown such panel is the page: its buttons (a scene list's rows too) and
+-- fields in its order (by `order`, then id; a panel in it at its place),
+-- Up and Down, Tab and Shift+Tab going through them, round at the ends;
+-- Enter or Space pressing the focused button (Urho3D's Button::OnKey:
+-- Pressed and Released, as a click's), a field's Enter its own. Its first
+-- button focused as it comes up, and the focused one again, by its id and
+-- row, once made anew (a root's elements are, at a scene switch). While a
+-- page with something to focus is up, play gets none of the keys
+-- (input.lua: kit.key and key_down, but F6's); a focused button is drawn
+-- as under the pointer. None in edit mode (the editor has the keys) nor
+-- on a touchscreen.
+-- simplified: one page at a time (the full screen's, else the first by
+-- depth and id). ui_utils.keyboard_page did not fit: a page of it cannot
+-- be turned off while shown (an over screen in play), goes by the
+-- elements' order and focuses its first button only once
 return function(K)
 local M, E, P = K.M, K.E, K.P
 local magic = require("buildat/extension/urho3d")
@@ -756,13 +774,17 @@ local function list_rows(r, id, rows, px, V)
 			if by ~= "" then
 				label = label .. ", by " .. by:sub(1, 40)
 			end
-			local key = px .. "|" .. label
+			-- ([KIT_UI_KEYS] focused: brighter, as a button under the pointer)
+			local focus = M.ui_keys() and e.b:HasFocus()
+			local key = px .. "|" .. label .. "|" .. tostring(focus)
 			if e.key ~= key then
 				e.key, e.label = key, label
 				e.t:SetFont(font, px)
 				e.t.text = label
 				e.t:SetColor(white)
-				e.bg.color = color(r.ui.border, magic.Color(0.5, 0.5, 0.5, 0.6))
+				local l = focus and 0.2 or 0
+				e.bg.color = color(r.ui.border, nil, l) or
+						magic.Color(0.5 + l, 0.5 + l, 0.5 + l, 0.6 + l)
 			end
 			lw = math.max(lw, e.t.minWidth)
 			lh = math.max(lh, e.t.height)
@@ -1101,6 +1123,156 @@ local function lift_for_keyboard(play)
 		log:info("kit: ui lifted for the keyboard: " .. line)
 	end
 end
+
+-- [KIT_UI_KEYS] The page: its id, its items ({el, key, button, label}),
+-- the focused one's index (at the last update or key) and its key and
+-- element, its focus elsewhere (a window over it)
+local KP = {id = nil, items = {}, at = nil, key = nil, el = nil}
+
+-- Whether a shown panel takes the keys, and after how long (seconds): an
+-- over screen once its player has been out of play a moment (the screen
+-- and the player's state come by different ways: a run's over screen is
+-- up a few frames before its player is back in play)
+local function takes_keys(r)
+	local k = tostring(r.ui.keyboard or "auto")
+	if k ~= "auto" then
+		return k == "on", 0
+	end
+	local s = tostring(r.ui.screen or "none")
+	if s == "over" then
+		return M.out_of_play ~= nil and M.out_of_play(), 0.3
+	end
+	return s == "full", 0
+end
+
+-- A shown panel's items in its order, a panel in it at its place
+local function page_items(p, out)
+	local kids = {}
+	for _, k in ipairs(p.kids or {}) do
+		if k.el and k.el.visible then
+			kids[#kids + 1] = k
+		end
+	end
+	table.sort(kids, before)
+	for _, k in ipairs(kids) do
+		if k.kind == "button" then
+			out[#out + 1] = {el = k.el, key = tostring(k.id), button = true,
+				label = k.text}
+		elseif k.edit then
+			out[#out + 1] = {el = k.edit, key = tostring(k.id),
+				label = "kit " .. k.kind .. " " .. k.id}
+		elseif k.kind == "list" then
+			for i = 1, k.list_n or 0 do
+				local e = k.rows[i]
+				out[#out + 1] = {el = e.b, key = k.id .. ":" .. i, button = true,
+					label = e.label}
+			end
+		elseif k.kind == "panel" then
+			page_items(k, out)
+		end
+	end
+	return out
+end
+
+-- (false for a removed one)
+local function has_focus(el)
+	local ok, f = pcall(function() return el:HasFocus() end)
+	return ok and f
+end
+
+local function focus_item(i, why)
+	local it = KP.items[i]
+	it.el:SetFocus(true)
+	KP.at, KP.key, KP.el = i, it.key, it.el
+	if why then
+		log:info("kit: ui keys: " .. why .. " " .. tostring(it.label))
+	end
+end
+
+-- Each update: the page (nil: none) and its focus
+local function keys_page(id)
+	local items = id and page_items(U[id], {}) or {}
+	local at = nil
+	for i, it in ipairs(items) do
+		if it.el:HasFocus() then
+			at = i
+		end
+	end
+	local was = KP.items
+	KP.items = items
+	if id ~= KP.id then
+		-- (a button of the one gone pressed by no key: its focus dropped)
+		for _, it in ipairs(was) do
+			if has_focus(it.el) then
+				magic.ui:SetFocusElement(nil)
+			end
+		end
+		KP.id, KP.at, KP.key, KP.el = id, nil, nil, nil
+		local labels = {}
+		for i, it in ipairs(items) do
+			if (i == at or (it.button and not at)) and not KP.key then
+				focus_item(i)
+			end
+			labels[#labels + 1] = it.label
+		end
+		log:info("kit: ui keys: " .. (id and "page " .. id .. ": " ..
+				table.concat(labels, " | ") .. (KP.key and ", " ..
+				tostring(items[KP.at].label) .. " focused" or "") or "none"))
+		return
+	end
+	-- (a removed one: a rebuild took the focus with it)
+	local gone = KP.el and not pcall(function() return KP.el.visible end)
+	if at then
+		KP.at, KP.key, KP.el = at, items[at].key, items[at].el
+	elseif id and KP.key and (magic.ui.focusElement == nil or gone) then
+		-- Nothing focused: the button that was, again (a window over the page
+		-- gone, a click beside it), a field made anew too; a field let go of
+		-- stays so (its Enter)
+		for i, it in ipairs(items) do
+			if it.key == KP.key and (it.button or gone) then
+				focus_item(i, "back to")
+				return
+			end
+		end
+		KP.at = nil
+	else
+		KP.at = nil
+	end
+end
+
+-- Whether the page has the keys: play gets none of them then
+function M.ui_keys()
+	return KP.id ~= nil and #KP.items > 0 and not E.editing
+end
+
+magic.SubscribeToEvent("KeyDown", function(_, data)
+	local key = data:GetInt("Key")
+	local tab = key == magic.KEY_TAB
+	if not (tab or key == magic.KEY_UP or key == magic.KEY_DOWN) or
+			not M.ui_keys() or (K.O.paused and K.O.paused()) or
+			(E.menu and E.menu.held()) then
+		return
+	end
+	-- (Urho3D's UI moved a Tab's focus already, by its children's order and
+	-- hidden ones too: the page's goes from where it was)
+	local at = tab and KP.at or nil
+	if not at then
+		for i, it in ipairs(KP.items) do
+			if has_focus(it.el) then
+				at = i
+			end
+		end
+		-- (the focus another window's: its key)
+		if not at and magic.ui.focusElement ~= nil then
+			return
+		end
+	end
+	local back = key == magic.KEY_UP or (tab and
+			data:GetInt("Qualifiers") == magic.QUAL_SHIFT)
+	local n = #KP.items
+	local i = at and (at - 1 + (back and -1 or 1)) % n + 1 or (back and n or 1)
+	focus_item(i, "to")
+end)
 
 local function update()
 	local root = magic.ui.root
@@ -1650,6 +1822,9 @@ local function update()
 				local sc, sp = magic.ui.scale, r.el.screenPosition
 				local over = mp.x / sc >= sp.x and mp.y / sc >= sp.y and
 						mp.x / sc < sp.x + w and mp.y / sc < sp.y + h
+				-- ([KIT_UI_KEYS] focused on a page as under it; a plain one's
+				-- style draws its own)
+				over = over or (M.ui_keys() and r.el:HasFocus())
 				if over ~= r.over then
 					r.over = over
 					r.parts.bg.color = color(u.background, magic.Color(0, 0, 0, 0.6),
@@ -1728,6 +1903,23 @@ local function update()
 			end
 		end
 	end
+	-- [KIT_UI_KEYS] The page: the full screen's, else the first (the
+	-- outermost) shown panel taking the keys
+	-- (none on a touchscreen: no keys there to take)
+	local page = nil
+	for _, id in ipairs(list) do
+		local r = U[id]
+		local on, wait = false, 0
+		if play and not TOUCH and r.kind == "panel" and r.el and
+				r.el.visible and r.on then
+			on, wait = takes_keys(r)
+		end
+		r.keys_at = on and (r.keys_at or now) or nil
+		if on and now - r.keys_at >= wait and (not page or id == up) then
+			page = id
+		end
+	end
+	keys_page(page)
 	lift_for_keyboard(play)
 	-- The edits waiting for a kit/game_rules placed
 	if rules_wait and E.editing then

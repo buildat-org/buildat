@@ -16,6 +16,8 @@
 --     keeps an app's last list only
 --   kit.key(id, key) -> whether the key code (a KeyDown's) is the action's
 --   kit.key_down(id) -> whether the action's key or gamepad button is held
+--     ([KIT_UI_KEYS] both false while a screen of Kit's UI has the keys,
+--     kit.ui_keys(), but for Edit mode's key)
 --   kit.key_name(id) -> the action's key ("" unbound; nil: no such action)
 --   kit.key_text(s) -> s with each "[id]" of an action "[its key]" (a
 --     touchscreen: its button's label), as signs and the HUD show it
@@ -159,9 +161,19 @@ function M.declare_keys(label, keys)
 	return type(names) == "table" and out or nil
 end
 
-function M.key(id, key)
+-- [KIT_UI_KEYS] While a screen of Kit's UI has the keys (ui.lua's
+-- kit.ui_keys) play gets none: only Edit mode's key goes
+local function withheld(id)
+	return id ~= "edit" and M.ui_keys ~= nil and M.ui_keys()
+end
+
+local function is_key(id, key)
 	local c = S.code[id]
 	return c ~= nil and c ~= 0 and c == key
+end
+
+function M.key(id, key)
+	return is_key(id, key) and not withheld(id)
 end
 
 -- ---- The gamepad: the first game controller (SDL's layout), read
@@ -189,14 +201,15 @@ end
 
 function M.key_down(id)
 	local c = S.code[id]
-	return (c ~= nil and c ~= 0 and magic.input:GetKeyDown(c)) or
-			pad_button(S.pad[id]) or false
+	return not withheld(id) and ((c ~= nil and c ~= 0 and
+			magic.input:GetKeyDown(c)) or pad_button(S.pad[id]) or false)
 end
 
 -- Whether the action's key went down since the last frame
 function M.key_press(id)
 	local c = S.code[id]
-	return c ~= nil and c ~= 0 and magic.input:GetKeyPress(c)
+	return c ~= nil and c ~= 0 and not withheld(id) and
+			magic.input:GetKeyPress(c)
 end
 
 function M.key_name(id)
@@ -251,7 +264,7 @@ end
 
 local function playing()
 	return not E.editing and not typing() and not (O.paused and O.paused())
-			and not ui_utils.mouse_look_paused()
+			and not ui_utils.mouse_look_paused() and not withheld()
 end
 
 buildat.sub_packet("kit:actions", function(data)
@@ -291,7 +304,8 @@ end)
 magic.SubscribeToEvent("KeyUp", function(_, data)
 	local key = data:GetInt("Key")
 	for _, a in ipairs(S.world) do
-		if M.key(a.name, key) and not pad_button(S.pad[a.name]) then
+		-- (let go while a screen has the keys too)
+		if is_key(a.name, key) and not pad_button(S.pad[a.name]) then
 			M.press_action(a.name, false)
 		end
 	end
