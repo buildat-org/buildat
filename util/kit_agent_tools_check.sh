@@ -22,7 +22,9 @@
 #      "target" into a counter so named in two scenes; try_input as nobody
 #      (the default: by "app", nothing reached), as kitboss (the world's
 #      target), as "me" (the body's scene's, moon) and refusals (5);
-#   4. play_input's press (8): a kit/ui_button by its label, a
+#   4. [KIT_SIDE_SCENERY] (5) play_join's body in the first scene, then
+#      moved to moon by play_join while editing moon;
+#      play_input's press (8): a kit/ui_button by its label, a
 #      kit/ui_scene_list's row by its title (its "picked"), an unknown one
 #      refused naming the screen's buttons;
 #   5. get_state's filters: scene, ids, type, state false (10);
@@ -350,20 +352,30 @@ elif phase == "links":
 elif phase == "play":
     rpc("initialize", init)
     H, MT, WT, B, L = s["H"], s["MT"], s["WT"], s["B"], s["L"]
+    def join():
+        """play_join until in: its answers, its body"""
+        t0, said = time.time(), []
+        while True:
+            r = rpc("tools/call", {"name": "play_join", "arguments": {}})["result"]
+            text = r["content"][0]["text"]
+            said.append(text)
+            print("  play_join ->", text[:400])
+            if not r["isError"]:
+                break
+            assert "is starting" in text or "on its way" in text, text
+            assert time.time() - t0 < 150, "the camera not in in 150 s"
+            time.sleep(0.5)
+        return said, json.loads(re.search(r"\): (\{.*\})\. play_input", text).group(1))
+    # [KIT_SIDE_SCENERY] (5) the body in the scene edited: in the first,
+    # then moved to moon by play_join there (again there: as it is)
+    call("switch_scene", {"name": s["main"]})
+    said, body = join()
+    assert body["scene"] == s["main"], body
     call("switch_scene", {"name": "moon"})
-    t0 = time.time()
-    while True:
-        r = rpc("tools/call", {"name": "play_join", "arguments": {}})["result"]
-        text = r["content"][0]["text"]
-        if not r["isError"]:
-            break
-        print("  play_join ->", text[:200])
-        assert "is starting" in text or "on its way" in text, text
-        assert time.time() - t0 < 150, "the camera not in in 150 s"
-        time.sleep(0.5)
-    print("  play_join ->", text[:400])
-    body = json.loads(re.search(r"\): (\{.*\})\. play_input", text).group(1))
+    said, body = join()
     assert body["scene"] == "moon", body
+    assert any(x.startswith("Your body left the scene %s. " % s["main"]) for x in said), said
+    assert call("play_join").startswith("You play already: "), "play_join in its scene"
     # The screen's buttons (the list's rows filled within a second)
     def buttons():
         b = json.loads(re.search(r"Played [^:]*: (\{.*\})", call("play_input",

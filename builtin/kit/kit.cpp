@@ -31145,10 +31145,14 @@ struct Module: public interface::Module, public Interface
 			// [KIT_AGENT_NEXT_1] 3a: the server's camera plays a body
 			// (agent_play())
 			{"play_join", "play_join", "Play the game yourself: the server's "
-				"camera (get_view's) takes a player body in your scene, a guest's "
-				"named \"<account>'s agent\", put as a joining player is. The "
-				"round must be Running (start). The first call may answer that the "
-				"camera is starting: call again. One agent plays at a time.",
+				"camera (get_view's) takes a player body in the scene you edit "
+				"(switch_scene's), a guest's named \"<account>'s agent\", on the "
+				"scene's spawner of players (kit/spawner players: true) as a "
+				"joining player there, else at the scene's spawn. Playing "
+				"already in another scene, the body moves to yours. The round "
+				"must be Running (start). The first call may answer that the "
+				"camera is starting or on its way: call again. One agent plays "
+				"at a time.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"play_input", "play_input", "Your body's input for a time, as a "
 				"player's client sends it (its keys predicted and all): keys held "
@@ -34375,15 +34379,24 @@ struct Module: public interface::Module, public Interface
 					"start: "+m_cam.failed;
 		const size_t cam = m_cam.peer;
 		if(op == "play_join"){
-			if(m_cam.play == account)
-				return "You play already: "+play_body().stringify();
+			// [KIT_SIDE_SCENERY] (5) Your body in another scene (or session)
+			// than the one you edit: it leaves, and joins yours as below
+			ss_ moved;
+			if(m_cam.play == account){
+				const json::Value b = play_body();
+				if(jstr(b, "scene") == p.scene && session_of_peer(cam) == sid)
+					return "You play already: "+b.stringify();
+				moved = jstr(b, "scene");
+				play_end("play_join into the scene "+p.scene);
+			}
 			ViewWait w;
 			w.session = sid;
 			w.scene = p.scene;
 			scene_spawn(p.scene, w.at[0], w.at[1], w.at[2]);
 			if(!camera_place(w))
-				return "The server's camera is on its way to your scene: call "
-						"play_join again in a second";
+				return (moved.empty() ? ss_() : "Your body left the scene "+
+						moved+". ")+"The server's camera is on its way to your "
+						"scene: call play_join again in a second";
 			double x = w.at[0], y = w.at[1], z = w.at[2], look = 0;
 			{
 				SessionScope sc(*this, sid);
@@ -34396,7 +34409,8 @@ struct Module: public interface::Module, public Interface
 			m_cam.used = now;
 			log_i(MODULE, "The server's camera plays for %s's agent", cs(account));
 			failed = false;
-			return "You play a body (a guest's, gone when you leave): "+
+			return (moved.empty() ? ss_() : "Your body left the scene "+moved+
+					". ")+"You play a body (a guest's, gone when you leave): "+
 					play_body().stringify()+". play_input moves it; play_leave ends "
 					"it, as do "+itos(PLAY_IDLE_US / 1000000)+" s unused";
 		}
