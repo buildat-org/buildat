@@ -111,7 +111,10 @@
 --     ([KIT_REPARENT_BUTTONS]) "Switch parent" and then an entity clicked
 --     (the view's or the list's; Escape or the button again cancels) puts
 --     it under that one, "Un-parent" back under the scene; a UI element's
---     new parent may be a panel ([KIT_PANEL_PARENT]), which it is then in
+--     new parent may be a panel ([KIT_PANEL_PARENT]), which it is then in;
+--     ([KIT_ROOT_EDIT]) one with no position "Onto the app root" (every
+--     scene's: the Game-wide list's) and "Into this scene" back; a
+--     no-position type's palette menu "Place on the app root"
 --   - every entity drawn as a box, the selected ones yellow, links as
 --     lines, and a type's gizmo (a sphere or a box), in edit mode only
 --   - the admin's: who is here, each "Builder: yes/no" to grant or take
@@ -2523,10 +2526,22 @@ function NT.palette_menu(it, x, y)
 			NT.palette_menu(it, x, y)
 		end
 	end)
-	NT.menu({it.label, NT.cost_line(it.type), {"Place", function()
+	local items = {it.label, NT.cost_line(it.type), {"Place", function()
 		NT.palette_chosen(it)
 		NT.place_now(it)
-	end}, {fs, fn}, {"Cancel", function() end}}, x, y)
+	end}}
+	-- [KIT_ROOT_EDIT] one with no position on the app root (a root type
+	-- goes there by Place)
+	local t = type_of(it.type)
+	if it.type and t.no_position and not t.root then
+		items[#items + 1] = {"Place on the app root", function()
+			NT.palette_chosen(it)
+			NT.place_now(it, "root")
+		end}
+	end
+	items[#items + 1] = {fs, fn}
+	items[#items + 1] = {"Cancel", function() end}
+	NT.menu(items, x, y)
 	log:info("kit editor: the palette's menu of " .. it.label)
 end
 
@@ -3658,15 +3673,52 @@ function NT.sym_section(w, e)
 	end
 end
 
+-- [KIT_ROOT_EDIT] Where e may go of the app root: "root" (onto it, from
+-- its scene) or 0 (into the scene edited, from the root); nil neither.
+-- The root's have no position: a type with none (a lobby, a panel and
+-- what is in it) or a root type, no World
+function NT.root_move(e)
+	local c1 = e.components and e.components[1]
+	if e.pos or e.kind or not c1 then
+		return nil
+	end
+	local t = type_of(c1.type)
+	if not t.no_position and not t.root then
+		return nil
+	end
+	for _, c in ipairs(e.components) do
+		if type_of(c.type).world then
+			return nil
+		end
+	end
+	return scene_name(e) and "root" or 0
+end
+
+function NT.root_move_label(rm)
+	return rm == 0 and "Into this scene" or "Onto the app root"
+end
+
+function NT.to_root(e, rm)
+	log:info("kit editor: " .. (rm == 0 and "into the scene " or
+			"onto the app root ") .. e.id)
+	send({op = "parent", id = e.id, parent = rm})
+end
+
 -- [KIT_PHONE_EDITING] The touch mode's inspector's rare buttons as one
 -- dropdown: Switch parent (Un-parent), Place under this, each component's
 -- Restart (the sweep of 2026-11-12). parented: whether it may have a
--- parent, pe the one it has, under: whether it may take placings
-function NT.actions(w, e, parented, pe, under)
+-- parent, pe the one it has, under: whether it may take placings, rm
+-- NT.root_move's
+function NT.actions(w, e, parented, pe, under, rm)
 	local c, fns = {{"Actions...", 0}}, {}
 	local function add(label, fn)
 		fns[#fns + 1] = fn
 		c[#c + 1] = {label, #fns}
+	end
+	if rm then
+		add(NT.root_move_label(rm), function()
+			NT.to_root(e, rm)
+		end)
 	end
 	if parented then
 		local armed = S.reparent == e.id
@@ -3994,11 +4046,13 @@ local function inspector(w, e, is_made)
 	local pe = parented and NT.tree().by[e.parent]
 	pe = pe and (pe.pos or NT.is_panel(pe)) and pe
 	local under = (e.pos or NT.is_panel(e)) and not sig and not copy
+	-- [KIT_ROOT_EDIT] onto the app root and back
+	local rm = not sig and not copy and NT.root_move(e)
 	if sh then
 		if pe then
 			text(w, "Under " .. NT.entity_label(pe), DIM)
 		end
-		NT.actions(w, e, parented, pe, under)
+		NT.actions(w, e, parented, pe, under, rm)
 	else
 		pos_rows()
 	end
@@ -4034,9 +4088,17 @@ local function inspector(w, e, is_made)
 		end, on)
 	end
 	if not sig and not copy and not sh then
-		button(w, "Delete", function()
+		-- ([KIT_ROOT_EDIT] onto the app root and back beside it: a row of
+		-- its own would move the parameters down)
+		local dr = rm and row(w) or w
+		button(dr, "Delete", function()
 			M.delete_selected()
 		end)
+		if rm then
+			button(dr, NT.root_move_label(rm), function()
+				NT.to_root(e, rm)
+			end):SetName("root move")
+		end
 	end
 	-- [KIT_COMPONENTS] A built child's are its prefab's. (Over the components: a
 	-- movement's parameters are longer than the screen)

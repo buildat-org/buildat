@@ -5821,9 +5821,18 @@ struct Module: public interface::Module, public Interface
 			return "no edit rights here";
 		if(!pi->second.editing)
 			return "not in edit mode";
-		if(active_session())
-			return "in a session: the game's types are the default round's";
-		return "";
+		return types_session();
+	}
+
+	// Why the session at hand changes no custom type ("" it may): the
+	// game's, every session's ([KIT_ROOT_EDIT] a draft's change would be
+	// the main round's at once)
+	ss_ types_session()
+	{
+		GameSession *gs = active_session();
+		return !gs ? "" : gs->draft && !gs->bench ? "in a draft: custom types "
+				"are the game's, a change goes live at once; leave the draft "
+				"first" : "in a session: the game's types are the default round's";
 	}
 
 	// A type's files: a custom type's, Kit's own (examples) or an installed
@@ -6090,6 +6099,9 @@ struct Module: public interface::Module, public Interface
 		// builder's next ones wait a while, so a loop of them does not
 		// hold the server
 		// simplified: by the clock, the builder's name
+		why = types_session();
+		if(!why.empty())
+			return false;
 		const int64_t now = interface::os::time_us();
 		auto slow = m_type_slow.find(p.name);
 		if(slow != m_type_slow.end() && now < slow->second){
@@ -31009,13 +31021,15 @@ struct Module: public interface::Module, public Interface
 				"many of your edits there are to undo; the game it is "
 				"(\"<author>/<name>\", list_aitta's filter) and its save; "
 				"session: where you are (the main round or your draft). main: "
-				"true reads the main round's from your draft. scene, ids, type: "
-				"only those entities; state: false leaves the components' state "
-				"out.",
+				"true reads the main round's from your draft. An entity on the "
+				"app root (every scene's: the game-wide rules, a lobby and its "
+				"screens) has app_root: true. scene, ids, type: only those "
+				"entities (scene \"\": the app root's); state: false leaves the "
+				"components' state out.",
 				R"J({"type": "object", "properties": {"main": {"type": "boolean",
 				"description": "From your draft: the main round's state"},
 				"scene": {"type": "string", "description":
-					"Only the entities in this scene (its own entity among them)"},
+					"Only the entities in this scene (its own entity among them); \"\": the app root's"},
 				"ids": {"type": "array", "items": {"type": "integer"},
 					"description": "Only these entities"},
 				"type": {"type": "string", "description":
@@ -31240,15 +31254,21 @@ struct Module: public interface::Module, public Interface
 			{"place", "place", "Places an entity of a type at pos, its params "
 				"set at once if given (each checked as set_param checks it), "
 				"under parent if given. The answer names its new id. A type "
-				"with no_position takes a pos too and has none.",
+				"with no_position takes a pos too and has none. A root type "
+				"(list_types: root) goes on the app root. parent \"root\": "
+				"one with no_position on the app root too, every scene's: a "
+				"game-wide lobby (kit/lobby), its screens (a kit/ui_panel, then "
+				"a kit/ui_scene_list or buttons placed under it), each linking "
+				"by to_name into the scene of the player who set it off (each "
+				"scene's \"the run\"); a scene's own stays in its scene.",
 				R"J({"type": "object", "properties": {
 				"type": {"type": "string", "description": "From list_types"},
 				"pos": {"type": "array", "items": {"type": "number"},
 					"minItems": 3, "maxItems": 3, "description": "x, y, z"},
 				"params": {"type": "object",
 					"description": "Parameter values by name"},
-				"parent": {"type": "integer", "description":
-					"An entity to put it under (0 or the scene's own id: the scene)"}},
+				"parent": {"description":
+					"An entity's id to put it under (0 or the scene's own id: the scene), or \"root\": the app root"}},
 				"required": ["type", "pos"]})J", ""},
 			{"set_param", "set", "Sets a parameter of an entity's component "
 				"to value, checked against its type's declaration. Or params: "
@@ -31331,11 +31351,16 @@ struct Module: public interface::Module, public Interface
 			{"set_parent", "parent", "Puts an entity (and what is under it) "
 				"under parent, a positioned entity of your scene (0: the scene), "
 				"where it is in the world kept; it then moves with its parent. "
+				"\"root\": onto the app root, one with no position (a kit/lobby, "
+				"a kit/ui_panel with what is in it, a root type), every scene's "
+				"from then on, its links kept; one on the root goes into your "
+				"scene by 0 (no position: none needed). "
 				"A scene's entity: under another scene (0: the root), the scenes "
 				"under it with it; it then has that scene's game-wide types "
 				"where it has none of its own.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
-				"parent": {"type": "integer"}}, "required": ["id", "parent"]})J",
+				"parent": {"description": "An entity's id, 0 or \"root\""}},
+				"required": ["id", "parent"]})J",
 				""},
 			{"duplicate", "duplicate", "Copies entities ids (each with what is "
 				"under it) by [dx, dy, dz], the links and entity params among "
@@ -31491,7 +31516,8 @@ struct Module: public interface::Module, public Interface
 			// [KIT_CUSTOM_TYPES]
 			{"put_type", "type_put", "Puts a custom type of this game's, "
 				"local/<name> (any builder edits any; one undo), loaded at once, "
-				"Running or not. Its error (syntax, load) is the answer and the "
+				"Running or not; the game's, so not in a draft (leave_draft "
+				"first). Its error (syntax, load) is the answer and the "
 				"version before runs on. Taken, the entities on it keep their "
 				"params and state and run its new handlers; a movement's bodies "
 				"step with its new step. source: Lua 5.1 run in Kit's box (base, "
@@ -31561,8 +31587,8 @@ struct Module: public interface::Module, public Interface
 				"type's source or (client: true) its client part; each find "
 				"must be there exactly once at its turn, else nothing is "
 				"changed and the answer names the edit. Then put as put_type "
-				"puts it (its checks, loaded at once, one undo). get_type reads "
-				"the files.",
+				"puts it (its checks, loaded at once, one undo; not in a draft). "
+				"get_type reads the files.",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string", "description": "local/<name> or <name>"},
 				"edits": {"type": "array", "minItems": 1, "maxItems": 32, "items": {
@@ -31574,15 +31600,27 @@ struct Module: public interface::Module, public Interface
 					"required": ["find", "replace"]}}},
 				"required": ["name", "edits"]})J", ""},
 			{"delete_type", "type_delete", "Deletes a custom type nothing uses "
-				"(no entity, prefab or round's start has it). One undo.",
+				"(no entity, prefab or round's start has it). One undo; not in a "
+				"draft.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"}},
 				"required": ["name"]})J", ""},
 			{"new_scene", "new_scene", "Makes a scene (letters, digits and _) "
 				"and takes your edits there; copy: true copies your scene's "
 				"World into it (none: it is empty, no ground). parent: the scene "
-				"it goes under (none: the root).",
+				"it goes under (none: the root). Not in a draft: scenes are the "
+				"game's.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"},
 				"copy": {"type": "boolean"}, "parent": {"type": "string"}},
+				"required": ["name"]})J", ""},
+			// [KIT_ROOT_EDIT] the editor's Remove scene
+			{"delete_scene", "remove_scene", "Removes scene name, all its "
+				"entities and the links to them, one undo (its World's voxels "
+				"stay), as the editor's Remove scene does. Refused for the "
+				"game's first scene, one with scenes under it, one with a "
+				"player on it (unlist it: they leave as they finish) and in a "
+				"draft (scenes are the game's). Your edits there go to the "
+				"game's first scene.",
+				R"J({"type": "object", "properties": {"name": {"type": "string"}},
 				"required": ["name"]})J", ""},
 			{"switch_scene", "scene", "Takes your edits to another scene "
 				"(get_state lists them).",
@@ -31613,7 +31651,9 @@ struct Module: public interface::Module, public Interface
 				"as it is. Your edits, start and stop (in a draft: its round "
 				"from its start again), get_view (the server's camera follows), "
 				"get_state (its session says where you are) and playtest go "
-				"there. publish puts what you changed into the game's start; "
+				"there; what is the game's (custom types, scenes, voxel types, "
+				"items, sounds) is refused there. publish puts what you changed "
+				"into the game's start; "
 				"leave_draft drops it. It ends on leave_draft or after 5 minutes "
 				"without a call of yours, never for want of a connection; 8 "
 				"sessions a server at most, drafts and rounds together. Your "
@@ -34733,9 +34773,11 @@ struct Module: public interface::Module, public Interface
 		failed = true;
 		if(!fi.is_undefined() && (!fi.is_array() || fi.size() > 1000))
 			return "ids: a list of entity ids, 1000 at most";
-		if(!fs.is_undefined() && (!fs.is_string() || !scene_entity(fs.as_string())))
+		// ([KIT_ROOT_EDIT] scene "": the app root's)
+		if(!fs.is_undefined() && (!fs.is_string() || (!fs.as_string().empty() &&
+				!scene_entity(fs.as_string()))))
 			return "scene: no scene named "+fs.stringify().substr(0, 80)+
-					" (get_state's scenes)";
+					" (get_state's scenes; \"\": the app root's)";
 		if(!ft.is_undefined() && !ft.is_string())
 			return "type: a type's name (kit/part, local/...)";
 		failed = false;
@@ -34744,11 +34786,17 @@ struct Module: public interface::Module, public Interface
 			const uint64_t id = (uint64_t)json::jint(es.at(i), "id", 0);
 			auto it = m_entities.find(id);
 			ss_ sc;
+			const bool in_scene = it != m_entities.end() &&
+					scene_of(it->second, &sc);
+			const bool root = it != m_entities.end() && on_root(it->second);
 			if((fi.is_array() && !ids.count(id)) || (fs.is_string() &&
-					(it == m_entities.end() || !((it->second.kind == "scene" &&
-					it->second.name == fs.as_string()) || (scene_of(it->second,
-					&sc) && sc == fs.as_string())))))
+					(it == m_entities.end() || !(fs.as_string().empty() ? root :
+					(it->second.kind == "scene" && it->second.name ==
+					fs.as_string()) || (in_scene && sc == fs.as_string())))))
 				continue;
+			// [KIT_ROOT_EDIT] the app root's marked: every scene's
+			if(root)
+				es[i].set("app_root", true);
 			json::Value &cs_ = es[i]["components"];
 			bool typed = !ft.is_string();
 			for(unsigned c = 0; c < cs_.size(); c++)
@@ -36965,7 +37013,11 @@ struct Module: public interface::Module, public Interface
 			"box), get_voxels; a heightmap's ground: edit_terrain, get_ground. "
 			"batch: many edits, one undo, all or nothing. Sounds: list_sounds, "
 			"put_sound. show marks where you work for your builder. Scenes: get_state "
-			"names them and yours (where you edit); switch_scene, new_scene. "
+			"names them and yours (where you edit); switch_scene, new_scene, "
+			"delete_scene. The app root (place's or set_parent's parent "
+			"\"root\") holds what is every scene's: a game-wide lobby, its "
+			"screens, the root types; they reach the player's scene by "
+			"to_name links. "
 			"move, rename, set_parent, duplicate, delete edit entities; "
 			"get_goal_warnings checks kit/goal chains.\n"
 			"- Custom types: put_type writes a type of this game's own, "
@@ -37007,6 +37059,18 @@ struct Module: public interface::Module, public Interface
 				"under it, and the rules it has from above. A new scene is empty "
 				"(no ground: its players held still until it has ground or a "
 				"spawner of players).\n"
+				// [KIT_ROOT_EDIT]
+				"- The app root: a game of several tracks (Crag Trial's "
+				"template) has its kit/lobby and its screens there (place or "
+				"set_parent with parent \"root\"; a kit/ui_panel with "
+				"lobby_screen naming it and to \"player\", a kit/ui_scene_list "
+				"under it linked picked -> the lobby's play), and the lobby's "
+				"entered linked by to_name to each scene's \"the run\": a pick "
+				"takes the player to that scene and starts its run. A lobby in "
+				"a scene is that scene's alone. Links by id from the root reach "
+				"the entity they name whoever set them off. get_state marks the "
+				"root's (app_root; scene \"\" lists them); any scene's edits "
+				"reach them.\n"
 				// [KIT_AGENT_FEEDBACK_1117]
 				"- In a type's Lua: c.players (players = true) lists every "
 				"scene's players, each p.scene theirs and p.away true outside the "
@@ -38805,7 +38869,7 @@ struct Module: public interface::Module, public Interface
 						"world_region", "version",
 						"inventory", "root", "no_position", "inputs_types", "outputs_types",
 						"inputs_labels", "outputs_labels", "player", "ui", "about", "seat",
-						"movement"})
+						"movement", "world"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
 				if(addable(t))
@@ -38825,7 +38889,8 @@ struct Module: public interface::Module, public Interface
 							"zone", "volume", "grants", "region", "voxel_box", "world_region",
 							"version", "inventory",
 							"root", "no_position", "inputs_types", "outputs_types", "inputs_labels",
-							"outputs_labels", "player", "ui", "about", "seat", "movement"})
+							"outputs_labels", "player", "ui", "about", "seat", "movement",
+							"world"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
 					if(addable(t.first))
@@ -39107,7 +39172,10 @@ struct Module: public interface::Module, public Interface
 				op == "draft" || op == "prefab_bench" ||
 				(gs->bench && op == "publish")))
 			return refuse(gs->bench ? "editing a prefab: the game's; Close "
-					"first" : "in a draft: the default round's");
+					"first" : op == "new_scene" || op == "remove_scene" ?
+					"in a draft: scenes are the game's, a scene made or removed "
+					"is the main round's at once; leave the draft first" :
+					"in a draft: the default round's");
 		if(op == "draft")
 			return make_draft(p, peer, refuse);
 		if(op == "publish")
@@ -39536,6 +39604,21 @@ struct Module: public interface::Module, public Interface
 				warn("scene "+name+": "+hwhy);
 			go_to_scene(p, peer, name);
 		}
+		// [KIT_ROOT_EDIT] An agent whose scene went (it has no body there:
+		// scene_busy() passes it): its edits in the game's first scene
+		if(op == "remove_scene"){
+			const json::Value tree = scene_tree();
+			const ss_ first = !m_host.world_scene.empty() ? m_host.world_scene :
+					tree.size() ? jstr(tree.at(0), "name") : "";
+			for(auto &ap : m_agent_peers){
+				auto pi = m_peers.find(ap.first);
+				if(pi == m_peers.end() || scene_entity(pi->second.scene))
+					continue;
+				go_to_scene(pi->second, ap.first, first);
+				if(ap.first == peer)
+					m_edit_what += "; your edits go to the scene "+first+" now";
+			}
+		}
 	}
 
 	// [KIT_SESSIONS_1] Whether an entity changed is (or becomes) a World's
@@ -39767,9 +39850,11 @@ struct Module: public interface::Module, public Interface
 			bool self = false;
 			for(auto &p : m_peers){
 				const ss_ &s = p.second.scene;
-				// (an agent has no body: its edits' scene only)
+				// (an agent has no body: its edits' scene only; [KIT_ROOT_EDIT]
+				// nor the server's camera playing no one)
 				if((s != n && s.compare(0, n.size() + 1, n+"~") != 0) ||
-						m_agent_peers.count(p.first))
+						m_agent_peers.count(p.first) || (p.first == m_cam.peer &&
+						m_cam.play.empty()))
 					continue;
 				if(p.second.name == by)
 					self = true;
@@ -39934,15 +40019,23 @@ struct Module: public interface::Module, public Interface
 	// for `height` levels more; [KIT_PANEL_PARENT] or a panel, for a
 	// `ui_child` only (the panel has no position, a UI element no use for
 	// one). [KIT_AGENT_VISUALS] The editor's scene's own entity is 0 too.
+	// [KIT_ROOT_EDIT] root_ok: "root" (or 1) is the app root, parent 1.
 	// false with why
 	bool parent_arg(const json::Value &j, const Peer &p, uint64_t &parent,
-			ss_ &why, int height = 1, bool ui_child = false)
+			ss_ &why, int height = 1, bool ui_child = false, bool root_ok = false)
 	{
 		parent = 0;
 		const json::Value &v = j.get("parent");
 		if(v.is_undefined() || (v.is_number() && (v.as_number() == 0 ||
 				v.as_number() == (double)scene_entity(p.scene))))
 			return true;
+		if((v.is_string() && v.as_string() == "root") ||
+				(v.is_number() && v.as_number() == 1)){
+			parent = 1;
+			if(!root_ok)
+				why = "parent: a prefab's copy goes in a scene, not on the app root";
+			return root_ok;
+		}
 		Entity *e = entity_arg(j, "parent", why);
 		if(!e)
 			return false;
@@ -39983,9 +40076,40 @@ struct Module: public interface::Module, public Interface
 		return h;
 	}
 
+	// [KIT_ROOT_EDIT] Why an entity (and what is under it) may not be on the
+	// app root, "" if it may: the root's are every scene's and have no
+	// position (a game-wide lobby, its screens, a root type); a World is
+	// its scene's
+	ss_ off_root(const Entity &e)
+	{
+		for(const Instance &in : e.comps){
+			auto t = m_types.find(in.type);
+			if(t != m_types.end() && t->second.world)
+				return in.type+" is a World: its scene's";
+		}
+		if(e.has_pos || (!no_position(e) && !root_type(e)))
+			return "entity "+itos(e.id)+" has a position: the app root holds "
+					"what has none (a kit/lobby, a kit/ui_panel with what is in "
+					"it, a root type)";
+		return "";
+	}
+	bool root_type(const Entity &e)
+	{
+		return !e.comps.empty() && m_types[e.comps[0].type].root;
+	}
+	// [KIT_ROOT_EDIT] Whether it is the app root's: in no scene
+	bool on_root(const Entity &e)
+	{
+		ss_ scene;
+		scene_of(e, &scene);
+		return e.kind.empty() && scene.empty();
+	}
+
 	// [KIT_NESTING] {"op": "parent", "id": n, "parent": m (0: the scene)}:
 	// the entity (and what is under it) under m, where it is in the world
-	// kept; m not it nor under it
+	// kept; m not it nor under it. [KIT_ROOT_EDIT] m "root" (or 1): onto
+	// the app root, one with no position; one there is the editor's from
+	// any scene, 0 putting it into the editor's
 	bool parent_change(const json::Value &j, const Peer &p,
 			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
 			ss_ &why)
@@ -39993,27 +40117,42 @@ struct Module: public interface::Module, public Interface
 		Entity *e = entity_arg(j, "id", why);
 		if(!e)
 			return false;
-		if((!e->has_pos && !no_position(*e)) || !e->kind.empty()){
+		// ([KIT_ROOT_EDIT] a root type's too: the root or a scene)
+		const bool rt = root_type(*e) && !no_position(*e) && !e->has_pos;
+		if((!e->has_pos && !no_position(*e) && !rt) || !e->kind.empty()){
 			why = "entity "+itos(e->id)+" has no position";
 			return false;
 		}
 		ss_ scene;
 		scene_of(*e, &scene);
-		if(scene != p.scene){
+		if(scene != p.scene && !on_root(*e)){
 			why = "entity "+itos(e->id)+" is in another scene";
 			return false;
 		}
 		uint64_t parent = 0;
-		if(!parent_arg(j, p, parent, why, height_of(e->id), is_ui_element(*e)))
+		if(!parent_arg(j, p, parent, why, height_of(e->id), is_ui_element(*e),
+				true))
+			return false;
+		if(parent == 1)
+			why = off_root(*e);
+		else if(rt && parent)
+			why = "parent: entity "+itos(e->id)+" is of a root type: it goes on "
+					"the app root or on a scene (0)";
+		if(!why.empty())
 			return false;
 		if(parent == e->id || under_one_of(parent, {e->id})){
 			why = "parent: entity "+itos(parent)+" is "+(parent == e->id ?
 					"itself" : "under it");
 			return false;
 		}
-		const uint64_t to = parent ? parent : scene_entity(scene);
+		const uint64_t to = parent ? parent : scene_entity(p.scene);
+		if(!to){
+			why = "the editor is in no scene of the composition's";
+			return false;
+		}
 		if(to == e->parent){
-			why = "entity "+itos(e->id)+" is under "+itos(to)+" already";
+			why = "entity "+itos(e->id)+" is "+(to == 1 ? ss_("on the app root") :
+					"under "+itos(to))+" already";
 			return false;
 		}
 		json::Value after = entity_json(*e);
@@ -40030,8 +40169,8 @@ struct Module: public interface::Module, public Interface
 			localize(after);
 		}
 		change.push_back(std::make_pair(e->id, after));
-		what = "put "+itos(e->id)+" under "+(parent ? itos(parent) :
-				"the scene "+scene);
+		what = "put "+itos(e->id)+(parent == 1 ? ss_(" on the app root") :
+				" under "+(parent ? itos(parent) : "the scene "+p.scene));
 		return true;
 	}
 
@@ -40139,30 +40278,37 @@ struct Module: public interface::Module, public Interface
 			const bool root = m_types[type].root;
 			// [KIT_NO_WORLD_TYPES] The scene's, or under that entity, no position
 			const bool no_pos = m_types[type].no_position;
+			// [KIT_NESTING] "parent": under that entity, pos the world's
+			// (a type the root or the scene has, as ever). [KIT_ROOT_EDIT]
+			// "root": one with no position on the app root, every scene's
+			uint64_t under = 0;
+			if(!root && !on_scene && !parent_arg(j, p, under, why, 1,
+					no_pos && m_types[type].decl.get("ui").is_object(), true))
+				return false;
+			if(under == 1 && !no_pos){
+				why = type+" has a position: the app root holds what has none "
+						"(a kit/lobby, a kit/ui_panel with what is in it, a root type)";
+				return false;
+			}
+			const bool app = root || under == 1;
 			uint64_t scene = 0;
 			for(auto &e : m_entities)
 				if(e.second.kind == "scene" && e.second.name == p.scene)
 					scene = e.first;
-			if(!scene && (!root || on_scene)){
+			if(!scene && (!app || on_scene)){
 				why = "the editor is in no scene of the composition's";
 				return false;
 			}
-			// [KIT_NESTING] "parent": under that entity, pos the world's
-			// (a type the root or the scene has, as ever)
-			uint64_t under = 0;
-			if(!root && !on_scene && !parent_arg(j, p, under, why, 1,
-					no_pos && m_types[type].decl.get("ui").is_object()))
-				return false;
 			const uint64_t id = m_next_id++;
 			json::Value e = json::object();
 			e.set("id", (int64_t)id);
-			e.set("parent", (int64_t)(on_scene ? scene : root ? 1 :
+			e.set("parent", (int64_t)(on_scene ? scene : app ? 1 :
 					under ? under : scene));
 			e.set("name", type+" "+itos(id));
 			json::Value pos = json::array();
 			for(unsigned k = 0; k < 3; k++)
 				pos.append(grid(j.get("pos").at(k).as_number()));
-			if(!root && !no_pos){
+			if(!app && !no_pos){
 				e.set("pos", pos);
 				localize(e);
 			}
@@ -40191,9 +40337,9 @@ struct Module: public interface::Module, public Interface
 			e.set("components", comps);
 			change.push_back(std::make_pair(id, e));
 			what = "placed "+type+" "+itos(id)+(on_scene ? " on the scene "+
-					p.scene : root ? ss_(" on the app root") : no_pos ?
+					p.scene : app ? ss_(" on the app root") : no_pos ?
 					ss_(", no position") : " at "+pos.stringify())+
-					(under ? " under "+itos(under) :
+					(under > 1 ? " under "+itos(under) :
 					ss_())+(ps.is_object() ? " with "+
 					comp.get("params").stringify() : ss_());
 			return true;
@@ -40923,6 +41069,23 @@ struct Module: public interface::Module, public Interface
 				n.nodes.clear();
 			}
 		}
+		// [KIT_ROOT_EDIT] Onto the app root or off it: what is under it has
+		// its nodes where it is now (a panel's UI elements: in each scene)
+		sv_<uint64_t> under;
+		if(had && n.parent != it->second.parent){
+			ss_ was, now;
+			scene_of(it->second, &was);
+			scene_of(n, &now);
+			if(was != now)
+				for(uint64_t c : group_of(id, m_entities.size()))
+					if(c != id){
+						Entity &ce = m_entities[c];
+						remove_node(ce);
+						ce.node = 0;
+						ce.nodes.clear();
+						under.push_back(c);
+					}
+		}
 		m_entities[id] = n;
 		Entity &e = m_entities[id];
 		// Running, live: a new instance starts at once, and joins those in
@@ -40976,6 +41139,9 @@ struct Module: public interface::Module, public Interface
 				nd->SetVar(magic::StringHash("kit_parent"), magic::Variant(pn));
 			});
 		}
+		for(uint64_t c : under)
+			if(wants_node(m_entities[c]))
+				make_node(m_entities[c]);
 		// [KIT_NESTING] it and what is under it where it is now
 		place_nodes(id);
 	}
