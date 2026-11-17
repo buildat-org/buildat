@@ -170,8 +170,8 @@ def rpc(method, params=None, tk=tok):
     m = {"jsonrpc": "2.0", "id": n, "method": method}
     if params is not None:
         m["params"] = params
-    # (a token's 120 calls a minute: waited out)
-    for i in range(40):
+    # (a token's 120 calls a minute: waited out, up to the minute)
+    for i in range(65):
         s, b = post(m, tk)
         if s != 429:
             break
@@ -369,15 +369,15 @@ elif phase == "play":
             time.sleep(0.5)
         return said, json.loads(re.search(r"\): (\{.*\})\. play_input", text).group(1))
     # [KIT_SIDE_SCENERY] (5) the body in the scene edited: in the first,
-    # then moved to moon by play_join there (again there: as it is)
-    call("switch_scene", {"name": s["main"]})
+    # then moved to moon by play_join there (again there: as it is); the
+    # phase starts in the first
     said, body = join()
     assert body["scene"] == s["main"], body
     call("switch_scene", {"name": "moon"})
     said, body = join()
     assert body["scene"] == "moon", body
     assert any(x.startswith("Your body left the scene %s. " % s["main"]) for x in said), said
-    assert call("play_join").startswith("You play already: "), "play_join in its scene"
+    assert refused("play_join").startswith("You play already: "), "play_join in its scene"
     # The screen's buttons (the list's rows filled within a second)
     def buttons():
         b = json.loads(re.search(r"Played [^:]*: (\{.*\})", call("play_input",
