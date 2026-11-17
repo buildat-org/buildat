@@ -4048,9 +4048,6 @@ local function inspector(w, e, is_made)
 	local under = (e.pos or NT.is_panel(e)) and not sig and not copy
 	-- [KIT_ROOT_EDIT] onto the app root and back
 	local rm = not sig and not copy and NT.root_move(e)
-	if rm == 0 then
-		text(w, "On the app root: every scene's", DIM)
-	end
 	if sh then
 		if pe then
 			text(w, "Under " .. NT.entity_label(pe), DIM)
@@ -4058,11 +4055,6 @@ local function inspector(w, e, is_made)
 		NT.actions(w, e, parented, pe, under, rm)
 	else
 		pos_rows()
-	end
-	if rm and not sh then
-		button(w, NT.root_move_label(rm), function()
-			NT.to_root(e, rm)
-		end):SetName("root move")
 	end
 	if not sh and parented then
 		-- [KIT_NESTING] what it is under; what is placed next under it.
@@ -4096,9 +4088,17 @@ local function inspector(w, e, is_made)
 		end, on)
 	end
 	if not sig and not copy and not sh then
-		button(w, "Delete", function()
+		-- ([KIT_ROOT_EDIT] onto the app root and back beside it: a row of
+		-- its own would move the parameters down)
+		local dr = rm and row(w) or w
+		button(dr, "Delete", function()
 			M.delete_selected()
 		end)
+		if rm then
+			button(dr, NT.root_move_label(rm), function()
+				NT.to_root(e, rm)
+			end):SetName("root move")
+		end
 	end
 	-- [KIT_COMPONENTS] A built child's are its prefab's. (Over the components: a
 	-- movement's parameters are longer than the screen)
