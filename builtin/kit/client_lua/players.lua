@@ -403,8 +403,10 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 					log:info("kit: player " .. id .. "'s body drawn")
 				end
 				b.hidden = false
-				-- (one watched is seen from its eyes)
-				local shown = (id ~= P.you or show_own == true) and id ~= SP.target
+				-- (one watched is seen from its eyes; [KIT_SPECTATE_CAMERA] a
+				-- following camera's is framed)
+				local shown = (id ~= P.you or show_own == true) and
+						(id ~= SP.target or SP.follows)
 				show_body(b, shown and not draw)
 				set_skin(b, teams[id])
 				if b.flash_till then
@@ -531,7 +533,10 @@ end
 -- not drawn), the clicks cycling: the left the next, the right the one
 -- before, own team first, then the others by id, then the free camera
 -- again. No actions (the server refuses them). A hint of the keys at the
--- screen's bottom.
+-- screen's bottom. [KIT_SPECTATE_CAMERA] That in first person; a side,
+-- top-down or chase camera stays the game's, following the own body where
+-- it is held, the clicks cycling it to the others' bodies and back (no
+-- free camera).
 
 -- [KIT_LOBBY] Where player `id`'s body is drawn (its feet; this player's
 -- own the controls'); nil: not drawn
@@ -609,13 +614,19 @@ magic.SubscribeToEvent("Update", function()
 	end
 end)
 
--- The camera's place and turn while spectating (nil: not), from
--- controls.lua's place_camera: where it is now and the mouse's look
-function M.spectate_view(dt, cam_pos, yaw, pitch)
+-- The camera while spectating (nil: not), from controls.lua's place_camera
+-- (where it is now, its turn, the mouse's look; follows: a side, top-down or
+-- chase camera): the player watched (P.you: none) and, not following, the
+-- view's place and turn (a free camera, or the watched one's eyes)
+function M.spectate_view(dt, cam_pos, cam_rot, yaw, pitch, follows)
 	local on = M.spectating()
 	if on ~= SP.on then
-		SP.on, SP.target, SP.pos = on, nil, nil
-		log:info("kit: spectating " .. (on and "on" or "off"))
+		SP.on, SP.target, SP.pos, SP.follows = on, nil, nil, nil
+		-- (with the camera as it was: for a drive)
+		local r = cam_rot
+		log:info("kit: spectating " .. (on and "on" or "off") ..
+				string.format(", the camera at %.2f,%.2f,%.2f turn %.4f,%.4f,%.4f,%.4f",
+				cam_pos.x, cam_pos.y, cam_pos.z, r.w, r.x, r.y, r.z))
 		if not on then
 			set_hint(nil)
 		end
@@ -623,17 +634,29 @@ function M.spectate_view(dt, cam_pos, yaw, pitch)
 	if not on then
 		return nil
 	end
+	SP.follows = follows
 	if SP.target and not eye_of(SP.target) then
 		SP.target = nil
 	end
 	if SP.target then
-		local p, y, pt = eye_of(SP.target)
-		SP.pos = p
 		set_hint("Watching " .. name_of(SP.target) .. "\n[Left click] next  " ..
 				"[Right click] back")
-		return p, magic.Quaternion(pt, y, 0)
+		if follows then
+			SP.pos = nil
+			return SP.target
+		end
+		local p, y, pt = eye_of(SP.target)
+		SP.pos = p
+		return SP.target, p, magic.Quaternion(pt, y, 0)
 	end
-	SP.pos = SP.pos or cam_pos
+	if follows then
+		SP.pos = nil
+		set_hint(#watchable() > 0 and "[Left click] watch a player  " ..
+				"[Right click] back" or nil)
+		return P.you
+	end
+	-- (a copy: the node's own follows a shake)
+	SP.pos = SP.pos or magic.Vector3(cam_pos.x, cam_pos.y, cam_pos.z)
 	local rot = magic.Quaternion(pitch, yaw, 0)
 	local v = magic.Vector3(0, 0, 0)
 	local function k(id) return M.key_down and M.key_down(id) end
@@ -654,7 +677,7 @@ function M.spectate_view(dt, cam_pos, yaw, pitch)
 			tostring(M.key_name("jump")) .. "] up, [" ..
 			tostring(M.key_name("down")) .. "] down\n[Left click] watch a " ..
 			"player  [Right click] back")
-	return SP.pos, rot
+	return P.you, SP.pos, rot
 end
 
 -- A click while spectating: the next (left) or the one before; true:
@@ -664,7 +687,7 @@ function M.spectate_click(left)
 		return false
 	end
 	local list = watchable()
-	list[#list + 1] = false -- the free camera
+	list[#list + 1] = false -- the free camera (following: the own body)
 	local at = #list
 	for i, id in ipairs(list) do
 		if id == SP.target then
@@ -674,7 +697,7 @@ function M.spectate_click(left)
 	local i = (at + (left and 1 or -1) - 1) % #list + 1
 	SP.target = list[i] or nil
 	log:info("kit: spectating " .. (SP.target and name_of(SP.target) or
-			"with the free camera"))
+			SP.follows and "their own body" or "with the free camera"))
 	return true
 end
 
