@@ -27,6 +27,9 @@
 //   ["key", name]           Tab, Enter, Escape, Space, Backspace, F1..F12,
 //                           Up, Down, Left, Right, PageUp, PageDown, Home,
 //                           End, or one character
+//   ["vkey", name]          as a phone's on-screen keyboard sends it: a
+//                           "key" name with no code, else text as Gboard
+//                           types it (key code 229) (Chrome only)
 //   ["holdkey", name, ms]   a key held down for ms: a car driven; name a
 //                           list (["w", "Space"]) for keys held together
 //   ["selall"]              Ctrl+A
@@ -481,6 +484,18 @@ async function chrome() {
 				await key(ch);
 		},
 		key: k => key(k),
+		// A phone's on-screen keyboard's: a named key with no code, as
+		// Android's sends Backspace and the arrows; a character as Gboard
+		// types it, key code 229 around the text put into the focused field
+		vkey: async k => {
+			const base = KEYS[k] ? {key: k === "Space" ? " " : KEYS[k][1], code: "",
+					windowsVirtualKeyCode: KEYS[k][2]} :
+					{key: "Unidentified", code: "", windowsVirtualKeyCode: 229};
+			await c.send("Input.dispatchKeyEvent", Object.assign({type: "rawKeyDown"}, base));
+			if (!KEYS[k])
+				await c.send("Input.insertText", {text: k});
+			await c.send("Input.dispatchKeyEvent", Object.assign({type: "keyUp"}, base));
+		},
 		holdkey: (k, ms) => Promise.all([].concat(k).map(x => key(x, [], ms))),
 		selall: () => key("a", ["Ctrl"]),
 		chord: ch => {
