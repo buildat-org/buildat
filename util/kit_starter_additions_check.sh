@@ -19,6 +19,8 @@
 # [KIT_OWN_LOOK] A kit/button (23) under M, M's own_look off: M drawn
 # faded in edit mode, not in play (solid still), the button drawn
 # (own_look_edit.png, own_look.png).
+# [KIT_AGENT_FEEDBACK_1117] (15) A kit/sign (24) turned away from the
+# player, both_sides: "Back side" on its back too (sign.png).
 #
 #   util/kit_starter_additions_check.sh
 set -u
@@ -80,7 +82,14 @@ EOF
 	# moving button
 	place '{"op": "place", "type": "kit/button", "pos": [4, 2, 4], "parent": 19}'
 	setp 19 own_look false
+	# [KIT_AGENT_FEEDBACK_1117] (15) A sign (24) turned away, both_sides:
+	# its back's text towards the player
+	place '{"op": "place", "type": "kit/sign", "pos": [3, 2, 6]}'
+	setp 24 text '"Back side"'
+	setp 24 both_sides true
+	edit '{"op": "move", "ids": [24], "turn": 180}'
 	cat <<'EOF'
+wait_log_any 10000 kit: entity 24 shows "Back side" on both sides
 wait_log_any 10000 kit: entity 19 drawn faded (own look off)
 frames 5
 screenshot @T@/own_look_edit.png

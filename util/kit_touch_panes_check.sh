@@ -46,7 +46,8 @@
 # favourite made from a scrolled list keeps it there; the link's Shown at
 # the touch size; the Signals viewport never the walk camera's, each Add
 # link step scrolled to; the Box pane's Copy and Paste on the box, the box
-# kept through a paste; the Items tab's search beside its dropdown.
+# kept through a paste (in the new scene, no ground: its cells air, 4z23
+# refused the copy); the Items tab's search beside its dropdown.
 #
 #   util/kit_touch_panes_check.sh [p412x915 l915x412]
 #
@@ -261,7 +262,10 @@ tab("Items")
 a("tap", "LineEdit", "item search"); fr(2); a("type", "bow"); a("waitlog", 'kit editor: items for "bow": [1-9]', 10)
 a("shot", "${OUT}/14b_items.png")
 # New voxel type, typed with the keyboard up (Voxels by the palette's
-# tabs' dropdown)
+# tabs' dropdown), back in the scene world: second has no ground (4z23's
+# new scene, [KIT_NO_WORLD]) and no voxel tool
+a("event", 'kit_edit {"op": "scene", "name": "world"}'); a("waitlog", "kit editor: in the scene world of", 10)
+a("sync", 5000); fr(5)
 tab("Voxels"); a("waitlog", "kit editor: tool voxels", 10); fr(5)
 # (below the view in landscape: its rows at the touch size)
 a("event", "kit_inspector_show voxel new"); a("waitlog", "the inspector shows voxel new", 10); fr(5)

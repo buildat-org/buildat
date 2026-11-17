@@ -11,7 +11,9 @@
 #      field hidden; Comments shows it, two lines typed (Return a newline),
 #      Save comments: the server sets them (36 bytes, the newline in), the
 #      button cyan; Comments hides the field again; Ctrl+Z takes them back
-#      (plain), an edit sets them again;
+#      (plain); 40 lines set: the field's scroll bar, a click on it
+#      scrolls them ([KIT_AGENT_FEEDBACK_1117], $t/scrolled.png); an edit
+#      sets the two lines again;
 #   2. kitbob's edit of them refused; every packet kitbob's client got
 #      (BUILDAT_PACKET_DUMP) without the text, kitboss's with it;
 #   3. a scene "notes" with a commented timer exported (its
@@ -20,8 +22,9 @@
 #   4. the server again from its save: the timer's button cyan;
 #   5. the web client (headless Chrome as a phone, touch, 412x915, the
 #      touch mode; skipped without web/ or Chrome): a New game's World
-#      selected, Comments, the field tapped opens the field entry mode, two
-#      lines typed, its Apply: the server sets them, the button cyan.
+#      selected, Comments, the field tapped opens the field entry mode (its
+#      scroll bar there), two lines typed, its Apply: the server sets
+#      them, the button cyan.
 # The button's colour read from the screenshots, kept with KEEP_TMP=1:
 # $t/plain.png, $t/cyan.png (the field shown with the text), $t/hidden.png,
 # $t/restart.png, $t/web/entry.png, $t/web/cyan.png
@@ -208,6 +211,18 @@ m=$(mark "$SL")
 step 10 "kit editor: comments of $T: 0 bytes, the button plain, the field hidden" \
 	"frames 3" "keydown ctrl" "keypress z" "keyup ctrl"
 await "$SL" "$m" 10 "An undo by kitboss: 1 entities put back"
+# [KIT_AGENT_FEEDBACK_1117] 40 lines: the field's scroll bar (more than a
+# field's height of text), a click on it scrolls the text down
+long=$(python3 -c 'print("\\n".join("Line %d" % i for i in range(40)))')
+edit "An edit by kitboss: set $T's comments" "{\"op\": \"comments\", \"id\": $T, \"text\": \"$long\"}"
+step 10 "kit editor: comments's scroll bar: [1-9][0-9.]* views more" "frames 3" \
+	'click Button "Comments"'
+step 10 "kit editor: comments scrolled to [1-9][0-9]* by its bar" "frames 5" \
+	'click ScrollBar "comments bar"'
+cmd "frames 3" "screenshot $t/scrolled.png"
+step 10 "kit editor: comments of $T: [0-9]+ bytes, the button cyan, the field hidden" \
+	"frames 3" 'click Button "Comments"'
+echo "ok: 40 lines: the field's scroll bar, a click on it scrolled them"
 m=$(mark "$CL")
 edit "An edit by kitboss: set $T's comments \(${#NOTE} bytes\)" \
 	"{\"op\": \"comments\", \"id\": $T, \"text\": \"Spawn zqxnote7731 timer.\\nSecond line\"}"
@@ -358,6 +373,7 @@ if command -v "${CHROME:-google-chrome}" > /dev/null && [ -f "$here/web/buildat.
 	["tap", "LineEdit", "comments"],
 	["waitlog", "kit editor: field entry: comments comments \\(long text\\)", 10],
 	["waitlog", "kit editor: field entry: laid out", 10], ["frames", 3],
+	["waitlog_any", "kit editor: entry field's scroll bar: ", 10],
 	["type", "Phone zqxweb5512 note"], ["key", "Enter"], ["type", "line two"], ["frames", 5],
 	["shot", "${OUT}/entry.png"],
 	["tap", "Button", "entry apply"],

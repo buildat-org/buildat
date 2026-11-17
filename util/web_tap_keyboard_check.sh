@@ -11,7 +11,11 @@
 # each tapped twice in a row, three rounds ([WEB_TAP_KEYBOARD_IOS]): a
 # focus() inside every tap, the focused one's too, and each still focused
 # and shown 10 frames on, not blurred in between;
-# the page logs "a field focused in the tap" for both; the name and the
+# the page logs "a field focused in the tap" for both; then the name
+# tapped with its stand-in read-only, as a read-only field (the server
+# window's version) leaves it: focused in the tap editable
+# ([WEB_TAP_KEYBOARD_SOMETIMES]: read-only, a phone opened no keyboard,
+# and the engine's sync a frame later focused nothing anew); the name and the
 # password typed into the stand-ins log in. The name as a phone's on-screen
 # keyboard types it ([WEB_KEYS]):Backspace and the arrows with no code
 # (Android's), the letters as Gboard's text (key code 229): "eix",
@@ -58,7 +62,7 @@ watch="document.querySelector('canvas').addEventListener('touchend', function(){
 # And a focus() inside each tap, also on a stand-in that has the focus
 # already: iOS opens its keyboard only for a focus in the tap, and the
 # login window's own focus on the name came from a frame
-watch="window.inTap = 0; document.addEventListener('touchend', function(){ window.inTap = 1; }, true); var fo = HTMLElement.prototype.focus; HTMLElement.prototype.focus = function(o){ if(window.inTap && window.tenOn) console.log('focus() in the tap: ' + this.id); return fo.call(this, o); }; $watch"
+watch="window.inTap = 0; document.addEventListener('touchend', function(){ window.inTap = 1; }, true); var fo = HTMLElement.prototype.focus; HTMLElement.prototype.focus = function(o){ if(window.inTap && window.tenOn) console.log('focus() in the tap: ' + this.id + (this.readOnly ? ' read-only' : '')); return fo.call(this, o); }; $watch"
 # The tester got a keyboard after tapping for a while: each field tapped
 # twice in a row, three rounds
 taps=""
@@ -76,6 +80,7 @@ cat > "$t/steps.json" <<J
  ["shot", "$t/login.png"],
  ["eval", "window.tenOn = true; 'on'"],
 $taps
+ ["eval", "document.getElementById('text').readOnly = true; 'as a read-only field left it'"],
  ["tap", $name], ["waitlog", "in the tap: ", 5], ["wait", 500],
  ["vkey", "e"], ["frames", 2], ["vkey", "i"], ["frames", 2], ["vkey", "x"], ["frames", 2],
  ["vkey", "Backspace"], ["frames", 2], ["vkey", "Left"], ["frames", 2],
@@ -102,6 +107,9 @@ in=$(grep -a "^focus() in the tap: " "$t/drive/page.log" | sed 's/focus() in the
 echo "focus() in the taps: $in"
 [ "$in" = "$(printf 'text text password password %.0s' 1 2 3)" ] ||
 	fail "a tap without a focus() in it: $in ($t/drive/page.log)"
+ro=$(grep -a "^focus() in the tap: " "$t/drive/page.log" | sed -n 13p)
+[ "$ro" = "focus() in the tap: text" ] ||
+	fail "the tap after a read-only field: '$ro', not a focus on an editable stand-in ($t/drive/page.log)"
 [ "$after" = "text password " ] || fail "the stand-ins not focused in the taps: $after ($t/drive/page.log)"
 [ $(grep -ac "a field focused in the tap: \(text\|password\)" "$t/drive/page.log") -ge 2 ] ||
 	fail "no \"a field focused in the tap\" ($t/drive/page.log)"

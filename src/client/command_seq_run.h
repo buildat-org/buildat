@@ -741,6 +741,12 @@
 				m_command_index++;
 				continue;
 			}
+			if(c.type == Type::MaxFps){
+				GetSubsystem<magic::Engine>()->SetMaxFps((int)c.n);
+				log_i(MODULE, "command: max_fps %i", (int)c.n);
+				m_command_index++;
+				continue;
+			}
 			if(c.type == Type::WaitLog || c.type == Type::WaitLogAny ||
 					c.type == Type::WaitLogAbsent){
 				if(m_wait_log_since < 0){

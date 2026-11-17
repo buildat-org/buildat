@@ -3712,11 +3712,57 @@ end
 -- entity). What is typed is a draft kept by the entity's id until
 -- the state has it; Save (amber while it differs) or Ctrl+Enter sends it,
 -- one undo. Enter breaks the line. The touch mode types it in the field
--- entry mode, its Apply the Save.
--- simplified: the multi-line field is the custom type dialog's, a fixed
--- height whose text scrolls by the wheel and follows the caret, no scroll
--- bar (Hearth's grows in a ScrollView: that, if notes get long)
+-- entry mode, its Apply the Save. The field a fixed height whose text
+-- scrolls by the wheel, the caret and ([KIT_AGENT_FEEDBACK_1117]) a scroll
+-- bar beside it (NT.text_bar).
 local MAX_COMMENTS = 4096
+
+-- [KIT_AGENT_FEEDBACK_1117] A scroll bar right of the multi-line field f,
+-- in its row r: its knob the part of the text shown; dragged (a finger
+-- too, which on the field selects) it scrolls the text. Returns what keeps
+-- it in step with the text's own scroll, called each frame (the caret and
+-- the wheel scroll it too); it logs the range as it changes (for a check).
+-- nil on a client older than LineEdit's childOffset in the sandbox
+function NT.text_bar(r, f, name)
+	if not pcall(function() return f.childOffset.y end) then
+		return nil
+	end
+	local b = r:CreateChild("ScrollBar")
+	b:SetStyleAuto()
+	b.orientation = magic.O_VERTICAL
+	b:SetFixedWidth(NT.sh.on() and NT.sh.TOUCH or 16)
+	b:SetName(name .. " bar")
+	local function vh()
+		local c = f.clipBorder
+		return math.max(1, f.height - c.top - c.bottom)
+	end
+	magic.SubscribeToEvent(b, "ScrollBarChanged", function(_, _, data)
+		local y = math.floor(data:GetFloat("Value") * vh() + 0.5)
+		if y ~= -f.childOffset.y then
+			f.childOffset = magic.IntVector2(f.childOffset.x, -y)
+			log:info("kit editor: " .. name .. " scrolled to " ..
+					-f.childOffset.y .. " by its bar")
+		end
+	end)
+	local said
+	return function()
+		-- (in views: the text's height over the field's, as a ScrollView's)
+		local range = math.max(0, f.textElement.height / vh() - 1)
+		if math.abs(b.range - range) > 1e-3 then
+			b.range = range
+		end
+		local v = -f.childOffset.y / vh()
+		if math.abs(b.value - v) > 1e-3 then
+			b.value = v
+		end
+		local s = string.format("%.2f", range)
+		if s ~= said then
+			said = s
+			log:info("kit editor: " .. name .. "'s scroll bar: " .. s ..
+					" views more than its field")
+		end
+	end
+end
 local function comments_item(w, e, title_row)
 	E.comment_drafts = E.comment_drafts or {}
 	local now = e.comments or ""
@@ -3763,7 +3809,8 @@ local function comments_item(w, e, title_row)
 				" bytes")
 		send({op = "comments", id = e.id, text = s})
 	end
-	local f = edit(w, E.comment_drafts[e.id] or now, function(s)
+	local fr = row(w)
+	local f = edit(fr, E.comment_drafts[e.id] or now, function(s)
 		E.comment_drafts[e.id] = s
 		if save_text then
 			mark()
@@ -3776,6 +3823,7 @@ local function comments_item(w, e, title_row)
 	f.maxLength = MAX_COMMENTS
 	f:SetFixedHeight(NT.sh.on() and 160 or 120)
 	f.cursorPosition = 0
+	NT.comments_bar = NT.text_bar(fr, f, "comments")
 	magic.SubscribeToEvent(f, "TextFinished", function()
 		save()
 	end)
@@ -4626,6 +4674,9 @@ local function fit_inspector()
 	if not w or not view or NT.sig() then
 		return
 	end
+	if NT.comments_bar then
+		NT.comments_bar()
+	end
 	local body = view.contentElement
 	local foot = W.touch and W.touch.visible and W.touch.height + 16 or 16
 	-- The screen's height at the unfitted scale (narrow()'s): bounded by
@@ -4819,7 +4870,7 @@ build_inspector = function()
 	if IV.of ~= S.primary then
 		IV.of, IV.y = S.primary, 0
 	end
-	IV.view = nil
+	IV.view, NT.comments_bar = nil, nil
 	drop("inspector")
 	NT.fe.list = {}
 	S.cost_text, S.cost_id = nil, nil

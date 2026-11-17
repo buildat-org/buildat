@@ -3,7 +3,8 @@
 -- the last signal's value on "value" (nothing until one comes), and | a
 -- new line. Flat on the board's front (-z, the side it faces) or facing
 -- the camera; its letters `size` cells high, in `color`, on a board of
--- `background` ("none": no board, the letters alone)
+-- `background` ("none": no board, the letters alone). both_sides: flat
+-- text on the back (+z) too, read from there
 local function shown(c)
 	local v = c.state.value
 	local t = c.params.text:gsub("{value}", function()
@@ -22,11 +23,13 @@ return {
 		voxel = "param:material",
 		text = "shown", text_idle = "param:text", text_size = "param:size",
 		text_color = "param:color",
-		text_facing = "param:facing", solid = "param:solid"},
+		text_facing = "param:facing", text_back = "param:both_sides",
+		solid = "param:solid"},
 	params = {
 		text = {cat = "look", type = "string", default = "Welcome!"},
 		facing = {cat = "look", type = "string", default = "flat",
 			choices = {"flat", "camera"}},
+		both_sides = {cat = "look", type = "bool", default = false},
 		size = {cat = "look", type = "number", default = 0.25, min = 0.05,
 			max = 4},
 		color = {cat = "look", type = "string", default = "#ffffff"},

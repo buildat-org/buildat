@@ -239,6 +239,7 @@ local function drop_look(n)
 	n.wear_wanted, n.ghost, n.hidden, n.ghost_alpha, n.poly = nil, nil, nil, nil, nil
 	n.look, n.hinge, n.body, n.mat, n.text, n.solid, n.box, n.on = nil, nil,
 			nil, nil, nil, nil, nil, nil
+	n.text_back, n.text_back_node = nil, nil
 end
 
 -- A client part's handler, protected: one that fails is left off for
@@ -680,9 +681,6 @@ local function draw_look(id, n, look)
 			m.castShadows = true
 		end
 		if look.text then
-			-- In the hinge, so it goes with a slide ([KIT] stage 4l)
-			local l = n.hinge:CreateChild("Text")
-			local t = l:CreateComponent("Text3D")
 			-- [KIT] stage 4l: text_facing "flat" (on the box's front, its -z
 			-- side, as the entity faces) or "camera" (turning round y),
 			-- text_size cells high, text_color; none: over it, a label of a
@@ -691,20 +689,33 @@ local function draw_look(id, n, look)
 			if facing ~= "flat" and facing ~= "camera" then
 				facing = nil
 			end
-			t:SetFont(magic.cache:GetResource("Font", buildat.font_sans),
-					facing and 48 or 16)
-			t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-			t:SetTextAlignment(magic.HA_CENTER)
-			t.faceCameraMode = facing == "flat" and magic.FC_NONE or
-					facing == "camera" and magic.FC_ROTATE_Y or
-					magic.FC_ROTATE_XYZ
-			t.fixedScreenSize = not facing
-			if facing ~= "flat" then
-				t.textEffect = magic.TE_STROKE
-				t.effectColor = magic.Color(0, 0, 0, 0.8)
+			-- In the hinge, so it goes with a slide ([KIT] stage 4l)
+			local function text3d(name)
+				local l = n.hinge:CreateChild(name)
+				local t = l:CreateComponent("Text3D")
+				t:SetFont(magic.cache:GetResource("Font", buildat.font_sans),
+						facing and 48 or 16)
+				t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+				t:SetTextAlignment(magic.HA_CENTER)
+				t.faceCameraMode = facing == "flat" and magic.FC_NONE or
+						facing == "camera" and magic.FC_ROTATE_Y or
+						magic.FC_ROTATE_XYZ
+				t.fixedScreenSize = not facing
+				if facing ~= "flat" then
+					t.textEffect = magic.TE_STROKE
+					t.effectColor = magic.Color(0, 0, 0, 0.8)
+				end
+				if type(look.text_color) == "string" then
+					t:SetColor(color(look.text_color, magic.Color(1, 1, 1)))
+				end
+				return l, t
 			end
-			if type(look.text_color) == "string" then
-				t:SetColor(color(look.text_color, magic.Color(1, 1, 1)))
+			local l, t = text3d("Text")
+			-- [KIT_AGENT_FEEDBACK_1117] text_back: flat text on the back too
+			-- (+z), turned round so it reads from there (kit/sign's both_sides)
+			if facing == "flat" and look.text_back == true then
+				n.text_back_node, n.text_back = text3d("TextBack")
+				n.text_back_node.rotation = magic.Quaternion(0, 180, 0)
 			end
 			n.text = t
 			n.text_node = l
@@ -752,6 +763,10 @@ local function draw_look(id, n, look)
 			n.text_node.position = magic.Vector3(b.off[1], b.off[2],
 					b.off[3] - b.size[3] / 2 - 0.01)
 			n.board_w, n.board_h = b.size[1], b.size[2]
+			if n.text_back_node then
+				n.text_back_node.position = magic.Vector3(b.off[1], b.off[2],
+						b.off[3] + b.size[3] / 2 + 0.01)
+			end
 		else
 			n.text_node.position = magic.Vector3(b.off[1], b.off[2] +
 					b.size[2] / 2 + 0.45, b.off[3])
@@ -840,6 +855,9 @@ local function own_look(id, n, look)
 	n.body.enabled = not hidden and not seen and n.box.color ~= "none"
 	if n.text then
 		n.text_node.enabled = not hidden or ghost
+		if n.text_back_node then
+			n.text_back_node.enabled = n.text_node.enabled
+		end
 	end
 	if ghost and not n.ghost then
 		n.ghost = n.hinge:CreateChild("Ghost")
@@ -1038,8 +1056,18 @@ local function update_play(_, data)
 					end
 					local sc = n.text_size * k / (48 / 128)
 					n.text_node.scale = magic.Vector3(sc, sc, sc)
+					-- (the back's the same)
+					if n.text_back then
+						if (n.board_w or 0) > 0 and (n.board_h or 0) > 0 then
+							n.text_back.wordwrap = true
+							n.text_back.width = n.text.width
+						end
+						n.text_back.text = v
+						n.text_back_node.scale = magic.Vector3(sc, sc, sc)
+					end
 				end
-				log:info("kit: entity " .. id .. " shows \"" .. v .. "\"")
+				log:info("kit: entity " .. id .. " shows \"" .. v .. "\"" ..
+						(n.text_back and " on both sides" or ""))
 			end
 		end
 		if type(show.hud) == "string" then

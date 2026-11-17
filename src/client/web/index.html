@@ -1170,6 +1170,12 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 		}
 		// let_go()'s, or the focus would open no keyboard
 		el.removeAttribute('virtualkeyboardpolicy');
+		// A tapped field is editable (web_fields_publish()): a read-only
+		// one's readOnly left on the stand-in opened no keyboard, and sync()
+		// clearing it a frame later focused nothing anew
+		// ([WEB_TAP_KEYBOARD_SOMETIMES])
+		if(tap)
+			el.readOnly = false;
 		if(tap && document.activeElement === el)
 			el.blur();
 		if(document.activeElement !== el)

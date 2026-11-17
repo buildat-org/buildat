@@ -15913,6 +15913,9 @@ struct Module: public interface::Module, public Interface
 				}
 				j.set("alive", player_alive(it->second));
 				j.set("by", "player:"+itos(pl.second));
+				// [KIT_AGENT_FEEDBACK_1117] the scene they are in (every
+				// scene's players are listed: a scene's component filters)
+				j.set("scene", actor_scene("player:"+itos(pl.second)));
 				players.append(j);
 				names.set("player:"+itos(pl.second), pl.first);
 			}
@@ -15940,6 +15943,7 @@ struct Module: public interface::Module, public Interface
 				scene_of(b, &ps);
 				if(!own_scene.empty() && ps != own_scene)
 					j.set("away", true);
+				j.set("scene", ps);
 				j.set("alive", player_alive(b));
 				players.append(j);
 				names.set("bot:"+itos(b.id), bot_name(b));
@@ -17359,6 +17363,10 @@ struct Module: public interface::Module, public Interface
 	{
 		json::Value out = json::null();
 		bool any = false;
+		// [KIT_NO_WORLD] no ground: no voxels, a cell not loaded is air
+		bool none = false;
+		for(auto &x : m_worlds)
+			none = none || (x.second.world_scene == ref && x.second.wp.none());
 		voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
 			any = true;
 			interface::VoxelRegistry *reg = w->get_voxel_reg();
@@ -17375,7 +17383,7 @@ struct Module: public interface::Module, public Interface
 						const pv::Vector3DInt32 q(base[0] + tx, o[1] + y,
 								base[2] + tz);
 						uint32_t word = 0;
-						if(!voxel_id(w, q, word)){
+						if(!voxel_id(w, q, word) && !none){
 							why = "the cell ("+itos(q.getX())+","+itos(q.getY())+
 									","+itos(q.getZ())+")'s section is not loaded";
 							return;
@@ -32600,6 +32608,8 @@ struct Module: public interface::Module, public Interface
 		size_t peer = 0;
 		bool ready = false;
 		int64_t started = 0, used = 0, checked = 0, moved = 0;
+		// Told to draw CAMERA_IDLE_FPS (camera_pace)
+		bool slow = false;
 		// Why the last start ended
 		ss_ failed;
 		// [3a] whose agent it plays for ("": none) and that agent's peer;
@@ -32630,6 +32640,22 @@ struct Module: public interface::Module, public Interface
 		if(write(m_cam.req, l.data(), l.size()) != (ssize_t)l.size())
 			log_w(MODULE, "The camera's launcher took no \"%s\"",
 					cs(line.substr(0, line.find(' '))));
+	}
+
+	// [KIT_AGENT_FEEDBACK_1117] Idle 2 s (no picture, no body played), it
+	// draws CAMERA_IDLE_FPS frames a second, else 20 (confine.cpp's
+	// max_fps): its frames were most of its CPU (llvmpipe, 24 % of a core
+	// at 20). Back at 20 before a call's work is sent, the first frame
+	// 1 / CAMERA_IDLE_FPS s away at most
+	static const int CAMERA_IDLE_FPS = 4;
+	void camera_pace(bool slow)
+	{
+		if(slow == m_cam.slow || !m_cam.running)
+			return;
+		m_cam.slow = slow;
+		camera_say("cmd max_fps "+itos(slow ? CAMERA_IDLE_FPS : 20));
+		log_i(MODULE, "The server's camera at %i frames a second%s",
+				slow ? CAMERA_IDLE_FPS : 20, slow ? " (idle)" : "");
 	}
 
 	// "" when it may run, else why not
@@ -32668,8 +32694,11 @@ struct Module: public interface::Module, public Interface
 		if(!why.empty())
 			return why;
 		m_cam.used = interface::os::time_us();
-		if(m_cam.running)
+		if(m_cam.running){
+			camera_pace(false);
 			return "";
+		}
+		m_cam.slow = false;
 		m_cam.mode = m_cam.no_offscreen ? "x11" : "offscreen";
 		std::random_device rd;
 		char secret[48];
@@ -32779,6 +32808,8 @@ struct Module: public interface::Module, public Interface
 		const int64_t now = interface::os::time_us();
 		if(!m_play.id.empty() && now > m_play.deadline)
 			play_finish("its input had not ended in time");
+		camera_pace(m_cam.ready && m_cam.play.empty() && !camera_busy() &&
+				now - m_cam.used > 2000000);
 		if(!m_cam.running || now - m_cam.checked < 1000000)
 			return;
 		m_cam.checked = now;
@@ -35741,6 +35772,13 @@ struct Module: public interface::Module, public Interface
 				"under it, and the rules it has from above. A new scene is empty "
 				"(no ground: its players held still until it has ground or a "
 				"spawner of players).\n"
+				// [KIT_AGENT_FEEDBACK_1117]
+				"- In a type's Lua: c.players (players = true) lists every "
+				"scene's players, each p.scene theirs and p.away true outside the "
+				"component's own scene: a scene's run or HUD keeps to not p.away. "
+				"State per_player = true is a table by `by` (\"player:<id>\"): "
+				"for by, v in pairs(c.state.<key>) lists it, c.state.<key>[by] = "
+				"nil clears one.\n"
 				// [KIT_AGENT_NEXT_1]
 				"- Play it yourself: play_join gives you a body in your scene "
 				"(the round Running), a guest's, by the server's camera; "
