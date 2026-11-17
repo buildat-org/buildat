@@ -714,6 +714,8 @@ BUILDAT_CLIENT_IMPORT("Button.pressedOffset:IntVector2", buildat_c_Button_get_pr
 BUILDAT_CLIENT_IMPORT("Button.pressedOffset=IntVector2", buildat_c_Button_set_pressedOffset)
 BUILDAT_CLIENT_IMPORT("CheckBox.checked:boolean", buildat_c_CheckBox_get_checked)
 BUILDAT_CLIENT_IMPORT("CheckBox.checked=boolean", buildat_c_CheckBox_set_checked)
+BUILDAT_CLIENT_IMPORT("LineEdit.childOffset:IntVector2", buildat_c_LineEdit_get_childOffset)
+BUILDAT_CLIENT_IMPORT("LineEdit.childOffset=IntVector2", buildat_c_LineEdit_set_childOffset)
 BUILDAT_CLIENT_IMPORT("LineEdit.clipBorder:IntRect", buildat_c_LineEdit_get_clipBorder)
 BUILDAT_CLIENT_IMPORT("LineEdit.clipBorder=IntRect", buildat_c_LineEdit_set_clipBorder)
 BUILDAT_CLIENT_IMPORT("LineEdit.cursor:any", buildat_c_LineEdit_get_cursor)
@@ -3498,6 +3500,10 @@ class LineEdit: public BorderImage
 public:
 	constexpr LineEdit() {}
 	constexpr explicit LineEdit(unsigned int handle): BorderImage(handle) {}
+	// LineEdit.childOffset:IntVector2
+	::buildat::IntVector2 childOffset() const;
+	// LineEdit.childOffset=IntVector2
+	void childOffset(const ::buildat::IntVector2 & a1) const;
 	// LineEdit.clipBorder:IntRect
 	::buildat::IntRect clipBorder() const;
 	// LineEdit.clipBorder=IntRect
@@ -5501,6 +5507,8 @@ inline ::buildat::IntVector2 Button::pressedOffset() const{ ::buildat::detail::R
 inline void Button::pressedOffset(const ::buildat::IntVector2 & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Button_set_pressedOffset, *this, a1); (void)r; }
 inline bool CheckBox::checked() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_CheckBox_get_checked, *this); return r.boolean(); }
 inline void CheckBox::checked(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_CheckBox_set_checked, *this, a1); (void)r; }
+inline ::buildat::IntVector2 LineEdit::childOffset() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_LineEdit_get_childOffset, *this); ::buildat::IntVector2 v{}; r.get(v); return v; }
+inline void LineEdit::childOffset(const ::buildat::IntVector2 & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_LineEdit_set_childOffset, *this, a1); (void)r; }
 inline ::buildat::IntRect LineEdit::clipBorder() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_LineEdit_get_clipBorder, *this); ::buildat::IntRect v{}; r.get(v); return v; }
 inline void LineEdit::clipBorder(const ::buildat::IntRect & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_LineEdit_set_clipBorder, *this, a1); (void)r; }
 inline ::buildat::Value LineEdit::cursor() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_LineEdit_get_cursor, *this); return r.value(); }

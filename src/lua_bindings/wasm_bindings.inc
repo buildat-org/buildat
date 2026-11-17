@@ -756,6 +756,8 @@ BUILDAT_BINDING("Button.pressedOffset:IntVector2", "get", "Button", "pressedOffs
 BUILDAT_BINDING("Button.pressedOffset=IntVector2", "set", "Button", "pressedOffset")
 BUILDAT_BINDING("CheckBox.checked:boolean", "get", "CheckBox", "checked")
 BUILDAT_BINDING("CheckBox.checked=boolean", "set", "CheckBox", "checked")
+BUILDAT_BINDING("LineEdit.childOffset:IntVector2", "get", "LineEdit", "childOffset")
+BUILDAT_BINDING("LineEdit.childOffset=IntVector2", "set", "LineEdit", "childOffset")
 BUILDAT_BINDING("LineEdit.clipBorder:IntRect", "get", "LineEdit", "clipBorder")
 BUILDAT_BINDING("LineEdit.clipBorder=IntRect", "set", "LineEdit", "clipBorder")
 BUILDAT_BINDING("LineEdit.cursor:any", "get", "LineEdit", "cursor")

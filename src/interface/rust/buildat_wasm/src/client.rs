@@ -4117,6 +4117,16 @@ impl Deref for LineEdit { type Target = BorderImage; fn deref(&self) -> &BorderI
 impl LineEdit {
 	/// The same object as another class of the list's
 	pub fn as_<T: FromValue>(self) -> T { T::from_value(Value::Object(self.0)) }
+	/// LineEdit.childOffset:IntVector2
+	pub fn childOffset(&self) -> IntVector2 {
+		let mut r = call(imports::buildat_c_LineEdit_get_childOffset, &[&H(self.handle()) as &dyn Put]);
+		r.value().as_::<IntVector2>()
+	}
+	/// LineEdit.childOffset=IntVector2
+	pub fn set_childOffset(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_LineEdit_set_childOffset, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
 	/// LineEdit.clipBorder:IntRect
 	pub fn clipBorder(&self) -> IntRect {
 		let mut r = call(imports::buildat_c_LineEdit_get_clipBorder, &[&H(self.handle()) as &dyn Put]);
@@ -8248,6 +8258,10 @@ mod imports {
 		pub fn buildat_c_CheckBox_get_checked(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "CheckBox.checked=boolean"]
 		pub fn buildat_c_CheckBox_set_checked(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "LineEdit.childOffset:IntVector2"]
+		pub fn buildat_c_LineEdit_get_childOffset(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "LineEdit.childOffset=IntVector2"]
+		pub fn buildat_c_LineEdit_set_childOffset(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "LineEdit.clipBorder:IntRect"]
 		pub fn buildat_c_LineEdit_get_clipBorder(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "LineEdit.clipBorder=IntRect"]
