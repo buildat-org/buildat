@@ -205,6 +205,8 @@ struct CState: public State
 	int64_t m_synced = 0;
 	// [COMPAT_BREAK_07] 8a: the server's core:hello, its first packet
 	bool m_hello_seen = false;
+	// [SERVER_VERSION_SHOWN] its version, for buildat.server_version()
+	ss_ m_server_version;
 	// **A connection that died without closing** (user, 2026-09-30: the
 	// web client froze, saying nothing): a server that sends
 	// network:keepalive to an idle peer is heard from every few seconds,
@@ -363,6 +365,7 @@ struct CState: public State
 		m_connected = false;
 		m_disconnected = false;
 		m_hello_seen = false;
+		m_server_version.clear();
 		m_last_data_us = 0;
 		m_received_bytes = 0;
 		m_received_us = 0;
@@ -502,6 +505,11 @@ struct CState: public State
 	{
 		std::lock_guard<std::mutex> lock(m_address_mutex);
 		return m_address;
+	}
+
+	ss_ get_server_version()
+	{
+		return m_server_version;
 	}
 
 	// accounts:owner_token sent on this connection
@@ -933,6 +941,9 @@ struct CState: public State
 								name+" before a hello");
 					const interface::Hello h = interface::hello_of(data);
 					m_hello_seen = true;
+					// The server's own words: as long as the refusal
+					// quotes them
+					m_server_version = h.version.substr(0, 40);
 					log_i(MODULE, "The server: Buildat %s, protocol %u-%u",
 							cs(h.version), h.protocol_min, h.protocol_max);
 					const ss_ refusal = interface::hello_refusal(h, "server");

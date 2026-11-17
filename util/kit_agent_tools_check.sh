@@ -8,8 +8,10 @@
 # builder and an admin token on a headless weston's Xwayland of the
 # check's own and stays, in edit mode; the server's camera on SDL's
 # offscreen driver:
+#   0. [SERVER_VERSION_SHOWN] the pause menu's "Server <VERSION>" label;
 #   1. tools/list: the builder token's without the admin's tools (14), the
-#      admin token's with them; both instructions under 4096 characters;
+#      admin token's with them; both instructions under 4096 characters,
+#      beginning "Buildat <VERSION> server."; get_state's buildat_version;
 #   2. types: put_type with client left out keeps the client part, "" takes
 #      it away (2); edit_type's find-and-replace in the source and the
 #      client part, refused (nothing changed) for a find not there, there
@@ -118,8 +120,11 @@ exec 3> "$t/boss.cmd"
 await "$CL" 0 120 "Joined as kitboss"
 cmd "wait_log_any 30000 server window: the page ntfy" "frames 3" 'click Button "Don'"'"'t add"'
 await "$CL" 0 120 "player physics enabled"
-# 0. The tokens: a builder's, then an admin's
+# 0. The tokens: a builder's, then an admin's; [SERVER_VERSION_SHOWN] the
+# pause menu's label, a Text on screen (the click finds it or fails)
+V=$(cat "$here/VERSION")
 step 10 "pause: the menu shown" "frames 3" "keypress Escape"
+cmd "frames 3" "click Text \"Server $V\""
 step 10 "accounts: agents: 0 tokens, on" "frames 3" 'click Button "My account*"' \
 	"frames 5" 'click Button "Connect an agent..."'
 step 10 "accounts: agents: a token made, builder" "frames 3" \
@@ -142,7 +147,7 @@ echo "ok: kitboss's builder and admin tokens; kitboss in edit mode"
 
 cat > "$t/mcp.py" <<'PY'
 import json, re, sys, time, urllib.error, urllib.request
-phase, url, tok, adm, out = sys.argv[1:6]
+phase, url, tok, adm, out, version = sys.argv[1:7]
 def post(msg, tk):
     h = {"Content-Type": "application/json",
          "Accept": "application/json, text/event-stream",
@@ -236,6 +241,7 @@ if phase == "tools":
     for tk, admin in ((tok, False), (adm, True)):
         r = rpc("initialize", init, tk)["result"]
         assert len(r["instructions"]) < 4096, len(r["instructions"])
+        assert r["instructions"].startswith("Buildat %s server. " % version), r["instructions"][:80]
         names = [t["name"] for t in rpc("tools/list", None, tk)["result"]["tools"]]
         assert {"edit_type", "get_history"} <= set(names), names
         if admin:
@@ -249,6 +255,7 @@ if phase == "tools":
     rpc("initialize", init)
     assert "only the server's admin" in refused("set_builder", {"name": "kitboss", "on": True})
     st = state()
+    assert st["buildat_version"] == version, st["buildat_version"]
     save(main=st["scene"])
 elif phase == "types":
     rpc("initialize", init)
@@ -459,7 +466,7 @@ print("ok:", phase)
 PY
 mcp() # <phase>: the MCP client's phase; its output in $t/mcp_<phase>.log
 {
-	python3 -I "$t/mcp.py" "$1" "$url" "$tok" "$adm" "$t" > "$t/mcp_$1.log" 2>&1 ||
+	python3 -I "$t/mcp.py" "$1" "$url" "$tok" "$adm" "$t" "$V" > "$t/mcp_$1.log" 2>&1 ||
 		fail "the MCP phase $1: $(tail -5 "$t/mcp_$1.log") ($t/mcp_$1.log, $SL)"
 	cat "$t/mcp_$1.log"
 }

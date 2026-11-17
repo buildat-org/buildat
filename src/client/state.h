@@ -39,6 +39,9 @@ namespace client
 		// The address connect() or connect_start() was last given, as
 		// given: what names the server a game's own storage belongs to
 		virtual ss_ get_address() = 0;
+		// [SERVER_VERSION_SHOWN] The server's Buildat version, as its hello
+		// said it; "" before one
+		virtual ss_ get_server_version() = 0;
 		// 0 while it runs, 1 when it is connected, -1 when it failed, with
 		// the reason in error. The connect's thread is joined here.
 		virtual int connect_poll(ss_ *error = nullptr) = 0;
