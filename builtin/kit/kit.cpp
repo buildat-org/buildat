@@ -23526,6 +23526,8 @@ struct Module: public interface::Module, public Interface
 				++it;
 		}
 		std::vector<uint64_t> unseat;
+		// [KIT_LEFTOVERS_1116] each scene's plane (NaN: none), for creatures
+		std::map<ss_, double> planes;
 		for(auto &dp : m_drives){
 			Drive &d = dp.second;
 			auto ei = m_entities.find(dp.first);
@@ -23610,10 +23612,22 @@ struct Module: public interface::Module, public Interface
 				if(sv.at(k).is_number())
 					v2 += sv.at(k).as_number() * sv.at(k).as_number();
 			const double reach = std::min(16.0, (std::sqrt(v2) + 10) * n / rate);
+			// [KIT_LEFTOVERS_1116] a creature (a bot too) held to kit/controls'
+			// plane as the players' bodies are (move.lua's W:hold after each
+			// step); a vehicle not
+			double plane = NAN;
+			if(d.creature){
+				auto pi = planes.find(d.scene);
+				if(pi == planes.end())
+					pi = planes.insert(std::make_pair(d.scene, jstr(controls_params(
+							d.scene), "plane") == "vertical" ? plane_depth(d.scene) :
+							NAN)).first;
+				plane = pi->second;
+			}
 			if(d.deck)
 				deck_snapshot(o, d, e, pos, r, h, reach);
 			else
-				snapshot(o, d.scene, d.state, e.id, pos, r, h, reach);
+				snapshot(o, d.scene, d.state, e.id, pos, r, h, reach, plane);
 			o += "}";
 			ss_ answer, why;
 			bool runaway = false;
@@ -23922,6 +23936,11 @@ struct Module: public interface::Module, public Interface
 				log_i(MODULE, "[KIT_CREATURES_8A] Entity %s stopped at (%.2f, %.2f, %.2f)%s",
 						cs(itos(e.id)), feet[0], feet[1], feet[2],
 						there ? ": arrived" : ", short of its goal");
+				// (its log too: where it stops, for its builders)
+				char at[96];
+				snprintf(at, sizeof at, "stopped at (%.2f, %.2f, %.2f)%s", feet[0],
+						feet[1], feet[2], there ? ": arrived" : ", short of its goal");
+				add_log(e.id, at);
 			}
 			m.walking = walking;
 			bool again = !m.pathed_us || m.gen != d.gen;

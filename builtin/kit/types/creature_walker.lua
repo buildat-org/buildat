@@ -43,7 +43,11 @@ return {
 		local wx, wz, jump = 0, 0, false
 		while #path > 0 do
 			local q = path[1]
-			local dx, dz = q[1] - pos[1], q[3] - pos[3]
+			-- [KIT_LEFTOVERS_1116] held to kit/controls' plane (M.steps' W:hold):
+			-- a point off it taken at its depth, walked along x alone.
+			-- simplified: the pathfinder's way is found in 3D; a point beside an
+			-- obstacle off the plane is walked past along x, not round it
+			local dx, dz = q[1] - pos[1], w.plane and 0 or q[3] - pos[3]
 			local d = w.sqrt(dx * dx + dz * dz)
 			-- There: the next one (a point up waits for the feet to be up too)
 			if d < 0.3 and pos[2] > q[2] - 0.3 then
