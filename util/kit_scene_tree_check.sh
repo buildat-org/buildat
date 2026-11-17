@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~4 min (2026-11-16)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/shell.lua builtin/kit/types/controls.lua builtin/kit/types/game_rules.lua builtin/kit/types/ui_scene_list.lua apps/workbench/main/main.cpp util/web_drive.js
+# covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/shell.lua builtin/kit/client_lua/signals.lua builtin/kit/types/controls.lua builtin/kit/types/game_rules.lua builtin/kit/types/ui_scene_list.lua apps/workbench/main/main.cpp util/web_drive.js
 # [KIT_SCENE_TREE] Scenes under scenes. kitboss, the admin of two Workbench
 # servers one after the other, on a headless weston's Xwayland of the
 # check's own:
@@ -26,7 +26,10 @@
 #   6. "menu", a new scene: the scene entity alone, World none: no ground,
 #      no section, no heightmap sent, movement none; Running, the player
 #      there out of the tools is held, the same place a second later, kept
-#      in menu, never falling out of the world.
+#      in menu, never falling out of the world. [KIT_SCENES_REMOVE_TIP] The
+#      Scenes window in menu: the Remove of menu, racing and world dimmed,
+#      each clicked: nothing sent, the pointer resting there its tip (the
+#      builder's own, scenes under it, the first); t1's and arena's none.
 #   7. B (another user dir): a scene "hub"; racing.scene.zip added under it
 #      (Scenes..., Add here...): racing under hub, t1 under racing, racing's
 #      controls in t1, the Scenes window indented so.
@@ -348,6 +351,25 @@ echo "ok: menu empty (no ground, 0 sections, no heightmap sent), its player held
 cmd "frames 3" 'click DropDownList "▼" 1024 0' "delay 300" "frames 5" "screenshot $t/a_tree.png" 'click Text "Scene: menu"' "frames 3"
 scenes_window "world, racing, >t1, arena, menu"
 cmd "frames 5" "screenshot $t/a_scenes.png"
+# [KIT_SCENES_REMOVE_TIP] The dimmed Remove: a click nothing, the pointer
+# resting there its tip (from the last row up: a tip is drawn under its
+# button)
+m=$(mark "$CL")
+ms=$(mark "$SL")
+step 10 "kit editor: the tip of remove menu at .*: The scene you're editing: switch to another first" \
+	'click Button "remove menu"'
+step 10 "kit editor: the tip of remove racing at .*: Has scenes under it" \
+	'click Button "remove racing"'
+step 10 "kit editor: the tip of remove world at .*: The first scene: always kept" \
+	'click Button "remove world"'
+cmd "frames 10"
+! tail -c +$((m + 1)) "$CL" | grep -qa "kit editor: remove the scene" ||
+	fail "a dimmed Remove sent a removal ($CL)"
+! tail -c +$((ms + 1)) "$SL" | grep -qa "remove_scene" ||
+	fail "a dimmed Remove's edit came ($SL)"
+grep -aqE "kit editor: the tip of remove (t1|arena)" "$CL" &&
+	fail "a Remove that works has a tip ($CL)"
+echo "ok: the dimmed Remove of menu (the builder's), racing (t1 under it), world (the first): its tip, its click nothing"
 bye
 
 # 7. B: racing added under hub
