@@ -36,8 +36,12 @@
 #   8. [KIT_EDIT_VIEW] kit/controls' edit_view 2d; the next session in
 #      the touch mode (by mouse), 3D remembered: edit mode comes up in 2D,
 #      the Front view.
-# The screenshots (side, front, side_ortho, side_polygons, front_polygon, touch_front)
-# are kept with KEEP_TMP=1; look at them.
+#   9. A third session: [KIT_SIDE_SCENERY] (4) an environment (sky
+#      #3070e0, cartoon), the side camera ortho looking 10 m left and 5 up
+#      of the body: the sky's colour over the frame, none of the dome's box
+#      (a cell's square) in its middle.
+# The screenshots (side, front, side_ortho, side_polygons, front_polygon, touch_front,
+# side_sky) are kept with KEEP_TMP=1; look at them.
 #   util/kit_plane_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -301,6 +305,34 @@ BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
 BUILDAT_TEST_KIT_UI_MODE=2 run_client 60 "$t/touch.log" timeout 120 bin/buildat \
 	-C "$t/client_cache" -D "$t/cu" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
 	-c @"$t/touch.cmds" || fail "the touch client failed ($t/touch.log, $t/srv.log)"
+# 9. The next session's entities after the last placed
+id0=$(grep -aoP 'An edit by kitboss: placed \S+ \K[0-9]+' "$t/srv.log" | sort -n | tail -1)
+env=$((id0 + 1))
+{
+	cat <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+event kit_edit {"op": "mode", "on": true}
+wait_log_any 10000 kit editor: edit mode on
+EOF
+	edit '{"op": "place", "type": "kit/environment", "pos": [0, 1, 0]}'
+	set_p $env lighting '"cartoon"'
+	set_p $env sky '"#3070e0"'
+	set_p 3 ortho true
+	set_p 3 offset_x -10
+	set_p 3 offset_y 5
+	cat <<EOF
+keypress F6
+wait_log 10000 kit editor: edit mode off
+frames 30
+screenshot $t/side_sky.png
+quit
+EOF
+} > "$t/side.cmds"
+run_client 60 "$t/side.log" timeout 120 bin/buildat -C "$t/client_cache" -D "$t/cu" \
+	-s localhost:$SERVER_PORT -w 1024x700 -l 3 -c @"$t/side.cmds" ||
+	fail "the side client failed ($t/side.log, $t/srv.log)"
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 c=$t/boss.log s=$t/srv.log
@@ -389,5 +421,23 @@ v=$(grep -aoP 'kit editor: the view is \K.*' "$t/touch.log" | tr '\n' ',')
 	grep -aq "remembered for .*: edit, 3d" "$t/touch.log" ||
 	fail "the touch session's views ($v): not 2D (front) last over a remembered 3D ($t/touch.log)"
 echo "ok: the touch session's edit mode came up in 2D, the Front view (kit/controls' edit_view), over a remembered 3D: $v"
-echo "PASS: kit/controls' vertical plane: kit/walker held to it on both sides, the side camera and its pointer, the editor's Front view placing at its depth, the movement list checked; kit/polygon's slope and overhang met, others off the plane not, one drawn and edited in the Front view; the 2D queries (util/kit_plane_check.lua)"
+# [KIT_SIDE_SCENERY] (4) The ortho side view under an environment: its sky
+# colour over the frame above the HUD, none of the dome's box (a cell's
+# square of clouds) in its middle
+python3 -I - "$t/side_sky.png" <<'PY' || fail "the ortho side view's sky ($t/side_sky.png)"
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB")
+w, h = im.size
+px = im.load()
+def sky(x, y):
+    return all(abs(a - b) <= 40 for a, b in zip(px[x, y], (0x30, 0x70, 0xe0)))
+frame = [sky(x, y) for x in range(0, w, 4) for y in range(0, h - 100, 4)]
+mid = [sky(x, y) for x in range(w // 2 - 40, w // 2 + 40) for y in range(h // 2 - 40, h // 2 + 40)]
+f, m = sum(frame) / len(frame), sum(mid) / len(mid)
+print("  the sky's colour over %.0f%% of the frame, %.0f%% of its middle" % (f * 100, m * 100))
+sys.exit(0 if f > 0.85 and m > 0.99 else 1)
+PY
+echo "ok: the ortho side view's sky is the fog's colour, no dome's box in the middle"
+echo "PASS: kit/controls' vertical plane: kit/walker held to it on both sides, the side camera and its pointer, the editor's Front view placing at its depth, the movement list checked; kit/polygon's slope and overhang met, others off the plane not, one drawn and edited in the Front view; the 2D queries (util/kit_plane_check.lua); the ortho side view's sky"
 # vim: set noet ts=4 sw=4:
