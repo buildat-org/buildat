@@ -450,17 +450,17 @@ local function update_drag()
 	end
 end
 
-local function place_at(cell, item)
+local function place_at(cell, item, on)
 	if not cell or not item then
 		return
 	end
 	-- [KIT_NESTING] under the entity the inspector's "Place under this"
 	-- named, while it is there (a root's or a scene's type goes on it all
-	-- the same, the server's)
+	-- the same, the server's). [KIT_ROOT_EDIT] on: "root", the app root
 	if S.under and not find(S.under) then
 		S.under = nil
 	end
-	local parent = S.under
+	local parent = on or S.under
 	-- [KIT_PANEL_PARENT] a UI element in the panel selected
 	local sel = S.primary and find(S.primary)
 	if not parent and NT.is_ui(item.type) and NT.is_panel(sel) then
@@ -492,9 +492,9 @@ end
 -- it comes (place_at): nothing else shows it placed.
 -- simplified: the first new entity of the next state is taken for it; another
 -- builder's in the same instant selects that one instead
-function NT.place_now(it)
+function NT.place_now(it, on)
 	S.placing = nil
-	place_at({0, 0, 0}, it)
+	place_at({0, 0, 0}, it, on)
 	palette()
 end
 

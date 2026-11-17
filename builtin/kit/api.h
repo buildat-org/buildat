@@ -953,7 +953,11 @@ namespace interface
 //   under each one with it (one under another named goes with that one)
 //   {"op": "parent", "id": n, "parent": m}  -- n (and what is under it)
 //       under m (0: the scene), where it is in the world kept; m not n
-//       nor under it
+//       nor under it. [KIT_ROOT_EDIT] m "root" (or 1): onto the app root,
+//       every scene's, for one with no position (a type with none and what
+//       is under it, a root type; no World); one there is edited from any
+//       scene, 0 putting it into the editor's. A place takes "parent":
+//       "root" alike for a type with no position
 //   {"op": "delete", "id": n}
 //   {"op": "set", "id": n, "comp": i, "param": p, "value": v}
 //       ([KIT_WAVE_PIVOT_CENTER] "center": true for "value": a parameter declared
