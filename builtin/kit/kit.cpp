@@ -5980,7 +5980,34 @@ struct Module: public interface::Module, public Interface
 	size_t local_reloaded(const ss_ &name, const ss_ &by)
 	{
 		size_t n = 0;
+		// Its params as the file has them: a new one at its default, one it
+		// no longer has or takes dropped; links from outputs it has no more
+		// gone
+		auto as_file = [&](Instance &in){
+			const json::Value &decl = m_types[name].decl.get("params");
+			sv_<ss_> gone;
+			for(json::Iterator it(in.params); it; ++it)
+				if(!decl.get(it.key()).is_object() ||
+						!check_param(decl.get(it.key()), *it).empty())
+					gone.push_back(it.key());
+			for(const ss_ &k : gone)
+				in.params.del_key(k);
+			if(decl.is_object())
+				for(json::Iterator it(decl); it; ++it)
+					if(in.params.get(it.key()).is_undefined())
+						in.params.set(it.key(), (*it).get("default"));
+			in.links.erase(std::remove_if(in.links.begin(),
+					in.links.end(), [&](const Link &l){
+				return !m_types[name].outputs.count(l.output);
+			}), in.links.end());
+		};
 		each_session([&]{
+			// [KIT_AGENT_FEEDBACK_1117] 3: those play removed (a gem taken)
+			// too, or Stop puts them back without a param the type got
+			for(auto &r : m_removed)
+				for(Instance &in : r.second.e.comps)
+					if(in.type == name)
+						as_file(in);
 			for(auto &ep : m_entities){
 				Entity &e = ep.second;
 				bool on = false;
@@ -5995,24 +6022,7 @@ struct Module: public interface::Module, public Interface
 					for(json::Iterator it(d.state); it; ++it)
 						if(in.state.get(it.key()).is_undefined())
 							in.state.set(it.key(), *it);
-					// Its params as the file has them: a new one at its
-					// default, one it no longer has or takes dropped
-					const json::Value &decl = m_types[name].decl.get("params");
-					sv_<ss_> gone;
-					for(json::Iterator it(in.params); it; ++it)
-						if(!decl.get(it.key()).is_object() ||
-								!check_param(decl.get(it.key()), *it).empty())
-							gone.push_back(it.key());
-					for(const ss_ &k : gone)
-						in.params.del_key(k);
-					if(decl.is_object())
-						for(json::Iterator it(decl); it; ++it)
-							if(in.params.get(it.key()).is_undefined())
-								in.params.set(it.key(), (*it).get("default"));
-					in.links.erase(std::remove_if(in.links.begin(),
-							in.links.end(), [&](const Link &l){
-						return !m_types[name].outputs.count(l.output);
-					}), in.links.end());
+					as_file(in);
 					in.disabled.clear();
 					for(const ss_ &k : m_types[name].shared)
 						replicate_state(e, i, k);
@@ -6041,6 +6051,32 @@ struct Module: public interface::Module, public Interface
 			m_runtime_dirty = true;
 		});
 		return n;
+	}
+
+	// [KIT_AGENT_FEEDBACK_1117] 1: edit_type's edits ([{find, replace,
+	// client}]) over a type's source and client part, in order, each find
+	// there once at its turn: "" or why not
+	static ss_ type_edits(const json::Value &edits, ss_ &source, ss_ &client)
+	{
+		if(!edits.is_array() || edits.size() < 1 || edits.size() > 32)
+			return "edits: a list of 1 to 32 {find, replace, client}";
+		for(unsigned i = 0; i < edits.size(); i++){
+			const json::Value &e = edits.at(i);
+			const ss_ at = "edits["+itos(i)+"]";
+			if(!e.is_object() || !e.get("find").is_string() ||
+					!e.get("replace").is_string() || jstr(e, "find").empty())
+				return at+": {find (not \"\"), replace, client}";
+			const bool cl = e.get("client").is_true();
+			ss_ &s = cl ? client : source;
+			const ss_ find = jstr(e, "find");
+			const size_t k = s.find(find);
+			if(k == ss_::npos || s.find(find, k + 1) != ss_::npos)
+				return at+"'s find \""+cut_utf8(find, 80)+"\" is "+(k == ss_::npos ?
+						"not" : "more than once")+" in the "+(cl ? "client part" :
+						"source")+(i ? " (after the edits before it)" : "");
+			s.replace(k, find.size(), jstr(e, "replace"));
+		}
+		return "";
 	}
 
 	// A put (client "" for none) or a delete (delete true) by builder p,
@@ -6098,6 +6134,7 @@ struct Module: public interface::Module, public Interface
 			u.pop_front();
 		log_i(MODULE, "An edit by %s: %s", cs(p.name), cs(what));
 		m_edit_what = what;
+		history(p.name, what);
 		return true;
 	}
 	sm_<ss_, int64_t> m_type_slow;
@@ -7528,6 +7565,29 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
+	// The current World's heightmap's edited samples and its builders'
+	// decorations as edits.bin has them; the samples' count
+	size_t hm_decor_edits(json::Value &hm, json::Value &decor)
+	{
+		hm_edits_load();
+		for(auto &e : m_w->hm_edits){
+			uint32_t bits;
+			memcpy(&bits, &e.second.first, 4);
+			for(int64_t v : {(int64_t)e.first.first, (int64_t)e.first.second,
+					(int64_t)bits})
+				hm.append(v);
+			for(uint8_t c : e.second.second)
+				hm.append((int64_t)c);
+		}
+		ss_ row;
+		const json::Value dj = m_store->get(world_row("decor"), row) ?
+				json::load_string(row.c_str()) : json::array();
+		for(unsigned i = 0; dj.is_array() && i < dj.size(); i++)
+			if(dj.at(i).size() == 6 && dj.at(i).at(5).is_true())
+				decor.append(dj.at(i));
+		return m_w->hm_edits.size();
+	}
+
 	// A World's edits as edits.bin has them: its cells that differ from its
 	// generator's, its heightmap's edited samples and its builders'
 	// decorations (false: none)
@@ -7590,23 +7650,7 @@ struct Module: public interface::Module, public Interface
 				}
 			}
 		});
-		hm_edits_load();
-		for(auto &e : m_w->hm_edits){
-			uint32_t bits;
-			memcpy(&bits, &e.second.first, 4);
-			for(int64_t v : {(int64_t)e.first.first, (int64_t)e.first.second,
-					(int64_t)bits})
-				hm.append(v);
-			for(uint8_t c : e.second.second)
-				hm.append((int64_t)c);
-			samples_n++;
-		}
-		ss_ row;
-		const json::Value dj = m_store->get(world_row("decor"), row) ?
-				json::load_string(row.c_str()) : json::array();
-		for(unsigned i = 0; dj.is_array() && i < dj.size(); i++)
-			if(dj.at(i).size() == 6 && dj.at(i).at(5).is_true())
-				decor.append(dj.at(i));
+		samples_n += hm_decor_edits(hm, decor);
 		if(!cells.size() && !hm.size() && !decor.size())
 			return false;
 		o = json::object();
@@ -8352,6 +8396,7 @@ struct Module: public interface::Module, public Interface
 			log_i(MODULE, "The scene %s: left out: %s", cs(name),
 					cs(dropped.at(i).as_string()));
 		m_edit_what = "Added "+what;
+		history(p.name, m_edit_what);
 		a.set("what", what);
 		a.set("scene", name);
 		json::Value names_j = json::array();
@@ -10812,6 +10857,7 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "World by %s: %zu edited sections regenerated, %zu cells "
 				"back to the generator's, %zu skipped (%zu to undo)", cs(p.name),
 				nc.regen.size(), cells, skipped, u.size());
+		history(p.name, "regenerated "+itos(nc.regen.size())+" edited sections");
 		send_state(peer);
 		send_edited(peer);
 	}
@@ -10855,14 +10901,41 @@ struct Module: public interface::Module, public Interface
 					input.substr(0, 32)+"\"");
 		if(!ok)
 			return refuse("value: its input "+input+" takes a "+type);
+		// [KIT_AGENT_FEEDBACK_1117] 5: an agent's sender (as): "nobody" (a
+		// link's from no player), "me" (its play_join body) or a player of
+		// the round; none (the editor's Try): the builder
+		ss_ by, as = "";
+		const json::Value &av = j.get("as");
+		if(av.is_undefined()){
+			by = by_of(p.name);
+		} else if(!av.is_string() || av.as_string().empty()){
+			return refuse("as: \"nobody\", \"me\" or a player's name");
+		} else if((as = av.as_string()) == "nobody"){
+			by = "app";
+		} else if(as == "me"){
+			auto ci = m_peers.find(m_cam.peer);
+			if(m_cam.play != author_of(p) || ci == m_peers.end() ||
+					!ci->second.player)
+				return refuse("as: \"me\" is your body: play_join first (in "
+						"this session)");
+			by = "player:"+itos(ci->second.player);
+		} else {
+			auto pl = m_players.find(as);
+			if(pl == m_players.end() || !m_entities.count(pl->second))
+				return refuse("as: no player named \""+cut_utf8(as, 64)+"\" in "
+						"this round (\"nobody\", \"me\" or a player's name)");
+			by = "player:"+itos(pl->second);
+		}
 		const uint64_t id = e->id;
 		const size_t before = m_queue.size();
-		deliver(id, input, value, by_of(p.name), 0);
+		deliver(id, input, value, by, 0);
 		for(size_t i = before; i < m_queue.size(); i++)
 			m_queue[i].tried = peer + 1;
-		log_i(MODULE, "%s tries entity %s's %s %s", cs(p.name), cs(itos(id)),
-				cs(input), cs(value.stringify().substr(0, 64)));
-		add_log(id, "tried: "+input+" by "+p.name);
+		log_i(MODULE, "%s tries entity %s's %s %s%s", cs(p.name), cs(itos(id)),
+				cs(input), cs(value.stringify().substr(0, 64)), as.empty() ? "" :
+				cs(" as "+as+" ("+by+")"));
+		add_log(id, "tried: "+input+" by "+p.name+(as.empty() ? ss_() :
+				" as "+as));
 	}
 
 	// [KIT_SIGNALS_LIVE] {"op": "watch", "id": n}: this builder is shown what
@@ -11298,6 +11371,7 @@ struct Module: public interface::Module, public Interface
 		commit({std::make_pair(id, ej)}, nullptr);
 		log_i(MODULE, "World by %s: the previous heightmap restored (%zu "
 				"edited samples)", cs(by), m_w->hm_edits.size());
+		history(by, "restored the previous heightmap");
 		return true;
 	}
 
@@ -11338,6 +11412,7 @@ struct Module: public interface::Module, public Interface
 			u.pop_front();
 		log_i(MODULE, "World by %s: the heightmap generated anew, %zu edited "
 				"samples discarded (%zu to undo)", cs(p.name), n, u.size());
+		history(p.name, "generated the heightmap anew");
 		send_state(peer);
 	}
 
@@ -13260,6 +13335,7 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "Terrain by %s: %s%s", cs(p.name), cs(what),
 				c ? cs(", stroke "+itos((int64_t)stroke)+" ("+itos(undo)+
 				" to undo)") : "");
+		history(p.name, "terrain: "+tool);
 		json::Value a = json::object();
 		a.set("tool", tool);
 		a.set("stroke", stroke);
@@ -14355,6 +14431,7 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "A voxel edit by %s: %s%s (%zu to undo)", cs(p.name),
 				cs(what), sym ? cs(", "+itos(images.size())+" images") : "",
 				u.size());
+		history(p.name, voxel == "air" ? ss_("dug voxels") : "placed "+voxel);
 		send_state(peer);
 	}
 
@@ -29929,7 +30006,8 @@ struct Module: public interface::Module, public Interface
 		on_ui_press_u(packet);
 	}
 
-	void on_ui_press_u(const network::Packet &packet)
+	// (refused: why it was, for play_input's press)
+	void on_ui_press_u(const network::Packet &packet, ss_ *refused = nullptr)
 	{
 		const size_t peer = packet.sender;
 		ss_ d = packet.data.substr(0, 40);
@@ -29953,10 +30031,15 @@ struct Module: public interface::Module, public Interface
 		const bool down = end && ss_(end) == " 1";
 		auto pi = m_peers.find(peer);
 		if(!m_hosted || pi == m_peers.end() || pi->second.name.empty() ||
-				!pi->second.player || !act_allowed(pi->second))
+				!pi->second.player || !act_allowed(pi->second)){
+			if(refused)
+				*refused = "no player placed, or too many acts a second";
 			return;
+		}
 		Peer &pe = pi->second;
 		auto refuse = [&](const ss_ &why){
+			if(refused)
+				*refused = why;
 			if(log_refusal(pe, why))
 				log_i(MODULE, "A UI press of %s from peer %zu refused: %s",
 						cs(d), peer, cs(why));
@@ -30451,11 +30534,98 @@ struct Module: public interface::Module, public Interface
 	// The last edit's or undo's text, as its log line says it
 	ss_ m_edit_what;
 
+	// [KIT_AGENT_FEEDBACK_1117] 11: who changed the game, what and when
+	// (get_history), the newest last; the same again within a minute
+	// counted in times. Recorded where an edit is said: on_edit()'s
+	// m_edit_what, put_local(), edit_voxel(), terrain(), publish(),
+	// checkpoint_restore(), import_scene(), keep(), save_as_start()
+	// simplified: in memory, the last HISTORY_MAX; gone at a restart (the
+	// log keeps the lines)
+	struct Change1
+	{
+		int64_t t = 0;
+		ss_ by, what, where;
+		int64_t times = 1;
+	};
+	std::deque<Change1> m_history;
+	static const size_t HISTORY_MAX = 500;
+
+	void history(const ss_ &by, const ss_ &what)
+	{
+		const int64_t t = time(nullptr);
+		const ss_ where = session_where(m_active), w = cut_utf8(what, 300);
+		if(!m_history.empty()){
+			Change1 &l = m_history.back();
+			if(l.by == by && l.what == w && l.where == where && t - l.t < 60){
+				l.t = t;
+				l.times++;
+				return;
+			}
+		}
+		Change1 c;
+		c.t = t;
+		c.by = by;
+		c.what = w;
+		c.where = where;
+		m_history.push_back(c);
+		while(m_history.size() > HISTORY_MAX)
+			m_history.pop_front();
+	}
+
+	static ss_ utc_text(int64_t t)
+	{
+		char s[32] = "";
+		const struct tm tmv = interface::os::utc_tm(t);
+		strftime(s, sizeof s, "%Y-%m-%dT%H:%M:%SZ", &tmv);
+		return s;
+	}
+
+	// get_history {since, limit}
+	ss_ agent_history(const json::Value &a, bool &failed)
+	{
+		// (as text: the entries' times sort as they read)
+		ss_ since;
+		const json::Value &sv = a.get("since"), &lv = a.get("limit");
+		if(sv.is_number() && std::fabs(sv.as_number()) < 1e11)
+			since = utc_text((int64_t)sv.as_number());
+		else if(sv.is_string() && sv.as_string().size() >= 4 &&
+				isdigit((unsigned char)sv.as_string()[0]))
+			since = sv.as_string();
+		else if(!sv.is_undefined()){
+			failed = true;
+			return "since: a time as the entries' (2026-11-17T10:00:00Z, or "
+					"its start: 2026-11-17T10) or seconds since 1970";
+		}
+		const int64_t limit = lv.is_number() ? std::max<int64_t>(1,
+				std::min<int64_t>(200, (int64_t)lv.as_number())) : 50;
+		json::Value out = json::array();
+		size_t first = m_history.size();
+		while(first > 0 && (int64_t)(m_history.size() - first) < limit &&
+				utc_text(m_history[first - 1].t) >= since)
+			first--;
+		for(size_t i = first; i < m_history.size(); i++){
+			const Change1 &c = m_history[i];
+			json::Value o = json::object();
+			o.set("time", utc_text(c.t));
+			o.set("by", c.by);
+			o.set("what", c.what);
+			o.set("where", c.where);
+			if(c.times > 1)
+				o.set("times", c.times);
+			out.append(o);
+		}
+		return out.stringify();
+	}
+
 	// A tool: Kit's edit op it is and the arguments it passes on (its
 	// schema's properties, over the defaults), or a read ("=...")
 	struct AgentTool
 	{
 		const char *name, *op, *about, *schema, *defaults;
+		// [KIT_AGENT_FEEDBACK_1117] 14: listed only for a token that may use
+		// it: "admin" (an admin token's), "publisher" (publishes as the
+		// server); the dispatch refuses the others as ever
+		const char *who;
 	};
 	static const sv_<AgentTool> &agent_tools()
 	{
@@ -30473,9 +30643,19 @@ struct Module: public interface::Module, public Interface
 				"many of your edits there are to undo; the game it is "
 				"(\"<author>/<name>\", list_aitta's filter) and its save; "
 				"session: where you are (the main round or your draft). main: "
-				"true reads the main round's from your draft.",
+				"true reads the main round's from your draft. scene, ids, type: "
+				"only those entities; state: false leaves the components' state "
+				"out.",
 				R"J({"type": "object", "properties": {"main": {"type": "boolean",
-				"description": "From your draft: the main round's state"}}})J", ""},
+				"description": "From your draft: the main round's state"},
+				"scene": {"type": "string", "description":
+					"Only the entities in this scene (its own entity among them)"},
+				"ids": {"type": "array", "items": {"type": "integer"},
+					"description": "Only these entities"},
+				"type": {"type": "string", "description":
+					"Only the entities with a component of this type"},
+				"state": {"type": "boolean", "description":
+					"false: no component's state (Running)"}}})J", ""},
 			{"list_types", "=types", "The types an entity is placed of: each "
 				"one's name, group and what it is. With type: its declaration, "
 				"its params (each one's type, default, min, max, choices), its "
@@ -30537,7 +30717,7 @@ struct Module: public interface::Module, public Interface
 				"buildat/releases, the linux-x86_64-portable archive), unpacked, "
 				"drawing off-screen with no X server and a software GL "
 				"(Debian: apt-get install libgl1 libegl1 libegl-mesa0 "
-				"libgl1-mesa-dri): BUILDAT_AGENT_TOKEN=<your token> "
+				"libgl1-mesa-dri libcurl4): BUILDAT_AGENT_TOKEN=<your token> "
 				"SDL_VIDEODRIVER=offscreen bin/buildat -s <host:port, or "
 				"https://host> -w 640x480 -o sound_mute=1; it logs in as your "
 				"account (\"Joined as <name>\") while your builder's own client "
@@ -30578,15 +30758,21 @@ struct Module: public interface::Module, public Interface
 				"your body's place before and after, how far it moved, its "
 				"components' states (health, score, inventory...), alive, and "
 				"the outputs entities emitted meanwhile (by \"you\" when your "
-				"body did it); picture: also a picture of its own view at the "
-				"end (width, height).",
+				"body did it), the screen's buttons (id, label; a list's rows); "
+				"picture: also a picture of its own view at the end (width, "
+				"height). press: a button on your body's screen pressed first, "
+				"as a click on it (a kit/ui_button, a pause menu item, a "
+				"kit/ui_scene_list's row: Play in a lobby), by its id or its "
+				"label (a list's row by its title, or row from 1).",
 				R"J({"type": "object", "properties": {
 				"keys": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
 				"actions": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
 				"seconds": {"type": "number"}, "yaw": {"type": "number"},
 				"pitch": {"type": "number"}, "jump": {"type": "boolean"},
 				"use": {"type": "integer"}, "picture": {"type": "boolean"},
-				"width": {"type": "integer"}, "height": {"type": "integer"}}})J",
+				"width": {"type": "integer"}, "height": {"type": "integer"},
+				"press": {"description": "A button's entity id or its label"},
+				"row": {"type": "integer", "description": "press's list's row, from 1"}}})J",
 				""},
 			{"play_leave", "play_leave", "Your body gone: the server's camera "
 				"plays no more (as after 120 s unused).",
@@ -30598,8 +30784,25 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"get_goal_warnings", "=goals", "What the links leave a kit/goal "
 				"missing, as the editor warns at Publish: nothing activates it, "
-				"no target, no via, no chain of links to its validate_reachable.",
+				"no target, no via, no chain of links to its validate_reachable. "
+				"Then the level's (publish asks about none of these): entities "
+				"still on a default name (type and id); scenes with no way in "
+				"(not where players join, not listed, named by no parameter or "
+				"custom type); entities with no link from an output or to an "
+				"input that at least 3 of 4 of their type (4 or more) have.",
 				R"J({"type": "object", "properties": {}})J", ""},
+			// [KIT_AGENT_FEEDBACK_1117] 11 (history())
+			{"get_history", "=history", "Who changed the game and when, the "
+				"newest last: builders' and agents' edits, undos, custom types, "
+				"voxels and terrain (repeats counted in times), draft publishes, "
+				"checkpoint restores, scenes added; each {time (UTC), by, what, "
+				"where (the main round or a draft), times}. since: from that "
+				"time (as time is, or seconds since 1970) on; limit: the last "
+				"that many (50 unless given, 200 at most). Kept since the "
+				"server started, the last 500.",
+				R"J({"type": "object", "properties": {
+				"since": {"description": "A time as the entries' or seconds since 1970"},
+				"limit": {"type": "integer"}}})J", ""},
 			{"list_prefabs", "=prefabs", "The prefabs to place: each one's "
 				"version, copies placed, its voxels' box and whether it is yours "
 				"(save_prefab makes a new version). With prefab: its entities.",
@@ -30670,15 +30873,22 @@ struct Module: public interface::Module, public Interface
 				"required": ["id"]})J", R"J({"comp": 0})J"},
 			{"link", "link", "Links an output of an entity's component to an "
 				"input of entity `to`: each time the output signals, the input "
-				"gets its value. Their value types must meet.",
+				"gets its value. Their value types must meet. Or to_name, by "
+				"name: each signal reaches the entity of that name in the scene "
+				"of the player who set it off (none: dropped), so one entity on "
+				"the root (a vehicle, a lobby) reaches only that player's "
+				"scene's (each track's \"the run\"), where a link by id would "
+				"reach the one it names whoever set it off.",
 				R"J({"type": "object", "properties": {
 				"id": {"type": "integer", "description": "The entity whose output it is"},
 				"comp": {"type": "integer", "description":
 					"Its component's index, 0 (the first) unless given"},
 				"output": {"type": "string"},
 				"to": {"type": "integer", "description": "The entity whose input it is"},
+				"to_name": {"type": "string", "description":
+					"Instead of to: a name, resolved in the scene of who set it off"},
 				"input": {"type": "string"}},
-				"required": ["id", "output", "to", "input"]})J", R"J({"comp": 0})J"},
+				"required": ["id", "output", "input"]})J", R"J({"comp": 0})J"},
 			{"delete", "delete", "Deletes an entity, those under it and the "
 				"links to them.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
@@ -30687,8 +30897,8 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {
 				"id": {"type": "integer"}, "comp": {"type": "integer"},
 				"output": {"type": "string"}, "to": {"type": "integer"},
-				"input": {"type": "string"}},
-				"required": ["id", "output", "to", "input"]})J", R"J({"comp": 0})J"},
+				"to_name": {"type": "string"}, "input": {"type": "string"}},
+				"required": ["id", "output", "input"]})J", R"J({"comp": 0})J"},
 			{"move", "move", "Moves entity id to pos (the world's), turned to "
 				"yaw, pitch and roll (degrees; each left out kept); or entities "
 				"ids together by [dx, dy, dz], turned turn degrees round axis "
@@ -30850,15 +31060,35 @@ struct Module: public interface::Module, public Interface
 				"(sandboxed): a table of on_add(e), on_state(e, key), "
 				"on_update(e, dt), on_remove(e); e.state, e.node, e:log(text); "
 				"a movement's draw(s, node) draws each player's body (node at "
-				"its feet, s its state; another's {pos, pose}).",
+				"its feet, s its state; another's {pos, pose}); left out, the "
+				"type's client part stays as it is, \"\" takes it away. A few "
+				"lines changed: edit_type.",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string", "description":
 					"local/<name> or <name>: letters, digits and _"},
 				"source": {"type": "string", "description":
 					"The type's file, 64 KiB at most"},
 				"client": {"type": "string", "description":
-					"Its client part (\"\" or left out: none), 32 KiB at most"}},
+					"Its client part, 32 KiB at most (left out: kept as it is; \"\": none)"}},
 				"required": ["name", "source"]})J", ""},
+			// [KIT_AGENT_FEEDBACK_1117] 1 (type_edits())
+			{"edit_type", "type_edit", "Changes a custom type in place: each "
+				"of edits replaces its find with its replace, in order, in the "
+				"type's source or (client: true) its client part; each find "
+				"must be there exactly once at its turn, else nothing is "
+				"changed and the answer names the edit. Then put as put_type "
+				"puts it (its checks, loaded at once, one undo). get_type reads "
+				"the files.",
+				R"J({"type": "object", "properties": {
+				"name": {"type": "string", "description": "local/<name> or <name>"},
+				"edits": {"type": "array", "minItems": 1, "maxItems": 32, "items": {
+					"type": "object", "properties": {
+					"find": {"type": "string", "description": "Text there once"},
+					"replace": {"type": "string"},
+					"client": {"type": "boolean", "description":
+						"In its client part (the source unless given)"}},
+					"required": ["find", "replace"]}}},
+				"required": ["name", "edits"]})J", ""},
 			{"delete_type", "type_delete", "Deletes a custom type nothing uses "
 				"(no entity, prefab or round's start has it). One undo.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"}},
@@ -30905,8 +31135,8 @@ struct Module: public interface::Module, public Interface
 				"shows: the main round's, from a draft too) as checkpoint name, "
 				"in the game's save: the composition (entities, components, "
 				"params, links, comments), each component's start state and "
-				"each World's edited voxels, as a save and an export hold them "
-				"(heightmap samples and decorations kept but not put back). The "
+				"each World's edited voxels, heightmap samples and placed "
+				"decorations, as a save and an export hold them. The "
 				"same name again replaces it; delete: true deletes it. At most "
 				"16 checkpoints and 32 MiB a game (list_checkpoints): past "
 				"either it is refused, delete one first.",
@@ -30921,7 +31151,9 @@ struct Module: public interface::Module, public Interface
 				"the game's start: the composition (one edit, which undo takes "
 				"back; the voxels it does not), the start states and the edited "
 				"voxels (each section edited now or then generated again, its "
-				"cells over it). In the main round and Stopped only: from a "
+				"cells over it), a heightmap's edited samples and placed "
+				"decorations (the map generated again under them where they "
+				"differ). In the main round and Stopped only: from a "
 				"draft it is refused (the draft is a copy and stays as it is: "
 				"leave_draft first), Running too (stop first). The start as it "
 				"was is kept first as the checkpoint \"before restore <name>\" "
@@ -30972,11 +31204,18 @@ struct Module: public interface::Module, public Interface
 				"start again (your edits kept, the voxels play wrote too).",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"try_input", "try", "Running: sends value to entity id's input "
-				"as a link would; what its runs emit comes in get_events.",
+				"as a link would; what its runs emit comes in get_events. as: who "
+				"set it off (the `by` its handlers get, whose scene a link by "
+				"name goes to): \"nobody\" unless given (as a link from no "
+				"player: a timer's), \"me\" (your body: play_join's, a player as "
+				"any other), or a player's name in the round (\"this rider "
+				"crashed\").",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
 				"input": {"type": "string"}, "value": {"description":
-					"As the input's type is; none for a none"}},
-				"required": ["id", "input"]})J", ""},
+					"As the input's type is; none for a none"},
+				"as": {"type": "string", "description":
+					"\"nobody\" (unless given), \"me\" or a player's name"}},
+				"required": ["id", "input"]})J", R"J({"as": "nobody"})J"},
 			{"watch", "watch", "Watches entity id's outputs (one entity at a "
 				"time; 0 stops): what they emit comes in get_events.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
@@ -30997,7 +31236,8 @@ struct Module: public interface::Module, public Interface
 				"account's edit rights. The Host's only: an admin token's.",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string", "description": "The account"},
-				"on": {"type": "boolean"}}, "required": ["name", "on"]})J", ""},
+				"on": {"type": "boolean"}}, "required": ["name", "on"]})J", "",
+				"admin"},
 			// [KIT_PROJECT_EXPORT]
 			{"export_template", "=export", "The game's start (what stop "
 				"goes back to) as a Workbench template, the files the editor's "
@@ -31027,16 +31267,18 @@ struct Module: public interface::Module, public Interface
 			{"list_games", "=projects", "The app's games (its saves): "
 				"each one's name, bytes on disk and whether it runs. An admin "
 				"token's, as the Games page is an admin's.",
-				R"J({"type": "object", "properties": {}})J", ""},
+				R"J({"type": "object", "properties": {}})J", "", "admin"},
 			{"copy_game", "=copy_project", "Copies game name as a new "
 				"game to: all of it, as saved now (a running one's round and "
 				"kept state too). An admin token's.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"},
-				"to": {"type": "string"}}, "required": ["name", "to"]})J", ""},
+				"to": {"type": "string"}}, "required": ["name", "to"]})J", "",
+				"admin"},
 			{"rename_game", "=rename_project", "Renames game name to "
 				"to; not the running one. An admin token's.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"},
-				"to": {"type": "string"}}, "required": ["name", "to"]})J", ""},
+				"to": {"type": "string"}}, "required": ["name", "to"]})J", "",
+				"admin"},
 			// [KIT_SERVER_PUBLISH]
 			{"publish_game", "server_publish", "Publishes the game's start "
 				"as a template on an Aitta the server lists, as the server: its "
@@ -31052,7 +31294,8 @@ struct Module: public interface::Module, public Interface
 				"description": {"type": "string", "description": "300 characters at most"},
 				"title": {"type": "string", "description": "40 bytes at most; none: the game's"},
 				"aitta": {"type": "string", "description": "One of list_aitta's Aittas"}},
-				"required": ["name", "license", "aitta"]})J", R"J({"what": "project"})J"},
+				"required": ["name", "license", "aitta"]})J", R"J({"what": "project"})J",
+				"publisher"},
 			{"publish_scene", "server_publish", "Publishes one scene as a scene "
 				"package (export_scene's files) on an Aitta the server lists, as "
 				"the server, as publish_game does.",
@@ -31063,7 +31306,8 @@ struct Module: public interface::Module, public Interface
 				"CC-BY-SA-4.0", "MIT", "LicenseRef-All-rights-reserved"]},
 				"description": {"type": "string"}, "title": {"type": "string"},
 				"aitta": {"type": "string"}},
-				"required": ["name", "license", "aitta"]})J", R"J({"what": "scene"})J"},
+				"required": ["name", "license", "aitta"]})J", R"J({"what": "scene"})J",
+				"publisher"},
 			{"publish_kit_package", "server_publish", "Publishes your prefabs, "
 				"voxel, item types and sounds (Publish my prefabs...'s) as a Kit "
 				"package on an Aitta the server lists, as the server, its names "
@@ -31073,7 +31317,8 @@ struct Module: public interface::Module, public Interface
 				"license": {"type": "string", "enum": ["CC0-1.0", "CC-BY-4.0",
 				"CC-BY-SA-4.0", "MIT", "LicenseRef-All-rights-reserved"]},
 				"description": {"type": "string"}, "aitta": {"type": "string"}},
-				"required": ["name", "license", "aitta"]})J", R"J({"what": "prefabs"})J"},
+				"required": ["name", "license", "aitta"]})J", R"J({"what": "prefabs"})J",
+				"publisher"},
 			{"list_aitta", "aitta_list", "The packages of a kind on the Aittas "
 				"the server lists (the Host's list; none else), the newest "
 				"release of each: [{aitta, key, author, name, version, title, "
@@ -31099,7 +31344,7 @@ struct Module: public interface::Module, public Interface
 			{"publish_log", "=publish_log", "What was published as the server: "
 				"[{time, builder: {account, starport_id}, package, kind, version, "
 				"sha256, aitta}], the oldest first. An admin token's.",
-				R"J({"type": "object", "properties": {}})J", ""},
+				R"J({"type": "object", "properties": {}})J", "", "admin"},
 		};
 		return t;
 	}
@@ -31252,7 +31497,17 @@ struct Module: public interface::Module, public Interface
 			return reply(id, "result", json::object(), 200, "");
 		if(method == "tools/list"){
 			json::Value list = json::array(), res = json::object();
+			// [KIT_AGENT_FEEDBACK_1117] 14: as account_of() and may_publish()
+			// see the token's agent
+			bool admin = false, publisher = false;
+			accounts::access(m_server, [&](accounts::Interface *i){
+				admin = at.scope == "admin" && i->is_admin(at.name);
+				publisher = i->is_admin(at.name) || i->has_priv(at.name,
+						"publisher");
+			});
 			for(const AgentTool &t : agent_tools()){
+				if(t.who && !(ss_(t.who) == "admin" ? admin : admin || publisher))
+					continue;
 				json::Value o = json::object();
 				o.set("name", t.name);
 				o.set("description", t.about);
@@ -31485,11 +31740,28 @@ struct Module: public interface::Module, public Interface
 					"your edits kept";
 		}
 		// [KIT_CUSTOM_TYPES] outside kit:edit (its 4096 bytes)
-		if(op == "type_put" || op == "type_delete"){
-			ss_ what, why;
+		if(op == "type_put" || op == "type_delete" || op == "type_edit"){
+			const ss_ name = local_name(jstr(a, "name"));
+			auto had = m_local_types.find(name);
+			ss_ source = jstr(a, "source"), client = jstr(a, "client"), what,
+					why;
+			// [KIT_AGENT_FEEDBACK_1117] 2: a put's client left out keeps the
+			// type's; 1: an edit's find-and-replace over its files
+			if(had != m_local_types.end() && (op == "type_edit" ||
+					!a.get("client").is_string()))
+				client = jstr(had->second, "client");
+			if(op == "type_edit"){
+				failed = true;
+				if(had == m_local_types.end())
+					return "Refused: no custom type "+name.substr(0, 80)+
+							" (put_type makes one)";
+				source = jstr(had->second, "source");
+				why = type_edits(a.get("edits"), source, client);
+				if(!why.empty())
+					return "Refused: "+why+"; nothing changed";
+			}
 			m_edit_what.clear();
-			failed = !put_local(p, local_name(jstr(a, "name")),
-					op == "type_delete", jstr(a, "source"), jstr(a, "client"),
+			failed = !put_local(p, name, op == "type_delete", source, client,
 					what, why);
 			return failed ? "Refused: "+why : what;
 		}
@@ -31853,7 +32125,7 @@ struct Module: public interface::Module, public Interface
 		if(it == m_sessions.end())
 			return "in session "+itos(id);
 		const GameSession &g = *it->second;
-		return g.draft ? "in a draft of "+g.by+"'s" : g.bench ?
+		return g.draft ? "in a draft by "+g.by : g.bench ?
 				"on the prefab bench of "+g.prefab : "in a game session (by "+
 				g.by+")";
 	}
@@ -32463,7 +32735,8 @@ struct Module: public interface::Module, public Interface
 						why : m_cam.no_offscreen ? "it could not draw off-screen "
 						"(SDL's offscreen driver needs EGL and a GL; Debian: "
 						"apt-get install libgl1 libegl1 libegl-mesa0 "
-						"libgl1-mesa-dri), and the server was given no X display. "
+						"libgl1-mesa-dri libcurl4), and the server was given no X "
+						"display. "
 						"Its host installs those, or starts it with "
 						"--camera-display :N (or BUILDAT_CAMERA_DISPLAY=:N), an X "
 						"server of its own such as `Xvfb :N -screen 0 1280x800x24` "
@@ -32653,7 +32926,127 @@ struct Module: public interface::Module, public Interface
 		for(int k = 0; k < 3; k++)
 			pos.append(std::round(w[k] * 100) / 100);
 		r.set("pos", pos);
+		const json::Value b = screen_buttons(p);
+		if(b.size())
+			r.set("buttons", b);
 		return r;
+	}
+
+	// [KIT_AGENT_FEEDBACK_1117] 8: the buttons on a player's screen as
+	// on_ui_press_u() takes their presses (a button, a pause menu item, a
+	// list; in their scene or the root's, up for them): [{id, label, action,
+	// rows}], 30 at most
+	json::Value screen_buttons(const Peer &pe)
+	{
+		json::Value r = json::array();
+		for(auto &x : m_entities){
+			const Entity &e = x.second;
+			if(!e.kind.empty() || r.size() >= 30)
+				continue;
+			for(const Instance &in : e.comps){
+				const Type &t = m_types[in.type];
+				const json::Value &ui = t.decl.get("ui");
+				const ss_ kind = jstr(ui, "kind");
+				if((kind != "button" && kind != "menu" && kind != "list") ||
+						!t.handlers.count("on_ui"))
+					continue;
+				ss_ scene;
+				scene_of(e, &scene);
+				if((scene != pe.scene && !root_ui(e)) ||
+						!ui_visible(e.id, pe.player))
+					break;
+				auto param = [&](const char *k){
+					const ss_ v = jstr(ui, k);
+					const json::Value &pv = v.compare(0, 6, "param:") ? json::Value() :
+							in.params.get(v.substr(6));
+					return pv.is_string() ? pv.as_string() : v.compare(0, 6,
+							"param:") ? v : ss_();
+				};
+				json::Value o = json::object();
+				o.set("id", (int64_t)e.id);
+				o.set("label", param("text"));
+				if(!e.name.empty())
+					o.set("name", e.name);
+				if(!param("action").empty())
+					o.set("action", param("action"));
+				if(kind == "menu")
+					o.set("in", "the pause menu");
+				if(kind == "list"){
+					json::Value rows = json::array();
+					const json::Value &v = in.state.get("value");
+					for(unsigned i = 0; v.is_array() && i < v.size() && i < 20; i++)
+						rows.append(v.at(i).is_array() && v.at(i).size() &&
+								v.at(i).at(0u).is_string() ?
+								v.at(i).at(0u).as_string() : ss_());
+					o.set("rows", rows);
+				}
+				r.append(o);
+				break;
+			}
+		}
+		return r;
+	}
+
+	// play_input's press: the button (and the list's row, from 1) on the
+	// body's screen it names, and its action if it is an action's; "" or
+	// why not
+	ss_ press_target(const Peer &pe, const json::Value &press, int64_t &id,
+			int64_t &row, ss_ &action)
+	{
+		const json::Value b = screen_buttons(pe);
+		auto lower = [](ss_ s){
+			for(char &c : s)
+				c = tolower((unsigned char)c);
+			return s;
+		};
+		const ss_ want = press.is_string() ? lower(press.as_string()) : "";
+		sv_<std::pair<int64_t, int64_t>> found;
+		for(unsigned i = 0; i < b.size(); i++){
+			const json::Value &o = b.at(i);
+			const int64_t oid = json::jint(o, "id");
+			const json::Value &rows = o.get("rows");
+			if(press.is_number()){
+				if(oid == (int64_t)press.as_number())
+					found.push_back(std::make_pair(oid, (int64_t)0));
+			} else if(lower(jstr(o, "label")) == want ||
+					lower(jstr(o, "name")) == want){
+				found.push_back(std::make_pair(oid, (int64_t)0));
+			} else {
+				for(unsigned k = 0; rows.is_array() && k < rows.size(); k++)
+					if(lower(rows.at(k).as_string()) == want)
+						found.push_back(std::make_pair(oid, (int64_t)k + 1));
+			}
+		}
+		if(found.empty())
+			return "press: no button "+(press.is_string() ? "\""+cut_utf8(
+					press.as_string(), 64)+"\"" : press.stringify().substr(0, 20))+
+					" on your body's screen (its buttons: "+b.stringify().
+					substr(0, 600)+")";
+		if(found.size() > 1)
+			return "press: "+itos(found.size())+" buttons have that label: "
+					"press one by its id ("+b.stringify().substr(0, 600)+")";
+		id = found[0].first;
+		if(found[0].second)
+			row = found[0].second;
+		for(unsigned i = 0; i < b.size(); i++){
+			const json::Value &o = b.at(i);
+			if(json::jint(o, "id") != id)
+				continue;
+			action = jstr(o, "action");
+			const json::Value &rows = o.get("rows");
+			if(rows.is_array() && (row < 1 || row > (int64_t)rows.size()))
+				return "press: the list "+itos(id)+"'s row: 1 to "+
+						itos(rows.size())+" (row, or its title as press)";
+			if(!rows.is_array() && row)
+				return "press: "+itos(id)+" is no list (no row)";
+		}
+		if(action == "pause_menu")
+			return "press: "+itos(id)+" opens the pause menu (Escape's): "
+					"press its items";
+		if(!action.empty() && !m_action_names.count(action))
+			return "press: "+itos(id)+"'s action "+action+" is no action of the "
+					"game";
+		return "";
 	}
 
 	ss_ agent_play(const ss_ &op, Peer &p, size_t peer, const json::Value &a,
@@ -32756,6 +33149,30 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!av.is_undefined() && !av.is_array())
 			return "actions: a list of action names";
+		// [KIT_AGENT_FEEDBACK_1117] 8: a button on the body's screen pressed
+		// first, as its client's click sends it (an action's button: that
+		// action held)
+		int64_t press_id = 0, press_row = 0;
+		ss_ press_action;
+		const json::Value &prv = a.get("press"), &rv = a.get("row");
+		if(!prv.is_undefined()){
+			if(!(prv.is_string() || prv.is_number()) || !(rv.is_undefined() ||
+					rv.is_number()))
+				return "press: a button's id or its label; row: a list's row, "
+						"from 1";
+			press_row = rv.is_number() ? (int64_t)rv.as_number() : 0;
+			SessionScope sc(*this, session_of_peer(cam));
+			auto ci = m_peers.find(cam);
+			if(ci == m_peers.end())
+				return "press: your body is not placed yet";
+			const ss_ why = press_target(ci->second, prv, press_id, press_row,
+					press_action);
+			if(!why.empty())
+				return why;
+			if(!press_action.empty() && std::find(actions.begin(),
+					actions.end(), press_action) == actions.end())
+				actions.push_back(press_action);
+		}
 		sv_<ss_> cmds;
 		const json::Value &yv = a.get("yaw"), &pv = a.get("pitch");
 		if(!yv.is_undefined() || !pv.is_undefined()){
@@ -32813,12 +33230,26 @@ struct Module: public interface::Module, public Interface
 		m_cam.rec_player = (uint64_t)json::jint(body, "entity");
 		m_cam.events = json::array();
 		m_cam.used = now;
+		if(press_id && press_action.empty()){
+			SessionScope sc(*this, session_of_peer(cam));
+			const ss_ rs = press_row ? " "+itos(press_row) : "";
+			ss_ refused;
+			on_ui_press_u(network::Packet(cam, "kit:ui", itos(press_id)+" 1"+rs),
+					&refused);
+			if(!refused.empty()){
+				m_play = PlayWait();
+				m_cam.rec = false;
+				return "press: "+itos(press_id)+" refused: "+refused;
+			}
+			on_ui_press_u(network::Packet(cam, "kit:ui", itos(press_id)+" 0"+rs));
+		}
 		for(const ss_ &n : actions)
 			on_action(network::Packet(cam, "kit:action", n+" 1"));
 		for(const ss_ &c : cmds)
 			camera_say("cmd "+c);
-		log_i(MODULE, "%s plays %g s: %zu commands, %zu actions", cs(p.name),
-				secs, cmds.size(), actions.size());
+		log_i(MODULE, "%s plays %g s: %zu commands, %zu actions%s", cs(p.name),
+				secs, cmds.size(), actions.size(), press_id ? cs(", pressed "+
+				itos(press_id)+(press_row ? " row "+itos(press_row) : ss_())) : "");
 		m_mcp_defer = peer;
 		failed = false;
 		return "";
@@ -32946,7 +33377,7 @@ struct Module: public interface::Module, public Interface
 				pos[1], pos[2]);
 	}
 
-	ss_ agent_state(const Peer &p)
+	ss_ agent_state(const Peer &p, const json::Value &a, bool &failed)
 	{
 		json::Value s = json::object(), scenes = json::array();
 		s.set("running", m_session.running);
@@ -33053,16 +33484,47 @@ struct Module: public interface::Module, public Interface
 		if(!m_host.project.empty())
 			s.set("save", m_host.project);
 		s.set("undo", (int64_t)m_undo[p.name].size());
-		json::Value es = authored_json(true).get("entities");
-		for(unsigned i = 0; m_session.running && i < es.size(); i++){
-			auto it = m_entities.find((uint64_t)json::jint(es.at(i), "id", 0));
-			if(it == m_entities.end())
+		// [KIT_AGENT_FEEDBACK_1117] 10: only a scene's, some ids' or a type's
+		// entities; state false: no component's state
+		const json::Value &fs = a.get("scene"), &fi = a.get("ids"),
+				&ft = a.get("type");
+		const bool with_state = !a.get("state").is_false();
+		std::set<uint64_t> ids;
+		for(unsigned i = 0; fi.is_array() && i < fi.size(); i++)
+			if(fi.at(i).is_number())
+				ids.insert((uint64_t)fi.at(i).as_number());
+		failed = true;
+		if(!fi.is_undefined() && (!fi.is_array() || fi.size() > 1000))
+			return "ids: a list of entity ids, 1000 at most";
+		if(!fs.is_undefined() && (!fs.is_string() || !scene_entity(fs.as_string())))
+			return "scene: no scene named "+fs.stringify().substr(0, 80)+
+					" (get_state's scenes)";
+		if(!ft.is_undefined() && !ft.is_string())
+			return "type: a type's name (kit/part, local/...)";
+		failed = false;
+		json::Value es = authored_json(true).get("entities"), kept = json::array();
+		for(unsigned i = 0; i < es.size(); i++){
+			const uint64_t id = (uint64_t)json::jint(es.at(i), "id", 0);
+			auto it = m_entities.find(id);
+			ss_ sc;
+			if((fi.is_array() && !ids.count(id)) || (fs.is_string() &&
+					(it == m_entities.end() || !((it->second.kind == "scene" &&
+					it->second.name == fs.as_string()) || (scene_of(it->second,
+					&sc) && sc == fs.as_string())))))
 				continue;
 			json::Value &cs_ = es[i]["components"];
-			for(unsigned c = 0; c < cs_.size() && c < it->second.comps.size(); c++)
+			bool typed = !ft.is_string();
+			for(unsigned c = 0; c < cs_.size(); c++)
+				typed = typed || jstr(cs_.at(c), "type") == ft.as_string();
+			if(!typed)
+				continue;
+			for(unsigned c = 0; with_state && m_session.running &&
+					it != m_entities.end() && c < cs_.size() &&
+					c < it->second.comps.size(); c++)
 				cs_[c].set("state", it->second.comps[c].state);
+			kept.append(es.at(i));
 		}
-		s.set("entities", es);
+		s.set("entities", kept);
 		return s.stringify();
 	}
 
@@ -33108,7 +33570,7 @@ struct Module: public interface::Module, public Interface
 		// [KIT_AGENT_NEXT_1] 2: from a draft, the main round's
 		if(op == "=state" && a.get("main").is_true() && m_active){
 			SessionScope sc(*this, 0);
-			return agent_state(p);
+			return agent_state(p, a, failed);
 		}
 		WorldScope ws(m_w, world_named(p.scene));
 		uint64_t id = 0;
@@ -33118,7 +33580,7 @@ struct Module: public interface::Module, public Interface
 		if(id_ok)
 			id = (uint64_t)iv.as_number();
 		if(op == "=state")
-			return agent_state(p);
+			return agent_state(p, a, failed);
 		// [KIT_AGENT_NEXT_1] 2, 3b
 		if(op == "=checkpoints")
 			return checkpoint_list();
@@ -33188,8 +33650,13 @@ struct Module: public interface::Module, public Interface
 			}
 			return agent_guide(p.name, true);
 		}
-		if(op == "=goals")
-			return agent_goals().stringify();
+		if(op == "=goals"){
+			json::Value w = agent_goals();
+			level_warnings(w);
+			return w.stringify();
+		}
+		if(op == "=history")
+			return agent_history(a, failed);
 		if(op == "=voxels")
 			return agent_get_voxels(p, a, failed);
 		if(op == "=ground")
@@ -33708,6 +34175,92 @@ struct Module: public interface::Module, public Interface
 		return out;
 	}
 
+	// [KIT_AGENT_FEEDBACK_1117] 12: get_goal_warnings' level checks after
+	// the goals' (publish asks about none): entities on a default name
+	// (place's "<type> <id>"), scenes with no way in, and per type the
+	// entities with no link out (in) where at least 3 of 4 of 4 or more of
+	// that type have one.
+	// simplified: a way in is any parameter or custom type's source naming
+	// the scene, a listing or players joining there; whether that
+	// teleport is ever reached is not followed
+	void level_warnings(json::Value &out)
+	{
+		auto ids = [](const sv_<uint64_t> &v){
+			ss_ s;
+			for(size_t i = 0; i < v.size() && i < 12; i++)
+				s += (i ? ", " : "")+itos(v[i]);
+			return s+(v.size() > 12 ? ", ..." : "");
+		};
+		sv_<uint64_t> unnamed;
+		// type -> {with a link out, without}, {with one in, without}
+		std::map<ss_, std::pair<sv_<uint64_t>, sv_<uint64_t>>> outs, ins;
+		std::set<uint64_t> linked_to;
+		std::set<ss_> named_to, mentioned;
+		for(auto &x : m_entities){
+			const Entity &e = x.second;
+			if(!authored(e) || !e.kind.empty())
+				continue;
+			for(const Instance &in : e.comps){
+				for(const Link &l : in.links)
+					if(l.name.empty())
+						linked_to.insert(l.to);
+					else
+						named_to.insert(l.name);
+				for(json::Iterator it(in.params); it; ++it)
+					if((*it).is_string() && !(*it).as_string().empty())
+						mentioned.insert((*it).as_string());
+			}
+		}
+		for(auto &x : m_entities){
+			const Entity &e = x.second;
+			if(!authored(e) || !e.kind.empty() || e.comps.empty())
+				continue;
+			if(e.name == e.comps[0].type+" "+itos(e.id))
+				unnamed.push_back(e.id);
+			const ss_ &t = e.comps[0].type;
+			const bool in = linked_to.count(e.id) || named_to.count(e.name);
+			(in ? ins[t].first : ins[t].second).push_back(e.id);
+			bool o = false;
+			for(const Instance &c : e.comps)
+				o = o || !c.links.empty();
+			(o ? outs[t].first : outs[t].second).push_back(e.id);
+		}
+		if(!unnamed.empty())
+			out.append(itos(unnamed.size())+" entities still on a default name "
+					"(type and id; rename names them): "+ids(unnamed));
+		const json::Value tree = scene_tree(), listed = listed_scenes();
+		std::set<ss_> ups, listed_names;
+		for(unsigned i = 0; i < tree.size(); i++)
+			ups.insert(jstr(tree.at(i), "up"));
+		for(unsigned i = 0; i < listed.size(); i++)
+			listed_names.insert(jstr(listed.at(i), "scene"));
+		for(unsigned i = 0; i < tree.size(); i++){
+			const ss_ s = jstr(tree.at(i), "name");
+			bool in_source = false;
+			for(auto &lt : m_local_types)
+				in_source = in_source || jstr(lt.second, "source").find("\""+s+
+						"\"") != ss_::npos;
+			if(s == m_host.world_scene || ups.count(s) || listed_names.count(s) ||
+					mentioned.count(s) || in_source)
+				continue;
+			out.append("scene "+s+": no way in (players join "+(
+					m_host.world_scene.empty() ? ss_("elsewhere") :
+					"in "+m_host.world_scene)+"; it is not listed by a "
+					"kit/scene_info, and no parameter or custom type names it)");
+		}
+		auto few = [&](const char *what,
+				const std::map<ss_, std::pair<sv_<uint64_t>, sv_<uint64_t>>> &m){
+			for(auto &x : m){
+				const size_t yes = x.second.first.size(), no = x.second.second.size();
+				if(no && yes + no >= 4 && yes * 4 >= (yes + no) * 3)
+					out.append(x.first+": "+itos(no)+" of "+itos(yes + no)+" have no "+
+							what+" (the others do): "+ids(x.second.second));
+			}
+		};
+		few("link out", outs);
+		few("link in", ins);
+	}
+
 	// The guide: how a composition is built and run, then the palette's
 	// types by group; full (get_guide) with each one's what, inputs, outputs
 	// and params' names, else (initialize's instructions, which Claude Code
@@ -33869,7 +34422,6 @@ struct Module: public interface::Module, public Interface
 	// start, in the main round and Stopped only; from a draft it is refused:
 	// the draft is a copy and stays as it is (one rule: a checkpoint holds
 	// the start, a restore writes it).
-	// simplified: heightmap samples and decorations are kept, not put back
 	static void checkpoint_caps(size_t &count, size_t &bytes)
 	{
 		count = 16;
@@ -34138,10 +34690,54 @@ struct Module: public interface::Module, public Interface
 			put_sections(&wd, jobs);
 			secs += jobs.size();
 		}
+		// [KIT_AGENT_FEEDBACK_1117] (4z26) a heightmap World's edited
+		// samples and a builder's decorations the checkpoint's too where
+		// they differ: their rows as a template's import writes them, the
+		// map generated anew under them (regenerate_heightmap()'s way; the
+		// checkpoint "before restore ..." has those of now)
+		size_t maps = 0, samples = 0, decors = 0;
+		ss_ map_why;
+		for(auto &wp : m_worlds){
+			World &wd = wp.second;
+			if(!wd.world_scene || wd.name.find('~') != ss_::npos ||
+					!wd.wp.heightmap())
+				continue;
+			WorldScope ws(m_w, &wd);
+			hm_flush();
+			json::Value hm = json::array(), decor = json::array(),
+					sj = edits.get("scenes").get(wd.name);
+			hm_decor_edits(hm, decor);
+			auto text = [](const json::Value &v){
+				return v.is_array() ? v.stringify() : ss_("[]");
+			};
+			if(text(hm) == text(sj.get("hm")) && text(decor) == text(sj.get("decor")))
+				continue;
+			clear_rows(m_store, world_row("hm_edit")+"/");
+			m_store->remove(world_row("decor"));
+			json::Value one = json::object(), sc = json::object();
+			one.set("materials", (int64_t)heightmap::MAX_MATERIALS);
+			if(sj.is_object())
+				sc.set(wd.name, sj);
+			one.set("scenes", sc);
+			import_hm(one, samples, decors);
+			decor_clear();
+			m_w->decor_off.clear();
+			m_w->hm_edits_loaded = false;
+			m_w->hm_edits.clear();
+			m_w->hm_edits_dirty.clear();
+			m_w->hm_force = true;
+			ss_ w;
+			if(!apply_world(world_params(), who, false, w))
+				map_why += "; the scene "+wd.name+"'s heightmap: "+w;
+			m_w->hm_force = false;
+			maps++;
+		}
 		log_i(MODULE, "%s restores checkpoint \"%s\": %zu entities changed, "
-				"%zu cells in %zu sections (%zu left out); the start before kept "
-				"as \"%s\"", cs(who), cs(name), change.size(), put, secs, left,
-				cs(before));
+				"%zu cells in %zu sections (%zu left out), %zu heightmaps (%zu "
+				"samples, %zu decorations); the start before kept as \"%s\"%s",
+				cs(who), cs(name), change.size(), put, secs, left, maps, samples,
+				decors, cs(before), cs(map_why));
+		history(who, "restored checkpoint \""+name+"\"");
 		for(auto &pp : m_peers)
 			if(pp.second.editing)
 				send_state(pp.first);
@@ -34150,8 +34746,11 @@ struct Module: public interface::Module, public Interface
 				itos(change.size())+" entities changed (one edit: undo takes it "
 				"back, not the voxels), "+itos(put)+" edited voxel cells in "+
 				itos(secs)+" sections generated again"+(left ? " ("+itos(left)+
-				" cells of voxels this server lacks left out)" : ss_())+"; the "
-				"start before is the checkpoint \""+before+"\"";
+				" cells of voxels this server lacks left out)" : ss_())+(maps ?
+				", "+itos(maps)+" heightmaps generated again under its "+
+				itos(samples)+" edited samples and "+itos(decors)+" placed "
+				"decorations" : ss_())+map_why+"; the start before is the "
+				"checkpoint \""+before+"\"";
 	}
 
 	// ---- diff: two compositions (load_composition()'s form), was -> now,
@@ -35088,7 +35687,9 @@ struct Module: public interface::Module, public Interface
 			"- Links carry signals: link an output of an entity's component to "
 			"an input of another entity, and each time the output fires the "
 			"input gets its value. The value types must meet (none, number, "
-			"string, ...). get_links lists them; unlink takes one away.\n"
+			"string, ...). get_links lists them; unlink takes one away. "
+			"to_name links by name, in the scene of who set it off (a root "
+			"entity's signal reaching each scene's own).\n"
 			"- Nothing runs while the round is Ended. start runs it (Play), "
 			"the players in it, edits still live; stop ends it, the world "
 			"back at its start. Running: try_input sends an input as a link "
@@ -35103,6 +35704,7 @@ struct Module: public interface::Module, public Interface
 			"get_goal_warnings checks kit/goal chains.\n"
 			"- Custom types: put_type writes a type of this game's own, "
 			"local/<name> (its description says the file), live at once; "
+			"edit_type changes a few lines; "
 			"get_type reads a type's file (Kit's are examples), "
 			"delete_type takes one away. A movement of your own steps the "
 			"players (kit/controls' movement): its events are its outputs, "
@@ -35145,8 +35747,12 @@ struct Module: public interface::Module, public Interface
 				"play_input holds keys or the game's actions for up to 4 s, "
 				"looks, jumps, uses an entity, and answers where the body went, "
 				"its state (health, score, inventory) and what entities emitted "
-				"meanwhile (picture: its view at the end); play_leave ends it. "
-				"Walk into what you built and read what fired.\n"
+				"meanwhile (picture: its view at the end), press a button on "
+				"its screen first (Play in a lobby); play_leave ends it. "
+				"Walk into what you built and read what fired. try_input as "
+				"\"me\" sends as your body, as a player's name as theirs.\n"
+				// [KIT_AGENT_FEEDBACK_1117] 11
+				"- get_history: who changed what and when, since a time.\n"
 				// [KIT_AGENT_NEXT_1] 2, 3b
 				"- Your sandbox. draft moves you into a copy of the game's start "
 				"of your own (the editor's Draft), running; your edits, start "
@@ -35807,6 +36413,7 @@ struct Module: public interface::Module, public Interface
 				"%zu entities made, %zu removed (%zu discarded left)", cs(p.name),
 				cs(counts_text(discarded_counts(put))), n, made, removed,
 				m_discarded.size());
+		history(p.name, "kept the builds of "+counts_text(discarded_counts(put)));
 		for(auto &o : m_peers)
 			send_state(o.first);
 	}
@@ -36647,6 +37254,7 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "Saved as the start by %s: %zu sections' copies dropped, "
 				"%zu entities made authored, %zu removed gone, the start's "
 				"state %s", cs(by), n, made, removed, cs(digest(m_start)));
+		history(by, "saved the round as the start");
 		pick_provider();
 		session_changed(true, by);
 		for(auto &p : m_peers)
@@ -37128,7 +37736,13 @@ struct Module: public interface::Module, public Interface
 	void on_edit(const network::Packet &packet)
 	{
 		SessionScope sc(*this, session_of_peer(packet.sender));
+		// [KIT_AGENT_FEEDBACK_1117] 11: what it did, its text kept
+		auto pi = m_peers.find(packet.sender);
+		const ss_ who = pi == m_peers.end() ? ss_() : pi->second.name;
+		m_edit_what.clear();
 		on_edit_u(packet);
+		if(!m_edit_what.empty() && !who.empty())
+			history(who, m_edit_what);
 	}
 
 	void on_edit_u(const network::Packet &packet)
@@ -40487,6 +41101,8 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "%s publishes draft %s: %zu entities, %zu cells%s",
 				cs(name), cs(itos(id)), change.size(), cells.size(),
 				unknown ? cs(", "+itos(unknown)+" not read") : "");
+		history(name, "published draft "+itos(id)+": "+itos(change.size())+
+				" entities, "+itos(cells.size())+" cells");
 	}
 };
 

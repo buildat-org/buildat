@@ -12,7 +12,8 @@
 #      line) and the JSON config one each shown by its button and copied;
 #      then an Admin one labelled "admin agent"; neither token in a log;
 #   2. an MCP client (Python's stdlib) with the builder token: initialize
-#      (the version negotiated), notifications/initialized, tools/list, the
+#      (the version negotiated), notifications/initialized, tools/list
+#      (without an admin token's tools), the
 #      state and the types; a kit/timer and a kit/counter placed, the timer
 #      set, linked to the counter; Start, the count read going up; undo
 #      takes the link back; Stop. Refused as tool errors: an unknown
@@ -228,19 +229,19 @@ if phase == "main":
     names = [t["name"] for t in tools]
     assert names == ["get_state", "list_types", "get_type", "get_guide",
         "get_links", "get_log", "get_view", "play_join", "play_input",
-        "play_leave", "get_events", "get_goal_warnings",
+        "play_leave", "get_events", "get_goal_warnings", "get_history",
         "list_prefabs", "list_items", "list_voxel_types", "get_voxels",
         "get_ground", "place", "set_param", "link", "delete", "unlink", "move",
         "rename", "set_comments", "add_component", "remove_component",
         "set_parent", "duplicate", "place_prefab", "save_prefab", "set_voxels",
-        "put_texture", "put_type", "delete_type",
+        "put_texture", "put_type", "edit_type", "delete_type",
         "new_scene", "switch_scene", "undo", "draft", "publish", "leave_draft",
         "checkpoint", "list_checkpoints", "restore_checkpoint", "diff",
         "playtest", "playtest_report", "start", "stop", "try_input",
-        "watch", "clear_kept", "keep", "set_builder", "export_template",
-        "export_scene", "list_games", "copy_game", "rename_game",
+        "watch", "clear_kept", "keep", "export_template",
+        "export_scene",
         "publish_game", "publish_scene", "publish_kit_package", "list_aitta",
-        "install_from_aitta", "publish_log"], names
+        "install_from_aitta"], names
     for t in tools:
         assert t["description"] and t["inputSchema"]["type"] == "object", t
     st = state(tok)

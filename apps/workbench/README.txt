@@ -95,7 +95,8 @@ saves, and on Linux with no display it draws off-screen with SDL's
 offscreen driver: EGL with no X server, on Mesa's software GL where
 there is no GPU:
 
-    # Debian/Ubuntu: apt-get install libgl1 libegl1 libegl-mesa0 libgl1-mesa-dri
+    # Debian/Ubuntu: apt-get install libgl1 libegl1 libegl-mesa0 \
+    #     libgl1-mesa-dri libcurl4
     # from https://github.com/celeron55/buildat/releases, the
     # linux-x86_64-portable archive, unpacked:
     cd buildat-*-linux-x86_64-portable
