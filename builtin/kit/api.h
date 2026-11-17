@@ -1017,6 +1017,19 @@ namespace interface
 //       tool sends "on" for a voxel pointed at over a heightmap, and its
 //       Seed brush goes on the cell in front of the voxel pointed at, else
 //       12 cells along the pointer's ray
+//       [KIT_AGENT_NEXT_2] "area": [x0, z0, x1, z1] in place of the point
+//       (a heightmap's raise, lower, flatten and smooth; a side 256 at
+//       most): the rectangle at once, no falloff; "amount" (cells) raises
+//       or lowers by that, flatten goes to level itself
+//   {"op": "region", "action": a, "at": [x, y, z], "size": [w, h, d],
+//    ...}  -- ([KIT_AGENT_NEXT_2]) a box of voxels at once, one undo: fill
+//       ("voxel", "param", "tint"), hollow ("voxel" its shell, none: the
+//       shell as it is; the inside air), clear, replace ("voxel"'s cells
+//       with "with"), copy (into the builder's clipboard), paste (the
+//       copy's low corner at at, "turn" a multiple of 90, "air": its air
+//       cells too), move (to "to", likewise); 64 a side. Its sections are
+//       loaded first: while one is generated it is refused, nothing
+//       written
 //   {"op": "set_voxel", "pos": [x, y, z], "voxel": n}  -- ([KIT_EDIT_VOXELS])
 //       the cell in the builder's scene set to voxel n ("air": a dig),
 //       routed as a player's write (an owned cell goes to its owner's
@@ -1095,7 +1108,10 @@ namespace interface
 // client keeping its value; {"op": "state"} asks for all of it again (any
 // client, rights or not). The builders with the tools on are sent
 // "kit:builders" as any of them turns them on or off, selects or moves
-// their cursor: [{"name", "color": "#rrggbb", "sel", "cursor"}]. A type's
+// their cursor: [{"name", "color": "#rrggbb", "sel", "cursor"}].
+// [KIT_AGENT_NEXT_2] An agent's show sends its account's clients
+// "kit:agent_show" {"from", "color", "at", "box", "ids": [{"id", "at"}],
+// "label"} (only from and color: cleared, as when it leaves). A type's
 // `gizmo = {shape = "box"|"sphere", size = n, color = "#rrggbb"}` is drawn
 // in edit mode only. The client half is builtin/kit/client_lua/module.lua.
 //
