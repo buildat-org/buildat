@@ -198,6 +198,8 @@ namespace interface
 //           (its sides), color = "#rrggbb", text = "<shared state key>",
 //           text_idle = "param:<name>" (drawn while that state is empty:
 //           a Stopped server has run nothing to set it) [KIT_TEMPLATES],
+//           text_facing = "flat"|"camera", text_back = true (flat text on
+//           the back too, kit/sign's both_sides) [KIT_AGENT_FEEDBACK_1117],
 //           extent = "<position param>", depth = n, solid = true,
 //           voxel = "<voxel material>",
 //           state = "<shared state key>", when = {color, solid, scale =
