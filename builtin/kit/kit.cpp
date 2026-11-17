@@ -15672,6 +15672,11 @@ struct Module: public interface::Module, public Interface
 			// [KIT_CTF] its world marker, "param:<name>" as a look's
 			if(show.get("marker").is_undefined() && d.get("marker").is_object())
 				show.set("marker", look_of(in, d.get("marker")));
+			// [KIT_SIDE_SCENERY] (8) a parallax layer's follow, follow_y and
+			// repeat ("param:<name>" as a look's): what is under it drawn so
+			// (module.lua's parallax pass)
+			if(show.get("parallax").is_undefined() && d.get("parallax").is_object())
+				show.set("parallax", look_of(in, d.get("parallax")));
 			// [KIT_FLAG_RIGHT_CLICK] the shared state naming the player
 			// whose right click uses it
 			if(show.get("right_use").is_undefined() &&
@@ -15770,6 +15775,24 @@ struct Module: public interface::Module, public Interface
 			if(m_types[in.type].health && in.disabled.empty())
 				show.set("health", true);
 		return show;
+	}
+
+	// [KIT_SIDE_SCENERY] (8) Whether it is under a parallax layer (a type
+	// with `parallax`, kit/parallax): drawn offset by the clients' cameras,
+	// so never met (the collision snapshot and the bots' grid leave it out)
+	bool under_parallax(const Entity &e)
+	{
+		uint64_t id = e.parent;
+		for(int i = 0; i < 16 && id; i++){
+			auto it = m_entities.find(id);
+			if(it == m_entities.end())
+				return false;
+			for(const Instance &in : it->second.comps)
+				if(m_types[in.type].decl.get("parallax").is_object())
+					return true;
+			id = it->second.parent;
+		}
+		return false;
 	}
 
 	// [KIT_NESTING] The entity a positioned one is under (0: a scene)
@@ -23359,7 +23382,8 @@ struct Module: public interface::Module, public Interface
 				world_of(e, w, &wq);
 			}
 			ss_ es;
-			if(scene_of(e, &es) != scene || !scene)
+			// ([KIT_SIDE_SCENERY] (8) under a parallax layer: never met)
+			if(scene_of(e, &es) != scene || !scene || under_parallax(e))
 				continue;
 			for(const Instance &in : e.comps){
 				const json::Value &d = m_types[in.type].decl.get("look");
@@ -23855,7 +23879,7 @@ struct Module: public interface::Module, public Interface
 						"polygon";
 			const double m = poly ? MAX_POLYGON_EXTENT + 8 : 40;
 			if(w[0] < g.x0 - m || w[0] > g.x0 + g.nx + m || w[2] < g.z0 - m ||
-					w[2] > g.z0 + g.nz + m)
+					w[2] > g.z0 + g.nz + m || under_parallax(e))
 				continue;
 			for(const Instance &in : e.comps){
 				const json::Value &d = m_types[in.type].decl.get("look");
@@ -31418,7 +31442,9 @@ struct Module: public interface::Module, public Interface
 				"comp": {"type": "integer"}}, "required": ["id", "comp"]})J", ""},
 			{"set_parent", "parent", "Puts an entity (and what is under it) "
 				"under parent, a positioned entity of your scene (0: the scene), "
-				"where it is in the world kept; it then moves with its parent. "
+				"where it is in the world kept; it then moves with its parent "
+				"(under a kit/parallax: drawn by its follow and repeat as a "
+				"backdrop, never met). "
 				"\"root\": onto the app root, one with no position (a kit/lobby, "
 				"a kit/ui_panel with what is in it, a root type), every scene's "
 				"from then on, its links kept; one on the root goes into your "
@@ -31638,7 +31664,8 @@ struct Module: public interface::Module, public Interface
 				"(sandboxed): a table of on_add(e), on_state(e, key), "
 				"on_update(e, dt), on_remove(e); e.state, e.node, e:log(text); "
 				"a movement's draw(s, node) draws each player's body (node at "
-				"its feet, s its state; another's {pos, pose}); left out, the "
+				"its feet, s its state; another's {pos, pose}; scenery is "
+				"kit/parallax's, not a client part's); left out, the "
 				"type's client part stays as it is, \"\" takes it away. A few "
 				"lines changed: edit_type.",
 				R"J({"type": "object", "properties": {
@@ -37155,7 +37182,8 @@ struct Module: public interface::Module, public Interface
 			"look_ahead: lower z, toward the camera, is the foreground, higher "
 			"the background; what lies wholly nearer than side_clip in front "
 			"of the plane is never drawn, as get_goal_warnings and the editor "
-			"say); fov (20...150), smoothing, offsets and roll; pointer "
+			"say; backdrops: kit/parallax, below); fov (20...150), smoothing, "
+			"offsets and roll; pointer "
 			"auto, crosshair or cursor; plane vertical holds bodies at one z "
 			"(side-scrollers, with kit/polygon); the effects tint and "
 			"tint_amount, vignette, blur and glitch (0...1) colour the whole "
@@ -37167,6 +37195,24 @@ struct Module: public interface::Module, public Interface
 			"lobby or result) side, top_down and chase stay on the body, a click "
 			"cycling to the others; first_person is a free camera. "
 			"edit_view auto, 2d or 3d is the editor's first view.\n"
+			"\n## Side views: backdrops and parallax\n"
+			"A side camera gives far scenery no depth by itself (ortho none at "
+			"all). For a skyline, hills or clouds use kit/parallax, never a "
+			"movement's or a type's client code: place it, then the scenery "
+			"under it (place's parent, or set_parent; polygons, parts, nested "
+			"too). What is under it moves with the camera by 1 - follow of "
+			"its travel (follow 0: as far as the sky, 1: the world; follow_y up "
+			"and down, 1 by default: a skyline's foot stays on the horizon), "
+			"repeat (m, 0 none) copies it every repeat along x to fill the "
+			"view. Place it where it looks right with the camera at the "
+			"layer's x, behind the plane (higher z). Visual only: it is never "
+			"met. get_view draws it as play does; the editor draws it where "
+			"authored. A far skyline 128 wide, repeated: place kit/parallax at "
+			"[0, 0, z] (z: the plane's + 20) with params {\"follow\": 0.2, "
+			"\"repeat\": 128}, then kit/polygon at [0, 0, z] with parent its id "
+			"and params {\"points\": [[-64, 0], [-64, 10], [-44, 10], [-44, 18], "
+			"[-24, 18], [-24, 8], [0, 8], [0, 24], [16, 24], [16, 12], [40, 12], "
+			"[40, 16], [64, 16], [64, 0]], \"color\": \"#4a5a78\"}.\n"
 			"\n## kit/environment: sky, fog, light, weather\n"
 			"sky (the sky's and the far fog's colour), fog_start and fog_end "
 			"(cells), ambient (the ambient light's colour), time (hours) and "
@@ -37212,7 +37258,9 @@ struct Module: public interface::Module, public Interface
 			"kept). A grass-edged cliff: place kit/polygon with params "
 			"{\"points\": [[-20, -6], [20, -6], [20, 2], [-20, 2]], \"voxel\": "
 			"\"kit/grass\", \"edge_depth\": 0.25}; an uploaded texture through "
-			"put_texture's voxel. kit/effect: "
+			"put_texture's voxel. kit/parallax: a side view's backdrop layer "
+			"(follow, follow_y, repeat) for what is put under it, never met "
+			"(above). kit/effect: "
 			"particle bursts (count, shape, colors, speed, gravity, ttl, size) "
 			"and a short light without shadow, on a signal or a world event "
 			"(dig, place, hit, blast, respawn, pickup). Prefabs group parts "
@@ -39115,7 +39163,7 @@ struct Module: public interface::Module, public Interface
 						"world_region", "version",
 						"inventory", "root", "no_position", "inputs_types", "outputs_types",
 						"inputs_labels", "outputs_labels", "player", "ui", "about", "seat",
-						"movement", "world", "environment"})
+						"movement", "world", "environment", "parallax"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
 				if(addable(t))
@@ -39136,7 +39184,7 @@ struct Module: public interface::Module, public Interface
 							"version", "inventory",
 							"root", "no_position", "inputs_types", "outputs_types", "inputs_labels",
 							"outputs_labels", "player", "ui", "about", "seat", "movement",
-							"world", "environment"})
+							"world", "environment", "parallax"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
 					if(addable(t.first))

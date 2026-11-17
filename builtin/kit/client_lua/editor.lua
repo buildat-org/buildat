@@ -699,6 +699,37 @@ function NT.under(id)
 	return r
 end
 
+-- [KIT_SIDE_SCENERY] (8) The inspector's note on a kit/parallax layer (a
+-- type with `parallax`) or what is under one: the editor's views draw it
+-- where authored (module.lua's parallax pass has no camera in edit mode),
+-- play from its camera. nil for others. Where authored, not as play draws
+-- it: what is selected, dragged and pointed at stays what is drawn, and a
+-- backdrop does not slide under the cursor as the view pans
+function NT.parallax_note(e)
+	local x, under = e, false
+	for _ = 1, 17 do
+		if not x then
+			return nil
+		end
+		for _, c in ipairs(x.components or {}) do
+			if type_of(c.type).parallax then
+				local p = c.params or {}
+				local f, fy = tonumber(p.follow) or 0.5, tonumber(p.follow_y) or 1
+				local r, lx = tonumber(p["repeat"]) or 0, x.pos and x.pos[1] or 0
+				return (under and "Under parallax layer " .. NT.entity_label(x) ..
+						": in play drawn" or "A parallax layer: in play what is under " ..
+						"it is drawn") .. string.format(" moving with the camera by " ..
+						"%g of its travel from x %g%s%s, never met. " ..
+						"Shown here where authored: as play draws it with the camera " ..
+						"at x %g.", 1 - f, lx, fy < 1 and string.format(" (%g up and " ..
+						"down)", 1 - fy) or "", r > 0 and ", repeated every " ..
+						r .. " m" or "", lx)
+			end
+		end
+		x, under = NT.tree().by[x.parent], true
+	end
+end
+
 -- Whether e is under one of the ids (a set)
 function NT.under_one_of(e, ids)
 	local p = NT.parent_of(e)
@@ -3441,17 +3472,17 @@ end
 -- composition
 -- A warning in lines of about 52 bytes: a long one otherwise sets the width of
 -- the whole inspector
-function NT.warn_text(w, line)
+function NT.warn_text(w, line, col)
 	local cur = ""
 	for word in line:gmatch("%S+") do
 		if cur ~= "" and #cur + #word > 52 then
-			text(w, cur, WARN)
+			text(w, cur, col or WARN)
 			cur = word
 		else
 			cur = cur == "" and word or cur .. " " .. word
 		end
 	end
-	text(w, cur, WARN)
+	text(w, cur, col or WARN)
 end
 
 function NT.publish_checked(what, go)
@@ -3928,6 +3959,16 @@ local function inspector(w, e, is_made)
 	-- [KIT] stage 4l: what it costs, changed in place as "kit:costs" comes
 	S.cost_text = text(w, M.cost_line(e.id), DIM)
 	S.cost_id = e.id
+	-- [KIT_SIDE_SCENERY] (8) a parallax layer's, or under one: drawn where
+	-- authored here
+	local pn = NT.parallax_note(e)
+	if pn then
+		NT.warn_text(w, pn, DIM)
+		if NT.par_said ~= e.id .. pn then
+			NT.par_said = e.id .. pn
+			log:info("kit editor: " .. e.id .. ": " .. pn)
+		end
+	end
 	-- [KIT_SIGNALS_VIEW] In the Signals view its position, its parameters, its
 	-- parent's buttons and Try alone: the links are the view's own table
 	local sig = NT.sig()

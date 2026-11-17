@@ -236,6 +236,11 @@ local function drop_look(n)
 	if n.look then
 		n.look:Remove()
 	end
+	-- ([KIT_SIDE_SCENERY] (8) a parallax layer's copies of it, below)
+	for _, c in ipairs(n.par_copies and n.par_copies.nodes or {}) do
+		c:Remove()
+	end
+	n.par_copies, n.par, n.par_solid = nil, nil, nil
 	n.wear_wanted, n.ghost, n.hidden, n.ghost_alpha, n.poly = nil, nil, nil, nil, nil
 	n.look, n.hinge, n.body, n.mat, n.text, n.solid, n.box, n.on = nil, nil,
 			nil, nil, nil, nil, nil, nil
@@ -1141,10 +1146,49 @@ local function carried(n)
 	return d
 end
 
+-- [KIT_SIDE_SCENERY] (8) The kit/parallax layer an entity is under: the
+-- nearest up its kit_parent whose show has `parallax` ({follow, follow_y,
+-- repeat}), its P.nodes entry; nil: none. Remembered for the frame
+-- (update_play clears it): controls.lua's world() asks every step
+local par_memo, par_any = {}, false
+function M.parallax_layer(id, n)
+	if not par_any then
+		return nil
+	end
+	if par_memo[id] ~= nil then
+		return par_memo[id] or nil
+	end
+	local chain, found = {id}, false
+	for _ = 1, 16 do
+		local pv = n.node:GetVar("kit_parent")
+		local pid = pv:IsEmpty() and 0 or pv:GetInt()
+		local p = pid ~= 0 and P.nodes[pid]
+		if not p then
+			break
+		end
+		if type(p.show) == "table" and type(p.show.parallax) == "table" then
+			found = p
+			break
+		end
+		if par_memo[pid] ~= nil then
+			found = par_memo[pid]
+			break
+		end
+		chain[#chain + 1] = pid
+		n = p
+	end
+	for _, c in ipairs(chain) do
+		par_memo[c] = found
+	end
+	return found or nil
+end
+
 local hud = nil
 local function update_play(_, data)
 	local dt = data:GetFloat("TimeStep")
 	local lines = {}
+	par_memo = {}
+	local layers = false
 	-- [KIT_MOVING_OBJECTS] what moves at this frame's time, before anything reads it
 	if M.moving_tick then
 		M.moving_tick()
@@ -1160,6 +1204,7 @@ local function update_play(_, data)
 			n.last_text = nil
 		end
 		local show = type(n.show) == "table" and n.show or {}
+		layers = layers or type(show.parallax) == "table"
 		if type(show.look) == "table" then
 			-- [KIT_LOOK_MATERIAL] A voxel material not in the registry
 			-- yet (a builder's new one, the registry still coming): drawn
@@ -1331,6 +1376,7 @@ local function update_play(_, data)
 			end
 		end
 	end
+	par_any = layers
 	table.sort(lines, function(a, b) return a[1] < b[1] end)
 	local t = {}
 	for _, l in ipairs(lines) do
@@ -2539,8 +2585,14 @@ function VIEW.next()
 	if q.camera and pos then
 		require("buildat/module/voxelworld").set_camera(node)
 	end
+	-- ([KIT_SIDE_SCENERY] (8) a pose's camera is the parallax layers' while
+	-- it draws: pose, cam, aspect)
 	VIEW.job = {node = node, tex = tex, vp = vp, surface = surface,
-			frames = 0, t = buildat.get_time_us()}
+			frames = 0, t = buildat.get_time_us(), pose = pos ~= nil, cam = cam,
+			aspect = w / h}
+	-- (the layers placed for it now: a picture queued here is drawn this
+	-- frame, maybe after their Update)
+	M.parallax_tick()
 	if not q.camera then
 		VIEW.job.drawn = 0
 		surface:QueueUpdate()
@@ -2731,6 +2783,184 @@ do
 	install({M = M, E = E, O = O, P = P, log = log, voxel_def = voxel_def,
 		color = color})
 end
+
+-- ---- [KIT_SIDE_SCENERY] (8) **kit/parallax**: the looks under a layer
+-- (M.parallax_layer) drawn offset by the camera's travel from the layer's
+-- place, 1 - follow of it along x and 1 - follow_y of it up, so a place
+-- authored is where it is drawn with the camera at the layer's x; with
+-- `repeat` > 0 copies of the look every repeat along x, enough to cover
+-- the view at its depth. The camera: a get_view pose's while one is being
+-- drawn, else the play camera (play, spectating, the server's camera); in
+-- edit mode none: drawn where authored (the editor's note says so). An
+-- Update of its own subscribed after controls.lua's, which places the
+-- camera of this frame.
+-- simplified: a copy is the look cloned (its Lua-made materials set again,
+-- its collision bodies left out), made again as the look is rebuilt, its
+-- state flips, it is hidden or shown or its text changes; a client part's
+-- change to the look in between shows on the original alone. 32 copies an
+-- entity at most, round the camera. A get_view pose's offsets show in the
+-- window too for the frames it draws in. Nested layers: the nearest one
+-- alone
+local PAR = {said = {}, max = 32}
+local function par_camera()
+	local j = VIEW.job
+	if j and j.pose then
+		return j.node, j.cam, j.aspect
+	end
+	if E.editing or not O.camera then
+		return nil
+	end
+	return O.camera, O.camera:GetComponent("Camera")
+end
+-- How far the view reaches either side of its middle at p's depth (m)
+local function par_half_width(cn, cam, p, aspect)
+	local a = aspect or cam.aspectRatio
+	a = (a and a > 0.1) and a or 2
+	local zoom = math.max(1e-3, cam.zoom)
+	if cam.orthographic then
+		return cam.orthoSize / 2 * a / zoom * 1.1 + 1
+	end
+	local d, c = cn.worldDirection, cn.worldPosition
+	local depth = math.max(0, (p.x - c.x) * d.x + (p.y - c.y) * d.y +
+			(p.z - c.z) * d.z)
+	return depth * math.tan(math.rad(cam.fov) / 2) * a / zoom * 1.1 + 1
+end
+-- A Lua-made material is no attribute: a clone has none, so they are set
+-- again from the original's, down its tree
+local function par_materials(a, b)
+	local sa, sb = a:GetComponent("StaticModel"), b:GetComponent("StaticModel")
+	if sa and sb then
+		sb.material = sa.material
+	end
+	local ca, cb = a:GetComponent("CustomGeometry"), b:GetComponent("CustomGeometry")
+	if ca and cb then
+		for i = 0, 63 do
+			local m = ca:GetMaterial(i)
+			if not m then
+				break
+			end
+			cb:SetMaterial(i, m)
+		end
+	end
+	for i = 0, math.min(a:GetNumChildren(), b:GetNumChildren()) - 1 do
+		par_materials(a:GetChild(i), b:GetChild(i))
+	end
+end
+local function par_copies(n, want)
+	local key = tostring(n.on) .. "|" .. tostring(n.hidden) .. "|" ..
+			tostring(n.last_text)
+	local cs = n.par_copies or {nodes = {}}
+	local stale = cs.src ~= n.look or cs.key ~= key
+	-- (taken away, not disabled: a node's enabled is not its children's)
+	while #cs.nodes > (stale and 0 or want) do
+		cs.nodes[#cs.nodes]:Remove()
+		cs.nodes[#cs.nodes] = nil
+	end
+	cs.src, cs.key = n.look, key
+	n.par_copies = want > 0 and cs or nil
+	while #cs.nodes < want do
+		local c = n.look:Clone()
+		local s = c:GetChild("Solid")
+		if s then
+			s:Remove()
+		end
+		par_materials(n.look, c)
+		cs.nodes[#cs.nodes + 1] = c
+	end
+	return cs.nodes
+end
+local function par_tick()
+	-- (none drawn offset is the common case: no layer, no walk)
+	if not par_any and not PAR.drawn then
+		return
+	end
+	PAR.drawn = par_any
+	local cn, cam, aspect = par_camera()
+	local c = cn and cn.worldPosition
+	for id, n in pairs(P.nodes) do
+		local L = cn and n.look and n.at and M.parallax_layer(id, n)
+		if L then
+			local s = L.show.parallax
+			local f = math.max(0, math.min(1, tonumber(s.follow) or 0.5))
+			local fy = math.max(0, math.min(1, tonumber(s.follow_y) or 1))
+			local R = math.max(0, tonumber(s["repeat"]) or 0)
+			local lp = L.node.position
+			local at = n.at + magic.Vector3((1 - f) * (c.x - lp.x),
+					(1 - fy) * (c.y - lp.y), 0)
+			local k0, k1 = 0, 0
+			if R > 0 then
+				-- (its look's reach from its place: the box's middle and half
+				-- its diagonal)
+				local b = n.box or {size = {1, 1, 1}, off = {0, 0, 0}}
+				local r = v3(b.off):Length() + v3(b.size):Length() / 2
+				local hw = par_half_width(cn, cam, at, aspect) + r
+				k0 = math.ceil((c.x - hw - at.x) / R)
+				k1 = math.max(k0, math.floor((c.x + hw - at.x) / R))
+				if k1 - k0 + 1 > PAR.max then
+					local mid = math.floor((c.x - at.x) / R + 0.5)
+					k0, k1 = mid - PAR.max / 2 + 1, mid + PAR.max / 2
+				end
+			end
+			-- (never met: its static bodies not moved about in the physics
+			-- world either; the look built again once it is out from under)
+			if n.solid then
+				n.solid:Remove()
+				n.solid, n.par_solid = nil, true
+			end
+			n.look.position = at + magic.Vector3(k0 * R, 0, 0)
+			local q = n.look.rotation
+			for j, copy in ipairs(par_copies(n, k1 - k0)) do
+				copy.position = at + magic.Vector3((k0 + j) * R, 0, 0)
+				copy.rotation = q
+			end
+			n.par = true
+			local said = L.id .. " " .. f .. " " .. fy .. " " .. R
+			if PAR.said[id] ~= said then
+				PAR.said[id] = said
+				log:info(string.format("kit: entity %d under parallax layer %d " ..
+						"(follow %g, follow_y %g, repeat %g)", id, L.id, f, fy, R))
+			end
+		elseif n.par then
+			-- (the editor's, or out from under a layer: where authored)
+			n.look.position = n.at
+			par_copies(n, 0)
+			n.par = nil
+			if n.par_solid then
+				drop_look(n)
+			end
+			if PAR.said[id] then
+				PAR.said[id] = nil
+				log:info("kit: entity " .. id .. " drawn where authored" ..
+						(cn and " (under no parallax layer)" or " (edit mode)"))
+			end
+		end
+	end
+end
+magic.SubscribeToEvent("Update", par_tick)
+M.parallax_tick = par_tick
+-- For a drive: "event kit_parallax <id>..." logs each one's look as drawn,
+-- where it is authored, its copies' x and the camera's place
+magic.SubscribeToEvent("command_seq:kit_parallax", function(_, data)
+	local cn = par_camera()
+	local c = cn and cn.worldPosition
+	for w in data:GetString("Param"):gmatch("%d+") do
+		local id = tonumber(w)
+		local n = P.nodes[id]
+		if not (n and n.look and n.at) then
+			log:info("kit: parallax: entity " .. id .. " has no look drawn")
+		else
+			local p, a, xs = n.look.position, n.at, {}
+			for _, copy in ipairs(n.par_copies and n.par_copies.nodes or {}) do
+				xs[#xs + 1] = string.format("%.2f", copy.position.x)
+			end
+			log:info(string.format("kit: parallax: entity %d drawn at %.3f,%.3f," ..
+					"%.3f, authored %.3f,%.3f,%.3f, %d copies%s, the camera %s", id,
+					p.x, p.y, p.z, a.x, a.y, a.z, #xs, #xs > 0 and " at x " ..
+					table.concat(xs, " ") or "", c and string.format("%.3f,%.3f,%.3f",
+					c.x, c.y, c.z) or "none (where authored)"))
+		end
+	end
+end)
 
 return M
 -- vim: set noet ts=4 sw=4:
