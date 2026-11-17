@@ -31194,7 +31194,10 @@ struct Module: public interface::Module, public Interface
 				"still on a default name (type and id); scenes with no way in "
 				"(not where players join, not listed, named by no parameter or "
 				"custom type); entities with no link from an output or to an "
-				"input that at least 3 of 4 of their type (4 or more) have.",
+				"input that at least 3 of 4 of their type (4 or more) have; in a "
+				"side view (kit/controls camera side), scenery wholly in front "
+				"of the plane by more than side_clip (lower z, the foreground), "
+				"never drawn.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			// [KIT_AGENT_FEEDBACK_1117] 11 (history())
 			{"get_history", "=history", "Who changed the game and when, the "
@@ -35512,11 +35515,133 @@ struct Module: public interface::Module, public Interface
 		return out;
 	}
 
+	// [KIT_SIDE_SCENERY] (3) Whether an authored entity's look lies wholly in
+	// front of its scene's side camera's clip: kit/controls camera side, the
+	// camera at lower z than the plane (lower z the foreground), what is
+	// nearer than side_clip in front of the plane never drawn (controls.lua).
+	// front: the farthest z its look reaches; clip: the z the view begins at.
+	// simplified: a look's box (a polygon's points and depth, a size, a
+	// sphere's radius) turned with the entity; a look with its own rotation or
+	// an extent by a sphere round all of it, so such a one may go unwarned
+	// clips: the scenes' clips found so far (a scan's), NaN where not side
+	bool side_clipped(const Entity &e, double &front, double &clip,
+			std::map<ss_, double> *clips = nullptr)
+	{
+		auto num = [](const json::Value &v, double def){
+			return v.is_number() && std::isfinite(v.as_number()) ? v.as_number() : def;
+		};
+		// (scenery: not one with a movement, which goes where it steps)
+		ss_ scene;
+		if(!e.has_pos || !e.kind.empty() || !authored(e) || movement_on(e) ||
+				!scene_of(e, &scene))
+			return false;
+		auto ci = clips ? clips->find(scene) : std::map<ss_, double>::iterator();
+		if(clips && ci != clips->end()){
+			clip = ci->second;
+		} else {
+			const json::Value cp = controls_params(scene);
+			clip = jstr(cp, "camera") != "side" ? NAN : plane_depth(scene) -
+					std::min(num(cp.get("distance"), 6), num(cp.get("side_clip"), 0.55));
+			if(clips)
+				(*clips)[scene] = clip;
+		}
+		if(std::isnan(clip))
+			return false;
+		double w[3];
+		Turn q;
+		world_of(e, w, &q);
+		bool any = false;
+		front = -1e300;
+		for(const Instance &in : e.comps){
+			const json::Value &d = m_types[in.type].decl.get("look");
+			if(!d.is_object())
+				continue;
+			const json::Value look = look_of(in, d);
+			double c[3] = {0, 0, 0}, h[3] = {0.4, 0.4, 0.4};
+			const json::Value &pts = look.get("points"), &sz = look.get("size"),
+					&off = look.get("offset");
+			if(jstr(look, "shape") == "polygon" && pts.is_array() && pts.size()){
+				double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
+				for(unsigned i = 0; i < pts.size(); i++)
+					for(unsigned k = 0; k < 2; k++){
+						const double v = num(pts.at(i).at(k), 0);
+						lo[k] = std::min(lo[k], v);
+						hi[k] = std::max(hi[k], v);
+					}
+				for(int k = 0; k < 2; k++){
+					c[k] = (lo[k] + hi[k]) / 2;
+					h[k] = (hi[k] - lo[k]) / 2;
+				}
+				h[2] = num(look.get("depth"), 1) / 2;
+			} else if(sz.is_array()){
+				for(unsigned k = 0; k < 3; k++)
+					h[k] = std::fabs(num(sz.at(k), 1)) / 2;
+			} else if(sz.is_number()){
+				h[0] = h[1] = h[2] = std::fabs(num(sz, 0.4));
+			}
+			for(unsigned k = 0; k < 3 && off.is_array(); k++)
+				c[k] += num(off.at(k), 0);
+			const json::Value &rot = look.get("rotation");
+			const bool round = !look.get("extent").is_undefined() ||
+					!look.get("when").is_undefined() || (rot.is_array() &&
+					(num(rot.at(0u), 0) || num(rot.at(1u), 0) || num(rot.at(2u), 0)));
+			double z = w[2];
+			if(round){
+				z += std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]) +
+						std::sqrt(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]) +
+						(look.get("extent").is_undefined() ? 0 : 1e6);
+			} else {
+				q.apply(c);
+				z += c[2];
+				for(int k = 0; k < 3; k++){
+					double a[3] = {0, 0, 0};
+					a[k] = 1;
+					q.apply(a);
+					z += std::fabs(a[2]) * h[k];
+				}
+			}
+			front = std::max(front, z);
+			any = true;
+		}
+		return any && front < clip;
+	}
+
+	// [KIT_SIDE_SCENERY] (3) The entities a change left wholly in front of
+	// the side view's clip: a line for the editor's notification and the
+	// agent's answer ("": none)
+	ss_ side_clip_note(const sv_<std::pair<uint64_t, json::Value>> &change)
+	{
+		ss_ ids;
+		double front = 0, clip = 0;
+		size_t n = 0;
+		std::map<ss_, double> clips;
+		for(const auto &c : change){
+			auto it = m_entities.find(c.first);
+			double f, cl;
+			if(it == m_entities.end() || !side_clipped(it->second, f, cl, &clips))
+				continue;
+			ids += (n ? ", " : "")+itos(c.first);
+			if(!n++)
+				front = f, clip = cl;
+		}
+		if(!n)
+			return "";
+		auto z = [](double v){
+			return json::Value(std::round(v * 100) / 100).stringify();
+		};
+		// (a line the editor's notification shows whole at 1024 wide)
+		return (n == 1 ? "Entity "+ids+" is" : "Entities "+ids+" are")+
+				" wholly in front of the side view's clip (z "+z(clip)+(n == 1 ?
+				"; it reaches "+z(front) : ss_())+"), never drawn: lower z is the "
+				"foreground. Move "+(n == 1 ? "it" : "them")+" to z "+z(clip)+
+				" or more, or raise side_clip";
+	}
+
 	// [KIT_AGENT_FEEDBACK_1117] 12: get_goal_warnings' level checks after
 	// the goals' (publish asks about none): entities on a default name
 	// (place's "<type> <id>"), scenes with no way in, and per type the
 	// entities with no link out (in) where at least 3 of 4 of 4 or more of
-	// that type have one.
+	// that type have one; [KIT_SIDE_SCENERY] (3) scenery a side view clips.
 	// simplified: a way in is any parameter or custom type's source naming
 	// the scene, a listing or players joining there; whether that
 	// teleport is ever reached is not followed
@@ -35596,6 +35721,21 @@ struct Module: public interface::Module, public Interface
 		};
 		few("link out", outs);
 		few("link in", ins);
+		// [KIT_SIDE_SCENERY] (3) scenery a side view never draws
+		std::map<ss_, double> clips;
+		std::map<ss_, sv_<uint64_t>> clipped;
+		for(auto &x : m_entities){
+			double f, cl;
+			ss_ sn;
+			if(side_clipped(x.second, f, cl, &clips) && scene_of(x.second, &sn))
+				clipped[sn].push_back(x.first);
+		}
+		for(auto &c : clipped)
+			out.append("scene "+c.first+": "+itos(c.second.size())+" entities "
+					"wholly in front of the side view's clip (z "+json::Value(
+					std::round(clips[c.first] * 100) / 100).stringify()+": the "
+					"plane less kit/controls' side_clip), never drawn; lower z is "
+					"the foreground: "+ids(c.second));
 	}
 
 	// The guide: how a composition is built and run, then the palette's
@@ -36953,7 +37093,10 @@ struct Module: public interface::Module, public Interface
 			"camera first_person (the eye), chase (behind the player, distance "
 			"away), top_down (from height at angle and yaw; ortho: flat) or "
 			"side (across a plane looking along +z; ortho, side_clip, dead_zone, "
-			"look_ahead); fov (20...150), smoothing, offsets and roll; pointer "
+			"look_ahead: lower z, toward the camera, is the foreground, higher "
+			"the background; what lies wholly nearer than side_clip in front "
+			"of the plane is never drawn, as get_goal_warnings and the editor "
+			"say); fov (20...150), smoothing, offsets and roll; pointer "
 			"auto, crosshair or cursor; plane vertical holds bodies at one z "
 			"(side-scrollers, with kit/polygon); the effects tint and "
 			"tint_amount, vignette, blur and glitch (0...1) colour the whole "
@@ -39626,6 +39769,13 @@ struct Module: public interface::Module, public Interface
 		}
 		log_i(MODULE, "An edit by %s: %s", cs(p.name), cs(what));
 		m_edit_what = what;
+		// [KIT_SIDE_SCENERY] (3) what it left where the side view never draws:
+		// the builder's notification, the agent's answer
+		const ss_ clipped = side_clip_note(change);
+		if(!clipped.empty()){
+			log_i(MODULE, "%s: %s", cs(p.name), cs(clipped));
+			tell(peer, clipped);
+		}
 		// (commit() sent the state before the World changed: its surface,
 		// [KIT_NO_WORLD]'s none, the editor's tools go by)
 		if(world_check(p.name))

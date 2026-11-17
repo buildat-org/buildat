@@ -29,7 +29,9 @@
 #      refused naming the screen's buttons;
 #   5. get_state's filters: scene, ids, type, state false (10);
 #   6. get_goal_warnings' level lines: default names, a scene with no way
-#      in, the timer with no link of four (12);
+#      in, the timer with no link of four (12); [KIT_SIDE_SCENERY] (3) parts
+#      wholly in front of a side view's clip, placed and moved there: in the
+#      answers and a line;
 #   7. get_history: the edits by who, limit, since (11);
 #   8. restore_checkpoint puts a heightmap's samples back (4z26): kitboss
 #      raises a sample after a checkpoint, the restore lowers it, the
@@ -432,6 +434,29 @@ elif phase == "goals":
     assert any(l.startswith("scene attic: no way in") for l in w), w
     assert not any(l.startswith("scene moon") for l in w), w
     assert "kit/timer: 1 of 4 have no link out (the others do): %d" % T[3] in w, w
+    # [KIT_SIDE_SCENERY] (3) a side view's clipped scenery: the place's and
+    # the move's answers, then a level line
+    call("switch_scene", {"name": "attic"})
+    call("place", {"type": "kit/controls", "pos": [0, 0, 0], "on": "scene",
+        "params": {"camera": "side"}})
+    CLIP = "wholly in front of the side view's clip (z "
+    r = call("place", {"type": "kit/part", "pos": [0, 1, -5]})
+    P1 = placed(r)
+    assert ("Entity %d is " % P1) + CLIP in r and "; it reaches -4.5), never drawn" in r, r
+    r = call("place", {"type": "kit/part", "pos": [2, 1, 0]})
+    P2 = placed(r)
+    assert CLIP not in r, r
+    r = call("move", {"id": P2, "pos": [2, 1, -5]})
+    assert ("Entity %d is " % P2) + CLIP in r, r
+    w = json.loads(call("get_goal_warnings"))
+    for l in w:
+        print("   |", l)
+    assert any(l.startswith("scene attic: 2 entities " + CLIP) and
+        l.endswith(": %d, %d" % (P1, P2)) for l in w), w
+    call("move", {"id": P2, "pos": [2, 1, 0]})
+    w = json.loads(call("get_goal_warnings"))
+    assert any(l.startswith("scene attic: 1 entities " + CLIP) and
+        l.endswith(": %d" % P1) for l in w), w
 elif phase == "history":
     rpc("initialize", init)
     h = json.loads(call("get_history"))
