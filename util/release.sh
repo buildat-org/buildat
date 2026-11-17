@@ -93,7 +93,12 @@ prune_alphas() {
 	old=$(printf '%s\n' "$tags" | grep -E "$ALPHA_TAG" | sort -V | head -n -5 || true)
 	for o in $old; do
 		echo "deleting the old alpha $o"
-		gh release delete "$o" --repo "$repo" --cleanup-tag --yes || bad=1
+		# (a tag whose package run failed has no release to delete it with)
+		if gh release view "$o" --repo "$repo" > /dev/null 2>&1; then
+			gh release delete "$o" --repo "$repo" --cleanup-tag --yes || bad=1
+		else
+			git push -q github ":refs/tags/$o" || bad=1
+		fi
 	done
 	return $bad
 }
