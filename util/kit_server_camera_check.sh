@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-11-17)
-# covers: src/server/confine.cpp src/server/main.cpp builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/accounts/accounts.cpp builtin/network/network.cpp apps/workbench/main/main.cpp builtin/voxelworld/client_lua/module.lua client/api.lua
+# covers: src/server/confine.cpp src/client/command_seq.cpp src/server/main.cpp builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/accounts/accounts.cpp builtin/network/network.cpp apps/workbench/main/main.cpp builtin/voxelworld/client_lua/module.lua client/api.lua
 # [KIT_AGENT_NEXT_1] The server's camera: a headless client of the
 # server's own draws an agent's get_view when no client of its account is
 # there, and plays a body for it (play_join, play_input, play_leave). One
@@ -18,7 +18,9 @@
 #   3. trust: /health counts no player; the camera's one-time secret, read
 #      off its environment, refused when replayed, and from this machine's
 #      LAN address (not loopback); not in any log;
-#   4. unused for BUILDAT_CAMERA_IDLE_S (10 here) it stops, its process gone;
+#   4. idle 2 s it draws 4 frames a second, a picture asked wakes it to 20
+#      ([KIT_AGENT_FEEDBACK_1117]; its idle CPU printed); unused for
+#      BUILDAT_CAMERA_IDLE_S (10 here) it stops, its process gone;
 #   5. play: play_join refused while Stopped; start; play_join (the camera
 #      started again); a trigger zone placed ahead; play_input walks into
 #      it: the zone's "entered" among the events, the body moved, a picture
@@ -330,6 +332,10 @@ elif phase == "health":
         h = json.loads(r.read().decode())
     assert h["players"] == 0, h
     print("  /health:", {k: h[k] for k in ("players",) if k in h})
+elif phase == "wake":
+    # [KIT_AGENT_FEEDBACK_1117] idle at 4 frames a second: the call's picture
+    text, imgs = view({"pos": C, "look_at": M, "width": 320, "height": 240}, "wake")
+    assert mag(imgs[0], 0.5, 0.5), imgs[0][2](160, 120)
 elif phase == "play":
     call("stop") # (Workbench's world Running from its start)
     text = refused("play_join", {})
@@ -472,9 +478,18 @@ else
 fi
 CLIENT=$SERVER_PID
 echo "ok: /health counts no player; the secret replayed refused"
+# [KIT_AGENT_FEEDBACK_1117] Idle 2 s: 4 frames a second; a call wakes it
+# (20) before its picture is asked
+await "$SL" 0 10 "The server's camera at 4 frames a second \(idle\)"
+m=$(mark "$SL")
+mcp wake
+await "$SL" "$m" 1 "The server's camera at 20 frames a second"
+echo "ok: idle at 4 frames a second, woken to 20 by a picture"
 
 # 4. Unused: stopped
-# (its idle CPU measured meanwhile, from 1 s after the last call)
+# (its idle CPU measured meanwhile, from its 4 frames a second on)
+m=$(mark "$SL")
+await "$SL" "$m" 10 "The server's camera at 4 frames a second \(idle\)"
 c0=$(ticks) t0=$(now_ms) idle=
 for i in $(seq 200); do
 	grep -aq "The server's camera stops: unused for 10 s" "$SL" && break
@@ -484,6 +499,8 @@ done
 [ -n "$idle" ] && echo "$idle"
 await "$SL" 0 5 "The server's camera stops: unused for 10 s"
 gone "$CP" "the idle camera"
+grep -aq "command: max_fps 4" "$CAMLOG" && grep -aq "command: max_fps 20" "$CAMLOG" ||
+	fail "the camera did not take max_fps 4 and 20 ($CAMLOG)"
 echo "ok: the idle camera stopped, its process gone"
 
 # 5. Play

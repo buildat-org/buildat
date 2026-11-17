@@ -248,6 +248,10 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			if(!parse_f64(rest, &r) || r < 0 || r > 1000)
 				return fail("game_rate <rate, 0 to 1000>");
 			c.s = rest;
+		} else if(cmd == "max_fps"){
+			c.type = Type::MaxFps;
+			if(!parse_i64(rest, &c.n) || c.n < 1 || c.n > 1000)
+				return fail("max_fps <frames a second, 1 to 1000>");
 		} else if(cmd == "expect_error"){
 			c.type = Type::ExpectError;
 			c.s = rest;
@@ -566,6 +570,8 @@ ss_ dump_command(const Command &c)
 		return "game_clock "+c.s;
 	case Type::GameRate:
 		return "game_rate "+c.s;
+	case Type::MaxFps:
+		return "max_fps "+itos(c.n);
 	case Type::Screenshot:
 		return "screenshot "+c.s;
 	case Type::Event:

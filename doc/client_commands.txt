@@ -134,6 +134,11 @@ game_rate <n>
     on the wall clock -- held keys, a mouse down and up, the client's
     prediction compared -- and the ceiling while the drive only waits.
 
+max_fps <n>
+    The engine's frame limit from now on, 1 to 1000 (the max_fps option's
+    for this run): Kit's server camera draws 4 a second while idle, 20 at
+    work.
+
 frames <n>
     n frames rendered: the frame after an input has read it, a UI laid out
     and drawn after a click or a key. Where a delay of a second waited for

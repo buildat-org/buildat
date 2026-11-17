@@ -32336,6 +32336,8 @@ struct Module: public interface::Module, public Interface
 		size_t peer = 0;
 		bool ready = false;
 		int64_t started = 0, used = 0, checked = 0, moved = 0;
+		// Told to draw CAMERA_IDLE_FPS (camera_pace)
+		bool slow = false;
 		// Why the last start ended
 		ss_ failed;
 		// [3a] whose agent it plays for ("": none) and that agent's peer;
@@ -32366,6 +32368,22 @@ struct Module: public interface::Module, public Interface
 		if(write(m_cam.req, l.data(), l.size()) != (ssize_t)l.size())
 			log_w(MODULE, "The camera's launcher took no \"%s\"",
 					cs(line.substr(0, line.find(' '))));
+	}
+
+	// [KIT_AGENT_FEEDBACK_1117] Idle 2 s (no picture, no body played), it
+	// draws CAMERA_IDLE_FPS frames a second, else 20 (confine.cpp's
+	// max_fps): its frames were most of its CPU (llvmpipe, 24 % of a core
+	// at 20). Back at 20 before a call's work is sent, the first frame
+	// 1 / CAMERA_IDLE_FPS s away at most
+	static const int CAMERA_IDLE_FPS = 4;
+	void camera_pace(bool slow)
+	{
+		if(slow == m_cam.slow || !m_cam.running)
+			return;
+		m_cam.slow = slow;
+		camera_say("cmd max_fps "+itos(slow ? CAMERA_IDLE_FPS : 20));
+		log_i(MODULE, "The server's camera at %i frames a second%s",
+				slow ? CAMERA_IDLE_FPS : 20, slow ? " (idle)" : "");
 	}
 
 	// "" when it may run, else why not
@@ -32404,8 +32422,11 @@ struct Module: public interface::Module, public Interface
 		if(!why.empty())
 			return why;
 		m_cam.used = interface::os::time_us();
-		if(m_cam.running)
+		if(m_cam.running){
+			camera_pace(false);
 			return "";
+		}
+		m_cam.slow = false;
 		m_cam.mode = m_cam.no_offscreen ? "x11" : "offscreen";
 		std::random_device rd;
 		char secret[48];
@@ -32514,6 +32535,8 @@ struct Module: public interface::Module, public Interface
 		const int64_t now = interface::os::time_us();
 		if(!m_play.id.empty() && now > m_play.deadline)
 			play_finish("its input had not ended in time");
+		camera_pace(m_cam.ready && m_cam.play.empty() && !camera_busy() &&
+				now - m_cam.used > 2000000);
 		if(!m_cam.running || now - m_cam.checked < 1000000)
 			return;
 		m_cam.checked = now;

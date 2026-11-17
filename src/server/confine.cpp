@@ -1252,6 +1252,13 @@ static void camera_exec(const CameraSetup &s, int in, bool x11, int w, int h,
 	env.push_back("SDL_AUDIODRIVER=none");
 	env.push_back("SDL_ASSERT=abort");
 	env.push_back("BUILDAT_AGENT_TOKEN="+secret);
+	// [KIT_AGENT_FEEDBACK_1117] Mesa's llvmpipe on two threads unless the
+	// host says (s.env): it starts one a core, and at 320x240 their
+	// handoffs were a third of the camera's CPU (16 cores: 37 % of a core
+	// idle, 24 % on two; pictures up to 256x256 as quick). A GPU's driver
+	// ignores it
+	if(!getenv("LP_NUM_THREADS"))
+		env.push_back("LP_NUM_THREADS=2");
 	if(x11){
 		env.push_back("SDL_VIDEODRIVER=x11");
 		env.push_back("DISPLAY="+s.display);
