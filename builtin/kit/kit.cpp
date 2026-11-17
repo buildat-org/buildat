@@ -31020,7 +31020,8 @@ struct Module: public interface::Module, public Interface
 				"(own, the scene it is under that has one, root or none); how "
 				"many of your edits there are to undo; the game it is "
 				"(\"<author>/<name>\", list_aitta's filter) and its save; "
-				"session: where you are (the main round or your draft). main: "
+				"session: where you are (the main round or your draft); "
+				"buildat_version: the server's Buildat version. main: "
 				"true reads the main round's from your draft. An entity on the "
 				"app root (every scene's: the game-wide rules, a lobby and its "
 				"screens) has app_root: true. scene, ids, type: only those "
@@ -32026,8 +32027,8 @@ struct Module: public interface::Module, public Interface
 			// The guide, as Claude Code puts it into the model's context (a
 			// resource it only lists): get_guide has it whole
 			res.set("instructions", m_hosted ? agent_guide(at.name+"'s agent",
-					false) : ss_("Kit is not hosted by this server's app: its "
-					"tools refuse"));
+					false) : ss_("Buildat ")+BUILDAT_VERSION+" server. Kit is "
+					"not hosted by this server's app: its tools refuse");
 			log_i(MODULE, "MCP: %s's agent (\"%s\", %s token) from %s, protocol "
 					"%s", cs(at.name), cs(at.label), cs(at.scope), cs(r.address),
 					cs(res.get("protocolVersion").as_string()));
@@ -34657,6 +34658,8 @@ struct Module: public interface::Module, public Interface
 	ss_ agent_state(const Peer &p, const json::Value &a, bool &failed)
 	{
 		json::Value s = json::object(), scenes = json::array();
+		// [SERVER_VERSION_SHOWN]
+		s.set("buildat_version", ss_(BUILDAT_VERSION));
 		s.set("running", m_session.running);
 		s.set("scene", p.scene);
 		// [KIT_AGENT_VISUALS] its entity (a parent as 0 is)
@@ -36991,8 +36994,10 @@ struct Module: public interface::Module, public Interface
 	ss_ agent_guide(const ss_ &who, bool full)
 	{
 		static const size_t MAX_INSTRUCTIONS = 4000;
-		ss_ s = "Kit on a Buildat server: a game (the composition) its "
-			"builders build together, live. You edit it as "+who+", with that "
+		// [SERVER_VERSION_SHOWN] the version first
+		ss_ s = ss_("Buildat ")+BUILDAT_VERSION+" server. Kit on it: a game "
+			"(the composition) its builders build together, live. You edit "
+			"it as "+who+", with that "
 			"account's rights; your edits are logged so and undo takes them "
 			"back, yours only (the last 50).\n"
 			"- An entity: an id, a name, a place (x, y, z in cells, y up) and "

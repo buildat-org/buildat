@@ -2770,6 +2770,11 @@ end
 buildat.safe.server_address = function()
 	return __buildat_server_address()
 end
+-- server_version() -> the joined server's Buildat version ("0.8.0-alpha.34"),
+-- as its hello said it; nil before one ([SERVER_VERSION_SHOWN])
+buildat.safe.server_version = function()
+	return __buildat_server_version()
+end
 -- get_cache_path() -> the directory those two work in. The share and user
 -- paths stay out of the sandbox; this is here because writing a file under
 -- the cache means knowing where the cache is.

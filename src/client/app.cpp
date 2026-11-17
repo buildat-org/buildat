@@ -3040,6 +3040,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(game_storage_dir)
 		DEF_BUILDAT_FUNC(set_client_keys)
 		DEF_BUILDAT_FUNC(server_address)
+		DEF_BUILDAT_FUNC(server_version)
 		DEF_BUILDAT_FUNC(lan_address)
 		DEF_BUILDAT_FUNC(lan_servers)
 		DEF_BUILDAT_FUNC(local_server_status)

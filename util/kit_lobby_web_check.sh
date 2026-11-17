@@ -17,7 +17,8 @@
 #     end and the view at its right, as before the panel (landscape.png);
 #   - [KIT_SCENE_PACKAGES] back in portrait: the track list (The Crags,
 #     The Loop) and Kit's touch Menu over the full screen (menu_over.png),
-#     tapped: the pause menu (menu.png), Continue; a kit/ui_button of
+#     tapped: the pause menu (menu.png) with its "Server <VERSION>" label
+#     ([SERVER_VERSION_SHOWN]: a tap finds it), Continue; a kit/ui_button of
 #     action pause_menu placed on the lobby screen (93): no touch Menu
 #     over it, the button opening the menu (menu_button.png); The Loop
 #     tapped: its scene (loop.png), its gems and finish by the editor's
@@ -79,6 +80,7 @@ cat > "$t/phone.json" <<'J'
 	["waitlog", "pause: the menu shown", 10],
 	["waitlog", "kit: the touch Menu over the full screen hidden", 10], ["frames", 5],
 	["shot", "${OUT}/menu.png"],
+	["tap", "Text", "Server @VERSION@"], ["frames", 3],
 	["tap", "Button", "Continue"], ["waitlog", "pause: the menu closed", 10],
 	["waitlog", "kit: the touch Menu over the full screen shown", 10],
 	["event", "kit_edit {\"op\": \"mode\", \"on\": true}"],
@@ -117,6 +119,7 @@ cat > "$t/phone.json" <<'J'
 	["eval", "console.log('CHECK: done'), 'mark'"]
 ]
 J
+sed -i "s/@VERSION@/$(cat "$here/VERSION")/" "$t/phone.json"
 TOUCH=1 WEB_DRIVE_VIEWPORT=412x915@1 "$here/util/web_drive.sh" chrome workbench "$t/phone.json" "$t/phone" ||
 	fail "the web drive as a phone ($t/phone)"
 python3 -I - "$t/phone/page.log" <<'PY' || fail "see above ($t/phone/*.png, $t/phone/page.log)"

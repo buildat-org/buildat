@@ -3,7 +3,8 @@
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
 -- [KIT] stage 4c: a game's pause menu, Escape's, shared (Workbench's and
--- skeldat's): Continue, Chat..., Settings... and Leave the game, and the
+-- skeldat's): the server's version on top ("Server 0.8.0-alpha.34"),
+-- Continue, Chat..., Settings... and Leave the game, and the
 -- app's own items and pages among them in the order it gives;
 -- kit.add_menu_items(menu) adds Kit's (builtin/kit). The app's server
 -- serves it (meta.json's "client_extensions": ["pause_menu"]), so a client
@@ -147,6 +148,18 @@ function M.safe.new(o)
 		local vm = ui_utils.vertical_menu(root, {min_width = 260})
 		local w = vm.window
 		w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		-- [SERVER_VERSION_SHOWN] The server's version on top, small and dim
+		-- (an older client has no server_version: no label)
+		local version = buildat.server_version and buildat.server_version()
+		if version then
+			local t = w:CreateChild("Text")
+			t:SetStyleAuto()
+			t.text = "Server " .. version
+			-- 80 % of the items' 15 (res/style.xml's Text)
+			t:SetFontSize(12)
+			t:SetColor(magic.Color(ui_utils.rgb("dim")))
+			t:SetTextAlignment(magic.HA_CENTER)
+		end
 		local list = {}
 		for _, it in ipairs(items) do
 			local label = it.label

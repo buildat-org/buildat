@@ -137,6 +137,12 @@ buildat.server_address() -> string, or nil when not joined
   connection_encrypted() telling https). The admin's Starport page offers
   it as the public address ([STARPORT_DEFAULT_URL]).
 
+buildat.server_version() -> string, or nil before the server's hello
+- The joined server's Buildat version, as its hello said it ("0.8.0-alpha.34",
+  40 characters at most); buildat.version() is the client's own. The pause
+  menu shows it ([SERVER_VERSION_SHOWN]). Served code that may run on an
+  older client tests for the function first.
+
 buildat.open_import_folder() -> ok, err
 - Opens <user>/shared/<the local server's app>/import in the desk's file
   manager. Only after a click or a key (user activated), only with a local

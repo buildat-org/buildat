@@ -2500,6 +2500,20 @@
 		return 1;
 	}
 
+	// server_version() -> the server's Buildat version as its hello said
+	// it, or nil before one ([SERVER_VERSION_SHOWN])
+	static int l_server_version(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const ss_ v = self->m_state ? self->m_state->get_server_version() : "";
+		if(v.empty())
+			return 0;
+		lua_pushlstring(L, v.c_str(), v.size());
+		return 1;
+	}
+
 	// lan_address() -> "a.b.c.d" or nothing: this machine's address on the
 	// LAN, for the pause menu's "Open to LAN" to say. Only while connected
 	// to the server this client started: to any other, where this machine
