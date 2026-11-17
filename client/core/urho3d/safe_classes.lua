@@ -2594,6 +2594,10 @@ function M.define(dst, util)
 			-- Enter breaks the line, Ctrl+Enter finishes, the text wraps
 			-- ([HEARTH_MVP]: a message has paragraphs)
 			multiLine = util.simple_property("boolean"),
+			-- How far its text is scrolled (y: minus the pixels scrolled
+			-- down), for a scroll bar beside a multi-line field
+			-- ([KIT_AGENT_FEEDBACK_1117]); the caret and the wheel move it too
+			childOffset = util.simple_property(dst.IntVector2),
 		},
 	})
 

@@ -338,7 +338,7 @@ function FE.open(rec)
 			"   ·   " .. takes(rec), A.DIM)
 	local about = rec.d.about or rec.d.description
 	s.about = type(about) == "string" and text(w, about, A.DIM) or nil
-	s.edit, s.view, s.picks, s.steps = nil, nil, {}, nil
+	s.edit, s.view, s.picks, s.steps, s.bar = nil, nil, {}, nil, nil
 	if rec.choices then
 		local view = w:CreateChild("ScrollView")
 		local body = view:CreateChild("UIElement")
@@ -373,6 +373,9 @@ function FE.open(rec)
 		s.edit = edit(r, str(current(rec)), function() end)
 		s.edit:SetName("entry field")
 		s.edit.multiLine = rec.long
+		-- [KIT_AGENT_FEEDBACK_1117] a long text's scroll bar (a phone has no
+		-- wheel)
+		s.bar = rec.long and NT.text_bar(r, s.edit, "entry field") or nil
 		magic.SubscribeToEvent(s.edit, "TextFinished", function()
 			FE.apply()
 		end)
@@ -441,7 +444,8 @@ local function lay_out(s, kb)
 		for _, b in ipairs(s.steps or {}) do
 			b:SetFixedSize(T, T)
 		end
-		s.edit:SetFixedSize(fw - (s.steps and 2 * (T + 4) or 0), h)
+		s.edit:SetFixedSize(fw - (s.steps and 2 * (T + 4) or 0) -
+				(s.bar and T + 4 or 0), h)
 	end
 	if not w.visible and s.edit then
 		w.visible = true
@@ -478,6 +482,9 @@ function FE.tick()
 			end
 		end
 		s.age = s.age + 1
+		if s.bar then
+			s.bar()
+		end
 		local kb = buildat.keyboard_height()
 		local r = magic.ui.root
 		local key = r.width .. " " .. r.height .. " " .. kb
