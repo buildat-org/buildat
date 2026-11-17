@@ -133,6 +133,11 @@ namespace interface
 //              {"player:<id>": v} (a `by`'s key), each client sent only
 //              its own player's v ("kit:mine" {"all": bool, "list":
 //              [{"id", "key", "value"}]}; null: none) while in its scene.
+//              In a run it is a plain table: `for by, v in
+//              pairs(c.state.<key>)` lists every player's entry, and
+//              c.state.<key>[by] = nil clears one (a table changed in
+//              place is a set); pairs and next on c.state itself list
+//              the state's keys ([KIT_AGENT_FEEDBACK_1117]).
 //              simplified: a player's entry stays until the round's start
 //              resets the state, in a persistent world for good (one a
 //              player who ever set it off); dropping a gone player's is
@@ -404,7 +409,9 @@ namespace interface
 //   their state is play state (the round's start resets it), kept in the
 //   runtime row (its "players": {name: {id, aside}}). A type with
 //   `players = true` reads every player: c.players = {{id, name, here,
-//   state = {type = state}}}.
+//   state = {type = state}, scene}}: every scene's players, each with
+//   the scene they are in ([KIT_AGENT_FEEDBACK_1117] "" none); a
+//   scene's component keeps to its own by `not p.away` (below).
 //   Entities made in play: c:spawn{prefab = name | entity = id, pos =
 //   {x, y, z}} (a copy of a prefab its prefab parameters name, or of an
 //   entity it reaches with what is under it, in its scene at pos or its
@@ -810,7 +817,8 @@ namespace interface
 //   ones: the world's, their feet's cell's middle, as c.pos is for an
 //   entity), yaw (degrees, their view's last input) and alive (placed,
 //   not waiting to respawn, their health's hp above 0 where they have
-//   one); away true when they are in another scene than the entity.
+//   one); away true when they are in another scene than the entity (a
+//   placed one's; never on the root's), scene the one they are in.
 //   regions = true -- c:region_at({x, y, z}): the region deciding the
 //   cell the point is in (the smallest enabled one of its scene, as
 //   allows() picks), {id, team (the team it is under, 0 none), rules
@@ -1440,7 +1448,7 @@ namespace interface
 // (show.player, show.bot).
 // [KIT_GUIDE_BOTS_2] A bot is a player but for what an account holds: in
 // c.players ({id, name, bot = true, by, here, state, pos, yaw, away,
-// alive}), c.player its own id in its runs (its own kit/inventory and the
+// scene, alive}), c.player its own id in its runs (its own kit/inventory and the
 // other player types, added as it is made), teams, an arena's queue and
 // count (ready as it enters), zones, sessions (a round's: a copy of it made
 // at the session's spawn, the bot itself parked until the session ends; a

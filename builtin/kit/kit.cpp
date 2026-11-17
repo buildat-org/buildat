@@ -15836,6 +15836,9 @@ struct Module: public interface::Module, public Interface
 				}
 				j.set("alive", player_alive(it->second));
 				j.set("by", "player:"+itos(pl.second));
+				// [KIT_AGENT_FEEDBACK_1117] the scene they are in (every
+				// scene's players are listed: a scene's component filters)
+				j.set("scene", actor_scene("player:"+itos(pl.second)));
 				players.append(j);
 				names.set("player:"+itos(pl.second), pl.first);
 			}
@@ -15863,6 +15866,7 @@ struct Module: public interface::Module, public Interface
 				scene_of(b, &ps);
 				if(!own_scene.empty() && ps != own_scene)
 					j.set("away", true);
+				j.set("scene", ps);
 				j.set("alive", player_alive(b));
 				players.append(j);
 				names.set("bot:"+itos(b.id), bot_name(b));
@@ -35139,6 +35143,13 @@ struct Module: public interface::Module, public Interface
 				"under it, and the rules it has from above. A new scene is empty "
 				"(no ground: its players held still until it has ground or a "
 				"spawner of players).\n"
+				// [KIT_AGENT_FEEDBACK_1117]
+				"- In a type's Lua: c.players (players = true) lists every "
+				"scene's players, each p.scene theirs and p.away true outside the "
+				"component's own scene: a scene's run or HUD keeps to not p.away. "
+				"State per_player = true is a table by `by` (\"player:<id>\"): "
+				"for by, v in pairs(c.state.<key>) lists it, c.state.<key>[by] = "
+				"nil clears one.\n"
 				// [KIT_AGENT_NEXT_1]
 				"- Play it yourself: play_join gives you a body in your scene "
 				"(the round Running), a guest's, by the server's camera; "
