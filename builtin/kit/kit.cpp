@@ -203,6 +203,8 @@ static const int MAX_BRUSH = 12;
 // [KIT_AIRSHIPS_2] a kit/terrain_region's side at most
 static const int MAX_WORLD_REGION = 128;
 static const int MAX_FILL = 64;
+// [KIT_AGENT_NEXT_2] an edit_terrain area's side (65536 samples a call)
+static const int MAX_AREA = 256;
 static const double HM_STEP = 0.25;
 static const float HM_ROCK_SLOPE = 0.35f;
 // [KIT_HEIGHTMAP_REGEN_LOSS] The edited samples' rows' chunk side, and how
@@ -13269,12 +13271,38 @@ struct Module: public interface::Module, public Interface
 			out = v.as_number();
 			return true;
 		};
+		// [KIT_AGENT_NEXT_2] 4: a heightmap's rectangle at once (an agent's
+		// edit_terrain), as the point and x1, z1
+		const json::Value &aj = j.get("area");
+		const bool area = !aj.is_undefined();
+		double amount = 0;
+		if(area){
+			if(!m_w->wp.heightmap() || on_voxels || !(tool == "raise" ||
+					tool == "lower" || tool == "flatten" || tool == "smooth"))
+				return refuse("area: a heightmap's raise, lower, flatten or "
+						"smooth (a voxel World: edit_voxels)");
+			bool ok = aj.is_array() && aj.size() == 4;
+			for(unsigned k = 0; ok && k < 4; k++)
+				ok = aj.at(k).is_number() && std::fabs(aj.at(k).as_number()) <=
+						MAX_COORD;
+			if(!ok || std::fabs(aj.at(2u).as_number() - aj.at(0u).as_number()) >=
+					MAX_AREA || std::fabs(aj.at(3u).as_number() -
+					aj.at(1u).as_number()) >= MAX_AREA)
+				return refuse("area: [x0, z0, x1, z1], "+itos(MAX_AREA)+
+						" cells a side at most");
+			if(!num("amount", 0, 64, 1, amount))
+				return;
+		}
 		double x, y, z, x1, z1, size, strength, level, stroke;
-		if(!num("x", -MAX_COORD, MAX_COORD, NAN, x) ||
+		if(area){
+			x = aj.at(0u).as_number(), z = aj.at(1u).as_number(), y = 0;
+			x1 = aj.at(2u).as_number(), z1 = aj.at(3u).as_number();
+		}
+		if((!area && (!num("x", -MAX_COORD, MAX_COORD, NAN, x) ||
 				!num("y", -MAX_COORD, MAX_COORD, NAN, y) ||
 				!num("z", -MAX_COORD, MAX_COORD, NAN, z) ||
 				!num("x1", -MAX_COORD, MAX_COORD, 0, x1) ||
-				!num("z1", -MAX_COORD, MAX_COORD, 0, z1) ||
+				!num("z1", -MAX_COORD, MAX_COORD, 0, z1))) ||
 				!num("size", 1, MAX_BRUSH, 3, size) ||
 				!num("strength", 1, 5, 2, strength) ||
 				!num("level", -MAX_COORD, MAX_COORD, 0, level) ||
@@ -13300,7 +13328,7 @@ struct Module: public interface::Module, public Interface
 			const Entity *sym = tool == "column" ? nullptr :
 					sym_scene(m_w->world_scene, cf);
 			const int cx = (int)std::floor(x + 0.5), cz = (int)std::floor(z + 0.5);
-			if(sym && (!cf.editable(cx, cz) || (tool == "fill" &&
+			if(sym && (!cf.editable(cx, cz) || ((tool == "fill" || area) &&
 					!cf.editable((int)std::floor(x1 + 0.5), (int)std::floor(z1 + 0.5)))))
 				return refuse("("+itos(cx)+","+itos(cz)+") is outside kit/symmetry "+
 						itos(sym->id)+"'s authored slice "+cf.slice);
@@ -13323,7 +13351,7 @@ struct Module: public interface::Module, public Interface
 		ss_ what, why;
 		if(m_w->wp.heightmap() && !on_voxels)
 			what = terrain_heightmap(p, tool, x, y, z, x1, z1, r, s, level,
-					biome, c, why);
+					biome, c, why, area, amount);
 		else
 			what = terrain_voxels(p, tool, x, y, z, x1, z1, r, s, level, biome,
 					c, why);
@@ -13650,7 +13678,8 @@ struct Module: public interface::Module, public Interface
 
 	ss_ terrain_heightmap(Peer &p, const ss_ &tool, double fx, double fy,
 			double fz, double fx1, double fz1, int r, double s, double level,
-			const ss_ &biome, Change *c, ss_ &why)
+			const ss_ &biome, Change *c, ss_ &why, bool area = false,
+			double amount = 0)
 	{
 		(void)p;
 		(void)fy;
@@ -13747,15 +13776,25 @@ struct Module: public interface::Module, public Interface
 					WS(x, z, w);
 			};
 			std::map<std::pair<int, int>, float> next;
+			// [KIT_AGENT_NEXT_2] an area: its rectangle, no falloff (d 0)
+			const int ax0 = std::min(cx, (int)std::floor(fx1 + 0.5)),
+					ax1 = std::max(cx, (int)std::floor(fx1 + 0.5)),
+					az0 = std::min(cz, (int)std::floor(fz1 + 0.5)),
+					az1 = std::max(cz, (int)std::floor(fz1 + 0.5));
+			if(area)
+				bx0 = ax0 - 1, bz0 = az0 - 1, bx1 = ax1 + 1, bz1 = az1 + 1;
 			auto circle = [&](std::function<void(int, int, double)> f){
-				for(int dz = -r; dz <= r; dz++)
-				for(int dx = -r; dx <= r; dx++){
-					const double d = std::sqrt((double)(dx * dx + dz * dz));
-					if(d <= r + 0.01 && in(cx + dx, cz + dz))
-						f(cx + dx, cz + dz, d);
+				for(int z = area ? az0 : cz - r; z <= (area ? az1 : cz + r); z++)
+				for(int x = area ? ax0 : cx - r; x <= (area ? ax1 : cx + r); x++){
+					const double d = area ? 0 : std::sqrt((double)((x - cx) *
+							(x - cx) + (z - cz) * (z - cz)));
+					if(d <= r + 0.01 && in(x, z))
+						f(x, z, d);
 				}
 			};
-			const float step = (float)(HM_STEP * s);
+			// (an area's amount, and its flatten to the level at once)
+			const float step = area ? (tool == "flatten" ? 1e9f : (float)amount) :
+					(float)(HM_STEP * s);
 			if(tool == "raise" || tool == "lower"){
 				circle([&](int x, int z, double d){
 					const double f = 1 - (d / (r + 1)) * (d / (r + 1));
@@ -13904,6 +13943,11 @@ struct Module: public interface::Module, public Interface
 					}
 				}
 			}
+			if(what.empty() && area)
+				what = tool+" ("+itos(ax0)+","+itos(az0)+") to ("+itos(ax1)+","+
+						itos(az1)+")"+(tool == "flatten" ? " to "+dtos(level) :
+						tool == "smooth" ? " strength "+itos((int)s) : " by "+
+						dtos(amount));
 			if(what.empty())
 				what = tool+" at ("+itos(cx)+","+itos(cz)+") size "+itos(r)+
 						" strength "+itos((int)s);
@@ -14202,8 +14246,17 @@ struct Module: public interface::Module, public Interface
 				for(auto &q : c.cells){
 					const pv::Vector3DInt32 v(std::get<0>(q.first),
 							std::get<1>(q.first), std::get<2>(q.first));
-					if(!hm_section(w, v))
-						continue;
+					// [KIT_AGENT_NEXT_2] one unloaded since (an agent's edit
+					// where no player is): read back from the save
+					if(!hm_section(w, v)){
+						const pv::Vector3DInt16 sp = section_of(w, v);
+						if(hm_world_of(w) || sp.getY() < WORLD_SECTION_Y0 ||
+								sp.getY() > WORLD_SECTION_Y1)
+							continue;
+						w->load_or_generate_section(sp);
+						if(!loaded(w, v) || !w->is_section_generated(sp))
+							continue;
+					}
 					set_id(w, v, q.second);
 					mark(w, c.scene ? c.scene : m_w->world_scene, v, 'k', p.name);
 					cells++;
@@ -14432,6 +14485,295 @@ struct Module: public interface::Module, public Interface
 				cs(what), sym ? cs(", "+itos(images.size())+" images") : "",
 				u.size());
 		history(p.name, voxel == "air" ? ss_("dug voxels") : "placed "+voxel);
+		send_state(peer);
+	}
+
+	// [KIT_AGENT_NEXT_2] 4: a box of voxels at once (an agent's edit_voxels),
+	// {"op": "region", "action", "at", "size", ...}: fill (voxel, param,
+	// tint), hollow (its shell voxel, else the shell as it is; the inside
+	// air), clear, replace (voxel's cells with `with`), copy (into the
+	// builder's clipboard, voxels only), paste (the clipboard's low corner
+	// at `at`, turned `turn` degrees about it; air: its air cells too) and
+	// move (to `to`, likewise; the box cleared first). The sections it
+	// touches are loaded first, MAX_REGION_LOADS a call as get_voxels
+	// loads them: while one is generated, nothing is written. One undo;
+	// cells past a heightmap's map skipped, counted.
+	// simplified: written straight as a prefab's voxels are (set_id): an
+	// owned voxel's owner is not asked
+	static const int64_t MAX_REGION_CELLS = 262144;
+	static const int MAX_REGION_LOADS = 8;
+	void region_op(Peer &p, size_t peer, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		const int64_t t0 = interface::os::time_us();
+		const ss_ action = jstr(j, "action");
+		if(!std::set<ss_>{"fill", "hollow", "clear", "replace", "copy",
+				"paste", "move"}.count(action))
+			return refuse("action: fill, hollow, clear, replace, copy, paste "
+					"or move");
+		auto three = [&](const char *k, int out[3], bool size){
+			const json::Value &v = j.get(k);
+			for(unsigned i = 0; i < 3; i++){
+				const double x = v.is_array() && v.size() == 3 &&
+						v.at(i).is_number() ? v.at(i).as_number() : NAN;
+				if(!(x == std::floor(x) && (size ? x >= 1 && x <= MAX_PREFAB_BOX :
+						std::fabs(x) <= MAX_COORD)))
+					return false;
+				out[i] = (int)x;
+			}
+			return true;
+		};
+		int o[3], n[3] = {1, 1, 1}, to[3] = {0, 0, 0};
+		if(!three("at", o, false))
+			return refuse("at: three whole numbers within "+itos((int)MAX_COORD));
+		if(action != "paste" && !three("size", n, true))
+			return refuse("size: three whole numbers 1..."+itos(MAX_PREFAB_BOX));
+		if(action == "move" && !three("to", to, false))
+			return refuse("to: three whole numbers within "+itos((int)MAX_COORD));
+		const json::Value &tj = j.get("turn");
+		if(!tj.is_undefined() && !(tj.is_number() &&
+				std::fabs(tj.as_number()) <= 3600 &&
+				std::fmod(tj.as_number(), 90.0) == 0))
+			return refuse("turn: a multiple of 90 degrees");
+		const int k = tj.is_number() ? (((int)tj.as_number() / 90) % 4 + 4) % 4 : 0;
+		auto si = m_host.scenes.find(p.scene);
+		if(si == m_host.scenes.end())
+			return refuse("not in a scene of the app's");
+		const main_context::SceneReference ref = si->second;
+		// The voxels written (paste's and move's): the clipboard's, or the box's
+		json::Value vox;
+		if(action == "paste"){
+			auto ci = m_clipboard.find(p.name);
+			if(ci == m_clipboard.end() || !ci->second.get("voxels").is_object())
+				return refuse("nothing copied (action copy)");
+			vox = ci->second.get("voxels").deepcopy();
+		}
+		if(!j.get("air").is_undefined() && !j.get("air").is_boolean())
+			return refuse("air: true or false");
+		// The box written (wo, wn): the box, or a paste's or move's turned,
+		// its low corner then at at or to (base: where the copy's goes)
+		int wo[3] = {o[0], o[1], o[2]}, wn[3] = {n[0], n[1], n[2]},
+				base[3] = {0, 0, 0};
+		if(vox.is_object() || action == "move"){
+			json::Value b = vox.is_object() ? vox : json::object();
+			if(!vox.is_object()){
+				json::Value z = json::array(), s = json::array();
+				for(int i = 0; i < 3; i++){
+					z.append((int64_t)0);
+					s.append((int64_t)n[i]);
+				}
+				b.set("at", z);
+				b.set("size", s);
+			}
+			const int zero[3] = {0, 0, 0};
+			int off[3];
+			placed_box(b, zero, k, off, wn);
+			for(int i = 0; i < 3; i++){
+				wo[i] = action == "move" ? to[i] : o[i];
+				base[i] = wo[i] - off[i];
+			}
+		}
+		// [KIT_SYMMETRY] in the authored slice (each box's corners), written
+		// into the others after
+		symmetry::Config cf;
+		const Entity *sym = sym_scene(ref, cf);
+		auto slice_ok = [&](const int a[3], const int s[3]){
+			for(int c = 0; c < 4; c++)
+				if(!cf.editable(a[0] + (c & 1 ? s[0] - 1 : 0),
+						a[2] + (c & 2 ? s[2] - 1 : 0)))
+					return false;
+			return true;
+		};
+		if(sym && action != "copy" && (!slice_ok(wo, wn) ||
+				(action == "move" && !slice_ok(o, n))))
+			return refuse("the box is outside kit/symmetry "+itos(sym->id)+
+					"'s authored slice "+cf.slice);
+		Change nc;
+		nc.stroke = -2;
+		nc.scene = ref;
+		ss_ why, voxel = jstr(j, "voxel");
+		size_t written = 0, missing = 0, unknown = 0, waiting = 0;
+		bool any = false;
+		voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
+			any = true;
+			// The sections loaded and generated first, as get_voxels loads
+			// them (a heightmap's past its map stay out: their cells are
+			// skipped)
+			const pv::Vector3DInt16 ss = w->get_section_size_voxels();
+			const World *pw = world_named(p.scene);
+			const bool may_load = !(pw && pw->world_scene && pw->wp.none());
+			int loads = 0;
+			auto load = [&](const int a[3], const int s[3]){
+				for(int sy = div_floor(a[1], ss.getY()); sy <=
+						div_floor(a[1] + s[1] - 1, ss.getY()); sy++)
+				for(int sz = div_floor(a[2], ss.getZ()); sz <=
+						div_floor(a[2] + s[2] - 1, ss.getZ()); sz++)
+				for(int sx = div_floor(a[0], ss.getX()); sx <=
+						div_floor(a[0] + s[0] - 1, ss.getX()); sx++){
+					const pv::Vector3DInt16 sp(sx, sy, sz);
+					if(sy < WORLD_SECTION_Y0 || sy > WORLD_SECTION_Y1)
+						continue;
+					const pv::Vector3DInt32 q(std::max(a[0], sx * ss.getX()),
+							std::max(a[1], sy * ss.getY()),
+							std::max(a[2], sz * ss.getZ()));
+					if(!w->is_section_loaded(sp)){
+						if(!may_load)
+							continue;
+						if(loads >= MAX_REGION_LOADS){
+							waiting++;
+							continue;
+						}
+						if(!hm_section(w, q) && !loaded(w, q) && !hm_world_of(w))
+							w->load_or_generate_section(sp);
+						if(!w->is_section_loaded(sp))
+							continue;
+						// (a generation on its way counted; one read back from
+						// the save is there at once, the box's 16 at most)
+						loads += !w->is_section_generated(sp);
+					}
+					if(!w->is_section_generated(sp))
+						waiting++;
+				}
+			};
+			load(o, n);
+			if(action == "move" || action == "paste")
+				load(wo, wn);
+			if(waiting)
+				return;
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			const interface::VoxelFormat &f = reg->get_format();
+			auto word_of = [&](const ss_ &name, uint32_t &out){
+				interface::VoxelName vn;
+				vn.block_name = name;
+				const interface::VoxelDefinition *d = reg->get(vn);
+				const json::Value &pj = j.get("param"), &tn = j.get("tint");
+				if(!d){
+					why = "\""+name.substr(0, 130)+"\" is no voxel of the scene's "
+							"(list_voxel_types)";
+					return false;
+				}
+				if((!pj.is_undefined() && !(pj.is_number() && pj.as_number() >= 0 &&
+						pj.as_number() <= 255)) || (!tn.is_undefined() &&
+						!(tn.is_number() && tn.as_number() >= 0 &&
+						tn.as_number() <= 15))){
+					why = "param: 0...255, tint: 0...15";
+					return false;
+				}
+				out = (uint32_t)kit::voxel_word(f, d->id, pj.is_number() ?
+						(uint32_t)pj.as_number() : 0, tn.is_number() ?
+						(uint32_t)tn.as_number() : 0) & state_mask(f);
+				return true;
+			};
+			auto put = [&](const pv::Vector3DInt32 &q, uint32_t word){
+				uint32_t old = 0;
+				if(!hm_section(w, q) || !voxel_id(w, q, old)){
+					missing++;
+					return;
+				}
+				if(old == word)
+					return;
+				nc.cells.emplace(std::make_tuple(q.getX(), q.getY(), q.getZ()), old);
+				set_id(w, q, word);
+				mark(w, ref, q, 'k', p.name);
+				written++;
+			};
+			auto each = [&](std::function<void(const pv::Vector3DInt32&, bool)> fn){
+				for(int y = 0; y < n[1]; y++)
+				for(int z = 0; z < n[2]; z++)
+				for(int x = 0; x < n[0]; x++)
+					fn(pv::Vector3DInt32(o[0] + x, o[1] + y, o[2] + z), x == 0 ||
+							y == 0 || z == 0 || x == n[0] - 1 || y == n[1] - 1 ||
+							z == n[2] - 1);
+			};
+			uint32_t a = 0, b = 0;
+			if(!word_of("air", a))
+				return;
+			if(action == "fill" || (action == "hollow" && !voxel.empty())){
+				if(!word_of(voxel, b))
+					return;
+			} else if(action == "replace"){
+				if(!word_of(voxel, b) || !word_of(jstr(j, "with"), a))
+					return;
+			}
+			if(action == "fill")
+				each([&](const pv::Vector3DInt32 &q, bool){ put(q, b); });
+			else if(action == "clear")
+				each([&](const pv::Vector3DInt32 &q, bool){ put(q, a); });
+			else if(action == "hollow")
+				each([&](const pv::Vector3DInt32 &q, bool shell){
+					if(!shell)
+						put(q, a);
+					else if(!voxel.empty())
+						put(q, b);
+				});
+			else if(action == "replace")
+				each([&](const pv::Vector3DInt32 &q, bool){
+					uint32_t old = 0;
+					if(voxel_id(w, q, old) && type_of(w, old) == type_of(w, b))
+						put(q, a);
+				});
+		});
+		if(!any)
+			return refuse("the scene has no voxels");
+		if(waiting)
+			return refuse(itos(waiting)+" sections of the box are being loaded "
+					"(or generated; "+itos(MAX_REGION_LOADS)+" a call): call again "
+					"in a moment; nothing changed");
+		if(!why.empty())
+			return refuse(why);
+		if(action == "copy" || action == "move"){
+			const json::Value v = read_voxels(ref, o, n, o, false, why);
+			if(v.is_null())
+				return refuse(why);
+			if(action == "copy"){
+				json::Value pf = json::object();
+				pf.set("entities", json::array());
+				pf.set("voxels", v);
+				m_clipboard[p.name] = pf;
+			}
+			vox = v;
+		}
+		if(action == "move")
+			clear_voxels(ref, o, n, nc, p.name, written, missing);
+		if(vox.is_object() && action != "copy"){
+			if(j.get("air").is_true())
+				vox.set("air", true);
+			write_voxels(vox, ref, base, k, nc, p.name, written, missing,
+					unknown);
+		}
+		if(sym && !nc.cells.empty())
+			voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
+				sv_<pv::Vector3DInt32> wrote;
+				for(auto &q : nc.cells)
+					wrote.push_back(pv::Vector3DInt32(std::get<0>(q.first),
+							std::get<1>(q.first), std::get<2>(q.first)));
+				sym_write(w, ref, cf, wrote, &nc.cells, p.name);
+			});
+		auto list = [](const int v[3]){
+			return "["+itos(v[0])+", "+itos(v[1])+", "+itos(v[2])+"]";
+		};
+		const int64_t cells = (int64_t)n[0] * n[1] * n[2];
+		ss_ what = action == "copy" ? "copied the box "+list(n)+" at "+list(o)+
+				" ("+itos(vox.get("kinds").size())+" kinds of cell): paste "
+				"puts it" : action+(action == "fill" || action == "hollow" ?
+				(voxel.empty() ? ss_() : " "+voxel) : action == "replace" ? " "+
+				voxel+" with "+jstr(j, "with") : ss_())+" "+(action == "paste" ?
+				"the copy "+list(wn)+" at "+list(wo) : "the box "+list(n)+" at "+
+				list(o)+" ("+itos(cells)+" cells)")+(action == "move" ? " to "+
+				list(wo) : ss_())+(k ? ", turned "+itos(k * 90) : ss_())+": "+
+				itos(written)+" cells written"+(missing ? ", "+itos(missing)+
+				" outside the World (past its map or height)" : ss_())+(unknown ?
+				", "+itos(unknown)+" of voxels the scene has not" : ss_());
+		if(!nc.cells.empty()){
+			std::deque<Change> &u = m_undo[p.name];
+			u.push_back(nc);
+			while(u.size() > UNDO_MAX)
+				u.pop_front();
+			what += ", one undo";
+		}
+		log_i(MODULE, "A voxel edit by %s: %s (%d ms)", cs(p.name), cs(what),
+				(int)((interface::os::time_us() - t0) / 1000));
+		m_edit_what = what;
 		send_state(peer);
 	}
 
@@ -26572,6 +26914,8 @@ struct Module: public interface::Module, public Interface
 		m_sounds[name] = row;
 		log_i(MODULE, "%s made sound %s version %s: %s", cs(p.name), cs(name),
 				cs(itos(json::jint(row, "version", 1))), cs(params));
+		m_edit_what = "made sound "+name+" version "+itos(json::jint(row,
+				"version", 1));
 		send_sounds(-1);
 	}
 
@@ -26591,6 +26935,7 @@ struct Module: public interface::Module, public Interface
 		m_store->remove("sound:"+name);
 		m_sounds.erase(it);
 		log_i(MODULE, "%s deleted sound %s", cs(p.name), cs(name));
+		m_edit_what = "deleted sound "+name;
 		send_sounds(-1);
 	}
 
@@ -30549,9 +30894,13 @@ struct Module: public interface::Module, public Interface
 	};
 	std::deque<Change1> m_history;
 	static const size_t HISTORY_MAX = 500;
+	// [KIT_AGENT_NEXT_2] a batch running: its ops one line, after
+	bool m_batch = false;
 
 	void history(const ss_ &by, const ss_ &what)
 	{
+		if(m_batch)
+			return;
 		const int64_t t = time(nullptr);
 		const ss_ where = session_where(m_active), w = cut_utf8(what, 300);
 		if(!m_history.empty()){
@@ -30741,6 +31090,26 @@ struct Module: public interface::Module, public Interface
 				"area": {"type": "array", "items": {"type": "number"}, "minItems": 4,
 					"maxItems": 4, "description": "map's [x0, z0, x1, z1]"},
 				"compare": {"type": "boolean"}}})J", ""},
+			// [KIT_AGENT_NEXT_2] 5 (agent_show())
+			{"show", "show", "Shows your builder where you work, drawn in "
+				"the clients of your account (in play and in the editor): a "
+				"marker at `at` (a post), a wire box (two corners), entities ids "
+				"outlined, label over them. Each call replaces the last; a "
+				"call with none of them clears it; gone when you leave (idle or "
+				"revoked). The "
+				"editors of every builder show your cursor (at) and selection "
+				"(the first of ids) by your name. The answer says how many "
+				"clients of yours it reached.",
+				R"J({"type": "object", "properties": {
+				"at": {"type": "array", "items": {"type": "number"},
+					"minItems": 3, "maxItems": 3},
+				"box": {"type": "array", "items": {"type": "number"},
+					"minItems": 6, "maxItems": 6,
+					"description": "x0, y0, z0, x1, y1, z1: two corners (cells)"},
+				"ids": {"type": "array", "items": {"type": "integer"},
+					"maxItems": 32},
+				"label": {"type": "string", "description": "80 bytes at most"}}})J",
+				""},
 			// [KIT_AGENT_NEXT_1] 3a: the server's camera plays a body
 			// (agent_play())
 			{"play_join", "play_join", "Play the game yourself: the server's "
@@ -30814,6 +31183,13 @@ struct Module: public interface::Module, public Interface
 			{"list_voxel_types", "=voxel_types", "The voxels set_voxels places: "
 				"each one's name, kind and whether it is solid.",
 				R"J({"type": "object", "properties": {}})J", ""},
+			// [KIT_AGENT_NEXT_2] 6
+			{"list_sounds", "=sounds", "The sounds a type's sound parameter "
+				"or an item's sound_<action> names: each one's name, author, "
+				"version and params (blip1's compact form). With sound: that "
+				"one's parameters as put_sound takes them.",
+				R"J({"type": "object", "properties": {"sound": {"type": "string",
+				"description": "A sound's name, as \"kit/click\""}}})J", ""},
 			{"get_voxels", "=voxels", "The voxels of a box of your scene, at "
 				"most 4096 cells: a key of characters to voxel names (\".\" "
 				"air, \"?\" not loaded), then each layer from y up, each row of "
@@ -30965,6 +31341,29 @@ struct Module: public interface::Module, public Interface
 					"description": "0 or the scene's own id: the scene"},
 				"free": {"type": "boolean"}, "detached": {"type": "boolean"}},
 				"required": ["prefab", "pos"]})J", ""},
+			// [KIT_AGENT_NEXT_2] 4 (scatter_ops(), agent_batch())
+			{"scatter_prefab", "scatter", "Places copies of a prefab, each as "
+				"place_prefab places one, all one undo (one refused: none "
+				"placed): count of them (8 unless given) at random (seed) in "
+				"area [x0, z0, x1, z1] at least spacing cells apart (4 unless "
+				"given), or along path (2 to 64 points [x, y, z]) every "
+				"spacing cells from its first; each on the ground (a "
+				"heightmap's surface; a voxel World's generated top, hand edits "
+				"not seen; none past a map) unless ground: false (the path's "
+				"own y). turn: degrees, a multiple of 90, or \"random\". 64 "
+				"copies a call at most.",
+				R"J({"type": "object", "properties": {
+				"prefab": {"type": "string"},
+				"area": {"type": "array", "items": {"type": "number"},
+					"minItems": 4, "maxItems": 4},
+				"count": {"type": "integer"}, "spacing": {"type": "number"},
+				"seed": {"type": "integer"},
+				"path": {"type": "array", "items": {"type": "array"},
+					"minItems": 2, "maxItems": 64},
+				"ground": {"type": "boolean"},
+				"turn": {"description": "Degrees (a multiple of 90) or \"random\""},
+				"free": {"type": "boolean"}, "detached": {"type": "boolean"}},
+				"required": ["prefab"]})J", ""},
 			{"save_prefab", "save_prefab", "Makes entities ids the prefab "
 				"\"<your account>/<name>\" (a new version if there is one), "
 				"placeable from then on; they stay as they are. Or root, a "
@@ -30991,6 +31390,50 @@ struct Module: public interface::Module, public Interface
 					"minItems": 3, "maxItems": 3, "description": "[1, 1, 1] unless given"},
 				"param": {"type": "integer"}, "tint": {"type": "integer"}},
 				"required": ["voxel", "at"]})J", ""},
+			// [KIT_AGENT_NEXT_2] 4 (region_op())
+			{"edit_voxels", "region", "A box of voxels of your scene at once, "
+				"one undo. action fill (voxel; param, tint as set_voxels'), "
+				"hollow (the inside air; voxel: the shell made of it, else left "
+				"as it is), clear (air), replace (voxel's cells with `with`), "
+				"copy (the box into your clipboard), paste (the copy, its low "
+				"corner at `at`, turned turn degrees, a multiple of 90; air: its "
+				"air cells too, else what is there stays), move (the box's to "
+				"`to`, likewise; the box cleared first). size: 64 a side at "
+				"most. The sections it touches are loaded for it, 8 a call: "
+				"while one is generated it is refused with nothing changed, call "
+				"again. Cells past a heightmap's map are skipped. get_voxels "
+				"reads the result.",
+				R"J({"type": "object", "properties": {
+				"action": {"type": "string", "enum": ["fill", "hollow", "clear",
+					"replace", "copy", "paste", "move"]},
+				"at": {"type": "array", "items": {"type": "integer"},
+					"minItems": 3, "maxItems": 3,
+					"description": "The box's low corner (paste: the copy's)"},
+				"size": {"type": "array", "items": {"type": "integer"},
+					"minItems": 3, "maxItems": 3, "description": "Cells each way"},
+				"voxel": {"type": "string"},
+				"with": {"type": "string", "description": "replace's new voxel"},
+				"to": {"type": "array", "items": {"type": "integer"},
+					"minItems": 3, "maxItems": 3, "description": "move's low corner"},
+				"turn": {"type": "number"}, "air": {"type": "boolean"},
+				"param": {"type": "integer"}, "tint": {"type": "integer"}},
+				"required": ["action", "at"]})J", ""},
+			{"edit_terrain", "terrain", "A heightmap World's ground over an "
+				"area of your scene at once (the editor's brushes on a "
+				"rectangle, no falloff), one undo: tool raise or lower (by "
+				"amount cells, 1 unless given, 64 at most), flatten (to level), "
+				"smooth (toward the neighbours' mean, strength 1 to 5, 2 unless "
+				"given; again for more). area [x0, z0, x1, z1], 256 cells a "
+				"side at most. The ground's layers follow (stone where steep). "
+				"get_ground reads it back. A voxel World's ground: edit_voxels.",
+				R"J({"type": "object", "properties": {
+				"tool": {"type": "string", "enum": ["raise", "lower", "flatten",
+					"smooth"]},
+				"area": {"type": "array", "items": {"type": "number"},
+					"minItems": 4, "maxItems": 4},
+				"amount": {"type": "number"}, "level": {"type": "number"},
+				"strength": {"type": "integer"}},
+				"required": ["tool", "area"]})J", ""},
 			// [KIT_AGENT_VISUALS]
 			{"put_texture", "texture_put", "Uploads a texture, as the editor's "
 				"Upload does: a square PNG, its side a power of two 8...128, 64 "
@@ -31004,6 +31447,30 @@ struct Module: public interface::Module, public Interface
 				"voxel": {"type": "object", "description":
 					"{name (letters, digits and _), kind (solid, leaves, plant, water; solid unless given), solid (true unless given), transparent, light (0...15), friction (0...10, 1 unless given), surface (a tag)}"}},
 				"required": ["png"]})J", ""},
+			// [KIT_AGENT_NEXT_2] 6 (agent_put_sound())
+			{"put_sound", "sound", "Makes or changes a sound as the editor's "
+				"sound designer does: name, made \"<your account>/<name>\", or "
+				"a builder's sound's whole name (a new version; not Kit's or a "
+				"package's: list_sounds gives its params to copy); 256 "
+				"sounds a game, no undo, not in a draft. The whole name is what "
+				"a type's sound parameter names. sound: blip1's "
+				"compact form (list_sounds), or a table {wave (square, saw, "
+				"sine, noise, triangle), seed, env_attack, env_sustain, "
+				"env_punch, env_decay, base_freq, freq_limit, freq_ramp, "
+				"freq_dramp, vib_strength, vib_speed, arp_mod, arp_speed, duty, "
+				"duty_ramp, repeat_speed, pha_offset, pha_ramp, lpf_freq, "
+				"lpf_ramp, lpf_resonance, hpf_freq, hpf_ramp, volume, "
+				"trem_depth, trem_speed, crackle, pluck, layers: [{at (s), "
+				"wave, ...}] (15 at most)}: each 0...1 (the ramps, arp_mod and "
+				"pha_offset -1...1), clamped, those not given the designer's "
+				"defaults. delete: true deletes sound name (its whole name; not "
+				"Kit's or a package's). The answer is its name, version and "
+				"compact form.",
+				R"J({"type": "object", "properties": {
+				"name": {"type": "string", "description": "Letters, digits and _"},
+				"sound": {"description": "\"blip1:...\" or a table"},
+				"delete": {"type": "boolean"}},
+				"required": ["name"]})J", ""},
 			// [KIT_CUSTOM_TYPES]
 			{"put_type", "type_put", "Puts a custom type of this game's, "
 				"local/<name> (any builder edits any; one undo), loaded at once, "
@@ -31106,6 +31573,22 @@ struct Module: public interface::Module, public Interface
 				"required": ["name"]})J", ""},
 			{"undo", "undo", "Takes back your last edit (yours only).",
 				R"J({"type": "object", "properties": {}})J", ""},
+			// [KIT_AGENT_NEXT_2] 4 (agent_batch())
+			{"batch", "batch", "Many edits in one call, all or nothing, one "
+				"undo: ops [{tool, args}] (64 at most), each as that tool alone "
+				"would do it, in order. Tools: place, place_prefab, set_param, "
+				"link, unlink, delete, move, rename, set_comments, "
+				"add_component, remove_component, set_parent, duplicate, "
+				"set_voxels, edit_voxels, edit_terrain. Every op is checked "
+				"before any runs (its tool, its required args); one refused "
+				"while they run takes back those before it, nothing changed. An "
+				"arg {\"id_of\": k} is the id op k (from 0) made. The answer is "
+				"each op's answer.",
+				R"J({"type": "object", "properties": {
+				"ops": {"type": "array", "maxItems": 64, "items": {"type": "object",
+					"properties": {"tool": {"type": "string"},
+					"args": {"type": "object"}}, "required": ["tool"]}}},
+				"required": ["ops"]})J", ""},
 			// [KIT_AGENT_NEXT_1] 2: the sandbox (agent_draft() and on)
 			{"draft", "draft", "Moves you into a draft of your own, as the "
 				"editor's Draft does: a copy of the game's start, running, for "
@@ -31644,6 +32127,11 @@ struct Module: public interface::Module, public Interface
 		if(it == m_agents.end())
 			return;
 		const size_t peer = it->second.peer;
+		// [KIT_AGENT_NEXT_2] 5: its marker cleared, its copy gone
+		json::Value shown = json::object();
+		shown.set("from", it->second.account+"'s agent");
+		show_to(it->second.account, shown);
+		m_clipboard.erase(it->second.account+"'s agent");
 		// [KIT_AGENT_NEXT_1] 2: its draft ends with it (who is in it back in
 		// the default), and it is back there to leave
 		{
@@ -31798,7 +32286,21 @@ struct Module: public interface::Module, public Interface
 			return "Texture "+name+"; voxel type "+builder_author(author_of(p))+
 					"/"+jstr(v, "name")+" wears it"+warnings;
 		}
-		// The edit as an editor's client sends it
+		// [KIT_AGENT_NEXT_2]
+		if(op == "batch" || op == "scatter")
+			return agent_batch(op == "scatter", p, peer, a, failed);
+		if(op == "show")
+			return agent_show(p, peer, a, failed);
+		if(op == "sound")
+			return agent_put_sound(p, peer, a, failed);
+		return agent_op(p, peer, t, a, failed);
+	}
+
+	// The edit as an editor's client sends it
+	ss_ agent_op(Peer &p, size_t peer, const AgentTool &t,
+			const json::Value &a, bool &failed)
+	{
+		const ss_ op = t.op;
 		json::Value e = t.defaults[0] ? json::load_string(t.defaults) :
 				json::object();
 		const json::Value schema = json::load_string(t.schema);
@@ -31842,12 +32344,17 @@ struct Module: public interface::Module, public Interface
 				refused += (refused.empty() ? "" : "\n")+g.second;
 			else if(g.first == "kit:warning")
 				warnings += "\n"+g.second;
+			// [KIT_AGENT_NEXT_2] a terrain edit's text (it has no m_edit_what)
+			else if(g.first == "kit:terrain")
+				m_edit_what = jstr(json::load_string(g.second.c_str()), "what");
 		}
 		return refused.empty();
 	}
 
 	// set_voxels: Kit's set_voxel each cell of the box, its undos one
-	ss_ agent_voxels(Peer &p, size_t peer, const json::Value &a, bool &failed)
+	// ([KIT_AGENT_NEXT_2] all: a cell refused fails it, for a batch)
+	ss_ agent_voxels(Peer &p, size_t peer, const json::Value &a, bool &failed,
+			bool all = false)
 	{
 		static const int64_t MAX_CELLS = 512;
 		failed = true;
@@ -31902,7 +32409,7 @@ struct Module: public interface::Module, public Interface
 				m.cells.insert(c);
 			u.pop_back();
 		}
-		failed = done == 0;
+		failed = done == 0 || (all && !refused.empty());
 		json::Value from = json::array(), size = json::array();
 		for(int k = 0; k < 3; k++){
 			from.append((int64_t)at[k]);
@@ -31916,6 +32423,696 @@ struct Module: public interface::Module, public Interface
 		if(done)
 			log_i(MODULE, "%s: %s", cs(p.name), cs(what));
 		return what+(refused.empty() ? ss_() : "; refused: "+refused)+warnings;
+	}
+
+	// ---- [KIT_AGENT_NEXT_2] 4: batch and scatter_prefab. A batch's ops run
+	// as their tools alone run them (agent_op(), agent_voxels()), in order,
+	// on an undo stack of their own whose changes are merged into one; one
+	// refused: those before it taken back as an undo does, nothing kept and
+	// nothing in the history. Its writes are capped as one call's: cells as
+	// one edit_voxels writes, samples as one edit_terrain
+	static const size_t MAX_BATCH = 64;
+	ss_ agent_batch(bool scatter, Peer &p, size_t peer, const json::Value &a,
+			bool &failed)
+	{
+		static const std::set<ss_> OK = {"place", "place_prefab",
+			"set_param", "link", "unlink", "delete", "move", "rename",
+			"set_comments", "add_component", "remove_component", "set_parent",
+			"duplicate", "set_voxels", "edit_voxels", "edit_terrain"};
+		failed = true;
+		sv_<std::pair<const AgentTool*, json::Value>> ops;
+		ss_ why, title;
+		if(scatter && !scatter_ops(p, a, ops, title, why))
+			return "Refused: "+why;
+		const json::Value &oj = a.get("ops");
+		if(!scatter && (!oj.is_array() || oj.size() == 0 ||
+				oj.size() > MAX_BATCH))
+			return "Refused: ops: a list of 1 to "+itos(MAX_BATCH)+
+					" {tool, args}";
+		for(unsigned i = 0; !scatter && i < oj.size(); i++){
+			const json::Value &o = oj.at(i);
+			const ss_ name = jstr(o, "tool"), k = "op "+itos(i)+": ";
+			const AgentTool *t = nullptr;
+			for(const AgentTool &x : agent_tools())
+				if(name == x.name)
+					t = &x;
+			if(!t)
+				return "Refused: "+k+"no tool \""+name.substr(0, 64)+"\"; nothing "
+						"changed";
+			if(!OK.count(name))
+				return "Refused: "+k+"a batch has no "+name+" (its tools: place, "
+						"place_prefab, set_param, link, unlink, delete, move, "
+						"rename, set_comments, add_component, remove_component, "
+						"set_parent, duplicate, set_voxels, edit_voxels, "
+						"edit_terrain); nothing changed";
+			const json::Value args = o.get("args").is_object() ?
+					o.get("args") : json::object();
+			if(!o.get("args").is_undefined() && !o.get("args").is_object())
+				return "Refused: "+k+"args: an object; nothing changed";
+			const json::Value schema = json::load_string(t->schema);
+			const json::Value &req = schema.get("required");
+			for(unsigned r = 0; r < req.size(); r++)
+				if(args.get(req.at(r).as_string()).is_undefined())
+					return "Refused: "+k+name+" needs "+req.at(r).as_string()+
+							"; nothing changed";
+			with_ids(args, i, nullptr, why);
+			if(!why.empty())
+				return "Refused: "+k+why+"; nothing changed";
+			ops.push_back(std::make_pair(t, args));
+		}
+		if(!scatter)
+			title = "batch of "+itos(ops.size())+" edits";
+		// The cells and samples it writes at most, each op's box
+		auto vol = [](const json::Value &s){
+			int64_t c = 1;
+			for(unsigned k = 0; k < 3; k++)
+				c *= s.is_array() && s.size() == 3 && s.at(k).is_number() ?
+						(int64_t)std::max(1.0, std::min(1e4,
+						std::fabs(s.at(k).as_number()))) : 1;
+			return c;
+		};
+		auto ci = m_clipboard.find(p.name);
+		int64_t cells = 0, samples = 0, clip = ci == m_clipboard.end() ? 0 :
+				vol(ci->second.get("voxels").get("size"));
+		for(auto &o : ops){
+			const ss_ n = o.first->name, act = jstr(o.second, "action");
+			const json::Value &ar = o.second.get("area");
+			if(n == "set_voxels" || (n == "edit_voxels" && act != "copy" &&
+					act != "paste"))
+				cells += vol(o.second.get("size")) * (act == "move" ? 2 : 1);
+			if(n == "edit_voxels" && act == "copy")
+				clip = vol(o.second.get("size"));
+			if(n == "edit_voxels" && act == "paste")
+				cells += clip;
+			if(n == "place_prefab" && prefab(jstr(o.second, "prefab")))
+				cells += vol(prefab(jstr(o.second, "prefab"))->get("voxels").
+						get("size"));
+			if(n == "edit_terrain" && ar.is_array() && ar.size() == 4)
+				samples += (int64_t)(std::min(1e4, std::fabs(ar.at(2u).as_number() -
+						ar.at(0u).as_number())) + 1) * (int64_t)(std::min(1e4,
+						std::fabs(ar.at(3u).as_number() - ar.at(1u).as_number())) + 1);
+		}
+		if(cells > MAX_REGION_CELLS || samples > (int64_t)MAX_AREA * MAX_AREA)
+			return "Refused: the "+ss_(scatter ? "copies" : "ops")+" write up to "+
+					itos(cells)+" cells and "+itos(samples)+" ground samples; one "
+					"call writes "+itos(MAX_REGION_CELLS)+" and "+itos((int64_t)MAX_AREA *
+					MAX_AREA)+" at most; nothing changed";
+		// Run on an undo stack of their own
+		std::deque<Change> &u = m_undo[p.name], kept;
+		kept.swap(u);
+		Change all;
+		std::set<uint64_t> had;
+		auto take = [&]{
+			for(const Change &c : u){
+				for(auto &b : c.before)
+					if(had.insert(b.first).second)
+						all.before.push_back(b);
+				all.cells.insert(c.cells.begin(), c.cells.end());
+				all.samples.insert(c.samples.begin(), c.samples.end());
+				all.hm_marks.insert(c.hm_marks.begin(), c.hm_marks.end());
+				all.decor.insert(all.decor.end(), c.decor.begin(), c.decor.end());
+				all.decor_gone.insert(all.decor_gone.end(), c.decor_gone.begin(),
+						c.decor_gone.end());
+				if(!all.scene)
+					all.scene = c.scene;
+			}
+			u.clear();
+		};
+		sv_<uint64_t> made;
+		ss_ out, refused;
+		m_batch = true;
+		for(size_t i = 0; i < ops.size() && refused.empty(); i++){
+			why.clear();
+			const json::Value args = with_ids(ops[i].second, i, &made, why);
+			const uint64_t next0 = m_next_id;
+			bool f = false;
+			ss_ text = !why.empty() ? why : ss_(ops[i].first->op) == "set_voxel" ?
+					agent_voxels(p, peer, args, f, true) :
+					agent_op(p, peer, *ops[i].first, args, f);
+			take();
+			made.push_back(m_next_id > next0 ? next0 : 0);
+			if(text.compare(0, 9, "Refused: ") == 0)
+				text = text.substr(9);
+			if(f || !why.empty())
+				refused = "op "+itos(i)+" ("+ops[i].first->name+") refused: "+text;
+			else
+				out += "\n"+itos(i)+" "+ops[i].first->name+": "+text;
+		}
+		m_batch = false;
+		const bool voxels = !all.cells.empty() || !all.samples.empty() ||
+				!all.decor.empty() || !all.decor_gone.empty();
+		if(!refused.empty()){
+			// Those before it taken back, as an undo does
+			if(voxels)
+				undo_terrain(all, p);
+			if(!all.before.empty())
+				commit(all.before, nullptr);
+			u.swap(kept);
+			log_i(MODULE, "%s's %s: %s; taken back", cs(p.name), cs(title),
+					cs(refused));
+			return "Refused: "+refused+"; those before it taken back, nothing "
+					"changed";
+		}
+		u.swap(kept);
+		if(!all.before.empty() || voxels){
+			all.stroke = all.before.empty() ? -2 : voxels ? -3 : -1;
+			u.push_back(all);
+			while(u.size() > UNDO_MAX)
+				u.pop_front();
+		}
+		failed = false;
+		history(p.name, title);
+		log_i(MODULE, "%s: %s, %zu entities and %zu cells, one undo", cs(p.name),
+				cs(title), all.before.size(), all.cells.size());
+		return title+", one undo:"+out;
+	}
+
+	// A batch op's args with each {"id_of": k} as the id op k made (made
+	// null: only checked); why set if one is wrong
+	static json::Value with_ids(const json::Value &v, size_t i,
+			const sv_<uint64_t> *made, ss_ &why)
+	{
+		if(v.is_object() && !v.get("id_of").is_undefined()){
+			const json::Value &k = v.get("id_of");
+			if(v.size() != 1 || !k.is_number() || k.as_number() < 0 ||
+					k.as_number() >= i || k.as_number() != std::floor(k.as_number())){
+				why = "{\"id_of\": k}: k an op before this one";
+				return v;
+			}
+			const size_t n = (size_t)k.as_number();
+			if(made && !(*made)[n])
+				why = "op "+itos(n)+" made no entity";
+			return made ? json::Value((int64_t)(*made)[n]) : v;
+		}
+		if(v.is_array()){
+			json::Value out = json::array();
+			for(unsigned n = 0; n < v.size(); n++)
+				out.append(with_ids(v.at(n), i, made, why));
+			return out;
+		}
+		if(v.is_object()){
+			json::Value out = json::object();
+			for(json::Iterator it(v); it; ++it)
+				out.set(it.key(), with_ids(*it, i, made, why));
+			return out;
+		}
+		return v;
+	}
+
+	// scatter_prefab's places as place_prefab ops: count at random in area
+	// (spacing apart; seeded) or along path every spacing, each on the
+	// ground unless ground: false
+	// simplified: a voxel World's ground is its generator's (get_ground's),
+	// hand edits not seen
+	bool scatter_ops(const Peer &p, const json::Value &a,
+			sv_<std::pair<const AgentTool*, json::Value>> &ops, ss_ &title,
+			ss_ &why)
+	{
+		const AgentTool *t = nullptr;
+		for(const AgentTool &x : agent_tools())
+			if(ss_(x.name) == "place_prefab")
+				t = &x;
+		const ss_ name = jstr(a, "prefab");
+		if(!prefab(name)){
+			why = "no prefab \""+name.substr(0, 130)+"\" (list_prefabs)";
+			return false;
+		}
+		const json::Value &area = a.get("area"), &path = a.get("path"),
+				&tj = a.get("turn");
+		if(area.is_undefined() == path.is_undefined()){
+			why = "area or path, one of them";
+			return false;
+		}
+		auto num = [&](const char *k, double lo, double hi, double def,
+				double &out){
+			const json::Value &v = a.get(k);
+			out = v.is_undefined() ? def : v.is_number() ? v.as_number() : NAN;
+			if(!(out >= lo && out <= hi))
+				why = ss_(k)+": "+dtos(lo)+" to "+dtos(hi);
+			return why.empty();
+		};
+		double count, spacing, seed;
+		if(!num("count", 1, MAX_BATCH, area.is_undefined() ? MAX_BATCH : 8,
+				count) || !num("spacing", 0.5, 1024, 4, spacing) ||
+				!num("seed", 0, 4294967295.0, 0, seed))
+			return false;
+		const bool any_turn = tj.is_string() && tj.as_string() == "random";
+		if(!tj.is_undefined() && !any_turn && !(tj.is_number() &&
+				std::fabs(tj.as_number()) <= 3600 &&
+				std::fmod(tj.as_number(), 90.0) == 0)){
+			why = "turn: a multiple of 90 degrees, or \"random\"";
+			return false;
+		}
+		std::mt19937 rng((uint32_t)seed);
+		sv_<std::array<double, 3>> at;
+		auto coords = [&](const json::Value &v, unsigned n){
+			bool ok = v.is_array() && v.size() == n;
+			for(unsigned k = 0; ok && k < n; k++)
+				ok = v.at(k).is_number() && std::fabs(v.at(k).as_number()) <=
+						MAX_COORD;
+			return ok;
+		};
+		if(!area.is_undefined()){
+			if(!coords(area, 4)){
+				why = "area: [x0, z0, x1, z1] within "+itos((int)MAX_COORD);
+				return false;
+			}
+			const int x0 = (int)std::ceil(std::min(area.at(0u).as_number(),
+					area.at(2u).as_number())), x1 = (int)std::floor(std::max(
+					area.at(0u).as_number(), area.at(2u).as_number())),
+					z0 = (int)std::ceil(std::min(area.at(1u).as_number(),
+					area.at(3u).as_number())), z1 = (int)std::floor(std::max(
+					area.at(1u).as_number(), area.at(3u).as_number()));
+			for(int tries = 0; x0 <= x1 && z0 <= z1 && at.size() < count &&
+					tries < 64 * count; tries++){
+				const double x = x0 + (int)(rng() % (uint32_t)(x1 - x0 + 1)),
+						z = z0 + (int)(rng() % (uint32_t)(z1 - z0 + 1));
+				bool near = false;
+				for(auto &q : at)
+					near = near || (q[0] - x) * (q[0] - x) + (q[2] - z) *
+							(q[2] - z) < spacing * spacing;
+				if(!near)
+					at.push_back({{x, 0, z}});
+			}
+		} else {
+			bool ok = path.is_array() && path.size() >= 2 && path.size() <= 64;
+			for(unsigned i = 0; ok && i < path.size(); i++)
+				ok = coords(path.at(i), 3);
+			if(!ok){
+				why = "path: 2 to 64 points [x, y, z] within "+itos((int)MAX_COORD);
+				return false;
+			}
+			// Every spacing along it from its first point
+			double d = 0;
+			for(unsigned i = 0; i + 1 < path.size() && at.size() < count; i++){
+				double s[3], e[3];
+				for(unsigned k = 0; k < 3; k++){
+					s[k] = path.at(i).at(k).as_number();
+					e[k] = path.at(i + 1).at(k).as_number();
+				}
+				const double len = std::sqrt((e[0] - s[0]) * (e[0] - s[0]) +
+						(e[1] - s[1]) * (e[1] - s[1]) + (e[2] - s[2]) * (e[2] - s[2]));
+				for(; d <= len + 1e-9 && at.size() < count; d += spacing){
+					const double f = len > 0 ? d / len : 0;
+					at.push_back({{s[0] + (e[0] - s[0]) * f, s[1] + (e[1] - s[1]) * f,
+							s[2] + (e[2] - s[2]) * f}});
+				}
+				d -= len;
+			}
+		}
+		// On the ground: a heightmap's surface, else the top cell's face
+		size_t past = 0;
+		if(!a.get("ground").is_false()){
+			World *pw = world_named(p.scene);
+			if(!pw || !pw->world_scene || pw->wp.none() || (!pw->wp.heightmap() &&
+					pw->wp.generator == "empty")){
+				why = "the scene has no ground (ground: false places at the "
+						"path's own heights)";
+				return false;
+			}
+			const world::Params &wp = pw->wp;
+			sv_<std::array<double, 3>> on;
+			if(wp.heightmap()){
+				heightmap::access(m_server, pw->world_scene,
+						[&](heightmap::Instance *map){
+					for(auto &q : at){
+						const int sx = (int)std::floor(q[0] + 0.5) - hm_ox(map),
+								sz = (int)std::floor(q[2] + 0.5) - hm_oz(map);
+						if(sx < 0 || sz < 0 || sx >= map->samples_x() ||
+								sz >= map->samples_z())
+							continue;
+						on.push_back({{q[0], map->get_height(sx, sz), q[2]}});
+					}
+				});
+			} else {
+				world::Heights h;
+				h.p = wp;
+				valleys_query(h);
+				if(h.p.generator == "valleys" && !h.valleys){
+					why = "the valleys generator needs builtin/luanti_mapgen";
+					return false;
+				}
+				sv_<int> top;
+				for(auto &q : at){
+					const int wx = (int)std::floor(q[0] + 0.5),
+							wz = (int)std::floor(q[2] + 0.5);
+					if(wp.finite() && !wp.in_map(wx, wz))
+						continue;
+					h.tops(wx, wz, 1, 1, top);
+					on.push_back({{q[0], top[0] + 0.5, q[2]}});
+				}
+			}
+			past = at.size() - on.size();
+			at.swap(on);
+		}
+		if(at.empty()){
+			why = "no place for a copy (the area past the map, or spacing "
+					"wider than it)";
+			return false;
+		}
+		for(auto &q : at){
+			json::Value o = json::object(), pos = json::array();
+			for(int k = 0; k < 3; k++)
+				pos.append(std::round(q[k] * 100) / 100);
+			o.set("prefab", name);
+			o.set("pos", pos);
+			if(any_turn)
+				o.set("turn", (int64_t)(rng() % 4 * 90));
+			else if(tj.is_number())
+				o.set("turn", tj);
+			for(const char *k : {"free", "detached"})
+				if(a.get(k).is_boolean())
+					o.set(k, a.get(k));
+			ops.push_back(std::make_pair(t, o));
+		}
+		title = "scatter_prefab "+name+": "+itos(ops.size())+" copies"+
+				(ops.size() < count && !area.is_undefined() ? " of "+
+				itos((int64_t)count)+" (no room for more "+dtos(spacing)+
+				" apart)" : ss_())+(past ? ", "+itos(past)+" places past the "
+				"map skipped" : ss_());
+		return true;
+	}
+
+	// ---- [KIT_AGENT_NEXT_2] 5: show, the agent's marker in its builder's
+	// clients: "kit:agent_show" {from, color, at, box, ids: [{id, at}],
+	// label} (none of them: cleared); and its cursor and selection in every
+	// builder's editor (focus)
+	// simplified: a client joining later has none of it until the next show
+	ss_ agent_show(Peer &p, size_t peer, const json::Value &a, bool &failed)
+	{
+		failed = true;
+		const json::Value &at = a.get("at"), &box = a.get("box"),
+				&ids = a.get("ids"), &label = a.get("label");
+		if(!at.is_undefined() && !pos_ok(at))
+			return "Refused: at: three numbers within "+itos((int)MAX_COORD);
+		bool ok = box.is_undefined() || (box.is_array() && box.size() == 6);
+		for(unsigned k = 0; ok && !box.is_undefined() && k < 6; k++)
+			ok = box.at(k).is_number() && std::fabs(box.at(k).as_number()) <=
+					MAX_COORD;
+		if(!ok)
+			return "Refused: box: [x0, y0, z0, x1, y1, z1] within "+
+					itos((int)MAX_COORD);
+		if(!ids.is_undefined() && !(ids.is_array() && ids.size() <= 32))
+			return "Refused: ids: 32 entities' ids at most";
+		if(!label.is_undefined() && !(label.is_string() &&
+				label.as_string().size() <= 80))
+			return "Refused: label: 80 bytes at most";
+		json::Value m = json::object(), il = json::array();
+		m.set("from", p.name);
+		m.set("color", COLORS[std::max(0, p.color) % NUM_COLORS]);
+		for(unsigned k = 0; k < ids.size(); k++){
+			const json::Value &v = ids.at(k);
+			auto e = v.is_number() && v.as_number() >= 0 ?
+					m_entities.find((uint64_t)v.as_number()) : m_entities.end();
+			if(e == m_entities.end())
+				return "Refused: ids: no entity "+v.stringify().substr(0, 40);
+			double w[3];
+			world_of(e->second, w);
+			json::Value o = json::object();
+			o.set("id", (int64_t)e->first);
+			o.set("at", vec1(w));
+			il.append(o);
+		}
+		if(!at.is_undefined())
+			m.set("at", at);
+		if(!box.is_undefined())
+			m.set("box", box);
+		if(il.size())
+			m.set("ids", il);
+		if(!label.is_undefined())
+			m.set("label", label);
+		const bool clear = m.size() == 2;
+		json::Value f = json::object();
+		f.set("op", "focus");
+		f.set("sel", il.size() ? il.at(0u).get("id") : json::Value((int64_t)0));
+		f.set("cursor", at.is_undefined() ? json::null() : at);
+		ss_ refused, warnings;
+		agent_edit(peer, f, refused, warnings);
+		const size_t n = show_to(p.account, m);
+		failed = false;
+		log_i(MODULE, "%s %s: %zu clients of %s's", cs(p.name), clear ?
+				"cleared its marker" : "shows a marker", n, cs(p.account));
+		return ss_(clear ? "Cleared" : "Shown")+" in "+itos(n)+" client(s) of "+
+				p.account+"'s"+(n ? ss_() : " (none connected: the builders' "
+				"editors show your cursor and selection still)");
+	}
+
+	// "kit:agent_show" m to an account's clients (not its agents', not the
+	// server's camera); how many
+	size_t show_to(const ss_ &account, const json::Value &m)
+	{
+		sv_<size_t> theirs;
+		if(m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *i){
+				theirs = i->find_peers(account);
+			});
+		size_t n = 0;
+		const ss_ data = m.stringify();
+		network::access(m_server, [&](network::Interface *i){
+			for(size_t c : theirs)
+				if(c != m_cam.peer && !agent_of(c)){
+					i->send(c, "kit:agent_show", data);
+					n++;
+				}
+		});
+		return n;
+	}
+
+	// ---- [KIT_AGENT_NEXT_2] 6: put_sound, a sound made as the editor's
+	// sound designer makes one (its "sound" op), from blip1's compact form or
+	// its table (packed here as extensions/blip/blip_gen.lua packs it)
+	ss_ agent_put_sound(Peer &p, size_t peer, const json::Value &a,
+			bool &failed)
+	{
+		failed = true;
+		const ss_ name = jstr(a, "name");
+		json::Value e = json::object(), t;
+		e.set("name", name);
+		ss_ params, why;
+		if(a.get("delete").is_true()){
+			e.set("op", "sound_delete");
+		} else {
+			const json::Value &s = a.get("sound");
+			if(s.is_string())
+				params = s.as_string();
+			else if(!s.is_object() || !blip_pack(s, params, why))
+				return "Refused: sound: "+(why.empty() ? ss_("blip1's compact "
+						"form or a table") : why);
+			if(params.size() > MAX_SOUND || !blip_unpack(params, t, why))
+				return "Refused: sound: "+(why.empty() ? "at most "+
+						itos(MAX_SOUND)+" characters" : why);
+			e.set("op", "sound");
+			e.set("params", params);
+		}
+		m_edit_what.clear();
+		ss_ refused, warnings;
+		if(!agent_edit(peer, e, refused, warnings))
+			return "Refused: "+refused+warnings;
+		failed = false;
+		return m_edit_what+(params.empty() ? ss_() : ": "+params)+warnings;
+	}
+
+	// blip1's parameters: name, range and default, in the compact form's
+	// order (blip_gen.lua's G.PARAMS; sfxr's 23 first)
+	struct BlipParam
+	{
+		const char *name;
+		double lo, hi, def;
+	};
+	static const sv_<BlipParam> &blip_params()
+	{
+		static const sv_<BlipParam> t = {
+			{"env_attack", 0, 1, 0}, {"env_sustain", 0, 1, 0.3},
+			{"env_punch", 0, 1, 0}, {"env_decay", 0, 1, 0.4},
+			{"base_freq", 0, 1, 0.3}, {"freq_limit", 0, 1, 0},
+			{"freq_ramp", -1, 1, 0}, {"freq_dramp", -1, 1, 0},
+			{"vib_strength", 0, 1, 0}, {"vib_speed", 0, 1, 0},
+			{"arp_mod", -1, 1, 0}, {"arp_speed", 0, 1, 0}, {"duty", 0, 1, 0},
+			{"duty_ramp", -1, 1, 0}, {"repeat_speed", 0, 1, 0},
+			{"pha_offset", -1, 1, 0}, {"pha_ramp", -1, 1, 0},
+			{"lpf_freq", 0, 1, 1}, {"lpf_ramp", -1, 1, 0},
+			{"lpf_resonance", 0, 1, 0}, {"hpf_freq", 0, 1, 0},
+			{"hpf_ramp", -1, 1, 0}, {"volume", 0, 1, 0.5},
+			{"trem_depth", 0, 1, 0}, {"trem_speed", 0, 1, 0},
+			{"crackle", 0, 1, 0}, {"pluck", 0, 1, 0}};
+		return t;
+	}
+	static const size_t BLIP_SFXR = 23;
+	static const char *blip_b64()
+	{
+		return "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+	}
+	static const char *const *blip_waves()
+	{
+		static const char *const w[] = {"square", "saw", "sine", "noise",
+			"triangle"};
+		return w;
+	}
+	static int64_t blip_q(const BlipParam &d, double x)
+	{
+		return d.lo < 0 ? (int64_t)std::floor(x * 2047 + 0.5) + 2047 :
+				(int64_t)std::floor(x * 4095 + 0.5);
+	}
+
+	// A sound's table (blip_gen.lua's G.params() of one: wave, seed, the
+	// parameters by name, clamped, the others the defaults; layers: up to
+	// 15 more, each with at) packed as G.pack() packs it
+	static bool blip_pack(const json::Value &t, ss_ &out, ss_ &why,
+			bool layer = false)
+	{
+		auto put = [&](int64_t v, int chars){
+			for(int i = chars - 1; i >= 0; i--)
+				out += blip_b64()[(v >> (6 * i)) & 63];
+		};
+		int wave = 0;
+		double at = 0;
+		int64_t seed = 0;
+		sv_<double> v;
+		for(const BlipParam &d : blip_params())
+			v.push_back(d.def);
+		for(json::Iterator it(t); it; ++it){
+			const ss_ k = it.key();
+			const json::Value &x = *it;
+			size_t i = 0;
+			while(i < v.size() && k != blip_params()[i].name)
+				i++;
+			if(k == "v" && !(x.is_number() && x.as_number() == 1)){
+				why = "v: 1 (blip1)";
+			} else if(k == "wave"){
+				while(wave < 5 && !(x.is_string() && x.as_string() ==
+						blip_waves()[wave]))
+					wave++;
+				if(wave == 5)
+					why = "wave: square, saw, sine, noise or triangle";
+			} else if(k == "seed"){
+				if(!(x.is_number() && x.as_number() == std::floor(x.as_number()) &&
+						x.as_number() >= 0 && x.as_number() <= 16777215))
+					why = "seed: a whole 0...16777215";
+				else
+					seed = (int64_t)x.as_number();
+			} else if(k == "at" && layer){
+				if(!x.is_number())
+					why = "a layer's at: a number (seconds)";
+				else
+					at = std::max(0.0, std::min(4.095, x.as_number()));
+			} else if(k == "layers" && !layer){
+				if(!x.is_array() || x.size() > 15)
+					why = "layers: a list of 15 at most";
+			} else if(k != "v" && i == v.size()){
+				why = "no parameter "+k.substr(0, 40);
+			} else if(i < v.size()){
+				if(!x.is_number())
+					why = k+": a number";
+				else
+					v[i] = std::max(blip_params()[i].lo, std::min(
+							blip_params()[i].hi, x.as_number()));
+			}
+			if(!why.empty())
+				return false;
+		}
+		if(layer){
+			out += "+";
+			put((int64_t)std::floor(at * 1000 + 0.5), 2);
+		} else {
+			out = "blip1:";
+		}
+		put(wave, 1);
+		bool ext = false;
+		for(size_t i = 0; i < v.size(); i++){
+			if(i < BLIP_SFXR)
+				put(blip_q(blip_params()[i], v[i]), 2);
+			else
+				ext = ext || blip_q(blip_params()[i], v[i]) !=
+						blip_q(blip_params()[i], blip_params()[i].def);
+		}
+		put(seed, 4);
+		for(size_t i = BLIP_SFXR; ext && i < v.size(); i++)
+			put(blip_q(blip_params()[i], v[i]), 2);
+		const json::Value &ls = t.get("layers");
+		for(unsigned i = 0; !layer && i < ls.size(); i++){
+			if(!ls.at(i).is_object()){
+				why = "layers: tables";
+				return false;
+			}
+			if(!ls.at(i).get("layers").is_undefined()){
+				why = "a layer with layers of its own";
+				return false;
+			}
+			if(!blip_pack(ls.at(i), out, why, true))
+				return false;
+		}
+		return true;
+	}
+
+	// The compact form as a table (blip_gen.lua's G.unpack(), its numbers
+	// to 4 places: packed again, the same); false with why if it is none
+	static bool blip_unpack(const ss_ &s, json::Value &t, ss_ &why)
+	{
+		const size_t VOICE = 1 + 2 * BLIP_SFXR + 4,
+				VOICE_EXT = VOICE + 2 * (blip_params().size() - BLIP_SFXR);
+		why = "not blip1's compact form";
+		if(s.compare(0, 6, "blip1:") != 0)
+			return false;
+		sv_<ss_> parts;
+		size_t from = 6;
+		for(;;){
+			const size_t plus = s.find('+', from);
+			parts.push_back(s.substr(from, plus == ss_::npos ? ss_::npos :
+					plus - from));
+			if(plus == ss_::npos)
+				break;
+			from = plus + 1;
+		}
+		if(parts.size() > 16){
+			why = "more than 16 layers";
+			return false;
+		}
+		auto value = [](char c) -> int {
+			const char *p = strchr(blip_b64(), c);
+			return c && p ? (int)(p - blip_b64()) : -1;
+		};
+		json::Value layers = json::array();
+		for(size_t li = 0; li < parts.size(); li++){
+			const ss_ &part = parts[li];
+			const size_t skip = li ? 2 : 0;
+			if(part.size() != VOICE + skip && part.size() != VOICE_EXT + skip)
+				return false;
+			for(char c : part)
+				if(value(c) < 0)
+					return false;
+			size_t pos = 0;
+			auto get = [&](int chars){
+				int64_t r = 0;
+				for(int i = 0; i < chars; i++)
+					r = r * 64 + value(part[pos++]);
+				return r;
+			};
+			json::Value o = json::object();
+			if(li)
+				o.set("at", std::min(4.095, get(2) / 1000.0));
+			const int64_t w = get(1);
+			if(w >= 5)
+				return false;
+			o.set("wave", blip_waves()[w]);
+			const bool ext = part.size() == VOICE_EXT + skip;
+			for(size_t i = 0; i < blip_params().size(); i++){
+				const BlipParam &d = blip_params()[i];
+				if(i == BLIP_SFXR)
+					o.set("seed", get(4));
+				const double q = i < BLIP_SFXR || ext ? (double)get(2) : -1;
+				const double x = q < 0 ? d.def : d.lo < 0 ? std::max(-1.0,
+						std::min(1.0, (q - 2047) / 2047)) : q / 4095;
+				o.set(d.name, std::round(x * 1e4) / 1e4);
+			}
+			if(li)
+				layers.append(o);
+			else
+				t = o;
+		}
+		if(layers.size())
+			t.set("layers", layers);
+		why.clear();
+		return true;
 	}
 
 	// ---- [KIT_AGENT_VISUALS] 2: **get_view**, an agent's pictures. A
@@ -33802,6 +34999,32 @@ struct Module: public interface::Module, public Interface
 						"light"})
 					if(!all.at(i).get(k).is_undefined())
 						o.set(k, all.at(i).get(k));
+				out.append(o);
+			}
+			return out.stringify();
+		}
+		// [KIT_AGENT_NEXT_2] 6
+		if(op == "=sounds"){
+			const ss_ one = jstr(a, "sound");
+			if(!one.empty()){
+				auto it = m_sounds.find(one);
+				json::Value t;
+				ss_ why;
+				if(it == m_sounds.end() || !blip_unpack(jstr(it->second, "params"),
+						t, why)){
+					failed = true;
+					return it == m_sounds.end() ? "No sound "+one.substr(0, 129) :
+							"Its params: "+why;
+				}
+				return t.stringify();
+			}
+			json::Value out = json::array();
+			for(auto &it : m_sounds){
+				json::Value o = json::object();
+				o.set("name", it.first);
+				for(const char *k : {"author", "version", "params", "package"})
+					if(!it.second.get(k).is_undefined())
+						o.set(k, it.second.get(k));
 				out.append(o);
 			}
 			return out.stringify();
@@ -35697,8 +36920,11 @@ struct Module: public interface::Module, public Interface
 			"both; get_log reads an entity's log; get_state each component's "
 			"state.\n"
 			"- Prefabs place groups of entities and voxels as one "
-			"(list_prefabs, place_prefab; save_prefab makes yours). Voxels: "
-			"list_voxel_types, set_voxels, get_voxels. Scenes: get_state "
+			"(list_prefabs, place_prefab, scatter_prefab; save_prefab makes "
+			"yours). Voxels: list_voxel_types, set_voxels, edit_voxels (a "
+			"box), get_voxels; a heightmap's ground: edit_terrain, get_ground. "
+			"batch: many edits, one undo, all or nothing. Sounds: list_sounds, "
+			"put_sound. show marks where you work for your builder. Scenes: get_state "
 			"names them and yours (where you edit); switch_scene, new_scene. "
 			"move, rename, set_parent, duplicate, delete edit entities; "
 			"get_goal_warnings checks kit/goal chains.\n"
@@ -35753,6 +36979,22 @@ struct Module: public interface::Module, public Interface
 				"\"me\" sends as your body, as a player's name as theirs.\n"
 				// [KIT_AGENT_FEEDBACK_1117] 11
 				"- get_history: who changed what and when, since a time.\n"
+				// [KIT_AGENT_NEXT_2]
+				"- Building in bulk: edit_voxels works on a box of up to 64 a "
+				"side (fill, hollow, clear, replace, copy into your clipboard, "
+				"paste and move, turned by 90s), edit_terrain on a heightmap's "
+				"rectangle of up to 256 a side, scatter_prefab places up to 64 "
+				"copies of a prefab over an area or along a path, each on the "
+				"ground; batch runs up to 64 edits as one (place, set_param, "
+				"link, ..., the voxel and terrain tools; {\"id_of\": k} the id op "
+				"k made), all refused if one is. Each is one undo. Read the "
+				"result back (get_voxels, get_ground, get_state). show draws a "
+				"marker (a post, a box, entities outlined, a label) in your "
+				"builder's own client, in play too, to point at what you made "
+				"or ask about; it goes when you leave. put_sound makes a sound "
+				"as the editor's sound designer does (blip1, sfxr's parameters "
+				"by name), named by a type's sound parameter; list_sounds lists "
+				"them and reads one back as a table.\n"
 				// [KIT_AGENT_NEXT_1] 2, 3b
 				"- Your sandbox. draft moves you into a copy of the game's start "
 				"of your own (the editor's Draft), running; your edits, start "
@@ -37901,7 +39143,7 @@ struct Module: public interface::Module, public Interface
 		// simplified: a prefab's or stamp's voxels are left out silently (no
 		// section is loaded to take them: hm_section())
 		if(op == "terrain" || op == "set_voxel" || op == "pattern" ||
-				op == "regenerate"){
+				op == "regenerate" || op == "region"){
 			const World *pw = world_named(p.scene);
 			if(pw && pw->world_scene && pw->wp.none())
 				return refuse("this scene has no voxels: its kit/terrain's "
@@ -37919,6 +39161,8 @@ struct Module: public interface::Module, public Interface
 			return delete_sound(p, j, refuse);
 		if(op == "set_voxel")
 			return edit_voxel(p, peer, j, refuse);
+		if(op == "region")
+			return region_op(p, peer, j, refuse);
 		if(op == "edited")
 			return send_edited(peer);
 		if(op == "regenerate")

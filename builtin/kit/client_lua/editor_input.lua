@@ -3182,6 +3182,62 @@ local function draw_builders(dbg)
 	end
 end
 
+-- [KIT_AGENT_NEXT_2] 5: the marker this account's agent shows
+-- ("kit:agent_show"), in play and in the editor: a post at at, a wire box,
+-- the entities outlined, its label over the first of them
+-- simplified: one (an account's agents share one name)
+local function draw_agent_show(dbg)
+	local m = E.agent_show
+	local t = E.agent_label and E.agent_label:GetComponent("Text3D")
+	if not m then
+		if t and t.text ~= "" then
+			t.text = ""
+		end
+		return
+	end
+	local c = color(m.color, magic.Color(1, 1, 1))
+	local top
+	if type(m.at) == "table" then
+		local x, y, z = m.at[1], m.at[2], m.at[3]
+		dbg:AddLine(magic.Vector3(x, y, z), magic.Vector3(x, y + 3, z), c, false)
+		dbg:AddCross(magic.Vector3(x, y, z), 1, c, false)
+		top = magic.Vector3(x, y + 3.4, z)
+	end
+	if type(m.box) == "table" then
+		local b = m.box
+		local x0, x1 = math.min(b[1], b[4]) - 0.5, math.max(b[1], b[4]) + 0.5
+		local y0, y1 = math.min(b[2], b[5]) - 0.5, math.max(b[2], b[5]) + 0.5
+		local z0, z1 = math.min(b[3], b[6]) - 0.5, math.max(b[3], b[6]) + 0.5
+		dbg:AddBoundingBox(magic.BoundingBox(magic.Vector3(x0, y0, z0),
+				magic.Vector3(x1, y1, z1)), c, false)
+		top = top or magic.Vector3((x0 + x1) / 2, y1 + 0.4, (z0 + z1) / 2)
+	end
+	for _, e in ipairs(type(m.ids) == "table" and m.ids or {}) do
+		local x, y, z = e.at[1], e.at[2], e.at[3]
+		dbg:AddBoundingBox(magic.BoundingBox(magic.Vector3(x - 0.6, y - 0.6,
+				z - 0.6), magic.Vector3(x + 0.6, y + 0.6, z + 0.6)), c, false)
+		top = top or magic.Vector3(x, y + 1, z)
+	end
+	if not E.agent_label then
+		E.agent_label = O.scene:CreateChild("kit_agent_label")
+		t = E.agent_label:CreateComponent("Text3D")
+		t:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 14)
+		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		t.faceCameraMode = magic.FC_ROTATE_XYZ
+		t.fixedScreenSize = true
+		t.textEffect = magic.TE_STROKE
+		t.effectColor = magic.Color(0, 0, 0, 0.8)
+	end
+	local text = tostring(m.from) .. (m.label and ": " .. tostring(m.label) or "")
+	if t.text ~= text then
+		t:SetColor(c)
+		t.text = text
+	end
+	if top then
+		E.agent_label.position = top
+	end
+end
+
 -- ---- The editor turned on
 function M.editor(options)
 	for k, v in pairs(options) do
@@ -3464,6 +3520,22 @@ function M.editor(options)
 			E.seen[name] = {sel = b.sel, cursor = cur}
 		end
 		people()
+	end)
+	-- [KIT_AGENT_NEXT_2] 5 (draw_agent_show())
+	buildat.sub_packet("kit:agent_show", function(data)
+		local m = network.parse_json(data)
+		if type(m) ~= "table" then
+			return
+		end
+		local any = m.at or m.box or m.ids or m.label
+		E.agent_show = any and m or nil
+		local function list(v)
+			return type(v) == "table" and table.concat(v, ",") or "-"
+		end
+		log:info("kit: agent marker from " .. tostring(m.from) .. (any and
+				": at " .. list(m.at) .. " box " .. list(m.box) .. " ids " ..
+				(type(m.ids) == "table" and #m.ids or 0) .. " label " ..
+				tostring(m.label or "-") or " cleared"))
 	end)
 	-- [KIT] stage 4d: signals passing along links light their lines, and
 	-- the selected entity's log
@@ -3764,6 +3836,7 @@ function M.editor(options)
 		draw_guide()
 		hover.finish()
 		draw_builders(O.debug)
+		draw_agent_show(O.debug)
 		if magic.ui_text_scale then
 			for _, w in pairs(W) do
 				magic.ui_text_scale(w, S.font)
