@@ -91,14 +91,15 @@ runs one itself: a client logs in with an agent token (the token's
 account; a builder token only for an account that is no Host and no
 Steward, an admin token for any; never where that account's own client
 is) from -T <token> or BUILDAT_AGENT_TOKEN, neither of which it logs or
-saves, and on Linux with no display it runs under Xvfb with Mesa's
-software GL:
+saves, and on Linux with no display it draws off-screen with SDL's
+offscreen driver: EGL with no X server, on Mesa's software GL where
+there is no GPU:
 
-    # Debian/Ubuntu: apt-get install xvfb libgl1-mesa-dri
+    # Debian/Ubuntu: apt-get install libgl1 libegl1 libegl-mesa0 libgl1-mesa-dri
     # from https://github.com/celeron55/buildat/releases, the
     # linux-x86_64-portable archive, unpacked:
     cd buildat-*-linux-x86_64-portable
-    BUILDAT_AGENT_TOKEN=bat_... xvfb-run -a -s "-screen 0 1280x800x24" \
+    BUILDAT_AGENT_TOKEN=bat_... SDL_VIDEODRIVER=offscreen \
         bin/buildat -s https://wb.example.org -w 640x480 -o sound_mute=1
 
 The token is a bat_ one from My account, Connect an agent...; a sign-in's

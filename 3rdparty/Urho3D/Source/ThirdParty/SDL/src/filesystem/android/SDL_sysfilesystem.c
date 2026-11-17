@@ -1,6 +1,6 @@
 /*
   Simple DirectMedia Layer
-  Copyright (C) 1997-2016 Sam Lantinga <slouken@libsdl.org>
+  Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -26,26 +26,24 @@
 /* System dependent filesystem routines                                */
 
 #include <unistd.h>
-#include <errno.h>
 
 #include "SDL_error.h"
 #include "SDL_filesystem.h"
 #include "SDL_system.h"
 
 
-char *
-SDL_GetBasePath(void)
+char *SDL_GetBasePath(void)
 {
     /* The current working directory is / on Android */
+    SDL_Unsupported();
     return NULL;
 }
 
-char *
-SDL_GetPrefPath(const char *org, const char *app)
+char *SDL_GetPrefPath(const char *org, const char *app)
 {
     const char *path = SDL_AndroidGetInternalStoragePath();
     if (path) {
-        size_t pathlen = SDL_strlen(path)+2;
+        size_t pathlen = SDL_strlen(path) + 2;
         char *fullpath = (char *)SDL_malloc(pathlen);
         if (!fullpath) {
             SDL_OutOfMemory();

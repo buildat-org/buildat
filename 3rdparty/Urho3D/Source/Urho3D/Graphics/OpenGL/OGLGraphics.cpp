@@ -467,8 +467,13 @@ bool Graphics::SetMode(int width, int height, bool fullscreen, bool borderless, 
             else
             {
 #ifndef __EMSCRIPTEN__
+                // buildat: SDL 2.32 takes the OpenGL flag as a hint; 2.0.5
+                // had Urho3D's flags argument
                 if (!window_)
-                    window_ = SDL_CreateWindowFrom(externalWindow_, SDL_WINDOW_OPENGL);
+                {
+                    SDL_SetHint(SDL_HINT_VIDEO_FOREIGN_WINDOW_OPENGL, "1");
+                    window_ = SDL_CreateWindowFrom(externalWindow_);
+                }
                 fullscreen = false;
 #endif
             }

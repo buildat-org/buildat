@@ -24,12 +24,14 @@
 #      it: the zone's "entered" among the events, the body moved, a picture
 #      at the end; play_leave;
 #   6. the server stopped: its camera gone with it;
-#   7. a server given no display (CAMERA_OFFSCREEN unset: this SDL has no
-#      offscreen driver): get_view says what its host needs;
+#   7. (CAMERA_X11=1) a server given no display, offscreen failing:
+#      get_view says what its host needs;
 #   8. kitboss turns the camera off (Accounts): get_view refused as before
 #      the camera (no word of it), no start.
-# CAMERA_OFFSCREEN=1: the camera on SDL's offscreen driver (an SDL with
-# it), no display given; else on the check's weston's Xwayland.
+# The camera on SDL's offscreen driver (Mesa's EGL vendor when installed),
+# no display given; CAMERA_X11=1: offscreen made to fail (an EGL vendor
+# file that is not there) and the check's weston's Xwayland given, the
+# fallback.
 # Pictures, kept with KEEP_TMP=1: $t/*.png; the camera's log
 # $t/user/camera/workbench/client.log
 #   util/kit_server_camera_check.sh
@@ -58,8 +60,10 @@ for i in $(seq 50); do
 	sleep 0.2
 done
 [ -n "$d" ] || fail "weston's Xwayland ($t/weston.log)"
-cam_display=$d
-[ -n "${CAMERA_OFFSCREEN:-}" ] && cam_display=
+cam_display= cam_egl=$(ls /usr/share/glvnd/egl_vendor.d/*_mesa.json 2>/dev/null | head -1)
+[ -n "${CAMERA_X11:-}" ] && cam_display=$d cam_egl=/nonexistent/egl_vendor.json
+# (the camera's and kitboss's; kitboss draws by GLX)
+[ -n "$cam_egl" ] && export __EGL_VENDOR_LIBRARY_FILENAMES=$cam_egl
 SL=$t/srv.log CL=$t/boss.log CAMLOG=$t/user/camera/workbench/client.log
 mark() { wc -c < "$1"; }
 await() # <log> <offset> <seconds> <regex>
@@ -430,10 +434,10 @@ echo "ok: kitboss's builder token, kitboss gone"
 m=$(mark "$SL")
 mcp first
 await "$SL" "$m" 5 "The server's camera is in \(peer [0-9]+, (x11|offscreen)"
-if [ -n "${CAMERA_OFFSCREEN:-}" ]; then
-	grep -aq "The server's camera is in (peer [0-9]*, offscreen" "$SL" ||
-		fail "not on the offscreen driver ($SL)"
-fi
+mode=offscreen
+[ -n "${CAMERA_X11:-}" ] && mode=x11
+grep -aq "The server's camera is in (peer [0-9]*, $mode" "$SL" ||
+	fail "not on $mode ($SL)"
 grep -aqE "Peer [0-9]+ joined from 127\.0\.0\.1 as the server's camera" "$SL" ||
 	fail "no camera login in $SL"
 grep -aq "kit: the server's camera is in" "$CAMLOG" || fail "no camera's log at $CAMLOG"
@@ -497,8 +501,8 @@ gone "$CP" "the camera after its server stopped"
 gone "$LP" "the camera's launcher after its server stopped"
 echo "ok: the server's stop took its camera and launcher"
 
-# 7. No display (an SDL with no offscreen driver)
-if [ -z "${CAMERA_OFFSCREEN:-}" ]; then
+# 7. No display, offscreen failing
+if [ -n "${CAMERA_X11:-}" ]; then
 	server "$t/srv2.log" ""
 	mcp nodisplay
 	echo "ok: no display: get_view says what the host needs"

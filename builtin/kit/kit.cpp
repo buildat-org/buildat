@@ -30535,9 +30535,10 @@ struct Module: public interface::Module, public Interface
 				"refused: your builder's own, or one you run yourself on Linux "
 				"with no display, from a release (https://github.com/celeron55/"
 				"buildat/releases, the linux-x86_64-portable archive), unpacked, "
-				"with Xvfb and a software GL (Debian: apt-get install xvfb "
-				"libgl1-mesa-dri): BUILDAT_AGENT_TOKEN=<your token> xvfb-run -a "
-				"-s \"-screen 0 1280x800x24\" bin/buildat -s <host:port, or "
+				"drawing off-screen with no X server and a software GL "
+				"(Debian: apt-get install libgl1 libegl1 libegl-mesa0 "
+				"libgl1-mesa-dri): BUILDAT_AGENT_TOKEN=<your token> "
+				"SDL_VIDEODRIVER=offscreen bin/buildat -s <host:port, or "
 				"https://host> -w 640x480 -o sound_mute=1; it logs in as your "
 				"account (\"Joined as <name>\") while your builder's own client "
 				"is not here; a builder token's for an account that is no Host "
@@ -32300,9 +32301,9 @@ struct Module: public interface::Module, public Interface
 	// the server's own, which draws an agent's get_view when no client of
 	// its account is in the agent's session, and plays a body for it
 	// (play_join, 3a below). src/server/confine.h's launcher, forked before
-	// the server's box, starts it in a box of its own: offscreen where its
-	// SDL has the driver (tried first; the client's log says when it has
-	// none), else on the X display the host gave (--camera-display), else
+	// the server's box, starts it in a box of its own: on SDL's offscreen
+	// driver (tried first; EGL and a GL, Mesa's llvmpipe with no GPU), else
+	// on the X display the host gave (--camera-display), else
 	// refused saying what the host needs. One a server (Host::camera: the
 	// app's), started at the first need, stopped unused for
 	// camera_idle_us() (BUILDAT_CAMERA_IDLE_S, 180) and when the Host turns
@@ -32318,7 +32319,7 @@ struct Module: public interface::Module, public Interface
 		bool parsed = false;
 		ss_ got;
 		// Started (the launcher asked) and its process; its mode (offscreen,
-		// x11) and whether this SDL has no offscreen driver
+		// x11) and whether offscreen failed (x11 from then on)
 		bool running = false;
 		int pid = 0;
 		ss_ mode;
@@ -32459,12 +32460,14 @@ struct Module: public interface::Module, public Interface
 				m_cam.running = false;
 				const ss_ why = line.substr(8);
 				m_cam.failed = why != "no display" ? "its launcher refused it: "+
-						why : m_cam.no_offscreen ? "this server's SDL has no "
-						"offscreen driver, and the server was given no X display. "
-						"Its host starts it with --camera-display :N (or "
-						"BUILDAT_CAMERA_DISPLAY=:N), an X server of its own such as "
-						"`Xvfb :N -screen 0 1280x800x24` with Mesa's software GL, or "
-						"runs a build whose SDL has the offscreen driver" :
+						why : m_cam.no_offscreen ? "it could not draw off-screen "
+						"(SDL's offscreen driver needs EGL and a GL; Debian: "
+						"apt-get install libgl1 libegl1 libegl-mesa0 "
+						"libgl1-mesa-dri), and the server was given no X display. "
+						"Its host installs those, or starts it with "
+						"--camera-display :N (or BUILDAT_CAMERA_DISPLAY=:N), an X "
+						"server of its own such as `Xvfb :N -screen 0 1280x800x24` "
+						"with Mesa's software GL" :
 						"no X display";
 				log_w(MODULE, "The server's camera did not start: %s", cs(why));
 			} else if(line.compare(0, 7, "exited ") == 0){
@@ -32473,11 +32476,12 @@ struct Module: public interface::Module, public Interface
 				const ss_ how = line.substr(7);
 				m_cam.running = false;
 				m_cam.pid = 0;
-				if(!m_cam.ready && m_cam.mode == "offscreen" &&
-						how.find("offscreen") != ss_::npos){
+				// Any end before it was in: SDL 2.32 has the driver, so EGL or
+				// a GL is what is missing (no word of that in "how")
+				if(!m_cam.ready && m_cam.mode == "offscreen"){
 					m_cam.no_offscreen = true;
-					log_i(MODULE, "The server's camera: no offscreen driver in this "
-							"SDL (%s): the host's X display next", cs(how));
+					log_i(MODULE, "The server's camera could not draw off-screen "
+							"(%s): the host's X display next", cs(how));
 					camera_start();
 					continue;
 				}

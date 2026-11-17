@@ -64,9 +64,34 @@ if (URHO3D_LIB_TYPE STREQUAL SHARED AND NOT WIN32 AND NOT ANDROID AND NOT IOS AN
 endif ()
 
 # Add targets
-foreach (TARGET FreeType JO LZ4 PugiXml rapidjson SDL StanHull STB)
+foreach (TARGET FreeType JO LZ4 PugiXml rapidjson StanHull STB)
     add_subdirectory (ThirdParty/${TARGET})
 endforeach ()
+
+# buildat: SDL 2.32 is built by its own upstream CMake, as a static library
+# merged into Urho3D like the other third-party ones (doc/magic.txt). FORCE:
+# a build tree configured for 2.0.5 keeps cache entries of the same names.
+# What 2.0.5 did not have is left out: no Wayland, KMS/DRM, Vivante or
+# Raspberry Pi video driver, so a client picks X11 as before.
+foreach (OPT SDL_STATIC SDL2_DISABLE_SDL2MAIN SDL2_DISABLE_INSTALL SDL2_DISABLE_UNINSTALL)
+    set (${OPT} ON CACHE BOOL "" FORCE)
+endforeach ()
+foreach (OPT SDL_SHARED SDL_TEST SDL_TESTS SDL_CCACHE SDL_RENDER SDL_WAYLAND SDL_KMSDRM SDL_VIVANTE SDL_RPI)
+    set (${OPT} OFF CACHE BOOL "" FORCE)
+endforeach ()
+if (WEB)
+    # As 2.0.5 was built here: SDL's threads would make it ask for -pthread
+    set (SDL_THREADS OFF CACHE BOOL "" FORCE)
+endif ()
+set (SDL_CMAKE_DEBUG_POSTFIX "" CACHE STRING "" FORCE)
+add_subdirectory (ThirdParty/SDL)
+list (APPEND STATIC_LIBRARY_TARGETS SDL2-static)
+# Its headers as <SDL/...>; the config and revision headers are generated
+string (TOLOWER "${CMAKE_BUILD_TYPE}" SDL_CONFIG_DIR)
+set (SDL_CONFIG_DIR ${CMAKE_CURRENT_BINARY_DIR}/ThirdParty/SDL/include-config-${SDL_CONFIG_DIR}/SDL2)
+file (REMOVE_RECURSE ${CMAKE_BINARY_DIR}/${DEST_INCLUDE_DIR}/ThirdParty/SDL)  # 2.0.5's links
+install_header_files (DIRECTORY ThirdParty/SDL/include/ DESTINATION ${DEST_INCLUDE_DIR}/ThirdParty/SDL FILES_MATCHING PATTERN *.h USE_FILE_SYMLINK)
+install_header_files (FILES ${CMAKE_CURRENT_BINARY_DIR}/ThirdParty/SDL/include/SDL2/SDL_revision.h ${SDL_CONFIG_DIR}/SDL_config.h DESTINATION ${DEST_INCLUDE_DIR}/ThirdParty/SDL)
 
 if (URHO3D_ANGELSCRIPT)
     add_subdirectory (ThirdParty/AngelScript)

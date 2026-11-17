@@ -120,19 +120,57 @@ CMakeCache.txt, or the VM assembly is made for the wrong mode.
 
 The mingw-w64 build (9daa6ee0, 4a1c1164)
 ----------------------------------------
-Source/Urho3D/CMakeLists.txt, Source/ThirdParty/SDL/CMakeLists.txt
+Source/Urho3D/CMakeLists.txt
 
 Urho3D.dll exports all symbols under MinGW, since buildat calls SDL through
-it; SDL's XAudio2 driver is left out, as its source does not compile
-against current mingw-w64's headers (DirectSound and WinMM remain).
+it.
 
-SDL: the mouse grab gives up after a second (1470b190)
-------------------------------------------------------
-Source/ThirdParty/SDL/src/video/x11/SDL_x11window.c
+SDL 2.32.10 in place of 2.0.5 ([KIT_AGENT_NEXT_1])
+--------------------------------------------------
+Source/ThirdParty/SDL (the release, trimmed), Source/CMakeLists.txt,
+CMake/Modules/UrhoCommon.cmake, Source/ThirdParty/GLEW/glew.c,
+Graphics/OpenGL/OGLGraphics.cpp, Graphics/Direct3D{9,11}/D3D*Graphics.cpp,
+Input/Input.cpp
 
-X11_SetWindowGrab() retried XGrabPointer forever; another client holding
-a grab (a locked screen, an open menu) froze the process for as long as
-that lasted. It gives up after a second, as upstream SDL does.
+The SDL 2.32.10 release tarball (sha256 5f5993c5...a9ca5165, signed by Sam
+Lantinga) with what its CMake build does not read left out: autotools, IDE
+projects, tests, docs, Wayland protocols. Its own CMakeLists.txt builds it
+(Urho3D's 2.0.5 replacement of it is gone), as the static SDL2-static,
+merged into Urho3D like the other third-party libraries; Source/CMakeLists.txt
+sets its options, with FORCE since a build tree configured for 2.0.5 keeps
+cache entries of the same names: no shared library, tests, install, render
+API, and no video driver 2.0.5 did not have (Wayland, KMS/DRM, Vivante,
+Raspberry Pi), so a client still picks X11; on the web no SDL threads, as
+before. The headers are linked into the build tree's include/Urho3D/
+ThirdParty/SDL from the source with the generated SDL_config.h and
+SDL_revision.h; the old links are removed first. Windows links what SDL's
+CMake links (advapi32 setupapi shell32 dinput8 added).
+
+The offscreen driver draws a desktop GL context with no X or Wayland, by
+EGL's device platform and a pbuffer (Mesa's llvmpipe on a box with no
+GPU): SDL_VIDEODRIVER=offscreen. It is used only when named so
+(src/video/offscreen/SDL_offscreenvideo.c), as the dummy driver is, so a
+client with no display still fails to start. GLEW's glxewInit() skips GLX
+when the context has no GLX display (an EGL one), or it queried GLX on a
+null one. SDL_CreateWindowFrom() takes no flags in 2.32; the OpenGL flag
+goes as SDL_HINT_VIDEO_FOREIGN_WINDOW_OPENGL.
+
+Urho3D's change to 2.0.5 carried: a warp sets the mouse state at once
+(src/events/SDL_mouse.c), so GetMousePosition() right after
+SetMousePosition() reads it. Not carried: Input::RemoveGesture() and
+RemoveAllGestures() do nothing (their SDL functions were Urho3D's own;
+nothing records gestures); SDL's dynamic API stays on, as upstream wants
+it; the DPI awareness call (the manifest declares it); on Windows the
+touch-emulated mouse filter (2.32 has its own), the warp during a title
+click and the IME composition reset; the Android, iOS, macOS, Raspberry
+Pi and MSVC changes (buildat builds none of those). Of
+buildat's: the mouse grab's bound (2.32 gives up after five seconds by
+itself), no dbus_shutdown() at quit (2.32 only on a hint), XAudio2 left
+out under mingw (2.32 has no XAudio2 driver), the Emscripten build fixes
+(2.32 has them: dynCall, UTF8ToString, eglQueryString, the window title,
+the gamepads' sampling) and the touch's mouse in pixels (2.32 sends a
+touch's mouse from SDL_touch.c, scaled to the window). Carried: the
+sections below.
 
 SDL: the wait for MapNotify is bounded (ba5b81cd)
 -------------------------------------------------
@@ -156,14 +194,6 @@ sets _NET_WM_USER_TIME to 0 first (EWMH for "the user did not ask for
 this window") and maps without raising. The client sets the hint only
 for a command sequence. XMapWindow was added to the X11 symbol list.
 
-SDL: no dbus_shutdown() at quit (1e1de29c)
-------------------------------------------
-Source/ThirdParty/SDL/src/core/linux/SDL_dbus.c
-
-dbus_shutdown() bumps libdbus's global generation counter, after which any
-other library holding a D-Bus connection fails its own exit cleanup
-(libGLX_nvidia aborted on the assertion). Upstream removed it too.
-
 The Lua GC stepped, not collected, per frame (3eaa6e93)
 -------------------------------------------------------
 LuaScript/LuaScript.cpp
@@ -180,18 +210,14 @@ Needed by the bundled build; not in the 1.7.1 tarball.
 
 A current Emscripten: emcmake and SDL's web backend ([WEB_EMSDK])
 -----------------------------------------------------------------
-CMake/Modules/UrhoCommon.cmake, Source/ThirdParty/SDL/CMakeLists.txt,
-Source/ThirdParty/SDL/src/{audio,video}/emscripten/
+CMake/Modules/UrhoCommon.cmake
 
 The web build is configured with emsdk's own toolchain (emcmake), which
 sets no EMSCRIPTEN_EMCC_VERSION, so the 1.7.1 check that added -std=c++03
 for an emcc older than 1.31.3 always fired: the engine is compiled as
 gnu++17 for the web as it is natively, and the removed link option
---memory-init-file is gone. SDL 2.0.5's Emscripten backend called JS that
-Emscripten no longer has: Runtime.dynCall became wasmTable.get(f)(arg),
-Module['Pointer_stringify'] became UTF8ToString. Current clang rejects its
-mixed declarations under -Werror (now not an error on EMSCRIPTEN) and one
-EGL function pointer assignment (cast). Built with emsdk 3.1.60.
+--memory-init-file is gone. Built with emsdk 3.1.60. (SDL 2.0.5's
+Emscripten backend needed fixes for it too; 2.32's does not.)
 
 GLES3 and WebGL 2 ([WEB_GLES3])
 -------------------------------
@@ -217,16 +243,14 @@ core functions. The engine sample and gradle parts of the PR are left out.
 
 More of SDL's Emscripten backend, and the browser's Esc ([WEB_CLIENT])
 ----------------------------------------------------------------------
-Source/ThirdParty/SDL/src/joystick/emscripten/SDL_sysjoystick.c,
-Source/ThirdParty/SDL/src/video/emscripten/SDL_emscripten{opengles,video,
-events}.c, Input/Input.cpp
+Source/ThirdParty/SDL/src/video/emscripten/SDL_emscriptenevents.c,
+Input/Input.cpp
 
-What the web client ran into at run time: the gamepads are sampled before
-they are counted or read (Emscripten asserts it); eglQueryString is loaded
-with the other EGL functions (SDL_EGL_HasExtension called it through a
-null pointer); the window title goes through emscripten_set_window_title;
-a resizable window follows the canvas's CSS size on a resize even when the
-two were equal at the start. In Input.cpp, when the browser ends a pointer
+What the web client ran into at run time: a resizable window follows the
+canvas's CSS size on a resize even when the two were equal at the start.
+(Fixes 2.0.5 needed and 2.32 has: the gamepads sampled before they are
+read, eglQueryString loaded, the title by emscripten_set_window_title.)
+In Input.cpp, when the browser ends a pointer
 lock that the game still wants (MM_RELATIVE, not an exit Urho asked for),
 an Esc down and up is pushed: the browser does that on Esc and keeps the
 key, and the game should see what the user pressed.
@@ -247,17 +271,17 @@ mode is the game's at once; MM_RELATIVE asks for the lock there and then
 other mode leaves it; a lock granted after the game stopped wanting it is
 left at once; the cursor hides while locked and is otherwise what the game
 set. SetMouseModeEmscriptenFinal and the deferred-request bookkeeping are
-gone. SDL's mouse button handler asked SDL_GetEventState about
-SDL_PRESSED/SDL_RELEASED instead of the event types, so the browser was
-never told to leave a button alone: a middle press in Firefox began its
-autoscroll or paste.
+gone. SDL's mouse button handler claims the press as it claims the
+release (2.0.5 claimed neither, 2.32 the release only): a middle press
+left to Firefox began its autoscroll or paste.
 
 The web keyboard: which keys the page claims ([WEB_KEYS])
 --------------------------------------------------------
 Source/ThirdParty/SDL/src/video/emscripten/SDL_emscriptenevents.c
 
 Emscripten_HandleKey claimed no key while text events were enabled, which
-is always, so F1 to F3 went to the browser. Now a key is claimed unless it
+is always, so F1 to F3 went to the browser (2.32's own rule: Ctrl's and
+the navigation keys only, replaced the same way). Now a key is claimed unless it
 is an IME's (key code 229, "Process", a dead key -- not sent as a game
 key either), Ctrl, Alt or Meta is held (the browser's shortcuts, and its
 copy and paste), or text input is active and the key types a character.
@@ -352,16 +376,16 @@ steps. In the browser the page keeps the textarea's own undo from the keys
 and its syncs come in through SetTextAsTyped, as typing: both clients have
 the same steps.
 
-The web's touch: the first finger's mouse in pixels ([FP_TOUCH])
-----------------------------------------------------------------
+The web's wheel in tenths of a notch (e6348545)
+-----------------------------------------------
 Source/ThirdParty/SDL/src/video/emscripten/SDL_emscriptenevents.c
 
-Emscripten_HandleTouch sends the first finger as the left mouse button.
-It gave SDL_SendMouseMotion the touch's 0..1 position, which is pixels
-there, so the press and the release were at the top left corner. A
-button tapped on a touchscreen was pressed through the UI's own touch
-handling and never released. The finger is now scaled to the window, as
-the mouse handler scales the mouse.
+A desktop's wheel is whole notches; a browser's is pixels (about 100 a
+notch), lines (3) or pages, and a smooth scroll a notch in many small
+events. Emscripten_HandleWheel sends tenths of a notch, which SDL adds up
+to whole ones, and the floorplanner divides by ten on the web (it zoomed
+far faster on the web, then in steps that Firefox's fewer pixels reached
+only now and then).
 
 The web's clipboard ([WEB_KEYS] step 3)
 --------------------------------------
@@ -510,9 +534,11 @@ Ctrl+V falls back to the primary selection ([PASTE_PRIMARY], 7898b77b)
 Source/ThirdParty/SDL/src/video/x11/SDL_x11clipboard.c
 
 X11_GetClipboardText reads CLIPBOARD as before and, when that gives no
-text, PRIMARY the same way. PRIMARY's read gives up after the same second
-but does not, as the CLIPBOARD read's timeout does, set both selections
-to "". util/os_clipboard_check.sh.
+text, PRIMARY. PRIMARY's read takes no cut buffer when it has no owner,
+and gives up after the same second without, as the CLIPBOARD read's
+timeout does, taking the selection with "". X11_SetClipboardText sets
+PRIMARY as well as CLIPBOARD, as SDL 2.0.5 did (2.32 sets CLIPBOARD
+only). util/os_clipboard_check.sh.
 
 The audio buffers' lengths ([SKELDAT_BOARD_SOUND_LAG], e1769237;
 [SKELDAT_BOARD_SOUND_FAULT], c8ee43b3)

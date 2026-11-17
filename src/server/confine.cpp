@@ -1476,7 +1476,8 @@ void start_camera_launcher(core::Config &config, const ss_ &module_path)
 	// What a check or a host set for every client of theirs
 	for(const char *k : {"BUILDAT_STARPORT_DEFAULT", "BUILDAT_AITTA_DEFAULT",
 			"BUILDAT_HEARTH_DEFAULT", "SDL_VIDEO_X11_XRANDR",
-			"LIBGL_ALWAYS_SOFTWARE", "GALLIUM_DRIVER", "LP_NUM_THREADS"})
+			"LIBGL_ALWAYS_SOFTWARE", "GALLIUM_DRIVER", "LP_NUM_THREADS",
+			"__EGL_VENDOR_LIBRARY_FILENAMES"})
 		if(const char *v = getenv(k))
 			s.env.push_back(ss_(k)+"="+v);
 	if(::access(s.exe.c_str(), X_OK) != 0){

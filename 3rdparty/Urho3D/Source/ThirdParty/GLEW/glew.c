@@ -13113,6 +13113,9 @@ GLenum glxewInit (GLXEW_CONTEXT_ARG_DEF_LIST)
   const GLubyte* extEnd;
   /* initialize core GLX 1.2 */
   if (_glewInit_GLX_VERSION_1_2(GLEW_CONTEXT_ARG_VAR_INIT)) return GLEW_ERROR_GLX_VERSION_11_ONLY;
+  /* buildat: a context made by EGL (SDL's offscreen driver, no X) has no
+     GLX display to query; GLX's extensions are left unset, unused */
+  if (glXGetCurrentDisplay() == NULL) return GLEW_OK;
   /* initialize flags */
   GLXEW_VERSION_1_0 = GL_TRUE;
   GLXEW_VERSION_1_1 = GL_TRUE;

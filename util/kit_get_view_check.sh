@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-16)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/accounts/accounts.cpp builtin/accounts/client_lua/accounts.lua src/client/main.cpp src/client/state.cpp src/lua_bindings/misc_urho3d.cpp client/core/urho3d/init.lua 3rdparty/Urho3D/Source/Urho3D/Graphics/OpenGL/OGLTexture2D.cpp
+# covers: builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/accounts/accounts.cpp builtin/accounts/client_lua/accounts.lua src/client/main.cpp src/client/state.cpp src/lua_bindings/misc_urho3d.cpp client/core/urho3d/init.lua 3rdparty/Urho3D/Source/Urho3D/Graphics/OpenGL/OGLTexture2D.cpp 3rdparty/Urho3D/Source/ThirdParty/SDL/src/video/offscreen/** 3rdparty/Urho3D/Source/ThirdParty/GLEW/glew.c
 # [KIT_AGENT_VISUALS] An agent's picture (Kit's get_view) and a client logged
 # in by an agent token. One Workbench server; kitboss (the admin) and kitbob
 # (made a builder by kitboss's admin token) on a headless weston's Xwayland
@@ -19,8 +19,8 @@
 #      look_at without pos refused; kitbob's client never asked;
 #   3. kitboss's client stopped (SIGSTOP): the call answered in 5 s, and
 #      the picture it sends once continued refused as late;
-#   4. a client of no user's display (DISPLAY only the check's own X server,
-#      no Wayland; the recipe's Xvfb here): -T with kitboss's builder token
+#   4. a client with no display (no X, no Wayland: SDL's offscreen driver,
+#      as the recipe has it): -T with kitboss's builder token
 #      refused (kitboss is the Host), the token gone from its command line;
 #      BUILDAT_AGENT_TOKEN with kitbob's while kitbob is here refused;
 #   5. kitbob's client gone: his agent's get_view refused with the way to
@@ -28,7 +28,8 @@
 #      (headless Chrome; skipped without it or web/): its pictures magenta
 #      and upright as in 2, its window the same, and no WebGL warning
 #      ([KIT_GET_VIEW_WEB_BLACK]: "Read buffer is GL_NONE", black);
-#   6. the token client as kitbob: joined, its picture served (magenta);
+#   6. the token client as kitbob: joined, on the offscreen driver, its
+#      picture served (magenta);
 #   7. kitboss revokes his builder token: a client with it refused; Agents
 #      (MCP) off: kitbob's token client kicked;
 #   8. no token in any log, the clients' user and cache dirs.
@@ -129,15 +130,18 @@ client() # <name>: its commands from the fifo $t/<name>.cmd, its log $t/<name>.l
 		< "$t/$1.cmd" > "$t/$1.log" 2>&1 &
 	CHECK_PIDS+=($!)
 }
-# A client of no user's display ([KIT_AGENT_VISUALS] 3, the README's
-# recipe): its only display the check's own X server, as xvfb-run's would
-# be, no Wayland, no drive, no join variables; its log <log>, $HL its PID
+# A client with no display ([KIT_AGENT_VISUALS] 3, the README's recipe):
+# no X, no Wayland, SDL's offscreen driver (EGL), no drive, no join
+# variables; its log <log>, $HL its PID. Mesa's EGL when it is there, as
+# a box with no GPU has: glvnd would offer a GPU vendor's device first.
+mesa_egl=$(ls /usr/share/glvnd/egl_vendor.d/*_mesa.json 2>/dev/null | head -1)
 headless() # <log> <dirs: client_cache_<name>, cu_<name>> [NAME=value ...] bin/buildat [-T token]
 {
 	local log=$1 cache=$2
 	shift 2
-	env -u WAYLAND_DISPLAY -u XAUTHORITY -u BUILDAT_JOIN_PASSWORD \
-		DISPLAY=$d SDL_VIDEODRIVER=x11 "$@" -C "$t/client_cache_$cache" -D "$t/cu_$cache" \
+	env -u DISPLAY -u WAYLAND_DISPLAY -u XAUTHORITY -u BUILDAT_JOIN_PASSWORD \
+		${mesa_egl:+__EGL_VENDOR_LIBRARY_FILENAMES=$mesa_egl} \
+		SDL_VIDEODRIVER=offscreen "$@" -C "$t/client_cache_$cache" -D "$t/cu_$cache" \
 		-s localhost:$SERVER_PORT -w 640x480 -l 4 -o sound_mute=1 \
 		> "$log" 2>&1 &
 	HL=$!
@@ -478,12 +482,14 @@ await "$t/agent.log" 0 120 "Joined as kitbob"
 await "$t/agent.log" 0 120 "player physics enabled"
 grep -aq "accounts: logged in as kitbob by agent token" "$t/agent.log" ||
 	fail "no login by the agent token in $t/agent.log"
+grep -aq "video driver offscreen" "$t/agent.log" ||
+	fail "the token client not on SDL's offscreen driver ($t/agent.log)"
 grep -aqE "kitbob joined from .* by an agent token \(\"My agent\", builder token\)" "$SL" ||
 	fail "no join by an agent token in $SL"
 mcp agent "$tok_bob" "$t"
 [ "$(pictures "$t/agent.log")" = 2 ] || fail "the token client took $(pictures "$t/agent.log") pictures"
 [ "$(pictures "$t/boss.log")" = "$n" ] || fail "kitboss's client was asked for kitbob's agent"
-echo "ok: a client logged in by kitbob's token, its pictures"
+echo "ok: a client logged in by kitbob's token with no display (offscreen), its pictures"
 
 # 7. Revoked: refused; Agents (MCP) off: kicked
 as boss
