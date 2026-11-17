@@ -14500,7 +14500,11 @@ struct Module: public interface::Module, public Interface
 	// cells past a heightmap's map skipped, counted.
 	// simplified: written straight as a prefab's voxels are (set_id): an
 	// owned voxel's owner is not asked
-	static const int64_t MAX_REGION_CELLS = 262144;
+	// 32 a side: a call's stall ~30-55 ms, its undo entry ~2 MB (64: ~200-430
+	// ms and ~17 MB, a stack of them near a GB)
+	static const int MAX_REGION_SIDE = 32;
+	static const int64_t MAX_REGION_CELLS = (int64_t)MAX_REGION_SIDE *
+			MAX_REGION_SIDE * MAX_REGION_SIDE;
 	static const int MAX_REGION_LOADS = 8;
 	void region_op(Peer &p, size_t peer, const json::Value &j,
 			std::function<void(const ss_&)> refuse)
@@ -14516,7 +14520,7 @@ struct Module: public interface::Module, public Interface
 			for(unsigned i = 0; i < 3; i++){
 				const double x = v.is_array() && v.size() == 3 &&
 						v.at(i).is_number() ? v.at(i).as_number() : NAN;
-				if(!(x == std::floor(x) && (size ? x >= 1 && x <= MAX_PREFAB_BOX :
+				if(!(x == std::floor(x) && (size ? x >= 1 && x <= MAX_REGION_SIDE :
 						std::fabs(x) <= MAX_COORD)))
 					return false;
 				out[i] = (int)x;
@@ -14527,7 +14531,7 @@ struct Module: public interface::Module, public Interface
 		if(!three("at", o, false))
 			return refuse("at: three whole numbers within "+itos((int)MAX_COORD));
 		if(action != "paste" && !three("size", n, true))
-			return refuse("size: three whole numbers 1..."+itos(MAX_PREFAB_BOX));
+			return refuse("size: three whole numbers 1..."+itos(MAX_REGION_SIDE));
 		if(action == "move" && !three("to", to, false))
 			return refuse("to: three whole numbers within "+itos((int)MAX_COORD));
 		const json::Value &tj = j.get("turn");
@@ -14572,6 +14576,11 @@ struct Module: public interface::Module, public Interface
 				wo[i] = action == "move" ? to[i] : o[i];
 				base[i] = wo[i] - off[i];
 			}
+			// (a builder's own copy in the clipboard may be bigger)
+			if((int64_t)wn[0] * wn[1] * wn[2] > MAX_REGION_CELLS)
+				return refuse("the clipboard's box is over "+
+						itos(MAX_REGION_CELLS)+" cells ("+itos(MAX_REGION_SIDE)+
+						" a side): copy a smaller one");
 		}
 		// [KIT_SYMMETRY] in the authored slice (each box's corners), written
 		// into the others after
@@ -31406,7 +31415,7 @@ struct Module: public interface::Module, public Interface
 				"copy (the box into your clipboard), paste (the copy, its low "
 				"corner at `at`, turned turn degrees, a multiple of 90; air: its "
 				"air cells too, else what is there stays), move (the box's to "
-				"`to`, likewise; the box cleared first). size: 64 a side at "
+				"`to`, likewise; the box cleared first). size: 32 a side at "
 				"most. The sections it touches are loaded for it, 8 a call: "
 				"while one is generated it is refused with nothing changed, call "
 				"again. Cells past a heightmap's map are skipped. get_voxels "

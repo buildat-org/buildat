@@ -1027,7 +1027,7 @@ namespace interface
 //       shell as it is; the inside air), clear, replace ("voxel"'s cells
 //       with "with"), copy (into the builder's clipboard), paste (the
 //       copy's low corner at at, "turn" a multiple of 90, "air": its air
-//       cells too), move (to "to", likewise); 64 a side. Its sections are
+//       cells too), move (to "to", likewise); 32 a side. Its sections are
 //       loaded first: while one is generated it is refused, nothing
 //       written
 //   {"op": "set_voxel", "pos": [x, y, z], "voxel": n}  -- ([KIT_EDIT_VOXELS])

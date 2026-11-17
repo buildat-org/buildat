@@ -9,7 +9,7 @@
 # weston's Xwayland of the check's own and stays, in edit mode:
 #   1. edit_voxels: fill, hollow, replace, copy, paste turned 90, move, each
 #      read back with get_voxels; one undo puts the move back; caps and bad
-#      arguments refused; a 64^3 fill and replace timed and undone (the
+#      arguments refused; a 32^3 fill and replace timed and undone (the
 #      server logs each region edit's ms); edit_terrain on a
 #      voxel World refused;
 #   2. batch: place, rename by {"id_of": 0}, set_comments, edit_voxels as one
@@ -243,8 +243,8 @@ if phase == "voxels":
     assert "Undone" in call("undo")
     assert voxels(B, [4, 3, 5]) == pb and set(cells(C, [4, 3, 5])) == {"air"}
     # caps and bad arguments
-    assert "size: three whole numbers 1...64" in edit({"action": "fill", "at": A,
-        "size": [65, 1, 1], "voxel": v1}, True)
+    assert "size: three whole numbers 1...32" in edit({"action": "fill", "at": A,
+        "size": [33, 1, 1], "voxel": v1}, True)
     assert "action: fill, hollow" in edit({"action": "explode", "at": A, "size": [1, 1, 1]}, True)
     assert "is no voxel of the scene's" in edit({"action": "fill", "at": A,
         "size": [1, 1, 1], "voxel": "nope"}, True)
@@ -256,23 +256,23 @@ if phase == "voxels":
     # (in the World's map, its corner)
     mp = json.loads(call("get_ground", {"at": [0, 0], "size": [1, 1]})).get("map",
         [-200, -200, 400, 400])
-    assert mp[2] >= 64 and mp[3] >= 64, mp
-    hi = max(h for row in ground(mp[:2], (64, 64)) for h in row if h is not None)
+    assert mp[2] >= 32 and mp[3] >= 32, mp
+    hi = max(h for row in ground(mp[:2], (32, 32)) for h in row if h is not None)
     D = [mp[0], hi + 16, mp[1]]
     t0 = time.time()
-    r = edit({"action": "fill", "at": D, "size": [64, 64, 64], "voxel": v1})
-    print("  fill 64^3: %.0f ms (from the first call)" % ((time.time() - t0) * 1000))
-    assert "(262144 cells): 262144 cells written" in r, r
-    assert set(cells([D[0], D[1] + 63, D[2]], [64, 1, 64])) == {v1}
+    r = edit({"action": "fill", "at": D, "size": [32, 32, 32], "voxel": v1})
+    print("  fill 32^3: %.0f ms (from the first call)" % ((time.time() - t0) * 1000))
+    assert "(32768 cells): 32768 cells written" in r, r
+    assert set(cells([D[0], D[1] + 31, D[2]], [32, 1, 32])) == {v1}
     # (its sections there: the write alone)
     t0 = time.time()
-    edit({"action": "replace", "at": D, "size": [64, 64, 64], "voxel": v1, "with": v2})
-    print("  replace 64^3: %.0f ms" % ((time.time() - t0) * 1000))
+    edit({"action": "replace", "at": D, "size": [32, 32, 32], "voxel": v1, "with": v2})
+    print("  replace 32^3: %.0f ms" % ((time.time() - t0) * 1000))
     for k in range(2):
         t0 = time.time()
         call("undo")
         print("  an undo: %.0f ms" % ((time.time() - t0) * 1000))
-    assert set(cells([D[0], D[1] + 63, D[2]], [64, 1, 64])) == {"air"}
+    assert set(cells([D[0], D[1] + 31, D[2]], [32, 1, 32])) == {"air"}
     save(top=top, v1=v1, v2=v2, A=A, B=B)
 elif phase == "batch":
     top, v1, A = s["top"], s["v1"], s["A"]
@@ -310,8 +310,8 @@ elif phase == "batch":
         {"tool": "place", "args": {"type": "kit/counter", "pos": [0, 0, 0]}},
         {"tool": "rename", "args": {"id": {"id_of": 1}, "name": "x"}}]})
     assert "rename needs id" in refused("batch", {"ops": [{"tool": "rename", "args": {"name": "x"}}]})
-    assert "write up to 524288 cells" in refused("batch", {"ops": [
-        {"tool": "edit_voxels", "args": {"action": "fill", "at": E, "size": [64, 64, 64], "voxel": v1}}] * 2})
+    assert "write up to 65536 cells" in refused("batch", {"ops": [
+        {"tool": "edit_voxels", "args": {"action": "fill", "at": E, "size": [32, 32, 32], "voxel": v1}}] * 2})
     assert len(state(type="kit/counter")["entities"]) == n0
 elif phase == "scatter":
     top = s["top"]
