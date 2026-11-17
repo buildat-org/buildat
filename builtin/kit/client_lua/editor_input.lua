@@ -1849,9 +1849,10 @@ zoom_at = function(notches, mx, my)
 		local o1 = M.screen_ray(mx, my)
 		S.cx, S.cz = S.cx + o0.x - o1.x, S.cz + o0.z - o1.z
 	elseif S.view == "front" then
-		-- [KIT_PLANE] as the plan's, in x and y
+		-- [KIT_PLANE] as the plan's, in x and y ([KIT_SIDE_SCENERY] out to a
+		-- 512-wide polygon's whole in a square window)
 		local o0 = M.screen_ray(mx, my)
-		S.fspan = math.max(4, math.min(400, S.fspan * f))
+		S.fspan = math.max(4, math.min(800, S.fspan * f))
 		place_cameras()
 		local o1 = M.screen_ray(mx, my)
 		S.fx, S.fy = S.fx + o0.x - o1.x, S.fy + o0.y - o1.y
@@ -2045,7 +2046,7 @@ local function touch_move(id, x, y, dx, dy)
 			local ax, ay = (px_ + o.x) / 2 - ox, (py_ + o.y) / 2 - oy
 			local k = S.fspan / h
 			local wx, wy = S.fx + (ax - w / 2) * k, S.fy - (ay - h / 2) * k
-			S.fspan = math.max(4, math.min(400, S.fspan * d0 / d1))
+			S.fspan = math.max(4, math.min(800, S.fspan * d0 / d1))
 			k = S.fspan / h
 			ax, ay = ax + mdx, ay + mdy
 			S.fx, S.fy = wx - (ax - w / 2) * k, wy + (ay - h / 2) * k
