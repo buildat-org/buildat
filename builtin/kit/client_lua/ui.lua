@@ -989,7 +989,9 @@ local function follow(r, id)
 		return false
 	end
 	local cam = eye:GetComponent("Camera")
-	local own = M.body_pos and M.body_pos()
+	-- ([KIT_SPECTATE_CAMERA] from what the camera follows: a watched player's,
+	-- a camera_target's)
+	local own = M.camera_follows and M.camera_follows()
 	local cp = eye.worldPosition
 	local ox, oy, oz = 0, 2, -6
 	if own then

@@ -501,6 +501,14 @@ local function log_body()
 		log:info(string.format("kit: side camera at %.2f,%.2f, lead %.2f,%.2f",
 				C.side_at[1], C.side_at[2], C.side_lead[1], C.side_lead[2]))
 	end
+	-- [KIT_SPECTATE_CAMERA] The camera: its place, turn and fov, and how far
+	-- a shake has it off its place
+	if O.camera and C.cam then
+		local p, q = O.camera.position, O.camera.rotation
+		log:info(string.format("kit: camera at %.2f,%.2f,%.2f turn %.4f,%.4f,%.4f,%.4f, " ..
+				"fov %.1f, shaken %.3f", p.x, p.y, p.z, q.w, q.x, q.y, q.z,
+				O.camera:GetComponent("Camera").fov, (p - C.cam):Length()))
+	end
 	-- [KIT_SHIP_VIEW] A chase view's distance from what it looks at
 	if C.chase_dist then
 		log:info(string.format("kit: camera %.2f m behind", C.chase_dist))
@@ -962,6 +970,13 @@ buildat.sub_packet("kit:controls", function(data)
 				signal(k, v)
 			end
 			C.signals[k] = v
+		end
+	end
+	-- ([KIT_SPECTATE_CAMERA] one gone, a Stop's or another scene's: none, as a
+	-- camera_target or a mode left over would stay)
+	for k in pairs(C.signals) do
+		if sig[k] == nil then
+			C.signals[k] = nil
 		end
 	end
 	if was_free ~= M.pointer_free() and O.capture then
@@ -1584,6 +1599,12 @@ function M.body_pos()
 	return C.draw and magic.Vector3(C.draw[1], C.draw[2], C.draw[3]) or nil
 end
 
+-- [KIT_SPECTATE_CAMERA] The feet the camera follows (the body's, a watched
+-- player's, a camera_target's less half a body); nil before the first view
+function M.camera_follows()
+	return C.follow and magic.Vector3(C.follow[1], C.follow[2], C.follow[3]) or nil
+end
+
 -- ---- The touchscreen ([FP_TOUCH] 3, floorplanner's walking)
 local function touch_kind()
 	if M.seated() then
@@ -1948,6 +1969,53 @@ local function see_through(sight)
 	seen = now
 end
 
+-- [KIT_SPECTATE_CAMERA] kit/controls' camera_target for this player (their
+-- own, else everyone's): the point the camera follows or looks at, an
+-- entity's (a player's body's middle as drawn, else its look's or node's
+-- place) or a position; nil none, or the entity not here (another scene,
+-- gone): the normal follow
+local function target_point()
+	local s = C.signals.camera_target
+	local t = type(s) == "table" and type(s.targets) == "table" and s.targets or {}
+	local v = t[tostring(P.you)]
+	if v == nil then
+		v = t[""]
+	end
+	local p, what = nil, "none"
+	if type(v) == "table" then
+		p = magic.Vector3(tonumber(v[1]) or 0, tonumber(v[2]) or 0, tonumber(v[3]) or 0)
+		what = string.format("position %g,%g,%g", p.x, p.y, p.z)
+	elseif (tonumber(v) or 0) > 0 then
+		local id = tonumber(v)
+		local n = P.nodes[id]
+		local show = n and type(n.show) == "table" and n.show or {}
+		if show.player then
+			local f = M.body_at(id)
+			p = f and f + magic.Vector3(0, bd_h() / 2, 0)
+		elseif n then
+			p = (n.look or n.node).worldPosition
+		end
+		what = "entity " .. id .. (p and "" or " not here")
+	end
+	if what ~= C.target_said then
+		log:info("kit: camera target " .. what .. (p and string.format(
+				" at %.2f,%.2f,%.2f", p.x, p.y, p.z) or "") ..
+				(C.target_said and ", was " .. C.target_said or ""))
+		C.target_said = what
+	end
+	return p
+end
+
+-- The view turned toward p from eye (camera_target's: the mouse's look held)
+local function look_at(eye, p)
+	local d = p - eye
+	local l = math.sqrt(d.x * d.x + d.z * d.z)
+	if l + math.abs(d.y) > 1e-3 then
+		C.yaw = math.deg(math.atan2(d.x, d.z)) % 360
+		C.pitch = math.max(-89, math.min(89, -math.deg(math.atan2(d.y, l))))
+	end
+end
+
 local function place_camera(dt, at)
 	local node = O.camera
 	local cam = node:GetComponent("Camera")
@@ -1956,15 +2024,6 @@ local function place_camera(dt, at)
 	-- (the near clip a side camera moved)
 	if C.near0 then
 		cam.nearClip, C.near0 = C.near0, nil
-	end
-	-- [KIT_SPECTATE] out of play: a free camera or a player's view
-	-- (players.lua)
-	local sp, sr = M.spectate_view(dt, node.position, C.yaw, C.pitch)
-	if sp then
-		node.position = sp
-		node.rotation = sr
-		C.cam = sp
-		return mode
 	end
 	local bd = body_decl()
 	local ox, oy, oz = tonumber(par.offset_x) or 0, tonumber(par.offset_y) or 0,
@@ -1992,9 +2051,38 @@ local function place_camera(dt, at)
 		return (math.random() * 2 - 1) * a
 	end
 	local roll = (tonumber(par.roll) or 0) + jitter(sh * 4)
-	local want_pos, rot, sight
+	-- [KIT_SPECTATE_CAMERA] What the camera follows: the body; a game's
+	-- camera_target (first person: looked at from the eye); out of play
+	-- ([KIT_SPECTATE], players.lua) the one watched, or in first person a free
+	-- camera or the watched one's eyes
+	local follows = mode ~= "first_person"
+	local tp = target_point()
+	local who, sp, sr = M.spectate_view(dt, node.position, node.rotation, C.yaw,
+			C.pitch, follows)
+	local own = true
+	if follows and tp then
+		at, own = {tp.x, tp.y - bd_h() / 2, tp.z}, false
+	elseif who and who ~= P.you then
+		local f = M.body_at(who)
+		if f then
+			at, own = {f.x, f.y, f.z}, false
+		end
+	end
+	C.follow = at
 	C.chase_dist = nil
 	cam.orthographic = false
+	if sp then
+		if tp then
+			look_at(sp, tp)
+			sr = magic.Quaternion(C.pitch, C.yaw, 0)
+		end
+		C.cam = sp
+		node.position = sh > 0 and sp + magic.Vector3(jitter(sh * 0.3),
+				jitter(sh * 0.3), jitter(sh * 0.3)) or sp
+		node.rotation = sr * magic.Quaternion(0, 0, roll)
+		return mode
+	end
+	local want_pos, rot, sight
 	if mode == "top_down" then
 		local h = (tonumber(par.height) or 14) * C.zoom
 		local pitch = tonumber(par.angle) or 60
@@ -2027,7 +2115,8 @@ local function place_camera(dt, at)
 		-- view's size from its perspective at the plane (ortho's is the same)
 		local la, lv = tonumber(par.look_ahead) or 0, tonumber(par.look_velocity) or 0
 		local lx, ly = 0, 0
-		if (la ~= 0 or lv ~= 0) and C.s then
+		-- ([KIT_SPECTATE_CAMERA] none for another's body or a target)
+		if (la ~= 0 or lv ~= 0) and C.s and own then
 			lx = math.sin(math.rad(tonumber(C.s.yaw) or 0)) * la
 			local v = type(C.s.vel) == "table" and C.s.vel or {}
 			lx = lx + (tonumber(v[1]) or 0) * lv
@@ -2072,7 +2161,7 @@ local function place_camera(dt, at)
 				C.zoom
 		local yaw = C.yaw
 		-- A vehicle's view behind it, turning as it turns
-		if M.seated() and C.s and tonumber(C.s.yaw) then
+		if own and M.seated() and C.s and tonumber(C.s.yaw) then
 			C.chase_yaw = lerp_yaw(C.chase_yaw or C.s.yaw, C.draw_yaw or C.s.yaw,
 					1 - math.exp(-dt / 0.25))
 			yaw = C.chase_yaw
@@ -2102,13 +2191,19 @@ local function place_camera(dt, at)
 		sight = {target, d, magic.Vector3(d.x, 0, d.z):Normalized()}
 		C.chase_dist = dist
 	else
-		rot = magic.Quaternion(C.pitch, C.yaw, roll)
 		local off = magic.Vector3(ox, (tonumber(bd.eye) or 1.5487) + oy, oz)
 		if C.tilt then
-			rot = C.tilt * rot
 			off = C.tilt * off
 		end
 		want_pos = magic.Vector3(at[1] + off.x, at[2] + off.y, at[3] + off.z)
+		-- ([KIT_SPECTATE_CAMERA] a camera_target looked at, untilted)
+		if tp then
+			look_at(want_pos, tp)
+		end
+		rot = magic.Quaternion(C.pitch, C.yaw, roll)
+		if C.tilt and not tp then
+			rot = C.tilt * rot
+		end
 		local d = rot * magic.Vector3(0, 0, 1)
 		sight = {want_pos, d, magic.Vector3(d.x, 0, d.z):Normalized()}
 	end

@@ -31,7 +31,10 @@
 -- a position: shake_amount, on each client full within shake_near m of its
 -- camera, nothing from shake_far, 0 everywhere full), fov (to a value
 -- over fov_time; 0: back), glitch (for seconds), tint (a flash of a
--- colour) and camera (a mode: "" the camera's own). [KIT_EDIT_VIEW]
+-- colour) and camera (a mode: "" the camera's own). [KIT_SPECTATE_CAMERA]
+-- camera_target (an entity id or a position; 0 none): side, top_down and
+-- chase follow it in place of the body, first_person looks at it; for the
+-- player who set it off, else everyone, `to` or not. [KIT_EDIT_VIEW]
 -- edit_view: the editor's view at a client's first edit mode (auto: the
 -- editor's own, a remembered one; 2d, 3d; [KIT_CRAG_PLAYTEST_1] 2d is the
 -- Front view where the camera is side), over the remembered,
@@ -58,6 +61,24 @@ local function signal(c, input, value, by)
 		v.color = type(value) == "string" and value or "#ffffff"
 	elseif input == "camera" then
 		v.mode = type(value) == "string" and value or ""
+	elseif input == "camera_target" then
+		-- [KIT_SPECTATE_CAMERA] Each player's (by player id; "": all of them),
+		-- whatever `to` says: one by a player sets theirs, one by nobody
+		-- everyone's. 0: none. by stays empty, so the server sends it to all.
+		-- simplified: a gone player's entry stays till the next one by nobody
+		local t = 0
+		if type(value) == "table" then
+			t = {tonumber(value[1]) or 0, tonumber(value[2]) or 0,
+				tonumber(value[3]) or 0}
+		elseif tonumber(value) then
+			t = math.max(0, math.floor(tonumber(value)))
+		end
+		local id = tostring(by or ""):match("^player:(%d+)$")
+		v.targets = id and type(s) == "table" and type(s.targets) == "table" and
+				s.targets or {}
+		v.targets[id or ""] = t
+		v.by = ""
+		value = type(t) == "table" and table.concat(t, ",") or t
 	end
 	c.state[input] = v
 	c:log(input, tostring(value), who ~= "" and "for " .. who or "")
@@ -138,9 +159,10 @@ return {
 			glitch = "A glitch on the screen. Value: its seconds (none: 1).",
 			tint = "A flash of a colour. Value: #rrggbb (none: white).",
 			camera = "Changes the camera's mode. Value: first_person, chase, top_down or side; \"\" its own.",
+			camera_target = "Aims its sender's camera (no sender: all), whatever `to` says. Value: an entity id or [x, y, z]; 0 back.",
 		},
 	},
 	inputs = {shake = "any", fov = "any", glitch = "any", tint = "any",
-		camera = "any"},
+		camera = "any", camera_target = "any"},
 	on_input = signal,
 }
