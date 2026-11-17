@@ -54,6 +54,9 @@
 //       against the sun flickers yellow-green. simplified, as PBRVoxel's:
 //       not multiplied by the shadow (the face is its own caster); the sun
 //       and the moon alone (a lamp's attenuation is not in lightDir).
+//   KITUNLIT  ([KIT_SIDE_SCENERY]) a look in material "glow" wearing a
+//       voxel material (KitVoxelLookGlow.xml, its base pass alone): the
+//       albedo as it is, no light.
 //
 // The vertex colour is light, not albedo, so it is not multiplied into the
 // diffuse colour as LitSolid's VERTEXCOLOR does.
@@ -500,6 +503,9 @@ void PS()
     #else
         // Ambient & per-vertex lighting
         vec3 finalColor = vVertexLight * diffColor.rgb;
+        #ifdef KITUNLIT
+            finalColor = diffColor.rgb;
+        #endif
         #ifdef AO
             // If using AO, the vertex light ambient is black, calculate occluded ambient here
             finalColor += texture2D(sEmissiveMap, vTexCoord2).rgb * cAmbientColor.rgb * diffColor.rgb;

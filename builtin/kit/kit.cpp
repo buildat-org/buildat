@@ -102,6 +102,9 @@ static const int MAX_VOLUME = 64;
 // [KIT_PLANE] stage 3: kit/polygon's points at most (its edit, 18 bytes a point
 // written to the 1/16, within the 4096-byte edit packet)
 static const size_t MAX_POLYGON_POINTS = 128;
+// [KIT_SIDE_SCENERY] its points' reach from its place each way (512 wide: a
+// skyline or a ridge in one piece); the other looks keep MAX_EXTENT
+static const int MAX_POLYGON_EXTENT = 256;
 // [KIT_CTF] A region's extent each way: the World's whole height, so a
 // map-wide region and a column down to the World's bottom fit;
 // [KIT_AIRSHIPS_2] the widest World's side (kit/terrain's width), so one
@@ -4181,12 +4184,12 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_PLANE] stage 3: kit/polygon's outline ("points": [[x, y]...] in its own x
 	// and y): "" when it is a simple polygon of 3...MAX_POLYGON_POINTS points within
-	// MAX_EXTENT / 2 of its place (its look's box within a look's 64), else what
-	// it should be. Every pair of edges is checked (128 points: 8128 pairs)
+	// MAX_POLYGON_EXTENT of its place ([KIT_SIDE_SCENERY]), else what it should
+	// be. Every pair of edges is checked (128 points: 8128 pairs)
 	static ss_ points_ok(const json::Value &v)
 	{
 		const ss_ what = "a polygon: 3 to "+itos(MAX_POLYGON_POINTS)+
-				" points [x, y] within "+itos(MAX_EXTENT / 2)+" of its place";
+				" points [x, y] within "+itos(MAX_POLYGON_EXTENT)+" of its place";
 		if(!v.is_array() || v.size() < 3 || v.size() > MAX_POLYGON_POINTS)
 			return what;
 		const size_t n = v.size();
@@ -4199,7 +4202,8 @@ struct Module: public interface::Module, public Interface
 			x[i] = p.at(0u).as_number();
 			y[i] = p.at(1u).as_number();
 			if(!std::isfinite(x[i]) || !std::isfinite(y[i]) ||
-					std::fabs(x[i]) > MAX_EXTENT / 2 || std::fabs(y[i]) > MAX_EXTENT / 2)
+					std::fabs(x[i]) > MAX_POLYGON_EXTENT ||
+					std::fabs(y[i]) > MAX_POLYGON_EXTENT)
 				return what;
 		}
 		auto cross = [&](size_t o, size_t a, size_t b){
@@ -23173,9 +23177,23 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// [KIT_AIRSHIP_CORE_DEATH] How far a look's box reaches from its entity's place
-	// at most (move.lua's M.look_box: its size, a state's scale, the offsets)
+	// at most (move.lua's M.look_box: its size, a state's scale, the offsets;
+	// [KIT_SIDE_SCENERY] a polygon's, its farthest point and half its depth)
 	static double look_reach(const json::Value &look)
 	{
+		if(jstr(look, "shape") == "polygon"){
+			const json::Value &pts = look.get("points"), &d = look.get("depth");
+			double r2 = 0;
+			for(unsigned i = 0; pts.is_array() && i < pts.size(); i++){
+				const json::Value &p = pts.at(i);
+				if(p.is_array() && p.size() == 2 && p.at(0u).is_number() &&
+						p.at(1u).is_number())
+					r2 = std::max(r2, p.at(0u).as_number() * p.at(0u).as_number() +
+							p.at(1u).as_number() * p.at(1u).as_number());
+			}
+			return std::sqrt(r2) + (d.is_number() ? std::min(64.0,
+					std::fabs(d.as_number())) / 2 : 0.5);
+		}
 		auto vec = [](const json::Value &v, double s[3], double def, double lo,
 				double hi){
 			for(unsigned i = 0; i < 3; i++){
@@ -23317,14 +23335,23 @@ struct Module: public interface::Module, public Interface
 			// [KIT_AIRSHIP_CORE_DEATH] each look as far as its own size reaches: an
 			// island's edge is far from its middle (16x4x26: past 10 m from it
 			// the body fell through). simplified: a look is met no further than
-			// 64 m from its entity's place (a 64 m box's corner is 55 m out)
+			// 64 m from its entity's place (a 64 m box's corner is 55 m out);
+			// [KIT_SIDE_SCENERY] a polygon's (its type's look one) as far as
+			// its points reach (look_reach)
 			double w[3];
 			Turn wq;
 			world_of(e, w, &wq);
 			const double near[3] = {std::fabs(w[0] - pos[0]) - R - 8,
 					std::fabs(w[1] - pos[1]) - ny - 8, std::fabs(w[2] - pos[2]) - R - 8};
-			if(near[0] > 64 || near[1] > 64 || near[2] > 64)
-				continue;
+			const double far = std::max(near[0], std::max(near[1], near[2]));
+			if(far > 64){
+				bool poly = false;
+				for(const Instance &in : e.comps)
+					poly = poly || jstr(m_types[in.type].decl.get("look"),
+							"shape") == "polygon";
+				if(!poly || far > MAX_POLYGON_EXTENT * 1.5 + 32)
+					continue;
+			}
 			// [KIT_MOVING_OBJECTS] one that moves: at rest, what moves it with it
 			const json::Value links = links_of(e);
 			if(links.size()){
@@ -23821,8 +23848,14 @@ struct Module: public interface::Module, public Interface
 			double w[3];
 			Turn wq;
 			world_of(e, w, &wq);
-			if(w[0] < g.x0 - 40 || w[0] > g.x0 + g.nx + 40 || w[2] < g.z0 - 40 ||
-					w[2] > g.z0 + g.nz + 40)
+			// ([KIT_SIDE_SCENERY] a polygon's box as far as its points reach)
+			bool poly = false;
+			for(const Instance &in : e.comps)
+				poly = poly || jstr(m_types[in.type].decl.get("look"), "shape") ==
+						"polygon";
+			const double m = poly ? MAX_POLYGON_EXTENT + 8 : 40;
+			if(w[0] < g.x0 - m || w[0] > g.x0 + g.nx + m || w[2] < g.z0 - m ||
+					w[2] > g.z0 + g.nz + m)
 				continue;
 			for(const Instance &in : e.comps){
 				const json::Value &d = m_types[in.type].decl.get("look");
@@ -23846,7 +23879,8 @@ struct Module: public interface::Module, public Interface
 				for(int k = 0; k < 3; k++){
 					s[k] = sz.is_array() ? num_at(sz, k, 1) : (sz.is_number() ?
 							sz.as_number() : 0.4) * 2;
-					s[k] = std::max(0.02, std::min(64.0, s[k]));
+					s[k] = std::max(0.02, std::min(poly ? 2.0 * MAX_POLYGON_EXTENT :
+							64.0, s[k]));
 					if(look.get("offset").is_array())
 						off[k] = num_at(look.get("offset"), k, 0);
 				}
@@ -33353,6 +33387,12 @@ struct Module: public interface::Module, public Interface
 				for(unsigned k = 0; sz.is_array() && k < sz.size() && k < 3; k++)
 					if(sz.at(k).is_number())
 						half = std::max(half, sz.at(k).as_number() / 2);
+				// [KIT_SIDE_SCENERY] a polygon's points
+				const json::Value &pts = in.params.get("points");
+				for(unsigned i = 0; pts.is_array() && i < pts.size(); i++)
+					for(unsigned k = 0; pts.at(i).is_array() && k < pts.at(i).size(); k++)
+						if(pts.at(i).at(k).is_number())
+							half = std::max(half, std::fabs(pts.at(i).at(k).as_number()));
 			}
 			half = std::min(half, 512.0);
 			for(int k = 0; k < 3; k++){
@@ -37164,7 +37204,15 @@ struct Module: public interface::Module, public Interface
 			"kit/part: a box, wedge or sphere of any size and rotation, its "
 			"color and material plain, metal, glass or glow (glow: unlit, "
 			"bright, casting no light), or voxel: a voxel type's texture. "
-			"kit/polygon: an extruded outline for side views. kit/effect: "
+			"kit/polygon: an extruded outline for side views, its points "
+			"within 256 of its place (a skyline or ridge 512 wide in one "
+			"piece); voxel wears a voxel type's textures, world-aligned so "
+			"pieces side by side tile, the type's top as a band edge_depth "
+			"cells deep along the edges facing up (color then unused, material "
+			"kept). A grass-edged cliff: place kit/polygon with params "
+			"{\"points\": [[-20, -6], [20, -6], [20, 2], [-20, 2]], \"voxel\": "
+			"\"kit/grass\", \"edge_depth\": 0.25}; an uploaded texture through "
+			"put_texture's voxel. kit/effect: "
 			"particle bursts (count, shape, colors, speed, gravity, ttl, size) "
 			"and a short light without shadow, on a signal or a world event "
 			"(dig, place, hit, blast, respawn, pickup). Prefabs group parts "

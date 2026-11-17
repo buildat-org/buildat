@@ -36,7 +36,16 @@
 #   8. [KIT_EDIT_VIEW] kit/controls' edit_view 2d; the next session in
 #      the touch mode (by mouse), 3D remembered: edit mode comes up in 2D,
 #      the Front view.
-#   9. A third session: [KIT_SIDE_SCENERY] (4) an environment (sky
+#   9. [KIT_SIDE_SCENERY] A polygon 512 wide: the body put on it 245 from
+#      its place stands on its top and walks, few corrections; a point at
+#      257 refused. Its Front view out to 800 high (all of it between the
+#      panels), one drawn by clicks there over 400 wide; its far end panned
+#      to by the middle button, the wheel in about it, its point dragged.
+#  10. [KIT_SIDE_SCENERY] voxel kit/grass on a concave polygon, in the Front
+#      view: its face dirt (brown, textured), a grass band along its top;
+#      cut in two at x 0, the same pixels (no seam). A builder's voxel type
+#      (op voxel) worn; glow and glass with a texture drawn, no error.
+#  11. A third session: [KIT_SIDE_SCENERY] (4) an environment (sky
 #      #3070e0, cartoon), the side camera ortho looking 10 m left and 5 up
 #      of the body: the sky's colour over the frame, none of the dome's box
 #      (a cell's square) in its middle; (3) a part placed in the plane, no
@@ -44,8 +53,10 @@
 #      1 - 3): the editor's notification, the part not drawn.
 #      [KIT_LEFTOVERS_1116] a kit/creature placed off the plane (z 4)
 #      stops in it (its log, kitboss selecting it), its senses off.
-# The screenshots (side, front, side_ortho, side_polygons, front_polygon, touch_front,
-# side_sky) are kept with KEEP_TMP=1; look at them.
+# The screenshots (side, front, side_ortho, side_polygons, front_polygon,
+# side_wide, front_wide, front_far_end, grass_one, grass_two,
+# grass_materials, touch_front, side_sky)
+# are kept with KEEP_TMP=1; look at them.
 #   util/kit_plane_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -276,6 +287,134 @@ keypress F2
 wait_log 5000 kit editor: the view is 3D
 EOF
 	n=$((n + 1))
+	# [KIT_SIDE_SCENERY] A polygon 512 wide (11), the body put on it 245 from
+	# its place and walked; a point at 257 refused
+	poly -200 12 1 '[[-256, -0.5], [256, -0.5], [256, 0.5], [-256, 0.5]]'
+	cat <<'EOF'
+event kit_edit {"op": "set", "id": 11, "comp": 0, "param": "points", "value": [[-257, -0.5], [256, -0.5], [256, 0.5], [-257, 0.5]]}
+wait_log 10000 within 256 of its place
+event kit_edit {"op": "walk_here", "pos": [45, 12.6, 1]}
+wait_log 10000 the server put the player at (45
+keypress F6
+wait_log 10000 kit editor: edit mode off
+frames 30
+event kit_body
+keydown A
+delay 600
+keyup A
+frames 30
+event kit_body
+screenshot @T@/side_wide.png
+keypress F6
+wait_log 10000 kit editor: state:
+keypress F1
+wait_log 5000 kit editor: the view is 2D (front)
+event kit_select 11
+wait_log_any 5000 kit editor: selected 11 (
+click Button "Edit in 2D view"
+wait_log 5000 kit editor: polygon 11 in the Front view at -200.00,12.00
+mouse_pos 512 350
+frames 3
+mouse_wheel -3
+wait_log 5000 kit editor: the wheel: the front 800.0 high
+frames 5
+screenshot @T@/front_wide.png
+EOF
+	# All of it between the panels (x 288...736 at 0.875 px a cell): one
+	# drawn by clicks there as wide (12, 480 cells)
+	pal_find kit/polygon
+	cat <<'EOF'
+click Button "kit/polygon"
+wait_log 5000 kit editor: placing
+mouse_pos 300 450
+frames 3
+mouse_click left
+wait_log 5000 kit editor: polygon point 1 at
+mouse_pos 720 450
+frames 3
+mouse_click left
+wait_log 5000 kit editor: polygon point 2 at
+mouse_pos 720 410
+frames 3
+mouse_click left
+wait_log 5000 kit editor: polygon point 3 at
+mouse_pos 300 450
+frames 3
+mouse_click left
+wait_log 5000 kit editor: placed kit/polygon at
+EOF
+	n=$((n + 1))
+	# 11's far end (256 from its place, x 736) panned to 536 by the middle
+	# button, the wheel in about it: its point 3 (256, 0.5) at 536, 337.6
+	# dragged by -25, -50 px (-1, 2 cells)
+	cat <<EOF
+wait_log_any 10000 entities, $n to undo
+event kit_select 11
+frames 3
+mouse_pos 650 500
+frames 3
+mouse_down middle
+frames 3
+mouse_pos 550 500
+frames 3
+mouse_pos 450 500
+frames 3
+mouse_up middle
+frames 3
+mouse_pos 536 350
+frames 3
+mouse_wheel 10
+frames 3
+mouse_wheel 5
+wait_log 5000 kit editor: the wheel: the front 28.1 high
+frames 5
+mouse_pos 536 338
+frames 3
+mouse_down left
+frames 3
+mouse_pos 526 318
+frames 3
+mouse_pos 511 288
+frames 3
+mouse_up left
+wait_log 5000 kit editor: polygon 11 point 3 moved, 4 points
+wait_log_any 10000 entities, $((n + 1)) to undo
+frames 5
+screenshot @T@/front_far_end.png
+EOF
+	n=$((n + 1))
+	# kit/grass on a concave polygon (13) in the Front view: then cut in two
+	# at x 0 (13 and 14, 14's place behind the inspector), the same pixels;
+	# a builder's voxel type worn (15), glow and glass with a texture
+	poly 0 30 1 '[[-4, -2], [4, -2], [4, 1], [1, 1], [0, -0.5], [-1, 1], [-4, 1]]' '"voxel": "kit/grass"'
+	cat <<'EOF'
+wait_log_any 10000 kit: entity 13 wears kit/grass
+event kit_select 13
+wait_log_any 5000 kit editor: selected 13 (
+click Button "Edit in 2D view"
+wait_log 5000 kit editor: polygon 13 in the Front view at 0.00,29.50
+event kit_select 11
+frames 10
+screenshot @T@/grass_one.png
+EOF
+	set_p 13 points '[[-4, -2], [0, -2], [0, -0.5], [-1, 1], [-4, 1]]'
+	poly 3.5 30.25 1 '[[-3.5, -2.25], [0.5, -2.25], [0.5, 0.75], [-2.5, 0.75], [-3.5, -0.75]]' '"voxel": "kit/grass"'
+	cat <<'EOF'
+wait_log_any 10000 kit: entity 14 wears kit/grass
+frames 10
+screenshot @T@/grass_two.png
+event kit_edit {"op": "voxel", "name": "cliff", "texture": "kit/stone.png"}
+EOF
+	poly 7 30 1 '[[-2, -2], [2, -2], [2, 2], [-2, 1]]' '"voxel": "kitboss/cliff", "material": "metal"'
+	set_p 14 material '"glass"'
+	set_p 13 material '"glow"'
+	cat <<'EOF'
+wait_log_any 10000 kit: entity 15 wears kitboss/cliff
+frames 10
+screenshot @T@/grass_materials.png
+keypress F2
+wait_log 5000 kit editor: the view is 3D
+EOF
 	set_p 3 edit_view '"2d"'
 	echo quit
 } > "$t/boss.cmds"
@@ -368,8 +507,8 @@ fields() # <line> -> x y z acks corrections pending jumps arrivals
 {
 	echo "$1" | sed -E 's/([-0-9.]+),([-0-9.]+),([-0-9.]+), ([0-9]+) acks, ([0-9]+) corrections, ([0-9]+) pending, ([0-9]+) jumps, ([0-9]+) arrivals/\1 \2 \3 \4 \5 \6 \7 \8/'
 }
-[ "$(grep -ac 'kit: body at' "$c")" = 7 ] || fail "not 7 body lines ($c)"
-for k in 1 2 3 4 5 6 7; do
+[ "$(grep -ac 'kit: body at' "$c")" = 9 ] || fail "not 9 body lines ($c)"
+for k in 1 2 3 4 5 6 7 8 9; do
 	read -r x y z acks corr rest <<< "$(fields "$(body $k)")"
 	[ "$z" = 1.00 ] || fail "off the plane (z 1): $(body $k)"
 done
@@ -407,12 +546,12 @@ awk -v x="$x7" -v y="$y7" 'BEGIN { exit !(x > 22 && x < 22.1 && y > 4.48 && y < 
 echo "ok: kit/walker up a polygon slope, stopped under a polygon overhang at $x7,$y7, through a tree and a hill off the plane, $((corr7 - corr)) corrections"
 # The drawn polygon: its points (the client's, on the 1/4 grid, less the place
 # it got, their box's middle) in the server's state, then its second point moved
-drawn=$(grep -aoP 'kit editor: polygon point [0-9]+ at \K\S+' "$c" | tr ',' ' ')
+drawn=$(grep -aoP 'kit editor: polygon point [0-9]+ at \K\S+' "$c" | head -5 | tr ',' ' ')
 [ "$(echo "$drawn" | wc -l)" = 5 ] || fail "not 5 points drawn ($c)"
 at=$(grep -aoP 'kit editor: placed kit/polygon at \K[-0-9.]+,[-0-9.]+,[-0-9.]+(?=, 5 points)' "$c")
 [ -n "$at" ] || fail "no polygon of 5 points placed ($c)"
 [ "${at##*,}" = 1 ] || fail "the polygon placed off the plane (z 1): $at"
-placed=$(grep -aP 'placed kit/polygon [0-9]+ at ' "$s" | tail -1)
+placed=$(grep -aP 'placed kit/polygon 10 at ' "$s")
 pid=$(echo "$placed" | grep -oP 'placed kit/polygon \K[0-9]+')
 nums() { sed -E 's/.*( with |points to )//' | grep -oE -- '-?[0-9.]+'; }
 got=$(echo "$placed" | nums)
@@ -436,6 +575,50 @@ awk -v s="$shown" -v a="$at" 'BEGIN { split(s, p, ","); split(a, q, ",")
 	exit !(p[1] - q[1] < 2 && q[1] - p[1] < 2 && p[2] - q[2] < 2 && q[2] - p[2] < 2) }' ||
 	fail "the points row's Front view not at the polygon ($at): ${shown:-none} ($c)"
 echo "ok: the inspector's points row went to the Front view at $shown (the polygon at $at)"
+# [KIT_SIDE_SCENERY] The 512-wide polygon: stood on (its top 12.5) and walked
+# 241 and more from its place; one drawn by clicks as wide; the far end's
+# point 3 dragged to about (255, 2.5), the others kept
+read -r x8 y8 z8 acks8 corr8 rest <<< "$(fields "$(body 8)")"
+read -r x9 y9 z9 acks9 corr9 rest <<< "$(fields "$(body 9)")"
+awk -v a="$x8" -v b="$x9" -v y="$y8" -v w="$y9" 'BEGIN {
+	exit !(a > 44.9 && b < a - 1 && y > 12.48 && y < 12.52 && w > 12.48 && w < 12.52) }' ||
+	fail "not stood and walked on the 512-wide polygon's top (12.5) at x 45: $(body 8) -> $(body 9)"
+[ $((corr9 - corr7)) -le 2 ] || fail "$((corr9 - corr7)) corrections on the wide polygon: $(body 9)"
+wide=$(grep -aP 'placed kit/polygon 12 at ' "$s" | nums | awk 'NR % 2 {
+	lo = NR == 1 || $1 < lo ? $1 : lo; hi = NR == 1 || $1 > hi ? $1 : hi } END { print hi - lo }')
+awk -v w="${wide:-0}" 'BEGIN { exit !(w > 400 && w <= 512) }' ||
+	fail "no polygon over 400 wide drawn by clicks: ${wide:-none} ($s)"
+far=$(grep -a "set 11's kit/polygon points to" "$s" | tail -1 | nums | tr '\n' ' ')
+echo "$far" | awk '{ exit !($1 == -256 && $2 == -0.5 && $3 == 256 && $4 == -0.5 &&
+	$5 >= 254 && $5 < 256 && $6 >= 2 && $6 <= 3 && $7 == -256 && $8 == 0.5) }' ||
+	fail "not 11's point 3 alone dragged to about (255, 2.5): ${far:-no set} ($s)"
+echo "ok: a polygon 512 wide: stood on at $x8,$y8 and walked to $x9 ($((corr9 - corr7)) corrections), 257 refused; the Front view out to 800 high, one drawn by clicks $wide wide, its far end's point dragged: [$far]"
+# kit/grass on a polygon (87 px a cell, its top at y 219.5): the face dirt
+# (brown, textured), a grass band 0.25 deep along the top; the two pieces'
+# pixels the one's
+grep -aqE 'kit: entity 13 drawn .*, textured, [0-9]+ triangles in its top band' "$c" ||
+	fail "polygon 13 not drawn textured with a top band ($c)"
+grep -aqE 'kit: entity 14 drawn .*, textured' "$c" && ! grep -aq 'ERROR' "$c" ||
+	fail "polygon 14 not drawn textured, or an error ($c)"
+grass=$(python3 -I - "$t/grass_one.png" "$t/grass_two.png" "$t/grass_materials.png" <<'PY'
+import sys
+from PIL import Image, ImageChops, ImageStat
+a, b, c = (Image.open(p).convert("RGB") for p in sys.argv[1:4])
+face = a.crop((290, 380, 700, 470))
+(fr, fg, fb), sd = ImageStat.Stat(face).mean, ImageStat.Stat(face.convert("L")).stddev[0]
+br, bg, bb = ImageStat.Stat(a.crop((290, 223, 410, 238))).mean
+box = (280, 210, 735, 480)
+n = sum(1 for v in ImageChops.difference(a.crop(box), b.crop(box)).convert("L").getdata() if v > 30)
+# 13 glow: its dirt as bright as lit or more, still brown
+lr, lg, lb = ImageStat.Stat(a.crop((290, 380, 500, 470))).mean
+gr, gg, gb = ImageStat.Stat(c.crop((290, 380, 500, 470))).mean
+print(f"face {fr:.0f},{fg:.0f},{fb:.0f} (deviation {sd:.1f}), band {br:.0f},{bg:.0f},{bb:.0f}, {n} pixels apart in two pieces; glow {gr:.0f},{gg:.0f},{gb:.0f}")
+sys.exit(0 if fr > fg > fb and fr - fb > 15 and sd > 3 and bg > br + 10 and
+	bg > bb + 10 and n < 40 and gr + gg + gb >= lr + lg + lb and gr > gg > gb else 1)
+PY
+) || fail "kit/grass on a polygon: ${grass:-no screenshot} ($t/grass_one.png, $t/grass_two.png, $t/grass_materials.png)"
+grep -aq 'kit: entity 15 wears kitboss/cliff' "$c" || fail "a builder's voxel type not worn ($c)"
+echo "ok: kit/grass on a polygon: $grass; a builder's voxel type worn, glow and glass with it"
 # [KIT_EDIT_VIEW] The touch session: 3D remembered, 2D (front) last
 v=$(grep -aoP 'kit editor: the view is \K.*' "$t/touch.log" | tr '\n' ',')
 [ "$(grep -aoP 'kit editor: the view is \K.*' "$t/touch.log" | tail -1)" = "2D (front)" ] &&
