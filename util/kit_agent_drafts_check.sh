@@ -257,8 +257,9 @@ if phase == "draft":
     sid = int(re.search(r"In your draft \(session (\d+)\)", tx).group(1))
     st = js("get_state")
     assert st["session"]["kind"] == "draft" and st["session"]["id"] == sid, st["session"]
+    assert st["session"]["where"] == "in a draft by kitboss's agent", st["session"]
     assert ids(st) == before, (ids(st), before)
-    assert "already" in refused("draft")
+    assert "you are in a draft by kitboss's agent already" in refused("draft")
     part = placed(text("place", PART))
     c = cells(**BOX)
     assert c == ["."] * 4, c
