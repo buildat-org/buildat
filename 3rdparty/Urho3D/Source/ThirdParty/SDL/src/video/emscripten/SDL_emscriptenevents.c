@@ -828,6 +828,14 @@ static EM_BOOL Emscripten_HandleKey(int eventType, const EmscriptenKeyboardEvent
         }
     }
 
+    /* buildat [WEB_KEYS]: a phone's on-screen keyboard sends Backspace and
+       the arrows with no code (""), only key and keyCode, and they were
+       claimed below and never sent: the keycode's scancode, as 2.0.5 took
+       every key's. The IME's keys returned above. */
+    if (scancode == SDL_SCANCODE_UNKNOWN) {
+        scancode = SDL_GetScancodeFromKey(keycode);
+    }
+
     if (scancode != SDL_SCANCODE_UNKNOWN) {
         SDL_SendKeyboardKeyAndKeycode(eventType == EMSCRIPTEN_EVENT_KEYDOWN ? SDL_PRESSED : SDL_RELEASED, scancode, keycode);
     }

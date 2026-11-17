@@ -172,6 +172,12 @@ the gamepads' sampling) and the touch's mouse in pixels (2.32 sends a
 touch's mouse from SDL_touch.c, scaled to the window). Carried: the
 sections below.
 
+A web key whose KeyboardEvent.code gives no scancode takes its keyCode's
+(src/video/emscripten/SDL_emscriptenevents.c, [WEB_KEYS]): 2.32 maps keys
+by code alone, and a phone's on-screen keyboard sends Backspace and the
+arrows with code "", which 2.32 claimed and dropped; 2.0.5 mapped every key
+by keyCode.
+
 SDL: the wait for MapNotify is bounded (ba5b81cd)
 -------------------------------------------------
 Source/ThirdParty/SDL/src/video/x11/SDL_x11window.c

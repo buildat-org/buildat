@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~2 min (2026-10-20)
-# covers: src/client/web/index.html src/client/app.cpp
+# covers: src/client/web/index.html src/client/app.cpp 3rdparty/Urho3D/Source/ThirdParty/SDL/src/video/emscripten/SDL_emscriptenevents.c
 # [WEB_TAP_KEYBOARD]: a tap on a field focuses its stand-in input inside
 # the tap's own touchend, which is when a phone's browser opens its
 # on-screen keyboard. On a floorplanner server with an account, in Chrome
@@ -12,7 +12,10 @@
 # focus() inside every tap, the focused one's too, and each still focused
 # and shown 10 frames on, not blurred in between;
 # the page logs "a field focused in the tap" for both; the name and the
-# password typed into the stand-ins log in.
+# password typed into the stand-ins log in. The name as a phone's on-screen
+# keyboard types it ([WEB_KEYS]):Backspace and the arrows with no code
+# (Android's), the letters as Gboard's text (key code 229): "eix",
+# Backspace, Left, "r", Right, "n" is "erin".
 #   util/web_tap_keyboard_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -74,15 +77,21 @@ cat > "$t/steps.json" <<J
  ["eval", "window.tenOn = true; 'on'"],
 $taps
  ["tap", $name], ["waitlog", "in the tap: ", 5], ["wait", 500],
- ["type", "erin"], ["wait", 300],
+ ["vkey", "e"], ["frames", 2], ["vkey", "i"], ["frames", 2], ["vkey", "x"], ["frames", 2],
+ ["vkey", "Backspace"], ["frames", 2], ["vkey", "Left"], ["frames", 2],
+ ["vkey", "r"], ["frames", 2], ["vkey", "Right"], ["frames", 2], ["vkey", "n"], ["frames", 3],
+ ["eval", "'the name: ' + document.getElementById('text').value"],
  ["tap", $pass], ["waitlog", "in the tap: ", 5], ["wait", 500],
  ["type", "rightpass123"], ["key", "Enter"],
  ["waitlog", "Joined as erin", 30]
 ]
 J
 TOUCH=1 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" "$here/util/web_drive.sh" chrome \
-	floorplanner "$t/steps.json" "$t/drive" > "$t/drive.txt" 2>&1 ||
-	fail "the drive: $(tail -2 "$t/drive.txt") ($t/drive/page.log)"
+	floorplanner "$t/steps.json" "$t/drive" > "$t/drive.txt" 2>&1; drove=$?
+typed=$(grep -ao 'eval: "the name: [^"]*' "$t/drive.txt" | sed 's/.*name: //')
+echo "the name the on-screen keyboard typed: $typed"
+[ "$typed" = erin ] || fail "the on-screen keyboard typed '$typed', not 'erin' ($t/drive.txt)"
+[ $drove = 0 ] || fail "the drive: $(tail -2 "$t/drive.txt") ($t/drive/page.log)"
 after=$(grep -ao "^in the tap: [A-Za-z]*" "$t/drive/page.log" | sed 's/in the tap: //' | tail -2 | tr '\n' ' ')
 echo "focused in the taps: $after"
 on=$(grep -a "^ten frames on: " "$t/drive/page.log" | sed 's/ten frames on: //' | head -12 | sort | uniq -c | tr -s ' ' | tr '\n' ';')
