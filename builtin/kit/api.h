@@ -526,9 +526,9 @@ namespace interface
 //   takes it: the players then stand). [KIT_SOUNDS] A parameter type "sound": a dropdown of
 //   the game's sounds and "none" ("").
 //   [KIT_PLANE] A parameter type "points": a closed shape [[x, y]...] of 3 to
-//   128 points (|x|, |y| <= 32, its edges not crossing nor touching, its area
-//   not 0; any winding), edited in a side game's 2D view, not the inspector
-//   (kit/polygon's).
+//   128 points (|x|, |y| <= 256, [KIT_SIDE_SCENERY]; its edges not crossing
+//   nor touching, its area not 0; any winding), edited in a side game's 2D
+//   view, not the inspector (kit/polygon's).
 //   [KIT_PARAM_CATEGORIES] A parameter's `cat` is the inspector's category
 //   it is under: "behaviour" (without one), "hud", "look" (appearance in
 //   the world and sounds), "physics" or "advanced" (technical: poll, rate,

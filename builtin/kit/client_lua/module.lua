@@ -294,9 +294,12 @@ end)
 -- the box it is turned to (a quarter round its -x edge, towards +z)
 local function look_box(look, on)
 	local size, off = {}, {0, 0, 0}
+	-- ([KIT_SIDE_SCENERY] a polygon's box up to 512 wide: kit.cpp's
+	-- MAX_POLYGON_EXTENT)
+	local cap = look.shape == "polygon" and 512 or 64
 	if type(look.size) == "table" then
 		for i = 1, 3 do
-			size[i] = math.max(0.02, math.min(64, tonumber(look.size[i]) or 1))
+			size[i] = math.max(0.02, math.min(cap, tonumber(look.size[i]) or 1))
 		end
 	else
 		local s = (tonumber(look.size) or 0.4) * 2

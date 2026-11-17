@@ -10,12 +10,13 @@
 -- there each click is a point, the first one again or Enter closes it; selected,
 -- a point dragged moves it, an edge's middle dragged or clicked adds one there, a
 -- right click (a long press) on a point takes it away. At most 128 points within
--- 32 of its place, no edge crossing another (the server's check_param)
+-- 256 of its place ([KIT_SIDE_SCENERY]: 512 wide, a skyline or a ridge in one
+-- piece), no edge crossing another (the server's check_param)
 return {
 	version = 1,
 	about = {
 		group = "Building",
-		what = "A shape of points in the side view's plane, extruded: level geometry for side-scrolling. points: [[x, y]...] from its place, 3 to 128, its edges not crossing.",
+		what = "A shape of points in the side view's plane, extruded: level geometry for side-scrolling. points: [[x, y]...] from its place, 3 to 128, within 256 (512 wide), its edges not crossing.",
 	},
 	params = {
 		points = {type = "points", default = {{-2, -0.5}, {2, -0.5}, {2, 0.5},

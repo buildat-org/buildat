@@ -36,7 +36,13 @@
 #   8. [KIT_EDIT_VIEW] kit/controls' edit_view 2d; the next session in
 #      the touch mode (by mouse), 3D remembered: edit mode comes up in 2D,
 #      the Front view.
-# The screenshots (side, front, side_ortho, side_polygons, front_polygon, touch_front)
+#   9. [KIT_SIDE_SCENERY] A polygon 512 wide: the body put on it 245 from
+#      its place stands on its top and walks, few corrections; a point at
+#      257 refused. Its Front view out to 800 high (all of it between the
+#      panels), one drawn by clicks there over 400 wide; its far end panned
+#      to by the middle button, the wheel in about it, its point dragged.
+# The screenshots (side, front, side_ortho, side_polygons, front_polygon,
+# side_wide, front_wide, front_far_end, touch_front)
 # are kept with KEEP_TMP=1; look at them.
 #   util/kit_plane_check.sh
 set -u
@@ -268,6 +274,104 @@ keypress F2
 wait_log 5000 kit editor: the view is 3D
 EOF
 	n=$((n + 1))
+	# [KIT_SIDE_SCENERY] A polygon 512 wide (11), the body put on it 245 from
+	# its place and walked; a point at 257 refused
+	poly -200 12 1 '[[-256, -0.5], [256, -0.5], [256, 0.5], [-256, 0.5]]'
+	cat <<'EOF'
+event kit_edit {"op": "set", "id": 11, "comp": 0, "param": "points", "value": [[-257, -0.5], [256, -0.5], [256, 0.5], [-257, 0.5]]}
+wait_log 10000 within 256 of its place
+event kit_edit {"op": "walk_here", "pos": [45, 12.6, 1]}
+wait_log 10000 the server put the player at (45
+keypress F6
+wait_log 10000 kit editor: edit mode off
+frames 30
+event kit_body
+keydown A
+delay 600
+keyup A
+frames 30
+event kit_body
+screenshot @T@/side_wide.png
+keypress F6
+wait_log 10000 kit editor: state:
+keypress F1
+wait_log 5000 kit editor: the view is 2D (front)
+event kit_select 11
+wait_log_any 5000 kit editor: selected 11 (
+click Button "Edit in 2D view"
+wait_log 5000 kit editor: polygon 11 in the Front view at -200.00,12.00
+mouse_pos 512 350
+frames 3
+mouse_wheel -3
+wait_log 5000 kit editor: the wheel: the front 800.0 high
+frames 5
+screenshot @T@/front_wide.png
+EOF
+	# All of it between the panels (x 288...736 at 0.875 px a cell): one
+	# drawn by clicks there as wide (12, 480 cells)
+	pal_find kit/polygon
+	cat <<'EOF'
+click Button "kit/polygon"
+wait_log 5000 kit editor: placing
+mouse_pos 300 450
+frames 3
+mouse_click left
+wait_log 5000 kit editor: polygon point 1 at
+mouse_pos 720 450
+frames 3
+mouse_click left
+wait_log 5000 kit editor: polygon point 2 at
+mouse_pos 720 410
+frames 3
+mouse_click left
+wait_log 5000 kit editor: polygon point 3 at
+mouse_pos 300 450
+frames 3
+mouse_click left
+wait_log 5000 kit editor: placed kit/polygon at
+EOF
+	n=$((n + 1))
+	# 11's far end (256 from its place, x 736) panned to 536 by the middle
+	# button, the wheel in about it: its point 3 (256, 0.5) at 536, 337.6
+	# dragged by -25, -50 px (-1, 2 cells)
+	cat <<EOF
+wait_log_any 10000 entities, $n to undo
+event kit_select 11
+frames 3
+mouse_pos 650 500
+frames 3
+mouse_down middle
+frames 3
+mouse_pos 550 500
+frames 3
+mouse_pos 450 500
+frames 3
+mouse_up middle
+frames 3
+mouse_pos 536 350
+frames 3
+mouse_wheel 10
+frames 3
+mouse_wheel 5
+wait_log 5000 kit editor: the wheel: the front 28.1 high
+frames 5
+mouse_pos 536 338
+frames 3
+mouse_down left
+frames 3
+mouse_pos 526 318
+frames 3
+mouse_pos 511 288
+frames 3
+mouse_up left
+wait_log 5000 kit editor: polygon 11 point 3 moved, 4 points
+wait_log_any 10000 entities, $((n + 1)) to undo
+frames 5
+screenshot @T@/front_far_end.png
+keypress F2
+wait_log 5000 kit editor: the view is 3D
+EOF
+	n=$((n + 1))
 	set_p 3 edit_view '"2d"'
 	echo quit
 } > "$t/boss.cmds"
@@ -315,8 +419,8 @@ fields() # <line> -> x y z acks corrections pending jumps arrivals
 {
 	echo "$1" | sed -E 's/([-0-9.]+),([-0-9.]+),([-0-9.]+), ([0-9]+) acks, ([0-9]+) corrections, ([0-9]+) pending, ([0-9]+) jumps, ([0-9]+) arrivals/\1 \2 \3 \4 \5 \6 \7 \8/'
 }
-[ "$(grep -ac 'kit: body at' "$c")" = 7 ] || fail "not 7 body lines ($c)"
-for k in 1 2 3 4 5 6 7; do
+[ "$(grep -ac 'kit: body at' "$c")" = 9 ] || fail "not 9 body lines ($c)"
+for k in 1 2 3 4 5 6 7 8 9; do
 	read -r x y z acks corr rest <<< "$(fields "$(body $k)")"
 	[ "$z" = 1.00 ] || fail "off the plane (z 1): $(body $k)"
 done
@@ -354,12 +458,12 @@ awk -v x="$x7" -v y="$y7" 'BEGIN { exit !(x > 22 && x < 22.1 && y > 4.48 && y < 
 echo "ok: kit/walker up a polygon slope, stopped under a polygon overhang at $x7,$y7, through a tree and a hill off the plane, $((corr7 - corr)) corrections"
 # The drawn polygon: its points (the client's, on the 1/4 grid, less the place
 # it got, their box's middle) in the server's state, then its second point moved
-drawn=$(grep -aoP 'kit editor: polygon point [0-9]+ at \K\S+' "$c" | tr ',' ' ')
+drawn=$(grep -aoP 'kit editor: polygon point [0-9]+ at \K\S+' "$c" | head -5 | tr ',' ' ')
 [ "$(echo "$drawn" | wc -l)" = 5 ] || fail "not 5 points drawn ($c)"
 at=$(grep -aoP 'kit editor: placed kit/polygon at \K[-0-9.]+,[-0-9.]+,[-0-9.]+(?=, 5 points)' "$c")
 [ -n "$at" ] || fail "no polygon of 5 points placed ($c)"
 [ "${at##*,}" = 1 ] || fail "the polygon placed off the plane (z 1): $at"
-placed=$(grep -aP 'placed kit/polygon [0-9]+ at ' "$s" | tail -1)
+placed=$(grep -aP 'placed kit/polygon 10 at ' "$s")
 pid=$(echo "$placed" | grep -oP 'placed kit/polygon \K[0-9]+')
 nums() { sed -E 's/.*( with |points to )//' | grep -oE -- '-?[0-9.]+'; }
 got=$(echo "$placed" | nums)
@@ -383,6 +487,24 @@ awk -v s="$shown" -v a="$at" 'BEGIN { split(s, p, ","); split(a, q, ",")
 	exit !(p[1] - q[1] < 2 && q[1] - p[1] < 2 && p[2] - q[2] < 2 && q[2] - p[2] < 2) }' ||
 	fail "the points row's Front view not at the polygon ($at): ${shown:-none} ($c)"
 echo "ok: the inspector's points row went to the Front view at $shown (the polygon at $at)"
+# [KIT_SIDE_SCENERY] The 512-wide polygon: stood on (its top 12.5) and walked
+# 241 and more from its place; one drawn by clicks as wide; the far end's
+# point 3 dragged to about (255, 2.5), the others kept
+read -r x8 y8 z8 acks8 corr8 rest <<< "$(fields "$(body 8)")"
+read -r x9 y9 z9 acks9 corr9 rest <<< "$(fields "$(body 9)")"
+awk -v a="$x8" -v b="$x9" -v y="$y8" -v w="$y9" 'BEGIN {
+	exit !(a > 44.9 && b < a - 1 && y > 12.48 && y < 12.52 && w > 12.48 && w < 12.52) }' ||
+	fail "not stood and walked on the 512-wide polygon's top (12.5) at x 45: $(body 8) -> $(body 9)"
+[ $((corr9 - corr7)) -le 2 ] || fail "$((corr9 - corr7)) corrections on the wide polygon: $(body 9)"
+wide=$(grep -aP 'placed kit/polygon 12 at ' "$s" | nums | awk 'NR % 2 {
+	lo = NR == 1 || $1 < lo ? $1 : lo; hi = NR == 1 || $1 > hi ? $1 : hi } END { print hi - lo }')
+awk -v w="${wide:-0}" 'BEGIN { exit !(w > 400 && w <= 512) }' ||
+	fail "no polygon over 400 wide drawn by clicks: ${wide:-none} ($s)"
+far=$(grep -a "set 11's kit/polygon points to" "$s" | tail -1 | nums | tr '\n' ' ')
+echo "$far" | awk '{ exit !($1 == -256 && $2 == -0.5 && $3 == 256 && $4 == -0.5 &&
+	$5 >= 254 && $5 < 256 && $6 >= 2 && $6 <= 3 && $7 == -256 && $8 == 0.5) }' ||
+	fail "not 11's point 3 alone dragged to about (255, 2.5): ${far:-no set} ($s)"
+echo "ok: a polygon 512 wide: stood on at $x8,$y8 and walked to $x9 ($((corr9 - corr7)) corrections), 257 refused; the Front view out to 800 high, one drawn by clicks $wide wide, its far end's point dragged: [$far]"
 # [KIT_EDIT_VIEW] The touch session: 3D remembered, 2D (front) last
 v=$(grep -aoP 'kit editor: the view is \K.*' "$t/touch.log" | tr '\n' ',')
 [ "$(grep -aoP 'kit editor: the view is \K.*' "$t/touch.log" | tail -1)" = "2D (front)" ] &&
