@@ -369,75 +369,6 @@ local function wedge(node)
 	return cg
 end
 
--- [KIT_PLANE] stage 3: a polygon look's mesh in its own frame: its points (x, y)
--- extruded its depth along z round 0, its two faces (move.lua's triangles) and a
--- side an edge; n.poly its points and half depth (entity_t's)
-local polygon_mesh
-do
-	local MV
-	polygon_mesh = function(node, look, n)
-		if not MV then
-			local _, err, m = buildat.run_script_file("kit/move.lua")
-			assert(type(m) == "table", "kit: move.lua: " .. tostring(err))
-			MV = m
-		end
-		local pts = {}
-		for _, p in ipairs(type(look.points) == "table" and look.points or {}) do
-			pts[#pts + 1] = type(p) == "table" and tonumber(p[1]) or 0
-			pts[#pts + 1] = type(p) == "table" and tonumber(p[2]) or 0
-		end
-		local d = math.max(0.02, math.min(64, tonumber(look.depth) or 1)) / 2
-		n.poly = {pts = pts, d = d}
-		local cg = node:CreateComponent("CustomGeometry")
-		cg:SetNumGeometries(1)
-		cg:BeginGeometry(0, magic.TRIANGLE_LIST)
-		local function tri(p1, p2, p3, nr)
-			-- Wound so it faces its normal (voxel_mesh's)
-			local e1x, e1y, e1z = p2[1] - p1[1], p2[2] - p1[2], p2[3] - p1[3]
-			local e2x, e2y, e2z = p3[1] - p1[1], p3[2] - p1[2], p3[3] - p1[3]
-			if (e1y * e2z - e1z * e2y) * nr[1] + (e1z * e2x - e1x * e2z) * nr[2] +
-					(e1x * e2y - e1y * e2x) * nr[3] < 0 then
-				p2, p3 = p3, p2
-			end
-			local nv = magic.Vector3(nr[1], nr[2], nr[3])
-			for _, p in ipairs({p1, p2, p3}) do
-				cg:DefineVertex(magic.Vector3(p[1], p[2], p[3]))
-				cg:DefineNormal(nv)
-				cg:DefineTexCoord(magic.Vector2(0, 0))
-			end
-		end
-		local tris = MV.triangulate(pts)
-		for q = 1, #tris - 2, 3 do
-			local a, b, c = tris[q], tris[q + 1], tris[q + 2]
-			for _, z in ipairs({-d, d}) do
-				tri({pts[2 * a - 1], pts[2 * a], z}, {pts[2 * b - 1], pts[2 * b], z},
-						{pts[2 * c - 1], pts[2 * c], z}, {0, 0, z < 0 and -1 or 1})
-			end
-		end
-		-- The sides, each its edge's normal out (counter-clockwise: to the right)
-		local k, area = #pts / 2, 0
-		for i = 1, k do
-			local j = i % k + 1
-			area = area + pts[2 * i - 1] * pts[2 * j] - pts[2 * j - 1] * pts[2 * i]
-		end
-		local sg = area > 0 and 1 or -1
-		for i = 1, k do
-			local j = i % k + 1
-			local ax, ay, bx, by = pts[2 * i - 1], pts[2 * i], pts[2 * j - 1], pts[2 * j]
-			local ex, ey = bx - ax, by - ay
-			local l = math.sqrt(ex * ex + ey * ey)
-			if l > 0 then
-				local nr = {sg * ey / l, -sg * ex / l, 0}
-				tri({ax, ay, -d}, {bx, by, -d}, {bx, by, d}, nr)
-				tri({ax, ay, -d}, {bx, by, d}, {ax, ay, d}, nr)
-			end
-		end
-		cg:Commit()
-		cg.castShadows = true
-		return cg, #tris / 3
-	end
-end
-
 -- A look's material ([KIT] stage 4d): plain, metal, glass or glow
 local TECHNIQUES = {glass = "Techniques/NoTextureAlpha.xml",
 	glow = "Techniques/NoTextureUnlit.xml"}
@@ -482,13 +413,12 @@ local function voxel_def(name)
 	return named(voxel_ids.by[name])
 end
 
--- [KIT_LOOK_MATERIAL] A unit box or wedge (wedge's) wearing a voxel
--- material's tiles (+y, -y, +x, -x, +z, -z, the voxels' order; a wedge's
--- slope its +y, its back +z), a texture a metre of its sides `size` as the
--- voxels wear theirs (a tile of a texture of several stretched over its
--- face); nil when the material has no textures here
+-- [KIT_LOOK_MATERIAL] A voxel material's tiles (+y, -y, +x, -x, +z, -z, the
+-- voxels' order) {t the texture, n its segments, s the one, its name}, its tint (its
+-- palette's entry 0) and the technique a look wearing it is drawn with; nil
+-- when it has no textures here
 local face_textures = {}
-local function voxel_mesh(node, def, size, shape)
+local function voxel_tiles(def)
 	local tex = {}
 	for i = 1, 6 do
 		local seg = def.textures[i]
@@ -504,7 +434,7 @@ local function voxel_mesh(node, def, size, shape)
 			end
 			if t then
 				tex[i] = {t = t, n = seg.total_segments,
-					s = seg.select_segment}
+					s = seg.select_segment, name = name}
 			end
 		end
 	end
@@ -521,6 +451,19 @@ local function voxel_mesh(node, def, size, shape)
 	local look_tech = def.translucent and "kit/KitVoxelLookAlpha.xml" or
 			def.alpha_masked and "kit/KitVoxelLookMasked.xml" or
 			"kit/KitVoxelLook.xml"
+	return tex, tint0, look_tech
+end
+
+-- [KIT_LOOK_MATERIAL] A unit box or wedge (wedge's) wearing a voxel
+-- material's tiles (voxel_tiles; a wedge's slope its +y, its back +z), a
+-- texture a metre of its sides `size` as the voxels wear theirs (a tile of a
+-- texture of several stretched over its face); nil when the material has no
+-- textures here
+local function voxel_mesh(node, def, size, shape)
+	local tex, tint0, look_tech = voxel_tiles(def)
+	if not tex then
+		return nil
+	end
 	local sx, sy, sz = size[1], size[2], size[3]
 	local a, b = -0.5, 0.5
 	-- Each face: its tile, its normal (unit box), its corners {x, y, z}
@@ -632,6 +575,250 @@ local function voxel_mesh(node, def, size, shape)
 	return cg, mats
 end
 
+-- [KIT_PLANE] stage 3: a polygon look's mesh in its own frame: its points (x, y)
+-- extruded its depth along z round 0, its two faces (move.lua's triangles) and a
+-- side an edge; n.poly its points and half depth (entity_t's). Returns the
+-- CustomGeometry, its faces' triangles, whether it wears textures and its top
+-- band's triangles.
+-- [KIT_SIDE_SCENERY] Wearing a voxel material (def, voxel_tiles'), textured
+-- world-aligned where its node is (at, q), a repeat a cell, so pieces side by side
+-- tile: on its faces u and v are the world's x and -y; on a side nearer level than
+-- upright the world's x and -z, else z and -y. Its faces wear the material's
+-- bottom tile where that is not its top (grass: the dirt under its turf), else
+-- its -z side's. An edge facing up (its normal out within 60 degrees of the
+-- world's up) wears the top tile on its side and, on the faces, a band of it
+-- look.edge_depth deep: the edge pushed straight down that far (a parallelogram),
+-- cut out of the faces' triangles (convex pieces, Sutherland and Hodgman), its
+-- part inside them the top's, so a concave outline's band stays inside it and
+-- no two overlap. Its colour is unused (the material's own tint, as a kit/part's),
+-- its material kept: metal shinier, glass at 0.4 alpha, glow unlit.
+-- simplified: a texture of several segments repeats whole
+local polygon_mesh
+do
+	local MV
+	-- A convex polygon {x1, y1...} cut to a * x + b * y <= c
+	local function cut(p, a, b, c)
+		local o, k = {}, #p / 2
+		for i = 1, k do
+			local j = i % k + 1
+			local px, py, qx, qy = p[2 * i - 1], p[2 * i], p[2 * j - 1], p[2 * j]
+			local dp, dq = a * px + b * py - c, a * qx + b * qy - c
+			if dp <= 0 then
+				o[#o + 1], o[#o + 2] = px, py
+			end
+			if (dp < 0 and dq > 0) or (dp > 0 and dq < 0) then
+				local t = dp / (dp - dq)
+				o[#o + 1], o[#o + 2] = px + (qx - px) * t, py + (qy - py) * t
+			end
+		end
+		return o
+	end
+	local function solid(p)
+		local s, k = 0, #p / 2
+		for i = 1, k do
+			local j = i % k + 1
+			s = s + p[2 * i - 1] * p[2 * j] - p[2 * j - 1] * p[2 * i]
+		end
+		return k >= 3 and math.abs(s) > 1e-9
+	end
+	local function face_uv(x, y)
+		return x, -y
+	end
+	local function level_uv(x, y, z)
+		return x, -z
+	end
+	local function upright_uv(x, y, z)
+		return z, -y
+	end
+	polygon_mesh = function(node, look, n, def, at, q)
+		if not MV then
+			local _, err, m = buildat.run_script_file("kit/move.lua")
+			assert(type(m) == "table", "kit: move.lua: " .. tostring(err))
+			MV = m
+		end
+		local pts = {}
+		for _, p in ipairs(type(look.points) == "table" and look.points or {}) do
+			pts[#pts + 1] = type(p) == "table" and tonumber(p[1]) or 0
+			pts[#pts + 1] = type(p) == "table" and tonumber(p[2]) or 0
+		end
+		local d = math.max(0.02, math.min(64, tonumber(look.depth) or 1)) / 2
+		n.poly = {pts = pts, d = d}
+		local tiles, tint0, tech
+		if def then
+			tiles, tint0, tech = voxel_tiles(def)
+		end
+		-- Its own x, y, z to the world's (less whole cells) and the world's down in
+		-- its x and y (its own -y while it stands upright)
+		local W, down = nil, nil
+		if tiles then
+			local ex, ey = q * magic.Vector3(1, 0, 0), q * magic.Vector3(0, 1, 0)
+			local ez = q * magic.Vector3(0, 0, 1)
+			local fx, fy = at.x - math.floor(at.x), at.y - math.floor(at.y)
+			local fz = at.z - math.floor(at.z)
+			W = function(x, y, z)
+				return ex.x * x + ey.x * y + ez.x * z + fx,
+						ex.y * x + ey.y * y + ez.y * z + fy,
+						ex.z * x + ey.z * y + ez.z * z + fz
+			end
+			local l = math.sqrt(ex.y * ex.y + ey.y * ey.y)
+			down = l > 0.1 and {-ex.y / l, -ey.y / l} or {0, -1}
+		end
+		-- 1: the faces' (all of it untextured), 2: the top tile's
+		local geo = {{}, {}}
+		local function tri(g, p1, p2, p3, nr, uv)
+			-- Wound so it faces its normal (voxel_mesh's)
+			local e1x, e1y, e1z = p2[1] - p1[1], p2[2] - p1[2], p2[3] - p1[3]
+			local e2x, e2y, e2z = p3[1] - p1[1], p3[2] - p1[2], p3[3] - p1[3]
+			if (e1y * e2z - e1z * e2y) * nr[1] + (e1z * e2x - e1x * e2z) * nr[2] +
+					(e1x * e2y - e1y * e2x) * nr[3] < 0 then
+				p2, p3 = p3, p2
+			end
+			local nv, list = magic.Vector3(nr[1], nr[2], nr[3]), geo[g]
+			for _, p in ipairs({p1, p2, p3}) do
+				local u, v = 0, 0
+				if W then
+					u, v = uv(W(p[1], p[2], p[3]))
+				end
+				list[#list + 1] = {p[1], p[2], p[3], u, v, nv}
+			end
+		end
+		-- The sides, each its edge's normal out (counter-clockwise: to the right);
+		-- each edge facing up its band: four sides a * x + b * y <= c (between the
+		-- lines down through its ends, under it and over it pushed down by D) and
+		-- its box
+		local D = math.max(0, math.min(4, tonumber(look.edge_depth) or 0.25))
+		local k, area = #pts / 2, 0
+		for i = 1, k do
+			local j = i % k + 1
+			area = area + pts[2 * i - 1] * pts[2 * j] - pts[2 * j - 1] * pts[2 * i]
+		end
+		local sg = area > 0 and 1 or -1
+		local bands = {}
+		for i = 1, k do
+			local j = i % k + 1
+			local ax, ay, bx, by = pts[2 * i - 1], pts[2 * i], pts[2 * j - 1], pts[2 * j]
+			local ex, ey = bx - ax, by - ay
+			local l = math.sqrt(ex * ex + ey * ey)
+			if l > 0 then
+				local nr = {sg * ey / l, -sg * ex / l, 0}
+				local nd = down and nr[1] * down[1] + nr[2] * down[2] or 0
+				local up = nd <= -0.5
+				local uv = nil
+				if W then
+					local wax, way = W(ax, ay, 0)
+					local wbx, wby = W(bx, by, 0)
+					uv = math.abs(wbx - wax) >= math.abs(wby - way) and level_uv or
+							upright_uv
+				end
+				local g = up and 2 or 1
+				tri(g, {ax, ay, -d}, {bx, by, -d}, {bx, by, d}, nr, uv)
+				tri(g, {ax, ay, -d}, {bx, by, d}, {ax, ay, d}, nr, uv)
+				if up and D > 0 then
+					local mx, my = -down[2], down[1]
+					local ma, mb = mx * ax + my * ay, mx * bx + my * by
+					local na = nr[1] * ax + nr[2] * ay
+					local cx, cy = down[1] * D, down[2] * D
+					bands[#bands + 1] = {{mx, my, math.max(ma, mb)},
+						{-mx, -my, -math.min(ma, mb)}, {nr[1], nr[2], na},
+						{-nr[1], -nr[2], -(na + D * nd)},
+						x0 = math.min(ax, bx, ax + cx, bx + cx),
+						x1 = math.max(ax, bx, ax + cx, bx + cx),
+						y0 = math.min(ay, by, ay + cy, by + cy),
+						y1 = math.max(ay, by, ay + cy, by + cy)}
+				end
+			end
+		end
+		-- The faces: the triangles less the bands, the bands' parts in them
+		local tris = MV.triangulate(pts)
+		local pieces, band = {}, {}
+		for t = 1, #tris - 2, 3 do
+			local a, b, c = tris[t], tris[t + 1], tris[t + 2]
+			pieces[#pieces + 1] = {pts[2 * a - 1], pts[2 * a], pts[2 * b - 1],
+				pts[2 * b], pts[2 * c - 1], pts[2 * c]}
+		end
+		for _, h in ipairs(bands) do
+			local rest = {}
+			for _, p in ipairs(pieces) do
+				local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
+				for v = 1, #p, 2 do
+					x0, x1 = math.min(x0, p[v]), math.max(x1, p[v])
+					y0, y1 = math.min(y0, p[v + 1]), math.max(y1, p[v + 1])
+				end
+				if x1 <= h.x0 or x0 >= h.x1 or y1 <= h.y0 or y0 >= h.y1 then
+					rest[#rest + 1] = p
+				else
+					local inside = p
+					for s = 1, 4 do
+						local out = cut(inside, -h[s][1], -h[s][2], -h[s][3])
+						if solid(out) then
+							rest[#rest + 1] = out
+						end
+						inside = cut(inside, h[s][1], h[s][2], h[s][3])
+					end
+					if solid(inside) then
+						band[#band + 1] = inside
+					end
+				end
+			end
+			pieces = rest
+		end
+		local band_tris = 0
+		for g, list in ipairs({pieces, band}) do
+			for _, p in ipairs(list) do
+				for v = 3, #p / 2 do
+					for _, z in ipairs({-d, d}) do
+						tri(g, {p[1], p[2], z}, {p[2 * v - 3], p[2 * v - 2], z},
+								{p[2 * v - 1], p[2 * v], z}, {0, 0, z < 0 and -1 or 1},
+								face_uv)
+					end
+					band_tris = band_tris + (g == 2 and 1 or 0)
+				end
+			end
+		end
+		local cg = node:CreateComponent("CustomGeometry")
+		local used = {}
+		for g = 1, 2 do
+			if geo[g][1] then
+				used[#used + 1] = g
+			end
+		end
+		cg:SetNumGeometries(#used)
+		for i, g in ipairs(used) do
+			cg:BeginGeometry(i - 1, magic.TRIANGLE_LIST)
+			for _, v in ipairs(geo[g]) do
+				cg:DefineVertex(magic.Vector3(v[1], v[2], v[3]))
+				cg:DefineNormal(v[6])
+				cg:DefineTexCoord(magic.Vector2(v[4], v[5]))
+			end
+		end
+		cg:Commit()
+		cg.castShadows = true
+		if tiles then
+			local function tile(i)
+				return tiles[i] or tiles[6] or select(2, next(tiles))
+			end
+			local top = tile(1)
+			local face = tiles[2] and tiles[2].name ~= top.name and tiles[2] or tile(6)
+			local glass = look.material == "glass"
+			for i, g in ipairs(used) do
+				local m = magic.Material:new()
+				m:SetTechnique(0, magic.cache:GetResource("Technique",
+						look.material == "glow" and "kit/KitVoxelLookGlow.xml" or
+						glass and (def.translucent or def.alpha_masked) and
+						"kit/KitVoxelLookAlpha.xml" or
+						glass and "kit/KitVoxelLookGlass.xml" or tech))
+				m:SetTexture(magic.TU_DIFFUSE, (g == 2 and top or face).t)
+				m:SetShaderParameter("MatDiffColor", glass and
+						magic.Color(tint0.r, tint0.g, tint0.b, 0.4) or tint0)
+				m:SetShaderParameter("MatSpecColor", look.material == "metal" and
+						magic.Color(0.6, 0.6, 0.6, 30) or magic.Color(0.05, 0.05, 0.05))
+				cg:SetMaterial(i - 1, m)
+			end
+		end
+		return cg, #tris / 3, tiles ~= nil, band_tris
+	end
+end
+
 -- The look drawn as its state has it: built the first time, changed as the
 -- state changes
 local function draw_look(id, n, look)
@@ -656,24 +843,37 @@ local function draw_look(id, n, look)
 		n.body = n.hinge:CreateChild("Body")
 		n.mat = material(look.material)
 		-- [KIT_LOOK_MATERIAL] A box or a wedge wearing a voxel material:
-		-- its sides the shut look's
+		-- its sides the shut look's ([KIT_SIDE_SCENERY] a polygon's
+		-- polygon_mesh's)
 		local wants = look.shape ~= "sphere" and type(look.voxel) ==
 				"string" and look.voxel ~= "" and look.voxel or nil
 		local def = wants and voxel_def(wants)
-		local worn = def and voxel_mesh(n.body, def,
-				look_box(look, false).size, look.shape)
+		local worn = nil
+		if look.shape == "polygon" then
+			-- [KIT_SIDE_SCENERY] textured where its node is (at rest, a moving
+			-- object's): built again when that changes (update_play)
+			local r = n.rest
+			local at = r and magic.Vector3(r[1], r[2], r[3]) or n.node.position
+			local q = r and magic.Quaternion(r[4], r[5], r[6], r[7]) or
+					n.node.rotation
+			local cg, nt, tex, bt = polygon_mesh(n.body, look, n, def, at, q)
+			if not tex then
+				cg:SetMaterial(0, n.mat)
+			end
+			worn = tex
+			n.poly.tris, n.poly.band = nt, tex and bt or nil
+			n.poly.at = tex and {at.x, at.y, at.z, q.w, q.x, q.y, q.z} or nil
+		elseif def then
+			worn = voxel_mesh(n.body, def, look_box(look, false).size, look.shape)
+		end
 		if wants then
 			log:info("kit: entity " .. id .. (worn and " wears " or
 					" wears no ") .. wants)
 		end
 		-- Not in the registry yet: drawn again once it is
 		n.wear_wanted = wants and not def and wants or nil
-		if worn then
+		if worn or n.poly then
 			-- (drawn)
-		elseif look.shape == "polygon" then
-			local cg, nt = polygon_mesh(n.body, look, n)
-			cg:SetMaterial(0, n.mat)
-			n.poly.tris = nt
 		elseif look.shape == "wedge" then
 			wedge(n.body):SetMaterial(0, n.mat)
 		else
@@ -832,7 +1032,9 @@ local function draw_look(id, n, look)
 			b.solid and ", solid" or "") ..
 			(look.shape == "wedge" and ", a wedge" or "") ..
 			(n.poly and ", a polygon of " .. #n.poly.pts / 2 .. " points, " ..
-			tostring(n.poly.tris) .. " triangles" or ""))
+			tostring(n.poly.tris) .. " triangles" or "") ..
+			(n.poly and n.poly.band and ", textured, " .. n.poly.band ..
+			" triangles in its top band" or ""))
 end
 
 -- [KIT_OWN_LOOK] A look hidden in play (its type's own_look off): not
@@ -964,6 +1166,24 @@ local function update_play(_, data)
 			-- again once it is
 			if n.look and n.wear_wanted and voxel_def(n.wear_wanted) then
 				drop_look(n)
+			end
+			-- [KIT_SIDE_SCENERY] A textured polygon moved or turned (at rest):
+			-- built again once it is still (a node's move is smoothed over some
+			-- frames), its textures the world's where it is now
+			local pa = n.look and n.poly and n.poly.at
+			if pa then
+				local r, p, q = n.rest, n.node.position, n.node.rotation
+				local now = r and {r[1], r[2], r[3], r[4], r[5], r[6], r[7]} or
+						{p.x, p.y, p.z, q.w, q.x, q.y, q.z}
+				local moved, stirred, last = 0, 0, n.poly.last or now
+				for i = 1, 7 do
+					moved = moved + math.abs(now[i] - pa[i])
+					stirred = stirred + math.abs(now[i] - last[i])
+				end
+				n.poly.last = now
+				if moved > 1e-4 and stirred < 1e-6 then
+					drop_look(n)
+				end
 			end
 			draw_look(id, n, show.look)
 			own_look(id, n, show.look)

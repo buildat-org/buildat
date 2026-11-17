@@ -1,0 +1,6 @@
+<!-- [KIT_SIDE_SCENERY] A look wearing a solid voxel material in material "glow"
+     (module.lua's polygon_mesh): KitVoxelLook's tint masked by the texture's alpha,
+     unlit. -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" psdefines="DIFFMAP KITLOOKTINT KITTINTMASK KITUNLIT">
+    <pass name="base" />
+</technique>

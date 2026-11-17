@@ -11,12 +11,18 @@
 -- a point dragged moves it, an edge's middle dragged or clicked adds one there, a
 -- right click (a long press) on a point takes it away. At most 128 points within
 -- 256 of its place ([KIT_SIDE_SCENERY]: 512 wide, a skyline or a ridge in one
--- piece), no edge crossing another (the server's check_param)
+-- piece), no edge crossing another (the server's check_param).
+-- [KIT_SIDE_SCENERY] `voxel` (a voxel type, kit/part's picker; "": its colour)
+-- wears that type's textures, world-aligned a repeat a cell so pieces side by
+-- side tile: its faces the type's bottom where that is not its top (grass: dirt),
+-- else its side; the edges facing up the top on their sides and a band of it
+-- `edge_depth` cells deep on the faces (0: none). Its colour is then unused (the
+-- type's own tint); its material still counts (module.lua's polygon_mesh)
 return {
 	version = 1,
 	about = {
 		group = "Building",
-		what = "A shape of points in the side view's plane, extruded: level geometry for side-scrolling. points: [[x, y]...] from its place, 3 to 128, within 256 (512 wide), its edges not crossing.",
+		what = "A shape of points in the side view's plane, extruded: level geometry for side-scrolling. points: [[x, y]...] from its place, 3 to 128, within 256 (512 wide), its edges not crossing. voxel: a voxel type's textures, tiling across pieces, with a band of its top texture edge_depth cells deep along the edges facing up; e.g. {\"points\": [[-20, -4], [20, -4], [20, 1], [0, 3], [-20, 2]], \"voxel\": \"kit/grass\", \"edge_depth\": 0.25}: a dirt hill edged with grass.",
 	},
 	params = {
 		points = {type = "points", default = {{-2, -0.5}, {2, -0.5}, {2, 0.5},
@@ -26,7 +32,13 @@ return {
 		material = {cat = "look", type = "string", default = "plain",
 			choices = {"plain", "metal", "glass", "glow"}},
 		collision = {cat = "physics", type = "bool", default = true},
+		-- [KIT_SIDE_SCENERY] (kit/part's)
+		voxel = {cat = "look", type = "voxel", default = "",
+			choices_from = "voxels"},
+		edge_depth = {cat = "look", type = "number", default = 0.25, min = 0,
+			max = 4},
 	},
 	look = {shape = "polygon", points = "param:points", depth = "param:depth",
-		color = "param:color", material = "param:material", solid = "param:collision"},
+		color = "param:color", material = "param:material", solid = "param:collision",
+		voxel = "param:voxel", edge_depth = "param:edge_depth"},
 }

@@ -758,7 +758,9 @@ namespace interface
 //   the movements (move.lua) where it lies flat (turned by yaw 0 or 180 and any
 //   roll), not by the clients' physics; with kit/controls' plane vertical only
 //   where its depth spans the plane's z (others background or foreground).
-//   Its size and offset are its points' box (kit.cpp's).
+//   Its size and offset are its points' box (kit.cpp's). [KIT_SIDE_SCENERY]
+//   voxel (a voxel type's name) and edge_depth: its textures world-aligned and
+//   a band of its top along the edges facing up (module.lua's polygon_mesh).
 //   Debugging: the builders with the tools on are sent each tick's signals
 //   along links ("kit:flow" [[from, output, to, input]...], their lines
 //   lit) and their selection's log ("kit:log" {"id", "lines"}).

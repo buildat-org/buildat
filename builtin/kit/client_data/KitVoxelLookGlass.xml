@@ -1,0 +1,8 @@
+<!-- [KIT_SIDE_SCENERY] A look wearing a solid voxel material in material "glass"
+     (module.lua's polygon_mesh): KitVoxelLook's tint masked by the texture's alpha,
+     see-through by the material's colour's alpha. -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" psdefines="DIFFMAP KITLOOKTINT KITTINTMASK">
+    <pass name="alpha" depthwrite="false" blend="alpha" />
+    <pass name="litalpha" depthwrite="false" blend="addalpha" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>
