@@ -1218,8 +1218,20 @@ local function live_tick()
 end
 
 -- ---- A signal's whole text, on a pointer's rest or a finger held
-function SG.tip(b, name, about)
-	if about then
+-- ([KIT_SCENES_REMOVE_TIP] win: the key in W of another window, the Scenes
+-- dialog's dimmed Remove: a list of that window's, gone with it)
+function SG.tip(b, name, about, win)
+	if not about then
+		return
+	elseif win then
+		local wt = SG.win_tips
+		if not (wt and wt.w == W[win]) then
+			wt = {key = win, w = W[win], list = {}}
+			SG.win_tips = wt
+		end
+		wt.list[#wt.list + 1] = {b = b, s = about, name = name,
+			say = "kit editor: the tip of " .. name}
+	else
 		SG.tips[#SG.tips + 1] = {b = b, s = about, name = name}
 	end
 end
@@ -1285,6 +1297,17 @@ function SG.hover_tick()
 				at(SG.links_view, x, y) then
 			for _, k in ipairs(SG.tips or {}) do
 				if at(k.b, x, y) then
+					c = k
+					break
+				end
+			end
+		end
+		local wt = SG.win_tips
+		if wt and W[wt.key] ~= wt.w then
+			SG.win_tips = nil
+		elseif wt and not c and wt.w.visible and at(wt.w, x, y) then
+			for _, k in ipairs(wt.list) do
+				if k.b.visible and at(k.b, x, y) then
 					c = k
 					break
 				end

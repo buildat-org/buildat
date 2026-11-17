@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-15)
-# covers: builtin/kit/types/lobby.lua builtin/kit/types/ui_scene_list.lua builtin/kit/types/scene_info.lua builtin/kit/kit.cpp builtin/kit/types/ui_chat.lua builtin/kit/types/ui_view.lua builtin/kit/types/ui_panel.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/players.lua
+# covers: builtin/kit/types/lobby.lua builtin/kit/types/ui_scene_list.lua builtin/kit/types/scene_info.lua builtin/kit/kit.cpp builtin/kit/types/ui_chat.lua builtin/kit/types/ui_view.lua builtin/kit/types/ui_panel.lua builtin/kit/client_lua/ui.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/players.lua builtin/kit/client_lua/input.lua
 # [KIT_LOBBY] A lobby on Workbench. kitboss (the admin) places 3 kit/lobby,
 # its lobby screen 4 (a kit/ui_panel, screen full, to the player: 5 a
 # kit/ui_chat, 6 Play -> 3 play, 7 a kit/ui_view following 3's entered and
@@ -21,10 +21,20 @@
 # from the lobby a notification in his edit mode. [KIT_LOBBY_OUT_OF_PLAY]
 # In the lobby and over each out of play (the server's line), kitboss's
 # client spectating, kitbob's body not drawn on kitboss's screen while he
-# plays, W held moving the free camera over the result card but not
-# under the lobby. The desktop HUD view: the frame and the tool panel, its shape a
+# plays, W held moving the free camera under neither the lobby nor the
+# result card ([KIT_UI_KEYS]: they have the keys). [KIT_UI_KEYS] 20's
+# picked -> 3 play; 21 an over screen with 22 Ping, shown in a run (3's
+# entered, left). kitboss goes by the keys: Down to Play, the chat, the
+# list's row, Enter: in the run (21 up, no page: Enter presses nothing);
+# over, the card's Again focused, Enter presses it; 8 set keyboard "off":
+# the lobby's Play by Enter, over the card W moves the camera and Enter
+# presses nothing. The desktop HUD view: the frame and the tool panel, its shape a
 # phone's, its screen picker on the lobby (15 a column there: the view the
-# frame's width, the chat under it). Screenshots: lobby.png, result.png,
+# frame's width, the chat under it). [KIT_UI_MARK_REMOVED] There Play (6)
+# selected, marked in the frame: the lobby's title changed (its panel
+# rebuilt), then the lobby put on the root and a scene made (the root's
+# elements rebuilt in it): no warning of Kit's UI, Play there and selected
+# by a click each time. Screenshots: lobby.png, result.png,
 # bob_lobby.png, notify.png, hud.png, hud_412x915.png, hud_lobby.png
 #   util/kit_lobby_check.sh
 set -u
@@ -138,6 +148,19 @@ EOF
 	in_panel 20 4
 	set_p 20 title '"Tracks"'
 	set_p 20 anchor '"top"'
+	# [KIT_UI_KEYS] a row picked plays (by the scene's name); 21 an over
+	# screen up in a run (3 entered, left), 22 its button
+	link 20 picked 3 play
+	place kit/ui_panel 15
+	set_p 21 title '"Over"'
+	set_p 21 screen '"over"'
+	set_p 21 to '"player"'
+	set_p 21 anchor '"top_right"'
+	place kit/ui_button 16
+	in_panel 22 21
+	set_p 22 label '"Ping"'
+	link 3 entered 21 show
+	link 3 left 21 hide
 	cat <<'EOF'
 keypress F6
 wait_log 10000 kit editor: edit mode off
@@ -169,14 +192,25 @@ frames 30
 keyup w
 event kit_players
 frames 3
-click Button "Play"
+keypress Down
+wait_log 10000 kit: ui keys: to Play
+keypress Down
+wait_log 10000 kit: ui keys: to kit chat 5
+keypress Down
+wait_log 10000 kit: ui keys: to Yard, by kitboss
+keypress Return
+wait_log 10000 kit: ui list 20 row 1 pressed
 wait_log 10000 kit: ui full screen none
 wait_log_any 10000 shown: "Builder away"
+wait_log_any 10000 shown, layer 21: "Over"
 frames 5
+keypress Return
+wait_log_absent 1000 kit: ui button 22 pressed
 event kit_players
 frames 3
 click Button "Finish"
 wait_log 10000 shown, layer 8: "Result"
+wait_log_any 10000 kit: ui keys: page 8: Again | Lobby, Again focused
 frames 10
 screenshot @T@/result.png
 event kit_players
@@ -186,12 +220,39 @@ frames 30
 keyup w
 event kit_players
 frames 3
-click Button "Again"
+keypress Return
+wait_log 10000 kit: ui button 10 pressed
 wait_log 10000 hidden, layer 8: "Result"
 frames 5
 click Button "Finish"
 wait_log 10000 shown, layer 8: "Result"
 frames 5
+click Button "Lobby"
+wait_log 10000 kit: ui full screen 4 up
+frames 5
+keypress F6
+wait_log 10000 kit editor: edit mode on
+event kit_edit {"op": "set", "id": 8, "comp": 0, "param": "keyboard", "value": "off"}
+wait_log 10000 kit editor: state:
+keypress F6
+wait_log 10000 kit: ui keys: page 4: Play | kit chat 5 | Yard, by kitboss, Play focused
+frames 5
+keypress Return
+wait_log 10000 kit: ui button 6 pressed
+wait_log 10000 kit: ui full screen none
+frames 5
+click Button "Finish"
+wait_log 10000 shown, layer 8: "Result"
+frames 10
+event kit_players
+frames 3
+keydown w
+frames 30
+keyup w
+event kit_players
+frames 3
+keypress Return
+wait_log_absent 1000 kit: ui button 10 pressed
 click Button "Lobby"
 wait_log 10000 kit: ui full screen 4 up
 frames 5
@@ -223,8 +284,33 @@ click Text "hud screen: ◆ 4 ui_panel"
 wait_log 10000 kit editor: the HUD view shows screen 4
 frames 10
 screenshot @T@/hud_lobby.png
+click DropDownList "hud shape"
+wait_log 10000 hud shape open
+frames 3
+click Text "hud shape: The room left"
+wait_log 10000 kit editor: the HUD view's shape is fit
+frames 5
 event kit_edit {"op": "set", "id": 14, "comp": 0, "param": "text", "value": "Builder done"}
 wait_log_any 10000 : "Builder done"
+event kit_select 6
+wait_log 10000 marked, layer 4: "Play"
+event kit_edit {"op": "set", "id": 4, "comp": 0, "param": "title", "value": "Lobby 2"}
+wait_log 10000 layer 4: "Lobby 2"
+event kit_select 15
+frames 3
+click Button "Play"
+wait_log 10000 kit editor: selected 6
+event kit_edit {"op": "parent", "id": 4, "parent": 1}
+wait_log 10000 kit editor: state:
+event kit_select 6
+frames 3
+event kit_edit {"op": "new_scene", "name": "track", "copy": true}
+wait_log 30000 kit editor: in the scene track
+frames 5
+event kit_select 15
+frames 3
+click Button "Play"
+wait_log 10000 kit editor: selected 6
 sync 3000
 quit
 EOF
@@ -285,6 +371,11 @@ grep -aqP "the HUD tool panel 390x720, the frame 0 0 890 720$" "$b" ||
 grep -aqP "the HUD tool panel 390x720, the frame 283 0 324 720$" "$b" ||
 	fail "the 412x915 frame not as wanted ($b)"
 grep -aq "OFF SCREEN" "$b" "$t/bob.log" && fail "a UI component off the screen"
+# [KIT_UI_MARK_REMOVED] No update stopped by a mark its rebuilt panel took
+grep -aE " W kit +: kit: (ui|ui handles|markers): " "$b" | head -3 | grep -a . &&
+	fail "Kit's UI warned ($b)"
+grep -aqF "An edit by kitboss: put 4 on the app root" "$s" ||
+	fail "the lobby screen not moved onto the root ($s)"
 # [KIT_LOBBY_OUT_OF_PLAY] Out of play in the lobby and over, in play as a
 # run starts; kitboss's client spectating as he is out; kitbob's body (in
 # the lobby) not drawn on kitboss's screen while he plays
@@ -295,10 +386,15 @@ awk '/kit: spectating on/ { on = 1 } on && /kit: ui full screen none/ { up = 1 }
 	up && /kit: spectating off/ { ok = 1 } END { exit !ok }' "$b" ||
 	fail "kitboss not spectating in the lobby, or still after Play ($b)"
 # W held: the free camera still under the lobby's full screen (its view
-# follows by the camera's offset), moving over the result card
-cams=($(grep -aoP "kit: the spectator's camera at \K\S+" "$b" | head -4))
-[ ${#cams[@]} = 4 ] && [ "${cams[0]}" = "${cams[1]}" ] && [ "${cams[2]}" != "${cams[3]}" ] ||
-	fail "W under the lobby, then over the result: the camera at ${cams[*]} ($b)"
+# follows by the camera's offset); [KIT_UI_KEYS] still over the result card
+# (it has the keys), moving over it with its keyboard "off"
+cams=($(grep -aoP "kit: the spectator's camera at \K\S+" "$b" | head -6))
+[ ${#cams[@]} = 6 ] && [ "${cams[0]}" = "${cams[1]}" ] && [ "${cams[2]}" = "${cams[3]}" ] &&
+	[ "${cams[4]}" != "${cams[5]}" ] ||
+	fail "W under the lobby, over the result, over it of keyboard off: the camera at ${cams[*]} ($b)"
+# [KIT_UI_KEYS] The over screen up in the run took no keys (auto, in play)
+grep -aqE " I kit +: kit: ui button 22 pressed" "$b" && fail "Enter pressed 21's button in play ($b)"
+grep -aqE " I kit +: kit: ui keys: page 21" "$b" && fail "21 was a page ($b)"
 db=$(find "$t/user" -name save.sqlite -path "*/saves/world/*" | head -1)
 python3 -I - "$db" <<'PY' || fail "the panel's duplicate ($db)"
 import json, sqlite3, sys
@@ -336,4 +432,4 @@ PY
 for p in lobby result bob_lobby notify hud hud_412x915 hud_lobby; do
 	[ -s "$t/$p.png" ] || fail "no screenshot $t/$p.png"
 done
-echo "PASS: a lobby: each player's lobby, run and result screens, its chat and view (an auto panel: a row, a column in the phone frame), out of play there (the free camera still under the lobby), a panel's duplicate under its parent, chat lines a builder's notifications, the desktop HUD view's frame, shapes and screens; screenshots in $t"
+echo "PASS: a lobby: each player's lobby, run and result screens, its chat and view (an auto panel: a row, a column in the phone frame), out of play there (the free camera still under the lobby and the result card), screens by the keys (a keyboard off one not), a panel's duplicate under its parent, chat lines a builder's notifications, the desktop HUD view's frame, shapes and screens; screenshots in $t"

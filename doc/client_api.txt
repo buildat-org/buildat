@@ -1288,6 +1288,12 @@ LineEdit.multiLine, UIElement:IsMultiLine()
   word, Ctrl+Delete forward, a double-click a word, a triple-click all (in a
   multi-line field the line).
 
+LineEdit.childOffset
+- How far the field's text is scrolled, read and set (an IntVector2; y is
+  minus the pixels scrolled down). The caret and the wheel move it too. A
+  scroll bar beside a multi-line field keeps in step with it by this
+  ([KIT_AGENT_FEEDBACK_1117]: Kit's comments field).
+
 magic.ui.focusElement, Text.selectionStart, Text.selectionLength
 - The focus reads as what it is when its class is whitelisted, as GetChild's
   children do: a field as a LineEdit, with its cursorPosition and
@@ -2755,7 +2761,7 @@ magic.LT_INVALID:
 magic.LT_OBJECT_GROUP: 
 magic.LT_TILE_LAYER: 
 magic.Light: brightness, color, fadeDistance, fov, lightType, rampTexture, range, shadowBias, shadowCascade, shadowIntensity, specularIntensity
-magic.LineEdit: clipBorder, cursor, cursorPosition, echoCharacter, editable, maxLength, multiLine, text, textCopyable, textElement, textSelectable
+magic.LineEdit: childOffset, clipBorder, cursor, cursorPosition, echoCharacter, editable, maxLength, multiLine, text, textCopyable, textElement, textSelectable
 magic.ListView: AddItem, AddSelection, ChangeSelection, ClearSelection, Expand, FindItem, GetItem, InsertItem, IsExpanded, IsSelected, RemoveAllItems, RemoveItem, RemoveSelection, SetSelection, ToggleExpand, ToggleSelection, baseIndent, clearSelectionOnDefocus, hierarchyMode, highlightMode, multiselect, numItems, selectOnClickEnd, selectedItem, selection
 magic.MASK_COLOR: 
 magic.MASK_NORMAL: 

@@ -5936,7 +5936,9 @@ end
 
 -- [KIT_SCENE_ADD_LIVE] The scenes: each listed or not (its kit/scene_info,
 -- for the players' list), and removed (one undo; the server refuses one
--- with players on it, and the one the builder is in)
+-- with players on it, and the one the builder is in; [KIT_SCENES_REMOVE_TIP]
+-- the first, one with scenes under it and the builder's own a dimmed Remove
+-- saying why)
 -- ([KIT_SCENE_TREE] indented as they are under each other; Move... puts
 -- one under another, Add here... adds a scene package under it)
 function M.scenes_dialog()
@@ -5946,9 +5948,10 @@ function M.scenes_dialog()
 		listed[n] = true
 	end
 	-- (for a drive: each under the one before it with a ">" a level)
-	local shown = {}
+	local shown, under = {}, {}
 	for _, s in ipairs(M.scene_rows()) do
 		shown[#shown + 1] = string.rep(">", tonumber(s.depth) or 0) .. s.name
+		under[s.up or ""] = true
 	end
 	log:info("kit editor: the Scenes window: " .. table.concat(shown, ", "))
 	for _, s in ipairs(M.scene_rows()) do
@@ -5974,12 +5977,24 @@ function M.scenes_dialog()
 				M.add_scene_file(n)
 			end):SetName("add under " .. n)
 		end
-		if n ~= E.state.world_scene and n ~= current_scene() then
-			button(r, "Remove", function()
-				log:info("kit editor: remove the scene " .. n)
-				send({op = "remove_scene", name = n})
-				drop("dialog")
-			end):SetName("remove " .. n)
+		-- [KIT_SCENES_REMOVE_TIP] One that cannot go: dimmed, its click
+		-- nothing, why on a pointer's rest or a finger held (Kit's tip,
+		-- signals.lua); the server's other refusals (a player on it) its own
+		local why = (n == E.state.world_scene and "The first scene: always kept")
+				or (under[n] and "Has scenes under it") or (n == current_scene()
+				and "The scene you're editing: switch to another first") or nil
+		local b, t = button(r, "Remove", function()
+			if why then
+				return
+			end
+			log:info("kit editor: remove the scene " .. n)
+			send({op = "remove_scene", name = n})
+			drop("dialog")
+		end)
+		b:SetName("remove " .. n)
+		if why then
+			t:SetColor(DIM)
+			NT.sg.tip(b, "remove " .. n, why, "dialog")
 		end
 	end
 	br = br or row(w)
