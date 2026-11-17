@@ -17286,6 +17286,10 @@ struct Module: public interface::Module, public Interface
 	{
 		json::Value out = json::null();
 		bool any = false;
+		// [KIT_NO_WORLD] no ground: no voxels, a cell not loaded is air
+		bool none = false;
+		for(auto &x : m_worlds)
+			none = none || (x.second.world_scene == ref && x.second.wp.none());
 		voxelworld::access(m_server, ref, [&](voxelworld::Instance *w){
 			any = true;
 			interface::VoxelRegistry *reg = w->get_voxel_reg();
@@ -17302,7 +17306,7 @@ struct Module: public interface::Module, public Interface
 						const pv::Vector3DInt32 q(base[0] + tx, o[1] + y,
 								base[2] + tz);
 						uint32_t word = 0;
-						if(!voxel_id(w, q, word)){
+						if(!voxel_id(w, q, word) && !none){
 							why = "the cell ("+itos(q.getX())+","+itos(q.getY())+
 									","+itos(q.getZ())+")'s section is not loaded";
 							return;
