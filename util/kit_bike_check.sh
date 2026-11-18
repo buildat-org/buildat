@@ -24,7 +24,9 @@
 #   3. back in edit mode (Stopped), a version with a heavy step put over
 #      kit:type: refused, "too slow";
 #   4. played again, W: the old version steps on the server, the first gem's trigger zone
-#      taken (the run's line: Gems 1/3, side.png); the corrections few; the
+#      taken (the run's line: Gems 1/3, side.png; [KIT_CLIENT_REACT] (1) its
+#      zone met on the client no later than on the server, the gem's client
+#      part's take predicted; the pass's cost logged); the corrections few; the
 #      side camera led ahead in +x, after Space (turned round) in -x
 #      (turned.png, [KIT_SIDE_LEAD]);
 #   5. kitbob joins: [KIT_LOBBY] he in the lobby, the gem kitboss took still
@@ -72,7 +74,7 @@ zip=$("$here/util/pack_templates.sh" "$t/key" "$t/out" crag_trial 2> "$t/pack.er
 	fail "the pack ($t/pack.err)"
 "$b" aitta install "$zip" "$t/user" > "$t/install.txt" 2>&1 || fail "the install ($t/install.txt)"
 fp=$(aitta_fp "$t/pub")
-for f in crag_bike.lua crag_bike.client.lua crag_gem.lua crag_run.lua; do
+for f in crag_bike.lua crag_bike.client.lua crag_gem.lua crag_gem.client.lua crag_run.lua; do
 	[ -f "$t/user/installed/$fp/crag_trial/1.0.0/types/$f" ] ||
 		fail "no types/$f installed ($t/install.txt)"
 done
@@ -302,6 +304,17 @@ n=$(grep -ac "kit: the body corrected by" "$CL")
 echo "ok: the old version stepping, the first gem taken (a trigger zone); $c"
 # ([KIT_LOBBY] the gem kitboss's own: gone on his screen)
 await "$CL" 0 5 "kit: entity 11's look: taken on"
+# [KIT_CLIENT_REACT] (1) its zone met on his client first (its own test of
+# the predicted wheels: the gem's client part takes it at once), the
+# server's after
+await "$SL" 0 5 "Entity 11: kitboss enters its zone"
+grep -aq "kit: entity 11 predicted taken = true" "$CL" || fail "the gem's client part did not take it ($CL)"
+ct=$(grep -am1 "kit: entity 11's zone entered (this client)" "$CL" | awk '{ print $3 }')
+st=$(grep -am1 "Entity 11: kitboss enters its zone" "$SL" | awk '{ print $3 }')
+[ -n "$ct" ] && [[ ! "$ct" > "$st" ]] || fail "the gem's zone on the client at '$ct', the server's at $st ($CL, $SL)"
+echo "ok: the gem's zone met on the client at $ct, on the server at $st"
+step 5 "kit: zones: " "event kit_zones"
+echo "   $(tail -c 2000 "$CL" | grep -ao 'kit: zones: .*' | tail -1)"
 # [KIT_SIDE_LEAD] The side camera led ahead of the bike riding right (+x);
 # turned round (Space), eased to its other side
 lead() # the side camera's lead along x now, into lx

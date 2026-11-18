@@ -564,6 +564,13 @@ namespace interface
 //   Client parts: <name>.client.lua beside a type, sent to every client at
 //   join and run there as the client's own Lua is (client_lua/module.lua
 //   says what it gets).
+//   [KIT_CLIENT_REACT] (1) A client part's on_enter(e) and on_leave(e): this
+//   client's own predicted body met the entity's zone or left it, tested on
+//   the client each frame in the server's shapes (cells, a look's outline,
+//   box or sphere; the body's spheres, box or point: move.lua's zone_meets),
+//   before the server's on_enter(c, by) hears of it: a gem gone at once
+//   (e:predict), the server still the one that decides. The zone's cells go
+//   in kit_show (zones) for an entity with client parts only.
 //   [KIT_CLIENT_REACT] (10) Out of play (dead and waiting to respawn, a
 //   kit/lobby's lobby or result) a movement's step gets i.out_of_play = true,
 //   its keys none, on the server's steps and the client's prediction alike

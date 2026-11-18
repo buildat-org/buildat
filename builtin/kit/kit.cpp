@@ -15906,7 +15906,9 @@ struct Module: public interface::Module, public Interface
 	// What its types show every client: the first look and hud
 	json::Value show_of(const Entity &e)
 	{
-		json::Value show = json::object(), parts = json::array();
+		json::Value show = json::object(), parts = json::array(),
+				zones = json::array();
+		bool look_zone_sent = false;
 		std::set<ss_> shared;
 		for(const Instance &in : e.comps){
 			const json::Value &d = m_types[in.type].decl;
@@ -15989,6 +15991,26 @@ struct Module: public interface::Module, public Interface
 			// the state they see
 			if(!m_types[in.type].client.empty())
 				parts.append(in.type);
+			// [KIT_CLIENT_REACT] (1) its zones, for its client parts' on_enter
+			// (module.lua's update_zones meets them as zone_shape() has them):
+			// a position parameter's cells or "look" (the look is above), 4
+			// at most
+			if(!ty.zone.empty() && zones.size() < 4){
+				if(ty.zone != "look"){
+					int n[3];
+					const bool deadly = in.type == TRIGGER_TYPE &&
+							in.params.get("deadly").is_true();
+					extent(in.params.get(ty.zone), n, deadly ? MAX_REGION_EXTENT :
+							MAX_EXTENT);
+					json::Value g = json::array();
+					for(int k = 0; k < 3; k++)
+						g.append(n[k]);
+					zones.append(g);
+				} else if(!look_zone_sent){
+					zones.append("look");
+					look_zone_sent = true;
+				}
+			}
 			for(const ss_ &k : m_types[in.type].shared)
 				if(!m_types[in.type].per_player.count(k))
 					shared.insert(k);
@@ -16008,6 +16030,8 @@ struct Module: public interface::Module, public Interface
 				keys.append(k);
 			show.set("client", parts);
 			show.set("shared", keys);
+			if(zones.size())
+				show.set("zones", zones);
 		}
 		if(e.kind == "player"){
 			show.set("player", true);
@@ -32488,7 +32512,10 @@ struct Module: public interface::Module, public Interface
 				"or down), each item gone once its input is used. client: an optional "
 				"client part the clients run "
 				"(sandboxed): a table of on_add(e), on_state(e, key), "
-				"on_update(e, dt), on_remove(e); e.state, e.node, e:log(text); "
+				"on_update(e, dt), on_remove(e), on_enter(e) and on_leave(e) "
+				"(this client's own predicted body in its zone, tested on the "
+				"client in the server's shapes, before the server's on_enter: "
+				"e:predict(\"taken\", true, 1) a gem gone at once); e.state, e.node, e:log(text); "
 				"a movement's draw(s, node) draws each player's body (node at "
 				"its feet, s its state; another's {pos, pose}; scenery is "
 				"kit/parallax's, not a client part's); left out, the "
@@ -38374,6 +38401,10 @@ struct Module: public interface::Module, public Interface
 				"is true (its keys none): a bike's step can hold it still under its result "
 				"card; the lobby's keep_own_body keeps the player's own body "
 				"drawn for them, the camera on it, hidden from the others. "
+				"A client part's on_enter(e) and on_leave(e) run on the "
+				"player's own client as their predicted body meets the zone "
+				"(the server's shapes), a round trip before the server's "
+				"on_enter: animate there (e:predict), decide on the server. "
 				"c.players (players = true) lists every "
 				"scene's players, each p.scene theirs and p.away true outside the "
 				"component's own scene: a scene's run or HUD keeps to not p.away. "

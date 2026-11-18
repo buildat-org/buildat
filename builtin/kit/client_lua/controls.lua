@@ -1639,6 +1639,21 @@ function M.body_spheres()
 	return out
 end
 
+-- [KIT_CLIENT_REACT] (1) This client's own predicted body as the zones meet
+-- it (move.lua's zone_body, the server's body_shape: its step's spheres, else
+-- a movement.zone = "box" body's box, else its point); nil: none yet. A
+-- seat's rider: nil too (the server meets the seat's point, not predicted
+-- here). M.zone_math: move.lua's zone shapes and tests (module.lua's
+-- update_zones)
+M.zone_math = MV
+function M.zone_body()
+	local feet = pos_of(C.s)
+	if not feet or not MV or M.riding() then
+		return nil
+	end
+	return MV.zone_body(feet, C.s.spheres, decl().zone == "box" and body_decl() or nil)
+end
+
 -- [KIT_SPECTATE_CAMERA] The feet the camera follows (the body's, a watched
 -- player's, a camera_target's less half a body); nil before the first view
 function M.camera_follows()
@@ -2546,6 +2561,11 @@ magic.SubscribeToEvent("Update", function(_, data)
 		end
 		if n > 0 then
 			C.touch_jump = false
+		end
+		-- [KIT_CLIENT_REACT] (1) the zones met where the steps left the body,
+		-- before the server hears of the steps
+		if n > 0 and M.update_zones then
+			M.update_zones()
 		end
 		if #C.out > 0 then
 			buildat.send_packet("kit:input", C.put .. ";" ..

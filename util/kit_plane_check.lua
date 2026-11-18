@@ -271,4 +271,82 @@ local g2 = MV.look_poly(GEM, true, {10, 5, 0}, 180)
 assert(near(g2.x0, 6.5) and near(g2.x1, 7.5) and near(g2.z0, -1) and near(g2.z1, 0),
 		"turned: " .. g2.x0 .. " " .. g2.z0)
 print("ok: a polygon's when: scaled about its point and offset while on, turned with it")
+
+-- [KIT_CLIENT_REACT] (1) The client's zone tests (move.lua's port of kit.cpp's)
+-- on the cases util/kit_agent_tools_check.sh's zones phase asks of the server,
+-- the same answers: get_state's bounds, who is in
+local function bounds(z, lo, hi, what)
+	for k = 1, 3 do
+		assert(near(z.lo[k], lo[k]) and near(z.hi[k], hi[k]), what .. ": " ..
+				table.concat(z.lo, ",") .. " " .. table.concat(z.hi, ","))
+	end
+end
+local function probe(x, y, wheels)
+	return MV.zone_body({x, y, 0}, wheels and {{-0.6, 0.36, 0, 0.36}, {0.6, 0.36, 0, 0.36}})
+end
+local U = {{0, 0}, {3, 0}, {3, 3}, {2, 3}, {2, 1}, {1, 1}, {1, 3}, {0, 3}}
+local uz = MV.zone_look({shape = "polygon", points = U}, false, {20, 1, 0})
+bounds(uz, {20, 1, -0.5}, {23, 4, 0.5}, "the U")
+assert(not MV.zone_meets(uz, probe(21.5, 2.5)), "the U's notch met")
+assert(MV.zone_meets(uz, probe(20.5, 2)), "the U's outline not met")
+local gz = MV.zone_cells({60, 1, 0}, nil, {1, 1, 1})
+bounds(gz, {59.5, 0.5, -0.5}, {60.5, 1.5, 0.5}, "the gem's cells")
+assert(not MV.zone_meets(gz, probe(59.2, 0.6)), "the gem by the point outside")
+local wb = probe(59.2, 0.6, true)
+assert(near(wb.spheres[1][1], 58.6) and near(wb.spheres[2][2], 0.96), "the wheels")
+assert(MV.zone_meets(gz, wb), "the gem not met by a wheel")
+assert(MV.zone_meets(gz, probe(59.8, 0.6)), "the gem not met by the point")
+local walker = MV.zone_body({59.25, 0.6, 0}, nil, {r = 0.3, h = 1})
+assert(walker.box and near(walker.lo[1], 58.951) and near(walker.hi[2], 1.599) and
+		near(walker.hi[3], 0.299), "the walker's box")
+assert(MV.zone_meets(gz, walker), "the gem not met by a walker's box")
+local pg = {shape = "polygon", points = {{-1, 0}, {1, 0}, {1, 2}, {-1, 2}}, depth = 1,
+	state = "taken", when = {scale = {0.25, 0.25, 1}, offset = {0, 1, 0}}}
+bounds(MV.zone_look(pg, false, {-40, 1, 0}), {-41, 1, -0.5}, {-39, 3, 0.5}, "the polygon gem")
+bounds(MV.zone_look(pg, true, {-40, 1, 0}), {-40.25, 2, -0.5}, {-39.75, 2.5, 0.5},
+		"the polygon gem taken")
+assert(MV.zone_meets(MV.zone_look(pg, false, {-40, 1, 0}), probe(-39.2, 1)) and
+		not MV.zone_meets(MV.zone_look(pg, true, {-40, 1, 0}), probe(-39.2, 1)),
+		"the polygon gem whole met, taken not")
+-- A turned box (a part turned a quarter round y: its long side along z), a
+-- sphere, a turned cell box (yaw 90 from a node's rotation)
+local q = MV.quat_matrix(math.cos(math.pi / 4), 0, math.sin(math.pi / 4), 0)
+local bz = MV.zone_look({size = {4, 1, 1}}, false, {0, 0, 0}, q)
+bounds(bz, {-0.5, -0.5, -2}, {0.5, 0.5, 2}, "a turned box")
+assert(MV.zone_meets(bz, MV.zone_body({0, -0.5, 1.8})) and
+		not MV.zone_meets(bz, MV.zone_body({1.8, -0.5, 0})), "a turned box's long side")
+local sz = MV.zone_look({shape = "sphere", size = {2, 2, 2}}, false, {0, 0, 0})
+assert(sz.kind == "s" and MV.zone_meets(sz, MV.zone_body({0.6, -0.5, 0.6})) and
+		not MV.zone_meets(sz, MV.zone_body({0.8, -0.5, 0.8})), "a sphere")
+local cz = MV.zone_cells({0.5, 0, 0}, q, {3, 1, 1})
+assert(MV.zone_meets(cz, MV.zone_body({0.5, -0.5, -2})) and
+		not MV.zone_meets(cz, MV.zone_body({2.5, -0.5, 0})), "turned cells")
+print("ok: zones on the client as on the server: the U, the gem's cells by a wheel, the point and a box, a polygon gem's when, turned boxes, a sphere")
+
+-- What the client's pass costs: 300 zones (cells, boxes, polygons, spheres)
+-- built (module.lua builds one again as it moves or its state turns), and
+-- met by a bike's two wheels, a frame
+local looks = {{size = {1, 1, 1}}, {shape = "polygon", points = U},
+	{shape = "sphere", size = {1, 1, 1}}}
+local FRAMES, zs, met = 200, {}, 0
+local t0 = os.clock()
+for f = 1, FRAMES do
+	for i = 1, 300 do
+		zs[i] = i % 4 == 0 and MV.zone_cells({i % 30, 1, 0}, nil, {1, 1, 1}) or
+				MV.zone_look(looks[i % 3 + 1], false, {i % 30, 1, math.floor(i / 30)})
+	end
+end
+local t1 = os.clock()
+for f = 1, FRAMES do
+	local body = probe(f % 30, 1, true)
+	for i = 1, 300 do
+		if MV.zone_meets(zs[i], body) then
+			met = met + 1
+		end
+	end
+end
+local t2 = os.clock()
+assert(met > 0)
+print(string.format("ok: 300 zones: built in %.0f us, met in %.0f us a frame (luajit)",
+		(t1 - t0) / FRAMES * 1e6, (t2 - t1) / FRAMES * 1e6))
 -- vim: set noet ts=4 sw=4:
