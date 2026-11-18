@@ -11,6 +11,7 @@
 -- where a tyre slips much (coloured by the floor), and on this player's own
 -- car the camera shaken in the frame its predicted step hits a wall hard.
 local magic = require("buildat/extension/urho3d")
+local kit = require("buildat/module/kit")
 local log = buildat.Logger("brim_car")
 local said = false
 local mats = {}
@@ -155,28 +156,70 @@ local function build(node, paint, wrecked)
 	return b
 end
 
--- [RACER_FEEL] The effects go through Kit's client part effects (kit_plan
--- 4z37c (2) the camera shake, (3) particles and marks) once those are in;
--- till then each kind is only logged, once.
+-- [RACER_FEEL] The effects: Kit's client part effects (kit.effect,
+-- kit.mark, kit.shake), on this client alone; each kind's first logged.
+-- The floor's height for them: the Bone Yard's floors' tops are 0.555 (the
+-- road) to 0.585 (mud, the line), the car's place is its plane's (y 1).
+-- simplified: one height for the template's track; a track with hills
+-- would take w:under's from the step into the pose
+local FLOOR_Y = 0.57
 local said_fx = {}
-local function stub(kind)
+local function said_once(kind, x, y, z)
 	if not said_fx[kind] then
 		said_fx[kind] = true
-		log:info("brim_car: effect " .. kind)
+		log:info(string.format("brim_car: effect %s at %.1f,%.1f,%.1f", kind, x, y, z))
 	end
 end
--- A puff of particles: kind (smoke, dust, spark, flame) at x, y, z, its
--- colour, drifting along dx, dz
-local function puff(kind, x, y, z, color, dx, dz)
-	stub(kind)
+-- Each kind's look (a description cached by Kit: only at, dir and count
+-- change call to call; dust's colour is its floor's, a look each)
+local LOOKS = {
+	smoke = {count = 2, shape = "round", colors = {"#6a6460", "#3a3632"},
+		spread = 25, speed_min = 1, speed_max = 2, gravity = -1, drag = 2,
+		ttl_min = 0.5, ttl_max = 0.8, size_min = 0.6, size_max = 0.9, grow = 1.5,
+		fade = 0.6},
+	flame = {count = 3, shape = "square", colors = {"#ff8a1a", "#ffd23c"},
+		spread = 15, speed_min = 3, speed_max = 5, gravity = 0, ttl_min = 0.12,
+		ttl_max = 0.25, size_min = 0.18, size_max = 0.3, grow = -0.5, fade = 0.4},
+	spark = {count = 6, shape = "square", colors = {"#ffd23c", "#fff4c0"},
+		spread = 50, speed_min = 4, speed_max = 8, gravity = 9, ttl_min = 0.15,
+		ttl_max = 0.35, size_min = 0.12, size_max = 0.2, fade = 0.2},
+}
+local function dust_look(color)
+	local k = "dust" .. color
+	if not LOOKS[k] then
+		LOOKS[k] = {count = 4, shape = "round", colors = {color}, spread = 60,
+			speed_min = 1, speed_max = 3, gravity = 1, drag = 2, ttl_min = 0.6,
+			ttl_max = 0.95, size_min = 0.9, size_max = 1.5, grow = 2.5, fade = 0.7,
+			box = 1.4}
+	end
+	return LOOKS[k]
 end
--- A tyre mark on the floor at x, z along the heading h, its colour
-local function mark(x, z, h, color)
-	stub("mark")
+-- A puff of particles: look (LOOKS') at x, y, z, thrown along dx, dz and up
+local function puff(kind, look, x, y, z, dx, dz)
+	local d = {}
+	for k, v in pairs(look) do
+		d[k] = v
+	end
+	d.at, d.dir = {x, y, z}, {dx, 0.6, dz}
+	if kit.effect(d) > 0 then
+		said_once(kind, x, y, z)
+	end
 end
--- This client's camera shaken (amount: about metres)
+-- A tyre's mark on the floor from x0, z0 to x1, z1 (a stroke, whatever the
+-- frame rate), its colour.
+-- simplified: a race's restart keeps the last one's marks (Kit's newest 1024
+-- stay); kit.clear_marks() from a restart signal once the client part gets one
+local function mark(x0, z0, x1, z1, color)
+	local dx, dz = x1 - x0, z1 - z0
+	local x, z = (x0 + x1) / 2, (z0 + z1) / 2
+	kit.mark(x, FLOOR_Y, z, math.atan2(dx, dz) * 180 / math.pi,
+			{0.3, math.sqrt(dx * dx + dz * dz) + 0.1}, color, 0.55)
+	said_once("mark", x, FLOOR_Y, z)
+end
+-- This client's camera shaken (0...5)
 local function shake(amount)
-	stub("shake")
+	kit.shake(amount)
+	said_once("shake", amount, 0, 0)
 end
 
 local function bit(n, b)
@@ -191,64 +234,72 @@ local function effects(s, node, p, h, flags)
 	local now = buildat.get_time_us() / 1e6
 	local e = fx[node]
 	if not e then
-		e = {t = now, smoke = 0, dust = 0, run = 0, bumps = tonumber(s.bumps)}
+		e = {t = now, smoke = 0, dust = 0, tyres = {}, bumps = tonumber(s.bumps)}
 		fx[node] = e
 	end
 	local dt = math.min(0.1, now - e.t)
 	e.t = now
 	local at = node.position
-	local x, y, z = at.x, at.y, at.z
+	local x, y, z = at.x, FLOOR_Y, at.z
 	local sh, ch = math.sin(h), math.cos(h)
 	local function world(lx, lz)
 		return x + lx * ch + lz * sh, z - lx * sh + lz * ch
 	end
 	local speed = tonumber(p[5]) or 0
 	local surf = math.floor(tonumber(p[6]) or 1)
+	-- (a burst a tenth of a second at most, each short-lived: Kit keeps 64
+	-- client part bursts alive)
 	-- Exhaust smoke out of the tail pipe, thicker on the throttle
-	e.smoke = e.smoke + dt * (bit(flags, 32) and 14 or 3)
+	e.smoke = e.smoke + dt * (bit(flags, 32) and 10 or 3)
 	if e.smoke >= 1 then
 		e.smoke = 0
 		local px, pz = world(0.55, -2.45)
-		puff("smoke", px, y + 0.4, pz, "#5a5450", -sh, -ch)
+		puff("smoke", LOOKS.smoke, px, y + 0.4, pz, -sh, -ch)
 	end
 	if bit(flags, 1) then
 		local px, pz = world(0, -2.6)
-		puff("flame", px, y + 0.5, pz, "#ff8a1a", -sh, -ch)
+		puff("flame", LOOKS.flame, px, y + 0.5, pz, -sh, -ch)
 	end
 	-- Dust off the rear tyres by the speed (none off oil), more sliding
 	if DUST[surf] and speed > 3 then
-		e.dust = e.dust + dt * speed * (bit(flags, 4) and 1.6 or 0.6)
+		e.dust = e.dust + dt * math.min(10, speed * (bit(flags, 4) and 0.8 or 0.35))
 		if e.dust >= 1 then
 			e.dust = 0
-			for _, side in ipairs({0.92, -0.92}) do
-				local px, pz = world(side, -1.6)
-				puff("dust", px, y + 0.2, pz, DUST[surf], -sh, -ch)
-			end
+			local px, pz = world(0, -1.6)
+			puff("dust", dust_look(DUST[surf]), px, y + 0.2, pz, -sh, -ch)
 		end
 	end
 	-- Sparks where it scrapes
 	for b, lz in pairs({[64] = 2.3, [128] = -2.3}) do
 		if bit(flags, b) then
 			local px, pz = world(0, lz)
-			puff("spark", px, y + 0.5, pz, "#ffd23c", -sh, -ch)
+			puff("spark", LOOKS.spark, px, y + 0.5, pz, -sh, -ch)
 		end
 	end
-	-- Marks: each slipping tyre's every 0.4 m
+	-- Marks: each slipping tyre's from where its last ended, 0.7 m on or
+	-- more (a jump past 4 m, a teleport, starts anew)
 	local slips = math.floor(tonumber(p[7]) or 0)
-	e.run = e.run + speed * dt
-	if slips > 0 and e.run >= 0.4 then
-		e.run = 0
-		for k, wh in ipairs(WHEELS) do
-			if bit(slips, 2 ^ (k - 1)) then
-				local px, pz = world(wh[1], wh[2])
-				mark(px, pz, h, MARK[surf] or MARK[1])
+	for k, wh in ipairs(WHEELS) do
+		local px, pz = world(wh[1], wh[2])
+		local last = e.tyres[k]
+		if not bit(slips, 2 ^ (k - 1)) then
+			e.tyres[k] = nil
+		elseif not last then
+			e.tyres[k] = {px, pz}
+		else
+			local d2 = (px - last[1]) ^ 2 + (pz - last[2]) ^ 2
+			if d2 > 16 then
+				e.tyres[k] = {px, pz}
+			elseif d2 >= 0.49 then
+				mark(last[1], last[2], px, pz, MARK[surf] or MARK[1])
+				e.tyres[k] = {px, pz}
 			end
 		end
 	end
 	-- This player's own car (its predicted state): shaken at once on a hard hit
 	if s.c and tonumber(s.bumps) and s.bumps ~= e.bumps then
 		e.bumps = s.bumps
-		shake(math.min(1, (tonumber(s.bump_v) or 8) / 20))
+		shake(math.min(2.5, (tonumber(s.bump_v) or 8) / 8))
 	end
 end
 

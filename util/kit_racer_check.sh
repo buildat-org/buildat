@@ -32,8 +32,8 @@
 #      card with the time; no prediction correction on that lap; the top
 #      speed approached slowly (on full throttle from the line: faster at 6 s
 #      than at 2 s, both under the top) (track.png on the way, trial.png);
-#   5. the car's effects drawn on kitboss's client: exhaust smoke, road dust,
-#      tyre marks.
+#   5. the car's effects drawn on kitboss's client (kit.effect, kit.mark):
+#      exhaust smoke, road dust, tyre marks; Kit's counts of them.
 # Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/grid.png, $t/push.png,
 # $t/drift.png, $t/wreck.png, $t/result.png, $t/track.png, $t/trial.png
 #   util/kit_racer_check.sh
@@ -176,14 +176,18 @@ while time.time() - t0 < secs:
     u = min(range(u - 10, u + 40),
             key=lambda q: (P[q % N][0] - x) ** 2 + (P[q % N][1] - z) ** 2) % N
     tx, tz = target or P[(u + int(5 + 0.35 * v)) % N]
-    # (AIM_FILE's place once it is written: driven through when ahead)
+    # (AIM_FILE's place once it is written: driven through when ahead,
+    # slowly, toward a point past it on the line from the car through it)
+    aiming = False
     if aim is None and aim_file and os.path.exists(aim_file):
         aim = [float(q) for q in open(aim_file).read().split(",")]
     if aim and aim is not True:
         ahead = (aim[0] - x) * math.sin(math.radians(yaw)) + (aim[1] - z) * math.cos(math.radians(yaw))
-        if math.hypot(aim[0] - x, aim[1] - z) < 25 and ahead > 1:
-            tx, tz = aim
-        elif ahead <= 1 and math.hypot(aim[0] - x, aim[1] - z) < 4:
+        d = math.hypot(aim[0] - x, aim[1] - z)
+        if d < 25 and ahead > -0.5:
+            tx, tz = aim[0] + (aim[0] - x) / d * 6, aim[1] + (aim[1] - z) / d * 6
+            aiming = True
+        elif ahead <= -0.5 and d < 6:
             aim = True
     bearing = math.degrees(math.atan2(tx - x, tz - z))
     err = (bearing - yaw + 540) % 360 - 180
@@ -194,6 +198,8 @@ while time.time() - t0 < secs:
     head = math.degrees(math.atan2(vx, vz)) if v > 3 and not target else yaw
     steer = (bearing - head + 540) % 360 - 180 - 0.2 * rate
     vt = TOP if target else V[(u + 3) % N]
+    if aiming:
+        vt = min(vt, 7)
     if drift and drift_till is None and math.hypot(drift[0] - x, drift[1] - z) < 35:
         vt = max(vt, 15)  # (into the bend too fast: the handbrake's to turn it)
     if drift and drift_till is None and math.hypot(drift[0] - x, drift[1] - z) < 6:
@@ -416,9 +422,12 @@ DO=$!
 as boss
 await "$SL" "$m" 60 "local/brim_race $RACE: kitboss drops a mine"
 # (kitbob's driver aims at its zone's middle: a lap's line is a metre or two
-# off another's)
+# off another's. The zone is 2x2 cells from the place's, cells round whole
+# numbers (brim_checkpoint's middle()): the middle is the place floored plus
+# a half)
 tail -c +$((m + 1)) "$SL" | grep -aoP 'kitboss drops a mine [0-9]+ at \K-?[0-9.]+ -?[0-9.]+' | head -1 |
-	awk '{ printf "%.2f,%.2f", $1 + 1, $2 + 1 }' > "$t/mine_at.tmp" && mv "$t/mine_at.tmp" "$t/mine_at"
+	awk '{ printf "%.2f,%.2f", int($1 + 1000) - 999.5, int($2 + 1000) - 999.5 }' > "$t/mine_at.tmp" &&
+	mv "$t/mine_at.tmp" "$t/mine_at"
 await "$SL" "$m" 40 "local/brim_race $RACE: kitbob hits a mine"
 await "$SL" "$m" 2 "local/brim_race $RACE: kitbob wrecked by mine"
 printf "%s\n" "frames 5" "screenshot $t/wreck.png" >&4 # (kitbob's view)
@@ -505,11 +514,21 @@ PY
 step 10 "Wrote screenshot $t/trial.png" "frames 10" "screenshot $t/trial.png"
 echo "ok: the trial: over the line at the start no lap, then checkpoints, the lap, the result; no correction"
 
-# 5. The effects (brim_car.client.lua's, each kind's first logged)
+# 5. The effects (brim_car.client.lua's through kit.effect and kit.mark,
+# each kind's first made logged; Kit's counts by event kit_effects)
 for k in smoke dust mark; do
 	grep -aq "brim_car: effect $k" "$CL" || fail "no $k drawn ($CL)"
 done
-echo "ok: the effects: $(grep -aoP 'brim_car: effect \K[a-z]+' "$CL" | sort -u | tr '\n' ' ')"
+step 5 "kit: effects: " "event kit_effects"
+fx=$(grep -aoP 'kit: effects: .*' "$CL" | tail -1)
+python3 -I - "$fx" <<'PY' || fail "the effects' counts: $fx ($CL)"
+import re, sys
+m = re.search(r"client parts made (\d+) particles, (\d+) bursts dropped; (\d+) marks kept of (\d+) made", sys.argv[1])
+made, dropped, kept, marks = map(int, m.groups())
+assert made > 100 and marks > 20 and kept > 0, (made, marks, kept)
+print("ok: the effects: %d particles, %d bursts dropped, %d marks (%d kept)" % (made, dropped, marks, kept))
+PY
+echo "ok: the effects' kinds: $(grep -aoP 'brim_car: effect \K[a-z]+' "$CL" | sort -u | tr '\n' ' ')"
 cmd "quit"
 as bob
 cmd "quit"
