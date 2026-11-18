@@ -90,6 +90,8 @@ namespace app
 		// SOUND_OFF_DB is the step under that, which is silence. The
 		// gain is made from it where it is applied and nowhere else.
 		float sound_volume_db = 0.0f;
+		// [MUSIC_SYNTH] the "Music" sound type's, under the master's
+		float music_volume_db = 0.0f;
 		bool sound_mute = false;
 		// **Listening for LAN games** ([WIN_FIREWALL]): off until the
 		// player first opens the list of the LAN's games, then on

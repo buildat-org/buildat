@@ -1401,6 +1401,8 @@ overridden for one run by -o (see README.md).
     multisampling   MSAA samples: 1, 2, 4, 8 or 16
     sound_volume_db decibels below full, 0 to -30 and off under it
     sound_mute      that gain forced to zero
+    music_volume_db the music's (sound type "Music": jam's songs) under
+                    that, the same scale
     ui_size         the UI scale, 0.5 to 3, or "auto", the default, which
                     follows the window (see get_ui_size); -u for a run
                     wins over it

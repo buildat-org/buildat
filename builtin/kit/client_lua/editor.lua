@@ -3188,6 +3188,91 @@ function NT.apply_params(e, ci, decl)
 	return bad
 end
 
+-- [MUSIC_SYNTH] A song parameter (kit/music's) k of e's component (its
+-- pending values' key): its text in a field of many lines, read by jam as
+-- it is typed (the first error by its line under it), Play/Stop a preview
+-- through jam as the players hear it (the music volume), and the song's
+-- moods to hear it in. Apply sends it with the rest; mark() marks Apply.
+-- simplified: a text field alone: no step grid, piano roll or mixer, and
+-- no touch mode field entry (its keyboard covers it on a phone)
+function NT.song_section(w, e, key, k, values, mark)
+	local jam = require("buildat/extension/jam")
+	local status
+	local function check(s)
+		local song, err = jam.song(s)
+		local info = song and song:info()
+		local line = s == "" and "No song" or song and string.format(
+				"%s: %g bpm, %d tracks, moods: %s", info.title, info.tempo,
+				#info.tracks, #info.moods > 0 and table.concat(info.moods, ", ")
+				or "none") or "Error: " .. tostring(err)
+		if status then
+			status:SetText(line)
+			status:SetColor(song and DIM or WARN)
+		end
+		if line ~= NT.song_said then
+			NT.song_said = line
+			log:info("kit editor: song " .. k .. ": " .. line)
+		end
+		return song
+	end
+	local now = tostring(values[k] or "")
+	label(row(w), k)
+	local fr = row(w)
+	local f = edit(fr, now, function(s)
+		E.pending[key] = E.pending[key] or {}
+		E.pending[key][k] = s
+		now = s
+		mark()
+		check(s)
+	end)
+	f:SetName("song " .. k)
+	f.multiLine = true
+	f.textSelectable = true
+	f.textCopyable = true
+	f.maxLength = 65536
+	f:SetFixedHeight(220)
+	f.cursorPosition = 0
+	NT.song_bar = NT.text_bar(fr, f, "song")
+	status = text(w, "", DIM)
+	local song = check(now)
+	local pr = row(w)
+	local b = button(pr, NT.song_player and "Stop" or "Play", function()
+		if NT.song_player then
+			NT.song_player:stop()
+			NT.song_player = nil
+			log:info("kit editor: song preview stopped")
+		else
+			local s = check(now)
+			NT.song_player = s and jam.play(s)
+			if NT.song_player and NT.song_mood then
+				NT.song_player:mood(NT.song_mood, true)
+			end
+			log:info("kit editor: song preview " .. (NT.song_player and
+					"of " .. s:info().title .. ", mood " .. (NT.song_mood or
+					"all") or "not played"))
+		end
+		inspector_window()
+	end)
+	b:SetName("song play")
+	local moods = {"all"}
+	for _, m in ipairs(song and song:info().moods or {}) do
+		moods[#moods + 1] = m
+	end
+	for _, m in ipairs(moods) do
+		local mb, mt = button(pr, m, function()
+			NT.song_mood = m
+			local ok = NT.song_player and NT.song_player:mood(m)
+			log:info("kit editor: song preview mood " .. m ..
+					(ok and "" or ok == false and ": not in the song" or ", not playing"))
+			inspector_window()
+		end)
+		mb:SetName("song mood " .. m)
+		if m == (NT.song_mood or "all") then
+			mt:SetColor(magic.Color(ui_utils.rgb("focus")))
+		end
+	end
+end
+
 -- [KIT_PARAM_CATEGORIES] A component's parameters, keep(name, decl) saying which
 -- (all without one), with Apply. Pending values and Apply cover every parameter
 -- of it, shown or not: the inspector's and the HUD view's panel's share them
@@ -3210,12 +3295,15 @@ function NT.params_form(w, e, ci, c, t, keep)
 	for k, v in pairs(E.pending[key] or {}) do
 		values[k] = v
 	end
-	local patterns, points = {}, {}
+	local patterns, points, songs = {}, {}, {}
 	for _, k in ipairs(names) do
 		-- [KIT_VOXEL_STATES] A pattern of voxels is no text to type:
 		-- its buttons below
 		if decl[k].type == "voxels" then
 			patterns[#patterns + 1] = k
+		elseif decl[k].type == "song" then
+			-- [MUSIC_SYNTH] its own section above Apply
+			songs[#songs + 1] = k
 		elseif decl[k].type == "points" then
 			-- ([KIT_PLANE] stage 3: kit/polygon's, edited in the Front view;
 			-- [KIT_POLYGON_ROW] its row below)
@@ -3293,6 +3381,9 @@ function NT.params_form(w, e, ci, c, t, keep)
 					inspector_window()
 				end, {label = "Add to " .. k, fill = true})
 			end
+		end
+		for _, k in ipairs(songs) do
+			NT.song_section(w, e, key, k, values, mark)
 		end
 		local apply_b
 		apply_b, apply_text = button(w, "Apply", function()
@@ -4793,6 +4884,9 @@ local function fit_inspector()
 	if NT.comments_bar then
 		NT.comments_bar()
 	end
+	if NT.song_bar then
+		NT.song_bar()
+	end
 	local body = view.contentElement
 	local foot = W.touch and W.touch.visible and W.touch.height + 16 or 16
 	-- The screen's height at the unfitted scale (narrow()'s): bounded by
@@ -4986,7 +5080,7 @@ build_inspector = function()
 	if IV.of ~= S.primary then
 		IV.of, IV.y = S.primary, 0
 	end
-	IV.view, NT.comments_bar = nil, nil
+	IV.view, NT.comments_bar, NT.song_bar = nil, nil, nil
 	drop("inspector")
 	NT.fe.list = {}
 	S.cost_text, S.cost_id = nil, nil

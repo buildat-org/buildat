@@ -552,6 +552,9 @@ namespace interface
 //   nor timed) and "none", an edit or c:set_param of another refused (a load
 //   takes it: the players then stand). [KIT_SOUNDS] A parameter type "sound": a dropdown of
 //   the game's sounds and "none" ("").
+//   [MUSIC_SYNTH] A parameter type "song": a song's text in jam's format
+//   (jam1; get_guide topic music), "" none, a parse error refused with its
+//   line; the inspector's own section (the text, Play/Stop, the moods).
 //   [KIT_PLANE] A parameter type "points": a closed shape [[x, y]...] of 3 to
 //   128 points (|x|, |y| <= 256, [KIT_SIDE_SCENERY]; its edges not crossing
 //   nor touching, its area not 0; any winding), edited in a side game's 2D
@@ -1418,6 +1421,16 @@ namespace interface
 // a component's c:sound (kit/door's sound_open and sound_close,
 // kit/button's sound_press, kit/pickup's sound, kit/sound's "play"
 // input).
+// [MUSIC_SYNTH] **Music**: kit/music (types/music.lua) holds a song's text
+// (jam1, extensions/jam), synthesised on each client. music_tick() picks
+// each player's (on: its per-player `on`, else `playing`; in their scene
+// or on the root; the highest priority, a scene's, the lowest id) and
+// sends "kit:music" {id, song, t0, now, mood} as it changes ({id, mood}
+// for a mood alone, {id: 0} none): t0 when the entity went on for anyone,
+// now the round's clock (motion_t()), so a late joiner starts at the bar
+// the others are at (client_lua/music.lua). Nothing while the round is
+// not Running; Play starts every song anew. get_state's round.music,
+// analyze_music and get_guide topic music are the agents'.
 //
 // **Tools** ([KIT_TOOLS_1], stage 7c's first part). An item type is a
 // flat sheet, "<author>/<name>": Kit's are types/<name>.item.json

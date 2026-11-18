@@ -38,6 +38,8 @@
 #      undo, a duplicate's, the scene export's); put_texture (as the
 #      editor's upload is checked, a voxel type wearing it); get_ground;
 #      get_voxels loading a section nobody loaded; every edit undone;
+#      [MUSIC_SYNTH] get_guide's topic music; analyze_music on a song's
+#      text, its parse error by line, a mood not in it;
 #   3. the builder token revoked on the page: its agent gone at once, 401;
 #   4. Agents (MCP) off on the Accounts page: the admin token refused with
 #      that said; on again: its set_builder done, and past 120 requests a
@@ -228,7 +230,7 @@ if phase == "main":
     tools = rpc(tok, "tools/list")["result"]["tools"]
     names = [t["name"] for t in tools]
     assert names == ["get_state", "list_types", "get_type", "get_guide",
-        "get_links", "get_log", "get_view", "show", "play_join", "play_input",
+        "analyze_music", "get_links", "get_log", "get_view", "show", "play_join", "play_input",
         "play_leave", "get_events", "get_goal_warnings", "get_history",
         "list_prefabs", "list_items", "list_voxel_types", "list_sounds",
         "get_voxels", "get_ground", "place", "set_param", "link", "delete",
@@ -428,6 +430,20 @@ elif phase == "visuals":
         return int(re.search(r"placed \S+ (\d+)", text)[1])
     def ent(i):
         return entity(state(tok), i)
+    # [MUSIC_SYNTH] the music's topic; analyze_music on a song's text, a
+    # parse error by its line, a mood not in it
+    mus = call(tok, "get_guide", {"topic": "music"})
+    for w in ("kit/music", "jam1", "analyze_music", "mood NAME", "pluck"):
+        assert w in mus, (w, mus[:500])
+    song = ("title Probe\ntempo 120\ninst b osc wave=saw\ntrack t inst=b\n"
+        "pattern p\nt: C3 . E3 . G3 . C4 . C3 . E3 . G3 . C4 .\n"
+        "section s: p\nplay s\nloop s\nmood quiet t=-12\n")
+    a = json.loads(call(tok, "analyze_music", {"text": song, "seconds": 4}))
+    assert a["title"] == "Probe" and -40 < a["lufs"] < 0 and a["peak_dbfs"] <= 0, a
+    assert "line 3: " in call(tok, "analyze_music", {"text": song.replace(
+        "wave=saw", "wave=saw foo=1")}, error=True)
+    call(tok, "analyze_music", {"text": song, "mood": "loud"}, error=True)
+    print("get_guide's music", len(mus), "characters; a song", a["lufs"], "LUFS")
     # [KIT_AGENT_VISUALS] get_state: the round, the scene's own entity, where
     # each scene's root types come from
     st = state(tok)
