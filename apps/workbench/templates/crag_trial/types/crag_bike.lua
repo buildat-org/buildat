@@ -12,7 +12,8 @@
 -- and s.wr the wheels {x, y, vx, vy, spin (the tyre's speed, m/s), turn},
 -- s.dead the crash's seconds left, s.start; s.pose what the clients draw
 -- (crag_bike.client.lua): {a, dir (2 * dir crashed), the wheels from the feet
--- (lx, ly, rx, ry), their turns}. s.pos is the frame's middle less LIFT.
+-- (lx, ly, rx, ry), their turns}. s.pos is the frame's middle less LIFT;
+-- s.spheres the wheels and the head from it, as the zones (the gems) meet it.
 -- The suspension: params stiffness and damping (the springs').
 local R = 0.36 -- a wheel's radius
 local AX, AY = 0.62, -0.36 -- the wheels' springs on the frame, from its middle
@@ -192,5 +193,12 @@ return {
 		s.yaw = s.dir > 0 and 90 or 270
 		s.pose = {s.a, s.dead and 2 * s.dir or s.dir, wl[1] - c[1], wl[2] - c[2] + LIFT,
 			wr[1] - c[1], wr[2] - c[2] + LIFT, wl[6], wr[6]}
+		-- The wheels and the head as the zones meet them (a gem taken by a
+		-- wheel), from s.pos
+		local ca, sa = math.cos(s.a), math.sin(s.a)
+		local px, py = s.pos[1], s.pos[2]
+		s.spheres = {{wl[1] - px, wl[2] - py, 0, R}, {wr[1] - px, wr[2] - py, 0, R},
+			{c[1] + HX * s.dir * ca - HY * sa - px, c[2] + HX * s.dir * sa + HY * ca - py,
+				0, HR}}
 	end,
 }

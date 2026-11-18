@@ -186,6 +186,27 @@ namespace interface
 //                               position parameter gives (64 cells at most)
 //   zone = "<param>"         -- the box of cells, the same way, that
 //                               on_enter/on_leave watch
+//                            -- [KIT_ZONE_SHAPES] zone = "look": the entity's
+//                               own look as drawn and turned, followed at
+//                               once through a reshape or a move (no copy):
+//                               a kit/polygon's outline over its depth, a
+//                               box look (a kit/part's, turned by its
+//                               rotation; its state's `when` over it), a
+//                               sphere of equal sides. simplified: a wedge
+//                               and an uneven sphere are their boxes. A spike
+//                               hazard is a component of its own with zone =
+//                               "look" on the spikes' polygon, reacting in
+//                               on_enter. An entity with no look, or under a
+//                               kit/parallax layer (drawn offset, never met),
+//                               has nobody in it. A body is met by its
+//                               movement's s.spheres, else a walker's body
+//                               box (movement.zone = "box": kit/walker,
+//                               kit/click_to_move), else its point (a seat's
+//                               holder, a bot, an app's own movement): box
+//                               zones the same way (client_lua/move.lua's
+//                               header). Nothing of a zone runs on the
+//                               clients. get_state's "zone": its kind,
+//                               shape and bounds, who is in it
 //   voxel_box = "<param>"    -- ([KIT_VOXEL_STATES]) the box of cells, the
 //                               same way (16 a side at most), that
 //                               c:set_voxels writes and the editor's
@@ -324,7 +345,12 @@ namespace interface
 //                               (logged). No c; none: the parameters as
 //                               they were, so filtered
 // c: c.id, c.pos, c.params (read), c.state (read and written; a table in
-// it changed in place is written too), c:emit(output, value),
+// it changed in place is written too), [KIT_ZONE_SHAPES] c:params_of(type)
+// (the parameters of the same entity's component of that type, as its own
+// c.params; a copy, so writing it changes nothing; nil: none there; as they
+// are at the run's start: no sibling on_params, a read at use is always
+// current; c:params_of("kit/polygon").points a polygon's outline; only a
+// type whose file names params_of has them in its runs), c:emit(output, value),
 // [KIT_SOUNDS] c:sound(name, {everywhere = true}) (a game's sound at
 // it, heard in its scene; everywhere, or an entity with no place: not
 // positional; 8 a run; "" or nil nothing),
@@ -889,7 +915,8 @@ namespace interface
 // (set_peer: the first time, or as another name; [KIT_SCENE_PACKAGES] one
 // with no position on the root: in any scene, each scene they come into
 // too); on_enter/on_leave as a
-// player's position (the cell it rounds to) comes into or leaves its zone.
+// player's position (the cell it rounds to) comes into or leaves its zone
+// ([KIT_ZONE_SHAPES] or its body's spheres or box: as zone's, above).
 //
 // Clients act, components react: a client's packet "kit:use" (an entity's
 // id) reaches the entity's usable components if the app placed the peer

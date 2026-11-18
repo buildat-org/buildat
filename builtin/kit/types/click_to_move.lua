@@ -22,7 +22,8 @@ return {
 		what = "A movement: players walk to where they click.",
 	},
 	root = true,
-	movement = {body = BODY, touch = "tap", click = true},
+	-- [KIT_ZONE_SHAPES] zones meet its body box, not its point
+	movement = {body = BODY, touch = "tap", click = true, zone = "box"},
 	params = {
 		speed = {cat = "physics", type = "number", default = 5, min = 0,
 			max = 50},

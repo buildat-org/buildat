@@ -2984,6 +2984,19 @@ local function draw()
 	NT.pf.draw(dbg)
 	NT.pg.draw(dbg)
 	NT.sym_draw(dbg)
+	-- [KIT_ZONE_SHAPES] The Front view: the body's spheres (its movement's, a
+	-- bike's wheels and head) as the zones meet them, circles in the plane.
+	-- simplified: this builder's own body's (its predicted state; the others'
+	-- spheres are not sent to the clients)
+	local sph = S.view == "front" and M.body_spheres and M.body_spheres() or {}
+	for _, c in ipairs(sph) do
+		dbg:AddCircle(magic.Vector3(c[1], c[2], c[3]), magic.Vector3(0, 0, 1), c[4],
+				magic.Color(0.3, 0.75, 1), 24, false)
+	end
+	if #sph ~= (E.spheres_drawn or 0) then
+		E.spheres_drawn = #sph
+		log:info("kit editor: the body's spheres drawn: " .. #sph)
+	end
 	-- The round's own entities, orange (players are drawn by the app)
 	for _, e in ipairs(made()) do
 		if e.pos and e.kind ~= "player" then
@@ -3039,6 +3052,28 @@ local function draw()
 				end
 				-- A zone's and an owned volume's extent, from its cell on
 				local t = type_of(c.type)
+				-- [KIT_ZONE_SHAPES] zone = "look": its look's outline as drawn, in
+				-- the zones' colour (a polygon's at its two faces)
+				local nd = t.zone == "look" and P.nodes[e.id]
+				local lc, lh, lr = nil, nil, nil
+				if nd then
+					lc, lh, lr = K.look_frame(nd)
+				end
+				if lc then
+					local zc = magic.Color(0.3, 0.75, 1)
+					if nd.poly then
+						local q, o, k = nd.poly.pts, nd.look.position, #nd.poly.pts / 2
+						for _, z in ipairs({-nd.poly.d, nd.poly.d}) do
+							for i = 1, k do
+								local j = i % k + 1
+								dbg:AddLine(o + lr * magic.Vector3(q[2 * i - 1], q[2 * i], z),
+										o + lr * magic.Vector3(q[2 * j - 1], q[2 * j], z), zc, false)
+							end
+						end
+					else
+						hover.box(lc, lh, lr, zc)
+					end
+				end
 				for _, k in ipairs({"zone", "volume", "grants", "voxel_box",
 						"region", "world_region"}) do
 					local n = t[k] and c.params and c.params[t[k]]
