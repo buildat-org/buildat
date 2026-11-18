@@ -2679,7 +2679,10 @@ local function num(v, i, def)
 end
 
 -- zone = "look": the entity's look (show.look: its params in it) at pos
--- turned by R, its `when` while on, as look_zone has it; nil: none
+-- turned by R, its `when` while on, as look_zone has it; nil: none.
+-- [KIT_TOP_DOWN] (3) a polygon met in its own frame however turned: lying flat
+-- (pitch 90), its outline over the world's x and z, its depth along y
+-- (kit_plane_check.lua's flat L)
 function M.zone_look(look, on, pos, R)
 	if type(look) ~= "table" then
 		return nil

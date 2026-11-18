@@ -321,7 +321,29 @@ assert(sz.kind == "s" and MV.zone_meets(sz, MV.zone_body({0.6, -0.5, 0.6})) and
 local cz = MV.zone_cells({0.5, 0, 0}, q, {3, 1, 1})
 assert(MV.zone_meets(cz, MV.zone_body({0.5, -0.5, -2})) and
 		not MV.zone_meets(cz, MV.zone_body({2.5, -0.5, 0})), "turned cells")
-print("ok: zones on the client as on the server: the U, the gem's cells by a wheel, the point and a box, a polygon gem's when, turned boxes, a sphere")
+-- [KIT_TOP_DOWN] (3) A flat L (pitch 90 from a node's rotation: its x, y the world's
+-- x, z) 1 deep round y 0.5, as kit.cpp's zone_d2 has it in the entity's own frame;
+-- turned yaw 90 after (its x along -z, its y along +x)
+local h = math.sqrt(0.5)
+local L = {shape = "polygon", depth = 1, points = {{0, 0}, {4, 0}, {4, 1}, {1, 1}, {1, 4},
+	{0, 4}}}
+local lz = MV.zone_look(L, false, {0, 0.5, 0}, MV.quat_matrix(h, h, 0, 0))
+bounds(lz, {0, 0, 0}, {4, 1, 4}, "the flat L")
+local function meets(z, x, y, zz, box)
+	return MV.zone_meets(z, MV.zone_body({x, y, zz}, nil, box and {r = 0.3, h = 1}))
+end
+-- (a point probe 0.5 over the feet)
+assert(meets(lz, 3, 0, 0.5) and meets(lz, 0.5, 0, 3) and not meets(lz, 3, 0, 3) and
+		not meets(lz, 0.5, 0.7, 3) and not meets(lz, 0.5, -0.7, 3), "the flat L by a point")
+assert(meets(lz, 0.5, 0.6, 3, true) and meets(lz, 1.2, 0.5, 3, true) and
+		not meets(lz, 1.4, 0.5, 3, true) and not meets(lz, 0.5, 1.1, 3, true) and
+		meets(lz, 0.5, -0.9, 3, true), "the flat L by a walker's box")
+-- (yaw 90 then pitch 90: q = qy * qx)
+local ty = MV.zone_look(L, false, {0, 0.5, 0}, MV.quat_matrix(0.5, 0.5, 0.5, -0.5))
+bounds(ty, {0, 0, -4}, {4, 1, 0}, "the flat L turned")
+assert(meets(ty, 0.5, 0, -3) and meets(ty, 3, 0, -0.5) and not meets(ty, 3, 0, -3),
+		"the flat L turned by a point")
+print("ok: zones on the client as on the server: the U, the gem's cells by a wheel, the point and a box, a polygon gem's when, turned boxes, a sphere; a flat L and one turned yaw 90")
 
 -- [KIT_TOP_DOWN] (1) A level plane (kit/controls' plane "horizontal") at y 1: the
 -- feet held at 0.5 over a floor of cells (top 0.5), a wall in the plane's layer (x 3,
