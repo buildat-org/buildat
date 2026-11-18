@@ -381,6 +381,45 @@ local function rotation(rx, ry, rz)
 	return m3(ry_(ry), m3(rx_(rx), rz_(rz)))
 end
 
+-- [RACER_FEEL] (1) A turn's angles (yaw, pitch, roll; degrees, each 0...360 to a
+-- millionth) from its quaternion, as kit.cpp's Turn::angles has them for the
+-- server's steps: at a pitch of +-90 all of it yaw. The client's from its node's
+-- float rotation (Urho3D's EulerAngles put it all in roll, and snapped pitches
+-- past 84 to 90); the gimbal's threshold wide enough for a float's
+local function round_to(a, k)
+	return (a < 0 and -floor(-a * k + 0.5) or floor(a * k + 0.5)) / k
+end
+local function deg360(a)
+	a = math.fmod(a, 360) + 0.0
+	return a < 0 and a + 360 or a
+end
+function M.turn_angles(w, x, y, z)
+	local d = 180 / PI
+	local check = 2 * (w * x - y * z)
+	local yaw, pitch, roll
+	if abs(check) > 1 - 1e-6 then
+		pitch, yaw, roll = check > 0 and 90 or -90, 2 * M.atan2(y, w) * d, 0
+	else
+		pitch = M.atan2(check, sqrt(1 - check * check)) * d
+		yaw = M.atan2(2 * (x * z + w * y), 1 - 2 * (x * x + y * y)) * d
+		roll = M.atan2(2 * (x * y + w * z), 1 - 2 * (x * x + z * z)) * d
+	end
+	return deg360(round_to(yaw, 1e6)), deg360(round_to(pitch, 1e6)),
+			deg360(round_to(roll, 1e6))
+end
+-- A flat one's turn (pitch +-90, any yaw and roll) as one yaw, to a thousandth of
+-- a degree, roll 0: the server's (all yaw) and a client's (from a float
+-- quaternion) the same bits. Ry(y) Rx(90) Rz(r) is Ry(y - r) Rx(90); at -90 y + r
+local function flat_turn(yaw, pitch, roll)
+	local p = pitch > 180 and pitch - 360 or pitch
+	if abs(abs(p) - 90) >= 1e-3 then
+		return yaw, pitch, roll
+	end
+	local y = p > 0 and yaw - roll or yaw + roll
+	return deg360(round_to(deg360(y), 1e3)), p > 0 and 90 or -90, 0
+end
+M.flat_turn = flat_turn
+
 function M.look_box(look, on, pos, yaw, pitch, roll)
 	-- ([KIT_MOVING_OBJECTS] or yaw the entity's turn as a matrix)
 	-- ([KIT_PLANE] stage 3: a polygon is no box: M.look_poly)
@@ -496,7 +535,10 @@ function M.look_poly(look, on, pos, yaw, pitch, roll)
 		solid = w.solid == true
 	end
 	local fl = not solid and look.floor == true
-	local R = rotation(tonumber(pitch) or 0, tonumber(yaw) or 0, tonumber(roll) or 0)
+	-- ([RACER_FEEL] (1) a flat one's turn as one yaw, the same on both sides)
+	pitch, yaw, roll = tonumber(pitch) or 0, tonumber(yaw) or 0, tonumber(roll) or 0
+	yaw, pitch, roll = flat_turn(yaw, pitch, roll)
+	local R = rotation(pitch, yaw, roll)
 	local da = abs(R[9]) >= 1 - 1e-9 and 3 or abs(R[6]) >= 1 - 1e-9 and 2 or nil
 	if not (solid or fl) or not da or fl and da ~= 2 then
 		return nil

@@ -27,6 +27,11 @@
 #   6. The editor's plan view: a kit/polygon drawn by clicks lies flat at the
 #      plane's height (one place op, pitch 90), its point dragged; the
 #      inspector's "Edit in 2D view" shows it in the plan view.
+#   7. [RACER_FEEL] (4) In the plan a right drag and a middle drag pan it,
+#      neither into 3D (kit_racer_web_check: the editor first in the plan).
+#   8. [RACER_FEEL] (2), (3) The zone's client part: kit.shake(2) in the
+#      frame it asked; 100 kit.effect bursts at once (a burst cap dropping
+#      some), 1100 kit.mark (1024 kept).
 set -u
 . "$(dirname "$0")/check_lib.sh"
 export BUILDAT_WORKBENCH_PROJECT=world
@@ -76,9 +81,20 @@ src = '''return {
 		c:log("entered by", c:name(by))
 	end,
 }'''
-cl = '''return {
+cl = '''local kit = require("buildat/module/kit")
+return {
 	on_enter = function(e)
 		e:log("tdzone on_enter")
+		kit.shake(2)
+		local p = e.node.position
+		for i = 1, 100 do
+			kit.effect{at = {p.x, p.y + 0.5, p.z}, count = 4, shape = "round",
+				colors = {"#808080"}, speed_min = 1, ttl_min = 0.5, size_min = 0.2}
+		end
+		for i = 1, 1100 do
+			kit.mark(p.x + i * 0.01, p.y, p.z, i, {0.25, 0.5}, "#202020")
+		end
+		e:log("tdzone effects asked")
 	end,
 }'''
 print("event kit_type " + json.dumps({"op": "put", "name": "tdzone", "source": src,
@@ -129,6 +145,9 @@ EOF
 	hold D 700 700
 	cat <<EOF
 wait_log_any 5000 kit: entity $ZONE's client part: tdzone on_enter
+wait_log_any 5000 kit: entity $ZONE's client part: tdzone effects asked
+frames 2
+event kit_effects
 frames 20
 event kit_body
 EOF
@@ -147,7 +166,7 @@ screenshot $t/top.png
 keypress F6
 wait_log 10000 kit editor: state:
 keypress F1
-wait_log 5000 kit editor: the view is 2D
+wait_log_any 5000 kit editor: the view is 2D
 click Button "Grid*"
 wait_log 5000 kit editor: grid 1/2
 click Button "Grid*"
@@ -204,6 +223,23 @@ wait_log 5000 kit editor: the inspector
 frames 3
 click Button "Edit in 2D view"
 wait_log 5000 kit editor: polygon $DRAWN in the plan view at
+frames 3
+mouse_pos 500 350
+frames 3
+mouse_down right
+frames 3
+mouse_pos 560 380
+frames 3
+mouse_pos 620 400
+frames 3
+mouse_up right
+wait_log 5000 kit editor: panned the plan to
+mouse_down middle
+frames 3
+mouse_pos 500 300
+frames 3
+mouse_up middle
+wait_log 5000 kit editor: panned the plan to
 frames 3
 quit
 EOF
@@ -304,5 +340,27 @@ grep -aq "An edit by kitboss: placed kit/polygon $DRAWN at " "$s" || fail "polyg
 grep -aq "set $DRAWN's kit/polygon points to" "$s" || fail "polygon $DRAWN's point not dragged ($s)"
 grep -aq "kit editor: polygon $DRAWN in the plan view at" "$c" || fail "the points row's plan view ($c)"
 echo "ok: a polygon drawn in the plan view lying flat at $at, its point dragged, the inspector's row back to the plan view"
-echo "PASS: kit/controls' horizontal plane: the body held at one height, flat polygon walls, a floor's surface, a flat look zone on the client and the server, the top_down camera's dead zone, kit/parallax along z, the plan view's polygon editing"
+# 7. [RACER_FEEL] (4) A right drag and a middle one pan the plan, not into 3D
+pans=$(grep -aoP 'kit editor: panned the plan to \K[-0-9.]+,[-0-9.]+' "$c" | tr '\n' ' ')
+read -r p1 p2 <<< "$pans"
+[ -n "${p2:-}" ] && [ "$p1" != "$p2" ] || fail "not panned twice in the plan: $pans ($c)"
+sed -n "/polygon $DRAWN in the plan view at/,\$p" "$c" | grep -aq "the view is 3D" &&
+	fail "a drag in the plan went into 3D ($c)"
+echo "ok: a right drag panned the plan to $p1, a middle one to $p2"
+# 8. [RACER_FEEL] (2), (3) The zone's client part on_enter: kit.shake(2) the
+# frame it was asked; 100 kit.effect bursts (the rate's cap dropping the rest),
+# 1100 kit.mark (the ring keeps 1024)
+f=$(grep -aoP "kit: a client part's shake 2 in frame \K[0-9]+" "$c" | head -1)
+if [ -n "$f" ]; then
+	grep -aq "kit: the camera placed shaken [0-9.]* in frame $f (asked in frame $f)" "$c" ||
+		fail "the shake asked in frame $f not placed in it ($c)"
+else
+	f=$(grep -aoP "kit: a client part's shake 2, the camera moved in frame \K[0-9]+" "$c" | head -1)
+	[ -n "$f" ] || fail "no client part's shake ($c)"
+fi
+fx=$(grep -aoP 'kit: effects: \K.*' "$c" | head -1)
+echo "$fx" | grep -qP '^\d+ particles live in \d+ bursts \((\d|[1-5]\d|6[0-4]) a client part.s\); client parts made ([1-9]\d+) particles, ([1-9]\d*) bursts dropped; 1024 marks kept of 1100 made' ||
+	fail "the client part's effects and marks: $fx ($c)"
+echo "ok: a client part's shake in its own frame ($f); its effects and marks: $fx"
+echo "PASS: kit/controls' horizontal plane: the body held at one height, flat polygon walls, a floor's surface, a flat look zone on the client and the server, the top_down camera's dead zone, kit/parallax along z, the plan view's polygon editing, the plan panned by a right or middle drag; a client part's shake, effects and marks"
 # vim: set noet ts=4 sw=4:

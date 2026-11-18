@@ -1421,6 +1421,12 @@ function NT.walk_looks()
 end
 
 -- ---- Input: the mouse ([FP]'s mouse_down, mouse_up, mouse_move)
+-- (for a drive: where a pan of the plan or the Front view ended)
+local function pan_text()
+	return S.view == "front" and string.format("panned the front to %.1f,%.1f",
+			S.fx or 0, S.fy or 0) or string.format("panned the plan to %.1f,%.1f",
+			S.cx or 0, S.cz or 0)
+end
 local function mouse_down(button_)
 	if not E.editing or S.touch then
 		return
@@ -1557,6 +1563,8 @@ local function mouse_up(button_)
 				rc.mx, rc.my = ox + w / 2, oy + h / 2
 			end
 			right_click(rc)
+		elseif rc and rc.panned then
+			log:info("kit editor: " .. pan_text())
 		elseif orbited and S.from_plan and plan_aligned() then
 			-- Back to the plan, where its floor is the view's
 			local o = S.pos
@@ -1589,6 +1597,9 @@ local function mouse_up(button_)
 					string.format("the camera at %.1f,%.1f,%.1f", S.pos.x,
 					S.pos.y, S.pos.z) or "in " .. tostring(S.view)))
 		end
+		if S.panning then
+			log:info("kit editor: " .. pan_text())
+		end
 		S.panning, S.pan3d, S.pinch = false, nil, nil
 		return
 	end
@@ -1607,6 +1618,12 @@ local function mouse_up(button_)
 		click()
 	end
 	S.press = nil
+end
+
+-- Whether a right drag pans: in the Front view, and [RACER_FEEL] (4) in a plane
+-- game's plan (a top-down racer's; 3D by the view's switch), not into 3D
+local function pans_right()
+	return S.view == "front" or S.view == "2d" and M.plane_game()
 end
 
 -- The plan's pan by the pointer's pixels, or [KIT_PLANE] the Front view's;
@@ -1648,9 +1665,11 @@ local function mouse_move(x, y, dx, dy)
 	end
 	if rc then
 		rc.moved = rc.moved + math.abs(dx) + math.abs(dy)
-		-- ([KIT_PLANE] the Front view's pans: it never turns)
-		if S.view == "front" and rc.moved >= RIGHT_CLICK_PX then
+		-- ([KIT_PLANE] the Front view's pans: it never turns; a plane game's
+		-- plan too)
+		if pans_right() and rc.moved >= RIGHT_CLICK_PX then
 			pan_flat(dx, dy)
+			rc.panned = true
 			return
 		end
 		if S.view == "2d" and rc.moved >= RIGHT_CLICK_PX and
@@ -2610,7 +2629,8 @@ local function compute_guide()
 	end
 	if S.tool == "terrain" then
 		ghost(nil)
-		local right = S.view == "2d" and "drag: into 3D, orbiting" or
+		local right = pans_right() and "drag: pan the view" or
+				S.view == "2d" and "drag: into 3D, orbiting" or
 				S.view == "3d" and "drag: orbit" or S.view == "front" and
 				"drag: pan the view" or "drag: turn"
 		if brush_at(mx, my) then
@@ -2636,7 +2656,8 @@ local function compute_guide()
 			g.left = ((S.vbox and not S.vbox.b) and "the box's second corner"
 					or "the box's first corner") .. " at " .. table.concat(c, ",")
 		end
-		g.right = S.view == "2d" and "drag: into 3D, orbiting" or
+		g.right = pans_right() and "drag: pan the view" or
+				S.view == "2d" and "drag: into 3D, orbiting" or
 				S.view == "3d" and "drag: orbit" or S.view == "front" and
 				"drag: pan the view" or "drag: turn"
 		g.note = not S.touch and M.key_text("Ctrl+[copy]: copy the box (and " ..
@@ -2678,8 +2699,8 @@ local function compute_guide()
 			g.shift = "dig " .. table.concat(t.cell, ",")
 		end
 		local p = pick(mx, my)
-		g.right = (p and p.id and "its menu; " or "") .. (S.view == "2d" and
-				"drag: into 3D, orbiting" or S.view == "3d" and "drag: orbit" or
+		g.right = (p and p.id and "its menu; " or "") .. (pans_right() and
+				"drag: pan the view" or S.view == "2d" and "drag: into 3D, orbiting" or S.view == "3d" and "drag: orbit" or
 				S.view == "front" and "drag: pan the view" or "drag: turn")
 		g.note = not S.touch and M.key_text("[voxels] or Esc: put the voxels " ..
 				"away") or nil
@@ -2725,7 +2746,8 @@ local function compute_guide()
 	end
 	local p = pick(mx, my)
 	local e = p and p.id and find(p.id)
-	local right_drag = S.view == "2d" and "drag: into 3D, orbiting" or
+	local right_drag = pans_right() and "drag: pan the view" or
+				S.view == "2d" and "drag: into 3D, orbiting" or
 			S.view == "3d" and "drag: orbit round what the pointer is on" or
 			S.view == "front" and "drag: pan the view" or "drag: turn"
 	if e then
