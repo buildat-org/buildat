@@ -265,8 +265,10 @@ return {
 				lim = lim * 1.2
 				if hb then
 					if speed > 0.2 then
-						-- (EDGM's 0.4: the heavier car's slide wants less)
-						lim = lim * 0.2
+						-- (EDGM's 0.4: the heavier car's slide wants less;
+						-- at 0.2 a half second's pull at full lock spun it past
+						-- what a counter-steer catches)
+						lim = lim * 0.3
 						slip = true
 					end
 				elseif throttle then
