@@ -318,7 +318,8 @@ ZPROBE = '''return {
 	movement = {body = {r = 0.3, h = 1, eye = 0.8}%s},
 	outputs = {surface = "string"},
 	step = function(s, i, dt, w, p)
-		s.pos, s.vel = {p.x, p.y, 0}, {0, 0, 0}
+		-- ([KIT_CLIENT_REACT] (10) out of play 10 up)
+		s.pos, s.vel = {p.x, p.y + (i.out_of_play and 10 or 0), 0}, {0, 0, 0}
 		s.spheres = p.wheels and {{-0.6, 0.36, 0, 0.36}, {0.6, 0.36, 0, 0.36}} or nil
 		-- [KIT_CLIENT_REACT] (5) what it touches, its surface and friction (not
 		-- the cells of sections not loaded: "unknown")
@@ -759,6 +760,14 @@ elif phase == "zones":
     comes(PG, 0, 2, 1)
     put(PR, 0, 2)
     print("   a polygon gem's when: its zone shrunk and moved with its look, whole again")
+    # (10) out of play (a kit/lobby's lobby): the server's step's i.out_of_play
+    # (the probe 10 up), back in play down again
+    LB = placed(call("place", {"type": "kit/lobby", "pos": [0, 1, 0]}))
+    call("try_input", {"id": LB, "input": "lobby", "as": "me"})
+    at(0, 12)
+    call("try_input", {"id": LB, "input": "play", "as": "me"})
+    at(0, 2)
+    print("   out of play: i.out_of_play in the server's step")
     assert "Your body is gone" in call("play_leave")
     call("stop")
 elif phase == "heightmap":

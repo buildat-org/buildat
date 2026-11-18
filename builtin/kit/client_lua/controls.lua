@@ -1337,6 +1337,15 @@ local function gather()
 				fmt(go_next[3], 2)
 		go_next = nil
 	end
+	-- [KIT_CLIENT_REACT] (10) out of play, the step told (as kit.cpp's on_input_u
+	-- tells the server's)
+	if M.out_of_play() then
+		i.out_of_play = true
+	end
+	if C.oop_said ~= (i.out_of_play == true) then
+		C.oop_said = i.out_of_play == true
+		log:info("kit: the steps' input: out of play " .. tostring(C.oop_said))
+	end
 	-- [KIT_AUTO_JUMP] the movement's auto_jump (kit/walker's): all, or
 	-- touchscreen on a touch client; a touch builder's Walk view always
 	local m = move()

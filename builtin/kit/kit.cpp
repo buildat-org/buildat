@@ -23590,6 +23590,9 @@ struct Module: public interface::Module, public Interface
 				o += ",down=1";
 			if(got == 15 && v[13] != 0)
 				o += ",auto=1";
+			// [KIT_CLIENT_REACT] (10) the step told (controls.lua's gather the same)
+			if(waiting)
+				o += ",out_of_play=true";
 			// [KIT_MOVING_OBJECTS] Taken within reason of the round's time: the server
 			// steps it against the pose the client stepped it against, so a late
 			// input is no correction. simplified: a client can choose its pose within
@@ -32444,7 +32447,8 @@ struct Module: public interface::Module, public Interface
 				"camera = \"chase\"} and step = function(s, i, dt, w, p): s its "
 				"state (s.pos {x, y, z} the feet, s.vel, kept between steps), i "
 				"the input (i.f, i.r forward and right -1...1, i.jump 1 held, "
-				"i.yaw degrees), w the world (w:move({x, y, z, r, h}, dx, dy, dz, "
+				"i.yaw degrees, i.out_of_play true while out of play: dead "
+				"waiting, a kit/lobby's lobby or result), w the world (w:move({x, y, z, r, h}, dx, dy, dz, "
 				"step_up) -> mx, my, mz, hits; w.sin, w.cos, w.sqrt, w.PI), p its "
 				"params; it runs on the server and on each client (get_type "
 				"kit/ball). [KIT_PLANE] The side view's: w:circle(x, y, r) -> "
@@ -38352,7 +38356,10 @@ struct Module: public interface::Module, public Interface
 				"wheels and head (local/crag_bike's). A kit/polygon's surface "
 				"(a tag) and friction reach a movement's step in what it hits "
 				"(w:circle's info.surface): a step can crash on \"spikes\" "
-				"itself, at once on the client too. "
+				"itself, at once on the client too. Out of play (dead and "
+				"waiting, a kit/lobby's lobby or result) a step's i.out_of_play "
+				"is true (its keys none): a bike's step can hold it still under its result "
+				"card. "
 				"c.players (players = true) lists every "
 				"scene's players, each p.scene theirs and p.away true outside the "
 				"component's own scene: a scene's run or HUD keeps to not p.away. "

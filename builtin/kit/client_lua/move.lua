@@ -55,7 +55,10 @@
 -- s its state (s.pos the body's bottom middle {x, y, z}, s.vel; the rest
 -- its own), changed in place; i this step's input: f (forward, -1...1),
 -- r (right), yaw (the camera's, degrees from +z toward +x), jump (0/1),
--- go (0/1: a target), tx, ty, tz (where to go); dt seconds; p its
+-- go (0/1: a target), tx, ty, tz (where to go), [KIT_CLIENT_REACT] (10)
+-- out_of_play (true while the player is out of play: dead and waiting to
+-- respawn, in a kit/lobby's lobby or result; its keys none then; nil in play;
+-- c:speed(by, 0) stays the freeze); dt seconds; p its
 -- parameters; w the world:
 --   w:cell(i, j, k) -> info or nil (air): the voxel centred on i, j, k
 --   w:walk(s, b, wx, wz, jump, dt, p): a character's step, s.frame below

@@ -564,6 +564,10 @@ namespace interface
 //   Client parts: <name>.client.lua beside a type, sent to every client at
 //   join and run there as the client's own Lua is (client_lua/module.lua
 //   says what it gets).
+//   [KIT_CLIENT_REACT] (10) Out of play (dead and waiting to respawn, a
+//   kit/lobby's lobby or result) a movement's step gets i.out_of_play = true,
+//   its keys none, on the server's steps and the client's prediction alike
+//   (move.lua's header; c:speed(by, 0) stays the freeze).
 //   [KIT_GENERATORS] **Generators**: a type with on_build(c) builds its
 //   own children from c.params, in the editor: as it is placed (not a
 //   copy that has its own: a duplicate, a prefab's, a paste) and as an
