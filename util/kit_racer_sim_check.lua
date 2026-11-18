@@ -1,0 +1,109 @@
+-- [KIT_TOP_DOWN] Brimstone Speedway's handbrake turn, offline: the template's own
+-- types/brim_car.lua stepped through builtin/kit/client_lua/move.lua's
+-- M.steps as kit/controls steps it (rate inputs a second, substeps each), in
+-- the level plane over a dirt floor polygon, by a fixed input script: full
+-- throttle to 14 m/s, turned in 0.5 s at full lock left on the throttle (from
+-- straight at 14 m/s the pull alone slides it some 4 degrees), the handbrake
+-- 0.4 s at full lock, then on the throttle again steered toward the slide
+-- while it slides over 5 degrees. It slides 20...60 degrees off the
+-- heading, never spins (under 80), and is straight again within 1.5 s of
+-- the pull, at the template's defaults and at a user's tuning (accel 9, grip
+-- 8, steer 40), at rate 30 x 4 substeps and 60 x 2 alike. (The
+-- in-game drift in util/kit_racer_check.sh is a driver's, its pull's
+-- length and the server's batching uneven: there only the turn is asserted.)
+-- Run: lua util/kit_racer_sim_check.lua (Lua 5.1 or LuaJIT), from the source tree's root.
+local function load_env(path, env)
+	local f = assert(loadfile(path))
+	setfenv(f, env)
+	return f()
+end
+local function env()
+	return {math = math, ipairs = ipairs, pairs = pairs, type = type,
+		tostring = tostring, tonumber = tonumber, setmetatable = setmetatable,
+		table = table, string = string, error = error}
+end
+local MV = load_env("builtin/kit/client_lua/move.lua", env())
+local car = load_env("apps/workbench/templates/brimstone_speedway/types/brim_car.lua", env())
+
+-- The track's ground: a kit/polygon floor lying flat (pitch 90), surface dirt
+local FLOOR = MV.look_poly({shape = "polygon", depth = 0.05, solid = false,
+	floor = true, surface = "dirt", points = {{-500, -500}, {500, -500}, {500, 500},
+	{-500, 500}}}, false, {0, 0, 0}, 0, 90, 0)
+local w = MV.world{cell = function() return nil end, plane = 0.5, horizontal = true,
+	polys = {FLOOR}}
+assert(w:under(0, 0.6, 0) and w:under(0, 0.6, 0).surface == "dirt", "no dirt under the car")
+
+local TURN_IN = 0.5
+local function run(name, over)
+	local p = {}
+	for k, d in pairs(car.params) do
+		p[k] = d.default
+	end
+	for k, v in pairs(over) do
+		p[k] = v
+	end
+	local rate, sub = p.rate, p.substeps
+	local s = {pos = {0, 0.5, 0}, yaw = 0}
+	local function step(f, r, hb)
+		MV.steps(car, s, {{f = f, r = r, jump = hb and 1 or 0}}, 1 / rate, sub, w, p)
+	end
+	local function speed()
+		return math.sqrt(s.c[3] ^ 2 + s.c[4] ^ 2)
+	end
+	-- The velocity's angle off the heading, degrees (positive: to the right)
+	local function slip()
+		local a = math.atan2(s.c[3], s.c[4]) - s.h
+		return math.deg((a + math.pi) % (2 * math.pi) - math.pi)
+	end
+	step(0, 0, false)
+	local n = 0
+	while speed() < 14 do
+		step(1, 0, false)
+		n = n + 1
+		assert(n < 20 * rate, name .. ": never 14 m/s")
+	end
+	-- Turned in: full lock left on the throttle, as into a bend
+	for _ = 1, math.floor(TURN_IN * rate + 0.5) do
+		step(1, -1, false)
+	end
+	local h0, most, back, turned = s.h, 0, nil, 0
+	local pull = math.floor(0.4 * rate + 0.5)
+	for k = 1, pull + 3 * rate do
+		local t = k / rate
+		if k <= pull then
+			step(0, -1, true)
+		else
+			-- (on the throttle, steered toward the way it goes while sliding,
+			-- else straight)
+			local sl = slip()
+			step(1, math.abs(sl) > 5 and (sl > 0 and 1 or -1) or 0, false)
+		end
+		local sl = math.abs(slip())
+		if speed() > 1 then
+			most = math.max(most, sl)
+		end
+		turned = math.max(turned, math.abs(math.deg(s.h - h0)))
+		if k > pull and not back and most > 12 and sl < 8 and speed() > 3 then
+			back = t - pull / rate
+		end
+	end
+	assert(most >= 20 and most <= 60, string.format("%s: slid %.0f deg off the heading, " ..
+		"not 20...60", name, most))
+	assert(most < 80, name .. ": spun")
+	assert(back and back <= 1.5, string.format("%s: straight again %s s after the pull",
+		name, tostring(back)))
+	print(string.format("ok: %s (rate %d, substeps %d): the handbrake slid it %.0f deg " ..
+		"off the heading, turned %.0f deg, straight again %.2f s after the pull", name,
+		rate, sub, most, turned, back))
+	return most, turned
+end
+
+run("brim_car's defaults", {})
+local m30, t30 = run("accel 9, grip 8, steer 40", {accel = 9, grip = 8, steer = 40})
+-- (the same 120 substeps a second: the same car, the inputs twice as often)
+local m60, t60 = run("accel 9, grip 8, steer 40 at rate 60", {accel = 9, grip = 8,
+	steer = 40, rate = 60, substeps = 2})
+assert(math.abs(m30 - m60) < 2 and math.abs(t30 - t60) < 2, string.format(
+	"rate 30 x 4 and 60 x 2 differ: slid %.1f and %.1f, turned %.1f and %.1f", m30, m60,
+	t30, t60))
+print("ok: rate 30 with 4 substeps drives as rate 60 with 2")
