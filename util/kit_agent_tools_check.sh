@@ -27,7 +27,9 @@
 #      moved to moon by play_join while editing moon;
 #      play_input's press (8): a kit/ui_button by its label, a
 #      kit/ui_scene_list's row by its title (its "picked"), an unknown one
-#      refused naming the screen's buttons;
+#      refused naming the screen's buttons; an output emitted every tick
+#      (local/ticker) one entry with its count, first and last value and
+#      time; muted by its name and by "<id>:<name>" (the answer's muted);
 #   5. get_state's filters: scene, ids, type, state false (10);
 #   6. get_goal_warnings' level lines: default names, a scene with no way
 #      in, the timer with no link of four (12); [KIT_SIDE_SCENERY] (3) parts
@@ -249,6 +251,23 @@ HUB = '''return {
 }
 '''
 CL1 = 'return {on_add = function(e) e:log("hub client v1") end}\n'
+# (play_input's repeats: an output every tick once it has "go")
+TICKER = '''return {
+	version = 1,
+	no_position = true,
+	inputs = {go = "none", stop = "none"},
+	outputs = {n = "number"},
+	state = {n = {default = 0}},
+	on_input = function(c, input)
+		if input == "go" then c:after(0) else c:after() end
+	end,
+	on_timer = function(c)
+		c.state.n = c.state.n + 1
+		c:emit("n", c.state.n)
+		c:after(0)
+	end,
+}
+'''
 if phase == "tools":
     hidden = {"set_builder", "list_games", "copy_game", "rename_game", "publish_log"}
     for tk, admin in ((tok, False), (adm, True)):
@@ -414,6 +433,22 @@ elif phase == "play":
     r = refused("play_input", {"press": "Nope"})
     assert "press: no button \"Nope\" on your body's screen (its buttons: " in r and "Go" in r, r
     assert "row: 1 to 1" in refused("play_input", {"press": L})
+    # An output every tick: one entry with its count, first and last; muted
+    # by its name or "<id>:<name>"
+    call("put_type", {"name": "ticker", "source": TICKER})
+    TK = placed(call("place", {"type": "local/ticker", "pos": [0, 1, 0]}))
+    call("try_input", {"id": TK, "input": "go"})
+    ev = [e for e in played({"seconds": 0.5})["events"] if e["id"] == TK]
+    assert len(ev) == 1 and ev[0]["count"] >= 5 and ev[0]["output"] == "n", ev
+    e = ev[0]
+    assert float(e["last_value"]) - float(e["value"]) == e["count"] - 1 and e["last_t"] > e["t"], e
+    print("   ticker: %d emits in one entry, %s at %s s to %s at %s s" % (e["count"],
+        e["value"], e["t"], e["last_value"], e["last_t"]))
+    for m in ("n", "%d:n" % TK):
+        p = played({"seconds": 0.3, "mute": [m]})
+        assert not any(e["id"] == TK for e in p["events"]) and p.get("muted", 0) >= 3, (m, p)
+    assert "mute: up to 16 outputs" in refused("play_input", {"mute": [""]})
+    call("try_input", {"id": TK, "input": "stop"})
     assert "Your body is gone" in call("play_leave")
 elif phase == "state":
     rpc("initialize", init)
@@ -558,4 +593,4 @@ CLIENT=$SERVER_PID
 for k in "${tok#bat_}" "${tok2#bat_}" "${adm#bat_}"; do
 	grep -rqaF "$k" "$t"/*.log && fail "a token in a log"
 done
-echo "PASS: an agent's tools: hidden by the token, edit_type, put_type keeping the client part, a new param's default, links by name, try_input as nobody/a player/its body, play_input's press, get_state's filters, the level warnings, get_history, a checkpoint's heightmap restored"
+echo "PASS: an agent's tools: hidden by the token, edit_type, put_type keeping the client part, a new param's default, links by name, try_input as nobody/a player/its body, play_input's press and its repeats in one entry and muted, get_state's filters, the level warnings, get_history, a checkpoint's heightmap restored"
