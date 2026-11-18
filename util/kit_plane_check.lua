@@ -410,6 +410,102 @@ assert(near(t, 0.6) and nx == 0 and ny == -1, "level segment along z: " .. tostr
 assert(hw0:segment(-8, 1, -2, 1) == nil, "the level segment met the ledge")
 print("ok: w:circle and w:segment level: a wall, its seams, the ledge off the layer, a box through it and one over it")
 
+-- [KIT_TOP_DOWN] (2) kit/polygon lying flat (pitch 90: its x, y the world's x, z;
+-- -90: its y along -z), its depth along y
+local function flat(points, at, t)
+	t = t or {}
+	return MV.look_poly({shape = "polygon", points = points, depth = t.depth or 2,
+		solid = t.solid ~= false, floor = t.floor, surface = t.surface,
+		friction = t.friction}, false, at, t.yaw or 0, t.pitch or 90, 0)
+end
+local TRI = {{0, 0}, {3, 0}, {0, 1}}
+local f1, f2 = flat(TRI, {1, 1, 5}), flat(TRI, {1, 1, 5}, {pitch = -90})
+assert(f1.da == 2 and near(f1.x0, 1) and near(f1.x1, 4) and near(f1.y0, 5) and
+		near(f1.y1, 6) and near(f1.z0, 0) and near(f1.z1, 2), "flat: " .. f1.y0 .. " " ..
+		f1.y1 .. " " .. f1.z0)
+assert(f2.da == 2 and near(f2.y0, 4) and near(f2.y1, 5), "flat at -90: " .. f2.y0)
+local f3 = flat(TRI, {1, 1, 5}, {yaw = 90})
+assert(f3.da == 2 and near(f3.x0, 1) and near(f3.x1, 2) and near(f3.y0, 2) and
+		near(f3.y1, 5), "flat turned 90: " .. f3.x0 .. " " .. f3.x1 .. " " .. f3.y0)
+assert(MV.look_poly({shape = "polygon", points = TRI, solid = true}, false, {0, 0, 0}, 0,
+	45, 0) == nil, "a tilted one met")
+assert(flat(TRI, {0, 0, 0}, {solid = false}) == nil, "a flat one not solid, no floor, met")
+assert(flat(TRI, {0, 0, 0}, {solid = false, floor = true}).floor, "a floor not a floor")
+assert(MV.look_poly({shape = "polygon", points = TRI, floor = true}, false, {0, 0, 0}, 0) ==
+		nil, "a standing floor met")
+-- In the level plane (y 1): a flat wall across z 4...6 (x -2...2, y 0...2), one over
+-- the layer (y 2.5...3.5), an ice floor patch (x -8...-4, y 0.45...0.55)
+local WALL = {{-2, -1}, {2, -1}, {2, 1}, {-2, 1}}
+local ICE = flat(WALL, {-6, 0.5, 0}, {solid = false, floor = true, depth = 0.1,
+	surface = "ice", friction = 0.1})
+local function fworld(rev_)
+	return hworld{polys = {flat(rev_ and rev(WALL) or WALL, {0, 1, 5}),
+		flat(WALL, {0, 3, -5}, {depth = 1}), ICE}}
+end
+local fw = fworld()
+assert(#fw.polys == 2 and #fw.floors == 1, "the floors apart")
+s = hrun({pos = {0, 0.5, 0}}, 90, {f = 1, r = 0, yaw = 0, jump = 0}, fw)
+assert(near(s.pos[3], 3.55, 1e-3), "the flat wall: " .. s.pos[3])
+s2 = hrun({pos = {0, 0.5, 0}}, 90, {f = 1, r = 0, yaw = 0, jump = 0}, fworld(true))
+assert(s2.pos[3] == s.pos[3], "the flat wall wound the other way: " .. s2.pos[3])
+-- Along -z under the one over the layer, onto the ice: its surface and friction
+s = hrun({pos = {0, 0.5, 0}}, 90, {f = -1, r = 0, yaw = 0, jump = 0}, fw)
+assert(s.pos[3] < -6, "the flat one over the layer met: " .. s.pos[3])
+s = hrun({pos = {-1, 0.5, 0}}, 40, {f = 0, r = -1, yaw = 0, jump = 0}, fw)
+assert(s.pos[1] < -4.2 and s.surface == "ice" and s.friction == 0.1, "on the ice: " ..
+		s.pos[1] .. " " .. tostring(s.surface))
+assert(fw:under(-6, 0.5, 0).surface == "ice" and fw:under(-6, 1.1, 0).surface == "ice" and
+		fw:under(-6, 1.2, 0) == nil and fw:under(-3, 0.5, 0).surface == "stone",
+		"w:under the ice")
+-- Run onto the ice and let go: it slides on (5 m/s2 at 6 m/s), the ground stops
+-- it within 0.36
+local function let_go(x)
+	local st = hrun({pos = {x, 0.5, 0}}, 40, {f = 0, r = -1, yaw = 0, jump = 0}, fw)
+	local x0 = st.pos[1]
+	hrun(st, 20, {f = 0, r = 0, yaw = 0, jump = 0}, fw)
+	return x0 - st.pos[1], x0
+end
+local slid, on_at = let_go(-1)
+local stopped = let_go(8)
+assert(on_at < -4 and slid > 1.5 and stopped < 0.4, "ice slides " .. slid .. " from " ..
+		on_at .. ", ground " .. stopped)
+-- w:circle and w:segment against the flat wall's edge (its normal -z), not the one
+-- over the layer
+c = fw:circle(0, 3.7, 0.5)
+assert(#c == 1 and near(c[1].depth, 0.2) and near(c[1].nx, 0) and near(c[1].ny, -1) and
+		c[1].info.surface == "polygon" and c[1].info.flat, "the flat wall's circle: " .. #c)
+assert(#fw:circle(0, -4, 0.5) == 0 and #fw:circle(0, -4, 0.5, 3) == 1,
+		"the flat one over the layer")
+assert(#fw:circle(-6, 0, 0.5) == 0, "the floor met as a wall")
+t, nx, ny, info = fw:segment(0, 0, 0, 10)
+assert(near(t, 0.4) and near(nx, 0) and near(ny, -1) and info.flat, "the flat wall's " ..
+		"segment: " .. tostring(t))
+local function ftrace()
+	local ww, ss, out = fworld(), {pos = {-1, 0.5, -1}}, {}
+	for n = 1, 200 do
+		MV.steps(walker, ss, {{f = n < 100 and 1 or -1, r = n % 5 == 0 and -1 or 0,
+			yaw = 10, jump = 0}}, 1 / 60, 1, ww, wp)
+		out[#out + 1] = string.format("%.17g %.17g", ss.pos[1], ss.pos[3])
+	end
+	return table.concat(out, ";")
+end
+assert(ftrace() == ftrace(), "not the same bits over flat polygons")
+-- The plane off: a flat slab 1 high is a wall, one 0.4 high a step up onto its top
+-- (W:down's), a floor patch the walker's ground's surface
+local function slab(h, at)
+	return flat(WALL, {at, 0.5 + h / 2, 0}, {depth = h})
+end
+local s3d = walk(pworld({slab(1, 6)}), {pos = {0, 0.55, 0}}, 120, RIGHT)
+assert(near(s3d.pos[1], 3.55, 1e-3) and near(s3d.pos[2], 0.5), "3D the slab 1 high: " ..
+		s3d.pos[1] .. "," .. s3d.pos[2])
+s3d = walk(pworld({slab(0.4, 6)}), {pos = {0, 0.55, 0}}, 60, RIGHT)
+assert(s3d.pos[1] > 4.5 and near(s3d.pos[2], 0.9) and s3d.surface == "polygon",
+		"3D up the slab 0.4 high: " .. s3d.pos[1] .. "," .. s3d.pos[2])
+assert(near(pworld({slab(0.4, 6)}):down(6, 2, 0, 3), 1.1), "3D down onto its top")
+s3d = walk(pworld({ICE}), {pos = {-3, 0.55, 0}}, 30, {f = 0, r = -1, yaw = 0, jump = 0})
+assert(s3d.pos[1] < -4.5 and s3d.surface == "ice", "3D on the ice: " .. tostring(s3d.surface))
+print("ok: kit/polygon lying flat: its frame at pitch 90, -90 and turned; walls in the level plane either winding, one over the layer not met, the ice floor's surface and slide, w:under; w:circle and w:segment; the same bits twice; the plane off a slab a wall or a step, its top, the floor")
+
 -- What the client's pass costs: 300 zones (cells, boxes, polygons, spheres)
 -- built (module.lua builds one again as it moves or its state turns), and
 -- met by a bike's two wheels, a frame

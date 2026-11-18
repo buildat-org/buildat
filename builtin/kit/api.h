@@ -826,7 +826,7 @@ namespace interface
 //   parameter's value (kit/part). [KIT_PLANE] shape "polygon", points (a
 //   "points" value in the entity's x and y), depth (along its z, centred on
 //   its position): a prism, its mesh built on the clients; solid, it is met by
-//   the movements (move.lua) where it lies flat (turned by yaw 0 or 180 and any
+//   the movements (move.lua) where it stands (turned by yaw 0 or 180 and any
 //   roll), not by the clients' physics; with kit/controls' plane vertical only
 //   where its depth spans the plane's z (others background or foreground).
 //   [KIT_TOP_DOWN] (1) kit/controls' plane horizontal holds the bodies at one
@@ -834,6 +834,13 @@ namespace interface
 //   moving in x and z: kit/walker there has no gravity and no jump; a step's
 //   w.horizontal is true, w.plane that cell's middle y, and w:circle's and
 //   w:segment's x, y are the world's x and z (move.lua's header).
+//   [KIT_TOP_DOWN] (2) a polygon turned pitch 90 (or -90) lies flat: its
+//   points the world's x and z, its depth along y; its edges are upright
+//   walls, met in a level plane where its depth spans the plane's y, in 3D its
+//   top a floor. kit/polygon's `floor` (with collision off; flat only): a
+//   floor patch, no wall, its info what w:under(x, y, z) gives over its area
+//   (a walker's s.surface and s.friction), on both sides. The creatures'
+//   pathfinder takes a flat one's box turned so (kit.cpp's grid_looks).
 //   Its size and offset are its points' box (kit.cpp's). [KIT_SIDE_SCENERY]
 //   voxel (a voxel type's name) and edge_depth: its textures world-aligned and
 //   a band of its top along the edges facing up (module.lua's polygon_mesh).

@@ -24552,6 +24552,17 @@ struct Module: public interface::Module, public Interface
 				}
 				double yaw, pitch, roll;
 				wq.angles(yaw, pitch, roll);
+				// [KIT_TOP_DOWN] (2) a polygon lying flat (pitch +-90; its box
+				// polygon_box()'s): its own y along the world's z, its depth along y.
+				// simplified: then by its yaw's quarter as any look
+				// (angles() gives 0...360: -90 is 270)
+				const bool up = std::fabs(pitch - 90) < 0.5;
+				if(poly && (up || std::fabs(pitch - 270) < 0.5)){
+					const double oy = off[1];
+					std::swap(s[1], s[2]);
+					off[1] = up ? -off[2] : off[2];
+					off[2] = up ? oy : -oy;
+				}
 				const int quarter = ((int)std::lround(yaw / 90) % 4 + 4) % 4;
 				if(quarter % 2){
 					std::swap(s[0], s[2]);
@@ -32575,7 +32586,9 @@ struct Module: public interface::Module, public Interface
 				"reacts to itself). [KIT_TOP_DOWN] With kit/controls' plane "
 				"horizontal (w.horizontal; w.plane the y of the spawn's cell, the "
 				"feet held at w.plane - 0.5, no speed up) their x, y are the "
-				"world's x and z, nx, ny the normal's x and z. "
+				"world's x and z, nx, ny the normal's x and z; a kit/polygon "
+				"lying flat (pitch 90) is walls there, w:under(x, y, z) -> info "
+				"a floor polygon's (floor on, collision off) over its area. "
 				"Its file's math is w's on both sides (floor, ceil, "
 				"sqrt, abs, fmod, min, max, sin, cos, atan, atan2; no random). "
 				"s.events = {\"name\" | {\"name\", value}...} set in a step: "
@@ -38354,7 +38367,10 @@ struct Module: public interface::Module, public Interface
 			"bright, casting no light), or voxel: a voxel type's texture. "
 			"kit/polygon: an extruded outline for side views, its points "
 			"within 256 of its place (a skyline or ridge 512 wide in one "
-			"piece); voxel wears a voxel type's textures, world-aligned so "
+			"piece); turned pitch 90 it lies flat, its points the world's x "
+			"and z, its depth up: a top-down view's walls, edited in the plan "
+			"view, or with floor on and collision off a floor patch (ice, mud) "
+			"whose surface and friction a body meets under its feet; voxel wears a voxel type's textures, world-aligned so "
 			"pieces side by side tile, the type's top as a band edge_depth "
 			"cells deep along the edges facing up (color then unused, material "
 			"kept). A grass-edged cliff: place kit/polygon with params "
