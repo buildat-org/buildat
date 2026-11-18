@@ -204,6 +204,8 @@ struct Module: public interface::Module, public Interface
 		const PeerId p = find_peer(name);
 		return p ? sv_<PeerId>{p} : sv_<PeerId>{};
 	}
+	// One client joins here, ever: no second login of a name to allow, or
+	// to ask about ([ACC_ALREADY_HERE])
 	void set_multiple_logins(bool on){}
 	void set_guests(bool on){}
 	ss_ address_of(PeerId peer){ return ""; }

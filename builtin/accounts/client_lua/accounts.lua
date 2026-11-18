@@ -341,6 +341,56 @@ local function show_moved(from, to, name)
 	end
 end
 
+-- **The account is here on another client already** ([ACC_ALREADY_HERE]):
+-- the login was proved, and the server waits for one of three. Kick: the
+-- other clients go and this one is the account's; guest: a guest<n> here
+-- (testing multiplayer); Leave: back at the login form, with no automatic
+-- sign-in, for another name
+local function show_here(name)
+	M.close()
+	local w = page_window(380)
+	window = w
+	page_text(w, name .. " is logged in on another client already.")
+	local choices = {
+		{"Kick out the other clients", function()
+			buildat.send_packet("accounts:here", "kick")
+			M.close()
+			window = page_window(380)
+			page_text(window, "Waiting for the other clients to leave...")
+		end},
+		{"Log in as guest", function()
+			guest_join = true
+			last_login = nil
+			buildat.send_packet("accounts:here", "guest")
+		end},
+		{"Leave", function()
+			buildat.send_packet("accounts:here", "leave")
+			show_login(nil)
+		end},
+	}
+	-- None the default: Return, pressed on into this from the form, is
+	-- Leave's, never a kick
+	local last
+	for _, c in ipairs(choices) do
+		local b = w:CreateChild("Button")
+		b:SetStyleAuto()
+		b.minHeight = 30
+		b:SetFocusMode(magic.FM_FOCUSABLE)
+		local bt = b:CreateChild("Text")
+		bt:SetStyleAuto()
+		bt:SetText(c[1])
+		bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		magic.SubscribeToEvent(b, "Released", function()
+			log:info("accounts: chose " .. c[1])
+			c[2]()
+		end)
+		last = b
+	end
+	last:SetFocus(true)
+	-- What a check waits for before it clicks
+	log:info("accounts: " .. name .. " is here already: choose")
+end
+
 -- **"That's my account"** ([ID_CLAIM_ACCOUNT]): a Starport ID whose name
 -- here is an account of this server's links to it by one login with the
 -- account's password; `token` is the refused login's ID token, sent with
@@ -799,6 +849,12 @@ local function on_login_result(data)
 	local err = r.error
 	if err ~= "" then
 		log:info("Login refused: " .. err)
+		-- [ACC_ALREADY_HERE] Proved, the account here already: the kept
+		-- login stands, and the code's wait is used up
+		if err:sub(1, 5) == "HERE:" then
+			buildat.storage_write("totp_wait", "")
+			return show_here(err:sub(6))
+		end
 		-- A kept login that did not work is forgotten
 		if token_tried then
 			buildat.storage_write("token", "")
@@ -1033,6 +1089,9 @@ buildat.sub_packet("accounts:kicked", function(data)
 	-- [LEAVE_WITH_REASON]: the server drops the connection next, and the
 	-- client's leave to the launcher says this
 	buildat.set_leave_reason(text)
+	-- [ACC_ALREADY_HERE] A kicked web page is not reloaded by itself on
+	-- its return, into a login of its own: it waits for a click
+	buildat.set_reload_on_return(false)
 	if M.on_kicked then
 		M.on_kicked(text)
 	end

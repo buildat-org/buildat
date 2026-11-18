@@ -77,6 +77,11 @@ namespace accounts
 		// default, as for a Luanti player, who is one object per name. A
 		// kick, a ban, a reset password and a deleted account then reach
 		// every connection of the name.
+		// [ACC_ALREADY_HERE] Off, a login proved for a name that is here
+		// already asks its client: kick out the other clients (they leave,
+		// with network:client_disconnected, before the new accounts:login),
+		// log in as a guest (whom a kick or a ban of the account reaches
+		// too), or leave.
 		virtual void set_multiple_logins(bool on) = 0;
 		// [HC_GUEST_PLAY] Whether a peer may join as a guest: no account,
 		// "guest<n>" (the next free number this run), trust level LV_NEW,
