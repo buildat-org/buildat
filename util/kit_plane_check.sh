@@ -8,7 +8,9 @@
 #   0. util/kit_plane_check.lua: kit/walker held to the plane as the box steps
 #      it (the same bits twice), w:circle and w:segment against voxels, a
 #      voxel off the plane and a heightmap's slope.
-#   1. kit/controls' plane vertical and the side camera: the plane at the
+#   1. Before the controls: the plan (2D) zoomed out to 800 across (a
+#      512-wide polygon whole). kit/controls' plane vertical and the side
+#      camera: the plane at the
 #      spawn's depth (z 1, the server's log); W goes nowhere, D walks along x
 #      past a wall in front of the plane and one behind it (neither met) to a
 #      ledge in the plane, D and Space jump onto it; z 1 in every body line,
@@ -45,6 +47,8 @@
 #      view: its face dirt (brown, textured), a grass band along its top;
 #      cut in two at x 0, the same pixels (no seam). A builder's voxel type
 #      (op voxel) worn; glow and glass with a texture drawn, no error.
+#      Glowing kit/water (translucent) half over the sky, half over the
+#      dirt: the two halves apart (drawn opaque, the same).
 #  11. A third session: [KIT_SIDE_SCENERY] (4) an environment (sky
 #      #3070e0, cartoon), the side camera ortho looking 10 m left and 5 up
 #      of the body: the sky's colour over the frame, none of the dome's box
@@ -85,10 +89,11 @@ cd "$here/Build"
 
 export BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_NAME=kitboss
 n=0
-edit() # <op json>: an edit and its answer
+edit() # <op json>: an edit and its answer (the undo stack stops at 50)
 {
 	n=$((n + 1))
-	printf 'event kit_edit %s\nwait_log 10000 entities, %d to undo\n' "$1" "$n"
+	printf 'event kit_edit %s\nwait_log 10000 entities, %d to undo\n' "$1" \
+		$((n > 50 ? 50 : n))
 }
 set_p() # <id> <param> <json value>
 {
@@ -108,6 +113,16 @@ wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
 keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
+keypress F1
+wait_log 5000 kit editor: the view is 2D
+mouse_pos 512 350
+frames 3
+mouse_wheel -10
+frames 3
+mouse_wheel -10
+wait_log 5000 kit editor: the wheel: the plan 800.0 across
+keypress F2
+wait_log 5000 kit editor: the view is 3D
 EOF
 	# The controls (3) and a region (4) where the admin digs and places in play
 	edit '{"op": "place", "type": "kit/controls", "pos": [0, 1, 0]}'
@@ -423,6 +438,14 @@ EOF
 wait_log_any 10000 kit: entity 15 wears kitboss/cliff
 frames 10
 screenshot @T@/grass_materials.png
+EOF
+	# A glowing kit/water polygon (16) in front of 13's top edge: half over
+	# the dirt, half over the sky
+	poly -1.8 31 0 '[[-0.6, -1.5], [0.6, -1.5], [0.6, 1.5], [-0.6, 1.5]]' '"voxel": "kit/water", "material": "glow"'
+	cat <<'EOF'
+wait_log_any 10000 kit: entity 16 wears kit/water
+frames 10
+screenshot @T@/glow_water.png
 keypress F2
 wait_log 5000 kit editor: the view is 3D
 EOF
@@ -715,10 +738,10 @@ grep -aqE 'kit: entity 13 drawn .*, textured, [0-9]+ triangles in its top band' 
 	fail "polygon 13 not drawn textured with a top band ($c)"
 grep -aqE 'kit: entity 14 drawn .*, textured' "$c" && ! grep -aq 'ERROR' "$c" ||
 	fail "polygon 14 not drawn textured, or an error ($c)"
-grass=$(python3 -I - "$t/grass_one.png" "$t/grass_two.png" "$t/grass_materials.png" <<'PY'
+grass=$(python3 -I - "$t/grass_one.png" "$t/grass_two.png" "$t/grass_materials.png" "$t/glow_water.png" <<'PY'
 import sys
 from PIL import Image, ImageChops, ImageStat
-a, b, c = (Image.open(p).convert("RGB") for p in sys.argv[1:4])
+a, b, c, d = (Image.open(p).convert("RGB") for p in sys.argv[1:5])
 face = a.crop((290, 380, 700, 470))
 (fr, fg, fb), sd = ImageStat.Stat(face).mean, ImageStat.Stat(face.convert("L")).stddev[0]
 br, bg, bb = ImageStat.Stat(a.crop((290, 223, 410, 238))).mean
@@ -727,13 +750,19 @@ n = sum(1 for v in ImageChops.difference(a.crop(box), b.crop(box)).convert("L").
 # 13 glow: its dirt as bright as lit or more, still brown
 lr, lg, lb = ImageStat.Stat(a.crop((290, 380, 500, 470))).mean
 gr, gg, gb = ImageStat.Stat(c.crop((290, 380, 500, 470))).mean
-print(f"face {fr:.0f},{fg:.0f},{fb:.0f} (deviation {sd:.1f}), band {br:.0f},{bg:.0f},{bb:.0f}, {n} pixels apart in two pieces; glow {gr:.0f},{gg:.0f},{gb:.0f}")
+# 16, glowing kit/water: blue, and what is behind it through it (over the
+# sky and over the dirt apart; drawn opaque, the same)
+wa = ImageStat.Stat(d.crop((305, 95, 400, 175))).mean
+wb = ImageStat.Stat(d.crop((305, 260, 400, 345))).mean
+wd = sum(abs(x - y) for x, y in zip(wa, wb))
+print(f"face {fr:.0f},{fg:.0f},{fb:.0f} (deviation {sd:.1f}), band {br:.0f},{bg:.0f},{bb:.0f}, {n} pixels apart in two pieces; glow {gr:.0f},{gg:.0f},{gb:.0f}; glowing water over the sky {wa[0]:.0f},{wa[1]:.0f},{wa[2]:.0f}, over dirt {wb[0]:.0f},{wb[1]:.0f},{wb[2]:.0f}")
 sys.exit(0 if fr > fg > fb and fr - fb > 15 and sd > 3 and bg > br + 10 and
-	bg > bb + 10 and n < 40 and gr + gg + gb >= lr + lg + lb and gr > gg > gb else 1)
+	bg > bb + 10 and n < 40 and gr + gg + gb >= lr + lg + lb and gr > gg > gb and
+	wa[2] > wa[0] + 30 and wb[2] > wb[0] + 30 and wd > 30 else 1)
 PY
-) || fail "kit/grass on a polygon: ${grass:-no screenshot} ($t/grass_one.png, $t/grass_two.png, $t/grass_materials.png)"
+) || fail "kit/grass on a polygon: ${grass:-no screenshot} ($t/grass_one.png, $t/grass_two.png, $t/grass_materials.png, $t/glow_water.png)"
 grep -aq 'kit: entity 15 wears kitboss/cliff' "$c" || fail "a builder's voxel type not worn ($c)"
-echo "ok: kit/grass on a polygon: $grass; a builder's voxel type worn, glow and glass with it"
+echo "ok: kit/grass on a polygon: $grass; a builder's voxel type worn, glow and glass with it, glowing water translucent"
 # [KIT_EDIT_VIEW] The touch session: 3D remembered, 2D (front) last
 v=$(grep -aoP 'kit editor: the view is \K.*' "$t/touch.log" | tr '\n' ',')
 [ "$(grep -aoP 'kit editor: the view is \K.*' "$t/touch.log" | tail -1)" = "2D (front)" ] &&

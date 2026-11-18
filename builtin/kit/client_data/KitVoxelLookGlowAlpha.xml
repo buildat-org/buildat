@@ -1,0 +1,6 @@
+<!-- [KIT_SIDE_SCENERY] A look wearing a translucent voxel material (water, stained
+     glass) in material "glow" (module.lua's polygon_mesh): KitVoxelLookAlpha's
+     blend, unlit. -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" psdefines="DIFFMAP KITUNLIT">
+    <pass name="alpha" depthwrite="false" blend="alpha" />
+</technique>

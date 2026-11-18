@@ -553,8 +553,14 @@ elif phase == "visuals":
             v = json.loads(call(tok, "get_voxels", q))
         assert v["layers"][0][0] != "?" and v["key"][v["layers"][0][0]] != "undefined", v
         print("section", (sx, sy, sz), "loaded, read after", i, "more asks:", v["key"])
+        # Listed by get_ground unless the streamer has unloaded it since
+        # (no player near it: its next pass may): then get_voxels has to
+        # load it again ([KIT_AGENTS_LOADED_SECTIONS])
         g = json.loads(call(tok, "get_ground", {"at": [sx * 64, sz * 64], "size": [1, 1]}))
-        assert [sx, sy, sz] in g["loaded_sections"], g
+        if [sx, sy, sz] not in g["loaded_sections"]:
+            v = json.loads(call(tok, "get_voxels", q))
+            assert v.get("sections_loaded") == 1, (g, v)
+            print("section", (sx, sy, sz), "unloaded before get_ground")
     # Every edit of this phase taken back (no state between: the minute's
     # calls)
     left = state(tok)["undo"]

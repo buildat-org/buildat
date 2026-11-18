@@ -53,6 +53,14 @@ local terrain_panel, zoom_at
 local brush_at, stroke_begin, stroke_move, stroke_end, draw_brush
 local cam3d_node, cam3d
 
+-- [KIT_SIDE_SCENERY] The plan's and the Front view's widest zoom (their height):
+-- a 512-wide polygon (MAX_POLYGON_EXTENT 256 each way) whole across the
+-- narrower side, a portrait phone's too
+local function max_span()
+	local w, h = screen_size()
+	return 800 * math.max(1, h / math.max(1, w))
+end
+
 -- ---- Ports and the knob: what is dragged to link and to turn
 local PORTS = {out = {}, ["in"] = {}}
 local ports_root = nil
@@ -1555,7 +1563,8 @@ local function mouse_up(button_)
 			local q = rot3d() * magic.Vector3(0, 0, 1)
 			local t = q.y < -1e-6 and ((S.cut or O.ground_y) - o.y) / q.y or 0
 			S.cx, S.cz = o.x + q.x * t, o.z + q.z * t
-			S.span = math.max(4, math.min(400, math.abs(o.y - (S.cut or 0)) *
+			S.span = math.max(4, math.min(max_span(),
+					math.abs(o.y - (S.cut or 0)) *
 					2 * math.tan(math.rad(cam3d.fov) / 2)))
 			set_view("2d")
 		elseif rc and NT.sh.on() then
@@ -1844,15 +1853,14 @@ zoom_at = function(notches, mx, my)
 	if S.view == "2d" then
 		-- About the pointer: the point under it stays under it
 		local o0 = M.screen_ray(mx, my)
-		S.span = math.max(4, math.min(400, S.span * f))
+		S.span = math.max(4, math.min(max_span(), S.span * f))
 		place_cameras()
 		local o1 = M.screen_ray(mx, my)
 		S.cx, S.cz = S.cx + o0.x - o1.x, S.cz + o0.z - o1.z
 	elseif S.view == "front" then
-		-- [KIT_PLANE] as the plan's, in x and y ([KIT_SIDE_SCENERY] out to a
-		-- 512-wide polygon's whole in a square window)
+		-- [KIT_PLANE] as the plan's, in x and y
 		local o0 = M.screen_ray(mx, my)
-		S.fspan = math.max(4, math.min(800, S.fspan * f))
+		S.fspan = math.max(4, math.min(max_span(), S.fspan * f))
 		place_cameras()
 		local o1 = M.screen_ray(mx, my)
 		S.fx, S.fy = S.fx + o0.x - o1.x, S.fy + o0.y - o1.y
@@ -2036,7 +2044,7 @@ local function touch_move(id, x, y, dx, dy)
 			local ax, ay = (px_ + o.x) / 2 - ox, (py_ + o.y) / 2 - oy
 			local k = S.span / h
 			local wx, wz = S.cx + (ax - w / 2) * k, S.cz - (ay - h / 2) * k
-			S.span = math.max(4, math.min(400, S.span * d0 / d1))
+			S.span = math.max(4, math.min(max_span(), S.span * d0 / d1))
 			k = S.span / h
 			ax, ay = ax + mdx, ay + mdy
 			S.cx, S.cz = wx - (ax - w / 2) * k, wz + (ay - h / 2) * k
@@ -2046,7 +2054,7 @@ local function touch_move(id, x, y, dx, dy)
 			local ax, ay = (px_ + o.x) / 2 - ox, (py_ + o.y) / 2 - oy
 			local k = S.fspan / h
 			local wx, wy = S.fx + (ax - w / 2) * k, S.fy - (ay - h / 2) * k
-			S.fspan = math.max(4, math.min(800, S.fspan * d0 / d1))
+			S.fspan = math.max(4, math.min(max_span(), S.fspan * d0 / d1))
 			k = S.fspan / h
 			ax, ay = ax + mdx, ay + mdy
 			S.fx, S.fy = wx - (ax - w / 2) * k, wy + (ay - h / 2) * k

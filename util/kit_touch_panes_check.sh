@@ -36,6 +36,10 @@
 #     scene's name focused: the field let go, and a tap focuses it again
 #     (the page's stand-in); portrait: the inspector's position typed in,
 #     a drag begun on its pane's button keeps the field's focus;
+#   - [KIT_TEXTURE_DESIGNER] weave's designer from the voxel form's
+#     "Design a texture...": its targets at the touch size, none cut at the
+#     UI half's sides; a preset tapped, a slider dragged by a finger (the
+#     recipe changed), Save: the server's texture, the form back;
 #   - the game settings by Tools' Menu: Fullscreen (kit_fullscreen) listed,
 #     off (the drive pins it), never turned on.
 # And from the sweep of 2026-11-12: in play Workbench's hint over the
@@ -270,6 +274,19 @@ tab("Voxels"); a("waitlog", "kit editor: tool voxels", 10); fr(5)
 # (below the view in landscape: its rows at the touch size)
 a("event", "kit_inspector_show voxel new"); a("waitlog", "the inspector shows voxel new", 10); fr(5)
 a("tap", "Button", "New voxel type..."); a("waitlog", "touch shell: the dialog pane", 10); fr(10)
+# [KIT_TEXTURE_DESIGNER] weave's designer from the form: a preset and a
+# slider by finger, Save back to the form
+a("tap", "Button", "Design a texture..."); a("waitlog", "designer shown", 10); fr(10)
+a("shot", "${OUT}/15c_weave.png")
+dump("weave")
+a("tap", "Button", "bricks"); a("waitlog", "designer: bricks: weave1:", 10); fr(5)
+# The page scrolled by a finger on a button (landscape has the sliders
+# below the view): a short drag, as its flick carries on after the release
+a("at_log", r'touch targets \(weave\): .*Button "New seed" (\d+) (\d+)', "drag", 0, -60, 20, 16); fr(40)
+a("drag", "Slider", "weave a hue", W - 4, round(H * 0.7), "touch"); fr(10)
+a("shot", "${OUT}/15d_weave_bricks.png")
+a("tap", "Button", "Save"); a("waitlog", "the voxel form's texture: texture ", 10)
+a("waitlog", "touch shell: the dialog pane", 10); fr(10)
 a("tap", "LineEdit", "my_voxel"); fr(2); a("selall"); fr(2); a("type", "v1"); fr(2)
 a("eval", kb); a("waitlog", "touch shell: typing in the dialog", 10); fr(10)
 a("shot", "${OUT}/16_voxel_dialog_keyboard.png")
@@ -324,8 +341,19 @@ for l in page[on:]:
                     (w < T - 1 or h < T - 1):
                 small.append(f"{t[0]} \"{t[1]}\" {w}x{h}")
         assert not small, f"under the touch size {T} ({m[1]}): {small}"
-        # The header: Tools, no "..."
         labels = {t[1] for t in ts if t[0] == "Button"}
+        if m[1] == "weave":
+            # weave's designer over the shell: its targets in the UI half
+            # across (none cut at its side), Save among them
+            cut = [f"{t[0]} \"{t[1]}\" {t[2]}" for t in ts
+                if ur[1] <= rect(t[2])[1] + rect(t[2])[3] / 2 < ur[1] + ur[3] and
+                (rect(t[2])[0] < ur[0] or rect(t[2])[0] + rect(t[2])[2] > ur[0] + ur[2])]
+            assert not cut and "Save" in labels, f"weave's designer across {ur}: {cut}, {sorted(labels)}"
+            # simplified: a row wider than the page's scroll view (cut at
+            # its side, a sideways bar) is in 15c/15d's shots only; the
+            # dump has no view rect (Urho stretches the page to the panel)
+            continue
+        # The header: Tools, no "..."
         assert "Tools" in labels and "..." not in labels, f"the header in {m[1]}: {sorted(labels)}"
         if m[1] == "palette":
             # The list's rows shown whole in the pane (sections, types)
@@ -345,7 +373,7 @@ for l in page[on:]:
                     f"the {k} window {r} over the world {geo['world']} ({m[2]})"
         want = PANE.get(m[2])
         assert not want or want in wins, f"no {want} window in the {m[2]} pane: {m[1]}"
-missing = set(PANE) | {"hud", "turning", "settings"}
+missing = set(PANE) | {"hud", "turning", "settings", "weave"}
 missing -= set(seen)
 assert not missing, f"no dumps of {missing}"
 assert "sg_view" in seen["sg_links"], f"no Signals viewport: {seen['sg_links']}"
@@ -387,6 +415,13 @@ if W > H:
 # A new scene; a voxel type typed with the keyboard up
 assert re.search(r"An edit by webboss: made the scene second", server), "no scene made (server.log)"
 assert re.search(r"webboss made voxel type webboss/v1", server), "no voxel type made (server.log)"
+# weave's designer: bricks, then a finger's drag on a slider changed it;
+# saved, and the server made it
+wb = re.search(r"designer: bricks: (weave1:\S+)", text)
+ws = re.search(r"designer: saved (weave1:\S+)", text)
+assert wb and ws and wb[1] != ws[1], f"weave's slider by finger: {wb and wb[1]} -> {ws and ws[1]}"
+assert re.search(r"webboss made texture webboss/my_voxel version \d+: " + re.escape(ws[1]), server), \
+    "weave's texture not made (server.log)"
 # (each dialog's last: the view is fitted and scrolled over a few frames)
 typing = list(dict(re.findall(r"typing in the dialog ([^:]*): the field (\d+ to \d+, its buttons \d+ "
     r"to \d+, the keyboard from \d+)", text)).values())

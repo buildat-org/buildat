@@ -1,0 +1,5 @@
+<!-- [KIT_SIDE_SCENERY] A look wearing a cut out voxel material (leaves, a plant) in
+     material "glow" (module.lua's polygon_mesh): KitVoxelLookMasked's cut, unlit. -->
+<technique vs="kit/KitVoxel" ps="kit/KitVoxel" psdefines="DIFFMAP ALPHAMASK KITUNLIT">
+    <pass name="base" />
+</technique>

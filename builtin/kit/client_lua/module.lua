@@ -805,10 +805,14 @@ do
 			local top = tile(1)
 			local face = tiles[2] and tiles[2].name ~= top.name and tiles[2] or tile(6)
 			local glass = look.material == "glass"
+			-- Glow keeps a translucent type's blend and a cut out one's cut
+			local glow = def.translucent and "kit/KitVoxelLookGlowAlpha.xml" or
+					def.alpha_masked and "kit/KitVoxelLookGlowMasked.xml" or
+					"kit/KitVoxelLookGlow.xml"
 			for i, g in ipairs(used) do
 				local m = magic.Material:new()
 				m:SetTechnique(0, magic.cache:GetResource("Technique",
-						look.material == "glow" and "kit/KitVoxelLookGlow.xml" or
+						look.material == "glow" and glow or
 						glass and (def.translucent or def.alpha_masked) and
 						"kit/KitVoxelLookAlpha.xml" or
 						glass and "kit/KitVoxelLookGlass.xml" or tech))
