@@ -36,7 +36,12 @@
 -- right: Jump (a car: Gas and Brake; the movement's touch_buttons, held,
 -- for Jump), Exit in a seat, the world's actions
 -- (held while pressed), the app's.
--- For a drive: "event kit_body" logs the body and the corrections.
+-- For a drive: "event kit_body" logs the body and the corrections (and the
+-- side or top_down camera's followed point and lead).
+-- [KIT_TOP_DOWN] kit/controls' plane horizontal (C.ctl.horizontal, M.level_plane):
+-- the body held at one height (move.lua), the pointer and the camera as without a
+-- plane; the top_down camera follows with a dead zone and a lead as side does
+-- (follow_point); kit/parallax's follow_y along z (module.lua).
 return function(K)
 local M, E, O, P = K.M, K.E, K.O, K.P
 local magic = require("buildat/extension/urho3d")
@@ -513,6 +518,11 @@ local function log_body()
 	if C.side_at and C.side_lead then
 		log:info(string.format("kit: side camera at %.2f,%.2f, lead %.2f,%.2f",
 				C.side_at[1], C.side_at[2], C.side_lead[1], C.side_lead[2]))
+	end
+	-- ([KIT_TOP_DOWN] (6) the top_down camera's, its view's axes on the ground)
+	if C.top_at and C.top_lead then
+		log:info(string.format("kit: top_down camera at %.2f,%.2f, lead %.2f,%.2f",
+				C.top_at[1], C.top_at[2], C.top_lead[1], C.top_lead[2]))
 	end
 	-- [KIT_SPECTATE_CAMERA] The camera: its place, turn and fov, and how far
 	-- a shake has it off its place
@@ -2082,6 +2092,31 @@ local function look_at(eye, p)
 	end
 end
 
+-- [KIT_SIDE_LEAD] [KIT_TOP_DOWN] (6) The point the side or top_down camera
+-- follows, in the view's two axes (u across the screen, v up it): the body's (bu,
+-- bv) led by (lu, lv), at most half the view's half width hw and height hh off it,
+-- the lead eased (most of the way in half a second); the view's middle held within
+-- dead_zone of that (half of it along v). C[key .. "_at"] and C[key .. "_lead"]
+-- kept between frames (log_body's)
+local function follow_point(key, par, dt, bu, bv, lu, lv, hw, hh)
+	lu = math.max(-hw / 2, math.min(hw / 2, lu))
+	lv = math.max(-hh / 2, math.min(hh / 2, lv))
+	local lead = C[key .. "_lead"] or {lu, lv}
+	local k = 1 - math.exp(-dt / 0.15)
+	lead = {lead[1] + (lu - lead[1]) * k, lead[2] + (lv - lead[2]) * k}
+	C[key .. "_lead"] = lead
+	local bx, by = bu + lead[1], bv + lead[2]
+	local dz = tonumber(par.dead_zone) or 0
+	local f = C[key .. "_at"]
+	if not f or math.abs(bx - f[1]) > 30 or math.abs(by - f[2]) > 30 then
+		f = {bx, by}
+	end
+	f[1] = math.max(bx - dz, math.min(bx + dz, f[1]))
+	f[2] = math.max(by - dz * 0.5, math.min(by + dz * 0.5, f[2]))
+	C[key .. "_at"] = f
+	return f
+end
+
 local function place_camera(dt, at)
 	local node = O.camera
 	local cam = node:GetComponent("Camera")
@@ -2149,12 +2184,36 @@ local function place_camera(dt, at)
 		return mode
 	end
 	local want_pos, rot, sight
+	local la, lvel = tonumber(par.look_ahead) or 0, tonumber(par.look_velocity) or 0
+	-- ([KIT_SPECTATE_CAMERA] no lead for another's body or a target)
+	local leads = (la ~= 0 or lvel ~= 0) and C.s and own
+	local vel = leads and type(C.s.vel) == "table" and C.s.vel or {}
+	local aspect = magic.ui.root.width / math.max(1, magic.ui.root.height)
 	if mode == "top_down" then
+		-- [KIT_TOP_DOWN] (6) Following as the side camera does (follow_point) in
+		-- the view's axes on the ground: across the screen (cos yaw, -sin yaw)
+		-- and up it (sin yaw, cos yaw) in x, z; led the way the body faces
+		-- (s.yaw; none: the way it goes) and goes
 		local h = (tonumber(par.height) or 14) * C.zoom
 		local pitch = tonumber(par.angle) or 60
-		rot = magic.Quaternion(pitch, tonumber(par.yaw) or 0, roll)
+		local yaw = tonumber(par.yaw) or 0
+		rot = magic.Quaternion(pitch, yaw, roll)
 		local d = rot * magic.Vector3(0, 0, 1)
-		local target = magic.Vector3(at[1] + ox, at[2] + oy + 1, at[3] + oz)
+		local c, s = math.cos(math.rad(yaw)), math.sin(math.rad(yaw))
+		local lx, lz = 0, 0
+		if leads then
+			local vx, vz = tonumber(vel[1]) or 0, tonumber(vel[3]) or 0
+			local sp = math.sqrt(vx * vx + vz * vz)
+			local a = tonumber(C.s.yaw) and math.rad(tonumber(C.s.yaw))
+			local fx = a and math.sin(a) or sp > 0.1 and vx / sp or 0
+			local fz = a and math.cos(a) or sp > 0.1 and vz / sp or 0
+			lx, lz = fx * la + vx * lvel, fz * la + vz * lvel
+		end
+		local hh = par.ortho == true and h / 2 or h * math.tan(math.rad(cam.fov) / 2)
+		local f = follow_point("top", par, dt, at[1] * c - at[3] * s,
+				at[1] * s + at[3] * c, lx * c - lz * s, lx * s + lz * c, hh * aspect, hh)
+		local target = magic.Vector3(f[1] * c + f[2] * s + ox, at[2] + oy + 1,
+				-f[1] * s + f[2] * c + oz)
 		want_pos = target - d * h
 		if par.ortho == true then
 			cam.orthographic = true
@@ -2173,37 +2232,19 @@ local function place_camera(dt, at)
 		-- simplified: as the editor's Front view, no caps: a cell of the layer
 		-- behind a solid one has no face toward the view
 		local dist = (tonumber(par.distance) or 6) * C.zoom
-		local dz = tonumber(par.dead_zone) or 0
 		-- [KIT_SIDE_LEAD] the point followed led the way the body faces
-		-- (s.yaw: degrees from +z toward +x) and goes (s.vel), at most half the
-		-- view's half width and height off the body, eased toward it
-		-- simplified: a fixed rate (most of the way in half a second), the
-		-- view's size from its perspective at the plane (ortho's is the same)
-		local la, lv = tonumber(par.look_ahead) or 0, tonumber(par.look_velocity) or 0
+		-- (s.yaw: degrees from +z toward +x) and goes (s.vel) (follow_point)
+		-- simplified: the view's size from its perspective at the plane (ortho's
+		-- is the same)
 		local lx, ly = 0, 0
-		-- ([KIT_SPECTATE_CAMERA] none for another's body or a target)
-		if (la ~= 0 or lv ~= 0) and C.s and own then
-			lx = math.sin(math.rad(tonumber(C.s.yaw) or 0)) * la
-			local v = type(C.s.vel) == "table" and C.s.vel or {}
-			lx = lx + (tonumber(v[1]) or 0) * lv
-			ly = (tonumber(v[2]) or 0) * lv
-			local hh = dist * math.tan(math.rad(cam.fov) / 2)
-			local hw = hh * magic.ui.root.width / math.max(1, magic.ui.root.height)
-			lx = math.max(-hw / 2, math.min(hw / 2, lx))
-			ly = math.max(-hh / 2, math.min(hh / 2, ly))
+		if leads then
+			lx = math.sin(math.rad(tonumber(C.s.yaw) or 0)) * la +
+					(tonumber(vel[1]) or 0) * lvel
+			ly = (tonumber(vel[2]) or 0) * lvel
 		end
-		local lead = C.side_lead or {lx, ly}
-		local k = 1 - math.exp(-dt / 0.15)
-		lead = {lead[1] + (lx - lead[1]) * k, lead[2] + (ly - lead[2]) * k}
-		C.side_lead = lead
-		local bx, by = at[1] + lead[1], at[2] + (tonumber(bd.h) or 1.7) * 0.5 + lead[2]
-		local f = C.side_at
-		if not f or math.abs(bx - f[1]) > 30 or math.abs(by - f[2]) > 30 then
-			f = {bx, by}
-		end
-		f[1] = math.max(bx - dz, math.min(bx + dz, f[1]))
-		f[2] = math.max(by - dz * 0.5, math.min(by + dz * 0.5, f[2]))
-		C.side_at = f
+		local hh = dist * math.tan(math.rad(cam.fov) / 2)
+		local f = follow_point("side", par, dt, at[1], at[2] + (tonumber(bd.h) or 1.7) *
+				0.5, lx, ly, hh * aspect, hh)
 		local pz = plane_z() or at[3]
 		local clip = math.min(dist, tonumber(par.side_clip) or 0.55)
 		rot = magic.Quaternion(0, 0, roll)

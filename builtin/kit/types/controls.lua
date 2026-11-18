@@ -4,7 +4,10 @@
 -- movement's own parameters likewise, its nearest copy's): the
 -- camera (first_person: the eye; chase: behind the player, distance away;
 -- top_down: from height above at a fixed angle and yaw, ortho a flat
--- view; [KIT_PLANE] side: distance across the plane looking along +z, x
+-- view; [KIT_TOP_DOWN] (6) following with dead_zone, look_ahead and
+-- look_velocity as side does, in the view's axes on the ground (across the
+-- screen and up it; the lead the way the body faces, s.yaw, else the way it
+-- goes); [KIT_PLANE] side: distance across the plane looking along +z, x
 -- right and y up, following once the body is dead_zone m off the middle
 -- (0: always), never turning, ortho flat, what is nearer than side_clip m
 -- in front of the plane clipped (0.55: all in front of the plane's layer;
