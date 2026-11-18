@@ -1920,12 +1920,13 @@ struct Module: public interface::Module, public Interface
 					}
 					t.kept.insert(it.key());
 				}
-				if((*it).get("shared").is_true())
-					t.shared.insert(it.key());
-				else if((*it).get("per_player").is_true()){
+				// [KIT_CLIENT_REACT] (7) per_player over shared: with both, the
+				// whole table went to every client
+				if((*it).get("per_player").is_true()){
 					t.per_player.insert(it.key());
 					t.shared.insert(it.key());
-				}
+				} else if((*it).get("shared").is_true())
+					t.shared.insert(it.key());
 			}
 		t.linked_in = t.decl.get("linked_in").is_true();
 		t.params_of = src.find("params_of") != ss_::npos;
