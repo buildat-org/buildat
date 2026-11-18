@@ -184,7 +184,7 @@ body() # the body's x, z and corrections now, into bx, bz, bc
 }
 drive() # <who> <seconds> <stop regex>: the driver on that client (env TARGET, FIRE_ON)
 {
-	python3 -I "$t/drive.py" "$t/$1.log" "$t/$1.cmd" "$2" "$3" > "$t/drive_$1.txt" 2>&1
+	python3 -I "$t/drive.py" "$t/$1.log" "$t/$1.cmd" "$2" "$3" > "$t/drive_$1.log" 2>&1
 }
 near() { awk -v a="$1" -v b="$2" -v e="$3" 'BEGIN { exit !((a - b) ^ 2 <= e * e) }'; }
 # (the game's clock as the wall's: the race's countdown, its clock and its
@@ -270,13 +270,14 @@ x0=$bx z0=$bz c0=$bc
 as bob
 body
 # (from his slot through the middle of kitboss's car, on: head-on into its
-# back; a glancing touch pushes it anything from 0.1 to 6 m)
+# back: 7-11 m. Under 0.5 m was kitbob's car stopping dead on it, the
+# knock traded again each step of his batch before kitboss's step took it)
 TARGET=$(awk -v x="$bx" -v z="$bz" -v X="$x0" -v Z="$z0" 'BEGIN { d = sqrt((X - x) ^ 2 + (Z - z) ^ 2)
 	printf "%.2f,%.2f", X + (X - x) / d * 60, Z + (Z - z) / d * 60 }') drive bob 2 "NEVER"
-cmd "frames 10" "screenshot $t/push.png"
+step 10 "Wrote screenshot $t/push.png" "frames 10" "screenshot $t/push.png"
 as boss
 body
-python3 -I - "$x0" "$z0" "$bx" "$bz" "$c0" "$bc" <<'PY' || fail "kitboss's car not pushed: $x0,$z0 to $bx,$bz ($CL, $t/drive_bob.txt)"
+python3 -I - "$x0" "$z0" "$bx" "$bz" "$c0" "$bc" <<'PY' || fail "kitboss's car not pushed: $x0,$z0 to $bx,$bz ($CL, $t/drive_bob.log)"
 import sys
 x0, z0, x1, z1, c0, c1 = map(float, sys.argv[1:])
 d = ((x1 - x0) ** 2 + (z1 - z0) ** 2) ** 0.5
@@ -300,10 +301,10 @@ await "$SL" "$m" 2 "local/brim_race $RACE: kitbob wrecked by mine"
 printf "%s\n" "frames 5" "screenshot $t/wreck.png" >&4 # (kitbob's view)
 await "$SL" "$m" 2 "Entity $RACE made a copy of entity:[0-9]+"
 await "$SL" "$m" 5 "local/brim_race $RACE: kitbob back on the road at checkpoint 2"
-wait $DB || fail "kitboss's driver: $(tail -2 "$t/drive_boss.txt")"
+wait $DB || fail "kitboss's driver: $(tail -2 "$t/drive_boss.log")"
 await "$SL" "$m" 5 "local/brim_race $RACE: kitboss finished 1st"
 as bob
-wait $DO || fail "kitbob's driver: $(tail -2 "$t/drive_bob.txt")"
+wait $DO || fail "kitbob's driver: $(tail -2 "$t/drive_bob.log")"
 await "$SL" "$m" 5 "local/brim_race $RACE: kitbob finished 2nd"
 await "$SL" "$m" 2 "local/brim_race $RACE: the race is over: everyone finished"
 await "$t/bob.log" 0 5 'shown, layer [0-9]+: "You: 2nd \| 1st  kitboss  [0-9.:]+ \| 2nd  kitbob '
@@ -331,8 +332,8 @@ assert len(lap) == 1 and len(cp) == 3 and max(cp) < lap[0], order
 assert any(l.startswith("finished the trial in") for l in order), order
 print("ok: the trial: %s" % "; ".join(order[1:]))
 PY
-grep -aoP "at \K-?[0-9.]+" "$t/drive_boss.txt" | head -20 | awk '$1 > -8 { f = 1 } END { exit !f }' ||
-	fail "the car never crossed the line at the start ($t/drive_boss.txt)"
+grep -aoP "at \K-?[0-9.]+" "$t/drive_boss.log" | head -20 | awk '$1 > -8 { f = 1 } END { exit !f }' ||
+	fail "the car never crossed the line at the start ($t/drive_boss.log)"
 # (up to the lap: the finish takes the car out of play, a step its client
 # had already taken in play: a correction there is the run's end)
 python3 -I - "$SL" "$m" "$CL" "$mc" "$TRIAL" <<'PY' || fail "corrections on the trial's lap ($CL)"
