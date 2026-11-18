@@ -115,6 +115,9 @@ client boss cu_boss "$t/boss.cmds" BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CREATE
 	BUILDAT_JOIN_ADMIN="setting open_registration on"
 done_ok boss $cpid
 want "$t/srv.log" "kitboss is kept logged in"
+# An account made by password is said to join so, not by a kept login
+grep -aqE "kitboss joined from \S+ by password and setup code$" "$t/srv.log" ||
+	fail "kitboss's join not by password and setup code ($t/srv.log)"
 
 # 1. A, then G a guest of kitbob's, then B kicking A out
 cat > "$t/a.cmds" <<'EOF'
@@ -134,6 +137,8 @@ EOF
 client a cu_a "$t/a.cmds" BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE=1
 apid=$cpid
 await "$t/a.log" 120 "acc_check_walked"
+grep -aqE "kitbob joined from \S+ by password$" "$t/srv.log" ||
+	fail "kitbob's first join not by password ($t/srv.log)"
 {
 	choose "Log in as guest"
 	echo "wait_log_any 60000 accounts: logged in as guest"

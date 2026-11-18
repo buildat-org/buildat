@@ -1995,8 +1995,10 @@ struct Module: public interface::Module, public Interface
 		// was one
 		ss_ wait_data;
 		bool waited = false;
-		// By the account's password (and code), not a kept login
+		// By the account's password (and code), not a kept login; the code
+		// a password came with (" and setup code", " and an invite")
 		bool by_password = false;
+		ss_ with_code;
 		const ss_ bin = network::address_bin(peer.address);
 		const int64_t wait = failure_wait(m_address_failures, bin, now);
 		if(wait > 0 && !local){
@@ -2153,6 +2155,7 @@ struct Module: public interface::Module, public Interface
 				set_account(name, account);
 				log_i(MODULE, "%s claimed the server with the setup code",
 						cs(name));
+				with_code = " and setup code";
 			}
 		} else {
 			// [ACCOUNT_CREATE]: a plain login does not make an account; a
@@ -2190,6 +2193,7 @@ struct Module: public interface::Module, public Interface
 					privs = {"admin"};
 					log_i(MODULE, "%s claimed the server with the setup code",
 							cs(name));
+					with_code = " and setup code";
 				} else if(!code.empty()){
 					if(!(m_store->get("invite/"+code, data) &&
 							unpack(data, invite)))
@@ -2197,6 +2201,7 @@ struct Module: public interface::Module, public Interface
 					m_store->remove("invite/"+code);
 					log_i(MODULE, "%s used an invite of %s", cs(name),
 							cs(invite.by));
+					with_code = " and an invite";
 				} else if(!m_access.open_registration){
 					return reply("New accounts need an invite code from an "
 							"admin");
@@ -2217,6 +2222,7 @@ struct Module: public interface::Module, public Interface
 			account = new_account(pw, privs);
 			set_account(name, account);
 			log_i(MODULE, "New account %s", cs(name));
+			by_password = !local;
 		}
 		// 10g: a blocklist's ban of the ID is a ban of its account here,
 		// password and kept login too -- not of an admin's or a
@@ -2254,9 +2260,8 @@ struct Module: public interface::Module, public Interface
 		update_setup_code();
 		const bool keep = cred.keep && !local && (cred.token.empty() || waited);
 		// [ACCOUNT_WHO] And how
-		const char *how = local ? "local" : !id.sub.empty() ? "Starport ID" :
-				by_password ? (code.empty() ? "password" :
-				"password and setup code") : "kept login";
+		const ss_ how = local ? "local" : !id.sub.empty() ? "Starport ID" :
+				by_password ? "password"+with_code : "kept login";
 		// [ACC_ALREADY_HERE] **Here on another client already**: the client
 		// is asked, and its answer (on_here) completes this. Where the app
 		// lets a name in more than once (floorplanner), no asking
@@ -2266,7 +2271,7 @@ struct Module: public interface::Module, public Interface
 			peer.here_hash = account.hash;
 			peer.here_keep = keep;
 			log_i(MODULE, "%s proved from %s by %s while here already: "
-					"asked to choose", cs(name), cs(peer.address), how);
+					"asked to choose", cs(name), cs(peer.address), cs(how));
 			if(!claim_id.sub.empty())
 				send(packet.sender, "accounts:link_result", pack(link_note));
 			return reply("HERE:"+name);
