@@ -325,6 +325,25 @@ buildat.sub_packet("voxelworld:init", function(data)
 			M.streaming_allowed and tostring(math.floor(M.send_distance)) or "0")
 end)
 
+-- [KIT_TEXTURE_DESIGNER] A texture named "generated/weave/weave1/..." is
+-- its recipe: made here from the name in a registry's bytes (an Image for
+-- the atlas, a Texture2D for a look), before anything is meshed with it
+local WEAVE_NAME = "generated/weave/weave1/" .. ("[0-9a-v]"):rep(53)
+function M.make_named_textures(data)
+	if not data:find("generated/weave/", 1, true) then
+		return
+	end
+	local weave = require("buildat/extension/weave")
+	for name in data:gmatch(WEAVE_NAME) do
+		local r = weave.from_name(name)
+		if r then
+			weave.texture(r)
+		else
+			log:warning("not a weave1 texture: " .. name)
+		end
+	end
+end
+
 -- [REGISTRY_FILE] The registry from the file the server serves, by the
 -- server's run_script: at join, ahead of voxelworld:ready, and again when
 -- it changes. The script runs once the file is in.
@@ -332,6 +351,7 @@ function M.registry_from_file()
 	local t0 = buildat.get_time_us()
 	local data = buildat.get_file_content("voxelworld/voxel_registry.bin")
 	local t1 = buildat.get_time_us()
+	M.make_named_textures(data)
 	voxel_reg:deserialize(data)
 	occl_tables = {}
 	log:info(string.format("the voxel registry from the served file, %d bytes"..
