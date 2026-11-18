@@ -324,7 +324,12 @@ namespace interface
 //                               (logged). No c; none: the parameters as
 //                               they were, so filtered
 // c: c.id, c.pos, c.params (read), c.state (read and written; a table in
-// it changed in place is written too), c:emit(output, value),
+// it changed in place is written too), [KIT_ZONE_SHAPES] c:params_of(type)
+// (the parameters of the same entity's component of that type, as its own
+// c.params; a copy, so writing it changes nothing; nil: none there; as they
+// are at the run's start: no sibling on_params, a read at use is always
+// current; c:params_of("kit/polygon").points a polygon's outline; only a
+// type whose file names params_of has them in its runs), c:emit(output, value),
 // [KIT_SOUNDS] c:sound(name, {everywhere = true}) (a game's sound at
 // it, heard in its scene; everywhere, or an entity with no place: not
 // positional; 8 a run; "" or nil nothing),

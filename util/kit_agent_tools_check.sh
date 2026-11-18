@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-17)
-# covers: builtin/kit/kit.cpp builtin/kit/types/ui_button.lua builtin/kit/types/ui_scene_list.lua
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/ui_button.lua builtin/kit/types/ui_scene_list.lua
 # [KIT_AGENT_FEEDBACK_1117] An agent's tools as a claude.ai agent asked for
 # them on testbench, through MCP on Workbench. kitboss (the admin) makes two
 # builder tokens and an admin token on a headless weston's Xwayland of the
@@ -38,7 +38,10 @@
 #   7. get_history: the edits by who, limit, since (11);
 #   8. restore_checkpoint puts a heightmap's samples back (4z26): kitboss
 #      raises a sample after a checkpoint, the restore lowers it, the
-#      restore of "before restore ..." raises it again (column reads).
+#      restore of "before restore ..." raises it again (column reads);
+#   9. [KIT_ZONE_SHAPES] (the admin token's, before 8) put_type's text;
+#      c:params_of reads the polygon it is on, a reshape's points at once, a
+#      copy.
 #   util/kit_agent_tools_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -274,6 +277,20 @@ TICKER = '''return {
 		c.state.n = c.state.n + 1
 		c:emit("n", c.state.n)
 		c:after(0)
+	end,
+}
+'''
+# [KIT_ZONE_SHAPES] a component reading its polygon's points
+HAZ = '''return {
+	version = 1,
+	component = true,
+	about = {what = "The check's reader of its entity's polygon."},
+	inputs = {read = "none"},
+	state = {pts = {default = {}}, door = {default = true}},
+	on_input = function(c, input)
+		c:params_of("kit/polygon").points[1] = {99, 99}
+		c.state.pts = c:params_of("kit/polygon").points
+		c.state.door = c:params_of("kit/door") ~= nil
 	end,
 }
 '''
@@ -525,6 +542,40 @@ elif phase == "history":
     assert json.loads(call("get_history", {"since": "2999-01-01T00"})) == []
     assert json.loads(call("get_history", {"since": 0, "limit": 200}))[-len(h):] == h
     assert "since: a time" in refused("get_history", {"since": "yesterday"})
+elif phase == "zones":
+    # [KIT_ZONE_SHAPES] c:params_of
+    rpc("initialize", init)
+    to_start()
+    call("new_scene", {"name": "zones"})
+    call("put_type", {"name": "zhaz", "source": HAZ})
+    d = {t["name"]: t for t in rpc("tools/list")["result"]["tools"]}["put_type"]["description"]
+    assert 'c:params_of(type)' in d, d
+    U = [[0, 0], [3, 0], [3, 3], [2, 3], [2, 1], [1, 1], [1, 3], [0, 3]]
+    P = placed(call("place", {"type": "kit/polygon", "pos": [20, 1, 0], "params": {"points": U}}))
+    call("add_component", {"id": P, "type": "local/zhaz"})
+    def comp(i, c):
+        return entity(i)["components"][c]
+    def wait(f, what, secs=10):
+        for k in range(secs * 2):
+            v = f()
+            if v:
+                return v
+            time.sleep(0.5)
+        raise AssertionError("not in %d s: %s" % (secs, what))
+    assert call("start") == "Running"
+    # (1) c:params_of: the polygon's points (its copy written: nothing
+    # changed), a reshape's at once; none of a type not there
+    def read(pts):
+        call("try_input", {"id": P, "input": "read"})
+        st = wait(lambda: (lambda x: x if x.get("pts") == pts else None)(
+            comp(P, 1).get("state", {})), "the hazard reading %s" % pts)
+        assert st["door"] is False, st
+    read(U)
+    U2 = U[:5] + [[1.5, 0.5]] + U[5:]
+    call("set_param", {"id": P, "param": "points", "value": U2})
+    read(U2)
+    print("   params_of: the polygon's points, again after a reshape")
+    call("stop")
 elif phase == "heightmap":
     rpc("initialize", init)
     to_start()
@@ -559,17 +610,18 @@ mcp() # <phase>: the MCP client's phase; its output in $t/mcp_<phase>.log
 	# (the builder's calls over two tokens, each under its 120 a minute; an
 	# agent's scene is its token's: heightmap's switch_scene after goals')
 	local k=$tok
-	case $1 in play|state|goals|history|heightmap|checkpoint) k=$tok2 ;; esac
+	case $1 in play|state|goals|history|heightmap|checkpoint) k=$tok2 ;;
+		zones) k=$adm ;; esac
 	python3 -I "$t/mcp.py" "$1" "$url" "$k" "$adm" "$t" "$V" > "$t/mcp_$1.log" 2>&1 ||
 		fail "the MCP phase $1: $(tail -5 "$t/mcp_$1.log") ($t/mcp_$1.log, $SL)"
 	cat "$t/mcp_$1.log"
 }
-for p in tools types links play state goals history; do
+for p in tools types links play state goals history zones; do
 	mcp $p
 done
 grep -aqE "kitboss's agent tries entity [0-9]+'s ping null as kitboss \(player:[0-9]+\)" "$SL" ||
 	fail "no try as kitboss in $SL"
-echo "ok: tools listed by the token; edit_type, a client part kept, a param's default; links by name; try_input as; press; filters; level warnings; history"
+echo "ok: tools listed by the token; edit_type, a client part kept, a param's default; links by name; try_input as; press; filters; level warnings; history; params_of"
 
 # 8. A heightmap's samples restored
 # (each map generated in the server's call: its line before the answer)

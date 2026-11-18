@@ -318,6 +318,9 @@ struct Type
 	// [CRAG_BEST_RESET] It reads the entities linking to it (linked_in =
 	// true: c.linked_in = {input = {id...}}), and reaches them
 	bool linked_in = false;
+	// [KIT_ZONE_SHAPES] Its file names params_of: its runs carry the same
+	// entity's other components' parameters (c:params_of)
+	bool params_of = false;
 	// [KIT_SCENE_PACKAGES] It reads the listed scenes (listed = true:
 	// c.listed, each scene with a kit/scene_info listing it)
 	bool listed = false;
@@ -1922,6 +1925,7 @@ struct Module: public interface::Module, public Interface
 				}
 			}
 		t.linked_in = t.decl.get("linked_in").is_true();
+		t.params_of = src.find("params_of") != ss_::npos;
 		t.listed = t.decl.get("listed").is_true();
 		t.usable = t.decl.get("usable").is_true();
 		// [KIT_USE_ACCESS] Who may use it, the engine's on every usable type
@@ -16393,6 +16397,19 @@ struct Module: public interface::Module, public Interface
 			}
 			o += ",players=";
 			lua_lit(players, o);
+		}
+		// [KIT_ZONE_SHAPES] c:params_of: {type = params} of its entity's
+		// components, as each one's c.params; read at use, so always current
+		if(m_types[in.type].params_of){
+			o += ",siblings={";
+			for(const Instance &si : e.comps){
+				o += "[";
+				lua_lit(json::Value(si.type), o);
+				o += "]=";
+				lua_lit(si.type == "kit/inventory" ? inv_params() : si.params, o);
+				o += ",";
+			}
+			o += "}";
 		}
 		// [CRAG_BEST_RESET] {input = {id...}}
 		if(m_types[in.type].linked_in){
@@ -31946,7 +31963,10 @@ struct Module: public interface::Module, public Interface
 				"Handlers: on_start(c) (the round starts or it is placed "
 				"Running), on_input(c, input, value, by), on_use(c, by), "
 				"on_timer(c, name), on_params(c, changed), on_remove(c). c: c.id, "
-				"c.pos, c.params, c.state (read and write), c:emit(output, value), "
+				"c.pos, c.params, c.state (read and write), c:params_of(type) "
+				"(the params of the same entity's component of that type, a "
+				"copy read at use, so always current; nil: none; "
+				"c:params_of(\"kit/polygon\").points), c:emit(output, value), "
 				"c:after(seconds, name) (then on_timer), c:log(...) (get_log), "
 				"c:name(by), c:teleport({x, y, z}) (who set the run off). A "
 				"movement (a seat's: seat = true, usable = true; or kit/controls' "
@@ -37808,7 +37828,10 @@ struct Module: public interface::Module, public Interface
 				"root's (app_root; scene \"\" lists them); any scene's edits "
 				"reach them.\n"
 				// [KIT_AGENT_FEEDBACK_1117]
-				"- In a type's Lua: c.players (players = true) lists every "
+				"- In a type's Lua: c:params_of(type) reads the params of the "
+				"same entity's component of that type (a polygon's points), "
+				"current at each run: no copy of them kept, no on_params for "
+				"it. c.players (players = true) lists every "
 				"scene's players, each p.scene theirs and p.away true outside the "
 				"component's own scene: a scene's run or HUD keeps to not p.away. "
 				"State per_player = true is a table by `by` (\"player:<id>\"): "
