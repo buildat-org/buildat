@@ -52,8 +52,9 @@ check_tmp kit_racer_web; t=$CHECK_TMP
  ["waitlog", "GO!", 20], ["frames", 5],
  ["holdkey", "w", 800],
 J
-	# (a weave along the straight: east, then left, right and back)
-	for k in a:300 d:600 a:300 d:300 a:300; do
+	# (a weave along the straight: east, then left, right and back; slow off
+	# the line, the car turns some 60 degrees a second)
+	for k in a:600 d:1200 a:600 d:600 a:600; do
 		cat <<J
  ["holdkey", ["w", "${k%:*}"], ${k#*:}], ["event", "kit_players"],
  ["waitlog", "movement body: ", 10], ["frames", 3],
