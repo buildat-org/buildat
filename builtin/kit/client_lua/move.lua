@@ -103,6 +103,17 @@
 -- solid looks' boxes through z, the heightmap's profile along z and the polygons'
 -- outlines (W:plane_edges); the segment the free objects too (W:ray's).
 -- simplified: the circle meets no free voxel object
+-- [KIT_TOP_DOWN] (1) w.horizontal (kit/controls' plane "horizontal"): w.plane is then a
+-- whole y, the middle of the spawn's cell; the body's feet are held at w.plane - 0.5
+-- (that cell's bottom, standing on the cell under it), its speed up none, and W:move
+-- and W:walk go nowhere up or down: a walker there has no gravity and no jump, always
+-- on its floor (W:walk_flat; its s.friction and s.surface w:under's). The 2D queries
+-- are then in the level plane at that y (z above: the slice's y, default w.plane):
+-- their x, y the world's x and z, nx, ny the normal's x and z, a circle meeting the
+-- voxels of that layer, the boxes through that y and the outlines of the polygons
+-- lying flat (stage 3's prisms with their depth up) that span it.
+-- simplified: in a horizontal plane the heightmap is no 2D edge (W:move still meets
+-- it), nor is a standing polygon (its slice there is the upgrade)
 -- [KIT_PLANE] stage 3: kit/polygon's look ("polygon": its points {{x, y}...} in its
 -- own x and y, extruded `depth` along its own z round its place) lying flat to the
 -- world's x and y (its yaw 0 or 180, any roll) is a prism (M.look_poly, w.polys):
@@ -860,6 +871,8 @@ function M.world(t)
 	w.cache = {}
 	-- [KIT_PLANE] the plane's z (nil: none); stage 3: the polygons' prisms
 	w.plane = type(t.plane) == "number" and t.plane or nil
+	-- [KIT_TOP_DOWN] (1) the plane level: w.plane a y
+	w.horizontal = w.plane ~= nil and t.horizontal == true or nil
 	w.polys = t.polys or {}
 	-- [KIT_MOVING_OBJECTS] t.moving_looks: solid looks on moving objects, each
 	-- {look, on, {x, y, z}, yaw, pitch, roll, links} at rest
@@ -1062,7 +1075,7 @@ end
 -- [KIT_PLANE] stage 3: whether a polygon's prism is met by the box: in the plane
 -- spanning its z, else the box's z within it
 local function spans(w, p, b)
-	if w.plane then
+	if w.plane and not w.horizontal then
 		return p.z0 < w.plane and p.z1 > w.plane
 	end
 	return p.z0 < b[6] - EPS and p.z1 > b[3] + EPS
@@ -1415,8 +1428,11 @@ end
 
 function W:move(b, dx, dy, dz, step)
 	local hits = {x = 0, y = 0, z = 0}
-	-- [KIT_PLANE] nothing across the plane (no wall met there, no step up from one)
-	if self.plane then
+	-- [KIT_PLANE] nothing across the plane (no wall met there, no step up from one;
+	-- [KIT_TOP_DOWN] a level one: nothing up or down)
+	if self.horizontal then
+		dy, step = 0, 0
+	elseif self.plane then
 		dz = 0
 	end
 	local bb = box_of(b.x, b.y, b.z, b.r, b.h)
@@ -1800,7 +1816,9 @@ function W:hold(s)
 	if type(p) ~= "table" then
 		return
 	end
-	p[3] = self.plane
+	-- ([KIT_TOP_DOWN] a level one: the feet at its cell's bottom)
+	local a = self.horizontal and 2 or 3
+	p[a] = self.horizontal and self.plane - 0.5 or self.plane
 	if s.frame and type(s.at) == "table" then
 		for _, o in ipairs(self.turned) do
 			if o.id == s.frame then
@@ -1808,7 +1826,7 @@ function W:hold(s)
 			end
 		end
 	elseif type(v) == "table" then
-		v[3] = 0
+		v[a] = 0
 	end
 end
 
@@ -1816,11 +1834,13 @@ end
 -- right going from a to b, for x0...x1, y0...y1: the heightmap's profile along z (a
 -- vertex at each whole x: exact at a whole z, as the plane's is) and the outlines of
 -- the polygons spanning z (stage 3)
+-- ([KIT_TOP_DOWN] a level plane at y = z: the flat polygons', no heightmap's)
 function W:plane_edges(z, x0, y0, x1, y1)
 	local out = {}
+	local da = self.horizontal and 2 or 3
 	for _, p in ipairs(self.polys) do
-		if p.z0 < z and p.z1 > z and p.x0 <= x1 and p.x1 >= x0 and p.y0 <= y1 and
-				p.y1 >= y0 then
+		if (p.da or 3) == da and p.z0 < z and p.z1 > z and p.x0 <= x1 and p.x1 >= x0 and
+				p.y0 <= y1 and p.y1 >= y0 then
 			local q = p.pts
 			for i = 1, p.n do
 				local j = i % p.n + 1
@@ -1832,7 +1852,7 @@ function W:plane_edges(z, x0, y0, x1, y1)
 			end
 		end
 	end
-	if self.ground_fn then
+	if self.ground_fn and not self.horizontal then
 		local px, ph = nil, nil
 		for ix = floor(x0), floor(x1) + 1 do
 			local h = self.ground_fn(ix, z)
@@ -1850,6 +1870,16 @@ function W:circle(x, y, r, z)
 	z = z or self.plane or 0
 	local k = floor(z + 0.5)
 	local out = {}
+	-- [KIT_TOP_DOWN] the plane's 2D y the world's V, across it N; a 2D cell's in the
+	-- world
+	local hz = self.horizontal
+	local V, N = hz and 3 or 2, hz and 2 or 3
+	local function cell(i, j)
+		if hz then
+			return self:cell(i, k, j)
+		end
+		return self:cell(i, j, k)
+	end
 	local function add(d, nx, ny, info)
 		local at = #out + 1
 		for i, c in ipairs(out) do
@@ -1900,16 +1930,16 @@ function W:circle(x, y, r, z)
 		add(r + best, nx, ny, info)
 	end
 	local function full(i, j)
-		local c = self:cell(i, j, k)
+		local c = cell(i, j)
 		return c ~= nil and not c.boxes
 	end
 	for i = lo_cell(x - r), hi_cell(x + r) do
 		for j = lo_cell(y - r), hi_cell(y + r) do
-			local info = self:cell(i, j, k)
+			local info = cell(i, j)
 			if info and info.boxes then
-				for _, b in ipairs(cell_boxes(info, i, j, k)) do
-					if b[3] < z and b[6] > z then
-						box(b[1], b[2], b[4], b[5], ALL, info)
+				for _, b in ipairs(cell_boxes(info, i, hz and k or j, hz and j or k)) do
+					if b[N] < z and b[N + 3] > z then
+						box(b[1], b[V], b[4], b[V + 3], ALL, info)
 					end
 				end
 			elseif info then
@@ -1919,9 +1949,9 @@ function W:circle(x, y, r, z)
 		end
 	end
 	for _, b in ipairs(self.boxes) do
-		if b[3] < z and b[6] > z and b[1] < x + r and b[4] > x - r and b[2] < y + r and
-				b[5] > y - r then
-			box(b[1], b[2], b[4], b[5], ALL, b.info or M.OBJECT)
+		if b[N] < z and b[N + 3] > z and b[1] < x + r and b[4] > x - r and b[V] < y + r and
+				b[V + 3] > y - r then
+			box(b[1], b[V], b[4], b[V + 3], ALL, b.info or M.OBJECT)
 		end
 	end
 	-- The edges: from in front as from a box's corner; from behind (inside the solid,
@@ -1958,7 +1988,13 @@ function W:segment(x0, y0, x1, y1, z)
 	if len < 1e-12 then
 		return nil
 	end
-	local t, info, nx, ny = self:ray(x0, y0, z, dx, dy, 0, len, true)
+	local t, info, nx, ny, _
+	if self.horizontal then
+		-- ([KIT_TOP_DOWN] level: along x and z at y = z; the normal's x and z)
+		t, info, nx, _, ny = self:ray(x0, z, y0, dx, 0, dy, len, true)
+	else
+		t, info, nx, ny = self:ray(x0, y0, z, dx, dy, 0, len, true)
+	end
 	local best = t and t / len
 	for _, e in ipairs(self:plane_edges(z, x0 < x1 and x0 or x1, y0 < y1 and y0 or y1,
 			x0 < x1 and x1 or x0, y0 < y1 and y1 or y0)) do
@@ -2207,6 +2243,28 @@ function W:walk_on(o, s, b, wx, wz, jump, dt, p)
 	return true
 end
 
+-- [KIT_TOP_DOWN] (1) W:walk in a level plane: toward the wish as what is under the
+-- feet lets (w:under's friction, 1 over nothing), along x and z only; always on its
+-- floor (s.ground), s.friction and s.surface w:under's after the move.
+-- simplified: no free object's deck (s.frame), no step up
+function W:walk_flat(s, b, wx, wz, dt, p)
+	local pos, v = s.pos, s.vel
+	s.frame, s.at, s.carry = nil, nil, nil
+	local on = self:under(pos[1], pos[2], pos[3])
+	toward(v, wx, wz, num(p.acceleration, 40) * dt * (on and on.friction or 1))
+	v[2] = 0
+	local mx, _, mz, hits = self:move({x = pos[1], y = pos[2], z = pos[3], r = b.r,
+		h = b.h}, v[1] * dt, 0, v[3] * dt, 0)
+	pos[1], pos[3] = pos[1] + mx, pos[3] + mz
+	if hits.x ~= 0 then v[1] = 0 end
+	if hits.z ~= 0 then v[3] = 0 end
+	on = self:under(pos[1], pos[2], pos[3])
+	s.ground = true
+	s.friction = on and on.friction or 1
+	s.surface = on and on.surface or nil
+	return s
+end
+
 -- [KIT_AUTO_JUMP] auto (the input's): up a one-voxel step without Jump
 M.AUTOJUMP_HEIGHT = 1.1
 M.AUTOJUMP_S = 0.1
@@ -2216,6 +2274,10 @@ function W:walk(s, b, wx, wz, jump, dt, p, auto)
 	end
 	if type(s.vel) ~= "table" then
 		s.vel = {0, 0, 0}
+	end
+	-- [KIT_TOP_DOWN] (1) a level plane: no gravity, no jump
+	if self.horizontal then
+		return self:walk_flat(s, b, wx, wz, dt, p)
 	end
 	-- [KIT_PLANE] no wish across the plane
 	if self.plane then
@@ -2440,7 +2502,7 @@ function M.snapshot(t)
 			(hm.ox or 0) + hm.sx - 1, (hm.oz or 0) + hm.sz - 1} or nil
 	return M.world{cell = cell, boxes = boxes, ground = ground, edge = edge,
 		turned = M.turned(t.turned or {}), moving_looks = moving_looks, t = t.t,
-		plane = t.plane, polys = polys}
+		plane = t.plane, horizontal = t.horizontal, polys = polys}
 end
 
 -- The steps of a batch: each input dt long, in sub steps of its own

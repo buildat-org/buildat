@@ -22,7 +22,9 @@
 -- stepping the players' bodies: kit/walker, kit/click_to_move, any other
 -- with a step but a creature's or a course's; "none"), [KIT_PLANE] plane
 -- (vertical: the players' bodies held at one z, the depth of the spawn a
--- joining player ends on, a whole z, both sides stepping so; none) and the
+-- joining player ends on, a whole z, both sides stepping so; [KIT_TOP_DOWN]
+-- horizontal: held at one height, the feet on the bottom of the spawn's cell,
+-- moving in x and z, no gravity or jump for kit/walker; none) and the
 -- view's detail:
 -- fov, an offset, smoothing (seconds), roll (degrees), and the effects
 -- tint (#rrggbb) at tint_amount, vignette, blur and glitch (0...1). The
@@ -97,7 +99,8 @@ return {
 			choices = {"world", "object"}},
 		movement = {type = "string", default = "kit/walker",
 			choices_from = "movements"},
-		plane = {type = "string", default = "none", choices = {"none", "vertical"}},
+		plane = {type = "string", default = "none",
+			choices = {"none", "vertical", "horizontal"}},
 		fov = {cat = "look", type = "number", default = 75, min = 20,
 			max = 150},
 		distance = {cat = "look", type = "number", default = 6, min = 1,

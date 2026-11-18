@@ -22920,8 +22920,9 @@ struct Module: public interface::Module, public Interface
 		// would end it exactly
 		int64_t settle_until = 0;
 		// [KIT_PLANE] the z it is held at (plane_depth(); NaN: kit/controls'
-		// plane is none)
+		// plane is none); [KIT_TOP_DOWN] plane_h: a level plane's y (plane_of())
 		double plane_z = NAN;
+		bool plane_h = false;
 	};
 	static constexpr int64_t SETTLE_US = 500000;
 	ss_ settle_json(const Body &b) const
@@ -23131,7 +23132,8 @@ struct Module: public interface::Module, public Interface
 	// editor's front view places there.
 	// simplified: one plane a scene; a team's pad at another depth has its players
 	// put onto this one (zones of their own are [KIT_PLANE]'s later stage)
-	double plane_depth(const ss_ &scene)
+	// [KIT_TOP_DOWN] k: the axis (1: a level plane's y, the spawn cell's middle)
+	double plane_depth(const ss_ &scene, int k = 2)
 	{
 		uint64_t best = 0;
 		double z = 0;
@@ -23146,15 +23148,26 @@ struct Module: public interface::Module, public Interface
 						in.params.get(t.spawn_param).is_true())){
 					double w[3];
 					world_of(e, w);
-					best = p.first, z = w[2];
+					best = p.first, z = w[k];
 				}
 			}
 		}
 		if(!best){
-			double x, y;
-			scene_spawn(scene, x, y, z);
+			double s[3];
+			scene_spawn(scene, s[0], s[1], s[2]);
+			z = s[k];
 		}
 		return std::floor(z + 0.5);
+	}
+
+	// [KIT_TOP_DOWN] kit/controls' plane in a scene: the coordinate it holds
+	// (vertical: plane_depth()'s z; horizontal: the spawn cell's middle y, the
+	// feet held at that cell's bottom), NaN: none; *h: level
+	double plane_of(const ss_ &scene, bool *h)
+	{
+		const ss_ p = jstr(controls_params(scene), "plane");
+		*h = p == "horizontal";
+		return p == "vertical" || *h ? plane_depth(scene, *h ? 1 : 2) : NAN;
 	}
 
 	// The movement a body has: its seat's, else the controls' choice
@@ -23299,6 +23312,8 @@ struct Module: public interface::Module, public Interface
 			// [KIT_PLANE] the z it is held at, the client predicting as the box steps
 			if(!std::isnan(b.plane_z))
 				c.set("plane", b.plane_z);
+			if(!std::isnan(b.plane_z) && b.plane_h)
+				c.set("horizontal", true);
 			// [KIT_VEHICLE_MOVEMENTS] a steered vehicle ridden: its inputs, no steps
 			if(b.ride)
 				c.set("ride", (int64_t)b.ride);
@@ -23539,14 +23554,14 @@ struct Module: public interface::Module, public Interface
 		}
 		// [KIT_PLANE] onto the plane: its depth, no speed across (a rider is
 		// where its seat is)
-		b.plane_z = NAN;
-		if(jstr(controls_params(m_peers[peer].scene), "plane") == "vertical")
-			b.plane_z = plane_depth(m_peers[peer].scene);
+		// ([KIT_TOP_DOWN] a level one: its feet at the cell's bottom, no speed up)
+		b.plane_z = plane_of(m_peers[peer].scene, &b.plane_h);
 		if(!std::isnan(b.plane_z) && !b.ride && b.state.get("pos").is_array() &&
 				b.state.get("pos").size() == 3){
-			b.state["pos"].set_at(2, b.plane_z);
+			const unsigned k = b.plane_h ? 1 : 2;
+			b.state["pos"].set_at(k, b.plane_h ? b.plane_z - 0.5 : b.plane_z);
 			if(b.state.get("vel").is_array() && b.state.get("vel").size() == 3)
-				b.state["vel"].set_at(2, 0.0);
+				b.state["vel"].set_at(k, 0.0);
 		}
 		b.state = json::load_string(b.state.stringify().c_str());
 		b.state_json = b.state.stringify();
@@ -23871,15 +23886,17 @@ struct Module: public interface::Module, public Interface
 			double r, double h, double reach)
 	{
 		const Entity *v = b.seat ? vehicle_of(b.seat) : nullptr;
-		snapshot(o, pe.scene, b.state, v ? v->id : 0, pos, r, h, reach, b.plane_z);
+		snapshot(o, pe.scene, b.state, v ? v->id : 0, pos, r, h, reach, b.plane_z,
+				b.plane_h);
 	}
 
 	// [KIT_VEHICLE_MOVEMENTS] own: what is stepping (a vehicle), not met with what is
 	// under it; the tracks of the scene's steered ones
-	// [KIT_PLANE] plane: the z the body is held at (NaN: none)
+	// [KIT_PLANE] plane: the z the body is held at (NaN: none; [KIT_TOP_DOWN] level:
+	// a y, plane_of()'s)
 	void snapshot(ss_ &o, const ss_ &scene_name, const json::Value &state, uint64_t own,
 			const double pos[3], double r, double h, double reach,
-			double plane = NAN)
+			double plane = NAN, bool level = false)
 	{
 		WorldScope ws(m_w, world_named(scene_name));
 		auto si = m_host.scenes.find(scene_name);
@@ -24136,7 +24153,8 @@ struct Module: public interface::Module, public Interface
 			});
 		tracks_lit(o, scene_name);
 		if(!std::isnan(plane))
-			o += ",plane="+json::Value(plane).stringify();
+			o += ",plane="+json::Value(plane).stringify()+(level ? ",horizontal=true" :
+					"");
 		o += "}";
 	}
 
@@ -24198,7 +24216,7 @@ struct Module: public interface::Module, public Interface
 		}
 		std::vector<uint64_t> unseat;
 		// [KIT_LEFTOVERS_1116] each scene's plane (NaN: none), for creatures
-		std::map<ss_, double> planes;
+		std::map<ss_, std::pair<double, bool>> planes;
 		for(auto &dp : m_drives){
 			Drive &d = dp.second;
 			auto ei = m_entities.find(dp.first);
@@ -24287,18 +24305,22 @@ struct Module: public interface::Module, public Interface
 			// plane as the players' bodies are (move.lua's W:hold after each
 			// step); a vehicle not
 			double plane = NAN;
+			bool level = false;
 			if(d.creature){
 				auto pi = planes.find(d.scene);
-				if(pi == planes.end())
-					pi = planes.insert(std::make_pair(d.scene, jstr(controls_params(
-							d.scene), "plane") == "vertical" ? plane_depth(d.scene) :
-							NAN)).first;
-				plane = pi->second;
+				if(pi == planes.end()){
+					bool hz;
+					const double pz = plane_of(d.scene, &hz);
+					pi = planes.insert(std::make_pair(d.scene, std::make_pair(pz,
+							hz))).first;
+				}
+				plane = pi->second.first;
+				level = pi->second.second;
 			}
 			if(d.deck)
 				deck_snapshot(o, d, e, pos, r, h, reach);
 			else
-				snapshot(o, d.scene, d.state, e.id, pos, r, h, reach, plane);
+				snapshot(o, d.scene, d.state, e.id, pos, r, h, reach, plane, level);
 			o += "}";
 			ss_ answer, why;
 			bool runaway = false;
@@ -26505,7 +26527,7 @@ struct Module: public interface::Module, public Interface
 		const int64_t now = interface::os::time_us();
 		// [KIT_PLANE] each scene's plane depth, once a tick ([KIT_SCENE_TREE]
 		// NaN: its nearest kit/controls holds no plane)
-		sm_<ss_, double> depths;
+		sm_<ss_, std::pair<double, bool>> depths;
 		for(auto &bp : m_bodies){
 			Body &b = bp.second;
 			auto pi = m_peers.find(bp.first);
@@ -26527,19 +26549,23 @@ struct Module: public interface::Module, public Interface
 			const bool changed = params.stringify() != b.params.stringify();
 			// [KIT_PLANE] The plane turned on or off, or its spawn moved: put again
 			// onto it (a rider holds nothing: its vehicle steps here)
+			// ([KIT_TOP_DOWN] or turned level or upright)
 			auto di = depths.find(pi->second.scene);
-			if(di == depths.end())
+			if(di == depths.end()){
+				bool hz;
+				const double pz = plane_of(pi->second.scene, &hz);
 				di = depths.insert(std::make_pair(pi->second.scene,
-						jstr(controls_params(pi->second.scene), "plane") ==
-						"vertical" ? plane_depth(pi->second.scene) : NAN)).first;
-			const double pz = di->second;
+						std::make_pair(pz, hz))).first;
+			}
+			const double pz = di->second.first;
+			const bool hz = di->second.second;
 			const bool plane_moved = std::isnan(pz) != std::isnan(b.plane_z) ||
-					(!std::isnan(pz) && pz != b.plane_z);
+					(!std::isnan(pz) && (pz != b.plane_z || hz != b.plane_h));
 			if(plane_moved && b.ride)
-				b.plane_z = pz;
+				b.plane_z = pz, b.plane_h = hz;
 			else if(plane_moved)
 				log_i(MODULE, "%s's plane: %s", cs(pi->second.name), std::isnan(pz) ?
-						"none" : cs("z "+json::Value(pz).stringify()));
+						"none" : cs((hz ? "y " : "z ")+json::Value(pz).stringify()));
 			if(type != b.type || ride != b.ride || (changed && !b.ride) ||
 					(plane_moved && !b.ride)){
 				if(type == b.type && !type.empty() && (changed || ride != b.ride)){
@@ -32546,7 +32572,11 @@ struct Module: public interface::Module, public Interface
 				"{{depth, nx, ny, info}...}, w:segment(x0, y0, x1, y1) -> t, nx, "
 				"ny, info (info.surface, info.friction: a voxel's, a "
 				"kit/polygon's surface and friction params; \"spikes\" a step "
-				"reacts to itself). Its file's math is w's on both sides (floor, ceil, "
+				"reacts to itself). [KIT_TOP_DOWN] With kit/controls' plane "
+				"horizontal (w.horizontal; w.plane the y of the spawn's cell, the "
+				"feet held at w.plane - 0.5, no speed up) their x, y are the "
+				"world's x and z, nx, ny the normal's x and z. "
+				"Its file's math is w's on both sides (floor, ceil, "
 				"sqrt, abs, fmod, min, max, sin, cos, atan, atan2; no random). "
 				"s.events = {\"name\" | {\"name\", value}...} set in a step: "
 				"outputs of its component on the app root (declare them), as by "
@@ -38247,7 +38277,9 @@ struct Module: public interface::Module, public Interface
 			"say; backdrops: kit/parallax, below); fov (20...150), smoothing, "
 			"offsets and roll; pointer "
 			"auto, crosshair or cursor; plane vertical holds bodies at one z "
-			"(side-scrollers, with kit/polygon); the effects tint and "
+			"(side-scrollers, with kit/polygon), horizontal at one height, the "
+			"feet on the bottom of the spawn's cell, moving in x and z "
+			"(top-down: kit/walker with no gravity or jump); the effects tint and "
 			"tint_amount, vignette, blur and glitch (0...1) colour the whole "
 			"view, and its inputs shake, fov, glitch, tint flash them in play; "
 			"its input camera changes the mode, camera_target (an entity id or "

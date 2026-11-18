@@ -233,6 +233,11 @@ local function voxel_info(id, v)
 	return c or nil
 end
 
+-- [KIT_PLANE] The z a vertical plane holds (nil: none, [KIT_TOP_DOWN] or level)
+local function plane_z()
+	return C.ctl and not C.ctl.horizontal and tonumber(C.ctl.plane) or nil
+end
+
 -- (skip: what is left out, a function of an entity's id and node; the vehicle held)
 local function world(skip)
 	local reg = voxelworld.get_voxel_registry()
@@ -316,7 +321,8 @@ local function world(skip)
 		edge = ground and {hm[3] or 0, hm[4] or 0, (hm[3] or 0) + hm[1] - 1,
 			(hm[4] or 0) + hm[2] - 1} or nil,
 		moving_looks = moving_looks, t = C.draw_t, polys = polys,
-		plane = C.ctl and tonumber(C.ctl.plane)} -- [KIT_PLANE] the body's z held
+		-- [KIT_PLANE] the body's z held ([KIT_TOP_DOWN] or y: horizontal)
+		plane = C.ctl and tonumber(C.ctl.plane), horizontal = C.ctl and C.ctl.horizontal}
 end
 
 -- ---- The body
@@ -988,7 +994,8 @@ buildat.sub_packet("kit:controls", function(data)
 	log:info("kit: controls: camera " .. camera_mode() .. ", pointer " ..
 			(M.pointer_free() and "cursor" or "crosshair") .. ", movement " ..
 			tostring(m and m.type or "none") .. (M.seated() and ", seat " ..
-			M.seated() or "") .. (c.plane and ", plane z " .. tostring(c.plane) or ""))
+			M.seated() or "") .. (c.plane and ", plane " .. (c.horizontal and "y " or "z ") ..
+			tostring(c.plane) or ""))
 end)
 
 -- ---- Effects: Kit's render path (kit_effects.xml), on a viewport of
@@ -1590,7 +1597,7 @@ function M.pointer_ray(x, y)
 	-- free cell of it is placed in against what is behind it.
 	-- simplified: a solid cell of the layer pointed at has no place (before its
 	-- face is off the plane)
-	local pz = camera_mode() == "side" and C.ctl and tonumber(C.ctl.plane)
+	local pz = camera_mode() == "side" and plane_z()
 	if pz and d.z > 1e-6 and o.z < pz - 0.499 then
 		o = o + d * ((pz - 0.499 - o.z) / d.z)
 	end
@@ -1600,7 +1607,7 @@ end
 -- [KIT_PLANE] A side camera's aim (hands.lua's shots): from the body's eye to where
 -- the pointer meets the plane, along it (nil: no side camera)
 function M.side_aim()
-	local pz = C.ctl and tonumber(C.ctl.plane)
+	local pz = plane_z()
 	if camera_mode() ~= "side" or not C.draw or not pz then
 		return nil
 	end
@@ -2193,7 +2200,7 @@ local function place_camera(dt, at)
 		f[1] = math.max(bx - dz, math.min(bx + dz, f[1]))
 		f[2] = math.max(by - dz * 0.5, math.min(by + dz * 0.5, f[2]))
 		C.side_at = f
-		local pz = C.ctl and tonumber(C.ctl.plane) or at[3]
+		local pz = plane_z() or at[3]
 		local clip = math.min(dist, tonumber(par.side_clip) or 0.55)
 		rot = magic.Quaternion(0, 0, roll)
 		want_pos = magic.Vector3(f[1] + ox, f[2] + oy, pz - dist + oz)

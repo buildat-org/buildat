@@ -296,10 +296,10 @@ local wb = probe(59.2, 0.6, true)
 assert(near(wb.spheres[1][1], 58.6) and near(wb.spheres[2][2], 0.96), "the wheels")
 assert(MV.zone_meets(gz, wb), "the gem not met by a wheel")
 assert(MV.zone_meets(gz, probe(59.8, 0.6)), "the gem not met by the point")
-local walker = MV.zone_body({59.25, 0.6, 0}, nil, {r = 0.3, h = 1})
-assert(walker.box and near(walker.lo[1], 58.951) and near(walker.hi[2], 1.599) and
-		near(walker.hi[3], 0.299), "the walker's box")
-assert(MV.zone_meets(gz, walker), "the gem not met by a walker's box")
+local wbox = MV.zone_body({59.25, 0.6, 0}, nil, {r = 0.3, h = 1})
+assert(wbox.box and near(wbox.lo[1], 58.951) and near(wbox.hi[2], 1.599) and
+		near(wbox.hi[3], 0.299), "the walker's box")
+assert(MV.zone_meets(gz, wbox), "the gem not met by a walker's box")
 local pg = {shape = "polygon", points = {{-1, 0}, {1, 0}, {1, 2}, {-1, 2}}, depth = 1,
 	state = "taken", when = {scale = {0.25, 0.25, 1}, offset = {0, 1, 0}}}
 bounds(MV.zone_look(pg, false, {-40, 1, 0}), {-41, 1, -0.5}, {-39, 3, 0.5}, "the polygon gem")
@@ -322,6 +322,93 @@ local cz = MV.zone_cells({0.5, 0, 0}, q, {3, 1, 1})
 assert(MV.zone_meets(cz, MV.zone_body({0.5, -0.5, -2})) and
 		not MV.zone_meets(cz, MV.zone_body({2.5, -0.5, 0})), "turned cells")
 print("ok: zones on the client as on the server: the U, the gem's cells by a wheel, the point and a box, a polygon gem's when, turned boxes, a sphere")
+
+-- [KIT_TOP_DOWN] (1) A level plane (kit/controls' plane "horizontal") at y 1: the
+-- feet held at 0.5 over a floor of cells (top 0.5), a wall in the plane's layer (x 3,
+-- z -5...5), a ledge over the head's (y 3, x -6...-4); a solid look's box through the
+-- layer (x 0...1, z 6...7) and one over it (z -8)
+local function hworld(t)
+	t = t or {}
+	return MV.world{cell = function(i, j, k)
+		if j <= 0 and not t.void then
+			return STONE
+		end
+		if j == 1 and i == 3 and k >= -5 and k <= 5 then
+			return STONE
+		end
+		if j == 3 and i >= -6 and i <= -4 then
+			return STONE
+		end
+		return nil
+	end, plane = 1, horizontal = true, polys = t.polys, boxes = {
+		{0, 0.5, 6, 1, 1.5, 7, info = MV.OBJECT}, {0, 2.5, -8, 1, 3, -7, info = MV.OBJECT}}}
+end
+local function hrun(s, n, input, w)
+	for _ = 1, n do
+		MV.steps(walker, s, {input}, 1 / 60, 1, w, wp)
+		assert(s.pos[2] == 0.5 and s.vel[2] == 0, "off the level plane: " .. s.pos[2])
+	end
+	return s
+end
+local hw0 = hworld()
+assert(hw0.horizontal == true and MV.world{plane = 1, horizontal = true}.horizontal and
+		not MV.world{horizontal = true}.horizontal, "w.horizontal")
+-- W along +z (yaw 0), on the floor; Jump does nothing
+s = hrun({pos = {0, 0.5, 0}}, 60, {f = 1, r = 0, yaw = 0, jump = 1}, hw0)
+assert(s.pos[3] > 4 and near(s.pos[1], 0) and s.ground == true and s.surface == "stone",
+		"along z: " .. s.pos[3] .. " " .. tostring(s.surface))
+-- Right (+x) into the wall: stopped at its side; under the ledge (over the head) free
+hrun(s, 90, {f = 0, r = 1, yaw = 0, jump = 0}, hw0)
+assert(near(s.pos[1], 2.05, 1e-3), "the wall: " .. s.pos[1])
+local sl = hrun({pos = {-2, 0.5, 0}}, 60, {f = 0, r = -1, yaw = 0, jump = 0}, hw0)
+assert(sl.pos[1] < -6, "under the ledge: " .. sl.pos[1])
+-- Nothing under it: held all the same, walking as on the ground
+local sv = hrun({pos = {0, 0.5, 0}}, 30, {f = 1, r = 0, yaw = 0, jump = 0},
+	hworld{void = true})
+local sf = hrun({pos = {0, 0.5, 0}}, 30, {f = 1, r = 0, yaw = 0, jump = 0}, hw0)
+assert(sv.pos[3] == sf.pos[3] and sv.pos[3] > 2 and sv.ground and sv.surface == nil and
+		sv.friction == 1, "over nothing: " .. sv.pos[3] .. " " .. sf.pos[3])
+-- A step going up: put back, its speed up gone, the rest kept
+local s9 = {pos = {0, 0.5, 0}}
+MV.steps({step = function(st) st.pos[2] = st.pos[2] + 3; st.vel = {1, 7, 2} end},
+	s9, {{}}, 1 / 60, 1, hw0, {})
+assert(s9.pos[2] == 0.5 and s9.vel[2] == 0 and s9.vel[1] == 1 and s9.vel[3] == 2,
+		"not held level: " .. s9.pos[2])
+-- The same bits twice
+local function htrace()
+	local ww, ss, out = hworld(), {pos = {-1, 0.5, -1}}, {}
+	for n = 1, 200 do
+		MV.steps(walker, ss, {{f = n % 3 == 0 and 1 or 0, r = n < 150 and 1 or -1,
+			yaw = 30, jump = 0}}, 1 / 60, 1, ww, wp)
+		out[#out + 1] = string.format("%.17g %.17g %.17g", ss.pos[1], ss.pos[2], ss.pos[3])
+	end
+	return table.concat(out, ";")
+end
+assert(htrace() == htrace(), "not the same bits level")
+print("ok: kit/walker in a level plane: held at y 0.5, no jump, along z and into a wall, under a ledge, over nothing, a step going up held; the same bits twice")
+
+-- w:circle and w:segment level: x, y the world's x and z
+c = hw0:circle(2.2, 0, 0.5)
+assert(#c == 1 and near(c[1].depth, 0.2) and c[1].nx == -1 and c[1].ny == 0 and
+		c[1].info == STONE, "level circle: " .. #c)
+-- At a seam of the wall's cells: one side, no seam's
+c = hw0:circle(2.2, 0.5, 0.5)
+assert(#c == 1 and c[1].nx == -1, "level seam: " .. #c)
+-- The ledge over the layer: not met; in its own layer it is
+assert(#hw0:circle(-5, 0, 0.4) == 0, "the ledge off the level met")
+assert(#hw0:circle(-5, 0, 0.4, 3) == 1, "the ledge in its layer not met")
+-- The box through the layer met (its z side), the one over it not
+c = hw0:circle(0.5, 5.8, 0.5)
+assert(#c == 1 and near(c[1].depth, 0.3) and c[1].nx == 0 and c[1].ny == -1 and
+		c[1].info == MV.OBJECT, "the box level: " .. #c)
+assert(#hw0:circle(0.5, -8.2, 0.5) == 0, "the box over the layer met")
+t, nx, ny, info = hw0:segment(0, 0, 10, 0)
+assert(near(t, 0.25) and nx == -1 and ny == 0 and info == STONE, "level segment: " ..
+		tostring(t))
+t, nx, ny = hw0:segment(0.5, 0, 0.5, 10)
+assert(near(t, 0.6) and nx == 0 and ny == -1, "level segment along z: " .. tostring(t))
+assert(hw0:segment(-8, 1, -2, 1) == nil, "the level segment met the ledge")
+print("ok: w:circle and w:segment level: a wall, its seams, the ledge off the layer, a box through it and one over it")
 
 -- What the client's pass costs: 300 zones (cells, boxes, polygons, spheres)
 -- built (module.lua builds one again as it moves or its state turns), and
