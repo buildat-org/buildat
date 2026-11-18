@@ -25,8 +25,7 @@
 #   4. the time trial (its own scene): kitboss over the line at the start
 #      with no checkpoint passed: no lap (the car's step meets the line with
 #      lap_open off), then round: checkpoints 1, 2, 3, the lap, the result
-#      card with the time; no prediction correction on that lap (trial.png);
-#   5. the music: its client part's blip stream, bars added on time.
+#      card with the time; no prediction correction on that lap (trial.png).
 # Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/grid.png, $t/push.png,
 # $t/wreck.png, $t/result.png, $t/trial.png
 #   util/kit_racer_check.sh
@@ -347,17 +346,8 @@ assert not n, n
 PY
 step 10 "Wrote screenshot $t/trial.png" "frames 10" "screenshot $t/trial.png"
 echo "ok: the trial: over the line at the start no lap, then checkpoints, the lap, the result; no correction"
-
-# 5. The music: a stream, its bars added a little ahead
-grep -aq "brim_music: a stream" "$CL" || fail "no music stream ($CL)"
-grep -aq "client part on_update: local/brim_music" "$CL" && fail "the music's client part failed ($CL)"
-grep -aoP "brim_music: bar [0-9]+ .*, \K[0-9.]+ ms to add, -?[0-9]+ ms ahead" "$CL" | head -24 > "$t/bars.txt"
-# (the first bar is the stream's start: added as it is due)
-awk 'NR > 1 { if ($5 < 140 || $5 > 260) bad = 1; n++ } END { exit !(n >= 8 && !bad) }' "$t/bars.txt" ||
-	fail "the music's bars not added 140...260 ms ahead ($t/bars.txt)"
-echo "ok: the music: a blip stream, $(wc -l < "$t/bars.txt") bars added ahead of their beat ($(awk '{ s += $1 } END { printf "%.1f", s / NR }' "$t/bars.txt") ms each)"
 cmd "quit"
 as bob
 cmd "quit"
-echo "PASS: Brimstone Speedway from its template: the lobby, the grid's Start, both cars off at once, a standing car pushed by another (the server's steps), kitboss's mine and kitbob's wreck and respawn at the checkpoint, the places by who finished first, a trial's lap only over every checkpoint with no correction, the music's blip stream; screenshots $t/lobby.png $t/grid.png $t/push.png $t/wreck.png $t/result.png $t/trial.png"
+echo "PASS: Brimstone Speedway from its template: the lobby, the grid's Start, both cars off at once, a standing car pushed by another (the server's steps), kitboss's mine and kitbob's wreck and respawn at the checkpoint, the places by who finished first, a trial's lap only over every checkpoint with no correction; screenshots $t/lobby.png $t/grid.png $t/push.png $t/wreck.png $t/result.png $t/trial.png"
 # vim: set noet ts=4 sw=4:

@@ -30,8 +30,7 @@
 -- `scorch`), then 2 s later back on the road at the last checkpoint passed
 -- (its own teleport) with full health.
 -- The announcer (`announce`, to a kit/ui_text for everyone) calls the start,
--- the leader, the wrecks and the finish. `music` (local/brim_music): each
--- player's mood, race in a run, lobby out of it.
+-- the leader, the wrecks and the finish.
 local PAINTS = 6
 local WEAPONS = {gun = 6, mines = 3, boost = 1}
 local NAMES = {gun = "Gun", mines = "Mines", boost = "Ram boost"}
@@ -221,16 +220,9 @@ local function clear_weapon(c, by, r)
 	end
 end
 
-local function mood(c, by, m)
-	if c.params.music ~= 0 then
-		c:send(c.params.music, "mood", m, by)
-	end
-end
-
 -- A run's start for the player (the lobby's entered)
 local function enter(c, by)
 	local r = view(c, by)
-	mood(c, by, "race")
 	local p = player_of(c, by)
 	r.mode = c.params.mode
 	r.lap, r.next, r.last, r.t, r.done, r.at = 1, 1, 0, 0, nil, 0
@@ -503,7 +495,6 @@ return {
 		grid_screen = {type = "entity", default = 0},
 		mine = {type = "entity", default = 0},
 		scorch = {type = "entity", default = 0},
-		music = {type = "entity", default = 0},
 		gun_damage = {type = "number", default = 3, min = 0, max = 100},
 		mine_damage = {type = "number", default = 9, min = 0, max = 100},
 		ram_damage = {type = "number", default = 6, min = 0, max = 100},
@@ -656,7 +647,6 @@ return {
 		if input == "entered" then
 			return enter(c, by)
 		elseif input == "left" then
-			mood(c, by, "lobby")
 			if r.mode == "race" then
 				drop_racer(c, by)
 				c:speed(by, 1)
