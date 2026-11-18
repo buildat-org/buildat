@@ -761,6 +761,13 @@ namespace interface
 //   Its size and offset are its points' box (kit.cpp's). [KIT_SIDE_SCENERY]
 //   voxel (a voxel type's name) and edge_depth: its textures world-aligned and
 //   a band of its top along the edges facing up (module.lua's polygon_mesh).
+//   [KIT_SIDE_SCENERY] (8) parallax = {follow =, follow_y =, repeat =}
+//   ("param:<name>" as a look's; kit/parallax): the looks under the entity
+//   are drawn by each client offset by its camera's travel from the
+//   entity's place, 1 - follow of it along x and 1 - follow_y up, with
+//   copies every repeat along x (0: none); never met (kit.cpp's collision
+//   snapshot and the bots' grid leave them out, as controls.lua's world()
+//   does). The editor draws them where authored (module.lua's parallax pass).
 //   Debugging: the builders with the tools on are sent each tick's signals
 //   along links ("kit:flow" [[from, output, to, input]...], their lines
 //   lit) and their selection's log ("kit:log" {"id", "lines"}).

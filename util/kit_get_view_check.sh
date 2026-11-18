@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-16)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/kit/client_lua/editor.lua builtin/accounts/accounts.cpp builtin/accounts/client_lua/accounts.lua src/client/main.cpp src/client/state.cpp src/lua_bindings/misc_urho3d.cpp client/core/urho3d/init.lua 3rdparty/Urho3D/Source/Urho3D/Graphics/OpenGL/OGLTexture2D.cpp 3rdparty/Urho3D/Source/ThirdParty/SDL/src/video/offscreen/** 3rdparty/Urho3D/Source/ThirdParty/GLEW/glew.c
+# covers: builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/kit/types/parallax.lua builtin/kit/client_lua/editor.lua builtin/accounts/accounts.cpp builtin/accounts/client_lua/accounts.lua src/client/main.cpp src/client/state.cpp src/lua_bindings/misc_urho3d.cpp client/core/urho3d/init.lua 3rdparty/Urho3D/Source/Urho3D/Graphics/OpenGL/OGLTexture2D.cpp 3rdparty/Urho3D/Source/ThirdParty/SDL/src/video/offscreen/** 3rdparty/Urho3D/Source/ThirdParty/GLEW/glew.c
 # [KIT_AGENT_VISUALS] An agent's picture (Kit's get_view) and a client logged
 # in by an agent token. One Workbench server; kitboss (the admin) and kitbob
 # (made a builder by kitboss's admin token) on a headless weston's Xwayland
@@ -17,6 +17,9 @@
 #      before and after (only the notice, "Your agent took a picture", at
 #      its top); a scene kitboss is not in, a size past 1024x768 and
 #      look_at without pos refused; kitbob's client never asked;
+#      [KIT_SIDE_SCENERY] (8) a kit/parallax at follow 0 by place, a part
+#      under it by place's parent and one by set_parent (get_state's
+#      parent): a pose 40 over draws them in its middle column;
 #   3. kitboss's client stopped (SIGSTOP): the call answered in 5 s, and
 #      the picture it sends once continued refused as late;
 #   4. a client with no display (no X, no Wayland: SDL's offscreen driver,
@@ -281,6 +284,28 @@ elif phase == "views":
     assert "is in the scene" in view({"scene": "nope"}, "", True)[0]
     assert "16 to 1024" in view({"width": 2000}, "", True)[0]
     assert "go with a pos" in view({"look_at": M}, "", True)[0]
+    # [KIT_SIDE_SCENERY] (8) kit/parallax at follow 0 (moving with the
+    # camera), high over the others' views: a magenta part under it by
+    # place's parent, one put under it by set_parent. From 40 over both are
+    # drawn in the picture's middle column (where authored, out of it); then
+    # deleted, the views after these as before
+    import re
+    def num(text):
+        return int(re.search(r"placed \S+ (\d+)", text).group(1))
+    mp = {"size": [2, 2, 2], "color": "#ff00ff", "material": "glow", "collision": False}
+    L = num(call("place", {"type": "kit/parallax", "pos": [0, 80, 20], "params": {"follow": 0}}))
+    A = num(call("place", {"type": "kit/part", "pos": [0, 80, 20], "parent": L, "params": mp}))
+    B = num(call("place", {"type": "kit/part", "pos": [0, 76, 20], "params": mp}))
+    call("set_parent", {"id": B, "parent": L})
+    parents = {e["id"]: e.get("parent") for e in json.loads(call("get_state", {"ids": [A, B]}))["entities"]}
+    assert parents == {A: L, B: L}, parents
+    time.sleep(1)
+    text, img = view({"pos": [40, 80, 2], "look_at": [40, 80, 20], "width": 320, "height": 240}, "view_parallax")
+    col = [mag(img, 0.5, y / 20) for y in range(21)]
+    assert mag(img, 0.5, 0.5) and any(col[12:]) and not mag(img, 0.1, 0.5), \
+        ("the parallax parts not in the middle column", col)
+    for i in (A, B, L):
+        call("delete", {"id": i})
 elif phase == "pose":
     text, img = view({"pos": C, "look_at": M}, "view_pose")
 elif phase == "timeout":
@@ -394,7 +419,7 @@ mcp pose "$tok_b" "$t"
 await "$CL" "$m" 5 "kit: the picture sent, [0-9]+ bytes"
 step 10 "Wrote screenshot .*after.png" "frames 2" "screenshot $t/after.png"
 mcp same "$tok_b" "$t" "$t/before.png" "$t/after.png"
-[ "$(pictures "$t/boss.log")" = 6 ] || fail "kitboss's client took $(pictures "$t/boss.log") pictures, not 6"
+[ "$(pictures "$t/boss.log")" = 7 ] || fail "kitboss's client took $(pictures "$t/boss.log") pictures, not 7"
 grep -aq "kit: Your agent took a picture (320x240, its pose)" "$t/boss.log" ||
 	fail "no notice of the 320x240 picture in $t/boss.log"
 for re in "kitboss's agent asks kitboss's client \(peer [0-9]+, scene [^)]+\) for a picture 320x240" \
