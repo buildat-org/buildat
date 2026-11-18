@@ -518,7 +518,10 @@ assert len(lap) == 1 and len(cp) == 3 and max(cp) < lap[0], order
 assert any(l.startswith("finished the trial in") for l in order), order
 print("ok: the trial: %s" % "; ".join(order[1:]))
 PY
-grep -aoP "at \K-?[0-9.]+" "$t/drive_boss.log" | head -20 | awk -v x=$LINE_X '$1 > x + 2 { f = 1 } END { exit !f }' ||
+# (in its first 5 s: the samples' count in that time is the client's frame
+# rate's)
+awk -v x=$LINE_X '$1 == "t" && $2 < 5 && $3 == "at" { split($4, p, ","); if (p[1] > x + 2) f = 1 }
+	END { exit !f }' "$t/drive_boss.log" ||
 	fail "the car never crossed the line at the start ($t/drive_boss.log)"
 # The top speed approached slowly: off the line on full throttle (the
 # template's top 28 m/s on dirt), at 2 s well on, at 6 s faster, both under
