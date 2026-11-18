@@ -4,7 +4,10 @@
 -- movement's own parameters likewise, its nearest copy's): the
 -- camera (first_person: the eye; chase: behind the player, distance away;
 -- top_down: from height above at a fixed angle and yaw, ortho a flat
--- view; [KIT_PLANE] side: distance across the plane looking along +z, x
+-- view; [KIT_TOP_DOWN] (6) following with dead_zone, look_ahead and
+-- look_velocity as side does, in the view's axes on the ground (across the
+-- screen and up it; the lead the way the body faces, s.yaw, else the way it
+-- goes); [KIT_PLANE] side: distance across the plane looking along +z, x
 -- right and y up, following once the body is dead_zone m off the middle
 -- (0: always), never turning, ortho flat, what is nearer than side_clip m
 -- in front of the plane clipped (0.55: all in front of the plane's layer;
@@ -22,7 +25,9 @@
 -- stepping the players' bodies: kit/walker, kit/click_to_move, any other
 -- with a step but a creature's or a course's; "none"), [KIT_PLANE] plane
 -- (vertical: the players' bodies held at one z, the depth of the spawn a
--- joining player ends on, a whole z, both sides stepping so; none) and the
+-- joining player ends on, a whole z, both sides stepping so; [KIT_TOP_DOWN]
+-- horizontal: held at one height, the feet on the bottom of the spawn's cell,
+-- moving in x and z, no gravity or jump for kit/walker; none) and the
 -- view's detail:
 -- fov, an offset, smoothing (seconds), roll (degrees), and the effects
 -- tint (#rrggbb) at tint_amount, vignette, blur and glitch (0...1). The
@@ -97,7 +102,8 @@ return {
 			choices = {"world", "object"}},
 		movement = {type = "string", default = "kit/walker",
 			choices_from = "movements"},
-		plane = {type = "string", default = "none", choices = {"none", "vertical"}},
+		plane = {type = "string", default = "none",
+			choices = {"none", "vertical", "horizontal"}},
 		fov = {cat = "look", type = "number", default = 75, min = 20,
 			max = 150},
 		distance = {cat = "look", type = "number", default = 6, min = 1,

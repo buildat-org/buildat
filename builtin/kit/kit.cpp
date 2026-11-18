@@ -22986,8 +22986,9 @@ struct Module: public interface::Module, public Interface
 		// would end it exactly
 		int64_t settle_until = 0;
 		// [KIT_PLANE] the z it is held at (plane_depth(); NaN: kit/controls'
-		// plane is none)
+		// plane is none); [KIT_TOP_DOWN] plane_h: a level plane's y (plane_of())
 		double plane_z = NAN;
+		bool plane_h = false;
 	};
 	static constexpr int64_t SETTLE_US = 500000;
 	// [KIT_BODY_VARS] The state's `vars` the body's own (a step's change to them
@@ -23210,7 +23211,8 @@ struct Module: public interface::Module, public Interface
 	// editor's front view places there.
 	// simplified: one plane a scene; a team's pad at another depth has its players
 	// put onto this one (zones of their own are [KIT_PLANE]'s later stage)
-	double plane_depth(const ss_ &scene)
+	// [KIT_TOP_DOWN] k: the axis (1: a level plane's y, the spawn cell's middle)
+	double plane_depth(const ss_ &scene, int k = 2)
 	{
 		uint64_t best = 0;
 		double z = 0;
@@ -23225,15 +23227,26 @@ struct Module: public interface::Module, public Interface
 						in.params.get(t.spawn_param).is_true())){
 					double w[3];
 					world_of(e, w);
-					best = p.first, z = w[2];
+					best = p.first, z = w[k];
 				}
 			}
 		}
 		if(!best){
-			double x, y;
-			scene_spawn(scene, x, y, z);
+			double s[3];
+			scene_spawn(scene, s[0], s[1], s[2]);
+			z = s[k];
 		}
 		return std::floor(z + 0.5);
+	}
+
+	// [KIT_TOP_DOWN] kit/controls' plane in a scene: the coordinate it holds
+	// (vertical: plane_depth()'s z; horizontal: the spawn cell's middle y, the
+	// feet held at that cell's bottom), NaN: none; *h: level
+	double plane_of(const ss_ &scene, bool *h)
+	{
+		const ss_ p = jstr(controls_params(scene), "plane");
+		*h = p == "horizontal";
+		return p == "vertical" || *h ? plane_depth(scene, *h ? 1 : 2) : NAN;
 	}
 
 	// The movement a body has: its seat's, else the controls' choice
@@ -23378,6 +23391,8 @@ struct Module: public interface::Module, public Interface
 			// [KIT_PLANE] the z it is held at, the client predicting as the box steps
 			if(!std::isnan(b.plane_z))
 				c.set("plane", b.plane_z);
+			if(!std::isnan(b.plane_z) && b.plane_h)
+				c.set("horizontal", true);
 			// [KIT_VEHICLE_MOVEMENTS] a steered vehicle ridden: its inputs, no steps
 			if(b.ride)
 				c.set("ride", (int64_t)b.ride);
@@ -23618,14 +23633,14 @@ struct Module: public interface::Module, public Interface
 		}
 		// [KIT_PLANE] onto the plane: its depth, no speed across (a rider is
 		// where its seat is)
-		b.plane_z = NAN;
-		if(jstr(controls_params(m_peers[peer].scene), "plane") == "vertical")
-			b.plane_z = plane_depth(m_peers[peer].scene);
+		// ([KIT_TOP_DOWN] a level one: its feet at the cell's bottom, no speed up)
+		b.plane_z = plane_of(m_peers[peer].scene, &b.plane_h);
 		if(!std::isnan(b.plane_z) && !b.ride && b.state.get("pos").is_array() &&
 				b.state.get("pos").size() == 3){
-			b.state["pos"].set_at(2, b.plane_z);
+			const unsigned k = b.plane_h ? 1 : 2;
+			b.state["pos"].set_at(k, b.plane_h ? b.plane_z - 0.5 : b.plane_z);
 			if(b.state.get("vel").is_array() && b.state.get("vel").size() == 3)
-				b.state["vel"].set_at(2, 0.0);
+				b.state["vel"].set_at(k, 0.0);
 		}
 		with_vars(b); // [KIT_BODY_VARS] kept over a put
 		b.state = json::load_string(b.state.stringify().c_str());
@@ -23951,15 +23966,17 @@ struct Module: public interface::Module, public Interface
 			double r, double h, double reach)
 	{
 		const Entity *v = b.seat ? vehicle_of(b.seat) : nullptr;
-		snapshot(o, pe.scene, b.state, v ? v->id : 0, pos, r, h, reach, b.plane_z);
+		snapshot(o, pe.scene, b.state, v ? v->id : 0, pos, r, h, reach, b.plane_z,
+				b.plane_h);
 	}
 
 	// [KIT_VEHICLE_MOVEMENTS] own: what is stepping (a vehicle), not met with what is
 	// under it; the tracks of the scene's steered ones
-	// [KIT_PLANE] plane: the z the body is held at (NaN: none)
+	// [KIT_PLANE] plane: the z the body is held at (NaN: none; [KIT_TOP_DOWN] level:
+	// a y, plane_of()'s)
 	void snapshot(ss_ &o, const ss_ &scene_name, const json::Value &state, uint64_t own,
 			const double pos[3], double r, double h, double reach,
-			double plane = NAN)
+			double plane = NAN, bool level = false)
 	{
 		WorldScope ws(m_w, world_named(scene_name));
 		auto si = m_host.scenes.find(scene_name);
@@ -24216,7 +24233,8 @@ struct Module: public interface::Module, public Interface
 			});
 		tracks_lit(o, scene_name);
 		if(!std::isnan(plane))
-			o += ",plane="+json::Value(plane).stringify();
+			o += ",plane="+json::Value(plane).stringify()+(level ? ",horizontal=true" :
+					"");
 		o += "}";
 	}
 
@@ -24278,7 +24296,7 @@ struct Module: public interface::Module, public Interface
 		}
 		std::vector<uint64_t> unseat;
 		// [KIT_LEFTOVERS_1116] each scene's plane (NaN: none), for creatures
-		std::map<ss_, double> planes;
+		std::map<ss_, std::pair<double, bool>> planes;
 		for(auto &dp : m_drives){
 			Drive &d = dp.second;
 			auto ei = m_entities.find(dp.first);
@@ -24367,18 +24385,22 @@ struct Module: public interface::Module, public Interface
 			// plane as the players' bodies are (move.lua's W:hold after each
 			// step); a vehicle not
 			double plane = NAN;
+			bool level = false;
 			if(d.creature){
 				auto pi = planes.find(d.scene);
-				if(pi == planes.end())
-					pi = planes.insert(std::make_pair(d.scene, jstr(controls_params(
-							d.scene), "plane") == "vertical" ? plane_depth(d.scene) :
-							NAN)).first;
-				plane = pi->second;
+				if(pi == planes.end()){
+					bool hz;
+					const double pz = plane_of(d.scene, &hz);
+					pi = planes.insert(std::make_pair(d.scene, std::make_pair(pz,
+							hz))).first;
+				}
+				plane = pi->second.first;
+				level = pi->second.second;
 			}
 			if(d.deck)
 				deck_snapshot(o, d, e, pos, r, h, reach);
 			else
-				snapshot(o, d.scene, d.state, e.id, pos, r, h, reach, plane);
+				snapshot(o, d.scene, d.state, e.id, pos, r, h, reach, plane, level);
 			o += "}";
 			ss_ answer, why;
 			bool runaway = false;
@@ -24610,6 +24632,17 @@ struct Module: public interface::Module, public Interface
 				}
 				double yaw, pitch, roll;
 				wq.angles(yaw, pitch, roll);
+				// [KIT_TOP_DOWN] (2) a polygon lying flat (pitch +-90; its box
+				// polygon_box()'s): its own y along the world's z, its depth along y.
+				// simplified: then by its yaw's quarter as any look
+				// (angles() gives 0...360: -90 is 270)
+				const bool up = std::fabs(pitch - 90) < 0.5;
+				if(poly && (up || std::fabs(pitch - 270) < 0.5)){
+					const double oy = off[1];
+					std::swap(s[1], s[2]);
+					off[1] = up ? -off[2] : off[2];
+					off[2] = up ? oy : -oy;
+				}
 				const int quarter = ((int)std::lround(yaw / 90) % 4 + 4) % 4;
 				if(quarter % 2){
 					std::swap(s[0], s[2]);
@@ -26585,7 +26618,7 @@ struct Module: public interface::Module, public Interface
 		const int64_t now = interface::os::time_us();
 		// [KIT_PLANE] each scene's plane depth, once a tick ([KIT_SCENE_TREE]
 		// NaN: its nearest kit/controls holds no plane)
-		sm_<ss_, double> depths;
+		sm_<ss_, std::pair<double, bool>> depths;
 		for(auto &bp : m_bodies){
 			Body &b = bp.second;
 			auto pi = m_peers.find(bp.first);
@@ -26607,19 +26640,23 @@ struct Module: public interface::Module, public Interface
 			const bool changed = params.stringify() != b.params.stringify();
 			// [KIT_PLANE] The plane turned on or off, or its spawn moved: put again
 			// onto it (a rider holds nothing: its vehicle steps here)
+			// ([KIT_TOP_DOWN] or turned level or upright)
 			auto di = depths.find(pi->second.scene);
-			if(di == depths.end())
+			if(di == depths.end()){
+				bool hz;
+				const double pz = plane_of(pi->second.scene, &hz);
 				di = depths.insert(std::make_pair(pi->second.scene,
-						jstr(controls_params(pi->second.scene), "plane") ==
-						"vertical" ? plane_depth(pi->second.scene) : NAN)).first;
-			const double pz = di->second;
+						std::make_pair(pz, hz))).first;
+			}
+			const double pz = di->second.first;
+			const bool hz = di->second.second;
 			const bool plane_moved = std::isnan(pz) != std::isnan(b.plane_z) ||
-					(!std::isnan(pz) && pz != b.plane_z);
+					(!std::isnan(pz) && (pz != b.plane_z || hz != b.plane_h));
 			if(plane_moved && b.ride)
-				b.plane_z = pz;
+				b.plane_z = pz, b.plane_h = hz;
 			else if(plane_moved)
 				log_i(MODULE, "%s's plane: %s", cs(pi->second.name), std::isnan(pz) ?
-						"none" : cs("z "+json::Value(pz).stringify()));
+						"none" : cs((hz ? "y " : "z ")+json::Value(pz).stringify()));
 			if(type != b.type || ride != b.ride || (changed && !b.ride) ||
 					(plane_moved && !b.ride)){
 				if(type == b.type && !type.empty() && (changed || ride != b.ride)){
@@ -32322,7 +32359,9 @@ struct Module: public interface::Module, public Interface
 				"parent": {"description":
 					"An entity's id to put it under (0 or the scene's own id: the scene), or \"root\": the app root"},
 				"on": {"type": "string", "enum": ["scene", "root"], "description":
-					"A root type's place: your scene's own copy, or the app root"}},
+					"A root type's place: your scene's own copy, or the app root"},
+				"pitch": {"type": "number", "description":
+					"Degrees about x in the world (90: a kit/polygon lying flat, its points the world's x and z)"}},
 				"required": ["type", "pos"]})J", ""},
 			{"set_param", "set", "Sets a parameter of an entity's component "
 				"to value, checked against its type's declaration. Or params: "
@@ -32636,7 +32675,13 @@ struct Module: public interface::Module, public Interface
 				"{{depth, nx, ny, info}...}, w:segment(x0, y0, x1, y1) -> t, nx, "
 				"ny, info (info.surface, info.friction: a voxel's, a "
 				"kit/polygon's surface and friction params; \"spikes\" a step "
-				"reacts to itself). Its file's math is w's on both sides (floor, ceil, "
+				"reacts to itself). [KIT_TOP_DOWN] With kit/controls' plane "
+				"horizontal (w.horizontal; w.plane the y of the spawn's cell, the "
+				"feet held at w.plane - 0.5, no speed up) their x, y are the "
+				"world's x and z, nx, ny the normal's x and z; a kit/polygon "
+				"lying flat (pitch 90) is walls there, w:under(x, y, z) -> info "
+				"a floor polygon's (floor on, collision off) over its area. "
+				"Its file's math is w's on both sides (floor, ceil, "
 				"sqrt, abs, fmod, min, max, sin, cos, atan, atan2; no random). "
 				"s.events = {\"name\" | {\"name\", value}...} set in a step: "
 				"outputs of its component on the app root (declare them), as by "
@@ -38354,7 +38399,8 @@ struct Module: public interface::Module, public Interface
 			"types. Entities (parts, polygons, effects) are their scene's.\n"
 			"\n## kit/controls: the camera\n"
 			"camera first_person (the eye), chase (behind the player, distance "
-			"away), top_down (from height at angle and yaw; ortho: flat) or "
+			"away), top_down (from height at angle and yaw; ortho: flat; dead_zone, "
+			"look_ahead and look_velocity as side's, on the ground) or "
 			"side (across a plane looking along +z; ortho, side_clip, dead_zone, "
 			"look_ahead: lower z, toward the camera, is the foreground, higher "
 			"the background; what lies wholly nearer than side_clip in front "
@@ -38362,7 +38408,9 @@ struct Module: public interface::Module, public Interface
 			"say; backdrops: kit/parallax, below); fov (20...150), smoothing, "
 			"offsets and roll; pointer "
 			"auto, crosshair or cursor; plane vertical holds bodies at one z "
-			"(side-scrollers, with kit/polygon); the effects tint and "
+			"(side-scrollers, with kit/polygon), horizontal at one height, the "
+			"feet on the bottom of the spawn's cell, moving in x and z "
+			"(top-down: kit/walker with no gravity or jump); the effects tint and "
 			"tint_amount, vignette, blur and glitch (0...1) colour the whole "
 			"view, and its inputs shake, fov, glitch, tint flash them in play; "
 			"its input camera changes the mode, camera_target (an entity id or "
@@ -38379,7 +38427,8 @@ struct Module: public interface::Module, public Interface
 			"under it (place's parent, or set_parent; polygons, parts, nested "
 			"too). What is under it moves with the camera by 1 - follow of "
 			"its travel (follow 0: as far as the sky, 1: the world; follow_y up "
-			"and down, 1 by default: a skyline's foot stays on the horizon), "
+			"and down, 1 by default: a skyline's foot stays on the horizon; along z "
+			"with kit/controls' plane horizontal), "
 			"repeat (m, 0 none) copies it every repeat along x to fill the "
 			"view. Place it where it looks right with the camera at the "
 			"layer's x, behind the plane (higher z). Visual only: it is never "
@@ -38437,7 +38486,10 @@ struct Module: public interface::Module, public Interface
 			"bright, casting no light), or voxel: a voxel type's texture. "
 			"kit/polygon: an extruded outline for side views, its points "
 			"within 256 of its place (a skyline or ridge 512 wide in one "
-			"piece); voxel wears a voxel type's textures, world-aligned so "
+			"piece); turned pitch 90 it lies flat, its points the world's x "
+			"and z, its depth up: a top-down view's walls, edited in the plan "
+			"view, or with floor on and collision off a floor patch (ice, mud) "
+			"whose surface and friction a body meets under its feet; voxel wears a voxel type's textures, world-aligned so "
 			"pieces side by side tile, the type's top as a band edge_depth "
 			"cells deep along the edges facing up (color then unused, material "
 			"kept). A grass-edged cliff: place kit/polygon with params "
@@ -40334,6 +40386,12 @@ struct Module: public interface::Module, public Interface
 			j.set("plane_depth", plane_depth(pi->second.scene));
 			j.set("plane_clip", controls_params(pi->second.scene).get(
 					"side_clip"));
+			// ([KIT_TOP_DOWN] (4) a level plane's y: the plan view draws a
+			// polygon there)
+			bool h = false;
+			const double py = plane_of(pi->second.scene, &h);
+			if(h)
+				j.set("plane_y", py);
 		}
 		j.set("can_make_scenes", (bool)m_host.make_scene);
 		// [KIT_SESSIONS_1] the session they are in: {id, kind, by, clock}
@@ -41895,6 +41953,11 @@ struct Module: public interface::Module, public Interface
 				pos.append(grid(j.get("pos").at(k).as_number()));
 			if(!app && !no_pos){
 				e.set("pos", pos);
+				// [KIT_TOP_DOWN] (4) "pitch": turned so in the world (a
+				// kit/polygon drawn in the plan view lies flat, pitch 90)
+				const json::Value &pt = j.get("pitch");
+				if(pt.is_number() && std::isfinite(pt.as_number()))
+					row_turn(e, 0, pt.as_number(), 0);
 				localize(e);
 			}
 			json::Value comp = json::object();

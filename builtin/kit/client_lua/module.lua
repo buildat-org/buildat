@@ -2966,7 +2966,8 @@ end
 
 -- ---- [KIT_SIDE_SCENERY] (8) **kit/parallax**: the looks under a layer
 -- (M.parallax_layer) drawn offset by the camera's travel from the layer's
--- place, 1 - follow of it along x and 1 - follow_y of it up, so a place
+-- place, 1 - follow of it along x and 1 - follow_y of it up ([KIT_TOP_DOWN] (5)
+-- along z with kit/controls' plane horizontal: a top-down view's up), so a place
 -- authored is where it is drawn with the camera at the layer's x; with
 -- `repeat` > 0 copies of the look every repeat along x, enough to cover
 -- the view at its depth. The camera: a get_view pose's while one is being
@@ -3079,8 +3080,10 @@ local function par_tick()
 			local fy = math.max(0, math.min(1, tonumber(s.follow_y) or 1))
 			local R = math.max(0, tonumber(s["repeat"]) or 0)
 			local lp = L.node.position
+			-- ([KIT_TOP_DOWN] (5) follow_y along z in a level plane)
+			local lv = M.level_plane()
 			local at = n.at + magic.Vector3((1 - f) * (c.x - lp.x),
-					(1 - fy) * (c.y - lp.y), 0)
+					lv and 0 or (1 - fy) * (c.y - lp.y), lv and (1 - fy) * (c.z - lp.z) or 0)
 			local k0, k1 = 0, 0
 			if R > 0 then
 				-- (its look's reach from its place: the box's middle and half

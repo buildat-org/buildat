@@ -14,11 +14,19 @@
 -- long press) on a point takes it away (3 kept); each a set op of its points (one
 -- undo). The server checks the shape (kit.cpp's points_ok); its refusal is logged
 -- as any edit's.
+-- [KIT_TOP_DOWN] (4) The plan (2D) view does the same for one lying flat (pitch 90:
+-- its x, y the world's x, z), on the plane at its height; drawn there in a scene
+-- whose kit/controls' plane is horizontal (E.state.plane_y), placed lying flat at
+-- that height (the place op's pitch 90). The inspector's "Edit in 2D view" shows a
+-- flat one in the plan view.
+-- simplified: no drawing in other games' plan view (a kit/polygon placed there is
+-- the standing default, as before); turn one flat and edit it there
 return function(A)
 local S, E, NT, M, magic, log = A.S, A.E, A.NT, A.M, A.magic, A.log
 local send, find, front_at, GRID_STEPS = A.send, A.find, A.front_at, A.GRID_STEPS
 local to_screen, px, SNAP_PX, drawn_at = A.to_screen, A.px, A.SNAP_PX, A.drawn_at
 local plane_z, type_of, palette = A.plane_z, A.type_of, A.palette
+local plane_at = A.plane_at
 local G = {}
 NT.pg = G
 local TYPE = "kit/polygon"
@@ -52,11 +60,42 @@ local function local_points(c)
 	return type(p) == "table" and p or {}
 end
 
--- Where the pointer meets the plane at z, on the grid (nil: along it)
-local function pointer_at(mx, my, z)
-	local o, v = M.screen_ray(mx, my)
-	local p = front_at(o, v, z)
-	return p and magic.Vector3(snap(p.x), snap(p.y), z)
+-- [KIT_TOP_DOWN] (4) The view's frame: the world's axis across the screen and those
+-- of a point's x and y (the Front view: z; x, y; the plan: y; x, z); nil: neither
+local function frame()
+	if S.view == "front" then
+		return "z", "x", "y"
+	elseif S.view == "2d" then
+		return "y", "x", "z"
+	end
+end
+
+-- A level plane's y (the server's plane_of()), nil: none
+local function plane_y()
+	return E.state and tonumber(E.state.plane_y)
+end
+
+-- Where the pointer meets the view's plane at d (along its axis), on the grid (nil:
+-- along it, or no such view)
+local function pointer_at(mx, my, d)
+	local ax, u, v = frame()
+	if not ax then
+		return nil
+	end
+	local o, r = M.screen_ray(mx, my)
+	local p = ax == "z" and front_at(o, r, d) or plane_at(o, r, d, "y")
+	if not p then
+		return nil
+	end
+	local c = {x = p.x, y = p.y, z = p.z}
+	c[u], c[v], c[ax] = snap(c[u]), snap(c[v]), d
+	return magic.Vector3(c.x, c.y, c.z)
+end
+
+-- A point's x and y in the view (its world u and v)
+local function uv(p)
+	local _, u, v = frame()
+	return p[u or "x"], p[v or "y"]
 end
 
 local function under(p, mx, my)
@@ -65,10 +104,12 @@ local function under(p, mx, my)
 			math.abs(sy - my) <= px(SNAP_PX)
 end
 
--- The selected polygon in the Front view, lying flat: {e, comp, wp (its points in
--- the world as drawn, Vector3s), o, q}; nil: none
+-- The selected polygon facing the view (its own z along the view's axis: standing in
+-- the Front view, flat in the plan): {e, comp, wp (its points in the world as drawn,
+-- Vector3s), o, q, d (o along the axis)}; nil: none
 local function editing()
-	if S.view ~= "front" or not S.primary then
+	local ax = frame()
+	if not ax or not S.primary then
 		return nil
 	end
 	local e, made_ = find(S.primary)
@@ -77,7 +118,7 @@ local function editing()
 		return nil
 	end
 	local q = NT.drawn_turn(e)
-	if math.abs((q * magic.Vector3(0, 0, 1)).z) < 0.999 then
+	if math.abs((q * magic.Vector3(0, 0, 1))[ax]) < 0.999 then
 		return nil
 	end
 	local o = drawn_at(e)
@@ -85,7 +126,7 @@ local function editing()
 	for i, p in ipairs(local_points(c)) do
 		wp[i] = o + q * magic.Vector3(tonumber(p[1]) or 0, tonumber(p[2]) or 0, 0)
 	end
-	return {e = e, comp = ci, wp = wp, o = o, q = q}
+	return {e = e, comp = ci, wp = wp, o = o, q = q, d = o[ax]}
 end
 
 -- Its points set (world ones, into its frame on the 1/16): one edit
@@ -156,7 +197,7 @@ function G.start(ed)
 end
 
 function G.update(d)
-	local p = pointer_at(S.mx, S.my, d.ed.o.z)
+	local p = pointer_at(S.mx, S.my, d.ed.d)
 	if p then
 		d.wp[d.at] = p
 		d.moved = true
@@ -170,58 +211,87 @@ function G.finish(d)
 	end
 end
 
+-- Whether one turned q lies flat (its own z along the world's y)
+local function flat(q)
+	return math.abs((q * magic.Vector3(0, 0, 1)).y) >= 0.999
+end
+G.flat = flat
+
 -- [KIT_POLYGON_ROW] The inspector's "Edit in 2D view": the Front view (a
--- side game's 2D) round the polygon's points (their box and a margin), where they are edited
+-- side game's 2D) round the polygon's points (their box and a margin), where they
+-- are edited; [KIT_TOP_DOWN] (4) one lying flat the plan view, cut over it
 function G.show(e)
 	local _, c = poly_comp(e)
 	if not c or not e.pos then
 		return
 	end
 	local o, q = drawn_at(e), NT.drawn_turn(e)
-	local x0, y0, x1, y1 = o.x, o.y, o.x, o.y
+	local lv = flat(q) and not M.side_game()
+	local V = lv and "z" or "y"
+	local x0, y0, x1, y1 = o.x, o[V], o.x, o[V]
 	for _, p in ipairs(local_points(c)) do
 		local w = o + q * magic.Vector3(tonumber(p[1]) or 0, tonumber(p[2]) or 0, 0)
-		x0, y0 = math.min(x0, w.x), math.min(y0, w.y)
-		x1, y1 = math.max(x1, w.x), math.max(y1, w.y)
+		x0, y0 = math.min(x0, w.x), math.min(y0, w[V])
+		x1, y1 = math.max(x1, w.x), math.max(y1, w[V])
 	end
 	local aspect = magic.ui.root.width / math.max(1, magic.ui.root.height)
-	S.fx, S.fy = (x0 + x1) / 2, (y0 + y1) / 2
-	S.fspan = math.max(8, 1.3 * (y1 - y0), 1.3 * (x1 - x0) / aspect)
+	local span = math.max(8, 1.3 * (y1 - y0), 1.3 * (x1 - x0) / aspect)
+	if lv then
+		S.cx, S.cz, S.span = (x0 + x1) / 2, (y0 + y1) / 2, span
+		S.cut = math.floor(o.y) + 1.5
+		M.set_view("2d")
+		log:info(string.format("kit editor: polygon %s in the plan view at %.2f,%.2f",
+				tostring(e.id), S.cx, S.cz))
+		return
+	end
+	S.fx, S.fy, S.fspan = (x0 + x1) / 2, (y0 + y1) / 2, span
 	M.set_view("front")
 	log:info(string.format("kit editor: polygon %s in the Front view at %.2f,%.2f",
 			tostring(e.id), S.fx, S.fy))
 end
 
--- Placing kit/polygon in the Front view: its points drawn so far
+-- Placing kit/polygon in the Front view (or the plan with a level plane): its
+-- points drawn so far
 function G.drawing()
-	return S.placing ~= nil and S.placing.type == TYPE and S.view == "front"
+	return S.placing ~= nil and S.placing.type == TYPE and (S.view == "front" or
+			S.view == "2d" and plane_y() ~= nil)
 end
 
+-- ({pts, ax: the view's axis, d: the plane's place along it})
 local function draft()
-	if not G.drawing() then
+	local ax = frame()
+	if not G.drawing() or S.pg_draft and S.pg_draft.ax ~= ax then
 		S.pg_draft = nil
+	end
+	if not G.drawing() then
 		return nil
 	end
-	S.pg_draft = S.pg_draft or {pts = {}, z = plane_z()}
+	S.pg_draft = S.pg_draft or {pts = {}, ax = ax, d = ax == "z" and plane_z() or
+		plane_y()}
 	return S.pg_draft
 end
 
 local function close(dr)
 	local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
 	for _, p in ipairs(dr.pts) do
-		x0, y0 = math.min(x0, p.x), math.min(y0, p.y)
-		x1, y1 = math.max(x1, p.x), math.max(y1, p.y)
+		local x, y = uv(p)
+		x0, y0 = math.min(x0, x), math.min(y0, y)
+		x1, y1 = math.max(x1, x), math.max(y1, y)
 	end
 	local cx, cy = sixteenth((x0 + x1) / 2), sixteenth((y0 + y1) / 2)
 	local pts = {}
 	for i, p in ipairs(dr.pts) do
-		pts[i] = {sixteenth(p.x - cx), sixteenth(p.y - cy)}
+		local x, y = uv(p)
+		pts[i] = {sixteenth(x - cx), sixteenth(y - cy)}
 	end
+	local lv = dr.ax == "y"
+	local pos = lv and {cx, dr.d, cy} or {cx, cy, dr.d}
 	-- Selected when it comes (place_at's)
 	NT.select_new = true
-	send({op = "place", type = TYPE, pos = {cx, cy, dr.z}, params = {points = pts}})
-	log:info(string.format("kit editor: placed %s at %g,%g,%g, %d points", TYPE, cx, cy,
-			dr.z, #pts))
+	send({op = "place", type = TYPE, pos = pos, pitch = lv and 90 or nil,
+		params = {points = pts}})
+	log:info(string.format("kit editor: placed %s at %g,%g,%g%s, %d points", TYPE,
+			pos[1], pos[2], pos[3], lv and " lying flat" or "", #pts))
 	S.pg_draft, S.placing = nil, nil
 	palette()
 end
@@ -231,7 +301,7 @@ end
 function G.click(mx, my, t)
 	local dr = draft()
 	if dr then
-		local p = pointer_at(mx, my, dr.z)
+		local p = pointer_at(mx, my, dr.d)
 		if #dr.pts >= 3 and under(dr.pts[1], mx, my) then
 			close(dr)
 		elseif p and #dr.pts >= MAX_POINTS then
@@ -239,7 +309,7 @@ function G.click(mx, my, t)
 		elseif p then
 			dr.pts[#dr.pts + 1] = p
 			log:info(string.format("kit editor: polygon point %d at %g,%g", #dr.pts,
-					p.x, p.y))
+					uv(p)))
 		end
 		return true
 	end
@@ -301,9 +371,9 @@ function G.guide(g, mx, my)
 	if not dr then
 		return nil
 	end
-	local p = pointer_at(mx, my, dr.z)
+	local p = pointer_at(mx, my, dr.d)
 	g.left = #dr.pts >= 3 and under(dr.pts[1], mx, my) and "close the polygon" or
-			p and string.format("a point of the polygon at %g,%g", p.x, p.y) or nil
+			p and string.format("a point of the polygon at %g,%g", uv(p)) or nil
 	g.right = "stop drawing"
 	g.note = not S.touch and "Enter: close it, Backspace: its last point back, " ..
 			"Esc: stop" or nil
@@ -312,7 +382,7 @@ end
 
 function G.draw(dbg)
 	local YELLOW, GREEN = magic.Color(1, 0.9, 0.2), magic.Color(0.3, 1, 0.5)
-	local r = (S.fspan or 16) * 0.006
+	local r = ((S.view == "2d" and S.span or S.fspan) or 16) * 0.006
 	local function dot(p, col)
 		dbg:AddBoundingBox(magic.BoundingBox(p - magic.Vector3(r, r, r),
 				p + magic.Vector3(r, r, r)), col, false)
@@ -329,7 +399,7 @@ function G.draw(dbg)
 			wp[i] = p
 			dot(p, i == 1 and YELLOW or GREEN)
 		end
-		local p = S.mx and pointer_at(S.mx, S.my, dr.z)
+		local p = S.mx and pointer_at(S.mx, S.my, dr.d)
 		if p then
 			wp[#wp + 1] = p
 		end
