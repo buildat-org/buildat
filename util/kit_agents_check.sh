@@ -235,7 +235,7 @@ if phase == "main":
         "unlink", "move", "rename", "set_comments", "add_component",
         "remove_component", "set_parent", "duplicate", "place_prefab",
         "scatter_prefab", "save_prefab", "set_voxels", "edit_voxels",
-        "edit_terrain", "put_texture", "put_sound", "put_type", "edit_type",
+        "edit_terrain", "put_texture", "list_textures", "put_sound", "put_type", "edit_type",
         "delete_type", "new_scene", "delete_scene", "switch_scene", "undo",
         "batch", "draft",
         "publish", "leave_draft",

@@ -1558,6 +1558,7 @@ buildat.sub_packet("kit:season", function(data)
 	local voxelworld = require("buildat/module/voxelworld")
 	if reg_data ~= "" then
 		local reg = buildat.createVoxelRegistry()
+		voxelworld.make_named_textures(reg_data)
 		reg:deserialize(reg_data)
 		season_base = season_base or voxelworld.get_voxel_registry()
 		voxelworld.set_voxel_registry(reg)

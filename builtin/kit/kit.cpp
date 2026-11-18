@@ -178,6 +178,8 @@ static const size_t MAX_VOXEL_TYPES = 256, MAX_TEXTURES = 256;
 static const size_t MAX_ITEM_TYPES = 256; // [KIT_TOOLS_1]
 // [KIT_SOUNDS] the sounds a save has at most, a sound's params' length
 static const size_t MAX_SOUNDS = 256, MAX_SOUND = 2048;
+// [KIT_TEXTURE_DESIGNER] the recipe textures a save names at most
+static const size_t MAX_WEAVES = 256;
 static const size_t MAX_PROJECTILES = 256; // [KIT_TOOLS_2] a round's
 static const size_t MAX_TEXTURE_BYTES = 64 << 10;
 static const uint32_t MAX_TEXTURE_SIDE = 128;
@@ -1489,6 +1491,9 @@ struct Module: public interface::Module, public Interface
 	// last gave it (set_items), by name
 	sm_<ss_, json::Value> m_app_items;
 	std::set<ss_> m_textures;
+	// [KIT_TEXTURE_DESIGNER] the project's recipe textures (rows
+	// "weave:<author>/<name>") by name, {recipe, author, name, version}
+	sm_<ss_, json::Value> m_weaves;
 	// The properties of what register_voxels() and a builder's type
 	// registered, by name (voxel_type())
 	sm_<ss_, world::Material> m_registered;
@@ -5463,6 +5468,12 @@ struct Module: public interface::Module, public Interface
 			if(m_store->get(k, png))
 				serve_texture(k.substr(8), png);
 		}
+		m_weaves.clear();
+		for(const ss_ &k : m_store->list("weave:")){
+			ss_ row;
+			if(m_store->get(k, row))
+				m_weaves[k.substr(6)] = json::load_string(row.c_str());
+		}
 		for(const ss_ &k : m_store->list("voxel:")){
 			ss_ row;
 			if(!m_store->get(k, row))
@@ -5471,8 +5482,9 @@ struct Module: public interface::Module, public Interface
 			m_voxel_types[k.substr(6)] = r;
 			register_builder_voxel(k.substr(6), r);
 		}
-		log_i(MODULE, "Builders' voxel types: %zu, uploaded textures: %zu",
-				m_voxel_types.size(), m_textures.size());
+		log_i(MODULE, "Builders' voxel types: %zu, uploaded textures: %zu, "
+				"recipe textures: %zu", m_voxel_types.size(), m_textures.size(),
+				m_weaves.size());
 	}
 
 	void serve_texture(const ss_ &hash, const ss_ &png)
@@ -5484,11 +5496,14 @@ struct Module: public interface::Module, public Interface
 		m_textures.insert(name);
 	}
 
-	// The textures a builder's type may wear: every registered voxel's and
-	// the uploaded ones
+	// The textures a builder's type may wear: every registered voxel's, the
+	// uploaded ones and the project's recipe textures (any weave1 name is
+	// worn too: weave_texture_ok())
 	std::set<ss_> texture_choices()
 	{
 		std::set<ss_> out = m_textures;
+		for(auto &w : m_weaves)
+			out.insert(weave_texture(jstr(w.second, "recipe")));
 		each_registry([&](interface::VoxelRegistry *reg){
 			for(const auto &d : reg->get_all())
 				for(const auto &t : d.textures)
@@ -5560,8 +5575,17 @@ struct Module: public interface::Module, public Interface
 		row.set("format", ss_("kit_voxel"));
 		row.set("author", author);
 		row.set("name", short_name);
-		const ss_ texture = jstr(j, "texture");
+		// [KIT_TEXTURE_DESIGNER] a recipe's compact form is worn as its
+		// texture's name; top and bottom, when given, over texture's
+		auto face = [&](const char *f){
+			const ss_ t = jstr(j, f);
+			return weave_ok(t) ? weave_texture(t) : t;
+		};
+		const ss_ texture = face("texture");
 		row.set("texture", texture);
+		for(const char *f : {"top", "bottom"})
+			if(!face(f).empty())
+				row.set(f, face(f));
 		row.set("kind", jstr(j, "kind", "solid"));
 		row.set("solid", !j.get("solid").is_boolean() ||
 				j.get("solid").is_true());
@@ -5594,8 +5618,14 @@ struct Module: public interface::Module, public Interface
 					"surface tag and a group (letters, digits and _), a "
 					"level (a whole number 0...15), sounds' names, a "
 					"drop's (<author>/<name>) and translucency 0...1");
-		if(!texture_choices().count(texture))
-			return refuse("texture: no voxel or upload has "+texture);
+		const std::set<ss_> choices = texture_choices();
+		for(const char *f : {"texture", "top", "bottom"}){
+			const ss_ t = jstr(row, f);
+			if((f == ss_("texture") || !t.empty()) && !choices.count(t) &&
+					!weave_texture_ok(t))
+				return refuse(ss_(f)+": no voxel, upload or recipe has "+
+						t.substr(0, 129));
+		}
 		auto old = m_voxel_types.find(name);
 		if(old != m_voxel_types.end() && !jstr(old->second, "package").empty())
 			return refuse(name+" is the package "+jstr(old->second, "package")+
@@ -6769,7 +6799,7 @@ struct Module: public interface::Module, public Interface
 				if(served.empty())
 					return tex+": "+twhy;
 				o.set(face, served);
-			} else if(!choices.count(tex)){
+			} else if(!choices.count(tex) && !weave_texture_ok(tex)){
 				return what+": no voxel or upload has the texture "+tex;
 			}
 			return ss_();
@@ -7547,14 +7577,14 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// The builders' rows (items.json, sounds.json, voxels.json,
-	// prefabs.json: {"<author>/<n>": its row}, a package's left out) and
-	// the uploads they wear, textures/<hash>.png; used: only those of these
-	// store keys ("voxel:<author>/<n>")
+	// prefabs.json, weaves.json: {"<author>/<n>": its row}, a package's left
+	// out) and the uploads they wear, textures/<hash>.png; used: only those
+	// of these store keys ("voxel:<author>/<n>")
 	void export_rows(sv_<std::pair<ss_, ss_>> &files,
 			const std::set<ss_> *used)
 	{
 		ss_ worn;
-		for(const char *kind : {"item", "sound", "voxel", "prefab"}){
+		for(const char *kind : {"item", "sound", "voxel", "prefab", "weave"}){
 			const ss_ pre = ss_(kind)+":";
 			ss_ out;
 			for(const ss_ &k : m_store->list(pre)){
@@ -7872,6 +7902,10 @@ struct Module: public interface::Module, public Interface
 				m_store->get(k, src);
 				rows[k] = std::make_pair(k.substr(strlen(kind) + 1), src);
 			}
+		// [KIT_TEXTURE_DESIGNER] a recipe texture by the name a voxel wears
+		for(auto &w : m_weaves)
+			rows["weave:"+w.first] = std::make_pair(weave_texture(jstr(w.second,
+					"recipe")), w.second.stringify());
 		for(auto &lt : m_local_types)
 			rows["type:"+lt.first] = std::make_pair(lt.first,
 					jstr(lt.second, "source")+jstr(lt.second, "client"));
@@ -8064,6 +8098,7 @@ struct Module: public interface::Module, public Interface
 						n != "meta.json" && n != "composition.json" &&
 						n != "items.json" && n != "sounds.json" &&
 						n != "voxels.json" && n != "prefabs.json" &&
+						n != "weaves.json" &&
 						n != "edits.bin" && n.compare(0, 7, "LICENSE") != 0 &&
 						n.compare(0, 7, "LICENCE") != 0)
 					throw Exception("not a scene package's file: "+n.substr(0, 80));
@@ -9415,7 +9450,7 @@ struct Module: public interface::Module, public Interface
 		// (a template with none of an export's files says nothing)
 		bool any = false;
 		for(const char *f : {"textures", "voxels.json", "items.json",
-				"sounds.json", "prefabs.json", "edits.bin"})
+				"sounds.json", "prefabs.json", "weaves.json", "edits.bin"})
 			any = any || interface::fs::path_exists(dir+"/"+f);
 		if(any)
 			log_i(MODULE, "The template's export: %zu textures, %zu rows (%zu "
@@ -9467,7 +9502,8 @@ struct Module: public interface::Module, public Interface
 				faces){
 			for(const char *f : faces)
 				if(r.get(f).is_string() && !r.get(f).as_string().empty() &&
-						!choices.count(r.get(f).as_string()))
+						!choices.count(r.get(f).as_string()) &&
+						!weave_texture_ok(r.get(f).as_string()))
 					return false;
 			return true;
 		};
@@ -9568,6 +9604,23 @@ struct Module: public interface::Module, public Interface
 			r.set("version", std::max<int64_t>(1, json::jint(*it, "version", 1)));
 			n += why.empty();
 			take("sound", it.key(), why, r);
+		}
+		// [KIT_TEXTURE_DESIGNER] the recipe textures
+		n = m_store->list("weave:").size();
+		const json::Value ws = rows("weaves.json");
+		for(json::Iterator it(ws); it; ++it){
+			const ss_ recipe = jstr(*it, "recipe");
+			const ss_ why = !own(it.key()) ? "not a builder's <author>/<name>" :
+					!weave_ok(recipe) ? "no weave1 recipe" :
+					n >= MAX_WEAVES ? "past "+itos(MAX_WEAVES)+" recipe textures" : "";
+			json::Value r = json::object();
+			const size_t sl = it.key().find('/');
+			r.set("recipe", recipe);
+			r.set("author", it.key().substr(0, sl));
+			r.set("name", it.key().substr(sl + 1));
+			r.set("version", std::max<int64_t>(1, json::jint(*it, "version", 1)));
+			n += why.empty();
+			take("weave", it.key(), why, r);
 		}
 		const json::Value ps = rows("prefabs.json");
 		for(json::Iterator it(ps); it; ++it){
@@ -26898,6 +26951,10 @@ struct Module: public interface::Module, public Interface
 		if(!item_sheet(j, base, row, why))
 			return refuse(why);
 		const ss_ icon = jstr(row, "icon");
+		// simplified: a recipe texture as an icon is drawn where a voxel
+		// type wears it (clients make them from the voxel registry's names);
+		// one no type wears draws nothing. Clients making every weave row's
+		// at join would lift it
 		if(!icon.empty() && !texture_choices().count(icon))
 			return refuse("icon: no voxel or upload has "+icon);
 		auto old = m_item_types.find(name);
@@ -27043,6 +27100,242 @@ struct Module: public interface::Module, public Interface
 		log_i(MODULE, "%s deleted sound %s", cs(p.name), cs(name));
 		m_edit_what = "deleted sound "+name;
 		send_sounds(-1);
+	}
+
+	// ---- [KIT_TEXTURE_DESIGNER] The project's recipe textures: weave1
+	// recipes (extensions/weave; data, not pixels: a client makes the pixels
+	// from the texture's name, which is the recipe), the builders' rows
+	// "weave:<author>/<name>" {recipe, author, name, version}, in the
+	// builders' state as "weaves". A voxel type wears one by its texture
+	// name, weave_texture(); any well-formed one is worn, named here or not
+
+	// weave1's parameters as weave_gen.lua's G.PARAMS has them, in the
+	// compact form's order
+	struct WeaveParam
+	{
+		const char *name;
+		double lo, hi, def;
+		bool whole;
+	};
+	static const sv_<WeaveParam> &weave_params()
+	{
+		static const sv_<WeaveParam> t = {
+			{"grain", 0, 1, 0.3, false}, {"octaves", 1, 4, 3, true},
+			{"contrast", 0, 1, 0.2, false}, {"balance", 0, 1, 0.5, false},
+			{"stretch", -1, 1, 0, false}, {"ridge", 0, 1, 0, false},
+			{"relief", 0, 1, 0.3, false}, {"count", 1, 16, 4, true},
+			{"gap", 0, 1, 0.3, false}, {"offset", 0, 1, 0.5, false},
+			{"jitter", 0, 1, 0.3, false}, {"variation", 0, 1, 0.3, false},
+			{"bevel", 0, 1, 0.4, false}, {"speckle", 0, 1, 0, false},
+			{"levels", 0, 16, 6, true},
+		};
+		return t;
+	}
+	static const char *weave_b32() { return "0123456789abcdefghijklmnopqrstuv"; }
+	static const sv_<ss_> &weave_colors()
+	{
+		static const sv_<ss_> c = {"color_a", "color_b", "gap_color",
+			"speckle_color"};
+		return c;
+	}
+
+	// weave1's compact form read as weave_gen.lua's unpack() reads it, into
+	// t (its table form; null: only checked)
+	static bool weave_unpack(const ss_ &s, json::Value *t)
+	{
+		static const char *const PATTERNS[] = {"none", "bricks", "tiles",
+			"planks", "cobbles", "stripes"};
+		if(s.size() != 7 + 53 || s.compare(0, 7, "weave1:") != 0)
+			return false;
+		size_t at = 7;
+		bool ok = true;
+		auto get = [&](int n){
+			int64_t v = 0;
+			while(n-- > 0){
+				const char *c = strchr(weave_b32(), s[at++]);
+				ok = ok && c && *c;
+				v = v * 32 + (c ? c - weave_b32() : 0);
+			}
+			return v;
+		};
+		const int64_t size = get(1), pattern = get(1), seed = get(4);
+		if(!ok || size > 2 || pattern > 5)
+			return false;
+		if(t){
+			*t = json::object();
+			t->set("v", (int64_t)1);
+			t->set("size", (int64_t)16 << size);
+			t->set("pattern", ss_(PATTERNS[pattern]));
+			t->set("seed", seed);
+		}
+		for(const ss_ &c : weave_colors()){
+			const int64_t v = get(5);
+			if(!ok || v > 0xffffff)
+				return false;
+			char hex[8];
+			snprintf(hex, sizeof hex, "#%06x", (unsigned)v);
+			if(t)
+				t->set(c, ss_(hex));
+		}
+		for(const WeaveParam &wp : weave_params()){
+			const int64_t q = get(wp.whole ? 1 : 2);
+			if(!ok || (wp.whole ? q > wp.hi - wp.lo : wp.lo < 0 && q > 1022))
+				return false;
+			// (4 decimals: each reads back as the same step)
+			const double x = wp.whole ? q + wp.lo : wp.lo < 0 ?
+					(q - 511) / 511.0 : q / 1023.0;
+			if(t)
+				t->set(wp.name, wp.whole ? json::Value((int64_t)x) :
+						json::Value(std::round(x * 1e4) / 1e4));
+		}
+		return true;
+	}
+	static bool weave_ok(const ss_ &s)
+	{
+		return weave_unpack(s, nullptr);
+	}
+
+	// A table form packed as weave_gen.lua's params() packs it: the fields
+	// given over the defaults, numbers clamped, a whole one rounded
+	static bool weave_pack(const json::Value &t, ss_ &out, ss_ &why)
+	{
+		static const sv_<ss_> PATTERNS = {"none", "bricks", "tiles", "planks",
+			"cobbles", "stripes"};
+		int64_t size = 0, pattern = 0, seed = 0;
+		sm_<ss_, int64_t> colors = {{"color_a", 0x808080},
+			{"color_b", 0x606060}, {"gap_color", 0x404040},
+			{"speckle_color", 0x202020}};
+		sm_<ss_, double> v;
+		for(const WeaveParam &wp : weave_params())
+			v[wp.name] = wp.def;
+		for(json::Iterator it(t); t.is_object() && it; ++it){
+			const ss_ k = it.key();
+			const json::Value &x = *it;
+			if(k == "v"){
+				if(!x.is_number() || x.as_number() != 1)
+					return why = "v: 1 (weave1)", false;
+			} else if(k == "size"){
+				const double n = x.is_number() ? x.as_number() : 0;
+				size = n == 16 ? 0 : n == 32 ? 1 : n == 64 ? 2 : -1;
+				if(size < 0)
+					return why = "size: 16, 32 or 64", false;
+			} else if(k == "pattern"){
+				auto f = std::find(PATTERNS.begin(), PATTERNS.end(),
+						x.is_string() ? x.as_string() : ss_());
+				if(f == PATTERNS.end())
+					return why = "pattern: none, bricks, tiles, planks, "
+							"cobbles or stripes", false;
+				pattern = f - PATTERNS.begin();
+			} else if(k == "seed"){
+				const double n = x.is_number() ? x.as_number() : -1;
+				if(n < 0 || n > 1048575 || n != std::floor(n))
+					return why = "seed: a whole number 0...1048575", false;
+				seed = (int64_t)n;
+			} else if(colors.count(k)){
+				const ss_ s = x.is_string() ? x.as_string() : ss_();
+				if(s.size() != 7 || s[0] != '#' || s.find_first_not_of(
+						"0123456789abcdefABCDEF", 1) != ss_::npos)
+					return why = k+": \"#rrggbb\"", false;
+				colors[k] = std::stoll(s.substr(1), nullptr, 16);
+			} else if(v.count(k)){
+				if(!x.is_number() || x.as_number() != x.as_number())
+					return why = k+": a number", false;
+				v[k] = x.as_number();
+			} else {
+				return why = "no parameter "+k.substr(0, 64), false;
+			}
+		}
+		if(!t.is_object())
+			return why = "a table", false;
+		auto put = [&](int64_t n, int chars){
+			ss_ d(chars, '0');
+			for(int i = chars - 1; i >= 0; i--, n /= 32)
+				d[i] = weave_b32()[n % 32];
+			out += d;
+		};
+		out = "weave1:";
+		put(size, 1);
+		put(pattern, 1);
+		put(seed, 4);
+		for(const ss_ &c : weave_colors())
+			put(colors[c], 5);
+		for(const WeaveParam &wp : weave_params()){
+			const double x = std::min(wp.hi, std::max(wp.lo, v[wp.name]));
+			put(wp.whole ? (int64_t)std::floor(x + 0.5) - (int64_t)wp.lo :
+					wp.lo < 0 ? (int64_t)std::floor(x * 511 + 0.5) + 511 :
+					(int64_t)std::floor(x * 1023 + 0.5), wp.whole ? 1 : 2);
+		}
+		return true;
+	}
+
+	// The texture a recipe is worn as, and whether a name is one
+	static ss_ weave_texture(const ss_ &recipe)
+	{
+		return "generated/weave/weave1/"+recipe.substr(std::min<size_t>(7,
+				recipe.size()));
+	}
+	static bool weave_texture_ok(const ss_ &name)
+	{
+		return name.compare(0, 23, "generated/weave/weave1/") == 0 &&
+				weave_ok("weave1:"+name.substr(23));
+	}
+
+	// {"op": "weave", "name": n, "recipe": "weave1:..."}: a builder's
+	// recipe texture made ("<their name>/<n>", or n a whole name of theirs:
+	// its next version); {"op": "weave_delete", "name": whole name}. The
+	// project's, so not in a draft
+	void make_weave(const Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		if(active_session())
+			return refuse("in a draft: the default round's");
+		const ss_ recipe = jstr(j, "recipe");
+		if(!weave_ok(recipe))
+			return refuse("recipe: weave1's compact form, \"weave1:\" and 53 "
+					"characters of 0-9 a-v");
+		const ss_ author = builder_author(author_of(p));
+		ss_ name = jstr(j, "name");
+		if(name.compare(0, author.size() + 1, author+"/") == 0)
+			name = name.substr(author.size() + 1);
+		if(!name_ok(name))
+			return refuse("name: letters, digits and _");
+		if(author.empty())
+			return refuse("a builder's textures are under their name, and it "
+					"is \""+p.name.substr(0, 64)+"\"");
+		name = author+"/"+name;
+		auto old = m_weaves.find(name);
+		if(old == m_weaves.end() && m_weaves.size() >= MAX_WEAVES)
+			return refuse("the save has "+itos(MAX_WEAVES)+" recipe textures");
+		json::Value row = json::object();
+		row.set("recipe", recipe);
+		row.set("author", author);
+		row.set("name", name.substr(author.size() + 1));
+		row.set("version", old == m_weaves.end() ? (int64_t)1 :
+				json::jint(old->second, "version", 1) + 1);
+		m_store->set("weave:"+name, row.stringify());
+		m_weaves[name] = row;
+		log_i(MODULE, "%s made texture %s version %s: %s", cs(p.name), cs(name),
+				cs(itos(json::jint(row, "version", 1))), cs(recipe));
+		m_edit_what = "made texture "+name+" version "+itos(json::jint(row,
+				"version", 1));
+		send_state_all();
+	}
+
+	void delete_weave(const Peer &p, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		if(active_session())
+			return refuse("in a draft: the default round's");
+		const ss_ name = jstr(j, "name");
+		if(!m_weaves.count(name))
+			return refuse("no texture "+name.substr(0, 129));
+		// simplified: a voxel type wearing it keeps it (its name is the
+		// recipe); only the name is gone
+		m_store->remove("weave:"+name);
+		m_weaves.erase(name);
+		log_i(MODULE, "%s deleted texture %s", cs(p.name), cs(name));
+		m_edit_what = "deleted texture "+name;
+		send_state_all();
 	}
 
 	// A sound played (its name; "" or one not here: nothing) for the peers
@@ -31303,7 +31596,8 @@ struct Module: public interface::Module, public Interface
 				"or a starting kit gives): each one's declaration.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"list_voxel_types", "=voxel_types", "The voxels set_voxels places: "
-				"each one's name, kind and whether it is solid.",
+				"each one's name, kind and whether it is solid; a builder's "
+				"its textures.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			// [KIT_AGENT_NEXT_2] 6
 			{"list_sounds", "=sounds", "The sounds a type's sound parameter "
@@ -31579,16 +31873,28 @@ struct Module: public interface::Module, public Interface
 			// [KIT_AGENT_VISUALS]
 			{"put_texture", "texture_put", "Uploads a texture, as the editor's "
 				"Upload does: a square PNG, its side a power of two 8...128, 64 "
-				"KiB at most, decoded and saved again. The answer is its name, "
-				"\"kit/up/<hash>.png\" (the same image: the same name). voxel: a "
+				"KiB at most, decoded and saved again; its name "
+				"\"kit/up/<hash>.png\" (the same image: the same name). Or "
+				"makes a recipe texture as the editor's texture designer does: "
+				"recipe, made \"<your account>/<name>\" (a new version if there "
+				"is one); its name \"generated/weave/weave1/...\", every client "
+				"drawing it from that. The answer is its name. voxel: a "
 				"voxel type of yours wearing it too, \"<your account>/<name>\" "
 				"(a new version if there is one), placeable with set_voxels and "
-				"a kit/part's voxel parameter.",
+				"a kit/part's or kit/polygon's voxel parameter.",
 				R"J({"type": "object", "properties": {
 				"png": {"type": "string", "description": "The PNG's bytes in base64"},
+				"recipe": {"description": "\"weave1:...\" (list_textures: the project's and the presets'), or a table {size (16, 32, 64), pattern (none, bricks, tiles, planks, cobbles, stripes), seed (0...1048575), color_a, color_b, gap_color, speckle_color (\"#rrggbb\"), grain, contrast, balance, ridge, relief, gap, offset, jitter, variation, bevel, speckle (0...1), stretch (-1...1), octaves (1...4), count (1...16), levels (0...16)}, those not given their defaults"},
+				"name": {"type": "string", "description": "A recipe's: letters, digits and _"},
 				"voxel": {"type": "object", "description":
-					"{name (letters, digits and _), kind (solid, leaves, plant, water; solid unless given), solid (true unless given), transparent, light (0...15), friction (0...10, 1 unless given), surface (a tag)}"}},
-				"required": ["png"]})J", ""},
+					"{name (letters, digits and _), face (all, top or bottom: which this texture is; all unless given), texture, top, bottom (the other faces': a texture's name or a recipe), kind (solid, leaves, plant, water; solid unless given), solid (true unless given), transparent, light (0...15), friction (0...10, 1 unless given), surface (a tag)}"}}})J", ""},
+			// [KIT_TEXTURE_DESIGNER]
+			{"list_textures", "=textures", "The textures a voxel type may "
+				"wear: uploads, the project's recipe textures (name, version, "
+				"recipe, texture: the name a voxel wears) and the presets' "
+				"recipes. With texture (a recipe texture's name or a recipe): "
+				"its recipe as put_texture's table.",
+				R"J({"type": "object", "properties": {"texture": {"type": "string"}}})J", ""},
 			// [KIT_AGENT_NEXT_2] 6 (agent_put_sound())
 			{"put_sound", "sound", "Makes or changes a sound as the editor's "
 				"sound designer does: name, made \"<your account>/<name>\", or "
@@ -31887,8 +32193,8 @@ struct Module: public interface::Module, public Interface
 				"Export this game zips: {game (its name), files: {path: text}, "
 				"base64: {path: its bytes}}. meta.json, LICENSE (all rights "
 				"reserved), composition.json, types/<name>.lua and .client.lua, "
-				"items.json, sounds.json, voxels.json, prefabs.json; "
-				"textures/<hash>.png and edits.bin (the World's hand-edited "
+				"items.json, sounds.json, voxels.json, prefabs.json, "
+				"weaves.json; textures/<hash>.png and edits.bin (the World's hand-edited "
 				"voxels and heightmap, zlib) in base64. Zipped, New's Start "
 				"from: From a file... takes them; as a directory, the repo's "
 				"templates/.",
@@ -32417,34 +32723,64 @@ struct Module: public interface::Module, public Interface
 		// it (store_texture()'s checks), and a voxel type wearing it if asked
 		if(op == "texture_put"){
 			failed = true;
-			ss_ b64 = jstr(a, "png"), png, why;
-			// (a data URL's head too)
-			if(b64.compare(0, 5, "data:") == 0 && b64.find(',') != ss_::npos)
-				b64 = b64.substr(b64.find(',') + 1);
-			if(b64.size() > (MAX_TEXTURE_BYTES + 2) / 3 * 4 + 4096 ||
-					!unbase64(b64, png))
-				return "Refused: png: a PNG's bytes in base64, "+
-						itos(MAX_TEXTURE_BYTES >> 10)+" KiB at most";
-			const ss_ name = store_texture(png, why);
-			if(name.empty())
-				return "Refused: "+why;
-			log_i(MODULE, "%s uploaded texture %s", cs(p.name), cs(name));
-			send_state_all();
+			ss_ name, made;
+			const json::Value &rj = a.get("recipe");
+			if(!rj.is_undefined()){
+				// [KIT_TEXTURE_DESIGNER] a recipe texture, as the designer's
+				// Save makes one (its "weave" op)
+				ss_ recipe, why;
+				if(rj.is_string())
+					recipe = rj.as_string();
+				else if(!weave_pack(rj, recipe, why))
+					return "Refused: recipe: "+why;
+				if(!weave_ok(recipe))
+					return "Refused: recipe: weave1's compact form or a table";
+				json::Value e = json::object();
+				e.set("op", "weave");
+				e.set("name", jstr(a, "name"));
+				e.set("recipe", recipe);
+				m_edit_what.clear();
+				ss_ refused, warnings;
+				if(!agent_edit(peer, e, refused, warnings))
+					return "Refused: "+refused+warnings;
+				name = weave_texture(recipe);
+				made = m_edit_what+": "+name;
+			} else {
+				ss_ b64 = jstr(a, "png"), png, why;
+				// (a data URL's head too)
+				if(b64.compare(0, 5, "data:") == 0 && b64.find(',') != ss_::npos)
+					b64 = b64.substr(b64.find(',') + 1);
+				if(b64.size() > (MAX_TEXTURE_BYTES + 2) / 3 * 4 + 4096 ||
+						!unbase64(b64, png))
+					return "Refused: png: a PNG's bytes in base64, "+
+							itos(MAX_TEXTURE_BYTES >> 10)+" KiB at most; or "
+							"a recipe";
+				name = store_texture(png, why);
+				if(name.empty())
+					return "Refused: "+why;
+				log_i(MODULE, "%s uploaded texture %s", cs(p.name), cs(name));
+				send_state_all();
+				made = "Texture "+name;
+			}
 			failed = false;
 			const json::Value &v = a.get("voxel");
 			if(!v.is_object())
-				return name;
+				return rj.is_undefined() ? name : made+" (a voxel type's "
+						"texture, top or bottom)";
 			json::Value e = v.deepcopy();
+			const ss_ face = jstr(v, "face", "all");
+			e.del_key("face");
 			e.set("op", "voxel");
-			e.set("texture", name);
+			e.set(face == "top" || face == "bottom" ? face : ss_("texture"),
+					name);
 			ss_ refused, warnings;
 			if(!agent_edit(peer, e, refused, warnings)){
 				failed = true;
-				return "Texture "+name+"; the voxel type refused: "+refused+
-						warnings;
+				return made+"; the voxel type refused: "+refused+warnings;
 			}
-			return "Texture "+name+"; voxel type "+builder_author(author_of(p))+
-					"/"+jstr(v, "name")+" wears it"+warnings;
+			return made+"; voxel type "+builder_author(author_of(p))+"/"+
+					jstr(v, "name")+" wears it"+(face == "top" ||
+					face == "bottom" ? " on its "+face : ss_())+warnings;
 		}
 		// [KIT_AGENT_NEXT_2]
 		if(op == "batch" || op == "scatter")
@@ -35249,9 +35585,12 @@ struct Module: public interface::Module, public Interface
 			for(unsigned i = 0; i < all.size(); i++){
 				json::Value o = json::object();
 				for(const char *k : {"name", "kind", "solid", "transparent",
-						"light"})
+						"light", "top", "bottom"})
 					if(!all.at(i).get(k).is_undefined())
 						o.set(k, all.at(i).get(k));
+				// [KIT_TEXTURE_DESIGNER] a builder's type's texture, to edit
+				if(!all.at(i).get("author").is_undefined())
+					o.set("texture", all.at(i).get("texture"));
 				out.append(o);
 			}
 			return out.stringify();
@@ -35280,6 +35619,51 @@ struct Module: public interface::Module, public Interface
 						o.set(k, it.second.get(k));
 				out.append(o);
 			}
+			return out.stringify();
+		}
+		// [KIT_TEXTURE_DESIGNER]
+		if(op == "=textures"){
+			// The designer's presets at seed 1 (weave.preset(name, 1))
+			static const char *const PRESETS[][2] = {
+				{"grass", "weave1:00000g4l2936b99n4kgq97veq0mo1bsdefv00c1399f5aga3bl765"},
+				{"dirt", "weave1:00000g7akpb5if134kgq98qraegb2a9f2fv00dl399f5aga3bl5j5"},
+				{"stone", "weave1:00000g8f2s36iqrf4kgq94qjak9u3dfdefvaee238pgta38ebv2n5"},
+				{"cobble", "weave1:04000g8b2c16eqbd4gga9164omeo272f2fv00ae2asf5k3gfl8005"},
+				{"bricks", "weave1:01000g9ei997idp5ctftn164omhu172f2fv008r3ahf544d9d8005"},
+				{"planks", "weave1:03000ga6u9v8an9n58dp9164omd52a9f2ub00783ahacgtbma2005"},
+				{"sand", "weave1:00000gdfhs7c7bbn4kgq9a72qul415ff2nv00ae399f5aga3bl404"},
+				{"regolith", "weave1:00000g9b4s37esrd4kgq94uiqabi3bsdefv00n8399f5aga3bl8p5"},
+				{"metal", "weave1:02000g9vad78f3sl5kmb5164om5513sf2pi00421ah00003vqg006"},
+				{"ice", "weave1:00000g8vgure7svp4kgq9164om552i82tfvvv4f38pgta38ebv005"},
+			};
+			const ss_ one = jstr(a, "texture");
+			if(!one.empty()){
+				auto it = m_weaves.find(one);
+				const ss_ recipe = it != m_weaves.end() ? jstr(it->second,
+						"recipe") : weave_texture_ok(one) ? "weave1:"+one.substr(23) :
+						one;
+				json::Value t;
+				failed = !weave_unpack(recipe, &t);
+				return failed ? "No recipe texture "+one.substr(0, 129) :
+						t.stringify();
+			}
+			json::Value out = json::object(), up = json::array(),
+					rs = json::array(), ps = json::object();
+			for(const ss_ &t : m_textures)
+				up.append(t);
+			for(auto &it : m_weaves){
+				json::Value o = json::object();
+				o.set("name", it.first);
+				o.set("version", it.second.get("version"));
+				o.set("recipe", it.second.get("recipe"));
+				o.set("texture", weave_texture(jstr(it.second, "recipe")));
+				rs.append(o);
+			}
+			for(auto &pr : PRESETS)
+				ps.set(pr[0], ss_(pr[1]));
+			out.set("uploads", up);
+			out.set("recipes", rs);
+			out.set("presets", ps);
 			return out.stringify();
 		}
 		failed = true;
@@ -37296,6 +37680,14 @@ struct Module: public interface::Module, public Interface
 			"list_voxel_types lists them; set_voxels places them (one "
 			"undo). put_texture uploads a square PNG (8...128 pixels a side, "
 			"64 KiB) and its voxel argument makes your voxel type wearing it.\n"
+			"Or a recipe texture, seamless pixel art made of parameters (the "
+			"editor's texture designer): put_texture's recipe, \"weave1:...\" "
+			"or a table (list_textures: the presets' and the project's); a "
+			"voxel type's texture, top and bottom take one too. A grass top on "
+			"a dirt side: put_texture {\"name\": \"grass_top\", \"recipe\": "
+			"\"weave1:00000g4l2936b99n4kgq97veq0mo1bsdefv00c1399f5aga3bl765\", "
+			"\"voxel\": {\"name\": \"grassy\", \"face\": \"top\", \"texture\": "
+			"\"weave1:00000g7akpb5if134kgq98qraegb2a9f2fv00dl399f5aga3bl5j5\"}}.\n"
 			"\n## Shapes and effects off the grid\n"
 			"kit/part: a box, wedge or sphere of any size and rotation, its "
 			"color and material plain, metal, glass or glow (glow: unlit, "
@@ -37356,7 +37748,7 @@ struct Module: public interface::Module, public Interface
 			"yours). Voxels: list_voxel_types, set_voxels, edit_voxels (a "
 			"box), get_voxels; a heightmap's ground: edit_terrain, get_ground. "
 			"batch: many edits, one undo, all or nothing. Sounds: list_sounds, "
-			"put_sound. show marks where you work for your builder. Scenes: get_state "
+			"put_sound; textures: list_textures, put_texture. show marks where you work for your builder. Scenes: get_state "
 			"names them and yours (where you edit); switch_scene, new_scene, "
 			"delete_scene. The app root (place's or set_parent's parent "
 			"\"root\") holds what is every scene's: a game-wide lobby, its "
@@ -39355,6 +39747,11 @@ struct Module: public interface::Module, public Interface
 			for(const ss_ &t : texture_choices())
 				ts.append(t);
 			j.set("textures", ts);
+			// [KIT_TEXTURE_DESIGNER] the recipe textures by name
+			json::Value wv = json::object();
+			for(auto &w : m_weaves)
+				wv.set(w.first, w.second);
+			j.set("weaves", wv);
 			// [KIT] stage 4f: what the terrain brushes choose from
 			if(m_w->world_scene){
 				json::Value t = json::object(), bs = json::array();
@@ -39619,6 +40016,10 @@ struct Module: public interface::Module, public Interface
 			return make_sound(p, j, refuse);
 		if(op == "sound_delete")
 			return delete_sound(p, j, refuse);
+		if(op == "weave")
+			return make_weave(p, j, refuse);
+		if(op == "weave_delete")
+			return delete_weave(p, j, refuse);
 		if(op == "set_voxel")
 			return edit_voxel(p, peer, j, refuse);
 		if(op == "region")

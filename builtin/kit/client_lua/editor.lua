@@ -6853,6 +6853,9 @@ end)
 local VOXEL_FIELDS = {
 	{name = "name", type = "text", max_length = 64},
 	{name = "texture", type = "texture"},
+	-- [KIT_TEXTURE_DESIGNER] its top's and bottom's ("" the texture's)
+	{name = "top", type = "texture", default = ""},
+	{name = "bottom", type = "texture", default = ""},
 	{name = "kind", type = "choice",
 		choices = {"solid", "leaves", "plant", "water"}},
 	{name = "solid", type = "bool"},
@@ -6874,18 +6877,100 @@ local VOXEL_FIELDS = {
 	{name = "drop", type = "text", max_length = 129},
 }
 
+-- [KIT_TEXTURE_DESIGNER] A texture's label: a recipe texture by its name in
+-- the project, one not named there as "recipe" and its first characters
+function M.texture_label(t)
+	if type(t) ~= "string" or t:sub(1, 23) ~= "generated/weave/weave1/" then
+		return t
+	end
+	for n, wv in pairs(E.state.weaves or {}) do
+		if t == "generated/weave/weave1/" .. tostring(wv.recipe):sub(8) then
+			return n .. " (recipe)"
+		end
+	end
+	return "recipe " .. t:sub(24, 33) .. "..."
+end
+
+-- [KIT_TEXTURE_DESIGNER] weave's designer on the voxel form's texture for
+-- E.weave_face (texture, top or bottom), its recipe when it wears one. Save
+-- names it in the project -- a named one's own name again, the voxel's
+-- (_top, _bottom) otherwise -- and the form wears it
+function NT.design_texture()
+	local weave = require("buildat/extension/weave")
+	local f = E.voxel_form
+	local k = E.weave_face or "texture"
+	local cur = f[k] ~= nil and f[k] ~= "" and f[k] or f.texture
+	local name
+	for n, wv in pairs(E.state.weaves or {}) do
+		if cur == "generated/weave/weave1/" .. tostring(wv.recipe):sub(8) then
+			name = n:match("[^/]*$")
+		end
+	end
+	name = name or tostring(f.name) .. (k == "texture" and "" or "_" .. k)
+	log:info("kit editor: designing texture " .. name .. " for " .. k)
+	-- ([KIT_PHONE_EDITING] the touch mode's: the controls in the UI half,
+	-- the preview in the world's rect, as the sound designer's)
+	local sh = NT.sh.on() and NT.sh.ui
+	-- The form out of the designer's way, back at Save
+	-- simplified: Cancel leaves it closed; "New voxel type..." opens it
+	-- again as it was (E.voxel_form). An on_close of weave.design's would
+	-- bring it back
+	drop("dialog")
+	weave.design(weave.from_name(cur), function(packed)
+		send({op = "weave", name = name, recipe = packed})
+		f[k] = weave.name(packed)
+		log:info("kit editor: the voxel form's " .. k .. ": texture " .. name)
+		M.voxel_dialog()
+	end, sh and {rect = sh, world = NT.sh.world})
+end
+
 function M.voxel_dialog()
 	-- A fixed width: the form's rows widen it past the screen otherwise
 	local w, br = dialog("New voxel type", 480)
 	local f = E.voxel_form
 	text(w, "A voxel type of yours")
-	ui_utils.settings_form(w, M.with_sounds(VOXEL_FIELDS, f), f, function(k, v)
-		f[k] = v
-	end, WIDGETS, {texture = E.state.textures or {}})
+	-- The textures by their labels, the form's own too (a recipe just
+	-- designed, before the state names it); top and bottom also the
+	-- texture's ("")
+	local tex, seen = {}, {}
+	for _, t in ipairs(E.state.textures or {}) do
+		tex[#tex + 1], seen[t] = t, true
+	end
+	for _, k in ipairs({"texture", "top", "bottom"}) do
+		if f[k] and f[k] ~= "" and not seen[f[k]] then
+			tex[#tex + 1], seen[f[k]] = f[k], true
+		end
+	end
+	local fields = {}
+	for i, fd in ipairs(M.with_sounds(VOXEL_FIELDS, f)) do
+		if fd.type == "texture" then
+			local ch = fd.name == "texture" and {} or {{"(the texture's)", ""}}
+			for _, t in ipairs(tex) do
+				ch[#ch + 1] = {M.texture_label(t), t}
+			end
+			fd = {name = fd.name, type = "choice", choices = ch,
+				default = fd.default}
+		end
+		fields[i] = fd
+	end
+	fields[#fields + 1] = {name = "design_face", label = "Design for",
+		type = "choice", default = E.weave_face or "texture", choices = {
+			{"texture (every face)", "texture"}, {"top", "top"},
+			{"bottom", "bottom"}}}
+	ui_utils.settings_form(w, fields, f, function(k, v)
+		if k == "design_face" then
+			E.weave_face = v
+		else
+			f[k] = v
+		end
+	end, WIDGETS)
 	br = br or row(w)
 	button(br, "Upload a PNG...", function()
 		S.uploading = buildat.pick_file(".png")
 	end)
+	button(br, "Design a texture...", function()
+		NT.design_texture()
+	end):SetName("voxel design")
 	button(br, "Make", function()
 		local j = {op = "voxel"}
 		for k, v in pairs(f) do
