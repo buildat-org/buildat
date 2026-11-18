@@ -3,7 +3,7 @@
 -- polygons extruded up (one CustomGeometry, a geometry a colour): a long
 -- hood, the cabin, tail fins, chrome bumpers, two-tone paint (s.pose[2]:
 -- the race's paint for the player, 1...6), headlights and tail lights, four
--- wheels, the front ones steered. Wrecked (pose flag 2) it is charred black;
+-- wheels where the movement's tyres are, the front ones steered. Wrecked (pose flag 2) it is charred black;
 -- boosted (flag 1) flames come out of the back. Facing +z, turned by the
 -- pose's heading
 local magic = require("buildat/extension/urho3d")
@@ -65,8 +65,8 @@ local PARTS = {
 	{{-0.9, -2.2, -0.88, -2.26, -1.08, -2.42, -1.1, -2.36}, 0.6, 1.0, "#ff2a14"},
 }
 -- The wheels: x, z, front
-local WHEELS = {{0.92, 1.45, true}, {-0.92, 1.45, true}, {0.92, -1.4},
-	{-0.92, -1.4}}
+local WHEELS = {{0.92, 1.3, true}, {-0.92, 1.3, true}, {0.92, -1.25},
+	{-0.92, -1.25}}
 
 local function tri(cg, a, b, c, n)
 	local e1x, e1y, e1z = b[1] - a[1], b[2] - a[2], b[3] - a[3]
@@ -166,7 +166,7 @@ return {
 		local h = tonumber(p[1]) or 0
 		local paint = math.floor(tonumber(p[2]) or 1)
 		paint = PAINTS[paint] and paint or 1
-		local steer = tonumber(p[3]) or 0
+		local steer = (tonumber(p[3]) or 0) * 180 / math.pi
 		local flags = math.floor(tonumber(p[4]) or 0)
 		local wrecked = math.floor(flags / 2) % 2 == 1
 		local look = paint * 10 + (wrecked and 1 or 0)
@@ -190,7 +190,7 @@ return {
 		local body = b:GetChild("body", false)
 		body.rotation = magic.Quaternion(0, h * 180 / math.pi, 0)
 		for k = 1, 2 do
-			body:GetChild("wheel" .. k, false).rotation = magic.Quaternion(0, steer * 28, 0)
+			body:GetChild("wheel" .. k, false).rotation = magic.Quaternion(0, steer, 0)
 		end
 		body:GetChild("flames", false).enabled = flags % 2 == 1
 	end,

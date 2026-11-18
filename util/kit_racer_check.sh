@@ -54,34 +54,68 @@ print("RACE=%d TRIAL=%d CRATE=%d" % (find("the race", "world")[0],
       find("the race", "trial")[0], find("crate", "world")[1]))
 PY
 . "$t/ids"
+# The oval's line: its straights' ends, the bends' radius
+export PATH_PTS="-80,-30,30 80,-30,30 80,30,30 -80,30,30"
 
-# The driver: round the oval's centre line (or at TARGET x,z), W held, A/D by
-# the heading; till a regex is in the client's log or the time is up
+# The driver: round the track's line (PATH_PTS: its corners "x,z,r ...", the
+# straights between them and an arc of radius r round each: the line the
+# template's road was laid along), or at TARGET x,z: A/D toward a point
+# ahead by the heading, W/S to a speed for the bends ahead (planned at A_LAT
+# across, A_BRAKE braking), backing off when stuck; DRIFT x,z: the handbrake
+# (Space) and the bend's steering held DRIFT_S seconds there, once; FIRE_ON:
+# the fire key (Left Ctrl) once as that shows in the log. A line a sample:
+# the time, the place, the speed, the heading and the velocity's (degrees)
 cat > "$t/drive.py" <<'PY'
-import math, os, re, sys, time
+import json, math, os, re, sys, time
 log, fifo, secs, stop = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
 target = [float(v) for v in os.environ["TARGET"].split(",")] if os.environ.get("TARGET") else None
-fire_on = os.environ.get("FIRE_ON")  # Space once as it shows in the log
+fire_on = os.environ.get("FIRE_ON")
+drift = [float(v) for v in os.environ["DRIFT"].split(",")] if os.environ.get("DRIFT") else None
+drift_s = float(os.environ.get("DRIFT_S", "0.5"))
+A_LAT, A_BRAKE, TOP = 8.0, 6.0, 30.0
 out = open(fifo, "w", buffering=1)
-L, RAD = 100.0, 30.0  # the straights' length, the bends' radius
-LOOP = 2 * L + 2 * math.pi * RAD
-def point(u):
-    """The centre line u metres on from (-50, -30), heading +x (anticlockwise)"""
-    u %= LOOP
-    if u < L:
-        return -50 + u, -RAD
-    u -= L
-    if u < math.pi * RAD:
-        a = -math.pi / 2 + u / RAD
-        return 50 + RAD * math.cos(a), RAD * math.sin(a)
-    u -= math.pi * RAD
-    if u < L:
-        return 50 - u, RAD
-    a = math.pi / 2 + (u - L) / RAD
-    return -50 + RAD * math.cos(a), RAD * math.sin(a)
-def dist2(q, x, z):
-    px, pz = point(q)
-    return (px - x) ** 2 + (pz - z) ** 2
+def rounded(pts):
+    """The closed line: straights between the corners, an arc of r round each"""
+    n, line = len(pts), []
+    for i in range(n):
+        (x0, z0, _), (x1, z1, r), (x2, z2, _) = pts[i - 1], pts[i], pts[(i + 1) % n]
+        la, lb = math.hypot(x1 - x0, z1 - z0), math.hypot(x2 - x1, z2 - z1)
+        ax, az, bx, bz = (x1 - x0) / la, (z1 - z0) / la, (x2 - x1) / lb, (z2 - z1) / lb
+        turn = math.atan2(ax * bz - az * bx, ax * bx + az * bz)
+        t = r * math.tan(abs(turn) / 2)
+        px, pz = x1 - ax * t, z1 - az * t
+        s = 1 if turn > 0 else -1
+        cx, cz = px - az * r * s, pz + ax * r * s
+        a0 = math.atan2(pz - cz, px - cx)
+        k = max(1, int(abs(turn) * r / 1.0))
+        line += [(cx + r * math.cos(a0 + turn * j / k), cz + r * math.sin(a0 + turn * j / k))
+                 for j in range(k + 1)]
+    # (1 m apart along the whole loop)
+    out1, acc = [line[0]], 0.0
+    for i in range(1, len(line) + 1):
+        (xa, za), (xb, zb) = line[i - 1], line[i % len(line)]
+        d = math.hypot(xb - xa, zb - za)
+        while d > 1e-9 and acc + d >= 1.0:
+            f = (1.0 - acc) / d
+            xa, za = xa + (xb - xa) * f, za + (zb - za) * f
+            d -= 1.0 - acc
+            acc = 0.0
+            out1.append((xa, za))
+        acc += d
+    return out1
+P = rounded([tuple(map(float, c.split(","))) for c in os.environ["PATH_PTS"].split()])
+N = len(P)
+def radius(i, k=4):
+    (xa, za), (xb, zb), (xc, zc) = P[(i - k) % N], P[i], P[(i + k) % N]
+    cr = (xb - xa) * (zc - za) - (zb - za) * (xc - xa)
+    if abs(cr) < 1e-6:
+        return 1e9
+    return (math.hypot(xb - xa, zb - za) * math.hypot(xc - xb, zc - zb) *
+            math.hypot(xc - xa, zc - za) / (2 * abs(cr)))
+V = [min(TOP, math.sqrt(A_LAT * radius(i))) for i in range(N)]
+for _ in range(2):
+    for i in range(N - 1, -1, -1):
+        V[i] = min(V[i], math.sqrt(V[(i + 1) % N] ** 2 + 2 * A_BRAKE))
 def send(*cmds):
     out.write("\n".join(cmds) + "\n")
 keys = set()
@@ -95,6 +129,7 @@ def key(k, on):
 f = open(log, errors="replace")
 f.seek(0, 2)
 t0, u, x, z, stopped = time.time(), None, None, None, False
+slow_since, back_till, drift_till = None, 0, None
 send("event kit_body")
 while time.time() - t0 < secs:
     line = f.readline()
@@ -106,7 +141,7 @@ while time.time() - t0 < secs:
         break
     if fire_on and re.search(fire_on, line):
         fire_on = None
-        send("keypress Space")
+        send("keypress Left Ctrl")
         print("fired", flush=True)
     m = re.search(r"kit: body at (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+)", line)
     if m:
@@ -114,18 +149,47 @@ while time.time() - t0 < secs:
             u = None  # (a teleport: found again on the whole loop)
         x, z = float(m[1]), float(m[3])
         continue
-    m = re.search(r"kit: vehicle speed -?[0-9.]+,-?[0-9.]+,-?[0-9.]+, yaw (-?[0-9.]+)", line)
+    m = re.search(r"kit: vehicle speed (-?[0-9.]+),-?[0-9.]+,(-?[0-9.]+), yaw (-?[0-9.]+)", line)
     if not m or x is None:
         continue
+    now = time.time() - t0
+    vx, vz, yaw = float(m[1]), float(m[2]), float(m[3])
+    v = math.hypot(vx, vz)
     if u is None:
-        u = min(range(int(LOOP)), key=lambda q: dist2(q, x, z))
-    u = min(range(u - 20, u + 60), key=lambda q: dist2(q, x, z))
-    tx, tz = target or point(u + 10)
-    err = (math.degrees(math.atan2(tx - x, tz - z)) - float(m[1]) + 540) % 360 - 180
-    key("W", True)
-    key("D", err > 3)
-    key("A", err < -3)
-    print("at %.1f,%.1f err %.0f" % (x, z, err), flush=True)
+        u = min(range(N), key=lambda q: (P[q][0] - x) ** 2 + (P[q][1] - z) ** 2)
+    u = min(range(u - 10, u + 40),
+            key=lambda q: (P[q % N][0] - x) ** 2 + (P[q % N][1] - z) ** 2) % N
+    tx, tz = target or P[(u + int(5 + 0.35 * v)) % N]
+    err = (math.degrees(math.atan2(tx - x, tz - z)) - yaw + 540) % 360 - 180
+    vt = TOP if target else V[(u + 3) % N]
+    if drift and drift_till is None and math.hypot(drift[0] - x, drift[1] - z) < 6:
+        drift_till = now + drift_s
+        print("drift from %.2f" % now, flush=True)
+    if drift_till is not None and now < drift_till:
+        key("W", False)
+        key("S", False)
+        key("Space", True)
+        key("D", err > 0)
+        key("A", err <= 0)
+    elif now < back_till:
+        key("Space", False)
+        key("W", False)
+        key("S", True)
+        key("D", err < 0)
+        key("A", err > 0)
+    else:
+        key("Space", False)
+        # (stuck on something: back off it a second)
+        slow_since = (slow_since or now) if v < 0.8 and "W" in keys else None
+        if slow_since is not None and now - slow_since > 1.5:
+            back_till, slow_since = now + 1.0, None
+        key("W", v < vt - 0.5)
+        key("S", v > vt + 1.0)
+        key("D", err > 3)
+        key("A", err < -3)
+    print("t %.2f at %.1f,%.1f v %.1f yaw %.1f vel %.1f keys %s" % (
+        now, x, z, v, yaw, math.degrees(math.atan2(vx, vz)) if v > 0.5 else yaw,
+        "".join(sorted(keys))), flush=True)
     send("frames 2", "event kit_body")
 for k in list(keys):
     key(k, False)
@@ -262,6 +326,11 @@ await "$SL" "$m" 5 "local/brim_race $RACE: kitboss starts the race: 2 cars"
 await "$CL" "$m" 10 '"GO! Burn rubber, sinners!"'
 await "$t/bob.log" "$mb" 2 '"GO! Burn rubber, sinners!"'
 echo "ok: the countdown, GO on both screens"
+# The fire key's mouse button (the race's client part): a press of the action
+m=$(mark "$SL")
+step 5 "kit: action fire pressed" "mouse_down left" "frames 3" "mouse_up left"
+await "$SL" "$m" 5 "local/brim_race $RACE: kitboss presses fire"
+echo "ok: the left mouse button presses the race's fire"
 
 # 2. (8) kitbob at kitboss's car standing on the grid: pushed by the server
 body

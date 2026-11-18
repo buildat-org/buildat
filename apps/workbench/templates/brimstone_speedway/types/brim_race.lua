@@ -24,7 +24,10 @@
 -- Weapons (races only): a crate (local/brim_crate's taken, linked to crate;
 -- value the kind) arms the car with a gun (6 shots ahead), mines (3, dropped
 -- behind: copies of the entity `mine`) or a ram boost (2.5 s, faster; a hit
--- on a car then hurts it); the car's fire (Space) uses it. Damage is Kit's
+-- on a car then hurts it); the fire key (its action "fire", Left Ctrl by
+-- default; the left mouse button too: brim_race.client.lua) uses it: a
+-- press counts up the car's body var fire, and the car's step says fire with
+-- its heading (linked to fire here). Damage is Kit's
 -- health (c:hurt; kit/game_rules not peaceful, its respawn on_signal): at 0
 -- a wreck (on_died: an explosion, fire, debris, a scorch mark: a copy of
 -- `scorch`), then 2 s later back on the road at the last checkpoint passed
@@ -513,6 +516,7 @@ return {
 		dice = {default = 0},
 		said_left = {default = 0},
 	},
+	actions = {{name = "fire", key = "Left Ctrl", label = "Fire"}},
 	inputs = {entered = "none", left = "none",
 		start = "none", checkpoint = "number", lap = "none", fire = "number",
 		crate = "string", mine = "entity", ram = "string", back = "none"},
@@ -638,6 +642,18 @@ return {
 		end
 		c:log(c:name(pb), "wrecked by", tostring(kind), killer or "")
 		c:after(2, "wrecked", {player = player})
+	end,
+	-- The fire key: the car's body var fire counted up (its step fires
+	-- along its heading)
+	on_action = function(c, name, phase, value, by)
+		if name ~= "fire" or phase ~= "pressed" or type(by) ~= "string" or
+				not by:match("^player:%d+$") then
+			return
+		end
+		local r = view(c, by)
+		r.shots = (r.shots or 0) + 1
+		c:log(c:name(by), "presses fire")
+		c:body_var(by, "fire", r.shots)
 	end,
 	on_input = function(c, input, value, by)
 		if type(by) ~= "string" or not by:match("^player:%d+$") then
