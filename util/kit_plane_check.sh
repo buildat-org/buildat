@@ -8,7 +8,9 @@
 #   0. util/kit_plane_check.lua: kit/walker held to the plane as the box steps
 #      it (the same bits twice), w:circle and w:segment against voxels, a
 #      voxel off the plane and a heightmap's slope.
-#   1. kit/controls' plane vertical and the side camera: the plane at the
+#   1. Before the controls: the plan (2D) zoomed out to 800 across (a
+#      512-wide polygon whole). kit/controls' plane vertical and the side
+#      camera: the plane at the
 #      spawn's depth (z 1, the server's log); W goes nowhere, D walks along x
 #      past a wall in front of the plane and one behind it (neither met) to a
 #      ledge in the plane, D and Space jump onto it; z 1 in every body line,
@@ -108,6 +110,16 @@ wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
 keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
+keypress F1
+wait_log 5000 kit editor: the view is 2D
+mouse_pos 512 350
+frames 3
+mouse_wheel -10
+frames 3
+mouse_wheel -10
+wait_log 5000 kit editor: the wheel: the plan 800.0 across
+keypress F2
+wait_log 5000 kit editor: the view is 3D
 EOF
 	# The controls (3) and a region (4) where the admin digs and places in play
 	edit '{"op": "place", "type": "kit/controls", "pos": [0, 1, 0]}'
