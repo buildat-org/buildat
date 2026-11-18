@@ -764,6 +764,34 @@ magic.SubscribeToEvent("command_seq:kit_players", function()
 		end
 	end
 	for id, b in pairs(bodies) do
+		-- ([RACER_FEEL] (1) one its movement draws: its CustomGeometries
+		-- shown (a node each, the first; an empty one's box is none), the
+		-- biggest box's ground area and its node's turn)
+		if b.mnode and b.mnode.enabled then
+			local ng, big, yaw = 0, 0, 0
+			local function walk(node)
+				local c = node:GetComponent("CustomGeometry")
+				if c and c.enabled then
+					local bb = c.worldBoundingBox
+					local a = math.max(0, bb.max.x - bb.min.x) *
+							math.max(0, bb.max.z - bb.min.z)
+					ng = ng + (a > 0 and 1 or 0)
+					if a > big then
+						local d = node.worldDirection
+						big, yaw = a, math.deg(math.atan2(d.x, d.z))
+					end
+				end
+				for i = 0, node:GetNumChildren() - 1 do
+					local ch = node:GetChild(i)
+					if ch.enabled then
+						walk(ch)
+					end
+				end
+			end
+			walk(b.mnode)
+			log:info(string.format("kit: player %d's movement body: %d geometries " ..
+					"shown, the biggest %.1f m2, turned %.0f", id, ng, big, yaw % 360))
+		end
 		if b.root.enabled then
 			local p = b.root.position
 			log:info(string.format("kit: player %d drawn at %.4f,%.4f,%.4f " ..

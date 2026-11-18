@@ -528,6 +528,83 @@ s3d = walk(pworld({ICE}), {pos = {-3, 0.55, 0}}, 30, {f = 0, r = -1, yaw = 0, ju
 assert(s3d.pos[1] < -4.5 and s3d.surface == "ice", "3D on the ice: " .. tostring(s3d.surface))
 print("ok: kit/polygon lying flat: its frame at pitch 90, -90 and turned; walls in the level plane either winding, one over the layer not met, the ice floor's surface and slide, w:under; w:circle and w:segment; the same bits twice; the plane off a slab a wall or a step, its top, the floor")
 
+-- [RACER_FEEL] (1) A flat polygon turned in yaw: the server's steps get its angles
+-- from kit.cpp's Turn::angles (doubles: all yaw at the gimbal), a client from its
+-- node's float rotation (M.turn_angles; Urho3D's own put it all in roll): the same
+-- frame, the same bits, its walls and zone where the turn puts them
+local function turn_q(yaw, pitch, roll) -- kit.cpp's Turn::of
+	local k = math.pi / 360
+	local sy, cy = math.sin(yaw * k), math.cos(yaw * k)
+	local sx, cx = math.sin(pitch * k), math.cos(pitch * k)
+	local sz, cz = math.sin(roll * k), math.cos(roll * k)
+	return cy * cx * cz + sy * sx * sz, cy * sx * cz + sy * cx * sz,
+			sy * cx * cz - cy * sx * sz, cy * cx * sz - sy * sx * cz
+end
+local function f32(x) -- to a float's 24 bits, as a node's rotation has it
+	if x == 0 then return 0 end
+	local mm, e = math.frexp(x)
+	return math.floor(mm * 2 ^ 24 + 0.5) / 2 ^ 24 * 2 ^ e
+end
+local function fpts(p)
+	local o = {}
+	for i = 1, #p.pts do o[i] = string.format("%.17g", p.pts[i]) end
+	return table.concat(o, " ") .. string.format(" %.17g %.17g", p.z0, p.z1)
+end
+local WALLK = {shape = "polygon", points = WALL, depth = 2, solid = true}
+for _, yaw in ipairs({30, 135, 200, 317.5}) do
+	for _, pitch in ipairs({90, -90}) do
+		local w, x, y, z = turn_q(yaw, pitch, 0)
+		local sy, sp, sr = MV.turn_angles(w, x, y, z)
+		local cy, cp, cr = MV.turn_angles(f32(w), f32(x), f32(y), f32(z))
+		assert(math.abs(sp) == 90 or sp == 270, "the server's flat pitch: " .. sp)
+		local server = MV.look_poly(WALLK, false, {0, 1, 5}, sy, sp, sr)
+		local client = MV.look_poly(WALLK, false, {0, 1, 5}, cy, cp, cr)
+		-- (Urho3D's split: all roll, off by a float's error)
+		local roll = pitch > 0 and -yaw or yaw
+		local urho = MV.look_poly(WALLK, false, {0, 1, 5}, 0, pitch, roll + 1e-5)
+		local given = MV.look_poly(WALLK, false, {0, 1, 5}, yaw, pitch, 0)
+		assert(server and server.da == 2 and fpts(server) == fpts(client) and
+				fpts(server) == fpts(urho) and fpts(server) == fpts(given),
+				"a flat one turned " .. yaw .. " at " .. pitch .. ": the sides differ\n" ..
+				fpts(server) .. "\n" .. fpts(client) .. "\n" .. fpts(urho))
+		-- Its corner (2, -1 at pitch 90; 2, 1 at -90) where Ry(yaw) Rx(pitch) puts it
+		local a = yaw * math.pi / 180
+		local ly = pitch > 0 and -1 or 1
+		local wx, wz = math.cos(a) * 2 + math.sin(a) * (pitch > 0 and ly or -ly),
+				-math.sin(a) * 2 + math.cos(a) * (pitch > 0 and ly or -ly) + 5
+		local found = false
+		for i = 1, server.n do
+			found = found or near(server.pts[2 * i - 1], wx, 1e-9) and
+					near(server.pts[2 * i], wz, 1e-9)
+		end
+		assert(found, "a flat one turned " .. yaw .. " at " .. pitch .. ": no corner at " ..
+				wx .. "," .. wz .. ": " .. fpts(server))
+		-- Met the same: w:circle at its middle's edge, the walker into it
+		local function tw(p)
+			return MV.world{cell = function() return nil end, plane = 1, horizontal = true, polys = {p}}
+		end
+		local mx, mz = math.sin(a) * 2.2, 5 + math.cos(a) * 2.2
+		local cs, cc = tw(server):circle(mx, mz, 1.5), tw(client):circle(mx, mz, 1.5)
+		assert(#cs == 1 and #cc == 1 and cs[1].depth == cc[1].depth and
+				cs[1].nx == cc[1].nx and cs[1].ny == cc[1].ny and near(cs[1].depth, 0.3, 1e-9),
+				"a flat one turned " .. yaw .. ": its wall's circle " .. #cs .. " " .. #cc)
+		-- Its zone (the server's and the client's port by the node's rotation)
+		local zs = MV.zone_look(WALLK, false, {0, 1, 5}, MV.quat_matrix(w, x, y, z))
+		local zc = MV.zone_look(WALLK, false, {0, 1, 5}, MV.quat_matrix(f32(w), f32(x),
+				f32(y), f32(z)))
+		for _, pr in ipairs({{0, 5, true}, {mx * 0.4, 5 + (mz - 5) * 0.4, true},
+				{wx * 0.98, 5 + (wz - 5) * 0.98, true}, {mx * 1.5, 5 + (mz - 5) * 1.5, false},
+				{0, 8, false}}) do
+			local m1 = MV.zone_meets(zs, MV.zone_body({pr[1], 0.5, pr[2]}))
+			local m2 = MV.zone_meets(zc, MV.zone_body({pr[1], 0.5, pr[2]}))
+			assert(m1 == pr[3] and m2 == pr[3], "a flat zone turned " .. yaw .. " at " ..
+					pitch .. ": " .. pr[1] .. "," .. pr[2] .. " " .. tostring(m1) .. " " ..
+					tostring(m2))
+		end
+	end
+end
+print("ok: a flat polygon turned in yaw (30, 135, 200, 317.5; pitch 90 and -90): the server's angles, a client's from a float rotation and Urho3D's split the same frame to the bit; its corner, wall and zone where the turn puts them")
+
 -- [KIT_TOP_DOWN] (8) The other bodies: in a level plane (the server's snapshot,
 -- kit.cpp's bodies_lit()) w:circle meets them as circles, info.body their by and
 -- info.vel; none in a vertical plane or without them

@@ -273,23 +273,24 @@ local function world(skip)
 			local r = links and n.rest
 			if r then
 				-- [KIT_MOVING_OBJECTS] As each step's time has it, from where it rests
-				local q = magic.Quaternion(r[4], r[5], r[6], r[7])
+				-- ([RACER_FEEL] (1) the angles as the server's Turn::angles has them)
+				local qy, qp, qr = MV.turn_angles(r[4], r[5], r[6], r[7])
 				moving_looks = moving_looks or {}
 				moving_looks[#moving_looks + 1] = {show.look, on == true, {r[1], r[2], r[3]},
-					q:YawAngle(), q:PitchAngle(), q:RollAngle(), links}
+					qy, qp, qr, links}
 			else
 				local p = n.node.position
 				local q = n.node.rotation
 				local tilted = q.x ~= 0 or q.z ~= 0
-				local b = MV.look_box(show.look, on, {p.x, p.y, p.z}, q:YawAngle(),
-						tilted and q:PitchAngle() or 0, tilted and q:RollAngle() or 0)
+				local qy, qp, qr = MV.turn_angles(q.w, q.x, q.y, q.z)
+				local b = MV.look_box(show.look, on, {p.x, p.y, p.z}, qy,
+						tilted and qp or 0, tilted and qr or 0)
 				if b then
 					boxes[#boxes + 1] = b
 				end
 				-- [KIT_PLANE] stage 3: a polygon's prism
 				local pg = show.look.shape == "polygon" and MV.look_poly(show.look, on,
-						{p.x, p.y, p.z}, q:YawAngle(), tilted and q:PitchAngle() or 0,
-						tilted and q:RollAngle() or 0)
+						{p.x, p.y, p.z}, qy, tilted and qp or 0, tilted and qr or 0)
 				if pg then
 					polys[#polys + 1] = pg
 				end
