@@ -1415,6 +1415,12 @@ magic.SubscribeToEvent("Update", update_play)
 -- edited) replaces it on the entities that have it (the old one's
 -- on_remove, the new one's on_add); an empty one takes it away
 P.part_src = P.part_src or {}
+-- [KIT_CLIENT_REACT] (2) kit.shared: one plain table every client part of
+-- every entity shares (`require("buildat/module/kit").shared`), keys by
+-- convention the type's name. Local, nothing sent; it lasts for the
+-- connection (a part's reload, a scene switch, Play and Stop keep it).
+-- simplified: no cleanup of its own; a part clears its keys in on_remove
+M.shared = {}
 local function swap_part(t, old, new)
 	for _, n in pairs(P.nodes) do
 		local show = type(n.show) == "table" and n.show or {}
