@@ -17,11 +17,15 @@
 --   wreck: wrecked, no control, rolling to a stop;
 --   paint: its colour variant (1...6), drawn by brim_car.client.lua;
 --   ghost: a time trial's car, meeting no other car.
--- [KIT_TOP_DOWN] (8) The other cars: w:circle's hits with info.body (move.lua's
--- bodies in a plane) push it out of them as a wall does, softer, and while
--- boosted a hard enough one is the event "ram" (value: the other's by).
+-- [KIT_TOP_DOWN] (8) The other cars (movement.bodies: w:circle's hits with
+-- info.body and info.vel) push it out of them, half the overlap each, and
+-- trade the speed they close at; while boosted a hard enough one is the
+-- event "ram" (value: the other's by). Each car is stepped apart (the
+-- server's batches in any order), so each takes the other's speed before
+-- the contact (s.vel is that) and gives up its own share: a car pushed
+-- along keeps up with the one pushing.
 -- Events (the movement's outputs, the race's inputs): lap, fire (Space
--- pressed), smash (a wall hit hard; value: the speed into it), ram.
+-- pressed; value: the heading), smash (a wall hit hard; value: the speed into it), ram.
 -- Its state: s.c {x, z, vx, vz}, s.h the heading (radians from +z toward
 -- +x, kit's yaw), s.pose what the clients draw: {heading, paint, steer,
 -- flags (1 boosting, 2 wrecked, 4 sliding, 8 braking), slide speed}.
@@ -33,6 +37,7 @@ local BODY = {r = 1.05, h = 1.3, eye = 1}
 local GRIP = {dirt = 0.35, oil = 0.05}
 local DRAG = {dirt = 1.4, oil = 0.1}
 local PI = math.pi
+local NOVEL = {0, 0}
 
 local function clamp(x, lo, hi)
 	return x < lo and lo or x > hi and hi or x
@@ -51,14 +56,14 @@ return {
 		what = "Brimstone Speedway's car, seen from above: W gas, S brake, A and D steer, Space fires. Grip by the floor's surface: dirt, oil, boost; finish the lap line.",
 		outputs = {
 			lap = "Over the finish line with every checkpoint passed (the race's lap_open).",
-			fire = "Space pressed: the race fires what the car carries.",
+			fire = "Space pressed: the race fires what the car carries. Value: the car's heading (degrees, kit's yaw).",
 			smash = "A wall hit hard. Value: the speed into it.",
 			ram = "A boosted car hit another. Value: the other's by.",
 		},
 	},
 	root = true,
-	outputs = {lap = "none", fire = "none", smash = "number", ram = "string"},
-	movement = {body = BODY, raw_keys = true, touch = "drive",
+	outputs = {lap = "none", fire = "number", smash = "number", ram = "string"},
+	movement = {body = BODY, raw_keys = true, touch = "drive", bodies = true,
 		touch_buttons = {{"Fire", "jump"}},
 		help = {{"[forward]/[back]", "gas, brake", "f"},
 			{"[left]/[right]", "steer", "r"}, {"[jump]", "fire", "jump"}},
@@ -102,7 +107,11 @@ return {
 		local top = (p.speed or 24) * (v.boost and (p.boost or 1.45) or 1)
 		local acc = (p.accel or 16) * (v.boost and 2 or 1)
 		local flags = 0
-		if surf == "boost" then
+		-- (c:speed(by, 0), the grid's freeze: held where it is)
+		if top < 0.01 then
+			f, r, vf, vs = 0, 0, 0, 0
+		end
+		if surf == "boost" and top > 0 then
 			vf = vf + 30 * dt
 			top = top * 1.4
 		end
@@ -138,6 +147,9 @@ return {
 		-- Walls and (8) the other cars: out of them, the speed into them
 		-- gone (a little bounce off a wall)
 		local events = nil
+		-- (s.vel: the speed before what it meets, the speed the other cars
+		-- meet: a car that steps after this one is still hit as hard)
+		local vx0, vz0 = c[3], c[4]
 		for k, h in ipairs(w:circle(c[1], c[2], R)) do
 			if k > 4 then
 				break
@@ -147,9 +159,12 @@ return {
 				local nx, ny = h.nx, h.ny
 				local d = body and h.depth * 0.5 or h.depth
 				c[1], c[2] = c[1] + nx * d, c[2] + ny * d
-				local vn = c[3] * nx + c[4] * ny
+				-- (a car's closing speed: its velocity's less ours; each car takes
+				-- half of it and a fifth more, as equal weights bouncing a little)
+				local ov = body and h.info.vel or NOVEL
+				local vn = (c[3] - ov[1]) * nx + (c[4] - ov[2]) * ny
 				if vn < 0 then
-					local e = body and 1.2 or 1.3
+					local e = body and 0.6 or 1.3
 					c[3], c[4] = c[3] - nx * vn * e, c[4] - ny * vn * e
 					if body and v.boost and -vn > 6 then
 						events = events or {}
@@ -170,12 +185,13 @@ return {
 		s.on_line = on_line or nil
 		if i.jump == 1 and not s.held and not v.wreck then
 			events = events or {}
-			events[#events + 1] = "fire"
+			-- (its heading: a player's yaw on the server is the camera's)
+			events[#events + 1] = {"fire", math.floor(s.h * 1800 / PI + 0.5) / 10}
 		end
 		s.held = i.jump == 1
 		s.events = events
 		s.pos = {c[1], y, c[2]}
-		s.vel = {c[3], 0, c[4]}
+		s.vel = {vx0, 0, vz0}
 		s.yaw = math.fmod(s.h * 180 / PI, 360)
 		if v.boost then
 			flags = flags + 1

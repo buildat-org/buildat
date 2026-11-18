@@ -28,6 +28,8 @@ end
 -- A bar's sound: its first note the table itself, the rest its layers
 local function bar(notes)
 	local first = notes[1]
+	-- (the first is at 0: blip1 takes no `at` on the sound itself)
+	first.at = nil
 	first.layers = {}
 	for i = 2, #notes do
 		first.layers[#first.layers + 1] = notes[i]

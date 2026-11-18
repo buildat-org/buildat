@@ -1,7 +1,8 @@
 -- Brimstone Speedway's mine: a copy of it is dropped behind a car (the
 -- race's c:spawn of its `mine` entity) and sent "arm"; armed a moment later,
 -- a car driving onto it (its zone) says "touched" with its id, linked to the
--- race's mine, which blows it up there. The one placed in the scene is the
+-- race's mine by name (a copy keeps only links by name or into itself),
+-- which blows it up there. The one placed in the scene is the
 -- pattern the copies are made of, never armed.
 return {
 	version = 1,

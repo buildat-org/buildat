@@ -79,13 +79,13 @@ local function say(c, text)
 	c:emit("announce", text)
 end
 
--- A grid slot's place: staggered, 5.5 m behind the one before and 0.8 m to
+-- A grid slot's place: staggered, 5.5 m behind the one before and 0.5 m to
 -- its other side (a car's nose on the bumper of the one ahead)
 local function slot(c, k)
 	local a = (c.yaw or 0) * math.pi / 180
 	local fx, fz = math.sin(a), math.cos(a)
 	local back = (k - 1) * 5.5
-	local side = (k % 2 == 1) and -0.8 or 0.8
+	local side = (k % 2 == 1) and -0.5 or 0.5
 	local p = c.pos
 	return {p[1] - fx * back + fz * side, p[2], p[3] - fz * back - fx * side}
 end
@@ -362,10 +362,10 @@ local function lap(c, by, r)
 	rank(c)
 end
 
--- Back on the road where they wrecked: full health, at the last checkpoint
--- passed (the grid's slot before any)
+-- Back on the road where they wrecked: full health (the game rules'
+-- respawn is on_signal: c:respawn_waiting(), the "wrecked" timer's), at the
+-- last checkpoint passed (the grid's slot before any)
 local function back(c, by, r)
-	c:respawn()
 	r.wrecked = nil
 	c:body_var(by, "wreck", nil)
 	if (r.last or 0) > 0 then
@@ -403,11 +403,11 @@ local function effects_wreck(c, at)
 	end
 end
 
-local function fire(c, by, r, p)
+local function fire(c, by, r, p, heading)
 	if not r.weapon or not p then
 		return
 	end
-	local a = (p.yaw or 0) * math.pi / 180
+	local a = (tonumber(heading) or 0) * math.pi / 180
 	local fx, fz = math.sin(a), math.cos(a)
 	local at = p.pos
 	if r.weapon == "gun" then
@@ -441,12 +441,14 @@ local function fire(c, by, r, p)
 			c:log(c:name(by), "shoots", best.name)
 		end
 	elseif r.weapon == "mines" and c.params.mine ~= 0 then
-		local pos = {at[1] - fx * 3.4, at[2], at[3] - fz * 3.4}
+		-- (its zone's 2x2 cells from its place: their middle on the car's line)
+		local pos = {at[1] - fx * 3.4 - 0.5, at[2], at[3] - fz * 3.4 - 0.5}
 		local id = c:spawn{entity = c.params.mine, pos = pos}
 		if id then
-			c.state.mines[tostring(id)] = pos
+			c.state.mines[tostring(id):match("%d+")] = pos
 			c:send(id, "arm")
-			c:log(c:name(by), "drops a mine", id)
+			c:log(c:name(by), "drops a mine", id, "at", math.floor(pos[1] * 10) / 10,
+					math.floor(pos[3] * 10) / 10)
 		end
 	elseif r.weapon == "boost" then
 		r.boosted = true
@@ -466,7 +468,7 @@ return {
 	players = true,
 	linked_in = true,
 	-- (the grid's pole and the way it faces)
-	look = {shape = "box", size = 0.3, color = "#f4d35e"},
+	gizmo = {shape = "box", size = 0.3, color = "#f4d35e"},
 	about = {
 		group = "Game",
 		what = "Brimstone Speedway's race control on the starting grid: time trials, races from a grid and a countdown, laps by checkpoints, the places, weapons, wrecks.",
@@ -476,7 +478,7 @@ return {
 			start = "Starts the race on the grid: a countdown, then everyone goes.",
 			checkpoint = "A checkpoint passed by the player. Value: its order (1...).",
 			lap = "The player's car crossed the finish line with every checkpoint passed.",
-			fire = "The player fires what their car carries.",
+			fire = "The player fires what their car carries. Value: the car's heading (degrees).",
 			crate = "The player took a crate. Value: gun, mines, boost or any.",
 			mine = "A mine touched by the player. Value: the mine.",
 			ram = "The player's boosted car rammed another. Value: the other's by.",
@@ -521,7 +523,7 @@ return {
 		said_left = {default = 0},
 	},
 	inputs = {entered = "none", left = "none",
-		start = "none", checkpoint = "number", lap = "none", fire = "none",
+		start = "none", checkpoint = "number", lap = "none", fire = "number",
 		crate = "string", mine = "entity", ram = "string", back = "none"},
 	outputs = {hud = "string", announce = "string", result = "string",
 		board = "string", lap_time = "number", finished = "number"},
@@ -543,8 +545,16 @@ return {
 			show(c, by, r)
 			return
 		elseif name == "wrecked" then
-			-- (back as that player: a run by them, for the teleport)
-			c:send(c.id, "back", nil, "player:" .. tostring(player))
+			-- simplified: c:respawn_waiting() puts every wrecked car back,
+			-- so one wrecked a moment after another waits less than 2 s;
+			-- a respawn per player in Kit would make each wait its own.
+			-- (each back as that player: a run by them, for the teleport)
+			c:respawn_waiting()
+			for by, r in pairs(c.state.runs) do
+				if r.wrecked then
+					c:send(c.id, "back", nil, by)
+				end
+			end
 			return
 		elseif name == "count" then
 			local n = c.state.count
@@ -714,17 +724,19 @@ return {
 			c:log(c:name(by), "picks up", kind)
 			show(c, by, r, NAMES[kind] .. "!")
 		elseif input == "fire" then
-			fire(c, by, r, player_of(c, by))
+			fire(c, by, r, player_of(c, by), value)
 		elseif input == "mine" then
-			local key = tostring(value)
-			local pos = c.state.mines[key]
+			-- (an entity value: its id, or "entity:<id>")
+			local key = tostring(value):match("%d+")
+			local pos = key and c.state.mines[key]
 			if not pos then
+				c:log("a mine not of this race:", tostring(value))
 				return
 			end
 			c.state.mines[key] = nil
-			c:remove(value)
+			c:remove(tonumber(key))
 			c:hurt(tonumber(by:match("%d+")), {amount = c.params.mine_damage, type = "mine"})
-			c:effect{at = {pos[1], pos[2] + 0.4, pos[3]}, count = 40, shape = "round",
+			c:effect{at = {pos[1] + 0.5, pos[2] + 0.4, pos[3] + 0.5}, count = 40, shape = "round",
 				colors = {"#ffe14a", "#ff7a12", "#5a5050"}, speed_min = 3,
 				speed_max = 10, gravity = -1, drag = 3, ttl_min = 0.3,
 				ttl_max = 0.9, size_min = 0.25, size_max = 0.7, grow = 1,
