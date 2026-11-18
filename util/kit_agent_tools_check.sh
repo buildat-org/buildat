@@ -50,6 +50,10 @@
 #      polygon's surface and friction (get_state's params) in what the
 #      server's step meets (the probe's output); (6) a polygon gem's `when`
 #      (scaled about its point, moved): its zone shrunk with it.
+#  9b. [KIT_TOP_DOWN] put_type's text and place's pitch; kit/controls'
+#      plane horizontal, kit/polygons placed lying flat (pitch 90 in
+#      get_state, a floor's params): the agent's body held at its height
+#      with Space held, stopped by the flat wall.
 #  10. [KIT_CLIENT_REACT] client parts on the agent's own client (the
 #      server's camera's log): its body's by "player:<id>" (met by a zone,
 #      try_input as me) and its per_player state (shared = true too) on
@@ -881,6 +885,37 @@ elif phase == "zones":
     print("   out of play: i.out_of_play in the server's step; keep_own_body's line")
     assert "Your body is gone" in call("play_leave")
     call("stop")
+elif phase == "top_down":
+    # [KIT_TOP_DOWN] kit/controls' plane horizontal; kit/polygons placed lying
+    # flat (place's pitch): a wall across z 3.5...4.5, a floor patch
+    rpc("initialize", init)
+    to_start()
+    call("new_scene", {"name": "top"})
+    d = {t["name"]: t for t in rpc("tools/list")["result"]["tools"]}
+    assert "w.horizontal" in d["put_type"]["description"], d["put_type"]["description"]
+    assert "pitch" in d["place"]["inputSchema"]["properties"], d["place"]
+    call("place", {"type": "kit/spawner", "pos": [0, 2, 0], "params": {"players": True}})
+    call("place", {"type": "kit/controls", "pos": [0, 0, 0], "on": "scene",
+        "params": {"plane": "horizontal", "camera": "top_down"}})
+    WL = placed(call("place", {"type": "kit/polygon", "pos": [0, 2, 4], "pitch": 90,
+        "params": {"points": [[-4, -0.5], [4, -0.5], [4, 0.5], [-4, 0.5]], "depth": 4}}))
+    FL = placed(call("place", {"type": "kit/polygon", "pos": [0, 1, 0], "pitch": 90,
+        "params": {"points": [[-2, -2], [2, -2], [2, 2], [-2, 2]], "depth": 0.1,
+            "collision": False, "floor": True, "surface": "mud"}}))
+    e = entity(WL)
+    assert e.get("pitch") == 90, e
+    p = entity(FL)["components"][0]["params"]
+    assert p["floor"] is True and p["surface"] == "mud", p
+    assert call("start") == "Running"
+    said, body = join()
+    # W (+z, the top_down camera's yaw 0) with Space: held at its height, stopped
+    # by the flat wall's edge (z 3.5, the walker's r 0.45)
+    b = played({"keys": ["W", "Space"], "seconds": 2})
+    assert b["pos"][1] == b["from"][1] and abs(b["pos"][2] - 3.05) < 0.01, b
+    print("   the body held at y %s, stopped by a flat wall at z %s" % (b["pos"][1],
+        b["pos"][2]))
+    assert "Your body is gone" in call("play_leave")
+    call("stop")
 elif phase == "client":
     # [KIT_CLIENT_REACT] client parts on the agent's own client (the
     # server's camera playing its body)
@@ -1010,13 +1045,13 @@ mcp() # <phase>: the MCP client's phase; its output in $t/mcp_<phase>.log
 	# (the builder's calls over two tokens, each under its 120 a minute; an
 	# agent's scene is its token's: heightmap's switch_scene after goals')
 	local k=$tok
-	case $1 in play|state|goals|history|heightmap|checkpoint) k=$tok2 ;;
+	case $1 in play|state|goals|history|top_down|heightmap|checkpoint) k=$tok2 ;;
 		zones) k=$adm ;; esac
 	python3 -I "$t/mcp.py" "$1" "$url" "$k" "$adm" "$t" "$V" > "$t/mcp_$1.log" 2>&1 ||
 		fail "the MCP phase $1: $(tail -5 "$t/mcp_$1.log") ($t/mcp_$1.log, $SL)"
 	cat "$t/mcp_$1.log"
 }
-for p in tools types links play state goals history zones client; do
+for p in tools types links play state goals history zones top_down client; do
 	mcp $p
 done
 # 10. [KIT_CLIENT_REACT] (4) pf's failure on the agent's client in kitboss's

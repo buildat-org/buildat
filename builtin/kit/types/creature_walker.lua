@@ -47,10 +47,11 @@ return {
 			-- a point off it taken at its depth, walked along x alone.
 			-- simplified: the pathfinder's way is found in 3D; a point beside an
 			-- obstacle off the plane is walked past along x, not round it
-			local dx, dz = q[1] - pos[1], w.plane and 0 or q[3] - pos[3]
+			-- ([KIT_TOP_DOWN] a level plane: along x and z, its points' height not waited for)
+			local dx, dz = q[1] - pos[1], w.plane and not w.horizontal and 0 or q[3] - pos[3]
 			local d = w.sqrt(dx * dx + dz * dz)
 			-- There: the next one (a point up waits for the feet to be up too)
-			if d < 0.3 and pos[2] > q[2] - 0.3 then
+			if d < 0.3 and (w.horizontal or pos[2] > q[2] - 0.3) then
 				table.remove(path, 1)
 			else
 				local sp = (p.speed or 3) * (tonumber(s.speed_k) or 1)

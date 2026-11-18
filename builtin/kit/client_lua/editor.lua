@@ -3335,12 +3335,14 @@ function NT.params_form(w, e, ci, c, t, keep)
 		end
 	end
 	-- [KIT_POLYGON_ROW] Points: how many, and the Front view round them, where
-	-- they are edited (polygon_edit.lua): a side game's 2D view.
-	-- simplified: no point editing in other games (their 2D is the plan)
+	-- they are edited (polygon_edit.lua): a side game's 2D view; [KIT_TOP_DOWN] (4)
+	-- one lying flat in another game's plan.
+	-- simplified: no point editing of a standing one in other games (their 2D is
+	-- the plan)
 	for _, k in ipairs(points) do
 		local r, v = row(w), values[k] or decl[k].default
 		label(r, k:upper() .. ": " .. (type(v) == "table" and #v or 0))
-		if M.side_game() then
+		if M.side_game() or e.pos and NT.pg.flat(NT.drawn_turn(e)) then
 			button(r, "Edit in 2D view", function()
 				NT.pg.show(e)
 			end)
@@ -7770,7 +7772,8 @@ do
 	install({S = S, E = E, NT = NT, M = M, magic = magic, log = log, send = send,
 		find = find, front_at = front_at, GRID_STEPS = GRID_STEPS,
 		to_screen = to_screen, px = px, SNAP_PX = SNAP_PX, drawn_at = drawn_at,
-		plane_z = plane_z, type_of = type_of, palette = function() palette() end})
+		plane_z = plane_z, type_of = type_of, palette = function() palette() end,
+		plane_at = plane_at})
 end
 
 -- [KIT_EDITOR_LOCALS] The rest of the editor: ports, press and drag, the

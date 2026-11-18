@@ -22,11 +22,18 @@
 -- movement's step meets on it (w:circle's, w:segment's and w:move's hit info, on
 -- the server's steps and the clients' predictions alike, move.lua): a spike
 -- strip's "spikes" a bike's step crashes on by itself, an "ice" floor
+-- [KIT_TOP_DOWN] (2) Lying flat (turned pitch 90: its points' x and y the world's x
+-- and z, its depth up and down round its place) it is a top-down view's level
+-- geometry: its outline upright walls a body meets as a standing one's edges (in
+-- kit/controls' plane horizontal where its depth spans the plane's height); drawn
+-- and edited in the editor's plan (2D) view. `floor` (with collision off): a floor
+-- patch, no wall: a body over its area meets its surface and friction under the
+-- feet (w:under, kit/walker's ground), ice, mud or a boost pad
 return {
 	version = 1,
 	about = {
 		group = "Building",
-		what = "A shape of points in the side view's plane, extruded: level geometry for side-scrolling. points: [[x, y]...] from its place, 3 to 128, within 256 (512 wide), its edges not crossing. voxel: a voxel type's textures, tiling across pieces, with a band of its top texture edge_depth cells deep along the edges facing up. surface (a tag) and friction: what a movement's step meets on it (info.surface, info.friction: \"spikes\" a hazard the step itself reacts to). E.g. {\"points\": [[-20, -4], [20, -4], [20, 1], [0, 3], [-20, 2]], \"voxel\": \"kit/grass\", \"edge_depth\": 0.25}: a dirt hill edged with grass.",
+		what = "A shape of points in the side view's plane, extruded: level geometry for side-scrolling. Lying flat (pitch 90: its x, y the world's x, z; depth up) it is a top-down view's walls, or with floor on and collision off a floor patch whose surface and friction a body meets under its feet. points: [[x, y]...] from its place, 3 to 128, within 256 (512 wide), its edges not crossing. voxel: a voxel type's textures, tiling across pieces, with a band of its top texture edge_depth cells deep along the edges facing up. surface (a tag) and friction: what a movement's step meets on it (info.surface, info.friction: \"spikes\" a hazard the step itself reacts to). E.g. {\"points\": [[-20, -4], [20, -4], [20, 1], [0, 3], [-20, 2]], \"voxel\": \"kit/grass\", \"edge_depth\": 0.25}: a dirt hill edged with grass.",
 	},
 	params = {
 		points = {type = "points", default = {{-2, -0.5}, {2, -0.5}, {2, 0.5},
@@ -38,6 +45,8 @@ return {
 		collision = {cat = "physics", type = "bool", default = true},
 		surface = {cat = "physics", type = "string", default = "polygon"},
 		friction = {cat = "physics", type = "number", default = 1, min = 0, max = 10},
+		-- [KIT_TOP_DOWN] (2)
+		floor = {cat = "physics", type = "bool", default = false},
 		-- [KIT_SIDE_SCENERY] (kit/part's)
 		voxel = {cat = "look", type = "voxel", default = "",
 			choices_from = "voxels"},
@@ -47,5 +56,5 @@ return {
 	look = {shape = "polygon", points = "param:points", depth = "param:depth",
 		color = "param:color", material = "param:material", solid = "param:collision",
 		voxel = "param:voxel", edge_depth = "param:edge_depth",
-		surface = "param:surface", friction = "param:friction"},
+		surface = "param:surface", friction = "param:friction", floor = "param:floor"},
 }
