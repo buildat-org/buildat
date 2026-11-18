@@ -190,6 +190,15 @@ def rpc(method, params=None, tk=tok):
 def call(name, args={}, error=False):
     r = rpc("tools/call", {"name": name, "arguments": args})["result"]
     text = r["content"][0]["text"]
+    # A type load over 50 ms (a busy box: the full tier beside it) makes
+    # the builder's next puts wait 5x as long (kit.cpp put_local): waited
+    # out once, as the server says, 3 s at most
+    w = re.search(r"your last type took long to load: wait (\d+) s", text)
+    if w:
+        assert int(w.group(1)) <= 3, ("a type load's wait over 3 s", name, text)
+        time.sleep(int(w.group(1)))
+        r = rpc("tools/call", {"name": name, "arguments": args})["result"]
+        text = r["content"][0]["text"]
     assert not text.startswith("Over 120 calls"), ("over the token's 120 calls "
         "a minute: split the phases over the tokens again", name, n)
     assert r["isError"] == error, (name, args, text[:800])
