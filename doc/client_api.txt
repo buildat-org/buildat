@@ -1473,6 +1473,43 @@ blip.gen, blip.mix
   mixer: plain Lua that an app may copy into its client_lua instead
   (the designer's "Save the files"), and so not follow blip's versions.
 
+weave
+-----
+Seamless pixel-art textures (16, 32 or 64 px) made of parameters, no pen
+or brush ([KIT_TEXTURE_DESIGNER]); blip's way with sounds, for textures.
+Its launch tile ("weave texture designer") is the designer. A recipe is a
+"weave1:..." string (53 characters after the prefix), a table of the
+parameters by name ({pattern = "bricks", color_a = "#9c4a32", grain =
+0.6, ...}, the missing ones at their defaults) or both ({"weave1:...",
+grain = 0.2}). weave1 is frozen from Kit's first stable release.
+- Parameters: size (16, 32, 64), pattern (none, bricks, tiles, planks,
+  cobbles, stripes), seed (0-1048575), color_a, color_b, gap_color,
+  speckle_color ("#rrggbb"); the noise's grain, octaves (1-4), contrast,
+  balance, stretch (-1..1), ridge and relief; the pattern's count (1-16),
+  gap, offset, jitter, variation and bevel; speckle and levels (0-16,
+  under 2 none). The ranges are weave_gen.lua's PARAMS.
+- **The name is the recipe**: weave.name(r) is
+  "generated/weave/weave1/<the compact form>", and a client meeting it in
+  a voxel registry makes the texture from the name alone (voxelworld's
+  registry_from_file()) before anything is meshed.
+weave.texture(recipe) -> Texture2D, made once and kept, registered in the
+  resource cache as weave.name(recipe) (an Image and a Texture2D)
+weave.image(recipe) -> an Image, made and not kept
+weave.name(recipe); weave.from_name(name) -> the recipe, or nil
+weave.pack(recipe) -> "weave1:..."; weave.unpack(s) and weave.params(r) ->
+  the full table
+weave.presets, weave.preset(name, seed) (grass, dirt, stone, cobble,
+  bricks, planks, sand, regolith, metal, ice), weave.random(seed),
+  weave.mutate(recipe, seed[, amount])
+weave.design(recipe, on_save[, opts]) -> the designer on the recipe; its
+  Save calls on_save("weave1:...") and closes it. opts {rect = {x, y, w,
+  h}, world = {x, y, w, h}}: its controls in rect, its preview in world
+  (UI units), as blip.design's
+weave.self_check() -> true, or false and the presets that moved
+weave.gen
+- extensions/weave/weave_gen.lua: plain, deterministic Lua that an app
+  may copy (the designer's "Save weave_gen.lua").
+
 replicate
 ---------
 Interface to server->client synchronized (replicated) scenes.

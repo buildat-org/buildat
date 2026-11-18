@@ -710,11 +710,11 @@ ss_ template_refusal(const ss_ &dir)
 		}
 	}
 	// [KIT_PROJECT_EXPORT] An exported project's rows beside the
-	// composition: items.json, sounds.json, voxels.json and prefabs.json
-	// (4 MiB each), textures/<16 hex digits>.png (Kit's caps: 256 of them,
-	// 64 KiB) and edits.bin (16 MiB), regular files
+	// composition: items.json, sounds.json, voxels.json, prefabs.json and
+	// weaves.json (4 MiB each), textures/<16 hex digits>.png (Kit's caps:
+	// 256 of them, 64 KiB) and edits.bin (16 MiB), regular files
 	for(const char *f : {"items.json", "sounds.json", "voxels.json",
-			"prefabs.json", "edits.bin"}){
+			"prefabs.json", "weaves.json", "edits.bin"}){
 		const ss_ p = dir+"/"+f;
 		if(!fs::path_exists(p))
 			continue;

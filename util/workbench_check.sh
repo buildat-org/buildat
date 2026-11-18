@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min, ~2 min with a cold module cache (2026-10-30)
-# covers: apps/workbench/** builtin/kit/** extensions/pause_menu/** builtin/world_menu/**
+# covers: apps/workbench/** builtin/kit/** extensions/weave/init.lua extensions/pause_menu/** builtin/world_menu/**
 # drives: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua
 # [KIT] stages 4 and 4b, Workbench and Kit's starter set (kit/*), on
 # scripted clients, the server's game clock at CHECK_RATE (the timer's
@@ -74,7 +74,8 @@
 #   7. ([KIT] stage 4e2) Kit's editor as floorplanner's, by mouse and by
 #      finger: below.
 #   8. ([KIT] stage 4g) A builder's voxel type made, drawn by a second
-#      client already in, placed and kept over a restart: below.
+#      client already in, placed, its texture designed again (weave) and
+#      kept over a restart: below.
 #   9. ([WORKBENCH_PROJECTS]) The projects, by the launcher's own client;
 #      a New game's heightmap walked on and built on: below.
 # Parts 1-8 make their project in Manage (New game..., the name
@@ -1608,8 +1609,13 @@ echo "ok: Kit's editor by mouse (the plan: a palette drag, select, a snapped mov
 # admin uploads a PNG from their exports (the client's file picker) in
 # Kit's editor's "New voxel type...", names the type frost, sets its
 # friction, makes it, takes it in hand from the Voxel list and places it in
-# play; kitbob's client reads the registry again and draws it. A restart:
-# the type registered before the save's sections load (not adopted).
+# play; kitbob's client reads the registry again and draws it.
+# [KIT_TEXTURE_DESIGNER] The form again: "Design a texture...", weave's
+# bricks, a slider moved by the keyboard, Save, Make: frost's version 2
+# wears the recipe (not the preset's), the placed voxel drawn otherwise
+# from the restart on ($t/voxel_designer.png, $t/voxel_again.png). A
+# restart: the type registered before the save's sections load (not
+# adopted).
 cat > "$t/maker.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitboss
 wait_log_any 30000 server window: the page ntfy
@@ -1682,6 +1688,30 @@ mouse_click right
 sync 5000
 frames 10
 screenshot @T@/voxel_placed.png
+# [KIT_TEXTURE_DESIGNER] The form again (frost's still): its texture
+# designed (bricks, a slider moved by the keyboard), saved, frost's next
+# version wearing it
+keypress F6
+wait_log 10000 kit editor: edit mode on
+frames 3
+click Button "New voxel type..."
+frames 3
+click Button "Design a texture..."
+wait_log 10000 designer shown
+frames 3
+click Button "bricks"
+wait_log 5000 designer: bricks: weave1:
+click Slider "weave a value"
+keypress Right
+keypress Right
+keypress Right
+frames 3
+screenshot @T@/voxel_designer.png
+click Button "Save"
+wait_log 5000 kit editor: the voxel form's texture: texture frost
+frames 3
+click Button "Make"
+sync 5000
 quit
 EOF
 cat > "$t/watcher.cmds" <<'EOF'
@@ -1720,14 +1750,33 @@ stop
 want "$t/srv5.log" "kitboss uploaded texture kit/up/" \
 	"kitboss made voxel type kitboss/frost version 1 (kit/up/" \
 	"solid, light 0, friction 0.2, surface \"\", group \"\" level 0)" \
-	"workbench: kitboss placed kitboss/frost ("
+	"workbench: kitboss placed kitboss/frost (" \
+	"kitboss made texture kitboss/frost version 1: weave1:" \
+	"kitboss made voxel type kitboss/frost version 2 (generated/weave/weave1/"
+# The saved recipe not the preset's (the slider moved)
+preset=$(grep -aoP 'designer: bricks: \Kweave1:[0-9a-v]+' "$t/maker.log" | tail -1)
+saved=$(grep -aoP 'designer: saved \Kweave1:[0-9a-v]+' "$t/maker.log" | tail -1)
+[ -n "$saved" ] && [ "$saved" != "$preset" ] ||
+	fail "the slider changed no recipe: bricks $preset, saved $saved ($t/maker.log)"
 server 6 "$t/user5"
 BUILDAT_JOIN_NAME=kitboss client again
 stop
-want "$t/srv6.log" "Builders' voxel types: 1, uploaded textures: 1"
+want "$t/srv6.log" "Builders' voxel types: 1, uploaded textures: 1, recipe textures: 1"
 grep -a "which this game does not register" "$t/srv6.log" &&
 	fail "the builder's type was adopted, not registered ($t/srv6.log)"
-echo "ok: a builder's voxel type made in Kit's editor from an uploaded PNG, drawn by a client already in, placed, and registered again at a restart"
+# (a type's next version is drawn from the next start: the restart's
+# client made the saved recipe's texture and draws frost otherwise)
+want "$t/again.log" "made $saved"
+python3 -I - "$t/voxel_placed.png" "$t/voxel_again.png" <<'PY' ||
+import sys
+from PIL import Image, ImageChops
+a, b = (Image.open(p).convert("RGB").crop((412, 250, 612, 450)) for p in sys.argv[1:3])
+n = sum(1 for v in ImageChops.difference(a, b).convert("L").getdata() if v > 40)
+print("frost's look: %d of 40000 pixels changed" % n)
+assert n > 4000, n
+PY
+	fail "frost's look did not change ($t/voxel_placed.png, $t/voxel_again.png)"
+echo "ok: a builder's voxel type made in Kit's editor from an uploaded PNG, drawn by a client already in, placed, its texture designed again (weave: a preset, a slider by the keyboard) and drawn so, and registered again at a restart"
 
 # 9. ([WORKBENCH_PROJECTS]) The projects, on the launcher's own server and
 # client (-u launcher=1): an old save "world" (part 1's project copied)

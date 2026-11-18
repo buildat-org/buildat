@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-16)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/kit/types/parallax.lua builtin/kit/client_lua/editor.lua builtin/accounts/accounts.cpp builtin/accounts/client_lua/accounts.lua src/client/main.cpp src/client/state.cpp src/lua_bindings/misc_urho3d.cpp client/core/urho3d/init.lua 3rdparty/Urho3D/Source/Urho3D/Graphics/OpenGL/OGLTexture2D.cpp 3rdparty/Urho3D/Source/ThirdParty/SDL/src/video/offscreen/** 3rdparty/Urho3D/Source/ThirdParty/GLEW/glew.c
+# covers: extensions/weave/** builtin/voxelworld/client_lua/module.lua builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/kit/types/parallax.lua builtin/kit/client_lua/editor.lua builtin/accounts/accounts.cpp builtin/accounts/client_lua/accounts.lua src/client/main.cpp src/client/state.cpp src/lua_bindings/misc_urho3d.cpp client/core/urho3d/init.lua 3rdparty/Urho3D/Source/Urho3D/Graphics/OpenGL/OGLTexture2D.cpp 3rdparty/Urho3D/Source/ThirdParty/SDL/src/video/offscreen/** 3rdparty/Urho3D/Source/ThirdParty/GLEW/glew.c
 # [KIT_AGENT_VISUALS] An agent's picture (Kit's get_view) and a client logged
 # in by an agent token. One Workbench server; kitboss (the admin) and kitbob
 # (made a builder by kitboss's admin token) on a headless weston's Xwayland
@@ -20,6 +20,13 @@
 #      [KIT_SIDE_SCENERY] (8) a kit/parallax at follow 0 by place, a part
 #      under it by place's parent and one by set_parent (get_state's
 #      parent): a pose 40 over draws them in its middle column;
+#   2b. [KIT_TEXTURE_DESIGNER] recipe textures by put_texture (a table
+#      packed as weave_gen.lua packs it, read back by list_textures and put
+#      again; bad ones refused), a voxel type wearing one on its sides and
+#      one on its top, set in cells and worn by a kit/polygon: pictures
+#      until the cells' top is yellow and the polygon's face green, both
+#      clients having made the textures from their names (5b: the web
+#      client's pictures of them too);
 #   3. kitboss's client stopped (SIGSTOP): the call answered in 5 s, and
 #      the picture it sends once continued refused as late;
 #   4. a client with no display (no X, no Wayland: SDL's offscreen driver,
@@ -49,6 +56,9 @@ if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
 check_tmp kit_get_view; t=$CHECK_TMP
+# [KIT_TEXTURE_DESIGNER] weave1 in plain Lua: presets' pixels, seams, the
+# compact form and tables
+(cd "$here" && luajit extensions/weave/test/gen_test.lua) || fail "weave's gen_test.lua"
 cd "$here/Build"
 export BUILDAT_WORKBENCH_PROJECT=world BUILDAT_JOIN_PASSWORD=checkpass12
 check_build
@@ -151,7 +161,7 @@ headless() # <log> <dirs: client_cache_<name>, cu_<name>> [NAME=value ...] bin/b
 	CHECK_PIDS+=($HL)
 }
 cat > "$t/mcp.py" <<'PY'
-import base64, json, struct, sys, time, urllib.error, urllib.request, zlib
+import base64, json, os, re, struct, sys, time, urllib.error, urllib.request, zlib
 phase, url, tok, out = sys.argv[1:5]
 def post(msg):
     h = {"Content-Type": "application/json",
@@ -245,6 +255,30 @@ def view(args, name, error=False):
     print(" ", "get_view", json.dumps(args), "->", c[0]["text"][:200],
         "(%d bytes, %.1f s)" % (len(png), time.time() - t0))
     return c[0]["text"], decode(png)
+def hue(img, fx, fy, want):
+    """The 5x5 around (fx, fy) mostly green (g over r and b) or yellow (r
+    and g over b)"""
+    w, h, px = img
+    x0, y0, k = int(fx * (w - 1)), int(fy * (h - 1)), 0
+    for y in range(max(0, y0 - 2), min(h, y0 + 3)):
+        for x in range(max(0, x0 - 2), min(w, x0 + 3)):
+            r, g, b = px(x, y)
+            k += (g > r + 40 and g > b + 40) if want == "green" else \
+                (r > b + 50 and g > b + 50)
+    return k > 12
+# [KIT_TEXTURE_DESIGNER] The woven type's top from above (yellow) and a
+# polygon's face wearing its side (green): pictures until both are drawn
+WT, WP = [-8, 36, 10], [8, 40, 10]
+def woven(name):
+    for i in range(20):
+        top = view({"pos": [WT[0], WT[1] + 6, WT[2] - 3], "look_at": [WT[0],
+            WT[1] + 1, WT[2]], "width": 128, "height": 96}, name + "_top")[1]
+        side = view({"pos": [WP[0], WP[1], WP[2] - 6], "look_at": WP,
+            "width": 128, "height": 96}, name + "_side")[1]
+        if hue(top, 0.5, 0.5, "yellow") and hue(side, 0.5, 0.5, "green"):
+            return i + 1
+        time.sleep(0.5)
+    assert False, ("the woven type not drawn", top[2](64, 48), side[2](64, 48))
 init = {"protocolVersion": "2025-11-25", "capabilities": {},
         "clientInfo": {"name": "kit_get_view_check", "version": "1"}}
 rpc("initialize", init)
@@ -306,6 +340,38 @@ elif phase == "views":
         ("the parallax parts not in the middle column", col)
     for i in (A, B, L):
         call("delete", {"id": i})
+elif phase == "weave":
+    # A recipe texture by a table, packed as weave_gen.lua packs it (the
+    # check's WEAVE_GREEN); a second one the top of a voxel type wearing
+    # the first on its sides
+    text = call("put_texture", {"name": "agentgreen", "recipe": {"pattern": "none",
+        "color_a": "#20b030", "color_b": "#30d040", "contrast": 0.1}})
+    G = re.search(r"generated/weave/weave1/[0-9a-v]{53}", text)[0]
+    assert G == "generated/weave/weave1/" + os.environ["WEAVE_GREEN"][7:], (G, os.environ["WEAVE_GREEN"])
+    assert "made texture kitboss/agentgreen version 1" in text, text
+    text = call("put_texture", {"name": "agenttop", "recipe": {"pattern": "tiles",
+        "count": 2, "color_a": "#e0c020", "color_b": "#d0b818", "gap_color": "#a08010"},
+        "voxel": {"name": "woven", "face": "top", "texture": G}})
+    assert "voxel type kitboss/woven wears it on its top" in text, text
+    # Listed with their recipes; one's table read back and put again: the
+    # same recipe, its next version
+    lt = json.loads(call("list_textures"))
+    rs = {x["name"]: x for x in lt["recipes"]}
+    assert rs["kitboss/agentgreen"]["texture"] == G and \
+        len(lt["presets"]) == 10 and "kitboss/agenttop" in rs, lt
+    t = json.loads(call("list_textures", {"texture": "kitboss/agentgreen"}))
+    assert t["color_a"] == "#20b030" and t["pattern"] == "none" and t["size"] == 16, t
+    text = call("put_texture", {"name": "agentgreen", "recipe": t})
+    assert "version 2: " + G in text, text
+    assert "recipe" in call("put_texture", {"name": "x", "recipe": "weave1:zz"}, True)
+    assert "pattern" in call("put_texture", {"name": "x", "recipe": {"pattern": "plaid"}}, True)
+    # Worn by a box of cells and by a polygon
+    assert "in 9 of 9 cells" in call("set_voxels", {"at": [WT[0] - 1, WT[1],
+        WT[2] - 1], "size": [3, 1, 3], "voxel": "kitboss/woven"})
+    assert "placed kit/polygon" in call("place", {"type": "kit/polygon", "pos": WP,
+        "params": {"points": [[-2, -2], [2, -2], [2, 2], [-2, 2]],
+        "voxel": "kitboss/woven"}})
+    print("  the woven type drawn in %d tries" % woven("view_woven"))
 elif phase == "pose":
     text, img = view({"pos": C, "look_at": M}, "view_pose")
 elif phase == "timeout":
@@ -325,6 +391,10 @@ elif phase == "web":
     text, img = view({"pos": C, "look_at": [M[0], M[1] - 3, M[2]]}, "web_below")
     assert mag(img, 0.5, 0.25) and not mag(img, 0.5, 0.75), \
         ("not upright", img[2](256, 96), img[2](256, 288))
+    # [KIT_TEXTURE_DESIGNER] the recipe textures made in the browser too;
+    # then a marker cleared, for the drive's last screenshot
+    print("  the woven type drawn in %d tries" % woven("web_woven"))
+    call("show")
 elif phase == "agent":
     text, img = view({"pos": C, "look_at": M}, "agent_at")
     assert text.startswith("kitbob's client drew this 512x384 from"), text
@@ -428,6 +498,16 @@ for re in "kitboss's agent asks kitboss's client \(peer [0-9]+, scene [^)]+\) fo
 done
 [ "$(pictures "$t/bob.log")" = 0 ] || fail "kitbob's client was asked ($t/bob.log)"
 echo "ok: kitboss's agent's pictures, from a pose, upright, by yaw and its own view; the window the same"
+# [KIT_TEXTURE_DESIGNER] Recipe textures by put_texture, worn by cells and a
+# polygon, drawn by kitboss's client (made from their names; kitbob's too)
+export WEAVE_GREEN
+WEAVE_GREEN=$(cd "$here" && luajit -e 'local G = dofile("extensions/weave/weave_gen.lua")
+	io.write(G.pack(G.params({pattern = "none", color_a = "#20b030", color_b = "#30d040", contrast = 0.1})))')
+mcp weave "$tok_b" "$t"
+for f in "$t/boss.log" "$t/bob.log"; do
+	grep -aq "weave *: made ${WEAVE_GREEN}" "$f" || fail "no texture made of the recipe in $f"
+done
+echo "ok: recipe textures put (a table packed as weave_gen.lua packs it), listed and read back; a voxel type wearing two (one its top), its cells and a polygon drawn"
 
 # 3. A client that does not answer
 bpid=$(pgrep -P $BOSS)
@@ -473,6 +553,7 @@ if command -v "${CHROME:-google-chrome}" > /dev/null && [ -f "$here/web/buildat.
 	["waitlog_any", "player physics enabled", 120], ["frames", 30],
 	["shot", "${OUT}/before.png"],
 	["waitlog", "kit: the picture sent", 60], ["waitlog", "kit: the picture sent", 10],
+	["waitlog", "kit: agent marker from", 60],
 	["frames", 5], ["shot", "${OUT}/after.png"]
 ]
 J
