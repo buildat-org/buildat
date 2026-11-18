@@ -39,9 +39,12 @@
 #   8. restore_checkpoint puts a heightmap's samples back (4z26): kitboss
 #      raises a sample after a checkpoint, the restore lowers it, the
 #      restore of "before restore ..." raises it again (column reads);
-#   9. [KIT_ZONE_SHAPES] (the admin token's, before 8) put_type's text;
-#      c:params_of reads the polygon it is on, a reshape's points at once, a
-#      copy.
+#   9. [KIT_ZONE_SHAPES] (the admin token's, before 8) put_type's text; a
+#      body put by its movement's params (local/zprobe): c:params_of reads
+#      the polygon it is on, a reshape's points at once, a copy; zone =
+#      "look" on a U polygon: met in its outline, not in its notch, moved
+#      with it, never under a kit/parallax; get_state's zone kind, shape,
+#      bounds and who is in it.
 #   util/kit_agent_tools_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -245,6 +248,23 @@ def tried(entity_id):
 def to_start():
     if state(ids=[])["running"]:
         call("stop")
+def join():
+    """play_join until in: its answers, its body"""
+    t0, said = time.time(), []
+    while True:
+        r = rpc("tools/call", {"name": "play_join", "arguments": {}})["result"]
+        text = r["content"][0]["text"]
+        said.append(text)
+        print("  play_join ->", text[:400])
+        if not r["isError"]:
+            break
+        assert "is starting" in text or "on its way" in text, text
+        assert time.time() - t0 < 150, "the camera not in in 150 s"
+        time.sleep(0.5)
+    return said, json.loads(re.search(r"\): (\{.*\})\. play_input", text).group(1))
+def played(args):
+    return json.loads(re.search(r"Played [^:]*: (\{.*\})", call("play_input",
+        args)).group(1))
 init = {"protocolVersion": "2025-11-25", "capabilities": {},
         "clientInfo": {"name": "kit_agent_tools_check", "version": "1"}}
 s = saved()
@@ -280,18 +300,45 @@ TICKER = '''return {
 	end,
 }
 '''
-# [KIT_ZONE_SHAPES] a component reading its polygon's points
+# [KIT_ZONE_SHAPES] a body put where its params say; a hazard on a
+# polygon's look reading its points; a gem's box of cells
+ZPROBE = '''return {
+	version = 1,
+	root = true,
+	about = {what = "The check's body, put where its params say."},
+	params = {x = {type = "number", default = 0, min = -500, max = 500},
+		y = {type = "number", default = 2, min = -500, max = 500}},
+	movement = {body = {r = 0.3, h = 1, eye = 0.8}},
+	step = function(s, i, dt, w, p)
+		s.pos, s.vel = {p.x, p.y, 0}, {0, 0, 0}
+	end,
+}
+'''
 HAZ = '''return {
 	version = 1,
 	component = true,
-	about = {what = "The check's reader of its entity's polygon."},
+	zone = "look",
+	about = {what = "The check's hazard: who meets its entity's look."},
 	inputs = {read = "none"},
-	state = {pts = {default = {}}, door = {default = true}},
+	state = {n = {default = 0}, out = {default = 0}, pts = {default = {}},
+		door = {default = true}},
+	on_enter = function(c, by) c.state.n = c.state.n + 1 end,
+	on_leave = function(c, by) c.state.out = c.state.out + 1 end,
 	on_input = function(c, input)
 		c:params_of("kit/polygon").points[1] = {99, 99}
 		c.state.pts = c:params_of("kit/polygon").points
 		c.state.door = c:params_of("kit/door") ~= nil
 	end,
+}
+'''
+GEM = '''return {
+	version = 1,
+	zone = "size",
+	about = {what = "The check's gem: who meets its cells."},
+	params = {size = {type = "position", default = {1, 1, 1}}},
+	state = {n = {default = 0}, out = {default = 0}},
+	on_enter = function(c, by) c.state.n = c.state.n + 1 end,
+	on_leave = function(c, by) c.state.out = c.state.out + 1 end,
 }
 '''
 if phase == "tools":
@@ -408,20 +455,6 @@ elif phase == "links":
 elif phase == "play":
     rpc("initialize", init)
     H, MT, WT, B, L = s["H"], s["MT"], s["WT"], s["B"], s["L"]
-    def join():
-        """play_join until in: its answers, its body"""
-        t0, said = time.time(), []
-        while True:
-            r = rpc("tools/call", {"name": "play_join", "arguments": {}})["result"]
-            text = r["content"][0]["text"]
-            said.append(text)
-            print("  play_join ->", text[:400])
-            if not r["isError"]:
-                break
-            assert "is starting" in text or "on its way" in text, text
-            assert time.time() - t0 < 150, "the camera not in in 150 s"
-            time.sleep(0.5)
-        return said, json.loads(re.search(r"\): (\{.*\})\. play_input", text).group(1))
     # [KIT_SIDE_SCENERY] (5) the body in the scene edited: in the first,
     # then moved to moon by play_join there (again there: as it is); the
     # phase starts in the first
@@ -446,9 +479,6 @@ elif phase == "play":
     until(lambda: count(MT) == 7, "the moon's target reached")
     assert count(WT) == 7
     # (8) press
-    def played(args):
-        return json.loads(re.search(r"Played [^:]*: (\{.*\})", call("play_input",
-            args)).group(1))
     ev = played({"press": "Go", "seconds": 0.3})["events"]
     assert any(e["id"] == B and e["output"] == "pressed" for e in ev), ev
     ev = played({"press": "moon run", "seconds": 0.3})["events"]
@@ -543,16 +573,24 @@ elif phase == "history":
     assert json.loads(call("get_history", {"since": 0, "limit": 200}))[-len(h):] == h
     assert "since: a time" in refused("get_history", {"since": "yesterday"})
 elif phase == "zones":
-    # [KIT_ZONE_SHAPES] c:params_of
+    # [KIT_ZONE_SHAPES] a body put where local/zprobe's params say
     rpc("initialize", init)
     to_start()
     call("new_scene", {"name": "zones"})
-    call("put_type", {"name": "zhaz", "source": HAZ})
+    for name, src in (("zprobe", ZPROBE), ("zhaz", HAZ), ("zgem", GEM)):
+        call("put_type", {"name": name, "source": src})
     d = {t["name"]: t for t in rpc("tools/list")["result"]["tools"]}["put_type"]["description"]
-    assert 'c:params_of(type)' in d, d
+    for w in ('c:params_of(type)', 'or "look" (the entity\'s own look'):
+        assert w in d, (w, d)
+    call("place", {"type": "kit/spawner", "pos": [0, 2, 0], "params": {"players": True}})
+    call("place", {"type": "kit/controls", "pos": [0, 0, 0], "on": "scene",
+        "params": {"movement": "local/zprobe"}})
+    PR = placed(call("place", {"type": "local/zprobe", "pos": [0, 0, 0], "on": "scene"}))
+    # A U: its notch (x 1 to 2, y 1 to 3) inside its box, outside its outline
     U = [[0, 0], [3, 0], [3, 3], [2, 3], [2, 1], [1, 1], [1, 3], [0, 3]]
     P = placed(call("place", {"type": "kit/polygon", "pos": [20, 1, 0], "params": {"points": U}}))
     call("add_component", {"id": P, "type": "local/zhaz"})
+    G = placed(call("place", {"type": "local/zgem", "pos": [60, 1, 0]}))
     def comp(i, c):
         return entity(i)["components"][c]
     def wait(f, what, secs=10):
@@ -562,6 +600,13 @@ elif phase == "zones":
                 return v
             time.sleep(0.5)
         raise AssertionError("not in %d s: %s" % (secs, what))
+    # get_state: each zone's kind and shape
+    z = comp(P, 1)["zone"]
+    assert z["kind"] == "look" and z["shape"] == "polygon" and z["points"] == 8 and \
+        z["depth"] == 1 and z["lo"] == [20, 1, -0.5] and z["hi"] == [23, 4, 0.5], z
+    z = comp(G, 0)["zone"]
+    assert z["kind"] == "box" and z["shape"] == "cells" and z["cells"] == [1, 1, 1] and \
+        z["lo"] == [59.5, 0.5, -0.5] and z["hi"] == [60.5, 1.5, 0.5], z
     assert call("start") == "Running"
     # (1) c:params_of: the polygon's points (its copy written: nothing
     # changed), a reshape's at once; none of a type not there
@@ -574,7 +619,52 @@ elif phase == "zones":
     U2 = U[:5] + [[1.5, 0.5]] + U[5:]
     call("set_param", {"id": P, "param": "points", "value": U2})
     read(U2)
+    call("set_param", {"id": P, "param": "points", "value": U})
     print("   params_of: the polygon's points, again after a reshape")
+    # The body, by its movement's params; its place (the feet a cell's
+    # middle up) as play_input answers it
+    said, body = join()
+    assert body["scene"] == "zones", body
+    def at(x, y):
+        def there():
+            b = played({"seconds": 0.1})
+            return b if max(abs(u - v) for u, v in zip(b["pos"], (x, y + 0.5, 0))) < 0.011 else None
+        return wait(there, "the body at %s, %s" % (x, y))
+    def put(mv, x, y, **kw):
+        call("set_param", {"id": mv, "params": dict(x=x, y=y, **kw)})
+        return at(x, y)
+    def still(i, c, n, out):
+        played({"seconds": 0.3})
+        st = comp(i, c)["state"]
+        assert (st["n"], st["out"]) == (n, out), (i, st, n, out)
+    def comes(i, c, n, out):
+        wait(lambda: (lambda st: (st["n"], st["out"]) == (n, out))(comp(i, c)["state"]),
+            "entity %d's zone: %d in, %d out" % (i, n, out))
+    # (2) zone = "look" on the U: its notch is not in it, its outline is
+    put(PR, 21.5, 2.5)
+    still(P, 1, 0, 0)
+    put(PR, 20.5, 2)
+    comes(P, 1, 1, 0)
+    z = comp(P, 1)["zone"]
+    assert len(z["inside"]) == 1 and z["inside"][0].startswith("player:"), z
+    # moved: the zone with it at once (out), then in where it is now
+    call("move", {"id": P, "pos": [40, 1, 0]})
+    comes(P, 1, 1, 1)
+    assert comp(P, 1)["zone"]["lo"] == [40, 1, -0.5]
+    put(PR, 40.5, 2)
+    comes(P, 1, 2, 1)
+    put(PR, 0, 2)
+    comes(P, 1, 2, 2)
+    # under a kit/parallax layer: never met
+    PX = placed(call("place", {"type": "kit/parallax", "pos": [40, 1, 0]}))
+    call("set_parent", {"id": P, "parent": PX})
+    z = comp(P, 1)["zone"]
+    assert z.get("note") == "under a kit/parallax layer: never met", z
+    put(PR, 40.5, 2)
+    still(P, 1, 2, 2)
+    put(PR, 0, 2)
+    print("   zone = \"look\": the U's outline met, its notch not; moved with it; not under a layer")
+    assert "Your body is gone" in call("play_leave")
     call("stop")
 elif phase == "heightmap":
     rpc("initialize", init)
@@ -621,7 +711,7 @@ for p in tools types links play state goals history zones; do
 done
 grep -aqE "kitboss's agent tries entity [0-9]+'s ping null as kitboss \(player:[0-9]+\)" "$SL" ||
 	fail "no try as kitboss in $SL"
-echo "ok: tools listed by the token; edit_type, a client part kept, a param's default; links by name; try_input as; press; filters; level warnings; history; params_of"
+echo "ok: tools listed by the token; edit_type, a client part kept, a param's default; links by name; try_input as; press; filters; level warnings; history; zones by shape"
 
 # 8. A heightmap's samples restored
 # (each map generated in the server's call: its line before the answer)

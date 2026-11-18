@@ -3031,6 +3031,28 @@ local function draw()
 				end
 				-- A zone's and an owned volume's extent, from its cell on
 				local t = type_of(c.type)
+				-- [KIT_ZONE_SHAPES] zone = "look": its look's outline as drawn, in
+				-- the zones' colour (a polygon's at its two faces)
+				local nd = t.zone == "look" and P.nodes[e.id]
+				local lc, lh, lr = nil, nil, nil
+				if nd then
+					lc, lh, lr = K.look_frame(nd)
+				end
+				if lc then
+					local zc = magic.Color(0.3, 0.75, 1)
+					if nd.poly then
+						local q, o, k = nd.poly.pts, nd.look.position, #nd.poly.pts / 2
+						for _, z in ipairs({-nd.poly.d, nd.poly.d}) do
+							for i = 1, k do
+								local j = i % k + 1
+								dbg:AddLine(o + lr * magic.Vector3(q[2 * i - 1], q[2 * i], z),
+										o + lr * magic.Vector3(q[2 * j - 1], q[2 * j], z), zc, false)
+							end
+						end
+					else
+						hover.box(lc, lh, lr, zc)
+					end
+				end
 				for _, k in ipairs({"zone", "volume", "grants", "voxel_box",
 						"region", "world_region"}) do
 					local n = t[k] and c.params and c.params[t[k]]

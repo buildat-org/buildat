@@ -2070,6 +2070,11 @@ struct Module: public interface::Module, public Interface
 			const ss_ pn = jstr(t.decl, k.first);
 			if(pn.empty())
 				continue;
+			// [KIT_ZONE_SHAPES] zone = "look": the entity's look its zone
+			if(k.second == &t.zone && pn == "look"){
+				t.zone = pn;
+				continue;
+			}
 			if(jstr(t.decl.get("params").get(pn), "type") != "position"){
 				why = name+": its "+k.first+" names no position parameter";
 				return false;
@@ -2117,7 +2122,8 @@ struct Module: public interface::Module, public Interface
 				}
 				t.space[it.key()] = k;
 			}
-			for(const ss_ &b : {t.zone, t.region, t.grants, lx})
+			for(const ss_ &b : {t.zone == "look" ? ss_() : t.zone, t.region,
+					t.grants, lx})
 				if(!b.empty() && !t.space.count(b))
 					t.space[b] = "box";
 			for(const ss_ &b : {t.volume, t.voxel_box, t.world_region})
@@ -2912,6 +2918,107 @@ struct Module: public interface::Module, public Interface
 				return false;
 		}
 		return true;
+	}
+
+	// [KIT_ZONE_SHAPES] A zone's shape in the world: a box of cells (a
+	// position parameter's, as box_holds meets it: 'c'), or (zone = "look")
+	// its entity's look: a turned box ('b'), a sphere ('s') or a polygon's
+	// outline over its depth ('p')
+	struct ZoneShape
+	{
+		char kind = 'c';
+		// cells: the corner cell's middle; a box's or a sphere's middle; a
+		// polygon's place
+		double o[3] = {0, 0, 0};
+		Turn q;
+		int n[3] = {1, 1, 1};
+		// its own box from o along q's axes (a polygon's points' and depth's)
+		double a[3] = {0, 0, 0}, b[3] = {0, 0, 0};
+		double r = 0; // a sphere's radius, a polygon's half depth
+		sv_<double> pts; // a polygon's x, y... in its own frame
+		double lo[3] = {0, 0, 0}, hi[3] = {0, 0, 0}; // its bounds in the world
+		void bound()
+		{
+			for(int k = 0; k < 3; k++)
+				lo[k] = 1e300, hi[k] = -1e300;
+			for(int c = 0; c < 8; c++){
+				double v[3];
+				for(int k = 0; k < 3; k++)
+					v[k] = (c >> k & 1) ? b[k] : a[k];
+				q.apply(v);
+				for(int k = 0; k < 3; k++)
+					lo[k] = std::min(lo[k], v[k] + o[k]),
+					hi[k] = std::max(hi[k], v[k] + o[k]);
+			}
+		}
+		const char *name() const
+		{
+			return kind == 'c' ? "cells" : kind == 'b' ? "box" : kind == 's' ?
+					"sphere" : "polygon";
+		}
+	};
+
+	// [KIT_ZONE_SHAPES] A body as the zones meet it: its point (Peer::pos, as
+	// before)
+	struct BodyShape
+	{
+		double p[3] = {0, 0, 0};
+	};
+
+	static bool in_outline(const sv_<double> &q, double x, double y)
+	{
+		bool inside = false;
+		const size_t n = q.size() / 2;
+		for(size_t i = 0, j = n - 1; i < n; j = i++)
+			if((q[2 * i + 1] > y) != (q[2 * j + 1] > y) && x < q[2 * i] +
+					(y - q[2 * i + 1]) * (q[2 * j] - q[2 * i]) /
+					(q[2 * j + 1] - q[2 * i + 1]))
+				inside = !inside;
+		return inside;
+	}
+
+	// How far a point is from a zone's shape, squared (0: in it)
+	static double zone_d2(const ZoneShape &z, const double p[3])
+	{
+		double l[3] = {p[0] - z.o[0], p[1] - z.o[1], p[2] - z.o[2]};
+		z.q.inverse().apply(l);
+		if(z.kind == 's'){
+			const double d = std::sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]) - z.r;
+			return d > 0 ? d * d : 0;
+		}
+		if(z.kind != 'p'){
+			double d2 = 0;
+			for(int k = 0; k < 3; k++){
+				const double d = l[k] < z.a[k] ? z.a[k] - l[k] : l[k] > z.b[k] ?
+						l[k] - z.b[k] : 0;
+				d2 += d * d;
+			}
+			return d2;
+		}
+		const double dz = std::max(0.0, std::fabs(l[2]) - z.r);
+		if(in_outline(z.pts, l[0], l[1]))
+			return dz * dz;
+		double best = 1e300;
+		const size_t n = z.pts.size() / 2;
+		for(size_t i = 0, j = n - 1; i < n; j = i++){
+			const double ax = z.pts[2 * j], ay = z.pts[2 * j + 1];
+			const double ex = z.pts[2 * i] - ax, ey = z.pts[2 * i + 1] - ay;
+			const double ll = ex * ex + ey * ey;
+			double t = ll > 0 ? ((l[0] - ax) * ex + (l[1] - ay) * ey) / ll : 0;
+			t = std::max(0.0, std::min(1.0, t));
+			const double dx = ax + ex * t - l[0], dy = ay + ey * t - l[1];
+			best = std::min(best, dx * dx + dy * dy);
+		}
+		return dz * dz + best;
+	}
+
+	// Whether a body meets a zone (a point in a box of cells exactly as
+	// box_holds has it)
+	static bool zone_meets(const ZoneShape &z, const BodyShape &s)
+	{
+		if(z.kind == 'c')
+			return box_holds(z.o, z.q, z.n, s.p);
+		return zone_d2(z, s.p) <= 0;
 	}
 
 	// A row's "pos" and turn, given in the world, made its parent's
@@ -21855,6 +21962,214 @@ struct Module: public interface::Module, public Interface
 			}
 	}
 
+	// [KIT_ZONE_SHAPES] zone = "look": the entity's own look as the clients
+	// draw it (its first), turned as it is: a polygon's outline over its
+	// depth (kit/polygon), a box (a part's, by its rotation; a look's state
+	// `when` over it as move.lua's M.look_box has it), a sphere of equal
+	// sides. simplified: a wedge and a sphere of unequal sides are their
+	// boxes. False: it has no look
+	bool look_zone(const Entity &e, ZoneShape &z)
+	{
+		for(const Instance &in : e.comps){
+			const json::Value &d = m_types[in.type].decl.get("look");
+			if(d.is_undefined())
+				continue;
+			// Read as look_of() has it ("param:<name>": that parameter's),
+			// with no copy (a copy per zone per tick: 12 us); an extent's
+			// look by look_of()
+			json::Value sub;
+			if(d.get("extent").is_string())
+				sub = look_of(in, d);
+			const json::Value &look = sub.is_undefined() ? d : sub;
+			auto rd = [&](const json::Value &o, const char *k) -> const json::Value & {
+				const json::Value &v = o.get(k);
+				if(v.is_string() && v.as_string().compare(0, 6, "param:") == 0)
+					return in.params.get(v.as_string().substr(6));
+				return v;
+			};
+			auto str = [](const json::Value &v){
+				return v.is_string() ? v.as_string() : ss_();
+			};
+			double w[3];
+			Turn wq;
+			world_of(e, w, &wq);
+			for(int k = 0; k < 3; k++)
+				z.o[k] = w[k];
+			auto num = [](const json::Value &v, unsigned i, double def){
+				const json::Value &x = v.is_array() && i < v.size() ? v.at(i) :
+						json::Value();
+				return x.is_number() && std::isfinite(x.as_number()) ?
+						x.as_number() : def;
+			};
+			const ss_ shape = str(rd(look, "shape"));
+			if(shape == "polygon"){
+				const json::Value &pts = rd(look, "points");
+				z.kind = 'p';
+				z.q = wq;
+				for(unsigned i = 0; pts.is_array() && i < pts.size(); i++)
+					for(unsigned k = 0; k < 2; k++)
+						z.pts.push_back(num(pts.at(i), k, 0));
+				if(z.pts.size() < 6)
+					return false;
+				const json::Value &dv = rd(look, "depth");
+				z.r = std::max(0.02, std::min(64.0, dv.is_number() &&
+						std::isfinite(dv.as_number()) ? dv.as_number() : 1)) / 2;
+				z.a[0] = z.b[0] = z.pts[0];
+				z.a[1] = z.b[1] = z.pts[1];
+				for(size_t i = 0; i + 1 < z.pts.size(); i += 2)
+					for(int k = 0; k < 2; k++)
+						z.a[k] = std::min(z.a[k], z.pts[i + k]),
+						z.b[k] = std::max(z.b[k], z.pts[i + k]);
+				z.a[2] = -z.r;
+				z.b[2] = z.r;
+				z.bound();
+				return true;
+			}
+			const ss_ key = str(rd(look, "state"));
+			const bool on = !key.empty() && in.state.get(key).is_true();
+			const json::Value &wh = on ? look.get("when") : json::Value();
+			double size[3], off[3];
+			const json::Value &sz = rd(look, "size");
+			for(unsigned k = 0; k < 3; k++){
+				size[k] = sz.is_array() ? std::max(0.02, std::min(64.0,
+						num(sz, k, 1))) : std::min(128.0, std::fabs(
+						(sz.is_number() && std::isfinite(sz.as_number()) ?
+						sz.as_number() : 0.4) * 2));
+				off[k] = num(rd(look, "offset"), k, 0) + num(rd(wh, "offset"), k, 0);
+			}
+			if(rd(wh, "scale").is_array()){
+				for(unsigned k = 0; k < 3; k++){
+					const double was = size[k];
+					size[k] *= num(rd(wh, "scale"), k, 1);
+					if(k == 1)
+						off[1] -= (was - size[1]) / 2;
+				}
+			}
+			if(rd(wh, "swing").is_true()){
+				// (a door's quarter turn round its -x edge, [KIT_DOOR_MIRROR]
+				// towards -z mirrored)
+				const double hinge = off[0] - size[0] / 2;
+				const double front = off[2] - size[2] / 2, back = off[2] + size[2] / 2;
+				std::swap(size[0], size[2]);
+				off[0] = hinge + size[0] / 2;
+				off[2] = rd(wh, "mirror").is_true() ? back - size[2] / 2 :
+						front + size[2] / 2;
+			}
+			const json::Value &rv = rd(look, "rotation");
+			const Turn R = wq * Turn::of(num(rv, 1, 0), num(rv, 0, 0), num(rv, 2, 0));
+			R.apply(off);
+			for(int k = 0; k < 3; k++)
+				z.o[k] += off[k];
+			if(shape == "sphere" && size[0] == size[1] &&
+					size[1] == size[2]){
+				z.kind = 's';
+				z.r = size[0] / 2;
+				for(int k = 0; k < 3; k++)
+					z.a[k] = -z.r, z.b[k] = z.r;
+			} else {
+				z.kind = 'b';
+				z.q = R;
+				for(int k = 0; k < 3; k++)
+					z.a[k] = -size[k] / 2, z.b[k] = size[k] / 2;
+			}
+			z.bound();
+			return true;
+		}
+		return false;
+	}
+
+	// [KIT_ZONE_SHAPES] How the zones meet a player's body: its point
+	BodyShape body_shape(size_t, const Peer &p)
+	{
+		BodyShape s;
+		for(int k = 0; k < 3; k++)
+			s.p[k] = p.pos[k];
+		return s;
+	}
+
+	// A zone's shape now (zone_meets() meets it); false: nobody is in it
+	// ([KIT_ZONE_SHAPES] a look zone with no look, or under a kit/parallax
+	// layer)
+	bool zone_shape(const Entity &e, const Instance &in, ZoneShape &z)
+	{
+		const Type &t = m_types[in.type];
+		if(t.zone == "look")
+			return look_zone(e, z) && !under_parallax(e);
+		// [KIT_AIRSHIPS] a deadly zone as large as a region (the ground
+		// under the islands)
+		const bool deadly = in.type == TRIGGER_TYPE &&
+				in.params.get("deadly").is_true();
+		int *n = z.n;
+		double *o = z.o;
+		extent(in.params.get(t.zone), n, deadly ? MAX_REGION_EXTENT : MAX_EXTENT);
+		box_frame(e, o, z.q);
+		// [KIT_GUIDE_BOTS_2] A reach goal with a target: its box round
+		// the target's place, level, following it as it moves
+		if(in.type == "kit/goal" && jstr(in.params, "kind") == "reach" &&
+				jstr(in.params, "pick", "entity") == "entity")
+			if(const Entity *te = goal_target(e, in, 0, o)){
+				world_of(*te, o);
+				z.q = Turn();
+				for(int k = 0; k < 3; k++)
+					o[k] = std::floor(o[k] + 0.5) - (k == 1 ? 0 : (n[k] - 1) / 2);
+			}
+		for(int k = 0; k < 3; k++)
+			z.a[k] = -0.5, z.b[k] = n[k] - 0.5;
+		z.bound();
+		return true;
+	}
+
+	// [KIT_ZONE_SHAPES] get_state's: a zone's kind (box: a position
+	// parameter's cells; look) and its shape now, its bounds in the world
+	json::Value zone_json(const Entity &e, const Instance &in)
+	{
+		json::Value o = json::object();
+		ZoneShape z;
+		const bool look = m_types[in.type].zone == "look";
+		o.set("kind", look ? "look" : "box");
+		if(look && !look_zone(e, z)){
+			o.set("shape", "none");
+			o.set("note", "no look on the entity: nobody is in it");
+			return o;
+		}
+		if(!look)
+			zone_shape(e, in, z);
+		o.set("shape", z.name());
+		if(look && under_parallax(e))
+			o.set("note", "under a kit/parallax layer: never met");
+		auto vec = [](const double *v){
+			json::Value a = json::array();
+			for(int k = 0; k < 3; k++)
+				a.append(std::round(v[k] * 1000) / 1000);
+			return a;
+		};
+		if(z.kind == 'c'){
+			json::Value c = json::array();
+			for(int k = 0; k < 3; k++)
+				c.append((int64_t)z.n[k]);
+			o.set("cells", c);
+		} else if(z.kind == 's'){
+			o.set("radius", std::round(z.r * 1000) / 1000);
+		} else if(z.kind == 'p'){
+			o.set("points", (int64_t)(z.pts.size() / 2));
+			o.set("depth", std::round(z.r * 2000) / 1000);
+		} else {
+			double s[3];
+			for(int k = 0; k < 3; k++)
+				s[k] = z.b[k] - z.a[k];
+			o.set("size", vec(s));
+		}
+		o.set("lo", vec(z.lo));
+		o.set("hi", vec(z.hi));
+		if(m_session.running){
+			json::Value who = json::array();
+			for(const ss_ &id : in.inside)
+				who.append(id.compare(0, 4, "bot:") == 0 ? id : "player:"+id);
+			o.set("inside", who);
+		}
+		return o;
+	}
+
 	// Zones: a type's `zone` (a position parameter, its extent in cells
 	// from the entity's own up and on) and who stands in it, the players
 	// as the app placed them (the cell their position rounds to):
@@ -21867,6 +22182,16 @@ struct Module: public interface::Module, public Interface
 		// [KIT_AIRSHIPS] stage 5: the ships touching a deadly kit/trigger_zone
 		// (lost after the scan)
 		sv_<std::pair<uint64_t, uint64_t>> touched;
+		// [KIT_ZONE_SHAPES] each player's body as the zones meet it
+		std::map<size_t, BodyShape> shapes;
+		// (and the scenes anyone is in: a zone elsewhere nobody is in is
+		// not looked at)
+		std::set<ss_> occupied;
+		for(auto &pp : m_peers)
+			if(pp.second.player){
+				shapes[pp.first] = body_shape(pp.first, pp.second);
+				occupied.insert(pp.second.scene);
+			}
 		// [KIT_GUIDE_BOTS] the bots: their scenes and places
 		std::map<uint64_t, std::pair<ss_, std::array<double, 3>>> bots;
 		for(auto &p : m_entities)
@@ -21874,6 +22199,7 @@ struct Module: public interface::Module, public Interface
 				auto &b = bots[p.first];
 				scene_of(p.second, &b.first);
 				world_of(p.second, b.second.data());
+				occupied.insert(b.first);
 			}
 		for(auto &p : m_entities){
 			Entity &e = p.second;
@@ -21886,27 +22212,15 @@ struct Module: public interface::Module, public Interface
 					continue;
 				ss_ scene;
 				scene_of(e, &scene);
-				// [KIT_AIRSHIPS] a deadly zone as large as a region (the ground
-				// under the islands)
 				const bool deadly = in.type == TRIGGER_TYPE &&
 						in.params.get("deadly").is_true();
-				int n[3];
-				extent(in.params.get(t.zone), n, deadly ? MAX_REGION_EXTENT : MAX_EXTENT);
-				double o[3];
-				Turn q;
-				box_frame(e, o, q);
-				// [KIT_GUIDE_BOTS_2] A reach goal with a target: its box round
-				// the target's place, level, following it as it moves
-				if(in.type == "kit/goal" && jstr(in.params, "kind") == "reach" &&
-						jstr(in.params, "pick", "entity") == "entity")
-					if(const Entity *te = goal_target(e, in, 0, o)){
-						world_of(*te, o);
-						q = Turn();
-						for(int k = 0; k < 3; k++)
-							o[k] = std::floor(o[k] + 0.5) - (k == 1 ? 0 : (n[k] - 1) / 2);
-					}
-				if(deadly && m_session.running)
-					ships_in_box(e.id, scene, o, q, n, touched);
+				if(!occupied.count(scene) && in.inside.empty() && !deadly &&
+						in.type != "kit/goal")
+					continue;
+				ZoneShape z;
+				const bool met = zone_shape(e, in, z);
+				if(z.kind == 'c' && m_session.running && deadly)
+					ships_in_box(e.id, scene, z.o, z.q, z.n, touched);
 				// Who is in it, by their entity's id; those arriving on it
 				// by a teleport enter it silently
 				std::set<ss_> now, silent;
@@ -21919,9 +22233,9 @@ struct Module: public interface::Module, public Interface
 					// ground on a join and at a session's end) is in no zone
 					auto bi = m_bodies.find(pp.first);
 					// ([KIT_LOBBY_OUT_OF_PLAY] nor one in a lobby)
-					const bool inside = !peer.spawning && !peer.lobby_out &&
+					const bool inside = met && !peer.spawning && !peer.lobby_out &&
 							(!m_host.controls || (bi != m_bodies.end() &&
-							bi->second.put)) && box_holds(o, q, n, peer.pos);
+							bi->second.put)) && zone_meets(z, shapes[pp.first]);
 					if(inside != (in.inside.count(itos(peer.player)) > 0))
 						log_i(MODULE, "Entity %s: %s %s its zone at %.3f,%.3f,%.3f",
 								cs(itos(e.id)), cs(peer.name), inside ? "enters" :
@@ -21938,9 +22252,16 @@ struct Module: public interface::Module, public Interface
 				}
 				// [KIT_GUIDE_BOTS] a zone holds bots too, "bot:<id>"
 				// ([KIT_GUIDE_BOTS_2]: every zone, not only a goal's)
-				for(const auto &b : bots)
-					if(b.second.first == scene && box_holds(o, q, n, b.second.second.data()))
+				// (each by its point)
+				for(const auto &b : bots){
+					if(!met || b.second.first != scene)
+						continue;
+					BodyShape bs;
+					for(int k = 0; k < 3; k++)
+						bs.p[k] = b.second.second[k];
+					if(zone_meets(z, bs))
 						now.insert("bot:"+itos(b.first));
+				}
 				// [KIT_AIRSHIPS_BOTS_LEFTOVERS] a reach goal through a station:
 				// those aboard its ship are in it as the station's holder (the
 				// helm took them there, not the gunner)
@@ -31959,7 +32280,12 @@ struct Module: public interface::Module, public Interface
 				"= \"none\"|\"number\"|\"string\"|\"bool\"|\"entity\"|\"position\"|"
 				"\"any\"}, outputs likewise; usable = true (players use it: "
 				"on_use); look = {shape = \"box\"|\"sphere\", size = n or {x, y, z}, "
-				"color = \"#rrggbb\", solid = true, text = \"<shared state key>\"}. "
+				"color = \"#rrggbb\", solid = true, text = \"<shared state key>\"}; "
+				"zone = \"<a position param>\" (a box of cells from its place) "
+				"or \"look\" (the entity's own look as drawn and turned: a "
+				"kit/polygon's outline over its depth, a part's box; a spike "
+				"hazard: component = true, zone = \"look\" on the polygon), "
+				"on_enter(c, by) and on_leave(c, by) as a body meets it. "
 				"Handlers: on_start(c) (the round starts or it is placed "
 				"Running), on_input(c, input, value, by), on_use(c, by), "
 				"on_timer(c, name), on_params(c, changed), on_remove(c). c: c.id, "
@@ -35328,6 +35654,11 @@ struct Module: public interface::Module, public Interface
 					it != m_entities.end() && c < cs_.size() &&
 					c < it->second.comps.size(); c++)
 				cs_[c].set("state", it->second.comps[c].state);
+			// [KIT_ZONE_SHAPES] a zone's kind and shape
+			for(unsigned c = 0; it != m_entities.end() && it->second.has_pos &&
+					c < cs_.size() && c < it->second.comps.size(); c++)
+				if(!m_types[it->second.comps[c].type].zone.empty())
+					cs_[c].set("zone", zone_json(it->second, it->second.comps[c]));
 			kept.append(es.at(i));
 		}
 		s.set("entities", kept);
@@ -37831,7 +38162,10 @@ struct Module: public interface::Module, public Interface
 				"- In a type's Lua: c:params_of(type) reads the params of the "
 				"same entity's component of that type (a polygon's points), "
 				"current at each run: no copy of them kept, no on_params for "
-				"it. c.players (players = true) lists every "
+				"it. A zone = \"look\" type meets bodies by the entity's own look "
+				"(a spike hazard: a component with zone = \"look\" on the "
+				"spikes' kit/polygon, reacting in on_enter; under a kit/parallax "
+				"layer never met). c.players (players = true) lists every "
 				"scene's players, each p.scene theirs and p.away true outside the "
 				"component's own scene: a scene's run or HUD keeps to not p.away. "
 				"State per_player = true is a table by `by` (\"player:<id>\"): "

@@ -186,6 +186,21 @@ namespace interface
 //                               position parameter gives (64 cells at most)
 //   zone = "<param>"         -- the box of cells, the same way, that
 //                               on_enter/on_leave watch
+//                            -- [KIT_ZONE_SHAPES] zone = "look": the entity's
+//                               own look as drawn and turned, followed at
+//                               once through a reshape or a move (no copy):
+//                               a kit/polygon's outline over its depth, a
+//                               box look (a kit/part's, turned by its
+//                               rotation; its state's `when` over it), a
+//                               sphere of equal sides. simplified: a wedge
+//                               and an uneven sphere are their boxes. A spike
+//                               hazard is a component of its own with zone =
+//                               "look" on the spikes' polygon, reacting in
+//                               on_enter. An entity with no look, or under a
+//                               kit/parallax layer (drawn offset, never met),
+//                               has nobody in it. Nothing of a zone runs on
+//                               the clients. get_state's "zone": its kind,
+//                               shape and bounds, who is in it
 //   voxel_box = "<param>"    -- ([KIT_VOXEL_STATES]) the box of cells, the
 //                               same way (16 a side at most), that
 //                               c:set_voxels writes and the editor's
