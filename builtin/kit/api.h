@@ -198,8 +198,14 @@ namespace interface
 //                               "look" on the spikes' polygon, reacting in
 //                               on_enter. An entity with no look, or under a
 //                               kit/parallax layer (drawn offset, never met),
-//                               has nobody in it. Nothing of a zone runs on
-//                               the clients. get_state's "zone": its kind,
+//                               has nobody in it. A body is met by its
+//                               movement's s.spheres, else a walker's body
+//                               box (movement.zone = "box": kit/walker,
+//                               kit/click_to_move), else its point (a seat's
+//                               holder, a bot, an app's own movement): box
+//                               zones the same way (client_lua/move.lua's
+//                               header). Nothing of a zone runs on the
+//                               clients. get_state's "zone": its kind,
 //                               shape and bounds, who is in it
 //   voxel_box = "<param>"    -- ([KIT_VOXEL_STATES]) the box of cells, the
 //                               same way (16 a side at most), that
@@ -909,7 +915,8 @@ namespace interface
 // (set_peer: the first time, or as another name; [KIT_SCENE_PACKAGES] one
 // with no position on the root: in any scene, each scene they come into
 // too); on_enter/on_leave as a
-// player's position (the cell it rounds to) comes into or leaves its zone.
+// player's position (the cell it rounds to) comes into or leaves its zone
+// ([KIT_ZONE_SHAPES] or its body's spheres or box: as zone's, above).
 //
 // Clients act, components react: a client's packet "kit:use" (an entity's
 // id) reaches the entity's usable components if the app placed the peer

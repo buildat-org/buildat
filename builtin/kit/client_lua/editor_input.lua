@@ -2976,6 +2976,19 @@ local function draw()
 	NT.pf.draw(dbg)
 	NT.pg.draw(dbg)
 	NT.sym_draw(dbg)
+	-- [KIT_ZONE_SHAPES] The Front view: the body's spheres (its movement's, a
+	-- bike's wheels and head) as the zones meet them, circles in the plane.
+	-- simplified: this builder's own body's (its predicted state; the others'
+	-- spheres are not sent to the clients)
+	local sph = S.view == "front" and M.body_spheres and M.body_spheres() or {}
+	for _, c in ipairs(sph) do
+		dbg:AddCircle(magic.Vector3(c[1], c[2], c[3]), magic.Vector3(0, 0, 1), c[4],
+				magic.Color(0.3, 0.75, 1), 24, false)
+	end
+	if #sph ~= (E.spheres_drawn or 0) then
+		E.spheres_drawn = #sph
+		log:info("kit editor: the body's spheres drawn: " .. #sph)
+	end
 	-- The round's own entities, orange (players are drawn by the app)
 	for _, e in ipairs(made()) do
 		if e.pos and e.kind ~= "player" then

@@ -1602,6 +1602,27 @@ function M.body_pos()
 	return C.draw and magic.Vector3(C.draw[1], C.draw[2], C.draw[3]) or nil
 end
 
+-- [KIT_ZONE_SHAPES] The body's spheres as the zones meet them (its movement's
+-- s.spheres from the feet, 8 at most): {{x, y, z, r}...} in the world as drawn
+function M.body_spheres()
+	local s, out = C.s, {}
+	if not C.draw or type(s) ~= "table" or type(s.spheres) ~= "table" then
+		return out
+	end
+	for i, c in ipairs(s.spheres) do
+		local x, y, z, r = type(c) == "table" and tonumber(c[1]), type(c) == "table" and
+				tonumber(c[2]), type(c) == "table" and tonumber(c[3]),
+				type(c) == "table" and tonumber(c[4])
+		if i > 8 then
+			break
+		end
+		if x and y and z and r and r > 0 then
+			out[#out + 1] = {C.draw[1] + x, C.draw[2] + y, C.draw[3] + z, r}
+		end
+	end
+	return out
+end
+
 -- [KIT_SPECTATE_CAMERA] The feet the camera follows (the body's, a watched
 -- player's, a camera_target's less half a body); nil before the first view
 function M.camera_follows()

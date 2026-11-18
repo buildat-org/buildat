@@ -43,8 +43,10 @@
 #      body put by its movement's params (local/zprobe): c:params_of reads
 #      the polygon it is on, a reshape's points at once, a copy; zone =
 #      "look" on a U polygon: met in its outline, not in its notch, moved
-#      with it, never under a kit/parallax; get_state's zone kind, shape,
-#      bounds and who is in it.
+#      with it, never under a kit/parallax; a gem's cells met by a wheel
+#      (s.spheres) with the point outside, by the point, by a walker's body
+#      box (movement.zone "box"); get_state's zone kind, shape, bounds and
+#      who is in it; play_input's body shape.
 #   util/kit_agent_tools_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -300,17 +302,20 @@ TICKER = '''return {
 	end,
 }
 '''
-# [KIT_ZONE_SHAPES] a body put where its params say; a hazard on a
-# polygon's look reading its points; a gem's box of cells
+# [KIT_ZONE_SHAPES] a body put where its params say, wheels or not (zwalk:
+# movement.zone "box", its body box); a hazard on a polygon's look reading
+# its points; a gem's box of cells
 ZPROBE = '''return {
 	version = 1,
 	root = true,
 	about = {what = "The check's body, put where its params say."},
 	params = {x = {type = "number", default = 0, min = -500, max = 500},
-		y = {type = "number", default = 2, min = -500, max = 500}},
-	movement = {body = {r = 0.3, h = 1, eye = 0.8}},
+		y = {type = "number", default = 2, min = -500, max = 500},
+		wheels = {type = "bool", default = false}},
+	movement = {body = {r = 0.3, h = 1, eye = 0.8}%s},
 	step = function(s, i, dt, w, p)
 		s.pos, s.vel = {p.x, p.y, 0}, {0, 0, 0}
+		s.spheres = p.wheels and {{-0.6, 0.36, 0, 0.36}, {0.6, 0.36, 0, 0.36}} or nil
 	end,
 }
 '''
@@ -577,15 +582,18 @@ elif phase == "zones":
     rpc("initialize", init)
     to_start()
     call("new_scene", {"name": "zones"})
-    for name, src in (("zprobe", ZPROBE), ("zhaz", HAZ), ("zgem", GEM)):
+    for name, src in (("zprobe", ZPROBE % ""), ("zwalk", ZPROBE % ', zone = "box"'),
+            ("zhaz", HAZ), ("zgem", GEM)):
         call("put_type", {"name": name, "source": src})
     d = {t["name"]: t for t in rpc("tools/list")["result"]["tools"]}["put_type"]["description"]
-    for w in ('c:params_of(type)', 'or "look" (the entity\'s own look'):
+    for w in ('c:params_of(type)', 'or "look" (the entity\'s own look', 's.spheres = {{x, y, z, r}...}',
+            'movement.zone = "box"'):
         assert w in d, (w, d)
     call("place", {"type": "kit/spawner", "pos": [0, 2, 0], "params": {"players": True}})
-    call("place", {"type": "kit/controls", "pos": [0, 0, 0], "on": "scene",
-        "params": {"movement": "local/zprobe"}})
+    CT = placed(call("place", {"type": "kit/controls", "pos": [0, 0, 0], "on": "scene",
+        "params": {"movement": "local/zprobe"}}))
     PR = placed(call("place", {"type": "local/zprobe", "pos": [0, 0, 0], "on": "scene"}))
+    PW = placed(call("place", {"type": "local/zwalk", "pos": [0, 0, 0], "on": "scene"}))
     # A U: its notch (x 1 to 2, y 1 to 3) inside its box, outside its outline
     U = [[0, 0], [3, 0], [3, 3], [2, 3], [2, 1], [1, 1], [1, 3], [0, 3]]
     P = placed(call("place", {"type": "kit/polygon", "pos": [20, 1, 0], "params": {"points": U}}))
@@ -622,7 +630,7 @@ elif phase == "zones":
     call("set_param", {"id": P, "param": "points", "value": U})
     print("   params_of: the polygon's points, again after a reshape")
     # The body, by its movement's params; its place (the feet a cell's
-    # middle up) as play_input answers it
+    # middle up) and its shape as play_input answers them
     said, body = join()
     assert body["scene"] == "zones", body
     def at(x, y):
@@ -641,7 +649,8 @@ elif phase == "zones":
         wait(lambda: (lambda st: (st["n"], st["out"]) == (n, out))(comp(i, c)["state"]),
             "entity %d's zone: %d in, %d out" % (i, n, out))
     # (2) zone = "look" on the U: its notch is not in it, its outline is
-    put(PR, 21.5, 2.5)
+    b = put(PR, 21.5, 2.5)
+    assert b["shape"] == {"kind": "point"}, b
     still(P, 1, 0, 0)
     put(PR, 20.5, 2)
     comes(P, 1, 1, 0)
@@ -664,6 +673,27 @@ elif phase == "zones":
     still(P, 1, 2, 2)
     put(PR, 0, 2)
     print("   zone = \"look\": the U's outline met, its notch not; moved with it; not under a layer")
+    # (3) a box zone (the gem's cells, x 59.5 to 60.5) by a wheel, the point
+    # outside; the point as before; a walker by its body box
+    put(PR, 59.2, 0.6)
+    still(G, 0, 0, 0)
+    b = put(PR, 59.2, 0.6, wheels=True)
+    comes(G, 0, 1, 0)
+    sh = played({"seconds": 0.1})["shape"]
+    assert sh == {"kind": "spheres", "spheres": [[58.6, 0.96, 0, 0.36], [59.8, 0.96, 0, 0.36]]}, sh
+    put(PR, 0, 2, wheels=False)
+    comes(G, 0, 1, 1)
+    put(PR, 59.8, 0.6)
+    comes(G, 0, 2, 1)
+    put(PR, 0, 2)
+    comes(G, 0, 2, 2)
+    call("set_param", {"id": PW, "params": {"x": 59.25, "y": 0.6}})
+    call("set_param", {"id": CT, "param": "movement", "value": "local/zwalk"})
+    at(59.25, 0.6)
+    comes(G, 0, 3, 2)
+    sh = played({"seconds": 0.1})["shape"]
+    assert sh == {"kind": "box", "lo": [58.951, 0.601, -0.299], "hi": [59.549, 1.599, 0.299]}, sh
+    print("   a gem met by a wheel (its point outside), by the point, by a walker's box")
     assert "Your body is gone" in call("play_leave")
     call("stop")
 elif phase == "heightmap":

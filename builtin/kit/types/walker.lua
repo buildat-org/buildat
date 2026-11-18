@@ -33,7 +33,8 @@ return {
 		what = "A movement: players walk with the keys and jump.",
 	},
 	root = true,
-	movement = {body = BODY, touch = "stick"},
+	-- [KIT_ZONE_SHAPES] zones meet its body box, not its point
+	movement = {body = BODY, touch = "stick", zone = "box"},
 	params = {
 		speed = {cat = "physics", type = "number", default = 6, min = 0,
 			max = 50},
