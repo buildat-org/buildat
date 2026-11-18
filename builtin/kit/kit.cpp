@@ -1584,6 +1584,9 @@ struct Module: public interface::Module, public Interface
 				&Module::on_camera_ready);
 		sub(m_server, "network:packet_received/kit:play_done",
 				&Module::on_play_done);
+		// [KIT_CLIENT_REACT] (4)
+		sub(m_server, "network:packet_received/kit:part_failed",
+				&Module::on_part_failed);
 		sub(m_server, "network:packet_received/kit:package",
 				&Module::on_package);
 		// [KIT_SCENE_PACKAGES] a scene added from a file or an Aitta
@@ -20315,6 +20318,54 @@ struct Module: public interface::Module, public Interface
 		m_log_dirty.insert(id);
 	}
 
+	// [KIT_CLIENT_REACT] (4) A client part's handler failed on a client
+	// (module.lua's call(), the first failure of that part on that entity
+	// there): "kit:part_failed" {id, type, handler, error} into the entity's
+	// log (get_log, a builder's editor Log), saying whose client.
+	// PART_FAILS_A_MINUTE a client at most, the rest dropped
+	static const int PART_FAILS_A_MINUTE = 10;
+	std::map<size_t, std::pair<int64_t, int>> m_part_fails;
+	void on_part_failed(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		auto &rate = m_part_fails[peer];
+		const int64_t now = interface::os::time_us();
+		if(now - rate.first > 60000000)
+			rate = {now, 0};
+		if(++rate.second > PART_FAILS_A_MINUTE)
+			return;
+		SessionScope sc(*this, session_of_peer(peer));
+		const json::Value j = packet.data.size() <= 2048 ?
+				json::load_string(packet.data.c_str()) : json::null();
+		auto pi = m_peers.find(peer);
+		const json::Value &iv = j.is_object() ? j.get("id") : json::null();
+		auto e = iv.is_number() && iv.as_number() >= 0 && iv.as_number() < 9e15 ?
+				m_entities.find((uint64_t)iv.as_number()) : m_entities.end();
+		const ss_ type = j.is_object() ? jstr(j, "type") : "";
+		bool has = false;
+		if(e != m_entities.end())
+			for(const Instance &in : e->second.comps)
+				has = has || in.type == type;
+		ss_ handler = j.is_object() ? jstr(j, "handler").substr(0, 16) : "";
+		if(pi == m_peers.end() || !has ||
+				handler.find_first_not_of("abcdefghijklmnopqrstuvwxyz_") !=
+				ss_::npos){
+			log_v(MODULE, "A client part's failure from peer %zu not taken",
+					peer);
+			return;
+		}
+		ss_ err = cut_utf8(jstr(j, "error"), 300);
+		for(char &c : err)
+			if((unsigned char)c < 32)
+				c = ' ';
+		// (the camera still: before it plays, drawing for get_view)
+		const ss_ line = "the client part of "+type+": "+handler+" failed on "+
+				(pi->second.name == accounts::CAMERA_NAME ? ss_("the server's "
+				"camera") : pi->second.name+"'s client")+": "+err;
+		log_i(MODULE, "Entity %s: %s", cs(itos(e->first)), cs(line));
+		add_log(e->first, line);
+	}
+
 	// The log of the entity a builder has selected, to them: whole as they
 	// select it, then as it grows
 	void send_log(size_t peer)
@@ -31434,6 +31485,7 @@ struct Module: public interface::Module, public Interface
 			m_cam.play_agent = 0;
 		}
 		m_local_peers.erase(old.info.id);
+		m_part_fails.erase(old.info.id);
 		m_watches.erase(old.info.id);
 		m_pub_open.erase(old.info.id);
 		// [KIT_SESSIONS_1] from their session's round; a guest's entity
@@ -31908,7 +31960,8 @@ struct Module: public interface::Module, public Interface
 				""},
 			{"get_log", "=log", "An entity's log, the last 50 lines: what its "
 				"components logged (c:log) and what came to it, with the game "
-				"clock's minutes and seconds.",
+				"clock's minutes and seconds; its client part's first failure "
+				"on each client (which handler, the error, whose client).",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
 				"required": ["id"]})J", ""},
 			// [KIT_AGENT_VISUALS] 2 (agent_view())

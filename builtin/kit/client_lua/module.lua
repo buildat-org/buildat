@@ -248,7 +248,10 @@ local function drop_look(n)
 end
 
 -- A client part's handler, protected: one that fails is left off for
--- that entity, logged
+-- that entity, logged, and ([KIT_CLIENT_REACT] (4)) told to the server
+-- ("kit:part_failed" {id, type, handler, error}: the entity's log, a
+-- builder's editor Log; the server bounds how many). simplified: an old
+-- part's on_remove as a new one replaces it is not told (its type unknown)
 local function call(n, part, fn, ...)
 	local f = part[fn]
 	if type(f) ~= "function" or (n.failed and n.failed[part]) then
@@ -258,8 +261,18 @@ local function call(n, part, fn, ...)
 	if not ok then
 		n.failed = n.failed or {}
 		n.failed[part] = true
+		-- Its place as the part's (eval names the chunk as this file).
+		-- simplified: an error inside this file's own e: functions is
+		-- named so too
+		local t = ""
+		for name, p in pairs(P.parts) do
+			t = p == part and name or t
+		end
+		err = tostring(err):gsub('^%[string "[^"]*"%]:', t .. ".client:", 1)
 		log:warning("kit: entity " .. tostring(n.e.id) .. "'s client part " ..
-				fn .. ": " .. tostring(err))
+				fn .. ": " .. err)
+		buildat.send_packet("kit:part_failed", network.write_json({
+				id = n.e.id, type = t, handler = fn, error = err:sub(1, 300)}))
 	end
 end
 
