@@ -17155,6 +17155,10 @@ struct Module: public interface::Module, public Interface
 			set_timer(e, in, name, player, s, r.by, own ? r.timer_due : 0);
 		}
 		const ss_ who = player_of(r.by);
+		// [KIT_BODY_VARS] c:body_var (before a teleport: its put has them)
+		const json::Value &bvars = fx.get("body_var");
+		for(unsigned i = 0; i < bvars.size(); i++)
+			body_var_fx(e, r.comp, r.by, bvars.at(i));
 		const json::Value &tp = fx.get("teleport");
 		if(tp.is_array()){
 			// [KIT_GUIDE_BOTS_2] a bot's run: the bot
@@ -20694,6 +20698,66 @@ struct Module: public interface::Module, public Interface
 		b.speed = f;
 	}
 
+	// [KIT_BODY_VARS] c:body_var(player, key, value): a value in the body's state
+	// (s.vars.<key>) from now on, so a movement's step reads it on the server and
+	// in the client's prediction alike: it goes with each state the server sends
+	// (kit:body), the client's steps since re-stepped with it. Until another
+	// call (nil clears), Stop or the body's going; kept over a put. A player it
+	// reaches, as c:speed's. Bounded: MAX_BODY_VARS keys of 1 to 32 letters,
+	// digits or _ (not a digit first), each a number, a boolean or a string of
+	// at most 64 bytes. s is {player, key[, value]}
+	static const size_t MAX_BODY_VARS = 16;
+	void body_var_fx(const Entity &e, size_t comp, const ss_ &by,
+			const json::Value &s)
+	{
+		const json::Value &who = s.at(0u), &k = s.at(1u), &v = s.at(2u);
+		const uint64_t pid = who.is_string() ? player_id(who.as_string()) :
+				who.is_number() && who.as_number() > 0 ?
+				(uint64_t)who.as_number() : 0;
+		const ss_ key = k.is_string() ? k.as_string() : ss_();
+		bool key_ok = !key.empty() && key.size() <= 32 &&
+				!(key[0] >= '0' && key[0] <= '9');
+		for(char ch : key)
+			key_ok = key_ok && (ch == '_' || (ch >= 'a' && ch <= 'z') ||
+					(ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9'));
+		const bool clear = v.is_undefined() || v.is_null();
+		auto pi = m_entities.find(pid);
+		ss_ why;
+		if(!key_ok)
+			why = "a key of 1 to 32 letters, digits or _";
+		else if(!clear && !(v.is_true() || v.is_false() ||
+				(v.is_number() && std::isfinite(v.as_number())) ||
+				(v.is_string() && v.as_string().size() <= 64)))
+			why = "a value a number, a boolean or a string of 64 bytes at most";
+		else if(pi == m_entities.end() || pi->second.kind != "player")
+			why = "no player";
+		else if(!reach(e, comp, by).count(pid))
+			why = "not a player it reaches";
+		const size_t peer = why.empty() ? peer_of_player(pid) : 0;
+		if(why.empty() && (!peer || !m_host.controls))
+			why = "they are not here";
+		Body *b = why.empty() ? &m_bodies[peer] : nullptr;
+		if(b && !clear && b->vars.get(key).is_undefined() &&
+				b->vars.size() >= MAX_BODY_VARS)
+			why = itos(MAX_BODY_VARS)+" keys a body at most";
+		if(!why.empty()){
+			add_log(e.id, "body_var "+(who.is_string() ? who.as_string().substr(0, 64) :
+					itos(pid))+" "+key.substr(0, 32)+" refused: "+why);
+			return;
+		}
+		const json::Value &was = b->vars.get(key);
+		if(clear ? was.is_undefined() :
+				(!was.is_undefined() && was.stringify() == v.stringify()))
+			return;
+		if(clear)
+			b->vars.del_key(key);
+		else
+			b->vars.set(key, v.deepcopy());
+		log_i(MODULE, "%s's body var %s = %s", cs(pi->second.name), cs(key),
+				cs(clear ? ss_("nil") : v.stringify()));
+		with_vars(*b);
+	}
+
 	// [KIT_VEHICLE_MOVEMENTS] c:set_param(id, type, param, value): a parameter of an
 	// entity's component it reaches, from now until Stop (play's; the row keeps its
 	// own). Checked as an edit's. A movement's go into its next step: a steered one's
@@ -22908,6 +22972,8 @@ struct Module: public interface::Module, public Interface
 		double look_yaw = 0;
 		// [KIT_CTF] c:speed's factor on the movement's `speed`
 		double speed = 1;
+		// [KIT_BODY_VARS] c:body_var's values: the state's `vars` (with_vars())
+		json::Value vars = json::object();
 		// [KIT_PLAYER_MODEL] the last input's view pitch (degrees, down
 		// positive), the client's count of its swings and its digging (1)
 		// or not; the pose last set on the player's node
@@ -22925,6 +22991,19 @@ struct Module: public interface::Module, public Interface
 		bool plane_h = false;
 	};
 	static constexpr int64_t SETTLE_US = 500000;
+	// [KIT_BODY_VARS] The state's `vars` the body's own (a step's change to them
+	// undone; none: no key), state_json with it
+	void with_vars(Body &b)
+	{
+		if(!b.state.is_object() || (!b.vars.size() &&
+				b.state.get("vars").is_undefined()))
+			return;
+		if(b.vars.size())
+			b.state.set("vars", b.vars.deepcopy());
+		else
+			b.state.del_key("vars");
+		b.state_json = b.state.stringify();
+	}
 	ss_ settle_json(const Body &b) const
 	{
 		return interface::os::time_us() < b.settle_until ? ",\"settle\":true" : "";
@@ -23563,6 +23642,7 @@ struct Module: public interface::Module, public Interface
 			if(b.state.get("vel").is_array() && b.state.get("vel").size() == 3)
 				b.state["vel"].set_at(k, 0.0);
 		}
+		with_vars(b); // [KIT_BODY_VARS] kept over a put
 		b.state = json::load_string(b.state.stringify().c_str());
 		b.state_json = b.state.stringify();
 		b.put = true;
@@ -26716,6 +26796,7 @@ struct Module: public interface::Module, public Interface
 					if(ev.is_array() && ev.size() && m_session.running)
 						movement_events(b.type, pi->second.name, pi->second.scene, ev);
 				}
+				with_vars(b);
 				stepped = true;
 			}
 			if(!stepped)
@@ -26928,8 +27009,10 @@ struct Module: public interface::Module, public Interface
 		for(auto &bp : m_bodies){
 			if(bp.second.seat)
 				unseat(bp.first, bp.second);
-			// [KIT_CTF] c:speed's factors gone
+			// [KIT_CTF] c:speed's factors gone, [KIT_BODY_VARS] c:body_var's
 			bp.second.speed = 1;
+			bp.second.vars = json::object();
+			with_vars(bp.second);
 		}
 		for(auto &h : m_seat_home){
 			auto it = m_entities.find(h.first);
@@ -31996,7 +32079,8 @@ struct Module: public interface::Module, public Interface
 				"inputs), its comments (builders' notes); whether the round is "
 				"Running, each component's state then; round: its state "
 				"(Running, Ended), who started it, its phase (ended; playing; "
-				"with a kit/lobby lobby, playing or over, each player's); your "
+				"with a kit/lobby lobby, playing or over, each player's; bodies: "
+				"each player's body's c:body_var values, by its by); your "
 				"scene and the scenes; scenes_from: where each scene's "
 				"kit/controls, kit/game_rules and kit/environment come from "
 				"(own, the scene it is under that has one, root or none); how "
@@ -32135,7 +32219,8 @@ struct Module: public interface::Module, public Interface
 				"already in another scene, the body moves to yours. The round "
 				"must be Running (start). The first call may answer that the "
 				"camera is starting or on its way: call again. One agent plays "
-				"at a time.",
+				"at a time. Its answer names the body's by (\"player:<id>\"): "
+				"per_player state's key, not the body's name.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"play_input", "play_input", "Your body's input for a time, as a "
 				"player's client sends it (its keys predicted and all): keys held "
@@ -32144,7 +32229,8 @@ struct Module: public interface::Module, public Interface
 				"pitch to look first (degrees as get_view's), jump, use (an "
 				"entity's id, as a click on it). seconds 0.1 to 4 (1). Answers "
 				"your body's place before and after, how far it moved, its "
-				"components' states (health, score, inventory...), alive, and "
+				"components' states (health, score, inventory...), alive, its by "
+				"and its vars (c:body_var's), and "
 				"the outputs entities emitted meanwhile (by \"you\" when your "
 				"body did it), the screen's buttons (id, label; a list's rows); "
 				"picture: also a picture of its own view at the end (width, "
@@ -32575,7 +32661,11 @@ struct Module: public interface::Module, public Interface
 				"movement (a seat's: seat = true, usable = true; or kit/controls' "
 				"movement): movement = {body = {r = 0.45, h = 1.7, eye = 1.55}, "
 				"camera = \"chase\"} and step = function(s, i, dt, w, p): s its "
-				"state (s.pos {x, y, z} the feet, s.vel, kept between steps), i "
+				"state (s.pos {x, y, z} the feet, s.vel, kept between steps; "
+				"s.vars what a component's c:body_var(by, key, value) set on the "
+				"body: a number, boolean or short string, 16 keys, read only, the "
+				"server's on both sides: a step reacts to the run's state, as "
+				"a finish open), i "
 				"the input (i.f, i.r forward and right -1...1, i.jump 1 held, "
 				"i.yaw degrees, i.out_of_play true while out of play: dead "
 				"waiting, a kit/lobby's lobby or result), w the world (w:move({x, y, z, r, h}, dx, dy, dz, "
@@ -35284,6 +35374,13 @@ struct Module: public interface::Module, public Interface
 		auto e = m_entities.find(p.player);
 		double w[3] = {p.pos[0], p.pos[1], p.pos[2]};
 		r.set("name", p.name);
+		// [KIT_BODY_VARS] (2) the body's by (per_player state's key; not its
+		// name) and its c:body_var values
+		if(p.player)
+			r.set("by", "player:"+itos(p.player));
+		auto bi = m_bodies.find(m_cam.peer);
+		if(bi != m_bodies.end() && bi->second.vars.size())
+			r.set("vars", bi->second.vars);
 		r.set("scene", p.scene);
 		if(e != m_entities.end()){
 			r.set("entity", (int64_t)e->first);
@@ -35514,10 +35611,15 @@ struct Module: public interface::Module, public Interface
 			m_cam.used = now;
 			log_i(MODULE, "The server's camera plays for %s's agent", cs(account));
 			failed = false;
+			// [KIT_BODY_VARS] (2) its by named: not its name, not session.by
+			const json::Value pb = play_body();
 			return (moved.empty() ? ss_() : "Your body left the scene "+moved+
 					". ")+"You play a body (a guest's, gone when you leave): "+
-					play_body().stringify()+". play_input moves it; play_leave ends "
-					"it, as do "+itos(PLAY_IDLE_US / 1000000)+" s unused";
+					pb.stringify()+". play_input moves it; play_leave ends it, as "
+					"do "+itos(PLAY_IDLE_US / 1000000)+" s unused. Your body is "+
+					jstr(pb, "by", "?")+" (its by: per_player state is keyed by it, "
+					"c:speed and c:body_var take it; not its name \""+
+					jstr(pb, "name")+"\" nor a draft's session.by)";
 		}
 		// play_input
 		if(m_cam.play != account)
@@ -35906,6 +36008,19 @@ struct Module: public interface::Module, public Interface
 		round.set("phase", phase);
 		if(lobby.size())
 			round.set("lobby", lobby);
+		// [KIT_BODY_VARS] the bodies with c:body_var's values, by their by
+		json::Value bodies = json::object();
+		for(auto &bp : m_bodies){
+			auto pp = m_peers.find(bp.first);
+			if(!bp.second.vars.size() || pp == m_peers.end() || !pp->second.player)
+				continue;
+			json::Value o = json::object();
+			o.set("name", pp->second.name);
+			o.set("vars", bp.second.vars);
+			bodies.set("player:"+itos(pp->second.player), o);
+		}
+		if(bodies.size())
+			round.set("bodies", bodies);
 		int64_t rounds = 0;
 		for(auto &gs : m_sessions)
 			rounds += !gs.second->draft && !gs.second->bench;
@@ -38510,7 +38625,16 @@ struct Module: public interface::Module, public Interface
 				"itself, at once on the client too. Out of play (dead and "
 				"waiting, a kit/lobby's lobby or result) a step's i.out_of_play "
 				"is true (its keys none): a bike's step can hold it still under its result "
-				"card; the lobby's keep_own_body keeps the player's own body "
+				"card. c:body_var(by, key, value) sets s.vars.<key> on a player's "
+				"body (16 keys of 32 characters, a number, boolean or string of "
+				"64 bytes; nil clears; until Stop or the body goes, kept over a "
+				"teleport): its step reads it on the server and in the client's "
+				"prediction alike (the client re-steps with the server's), so "
+				"local/crag_bike holds itself on the finish line (a kit/polygon "
+				"surface \"finish\") while crag_run's finish_open, set with the "
+				"last gem: no freeze from the server, no rewind (simplified: a "
+				"value set under a round trip before it is needed still rewinds). "
+				"The lobby's keep_own_body keeps the player's own body "
 				"drawn for them, the camera on it, hidden from the others. "
 				"A client part's on_enter(e) and on_leave(e) run on the "
 				"player's own client as their predicted body meets the zone "
@@ -38557,7 +38681,10 @@ struct Module: public interface::Module, public Interface
 				"\"me\" sends as your body, as a player's name as theirs. The "
 				"body is a player's (its by \"player:<id>\") and its client "
 				"predicts it as a player's does: per_player state, client "
-				"parts and the movement's draw run there as for a player.\n"
+				"parts and the movement's draw run there as for a player. "
+				"play_join names it (\"Your body is player:<id>\"): per_player "
+				"state is keyed by that by, not by the body's name "
+				"(\"<account>'s agent\") nor a draft's session.by.\n"
 				// [KIT_AGENT_FEEDBACK_1117] 11
 				"- get_history: who changed what and when, since a time.\n"
 				// [KIT_AGENT_NEXT_2]

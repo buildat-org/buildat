@@ -605,7 +605,10 @@ namespace interface
 //   [KIT_CLIENT_REACT] (10) Out of play (dead and waiting to respawn, a
 //   kit/lobby's lobby or result) a movement's step gets i.out_of_play = true,
 //   its keys none, on the server's steps and the client's prediction alike
-//   (move.lua's header; c:speed(by, 0) stays the freeze). (9) A kit/lobby's
+//   (move.lua's header; c:speed(by, 0) stays the freeze). [KIT_BODY_VARS]
+//   s.vars: what c:body_var set on the body (read only; nil: none), the
+//   server's in the client's re-steps too: a step decides by the run's
+//   state itself (a finish open) with no rewind. (9) A kit/lobby's
 //   keep_own_body: the player's own body stays drawn for them out of play,
 //   their camera on it (no spectating), hidden from the others as ever (the
 //   pose's flag 8, players.lua).
@@ -943,6 +946,22 @@ namespace interface
 //   their client's prediction ("kit:controls"' parameters) alike. Until
 //   another call, Stop, or their body's going (they leave, another
 //   session). 64 a run.
+//   [KIT_BODY_VARS] c:body_var(player, key, value): a player it reaches
+//   (an id or a by, as c:speed's), on an app with Kit's controls: their
+//   body's state has s.vars[key] = value from then on (nil clears), which
+//   their movement's step reads on the server's steps and in their
+//   client's prediction alike: it goes in each state the server sends
+//   (kit:body), and the client steps its inputs since again with it, so a
+//   rewind replays with the server's value. Until another call, Stop or
+//   their body's going; kept over a put (a teleport, a respawn). 16 keys
+//   a body, a key 1 to 32 letters, digits or _ (not a digit first), a
+//   value a number, a boolean or a string of 64 bytes at most: a bad key
+//   or value errs (as c:speed's factor), the 17th key, a player it does
+//   not reach or one not here are refused in its log. 64 a run. Crag
+//   Trial's run sets finish_open with a rider's last gem; the bike's step
+//   holds itself still on the finish line's polygon (surface "finish")
+//   while s.vars.finish_open. simplified: a value set less than a round
+//   trip before the step that needs it still rewinds the client.
 //   c:attach(player, {bone = name, offset = {x, y, z}})
 //   ([KIT_CARRY_ATTACH]): its own entity on a player it reaches (an id or
 //   a by), placed and in its scene: every client draws its look at the

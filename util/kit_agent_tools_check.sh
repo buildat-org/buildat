@@ -57,7 +57,11 @@
 #  10. [KIT_CLIENT_REACT] client parts on the agent's own client (the
 #      server's camera's log): its body's by "player:<id>" (met by a zone,
 #      try_input as me) and its per_player state (shared = true too) on
-#      its client (7); the movement's draw given the predicted state (8); two
+#      its client (7), [KIT_BODY_VARS] named in play_join's answer;
+#      c:body_var: 16 keys (the 17th refused) in get_state's round.bodies,
+#      play_input's body and the client's predicted state, bad keys and values
+#      erring, a player not here refused, cleared;
+#      the movement's draw given the predicted state (8); two
 #      parts passing a value through kit.shared (2); a part's on_add failing:
 #      in get_log and in kitboss's editor Log, its entity selected (4).
 #   util/kit_agent_tools_check.sh
@@ -453,7 +457,34 @@ return {draw = function(s, node)
 		said[k] = true
 		log:info("kit check: pmove draws a " .. k .. " body")
 	end
+	if s.vars and s.vars.k1 and not said.vars then
+		said.vars = true
+		log:info("kit check: pmove's predicted state has vars k1 " .. tostring(s.vars.k1))
+	end
 end}
+'''
+# [KIT_BODY_VARS] c:body_var on the body that set it off: 17 keys (one past
+# the bound), each cleared, a bad key or value (by its number), a player not
+# there
+PV = '''local BAD = {{"9x", 1}, {"a-b", 1}, {"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", 1},
+	{"k", {}}, {"k", "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"},
+	{"k", 0 / 0}, {"k", 1 / 0}}
+return {
+	version = 1,
+	about = {what = "The check's body vars."},
+	inputs = {fill = "none", clear = "none", bad = "number", nobody = "none"},
+	on_input = function(c, input, value, by)
+		if input == "fill" or input == "clear" then
+			for k = 1, 17 do
+				c:body_var(by, "k" .. k, input == "fill" and k or nil)
+			end
+		elseif input == "nobody" then
+			c:body_var("player:999999", "k1", 1)
+		else
+			c:body_var(by, BAD[value][1], BAD[value][2])
+		end
+	end,
+}
 '''
 if phase == "tools":
     hidden = {"set_builder", "list_games", "copy_game", "rename_game", "publish_log"}
@@ -898,7 +929,7 @@ elif phase == "client":
             return ""
     call("new_scene", {"name": "cparts"})
     for name, src, cl in (("pp", PP, PP_CL), ("pq", PQ, PQ_CL), ("pf", PF, PF_CL),
-            ("pmove", PMOVE, PMOVE_CL)):
+            ("pmove", PMOVE, PMOVE_CL), ("pv", PV, "")):
         call("put_type", {"name": name, "source": src, "client": cl})
     d = {t["name"]: t for t in rpc("tools/list")["result"]["tools"]}
     assert "client part's first failure" in d["get_log"]["description"], d["get_log"]
@@ -909,8 +940,13 @@ elif phase == "client":
     EP = placed(call("place", {"type": "local/pp", "pos": [0, 1, 0]}))
     EQ = placed(call("place", {"type": "local/pq", "pos": [3, 1, 0]}))
     EF = placed(call("place", {"type": "local/pf", "pos": [4, 1, 0]}))
+    EV = placed(call("place", {"type": "local/pv", "pos": [6, 1, 0]}))
     assert call("start") == "Running"
-    join()
+    # [KIT_BODY_VARS] (2) play_join names the body's by
+    said, body = join()
+    me = re.search(r"\. Your body is (player:\d+) \(its by: per_player state is "
+        r"keyed by it", said[-1]).group(1)
+    assert body["by"] == me, (body, me)
     # (7) the body's `by` is a player's: met by its zone, then tried as me;
     # its per_player state reaches its client
     def camsays(what, secs=20):
@@ -918,7 +954,7 @@ elif phase == "client":
     played({"seconds": 0.3})
     call("try_input", {"id": EP, "input": "set", "as": "me"})
     who = [v for o, v in tried(EP) if o == "who"]
-    assert len(who) == 1 and re.match(r"^player:\d+$", who[0]), who
+    assert who == [me], (who, me)
     camsays("kit: entity %d's client part: got met %s" % (EP, who[0]))
     camsays("kit: entity %d's client part: got set %s" % (EP, who[0]))
     print("   the body is %s: met, tried as me, its own state on its client" % who[0])
@@ -926,6 +962,36 @@ elif phase == "client":
     # predicted state (s.n, its steps' own), no other body there
     camsays("kit check: pmove draws a predicted body")
     assert "kit check: pmove draws a posed body" not in camlog()
+    # [KIT_BODY_VARS] (1) c:body_var: 16 keys on the body, the 17th refused;
+    # in get_state's round.bodies, play_input's body and the state its client
+    # predicts from; bad keys and values err, a player not here refused;
+    # cleared
+    call("try_input", {"id": EV, "input": "fill", "as": "me"})
+    def bodies():
+        return state(ids=[])["round"].get("bodies", {})
+    b = until(lambda: len(bodies().get(me, {}).get("vars", {})) == 16 and bodies()[me],
+        "16 body vars in get_state")
+    assert b == {"name": body["name"], "vars": {"k%d" % k: k for k in range(1, 17)}}, b
+    assert played({"seconds": 0.2})["vars"]["k16"] == 16
+    camsays("kit check: pmove's predicted state has vars k1 1")
+    for v in range(1, 8):
+        call("try_input", {"id": EV, "input": "bad", "value": v, "as": "me"})
+    call("try_input", {"id": EV, "input": "nobody", "as": "me"})
+    def vlog():
+        l = json.loads(call("get_log", {"id": EV}))
+        ok = (sum("body_var: a key of 1 to 32 letters" in x for x in l) == 3 and
+            sum("body_var: a value a number, a boolean" in x for x in l) == 4 and
+            any("body_var player:999999 k1 refused: no player" in x for x in l))
+        return l if ok else (time.sleep(0.3) and None)
+    l = until(vlog, "body_var's refusals in its log")
+    assert any(("body_var %s k17 refused: 16 keys a body at most" % me) in x for x in l), l
+    assert len(bodies()[me]["vars"]) == 16, bodies()
+    call("try_input", {"id": EV, "input": "clear", "as": "me"})
+    until(lambda: me not in bodies(), "the body vars cleared")
+    assert "vars" not in played({"seconds": 0.2})
+    print("   body vars on %s: 16 set (the 17th refused), in get_state, play_input "
+        "and its predicted state; 3 bad keys, 4 bad values, a player not here refused; "
+        "cleared" % me)
     # (2) kit.shared: pp's part wrote it, pq's read it
     camsays("kit: entity %d's client part: shared pp %d" % (EQ, EP))
     # (4) pf's on_add failed on this client: in its log, which client said
