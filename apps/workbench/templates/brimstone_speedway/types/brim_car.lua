@@ -22,8 +22,9 @@
 -- trade the speed they close at; while boosted a hard enough one is the
 -- event "ram" (value: the other's by). Each car is stepped apart (the
 -- server's batches in any order), so each takes the other's speed before
--- the contact (s.vel is that) and gives up its own share: a car pushed
--- along keeps up with the one pushing.
+-- the contact (s.vel is that) and gives up its own share, once each time
+-- the other has stepped (s.met): a car pushed along keeps up with the one
+-- pushing.
 -- Events (the movement's outputs, the race's inputs): lap, fire (Space
 -- pressed; value: the heading), smash (a wall hit hard; value: the speed into it), ram.
 -- Its state: s.c {x, z, vx, vz}, s.h the heading (radians from +z toward
@@ -150,6 +151,15 @@ return {
 		-- (s.vel: the speed before what it meets, the speed the other cars
 		-- meet: a car that steps after this one is still hit as hard)
 		local vx0, vz0 = c[3], c[4]
+		-- (a car's speed traded once a look at it: the server steps each car a
+		-- batch of inputs at a time against the others as they were, a client
+		-- sees them a round trip old; traded again each step, the one ramming
+		-- stopped dead on the standing one before its step took the knock.
+		-- s.met: the velocity each car in contact was last seen at.
+		-- simplified: the same velocity is the same look (a car's moves change
+		-- it), so a car standing exactly still and never stepped is met once)
+		local met = type(s.met) == "table" and s.met or {}
+		local seen = nil
 		for k, h in ipairs(w:circle(c[1], c[2], R)) do
 			if k > 4 then
 				break
@@ -163,7 +173,12 @@ return {
 				-- half of it and a fifth more, as equal weights bouncing a little)
 				local ov = body and h.info.vel or NOVEL
 				local vn = (c[3] - ov[1]) * nx + (c[4] - ov[2]) * ny
-				if vn < 0 then
+				local m = body and met[body]
+				if body then
+					seen = seen or {}
+					seen[body] = {ov[1], ov[2]}
+				end
+				if vn < 0 and not (m and m[1] == ov[1] and m[2] == ov[2]) then
 					local e = body and 0.6 or 1.3
 					c[3], c[4] = c[3] - nx * vn * e, c[4] - ny * vn * e
 					if body and v.boost and -vn > 6 then
@@ -176,6 +191,7 @@ return {
 				end
 			end
 		end
+		s.met = seen
 		-- The lap line: once a crossing, with the lap open
 		local on_line = surf == "finish"
 		if on_line and not s.on_line and v.lap_open then
