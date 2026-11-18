@@ -110,9 +110,16 @@ end
 
 -- [KIT_TOOLS_1] hands.lua's wheel picks in first person
 M.camera_mode = function() return camera_mode() end
--- [KIT_EDIT_VIEW] The editor's first view (nil: the controls not here yet)
+-- [KIT_EDIT_VIEW] The editor's first view (nil: the controls not here yet);
+-- [RACER_FEEL] (4) a plane game's auto is 2d
 function M.edit_view()
-	return C.ctl and (params().edit_view or "auto") or nil
+	local v = C.ctl and (params().edit_view or "auto")
+	return v == "auto" and M.plane_game() and "2d" or v or nil
+end
+-- [RACER_FEEL] (4) kit/controls' plane, level or upright: the editor's 2D view
+-- first, its right drag panning
+function M.plane_game()
+	return C.ctl ~= nil and (C.ctl.horizontal == true or tonumber(C.ctl.plane) ~= nil)
 end
 -- [KIT_CRAG_PLAYTEST_1] kit/controls' camera side, game-wide: the editor's
 -- 2D view is the Front view

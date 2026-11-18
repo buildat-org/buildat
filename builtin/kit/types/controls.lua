@@ -41,7 +41,7 @@
 -- chase follow it in place of the body, first_person looks at it; for the
 -- player who set it off, else everyone, `to` or not. [KIT_EDIT_VIEW]
 -- edit_view: the editor's view at a client's first edit mode (auto: the
--- editor's own, a remembered one; 2d, 3d; [KIT_CRAG_PLAYTEST_1] 2d is the
+-- editor's own, a remembered one, [RACER_FEEL] (4) with a plane 2d; 2d, 3d; [KIT_CRAG_PLAYTEST_1] 2d is the
 -- Front view where the camera is side), over the remembered,
 -- the builder's picks standing after it. Without it an app
 -- with Kit's controls walks with kit/walker in first person.

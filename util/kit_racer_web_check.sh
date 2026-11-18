@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-11-18)
-# covers: 3rdparty/Urho3D/Source/Urho3D/Graphics/OpenGL/OGLGraphics.cpp builtin/kit/client_lua/players.lua builtin/kit/client_lua/controls.lua apps/workbench/templates/brimstone_speedway/**
-# [RACER_FEEL] (1) Brimstone Speedway in Workbench's web client in
+# covers: 3rdparty/Urho3D/Source/Urho3D/Graphics/OpenGL/OGLGraphics.cpp builtin/kit/client_lua/players.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/controls.lua apps/workbench/templates/brimstone_speedway/**
+# [RACER_FEEL] (1), (4) Brimstone Speedway in Workbench's web client in
 # headless Firefox, webboss (the admin) New from it:
+#   - (4) the editor opens in the plan (a plane game's auto edit view: 2D),
+#     a right drag pans it ("panned the plan to"), still the plan;
 #   - (1) the time trial, the car driven weaving left and right: at
 #     each stop "event kit_players" says the car's movement body drawn
 #     (its CustomGeometries shown, the biggest's box over a square metre)
@@ -41,7 +43,10 @@ check_tmp kit_racer_web; t=$CHECK_TMP
  ["click", "Text", "Brimstone Speedway"], ["waitlog", "world_menu: template picked", 10],
  ["frames", 3], ["click", "Button", "Create"],
  ["waitlog", "kit editor: edit mode on", 120],
- ["frames", 10],
+ ["waitlog_any", "kit editor: the view is 2D", 20], ["frames", 10],
+ ["rdrag", 500, 350, 620, 400],
+ ["waitlog", "kit editor: panned the plan to", 10], ["frames", 3],
+ ["shot", "${OUT}/plan.png"],
  ["key", "F6"], ["waitlog", "kit: ui full screen [0-9]+ up", 20], ["frames", 10],
  ["click", "Button", "Time trial: The*"],
  ["waitlog", "GO!", 20], ["frames", 5],
@@ -78,4 +83,4 @@ for x in m:
 assert len(yaws) >= 3, f"the car not turned through 3 yaws: {[x[0] for x in m]}"
 print(f"ok: the car's body drawn at yaws {yaws}: {[x[0] for x in m]}")
 PY
-echo "PASS: Brimstone Speedway in Firefox: the car's body (a CustomGeometry without texcoords) drawn at every turn, no WebGL warning ($t/web)"
+echo "PASS: Brimstone Speedway in Firefox: the editor opened in the plan, a right drag panned it; the car's body (a CustomGeometry without texcoords) drawn at every turn, no WebGL warning ($t/web)"

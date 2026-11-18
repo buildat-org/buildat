@@ -27,6 +27,8 @@
 #   6. The editor's plan view: a kit/polygon drawn by clicks lies flat at the
 #      plane's height (one place op, pitch 90), its point dragged; the
 #      inspector's "Edit in 2D view" shows it in the plan view.
+#   7. [RACER_FEEL] (4) In the plan a right drag and a middle drag pan it,
+#      neither into 3D (kit_racer_web_check: the editor first in the plan).
 #   8. [RACER_FEEL] (2), (3) The zone's client part: kit.shake(2) in the
 #      frame it asked; 100 kit.effect bursts at once (a burst cap dropping
 #      some), 1100 kit.mark (1024 kept).
@@ -164,7 +166,7 @@ screenshot $t/top.png
 keypress F6
 wait_log 10000 kit editor: state:
 keypress F1
-wait_log 5000 kit editor: the view is 2D
+wait_log_any 5000 kit editor: the view is 2D
 click Button "Grid*"
 wait_log 5000 kit editor: grid 1/2
 click Button "Grid*"
@@ -221,6 +223,23 @@ wait_log 5000 kit editor: the inspector
 frames 3
 click Button "Edit in 2D view"
 wait_log 5000 kit editor: polygon $DRAWN in the plan view at
+frames 3
+mouse_pos 500 350
+frames 3
+mouse_down right
+frames 3
+mouse_pos 560 380
+frames 3
+mouse_pos 620 400
+frames 3
+mouse_up right
+wait_log 5000 kit editor: panned the plan to
+mouse_down middle
+frames 3
+mouse_pos 500 300
+frames 3
+mouse_up middle
+wait_log 5000 kit editor: panned the plan to
 frames 3
 quit
 EOF
@@ -321,6 +340,13 @@ grep -aq "An edit by kitboss: placed kit/polygon $DRAWN at " "$s" || fail "polyg
 grep -aq "set $DRAWN's kit/polygon points to" "$s" || fail "polygon $DRAWN's point not dragged ($s)"
 grep -aq "kit editor: polygon $DRAWN in the plan view at" "$c" || fail "the points row's plan view ($c)"
 echo "ok: a polygon drawn in the plan view lying flat at $at, its point dragged, the inspector's row back to the plan view"
+# 7. [RACER_FEEL] (4) A right drag and a middle one pan the plan, not into 3D
+pans=$(grep -aoP 'kit editor: panned the plan to \K[-0-9.]+,[-0-9.]+' "$c" | tr '\n' ' ')
+read -r p1 p2 <<< "$pans"
+[ -n "${p2:-}" ] && [ "$p1" != "$p2" ] || fail "not panned twice in the plan: $pans ($c)"
+sed -n "/polygon $DRAWN in the plan view at/,\$p" "$c" | grep -aq "the view is 3D" &&
+	fail "a drag in the plan went into 3D ($c)"
+echo "ok: a right drag panned the plan to $p1, a middle one to $p2"
 # 8. [RACER_FEEL] (2), (3) The zone's client part on_enter: kit.shake(2) the
 # frame it was asked; 100 kit.effect bursts (the rate's cap dropping the rest),
 # 1100 kit.mark (the ring keeps 1024)
@@ -336,5 +362,5 @@ fx=$(grep -aoP 'kit: effects: \K.*' "$c" | head -1)
 echo "$fx" | grep -qP '^\d+ particles live in \d+ bursts \((\d|[1-5]\d|6[0-4]) a client part.s\); client parts made ([1-9]\d+) particles, ([1-9]\d*) bursts dropped; 1024 marks kept of 1100 made' ||
 	fail "the client part's effects and marks: $fx ($c)"
 echo "ok: a client part's shake in its own frame ($f); its effects and marks: $fx"
-echo "PASS: kit/controls' horizontal plane: the body held at one height, flat polygon walls, a floor's surface, a flat look zone on the client and the server, the top_down camera's dead zone, kit/parallax along z, the plan view's polygon editing; a client part's shake, effects and marks"
+echo "PASS: kit/controls' horizontal plane: the body held at one height, flat polygon walls, a floor's surface, a flat look zone on the client and the server, the top_down camera's dead zone, kit/parallax along z, the plan view's polygon editing, the plan panned by a right or middle drag; a client part's shake, effects and marks"
 # vim: set noet ts=4 sw=4:
