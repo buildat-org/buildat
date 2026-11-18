@@ -555,6 +555,27 @@ function M.body_at(id)
 	return b and not b.hidden and b.at or nil
 end
 
+-- [KIT_TOP_DOWN] (8) The others' bodies as a movement.bodies meets them on this
+-- client: their last known places (the last sample, not drawn DELAY back) and the
+-- velocity of the last two, {x, z, r, vx, vz, by} each (move.lua's t.bodies).
+-- simplified: r this player's own body's (a scene's players share kit/controls'
+-- movement); a hidden one (seated, out of play) is none, as on the server
+function M.others_bodies(r)
+	local out = {}
+	for id, b in pairs(bodies) do
+		local s = b.samples
+		if id ~= P.you and not b.hidden and s and #s > 0 then
+			local a, z = s[#s], s[#s - 1]
+			local vx, vz = 0, 0
+			if z and a.t - z.t > 1e-3 then
+				vx, vz = (a.p.x - z.p.x) / (a.t - z.t), (a.p.z - z.p.z) / (a.t - z.t)
+			end
+			out[#out + 1] = {a.p.x, a.p.z, r, vx, vz, "player:" .. tostring(id)}
+		end
+	end
+	return out
+end
+
 -- ([KIT_LOBBY_OUT_OF_PLAY] in a lobby too, under its screen; [KIT_CLIENT_REACT]
 -- (9) not with the body kept: drawn, the camera on it)
 local kept_said = false

@@ -528,6 +528,24 @@ s3d = walk(pworld({ICE}), {pos = {-3, 0.55, 0}}, 30, {f = 0, r = -1, yaw = 0, ju
 assert(s3d.pos[1] < -4.5 and s3d.surface == "ice", "3D on the ice: " .. tostring(s3d.surface))
 print("ok: kit/polygon lying flat: its frame at pitch 90, -90 and turned; walls in the level plane either winding, one over the layer not met, the ice floor's surface and slide, w:under; w:circle and w:segment; the same bits twice; the plane off a slab a wall or a step, its top, the floor")
 
+-- [KIT_TOP_DOWN] (8) The other bodies: in a level plane (the server's snapshot,
+-- kit.cpp's bodies_lit()) w:circle meets them as circles, info.body their by and
+-- info.vel; none in a vertical plane or without them
+local OTHERS = {{3, 0, 1, 2, -1, "player:7"}}
+local wb = MV.snapshot{plane = 1, horizontal = true, bodies = OTHERS}
+local hb = wb:circle(1.5, 0, 1)
+assert(#hb == 1 and near(hb[1].depth, 0.5) and near(hb[1].nx, -1) and near(hb[1].ny, 0) and
+		hb[1].info.body == "player:7" and hb[1].info.vel[1] == 2 and hb[1].info.vel[2] == -1,
+		"a body met: " .. #hb)
+hb = wb:circle(3, 0.5, 1)
+assert(#hb == 1 and near(hb[1].depth, 1.5) and near(hb[1].ny, 1), "a body met off its middle")
+assert(#wb:circle(-0.5, 0, 1) == 0, "a body out of reach")
+assert(#wb:circle(3, 0, 1) == 1, "a body on the middle: out along +x")
+assert(#MV.snapshot{plane = 1, horizontal = true}:circle(1.5, 0, 1) == 0, "no bodies asked")
+assert(#MV.snapshot{plane = 1, bodies = OTHERS}:circle(1.5, 0, 1) == 0,
+		"no bodies in a vertical plane")
+print("ok: the other bodies in a level plane: met as circles, their by and velocity; none unasked or upright")
+
 -- What the client's pass costs: 300 zones (cells, boxes, polygons, spheres)
 -- built (module.lua builds one again as it moves or its state turns), and
 -- met by a bike's two wheels, a frame
