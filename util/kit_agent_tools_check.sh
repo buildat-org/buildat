@@ -761,13 +761,18 @@ elif phase == "zones":
     put(PR, 0, 2)
     print("   a polygon gem's when: its zone shrunk and moved with its look, whole again")
     # (10) out of play (a kit/lobby's lobby): the server's step's i.out_of_play
-    # (the probe 10 up), back in play down again
-    LB = placed(call("place", {"type": "kit/lobby", "pos": [0, 1, 0]}))
+    # (the probe 10 up), back in play down again; (9) keep_own_body: the
+    # server's line (the clients': util/kit_bike_check.sh)
+    LB = placed(call("place", {"type": "kit/lobby", "pos": [0, 1, 0],
+        "params": {"keep_own_body": True}}))
     call("try_input", {"id": LB, "input": "lobby", "as": "me"})
     at(0, 12)
     call("try_input", {"id": LB, "input": "play", "as": "me"})
     at(0, 2)
-    print("   out of play: i.out_of_play in the server's step")
+    srv = open(out + "/srv.log", errors="replace").read()
+    assert "kitboss's agent is out of play (a lobby), their own body kept" in srv, \
+        [l for l in srv.splitlines() if "out of play" in l][-3:]
+    print("   out of play: i.out_of_play in the server's step; keep_own_body's line")
     assert "Your body is gone" in call("play_leave")
     call("stop")
 elif phase == "heightmap":

@@ -402,6 +402,9 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 					b.samples = {}
 					log:info("kit: player " .. id .. "'s body drawn")
 				end
+				if b.hidden then
+					log:info("kit: player " .. id .. "'s body shown again")
+				end
 				b.hidden = false
 				-- (one watched is seen from its eyes; [KIT_SPECTATE_CAMERA] a
 				-- following camera's is framed)
@@ -499,6 +502,10 @@ function M.draw_players(own, yaw, pitch, h, show_own)
 				hooked(b, id, n, at, draw, shown)
 			elseif b then
 				show_body(b, false)
+				if not b.hidden then
+					log:info("kit: player " .. id .. "'s body hidden (" ..
+							(flags % 4 >= 2 and "in a seat" or "out of play") .. ")")
+				end
 				b.hidden = true
 				if b.mnode then
 					b.mnode:SetDeepEnabled(false)
@@ -548,9 +555,17 @@ function M.body_at(id)
 	return b and not b.hidden and b.at or nil
 end
 
--- ([KIT_LOBBY_OUT_OF_PLAY] in a lobby too, under its screen)
+-- ([KIT_LOBBY_OUT_OF_PLAY] in a lobby too, under its screen; [KIT_CLIENT_REACT]
+-- (9) not with the body kept: drawn, the camera on it)
+local kept_said = false
 function M.spectating()
-	return M.out_of_play ~= nil and M.out_of_play()
+	local kept = M.own_body_kept ~= nil and M.own_body_kept()
+	if kept ~= kept_said then
+		kept_said = kept
+		log:info("kit: out of play, your own body " .. (kept and "kept drawn" or
+				"no longer kept"))
+	end
+	return M.out_of_play ~= nil and M.out_of_play() and not kept
 end
 
 local function eye_of(id)

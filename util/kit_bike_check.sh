@@ -35,7 +35,9 @@
 #   6. [CRAG_BEST_RESET] a fourth gem placed, linked only to the run: the run
 #      counts it (Gems 0/4), the finish refused at 3 of 4 and taken at 4, the
 #      run's reset brings it back; [KIT_LOBBY] the finish the result card
-#      (an over screen: the time, result.png); the best on the top-5 sign (a kit/sign
+#      (an over screen: the time, result.png; [KIT_CLIENT_REACT] (9) the
+#      lobby's keep_own_body set on for it: kitboss's own bike kept drawn
+#      for him, hidden from kitbob); the best on the top-5 sign (a kit/sign
 #      fed by the run's board); [KIT_SCENE_PACKAGES] the card's Lobby, then
 #      The Loop: kitboss taken to that scene onto its start, its run (59)
 #      started; W and A: his crash there (the root's bike's crash by name to
@@ -402,6 +404,9 @@ try_ finish
 await "$SL" "$m" 5 "Take every gem first"
 try_ gem
 await "$SL" "$m" 5 "kitboss has 4 of 4 gems"
+# ([KIT_CLIENT_REACT] (9) the lobby's keep_own_body on for the card below)
+cmd 'event kit_edit {"op": "set", "id": 44, "comp": 0, "param": "keep_own_body", "value": true}'
+mb=$(mark "$t/bob.log")
 try_ finish
 await "$SL" "$m" 5 "local/crag_run 7: kitboss finished in [0-9.]+ \(best\)"
 best=$(tail -c +$((m + 1)) "$SL" | grep -aoP 'kitboss finished in \K[0-9.]+(?= \(best\))' | tail -1)
@@ -413,9 +418,16 @@ await "$SL" "$m" 5 "kit/lobby 44: kitboss: playing -> over"
 await "$CL" 0 5 "kit: ui 51 text .*: \"Time $best"
 step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
 await "$CL" 0 5 "kit: ui 50 panel .* shown, layer 50: \"Finished\""
+# [KIT_CLIENT_REACT] (9) keep_own_body: out of play under the card, kitboss's
+# own bike still drawn for him (no spectating), hidden from kitbob; off again
+await "$SL" "$m" 5 "kitboss is out of play \(a lobby\), their own body kept"
+await "$CL" 0 5 "kit: out of play, your own body kept drawn"
+await "$t/bob.log" "$mb" 5 "kit: player [0-9]+'s body hidden \(out of play\)"
 cmd "frames 10" "screenshot $t/result.png"
 step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
-echo "ok: the result card: Time $best"
+cmd 'event kit_edit {"op": "set", "id": 44, "comp": 0, "param": "keep_own_body", "value": false}'
+await "$SL" "$m" 5 "set 44's kit/lobby keep_own_body to false"
+echo "ok: the result card: Time $best; keep_own_body: kitboss's bike kept for him, hidden from kitbob"
 # The top-5 sign lists it; kitbob (no builder) may not clear it; End, then
 # Play: still there
 sign() { echo "kit/sign ${2:-43}: shows \"Best times.$1\" by"; } # (the log's newline a ?)

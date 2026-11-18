@@ -538,6 +538,9 @@ struct Peer
 	// [KIT_LOBBY_OUT_OF_PLAY] In a kit/lobby's lobby or result (its
 	// out_of_play on), not editing: lobby_out_tick()'s
 	bool lobby_out = false;
+	// [KIT_CLIENT_REACT] (9) and that lobby's keep_own_body on: their body
+	// still drawn on their own client (set_pose()'s flag 8)
+	bool lobby_keep = false;
 	// The tools' colour (an index of COLORS, -1 while they are off), the
 	// selected entity (0: none) and the cursor (null: none), which the
 	// other builders see
@@ -23689,8 +23692,11 @@ struct Module: public interface::Module, public Interface
 		auto ei = m_entities.find(pi->second.player);
 		if(ei == m_entities.end() || !ei->second.node)
 			return;
+		// ([KIT_CLIENT_REACT] (9) 8: out of play, the body kept drawn on its own
+		// client, a kit/lobby's keep_own_body; hidden from the rest as 4 is)
 		const int flags = (b.dig != 0 ? 1 : 0) | (b.seat ? 2 : 0) |
-				(out_of_play(pi->second.player) ? 4 : 0);
+				(out_of_play(pi->second.player) ? 4 : 0) |
+				(pi->second.lobby_out && pi->second.lobby_keep ? 8 : 0);
 		char buf[64];
 		snprintf(buf, sizeof buf, "%.0f %.0f %.0f %d ", b.look_yaw,
 				b.look_pitch, std::fmod(b.swings, 1000000), flags);
@@ -28592,7 +28598,8 @@ struct Module: public interface::Module, public Interface
 	// out_of_play is on), logged as it changes; none while Stopped
 	void lobby_out_tick()
 	{
-		std::set<ss_> out;
+		// ([KIT_CLIENT_REACT] (9) keep: those of a lobby with keep_own_body)
+		std::set<ss_> out, keep;
 		for(auto &e : m_entities)
 			for(const Instance &in : e.second.comps){
 				const json::Value &st = in.state.get("states");
@@ -28601,18 +28608,24 @@ struct Module: public interface::Module, public Interface
 					continue;
 				for(json::Iterator it(st); it; ++it)
 					if((*it).is_string() && ((*it).as_string() == "lobby" ||
-							(*it).as_string() == "over"))
+							(*it).as_string() == "over")){
 						out.insert(it.key());
+						if(in.params.get("keep_own_body").is_true())
+							keep.insert(it.key());
+					}
 			}
 		for(auto &pp : m_peers){
 			Peer &p = pp.second;
 			const bool o = m_session.running && p.player && !p.editing &&
 					out.count("player:"+itos(p.player));
-			if(o == p.lobby_out)
+			const bool k = o && keep.count("player:"+itos(p.player));
+			if(o == p.lobby_out && k == p.lobby_keep)
 				continue;
 			p.lobby_out = o;
-			log_i(MODULE, "%s is %s", cs(p.name), o ? "out of play (a lobby)" :
-					"in play");
+			p.lobby_keep = k;
+			log_i(MODULE, "%s is %s", cs(p.name), !o ? "in play" : k ?
+					"out of play (a lobby), their own body kept" :
+					"out of play (a lobby)");
 		}
 	}
 
@@ -38359,7 +38372,8 @@ struct Module: public interface::Module, public Interface
 				"itself, at once on the client too. Out of play (dead and "
 				"waiting, a kit/lobby's lobby or result) a step's i.out_of_play "
 				"is true (its keys none): a bike's step can hold it still under its result "
-				"card. "
+				"card; the lobby's keep_own_body keeps the player's own body "
+				"drawn for them, the camera on it, hidden from the others. "
 				"c.players (players = true) lists every "
 				"scene's players, each p.scene theirs and p.away true outside the "
 				"component's own scene: a scene's run or HUD keeps to not p.away. "

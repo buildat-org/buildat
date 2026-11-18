@@ -567,7 +567,10 @@ namespace interface
 //   [KIT_CLIENT_REACT] (10) Out of play (dead and waiting to respawn, a
 //   kit/lobby's lobby or result) a movement's step gets i.out_of_play = true,
 //   its keys none, on the server's steps and the client's prediction alike
-//   (move.lua's header; c:speed(by, 0) stays the freeze).
+//   (move.lua's header; c:speed(by, 0) stays the freeze). (9) A kit/lobby's
+//   keep_own_body: the player's own body stays drawn for them out of play,
+//   their camera on it (no spectating), hidden from the others as ever (the
+//   pose's flag 8, players.lua).
 //   [KIT_GENERATORS] **Generators**: a type with on_build(c) builds its
 //   own children from c.params, in the editor: as it is placed (not a
 //   copy that has its own: a duplicate, a prefab's, a paste) and as an

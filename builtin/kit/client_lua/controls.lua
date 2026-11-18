@@ -1135,12 +1135,19 @@ end
 
 -- [KIT_LOBBY_OUT_OF_PLAY] Whether this player is out of play: waiting, or
 -- in a kit/lobby's lobby or result (their pose's flag 4, the server's)
-function M.out_of_play()
+local function own_flags()
 	local me = P.nodes[P.you]
 	local v = me and me.node:GetVar("kit_pose")
-	local f = v and not v:IsEmpty() and
-			tonumber(v:GetString():match("^%S+ %S+ %S+ (%S+)"))
-	return M.waiting() or (f or 0) % 8 >= 4
+	return v and not v:IsEmpty() and
+			tonumber(v:GetString():match("^%S+ %S+ %S+ (%S+)")) or 0
+end
+function M.out_of_play()
+	return M.waiting() or own_flags() % 8 >= 4
+end
+-- [KIT_CLIENT_REACT] (9) Out of play with the body kept drawn here (a
+-- kit/lobby's keep_own_body: the pose's flag 8): no spectating
+function M.own_body_kept()
+	return own_flags() % 16 >= 8 and not M.waiting()
 end
 
 local go_next = nil -- a target to send in the next step
