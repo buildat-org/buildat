@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-11-17)
-# covers: src/server/confine.cpp src/client/command_seq.cpp src/server/main.cpp builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/accounts/accounts.cpp builtin/network/network.cpp apps/workbench/main/main.cpp builtin/voxelworld/client_lua/module.lua client/api.lua
+# covers: src/server/confine.cpp src/client/command_seq.cpp src/server/main.cpp builtin/kit/kit.cpp builtin/kit/client_lua/module.lua builtin/accounts/accounts.cpp builtin/network/network.cpp apps/workbench/main/main.cpp builtin/voxelworld/client_lua/module.lua client/api.lua extensions/weave/init.lua
 # [KIT_AGENT_NEXT_1] The server's camera: a headless client of the
 # server's own draws an agent's get_view when no client of its account is
 # there, and plays a body for it (play_join, play_input, play_leave). One
@@ -14,7 +14,8 @@
 #      yaw 0 and 180, and with no pose (over the agent's last place);
 #   2. views: two poses in a call; preset map (orthographic, over an area),
 #      turn (4 round the part, magenta in each) and frame; compare (the
-#      pose's last picture first); a call past 1572864 pixels refused;
+#      pose's last picture first); a call past 1572864 pixels refused; a
+#      polygon wearing a recipe texture ([KIT_TEXTURE_DESIGNER]) green;
 #   3. trust: /health counts no player; the camera's one-time secret, read
 #      off its environment, refused when replayed, and from this machine's
 #      LAN address (not loopback); not in any log;
@@ -326,6 +327,22 @@ elif phase == "views":
         "height": 768}] * 3})
     assert "1572864 at most a call" in text, text
     assert "turn around" in refused("get_view", {"preset": "turn", "id": 999999})
+    # [KIT_TEXTURE_DESIGNER] a recipe texture the camera makes from its name:
+    # a polygon wearing a green one, its face green
+    text = call("put_texture", {"name": "camgreen", "recipe": {"pattern": "none",
+        "color_a": "#20b030", "color_b": "#30d040", "contrast": 0.1},
+        "voxel": {"name": "camwoven"}})[0]
+    assert "wears it" in text, text
+    call("place", {"type": "kit/polygon", "pos": [8, 40, 10], "params": {"points":
+        [[-2, -2], [2, -2], [2, 2], [-2, 2]], "voxel": "kitboss/camwoven"}})
+    for i in range(20):
+        w, h, px = view({"pos": [8, 40, 4], "look_at": [8, 40, 10], "width": 64,
+            "height": 48}, "woven")[1][0]
+        r, g, b = px(32, 24)
+        if g > r + 40 and g > b + 40:
+            break
+        time.sleep(0.5)
+    assert g > r + 40 and g > b + 40, ("the recipe texture not drawn", (r, g, b))
 elif phase == "health":
     with urllib.request.urlopen(url.replace("/api/v1/mcp", "/health"),
             timeout=10) as r:
@@ -453,7 +470,7 @@ echo "ok: the camera started by get_view, its pictures (pose, upright, yaw, no p
 c0=$(ticks) t0=$(now_ms)
 mcp views
 cpu "drawing (the views phase)" "$c0" "$t0"
-echo "ok: views, map, turn, frame, compare; the pixel cap"
+echo "ok: views, map, turn, frame, compare; the pixel cap; a recipe texture drawn"
 
 # 3. Trust: no player counted; the secret once, from loopback only
 mcp health
