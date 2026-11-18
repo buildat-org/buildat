@@ -23,8 +23,9 @@
 # copy under a turned part, a part under its member: each pose against the rows
 # composed here (python, its own quaternions), on the server and in the client's
 # nodes, a parent's turn taken along, seven quick key presses all counted. A zone
-# under a pitched parent walked through: its edge where the turned box has it. A
-# region under one: cells round its edges against the box, by the server, the client
+# under a pitched parent walked through: its edge where the turned box has it
+# (the walker's body box against it). A region under one: cells round its edges
+# against the box, by the server, the client
 # and c:region_at. The three handles of the editor dragged: each one angle of the
 # row. A stamp refused when tilted. Saved, the server restarted: the same poses. A
 # walker up a pitched deck (on its true surface; no corrections). Screenshots of the
@@ -484,8 +485,9 @@ import sys
 sys.path.insert(0, sys.argv[1])
 from geo import *
 bx, by, bz, y, p = map(float, sys.argv[2:7])
-# The box's middle on the way the body walks, 3.5 before it
-o = sub([bx, by + 0.5, bz + 3.5], rot(quat(y, p, 0), [1.5, 2.5, 1.5]))
+# The box's middle on the way the body walks, 4.5 before it
+# ([KIT_ZONE_SHAPES] the walker's body box 0.7 out of it at the start)
+o = sub([bx, by + 0.5, bz + 4.5], rot(quat(y, p, 0), [1.5, 2.5, 1.5]))
 print(*map(g, o))
 PY
 )"
@@ -738,9 +740,19 @@ o, q = world(es, 9)
 n = [4, 6, 4]
 z = re.findall(r"Entity 9: kitboss (enters|leaves) its zone at ([-\d.]+),([-\d.]+),([-\d.]+)", srv)
 assert len(z) >= 2 and z[0][0] == "enters" and z[1][0] == "leaves", z
+# ([KIT_ZONE_SHAPES] a walker met by its body box, kit/walker's r 0.45, h
+# 1.7 from the feet (the logged point 0.5 over them): how far it is past
+# the turned box on the two boxes' six axes, inside negative)
+R, H = 0.45, 1.7
 def face(p):
-	l = rot(conj(q), sub(p, o))
-	return max(max(-0.5 - l[k], l[k] - (n[k] - 0.5)) for k in range(3))
+	c, h = [p[0], p[1] - 0.5 + H / 2, p[2]], [R, H / 2, R]
+	zc, zh = add(o, rot(q, [(n[k] - 1) / 2 for k in range(3)])), [n[k] / 2 for k in range(3)]
+	axes = [rot(q, e) for e in ([1, 0, 0], [0, 1, 0], [0, 0, 1])]
+	gaps = [abs(sum((c[j] - zc[j]) * a[j] for j in range(3))) - zh[k] -
+		sum(h[j] * abs(a[j]) for j in range(3)) for k, a in enumerate(axes)]
+	gaps += [abs(c[j] - zc[j]) - h[j] - sum(zh[k] * abs(axes[k][j]) for k in range(3))
+		for j in range(3)]
+	return max(gaps)
 pe, pl = [list(map(float, x[1:])) for x in z[:2]]
 print("the zone: entered at z %.2f, %.2f past the turned box's face; left at z %.2f, %.2f past it" % (pe[2], -face(pe), pl[2], face(pl)))
 # (a tick's walk past the edge at most)

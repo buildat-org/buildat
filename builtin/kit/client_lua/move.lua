@@ -32,6 +32,17 @@
 --     component on the app root (its `outputs`), as by the body's player; the
 --     client's own steps set them too, for its draw to show them at once
 --   s.pose = {n...} (8 at most): what the other clients' draw gets of it
+-- [KIT_ZONE_SHAPES] How the server's zones (a type's zone: on_enter, on_leave,
+-- who is in it) meet the body, any movement's:
+--   s.spheres = {{x, y, z, r}...} set by a step (kept in the state as the rest):
+--     spheres from s.pos (the feet) along the world's axes, a step turning them
+--     as it turns (in a side view's plane circles: a bike's wheels and head);
+--     8 at most (the rest unmet), each within 16 m of the feet, r 0.01 to 8, a
+--     bad one unmet. The editor's Front view draws the builder's own body's
+--   else movement.zone = "box": its body box (body.r either side of the feet,
+--     body.h up; kit/walker's and kit/click_to_move's)
+--   else its point (s.pos, a cell's middle up: what zones met before)
+--   A seat's holder is met by its point (the seat's place)
 --   a step past box.c's STEP_CAP Lua instructions errs "too slow": the body
 --     stops (the component's Log says it) till put again or the next version;
 --     put_type steps a new version once (an empty world) and refuses it so,
