@@ -147,9 +147,15 @@ f.seek(0, 2)
 t0, u, x, z, stopped = time.time(), None, None, None, False
 slow_since, back_till, drift_till, last, queued = None, 0, None, None, 0
 send("event kit_body")
+asked = time.time()
 while time.time() - t0 < secs:
     line = f.readline()
     if not line:
+        # (a sample with no vehicle line -- asked just after a put, before a
+        # step -- asks for none after it: asked again)
+        if not queued and time.time() - asked > 1.0:
+            send("frames 2", "event kit_body")
+            asked = time.time()
         time.sleep(0.01)
         continue
     if re.search(stop, line):
@@ -256,6 +262,7 @@ while time.time() - t0 < secs:
         queued -= 1
     else:
         send("frames 2", "event kit_body")
+    asked = time.time()
 for k in list(keys):
     key(k, False)
 print("stopped" if stopped else "time up", flush=True)
