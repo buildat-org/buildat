@@ -103,15 +103,6 @@ local PREFERENCES = {
 		label = "Mute",
 		values = {false, true},
 	},
-	-- [MUSIC_SYNTH] the music's (jam's songs) under the sound volume
-	{
-		name = "music_volume_db",
-		label = "Music volume",
-		values = {-33, -30, -27, -24, -21, -18, -15, -12, -9, -6, -3, 0},
-		show = function(v)
-			return ui_utils.db_text(v)
-		end,
-	},
 	-- [KIT_FORCE_CARTOON] Kit's physical lighting drawn as cartoon on this
 	-- client, a weak device's; unset ("auto") it is cartoon on software GL.
 	-- [SOFT_GL_CARTOON] skeldat and hillclimb draw no shadows and a shorter
@@ -780,7 +771,7 @@ end
 -- added (accounts' Server), and Logs and errors.
 --
 local GAME_ROWS = {
-	{"Sound", {"sound_volume_db", "sound_mute", "music_volume_db"}},
+	{"Sound", {"sound_volume_db", "sound_mute"}},
 	{"Video", {"render_scale", "max_fps", "vsync", "multisampling",
 		"lighting", "ui_size", "page_size", "web_address_bar", "screen_orientation", "web_idle_fps",
 		"kit_editor_font", "floorplanner_font", "kit_ui_mode", "fp_ui_mode",
