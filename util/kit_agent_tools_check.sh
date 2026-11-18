@@ -352,7 +352,9 @@ if phase == "tools":
         r = rpc("initialize", init, tk)["result"]
         assert len(r["instructions"]) < 4096, len(r["instructions"])
         assert r["instructions"].startswith("Buildat %s server. " % version), r["instructions"][:80]
-        names = [t["name"] for t in rpc("tools/list", None, tk)["result"]["tools"]]
+        # the source at this version's tag, for what the guide leaves out
+        assert "https://github.com/buildat-org/buildat/tree/v%s (" % version in r["instructions"], r["instructions"]
+        names =[t["name"] for t in rpc("tools/list", None, tk)["result"]["tools"]]
         assert {"edit_type", "get_history"} <= set(names), names
         if admin:
             assert hidden <= set(names), names

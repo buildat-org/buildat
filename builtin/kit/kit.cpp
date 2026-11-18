@@ -38289,7 +38289,16 @@ struct Module: public interface::Module, public Interface
 			"Look with get_view before and after a change; " :
 			"You see no pixels: ")+"say what you set, never that a look "
 			"improved unseen. set_comments leaves notes on an entity for the "
-			"builders.\n";
+			"builders.\n"
+			// (user, 2026-11-18: an agent linked the tag decided much better)
+			// simplified: VERSION names the last cut, so a server built
+			// between cuts is a little newer than its tag
+			"- Buildat's source, for what the tools and this guide leave out "
+			"(how a type or tool behaves, a limit, a refusal's reason): "
+			"https://github.com/buildat-org/buildat/tree/v"+BUILDAT_VERSION+
+			" (builtin/kit/api.h the type API, builtin/kit/types Kit's types, "
+			"builtin/kit/kit.cpp the server, builtin/kit/client_lua the "
+			"client).\n";
 		// [KIT_SCENE_TREE] (get_guide's: the instructions are cut at 4000)
 		if(full)
 			s += "- Scenes in a tree: a scene may sit under another "
