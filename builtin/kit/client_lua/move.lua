@@ -109,7 +109,10 @@
 -- outline, W:down its tops. W:move climbs an edge as the body's slope lets (b.slope,
 -- the heightmap's), else it is a wall: no step up it. With the plane on one is met
 -- where it spans the plane's z; one at another depth is background or foreground.
--- An edge's info is {solid, friction, surface "polygon", nx, ny: its normal out}.
+-- An edge's info is {solid, friction, surface, nx, ny: its normal out}: [KIT_CLIENT_REACT]
+-- (5) its look's surface (a tag, "polygon" by default) and friction (1; 0...10),
+-- kit/polygon's params so named, the same in a step on both sides: a step reacts to
+-- "spikes" or "ice" itself.
 -- simplified: one turned otherwise (a yaw off 0 and 180, a pitch) or on a moving
 -- object is not met, nor by W:ray; a circle's middle deeper in one than its radius
 -- meets nothing of it
@@ -430,6 +433,18 @@ end
 -- round, n, z0, z1, x0, y0, x1, y1 its box, info, inf (its edges' infos)}; nil when
 -- it is not met
 M.POLYGON = {solid = true, friction = 1, surface = "polygon"}
+-- [KIT_CLIENT_REACT] (5) a look's own surface and friction (none: M.POLYGON)
+local function poly_info(look)
+	local f, s = tonumber(look.friction), look.surface
+	if type(s) ~= "string" or s == "" then
+		s = "polygon"
+	end
+	if (f == nil or f == 1) and s == "polygon" then
+		return M.POLYGON
+	end
+	f = f or 1
+	return {solid = true, friction = f < 0 and 0 or f > 10 and 10 or f, surface = s}
+end
 function M.look_poly(look, on, pos, yaw, pitch, roll)
 	if type(look) ~= "table" or look.shape ~= "polygon" or
 			type(look.points) ~= "table" or type(yaw) == "table" then
@@ -474,7 +489,7 @@ function M.look_poly(look, on, pos, yaw, pitch, roll)
 			pts[2 * i], pts[2 * j] = pts[2 * j], pts[2 * i]
 		end
 	end
-	local p = {pts = pts, n = n, info = M.POLYGON, inf = {},
+	local p = {pts = pts, n = n, info = poly_info(look), inf = {},
 		x0 = math.huge, y0 = math.huge, x1 = -math.huge, y1 = -math.huge}
 	for i = 1, n do
 		local x, y = pts[2 * i - 1], pts[2 * i]

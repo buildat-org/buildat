@@ -236,4 +236,22 @@ for q = 1, #tri, 3 do
 end
 assert(#tri == 12 and near(area, 6), "triangles: " .. #tri .. ", " .. area)
 print("ok: w:circle, w:segment and w:down against polygon edges, one at another depth not met; a concave one's triangles")
+
+-- [KIT_CLIENT_REACT] (5) a polygon's own surface and friction in what a step meets:
+-- w:circle's, w:segment's and the walker's ground (s.surface); none: "polygon", 1
+local spikes = MV.look_poly({shape = "polygon", points = SLOPE, depth = 1, solid = true,
+	surface = "spikes", friction = 0.25}, false, {0, 0, 0}, 0)
+local sw = pworld({spikes}, 0)
+c = sw:circle(9, 2.4, 0.5)
+assert(#c == 1 and c[1].info.surface == "spikes" and c[1].info.friction == 0.25 and
+		near(c[1].info.ny, 2 / math.sqrt(5)), "spikes' circle: " .. #c)
+t, nx, ny, info = sw:segment(9, 5, 9, 0)
+assert(near(t, 0.6) and info.surface == "spikes" and info.friction == 0.25, tostring(t))
+s = walk(sw, {pos = {0, 0.55, 0}}, 150, RIGHT)
+assert(s.ground and s.surface == "spikes" and s.pos[2] > 1, "on the spikes: " ..
+		tostring(s.surface) .. " at " .. s.pos[2])
+assert(pw:circle(9, 2.4, 0.5)[1].info.friction == 1, "a polygon's default friction")
+assert(MV.look_poly({shape = "polygon", points = SLOPE, solid = true, surface = "",
+	friction = 40}, false, {0, 0, 0}, 0).info.friction == 10, "friction past 10")
+print("ok: a polygon's surface and friction in w:circle, w:segment and the walker's ground; none: polygon, 1")
 -- vim: set noet ts=4 sw=4:

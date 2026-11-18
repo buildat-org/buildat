@@ -46,7 +46,9 @@
 #      with it, never under a kit/parallax; a gem's cells met by a wheel
 #      (s.spheres) with the point outside, by the point, by a walker's body
 #      box (movement.zone "box"); get_state's zone kind, shape, bounds and
-#      who is in it; play_input's body shape.
+#      who is in it; play_input's body shape. [KIT_CLIENT_REACT] (5) a
+#      polygon's surface and friction (get_state's params) in what the
+#      server's step meets (the probe's output).
 #   util/kit_agent_tools_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -313,9 +315,19 @@ ZPROBE = '''return {
 		y = {type = "number", default = 2, min = -500, max = 500},
 		wheels = {type = "bool", default = false}},
 	movement = {body = {r = 0.3, h = 1, eye = 0.8}%s},
+	outputs = {surface = "string"},
 	step = function(s, i, dt, w, p)
 		s.pos, s.vel = {p.x, p.y, 0}, {0, 0, 0}
 		s.spheres = p.wheels and {{-0.6, 0.36, 0, 0.36}, {0.6, 0.36, 0, 0.36}} or nil
+		-- [KIT_CLIENT_REACT] (5) what it touches, its surface and friction (not
+		-- the cells of sections not loaded: "unknown")
+		for _, h in ipairs(w:circle(p.x, p.y, 0.3)) do
+			if h.info.surface ~= "unknown" then
+				s.events = {{"surface", tostring(h.info.surface) .. " " ..
+					tostring(h.info.friction)}}
+				break
+			end
+		end
 	end,
 }
 '''
@@ -696,6 +708,25 @@ elif phase == "zones":
     sh = played({"seconds": 0.1})["shape"]
     assert sh == {"kind": "box", "lo": [58.951, 0.601, -0.299], "hi": [59.549, 1.599, 0.299]}, sh
     print("   a gem met by a wheel (its point outside), by the point, by a walker's box")
+    call("set_param", {"id": CT, "param": "movement", "value": "local/zprobe"})
+    put(PR, 0, 2)
+    # [KIT_CLIENT_REACT] (5) a polygon's surface and friction (its params, in
+    # get_state) in what the server's step meets: the probe's surface output
+    SP = placed(call("place", {"type": "kit/polygon", "pos": [-20, 0, 0], "params": {
+        "points": [[0, 0], [2, 0], [2, 1], [0, 1]], "surface": "spikes", "friction": 0.5}}))
+    pp = comp(SP, 0)["params"]
+    assert pp["surface"] == "spikes" and pp["friction"] == 0.5, pp
+    # (its circle round the feet at 1.1, r 0.3: in the top at 1 by 0.2, the
+    # body itself over it)
+    call("set_param", {"id": PR, "params": {"x": -19, "y": 1.1}})
+    def touched(want):
+        ev = [e for e in played({"seconds": 0.3})["events"] if e["output"] == "surface"]
+        return ev if ev and ev[-1].get("last_value", ev[-1].get("value")) == want else None
+    wait(lambda: touched("spikes 0.5"), "the step meeting the spikes")
+    call("set_param", {"id": SP, "params": {"surface": "", "friction": 1}})
+    wait(lambda: touched("polygon 1"), "the step meeting a plain polygon")
+    put(PR, 0, 2)
+    print("   a polygon's surface and friction in the server's step: spikes 0.5, none: polygon 1")
     assert "Your body is gone" in call("play_leave")
     call("stop")
 elif phase == "heightmap":

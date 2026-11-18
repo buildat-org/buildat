@@ -787,6 +787,12 @@ namespace interface
 //   Its size and offset are its points' box (kit.cpp's). [KIT_SIDE_SCENERY]
 //   voxel (a voxel type's name) and edge_depth: its textures world-aligned and
 //   a band of its top along the edges facing up (module.lua's polygon_mesh).
+//   [KIT_CLIENT_REACT] (5) surface (a short tag, "polygon" if none) and
+//   friction (0...10, 1 if none): the info a movement's step gets where it
+//   meets the polygon (w:circle's, w:segment's, w:move's hits, a walker's
+//   s.surface), on the server's steps and the client's prediction alike
+//   (kit/polygon's params so named): a spike strip a bike's step crashes on
+//   itself, no zone and no round trip.
 //   [KIT_SIDE_SCENERY] (8) parallax = {follow =, follow_y =, repeat =}
 //   ("param:<name>" as a look's; kit/parallax): the looks under the entity
 //   are drawn by each client offset by its camera's travel from the
