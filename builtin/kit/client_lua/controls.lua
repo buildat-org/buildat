@@ -2767,14 +2767,18 @@ magic.SubscribeToEvent("Update", function(_, data)
 end)
 
 -- [KIT_PLANE] stage 4: the movement's draw hook (its client part's draw(s,
--- node): players.lua calls it for each body) and this body's state as
--- predicted, for it
+-- node, yaw): players.lua calls it for each body) and this body's state as
+-- predicted, for it; [KIT_DRAWN_YAW] its yaw as drawn (degrees), between its
+-- last two steps as its place is
 function M.movement_draw()
 	local part = C.type and P.parts[C.type]
 	return type(part) == "table" and type(part.draw) == "function" and part.draw or nil
 end
 function M.body_state()
 	return C.s
+end
+function M.drawn_yaw()
+	return C.draw_yaw
 end
 
 -- For a drive: "event kit_click_at <x> <y> <z> [right]" clicks (the left

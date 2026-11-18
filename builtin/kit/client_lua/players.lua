@@ -331,10 +331,13 @@ function M.flash_player(id, color, time)
 end
 
 -- [KIT_PLANE] stage 4: a body the movement draws (its client part's draw(s,
--- node), controls.lua's M.movement_draw()): a node of its own at the feet as
+-- node, yaw), controls.lua's M.movement_draw()): a node of its own at the feet as
 -- drawn (no turn; its children the hook's to make and pose), s this player's
 -- predicted state or another's {pos, pose = the numbers of its "kit_mpose"};
 -- the humanoid posed as ever (what is attached follows it) and not shown.
+-- [KIT_DRAWN_YAW] yaw: this player's own body's yaw (degrees) between its last
+-- two steps, as its place is drawn (a pose's heading is the last step's: a
+-- car stepped 30 times a second turned in steps at 60 frames); the others' nil
 -- simplified: the others by this client's movement (kit/controls' one: a seat's
 -- body is not drawn), their pose as it came (not 0.1 s back as their place)
 local function hooked(b, id, n, at, draw, shown)
@@ -366,7 +369,7 @@ local function hooked(b, id, n, at, draw, shown)
 		end
 		s = {pos = {at.x, at.y, at.z}, pose = pose}
 	end
-	local ok, err = pcall(draw, s, b.mnode)
+	local ok, err = pcall(draw, s, b.mnode, id == P.you and M.drawn_yaw() or nil)
 	if not ok and not b.mfailed then
 		b.mfailed = true
 		log:warning("kit: the movement's draw: " .. tostring(err))
