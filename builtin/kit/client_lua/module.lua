@@ -184,7 +184,9 @@ end
 --   e:predict(key, value, seconds) (drawn so at once, until the server's
 --   value changes or the seconds, 1, pass), e:log(text) (this client's log);
 --   [KIT_CLIENT_REACT] require("buildat/module/kit") is this module (M):
---   kit.shared, kit.body_state()...; a handler that errs is off for that
+--   kit.shared, kit.body_state()..., [RACER_FEEL] (2) kit.shake(a)
+--   (controls.lua's head), also from a movement's draw; a handler that
+--   errs is off for that
 --   entity here, its first failure sent (call() below). api.h's client
 --   parts paragraph says what else a part reaches and what is refused
 -- kit.pointed(origin, dir, reach) -> the id of the entity nearest the ray

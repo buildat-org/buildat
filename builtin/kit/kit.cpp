@@ -32758,7 +32758,8 @@ struct Module: public interface::Module, public Interface
 				"get_log (get_guide: all a client part reaches); "
 				"a movement's draw(s, node) draws each player's body (node at "
 				"its feet, s its state; another's {pos, pose}; scenery is "
-				"kit/parallax's, not a client part's); left out, the "
+				"kit/parallax's, not a client part's; kit.shake(a) from any of "
+				"them: get_guide); left out, the "
 				"type's client part stays as it is, \"\" takes it away. A few "
 				"lines changed: edit_type.",
 				R"J({"type": "object", "properties": {
@@ -38707,6 +38708,11 @@ struct Module: public interface::Module, public Interface
 				"(by convention keyed by your type's name; a part's reload, a "
 				"scene switch, Play and Stop keep it; clear your keys in "
 				"on_remove), kit.body_state() is this client's predicted body. "
+				// [RACER_FEEL] (2)
+				"From a handler or a movement's draw(s, node), on that client "
+				"alone, at once: kit.shake(amount) shakes the camera (0 to 5, "
+				"decaying at kit/controls' shake_decay; a crash felt the frame "
+				"it is predicted). "
 				"Urho3D: require(\"buildat/extension/urho3d\"), the sandbox's "
 				"classes; change only what you made under e.node, never Kit's "
 				"own nodes. Refused: node:GetScene(), a global set in a handler "

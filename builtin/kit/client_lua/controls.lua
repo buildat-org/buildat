@@ -23,6 +23,11 @@
 --     left), nil: it declares none ([KIT_PLAY_HINTS], below)
 --   kit.touch_bar_left() -> where the touch bars begin (UI x; nil: none)
 --   kit.viewport(scene, camera) -> a Viewport with Kit's effects
+--   [RACER_FEEL] (2) kit.shake(amount): the camera shaken from a client part
+--     (its own prediction of a crash) as kit/controls' shake input does it
+--     (amount 0...5, decaying at shake_decay), from this frame: called before
+--     the camera is placed it is placed shaken, after (a draw hook) the
+--     camera is moved now. This client's camera only; nothing sent
 -- The keys (input.lua's actions, the player's to rebind; these the
 -- defaults): W A S D (a car: throttle, brake and steering), Space jumps,
 -- F leaves a seat (a key bound to use uses what is pointed at, the left
@@ -621,6 +626,33 @@ local function signal(key, v)
 		log:info("kit: camera tint " .. C.flash_color)
 	elseif key == "camera" then
 		log:info("kit: camera mode " .. camera_mode())
+	end
+end
+
+-- [RACER_FEEL] (2) A client part's shake (the header's kit.shake): the server's
+-- shake input's, this frame (the engine's frame number; C.placed the frame the
+-- camera was last placed in)
+function M.shake(amount)
+	local a = math.max(0, math.min(5, tonumber(amount) or 0))
+	if a <= 0 or not O.camera then
+		return
+	end
+	signal("shake", {amount = a})
+	local f = magic.time.frameNumber
+	if C.placed == f then
+		-- Placed already this frame: moved now as place_camera moves it
+		local function jitter(k)
+			return (math.random() * 2 - 1) * k
+		end
+		local node = O.camera
+		node.position = node.position + magic.Vector3(jitter(a * 0.3), jitter(a * 0.3),
+				jitter(a * 0.3))
+		node.rotation = node.rotation * magic.Quaternion(0, 0, jitter(a * 4))
+		log:info(string.format("kit: a client part's shake %g, the camera moved in " ..
+				"frame %d", a, f))
+	else
+		C.shake_frame = f
+		log:info(string.format("kit: a client part's shake %g in frame %d", a, f))
 	end
 end
 
@@ -2130,6 +2162,12 @@ local function place_camera(dt, at)
 	local cam = node:GetComponent("Camera")
 	local par = params()
 	local mode = camera_mode()
+	C.placed = magic.time.frameNumber
+	if C.shake_frame then
+		log:info(string.format("kit: the camera placed shaken %.3f in frame %d " ..
+				"(asked in frame %d)", C.shake, C.placed, C.shake_frame))
+		C.shake_frame = nil
+	end
 	-- (the near clip a side camera moved)
 	if C.near0 then
 		cam.nearClip, C.near0 = C.near0, nil

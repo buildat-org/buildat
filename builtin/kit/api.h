@@ -571,7 +571,10 @@ namespace interface
 //   client's log only); `local kit = require("buildat/module/kit")`, the
 //   client's Kit (module.lua's and controls.lua's heads list it: kit.pointed,
 //   kit.use, kit.body_state() this client's predicted body, kit.body_pos(),
-//   kit.seated()...); (2) kit.shared, one plain table per client every
+//   kit.seated()...; [RACER_FEEL] (2) from a handler or a movement's
+//   draw, this client's alone and at once: kit.shake(amount) the camera
+//   shaken as kit/controls' shake input does (0...5, from this frame));
+//   (2) kit.shared, one plain table per client every
 //   client part of every entity shares (local, nothing sent; a part's
 //   reload, a scene switch, Play and Stop keep it, the connection's end
 //   drops it; keys by convention the type's name; simplified: a part

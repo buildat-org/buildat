@@ -27,6 +27,8 @@
 #   6. The editor's plan view: a kit/polygon drawn by clicks lies flat at the
 #      plane's height (one place op, pitch 90), its point dragged; the
 #      inspector's "Edit in 2D view" shows it in the plan view.
+#   8. [RACER_FEEL] (2) The zone's client part: kit.shake(2) in the frame
+#      it asked.
 set -u
 . "$(dirname "$0")/check_lib.sh"
 export BUILDAT_WORKBENCH_PROJECT=world
@@ -76,9 +78,11 @@ src = '''return {
 		c:log("entered by", c:name(by))
 	end,
 }'''
-cl = '''return {
+cl = '''local kit = require("buildat/module/kit")
+return {
 	on_enter = function(e)
 		e:log("tdzone on_enter")
+		kit.shake(2)
 	end,
 }'''
 print("event kit_type " + json.dumps({"op": "put", "name": "tdzone", "source": src,
@@ -304,5 +308,16 @@ grep -aq "An edit by kitboss: placed kit/polygon $DRAWN at " "$s" || fail "polyg
 grep -aq "set $DRAWN's kit/polygon points to" "$s" || fail "polygon $DRAWN's point not dragged ($s)"
 grep -aq "kit editor: polygon $DRAWN in the plan view at" "$c" || fail "the points row's plan view ($c)"
 echo "ok: a polygon drawn in the plan view lying flat at $at, its point dragged, the inspector's row back to the plan view"
-echo "PASS: kit/controls' horizontal plane: the body held at one height, flat polygon walls, a floor's surface, a flat look zone on the client and the server, the top_down camera's dead zone, kit/parallax along z, the plan view's polygon editing"
+# 8. [RACER_FEEL] (2) The zone's client part on_enter: kit.shake(2) the
+# frame it was asked
+f=$(grep -aoP "kit: a client part's shake 2 in frame \K[0-9]+" "$c" | head -1)
+if [ -n "$f" ]; then
+	grep -aq "kit: the camera placed shaken [0-9.]* in frame $f (asked in frame $f)" "$c" ||
+		fail "the shake asked in frame $f not placed in it ($c)"
+else
+	f=$(grep -aoP "kit: a client part's shake 2, the camera moved in frame \K[0-9]+" "$c" | head -1)
+	[ -n "$f" ] || fail "no client part's shake ($c)"
+fi
+echo "ok: a client part's shake in its own frame ($f)"
+echo "PASS: kit/controls' horizontal plane: the body held at one height, flat polygon walls, a floor's surface, a flat look zone on the client and the server, the top_down camera's dead zone, kit/parallax along z, the plan view's polygon editing; a client part's shake"
 # vim: set noet ts=4 sw=4:
