@@ -199,9 +199,9 @@ return {
 		end
 		local throttle, brake = false, false
 		if hb then
-			-- (EDGM: the handbrake's force is the engine's push; here 0.6 of it, a
-			-- car of its weight pushed harder)
-			af = af - clamp(vf / dt, -push * 0.6, push * 0.6)
+			-- (EDGM: the handbrake's force is the engine's push; here 0.35 of
+			-- it: the locked rear's slide, not a stop, turns the car)
+			af = af - clamp(vf / dt, -push * 0.35, push * 0.35)
 			flags = flags + 16
 		elseif f < 0 then
 			if vf > 0 then
@@ -265,7 +265,8 @@ return {
 				lim = lim * 1.2
 				if hb then
 					if speed > 0.2 then
-						lim = lim * 0.4
+						-- (EDGM's 0.4: the heavier car's slide wants less)
+						lim = lim * 0.2
 						slip = true
 					end
 				elseif throttle then
