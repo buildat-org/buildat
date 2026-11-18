@@ -571,6 +571,17 @@ struct Peer
 	ss_ agent_token, agent_id;
 	// [KIT_AGENT_NEXT_1] the server's camera (camera_login())
 	bool camera = false;
+	// [ACC_ALREADY_HERE] A login proved while its account is here on
+	// another client, held until the client chooses (on_here): the account,
+	// how it was proved, the password's hash then, whether a kept login was
+	// asked; and, once "Kick out the other clients" was chosen, the kicked
+	// peers still leaving
+	ss_ here_name, here_how, here_hash;
+	bool here_keep = false;
+	std::set<PeerId> here_leaving;
+	// A guest chosen there: the account it was proved as, which a kick or
+	// a ban of reaches it too
+	ss_ guest_of;
 };
 
 struct Module: public interface::Module, public Interface
@@ -714,7 +725,7 @@ struct Module: public interface::Module, public Interface
 				"accounts:totp", "accounts:link_starport",
 				"accounts:unlink_starport", "accounts:open_lan",
 				"accounts:ntfy", "accounts:guest", "accounts:agent:req",
-				"accounts:agent_token"})
+				"accounts:agent_token", "accounts:here"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 		m_server->sub_event(this, Event::t("accounts:agent_revoked"));
@@ -751,6 +762,8 @@ struct Module: public interface::Module, public Interface
 		EVENT_TYPEN("network:packet_received/accounts:open_lan",
 				on_open_lan, network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:guest", on_guest,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/accounts:here", on_here,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:agent:req",
 				on_agent_req, network::Packet)
@@ -853,6 +866,17 @@ struct Module: public interface::Module, public Interface
 		m_peers.erase(it);
 		if(joined)
 			send_users_to_staff();
+		// [ACC_ALREADY_HERE] A login that kicked out its account's other
+		// clients completes once they are gone: every module has this
+		// leave in its queue ahead of the accounts:login that follows, so
+		// an app saves the player at the leave and loads them at the join
+		sv_<PeerId> done;
+		for(auto &pair : m_peers)
+			if(pair.second.here_leaving.erase(client.info.id) &&
+					pair.second.here_leaving.empty())
+				done.push_back(pair.first);
+		for(PeerId id : done)
+			here_kicked(id);
 	}
 
 	// The interface
@@ -876,6 +900,17 @@ struct Module: public interface::Module, public Interface
 		sv_<PeerId> out;
 		for(auto &pair : m_peers)
 			if(!name.empty() && pair.second.name == name)
+				out.push_back(pair.first);
+		return out;
+	}
+
+	// [ACC_ALREADY_HERE] find_peers(), and the guests the account's logins
+	// chose to be: what a kick or a ban of the account reaches
+	sv_<PeerId> seats_of(const ss_ &name)
+	{
+		sv_<PeerId> out = find_peers(name);
+		for(auto &pair : m_peers)
+			if(!name.empty() && pair.second.guest_of == name)
 				out.push_back(pair.first);
 		return out;
 	}
@@ -1324,7 +1359,7 @@ struct Module: public interface::Module, public Interface
 		// On an invite-only server the account is enough, and an address
 		// ban would keep out others behind the same one.
 		// Each connection's address, where the name is here more than once
-		const sv_<PeerId> peers = find_peers(name);
+		const sv_<PeerId> peers = seats_of(name);
 		if(!peers.empty() && m_access.open_registration)
 			b.address = address_of(peers[0]);
 		m_store->set("ban/"+name, pack(b));
@@ -1938,8 +1973,11 @@ struct Module: public interface::Module, public Interface
 			return reply("A name is 1 to 20 letters, digits, _ or -");
 		if(password.size() > 100 || code.size() > 100 || cred.token.size() > 100)
 			return reply("The password is too long");
-		if(find_peer(name) && !m_multiple_logins)
-			return reply(name+" is already here");
+		// [ACC_ALREADY_HERE] The account being here already is answered
+		// once the login is proved, below: nobody learns more of it, or
+		// kicks it, without that
+		peer.here_name.clear();
+		peer.here_leaving.clear();
 		if(!local){
 			const ss_ why = banned(name, peer.address);
 			if(!why.empty()){
@@ -2214,33 +2252,135 @@ struct Module: public interface::Module, public Interface
 			link_note = link_id(name, claim_id);
 		}
 		update_setup_code();
-		if(cred.keep && !local && (cred.token.empty() || waited)){
+		const bool keep = cred.keep && !local && (cred.token.empty() || waited);
+		// [ACCOUNT_WHO] And how
+		const char *how = local ? "local" : !id.sub.empty() ? "Starport ID" :
+				by_password ? (code.empty() ? "password" :
+				"password and setup code") : "kept login";
+		// [ACC_ALREADY_HERE] **Here on another client already**: the client
+		// is asked, and its answer (on_here) completes this. Where the app
+		// lets a name in more than once (floorplanner), no asking
+		if(!m_multiple_logins && find_peer(name)){
+			peer.here_name = name;
+			peer.here_how = how;
+			peer.here_hash = account.hash;
+			peer.here_keep = keep;
+			log_i(MODULE, "%s proved from %s by %s while here already: "
+					"asked to choose", cs(name), cs(peer.address), how);
+			if(!claim_id.sub.empty())
+				send(packet.sender, "accounts:link_result", pack(link_note));
+			return reply("HERE:"+name);
+		}
+		complete_login(packet.sender, peer, name, keep, how);
+		if(!claim_id.sub.empty())
+			send(packet.sender, "accounts:link_result", pack(link_note));
+	}
+
+	// The end of a proved login: a kept login's token made if asked, the
+	// peer joined as the account
+	void complete_login(PeerId id, Peer &peer, const ss_ &name, bool keep,
+			const ss_ &how)
+	{
+		ss_ token;
+		Account account;
+		if(keep && get_account(name, account)){
 			token = random_code(32);
 			KeptLogin kept;
 			kept.name = name;
-			kept.expires_us = now + KEEP_US;
+			kept.expires_us = interface::os::wall_us() + KEEP_US;
 			kept.hash = account.hash;
 			m_store->set("token/"+interface::sha256::hex(
 					interface::sha256::calculate(token)), pack(kept));
 			log_i(MODULE, "%s is kept logged in", cs(name));
 		}
-		// [ACCOUNT_WHO] And how
-		const char *how = local ? "local" : !id.sub.empty() ? "Starport ID" :
-				by_password ? (code.empty() ? "password" :
-				"password and setup code") : "kept login";
 		log_i(MODULE, "%s joined from %s by %s", cs(name), cs(peer.address),
-				how);
+				cs(how));
 		peer.name = name;
 		stats_joined(peer);
-		reply("");
-		send_links(packet.sender, name);
-		if(!claim_id.sub.empty())
-			send(packet.sender, "accounts:link_result", pack(link_note));
-		m_server->emit_event("accounts:login", new Login(packet.sender, name));
+		// The name joined as: a Starport ID's is the token's
+		send(id, "accounts:login_result", pack(std::make_pair(
+				std::make_pair(ss_(), token), name)));
+		send_links(id, name);
+		m_server->emit_event("accounts:login", new Login(id, name));
 		send_users_to_staff();
-		ntfy_ask(packet.sender, name);
+		ntfy_ask(id, name);
 		if(!m_serve_updates.empty() && level(name) >= LV_ADMIN)
-			tell_update(packet.sender, true);
+			tell_update(id, true);
+	}
+
+	// [ACC_ALREADY_HERE] **The answer to "already here: choose"** ("kick",
+	// "guest" or "leave"), for the login held in the peer's here_name.
+	// Kick: the account's other clients kicked, and the login completed
+	// once they are gone (on_client_disconnected(), here_kicked()). Guest:
+	// a guest<n> as on_guest() makes, even where the app takes no guests
+	// (the account was proved), its account noted. Leave: the login
+	// dropped; the client is back at its login form.
+	void on_here(const network::Packet &packet)
+	{
+		auto pit = m_peers.find(packet.sender);
+		if(pit == m_peers.end() || !m_store)
+			return;
+		Peer &peer = pit->second;
+		if(!peer.name.empty() || peer.here_name.empty() ||
+				!peer.here_leaving.empty())
+			return;
+		const ss_ name = peer.here_name;
+		const ss_ &choice = packet.data;
+		auto refuse = [&](const ss_ &why){
+			peer.here_name.clear();
+			send(packet.sender, "accounts:login_result", pack(std::make_pair(
+					std::make_pair(why, ss_()), ss_())));
+		};
+		if(choice == "leave"){
+			log_i(MODULE, "%s from %s left the choice: back to the login",
+					cs(name), cs(peer.address));
+			peer.here_name.clear();
+			return;
+		}
+		// Banned, gone or its password reset while the client chose
+		Account account;
+		if(!get_account(name, account) || account.hash != peer.here_hash)
+			return refuse("The login has ended: log in again");
+		if(!is_local(packet.sender)){
+			const ss_ why = banned(name, peer.address);
+			if(!why.empty())
+				return refuse(why);
+		}
+		if(choice == "kick"){
+			const sv_<PeerId> others = find_peers(name);
+			log_i(MODULE, "%s from %s kicks out its other clients (%zu)",
+					cs(name), cs(peer.address), others.size());
+			if(others.empty())
+				return here_kicked(packet.sender);
+			peer.here_leaving.insert(others.begin(), others.end());
+			for(PeerId p : others)
+				kick(p, "Logged in from another client");
+			return;
+		}
+		if(choice != "guest")
+			return;
+		peer.here_name.clear();
+		join_guest(packet.sender, peer, name);
+	}
+
+	// The other clients a "Kick out the other clients" kicked are gone:
+	// the login completes, or is asked again where another login of the
+	// account completed meanwhile
+	void here_kicked(PeerId id)
+	{
+		auto pit = m_peers.find(id);
+		if(pit == m_peers.end() || pit->second.here_name.empty())
+			return;
+		Peer &peer = pit->second;
+		const ss_ name = peer.here_name;
+		if(find_peer(name)){
+			log_i(MODULE, "%s from %s: here again meanwhile, asked again",
+					cs(name), cs(peer.address));
+			return send(id, "accounts:login_result", pack(std::make_pair(
+					std::make_pair("HERE:"+name, ss_()), ss_())));
+		}
+		peer.here_name.clear();
+		complete_login(id, peer, name, peer.here_keep, peer.here_how);
 	}
 
 	// [HC_GUEST_PLAY] A guest: no account and nothing to type -- the next
@@ -2253,11 +2393,9 @@ struct Module: public interface::Module, public Interface
 		if(pit == m_peers.end() || !m_store)
 			return;
 		Peer &peer = pit->second;
-		ss_ name;
 		auto reply = [&](const ss_ &error){
 			send(packet.sender, "accounts:login_result",
-					pack(std::make_pair(std::make_pair(error, ss_()),
-					error.empty() ? name : ss_())));
+					pack(std::make_pair(std::make_pair(error, ss_()), ss_())));
 		};
 		if(!peer.name.empty())
 			return reply("Already joined");
@@ -2279,17 +2417,30 @@ struct Module: public interface::Module, public Interface
 				return reply("The server is full ("+itos(max_players)+
 						" players)");
 		}
+		join_guest(packet.sender, peer, "");
+	}
+
+	// `of`: the account a login proved before it chose to be a guest
+	// ([ACC_ALREADY_HERE]), or ""
+	// simplified: that guest is not held to max_players again; the
+	// account's login was, a moment before
+	void join_guest(PeerId id, Peer &peer, const ss_ &of)
+	{
+		ss_ name;
 		do
 			name = "guest"+itos(++m_last_guest);
 		while(exists(name) || deleted(name) || find_peer(name) != 0);
 		m_store->set("last_guest", itos(m_last_guest));
-		log_i(MODULE, "%zu joined as a guest, %s, from %s", packet.sender,
-				cs(name), cs(peer.address));
+		log_i(MODULE, "%zu joined as a guest, %s, from %s%s", (size_t)id,
+				cs(name), cs(peer.address), of.empty() ? "" :
+				cs(", proved as "+of+", which is here already"));
 		peer.name = name;
 		peer.guest = true;
+		peer.guest_of = of;
 		stats_joined(peer);
-		reply("");
-		m_server->emit_event("accounts:login", new Login(packet.sender, name));
+		send(id, "accounts:login_result", pack(std::make_pair(
+				std::make_pair(ss_(), ss_()), name)));
+		m_server->emit_event("accounts:login", new Login(id, name));
 		send_users_to_staff();
 	}
 
@@ -2570,7 +2721,6 @@ struct Module: public interface::Module, public Interface
 		};
 		Account account;
 		const bool exists = !r.name.empty() && get_account(r.name, account);
-		const PeerId target = exists ? find_peer(r.name) : 0;
 		// Every connection of the name ([FP_TWO_CLIENTS])
 		const sv_<PeerId> targets = exists ? find_peers(r.name) : sv_<PeerId>();
 		if(r.cmd == "list"){
@@ -2611,9 +2761,10 @@ struct Module: public interface::Module, public Interface
 				return result(why);
 			result(r.name+" is a "+level_name(level(r.name)));
 		} else if(r.cmd == "kick"){
-			if(!target)
+			const sv_<PeerId> seats = exists ? seats_of(r.name) : targets;
+			if(seats.empty())
 				return result(r.name+" is not here");
-			for(PeerId t : targets)
+			for(PeerId t : seats)
 				kick(t, "kicked by "+by);
 			result(r.name+" was kicked");
 		} else if(r.cmd == "ban"){

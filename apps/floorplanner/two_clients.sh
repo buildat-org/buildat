@@ -8,7 +8,7 @@
 #   2. A leaves, B carries on and switches to editing: a second one.
 #   3. Both again, and the admin kicks pl: both are kicked.
 #   4. Both again, and the admin resets pl's password: both are ended.
-#   5. vanilla refuses the second login of a name.
+#   5. vanilla asks the second login of a name ([ACC_ALREADY_HERE]).
 # Read from the server's log ("is editing", "kicked:") and the clients'.
 #
 #   apps/floorplanner/two_clients.sh
@@ -126,10 +126,13 @@ cmds v "wait_log_any 30000 Login refused" "quit"
 client BUILDAT_JOIN op adminpass12 "" "$out/v.txt" "$out/v2.log"
 echo quit >&3; exec 3>&-
 wait $cv
-if grep -aq "Login refused: op is already here" "$out/v2.log"; then
-	echo "ok: vanilla refuses a second login of a name"
+# [ACC_ALREADY_HERE] asked to choose (util/acc_already_here_check.sh), not
+# let in beside the first
+if grep -aq "Login refused: HERE:op" "$out/v2.log" &&
+		! grep -aq "Joined as op" "$out/v2.log"; then
+	echo "ok: vanilla asks a second login of a name, and lets it in only by the choice"
 else
-	echo "FAIL: vanilla let op in twice"; fail=1
+	echo "FAIL: vanilla let op in twice, or did not ask"; fail=1
 fi
 [ $fail = 0 ] && echo "PASS: one user from two clients, both live, and the admin reaches both"
 exit $fail
