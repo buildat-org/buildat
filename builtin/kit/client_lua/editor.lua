@@ -3221,7 +3221,17 @@ function NT.params_form(w, e, ci, c, t, keep)
 			-- [KIT_POLYGON_ROW] its row below)
 			points[#points + 1] = k
 		else
-			fields[#fields + 1] = field(k, decl[k], values)
+			local f = field(k, decl[k], values)
+			-- [KIT_SIDE_SCENERY] (8) under a parallax layer nothing is met
+			-- (kit.cpp's under_parallax()): its collision says so
+			if k == "collision" and (NT.parallax_note(e) or ""):find("^Under") then
+				f.label = "collision (none: under a parallax layer)"
+				if NT.col_said ~= e.id then
+					NT.col_said = e.id
+					log:info("kit editor: " .. e.id .. ": " .. f.label)
+				end
+			end
+			fields[#fields + 1] = f
 		end
 	end
 	if #fields > 0 then
