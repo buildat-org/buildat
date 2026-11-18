@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~5 min (2026-11-15)
-# covers: builtin/kit/kit.cpp builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/world_menu/** apps/workbench/main/main.cpp src/impl/aitta.cpp src/client/web/index.html util/web_drive.js
+# covers: builtin/kit/kit.cpp extensions/weave/init.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/world_menu/** apps/workbench/main/main.cpp src/impl/aitta.cpp src/client/web/index.html util/web_drive.js
 # [KIT_PROJECT_EXPORT] A Workbench project exported as a template and made
 # a project again, copied and renamed. One server, kitboss (the admin) on a
 # headless weston's Xwayland of the check's own (its clipboard carries the
@@ -15,7 +15,9 @@
 #      an item type and a sound by the editor's ops, a heightmap stroke;
 #      by MCP a timer linked to a counter, a custom type local/beacon (a
 #      client part too) placed, a prefab saved, a box of the voxel type set
-#      (one cell tinted). The palette's New tab, Export this game: the
+#      (one cell tinted), an uploaded texture and a recipe one (on a type's
+#      top) each worn by a cell (4z17: the import's line counts them, and
+#      is not said for a template with no export's files). The palette's New tab, Export this game: the
 #      file in <user>/exports, its files those export_template answers. The
 #      file unzipped packs (`buildat aitta pack`) and installs; with a
 #      texture not named by its hash, refused at pack.
@@ -159,7 +161,7 @@ new_project() # <name> [<Start from's label> <its value>]: Empty without
 }
 url=http://localhost:$SERVER_PORT/api/v1/mcp
 cat > "$t/mcp.py" <<'PY'
-import base64, json, os, re, sqlite3, sys, urllib.error, urllib.request, zlib
+import base64, json, os, re, sqlite3, struct, sys, urllib.error, urllib.request, zlib
 phase, url, tok = sys.argv[1:4]
 args = sys.argv[4:]
 def post(token, msg):
@@ -197,6 +199,13 @@ def stopped():
         assert call("stop").startswith("Ended")
 def placed(text):
     return int(re.search(r"placed \S+ (\d+)", text)[1])
+def png(w, h, rgb):
+    """A plain RGB PNG of one colour"""
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+    rows = b"".join(b"\0" + bytes(rgb) * w for _ in range(h))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h,
+        8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 # An export written out: its files, the base64 ones decoded, and each of
 # its types' params' defaults on this server (list_types)
 def export(to):
@@ -306,7 +315,20 @@ elif phase == "build":
     assert "in 18 of 18 cells" in call("set_voxels", dict(box, voxel="kitboss/brick"))
     assert "in 1 of 1 cells" in call("set_voxels", {"at": [3, 14, 3], "size": [1, 1, 1],
         "voxel": "kitboss/brick", "tint": 5})
-    json.dump({"T": T, "C": C, "B": B, "state": state()}, open(args[0], "w"))
+    # [KIT_TEXTURE_DESIGNER] an uploaded texture and a recipe one (the
+    # grass preset, on a type's top), each worn by a cell
+    r = call("put_texture", {"png": base64.b64encode(png(16, 16, (200, 60, 60))).decode(),
+        "voxel": {"name": "redstone"}})
+    assert "voxel type kitboss/redstone wears it" in r, r
+    grass = json.loads(call("list_textures"))["presets"]["grass"]
+    r = call("put_texture", {"name": "moss", "recipe": grass, "voxel": {"name": "mossy",
+        "face": "top", "texture": "kit/stone.png"}})
+    assert "voxel type kitboss/mossy wears it on its top" in r, r
+    for x, v in ((6, "redstone"), (7, "mossy")):
+        assert "in 1 of 1 cells" in call("set_voxels", {"at": [x, 12, 2],
+            "size": [1, 1, 1], "voxel": "kitboss/" + v})
+    json.dump({"T": T, "C": C, "B": B, "state": state(), "grass": grass},
+        open(args[0], "w"))
 elif phase == "export":
     out, gui = args
     export(out)
@@ -314,9 +336,12 @@ elif phase == "export":
     assert files(out) == files(gui), (files(out), files(gui))
     for f in files(gui):
         assert open(out + "/" + f, "rb").read() == open(gui + "/" + f, "rb").read(), f
-    want = ["LICENSE", "composition.json", "edits.bin", "items.json", "meta.json",
+    # (the upload by its hash)
+    tx = [f for f in files(out) if f.startswith("textures/")]
+    assert len(tx) == 1 and re.fullmatch(r"textures/[0-9a-f]{16}\.png", tx[0]), files(out)
+    want = sorted(["LICENSE", "composition.json", "edits.bin", "items.json", "meta.json",
         "prefabs.json", "sounds.json", "types/beacon.client.lua", "types/beacon.lua",
-        "voxels.json"]
+        "voxels.json", "weaves.json"] + tx)
     assert files(out) == want, files(out)
     e = edits(out)["scenes"]["world"]
     cells = [e["cells"][i:i + 5] for i in range(0, len(e["cells"]), 5)]
@@ -324,7 +349,7 @@ elif phase == "export":
     print("the export: %s; edits.bin: %d cells (%d of kitboss/brick), %d heightmap "
         "samples" % (", ".join(files(out)), len(cells), len(brick), len(e["hm"]) // 19))
     # (a heightmap's voxels are air: no sea in the generator's to differ from)
-    assert len(cells) == 19 and len(brick) == 19 and \
+    assert len(cells) == 21 and len(brick) == 19 and \
         len([c for c in brick if c[4]]) == 1 and e["hm"], e
 elif phase == "after":
     first, out, built, title = args
@@ -343,6 +368,14 @@ elif phase == "after":
     assert "kitboss/blade" in json.loads(call("list_items"))
     assert any(v["name"] == "kitboss/brick" for v in json.loads(call("list_voxel_types")))
     assert any(p["prefab"] == "kitboss/pair" for p in json.loads(call("list_prefabs")))
+    # [KIT_TEXTURE_DESIGNER] the recipe texture, and the types wearing it
+    # and the upload
+    r = {x["name"]: x for x in json.loads(call("list_textures"))["recipes"]}
+    vt = {v["name"]: v for v in json.loads(call("list_voxel_types"))}
+    assert r["kitboss/moss"]["recipe"] == built["grass"] and \
+        vt["kitboss/mossy"]["top"] == r["kitboss/moss"]["texture"] and \
+        re.fullmatch(r"kit/up/[0-9a-f]{16}\.png", vt["kitboss/redstone"]["texture"]), \
+        (r, vt.get("kitboss/mossy"), vt.get("kitboss/redstone"))
     g = json.loads(call("get_voxels", {"at": [2, 12, 2], "size": [3, 2, 3]}))
     k = [c for c, n in g["key"].items() if n == "kitboss/brick"]
     assert k and g["layers"] == [[k[0] * 3] * 3] * 2, g
@@ -455,7 +488,6 @@ mcp export "$tok" "$t/first" "$t/gui"
 zip=$("$b" aitta pack "$t/gui" "$t/key" "$t/out" 2> "$t/pack.err") || fail "the pack ($t/pack.err)"
 "$b" aitta install "$zip" "$t/inst" > "$t/install.txt" 2>&1 || fail "the install ($t/install.txt)"
 cp -r "$t/gui" "$t/bad"
-mkdir "$t/bad/textures"
 printf 'x' > "$t/bad/textures/Not_a_hash.png"
 if "$b" aitta pack "$t/bad" "$t/key" "$t/out_bad" > /dev/null 2> "$t/bad.err"; then
 	fail "packed with textures/Not_a_hash.png"
@@ -476,10 +508,14 @@ step 30 "world_menu: create imported from project.template.zip \([0-9]+ bytes\)"
 switched imported
 grep -aqE 'workbench: the project "imported" from a file \([0-9]+ bytes, "project"\)' "$SL" ||
 	fail "no import line ($SL)"
-grep -aqE "The template's export: 0 textures, 4 rows \(0 left out\), [1-9][0-9]* heightmap samples" "$SL" ||
+grep -aqE "The template's export: 1 textures, 7 rows \(0 left out\), [1-9][0-9]* heightmap samples" "$SL" ||
 	fail "the rows not all taken: $(grep -a "The template's export" "$SL") ($SL)"
-grep -aqE "World world: the template's 19 edited cells in 1 sections \(0 left out\)" "$SL" ||
+grep -aqE "World world: the template's 21 edited cells in 1 sections \(0 left out\)" "$SL" ||
 	fail "the cells not all taken: $(grep -a "edited cells" "$SL") ($SL)"
+# [4z17] Said for the export's template only: Crag Trial's and Empty's
+# have none of an export's files
+[ "$(grep -ac "The template's export: " "$SL")" = 1 ] ||
+	fail "the export's line not for the export only: $(grep -a "The template's export: " "$SL") ($SL)"
 client 3
 await "$CL" 0 60 "kit editor: edit mode on"
 await "$CL" 0 30 "kit: entity [0-9]+'s client part: beacon added"
