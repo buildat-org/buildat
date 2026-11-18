@@ -566,7 +566,9 @@ event kit_edit {"op": "walk_here", "pos": [-20, 15, 1]}
 wait_log 10000 the server put the player at (-20
 keypress F6
 wait_log 10000 kit editor: edit mode off
-frames 30
+# (the camera eased ~10 after walk_here: at 30 frames it was 0.3-0.4 short,
+# the follow assert's whole margin)
+frames 90
 event kit_parallax $C5 $C0 $CR $WL
 event kit_body
 keydown D
