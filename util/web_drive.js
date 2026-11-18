@@ -68,8 +68,9 @@
 //                           the same from where the click by label would go
 //   ["at_log", regex, "tap"]  a tap where the last console line matching
 //                           regex says: its two groups x, y (pixels)
-//   ["at_log", regex, "drag", dx, dy]
-//                           a finger's drag from there by dx, dy (Chrome)
+//   ["at_log", regex, "drag", dx, dy, ox, oy]
+//                           a finger's drag from there (plus ox, oy if
+//                           given: x, y a rect's corner) by dx, dy (Chrome)
 //   ["event", "name param"] the native sequence's event line
 //                           (doc/client_commands.txt): sent in the next frame
 //   ["shot", path]          a PNG of the page
@@ -897,7 +898,8 @@ async function find(b, type, label, hx, hy) {
 				const m = l && l.match(re);
 				if (!m || m.length < 3)
 					throw new Error("no console line with a place: /" + a + "/");
-				const x = Number(m[1]), y = Number(m[2]);
+				const x = Number(m[1]) + (args[4] || 0),
+						y = Number(m[2]) + (args[5] || 0);
 				console.log(c + " at " + x + ", " + y + " (the page's line)");
 				if (c === "tap")
 					await b.ops.tap(x, y);

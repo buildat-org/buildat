@@ -241,6 +241,9 @@ local function open_designer(recipe, on_save, opts)
 	local col, prev_col = win, nil
 	local rect = opts.rect
 	local tile_px = 48
+	-- [KIT_TEXTURE_DESIGNER] A target's height: Kit's touch size (its
+	-- shell's SH.TOUCH) where the caller places it (its touch mode)
+	local BH = rect and 32 or 28
 	if rect then
 		-- Placed by the caller: the controls clipped to rect, the preview
 		-- in a window of its own in opts.world
@@ -314,8 +317,11 @@ local function open_designer(recipe, on_save, opts)
 		end
 		return t
 	end
+	-- Where the rows go: the window's column, in a placed one (rect) a page
+	-- scrolled under its Save row
+	local body = col
 	local function row(parent)
-		local r = (parent or col):CreateChild("UIElement")
+		local r = (parent or body):CreateChild("UIElement")
 		r:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
 		return r
 	end
@@ -323,7 +329,7 @@ local function open_designer(recipe, on_save, opts)
 		local b = parent:CreateChild("Button")
 		b:SetStyleAuto()
 		b:SetName(label)
-		b:SetFixedHeight(28)
+		b:SetFixedHeight(BH)
 		b:SetLayout(LM_HORIZONTAL, 0, magic.IntRect(8, 2, 8, 2))
 		local t = b:CreateChild("Text")
 		t:SetStyleAuto()
@@ -369,7 +375,12 @@ local function open_designer(recipe, on_save, opts)
 		end
 	end
 
-	text(col, "weave: textures of parameters, no pen or brush")
+	local title = text(col, "weave: textures of parameters, no pen or brush")
+	if rect then
+		-- Clear of the close glyph (40 wide)
+		title:SetWordwrap(true)
+		title:SetFixedWidth(math.max(40, rect[3] - 64))
+	end
 	local status = nil
 	local function say(s)
 		status.text = s
@@ -384,6 +395,21 @@ local function open_designer(recipe, on_save, opts)
 			on_save(packed)
 		end)
 		button(sr, "Cancel", close)
+	end
+	-- Placed (a phone's half screen): everything else in one page scrolled
+	-- by a finger, the sliders' rows in it, not a list of their own
+	local view, page
+	local function scrolled(parent)
+		view = parent:CreateChild("ScrollView")
+		view:SetStyleAuto()
+		view.scrollBarsAutoVisible = true
+		page = view:CreateChild("UIElement")
+		page:SetLayout(LM_VERTICAL, rect and 6 or 2, magic.IntRect(0, 0, 0, 0))
+		view.contentElement = page
+	end
+	if rect then
+		scrolled(col)
+		body = page
 	end
 
 	local function snippet(format)
@@ -463,10 +489,10 @@ local function open_designer(recipe, on_save, opts)
 		say(what .. ": " .. gen.pack(r))
 	end
 
-	-- The presets, then mutate and random, five a row
+	-- The presets, then mutate and random, five a row (four at a finger's size)
 	local rows = {}
 	local function gen_row(i)
-		local k = math.floor((i - 1) / 5) + 1
+		local k = math.floor((i - 1) / (rect and 4 or 5)) + 1
 		rows[k] = rows[k] or row()
 		return rows[k]
 	end
@@ -505,7 +531,7 @@ local function open_designer(recipe, on_save, opts)
 			d.r.size = s
 			changed()
 		end
-	end, {label = "Size"})))
+	end, {label = "Size", height = BH})))
 	local pats = {}
 	for i, p in ipairs(gen.PATTERNS) do
 		pats[i] = {p, p}
@@ -516,17 +542,15 @@ local function open_designer(recipe, on_save, opts)
 			d.r.pattern = p
 			changed()
 		end
-	end, {label = "Pattern"})))
+	end, {label = "Pattern", height = BH})))
 
-	local view = col:CreateChild("ScrollView")
-	view:SetStyleAuto()
-	view.scrollBarsAutoVisible = true
-	local page = view:CreateChild("UIElement")
-	page:SetLayout(LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
-	view.contentElement = page
-	view:SetFixedHeight(math.min(300,
-			math.max(120, (rect and rect[4] or ui_h) - 300 -
-			(prev_col and not rect and ui_w < 820 and tile_px * 6 + 60 or 0))))
+	if not rect then
+		scrolled(col)
+		view:SetFixedHeight(math.min(300, math.max(120, ui_h - 300 -
+				(prev_col and ui_w < 820 and tile_px * 6 + 60 or 0))))
+	end
+	-- A slider's row: a finger's where placed
+	local RH = rect and BH or 20
 	-- Each colour as three sliders (hue, saturation, value), then the
 	-- parameters
 	local defs = {}
@@ -541,23 +565,23 @@ local function open_designer(recipe, on_save, opts)
 	end
 	for _, def in ipairs(defs) do
 		local r = row(page)
-		r:SetFixedHeight(20)
+		r:SetFixedHeight(RH)
 		-- Each text in a holder of the row's height (blip's)
 		local function centred(s, width)
 			local holder = r:CreateChild("UIElement")
-			holder:SetFixedSize(width, 20)
+			holder:SetFixedSize(width, RH)
 			local t = text(holder, s, width)
 			t.position = magic.IntVector2(0,
-					math.floor((20 - t.height) / 2) - 4)
+					math.floor((RH - t.height) / 2) - 4)
 			return t
 		end
-		local name = centred(def[1], 104)
+		local name = centred(def[1], rect and 84 or 104)
 		local slider = r:CreateChild("Slider")
 		slider:SetStyleAuto()
 		slider:SetName("weave " .. def[1])
 		slider.range = 1
-		slider:SetFixedHeight(16)
-		local value = centred("", 64)
+		slider:SetFixedHeight(RH - 4)
+		local value = centred("", rect and 84 or 64)
 		local sl = {def = def, slider = slider, value = value, name = name,
 			row = r}
 		sliders[#sliders + 1] = sl
@@ -620,7 +644,7 @@ local function open_designer(recipe, on_save, opts)
 		ui_utils.copy(snippet("table"))
 		say("copied as a table")
 	end)
-	button(ex, "Save weave_gen.lua", function()
+	button(rect and row() or ex, "Save weave_gen.lua", function()
 		local path = api.save_file("weave_gen.lua",
 				api.read_extension_file("weave_gen.lua"))
 		say(path and "saved weave_gen.lua" or "weave_gen.lua not saved")
@@ -628,7 +652,16 @@ local function open_designer(recipe, on_save, opts)
 
 	status = text(col, "")
 	status:SetFixedWidth(rect and math.max(40, rect[3] - 24) or 380)
-	page:SetFixedWidth((rect and rect[3] - 20 or 380) - 24)
+	-- Placed: the view's width but its scroll bar's (16) and borders
+	page:SetFixedWidth(rect and view.width - 20 or 356)
+	if rect then
+		-- Two lines of status (a recipe's code wraps), the page the rest
+		status:SetWordwrap(true)
+		status.text = "-\n-"
+		status:SetFixedHeight(status.height)
+		view:SetFixedHeight(math.max(BH * 3, rect[4] - 20 - title.height -
+				(on_save and BH + 6 or 0) - status.height - 12))
+	end
 	show_values()
 	show_now()
 	say(gen.pack(d.r))
