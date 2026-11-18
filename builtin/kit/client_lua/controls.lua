@@ -331,7 +331,11 @@ local function world(skip)
 			(hm[4] or 0) + hm[2] - 1} or nil,
 		moving_looks = moving_looks, t = C.draw_t, polys = polys,
 		-- [KIT_PLANE] the body's z held ([KIT_TOP_DOWN] or y: horizontal)
-		plane = C.ctl and tonumber(C.ctl.plane), horizontal = C.ctl and C.ctl.horizontal}
+		plane = C.ctl and tonumber(C.ctl.plane), horizontal = C.ctl and C.ctl.horizontal,
+		-- [KIT_TOP_DOWN] (8) the others, for a movement that meets them
+		bodies = C.ctl and C.ctl.horizontal and decl().bodies == true and
+			(tonumber(C.ctl.seat) or 0) == 0 and M.others_bodies and
+			M.others_bodies(tonumber(body_decl().r) or 0.45) or nil}
 end
 
 -- ---- The body

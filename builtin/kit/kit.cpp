@@ -23966,8 +23966,47 @@ struct Module: public interface::Module, public Interface
 			double r, double h, double reach)
 	{
 		const Entity *v = b.seat ? vehicle_of(b.seat) : nullptr;
+		ss_ others;
+		if(b.plane_h && !b.seat && m_types[b.type].decl.get("movement").get(
+				"bodies").is_true())
+			bodies_lit(others, pe, pos, r + reach);
 		snapshot(o, pe.scene, b.state, v ? v->id : 0, pos, r, h, reach, b.plane_z,
-				b.plane_h);
+				b.plane_h, others);
+	}
+
+	// [KIT_TOP_DOWN] (8) ",bodies={{x, z, r, vx, vz, by}...}": the other players'
+	// bodies in pe's scene within reach (+ their r) of pos, in play and not
+	// seated, for a movement that asks (movement.bodies; move.lua's W:circle)
+	void bodies_lit(ss_ &o, const Peer &pe, const double pos[3], double reach)
+	{
+		o += ",bodies={";
+		char buf[160];
+		for(auto &bp : m_bodies){
+			auto pi = m_peers.find(bp.first);
+			const Body &ob = bp.second;
+			if(pi == m_peers.end() || &pi->second == &pe || pi->second.scene != pe.scene ||
+					ob.type.empty() || ob.seat || pi->second.editing ||
+					out_of_play(pi->second.player))
+				continue;
+			const json::Value &sp = ob.state.get("pos"), &sv = ob.state.get("vel");
+			if(!pos_ok(sp))
+				continue;
+			const double x = sp.at(0u).as_number(), z = sp.at(2u).as_number();
+			const double r = num(body_decl(ob.type), "r", 0.45, 0.05, 8);
+			if((x - pos[0]) * (x - pos[0]) + (z - pos[2]) * (z - pos[2]) >
+					(reach + r) * (reach + r))
+				continue;
+			auto vel = [&](unsigned k){
+				return sv.is_array() && k < sv.size() && sv.at(k).is_number() &&
+						std::isfinite(sv.at(k).as_number()) ? sv.at(k).as_number() : 0.0;
+			};
+			snprintf(buf, sizeof buf, "{%.17g,%.17g,%.17g,%.17g,%.17g,", x, z, r,
+					vel(0), vel(2));
+			o += buf;
+			lua_lit(json::Value("player:"+itos(pi->second.player)), o);
+			o += "},";
+		}
+		o += "}";
 	}
 
 	// [KIT_VEHICLE_MOVEMENTS] own: what is stepping (a vehicle), not met with what is
@@ -23976,7 +24015,7 @@ struct Module: public interface::Module, public Interface
 	// a y, plane_of()'s)
 	void snapshot(ss_ &o, const ss_ &scene_name, const json::Value &state, uint64_t own,
 			const double pos[3], double r, double h, double reach,
-			double plane = NAN, bool level = false)
+			double plane = NAN, bool level = false, const ss_ &bodies = "")
 	{
 		WorldScope ws(m_w, world_named(scene_name));
 		auto si = m_host.scenes.find(scene_name);
@@ -24235,6 +24274,7 @@ struct Module: public interface::Module, public Interface
 		if(!std::isnan(plane))
 			o += ",plane="+json::Value(plane).stringify()+(level ? ",horizontal=true" :
 					"");
+		o += bodies; // ([KIT_TOP_DOWN] (8) bodies_lit()'s)
 		o += "}";
 	}
 
@@ -32681,6 +32721,12 @@ struct Module: public interface::Module, public Interface
 				"world's x and z, nx, ny the normal's x and z; a kit/polygon "
 				"lying flat (pitch 90) is walls there, w:under(x, y, z) -> info "
 				"a floor polygon's (floor on, collision off) over its area. "
+				"[KIT_TOP_DOWN] (8) movement.bodies = true there: w:circle meets "
+				"the other players' bodies in the scene (in play, not seated) as "
+				"circles of their body's r, info.body their by, info.vel {vx, vz}; "
+				"the step pushes its own body out (the server's place is the "
+				"answer, a client predicting against the others' last known "
+				"places); none without it. "
 				"Its file's math is w's on both sides (floor, ceil, "
 				"sqrt, abs, fmod, min, max, sin, cos, atan, atan2; no random). "
 				"s.events = {\"name\" | {\"name\", value}...} set in a step: "
@@ -38410,7 +38456,10 @@ struct Module: public interface::Module, public Interface
 			"auto, crosshair or cursor; plane vertical holds bodies at one z "
 			"(side-scrollers, with kit/polygon), horizontal at one height, the "
 			"feet on the bottom of the spawn's cell, moving in x and z "
-			"(top-down: kit/walker with no gravity or jump); the effects tint and "
+			"(top-down: kit/walker with no gravity or jump; bodies pass through "
+			"each other unless the movement's type says movement.bodies = true, "
+			"a car's: then its step meets the others as circles, the server "
+			"deciding); the effects tint and "
 			"tint_amount, vignette, blur and glitch (0...1) colour the whole "
 			"view, and its inputs shake, fov, glitch, tint flash them in play; "
 			"its input camera changes the mode, camera_target (an entity id or "

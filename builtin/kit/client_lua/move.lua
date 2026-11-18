@@ -118,6 +118,14 @@
 -- lying flat (stage 3's prisms with their depth up) that span it.
 -- simplified: in a horizontal plane the heightmap is no 2D edge (W:move still meets
 -- it), nor is a standing polygon (its slice there is the upgrade)
+-- [KIT_TOP_DOWN] (8) Bodies pass through each other unless a movement asks:
+-- movement.bodies = true (its type's declaration) in a level plane, its w:circle
+-- meets the other players' bodies as circles (w.bodies, t.bodies {{x, z, r, vx, vz,
+-- by}...}: kit.cpp's bodies_lit() for the server's step, the others' last known
+-- places on a client, players.lua's others_bodies()), info.body their by, info.vel
+-- {vx, vz}. Each step pushes its own body out of them (half the depth: the other's
+-- step does the rest), the server deciding. simplified: a correction on contact (a
+-- client's others are a round trip old); W:segment and W:move meet no bodies
 -- [KIT_PLANE] stage 3: kit/polygon's look ("polygon": its points {{x, y}...} in its
 -- own x and y, extruded `depth` along its own z round its place) lying flat to the
 -- world's x and y (its yaw 0 or 180, any roll) is a prism (M.look_poly, w.polys):
@@ -904,6 +912,17 @@ function M.world(t)
 	for _, p in ipairs(t.polys or {}) do
 		local l = p.floor and w.floors or w.polys
 		l[#l + 1] = p
+	end
+	-- [KIT_TOP_DOWN] (8) the other bodies a movement.bodies meets, {x, z, r, vx, vz,
+	-- by} each, their info made once; in a level plane only
+	w.bodies = {}
+	for _, b in ipairs(w.horizontal and type(t.bodies) == "table" and t.bodies or {}) do
+		local x, z, r = tonumber(b[1]), tonumber(b[2]), tonumber(b[3])
+		if x and z and r then
+			w.bodies[#w.bodies + 1] = {x, z, r, info = {solid = true, friction = 1,
+				surface = "body", body = tostring(b[6]), vel = {tonumber(b[4]) or 0,
+				tonumber(b[5]) or 0}}}
+		end
 	end
 	-- [KIT_MOVING_OBJECTS] t.moving_looks: solid looks on moving objects, each
 	-- {look, on, {x, y, z}, yaw, pitch, roll, links} at rest
@@ -2028,6 +2047,19 @@ function W:circle(x, y, r, z)
 			box(b[1], b[V], b[4], b[V + 3], ALL, b.info or M.OBJECT)
 		end
 	end
+	-- [KIT_TOP_DOWN] (8) the other bodies: circles (one on the middle: out along +x)
+	for _, b in ipairs(self.bodies or {}) do
+		local dx, dy, rr = x - b[1], y - b[2], r + b[3]
+		local d2 = dx * dx + dy * dy
+		if d2 < rr * rr then
+			local d = sqrt(d2)
+			if d > 1e-9 then
+				add(rr - d, dx / d, dy / d, b.info)
+			else
+				add(rr, 1, 0, b.info)
+			end
+		end
+	end
 	-- The edges: from in front as from a box's corner; from behind (inside the solid,
 	-- over the edge's span) out along its normal
 	for _, e in ipairs(self:plane_edges(z, x - r, y - r, x + r, y + r)) do
@@ -2578,7 +2610,7 @@ function M.snapshot(t)
 			(hm.ox or 0) + hm.sx - 1, (hm.oz or 0) + hm.sz - 1} or nil
 	return M.world{cell = cell, boxes = boxes, ground = ground, edge = edge,
 		turned = M.turned(t.turned or {}), moving_looks = moving_looks, t = t.t,
-		plane = t.plane, horizontal = t.horizontal, polys = polys}
+		plane = t.plane, horizontal = t.horizontal, polys = polys, bodies = t.bodies}
 end
 
 -- The steps of a batch: each input dt long, in sub steps of its own

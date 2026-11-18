@@ -837,6 +837,16 @@ namespace interface
 //   moving in x and z: kit/walker there has no gravity and no jump; a step's
 //   w.horizontal is true, w.plane that cell's middle y, and w:circle's and
 //   w:segment's x, y are the world's x and z (move.lua's header).
+//   [KIT_TOP_DOWN] (8) The bodies pass through each other there unless the
+//   movement's type declares movement.bodies = true: then a step's w:circle
+//   meets the other players' bodies in the scene (in play, not seated, within
+//   its reach) as circles of their body's r, info.body their by and info.vel
+//   their velocity's x and z; the step pushes its own body out, each body
+//   by its own step. The server's snapshot sends them (kit.cpp's
+//   bodies_lit()); a client predicts against the others' last known places
+//   (players.lua's others_bodies()). simplified: a correction on contact
+//   (the others' places are a round trip old on the client); no bodies in a
+//   vertical plane or without one, none for the creatures.
 //   [KIT_TOP_DOWN] (2) a polygon turned pitch 90 (or -90) lies flat: its
 //   points the world's x and z, its depth along y; its edges are upright
 //   walls, met in a level plane where its depth spans the plane's y, in 3D its
