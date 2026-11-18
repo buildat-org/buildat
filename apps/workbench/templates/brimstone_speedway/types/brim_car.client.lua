@@ -309,9 +309,10 @@ local function effects(s, node, p, h, flags)
 end
 
 return {
-	draw = function(s, node)
+	draw = function(s, node, yaw)
 		local p = type(s.pose) == "table" and s.pose or {}
-		local h = tonumber(p[1]) or 0
+		-- (this player's own car turned as drawn between its steps: Kit's yaw)
+		local h = tonumber(yaw) and yaw * math.pi / 180 or tonumber(p[1]) or 0
 		local paint = math.floor(tonumber(p[2]) or 1)
 		paint = PAINTS[paint] and paint or 1
 		local steer = (tonumber(p[3]) or 0) * 180 / math.pi

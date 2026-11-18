@@ -291,21 +291,23 @@ local function world(skip)
 				moving_looks[#moving_looks + 1] = {show.look, on == true, {r[1], r[2], r[3]},
 					qy, qp, qr, links}
 			else
-				local p = n.node.position
-				local q = n.node.rotation
-				local tilted = q.x ~= 0 or q.z ~= 0
-				local qy, qp, qr = MV.turn_angles(q.w, q.x, q.y, q.z)
-				local b = MV.look_box(show.look, on, {p.x, p.y, p.z}, qy,
-						tilted and qp or 0, tilted and qr or 0)
-				if b then
-					boxes[#boxes + 1] = b
+				-- [KIT_STILL_LOOKS] kept till its place, turn or show change
+				-- (module.lua's n.gen; one with a state made each time)
+				local c = n.world_made
+				if not (c and n.gen and c.gen == n.gen and n.look and not show.look.state) then
+					local p = n.node.position
+					local q = n.node.rotation
+					local tilted = q.x ~= 0 or q.z ~= 0
+					local qy, qp, qr = MV.turn_angles(q.w, q.x, q.y, q.z)
+					c = {gen = n.gen, box = MV.look_box(show.look, on, {p.x, p.y, p.z}, qy,
+							tilted and qp or 0, tilted and qr or 0),
+						-- [KIT_PLANE] stage 3: a polygon's prism
+						poly = show.look.shape == "polygon" and MV.look_poly(show.look, on,
+							{p.x, p.y, p.z}, qy, tilted and qp or 0, tilted and qr or 0) or nil}
+					n.world_made = c
 				end
-				-- [KIT_PLANE] stage 3: a polygon's prism
-				local pg = show.look.shape == "polygon" and MV.look_poly(show.look, on,
-						{p.x, p.y, p.z}, qy, tilted and qp or 0, tilted and qr or 0)
-				if pg then
-					polys[#polys + 1] = pg
-				end
+				boxes[#boxes + 1] = c.box
+				polys[#polys + 1] = c.poly
 			end
 		end
 	end
@@ -361,6 +363,30 @@ local function copy(t)
 		r[k] = copy(v)
 	end
 	return r
+end
+
+-- Whether a and b hold the same: strings, booleans and tables of them, and
+-- numbers to a billionth (the box's Lua and the client's differ in the last
+-- bits of some: 57.772970860263 either way)
+local function same(a, b)
+	if type(a) == "number" and type(b) == "number" then
+		local d, m = a - b, math.max(a < 0 and -a or a, b < 0 and -b or b)
+		return (d < 0 and -d or d) <= 1e-9 * m + 1e-12
+	end
+	if type(a) ~= "table" or type(b) ~= "table" then
+		return a == b
+	end
+	for k, v in pairs(a) do
+		if not same(v, b[k]) then
+			return false
+		end
+	end
+	for k in pairs(b) do
+		if a[k] == nil then
+			return false
+		end
+	end
+	return true
 end
 
 local function pos_of(s)
@@ -468,17 +494,29 @@ buildat.sub_packet("kit:body", function(data)
 		return
 	end
 	local before = pos_of(C.s)
-	local keep = {}
+	local keep, acked = {}, nil
 	for _, q in ipairs(C.pending) do
 		if q[1] > ack then
 			keep[#keep + 1] = q
+		elseif q[1] == ack then
+			acked = q
 		end
 	end
 	C.pending = keep
+	-- [KIT_SAME_STATE] The server's state after the input acknowledged the
+	-- one this client predicted after it: the steps since stand as they are
+	-- (stepped again, each was the steps' cost again a body packet, a round
+	-- trip's worth of them)
+	if acked and same(acked[3], b.s) then
+		C.acks = C.acks + 1
+		return
+	end
 	C.s = b.s
+	C.replays = (C.replays or 0) + (#keep > 0 and 1 or 0)
 	local w = #keep > 0 and world() or nil
 	for _, q in ipairs(keep) do
 		step(C.s, q[2], w)
+		q[3] = copy(C.s)
 	end
 	C.acks = C.acks + 1
 	local after = pos_of(C.s)
@@ -529,11 +567,14 @@ local function log_body()
 			C.acks, C.corrections, #C.pending, tonumber(C.s and C.s.jumps) or 0,
 			tonumber(C.s and C.s.arrived) or 0))
 	-- [KIT_WALKER_FRAME] To the tenth of a millimetre, for measuring a deck
+	-- (kit_free_prefab_check reads it on the line after the one above)
 	log:info(string.format("kit: feet at %.4f,%.4f,%.4f, frame %s", p[1], p[2],
 			p[3], tostring(C.s and C.s.frame or "none")))
 	-- ([KIT_TOP_DOWN] (2) what the step says it stands on: a floor polygon's)
 	log:info(string.format("kit: body on %s, friction %s",
 			tostring(C.s and C.s.surface or "none"), tostring(C.s and C.s.friction)))
+	-- [KIT_SAME_STATE] the body packets whose steps were taken again
+	log:info(string.format("kit: body replayed %d of %d acks", C.replays or 0, C.acks))
 	-- [KIT_SIDE_LEAD] the side camera's middle and its lead
 	if C.side_at and C.side_lead then
 		log:info(string.format("kit: side camera at %.2f,%.2f, lead %.2f,%.2f",
@@ -2647,7 +2688,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 			C.seq = C.seq + 1
 			if not riding then
 				step(C.s, i, w)
-				C.pending[#C.pending + 1] = {C.seq, i}
+				C.pending[#C.pending + 1] = {C.seq, i, copy(C.s)}
 			end
 			-- [KIT_PLAYER_MODEL] and the pitch, the swings and the dig
 			-- others see on this body
@@ -2727,14 +2768,18 @@ magic.SubscribeToEvent("Update", function(_, data)
 end)
 
 -- [KIT_PLANE] stage 4: the movement's draw hook (its client part's draw(s,
--- node): players.lua calls it for each body) and this body's state as
--- predicted, for it
+-- node, yaw): players.lua calls it for each body) and this body's state as
+-- predicted, for it; [KIT_DRAWN_YAW] its yaw as drawn (degrees), between its
+-- last two steps as its place is
 function M.movement_draw()
 	local part = C.type and P.parts[C.type]
 	return type(part) == "table" and type(part.draw) == "function" and part.draw or nil
 end
 function M.body_state()
 	return C.s
+end
+function M.drawn_yaw()
+	return C.draw_yaw
 end
 
 -- For a drive: "event kit_click_at <x> <y> <z> [right]" clicks (the left

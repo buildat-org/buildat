@@ -1171,6 +1171,7 @@ end
 local function carried(n)
 	local d = magic.Vector3(0, 0, 0)
 	local pid = n.node:GetVar("kit_parent"):GetInt()
+	n.pid = pid
 	for _ = 1, 16 do
 		local pn = pid ~= 0 and P.nodes[pid]
 		if not pn then
@@ -1222,6 +1223,32 @@ function M.parallax_layer(id, n)
 end
 
 local hud = nil
+-- [KIT_STILL_LOOKS] A look that has stood still CALM frames in play, with
+-- nothing else on it that changes by the frame (no text, HUD line, client
+-- part, state, slide, attachment, preview, pose, moving links; its parent
+-- not sliding), is read again each 16th frame only, staggered by its id: a
+-- node's place, turn and show are dear reads through the sandbox, and a
+-- track of 250 polygons read each frame was some 18 ms of the frame
+-- (Brimstone Speedway's, 2026-11-18). n.gen counts what changed in its
+-- place, turn or show (controls.lua's world() keeps what it made of it
+-- till then); n.still: skipped this frame.
+-- simplified: a still one moved or changed by the server is drawn so up to
+-- 16 frames late; in edit mode every look is read each frame
+local CALM, frame_no = 8, 0
+-- (for "event kit_looks": what the frames since the last ask read and cost)
+local LK = {frames = 0, read = 0, looks = 0, us = 0}
+local function still(id, n)
+	if E.editing or not n.look or (n.calm or 0) < CALM or (frame_no + id) % 16 == 0 then
+		return false
+	end
+	local show = n.show
+	local look = show.look
+	local pn = n.pid and n.pid ~= 0 and P.nodes[n.pid]
+	return not (n.text or show.hud ~= nil or show.client ~= nil or look.state or
+			look.hidden or n.rest or n.slide_to or n.wear_wanted or n.ghost or
+			n.see_through or n.attach_to or P.preview[id] or P.pose[id] or
+			(pn and pn.slide_to))
+end
 local function update_play(_, data)
 	local dt = data:GetFloat("TimeStep")
 	local lines = {}
@@ -1231,7 +1258,20 @@ local function update_play(_, data)
 	if M.moving_tick then
 		M.moving_tick()
 	end
+	frame_no = frame_no + 1
+	local busy = {}
 	for id, n in pairs(P.nodes) do
+		n.still = still(id, n)
+		if n.still then
+			layers = layers or type(n.show.parallax) == "table"
+		else
+			busy[id] = n
+		end
+		LK.read = LK.read + (n.look and not n.still and 1 or 0)
+		LK.looks = LK.looks + (n.look and 1 or 0)
+	end
+	for id, n in pairs(busy) do
+		local look_was, on_was, calm = n.look, n.on, true
 		-- What it shows: again as an edit changes it
 		local raw = n.node:GetVar("kit_show")
 		raw = raw:IsEmpty() and "" or raw:GetString()
@@ -1240,6 +1280,7 @@ local function update_play(_, data)
 			n.show = network.parse_json(raw)
 			drop_look(n)
 			n.last_text = nil
+			n.gen, calm = (n.gen or 0) + 1, false
 		end
 		local show = type(n.show) == "table" and n.show or {}
 		layers = layers or type(show.parallax) == "table"
@@ -1294,7 +1335,15 @@ local function update_play(_, data)
 		if n.look then
 			local p = n.node.position
 			local nr = n.node.rotation
-			local q = magic.Quaternion(nr.w, nr.x, nr.y, nr.z)
+			local r = {p.x, p.y, p.z, nr.w, nr.x, nr.y, nr.z}
+			local was = n.raw or {}
+			for i = 1, 7 do
+				if r[i] ~= was[i] then
+					n.raw, n.gen, calm = r, (n.gen or 0) + 1, false
+					break
+				end
+			end
+			local q = magic.Quaternion(r[4], r[5], r[6], r[7])
 			local pv = P.preview[id]
 			-- An editor's preview: where its drag has it, until the server's
 			-- node is there (or its time is up)
@@ -1318,8 +1367,13 @@ local function update_play(_, data)
 				n.at, n.at_q = magic.Vector3(p.x, p.y, p.z), q
 				n.look.position = n.at
 				n.look.rotation = q * n.look_rot
+				calm = false
 			end
 		end
+		if n.look ~= look_was or n.on ~= on_was then
+			calm = false
+		end
+		n.calm = calm and (n.calm or 0) + 1 or 0
 		if n.text then
 			-- [KIT_INPUT_ACTIONS] "[use]": this player's key for it
 			local v = shown(parse(n.node:GetVar("kit:" ..
@@ -1442,7 +1496,19 @@ local function update_play(_, data)
 		P.notice = nil
 	end
 end
-magic.SubscribeToEvent("Update", update_play)
+magic.SubscribeToEvent("Update", function(_, data)
+	local t0 = buildat.get_time_us()
+	update_play(_, data)
+	LK.frames, LK.us = LK.frames + 1, LK.us + buildat.get_time_us() - t0
+end)
+-- [KIT_STILL_LOOKS] (a drive's: the looks read a frame since the last ask, of
+-- how many, and this pass's ms a frame)
+magic.SubscribeToEvent("command_seq:kit_looks", function()
+	local f = math.max(1, LK.frames)
+	log:info(string.format("kit: looks: %d frames, %.1f read a frame of %.1f, " ..
+			"%.2f ms a frame", LK.frames, LK.read / f, LK.looks / f, LK.us / f / 1000))
+	LK.frames, LK.read, LK.looks, LK.us = 0, 0, 0, 0
+end)
 
 -- [KIT_CLIENT_REACT] (1) Zones on this client: its own predicted body
 -- (controls.lua's zone_body) against the zones of the entities with client
@@ -2320,10 +2386,13 @@ function M.play_target(origin, dir, reach, solid)
 			P.nodes[P.you] and P.nodes[P.you].node.position
 	if me and P.use_range and not (M.clicks_move and M.clicks_move()) then
 		for nid, n in pairs(P.nodes) do
-			-- [KIT_FLAG_CLICK_RANGE] its type's own, if it has one
-			local r = math.min(P.use_range, tonumber(show_of(n).use_range) or
+			-- [KIT_FLAG_CLICK_RANGE] its type's own, if it has one (only what
+			-- pick_entity would take: a node's place is a dear read)
+			local show = show_of(n)
+			local r = math.min(P.use_range, tonumber(show.use_range) or
 					P.use_range)
-			if (n.node.position - me):Length() > r then
+			if show.usable and not show.player and
+					(n.node.position - me):Length() > r then
 				skip[nid] = true
 			end
 		end

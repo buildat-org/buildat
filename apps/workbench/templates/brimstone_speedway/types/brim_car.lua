@@ -151,9 +151,12 @@ return {
 			max = 40},
 		boost = {cat = "physics", type = "number", default = 1.45, min = 1,
 			max = 3},
-		rate = {cat = "advanced", type = "number", default = 60, min = 10,
+		-- (the inputs a second; Kit draws the car between them. Each step
+		-- `substeps` of the physics: 120 a second as at 60 and 2, the tyres'
+		-- grip being a share of the speed across them each)
+		rate = {cat = "advanced", type = "number", default = 30, min = 10,
 			max = 120},
-		substeps = {cat = "advanced", type = "number", default = 2, min = 1,
+		substeps = {cat = "advanced", type = "number", default = 4, min = 1,
 			max = 8},
 	},
 	step = function(s, i, dt, w, p)
