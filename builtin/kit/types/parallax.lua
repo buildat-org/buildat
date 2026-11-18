@@ -9,7 +9,11 @@
 -- x, as many as the view needs. Visual only: what is under it is never met
 -- (the server's collision and the bots' grid leave it out, as the clients
 -- do). Play, spectating and get_view draw it from their camera; the editor
--- draws it where authored and says so (module.lua's parallax pass)
+-- draws it where authored and says so (module.lua's parallax pass).
+-- [KIT_TOP_DOWN] (5) With kit/controls' plane horizontal (a top-down view)
+-- follow_y is along z, the view's up on the screen, and nothing moves up and
+-- down: ground far under the play (or clouds over it) lagging the camera
+-- both ways. The name kept: follow_y is the view's second axis
 return {
 	version = 1,
 	parallax = {follow = "param:follow", follow_y = "param:follow_y",
@@ -24,7 +28,7 @@ return {
 	gizmo = {shape = "box", size = 0.3, color = "#8090e0"},
 	about = {
 		group = "Building",
-		what = "A backdrop layer for side views: what is put under it (polygons, parts) is drawn moving with the camera by 1 - follow (0: as far as the sky, 1: the world; follow_y up and down, 1 by default) and repeated every `repeat` m along x (0: once), never met. Placed where it looks right with the camera at the layer's x. E.g. {\"follow\": 0.2, \"repeat\": 128} with a far skyline polygon under it.",
+		what = "A backdrop layer for side views: what is put under it (polygons, parts) is drawn moving with the camera by 1 - follow (0: as far as the sky, 1: the world; follow_y up and down, along z in a top-down game with kit/controls' plane horizontal, 1 by default) and repeated every `repeat` m along x (0: once), never met. Placed where it looks right with the camera at the layer's x. E.g. {\"follow\": 0.2, \"repeat\": 128} with a far skyline polygon under it.",
 		keywords = "backdrop background skyline scenery scroll depth layer",
 	},
 }

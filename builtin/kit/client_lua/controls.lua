@@ -109,6 +109,10 @@ end
 function M.side_game()
 	return params().camera == "side"
 end
+-- [KIT_TOP_DOWN] (5) kit/controls' plane horizontal (the server's word)
+function M.level_plane()
+	return C.ctl ~= nil and C.ctl.horizontal == true
+end
 -- Whether the mouse or a drag turns the view (a top-down's and [KIT_PLANE] a
 -- side camera's never turn)
 function M.view_turns()

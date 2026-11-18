@@ -853,7 +853,8 @@ namespace interface
 //   [KIT_SIDE_SCENERY] (8) parallax = {follow =, follow_y =, repeat =}
 //   ("param:<name>" as a look's; kit/parallax): the looks under the entity
 //   are drawn by each client offset by its camera's travel from the
-//   entity's place, 1 - follow of it along x and 1 - follow_y up, with
+//   entity's place, 1 - follow of it along x and 1 - follow_y up
+//   ([KIT_TOP_DOWN] (5) along z with kit/controls' plane horizontal), with
 //   copies every repeat along x (0: none); never met (kit.cpp's collision
 //   snapshot and the bots' grid leave them out, as controls.lua's world()
 //   does). The editor draws them where authored (module.lua's parallax pass).
