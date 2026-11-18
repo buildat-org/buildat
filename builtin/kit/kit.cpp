@@ -32273,7 +32273,9 @@ struct Module: public interface::Module, public Interface
 				"parent": {"description":
 					"An entity's id to put it under (0 or the scene's own id: the scene), or \"root\": the app root"},
 				"on": {"type": "string", "enum": ["scene", "root"], "description":
-					"A root type's place: your scene's own copy, or the app root"}},
+					"A root type's place: your scene's own copy, or the app root"},
+				"pitch": {"type": "number", "description":
+					"Degrees about x in the world (90: a kit/polygon lying flat, its points the world's x and z)"}},
 				"required": ["type", "pos"]})J", ""},
 			{"set_param", "set", "Sets a parameter of an entity's component "
 				"to value, checked against its type's declaration. Or params: "
@@ -40255,6 +40257,12 @@ struct Module: public interface::Module, public Interface
 			j.set("plane_depth", plane_depth(pi->second.scene));
 			j.set("plane_clip", controls_params(pi->second.scene).get(
 					"side_clip"));
+			// ([KIT_TOP_DOWN] (4) a level plane's y: the plan view draws a
+			// polygon there)
+			bool h = false;
+			const double py = plane_of(pi->second.scene, &h);
+			if(h)
+				j.set("plane_y", py);
 		}
 		j.set("can_make_scenes", (bool)m_host.make_scene);
 		// [KIT_SESSIONS_1] the session they are in: {id, kind, by, clock}
@@ -41816,6 +41824,11 @@ struct Module: public interface::Module, public Interface
 				pos.append(grid(j.get("pos").at(k).as_number()));
 			if(!app && !no_pos){
 				e.set("pos", pos);
+				// [KIT_TOP_DOWN] (4) "pitch": turned so in the world (a
+				// kit/polygon drawn in the plan view lies flat, pitch 90)
+				const json::Value &pt = j.get("pitch");
+				if(pt.is_number() && std::isfinite(pt.as_number()))
+					row_turn(e, 0, pt.as_number(), 0);
 				localize(e);
 			}
 			json::Value comp = json::object();

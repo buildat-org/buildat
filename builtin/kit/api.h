@@ -1013,7 +1013,8 @@ namespace interface
 //   {"op": "place", "type": t, "pos": [x, y, z]}  -- a new entity in the
 //       editor's scene with an instance of t (the palette: every
 //       type of Kit's and of the app's that loads), its id the next; a
-//       position on a 1/16 cell's grid
+//       position on a 1/16 cell's grid; [KIT_TOP_DOWN] (4) "pitch":
+//       degrees, turned so in the world (90: a kit/polygon lying flat)
 //   {"op": "place", "prefab": name, "pos": [x, y, z], "turn": degrees}
 //       -- a prefab's copy, turned a multiple of 90 about its base
 //       ([KIT_PREFAB_VOXELS]); "clipboard": true instead of a prefab: the
