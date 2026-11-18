@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min (2026-11-17)
+# cost: ~2.5 min (2026-11-18)
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/ui_button.lua builtin/kit/types/ui_scene_list.lua
 # [KIT_AGENT_FEEDBACK_1117] An agent's tools as a claude.ai agent asked for
 # them on testbench, through MCP on Workbench. kitboss (the admin) makes two
@@ -47,6 +47,12 @@
 #      (s.spheres) with the point outside, by the point, by a walker's body
 #      box (movement.zone "box"); get_state's zone kind, shape, bounds and
 #      who is in it; play_input's body shape.
+#  10. [KIT_CLIENT_REACT] client parts on the agent's own client (the
+#      server's camera's log): its body's by "player:<id>" (met by a zone,
+#      try_input as me) and its per_player state (shared = true too) on
+#      its client (7); the movement's draw given the predicted state (8); two
+#      parts passing a value through kit.shared (2); a part's on_add failing:
+#      in get_log and in kitboss's editor Log, its entity selected (4).
 #   util/kit_agent_tools_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -345,6 +351,75 @@ GEM = '''return {
 	on_enter = function(c, by) c.state.n = c.state.n + 1 end,
 	on_leave = function(c, by) c.state.out = c.state.out + 1 end,
 }
+'''
+# [KIT_CLIENT_REACT] a zone with a per_player state (met, set: by whom); a
+# reader of kit.shared; a client part that fails; a movement counting its
+# steps (s.n: the predicted state's), its draw saying which it got
+PP = '''return {
+	version = 1,
+	zone = "size",
+	about = {what = "The check's per_player state."},
+	params = {size = {type = "position", default = {1, 1, 1}}},
+	inputs = {set = "none"},
+	outputs = {who = "string"},
+	state = {got = {default = {}, shared = true, per_player = true}},
+	on_enter = function(c, by) c.state.got[by] = "met " .. by end,
+	on_input = function(c, input, value, by)
+		c.state.got[by] = "set " .. by
+		c:emit("who", by)
+	end,
+}
+'''
+PP_CL = '''local kit = require("buildat/module/kit")
+local network = require("buildat/extension/network")
+return {
+	on_add = function(e) kit.shared.pp = "pp " .. e.id end,
+	on_update = function(e)
+		local v = e:shown("got")
+		v = type(v) == "table" and network.write_json(v) or tostring(v)
+		if v ~= e.said then
+			e.said = v
+			e:log("got " .. v)
+		end
+	end,
+	on_remove = function(e) kit.shared.pp = nil end,
+}
+'''
+PQ = '''return {version = 1, about = {what = "The check's reader of kit.shared."}}
+'''
+PQ_CL = '''local kit = require("buildat/module/kit")
+return {
+	on_update = function(e)
+		if kit.shared.pp and not e.said then
+			e.said = true
+			e:log("shared " .. kit.shared.pp)
+		end
+	end,
+}
+'''
+PF = '''return {version = 1, about = {what = "The check's failing client part."}}
+'''
+PF_CL = 'return {on_add = function(e) error("pf fails on purpose") end}\n'
+PMOVE = '''return {
+	version = 1,
+	root = true,
+	about = {what = "The check's movement: its steps counted."},
+	movement = {body = {r = 0.3, h = 1, eye = 0.8}},
+	step = function(s, i, dt, w, p)
+		s.pos, s.vel = {0, 0.6, 0}, {0, 0, 0}
+		s.n = (s.n or 0) + 1
+	end,
+}
+'''
+PMOVE_CL = '''local log = buildat.Logger("pmove")
+local said = {}
+return {draw = function(s, node)
+	local k = s.n and "predicted" or "posed"
+	if not said[k] then
+		said[k] = true
+		log:info("kit check: pmove draws a " .. k .. " body")
+	end
+end}
 '''
 if phase == "tools":
     hidden = {"set_builder", "list_games", "copy_game", "rename_game", "publish_log"}
@@ -698,6 +773,66 @@ elif phase == "zones":
     print("   a gem met by a wheel (its point outside), by the point, by a walker's box")
     assert "Your body is gone" in call("play_leave")
     call("stop")
+elif phase == "client":
+    # [KIT_CLIENT_REACT] client parts on the agent's own client (the
+    # server's camera playing its body)
+    rpc("initialize", init)
+    to_start()
+    cam = out + "/user/camera/workbench/client.log"
+    def camlog():
+        try:
+            return open(cam, errors="replace").read()
+        except FileNotFoundError:
+            return ""
+    call("new_scene", {"name": "cparts"})
+    for name, src, cl in (("pp", PP, PP_CL), ("pq", PQ, PQ_CL), ("pf", PF, PF_CL),
+            ("pmove", PMOVE, PMOVE_CL)):
+        call("put_type", {"name": name, "source": src, "client": cl})
+    d = {t["name"]: t for t in rpc("tools/list")["result"]["tools"]}
+    assert "client part's first failure" in d["get_log"]["description"], d["get_log"]
+    call("place", {"type": "kit/spawner", "pos": [0, 2, 0], "params": {"players": True}})
+    call("place", {"type": "kit/controls", "pos": [0, 0, 0], "on": "scene",
+        "params": {"movement": "local/pmove", "camera": "chase"}})
+    call("place", {"type": "local/pmove", "pos": [0, 0, 0], "on": "scene"})
+    EP = placed(call("place", {"type": "local/pp", "pos": [0, 1, 0]}))
+    EQ = placed(call("place", {"type": "local/pq", "pos": [3, 1, 0]}))
+    EF = placed(call("place", {"type": "local/pf", "pos": [4, 1, 0]}))
+    assert call("start") == "Running"
+    join()
+    # (7) the body's `by` is a player's: met by its zone, then tried as me;
+    # its per_player state reaches its client
+    def camsays(what, secs=20):
+        until(lambda: what in camlog(), "the camera's log: " + what, secs)
+    played({"seconds": 0.3})
+    call("try_input", {"id": EP, "input": "set", "as": "me"})
+    who = [v for o, v in tried(EP) if o == "who"]
+    assert len(who) == 1 and re.match(r"^player:\d+$", who[0]), who
+    camsays("kit: entity %d's client part: got met %s" % (EP, who[0]))
+    camsays("kit: entity %d's client part: got set %s" % (EP, who[0]))
+    print("   the body is %s: met, tried as me, its own state on its client" % who[0])
+    # (8) its client predicts its own body: the movement's draw gets the
+    # predicted state (s.n, its steps' own), no other body there
+    camsays("kit check: pmove draws a predicted body")
+    assert "kit check: pmove draws a posed body" not in camlog()
+    # (2) kit.shared: pp's part wrote it, pq's read it
+    camsays("kit: entity %d's client part: shared pp %d" % (EQ, EP))
+    # (4) pf's on_add failed on this client: in its log, which client said
+    # (the camera's, as it came into the scene still, before it played)
+    camsays("kit: entity %d's client part on_add: local/pf.client:1: pf fails on purpose" % EF)
+    def failed():
+        l = [x for x in json.loads(call("get_log", {"id": EF})) if "failed on" in x]
+        return l or (time.sleep(0.3) and None)
+    l = until(failed, "pf's failure in its log")
+    assert len(l) == 1 and re.search(r"the client part of local/pf: on_add failed on "
+        r"(the server's camera|kitboss's agent's client): local/pf\.client:1: pf fails on purpose$",
+        l[0]), l
+    print("   pf entity %d: %s" % (EF, l[0]))
+elif phase == "client_end":
+    # (after kitboss's editor Log showed pf's failure)
+    rpc("initialize", init)
+    assert "Your body is gone" in call("play_leave")
+    call("stop")
+    call("switch_scene", {"name": s["main"]})
 elif phase == "heightmap":
     rpc("initialize", init)
     to_start()
@@ -738,9 +873,18 @@ mcp() # <phase>: the MCP client's phase; its output in $t/mcp_<phase>.log
 		fail "the MCP phase $1: $(tail -5 "$t/mcp_$1.log") ($t/mcp_$1.log, $SL)"
 	cat "$t/mcp_$1.log"
 }
-for p in tools types links play state goals history zones; do
+for p in tools types links play state goals history zones client; do
 	mcp $p
 done
+# 10. [KIT_CLIENT_REACT] (4) pf's failure on the agent's client in kitboss's
+# editor Log, the entity selected
+EF=$(grep -aoP '^   pf entity \K[0-9]+' "$t/mcp_client.log")
+[ -n "$EF" ] || fail "no pf entity in $t/mcp_client.log"
+step 10 "kit editor: log of $EF: .*the client part of local/pf: on_add failed on (the server's camera|kitboss's agent's client): .*pf fails on purpose" \
+	"frames 2" 'event kit_edit {"op": "focus", "sel": '$EF'}'
+cmd "frames 2" 'event kit_edit {"op": "focus", "sel": 0}'
+mcp client_end
+echo "ok: client parts on the agent's client: its by, its per_player state, its predicted body, kit.shared, a failure in get_log and the editor's Log"
 grep -aqE "kitboss's agent tries entity [0-9]+'s ping null as kitboss \(player:[0-9]+\)" "$SL" ||
 	fail "no try as kitboss in $SL"
 echo "ok: tools listed by the token; edit_type, a client part kept, a param's default; links by name; try_input as; press; filters; level warnings; history; zones by shape"
