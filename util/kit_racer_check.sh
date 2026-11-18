@@ -1,14 +1,15 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~2 min (2026-11-18)
+# cost: ~4 min (2026-11-18)
 # covers: apps/workbench/templates/brimstone_speedway/** builtin/kit/client_lua/move.lua builtin/kit/client_lua/players.lua builtin/kit/client_lua/controls.lua builtin/kit/kit.cpp
 # [KIT_TOP_DOWN] (7), (8) The Brimstone Speedway template (a top-down racer:
 # local/brim_car in kit/controls' plane horizontal, its race, checkpoints,
 # crates and mines) on Workbench; one server, kitboss (the admin) and kitbob
 # on a headless weston's Xwayland of the check's own; the cars driven round
-# the oval's centre line by a closed loop over the fifo (each body line's
-# place and yaw, A/D toward a point 10 m on):
+# the Bone Yard's centre line by a closed loop over the fifo (each body
+# line's place, speed and yaw: A/D toward a point ahead, W/S to a speed for
+# the bends):
 #   0. New from it (the edits: one lap a race and a trial, a mine 30 damage,
 #      crate 2 mines): the lobby's full screen and its two tracks
 #      (lobby.png), Race: kitboss on the grid, the Start button; kitbob
@@ -17,18 +18,24 @@
 #   2. (8) bodies colliding: kitbob drives from his slot through the middle
 #      of kitboss's standing car: kitboss pushed a metre or more
 #      (the server's steps; his own client corrected) (push.png);
-#   3. the race: kitboss round first, the crate's mines taken and one dropped
-#      behind him on the north straight, kitbob after him onto it: the
+#   3. the race: kitboss round first, a handbrake drift into the bend
+#      after checkpoint 1 (the yaw rate high while the velocity is more than 20 degrees
+#      off the heading, then straight again: drift.png), the crate's mines
+#      taken and one dropped behind him on the north straight, kitbob after
+#      him onto it: the
 #      mine's blast, his wreck (kit/health's death: the effects, a scorch
 #      mark, wreck.png), back on the road at checkpoint 2 two seconds later;
 #      kitboss 1st, kitbob 2nd, the race over; the result card (result.png);
 #   4. the time trial (its own scene): kitboss over the line at the start
 #      with no checkpoint passed: no lap (the car's step meets the line with
 #      lap_open off), then round: checkpoints 1, 2, 3, the lap, the result
-#      card with the time; no prediction correction on that lap (trial.png);
-#   5. the music: its client part's blip stream, bars added on time.
+#      card with the time; no prediction correction on that lap; the top
+#      speed approached slowly (on full throttle from the line: faster at 6 s
+#      than at 2 s, both under the top) (track.png on the way, trial.png);
+#   5. the car's effects drawn on kitboss's client (kit.effect, kit.mark):
+#      exhaust smoke, road dust, tyre marks; Kit's counts of them.
 # Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/grid.png, $t/push.png,
-# $t/wreck.png, $t/result.png, $t/trial.png
+# $t/drift.png, $t/wreck.png, $t/result.png, $t/track.png, $t/trial.png
 #   util/kit_racer_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -55,34 +62,76 @@ print("RACE=%d TRIAL=%d CRATE=%d" % (find("the race", "world")[0],
       find("the race", "trial")[0], find("crate", "world")[1]))
 PY
 . "$t/ids"
+# The Bone Yard's line: its corners, each bend's radius (the template's
+# generator laid the road along it); the finish line's x on the first straight
+export PATH_PTS="-100,-58,12 60,-58,10 60,-34,10 10,-34,9 0,-14,9 30,0,10 95,0,12 95,55,12 50,55,9 40,30,8 25,30,8 15,58,10 -40,58,12 -55,20,10 -30,5,9 -60,-10,10 -100,-20,12"
+LINE_X=-64
 
-# The driver: round the oval's centre line (or at TARGET x,z), W held, A/D by
-# the heading; till a regex is in the client's log or the time is up
+# The driver: round the track's line (PATH_PTS: its corners "x,z,r ...", the
+# straights between them and an arc of radius r round each: the line the
+# template's road was laid along), or at TARGET x,z: A/D toward a point
+# ahead by the heading, W/S to a speed for the bends ahead (planned at A_LAT
+# across, A_BRAKE braking), backing off when stuck; DRIFT x,z: the handbrake
+# (Space) DRIFT_S seconds (timed by the client) and the bend's steering there,
+# once, a screenshot DRIFT_SHOT as it ends; SHOTS "x,z,path ...": a screenshot near
+# each place, once; FIRE_ON: the fire key (Left Ctrl) once as that shows in
+# the log; AIM_FILE: once that file holds "x,z", through there when it is
+# ahead. A line a sample:
+# the time, the place, the speed, the heading and the velocity's (degrees)
 cat > "$t/drive.py" <<'PY'
-import math, os, re, sys, time
+import json, math, os, re, sys, time
 log, fifo, secs, stop = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
 target = [float(v) for v in os.environ["TARGET"].split(",")] if os.environ.get("TARGET") else None
-fire_on = os.environ.get("FIRE_ON")  # Space once as it shows in the log
+fire_on = os.environ.get("FIRE_ON")
+drift = [float(v) for v in os.environ["DRIFT"].split(",")] if os.environ.get("DRIFT") else None
+drift_s = float(os.environ.get("DRIFT_S", "0.5"))
+drift_shot = os.environ.get("DRIFT_SHOT")
+shots = [s.split(",", 2) for s in os.environ.get("SHOTS", "").split()]
+aim_file, aim = os.environ.get("AIM_FILE"), None
+A_LAT, A_BRAKE, TOP = 8.0, 6.0, 30.0
 out = open(fifo, "w", buffering=1)
-L, RAD = 100.0, 30.0  # the straights' length, the bends' radius
-LOOP = 2 * L + 2 * math.pi * RAD
-def point(u):
-    """The centre line u metres on from (-50, -30), heading +x (anticlockwise)"""
-    u %= LOOP
-    if u < L:
-        return -50 + u, -RAD
-    u -= L
-    if u < math.pi * RAD:
-        a = -math.pi / 2 + u / RAD
-        return 50 + RAD * math.cos(a), RAD * math.sin(a)
-    u -= math.pi * RAD
-    if u < L:
-        return 50 - u, RAD
-    a = math.pi / 2 + (u - L) / RAD
-    return -50 + RAD * math.cos(a), RAD * math.sin(a)
-def dist2(q, x, z):
-    px, pz = point(q)
-    return (px - x) ** 2 + (pz - z) ** 2
+def rounded(pts):
+    """The closed line: straights between the corners, an arc of r round each"""
+    n, line = len(pts), []
+    for i in range(n):
+        (x0, z0, _), (x1, z1, r), (x2, z2, _) = pts[i - 1], pts[i], pts[(i + 1) % n]
+        la, lb = math.hypot(x1 - x0, z1 - z0), math.hypot(x2 - x1, z2 - z1)
+        ax, az, bx, bz = (x1 - x0) / la, (z1 - z0) / la, (x2 - x1) / lb, (z2 - z1) / lb
+        turn = math.atan2(ax * bz - az * bx, ax * bx + az * bz)
+        t = r * math.tan(abs(turn) / 2)
+        px, pz = x1 - ax * t, z1 - az * t
+        s = 1 if turn > 0 else -1
+        cx, cz = px - az * r * s, pz + ax * r * s
+        a0 = math.atan2(pz - cz, px - cx)
+        k = max(1, int(abs(turn) * r / 1.0))
+        line += [(cx + r * math.cos(a0 + turn * j / k), cz + r * math.sin(a0 + turn * j / k))
+                 for j in range(k + 1)]
+    # (1 m apart along the whole loop)
+    out1, acc = [line[0]], 0.0
+    for i in range(1, len(line) + 1):
+        (xa, za), (xb, zb) = line[i - 1], line[i % len(line)]
+        d = math.hypot(xb - xa, zb - za)
+        while d > 1e-9 and acc + d >= 1.0:
+            f = (1.0 - acc) / d
+            xa, za = xa + (xb - xa) * f, za + (zb - za) * f
+            d -= 1.0 - acc
+            acc = 0.0
+            out1.append((xa, za))
+        acc += d
+    return out1
+P = rounded([tuple(map(float, c.split(","))) for c in os.environ["PATH_PTS"].split()])
+N = len(P)
+def radius(i, k=4):
+    (xa, za), (xb, zb), (xc, zc) = P[(i - k) % N], P[i], P[(i + k) % N]
+    cr = (xb - xa) * (zc - za) - (zb - za) * (xc - xa)
+    if abs(cr) < 1e-6:
+        return 1e9
+    return (math.hypot(xb - xa, zb - za) * math.hypot(xc - xb, zc - zb) *
+            math.hypot(xc - xa, zc - za) / (2 * abs(cr)))
+V = [min(TOP, math.sqrt(A_LAT * radius(i))) for i in range(N)]
+for _ in range(2):
+    for i in range(N - 1, -1, -1):
+        V[i] = min(V[i], math.sqrt(V[(i + 1) % N] ** 2 + 2 * A_BRAKE))
 def send(*cmds):
     out.write("\n".join(cmds) + "\n")
 keys = set()
@@ -96,6 +145,7 @@ def key(k, on):
 f = open(log, errors="replace")
 f.seek(0, 2)
 t0, u, x, z, stopped = time.time(), None, None, None, False
+slow_since, back_till, drift_till, last, queued = None, 0, None, None, 0
 send("event kit_body")
 while time.time() - t0 < secs:
     line = f.readline()
@@ -107,7 +157,7 @@ while time.time() - t0 < secs:
         break
     if fire_on and re.search(fire_on, line):
         fire_on = None
-        send("keypress Space")
+        send("keypress Left Ctrl")
         print("fired", flush=True)
     m = re.search(r"kit: body at (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+)", line)
     if m:
@@ -115,19 +165,97 @@ while time.time() - t0 < secs:
             u = None  # (a teleport: found again on the whole loop)
         x, z = float(m[1]), float(m[3])
         continue
-    m = re.search(r"kit: vehicle speed -?[0-9.]+,-?[0-9.]+,-?[0-9.]+, yaw (-?[0-9.]+)", line)
+    m = re.search(r"kit: vehicle speed (-?[0-9.]+),-?[0-9.]+,(-?[0-9.]+), yaw (-?[0-9.]+)", line)
     if not m or x is None:
         continue
+    now = time.time() - t0
+    vx, vz, yaw = float(m[1]), float(m[2]), float(m[3])
+    v = math.hypot(vx, vz)
     if u is None:
-        u = min(range(int(LOOP)), key=lambda q: dist2(q, x, z))
-    u = min(range(u - 20, u + 60), key=lambda q: dist2(q, x, z))
-    tx, tz = target or point(u + 10)
-    err = (math.degrees(math.atan2(tx - x, tz - z)) - float(m[1]) + 540) % 360 - 180
-    key("W", True)
-    key("D", err > 3)
-    key("A", err < -3)
-    print("at %.1f,%.1f err %.0f" % (x, z, err), flush=True)
-    send("frames 2", "event kit_body")
+        u = min(range(N), key=lambda q: (P[q][0] - x) ** 2 + (P[q][1] - z) ** 2)
+    u = min(range(u - 10, u + 40),
+            key=lambda q: (P[q % N][0] - x) ** 2 + (P[q % N][1] - z) ** 2) % N
+    tx, tz = target or P[(u + int(5 + 0.35 * v)) % N]
+    # (AIM_FILE's place once it is written: driven through when ahead,
+    # slowly, toward a point past it on the line from the car through it)
+    aiming = False
+    if aim is None and aim_file and os.path.exists(aim_file):
+        aim = [float(q) for q in open(aim_file).read().split(",")]
+    if aim and aim is not True:
+        ahead = (aim[0] - x) * math.sin(math.radians(yaw)) + (aim[1] - z) * math.cos(math.radians(yaw))
+        d = math.hypot(aim[0] - x, aim[1] - z)
+        if d < 25 and ahead > -0.5:
+            tx, tz = aim[0] + (aim[0] - x) / d * 6, aim[1] + (aim[1] - z) / d * 6
+            aiming = True
+        elif ahead <= -0.5 and d < 6:
+            aim = True
+    bearing = math.degrees(math.atan2(tx - x, tz - z))
+    err = (bearing - yaw + 540) % 360 - 180
+    # (on the way: the way it goes, a slide's too, less the turning's rate:
+    # the keys are on or off and a sample late)
+    rate = ((yaw - last[0] + 540) % 360 - 180) / max(0.02, now - last[1]) if last else 0
+    last = (yaw, now)
+    head = math.degrees(math.atan2(vx, vz)) if v > 3 and not target else yaw
+    steer = (bearing - head + 540) % 360 - 180 - 0.2 * rate
+    vt = TOP if target else V[(u + 3) % N]
+    if aiming:
+        vt = min(vt, 7)
+    if drift and drift_till is None and math.hypot(drift[0] - x, drift[1] - z) < 35:
+        vt = max(vt, 15)  # (into the bend too fast: the handbrake's to turn it)
+    if drift and drift_till is None and math.hypot(drift[0] - x, drift[1] - z) < 6:
+        drift_till = now + drift_s
+        # (the way the bend ahead turns: the line's heading 15 m on against
+        # now's; left is the yaw falling, A)
+        (xa, za), (xb, zb) = P[u], P[(u + 1) % N]
+        (xc, zc), (xd, zd) = P[(u + 15) % N], P[(u + 16) % N]
+        drift_left = (xb - xa) * (zd - zc) - (zb - za) * (xd - xc) > 0
+        print("drift from %.2f" % now, flush=True)
+    for sh in shots[:]:
+        if math.hypot(float(sh[0]) - x, float(sh[1]) - z) < 6:
+            shots.remove(sh)
+            send("screenshot " + sh[2])
+    if drift_shot and drift_till is not None and now >= drift_till:
+        send("screenshot " + drift_shot)
+        drift_shot = None
+    if drift_till is not None and now < drift_till:
+        key("W", False)
+        key("S", False)
+        key("D", not drift_left)
+        key("A", drift_left)
+        if drift_till - now > drift_s - 0.001:
+            # (the pull's length the client's own: a sample comes some 0.2 s
+            # apart, and a tenth of a second more turns it 30 degrees more;
+            # a sample each tenth in it, then one after, asked for here)
+            k = max(1, round(drift_s / 0.1))
+            send("keydown Space", *["delay 100", "event kit_body"] * k,
+                 "keyup Space", "frames 2", "event kit_body")
+            queued = k + 1
+    elif now < back_till:
+        key("Space", False)
+        key("W", False)
+        key("S", True)
+        key("D", err < 0)
+        key("A", err > 0)
+    else:
+        key("Space", False)
+        # (stuck on something: back off it a second)
+        slow_since = (slow_since or now) if v < 0.8 and "W" in keys else None
+        if slow_since is not None and now - slow_since > 1.0:
+            back_till, slow_since = now + 1.0, None
+        # (sliding: hands off, the car's own counter-steer brings it
+        # straight; a key's full lock on top swings it the other way)
+        sliding = v > 3 and abs((math.degrees(math.atan2(vx, vz)) - yaw + 540) % 360 - 180) > 15
+        key("W", v < vt - 0.5 and not sliding)
+        key("S", v > vt + 1.0 and not sliding)
+        key("D", steer > 3 and not sliding)
+        key("A", steer < -3 and not sliding)
+    print("t %.2f at %.1f,%.1f v %.1f yaw %.1f vel %.1f keys %s" % (
+        now, x, z, v, yaw, math.degrees(math.atan2(vx, vz)) if v > 0.5 else yaw,
+        "".join(sorted(keys))), flush=True)
+    if queued:
+        queued -= 1
+    else:
+        send("frames 2", "event kit_body")
 for k in list(keys):
     key(k, False)
 print("stopped" if stopped else "time up", flush=True)
@@ -182,7 +310,7 @@ body() # the body's x, z and corrections now, into bx, bz, bc
 	read bx bz bc <<< "$(tail -c +$((m + 1)) "$CL" | grep -aoP 'kit: body at \K-?[0-9.]+,-?[0-9.]+,-?[0-9.]+, [0-9]+ acks, [0-9]+' |
 		tail -1 | sed -E 's/^(-?[0-9.]+),-?[0-9.]+,(-?[0-9.]+), [0-9]+ acks, ([0-9]+)$/\1 \2 \3/')"
 }
-drive() # <who> <seconds> <stop regex>: the driver on that client (env TARGET, FIRE_ON)
+drive() # <who> <seconds> <stop regex>: the driver on that client (env TARGET, FIRE_ON, DRIFT, SHOTS)
 {
 	python3 -I "$t/drive.py" "$t/$1.log" "$t/$1.cmd" "$2" "$3" > "$t/drive_$1.log" 2>&1
 }
@@ -235,7 +363,7 @@ step 10 "kit editor: edit mode off" "frames 3" "keypress F6"
 await "$CL" 0 10 "kit: controls: camera top_down, pointer [a-z]+, movement local/brim_car, plane y 1"
 await "$CL" 0 10 "brim_car: the draw hook draws a car"
 await "$CL" 0 10 "kit: ui full screen [0-9]+ up"
-await "$CL" 0 10 'kit: ui [0-9]+ list .* shown, layer [0-9]+: "Pick your poison \| Race: The Pit Loop, by buildat \| Time trial: The Pit Loop, by buildat"'
+await "$CL" 0 10 'kit: ui [0-9]+ list .* shown, layer [0-9]+: "Pick your poison \| Race: The Bone Yard, by buildat \| Time trial: The Bone Yard, by buildat"'
 cmd "frames 10" "screenshot $t/lobby.png"
 m=$(mark "$SL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Race: The*"'
@@ -260,9 +388,14 @@ m=$(mark "$SL")
 mb=$(mark "$t/bob.log")
 cmd "frames 3" 'click Button "Start the race"'
 await "$SL" "$m" 5 "local/brim_race $RACE: kitboss starts the race: 2 cars"
-await "$CL" "$m" 10 '"GO! Burn rubber, sinners!"'
-await "$t/bob.log" "$mb" 2 '"GO! Burn rubber, sinners!"'
+await "$CL" "$m" 10 '"GO! Eat dirt, scrap heaps!"'
+await "$t/bob.log" "$mb" 2 '"GO! Eat dirt, scrap heaps!"'
 echo "ok: the countdown, GO on both screens"
+# The fire key's mouse button (the race's client part): a press of the action
+m=$(mark "$SL")
+step 5 "kit: action fire pressed" "mouse_down left" "frames 3" "mouse_up left"
+await "$SL" "$m" 5 "local/brim_race $RACE: kitboss presses fire"
+echo "ok: the left mouse button presses the race's fire"
 
 # 2. (8) kitbob at kitboss's car standing on the grid: pushed by the server
 body
@@ -288,20 +421,56 @@ PY
 # 3. The race: kitboss round, the mines dropped; kitbob after him onto one
 as boss
 m=$(mark "$SL")
-FIRE_ON="Mines x" drive boss 60 'panel .* shown, layer [0-9]+: "The flag is down' &
+# (the drift: the handbrake held into the bend after checkpoint 1)
+FIRE_ON="Mines x" DRIFT=88,0 DRIFT_S=0.4 DRIFT_SHOT=$t/drift.png \
+	drive boss 120 'panel .* shown, layer [0-9]+: "The flag is down' &
 DB=$!
-await "$SL" "$m" 20 "local/brim_race $RACE: kitboss passed checkpoint 1 of 3"
+await "$SL" "$m" 40 "local/brim_race $RACE: kitboss passed checkpoint 1 of 3"
 as bob
-drive bob 70 'panel .* shown, layer [0-9]+: "The flag is down' &
+AIM_FILE=$t/mine_at drive bob 130 'panel .* shown, layer [0-9]+: "The flag is down' &
 DO=$!
 as boss
-await "$SL" "$m" 30 "local/brim_race $RACE: kitboss drops a mine"
-await "$SL" "$m" 30 "local/brim_race $RACE: kitbob hits a mine"
+await "$SL" "$m" 60 "local/brim_race $RACE: kitboss drops a mine"
+# (kitbob's driver aims at its zone's middle: a lap's line is a metre or two
+# off another's. The zone is 2x2 cells from the place's, cells round whole
+# numbers (brim_checkpoint's middle()): the middle is the place floored plus
+# a half)
+tail -c +$((m + 1)) "$SL" | grep -aoP 'kitboss drops a mine [0-9]+ at \K-?[0-9.]+ -?[0-9.]+' | head -1 |
+	awk '{ printf "%.2f,%.2f", int($1 + 1000) - 999.5, int($2 + 1000) - 999.5 }' > "$t/mine_at.tmp" &&
+	mv "$t/mine_at.tmp" "$t/mine_at"
+await "$SL" "$m" 40 "local/brim_race $RACE: kitbob hits a mine"
 await "$SL" "$m" 2 "local/brim_race $RACE: kitbob wrecked by mine"
 printf "%s\n" "frames 5" "screenshot $t/wreck.png" >&4 # (kitbob's view)
 await "$SL" "$m" 2 "Entity $RACE made a copy of entity:[0-9]+"
 await "$SL" "$m" 5 "local/brim_race $RACE: kitbob back on the road at checkpoint 2"
 wait $DB || fail "kitboss's driver: $(tail -2 "$t/drive_boss.log")"
+cp "$t/drive_boss.log" "$t/drive_boss_race.log" # (the trial's drive writes over it)
+# The drift: in the handbrake's time and a second on, turned over 60 degrees
+# (a 90 degree bend at 14 m/s: more than the grip alone turns it) with the
+# velocity over 12 degrees off the heading (the slide's most some 25, sampled
+# each tenth of the pull); then, before 4 s, straight
+# again (under 8 degrees off) and going, out of the bend (yaw 0, north to
+# 95,55); never spun (the velocity under 80 degrees off the heading while
+# moving)
+python3 -I - "$t/drive_boss.log" <<'PY' || fail "no handbrake drift ($t/drive_boss.log)"
+import re, sys
+s = open(sys.argv[1]).read()
+t0 = float(re.search(r"drift from ([0-9.]+)", s)[1])
+S = [tuple(map(float, m)) for m in re.findall(
+    r"t ([0-9.]+) at \S+ v ([0-9.]+) yaw (-?[0-9.]+) vel (-?[0-9.]+)", s)]
+def off(a, b):
+    return abs((a - b + 540) % 360 - 180)
+W = [x for x in S if t0 <= x[0] < t0 + 1.7]
+best = (max(off(x[2], W[0][2]) for x in W), max(off(x[3], x[2]) for x in W))
+assert best[0] > 60 and best[1] > 12, "no fast turn sliding: %r" % W
+most = max(off(x[3], x[2]) for x in S if t0 <= x[0] < t0 + 4 and x[1] > 1)
+assert most < 80, "spun: the velocity %.0f deg off the heading: %r" % (most, [x for x in S if t0 <= x[0] < t0 + 4])
+back = [x for x in S if t0 + 0.7 < x[0] < t0 + 4 and off(x[3], x[2]) < 8 and x[1] > 3
+        and off(x[2], 0) < 60]
+assert back, "never straight again out of the bend: %r" % [x for x in S if t0 <= x[0] < t0 + 4]
+print("ok: a handbrake drift: turned %.0f deg with the velocity up to %.0f deg off the heading; straight again at %.1f s" %
+      (best[0], best[1], back[0][0] - t0))
+PY
 await "$SL" "$m" 5 "local/brim_race $RACE: kitboss finished 1st"
 as bob
 wait $DO || fail "kitbob's driver: $(tail -2 "$t/drive_bob.log")"
@@ -320,7 +489,7 @@ step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
 await "$CL" "$m" 10 '"Lap 1/1   Time [0-9.]+   GO!'
 mc=$(mark "$CL")
-drive boss 40 'panel .* shown, layer [0-9]+: "The flag is down'
+SHOTS="40,0,$t/track.png" drive boss 120 'panel .* shown, layer [0-9]+: "The flag is down'
 python3 -I - "$SL" "$m" "$TRIAL" <<'PY' || fail "the trial's lap ($SL)"
 import re, sys
 s = open(sys.argv[1], "rb").read()[int(sys.argv[2]):].decode(errors="replace")
@@ -332,8 +501,18 @@ assert len(lap) == 1 and len(cp) == 3 and max(cp) < lap[0], order
 assert any(l.startswith("finished the trial in") for l in order), order
 print("ok: the trial: %s" % "; ".join(order[1:]))
 PY
-grep -aoP "at \K-?[0-9.]+" "$t/drive_boss.log" | head -20 | awk '$1 > -8 { f = 1 } END { exit !f }' ||
+grep -aoP "at \K-?[0-9.]+" "$t/drive_boss.log" | head -20 | awk -v x=$LINE_X '$1 > x + 2 { f = 1 } END { exit !f }' ||
 	fail "the car never crossed the line at the start ($t/drive_boss.log)"
+# The top speed approached slowly: off the line on full throttle (the
+# template's top 28 m/s on dirt), at 2 s well on, at 6 s faster, both under
+python3 -I - "$t/drive_boss.log" <<'PY' || fail "the top speed's approach ($t/drive_boss.log)"
+import re, sys
+S = [tuple(map(float, m)) for m in re.findall(r"t ([0-9.]+) at \S+ v ([0-9.]+)", open(sys.argv[1]).read())]
+v2 = [v for t, v in S if t >= 2][0]
+v6 = [v for t, v in S if t >= 6][0]
+assert 5 < v2 < v6 < 27, (v2, v6)
+print("ok: off the line %.1f m/s at 2 s, %.1f at 6 s (the top 28)" % (v2, v6))
+PY
 # (up to the lap: the finish takes the car out of play, a step its client
 # had already taken in play: a correction there is the run's end)
 python3 -I - "$SL" "$m" "$CL" "$mc" "$TRIAL" <<'PY' || fail "corrections on the trial's lap ($CL)"
@@ -348,16 +527,23 @@ PY
 step 10 "Wrote screenshot $t/trial.png" "frames 10" "screenshot $t/trial.png"
 echo "ok: the trial: over the line at the start no lap, then checkpoints, the lap, the result; no correction"
 
-# 5. The music: a stream, its bars added a little ahead
-grep -aq "brim_music: a stream" "$CL" || fail "no music stream ($CL)"
-grep -aq "client part on_update: local/brim_music" "$CL" && fail "the music's client part failed ($CL)"
-grep -aoP "brim_music: bar [0-9]+ .*, \K[0-9.]+ ms to add, -?[0-9]+ ms ahead" "$CL" | head -24 > "$t/bars.txt"
-# (the first bar is the stream's start: added as it is due)
-awk 'NR > 1 { if ($5 < 140 || $5 > 260) bad = 1; n++ } END { exit !(n >= 8 && !bad) }' "$t/bars.txt" ||
-	fail "the music's bars not added 140...260 ms ahead ($t/bars.txt)"
-echo "ok: the music: a blip stream, $(wc -l < "$t/bars.txt") bars added ahead of their beat ($(awk '{ s += $1 } END { printf "%.1f", s / NR }' "$t/bars.txt") ms each)"
+# 5. The effects (brim_car.client.lua's through kit.effect and kit.mark,
+# each kind's first made logged; Kit's counts by event kit_effects)
+for k in smoke dust mark; do
+	grep -aq "brim_car: effect $k" "$CL" || fail "no $k drawn ($CL)"
+done
+step 5 "kit: effects: " "event kit_effects"
+fx=$(grep -aoP 'kit: effects: .*' "$CL" | tail -1)
+python3 -I - "$fx" <<'PY' || fail "the effects' counts: $fx ($CL)"
+import re, sys
+m = re.search(r"client parts made (\d+) particles, (\d+) bursts dropped; (\d+) marks kept of (\d+) made", sys.argv[1])
+made, dropped, kept, marks = map(int, m.groups())
+assert made > 100 and marks > 20 and kept > 0, (made, marks, kept)
+print("ok: the effects: %d particles, %d bursts dropped, %d marks (%d kept)" % (made, dropped, marks, kept))
+PY
+echo "ok: the effects' kinds: $(grep -aoP 'brim_car: effect \K[a-z]+' "$CL" | sort -u | tr '\n' ' ')"
 cmd "quit"
 as bob
 cmd "quit"
-echo "PASS: Brimstone Speedway from its template: the lobby, the grid's Start, both cars off at once, a standing car pushed by another (the server's steps), kitboss's mine and kitbob's wreck and respawn at the checkpoint, the places by who finished first, a trial's lap only over every checkpoint with no correction, the music's blip stream; screenshots $t/lobby.png $t/grid.png $t/push.png $t/wreck.png $t/result.png $t/trial.png"
+echo "PASS: Brimstone Speedway from its template: the lobby, the grid's Start, both cars off at once, a standing car pushed by another (the server's steps), kitboss's mine and kitbob's wreck and respawn at the checkpoint, the places by who finished first, a handbrake drift, a trial's lap only over every checkpoint with no correction, the top speed approached slowly, the car's smoke, dust and marks; screenshots $t/lobby.png $t/grid.png $t/push.png $t/drift.png $t/wreck.png $t/result.png $t/track.png $t/trial.png"
 # vim: set noet ts=4 sw=4:

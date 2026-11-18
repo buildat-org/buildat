@@ -3,10 +3,15 @@
 -- polygons extruded up (one CustomGeometry, a geometry a colour): a long
 -- hood, the cabin, tail fins, chrome bumpers, two-tone paint (s.pose[2]:
 -- the race's paint for the player, 1...6), headlights and tail lights, four
--- wheels, the front ones steered. Wrecked (pose flag 2) it is charred black;
--- boosted (flag 1) flames come out of the back. Facing +z, turned by the
--- pose's heading
+-- wheels where the movement's tyres are, the front ones steered. Wrecked
+-- (pose flag 2) it is charred black. Facing +z, turned by the pose's
+-- heading. Its effects from the pose (brim_car.lua's head): exhaust smoke
+-- (more on the throttle), road dust by the floor and the speed, sparks
+-- where it scrapes a wall, flames out of the back boosted, tyre marks
+-- where a tyre slips much (coloured by the floor), and on this player's own
+-- car the camera shaken in the frame its predicted step hits a wall hard.
 local magic = require("buildat/extension/urho3d")
+local kit = require("buildat/module/kit")
 local log = buildat.Logger("brim_car")
 local said = false
 local mats = {}
@@ -22,6 +27,9 @@ local PAINTS = {
 }
 local CHROME, GLASS, TYRE = "#d9dee4", "#1a2633", "#141414"
 local CHAR = "#2a2420"
+-- The pose's floor (brim_car.lua's SURF): dust and marks
+local DUST = {"#9a7a52", "#5a4630", nil, "#8a8478", "#9a7a52"}
+local MARK = {"#2e2216", "#1e1610", "#0a0a0c", "#151515", "#2e2216"}
 
 local function mat(hex)
 	if not mats[hex] then
@@ -65,8 +73,8 @@ local PARTS = {
 	{{-0.9, -2.2, -0.88, -2.26, -1.08, -2.42, -1.1, -2.36}, 0.6, 1.0, "#ff2a14"},
 }
 -- The wheels: x, z, front
-local WHEELS = {{0.92, 1.45, true}, {-0.92, 1.45, true}, {0.92, -1.4},
-	{-0.92, -1.4}}
+local WHEELS = {{0.92, 1.3, true}, {-0.92, 1.3, true}, {0.92, -1.25},
+	{-0.92, -1.25}}
 
 local function tri(cg, a, b, c, n)
 	local e1x, e1y, e1z = b[1] - a[1], b[2] - a[2], b[3] - a[3]
@@ -145,19 +153,154 @@ local function build(node, paint, wrecked)
 		m.material = mat(TYRE)
 		n.scale = magic.Vector3(0.3, 0.66, 0.78)
 	end
-	-- The boost's flames out of the back, hidden till boosted
-	local fl = body:CreateChild("flames")
-	fl.position = magic.Vector3(0, 0.45, -2.75)
-	for k, c in ipairs({{"#ffd23c", 0.5, 0.9}, {"#ff6a10", 0.8, 0.6}}) do
-		local n = fl:CreateChild("f" .. k)
-		local m = n:CreateComponent("StaticModel")
-		m.model = magic.cache:GetResource("Model", "Models/Cone.mdl")
-		m.material = mat(c[1])
-		n.rotation = magic.Quaternion(-90, 0, 0)
-		n.scale = magic.Vector3(c[2], c[3], c[2])
-	end
-	fl.enabled = false
 	return b
+end
+
+-- [RACER_FEEL] The effects: Kit's client part effects (kit.effect,
+-- kit.mark, kit.shake), on this client alone; each kind's first logged.
+-- The floor's height for them: the Bone Yard's floors' tops are 0.555 (the
+-- road) to 0.585 (mud, the line), the car's place is its plane's (y 1).
+-- simplified: one height for the template's track; a track with hills
+-- would take w:under's from the step into the pose
+local FLOOR_Y = 0.57
+local said_fx = {}
+local function said_once(kind, x, y, z)
+	if not said_fx[kind] then
+		said_fx[kind] = true
+		log:info(string.format("brim_car: effect %s at %.1f,%.1f,%.1f", kind, x, y, z))
+	end
+end
+-- Each kind's look (a description cached by Kit: only at, dir and count
+-- change call to call; dust's colour is its floor's, a look each)
+local LOOKS = {
+	smoke = {count = 2, shape = "round", colors = {"#6a6460", "#3a3632"},
+		spread = 25, speed_min = 1, speed_max = 2, gravity = -1, drag = 2,
+		ttl_min = 0.5, ttl_max = 0.8, size_min = 0.6, size_max = 0.9, grow = 1.5,
+		fade = 0.6},
+	flame = {count = 3, shape = "square", colors = {"#ff8a1a", "#ffd23c"},
+		spread = 15, speed_min = 3, speed_max = 5, gravity = 0, ttl_min = 0.12,
+		ttl_max = 0.25, size_min = 0.18, size_max = 0.3, grow = -0.5, fade = 0.4},
+	spark = {count = 6, shape = "square", colors = {"#ffd23c", "#fff4c0"},
+		spread = 50, speed_min = 4, speed_max = 8, gravity = 9, ttl_min = 0.15,
+		ttl_max = 0.35, size_min = 0.12, size_max = 0.2, fade = 0.2},
+}
+local function dust_look(color)
+	local k = "dust" .. color
+	if not LOOKS[k] then
+		LOOKS[k] = {count = 4, shape = "round", colors = {color}, spread = 60,
+			speed_min = 1, speed_max = 3, gravity = 1, drag = 2, ttl_min = 0.6,
+			ttl_max = 0.95, size_min = 0.9, size_max = 1.5, grow = 2.5, fade = 0.7,
+			box = 1.4}
+	end
+	return LOOKS[k]
+end
+-- A puff of particles: look (LOOKS') at x, y, z, thrown along dx, dz and up
+local function puff(kind, look, x, y, z, dx, dz)
+	local d = {}
+	for k, v in pairs(look) do
+		d[k] = v
+	end
+	d.at, d.dir = {x, y, z}, {dx, 0.6, dz}
+	if kit.effect(d) > 0 then
+		said_once(kind, x, y, z)
+	end
+end
+-- A tyre's mark on the floor from x0, z0 to x1, z1 (a stroke, whatever the
+-- frame rate), its colour.
+-- simplified: a race's restart keeps the last one's marks (Kit's newest 1024
+-- stay); kit.clear_marks() from a restart signal once the client part gets one
+local function mark(x0, z0, x1, z1, color)
+	local dx, dz = x1 - x0, z1 - z0
+	local x, z = (x0 + x1) / 2, (z0 + z1) / 2
+	kit.mark(x, FLOOR_Y, z, math.atan2(dx, dz) * 180 / math.pi,
+			{0.3, math.sqrt(dx * dx + dz * dz) + 0.1}, color, 0.55)
+	said_once("mark", x, FLOOR_Y, z)
+end
+-- This client's camera shaken (0...5)
+local function shake(amount)
+	kit.shake(amount)
+	said_once("shake", amount, 0, 0)
+end
+
+local function bit(n, b)
+	return math.floor(n / b) % 2 == 1
+end
+
+-- Each drawn car's effects' clocks, by its node.
+-- simplified: never dropped (the sandbox has no weak tables): a few numbers
+-- for each body this client has drawn
+local fx = {}
+local function effects(s, node, p, h, flags)
+	local now = buildat.get_time_us() / 1e6
+	local e = fx[node]
+	if not e then
+		e = {t = now, smoke = 0, dust = 0, tyres = {}, bumps = tonumber(s.bumps)}
+		fx[node] = e
+	end
+	local dt = math.min(0.1, now - e.t)
+	e.t = now
+	local at = node.position
+	local x, y, z = at.x, FLOOR_Y, at.z
+	local sh, ch = math.sin(h), math.cos(h)
+	local function world(lx, lz)
+		return x + lx * ch + lz * sh, z - lx * sh + lz * ch
+	end
+	local speed = tonumber(p[5]) or 0
+	local surf = math.floor(tonumber(p[6]) or 1)
+	-- (a burst a tenth of a second at most, each short-lived: Kit keeps 64
+	-- client part bursts alive)
+	-- Exhaust smoke out of the tail pipe, thicker on the throttle
+	e.smoke = e.smoke + dt * (bit(flags, 32) and 10 or 3)
+	if e.smoke >= 1 then
+		e.smoke = 0
+		local px, pz = world(0.55, -2.45)
+		puff("smoke", LOOKS.smoke, px, y + 0.4, pz, -sh, -ch)
+	end
+	if bit(flags, 1) then
+		local px, pz = world(0, -2.6)
+		puff("flame", LOOKS.flame, px, y + 0.5, pz, -sh, -ch)
+	end
+	-- Dust off the rear tyres by the speed (none off oil), more sliding
+	if DUST[surf] and speed > 3 then
+		e.dust = e.dust + dt * math.min(10, speed * (bit(flags, 4) and 0.8 or 0.35))
+		if e.dust >= 1 then
+			e.dust = 0
+			local px, pz = world(0, -1.6)
+			puff("dust", dust_look(DUST[surf]), px, y + 0.2, pz, -sh, -ch)
+		end
+	end
+	-- Sparks where it scrapes
+	for b, lz in pairs({[64] = 2.3, [128] = -2.3}) do
+		if bit(flags, b) then
+			local px, pz = world(0, lz)
+			puff("spark", LOOKS.spark, px, y + 0.5, pz, -sh, -ch)
+		end
+	end
+	-- Marks: each slipping tyre's from where its last ended, 0.7 m on or
+	-- more (a jump past 4 m, a teleport, starts anew)
+	local slips = math.floor(tonumber(p[7]) or 0)
+	for k, wh in ipairs(WHEELS) do
+		local px, pz = world(wh[1], wh[2])
+		local last = e.tyres[k]
+		if not bit(slips, 2 ^ (k - 1)) then
+			e.tyres[k] = nil
+		elseif not last then
+			e.tyres[k] = {px, pz}
+		else
+			local d2 = (px - last[1]) ^ 2 + (pz - last[2]) ^ 2
+			if d2 > 16 then
+				e.tyres[k] = {px, pz}
+			elseif d2 >= 0.49 then
+				mark(last[1], last[2], px, pz, MARK[surf] or MARK[1])
+				e.tyres[k] = {px, pz}
+			end
+		end
+	end
+	-- This player's own car (its predicted state): shaken at once on a hard hit
+	if s.c and tonumber(s.bumps) and s.bumps ~= e.bumps then
+		e.bumps = s.bumps
+		shake(math.min(2.5, (tonumber(s.bump_v) or 8) / 8))
+	end
 end
 
 return {
@@ -166,7 +309,7 @@ return {
 		local h = tonumber(p[1]) or 0
 		local paint = math.floor(tonumber(p[2]) or 1)
 		paint = PAINTS[paint] and paint or 1
-		local steer = tonumber(p[3]) or 0
+		local steer = (tonumber(p[3]) or 0) * 180 / math.pi
 		local flags = math.floor(tonumber(p[4]) or 0)
 		local wrecked = math.floor(flags / 2) % 2 == 1
 		local look = paint * 10 + (wrecked and 1 or 0)
@@ -190,8 +333,8 @@ return {
 		local body = b:GetChild("body", false)
 		body.rotation = magic.Quaternion(0, h * 180 / math.pi, 0)
 		for k = 1, 2 do
-			body:GetChild("wheel" .. k, false).rotation = magic.Quaternion(0, steer * 28, 0)
+			body:GetChild("wheel" .. k, false).rotation = magic.Quaternion(0, steer, 0)
 		end
-		body:GetChild("flames", false).enabled = flags % 2 == 1
+		effects(s, node, p, h, flags)
 	end,
 }

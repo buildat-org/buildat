@@ -612,7 +612,8 @@ end
 -- band's triangles.
 -- [KIT_SIDE_SCENERY] Wearing a voxel material (def, voxel_tiles'), textured
 -- world-aligned where its node is (at, q), a repeat a cell, so pieces side by side
--- tile: on its faces u and v are the world's x and -y; on a side nearer level than
+-- tile: on its faces u and v are the world's x and -y (lying flat, its faces
+-- level: x and -z, else a stripe); on a side nearer level than
 -- upright the world's x and -z, else z and -y. Its faces wear the material's
 -- bottom tile where that is not its top (grass: the dirt under its turf), else
 -- its -z side's. An edge facing up (its normal out within 60 degrees of the
@@ -679,10 +680,13 @@ do
 		end
 		-- Its own x, y, z to the world's (less whole cells) and the world's down in
 		-- its x and y (its own -y while it stands upright)
-		local W, down = nil, nil
+		local W, down, faces_uv = nil, nil, face_uv
 		if tiles then
 			local ex, ey = q * magic.Vector3(1, 0, 0), q * magic.Vector3(0, 1, 0)
 			local ez = q * magic.Vector3(0, 0, 1)
+			if math.abs(ez.y) > 0.7 then
+				faces_uv = level_uv
+			end
 			local fx, fy = at.x - math.floor(at.x), at.y - math.floor(at.y)
 			local fz = at.z - math.floor(at.z)
 			W = function(x, y, z)
@@ -799,7 +803,7 @@ do
 					for _, z in ipairs({-d, d}) do
 						tri(g, {p[1], p[2], z}, {p[2 * v - 3], p[2 * v - 2], z},
 								{p[2 * v - 1], p[2 * v], z}, {0, 0, z < 0 and -1 or 1},
-								face_uv)
+								faces_uv)
 					end
 					band_tris = band_tris + (g == 2 and 1 or 0)
 				end

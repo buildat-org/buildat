@@ -24,14 +24,16 @@
 -- Weapons (races only): a crate (local/brim_crate's taken, linked to crate;
 -- value the kind) arms the car with a gun (6 shots ahead), mines (3, dropped
 -- behind: copies of the entity `mine`) or a ram boost (2.5 s, faster; a hit
--- on a car then hurts it); the car's fire (Space) uses it. Damage is Kit's
+-- on a car then hurts it); the fire key (its action "fire", Left Ctrl by
+-- default; the left mouse button too: brim_race.client.lua) uses it: a
+-- press counts up the car's body var fire, and the car's step says fire with
+-- its heading (linked to fire here). Damage is Kit's
 -- health (c:hurt; kit/game_rules not peaceful, its respawn on_signal): at 0
 -- a wreck (on_died: an explosion, fire, debris, a scorch mark: a copy of
 -- `scorch`), then 2 s later back on the road at the last checkpoint passed
 -- (its own teleport) with full health.
 -- The announcer (`announce`, to a kit/ui_text for everyone) calls the start,
--- the leader, the wrecks and the finish. `music` (local/brim_music): each
--- player's mood, race in a run, lobby out of it.
+-- the leader, the wrecks and the finish.
 local PAINTS = 6
 local WEAPONS = {gun = 6, mines = 3, boost = 1}
 local NAMES = {gun = "Gun", mines = "Mines", boost = "Ram boost"}
@@ -189,7 +191,7 @@ local function rank(c)
 	end
 	if list[1] and list[1] ~= c.state.leader and c.state.phase == "running" then
 		if c.state.leader then
-			say(c, c:name(list[1]) .. " takes the lead! The devil loves a climber!")
+			say(c, c:name(list[1]) .. " takes the lead! The yard loves a climber!")
 		end
 		c.state.leader = list[1]
 	end
@@ -221,16 +223,9 @@ local function clear_weapon(c, by, r)
 	end
 end
 
-local function mood(c, by, m)
-	if c.params.music ~= 0 then
-		c:send(c.params.music, "mood", m, by)
-	end
-end
-
 -- A run's start for the player (the lobby's entered)
 local function enter(c, by)
 	local r = view(c, by)
-	mood(c, by, "race")
 	local p = player_of(c, by)
 	r.mode = c.params.mode
 	r.lap, r.next, r.last, r.t, r.done, r.at = 1, 1, 0, 0, nil, 0
@@ -503,7 +498,6 @@ return {
 		grid_screen = {type = "entity", default = 0},
 		mine = {type = "entity", default = 0},
 		scorch = {type = "entity", default = 0},
-		music = {type = "entity", default = 0},
 		gun_damage = {type = "number", default = 3, min = 0, max = 100},
 		mine_damage = {type = "number", default = 9, min = 0, max = 100},
 		ram_damage = {type = "number", default = 6, min = 0, max = 100},
@@ -522,6 +516,7 @@ return {
 		dice = {default = 0},
 		said_left = {default = 0},
 	},
+	actions = {{name = "fire", key = "Left Ctrl", label = "Fire"}},
 	inputs = {entered = "none", left = "none",
 		start = "none", checkpoint = "number", lap = "none", fire = "number",
 		crate = "string", mine = "entity", ram = "string", back = "none"},
@@ -564,7 +559,7 @@ return {
 				c:after(1, "count")
 				return
 			end
-			say(c, "GO! Burn rubber, sinners!")
+			say(c, "GO! Eat dirt, scrap heaps!")
 			c.state.phase, c.state.t = "running", 0
 			for _, by in ipairs(c.state.racers) do
 				c:speed(by, 1)
@@ -643,10 +638,22 @@ return {
 					" is a hood ornament now!" or c:name(pb) .. " wrecks! First blood to the track!")
 		else
 			say(c, killer and killer .. " sends " .. c:name(pb) .. " to the scrapyard!" or
-					c:name(pb) .. " leaves a mark on the asphalt!")
+					c:name(pb) .. " leaves a mark on the dirt!")
 		end
 		c:log(c:name(pb), "wrecked by", tostring(kind), killer or "")
 		c:after(2, "wrecked", {player = player})
+	end,
+	-- The fire key: the car's body var fire counted up (its step fires
+	-- along its heading)
+	on_action = function(c, name, phase, value, by)
+		if name ~= "fire" or phase ~= "pressed" or type(by) ~= "string" or
+				not by:match("^player:%d+$") then
+			return
+		end
+		local r = view(c, by)
+		r.shots = (r.shots or 0) + 1
+		c:log(c:name(by), "presses fire")
+		c:body_var(by, "fire", r.shots)
 	end,
 	on_input = function(c, input, value, by)
 		if type(by) ~= "string" or not by:match("^player:%d+$") then
@@ -656,7 +663,6 @@ return {
 		if input == "entered" then
 			return enter(c, by)
 		elseif input == "left" then
-			mood(c, by, "lobby")
 			if r.mode == "race" then
 				drop_racer(c, by)
 				c:speed(by, 1)
@@ -686,7 +692,7 @@ return {
 				end
 			end
 			c:log(c:name(by), "starts the race:", #c.state.racers, "cars")
-			say(c, "Engines hot! The pit is open!")
+			say(c, "Engines hot! The yard gates are open!")
 			c:after(1, "count")
 			return
 		end

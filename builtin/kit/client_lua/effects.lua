@@ -210,8 +210,11 @@ local function burst(d, at, part)
 			if d.land then
 				set_floor(em, at[1], at[2], at[3])
 			end
+			-- (a frame more for one made in an Update handler after the
+			-- scene's update: a client part's from a draw hook. Stopped the
+			-- next frame before the scene's update, it had never emitted)
 			bursts[#bursts + 1] = {node = node, emitter = em, n = n, frames = 0,
-				stop = math.ceil(n / IN_FRAME) + 1, till = now_s() + d.ttl_max + 0.1,
+				stop = math.ceil(n / IN_FRAME) + 2, till = now_s() + d.ttl_max + 0.1,
 				part = part}
 			part_bursts = part_bursts + (part and 1 or 0)
 			live = live + n
@@ -349,8 +352,9 @@ end
 -- alone. simplified: no fading with age, and a scene switch drops them (the
 -- old scene's node goes with it)
 local MAX_MARKS, CHUNK, MARK_EVERY = 1024, 32, 0.1
--- (two triangles of the four corners)
-local QUAD = {1, 2, 3, 1, 3, 4}
+-- (two triangles of the four corners, clockwise seen from above: Urho3D culls
+-- counter-clockwise faces)
+local QUAD = {1, 3, 2, 1, 4, 3}
 local marks = {n = 0, next = 0, list = {}, dirty = {}, made = 0, at = 0}
 local mark_mat
 local mark_colors = {}
