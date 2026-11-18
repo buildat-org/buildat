@@ -25,7 +25,9 @@
 #   4. the time trial (its own scene): kitboss over the line at the start
 #      with no checkpoint passed: no lap (the car's step meets the line with
 #      lap_open off), then round: checkpoints 1, 2, 3, the lap, the result
-#      card with the time; no prediction correction on that lap (trial.png).
+#      card with the time; no prediction correction on that lap (trial.png);
+#   5. the car's effects drawn on kitboss's client: exhaust smoke, road dust,
+#      tyre marks.
 # Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/grid.png, $t/push.png,
 # $t/wreck.png, $t/result.png, $t/trial.png
 #   util/kit_racer_check.sh
@@ -415,8 +417,14 @@ assert not n, n
 PY
 step 10 "Wrote screenshot $t/trial.png" "frames 10" "screenshot $t/trial.png"
 echo "ok: the trial: over the line at the start no lap, then checkpoints, the lap, the result; no correction"
+
+# 5. The effects (brim_car.client.lua's, each kind's first logged)
+for k in smoke dust mark; do
+	grep -aq "brim_car: effect $k" "$CL" || fail "no $k drawn ($CL)"
+done
+echo "ok: the effects: $(grep -aoP 'brim_car: effect \K[a-z]+' "$CL" | sort -u | tr '\n' ' ')"
 cmd "quit"
 as bob
 cmd "quit"
-echo "PASS: Brimstone Speedway from its template: the lobby, the grid's Start, both cars off at once, a standing car pushed by another (the server's steps), kitboss's mine and kitbob's wreck and respawn at the checkpoint, the places by who finished first, a trial's lap only over every checkpoint with no correction; screenshots $t/lobby.png $t/grid.png $t/push.png $t/wreck.png $t/result.png $t/trial.png"
+echo "PASS: Brimstone Speedway from its template: the lobby, the grid's Start, both cars off at once, a standing car pushed by another (the server's steps), kitboss's mine and kitbob's wreck and respawn at the checkpoint, the places by who finished first, a trial's lap only over every checkpoint with no correction, the car's smoke, dust and marks; screenshots $t/lobby.png $t/grid.png $t/push.png $t/wreck.png $t/result.png $t/trial.png"
 # vim: set noet ts=4 sw=4:
