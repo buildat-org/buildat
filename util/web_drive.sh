@@ -39,12 +39,18 @@ free_port(){
 port=$(free_port 29600)
 bport=$(free_port 9400)
 pids=()
+# Chrome's TMPDIR: its com.google.Chrome.* singleton dir goes here, not
+# /tmp's top (thousands were left there). Short and in /tmp, not under
+# $out: the singleton socket's path must fit a unix socket's 108 bytes; a
+# run killed before cleanup leaves a buildat_* dir the daily sweep takes
+chrome_tmp=""
 cleanup(){
 	# Each was started in a process group of its own: the whole group goes,
 	# the browser's children with it, and nothing else
 	for p in "${pids[@]}"; do
 		kill -- -"$p" 2>/dev/null
 	done
+	[ -z "$chrome_tmp" ] || { sleep 0.2; rm -rf "$chrome_tmp"; }
 }
 trap cleanup EXIT
 
@@ -112,7 +118,8 @@ case "$browser" in
 				[ -e /dev/dri/renderD128 ] && [ -f "$mesa" ]; then
 			gl="--use-angle=gl-egl"
 		fi
-		__EGL_VENDOR_LIBRARY_FILENAMES=$mesa \
+		chrome_tmp=$(mktemp -d /tmp/buildat_chrome.XXXXXX)
+		TMPDIR=$chrome_tmp __EGL_VENDOR_LIBRARY_FILENAMES=$mesa \
 		setsid "${CHROME:-google-chrome}" --headless=new --mute-audio \
 				--remote-debugging-port="$bport" --user-data-dir="$out/profile" \
 				--use-gl=angle $gl \
