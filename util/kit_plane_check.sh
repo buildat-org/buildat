@@ -60,8 +60,9 @@
 #      with a copy 8 over; a wall in the plane under a layer walked
 #      through. Perspective: the same offset from the layer's x, copies.
 #      The editor: one placed from the palette in the Front view, a polygon
-#      put under it by Switch parent, its inspector's note; what is under a
-#      layer drawn where authored in edit mode. (MCP and get_view:
+#      put under it by Switch parent, its inspector's note and its
+#      collision row marked none; what is under a layer drawn where
+#      authored in edit mode. (MCP and get_view:
 #      util/kit_get_view_check.sh.)
 # The screenshots (side, front, side_ortho, side_polygons, front_polygon,
 # side_wide, front_wide, front_far_end, grass_one, grass_two,
@@ -782,11 +783,13 @@ near() { awk -v a="$1" -v b="$2" -v e="$3" 'BEGIN { exit !((a - b) ^ 2 <= e * e)
 grep -aq "kit editor: placed kit/parallax at" "$p" || fail "kit/parallax not placed from the palette ($p)"
 grep -aq "kit editor: $CP: Under parallax layer .*Shown here where authored" "$p" ||
 	fail "no inspector note on $CP under $LP ($p)"
+grep -aq "kit editor: $CP: collision (none: under a parallax layer)" "$p" ||
+	fail "the collision row of $CP under $LP not marked ($p)"
 for e in "$C5 3" "$CP 1"; do
 	read -r d a k cx rest <<< "$(par $e)"
 	[ "$cx" = none ] && [ "$d" = "$a" ] || fail "entity ${e% *} not drawn where authored in edit mode: $(par $e)"
 done
-echo "ok: kit/parallax placed from the palette in the Front view, polygon $CP put under it by Switch parent; the editor draws what is under a layer where authored, its inspector says so"
+echo "ok: kit/parallax placed from the palette in the Front view, polygon $CP put under it by Switch parent; the editor draws what is under a layer where authored, its inspector says so, its collision row marked none"
 read -r bx1 by1 bz1 acks1 corr1 rest <<< "$(fields "$(grep -aoP 'kit: body at \K.*' "$p" | sed -n 1p)")"
 read -r bx2 by2 bz2 acks2 corr2 rest <<< "$(fields "$(grep -aoP 'kit: body at \K.*' "$p" | sed -n 2p)")"
 read -r d1 a1 k1 c1 rest <<< "$(par $C5 1)"

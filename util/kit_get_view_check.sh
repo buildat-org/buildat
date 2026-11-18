@@ -497,7 +497,12 @@ for re in "kitboss's agent asks kitboss's client \(peer [0-9]+, scene [^)]+\) fo
 	grep -aqE "$re" "$SL" || fail "no \"$re\" in $SL"
 done
 [ "$(pictures "$t/bob.log")" = 0 ] || fail "kitbob's client was asked ($t/bob.log)"
-echo "ok: kitboss's agent's pictures, from a pose, upright, by yaw and its own view; the window the same"
+# [KIT_SIDE_SCENERY] (8) The parallax pose's camera placed the layers in
+# kitboss's window for its picture's frame alone
+offs=$(grep -aoP "kit: parallax: a get_view pose's camera off after \K\d+(?= frames drawn)" "$t/boss.log" | sort -u | tr '\n' ' ')
+grep -aq "kit: parallax: a get_view pose's camera on" "$t/boss.log" && [ "$offs" = "1 " ] ||
+	fail "the pose's camera on the layers in kitboss's window past its picture's frame: off after $offs frames ($t/boss.log)"
+echo "ok: kitboss's agent's pictures, from a pose, upright, by yaw and its own view; the window the same; a pose's parallax offsets in it for its picture's frame alone"
 # [KIT_TEXTURE_DESIGNER] Recipe textures by put_texture, worn by cells and a
 # polygon, drawn by kitboss's client (made from their names; kitbob's too)
 export WEAVE_GREEN

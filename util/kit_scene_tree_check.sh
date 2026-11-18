@@ -30,9 +30,10 @@
 #      Scenes window in menu: the Remove of menu, racing and world dimmed,
 #      each clicked: nothing sent, the pointer resting there its tip (the
 #      builder's own, scenes under it, the first); t1's and arena's none.
+#      Its buttons in columns (each kind at one x).
 #   7. B (another user dir): a scene "hub"; racing.scene.zip added under it
 #      (Scenes..., Add here...): racing under hub, t1 under racing, racing's
-#      controls in t1, the Scenes window indented so.
+#      controls in t1, the Scenes window indented so, its buttons in columns.
 #   8. The web client (headless Chrome; skipped without web/ or Chrome) in
 #      B: the Scenes window the same; t1's Move..., the root: t1 on the
 #      root. B's save after: the tree and the carried environment (B's
@@ -118,8 +119,12 @@ arrived() # <offset in the client's log> <scene> <regex of the controls the clie
 {
 	# (the controls come before the body's put; none are sent where they
 	# are the same as where it was)
+	# (the body's put after that line: a scene left on the way, as Play's
+	# round start through world, has a put and controls of its own before)
+	local o
 	await "$CL" "$1" 20 "kit editor: in the scene $2 "
-	await "$CL" "$1" 20 "player physics enabled"
+	o=$(tail -c +$(($1 + 1)) "$CL" | grep -abm1 -E "kit editor: in the scene $2 " | cut -d: -f1)
+	await "$CL" "$(($1 + o))" 20 "player physics enabled"
 	grep -a "kit: controls: " "$CL" | tail -1 | grep -qaE "kit: controls: $3" ||
 		fail "in $2 not \"$3\": $(grep -a "kit: controls: " "$CL" | tail -1) ($CL)"
 }
@@ -187,6 +192,25 @@ scenes_window() # <the scenes it shows, ">" a level under>: the scene list's Sce
 	grep -a "kit editor: the Scenes window: " "$CL" | tail -1 | grep -qF "window: $1" ||
 		fail "the Scenes window not \"$1\": $(grep -a "kit editor: the Scenes window: " "$CL" | tail -1) ($CL)"
 	cmd "frames 3"
+}
+# The Scenes window's buttons in columns: in the rows (each with a Move...),
+# each kind at one x whatever the name's length and indent
+scenes_columns() # <a name for the dump>
+{
+	step 10 "kit editor: touch targets \\($1\\)" "frames 3" "event kit_touch_targets $1"
+	python3 -I - "$CL" "$1" <<'PY' || fail "the Scenes window's columns ragged ($CL)"
+import re, sys
+l = [x for x in open(sys.argv[1], errors="replace") if "touch targets (%s)" % sys.argv[2] in x][-1]
+bs = [(t, int(x), int(y)) for t, x, y in re.findall(r'Button "([^"]*)" (-?\d+) (-?\d+) \d+ \d+', l)]
+rows = {y for t, x, y in bs if t == "Move..."}
+xs = {}
+for t, x, y in bs:
+    if y in rows and t in ("List", "Unlist", "Move...", "Add here...", "Remove"):
+        xs.setdefault("List" if t == "Unlist" else t, set()).add(x)
+assert len(rows) >= 2 and len(xs) >= 3 and all(len(v) == 1 for v in xs.values()), (len(rows), xs)
+print("ok: the Scenes window's %d rows, its buttons in columns at x %s" % (len(rows),
+    ", ".join("%s %d" % (k, min(v)) for k, v in sorted(xs.items(), key=lambda kv: min(kv[1])))))
+PY
 }
 
 # A: its save made first, as New makes one (Workbench's "ground" row): a
@@ -351,6 +375,7 @@ echo "ok: menu empty (no ground, 0 sections, no heightmap sent), its player held
 cmd "frames 3" 'click DropDownList "▼" 1024 0' "delay 300" "frames 5" "screenshot $t/a_tree.png" 'click Text "Scene: menu"' "frames 3"
 scenes_window "world, racing, >t1, arena, menu"
 cmd "frames 5" "screenshot $t/a_scenes.png"
+scenes_columns a_scenes
 # [KIT_SCENES_REMOVE_TIP] The dimmed Remove: a click nothing, the pointer
 # resting there its tip (from the last row up: a tip is drawn under its
 # button)
@@ -383,7 +408,9 @@ step 60 "kit editor: Added the scene racing " "frames 3" 'click Button "racing.s
 await "$SL" "$m" 10 "kitboss adds the scene racing \(and 1 under it\) under hub "
 to_scene t1 "camera chase, pointer \S+, movement kit/click_to_move"
 scenes_window "world, hub, >racing, >>t1"
-cmd "frames 5" "screenshot $t/b_scenes.png" 'click Button "Close"' "frames 3"
+cmd "frames 5" "screenshot $t/b_scenes.png"
+scenes_columns b_scenes
+cmd 'click Button "Close"' "frames 3"
 cmd "quit"
 exec 3>&-
 wait $CLIENT

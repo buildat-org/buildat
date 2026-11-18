@@ -28,8 +28,8 @@
 #      side camera led ahead in +x, after Space (turned round) in -x
 #      (turned.png, [KIT_SIDE_LEAD]);
 #   5. kitbob joins: [KIT_LOBBY] he in the lobby, the gem kitboss took still
-#      drawn for him (each rider's own), [KIT_LOBBY_OUT_OF_PLAY] out of play;
-#      his pick of The Crags, his body drawn by the hook on kitboss's screen;
+#      drawn for him (each rider's own), [KIT_LOBBY_OUT_OF_PLAY] out of play
+#      (W held there leaves his bike where it is); his pick of The Crags, his body drawn by the hook on kitboss's screen;
 #      his first My account page drawn again when the hello comes, "Connect
 #      an agent..." on it (accounts.lua);
 #   6. [CRAG_BEST_RESET] a fourth gem placed, linked only to the run: the run
@@ -339,6 +339,16 @@ await "$CL" 0 10 "kit: entity 11's look: taken off"
 seen "$CL" 0 "kit: entity 11's look: taken on" && fail "kitboss's gem gone for kitbob ($CL)"
 grep -aq "kit/lobby 44: kitbob: none -> lobby" "$SL" || fail "kitbob not in the lobby ($SL)"
 await "$SL" 0 10 "kitbob is out of play \(a lobby\)"
+# (4z16: the rider's keys drove the bike under the lobby screen) W held
+# there: the bike stays. simplified: a held key may read as not held, which
+# passes too
+body
+x0=$bx
+cmd "keydown W" "delay 800" "keyup W" "frames 10"
+body
+awk -v a="$x0" -v b="$bx" 'BEGIN { exit !((a - b) ^ 2 < 0.0025) }' ||
+	fail "W under the lobby moved kitbob's bike: x $x0 -> $bx ($CL)"
+echo "ok: W held under the lobby: kitbob's bike stayed at x $bx"
 m=$(mark "$SL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "The Crags*"'
 await "$SL" "$m" 5 "kitbob is in play"

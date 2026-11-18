@@ -3221,7 +3221,17 @@ function NT.params_form(w, e, ci, c, t, keep)
 			-- [KIT_POLYGON_ROW] its row below)
 			points[#points + 1] = k
 		else
-			fields[#fields + 1] = field(k, decl[k], values)
+			local f = field(k, decl[k], values)
+			-- [KIT_SIDE_SCENERY] (8) under a parallax layer nothing is met
+			-- (kit.cpp's under_parallax()): its collision says so
+			if k == "collision" and (NT.parallax_note(e) or ""):find("^Under") then
+				f.label = "collision (none: under a parallax layer)"
+				if NT.col_said ~= e.id then
+					NT.col_said = e.id
+					log:info("kit editor: " .. e.id .. ": " .. f.label)
+				end
+			end
+			fields[#fields + 1] = f
 		end
 	end
 	if #fields > 0 then
@@ -5996,6 +6006,15 @@ function M.scenes_dialog()
 		under[s.up or ""] = true
 	end
 	log:info("kit editor: the Scenes window: " .. table.concat(shown, ", "))
+	-- (columns: each cell as wide as its column's widest, the name's with
+	-- its indent, so the buttons line up; the touch mode's panes stretch
+	-- the buttons again)
+	local cols = {}
+	local function cell(i, e, indent)
+		cols[i] = cols[i] or {}
+		table.insert(cols[i], {e = e, indent = indent or 0})
+		return e
+	end
 	for _, s in ipairs(M.scene_rows()) do
 		local n = s.name
 		local r = row(w)
@@ -6004,20 +6023,22 @@ function M.scenes_dialog()
 		if depth > 0 then
 			r:CreateChild("UIElement"):SetFixedWidth(20 * depth)
 		end
-		label(r, n .. (listed[n] and " (listed)" or " (not listed)"))
-		button(r, listed[n] and "Unlist" or "List", function()
+		cell(1, label(r, n .. (listed[n] and " (listed)" or " (not listed)")),
+				depth > 0 and 20 * depth + 4 or 0)
+		-- (button() returns its Text too: one value into cell)
+		cell(2, (button(r, listed[n] and "Unlist" or "List", function()
 			log:info("kit editor: " .. (listed[n] and "unlist " or "list ") .. n)
 			send({op = "list_scene", name = n, on = not listed[n]})
 			drop("dialog")
-		end):SetName("list " .. n)
-		button(r, "Move...", function()
+		end))):SetName("list " .. n)
+		cell(3, (button(r, "Move...", function()
 			M.scene_move_dialog(s)
-		end):SetName("move " .. n)
+		end))):SetName("move " .. n)
 		if E.state.can_make_scenes then
-			button(r, "Add here...", function()
+			cell(4, (button(r, "Add here...", function()
 				drop("dialog")
 				M.add_scene_file(n)
-			end):SetName("add under " .. n)
+			end))):SetName("add under " .. n)
 		end
 		-- [KIT_SCENES_REMOVE_TIP] One that cannot go: dimmed, its click
 		-- nothing, why on a pointer's rest or a finger held (Kit's tip,
@@ -6037,6 +6058,17 @@ function M.scenes_dialog()
 		if why then
 			t:SetColor(DIM)
 			NT.sg.tip(b, "remove " .. n, why, "dialog")
+		end
+	end
+	for _, c in pairs(cols) do
+		local most = 0
+		for _, x in ipairs(c) do
+			most = math.max(most, x.e.minWidth + x.indent)
+		end
+		-- (fixed: the window's room spread over the cells moved them a
+		-- pixel or three a row)
+		for _, x in ipairs(c) do
+			x.e:SetFixedWidth(most - x.indent)
 		end
 	end
 	br = br or row(w)

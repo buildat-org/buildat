@@ -4,10 +4,11 @@
 # cost: ~2 min (2026-11-17)
 # covers: builtin/kit/kit.cpp builtin/kit/types/ui_button.lua builtin/kit/types/ui_scene_list.lua
 # [KIT_AGENT_FEEDBACK_1117] An agent's tools as a claude.ai agent asked for
-# them on testbench, through MCP on Workbench. kitboss (the admin) makes a
-# builder and an admin token on a headless weston's Xwayland of the
+# them on testbench, through MCP on Workbench. kitboss (the admin) makes two
+# builder tokens and an admin token on a headless weston's Xwayland of the
 # check's own and stays, in edit mode; the server's camera on SDL's
-# offscreen driver:
+# offscreen driver. The phases split over the two builder tokens so that
+# neither meets a token's 120 calls a minute (met: a loud fail, no wait):
 #   0. [SERVER_VERSION_SHOWN] the pause menu's "Server <VERSION>" label;
 #   1. tools/list: the builder token's without the admin's tools (14), the
 #      admin token's with them; both instructions under 4096 characters,
@@ -26,7 +27,9 @@
 #      moved to moon by play_join while editing moon;
 #      play_input's press (8): a kit/ui_button by its label, a
 #      kit/ui_scene_list's row by its title (its "picked"), an unknown one
-#      refused naming the screen's buttons;
+#      refused naming the screen's buttons; an output emitted every tick
+#      (local/ticker) one entry with its count, first and last value and
+#      time; muted by its name and by "<id>:<name>" (the answer's muted);
 #   5. get_state's filters: scene, ids, type, state false (10);
 #   6. get_goal_warnings' level lines: default names, a scene with no way
 #      in, the timer with no link of four (12); [KIT_SIDE_SCENERY] (3) parts
@@ -136,18 +139,25 @@ step 10 "accounts: agents: a token made, builder" "frames 3" \
 step 10 "accounts: agents: the token copied" "frames 3" 'click Button "copy token"'
 tok=$(clip "")
 [[ $tok =~ ^bat_[0-9a-f]{64}$ ]] || fail "kitboss's builder token: $tok"
+# (a second builder's: the phases split over the two, each token under its
+# 120 calls a minute)
+cmd "frames 3" 'click Button "Done"'
+step 10 "accounts: agents: a token made, builder" "frames 3" 'click Button "Make a token"'
+step 10 "accounts: agents: the token copied" "frames 3" 'click Button "copy token"'
+tok2=$(clip "$tok")
+[[ $tok2 =~ ^bat_[0-9a-f]{64}$ ]] && [ "$tok2" != "$tok" ] || fail "kitboss's second builder token: $tok2"
 cmd "frames 3" 'click Button "Done"' "frames 3" 'click Button "Scope: Builder*"' \
 	"frames 3" 'click LineEdit "My agent"' "delay 300" "keydown ctrl" \
 	"keypress a" "keyup ctrl" "text admin agent" "frames 2"
 step 10 "accounts: agents: a token made, admin" 'click Button "Make a token"'
 step 10 "accounts: agents: the token copied" "frames 3" 'click Button "copy token"'
-adm=$(clip "$tok")
-[[ $adm =~ ^bat_[0-9a-f]{64}$ ]] && [ "$adm" != "$tok" ] || fail "kitboss's admin token: $adm"
+adm=$(clip "$tok2")
+[[ $adm =~ ^bat_[0-9a-f]{64}$ ]] && [ "$adm" != "$tok" ] && [ "$adm" != "$tok2" ] || fail "kitboss's admin token: $adm"
 cmd "frames 3" 'click Button "Done"'
 step 10 "pause: the menu shown" "keypress Escape"
 step 10 "pause: the menu closed" "frames 3" "keypress Escape"
 step 10 "kit editor: edit mode on" "frames 3" 'event kit_edit {"op": "mode", "on": true}'
-echo "ok: kitboss's builder and admin tokens; kitboss in edit mode"
+echo "ok: kitboss's two builder tokens and an admin token; kitboss in edit mode"
 
 cat > "$t/mcp.py" <<'PY'
 import json, re, sys, time, urllib.error, urllib.request
@@ -170,17 +180,18 @@ def rpc(method, params=None, tk=tok):
     m = {"jsonrpc": "2.0", "id": n, "method": method}
     if params is not None:
         m["params"] = params
-    # (a token's 120 calls a minute: waited out, up to the minute)
-    for i in range(65):
-        s, b = post(m, tk)
-        if s != 429:
-            break
-        time.sleep(1)
+    # (a token's 120 calls a minute: never met, the phases over two builder
+    # tokens; a tools/call over it answers "Over 120 calls" as an error)
+    s, b = post(m, tk)
+    assert s != 429, ("over the token's 120 calls a minute: split the phases "
+        "over the tokens again", method, n)
     assert s == 200, (method, s, b)
     return json.loads(b)
 def call(name, args={}, error=False):
     r = rpc("tools/call", {"name": name, "arguments": args})["result"]
     text = r["content"][0]["text"]
+    assert not text.startswith("Over 120 calls"), ("over the token's 120 calls "
+        "a minute: split the phases over the tokens again", name, n)
     assert r["isError"] == error, (name, args, text[:800])
     print(" ", name, json.dumps(args)[:200], "->", text[:300])
     return text
@@ -240,6 +251,23 @@ HUB = '''return {
 }
 '''
 CL1 = 'return {on_add = function(e) e:log("hub client v1") end}\n'
+# (play_input's repeats: an output every tick once it has "go")
+TICKER = '''return {
+	version = 1,
+	no_position = true,
+	inputs = {go = "none", stop = "none"},
+	outputs = {n = "number"},
+	state = {n = {default = 0}},
+	on_input = function(c, input)
+		if input == "go" then c:after(0) else c:after() end
+	end,
+	on_timer = function(c)
+		c.state.n = c.state.n + 1
+		c:emit("n", c.state.n)
+		c:after(0)
+	end,
+}
+'''
 if phase == "tools":
     hidden = {"set_builder", "list_games", "copy_game", "rename_game", "publish_log"}
     for tk, admin in ((tok, False), (adm, True)):
@@ -405,6 +433,22 @@ elif phase == "play":
     r = refused("play_input", {"press": "Nope"})
     assert "press: no button \"Nope\" on your body's screen (its buttons: " in r and "Go" in r, r
     assert "row: 1 to 1" in refused("play_input", {"press": L})
+    # An output every tick: one entry with its count, first and last; muted
+    # by its name or "<id>:<name>"
+    call("put_type", {"name": "ticker", "source": TICKER})
+    TK = placed(call("place", {"type": "local/ticker", "pos": [0, 1, 0]}))
+    call("try_input", {"id": TK, "input": "go"})
+    ev = [e for e in played({"seconds": 0.5})["events"] if e["id"] == TK]
+    assert len(ev) == 1 and ev[0]["count"] >= 5 and ev[0]["output"] == "n", ev
+    e = ev[0]
+    assert float(e["last_value"]) - float(e["value"]) == e["count"] - 1 and e["last_t"] > e["t"], e
+    print("   ticker: %d emits in one entry, %s at %s s to %s at %s s" % (e["count"],
+        e["value"], e["t"], e["last_value"], e["last_t"]))
+    for m in ("n", "%d:n" % TK):
+        p = played({"seconds": 0.3, "mute": [m]})
+        assert not any(e["id"] == TK for e in p["events"]) and p.get("muted", 0) >= 3, (m, p)
+    assert "mute: up to 16 outputs" in refused("play_input", {"mute": [""]})
+    call("try_input", {"id": TK, "input": "stop"})
     assert "Your body is gone" in call("play_leave")
 elif phase == "state":
     rpc("initialize", init)
@@ -499,11 +543,15 @@ elif phase in ("restore", "back"):
         h = json.loads(call("get_history", {"limit": 200}))
         assert any(x["by"] == "kitboss" and x["what"] == "terrain: raise" for x in h), h[-8:]
         assert any(x["what"] == "restored checkpoint \"flat\"" for x in h), h[-8:]
-print("ok:", phase)
+print("ok: %s (%d calls)" % (phase, n))
 PY
 mcp() # <phase>: the MCP client's phase; its output in $t/mcp_<phase>.log
 {
-	python3 -I "$t/mcp.py" "$1" "$url" "$tok" "$adm" "$t" "$V" > "$t/mcp_$1.log" 2>&1 ||
+	# (the builder's calls over two tokens, each under its 120 a minute; an
+	# agent's scene is its token's: heightmap's switch_scene after goals')
+	local k=$tok
+	case $1 in play|state|goals|history|heightmap|checkpoint) k=$tok2 ;; esac
+	python3 -I "$t/mcp.py" "$1" "$url" "$k" "$adm" "$t" "$V" > "$t/mcp_$1.log" 2>&1 ||
 		fail "the MCP phase $1: $(tail -5 "$t/mcp_$1.log") ($t/mcp_$1.log, $SL)"
 	cat "$t/mcp_$1.log"
 }
@@ -542,7 +590,7 @@ cmd "sync 2000" quit
 exec 3>&-
 wait $CLIENT 2>/dev/null
 CLIENT=$SERVER_PID
-for k in "${tok#bat_}" "${adm#bat_}"; do
+for k in "${tok#bat_}" "${tok2#bat_}" "${adm#bat_}"; do
 	grep -rqaF "$k" "$t"/*.log && fail "a token in a log"
 done
-echo "PASS: an agent's tools: hidden by the token, edit_type, put_type keeping the client part, a new param's default, links by name, try_input as nobody/a player/its body, play_input's press, get_state's filters, the level warnings, get_history, a checkpoint's heightmap restored"
+echo "PASS: an agent's tools: hidden by the token, edit_type, put_type keeping the client part, a new param's default, links by name, try_input as nobody/a player/its body, play_input's press and its repeats in one entry and muted, get_state's filters, the level warnings, get_history, a checkpoint's heightmap restored"

@@ -31538,7 +31538,11 @@ struct Module: public interface::Module, public Interface
 				"height). press: a button on your body's screen pressed first, "
 				"as a click on it (a kit/ui_button, a pause menu item, a "
 				"kit/ui_scene_list's row: Play in a lobby), by its id or its "
-				"label (a list's row by its title, or row from 1).",
+				"label (a list's row by its title, or row from 1). An entity's "
+				"output emitted again is one entry: count, the first value and "
+				"time t (s from the start), last_value and last_t; mute: outputs "
+				"left out (\"<output>\" or \"<id>:<output>\", up to 16; "
+				"muted: how many emits that left out).",
 				R"J({"type": "object", "properties": {
 				"keys": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
 				"actions": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
@@ -31547,7 +31551,9 @@ struct Module: public interface::Module, public Interface
 				"use": {"type": "integer"}, "picture": {"type": "boolean"},
 				"width": {"type": "integer"}, "height": {"type": "integer"},
 				"press": {"description": "A button's entity id or its label"},
-				"row": {"type": "integer", "description": "press's list's row, from 1"}}})J",
+				"row": {"type": "integer", "description": "press's list's row, from 1"},
+				"mute": {"type": "array", "items": {"type": "string"}, "maxItems": 16,
+					"description": "Outputs left out: \"<output>\" or \"<id>:<output>\""}}})J",
 				""},
 			{"play_leave", "play_leave", "Your body gone: the server's camera "
 				"plays no more (as after 120 s unused).",
@@ -34304,6 +34310,12 @@ struct Module: public interface::Module, public Interface
 		bool rec = false;
 		uint64_t rec_session = 0, rec_player = 0;
 		json::Value events = json::array();
+		// An entity's output again: counted on its first entry (its index in
+		// events by "<id>:<output>"); outputs muted ("<output>" or
+		// "<id>:<output>") and the emits they left out
+		std::map<ss_, unsigned> event_at;
+		sv_<ss_> mute;
+		int64_t muted = 0;
 	} m_cam;
 	// A call's answer within the network's 10 s (take_pub_jobs' 8)
 	static const int64_t CAMERA_CALL_US = 7500000;
@@ -34875,6 +34887,16 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!av.is_undefined() && !av.is_array())
 			return "actions: a list of action names";
+		sv_<ss_> mute;
+		const json::Value &mv = a.get("mute");
+		for(unsigned i = 0; mv.is_array() && i < mv.size(); i++){
+			const ss_ m = mv.at(i).is_string() ? mv.at(i).as_string() : "";
+			if(m.empty() || m.size() > 64 || mute.size() >= 16)
+				return "mute: up to 16 outputs, \"<output>\" or \"<id>:<output>\"";
+			mute.push_back(m);
+		}
+		if(!mv.is_undefined() && !mv.is_array())
+			return "mute: a list of outputs";
 		// [KIT_AGENT_FEEDBACK_1117] 8: a button on the body's screen pressed
 		// first, as its client's click sends it (an action's button: that
 		// action held)
@@ -34955,6 +34977,9 @@ struct Module: public interface::Module, public Interface
 		m_cam.rec_session = sid;
 		m_cam.rec_player = (uint64_t)json::jint(body, "entity");
 		m_cam.events = json::array();
+		m_cam.event_at.clear();
+		m_cam.mute = mute;
+		m_cam.muted = 0;
 		m_cam.used = now;
 		if(press_id && press_action.empty()){
 			SessionScope sc(*this, session_of_peer(cam));
@@ -34985,18 +35010,40 @@ struct Module: public interface::Module, public Interface
 	void play_fired(const Entity &e, const ss_ &output, const json::Value &value,
 			const ss_ &by)
 	{
+		const ss_ key = itos(e.id)+":"+output;
+		for(const ss_ &m : m_cam.mute){
+			if(m == output || m == key){
+				m_cam.muted++;
+				return;
+			}
+		}
+		const ss_ v = value.is_null() ? ss_() : value.is_string() ?
+				value.as_string() : value.stringify();
+		const double t = std::round((interface::os::time_us() - m_play.since) /
+				10000.0) / 100;
+		// The same entity's output again (one emitted every tick filled the
+		// list): counted on its first entry
+		auto it = m_cam.event_at.find(key);
+		if(it != m_cam.event_at.end()){
+			json::Value &o = m_cam.events[it->second];
+			o.set("count", json::jint(o, "count") + 1);
+			o.set("last_value", v.substr(0, 100));
+			o.set("last_t", t);
+			return;
+		}
 		if(m_cam.events.size() >= 40)
 			return;
 		json::Value o = json::object();
 		o.set("id", (int64_t)e.id);
 		o.set("name", e.name);
 		o.set("output", output);
-		const ss_ v = value.is_null() ? ss_() : value.is_string() ?
-				value.as_string() : value.stringify();
 		if(!v.empty())
 			o.set("value", v.substr(0, 100));
+		o.set("t", t);
+		o.set("count", (int64_t)1);
 		if(!by.empty())
 			o.set("by", by == "player:"+itos(m_cam.rec_player) ? ss_("you") : by);
+		m_cam.event_at[key] = m_cam.events.size();
 		m_cam.events.append(o);
 	}
 
@@ -35025,7 +35072,10 @@ struct Module: public interface::Module, public Interface
 		r.set("from", from);
 		r.set("moved", std::round(std::sqrt(d) * 100) / 100);
 		r.set("events", m_cam.events);
+		if(m_cam.muted)
+			r.set("muted", m_cam.muted);
 		m_cam.events = json::array();
+		m_cam.event_at.clear();
 		m_cam.used = interface::os::time_us();
 		const ss_ text = "Played "+json::Value(w.secs).stringify()+" s"+
 				(note.empty() ? ss_() : " ("+note+")")+": "+r.stringify();
@@ -37770,8 +37820,9 @@ struct Module: public interface::Module, public Interface
 				"play_input holds keys or the game's actions for up to 4 s, "
 				"looks, jumps, uses an entity, and answers where the body went, "
 				"its state (health, score, inventory) and what entities emitted "
-				"meanwhile (picture: its view at the end), press a button on "
-				"its screen first (Play in a lobby); play_leave ends it. "
+				"meanwhile (an output again one entry with its count; mute "
+				"leaves a busy one out; picture: its view at the end), press "
+				"a button on its screen first (Play in a lobby); play_leave ends it. "
 				"Walk into what you built and read what fired. try_input as "
 				"\"me\" sends as your body, as a player's name as theirs.\n"
 				// [KIT_AGENT_FEEDBACK_1117] 11

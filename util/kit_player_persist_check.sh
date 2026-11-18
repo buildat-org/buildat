@@ -142,23 +142,29 @@ read -r x y z <<<"$(echo "$p3" | tr -d ',')"
 cx=$(python3 -c "import math; print(math.floor($x + 0.5))")
 cy=$(python3 -c "import math; print(math.floor($y + 0.5))")
 cz=$(python3 -c "import math; print(math.floor($z + 0.5))")
-voxels() # <cmds file> <"x, y, z voxel">...: kitboss sets them in edit mode
+# kitboss sets them in edit mode: by F6, or as the editor remembers him
+# leaving (the session before left in edit mode: an F6 then would race the
+# remembered edit mode coming on and turn it off)
+voxels() # <cmds file> <F6|remembered> <"x, y, z voxel">...
 {
-	local f=$1 v
-	shift
+	local f=$1 how=$2 v
+	shift 2
 	cat > "$f" <<'EOF'
 wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 player physics enabled
 wait_log_any 10000 kit editor: edit rights: yes
-keypress F6
-wait_log 10000 kit editor: edit mode on
 EOF
+	if [ "$how" = F6 ]; then
+		printf 'keypress F6\nwait_log 10000 kit editor: edit mode on\n' >> "$f"
+	else
+		printf 'wait_log_any 10000 kit editor: remembered: edit mode\nwait_log_any 10000 kit editor: edit mode on\n' >> "$f"
+	fi
 	for v in "$@"; do
 		echo "event kit_edit {\"op\": \"set_voxel\", \"pos\": [${v% *}], \"voxel\": \"${v##* }\"}" >> "$f"
 	done
 	printf 'sync 2000\nquit\n' >> "$f"
 }
-voxels "$t/boss2.cmds" "$cx, $cy, $cz kit/stone" "$cx, $((cy + 1)), $cz kit/stone"
+voxels "$t/boss2.cmds" F6 "$cx, $cy, $cz kit/stone" "$cx, $((cy + 1)), $cz kit/stone"
 client kitboss "$t/boss2.cmds"
 client kitbob "$t/bob2.cmds"
 want "$t/srv2.log" "kitbob's kept place ($p3) is built over: the spawn" \
@@ -167,7 +173,7 @@ echo "ok: built over while away: the spawn"
 # 5. Dug out under the spawner, where he was kept: back there, falls
 p4=$(kept "$t/srv2.log")
 [ "$p4" = "0, 1, -4" ] || fail "kitbob was not kept on the spawner ($p4, $t/srv2.log)"
-voxels "$t/boss3.cmds" "0, 0, -4 air" "0, -1, -4 air"
+voxels "$t/boss3.cmds" remembered "0, 0, -4 air" "0, -1, -4 air"
 client kitboss "$t/boss3.cmds"
 cat > "$t/bob3.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob

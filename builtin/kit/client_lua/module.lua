@@ -2590,7 +2590,7 @@ function VIEW.next()
 	-- it draws: pose, cam, aspect)
 	VIEW.job = {node = node, tex = tex, vp = vp, surface = surface,
 			frames = 0, t = buildat.get_time_us(), pose = pos ~= nil, cam = cam,
-			aspect = w / h}
+			aspect = w / h, hidden = q.camera and true or false}
 	-- (the layers placed for it now: a picture queued here is drawn this
 	-- frame, maybe after their Update)
 	M.parallax_tick()
@@ -2599,6 +2599,14 @@ function VIEW.next()
 		surface:QueueUpdate()
 	end
 end
+-- The renderer's views of this frame set up: a picture queued before is
+-- drawn in this frame (kit/parallax's pose camera off from the next)
+magic.SubscribeToEvent("PostRenderUpdate", function()
+	local j = VIEW.job
+	if j and j.drawn == 0 then
+		j.drawn_in = true
+	end
+end)
 buildat.sub_packet("kit:view", function(data)
 	local q = network.parse_json(data)
 	if type(q) ~= "table" or type(q.id) ~= "string" or #q.id > 64 then
@@ -2799,13 +2807,19 @@ end
 -- its collision bodies left out), made again as the look is rebuilt, its
 -- state flips, it is hidden or shown or its text changes; a client part's
 -- change to the look in between shows on the original alone. 32 copies an
--- entity at most, round the camera. A get_view pose's offsets show in the
--- window too for the frames it draws in. Nested layers: the nearest one
--- alone
+-- entity at most, round the camera. Nested layers: the nearest one alone.
+-- A get_view pose in a builder's own window: its camera for the frame its
+-- picture is drawn in alone (queued, drawn in the frame whose
+-- PostRenderUpdate comes after: VIEW's drawn_in), the window's again after
+-- it (the server's camera's hidden window: until its picture is read).
+-- simplified: that one frame shows the pose's offsets in the builder's
+-- window too (Urho3D draws a frame's views from one scene state; moving
+-- the looks between the views would need each view's octree and
+-- transforms updated again)
 local PAR = {said = {}, max = 32}
 local function par_camera()
 	local j = VIEW.job
-	if j and j.pose then
+	if j and j.pose and (j.hidden or not j.drawn_in) then
 		return j.node, j.cam, j.aspect
 	end
 	if E.editing or not O.camera then
@@ -2878,6 +2892,14 @@ local function par_tick()
 	PAR.drawn = par_any
 	local cn, cam, aspect = par_camera()
 	local c = cn and cn.worldPosition
+	-- (for a check: the frames drawn with a pose's camera placing the layers)
+	local j = VIEW.job
+	local pose = j and cn == j.node and j or nil
+	if pose ~= PAR.pose then
+		log:info("kit: parallax: a get_view pose's camera " .. (pose and "on" or
+				"off after " .. PAR.pose_frames .. " frames drawn with it"))
+		PAR.pose, PAR.pose_frames = pose, 0
+	end
 	for id, n in pairs(P.nodes) do
 		local L = cn and n.look and n.at and M.parallax_layer(id, n)
 		if L then
@@ -2938,6 +2960,11 @@ local function par_tick()
 	end
 end
 magic.SubscribeToEvent("Update", par_tick)
+magic.SubscribeToEvent("PostRenderUpdate", function()
+	if PAR.pose then
+		PAR.pose_frames = PAR.pose_frames + 1
+	end
+end)
 M.parallax_tick = par_tick
 -- For a drive: "event kit_parallax <id>..." logs each one's look as drawn,
 -- where it is authored, its copies' x and the camera's place
