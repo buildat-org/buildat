@@ -53,7 +53,11 @@
 --     hook's), s this client's predicted state or another's {pos, pose}; the
 --     humanoid not drawn
 -- s its state (s.pos the body's bottom middle {x, y, z}, s.vel; the rest
--- its own), changed in place; i this step's input: f (forward, -1...1),
+-- its own), changed in place; [KIT_BODY_VARS] s.vars (nil: none) the values
+-- the server's components set on this body (c:body_var(by, key, value)), read
+-- only: in the state the server sends, so the client's re-steps have the
+-- server's (a step's change to them is undone at the server's next state);
+-- i this step's input: f (forward, -1...1),
 -- r (right), yaw (the camera's, degrees from +z toward +x), jump (0/1),
 -- go (0/1: a target), tx, ty, tz (where to go), [KIT_CLIENT_REACT] (10)
 -- out_of_play (true while the player is out of play: dead and waiting to

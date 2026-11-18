@@ -11,6 +11,11 @@
 -- [KIT_LOBBY] With a kit/lobby's entered linked to start: each rider's clock
 -- from their own Play or Again, their gems, crashes and finish counted only
 -- then; the finish their result (the time and the best) and the run over.
+-- [KIT_BODY_VARS] A rider with every gem (and in their run) has the finish
+-- open on their body (c:body_var "finish_open", s.vars in crag_bike's step):
+-- the bike holds itself on the finish line, on their client at once; the
+-- finish here (the time, the result) still decides. simplified: a last gem
+-- taken under a round trip before the line, the client's bike rewinds there.
 local function view(c, by)
 	local r = c.state.runs[by]
 	if not r then
@@ -65,6 +70,16 @@ local function board(c)
 	end
 end
 
+-- The finish open for the rider's bike as they have every gem in their run
+-- (true or nil: only a change sent)
+local function open(c, by, r)
+	local want = r.got >= gems(c) and (r.playing or not waits(c)) or nil
+	if want ~= r.open then
+		r.open = want
+		c:body_var(by, "finish_open", want)
+	end
+end
+
 -- Over from the start: the clock held a second (the bike's crash, a teleport)
 local function over(c, by, why)
 	local r = view(c, by)
@@ -73,6 +88,7 @@ local function over(c, by, why)
 		c:send(id, "reset", nil, by)
 	end
 	c:emit("reset", nil, by)
+	open(c, by, r)
 	c:log(c:name(by) .. ": " .. why .. ", the run starts over")
 	show(c, by, r, why:sub(1, 1):upper() .. why:sub(2))
 end
@@ -118,7 +134,7 @@ return {
 	-- (back in: in the lobby, no run; their line, the best, as it was)
 	on_join = function(c, by)
 		local r = view(c, by)
-		r.playing = nil
+		r.playing, r.open = nil, nil
 		show(c, by, r)
 	end,
 	on_timer = function(c)
@@ -130,6 +146,8 @@ return {
 				r.t = r.t + 0.1
 				r.note_left = (r.note_left or 0) - 0.1
 				show(c, by, r)
+				-- (a gem placed or removed meanwhile)
+				open(c, by, r)
 			end
 		end
 		board(c)
@@ -152,6 +170,7 @@ return {
 		if input == "gem" then
 			r.got = r.got + 1
 			c:log(c:name(by), "has", r.got, "of", gems(c), "gems")
+			open(c, by, r)
 		elseif input == "crash" then
 			over(c, by, "crashed")
 		elseif input == "hazard" then

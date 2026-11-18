@@ -36,7 +36,9 @@
 **                        teleport_yaw = degrees, teleport_scene = name,
 **                        teleport_entity = id, [KIT_CTF] move = {x, y,
 **                        z, fall} (c:move), speed = {{player, factor}...}
-**                        (c:speed), [KIT_CARRY_ATTACH] attach = {player,
+**                        (c:speed), [KIT_BODY_VARS] body_var = {{player,
+**                        key, value (none: cleared)}...} (c:body_var),
+**                        [KIT_CARRY_ATTACH] attach = {player,
 **                        bone, x, y, z} | false (c:attach, c:detach);
 **                        the request's regions = {{id, team,
 **                        rules, o, n}...} (a type's `regions`: c:region_at)
@@ -616,6 +618,16 @@ static const char PRELUDE[] =
 "		if #s >= 64 then error('speed: 64 a run at most', 2) end\n"
 "		s[#s + 1] = {type(player) == 'string' and player or tonumber(player) or 0, f}\n"
 "		fx.speed = s\n"
+"	end\n"
+"	-- [KIT_BODY_VARS] a value in a player's body's state, s.vars.<key> in its steps\n"
+"	function c:body_var(player, key, value)\n"
+"		if type(key) ~= 'string' or #key > 32 or not key:match('^[%a_][%w_]*$') then error('body_var: a key of 1 to 32 letters, digits or _', 2) end\n"
+"		local t = type(value)\n"
+"		if not (value == nil or t == 'boolean' or (t == 'number' and value - value == 0) or (t == 'string' and #value <= 64)) then error('body_var: a value a number, a boolean, a string of 64 bytes at most or nil', 2) end\n"
+"		local s = fx.body_var or {}\n"
+"		if #s >= 64 then error('body_var: 64 a run at most', 2) end\n"
+"		s[#s + 1] = {type(player) == 'string' and player or tonumber(player) or 0, key, value}\n"
+"		fx.body_var = s\n"
 "	end\n"
 "	-- [KIT_VEHICLE_MOVEMENTS] a parameter of a component it reaches, play's\n"
 "	function c:set_param(id, ty, param, value)\n"

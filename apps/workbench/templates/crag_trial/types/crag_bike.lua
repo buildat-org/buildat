@@ -15,6 +15,12 @@
 -- (lx, ly, rx, ry), their turns}. s.pos is the frame's middle less LIFT;
 -- s.spheres the wheels and the head from it, as the zones (the gems) meet it.
 -- The suspension: params stiffness and damping (the springs').
+-- [KIT_BODY_VARS] The finish: a wheel on the finish line (a kit/polygon whose
+-- surface is "finish") while s.vars.finish_open (crag_run's c:body_var, set
+-- with the rider's last gem) holds the bike still there (s.done) till the run
+-- puts it back: its own step's, on the server and in the client's prediction
+-- alike, so no freeze from the server and no rewind. Without every gem it
+-- rides over the line.
 local R = 0.36 -- a wheel's radius
 local AX, AY = 0.62, -0.36 -- the wheels' springs on the frame, from its middle
 local LIFT = R - AY + 0.02 -- the middle over the feet
@@ -51,9 +57,10 @@ local function spring(s, wh, lx, ca, sa, dt, K, D)
 end
 
 -- A wheel against the world: out of what it is in, its speed into it gone,
--- its tyre gripping (the friction a share of the push)
+-- its tyre gripping (the friction a share of the push); true and whether a
+-- finish line is among what it met
 local function ground(wh, w, dt)
-	local touched = false
+	local touched, finish = false, false
 	for k, h in ipairs(w:circle(wh[1], wh[2], R)) do
 		if k > 3 then
 			break
@@ -74,8 +81,9 @@ local function ground(wh, w, dt)
 			wh[5] = wh[5] + j
 		end
 		touched = true
+		finish = finish or (h.info and h.info.surface == "finish")
 	end
-	return touched
+	return touched, finish
 end
 
 return {
@@ -120,7 +128,13 @@ return {
 			reset(s)
 		end
 		local c, wl, wr = s.c, s.wl, s.wr
-		if s.dead then
+		local open = type(s.vars) == "table" and s.vars.finish_open
+		if not open then
+			s.done = nil
+		end
+		if s.done then
+			-- (held at the finish: nothing moves)
+		elseif s.dead then
 			s.dead = s.dead - dt
 			if s.dead <= 0 then
 				reset(s)
@@ -168,9 +182,11 @@ return {
 			s.av = s.av * (1 - 0.6 * dt)
 			c[1], c[2] = c[1] + c[3] * dt, c[2] + c[4] * dt
 			s.a = s.a + s.av * dt
+			local finish = false
 			for _, wh in ipairs({wl, wr}) do
 				wh[1], wh[2] = wh[1] + wh[3] * dt, wh[2] + wh[4] * dt
-				ground(wh, w, dt)
+				local _, f = ground(wh, w, dt)
+				finish = finish or f
 				wh[6] = math.fmod(wh[6] - wh[5] / R * dt, 2 * math.pi)
 			end
 			-- The head
@@ -185,6 +201,12 @@ return {
 				end
 				s.events = {"crash"}
 				s.crashes = (s.crashes or 0) + 1
+			elseif finish and open then
+				s.done = true
+				c[3], c[4], s.av = 0, 0, 0
+				for _, wh in ipairs({wl, wr}) do
+					wh[3], wh[4], wh[5] = 0, 0, 0
+				end
 			end
 		end
 		local z = type(s.pos) == "table" and tonumber(s.pos[3]) or 0

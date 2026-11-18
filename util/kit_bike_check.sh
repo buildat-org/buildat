@@ -36,7 +36,11 @@
 #      an agent..." on it (accounts.lua);
 #   6. [CRAG_BEST_RESET] a fourth gem placed, linked only to the run: the run
 #      counts it (Gems 0/4), the finish refused at 3 of 4 and taken at 4, the
-#      run's reset brings it back; [KIT_LOBBY] the finish the result card
+#      run's reset brings it back; [KIT_BODY_VARS] the finish (its zone and its
+#      line, a kit/polygon of surface "finish") moved ahead of the start: ridden
+#      over at 0 of 3 (not held), at 4 of 4 (the run's c:body_var finish_open,
+#      the finish's link away) the bike held on the line by its own step, no
+#      correction on the client; the run over closes it; [KIT_LOBBY] the finish the result card
 #      (an over screen: the time, result.png; [KIT_CLIENT_REACT] (9) the
 #      lobby's keep_own_body set on for it: kitboss's own bike kept drawn
 #      for him, hidden from kitbob); the best on the top-5 sign (a kit/sign
@@ -403,6 +407,43 @@ for i in $(seq 20); do
 	cmd "delay 200"
 done
 awk -v x="$bx" 'BEGIN { exit !(x < -58) }' || fail "the hazard did not take the bike to the start: $bx ($CL)"
+# [KIT_BODY_VARS] The finish (its trigger zone and its line, a kit/polygon of
+# surface "finish") moved just ahead of the start: ridden over without every
+# gem (refused, the bike not held)
+hazard_back() # try_ hazard, the bike back at the start
+{
+	local mh
+	mh=$(mark "$SL")
+	try_ hazard
+	await "$SL" "$mh" 5 "local/crag_run 7: kitboss: hit a hazard"
+	for i in $(seq 20); do
+		body
+		awk -v x="$bx" 'BEGIN { exit !(x < -58) }' && break
+		cmd "delay 200"
+	done
+	awk -v x="$bx" 'BEGIN { exit !(x < -58) }' || fail "the hazard did not take the bike to the start: $bx ($CL)"
+}
+cmd 'event kit_edit {"op": "move", "id": 15, "pos": [-57, 0, 1]}'
+await "$SL" "$m" 5 "An edit by kitboss: moved 15 to"
+step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
+for try in 1 2; do
+	mf=$(mark "$CL")
+	cmd "keydown W"
+	for i in $(seq 20); do
+		body
+		awk -v x="$bx" 'BEGIN { exit !(x > -54) }' && break
+		cmd "delay 100"
+	done
+	cmd "keyup W"
+	awk -v x="$bx" 'BEGIN { exit !(x > -54) }' && break
+	[ $try = 2 ] && fail "the bike not past the finish line without every gem: x $bx ($CL)"
+	echo "the bike short of x -54 ($bx): W again"
+done
+await "$CL" "$mf" 5 "Gems 0/3   Take every gem first"
+seen "$SL" "$m" "kitboss's body var finish_open" && fail "finish_open set without every gem ($SL)"
+echo "ok: over the finish line without every gem: refused, the bike rode on to x $bx"
+step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
+hazard_back
 cmd 'event kit_edit {"op": "place", "type": "local/crag_gem", "pos": [-45, 8, 1]}'
 await "$SL" "$m" 5 "An edit by kitboss: placed local/crag_gem 93 "
 step 5 "Gems 0/4" 'event kit_edit {"op": "link", "id": 93, "comp": 0, "output": "collected", "to": 7, "input": "gem"}'
@@ -417,12 +458,51 @@ try_ finish
 await "$SL" "$m" 5 "Take every gem first"
 try_ gem
 await "$SL" "$m" 5 "kitboss has 4 of 4 gems"
+# [KIT_BODY_VARS] Every gem: the run's finish_open on his body (c:body_var);
+# the finish's link taken away (its zone then finishes nothing, the bike
+# stays), ridden to the line: held still by the bike's own step (s.vars), W
+# still held, and no correction on his client
+await "$SL" "$m" 5 "kitboss's body var finish_open = true"
+cmd 'event kit_edit {"op": "unlink", "id": 15, "comp": 0, "output": "entered", "to": 7, "input": "finish"}'
+await "$SL" "$m" 5 "An edit by kitboss: unlinked 15"
+step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
+mc=$(mark "$CL")
+for try in 1 2; do
+	cmd "keydown W"
+	for i in $(seq 20); do
+		body
+		awk -v x="$bx" 'BEGIN { exit !(x > -58.5) }' && break
+		cmd "delay 100"
+	done
+	awk -v x="$bx" 'BEGIN { exit !(x > -58.5) }' && break
+	cmd "keyup W"
+	[ $try = 2 ] && fail "the bike never reached the finish line: x $bx ($CL)"
+	echo "the bike short of the line ($bx): W again"
+done
+cmd "delay 300"
+body
+x1=$bx
+cmd "delay 1000"
+body
+cmd "keyup W"
+awk -v a="$x1" -v b="$bx" 'BEGIN { exit !(a > -58.5 && a < -55 && (a - b) ^ 2 < 0.0001) }' ||
+	fail "the bike not held on the finish line with every gem: x $x1 -> $bx ($CL)"
+seen "$CL" "$mc" "kit: the body corrected by" &&
+	fail "a correction on the way to the line: $(tail -c +$((mc + 1)) "$CL" | grep -a "kit: the body corrected by" | head -3) ($CL)"
+echo "ok: every gem: finish_open on his body, the bike held on the finish line by its own step (x $bx, W held), no correction"
+step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
+cmd 'event kit_edit {"op": "link", "id": 15, "comp": 0, "output": "entered", "to": 7, "input": "finish"}'
+await "$SL" "$m" 5 "An edit by kitboss: linked 15"
+cmd 'event kit_edit {"op": "move", "id": 15, "pos": [52, 0, 1]}'
+await "$SL" "$m" 5 "An edit by kitboss: moved 15 to \[52"
 # ([KIT_CLIENT_REACT] (9) the lobby's keep_own_body on for the card below)
 cmd 'event kit_edit {"op": "set", "id": 44, "comp": 0, "param": "keep_own_body", "value": true}'
 mb=$(mark "$t/bob.log")
 try_ finish
 await "$SL" "$m" 5 "local/crag_run 7: kitboss finished in [0-9.]+ \(best\)"
 best=$(tail -c +$((m + 1)) "$SL" | grep -aoP 'kitboss finished in \K[0-9.]+(?= \(best\))' | tail -1)
+# ([KIT_BODY_VARS] the run over: the finish closed again)
+await "$SL" "$m" 5 "kitboss's body var finish_open = nil"
 await "$SL" "$m" 5 "local/crag_gem 93: back"
 echo "ok: a fourth gem linked only to the run: Gems 0/4, its take counted, the finish refused at 3 of 4 and taken at 4 ($best), the gem back by the run's reset"
 # [KIT_LOBBY] The finish kitboss's result card (an over screen): the time,
