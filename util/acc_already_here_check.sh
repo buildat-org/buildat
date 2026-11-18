@@ -115,6 +115,9 @@ client boss cu_boss "$t/boss.cmds" BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CREATE
 	BUILDAT_JOIN_ADMIN="setting open_registration on"
 done_ok boss $cpid
 want "$t/srv.log" "kitboss is kept logged in"
+# Its admin script answered, though Workbench's own copy of accounts.lua
+# took the answer
+want "$t/boss.log" "admin script: done"
 # An account made by password is said to join so, not by a kept login
 grep -aqE "kitboss joined from \S+ by password and setup code$" "$t/srv.log" ||
 	fail "kitboss's join not by password and setup code ($t/srv.log)"

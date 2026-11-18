@@ -963,16 +963,23 @@ local function on_login_result(data)
 	local admin = buildat.get_env((opts.env or "BUILDAT_JOIN") .. "_ADMIN")
 	if admin and admin ~= "" and not M.admin_sent then
 		M.admin_sent = true
+		-- Each but "list" has one admin_result, counted for the check's
+		-- "admin script: done". Kept in the storage: an app's own copy of
+		-- this file, run after the join's (Workbench's main/init.lua), takes
+		-- the answers to this copy's requests.
+		-- simplified: a run that quit before its answers leaves a count
+		-- for the next one's admin results to finish off (a line logged)
+		local reqs, left = {}, 0
 		for l in admin:gmatch("[^\n]+") do
 			local cmd, name, arg = l:match("^(%S+)%s*(%S*)%s*(.*)$")
 			if cmd then
-				-- Each but "list" has one admin_result, counted for the
-				-- check's "admin script: done"
-				if cmd ~= "list" then
-					M.admin_left = (M.admin_left or 0) + 1
-				end
-				M.admin(cmd, name, arg, cmd == "priv" or arg == "on")
+				reqs[#reqs + 1] = {cmd, name, arg}
+				left = left + (cmd ~= "list" and 1 or 0)
 			end
+		end
+		buildat.storage_write("admin_left", tostring(left))
+		for _, r in ipairs(reqs) do
+			M.admin(r[1], r[2], r[3], r[1] == "priv" or r[3] == "on")
 		end
 	end
 	-- A scripted client's ntfy requests, "cmd [url]" a line each
@@ -1027,9 +1034,10 @@ end)
 buildat.sub_packet("accounts:admin_result", function(data)
 	M.message = cereal.binary_input(data, TEXT).text
 	log:info("admin result: " .. M.message)
-	if (M.admin_left or 0) > 0 then
-		M.admin_left = M.admin_left - 1
-		if M.admin_left == 0 then
+	local left = tonumber(buildat.storage_read("admin_left") or "") or 0
+	if left > 0 then
+		buildat.storage_write("admin_left", tostring(left - 1))
+		if left == 1 then
 			log:info("admin script: done")
 		end
 	end
