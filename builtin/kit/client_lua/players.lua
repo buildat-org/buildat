@@ -274,7 +274,8 @@ local SP = {on = false, target = nil, pos = nil, hint = nil, text = nil}
 local BONES = {head = "Head", body = "Body", hand = "Wield_Item"}
 local function draw_attached()
 	for _, n in pairs(P.nodes) do
-		local v = n.look and n.node:GetVar("kit_attach")
+		-- ([KIT_STILL_LOOKS] one standing still, read each 16th frame)
+		local v = n.look and not n.still and n.node:GetVar("kit_attach")
 		local a = v and not v:IsEmpty() and v:GetString() or ""
 		local pid, bone, x, y, z = a:match("^(%d+) (%S+) (%S+) (%S+) (%S+)$")
 		local b = pid and bodies[tonumber(pid)]

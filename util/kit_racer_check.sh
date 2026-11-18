@@ -489,7 +489,25 @@ step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
 await "$CL" "$m" 10 '"Lap 1/1   Time [0-9.]+   GO!'
 mc=$(mark "$CL")
+step 5 "kit: body replayed" "event kit_looks" "event kit_body"
+r0=$(grep -aoP 'kit: body replayed \K[0-9]+ of [0-9]+' "$CL" | tail -1)
 SHOTS="40,0,$t/track.png" drive boss 120 'panel .* shown, layer [0-9]+: "The flag is down'
+# The lap's frames' cost, in counts (the check machines' ms differ): the
+# track's still looks not read each frame ([KIT_STILL_LOOKS], some 250
+# read each frame were 18 ms of a frame) and the body packets' steps not
+# taken again where the server's state is the one predicted
+# ([KIT_SAME_STATE])
+step 5 "kit: body replayed" "event kit_looks" "event kit_body"
+python3 -I - "$r0" "$(grep -aoP 'kit: body replayed \K[0-9]+ of [0-9]+' "$CL" | tail -1)" \
+		"$(grep -aoP 'kit: looks: .*' "$CL" | tail -1)" <<'PY' || fail "the lap's frames' cost ($CL)"
+import re, sys
+(r0, a0), (r1, a1) = [map(int, s.split(" of ")) for s in sys.argv[1:3]]
+f, read, looks, ms = re.search(r"(\d+) frames, ([0-9.]+) read a frame of ([0-9.]+), ([0-9.]+) ms", sys.argv[3]).groups()
+assert float(read) < 0.3 * float(looks), sys.argv[3]
+assert r1 - r0 <= (a1 - a0) / 10 + 3, (r1 - r0, a1 - a0)
+print("ok: the lap's frames read %s of %s looks (Kit's pass %s ms a frame); %d of %d body packets replayed" %
+      (read, looks, ms, r1 - r0, a1 - a0))
+PY
 python3 -I - "$SL" "$m" "$TRIAL" <<'PY' || fail "the trial's lap ($SL)"
 import re, sys
 s = open(sys.argv[1], "rb").read()[int(sys.argv[2]):].decode(errors="replace")

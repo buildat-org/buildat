@@ -1107,6 +1107,64 @@ static void lua_lit(const json::Value &v, ss_ &o, int depth = 0)
 	}
 }
 
+// [KIT_SAME_STATE] A JSON value with its numbers to the last bit (%.17g, as
+// the box writes them): json::Value::stringify() has six digits, and a body's
+// state sent so was never the one its client predicted
+static void json_exact(const json::Value &v, ss_ &o)
+{
+	switch(v.get_type()){
+	case json::Value::T_BOOL:
+		o += v.as_boolean() ? "true" : "false";
+		return;
+	case json::Value::T_INT:
+		o += itos(v.as_integer());
+		return;
+	case json::Value::T_FLOAT: {
+		const double d = v.as_real();
+		if(d != d || std::isinf(d)){
+			o += "null";
+		} else {
+			char b[40];
+			snprintf(b, sizeof b, "%.17g", d);
+			o += b;
+		}
+		return; }
+	case json::Value::T_STRING:
+		o += v.stringify();
+		return;
+	case json::Value::T_ARRAY:
+		o += '[';
+		for(unsigned i = 0; i < v.size(); i++){
+			if(i)
+				o += ',';
+			json_exact(v.at(i), o);
+		}
+		o += ']';
+		return;
+	case json::Value::T_OBJECT: {
+		o += '{';
+		bool first = true;
+		for(json::Iterator it(v); it; ++it){
+			if(!first)
+				o += ',';
+			first = false;
+			o += json::Value(it.key()).stringify();
+			o += ':';
+			json_exact(*it, o);
+		}
+		o += '}';
+		return; }
+	default:
+		o += "null";
+	}
+}
+static ss_ json_exact(const json::Value &v)
+{
+	ss_ o;
+	json_exact(v, o);
+	return o;
+}
+
 static ss_ read_file(const ss_ &path)
 {
 	std::ifstream f(path, std::ios::binary);
@@ -23002,7 +23060,7 @@ struct Module: public interface::Module, public Interface
 			b.state.set("vars", b.vars.deepcopy());
 		else
 			b.state.del_key("vars");
-		b.state_json = b.state.stringify();
+		b.state_json = json_exact(b.state);
 	}
 	ss_ settle_json(const Body &b) const
 	{
@@ -26832,7 +26890,7 @@ struct Module: public interface::Module, public Interface
 				if(b.state.is_object() && !b.state.get("events").is_undefined()){
 					const json::Value ev = b.state.get("events");
 					b.state.del_key("events");
-					b.state_json = b.state.stringify();
+					b.state_json = json_exact(b.state);
 					if(ev.is_array() && ev.size() && m_session.running)
 						movement_events(b.type, pi->second.name, pi->second.scene, ev);
 				}
