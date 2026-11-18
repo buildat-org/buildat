@@ -22048,7 +22048,8 @@ struct Module: public interface::Module, public Interface
 	// [KIT_ZONE_SHAPES] zone = "look": the entity's own look as the clients
 	// draw it (its first), turned as it is: a polygon's outline over its
 	// depth (kit/polygon), a box (a part's, by its rotation; a look's state
-	// `when` over it as move.lua's M.look_box has it), a sphere of equal
+	// `when` over it as move.lua's M.look_box has it, a polygon's as its
+	// M.look_poly), a sphere of equal
 	// sides. simplified: a wedge and a sphere of unequal sides are their
 	// boxes. False: it has no look
 	bool look_zone(const Entity &e, ZoneShape &z)
@@ -22085,18 +22086,32 @@ struct Module: public interface::Module, public Interface
 						x.as_number() : def;
 			};
 			const ss_ shape = str(rd(look, "shape"));
+			const ss_ key = str(rd(look, "state"));
+			const bool on = !key.empty() && in.state.get(key).is_true();
+			const json::Value &wh = on ? look.get("when") : json::Value();
 			if(shape == "polygon"){
 				const json::Value &pts = rd(look, "points");
 				z.kind = 'p';
 				z.q = wq;
+				// [KIT_CLIENT_REACT] (6) its `when` as a box's: scaled about its
+				// own point, moved by its offset (move.lua's look_poly)
+				double sc[3], wo[3];
+				for(unsigned k = 0; k < 3; k++){
+					sc[k] = num(rd(wh, "scale"), k, 1);
+					wo[k] = num(rd(wh, "offset"), k, 0);
+				}
+				wq.apply(wo);
+				for(int k = 0; k < 3; k++)
+					z.o[k] += wo[k];
 				for(unsigned i = 0; pts.is_array() && i < pts.size(); i++)
 					for(unsigned k = 0; k < 2; k++)
-						z.pts.push_back(num(pts.at(i), k, 0));
+						z.pts.push_back(num(pts.at(i), k, 0) * sc[k]);
 				if(z.pts.size() < 6)
 					return false;
 				const json::Value &dv = rd(look, "depth");
 				z.r = std::max(0.02, std::min(64.0, dv.is_number() &&
-						std::isfinite(dv.as_number()) ? dv.as_number() : 1)) / 2;
+						std::isfinite(dv.as_number()) ? dv.as_number() : 1)) / 2 *
+						std::fabs(sc[2]);
 				z.a[0] = z.b[0] = z.pts[0];
 				z.a[1] = z.b[1] = z.pts[1];
 				for(size_t i = 0; i + 1 < z.pts.size(); i += 2)
@@ -22108,9 +22123,6 @@ struct Module: public interface::Module, public Interface
 				z.bound();
 				return true;
 			}
-			const ss_ key = str(rd(look, "state"));
-			const bool on = !key.empty() && in.state.get(key).is_true();
-			const json::Value &wh = on ? look.get("when") : json::Value();
 			double size[3], off[3];
 			const json::Value &sz = rd(look, "size");
 			for(unsigned k = 0; k < 3; k++){

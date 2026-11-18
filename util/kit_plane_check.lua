@@ -254,4 +254,21 @@ assert(pw:circle(9, 2.4, 0.5)[1].info.friction == 1, "a polygon's default fricti
 assert(MV.look_poly({shape = "polygon", points = SLOPE, solid = true, surface = "",
 	friction = 40}, false, {0, 0, 0}, 0).info.friction == 10, "friction past 10")
 print("ok: a polygon's surface and friction in w:circle, w:segment and the walker's ground; none: polygon, 1")
+
+-- [KIT_CLIENT_REACT] (6) a polygon look's `when` while its state is on: scaled about
+-- its own point, moved by its offset (its depth along z too); off: as it is
+local GEM = {shape = "polygon", points = {{-1, 0}, {1, 0}, {1, 2}, {-1, 2}}, depth = 2,
+	solid = true, state = "taken", when = {scale = {0.5, 0.25, 0.5}, offset = {3, 1, 0.5}}}
+local g0 = MV.look_poly(GEM, false, {10, 5, 0}, 0)
+assert(g0.x0 == 9 and g0.x1 == 11 and g0.y0 == 5 and g0.y1 == 7 and g0.z0 == -1 and
+		g0.z1 == 1, "off: " .. g0.x0 .. " " .. g0.y1)
+local g1 = MV.look_poly(GEM, true, {10, 5, 0}, 0)
+assert(g1.x0 == 12.5 and g1.x1 == 13.5 and g1.y0 == 6 and g1.y1 == 6.5 and
+		g1.z0 == 0 and g1.z1 == 1, "on: " .. g1.x0 .. " " .. g1.x1 .. " " .. g1.y0 .. " " ..
+		g1.y1 .. " " .. g1.z0 .. " " .. g1.z1)
+-- Turned round (yaw 180): its offset with it
+local g2 = MV.look_poly(GEM, true, {10, 5, 0}, 180)
+assert(near(g2.x0, 6.5) and near(g2.x1, 7.5) and near(g2.z0, -1) and near(g2.z1, 0),
+		"turned: " .. g2.x0 .. " " .. g2.z0)
+print("ok: a polygon's when: scaled about its point and offset while on, turned with it")
 -- vim: set noet ts=4 sw=4:

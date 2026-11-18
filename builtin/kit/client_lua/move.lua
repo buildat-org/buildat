@@ -459,6 +459,13 @@ function M.look_poly(look, on, pos, yaw, pitch, roll)
 	if not solid or abs(R[9]) < 1 - 1e-9 then
 		return nil
 	end
+	-- [KIT_CLIENT_REACT] (6) its `when` over it as over a box: scaled about its own
+	-- point, then moved by its offset, in its own frame
+	local sc, of = {1, 1, 1}, {0, 0, 0}
+	for k = 1, 3 do
+		sc[k] = type(w.scale) == "table" and tonumber(w.scale[k]) or 1
+		of[k] = type(w.offset) == "table" and tonumber(w.offset[k]) or 0
+	end
 	local pts, n = {}, 0
 	for _, p in ipairs(look.points) do
 		local x = type(p) == "table" and tonumber(p[1])
@@ -466,6 +473,7 @@ function M.look_poly(look, on, pos, yaw, pitch, roll)
 		if not x or not y then
 			return nil
 		end
+		x, y = x * sc[1] + of[1], y * sc[2] + of[2]
 		pts[2 * n + 1] = pos[1] + R[1] * x + R[2] * y
 		pts[2 * n + 2] = pos[2] + R[4] * x + R[5] * y
 		n = n + 1
@@ -499,8 +507,9 @@ function M.look_poly(look, on, pos, yaw, pitch, roll)
 		if y > p.y1 then p.y1 = y end
 	end
 	local d = tonumber(look.depth) or 1
-	d = d < 0.02 and 0.02 or d > 64 and 64 or d
-	p.z0, p.z1 = pos[3] - d / 2, pos[3] + d / 2
+	d = (d < 0.02 and 0.02 or d > 64 and 64 or d) * abs(sc[3])
+	local zc = pos[3] + R[9] * of[3]
+	p.z0, p.z1 = zc - d / 2, zc + d / 2
 	return p
 end
 

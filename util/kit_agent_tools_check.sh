@@ -48,7 +48,8 @@
 #      box (movement.zone "box"); get_state's zone kind, shape, bounds and
 #      who is in it; play_input's body shape. [KIT_CLIENT_REACT] (5) a
 #      polygon's surface and friction (get_state's params) in what the
-#      server's step meets (the probe's output).
+#      server's step meets (the probe's output); (6) a polygon gem's `when`
+#      (scaled about its point, moved): its zone shrunk with it.
 #   util/kit_agent_tools_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -331,6 +332,22 @@ ZPROBE = '''return {
 	end,
 }
 '''
+# [KIT_CLIENT_REACT] (6) a polygon gem: its look (and so its zone) shrunk and
+# moved up while taken
+PGEM = '''return {
+	version = 1,
+	zone = "look",
+	about = {what = "The check's polygon gem."},
+	inputs = {take = "none", back = "none"},
+	state = {taken = {default = false, shared = true}, n = {default = 0},
+		out = {default = 0}},
+	look = {shape = "polygon", points = {{-1, 0}, {1, 0}, {1, 2}, {-1, 2}}, depth = 1,
+		state = "taken", when = {scale = {0.25, 0.25, 1}, offset = {0, 1, 0}}},
+	on_input = function(c, input) c.state.taken = input == "take" end,
+	on_enter = function(c, by) c.state.n = c.state.n + 1 end,
+	on_leave = function(c, by) c.state.out = c.state.out + 1 end,
+}
+'''
 HAZ = '''return {
 	version = 1,
 	component = true,
@@ -597,7 +614,7 @@ elif phase == "zones":
     to_start()
     call("new_scene", {"name": "zones"})
     for name, src in (("zprobe", ZPROBE % ""), ("zwalk", ZPROBE % ', zone = "box"'),
-            ("zhaz", HAZ), ("zgem", GEM)):
+            ("zhaz", HAZ), ("zgem", GEM), ("zpgem", PGEM)):
         call("put_type", {"name": name, "source": src})
     d = {t["name"]: t for t in rpc("tools/list")["result"]["tools"]}["put_type"]["description"]
     for w in ('c:params_of(type)', 'or "look" (the entity\'s own look', 's.spheres = {{x, y, z, r}...}',
@@ -727,6 +744,21 @@ elif phase == "zones":
     wait(lambda: touched("polygon 1"), "the step meeting a plain polygon")
     put(PR, 0, 2)
     print("   a polygon's surface and friction in the server's step: spikes 0.5, none: polygon 1")
+    # (6) a polygon gem's `when` (scaled about its point, moved up) its zone's
+    # too: the body met by the whole one, not by the taken one
+    PG = placed(call("place", {"type": "local/zpgem", "pos": [-40, 1, 0]}))
+    z = comp(PG, 0)["zone"]
+    assert z["shape"] == "polygon" and z["lo"] == [-41, 1, -0.5] and z["hi"] == [-39, 3, 0.5], z
+    put(PR, -39.2, 1)
+    comes(PG, 0, 1, 0)
+    call("try_input", {"id": PG, "input": "take"})
+    comes(PG, 0, 1, 1)
+    z = comp(PG, 0)["zone"]
+    assert z["lo"] == [-40.25, 2, -0.5] and z["hi"] == [-39.75, 2.5, 0.5], z
+    call("try_input", {"id": PG, "input": "back"})
+    comes(PG, 0, 2, 1)
+    put(PR, 0, 2)
+    print("   a polygon gem's when: its zone shrunk and moved with its look, whole again")
     assert "Your body is gone" in call("play_leave")
     call("stop")
 elif phase == "heightmap":

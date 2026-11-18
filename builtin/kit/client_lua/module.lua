@@ -324,8 +324,11 @@ local function look_box(look, on)
 		for i = 1, 3 do
 			local was = size[i]
 			size[i] = size[i] * (tonumber(w.scale[i]) or 1)
-			-- Its bottom kept
-			if i == 2 then
+			-- Its bottom kept ([KIT_CLIENT_REACT] (6) a polygon's box scaled
+			-- about its own point, as its mesh is)
+			if look.shape == "polygon" then
+				off[i] = off[i] * (tonumber(w.scale[i]) or 1)
+			elseif i == 2 then
 				off[2] = off[2] - (was - size[2]) / 2
 			end
 		end
@@ -943,9 +946,14 @@ local function draw_look(id, n, look)
 	-- A swing turns the body round its hinge: the middle of its thickness
 	-- at its -x end, so the turned box is look_box's
 	if n.poly then
-		-- ([KIT_PLANE] stage 3: a polygon's mesh is in its own frame, b the box round)
+		-- ([KIT_PLANE] stage 3: a polygon's mesh is in its own frame, b the box round;
+		-- [KIT_CLIENT_REACT] (6) its `when` scale about its own point, its offset
+		-- the slide's below)
+		local sc = on and type(look.when) == "table" and type(look.when.scale) ==
+				"table" and look.when.scale or {}
 		n.body.position = magic.Vector3(0, 0, 0)
-		n.body.scale = magic.Vector3(1, 1, 1)
+		n.body.scale = magic.Vector3(tonumber(sc[1]) or 1, tonumber(sc[2]) or 1,
+				tonumber(sc[3]) or 1)
 	elseif type(look.when) == "table" and look.when.swing then
 		local c = look_box(look, false)
 		local px = c.off[1] - c.size[1] / 2 + c.size[3] / 2
