@@ -164,8 +164,6 @@ bool PathExists(std::string path)
 
 bool RecursiveDelete(std::string path)
 {
-	std::cerr<<"Removing \""<<path<<"\""<<std::endl;
-
 	//return false;
 
 	// pFrom is a list ended by an empty name: a second null after the one
@@ -255,8 +253,6 @@ bool RecursiveDelete(std::string path)
 		Execute the 'rm' command directly, by fork() and execve()
 	*/
 
-	std::cerr<<"Removing \""<<path<<"\""<<std::endl;
-
 	//return false;
 
 	pid_t child_pid = fork();
@@ -275,9 +271,6 @@ bool RecursiveDelete(std::string path)
 		argv[1] = argv_data[1];
 		argv[2] = argv_data[2];
 		argv[3] = NULL;
-
-		std::cerr<<"Executing '"<<argv[0]<<"' '"<<argv[1]<<"' '"
-				<<argv[2]<<"'"<<std::endl;
 
 		execv(argv[0], argv);
 
