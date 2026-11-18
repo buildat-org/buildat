@@ -1587,6 +1587,9 @@ struct Module: public interface::Module, public Interface
 				&Module::on_camera_ready);
 		sub(m_server, "network:packet_received/kit:play_done",
 				&Module::on_play_done);
+		// [KIT_CLIENT_REACT] (4)
+		sub(m_server, "network:packet_received/kit:part_failed",
+				&Module::on_part_failed);
 		sub(m_server, "network:packet_received/kit:package",
 				&Module::on_package);
 		// [KIT_SCENE_PACKAGES] a scene added from a file or an Aitta
@@ -1920,12 +1923,13 @@ struct Module: public interface::Module, public Interface
 					}
 					t.kept.insert(it.key());
 				}
-				if((*it).get("shared").is_true())
-					t.shared.insert(it.key());
-				else if((*it).get("per_player").is_true()){
+				// [KIT_CLIENT_REACT] (7) per_player over shared: with both, the
+				// whole table went to every client
+				if((*it).get("per_player").is_true()){
 					t.per_player.insert(it.key());
 					t.shared.insert(it.key());
-				}
+				} else if((*it).get("shared").is_true())
+					t.shared.insert(it.key());
 			}
 		t.linked_in = t.decl.get("linked_in").is_true();
 		t.params_of = src.find("params_of") != ss_::npos;
@@ -20342,6 +20346,54 @@ struct Module: public interface::Module, public Interface
 		m_log_dirty.insert(id);
 	}
 
+	// [KIT_CLIENT_REACT] (4) A client part's handler failed on a client
+	// (module.lua's call(), the first failure of that part on that entity
+	// there): "kit:part_failed" {id, type, handler, error} into the entity's
+	// log (get_log, a builder's editor Log), saying whose client.
+	// PART_FAILS_A_MINUTE a client at most, the rest dropped
+	static const int PART_FAILS_A_MINUTE = 10;
+	std::map<size_t, std::pair<int64_t, int>> m_part_fails;
+	void on_part_failed(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		auto &rate = m_part_fails[peer];
+		const int64_t now = interface::os::time_us();
+		if(now - rate.first > 60000000)
+			rate = {now, 0};
+		if(++rate.second > PART_FAILS_A_MINUTE)
+			return;
+		SessionScope sc(*this, session_of_peer(peer));
+		const json::Value j = packet.data.size() <= 2048 ?
+				json::load_string(packet.data.c_str()) : json::null();
+		auto pi = m_peers.find(peer);
+		const json::Value &iv = j.is_object() ? j.get("id") : json::null();
+		auto e = iv.is_number() && iv.as_number() >= 0 && iv.as_number() < 9e15 ?
+				m_entities.find((uint64_t)iv.as_number()) : m_entities.end();
+		const ss_ type = j.is_object() ? jstr(j, "type") : "";
+		bool has = false;
+		if(e != m_entities.end())
+			for(const Instance &in : e->second.comps)
+				has = has || in.type == type;
+		ss_ handler = j.is_object() ? jstr(j, "handler").substr(0, 16) : "";
+		if(pi == m_peers.end() || !has ||
+				handler.find_first_not_of("abcdefghijklmnopqrstuvwxyz_") !=
+				ss_::npos){
+			log_v(MODULE, "A client part's failure from peer %zu not taken",
+					peer);
+			return;
+		}
+		ss_ err = cut_utf8(jstr(j, "error"), 300);
+		for(char &c : err)
+			if((unsigned char)c < 32)
+				c = ' ';
+		// (the camera still: before it plays, drawing for get_view)
+		const ss_ line = "the client part of "+type+": "+handler+" failed on "+
+				(pi->second.name == accounts::CAMERA_NAME ? ss_("the server's "
+				"camera") : pi->second.name+"'s client")+": "+err;
+		log_i(MODULE, "Entity %s: %s", cs(itos(e->first)), cs(line));
+		add_log(e->first, line);
+	}
+
 	// The log of the entity a builder has selected, to them: whole as they
 	// select it, then as it grows
 	void send_log(size_t peer)
@@ -31486,6 +31538,7 @@ struct Module: public interface::Module, public Interface
 			m_cam.play_agent = 0;
 		}
 		m_local_peers.erase(old.info.id);
+		m_part_fails.erase(old.info.id);
 		m_watches.erase(old.info.id);
 		m_pub_open.erase(old.info.id);
 		// [KIT_SESSIONS_1] from their session's round; a guest's entity
@@ -31960,7 +32013,8 @@ struct Module: public interface::Module, public Interface
 				""},
 			{"get_log", "=log", "An entity's log, the last 50 lines: what its "
 				"components logged (c:log) and what came to it, with the game "
-				"clock's minutes and seconds.",
+				"clock's minutes and seconds; its client part's first failure "
+				"on each client (which handler, the error, whose client).",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
 				"required": ["id"]})J", ""},
 			// [KIT_AGENT_VISUALS] 2 (agent_view())
@@ -32516,6 +32570,11 @@ struct Module: public interface::Module, public Interface
 				"(this client's own predicted body in its zone, tested on the "
 				"client in the server's shapes, before the server's on_enter: "
 				"e:predict(\"taken\", true, 1) a gem gone at once); e.state, e.node, e:log(text); "
+				"require(\"buildat/module/kit\").shared one table every client "
+				"part on that client shares (keys: your type's name); no "
+				"node:GetScene(), no globals set in a handler; one that errs is "
+				"off for that entity on that client, its first failure in "
+				"get_log (get_guide: all a client part reaches); "
 				"a movement's draw(s, node) draws each player's body (node at "
 				"its feet, s its state; another's {pos, pose}; scenery is "
 				"kit/parallax's, not a client part's); left out, the "
@@ -38411,6 +38470,28 @@ struct Module: public interface::Module, public Interface
 				"State per_player = true is a table by `by` (\"player:<id>\"): "
 				"for by, v in pairs(c.state.<key>) lists it, c.state.<key>[by] = "
 				"nil clears one.\n"
+				// [KIT_CLIENT_REACT] (2), (3), (4)
+				"- A type's client part (put_type's client) runs on each client, "
+				"in its sandbox. Its handlers get e: e.id, e.node (its "
+				"replicated node: children and components of your own under "
+				"it), e.state (the shared state), e:shown(key) (as drawn: a "
+				"per_player state this player's own), e:predict(key, v, secs), "
+				"e.mine, e.you, e:near(d), e:log(text) (that client's own log, "
+				"not get_log). local kit = require(\"buildat/module/kit\"): "
+				"kit.shared is one table all client parts on that client share "
+				"(by convention keyed by your type's name; a part's reload, a "
+				"scene switch, Play and Stop keep it; clear your keys in "
+				"on_remove), kit.body_state() is this client's predicted body. "
+				"Urho3D: require(\"buildat/extension/urho3d\"), the sandbox's "
+				"classes; change only what you made under e.node, never Kit's "
+				"own nodes. Refused: node:GetScene(), a global set in a handler "
+				"(locals of the part's file, fields on e or kit.shared instead). "
+				"A handler that errs is switched off "
+				"for that part on that entity on that client; its first failure "
+				"there is in the entity's get_log and the builders' Log (\"the "
+				"client part of <type>: <handler> failed on <player>'s client: "
+				"<error>\"; before your body plays, the server's camera's: "
+				"\"failed on the server's camera\").\n"
 				// [KIT_AGENT_NEXT_1]
 				"- Play it yourself: play_join gives you a body in your scene "
 				"(the round Running), a guest's, by the server's camera; "
@@ -38421,7 +38502,10 @@ struct Module: public interface::Module, public Interface
 				"leaves a busy one out; picture: its view at the end), press "
 				"a button on its screen first (Play in a lobby); play_leave ends it. "
 				"Walk into what you built and read what fired. try_input as "
-				"\"me\" sends as your body, as a player's name as theirs.\n"
+				"\"me\" sends as your body, as a player's name as theirs. The "
+				"body is a player's (its by \"player:<id>\") and its client "
+				"predicts it as a player's does: per_player state, client "
+				"parts and the movement's draw run there as for a player.\n"
 				// [KIT_AGENT_FEEDBACK_1117] 11
 				"- get_history: who changed what and when, since a time.\n"
 				// [KIT_AGENT_NEXT_2]
