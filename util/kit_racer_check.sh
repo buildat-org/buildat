@@ -72,8 +72,8 @@ LINE_X=-64
 # template's road was laid along), or at TARGET x,z: A/D toward a point
 # ahead by the heading, W/S to a speed for the bends ahead (planned at A_LAT
 # across, A_BRAKE braking), backing off when stuck; DRIFT x,z: the handbrake
-# (Space) and the bend's steering held DRIFT_S seconds there, once, a
-# screenshot DRIFT_SHOT as it ends; SHOTS "x,z,path ...": a screenshot near
+# (Space) DRIFT_S seconds (timed by the client) and the bend's steering there,
+# once, a screenshot DRIFT_SHOT as it ends; SHOTS "x,z,path ...": a screenshot near
 # each place, once; FIRE_ON: the fire key (Left Ctrl) once as that shows in
 # the log; AIM_FILE: once that file holds "x,z", through there when it is
 # ahead. A line a sample:
@@ -145,7 +145,7 @@ def key(k, on):
 f = open(log, errors="replace")
 f.seek(0, 2)
 t0, u, x, z, stopped = time.time(), None, None, None, False
-slow_since, back_till, drift_till, last = None, 0, None, None
+slow_since, back_till, drift_till, last, queued = None, 0, None, None, 0
 send("event kit_body")
 while time.time() - t0 < secs:
     line = f.readline()
@@ -220,9 +220,16 @@ while time.time() - t0 < secs:
     if drift_till is not None and now < drift_till:
         key("W", False)
         key("S", False)
-        key("Space", True)
         key("D", not drift_left)
         key("A", drift_left)
+        if drift_till - now > drift_s - 0.001:
+            # (the pull's length the client's own: a sample comes some 0.2 s
+            # apart, and a tenth of a second more turns it 30 degrees more;
+            # a sample each tenth in it, then one after, asked for here)
+            k = max(1, round(drift_s / 0.1))
+            send("keydown Space", *["delay 100", "event kit_body"] * k,
+                 "keyup Space", "frames 2", "event kit_body")
+            queued = k + 1
     elif now < back_till:
         key("Space", False)
         key("W", False)
@@ -245,7 +252,10 @@ while time.time() - t0 < secs:
     print("t %.2f at %.1f,%.1f v %.1f yaw %.1f vel %.1f keys %s" % (
         now, x, z, v, yaw, math.degrees(math.atan2(vx, vz)) if v > 0.5 else yaw,
         "".join(sorted(keys))), flush=True)
-    send("frames 2", "event kit_body")
+    if queued:
+        queued -= 1
+    else:
+        send("frames 2", "event kit_body")
 for k in list(keys):
     key(k, False)
 print("stopped" if stopped else "time up", flush=True)
@@ -412,7 +422,7 @@ PY
 as boss
 m=$(mark "$SL")
 # (the drift: the handbrake held into the bend after checkpoint 1)
-FIRE_ON="Mines x" DRIFT=88,0 DRIFT_S=0.6 DRIFT_SHOT=$t/drift.png \
+FIRE_ON="Mines x" DRIFT=88,0 DRIFT_S=0.4 DRIFT_SHOT=$t/drift.png \
 	drive boss 120 'panel .* shown, layer [0-9]+: "The flag is down' &
 DB=$!
 await "$SL" "$m" 40 "local/brim_race $RACE: kitboss passed checkpoint 1 of 3"
@@ -435,9 +445,13 @@ await "$SL" "$m" 2 "Entity $RACE made a copy of entity:[0-9]+"
 await "$SL" "$m" 5 "local/brim_race $RACE: kitbob back on the road at checkpoint 2"
 wait $DB || fail "kitboss's driver: $(tail -2 "$t/drive_boss.log")"
 cp "$t/drive_boss.log" "$t/drive_boss_race.log" # (the trial's drive writes over it)
-# The drift: in the handbrake's time and a second on, a sample turning fast
-# (over 45 degrees a second) with the velocity over 20 degrees off the
-# heading; then, before 4 s, straight again (under 8 degrees off) and going
+# The drift: in the handbrake's time and a second on, turned over 60 degrees
+# (a 90 degree bend at 14 m/s: more than the grip alone turns it) with the
+# velocity over 12 degrees off the heading (the slide's most some 25, sampled
+# each tenth of the pull); then, before 4 s, straight
+# again (under 8 degrees off) and going, out of the bend (yaw 0, north to
+# 95,55); never spun (the velocity under 80 degrees off the heading while
+# moving)
 python3 -I - "$t/drive_boss.log" <<'PY' || fail "no handbrake drift ($t/drive_boss.log)"
 import re, sys
 s = open(sys.argv[1]).read()
@@ -446,16 +460,15 @@ S = [tuple(map(float, m)) for m in re.findall(
     r"t ([0-9.]+) at \S+ v ([0-9.]+) yaw (-?[0-9.]+) vel (-?[0-9.]+)", s)]
 def off(a, b):
     return abs((a - b + 540) % 360 - 180)
-best = (0, 0)
-for (ta, va, ya, la), (tb, vb, yb, lb) in zip(S, S[1:]):
-    if t0 <= ta < t0 + 1.7:
-        rate = off(yb, ya) / (tb - ta)
-        if off(lb, yb) > 20 and rate > 45:
-            best = max(best, (rate, off(lb, yb)))
-assert best[0], "no sample turning fast while sliding: %r" % [x for x in S if t0 <= x[0] < t0 + 1.7]
-back = [x for x in S if t0 + 0.7 < x[0] < t0 + 4 and off(x[3], x[2]) < 8 and x[1] > 3]
-assert back, "never straight again"
-print("ok: a handbrake drift: %.0f deg/s with the velocity %.0f deg off the heading; straight again at %.1f s" %
+W = [x for x in S if t0 <= x[0] < t0 + 1.7]
+best = (max(off(x[2], W[0][2]) for x in W), max(off(x[3], x[2]) for x in W))
+assert best[0] > 60 and best[1] > 12, "no fast turn sliding: %r" % W
+most = max(off(x[3], x[2]) for x in S if t0 <= x[0] < t0 + 4 and x[1] > 1)
+assert most < 80, "spun: the velocity %.0f deg off the heading: %r" % (most, [x for x in S if t0 <= x[0] < t0 + 4])
+back = [x for x in S if t0 + 0.7 < x[0] < t0 + 4 and off(x[3], x[2]) < 8 and x[1] > 3
+        and off(x[2], 0) < 60]
+assert back, "never straight again out of the bend: %r" % [x for x in S if t0 <= x[0] < t0 + 4]
+print("ok: a handbrake drift: turned %.0f deg with the velocity up to %.0f deg off the heading; straight again at %.1f s" %
       (best[0], best[1], back[0][0] - t0))
 PY
 await "$SL" "$m" 5 "local/brim_race $RACE: kitboss finished 1st"
