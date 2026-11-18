@@ -595,6 +595,20 @@ namespace interface
 //   the entity's log (get_log, a builder's editor Log), "the client part
 //   of <type>: <handler> failed on <player>'s client: <error>" (the server's
 //   camera's, not yet playing a body: "on the server's camera").
+//   [KIT_CLIENT_REACT] (1) A client part's on_enter(e) and on_leave(e): this
+//   client's own predicted body met the entity's zone or left it, tested on
+//   the client each frame in the server's shapes (cells, a look's outline,
+//   box or sphere; the body's spheres, box or point: move.lua's zone_meets),
+//   before the server's on_enter(c, by) hears of it: a gem gone at once
+//   (e:predict), the server still the one that decides. The zone's cells go
+//   in kit_show (zones) for an entity with client parts only.
+//   [KIT_CLIENT_REACT] (10) Out of play (dead and waiting to respawn, a
+//   kit/lobby's lobby or result) a movement's step gets i.out_of_play = true,
+//   its keys none, on the server's steps and the client's prediction alike
+//   (move.lua's header; c:speed(by, 0) stays the freeze). (9) A kit/lobby's
+//   keep_own_body: the player's own body stays drawn for them out of play,
+//   their camera on it (no spectating), hidden from the others as ever (the
+//   pose's flag 8, players.lua).
 //   [KIT_GENERATORS] **Generators**: a type with on_build(c) builds its
 //   own children from c.params, in the editor: as it is placed (not a
 //   copy that has its own: a duplicate, a prefab's, a paste) and as an
@@ -818,6 +832,12 @@ namespace interface
 //   Its size and offset are its points' box (kit.cpp's). [KIT_SIDE_SCENERY]
 //   voxel (a voxel type's name) and edge_depth: its textures world-aligned and
 //   a band of its top along the edges facing up (module.lua's polygon_mesh).
+//   [KIT_CLIENT_REACT] (5) surface (a short tag, "polygon" if none) and
+//   friction (0...10, 1 if none): the info a movement's step gets where it
+//   meets the polygon (w:circle's, w:segment's, w:move's hits, a walker's
+//   s.surface), on the server's steps and the client's prediction alike
+//   (kit/polygon's params so named): a spike strip a bike's step crashes on
+//   itself, no zone and no round trip.
 //   [KIT_SIDE_SCENERY] (8) parallax = {follow =, follow_y =, repeat =}
 //   ("param:<name>" as a look's; kit/parallax): the looks under the entity
 //   are drawn by each client offset by its camera's travel from the

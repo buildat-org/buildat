@@ -538,6 +538,9 @@ struct Peer
 	// [KIT_LOBBY_OUT_OF_PLAY] In a kit/lobby's lobby or result (its
 	// out_of_play on), not editing: lobby_out_tick()'s
 	bool lobby_out = false;
+	// [KIT_CLIENT_REACT] (9) and that lobby's keep_own_body on: their body
+	// still drawn on their own client (set_pose()'s flag 8)
+	bool lobby_keep = false;
 	// The tools' colour (an index of COLORS, -1 while they are off), the
 	// selected entity (0: none) and the cursor (null: none), which the
 	// other builders see
@@ -15907,7 +15910,9 @@ struct Module: public interface::Module, public Interface
 	// What its types show every client: the first look and hud
 	json::Value show_of(const Entity &e)
 	{
-		json::Value show = json::object(), parts = json::array();
+		json::Value show = json::object(), parts = json::array(),
+				zones = json::array();
+		bool look_zone_sent = false;
 		std::set<ss_> shared;
 		for(const Instance &in : e.comps){
 			const json::Value &d = m_types[in.type].decl;
@@ -15990,6 +15995,26 @@ struct Module: public interface::Module, public Interface
 			// the state they see
 			if(!m_types[in.type].client.empty())
 				parts.append(in.type);
+			// [KIT_CLIENT_REACT] (1) its zones, for its client parts' on_enter
+			// (module.lua's update_zones meets them as zone_shape() has them):
+			// a position parameter's cells or "look" (the look is above), 4
+			// at most
+			if(!ty.zone.empty() && zones.size() < 4){
+				if(ty.zone != "look"){
+					int n[3];
+					const bool deadly = in.type == TRIGGER_TYPE &&
+							in.params.get("deadly").is_true();
+					extent(in.params.get(ty.zone), n, deadly ? MAX_REGION_EXTENT :
+							MAX_EXTENT);
+					json::Value g = json::array();
+					for(int k = 0; k < 3; k++)
+						g.append(n[k]);
+					zones.append(g);
+				} else if(!look_zone_sent){
+					zones.append("look");
+					look_zone_sent = true;
+				}
+			}
 			for(const ss_ &k : m_types[in.type].shared)
 				if(!m_types[in.type].per_player.count(k))
 					shared.insert(k);
@@ -16009,6 +16034,8 @@ struct Module: public interface::Module, public Interface
 				keys.append(k);
 			show.set("client", parts);
 			show.set("shared", keys);
+			if(zones.size())
+				show.set("zones", zones);
 		}
 		if(e.kind == "player"){
 			show.set("player", true);
@@ -22100,7 +22127,8 @@ struct Module: public interface::Module, public Interface
 	// [KIT_ZONE_SHAPES] zone = "look": the entity's own look as the clients
 	// draw it (its first), turned as it is: a polygon's outline over its
 	// depth (kit/polygon), a box (a part's, by its rotation; a look's state
-	// `when` over it as move.lua's M.look_box has it), a sphere of equal
+	// `when` over it as move.lua's M.look_box has it, a polygon's as its
+	// M.look_poly), a sphere of equal
 	// sides. simplified: a wedge and a sphere of unequal sides are their
 	// boxes. False: it has no look
 	bool look_zone(const Entity &e, ZoneShape &z)
@@ -22137,18 +22165,32 @@ struct Module: public interface::Module, public Interface
 						x.as_number() : def;
 			};
 			const ss_ shape = str(rd(look, "shape"));
+			const ss_ key = str(rd(look, "state"));
+			const bool on = !key.empty() && in.state.get(key).is_true();
+			const json::Value &wh = on ? look.get("when") : json::Value();
 			if(shape == "polygon"){
 				const json::Value &pts = rd(look, "points");
 				z.kind = 'p';
 				z.q = wq;
+				// [KIT_CLIENT_REACT] (6) its `when` as a box's: scaled about its
+				// own point, moved by its offset (move.lua's look_poly)
+				double sc[3], wo[3];
+				for(unsigned k = 0; k < 3; k++){
+					sc[k] = num(rd(wh, "scale"), k, 1);
+					wo[k] = num(rd(wh, "offset"), k, 0);
+				}
+				wq.apply(wo);
+				for(int k = 0; k < 3; k++)
+					z.o[k] += wo[k];
 				for(unsigned i = 0; pts.is_array() && i < pts.size(); i++)
 					for(unsigned k = 0; k < 2; k++)
-						z.pts.push_back(num(pts.at(i), k, 0));
+						z.pts.push_back(num(pts.at(i), k, 0) * sc[k]);
 				if(z.pts.size() < 6)
 					return false;
 				const json::Value &dv = rd(look, "depth");
 				z.r = std::max(0.02, std::min(64.0, dv.is_number() &&
-						std::isfinite(dv.as_number()) ? dv.as_number() : 1)) / 2;
+						std::isfinite(dv.as_number()) ? dv.as_number() : 1)) / 2 *
+						std::fabs(sc[2]);
 				z.a[0] = z.b[0] = z.pts[0];
 				z.a[1] = z.b[1] = z.pts[1];
 				for(size_t i = 0; i + 1 < z.pts.size(); i += 2)
@@ -22160,9 +22202,6 @@ struct Module: public interface::Module, public Interface
 				z.bound();
 				return true;
 			}
-			const ss_ key = str(rd(look, "state"));
-			const bool on = !key.empty() && in.state.get(key).is_true();
-			const json::Value &wh = on ? look.get("when") : json::Value();
 			double size[3], off[3];
 			const json::Value &sz = rd(look, "size");
 			for(unsigned k = 0; k < 3; k++){
@@ -23630,6 +23669,9 @@ struct Module: public interface::Module, public Interface
 				o += ",down=1";
 			if(got == 15 && v[13] != 0)
 				o += ",auto=1";
+			// [KIT_CLIENT_REACT] (10) the step told (controls.lua's gather the same)
+			if(waiting)
+				o += ",out_of_play=true";
 			// [KIT_MOVING_OBJECTS] Taken within reason of the round's time: the server
 			// steps it against the pose the client stepped it against, so a late
 			// input is no correction. simplified: a client can choose its pose within
@@ -23726,8 +23768,11 @@ struct Module: public interface::Module, public Interface
 		auto ei = m_entities.find(pi->second.player);
 		if(ei == m_entities.end() || !ei->second.node)
 			return;
+		// ([KIT_CLIENT_REACT] (9) 8: out of play, the body kept drawn on its own
+		// client, a kit/lobby's keep_own_body; hidden from the rest as 4 is)
 		const int flags = (b.dig != 0 ? 1 : 0) | (b.seat ? 2 : 0) |
-				(out_of_play(pi->second.player) ? 4 : 0);
+				(out_of_play(pi->second.player) ? 4 : 0) |
+				(pi->second.lobby_out && pi->second.lobby_keep ? 8 : 0);
 		char buf[64];
 		snprintf(buf, sizeof buf, "%.0f %.0f %.0f %d ", b.look_yaw,
 				b.look_pitch, std::fmod(b.swings, 1000000), flags);
@@ -28629,7 +28674,8 @@ struct Module: public interface::Module, public Interface
 	// out_of_play is on), logged as it changes; none while Stopped
 	void lobby_out_tick()
 	{
-		std::set<ss_> out;
+		// ([KIT_CLIENT_REACT] (9) keep: those of a lobby with keep_own_body)
+		std::set<ss_> out, keep;
 		for(auto &e : m_entities)
 			for(const Instance &in : e.second.comps){
 				const json::Value &st = in.state.get("states");
@@ -28638,18 +28684,24 @@ struct Module: public interface::Module, public Interface
 					continue;
 				for(json::Iterator it(st); it; ++it)
 					if((*it).is_string() && ((*it).as_string() == "lobby" ||
-							(*it).as_string() == "over"))
+							(*it).as_string() == "over")){
 						out.insert(it.key());
+						if(in.params.get("keep_own_body").is_true())
+							keep.insert(it.key());
+					}
 			}
 		for(auto &pp : m_peers){
 			Peer &p = pp.second;
 			const bool o = m_session.running && p.player && !p.editing &&
 					out.count("player:"+itos(p.player));
-			if(o == p.lobby_out)
+			const bool k = o && keep.count("player:"+itos(p.player));
+			if(o == p.lobby_out && k == p.lobby_keep)
 				continue;
 			p.lobby_out = o;
-			log_i(MODULE, "%s is %s", cs(p.name), o ? "out of play (a lobby)" :
-					"in play");
+			p.lobby_keep = k;
+			log_i(MODULE, "%s is %s", cs(p.name), !o ? "in play" : k ?
+					"out of play (a lobby), their own body kept" :
+					"out of play (a lobby)");
 		}
 	}
 
@@ -32486,12 +32538,15 @@ struct Module: public interface::Module, public Interface
 				"camera = \"chase\"} and step = function(s, i, dt, w, p): s its "
 				"state (s.pos {x, y, z} the feet, s.vel, kept between steps), i "
 				"the input (i.f, i.r forward and right -1...1, i.jump 1 held, "
-				"i.yaw degrees), w the world (w:move({x, y, z, r, h}, dx, dy, dz, "
+				"i.yaw degrees, i.out_of_play true while out of play: dead "
+				"waiting, a kit/lobby's lobby or result), w the world (w:move({x, y, z, r, h}, dx, dy, dz, "
 				"step_up) -> mx, my, mz, hits; w.sin, w.cos, w.sqrt, w.PI), p its "
 				"params; it runs on the server and on each client (get_type "
 				"kit/ball). [KIT_PLANE] The side view's: w:circle(x, y, r) -> "
 				"{{depth, nx, ny, info}...}, w:segment(x0, y0, x1, y1) -> t, nx, "
-				"ny, info. Its file's math is w's on both sides (floor, ceil, "
+				"ny, info (info.surface, info.friction: a voxel's, a "
+				"kit/polygon's surface and friction params; \"spikes\" a step "
+				"reacts to itself). Its file's math is w's on both sides (floor, ceil, "
 				"sqrt, abs, fmod, min, max, sin, cos, atan, atan2; no random). "
 				"s.events = {\"name\" | {\"name\", value}...} set in a step: "
 				"outputs of its component on the app root (declare them), as by "
@@ -32511,7 +32566,10 @@ struct Module: public interface::Module, public Interface
 				"or down), each item gone once its input is used. client: an optional "
 				"client part the clients run "
 				"(sandboxed): a table of on_add(e), on_state(e, key), "
-				"on_update(e, dt), on_remove(e); e.state, e.node, e:log(text); "
+				"on_update(e, dt), on_remove(e), on_enter(e) and on_leave(e) "
+				"(this client's own predicted body in its zone, tested on the "
+				"client in the server's shapes, before the server's on_enter: "
+				"e:predict(\"taken\", true, 1) a gem gone at once); e.state, e.node, e:log(text); "
 				"require(\"buildat/module/kit\").shared one table every client "
 				"part on that client shares (keys: your type's name); no "
 				"node:GetScene(), no globals set in a handler; one that errs is "
@@ -38394,7 +38452,19 @@ struct Module: public interface::Module, public Interface
 				"(a spike hazard: a component with zone = \"look\" on the "
 				"spikes' kit/polygon, reacting in on_enter; under a kit/parallax "
 				"layer never met), a movement's s.spheres meet zones as its "
-				"wheels and head (local/crag_bike's). c.players (players = true) lists every "
+				"wheels and head (local/crag_bike's). A kit/polygon's surface "
+				"(a tag) and friction reach a movement's step in what it hits "
+				"(w:circle's info.surface): a step can crash on \"spikes\" "
+				"itself, at once on the client too. Out of play (dead and "
+				"waiting, a kit/lobby's lobby or result) a step's i.out_of_play "
+				"is true (its keys none): a bike's step can hold it still under its result "
+				"card; the lobby's keep_own_body keeps the player's own body "
+				"drawn for them, the camera on it, hidden from the others. "
+				"A client part's on_enter(e) and on_leave(e) run on the "
+				"player's own client as their predicted body meets the zone "
+				"(the server's shapes), a round trip before the server's "
+				"on_enter: animate there (e:predict), decide on the server. "
+				"c.players (players = true) lists every "
 				"scene's players, each p.scene theirs and p.away true outside the "
 				"component's own scene: a scene's run or HUD keeps to not p.away. "
 				"State per_player = true is a table by `by` (\"player:<id>\"): "

@@ -172,6 +172,9 @@ end
 --   on_update(e, dt) (each frame), on_use(e) (this player used it, before
 --   the server hears of it), on_remove(e); [KIT_PLANE] stage 4: a movement's
 --   draw(s, node) draws the players' bodies (move.lua's top)
+--   [KIT_CLIENT_REACT] (1) on_enter(e), on_leave(e): this player's own
+--   predicted body met its zone or left it, by this client's own test
+--   (update_zones below), before the server's on_enter hears of it
 --   e.id, e.node (its replicated node), e.look, e.hinge, e.body (its look's
 --   nodes: the body turns with the hinge), e.swing (a swing's open angle:
 --   -90, or 90 when.mirror), e.state (the server's), e.mine
@@ -341,8 +344,11 @@ local function look_box(look, on)
 		for i = 1, 3 do
 			local was = size[i]
 			size[i] = size[i] * (tonumber(w.scale[i]) or 1)
-			-- Its bottom kept
-			if i == 2 then
+			-- Its bottom kept ([KIT_CLIENT_REACT] (6) a polygon's box scaled
+			-- about its own point, as its mesh is)
+			if look.shape == "polygon" then
+				off[i] = off[i] * (tonumber(w.scale[i]) or 1)
+			elseif i == 2 then
 				off[2] = off[2] - (was - size[2]) / 2
 			end
 		end
@@ -960,9 +966,14 @@ local function draw_look(id, n, look)
 	-- A swing turns the body round its hinge: the middle of its thickness
 	-- at its -x end, so the turned box is look_box's
 	if n.poly then
-		-- ([KIT_PLANE] stage 3: a polygon's mesh is in its own frame, b the box round)
+		-- ([KIT_PLANE] stage 3: a polygon's mesh is in its own frame, b the box round;
+		-- [KIT_CLIENT_REACT] (6) its `when` scale about its own point, its offset
+		-- the slide's below)
+		local sc = on and type(look.when) == "table" and type(look.when.scale) ==
+				"table" and look.when.scale or {}
 		n.body.position = magic.Vector3(0, 0, 0)
-		n.body.scale = magic.Vector3(1, 1, 1)
+		n.body.scale = magic.Vector3(tonumber(sc[1]) or 1, tonumber(sc[2]) or 1,
+				tonumber(sc[3]) or 1)
 	elseif type(look.when) == "table" and look.when.swing then
 		local c = look_box(look, false)
 		local px = c.off[1] - c.size[1] / 2 + c.size[3] / 2
@@ -1426,6 +1437,139 @@ local function update_play(_, data)
 	end
 end
 magic.SubscribeToEvent("Update", update_play)
+
+-- [KIT_CLIENT_REACT] (1) Zones on this client: its own predicted body
+-- (controls.lua's zone_body) against the zones of the entities with client
+-- parts (show.zones: {nx, ny, nz} a position parameter's cells, "look" its
+-- look), in the shapes the server meets them (move.lua's port of kit.cpp's),
+-- each frame, right after the steps (controls.lua's, before it sends them):
+-- the parts' on_enter(e) and on_leave(e) as that changes, logged ("kit:
+-- entity N's zone entered (this client)"), so one animates at once; the
+-- server still decides (its own on_enter). None while Ended, out of play in
+-- a lobby, nor a look zone under a kit/parallax layer. A shape kept till its
+-- entity moves or turns, its look's state turns or its show changes; one
+-- more than FAR metres from the body read again each 16th frame only (a
+-- node's place is a dear read; met first by its kept bounds).
+-- "event kit_zones" logs what the pass costs.
+-- simplified: a far zone moving faster than FAR in 16 frames (15 m/s at
+-- 60 fps) is met up to 16 frames late; a seat's rider stays as it was (the
+-- server meets the seat's point, not predicted here); a kit/goal's reach
+-- box round its target and a disabled component's zone are left out
+local ZN = {inside = {}, frame = 0, frames = 0, us = 0, tested = 0, built = 0,
+	max_us = 0, stepped = false}
+local FAR = 4
+local function zone_shapes(id, n, show, Z, body)
+	local c = n.zone_cache
+	if c and c.raw == n.show_raw and (ZN.frame + id) % 16 ~= 0 then
+		local far = false
+		for k = 1, 3 do
+			far = far or body.hi[k] < c.lo[k] - FAR or body.lo[k] > c.hi[k] + FAR
+		end
+		if far then
+			return c.shapes
+		end
+	end
+	local p, r = n.node.position, n.node.rotation
+	local look = type(show.look) == "table" and show.look or nil
+	local key = look and type(look.state) == "string" and look.state ~= "" and look.state
+	local on = key and parse(n.node:GetVar("kit:" .. key)) == true or false
+	local at = {p.x, p.y, p.z, r.w, r.x, r.y, r.z, on}
+	if c and c.raw == n.show_raw then
+		local same = true
+		for i = 1, 8 do
+			same = same and c.at[i] == at[i]
+		end
+		if same then
+			return c.shapes
+		end
+	end
+	ZN.built = ZN.built + 1
+	local R, pos, shapes = Z.quat_matrix(r.w, r.x, r.y, r.z), {p.x, p.y, p.z}, {}
+	c = {at = at, raw = n.show_raw, shapes = shapes, lo = {math.huge, math.huge,
+		math.huge}, hi = {-math.huge, -math.huge, -math.huge}}
+	for i, z in ipairs(show.zones) do
+		if i > 4 then
+			break
+		end
+		local s
+		if z == "look" then
+			s = not M.parallax_layer(id, n) and Z.zone_look(look, on, pos, R)
+		elseif type(z) == "table" then
+			s = Z.zone_cells(pos, R, z)
+		end
+		if s then
+			shapes[#shapes + 1] = s
+			for k = 1, 3 do
+				c.lo[k], c.hi[k] = math.min(c.lo[k], s.lo[k]), math.max(c.hi[k], s.hi[k])
+			end
+		end
+	end
+	n.zone_cache = c
+	return shapes
+end
+local function update_zones()
+	local Z = M.zone_math
+	if not Z or (M.riding and M.riding()) then
+		return
+	end
+	local t0 = buildat.get_time_us()
+	ZN.frame = ZN.frame + 1
+	local body = E.running and M.zone_body and
+			not (M.out_of_play and M.out_of_play() and not M.waiting()) and M.zone_body()
+	for id, n in pairs(P.nodes) do
+		local show = type(n.show) == "table" and n.show
+		local inside = false
+		if body and n.added and show and type(show.zones) == "table" then
+			for _, s in ipairs(zone_shapes(id, n, show, Z, body)) do
+				ZN.tested = ZN.tested + 1
+				if Z.zone_meets(s, body) then
+					inside = true
+					break
+				end
+			end
+		end
+		if inside ~= (ZN.inside[id] == true) then
+			ZN.inside[id] = inside or nil
+			log:info("kit: entity " .. id .. "'s zone " .. (inside and "entered" or
+					"left") .. " (this client)")
+			for _, part in ipairs(parts_of(n)) do
+				call(n, part, inside and "on_enter" or "on_leave")
+			end
+		end
+	end
+	for id in pairs(ZN.inside) do
+		if not P.nodes[id] then
+			ZN.inside[id] = nil
+		end
+	end
+	local us = buildat.get_time_us() - t0
+	ZN.frames, ZN.us = ZN.frames + 1, ZN.us + us
+	ZN.max_us = math.max(ZN.max_us, us)
+end
+-- (controls.lua's after its steps; a frame's own pass only where no steps
+-- ran the frame before)
+function M.update_zones()
+	ZN.stepped = true
+	update_zones()
+end
+magic.SubscribeToEvent("Update", function()
+	if not ZN.stepped then
+		update_zones()
+	end
+	ZN.stepped = false
+end)
+-- (a drive's: the pass's cost since the last ask)
+magic.SubscribeToEvent("command_seq:kit_zones", function()
+	local n = 0
+	for _ in pairs(ZN.inside) do
+		n = n + 1
+	end
+	log:info(string.format("kit: zones: %d frames, %.1f us a frame (at most %d), " ..
+			"%.1f shapes met a frame, %d built, %d inside", ZN.frames,
+			ZN.us / math.max(1, ZN.frames), ZN.max_us, ZN.tested / math.max(1, ZN.frames),
+			ZN.built, n))
+	ZN.frames, ZN.us, ZN.tested, ZN.built, ZN.max_us = 0, 0, 0, 0, 0
+end)
 
 -- The types' client parts, run as this module's own Lua is ([KIT] 4d).
 -- [KIT_CUSTOM_TYPES] One sent again with another source (a custom type

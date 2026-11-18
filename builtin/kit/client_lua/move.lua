@@ -55,7 +55,10 @@
 -- s its state (s.pos the body's bottom middle {x, y, z}, s.vel; the rest
 -- its own), changed in place; i this step's input: f (forward, -1...1),
 -- r (right), yaw (the camera's, degrees from +z toward +x), jump (0/1),
--- go (0/1: a target), tx, ty, tz (where to go); dt seconds; p its
+-- go (0/1: a target), tx, ty, tz (where to go), [KIT_CLIENT_REACT] (10)
+-- out_of_play (true while the player is out of play: dead and waiting to
+-- respawn, in a kit/lobby's lobby or result; its keys none then; nil in play;
+-- c:speed(by, 0) stays the freeze); dt seconds; p its
 -- parameters; w the world:
 --   w:cell(i, j, k) -> info or nil (air): the voxel centred on i, j, k
 --   w:walk(s, b, wx, wz, jump, dt, p): a character's step, s.frame below
@@ -109,7 +112,10 @@
 -- outline, W:down its tops. W:move climbs an edge as the body's slope lets (b.slope,
 -- the heightmap's), else it is a wall: no step up it. With the plane on one is met
 -- where it spans the plane's z; one at another depth is background or foreground.
--- An edge's info is {solid, friction, surface "polygon", nx, ny: its normal out}.
+-- An edge's info is {solid, friction, surface, nx, ny: its normal out}: [KIT_CLIENT_REACT]
+-- (5) its look's surface (a tag, "polygon" by default) and friction (1; 0...10),
+-- kit/polygon's params so named, the same in a step on both sides: a step reacts to
+-- "spikes" or "ice" itself.
 -- simplified: one turned otherwise (a yaw off 0 and 180, a pitch) or on a moving
 -- object is not met, nor by W:ray; a circle's middle deeper in one than its radius
 -- meets nothing of it
@@ -430,6 +436,18 @@ end
 -- round, n, z0, z1, x0, y0, x1, y1 its box, info, inf (its edges' infos)}; nil when
 -- it is not met
 M.POLYGON = {solid = true, friction = 1, surface = "polygon"}
+-- [KIT_CLIENT_REACT] (5) a look's own surface and friction (none: M.POLYGON)
+local function poly_info(look)
+	local f, s = tonumber(look.friction), look.surface
+	if type(s) ~= "string" or s == "" then
+		s = "polygon"
+	end
+	if (f == nil or f == 1) and s == "polygon" then
+		return M.POLYGON
+	end
+	f = f or 1
+	return {solid = true, friction = f < 0 and 0 or f > 10 and 10 or f, surface = s}
+end
 function M.look_poly(look, on, pos, yaw, pitch, roll)
 	if type(look) ~= "table" or look.shape ~= "polygon" or
 			type(look.points) ~= "table" or type(yaw) == "table" then
@@ -444,6 +462,13 @@ function M.look_poly(look, on, pos, yaw, pitch, roll)
 	if not solid or abs(R[9]) < 1 - 1e-9 then
 		return nil
 	end
+	-- [KIT_CLIENT_REACT] (6) its `when` over it as over a box: scaled about its own
+	-- point, then moved by its offset, in its own frame
+	local sc, of = {1, 1, 1}, {0, 0, 0}
+	for k = 1, 3 do
+		sc[k] = type(w.scale) == "table" and tonumber(w.scale[k]) or 1
+		of[k] = type(w.offset) == "table" and tonumber(w.offset[k]) or 0
+	end
 	local pts, n = {}, 0
 	for _, p in ipairs(look.points) do
 		local x = type(p) == "table" and tonumber(p[1])
@@ -451,6 +476,7 @@ function M.look_poly(look, on, pos, yaw, pitch, roll)
 		if not x or not y then
 			return nil
 		end
+		x, y = x * sc[1] + of[1], y * sc[2] + of[2]
 		pts[2 * n + 1] = pos[1] + R[1] * x + R[2] * y
 		pts[2 * n + 2] = pos[2] + R[4] * x + R[5] * y
 		n = n + 1
@@ -474,7 +500,7 @@ function M.look_poly(look, on, pos, yaw, pitch, roll)
 			pts[2 * i], pts[2 * j] = pts[2 * j], pts[2 * i]
 		end
 	end
-	local p = {pts = pts, n = n, info = M.POLYGON, inf = {},
+	local p = {pts = pts, n = n, info = poly_info(look), inf = {},
 		x0 = math.huge, y0 = math.huge, x1 = -math.huge, y1 = -math.huge}
 	for i = 1, n do
 		local x, y = pts[2 * i - 1], pts[2 * i]
@@ -484,8 +510,9 @@ function M.look_poly(look, on, pos, yaw, pitch, roll)
 		if y > p.y1 then p.y1 = y end
 	end
 	local d = tonumber(look.depth) or 1
-	d = d < 0.02 and 0.02 or d > 64 and 64 or d
-	p.z0, p.z1 = pos[3] - d / 2, pos[3] + d / 2
+	d = (d < 0.02 and 0.02 or d > 64 and 64 or d) * abs(sc[3])
+	local zc = pos[3] + R[9] * of[3]
+	p.z0, p.z1 = zc - d / 2, zc + d / 2
 	return p
 end
 
@@ -2453,6 +2480,330 @@ function M.steps(def, s, inputs, dt, sub, w, p, guard)
 	end
 	s.events = events
 	return s
+end
+
+-- ---- [KIT_CLIENT_REACT] (1) Zones as kit.cpp meets them (its ZoneShape,
+-- look_zone, body_shape and zone_meets, ported line by line): the client's
+-- own predicted body against the zones of the entities with client parts
+-- (module.lua's update_zones), the server still the one that decides. A turn
+-- is a 3x3 matrix (rows); a shape {kind = "c" cells, "b" a turned box, "s" a
+-- sphere, "p" a polygon over its depth; o, R, n, a, b, r, pts, lo, hi}.
+-- simplified: client-only, though the box loads the file too (a few hundred
+-- lines it never calls)
+local function tr(R)
+	return {R[1], R[4], R[7], R[2], R[5], R[8], R[3], R[6], R[9]}
+end
+local function app(R, v)
+	return {R[1] * v[1] + R[2] * v[2] + R[3] * v[3],
+		R[4] * v[1] + R[5] * v[2] + R[6] * v[3],
+		R[7] * v[1] + R[8] * v[2] + R[9] * v[3]}
+end
+local ID = {1, 0, 0, 0, 1, 0, 0, 0, 1}
+
+-- A node's rotation (w, x, y, z) as a matrix; nil: none (the identity)
+function M.quat_matrix(w, x, y, z)
+	if abs(x) < 1e-7 and abs(y) < 1e-7 and abs(z) < 1e-7 then
+		return nil
+	end
+	return {1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y),
+		2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
+		2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)}
+end
+
+local function bound(z)
+	z.lo, z.hi = {math.huge, math.huge, math.huge}, {-math.huge, -math.huge, -math.huge}
+	for c = 0, 7 do
+		local v = app(z.R, {c % 2 == 1 and z.b[1] or z.a[1],
+			floor(c / 2) % 2 == 1 and z.b[2] or z.a[2], c >= 4 and z.b[3] or z.a[3]})
+		for k = 1, 3 do
+			v[k] = v[k] + z.o[k]
+			if v[k] < z.lo[k] then z.lo[k] = v[k] end
+			if v[k] > z.hi[k] then z.hi[k] = v[k] end
+		end
+	end
+	return z
+end
+
+-- A box of n cells (a position parameter's zone) from the entity at pos
+-- turned by R (nil: level, on the cell its place floors to: box_frame's)
+function M.zone_cells(pos, R, n)
+	local o = {pos[1], pos[2], pos[3]}
+	if not R then
+		for k = 1, 3 do o[k] = floor(o[k]) end
+	end
+	local nn = {}
+	for k = 1, 3 do
+		nn[k] = type(n) == "table" and tonumber(n[k]) or 1
+	end
+	return bound({kind = "c", o = o, R = R or ID, n = nn, a = {-0.5, -0.5, -0.5},
+		b = {nn[1] - 0.5, nn[2] - 0.5, nn[3] - 0.5}})
+end
+
+local function num(v, i, def)
+	local x = type(v) == "table" and tonumber(v[i])
+	return x and x == x and x ~= math.huge and x ~= -math.huge and x or def
+end
+
+-- zone = "look": the entity's look (show.look: its params in it) at pos
+-- turned by R, its `when` while on, as look_zone has it; nil: none
+function M.zone_look(look, on, pos, R)
+	if type(look) ~= "table" then
+		return nil
+	end
+	R = R or ID
+	local wh = on and type(look.when) == "table" and look.when or {}
+	local o = {pos[1], pos[2], pos[3]}
+	if look.shape == "polygon" then
+		local sc, wo = {}, {}
+		for k = 1, 3 do
+			sc[k], wo[k] = num(wh.scale, k, 1), num(wh.offset, k, 0)
+		end
+		wo = app(R, wo)
+		for k = 1, 3 do o[k] = o[k] + wo[k] end
+		local pts = {}
+		for _, p in ipairs(type(look.points) == "table" and look.points or {}) do
+			pts[#pts + 1] = num(p, 1, 0) * sc[1]
+			pts[#pts + 1] = num(p, 2, 0) * sc[2]
+		end
+		if #pts < 6 then
+			return nil
+		end
+		local d = tonumber(look.depth) or 1
+		local r = (d < 0.02 and 0.02 or d > 64 and 64 or d) / 2 * abs(sc[3])
+		local a, b = {pts[1], pts[2], -r}, {pts[1], pts[2], r}
+		for i = 1, #pts - 1, 2 do
+			for k = 1, 2 do
+				local v = pts[i + k - 1]
+				if v < a[k] then a[k] = v end
+				if v > b[k] then b[k] = v end
+			end
+		end
+		return bound({kind = "p", o = o, R = R, pts = pts, r = r, a = a, b = b})
+	end
+	local size, off = {}, {}
+	for k = 1, 3 do
+		if type(look.size) == "table" then
+			local v = num(look.size, k, 1)
+			size[k] = v < 0.02 and 0.02 or v > 64 and 64 or v
+		else
+			size[k] = math.min(128, abs((tonumber(look.size) or 0.4) * 2))
+		end
+		off[k] = num(look.offset, k, 0) + num(wh.offset, k, 0)
+	end
+	if type(wh.scale) == "table" then
+		for k = 1, 3 do
+			local was = size[k]
+			size[k] = size[k] * num(wh.scale, k, 1)
+			if k == 2 then
+				off[2] = off[2] - (was - size[2]) / 2
+			end
+		end
+	end
+	if wh.swing == true then
+		local hinge = off[1] - size[1] / 2
+		local front, back = off[3] - size[3] / 2, off[3] + size[3] / 2
+		size[1], size[3] = size[3], size[1]
+		off[1] = hinge + size[1] / 2
+		off[3] = wh.mirror == true and back - size[3] / 2 or front + size[3] / 2
+	end
+	local rv = look.rotation
+	local RR = m3(R, rotation(num(rv, 1, 0), num(rv, 2, 0), num(rv, 3, 0)))
+	off = app(RR, off)
+	for k = 1, 3 do o[k] = o[k] + off[k] end
+	if look.shape == "sphere" and size[1] == size[2] and size[2] == size[3] then
+		local r = size[1] / 2
+		return bound({kind = "s", o = o, R = ID, r = r, a = {-r, -r, -r}, b = {r, r, r}})
+	end
+	return bound({kind = "b", o = o, R = RR, a = {-size[1] / 2, -size[2] / 2,
+		-size[3] / 2}, b = {size[1] / 2, size[2] / 2, size[3] / 2}})
+end
+
+-- The body as the zones meet it (body_shape): its movement's spheres
+-- ({x, y, z, r} from the feet, 8 at most, each within 16 m, r 0.01...8),
+-- else its body's box (box: {r, h}, a movement's zone = "box"), else its
+-- point half a metre over the feet
+function M.zone_body(feet, spheres, box)
+	local p = {feet[1], feet[2] + 0.5, feet[3]}
+	local s = {p = p, spheres = {}, lo = {p[1], p[2], p[3]}, hi = {p[1], p[2], p[3]}}
+	for _, c in ipairs(type(spheres) == "table" and spheres or {}) do
+		if #s.spheres >= 8 then
+			break
+		end
+		local ok = type(c) == "table" and #c == 4
+		for k = 1, 4 do
+			local v = ok and tonumber(c[k])
+			ok = v and v == v and (k < 4 and abs(v) <= 16 or k == 4 and v >= 0.01 and v <= 8)
+		end
+		if ok then
+			local q = {c[1] + feet[1], c[2] + feet[2], c[3] + feet[3], c[4]}
+			s.spheres[#s.spheres + 1] = q
+			for k = 1, 3 do
+				if q[k] - q[4] < s.lo[k] then s.lo[k] = q[k] - q[4] end
+				if q[k] + q[4] > s.hi[k] then s.hi[k] = q[k] + q[4] end
+			end
+		end
+	end
+	if #s.spheres > 0 or type(box) ~= "table" then
+		return s
+	end
+	local function cl(v, d, a, b)
+		v = tonumber(v) or d
+		return v < a and a or v > b and b or v
+	end
+	local r, h, EPS = cl(box.r, 0.45, 0.05, 8), cl(box.h, 1.7, 0.05, 16), 1e-3
+	s.box = true
+	for k = 1, 3 do
+		s.lo[k] = feet[k] - (k == 2 and 0 or r) + EPS
+		s.hi[k] = feet[k] + (k == 2 and h or r) - EPS
+	end
+	return s
+end
+
+local function in_outline(q, x, y)
+	local inside, n = false, #q / 2
+	local j = n
+	for i = 1, n do
+		local xi, yi, xj, yj = q[2 * i - 1], q[2 * i], q[2 * j - 1], q[2 * j]
+		if (yi > y) ~= (yj > y) and x < xi + (y - yi) * (xj - xi) / (yj - yi) then
+			inside = not inside
+		end
+		j = i
+	end
+	return inside
+end
+
+local function zone_d2(z, p)
+	local l = app(tr(z.R), {p[1] - z.o[1], p[2] - z.o[2], p[3] - z.o[3]})
+	if z.kind == "s" then
+		local d = sqrt(l[1] * l[1] + l[2] * l[2] + l[3] * l[3]) - z.r
+		return d > 0 and d * d or 0
+	end
+	if z.kind ~= "p" then
+		local d2 = 0
+		for k = 1, 3 do
+			local d = l[k] < z.a[k] and z.a[k] - l[k] or l[k] > z.b[k] and l[k] - z.b[k] or 0
+			d2 = d2 + d * d
+		end
+		return d2
+	end
+	local dz = math.max(0, abs(l[3]) - z.r)
+	if in_outline(z.pts, l[1], l[2]) then
+		return dz * dz
+	end
+	local best, q, n = math.huge, z.pts, #z.pts / 2
+	local j = n
+	for i = 1, n do
+		local ax, ay = q[2 * j - 1], q[2 * j]
+		local ex, ey = q[2 * i - 1] - ax, q[2 * i] - ay
+		local ll = ex * ex + ey * ey
+		local t = ll > 0 and ((l[1] - ax) * ex + (l[2] - ay) * ey) / ll or 0
+		t = t < 0 and 0 or t > 1 and 1 or t
+		local dx, dy = ax + ex * t - l[1], ay + ey * t - l[2]
+		if dx * dx + dy * dy < best then best = dx * dx + dy * dy end
+		j = i
+	end
+	return dz * dz + best
+end
+
+local function zone_box(z, lo, hi)
+	if z.kind == "s" then
+		local d2 = 0
+		for k = 1, 3 do
+			local c = math.max(lo[k], math.min(hi[k], z.o[k]))
+			d2 = d2 + (c - z.o[k]) * (c - z.o[k])
+		end
+		return d2 < z.r * z.r
+	end
+	local la, lb = {math.huge, math.huge, math.huge}, {-math.huge, -math.huge, -math.huge}
+	local inv = tr(z.R)
+	for c = 0, 7 do
+		local v = app(inv, {(c % 2 == 1 and hi[1] or lo[1]) - z.o[1],
+			(floor(c / 2) % 2 == 1 and hi[2] or lo[2]) - z.o[2],
+			(c >= 4 and hi[3] or lo[3]) - z.o[3]})
+		for k = 1, 3 do
+			if v[k] < la[k] then la[k] = v[k] end
+			if v[k] > lb[k] then lb[k] = v[k] end
+		end
+	end
+	if z.kind ~= "p" then
+		for k = 1, 3 do
+			if lb[k] <= z.a[k] or la[k] >= z.b[k] then
+				return false
+			end
+		end
+		return true
+	end
+	if lb[3] <= -z.r or la[3] >= z.r then
+		return false
+	end
+	local q, n = z.pts, #z.pts / 2
+	for i = 1, n do
+		local x, y = q[2 * i - 1], q[2 * i]
+		if x > la[1] and x < lb[1] and y > la[2] and y < lb[2] then
+			return true
+		end
+	end
+	if in_outline(q, (la[1] + lb[1]) / 2, (la[2] + lb[2]) / 2) then
+		return true
+	end
+	local j = n
+	for i = 1, n do
+		local s = {q[2 * j - 1], q[2 * j]}
+		local d = {q[2 * i - 1] - s[1], q[2 * i] - s[2]}
+		local t0, t1, out = 0, 1, false
+		for k = 1, 2 do
+			if out then break end
+			if abs(d[k]) < 1e-12 then
+				out = s[k] <= la[k] or s[k] >= lb[k]
+			else
+				local u, w = (la[k] - s[k]) / d[k], (lb[k] - s[k]) / d[k]
+				if u > w then u, w = w, u end
+				t0, t1 = math.max(t0, u), math.min(t1, w)
+				out = t0 >= t1
+			end
+		end
+		if not out then
+			return true
+		end
+		j = i
+	end
+	return false
+end
+
+-- Whether a body (M.zone_body's) meets a zone: its bounds first, then its
+-- spheres, its box or its point (a point in cells as box_holds has it)
+function M.zone_meets(z, s)
+	if z.kind == "c" and not s.box and #s.spheres == 0 then
+		local l = app(tr(z.R), {s.p[1] - z.o[1], s.p[2] - z.o[2], s.p[3] - z.o[3]})
+		for k = 1, 3 do
+			local c = floor(l[k] + 0.5)
+			if c < 0 or c >= z.n[k] then
+				return false
+			end
+		end
+		return true
+	end
+	for k = 1, 3 do
+		if s.hi[k] < z.lo[k] or s.lo[k] > z.hi[k] then
+			return false
+		end
+	end
+	for _, c in ipairs(s.spheres) do
+		local near = true
+		for k = 1, 3 do
+			near = near and c[k] + c[4] >= z.lo[k] and c[k] - c[4] <= z.hi[k]
+		end
+		if near and zone_d2(z, c) < c[4] * c[4] then
+			return true
+		end
+	end
+	if #s.spheres > 0 then
+		return false
+	end
+	if s.box then
+		return zone_box(z, s.lo, s.hi)
+	end
+	return zone_d2(z, s.p) <= 0
 end
 
 return M

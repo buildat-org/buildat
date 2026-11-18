@@ -1135,12 +1135,19 @@ end
 
 -- [KIT_LOBBY_OUT_OF_PLAY] Whether this player is out of play: waiting, or
 -- in a kit/lobby's lobby or result (their pose's flag 4, the server's)
-function M.out_of_play()
+local function own_flags()
 	local me = P.nodes[P.you]
 	local v = me and me.node:GetVar("kit_pose")
-	local f = v and not v:IsEmpty() and
-			tonumber(v:GetString():match("^%S+ %S+ %S+ (%S+)"))
-	return M.waiting() or (f or 0) % 8 >= 4
+	return v and not v:IsEmpty() and
+			tonumber(v:GetString():match("^%S+ %S+ %S+ (%S+)")) or 0
+end
+function M.out_of_play()
+	return M.waiting() or own_flags() % 8 >= 4
+end
+-- [KIT_CLIENT_REACT] (9) Out of play with the body kept drawn here (a
+-- kit/lobby's keep_own_body: the pose's flag 8): no spectating
+function M.own_body_kept()
+	return own_flags() % 16 >= 8 and not M.waiting()
 end
 
 local go_next = nil -- a target to send in the next step
@@ -1336,6 +1343,15 @@ local function gather()
 		i.go, i.tx, i.ty, i.tz = 1, fmt(go_next[1], 2), fmt(go_next[2], 2),
 				fmt(go_next[3], 2)
 		go_next = nil
+	end
+	-- [KIT_CLIENT_REACT] (10) out of play, the step told (as kit.cpp's on_input_u
+	-- tells the server's)
+	if M.out_of_play() then
+		i.out_of_play = true
+	end
+	if C.oop_said ~= (i.out_of_play == true) then
+		C.oop_said = i.out_of_play == true
+		log:info("kit: the steps' input: out of play " .. tostring(C.oop_said))
 	end
 	-- [KIT_AUTO_JUMP] the movement's auto_jump (kit/walker's): all, or
 	-- touchscreen on a touch client; a touch builder's Walk view always
@@ -1621,6 +1637,21 @@ function M.body_spheres()
 		end
 	end
 	return out
+end
+
+-- [KIT_CLIENT_REACT] (1) This client's own predicted body as the zones meet
+-- it (move.lua's zone_body, the server's body_shape: its step's spheres, else
+-- a movement.zone = "box" body's box, else its point); nil: none yet. A
+-- seat's rider: nil too (the server meets the seat's point, not predicted
+-- here). M.zone_math: move.lua's zone shapes and tests (module.lua's
+-- update_zones)
+M.zone_math = MV
+function M.zone_body()
+	local feet = pos_of(C.s)
+	if not feet or not MV or M.riding() then
+		return nil
+	end
+	return MV.zone_body(feet, C.s.spheres, decl().zone == "box" and body_decl() or nil)
 end
 
 -- [KIT_SPECTATE_CAMERA] The feet the camera follows (the body's, a watched
@@ -2530,6 +2561,11 @@ magic.SubscribeToEvent("Update", function(_, data)
 		end
 		if n > 0 then
 			C.touch_jump = false
+		end
+		-- [KIT_CLIENT_REACT] (1) the zones met where the steps left the body,
+		-- before the server hears of the steps
+		if n > 0 and M.update_zones then
+			M.update_zones()
 		end
 		if #C.out > 0 then
 			buildat.send_packet("kit:input", C.put .. ";" ..

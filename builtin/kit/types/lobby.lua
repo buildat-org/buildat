@@ -14,7 +14,10 @@
 -- walking, no actions, their client spectating under the screen), their
 -- body hidden from the others, not hit and in no zone; entered puts them
 -- back where they were, for the game to place them (a teleport). Off for
--- a lobby that is a place in the world.
+-- a lobby that is a place in the world. [KIT_CLIENT_REACT] (9)
+-- `keep_own_body` (off by default): out of play so, a player's own body stays
+-- drawn for them where it stopped and their camera on it (no spectating: a
+-- result card over their frozen bike), still hidden from the others.
 -- [KIT_SCENE_PACKAGES] On the app root it is every scene's (its screens
 -- too, on the root): a play whose value is a scene's name (a
 -- kit/ui_scene_list's picked) takes the player there, onto its spawner of
@@ -50,7 +53,7 @@ return {
 	no_position = true,
 	about = {
 		group = "Game",
-		what = "Each player's lobby, run and result, and the screens for them.",
+		what = "Each player's lobby, run and result, and the screens for them. out_of_play: there a player is out of play, hidden from the others; keep_own_body: their own body still drawn for them, the camera on it (a result card over their frozen bike).",
 		keywords = "menu start round result card",
 		inputs = {
 			play = "The player who set it off starts a run (from the lobby or a result). Value: a scene to go to first.",
@@ -67,6 +70,7 @@ return {
 		lobby_screen = {type = "entity", default = 0},
 		over_screen = {type = "entity", default = 0},
 		out_of_play = {type = "bool", default = true},
+		keep_own_body = {type = "bool", default = false},
 	},
 	state = {states = {default = {}, per_player = true},
 		-- [KIT_SCENE_PACKAGES] the scene a player's play is taking them to

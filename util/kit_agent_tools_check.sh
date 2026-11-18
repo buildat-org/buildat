@@ -46,7 +46,10 @@
 #      with it, never under a kit/parallax; a gem's cells met by a wheel
 #      (s.spheres) with the point outside, by the point, by a walker's body
 #      box (movement.zone "box"); get_state's zone kind, shape, bounds and
-#      who is in it; play_input's body shape.
+#      who is in it; play_input's body shape. [KIT_CLIENT_REACT] (5) a
+#      polygon's surface and friction (get_state's params) in what the
+#      server's step meets (the probe's output); (6) a polygon gem's `when`
+#      (scaled about its point, moved): its zone shrunk with it.
 #  10. [KIT_CLIENT_REACT] client parts on the agent's own client (the
 #      server's camera's log): its body's by "player:<id>" (met by a zone,
 #      try_input as me) and its per_player state (shared = true too) on
@@ -319,10 +322,37 @@ ZPROBE = '''return {
 		y = {type = "number", default = 2, min = -500, max = 500},
 		wheels = {type = "bool", default = false}},
 	movement = {body = {r = 0.3, h = 1, eye = 0.8}%s},
+	outputs = {surface = "string"},
 	step = function(s, i, dt, w, p)
-		s.pos, s.vel = {p.x, p.y, 0}, {0, 0, 0}
+		-- ([KIT_CLIENT_REACT] (10) out of play 10 up)
+		s.pos, s.vel = {p.x, p.y + (i.out_of_play and 10 or 0), 0}, {0, 0, 0}
 		s.spheres = p.wheels and {{-0.6, 0.36, 0, 0.36}, {0.6, 0.36, 0, 0.36}} or nil
+		-- [KIT_CLIENT_REACT] (5) what it touches, its surface and friction (not
+		-- the cells of sections not loaded: "unknown")
+		for _, h in ipairs(w:circle(p.x, p.y, 0.3)) do
+			if h.info.surface ~= "unknown" then
+				s.events = {{"surface", tostring(h.info.surface) .. " " ..
+					tostring(h.info.friction)}}
+				break
+			end
+		end
 	end,
+}
+'''
+# [KIT_CLIENT_REACT] (6) a polygon gem: its look (and so its zone) shrunk and
+# moved up while taken
+PGEM = '''return {
+	version = 1,
+	zone = "look",
+	about = {what = "The check's polygon gem."},
+	inputs = {take = "none", back = "none"},
+	state = {taken = {default = false, shared = true}, n = {default = 0},
+		out = {default = 0}},
+	look = {shape = "polygon", points = {{-1, 0}, {1, 0}, {1, 2}, {-1, 2}}, depth = 1,
+		state = "taken", when = {scale = {0.25, 0.25, 1}, offset = {0, 1, 0}}},
+	on_input = function(c, input) c.state.taken = input == "take" end,
+	on_enter = function(c, by) c.state.n = c.state.n + 1 end,
+	on_leave = function(c, by) c.state.out = c.state.out + 1 end,
 }
 '''
 HAZ = '''return {
@@ -660,7 +690,7 @@ elif phase == "zones":
     to_start()
     call("new_scene", {"name": "zones"})
     for name, src in (("zprobe", ZPROBE % ""), ("zwalk", ZPROBE % ', zone = "box"'),
-            ("zhaz", HAZ), ("zgem", GEM)):
+            ("zhaz", HAZ), ("zgem", GEM), ("zpgem", PGEM)):
         call("put_type", {"name": name, "source": src})
     d = {t["name"]: t for t in rpc("tools/list")["result"]["tools"]}["put_type"]["description"]
     for w in ('c:params_of(type)', 'or "look" (the entity\'s own look', 's.spheres = {{x, y, z, r}...}',
@@ -771,6 +801,53 @@ elif phase == "zones":
     sh = played({"seconds": 0.1})["shape"]
     assert sh == {"kind": "box", "lo": [58.951, 0.601, -0.299], "hi": [59.549, 1.599, 0.299]}, sh
     print("   a gem met by a wheel (its point outside), by the point, by a walker's box")
+    call("set_param", {"id": CT, "param": "movement", "value": "local/zprobe"})
+    put(PR, 0, 2)
+    # [KIT_CLIENT_REACT] (5) a polygon's surface and friction (its params, in
+    # get_state) in what the server's step meets: the probe's surface output
+    SP = placed(call("place", {"type": "kit/polygon", "pos": [-20, 0, 0], "params": {
+        "points": [[0, 0], [2, 0], [2, 1], [0, 1]], "surface": "spikes", "friction": 0.5}}))
+    pp = comp(SP, 0)["params"]
+    assert pp["surface"] == "spikes" and pp["friction"] == 0.5, pp
+    # (its circle round the feet at 1.1, r 0.3: in the top at 1 by 0.2, the
+    # body itself over it)
+    call("set_param", {"id": PR, "params": {"x": -19, "y": 1.1}})
+    def touched(want):
+        ev = [e for e in played({"seconds": 0.3})["events"] if e["output"] == "surface"]
+        return ev if ev and ev[-1].get("last_value", ev[-1].get("value")) == want else None
+    wait(lambda: touched("spikes 0.5"), "the step meeting the spikes")
+    call("set_param", {"id": SP, "params": {"surface": "", "friction": 1}})
+    wait(lambda: touched("polygon 1"), "the step meeting a plain polygon")
+    put(PR, 0, 2)
+    print("   a polygon's surface and friction in the server's step: spikes 0.5, none: polygon 1")
+    # (6) a polygon gem's `when` (scaled about its point, moved up) its zone's
+    # too: the body met by the whole one, not by the taken one
+    PG = placed(call("place", {"type": "local/zpgem", "pos": [-40, 1, 0]}))
+    z = comp(PG, 0)["zone"]
+    assert z["shape"] == "polygon" and z["lo"] == [-41, 1, -0.5] and z["hi"] == [-39, 3, 0.5], z
+    put(PR, -39.2, 1)
+    comes(PG, 0, 1, 0)
+    call("try_input", {"id": PG, "input": "take"})
+    comes(PG, 0, 1, 1)
+    z = comp(PG, 0)["zone"]
+    assert z["lo"] == [-40.25, 2, -0.5] and z["hi"] == [-39.75, 2.5, 0.5], z
+    call("try_input", {"id": PG, "input": "back"})
+    comes(PG, 0, 2, 1)
+    put(PR, 0, 2)
+    print("   a polygon gem's when: its zone shrunk and moved with its look, whole again")
+    # (10) out of play (a kit/lobby's lobby): the server's step's i.out_of_play
+    # (the probe 10 up), back in play down again; (9) keep_own_body: the
+    # server's line (the clients': util/kit_bike_check.sh)
+    LB = placed(call("place", {"type": "kit/lobby", "pos": [0, 1, 0],
+        "params": {"keep_own_body": True}}))
+    call("try_input", {"id": LB, "input": "lobby", "as": "me"})
+    at(0, 12)
+    call("try_input", {"id": LB, "input": "play", "as": "me"})
+    at(0, 2)
+    srv = open(out + "/srv.log", errors="replace").read()
+    assert "kitboss's agent is out of play (a lobby), their own body kept" in srv, \
+        [l for l in srv.splitlines() if "out of play" in l][-3:]
+    print("   out of play: i.out_of_play in the server's step; keep_own_body's line")
     assert "Your body is gone" in call("play_leave")
     call("stop")
 elif phase == "client":
