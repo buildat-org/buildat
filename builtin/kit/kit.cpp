@@ -15725,6 +15725,11 @@ struct Module: public interface::Module, public Interface
 			// [KIT_CTF] its world marker, "param:<name>" as a look's
 			if(show.get("marker").is_undefined() && d.get("marker").is_object())
 				show.set("marker", look_of(in, d.get("marker")));
+			// [KIT_SIDE_SCENERY] (8) a parallax layer's follow, follow_y and
+			// repeat ("param:<name>" as a look's): what is under it drawn so
+			// (module.lua's parallax pass)
+			if(show.get("parallax").is_undefined() && d.get("parallax").is_object())
+				show.set("parallax", look_of(in, d.get("parallax")));
 			// [KIT_FLAG_RIGHT_CLICK] the shared state naming the player
 			// whose right click uses it
 			if(show.get("right_use").is_undefined() &&
@@ -15823,6 +15828,24 @@ struct Module: public interface::Module, public Interface
 			if(m_types[in.type].health && in.disabled.empty())
 				show.set("health", true);
 		return show;
+	}
+
+	// [KIT_SIDE_SCENERY] (8) Whether it is under a parallax layer (a type
+	// with `parallax`, kit/parallax): drawn offset by the clients' cameras,
+	// so never met (the collision snapshot and the bots' grid leave it out)
+	bool under_parallax(const Entity &e)
+	{
+		uint64_t id = e.parent;
+		for(int i = 0; i < 16 && id; i++){
+			auto it = m_entities.find(id);
+			if(it == m_entities.end())
+				return false;
+			for(const Instance &in : it->second.comps)
+				if(m_types[in.type].decl.get("parallax").is_object())
+					return true;
+			id = it->second.parent;
+		}
+		return false;
 	}
 
 	// [KIT_NESTING] The entity a positioned one is under (0: a scene)
@@ -23412,7 +23435,8 @@ struct Module: public interface::Module, public Interface
 				world_of(e, w, &wq);
 			}
 			ss_ es;
-			if(scene_of(e, &es) != scene || !scene)
+			// ([KIT_SIDE_SCENERY] (8) under a parallax layer: never met)
+			if(scene_of(e, &es) != scene || !scene || under_parallax(e))
 				continue;
 			for(const Instance &in : e.comps){
 				const json::Value &d = m_types[in.type].decl.get("look");
@@ -23606,6 +23630,8 @@ struct Module: public interface::Module, public Interface
 				++it;
 		}
 		std::vector<uint64_t> unseat;
+		// [KIT_LEFTOVERS_1116] each scene's plane (NaN: none), for creatures
+		std::map<ss_, double> planes;
 		for(auto &dp : m_drives){
 			Drive &d = dp.second;
 			auto ei = m_entities.find(dp.first);
@@ -23690,10 +23716,22 @@ struct Module: public interface::Module, public Interface
 				if(sv.at(k).is_number())
 					v2 += sv.at(k).as_number() * sv.at(k).as_number();
 			const double reach = std::min(16.0, (std::sqrt(v2) + 10) * n / rate);
+			// [KIT_LEFTOVERS_1116] a creature (a bot too) held to kit/controls'
+			// plane as the players' bodies are (move.lua's W:hold after each
+			// step); a vehicle not
+			double plane = NAN;
+			if(d.creature){
+				auto pi = planes.find(d.scene);
+				if(pi == planes.end())
+					pi = planes.insert(std::make_pair(d.scene, jstr(controls_params(
+							d.scene), "plane") == "vertical" ? plane_depth(d.scene) :
+							NAN)).first;
+				plane = pi->second;
+			}
 			if(d.deck)
 				deck_snapshot(o, d, e, pos, r, h, reach);
 			else
-				snapshot(o, d.scene, d.state, e.id, pos, r, h, reach);
+				snapshot(o, d.scene, d.state, e.id, pos, r, h, reach, plane);
 			o += "}";
 			ss_ answer, why;
 			bool runaway = false;
@@ -23894,7 +23932,7 @@ struct Module: public interface::Module, public Interface
 						"polygon";
 			const double m = poly ? MAX_POLYGON_EXTENT + 8 : 40;
 			if(w[0] < g.x0 - m || w[0] > g.x0 + g.nx + m || w[2] < g.z0 - m ||
-					w[2] > g.z0 + g.nz + m)
+					w[2] > g.z0 + g.nz + m || under_parallax(e))
 				continue;
 			for(const Instance &in : e.comps){
 				const json::Value &d = m_types[in.type].decl.get("look");
@@ -24009,6 +24047,11 @@ struct Module: public interface::Module, public Interface
 				log_i(MODULE, "[KIT_CREATURES_8A] Entity %s stopped at (%.2f, %.2f, %.2f)%s",
 						cs(itos(e.id)), feet[0], feet[1], feet[2],
 						there ? ": arrived" : ", short of its goal");
+				// (its log too: where it stops, for its builders)
+				char at[96];
+				snprintf(at, sizeof at, "stopped at (%.2f, %.2f, %.2f)%s", feet[0],
+						feet[1], feet[2], there ? ": arrived" : ", short of its goal");
+				add_log(e.id, at);
 			}
 			m.walking = walking;
 			bool again = !m.pathed_us || m.gen != d.gen;
@@ -31472,10 +31515,14 @@ struct Module: public interface::Module, public Interface
 			// [KIT_AGENT_NEXT_1] 3a: the server's camera plays a body
 			// (agent_play())
 			{"play_join", "play_join", "Play the game yourself: the server's "
-				"camera (get_view's) takes a player body in your scene, a guest's "
-				"named \"<account>'s agent\", put as a joining player is. The "
-				"round must be Running (start). The first call may answer that the "
-				"camera is starting: call again. One agent plays at a time.",
+				"camera (get_view's) takes a player body in the scene you edit "
+				"(switch_scene's), a guest's named \"<account>'s agent\", on the "
+				"scene's spawner of players (kit/spawner players: true) as a "
+				"joining player there, else at the scene's spawn. Playing "
+				"already in another scene, the body moves to yours. The round "
+				"must be Running (start). The first call may answer that the "
+				"camera is starting or on its way: call again. One agent plays "
+				"at a time.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"play_input", "play_input", "Your body's input for a time, as a "
 				"player's client sends it (its keys predicted and all): keys held "
@@ -31517,7 +31564,10 @@ struct Module: public interface::Module, public Interface
 				"still on a default name (type and id); scenes with no way in "
 				"(not where players join, not listed, named by no parameter or "
 				"custom type); entities with no link from an output or to an "
-				"input that at least 3 of 4 of their type (4 or more) have.",
+				"input that at least 3 of 4 of their type (4 or more) have; in a "
+				"side view (kit/controls camera side), scenery wholly in front "
+				"of the plane by more than side_clip (lower z, the foreground), "
+				"never drawn.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			// [KIT_AGENT_FEEDBACK_1117] 11 (history())
 			{"get_history", "=history", "Who changed the game and when, the "
@@ -31584,7 +31634,12 @@ struct Module: public interface::Module, public Interface
 				"set at once if given (each checked as set_param checks it), "
 				"under parent if given. The answer names its new id. A type "
 				"with no_position takes a pos too and has none. A root type "
-				"(list_types: root) goes on the app root. parent \"root\": "
+				"(list_types: root) goes on the app root; on \"scene\" puts it "
+				"on your scene (its own copy). kit/environment goes on your "
+				"scene in a game of more than one scene (in a one-scene game "
+				"on the app root while that has none); on \"root\" (or parent "
+				"\"root\") puts it on the app root: every scene's sky but those "
+				"with their own. The answer says which. parent \"root\": "
 				"one with no_position on the app root too, every scene's: a "
 				"game-wide lobby (kit/lobby), its screens (a kit/ui_panel, then "
 				"a kit/ui_scene_list or buttons placed under it), each linking "
@@ -31597,7 +31652,9 @@ struct Module: public interface::Module, public Interface
 				"params": {"type": "object",
 					"description": "Parameter values by name"},
 				"parent": {"description":
-					"An entity's id to put it under (0 or the scene's own id: the scene), or \"root\": the app root"}},
+					"An entity's id to put it under (0 or the scene's own id: the scene), or \"root\": the app root"},
+				"on": {"type": "string", "enum": ["scene", "root"], "description":
+					"A root type's place: your scene's own copy, or the app root"}},
 				"required": ["type", "pos"]})J", ""},
 			{"set_param", "set", "Sets a parameter of an entity's component "
 				"to value, checked against its type's declaration. Or params: "
@@ -31679,7 +31736,9 @@ struct Module: public interface::Module, public Interface
 				"comp": {"type": "integer"}}, "required": ["id", "comp"]})J", ""},
 			{"set_parent", "parent", "Puts an entity (and what is under it) "
 				"under parent, a positioned entity of your scene (0: the scene), "
-				"where it is in the world kept; it then moves with its parent. "
+				"where it is in the world kept; it then moves with its parent "
+				"(under a kit/parallax: drawn by its follow and repeat as a "
+				"backdrop, never met). "
 				"\"root\": onto the app root, one with no position (a kit/lobby, "
 				"a kit/ui_panel with what is in it, a root type), every scene's "
 				"from then on, its links kept; one on the root goes into your "
@@ -31911,7 +31970,8 @@ struct Module: public interface::Module, public Interface
 				"(sandboxed): a table of on_add(e), on_state(e, key), "
 				"on_update(e, dt), on_remove(e); e.state, e.node, e:log(text); "
 				"a movement's draw(s, node) draws each player's body (node at "
-				"its feet, s its state; another's {pos, pose}); left out, the "
+				"its feet, s its state; another's {pos, pose}; scenery is "
+				"kit/parallax's, not a client part's); left out, the "
 				"type's client part stays as it is, \"\" takes it away. A few "
 				"lines changed: edit_type.",
 				R"J({"type": "object", "properties": {
@@ -31993,7 +32053,9 @@ struct Module: public interface::Module, public Interface
 				"from its start again), get_view (the server's camera follows), "
 				"get_state (its session says where you are) and playtest go "
 				"there; what is the game's (custom types, scenes, voxel types, "
-				"items, sounds) is refused there. publish puts what you changed "
+				"items, sounds, the World, the app root's environment) is "
+				"refused there; a scene's own kit/environment is the draft's "
+				"(place puts one there). publish puts what you changed "
 				"into the game's start; "
 				"leave_draft drops it. It ends on leave_draft or after 5 minutes "
 				"without a call of yours, never for want of a connection; 8 "
@@ -34742,15 +34804,24 @@ struct Module: public interface::Module, public Interface
 					"start: "+m_cam.failed;
 		const size_t cam = m_cam.peer;
 		if(op == "play_join"){
-			if(m_cam.play == account)
-				return "You play already: "+play_body().stringify();
+			// [KIT_SIDE_SCENERY] (5) Your body in another scene (or session)
+			// than the one you edit: it leaves, and joins yours as below
+			ss_ moved;
+			if(m_cam.play == account){
+				const json::Value b = play_body();
+				if(jstr(b, "scene") == p.scene && session_of_peer(cam) == sid)
+					return "You play already: "+b.stringify();
+				moved = jstr(b, "scene");
+				play_end("play_join into the scene "+p.scene);
+			}
 			ViewWait w;
 			w.session = sid;
 			w.scene = p.scene;
 			scene_spawn(p.scene, w.at[0], w.at[1], w.at[2]);
 			if(!camera_place(w))
-				return "The server's camera is on its way to your scene: call "
-						"play_join again in a second";
+				return (moved.empty() ? ss_() : "Your body left the scene "+
+						moved+". ")+"The server's camera is on its way to your "
+						"scene: call play_join again in a second";
 			double x = w.at[0], y = w.at[1], z = w.at[2], look = 0;
 			{
 				SessionScope sc(*this, sid);
@@ -34763,7 +34834,8 @@ struct Module: public interface::Module, public Interface
 			m_cam.used = now;
 			log_i(MODULE, "The server's camera plays for %s's agent", cs(account));
 			failed = false;
-			return "You play a body (a guest's, gone when you leave): "+
+			return (moved.empty() ? ss_() : "Your body left the scene "+moved+
+					". ")+"You play a body (a guest's, gone when you leave): "+
 					play_body().stringify()+". play_input moves it; play_leave ends "
 					"it, as do "+itos(PLAY_IDLE_US / 1000000)+" s unused";
 		}
@@ -35913,11 +35985,133 @@ struct Module: public interface::Module, public Interface
 		return out;
 	}
 
+	// [KIT_SIDE_SCENERY] (3) Whether an authored entity's look lies wholly in
+	// front of its scene's side camera's clip: kit/controls camera side, the
+	// camera at lower z than the plane (lower z the foreground), what is
+	// nearer than side_clip in front of the plane never drawn (controls.lua).
+	// front: the farthest z its look reaches; clip: the z the view begins at.
+	// simplified: a look's box (a polygon's points and depth, a size, a
+	// sphere's radius) turned with the entity; a look with its own rotation or
+	// an extent by a sphere round all of it, so such a one may go unwarned
+	// clips: the scenes' clips found so far (a scan's), NaN where not side
+	bool side_clipped(const Entity &e, double &front, double &clip,
+			std::map<ss_, double> *clips = nullptr)
+	{
+		auto num = [](const json::Value &v, double def){
+			return v.is_number() && std::isfinite(v.as_number()) ? v.as_number() : def;
+		};
+		// (scenery: not one with a movement, which goes where it steps)
+		ss_ scene;
+		if(!e.has_pos || !e.kind.empty() || !authored(e) || movement_on(e) ||
+				!scene_of(e, &scene))
+			return false;
+		auto ci = clips ? clips->find(scene) : std::map<ss_, double>::iterator();
+		if(clips && ci != clips->end()){
+			clip = ci->second;
+		} else {
+			const json::Value cp = controls_params(scene);
+			clip = jstr(cp, "camera") != "side" ? NAN : plane_depth(scene) -
+					std::min(num(cp.get("distance"), 6), num(cp.get("side_clip"), 0.55));
+			if(clips)
+				(*clips)[scene] = clip;
+		}
+		if(std::isnan(clip))
+			return false;
+		double w[3];
+		Turn q;
+		world_of(e, w, &q);
+		bool any = false;
+		front = -1e300;
+		for(const Instance &in : e.comps){
+			const json::Value &d = m_types[in.type].decl.get("look");
+			if(!d.is_object())
+				continue;
+			const json::Value look = look_of(in, d);
+			double c[3] = {0, 0, 0}, h[3] = {0.4, 0.4, 0.4};
+			const json::Value &pts = look.get("points"), &sz = look.get("size"),
+					&off = look.get("offset");
+			if(jstr(look, "shape") == "polygon" && pts.is_array() && pts.size()){
+				double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
+				for(unsigned i = 0; i < pts.size(); i++)
+					for(unsigned k = 0; k < 2; k++){
+						const double v = num(pts.at(i).at(k), 0);
+						lo[k] = std::min(lo[k], v);
+						hi[k] = std::max(hi[k], v);
+					}
+				for(int k = 0; k < 2; k++){
+					c[k] = (lo[k] + hi[k]) / 2;
+					h[k] = (hi[k] - lo[k]) / 2;
+				}
+				h[2] = num(look.get("depth"), 1) / 2;
+			} else if(sz.is_array()){
+				for(unsigned k = 0; k < 3; k++)
+					h[k] = std::fabs(num(sz.at(k), 1)) / 2;
+			} else if(sz.is_number()){
+				h[0] = h[1] = h[2] = std::fabs(num(sz, 0.4));
+			}
+			for(unsigned k = 0; k < 3 && off.is_array(); k++)
+				c[k] += num(off.at(k), 0);
+			const json::Value &rot = look.get("rotation");
+			const bool round = !look.get("extent").is_undefined() ||
+					!look.get("when").is_undefined() || (rot.is_array() &&
+					(num(rot.at(0u), 0) || num(rot.at(1u), 0) || num(rot.at(2u), 0)));
+			double z = w[2];
+			if(round){
+				z += std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]) +
+						std::sqrt(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]) +
+						(look.get("extent").is_undefined() ? 0 : 1e6);
+			} else {
+				q.apply(c);
+				z += c[2];
+				for(int k = 0; k < 3; k++){
+					double a[3] = {0, 0, 0};
+					a[k] = 1;
+					q.apply(a);
+					z += std::fabs(a[2]) * h[k];
+				}
+			}
+			front = std::max(front, z);
+			any = true;
+		}
+		return any && front < clip;
+	}
+
+	// [KIT_SIDE_SCENERY] (3) The entities a change left wholly in front of
+	// the side view's clip: a line for the editor's notification and the
+	// agent's answer ("": none)
+	ss_ side_clip_note(const sv_<std::pair<uint64_t, json::Value>> &change)
+	{
+		ss_ ids;
+		double front = 0, clip = 0;
+		size_t n = 0;
+		std::map<ss_, double> clips;
+		for(const auto &c : change){
+			auto it = m_entities.find(c.first);
+			double f, cl;
+			if(it == m_entities.end() || !side_clipped(it->second, f, cl, &clips))
+				continue;
+			ids += (n ? ", " : "")+itos(c.first);
+			if(!n++)
+				front = f, clip = cl;
+		}
+		if(!n)
+			return "";
+		auto z = [](double v){
+			return json::Value(std::round(v * 100) / 100).stringify();
+		};
+		// (a line the editor's notification shows whole at 1024 wide)
+		return (n == 1 ? "Entity "+ids+" is" : "Entities "+ids+" are")+
+				" wholly in front of the side view's clip (z "+z(clip)+(n == 1 ?
+				"; it reaches "+z(front) : ss_())+"), never drawn: lower z is the "
+				"foreground. Move "+(n == 1 ? "it" : "them")+" to z "+z(clip)+
+				" or more, or raise side_clip";
+	}
+
 	// [KIT_AGENT_FEEDBACK_1117] 12: get_goal_warnings' level checks after
 	// the goals' (publish asks about none): entities on a default name
 	// (place's "<type> <id>"), scenes with no way in, and per type the
 	// entities with no link out (in) where at least 3 of 4 of 4 or more of
-	// that type have one.
+	// that type have one; [KIT_SIDE_SCENERY] (3) scenery a side view clips.
 	// simplified: a way in is any parameter or custom type's source naming
 	// the scene, a listing or players joining there; whether that
 	// teleport is ever reached is not followed
@@ -35997,6 +36191,21 @@ struct Module: public interface::Module, public Interface
 		};
 		few("link out", outs);
 		few("link in", ins);
+		// [KIT_SIDE_SCENERY] (3) scenery a side view never draws
+		std::map<ss_, double> clips;
+		std::map<ss_, sv_<uint64_t>> clipped;
+		for(auto &x : m_entities){
+			double f, cl;
+			ss_ sn;
+			if(side_clipped(x.second, f, cl, &clips) && scene_of(x.second, &sn))
+				clipped[sn].push_back(x.first);
+		}
+		for(auto &c : clipped)
+			out.append("scene "+c.first+": "+itos(c.second.size())+" entities "
+					"wholly in front of the side view's clip (z "+json::Value(
+					std::round(clips[c.first] * 100) / 100).stringify()+": the "
+					"plane less kit/controls' side_clip), never drawn; lower z is "
+					"the foreground: "+ids(c.second));
 	}
 
 	// The guide: how a composition is built and run, then the palette's
@@ -37343,7 +37552,9 @@ struct Module: public interface::Module, public Interface
 			"root's last; a copy is on a scene when it is right under its "
 			"entity with no position): kit/controls, kit/environment and "
 			"kit/game_rules (scenes_from in get_state says whose each scene "
-			"has). Each scene "
+			"has). place puts them on the app root, on \"scene\" on your "
+			"scene; kit/environment goes on your scene in a game of more than "
+			"one scene (on \"root\": the app root's, every scene's sky). Each scene "
 			"has its own World (kit/terrain); a new scene has none (no ground) "
 			"unless new_scene's copy. Game-wide: kit/environment's lighting "
 			"(the root's alone), the voxel types, textures, prefabs and item "
@@ -37352,7 +37563,11 @@ struct Module: public interface::Module, public Interface
 			"camera first_person (the eye), chase (behind the player, distance "
 			"away), top_down (from height at angle and yaw; ortho: flat) or "
 			"side (across a plane looking along +z; ortho, side_clip, dead_zone, "
-			"look_ahead); fov (20...150), smoothing, offsets and roll; pointer "
+			"look_ahead: lower z, toward the camera, is the foreground, higher "
+			"the background; what lies wholly nearer than side_clip in front "
+			"of the plane is never drawn, as get_goal_warnings and the editor "
+			"say; backdrops: kit/parallax, below); fov (20...150), smoothing, "
+			"offsets and roll; pointer "
 			"auto, crosshair or cursor; plane vertical holds bodies at one z "
 			"(side-scrollers, with kit/polygon); the effects tint and "
 			"tint_amount, vignette, blur and glitch (0...1) colour the whole "
@@ -37364,6 +37579,24 @@ struct Module: public interface::Module, public Interface
 			"lobby or result) side, top_down and chase stay on the body, a click "
 			"cycling to the others; first_person is a free camera. "
 			"edit_view auto, 2d or 3d is the editor's first view.\n"
+			"\n## Side views: backdrops and parallax\n"
+			"A side camera gives far scenery no depth by itself (ortho none at "
+			"all). For a skyline, hills or clouds use kit/parallax, never a "
+			"movement's or a type's client code: place it, then the scenery "
+			"under it (place's parent, or set_parent; polygons, parts, nested "
+			"too). What is under it moves with the camera by 1 - follow of "
+			"its travel (follow 0: as far as the sky, 1: the world; follow_y up "
+			"and down, 1 by default: a skyline's foot stays on the horizon), "
+			"repeat (m, 0 none) copies it every repeat along x to fill the "
+			"view. Place it where it looks right with the camera at the "
+			"layer's x, behind the plane (higher z). Visual only: it is never "
+			"met. get_view draws it as play does; the editor draws it where "
+			"authored. A far skyline 128 wide, repeated: place kit/parallax at "
+			"[0, 0, z] (z: the plane's + 20) with params {\"follow\": 0.2, "
+			"\"repeat\": 128}, then kit/polygon at [0, 0, z] with parent its id "
+			"and params {\"points\": [[-64, 0], [-64, 10], [-44, 10], [-44, 18], "
+			"[-24, 18], [-24, 8], [0, 8], [0, 24], [16, 24], [16, 12], [40, 12], "
+			"[40, 16], [64, 16], [64, 0]], \"color\": \"#4a5a78\"}.\n"
 			"\n## kit/environment: sky, fog, light, weather\n"
 			"sky (the sky's and the far fog's colour), fog_start and fog_end "
 			"(cells), ambient (the ambient light's colour), time (hours) and "
@@ -37417,7 +37650,9 @@ struct Module: public interface::Module, public Interface
 			"kept). A grass-edged cliff: place kit/polygon with params "
 			"{\"points\": [[-20, -6], [20, -6], [20, 2], [-20, 2]], \"voxel\": "
 			"\"kit/grass\", \"edge_depth\": 0.25}; an uploaded texture through "
-			"put_texture's voxel. kit/effect: "
+			"put_texture's voxel. kit/parallax: a side view's backdrop layer "
+			"(follow, follow_y, repeat) for what is put under it, never met "
+			"(above). kit/effect: "
 			"particle bursts (count, shape, colors, speed, gravity, ttl, size) "
 			"and a short light without shadow, on a signal or a world event "
 			"(dig, place, hit, blast, respawn, pickup). Prefabs group parts "
@@ -39320,7 +39555,7 @@ struct Module: public interface::Module, public Interface
 						"world_region", "version",
 						"inventory", "root", "no_position", "inputs_types", "outputs_types",
 						"inputs_labels", "outputs_labels", "player", "ui", "about", "seat",
-						"movement", "world"})
+						"movement", "world", "environment", "parallax"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
 				if(addable(t))
@@ -39341,7 +39576,7 @@ struct Module: public interface::Module, public Interface
 							"version", "inventory",
 							"root", "no_position", "inputs_types", "outputs_types", "inputs_labels",
 							"outputs_labels", "player", "ui", "about", "seat", "movement",
-							"world"})
+							"world", "environment", "parallax"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
 					if(addable(t.first))
@@ -39931,14 +40166,19 @@ struct Module: public interface::Module, public Interface
 			return refuse(why);
 		}
 		if(in_draft())
-			for(const auto &c : change)
-				if(world_or_env(c.first, c.second)){
-					m_next_id = next0;
-					return refuse(active_session()->bench ? "editing a prefab: "
-							"the World and the environment are the game's" :
-							"in a draft: the World and the environment are the "
-							"default round's");
-				}
+			for(const auto &c : change){
+				const int k = world_or_env(c.first, c.second);
+				if(!k || (k == 3 && !active_session()->bench))
+					continue;
+				m_next_id = next0;
+				return refuse(active_session()->bench ? "editing a prefab: "
+						"the World and the environment are the game's" :
+						k == 1 ? "in a draft: the World is the default round's "
+						"(leave the draft to change it)" : "in a draft: the app "
+						"root's environment is the default round's; a scene's own "
+						"(a kit/environment placed on the scene: on \"scene\") "
+						"is the draft's");
+			}
 		two_way_returns(change, what);
 		// [KIT_SYMMETRY] a place's voxels in the authored slice (its sides:
 		// the slice and the map are convex), copied into the others after
@@ -40045,6 +40285,13 @@ struct Module: public interface::Module, public Interface
 		}
 		log_i(MODULE, "An edit by %s: %s", cs(p.name), cs(what));
 		m_edit_what = what;
+		// [KIT_SIDE_SCENERY] (3) what it left where the side view never draws:
+		// the builder's notification, the agent's answer
+		const ss_ clipped = side_clip_note(change);
+		if(!clipped.empty()){
+			log_i(MODULE, "%s: %s", cs(p.name), cs(clipped));
+			tell(peer, clipped);
+		}
 		// (commit() sent the state before the World changed: its surface,
 		// [KIT_NO_WORLD]'s none, the editor's tools go by)
 		if(world_check(p.name))
@@ -40082,24 +40329,31 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// [KIT_SESSIONS_1] Whether an entity changed is (or becomes) a World's
-	// or an environment's
-	bool world_or_env(uint64_t id, const json::Value &after)
+	// or an environment's: 0 neither, 1 a World's, 2 the app root's
+	// environment, 3 a scene's ([KIT_SIDE_SCENERY] (2): a draft may hold
+	// that one, its state being the session's as its entities are)
+	int world_or_env(uint64_t id, const json::Value &after)
 	{
+		int k = 0;
+		bool root = after.is_object() && json::jint(after, "parent", 0) == 1;
 		auto is = [&](const ss_ &t){
 			auto ti = m_types.find(t);
-			return t == "kit/environment" ||
-					(ti != m_types.end() && ti->second.world);
+			if(ti != m_types.end() && ti->second.world)
+				k = 1;
+			else if(!k && (t == "kit/environment" ||
+					(ti != m_types.end() && ti->second.environment)))
+				k = 2;
 		};
 		auto it = m_entities.find(id);
-		if(it != m_entities.end())
+		if(it != m_entities.end()){
+			root = root || it->second.parent == 1;
 			for(const Instance &in : it->second.comps)
-				if(is(in.type))
-					return true;
+				is(in.type);
+		}
 		const json::Value &cs = after.get("components");
 		for(unsigned i = 0; cs.is_array() && i < cs.size(); i++)
-			if(is(full_type(jstr(cs.at(i), "type"))))
-				return true;
-		return false;
+			is(full_type(jstr(cs.at(i), "type")));
+		return k == 2 && !root ? 3 : k;
 	}
 
 	// [KIT_SCENES] A two-way teleporter in a change, onto an entity: that
@@ -40730,11 +40984,23 @@ struct Module: public interface::Module, public Interface
 			// and a root type asked "on": "scene" (an environment of the
 			// scene's own)
 			// [KIT_ENVIRONMENT] an environment on the root, the scene's
-			// own once the root has one
+			// own once the root has one. [KIT_SIDE_SCENERY] (1) In a game
+			// of more than one scene the scene's own (placed while editing
+			// one scene, it darkened the others' sky), and in a draft (2):
+			// the root's is the default round's there; "on" or parent "root"
+			// the root's
+			const json::Value &pv = j.get("parent");
+			const bool ask_root = jstr(j, "on") == "root" || (pv.is_string() &&
+					pv.as_string() == "root") || (pv.is_number() &&
+					pv.as_number() == 1);
+			size_t scenes = 0;
+			for(auto &e : m_entities)
+				scenes += e.second.kind == "scene";
+			const bool env = m_types[type].environment;
 			const bool on_scene = m_types[type].world ||
 					(m_types[type].root && jstr(j, "on") == "scene") ||
-					(m_types[type].environment && jstr(j, "on") != "root" &&
-					env_at(1));
+					(env && !ask_root && (env_at(1) || scenes > 1 ||
+					(in_draft() && !active_session()->bench)));
 			const bool root = m_types[type].root;
 			// [KIT_NO_WORLD_TYPES] The scene's, or under that entity, no position
 			const bool no_pos = m_types[type].no_position;
@@ -40801,7 +41067,10 @@ struct Module: public interface::Module, public Interface
 					ss_(", no position") : " at "+pos.stringify())+
 					(under > 1 ? " under "+itos(under) :
 					ss_())+(ps.is_object() ? " with "+
-					comp.get("params").stringify() : ss_());
+					comp.get("params").stringify() : ss_())+
+					(!env ? ss_() : on_scene ? " (this scene's own environment; "
+					"the lighting stays the app root's)" : " (every scene's "
+					"environment but those with their own)");
 			return true;
 		}
 		if(op == "move" && !j.get("ids").is_undefined())

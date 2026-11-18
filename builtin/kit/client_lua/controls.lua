@@ -250,7 +250,10 @@ local function world(skip)
 	skip = skip or on_vehicle
 	for id, n in pairs(P.nodes) do
 		local show = type(n.show) == "table" and n.show or {}
-		if type(show.look) == "table" and not show.player and not skip(id, n) then
+		-- ([KIT_SIDE_SCENERY] (8) what is under a kit/parallax layer is never
+		-- met: kit.cpp's snapshot leaves it out too)
+		if type(show.look) == "table" and not show.player and not skip(id, n) and
+				not M.parallax_layer(id, n) then
 			local on = show.look.state and K.value(n, show.look.state) == true
 			local links = M.links_of(id, n)
 			local r = links and n.rest

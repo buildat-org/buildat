@@ -33,6 +33,9 @@
 #      delete_scene, saying why; outside it they work;
 #   6. delete_scene: refused with kitboss on moon, then done; the agent's
 #      own scene removed takes its edits to the first.
+#   [KIT_SIDE_SCENERY] (1) kit/environment in a game of two scenes: by
+#   place and the palette's Place the scene's own, on "root" and by Place on
+#   the app root the root's.
 #   util/kit_root_edit_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -239,6 +242,18 @@ if phase == "build":
     R1 = placed(call("place", {"type": "kit/counter", "pos": [0, 1, 0]}))
     call("rename", {"id": R1, "name": "the run"})
     call("place", {"type": "kit/scene_info", "pos": [0, 0, 0], "params": {"title": "Moon run"}})
+    # [KIT_SIDE_SCENERY] (1) kit/environment in a game of two scenes: the
+    # scene's own; on "root" the app root's
+    r = call("place", {"type": "kit/environment", "pos": [0, 0, 0]})
+    EV = placed(r)
+    assert "on the scene moon (this scene's own environment;" in r, r
+    assert EV in {e["id"] for e in state(scene="moon")["entities"]}, EV
+    r = call("place", {"type": "kit/environment", "pos": [0, 0, 0], "on": "root"})
+    ER = placed(r)
+    assert "on the app root (every scene's environment but those with their own)" in r, r
+    assert entity(ER).get("app_root") is True, entity(ER)
+    call("delete", {"id": EV})
+    call("delete", {"id": ER})
     call("switch_scene", {"name": main})
     assert not any(e.get("app_root") for e in state(scene=main)["entities"])
     # Onto the root: the lobby, the panel with its list under it
@@ -416,6 +431,20 @@ await "$CL" "$mc" 10 "kit editor: list Game-wide \\([0-9]+\\): .*\\b$EP, >$UT\\b
 m=$(mark "$SL")
 step 10 "kit editor: into the scene $EP\\b" "frames 5" 'click Button "Into this scene"'
 await "$SL" "$m" 10 "An edit by kitboss: put $EP under the scene $MAIN"
+# [KIT_SIDE_SCENERY] (1) kit/environment from the palette in a game of two
+# scenes: Place on this scene, Place on the app root on the root
+m=$(mark "$SL")
+cmd "frames 3" 'click Button "Place"' "frames 5" \
+	'click Button "palette filter clear"' "frames 2" 'click LineEdit "palette filter"' \
+	"frames 2" "text kit/environment" "frames 3"
+step 10 "the palette's menu of kit/environment" 'click Button "kit/environment"'
+cmd "frames 3" 'click Button "menu Place"'
+await "$SL" "$m" 10 "An edit by kitboss: placed kit/environment [0-9]+ on the scene $MAIN \\(this scene's own"
+m=$(mark "$SL")
+step 10 "the palette's menu of kit/environment" "frames 3" 'click Button "kit/environment"'
+cmd "frames 3" 'click Button "menu Place on the app root"'
+await "$SL" "$m" 10 "An edit by kitboss: placed kit/environment [0-9]+ on the app root \\(every scene's"
+echo "ok: the palette's kit/environment on the scene in a game of two, on the root by Place on the app root"
 m=$(mark "$SL")
 cmd "frames 3" 'click Button "Place"' "frames 5" \
 	'click Button "palette filter clear"' "frames 2" 'click LineEdit "palette filter"' \

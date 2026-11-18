@@ -22,12 +22,16 @@
 #      "target" into a counter so named in two scenes; try_input as nobody
 #      (the default: by "app", nothing reached), as kitboss (the world's
 #      target), as "me" (the body's scene's, moon) and refusals (5);
-#   4. play_input's press (8): a kit/ui_button by its label, a
+#   4. [KIT_SIDE_SCENERY] (5) play_join's body in the first scene, then
+#      moved to moon by play_join while editing moon;
+#      play_input's press (8): a kit/ui_button by its label, a
 #      kit/ui_scene_list's row by its title (its "picked"), an unknown one
 #      refused naming the screen's buttons;
 #   5. get_state's filters: scene, ids, type, state false (10);
 #   6. get_goal_warnings' level lines: default names, a scene with no way
-#      in, the timer with no link of four (12);
+#      in, the timer with no link of four (12); [KIT_SIDE_SCENERY] (3) parts
+#      wholly in front of a side view's clip, placed and moved there: in the
+#      answers and a line;
 #   7. get_history: the edits by who, limit, since (11);
 #   8. restore_checkpoint puts a heightmap's samples back (4z26): kitboss
 #      raises a sample after a checkpoint, the restore lowers it, the
@@ -166,8 +170,8 @@ def rpc(method, params=None, tk=tok):
     m = {"jsonrpc": "2.0", "id": n, "method": method}
     if params is not None:
         m["params"] = params
-    # (a token's 120 calls a minute: waited out)
-    for i in range(40):
+    # (a token's 120 calls a minute: waited out, up to the minute)
+    for i in range(65):
         s, b = post(m, tk)
         if s != 429:
             break
@@ -350,20 +354,30 @@ elif phase == "links":
 elif phase == "play":
     rpc("initialize", init)
     H, MT, WT, B, L = s["H"], s["MT"], s["WT"], s["B"], s["L"]
+    def join():
+        """play_join until in: its answers, its body"""
+        t0, said = time.time(), []
+        while True:
+            r = rpc("tools/call", {"name": "play_join", "arguments": {}})["result"]
+            text = r["content"][0]["text"]
+            said.append(text)
+            print("  play_join ->", text[:400])
+            if not r["isError"]:
+                break
+            assert "is starting" in text or "on its way" in text, text
+            assert time.time() - t0 < 150, "the camera not in in 150 s"
+            time.sleep(0.5)
+        return said, json.loads(re.search(r"\): (\{.*\})\. play_input", text).group(1))
+    # [KIT_SIDE_SCENERY] (5) the body in the scene edited: in the first,
+    # then moved to moon by play_join there (again there: as it is); the
+    # phase starts in the first
+    said, body = join()
+    assert body["scene"] == s["main"], body
     call("switch_scene", {"name": "moon"})
-    t0 = time.time()
-    while True:
-        r = rpc("tools/call", {"name": "play_join", "arguments": {}})["result"]
-        text = r["content"][0]["text"]
-        if not r["isError"]:
-            break
-        print("  play_join ->", text[:200])
-        assert "is starting" in text or "on its way" in text, text
-        assert time.time() - t0 < 150, "the camera not in in 150 s"
-        time.sleep(0.5)
-    print("  play_join ->", text[:400])
-    body = json.loads(re.search(r"\): (\{.*\})\. play_input", text).group(1))
+    said, body = join()
     assert body["scene"] == "moon", body
+    assert any(x.startswith("Your body left the scene %s. " % s["main"]) for x in said), said
+    assert refused("play_join").startswith("You play already: "), "play_join in its scene"
     # The screen's buttons (the list's rows filled within a second)
     def buttons():
         b = json.loads(re.search(r"Played [^:]*: (\{.*\})", call("play_input",
@@ -420,6 +434,29 @@ elif phase == "goals":
     assert any(l.startswith("scene attic: no way in") for l in w), w
     assert not any(l.startswith("scene moon") for l in w), w
     assert "kit/timer: 1 of 4 have no link out (the others do): %d" % T[3] in w, w
+    # [KIT_SIDE_SCENERY] (3) a side view's clipped scenery: the place's and
+    # the move's answers, then a level line
+    call("switch_scene", {"name": "attic"})
+    call("place", {"type": "kit/controls", "pos": [0, 0, 0], "on": "scene",
+        "params": {"camera": "side"}})
+    CLIP = "wholly in front of the side view's clip (z "
+    r = call("place", {"type": "kit/part", "pos": [0, 1, -5]})
+    P1 = placed(r)
+    assert ("Entity %d is " % P1) + CLIP in r and "; it reaches -4.5), never drawn" in r, r
+    r = call("place", {"type": "kit/part", "pos": [2, 1, 0]})
+    P2 = placed(r)
+    assert CLIP not in r, r
+    r = call("move", {"id": P2, "pos": [2, 1, -5]})
+    assert ("Entity %d is " % P2) + CLIP in r, r
+    w = json.loads(call("get_goal_warnings"))
+    for l in w:
+        print("   |", l)
+    assert any(l.startswith("scene attic: 2 entities " + CLIP) and
+        l.endswith(": %d, %d" % (P1, P2)) for l in w), w
+    call("move", {"id": P2, "pos": [2, 1, 0]})
+    w = json.loads(call("get_goal_warnings"))
+    assert any(l.startswith("scene attic: 1 entities " + CLIP) and
+        l.endswith(": %d" % P1) for l in w), w
 elif phase == "history":
     rpc("initialize", init)
     h = json.loads(call("get_history"))

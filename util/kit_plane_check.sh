@@ -45,9 +45,27 @@
 #      view: its face dirt (brown, textured), a grass band along its top;
 #      cut in two at x 0, the same pixels (no seam). A builder's voxel type
 #      (op voxel) worn; glow and glass with a texture drawn, no error.
+#  11. A third session: [KIT_SIDE_SCENERY] (4) an environment (sky
+#      #3070e0, cartoon), the side camera ortho looking 10 m left and 5 up
+#      of the body: the sky's colour over the frame, none of the dome's box
+#      (a cell's square) in its middle; (3) a part placed in the plane, no
+#      notification; moved wholly in front of the clip (z -4, the clip at
+#      1 - 3): the editor's notification, the part not drawn.
+#      [KIT_LEFTOVERS_1116] a kit/creature placed off the plane (z 4)
+#      stops in it (its log, kitboss selecting it), its senses off.
+#  12. A fourth session: [KIT_SIDE_SCENERY] (8) kit/parallax layers behind
+#      the plane over polygon 11, no clip notification: the body walks ~11 m
+#      on it (ortho), a polygon under follow 0.5 drawn moved half the
+#      camera's way, one under follow 0 kept on screen, one under repeat 8
+#      with a copy 8 over; a wall in the plane under a layer walked
+#      through. Perspective: the same offset from the layer's x, copies.
+#      The editor: one placed from the palette in the Front view, a polygon
+#      put under it by Switch parent, its inspector's note; what is under a
+#      layer drawn where authored in edit mode. (MCP and get_view:
+#      util/kit_get_view_check.sh.)
 # The screenshots (side, front, side_ortho, side_polygons, front_polygon,
 # side_wide, front_wide, front_far_end, grass_one, grass_two,
-# grass_materials, touch_front)
+# grass_materials, touch_front, side_sky, par_front, par_side)
 # are kept with KEEP_TMP=1; look at them.
 #   util/kit_plane_check.sh
 set -u
@@ -440,6 +458,155 @@ BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_CREATE=1 \
 BUILDAT_TEST_KIT_UI_MODE=2 run_client 60 "$t/touch.log" timeout 120 bin/buildat \
 	-C "$t/client_cache" -D "$t/cu" -s localhost:$SERVER_PORT -w 1024x700 -l 3 \
 	-c @"$t/touch.cmds" || fail "the touch client failed ($t/touch.log, $t/srv.log)"
+# 9. The next session's entities after the last placed
+id0=$(grep -aoP 'An edit by kitboss: placed \S+ \K[0-9]+' "$t/srv.log" | sort -n | tail -1)
+env=$((id0 + 1)) part=$((id0 + 2)) cre=$((id0 + 4))
+{
+	cat <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+event kit_edit {"op": "mode", "on": true}
+wait_log_any 10000 kit editor: edit mode on
+EOF
+	edit '{"op": "place", "type": "kit/environment", "pos": [0, 1, 0]}'
+	set_p $env lighting '"cartoon"'
+	set_p $env sky '"#3070e0"'
+	set_p 3 ortho true
+	set_p 3 offset_x -10
+	set_p 3 offset_y 5
+	edit '{"op": "place", "type": "kit/part", "pos": [-12, 6, 1]}'
+	echo "wait_log_absent 1000 wholly in front"
+	edit "{\"op\": \"move\", \"id\": $part, \"pos\": [-12, 6, -4]}"
+	cat <<EOF
+wait_log_any 10000 kit: warning: Entity $part is wholly in front of the side view's clip (z -2;
+keypress F6
+wait_log 10000 kit editor: edit mode off
+frames 30
+screenshot $t/side_sky.png
+keypress F6
+wait_log 10000 kit editor: state:
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended
+EOF
+	# (its senses off from its start: it wanders, chasing nobody in the plane)
+	edit '{"op": "place", "prefab": "kit/creature", "pos": [-6, 1, 4]}'
+	edit "{\"op\": \"set\", \"id\": $cre, \"comp\": 3, \"param\": \"enabled\", \"value\": false}"
+	cat <<EOF
+event kit_edit {"op": "play"}
+wait_log 10000 kit editor: the server is Running
+event kit_select $cre
+wait_log 30000 stopped at (
+quit
+EOF
+} > "$t/side.cmds"
+run_client 60 "$t/side.log" timeout 120 bin/buildat -C "$t/client_cache" -D "$t/cu" \
+	-s localhost:$SERVER_PORT -w 1024x700 -l 3 -c @"$t/side.cmds" ||
+	fail "the side client failed ($t/side.log, $t/srv.log)"
+# 12. kit/parallax: layers over polygon 11 by the origin (x -20; x -100's sections not
+# loaded in time), behind the
+# plane: at follow 0.5 (L5) a polygon (C5) and a wall in the plane across the
+# walk (WL); at follow 0 (L0) C0; at follow 0.2, repeat 8 (LR) CR. One
+# placed from the palette in the Front view (LP), a polygon (CP) put under
+# it by Switch parent
+id0=$(grep -aoP 'An edit by kitboss: placed (\S+ \K[0-9]+|prefab \S+ as [0-9]+\.\.\.\K[0-9]+)' "$t/srv.log" | sort -n | tail -1)
+L5=$((id0 + 1)) C5=$((id0 + 2)) WL=$((id0 + 3)) L0=$((id0 + 4)) C0=$((id0 + 5))
+LR=$((id0 + 6)) CR=$((id0 + 7)) CP=$((id0 + 8)) LP=$((id0 + 9))
+# (the undo stack stops at 50: each place waited for by the count)
+ents=$(grep -aoP 'kit editor: state: \K[0-9]+' "$t/side.log" | tail -1)
+pl() # <op json>: a place and the count after it
+{
+	ents=$((ents + 1))
+	printf 'event kit_edit %s\nwait_log 10000 kit editor: state: %d entities\n' "$1" "$ents"
+}
+{
+	cat <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+event kit_edit {"op": "mode", "on": true}
+wait_log_any 10000 kit editor: edit mode on
+EOF
+	pl '{"op": "place", "type": "kit/parallax", "pos": [-20, 13, 6]}'
+	pl "{\"op\": \"place\", \"type\": \"kit/polygon\", \"pos\": [-20, 16, 6], \"parent\": $L5}"
+	pl "{\"op\": \"place\", \"type\": \"kit/polygon\", \"pos\": [-16, 15.5, 1], \"parent\": $L5, \"params\": {\"points\": [[-0.5, -1.5], [0.5, -1.5], [0.5, 1.5], [-0.5, 1.5]], \"depth\": 2}}"
+	pl '{"op": "place", "type": "kit/parallax", "pos": [-20, 13, 7], "params": {"follow": 0}}'
+	pl "{\"op\": \"place\", \"type\": \"kit/polygon\", \"pos\": [-20, 18, 7], \"parent\": $L0}"
+	pl '{"op": "place", "type": "kit/parallax", "pos": [-20, 13, 8], "params": {"follow": 0.2, "repeat": 8}}'
+	pl "{\"op\": \"place\", \"type\": \"kit/polygon\", \"pos\": [-20, 20, 8], \"parent\": $LR}"
+	# (behind the plane: never in front of the side view's clip)
+	echo "wait_log_absent 1000 wholly in front"
+	pl '{"op": "place", "type": "kit/polygon", "pos": [-24, 16, 6]}'
+	cat <<EOF
+event kit_edit {"op": "walk_here", "pos": [-20, 15, 1]}
+wait_log 10000 the server put the player at (-20
+keypress F6
+wait_log 10000 kit editor: edit mode off
+frames 30
+event kit_parallax $C5 $C0 $CR $WL
+event kit_body
+keydown D
+delay 900
+delay 900
+keyup D
+frames 30
+event kit_parallax $C5 $C0 $CR $WL
+event kit_body
+screenshot $t/par_side.png
+keypress F6
+wait_log 10000 kit editor: state:
+wait_log_any 5000 kit: entity $C5 drawn where authored (edit mode)
+event kit_parallax $C5
+keypress F1
+wait_log 5000 kit editor: the view is 2D (front)
+EOF
+	pal_find kit/parallax
+	ents=$((ents + 1))
+	cat <<EOF
+click Button "kit/parallax"
+wait_log 5000 kit editor: placing
+mouse_pos 600 300
+frames 3
+mouse_click left
+wait_log 5000 kit editor: placed kit/parallax
+wait_log 10000 kit editor: state: $ents entities
+mouse_click right
+wait_log 5000 kit editor: placing nothing
+click Button "Entities"
+frames 3
+click Button "Positioned (*"
+frames 3
+event kit_select $CP
+wait_log_any 5000 kit editor: selected $CP (
+frames 3
+click Button "Switch parent"
+wait_log 5000 kit editor: switch parent of $CP: armed
+frames 3
+EOF
+	# (LP's row at the list's end, below the window: the wheel down first)
+	printf 'mouse_pos 143 400\n'
+	for _ in $(seq 20); do printf 'mouse_wheel -1\n'; done
+	cat <<EOF
+frames 5
+click Button "select $LP"
+wait_log 5000 kit editor: switch parent of $CP to $LP
+wait_log_any 10000 kit editor: $CP: Under parallax layer
+frames 5
+screenshot $t/par_front.png
+event kit_parallax $CP
+event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "ortho", "value": false}
+wait_log 10000 kit: controls: camera side
+keypress F6
+wait_log 10000 kit editor: edit mode off
+wait_log_any 10000 kit: entity $CP under parallax layer $LP
+frames 10
+event kit_parallax $C5 $CR
+quit
+EOF
+} > "$t/par.cmds"
+run_client 60 "$t/par.log" timeout 120 bin/buildat -C "$t/client_cache" -D "$t/cu" \
+	-s localhost:$SERVER_PORT -w 1024x700 -l 3 -c @"$t/par.cmds" ||
+	fail "the parallax client failed ($t/par.log, $t/srv.log)"
 kill -INT "$SERVER_PID" 2>/dev/null
 wait "$SERVER_PID" 2>/dev/null
 c=$t/boss.log s=$t/srv.log
@@ -572,5 +739,80 @@ v=$(grep -aoP 'kit editor: the view is \K.*' "$t/touch.log" | tr '\n' ',')
 	grep -aq "remembered for .*: edit, 3d" "$t/touch.log" ||
 	fail "the touch session's views ($v): not 2D (front) last over a remembered 3D ($t/touch.log)"
 echo "ok: the touch session's edit mode came up in 2D, the Front view (kit/controls' edit_view), over a remembered 3D: $v"
-echo "PASS: kit/controls' vertical plane: kit/walker held to it on both sides, the side camera and its pointer, the editor's Front view placing at its depth, the movement list checked; kit/polygon's slope and overhang met, others off the plane not, one drawn and edited in the Front view; the 2D queries (util/kit_plane_check.lua)"
+# [KIT_SIDE_SCENERY] (4) The ortho side view under an environment: its sky
+# colour over most of the frame above the HUD (the 512-wide polygon of 9
+# crosses its top), none of the dome's box (a cell's square of clouds) in
+# its middle; the part moved in front of the clip not drawn there either
+python3 -I - "$t/side_sky.png" <<'PY' || fail "the ortho side view's sky ($t/side_sky.png)"
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB")
+w, h = im.size
+px = im.load()
+def sky(x, y):
+    return all(abs(a - b) <= 40 for a, b in zip(px[x, y], (0x30, 0x70, 0xe0)))
+frame = [sky(x, y) for x in range(0, w, 4) for y in range(0, h - 100, 4)]
+mid = [sky(x, y) for x in range(w // 2 - 40, w // 2 + 40) for y in range(h // 2 - 40, h // 2 + 40)]
+f, m = sum(frame) / len(frame), sum(mid) / len(mid)
+print("  the sky's colour over %.0f%% of the frame, %.0f%% of its middle" % (f * 100, m * 100))
+sys.exit(0 if f > 0.7 and m > 0.99 else 1)
+PY
+echo "ok: the ortho side view's sky is the fog's colour, no dome's box in the middle"
+# (3) The editor's notification: none in the plane, one moved in front of it
+grep -aq "kit: warning: Entity $part is wholly in front of the side view's clip (z -2; it reaches -3.5), never drawn" "$t/side.log" ||
+	fail "no notification of part $part in front of the clip ($t/side.log)"
+echo "ok: the editor told of part $part moved wholly in front of the side view's clip"
+# [KIT_LEFTOVERS_1116] The creature placed at z 4 stopped in the plane (z 1)
+# (unheld, it wanders to within 8 m of z 4)
+stops=$(grep -aoP "kit editor: log of $cre: .*stopped at \\(\\K[-0-9.]+, [-0-9.]+, [-0-9.]+" "$t/side.log")
+[ -n "$stops" ] || fail "no stop of creature $cre ($t/side.log)"
+echo "$stops" | awk -F', ' '$3 != "1.00" { exit 1 }' ||
+	fail "creature $cre (placed at -6, 1, 4) not stopped in the plane (z 1): $(echo $stops) ($t/srv.log)"
+echo "ok: a creature placed at z 4 held to the plane, stopped at $(echo "$stops" | tail -1)"
+# 12. kit/parallax. par <id> <k>: the kth "kit: parallax" line of an entity
+# as "drawn-x authored-x copies camera-x [copy x...]" (camera "none": edit
+# mode)
+p=$t/par.log
+par()
+{
+	grep -aoP "kit: parallax: entity $1 drawn at \\K.*" "$p" | sed -n "$2p" | sed -E \
+		's/^([-0-9.]+),[-0-9.]+,[-0-9.]+, authored ([-0-9.]+),[-0-9.]+,[-0-9.]+, ([0-9]+) copies( at x ([-0-9. ]+))?, the camera ([-0-9.]+|none).*/\1 \2 \3 \6 \5/'
+}
+near() { awk -v a="$1" -v b="$2" -v e="$3" 'BEGIN { exit !((a - b) ^ 2 <= e * e) }'; }
+grep -aq "kit editor: placed kit/parallax at" "$p" || fail "kit/parallax not placed from the palette ($p)"
+grep -aq "kit editor: $CP: Under parallax layer .*Shown here where authored" "$p" ||
+	fail "no inspector note on $CP under $LP ($p)"
+for e in "$C5 3" "$CP 1"; do
+	read -r d a k cx rest <<< "$(par $e)"
+	[ "$cx" = none ] && [ "$d" = "$a" ] || fail "entity ${e% *} not drawn where authored in edit mode: $(par $e)"
+done
+echo "ok: kit/parallax placed from the palette in the Front view, polygon $CP put under it by Switch parent; the editor draws what is under a layer where authored, its inspector says so"
+read -r bx1 by1 bz1 acks1 corr1 rest <<< "$(fields "$(grep -aoP 'kit: body at \K.*' "$p" | sed -n 1p)")"
+read -r bx2 by2 bz2 acks2 corr2 rest <<< "$(fields "$(grep -aoP 'kit: body at \K.*' "$p" | sed -n 2p)")"
+read -r d1 a1 k1 c1 rest <<< "$(par $C5 1)"
+read -r d2 a2 k2 c2 rest <<< "$(par $C5 2)"
+awk -v a="$bx1" -v b="$bx2" 'BEGIN { exit !(b - a > 5) }' || fail "the body did not walk: $bx1 -> $bx2 ($p)"
+near "$(awk -v a="$c1" -v b="$c2" -v x="$bx1" -v y="$bx2" 'BEGIN { print (b - a) - (y - x) }')" 0 0.3 ||
+	fail "the camera did not follow the body: $c1 -> $c2, $bx1 -> $bx2"
+near "$(awk -v a="$d1" -v b="$d2" -v x="$c1" -v y="$c2" 'BEGIN { print (b - a) - 0.5 * (y - x) }')" 0 0.02 ||
+	fail "follow 0.5: $C5 drawn $d1 -> $d2, not half the camera's $c1 -> $c2"
+read -r e1 f1 k c3 rest <<< "$(par $C0 1)"
+read -r e2 f2 k c4 rest <<< "$(par $C0 2)"
+near "$(awk -v a="$e1" -v b="$e2" -v x="$c3" -v y="$c4" 'BEGIN { print (b - y) - (a - x) }')" 0 0.02 ||
+	fail "follow 0: $C0 drawn $e1 -> $e2 moved on screen (the camera $c3 -> $c4)"
+cops() # <par line>: its first copy one period (8) from what is drawn
+{
+	set -- $1
+	[ "${3:-0}" -ge 1 ] && near "$5" "$(awk -v d="$1" 'BEGIN { print d + 8 }')" 0.02
+}
+cops "$(par $CR 2)" || fail "repeat 8: no copy one period over: $(par $CR 2)"
+[ "$bz2" = 1.00 ] && awk -v x="$bx2" 'BEGIN { exit !(x > -15) }' && [ $((corr2 - corr1)) -le 2 ] ||
+	fail "the body met the wall $WL under the layer at x -16: $bx1 -> $bx2, $((corr2 - corr1)) corrections"
+echo "ok: ortho: the body walked $bx1 -> $bx2 through wall $WL (under a layer, $((corr2 - corr1)) corrections); follow 0.5 drawn $d1 -> $d2 for the camera's $c1 -> $c2; follow 0 kept its place on screen; repeat 8: $(par $CR 2)"
+read -r d a k c rest <<< "$(par $C5 4)"
+near "$(awk -v d="$d" -v a="$a" -v c="$c" 'BEGIN { print (d - a) - 0.5 * (c + 20) }')" 0 0.02 ||
+	fail "perspective: $C5 not half the camera's way from the layer (x -20): $(par $C5 4)"
+cops "$(par $CR 3)" || fail "perspective, repeat 8: no copy one period over: $(par $CR 3)"
+echo "ok: perspective: follow 0.5 at $d (authored $a, the camera $c), repeat 8: $(par $CR 3)"
+echo "PASS: kit/controls' vertical plane: kit/walker held to it on both sides, the side camera and its pointer, the editor's Front view placing at its depth, the movement list checked; kit/polygon's slope and overhang met, others off the plane not, one drawn and edited in the Front view; the 2D queries (util/kit_plane_check.lua); the ortho side view's sky, clipped scenery told, a creature held to the plane; kit/parallax's follow, repeat and never met, the editor's where authored"
 # vim: set noet ts=4 sw=4:
