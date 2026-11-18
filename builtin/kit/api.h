@@ -565,6 +565,36 @@ namespace interface
 //   Client parts: <name>.client.lua beside a type, sent to every client at
 //   join and run there as the client's own Lua is (client_lua/module.lua
 //   says what it gets).
+//   [KIT_CLIENT_REACT] (3) **What a client part reaches**: its handlers'
+//   `e` (e.id, e.node, e.state, e.look, e.hinge, e.body, e.swing, e.mine,
+//   e.you, e:shown(key), e:predict(key, v, s), e:near(d), e:log(text): this
+//   client's log only); `local kit = require("buildat/module/kit")`, the
+//   client's Kit (module.lua's and controls.lua's heads list it: kit.pointed,
+//   kit.use, kit.body_state() this client's predicted body, kit.body_pos(),
+//   kit.seated()...); (2) kit.shared, one plain table per client every
+//   client part of every entity shares (local, nothing sent; a part's
+//   reload, a scene switch, Play and Stop keep it, the connection's end
+//   drops it; keys by convention the type's name; simplified: a part
+//   clears its own keys in on_remove); the client sandbox's
+//   require("buildat/extension/urho3d") with the Urho3D classes its
+//   whitelist allows (client/core/urho3d/safe_classes.lua: e.node's
+//   children and components, Vector3, materials...) and
+//   require("buildat/extension/network") (write_json, parse_json). Refused:
+//   node:GetScene() (a scene-wide handle reaches Kit's own nodes on every
+//   visitor's client; the whitelist has it for a Viewport only), a global
+//   set in a handler (a part's own state goes in locals of its chunk, on
+//   e, or in kit.shared), the server's c: (state reaches a client part
+//   through `shared` and per_player state). simplified: the scene is
+//   still reachable (a Node's `scene` property, replicate's main_scene:
+//   the sandbox guards the player's machine, not Kit's nodes from a
+//   builder's part); the guide asks a part to change only what it made
+//   under e.node, closing those the upgrade. A handler that errs is
+//   switched off for that part on that entity on that client, and (4) its
+//   first failure there goes to the server ("kit:part_failed" {id, type,
+//   handler, error}; 10 a minute a client, the error cut at 300 bytes):
+//   the entity's log (get_log, a builder's editor Log), "the client part
+//   of <type>: <handler> failed on <player>'s client: <error>" (the server's
+//   camera's, not yet playing a body: "on the server's camera").
 //   [KIT_GENERATORS] **Generators**: a type with on_build(c) builds its
 //   own children from c.params, in the editor: as it is placed (not a
 //   copy that has its own: a duplicate, a prefab's, a paste) and as an
