@@ -566,14 +566,15 @@ local function log_body()
 			"corrections, %d pending, %d jumps, %d arrivals", p[1], p[2], p[3],
 			C.acks, C.corrections, #C.pending, tonumber(C.s and C.s.jumps) or 0,
 			tonumber(C.s and C.s.arrived) or 0))
-	-- [KIT_SAME_STATE] the body packets whose steps were taken again
-	log:info(string.format("kit: body replayed %d of %d acks", C.replays or 0, C.acks))
 	-- [KIT_WALKER_FRAME] To the tenth of a millimetre, for measuring a deck
+	-- (kit_free_prefab_check reads it on the line after the one above)
 	log:info(string.format("kit: feet at %.4f,%.4f,%.4f, frame %s", p[1], p[2],
 			p[3], tostring(C.s and C.s.frame or "none")))
 	-- ([KIT_TOP_DOWN] (2) what the step says it stands on: a floor polygon's)
 	log:info(string.format("kit: body on %s, friction %s",
 			tostring(C.s and C.s.surface or "none"), tostring(C.s and C.s.friction)))
+	-- [KIT_SAME_STATE] the body packets whose steps were taken again
+	log:info(string.format("kit: body replayed %d of %d acks", C.replays or 0, C.acks))
 	-- [KIT_SIDE_LEAD] the side camera's middle and its lead
 	if C.side_at and C.side_lead then
 		log:info(string.format("kit: side camera at %.2f,%.2f, lead %.2f,%.2f",
