@@ -104,6 +104,13 @@ output is part of the engine's interface. A change to it is a new block,
 or a new `version` argument with the old code kept, never an edit;
 src/lua_bindings/synth.cpp's self-check holds the hashes.
 
+jam1
+----
+jam's song format and its samples ([MUSIC_SYNTH]): a jam1 song renders the
+same samples natively, on the web and in every release (its own tables
+and seeded noise, -ffp-contract=off). A change to what a song sounds like
+is jam2 beside it, never an edit; util/jam_check.sh holds the hashes.
+
 Apps
 ----
 Every module of an app says the engine API it is written against in its

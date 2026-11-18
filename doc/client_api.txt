@@ -1473,6 +1473,30 @@ blip.gen, blip.mix
   mixer: plain Lua that an app may copy into its client_lua instead
   (the designer's "Save the files"), and so not follow blip's versions.
 
+jam
+---
+Music from text ([MUSIC_SYNTH]): a song in the jam1 format, synthesised as
+it plays on the audio thread (src/impl/jam.cpp, the server's too: it
+checks songs and measures them). No samples, no files. The format's
+reference is Kit's get_guide topic "music" (builtin/kit/kit.cpp's
+agent_music()); jam1 is frozen: a song sounds the same in every later
+jam, natively and on the web (util/jam_check.sh holds the hashes).
+jam.song(text [, tempo]) -> song, or nil and "line N: why"
+- song:info() -> {title, tempo, bar (s), loop = {from, to} (s), events,
+  tracks, moods}; song:analyze([seconds [, mood [, track]]]) -> JSON:
+  loudness (LUFS), peak, bands, each track's, the loop's join, the cost.
+jam.play(song or text [, opts]) -> player, or nil and why
+- opts {at, mood, gain, type, node}: from at seconds on the song's
+  timeline (play order, then its loop), as sound type type ("Music": the
+  client's music volume), on node (jam's own scene otherwise).
+- player:mood(name [, now]): from the next bar, faded over a beat ("all"
+  every track); false: no such mood. player:seek(seconds),
+  player:position() -> seconds, bar, the sample a pending mood lands on;
+  player:stop(), player:playing().
+- Web: SDL's audio callback runs on the browser's main thread, so a long
+  frame there starves it; Kit's client seeks back when it is 0.5 s off.
+jam.songs: example songs' texts by name (scrap_heat, yard_vamp)
+
 weave
 -----
 Seamless pixel-art textures (16, 32 or 64 px) made of parameters, no pen

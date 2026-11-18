@@ -454,7 +454,12 @@ set(BUILDAT_CORE_SRCS
 	src/impl/game_clock.cpp
 	src/impl/thread.cpp
 	src/impl/magic_event_handler.cpp
+	src/impl/jam.cpp
 )
+# [MUSIC_SYNTH] jam renders the same samples on every platform: no fused
+# multiply-add where the source has a multiply and an add
+set_source_files_properties(src/impl/jam.cpp PROPERTIES
+		COMPILE_OPTIONS "-ffp-contract=off")
 if(WIN32)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/windows/file_watch.cpp)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/windows/process.cpp)
@@ -597,6 +602,7 @@ if(BUILD_CLIENT)
 		src/lua_bindings/compress.cpp
 		src/lua_bindings/replicate.cpp
 		src/lua_bindings/synth.cpp
+		src/lua_bindings/jam.cpp
 		src/lua_bindings/wasm.cpp
 		src/wasm/engine.cpp
 		# [WASM_MAIN_WEB_PATHS] a serverless app's .wasm (app::serverless_wasms)

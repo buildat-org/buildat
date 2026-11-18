@@ -2615,6 +2615,10 @@ buildat.safe.write_shorts             = __buildat_write_shorts
 -- [SYNTH_BLOCKS]: synth.buffer(n), a buffer of samples in C++ and the
 -- blocks that write it (src/lua_bindings/synth.cpp, doc/client_api.txt)
 buildat.safe.synth = {buffer = __buildat_synth_buffer}
+-- [MUSIC_SYNTH]: jam.song(text[, tempo]), a song in the jam1 format to play
+-- from the audio thread (src/lua_bindings/jam.cpp, doc/client_api.txt);
+-- apps reach it through extensions/jam
+buildat.safe.jam = {song = __buildat_jam_song}
 -- add_resource_dir(path) and compose_image(args), in the sandbox as they
 -- are (decided 2026-09-13). What they give sandboxed code is "write files
 -- under the cache and make them loadable", which a server can already do
