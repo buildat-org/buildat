@@ -27,6 +27,12 @@ local TEXTURES = {square = "kit/particle_square.png",
 
 local now_s = function() return buildat.get_time_us() / 1e6 end
 local live, bursts, lights = 0, {}, {}
+-- [RACER_FEEL] (3) A client part's bursts (kit.effect below): at most
+-- PART_BURSTS of MAX_BURSTS live, PART_RATE a second (PART_RATE / 4 at once);
+-- past them dropped and counted
+local PART_BURSTS, PART_RATE = 64, 240
+local part_bursts, part_tokens, part_at, part_made, part_dropped = 0,
+		PART_RATE / 4, 0, 0, 0
 
 -- One material a texture
 local materials = {}
@@ -168,7 +174,7 @@ local function set_floor(emitter, x, y, z)
 	end
 end
 
-local function burst(d, at)
+local function burst(d, at, part)
 	if not O.scene or (tonumber(d.count) or 0) <= 0 then
 		return 0
 	end
@@ -192,7 +198,8 @@ local function burst(d, at)
 	local dir = d.dir or {0, 1, 0}
 	for _, k in ipairs(kinds) do
 		local n = math.min(math.ceil(d.count / #kinds), MAX_LIVE - live)
-		local e = n > 0 and #bursts < MAX_BURSTS and effect_of(d, k[1], k[2])
+		local e = n > 0 and #bursts < MAX_BURSTS and (not part or
+				part_bursts < PART_BURSTS) and effect_of(d, k[1], k[2])
 		if e then
 			local node = O.scene:CreateChild("kit_effect")
 			node.position = magic.Vector3(at[1], at[2], at[3])
@@ -204,7 +211,9 @@ local function burst(d, at)
 				set_floor(em, at[1], at[2], at[3])
 			end
 			bursts[#bursts + 1] = {node = node, emitter = em, n = n, frames = 0,
-				stop = math.ceil(n / IN_FRAME) + 1, till = now_s() + d.ttl_max + 0.1}
+				stop = math.ceil(n / IN_FRAME) + 1, till = now_s() + d.ttl_max + 0.1,
+				part = part}
+			part_bursts = part_bursts + (part and 1 or 0)
 			live = live + n
 			made = made + n
 		end
@@ -251,6 +260,186 @@ buildat.sub_packet("kit:effect", function(data)
 	log:verbose(string.format("kit: effect %d of %d %s at (%.1f,%.1f,%.1f), " ..
 			"%d live%s", made, tonumber(d.count) or 0, tostring(d.shape), at[1], at[2],
 			at[3], live, d.light_color and ", a light" or ""))
+end)
+
+-- [RACER_FEEL] (3) kit.effect{...}: a burst of particles from a client part
+-- (a handler or a movement's draw), drawn this frame on this client alone:
+-- c:effect's particle fields (api.h; light, flash and arc not), clamped as
+-- kit.cpp's effect_fx clamps them, at {x, y, z} (needed). Returns how many
+-- particles it made (0: dropped). Its description is cached as c:effect's:
+-- what varies call to call goes in at, dir and count
+local function vec3(v, lim)
+	if type(v) ~= "table" then
+		return nil
+	end
+	local o = {}
+	for i = 1, 3 do
+		local n = tonumber(v[i])
+		if not n or n ~= n or math.abs(n) > lim then
+			return nil
+		end
+		o[i] = n
+	end
+	return o
+end
+function M.effect(x)
+	local at = type(x) == "table" and vec3(x.at, 1e7)
+	if not at then
+		return 0
+	end
+	local t = now_s()
+	part_tokens = math.min(PART_RATE / 4, part_tokens + (t - part_at) * PART_RATE)
+	part_at = t
+	if part_tokens < 1 or part_bursts >= PART_BURSTS then
+		part_dropped = part_dropped + 1
+		return 0
+	end
+	part_tokens = part_tokens - 1
+	local function num(k, def, lo, hi)
+		local v = tonumber(x[k])
+		if v == nil or v ~= v or math.abs(v) == math.huge then
+			return def
+		end
+		return math.max(lo, math.min(hi, v))
+	end
+	local d = {count = math.floor(num("count", 0, 0, 256)), shape = x.shape,
+		colors = {}, voxels = {}}
+	if d.shape ~= "round" and d.shape ~= "ring" and d.shape ~= "voxel" then
+		d.shape = "square"
+	end
+	for _, k in ipairs({"colors", "voxels"}) do
+		for i, c in ipairs(type(x[k]) == "table" and x[k] or {}) do
+			if i <= 4 and type(c) == "string" and (k == "voxels" or
+					c:match("^#%x%x%x%x%x%x$") or c:match("^#%x%x%x%x%x%x%x%x$")) then
+				d[k][#d[k] + 1] = c
+			end
+		end
+	end
+	d.dir = vec3(x.dir, 1e6) or {0, 1, 0}
+	local l = math.sqrt(d.dir[1] ^ 2 + d.dir[2] ^ 2 + d.dir[3] ^ 2)
+	d.dir = l > 1e-6 and {d.dir[1] / l, d.dir[2] / l, d.dir[3] / l} or {0, 1, 0}
+	d.spread = num("spread", 180, 0, 180)
+	d.speed_min = num("speed_min", 1, 0, 60)
+	d.speed_max = num("speed_max", d.speed_min, d.speed_min, 60)
+	d.gravity = num("gravity", 0, -50, 50)
+	d.drag = num("drag", 0, 0, 20)
+	d.ttl_min = num("ttl_min", 1, 0.05, 10)
+	d.ttl_max = num("ttl_max", d.ttl_min, d.ttl_min, 10)
+	d.size_min = num("size_min", 0.1, 0.01, 8)
+	d.size_max = num("size_max", d.size_min, d.size_min, 8)
+	d.grow = num("grow", 0, -20, 100)
+	d.fade = num("fade", 0.3, 0, 1)
+	d.box = num("box", 0, 0, 16)
+	d.spin = num("spin", 0, 0, 1440)
+	d.land = x.land == true
+	local made = burst(d, at, true)
+	part_made = part_made + made
+	return made
+end
+
+-- [RACER_FEEL] (3) kit.mark(x, y, z, yaw, size, color[, alpha]): a mark on the
+-- ground from a client part (a tyre's): a flat quad at x, y + 0.02, z, turned
+-- yaw degrees (from +z toward +x, as s.yaw), size {across, along} m (a number:
+-- a square), color "#rrggbb", alpha 0...1 (0.6), unlit. Kept in a ring of
+-- MAX_MARKS in the scene, the oldest replaced; drawn as CHUNK marks a
+-- CustomGeometry, one that got marks rebuilt every MARK_EVERY s (a mark
+-- shows up to that late: the cost is the sandbox's calls a vertex, ~3 ms for
+-- a chunk of Vector3s made there; the corners made once, at the mark).
+-- kit.clear_marks() takes them all away (a race's restart). This client's
+-- alone. simplified: no fading with age, and a scene switch drops them (the
+-- old scene's node goes with it)
+local MAX_MARKS, CHUNK, MARK_EVERY = 1024, 32, 0.1
+-- (two triangles of the four corners)
+local QUAD = {1, 2, 3, 1, 3, 4}
+local marks = {n = 0, next = 0, list = {}, dirty = {}, made = 0, at = 0}
+local mark_mat
+local mark_colors = {}
+local function mark_chunk(c)
+	if not marks.node or marks.scene ~= O.scene then
+		return
+	end
+	local cg = marks.chunks[c]
+	if not cg then
+		cg = marks.node:CreateComponent("CustomGeometry")
+		cg:SetNumGeometries(1)
+		if not mark_mat then
+			mark_mat = magic.Material:new()
+			mark_mat:SetTechnique(0, magic.cache:GetResource("Technique",
+					"kit/KitMarks.xml"))
+		end
+		cg:SetMaterial(0, mark_mat)
+		cg.dynamic = true
+		marks.chunks[c] = cg
+	end
+	-- (no normals or texcoords: unlit, NOUV)
+	cg:BeginGeometry(0, magic.TRIANGLE_LIST)
+	for i = c * CHUNK, c * CHUNK + CHUNK - 1 do
+		local m = marks.list[i]
+		if m then
+			local col = m[5]
+			for _, k in ipairs(QUAD) do
+				cg:DefineVertex(m[k])
+				cg:DefineColor(col)
+			end
+		end
+	end
+	cg:Commit()
+end
+function M.mark(x, y, z, yaw, size, color, alpha)
+	x, y, z = tonumber(x), tonumber(y), tonumber(z)
+	if not O.scene or not x or not y or not z then
+		return
+	end
+	if marks.scene ~= O.scene then
+		marks.scene = O.scene
+		marks.node = O.scene:CreateChild("kit_marks")
+		marks.chunks, marks.list, marks.dirty, marks.n, marks.next = {}, {}, {},
+				0, 0
+	end
+	local w = type(size) == "table" and tonumber(size[1]) or tonumber(size) or 0.3
+	local l = type(size) == "table" and tonumber(size[2]) or w
+	w, l = math.max(0.01, math.min(16, w)) / 2, math.max(0.01, math.min(16, l)) / 2
+	local a = math.rad(tonumber(yaw) or 0)
+	-- along (sin, cos), across (cos, -sin)
+	local fx, fz, rx, rz = math.sin(a) * l, math.cos(a) * l, math.cos(a) * w,
+			-math.sin(a) * w
+	y = y + 0.02
+	alpha = math.max(0, math.min(1, tonumber(alpha) or 0.6))
+	local ck = tostring(color) .. alpha
+	local col = mark_colors[ck]
+	if not col then
+		-- (256 at most, then all start over: a game's few)
+		mark_colors.n = (mark_colors.n or 0) + 1
+		if mark_colors.n > 256 then
+			mark_colors = {n = 1}
+		end
+		col = rgba(color, alpha)
+		mark_colors[ck] = col
+	end
+	local i = marks.next
+	local V3 = magic.Vector3
+	marks.list[i] = {V3(x - fx - rx, y, z - fz - rz), V3(x - fx + rx, y, z - fz + rz),
+		V3(x + fx + rx, y, z + fz + rz), V3(x + fx - rx, y, z + fz - rz), col}
+	marks.dirty[math.floor(i / CHUNK)] = true
+	marks.next = (i + 1) % MAX_MARKS
+	marks.n = math.min(MAX_MARKS, marks.n + 1)
+	marks.made = marks.made + 1
+end
+function M.clear_marks()
+	if marks.node then
+		marks.node:Remove()
+	end
+	marks.scene, marks.node = nil, nil
+	log:info("kit: marks cleared")
+end
+
+-- For a drive: "event kit_effects" logs a client part's effects and marks
+magic.SubscribeToEvent("command_seq:kit_effects", function()
+	log:info(string.format("kit: effects: %d particles live in %d bursts (%d a " ..
+			"client part's); client parts made %d particles, %d bursts dropped; " ..
+			"%d marks kept of %d made (the last rebuilt in %d us)", live, #bursts,
+			part_bursts, part_made, part_dropped, marks.scene == O.scene and
+			marks.n or 0, marks.made, marks.us or 0))
 end)
 
 -- ---- The arc: dots along the screen's edge, turning with the view
@@ -322,6 +511,7 @@ magic.SubscribeToEvent("Update", function()
 		end
 		if t >= b.till then
 			live = live - b.n
+			part_bursts = part_bursts - (b.part and 1 or 0)
 			b.node:Remove()
 			table.remove(bursts, i)
 		end
@@ -338,6 +528,15 @@ magic.SubscribeToEvent("Update", function()
 	end
 	if #arcs > 0 then
 		draw_arcs(t)
+	end
+	if next(marks.dirty) and t - marks.at >= MARK_EVERY then
+		marks.at = t
+		local t0 = buildat.get_time_us()
+		for c in pairs(marks.dirty) do
+			mark_chunk(c)
+		end
+		marks.dirty = {}
+		marks.us = buildat.get_time_us() - t0
 	end
 end)
 end

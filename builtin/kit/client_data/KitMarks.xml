@@ -1,0 +1,5 @@
+<!-- [RACER_FEEL] (3) Kit's ground marks (effects.lua's kit.mark): unlit,
+     the vertices' colour and alpha -->
+<technique vs="Unlit" ps="Unlit" vsdefines="VERTEXCOLOR NOUV" psdefines="VERTEXCOLOR">
+    <pass name="alpha" depthwrite="false" blend="alpha" />
+</technique>

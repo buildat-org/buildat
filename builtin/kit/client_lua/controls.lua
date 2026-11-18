@@ -23,6 +23,11 @@
 --     left), nil: it declares none ([KIT_PLAY_HINTS], below)
 --   kit.touch_bar_left() -> where the touch bars begin (UI x; nil: none)
 --   kit.viewport(scene, camera) -> a Viewport with Kit's effects
+--   [RACER_FEEL] (2) kit.shake(amount): the camera shaken from a client part
+--     (its own prediction of a crash) as kit/controls' shake input does it
+--     (amount 0...5, decaying at shake_decay), from this frame: called before
+--     the camera is placed it is placed shaken, after (a draw hook) the
+--     camera is moved now. This client's camera only; nothing sent
 -- The keys (input.lua's actions, the player's to rebind; these the
 -- defaults): W A S D (a car: throttle, brake and steering), Space jumps,
 -- F leaves a seat (a key bound to use uses what is pointed at, the left
@@ -105,9 +110,16 @@ end
 
 -- [KIT_TOOLS_1] hands.lua's wheel picks in first person
 M.camera_mode = function() return camera_mode() end
--- [KIT_EDIT_VIEW] The editor's first view (nil: the controls not here yet)
+-- [KIT_EDIT_VIEW] The editor's first view (nil: the controls not here yet);
+-- [RACER_FEEL] (4) a plane game's auto is 2d
 function M.edit_view()
-	return C.ctl and (params().edit_view or "auto") or nil
+	local v = C.ctl and (params().edit_view or "auto")
+	return v == "auto" and M.plane_game() and "2d" or v or nil
+end
+-- [RACER_FEEL] (4) kit/controls' plane, level or upright: the editor's 2D view
+-- first, its right drag panning
+function M.plane_game()
+	return C.ctl ~= nil and (C.ctl.horizontal == true or tonumber(C.ctl.plane) ~= nil)
 end
 -- [KIT_CRAG_PLAYTEST_1] kit/controls' camera side, game-wide: the editor's
 -- 2D view is the Front view
@@ -273,23 +285,24 @@ local function world(skip)
 			local r = links and n.rest
 			if r then
 				-- [KIT_MOVING_OBJECTS] As each step's time has it, from where it rests
-				local q = magic.Quaternion(r[4], r[5], r[6], r[7])
+				-- ([RACER_FEEL] (1) the angles as the server's Turn::angles has them)
+				local qy, qp, qr = MV.turn_angles(r[4], r[5], r[6], r[7])
 				moving_looks = moving_looks or {}
 				moving_looks[#moving_looks + 1] = {show.look, on == true, {r[1], r[2], r[3]},
-					q:YawAngle(), q:PitchAngle(), q:RollAngle(), links}
+					qy, qp, qr, links}
 			else
 				local p = n.node.position
 				local q = n.node.rotation
 				local tilted = q.x ~= 0 or q.z ~= 0
-				local b = MV.look_box(show.look, on, {p.x, p.y, p.z}, q:YawAngle(),
-						tilted and q:PitchAngle() or 0, tilted and q:RollAngle() or 0)
+				local qy, qp, qr = MV.turn_angles(q.w, q.x, q.y, q.z)
+				local b = MV.look_box(show.look, on, {p.x, p.y, p.z}, qy,
+						tilted and qp or 0, tilted and qr or 0)
 				if b then
 					boxes[#boxes + 1] = b
 				end
 				-- [KIT_PLANE] stage 3: a polygon's prism
 				local pg = show.look.shape == "polygon" and MV.look_poly(show.look, on,
-						{p.x, p.y, p.z}, q:YawAngle(), tilted and q:PitchAngle() or 0,
-						tilted and q:RollAngle() or 0)
+						{p.x, p.y, p.z}, qy, tilted and qp or 0, tilted and qr or 0)
 				if pg then
 					polys[#polys + 1] = pg
 				end
@@ -620,6 +633,33 @@ local function signal(key, v)
 		log:info("kit: camera tint " .. C.flash_color)
 	elseif key == "camera" then
 		log:info("kit: camera mode " .. camera_mode())
+	end
+end
+
+-- [RACER_FEEL] (2) A client part's shake (the header's kit.shake): the server's
+-- shake input's, this frame (the engine's frame number; C.placed the frame the
+-- camera was last placed in)
+function M.shake(amount)
+	local a = math.max(0, math.min(5, tonumber(amount) or 0))
+	if a <= 0 or not O.camera then
+		return
+	end
+	signal("shake", {amount = a})
+	local f = magic.time.frameNumber
+	if C.placed == f then
+		-- Placed already this frame: moved now as place_camera moves it
+		local function jitter(k)
+			return (math.random() * 2 - 1) * k
+		end
+		local node = O.camera
+		node.position = node.position + magic.Vector3(jitter(a * 0.3), jitter(a * 0.3),
+				jitter(a * 0.3))
+		node.rotation = node.rotation * magic.Quaternion(0, 0, jitter(a * 4))
+		log:info(string.format("kit: a client part's shake %g, the camera moved in " ..
+				"frame %d", a, f))
+	else
+		C.shake_frame = f
+		log:info(string.format("kit: a client part's shake %g in frame %d", a, f))
 	end
 end
 
@@ -2129,6 +2169,12 @@ local function place_camera(dt, at)
 	local cam = node:GetComponent("Camera")
 	local par = params()
 	local mode = camera_mode()
+	C.placed = magic.time.frameNumber
+	if C.shake_frame then
+		log:info(string.format("kit: the camera placed shaken %.3f in frame %d " ..
+				"(asked in frame %d)", C.shake, C.placed, C.shake_frame))
+		C.shake_frame = nil
+	end
 	-- (the near clip a side camera moved)
 	if C.near0 then
 		cam.nearClip, C.near0 = C.near0, nil

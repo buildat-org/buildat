@@ -3225,8 +3225,14 @@ void Graphics::PrepareDraw()
             }
         }
 
-        // Finally disable unnecessary vertex attributes
-        unsigned disableVertexAttributes = impl_->enabledVertexAttributes_ & (~impl_->usedVertexAttributes_);
+        // Finally disable unnecessary vertex attributes, and (buildat) also the
+        // ones the shader reads but no bound buffer supplies: left enabled they
+        // keep the previous draw's pointer, which WebGL (Firefox) refuses as a
+        // fetch out of range and native GL reads past; disabled, the shader
+        // reads the attribute's constant value. A CustomGeometry with no
+        // texcoords (a lit shader reads iTexCoord) vanished in Firefox after a
+        // 24-vertex box was drawn before it
+        unsigned disableVertexAttributes = impl_->enabledVertexAttributes_ & (~assignedLocations);
         unsigned location = 0;
         while (disableVertexAttributes)
         {
