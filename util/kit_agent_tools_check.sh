@@ -53,7 +53,8 @@
 #  10. [KIT_CLIENT_REACT] client parts on the agent's own client (the
 #      server's camera's log): its body's by "player:<id>" (met by a zone,
 #      try_input as me) and its per_player state (shared = true too) on
-#      its client (7); [KIT_BODY_VARS] c:body_var: 16 keys (the 17th refused) in get_state's round.bodies,
+#      its client (7), [KIT_BODY_VARS] named in play_join's answer;
+#      c:body_var: 16 keys (the 17th refused) in get_state's round.bodies,
 #      play_input's body and the client's predicted state, bad keys and values
 #      erring, a player not here refused, cleared;
 #      the movement's draw given the predicted state (8); two
@@ -906,7 +907,11 @@ elif phase == "client":
     EF = placed(call("place", {"type": "local/pf", "pos": [4, 1, 0]}))
     EV = placed(call("place", {"type": "local/pv", "pos": [6, 1, 0]}))
     assert call("start") == "Running"
+    # [KIT_BODY_VARS] (2) play_join names the body's by
     said, body = join()
+    me = re.search(r"\. Your body is (player:\d+) \(its by: per_player state is "
+        r"keyed by it", said[-1]).group(1)
+    assert body["by"] == me, (body, me)
     # (7) the body's `by` is a player's: met by its zone, then tried as me;
     # its per_player state reaches its client
     def camsays(what, secs=20):
@@ -914,8 +919,7 @@ elif phase == "client":
     played({"seconds": 0.3})
     call("try_input", {"id": EP, "input": "set", "as": "me"})
     who = [v for o, v in tried(EP) if o == "who"]
-    assert len(who) == 1 and re.match(r"^player:\d+$", who[0]), who
-    me = who[0]
+    assert who == [me], (who, me)
     camsays("kit: entity %d's client part: got met %s" % (EP, who[0]))
     camsays("kit: entity %d's client part: got set %s" % (EP, who[0]))
     print("   the body is %s: met, tried as me, its own state on its client" % who[0])

@@ -32182,7 +32182,8 @@ struct Module: public interface::Module, public Interface
 				"already in another scene, the body moves to yours. The round "
 				"must be Running (start). The first call may answer that the "
 				"camera is starting or on its way: call again. One agent plays "
-				"at a time.",
+				"at a time. Its answer names the body's by (\"player:<id>\"): "
+				"per_player state's key, not the body's name.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"play_input", "play_input", "Your body's input for a time, as a "
 				"player's client sends it (its keys predicted and all): keys held "
@@ -32191,8 +32192,8 @@ struct Module: public interface::Module, public Interface
 				"pitch to look first (degrees as get_view's), jump, use (an "
 				"entity's id, as a click on it). seconds 0.1 to 4 (1). Answers "
 				"your body's place before and after, how far it moved, its "
-				"components' states (health, score, inventory...), alive, its vars "
-				"(c:body_var's), and "
+				"components' states (health, score, inventory...), alive, its by "
+				"and its vars (c:body_var's), and "
 				"the outputs entities emitted meanwhile (by \"you\" when your "
 				"body did it), the screen's buttons (id, label; a list's rows); "
 				"picture: also a picture of its own view at the end (width, "
@@ -35328,7 +35329,10 @@ struct Module: public interface::Module, public Interface
 		auto e = m_entities.find(p.player);
 		double w[3] = {p.pos[0], p.pos[1], p.pos[2]};
 		r.set("name", p.name);
-		// [KIT_BODY_VARS] its c:body_var values
+		// [KIT_BODY_VARS] (2) the body's by (per_player state's key; not its
+		// name) and its c:body_var values
+		if(p.player)
+			r.set("by", "player:"+itos(p.player));
 		auto bi = m_bodies.find(m_cam.peer);
 		if(bi != m_bodies.end() && bi->second.vars.size())
 			r.set("vars", bi->second.vars);
@@ -35562,10 +35566,15 @@ struct Module: public interface::Module, public Interface
 			m_cam.used = now;
 			log_i(MODULE, "The server's camera plays for %s's agent", cs(account));
 			failed = false;
+			// [KIT_BODY_VARS] (2) its by named: not its name, not session.by
+			const json::Value pb = play_body();
 			return (moved.empty() ? ss_() : "Your body left the scene "+moved+
 					". ")+"You play a body (a guest's, gone when you leave): "+
-					play_body().stringify()+". play_input moves it; play_leave ends "
-					"it, as do "+itos(PLAY_IDLE_US / 1000000)+" s unused";
+					pb.stringify()+". play_input moves it; play_leave ends it, as "
+					"do "+itos(PLAY_IDLE_US / 1000000)+" s unused. Your body is "+
+					jstr(pb, "by", "?")+" (its by: per_player state is keyed by it, "
+					"c:speed and c:body_var take it; not its name \""+
+					jstr(pb, "name")+"\" nor a draft's session.by)";
 		}
 		// play_input
 		if(m_cam.play != account)
@@ -38620,7 +38629,10 @@ struct Module: public interface::Module, public Interface
 				"\"me\" sends as your body, as a player's name as theirs. The "
 				"body is a player's (its by \"player:<id>\") and its client "
 				"predicts it as a player's does: per_player state, client "
-				"parts and the movement's draw run there as for a player.\n"
+				"parts and the movement's draw run there as for a player. "
+				"play_join names it (\"Your body is player:<id>\"): per_player "
+				"state is keyed by that by, not by the body's name "
+				"(\"<account>'s agent\") nor a draft's session.by.\n"
 				// [KIT_AGENT_FEEDBACK_1117] 11
 				"- get_history: who changed what and when, since a time.\n"
 				// [KIT_AGENT_NEXT_2]
