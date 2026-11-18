@@ -206,9 +206,8 @@ local function puff(kind, look, x, y, z, dx, dz)
 	end
 end
 -- A tyre's mark on the floor from x0, z0 to x1, z1 (a stroke, whatever the
--- frame rate), its colour.
--- simplified: a race's restart keeps the last one's marks (Kit's newest 1024
--- stay); kit.clear_marks() from a restart signal once the client part gets one
+-- frame rate), its colour. This player's new run (the pose's run) clears
+-- them all.
 local function mark(x0, z0, x1, z1, color)
 	local dx, dz = x1 - x0, z1 - z0
 	local x, z = (x0 + x1) / 2, (z0 + z1) / 2
@@ -239,6 +238,12 @@ local function effects(s, node, p, h, flags)
 	end
 	local dt = math.min(0.1, now - e.t)
 	e.t = now
+	-- (this player's own car's: the others' poses stop at 8 numbers)
+	local run = tonumber(p[9])
+	if run and e.run and e.run ~= run then
+		kit.clear_marks()
+	end
+	e.run = run or e.run
 	local at = node.position
 	local x, y, z = at.x, FLOOR_Y, at.z
 	local sh, ch = math.sin(h), math.cos(h)
