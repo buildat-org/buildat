@@ -191,7 +191,7 @@ local function rank(c)
 	end
 	if list[1] and list[1] ~= c.state.leader and c.state.phase == "running" then
 		if c.state.leader then
-			say(c, c:name(list[1]) .. " takes the lead! The devil loves a climber!")
+			say(c, c:name(list[1]) .. " takes the lead! The yard loves a climber!")
 		end
 		c.state.leader = list[1]
 	end
@@ -559,7 +559,7 @@ return {
 				c:after(1, "count")
 				return
 			end
-			say(c, "GO! Burn rubber, sinners!")
+			say(c, "GO! Eat dirt, scrap heaps!")
 			c.state.phase, c.state.t = "running", 0
 			for _, by in ipairs(c.state.racers) do
 				c:speed(by, 1)
@@ -638,7 +638,7 @@ return {
 					" is a hood ornament now!" or c:name(pb) .. " wrecks! First blood to the track!")
 		else
 			say(c, killer and killer .. " sends " .. c:name(pb) .. " to the scrapyard!" or
-					c:name(pb) .. " leaves a mark on the asphalt!")
+					c:name(pb) .. " leaves a mark on the dirt!")
 		end
 		c:log(c:name(pb), "wrecked by", tostring(kind), killer or "")
 		c:after(2, "wrecked", {player = player})
@@ -692,7 +692,7 @@ return {
 				end
 			end
 			c:log(c:name(by), "starts the race:", #c.state.racers, "cars")
-			say(c, "Engines hot! The pit is open!")
+			say(c, "Engines hot! The yard gates are open!")
 			c:after(1, "count")
 			return
 		end
