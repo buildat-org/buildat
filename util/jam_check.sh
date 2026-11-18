@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~1 min (2026-11-19)
-# covers: src/impl/jam.cpp src/interface/jam.h src/lua_bindings/jam.cpp extensions/jam apps/jam_check apps/workbench/templates/brimstone_speedway/composition.json
+# covers: src/impl/jam.cpp src/interface/jam.h src/lua_bindings/jam.cpp extensions/jam/** apps/jam_check/** apps/workbench/templates/brimstone_speedway/composition.json
 # [MUSIC_SYNTH]: apps/jam_check natively and in the web client (Chrome,
 # skipped without web/ or Chrome): parse errors by line, jam1's hashes
 # (the first 10 s of jam.songs, one in a mood) the same as committed and on
