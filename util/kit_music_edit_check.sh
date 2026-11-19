@@ -213,9 +213,9 @@ analyze() # HASH: the editor's Analyze's
 {
 	local m
 	m=$(mark "$CL")
-	step 30 "kit editor: music analysed" "frames 2" 'click Button "music analyze"'
-	HASH=$(tail -c +$((m + 1)) "$CL" | grep -aoP "kit editor: music analysed.*hash \K[0-9a-f]+" | head -1)
-	[ -n "$HASH" ] || fail "no hash: $(tail -c +$((m + 1)) "$CL" | grep -a "music analysed") ($CL)"
+	step 30 "kit editor: music analyzed" "frames 2" 'click Button "music analyze"'
+	HASH=$(tail -c +$((m + 1)) "$CL" | grep -aoP "kit editor: music analyzed.*hash \K[0-9a-f]+" | head -1)
+	[ -n "$HASH" ] || fail "no hash: $(tail -c +$((m + 1)) "$CL" | grep -a "music analyzed") ($CL)"
 }
 APPLIED= # the last Apply's text, in $t/applied_<n>.txt
 napply=0
@@ -322,7 +322,7 @@ view song ""
 step 10 "kit editor: music section blues" "frames 2" 'click Button "music section blues 2"'
 step 10 "kit editor: music playing song from [1-9][0-9.]* s, mood all" "frames 2" \
 	'click Button "music play from"'
-step 10 "kit editor: music playing s:blues from 0.00 s" "frames 30" 'click Button "music loop it"'
+step 10 "kit editor: music playing section blues from 0.00 s" "frames 30" 'click Button "music loop it"'
 step 10 "kit editor: music stopped" "frames 30" 'click Button "music play"'
 view pattern ""
 step 10 "kit editor: music view pattern" "frames 2" 'click DropDownList "music pattern"' \
@@ -362,7 +362,7 @@ step 10 "kit editor: music edit placed [A-G][#b]?[0-9] at ld1 lead step 4: parse
 	'click BorderImage "music step lead 4"'
 view roll ""
 m=$(mark "$CL")
-step 10 "kit editor: music edit note G4 at step 20, 1 long: ld1 lead: parses" "frames 2" \
+step 10 "kit editor: music edit note G4 at step 20, length 1: ld1 lead: parses" "frames 2" \
 	'click BorderImage "music roll 20 G4"'
 # Drags from there, in the drive's pixels (the window's over the UI's):
 # E4 drawn 4 long at step 22, moved a step on and up to F4, made 5 long
@@ -375,11 +375,11 @@ drag() # <regex> <from x y> <to x y> (UI units)
 	step 10 "$1" "mouse_pos $(px "$2") $(px "$3")" "frames 2" "mouse_down left" "frames 2" \
 		"mouse_pos $(px "$4") $(px "$5")" "frames 2" "mouse_up left" "frames 2"
 }
-drag "kit editor: music edit note E4 at step 22, 4 long: ld1 lead: parses" \
+drag "kit editor: music edit note E4 at step 22, length 4: ld1 lead: parses" \
 	"X + 2 * CW" "Y + 3 * CH" "X + 5 * CW" "Y + 3 * CH"
-drag "kit editor: music edit note E4 moved to step 23 F4: ld1 lead: parses" \
+drag "kit editor: music edit note E4 moved to step 23 as F4: ld1 lead: parses" \
 	"X + 2 * CW" "Y + 3 * CH" "X + 3 * CW" "Y + 2 * CH"
-drag "kit editor: music edit note at step 23 5 long: ld1 lead: parses" \
+drag "kit editor: music edit note at step 23, length 5: ld1 lead: parses" \
 	"X + 6 * CW + CW / 4" "Y + 2 * CH" "X + 7 * CW + CW / 4" "Y + 2 * CH"
 cmd "frames 5" "screenshot $t/roll_edit.png" "wait_log_any 5000 Wrote screenshot $t/roll_edit.png"
 view inst ""
