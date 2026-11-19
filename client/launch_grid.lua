@@ -464,8 +464,8 @@ function M.actions(log)
 			actions[#actions + 1] = {id = "move_saves",
 				label = tostring(first.label) .. " " ..
 						source.name:match("@(.*)$") .. ": move saves here",
-				description = "Play this version, moving the saves another " ..
-						"version made to it",
+				description = "Play this version, moving the saves of other " ..
+						"versions to it",
 				run = function()
 					do_launch(log, from, {app = source.name,
 						params = {aitta_move_saves = 1}})

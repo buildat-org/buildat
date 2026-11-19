@@ -1067,9 +1067,10 @@ function M.offer_aittas()
 	end)
 	offer_root = root
 	log:info("Offering " .. #new .. " Aitta(s)")
-	add_text(w, "Aittas are where people share apps: unreviewed, each " ..
-			"run in the server's sandbox. Not added, an Aitta is not offered " ..
-			"again; the Starport settings can add it later.", DIM)
+	add_text(w, "Aittas are where people share apps. Their apps are " ..
+			"unreviewed and run in the server's sandbox. An Aitta you don't " ..
+			"add is not offered again, but you can add it later in the " ..
+			"Starport settings.", DIM)
 	local last = nil
 	for i, x in ipairs(new) do
 		if x.starport ~= last then
@@ -1248,7 +1249,7 @@ function M.offer_version()
 	version_root = root
 	log:info("Offering version " .. n.version .. " (" .. n.url .. ", from " ..
 			n.starport .. ")")
-	add_text(w, "Buildat " .. n.version .. " is out; this is " ..
+	add_text(w, "Buildat " .. n.version .. " is out. You have " ..
 			tostring(buildat.version()) .. ".")
 	add_text(w, n.url, DIM)
 	local r = add_row(w)
@@ -1289,7 +1290,7 @@ function M.offer_version()
 			end, true, true)
 		elseif not failed then
 			-- The window stays, the link on it to copy by hand
-			failed = add_text(w, "Could not open it: " .. tostring(err), WARN)
+			failed = add_text(w, "Could not open the link: " .. tostring(err), WARN)
 		end
 	end, n.url:match("^https://") ~= nil, true)
 	add_button(r, "Not now", function() close(true) end)
@@ -1550,8 +1551,8 @@ settings_page = function(can, again, message)
 	add_button(r, "Add Starport", function()
 		local url = normalize_url(new:GetText())
 		if not url:match("^https?://[%w%.%-]+[:%d]*$") then
-			return settings_page(can, true, "A Starport is a host name, or "..
-					"an http(s):// address")
+			return settings_page(can, true, "Enter the Starport as a host "..
+					"name or an http(s):// address")
 		end
 		table.insert(s.starports, url)
 		save_state()
@@ -1609,8 +1610,8 @@ settings_page = function(can, again, message)
 	add_button(r, "Add Aitta", function()
 		local url = normalize_url(new_aitta:GetText())
 		if not url:match("^https?://[%w%.%-]+[:%d]*$") then
-			return settings_page(can, true, "An Aitta is a host name, or "..
-					"an http(s):// address")
+			return settings_page(can, true, "Enter the Aitta as a host name "..
+					"or an http(s):// address")
 		end
 		add_aitta(url)
 		save_state()
@@ -1643,12 +1644,12 @@ settings_page = function(can, again, message)
 		settings_page(can, true)
 	end)
 	add_text(w, (s.send_key and
-			"Your key builds the standing your reports are weighed by, and "..
-			"brings you their outcomes." or
-			"Off: your key is not sent, so Starports keep nothing new of "..
-			"your use; your reports weigh as a new key's and get no "..
+			"Your key builds the standing that gives your reports weight, "..
+			"and brings you their outcomes." or
+			"Off: your key is not sent, so Starports learn nothing new "..
+			"about you. Your reports count as a new key's and get no "..
 			"outcomes. The key is kept: turned on again, it is sent with "..
-			"its standing as it was."), DIM)
+			"its old standing."), DIM)
 	if not s.send_key then
 		add_text(w, "The keys are in " .. STATE_PATH .. " (\"keys\"). "..
 				"Deleting them there starts over with new ones.", DIM)
@@ -1684,7 +1685,7 @@ settings_page = function(can, again, message)
 	add_button(r, s.pin ~= "" and "Change PIN" or "Set PIN", function()
 		local p = pin:GetText()
 		if #p < 4 then
-			return settings_page(can, true, "A PIN of at least 4 characters")
+			return settings_page(can, true, "The PIN needs at least 4 characters")
 		end
 		s.pin = pin_hash(p)
 		save_state()
@@ -1695,8 +1696,8 @@ settings_page = function(can, again, message)
 		save_state()
 		settings_page(can, true)
 	end, can and s.pin ~= "")
-	add_text(w, "The lock covers this client only: not someone with the "..
-			"computer's administrator rights.", DIM)
+	add_text(w, "The lock covers this client only. It does not stop "..
+			"someone with administrator rights on the computer.", DIM)
 
 	if #s.receipts > 0 then
 		add_text(w, "Your reports:")
@@ -1907,7 +1908,7 @@ function M.id_login(url, then_cb, message)
 			id_passwords[url] = password:GetText()
 			uistack.main:pop(root)
 			local remind = "This ID has no recovery e-mail: a forgotten "..
-					"password is the end of it."
+					"password cannot be reset."
 			if res.remind_email and then_cb then
 				-- Said, and what the login was for goes on
 				local root2, w2 = open_window("starport id remind", 520, nil, {close_glyph = false})
@@ -1944,7 +1945,7 @@ end
 
 function M.id_reset(url, name_text)
 	local root, w = open_window("starport id reset", 520, nil, {close_glyph = false})
-	add_text(w, "A new password: a code goes to the ID's recovery e-mail.")
+	add_text(w, "For a new password, a code is sent to the ID's recovery e-mail.")
 	local r = add_row(w)
 	add_label(r, "Name", 120)
 	local name = add_edit(r, name_text or "")
@@ -2016,7 +2017,7 @@ local function age_rows(w)
 		end
 		local y = tonumber(year:GetText())
 		if not y then
-			return nil, "The year you were born"
+			return nil, "Enter the year you were born"
 		end
 		return {adult = false, birth_year = y, consent = age.consent}
 	end
@@ -2030,13 +2031,13 @@ function M.id_register(url, then_cb)
 		local root, w = open_window("starport id register", 640, nil, {close_glyph = false})
 		add_text(w, "A Starport ID at " .. url)
 		-- 10a: what it holds, said where it is made
-		add_text(w, "It holds: a name, a password (as a hash), a recovery "..
+		add_text(w, "It holds a name, a password (as a hash), a recovery "..
 				"e-mail if you give one, \"18 or over\" or a birth year under "..
 				"that, a parent's consent under 13, how many times you have "..
 				"logged in, your report key, and a separate identity for "..
-				"each community you join. That is all, on purpose: it is "..
-				"made for privacy, and nothing more is asked or kept than "..
-				"logging in, the age limits and moderation need.", DIM)
+				"each community you join. That is all, by design: nothing "..
+				"is asked or kept beyond what logging in, the age limits "..
+				"and moderation need.", DIM)
 		local r = add_row(w)
 		add_label(r, "Name", 200)
 		local name = add_edit(r, "")
@@ -2049,14 +2050,14 @@ function M.id_register(url, then_cb)
 		r = add_row(w)
 		add_label(r, "Recovery e-mail (optional)", 200)
 		local email = add_edit(r, "")
-		add_text(w, "Without one, a forgotten password is the end of the ID "..
-				"and its standing. You can add it later.", DIM)
+		add_text(w, "Without one, a forgotten password loses the ID and its "..
+				"standing. You can add it later.", DIM)
 		local get_age = age_rows(w)
 		local status = add_text(w, "")
 		r = add_row(w)
 		add_button(r, "Make the ID", function()
 			if pw:GetText() ~= pw2:GetText() then
-				status.text = "The passwords differ"
+				status.text = "The passwords do not match"
 				return
 			end
 			local a, why = get_age()
@@ -2069,7 +2070,7 @@ function M.id_register(url, then_cb)
 				birth_year = a.birth_year, consent = a.consent,
 				-- The key this client has used there: its standing comes
 				key = load_state().keys[url]}
-			status.text = "Making it..."
+			status.text = "Making the ID..."
 			id_call(url, "register", body, function(res, err)
 				if not res then
 					status.text = err
@@ -2133,13 +2134,13 @@ function M.id_page(url, message)
 		add_button(r, "Set", function()
 			id_call(url, "email", {session = session, email = email:GetText(),
 				totp = totp()}, function(res, e2)
-				again(res == "sent" and "A code went to the address" or
+				again(res == "sent" and "A code was sent to the address" or
 						res and "Set" or e2)
 			end)
 		end)
 		if me.email_pending ~= "" then
 			r = add_row(w)
-			add_label(r, "Code from the mail", 160)
+			add_label(r, "Code from the e-mail", 160)
 			local code = add_edit(r, "")
 			add_button(r, "Confirm", function()
 				id_call(url, "confirm_email", {session = session,
@@ -2243,7 +2244,7 @@ function M.id_page(url, message)
 					add_text(w2, line(x) .. (x.this and " (this one)" or ""),
 							x.this and DIM or nil)
 				end
-				add_text(w2, "The last logins:")
+				add_text(w2, "Recent logins:")
 				for i = #(res.recent or {}), 1, -1 do
 					add_text(w2, line(res.recent[i]))
 				end
@@ -2296,10 +2297,10 @@ local function ask_age(url, session, on_done)
 		local root, w = open_window("starport id age", 560, nil, {close_glyph = false})
 		add_text(w, "Your Starport ID has no age yet")
 		add_text(w, "Servers on " .. url .. " have age limits, so before "..
-				"your ID joins one, say whether you are 18 or over. That "..
-				"is all that is kept for an adult; under 18, the birth "..
-				"year. You can change it later: Starport settings..., "..
-				"Starport ID..., Change the age...", DIM)
+				"your ID joins one, say whether you are 18 or over. For "..
+				"an adult, that is all that is kept; under 18, the birth "..
+				"year is kept too. You can change it later under Starport "..
+				"settings..., Starport ID..., Change the age...", DIM)
 		local get_age = age_rows(w)
 		local st = add_text(w, "")
 		local rr = add_row(w)
@@ -2366,7 +2367,7 @@ local function web_authorize(url, listing, address, cb, rename_reason)
 		add_text(w, rename_reason)
 	end
 	add_text(w, "Sign in with your Starport ID at " .. url .. ". Its page "..
-			"opens in a window of its own; your password goes there only.")
+			"opens in a window of its own. Type your password only there.")
 	local st = add_text(w, "")
 	local rr = add_row(w)
 	local again = false -- [WEB_ISOLATED_SIGNIN] Open again: the same attempt
@@ -2494,7 +2495,7 @@ function M.safe.id_token_here(cb, rename_reason)
 				local plain = __buildat_unseal(e:GetText(), unhex(sealed))
 				local v = plain and network.parse_json(plain)
 				if not v then
-					st.text = "Not the password"
+					st.text = "Wrong password"
 					return
 				end
 				if (tonumber(v.exp) or 0) < os.time() then
@@ -2749,8 +2750,8 @@ local function open_report_row(row)
 						reason = reason, ts = os.time(), keyed = s.send_key,
 						state = "open"})
 					save_state()
-					status.text = "Sent; receipt " .. v.receipt ..
-							(s.send_key and ". The outcome shows in the "..
+					status.text = "Sent, receipt " .. v.receipt ..
+							(s.send_key and ". The outcome will show in the "..
 							"Starport settings." or ".")
 				else
 					status.text = "Not sent: " .. tostring(type(v) == "table"
@@ -2850,9 +2851,9 @@ function M.safe.open_report_here()
 		end
 		if #asked == 0 then
 			add_text(w, "No Starports are set, so there is nobody to " ..
-					"report to: add one in the Starport settings.")
+					"report to. Add one in the Starport settings.")
 		else
-			add_text(w, address .. " is not among the listings of " ..
+			add_text(w, address .. " is not listed on " ..
 					table.concat(asked, ", ") .. ".")
 		end
 		for _, e in ipairs(errors) do

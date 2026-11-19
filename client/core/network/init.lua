@@ -349,7 +349,7 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 	elseif server:match("^local:") then
 		add_text("Your local game "..server:sub(7))
 	else
-		add_text("A script of the server")
+		add_text("A script from the server")
 		add_text("  "..server)
 	end
 	add_text("wants to use the network:")

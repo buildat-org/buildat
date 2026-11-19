@@ -401,7 +401,7 @@ struct Module: public interface::Module, public Interface
 			if(options.count(f.key) && f.files.count(options[f.key])){
 				auto it = m_files.find(packet.sender);
 				if(it == m_files.end()){
-					send_list(packet.sender, "No file came: pick it again");
+					send_list(packet.sender, "No file arrived: pick it again");
 					return;
 				}
 				file.swap(it->second);
@@ -439,7 +439,7 @@ struct Module: public interface::Module, public Interface
 		if(packet.data.size() > MAX_FILE){
 			log_w(MODULE, "world_menu: a file of %zu bytes from peer %zu "
 					"refused", packet.data.size(), packet.sender);
-			send_list(packet.sender, "The file is past "+
+			send_list(packet.sender, "The file is over "+
 					std::to_string(MAX_FILE >> 20)+" MiB");
 			return;
 		}
@@ -461,7 +461,7 @@ struct Module: public interface::Module, public Interface
 					!exists(i, to);
 		});
 		if(!ok){
-			send_list(packet.sender, "Not copied: "+to+" is no free name of a "+
+			send_list(packet.sender, "Not copied: "+to+" is not a free name for a "+
 					m_config.noun);
 			return;
 		}
@@ -533,7 +533,7 @@ struct Module: public interface::Module, public Interface
 		storage::access(m_server, [&](storage::Interface *i){
 			if(i->remove_trashed(entry)){
 				log_i(MODULE, "world_menu: \"%s\" deleted for good", cs(entry));
-				note = "Deleted for good";
+				note = "Deleted permanently";
 			}
 		});
 		send_list(packet.sender, note);

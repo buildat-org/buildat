@@ -194,8 +194,8 @@ local AITTA_REASONS = {
 local function aitta_report(aitta, id)
 	local root, w = open_window("aitta report", 620, nil, {close_glyph = false})
 	add_text(w, "Report " .. id .. " to " .. aitta)
-	add_text(w, "A moderator of that Aitta decides; the author is told " ..
-			"what was done and why, not who reported it.", DIM)
+	add_text(w, "A moderator of that Aitta decides. The author is told " ..
+			"what was done and why, but not who reported it.", DIM)
 	local reason
 	local buttons = {}
 	for _, r in ipairs(AITTA_REASONS) do
@@ -223,7 +223,7 @@ local function aitta_report(aitta, id)
 				function(answer, err)
 			local v = answer and network.parse_json(answer)
 			if type(v) == "table" and v.ok then
-				status.text = "Sent; receipt " .. tostring(v.receipt)
+				status.text = "Sent, receipt " .. tostring(v.receipt)
 				log:info("aitta report: sent " .. id .. " " .. reason .. ": " ..
 						tostring(v.receipt))
 			else
@@ -321,11 +321,11 @@ local function cannot_run(rel)
 		return "needs a newer Buildat"
 	elseif type(rel.manifest) == "table" and rel.manifest.kind == "kit" then
 		-- [KIT] stage 5: Aitta lists it as "other"; Kit's palette has it
-		return "a Kit package: installed from Kit's palette, in an app's " ..
+		return "a Kit package, installed from Kit's palette in an app's " ..
 				"edit mode"
 	elseif type(rel.manifest) == "table" and rel.manifest.kind == "scene" then
 		-- [KIT_SCENE_PACKAGES] the same, added to a Workbench game
-		return "a scene: added from Kit's palette, in a Workbench game's " ..
+		return "a scene, added from Kit's palette in a Workbench game's " ..
 				"edit mode"
 	elseif rel.kind and rel.kind ~= "app" and rel.kind ~= "extension" and
 			rel.kind ~= "world" and rel.kind ~= "remix" and
@@ -810,13 +810,13 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		if rel.kind == "world" then
 			local app, wp, why = world_app(rel)
 			ptext(wp and "Installs as a new save of " .. app .. " and plays " ..
-					"it: a save's data, no code." or "Cannot be installed: " ..
+					"it. It is save data, with no code." or "Cannot be installed: " ..
 					why .. ".", wp and DIM or WARN)
 		elseif rel.kind == "remix" then
 			local base, why = base_release(rel)
-			ptext("Settings and files of its own over " .. tostring(rel.base) ..
-					"'s, and no code: it runs " .. tostring(rel.base) ..
-					"'s, in the server's sandbox." .. (base and " Installs " ..
+			ptext("Its own settings and files over " .. tostring(rel.base) ..
+					"'s, with no code: it runs " .. tostring(rel.base) ..
+					"'s code in the server's sandbox." .. (base and " Installs " ..
 					base.author .. "/" .. base.name .. " " ..
 					tostring(base.version) .. " from this Aitta too." or ""),
 					DIM)
@@ -824,8 +824,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 				ptext("Cannot be installed: " .. why .. ".", WARN)
 			end
 		elseif is_template(rel) then
-			ptext("Installed, Workbench's New lists it: a starting point, no " ..
-					"code.", DIM)
+			ptext("Once installed, Workbench's New lists it: a starting " ..
+					"point with no code.", DIM)
 		elseif rel.kind ~= "extension" then
 			ptext("It runs in the server's sandbox: it cannot reach your " ..
 					"files, only its own saves.", DIM)
@@ -1147,13 +1147,13 @@ function M.playtest(offer, start)
 	if not effective().filters.unreviewed then
 		log:info("playtest: refused by the filters")
 		ui.show_message_dialog("This client's filters hide unreviewed " ..
-				"content, so it cannot playtest " .. id .. ". A reviewer's " ..
-				"client allows it: the Starport settings, Filters.")
+				"content, so it cannot playtest " .. id .. ". To allow it, " ..
+				"show unreviewed apps in the Starport settings.")
 		return
 	end
 	ui.show_confirm_dialog("Playtest " .. id .. " from " .. offer.aitta ..
-			"? Not reviewed. It is installed apart, under your user " ..
-			"folder's review/, and runs in the server's sandbox.", function()
+			"? It is not reviewed. It is installed separately, under " ..
+			"review/ in your user folder, and runs in the server's sandbox.", function()
 		log:info("playtest: yes, " .. id)
 		-- The network's own leave for the Aitta's address is asked as for
 		-- any fetch, once

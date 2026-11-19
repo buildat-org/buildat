@@ -181,7 +181,7 @@ struct CSave: public Save
 				sqlite3_close(m_db);
 				m_db = nullptr;
 				throw SqliteError("The save "+path+" has a trigger or a "
-						"view, which no save Buildat writes has");
+						"view, which Buildat never writes into a save");
 			}
 		}
 		// A save that a crash interrupted is worth more than the milliseconds

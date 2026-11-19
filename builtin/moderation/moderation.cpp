@@ -309,8 +309,8 @@ struct Module: public interface::Module, public Interface
 		s.set("text", text);
 		s.set("by", by);
 		s.set("owner", owner);
-		s.set("appeal", "Appeal once, from your account on this "+h->name()+
-				"; another moderator than the one who acted decides.");
+		s.set("appeal", "You can appeal once, from your account on this "+
+				h->name()+". A moderator other than the one who acted decides.");
 		put(h, "statements", id, s);
 		if(!owner.empty())
 			h->event({owner}, by, jstr(l, "name")+": "+action+", for "+reason+
@@ -497,9 +497,9 @@ struct Module: public interface::Module, public Interface
 		if(!a.is_object() || jstr(a, "state") != "open")
 			throw Exception("no such open appeal");
 		if(jstr(a, "acted_by") == by && !jstr(a, "acted_by").empty())
-			throw Exception("another moderator than the one who acted decides");
+			throw Exception("a moderator other than the one who acted must decide");
 		if(jstr(a, "by") == by)
-			throw Exception("another moderator than the one who appealed decides");
+			throw Exception("a moderator other than the one who appealed must decide");
 		const ss_ outcome = jstr(q, "outcome");
 		if(outcome != "reverse" && outcome != "keep")
 			throw Exception("outcome: reverse or keep");

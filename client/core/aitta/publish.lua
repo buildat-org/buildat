@@ -136,7 +136,7 @@ local function ask_new(kind, back)
 	local root, w = open_window("aitta new", 560, back,
 			{close_glyph = false})
 	add_text(w, "A new " .. kind .. " in " .. USER .. "/dev_apps/. Its name: " ..
-			"a-z, 0-9 and _, 40 at most.")
+			"a-z, 0-9 and _, at most 40 characters.")
 	local e = add_edit(w, "")
 	local why = add_text(w, "", WARN)
 	local r = add_row(w)
@@ -153,7 +153,7 @@ local function ask_new(kind, back)
 		st.result = nil
 		refresh_menu()
 		page_package("Made " .. path .. (kind == "app" and
-				": it is on the grid as a Dev tile, to play" or ""))
+				". It is on the grid as a Dev tile, ready to play." or ""))
 	end
 	magic.SubscribeToEvent(e, "TextFinished", go)
 	add_button(r, "Make it", go, nil, true)
@@ -225,16 +225,16 @@ page_package = function(message)
 	end
 	log:info("aitta publish: the package page, " .. tostring(st.selected))
 	if not entry then
-		add_text(w, "Choose a package, or make a new one: an app is on " ..
-				"the grid at once, to play before it is published.", DIM)
+		add_text(w, "Choose a package or make a new one. A new app is on " ..
+				"the grid at once, so you can play it before publishing.", DIM)
 		return
 	end
 	local m = read_meta(entry.name)
 	-- [APP_REMIX] A remix says what it is made on, its settings a page back
 	if entry.kind == "remix" then
-		add_text(w, "My own version of " .. tostring(m.base) .. ": its " ..
-				"settings and files over " .. tostring(m.base) .. "'s, which " ..
-				"runs it.", DIM)
+		add_text(w, "My own version of " .. tostring(m.base) .. ": its own " ..
+				"settings and files over " .. tostring(m.base) .. "'s, run by " ..
+				"its code.", DIM)
 		add_button(add_row(w), "Settings and files...", function()
 			uistack.main:pop(root)
 			page_remix()
@@ -245,9 +245,9 @@ page_package = function(message)
 		add_text(w, "A world for " .. tostring(m.app) .. (m.app_version and
 				" " .. tostring(m.app_version) or "") .. ", made with Buildat " ..
 				tostring(m.buildat_version) .. ". Everything in the save " ..
-				"goes in but its players: the map and its settings, not who " ..
-				"played it, their privileges or what they carry. Publish " ..
-				"this world again on the save to copy it again.", DIM)
+				"goes in except its players: the map and its settings, but not " ..
+				"who played it, their privileges or what they carry. " ..
+				"Publishing this world again copies the save again.", DIM)
 	end
 	m.name = m.name or entry.name
 	m.version = m.version or "0.1.0"
@@ -282,7 +282,7 @@ page_package = function(message)
 		for _, k in ipairs({"license_code", "license_media"}) do
 			if field ~= k and m[k] and m[k] ~= "" and
 					not licence_ok(m[k], licences) then
-				why_of[k].text = m[k] .. " is not one this Aitta takes"
+				why_of[k].text = "This Aitta does not take " .. m[k]
 				why = why ~= "" and why or why_of[k].text
 			end
 		end
@@ -443,11 +443,11 @@ page_publish = function(message)
 	end
 	-- The key
 	local pub = __buildat_aitta_dev("public", author)
-	add_text(w, "Your publishing key is who you are as a publisher: whoever " ..
-			"has the file publishes as " .. author .. ". It is not encrypted. " ..
-			"Copy it somewhere safe (a USB stick, a password manager) from " ..
-			KEYS .. "/" .. author .. ".key; without it, no new version " ..
-			"of your packages can be published.", DIM)
+	add_text(w, "Your publishing key is your identity as a publisher: " ..
+			"whoever has the file can publish as " .. author .. ". It is not " ..
+			"encrypted. Copy " .. KEYS .. "/" .. author .. ".key somewhere " ..
+			"safe (a USB stick, a password manager): without it, you cannot " ..
+			"publish new versions of your packages.", DIM)
 	local kr = add_row(w)
 	if pub then
 		add_label(kr, "Key: " .. author .. ".key  " .. pub:sub(1, 18) .. "...", 0)
@@ -493,7 +493,7 @@ page_publish = function(message)
 			end)
 		elseif info.error then
 			status.text = url .. " did not say whether the key is bound (" ..
-					info.error .. "); publishing tells"
+					info.error .. "). Publishing will show it."
 		elseif info.author == author then
 			status.text = "The key is bound to " .. author .. " on " .. url
 			status.color = OK
@@ -502,8 +502,8 @@ page_publish = function(message)
 					url .. ", and the manifest says " .. author
 			status.color = WARN
 		else
-			status.text = "The key is not bound on " .. url .. " yet: bind it " ..
-					"there, logged in, then come back here"
+			status.text = "The key is not bound on " .. url .. " yet. Log in " ..
+					"there, bind it, then come back here."
 		end
 		if not (info and info.author == author) then
 			add_button(br, "Bind on " .. url .. "...", function()
@@ -572,8 +572,8 @@ page_publish = function(message)
 			st.result_ok, st.raise = id ~= nil, false
 			if id then
 				st.result = "Published " .. id .. " on " .. url .. ". It is " ..
-						"listed as unreviewed, under Apps from Aitta" ..
-						" (an update waits out the Aitta's update delay)." ..
+						"listed as unreviewed under Apps from Aitta" ..
+						" (an update shows after the Aitta's update delay)." ..
 						(warning and "\n" .. warning or "")
 			elseif tostring(why):find("here already", 1, true) then
 				st.result = tostring(m.version) .. " is already published: " ..
@@ -587,7 +587,7 @@ page_publish = function(message)
 		end, function(f, waiting)
 			result.text = "Packed " .. zip .. "; uploading to " .. url .. ": " ..
 					math.floor(f * 100) .. " %" .. (waiting and
-					", waiting for the Aitta's limit on uploads a minute" or "")
+					", waiting for the Aitta's upload limit" or "")
 		end)
 	end, pub ~= nil, true)
 	if st.raise and not st.result_ok then
@@ -622,15 +622,16 @@ page_page = function(message)
 	local root, w = open_window("aitta page", 780)
 	add_text(w, "The page of " .. pkg .. " on " .. tostring(url))
 	local desc, shots, dir = __buildat_aitta_dev("page_read", name)
-	add_text(w, "On the package's page on the Aitta, not in any release. " ..
-			"The description: 20000 characters at most, a blank line " ..
-			"between paragraphs, an http(s):// address a link.", DIM)
+	add_text(w, "Shown on the package's page on the Aitta, not in any " ..
+			"release. The description: at most 20000 characters, a blank " ..
+			"line between paragraphs; an http(s):// address becomes a link.",
+			DIM)
 	local e = add_edit(w, desc or "")
 	e.multiLine = true
 	e:SetFixedHeight(220)
 	shots = shots or {}
-	add_text(w, #shots .. " screenshots (PNG or JPEG, 8 at most, 1920 px " ..
-			"and 2 MB each, in the order of their names) in " ..
+	add_text(w, #shots .. " screenshots (PNG or JPEG, at most 8, each at most " ..
+			"1920 px and 2 MB, in name order) in " ..
 			tostring(dir) .. (#shots > 0 and ": " ..
 			table.concat(shots, ", ") or ""), DIM)
 	local result = add_text(w, message or "", st.page_ok and OK or WARN)
@@ -681,9 +682,9 @@ page_remix = function(message)
 		return
 	end
 	local base = tostring(r.base)
-	add_text(w, "Its settings and files over " .. base .. "'s; " .. base ..
-			"'s code runs it. It is on the grid as a Dev tile, to play as " ..
-			"it is saved.", DIM)
+	add_text(w, "Its own settings and files over " .. base .. "'s, run " ..
+			"by " .. base .. "'s code. It is on the grid as a Dev tile, to " ..
+			"play as saved.", DIM)
 	local m = read_meta(name)
 	if type(m.setting_values) ~= "table" then
 		m.setting_values = {}
@@ -716,8 +717,8 @@ page_remix = function(message)
 		log:info("aitta remix: " .. k .. " = " .. tostring(v))
 	end, widgets, files)
 	add_text(w, "Files of your own: a file in " .. USER .. "/dev_apps/" ..
-			name .. "/<module>/client_data/ is used in place of " .. base ..
-			"'s of the same name (" .. #(r.files or {}) .. " it has: " ..
+			name .. "/<module>/client_data/ replaces " .. base ..
+			"'s file of the same name (it has " .. #(r.files or {}) .. ": " ..
 			"textures, models, sounds and worlds). " .. (#mine > 0 and
 			"Yours: " .. table.concat(mine, ", ") or "None of yours yet."),
 			DIM)
@@ -787,7 +788,7 @@ function M.publish_world(app, save, code, rows)
 				"Could not publish " .. tostring(save) .. ": " .. tostring(err))
 	end
 	st.selected, st.result = name, nil
-	page_package("The save " .. save .. " copied into " .. USER ..
+	page_package("The save " .. save .. " was copied into " .. USER ..
 			"/dev_apps/" .. name .. "/world")
 end
 
@@ -810,7 +811,7 @@ function M.publish_kit(t)
 		ui.show_message_dialog("Not published: " .. why)
 	end
 	if GetPlatform() == "Web" then
-		return refuse("publishing is in the native client")
+		return refuse("publishing needs the native client")
 	end
 	local name, author = tostring(t.name), tostring(t.author)
 	for _, n in ipairs({name, author}) do
