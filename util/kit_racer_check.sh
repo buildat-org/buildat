@@ -21,8 +21,10 @@
 #   3. the race: kitboss round first, a handbrake drift into the bend
 #      after checkpoint 1 (turned through it, never spun, then straight
 #      again: drift.png; the slide itself util/kit_racer_sim_check.lua's), the crate's mines
-#      taken and one dropped behind him on the north straight, kitbob after
-#      him onto it: the
+#      taken and one dropped behind him on the north straight (at x -20,
+#      some 25 m past the bend before it: kitbob's line straight at it as
+#      he aims; dropped at the crates he came on it 6 m out of that bend
+#      and missed, 0a7l), kitbob after him onto it: the
 #      mine's blast, his wreck (kit/health's death: the effects, a scorch
 #      mark, wreck.png), back on the road at checkpoint 2 two seconds later;
 #      kitboss 1st, kitbob 2nd, the race over; the result card (result.png);
@@ -67,8 +69,8 @@ print("RACE=%d TRIAL=%d CRATE=%d" % (find("the race", "world")[0],
       find("the race", "trial")[0], find("crate", "world")[1]))
 PY
 . "$t/ids"
-# The Bone Yard's line: its corners, each bend's radius (the template's
-# generator laid the road along it); the finish line's x on the first straight
+# The Bone Yard's line: its corners, each bend's radius (local/brim_yard's
+# corners, the road laid along them); the finish line's x on the first straight
 export PATH_PTS="-100,-58,12 60,-58,10 60,-34,10 10,-34,9 0,-14,9 30,0,10 95,0,12 95,55,12 50,55,9 40,30,8 25,30,8 15,58,10 -40,58,12 -55,20,10 -30,5,9 -60,-10,10 -100,-20,12"
 LINE_X=-64
 
@@ -80,14 +82,16 @@ LINE_X=-64
 # (Space) DRIFT_S seconds (timed by the client) and the bend's steering there,
 # once, a screenshot DRIFT_SHOT as it ends; SHOTS "x,z,path ...": a screenshot near
 # each place, once; FIRE_ON: the fire key (Left Ctrl) once as that shows in
-# the log; AIM_FILE: once that file holds "x,z", through there when it is
-# ahead. A line a sample:
+# the log (FIRE_AT x,z: then once within 4 m of there); AIM_FILE: once that
+# file holds "x,z", through there when it is ahead. A line a sample:
 # the time, the place, the speed, the heading and the velocity's (degrees)
 cat > "$t/drive.py" <<'PY'
 import json, math, os, re, sys, time
 log, fifo, secs, stop = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
 target = [float(v) for v in os.environ["TARGET"].split(",")] if os.environ.get("TARGET") else None
 fire_on = os.environ.get("FIRE_ON")
+fire_at = [float(v) for v in os.environ["FIRE_AT"].split(",")] if os.environ.get("FIRE_AT") else None
+armed = False
 drift = [float(v) for v in os.environ["DRIFT"].split(",")] if os.environ.get("DRIFT") else None
 drift_s = float(os.environ.get("DRIFT_S", "0.5"))
 drift_shot = os.environ.get("DRIFT_SHOT")
@@ -168,6 +172,9 @@ while time.time() - t0 < secs:
         break
     if fire_on and re.search(fire_on, line):
         fire_on = None
+        armed = True
+    if armed and (not fire_at or x is not None and math.hypot(fire_at[0] - x, fire_at[1] - z) < 4):
+        armed = False
         send("keypress Left Ctrl")
         print("fired", flush=True)
     m = re.search(r"kit: body at (-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+)", line)
@@ -366,7 +373,9 @@ for re in "The template's type local/brim_car \([0-9]+ bytes\)" "The template's 
 	grep -aqE "$re" "$SL" || fail "no \"$re\" in $SL"
 done
 n=0
-for e in "$RACE laps 1" "$RACE mine_damage 30" "$CRATE weapon \"mines\"" "$TRIAL trial_laps 1"; do
+# (time_out 90: kitbob, wrecked and slow, finishes some 43 s after kitboss,
+# and a loaded box once made it 46, over the default 45's "out of time")
+for e in "$RACE laps 1" "$RACE mine_damage 30" "$RACE time_out 90" "$CRATE weapon \"mines\"" "$TRIAL trial_laps 1"; do
 	set -- $e
 	n=$((n + 1))
 	step 10 "entities, $n to undo" "event kit_edit {\"op\": \"set\", \"id\": $1, \"comp\": 0, \"param\": \"$2\", \"value\": $3}"
@@ -449,7 +458,7 @@ PY
 as boss
 m=$(mark "$SL")
 # (the drift: the handbrake held into the bend after checkpoint 1)
-FIRE_ON="Mines x" DRIFT=88,0 DRIFT_S=0.4 DRIFT_SHOT=$t/drift.png \
+FIRE_ON="Mines x" FIRE_AT=-20,58 DRIFT=88,0 DRIFT_S=0.4 DRIFT_SHOT=$t/drift.png \
 	drive boss 120 'panel .* shown, layer [0-9]+: "The flag is down' &
 DB=$!
 await "$SL" "$m" 40 "local/brim_race $RACE: kitboss passed checkpoint 1 of 3"

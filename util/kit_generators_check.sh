@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~1 min (2026-11-03)
-# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/lights_out.lua builtin/kit/types/lights_out_tile.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua apps/sample_kit/main/kit/gen_*.lua
+# cost: ~1.5 min (2026-11-19)
+# covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/lights_out.lua builtin/kit/types/lights_out_tile.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/polygon_edit.lua apps/sample_kit/main/kit/gen_*.lua
 # [KIT_GENERATORS] (kit_plan 4q) Generators, in apps/sample_kit; kitboss
 # builds in Kit's editor, Ended:
 #   1. A kit/lights_out L (17) placed at (0, 1, -3): its build, 25 tiles
@@ -21,6 +21,19 @@
 #      copy of L and what is under it (69...95).
 #   4. A restart: the save has L and its 25 tiles as built, 43 under L,
 #      18's override; no build runs as it loads.
+#   5. (4z37f) Then, stopped, sample_kit/gen_posts G (the save's next id)
+#      placed at (-30, 1, 30), clear of the sample's entities:
+#      past 63 children (its type's children 200), its corners (a level
+#      points param with a height a point) and 70 posts by its seed. A sign
+#      put under G by hand and one beside it (among the posts): G's Run
+#      (the edit op "build") keeps the posts clear of the one beside it
+#      (c.entities; c.move there), the posts it made before replaced (kept
+#      by member, the rest gone), both signs kept; Run with seed 2 and
+#      count 40 (one edit); undone: the seed 1 posts back. A corner without
+#      its height
+#      and one out of its range refused. Its reseed 7: Play builds it again
+#      live (its on_start's c:generate): seed 7's posts in the round, the
+#      sign under it kept; Stop: the authored ones back (the save's).
 #
 #   util/kit_generators_check.sh
 set -u
@@ -73,6 +86,27 @@ refused() # <json> <reason>
 	printf 'event kit_edit %s\nwait_log 30000 kit editor: refused: %s\n' "$1" "$2"
 }
 size() { edit "{\"op\": \"set\", \"id\": 17, \"comp\": 0, \"param\": \"size\", \"value\": $1}" "$2"; }
+# gen_posts' posts from a seed (its Lehmer generator), clear of points: how many
+posts() # <seed> <count> [x,z (relative to G)...]
+{
+	python3 -I - "$@" <<'PY'
+import sys
+seed, count = int(sys.argv[1]), int(sys.argv[2])
+avoid = [tuple(map(float, a.split(","))) for a in sys.argv[3:]]
+s = seed % 2147483646 + 1
+def r():
+    global s
+    s = s * 16807 % 2147483647
+    return (s - 1) / 2147483646
+n = 0
+for _ in range(count):
+    x, z = r() * 20 - 10, r() * 20 - 10
+    n += all((x - a) ** 2 + (z - b) ** 2 >= 9 for a, b in avoid)
+print(n)
+PY
+}
+P1=$(posts 1 70) P1C=$(posts 1 70 5,5) P2C=$(posts 2 40 5,5) P7C=$(posts 7 70 5,5)
+[ "$P1" = 70 ] && [ "$P1C" -lt 70 ] || fail "seed 1's posts: $P1, $P1C clear of the sign (pick another place)"
 {
 	cat <<'EOF'
 wait_log_any 60000 Joined as kitboss
@@ -162,7 +196,7 @@ db=$(find "$t/user" -name save.sqlite -path "*/saves/world/*" | head -1)
 [ -n "$db" ] || fail "no save.sqlite under $t/user"
 check_save()
 {
-	python3 - "$db" <<'PY' || fail "the build in the save ($db)"
+	python3 - "$db" "$@" <<'PY' || fail "the build in the save ($db)"
 import json, sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
 au = json.loads(db.execute("select value from store where store='kit' and key='authored'").fetchone()[0])
@@ -182,23 +216,80 @@ assert c30["params"]["lit"] is True and {"output": "pressed", "to": 25, "input":
 assert {"output": "changed", "to": 17, "input": "add"} in c30["links"], c30
 assert ents[18]["pos"] == [-2, 0, 1] and ents[42]["pos"] == [2, 0, 5], (ents[18], ents[42])
 assert not any(i in ents for i in range(44, 68)), sorted(ents)
-print("  the save: 17 and its 25 tiles as built, 43 under it, 18's override")
+if len(sys.argv) > 2:
+    G, n, H = map(int, sys.argv[2:5])
+    g = [i for i, e in ents.items() if e.get("built", {}).get("by") == G]
+    assert len(g) == n, (len(g), n)
+    assert ents[H]["parent"] == G and "built" not in ents[H], ents[H]
+    print("  the save: generator %d's %d children, %d under it by hand" % (G, n, H))
+else:
+    print("  the save: 17 and its 25 tiles as built, 43 under it, 18's override; the next id %d" % au["next_id"])
 PY
 }
 check_save
-cat > "$t/boss2.cmds" <<'EOF'
+# (G: the next id, the save's)
+G=$(python3 - "$db" <<'PY'
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+v = lambda k: json.loads(db.execute("select value from store where store='kit' and key=?", (k,)).fetchone()[0])["next_id"]
+print(max(v("authored"), v("runtime")))
+PY
+)
+H=$((G + 3 + P1 + 1))
+n=0 c=43
+{
+	cat <<'EOF'
 wait_log_any 60000 Joined as kitboss
 wait_log_any 60000 kit editor: edit rights: yes
 click Button "Edit"
 wait_log 10000 kit editor: state: 43 entities
-sync 5000
-quit
+sync 3000
 EOF
+	# 5. G: 3 corners and the posts; H the sign under it
+	gb="{\"op\": \"build\", \"id\": $G, \"comp\": 0"
+	printf '%s\n' 'event kit_edit {"op": "stop"}' 'wait_log 10000 kit editor: the server is Ended (by kitboss)'
+	edit '{"op": "place", "type": "sample_kit/gen_posts", "pos": [-30, 1, 30]}' $((43 + 1 + 3 + P1))
+	edit "{\"op\": \"place\", \"type\": \"kit/sign\", \"pos\": [40, 1, 40], \"parent\": $G}" $((c + 1))
+	edit '{"op": "place", "type": "kit/sign", "pos": [-25, 1, 35]}' $((c + 1))
+	edit "$gb}" $((46 + 3 + P1C))
+	edit "$gb, \"params\": {\"seed\": 2, \"count\": 40}}" $((46 + 3 + P2C))
+	echo 'event kit_edit {"op": "undo"}'
+	n=$((n - 1)) c=$((46 + 3 + P1C))
+	printf 'wait_log 10000 kit editor: state: %d entities, %d to undo\n' $c $n
+	refused "{\"op\": \"set\", \"id\": $G, \"comp\": 0, \"param\": \"corners\", \"value\": [[0, 0], [4, 0], [0, 4]]}" \
+		"set: "
+	refused "{\"op\": \"set\", \"id\": $G, \"comp\": 0, \"param\": \"corners\", \"value\": [[0, 0, 1], [4, 0, 9], [0, 4, 1]]}" \
+		"set: "
+	edit "{\"op\": \"set\", \"id\": $G, \"comp\": 0, \"param\": \"reseed\", \"value\": 7}" $c
+	cat <<'EOF'
+event kit_edit {"op": "play"}
+wait_log 10000 kit editor: the server is Running (by kitboss)
+sync 3000
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Ended (by kitboss)
+EOF
+	printf 'wait_log 10000 kit editor: state: %d entities\nsync 3000\nquit\n' $c
+} > "$t/boss2.cmds"
 server 2
 BUILDAT_JOIN_CREATE= client boss2
 stop
-grep -aq "built 17 again" "$t/srv2.log" && fail "a build ran as the save loaded ($t/srv2.log)"
+s=$t/srv2.log
+grep -aq "built 17 again" "$s" && fail "a build ran as the save loaded ($s)"
 check_save
 echo "ok: a restart keeps the build as it was"
-echo "PASS: generators: kit/lights_out builds its board as placed and as its size changes, overrides and a builder's child kept, an undo putting the old ones back; the cap and the meter refuse a build; the board plays and is solved; the save keeps the output"
+grep -a "An edit by\|An undo by\|build refused\|gen_posts\|generated" "$s" |
+	sed 's/^.* I [a-z_]* *: /  /' | cut -c1-170
+want "$s" "placed sample_kit/gen_posts $G at [-30,1,30], built $G again: $((3 + P1)) children (0 kept, $((3 + P1)) new, 0 gone)" \
+	"sample_kit/gen_posts $G: gen_posts: seed 1, $P1C posts, $((70 - P1C)) kept clear of " \
+	"entities, move.lua there" \
+	"ran $G's sample_kit/gen_posts, built $G again: $((3 + P1C)) children ($((3 + P1C)) kept, 0 new, $((P1 - P1C)) gone)" \
+	"ran $G's sample_kit/gen_posts, count 40, seed 2, built $G again: $((3 + P2C)) children"
+echo "ok: a generator past 63 children; Run keeps it clear of a sign beside it, its own last posts replaced; Run with params, one undo"
+want "$t/boss2.log" "points [x, y, h] within 256 of its place" "(point 2's h: a number from 0 to 5)"
+echo "ok: a corner without its height, one out of its range, refused"
+want "$s" "sample_kit/gen_posts $G: gen_posts: seed 7, $P7C posts" \
+	"Entity $G generated $G live: $((3 + P7C)) children ($((3 + P1C)) gone)"
+check_save $G $((3 + P1C)) $H
+echo "ok: Play builds it again live from its reseed, Stop puts the authored ones back"
+echo "PASS: generators: kit/lights_out builds its board as placed and as its size changes, overrides and a builder's child kept, an undo putting the old ones back; the cap and the meter refuse a build; the board plays and is solved; the save keeps the output; a generator past 63 children Run again (with params), clear of the scene's entities, its own output replaced, one undo; a points param's values checked; a round's live build from a seed undone at Stop"
 # vim: set noet ts=4 sw=4:

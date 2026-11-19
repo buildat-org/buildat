@@ -21,6 +21,10 @@
 -- flat one in the plan view.
 -- simplified: no drawing in other games' plan view (a kit/polygon placed there is
 -- the standing default, as before); turn one flat and edit it there
+-- [KIT_GENERATORS] (4z37f) The same handles for any type's points param declared
+-- level (a generator's corner list: the entity's own x and z, in the plan view),
+-- each point's further values (its radius) kept as it moves, copied to a point
+-- added after it.
 return function(A)
 local S, E, NT, M, magic, log = A.S, A.E, A.NT, A.M, A.magic, A.log
 local send, find, front_at, GRID_STEPS = A.send, A.find, A.front_at, A.GRID_STEPS
@@ -42,22 +46,44 @@ local function sixteenth(v)
 	return math.floor(v * 16 + 0.5) / 16
 end
 
--- Its kit/polygon component: its index (from 0) and the component
+-- Its kit/polygon component, or one with a level points param: its index (from
+-- 0), the component, the param's name, whether level
 local function poly_comp(e)
 	for i, c in ipairs(e and e.components or {}) do
 		if c.type == TYPE then
-			return i - 1, c
+			return i - 1, c, "points"
+		end
+		for k, d in pairs(type_of(c.type).params or {}) do
+			if type(d) == "table" and d.type == "points" and d.level then
+				return i - 1, c, k, true
+			end
 		end
 	end
 end
 
-local function local_points(c)
-	local p = type(c.params) == "table" and c.params.points
+local function local_points(c, k)
+	k = k or "points"
+	local p = type(c.params) == "table" and c.params[k]
 	if type(p) ~= "table" then
-		local d = (type_of(TYPE).params or {}).points
+		local d = (type_of(c.type).params or {})[k]
 		p = type(d) == "table" and d.default
 	end
 	return type(p) == "table" and p or {}
+end
+
+-- A point's values after its x and y
+local function extra(p)
+	local x = {}
+	for i = 3, #p do
+		x[#x + 1] = p[i]
+	end
+	return x
+end
+
+-- Its frame: a level param's points lie in its x, z (as a pitch 90 polygon's)
+local function turn_of(e, lv)
+	local q = NT.drawn_turn(e)
+	return lv and q * magic.Quaternion(90, 0, 0) or q
 end
 
 -- [KIT_TOP_DOWN] (4) The view's frame: the world's axis across the screen and those
@@ -113,44 +139,51 @@ local function editing()
 		return nil
 	end
 	local e, made_ = find(S.primary)
-	local ci, c = poly_comp(e)
+	local ci, c, k, lv = poly_comp(e)
 	if not ci or made_ or not e.pos then
 		return nil
 	end
-	local q = NT.drawn_turn(e)
+	local q = turn_of(e, lv)
 	if math.abs((q * magic.Vector3(0, 0, 1))[ax]) < 0.999 then
 		return nil
 	end
 	local o = drawn_at(e)
-	local wp = {}
-	for i, p in ipairs(local_points(c)) do
+	local wp, ex = {}, {}
+	for i, p in ipairs(local_points(c, k)) do
 		wp[i] = o + q * magic.Vector3(tonumber(p[1]) or 0, tonumber(p[2]) or 0, 0)
+		ex[i] = extra(p)
 	end
-	return {e = e, comp = ci, wp = wp, o = o, q = q, d = o[ax]}
+	return {e = e, comp = ci, param = k, wp = wp, ex = ex, o = o, q = q, d = o[ax]}
 end
 
--- Its points set (world ones, into its frame on the 1/16): one edit
-local function set_points(ed, wp, what)
+-- Its points set (world ones, into its frame on the 1/16; ex: each one's further
+-- values): one edit
+local function set_points(ed, wp, what, ex)
 	local q = ed.q
 	local inv = magic.Quaternion(q.w, -q.x, -q.y, -q.z)
 	local pts = {}
 	for i, p in ipairs(wp) do
 		local l = inv * (p - ed.o)
 		pts[i] = {sixteenth(l.x), sixteenth(l.y)}
+		for _, v in ipairs(ex[i] or {}) do
+			pts[i][#pts[i] + 1] = v
+		end
 	end
-	send({op = "set", id = ed.e.id, comp = ed.comp, param = "points", value = pts})
+	send({op = "set", id = ed.e.id, comp = ed.comp, param = ed.param, value = pts})
 	log:info("kit editor: polygon " .. ed.e.id .. " " .. what .. ", " .. #pts ..
 			" points")
 end
 
--- Its points with one added in the middle of edge i: the list, its index
+-- Its points with one added in the middle of edge i (its values point i's): the
+-- list, its index, the values
 local function with_middle(ed, i)
-	local wp = {}
+	local wp, ex = {}, {}
 	for k, p in ipairs(ed.wp) do
-		wp[k] = p
+		wp[k], ex[k] = p, ed.ex[k]
 	end
 	table.insert(wp, i + 1, (ed.wp[i] + ed.wp[i % #ed.wp + 1]) * 0.5)
-	return wp, i + 1
+	table.insert(ex, i + 1, ed.ex[i])
+	return wp, i + 1, ex
 end
 
 -- A handle under the pointer: editing()'s with point = i or edge = i (from point
@@ -178,14 +211,14 @@ end
 
 -- A handle's drag (S.drag): a point, or an edge's new middle one
 function G.start(ed)
-	local wp, at = ed.wp, ed.point
+	local wp, at, ex = ed.wp, ed.point, ed.ex
 	if ed.edge then
 		if #ed.wp >= MAX_POINTS then
 			log:info("kit editor: polygon " .. ed.e.id .. " has " .. MAX_POINTS ..
 					" points, the most")
 			return nil
 		end
-		wp, at = with_middle(ed, ed.edge)
+		wp, at, ex = with_middle(ed, ed.edge)
 	else
 		wp = {}
 		for k, p in ipairs(ed.wp) do
@@ -193,7 +226,7 @@ function G.start(ed)
 		end
 	end
 	log:info("kit editor: dragging polygon " .. ed.e.id .. "'s point " .. at)
-	return {kind = "poly", ed = ed, wp = wp, at = at, added = ed.edge ~= nil}
+	return {kind = "poly", ed = ed, wp = wp, ex = ex, at = at, added = ed.edge ~= nil}
 end
 
 function G.update(d)
@@ -207,7 +240,7 @@ end
 function G.finish(d)
 	if d.moved or d.added then
 		set_points(d.ed, d.wp, d.added and "point " .. d.at .. " added" or
-				"point " .. d.at .. " moved")
+				"point " .. d.at .. " moved", d.ex)
 	end
 end
 
@@ -221,15 +254,15 @@ G.flat = flat
 -- side game's 2D) round the polygon's points (their box and a margin), where they
 -- are edited; [KIT_TOP_DOWN] (4) one lying flat the plan view, cut over it
 function G.show(e)
-	local _, c = poly_comp(e)
+	local _, c, k, level = poly_comp(e)
 	if not c or not e.pos then
 		return
 	end
-	local o, q = drawn_at(e), NT.drawn_turn(e)
+	local o, q = drawn_at(e), turn_of(e, level)
 	local lv = flat(q) and not M.side_game()
 	local V = lv and "z" or "y"
 	local x0, y0, x1, y1 = o.x, o[V], o.x, o[V]
-	for _, p in ipairs(local_points(c)) do
+	for _, p in ipairs(local_points(c, k)) do
 		local w = o + q * magic.Vector3(tonumber(p[1]) or 0, tonumber(p[2]) or 0, 0)
 		x0, y0 = math.min(x0, w.x), math.min(y0, w[V])
 		x1, y1 = math.max(x1, w.x), math.max(y1, w[V])
@@ -316,8 +349,8 @@ function G.click(mx, my, t)
 	local ed = t and t.poly
 	if ed and ed.edge then
 		if #ed.wp < MAX_POINTS then
-			local wp, at = with_middle(ed, ed.edge)
-			set_points(ed, wp, "point " .. at .. " added")
+			local wp, at, ex = with_middle(ed, ed.edge)
+			set_points(ed, wp, "point " .. at .. " added", ex)
 		end
 		return true
 	end
@@ -334,13 +367,14 @@ function G.right(mx, my)
 		log:info("kit editor: a polygon keeps 3 points")
 		return true
 	end
-	local wp = {}
+	local wp, ex = {}, {}
 	for k, p in ipairs(ed.wp) do
 		if k ~= ed.point then
-			wp[#wp + 1] = p
+			local n = #wp + 1
+			wp[n], ex[n] = p, ed.ex[k]
 		end
 	end
-	set_points(ed, wp, "point " .. ed.point .. " taken away")
+	set_points(ed, wp, "point " .. ed.point .. " taken away", ex)
 	return true
 end
 

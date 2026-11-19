@@ -194,8 +194,10 @@ static const size_t MAX_EDITED_LISTED = 256;
 static const size_t MAX_MADE = 1024;
 static const size_t MAX_PREFAB = 64;
 // [KIT_GENERATORS] The children a generator's build makes at most: with
-// the generator, a prefab's members
+// the generator, a prefab's members; [KIT_GENERATORS] (4z37f) a type's
+// `children` up to MAX_BUILT_MOST (a track's lap of road, walls and junk)
 static const size_t MAX_BUILT = MAX_PREFAB - 1;
+static const size_t MAX_BUILT_MOST = 1023;
 // [KIT_PREFAB_VOXELS] A prefab's voxel box each way, and the kinds of cell
 // (a voxel, its param and tint) in it at most
 static const int MAX_PREFAB_BOX = 64;
@@ -365,6 +367,8 @@ struct Type
 	// game changes (builds = true)
 	bool builds = false;
 	int64_t version = 1;
+	// [KIT_GENERATORS] (4z37f) the children its on_build makes at most
+	size_t children = MAX_BUILT;
 	// The position parameters that are its zone's, its owned volume's and
 	// its grants' extent ("" for none)
 	ss_ zone, volume, grants;
@@ -2087,6 +2091,13 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		t.version = ver.is_number() ? (int64_t)ver.as_number() : 1;
+		const json::Value &kids = t.decl.get("children");
+		if(!kids.is_undefined() && (!kids.is_number() || kids.as_number() < 1 ||
+				kids.as_number() > MAX_BUILT_MOST)){
+			why = name+": its children is a number from 1 to "+itos(MAX_BUILT_MOST);
+			return false;
+		}
+		t.children = kids.is_number() ? (size_t)kids.as_number() : MAX_BUILT;
 		t.inventory = t.decl.get("inventory").is_true();
 		// spawn = true, or ([KIT] stage 4d) the bool parameter whose value
 		// says whether the instance places players
@@ -4456,27 +4467,46 @@ struct Module: public interface::Module, public Interface
 		if(t == "position")
 			return pos_ok(v) ? "" : "a position, three numbers";
 		if(t == "points")
-			return points_ok(v);
+			return points_ok(v, decl.get("values"));
 		return "a type of parameter Kit has (\""+t.substr(0, 32)+"\" is none)";
 	}
 
 	// [KIT_PLANE] stage 3: kit/polygon's outline ("points": [[x, y]...] in its own x
 	// and y): "" when it is a simple polygon of 3...MAX_POLYGON_POINTS points within
 	// MAX_POLYGON_EXTENT of its place ([KIT_SIDE_SCENERY]), else what it should
-	// be. Every pair of edges is checked (128 points: 8128 pairs)
-	static ss_ points_ok(const json::Value &v)
+	// be. Every pair of edges is checked (128 points: 8128 pairs).
+	// [KIT_GENERATORS] (4z37f) a parameter's `values` = {{name, min, max,
+	// default}...}: a point's further numbers after its x and y, in that
+	// order (a track's corner's radius), each within its min and max
+	static ss_ points_ok(const json::Value &v, const json::Value &values =
+			json::Value())
 	{
+		const unsigned nv = values.is_array() ? values.size() : 0;
+		ss_ names;
+		for(unsigned k = 0; k < nv; k++)
+			names += ", "+jstr(values.at(k), "name");
 		const ss_ what = "a polygon: 3 to "+itos(MAX_POLYGON_POINTS)+
-				" points [x, y] within "+itos(MAX_POLYGON_EXTENT)+" of its place";
+				" points [x, y"+names+"] within "+itos(MAX_POLYGON_EXTENT)+
+				" of its place";
 		if(!v.is_array() || v.size() < 3 || v.size() > MAX_POLYGON_POINTS)
 			return what;
 		const size_t n = v.size();
 		sv_<double> x(n), y(n);
 		for(unsigned i = 0; i < n; i++){
 			const json::Value &p = v.at(i);
-			if(!p.is_array() || p.size() != 2 || !p.at(0u).is_number() ||
+			if(!p.is_array() || p.size() != 2 + nv || !p.at(0u).is_number() ||
 					!p.at(1u).is_number())
 				return what;
+			for(unsigned k = 0; k < nv; k++){
+				const json::Value &d = values.at(k), &pv = p.at(2 + k);
+				const json::Value &lo = d.get("min"), &hi = d.get("max");
+				if(!pv.is_number() || !std::isfinite(pv.as_number()) ||
+						(lo.is_number() && pv.as_number() < lo.as_number()) ||
+						(hi.is_number() && pv.as_number() > hi.as_number()))
+					return what+" (point "+itos(i + 1)+"'s "+jstr(d, "name")+": a number"+
+							(lo.is_number() ? " from "+lo.stringify() : ss_())+
+							(hi.is_number() ? " to "+hi.stringify() : ss_())+")";
+			}
 			x[i] = p.at(0u).as_number();
 			y[i] = p.at(1u).as_number();
 			if(!std::isfinite(x[i]) || !std::isfinite(y[i]) ||
@@ -16565,6 +16595,42 @@ struct Module: public interface::Module, public Interface
 		o += ",args=";
 		lua_lit(r.args, o);
 		o += ",nargs="+itos(r.args.size());
+		// [KIT_GENERATORS] (4z37f) a build's: its children's cap, and its
+		// scene's entities (not its own children): {id, name, types, pos
+		// (the world's), yaw}
+		if(r.handler == "on_build"){
+			o += ",max_children="+itos(m_types[in.type].children)+",entities={";
+			ss_ gs;
+			scene_of(e, &gs);
+			size_t n = 0;
+			for(auto &x : m_entities){
+				ss_ xs;
+				if(x.first == e.id || !authored(x.second) ||
+						!x.second.kind.empty() || (uint64_t)json::jint(
+						x.second.built, "by", 0) == e.id ||
+						!scene_of(x.second, &xs) || xs != gs || ++n > MAX_BUILT_MOST)
+					continue;
+				json::Value ej = json::object(), ts = json::array();
+				ej.set("id", (int64_t)x.first);
+				ej.set("name", x.second.name);
+				for(const Instance &xi : x.second.comps)
+					ts.append(xi.type);
+				ej.set("types", ts);
+				if(x.second.has_pos){
+					double w[3];
+					Turn wq;
+					world_of(x.second, w, &wq);
+					json::Value pj = json::array();
+					for(int k = 0; k < 3; k++)
+						pj.append(w[k]);
+					ej.set("pos", pj);
+					ej.set("yaw", wq.yaw());
+				}
+				lua_lit(ej, o);
+				o += ',';
+			}
+			o += "}";
+		}
 		// The player who set it off (their entity, their name), and their
 		// inventory's provider: the replacing instance, or their entity's
 		// own kit/inventory (itself, or its type, id, params and state)
@@ -17318,6 +17384,10 @@ struct Module: public interface::Module, public Interface
 		const json::Value &spawns = fx.get("spawn");
 		for(unsigned i = 0; i < spawns.size(); i++)
 			spawn(self, comp, r.by, spawns.at(i));
+		// [KIT_GENERATORS] (4z37f)
+		const json::Value &gens = fx.get("generate");
+		for(unsigned i = 0; i < gens.size() && m_entities.count(self); i++)
+			live_generate(self, comp, r.by, gens.at(i));
 		const json::Value &sends = fx.get("send");
 		if(sends.size()){
 			const std::set<uint64_t> rch = reach(m_entities[self], comp, r.by);
@@ -17700,6 +17770,175 @@ struct Module: public interface::Module, public Interface
 					send_state(p.first);
 	}
 
+	// [KIT_GENERATORS] (4z37f) c:generate(id, params) in play: generator id
+	// (one the instance reaches) built again live, params over its own (a
+	// seed: a new layout each round): what it built (its authored children,
+	// or an earlier live run's, with what is under them) out of the round
+	// as c:remove takes them (an authored one back at Stop), the build's new
+	// children made in play under it (gone at Stop); nothing saved.
+	// simplified: a live build writes no voxels; a persistent world has no
+	// rounds to undo it, so it is refused there
+	void live_generate(uint64_t maker, size_t comp, const ss_ &by,
+			const json::Value &s)
+	{
+		const uint64_t id = s.at(0u).is_number() ?
+				(uint64_t)std::max(0.0, s.at(0u).as_number()) : 0;
+		auto refuse = [&](const ss_ &why){
+			log_w(MODULE, "Entity %s: generate %s refused: %s", cs(itos(maker)),
+					cs(itos(id)), cs(why));
+			add_log(maker, "generate "+itos(id)+" refused: "+why);
+		};
+		auto mi = m_entities.find(maker);
+		if(mi == m_entities.end() || comp >= mi->second.comps.size())
+			return;
+		if(!m_session.running || m_host.persistent)
+			return refuse(m_host.persistent ? "a persistent world has no rounds" :
+					"the round is not Running");
+		auto gi = m_entities.find(id);
+		if(gi == m_entities.end() || !reach(mi->second, comp, by).count(id))
+			return refuse("not one it reaches");
+		Entity g = gi->second;
+		size_t ci = g.comps.size();
+		for(size_t i = 0; i < g.comps.size() && ci == g.comps.size(); i++)
+			if(m_types[g.comps[i].type].handlers.count("on_build"))
+				ci = i;
+		if(ci == g.comps.size())
+			return refuse("it is no generator");
+		g.comps[ci].params = g.comps[ci].params.deepcopy();
+		const json::Value ps = s.at(1u).is_object() ? s.at(1u) : json::object();
+		for(json::Iterator it(ps); it; ++it){
+			const json::Value &decl = m_types[g.comps[ci].type].decl.get("params").
+					get(it.key());
+			const ss_ bad = !decl.is_object() ? ss_("no parameter of it") :
+					check_set_param(decl, *it);
+			if(!bad.empty())
+				return refuse(it.key().substr(0, 64)+": "+bad);
+			g.comps[ci].params.set(it.key(), *it);
+		}
+		json::Value pf;
+		ss_ why;
+		const int64_t t0 = interface::os::time_us();
+		m_build_log = json::array();
+		const bool built = build_of(g, ci, pf, why);
+		GenRun &gr = m_gen_runs[id];
+		gr = GenRun();
+		gr.t = time(nullptr);
+		gr.by = mi->second.name+" ("+itos(maker)+")";
+		gr.live = true;
+		gr.us = interface::os::time_us() - t0;
+		gr.log = m_build_log;
+		if(!built){
+			gr.why = why;
+			return refuse(why);
+		}
+		// The old ones, with what is under them
+		sv_<uint64_t> old;
+		std::set<uint64_t> seen;
+		size_t made_old = 0;
+		for(auto &x : m_entities)
+			if((uint64_t)json::jint(x.second.built, "by", 0) == id)
+				for(uint64_t y : group_of(x.first, MAX_ENTITIES))
+					if(seen.insert(y).second){
+						old.push_back(y);
+						made_old += m_entities[y].made ? 1 : 0;
+					}
+		const size_t n_new = pf.get("entities").size();
+		if(made_count() - made_old + n_new > MAX_MADE)
+			return refuse("the round would have made more than "+itos(MAX_MADE)+
+					" entities");
+		for(uint64_t x : old)
+			run_now(x, "on_remove", by);
+		for(auto x = old.rbegin(); x != old.rend(); ++x){
+			auto it = m_entities.find(*x);
+			if(it == m_entities.end())
+				continue;
+			remove_node(it->second);
+			it->second.node = 0;
+			it->second.nodes.clear();
+			if(!it->second.made){
+				Removed rm;
+				rm.e = it->second;
+				m_removed[*x] = rm;
+			}
+			m_entities.erase(it);
+		}
+		const uint64_t first = m_next_id;
+		sv_<json::Value> rows;
+		const double zero[3] = {0, 0, 0};
+		instantiate(pf, "", id, zero, first, rows);
+		m_next_id = first + rows.size();
+		const json::Value &self_links = pf.get("to_self");
+		for(unsigned i = 0; i < self_links.size(); i++){
+			const json::Value &sl = self_links.at(i);
+			const size_t r = (size_t)sl.at(0u).as_number() - 1;
+			const unsigned k = (unsigned)sl.at(1u).as_number();
+			if(r >= rows.size())
+				continue;
+			json::Value cs_ = rows[r].get("components");
+			json::Value cj = cs_.at(k), ls = cj.get("links"), lj = json::object();
+			lj.set("output", sl.at(2u));
+			lj.set("to", sl.at(4u));
+			lj.set("input", sl.at(3u));
+			ls.append(lj);
+			cj.set("links", ls);
+			cs_.set_at(k, cj);
+			rows[r].set("components", cs_);
+		}
+		const json::Value &es = pf.get("entities");
+		for(size_t i = 0; i < rows.size(); i++){
+			json::Value bt = json::object();
+			bt.set("by", (int64_t)id);
+			bt.set("member", json::jint(es.at((unsigned)i), "id", 0));
+			rows[i].set("built", bt);
+			m_pending_ids.insert(first + i);
+		}
+		sv_<uint64_t> made;
+		for(const json::Value &row : rows){
+			Entity n;
+			ss_ bad;
+			if(!entity_from_json(row, n, bad) || m_entities.count(n.id)){
+				refuse("a child does not load: "+bad);
+				continue;
+			}
+			n.made = 'g';
+			n.maker = id;
+			n.maker_comp = ci;
+			m_entities[n.id] = n;
+			made.push_back(n.id);
+		}
+		m_pending_ids.clear();
+		for(uint64_t x : made){
+			Entity &n = m_entities[x];
+			for(Instance &in : n.comps){
+				in.state = json::object();
+				state_defaults(in);
+			}
+			if(wants_node(n))
+				make_node(n);
+			for(size_t i = 0; i < n.comps.size(); i++){
+				Run r;
+				r.entity = x;
+				r.comp = i;
+				r.handler = "on_start";
+				r.by = by;
+				queue_run(r);
+			}
+		}
+		gr.ok = true;
+		gr.children = made.size();
+		gr.gone = old.size();
+		m_runtime_dirty = true;
+		own_voxels();
+		pick_provider();
+		log_i(MODULE, "Entity %s generated %s live: %zu children (%zu gone), "
+				"%.1f ms", cs(itos(maker)), cs(itos(id)), made.size(), old.size(),
+				gr.us / 1000.0);
+		add_log(maker, "generated "+itos(id)+": "+itos(made.size())+" children");
+		for(auto &p : m_peers)
+			if(p.second.editing)
+				send_state(p.first);
+	}
+
 	// An entity's handler run at once (on_remove, before it goes), each of
 	// its instances that has it
 	void run_now(uint64_t id, const char *handler, const ss_ &by)
@@ -17838,7 +18077,8 @@ struct Module: public interface::Module, public Interface
 
 	// A prefab's file as Kit takes it: its members, their parents earlier
 	// members, their types, parameters and links as an authored entity's
-	bool check_prefab(const json::Value &j, ss_ &why)
+	// ([KIT_GENERATORS] max: a generator's build's, its children and itself)
+	bool check_prefab(const json::Value &j, ss_ &why, size_t max = MAX_PREFAB)
 	{
 		if(!j.is_object() || jstr(j, "format") != "kit_prefab"){
 			why = "not a JSON object of \"format\": \"kit_prefab\"";
@@ -17890,8 +18130,8 @@ struct Module: public interface::Module, public Interface
 		}
 		const json::Value &es = j.get("entities");
 		if(!es.is_array() || es.size() < (vox ? 0 : 1) ||
-				es.size() > MAX_PREFAB){
-			why = (vox ? "0" : "1")+ss_(" to ")+itos(MAX_PREFAB)+" entities";
+				es.size() > max){
+			why = (vox ? "0" : "1")+ss_(" to ")+itos(max)+" entities";
 			return false;
 		}
 		std::set<int64_t> ids, placed;
@@ -17908,8 +18148,8 @@ struct Module: public interface::Module, public Interface
 			}
 			if(!e.get("pos").is_undefined())
 				placed.insert(id);
-			if(id < 1 || id > (int64_t)MAX_PREFAB || ids.count(id)){
-				why = "a member's id is 1..."+itos(MAX_PREFAB)+", once";
+			if(id < 1 || id > (int64_t)max || ids.count(id)){
+				why = "a member's id is 1..."+itos(max)+", once";
 				return false;
 			}
 			if(parent && !ids.count(parent)){
@@ -19862,6 +20102,86 @@ struct Module: public interface::Module, public Interface
 	// ---- [KIT_GENERATORS] Generators: a type with on_build makes its own
 	// children from its parameters, in the editor (api.h)
 
+	// (4z37f) Each generator's last run (get_state's and the editor's
+	// generators): when, by whom, its children (kept, gone), its log or why
+	// it was refused; live: a round's c:generate.
+	// simplified: in memory, gone at a restart
+	struct GenRun
+	{
+		int64_t t = 0, us = 0;
+		ss_ by, why;
+		bool ok = false, live = false;
+		size_t children = 0, kept = 0, gone = 0;
+		json::Value log;
+	};
+	std::map<uint64_t, GenRun> m_gen_runs;
+	uint64_t m_force_build = 0;
+	size_t m_rb_rows = 0, m_rb_kept = 0, m_rb_gone = 0;
+	json::Value m_build_log = json::array();
+
+	bool is_generator(const Entity &e)
+	{
+		for(const Instance &in : e.comps)
+			if(m_types[in.type].handlers.count("on_build"))
+				return true;
+		return false;
+	}
+
+	// The composition's generators (an authored entity with an on_build
+	// type, not a copy's): {id, name, type, scene, children (built by it
+	// now), comp (its index), last: {time, by, ok, children, kept, gone, ms,
+	// why | log, live}}
+	json::Value generators_json(const ss_ &only_scene = "*")
+	{
+		json::Value out = json::array();
+		std::map<uint64_t, size_t> kids;
+		for(auto &x : m_entities)
+			if(const int64_t by = json::jint(x.second.built, "by", 0))
+				kids[(uint64_t)by]++;
+		for(auto &x : m_entities){
+			const Entity &e = x.second;
+			ss_ sn;
+			scene_of(e, &sn);
+			if(!authored(e) || !is_generator(e) || copy_by(e) ||
+					(only_scene != "*" && sn != only_scene))
+				continue;
+			json::Value g = json::object();
+			g.set("id", (int64_t)e.id);
+			g.set("name", e.name);
+			for(size_t i = 0; i < e.comps.size(); i++)
+				if(m_types[e.comps[i].type].handlers.count("on_build")){
+					g.set("type", e.comps[i].type);
+					g.set("comp", (int64_t)i);
+					break;
+				}
+			g.set("scene", sn);
+			g.set("children", (int64_t)kids[e.id]);
+			auto ri = m_gen_runs.find(e.id);
+			if(ri != m_gen_runs.end()){
+				const GenRun &r = ri->second;
+				json::Value l = json::object();
+				l.set("time", utc_text(r.t));
+				l.set("by", r.by);
+				l.set("ok", r.ok);
+				if(r.ok){
+					l.set("children", (int64_t)r.children);
+					l.set("kept", (int64_t)r.kept);
+					l.set("gone", (int64_t)r.gone);
+				} else {
+					l.set("why", r.why);
+				}
+				l.set("ms", (int64_t)(r.us / 1000));
+				if(r.log.size())
+					l.set("log", r.log);
+				if(r.live)
+					l.set("live", true);
+				g.set("last", l);
+			}
+			out.append(g);
+		}
+		return out;
+	}
+
 	// A generator's build, run as the entity is after an edit (it may be
 	// a new one, not in the tree yet): its children as a prefab's members
 	// (their positions its frame's), checked as a prefab's, MAX_BUILT at
@@ -19894,8 +20214,10 @@ struct Module: public interface::Module, public Interface
 		const json::Value fx = json::load_string(answer.c_str());
 		const json::Value &lines = fx.get("log");
 		for(unsigned i = 0; i < lines.size(); i++)
-			if(lines.at(i).is_string())
+			if(lines.at(i).is_string()){
 				add_log(e.id, lines.at(i).as_string());
+				m_build_log.append(lines.at(i));
+			}
 		const json::Value &b = fx.get("build");
 		const json::Value &es = b.get("entities");
 		pf = json::object();
@@ -19903,16 +20225,18 @@ struct Module: public interface::Module, public Interface
 		pf.set("entities", es.is_array() ? es : json::array());
 		if(!b.get("voxels").is_undefined())
 			pf.set("voxels", b.get("voxels"));
-		if(pf.get("entities").size() > MAX_BUILT){
+		const size_t most = m_types[e.comps[comp].type].children;
+		if(pf.get("entities").size() > most){
 			why = "on_build makes "+itos(pf.get("entities").size())+
-					" children, past "+itos(MAX_BUILT);
+					" children, past "+itos(most);
 			return false;
 		}
 		if(pf.get("entities").size() == 0 && pf.get("voxels").is_undefined())
 			return true;
-		// A link to 0 is to the generator itself: aside ("to_self":
-		// [[member, component, output, input]...]), its input the
-		// generator's
+		// A link to 0 is to the generator itself, (4z37f) one with
+		// "to_entity" to an entity of the composition's: aside ("to_self":
+		// [[member, component, output, input, its entity]...]), its input
+		// that entity's
 		json::Value ms0 = pf.get("entities"), self_links = json::array();
 		for(unsigned i = 0; i < ms0.size(); i++){
 			json::Value m = ms0.at(i), cs_ = m.get("components");
@@ -19921,18 +20245,28 @@ struct Module: public interface::Module, public Interface
 				const json::Value &ls = cj.get("links");
 				json::Value keep = json::array();
 				for(unsigned l = 0; l < ls.size(); l++){
-					if(json::jint(ls.at(l), "to", -1) != 0){
+					const int64_t out_id = json::jint(ls.at(l), "to_entity", 0);
+					if(json::jint(ls.at(l), "to", -1) != 0 && !out_id){
 						keep.append(ls.at(l));
 						continue;
 					}
 					const ss_ input = jstr(ls.at(l), "input");
+					auto oi = m_entities.find((uint64_t)out_id);
+					const bool outside = out_id != 0;
+					if(outside && (oi == m_entities.end() || out_id == (int64_t)e.id ||
+							!authored(oi->second) || !oi->second.kind.empty())){
+						why = "on_build: child "+itos(i + 1)+" links to entity "+
+								itos(out_id)+", which is no entity of the composition's";
+						return false;
+					}
 					bool ok = false;
-					for(const Instance &in : e.comps)
+					for(const Instance &in : outside ? oi->second.comps : e.comps)
 						ok = ok || m_types[in.type].inputs.count(input);
 					if(!ok){
-						why = "on_build: child "+itos(i + 1)+" links to the "
-								"generator's "+input.substr(0, 64)+", which it has "
-								"not";
+						why = "on_build: child "+itos(i + 1)+" links to "+
+								(outside ? "entity "+itos(out_id)+"'s " :
+								ss_("the generator's "))+input.substr(0, 64)+
+								", which it has not";
 						return false;
 					}
 					json::Value sl = json::array();
@@ -19940,6 +20274,7 @@ struct Module: public interface::Module, public Interface
 					sl.append((int64_t)k);
 					sl.append(jstr(ls.at(l), "output"));
 					sl.append(input);
+					sl.append(outside ? out_id : (int64_t)e.id);
 					self_links.append(sl);
 				}
 				cj.set("links", keep);
@@ -19949,7 +20284,7 @@ struct Module: public interface::Module, public Interface
 			ms0.set_at(i, m);
 		}
 		pf.set("entities", ms0);
-		if(!check_prefab(pf, why)){
+		if(!check_prefab(pf, why, std::max(MAX_PREFAB, most))){
 			why = "on_build: "+why;
 			return false;
 		}
@@ -20098,7 +20433,7 @@ struct Module: public interface::Module, public Interface
 			json::Value cj = cs_.at(k), ls = cj.get("links"),
 					lj = json::object();
 			lj.set("output", sl.at(2u));
-			lj.set("to", (int64_t)g);
+			lj.set("to", sl.size() > 4 ? sl.at(4u) : json::Value((int64_t)g));
 			lj.set("input", sl.at(3u));
 			ls.append(lj);
 			cj.set("links", ls);
@@ -20248,6 +20583,9 @@ struct Module: public interface::Module, public Interface
 		for(json::Value &row : moved)
 			change.push_back(std::make_pair((uint64_t)json::jint(row, "id", 0),
 					row));
+		m_rb_rows = rows.size();
+		m_rb_kept = kept.size();
+		m_rb_gone = gone.size();
 		what += ", built "+itos(g)+" again: "+itos(rows.size())+" children ("+
 				itos(kept.size())+" kept, "+itos(rows.size() - kept.size())+
 				" new, "+itos(gone.size())+" gone"+(overrides ? ", "+
@@ -20261,6 +20599,9 @@ struct Module: public interface::Module, public Interface
 	bool rebuilds(sv_<std::pair<uint64_t, json::Value>> &change,
 			Peer &p, ss_ &what, ss_ &why)
 	{
+		// ([KIT_GENERATORS] 4z37f: the op "build"'s, built whatever changed)
+		const uint64_t force = m_force_build;
+		m_force_build = 0;
 		for(auto &c : change){
 			if(c.second.is_null() || !c.second.get("built").is_object())
 				continue;
@@ -20336,7 +20677,7 @@ struct Module: public interface::Module, public Interface
 								x.second.get("built"), "by", 0) == n.id)
 							again = false;
 				} else {
-					again = ci >= it->second.comps.size() ||
+					again = n.id == force || ci >= it->second.comps.size() ||
 							it->second.comps[ci].type != n.comps[ci].type ||
 							it->second.comps[ci].params.stringify() !=
 							n.comps[ci].params.stringify();
@@ -20364,11 +20705,20 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			int64_t spent = 0;
+			m_build_log = json::array();
 			const bool built = build_of(n, ci, pf, why, &spent);
 			p.build_tokens -= std::max(BUILD_MIN, m_box ? (double)spent /
 					std::max<int64_t>(1, m_box->budget()) : BUILD_MIN);
+			// [KIT_GENERATORS] (4z37f) its last run
+			GenRun &gr = m_gen_runs[n.id];
+			gr = GenRun();
+			gr.t = time(nullptr);
+			gr.by = p.name;
+			gr.us = interface::os::time_us() - t_us;
+			gr.log = m_build_log;
 			if(!built){
 				why = "entity "+itos(n.id)+"'s "+n.comps[ci].type+": "+why;
+				gr.why = why;
 				log_i(MODULE, "Entity %s's build refused: %s", cs(itos(n.id)),
 						cs(why));
 				return false;
@@ -20379,9 +20729,14 @@ struct Module: public interface::Module, public Interface
 						0 : 1;
 			if(now + pf.get("entities").size() > MAX_ENTITIES){
 				why = "the composition has "+itos(MAX_ENTITIES)+" entities";
+				gr.why = why;
 				return false;
 			}
 			rebuild(n, pf, change, what);
+			gr.ok = true;
+			gr.children = m_rb_rows;
+			gr.kept = m_rb_kept;
+			gr.gone = m_rb_gone;
 			// Its voxels, with the edit's (one box an edit; simplified: what
 			// an earlier build wrote stays where this one writes none)
 			if(pf.get("voxels").is_object() && !m_paste.set){
@@ -32673,6 +33028,20 @@ struct Module: public interface::Module, public Interface
 				"params": {"type": "object", "description":
 					"Instead of param and value: {param: value, ...}"}},
 				"required": ["id"]})J", R"J({"comp": 0})J"},
+			// [KIT_GENERATORS] (4z37f)
+			{"run_generator", "build", "Runs a generator (an entity whose type "
+				"has on_build; get_state's generators lists them, with their last "
+				"run): params (some of its parameters' values) set first, then its "
+				"children built again: those it made last time replaced, "
+				"hand-placed ones kept, one undo. The answer says how many were "
+				"kept, new and gone; a refusal (its own error) says why.",
+				R"J({"type": "object", "properties": {
+				"id": {"type": "integer", "description": "The generator's entity"},
+				"comp": {"type": "integer", "description":
+					"Its component's index, 0 (the first) unless given"},
+				"params": {"type": "object", "description":
+					"Parameter values by name, set first"}},
+				"required": ["id"]})J", R"J({"comp": 0})J"},
 			{"link", "link", "Links an output of an entity's component to an "
 				"input of entity `to`: each time the output signals, the input "
 				"gets its value. Their value types must meet. Or to_name, by "
@@ -36360,6 +36729,11 @@ struct Module: public interface::Module, public Interface
 		if(!m_host.project.empty())
 			s.set("save", m_host.project);
 		s.set("undo", (int64_t)m_undo[p.name].size());
+		// [KIT_GENERATORS] (4z37f) the generators and their last runs
+		const json::Value gens = generators_json(a.get("scene").is_string() ?
+				a.get("scene").as_string() : ss_("*"));
+		if(gens.size())
+			s.set("generators", gens);
 		// [KIT_AGENT_FEEDBACK_1117] 10: only a scene's, some ids' or a type's
 		// entities; state false: no component's state
 		const json::Value &fs = a.get("scene"), &fi = a.get("ids"),
@@ -39045,6 +39419,26 @@ struct Module: public interface::Module, public Interface
 				"under it, and the rules it has from above. A new scene is empty "
 				"(no ground: its players held still until it has ground or a "
 				"spawner of players).\n"
+				// [KIT_GENERATORS] (4z37f)
+				"- Generators: a type with on_build(c) builds its own children "
+				"from its params (a track, a maze, scatter): c:child{type, name, "
+				"pos (its frame's), yaw, pitch, params, parent} -> a number, "
+				"c:link(child, output, to, input) (to: a child's number, 0 the "
+				"generator, {id = n} an entity of the scene's), c:voxel_box{...}; "
+				"c.entities, the scene's other entities ({id, name, types, pos, "
+				"yaw}), to avoid or decorate; c.move, move.lua's library; its "
+				"type's children = n (63 by default, 1023 at most); an error() "
+				"refuses the run, its text the reason. get_state's generators "
+				"lists them and their last run (children, kept, gone, its c:log "
+				"lines, or why refused). run_generator (or a param's set_param) "
+				"builds it again: what it made last time replaced, hand-placed "
+				"entities kept, one undo. A \"points\" param with values = {{name, "
+				"min, max, default}...} has more numbers a point ([x, z, r]: a "
+				"track's corners, level = true: the frame's x and z, dragged in "
+				"the plan view). In play c:generate(id, {seed = n}) (a generator it "
+				"reaches) builds it live for the round: a new layout, nothing "
+				"saved, the authored one back at stop. Brimstone Speedway's "
+				"local/brim_yard is one.\n"
 				// [KIT_ROOT_EDIT]
 				"- The app root: a game of several tracks (Crag Trial's "
 				"template) has its kit/lobby and its screens there (place or "
@@ -41111,6 +41505,8 @@ struct Module: public interface::Module, public Interface
 			}
 			j.set("undo", (int64_t)m_undo[pi->second.name].size());
 			j.set("symmetry", sym_state(pi->second.scene));
+			// [KIT_GENERATORS] (4z37f) the editor's list
+			j.set("generators", generators_json());
 			// The admin's: who is here with an account, to make builders
 			bool admin = false;
 			account_of(peer, &admin);
@@ -42603,6 +42999,47 @@ struct Module: public interface::Module, public Interface
 			what = "deleted "+itos(e->id)+(under ? " and "+itos(under)+
 					" under it" : "")+(change.size() > under + 1 ? ", "+
 					itos(change.size() - under - 1)+" links' ends" : "");
+			return true;
+		}
+		// [KIT_GENERATORS] (4z37f) {"op": "build", "id", "comp", "params"}: a
+		// generator run (the editor's Run, run_generator): its parameters set
+		// first if given, each checked, then built again whether they changed
+		// or not (rebuilds()): one change, one undo
+		if(op == "build"){
+			Entity *e = nullptr;
+			Instance *in = instance_arg(j, e, why);
+			if(!in)
+				return false;
+			if(!m_types[in->type].handlers.count("on_build")){
+				why = "entity "+itos(e->id)+"'s "+in->type+" is no generator "
+						"(no on_build)";
+				return false;
+			}
+			const json::Value &ps = j.get("params");
+			if(!ps.is_undefined() && !ps.is_object() && !(ps.is_array() &&
+					!ps.size())){
+				why = "params: an object of its parameters' values";
+				return false;
+			}
+			const size_t ci = in - &e->comps[0];
+			Entity copy = *e;
+			copy.comps[ci].params = copy.comps[ci].params.deepcopy();
+			what = "ran "+itos(e->id)+"'s "+in->type;
+			const json::Value pobj = ps.is_object() ? ps : json::object();
+			for(json::Iterator it(pobj); it; ++it){
+				const json::Value &decl = m_types[in->type].decl.get("params").
+						get(it.key());
+				const ss_ bad = !decl.is_object() ? ss_("no parameter of it") :
+						check_set_param(decl, *it);
+				if(!bad.empty()){
+					why = in->type+"'s "+it.key().substr(0, 64)+": "+bad;
+					return false;
+				}
+				copy.comps[ci].params.set(it.key(), *it);
+				what += ", "+it.key()+" "+cut_utf8((*it).stringify(), 60);
+			}
+			change.push_back(std::make_pair(e->id, entity_json(copy)));
+			m_force_build = e->id;
 			return true;
 		}
 		if(op == "set"){

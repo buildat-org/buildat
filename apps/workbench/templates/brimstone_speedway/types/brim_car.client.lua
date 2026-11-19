@@ -28,8 +28,8 @@ local PAINTS = {
 local CHROME, GLASS, TYRE = "#d9dee4", "#1a2633", "#141414"
 local CHAR = "#2a2420"
 -- The pose's floor (brim_car.lua's SURF): dust and marks
-local DUST = {"#9a7a52", "#5a4630", nil, "#8a8478", "#9a7a52"}
-local MARK = {"#2e2216", "#1e1610", "#0a0a0c", "#151515", "#2e2216"}
+local DUST = {"#9a7a52", "#5a4630", nil, "#8a8478", "#9a7a52", "#8c8984"}
+local MARK = {"#2e2216", "#1e1610", "#0a0a0c", "#151515", "#2e2216", "#3a3732"}
 
 local function mat(hex)
 	if not mats[hex] then
@@ -159,7 +159,7 @@ end
 -- [RACER_FEEL] The effects: Kit's client part effects (kit.effect,
 -- kit.mark, kit.shake), on this client alone; each kind's first logged.
 -- The floor's height for them: the Bone Yard's floors' tops are 0.555 (the
--- road) to 0.585 (mud, the line), the car's place is its plane's (y 1).
+-- road) to 0.5875 (mud, the line), the car's place is its plane's (y 1).
 -- simplified: one height for the template's track; a track with hills
 -- would take w:under's from the step into the pose
 local FLOOR_Y = 0.57

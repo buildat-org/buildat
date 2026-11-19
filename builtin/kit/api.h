@@ -650,6 +650,32 @@ namespace interface
 //   writes none; a copy following its prefab builds again as its
 //   parameters change, its built children's overrides kept over the
 //   prefab's values. A build at each session's start: stage 7.
+//   (4z37f) A type's `children = n` (1...1023) raises its build's cap (63
+//   by default). c:child takes pitch and roll too; c:link's `to` may be
+//   {id = n}, an entity of c.entities (a checkpoint linked to its race).
+//   c.entities: the generator's scene's other entities, its own children
+//   left out, {id, name, types = {type...}, pos = {x, y, z} (the world's;
+//   none without a place), yaw}: to avoid or decorate hand-placed ones;
+//   c.move: move.lua's library, to check what it builds. An error() refuses
+//   the run (the edit with it), its text the reason. Run again on demand:
+//   the edit op {"op": "build", "id", "comp", "params"} (the editor's Run,
+//   MCP run_generator): params set first, then built whether they changed
+//   or not, one undo. Each generator's last run (when, by whom, children,
+//   kept, gone, ms, its c:log lines or why refused; live for a round's) is
+//   in the edit state's and get_state's "generators" ({id, name, type,
+//   scene, children, last}). A parameter type "points" with `values` =
+//   {{name, min, max, default}...}: each point [x, y, v1...], those after
+//   its x and y in order, each in its range; `level = true`: the points are
+//   the entity's own x and z (the ground's plane), dragged in the plan view
+//   on the entity's own (a track's corner list with each bend's radius);
+//   the inspector edits them as text, a point a line.
+//   In play c:generate(id, params) (a generator the instance reaches, 4 a
+//   run): built again live for the round, params over its own (a seed: a
+//   new layout each round): what it built (authored, or an earlier live
+//   run's) out of the round as c:remove takes it (the authored back at
+//   Stop), the new children made in play under it; nothing saved.
+//   simplified: a live build writes no voxels; refused in a persistent
+//   world
 //   [KIT_SYMMETRY] **Symmetric maps** (kit/symmetry, kit_plan 7c): one a
 //   scene, right under it, put at its World's middle (x = z = 0, level).
 //   Its slices: halves or quadrants, their seams straight (along x and z)
