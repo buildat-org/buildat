@@ -3193,8 +3193,8 @@ end
 -- it is typed (the first error by its line under it), Play/Stop a preview
 -- through jam as the players hear it (the music volume), and the song's
 -- moods to hear it in. Apply sends it with the rest; mark() marks Apply.
--- simplified: a text field alone: no step grid, piano roll or mixer, and
--- no touch mode field entry (its keyboard covers it on a phone)
+-- [JAM_EDITOR] Edit... opens the music editor on it (music_edit.lua, NT.mu)
+-- simplified: no touch mode field entry (its keyboard covers it on a phone)
 function NT.song_section(w, e, key, k, values, mark)
 	local jam = require("buildat/extension/jam")
 	local status
@@ -3209,9 +3209,9 @@ function NT.song_section(w, e, key, k, values, mark)
 			status:SetText(line)
 			status:SetColor(song and DIM or WARN)
 		end
-		if line ~= NT.song_said then
-			NT.song_said = line
-			log:info("kit editor: song " .. k .. ": " .. line)
+		if line .. #s ~= NT.song_said then
+			NT.song_said = line .. #s
+			log:info("kit editor: song " .. k .. ": " .. line .. " (" .. #s .. " bytes)")
 		end
 		return song
 	end
@@ -3254,6 +3254,23 @@ function NT.song_section(w, e, key, k, values, mark)
 		inspector_window()
 	end)
 	b:SetName("song play")
+	button(pr, "Edit...", function()
+		if NT.song_player then
+			NT.song_player:stop()
+			NT.song_player = nil
+		end
+		NT.mu.open({text = now, title = "entity " .. e.id, on_text = function(s)
+			E.pending[key] = E.pending[key] or {}
+			E.pending[key][k] = s
+			now = s
+		end, apply = function(s)
+			send({op = "set", id = e.id, comp = tonumber(key:match("/(%d+)$")) - 1,
+				param = k, value = s})
+			if E.pending[key] then
+				E.pending[key][k] = nil
+			end
+		end, on_close = function() inspector_window() end})
+	end):SetName("song edit")
 	local moods = {"all"}
 	for _, m in ipairs(song and song:info().moods or {}) do
 		moods[#moods + 1] = m
@@ -7772,8 +7789,9 @@ end
 -- arrows turn it with nothing selected; walking is the app's
 local function move_camera(dt)
 	-- [KIT_DROPDOWN_ARROWS_MOVE] an open dropdown's popup has the arrows
+	-- ([JAM_EDITOR] the music editor has the arrows)
 	if typing() or key_held(magic.KEY_LCTRL) or key_held(magic.KEY_RCTRL) or
-			(E.menu and E.menu.held()) or ui_utils.dropdown_open() then
+			(E.menu and E.menu.held()) or ui_utils.dropdown_open() or NT.mu.on() then
 		return
 	end
 	local shift = key_held(magic.KEY_LSHIFT) or key_held(magic.KEY_RSHIFT)
@@ -7877,6 +7895,14 @@ do
 		to_screen = to_screen, px = px, SNAP_PX = SNAP_PX, drawn_at = drawn_at,
 		plane_z = plane_z, type_of = type_of, palette = function() palette() end,
 		plane_at = plane_at})
+end
+
+-- [JAM_EDITOR] The music editor on a song parameter (music_edit.lua, NT.mu)
+do
+	local ok, err, install = buildat.run_script_file("kit/music_edit.lua")
+	assert(ok and type(install) == "function", "kit: music_edit.lua: " ..
+			tostring(err))
+	install({K = K, NT = NT, magic = magic, ui_utils = ui_utils, log = log})
 end
 
 -- [KIT_EDITOR_LOCALS] The rest of the editor: ports, press and drag, the

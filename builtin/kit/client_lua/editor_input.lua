@@ -3756,8 +3756,9 @@ function M.editor(options)
 		-- of the editor's keys are meant while it is open (Escape or a
 		-- click closes it)
 		-- ([KIT_SIGNALS_VIEW] the view keys there: the filter keeps the focus)
+		-- ([JAM_EDITOR] none while the music editor is open: its own)
 		if (typing() and not NT.sg.view_key(key, VIEW_KEYS)) or
-				ui_utils.dropdown_open() then
+				ui_utils.dropdown_open() or NT.mu.on() then
 			return
 		end
 		if M.key("edit", key) then
