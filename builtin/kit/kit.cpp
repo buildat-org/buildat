@@ -5515,6 +5515,9 @@ struct Module: public interface::Module, public Interface
 		// Authored: the save's, or the app's file the first time
 		ss_ authored;
 		bool first = false;
+		// [KIT_API_1] a template's maker, for a refusal (a save's is not
+		// kept: __save's version is the last to open it)
+		ss_ by;
 		if(!m_store->get("authored", authored)){
 			authored = read_file(host.composition_path);
 			if(authored.empty()){
@@ -5522,6 +5525,19 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			first = true;
+			// [KIT_API_1] A newer Buildat's template refused before any of
+			// it is stored: its levels, its edits' generators
+			const ss_ dir = host.composition_path.substr(0,
+					host.composition_path.rfind('/'));
+			json::json_error_t merr;
+			by = jstr(json::load_file((dir+"/meta.json").c_str(), &merr),
+					"buildat_version");
+			why = interface::aitta::kit_level_refusal(json::load_string(
+					authored.c_str()), by);
+			if(why.empty() && host.opens_in_edit)
+				read_edits(dir, &why);
+			if(!why.empty())
+				return false;
 			// [KIT_CUSTOM_TYPES] and its template's types
 			if(!host.local_types_path.empty())
 				import_local_types(host.local_types_path);
@@ -5533,15 +5549,6 @@ struct Module: public interface::Module, public Interface
 		if(!c.is_object()){
 			why = "the composition is not a JSON object";
 			return false;
-		}
-		// [KIT_API_1] a template's maker, for a refusal (a save's is not
-		// kept: __save's version is the last to open it)
-		ss_ by;
-		if(first){
-			json::json_error_t merr;
-			by = jstr(json::load_file((host.composition_path.substr(0,
-					host.composition_path.rfind('/'))+"/meta.json").c_str(), &merr),
-					"buildat_version");
 		}
 		if(!load_composition(c, why, by))
 			return false;
@@ -7804,8 +7811,8 @@ struct Module: public interface::Module, public Interface
 	//   items.json, sounds.json, voxels.json, prefabs.json: {"<author>/<n>":
 	//   its row}, the builders' (a package's left out);
 	//   textures/<hash>.png: the uploads those rows wear;
-	//   edits.bin: zlib's of {"format": "kit_world_edits", "materials":
-	//   heightmap::MAX_MATERIALS, "scenes": {"<scene>": {"names": [voxel...],
+	//   edits.bin: zlib's of {"format": "kit_world_edits", "generator":
+	//   world::VERSION, "materials": heightmap::MAX_MATERIALS, "scenes": {"<scene>": {"names": [voxel...],
 	//   "cells": [x, y, z, its name's index, the rest of its word (param,
 	//   tint)...], "hm": [x, z, the height's float's bits, weights...],
 	//   "decor": [the builders' decorations, the row's]}}}: each World's
@@ -8269,6 +8276,8 @@ struct Module: public interface::Module, public Interface
 			return;
 		json::Value b = json::object();
 		b.set("format", "kit_world_edits");
+		// [KIT_API_1] the generators' version its cells differ from
+		b.set("generator", (int64_t)world::VERSION);
 		b.set("materials", (int64_t)heightmap::MAX_MATERIALS);
 		b.set("scenes", scenes);
 		std::ostringstream os(std::ios::binary);
@@ -8704,6 +8713,9 @@ struct Module: public interface::Module, public Interface
 				&err);
 		// [KIT_API_1] (add_scene_data() names its maker)
 		why = interface::aitta::kit_level_refusal(c);
+		if(!why.empty())
+			return why;
+		read_edits(dir, &why); // [KIT_API_1] its edits' generators this build's
 		if(!why.empty())
 			return why;
 		const json::Value es = file_versions(c, c.get("entities")),
@@ -10204,8 +10216,24 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
-	// An export's edits.bin (undefined: none or not one, logged)
-	json::Value read_edits(const ss_ &dir)
+	// [KIT_API_1] "" if this build's generators made what an edits.bin's
+	// cells differ from (none: a file from before, taken as this build's)
+	static ss_ edits_refusal(const json::Value &edits)
+	{
+		const json::Value &g = edits.get("generator");
+		if(g.is_undefined() || json::jint(edits, "generator", -1) ==
+				world::VERSION)
+			return "";
+		return "its edits were made over the terrain generators' version "+
+				itos(json::jint(edits, "generator", -1))+", this Buildat's is "+
+				itos(world::VERSION)+" (made with "+(json::jint(edits, "generator",
+				-1) > world::VERSION ? "a newer" : "an older")+" Buildat): not "
+				"taken";
+	}
+
+	// An export's edits.bin (undefined: none or not one, logged; why: a
+	// refusal's, edits_refusal()'s)
+	json::Value read_edits(const ss_ &dir, ss_ *why = nullptr)
 	{
 		json::Value edits;
 		const ss_ z = read_file(dir+"/edits.bin");
@@ -10223,6 +10251,13 @@ struct Module: public interface::Module, public Interface
 			log_w(MODULE, "The template's edits.bin: not kit_world_edits");
 			edits = json::Value();
 		}
+		if(!edits_refusal(edits).empty()){
+			log_w(MODULE, "The template's edits.bin: %s",
+					cs(edits_refusal(edits)));
+			if(why)
+				*why = "edits.bin: "+edits_refusal(edits);
+			edits = json::Value();
+		}
 		return edits;
 	}
 
@@ -10232,17 +10267,26 @@ struct Module: public interface::Module, public Interface
 	{
 		const json::Value &sc = edits.get("scenes");
 		const int M = heightmap::MAX_MATERIALS, C = HM_EDIT_CHUNK;
+		// [KIT_API_1] each sample's weights the file's count, this build's
+		// padded with 0 or cut
+		const int64_t FM = json::jint(edits, "materials", 0);
+		if(FM < 1 || FM > 64){
+			if(sc.is_object() && sc.size())
+				log_w(MODULE, "edits.bin's heightmap: no \"materials\" of 1...64: "
+						"its samples left out");
+			return;
+		}
 		for(json::Iterator it(sc); sc.is_object() && it; ++it){
 			if(!name_ok(it.key()))
 				continue;
 			const ss_ at = it.key() == m_host.world_scene ? "" : ":"+it.key();
 			const json::Value &hm = (*it).get("hm");
 			std::map<std::pair<int, int>, ss_> chunks;
-			for(unsigned i = 0; json::jint(edits, "materials", 0) == M &&
-					hm.is_array() && i + 3 + M <= hm.size(); i += 3 + M){
-				int64_t v[3 + heightmap::MAX_MATERIALS];
+			for(unsigned i = 0; hm.is_array() && i + 3 + FM <= hm.size();
+					i += 3 + FM){
+				int64_t v[3 + heightmap::MAX_MATERIALS] = {0};
 				bool ok = true;
-				for(int k = 0; k < 3 + M; k++){
+				for(int k = 0; k < 3 + std::min<int>(M, FM); k++){
 					const json::Value &x = hm.at(i + k);
 					ok = ok && x.is_number() && x.as_number() == std::floor(
 							x.as_number()) && std::fabs(x.as_number()) < 5e9;
@@ -38590,7 +38634,8 @@ struct Module: public interface::Module, public Interface
 			why = "its voxels are not kit_world_edits";
 			return false;
 		}
-		return true;
+		why = edits_refusal(edits);
+		return why.empty();
 	}
 
 	ss_ checkpoint_list()
