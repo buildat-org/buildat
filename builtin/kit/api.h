@@ -155,6 +155,10 @@ namespace interface
 //              title, author}...}: the scenes a kit/scene_info on them
 //              lists (title the scene's name where it gives none), by the
 //              scene's id (kit/ui_scene_list, kit/arena's maps "*")
+//   experimental = true      -- [KIT_API_1] (item 10) the type is outside
+//              Kit API 1 and may change in any release (kit/path,
+//              kit/parallax): get_guide's list says "(experimental)", and
+//              publishing a game that places one warns
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
 //   about    = {what = "...", inputs = {name = "..."}, outputs = {name = "..."}}
 //                            -- [KIT_SIGNALS_DOCS] For the builders, all of it
@@ -634,7 +638,10 @@ namespace interface
 //   keep_own_body: the player's own body stays drawn for them out of play,
 //   their camera on it (no spectating), hidden from the others as ever (the
 //   pose's flag 8, players.lua).
-//   [KIT_GENERATORS] **Generators**: a type with on_build(c) builds its
+//   [KIT_GENERATORS] **Generators** (experimental, [KIT_API_1]: on_build,
+//   c:child, c:link, c:voxel_box, c.entities, c.move, c:generate and the
+//   "points" keys `values` and `level` may change in any release; publishing
+//   a game that uses them warns): a type with on_build(c) builds its
 //   own children from c.params, in the editor: as it is placed (not a
 //   copy that has its own: a duplicate, a prefab's, a paste) and as an
 //   edit changes its parameters, into that edit (one undo puts the old
@@ -912,7 +919,8 @@ namespace interface
 //   (kit/polygon's params so named): a spike strip a bike's step crashes on
 //   itself, no zone and no round trip.
 //   [KIT_SIDE_SCENERY] (8) parallax = {follow =, follow_y =, repeat =}
-//   ("param:<name>" as a look's; kit/parallax): the looks under the entity
+//   ("param:<name>" as a look's; kit/parallax; experimental, [KIT_API_1]:
+//   the field and the type may change in any release): the looks under the entity
 //   are drawn by each client offset by its camera's travel from the
 //   entity's place, 1 - follow of it along x and 1 - follow_y up
 //   ([KIT_TOP_DOWN] (5) along z with kit/controls' plane horizontal), with
@@ -1687,7 +1695,15 @@ namespace interface
 // anywhere in its scene; simplified: the pathfinder does not walk a deck);
 // c.seat is the seat held (0: none), c:drive{f, r, fire} its inputs there
 // (-1...1; fire: a holder's jump, a turret's trigger), c:leave_seat() back
-// where it stood; a teleport or a death takes it out. A turret held by a bot
+// where it stood; a teleport or a death takes it out. [KIT_BOT_DRIVE] A
+// driving bot (kit/bot's drive) also steers the players' movement with
+// c:drive; its runs have c.body {pos, vel, yaw, top} (its body as last
+// stepped, the world's; top its movement's speed) and c.path {points =
+// {{x, y, z}...}} (its kit/bot's `path`, else its scene's first kit/path,
+// in the world; nil: none). Experimental ([KIT_API_1]): c:drive, c.body,
+// c.path, kit/path and kit/bot's drive, skill and ask may change in any
+// release, and publishing a type that uses them warns; a kit/bot that
+// walks the goals is Kit API 1's. A turret held by a bot
 // fires its shots as the bot's. c.aim(speed, gravity, d, h, lo, hi): the
 // flattest elevation (radians) between lo and hi whose arc is h m over the
 // muzzle d m out (move.lua's M.aim, by M.arc, which a gunner's impact

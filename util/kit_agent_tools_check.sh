@@ -66,7 +66,9 @@
 #      the movement's draw given the predicted state (8); two
 #      parts passing a value through kit.shared (2), [KIT_API_1] kit.editor nil
 #      to a part and kit.internal.editor a function; a part's on_add failing:
-#      in get_log and in kitboss's editor Log, its entity selected (4).
+#      in get_log and in kitboss's editor Log, its entity selected (4);
+#      [KIT_API_1] export_template's warning naming the part's .internal
+#      and the zones' kit/parallax (experimental).
 #   util/kit_agent_tools_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -1026,6 +1028,14 @@ elif phase == "client":
         r"(the server's camera|kitboss's agent's client): local/pf\.client:1: pf fails on purpose$",
         l[0]), l
     print("   pf entity %d: %s" % (EF, l[0]))
+    # [KIT_API_1] (item 10) pq's part uses kit.internal, and the zones
+    # phase's kit/parallax is an experimental type: export_template's
+    # warning, as publishing's, names both (one call: this token's minute
+    # is near its 120 with restore's and back's polls)
+    w = json.loads(call("export_template")).get("warning", "")
+    assert w.startswith("Uses experimental parts of Kit") and \
+        ".internal (types/pq.client.lua)" in w and "kit/parallax" in w, w
+    print("   export_template: " + w)
 elif phase == "client_end":
     # (after kitboss's editor Log showed pf's failure)
     rpc("initialize", init)

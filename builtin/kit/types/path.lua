@@ -7,6 +7,8 @@
 -- crossing), so a figure eight or an open route is no path yet
 return {
 	version = 1,
+	-- [KIT_API_1] outside Kit API 1: it may change in any release
+	experimental = true,
 	gizmo = {shape = "sphere", size = 0.3, color = "#40c0ff"},
 	about = {
 		group = "Game",

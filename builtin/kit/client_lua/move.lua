@@ -15,7 +15,8 @@
 --     metres its target is raised, touch = "stick"|"tap"|"drive",
 --     touch_buttons = {{"Fire", "jump"}...}: the touch bar's buttons, each
 --     held while pressed as that input (jump or down), for the default Jump,
---     [KIT_TOUCH_THUMBS] touch_axes = {{"Left", "r", -1}, {"Right", "r", 1}}:
+--     [KIT_TOUCH_THUMBS] touch_axes (experimental, [KIT_API_1]: it may
+--     change in any release) = {{"Left", "r", -1}, {"Right", "r", 1}}:
 --     a stack at the lower left beside the stick (top to bottom), each holding
 --     that input (f or r) at that value while pressed (full steering taps),
 --     [KIT_PLAY_HINTS] help = {{"[forward]/[back]", "gas, brake", "f"}...}

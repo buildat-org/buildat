@@ -16,6 +16,8 @@
 -- both ways. The name kept: follow_y is the view's second axis
 return {
 	version = 1,
+	-- [KIT_API_1] outside Kit API 1: it may change in any release
+	experimental = true,
 	parallax = {follow = "param:follow", follow_y = "param:follow_y",
 		["repeat"] = "param:repeat"},
 	params = {
