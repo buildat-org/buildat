@@ -55,14 +55,15 @@ cleanup(){
 trap cleanup EXIT
 
 # WEB_DRIVE_URL: a server already running there (a package's smoke), and
-# none started here
+# none started here. WEB_DRIVE_WEB: the web client's files from there
+# instead of web/ (an older build's, to compare)
 url=${WEB_DRIVE_URL:-}
 code=""
 if [ -z "$url" ]; then
 	echo "web_drive: $browser, $game on port $port, out $out"
 	cd "$here"
 	setsid Build/bin/buildat_server -m "apps/$game" -D "$out/user" -P "$port" \
-			-W "$here/web" -l 3 > "$out/server.log" 2>&1 &
+			-W "${WEB_DRIVE_WEB:-$here/web}" -l 3 > "$out/server.log" 2>&1 &
 	pids+=($!)
 	for i in $(seq 1 120); do
 		grep -q "Listening at" "$out/server.log" && break

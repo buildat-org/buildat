@@ -118,6 +118,9 @@
 //                           (Chrome only)
 //   ["cpu", rate]           the page's CPU that many times slower, as a
 //                           phone's (Chrome only)
+//   ["init", js]            js run in each page loaded after it, before the
+//                           page's own scripts (a capture's hooks; Chrome
+//                           only)
 //   ["watch", regex, s, ms] until a console line from here on matches, the
 //                           page as drawn taken every 500 ms: says each
 //                           #status text (the loading stripe's while up) and each stretch over ms where
@@ -617,6 +620,7 @@ async function chrome() {
 					"portraitPrimary", angle: land ? 90 : 0});
 		},
 		cpu: rate => c.send("Emulation.setCPUThrottlingRate", {rate}),
+		init: js => c.send("Page.addScriptToEvaluateOnNewDocument", {source: js}),
 		// The screen and #status, or the loading stripe's line while it is
 		// up ([JOIN_STRIPES]), for watch
 		look: async () => {
