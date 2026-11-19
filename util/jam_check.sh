@@ -18,8 +18,10 @@ check_tmp jam; t=$CHECK_TMP
 export SDL_AUDIODRIVER=dummy
 # jam1's samples: a change here is a jam2 beside it, never an edit (a
 # song's text changed is a new hash of its own: kit_plan 4z37h's tempo,
-# repeats and -3 dB)
-HASHES="scrap_heat:44bf220977ef7256 scrap_heat/calm:41c90017b27f284a yard_vamp:db6e26bc09b5eef6"
+# repeats and -3 dB). The jam app's templates ([JAM_APP]): Slow Tide's 40 s
+# reach its chance notes (%25), and both run cutoff LFOs (flfo)
+HASHES="scrap_heat:44bf220977ef7256 scrap_heat/calm:41c90017b27f284a yard_vamp:db6e26bc09b5eef6
+	launch_room:faa8a83375bce415 slow_tide:39d7ad3b331f7499"
 slow_limit cost_ms 120
 
 # Brimstone's music is jam.songs' (one text, two places)
@@ -37,7 +39,8 @@ for e in comp["entities"]:
         name = [n for n, s in songs.items() if s == c["params"].get("song")]
         assert name, "entity %s's song is not one of jam.songs" % e["id"]
         found.add(name[0])
-assert found == set(songs), found
+# (the jam app's templates are jam.songs too: Brimstone's are its two)
+assert found == {"scrap_heat", "yard_vamp"} and found <= set(songs), found
 PY
 
 lines(){ grep -a "jam check:" "$1" | grep -av 'wait_log\|command' | sed 's/.*jam check: //'; }

@@ -1033,7 +1033,7 @@ interface/event.h: EVENT_DISPATCH_VOID, EVENT_VOIDN, EVENT_TYPEN, Event, Type, P
 interface/file_watch.h: FileWatch, ~FileWatch, add, get_fds, report_fd, update, createFileWatch
 interface/fs.h: Node, list_directory, create_directories, get_cwd, get_absolute_path, is_inside_path, path_exists, copy_file, remove_all, rename, write_file, migrate_user_apps, file_size, directory_tree_size, touch, remove_older, icon_png_ok, read_icon_png, check_file_extension, strip_file_extension, strip_file_name
 interface/http.h: http_get, http_get_pinned, http_post, send_mail, mail_supported, http_download
-interface/jam.h: Info, parse, info, song_sample, bar_of, Engine, render, set_mood, seek, position, mood_at, voices, solo, tap, tapped, block_size, analyze
+interface/jam.h: Info, parse, info, song_sample, bar_of, Engine, render, set_mood, seek, position, mood_at, voices, solo, tap, tapped, block_size, analyze, wav
 interface/magic_event.h: MagicEvent
 interface/magic_event_handler.h: MagicEventHandler, emit_event, on_event
 interface/markup.h: to_html

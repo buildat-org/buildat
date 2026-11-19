@@ -1,10 +1,11 @@
--- Buildat: builtin/kit/client_lua/music_edit.lua
+-- Buildat: extensions/jam/music_edit.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
 -- [JAM_EDITOR] **The music editor**: a kit/music song (jam1, doc/client_api.txt)
--- in views over its text, opened by the inspector's "Edit..." under the song
--- field (editor.lua's song_section). **The text is the song**: every edit of a
+-- in views over its text, opened by Kit's inspector's "Edit..." under the song
+-- field (builtin/kit/client_lua/editor.lua's song_section) and by the jam app
+-- ([JAM_APP], app.lua): one copy, run by jam.editor(A) for each. **The text is the song**: every edit of a
 -- view rewrites the lines it changes (the others as they were, comments and
 -- spacing too) and the views are drawn again from the text, so a text typed
 -- (the Text view, or the inspector's field) shows in them at once and an agent's
@@ -48,7 +49,7 @@
 --   - **Text**: the text itself, read as it is typed.
 -- Keys: Escape closes, Ctrl+Z undoes, Space plays or stops, Delete takes the
 -- selected step or note out, the arrows move it (Up and Down: a semitone).
--- Logs "kit editor: music ...".
+-- Logs "kit editor: music ..." (A.log_prefix the "kit editor: music " part).
 -- **Touch**: every action is a click (a tap) on a target at least SH.TOUCH
 -- across in the touch mode, nothing on hover; what is not touch-ready: the
 -- roll's drags (the buttons below do the same), the sliders' fine steps
@@ -833,7 +834,8 @@ J.INST = {
 		{"spread", -100, 100, 0}, {"drive", 0, 60, 0}},
 	filter = {{"cut", 10, 20000, 2000}, {"res", 0, 0.98, 0.2}, {"fenv", -10, 10, 0},
 		{"fa", 0, 30, 0.002}, {"fd", 0, 60, 0.3}, {"fs", 0, 1, 0}, {"fr", 0, 60, 0.1},
-		{"ktrack", -2, 2, 0.5}, {"velf", -4, 4, 0.5}},
+		{"ktrack", -2, 2, 0.5}, {"velf", -4, 4, 0.5}, {"flfo", -8, 8, 0},
+		{"flforate", 0, 20, 0.1}},
 	osc = {{"mix2", 0, 1, 0.5}, {"detune2", -1200, 1200, 7}, {"oct2", -4, 4, 0},
 		{"pw", 0, 1, 0.5}, {"pwm", 0, 1, 0}, {"pwmrate", 0, 50, 0.5}, {"sub", 0, 2, 0},
 		{"noise", 0, 2, 0}},
@@ -936,6 +938,7 @@ if not A then
 end
 local K, NT = A.K, A.NT
 local magic, ui_utils, log = A.magic, A.ui_utils, A.log
+local PRE = A.log_prefix or "kit editor: music "
 local text, edit = K.text, K.edit
 -- Buttons as wide as their text and rows of one height: a row's layout
 -- spread a window's room over them
@@ -986,7 +989,7 @@ end
 
 local function say(s)
 	MU.status = s
-	log:info("kit editor: music " .. s)
+	log:info(PRE .. s)
 end
 
 -- The text read again: the model, and jam's song or the reason it is none
@@ -1009,7 +1012,7 @@ local function set_text(t, what, quiet)
 	end
 	read(t)
 	MU.opts.on_text(t)
-	log:info("kit editor: music edit " .. what .. ": " .. (MU.err and
+	log:info(PRE .. "edit " .. what .. ": " .. (MU.err and
 			"Error: " .. MU.err or "parses") .. ", " .. #t .. " bytes")
 	MU.status = what
 	if MU.player then
@@ -1100,7 +1103,7 @@ local function audition(track, tok, inst)
 	stop_audition()
 	MU.aud = jam.play(song)
 	MU.aud_stop = now_us() + math.min(3, 2 * song:info().bar) * 1e6
-	log:info("kit editor: music audition " .. tostring(track or inst) .. " " .. tok)
+	log:info(PRE .. "audition " .. tostring(track or inst) .. " " .. tok)
 end
 
 -- ---- Sizes: cells, rows; the touch mode's bigger
@@ -1112,7 +1115,7 @@ local function sizes()
 	MU.CH = MU.touch and 32 or 22
 	MU.LW = 80
 	-- (Kit's guide hidden meanwhile: editor_input.lua's draw_guide)
-	MU.W, MU.H = r.width - 16, r.height - 16
+	MU.W, MU.H = r.width - 16, r.height - 16 - (MU.opts.top or 0)
 end
 
 -- A cell: a coloured box at x, y in a free parent, named for a drive
@@ -2420,14 +2423,18 @@ local function analyze()
 	MU.draw()
 end
 
-function MU.close()
+-- force: past opts.may_close() (false: kept open, the opener asks first)
+function MU.close(force)
 	MU.close_due = nil
+	if not force and MU.opts.may_close and not MU.opts.may_close() then
+		return
+	end
 	stop()
 	stop_audition()
 	MU.win, MU.grid, MU.ph, MU.press = nil, nil, nil, nil
 	uistack.main:pop(MU.root)
 	MU.root = nil
-	log:info("kit editor: music closed, " .. #MU.text .. " bytes")
+	log:info(PRE .. "closed, " .. #MU.text .. " bytes")
 	MU.opts.on_close()
 end
 
@@ -2444,11 +2451,13 @@ local function header(win)
 	end
 	text(r1, "  ")
 	button(r1, "Undo", undo):SetName("music undo")
-	button(r1, "Apply", function()
-		MU.opts.apply(MU.text)
-		say("applied, " .. #MU.text .. " bytes")
-		MU.draw()
-	end):SetName("music apply")
+	if MU.opts.apply then
+		button(r1, "Apply", function()
+			MU.opts.apply(MU.text)
+			say("applied, " .. #MU.text .. " bytes")
+			MU.draw()
+		end):SetName("music apply")
+	end
 	button(r1, "Close", MU.close):SetName("music close")
 	local r2 = row(win)
 	button(r2, MU.player and "Stop" or "Play", function()
@@ -2514,6 +2523,9 @@ local function header(win)
 	end
 	MU.status_text = text(r3, "  " .. (MU.err and "Error: " .. MU.err or MU.status or
 			"Parses"), MU.err and WARN or DIM)
+	if MU.opts.file_row then
+		MU.opts.file_row(row(win))
+	end
 end
 
 function MU.draw()
@@ -2524,7 +2536,7 @@ function MU.draw()
 	win:RemoveAllChildren()
 	MU.grid, MU.ph, MU.playing_texts, MU.press = nil, nil, nil, nil
 	header(win)
-	MU.bh = MU.H - 16 - 3 * ((MU.touch and 32 or 28) + 4) - 4
+	MU.bh = MU.H - 16 - (MU.opts.file_row and 4 or 3) * ((MU.touch and 32 or 28) + 4) - 4
 	local body = win:CreateChild("UIElement")
 	body:SetFixedHeight(MU.bh)
 	body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
@@ -2539,8 +2551,10 @@ function MU.draw()
 	end
 end
 
--- The editor on a song: opts {text, title, on_text(text), apply(text),
--- on_close()}
+-- The editor on a song: opts {text, title, on_text(text), apply(text) (no
+-- Apply without it), on_close(), file_row(row) (a fourth header row's
+-- contents: the jam app's files), may_close() (false keeps it open), top
+-- (UI pixels left free above it: the launcher's own buttons)}
 function MU.open(opts)
 	if MU.win then
 		return
@@ -2562,14 +2576,14 @@ function MU.open(opts)
 	local win = root:CreateChild("Window")
 	win:SetStyleAuto()
 	win:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(8, 8, 8, 8))
-	win:SetPosition(8, 8)
+	win:SetPosition(8, 8 + (opts.top or 0))
 	win:SetFixedSize(MU.W, MU.H)
 	win.clipChildren = true
 	win:SetName("music window")
 	ui_utils.wants_clicks(win)
 	MU.root, MU.win = root, win
 	local m = MU.m
-	log:info(string.format("kit editor: music opened %s: %d bytes, %d tracks, " ..
+	log:info(string.format(PRE .. "opened %s: %d bytes, %d tracks, " ..
 			"%d patterns, %d sections, %s", opts.title, #opts.text, #m.tracks,
 			#m.patterns, #m.sections, MU.err and "Error: " .. MU.err or "parses"))
 	MU.draw()
@@ -2580,6 +2594,10 @@ end
 magic.SubscribeToEvent("UIMouseClick", function(_, d)
 	local g = MU.win and MU.grid
 	if not g or ui_utils.dropdown_open() or d:GetInt("Button") ~= magic.MOUSEB_LEFT then
+		return
+	end
+	-- Not through a screen over it (the jam app's file picker placed a step)
+	if uistack.main:top() ~= MU.root then
 		return
 	end
 	local p = g.el.screenPosition
@@ -2593,7 +2611,7 @@ magic.SubscribeToEvent("UIMouseClick", function(_, d)
 		return
 	end
 	-- (for a drive's drag: where, in the UI's units)
-	log:info(string.format("kit editor: music press at %d %d of %d, cells %d %d",
+	log:info(string.format(PRE .. "press at %d %d of %d, cells %d %d",
 			mx, my, magic.ui.root.width, MU.CW, MU.CH))
 	g.press(r + 1, g.first + c, mx, my, x - c * MU.CW)
 end)
@@ -2722,7 +2740,9 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 		-- (closed next frame: Kit's own handler, after this one, sees it
 		-- open and leaves the Escape alone; an app's pause menu asks
 		-- kit.escape() first, which closes it at once)
-		MU.close_due = not ui_utils.dropdown_open() or nil
+		-- Not a dialog's over it (its Escape is its own Cancel)
+		MU.close_due = not ui_utils.dropdown_open() and
+				uistack.main:top() == MU.root or nil
 		return
 	end
 	local f = magic.ui.focusElement

@@ -41,12 +41,14 @@ end
 say(bad == 0 and ("errors ok, " .. #BAD) or "errors FAILED")
 
 -- **The hashes and the cost**: the first 10 s of each song (and one in a
--- mood), the samples' hash and the render's milliseconds a second
+-- mood), the samples' hash and the render's milliseconds a second; Slow
+-- Tide's 40 s, into its bells' %25 notes ([JAM_APP]: flfo and chance)
 local songs = {}
-for _, h in ipairs({{"scrap_heat"}, {"scrap_heat", "calm"}, {"yard_vamp"}}) do
+for _, h in ipairs({{"scrap_heat"}, {"scrap_heat", "calm"}, {"yard_vamp"},
+		{"launch_room"}, {"slow_tide", nil, 40}}) do
 	local s = assert(jam.song(jam.songs[h[1]]))
 	songs[h[1]] = s
-	local a = s:analyze(10, h[2])
+	local a = s:analyze(h[3] or 10, h[2])
 	say(string.format("hash %s%s %s, %s ms per s, %s LUFS", h[1],
 			h[2] and ("/" .. h[2]) or "", a:match('"hash": "(%x+)"'),
 			a:match('"cpu_ms_per_s": ([%d.]+)'), a:match('"lufs": ([-%d.]+)')))

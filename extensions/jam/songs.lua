@@ -9,6 +9,10 @@
 -- master gain and ceiling (-14 at first, then 3 dB down to sit under the
 -- game: kit_plan 4z37h). The template's kit/music entities hold the same texts
 -- (util/jam_check.sh compares them); its race's tempo is the user's pick.
+-- [JAM_APP] And the jam app's other starters: Slow Tide (an ambient pad)
+-- and Launch Room (extensions/launch_world's room music as a song, its
+-- layers' loudness and bands within 2 dB of synth.lua's m116_broken's,
+-- measured offline), both at -17 LUFS.
 return {
 scrap_heat = [==[
 # Scrap Heat: gritty rock for Brimstone Speedway (E, 156 bpm).
@@ -312,5 +316,244 @@ section blues: rE1+drA rE2+drA rE1+drA rE3+drA rA1+drA rA2+drA rE1+drA rE2+drA r
 section vamp:  vamp+drB vamp+drB vamp+drB vampend+drB
 play intro blues vamp
 loop blues
+]==],
+slow_tide = [==[
+# Slow Tide: a slow ambient pad (D minor, 60 bpm, no drums). Warm
+# detuned saws whose filter breathes on a slow LFO, a glassy upper
+# voicing, a sine sub and sparse bells drawn at random each pass. Two
+# bars a chord: Dm9, Bbmaj9, Fadd9, C6/9; the bells come in on the
+# second pass of the chords and the whole loops.
+title Slow Tide
+tempo 60
+steps 16
+beat 4
+swing 0
+
+reverb size=1.3 decay=6 damp=0.6 predelay=0.04 lowcut=200
+delay time=6 feedback=0.5 tone=1800
+master comp=-20 ratio=1.5 ceiling=-5 gain=-4.4
+
+inst warm osc wave=saw wave2=saw detune2=12 mix2=0.5 ftype=lp poles=4 cut=520 res=0.12 ktrack=0.3 flfo=1 flforate=0.023 a=3.5 d=1 s=1 r=4 gate=1 vels=0
+inst glass osc gain=-14 wave=tri wave2=sine oct2=1 mix2=0.3 detune2=4 ftype=lp cut=2400 ktrack=0 flfo=0.7 flforate=0.013 a=4 d=1 s=1 r=5 gate=1 vels=0
+inst sub osc wave=sine a=1.5 d=1 s=1 r=2.5 gate=1 vels=0
+inst bell fm gain=-8 ratio=3.5 index=1.4 idecay=1.2 ifloor=0.05 tine=0.2 tratio=7 tdecay=0.1 a=0.004 d=7 s=0 r=3 vels=0.6
+
+track warm  inst=warm  gain=-6 rev=0.5 trem=0.15 tremsteps=96
+track glass inst=glass gain=-15 pan=0.25 rev=0.9 trem=0.3 tremsteps=56
+track sub   inst=sub   gain=-8
+track bell  inst=bell  gain=-16 pan=-0.3 rev=1 dly=0.5 seed=3
+
+mood deep glass=off bell=off
+mood bare glass=off bell=off warm=-4
+
+def dm9  D3+F3+A3+C4+E4
+def bb9  Bb2+D3+F3+A3+C4
+def f9   F2+C3+G3+A3+C4
+def c69  C3+E3+A3+D4
+
+# A chord a pattern, two bars each
+pattern d bars=2
+warm:  dm9 - - - - - - - - - - - - - - -
+warm:  - - - - - - - - - - - - - - - -
+glass: A4+E5 - - - - - - - - - - - - - - -
+glass: - - - - - - - - - - - - - - - -
+sub:   D2 - - - - - - - - - - - - - - -
+sub:   - - - - - - - - - - - - - - - -
+pattern bb bars=2
+warm:  bb9 - - - - - - - - - - - - - - -
+warm:  - - - - - - - - - - - - - - - -
+glass: F4+D5 - - - - - - - - - - - - - - -
+glass: - - - - - - - - - - - - - - - -
+sub:   Bb1 - - - - - - - - - - - - - - -
+sub:   - - - - - - - - - - - - - - - -
+pattern f bars=2
+warm:  f9 - - - - - - - - - - - - - - -
+warm:  - - - - - - - - - - - - - - - -
+glass: C5+G5 - - - - - - - - - - - - - - -
+glass: - - - - - - - - - - - - - - - -
+sub:   F1 - - - - - - - - - - - - - - -
+sub:   - - - - - - - - - - - - - - - -
+pattern c bars=2
+warm:  c69 - - - - - - - - - - - - - - -
+warm:  - - - - - - - - - - - - - - - -
+glass: E4+D5 - - - - - - - - - - - - - - -
+glass: - - - - - - - - - - - - - - - -
+sub:   C2 - - - - - - - - - - - - - - -
+sub:   - - - - - - - - - - - - - - - -
+
+# Bells on D minor's pentatonic, each on a quarter of the passes
+pattern bells bars=2
+bell: . . . . A5%25 . . . . . . . D6%25 . . .
+bell: . . F5%25 . . . . . C6%25 . . . . . G5%25 .
+
+section drift: d bb f c
+section tide:  d+bells bb+bells f+bells c+bells
+play drift tide
+loop drift
+]==],
+launch_room = [==[
+# Launch Room: the launcher's room music (extensions/launch_world's
+# synth.lua, m116_broken) as a song: downtempo, a broken beat with swung
+# hats, two pads over Cmaj7 Am7 Fmaj7 G, a sub bass, a dotted riff into
+# the delay, wind and chimes. Six sections of 16 bars, looping. What keeps
+# it moving as the room's does: the pads' and the wind's filters swept by
+# slow LFOs on the song's clock (flfo, flforate), so no pass sounds like
+# the last, and chimes drawn at random each pass (%N).
+title Launch Room
+tempo 116
+steps 16
+beat 4
+swing 0.16
+
+reverb size=1 decay=2.4 damp=0.5 predelay=0.02 lowcut=220
+delay time=3 feedback=0.42 tone=2400
+master comp=-18 ratio=1.6 ceiling=-4 gain=-2
+
+# padA: sines with a little of the second harmonic, its brightness swept;
+# padB: two detuned saws through four poles, the cutoff swept slower
+inst padA osc gain=-1.6 wave=sine wave2=tri oct2=1 mix2=0.3 detune2=0 ftype=lp cut=900 res=0.1 ktrack=0 flfo=1.2 flforate=0.011 a=1.6 d=1 s=1 r=1.6 gate=1 vels=0
+inst padB osc gain=-1.9 wave=saw wave2=saw detune2=14 mix2=0.5 ftype=lp poles=4 cut=300 res=0.15 ktrack=0 flfo=1.3 flforate=0.0072 a=2 d=1 s=1 r=2 gate=1 vels=0
+inst sub osc wave=sine a=0.05 d=1 s=1 r=0.4 gate=1 vels=0
+inst riff osc wave=saw ftype=lp cut=300 res=0.25 fenv=3.2 fa=0.001 fd=0.25 fs=0 fr=0.3 ktrack=0.5 a=0.002 d=2 s=0 r=0.3 gate=1 vels=0.4
+inst wind osc gain=11 wave=none noise=1 ftype=lp poles=2 cut=70 res=0 ktrack=0 flfo=0.8 flforate=0.005 a=3 d=1 s=1 r=3 gate=1 vels=0
+inst chime osc gain=-11 wave=sine wave2=sine oct2=1 detune2=558 mix2=0.2 a=0.003 d=9 s=0 r=4 vels=0.5
+inst kick kick tone=50 pdrop=3 pdecay=0.05 click=0.05 d=1 s=0 vels=0.7
+inst snare snare tone=185 pdrop=1.3 pdecay=0.02 snappy=0.55 ndecay=0.2 nfreq=3200 d=0.3 s=0 vels=0.7
+inst hat hat tone=50 metal=0.3 noise=0.9 nfreq=8500 d=0.07 s=0 odecay=0.45 vels=0.8
+inst rim snare tone=820 pdrop=1 pdecay=0.01 snappy=0.8 ndecay=0.04 nfreq=5000 d=0.05 s=0 vels=0.6
+
+# trem: the pads' slow swell (256 steps, 33 s); the wind's
+track padA  inst=padA  gain=-11 pan=-0.2 trem=0.25 tremsteps=256 rev=0.4
+track padB  inst=padB  gain=-13 pan=0.2 trem=0.2 tremsteps=200 rev=0.4
+track sub   inst=sub   gain=-14 mono=1
+track riff  inst=riff  gain=-12 pan=0.15 dly=0.8 rev=0.2 mono=1
+track wind  inst=wind  gain=-4 pan=-0.1 trem=0.4 tremsteps=256 rev=0.3
+track chime inst=chime gain=-16 pan=0.3 rev=0.7 dly=0.3 seed=7
+track kick  inst=kick  gain=0
+track snare inst=snare gain=-11 rev=0.25 hum=4
+track hat   inst=hat   gain=0 pan=0.25 choke=1 hum=5 velr=0.1 hp=500
+track rim   inst=rim   gain=-1 pan=-0.25 rev=0.2
+
+# Moods for a game to move between, as the room's engagement does
+mood calm kick=off snare=off hat=off rim=off riff=-6
+mood still kick=off snare=off hat=off rim=off riff=off sub=-6
+
+def cmaj C3+E3+G3+B3
+def am7  A2+C3+E3+G3
+def fmaj F2+A2+C3+E3
+def g6   G2+B2+D3+G3
+
+# The chords, four bars each: padA, padB and the sub as separate layers
+pattern aC bars=4
+padA: cmaj - - - - - - - - - - - - - - -
+padA: - - - - - - - - - - - - - - - -
+padA: - - - - - - - - - - - - - - - -
+padA: - - - - - - - - - - - - - - - -
+pattern bC bars=4
+padB: cmaj - - - - - - - - - - - - - - -
+padB: - - - - - - - - - - - - - - - -
+padB: - - - - - - - - - - - - - - - -
+padB: - - - - - - - - - - - - - - - -
+pattern sC bars=4
+sub: C2 - - - - - - - - - - - - - - -
+sub: - - - - - - - - - - - - - - - -
+sub: - - - - - - - - - - - - - - - -
+sub: - - - - - - - - - - - - - - - -
+pattern aA bars=4
+padA: am7 - - - - - - - - - - - - - - -
+padA: - - - - - - - - - - - - - - - -
+padA: - - - - - - - - - - - - - - - -
+padA: - - - - - - - - - - - - - - - -
+pattern bA bars=4
+padB: am7 - - - - - - - - - - - - - - -
+padB: - - - - - - - - - - - - - - - -
+padB: - - - - - - - - - - - - - - - -
+padB: - - - - - - - - - - - - - - - -
+pattern sA bars=4
+sub: A1 - - - - - - - - - - - - - - -
+sub: - - - - - - - - - - - - - - - -
+sub: - - - - - - - - - - - - - - - -
+sub: - - - - - - - - - - - - - - - -
+pattern aF bars=4
+padA: fmaj - - - - - - - - - - - - - - -
+padA: - - - - - - - - - - - - - - - -
+padA: - - - - - - - - - - - - - - - -
+padA: - - - - - - - - - - - - - - - -
+pattern bF bars=4
+padB: fmaj - - - - - - - - - - - - - - -
+padB: - - - - - - - - - - - - - - - -
+padB: - - - - - - - - - - - - - - - -
+padB: - - - - - - - - - - - - - - - -
+pattern sF bars=4
+sub: F1 - - - - - - - - - - - - - - -
+sub: - - - - - - - - - - - - - - - -
+sub: - - - - - - - - - - - - - - - -
+sub: - - - - - - - - - - - - - - - -
+pattern aG bars=4
+padA: g6 - - - - - - - - - - - - - - -
+padA: - - - - - - - - - - - - - - - -
+padA: - - - - - - - - - - - - - - - -
+padA: - - - - - - - - - - - - - - - -
+pattern bG bars=4
+padB: g6 - - - - - - - - - - - - - - -
+padB: - - - - - - - - - - - - - - - -
+padB: - - - - - - - - - - - - - - - -
+padB: - - - - - - - - - - - - - - - -
+pattern sG bars=4
+sub: G1 - - - - - - - - - - - - - - -
+sub: - - - - - - - - - - - - - - - -
+sub: - - - - - - - - - - - - - - - -
+sub: - - - - - - - - - - - - - - - -
+
+# The riff: dotted eighths through the chord an octave up, against the beat
+pattern rC bars=2
+riff: C4 . . G4 . . E4 . . B4 . . G4 . E4 .
+riff: C4 . . G4 . . E4 . B4 . G4 . . E4 . .
+pattern rA bars=2
+riff: A3 . . E4 . . C4 . . G4 . . E4 . C4 .
+riff: A3 . . E4 . . C4 . G4 . E4 . . C4 . .
+pattern rF bars=2
+riff: F3 . . C4 . . A3 . . E4 . . C4 . A3 .
+riff: F3 . . C4 . . A3 . E4 . C4 . . A3 . .
+pattern rG bars=2
+riff: G3 . . D4 . . B3 . . G4 . . D4 . B3 .
+riff: G3 . . D4 . . B3 . G4 . D4 . . B3 . .
+
+# The broken beat; beatin fades it in over a bar (per-step gains)
+pattern beat
+kick:  X . . . . . x . . . X . . . . g
+snare: . . . . x . . . . . . . x . . g
+hat:   x g x g x g x g x g x g x g o g
+rim:   . . . . . . . . . . . g . . . .
+pattern beatin
+kick:  X . . . . . x . . . X . . . . g
+kick~gain: -12 . . . . . -8 . . . -4 . . . . 0
+hat:   x g x g x g x g x g x g x g o g
+hat~gain: -12 -11 -10 -9 -8 -7 -6 -5 -4 -3 -2 -1 0 . . .
+pattern hats
+hat:   g . g . g . g . g . g . g . o .
+
+# Wind, four bars a breath; chimes on C major's pentatonic, each on 10 %
+# of the passes: one every 5 s or so, never the same run twice
+pattern air bars=4
+wind: C4 - - - - - - - - - - - - - - -
+wind: - - - - - - - - - - - - - - - -
+wind: - - - - - - - - - - - - - - - -
+wind: - - - - - - - - - - - - - - - -
+pattern bells bars=4
+chime: C5%10 . . . A5%10 . . . E5%10 . . . D6%10 . . .
+chime: G5%10 . . . C6%10 . . . D5%10 . . . E6%10 . . .
+chime: A5%10 . . . E5%10 . . . G5%10 . . . C5%10 . . .
+chime: D6%10 . . . G5%10 . . . C6%10 . . . A5%10 . . .
+
+# The room's six sections, as synth.lua's SECTIONS
+section intro:  aC+air aA+air aF+air aG+air
+section groove: aC+sC+beatin aA+sA+beat aF+sF+beat aG+sG+beat
+section riff:   aC+sC+beat+rC aA+sA+beat+rA aF+sF+beat+rF aG+sG+beat+rG
+section lift:   bC+sC+beat+rC+bells bA+sA+beat+rA+bells bF+sF+beat+rF+bells bG+sG+beat+rG+bells
+section break:  bC+air+bells+hats bA+air+bells+hats bF+air+bells+hats bG+air+bells+hats
+section back:   aC+bC+sC+beatin aA+bA+sA+beat aF+bF+sF+beat aG+bG+sG+beat
+play intro groove riff lift break back
+loop intro
 ]==],
 }
