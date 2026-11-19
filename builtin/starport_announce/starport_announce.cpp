@@ -1085,7 +1085,7 @@ struct Module: public interface::Module, public Interface
 	ss_ verify_id_token(const ss_ &token, IdLogin *out)
 	{
 		if(!accepts_ids())
-			return "This server does not take Starport IDs";
+			return "This server does not accept Starport IDs";
 		const size_t dot = token.find('.');
 		if(dot == ss_::npos || token.size() > 2000)
 			return "Not a Starport ID token";
@@ -1116,9 +1116,9 @@ struct Module: public interface::Module, public Interface
 		const json::Value p = json::load_string(unbase64url(payload).c_str());
 		if(!p.is_object() || !p.get("sub").is_string() ||
 				!p.get("name").is_string() || !p.get("v").is_integer())
-			return "A malformed token";
+			return "The token is malformed";
 		if(p.get("v").as_integer() != 1)
-			return "A token this version of Buildat cannot read";
+			return "This version of Buildat cannot read the token";
 		// A site's token is not a server's, and one for another listing
 		// on the same secret is not this one's
 		if(!p.get("typ").is_string() || p.get("typ").as_string() != "server")

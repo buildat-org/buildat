@@ -38,7 +38,7 @@ struct Access
 		if(m_public ? is_admin(peer) : is_owner(m_server, peer))
 			return true;
 		menu_error(m_server, peer,
-				"Only an admin manages this server's worlds");
+				"Only an admin can manage this server's worlds");
 		return false;
 	}
 
@@ -47,8 +47,9 @@ struct Access
 	{
 		if(!m_public && is_owner(m_server, peer))
 			return true;
-		menu_error(m_server, peer, m_public ? "Not on a public server" :
-				"Only the player who started this game");
+		menu_error(m_server, peer, m_public ?
+				"Not available on a public server" :
+				"Only the player who started this game can do this");
 		return false;
 	}
 

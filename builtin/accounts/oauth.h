@@ -391,7 +391,7 @@ b.onclick = function(){
 		encodeURIComponent(b.dataset.listing) + "&origin=" +
 		encodeURIComponent(location.origin) + "&state=" + state, "_blank",
 		"noopener");
-	say("ok", "Sign in in the Starport's window, and Allow there");
+	say("ok", "Sign in in the Starport's window and press Allow there");
 };
 })();)JS";
 
@@ -429,15 +429,15 @@ static std::pair<ss_, ss_> oauth_page(const OAuthPage &p)
 	if(!p.ended){
 		h += "<h1>Connect "+(p.client.empty() ? ss_("an agent") : html(p.client))+
 				"?</h1>\n<p>"+who+" asks to work on <b>"+html(p.server)+
-				"</b> as your agent: with "+(p.admin_name.empty() ?
+				"</b> as your agent, with "+(p.admin_name.empty() ?
 				ss_("your builder rights (after signing in, an admin may add "
 				"the Host's)") : ss_("<span id=\"rights\">your builder rights "
-				"(none of the Host's)</span>"))+", its edits going into the "
-				"live round, logged as your agent's.</p>\n"
+				"(none of the Host's)</span>"))+". Its edits go into the "
+				"live round and are logged as your agent's.</p>\n"
 				"<p class=\"meta\">Allowing it sends you back to <b>"+
 				html(rhost)+"</b>"+(oauth_loopback(rhost) ? ", a program on "
-				"the device you opened this on" : "")+". It is listed on My "
-				"account, Connect an agent..., where you revoke it.</p>\n";
+				"the device you opened this on" : "")+". It is then listed in "
+				"My account, Connect an agent..., where you can revoke it.</p>\n";
 	}
 	h += "<p id=\"err\" role=\"alert\">"+html(p.error)+"</p><p id=\"ok\" "
 			"role=\"status\"></p>\n";

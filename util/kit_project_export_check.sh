@@ -128,7 +128,7 @@ client() # <n>: kitboss, its commands from the fifo $t/c<n>.cmd, its log $t/boss
 }
 switched() # <project>: the switch's goodbye, the client gone (it leaves by itself), the project up
 {
-	await "$CL" 0 60 "Disconnected from server: The server switches to the game $1"
+	await "$CL" 0 60 "Disconnected from server: The server is switching to the game $1"
 	exec 3>&-
 	wait $CLIENT
 	wait_for_log "$SL" "workbench: switched to \"$1\"" 120 || fail "$1 did not start ($SL)"
@@ -463,7 +463,7 @@ echo "ok: Crag Trial exported back as it is in the repo"
 # 2. A project of the builder's, exported
 step 10 "world_menu: the list shown, 1 worlds" "frames 3" 'click Button "Games..."'
 new_project project
-cmd "expect_error Disconnected from server: The server switches" 'click Button "Create"'
+cmd "expect_error Disconnected from server: The server is switching" 'click Button "Create"'
 switched project
 client 2
 await "$CL" 0 60 "player physics enabled"
@@ -511,7 +511,7 @@ step 10 "world_menu: import" 'click Button "Import a game from a file..."'
 cmd "frames 3" "keydown ctrl" "keypress a" "keyup ctrl" "text imported" "frames 2"
 cmd "frames 5" "screenshot $t/import_page.png"
 step 10 "The file picker at .*/exports" 'click Button "Create"'
-cmd "delay 500" "expect_error Disconnected from server: The server switches"
+cmd "delay 500" "expect_error Disconnected from server: The server is switching"
 step 30 "world_menu: create imported from project.template.zip \([0-9]+ bytes\)" \
 	'click Button "project.template.zip"'
 switched imported
@@ -584,7 +584,7 @@ if [ -n "$web" ]; then
  ["file", "${OUT}/imported.template.zip"],
  ["click", "Button", "Create"],
  ["waitlog", "world_menu: create webimport from imported.template.zip \\([0-9]+ bytes\\)", 30],
- ["waitlog", "Disconnected from server: The server switches to the game webimport", 60]
+ ["waitlog", "Disconnected from server: The server is switching to the game webimport", 60]
 ]
 J
 	page web1

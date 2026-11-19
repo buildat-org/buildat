@@ -1,6 +1,6 @@
 Luanti client
 =============
-extensions/luanti_client makes the buildat client talk to an unmodified Luanti
+extensions/luanti_client makes the Buildat client talk to an unmodified Luanti
 server: it does the client's side of Luanti's protocol.
 
     $ bin/buildat -m luanti_client

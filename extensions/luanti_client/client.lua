@@ -526,8 +526,8 @@ function M.new(socket, options, log)
 			status("The server offers no authentication this client can do "..
 					"(mechanisms "..mechanisms..")")
 			self.state = "failed"
-			fail("The server offers no way to log in\n"..
-					"that this client can do.\n"..
+			fail("The server offers no login method\n"..
+					"that this client supports.\n"..
 					"(mechanisms "..mechanisms..")", true)
 		end
 	end
@@ -1413,7 +1413,7 @@ function M.new(socket, options, log)
 		if not self.failure and self.state == "init_sent" and
 				conn.last_receive_us and
 				buildat.get_time_us() - started_us >= HELLO_LIMIT_S * 1000000 then
-			fail("The server answers but does not take the login.\nIt may be "..
+			fail("The server answers but does not accept the login.\nIt may be "..
 					"older than Luanti 5.0: this client\nspeaks protocol "..
 					CLIENT_PROTOCOL_VERSION_MIN.." to "..LATEST_PROTOCOL_VERSION..
 					".", true)

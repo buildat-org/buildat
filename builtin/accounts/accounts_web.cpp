@@ -36,7 +36,7 @@ using storage::unpack;
 
 namespace accounts {
 
-static const char *REFUSED = "There are no accounts in a server in a browser";
+static const char *REFUSED = "A server running in a browser has no accounts";
 
 struct Module: public interface::Module, public Interface
 {
@@ -153,7 +153,7 @@ struct Module: public interface::Module, public Interface
 					error.empty() ? m_name : ss_())));
 		};
 		if(packet.sender != m_local)
-			return reply("This server has one player, who is here");
+			return reply("This server has one player, who is already here");
 		if(m_joined)
 			return reply("Already joined");
 		if(!m_store)
@@ -162,7 +162,7 @@ struct Module: public interface::Module, public Interface
 			return reply("Malformed login");
 		if(m_name.empty()){
 			if(!valid_name(cred.name))
-				return reply("A name is 1 to 20 letters, digits, - and _");
+				return reply("A name must be 1 to 20 letters, digits, - and _");
 			m_name = cred.name;
 			m_store->set("local_name", m_name);
 		}

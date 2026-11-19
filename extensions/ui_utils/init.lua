@@ -2949,10 +2949,11 @@ local function load_open()
 			-- An iPhone's own PNG (Apple's CgBI) is not read: said so, not
 			-- as any picture that does not decode
 			if data:sub(1, 4) == "\137PNG" and data:sub(13, 16) == "CgBI" then
-				return nil, "an iPhone's PNG (Apple's CgBI), which is not " ..
+				return nil, "an iPhone PNG (Apple's CgBI), which cannot be " ..
 						"read here: save it again as a plain PNG or a JPEG"
 			end
-			return nil, #data .. " bytes; a PNG or JPEG, 4096 a side at most"
+			return nil, #data .. " bytes, not a PNG or JPEG of at most 4096 " ..
+					"pixels a side"
 		end
 		local tex = magic.Texture2D:new()
 		tex:SetData(img)

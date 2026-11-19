@@ -999,9 +999,10 @@ struct Module: public interface::Module, public Interface
 		}
 		if(in_bin >= UNTRUSTED_A_NETWORK)
 			return "This network has "+itos(UNTRUSTED_A_NETWORK)+" new "
-					"accounts waiting to be trusted: one more is made once a "
+					"accounts waiting to be trusted. Another can be made once a "
 					+level_name(LV_HELPER)+" or a "+level_name(LV_MODERATOR)+
-					" trusts one of them, or it has been active a few days";
+					" trusts one of them, or once one has been active for a "
+					"few days";
 		if(today >= UNTRUSTED_A_DAY)
 			return "No more new accounts today; try tomorrow";
 		return "";
@@ -1034,7 +1035,7 @@ struct Module: public interface::Module, public Interface
 		if(!by.empty() && !is_admin(by))
 			return "Only the "+level_name(LV_ADMIN)+" grants "+priv;
 		if(name.empty() || !get_account(name, account))
-			return "No account "+name.substr(0, 64);
+			return "There is no account "+name.substr(0, 64);
 		if(account.has(priv) == on)
 			return "";
 		sv_<ss_> privs;
@@ -1058,12 +1059,13 @@ struct Module: public interface::Module, public Interface
 			return "No such account";
 		const int was = level(name);
 		if(lv < LV_NEW || lv >= LV_ADMIN || was >= LV_ADMIN)
-			return "A "+level_name(LV_ADMIN)+" is made in the Server window";
+			return "A "+level_name(LV_ADMIN)+" can only be made in the Server "
+					"window";
 		if(!by.empty()){
 			const int by_lv = level(by);
 			if(by_lv < LV_MODERATOR || lv >= by_lv || was >= by_lv)
-				return "One sets only levels below one's own, from "+
-						level_name(LV_MODERATOR);
+				return "You can only set levels below your own, and only as a "+
+						level_name(LV_MODERATOR)+" or higher";
 		}
 		if(lv == LV_NEW)
 			m_store->remove("level/"+name);
@@ -1348,7 +1350,7 @@ struct Module: public interface::Module, public Interface
 		if(!valid_name(name))
 			return "No such name";
 		if(is_admin(name))
-			return "An admin is not banned";
+			return "An admin cannot be banned";
 		Ban b;
 		b.by = by;
 		ss_ data;
@@ -1419,7 +1421,7 @@ struct Module: public interface::Module, public Interface
 			Ban b;
 			if(m_store->get("ban/"+name, bd) && unpack(bd, b) &&
 					b.by != only_by)
-				return "Banned by "+b.by+"; an admin lifts it";
+				return "Banned by "+b.by+"; only an admin can lift it";
 		}
 		if(m_store->get("ban/"+name_or_address, data)){
 			Ban b;
@@ -1450,7 +1452,7 @@ struct Module: public interface::Module, public Interface
 			found = true;
 		}
 		if(!found)
-			return "No ban of "+name_or_address;
+			return name_or_address+" is not banned";
 		log_i(MODULE, "%s was unbanned", cs(name_or_address));
 		send_users_to_staff();
 		return "";
@@ -1918,7 +1920,7 @@ struct Module: public interface::Module, public Interface
 		// ID to it as it completes
 		starport_announce::IdLogin id, claim_id;
 		if(!cred.starport.empty()){
-			ss_ why = "This server does not take Starport IDs";
+			ss_ why = "This server does not accept Starport IDs";
 			starport_announce::access(m_server,
 					[&](starport_announce::Interface *s){
 				why = s->verify_id_token(cred.starport, &id);
@@ -1957,7 +1959,8 @@ struct Module: public interface::Module, public Interface
 			}
 			if(!cred.name.empty()){
 				if(has && linked != cred.name)
-					return reply("That Starport ID is another account's here");
+					return reply("That Starport ID belongs to another account "
+							"here");
 				claim_id = id;
 				id = starport_announce::IdLogin();
 			} else {
@@ -1970,7 +1973,7 @@ struct Module: public interface::Module, public Interface
 		const ss_ &password = cred.password;
 		const ss_ code = upper(cred.code);
 		if(!valid_name(name))
-			return reply("A name is 1 to 20 letters, digits, _ or -");
+			return reply("A name must be 1 to 20 letters, digits, _ or -");
 		if(password.size() > 100 || code.size() > 100 || cred.token.size() > 100)
 			return reply("The password is too long");
 		// [ACC_ALREADY_HERE] The account being here already is answered
@@ -2032,24 +2035,23 @@ struct Module: public interface::Module, public Interface
 			});
 			if(m_store->get(link, linked)){
 				if(!get_account(name, account))
-					return refused("This Starport ID's account here is gone; "
-							"ask an admin");
+					return refused("This Starport ID's account here was "
+							"deleted; ask an admin");
 			} else {
 				if(reserved_name(name))
 					return refused("\""+name+"\" is kept for a client that "
 							"has not logged in: pick another name for this "
 							"community on the Starport");
 				if(deleted(name))
-					return refused("The name "+name+" was a deleted "
-							"account's on this server: pick another for this "
+					return refused("The name "+name+" belonged to a deleted "
+							"account on this server: pick another for this "
 							"community on the Starport");
 				if(exists(name))
 					return refused("The name "+name+" is taken on this server "
-							"by an account of its own: pick another for "
-							"this community on the Starport, or, if the "
-							"account is yours, choose \"That's my account\" "
-							"and log in with its password: your ID is linked "
-							"to it");
+							"by a local account: pick another for this "
+							"community on the Starport. If the account is "
+							"yours, choose \"That's my account\" and log in "
+							"with its password to link your ID to it");
 				// No admin yet: as with a local account, only the setup
 				// code makes a new one, and makes it the admin (10g)
 				if(!m_setup_code.empty() && code != m_setup_code)
@@ -2071,8 +2073,8 @@ struct Module: public interface::Module, public Interface
 			}
 			ss_ pending;
 			if(m_store->get("approval/"+name, pending))
-				return refused("Your Starport ID waits for an admin of this "
-						"server to let it in");
+				return refused("Your Starport ID is waiting for an admin of "
+						"this server to let it in");
 			// The first admin by ID, as by a local login (10g)
 			if(!m_setup_code.empty() && !code.empty()){
 				if(code != m_setup_code)
@@ -2093,7 +2095,7 @@ struct Module: public interface::Module, public Interface
 					tw.hash != account.hash){
 				// Not counted: an old token is no guess
 				m_store->remove(key);
-				return reply("The wait for the code has ended: log in again");
+				return reply("The time for the code has run out: log in again");
 			}
 			// A client come back to its code page asks whether it waits
 			if(cred.totp.empty())
@@ -2119,7 +2121,7 @@ struct Module: public interface::Module, public Interface
 					kept.name != name || kept.expires_us < now ||
 					!get_account(name, account) || kept.hash != account.hash){
 				m_store->remove(key);
-				return fail("The saved login has ended: log in again");
+				return fail("The saved login has expired: log in again");
 			}
 			// [TRUST_LADDER]: KEEP_US from each use
 			kept.expires_us = now + KEEP_US;
@@ -2171,7 +2173,7 @@ struct Module: public interface::Module, public Interface
 						"guest; choose another name");
 			// simplified: the launcher's own user (the admin) takes it
 			if(!local && deleted(name))
-				return reply("\""+name+"\" was a deleted account's; "
+				return reply("\""+name+"\" belonged to a deleted account; "
 						"choose another name");
 			sv_<ss_> privs;
 			if(local){
@@ -2180,7 +2182,7 @@ struct Module: public interface::Module, public Interface
 					privs = {"admin"};
 			} else {
 				if(password.size() < MIN_PASSWORD)
-					return reply("A new account's password is at least "+
+					return reply("A new account's password must be at least "+
 							itos((int)MIN_PASSWORD)+" characters");
 				Invite invite;
 				ss_ data;
@@ -2345,7 +2347,7 @@ struct Module: public interface::Module, public Interface
 		// Banned, gone or its password reset while the client chose
 		Account account;
 		if(!get_account(name, account) || account.hash != peer.here_hash)
-			return refuse("The login has ended: log in again");
+			return refuse("The login is no longer valid: log in again");
 		if(!is_local(packet.sender)){
 			const ss_ why = banned(name, peer.address);
 			if(!why.empty())
@@ -2405,7 +2407,7 @@ struct Module: public interface::Module, public Interface
 		if(!peer.name.empty())
 			return reply("Already joined");
 		if(!m_guests)
-			return reply("This server does not take guests");
+			return reply("This server does not accept guests");
 		const ss_ why = banned("", peer.address);
 		if(!why.empty()){
 			log_i(MODULE, "A guest from %s refused: %s", cs(peer.address),
@@ -2500,8 +2502,8 @@ struct Module: public interface::Module, public Interface
 		if(why == "off")
 			why = "Agent access is off on this server";
 		else if(why == "expired")
-			why = "The agent token has expired: get a new one (a sign-in's "
-					"lasts an hour)";
+			why = "The agent token has expired: get a new one (one from a "
+					"sign-in lasts an hour)";
 		else if(!why.empty())
 			why[0] = (char)toupper((unsigned char)why[0]);
 		if(why.empty()){
@@ -2511,11 +2513,11 @@ struct Module: public interface::Module, public Interface
 		if(why.empty() && at.scope != "admin" && (is_admin(name) ||
 				level(name) >= LV_MODERATOR))
 			why = name+" is a "+level_name(level(name))+": an agent's client "
-					"logs in as one with an admin token only (a builder token "
-					"carries none of a Host's or a Steward's rights)";
+					"logs in as one only with an admin token (a builder token "
+					"has none of a Host's or a Steward's rights)";
 		if(why.empty() && find_peer(name) && !m_multiple_logins)
-			why = name+" is already here: an agent's client logs in where "
-					"its builder's own is not";
+			why = name+" is already here: an agent's client can log in only "
+					"while its builder's own client is not";
 		const int max_players = atoi(m_server->get_config().get<ss_>(
 				"max_players").c_str());
 		if(why.empty() && max_players > 0 && !is_admin(name) &&
@@ -2715,11 +2717,11 @@ struct Module: public interface::Module, public Interface
 				r.cmd != "uninvite" && r.cmd != "approve" &&
 				r.cmd != "turn_away" && r.cmd != "level" && r.cmd != "stats")
 			return send(packet.sender, "accounts:admin_result",
-					pack(ss_("Only the "+level_name(LV_ADMIN)+" does that")));
+					pack(ss_("Only the "+level_name(LV_ADMIN)+" can do that")));
 		if((r.cmd == "kick" || r.cmd == "ban") && by_lv < LV_ADMIN &&
 				level(r.name) >= by_lv)
 			return send(packet.sender, "accounts:admin_result",
-					pack(ss_("Only the "+level_name(LV_ADMIN)+" does that to a "+
+					pack(ss_("Only the "+level_name(LV_ADMIN)+" can do that to a "+
 					level_name(level(r.name)))));
 		auto result = [&](const ss_ &text){
 			send(packet.sender, "accounts:admin_result", pack(text));
@@ -2744,7 +2746,7 @@ struct Module: public interface::Module, public Interface
 			if(!exists || r.arg != "admin")
 				return result("No such account or privilege");
 			if(!r.on && account.has("admin") && admin_count() <= 1)
-				return result("The last admin keeps admin");
+				return result("The last admin must stay an admin");
 			{
 				sv_<ss_> privs;
 				for(const ss_ &p : account.privs)
@@ -2788,15 +2790,15 @@ struct Module: public interface::Module, public Interface
 				if(m_store->get("ban/"+r.name, data) && unpack(data, b) &&
 						level(b.by) >= by_lv)
 					return result("Banned by "+b.by+"; only the "+
-							level_name(LV_ADMIN)+" lifts it");
+							level_name(LV_ADMIN)+" can lift it");
 			}
 			const ss_ why = unban(r.name, "");
 			result(why.empty() ? r.name+" was unbanned" : why);
 		} else if(r.cmd == "password"){
 			if(!exists)
-				return result("No account "+r.name);
+				return result("There is no account "+r.name);
 			if(r.arg.size() < MIN_PASSWORD || r.arg.size() > 100)
-				return result("A password is "+itos((int)MIN_PASSWORD)+
+				return result("A password must be "+itos((int)MIN_PASSWORD)+
 						" to 100 characters");
 			set_account(r.name, new_account(r.arg, account.privs));
 			// A password someone knows: the account no longer logs in by
@@ -2809,11 +2811,11 @@ struct Module: public interface::Module, public Interface
 			result("The password of "+r.name+" was reset");
 		} else if(r.cmd == "delete"){
 			if(!exists)
-				return result("No account "+r.name);
+				return result("There is no account "+r.name);
 			if(r.name == by)
-				return result("An admin does not delete their own account");
+				return result("An admin cannot delete their own account");
 			if(account.has("admin") && admin_count() <= 1)
-				return result("The last admin is not deleted");
+				return result("The last admin cannot be deleted");
 			for(PeerId t : targets)
 				kick(t, "the account was deleted by "+by);
 			m_store->remove("auth/"+r.name);
@@ -2831,12 +2833,12 @@ struct Module: public interface::Module, public Interface
 			result("The account "+r.name+" was deleted");
 		} else if(r.cmd == "add"){
 			if(!valid_name(r.name) || reserved_name(r.name))
-				return result("A name is 1 to 20 letters, digits, _ or -, "
+				return result("A name must be 1 to 20 letters, digits, _ or -, "
 						"and not client<digits>");
 			if(exists || unreadable(r.name))
-				return result("There is an account "+r.name+" already");
+				return result("An account "+r.name+" already exists");
 			if(r.arg.size() < MIN_PASSWORD || r.arg.size() > 100)
-				return result("A password is "+itos((int)MIN_PASSWORD)+
+				return result("A password must be "+itos((int)MIN_PASSWORD)+
 						" to 100 characters");
 			set_account(r.name, new_account(r.arg, {}));
 			log_i(MODULE, "%s added the account %s", cs(by), cs(r.name));
@@ -2868,7 +2870,7 @@ struct Module: public interface::Module, public Interface
 		} else if(r.cmd == "approve" || r.cmd == "turn_away"){
 			ss_ pending;
 			if(!m_store->get("approval/"+r.name, pending))
-				return result("No ID of "+r.name+" waits");
+				return result("No ID named "+r.name+" is waiting");
 			m_store->remove("approval/"+r.name);
 			if(r.cmd == "turn_away"){
 				unlink_all(r.name);
@@ -2929,7 +2931,7 @@ struct Module: public interface::Module, public Interface
 			const ss_ &a = r.arg;
 			if(a.empty() || a.size() > 9 ||
 					a.find_first_not_of("0123456789") != ss_::npos)
-				return result("The budget is a number of MB");
+				return result("The budget must be a number of MB");
 			m_store->set("storage_budget_mb", a);
 			log_i(MODULE, "%s set the storage budget to %s MB", cs(by), cs(a));
 			send_users(packet.sender);
@@ -3002,7 +3004,7 @@ struct Module: public interface::Module, public Interface
 			return result("The old password is wrong");
 		}
 		if(pw.second.size() < MIN_PASSWORD || pw.second.size() > 100)
-			return result("A password is "+itos((int)MIN_PASSWORD)+
+			return result("A password must be "+itos((int)MIN_PASSWORD)+
 					" to 100 characters");
 		set_account(name, new_account(pw.second, account.privs));
 		m_store->set("own_password/"+name, "");
@@ -3048,7 +3050,7 @@ struct Module: public interface::Module, public Interface
 			send(packet.sender, "accounts:link_result", pack(text));
 		};
 		starport_announce::IdLogin id;
-		ss_ why = "This server does not take Starport IDs";
+		ss_ why = "This server does not accept Starport IDs";
 		starport_announce::access(m_server,
 				[&](starport_announce::Interface *s){
 			why = s->verify_id_token(packet.data, &id);
@@ -3059,7 +3061,7 @@ struct Module: public interface::Module, public Interface
 		ss_ linked;
 		if(m_store->get(link, linked))
 			return result(linked == name ? "Already linked" :
-					"That Starport ID is another account's here");
+					"That Starport ID belongs to another account here");
 		const ss_ note = link_id(name, id);
 		send_links(packet.sender, name);
 		result(note);
@@ -3090,10 +3092,10 @@ struct Module: public interface::Module, public Interface
 		if(packet.data.empty() || packet.data.find('/') != ss_::npos ||
 				!m_store->get(key, link))
 			return send(packet.sender, "accounts:link_result",
-					pack(ss_("No Starport ID of that Starport is linked")));
+					pack(ss_("No Starport ID from that Starport is linked")));
 		if(links_of(name).size() == 1 && !m_store->get("own_password/"+name, x))
 			return send(packet.sender, "accounts:link_result", pack(ss_(
-					"This account logs in by its Starport ID only: "
+					"This account logs in only with its Starport ID: "
 					"set a password first")));
 		m_store->remove(link);
 		m_store->remove(key);
@@ -3139,8 +3141,8 @@ struct Module: public interface::Module, public Interface
 		AgentRecord a;
 		ss_ data, key, gid, secret;
 		const int64_t now = interface::os::wall_us();
-		const char *gone = "not an agent token of this server's (revoked, or "
-				"its account gone)";
+		const char *gone = "not an agent token of this server (revoked, or "
+				"its account deleted)";
 		// [KIT_AGENTS_OAUTH] A sign-in's access token, its grant's current one
 		if(oauth_split(token, "bao_", gid, secret)){
 			key = "agent/"+gid;
@@ -3252,10 +3254,10 @@ struct Module: public interface::Module, public Interface
 			if(!agents_on())
 				throw Exception("Agent access is off on this server");
 			if(scope != "builder" && scope != "admin")
-				throw Exception("A scope is builder or admin");
+				throw Exception("The scope must be builder or admin");
 			if(scope == "admin" && !is_admin(name))
 				throw Exception("Only the "+level_name(LV_ADMIN)+
-						" makes an admin token");
+						" can make an admin token");
 			if(mine.size() >= AGENTS_A_USER)
 				throw Exception("You have "+itos(AGENTS_A_USER)+" agent "
 						"tokens: revoke one first");
@@ -3732,7 +3734,7 @@ struct Module: public interface::Module, public Interface
 			page.redirect = q.redirect;
 			page.back = back_url(q, "error="+error+"&error_description="+
 					oauth_url_encode(why));
-			ended("The tool's request is not one this server takes: "+why);
+			ended("This server does not accept the tool's request: "+why);
 		};
 		const ss_ bad_host = oauth_host_problem(r, origin);
 		if(!bad_host.empty()){
@@ -3753,8 +3755,8 @@ struct Module: public interface::Module, public Interface
 				q.redirect = c.redirects[0];
 			if(std::find(c.redirects.begin(), c.redirects.end(), q.redirect) ==
 					c.redirects.end())
-				return ended("The tool asks to go back to an address it did "
-						"not register: not sent there");
+				return ended("The tool asked to go back to an address it did "
+						"not register, so you were not sent there");
 			// From here a refusal links back to the tool
 			q.state = r.param("state");
 			if(q.state.size() > 1000)
@@ -3788,8 +3790,8 @@ struct Module: public interface::Module, public Interface
 			page = oauth_page_of(q, rid, origin);
 			if(!agents_on()){
 				page.off = true;
-				page.error = "Agent access is off on this server: its Host "
-						"turns it on in Accounts";
+				page.error = "Agent access is off on this server. Its Host "
+						"can turn it on in Accounts";
 			}
 			return show(200);
 		}
@@ -3820,8 +3822,8 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!agents_on()){
 			page.off = true;
-			page.error = "Agent access is off on this server: its Host turns it "
-					"on in Accounts";
+			page.error = "Agent access is off on this server. Its Host can turn "
+					"it on in Accounts";
 			return show(403);
 		}
 		ss_ name, how = "a password";
@@ -3834,7 +3836,7 @@ struct Module: public interface::Module, public Interface
 			// A Starport ID's token, from the Starport's window: the account
 			// linked to the ID, as a join by it logs in
 			starport_announce::IdLogin id;
-			ss_ why = "This server does not take Starport IDs";
+			ss_ why = "This server does not accept Starport IDs";
 			starport_announce::access(m_server,
 					[&](starport_announce::Interface *s){
 				why = s->verify_id_token(id_token, &id);
@@ -3845,8 +3847,8 @@ struct Module: public interface::Module, public Interface
 				why = "This Starport ID has no account on this server yet: join "
 						"the server with it once, then sign in here";
 			else if(why.empty() && m_store->get("approval/"+linked, pending))
-				why = "Your Starport ID waits for an admin of this server to let "
-						"it in";
+				why = "Your Starport ID is waiting for an admin of this server "
+						"to let it in";
 			if(!why.empty()){
 				log_i(MODULE, "OAuth: a Starport ID sign-in from %s refused: %s",
 						cs(r.address), cs(why));
@@ -3909,8 +3911,8 @@ struct Module: public interface::Module, public Interface
 		for(auto &m : agents_of(name))
 			others += m.second.client != q.client;
 		if(why.empty() && others >= AGENTS_A_USER)
-			why = "You have "+itos(AGENTS_A_USER)+" agent tokens: revoke one on "
-					"My account, Connect an agent..., first";
+			why = "You have "+itos(AGENTS_A_USER)+" agent tokens: first revoke "
+					"one in My account, Connect an agent...";
 		if(why.empty() && !m_oauth_rates.ok("code", network::address_bin(
 				r.address), OAUTH_CODES, OAUTH_CODE_US / 1000000))
 			why = "Too many sign-ins from your network: try again in a few "
@@ -4178,7 +4180,7 @@ struct Module: public interface::Module, public Interface
 	{
 		const ss_ secret = totp_secret(name, "totp_pending/");
 		if(secret.empty())
-			return "Nothing to confirm: begin again";
+			return "Nothing to confirm: start again";
 		m_store->set("totp/"+name, secret);
 		if(!check_totp(name, code)){
 			m_store->remove("totp/"+name);
@@ -4279,15 +4281,15 @@ struct Module: public interface::Module, public Interface
 	static ss_ ntfy_url_problem(const ss_ &url)
 	{
 		if(url.compare(0, 8, "https://") != 0)
-			return "An https:// address, please";
+			return "Enter an https:// address";
 		if(url.size() > 300)
-			return "Too long";
+			return "The address is too long";
 		const size_t slash = url.find('/', 8);
 		if(slash == ss_::npos || slash == 8 || slash + 1 >= url.size())
-			return "The server and the topic: https://ntfy.sh/<topic>";
+			return "Enter the server and the topic: https://ntfy.sh/<topic>";
 		for(unsigned char c : url)
 			if(c <= ' ' || c >= 127 || c == '"' || c == '\\')
-				return "No spaces or odd characters in it";
+				return "The address cannot have spaces or unusual characters";
 		return "";
 	}
 
@@ -4446,7 +4448,7 @@ struct Module: public interface::Module, public Interface
 			if(note.empty()){
 				m_store->set("ntfy/"+name, url);
 				log_i(MODULE, "%s set an ntfy address", cs(name));
-				note = "Saved. Test sends one push.";
+				note = "Saved. Test sends a push.";
 			}
 		} else if(cmd == "test"){
 			const ss_ to = ntfy_get("ntfy/", name);
@@ -4489,7 +4491,7 @@ struct Module: public interface::Module, public Interface
 	ss_ report_ban(const ss_ &name, const ss_ &reason)
 	{
 		if(links_of(name).empty())
-			return "not reported: not a Starport ID's account";
+			return "not reported: the account has no Starport ID";
 		m_store->set("ban_report/"+name, reason.empty() ? ss_("other") :
 				reason);
 		return "";
@@ -4551,8 +4553,8 @@ struct Module: public interface::Module, public Interface
 				password = jstr(v, "password"), from = jstr(v, "from");
 		if(url.empty() || from.empty()){
 			if(done)
-				done("this server has no mail server set (the Server "
-						"window's Health page)");
+				done("this server has no mail server set (set one on the "
+						"Health page of the Server window)");
 			return;
 		}
 		char date[64];
@@ -4607,9 +4609,9 @@ struct Module: public interface::Module, public Interface
 		const ss_ url = jstr(in, "url"), from = jstr(in, "from");
 		if(!url.empty() && url.compare(0, 7, "smtp://") != 0 &&
 				url.compare(0, 8, "smtps://") != 0)
-			return "The server is smtp://host:587 or smtps://host:465";
+			return "The server must be smtp://host:587 or smtps://host:465";
 		if(!from.empty() && !mail_address(from))
-			return "The sender is one address";
+			return "The sender must be one address";
 		v.set("url", url);
 		v.set("from", from);
 		v.set("user", jstr(in, "user"));
@@ -4634,7 +4636,7 @@ struct Module: public interface::Module, public Interface
 				[=](const ss_ &error){
 			std::lock_guard<std::mutex> lock(results->m);
 			results->r.push_back(std::make_pair(peer, error.empty() ?
-					"Sent: the mail server took it for "+to :
+					"Sent: the mail server accepted it for "+to :
 					"Not sent: "+error));
 		});
 		return "Sending to "+to+"...";
@@ -5037,12 +5039,12 @@ struct Module: public interface::Module, public Interface
 		if(!m_store)
 			return "Not ready";
 		if(!valid_name(name) || reserved_name(name))
-			return "A name is 1 to 20 letters, digits, _ or -, and not "
+			return "A name must be 1 to 20 letters, digits, _ or -, and not "
 					"client<digits>";
 		if(exists(name) || deleted(name))
 			return "That name is taken";
 		if(password.size() < MIN_PASSWORD || password.size() > 100)
-			return "A password is "+itos((int)MIN_PASSWORD)+
+			return "A password must be "+itos((int)MIN_PASSWORD)+
 					" to 100 characters";
 		set_account(name, new_account(password, {}));
 		log_i(MODULE, "New account %s (Starport ID)", cs(name));
@@ -5062,7 +5064,7 @@ struct Module: public interface::Module, public Interface
 		if(!get_account(name, account))
 			return "No such account";
 		if(password.size() < MIN_PASSWORD || password.size() > 100)
-			return "A password is "+itos((int)MIN_PASSWORD)+
+			return "A password must be "+itos((int)MIN_PASSWORD)+
 					" to 100 characters";
 		set_account(name, new_account(password, account.privs));
 		return "";

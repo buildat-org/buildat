@@ -1,6 +1,7 @@
 sample_voxel_objects -- builtin/voxel_objects ([VOXEL_OBJECTS])
 
-Voxel houses standing turned on builtin/heightmap's hills: a 16^3 house
+Voxel houses standing at different angles on builtin/heightmap's hills: a
+16^3 house
 model shown by 100 objects (BUILDAT_VOXEL_OBJECTS_COPIES on the server
 sets how many), each at its own yaw and a slight tilt, a 40x20x40 keep of
 four chunks, and a beam floating at 45 degrees over a gravel pad with a

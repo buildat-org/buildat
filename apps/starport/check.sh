@@ -373,7 +373,7 @@ tnew=$tokens
 BUILDAT_FP_STARPORT=$tnew timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
 	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds_refused.txt" \
 	> "$tmp/cl5.log" 2>&1
-grep -q "Login refused: Your Starport ID waits" "$tmp/cl5.log" ||
+grep -q "Login refused: Your Starport ID is waiting" "$tmp/cl5.log" ||
 	fail "a new ID did not wait for approval (cl5.log)"
 echo "ok: approved only: a new ID waits"
 python3 - "$tmp/an/apps/floorplanner/starport.json" <<'PY'

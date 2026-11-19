@@ -863,7 +863,7 @@
 				if(!plain_aitta_name(arg) || (kind == "extension" &&
 						(arg.front() == '_' || arg.back() == '_' ||
 						arg.find("__") != ss_::npos)))
-					throw Exception("A name is 1 to 40 of a-z, 0-9 and _"+
+					throw Exception("A name must be 1 to 40 characters: a-z, 0-9 and _"+
 							ss_(kind == "extension" ? ", with no \"__\" and "
 							"not starting or ending with _" : ""));
 				const ss_ dir = dev_apps_path()+"/"+arg;
@@ -957,7 +957,8 @@
 			}
 			if(op == "keygen" || op == "public"){
 				if(!plain_aitta_name(arg))
-					throw Exception("An author name is 1 to 40 of a-z, 0-9 and _");
+					throw Exception("An author name must be 1 to 40 characters: a-z, "
+							"0-9 and _");
 				const ss_ path = keys+"/"+arg+".key";
 				if(op == "public"){
 					if(!interface::fs::path_exists(path))
@@ -1465,7 +1466,7 @@
 		}
 		if(interface::process::is_running(g_local_server)){
 			lua_pushboolean(L, false);
-			lua_pushstring(L, "Previous local server is still running");
+			lua_pushstring(L, "The previous local server is still running");
 			return 2;
 		}
 		// The old one is gone; a stop still pending across frames would
@@ -1604,7 +1605,7 @@
 #endif
 		if(!g_local_server.valid()){
 			lua_pushboolean(L, false);
-			lua_pushstring(L, "Failed to start server");
+			lua_pushstring(L, "Could not start the server");
 			return 2;
 		}
 		write_pidfile();

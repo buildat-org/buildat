@@ -2,8 +2,8 @@ Hearth: a community forum as an app
 ===================================
 apps/hearth is a buildat app:
 topics, threads under them and messages in those, each at a permanent
-address. It is read as plain HTML in a browser and taken part in from
-the buildat client.
+address. Anyone can read it as plain HTML in a browser, and members
+take part from the Buildat client.
 
 Running it
 ----------
@@ -19,7 +19,7 @@ The data
 --------
 One SQLite file, <user path>/apps/hearth/hearth.sqlite (WAL; the
 directory is the app's id, "<author>.<name>" for an installed release),
-made on the first start; a file from before a column gets it added. Tables:
+made on the first start; an older file gets newer columns added. Tables:
 topics (a parent topic, 0 at the top), threads, messages, edits (what
 an edit replaced, when and by whom), follows, notifications, members
 (when an account first came), reads (the threads an account has
@@ -33,8 +33,8 @@ place, /p/<author>/<name> (a second key under the name noted); a thread
 about no package is linked to one afterwards ("About a package..."; the
 link command) by whoever started it or a moderator, only to a package
 with a release here. A thread about an app or a ContentDB game lists up
-to three servers its Starports list running it that their play page can
-join, most players first ([HEARTH_VISITOR_FLOW]).
+to three servers running it, from its Starports' lists, that their play
+page can join, most players first ([HEARTH_VISITOR_FLOW]).
 
 Releases: the admin's release_sources names the Aittas to read and this
 Hearth's own addresses; a poller reads each Aitta's list once a minute,
@@ -57,8 +57,8 @@ face needs no account.
 
 The HTML face
 -------------
-Claimed from builtin/network (claim_http_path); /app (also /play and
-/index.html) and the rest stay the web client's.
+Its paths are claimed from builtin/network (claim_http_path); /app
+(also /play and /index.html) and the rest stay with the web client.
 
     /                the topics (one level of subtopics) and the latest
                      20 threads
@@ -90,7 +90,8 @@ package's (/p/<author>/<name>) or an account's (/u/<name>) page as
 /app#open=<that page's path>. The web page takes only that shape
 (/topic, /t, /m, /p or /u and up to 200 of [A-Za-z0-9_.-/]) into the
 client's BUILDAT_OPEN, and Hearth opens that page after the join, over
-home: Back goes home, and a place not there is said on home. A reload of
+home: Back goes home, and a place that does not exist is reported on
+home. A reload of
 the page leaves #open out, so the page the user was on comes back
 instead ([WEB_RELOAD_APPS]: the web client loads again by itself when a
 phone's browser dropped its connection in the background). The native
@@ -102,13 +103,13 @@ topic's counts its subtopics' threads ([HEARTH_BLOBS]).
 
 Anything else under those paths is a 404; a POST is a 404. A message is
 CommonMark with GitHub's tables, strikethrough, task lists and URL
-autolinks, and ||spoilers|| (interface::markup::to_html, md4c); a single
-newline breaks the line (<br>, as GitHub's comments do): raw HTML is
-text, a link or an image to anything but http, https, mailto or a
-relative path is its text alone, an image is a link to it and never
-loaded but for the Hearth's own /f/<id> (an <img>, lazily loaded;
+autolinks, and ||spoilers|| (interface::markup::to_html, md4c). A single
+newline breaks the line (<br>, as GitHub's comments do). Raw HTML is
+shown as text; a link or an image to anything but http, https, mailto or
+a relative path shows only its text. An image is a link to it and is
+never loaded, except the Hearth's own /f/<id> (an <img>, lazily loaded;
 "{.right}" right after it floats it right, beside the paragraphs after
-it, and "{.center}" centres it, [HEARTH_POST_STYLE]), and every link is
+it, and "{.center}" centres it, [HEARTH_POST_STYLE]). Every link is
 rel="nofollow ugc". "#1234" links to thread 1234, "@name"
 to /u/name. An uploaded image's thumbnail (320x240 at most) goes at the
 message's end linked to the image, and a message's files are listed
@@ -124,8 +125,8 @@ message: {id, author, created, excerpt, url, thread: {id, title, url},
 topic: {id, name, url}}}, or {} when a month has fewer than two to pick
 from. The span is the shortest of 24 hours, 7 days and 30 days with two
 or more messages that are visible, in a visible thread, not empty as
-text, and by a member that is not banned; one of them at random, kept
-ten minutes. The excerpt is plain text (the markup taken out, a link
+text, and by a member that is not banned. One of them is picked at random and
+kept for ten minutes. The excerpt is plain text (the markup taken out, a link
 as its text, a spoiler "[spoiler]"), about 200 characters cut on a
 word; put it in a page as text, never as HTML. Answered with
 "Access-Control-Allow-Origin: *", under the pages' rate. The links are
@@ -144,23 +145,24 @@ first; active up to 5 others with the most messages of the last 7 days;
 packages "author/name" -> {posts, last, threads: its 3 latest}, the 300
 packages written about last (every key's together, as /p/). Only visible
 threads started by a member that is not banned, or a release's thread;
-posts counts the visible messages; a title is plain text. Kept a
-minute, a hide or a category's change drops it; CORS and the pages' rate
+posts counts the visible messages; a title is plain text. The answer
+is kept for a minute, and a hide or a category change drops it; CORS and the
+pages' rate
 as /api/v1/discussed, the same base url. A launcher's click on a thread
 joins the Hearth and opens it, as BUILDAT_OPEN does (the client's
 hearth_open()).
 
 Taking part: the client
 -----------------------
-The client ([HEARTH_UI]) is a sidebar of topics beside a page, one
-scroll view, by the arrow keys between the two; Escape at the top opens
-My account -- from a launcher, "Exit to launcher?" (Exit, My account,
-Cancel), which the × at the frame's top right opens too ([HEARTH_CLOSE]);
-on the web "Leave Hearth?" (Leave, My account, Cancel), Leave going back
-to the page before with the login kept ([HEARTH_WEB_BACK]) -- and on the
-web Back steps through the pages to the sidebar and that dialog; a draft
-and the
-place kept over a restart ([HEARTH_RESUME]). A thread or topic row carries
+The client ([HEARTH_UI]) is a sidebar of topics beside a page, in one
+scroll view; the arrow keys move between the two. Escape at the top
+opens My account. From a launcher it opens "Exit to launcher?" (Exit, My
+account, Cancel) instead, which the × at the frame's top right opens too
+([HEARTH_CLOSE]). On the web it opens "Leave Hearth?" (Leave, My account,
+Cancel), where Leave goes back to the page before with the login kept
+([HEARTH_WEB_BACK]), and Back steps through the pages to the sidebar and
+that dialog. A draft and the place are kept over a restart
+([HEARTH_RESUME]). A thread or topic row carries
 a ● for a message within a day and a • within a week, amber while
 unread ([HEARTH_NEW_MARKS]); home's "Waiting for you" lists the unread
 threads, followed first. The client's pages: the topics and the latest
@@ -170,16 +172,17 @@ messages, a reply, Follow, "This answered it", Report or Appeal),
 notifications, and for an admin the moderation queue and a new topic
 (a name, what it is about, and a parent: none, or a top-level topic --
 subtopics are one level deep). The client draws a message from the
-server's HTML of it (a thread's "html"; [HEARTH_LINES_CODE]): its text
-with a link's address after it, a fenced block in the mono font on a
-darker ground (a line past the width cut with "..."), bold brighter and
-drawn twice, a picture of the Hearth's own where the text has it rather
-than its Markdown: centred, or with {.right} at the right with the
-paragraphs after it beside it, narrowed until they pass its height. A message's field
-is multi-line: Enter breaks the line, Ctrl+Enter sends; Bold, List, Link,
+server's HTML of it (a thread's "html"; [HEARTH_LINES_CODE]): text with
+each link's address after it; a fenced block in the mono font on a
+darker background (a line too wide is cut with "..."); bold text brighter
+and drawn twice; and the Hearth's own pictures where the text has them,
+instead of their Markdown: centred, or with {.right} at the right, with
+the paragraphs after it narrowed beside it until they pass its height.
+A message's field is multi-line: Enter breaks the line, Ctrl+Enter sends;
+Bold, List, Link,
 Image and "Code block" put their Markdown in at the cursor, and Preview
-shows the message as the HTML face will. A member thanks a message
-("+N" at its top right; the author told once while unseen).
+shows the message as the HTML face will. A member can thank a message
+("+N" at its top right); the author is notified once.
 
 Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
 "hr:res" {id, ok, result | error}. The commands and who may use them:
@@ -230,12 +233,12 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
     tracker_link           a ticket's starter or a moderator: thread, link
                            ("" takes it off); below
     tracker_domains        the list; a moderator: add, remove (domains)
-    reply                  anyone; not in a hidden thread but a moderator
+    reply                  anyone; in a hidden thread only a moderator
     edit                   the message's author or a moderator
     answered               whoever started the thread, or a moderator;
                            message 0 takes it back; not the first message
     follow                 on true or false
-    notifications          the latest 50; they are seen after
+    notifications          the latest 50, marked seen after
     report                 someone else's shown message, with a reason
     appeal                 one's own message a moderator hid or
                            deleted, with a text
@@ -312,8 +315,8 @@ trusted; rejected, it is deleted.
 
 A patch is a file named .patch or .diff of text whose first 10 lines
 have "From ", "diff --git ", "--- ", "+++ " or "@@ " at a line's start,
-10,000 lines at most. Anyone uploads one, a new account too; it is
-served as text/plain, so it is applied as it is fetched (git am), and a
+10,000 lines at most. Anyone can upload one, a new account too; it is
+served as text/plain, so it can be applied as fetched (git am), and a
 message linking to it shows it inline below the message, 256 kB of
 patches a message at most, on both faces.
 
@@ -323,10 +326,10 @@ File... under a message's field picks a file (the browser's picker; on
 native the client's list of <user>/exports) and uploads it as the
 request "upload" {name, data in hex}; its link goes in at the cursor,
 ![name](/f/<id>/name) for an image. A file is 16 MiB at most, 20 an hour
-(an admin any number). A new account uploads a patch (Tickets, above)
-or an image, one a thread; a below-member's image is drawn only for
-helpers until one shows it to everyone (vet_file) or its account becomes
-a member ([HEARTH_NEW_IMAGES]). A PNG or JPEG is
+(an admin any number). A new account can upload a patch (Tickets, above)
+or an image, one per thread; an image from an account below member is
+shown only to helpers until one shows it to everyone (vet_file) or its
+account becomes a member ([HEARTH_NEW_IMAGES]). A PNG or JPEG is
 read (stb_image, those two only, 40 million pixels at most) and written
 again within 1920x1080 (the short side 1080), a JPEG at quality 85:
 nothing else of the upload is kept, its metadata with it. Any other
@@ -348,7 +351,7 @@ Limits
 ------
 A title is 200 bytes at most, a message 20000, a topic's name 80; no
 control characters but a tab, and a line break where lines are allowed.
-A level is worked out at each post. Accounts saves it as the number;
+A level is worked out at each post. builtin/accounts stores it as a number;
 the names shown (Guest, Resident, Keeper, Steward, Host) are
 accounts::level_name()'s and accounts.lua's LEVEL_NAMES, changed
 together:
@@ -360,7 +363,7 @@ together:
        hour. Trusted is level 10 in accounts: by 5 active days -- a
        day (UTC) is active if the account read a thread or wrote a
        message that stands on it, and counts once it is over, so more
-       on one day is no more trust -- or by a helper's or a
+       activity on one day adds no trust -- or by a helper's or a
        moderator's approval
    20  a helper (Keeper), made by a moderator: 20 threads a day, 120 messages an
        hour; sees the queue, approves or rejects held links and trusts
@@ -374,7 +377,7 @@ together:
 
 The levels are spaced so one added later goes between two. An edit
 counts as a message. A link is "://", "www." or anything the markup
-makes a link of. An account reports 10 a day at most (a moderator any
+makes a link of. An account makes 10 reports a day at most (a moderator any
 number), and has one open report or appeal per message.
 
 A report weighs by its reporter's level: a new account 0, a member 1, a
@@ -383,9 +386,9 @@ message hidden by reports it made. The reports of one network (an IPv4
 /24 or an IPv6 /64) count once, at the highest. At 3 in all the message
 is hidden, "Reported; hidden until a moderator looks", unless its author
 is a helper or up; the moderator hides it (with a statement) or
-dismisses the report, which shows it again. Search on the HTML face is
-30 a minute per address (429 after), and every page 120 a minute per
-address.
+dismisses the report, which shows it again. Search on the HTML face is limited
+to 30 a minute per address (429 after), and every page to 120 a minute
+per address.
 
 The environment
 ---------------

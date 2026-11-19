@@ -108,8 +108,8 @@ screenshot @T@/menu_bob.png
 keypress Escape
 wait_log 5000 pause: the menu closed
 event workbench_projects
-expect_error Disconnected from server: The server switches
-wait_log 300000 Disconnected from server: The server switches to the game beta
+expect_error Disconnected from server: The server is switching
+wait_log 300000 Disconnected from server: The server is switching to the game beta
 quit
 EOF
 client bob1 BUILDAT_JOIN_NAME=kitbob &
@@ -141,9 +141,9 @@ screenshot @T@/list_running.png
 click Button "New game..."
 wait_log 5000 world_menu: the name screen shown
 text beta
-expect_error Disconnected from server: The server switches
+expect_error Disconnected from server: The server is switching
 click Button "Create"
-wait_log 60000 Disconnected from server: The server switches to the game beta
+wait_log 60000 Disconnected from server: The server is switching to the game beta
 quit
 EOF
 client boss2 BUILDAT_JOIN_NAME=kitboss || fail "the switch to beta ($t/boss2.log)"
@@ -182,9 +182,9 @@ frames 3
 click Button "alpha"
 wait_log 5000 world_menu: the list shown
 frames 3
-expect_error Disconnected from server: The server switches
+expect_error Disconnected from server: The server is switching
 click Button "Play"
-wait_log 60000 Disconnected from server: The server switches to the game alpha
+wait_log 60000 Disconnected from server: The server is switching to the game alpha
 quit
 EOF
 client boss3 BUILDAT_JOIN_NAME=kitboss || fail "beta, and the switch back ($t/boss3.log)"

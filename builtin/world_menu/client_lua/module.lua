@@ -250,9 +250,9 @@ function M.open(spec)
 	end
 	-- simplified: the filter applies on Enter (TextChanged is not in the
 	-- sandbox's events) and the screen is drawn again
-	text_on(left, filter ~= "" and ("filter (enter to apply): " .. #shown ..
+	text_on(left, filter ~= "" and ("Filter (Enter to apply): " .. #shown ..
 			" of " .. #spec.worlds .. " shown") or
-			("filter (enter to apply), " .. #spec.worlds .. " in the list:"))
+			("Filter (Enter to apply), " .. #spec.worlds .. " in the list:"))
 	local edit = edit_on(left, filter)
 	magic.SubscribeToEvent(edit, "TextFinished", function()
 		filter = edit:GetText()

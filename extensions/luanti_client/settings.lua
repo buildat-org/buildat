@@ -346,7 +346,7 @@ function M.show_pause(o)
 			o.leave(true)
 			local ok, why = buildat.discuss_this_server(origin)
 			if not ok then
-				ui_utils.show_message_dialog("Not discussed: " .. tostring(why))
+				ui_utils.show_message_dialog("Could not open the discussion: " .. tostring(why))
 			end
 		end)
 	end

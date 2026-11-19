@@ -91,7 +91,7 @@ click Button "Delete..."
 wait_log 5000 confirm dialog: Move the world
 delay 300
 click Button "Move to the trash"
-wait_log 10000 menu: The world that is running
+wait_log 10000 menu: The running world cannot be deleted
 delay 800
 keypress Escape
 wait_log 10000 menu: 2 saves

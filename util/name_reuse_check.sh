@@ -73,7 +73,7 @@ admin del_b "delete bob" || bad="$bad; bob not deleted ($t/del_b.log)"
 BUILDAT_JOIN_NAME=bob BUILDAT_JOIN_PASSWORD=otherpass12 BUILDAT_JOIN_CREATE=1 \
 	drive lan_b2 "wait_log_any 60000 Login refused: " ||
 	bad="$bad; no refusal for bob again ($t/lan_b2.log)"
-grep -aq "Login refused: \"bob\" was a deleted account's" "$t/lan_b2.log" ||
+grep -aq "Login refused: \"bob\" belonged to a deleted account" "$t/lan_b2.log" ||
 	bad="$bad; a deleted name registered again ($t/lan_b2.log)"
 admin add_b "add bob checkpass12" &&
 	grep -aq "admin result: The account bob was added" "$t/add_b.log" ||

@@ -99,7 +99,7 @@ E.tools.measure = {
 		hl({kind = "point", x = x, z = z})
 		local last = m and not m.closed and m.pts[#m.pts]
 		if closes(m, x, z) then
-			g.left = "close it: the area"
+			g.left = "close it to get the area"
 		elseif last then
 			g.left = "a point here, " .. mm_text(geom.len(x - last[1],
 					z - last[2])) .. " on"

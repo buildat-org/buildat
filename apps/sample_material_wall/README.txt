@@ -20,14 +20,14 @@ that is the order the camera sees them in:
   gloss (binder) 0 -> full
 
 Nothing is simulated and nothing is derived: the worldgen writes the fields.
-The format binds tint, wetness, grain and gloss -- which is all four surface
-modifiers there is room for -- plus sag_top, and the client switches
+The format binds tint, wetness, grain and gloss -- the four surface modifiers
+there is room for -- plus sag_top, and the client switches
 voxel_shading to PBRVoxelModifiers, the reference consumption of them.
 
 **There is no voxel type id in this world.** Every voxel carries how much of
 it is rock and how much is sand, two bits each, and the registry's look
 rules pick the definition from a threshold over those: rock first, then
-sand, then air for everything left. The one id role bound is written as 1
+sand, then air for everything left. The one bound id role is written as 1
 everywhere, because that is how voxelworld tells a generated voxel from one
 nothing has got to yet, and it says nothing about what the voxel is.
 

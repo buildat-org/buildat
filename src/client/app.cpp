@@ -3224,7 +3224,7 @@ struct CApp: public App, public magic::Application
 							"buildat could not start a launch UI.\n\n"
 							"Asked for: " + extname + "\n" +
 							(tried_fallback ?
-							"The built-in menu (launch_menu) raised as well.\n" :
+							"The built-in menu (launch_menu) failed as well.\n" :
 							"") +
 							"\nStart it with another one:\n"
 							"    buildat -m launch_world\n"

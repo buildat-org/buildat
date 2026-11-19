@@ -215,8 +215,8 @@ local function gather()
 	add({label = "Display and sound", kind = "action", badge = "Settings",
 		icon = "own:launch_menu/res/icon_preferences.png",
 		section = "Display and sound",
-		description = "What every app honours: the window, the sound, " ..
-				"the mouse, and which launch UI this is.",
+		description = "Settings for every app: the window, the sound, " ..
+				"the mouse and the launch UI.",
 		run = function() api.show_engine_settings() end})
 	local console = require("buildat/extension/launch_console")
 	console = console and (console.show and console or console.safe)
@@ -613,7 +613,7 @@ local function now_rows()
 	local function thread(th, badge)
 		out[#out + 1] = {label = cut(th.title, 50), kind = "now", glyph = "●",
 			badge = badge, description = th.title .. "   on " .. host ..
-					", written in " .. ago(th.last, t),
+					", written " .. ago(th.last, t),
 			run = function()
 				stale = true
 				local ok, why = api.open_hearth_thread(th.id)
@@ -696,7 +696,7 @@ local function home(query)
 		end
 		view:header("Menu")
 		row({label = "Settings", kind = "settings", description =
-				"Display and sound, the keys, Luanti's, the developer's."},
+				"Display and sound, keys, Luanti and developer settings."},
 				nil, function() settings() end)
 	else
 		-- At most SEARCH_CAP a kind, the best first; Browse has the rest.
@@ -986,7 +986,7 @@ local function logs()
 			"Logs and errors", "")
 	local path = api.log_path() or ""
 	local where = text(window, path ~= "" and "The log: " .. path or
-			"No log file here: the browser's console (F12) has it.", 14)
+			"No log file here: see the browser's console (F12).", 14)
 	where:SetWordwrap(true)
 	where:SetFixedWidth(width - 32)
 	local view = ui_utils.list_view(window, width - 32, 200)
@@ -1176,7 +1176,7 @@ function M.boot(launch_action)
 	local fell_back = api.launch_ui_fell_back and api.launch_ui_fell_back()
 	if fell_back then
 		ui_utils.show_message_dialog("The launch UI \"" .. fell_back ..
-				"\" did not load, so this is the menu.\n\n" ..
+				"\" did not load, so this menu is shown instead.\n\n" ..
 				"The log has the error.")
 	end
 	-- [WIN_MINIDUMP]: the last crash's dump, once

@@ -236,7 +236,7 @@ local PREFERENCES = {
 					(api.get_preference("web_address_bar") == "show" or
 					api.get_preference("web_address_bar") == "landscape" and
 					api.get_preference("screen_orientation") == "portrait") then
-				return "Held only with the address bar hidden"
+				return "Works only with the address bar hidden"
 			end
 		end,
 	},
@@ -561,7 +561,7 @@ local function key_rows(store, app_key)
 			set = set, reset = reset, unbind = unbind}
 	end
 	local function client()
-		out[#out + 1] = {header = "This client's"}
+		out[#out + 1] = {header = "This client's keys"}
 		for _, c in ipairs(store.client) do
 			if not app_key or CLIENT_KEYS_SHOWN[c.which] then
 				row(CLIENT_KEY_LABEL[c.which] or c.which,
@@ -590,7 +590,7 @@ local function key_rows(store, app_key)
 			end
 			return x < y
 		end)
-		out[#out + 1] = {header = "Shared, for every app that has not its own"}
+		out[#out + 1] = {header = "Shared, for every app without its own"}
 		for _, n in ipairs(names) do
 			row(n, store.shared[n], store.shared[n] == nil and
 					"each app's own, used by " .. (users[n] or 0) or
@@ -612,8 +612,8 @@ local function key_rows(store, app_key)
 						end, nil, KEY_GLYPH[e.shared])
 			end
 			if app_key then
-				out[#out + 1] = {label = "Defaults", badge = "every key of " ..
-						a.label .. " as it came", run = function()
+				out[#out + 1] = {label = "Defaults",
+						badge = "resets every key of " .. a.label, run = function()
 					local all = {}
 					for _, e in ipairs(a.actions) do all[e.id] = false end
 					return api.set_app_keys(a.id, all)
@@ -695,7 +695,7 @@ local function key_page(parent, width, height, app_key, options)
 					magic.input:GetKeyDown(magic.KEY_KP_ENTER) and
 					magic.KEY_KP_ENTER or nil
 			line.text = "Press a key for \"" .. r.label ..
-					"\" (Escape leaves it)"
+					"\" (Escape cancels)"
 			log:info(page.log .. ": " .. r.label .. " waits for a key")
 		end}
 	end
@@ -750,7 +750,7 @@ function M.show_keys()
 	window:SetFixedWidth(width)
 	local heading = window:CreateChild("Text")
 	heading:SetStyleAuto()
-	heading.text = "Keys   (Enter and a key binds; Backspace resets)"
+	heading.text = "Keys   (Enter, then a key, binds; Backspace resets)"
 	heading:SetFontSize(20)
 	heading.color = magic.Color(ui_utils.rgb("dim"))
 	ui_utils.close_glyph(root, window)
@@ -905,7 +905,7 @@ function M.show_game(o, app_key, extra)
 			local ok, err = pcall(draw, w, ui)
 			if not ok then
 				log:warning("A settings section failed: " .. tostring(err))
-				text(w, "This section failed: " .. tostring(err), "error")
+				text(w, "This section failed to load: " .. tostring(err), "error")
 			end
 		end
 		-- This window closed for another, which comes back to it with
@@ -1031,7 +1031,7 @@ function M.show_game(o, app_key, extra)
 	section("Logs and errors", function(w)
 		local path = api.log_path() or ""
 		text(w, path ~= "" and "The log: " .. path or
-				"No log file here: the browser's console (F12) has it.")
+				"No log file here: see the browser's console (F12).")
 		local status = text(w, "", "dim")
 		if path ~= "" then
 			button(w, "Copy the path", function()
@@ -1057,7 +1057,7 @@ function M.show_game(o, app_key, extra)
 		title.text = "Keys"
 		local box = win:CreateChild("UIElement")
 		box:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
-		local hint = text(box, "Enter and a key binds; Backspace resets", "dim")
+		local hint = text(box, "Enter, then a key, binds; Backspace resets", "dim")
 		hint:SetFixedHeight(20)
 		local page = key_page(box, inner, win.height - 150, app_key,
 				{follow_focus = true, log = "Game keys"})

@@ -93,7 +93,7 @@ C
 client -C "$t/sc" -D "$t/su" -a app/vanilla/settings -l 4 -c @"$t/s.cmds" > "$t/s.log" 2>&1 ||
 	fail "the Luanti settings drive ($t/s.log): $(drive_err "$t/s.log")"
 grep -a "Game keys shown\|Game keys: " "$t/s.log" | cut -c 30-
-grep -aq "Game keys shown: [0-9]* rows under Luanti *(app/vanilla), This client's$" "$t/s.log" ||
+grep -aq "Game keys shown: [0-9]* rows under Luanti *(app/vanilla), This client's keys$" "$t/s.log" ||
 	fail "Luanti settings' page is not the game's alone ($t/s.log)"
 grep -aq "Game keys: Fly mode on and off = L;" "$t/s.log" ||
 	fail "no key rebound in Luanti settings ($t/s.log)"
@@ -171,7 +171,7 @@ assert [x.split(";")[0] for x in l] == want, l
 assert len(set(x.split(";")[1] for x in l)) == 1, "the page moved: %s" % l
 print("rebound, reset and rebound in place")
 PY
-grep -aq "Game keys shown: [0-9]* rows under Luanti *(server/[^,]*), This client's$" "$t/vc.log" ||
+grep -aq "Game keys shown: [0-9]* rows under Luanti *(server/[^,]*), This client's keys$" "$t/vc.log" ||
 	fail "the page has more than the game's keys ($t/vc.log)"
 # The new key in the game: F5's line, after the window closed
 sed -n '/Game keys closed/,$p' "$t/vc.log" | grep -aq "vanilla : b/.*| step:" ||

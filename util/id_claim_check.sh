@@ -137,7 +137,7 @@ join id_a2 "linked Starport IDs: " BUILDAT_HEARTH_STARPORT=$tok_a
 has id_a2 "Joined as erin"
 join other "Login refused: " BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
 	BUILDAT_HEARTH_STARPORT=$tok_a
-has other "Login refused: That Starport ID is another account's here"
+has other "Login refused: That Starport ID belongs to another account here"
 echo "ok: refused by name, a wrong password links nothing, the password links, the ID then joins, another account's password refused"
 # finn: the code asked after the password, typed on the code page
 code=$(python3 - <<'PY'

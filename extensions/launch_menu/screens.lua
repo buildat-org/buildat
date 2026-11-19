@@ -234,7 +234,7 @@ function M.reconnect(address, why, restarting)
 		if s >= 300 then
 			log:info("reconnect: not back in 5 minutes")
 			close()
-			show_error(why .. "\n\nNot back in 5 minutes.")
+			show_error(why .. "\n\nThe server was not back within 5 minutes.")
 			return
 		end
 		status.text = why .. "\n\nReconnecting... (" .. s .. " s)"
@@ -279,10 +279,10 @@ function M.join_listed(address)
 			end
 		end
 		log:info("A link's " .. address .. " is not listed; not joined")
-		show_error("The link asked to join " .. address .. ", which " ..
-				"no Starport in the settings lists" ..
-				(https and " with TLS" or "") .. ", so this page does " ..
-				"not join it.\nThe servers it can join are under Servers." ..
+		show_error("The link asks to join " .. address .. ", but " ..
+				"no Starport in the settings lists it" ..
+				(https and " with TLS" or "") .. ", so this page cannot " ..
+				"join it.\nThe servers it can join are under Servers." ..
 				(#info.errors > 0 and "\n\n" .. table.concat(info.errors,
 				"\n") or ""))
 	-- Asking: the link was the user's click, and a Starport not asked yet
@@ -580,7 +580,7 @@ function M.show_servers()
 			end
 		end
 		if direct and not web then
-			section("LAN", lan_rows, "No LAN games found. The host opens " ..
+			section("LAN", lan_rows, "No LAN games found. A host opens " ..
 					"one from the pause menu: My account... > Open to LAN.")
 		end
 		if direct then
@@ -722,7 +722,7 @@ function M.show_servers()
 					name = s.name, badge = s.players .. " playing",
 					info = s.address .. (s.game ~= "" and "\n" .. s.game or "")}
 			end
-			lt_note = err and "The Luanti server list did not come." or
+			lt_note = err and "The Luanti server list did not load." or
 					"No servers listed."
 			if unasked then
 				lt_ask = {name = "Ask for the list", badge = unasked,
@@ -909,7 +909,7 @@ local function show_starting(game)
 		if now - last_stage_at > 120 * 1000000 then
 			api.stop_local_server()
 			finish()
-			show_error("Server did not start: no progress for 120 s"..
+			show_error("The server did not start: no progress in 120 s"..
 					(last_stage and (", last at \""..last_stage.."\"") or ""))
 		end
 	end)
@@ -942,7 +942,7 @@ end
 
 local function show_waiting_for_old_server(game, launch)
 	local root = push_status_screen("stopping_old_server",
-			"Stopping previous server...")
+			"Stopping the previous server...")
 	local t0 = api.get_time_us()
 	local done = false
 	root:SubscribeToStackEvent("Update", function()

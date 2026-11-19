@@ -21,7 +21,7 @@ return function(ctx)
 	end
 	return {{id = "voxel_physics", label = "Voxel physics sample",
 		icon = "grass_block.png", order = 150,
-		description = "vanilla with demo_undermine's voxel physics, on " .. game,
+		description = "Vanilla with demo_undermine's voxel physics, on " .. game,
 		run = function()
 			ctx.launch{app = "sample_vanilla_falling_blocks",
 					params = {luanti_game = game, menu = "worlds"}}

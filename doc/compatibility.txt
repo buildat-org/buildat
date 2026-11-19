@@ -38,8 +38,9 @@ client/core/starport's semver_cmp for precedence).
   API or in a save. Its user and cache directories are its own (buildat-alpha,
   beside a stable build's buildat) and disposable: nothing migrates them, and
   nothing moves them to a release. Delete them when an alpha misbehaves.
-  What is in them is not read by a stable build, and a release's is not read
-  by an alpha, unless given by -D and -C or in a portable tree's own folder.
+  A stable build does not read them, and an alpha does not read a
+  release's, unless they are given with -D and -C or sit in a portable
+  tree's own folder.
 
 The connection
 --------------
@@ -55,7 +56,7 @@ record "hello" 1.0 of {protocol_min, protocol_max, version, api, features}.
   flag is defined; a reader refuses one it does not know.
 - **Another minor** is refused at the hello: when the protocol ranges do
   not overlap, the server sends network:goodbye with the reason ("The
-  client runs Buildat X, which is older than this one (Y) plays with", or
+  client runs Buildat X, which is older than this one (Y) can play with", or
   newer) and the client shows it. A 0.6 client, whose framing has no flags
   byte, is told in its own framing to update Buildat and is dropped after
   10 s; a 0.7 client on a 0.6 server says the server did not say hello
@@ -207,8 +208,8 @@ Read once, converted, and dropped at the next break:
   stamped format 1;
 - the 0.6 voxel registry, name and format tables (voxel_cereal_legacy.h);
 - a launch extension's storage at user/<extension>/, moved to
-  user/extensions/<extension>/ on its first use (kept as it is when the
-  new one is there too, and said in the log);
+  user/extensions/<extension>/ on its first use (left as it is, with a
+  log line, when the new one is there too);
 - the Luanti players row and mod storage without "v", rewritten with it;
 - a pidfile in 0.6's "<server> <client>" form, left alone.
 
@@ -223,8 +224,8 @@ Upgrading a server from 0.6
 - starport.json's "login" is refused: a server with it stops at start,
   saying so. Replace "login": "both" or "starport" with "ids": "anyone"
   (or "approved", where an operator approves each ID); remove "login":
-  "local", which is Starport IDs off. An edit at runtime with "login" is
-  logged and not taken.
+  "local", which means Starport IDs off. An edit at runtime with "login"
+  is logged and ignored.
 - Every installed package is republished at engine_api 2 (Apps, above);
   one that is not is refused at load.
 - The save is migrated on its first start and stamped. 0.6 does not
@@ -232,7 +233,8 @@ Upgrading a server from 0.6
   the save to go back.
 - **An operator locked out**: when the save has admins but no admin
   account this Buildat can read (one written by a newer Buildat), the
-  server logs which, once a start, and is not offered to be claimed. To
+  server logs which, once per start, and does not offer itself to be
+  claimed. To
   get back in, run the Buildat that wrote the account, or stop the server
   and delete that row (store "accounts", key "auth/<name>") from
   save.sqlite; the next start offers the server to be claimed.

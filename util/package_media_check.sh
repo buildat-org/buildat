@@ -222,7 +222,7 @@ EOF2
 "$b" aitta page 127.0.0.1:$P tester/m1 "$t/pdir" "$t/key" > /dev/null 2>&1 ||
 	fail "a second page"
 out=$("$b" aitta publish "$t/old-page.zip" 127.0.0.1:$P 2>&1)
-echo "$out" | grep -q "as new as this or newer" || fail "an older page: $out"
+echo "$out" | grep -q "as new as this one, or newer" || fail "an older page: $out"
 echo "ok: aitta page: the package page in order, escaped, linked; another key and an older page refused"
 curl -s -d "release=tester/m1&reason=spam&text=ads" "$A/api/v1/aitta/report" | grep -q "Sent" ||
 	fail "the page's report"

@@ -144,11 +144,11 @@ namespace interface
 		if(h.protocol_max < PROTOCOL_MIN)
 			return "The "+theirs+" runs Buildat "+h.version.substr(0, 40)+
 					", which is older than this one ("+BUILDAT_VERSION+
-					") plays with";
+					") can play with";
 		if(h.protocol_min > PROTOCOL_MAX)
 			return "The "+theirs+" runs Buildat "+h.version.substr(0, 40)+
 					", which is newer than this one ("+BUILDAT_VERSION+
-					") plays with";
+					") can play with";
 		return "";
 	}
 }

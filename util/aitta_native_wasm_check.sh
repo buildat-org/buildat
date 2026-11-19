@@ -206,7 +206,7 @@ grep -a "web build of tester/rusty/1.0.0: " "$t/srv.log" &&
 for n in q1 q2 q3; do
 	grep -q "listed: tester/$n/1.0.0" "$t/pub_$n.out" || fail "publish $n: $(cat "$t/pub_$n.out")"
 done
-grep -q "3 releases of tester wait to be built here already" "$t/pub_q4.out" ||
+grep -q "3 releases of tester are already waiting to be built here" "$t/pub_q4.out" ||
 	fail "a fourth release not for the page was not refused: $(cat "$t/pub_q4.out")"
 grep -aq "tester/q1/1.0.0 in the page: no, the module main is C++; its .wasm queued" "$t/srv.log" ||
 	fail "q1 not queued for a native server ($t/srv.log)"
@@ -406,7 +406,7 @@ echo "http://planted.invalid" > "$t/planted/.aitta_from"
 echo "planted" > "$t/planted/.aitta_sha256"
 rawsign "$t/planted" "$t/key" "$t/raw/tester-planted-1.0.0" || fail "the planted release"
 "$b" aitta publish "$t/raw/tester-planted-1.0.0.zip" 127.0.0.1:$P > "$t/pub_planted.out" 2>&1
-grep -q "at its root: a name under a dot there is an install's" "$t/pub_planted.out" ||
+grep -q "at its root: a name starting with a dot there belongs to an install" "$t/pub_planted.out" ||
 	fail "a planted .aitta_wasm was not refused at publish: $(cat "$t/pub_planted.out")"
 [ -z "$(release planted)" ] || fail "the planted release is listed"
 "$b" aitta install "$t/raw/tester-planted-1.0.0.zip" "$t/u_file" > "$t/file.out" 2> "$t/file.err" ||
@@ -429,7 +429,7 @@ for wname in main/client_data/main.wasm main/client_data/MAIN.Wasm \
 	cp "$dir/.aitta_wasm/main.wasm" "$t/inblob/$wname"
 	rawsign "$t/inblob" "$t/key" "$t/raw/tester-inblob-1.0.0" || fail "the $wname release"
 	"$b" aitta publish "$t/raw/tester-inblob-1.0.0.zip" 127.0.0.1:$P > "$t/pub_inblob.out" 2>&1
-	grep -q "the archive has $wname: a release's .wasm is built here" "$t/pub_inblob.out" ||
+	grep -q "the archive has $wname: Aitta builds a release's .wasm from" "$t/pub_inblob.out" ||
 		fail "$wname was not refused: $(cat "$t/pub_inblob.out")"
 	[ -z "$(release inblob)" ] || fail "the $wname release is listed"
 	rm -f "$t/inblob/$wname"

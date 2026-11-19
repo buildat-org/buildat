@@ -6,13 +6,13 @@ run their own. The official one is https://starport.buildat.org.
 
 - A server is listed only if its admin names a Starport in
   `starport.json`. Its announce carries its address, app and player count,
-  not who is playing. Its kind (world, arena, app, other) is the
-  file's, or else the app's own: `main/meta.json`'s "kind", experiment
-  and check listed as other ([APP_CATEGORY]).
-  A listing not announced for 30 days is dropped -- a claimed one after
-  a year, while the account that claimed it exists and is not suspended
-  or banned -- unless moderation has a record of it; its server, back, is
-  listed again under a new id and claim code.
+  not who is playing. Its kind (world, arena, app, other) comes from the
+  file, or else from the app's own `main/meta.json` "kind", where
+  experiment and check are listed as other ([APP_CATEGORY]).
+  A listing not announced for 30 days is dropped (a claimed one after a
+  year, while the account that claimed it exists and is not suspended
+  or banned), unless moderation has a record of it. If its server comes
+  back, it is listed again under a new id and claim code.
 - A server accepts Starport IDs only if its admin turns them on; local
   accounts work without one. A player uses an ID only by choosing "Sign in
   with your Starport ID". After that the client signs in with the ID by
@@ -33,16 +33,16 @@ run their own. The official one is https://starport.buildat.org.
   `state=<16 to 128 of A-Z a-z 0-9 _ ->`, the window goes on after Allow
   to `<that origin>/starport_signin#code=<code>&state=<state>` (Cancel:
   `#error=cancelled&state=<state>`), the origin always the one the API
-  computed, never one from the address. The token stays on the Starport;
+  computed, never one taken from the address. The token stays on the Starport;
   the page there takes it by POSTing `{"code"}` to `/api/v1/id/redeem`,
   which answers only a page of that origin (its Origin header), once,
   within a minute, with what the token call gives (`token`, `name`,
   `listing`, `exp`). A site's window (below) has no such way. `/id` is
   the ID's page: its sessions and last 20 logins with "Log out everywhere
   else", TOTP, the e-mail, the password and the age, and making an ID.
-  The age asks "18 or over?" first, the birth year only on a No, kept
-  until the ID turns 18. With TOTP on, changing the password or the
-  e-mail takes a current code.
+  The age setting asks "18 or over?" first and asks for the birth year
+  only on a No; the year is kept until the ID turns 18. With TOTP on,
+  changing the password or the e-mail takes a current code.
 - A website signs its visitors in the same way ([STARPORT_SITE_LOGIN]):
   its operator registers it (the Starport app's Sites page: a name and
   an origin, https://host[:port]) and gets an id and a secret. The site
@@ -70,17 +70,18 @@ run their own. The official one is https://starport.buildat.org.
   the player once whether to keep the account it knew by `prev_sub`. Only
   that server gets the pair, and only for 2 moves in 30 days.
 - A Starport ID holds a name, a password hash and, if given, a recovery
-  e-mail. It is deleted from its own settings. Mail goes through the
+  e-mail. It can be deleted from its own settings. Mail goes through the
   server's SMTP server, set on the Server window's Health page; the old
   `smtp` setting moves there at the first start that has none.
   A session lasts 30 days from its last use. Wrong logins are limited
   by the network they come from (an IPv4 /24, an IPv6 /64), 30 an hour,
-  never by the name tried; new IDs to 5 a day from one network.
+  never by the name tried; new IDs are limited to 5 a day from one
+  network.
 - The address a login or a report came from is kept for `retention_days`,
   7 by default, which the Starport's admin sets; a daily pass then clears
   it. The ID sees its own recent logins with their addresses until then.
-- The admin's Settings page holds every setting, each as JSON, a setting
-  newer than the Starport's first start at its default. `web_clients`
+- The admin's Settings page holds every setting, each as JSON; a setting
+  added after the Starport's first start has its default value. `web_clients`
   lists the origins of web pages besides a listed server's own that
   `/authorize` sends a Starport ID's token to: a page that serves the web
   client with no game of its own, as `apps/play` does
@@ -88,14 +89,15 @@ run their own. The official one is https://starport.buildat.org.
   in with an ID.
 - `/` is a read-only page ([FRONT_PAGES]): the listings by fleet with
   kind and audience filters, the transparency numbers and a privacy
-  line; only what suits a teen (no yes to sexual content, drugs or
-  gambling, no unmoderated chat or content, no open report, no adult
-  audience) and claimed at least `page_delay` (3600 s) ago, the busiest
-  first. The web client is at /index.html.
+  line. It shows only listings that suit a teen (no yes to sexual
+  content, drugs or gambling, no unmoderated chat or content, no open
+  report, no adult audience) and were claimed at least `page_delay`
+  (3600 s) ago, the busiest first. The web client is at /index.html.
 - Reports, their weights, the queue, decisions, statements of reasons and
-  appeals are builtin/moderation's (doc/server_api.txt); a statement has
-  one appeal; a decided one closes it. A blocklist takes only an offered listing or fleet; an
-  account makes 20 at most, none when banned. Moderators are accounts at
+  appeals belong to builtin/moderation (doc/server_api.txt). A statement
+  has one appeal, and deciding it closes the statement. A blocklist takes
+  only an offered listing or fleet; an account makes at most 20, and none
+  when banned. Moderators are accounts at
   the Steward level ([TRUST_LADDER]), set by the "level" request as
   Hearth's are.
 - `recommended_hearth` (an http(s) address) and `recommended_aittas` (a
@@ -114,17 +116,18 @@ run their own. The official one is https://starport.buildat.org.
   {"url": ...}, "win64": {"url": ...}}}`. `/api/v1/list` carries it as
   "version", https links only; a failed run keeps the last good answer
   and logs why. `util/starport_version_github.py` is the one for GitHub
-  releases. A native client newer than its own shows a notice on the
+  releases. A native client that is offered a version newer than its own
+  shows a notice on the
   launcher's screen with its platform's link, "Download" and "Not
   now", which is kept until a newer version. Once Download has opened
   the link, the notice says what to do next by the file's name (an .exe
   is run, an archive extracted; the saves and settings stay in the user
-  directory) and offers "Close Buildat", out of the installer's way.
+  directory) and offers "Close Buildat" to get out of the installer's way.
 - The alpha channel ([ALPHA_BUILDS], doc/compatibility.txt): the adapter's
   answer may hold "prerelease", the newest alpha in the same shape. A stable
   client does not read it; an alpha client is offered it within its own
   MAJOR.MINOR, and any stable "version" newer than itself. A listing whose
-  version has `-alpha.` in it (a server tells its engine's) is shown only to a
+  version has `-alpha.` in it (a server reports its engine's) is shown only to a
   client that names that same version: an alpha client posts `{"version":
   "0.8.0-alpha.3"}` to `/api/v1/list`, and only an alpha client says its
   version there. Anything else, the page at / and a Hearth included, gets no
@@ -141,7 +144,7 @@ run their own. The official one is https://starport.buildat.org.
   `{"ok": false, "code": "upgrade_required", ...}`. A refusal is `{"ok":
   false, "code": ..., "error": ...}`: code for a program to match
   ("refused", "too_often", "no_listing", "session"), error for a person.
-  A newer server's announce is taken: a kind this Starport does not know
+  A newer server's announce is accepted: a kind this Starport does not know
   is listed as "other", an audience as "adult", a descriptor's value as
   "unknown"; an access or login word is listed as it is, and a client
   that does not know it leaves the listing out. The announce's keys this

@@ -757,8 +757,8 @@ struct Module: public interface::Module, public moderation::Host
 				return respond(r, v);
 			}
 			using interface::web_brand::html;
-			const ss_ body = (error.empty() ? "<p>Sent; a moderator will "
-					"look. Receipt "+html(receipt)+".</p>" : "<p>Not sent: "+
+			const ss_ body = (error.empty() ? "<p>Sent. A moderator will "
+					"look at it. Receipt: "+html(receipt)+".</p>" : "<p>Not sent: "+
 					html(error)+"</p>")+"<p><a href=\"/\">Aitta</a></p>";
 			network::access(m_server, [&](network::Interface *iface){
 				iface->http_respond(r.peer, 200, "text/html; charset=utf-8",
@@ -768,7 +768,7 @@ struct Module: public interface::Module, public moderation::Host
 		};
 		const ss_ net = network::address_bin(r.address);
 		if(!m_hits.ok("report", net, 10, 3600))
-			return answer("too many reports from your network; try later", "");
+			return answer("too many reports from your network; try again later", "");
 		const ss_ id = jstr(b, "release");
 		// [AITTA_PACKAGE_PAGE] Or "author/name": the package's page
 		const json::Value rel = is_page(id) ? shown_page(id) :
@@ -798,7 +798,7 @@ struct Module: public interface::Module, public moderation::Host
 			if(was.is_object() && !load("reporters", h).is_object())
 				put("reporters", h, was);
 			if(!m_hits.ok("report_key", h, 5, 3600))
-				return answer("too many reports from this key; try later", "");
+				return answer("too many reports from this key; try again later", "");
 		}
 		json::Value rep = json::object();
 		const ss_ rid = interface::sha256::hex(
@@ -829,7 +829,7 @@ struct Module: public interface::Module, public moderation::Host
 		// Starport's limit ([SECURITY_RUN_7]; there was none here)
 		if(!m_hits.ok("report_status", network::address_key(r.address), 30,
 				60))
-			return refuse(r, "asked too often");
+			return refuse(r, "too many requests; try again later");
 		const json::Value b = json::load_string(r.body.c_str());
 		json::Value out;
 		const ss_ err = moderation::report_status(store("reports"), b, out);
@@ -1143,7 +1143,7 @@ struct Module: public interface::Module, public moderation::Host
 			if(mine.empty() && alphas.empty())
 				return send(404, html_type, interface::web_brand::page(
 						"Not found", "Aitta", "<p>No package of that name is "
-						"listed here. <a href=\"/\">The list</a>.</p>", MANAGE));
+						"listed here. <a href=\"/\">Back to the list</a>.</p>", MANAGE));
 			const json::Value &top = mine.empty() ? *alphas[0] : *mine[0];
 			auto boxes = [&](const sv_<const json::Value*> &l){
 				ss_ o = release_box(*l[0], false);
@@ -1185,21 +1185,21 @@ struct Module: public interface::Module, public moderation::Host
 				if(jstr(*mine[0], "kind") != "world")
 					c += "<details><summary>On a dedicated server</summary>"
 						"<div class=\"box\"><span class=\"meta\">In the "
-						"directory of a Buildat release; the newest listed, or a "
-						"version</span><pre>"
+						"directory of a Buildat release: the newest listed "
+						"release, or a given version</span><pre>"
 						"bin/buildat aitta install "+html(self)+" "+html(want)+
 						" &lt;user dir&gt;\n"
 						"util/serve_latest_release.sh "+html(want)+
 						" &lt;port&gt; &lt;user dir&gt;\n"
-						"# following its releases here:\n"
+						"# to follow its releases here:\n"
 						"AITTA="+html(self)+" util/serve_latest_release.sh "+
 						html(want)+" &lt;port&gt; &lt;user dir&gt;</pre><pre>"+
 						html(vers)+"</pre></div></details>\n";
 			}
 			if(!alphas.empty())
 				c += "<h2>Alpha releases</h2>\n<p class=\"meta\">For Buildat "
-						"0.8 alpha, installed with an alpha's client; a stable "
-						"Buildat installs none of them.</p>\n"+boxes(alphas);
+						"0.8 alpha. An alpha client installs them; a stable "
+						"Buildat does not.</p>\n"+boxes(alphas);
 			// [AITTA_REPORTS] A report from the web: anonymous, so it
 			// weighs little alone. [AITTA_HTML_FOLDS] Folded: a visitor is
 			// seldom here to report
@@ -1260,10 +1260,10 @@ struct Module: public interface::Module, public moderation::Host
 						worlds += release_box(rel, true);
 			}
 			if(!worlds.empty())
-				worlds = "<h2>Worlds for it</h2>\n"+worlds;
+				worlds = "<h2>Worlds for this app</h2>\n"+worlds;
 			return send(200, html_type, interface::web_brand::page(want+
 					" - Aitta", "Aitta", head+"<p class=\""
-					"meta\">Every listed release, the newest first.</p>\n"+
+					"meta\">Every listed release, newest first.</p>\n"+
 					(pl.empty() ? "" : "<p>"+pl+"</p>\n")+c+worlds+
 					f, MANAGE));
 		}
@@ -1286,8 +1286,8 @@ struct Module: public interface::Module, public moderation::Host
 				"yet.</p>\n" : c.empty() ? "" : "<h2>Packages</h2>\n"+c;
 		if(!ca.empty())
 			body += "<h2>Alpha packages</h2>\n<p class=\"meta\">For Buildat "
-					"0.8 alpha, installed with an alpha's client; a stable "
-					"Buildat installs none of them.</p>\n"+ca;
+					"0.8 alpha. An alpha client installs them; a stable "
+					"Buildat does not.</p>\n"+ca;
 		send(200, html_type, interface::web_brand::page("Aitta", "Aitta",
 				body, MANAGE));
 	}
@@ -1425,7 +1425,7 @@ struct Module: public interface::Module, public moderation::Host
 			return refuse(r, "the signature does not match the hash");
 		const json::Value &max = m_settings.get("max_size");
 		if(size <= 0 || (max.is_number() && size > max.as_number()))
-			return refuse(r, "the archive's size is 1 byte to "+
+			return refuse(r, "the archive must be 1 to "+
 					itos((int64_t)max.as_number())+" bytes here");
 		if(!page && interface::fs::path_exists(m_archives+"/"+sha+".zip"))
 			return refuse(r, "this archive is here already");
@@ -1464,7 +1464,7 @@ struct Module: public interface::Module, public moderation::Host
 		if(r.body.size() > (size_t)PIECE)
 			return refuse(r, "a piece is "+itos((int64_t)PIECE)+" bytes at most");
 		if(u.data.size() + r.body.size() > u.size)
-			return refuse(r, "more than the size given");
+			return refuse(r, "more bytes than the size given");
 		u.data += r.body;
 		ok(r);
 	}
@@ -1944,7 +1944,7 @@ struct Module: public interface::Module, public moderation::Host
 		Upload u = it->second;
 		m_uploads.erase(it);
 		if(u.data.size() != u.size)
-			return refuse(r, "the archive is not whole");
+			return refuse(r, "the archive is incomplete");
 		if(interface::sha256::hex(interface::sha256::calculate(u.data)) != sha)
 			return refuse(r, "the archive is not the one the .sig is for");
 		if(jstr(u.sig, "format") == interface::aitta::PAGE_FORMAT)
@@ -2015,10 +2015,11 @@ struct Module: public interface::Module, public moderation::Host
 			return drop("meta.json: "+why);
 		if(!dotted.empty())
 			return drop("the archive has "+dotted[0]+" at its root: a name "
-					"under a dot there is an install's, not a package's");
+					"starting with a dot there belongs to an install, not to a "
+					"package");
 		if(!carried_wasm.empty())
-			return drop("the archive has "+carried_wasm+": a release's .wasm "
-					"is built here from its source, so that a review reads "
+			return drop("the archive has "+carried_wasm+": Aitta builds a "
+					"release's .wasm from its source, so that a review reads "
 					"what runs");
 		if(!changelog_there)
 			return drop("meta.json: \"changelog\": "+jstr(m, "changelog")+
@@ -2030,8 +2031,8 @@ struct Module: public interface::Module, public moderation::Host
 					"\", and the manifest says \""+jstr(m, "author")+"\"");
 		for(const char *k : {"license_code", "license_media"})
 			if(!licence_ok(jstr(m, k)))
-				return drop(ss_(k)+" \""+jstr(m, k)+"\" names one this "
-						"instance does not take, or is not ids joined by AND "
+				return drop(ss_(k)+" \""+jstr(m, k)+"\" names a licence "
+						"this Aitta does not take, or is not ids joined by AND "
 						"and OR");
 		const ss_ id = jstr(m, "author")+"/"+jstr(m, "name")+"/"+
 				jstr(m, "version");
@@ -2047,8 +2048,8 @@ struct Module: public interface::Module, public moderation::Host
 				m_web_queue.end(), [&](const ss_ &q){
 					return author_of(q) == u.author; }) >= WEB_WAITING_MAX)
 			return drop(itos(WEB_WAITING_MAX)+" releases of "+u.author+
-					" wait to be built here already: publish "
-					"this once one of them is built");
+					" are already waiting to be built here: publish "
+					"this one after one of them is built");
 		if(!media_why.empty())
 			return drop("meta.json: "+media_why);
 		if(m.get("serverless").as_boolean() && !lua51.empty())
@@ -2204,7 +2205,7 @@ struct Module: public interface::Module, public moderation::Host
 		const json::Value old = load("pages", pkg);
 		if(old.is_object() && p.get("time_ms").as_number() <=
 				old.get("time_ms").as_number())
-			return refuse(r, "the page here is as new as this or newer");
+			return refuse(r, "the page here is as new as this one, or newer");
 		json::Value pg = json::object();
 		pg.set("package", pkg);
 		pg.set("author", u.author);
@@ -2257,8 +2258,8 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		log_i(MODULE, "The page of %s (%u screenshots) from %s%s", cs(pkg),
 				hashes.size(), cs(r.address), held ? ", held" : "");
-		ok(r, held ? pkg+": it waits for a moderator, as the last page was "
-				"delisted" : pkg);
+		ok(r, held ? pkg+": it waits for a moderator because the last page "
+				"was delisted" : pkg);
 	}
 
 	// An SPDX expression ([LUANTI_APP_PACKAGES]): ids joined by AND and OR,
@@ -2636,7 +2637,7 @@ struct Module: public interface::Module, public moderation::Host
 				rel.set("review_note", "");
 			} else if(action == "needs_changes"){
 				if(note.empty())
-					throw Exception("say what needs changing");
+					throw Exception("the note must say what needs changing");
 				rel.set("review", "needs_changes");
 				rel.set("review_note", note);
 			} else if(action == "relabel"){
@@ -2724,7 +2725,7 @@ struct Module: public interface::Module, public moderation::Host
 			rel.set("hidden", true);
 		rel.set("status_auto", true);
 		rel.set("delisted_why", "reported for "+jstr(g, "reason")+
-				"; out of the list until a moderator looks");
+				"; hidden until a moderator looks at it");
 		put(st, id, rel);
 		return subject(id);
 	}
@@ -2744,7 +2745,7 @@ struct Module: public interface::Module, public moderation::Host
 				action != "delist_package" && action != "bar")
 			throw Exception("action: unreview, delist, delist_package or bar");
 		if(page && action != "delist" && action != "bar")
-			throw Exception("a page is delisted, or its author barred");
+			throw Exception("a page can only be delisted, or its author barred");
 		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name")+"/";
 		ss_ stated = action == "unreview" ? "unreviewed" : action == "bar" ?
 				"barred" : action == "delist" ? (page ? "page delisted" :
@@ -2896,7 +2897,7 @@ struct Module: public interface::Module, public moderation::Host
 			if(cmd.compare(0, 7, "review_") == 0 || cmd == "playtest" ||
 					cmd.compare(0, 4, "mod_") == 0){
 				if(!reviewer)
-					throw Exception("for the reviewers: this server's "
+					throw Exception("only for reviewers: this server's "
 							"moderators and admins");
 				return cmd.compare(0, 4, "mod_") == 0 ?
 						handle_mod(name, cmd, q) : handle_review(name, cmd, q);
@@ -2970,17 +2971,18 @@ struct Module: public interface::Module, public moderation::Host
 		if(cmd == "bind"){
 			const ss_ author = jstr(q, "author"), key = jstr(q, "key");
 			if(!get("owners", name).empty())
-				throw Exception("this account has its author name already");
+				throw Exception("this account already has an author name");
 			if(!plain_name(author))
-				throw Exception("an author name is 1 to 40 of a-z, 0-9 and _");
+				throw Exception("an author name is 1 to 40 characters of a-z, 0-9 "
+						"and _");
 			if(!get("authors", author).empty())
 				throw Exception("the author name \""+author+"\" is taken");
 			// An uncompressed P-256 point: 04, then x and y
 			if(!is_hex(key, 130) || key.compare(0, 2, "04") != 0)
-				throw Exception("the key is what `bin/buildat aitta keygen` "
-						"printed: 130 hex digits");
+				throw Exception("the key is the line `bin/buildat aitta "
+						"keygen` printed: 130 hex digits");
 			if(!get("keys", key).empty())
-				throw Exception("this key is bound already");
+				throw Exception("this key is already bound");
 			json::Value a = json::object();
 			a.set("author", author);
 			a.set("key", key);
@@ -2995,7 +2997,7 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		if(cmd == "delist" || cmd == "relist"){
 			if(!admin)
-				throw Exception("only the admin delists");
+				throw Exception("only the admin can delist");
 			const ss_ id = jstr(q, "release");
 			json::Value rel = load("releases", id);
 			if(!rel.is_object())
@@ -3025,7 +3027,7 @@ struct Module: public interface::Module, public moderation::Host
 		// stored ones, for the admin's Settings page
 		if(cmd == "settings"){
 			if(!admin)
-				throw Exception("only the admin reads settings");
+				throw Exception("only the admin can read settings");
 			json::Value r = default_settings();
 			for(json::Iterator it(m_settings); it.valid(); it.next())
 				r.set(it.key(), it.value());
@@ -3034,7 +3036,7 @@ struct Module: public interface::Module, public moderation::Host
 		// Settings by name, each one default_settings has
 		if(cmd == "set_settings"){
 			if(!admin)
-				throw Exception("only the admin sets settings");
+				throw Exception("only the admin can change settings");
 			const json::Value &s = q.get("settings");
 			if(!s.is_object())
 				throw Exception("settings: an object");

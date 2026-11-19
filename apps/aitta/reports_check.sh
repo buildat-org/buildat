@@ -92,7 +92,7 @@ curl -s -X POST -d '{"release":"tester/pk/1.0.0","reason":"broken","text":"anony
 	"$A/api/v1/aitta/report" | grep -q '"ok":true' || fail "the anonymous report"
 curl -s -X POST --data-urlencode "release=tester/pk2/1.0.0" -d reason=other \
 	--data-urlencode "text=from the web" "$A/api/v1/aitta/report" |
-	grep -q "Sent; a moderator will look" || fail "the web form's report"
+	grep -q "Sent. A moderator will look" || fail "the web form's report"
 echo "{\"aittas\": [\"$A\"]}" > "$t/managed.json"
 # The delay between the two clicks: not a double click
 cat > "$t/report.cmds" <<C
@@ -185,7 +185,7 @@ apid=$(ans "$t/ap1.log" 1 | grep -o '"id":"[0-9a-f]*"' | head -1 | cut -d'"' -f4
 [ -n "$apid" ] || fail "no appeal open: $(grep -a 'ai: ' "$t/ap1.log")"
 reqs admin "$t/ap2.log" \
 	"{\"cmd\":\"mod_decide_appeal\",\"appeal\":\"$apid\",\"outcome\":\"reverse\",\"text\":\"mine\"}"
-grep -aq 'another moderator than the one who acted' "$t/ap2.log" ||
+grep -aq 'a moderator other than the one who acted' "$t/ap2.log" ||
 	fail "the admin decided their own: $(grep -a 'ai: ' "$t/ap2.log")"
 reqs mod2 "$t/ap3.log" \
 	"{\"cmd\":\"mod_decide_appeal\",\"appeal\":\"$apid\",\"outcome\":\"reverse\",\"text\":\"it starts\"}"

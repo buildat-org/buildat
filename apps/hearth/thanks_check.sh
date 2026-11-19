@@ -64,7 +64,7 @@ client bob bobpass1234 '{"cmd":"new_thread","topic":1,"title":"Lamps","body":"us
 answer bob 1002 | grep -q '"error":"not your own message"' ||
 	fail "bob thanked his own: $(answer bob 1002)"
 client carol carolpass1234 '{"cmd":"thank","message":1,"on":true}'
-answer carol 1001 | grep -q '"error":"thanks are a ' ||
+answer carol 1001 | grep -q '"error":"only a .* can thank' ||
 	fail "a new account thanked: $(answer carol 1001)"
 client admin checkpass12 '{"cmd":"thank","message":1,"on":true}
 {"cmd":"thank","message":1,"on":false}

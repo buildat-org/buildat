@@ -132,7 +132,7 @@ return function(h)
 			if #rows == 0 then
 				rows[1] = {"No times yet"}
 			end
-			scores_page("High scores (> this hill)", rows, {}, function()
+			scores_page("High scores (> marks this hill)", rows, {}, function()
 				close_scores()
 				back()
 			end)

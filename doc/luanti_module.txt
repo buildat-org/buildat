@@ -4,8 +4,8 @@ builtin/luanti -- a Luanti game as a buildat module
 builtin/luanti runs an unmodified Luanti *game* -- its mods, its nodes, its
 items, its callbacks -- inside buildat_server, with none of Luanti's network
 protocol anywhere. The game logic is Luanti's; everything around it is
-buildat's. The other end of the telescope from extensions/luanti_client, which
-speaks the real protocol to a real Luanti server.
+Buildat's. It is the opposite of extensions/luanti_client, which speaks the
+real protocol to a real Luanti server.
 
 What is written down here is what exists.
 
@@ -19,7 +19,7 @@ directory with a game.conf; a world is a directory with a world.mt naming its
 gameid. (The user path, not the cache: a game somebody installed and a world
 they have played are things they chose.)
 
-buildat ships one Luanti game of its own, builtin/luanti/minimal_game: one
+Buildat ships one Luanti game of its own, builtin/luanti/minimal_game: one
 mod, two node types and a floor made of them. It needs nothing installed and
 it is what the visual check runs, since a fixture somebody has to install is
 a fixture that is different on every machine.
@@ -77,7 +77,7 @@ The import folder is <user>/shared/vanilla/import (Luanti's own path plus
 /import; games/ and worlds/ are made in it at the first look). It is the
 one place a player puts what to import: the server is sandboxed by default
 and reads no ~/.luanti. The import screens' "Open the import folder" opens it
-in the desk's file manager (buildat.open_import_folder, a local server's
+in the desktop's file manager (buildat.open_import_folder, a local server's
 only). A world.mt with "gameid = minetest" is minetest_game's; one with no
 gameid is left out and counted. The launcher says which roots it looked at and
 what it found in them, so "0 games and 0 worlds from 2 roots" in the log is
@@ -91,7 +91,7 @@ and on the screen. The real tiles, the drawtypes and the media are M3.
 The licence, and why this is allowed
 ------------------------------------
 
-Luanti is LGPL-2.1-or-later and buildat is Apache-2.0. This works because a
+Luanti is LGPL-2.1-or-later and Buildat is Apache-2.0. This works because a
 buildat module is dynamically linked at runtime -- src/server/rccpp.cpp
 compiles each one to its own -shared object and dlopens it -- so the vendored
 Luanti code lives in that object, which is LGPL, and buildat_server itself

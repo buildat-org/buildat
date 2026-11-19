@@ -4,10 +4,10 @@ launch_world
 The room you start in. The client starts in a small hand-authored room
 and walks out of it into a game -- the games are warm orbs wedged in
 niches, the servers are mirrors on the floor, every readout is a real
-light source and nothing is on a HUD. It is to be the default launch
-mode once it is polished enough, with launch_menu kept for the audience
-that wants a list; and it is a showcase of what a buildat program can
-be, not of how little one can be. There is no server, no mapgen, no streaming, no sky, no day or night and
+light source and nothing is on a HUD. It is meant to become the default
+launch mode once it is polished enough, with launch_menu kept for those
+who want a list. There is no server, no mapgen, no streaming, no sky, no day
+or night and
 no entities -- the room is generated from a table every boot. What it
 keeps is the player's bookmarks row and its sound levels.
 
@@ -38,8 +38,8 @@ orb's mark, and the floor's value and finish:
 because the room *is* the launcher: starting a game is ctx.launch on the
 trusted side, which a game's own sandbox cannot call. The voxels are
 described in room.lua, built in Lua and meshed straight into a node
-through buildat.safe.set_8bit_voxel_geometry. What that costs, and the
-plan said it would: no voxelworld means no skylight flood and no baked
+through buildat.safe.set_8bit_voxel_geometry. That has a cost, as the
+plan said: no voxelworld means no skylight flood and no baked
 ambient occlusion, so the wall's relief rests entirely on the real
 lights, and the dissolve is a rewrite of the block and a re-mesh.
 
@@ -102,7 +102,7 @@ the default:
                              with the orbs' voices), pad, pad_dark,
                              chimes, quiet. M.STYLES in synth.lua
 
-The switches `event room probe|ornament|still` make, at boot:
+The switches of `event room probe|ornament|still`, at boot:
 
     BUILDAT_LAUNCH_NO_PROBE  the reflection probe off
     BUILDAT_LAUNCH_NO_ORNAMENT
@@ -296,7 +296,7 @@ line is a thing that has been seen to fail:
 The room's save is user/launch_world/room.txt: the bookmarks row,
 "!bookmark <key>" a line, and the levels, "!sound_db <orbs> <bed>". A
 file a person can read and delete. Placed voxels, moved spheres and the
-field of view, which the proof saved, are read past and not written.
+field of view, which the proof saved, are skipped when read and never written.
 
 Two of them exist because a feature drew nothing for a day while its own
 log line said otherwise, and two more were passing on the HUD's text

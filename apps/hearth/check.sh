@@ -214,13 +214,13 @@ grep -aq 'hr: {.*"level":0' "$t/bob6.log" || fail "bob is not a new account"
 answer "$t/bob6.log" 1002 | grep -q '"result":2' || fail "bob's thread: $(answer "$t/bob6.log" 1002)"
 answer "$t/bob6.log" 1003 | grep -q '"ok":true' || fail "bob's second thread"
 answer "$t/bob6.log" 1004 | grep -q "2 new threads a day" || fail "a third thread in a day"
-answer "$t/bob6.log" 1005 | grep -q "one's own" || fail "bob reported his own"
+answer "$t/bob6.log" 1005 | grep -q "your own message" || fail "bob reported his own"
 answer "$t/bob6.log" 1016 | grep -q "messages an hour" || fail "edits without a limit"
 client carol carolpass1234 "$t/carol.log" '{"cmd":"report","message":6,"reason":"spam"}
 {"cmd":"report","message":6,"reason":"spam!"}
 {"cmd":"report","message":2,"reason":"rude"}'
 answer "$t/carol.log" 1001 | grep -q '"result":1' || fail "carol's report: $(answer "$t/carol.log" 1001)"
-answer "$t/carol.log" 1002 | grep -q "waiting already" || fail "a report twice"
+answer "$t/carol.log" 1002 | grep -q "already waiting" || fail "a report twice"
 answer "$t/carol.log" 1003 | grep -q '"result":2' || fail "carol's second report"
 client admin checkpass12 "$t/admin6.log" '{"cmd":"queue"}
 {"cmd":"moderate","report":1,"action":"hide"}
@@ -254,8 +254,8 @@ answer "$t/bob7.log" 1001 | grep -q '"kind":"hidden".*"note":"Advertising"' ||
 answer "$t/bob7.log" 1002 | grep -q '"body":"Cheap lamps for everyone"' ||
 	fail "the author does not see his hidden message"
 answer "$t/bob7.log" 1003 | grep -q '"result":3' || fail "the appeal: $(answer "$t/bob7.log" 1003)"
-answer "$t/bob7.log" 1004 | grep -q "waiting already" || fail "an appeal twice"
-answer "$t/bob7.log" 1005 | grep -q "a hidden message is not edited" ||
+answer "$t/bob7.log" 1004 | grep -q "already waiting" || fail "an appeal twice"
+answer "$t/bob7.log" 1005 | grep -q "a hidden message cannot be edited" ||
 	fail "a hidden message edited: $(answer "$t/bob7.log" 1005)"
 client admin checkpass12 "$t/admin7.log" '{"cmd":"moderate","report":3,"action":"hide","statement":"x"}
 {"cmd":"moderate","report":3,"action":"restore"}'
@@ -353,7 +353,7 @@ open(d + "/up_png", "w").write(b.getvalue().hex())
 PY
 client bob bobpass1234 "$t/bob_files.log" '{"cmd":"upload","name":"a.txt","data":"68690a"}
 {"cmd":"file_settings","budget":0}'
-answer "$t/bob_files.log" 1001 | grep -q "no files yet" ||
+answer "$t/bob_files.log" 1001 | grep -q "only a patch or an image for now" ||
 	fail "a new account's upload: $(answer "$t/bob_files.log" 1001)"
 answer "$t/bob_files.log" 1002 | grep -q "only the Host" ||
 	fail "bob set the budget: $(answer "$t/bob_files.log" 1002)"
@@ -446,7 +446,7 @@ client dave davepass1234 "$t/tr_dave1.log" "{\"cmd\":\"upload\",\"name\":\"fix.p
 {\"cmd\":\"upload\",\"name\":\"fake.patch\",\"data\":\"68690a\"}"
 F=$(res "$t/tr_dave1.log" 1001 'r["result"]["id"] if r["result"]["patch"] else ""')
 [ -n "$F" ] || fail "a new account's patch: $(answer "$t/tr_dave1.log" 1001)"
-answer "$t/tr_dave1.log" 1002 | grep -q "no files yet" ||
+answer "$t/tr_dave1.log" 1002 | grep -q "only a patch or an image for now" ||
 	fail "a .patch that is not one: $(answer "$t/tr_dave1.log" 1002)"
 client dave davepass1234 "$t/tr_dave2.log" "{\"cmd\":\"new_thread\",\"topic\":$T,\"kind\":\"patch\",\"title\":\"f.txt: two\",\"body\":\"[fix.patch](/f/$F/fix.patch), also at https://codeberg.org/dave/buildat\"}
 {\"cmd\":\"new_thread\",\"topic\":1,\"kind\":\"patch\",\"title\":\"x\",\"body\":\"y\"}"
@@ -550,7 +550,7 @@ client erin erinpass1234 "$t/erin12.log" '{"cmd":"reply","thread":1,"body":"see 
 {"cmd":"reply","thread":1,"body":"and https://two.example"}'
 held=$(num "$t/erin12.log" 1001)
 [ -n "$held" ] || fail "erin's link: $(answer "$t/erin12.log" 1001)"
-answer "$t/erin12.log" 1002 | grep -q "waiting for approval already" ||
+answer "$t/erin12.log" 1002 | grep -q "already waiting for approval" ||
 	fail "a second held link: $(answer "$t/erin12.log" 1002)"
 get /m/$held > /dev/null; grep -q "erinlamps.example" "$t/page" && fail "a held link on the page"
 client admin checkpass12 "$t/admin12.log" '{"cmd":"level","name":"carol","level":20}'
@@ -560,7 +560,7 @@ client carol carolpass1234 "$t/carol12.log" '{"cmd":"queue"}
 {"cmd":"me"}'
 R=$(res "$t/carol12.log" 1001 '[x["id"] for x in r["result"] if x["kind"] == "held" and x["message"] == '"$held"'][0]')
 [ -n "$R" ] || fail "the held link not in a helper's queue: $(answer "$t/carol12.log" 1001 | cut -c1-300)"
-answer "$t/carol12.log" 1002 | grep -q "only levels below one's own" || fail "a helper made a helper"
+answer "$t/carol12.log" 1002 | grep -q "only set levels below your own" || fail "a helper made a helper"
 answer "$t/carol12.log" 1003 | grep -q '"level":20' || fail "carol's level: $(answer "$t/carol12.log" 1003)"
 client carol carolpass1234 "$t/carol12b.log" "{\"cmd\":\"moderate\",\"report\":$R,\"action\":\"approve\"}
 {\"cmd\":\"account\",\"name\":\"erin\"}
@@ -569,7 +569,7 @@ client carol carolpass1234 "$t/carol12b.log" "{\"cmd\":\"moderate\",\"report\":$
 answer "$t/carol12b.log" 1001 | grep -q '"ok":true' || fail "the approval: $(answer "$t/carol12b.log" 1001)"
 answer "$t/carol12b.log" 1002 | grep -q '"approved_by":\[{"name":"carol".*"level":10' ||
 	fail "erin after the approval: $(answer "$t/carol12b.log" 1002 | cut -c1-300)"
-answer "$t/carol12b.log" 1003 | grep -q "only its own approval" || fail "a helper took back another's trust"
+answer "$t/carol12b.log" 1003 | grep -q "only their own approval" || fail "a helper took back another's trust"
 answer "$t/carol12b.log" 1004 | grep -q '"ok":true' || fail "carol trusted dave: $(answer "$t/carol12b.log" 1004)"
 get /m/$held > /dev/null; grep -q "erinlamps.example" "$t/page" || fail "the approved link not shown"
 # erin and dave, members on one network (every client is 127.0.0.1):
@@ -608,7 +608,7 @@ I2=$(res "$t/frank13.log" 1002 'r["result"]["id"]')
 I3=$(res "$t/frank13.log" 1003 'r["result"]["id"]')
 [ "$I1" -gt 0 ] && [ "$I2" -gt 0 ] && [ "$I3" -gt 0 ] ||
 	fail "a new account's images: $(answer "$t/frank13.log" 1001 | head -c 300)"
-answer "$t/frank13.log" 1004 | grep -q "no files yet but a patch or an image" ||
+answer "$t/frank13.log" 1004 | grep -q "only a patch or an image for now" ||
 	fail "a new account's other file: $(answer "$t/frank13.log" 1004)"
 img(){ echo "[![$1](/f/$2/thumb)](/f/$2/$1)"; }
 client frank frankpass1234 "$t/frank13b.log" "{\"cmd\":\"new_thread\",\"topic\":1,\"title\":\"My lamp\",\"body\":\"$(img one.png $I1)\"}"
@@ -630,7 +630,7 @@ shown(){ # log id: the first message's files' shown
 	res "$1" $2 '[f["shown"] for f in r["result"]["list"][0]["files"]]'
 }
 [ "$(get /t/$TN)" = 200 ] && ! grep -q "<img src=\"/f/$I1/" "$t/page" &&
-	grep -q "a new account's image, not shown until a helper says" "$t/page" ||
+	grep -q "a new account's image, not shown until a helper approves it" "$t/page" ||
 	fail "a new account's image drawn on the page"
 client erin erinpass1234 "$t/erin13.log" "{\"cmd\":\"thread\",\"thread\":$TN}"
 client carol carolpass1234 "$t/carol13.log" "{\"cmd\":\"thread\",\"thread\":$TN}
@@ -641,7 +641,7 @@ client erin erinpass1234 "$t/erin13b.log" "{\"cmd\":\"thread\",\"thread\":$TN}
 [ "$(shown "$t/erin13.log" 1001)" = "[False]" ] && [ "$(shown "$t/carol13.log" 1001)" = "[True]" ] &&
 	[ "$(shown "$t/erin13b.log" 1001)" = "[True]" ] ||
 	fail "shown to a member, a helper, then the member: $(shown "$t/erin13.log" 1001) $(shown "$t/carol13.log" 1001) $(shown "$t/erin13b.log" 1001)"
-answer "$t/erin13b.log" 1002 | grep -q "says whether everyone sees" || fail "a member vetted an image"
+answer "$t/erin13b.log" 1002 | grep -q "say whether everyone sees" || fail "a member vetted an image"
 grep -aq "carol showed everyone image $I1" "$t/srv2.log" || fail "the log has no vetting"
 grep -aq "carol took back image $I2" "$t/srv2.log" || fail "the log has no taking back"
 [ "$(get /t/$TN)" = 200 ] && grep -q "<img src=\"/f/$I1/thumb\"" "$t/page" ||
@@ -679,8 +679,8 @@ password bob newpass1234
 level erin 0"
 grep -aq "accounts listed" "$t/dave12b.log" || fail "no accounts list for a Steward"
 grep -aq "admin result: bob is a Keeper" "$t/dave12b.log" || fail "a Steward made a Keeper: $(grep -a "admin result" "$t/dave12b.log")"
-grep -aq "admin result: One sets only levels below one's own" "$t/dave12b.log" || fail "a Steward made a Steward"
-grep -aq "admin result: Only the Host does that" "$t/dave12b.log" || fail "a Steward reset a password"
+grep -aq "admin result: You can only set levels below your own" "$t/dave12b.log" || fail "a Steward made a Steward"
+grep -aq "admin result: Only the Host can do that" "$t/dave12b.log" || fail "a Steward reset a password"
 grep -aq "admin result: erin is a Guest" "$t/dave12b.log" || fail "a Steward took back a trust"
 echo "ok: a Steward's Accounts page"
 
@@ -700,7 +700,7 @@ client bob bobpass1234 "$t/bob14.log" "{\"cmd\":\"new_thread\",\"topic\":$DT,\"t
 {\"cmd\":\"reply\",\"thread\":$DTH,\"body\":\"Nice entry\"}
 {\"cmd\":\"topic\",\"topic\":$DT}
 {\"cmd\":\"topic_mod_threads\",\"topic\":$DT,\"on\":false}"
-answer "$t/bob14.log" 1001 | grep -q "only a Steward starts a thread in Devlog" ||
+answer "$t/bob14.log" 1001 | grep -q "only a Steward can start a thread in Devlog" ||
 	fail "bob's thread in the devlog: $(answer "$t/bob14.log" 1001)"
 answer "$t/bob14.log" 1002 | grep -q '"ok":true' ||
 	fail "bob's reply in the devlog: $(answer "$t/bob14.log" 1002)"

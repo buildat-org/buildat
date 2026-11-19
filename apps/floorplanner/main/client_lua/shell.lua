@@ -773,7 +773,7 @@ function SH.tick()
 	local e = ""
 	if not pw then
 		e = SH.pane == "props" and (S.tool and "Nothing to show" or
-				"No tool: take one in Tools") or ""
+				"No tool: pick one in Tools") or ""
 	end
 	if SH.empty.text ~= e then
 		SH.empty.text = e

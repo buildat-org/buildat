@@ -171,8 +171,8 @@ function G.unpack(s)
 	end
 	local body = s:sub(8)
 	if #body ~= G.PACKED_LEN or body:find("[^0-9a-v]") then
-		error("weave: a weave1 recipe is \"weave1:\" and " .. G.PACKED_LEN ..
-				" characters of 0-9 a-v", 3)
+		error("weave: a weave1 recipe must be \"weave1:\" and " .. G.PACKED_LEN ..
+				" characters from 0-9 a-v", 3)
 	end
 	local pos = 1
 	local function get(chars)
@@ -187,14 +187,13 @@ function G.unpack(s)
 	r.size = G.SIZES[get(1) + 1]
 	r.pattern = G.PATTERNS[get(1) + 1]
 	if not r.size or not r.pattern then
-		error("weave: a weave1 recipe's size or pattern is not one of weave1's",
-				3)
+		error("weave: a weave1 recipe has an unknown size or pattern", 3)
 	end
 	r.seed = get(4)
 	for _, c in ipairs(G.COLORS) do
 		local n = get(5)
 		if n > 16777215 then
-			error("weave: a weave1 recipe's " .. c[1] .. " is past #ffffff", 3)
+			error("weave: a weave1 recipe's " .. c[1] .. " is above #ffffff", 3)
 		end
 		r[c[1]] = hex_string(n)
 	end
@@ -202,7 +201,7 @@ function G.unpack(s)
 		local q = get(d[5] and 1 or 2)
 		local x = unquantise(d, q)
 		if x < d[2] or x > d[3] then
-			error("weave: a weave1 recipe's " .. d[1] .. " is out of its range",
+			error("weave: a weave1 recipe's " .. d[1] .. " is out of range",
 					3)
 		end
 		r[d[1]] = x
@@ -216,7 +215,7 @@ local function apply(r, t)
 	for k, v in pairs(t) do
 		if k == "v" then
 			if v ~= G.VERSION then
-				error("weave: v = " .. tostring(v) .. ", this is weave1", 3)
+				error("weave: v is " .. tostring(v) .. ", but this is weave1", 3)
 			end
 		elseif k == "size" then
 			if SIZE_INDEX[v] == nil then
@@ -232,8 +231,8 @@ local function apply(r, t)
 		elseif k == "seed" then
 			if type(v) ~= "number" or v ~= floor(v) or v < 0 or
 					v > SEED_MAX then
-				error("weave: seed is " .. tostring(v) .. ", not a whole 0.." ..
-						SEED_MAX, 3)
+				error("weave: seed is " .. tostring(v) .. ", not a whole number " ..
+						"from 0 to " .. SEED_MAX, 3)
 			end
 			r.seed = v
 		elseif COLOR_DEFAULT[k] then
@@ -245,7 +244,7 @@ local function apply(r, t)
 		elseif k ~= 1 then
 			local d = BY_NAME[k]
 			if not d then
-				error("weave: no parameter " .. tostring(k), 3)
+				error("weave: unknown parameter " .. tostring(k), 3)
 			end
 			if type(v) ~= "number" or v ~= v then
 				error("weave: " .. k .. " is not a number", 3)
@@ -272,7 +271,7 @@ function G.params(recipe)
 		apply(r, recipe)
 		r = G.unpack(G.pack(r))
 	else
-		error("weave: a recipe is a weave1 string or a table, not a " ..
+		error("weave: a recipe must be a weave1 string or a table, not a " ..
 				type(recipe), 2)
 	end
 	return r
@@ -655,7 +654,7 @@ end
 function G.preset(name, seed)
 	local base = PRESET[name]
 	if not base then
-		error("weave: no preset " .. tostring(name), 2)
+		error("weave: unknown preset " .. tostring(name), 2)
 	end
 	local rnd = G.rng(seed)
 	local r = apply(G.defaults(), base)

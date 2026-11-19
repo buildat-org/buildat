@@ -2,12 +2,13 @@
 
 Buildat
 =======
-A small engine and platform for networked 3D apps and games. The engine:
-the server runs C++ modules it compiles at runtime; the client runs the
-app's Lua in a sandbox, sent by the server, so joining a server is all a
-player installs. The platform: a public server list and login
-(Starport), signed apps (Aitta) and forums (Hearth) -- apps on the same
-engine, which anyone can run.
+A small engine and platform for networked 3D apps and games. In the
+engine, the server runs C++ modules that it compiles at runtime, and the
+client runs the app's Lua, sent by the server, in a sandbox. A player
+installs only the client and gets each game by joining its server. The
+platform is a public server list and login (Starport), signed apps
+(Aitta) and forums (Hearth): apps on the same engine, which anyone can
+run.
 
 What runs on it:
 
@@ -35,8 +36,8 @@ The apps
 Each directory in `apps/` is an app: pick it in the launch menu, or run
 `bin/buildat_server -m ../apps/<name>`. An app says what it is in
 `main/meta.json`'s `"kind"` -- world, arena, app, other, experiment or
-check -- and the launch menu's "Local app" list is grouped by it; a
-Starport listing takes it as its kind unless `starport.json` names one.
+check. The launch menu's "Local app" list is grouped by it, and a
+Starport listing uses it as its kind unless `starport.json` names one.
 
 * Games (world, arena): `vanilla` (Luanti games), `demo_digger`,
   `demo_bomber_drone` (a drone over demo_digger's terrain),
@@ -46,9 +47,9 @@ Starport listing takes it as its kind unless `starport.json` names one.
   `hillclimb` (laps of a circuit on a hill, or a timed climb, on generated
   ground).
 * Apps: `starport`, `aitta`, `hearth`, `floorplanner`.
-* Other: `play`, which serves the web client and has no game of its own:
-  its page starts on the launch menu (a Starport lists its origin in
-  `web_clients`, doc/starport.txt).
+* Other: `play`, which serves the web client and has no game of its own.
+  Its page starts on the launch menu. A Starport lists its origin in
+  `web_clients` (doc/starport.txt).
 * Experiments, not developed now: `demo_undermine` (demo_digger's world,
   which collapses), `demo_aggregate` (demo_undermine's world made of
   mixtures) and `sample_material_wall`.
@@ -80,8 +81,8 @@ Further reading:
   playing on a real Luanti server over its own protocol
 * [doc/compatibility.txt](doc/compatibility.txt) -- what stays the same
   between versions, and upgrading a server from 0.6
-* [doc/aitta.txt](doc/aitta.txt) -- an app packed, signed, published to an
-  Aitta registry (apps/aitta) and installed
+* [doc/aitta.txt](doc/aitta.txt) -- packing an app, signing it, publishing
+  it to an Aitta registry (apps/aitta) and installing it
 * [doc/starport.txt](doc/starport.txt) -- the server list and the Starport
   ID: what is opt-in, and what a Starport holds
 * [doc/hearth.txt](doc/hearth.txt) -- apps/hearth, a forum: its HTML
@@ -90,7 +91,7 @@ Further reading:
   what it carries that Urho3D does not
 * [doc/developer_notes.txt](doc/developer_notes.txt) -- small things worth
   knowing when working on the engine
-* [doc/whynot.txt](doc/whynot.txt) -- decisions against, and why
+* [doc/whynot.txt](doc/whynot.txt) -- what was decided against, and why
 
 Buildat Linux How-To
 ====================
@@ -115,20 +116,20 @@ on, and LuaJIT, for the Lua ones:
 	$ sudo apt-get install iproute2 luajit
 	$ sudo dnf install iproute luajit
 
-They are tuned on the Debug build below. `util/checks_in_docker.sh`
-builds Release, with `BUILDAT_CI=1`, where a timing is a reading and not
-a verdict.
+They are tuned for the Debug build below. `util/checks_in_docker.sh`
+builds Release with `BUILDAT_CI=1`, where a timing is reported but does
+not fail a check.
 
 Build
 -------
 
 Magic, Buildat's fork of Urho3D 1.7.1 (doc/magic.txt), is bundled in
-`3rdparty/Urho3D` and is configured/built as part of
+`3rdparty/Urho3D` and is configured and built as part of
 this project (shared library, Lua, safe Lua). `-DURHO3D_LIB_TYPE=SHARED` is
 required for the module interface.
 
     $ cd $wherever_buildat_is
-    $ mkdir Build  # Capital B is a good idea so it stays out of the way in tabcomplete
+    $ mkdir Build  # A capital B keeps it out of the way in tab completion
     $ cd Build
     $ cmake .. -DCMAKE_BUILD_TYPE=Debug
     $ make -j4
@@ -146,8 +147,8 @@ macOS), which is what an installed copy wants. A portable build does the
 same when a file named `installed` is beside its executable, as the Windows
 installer puts it. `-C` and `-D` override either.
 
-The build compiles through ccache when it finds one (not the web build);
-`-DBUILDAT_CCACHE=OFF` goes without.
+The build compiles through ccache when it finds one (the web build does
+not); `-DBUILDAT_CCACHE=OFF` turns it off.
 
 Optional: `-DURHO3D_LUAJIT=TRUE` builds the bundled LuaJIT instead of Lua.
 `URHO3D_HOME` still overrides the bundled tree if you need an external build.
@@ -165,54 +166,56 @@ It is built separately, with
 It builds in `Build-web/` and `Build-web-mt/` and writes `web/`, which the
 server serves from by default; `buildat_server -W <dir>` serves another.
 `buildat_mt.*` is the client with threads, which meshes the world on
-workers: the page runs it where it is cross-origin isolated, and
-`buildat.*`, which meshes on the page's own thread, elsewhere. Behind an https reverse
-proxy the page connects over wss. Its address takes `?log=4` for a verbose
-log, `scale=` for the UI scale, `pref=<key>=<value>` (repeatable) and
-`isolated=0` for a page that is not cross-origin isolated (the client
-without threads; by default the page is isolated where the browser
-allows it), and nothing else of the command line: a link is anybody's to write. The server accepts a WebSocket only from its
-own page's origin.
+workers; the page runs it where the page is cross-origin isolated.
+Elsewhere it runs `buildat.*`, which meshes on the page's own thread.
+Behind an https reverse proxy the page connects over wss. The page's
+address takes `?log=4` for a verbose log, `scale=` for the UI scale,
+`pref=<key>=<value>` (repeatable) and `isolated=0` for a page that is
+not cross-origin isolated (the client without threads; by default the
+page is isolated where the browser allows it). It takes no other
+command-line options, because anybody can write a link. The server
+accepts a WebSocket only from its own page's origin.
 
 Play
 ----
 
     $ $wherever_buildat_is/Build/bin/buildat
 
-The launch menu: a local app, a server to connect to, or one of the
-extensions that can be launched on their own -- a Luanti client, so far.
-Arrows or the mouse to pick, enter to go.
+This opens the launch menu: pick a local app, a server to connect to, or
+an extension that runs on its own (so far, a Luanti client). Pick with
+the arrow keys or the mouse and press Enter.
 
-Keys, in any app -- F9 to F12 are the client's, every other key the
-app's, and no script hears these four:
+Keys in any app: F9 to F12 belong to the client and every other key to
+the app. No script hears these four:
 
-* F9: the client's own overlay -- the Starport trust colour, the IDs
-  logged in and a three-character code at its bottom left -- on and off.
-  It is shown whenever the launcher comes up and hidden when a game
-  starts. No script hears F9, so an overlay that does not go away on it
-  is not the client's. The same code is in the window title and at the
-  top right of every Starport field; no script can read it.
-* F10: on-screen profiler, render and resource stats; Ctrl+F10: draw
+* F9: turns the client's own overlay on and off. It shows the Starport
+  trust colour, the IDs logged in and a three-character code at its
+  bottom left. It is shown whenever the launcher comes up and hidden
+  when a game starts. No script hears F9, so an overlay that does not go
+  away on it is not the client's. The same code is in the window title
+  and at the top right of every Starport field; no script can read it.
+* F10: the on-screen profiler, render and resource stats; Ctrl+F10: draw
   physics debug geometry
 * F11: fullscreen on and off
-* F12: a screenshot under the user path's `screenshots`; Ctrl+F12: the
-  sandbox test extension
+* F12: a screenshot into `screenshots` under the user path; Ctrl+F12:
+  the sandbox test extension
 
 Engine settings
 ---------------
 
-What the user sets once and every app honours: `render_scale` (3D viewports
-drawn at a fraction of the window size, with the UI left at native
-resolution), `vsync`, `max_fps`, `multisampling`, `sound_volume`,
+The user sets these once and every app honours them: `render_scale` (3D
+viewports drawn at a fraction of the window size, with the UI left at
+native resolution), `vsync`, `max_fps`, `multisampling`, `sound_volume`,
 `sound_mute`, `page_size` (the most items a Page Up or Down moves), and
-`default_username`, the name an app offers when it asks for one. They live in `user/settings.json` beside the remembered
-window size; the launch menu's Settings, "Display and sound", edits them, or set
-them for one run with `-o`, which is not written back:
+`default_username`, the name an app offers when it asks for one. They
+are kept in `user/settings.json` beside the remembered window size. The
+launch menu's Settings, "Display and sound", edits them; `-o` sets them
+for one run without saving them:
 
     $ bin/buildat -o render_scale=0.5,vsync=0,sound_mute=1
 
-`user/` is where what the user made, chose or downloaded deliberately goes, as
-against `cache/`, which is what the program can recreate by itself. In the
+`user/` holds what the user made, chose or deliberately downloaded;
+`cache/` holds what the program can recreate by itself. In the
 default portable build both sit in the buildat directory; `-D` and `-C` move
 them, and `-DPORTABLE=FALSE` puts them where the platform says (see Build).
 
@@ -224,12 +227,12 @@ Saves
 
 An app can persist its world. `apps/demo_digger` does: it opens or creates the
 save `user/apps/demo_digger/saves/world`, and what you dig is there next time.
-Delete that directory to start over. Every other app generates and forgets,
-which is what they did before saves existed -- persistence is opt-in, and an
-arena game whose world is gone when the match ends should not have one.
+Delete that directory to start over. Every other app generates its world
+and forgets it. Saving is opt-in: an arena game whose world is gone when
+the match ends should not save one.
 
-Behind it is a key-to-blob store per save, in one vendored SQLite database,
-namespaced per module. See `builtin/storage/api.h`.
+Behind it is a key-to-blob store for each save, in one vendored SQLite
+database, with a namespace for each module. See `builtin/storage/api.h`.
 
 Server and client
 -----------------
@@ -247,36 +250,39 @@ Terminal 2:
     $ bin/buildat -s localhost
 
 A game started from the launcher listens on 127.0.0.1 only, and the
-launcher's client is its owner by a token the two share; apps/vanilla's
+launcher's client owns it through a token the two share. apps/vanilla's
 pause menu has "Open to LAN", which opens it to the network. A dedicated
 server announces itself to the LAN with `--lan-announce NAME` (or
-`BUILDAT_LAN_ANNOUNCE`), and the launcher's connect screen lists what it
-hears under "On this network". `--compile-only` compiles and loads the
-app's modules and exits, 1 naming the module that failed: for a run whose
-clock a first compile would eat.
+`BUILDAT_LAN_ANNOUNCE`), and the launcher's connect screen lists the
+servers it hears under "On this network". `--compile-only` compiles and
+loads the app's modules and exits, with 1 and the failed module's name
+if one failed. Use it before a timed run, so that the first compile
+does not count.
 
-A server with no admin logs a setup code, and the first to join with it
-becomes the admin. A script that makes a server names the admin instead
-in `<user>/first_admin`, one line, read at the next start and removed:
+A server with no admin logs a setup code, and the first player to join
+with it becomes the admin. A script that sets up a server can name the
+admin instead in `<user>/first_admin`, one line, read at the next start
+and removed:
 `name <name> <password>` makes that account the admin, and `code <code>`
 (8 or more characters) is the setup code in place of the log's, for a
 Starport ID's join too. On a server that has an admin it is ignored.
 
-A server's user directory (`-D`) is the whole of it: saves, accounts,
-the Starport listing's secret, installed Aitta apps. It holds no absolute
-paths, so a copy runs on another machine as it is (the old one stopped,
-or both announce the same listing). Stopped, `cp -a` or a zip copies it.
-Running: write an empty `<user>/apps/<app>/save_now`; the server saves
-what its games hold and removes the file, and a filesystem or VM
-snapshot taken after it loses nothing. A plain copy of a running server
-can still catch a save's SQLite database apart from its `-wal`; stop it
-for that. The secrets in it: `apps/<app>/saves/_server` (password
+A server's user directory (`-D`) holds all of its state: saves,
+accounts, the Starport listing's secret and installed Aitta apps. It
+holds no absolute paths, so a copy runs on another machine as it is
+(stop the old server first, or both announce the same listing). While
+the server is stopped, `cp -a` or a zip copies it. While it runs, write
+an empty `<user>/apps/<app>/save_now`: the server saves what its games
+hold and removes the file, and a filesystem or VM snapshot taken after
+that loses nothing. A plain copy of a running server can still catch a
+save's SQLite database out of step with its `-wal` file; stop the server
+for that. The secrets in it are `apps/<app>/saves/_server` (password
 hashes, TOTP secrets, the SMTP password), `starport_state.json` and
-`starport_claim.txt` (the listing), `health_token.txt`.
-A running world is written every `--save-interval` seconds (5.3; a hard
-stop loses at most that), and `--max-disk-mb` caps what an app writes:
-over it a world forgets land nobody changed. `bin/buildat_server --help`
-lists the rest.
+`starport_claim.txt` (the listing), and `health_token.txt`.
+A running world is written every `--save-interval` seconds (5.3 by
+default; a hard stop loses at most that), and `--max-disk-mb` caps what
+an app writes: over it, a world forgets land nobody changed.
+`bin/buildat_server --help` lists the other options.
 
 On Linux the server confines itself before it loads an app (Landlock and
 seccomp): the app writes `<user>/apps/<app>`, its own `<user>/shared/<app>`
@@ -284,9 +290,9 @@ and its own cache, reads the install and the other apps' shared
 directories, and reaches nothing else of yours. It binds TCP only on its
 own port and connects only to ports 80, 443, 465, 587, 29500 and 29595,
 plus what `--connect-ports`, `BUILDAT_CONNECT_PORTS` or a line in
-`<user>/connect_ports` adds ("any", or "8080,30000"): the
-services on 127.0.0.1 are other programs of yours. Where the kernel cannot
-make the sandbox the server refuses to start; `--unconfined` (or
+`<user>/connect_ports` adds ("any", or "8080,30000"); the
+services on 127.0.0.1 are your other programs. Where the kernel cannot
+make the sandbox, the server refuses to start; `--unconfined` (or
 `BUILDAT_UNCONFINED=1`) runs it without one. `apps/box_test/check.sh` is
 the check.
 
@@ -300,13 +306,13 @@ off. A container has no port rules: a sandboxed server connects to any
 host and port until an administrator runs `bin\sandbox_firewall.ps1`
 (`-ConnectPorts 8080,30000` for more), which gives each app's sandbox the
 Linux ports by a firewall rule. An app's sandbox is made at its first
-sandboxed start; the script is run again after it.
+sandboxed start, so run the script again after a new app's first start.
 
 Client command sequence (CI / visual checks)
 --------------------------------------------
 
-The client can run a one-shot command script and exit. Screenshots, delays,
-and injected keyboard/mouse input:
+The client can run a command script and exit: screenshots, delays, and
+injected keyboard and mouse input:
 
     $ bin/buildat -c $'delay 2000\nscreenshot /tmp/menu.png'
     $ bin/buildat -c @commands.txt
@@ -343,12 +349,13 @@ carries the compiler the server needs at run time. Unpack it and run
 tested.
 
 It also writes `buildat-<version>-<hash>-win64-setup.exe` (NSIS,
-`util/installer.nsi`): the same build installed for the user alone, no
-admin, to `%LOCALAPPDATA%\Programs\Buildat`, with a Start menu entry and
-an uninstaller in Add/Remove Programs. The installed copy keeps its data
-in `%APPDATA%\buildat` and `%LOCALAPPDATA%\buildat\cache`; the uninstall
-leaves them. Neither is signed, so Windows names no publisher.
+`util/installer.nsi`): the same build, installed for the current user
+only, without admin rights, to `%LOCALAPPDATA%\Programs\Buildat`, with a
+Start menu entry and an uninstaller in Add/Remove Programs. The
+installed copy keeps its data in `%APPDATA%\buildat` and
+`%LOCALAPPDATA%\buildat\cache`; uninstalling leaves them. Neither file is
+signed, so Windows names no publisher.
 
-A crash on Windows writes a minidump into the cache,
-`crash-<exe>-<time>.dmp` (the newest five kept, the sandboxed server's
-too), and the launcher says so at the next start.
+A crash on Windows writes a minidump, `crash-<exe>-<time>.dmp`, into
+the cache (the newest five are kept, the sandboxed server's too), and
+the launcher reports it at the next start.

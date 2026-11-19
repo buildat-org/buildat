@@ -1386,8 +1386,8 @@ struct Module: public interface::Module, public network::Interface
 			def += (char)(name.size()>>(8 * i) & 0xff);
 		def += name;
 		const ss_ out = packet(0, def) + packet(100, ss_("0")+
-				"The server runs Buildat "+BUILDAT_VERSION+", newer than this "
-				"client plays with: update Buildat to join it");
+				"The server runs Buildat "+BUILDAT_VERSION+", which is newer "
+				"than this client: update Buildat to join it");
 		log_i(MODULE, "Peer %zu: a client from before 0.7; refused",
 				peer.id);
 		peer.enqueue("network:goodbye", peer.kind == Peer::Kind::WebSocket ?

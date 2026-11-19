@@ -188,7 +188,7 @@ local blocklists_page
 -- reports (decide) or on its own (act)
 local function action_rows(w, on_action)
 	local why = edit(w, "Statement", "")
-	local days = edit(w, "Days (0: open)", "0")
+	local days = edit(w, "Days (0: until lifted)", "0")
 	local audience = edit(w, "Relabel audience", "")
 	local r = row(w)
 	local function go(action, extra)
@@ -355,10 +355,10 @@ end
 -- their statements
 servers_page = function()
 	local w = open("Servers", servers_page)
-	text(w, "Claiming a listing: its id and claim code are in "..
-			"starport_claim.txt beside the server's starport.json.", GREY)
-	text(w, "A server with a new key: the listing it replaces too.",
-			GREY)
+	text(w, "To claim a listing, enter its id and claim code from "..
+			"starport_claim.txt, beside the server's starport.json.", GREY)
+	text(w, "For a server with a new key, also enter the listing it " ..
+			"replaces.", GREY)
 	local cl = edit(w, "Listing id", "")
 	local cc = edit(w, "Claim code", "")
 	local cr = edit(w, "Replaces (optional)", "")
@@ -409,13 +409,13 @@ accounts.account_extra = function(w)
 			me.email_pending or me.email)
 	button(row(w), "Set e-mail", function()
 		req("set_email", {email = email:GetText()}, function(how)
-			message = how == "sent" and "A code went to that address;"..
+			message = how == "sent" and "A code was sent to that address;"..
 					" enter it below." or "Set."
 			home()
 		end)
 	end)
 	if s(me.email_pending) ~= "" then
-		local code = edit(w, "Code from the mail", "")
+		local code = edit(w, "Code from the e-mail", "")
 		button(row(w), "Confirm", function()
 			req("confirm_email", {code = code:GetText()}, function()
 				message = "Confirmed."
@@ -429,8 +429,8 @@ end
 -- shown here in its starport.json
 fleets_page = function(me)
 	local w = open("Fleets", function() fleets_page(me) end)
-	text(w, "A server joins a fleet by a line in its starport.json; "..
-			"servers that only split the load also name the same pool.",
+	text(w, "A server joins a fleet with a line in its starport.json. "..
+			"Servers that only share the load also name the same pool.",
 			GREY)
 	local l = list(w)
 	for _, f in ipairs(me.fleets or {}) do
@@ -465,14 +465,14 @@ sites_page = function(me)
 	text(w, "A website signs its visitors in by opening this Starport's "..
 			"/authorize?site=<id> in a window; the token comes back to the "..
 			"site's origin by postMessage, and the site checks it with the "..
-			"secret (doc/starport.txt). A visitor's name there is their own "..
-			"for the site.", GREY)
+			"secret (doc/starport.txt). Visitors pick a name of their own "..
+			"for each site.", GREY)
 	local l = list(w)
 	for _, f in ipairs(me.sites or {}) do
 		l.text(s(f.name) .. " at " .. s(f.origin) .. ", id " .. s(f.id))
 		l.copy("Secret", s(f.secret))
 		local r = l.row()
-		button(r, "New secret (tokens signed with the old fail)", function()
+		button(r, "New secret (tokens signed with the old one fail)", function()
 			req("site_new_secret", {site = f.id}, function()
 				req("me", {}, sites_page)
 			end)
@@ -534,7 +534,7 @@ blocklists_page = function(me)
 				end)
 			end
 			button(r, "Publish to it", function() go("blocklist_publish") end)
-			button(r, "Stop", function() go("blocklist_unpublish") end)
+			button(r, "Stop publishing", function() go("blocklist_unpublish") end)
 			button(r, "Subscribe", function() go("blocklist_subscribe") end)
 			button(r, "Unsubscribe", function()
 				go("blocklist_subscribe", {on = false})
@@ -565,11 +565,11 @@ appeal_page = function(st)
 	local w = open("Appeal: " .. s(st.listing_name) .. ", " .. s(st.action),
 			function() appeal_page(st) end, home)
 	text(w, s(st.text))
-	local why = edit(w, "Why", "")
+	local why = edit(w, "Why the decision is wrong", "")
 	local r = row(w)
 	button(r, "Send", function()
 		req("appeal", {statement = st.id, text = why:GetText()}, function()
-			message = "Appeal sent; another moderator decides."
+			message = "Appeal sent; another moderator will decide."
 			home()
 		end)
 	end)
@@ -618,7 +618,7 @@ group_page = function(gid)
 					local path = buildat.save_file("evidence_" .. rep.id ..
 							".jpg", unbase64(rep.evidence))
 					message = path and "Saved: " .. path or
-							"Could not save it"
+							"Could not save the screenshot"
 					group_page(gid)
 				end)
 			end
@@ -669,12 +669,12 @@ end
 local STATUS_LETTERS = {
 	{"L", "listed", "listed"},
 	{"H", "hidden", "hidden from filtered views"},
-	{"U", "unlisted", "unlisted by its server: in no list, takes IDs"},
+	{"U", "unlisted", "unlisted by its server: in no list, but takes IDs"},
 	{"O", "offline", "offline: no announce in 15 minutes"},
 	{"W", "withdrawn", "withdrawn by its server"},
 	{"F", "filtered", "filtered out by this instance's filter"},
 	{"C", "unclaimed", "unclaimed: no operator has claimed it"},
-	{"V", "unverified", "unverified: its address being checked, or failed"},
+	{"V", "unverified", "unverified: its address is being checked, or the check failed"},
 	{"D", "delisted", "delisted"},
 	{"B", "banned", "banned"},
 }

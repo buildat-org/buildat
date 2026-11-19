@@ -230,7 +230,7 @@ return function(game, declare_keys)
 				admin_send("players")
 			end
 		elseif admin.page == "audit" then
-			text("The audit log, the newest first")
+			text("The audit log, newest first")
 			text(#admin.audit == 0 and "Nothing yet." or
 					table.concat(admin.audit, "\n"))
 			back = function()
@@ -337,12 +337,11 @@ return function(game, declare_keys)
 		"Lanterns (iron and bones, filled with coal) stop the bones growing "
 				.. "around them and slowly push them back. Skeletons will try "
 				.. "to steal them.",
-		"The Bone Crown (three Deep Skulls, which skeletons deep down drop, "
-				.. "a diamond and two bone blocks), put on and off with a right click "
-				.. "while held, "
-				.. "is a lantern you wear: it burns coal from your inventory. "
-				.. "Skeletons shoot its wearer first, and snatch it if they "
-				.. "reach you.",
+		"The Bone Crown (three Deep Skulls, dropped by skeletons deep down, "
+				.. "a diamond and two bone blocks) is a lantern you wear: it burns "
+				.. "coal from your inventory. Right-click while holding it to put "
+				.. "it on or off. Skeletons shoot its wearer first and snatch it "
+				.. "if they reach you.",
 		"Skeletons burn in daylight away from the bones, and near a torch "
 				.. "or a lantern; they die in water. "
 				.. "Killed, they drop bones and arrows.",
@@ -353,10 +352,10 @@ return function(game, declare_keys)
 				.. "stick): hold the left button to draw, release to shoot.",
 		"Fire arrows (a coal over an arrow) burn the bones away where they "
 				.. "land. The bow shoots the first arrow in your inventory.",
-		"Walking fast down a step you ride a skateboard: it turns where "
+		"Walking fast down a step puts you on a skateboard. It turns where "
 				.. "you look; with forward held, left and right steer "
 				.. "(Camera steer, in the settings). Back brakes, jump "
-				.. "jumps (once more in the air), sneak lies flat.",
+				.. "jumps (once more in the air) and sneak lies flat.",
 	}
 	local function show_intro(days)
 		close()

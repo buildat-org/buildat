@@ -1312,7 +1312,7 @@
 				if(!peer)
 					out = a+" is not here";
 				else if(i->is_admin(a))
-					out = "An admin is not kicked";
+					out = "An admin cannot be kicked";
 				else
 					i->kick(peer, b.empty() ? "Kicked" : b);
 			} else if(cmd == "ban"){

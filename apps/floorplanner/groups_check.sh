@@ -110,7 +110,7 @@ echo "ok: b reads a's plan, cannot edit it, and b's copy is b's alone"
 
 # Editable: b edits; then removed, b is out of the plan and the group
 # The 1 s after the privileges' line: the editor's buttons laid out
-printf 'wait_log 40000 Privileges: can_edit\ndelay 1000\nclick Button "Start editing"\nwait_log 20000 no longer let into\nquit\n' > "$tmp/cb3"
+printf 'wait_log 40000 Privileges: can_edit\ndelay 1000\nclick Button "Start editing"\nwait_log 20000 no longer have access to\nquit\n' > "$tmp/cb3"
 CMDS="$tmp/cb3" client b b3.log "" BUILDAT_FP_PLAN=pa &
 cb=$!
 until_in "$tmp/b3.log" "Entered the plan pa" $cb
@@ -120,7 +120,7 @@ client a a5.log "Group script: done" "BUILDAT_FP_GROUP=remove 1 b"
 wait $cb || exit 1
 grep -q "b ([0-9]*) is editing pa" "$tmp/fp.log" || fail "b did not edit ($tmp/b3.log)"
 echo "ok: an editable share, and b edits"
-grep -q "no longer let into" "$tmp/b3.log" || fail "b stayed in pa ($tmp/b3.log)"
+grep -q "no longer have access to" "$tmp/b3.log" || fail "b stayed in pa ($tmp/b3.log)"
 client b b4.log "$(printf 'Plans: \nGroups: ')"
 last b4.log "Plans:" | grep -q "pa" && fail "b still sees pa"
 last b4.log "Groups:" | grep -q "Groups: 0" || fail "b still in the group"

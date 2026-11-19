@@ -10,25 +10,25 @@ Client
 ------
 Built using Magic, Buildat's fork of Urho3D (magic.txt).
 
-Module code is transfered from the server and run in a safe Lua sandbox.
+Module code is transferred from the server and run in a safe Lua sandbox.
 
 Extensions (extensions/) run in the same sandbox, with the safe interfaces
 and a few verbs of their own (storage, a cache, their own files). What
 needs trust -- the sandbox itself, the sockets and the user's per-host
 consent, the Starport identity -- is the client's own code, the client
 core, in client/core/ ([CLIENT_CORE]). "Extension" means a sandboxed one
-only; the client core is another thing than the C++ core in src/core/.
+only; the client core is not the C++ core in src/core/.
 
-What a script cannot imitate is marked ([TRUST_COLOR]): a colour picked at
-random at client start fills every Starport field, and the launcher shows
+What a script cannot imitate is marked ([TRUST_COLOR]). A colour picked
+at random at client start fills every Starport field. The launcher shows
 it at the top right as the background of its Starport buttons, in an
-overlay of elements no script is handed: "Starport ID..." and "Starport
-settings..." while no ID is logged in, and each ID logged in with a Log
-out, and the settings under them, while one is ([ID_OVERLAY]); a script's
-window, even raised by a click, stays under it. A field the client makes
-for a secret (named __trusted...) reads empty to scripts and takes keys no
-script hears, a Starport dialog a script adds to is closed, and a script's
-element is drawn under the client's own dialogs.
+overlay of elements no script is handed ([ID_OVERLAY]): "Starport ID..."
+and "Starport settings..." while no ID is logged in, otherwise each
+logged-in ID with a Log out button, and the settings under them. A
+script's window, even one raised by a click, stays under it. A field the
+client makes for a secret (named __trusted...) reads empty to scripts and
+takes keys no script hears, a Starport dialog that a script adds to is
+closed, and a script's element is drawn under the client's own dialogs.
 
 Server
 ------
@@ -161,10 +161,11 @@ choice, not a rewrite.
 - An existing server game played alone in a browser, with no host: its
   server and modules built to wasm and run in a Web Worker of the page.
   The modules need "web": true: no sockets, http, processes or real
-  files, and threads only where the page has them; accounts is a local
-  single player, the admin. The page's download and memory grow by a
-  server. The native client starts a local server for this instead.
-  hillclimb, demo_aggregate and skeldat ship so in the Linux archives;
+  files, and threads only where the page has them; accounts has one
+  local player, the admin. The page's download and memory grow by the
+  size of a server. The native client starts a local server for this
+  instead. hillclimb, demo_aggregate and skeldat ship this way in the
+  Linux archives;
   a page with no game (play.buildat.org's) offers them in its launch
   menu, at /?local=<app>.
 - A game from Aitta played in the browser with no host: its modules'
@@ -178,8 +179,8 @@ choice, not a rewrite.
 - The same with C++ modules, on an Aitta with an SDK: Aitta links the
   release's C++ into a copy of that server at publish, in the same box,
   and checks the output imports nothing the engine's does not and
-  carries no JS; the page runs it with the engine's own .js. Tied to the
-  engine's version: a new one links it again (doc/aitta.txt).
+  carries no JS; the page runs it with the engine's own .js. This is tied
+  to the engine's version: a new version links it again (doc/aitta.txt).
 - A small game whose rules all fit in wasm/ and Lua (a board game, an
   arcade game, a puzzle): a serverless release (aitta.txt), with no
   server at all. The page stays light, but the game has to be made that
@@ -198,8 +199,8 @@ Extension behavior
 ------------------
 Extensions use the new Lua 5.1/5.2 module interface.
 
-If an extension wish to provide an interface to sandboxed code, it should
-implement table "safe", which contains the safe interface.
+If an extension wishes to provide an interface to sandboxed code, it
+should implement a table "safe", which contains the safe interface.
 
 Extensions and modules use require "buildat/extension/<name>" to use extensions,
 and require "buildat/core/<name>" for a part of the client core.
@@ -213,16 +214,18 @@ offer. Above Continue, natively and on the web, a "Now" strip
 ([LIVELY_MENU]) shows what is going on: up to 3 servers with players
 (Starport), 3 packages an Aitta listed in the last 14 days, and the
 Hearth's announcements and 3 most active threads (its /api/v1/feed,
-doc/hearth.txt), each opened by a click; it is not there when none is.
+doc/hearth.txt), each opened by a click; the strip is hidden when there is
+nothing to show.
 Home asks nothing: it reads from the hosts the user has accepted and
 from the built-in defaults -- the default Starport, Aitta and Hearth
 count as accepted for the client's own fetches (the trusted side's
 http_get and http_post, never a sandboxed one's) while it is on no
 server, so a fresh client shows the strip; a host the managed file names
 or the user typed is asked about as before (client/core/network
-set_default_hosts). Its screens.lua is where every launch UI's app starts
-end: the local app list, connecting, and the screens a local server starts
-behind, run in the sandbox by client/launch_grid.lua. Leaving an app
+set_default_hosts). Every launch UI starts its apps through launch_menu's
+screens.lua: the local app list, connecting, and the screens shown while a
+local server starts, run in the sandbox by client/launch_grid.lua. Leaving
+an app
 (leave(), leave_to_menu()) goes back to the launch UI in the same process;
 disconnect() shuts the client down.
 
@@ -253,9 +256,9 @@ label and run are required; id is a stable name within the source; icon
 is a file name inside launcher/, resolved on the trusted side to
 <source>/launcher/<icon> (the buildat logo when absent). run is a callback
 with the menu underneath it on the UI stack: push a screen and come back,
-never Exit(). A file that errors, returns a non-table or an action without
-label or run is one warning naming it, and the rest of the grid draws. A
-app without launcher/ gets one tile, its name and its icon.png; an app
+never Exit(). A file that errors or returns a non-table or an action without
+label or run gives one warning naming it, and the rest of the grid draws.
+An app without launcher/ gets one tile, its name and its icon.png; an app
 with one replaces that and may return zero.
 
 The one way out of a file is ctx.launch:
@@ -292,7 +295,7 @@ doc/aitta.txt's "Worlds"):
     ctx.world_packages = { code = { "luanti/worldmods" },
         player_rows = { "luanti/players" } }
 
-The app's save directory copies as files, code names the paths in a save
+The app's save directory can be copied as files, code names the paths in a save
 that the app runs as code, which a world package never carries, and
 player_rows the rows of its save.sqlite ("<store>/<key>") that are per
 player, which a published world leaves out. Each
@@ -301,7 +304,7 @@ a world of it as a new save.
 
 An app whose meta.json declares settings ([APP_REMIX], doc/aitta.txt's
 "Settings and remixes") has a tile "<label>: make my own version" beside
-its own, and a remix, which carries no launcher, a tile of its name.
+its own, and a remix, which carries no launcher, gets a tile of its own name.
 
 `buildat -a kind/name/id` runs one action on boot, with the grid
 underneath it: app/<name>/<id> (game/ is read as app/), builtin/...,
@@ -326,7 +329,7 @@ core:hello.
 **The hello** (src/interface/protocol.h): the first packet each way is
 core:hello -- the protocol range, the engine version, the engine API and
 the feature names. A server and a client play together when their protocol
-ranges overlap; otherwise the server says network:goodbye with the reason,
+ranges overlap; otherwise the server sends network:goodbye with the reason,
 which the client shows, and a 0.6 client, whose framing has no flags byte,
 is told in its own. **One protocol number per minor release** (0.7 is 1):
 a patch release only adds, behind a feature name that served Lua asks for
@@ -344,15 +347,16 @@ with an example of each, is in compatibility.txt.
 hash in one core:announce_files, the client asks for what it has not
 cached in one core:request_files, and the contents come in
 core:file_contents of about 5 KB each. The records are FileHash and
-FileContent (src/interface/protocol.h), whose hash is SHA-1, said by an
+FileContent (src/interface/protocol.h), whose hash is SHA-1, named by an
 algorithm byte. The server's packets start with a compression byte, plain
 or zstd. An algorithm or compression the client does not know ends the
 join with a message.
 
 Core uses cereal's portable binary serialization, except for low-level
-packet streaming. A queue per peer with
-one send policy is what exists; channels with a policy each, and the
-transport after TCP (ENet with a Noise handshake), are designed, not built. A peer that sends nothing for 60 s is dropped,
+packet streaming. Today there is one queue
+per peer with one send policy; channels with their own policies, and a
+transport after TCP (ENet with a Noise handshake), are designed but not
+built. A peer that sends nothing for 60 s is dropped,
 so a client with nothing to say sends network:keepalive. A game on the LAN
 is found without its address: a server announces itself every 2 s to a
 UDP multicast group, and the launcher lists what it hears
@@ -376,7 +380,7 @@ builtin/voxelworld owns the world on the server and the client: the voxel
 registry (interface::VoxelRegistry, one named "main"), the sections and
 their chunks, generation through the "voxelworld:generation_request" event,
 saving through builtin/storage, and the light -- a skylight and a lamp
-flood, a level a voxel, kept in the bits the world's VoxelFormat binds for
+flood, one level per voxel, kept in the bits the world's VoxelFormat binds for
 them. A voxel is a uint32_t word per plane, cut up by the format the game
 set (doc/server_api.txt lists the layouts);
 the client meshes chunks in src/impl/mesh.cpp and shades them with
@@ -384,21 +388,24 @@ builtin/voxel_shading. Chunk data crosses the network as a node attribute,
 compressed, replicated by builtin/replicate.
 
 builtin/heightmap is the other ground: a finite 2D grid of heights and
-up to 16 material weights a sample, in chunks, its cell its own (a metre
-by default) ([HEIGHTMAP_TERRAIN], [HEIGHTMAP_REST]). The server holds it,
+up to 16 material weights per sample, in chunks, with its own cell size
+(a metre by default) ([HEIGHTMAP_TERRAIN], [HEIGHTMAP_REST]). The server
+holds it,
 saves it through builtin/storage and keeps a Bullet heightfield over its
 own float array for the scene's physics (no Terrain); a client gets the
 whole map at join and the rectangle each edit wrote after, by the
 module's own packets, and draws one Terrain (LOD per patch, splatted from
-RGBA weight textures over a texture array). Lighter than voxels for a
-world of gentle slopes, a driving game's; nothing under the surface.
+RGBA weight textures over a texture array). It is lighter than voxels
+for a world of gentle slopes, such as a driving game's, and has nothing
+under the surface.
 
 builtin/voxel_objects puts voxels on either ground as objects
 ([VOXEL_OBJECTS]): a model is a small voxel grid of the scene's
 voxelworld registry, saved through builtin/storage, sent by the module's
-own packets a 32^3 chunk at a time; an object is a replicated node with
-any rotation showing it, a static Bullet body of the model's boxes on the
-server. The client meshes each chunk once (voxelworld's mesher and atlas,
+own packets a 32^3 chunk at a time; an object is a replicated node at
+any rotation that shows a model, with a static Bullet body of the model's
+boxes on the server. The client meshes each chunk once (voxelworld's mesher
+and atlas,
 the corners' occlusion baked, no world light inside) and every copy draws
 that mesh, instanced.
 
@@ -421,8 +428,8 @@ The supported ones, kept from version to version as an option is:
   https://starport.buildat.org, https://aitta.buildat.org and
   https://forum.buildat.org (a check's local ones; util/check_lib.sh sets
   all three to a closed port). The first is also a server's default
-  Starport ([STARPORT_DEFAULT_URL]). A server's own are its web page's
-  client's (index.html's default_hosts).
+  Starport ([STARPORT_DEFAULT_URL]). A server's own defaults are those of
+  its web page's client (index.html's default_hosts).
 - BUILDAT_LUANTI_*: builtin/luanti's own (luanti_module.txt).
 
 Buildat sets BUILDAT_OWNER_TOKEN, BUILDAT_RUN, BUILDAT_OPEN,

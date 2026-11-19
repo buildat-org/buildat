@@ -92,7 +92,7 @@ cat > "$t/steps.json" <<J
  ["eval", "'field ' + document.activeElement.id + ' ' + document.activeElement.getAttribute('autocomplete') + ' after the reload'"],
  ["wait", 25000],
  ["nav", "\${URL}"],
- ["waitlog", "Login refused: The wait for the code has ended", 60], ["wait", 1000],
+ ["waitlog", "Login refused: The time for the code has run out", 60], ["wait", 1000],
  ["click", 600, 291], ["wait", 500],
  ["eval", "'name ' + document.activeElement.value"],
  ["click", 600, 364], ["wait", 500],
