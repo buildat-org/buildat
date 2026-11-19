@@ -239,11 +239,9 @@ local function aitta_note(rel, why)
 		f:close()
 		log:info("aitta page: delisted " .. a .. "." .. n .. "@" .. v .. ": " ..
 				tostring(why))
-		-- The grid behind, its tile with the note
-		local menu = buildat.menu_extension()
-		if menu and type(menu.refresh) == "function" then
-			menu.refresh()
-		end
+		-- No grid refresh here: it pops every window down to Home, this
+		-- page with them ([AITTA_PAGE_DELISTED_BACK]). launch_menu draws
+		-- Home again when it is back on top after the page closes.
 	end
 end
 
