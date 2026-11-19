@@ -23,14 +23,14 @@ and builtin/client_data ship to the client. Modules under builtin/ are the
 engine's own; an app's are under apps/<app>/. The engine loads
 builtin/loader first, and it reads the rest. Once the load order is
 known, the modules whose build is not current are compiled side by side,
-the largest first, on at most half the usable cores, each further
-compiler only while free memory covers 1 GiB for each running one plus a
-1 GiB reserve (BUILDAT_COMPILE_RESERVE_MB raises it), and each beyond a
-server's first only with one of the half-the-cores slots all of the
-user's servers share (/tmp/buildat-compile-<uid>, or
-BUILDAT_COMPILE_SLOTS; none usable, one at a time); loading and init()
-stay one at a time, in order. --compile-only compiles and loads them,
-then exits (1 naming the module that failed).
+the largest first, on at most half the usable cores. Each further
+compiler starts only while free memory covers 1 GiB for each running one
+plus a 1 GiB reserve (BUILDAT_COMPILE_RESERVE_MB raises it), and each one
+beyond a server's first needs one of the half-the-cores slots that all of
+the user's servers share (/tmp/buildat-compile-<uid>, or
+BUILDAT_COMPILE_SLOTS; with none usable, one at a time). Loading and
+init() stay one at a time, in order. --compile-only compiles and loads
+them, then exits (with 1 and the failed module's name if one failed).
 
 <module>.cpp defines a struct deriving from interface::Module and exports
 one function:
@@ -58,7 +58,7 @@ in init() subscribes to it and has the default event() call the handler,
 with the event's parameter as the handler's parameter type
 (sub(m_server, "core:tick", &Module::on_tick) for
 on_tick(const interface::TickEvent&); a handler with no parameter takes
-none). A type that is no Event::Private does not compile, an event that
+none). A type that is not an Event::Private does not compile, an event that
 carries another throws, and a second handler for one name throws. A
 handler on another object names its type: sub<network::Packet>(m_server,
 name, [&](const network::Packet &p){ ... }). The older way still works
@@ -85,8 +85,8 @@ still an access().
 Throwing interface::ModuleAskedToStop from a handler stops the module.
 Any other exception from a handler shuts the server down, except on a
 network:packet_received/* event: a client's packet the handler cannot read
-is dropped and logged, the first ten and then one line every ten seconds
-with how many went unsaid.
+is dropped and logged: the first ten each, then one line every ten
+seconds saying how many were not logged.
 
 meta.json: {"engine_api": 2, "cxxflags": "", "ldflags": "",
 "dependencies": [{"module": "network"}, {"module": "x", "optional":
@@ -101,7 +101,7 @@ ENGINE_API_MIN...ENGINE_API; 0.7 runs 2); the rest may be left out, and
 "comment") is refused at load with the reason, as is an app module named
 like one of Buildat's (builtin/). A dependency is loaded first; a reverse
 dependency is loaded after this module and says the other may use this
-one. disable_cpp is a module with client halves only. client_main names a
+one. disable_cpp marks a module with client halves only. client_main names a
 script in the module's client_lua/ that the engine runs once on each
 client, when its files first arrive (modules in load order); "wasm" names
 the engine's default instead (builtin/client_lua/client_lua/wasm_main.lua),
@@ -119,8 +119,9 @@ keeps to the web API (below).
 **The web API** ([WEB_LOCAL_SERVER]): util/build_web_server.sh <app>
 builds the server with the app's modules compiled into it, to run in a
 browser (doc/architecture.txt, "Running a game in the browser"). It
-refuses an app any of whose modules, or the modules they depend on, does
-not say "web": true or have a server_wasm, naming each. There a module is compiled with
+refuses an app if any of its modules, or the modules they depend on,
+neither says "web": true nor has a server_wasm, and names each. There a
+module is compiled with
 BUILDAT_WEB_MODULE, under which interface/tcpsocket.h, http.h, process.h
 and select_handler.h are an #error: no sockets, HTTP or processes. Files
 are in Emscripten's file system, the app's directories packed into it
@@ -171,7 +172,7 @@ given the apps that have web/local/<app>/, and its launch menu lists
 each under Apps, "In the browser", Play going to /?local=<app>.
 util/package.sh builds WEB_LOCAL_APPS (hillclimb, demo_aggregate,
 skeldat) into the Linux archives' web/local/. util/web_local_check.sh
-plays them so from static files.
+plays them this way from static files.
 
 
 src/interface, the core
@@ -302,8 +303,8 @@ log_set_file() sends into the log file. watchdog_on_freeze(f): what a
 30 s freeze runs on the frozen thread besides the log (Linux only).
 set_crash_dump_dir(dir, exe) ([WIN_MINIDUMP], Windows; nothing elsewhere):
 a crash also writes <dir>/crash-<exe>-<time>.dmp, the newest five kept;
-crash_dump_untold(dir), the newest not told about yet, then marked told.
-BUILDAT_DEBUG_CRASH=<exe> crashes that exe on purpose, for the test.
+crash_dump_untold(dir), the newest one not yet reported, then marked
+reported. BUILDAT_DEBUG_CRASH=<exe> crashes that exe on purpose, for the test.
 
 interface/compress.h -- compress_zlib / decompress_zlib,
 compress_deflate_raw / decompress_deflate_raw, compress_zstd /
@@ -342,9 +343,9 @@ install and an Aitta check a remix with.
 interface/markup.h -- markup::to_html(md): what a user wrote, as HTML for
 a page ([HEARTH_MVP]), through the bundled md4c (3rdparty/md4c): CommonMark
 with GitHub's tables, strikethrough, task lists and autolinks, and
-||spoilers||. Raw HTML is text, a link or image that is not http, https,
-mailto or relative is its text alone, and an image is a link, never
-loaded, but for the Hearth's own ("/f/<id>...", relative), an <img>.
+||spoilers||. Raw HTML is shown as text; a link or image that is not http,
+https, mailto or relative shows only its text; an image is a link and is never
+loaded, except the Hearth's own ("/f/<id>...", relative), an <img>.
 "#1234" is a link to /t/1234 (class "ref"), "@name" one to /u/name.
 interface/address.h -- host, port and URL parsing in one place
 ([REWORK_FIXES]): split_host_port(a, &host, &port, def) takes "host",
@@ -359,7 +360,7 @@ HTML an app serves (Hearth's pages, the Starport's): css, logo (an <img>
 of /brand/logo.png); a form's first button (form[id]>button) is its main
 one, the client's PrimaryButton ([WEB_MAIN_BUTTON]: a dark amber fill,
 light text, a 2 px amber border, cyan on hover; a solid amber fill on the
-dark ground is not recommended for a main button, as it resembles a
+dark background is not recommended for a main button, as it resembles a
 well-known adult site's look); html(s), text escaped for HTML and attributes;
 cut(s, n) at a UTF-8 character's start with "..."; page(title, name,
 content), a read-only page with the header and the link into the web
@@ -375,7 +376,7 @@ moods) and rendered by an Engine (render(left, right, n) at RATE, set_mood,
 seek; solo and tap for analysis), and analyze(song, seconds, mood,
 track) -> JSON: loudness, peaks, bands, the loop's join, a hash; the same
 samples on every platform and release. The client plays
-it (lua_bindings/jam.cpp), builtin/kit's agents analyse songs with it.
+it (lua_bindings/jam.cpp); builtin/kit's agents analyse songs with it.
 interface/noise.h -- interface::noise, value noise for an app's generator,
 header only: value2/value3 (-1..1, a lattice point every 1), fbm2/fbm3
 (octaves of twice the frequency and persist the amplitude, scaled back to
@@ -449,7 +450,7 @@ data and never reinterprets it:
   any width change, of a role or named plane   the game's migration, or the
                                                save is refused
 
-The last row because 4 bits into 3 loses data and even 4 into 5 is a
+The last row is so because 4 bits into 3 loses data and even 4 into 5 is a
 choice -- scale, or zero-extend? -- that only the game can make. The game's
 migration is an interface::VoxelMigration (interface/voxel_volume.h) given to
 voxelworld's set_migration() before set_save(): per chunk, begin(from, to)
@@ -513,11 +514,11 @@ AtlasSegmentReference, get_atlas_cache / get_texture, set_surface_maps(bool) (th
 surface maps beside the diffuse, or not), describe_segments, update().
 
 interface/wasm_api.h -- what a module's wasm/ (C, C++ or Rust) is written
-against ([CLIENT_WASM]): the server builds wasm/ with clang to a .wasm as
-it loads the module (cached by the sources' hash; with no clang and wasm
-linker, an Aitta install uses the .wasm its Aitta built (doc/aitta.txt) and
-the module is refused without one, but a builtin is loaded without its
-.wasm and its client Lua does without), client_data serves it as
+against ([CLIENT_WASM]). The server builds wasm/ with clang to a .wasm as
+it loads the module, cached by the sources' hash. With no clang and wasm
+linker, an Aitta install uses the .wasm its Aitta built (doc/aitta.txt)
+and the module is refused without one, but a builtin is loaded without
+its .wasm and its client Lua does without. client_data serves it as
 <module>/<module>.wasm, and a client loads it with buildat.wasm_load()
 (client_api.txt). BUILDAT_WASM_EXPORT marks a function Lua may call. The
 imports, all a module can call, general (they move bytes and do not know
@@ -533,11 +534,11 @@ transform as 10 floats (position, rotation w x y z, scale);
 buildat_send_packet(name, len, data, len), a packet "<module>:<name>" to
 the server; buildat_event_take(buf, cap), the next event its Lua queued.
 Nodes, textures and volumes are handles its Lua gave it (m:handle()).
-Caps, a module's: 1024 handles, 196608 indices a geometry and 1048576 in
+A module's caps: 1024 handles, 196608 indices a geometry and 1048576 in
 all, 16 geometries a node, 4096 pixels across and 64 MiB of textures,
 4194304 voxels a read, 64 packets a call of at most 65536 bytes and a
 name of 64. A pointer or length past the module's memory, a handle not
-its own, stale or of the wrong kind, and a cap passed each trap the
+its own, stale or of the wrong kind, and an exceeded cap each trap the
 call, with the reason in the client's log. The server looks for the
 tools at its start: BUILDAT_WASM_CC and
 BUILDAT_WASM_LD, then clang and wasm-ld in PATH, then emsdk's and
@@ -555,7 +556,8 @@ memory and panics aborting; so a module's crates are its own and path
 dependencies, not crates.io's: the module's other top-level crates
 (each a directory with a Cargo.toml) are copied beside wasm/, so that
 "../shared" is a crate both halves of a module use. Cached by the hash
-of wasm/'s files (but target/), those crates' and buildat_wasm's. cargo is BUILDAT_CARGO, then PATH's, then
+of wasm/'s files (except target/), those crates' and buildat_wasm's. cargo
+is BUILDAT_CARGO, then PATH's, then
 $CARGO_HOME/bin's and ~/.cargo/bin's; without it, or without the
 wasm32-unknown-unknown target (rustup target add wasm32-unknown-unknown),
 an Aitta install uses the .wasm its Aitta built and otherwise the module
@@ -566,8 +568,8 @@ and 8 nodes, each with a CustomGeometry whose material shows the vertex
 colours times the node's own texture (white until set) -- and calls the
 exports frame(float dt) each frame (dt in seconds; the module takes its
 events there) and, once, the optional packets(), which returns a 0-ended
-string of the packet names (without "<module>:", space-separated) it is
-to be sent. An event is little-endian 32-bit words, the first its kind
+string of the names (without "<module>:", space-separated) of the packets
+it wants to be sent. An event is little-endian 32-bit words, the first its kind
 (BUILDAT_EVENT_*): START (camera, light, window width and height, n, then
 n pairs of a node and its texture, all handles), KEY_DOWN (key, repeat,
 qualifiers), KEY_UP (key), MOUSE_DOWN and MOUSE_UP (button), MOUSE_MOVE
@@ -635,7 +637,7 @@ from then on less than the engine's budget() (in its units, which the
 interpreter and the compiled module count differently), and
 meter_left() says what the last call left, below 0 past it. A trap
 leaves the module's memory as it was; what that means is the caller's.
-builtin/kit's Lua box is the one there is. meta.json's "wasm_box" names
+builtin/kit's Lua box is the only one. meta.json's "wasm_box" names
 the directory for util/web_server.cmake and util/prebuild_wasm.py, which
 build it beforehand for the web server and an archive's cache.
 
@@ -686,12 +688,12 @@ definition or the modules that subscribe to it. A payload over 64 KB is
 fragmented on the wire and handed back whole. send_bulk(peer, name,
 shared data) ([FILE_TRANSFER_LATENCY], client_file's file contents): a
 lane behind everything else, made into fragments one at a time as the
-socket drains, so the game's packets wait a fragment for it and not the
-whole; in order with other bulk only, never dropped, not in
+socket drains, so the game's packets wait for one fragment and not the
+whole payload; in order with other bulk only, never dropped, not in
 pending_bytes(); the sender paces it by bulk_bytes(peer) and
 "network:bulk_room" (BulkRoom: peer), sent once the lane falls under
-BULK_LOW after a send_bulk() left it at that or over. disconnect(peer) lets it go
-once its queue has gone (two seconds at most). The HTTP face on the same
+BULK_LOW after a send_bulk() left it at that or over. disconnect(peer) drops it
+once its queue has drained (two seconds at most). The HTTP face on the same
 port: a request under /api/, or under a prefix the module claimed with
 claim_http_path(prefix) ([HEARTH_MVP]: Hearth's pages), comes as
 "network:http_request" (HttpRequest: peer, method, path, query, body of 64
@@ -762,8 +764,8 @@ exists, account_names, is_local (the launcher's own user of a server it
 started -- told by the token the launcher gives its server in
 BUILDAT_OWNER_TOKEN and its own client, never a WebSocket peer), launched;
 kick, ban(name, by, until, reason) (by name, and by address while
-registration is open; until 0 or a time it lifts itself at, and the
-reason, both said at a refused join),
+registration is open; until 0 or the time it lifts itself, and the
+reason, both shown at a refused join),
 unban(name_or_address, only_by) (with only_by, only that one's bans: a
 game's /unban lifts the game's), ban_list; create_account, check_password,
 set_password, delete_account; TOTP (totp_on, check_totp, totp_begin,
@@ -775,10 +777,11 @@ LV_MODERATOR 30; the admin is LV_ADMIN 40), named by level_name() (Guest,
 Resident, Keeper, Steward, Host); accounts::level(server, name) is the
 same from another module, for an app's admin and moderator tests. LV_MEMBER and up is trusted: open
 registration takes at most 5 untrusted accounts made in 30 days from one
-network, address_bin(), and 50 a day in all. With `by`, one sets only
-below one's own level, from LV_MODERATOR; a moderator has the Server
-window's Accounts page but for passwords, deletion, adding and the
-settings. A kept login lasts 90 days from its last use. set_multiple_logins(on):
+network, address_bin(), and 50 a day in all. With `by`, an account sets
+levels only below its own, and only from LV_MODERATOR up; a moderator has
+the Server window's Accounts page except for passwords, deletion, adding
+and the settings. A kept login lasts 90 days from its last use.
+set_multiple_logins(on):
 whether one name may be here from several clients at once
 ([FP_TWO_CLIENTS]; off by default, floorplanner turns it on), and then a
 kick, a ban, a password an admin resets and a deleted account reach every
@@ -807,8 +810,8 @@ accounts made counted in it too), folded into a row a day when the day ends
 (stats/d/, kept for ever), and per account the last join and the time joined
 (seen/<name>); the page draws the week by the hour and the half year by the
 day as bar graphs (the players' most, average and fewest), the line under
-them the bar the pointer is on, and the accounts by level, made in 30 days,
-not joined in 90 and the ten with the most time joined. The
+them describing the bar the pointer is on, and the accounts by level, made
+in 30 days, not joined in 90 and the ten with the most time joined. The
 "Server" corner button and a game's My account open it as a window of
 its own, closed by Close or a click outside it. An app adds its
 own pages with accounts.server_menu = function(add) add(header, label,
@@ -829,7 +832,7 @@ decide_appeal. A callback runs in this module's thread and is handed the
 Interface to call; access() from it would be the module accessing itself.
 
 builtin/chat/api.h -- chat::Interface: one shared chat for the players an
-app puts in it, with the trust ladder's say (a lowest level that may
+app puts in it, with the trust ladder's rules (a lowest level that may
 talk, a moderator's mutes, reports into builtin/moderation's queue);
 its state in the save "_chat", its client half
 require("buildat/module/chat"). join(peer, name) / leave(peer); say(line),
@@ -853,8 +856,8 @@ storage::trash_info(entry) reads an entry's name and date. A Save
 has path() and store(name) -> Store, a sqlite object store with get / set /
 remove / list / batch, that modules keep their data in under
 <user>/apps/<app_id>/saves/<name>. storage::pack(value) / unpack(data,
-value): a value as a store holds it, cereal's portable binary; unpack is
-false for data that does not read as the type.
+value): a value as a store holds it, cereal's portable binary; unpack returns
+false for data that cannot be read as the type.
 
 builtin/world_menu/api.h -- world_menu::Interface: an app's worlds menu
 (its saves, newest first: new, rename, delete, play), drawn on the client
@@ -905,7 +908,7 @@ copied into the Bullet heightfield, which reads the map's own float array
 -- no Terrain on the server, ~11 MB for 1 km^2 at a metre and 5
 materials; the rectangle written in each chunk sent, the chunk saved),
 content_hash(), and add_chunk_hook (ChunkHook::before_write(map, cx, cz,
-old data): once a chunk per commit, before its first write -- where a
+old data): once per chunk and commit, before its first write -- where a
 copy-on-write snapshot keeps its copy). A peer that joins the scene gets
 the module's client half and the whole map; the client builds one
 Terrain (LOD per 64-sample patch) and writes an edit's rectangle alone
@@ -926,9 +929,9 @@ Model: get_voxel / set_voxel(x, y, z, id) in its own frame (voxel (x, y,
 z) fills [x, x+1]..., id 0 empty), content_hash(), rev(). create_object(
 model, position, rotation) -> a replicated node "voxel_object" (var
 "voxel_model") at the model's (0, 0, 0) corner, any rotation, with a static
-RigidBody of the model's boxes (voxelworld's box merger, a set a model,
-every object's the same); remove_object(id), num_objects(). commit() (also
-each tick): the chunks written saved (a palette of voxel names a chunk:
+RigidBody of the model's boxes (voxelworld's box merger, one set per model,
+the same for every object); remove_object(id), num_objects(). commit() (also
+each tick): the chunks written saved (a palette of voxel names per chunk:
 ids are the run's), sent (a chunk and its neighbours' padding, voxelworld's
 volume format) and their boxes given to every object of the model. The
 client meshes a model's chunks (32^3) once each with voxelworld's

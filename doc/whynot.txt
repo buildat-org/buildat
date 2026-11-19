@@ -1,16 +1,16 @@
-Decisions against, and why
-==========================
+What was decided against, and why
+=================================
 Things that were considered and not done, so the question is not reopened
 by accident. The plan's own "not this" notes are beside the items they
 belong to.
 
 Why not use protobuf?
-- It would suck for modules because it has many moving parts
+- It has too many moving parts for modules
 
 Why not use cereal's versioning system?
 - It doesn't support forward compatibility
 
-Why not allow making arbitrary number of instances of any module?
+Why not allow making an arbitrary number of instances of any module?
 - It would make module reloading and management practically impossible, and it
   would make module interoperability much harder to achieve. Creating a robust
   but usable system for threading is also tricky. Also, it does not make that
@@ -29,8 +29,8 @@ Decided 2026-10-02 and 2026-10-03 ([PROCESS_SANDBOX]).
   system's bwrap may be an extra layer; Landlock and seccomp are the sandbox.
 - The Windows sandbox's local client bridged through loopback. Loopback is
   blocked between an AppContainer and the rest of the machine both ways
-  (the user's probe runs), and a bridge inside the sandbox would need loopback
-  there too; the client joins by a named pipe in the container's
+  (as the user's probe runs showed), and a bridge inside the sandbox would
+  need loopback there too; the client joins by a named pipe in the container's
   namespace, a second transport for the same byte stream.
 - Low integrity on Windows instead of an AppContainer: it does not
   restrict reading, and reading the user's files is half of what the
@@ -40,7 +40,7 @@ Luanti features left out on purpose, not to be added
 -----------------------------------------------------
 Official Luanti's client has these; buildat's two Luanti clients do
 not, and the decision (2026-09-22) is that they stay out. A
-game that needs one is a game that needs official.
+game that needs one needs the official client.
 
 - Cinematic mode (F8, the smoothed camera).
 - Pitch move (the fly mode that follows the pitch).
@@ -58,8 +58,8 @@ Taken out of `extensions/launch_world` on purpose (2026-09-24 and
   while a bay came apart. A discarded idea rather than a thing waiting
   for its turn. The dissolve is the piece worth reusing -- a bay
   un-builds into a flying cube per voxel, reversible and interruptible
-  with no keyframes -- and it belongs to activation, which `launch()`
-  is the one door for.
+  with no keyframes -- and it belongs to activation, whose only
+  way in is `launch()`.
 - Opening a bay by hand: Return on a pointed orb opened its pocket and
   Backspace closed it. It was unreachable from either mode, and a
   player who wants a pocket open wants what is in it launched -- the

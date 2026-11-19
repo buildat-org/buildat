@@ -91,17 +91,18 @@ If an object owns a thread, the thread should not be stopped in the object's
 destructor. Instead the object should have thread_request_stop() and
 thread_join() methods which should always be called before the object is
 destructed. This allows fast parallel shutdown and better control over
-destruction. You can skip this if you somehow can do it without Hellgrind and
-DRD bitching at you though.
+destruction. You can skip this if you can do it without Helgrind and DRD
+reporting errors.
 
 Directory structure
 -------------------
 ├── 3rdparty    << Bundled 3rd-party libraries
 ├── Build       << Build files; "mkdir Build; cmake ..; make"
 ├── cache       << Runtime directory used by Buildat; a sandboxed server's
-│                  is cache/apps/<app>, and cache/rccpp_build only the
-│                  unsandboxed build's, read by the sandboxes; the client keeps
-│                  a server's files in cache/remote/server_<address>
+│                  is cache/apps/<app>, and cache/rccpp_build belongs
+│                  to the unsandboxed build, which the sandboxes read;
+│                  the client keeps a server's files in
+│                  cache/remote/server_<address>
 │                  (this machine's servers share cache/remote/local),
 │                  and a client run with -c and no -C uses cache/scripted
 ├── builtin     << Built-in modules
@@ -148,7 +149,7 @@ is the scan parser and a fifo-driven client for a UI drive.
 Five header lines say the rest, and only the first is required:
 
   # tier: quick        quick (no downloaded game, what a push runs), full
-                       (wants the game media), long (fuzz, drives, shots),
+                       (needs the game media), long (fuzz, drives, shots),
                        broken (fails for a reason of its own, not the
                        code's: run alone or with run_all.sh broken while
                        it is fixed, and in no other tier; --changed picks
@@ -202,7 +203,7 @@ apps/sample_lighting_scene/check.sh through its "covers" line. That one compares
 fourteen framings against the reference run kept in local/sample_lighting_scene/ref/
 -- taken with --accept on a tree whose look somebody has confirmed -- and says
 which view moved and by how much. With no reference on the machine it skips
-and says so; a committed baseline is [CHECK_BASELINE]'s and wants a commit
+and says so; a committed baseline is [CHECK_BASELINE]'s and needs a commit
 hash the user has picked.
 
 A drive progresses on events, not on time (the user, 2026-10-13): wait_log
@@ -224,7 +225,7 @@ exits non-zero at once; a thing that must not happen is wait_log_absent. An
 error line in the client's log, or the connection dropping, fails it then and
 names the line; an error a drive provokes on purpose is declared first with
 expect_error. A timeout is a small multiple of what the event takes on the
-slowest machine the runner runs on, not a round minute. The shell side the
+slowest machine the runner runs on, not a round minute. The shell side does the
 same: a runner stops at its first failed step and kills what it started, and
 a runner waiting for a server, a file or a port polls that thing
 (wait_for_log in util/check_lib.sh) rather than sleeping.
@@ -235,7 +236,7 @@ the wait's own line and passes by itself. Filter wait_log out, or grep for the
 line's own source (launch_w:, not the text alone).
 
 Under BUILDAT_CI=1 a timing is a row and never a verdict -- what CI asserts is
-behaviour, since a threshold argued against a desk's GPU fails every run under
+behaviour, since a threshold argued against a desktop GPU fails every run under
 llvmpipe and teaches everyone to ignore the result.
 
 Commit messages
@@ -293,13 +294,13 @@ Menu screens
 
 Escape is Back, on every screen the launcher and the apps draw: what the
 screen's "< back", "Back", "Cancel" or "Ok" button does, Escape does,
-whether or not a text field has the focus. The one place it is is
+whether or not a text field has the focus. It is implemented in one place,
 ui_utils.bind_button_menu (extensions/ui_utils), which every vertical_menu
 and grid goes through: it presses the item labelled as the way back. A
 screen with a capture of its own (the key editor listening for a key)
 takes Escape first by returning true from its on_key handler, and Escape
 is then that capture's cancel. A screen never adds a second Escape handler
-that pops itself -- with the menu's own, that was the pop twice.
+that pops itself -- with the menu's own, the screen was popped twice.
 
 A click or tap on nothing is Escape, and so is the browser's Back
 ([TAP_BACK], client/core/uistack): a touchscreen has no Escape key.
@@ -311,7 +312,7 @@ A screen also has a "×" at its top right (ui_utils.close_glyph,
 Such a screen has no Back or Close that only closes it; a vertical menu of
 buttons keeps its "< back" and has no ×.
 
-Every menu is by the keyboard without a line of its own ([MENU_KEYS]): a
+Every menu works by the keyboard without code of its own ([MENU_KEYS]): a
 page made with ui_utils.keyboard_page (every Accounts page through its
 page_window, floorplanner's pages) or a menu through bind_button_menu /
 vertical_menu gets the arrows, Tab and Enter. No letter shortcuts

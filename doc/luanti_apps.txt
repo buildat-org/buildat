@@ -34,7 +34,7 @@ variant (apps/vanilla in the tree), then among the apps Buildat ships
 Buildat it runs on. "base": "<author>.<name>" names an installed package
 instead, with "base_version" the lowest version taken (the newest
 installed of that major version is used). A base that does not resolve
-stops the server ("loader: ...") and refuses the install in the client.
+stops the server ("loader: ...") and makes the client refuse the install.
 
 Run it from the tree:
 
@@ -102,7 +102,7 @@ licensed one by one (each mod's LICENSE.txt or license.txt; a game's
 README or LEGAL.md often lists them), so the fields name every licence
 in the package, joined: "MIT AND LGPL-2.1-or-later" when all of them
 apply, "CC-BY-SA-4.0 OR CC-BY-4.0" when either may be chosen. An Aitta
-takes the expression when every id in it is on its list (free licences
+accepts the expression when every id in it is on its list (free licences
 by default). Media under CC BY or CC BY-SA needs its credit kept: name
 the authors in the app's README. A variant declares only what it holds
 itself; vanilla's and the user's games are not in its package.

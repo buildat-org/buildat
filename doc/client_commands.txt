@@ -17,7 +17,7 @@ remembers between runs. Use it for anything that compares images between runs.
 -c ignores user/settings.json entirely and runs on the built-in defaults,
 so a preference someone left at render_scale=0.5 can never change what a
 screenshot looks like, and a run never writes the file. A -c run is also muted
-unless -o says otherwise: nothing captures audio, and a driven run playing a
+unless -o says otherwise: nothing captures audio, and a driven run playing an
 app's music through whoever's speakers is a small recurring annoyance with no
 upside. -o still wins, which is how a preference itself gets tested:
 
@@ -44,9 +44,10 @@ rather than ending the run.
 The writer has to stay open -- the sleep above is what keeps it so -- because
 closing the last writer of a fifo is end of input.
 
-delay is wall-clock milliseconds of app time continuing to run. Use it for
-what is a length of time itself -- a held key, a walk; startup, a screen,
-the network and the meshes have wait_log, frames, sync and idle. Input is queued as
+delay is wall-clock milliseconds of app time continuing to run. Use it only
+where the length of time is the point, such as a held key or a walk; for
+startup, a screen, the network and the meshes, use wait_log, frames, sync
+and idle. Input is queued as
 SDL events at the start of the frame (before Urho3D Input::Update). Screenshots
 are taken after the current frame has been rendered (3D + UI), before buffer
 swap.
@@ -73,7 +74,7 @@ Commands
 delay <ms>
     Wait this many milliseconds before the next command. App keeps running.
 
-A driven client is a window the desk did not ask for, and says so: its
+A driven client is a window the user did not open, and says so: its
 WM_CLASS is "buildat-scripted" where a client somebody opened is
 "buildat", its title is "Buildat Client (scripted)", and it maps
 without raising and with _NET_WM_USER_TIME = 0, which a window manager
@@ -87,10 +88,10 @@ SDL_VIDEO_X11_WMCLASS set by the caller is left alone.
 
 wait_log <ms> <text>
     Hold the sequence until the client's own log has a line containing the
-    text. Not seen in the time, the sequence fails and the client exits
-    non-zero (read from standard input, a line says so and it goes on). A
-    wait for a screen or a moment instead of a guessed delay:
-    "wait_log 120000 load: the world is in" is the world being playable
+    text. If it is not seen in time, the sequence fails and the client exits
+    non-zero (when read from standard input, a line says so and it goes
+    on). Use it to wait for a screen or a moment instead of guessing a
+    delay: "wait_log 120000 load: the world is in" is the world being playable
     in an app that runs the luanti module (vanilla and the apps based on
     it, such as sample_vanilla_falling_blocks; sample_luanti_glue;
     demo_skelenti): the player is placed and the ground under them is
@@ -98,7 +99,7 @@ wait_log <ms> <text>
     then. "the server put the player at ..." and the once-a-second
     "settle: ... N undrawn within 2" come from the same client. Wait for
     "scene, 0 undrawn within 2" only where a run looks at the world's
-    pixels, which want the chunks round the player drawn (a substring:
+    pixels, which need the chunks around the player drawn (a substring:
     "0 undrawn" alone is also "110 undrawn"), and for the world in as
     well if it sends input after. "wait_log 90000 voxel types have their
     own textures" is the same for the luanti_client extension.
@@ -130,13 +131,13 @@ game_clock <dir>
 
 game_rate <n>
     That server's rate from now on: written into <dir>/sim_clock with its
-    offset kept (the server reads it within 10 ms). 1 around inputs timed
+    offset kept (the server reads it within 10 ms). Use 1 around inputs timed
     on the wall clock -- held keys, a mouse down and up, the client's
     prediction compared -- and the ceiling while the drive only waits.
 
 max_fps <n>
-    The engine's frame limit from now on, 1 to 1000 (the max_fps option's
-    for this run): Kit's server camera draws 4 a second while idle, 20 at
+    The engine's frame limit from now on, 1 to 1000 (the max_fps option,
+    for this run only): Kit's server camera draws 4 a second while idle, 20 at
     work.
 
 frames <n>
@@ -246,10 +247,10 @@ click <type> "<label>" [x y]
     hold a ". The element is effectively visible, and the element under its
     centre is it or a child of it, so nothing (a dialog, a dropdown's list)
     is over it. Of several, the one nearest x y, in mouse_pos pixels.
-    None fails the sequence, and the error lists every element of the type
+    No match fails the sequence, and the error lists every element of the type
     with its rectangle and why it was left (another label, hidden, covered
-    by what). For the checks that clicked at fixed pixels and missed
-    silently when a row moved; move one to it when it is next touched.
+    by what). It replaces clicks at fixed pixels, which missed silently when
+    a row moved; move a check to it when the check is next touched.
     util/web_drive.js's click and tap steps take the same lookup.
 
         click Button "Accept" 283 154
@@ -361,7 +362,7 @@ window <w> <h>
     The window made that size, windowed, the way F11 changes the mode: the
     window and the GL context made again, every GPU object lost and
     restored ([KIT_RESIZE_CRASH]). The new mode is logged ("screen mode:
-    WxH") within the command, so wait for it with wait_log_any. Wants
+    WxH") within the command, so wait for it with wait_log_any. Needs
     BUILDAT_TEST_REAL_WINDOW=1: in -w's fixed-size mode the UI keeps the -w
     size. A size near the screen's covers someone's desktop:
     util/kit_resize_check.sh runs it in a headless weston of its own.
