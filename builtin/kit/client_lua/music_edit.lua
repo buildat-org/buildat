@@ -1111,8 +1111,8 @@ local function sizes()
 	MU.CW = MU.touch and 32 or 26
 	MU.CH = MU.touch and 32 or 22
 	MU.LW = 80
-	-- (Kit's guide's two lines at the bottom left free)
-	MU.W, MU.H = r.width - 16, r.height - 60
+	-- (Kit's guide hidden meanwhile: editor_input.lua's draw_guide)
+	MU.W, MU.H = r.width - 16, r.height - 16
 end
 
 -- A cell: a coloured box at x, y in a free parent, named for a drive
@@ -1127,7 +1127,7 @@ local function cell(parent, name, x, y, w, h, c, s)
 	if s then
 		mono = mono or magic.cache:GetResource("Font", buildat.font_mono)
 		local t = b:CreateChild("Text")
-		t:SetFont(mono, 10)
+		t:SetFont(mono, h >= 30 and 13 or 10)
 		t:SetText(s)
 		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	end
@@ -1214,9 +1214,28 @@ local function draw_song(body)
 	view.contentElement = page
 	MU.playing_texts = {}
 	local seen, shown = {}, {}
+	-- An entry as wide as it is long (its longest pattern, repeated), the
+	-- longest section the window's width
+	local function steps_of(e)
+		local n = 0
+		for _, pn in ipairs(e.layer) do
+			n = math.max(n, (m.pattern[pn] or {len = m.steps}).len)
+		end
+		return n * e.rep
+	end
+	local most = 1
+	for _, sec in ipairs(m.sections) do
+		local n = 0
+		for _, e in ipairs(sec.entries) do
+			n = n + steps_of(e)
+		end
+		most = math.max(most, n)
+	end
+	local per_step = (MU.W - 60 - 120) / most
 	local function sec_row(sn, k)
 		local sec = m.section[sn]
 		local r = row(page)
+		r:SetFixedHeight(MU.touch and 40 or 34)
 		local mark = (sn == m.loop and not seen[sn]) and " (loop)" or ""
 		seen[sn] = true
 		local sel = MU.ssel and MU.ssel.section == sn and MU.ssel.k == k
@@ -1226,7 +1245,7 @@ local function draw_song(body)
 			MU.draw()
 		end))
 		b:SetName("music section " .. sn .. " " .. tostring(k))
-		b.minWidth = 110
+		b:SetFixedWidth(116)
 		if sel and not MU.ssel.entry then
 			t:SetColor(FOCUS)
 		end
@@ -1238,6 +1257,7 @@ local function draw_song(body)
 				MU.draw()
 			end)
 			eb:SetName("music entry " .. sn .. " " .. ei)
+			eb:SetFixedWidth(math.max(eb.minWidth, math.floor(steps_of(e) * per_step) - 4))
 			if sel and MU.ssel.entry == ei then
 				et:SetColor(FOCUS)
 			end
@@ -1361,11 +1381,21 @@ end
 
 -- ---- Pattern: the step grid
 
--- The steps a page shows: two bars, or what fits in whole beats
+-- The steps a page shows: the whole pattern, or as many bars (else beats)
+-- as fit at the smallest cell; the cells (MU.CW) then as wide as fills the
+-- window
 local function page_steps(p)
 	local m = MU.m
-	local fit = math.floor((MU.W - 40 - MU.LW) / MU.CW / m.beat) * m.beat
-	return math.max(m.beat, math.min(fit, 2 * m.steps, p.len))
+	local avail = MU.W - 40 - MU.LW
+	local minw = MU.touch and 32 or 22
+	local per = p.len
+	if per * minw > avail then
+		local bars = math.floor(avail / minw / m.steps)
+		per = bars >= 1 and bars * m.steps or
+				math.max(m.beat, math.floor(avail / minw / m.beat) * m.beat)
+	end
+	MU.CW = math.max(minw, math.min(160, math.floor(avail / per)))
+	return per
 end
 
 local function cur_pattern()
@@ -1566,6 +1596,10 @@ local function draw_grid(body)
 	end
 	local first = (MU.page - 1) * per + 1
 	local n = math.min(per, p.len - first + 1)
+	-- The rows as tall as fills the body above the selection's two rows
+	local rh = (MU.touch and 32 or 28) + 4
+	MU.CH = math.max(MU.touch and 32 or 26, math.min(96,
+			math.floor((MU.bh - 3 * rh - 24) / math.max(1, #p.lanes))))
 	local CW, CH, LW, HH = MU.CW, MU.CH, MU.LW, 16
 	local g = body:CreateChild("UIElement")
 	g:SetFixedSize(LW + n * CW, HH + #p.lanes * CH)
@@ -1907,6 +1941,7 @@ local function draw_roll(body)
 		say("view roll " .. p.name .. " " .. v)
 		MU.draw()
 	end, "Lane")
+	MU.CH = MU.touch and 32 or 22
 	MU.key = MU.key or J.key_of(m)
 	local key = MU.key
 	text(head, "Key: " .. key.name .. " (guessed)", DIM)
@@ -2190,21 +2225,31 @@ local function draw_mixer(body)
 	view:SetStyleAuto()
 	view.scrollBarsAutoVisible = true
 	local sel = MU.mix
-	view:SetFixedSize(MU.W - 20, math.min(MU.bh - 160, (#J.TRACK + #m.moods + 2) *
-			((MU.touch and 32 or 24) + 3) + 20))
+	-- The table as tall as its rows (all of the body but a row below at
+	-- most), its columns over the window's width, the labels' column as
+	-- wide as the widest
+	local rh = (MU.touch and 32 or 28) + 3
+	local th = math.min(MU.bh - rh - 8, (2 + #J.TRACK + #m.moods) * rh + 8)
+	view:SetFixedSize(MU.W - 20, th)
 	local page = view:CreateChild("UIElement")
 	page:SetLayout(magic.LM_VERTICAL, 3, magic.IntRect(0, 0, 0, 0))
 	view.contentElement = page
-	local W = MU.touch and 64 or 56
-	local hr = row(page)
-	text(hr, ""):SetFixedWidth(84)
-	for _, t in ipairs(m.tracks) do
-		text(hr, t.name):SetFixedWidth(W)
+	local labels = {}
+	local function label_of(el)
+		labels[#labels + 1] = el
+		return el
 	end
-	text(hr, "buses"):SetFixedWidth(W)
+	local W = 0 -- (set below once the labels' width is known)
+	local cells = {}
+	local hr = row(page)
+	label_of(text(hr, ""))
+	for _, t in ipairs(m.tracks) do
+		cells[#cells + 1] = text(hr, t.name)
+	end
+	cells[#cells + 1] = text(hr, "buses")
 	local function cellb(r, name, s, on, fn)
 		local b, t = button(r, s, fn)
-		b:SetFixedWidth(W)
+		cells[#cells + 1] = b
 		b:SetName(name)
 		lit(b, t, on)
 	end
@@ -2219,7 +2264,7 @@ local function draw_mixer(body)
 				say("preview mood " .. md.name)
 				MU.draw()
 			end)
-			lb:SetFixedWidth(84)
+			label_of(lb)
 			lb:SetName("music mood row " .. md.name)
 			lit(lb, lt, MU.mood == md.name)
 			for _, t in ipairs(m.tracks) do
@@ -2241,7 +2286,7 @@ local function draw_mixer(body)
 	for _, grp in ipairs(J.TRACK) do
 		local g = grp[1]
 		local r = row(page)
-		text(r, g):SetFixedWidth(84)
+		label_of(text(r, g))
 		for _, t in ipairs(m.tracks) do
 			cellb(r, "music mix " .. t.name .. " " .. g, mix_text(m, t, g),
 					sel and sel.track == t.name and sel.row == g, function()
@@ -2265,6 +2310,18 @@ local function draw_mixer(body)
 		if g == "gain" then
 			mood_rows()
 		end
+	end
+	local LW = 0
+	for _, el in ipairs(labels) do
+		LW = math.max(LW, el.minWidth)
+	end
+	for _, el in ipairs(labels) do
+		el:SetFixedWidth(LW + 4)
+	end
+	W = math.max(MU.touch and 64 or 56, math.min(120, math.floor((MU.W - 60 - LW) /
+			(#m.tracks + 1)) - 4))
+	for _, el in ipairs(cells) do
+		el:SetFixedWidth(W)
 	end
 	if not sel or not (m.track[sel.track] or sel.track == "bus") then
 		text(body, "Pick a cell: its parameters here; a mood's row: heard in it", DIM)
@@ -2298,7 +2355,7 @@ local function draw_mixer(body)
 	local dv = body:CreateChild("ScrollView")
 	dv:SetStyleAuto()
 	dv.scrollBarsAutoVisible = true
-	dv:SetFixedSize(MU.W - 20, 150)
+	dv:SetFixedSize(MU.W - 20, math.max(80, MU.bh - th - 8))
 	local dp = dv:CreateChild("UIElement")
 	dp:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
 	dv.contentElement = dp

@@ -2825,7 +2825,9 @@ local function draw_guide()
 		guide_hud.priority = 90
 	end
 	local s = ""
-	if E.editing and not NT.world_off() and not (E.menu and E.menu.held()) then
+	-- ([JAM_EDITOR] none under the music editor's window)
+	if E.editing and not NT.world_off() and not (E.menu and E.menu.held()) and
+			not NT.mu.on() then
 		s = guide_text(compute_guide())
 	else
 		ghost(nil)

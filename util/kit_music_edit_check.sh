@@ -22,6 +22,7 @@
 #      pan, the reverb, tempo, swing, a mood, Space), the server takes it;
 #   3. Scrap Heat with a comment added and a lane's spacing changed (set
 #      as an agent would): the editor's hash the original's;
+#   (0b. an agent's set_param of Scrap Heat over MCP, an 8 KB request;)
 #   4. the touch mode (BUILDAT_TEST_KIT_UI_MODE=2): the editor opened, a
 #      step tapped places it.
 # Screenshots, kept with KEEP_TMP=1: $t/song.png $t/pattern.png $t/roll.png
@@ -32,7 +33,9 @@ set -u
 . "$(dirname "$0")/check_lib.sh"
 export BUILDAT_WORKBENCH_PROJECT=world
 here=$(cd "$(dirname "$0")/.." && pwd)
-command -v weston > /dev/null || skip "no weston"
+for c in weston xclip; do
+	command -v $c > /dev/null || skip "no $c"
+done
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
@@ -251,6 +254,58 @@ cmd 'event kit_edit {"op": "place", "type": "kit/music", "pos": [0, 1, 0]}'
 await "$SL" "$m" 10 "An edit by kitboss: placed kit/music [0-9]+"
 ID=$(tail -c +$((m + 1)) "$SL" | grep -aoP "An edit by kitboss: placed kit/music \K[0-9]+" | head -1)
 songs "$ID"
+
+# 0b. An agent's set_param of Scrap Heat (8 KB) over MCP: a token made on My
+# account, one call
+clip() # the clipboard
+{
+	local i got
+	for i in $(seq 50); do
+		got=$(DISPLAY=$d xclip -selection clipboard -o 2>/dev/null)
+		[ -n "$got" ] && break
+		sleep 0.2
+	done
+	printf '%s' "$got"
+}
+step 10 "pause: the menu shown" "frames 3" "keypress Escape"
+step 10 "accounts: agents: 0 tokens, on" "frames 3" 'click Button "My account*"' \
+	"frames 5" 'click Button "Connect an agent..."'
+step 10 "accounts: agents: a token made, builder" "frames 3" \
+	'click Button "Make a token..."' "frames 3" 'click Button "Make a token"'
+step 10 "accounts: agents: the token copied" "frames 3" 'click Button "copy token"'
+tok=$(clip)
+[[ $tok =~ ^bat_[0-9a-f]{64}$ ]] || fail "kitboss's token: $tok"
+cmd "frames 3" 'click Button "Done"'
+step 10 "pause: the menu shown" "keypress Escape"
+step 10 "pause: the menu closed" "frames 3" "keypress Escape"
+m=$(mark "$SL")
+python3 -I - "http://localhost:$SERVER_PORT/api/v1/mcp" "$tok" "$t/scrap_heat.json" <<'PY' ||
+import json, sys, urllib.request
+url, tok, f = sys.argv[1:4]
+n = 0
+def rpc(method, params):
+    global n
+    n += 1
+    body = json.dumps({"jsonrpc": "2.0", "id": n, "method": method,
+        "params": params}).encode()
+    req = urllib.request.Request(url, data=body, method="POST", headers={
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "Authorization": "Bearer " + tok})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        assert r.status == 200, r.status
+        return json.loads(r.read().decode()), len(body)
+rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
+    "clientInfo": {"name": "kit_music_edit_check", "version": "1"}})
+e = json.load(open(f))
+r, size = rpc("tools/call", {"name": "set_param", "arguments": {"id": e["id"],
+    "comp": 0, "param": "song", "value": e["value"]}})
+text = r["result"]["content"][0]["text"]
+assert not r["result"]["isError"] and size > 8000, (size, text[:300])
+print("ok: an agent's set_param of Scrap Heat (a %d-byte request): %s" % (size, text[:80]))
+PY
+	fail "an agent's set_param of an 8 KB song"
+await "$SL" "$m" 10 "set $ID's kit/music song to \"# Scrap Heat"
 
 # 1. Yard Vamp: every view, Apply unchanged
 set_song yard_vamp
