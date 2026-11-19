@@ -39819,7 +39819,24 @@ struct Module: public interface::Module, public Interface
 			"the server, client_lua the client).\n";
 		// [KIT_SCENE_TREE] (get_guide's: the instructions are cut at 4000)
 		if(full)
-			s += "- Scenes in a tree: a scene may sit under another "
+			// [KIT_API_1] (items 11 and 12, api.h's)
+			s += "- Kit API 1: a game made with it keeps loading and playing "
+				"the same way in every later Buildat. Promised: the game file's "
+				"structure; each Kit type's params (defaults, meanings), inputs, "
+				"outputs and state keys; the type API (c:, the handlers, the "
+				"type fields, signal types); movements (s, i, p and w's 10 "
+				"methods: cell, walk, move, ray, down, under, contacts, circle, "
+				"segment, unbury); client parts' handlers, e and their kit's 15 "
+				"names; jam1, blip1 and weave1. Kit only adds within API 1, a "
+				"renamed thing keeping its old name. Not promised, changing in "
+				"any release: what is marked experimental (generators, driving "
+				"bots and kit/path, kit/parallax, touch_axes; publishing warns), "
+				"kit.internal and w's other methods, the texts of refusals, "
+				"errors, logs, these tools and this guide (never branch on an "
+				"error's text), network protocols, per-run caps and rates (c:hurt "
+				"16 a run, c:after 64, set_voxels 4096...: never rely on meeting "
+				"one), and the editor's UI.\n"
+				"- Scenes in a tree: a scene may sit under another "
 				"(new_scene's parent, set_parent with a scene's id; get_state's "
 				"scenes_under), a group (a hub or a menu, a real scene with its "
 				"own World) and its tracks. Root types (kit/controls, the "

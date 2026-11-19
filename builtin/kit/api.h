@@ -75,6 +75,44 @@ namespace interface
 // (radians; the box's own, the same on the server and every client), pi,
 // huge and random (one sequence in the box).
 //
+// [KIT_API_1] **What Kit API 1 promises** (kit_plan 4z37j). A game made
+// with Kit API 1 keeps loading and playing the same way in every later
+// Buildat. A builder can rely on: the game file's structure; each builtin
+// type's params, their defaults and meanings, inputs, outputs and state
+// keys (older values move forward through the type's migrations); the
+// server script interface this file documents (c: methods and fields, the
+// handlers, the type-table fields, signal value types); movement
+// declarations, a step's s, i and p, and the 10 official w methods
+// (client_lua/move.lua's head); the client parts' handlers, e, and the 15
+// names of their `kit` table (Client parts, below); and the jam1, blip1 and
+// weave1 formats. Within API 1 Kit only adds things; a renamed thing keeps
+// its old name as an alias until API 2. A Kit that meets a game made with a
+// newer one refuses it with a message saying which Buildat to use, and
+// never loads it half-way.
+// Outside the promise (any release may change them):
+// - what is marked experimental: generators (on_build, c:child, c:link,
+//   c:voxel_box, c.entities, c.move, c:generate, the "points" keys `values`
+//   and `level`), driving bots (c:drive, c.body, c.path, kit/path and
+//   kit/bot's drive, skill and ask; a kit/bot walking the goals is API
+//   1's), kit/parallax and a movement's touch_axes; a type of its own by
+//   `experimental = true`. Publishing a game that uses one warns and is not
+//   blocked (kit.cpp's experimental_names(), pub_experimental());
+// - kit.internal (the whole client module) and w's 18 internal methods;
+// - [KIT_API_1] (item 11) the texts of refusals, errors and log lines, the
+//   MCP tools' texts and get_guide's wording. A script must not branch on
+//   an error's text: a game that needs to tell failures apart gets a
+//   return value from Kit, not a stable message. The checks match these
+//   texts in the tree and change with them;
+// - network protocols (the packets: a client and its server update
+//   together, and nothing persisted is lost);
+// - per-run caps and rates: c:hurt 16 a run, c:explode 4, c:speed and
+//   c:body_var 64, c:set_voxels 4096, sessions 8, c:after 64, c:sound 8,
+//   a generator's 63 children, EXPLODE_RATE, EFFECT_RATE, client parts' 64
+//   bursts and 240 a second, the 0.1 s held period, box.c's STEP_CAP and
+//   string params' lengths. Kit aims to raise them, not lower them; a game
+//   must not rely on meeting one;
+// - the editor's and Workbench's UI.
+//
 // A type is named "<author>/<name>" ([KIT] stage 4b): everyone makes their
 // own door. Kit's own generic types are builtin/kit/types/<name>.lua,
 // author "kit", in every hosting app; the app's are <types_path>/<name>.lua
