@@ -7,7 +7,11 @@
 -- `action` "pause_menu": it opens the app's pause menu (Esc's, the touch
 -- bar's Menu), "Menu" with no `label`: a full screen's way to it on a
 -- touchscreen, where Kit's own Menu over the screen is then not drawn
--- (the touch bar is hidden under a full screen). A press counts only
+-- (the touch bar is hidden under a full screen). [KIT_MUTE_BUTTON]
+-- `action` "mute": it mutes and unmutes the player's client (its own
+-- setting, kept as the settings window's), "Sound on" or "Sound off" with
+-- no `label`, a label's with " (off)" while muted; the prefab
+-- kit/mute_button is one top right. A press counts only
 -- while it is on that player's screen, within their acts a second (as
 -- an action's). Where, who sees it and "show", "hide" and "toggle" as
 -- kit/ui_text's ([KIT_HUD_STYLE] its `style`, colours and sizes too).
@@ -80,7 +84,10 @@ return {
 	},
 	about = {
 		group = "UI",
-		what = "A button on the players' screens.",
+		what = "A button on the players' screens. action: a kit/action's name" ..
+				" (its button), \"pause_menu\" (opens the pause menu) or" ..
+				" \"mute\" (mutes and unmutes the player's own client; with" ..
+				" label \"\" it reads Sound on or Sound off).",
 		inputs = {
 			show = "Shows it.",
 			hide = "Hides it.",

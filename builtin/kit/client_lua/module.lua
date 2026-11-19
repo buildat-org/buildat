@@ -1707,6 +1707,10 @@ buildat.sub_packet("kit:you", function(data)
 	-- [KIT_TOOLS_1] Kit's hotbar (hands.lua)
 	P.hands = type(y) == "table" and y.hands == true
 	log:info("kit: this player is entity " .. tostring(P.you))
+	-- [KIT_MUSIC_LOAD_HOLD] a scene entered: its music waits for its load
+	if M.music_entered then
+		M.music_entered()
+	end
 	-- [KIT_AGENT_NEXT_1] The server's camera: it says it is in
 	if type(y) == "table" and y.camera == true then
 		log:info("kit: the server's camera is in")
@@ -2973,7 +2977,7 @@ do
 	local ok, err, install = buildat.run_script_file("kit/music.lua")
 	assert(ok and type(install) == "function", "kit: music.lua: " ..
 			tostring(err))
-	install({log = log})
+	install({log = log, M = M})
 end
 
 -- ---- The editor: editor.lua, given what it shares with play

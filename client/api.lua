@@ -2378,7 +2378,7 @@ end
 -- gain is made from it in the client, in the one place it is applied.
 buildat.safe.get_sound = function()
 	return __buildat_get_preference("sound_mute") == true,
-			__buildat_get_preference("sound_volume_db") or 0
+			__buildat_get_preference("sound_volume_db") or -3
 end
 buildat.safe.set_sound = function(mute, db)
 	if type(mute) ~= "boolean" or type(db) ~= "number" then

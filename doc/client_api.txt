@@ -1399,7 +1399,8 @@ overridden for one run by -o (see README.md).
     vsync           present synchronised to the display
     max_fps         frame limiter; 0 is unlimited
     multisampling   MSAA samples: 1, 2, 4, 8 or 16
-    sound_volume_db decibels below full, 0 to -30 and off under it
+    sound_volume_db decibels below full, 0 to -30 and off under it; -3 by
+                    default
     sound_mute      that gain forced to zero
     music_volume_db the music's (sound type "Music": jam's songs) under
                     that, the same scale
@@ -1495,8 +1496,12 @@ jam.play(song or text [, opts]) -> player, or nil and why
   every track); false: no such mood. player:seek(seconds),
   player:position() -> seconds, bar, the sample a pending mood lands on;
   player:stop(), player:playing().
-- Web: SDL's audio callback runs on the browser's main thread, so a long
-  frame there starves it; Kit's client seeks back when it is 0.5 s off.
+- Web ([MUSIC_WEB_RING]): rendered a second ahead into a ring that an
+  AudioWorklet plays (filled by a thread of jam's own in buildat_mt, by
+  the page's thread every 20 ms otherwise), so a few frames a second or a
+  stall under a second is not heard; position() is what is heard, and a
+  mood is heard up to a second later than natively. Sound effects stay on
+  SDL's short path. Kit's client seeks back when it is 0.5 s off.
 jam.songs: example songs' texts by name (scrap_heat, yard_vamp)
 
 weave
