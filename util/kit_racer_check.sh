@@ -36,6 +36,12 @@
 #      than at 2 s, both under the top) (track.png on the way, trial.png);
 #   5. the car's effects drawn on kitboss's client (kit.effect, kit.mark):
 #      exhaust smoke, road dust, tyre marks; Kit's counts of them.
+#   (4z37h) The pause menu (Escape) in a run: Retry and To lobby to kitboss
+#   alone on the grid, To lobby alone with kitbob there too, neither in the
+#   lobby; in the trial Retry starts it again, To lobby takes him to the
+#   lobby. The joins and the runs' starts not running the Bone Yard's
+#   generator (its output kept in the composition); in that output, the
+#   east straight's two bends' run-off joined, no wall stub between.
 #   [MUSIC_SYNTH] The music (kit/music, played by jam): the lobby's song
 #   (Yard Vamp) in play, the race's (Scrap Heat) from a run's start on the
 #   grid, kitbob joining it where kitboss's is (the same place on the
@@ -73,6 +79,16 @@ def find(name, s):
             e.get("parent") == scene[s]]
 print("RACE=%d TRIAL=%d CRATE=%d" % (find("the race", "world")[0],
       find("the race", "trial")[0], find("crate", "world")[1]))
+# (4z37h) Two bends' run-off on one side close together joined: on the
+# east straight between corners 7 and 8 (x 95, both 5 m) the outside wall
+# out at 6 + 5 m all along, none at the road's edge (6 m)
+gen = [e["id"] for e in d["entities"] if any(c["type"] == "local/brim_yard"
+       for c in e.get("components", []))][0]
+for e in d["entities"]:
+    if e.get("parent") == gen and e["name"] in ("a concrete wall", "a tyre wall"):
+        for q in e["components"][0]["params"]["points"]:
+            x, z = e["pos"][0] + q[0], e["pos"][2] + q[1]
+            assert not (100.5 < x < 105.5 and 5 < z < 50), ("a wall stub", e["id"], x, z)
 PY
 . "$t/ids"
 # The Bone Yard's line: its corners, each bend's radius (local/brim_yard's
@@ -348,6 +364,33 @@ drive() # <who> <seconds> <stop regex>: the driver on that client (env TARGET, F
 {
 	python3 -I "$t/drive.py" "$t/$1.log" "$t/$1.cmd" "$2" "$3" > "$t/drive_$1.log" 2>&1
 }
+# (4z37h) Escape's pause menu: its items line matching <regex> and not
+# <regex 2> (if given), then Continue
+pause_open() # <regex>: Escape's menu open, its items line matching
+{
+	# (an item reaches the client with its scene's entities, which may
+	# still be drawn as a run starts: closed and opened again until then)
+	local i m items=
+	for i in $(seq 10); do
+		m=$(mark "$CL")
+		step 10 "pause: the items" "keypress Escape"
+		items=$(tail -c +$((m + 1)) "$CL" | grep -a "pause: the items" | tail -1)
+		echo "$items" | grep -qE "$1" && return 0
+		step 10 "pause: the menu closed" "frames 3" 'click Button "Continue"'
+		sleep 1
+	done
+	fail "the pause menu not \"$1\": $items ($CL)"
+}
+pause_items() # <regex> [regex 2]
+{
+	local m items
+	m=$(mark "$CL")
+	pause_open "$1"
+	items=$(tail -c +$((m + 1)) "$CL" | grep -a "pause: the items" | tail -1)
+	[ -z "${2:-}" ] || ! echo "$items" | grep -qE "$2" ||
+		fail "the pause menu with \"$2\": $items ($CL)"
+	step 10 "pause: the menu closed" "frames 3" 'click Button "Continue"'
+}
 near() { awk -v a="$1" -v b="$2" -v e="$3" 'BEGIN { exit !((a - b) ^ 2 <= e * e) }'; }
 # (the game's clock as the wall's: the race's countdown, its clock and its
 # timers are the game's seconds, the cars' steps the wall's)
@@ -406,12 +449,14 @@ step 10 "kit: sound on" "frames 3" 'click Button "Sound off"'
 cmd "frames 5" "screenshot $t/lobby_sound.png"
 step 10 "kit: sound muted" "frames 3" 'click Button "Sound on"'
 echo "ok: the lobby's mute button: unmuted, its text Sound on, muted again"
+pause_items "Continue" "Retry|To lobby"
 m=$(mark "$SL")
 mc=$(mark "$CL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Race: The*"'
 await "$SL" "$m" 5 "local/brim_race $RACE: kitboss is on the grid, slot 1"
 await "$CL" 0 10 '"On the grid: 1 car. Start when ready."'
 await "$CL" "$mc" 5 'kit: music [0-9]+ "Scrap Heat" from '
+pause_items "Retry, To lobby"
 echo "ok: a project from it: the top-down camera, the car's movement and hook; the lobby's tracks; Race: kitboss on the grid"
 BUILDAT_JOIN_CREATE=1 client bob
 BOB=$!
@@ -429,6 +474,11 @@ step 10 "kit: ui full screen none" "frames 3" 'click Button "Race: The*"'
 await "$SL" "$m" 5 "local/brim_race $RACE: kitbob is on the grid, slot 2"
 cmd "frames 20" "screenshot $t/grid.png"
 echo "ok: kitbob joined the grid, slot 2"
+pause_items "To lobby" "Retry"
+as boss
+pause_items "To lobby" "Retry"
+as bob
+echo "ok: the pause menu: Retry and To lobby alone on the grid, To lobby alone with two, neither in the lobby"
 # [MUSIC_SYNTH] kitbob's race song from where kitboss's is by now
 await "$CL" 0 5 'kit: music [0-9]+ "Scrap Heat" from '
 python3 -I - "$t/boss.log" "$CL" <<'PY' || fail "kitbob's race song not where kitboss's is ($t/boss.log, $CL)"
@@ -550,11 +600,22 @@ mh=$(mark "$CL")
 step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "Lobby"'
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
-await "$CL" "$m" 10 '"Lap 1/1   Time [0-9.]+   GO!'
 # [KIT_MUSIC_LOAD_HOLD] the trial's scene entered: its music held, then on
 await "$CL" "$mh" 30 'kit: music: the scene loaded'
 held_first "$CL" "$mh" || fail "the trial's music played while its scene loaded ($CL)"
 echo "ok: the trial's music held while its scene loaded: $(tail -c +$((mh + 1)) "$CL" | grep -aoE 'kit: music: the scene loaded.*' | head -1)"
+# (4z37h) Retry: the trial from its start again
+m=$(mark "$SL")
+pause_open "Retry, To lobby"
+# (the first start's GO may come by now, and be drawn again: the second's
+# after its countdown's 3)
+mc=$(mark "$CL")
+cmd "frames 3" 'click Button "Retry"'
+await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
+await "$CL" "$mc" 10 '"Lap 1/1   Time [0-9.]+   3"'
+mc=$(mark "$CL")
+echo "ok: the pause menu's Retry in the trial: started again"
+await "$CL" "$mc" 10 '"Lap 1/1   Time [0-9.]+   GO!'
 mc=$(mark "$CL")
 step 5 "kit: body replayed" "event kit_looks" "event kit_body"
 r0=$(grep -aoP 'kit: body replayed \K[0-9]+ of [0-9]+' "$CL" | tail -1)
@@ -630,10 +691,24 @@ assert made > 100 and marks > 20 and kept > 0, (made, marks, kept)
 print("ok: the effects: %d particles, %d bursts dropped, %d marks (%d kept)" % (made, dropped, marks, kept))
 PY
 echo "ok: the effects' kinds: $(grep -aoP 'brim_car: effect \K[a-z]+' "$CL" | sort -u | tr '\n' ' ')"
+# (4z37h) To lobby in a trial: the lobby, the items gone
+step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "Lobby"'
+m=$(mark "$SL")
+step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
+await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
+pause_open "Retry, To lobby"
+step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "To lobby"'
+pause_items "Continue" "Retry|To lobby"
+echo "ok: the pause menu's To lobby in the trial: the lobby, Retry and To lobby gone"
 # [MUSIC_SYNTH] the round stopped: no music
 mc=$(mark "$CL")
 step 10 "kit: music [0-9]+ stopped" 'event kit_edit {"op": "stop"}'
 echo "ok: the music: the lobby's, the race's from a run's start, the lobby's after it, none once stopped"
+# (4z37h) The Bone Yard's generator never run: its output is the
+# composition's (a join, a race's start, a trial's take it as it is)
+! grep -aE "the loop [0-9]+ m, [0-9]+ corners" "$SL" ||
+	fail "the Bone Yard's generator ran in play ($SL)"
+echo "ok: the joins and the runs' starts did not run the Bone Yard's generator"
 cmd "quit"
 as bob
 cmd "quit"

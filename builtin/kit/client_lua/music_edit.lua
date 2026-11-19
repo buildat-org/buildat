@@ -1239,16 +1239,15 @@ local function draw_song(body)
 		local mark = (sn == m.loop and not seen[sn]) and " (loop)" or ""
 		seen[sn] = true
 		local sel = MU.ssel and MU.ssel.section == sn and MU.ssel.k == k
-		local b, t = lit(button(r, sn .. mark, function()
+		local b, t = button(r, sn .. mark, function()
 			MU.ssel = {section = sn, k = k}
 			say("section " .. sn)
 			MU.draw()
-		end))
+		end)
 		b:SetName("music section " .. sn .. " " .. tostring(k))
 		b:SetFixedWidth(116)
-		if sel and not MU.ssel.entry then
-			t:SetColor(FOCUS)
-		end
+		-- (4z37h) things to pick, Kit's lists' look
+		ui_utils.selectable(b, t, sel and not MU.ssel.entry)
 		for ei, e in ipairs(sec and sec.entries or {}) do
 			local eb, et = button(r, table.concat(e.layer, "+") ..
 					(e.rep > 1 and " x" .. e.rep or ""), function()
@@ -1258,9 +1257,7 @@ local function draw_song(body)
 			end)
 			eb:SetName("music entry " .. sn .. " " .. ei)
 			eb:SetFixedWidth(math.max(eb.minWidth, math.floor(steps_of(e) * per_step) - 4))
-			if sel and MU.ssel.entry == ei then
-				et:SetColor(FOCUS)
-			end
+			ui_utils.selectable(eb, et, sel and MU.ssel.entry == ei)
 			if k then
 				MU.playing_texts[k .. " " .. ei] = et
 			end
@@ -2095,11 +2092,13 @@ local function draw_inst(body)
 		MU.inst = m.insts[1] and m.insts[1].name
 	end
 	for _, i in ipairs(m.insts) do
-		lit(button(r, i.name, function()
+		local ib, it = button(r, i.name, function()
 			MU.inst = i.name
 			say("instrument " .. i.name)
 			MU.draw()
-		end, i.name == MU.inst)):SetName("music inst " .. i.name)
+		end)
+		ib:SetName("music inst " .. i.name)
+		ui_utils.selectable(ib, it, i.name == MU.inst)
 	end
 	local i = m.inst[MU.inst or ""]
 	if not i then

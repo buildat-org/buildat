@@ -52,7 +52,9 @@
 #      Play: still listed;
 #   7. the server restarted Ended, kitboss back, Play: still listed, his HUD's
 #      best; the inspector's Clear kept state (asked first) empties the
-#      sign, Undo brings it back; the lobby, The Crags (sign.png).
+#      sign, Undo brings it back; the lobby, The Crags (sign.png);
+#      (4z37h) the pause menu (Escape): no Retry or To lobby in the lobby,
+#      both in the run; Retry starts the run over, To lobby the lobby.
 # And [KIT_PLAY_HINTS]: Workbench's help line in play the bike's own hints
 # (movement.help), W's and A's gone once used, Space's last after the gem:
 # the line gone, kept in Kit's storage (kit_hints).
@@ -123,6 +125,33 @@ step() # <seconds> <regex in the client's log> <command>...
 	m=$(mark "$CL")
 	cmd "$@"
 	await "$CL" "$m" "$s" "$re"
+}
+# (4z37h) Escape's pause menu: its items line matching <regex> and not
+# <regex 2> (if given), then Continue
+pause_open() # <regex>: Escape's menu open, its items line matching
+{
+	# (an item reaches the client with its scene's entities, which may
+	# still be drawn as a run starts: closed and opened again until then)
+	local i m items=
+	for i in $(seq 10); do
+		m=$(mark "$CL")
+		step 10 "pause: the items" "keypress Escape"
+		items=$(tail -c +$((m + 1)) "$CL" | grep -a "pause: the items" | tail -1)
+		echo "$items" | grep -qE "$1" && return 0
+		step 10 "pause: the menu closed" "frames 3" 'click Button "Continue"'
+		sleep 1
+	done
+	fail "the pause menu not \"$1\": $items ($CL)"
+}
+pause_items() # <regex> [regex 2]
+{
+	local m items
+	m=$(mark "$CL")
+	pause_open "$1"
+	items=$(tail -c +$((m + 1)) "$CL" | grep -a "pause: the items" | tail -1)
+	[ -z "${2:-}" ] || ! echo "$items" | grep -qE "$2" ||
+		fail "the pause menu with \"$2\": $items ($CL)"
+	step 10 "pause: the menu closed" "frames 3" 'click Button "Continue"'
 }
 body() # the body's x and y now, into bx and by
 {
@@ -445,12 +474,12 @@ echo "ok: over the finish line without every gem: refused, the bike rode on to x
 step 10 "kit editor: edit mode on" 'event kit_edit {"op": "mode", "on": true}'
 hazard_back
 cmd 'event kit_edit {"op": "place", "type": "local/crag_gem", "pos": [-45, 8, 1]}'
-await "$SL" "$m" 5 "An edit by kitboss: placed local/crag_gem 93 "
-step 5 "Gems 0/4" 'event kit_edit {"op": "link", "id": 93, "comp": 0, "output": "collected", "to": 7, "input": "gem"}'
+await "$SL" "$m" 5 "An edit by kitboss: placed local/crag_gem 95 "
+step 5 "Gems 0/4" 'event kit_edit {"op": "link", "id": 95, "comp": 0, "output": "collected", "to": 7, "input": "gem"}'
 # (onto the bike at the start: its zone entered)
-cmd 'event kit_edit {"op": "move", "id": 93, "pos": [-61, 0, 1]}'
+cmd 'event kit_edit {"op": "move", "id": 95, "pos": [-61, 0, 1]}'
 await "$SL" "$m" 5 "local/crag_run 7: kitboss has 1 of 4 gems"
-seen "$SL" "$m" "local/crag_gem 93: kitboss took the gem" || fail "not gem 93's take ($SL)"
+seen "$SL" "$m" "local/crag_gem 95: kitboss took the gem" || fail "not gem 95's take ($SL)"
 try_ gem
 try_ gem
 await "$SL" "$m" 5 "kitboss has 3 of 4 gems"
@@ -503,7 +532,7 @@ await "$SL" "$m" 5 "local/crag_run 7: kitboss finished in [0-9.]+ \(best\)"
 best=$(tail -c +$((m + 1)) "$SL" | grep -aoP 'kitboss finished in \K[0-9.]+(?= \(best\))' | tail -1)
 # ([KIT_BODY_VARS] the run over: the finish closed again)
 await "$SL" "$m" 5 "kitboss's body var finish_open = nil"
-await "$SL" "$m" 5 "local/crag_gem 93: back"
+await "$SL" "$m" 5 "local/crag_gem 95: back"
 echo "ok: a fourth gem linked only to the run: Gems 0/4, its take counted, the finish refused at 3 of 4 and taken at 4 ($best), the gem back by the run's reset"
 # [KIT_LOBBY] The finish kitboss's result card (an over screen): the time,
 # the best; the clock held till Again or the lobby's Play
@@ -632,9 +661,21 @@ await "$SL" "$m" 5 "$(sign "1\. kitboss $best")"
 step 10 "kit editor: edit mode off" 'event kit_edit {"op": "mode", "on": false}'
 # ([KIT_LOBBY] the lobby, The Crags: back at the sign)
 await "$CL" 0 10 "kit: ui full screen 45 up"
+pause_items "Continue" "Retry|To lobby"
 step 10 "kit: ui full screen none" "frames 3" 'click Button "The Crags*"'
 await "$SL" 0 10 "local/crag_run 7: kitboss: off you go"
 cmd "frames 30" "screenshot $t/sign.png"
+# (4z37h) The pause menu in the run: Retry (the run over from its start),
+# To lobby (the lobby, the two gone)
+pause_items "Retry, To lobby"
+m=$(mark "$SL")
+pause_open "Retry, To lobby"
+cmd "frames 3" 'click Button "Retry"'
+await "$SL" "$m" 10 "local/crag_run 7: kitboss: off you go"
+pause_open "Retry, To lobby"
+step 10 "kit: ui full screen 45 up" "frames 3" 'click Button "To lobby"'
+pause_items "Continue" "Retry|To lobby"
+echo "ok: the pause menu: Retry and To lobby in the run, not in the lobby; Retry started it over, To lobby the lobby"
 echo "ok: over a server restart (Ended) still listed, the HUD's best $best; kitboss's Clear kept state emptied the sign, Undo brought it back"
 cmd "sync 2000" quit
 exec 3>&-
