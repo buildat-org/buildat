@@ -141,6 +141,10 @@ static const size_t MAX_EDIT_PACKET = 4096;
 // them (JSON's escapes: a character at most six bytes, as \u001f is)
 static const size_t MAX_COMMENTS = 4096;
 static const size_t MAX_COMMENTS_PACKET = 6 * MAX_COMMENTS + 256;
+// [JAM_EDITOR] A set of a song (jam's text, Brimstone's 7 KB): its newlines
+// and quotes two bytes each in JSON
+// simplified: a song of many other escapes (\u....) nears jam's 64 KB sooner
+static const size_t MAX_SET_PACKET = 2 * interface::jam::MAX_TEXT + 256;
 // [KIT_SIGNALS_LIVE] The most of a value a builder's test sends
 static const size_t MAX_TRY_VALUE = 512;
 // The most of an output's value a watcher is told, and how often
@@ -41567,11 +41571,12 @@ struct Module: public interface::Module, public Interface
 	void on_edit_u(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
-		// ([KIT_AGENT_VISUALS] comments' are longer)
-		json::Value j = packet.data.size() <= MAX_COMMENTS_PACKET ?
+		// ([KIT_AGENT_VISUALS] comments' are longer, [JAM_EDITOR] a set's too)
+		json::Value j = packet.data.size() <= MAX_SET_PACKET ?
 				json::load_string(packet.data.c_str()) : json::null();
 		if(packet.data.size() > MAX_EDIT_PACKET && !(j.is_object() &&
-				jstr(j, "op") == "comments"))
+				((jstr(j, "op") == "comments" && packet.data.size() <=
+				MAX_COMMENTS_PACKET) || jstr(j, "op") == "set")))
 			j = json::null();
 		const ss_ op = j.is_object() ? jstr(j, "op").substr(0, 16) : "";
 		auto refuse = [&](const ss_ &why){

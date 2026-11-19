@@ -689,6 +689,11 @@ end
 -- Escape's, the tools' first ([FP_ESC]: down one level): a dialog or the
 -- menu, a drag, placing, a pending link, the crosshair. True when taken
 function M.escape()
+	-- ([JAM_EDITOR] the music editor closed)
+	if NT.mu.on() then
+		NT.mu.close()
+		return true
+	end
 	if S.view == "hud" then
 		set_view(S.before_hud)
 		return true
@@ -2820,7 +2825,9 @@ local function draw_guide()
 		guide_hud.priority = 90
 	end
 	local s = ""
-	if E.editing and not NT.world_off() and not (E.menu and E.menu.held()) then
+	-- ([JAM_EDITOR] none under the music editor's window)
+	if E.editing and not NT.world_off() and not (E.menu and E.menu.held()) and
+			not NT.mu.on() then
 		s = guide_text(compute_guide())
 	else
 		ghost(nil)
@@ -3756,8 +3763,9 @@ function M.editor(options)
 		-- of the editor's keys are meant while it is open (Escape or a
 		-- click closes it)
 		-- ([KIT_SIGNALS_VIEW] the view keys there: the filter keeps the focus)
+		-- ([JAM_EDITOR] none while the music editor is open: its own)
 		if (typing() and not NT.sg.view_key(key, VIEW_KEYS)) or
-				ui_utils.dropdown_open() then
+				ui_utils.dropdown_open() or NT.mu.on() then
 			return
 		end
 		if M.key("edit", key) then
