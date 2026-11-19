@@ -271,6 +271,9 @@ struct Instance
 	// file) left out, {name: value}, kept for its builder (get_entity, the
 	// builder op clear_old_params); undefined if none
 	json::Value old_params;
+	// authored: the keys a newer Kit wrote that this one does not read,
+	// written back as they were; undefined if none
+	json::Value rest;
 	// runtime, not saved ([KIT] stage 4l): the meter it spent in this cost
 	// window
 	int64_t spent = 0;
@@ -313,7 +316,36 @@ struct Entity
 	ss_ made_by;
 	uint64_t maker = 0;
 	size_t maker_comp = 0;
+	// authored ([KIT_API_1]): the keys a newer Kit wrote that this one does
+	// not read, written back as they were; undefined if none
+	json::Value rest;
 };
+
+// [KIT_API_1] The keys of j not in known, undefined if none
+static json::Value rest_of(const json::Value &j, const std::set<ss_> &known)
+{
+	json::Value r;
+	for(json::Iterator it(j); j.is_object() && it; ++it){
+		if(known.count(it.key()))
+			continue;
+		if(r.is_undefined())
+			r = json::object();
+		r.set(it.key(), (*it).deepcopy());
+	}
+	return r;
+}
+// Puts rest's keys into j where j has none of that name
+static void put_rest(json::Value &j, const json::Value &rest)
+{
+	for(json::Iterator it(rest); rest.is_object() && it; ++it)
+		if(j.get(it.key()).is_undefined())
+			j.set(it.key(), *it);
+}
+static const std::set<ss_> ENTITY_KEYS = {"id", "parent", "name", "kind",
+		"prefab", "built", "comments", "pos", "yaw", "pitch", "roll",
+		"components"};
+static const std::set<ss_> COMPONENT_KEYS = {"type", "version", "params",
+		"old_params", "overrides", "links"};
 
 struct Type
 {
@@ -1433,6 +1465,10 @@ struct Module: public interface::Module, public Interface
 	sv_<Migrated> m_migrated_objects;
 	// [KIT] stage 4d: authored entities play removed, back at Stop
 	std::map<uint64_t, Removed> m_removed;
+	// [KIT_API_1] The runtime row's made entries this Kit could not read (a
+	// newer Kit's), written back as they were; gone at Stop as the made
+	// ones. simplified: a save-as-start leaves them round-made
+	json::Value m_raw_made = json::array();
 	// The players' entities by name (kept: a player's id is stable), and
 	// what each keeps between plays ("keep inventory": their items)
 	std::map<ss_, uint64_t> m_players;
@@ -4798,10 +4834,12 @@ struct Module: public interface::Module, public Interface
 			e.pitch = norm_yaw(j.get("pitch").as_number());
 		if(j.get("roll").is_number())
 			e.roll = norm_yaw(j.get("roll").as_number());
+		e.rest = rest_of(j, ENTITY_KEYS); // [KIT_API_1]
 		const json::Value &cs_ = j.get("components");
 		for(unsigned k = 0; k < cs_.size(); k++){
 			const json::Value &cj = cs_.at(k);
 			Instance in;
+			in.rest = rest_of(cj, COMPONENT_KEYS);
 			in.type = full_type(jstr(cj, "type"));
 			if(in.type != jstr(cj, "type") && in.type.compare(0, 11,
 					"kit/terrain") == 0)
@@ -4875,8 +4913,15 @@ struct Module: public interface::Module, public Interface
 				in.version = t.version;
 				m_upgraded++;
 			}
-			// simplified: a newer version's instance (a type's file put
-			// back to an older one) runs on the file's
+			// [KIT_API_1] A newer version's instance is a newer Kit's (or
+			// package's): refused. simplified: a local/ type's file put back
+			// to an older one runs on the file's
+			if(in.version != t.version && !lenient){
+				why = "entity "+itos(e.id)+": "+interface::aitta::kit_newer(
+						in.type+" version "+itos(in.version), "has "+in.type+
+						" version "+itos(t.version));
+				return false;
+			}
 			if(in.version != t.version)
 				log_w(MODULE, "Entity %s's %s is of version %lli, its file "
 						"%lli: run on the file's", cs(itos(e.id)), cs(in.type),
@@ -4911,7 +4956,9 @@ struct Module: public interface::Module, public Interface
 					}
 					if(!decl.get(it.key()).is_object()){
 						why = "entity "+itos(e.id)+": "+in.type+
-								" has no parameter "+it.key();
+								" has no parameter "+it.key()+" ("+
+								interface::aitta::kit_newer(in.type+"'s "+
+								it.key().substr(0, 64), "has no such parameter")+")";
 						return false;
 					}
 					if(!bad.empty()){
@@ -5046,9 +5093,11 @@ struct Module: public interface::Module, public Interface
 				ls.append(lj);
 			}
 			cj.set("links", ls);
+			put_rest(cj, in.rest);
 			comps.append(cj);
 		}
 		j.set("components", comps);
+		put_rest(j, e.rest);
 		return j;
 	}
 
@@ -5059,6 +5108,9 @@ struct Module: public interface::Module, public Interface
 	// from before, 1): what its own types are written for. Saving never
 	// raises it
 	int64_t m_api = interface::aitta::KIT_API;
+	// [KIT_API_1] The composition's keys a newer Kit wrote (rest_of()'s),
+	// written back
+	json::Value m_comp_rest;
 
 	// [KIT_API_1] A component's version in a file (a composition, a
 	// prefab): its own; none, in a file of "kit" 1 or more 1 (Kit writes
@@ -5096,6 +5148,8 @@ struct Module: public interface::Module, public Interface
 		if(!why.empty())
 			return false;
 		m_api = std::max<int64_t>(1, json::jint(c, "api", 1));
+		m_comp_rest = rest_of(c, {"kit", "api", "entities", "next_id", "scene",
+				"outside"});
 		Entity root;
 		root.id = 1;
 		root.kind = "app";
@@ -5200,6 +5254,7 @@ struct Module: public interface::Module, public Interface
 		}
 		c.set("entities", es);
 		c.set("next_id", (int64_t)m_next_id);
+		put_rest(c, m_comp_rest);
 		return c;
 	}
 
@@ -5267,6 +5322,8 @@ struct Module: public interface::Module, public Interface
 		}
 		if(for_start)
 			return r;
+		for(unsigned i = 0; i < m_raw_made.size(); i++)
+			made.append(m_raw_made.at(i));
 		json::Value removed = json::array();
 		for(auto &rm : m_removed){
 			json::Value m = json::object();
@@ -5886,6 +5943,38 @@ struct Module: public interface::Module, public Interface
 	// The save's: the uploaded textures served, the builders' types
 	// registered, before a section is loaded (the save's names then
 	// resolve to them)
+	// [KIT_API_1] A row's "format" this Kit reads ("" none: one from
+	// before)
+	static bool format_ok(const json::Value &row, const char *format)
+	{
+		const json::Value &f = row.get("format");
+		return f.is_undefined() || (f.is_string() && f.as_string() == format);
+	}
+	// A field of a voxel type's row world::Material::parse() does not read
+	// (nor the row's own), "" none: a newer Kit's. simplified: the list is
+	// parse()'s by hand; a field it gains goes here too
+	static ss_ unknown_voxel_field(const json::Value &row)
+	{
+		static const std::set<ss_> KNOWN = {"format", "author", "name",
+				"version", "package", "texture", "top", "side", "bottom", "kind",
+				"heightmap", "solid", "transparent", "light", "friction",
+				"blast_resist", "surface", "spots", "static_spots", "bumpiness",
+				"translucency", "group", "sound_dig", "sound_place", "drop",
+				"level", "seasons", "tint"};
+		for(json::Iterator it(row); row.is_object() && it; ++it)
+			if(!KNOWN.count(it.key()))
+				return it.key();
+		return "";
+	}
+	// What a file's unknown behaviour field is refused as (what: "the voxel
+	// type x/y", the field)
+	static ss_ newer_field(const ss_ &what, const ss_ &field)
+	{
+		return what+" has a field this Buildat does not know, "+
+				field.substr(0, 64)+": "+interface::aitta::kit_newer(what+"'s "+
+				field.substr(0, 64), "does not read it");
+	}
+
 	void load_builder_voxels()
 	{
 		for(const ss_ &k : m_store->list("texture:")){
@@ -5904,6 +5993,15 @@ struct Module: public interface::Module, public Interface
 			if(!m_store->get(k, row))
 				continue;
 			const json::Value r = json::load_string(row.c_str());
+			// [KIT_API_1] (the row kept: a newer Kit's save opens there)
+			if(!format_ok(r, "kit_voxel")){
+				log_w(MODULE, "The voxel type %s: not \"format\": \"kit_voxel\": "
+						"not loaded", cs(k.substr(6)));
+				continue;
+			}
+			if(!unknown_voxel_field(r).empty())
+				log_w(MODULE, "%s", cs(newer_field("the voxel type "+k.substr(6),
+						unknown_voxel_field(r))));
 			m_voxel_types[k.substr(6)] = r;
 			register_builder_voxel(k.substr(6), r);
 		}
@@ -7083,6 +7181,14 @@ struct Module: public interface::Module, public Interface
 				const json::Value j = json::load_string(f.second.c_str());
 				if(!j.is_object())
 					return f.first+": not a JSON object";
+				// [KIT_API_1]
+				if(kind == ".voxel.json" && !unknown_voxel_field(j).empty())
+					return f.first+": "+newer_field("the voxel type "+fp+"/"+n,
+							unknown_voxel_field(j));
+				if(kind != ".prefab.json" && !format_ok(j, kind == ".voxel.json" ?
+						"kit_voxel" : "kit_item"))
+					return f.first+": its \"format\" is not "+(kind ==
+							".voxel.json" ? "kit_voxel" : "kit_item");
 				json::Value r = j.deepcopy();
 				resolve_names(r, keys);
 				(kind == ".prefab.json" ? prefabs : kind == ".voxel.json" ?
@@ -7185,6 +7291,10 @@ struct Module: public interface::Module, public Interface
 			if(!item_sheet(it.second, json::object(), sheet, iwhy))
 				return "types/"+it.first.substr(fp.size() + 1)+".item.json: "+
 						iwhy;
+			if(!unknown_item_field(it.second, sheet).empty())
+				return "types/"+it.first.substr(fp.size() + 1)+".item.json: "+
+						newer_field("the item type "+it.first,
+						unknown_item_field(it.second, sheet));
 			ss_ row;
 			if(m_store->get("item:"+it.first, row) && jstr(json::load_string(
 					row.c_str()), "package") != name)
@@ -7891,7 +8001,7 @@ struct Module: public interface::Module, public Interface
 				"game"), title, "The Workbench game "+title,
 				game_of(author_of(p), true));
 		// The composition ([KIT_API_1] its format and the game's level first)
-		ss_ comp = "{\n"+levels_text()+"\t\"entities\": [\n";
+		ss_ comp = "{\n"+levels_text(true)+"\t\"entities\": [\n";
 		if(!export_entities(authored_json(false).get("entities"), comp, why))
 			return false;
 		int64_t next = m_next_id;
@@ -7928,10 +8038,16 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// [KIT_API_1] An export's composition's first lines: "kit" and "api"
-	ss_ levels_text()
+	// (rest: and the composition's keys a newer Kit wrote)
+	ss_ levels_text(bool rest = false)
 	{
-		return "\t\"kit\": "+itos(interface::aitta::KIT_FORMAT)+",\n\t\"api\": "+
+		ss_ s = "\t\"kit\": "+itos(interface::aitta::KIT_FORMAT)+",\n\t\"api\": "+
 				itos(m_api)+",\n";
+		for(json::Iterator it(m_comp_rest); rest && m_comp_rest.is_object() &&
+				it; ++it)
+			s += "\t"+json::Value(it.key()).stringify()+": "+json_line(*it)+
+					",\n";
+		return s;
 	}
 
 	// The composition's lines, an entity a line (load_composition()'s form):
@@ -9998,6 +10114,9 @@ struct Module: public interface::Module, public Interface
 			const ss_ why = !own(it.key()) ? "not a builder's <author>/<name>" :
 					game ? "" :
 					m_registered.count(it.key()) ? "the app's or Kit's voxel" :
+					!format_ok(r, "kit_voxel") ? "not \"format\": \"kit_voxel\"" :
+					!unknown_voxel_field(r).empty() ? newer_field("the voxel type "+
+					it.key(), unknown_voxel_field(r)) :
 					!m.parse(r) ? "not a voxel type's row" :
 					!worn(r, {"texture", "top", "side", "bottom"}) ?
 					"a texture no voxel or upload has" : n >= MAX_VOXEL_TYPES ?
@@ -10010,13 +10129,17 @@ struct Module: public interface::Module, public Interface
 		for(json::Iterator it(is); it; ++it){
 			json::Value r = (*it).is_object() ? (*it).deepcopy() : json::object(),
 					sheet;
+			ss_ why = !own(it.key()) ? "not a builder's <author>/<name>" :
+					!format_ok(r, "kit_item") ? "not \"format\": \"kit_item\"" : "";
 			for(const char *f : {"format", "author", "name", "version",
 					"look_data", "package"})
 				r.del_key(f);
-			ss_ why = !own(it.key()) ? "not a builder's <author>/<name>" : "";
 			if(why.empty() && !item_sheet(r, json::object(), sheet, why) &&
 					why.empty())
 				why = "not an item type's row";
+			if(why.empty() && !unknown_item_field(r, sheet).empty())
+				why = newer_field("the item type "+it.key(),
+						unknown_item_field(r, sheet));
 			if(why.empty() && !worn(sheet, {"icon"}))
 				why = "an icon no voxel or upload has";
 			if(why.empty() && n >= MAX_ITEM_TYPES)
@@ -15872,6 +15995,7 @@ struct Module: public interface::Module, public Interface
 	void load_round(const json::Value &rt)
 	{
 		const json::Value &made = rt.get("made");
+		m_raw_made = json::array();
 		for(unsigned i = 0; i < made.size(); i++)
 			m_pending_ids.insert((uint64_t)json::jint(made.at(i).get("entity"),
 					"id", 0));
@@ -15879,7 +16003,18 @@ struct Module: public interface::Module, public Interface
 			const json::Value &m = made.at(i);
 			Entity e;
 			ss_ why;
-			if(!entity_from_json(m.get("entity"), e, why) || e.kind != "" ||
+			// [KIT_API_1] one this Kit does not read kept as it is
+			const int64_t rid = json::jint(m.get("entity"), "id", 0);
+			const bool read = entity_from_json(m.get("entity"), e, why);
+			if(!read && rid >= 2 &&
+					rid < (int64_t)9e15 && !m_entities.count((uint64_t)rid)){
+				log_w(MODULE, "An entity the round made is kept as it was (not "
+						"read: %s)", cs(why));
+				m_raw_made.append(m.deepcopy());
+				m_next_id = std::max(m_next_id, (uint64_t)rid + 1);
+				continue;
+			}
+			if(!read || e.kind != "" ||
 					m_entities.count(e.id) || !m_entities.count(e.parent)){
 				log_w(MODULE, "An entity the round made is dropped: %s",
 						why.empty() ? cs(m.get("entity").stringify().substr(0,
@@ -19756,6 +19891,11 @@ struct Module: public interface::Module, public Interface
 					pf.get("voxels").stringify() ? voxels_version(*old) : version);
 		if(old && old->get("published").is_true())
 			pf.set("published", true);
+		// [KIT_API_1] the old row's keys a newer Kit wrote
+		if(old)
+			put_rest(pf, rest_of(*old, {"format", "kit", "api", "author", "name",
+					"group", "version", "entities", "root", "voxels",
+					"voxels_version", "published"}));
 		if(!check_prefab(pf, why))
 			return false;
 		// The copies that will follow, at their most
@@ -28179,6 +28319,18 @@ struct Module: public interface::Module, public Interface
 		return name_ok(s.substr(0, sl)) && name_ok(s.substr(sl + 1));
 	}
 
+	// [KIT_API_1] A field of an item type's row (j) its sheet (item_sheet()'s
+	// of it) does not have, nor the row's own: "" none, else a newer Kit's
+	static ss_ unknown_item_field(const json::Value &j, const json::Value &sheet)
+	{
+		static const std::set<ss_> ROW = {"format", "author", "name",
+				"version", "package", "preset", "look_data"};
+		for(json::Iterator it(j); j.is_object() && it; ++it)
+			if(sheet.get(it.key()).is_undefined() && !ROW.count(it.key()))
+				return it.key();
+		return "";
+	}
+
 	// An item type's sheet from what a builder or a file gives (j), over
 	// base (a preset's; null: the defaults): each field checked, those it
 	// does not know left out. One flat sheet for every use kind; 7c-2's
@@ -28424,8 +28576,22 @@ struct Module: public interface::Module, public Interface
 		}
 		for(const ss_ &k : m_store->list("item:")){
 			ss_ row;
-			if(m_store->get(k, row))
-				m_item_types[k.substr(5)] = json::load_string(row.c_str());
+			if(!m_store->get(k, row))
+				continue;
+			const json::Value r = json::load_string(row.c_str());
+			// [KIT_API_1] (the row kept: a newer Kit's save opens there)
+			json::Value sheet;
+			ss_ why;
+			if(!format_ok(r, "kit_item")){
+				log_w(MODULE, "The item type %s: not \"format\": \"kit_item\": "
+						"not loaded", cs(k.substr(5)));
+				continue;
+			}
+			if(item_sheet(r, json::object(), sheet, why) &&
+					!unknown_item_field(r, sheet).empty())
+				log_w(MODULE, "%s", cs(newer_field("the item type "+k.substr(5),
+						unknown_item_field(r, sheet))));
+			m_item_types[k.substr(5)] = r;
 		}
 		std::set<ss_> sorted;
 		for(auto &it : m_item_types)
@@ -28611,8 +28777,10 @@ struct Module: public interface::Module, public Interface
 		m_sounds.clear();
 		const json::Value own = json::load_string(read_file(
 				m_server->get_module_path(MODULE)+"/sounds.json").c_str());
-		for(json::Iterator it(own.get("sounds")); own.get("sounds").
-				is_object() && it; ++it){
+		if(jstr(own, "format") != "kit_sounds") // [KIT_API_1]
+			log_w(MODULE, "sounds.json: not \"format\": \"kit_sounds\"");
+		for(json::Iterator it(own.get("sounds")); jstr(own, "format") ==
+				"kit_sounds" && own.get("sounds").is_object() && it; ++it){
 			json::Value r = json::object();
 			r.set("params", jstr(*it, "params"));
 			r.set("author", ss_("kit"));
@@ -41336,6 +41504,7 @@ struct Module: public interface::Module, public Interface
 			log_i(MODULE, "The round's entities: %zu made gone, %zu removed "
 					"back", made.size(), m_removed.size());
 		m_removed.clear();
+		m_raw_made = json::array();
 		sync_free_objects();
 	}
 
@@ -44166,6 +44335,7 @@ struct Module: public interface::Module, public Interface
 		std::set<ss_> marks_dirty;
 		sv_<Discarded> discarded;
 		std::map<uint64_t, Removed> removed;
+		json::Value raw_made = json::array();
 		std::map<ss_, uint64_t> players;
 		json::Value aside = json::object();
 		json::Value flows = json::array();
@@ -44225,6 +44395,7 @@ struct Module: public interface::Module, public Interface
 		swap(m_marks_dirty, c.marks_dirty);
 		swap(m_discarded, c.discarded);
 		swap(m_removed, c.removed);
+		swap(m_raw_made, c.raw_made);
 		swap(m_players, c.players);
 		swap(m_aside, c.aside);
 		swap(m_flows, c.flows);
