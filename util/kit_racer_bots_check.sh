@@ -77,7 +77,8 @@ step() # <seconds> <regex in the client's log> <command>...
 	await "$CL" "$m" "$s" "$re"
 }
 # The pause menu: its items line matching <regex> and not <regex 2> (if
-# given), then Continue
+# given; opened again till it is so: the item's show comes a moment
+# after what changes it), then Continue
 pause_items() # <regex> [regex 2]
 {
 	local i m items=
@@ -85,7 +86,8 @@ pause_items() # <regex> [regex 2]
 		m=$(mark "$CL")
 		step 10 "pause: the items" "keypress Escape"
 		items=$(tail -c +$((m + 1)) "$CL" | grep -a "pause: the items" | tail -1)
-		echo "$items" | grep -qE "$1" && break
+		echo "$items" | grep -qE "$1" && { [ -z "${2:-}" ] || ! echo "$items" | grep -qE "$2"; } &&
+			break
 		step 10 "pause: the menu closed" "frames 3" 'click Button "Continue"'
 		sleep 1
 	done

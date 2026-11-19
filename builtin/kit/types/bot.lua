@@ -397,8 +397,8 @@ return {
 	about = {
 		what = "A bot: it does the goals a player would, one at a time.",
 		inputs = {
-			ask = "Asks the player who set it off for its aim, reaction and speed (a dialog; a driving bot's skill).",
-			skill = "A driving bot's skill (0...100 %).",
+			ask = "Asks the player who set it off for its knobs in a dialog.",
+			skill = "Sets a driving bot's skill. Value: 0 to 100 (%).",
 		},
 		outputs = {
 			stuck = "It cannot do its goal. Value: why.",
