@@ -1904,7 +1904,8 @@ end
 -- off it and lifted, stayed pressed): pressed as it goes down, released as
 -- that finger lifts wherever it is (Urho3D's Button lets go as the finger
 -- leaves it and sends no Released for a finger lifted off it), so two
--- fingers hold two buttons, each its own
+-- fingers hold two buttons, each its own. The second value: its side,
+-- "left" (the touch_axes stack) or "right"
 local function touch_button(x, y)
 	local sc = magic.ui.scale
 	for _, row in ipairs(C.rows) do
@@ -1915,7 +1916,7 @@ local function touch_button(x, y)
 			local p, s = btn.screenPosition, btn.size
 			if x / sc >= p.x and y / sc >= p.y and x / sc < p.x + s.x and
 					y / sc < p.y + s.y then
-				return list[i]
+				return list[i], bar == C.lbar and "left" or "right"
 			end
 		end
 	end
@@ -2166,7 +2167,7 @@ if TOUCH then
 			ui = on_ui(x, y)}
 		C.fingers[id] = f
 		-- [KIT_TOUCH_THUMBS] a bar's button: this finger's till it lifts
-		f.btn = touch_button(x, y)
+		f.btn, f.side = touch_button(x, y)
 		if f.btn then
 			f.ui = true
 			log:info("kit: touch button " .. f.btn[1] .. " down by finger " .. id)
@@ -2226,6 +2227,22 @@ if TOUCH then
 		end
 		local x, y = data:GetInt("X"), data:GetInt("Y")
 		f.x, f.y = x, y
+		-- [KIT_TOUCH_THUMBS] A held button's finger slid onto another held
+		-- button of its stack (Gas to Brake, Left to Right): that one's now;
+		-- onto nothing, still the old one's. Only buttons held while pressed
+		-- (a press handler): Jump, Exit and the app's act as they lift
+		if f.btn and f.btn[2] then
+			local b, side = touch_button(x, y)
+			if b and b ~= f.btn and b[2] and side == f.side then
+				local id = data:GetInt("TouchID")
+				log:info(string.format("kit: touch button %s up by finger %d at %d,%d " ..
+						"(slid onto %s)", f.btn[1], id, x, y, b[1]))
+				f.btn[3]()
+				f.btn = b
+				log:info("kit: touch button " .. b[1] .. " down by finger " .. id)
+				b[2]()
+			end
+		end
 		if f.ui then
 			return
 		end
