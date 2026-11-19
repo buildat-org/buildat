@@ -3799,7 +3799,7 @@ struct Module: public interface::Module, public Interface
 					if(p.first != c.first && p.second.parent == parent &&
 							!gone.count(p.first) && symmetry_in(p.second)){
 						why = "its scene has kit/symmetry "+itos(p.first)+
-								" already: one a scene";
+								" already: one per scene";
 						return false;
 					}
 				Entity n;
@@ -4250,12 +4250,12 @@ struct Module: public interface::Module, public Interface
 		if(n.has_pos && pi->second.kind != "scene" && (!pi->second.has_pos ||
 				!pi->second.kind.empty())){
 			why = "entity "+itos(n.id)+"'s parent "+itos(n.parent)+
-					" is no scene and has no position";
+					" is not a scene and has no position";
 			return false;
 		}
 		// [KIT_SCENE_TREE] a scene under the root or a scene
 		if(n.kind == "scene" && n.parent != 1 && pi->second.kind != "scene"){
-			why = "the scene "+n.name+"'s parent "+itos(n.parent)+" is no scene";
+			why = "the scene "+n.name+"'s parent "+itos(n.parent)+" is not a scene";
 			return false;
 		}
 		// (MAX_NEST levels under its scene; [KIT_SCENE_TREE] the scenes over
@@ -5035,7 +5035,7 @@ struct Module: public interface::Module, public Interface
 			Entity e;
 			const bool ok = entity_from_json(es.at(i), e, why);
 			if(ok && e.kind == "player")
-				why = "entity "+itos(e.id)+": a player is no authored entity";
+				why = "entity "+itos(e.id)+": a player is not an authored entity";
 			else if(ok && m_entities.count(e.id))
 				why = "entity "+itos(e.id)+" twice";
 			if(!ok || e.kind == "player" || m_entities.count(e.id)){
@@ -6477,7 +6477,7 @@ struct Module: public interface::Module, public Interface
 		const int64_t now = interface::os::time_us();
 		auto slow = m_type_slow.find(p.name);
 		if(slow != m_type_slow.end() && now < slow->second){
-			why = "your last type took long to load: wait "+itos((slow->second -
+			why = "your last type took a long time to load: wait "+itos((slow->second -
 					now) / 1000000 + 1)+" s";
 			return false;
 		}
@@ -8987,7 +8987,7 @@ struct Module: public interface::Module, public Interface
 		if(path.empty())
 			return "this server keeps no data of Kit's";
 		if(interface::fs::path_exists(path))
-			return "the server has its key already (one a server; its file "
+			return "the server has its key already (one per server; its file "
 					"is "+path+")";
 		ss_ text, pub;
 		interface::aitta::keygen(text, pub);
@@ -9630,8 +9630,8 @@ struct Module: public interface::Module, public Interface
 		bool admin = false;
 		account_of(peer, &admin);
 		if(kind == "template" && !admin)
-			return refuse("a template's install is an admin's (New's Start "
-					"from is the server's)");
+			return refuse("only an admin installs a template (New's Start "
+					"from list is the server's)");
 		if(kind == "scene" && !m_host.make_scene)
 			return refuse("the app makes no scenes");
 		if(m_mcp_waits.count(peer))
@@ -10447,7 +10447,7 @@ struct Module: public interface::Module, public Interface
 		if(m_host.world_scene.empty())
 			return true;
 		if(!m_host.scenes.count(m_host.world_scene)){
-			why = "the World's scene "+m_host.world_scene+" is none of the app's";
+			why = "the World's scene "+m_host.world_scene+" is not one of the app's";
 			return false;
 		}
 		world::MaterialSet app;
@@ -10626,7 +10626,7 @@ struct Module: public interface::Module, public Interface
 		}
 		if(p.generator == "valleys" && !m_server->has_module("luanti_mapgen")){
 			why = "the valleys generator needs builtin/luanti_mapgen, which "
-					"this server has not";
+					"this server does not have";
 			return false;
 		}
 		// The surface or a heightmap's size changed: the heightmap there
@@ -11728,7 +11728,7 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		if(!m_w->wp.heightmap()){
-			why = "the World is voxels now: its surface a heightmap first";
+			why = "the World is voxels now: make its surface a heightmap first";
 			return false;
 		}
 		const json::Value meta = json::load_string(ms.c_str());
@@ -11736,7 +11736,7 @@ struct Module: public interface::Module, public Interface
 		world::Params pp;
 		pp.from(params);
 		if(!params.is_object() || !pp.heightmap() || !world_entity(id, comp)){
-			why = "the previous heightmap's World is none to restore";
+			why = "no heightmap World to restore";
 			return false;
 		}
 		hm_flush();
@@ -11792,7 +11792,7 @@ struct Module: public interface::Module, public Interface
 	{
 		(void)j;
 		if(!m_w->world_scene || !m_w->wp.heightmap())
-			return refuse("a heightmap World's");
+			return refuse("no heightmap World here");
 		if(m_session.running && !m_host.persistent)
 			return refuse("the game is Running: End it first");
 		hm_backup();
@@ -12531,7 +12531,7 @@ struct Module: public interface::Module, public Interface
 		if(waiting_refused(pi->second, "build"))
 			return;
 		if(!m_session.running)
-			return refuse("The server is not Running");
+			return refuse("The game is not running");
 		const json::Value j = packet.data.size() < 512 ?
 				json::load_string(packet.data.c_str()) : json::null();
 		const json::Value &cj = j.get("cell");
@@ -12648,7 +12648,7 @@ struct Module: public interface::Module, public Interface
 			if(c.id)
 				return refuse("Taken");
 			if(core && vid == core)
-				return refuse("One core a ship: it comes with the ship");
+				return refuse("One core per ship: it comes with the ship");
 			ss_ why;
 			if(!place_ready(peer, voxel, &why))
 				return refuse(why);
@@ -15064,7 +15064,7 @@ struct Module: public interface::Module, public Interface
 				const interface::VoxelDefinition *d = reg->get(vn);
 				const json::Value &pj = j.get("param"), &tn = j.get("tint");
 				if(!d){
-					why = "\""+name.substr(0, 130)+"\" is no voxel of the scene's "
+					why = "\""+name.substr(0, 130)+"\" is not one of the scene's voxels "
 							"(list_voxel_types)";
 					return false;
 				}
@@ -15179,7 +15179,7 @@ struct Module: public interface::Module, public Interface
 				list(wo) : ss_())+(k ? ", turned "+itos(k * 90) : ss_())+": "+
 				itos(written)+" cells written"+(missing ? ", "+itos(missing)+
 				" outside the World (past its map or height)" : ss_())+(unknown ?
-				", "+itos(unknown)+" of voxels the scene has not" : ss_());
+				", "+itos(unknown)+" of voxels the scene does not have" : ss_());
 		if(!nc.cells.empty()){
 			std::deque<Change> &u = m_undo[p.name];
 			u.push_back(nc);
@@ -17838,7 +17838,7 @@ struct Module: public interface::Module, public Interface
 			if(m_types[g.comps[i].type].handlers.count("on_build"))
 				ci = i;
 		if(ci == g.comps.size())
-			return refuse("it is no generator");
+			return refuse("it is not a generator");
 		g.comps[ci].params = g.comps[ci].params.deepcopy();
 		const json::Value ps = s.at(1u).is_object() ? s.at(1u) : json::object();
 		for(json::Iterator it(ps); it; ++it){
@@ -18188,7 +18188,7 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			if(parent && !ids.count(parent)){
-				why = "member "+itos(id)+"'s parent is no earlier member";
+				why = "member "+itos(id)+"'s parent is not an earlier member";
 				return false;
 			}
 			// [KIT_GENERATORS] a generator's child: its generator an
@@ -18202,7 +18202,7 @@ struct Module: public interface::Module, public Interface
 			}
 			if(!jstr(e, "kind").empty() || (!e.get("pos").is_undefined() &&
 					!pos_ok(e.get("pos")))){
-				why = "member "+itos(id)+" is no plain entity with a position";
+				why = "member "+itos(id)+" is not a plain entity with a position";
 				return false;
 			}
 			// [KIT_PREFAB_ROOT] another prefab's copy among them
@@ -19473,7 +19473,7 @@ struct Module: public interface::Module, public Interface
 	{
 		Entity *e = entity_arg(j, key, why);
 		if(e && !is_root(*e)){
-			why = "entity "+itos(e->id)+" is no placed prefab's root";
+			why = "entity "+itos(e->id)+" is not a placed prefab's root";
 			return nullptr;
 		}
 		return e;
@@ -19507,7 +19507,7 @@ struct Module: public interface::Module, public Interface
 				return false;
 			// [KIT_PREFAB_BENCH] not of a box its voxels are not in yet
 			if(active_session() && active_session()->stamp.is_object()){
-				why = "its voxels are still being laid out here: a moment";
+				why = "its voxels are still being laid out here: try again in a moment";
 				return false;
 			}
 			const ss_ of = jstr(root->prefab, "of");
@@ -19862,12 +19862,12 @@ struct Module: public interface::Module, public Interface
 			json::Value out = row;
 			out.set("components", cs_);
 			change.push_back(std::make_pair(e->id, out));
-			what = "entity "+itos(e->id)+"'s "+param+" its source's again";
+			what = "entity "+itos(e->id)+"'s "+param+" is its source's again";
 			return true;
 		}
 		auto ri = m_entities.find(by);
 		if(ri == m_entities.end() || !is_root(ri->second)){
-			why = "entity "+itos(e->id)+" is no prefab's member";
+			why = "entity "+itos(e->id)+" is not a prefab's member";
 			return false;
 		}
 		const ss_ param = jstr(j, "param"), of = jstr(ri->second.prefab, "of");
@@ -20306,7 +20306,7 @@ struct Module: public interface::Module, public Interface
 					if(outside && (oi == m_entities.end() || out_id == (int64_t)e.id ||
 							!authored(oi->second) || !oi->second.kind.empty())){
 						why = "on_build: child "+itos(i + 1)+" links to entity "+
-								itos(out_id)+", which is no entity of the composition's";
+								itos(out_id)+", which is not an entity of the composition";
 						return false;
 					}
 					bool ok = false;
@@ -20316,7 +20316,7 @@ struct Module: public interface::Module, public Interface
 						why = "on_build: child "+itos(i + 1)+" links to "+
 								(outside ? "entity "+itos(out_id)+"'s " :
 								ss_("the generator's "))+input.substr(0, 64)+
-								", which it has not";
+								", which it does not have";
 						return false;
 					}
 					json::Value sl = json::array();
@@ -20345,7 +20345,7 @@ struct Module: public interface::Module, public Interface
 			const ss_ type = full_type(jstr(cs_.at((unsigned)sl.at(1u).
 					as_number()), "type"));
 			if(!m_types[type].outputs.count(sl.at(2u).as_string())){
-				why = "on_build: a link from an output "+type+" has not";
+				why = "on_build: a link from an output that "+type+" does not have";
 				return false;
 			}
 		}
@@ -20993,7 +20993,7 @@ struct Module: public interface::Module, public Interface
 				"the app moves no players" :
 				who.empty() ? "no player set it off" :
 				!peer ? "the player is not in its scene" :
-				to_entity.is_number() && !te ? "the target is no placed entity" :
+				to_entity.is_number() && !te ? "the target is not a placed entity" :
 				!to_entity.is_number() && !pos_ok(pos) && !onto_spawn ?
 						"not a position" :
 				other && !m_host.scenes.count(target) ?
@@ -21217,7 +21217,7 @@ struct Module: public interface::Module, public Interface
 		else if(!clear && !(v.is_true() || v.is_false() ||
 				(v.is_number() && std::isfinite(v.as_number())) ||
 				(v.is_string() && v.as_string().size() <= 64)))
-			why = "a value a number, a boolean or a string of 64 bytes at most";
+			why = "a value is a number, a boolean or a string of at most 64 bytes";
 		else if(!bot && (pi == m_entities.end() || pi->second.kind != "player"))
 			why = "no player";
 		else if(!reach(e, comp, by).count(bot ? bot->id : pid))
@@ -21230,7 +21230,7 @@ struct Module: public interface::Module, public Interface
 				&m_bot_bodies[bot->id].vars : nullptr;
 		if(vars && !clear && vars->get(key).is_undefined() &&
 				vars->size() >= MAX_BODY_VARS)
-			why = itos(MAX_BODY_VARS)+" keys a body at most";
+			why = itos(MAX_BODY_VARS)+" keys per body at most";
 		if(!why.empty()){
 			add_log(e.id, "body_var "+(who.is_string() ? who.as_string().substr(0, 64) :
 					itos(pid))+" "+key.substr(0, 32)+" refused: "+why);
@@ -22213,7 +22213,7 @@ struct Module: public interface::Module, public Interface
 		// Stopped, the world is the start: only a builder changes it
 		if(!m_hosted || pi == m_peers.end() || (build && !m_session.running)){
 			if(why)
-				*why = build ? "The server is not Running" : "Not here";
+				*why = build ? "The game is not running" : "Not here";
 			return !build && pi != m_peers.end();
 		}
 		// [KIT_CTF] a dead player waiting to respawn does nothing but stand
@@ -28166,7 +28166,7 @@ struct Module: public interface::Module, public Interface
 			const json::Value &v = field(k);
 			const ss_ s = v.is_string() ? v.as_string() : def;
 			if(!s.empty() && !ok(s)){
-				why = ss_(k)+": \""+s.substr(0, 64)+"\" is no name";
+				why = ss_(k)+": \""+s.substr(0, 64)+"\" is not a name";
 				return false;
 			}
 			out.set(k, s);
@@ -30260,7 +30260,7 @@ struct Module: public interface::Module, public Interface
 		const ss_ item = hands_of(p.player, &sheet);
 		if(!sheet || jstr(*sheet, "use") != "melee")
 			return refuse(item.empty() ? "nothing in hand" : item+
-					" is no melee item");
+					" is not a melee item");
 		if(!has_item(p.name, item))
 			return refuse("no "+item+" in their inventory");
 		// From the eye (the body's bottom and 1.55; Peer::pos is its
@@ -30603,7 +30603,7 @@ struct Module: public interface::Module, public Interface
 		else if(p.editing)
 			why = "in edit mode";
 		else if(!sheet || jstr(*sheet, "use") != "ranged")
-			why = item.empty() ? "nothing in hand" : item+" is no ranged item";
+			why = item.empty() ? "nothing in hand" : item+" is not a ranged item";
 		else if(!has_item(p.name, item))
 			why = "no "+item+" in their inventory";
 		else
@@ -32892,25 +32892,24 @@ struct Module: public interface::Module, public Interface
 	{
 		static const sv_<AgentTool> t = {
 			{"get_state", "=state", "The composition as built: each authored "
-				"entity's id, parent, name, position (x, y, z; y up, a cell 1) "
-				"and components (type, params, links to other entities' "
-				"inputs), its comments (builders' notes); whether the round is "
-				"Running, each component's state then; round: its state "
-				"(Running, Ended), who started it, its phase (ended; playing; "
-				"with a kit/lobby lobby, playing or over, each player's; bodies: "
-				"each player's body's c:body_var values, by its by); your "
-				"scene and the scenes; scenes_from: where each scene's "
-				"kit/controls, kit/game_rules and kit/environment come from "
-				"(own, the scene it is under that has one, root or none); how "
-				"many of your edits there are to undo; the game it is "
-				"(\"<author>/<name>\", list_aitta's filter) and its save; "
-				"session: where you are (the main round or your draft); "
-				"buildat_version: the server's Buildat version. main: "
-				"true reads the main round's from your draft. An entity on the "
-				"app root (every scene's: the game-wide rules, a lobby and its "
-				"screens) has app_root: true. scene, ids, type: only those "
-				"entities (scene \"\": the app root's); state: false leaves the "
-				"components' state out.",
+				"entity's id, parent, name, position (x, y, z; y up, 1 per cell) "
+				"and components (type, params, links to other entities' inputs), "
+				"its comments (builders' notes); whether the round is Running, "
+				"and then each component's state; round: its state (Running, "
+				"Ended), who started it, its phase (ended or playing; with a "
+				"kit/lobby, each player's: lobby, playing or over), bodies (each "
+				"player's body's c:body_var values, keyed by its by); your scene "
+				"and the scenes; scenes_from: where each scene's kit/controls, "
+				"kit/game_rules and kit/environment come from (own, the scene it "
+				"is under that has one, root or none); how many of your edits "
+				"there are to undo; the game's name (\"<author>/<name>\", "
+				"list_aitta's filter) and its save; session: where you are (the "
+				"main round or your draft); buildat_version: the server's "
+				"Buildat version. main: true reads the main round's state from "
+				"your draft. An entity on the app root (every scene's: the "
+				"game-wide rules, a lobby and its screens) has app_root: true. "
+				"scene, ids, type: only those entities (scene \"\": the app "
+				"root's); state: false leaves the components' state out.",
 				R"J({"type": "object", "properties": {"main": {"type": "boolean",
 				"description": "From your draft: the main round's state"},
 				"scene": {"type": "string", "description":
@@ -32921,45 +32920,47 @@ struct Module: public interface::Module, public Interface
 					"Only the entities with a component of this type"},
 				"state": {"type": "boolean", "description":
 					"false: no component's state (Running)"}}})J", ""},
-			{"list_types", "=types", "The types an entity is placed of: each "
-				"one's name, group and what it is. With type: its declaration, "
-				"its params (each one's type, default, min, max, choices), its "
-				"inputs and outputs (their values' types) and what each does.",
+			{"list_types", "=types", "The types an entity can be placed as: "
+				"each one's name, group and what it is. With type: its "
+				"declaration, its params (each one's type, default, min, max, "
+				"choices), its inputs and outputs (their values' types) and what "
+				"each does.",
 				R"J({"type": "object", "properties": {"type": {"type": "string",
 				"description": "A type, as \"kit/counter\""}}})J", ""},
 			// [KIT_CUSTOM_TYPES]
 			{"get_type", "=type", "A type's files (Kit's own, an installed "
-				"package's or a custom one's): {type, custom, source, "
-				"client (its client part, \"\" none)}, a custom type's by (who "
-				"put it last). Kit's own read as examples: kit/counter, kit/timer, "
-				"kit/door, kit/walker (a movement), kit/ball (a seat that rolls).",
+				"package's or a custom one's): {type, custom, source, client "
+				"(its client part; \"\": none)}, and a custom type's by (who put "
+				"it last). Kit's own types serve as examples: kit/counter, "
+				"kit/timer, kit/door, kit/walker (a movement), kit/ball (a seat "
+				"that rolls).",
 				R"J({"type": "object", "properties": {"type": {"type": "string",
 				"description": "As \"kit/counter\"; \"bike\" is local/bike"}},
 				"required": ["type"]})J", ""},
 			// The reads (agent_read())
 			{"get_guide", "=guide", "How Kit's compositions are built and run, "
-				"and every type of this server's with its inputs, outputs and "
-				"params' names. Read it first. topic \"visuals\": how a game "
-				"looks (camera, sky, light, ground, voxels, textures, effects), "
-				"what you can and cannot see of it; read it before changing "
-				"a look. topic \"music\": kit/music and the song format "
+				"and every type of this server's with the names of its inputs, "
+				"outputs and params. Read it first. topic \"visuals\": how a "
+				"game looks (camera, sky, light, ground, voxels, textures, "
+				"effects), what you can and cannot see of it; read it before "
+				"changing a look. topic \"music\": kit/music and the song format "
 				"(jam1), every line and parameter; read it before writing a "
 				"song.",
 				R"J({"type": "object", "properties": {"topic": {"type": "string",
-				"enum": ["visuals", "music"], "description": "None: the guide"}}})J", ""},
-			{"analyze_music", "=music", "Your ears for music: a song rendered "
-				"on the server and measured, since you cannot listen. Its "
-				"whole play order and 0.1 s past the loop's join, or seconds "
-				"of it (at most 120), from its start, in a mood (\"\": every "
-				"track), or one track alone. Gives loudness (integrated LUFS; "
-				"about -14 is the norm here), short-term loudness's range, "
-				"peak dBFS, the energy in sub/low/mid/high/air bands (%), "
-				"the same for each track (after its inserts, before the "
-				"buses), the loop's join (the step there against the median "
-				"step: a click is a big one), peak voices and the render's "
-				"cost. The song: entity (a kit/music's), or text (a song not "
-				"set yet: a parse error comes back with its line). It stalls "
-				"the round while it renders (about 2 s for a minute).",
+				"enum": ["visuals", "music"], "description": "None: the main guide"}}})J", ""},
+			{"analyze_music", "=music", "Your ears for music: renders a song "
+				"on the server and measures it, since you cannot listen. It "
+				"renders the whole play order plus 0.1 s past the loop's join, "
+				"or seconds of it (at most 120) from its start; in a mood (\"\": "
+				"every track) or one track alone. Gives loudness (integrated "
+				"LUFS; about -14 is the norm here), short-term loudness's range, "
+				"peak dBFS, the energy in sub/low/mid/high/air bands (%), the "
+				"same for each track (after its inserts, before the buses), the "
+				"loop's join (the step there against the median step: a click is "
+				"a big one), peak voices and the render's cost. The song: entity "
+				"(a kit/music's) or text (a song not set yet; a parse error "
+				"comes back with its line). It stalls the round while it renders "
+				"(about 2 s for a minute).",
 				R"J({"type": "object", "properties": {"entity": {"type": "integer",
 				"description": "A kit/music entity's id"},
 				"text": {"type": "string", "description": "A song's text instead"},
@@ -32973,44 +32974,47 @@ struct Module: public interface::Module, public Interface
 				""},
 			{"get_log", "=log", "An entity's log, the last 50 lines: what its "
 				"components logged (c:log) and what came to it, with the game "
-				"clock's minutes and seconds; its client part's first failure "
-				"on each client (which handler, the error, whose client).",
+				"clock's minutes and seconds; and its client part's first "
+				"failure on each client (which handler, the error, whose "
+				"client).",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
 				"required": ["id"]})J", ""},
 			// [KIT_AGENT_VISUALS] 2 (agent_view())
 			{"get_view", "view", "Pictures of the game as it is drawn (PNGs): "
-				"a client of your own account in your session draws a camera of "
-				"its own and sends it; its window's view is left as it is, and it "
-				"shows \"Your agent took a picture\". With none of yours there, "
-				"the server's camera draws (a client of the server's own, started "
-				"at the first need: the first call may answer that it is starting; "
-				"call again), from what the server has loaded round the pose. "
-				"pos and look_at, or pos, yaw and pitch (degrees: yaw 0 looks "
-				"along +z, 90 along +x; pitch down), in cells (y up); none: that "
-				"client's own view (the server's camera's: over your last place, "
-				"else the spawn). views: several poses in one call. preset: "
-				"\"map\" (top-down, orthographic, +z up; over area [x0, z0, x1, "
-				"z1] or the scene's extent), \"turn\" (count pictures round "
-				"entity id, 4 unless given), \"frame\" (one on entity id's box). "
-				"compare: each pose's last picture before the new one (before "
-				"and after a change). width and height 512x384 unless given, "
-				"1024x768 at most, 8 views and 1572864 pixels a call at most. The "
-				"scene drawn is the one that client is in (scene: refused unless "
-				"one is; the server's camera goes there), as far as it has loaded "
-				"it. Look before and after a change of looks, and say so when you "
-				"could not. With no client of yours and no server camera it is "
-				"refused: your builder's own, or one you run yourself on Linux "
-				"with no display, from a release (https://github.com/celeron55/"
-				"buildat/releases, the linux-x86_64-portable archive), unpacked, "
-				"drawing off-screen with no X server and a software GL "
-				"(Debian: apt-get install libgl1 libegl1 libegl-mesa0 "
-				"libgl1-mesa-dri libcurl4): BUILDAT_AGENT_TOKEN=<your token> "
-				"SDL_VIDEODRIVER=offscreen bin/buildat -s <host:port, or "
-				"https://host> -w 640x480 -o sound_mute=1; it logs in as your "
-				"account (\"Joined as <name>\") while your builder's own client "
-				"is not here; a builder token's for an account that is no Host "
-				"and no Steward. The token: My account, Connect an agent... (a "
-				"sign-in's stays inside your tool).",
+				"a client of your own account in your session draws them from a "
+				"camera of its own and sends them; its window's view is left as "
+				"it is, and it shows \"Your agent took a picture\". With none of "
+				"yours there, the server's camera draws (a client of the "
+				"server's own, started when first needed: the first call may "
+				"answer that it is starting; call again), from what the server "
+				"has loaded around the pose. pos and look_at, or pos, yaw and "
+				"pitch (degrees: yaw 0 looks along +z, 90 along +x; pitch down), "
+				"positions in cells (y up); none: that client's own view (the "
+				"server's camera's: over your last place, else the spawn). "
+				"views: several poses in one call. preset: \"map\" (top-down, "
+				"orthographic, +z up; over area [x0, z0, x1, z1] or the scene's "
+				"extent), \"turn\" (count pictures around entity id, 4 unless "
+				"given), \"frame\" (one on entity id's box). compare: each "
+				"pose's last picture before the new one (before and after a "
+				"change). width and height 512x384 unless given, 1024x768 at "
+				"most; 8 views and 1572864 pixels a call at most. The scene "
+				"drawn is the one that client is in (scene: refused unless one "
+				"is; the server's camera goes there), as far as it has loaded "
+				"it. Look before and after a change of looks, and say so when "
+				"you could not. With no client of yours and no server camera it "
+				"is refused. A client of yours is your builder's own, or one you "
+				"run yourself on Linux with no display, from a release "
+				"(https://github.com/celeron55/buildat/releases, the "
+				"linux-x86_64-portable archive), unpacked, drawing off-screen "
+				"with no X server and a software GL (Debian: apt-get install "
+				"libgl1 libegl1 libegl-mesa0 libgl1-mesa-dri libcurl4): "
+				"BUILDAT_AGENT_TOKEN=<your token> SDL_VIDEODRIVER=offscreen "
+				"bin/buildat -s <host:port, or https://host> -w 640x480 -o "
+				"sound_mute=1; it logs in as your account (\"Joined as <name>\") "
+				"while your builder's own client is not here (a builder token "
+				"works only for an account that is neither a Host nor a "
+				"Steward). The token: My account, Connect an agent... (a "
+				"sign-in's token stays inside your tool).",
 				R"J({"type": "object", "properties": {
 				"pos": {"type": "array", "items": {"type": "number"},
 					"minItems": 3, "maxItems": 3, "description": "The camera, x, y, z"},
@@ -33029,15 +33033,14 @@ struct Module: public interface::Module, public Interface
 					"maxItems": 4, "description": "map's [x0, z0, x1, z1]"},
 				"compare": {"type": "boolean"}}})J", ""},
 			// [KIT_AGENT_NEXT_2] 5 (agent_show())
-			{"show", "show", "Shows your builder where you work, drawn in "
-				"the clients of your account (in play and in the editor): a "
-				"marker at `at` (a post), a wire box (two corners), entities ids "
-				"outlined, label over them. Each call replaces the last; a "
-				"call with none of them clears it; gone when you leave (idle or "
-				"revoked). The "
-				"editors of every builder show your cursor (at) and selection "
-				"(the first of ids) by your name. The answer says how many "
-				"clients of yours it reached.",
+			{"show", "show", "Shows your builder where you work, drawn in the "
+				"clients of your account (in play and in the editor): a marker "
+				"(a post) at `at`, a wire box (two corners), the entities ids "
+				"outlined, and label over them. Each call replaces the last; a "
+				"call with none of them clears it; it is gone when you leave "
+				"(idle or revoked). Every builder's editor shows your cursor "
+				"(at) and selection (the first of ids) with your name. The "
+				"answer says how many clients of yours it reached.",
 				R"J({"type": "object", "properties": {
 				"at": {"type": "array", "items": {"type": "number"},
 					"minItems": 3, "maxItems": 3},
@@ -33052,35 +33055,36 @@ struct Module: public interface::Module, public Interface
 			// (agent_play())
 			{"play_join", "play_join", "Play the game yourself: the server's "
 				"camera (get_view's) takes a player body in the scene you edit "
-				"(switch_scene's), a guest's named \"<account>'s agent\", on the "
-				"scene's spawner of players (kit/spawner players: true) as a "
-				"joining player there, else at the scene's spawn. Playing "
-				"already in another scene, the body moves to yours. The round "
-				"must be Running (start). The first call may answer that the "
-				"camera is starting or on its way: call again. One agent plays "
-				"at a time. Its answer names the body's by (\"player:<id>\"): "
-				"per_player state's key, not the body's name.",
+				"(switch_scene's), a guest's, named \"<account>'s agent\", put "
+				"by the scene's spawner of players (kit/spawner with players: "
+				"true) as a joining player would be, else at the scene's spawn. "
+				"If you already play in another scene, the body moves to yours. "
+				"The round must be Running (start). The first call may answer "
+				"that the camera is starting or on its way: call again. One "
+				"agent plays at a time. Its answer names the body's by "
+				"(\"player:<id>\"): the key of per_player state, not the body's "
+				"name.",
 				R"J({"type": "object", "properties": {}})J", ""},
-			{"play_input", "play_input", "Your body's input for a time, as a "
-				"player's client sends it (its keys predicted and all): keys held "
-				"(SDL's names: W, A, S, D, Space, Left Shift, ...; up to 6), the "
-				"game's input actions held (actions: up to 4 names), yaw and "
-				"pitch to look first (degrees as get_view's), jump, use (an "
-				"entity's id, as a click on it). seconds 0.1 to 4 (1). Answers "
-				"your body's place before and after, how far it moved, its "
-				"components' states (health, score, inventory...), alive, its by "
-				"and its vars (c:body_var's), and "
-				"the outputs entities emitted meanwhile (by \"you\" when your "
-				"body did it), the screen's buttons (id, label; a list's rows); "
-				"picture: also a picture of its own view at the end (width, "
-				"height). press: a button on your body's screen pressed first, "
-				"as a click on it (a kit/ui_button, a pause menu item, a "
-				"kit/ui_scene_list's row: Play in a lobby), by its id or its "
-				"label (a list's row by its title, or row from 1). An entity's "
-				"output emitted again is one entry: count, the first value and "
-				"time t (s from the start), last_value and last_t; mute: outputs "
-				"left out (\"<output>\" or \"<id>:<output>\", up to 16; "
-				"muted: how many emits that left out).",
+			{"play_input", "play_input", "Sends your body's input for a time, "
+				"as a player's client sends it (keys predicted and all): keys "
+				"held (SDL's names: W, A, S, D, Space, Left Shift, ...; up to "
+				"6), the game's input actions held (actions: up to 4 names), yaw "
+				"and pitch to look first (degrees as get_view's), jump, use (an "
+				"entity's id, as a click on it). seconds: 0.1 to 4 (1 unless "
+				"given). Answers your body's place before and after, how far it "
+				"moved, its components' states (health, score, inventory...), "
+				"alive, its by and its vars (c:body_var's), and the outputs "
+				"entities emitted meanwhile (by \"you\" when your body did it), "
+				"the screen's buttons (id, label; a list's rows); picture: also "
+				"a picture of its own view at the end (width, height). press: a "
+				"button on your body's screen pressed first, as a click on it (a "
+				"kit/ui_button, a pause menu item, a kit/ui_scene_list's row: "
+				"Play in a lobby), by its id or its label (a list's row by its "
+				"title, or row from 1). An entity's output emitted again is one "
+				"entry: count, the first value and time t (s from the start), "
+				"last_value and last_t; mute: outputs left out (\"<output>\" or "
+				"\"<id>:<output>\", up to 16; muted: how many emits were left "
+				"out).",
 				R"J({"type": "object", "properties": {
 				"keys": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
 				"actions": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
@@ -33093,25 +33097,25 @@ struct Module: public interface::Module, public Interface
 				"mute": {"type": "array", "items": {"type": "string"}, "maxItems": 16,
 					"description": "Outputs left out: \"<output>\" or \"<id>:<output>\""}}})J",
 				""},
-			{"play_leave", "play_leave", "Your body gone: the server's camera "
-				"plays no more (as after 120 s unused).",
+			{"play_leave", "play_leave", "Takes your body away: the server's "
+				"camera stops playing (as it does after 120 s unused).",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"get_events", "=events", "What came for you since you last asked "
-				"(the last 50): your try_input's answers (what its runs emitted), "
-				"what the entity you watch emitted (every 0.2 s at most: each "
-				"output's last value and how many times), warnings.",
+				"(the last 50): try_input's answers (what its runs emitted), "
+				"what the entity you watch emitted (at most every 0.2 s: each "
+				"output's last value and count), and warnings.",
 				R"J({"type": "object", "properties": {}})J", ""},
-			{"get_goal_warnings", "=goals", "What the links leave a kit/goal "
+			{"get_goal_warnings", "=goals", "What a kit/goal's links leave "
 				"missing, as the editor warns at Publish: nothing activates it, "
 				"no target, no via, no chain of links to its validate_reachable. "
-				"Then the level's (publish asks about none of these): entities "
-				"still on a default name (type and id); scenes with no way in "
-				"(not where players join, not listed, named by no parameter or "
-				"custom type); entities with no link from an output or to an "
-				"input that at least 3 of 4 of their type (4 or more) have; in a "
-				"side view (kit/controls camera side), scenery wholly in front "
-				"of the plane by more than side_clip (lower z, the foreground), "
-				"never drawn.",
+				"Then the level's warnings (publish asks about none of these): "
+				"entities still with a default name (type and id); scenes with "
+				"no way in (not where players join, not listed, named by no "
+				"parameter or custom type); entities lacking a link from an "
+				"output or to an input that at least 3 in 4 of their type have "
+				"(of 4 or more); in a side view (kit/controls camera side), "
+				"scenery wholly in front of the plane by more than side_clip "
+				"(lower z, the foreground), which is never drawn.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			// [KIT_AGENT_FEEDBACK_1117] 11 (history())
 			{"get_history", "=history", "Who changed the game and when, the "
@@ -33119,23 +33123,24 @@ struct Module: public interface::Module, public Interface
 				"voxels and terrain (repeats counted in times), draft publishes, "
 				"checkpoint restores, scenes added; each {time (UTC), by, what, "
 				"where (the main round or a draft), times}. since: from that "
-				"time (as time is, or seconds since 1970) on; limit: the last "
-				"that many (50 unless given, 200 at most). Kept since the "
-				"server started, the last 500.",
+				"time on (as an entry's time, or seconds since 1970); limit: the "
+				"last that many (50 unless given, 200 at most). Kept since the "
+				"server started, the last 500 at most.",
 				R"J({"type": "object", "properties": {
 				"since": {"description": "A time as the entries' or seconds since 1970"},
 				"limit": {"type": "integer"}}})J", ""},
 			{"list_prefabs", "=prefabs", "The prefabs to place: each one's "
-				"version, copies placed, its voxels' box and whether it is yours "
-				"(save_prefab makes a new version). With prefab: its entities.",
+				"version, number of copies placed, voxel box and whether it is "
+				"yours (save_prefab makes a new version). With prefab: its "
+				"entities.",
 				R"J({"type": "object", "properties": {"prefab": {"type": "string",
 				"description": "A prefab, as \"kit/hut\""}}})J", ""},
 			{"list_items", "=items", "The item types (what a kit/pickup, a shop "
 				"or a starting kit gives): each one's declaration.",
 				R"J({"type": "object", "properties": {}})J", ""},
-			{"list_voxel_types", "=voxel_types", "The voxels set_voxels places: "
-				"each one's name, kind and whether it is solid; a builder's "
-				"its textures.",
+			{"list_voxel_types", "=voxel_types", "The voxels set_voxels "
+				"places: each one's name, kind and whether it is solid; for a "
+				"builder's voxel type, also its textures.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			// [KIT_AGENT_NEXT_2] 6
 			{"list_sounds", "=sounds", "The sounds a type's sound parameter "
@@ -33145,12 +33150,12 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {"sound": {"type": "string",
 				"description": "A sound's name, as \"kit/click\""}}})J", ""},
 			{"get_voxels", "=voxels", "The voxels of a box of your scene, at "
-				"most 4096 cells: a key of characters to voxel names (\".\" "
-				"air, \"?\" not loaded), then each layer from y up, each row of "
-				"it from z up, each character x from at's. The sections (64 "
-				"cells a side) it reads are loaded for it, 8 a call at most "
-				"(not_loaded says why a \"?\" is left). The ground's height over "
-				"a wide area: get_ground.",
+				"most 4096 cells: a key from characters to voxel names (\".\": "
+				"air, \"?\": not loaded), then each layer from y up, each of its "
+				"rows from z up, each character one x from at's. The sections "
+				"(64 cells a side) it reads are loaded for it, 8 a call at most "
+				"(not_loaded says why a \"?\" is left). For the ground's height "
+				"over a wide area, use get_ground.",
 				R"J({"type": "object", "properties": {
 				"at": {"type": "array", "items": {"type": "integer"},
 					"minItems": 3, "maxItems": 3, "description": "Its lowest corner"},
@@ -33159,14 +33164,14 @@ struct Module: public interface::Module, public Interface
 				"required": ["at", "size"]})J", ""},
 			// [KIT_AGENT_VISUALS]
 			{"get_ground", "=ground", "The ground's height over an area of "
-				"your scene, from its kit/terrain, nothing loaded or generated: "
-				"rows from z up of heights every step cells from x up (a "
-				"heightmap's surface, or a voxel World's generated top cell; "
-				"null past a finite map), at most 1024 cells a side and 4096 "
-				"heights (step, unless given, the least that fits); the sea "
-				"level, the map's x, z, width and depth, and the voxel "
-				"sections (64 cells a side, [x, y, z]) loaded there. Hand "
-				"edits, caves and decorations are only in get_voxels.",
+				"your scene, from its kit/terrain, without loading or generating "
+				"anything: rows (from z up) of heights every step cells (from x "
+				"up) (a heightmap's surface, or a voxel World's generated top "
+				"cell; null past a finite map), at most 1024 cells a side and "
+				"4096 heights (step unless given: the least that fits); the sea "
+				"level, the map's x, z, width and depth, and the voxel sections "
+				"(64 cells a side, [x, y, z]) loaded there. Hand edits, caves "
+				"and decorations are only in get_voxels.",
 				R"J({"type": "object", "properties": {
 				"at": {"type": "array", "items": {"type": "integer"},
 					"minItems": 2, "maxItems": 2, "description": "x, z: its corner"},
@@ -33176,19 +33181,20 @@ struct Module: public interface::Module, public Interface
 				"required": ["at", "size"]})J", ""},
 			{"place", "place", "Places an entity of a type at pos, its params "
 				"set at once if given (each checked as set_param checks it), "
-				"under parent if given. The answer names its new id. A type "
-				"with no_position takes a pos too and has none. A root type "
+				"under parent if given. The answer names its new id. A type with "
+				"no_position takes a pos too, but has no position. A root type "
 				"(list_types: root) goes on the app root; on \"scene\" puts it "
 				"on your scene (its own copy). kit/environment goes on your "
-				"scene in a game of more than one scene (in a one-scene game "
-				"on the app root while that has none); on \"root\" (or parent "
-				"\"root\") puts it on the app root: every scene's sky but those "
-				"with their own. The answer says which. parent \"root\": "
-				"one with no_position on the app root too, every scene's: a "
-				"game-wide lobby (kit/lobby), its screens (a kit/ui_panel, then "
-				"a kit/ui_scene_list or buttons placed under it), each linking "
-				"by to_name into the scene of the player who set it off (each "
-				"scene's \"the run\"); a scene's own stays in its scene.",
+				"scene in a game of more than one scene (in a one-scene game, on "
+				"the app root while it has none); on \"root\" (or parent "
+				"\"root\") puts it on the app root: the sky of every scene "
+				"without its own. The answer says which. parent \"root\" also "
+				"puts a type with no_position on the app root, in every scene: a "
+				"game-wide lobby (kit/lobby) and its screens (a kit/ui_panel, "
+				"then a kit/ui_scene_list or buttons placed under it), each "
+				"linking by to_name into the scene of the player who set it off "
+				"(each scene's \"the run\"); a scene's own lobby stays in its "
+				"scene.",
 				R"J({"type": "object", "properties": {
 				"type": {"type": "string", "description": "From list_types"},
 				"pos": {"type": "array", "items": {"type": "number"},
@@ -33202,10 +33208,10 @@ struct Module: public interface::Module, public Interface
 				"pitch": {"type": "number", "description":
 					"Degrees about x in the world (90: a kit/polygon lying flat, its points the world's x and z)"}},
 				"required": ["type", "pos"]})J", ""},
-			{"set_param", "set", "Sets a parameter of an entity's component "
-				"to value, checked against its type's declaration. Or params: "
-				"several of that component's at once, each checked first, all "
-				"or none set, one undo.",
+			{"set_param", "set", "Sets a parameter of an entity's component to "
+				"value, checked against its type's declaration. Or params: "
+				"several of that component's parameters at once, each checked "
+				"first, all or none set, one undo.",
 				R"J({"type": "object", "properties": {
 				"id": {"type": "integer"},
 				"comp": {"type": "integer", "description":
@@ -33232,12 +33238,13 @@ struct Module: public interface::Module, public Interface
 				"required": ["id"]})J", R"J({"comp": 0})J"},
 			{"link", "link", "Links an output of an entity's component to an "
 				"input of entity `to`: each time the output signals, the input "
-				"gets its value. Their value types must meet. Or to_name, by "
-				"name: each signal reaches the entity of that name in the scene "
-				"of the player who set it off (none: dropped), so one entity on "
-				"the root (a vehicle, a lobby) reaches only that player's "
-				"scene's (each track's \"the run\"), where a link by id would "
-				"reach the one it names whoever set it off.",
+				"gets its value. Their value types must be compatible. Or "
+				"to_name, by name: each signal reaches the entity of that name "
+				"in the scene of the player who set it off (if there is none, "
+				"the signal is dropped), so one entity on the root (a vehicle, a "
+				"lobby) reaches only that player's scene's entity (each track's "
+				"\"the run\"), whereas a link by id reaches the entity it names "
+				"whoever set it off.",
 				R"J({"type": "object", "properties": {
 				"id": {"type": "integer", "description": "The entity whose output it is"},
 				"comp": {"type": "integer", "description":
@@ -33245,23 +33252,24 @@ struct Module: public interface::Module, public Interface
 				"output": {"type": "string"},
 				"to": {"type": "integer", "description": "The entity whose input it is"},
 				"to_name": {"type": "string", "description":
-					"Instead of to: a name, resolved in the scene of who set it off"},
+					"Instead of to: a name, resolved in the scene of whoever set it off"},
 				"input": {"type": "string"}},
 				"required": ["id", "output", "input"]})J", R"J({"comp": 0})J"},
 			{"delete", "delete", "Deletes an entity, those under it and the "
 				"links to them.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
 				"required": ["id"]})J", ""},
-			{"unlink", "unlink", "Takes a link away (as link names it).",
+			{"unlink", "unlink", "Removes a link (named as link names it).",
 				R"J({"type": "object", "properties": {
 				"id": {"type": "integer"}, "comp": {"type": "integer"},
 				"output": {"type": "string"}, "to": {"type": "integer"},
 				"to_name": {"type": "string"}, "input": {"type": "string"}},
 				"required": ["id", "output", "input"]})J", R"J({"comp": 0})J"},
 			{"move", "move", "Moves entity id to pos (the world's), turned to "
-				"yaw, pitch and roll (degrees; each left out kept); or entities "
-				"ids together by [dx, dy, dz], turned turn degrees round axis "
-				"(default y) about their middle. What is under them goes along.",
+				"yaw, pitch and roll (degrees; each one left out is kept); or "
+				"moves entities ids together by [dx, dy, dz] and turns them turn "
+				"degrees around axis (y unless given) about their middle. What "
+				"is under them moves along.",
 				R"J({"type": "object", "properties": {
 				"id": {"type": "integer"},
 				"pos": {"type": "array", "items": {"type": "number"},
@@ -33274,55 +33282,55 @@ struct Module: public interface::Module, public Interface
 				"turn": {"type": "number"},
 				"axis": {"type": "array", "items": {"type": "number"},
 					"minItems": 3, "maxItems": 3}}})J", ""},
-			{"rename", "rename", "Names an entity as builders read it (\"\": "
-				"its type and id again).",
+			{"rename", "rename", "Names an entity as builders see it (\"\": "
+				"back to its type and id).",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
 				"name": {"type": "string"}}, "required": ["id", "name"]})J", ""},
 			// [KIT_AGENT_VISUALS]
-			{"set_comments", "comments", "Sets an entity's comments (a "
-				"scene's entity's too): notes for builders, as code comments "
-				"are, never sent to players. Newlines kept, 4096 bytes at most, "
-				"\"\" none. One undo. get_state shows them.",
+			{"set_comments", "comments", "Sets an entity's comments (a scene's "
+				"entity too): notes for builders, like code comments, never sent "
+				"to players. Newlines are kept; 4096 bytes at most; \"\": none. "
+				"One undo. get_state shows them.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
 				"text": {"type": "string"}}, "required": ["id", "text"]})J", ""},
-			{"add_component", "add_component", "Adds a component of an "
-				"addable type (list_types with type says) to an entity, its "
-				"params at their defaults. One of a type an entity.",
+			{"add_component", "add_component", "Adds a component of an addable "
+				"type (list_types with type says) to an entity, its params at "
+				"their defaults. One component of each type per entity.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
 				"type": {"type": "string"}}, "required": ["id", "type"]})J", ""},
-			{"remove_component", "remove_component", "Takes component comp "
-				"(its index) off an entity; not the first, what it is.",
+			{"remove_component", "remove_component", "Removes component comp "
+				"(its index) from an entity; not the first, which is what the "
+				"entity is.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
 				"comp": {"type": "integer"}}, "required": ["id", "comp"]})J", ""},
 			{"set_parent", "parent", "Puts an entity (and what is under it) "
 				"under parent, a positioned entity of your scene (0: the scene), "
-				"where it is in the world kept; it then moves with its parent "
-				"(under a kit/parallax: drawn by its follow and repeat as a "
-				"backdrop, never met). "
-				"\"root\": onto the app root, one with no position (a kit/lobby, "
-				"a kit/ui_panel with what is in it, a root type), every scene's "
-				"from then on, its links kept; one on the root goes into your "
-				"scene by 0 (no position: none needed). "
-				"A scene's entity: under another scene (0: the root), the scenes "
-				"under it with it; it then has that scene's game-wide types "
-				"where it has none of its own.",
+				"keeping its place in the world; it then moves with its parent "
+				"(under a kit/parallax it is drawn as a backdrop by the "
+				"parallax's follow and repeat, never met). \"root\" moves an "
+				"entity with no position (a kit/lobby, a kit/ui_panel with what "
+				"is in it, a root type) onto the app root, into every scene from "
+				"then on, its links kept; 0 moves one on the root into your "
+				"scene (no position needed). A scene's entity goes under another "
+				"scene (0: the root), taking the scenes under it along; it then "
+				"has that scene's game-wide types where it has none of its own.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
 				"parent": {"description": "An entity's id, 0 or \"root\""}},
 				"required": ["id", "parent"]})J",
 				""},
 			{"duplicate", "duplicate", "Copies entities ids (each with what is "
-				"under it) by [dx, dy, dz], the links and entity params among "
-				"them the copies'. The answer names the new ids.",
+				"under it) offset by [dx, dy, dz]; links and entity params among "
+				"them point to the copies. The answer names the new ids.",
 				R"J({"type": "object", "properties": {
 				"ids": {"type": "array", "items": {"type": "integer"}},
 				"by": {"type": "array", "items": {"type": "number"},
 					"minItems": 3, "maxItems": 3}},
 				"required": ["ids", "by"]})J", ""},
-			{"place_prefab", "place", "Places a copy of a prefab (list_prefabs) "
-				"at pos, turned turn degrees (a multiple of 90), its voxels "
-				"written into the world; it follows the prefab's new versions. "
-				"free: its voxels a moving object instead; detached: plain "
-				"entities that follow nothing.",
+			{"place_prefab", "place", "Places a copy of a prefab "
+				"(list_prefabs) at pos, turned turn degrees (a multiple of 90), "
+				"its voxels written into the world; it follows the prefab's new "
+				"versions. free: its voxels as a moving object instead; "
+				"detached: plain entities that follow nothing.",
 				R"J({"type": "object", "properties": {
 				"prefab": {"type": "string"},
 				"pos": {"type": "array", "items": {"type": "number"},
@@ -33333,15 +33341,15 @@ struct Module: public interface::Module, public Interface
 				"required": ["prefab", "pos"]})J", ""},
 			// [KIT_AGENT_NEXT_2] 4 (scatter_ops(), agent_batch())
 			{"scatter_prefab", "scatter", "Places copies of a prefab, each as "
-				"place_prefab places one, all one undo (one refused: none "
-				"placed): count of them (8 unless given) at random (seed) in "
-				"area [x0, z0, x1, z1] at least spacing cells apart (4 unless "
-				"given), or along path (2 to 64 points [x, y, z]) every "
-				"spacing cells from its first; each on the ground (a "
-				"heightmap's surface; a voxel World's generated top, hand edits "
-				"not seen; none past a map) unless ground: false (the path's "
-				"own y). turn: degrees, a multiple of 90, or \"random\". 64 "
-				"copies a call at most.",
+				"place_prefab places one, all one undo (if one is refused, none "
+				"is placed): count copies (8 unless given) at random (seed) in "
+				"area [x0, z0, x1, z1], at least spacing cells apart (4 unless "
+				"given), or along path (2 to 64 points [x, y, z]) every spacing "
+				"cells from its first point; each on the ground (a heightmap's "
+				"surface; a voxel World's generated top, hand edits not seen; "
+				"none past a map) unless ground: false (then the path's own y). "
+				"turn: degrees, a multiple of 90, or \"random\". 64 copies a "
+				"call at most.",
 				R"J({"type": "object", "properties": {
 				"prefab": {"type": "string"},
 				"area": {"type": "array", "items": {"type": "number"},
@@ -33354,12 +33362,13 @@ struct Module: public interface::Module, public Interface
 				"turn": {"description": "Degrees (a multiple of 90) or \"random\""},
 				"free": {"type": "boolean"}, "detached": {"type": "boolean"}},
 				"required": ["prefab"]})J", ""},
-			{"save_prefab", "save_prefab", "Makes entities ids the prefab "
+			{"save_prefab", "save_prefab", "Saves entities ids as the prefab "
 				"\"<your account>/<name>\" (a new version if there is one), "
 				"placeable from then on; they stay as they are. Or root, a "
-				"placed copy of a prefab of yours: what is under it the "
-				"prefab's new version, every copy following. Either with the "
-				"voxels of box (air: its air cells too clear where it is placed).",
+				"placed copy of a prefab of yours: what is under it becomes the "
+				"prefab's new version, and every copy follows. Either way with "
+				"the voxels of box (air: its air cells too, clearing where it is "
+				"placed).",
 				R"J({"type": "object", "properties": {
 				"ids": {"type": "array", "items": {"type": "integer"}},
 				"name": {"type": "string", "description": "Letters, digits and _"},
@@ -33370,7 +33379,7 @@ struct Module: public interface::Module, public Interface
 				"air": {"type": "boolean"}}})J", ""},
 			{"set_voxels", "set_voxel", "Places voxel (list_voxel_types; "
 				"\"air\" digs) in each cell of a box of your scene, at most 512 "
-				"cells, one undo. param: a shape's facing, tint: 0...15. Stops "
+				"cells, one undo. param: a shape's facing; tint: 0...15. Stops "
 				"at a refused cell (one not loaded: no player near it).",
 				R"J({"type": "object", "properties": {
 				"voxel": {"type": "string"},
@@ -33381,18 +33390,19 @@ struct Module: public interface::Module, public Interface
 				"param": {"type": "integer"}, "tint": {"type": "integer"}},
 				"required": ["voxel", "at"]})J", ""},
 			// [KIT_AGENT_NEXT_2] 4 (region_op())
-			{"edit_voxels", "region", "A box of voxels of your scene at once, "
-				"one undo. action fill (voxel; param, tint as set_voxels'), "
-				"hollow (the inside air; voxel: the shell made of it, else left "
-				"as it is), clear (air), replace (voxel's cells with `with`), "
-				"copy (the box into your clipboard), paste (the copy, its low "
-				"corner at `at`, turned turn degrees, a multiple of 90; air: its "
-				"air cells too, else what is there stays), move (the box's to "
-				"`to`, likewise; the box cleared first). size: 32 a side at "
-				"most. The sections it touches are loaded for it, 8 a call: "
-				"while one is generated it is refused with nothing changed, call "
-				"again. Cells past a heightmap's map are skipped. get_voxels "
-				"reads the result.",
+			{"edit_voxels", "region", "Edits a box of voxels of your scene at "
+				"once, one undo. action fill (voxel; param, tint as "
+				"set_voxels'), hollow (the inside made air; voxel: the shell "
+				"made of it, else left as it is), clear (air), replace (voxel's "
+				"cells with `with`), copy (the box into your clipboard), paste "
+				"(the copy, its low corner at `at`, turned turn degrees, a "
+				"multiple of 90; air: its air cells too, else what is there "
+				"stays), move (the box's cells to `to`, likewise; the box "
+				"cleared first). size: 32 a side at most. The sections it "
+				"touches are loaded for it, 8 a call at most: while one is being "
+				"generated, it is refused with nothing changed; call again. "
+				"Cells past a heightmap's map are skipped. get_voxels reads the "
+				"result.",
 				R"J({"type": "object", "properties": {
 				"action": {"type": "string", "enum": ["fill", "hollow", "clear",
 					"replace", "copy", "paste", "move"]},
@@ -33408,14 +33418,15 @@ struct Module: public interface::Module, public Interface
 				"turn": {"type": "number"}, "air": {"type": "boolean"},
 				"param": {"type": "integer"}, "tint": {"type": "integer"}},
 				"required": ["action", "at"]})J", ""},
-			{"edit_terrain", "terrain", "A heightmap World's ground over an "
-				"area of your scene at once (the editor's brushes on a "
+			{"edit_terrain", "terrain", "Edits a heightmap World's ground over "
+				"an area of your scene at once (the editor's brushes on a "
 				"rectangle, no falloff), one undo: tool raise or lower (by "
 				"amount cells, 1 unless given, 64 at most), flatten (to level), "
 				"smooth (toward the neighbours' mean, strength 1 to 5, 2 unless "
-				"given; again for more). area [x0, z0, x1, z1], 256 cells a "
-				"side at most. The ground's layers follow (stone where steep). "
-				"get_ground reads it back. A voxel World's ground: edit_voxels.",
+				"given; again for more). area [x0, z0, x1, z1], 256 cells a side "
+				"at most. The ground's layers follow (stone where steep). "
+				"get_ground reads it back. For a voxel World's ground, use "
+				"edit_voxels.",
 				R"J({"type": "object", "properties": {
 				"tool": {"type": "string", "enum": ["raise", "lower", "flatten",
 					"smooth"]},
@@ -33427,15 +33438,16 @@ struct Module: public interface::Module, public Interface
 			// [KIT_AGENT_VISUALS]
 			{"put_texture", "texture_put", "Uploads a texture, as the editor's "
 				"Upload does: a square PNG, its side a power of two 8...128, 64 "
-				"KiB at most, decoded and saved again; its name "
-				"\"kit/up/<hash>.png\" (the same image: the same name). Or "
+				"KiB at most, decoded and saved again; it is named "
+				"\"kit/up/<hash>.png\" (the same image gets the same name). Or "
 				"makes a recipe texture as the editor's texture designer does: "
-				"recipe, made \"<your account>/<name>\" (a new version if there "
-				"is one); its name \"generated/weave/weave1/...\", every client "
-				"drawing it from that. The answer is its name. voxel: a "
-				"voxel type of yours wearing it too, \"<your account>/<name>\" "
-				"(a new version if there is one), placeable with set_voxels and "
-				"a kit/part's or kit/polygon's voxel parameter.",
+				"recipe, saved as \"<your account>/<name>\" (a new version if "
+				"there is one); it is named \"generated/weave/weave1/...\", and "
+				"every client draws it from that. The answer is its name. voxel: "
+				"also makes a voxel type of yours wearing it, \"<your "
+				"account>/<name>\" (a new version if there is one), placeable "
+				"with set_voxels and a kit/part's or kit/polygon's voxel "
+				"parameter.",
 				R"J({"type": "object", "properties": {
 				"png": {"type": "string", "description": "The PNG's bytes in base64"},
 				"recipe": {"description": "\"weave1:...\" (list_textures: the project's and the presets'), or a table {size (16, 32, 64), pattern (none, bricks, tiles, planks, cobbles, stripes), seed (0...1048575), color_a, color_b, gap_color, speckle_color (\"#rrggbb\"), grain, contrast, balance, ridge, relief, gap, offset, jitter, variation, bevel, speckle (0...1), stretch (-1...1), octaves (1...4), count (1...16), levels (0...16)}, those not given their defaults"},
@@ -33451,135 +33463,134 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {"texture": {"type": "string"}}})J", ""},
 			// [KIT_AGENT_NEXT_2] 6 (agent_put_sound())
 			{"put_sound", "sound", "Makes or changes a sound as the editor's "
-				"sound designer does: name, made \"<your account>/<name>\", or "
-				"a builder's sound's whole name (a new version; not Kit's or a "
-				"package's: list_sounds gives its params to copy); 256 "
-				"sounds a game, no undo, not in a draft. The whole name is what "
-				"a type's sound parameter names. sound: blip1's "
-				"compact form (list_sounds), or a table {wave (square, saw, "
-				"sine, noise, triangle), seed, env_attack, env_sustain, "
-				"env_punch, env_decay, base_freq, freq_limit, freq_ramp, "
-				"freq_dramp, vib_strength, vib_speed, arp_mod, arp_speed, duty, "
-				"duty_ramp, repeat_speed, pha_offset, pha_ramp, lpf_freq, "
-				"lpf_ramp, lpf_resonance, hpf_freq, hpf_ramp, volume, "
-				"trem_depth, trem_speed, crackle, pluck, layers: [{at (s), "
-				"wave, ...}] (15 at most)}: each 0...1 (the ramps, arp_mod and "
-				"pha_offset -1...1), clamped, those not given the designer's "
-				"defaults. delete: true deletes sound name (its whole name; not "
-				"Kit's or a package's). The answer is its name, version and "
-				"compact form.",
+				"sound designer does: name, made as \"<your account>/<name>\", "
+				"or the whole name of a builder's sound (a new version; not "
+				"Kit's or a package's: list_sounds gives its params to copy); "
+				"256 sounds a game, no undo, not in a draft. The whole name is "
+				"what a type's sound parameter names. sound: blip1's compact "
+				"form (list_sounds), or a table {wave (square, saw, sine, noise, "
+				"triangle), seed, env_attack, env_sustain, env_punch, env_decay, "
+				"base_freq, freq_limit, freq_ramp, freq_dramp, vib_strength, "
+				"vib_speed, arp_mod, arp_speed, duty, duty_ramp, repeat_speed, "
+				"pha_offset, pha_ramp, lpf_freq, lpf_ramp, lpf_resonance, "
+				"hpf_freq, hpf_ramp, volume, trem_depth, trem_speed, crackle, "
+				"pluck, layers: [{at (s), wave, ...}] (15 at most)}: each 0...1 "
+				"(the ramps, arp_mod and pha_offset -1...1), clamped; those not "
+				"given take the designer's defaults. delete: true deletes sound "
+				"name (its whole name; not Kit's or a package's). The answer is "
+				"its name, version and compact form.",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string", "description": "Letters, digits and _"},
 				"sound": {"description": "\"blip1:...\" or a table"},
 				"delete": {"type": "boolean"}},
 				"required": ["name"]})J", ""},
 			// [KIT_CUSTOM_TYPES]
-			{"put_type", "type_put", "Puts a custom type of this game's, "
-				"local/<name> (any builder edits any; one undo), loaded at once, "
-				"Running or not; the game's, so not in a draft (leave_draft "
-				"first). Its error (syntax, load) is the answer and the "
-				"version before runs on. Taken, the entities on it keep their "
-				"params and state and run its new handlers; a movement's bodies "
-				"step with its new step. source: Lua 5.1 run in Kit's box (base, "
-				"string, table, math; no os, io, require, pcall or loadstring), "
-				"returning a table: version = n (raise it to migrate placed "
-				"ones: migrate(params, from)); about = {what, group = \"Logic\" "
-				"(or World, Building, Game, Players, Vehicles, Items, UI), inputs "
-				"= {name = \"what it does\"}, outputs = {...}}; params = {name = "
-				"{type = \"number\"|\"string\"|\"bool\"|\"voxel\"|\"entity\"|"
-				"\"position\", default, min, max, choices = {...}}}; state = {name "
-				"= {default, shared = true (sent to the clients), kept = true "
-				"(play never resets it: Play, Stop, rounds and restarts keep it, "
-				"only clear_kept clears it; a game's best times by c:name(by))}}; "
+			{"put_type", "type_put", "Puts a custom type of this game, "
+				"local/<name> (any builder may edit any; one undo), loaded at "
+				"once, Running or not; it is the game's, so not in a draft "
+				"(leave_draft first). On an error (syntax, load) the answer is "
+				"the error and the version before runs on. Once taken, the "
+				"entities of the type keep their params and state and run its "
+				"new handlers; a movement's bodies step with its new step. "
+				"source: Lua 5.1 run in Kit's box (base, string, table, math; no "
+				"os, io, require, pcall or loadstring), returning a table: "
+				"version = n (raise it to migrate placed ones: migrate(params, "
+				"from)); about = {what, group = \"Logic\" (or World, Building, "
+				"Game, Players, Vehicles, Items, UI), inputs = {name = \"what it "
+				"does\"}, outputs = {...}}; params = {name = {type = "
+				"\"number\"|\"string\"|\"bool\"|\"voxel\"|\"entity\"|\"position\", "
+				"default, min, max, choices = {...}}}; state = {name = {default, "
+				"shared = true (sent to the clients), kept = true (play never "
+				"resets it: Play, Stop, rounds and restarts keep it, only "
+				"clear_kept clears it; a game's best times by c:name(by))}}; "
 				"linked_in = true: c.linked_in = {input = {id...}}, the entities "
-				"linking to it, which it reaches (c:send); inputs = {name "
-				"= \"none\"|\"number\"|\"string\"|\"bool\"|\"entity\"|\"position\"|"
-				"\"any\"}, outputs likewise; usable = true (players use it: "
-				"on_use); look = {shape = \"box\"|\"sphere\", size = n or {x, y, z}, "
-				"color = \"#rrggbb\", solid = true, text = \"<shared state key>\"}; "
-				"zone = \"<a position param>\" (a box of cells from its place) "
-				"or \"look\" (the entity's own look as drawn and turned: a "
+				"linking to it, which it reaches (c:send); inputs = {name = "
+				"\"none\"|\"number\"|\"string\"|\"bool\"|\"entity\"|\"position\"|\"any\"}, "
+				"outputs likewise; usable = true (players use it: on_use); look "
+				"= {shape = \"box\"|\"sphere\", size = n or {x, y, z}, color = "
+				"\"#rrggbb\", solid = true, text = \"<shared state key>\"}; zone "
+				"= \"<a position param>\" (a box of cells from its place) or "
+				"\"look\" (the entity's own look as drawn and turned: a "
 				"kit/polygon's outline over its depth, a part's box; a spike "
 				"hazard: component = true, zone = \"look\" on the polygon), "
-				"on_enter(c, by) and on_leave(c, by) as a body meets it. "
-				"Handlers: on_start(c) (the round starts or it is placed "
+				"on_enter(c, by) and on_leave(c, by) as a body enters and leaves "
+				"it. Handlers: on_start(c) (the round starts or it is placed "
 				"Running), on_input(c, input, value, by), on_use(c, by), "
-				"on_timer(c, name), on_params(c, changed), on_remove(c). c: c.id, "
-				"c.pos, c.params, c.state (read and write), c:params_of(type) "
-				"(the params of the same entity's component of that type, a "
-				"copy read at use, so always current; nil: none; "
+				"on_timer(c, name), on_params(c, changed), on_remove(c). c: "
+				"c.id, c.pos, c.params, c.state (read and write), "
+				"c:params_of(type) (the params of the same entity's component of "
+				"that type, a copy read at use, so always current; nil: none; "
 				"c:params_of(\"kit/polygon\").points), c:emit(output, value), "
 				"c:after(seconds, name) (then on_timer), c:log(...) (get_log), "
 				"c:name(by), c:teleport({x, y, z}) (who set the run off). A "
-				"movement (a seat's: seat = true, usable = true; or kit/controls' "
-				"movement): movement = {body = {r = 0.45, h = 1.7, eye = 1.55}, "
-				"camera = \"chase\"} and step = function(s, i, dt, w, p): s its "
-				"state (s.pos {x, y, z} the feet, s.vel, kept between steps; "
-				"s.vars what a component's c:body_var(by, key, value) set on the "
-				"body: a number, boolean or short string, 16 keys, read only, the "
-				"server's on both sides: a step reacts to the run's state, as "
-				"a finish open), i "
-				"the input (i.f, i.r forward and right -1...1, i.jump 1 held, "
-				"i.yaw degrees, i.out_of_play true while out of play: dead "
-				"waiting, a kit/lobby's lobby or result), w the world (w:move({x, y, z, r, h}, dx, dy, dz, "
-				"step_up) -> mx, my, mz, hits; w.sin, w.cos, w.sqrt, w.PI), p its "
-				"params; it runs on the server and on each client (get_type "
-				"kit/ball). [KIT_PLANE] The side view's: w:circle(x, y, r) -> "
-				"{{depth, nx, ny, info}...}, w:segment(x0, y0, x1, y1) -> t, nx, "
-				"ny, info (info.surface, info.friction: a voxel's, a "
-				"kit/polygon's surface and friction params; \"spikes\" a step "
-				"reacts to itself). [KIT_TOP_DOWN] With kit/controls' plane "
-				"horizontal (w.horizontal; w.plane the y of the spawn's cell, the "
-				"feet held at w.plane - 0.5, no speed up) their x, y are the "
-				"world's x and z, nx, ny the normal's x and z; a kit/polygon "
-				"lying flat (pitch 90) is walls there, w:under(x, y, z) -> info "
-				"a floor polygon's (floor on, collision off) over its area. "
-				"[KIT_TOP_DOWN] (8) movement.bodies = true there: w:circle meets "
-				"the other players' bodies in the scene (in play, not seated) as "
-				"circles of their body's r, info.body their by, info.vel {vx, vz}; "
-				"the step pushes its own body out (the server's place is the "
-				"answer, a client predicting against the others' last known "
-				"places); none without it. "
-				"Its file's math is w's on both sides (floor, ceil, "
-				"sqrt, abs, fmod, min, max, sin, cos, atan, atan2; no random). "
-				"s.events = {\"name\" | {\"name\", value}...} set in a step: "
-				"outputs of its component on the app root (declare them), as by "
-				"the player; s.pose = {n...} (8): what the other clients draw by. "
-				"s.spheres = {{x, y, z, r}...} (8; from s.pos along the world's "
-				"axes, within 16, r 0.01 to 8): the body's shape the zones meet "
-				"(a bike's wheels and head; get_state's and play_input's "
-				"shape); none: movement.zone = \"box\" its body box (kit/walker's), "
-				"else its point. "
-				"A step past 200000 Lua instructions is too slow: a put whose "
-				"step is is refused (the version before runs on), in play the "
-				"body stops. movement.raw_keys = true: the side camera's keys "
-				"as they are (f, r); touch = \"drive\" (Gas, Brake, the stick's "
-				"r), touch_buttons = {{\"Turn\", \"jump\"}} (above Brake; a "
-				"third \"low\": under Gas), touch_axes = "
+				"movement (a seat's: seat = true, usable = true; or "
+				"kit/controls' movement): movement = {body = {r = 0.45, h = 1.7, "
+				"eye = 1.55}, camera = \"chase\"} and step = function(s, i, dt, "
+				"w, p): s its state (s.pos {x, y, z} the feet, s.vel, kept "
+				"between steps; s.vars what a component's c:body_var(by, key, "
+				"value) set on the body: a number, boolean or short string, 16 "
+				"keys, read only, the server's on both sides: a step reacts to "
+				"the run's state, such as an open finish), i the input (i.f, i.r "
+				"forward and right -1...1, i.jump 1 when held, i.yaw degrees, "
+				"i.out_of_play true while out of play: dead waiting, a "
+				"kit/lobby's lobby or result), w the world (w:move({x, y, z, r, "
+				"h}, dx, dy, dz, step_up) -> mx, my, mz, hits; w.sin, w.cos, "
+				"w.sqrt, w.PI), p its params; it runs on the server and on each "
+				"client (get_type kit/ball). [KIT_PLANE] The side view's: "
+				"w:circle(x, y, r) -> {{depth, nx, ny, info}...}, w:segment(x0, "
+				"y0, x1, y1) -> t, nx, ny, info (info.surface, info.friction: a "
+				"voxel's, a kit/polygon's surface and friction params; "
+				"\"spikes\" a step reacts to itself). [KIT_TOP_DOWN] With "
+				"kit/controls' plane horizontal (w.horizontal; w.plane the y of "
+				"the spawn's cell, the feet held at w.plane - 0.5, no speed up) "
+				"their x, y are the world's x and z, nx, ny the normal's x and "
+				"z; a kit/polygon lying flat (pitch 90) is walls there, "
+				"w:under(x, y, z) -> info a floor polygon's (floor on, collision "
+				"off) over its area. [KIT_TOP_DOWN] (8) movement.bodies = true "
+				"there: w:circle meets the other players' bodies in the scene "
+				"(in play, not seated) as circles of their body's r, info.body "
+				"their by, info.vel {vx, vz}; the step pushes its own body out "
+				"(the server's place is the answer, a client predicting against "
+				"the others' last known places); none without it. Its file's "
+				"math is w's on both sides (floor, ceil, sqrt, abs, fmod, min, "
+				"max, sin, cos, atan, atan2; no random). s.events = {\"name\" | "
+				"{\"name\", value}...} set in a step: outputs of its component "
+				"on the app root (declare them), as by the player; s.pose = "
+				"{n...} (8): what the other clients draw by. s.spheres = {{x, y, "
+				"z, r}...} (8; from s.pos along the world's axes, within 16, r "
+				"0.01 to 8): the body's shape the zones meet (a bike's wheels "
+				"and head; get_state's and play_input's shape); none: "
+				"movement.zone = \"box\" its body box (kit/walker's), else its "
+				"point. A step of more than 200000 Lua instructions is too slow: "
+				"a put with such a step is refused (the version before runs on); "
+				"in play, the body stops. movement.raw_keys = true: the side "
+				"camera's keys as they are (f, r); touch = \"drive\" (Gas, "
+				"Brake, the stick's r), touch_buttons = {{\"Turn\", \"jump\"}} "
+				"(above Brake; a third \"low\": under Gas), touch_axes = "
 				"{{\"Left\", \"r\", -1}, {\"Right\", \"r\", 1}} (a stack at the "
 				"lower left, each holding f or r at that value); help = "
-				"{{\"[forward]/[back]\", \"gas, brake\", \"f\"}...} and touch_help "
-				"alike: the help line in play (keys, what, the input f, r, jump "
-				"or down), each item gone once its input is used. client: an optional "
-				"client part the clients run "
-				"(sandboxed): a table of on_add(e), on_state(e, key), "
-				"on_update(e, dt), on_remove(e), on_enter(e) and on_leave(e) "
-				"(this client's own predicted body in its zone, tested on the "
-				"client in the server's shapes, before the server's on_enter: "
-				"e:predict(\"taken\", true, 1) a gem gone at once); e.state, e.node, e:log(text); "
-				"require(\"buildat/module/kit\").shared one table every client "
-				"part on that client shares (keys: your type's name); no "
-				"node:GetScene(), no globals set in a handler; one that errs is "
-				"off for that entity on that client, its first failure in "
-				"get_log (get_guide: all a client part reaches); "
-				"a movement's draw(s, node, yaw) draws each player's body (node at "
-				"its feet, s its state; another's {pos, pose}; yaw the own "
-				"body's as drawn between its steps, degrees; scenery is "
+				"{{\"[forward]/[back]\", \"gas, brake\", \"f\"}...} and "
+				"touch_help alike: the help line in play (keys, what, the input "
+				"f, r, jump or down), each item gone once its input is used. "
+				"client: an optional client part the clients run (sandboxed): a "
+				"table of on_add(e), on_state(e, key), on_update(e, dt), "
+				"on_remove(e), on_enter(e) and on_leave(e) (this client's own "
+				"predicted body in its zone, tested on the client in the "
+				"server's shapes, before the server's on_enter: "
+				"e:predict(\"taken\", true, 1) a gem gone at once); e.state, "
+				"e.node, e:log(text); require(\"buildat/module/kit\").shared one "
+				"table every client part on that client shares (keys: your "
+				"type's name); no node:GetScene(), no globals set in a handler; "
+				"a handler that errs is off for that entity on that client, its "
+				"first failure in get_log (get_guide: all a client part "
+				"reaches); a movement's draw(s, node, yaw) draws each player's "
+				"body (node at its feet, s its state; another's {pos, pose}; yaw "
+				"the own body's as drawn between its steps, degrees; scenery is "
 				"kit/parallax's, not a client part's; kit.shake(a), "
 				"kit.effect{at, ...} and kit.mark(x, y, z, yaw, size, color) "
-				"from any of them: get_guide); left out, the "
-				"type's client part stays as it is, \"\" takes it away. A few "
-				"lines changed: edit_type.",
+				"from any of them: get_guide); with client left out, the type's "
+				"client part stays as it is; \"\" takes it away. A few lines "
+				"changed: edit_type.",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string", "description":
 					"local/<name> or <name>: letters, digits and _"},
@@ -33591,16 +33602,16 @@ struct Module: public interface::Module, public Interface
 			// [KIT_AGENT_FEEDBACK_1117] 1 (type_edits())
 			{"edit_type", "type_edit", "Changes a custom type in place: each "
 				"of edits replaces its find with its replace, in order, in the "
-				"type's source or (client: true) its client part; each find "
-				"must be there exactly once at its turn, else nothing is "
-				"changed and the answer names the edit. Then put as put_type "
+				"type's source or (client: true) its client part; each find must "
+				"be there exactly once at its turn, else nothing is changed and "
+				"the answer names the edit. Then the type is put as put_type "
 				"puts it (its checks, loaded at once, one undo; not in a draft). "
 				"get_type reads the files.",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string", "description": "local/<name> or <name>"},
 				"edits": {"type": "array", "minItems": 1, "maxItems": 32, "items": {
 					"type": "object", "properties": {
-					"find": {"type": "string", "description": "Text there once"},
+					"find": {"type": "string", "description": "Text found there exactly once"},
 					"replace": {"type": "string"},
 					"client": {"type": "boolean", "description":
 						"In its client part (the source unless given)"}},
@@ -33613,7 +33624,7 @@ struct Module: public interface::Module, public Interface
 				"required": ["name"]})J", ""},
 			{"new_scene", "new_scene", "Makes a scene (letters, digits and _) "
 				"and takes your edits there; copy: true copies your scene's "
-				"World into it (none: it is empty, no ground). parent: the scene "
+				"World into it (without it: empty, no ground). parent: the scene "
 				"it goes under (none: the root). Not in a draft: scenes are the "
 				"game's.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"},
@@ -33623,10 +33634,10 @@ struct Module: public interface::Module, public Interface
 			{"delete_scene", "remove_scene", "Removes scene name, all its "
 				"entities and the links to them, one undo (its World's voxels "
 				"stay), as the editor's Remove scene does. Refused for the "
-				"game's first scene, one with scenes under it, one with a "
-				"player on it (unlist it: they leave as they finish) and in a "
-				"draft (scenes are the game's). Your edits there go to the "
-				"game's first scene.",
+				"game's first scene, one with scenes under it, one with a player "
+				"in it (unlist it: they leave as they finish) and in a draft "
+				"(scenes are the game's). Your edits there go to the game's "
+				"first scene.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"}},
 				"required": ["name"]})J", ""},
 			{"switch_scene", "scene", "Takes your edits to another scene "
@@ -33642,10 +33653,10 @@ struct Module: public interface::Module, public Interface
 				"link, unlink, delete, move, rename, set_comments, "
 				"add_component, remove_component, set_parent, duplicate, "
 				"set_voxels, edit_voxels, edit_terrain. Every op is checked "
-				"before any runs (its tool, its required args); one refused "
-				"while they run takes back those before it, nothing changed. An "
-				"arg {\"id_of\": k} is the id op k (from 0) made. The answer is "
-				"each op's answer.",
+				"before any runs (its tool, its required args); if one is "
+				"refused while they run, those before it are taken back and "
+				"nothing is changed. An arg {\"id_of\": k} is the id op k (from "
+				"0) made. The answer is each op's answer.",
 				R"J({"type": "object", "properties": {
 				"ops": {"type": "array", "maxItems": 64, "items": {"type": "object",
 					"properties": {"tool": {"type": "string"},
@@ -33658,15 +33669,15 @@ struct Module: public interface::Module, public Interface
 				"as it is. Your edits, start and stop (in a draft: its round "
 				"from its start again), get_view (the server's camera follows), "
 				"get_state (its session says where you are) and playtest go "
-				"there; what is the game's (custom types, scenes, voxel types, "
-				"items, sounds, the World, the app root's environment) is "
-				"refused there; a scene's own kit/environment is the draft's "
-				"(place puts one there). publish puts what you changed "
-				"into the game's start; "
-				"leave_draft drops it. It ends on leave_draft or after 5 minutes "
-				"without a call of yours, never for want of a connection; 8 "
-				"sessions a server at most, drafts and rounds together. Your "
-				"builder's Draft button takes them into it to see it.",
+				"there; edits to what is the game's (custom types, scenes, voxel "
+				"types, items, sounds, the World, the app root's environment) "
+				"are refused there; a scene's own kit/environment is the draft's "
+				"(place puts one there). publish puts what you changed into the "
+				"game's start; leave_draft drops it. It ends on leave_draft or "
+				"after 5 minutes without a call of yours, never for lack of a "
+				"connection; 8 sessions a server at most, drafts and rounds "
+				"together. Your builder's Draft button takes them into it to see "
+				"it.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"publish", "publish", "In your draft: writes it over the game's "
 				"start, as the editor's Publish does: the entities you changed "
@@ -33676,19 +33687,19 @@ struct Module: public interface::Module, public Interface
 				"editor's Publish asks about) unless anyway: true.",
 				R"J({"type": "object", "properties": {"anyway": {"type": "boolean",
 				"description": "Publish with goal warnings"}}})J", ""},
-			{"leave_draft", "leave_draft", "Back to the main round: your draft "
-				"ends, what publish did not take gone with it (a builder in it "
-				"goes back too).",
+			{"leave_draft", "leave_draft", "Goes back to the main round: your "
+				"draft ends, and what publish did not take goes with it (a "
+				"builder in it goes back too).",
 				R"J({"type": "object", "properties": {}})J", ""},
-			{"checkpoint", "checkpoint", "Keeps the game's start (what stop "
-				"shows: the main round's, from a draft too) as checkpoint name, "
-				"in the game's save: the composition (entities, components, "
-				"params, links, comments), each component's start state and "
-				"each World's edited voxels, heightmap samples and placed "
-				"decorations, as a save and an export hold them. The "
-				"same name again replaces it; delete: true deletes it. At most "
-				"16 checkpoints and 32 MiB a game (list_checkpoints): past "
-				"either it is refused, delete one first.",
+			{"checkpoint", "checkpoint", "Saves the game's start (what stop "
+				"goes back to: the main round's, from a draft too) as checkpoint "
+				"name, in the game's save: the composition (entities, "
+				"components, params, links, comments), each component's start "
+				"state and each World's edited voxels, heightmap samples and "
+				"placed decorations, as a save and an export hold them. The same "
+				"name again replaces it; delete: true deletes it. At most 16 "
+				"checkpoints and 32 MiB a game (list_checkpoints): past either, "
+				"it is refused: delete one first.",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string", "description": "1 to 64 bytes"},
 				"delete": {"type": "boolean"}}, "required": ["name"]})J", ""},
@@ -33698,15 +33709,15 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"restore_checkpoint", "restore", "Puts checkpoint name back as "
 				"the game's start: the composition (one edit, which undo takes "
-				"back; the voxels it does not), the start states and the edited "
+				"back, though not the voxels), the start states and the edited "
 				"voxels (each section edited now or then generated again, its "
 				"cells over it), a heightmap's edited samples and placed "
 				"decorations (the map generated again under them where they "
-				"differ). In the main round and Stopped only: from a "
-				"draft it is refused (the draft is a copy and stays as it is: "
-				"leave_draft first), Running too (stop first). The start as it "
-				"was is kept first as the checkpoint \"before restore <name>\" "
-				"(one so named replaced); refused if that passes the caps.",
+				"differ). Only in the main round and Stopped: it is refused from "
+				"a draft (the draft is a copy and stays as it is: leave_draft "
+				"first) and while Running (stop first). The start as it was is "
+				"kept first as the checkpoint \"before restore <name>\" "
+				"(replacing one so named); refused if that passes the caps.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"}},
 				"required": ["name"]})J", ""},
 			{"diff", "=diff", "What changed. In a draft: the draft against the "
@@ -33720,17 +33731,17 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {"checkpoint": {"type": "string",
 				"description": "None: the draft against the start"}}})J", ""},
 			// [KIT_AGENT_NEXT_1] 3b (playtest_start())
-			{"playtest", "playtest", "Runs bots in your draft for seconds "
-				"(the game's: real time on most servers), from its start again, "
-				"then puts it back at its "
-				"start (as stop: what play made gone; the voxels play wrote "
-				"stay). The bots are the kit/bot prefab's (a walker doing the "
-				"goals a player would, kit/goal's, one at a time), joining as "
-				"players do (a kit/spawner of players puts them, spread round "
-				"it). Outside a draft it is refused, unless main: true and the "
-				"main round is Stopped (it is started for the playtest, every "
-				"player in it, and stopped after). One playtest at a time on a "
-				"server. Answers at once: playtest_report reads the report.",
+			{"playtest", "playtest", "Runs bots in your draft for seconds (the "
+				"game's: real time on most servers), from its start again, then "
+				"puts it back at its start (as stop: what play made gone; the "
+				"voxels play wrote stay). The bots are the kit/bot prefab's (a "
+				"walker that does the kit/goals a player would, one at a time) "
+				"and join as players do (a kit/spawner of players places them, "
+				"spread around it). Outside a draft it is refused, unless main: "
+				"true and the main round is Stopped (it is started for the "
+				"playtest, every player in it, and stopped after). One playtest "
+				"at a time on a server. Answers at once: playtest_report reads "
+				"the report.",
 				R"J({"type": "object", "properties": {
 				"bots": {"type": "integer", "description": "1 to 8, 2 unless given"},
 				"seconds": {"type": "integer", "description": "5 to 120, 30 unless given"},
@@ -33748,9 +33759,10 @@ struct Module: public interface::Module, public Interface
 				"live, with the players in it. Edits go on while it runs. In "
 				"your draft (which always runs): its round from its start again.",
 				R"J({"type": "object", "properties": {}})J", ""},
-			{"stop", "stop", "Ends the round (Stop): the world back at its "
-				"start, what play made gone. In your draft: its round from its "
-				"start again (your edits kept, the voxels play wrote too).",
+			{"stop", "stop", "Ends the round (Stop): the world goes back to "
+				"its start, and what play made is gone. In your draft: its round "
+				"from its start again (your edits kept, the voxels play wrote "
+				"too).",
 				R"J({"type": "object", "properties": {}})J", ""},
 			{"try_input", "try", "Running: sends value to entity id's input "
 				"as a link would; what its runs emit comes in get_events. as: who "
@@ -33761,7 +33773,7 @@ struct Module: public interface::Module, public Interface
 				"crashed\").",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
 				"input": {"type": "string"}, "value": {"description":
-					"As the input's type is; none for a none"},
+					"As the input's type is; none for a \"none\" input"},
 				"as": {"type": "string", "description":
 					"\"nobody\" (unless given), \"me\" or a player's name"}},
 				"required": ["id", "input"]})J", R"J({"as": "nobody"})J"},
@@ -33769,48 +33781,47 @@ struct Module: public interface::Module, public Interface
 				"time; 0 stops): what they emit comes in get_events.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"}},
 				"required": ["id"]})J", ""},
-			{"clear_kept", "clear_kept", "Puts the kept state (a type's state "
-				"with kept = true: what play never resets, a game's best "
-				"times) of entity id's component comp back at its defaults. "
-				"One undo.",
+			{"clear_kept", "clear_kept", "Resets the kept state (a type's "
+				"state with kept = true: what play never resets, a game's best "
+				"times) of entity id's component comp to its defaults. One undo.",
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
 				"comp": {"type": "integer", "description": "From 0"}},
 				"required": ["id"]})J", R"J({"comp": 0})J"},
-			{"keep", "keep", "Stopped: puts the builds the last Stop discarded "
-				"(what players built and made in play) into the start, all or "
-				"those of names.",
+			{"keep", "keep", "When Stopped: puts the builds the last Stop "
+				"discarded (what players built and made in play) into the start: "
+				"all of them, or those named in names.",
 				R"J({"type": "object", "properties": {"names": {"type": "array",
 				"items": {"type": "string"}}}})J", ""},
-			{"set_builder", "builder", "Grants (on: true) or takes an "
-				"account's edit rights. The Host's only: an admin token's.",
+			{"set_builder", "builder", "Grants (on: true) or removes an "
+				"account's edit rights. The Host's only: needs an admin token.",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string", "description": "The account"},
 				"on": {"type": "boolean"}}, "required": ["name", "on"]})J", "",
 				"admin"},
 			// [KIT_PROJECT_EXPORT]
-			{"export_template", "=export", "The game's start (what stop "
-				"goes back to) as a Workbench template, the files the editor's "
-				"Export this game zips: {game (its name), files: {path: text}, "
-				"base64: {path: its bytes}}. meta.json, LICENSE (all rights "
-				"reserved), composition.json, types/<name>.lua and .client.lua, "
-				"items.json, sounds.json, voxels.json, prefabs.json, "
-				"weaves.json; textures/<hash>.png and edits.bin (the World's hand-edited "
-				"voxels and heightmap, zlib) in base64. Zipped, New's Start "
-				"from: From a file... takes them; as a directory, the repo's "
-				"templates/.",
+			{"export_template", "=export", "The game's start (what stop goes "
+				"back to) as a Workbench template, the files the editor's Export "
+				"this game zips: {game (its name), files: {path: text}, base64: "
+				"{path: its bytes}}. meta.json, LICENSE (all rights reserved), "
+				"composition.json, types/<name>.lua and .client.lua, items.json, "
+				"sounds.json, voxels.json, prefabs.json, weaves.json; "
+				"textures/<hash>.png and edits.bin (the World's hand-edited "
+				"voxels and heightmap, zlib) in base64. Zipped, they are what "
+				"New's Start from: From a file... takes; as a directory, what "
+				"the repo's templates/ holds.",
 				R"J({"type": "object", "properties": {}})J", ""},
 			// [KIT_SCENE_PACKAGES]
 			{"export_scene", "=export_scene", "One scene of the game's start "
 				"as a scene package, the files the editor's Export this scene "
-				"zips, as export_template gives them: meta.json (kind scene, "
-				"its game), LICENSE, composition.json (the scene entity and "
-				"those under it, the scenes under it among them; the rules it "
-				"has from above on an entity \"Rules from above\"; \"outside\": "
-				"the entities outside it its links "
-				"and entity parameters name, by name), the custom types, rows "
-				"and textures it uses, edits.bin (each scene's World's). The "
-				"Scenes window's Import a scene... takes the zip into another "
-				"game, import_scene these files.",
+				"zips, as export_template gives them: meta.json (kind scene, its "
+				"game), LICENSE, composition.json (the scene entity and those "
+				"under it, the scenes under it among them; the rules it has from "
+				"above on an entity \"Rules from above\"; \"outside\": by name, "
+				"the entities outside it that its links and entity parameters "
+				"name), the custom types, rows and textures it uses, edits.bin "
+				"(each scene's World's). The Scenes window's Import a scene... "
+				"takes the zip into another game; import_scene takes these "
+				"files.",
 				R"J({"type": "object", "properties": {"scene": {"type": "string",
 				"description": "Its name; none: the scene the agent is in"}}})J",
 				""},
@@ -33819,42 +33830,43 @@ struct Module: public interface::Module, public Interface
 				"scene, as the Scenes window's Import a scene... adds a file: "
 				"export_scene's files and base64 (of this game or another), "
 				"checked as a file is (its files, sizes, meta.json's kind and "
-				"version). Its name the next free one (track, track_2...), its "
-				"entities new ids; a link or entity parameter onto an entity "
-				"outside it goes to this game's entity of that name, none: left "
-				"out (dropped); its custom types and rows this game has are kept "
-				"as this game's (kept). Running: added unlisted. Answers {what, "
-				"scene, dropped, kept}.",
+				"version). It gets the next free name (track, track_2...) and "
+				"its entities new ids; a link or entity parameter onto an entity "
+				"outside it goes to this game's entity of that name, or is left "
+				"out if there is none (dropped); its custom types and rows that "
+				"this game already has stay as this game's (kept). While "
+				"Running, it is added unlisted. Answers {what, scene, dropped, "
+				"kept}.",
 				R"J({"type": "object", "properties": {
 				"files": {"type": "object", "description": "export_scene's files: {path: text}"},
 				"base64": {"type": "object", "description": "export_scene's base64: {path: bytes}"},
 				"parent": {"type": "string", "description": "The scene it goes under; none: the root"}},
 				"required": ["files"]})J", ""},
-			{"list_games", "=projects", "The app's games (its saves): "
-				"each one's name, bytes on disk and whether it runs. An admin "
-				"token's, as the Games page is an admin's.",
+			{"list_games", "=projects", "The app's games (its saves): each "
+				"one's name, bytes on disk and whether it runs. Needs an admin "
+				"token, as the Games page is an admin's.",
 				R"J({"type": "object", "properties": {}})J", "", "admin"},
-			{"copy_game", "=copy_project", "Copies game name as a new "
-				"game to: all of it, as saved now (a running one's round and "
-				"kept state too). An admin token's.",
+			{"copy_game", "=copy_project", "Copies game name as a new game, "
+				"to: all of it, as saved now (a running one's round and kept "
+				"state too). Needs an admin token.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"},
 				"to": {"type": "string"}}, "required": ["name", "to"]})J", "",
 				"admin"},
-			{"rename_game", "=rename_project", "Renames game name to "
-				"to; not the running one. An admin token's.",
+			{"rename_game", "=rename_project", "Renames game name to to; not "
+				"the running one. Needs an admin token.",
 				R"J({"type": "object", "properties": {"name": {"type": "string"},
 				"to": {"type": "string"}}, "required": ["name", "to"]})J", "",
 				"admin"},
 			// [KIT_SERVER_PUBLISH]
-			{"publish_game", "server_publish", "Publishes the game's start "
-				"as a template on an Aitta the server lists, as the server: its "
+			{"publish_game", "server_publish", "Publishes the game's start as "
+				"a template on an Aitta the server lists, as the server: its "
 				"author name and key, published_by your account (shown in the "
 				"release), the LICENSE naming you. Needs the right to publish as "
 				"the server (the Host's to give; an admin has it). Answers when "
-				"the Aitta took it.",
+				"the Aitta has taken it.",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string", "description": "The package's name: a-z, 0-9 and _"},
-				"version": {"type": "string", "description": "SemVer; none: the next of the last published"},
+				"version": {"type": "string", "description": "SemVer; none: the one after the last published"},
 				"license": {"type": "string", "enum": ["CC0-1.0", "CC-BY-4.0",
 				"CC-BY-SA-4.0", "MIT", "LicenseRef-All-rights-reserved"]},
 				"description": {"type": "string", "description": "300 characters at most"},
@@ -33875,9 +33887,10 @@ struct Module: public interface::Module, public Interface
 				"required": ["name", "license", "aitta"]})J", R"J({"what": "scene"})J",
 				"publisher"},
 			{"publish_kit_package", "server_publish", "Publishes your prefabs, "
-				"voxel, item types and sounds (Publish my prefabs...'s) as a Kit "
-				"package on an Aitta the server lists, as the server, its names "
-				"made the server's author's, as publish_game does.",
+				"voxel types, item types and sounds (as Publish my prefabs... "
+				"does) as a Kit package on an Aitta the server lists, as the "
+				"server, its names changed to the server author's, as "
+				"publish_game does.",
 				R"J({"type": "object", "properties": {
 				"name": {"type": "string"}, "version": {"type": "string"},
 				"license": {"type": "string", "enum": ["CC0-1.0", "CC-BY-4.0",
@@ -33886,20 +33899,20 @@ struct Module: public interface::Module, public Interface
 				"required": ["name", "license", "aitta"]})J", R"J({"what": "prefabs"})J",
 				"publisher"},
 			{"list_aitta", "aitta_list", "The packages of a kind on the Aittas "
-				"the server lists (the Host's list; none else), the newest "
+				"the server lists (the Host's list; no others), the newest "
 				"release of each: [{aitta, key, author, name, version, title, "
 				"description, game, sha256, review, buildat_version}]. game "
 				"(\"<author>/<name>\", get_state's): only those made for it.",
 				R"J({"type": "object", "properties": {
 				"kind": {"type": "string", "enum": ["scene", "kit", "template"]},
 				"game": {"type": "string"}}, "required": ["kind"]})J", ""},
-			{"install_from_aitta", "aitta_install", "Fetches a package list_aitta "
-				"lists, by its key and Aitta, the server checking its signature "
-				"and asking its Aitta whose key it is: a scene is added to the "
-				"game as a new scene (unlisted while Running) with the scenes "
-				"under it, under parent (none: the root), a Kit package "
-				"(and those it depends on) installed into it; a template (an "
-				"admin token's) goes into New's Start from.",
+			{"install_from_aitta", "aitta_install", "Fetches a package that "
+				"list_aitta lists, by its key and Aitta; the server checks its "
+				"signature and asks its Aitta whose key it is. A scene is added "
+				"to the game as a new scene (unlisted while Running) with the "
+				"scenes under it, under parent (none: the root), a Kit package "
+				"(and those it depends on) is installed into it; a template "
+				"(needs an admin token) goes into New's Start from.",
 				R"J({"type": "object", "properties": {
 				"kind": {"type": "string", "enum": ["scene", "kit", "template"]},
 				"key": {"type": "string", "description": "list_aitta's key, <fp>/<name>"},
@@ -33908,8 +33921,9 @@ struct Module: public interface::Module, public Interface
 				"required": ["kind", "key", "aitta"]})J",
 				""},
 			{"publish_log", "=publish_log", "What was published as the server: "
-				"[{time, builder: {account, starport_id}, package, kind, version, "
-				"sha256, aitta}], the oldest first. An admin token's.",
+				"[{time, builder: {account, starport_id}, package, kind, "
+				"version, sha256, aitta}], the oldest first. Needs an admin "
+				"token.",
 				R"J({"type": "object", "properties": {}})J", "", "admin"},
 		};
 		return t;
@@ -33962,7 +33976,7 @@ struct Module: public interface::Module, public Interface
 		interface::split_host_port(r.address, &host, &port, "0");
 		const ss_ bin = network::address_bin(host);
 		if(!m_agent_rates.ok("mcp_fail", bin, AGENT_FAILS, 60, false))
-			return error(429, json::null(), -32000, "Too many refused tries "
+			return error(429, json::null(), -32000, "Too many refused requests "
 					"from your network: wait a minute");
 		const ss_ auth = r.header("authorization");
 		ss_ token;
@@ -34022,8 +34036,8 @@ struct Module: public interface::Module, public Interface
 		if(j.is_undefined())
 			return error(400, json::null(), -32700, "Not JSON");
 		if(!j.is_object() || jstr(j, "jsonrpc") != "2.0")
-			return error(400, json::null(), -32600, "One JSON-RPC 2.0 message, "
-					"an object (no batches)");
+			return error(400, json::null(), -32600, "Expected one JSON-RPC 2.0 "
+					"message, an object (no batches)");
 		const json::Value &id = j.get("id");
 		// A notification (notifications/initialized) or a response: taken
 		if(id.is_undefined() || !j.get("method").is_string())
@@ -34348,9 +34362,9 @@ struct Module: public interface::Module, public Interface
 				return "Refused: a playtest runs in your draft (playtest_report)";
 			}
 			draft_again();
-			return "Your draft's round from its start again (a draft always "
-					"runs): what play made gone, each component at its start, "
-					"your edits kept";
+			return "Your draft's round runs from its start again (a draft always "
+					"runs): what play made is gone, each component is at its "
+					"start, and your edits are kept";
 		}
 		// [KIT_CUSTOM_TYPES] outside kit:edit (its 4096 bytes)
 		if(op == "type_put" || op == "type_delete" || op == "type_edit"){
@@ -35009,7 +35023,7 @@ struct Module: public interface::Module, public Interface
 				"cleared its marker" : "shows a marker", n, cs(p.account));
 		return ss_(clear ? "Cleared" : "Shown")+" in "+itos(n)+" client(s) of "+
 				p.account+"'s"+(n ? ss_() : " (none connected: the builders' "
-				"editors show your cursor and selection still)");
+				"editors still show your cursor and selection)");
 	}
 
 	// "kit:agent_show" m to an account's clients (not its agents', not the
@@ -35142,7 +35156,7 @@ struct Module: public interface::Module, public Interface
 			} else if(k == "seed"){
 				if(!(x.is_number() && x.as_number() == std::floor(x.as_number()) &&
 						x.as_number() >= 0 && x.as_number() <= 16777215))
-					why = "seed: a whole 0...16777215";
+					why = "seed: a whole number 0...16777215";
 				else
 					seed = (int64_t)x.as_number();
 			} else if(k == "at" && layer){
@@ -35615,7 +35629,7 @@ struct Module: public interface::Module, public Interface
 			px += json::jint(v, "w") * json::jint(v, "h");
 		if(px > VIEW_CALL_PIXELS)
 			return itos(views.size())+" pictures of "+itos(px)+" pixels: "+
-					itos(VIEW_CALL_PIXELS)+" at most a call (smaller width and "
+					itos(VIEW_CALL_PIXELS)+" at most per call (smaller width and "
 					"height, or fewer)";
 		// The account's clients: what accounts says, so not an agent's peer
 		// (none of its), a bot nor the server's camera; in the agent's
@@ -36455,7 +36469,7 @@ struct Module: public interface::Module, public Interface
 				return "press: the list "+itos(id)+"'s row: 1 to "+
 						itos(rows.size())+" (row, or its title as press)";
 			if(!rows.is_array() && row)
-				return "press: "+itos(id)+" is no list (no row)";
+				return "press: "+itos(id)+" is not a list (no row)";
 		}
 		if(action == "pause_menu")
 			return "press: "+itos(id)+" opens the pause menu (Escape's): "
@@ -36464,7 +36478,7 @@ struct Module: public interface::Module, public Interface
 			return "press: "+itos(id)+" mutes a player's own client "
 					"([KIT_MUTE_BUTTON]): nothing of the game's to press";
 		if(!action.empty() && !m_action_names.count(action))
-			return "press: "+itos(id)+"'s action "+action+" is no action of the "
+			return "press: "+itos(id)+"'s action "+action+" is not an action of the "
 					"game";
 		return "";
 	}
@@ -36514,7 +36528,7 @@ struct Module: public interface::Module, public Interface
 			if(m_cam.play == account){
 				const json::Value b = play_body();
 				if(jstr(b, "scene") == p.scene && session_of_peer(cam) == sid)
-					return "You play already: "+b.stringify();
+					return "You play a body already: "+b.stringify();
 				moved = jstr(b, "scene");
 				play_end("play_join into the scene "+p.scene);
 			}
@@ -37164,7 +37178,7 @@ struct Module: public interface::Module, public Interface
 				return agent_music();
 			if(!topic.empty()){
 				failed = true;
-				return "topic: \"visuals\", \"music\" or none (the guide)";
+				return "topic: \"visuals\", \"music\" or none (the main guide)";
 			}
 			return agent_guide(p.name, true);
 		}
@@ -39331,11 +39345,11 @@ struct Module: public interface::Module, public Interface
 			"for everyone from the round's start), mood (a mood's name, \"\" "
 			"every track), priority. Placed on a scene (no position) it is "
 			"that scene's, on the app's root every scene's; each player "
-			"hears the one on for them with the highest priority (then a "
+			"hears the one playing for them with the highest priority (then a "
 			"scene's over the root's, then the lowest id). Its inputs: play, "
 			"stop (with a player, theirs alone, else everyone's) and mood "
 			"(value: a mood name, from the next bar, faded over a beat). It "
-			"runs from when it went on, on the round's clock, so all hear "
+			"plays from when it was turned on, on the round's clock, so all hear "
 			"the same bar; the round's end stops it; a scene change keeps it "
 			"if it is still the one. With a kit/lobby the music follows each "
 			"player's runs by links: the lobby's song (autoplay) played by its "
@@ -39350,8 +39364,8 @@ struct Module: public interface::Module, public Interface
 			"sounds), peaks under the ceiling, no track much louder than the "
 			"rest; a loop join step near the median step.\n\n"
 			"## The format (jam1)\n"
-			"Lines; an unknown line, parameter or value out of its range is an "
-			"error with its line number. # at a line's start or after a space "
+			"One statement a line; an unknown line or parameter, or a value out "
+			"of its range, is an error with its line number. # at a line's start or after a space "
 			"starts a comment (C#3 is a note). Order: settings, instruments, "
 			"tracks, then patterns, sections, play, loop, moods.\n"
 			"  title Scrap Heat\n"
@@ -39424,8 +39438,8 @@ struct Module: public interface::Module, public Interface
 	ss_ agent_visuals()
 	{
 		return ss_("How a game looks in Workbench (Kit's types decide it; "
-			"get_type kit/<type> reads a type's file, whose comments are the "
-			"facts, and list_types with type its params' ranges and choices: "
+			"get_type kit/<type> reads a type's file, whose comments state the "
+			"facts, and list_types with type gives its params' ranges and choices: "
 			"read those, never guess a name or a range).\n\n"
 			"## What you can see\n"
 			"- get_state: the entities, their params and comments, the round, "
@@ -39437,25 +39451,25 @@ struct Module: public interface::Module, public Interface
 			"- get_view: a picture of the scene as a player's camera draws "
 			"it: your builder's client's, else the server's camera's (a "
 			"client of the server's own; its first call may say it is "
-			"starting). views takes several poses at once; preset map (top "
-			"down), turn (round an entity) and frame (on an entity); compare "
+			"starting). views takes several poses at once; the presets are map "
+			"(top down), turn (around an entity) and frame (on an entity); compare "
 			"puts each pose's last picture before the new one. Look before "
 			"and after a change of the look.\n" :
 			"- No pixels: no tool here shows you the screen. The sky, the "
 			"light, colours as drawn, fog, particles and what a player sees "
 			"are not visible to you.\n")+
 			"\n## Rules for a look's change\n"
-			"- What you have not seen, say so: tell the builder what you set "
+			"- Say what you have not seen: tell the builder what you set "
 			"(type, params, values) and ask them to look. Never claim a look "
 			"improved or matches a picture unless you saw it.\n"
 			"- Before a big change: draft, and make it there (publish takes it "
 			"into the game, leave_draft drops it), or checkpoint the start "
 			"(restore_checkpoint puts it back; diff says what changed since); "
 			"export_scene's files are a copy outside the game. Undo takes back "
-			"only your last 50 edits, yours only.\n"
+			"only your own last 50 edits.\n"
 			"- One change at a time, read back with get_state, then the next.\n"
 			"- Ask the builder before start or stop in the main round: they "
-			"move every player and stop puts the world back at its start (in "
+			"affect every player and stop puts the world back at its start (in "
 			"your draft they restart it alone).\n"
 			"- A voxel world is stylized: cells of 1 m, textures 8 to 128 "
 			"pixels a side, simple lights. Promise a style, never "
@@ -39466,11 +39480,11 @@ struct Module: public interface::Module, public Interface
 			"root's last; a copy is on a scene when it is right under its "
 			"entity with no position): kit/controls, kit/environment and "
 			"kit/game_rules (scenes_from in get_state says whose each scene "
-			"has). place puts them on the app root, on \"scene\" on your "
+			"has). place puts them on the app root, or with on \"scene\" on your "
 			"scene; kit/environment goes on your scene in a game of more than "
 			"one scene (on \"root\": the app root's, every scene's sky). Each scene "
 			"has its own World (kit/terrain); a new scene has none (no ground) "
-			"unless new_scene's copy. Game-wide: kit/environment's lighting "
+			"unless made with new_scene's copy. Game-wide: kit/environment's lighting "
 			"(the root's alone), the voxel types, textures, prefabs and item "
 			"types. Entities (parts, polygons, effects) are their scene's.\n"
 			"\n## kit/controls: the camera\n"
@@ -39545,13 +39559,13 @@ struct Module: public interface::Module, public Interface
 			"generates the unedited sections again. kit/terrain_region adds "
 			"islands in a box or sphere.\n"
 			"\n## Voxels, materials, textures\n"
-			"A cell is a voxel type: its texture (top, side and bottom in a "
+			"Each cell holds a voxel type: its texture (top, side and bottom in a "
 			"set's), kind (solid, water, leaves, plant, glass), light 0...15 "
 			"(fast_physical and physical draw the nearest as lamps: 8 at "
 			"most, within 8 cells of the camera), tint (set_voxels' tint: the type's palette). "
 			"list_voxel_types lists them; set_voxels places them (one "
 			"undo). put_texture uploads a square PNG (8...128 pixels a side, "
-			"64 KiB) and its voxel argument makes your voxel type wearing it.\n"
+			"64 KiB), and its voxel argument makes a voxel type of yours wearing it.\n"
 			"Or a recipe texture, seamless pixel art made of parameters (the "
 			"editor's texture designer): put_texture's recipe, \"weave1:...\" "
 			"or a table (list_textures: the presets' and the project's); a "
@@ -39583,10 +39597,10 @@ struct Module: public interface::Module, public Interface
 			"(dig, place, hit, blast, respawn, pickup). Prefabs group parts "
 			"and voxels as one.\n"
 			"\n## Costs\n"
-			"Every player's computer draws it, phones too. Light is the "
-			"dearest: physical's shadow map most, each voxel lamp and effect "
+			"Every player's computer draws it, phones too. Light costs the "
+			"most: physical's shadow map most, each voxel lamp and effect "
 			"light (8 at once at most, never shadowed) more; fast_physical or "
-			"cartoon for a big world. Particles: 1500 live at most a client. "
+			"cartoon for a big world. Particles: at most 1500 live per client. "
 			"A big fog_end, a wide view and many parts cost frame time; fewer "
 			"larger parts beat many small ones.\n";
 	}
@@ -39595,29 +39609,29 @@ struct Module: public interface::Module, public Interface
 	{
 		static const size_t MAX_INSTRUCTIONS = 4000;
 		// [SERVER_VERSION_SHOWN] the version first
-		ss_ s = ss_("Buildat ")+BUILDAT_VERSION+" server. Kit on it: a game "
+		ss_ s = ss_("Buildat ")+BUILDAT_VERSION+" server. Kit runs on it: a game "
 			"(the composition) its builders build together, live. You edit "
 			"it as "+who+", with that "
-			"account's rights; your edits are logged so and undo takes them "
-			"back, yours only (the last 50).\n"
-			"- An entity: an id, a name, a place (x, y, z in cells, y up) and "
-			"components; place makes one of a type, its first component. "
-			"add_component adds more of the addable types. A component's "
-			"params: set_param, checked against its type's declaration "
+			"account's rights; your edits are logged by that name, and undo "
+			"takes back yours only (the last 50).\n"
+			"- An entity has an id, a name, a place (x, y, z in cells, y up) "
+			"and components; place makes one of a type, its first component. "
+			"add_component adds more of the addable types. set_param sets "
+			"their params, checked against the type's declaration "
 			"(list_types with type: each param's type, default, min, max, "
 			"choices; each input and output and what it does).\n"
-			"- Links carry signals: link an output of an entity's component to "
-			"an input of another entity, and each time the output fires the "
-			"input gets its value. The value types must meet (none, number, "
-			"string, ...). get_links lists them, unlink removes one. "
-			"to_name links by name, in the scene of who set it off (a root "
-			"entity's signal reaching each scene's own).\n"
-			"- Nothing runs while the round is Ended. start runs it (Play), "
-			"the players in it, edits still live; stop ends it, the world "
-			"back at its start. Running: try_input sends an input as a link "
-			"would; watch an entity to see its outputs fire; get_events reads "
-			"both; get_log reads an entity's log; get_state each component's "
-			"state.\n"
+			"- Links carry signals: each time a component's output fires, "
+			"every input linked to it gets its value. The value types must "
+			"be compatible (none, "
+			"number, string, ...). get_links lists them, unlink removes one. "
+			"to_name links by name, in the scene of whoever set it off (a "
+			"root entity's signal reaches each scene's own).\n"
+			"- Nothing runs while the round is Ended. start runs it (Play) "
+			"with the players in it, edits still live; stop ends it and puts "
+			"the world back at its start. Running: try_input sends an input as "
+			"a link would; watch an entity to see its outputs fire; get_events "
+			"reads both; get_log reads an entity's log; get_state, each "
+			"component's state.\n"
 			"- Prefabs place groups of entities and voxels as one "
 			"(list_prefabs, place_prefab, scatter_prefab; save_prefab makes "
 			"yours). Voxels: list_voxel_types, set_voxels, edit_voxels (a "
@@ -39626,13 +39640,13 @@ struct Module: public interface::Module, public Interface
 			"put_sound; textures: list_textures, put_texture. show marks where you work for your builder. Scenes: get_state "
 			"names them and yours (where you edit); switch_scene, new_scene, "
 			"delete_scene. The app root (place's or set_parent's parent "
-			"\"root\") holds what is every scene's: a game-wide lobby, its "
+			"\"root\") holds what every scene shares: a game-wide lobby, its "
 			"screens, the root types; they reach the player's scene by "
 			"to_name links. "
 			"move, rename, set_parent, duplicate, delete edit entities; "
 			"get_goal_warnings checks kit/goal chains.\n"
 			"- Custom types: put_type writes a type of this game's own, "
-			"local/<name> (its description says the file), live at once; "
+			"local/<name> (its description gives the file's format), live at once; "
 			"edit_type changes a few lines; "
 			"get_type reads a type's file (Kit's are examples), "
 			"delete_type removes one. A movement of your own steps the "
@@ -39645,9 +39659,9 @@ struct Module: public interface::Module, public Interface
 			"get_log, stop, fix, again. An edit's arguments are 4 KB at "
 			"most. A refusal is a tool error saying why.\n"
 			// [KIT_AGENT_NEXT_1] 2, 3b
-			"- Big changes in a draft (your own copy; publish or leave_draft), "
-			"a checkpoint of the start before them; playtest runs bots "
-			"through it.\n"
+			"- Make big changes in a draft (your own copy; publish or "
+			"leave_draft), after a checkpoint of the start; playtest runs "
+			"bots through it.\n"
 			// [KIT_AGENT_VISUALS]
 			"- The look: get_guide topic \"visuals\" first. "+ss_(has_view() ?
 			"Look with get_view before and after a change; " :
@@ -39673,8 +39687,8 @@ struct Module: public interface::Module, public Interface
 				"a scene) winning, the root's last; the inventory's size, "
 				"kit/player_state and the types on every player stay game-wide. "
 				"A kit/ui_scene_list or kit/arena (maps \"*\") lists the listed "
-				"scenes right under its scene (none there: all). A scene with "
-				"scenes under it is not removed. export_scene takes the scenes "
+				"scenes right under its scene (if none are there: all). A scene "
+				"with scenes under it cannot be removed. export_scene takes the scenes "
 				"under it, and the rules it has from above. A new scene is empty "
 				"(no ground: its players held still until it has ground or a "
 				"spawner of players).\n"
@@ -39686,13 +39700,13 @@ struct Module: public interface::Module, public Interface
 				"generator, {id = n} an entity of the scene's), c:voxel_box{...}; "
 				"c.entities, the scene's other entities ({id, name, types, pos, "
 				"yaw}), to avoid or decorate; c.move, move.lua's library; its "
-				"type's children = n (63 by default, 1023 at most); an error() "
+				"type's children = n caps them (63 by default, 1023 at most); an error() "
 				"refuses the run, its text the reason. get_state's generators "
 				"lists them and their last run (children, kept, gone, its c:log "
 				"lines, or why refused). run_generator (or a param's set_param) "
 				"builds it again: what it made last time replaced, hand-placed "
 				"entities kept, one undo. A \"points\" param with values = {{name, "
-				"min, max, default}...} has more numbers a point ([x, z, r]: a "
+				"min, max, default}...} has more numbers per point ([x, z, r]: a "
 				"track's corners, level = true: the frame's x and z, dragged in "
 				"the plan view). In play c:generate(id, {seed = n}) (a generator it "
 				"reaches) builds it live for the round: a new layout, nothing "
@@ -39709,7 +39723,7 @@ struct Module: public interface::Module, public Interface
 				"the movement's events. Its one knob is skill (0...100 %, "
 				"default 60: how near the line, how late it brakes, how fast): "
 				"the bot's skill param or input (try_input on the bot, value a "
-				"number), or its Add bot dialog. Players add them as CTF's: a "
+				"number), or its Add bot dialog. Players add them as in CTF: a "
 				"kit/spawner of the prefab and kit/pause_menu_actions linked to "
 				"its spawn and clear (try_input on the spawner as an agent). "
 				"Brimstone Speedway's race puts them on its grid.\n"
@@ -39761,7 +39775,7 @@ struct Module: public interface::Module, public Interface
 				"on_enter: animate there (e:predict), decide on the server. "
 				"c.players (players = true) lists every "
 				"scene's players, each p.scene theirs and p.away true outside the "
-				"component's own scene: a scene's run or HUD keeps to not p.away. "
+				"component's own scene: a scene's run or HUD keeps to those not p.away. "
 				"State per_player = true is a table by `by` (\"player:<id>\"): "
 				"for by, v in pairs(c.state.<key>) lists it, c.state.<key>[by] = "
 				"nil clears one.\n"
@@ -39784,7 +39798,7 @@ struct Module: public interface::Module, public Interface
 				"it is predicted); kit.effect{at = {x, y, z}, count, ...} a "
 				"burst of c:effect's particles (its particle fields, clamped "
 				"the same; keep a description fixed, vary at, dir and count; "
-				"64 bursts live and 240 a second from all parts, past it "
+				"64 bursts live and 240 a second from all parts, the rest "
 				"dropped: a stream is a small count every 0.1 s, ttl under 1 s); "
 				"kit.mark(x, y, z, yaw, size, color[, alpha]) a flat quad on the "
 				"ground (a tyre's mark: size {across, along} m, yaw as s.yaw, "
@@ -39807,9 +39821,9 @@ struct Module: public interface::Module, public Interface
 				"play_input holds keys or the game's actions for up to 4 s, "
 				"looks, jumps, uses an entity, and answers where the body went, "
 				"its state (health, score, inventory) and what entities emitted "
-				"meanwhile (an output again one entry with its count; mute "
-				"leaves a busy one out; picture: its view at the end), press "
-				"a button on its screen first (Play in a lobby); play_leave ends it. "
+				"meanwhile (an output emitted again is one entry with its count; "
+				"mute leaves a busy one out; picture: its view at the end); press "
+				"presses a button on its screen first (Play in a lobby); play_leave ends it. "
 				"Walk into what you built and read what fired. try_input as "
 				"\"me\" sends as your body, as a player's name as theirs. The "
 				"body is a player's (its by \"player:<id>\") and its client "
@@ -39823,7 +39837,7 @@ struct Module: public interface::Module, public Interface
 				// [KIT_AGENT_NEXT_2]
 				"- Building in bulk: edit_voxels works on a box of up to 64 a "
 				"side (fill, hollow, clear, replace, copy into your clipboard, "
-				"paste and move, turned by 90s), edit_terrain on a heightmap's "
+				"paste and move, turned in steps of 90 degrees), edit_terrain on a heightmap's "
 				"rectangle of up to 256 a side, scatter_prefab places up to 64 "
 				"copies of a prefab over an area or along a path, each on the "
 				"ground; batch runs up to 64 edits as one (place, set_param, "
@@ -39837,15 +39851,15 @@ struct Module: public interface::Module, public Interface
 				"by name), named by a type's sound parameter; list_sounds lists "
 				"them and reads one back as a table.\n"
 				// [KIT_AGENT_NEXT_1] 2, 3b
-				"- Your sandbox. draft moves you into a copy of the game's start "
-				"of your own (the editor's Draft), running; your edits, start "
+				"- Your sandbox. draft moves you into your own copy of the game's "
+				"start (the editor's Draft), running; your edits, start "
 				"and stop (there: its round from its start again), get_view and "
 				"playtest go there, the main round left as it is, and get_state's "
 				"session says where you are. diff lists what you changed against "
 				"the start; publish writes it into the start (refused with goal "
 				"warnings unless anyway); leave_draft drops it. It ends after 5 "
 				"minutes without a call of yours. checkpoint keeps the start "
-				"under a name (16 and 32 MiB a game), list_checkpoints lists "
+				"under a name (at most 16 and 32 MiB a game), list_checkpoints lists "
 				"them, diff with checkpoint compares one with the start now, "
 				"restore_checkpoint puts one back (in the main round, Stopped; "
 				"the start before kept as \"before restore <name>\"). playtest "
@@ -40457,7 +40471,7 @@ struct Module: public interface::Module, public Interface
 			const std::function<void(const ss_&)> &refuse)
 	{
 		if(m_session.running)
-			return refuse("the server is Running: End discards and keeps");
+			return refuse("the server is Running: End it first");
 		if(m_discarded.empty())
 			return refuse("no builds discarded since the last Run");
 		const json::Value &names = j.get("names");
@@ -41919,7 +41933,7 @@ struct Module: public interface::Module, public Interface
 				op == "export_project" || op == "export_scene" ||
 				op == "draft" || op == "prefab_bench" ||
 				(gs->bench && op == "publish")))
-			return refuse(gs->bench ? "editing a prefab: the game's; Close "
+			return refuse(gs->bench ? "editing a prefab: the game's; Close it "
 					"first" : op == "new_scene" || op == "remove_scene" ?
 					"in a draft: scenes are the game's, a scene made or removed "
 					"is the main round's at once; leave the draft first" :
@@ -42322,7 +42336,7 @@ struct Module: public interface::Module, public Interface
 			what += ", "+(m_paste.clear ? itos(cleared)+" voxels cleared, " :
 					ss_())+itos(written)+" voxels written"+(missing ? ", "+
 					itos(missing)+" not loaded" : ss_())+(unknown ? ", "+
-					itos(unknown)+" of voxels the scene has not" : ss_());
+					itos(unknown)+" of voxels the scene does not have" : ss_());
 			// [KIT_PREFAB_ROOT] with the root's move just before: one undo,
 			// its own rows first so that the move's older ones are put last
 			if(m_paste.merge && u.size() >= 2){
@@ -42554,7 +42568,7 @@ struct Module: public interface::Module, public Interface
 		}
 		const Entity &s = si->second;
 		if(to != 1 && (ti == m_entities.end() || ti->second.kind != "scene")){
-			why = "parent: entity "+itos(to)+" is no scene (a scene goes under "
+			why = "parent: entity "+itos(to)+" is not a scene (a scene goes under "
 					"the root or a scene)";
 			return false;
 		}
@@ -43296,7 +43310,7 @@ struct Module: public interface::Module, public Interface
 			if(!in)
 				return false;
 			if(!m_types[in->type].handlers.count("on_build")){
-				why = "entity "+itos(e->id)+"'s "+in->type+" is no generator "
+				why = "entity "+itos(e->id)+"'s "+in->type+" is not a generator "
 						"(no on_build)";
 				return false;
 			}
@@ -44929,7 +44943,7 @@ struct Module: public interface::Module, public Interface
 				for(uint64_t pid : want){
 					size_t peer = 0;
 					if(!may(pid))
-						why = "player "+itos(pid)+" is none it reaches";
+						why = "player "+itos(pid)+" is not one it reaches";
 					else if(peer_of_player(pid, peer))
 						so.peers.push_back(peer);
 					else if(is_bot_id(pid))
@@ -44953,9 +44967,9 @@ struct Module: public interface::Module, public Interface
 				if(may(pid) && !m_active && is_bot_id(pid))
 					so.bots.push_back(pid);
 				else if(!may(pid) || !peer_of_player(pid, peer))
-					why = "player "+itos(pid)+" is none it reaches here";
+					why = "player "+itos(pid)+" is not one it reaches here";
 				else if(m_active ? so.target != 0 : !made_by(so.target))
-					why = "session "+itos(so.target)+" is none it made";
+					why = "session "+itos(so.target)+" is not one it made";
 				if(peer)
 					so.peers.push_back(peer);
 			} else if(op == "end"){
@@ -45229,7 +45243,7 @@ struct Module: public interface::Module, public Interface
 		// A Save drops what the scene has no voxel for: said now
 		if(unknown)
 			warn("the prefab "+gs->prefab+" has "+itos(unknown)+" voxels of types "
-					"this scene has not: not shown, and a Save drops them");
+					"this scene does not have: not shown, and a Save drops them");
 	}
 
 	// A save in a bench: its own round's copies followed in rebuilds(); the

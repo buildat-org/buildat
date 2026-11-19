@@ -220,7 +220,7 @@ def call(name, args={}, error=False):
     # A type load over 50 ms (a busy box: the full tier beside it) makes
     # the builder's next puts wait 5x as long (kit.cpp put_local): waited
     # out once, as the server says, 3 s at most
-    w = re.search(r"your last type took long to load: wait (\d+) s", text)
+    w = re.search(r"your last type took a long time to load: wait (\d+) s", text)
     if w:
         assert int(w.group(1)) <= 3, ("a type load's wait over 3 s", name, text)
         time.sleep(int(w.group(1)))
@@ -613,7 +613,7 @@ elif phase == "play":
     said, body = join()
     assert body["scene"] == "moon", body
     assert any(x.startswith("Your body left the scene %s. " % s["main"]) for x in said), said
-    assert refused("play_join").startswith("You play already: "), "play_join in its scene"
+    assert refused("play_join").startswith("You play a body already: "), "play_join in its scene"
     # The screen's buttons (the list's rows filled within a second)
     def buttons():
         b = json.loads(re.search(r"Played [^:]*: (\{.*\})", call("play_input",
@@ -682,7 +682,7 @@ elif phase == "state":
     assert "built %d again: 36 children (25 kept, 11 new, 0 gone)" % L in t, t
     g = gen()
     assert g["children"] == 36 and g["last"]["children"] == 36 and g["last"]["kept"] == 25, g
-    assert "no generator" in refused("run_generator", {"id": MT})
+    assert "not a generator" in refused("run_generator", {"id": MT})
     call("undo")
     call("undo")
 elif phase == "goals":
@@ -995,11 +995,11 @@ elif phase == "client":
     def vlog():
         l = json.loads(call("get_log", {"id": EV}))
         ok = (sum("body_var: a key of 1 to 32 letters" in x for x in l) == 3 and
-            sum("body_var: a value a number, a boolean" in x for x in l) == 4 and
+            sum("body_var: a value is a number, a boolean" in x for x in l) == 4 and
             any("body_var player:999999 k1 refused: no player" in x for x in l))
         return l if ok else (time.sleep(0.3) and None)
     l = until(vlog, "body_var's refusals in its log")
-    assert any(("body_var %s k17 refused: 16 keys a body at most" % me) in x for x in l), l
+    assert any(("body_var %s k17 refused: 16 keys per body at most" % me) in x for x in l), l
     assert len(bodies()[me]["vars"]) == 16, bodies()
     call("try_input", {"id": EV, "input": "clear", "as": "me"})
     until(lambda: me not in bodies(), "the body vars cleared")

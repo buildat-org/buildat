@@ -484,7 +484,7 @@ elif phase == "end":
     assert "past its budget" in r, r
     # (5 times as long as that took; then taken)
     r = call("put_type", {"name": "spin2", "source": "return {version = 1}"}, error=True)
-    assert "your last type took long to load" in r, r
+    assert "your last type took a long time to load" in r, r
     until(lambda: not rpc("tools/call", {"name": "put_type", "arguments": {"name":
         "spin2", "source": "return {version = 1}"}})["result"]["isError"],
         "the put after the wait", 25)
