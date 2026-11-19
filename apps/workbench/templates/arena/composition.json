@@ -1,4 +1,6 @@
 {
+	"kit": 1,
+	"api": 1,
 	"entities": [
 		{"id": 2, "name": "world", "kind": "scene"},
 		{"id": 3, "parent": 2, "name": "the ground", "components": [{"type": "kit/terrain", "params": {"dig": "none", "place": "none", "generator": "flat", "surface": "voxels", "biome": "grassland", "decorations": false, "border": "wall", "width": 32, "depth": 32}}]},

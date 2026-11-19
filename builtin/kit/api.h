@@ -1063,6 +1063,18 @@ namespace interface
 // (each instance's state and timer, the disabled ones, the players'
 // items).
 //
+// [KIT_API_1] **Formats and levels.** A composition (the authored row, an
+// export's or scene's composition.json) and a prefab say at their top
+// "kit": the file format, raised when a file's structure changes, a newer
+// Kit reading the older; and "api": the script level the game's own types
+// are written for, which a new game gets as this Kit's and only its builder
+// raises (none: a file from before, 1 each). A Kit kind's meta.json says
+// "kit_api", which an install refuses above this Kit's
+// (interface::aitta::check_manifest). A Kit that meets a newer "kit" or
+// "api" refuses the file whole: "This game was made with a newer Buildat
+// (Kit format 2, Buildat <its version, where known>). ... Update Buildat to
+// open it."
+//
 // Budgets: each handler run has a slice of the box's meter, and a tick a
 // few slices; the queue waits for the next tick past that. A run past its
 // slice disables its instance (logged, saved with the runtime), and a new

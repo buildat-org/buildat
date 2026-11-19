@@ -1,4 +1,6 @@
 {
+	"kit": 1,
+	"api": 1,
 	"entities": [
 		{"id": 2, "name": "world", "kind": "scene"},
 		{"id": 4, "parent": 1, "name": "game rules", "components": [{"type": "kit/game_rules", "params": {"peaceful": true, "slots": 0, "hotbar": 0, "show_health": false}}]},

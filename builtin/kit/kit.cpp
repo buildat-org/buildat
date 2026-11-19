@@ -5019,8 +5019,18 @@ struct Module: public interface::Module, public Interface
 	// [KIT_TEMPLATES] Host::opens_in_edit's first builder is yet to come
 	bool m_open_tools = false;
 
-	bool load_composition(const json::Value &c, ss_ &why)
+	// [KIT_API_1] The game's script level, its composition's "api" (none:
+	// from before, 1): what its own types are written for. Saving never
+	// raises it
+	int64_t m_api = interface::aitta::KIT_API;
+
+	// by: the Buildat that wrote it, if known (a template's meta.json's)
+	bool load_composition(const json::Value &c, ss_ &why, const ss_ &by = "")
 	{
+		why = interface::aitta::kit_level_refusal(c, by);
+		if(!why.empty())
+			return false;
+		m_api = std::max<int64_t>(1, json::jint(c, "api", 1));
 		Entity root;
 		root.id = 1;
 		root.kind = "app";
@@ -5108,6 +5118,9 @@ struct Module: public interface::Module, public Interface
 		for(auto &r : m_removed)
 			all[r.first] = &r.second.e;
 		json::Value c = json::object();
+		// [KIT_API_1] its format and the game's level
+		c.set("kit", (int64_t)interface::aitta::KIT_FORMAT);
+		c.set("api", m_api);
 		json::Value es = json::array();
 		for(auto &p : all){
 			// What play moved (c:move, a vehicle) at its place before:
@@ -5399,7 +5412,16 @@ struct Module: public interface::Module, public Interface
 			why = "the composition is not a JSON object";
 			return false;
 		}
-		if(!load_composition(c, why))
+		// [KIT_API_1] a template's maker, for a refusal (a save's is not
+		// kept: __save's version is the last to open it)
+		ss_ by;
+		if(first){
+			json::json_error_t merr;
+			by = jstr(json::load_file((host.composition_path.substr(0,
+					host.composition_path.rfind('/'))+"/meta.json").c_str(), &merr),
+					"buildat_version");
+		}
+		if(!load_composition(c, why, by))
 			return false;
 		if(m_migrated)
 			log_i(MODULE, "%zu bare type names made <author>/<name>",
@@ -7772,6 +7794,8 @@ struct Module: public interface::Module, public Interface
 			{"kind", kind}, {"author", author}, {"name", name}, {"title", title},
 			{"version", "1.0.0"},
 			{"engine_api", (int64_t)interface::aitta::ENGINE_API},
+			// [KIT_API_1] the game's script level (check_manifest's gate)
+			{"kit_api", m_api},
 			{"license_code", "LicenseRef-All-rights-reserved"},
 			{"license_media", "LicenseRef-All-rights-reserved"},
 			{"description", what+", exported by "+author+"."},
@@ -7801,8 +7825,8 @@ struct Module: public interface::Module, public Interface
 		export_head(files, "template", author, plain_id(m_host.project,
 				"game"), title, "The Workbench game "+title,
 				game_of(author_of(p), true));
-		// The composition
-		ss_ comp = "{\n\t\"entities\": [\n";
+		// The composition ([KIT_API_1] its format and the game's level first)
+		ss_ comp = "{\n"+levels_text()+"\t\"entities\": [\n";
 		if(!export_entities(authored_json(false).get("entities"), comp, why))
 			return false;
 		int64_t next = m_next_id;
@@ -7836,6 +7860,13 @@ struct Module: public interface::Module, public Interface
 				"heightmap samples", cs(p.name), cs(m_host.project), files.size(),
 				cells_n, samples_n);
 		return true;
+	}
+
+	// [KIT_API_1] An export's composition's first lines: "kit" and "api"
+	ss_ levels_text()
+	{
+		return "\t\"kit\": "+itos(interface::aitta::KIT_FORMAT)+",\n\t\"api\": "+
+				itos(m_api)+",\n";
 	}
 
 	// The composition's lines, an entity a line (load_composition()'s form):
@@ -8262,8 +8293,8 @@ struct Module: public interface::Module, public Interface
 		export_head(files, "scene", author, plain_id(scene, "scene"), title,
 				"The scene "+scene+" of the Workbench game "+
 				title_cut(m_host.project), game_of(author_in, true));
-		ss_ comp = "{\n\t\"scene\": "+json::Value(scene).stringify()+
-				",\n\t\"entities\": [\n";
+		ss_ comp = "{\n"+levels_text()+"\t\"scene\": "+
+				json::Value(scene).stringify()+",\n\t\"entities\": [\n";
 		if(!export_entities(es, comp, why))
 			return false;
 		world_stand_in(scene_ids, next, comp);
@@ -8488,6 +8519,10 @@ struct Module: public interface::Module, public Interface
 			return "composition.json: past 4 MiB";
 		const json::Value c = json::load_file((dir+"/composition.json").c_str(),
 				&err);
+		// [KIT_API_1] (add_scene_data() names its maker)
+		why = interface::aitta::kit_level_refusal(c);
+		if(!why.empty())
+			return why;
 		const json::Value &es = c.get("entities"), &outside = c.get("outside");
 		// Its scene entity on the root, each other one under it
 		// ([KIT_SCENE_TREE] the scenes under it too)
@@ -9359,6 +9394,7 @@ struct Module: public interface::Module, public Interface
 		m.set("title", title);
 		m.set("version", version);
 		m.set("engine_api", (int64_t)interface::aitta::ENGINE_API);
+		m.set("kit_api", m_api); // [KIT_API_1]
 		m.set("license_code", licence);
 		m.set("license_media", licence);
 		m.set("description", jstr(j, "description"));
@@ -9530,7 +9566,8 @@ struct Module: public interface::Module, public Interface
 			if(fp.empty() || !pub_name_ok(name) || !hex || !m.is_object() ||
 					jstr(m, "kind") != kind || r.get("delisted").is_true() ||
 					api < interface::aitta::ENGINE_API_MIN ||
-					api > interface::aitta::ENGINE_API)
+					api > interface::aitta::ENGINE_API ||
+					json::jint(m, "kit_api", 1) > interface::aitta::KIT_API)
 				continue;
 			const ss_ key = fp+"/"+name;
 			auto had = newest.find(key);
@@ -18119,6 +18156,9 @@ struct Module: public interface::Module, public Interface
 			why = "not a JSON object of \"format\": \"kit_prefab\"";
 			return false;
 		}
+		why = interface::aitta::kit_level_refusal(j);
+		if(!why.empty())
+			return false;
 		const json::Value &v = j.get("version");
 		if(!v.is_undefined() && (!v.is_number() || v.as_number() < 1 ||
 				v.as_number() > 1e9 || v.as_number() != std::floor(
@@ -18783,6 +18823,9 @@ struct Module: public interface::Module, public Interface
 		}
 		json::Value pf = json::object();
 		pf.set("format", "kit_prefab");
+		// [KIT_API_1]
+		pf.set("kit", (int64_t)interface::aitta::KIT_FORMAT);
+		pf.set("api", m_api);
 		pf.set("version", (int64_t)1);
 		pf.set("entities", es);
 		return pf;

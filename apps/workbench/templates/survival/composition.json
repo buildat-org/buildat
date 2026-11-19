@@ -1,4 +1,6 @@
 {
+	"kit": 1,
+	"api": 1,
 	"entities": [
 		{"id": 2, "name": "world", "kind": "scene"},
 		{"id": 3, "parent": 2, "name": "the land", "components": [{"type": "kit/terrain", "params": {"generator": "valleys", "seed": 1, "size": "infinite", "biome": "grassland", "caves": true, "decorations": true, "dig": "all", "place": "all"}}]},

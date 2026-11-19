@@ -5,6 +5,7 @@
 	"title": "Airships",
 	"version": "0.1.0",
 	"engine_api": 2,
+	"kit_api": 1,
 	"license_code": "CC0-1.0",
 	"license_media": "CC0-1.0",
 	"description": "Two teams on floating islands over a continent. A round starts on the lobby's gold pad: buy ships, guns, engines and radars, build on your ship and fight. A ship is lost when its core is hit or it touches the ground: a point to the other team, and 2 points win. Between rounds, everything is free."

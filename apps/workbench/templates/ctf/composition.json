@@ -1,4 +1,6 @@
 {
+	"kit": 1,
+	"api": 1,
 	"entities": [
 		{"id": 2, "name": "world", "kind": "scene"},
 		{"id": 3, "parent": 2, "name": "the ground", "components": [{"links": [], "params": {"dig": "none", "place": "none", "biome": "grassland", "border": "wall", "caves": false, "decorations": false, "depth": 32, "generator": "flat", "height": 12, "level": 0, "materials": "", "sea_level": 0, "seed": 0, "size": "finite", "sky_light": false, "soil_depth": -1, "spread": 48, "surface": "voxels", "width": 32}, "type": "kit/terrain", "version": 2}]},

@@ -5,6 +5,7 @@
 	"title": "Crag Trial",
 	"version": "1.0.0",
 	"engine_api": 2,
+	"kit_api": 1,
 	"license_code": "CC0-1.0",
 	"license_media": "CC0-1.0",
 	"description": "A bike trial in side view with two tracks, picked in the lobby. Take every gem and reach the finish against the clock; each track's sign shows the best times. A head on the rocks is a crash. Each track is a scene: a new scene makes a new track. The bike, gems and run are the game's own types."

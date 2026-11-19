@@ -38,6 +38,38 @@ namespace interface
 						itos(ENGINE_API)+")";
 			return "";
 		}
+		// [KIT_API_1] Kit's file format ("kit" at the top of a game's
+		// composition, the authored row and a prefab) and its script level
+		// ("api" there, "kit_api" in a Kit kind's meta.json) this Buildat
+		// reads up to. A newer one is refused, never loaded half-way;
+		// "kit" is raised when a file's structure changes, "api" only by a
+		// game's builder
+		static const int KIT_FORMAT = 1;
+		static const int KIT_API = 1;
+		// The refusal of what a newer Buildat made: what, "Kit format 2";
+		// reads, "reads up to Kit format 1"; by, the Buildat that wrote it
+		// if known ("" not)
+		static inline ss_ kit_newer(const ss_ &what, const ss_ &reads,
+				const ss_ &by = "")
+		{
+			return "This game was made with a newer Buildat ("+what+
+					(by.empty() ? ss_() : ", Buildat "+by.substr(0, 40))+
+					"). This Buildat "+reads+". Update Buildat to open it.";
+		}
+		// "" when this Buildat reads a file's "kit" and "api" (none: a file
+		// from before, format and level 1), else kit_newer()'s
+		static inline ss_ kit_level_refusal(const json::Value &file,
+				const ss_ &by = "")
+		{
+			const json::Value &k = file.get("kit"), &a = file.get("api");
+			if(k.is_number() && k.as_number() > KIT_FORMAT)
+				return kit_newer("Kit format "+itos((int64_t)k.as_number()),
+						"reads up to Kit format "+itos(KIT_FORMAT), by);
+			if(a.is_number() && a.as_number() > KIT_API)
+				return kit_newer("Kit API "+itos((int64_t)a.as_number()),
+						"reads up to Kit API "+itos(KIT_API), by);
+			return "";
+		}
 
 		// A new key: the file's text, and its public half as hex
 		void keygen(ss_ &key_file_text, ss_ &public_hex);

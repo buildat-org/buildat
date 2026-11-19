@@ -1,4 +1,6 @@
 {
+	"kit": 1,
+	"api": 1,
 	"entities": [
 		{"id": 2, "name": "world", "kind": "scene"},
 		{"id": 3, "parent": 2, "name": "the ground", "components": [{"type": "kit/terrain", "params": {"dig": "none", "place": "none", "surface": "heightmap", "size": "finite", "width": 1024, "depth": 1024, "generator": "noise", "biome": "grassland", "level": -60, "height": 20, "spread": 200, "sea_level": -100, "decorations": false}}]},
