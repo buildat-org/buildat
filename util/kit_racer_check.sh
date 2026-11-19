@@ -34,6 +34,11 @@
 #      than at 2 s, both under the top) (track.png on the way, trial.png);
 #   5. the car's effects drawn on kitboss's client (kit.effect, kit.mark):
 #      exhaust smoke, road dust, tyre marks; Kit's counts of them.
+#   [MUSIC_SYNTH] The music (kit/music, played by jam): the lobby's song
+#   (Yard Vamp) in play, the race's (Scrap Heat) from a run's start on the
+#   grid, kitbob joining it where kitboss's is (the same place on the
+#   song's timeline, by the logs' clocks), the lobby's again after the
+#   race, and none once the round is stopped.
 # Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/grid.png, $t/push.png,
 # $t/drift.png, $t/wreck.png, $t/result.png, $t/track.png, $t/trial.png
 #   util/kit_racer_check.sh
@@ -372,10 +377,13 @@ await "$CL" 0 10 "brim_car: the draw hook draws a car"
 await "$CL" 0 10 "kit: ui full screen [0-9]+ up"
 await "$CL" 0 10 'kit: ui [0-9]+ list .* shown, layer [0-9]+: "Pick your poison \| Race: The Bone Yard, by buildat \| Time trial: The Bone Yard, by buildat"'
 cmd "frames 10" "screenshot $t/lobby.png"
+await "$CL" 0 5 'kit: music [0-9]+ "Yard Vamp" from '
 m=$(mark "$SL")
+mc=$(mark "$CL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Race: The*"'
 await "$SL" "$m" 5 "local/brim_race $RACE: kitboss is on the grid, slot 1"
 await "$CL" 0 10 '"On the grid: 1 car. Start when ready."'
+await "$CL" "$mc" 5 'kit: music [0-9]+ "Scrap Heat" from '
 echo "ok: a project from it: the top-down camera, the car's movement and hook; the lobby's tracks; Race: kitboss on the grid"
 BUILDAT_JOIN_CREATE=1 client bob
 BOB=$!
@@ -388,6 +396,18 @@ step 10 "kit: ui full screen none" "frames 3" 'click Button "Race: The*"'
 await "$SL" "$m" 5 "local/brim_race $RACE: kitbob is on the grid, slot 2"
 cmd "frames 20" "screenshot $t/grid.png"
 echo "ok: kitbob joined the grid, slot 2"
+# [MUSIC_SYNTH] kitbob's race song from where kitboss's is by now
+await "$CL" 0 5 'kit: music [0-9]+ "Scrap Heat" from '
+python3 -I - "$t/boss.log" "$CL" <<'PY' || fail "kitbob's race song not where kitboss's is ($t/boss.log, $CL)"
+import re, sys
+def start(path):
+    l = [x for x in open(path, errors="replace") if '"Scrap Heat" from' in x][0]
+    h, m, s = re.search(r"(\d+):(\d+):([\d.]+) ", l).groups()
+    return int(h) * 3600 + int(m) * 60 + float(s), float(re.search(r"from ([\d.]+) s", l).group(1))
+(ta, a), (tb, b) = start(sys.argv[1]), start(sys.argv[2])
+assert tb > ta + 1 and abs((b - a) - (tb - ta)) < 0.3, (ta, a, tb, b)
+print("ok: the music: kitbob joined the race's song at %.2f s, %.2f s after kitboss's start at %.2f s" % (b, tb - ta, a))
+PY
 
 # 1. The start: the countdown, both go at once
 as boss
@@ -487,6 +507,8 @@ await "$t/bob.log" 0 5 'shown, layer [0-9]+: "You: 2nd \| 1st  kitboss  [0-9.:]+
 as boss
 await "$CL" 0 5 'shown, layer [0-9]+: "You: 1st \| 1st  kitboss  [0-9.:]+ \| 2nd  kitbob '
 cmd "frames 10" "screenshot $t/result.png"
+# [MUSIC_SYNTH] the lobby's song again once the race is over
+await "$CL" "$mc" 5 'kit: music [0-9]+ "Yard Vamp" from '
 echo "ok: the race: kitboss's mine, kitbob's wreck and his respawn at checkpoint 2; kitboss 1st, kitbob 2nd"
 
 # 4. The time trial: no lap over the line with no checkpoint, then one
@@ -570,6 +592,10 @@ assert made > 100 and marks > 20 and kept > 0, (made, marks, kept)
 print("ok: the effects: %d particles, %d bursts dropped, %d marks (%d kept)" % (made, dropped, marks, kept))
 PY
 echo "ok: the effects' kinds: $(grep -aoP 'brim_car: effect \K[a-z]+' "$CL" | sort -u | tr '\n' ' ')"
+# [MUSIC_SYNTH] the round stopped: no music
+mc=$(mark "$CL")
+step 10 "kit: music [0-9]+ stopped" 'event kit_edit {"op": "stop"}'
+echo "ok: the music: the lobby's, the race's from a run's start, the lobby's after it, none once stopped"
 cmd "quit"
 as bob
 cmd "quit"

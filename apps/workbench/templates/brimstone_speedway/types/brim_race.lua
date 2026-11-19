@@ -34,6 +34,8 @@
 -- (its own teleport) with full health.
 -- The announcer (`announce`, to a kit/ui_text for everyone) calls the start,
 -- the leader, the wrecks and the finish.
+-- The music (`music`, a kit/music on the root above the lobby's): played to
+-- a player from their run's start to its end or their leaving.
 local PAINTS = 6
 local WEAPONS = {gun = 6, mines = 3, boost = 1}
 local NAMES = {gun = "Gun", mines = "Mines", boost = "Ram boost"}
@@ -90,6 +92,12 @@ local function slot(c, k)
 	local side = (k % 2 == 1) and -0.5 or 0.5
 	local p = c.pos
 	return {p[1] - fx * back + fz * side, p[2], p[3] - fz * back - fx * side}
+end
+
+local function music(c, by, on)
+	if c.params.music ~= 0 then
+		c:send(c.params.music, on and "play" or "stop", nil, by)
+	end
 end
 
 local function set_open(c, by, r, want)
@@ -233,10 +241,15 @@ local function enter(c, by)
 	clear_weapon(c, by, r)
 	set_open(c, by, r, false)
 	c:body_var(by, "wreck", nil)
+	-- (the car's client part clears the tyre marks on a new run)
+	r.run = (r.run or 0) + 1
+	c:body_var(by, "run", r.run)
+	music(c, by, true)
 	if r.mode == "race" then
 		if c.state.phase ~= "grid" then
 			-- (a race on: back to the lobby to wait)
 			r.mode = nil
+			music(c, by, false)
 			show(c, by, r)
 			c:emit("hud", "A race is on: the next one starts from the lobby.", by)
 			c:send(c.params.lobby, "lobby", nil, by)
@@ -279,6 +292,7 @@ local function race_over(c, why)
 		if not r.done then
 			c:emit("result", "Out of time: DNF|" .. table.concat(standings(c), "|"), by)
 			c:send(c.params.lobby, "over", nil, by)
+			music(c, by, false)
 		end
 		r.mode = nil
 		clear_weapon(c, by, r)
@@ -306,6 +320,7 @@ local function finish_race(c, by, r)
 	clear_weapon(c, by, r)
 	set_open(c, by, r, false)
 	c:send(c.params.lobby, "over", nil, by)
+	music(c, by, false)
 	results(c)
 	c:emit("finished", r.done, by)
 	if #c.state.finished >= #c.state.racers then
@@ -340,6 +355,7 @@ local function lap(c, by, r)
 			c:log(name, "finished the trial in", clock(r.t))
 			r.mode = nil
 			c:send(c.params.lobby, "over", nil, by)
+			music(c, by, false)
 			return
 		end
 		r.lap = r.lap + 1
@@ -498,6 +514,7 @@ return {
 		grid_screen = {type = "entity", default = 0},
 		mine = {type = "entity", default = 0},
 		scorch = {type = "entity", default = 0},
+		music = {type = "entity", default = 0},
 		gun_damage = {type = "number", default = 3, min = 0, max = 100},
 		mine_damage = {type = "number", default = 9, min = 0, max = 100},
 		ram_damage = {type = "number", default = 6, min = 0, max = 100},
@@ -592,6 +609,7 @@ return {
 					drop_racer(c, by)
 				end
 				r.mode = nil
+				music(c, by, false)
 			elseif r and r.mode == "trial" then
 				if r.count then
 					r.count = r.count - 0.1
@@ -663,6 +681,7 @@ return {
 		if input == "entered" then
 			return enter(c, by)
 		elseif input == "left" then
+			music(c, by, false)
 			if r.mode == "race" then
 				drop_racer(c, by)
 				c:speed(by, 1)

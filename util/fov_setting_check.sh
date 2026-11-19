@@ -56,7 +56,7 @@ keypress O
 wait_log 5000 Game settings shown
 delay 1000
 screenshot $t/window.png
-click DropDownList "▼" 668 603
+click DropDownList "dropdown_fov"
 wait_log 5000 dropdown_
 keypress Down
 keypress Down

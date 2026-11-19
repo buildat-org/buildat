@@ -48,7 +48,8 @@
 -- a tyre slipping much, 8 braking, 16 handbrake, 32 throttle, 64 and 128
 -- the front and the back scraping a wall), speed, the floor (SURF's
 -- index), the tyres slipping much (bits 1 2 4 8: TYRES' order), its hard
--- hits}. s.spheres two circles, front and back, as the zones (checkpoints,
+-- hits, its run (body var run, the race's: a new one clears the tyre
+-- marks; past Kit's 8 for the others, so its own client's alone)}. s.spheres two circles, front and back, as the zones (checkpoints,
 -- crates, mines) meet it.
 local R = 1.05 -- the circles against walls (m)
 local AX = 1.35 -- their offset ahead and behind the middle
@@ -440,7 +441,7 @@ return {
 		end
 		s.pose = {s.h, tonumber(v.paint) or 1, st, flags,
 			math.floor(speed * 10 + 0.5) / 10, SURF[surf] or 1, slips,
-			tonumber(s.bumps) or 0}
+			tonumber(s.bumps) or 0, tonumber(v.run) or 0}
 		s.spheres = {{sh * AX, 0.5, ch * AX, 0.9}, {-sh * AX, 0.5, -ch * AX, 0.9}}
 	end,
 }

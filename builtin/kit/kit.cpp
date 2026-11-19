@@ -28,6 +28,7 @@
 #include "interface/address.h"
 #include "interface/zip.h"
 #include "interface/compress.h"
+#include "interface/jam.h"
 #include "kit/terrain.h"
 #include "kit/symmetry.h"
 #include "kit/creatures.h"
@@ -583,6 +584,9 @@ struct Peer
 	// [KIT_AGENT_NEXT_1] The server's camera while it plays no body: no
 	// entity, no round, no act of its own (act_allowed())
 	bool still = false;
+	// [MUSIC_SYNTH] The music last sent ("kit:music"): "<entity>:<the
+	// song's hash>:<t0>" ("" none) and its mood
+	ss_ music_key, music_mood;
 };
 
 // Whose name a peer's prefabs, voxel and item types are under
@@ -4391,6 +4395,16 @@ struct Module: public interface::Module, public Interface
 		}
 		if(t == "bool")
 			return v.is_boolean() ? "" : "true or false";
+		if(t == "song"){
+			// [MUSIC_SYNTH] jam's text ("": none), its error by line
+			if(!v.is_string())
+				return "a song's text";
+			ss_ why;
+			if(!v.as_string().empty() &&
+					!interface::jam::parse(v.as_string(), &why))
+				return why;
+			return "";
+		}
 		if(t == "string"){
 			if(!v.is_string() || v.as_string().size() > MAX_STRING)
 				return "a string of at most "+itos(MAX_STRING)+" bytes";
@@ -22743,7 +22757,11 @@ struct Module: public interface::Module, public Interface
 			round_join(peer, false);
 		else
 			send_items(p.name);
-		send_state(peer);
+		// (a template's first builder: the state in edit mode comes next,
+		// from the caller's m_open_tools; one in play before it had a web
+		// client ask for the pointer lock, and pause, in the editor)
+		if(!(m_open_tools && can_edit_u(peer)))
+			send_state(peer);
 	}
 
 	void on_tick(const interface::TickEvent &event)
@@ -22850,6 +22868,7 @@ struct Module: public interface::Module, public Interface
 		if(m_session.running)
 			radars_tick();
 		send_controls();
+		music_tick();
 		env_tick();
 		lobby_out_tick();
 		// simplified: the world's actions looked for once a second, not
@@ -23569,6 +23588,164 @@ struct Module: public interface::Module, public Interface
 				inetwork->send(p.first, "kit:controls", s);
 			});
 		}
+	}
+
+	// ---- [MUSIC_SYNTH] kit/music: each player's song, played by their client
+	// (client_lua/music.lua) from the audio thread
+
+	// A round's kit/music entities (looked for once a second) and when each
+	// went on (motion_t()), by the session
+	struct MusicSession
+	{
+		int64_t scanned = 0;
+		sv_<uint64_t> ids;
+		std::map<uint64_t, double> t0;
+	};
+	std::map<uint64_t, MusicSession> m_music;
+
+	static const Instance* music_of(const Entity &e)
+	{
+		for(const Instance &in : e.comps)
+			if(in.type == "kit/music")
+				return &in;
+		return nullptr;
+	}
+
+	// A kit/music's state for a player: their own entry ("player:<id>")
+	// over everyone's
+	static const json::Value& music_state(const Instance &in, const char *own,
+			const char *all, uint64_t player)
+	{
+		const json::Value &o = in.state.get(own);
+		if(o.is_object()){
+			const json::Value &v = o.get("player:"+itos(player));
+			if(!v.is_undefined() && !v.is_null())
+				return v;
+		}
+		return in.state.get(all);
+	}
+
+	// The kit/music on for a peer (0: none): the highest priority, then a
+	// scene's over the root's, then the lowest id
+	uint64_t music_for(const Peer &p, const MusicSession &ms)
+	{
+		uint64_t best = 0;
+		double best_pri = 0;
+		bool best_own = false;
+		for(uint64_t id : ms.ids){
+			auto it = m_entities.find(id);
+			if(it == m_entities.end())
+				continue;
+			const Instance *in = music_of(it->second);
+			if(!in || !music_state(*in, "on", "playing", p.player).is_true() ||
+					jstr(in->params, "song").empty())
+				continue;
+			ss_ scene;
+			scene_of(it->second, &scene);
+			const bool own = !scene.empty();
+			if(own && scene != p.scene)
+				continue;
+			const double pri = row_num(in->params, "priority");
+			if(!best || pri > best_pri || (pri == best_pri && own && !best_own)){
+				best = id;
+				best_pri = pri;
+				best_own = own;
+			}
+		}
+		return best;
+	}
+
+	// Each player's music, sent as "kit:music" {"id", "song", "t0", "now",
+	// "mood"} when it changes (only {"id", "mood"} for a mood; {"id": 0}:
+	// none). An entity's t0 is when it went on for anyone, on the round's
+	// clock, so everyone hearing it hears the same bar; nothing plays while
+	// the round is not Running
+	void music_tick()
+	{
+		MusicSession &ms = m_music[m_active];
+		const int64_t real = interface::os::time_us();
+		if(real - ms.scanned > 1000000){
+			ms.scanned = real;
+			ms.ids.clear();
+			for(auto &e : m_entities)
+				if(music_of(e.second))
+					ms.ids.push_back(e.first);
+		}
+		const double now = motion_t();
+		std::set<uint64_t> heard;
+		for(auto &pp : m_peers){
+			Peer &p = pp.second;
+			const uint64_t id = m_session.running && p.player ?
+					music_for(p, ms) : 0;
+			json::Value m = json::object();
+			m.set("id", (int64_t)id);
+			ss_ key, mood;
+			if(id){
+				heard.insert(id);
+				const Instance &in = *music_of(m_entities[id]);
+				const ss_ song = jstr(in.params, "song");
+				const double t0 = ms.t0.emplace(id, now).first->second;
+				char k[96];
+				snprintf(k, sizeof k, "%llu:%zx:%.6f", (unsigned long long)id,
+						std::hash<ss_>()(song), t0);
+				key = k;
+				const json::Value &mv = music_state(in, "moods", "mood",
+						p.player);
+				mood = mv.is_string() ? mv.as_string() : "";
+				m.set("mood", mood);
+				if(key != p.music_key){
+					m.set("song", song);
+					m.set("t0", t0);
+					m.set("now", now);
+				}
+			}
+			if(key == p.music_key && mood == p.music_mood)
+				continue;
+			p.music_key = key;
+			p.music_mood = mood;
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(pp.first, "kit:music", m.stringify());
+			});
+		}
+		// one nobody hears starts again when it next goes on
+		for(auto it = ms.t0.begin(); it != ms.t0.end();){
+			if(heard.count(it->first))
+				++it;
+			else
+				it = ms.t0.erase(it);
+		}
+	}
+
+	// A round's start: every song from its start again
+	void music_restart()
+	{
+		m_music[m_active].t0.clear();
+		for(auto &p : m_peers)
+			p.second.music_key.clear();
+	}
+
+	// What a player hears, for get_state: {entity, title, mood, bar} (null:
+	// nothing)
+	json::Value music_heard(const Peer &p)
+	{
+		if(p.music_key.empty())
+			return json::null();
+		const uint64_t id = strtoull(p.music_key.c_str(), nullptr, 10);
+		auto it = m_entities.find(id);
+		auto &t0s = m_music[m_active].t0;
+		if(it == m_entities.end() || !music_of(it->second) || !t0s.count(id))
+			return json::null();
+		auto song = interface::jam::parse(jstr(music_of(it->second)->params,
+				"song"), nullptr);
+		json::Value o = json::object();
+		o.set("entity", (int64_t)id);
+		o.set("mood", p.music_mood.empty() ? "all" : p.music_mood);
+		if(song){
+			o.set("title", interface::jam::info(*song).title);
+			o.set("bar", (int64_t)interface::jam::bar_of(*song,
+					(int64_t)((motion_t() - t0s[id]) * interface::jam::RATE)));
+		}
+		return o;
 	}
 
 	// Where a body's state puts a peer (the middle of the cell their feet
@@ -32222,9 +32399,30 @@ struct Module: public interface::Module, public Interface
 				"params' names. Read it first. topic \"visuals\": how a game "
 				"looks (camera, sky, light, ground, voxels, textures, effects), "
 				"what you can and cannot see of it; read it before changing "
-				"a look.",
+				"a look. topic \"music\": kit/music and the song format "
+				"(jam1), every line and parameter; read it before writing a "
+				"song.",
 				R"J({"type": "object", "properties": {"topic": {"type": "string",
-				"enum": ["visuals"], "description": "None: the guide"}}})J", ""},
+				"enum": ["visuals", "music"], "description": "None: the guide"}}})J", ""},
+			{"analyze_music", "=music", "Your ears for music: a song rendered "
+				"on the server and measured, since you cannot listen. Its "
+				"whole play order and 0.1 s past the loop's join, or seconds "
+				"of it (at most 120), from its start, in a mood (\"\": every "
+				"track), or one track alone. Gives loudness (integrated LUFS; "
+				"about -14 is the norm here), short-term loudness's range, "
+				"peak dBFS, the energy in sub/low/mid/high/air bands (%), "
+				"the same for each track (after its inserts, before the "
+				"buses), the loop's join (the step there against the median "
+				"step: a click is a big one), peak voices and the render's "
+				"cost. The song: entity (a kit/music's), or text (a song not "
+				"set yet: a parse error comes back with its line). It stalls "
+				"the round while it renders (about 2 s for a minute).",
+				R"J({"type": "object", "properties": {"entity": {"type": "integer",
+				"description": "A kit/music entity's id"},
+				"text": {"type": "string", "description": "A song's text instead"},
+				"seconds": {"type": "number", "description": "From the start; none: the play order"},
+				"mood": {"type": "string", "description": "A mood of the song"},
+				"track": {"type": "string", "description": "One track alone"}}})J", ""},
 			{"get_links", "=links", "The links: each one's entity, component, "
 				"output, the entity it goes to and its input, with their value "
 				"types. With id: those from it and to it.",
@@ -36128,6 +36326,16 @@ struct Module: public interface::Module, public Interface
 		}
 		if(bodies.size())
 			round.set("bodies", bodies);
+		// [MUSIC_SYNTH] what each player hears
+		json::Value music = json::object();
+		for(auto &pp : m_peers){
+			json::Value h = pp.second.player ? music_heard(pp.second) :
+					json::null();
+			if(!h.is_null())
+				music.set("player:"+itos(pp.second.player), h);
+		}
+		if(music.size())
+			round.set("music", music);
 		int64_t rounds = 0;
 		for(auto &gs : m_sessions)
 			rounds += !gs.second->draft && !gs.second->bench;
@@ -36325,11 +36533,48 @@ struct Module: public interface::Module, public Interface
 			const ss_ topic = jstr(a, "topic");
 			if(topic == "visuals")
 				return agent_visuals();
+			if(topic == "music")
+				return agent_music();
 			if(!topic.empty()){
 				failed = true;
-				return "topic: \"visuals\" or none (the guide)";
+				return "topic: \"visuals\", \"music\" or none (the guide)";
 			}
 			return agent_guide(p.name, true);
+		}
+		// [MUSIC_SYNTH]
+		if(op == "=music"){
+			ss_ text = jstr(a, "text");
+			if(a.get("entity").is_number()){
+				auto it = m_entities.find((uint64_t)a.get("entity").as_number());
+				const Instance *in = it == m_entities.end() ? nullptr :
+						music_of(it->second);
+				if(!in){
+					failed = true;
+					return "entity: a kit/music's id";
+				}
+				text = jstr(in->params, "song");
+			}
+			ss_ why;
+			auto song = interface::jam::parse(text, &why);
+			if(!song){
+				failed = true;
+				return text.empty() ? "entity or text: a song" : why;
+			}
+			const double sec = a.get("seconds").is_number() ?
+					a.get("seconds").as_number() : 0;
+			if(!(sec >= 0 && sec <= 120)){
+				failed = true;
+				return "seconds: 0...120";
+			}
+			// simplified: rendered on Kit's thread, the round waiting
+			// (~33 ms a second of music); a worker thread is the upgrade
+			// if agents analyze while others play
+			const interface::jam::Info info = interface::jam::info(*song);
+			const double whole = (double)info.end / interface::jam::RATE + 0.1;
+			ss_ out = interface::jam::analyze(*song, sec > 0 ? sec :
+					std::min(whole, 120.0), jstr(a, "mood"), jstr(a, "track"));
+			failed = out.compare(0, 9, "{\"error\":") == 0;
+			return out;
 		}
 		if(op == "=goals"){
 			json::Value w = agent_goals();
@@ -38447,6 +38692,97 @@ struct Module: public interface::Module, public Interface
 		return false;
 	}
 
+	// [MUSIC_SYNTH] get_guide's topic "music": kit/music and jam1, the song
+	// format (its one reference; doc/client_api.txt points here). The
+	// parser is src/impl/jam.cpp's; a name or range it does not take is
+	// an error with its line
+	static ss_ agent_music()
+	{
+		return "Music in Kit: kit/music plays a song written as text (the "
+			"jam1 format, below), synthesised on each client as it plays: "
+			"no samples, no files. Its params: song (the text), autoplay (on "
+			"for everyone from the round's start), mood (a mood's name, \"\" "
+			"every track), priority. Placed on a scene (no position) it is "
+			"that scene's, on the app's root every scene's; each player "
+			"hears the one on for them with the highest priority (then a "
+			"scene's over the root's, then the lowest id). Its inputs: play, "
+			"stop (with a player, theirs alone, else everyone's) and mood "
+			"(value: a mood name, from the next bar, faded over a beat). It "
+			"runs from when it went on, on the round's clock, so all hear "
+			"the same bar; the round's end stops it; a scene change keeps it "
+			"if it is still the one. get_state's round.music says what each "
+			"player hears, its mood and bar. You cannot listen: "
+			"analyze_music measures a song (loudness, peaks, bands, each "
+			"track, the loop's join). Aim at about -14 LUFS with master "
+			"gain=, peaks under the ceiling, no track much louder than the "
+			"rest; a loop join step near the median step.\n\n"
+			"## The format (jam1)\n"
+			"Lines; an unknown line, parameter or value out of its range is an "
+			"error with its line number. # at a line's start or after a space "
+			"starts a comment (C#3 is a note). Order: settings, instruments, "
+			"tracks, then patterns, sections, play, loop, moods.\n"
+			"  title Scrap Heat\n"
+			"  tempo 150          # beats a minute (20..400)\n"
+			"  steps 16           # steps a bar\n"
+			"  beat 4             # steps a beat (delay times count steps)\n"
+			"  swing 0            # 0..0.5: every odd step late by this part of a step\n"
+			"  reverb size=0.8 decay=1.3 damp=0.5 predelay=0.015 lowcut=200 gain=0\n"
+			"  delay time=3 feedback=0.3 tone=2500 gain=0   # time in steps\n"
+			"  master comp=-12 ratio=2 catk=0.01 crel=0.15 ceiling=-1 release=0.08 gain=0\n"
+			"  inst NAME SOURCE|INST k=v ...   # a source (below), or an inst to copy\n"
+			"  track NAME inst=INST k=v ...\n"
+			"  def NAME TOKEN                  # a token alias: def em9 G3+B3+D4+F#4\n"
+			"  pattern NAME [bars=N]\n"
+			"  TRACK: tokens ...               # lines append; a bar a line is usual\n"
+			"  TRACK: = OTHER                  # a copy of OTHER's lane above\n"
+			"  TRACK~PARAM: values ...         # per-step instrument params, . keeps\n"
+			"  section NAME: ENTRY ...         # ENTRY: pat, pat+pat (layered), pat*N\n"
+			"  play SECTION ...\n"
+			"  loop SECTION                    # where play goes after its end (first)\n"
+			"  mood NAME TRACK=off|dB ...      # a set of track gains\n"
+			"A lane shorter than its pattern repeats (its length divides the "
+			"pattern's); layered patterns last as long as the longest.\n"
+			"Melodic tokens, one a step: . rest, - hold, E2 C#3 Bb1 a note "
+			"(C4 = MIDI 60), E2+G2+B2 together (8 at most), then modifiers: ! "
+			"accent (velocity 1), ? soft (0.5), @0.6 a velocity, m palm mute "
+			"(pluck), ~ slide into the next note, ' staccato. Default velocity "
+			"0.8; a note lasts its steps times the instrument's gate.\n"
+			"Drum lanes (kick, snare, hat, cymbal), a character a step, "
+			"spaces and | ignored: X accent, x hit, g ghost, o/O open hat, f "
+			"flam, . nothing. A tom is pitched and takes melodic tokens.\n"
+			"## Instrument parameters\n"
+			"Times in seconds (d r fd fr decay: to fall 60 dB), gains dB, "
+			"levels 0..1.\n"
+			"- all: src, gain, vels (velocity to level), a d s r (amp ADSR), "
+			"gate, glide, vib (cents) vibrate (Hz) vibdelay, tune (cents), "
+			"chord (intervals: 0,7,12), strum (s between), spread (cents "
+			"across a chord), drive (dB into a soft clip)\n"
+			"- filter: ftype (none lp bp hp), cut (Hz), res (0..0.98), fenv "
+			"(octaves), fa fd fs fr, ktrack, velf, poles (2 or 4)\n"
+			"- osc: wave wave2 (saw square pulse tri sine none), mix2, "
+			"detune2 (cents), oct2, pw, pwm, pwmrate, sub, noise\n"
+			"- pluck (Karplus-Strong): bright, decay, pick (0..0.5), mdecay "
+			"mbright (palm mute), rdecay (after the gate)\n"
+			"- fm: ratio, index, idecay, ifloor, tine, tratio, tdecay\n"
+			"- kick: tone (Hz), pdrop, pdecay, click\n"
+			"- snare, tom: tone, pdrop, pdecay, snappy, ndecay, nfreq\n"
+			"- hat, cymbal: tone (50: the TR-808's tuning), metal, noise, "
+			"nfreq, odecay (open), bell\n"
+			"## Track parameters\n"
+			"inst, gain, pan, rev dly (sends), mono (a new note stops the "
+			"others), choke (the same for drums), transpose, tune (cents), hum "
+			"(up to ms late, the same every time), velr (velocity +-), seed, "
+			"trem (depth) tremsteps (period), EQ hp lp (Hz) lo hi (shelf dB at "
+			"lof 150 / hif 5000), compressor comp (threshold dB) ratio catk "
+			"crel makeup, the guitar amp: amp (drive dB; on when set), bias, "
+			"tight (Hz), hump mid (pre-drive boost dB, Hz), fizz (Hz), cab "
+			"(Hz), thump thumpf mud presence (dB), ampout (dB), blend (0..1, "
+			"the rest dry).\n"
+			"Limits: 64 KiB of text, 32 tracks, 64 instruments, 60000 notes, "
+			"30 minutes of play order, 64 voices at once (a note past them is "
+			"not played).\n";
+	}
+
 	// [KIT_AGENT_VISUALS] get_guide's topic "visuals": how Workbench draws a
 	// game and which types decide it (each type's file, get_type, has the
 	// details), what an agent sees of it, and the rules a look's change
@@ -38640,7 +38976,7 @@ struct Module: public interface::Module, public Interface
 			"- Links carry signals: link an output of an entity's component to "
 			"an input of another entity, and each time the output fires the "
 			"input gets its value. The value types must meet (none, number, "
-			"string, ...). get_links lists them; unlink takes one away. "
+			"string, ...). get_links lists them, unlink removes one. "
 			"to_name links by name, in the scene of who set it off (a root "
 			"entity's signal reaching each scene's own).\n"
 			"- Nothing runs while the round is Ended. start runs it (Play), "
@@ -38666,15 +39002,15 @@ struct Module: public interface::Module, public Interface
 			"local/<name> (its description says the file), live at once; "
 			"edit_type changes a few lines; "
 			"get_type reads a type's file (Kit's are examples), "
-			"delete_type takes one away. A movement of your own steps the "
+			"delete_type removes one. A movement of your own steps the "
 			"players (kit/controls' movement): its events are its outputs, "
 			"its client part's draw(s, node) draws them (the Crag Trial "
-			"template's local/crag_bike is one). State with kept = true (best "
+			"template's local/crag_bike). State with kept = true (best "
 			"times) outlives Stop and restarts; clear_kept clears it.\n"
-			"- Work in small steps and read back: get_state (or list_types) "
-			"first, then place, set_param, link, start, try_input, get_events "
-			"and get_log, stop, fix, again. An edit's arguments are 4 KB at "
-			"most. Kit's refusals come back as tool errors saying why.\n"
+			"- Work in small steps and read back: get_state (or list_types), "
+			"then place, set_param, link, start, try_input, get_events, "
+			"get_log, stop, fix, again. An edit's arguments are 4 KB at "
+			"most. A refusal is a tool error saying why.\n"
 			// [KIT_AGENT_NEXT_1] 2, 3b
 			"- Big changes in a draft (your own copy; publish or leave_draft), "
 			"a checkpoint of the start before them; playtest runs bots "
@@ -38691,9 +39027,8 @@ struct Module: public interface::Module, public Interface
 			"- Buildat's source, for what the tools and this guide leave out "
 			"(how a type or tool behaves, a limit, a refusal's reason): "
 			"https://github.com/buildat-org/buildat/tree/v"+BUILDAT_VERSION+
-			" (builtin/kit/api.h the type API, builtin/kit/types Kit's types, "
-			"builtin/kit/kit.cpp the server, builtin/kit/client_lua the "
-			"client).\n";
+			" (in builtin/kit: api.h the type API, types Kit's types, kit.cpp "
+			"the server, client_lua the client).\n";
 		// [KIT_SCENE_TREE] (get_guide's: the instructions are cut at 4000)
 		if(full)
 			s += "- Scenes in a tree: a scene may sit under another "
@@ -40047,6 +40382,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		m_session.running = true;
 		m_motion_base = now_us();
+		music_restart();
 		// [KIT_VEHICLE_MOVEMENTS] steered from their rows again, play's parameters gone
 		m_drives.clear();
 		m_play_params.clear();

@@ -1866,7 +1866,8 @@
 	static const char** preference_names()
 	{
 		static const char *names[] = {"render_scale", "vsync", "max_fps",
-				"multisampling", "sound_volume_db", "sound_mute", "ui_size", "lan_discovery",
+				"multisampling", "sound_volume_db", "sound_mute", "music_volume_db",
+				"ui_size", "lan_discovery",
 				"launch_ui",
 				"default_username", "page_size", "lighting", "cache_keep",
 				"cache_per_server", "kit_editor_font", "floorplanner_font",
@@ -1967,6 +1968,8 @@
 			lua_pushboolean(L, o.lan_discovery);
 		else if(name == "sound_mute")
 			lua_pushboolean(L, o.sound_mute);
+		else if(name == "music_volume_db")
+			lua_pushnumber(L, o.music_volume_db);
 		else if(name == "ui_size" && o.ui_size_auto)
 			lua_pushstring(L, "auto");
 		else if(name == "ui_size")

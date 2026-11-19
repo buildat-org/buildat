@@ -305,6 +305,7 @@ int main(int argc, char *argv[])
 			"  -o [k=v,...]         Set preferences; not remembered. Keys:\n"
 			"                       render_scale, vsync, max_fps,\n"
 			"                       multisampling, sound_volume_db, sound_mute,\n"
+			"                       music_volume_db,\n"
 			"                       ui_size (auto, or the UI scale 0.5 to 3),\n"
 			"                       page_size (the most items a Page Up or\n"
 			"                       Down moves, 1 to 100),\n"

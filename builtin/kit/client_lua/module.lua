@@ -2968,6 +2968,14 @@ do
 	install({M = M, O = O, log = log})
 end
 
+-- ---- [MUSIC_SYNTH] kit/music, played: music.lua
+do
+	local ok, err, install = buildat.run_script_file("kit/music.lua")
+	assert(ok and type(install) == "function", "kit: music.lua: " ..
+			tostring(err))
+	install({log = log})
+end
+
 -- ---- The editor: editor.lua, given what it shares with play
 do
 	local ok, err, install = buildat.run_script_file("kit/editor.lua")

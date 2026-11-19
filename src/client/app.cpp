@@ -557,6 +557,9 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 		} else if(key == "sound_volume_db"){
 			in_range = (v >= app::SOUND_OFF_DB && v <= 0.0);
 			opt->sound_volume_db = (float)v;
+		} else if(key == "music_volume_db"){
+			in_range = (v >= app::SOUND_OFF_DB && v <= 0.0);
+			opt->music_volume_db = (float)v;
 		} else if(key == "sound_mute"){
 			opt->sound_mute = (v != 0);
 		} else if(key == "lan_discovery"){
@@ -873,6 +876,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	// on the other -- which is why the key is a new one.
 	const json::Value &jsv_old = o.get("sound_volume");
 	const json::Value &jsm = o.get("sound_mute");
+	const json::Value &jmv = o.get("music_volume_db");
 	const json::Value &jld = o.get("lan_discovery");
 	const json::Value &jus = o.get("ui_size");
 	const json::Value &jui = o.get("launch_ui");
@@ -956,6 +960,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	}
 	if(jsm.is_boolean())
 		items += ss_()+(items.empty()?"":",")+"sound_mute="+(jsm.as_boolean()?"1":"0");
+	if(jmv.is_number())
+		items += ss_()+(items.empty()?"":",")+"music_volume_db="+ftos(jmv.as_number());
 	if(jld.is_boolean())
 		items += ss_()+(items.empty()?"":",")+"lan_discovery="+(jld.as_boolean()?"1":"0");
 	if(jcp.is_boolean())
@@ -1132,6 +1138,7 @@ static void save_preferences(const app::Options &opt)
 	o.set("multisampling", opt.graphics.multisampling);
 	o.set("sound_volume_db", opt.sound_volume_db);
 	o.set("sound_mute", opt.sound_mute);
+	o.set("music_volume_db", opt.music_volume_db);
 	o.set("lan_discovery", opt.lan_discovery);
 	if(opt.ui_size_auto)
 		o.set("ui_size", "auto");
@@ -3831,6 +3838,7 @@ struct CApp: public App, public magic::Application
 		const GraphicsOptions &g = m_options.graphics;
 		const GraphicsOptions &b = before.graphics;
 		if(m_options.sound_volume_db != before.sound_volume_db ||
+				m_options.music_volume_db != before.music_volume_db ||
 				m_options.sound_mute != before.sound_mute)
 			apply_sound_preferences();
 		if(m_options.lan_discovery)
@@ -3874,6 +3882,10 @@ struct CApp: public App, public magic::Application
 				db <= app::SOUND_OFF_DB + 0.01f) ? 0.0f :
 				(float)pow(10.0, db / 20.0);
 		audio->SetMasterGain("Master", gain);
+		// [MUSIC_SYNTH] jam's songs (and any "Music" source) under it
+		const float mdb = m_options.music_volume_db;
+		audio->SetMasterGain("Music", mdb <= app::SOUND_OFF_DB + 0.01f ?
+				0.0f : (float)pow(10.0, mdb / 20.0));
 	}
 
 	// With the cursor hidden, Urho3D on Linux hands the focus back only on

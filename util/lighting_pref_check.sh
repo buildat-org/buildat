@@ -45,7 +45,8 @@ v=$(got -o lighting=auto); case "$v" in *", auto true") ;;
 echo "ok: lighting_auto true unset and with auto, false with cartoon"
 
 # The Lighting row's dropdown: the "▼" nearest its place (a row holds
-# 38 px; rows added above it move it -- 2026-11-03 the cache rows did)
+# 38 px, the window centred: a row added above it moves it 19 px --
+# 2026-11-03 the cache rows did, 2026-11-19 Music volume)
 cat > "$t/o.cmds" <<C
 wait_log_any 60000 rows in
 delay 500
@@ -54,11 +55,11 @@ wait_log 5000 rows for "dis"
 keypress Return
 wait_log 5000 Engine settings shown
 delay 800
-tap 735 488
+tap 735 507
 wait_log 5000 open
 tap 100 100
 wait_log 5000 closed
-click DropDownList "▼" 735 488
+click DropDownList "▼" 735 507
 wait_log 5000 open
 mouse_pos 100 100
 mouse_click left
@@ -83,7 +84,7 @@ keypress Return
 wait_log 5000 Engine settings shown
 delay 800
 screenshot $t/cartoon.png
-click DropDownList "▼" 735 488
+click DropDownList "▼" 735 507
 wait_log 5000 dropdown_
 delay 300
 screenshot $t/list.png
