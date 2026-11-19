@@ -64,7 +64,8 @@
 #      play_input's body and the client's predicted state, bad keys and values
 #      erring, a player not here refused, cleared;
 #      the movement's draw given the predicted state (8); two
-#      parts passing a value through kit.shared (2); a part's on_add failing:
+#      parts passing a value through kit.shared (2), [KIT_API_1] kit.editor nil
+#      to a part and kit.internal.editor a function; a part's on_add failing:
 #      in get_log and in kitboss's editor Log, its entity selected (4).
 #   util/kit_agent_tools_check.sh
 set -u
@@ -433,6 +434,9 @@ return {
 		if kit.shared.pp and not e.said then
 			e.said = true
 			e:log("shared " .. kit.shared.pp)
+			-- [KIT_API_1] a name outside Kit API 1's table is nil, .internal's not
+			e:log("outside " .. tostring(kit.editor) .. ", internal " ..
+					type(kit.internal.editor))
 		end
 	end,
 }
@@ -1009,6 +1013,8 @@ elif phase == "client":
         "cleared" % me)
     # (2) kit.shared: pp's part wrote it, pq's read it
     camsays("kit: entity %d's client part: shared pp %d" % (EQ, EP))
+    # [KIT_API_1] (item 3) kit.editor is no part's: nil, but kit.internal's
+    camsays("kit: entity %d's client part: outside nil, internal function" % EQ)
     # (4) pf's on_add failed on this client: in its log, which client said
     # (the camera's, as it came into the scene still, before it played)
     camsays("kit: entity %d's client part on_add: local/pf.client:1: pf fails on purpose" % EF)

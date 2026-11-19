@@ -44,7 +44,7 @@ local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local ui_utils = require("buildat/extension/ui_utils")
 local voxelworld = require("buildat/module/voxelworld")
-local kit = require("buildat/module/kit")
+local kit = require("buildat/module/kit").internal
 -- The server's copy (meta.json's client_extensions), whatever the client's
 local _, pm_err, pause_menu = buildat.run_script_file("pause_menu/init.lua")
 assert(type(pause_menu) == "table", "pause_menu: " .. tostring(pm_err))

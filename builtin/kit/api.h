@@ -571,10 +571,21 @@ namespace interface
 //   [KIT_CLIENT_REACT] (3) **What a client part reaches**: its handlers'
 //   `e` (e.id, e.node, e.state, e.look, e.hinge, e.body, e.swing, e.mine,
 //   e.you, e:shown(key), e:predict(key, v, s), e:near(d), e:log(text): this
-//   client's log only); `local kit = require("buildat/module/kit")`, the
-//   client's Kit (module.lua's and controls.lua's heads list it: kit.pointed,
-//   kit.use, kit.body_state() this client's predicted body, kit.body_pos(),
-//   kit.seated()...; [RACER_FEEL] (2), (3) from a handler or a movement's
+//   client's log only); `local kit = require("buildat/module/kit")`,
+//   [KIT_API_1] these 15 names of the client's Kit and no others (another
+//   is nil; module.lua's, controls.lua's and input.lua's heads say more):
+//   kit.pointed(origin, dir, reach) and kit.use(id), kit.body_state() this
+//   client's predicted body, kit.body_pos(), kit.seated(), kit.ui_keys()
+//   (true while a UI page has the keys: play gets none),
+//   kit.press_action(name, down) (a game action, a type's `actions`,
+//   pressed or let go as by its key), kit.key_down(id) (a key action held),
+//   kit.key_name(id) (its key's name) and kit.key_text(s) (each "[id]" in s
+//   as this client's key, as signs show it), kit.shared, kit.shake,
+//   kit.effect, kit.mark and kit.clear_marks below. kit.internal is the
+//   whole client module, the editor's too: outside Kit API 1 (it may
+//   change in any release; the apps that host Kit use it, and publishing a
+//   game whose part does warns). [RACER_FEEL] (2), (3) from a handler or a
+//   movement's
 //   draw, this client's alone and at once: kit.shake(amount) the camera
 //   shaken as kit/controls' shake input does (0...5, from this frame),
 //   kit.effect{at = {x, y, z}, ...} c:effect's particles (its particle
@@ -582,7 +593,7 @@ namespace interface
 //   past it dropped; effects.lua), kit.mark(x, y, z, yaw, size, color[,
 //   alpha]) a flat ground mark (size {across, along}; a ring of 1024;
 //   ~60 us a mark, the sandbox's Vector3s),
-//   kit.clear_marks()); (2) kit.shared, one plain table per client every
+//   kit.clear_marks(); (2) kit.shared, one plain table per client every
 //   client part of every entity shares (local, nothing sent; a part's
 //   reload, a scene switch, Play and Stop keep it, the connection's end
 //   drops it; keys by convention the type's name; simplified: a part

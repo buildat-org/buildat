@@ -13,7 +13,7 @@
 local magic = require("buildat/extension/urho3d")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
-local kit = require("buildat/module/kit")
+local kit = require("buildat/module/kit").internal
 
 return function(game, scene, camera_node)
 	kit.editor{scene = scene, camera = camera_node, ground_y = 0,
