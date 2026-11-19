@@ -1042,8 +1042,10 @@ namespace interface
 //   UI's `stack` (kit/goal's): the shown ones of one anchor and place go
 //   under each other (over, at a bottom anchor), a hidden one or one with no
 //   text leaving no gap, by order then id.
-// `by` is who caused it, "player:<name>" or "app", carried along the links
-// it sets off and kept with a timer. Handlers run only while the server
+// `by` is who caused it, "player:<id>" (a bot's "bot:<id>") or "app",
+// carried along the links it sets off and kept with a timer. [KIT_API_1] A
+// function's player argument (c:hurt, c:speed, c:session_move...) is a
+// player's entity id or such a by. Handlers run only while the server
 // is Running (below).
 // on_start(c) as a round starts from the start (Play, an instance placed
 // or restarted in the round); on_join(c, by) as a player goes through the
@@ -1635,7 +1637,7 @@ namespace interface
 // their modify_hit hooks and health as a hit of type `type` ("hurt" by
 // default), by the run's by; Kit refuses it (logged) for a player waiting,
 // under game_rules' peaceful, or where the region at them refuses them
-// damage. 16 a run.
+// damage. 16 a run; a player that is no id or by an error.
 // [KIT_CREATURES_8A] Creatures: an entity with a creature movement
 // (kit/creature_walker's `movement.steered`, the server's drive) and
 // behaviours, types with `creature = true`. A behaviour proposes a goal,
