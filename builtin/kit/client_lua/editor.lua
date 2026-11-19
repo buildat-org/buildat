@@ -1937,6 +1937,29 @@ end
 function NT.entities(w)
 	local tabs, indent = NT.entity_lists()
 	local tab = S.list_tab or "Game-wide"
+	-- [KIT_GENERATORS] (4z37f) this scene's generators first, each with Run
+	-- (its params in the inspector)
+	local gens = {}
+	for _, g in ipairs(E.state and E.state.generators or {}) do
+		if g.scene == (E.state.scene or "") then
+			gens[#gens + 1] = g
+		end
+	end
+	if #gens > 0 then
+		label(row(w), "Generators")
+		for _, g in ipairs(gens) do
+			local gr = row(w)
+			NT.name_item(gr, "palette", find(g.id) or {id = g.id, name = g.name},
+					(g.name ~= "" and g.name or g.type) .. ": " .. NT.gen_line(g),
+					function()
+						M.select(g.id)
+					end)
+			button(gr, "Run", function()
+				log:info("kit editor: run generator " .. g.id)
+				send({op = "build", id = g.id, comp = g.comp})
+			end):SetName("run generator " .. g.id)
+		end
+	end
 	local tr = row(w)
 	if NT.sh.on() then
 		-- ([KIT_PHONE_EDITING] a dropdown: the three ran off a phone's pane)
@@ -3433,13 +3456,87 @@ function NT.params_form(w, e, ci, c, t, keep)
 	for _, k in ipairs(points) do
 		local r, v = row(w), values[k] or decl[k].default
 		label(r, k:upper() .. ": " .. (type(v) == "table" and #v or 0))
-		if M.side_game() or e.pos and NT.pg.flat(NT.drawn_turn(e)) then
+		if M.side_game() or e.pos and (decl[k].level or
+				NT.pg.flat(NT.drawn_turn(e))) then
 			button(r, "Edit in 2D view", function()
 				NT.pg.show(e)
 			end)
 		end
+		-- [KIT_GENERATORS] (4z37f) a point's further values (a corner's
+		-- radius) typed: a point a line, its numbers in the order named
+		if type(decl[k].values) == "table" and type(v) == "table" then
+			local cols = {"x", decl[k].level and "z" or "y"}
+			for _, d in ipairs(decl[k].values) do
+				cols[#cols + 1] = tostring(d.name)
+			end
+			text(w, table.concat(cols, " ") .. ", a point a line", DIM)
+			local lines = {}
+			for _, p in ipairs(v) do
+				local ns = {}
+				for i, x in ipairs(p) do
+					ns[i] = string.format("%g", x)
+				end
+				lines[#lines + 1] = table.concat(ns, " ")
+			end
+			local now = table.concat(lines, "\n")
+			local f = edit(row(w), now, function(s)
+				now = s
+			end)
+			f:SetName("points " .. k)
+			f.multiLine = true
+			f.textSelectable = true
+			f.textCopyable = true
+			f.maxLength = 8192
+			f:SetFixedHeight(160)
+			f.cursorPosition = 0
+			button(w, "Set " .. k, function()
+				local pts = {}
+				for line in now:gmatch("[^\n]+") do
+					local p = {}
+					for x in line:gmatch("%S+") do
+						p[#p + 1] = tonumber(x)
+					end
+					if #p > 0 then
+						pts[#pts + 1] = p
+					end
+				end
+				log:info("kit editor: " .. key .. " " .. k .. " set, " .. #pts ..
+						" points")
+				send({op = "set", id = e.id, comp = ci - 1, param = k, value = pts})
+			end):SetName("set points " .. k)
+		end
+	end
+	-- [KIT_GENERATORS] (4z37f) a generator's Run and its last run
+	local g = NT.generator(e.id)
+	if g and g.comp == ci - 1 then
+		local gr = row(w)
+		button(gr, "Run", function()
+			log:info("kit editor: run generator " .. e.id)
+			send({op = "build", id = e.id, comp = ci - 1})
+		end):SetName("run generator " .. e.id)
+		label(gr, NT.gen_line(g))
 	end
 return names
+end
+
+-- [KIT_GENERATORS] (4z37f) The edit state's generator of an entity (nil: none)
+function NT.generator(id)
+	for _, g in ipairs(E.state and E.state.generators or {}) do
+		if g.id == id then
+			return g
+		end
+	end
+end
+
+-- Its last run in a line
+function NT.gen_line(g)
+	local l = g.last
+	if not l then
+		return g.children .. " children, not run here yet"
+	end
+	return l.ok and string.format("%d children (%d kept, %d gone), %d ms, %s%s",
+			l.children, l.kept or 0, l.gone or 0, l.ms or 0, l.by or "",
+			l.live and ", live" or "") or "refused: " .. tostring(l.why)
 end
 
 -- [KIT_GOALS] What the links say of the goals (kit/goal; of every scene):
