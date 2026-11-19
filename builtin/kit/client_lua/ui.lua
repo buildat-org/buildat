@@ -1973,8 +1973,10 @@ local function update()
 	end
 	-- A panel with a button up: the pointer this player's to click with
 	-- (as builtin/accounts' Server window frees it); ui_utils' mouse look
-	-- takes it back after
-	if wants and not want.visible then
+	-- takes it back after. Each frame it is up, not only as it comes: a
+	-- panel up before Workbench's mode settled had its pointer taken by the
+	-- mouse look turned on then (a fast join, 2026-11-19)
+	if wants then
 		local input = magic.input
 		if not input.mouseVisible or (WEB and input:IsMouseLocked()) then
 			input:SetMouseVisible(true, "a Kit panel with a button")
