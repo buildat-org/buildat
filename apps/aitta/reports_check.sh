@@ -15,7 +15,9 @@
 #      is not appealed twice; the admin's own delist and relist are in
 #      the audit log and stated to the author.
 #   3. While pk is delisted, the launcher's Aitta page notes it on the
-#      installed tile: "Delisted by its Aitta" and why.
+#      installed tile: "Delisted by its Aitta" and why. The page stays up
+#      and lists pk2 ([AITTA_PAGE_DELISTED_BACK]); Home is drawn again
+#      after it closes.
 #   4. A bar: tester's next release refused.
 # Screenshots in $t (KEEP_TMP=1 keeps it).
 #
@@ -164,6 +166,11 @@ BUILDAT_STARPORT_MANAGED="$t/managed.json" timeout 90 bin/buildat \
 	> "$t/note.log" 2>&1
 mine "aitta page: delisted $(aitta_fp "$t/pub").pk@1.0.0: broken: it does not start" "$t/note.log" > /dev/null ||
 	fail "no note on the installed one ($(grep -a "aitta page\|Command seq" "$t/note.log" | tail -3))"
+mine "aitta page: tester/pk2 1.0.0" "$t/note.log" > /dev/null &&
+	! grep -aq "Command sequence failed" "$t/note.log" ||
+	fail "the page did not stay up past the delisted one ($(grep -a "aitta page\|launch_menu\|Command seq" "$t/note.log" | tail -4))"
+mine "launch_menu: back on Home, drawn again" "$t/note.log" > /dev/null ||
+	fail "Home not drawn again after the page ($(grep -a "launch_menu\|Command seq" "$t/note.log" | tail -3))"
 
 reqs author1 "$t/st.log" '{"cmd":"statements"}'
 st=$(ans "$t/st.log" 1 | grep -o '"id":"[0-9a-f]*","listing":"tester/pk/1.0.0"' | head -1 | cut -d'"' -f4)
