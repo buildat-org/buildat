@@ -155,6 +155,56 @@ local function pieces(B)
 	return out
 end
 
+-- (4z37i (4)) The racing line ({{x, z}...}, the lap's way round): the centre
+-- line (LINE) at RL_N points, each moved across the road (held RL_IN m inside
+-- its edges) to where the line bends least: again and again toward what its
+-- neighbours two either side make straightest (the second differences'
+-- least squares), at a coarse spacing first, then the fine. It runs wide
+-- into a bend, cuts its inside and runs wide out.
+-- simplified: the road's width only, never the run-off's
+local RL_N, RL_IN = 120, 2.8
+local function racing_line(LINE, W)
+	local N, n = #LINE, math.min(RL_N, math.floor(#LINE / 3))
+	local C, Q, d = {}, {}, {}
+	for k = 1, n do
+		local s = (k - 1) * N / n
+		local i = math.floor(s)
+		local a, b = LINE[i % N + 1], LINE[(i + 1) % N + 1]
+		C[k] = {a[1] + (b[1] - a[1]) * (s - i), a[2] + (b[2] - a[2]) * (s - i)}
+		d[k] = 0
+	end
+	for k = 1, n do
+		local a, b = C[(k - 2) % n + 1], C[k % n + 1]
+		local l = hypot(b[1] - a[1], b[2] - a[2])
+		Q[k] = {-(b[2] - a[2]) / l, (b[1] - a[1]) / l}
+	end
+	local lim = W - RL_IN
+	local function at(k)
+		k = (k - 1) % n + 1
+		return C[k][1] + Q[k][1] * d[k], C[k][2] + Q[k][2] * d[k]
+	end
+	for _, span in ipairs({3, 2, 1}) do
+		for _ = 1, 200 do
+			for k = 1, n do
+				local ax, az = at(k - span)
+				local bx, bz = at(k + span)
+				local cx, cz = at(k - 2 * span)
+				local ex, ez = at(k + 2 * span)
+				local tx = (4 * (ax + bx) - cx - ex) / 6
+				local tz = (4 * (az + bz) - cz - ez) / 6
+				local v = (tx - C[k][1]) * Q[k][1] + (tz - C[k][2]) * Q[k][2]
+				d[k] = v < -lim and -lim or v > lim and lim or v
+			end
+		end
+	end
+	local out = {}
+	for k = 1, n do
+		local x, z = at(k)
+		out[k] = {r2(x), r2(z)}
+	end
+	return out
+end
+
 return {
 	version = 1,
 	-- (a lap's worth of road, walls, run-off and junk: some 250 children)
@@ -506,6 +556,9 @@ return {
 				missed = missed + 1
 			end
 		end
+		-- (4z37i (4)) The racing line: the race's bots drive along it
+		c:child{type = "kit/path", name = "the racing line", pos = {0, Y_ROAD, 0},
+			params = {points = racing_line(LINE, W)}}
 		c:log(string.format("the loop %d m, %d corners, %d checkpoints%s", N, n, #cps,
 			missed > 0 and ", " .. missed .. " junk with no room" or ""))
 	end,

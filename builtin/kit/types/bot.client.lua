@@ -14,6 +14,14 @@ local KNOBS = {
 		max = 3},
 	{key = "speed", label = "Speed", unit = "%", step = 10, min = 30, max = 100},
 }
+-- [KIT_BOT_DRIVE] a driving bot's (its state `driving`): one row, Add
+-- sends "<id> <skill>"
+local DRIVE_KNOBS = {
+	{key = "skill", label = "Skill", unit = "%", step = 10, min = 0, max = 100},
+}
+local function knobs_of(e)
+	return e.state.driving == true and DRIVE_KNOBS or KNOBS
+end
 local WEB = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
 local last = nil
 -- (one at a time: a second bot's replaces it)
@@ -62,7 +70,7 @@ local function open(e)
 	title:SetStyleAuto()
 	title:SetText("Add bot")
 	box = {win = win, v = {}, id = e.id}
-	for _, k in ipairs(KNOBS) do
+	for _, k in ipairs(knobs_of(e)) do
 		local v = last and last[k.key] or tonumber(e.state[k.key])
 		box.v[k.key] = math.max(k.min, math.min(k.max, v or k.min))
 		local row = win:CreateChild("UIElement")
@@ -101,7 +109,13 @@ local function open(e)
 	end
 	button(row, "Add", "bot add", function()
 		local v = box.v
-		last = {aim = v.aim, reaction = v.reaction, speed = v.speed}
+		last = last or {}
+		for k, x in pairs(v) do
+			last[k] = x
+		end
+		if v.skill then
+			return answer(string.format("%g", v.skill))
+		end
 		answer(string.format("%g %g %g", v.aim, math.floor(v.reaction * 10 + 0.5) / 10,
 				v.speed))
 	end)
@@ -115,8 +129,12 @@ local function open(e)
 			input:SetMouseMode(magic.MM_ABSOLUTE)
 		end
 	end
-	e:log(string.format("bot dialog shown, the pointer free: %s: aim %g reaction %g speed %g",
-			tostring(input.mouseVisible), box.v.aim, box.v.reaction, box.v.speed))
+	local shown_v = {}
+	for _, k in ipairs(knobs_of(e)) do
+		shown_v[#shown_v + 1] = k.key .. " " .. string.format("%g", box.v[k.key])
+	end
+	e:log("bot dialog shown, the pointer free: " .. tostring(input.mouseVisible) .. ": " ..
+			table.concat(shown_v, " "))
 end
 
 return {
@@ -130,7 +148,10 @@ return {
 		end
 		-- (once its knobs are here too: the keys come one by one)
 		if mine then
-			for _, k in ipairs(KNOBS) do
+			if e.state.driving == nil then
+				return
+			end
+			for _, k in ipairs(knobs_of(e)) do
 				if tonumber(e.state[k.key]) == nil then
 					return
 				end
