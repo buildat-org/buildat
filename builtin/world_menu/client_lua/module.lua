@@ -612,6 +612,8 @@ buildat.sub_packet("world_menu:list", function(data)
 	-- [SKELDAT_WORLD_ADMIN] Shown in a running world: it marked, Back
 	-- and Close world; a refusal said over the list
 	local running = (state.running or "") ~= "" and state.running or nil
+	-- (4z37i) none selected: the running one, its buttons shown
+	served.selected = served.selected or running
 	for _, w in ipairs(state.worlds) do
 		w.label = w.name == running and (w.name .. " (running)") or nil
 	end

@@ -533,8 +533,8 @@ mcp after "$tok" "$t/first" "$t/second" "$t/built.json" imported
 # Its export, for the web's download (5.): (4z37i) Games...' right
 # column for the running game, over the editor
 menu
+# (the running game selected)
 step 10 "world_menu: the list shown, 3 worlds" "frames 3" 'click Button "Games..."'
-step 10 "world_menu: the list shown" "frames 3" 'click Button "imported (running)"'
 cmd "frames 3" "screenshot $t/games_panel.png"
 step 20 "kit editor: Exported to .*imported.template.zip" 'click Button "Export this game"'
 cmd "frames 5" "screenshot $t/games_exported.png"
@@ -574,7 +574,6 @@ if [ -n "$web" ]; then
 	cat > "$t/web1.steps" <<'J'
  ["waitlog_any", "pause: the menu shown", 30], ["frames", 3],
  ["click", "Button", "Games..."], ["waitlog", "world_menu: the list shown, 5 worlds", 10], ["frames", 3],
- ["click", "Button", "imported (running)"], ["waitlog", "world_menu: the list shown", 10], ["frames", 3],
  ["click", "Button", "Export this game"],
  ["waitlog", "kit editor: Exported imported.template.zip \\([0-9]+ KiB\\): see your downloads", 20],
  ["downloaded", "imported.template.zip", 20], ["frames", 3],
