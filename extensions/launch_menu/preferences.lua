@@ -103,6 +103,15 @@ local PREFERENCES = {
 		label = "Mute",
 		values = {false, true},
 	},
+	-- [MUSIC_SYNTH] the music's (jam's songs) under the sound volume
+	{
+		name = "music_volume_db",
+		label = "Music volume",
+		values = {-33, -30, -27, -24, -21, -18, -15, -12, -9, -6, -3, 0},
+		show = function(v)
+			return ui_utils.db_text(v)
+		end,
+	},
 	-- [KIT_FORCE_CARTOON] Kit's physical lighting drawn as cartoon on this
 	-- client, a weak device's; unset ("auto") it is cartoon on software GL.
 	-- [SOFT_GL_CARTOON] skeldat and hillclimb draw no shadows and a shorter
@@ -771,7 +780,7 @@ end
 -- added (accounts' Server), and Logs and errors.
 --
 local GAME_ROWS = {
-	{"Sound", {"sound_volume_db", "sound_mute"}},
+	{"Sound", {"sound_volume_db", "sound_mute", "music_volume_db"}},
 	{"Video", {"render_scale", "max_fps", "vsync", "multisampling",
 		"lighting", "ui_size", "page_size", "web_address_bar", "screen_orientation", "web_idle_fps",
 		"kit_editor_font", "floorplanner_font", "kit_ui_mode", "fp_ui_mode",
@@ -853,7 +862,9 @@ function M.show_game(o, app_key, extra)
 		magic.SubscribeToEvent(b, "Released", function() on_click() end)
 		return b
 	end
-	local function dropdown(parent, label, choices, current, on_choose)
+	-- (name: a preference's row's, "dropdown_<preference>", for a drive's
+	-- click by name, as a row added above moves it)
+	local function dropdown(parent, label, choices, current, on_choose, name)
 		local list, at = {}, 1
 		for i, c in ipairs(choices) do
 			list[i] = {c[1], i}
@@ -862,7 +873,8 @@ function M.show_game(o, app_key, extra)
 		return ui_utils.dropdown(parent, list, at, function(_, i)
 			on_choose(choices[i][2])
 		end, {label = label, label_width = math.floor(inner * 0.45),
-			width = math.floor(inner * 0.5)})
+			width = math.floor(inner * 0.5),
+			name = name and "dropdown_" .. name})
 	end
 	-- Not on the stack, so its own on_close ([CLOSE_GLYPH])
 	ui_utils.close_glyph(root, win, function() game_close() end)
@@ -940,7 +952,7 @@ function M.show_game(o, app_key, extra)
 									tostring(err2))
 						end
 					end
-				end)
+				end, pref.name)
 				local note = pref.note and pref.note()
 				if note then
 					text(w, note, "dim")
@@ -975,7 +987,7 @@ function M.show_game(o, app_key, extra)
 									tostring(err2))
 						end
 					end
-				end)
+				end, "fov")
 			end
 		end)
 		for _, pref in ipairs(rows) do
