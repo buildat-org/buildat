@@ -1174,11 +1174,15 @@ PY
 # it stands, beside a bone block, which does not burn; one 20 off with no
 # bones round it, which does as it walks in. Both marked, as the marker
 # skull a skeleton puts in the next column on seeing a player would keep
-# the sun off it too
+# the sun off it too. The first walled in by stone (which keeps no sun
+# off) round the block: its light form reads its column's bones only, not
+# the block, and before the body came it once stepped out of the block's
+# reach
 log23="$t/srv23.log"
+pen=$(walls "-1 5" "0 5" "1 5" "-1 6" "-1 7" "0 7" "1 7")
 BUILDAT_SKELDAT_WORLD=sun BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
-	BUILDAT_SKELDAT_TEST="skeleton 0 6 marked; marker 1 6 skeldat:bone_block; skeleton 0 -20 marked" \
+	BUILDAT_SKELDAT_TEST="${pen}skeleton 0 6 marked; marker 1 6 skeldat:bone_block; skeleton 0 -20 marked" \
 	start_server "$log23" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv23" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log23)"
