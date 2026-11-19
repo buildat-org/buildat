@@ -5024,6 +5024,35 @@ struct Module: public interface::Module, public Interface
 	// raises it
 	int64_t m_api = interface::aitta::KIT_API;
 
+	// [KIT_API_1] A component's version in a file (a composition, a
+	// prefab): its own; none, in a file of "kit" 1 or more 1 (Kit writes
+	// each one's since), in one from before the type's current (Kit left
+	// that out then); 0: the type's current, for entity_from_json()
+	static int64_t file_version(const json::Value &file, const json::Value &c)
+	{
+		const json::Value &v = c.get("version");
+		if(v.is_number())
+			return (int64_t)v.as_number();
+		return json::jint(file, "kit", 0) >= 1 ? 1 : 0;
+	}
+	// The file's entities with file_version()'s, each component's
+	static json::Value file_versions(const json::Value &file,
+			const json::Value &es)
+	{
+		if(json::jint(file, "kit", 0) < 1 || !es.is_array())
+			return es;
+		json::Value out = es.deepcopy();
+		for(unsigned i = 0; i < out.size(); i++){
+			if(!out.at(i).get("components").is_array())
+				continue;
+			json::Value &cs = out[i]["components"];
+			for(unsigned k = 0; k < cs.size(); k++)
+				if(cs.at(k).is_object() && cs.at(k).get("version").is_undefined())
+					cs[k].set("version", (int64_t)1);
+		}
+		return out;
+	}
+
 	// by: the Buildat that wrote it, if known (a template's meta.json's)
 	bool load_composition(const json::Value &c, ss_ &why, const ss_ &by = "")
 	{
@@ -5036,7 +5065,7 @@ struct Module: public interface::Module, public Interface
 		root.kind = "app";
 		root.name = "app";
 		m_entities[1] = root;
-		const json::Value &es = c.get("entities");
+		const json::Value es = file_versions(c, c.get("entities"));
 		m_pending_ids.clear();
 		m_from_dig_zone.clear();
 		for(unsigned i = 0; i < es.size(); i++)
@@ -7871,8 +7900,9 @@ struct Module: public interface::Module, public Interface
 
 	// The composition's lines, an entity a line (load_composition()'s form):
 	// each param only where it is not its type's default or the app gives one
-	// (Host::defaults: another project's may differ), a version only where it
-	// is not the type's. Refused: a type not Kit's or the project's own
+	// (Host::defaults: another project's may differ), each one's version
+	// ([KIT_API_1]: a type bumped later migrates it). Refused: a type not
+	// Kit's or the project's own
 	bool export_entities(const json::Value &es, ss_ &comp, ss_ &why)
 	{
 		for(unsigned i = 0; i < es.size(); i++){
@@ -7888,8 +7918,6 @@ struct Module: public interface::Module, public Interface
 					return false;
 				}
 				const Type &t = m_types[type];
-				if(json::jint(cj, "version", 0) == t.version)
-					cj.del_key("version");
 				const json::Value &decl = t.decl.get("params"),
 						&app = m_defaults.get(type), &ps = cj.get("params");
 				json::Value kept = json::object();
@@ -7936,6 +7964,9 @@ struct Module: public interface::Module, public Interface
 			e.set("parent", (int64_t)sc.first);
 			e.set("name", "World");
 			cj.set("type", "kit/terrain");
+			std::string tw;
+			if(load_type("kit/terrain", tw))
+				cj.set("version", m_types["kit/terrain"].version);
 			if(m_defaults.get("kit/terrain").size())
 				cj.set("params", m_defaults.get("kit/terrain"));
 			comps.append(cj);
@@ -8523,7 +8554,8 @@ struct Module: public interface::Module, public Interface
 		why = interface::aitta::kit_level_refusal(c);
 		if(!why.empty())
 			return why;
-		const json::Value &es = c.get("entities"), &outside = c.get("outside");
+		const json::Value es = file_versions(c, c.get("entities")),
+				&outside = c.get("outside");
 		// Its scene entity on the root, each other one under it
 		// ([KIT_SCENE_TREE] the scenes under it too)
 		std::map<uint64_t, uint64_t> up;
@@ -18277,11 +18309,11 @@ struct Module: public interface::Module, public Interface
 				// [KIT] stage 5: a member of an older version of its type
 				// is checked as its copies will be made, migrated
 				json::Value ps = c.get("params");
-				if(ps.is_object() && json::jint(c, "version", 1) <
-						m_types[type].version){
+				const int64_t cv = file_version(j, c) ? file_version(j, c) :
+						m_types[type].version;
+				if(ps.is_object() && cv < m_types[type].version){
 					ps = ps.deepcopy();
-					migrate_params(type, json::jint(c, "version", 1), ps,
-							"A prefab's "+who);
+					migrate_params(type, cv, ps, "A prefab's "+who);
 				}
 				if(ps.is_object())
 					for(json::Iterator it(ps); it; ++it){
@@ -18910,8 +18942,8 @@ struct Module: public interface::Module, public Interface
 				const ss_ type = full_type(jstr(c, "type"));
 				json::Value cj = json::object(), ls = json::array();
 				cj.set("type", type);
-				if(c.get("version").is_number())
-					cj.set("version", c.get("version"));
+				if(file_version(pf, c)) // [KIT_API_1]
+					cj.set("version", file_version(pf, c));
 				json::Value params = c.get("params").is_object() ?
 						c.get("params").deepcopy() : json::object();
 				const json::Value &decl = m_types[type].decl.get("params");

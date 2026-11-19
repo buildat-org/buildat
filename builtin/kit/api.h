@@ -82,7 +82,9 @@ namespace interface
 // packages (below), named "<fp>/<name>" by the package's key
 // ([AITTA_KEY_IDENTITY]: fp the key's fingerprint, doc/aitta.txt); the
 // game's own are custom types, "local/<name>" (below). An instance records its type and the type's version
-// (the file's `version`). A save from before, its types bare names, is
+// (the file's `version`), each one's written ([KIT_API_1]; one left out:
+// in a file of "kit" 1 or more version 1, in one from before the type's
+// current). A save from before, its types bare names, is
 // read as the app's type of that name if it has one, else Kit's, and
 // written back so.
 //
