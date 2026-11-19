@@ -246,6 +246,9 @@ BUILDAT_FP_STARPORT=$token timeout 60 Build/bin/buildat -o launch_ui=launch_menu
 	> "$tmp/cl2.log" 2>&1
 grep -q "Login refused: This server has no admin yet" "$tmp/cl2.log" ||
 	fail "an ID got in before the server had an admin (cl2.log)"
+# That refusal is the address's first failed login, which waits 1 s: a
+# client joining sooner is refused for it
+sleep 1
 BUILDAT_FP_STARPORT=$token BUILDAT_FP_CODE=$setup timeout 60 \
 	Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN2 \
 	-c @"$tmp/cmds_joined.txt" > "$tmp/cl2.log" 2>&1
