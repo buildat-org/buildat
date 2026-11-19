@@ -97,6 +97,7 @@ return {
 	outputs = {crash = "none"},
 	movement = {body = BODY, raw_keys = true, touch = "drive",
 		touch_buttons = {{"Turn", "jump"}},
+		touch_axes = {{"Lean left", "r", -1}, {"Lean right", "r", 1}},
 		-- The help line in play, each item gone once its input is used
 		help = {{"[forward]/[back]", "gas, brake", "f"},
 			{"[left]/[right]", "lean", "r"}, {"[jump]", "turn round", "jump"}},

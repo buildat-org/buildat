@@ -133,6 +133,7 @@ return {
 	outputs = {lap = "none", fire = "number", smash = "number", ram = "string"},
 	movement = {body = BODY, raw_keys = true, touch = "drive", bodies = true,
 		touch_buttons = {{"Handbrake", "jump"}},
+		touch_axes = {{"Left", "r", -1}, {"Right", "r", 1}},
 		help = {{"[forward]/[back]", "gas, brake", "f"},
 			{"[left]/[right]", "steer", "r"}, {"[jump]", "handbrake", "jump"},
 			{"[fire]/Left click", "fire"}},
