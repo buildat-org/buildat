@@ -828,6 +828,10 @@ screenshot $t/pause.png
 click Button "Settings..."
 wait_log 5000 pause: settings shown
 delay 1000
+# Server... is below the page's fold at 800x500: scrolled to
+mouse_pos 400 250
+$(for _ in $(seq 20); do echo "mouse_wheel -1"; done)
+delay 500
 click Button "Server..."
 delay 1500
 keypress Escape
