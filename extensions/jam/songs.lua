@@ -5,25 +5,26 @@
 --
 -- [MUSIC_SYNTH] jam's example songs, as jam.songs: Brimstone Speedway's
 -- race (Scrap Heat) and menu (Yard Vamp) music, from the prototype
--- (local/music_proto, kit_plan 4z37d), each levelled to -14 LUFS by its
--- master gain. The template's kit/music entities hold the same texts
+-- (local/music_proto, kit_plan 4z37d), each levelled to -17 LUFS by its
+-- master gain and ceiling (-14 at first, then 3 dB down to sit under the
+-- game: kit_plan 4z37h). The template's kit/music entities hold the same texts
 -- (util/jam_check.sh compares them); its race's tempo is the user's pick.
 return {
 scrap_heat = [==[
-# Scrap Heat: gritty rock for Brimstone Speedway (E, 163 bpm).
+# Scrap Heat: gritty rock for Brimstone Speedway (E, 156 bpm).
 # Two palm-muted power-chord guitars panned hard left and right, a picked
 # bass with grit, a rock kit, a lead guitar in the break. A 4-bar intro
-# (one guitar, then the band), then verse, chorus, break, verse, chorus
-# and a turnaround that loops back into the verse.
+# (one guitar, then the band), then verse, chorus, break, verse, chorus,
+# each played twice, and a turnaround that loops back into the verse.
 title Scrap Heat
-tempo 163
+tempo 156
 steps 16
 beat 4
 swing 0
 
 reverb size=0.8 decay=1.3 damp=0.5 predelay=0.015 lowcut=200
 delay time=3 feedback=0.3 tone=2500
-master comp=-12 ratio=2 ceiling=-1.8 gain=-2.1
+master comp=-12 ratio=2 ceiling=-4.8 gain=-5.1
 
 # Instruments ---------------------------------------------------------
 # A power chord: root, fifth and octave, each a Karplus-Strong string a
@@ -200,7 +201,7 @@ section chorus: chA+beatc chB+beatc chA+beatc chB+beatcf
 section break:  brk+beat+ld1 brk+beat+ld2 brk+beat+ld3 brk+beatf+ld4
 section verse2: vA+beatx vB+beatf
 section turn:   stop go
-play intro verse chorus break verse2 chorus turn
+play intro verse verse chorus chorus break break verse2 verse2 chorus chorus turn
 loop verse
 ]==],
 yard_vamp = [==[
@@ -218,7 +219,7 @@ swing 0.2
 
 reverb size=1.1 decay=2.6 damp=0.55 predelay=0.02 lowcut=250
 delay time=6 feedback=0.38 tone=2200
-master comp=-16 ratio=1.6 ceiling=-2.2 gain=5.1
+master comp=-16 ratio=1.6 ceiling=-5.2 gain=2.1
 
 inst ep fm ratio=1 index=1.6 idecay=0.9 ifloor=0.15 tine=0.18 tratio=14 tdecay=0.05 a=0.003 d=4 s=0 r=0.5 gate=0.95 vels=0.6
 inst gtr pluck bright=0.45 decay=3.5 pick=0.2 rdecay=0.4 vib=12 vibrate=5 vibdelay=0.3 glide=0.08 gate=1 vels=0.5 s=1 r=0.3

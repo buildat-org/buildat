@@ -13,12 +13,18 @@
 # has no command sequence and is stopped once it has logged: the file's
 # "fov": {"skeldat": 90} read (90, "luanti" 72) and written back. The
 # parser's range is app.cpp's own self test (500 refused).
+# [VOLUME_DEFAULT] The app logs get_sound() and toggles the mute with
+# set_sound() as Kit's mute button does ([KIT_MUTE_BUTTON]): -3 dB on the
+# defaults; the last run's file of 0 dB, unmuted: 0 dB kept, the mute
+# toggled on and saved.
 #   util/fov_setting_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp fov; t=$CHECK_TMP
+# (the app unmutes as it toggles: nothing reaches a device)
+export SDL_AUDIODRIVER=dummy
 cd "$here/Build"
 client(){ timeout 240 bin/buildat -w 1100x1000 -u 1 -l 3 -o sound_mute=1 "$@"; }
 seen(){ grep -aq "$1" "$2" || fail "$3 (no \"$1\" in $2: $(grep -a "Command seq\|click:\|failed" "$2" | tail -2))"; }
@@ -34,6 +40,12 @@ local magic = require("buildat/core/urho3d")
 local fov = buildat.declare_fov("skeldat", 72, function(v)
 	log:info("fovcheck: changed to " .. v)
 end)
+-- [VOLUME_DEFAULT], [KIT_MUTE_BUTTON]: the sound as found, then toggled as
+-- Kit's mute button does
+local mute, db = buildat.get_sound()
+log:info("fovcheck: sound mute " .. tostring(mute) .. ", " .. db .. " dB, set " ..
+		tostring(buildat.set_sound(not mute, db)) .. ", now " ..
+		tostring((buildat.get_sound())))
 local ok = buildat.set_preference("fov.skeldat", 100)
 log:info("fovcheck: skeldat " .. fov .. ", luanti " ..
 		buildat.declare_fov("luanti", 72) .. ", set by the app " .. tostring(ok))
@@ -68,6 +80,7 @@ C
 client -C "$t/c" -D "$t/u" -a dev/fovcheck/play -c @"$t/f1.cmds" > "$t/f1.log" 2>&1 ||
 	fail "the first drive ($t/f1.log)"
 seen "fovcheck: skeldat 72, luanti 72, set by the app false" "$t/f1.log" "not 72 with no setting, or the app set it"
+seen "fovcheck: sound mute true, -3 dB, set true, now false" "$t/f1.log" "the default volume not -3, or the toggle"
 seen "Game settings shown: .*fov.skeldat" "$t/f1.log" "no Field of view row"
 seen "fovcheck: changed to 90, the preference 90, luanti's nil" "$t/f1.log" "the row did not set 90"
 printf 'wait_log 60000 fovcheck: skeldat\nquit\n' > "$t/f2.cmds"
@@ -90,12 +103,18 @@ quit
 C
 client -o fov.skeldat=80 -C "$t/c" -D "$t/u" -c @"$t/f4.cmds" > "$t/f4.log" 2>&1 ||
 	fail "the Engine settings drive ($t/f4.log)"
-echo '{"sound_mute": true, "fov": {"skeldat": 90}}' > "$t/u/settings.json"
+echo '{"sound_mute": false, "sound_volume_db": 0, "fov": {"skeldat": 90}}' > "$t/u/settings.json"
 timeout 120 bin/buildat -w 1100x1000 -l 3 -C "$t/c" -D "$t/u" -a dev/fovcheck/play > "$t/f3.log" 2>&1 &
 CHECK_PIDS+=($!)
 wait_for_log "$t/f3.log" "fovcheck: skeldat" 60 || fail "the run with the file ($t/f3.log)"
 kill -INT $!; wait $! 2>/dev/null
 seen "fovcheck: skeldat 90, luanti 72," "$t/f3.log" "the file's 90 not read, or luanti's changed"
+seen "fovcheck: sound mute false, 0 dB, set true, now true" "$t/f3.log" "the file's sound not read, or the toggle"
 grep -q '"fov":{"skeldat":90}' "$t/u/settings.json" ||
 	fail "not written back: $(cat "$t/u/settings.json")"
-echo "PASS: 72 unset, the row to 90, -o 80, Engine settings' reset, the file's 90 read and written back"
+python3 -I - "$t/u/settings.json" <<'PY' || fail "the toggled mute not saved, or the saved 0 dB not kept: $(cat "$t/u/settings.json")"
+import json, sys
+o = json.load(open(sys.argv[1]))
+assert o["sound_mute"] is True and o["sound_volume_db"] == 0, o
+PY
+echo "PASS: 72 unset, the row to 90, -o 80, Engine settings' reset, the file's 90 read and written back; the volume -3 dB by default, a saved 0 dB kept, the mute toggled as Kit's button does and saved"

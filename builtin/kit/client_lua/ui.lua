@@ -461,6 +461,15 @@ local function make(r, id, parent, in_panel)
 			if down and E.menu then
 				E.menu.open()
 			end
+		elseif a == "mute" then
+			-- [KIT_MUTE_BUTTON] the client's own mute (the preference,
+			-- saved as from its settings)
+			if down then
+				local mute, db = buildat.get_sound()
+				local ok, err = buildat.set_sound(not mute, db)
+				log:info("kit: sound " .. (not ok and "not set: " .. tostring(err) or
+						mute and "on" or "muted"))
+			end
 		elseif a ~= "" then
 			M.press_action(a, down)
 		else
@@ -1485,6 +1494,12 @@ local function update()
 			local text = shown_text(u.text, value)
 			if u.kind == "button" and text == "" and u.action == "pause_menu" then
 				text = "Menu"
+			elseif u.kind == "button" and u.action == "mute" then
+				-- [KIT_MUTE_BUTTON] the state on it: "Sound on" or "Sound
+				-- off", a label of its own then " (off)" while muted
+				local mute = buildat.get_sound()
+				text = text == "" and (mute and "Sound off" or "Sound on") or
+						(mute and text .. " (off)" or text)
 			elseif u.kind == "button" and text == "" and tostring(u.action or "")
 					~= "" then
 				for _, a in ipairs(M.world_actions()) do

@@ -433,7 +433,7 @@ e() # <log after "kit editor: music "> <command>...
 	step 10 "kit editor: music $re" "frames 2" "$@"
 }
 view song ""
-e "section chorus" 'click Button "music section chorus 3"'
+e "section chorus" 'click Button "music section chorus 4"'
 e "edit loop chorus: parses" 'click Button "music loop here"'
 e "entry chorus 1" 'click Button "music entry chorus 1"'
 e "edit section chorus 1 repeat 2: parses" 'click Button "music rep +"'
@@ -458,7 +458,7 @@ e "mixer gtl pan" 'click Button "music mix gtl pan"'
 e "edit track gtl pan -?[0-9.]+: parses" 'click Button "music track pan +"'
 e "mixer reverb" 'click Button "music mix bus rev"'
 e "edit reverb decay [0-9.]+: parses" 'click Button "music bus decay +"'
-e "edit tempo 164: parses" 'click Button "music tempo +"'
+e "edit tempo 157: parses" 'click Button "music tempo +"'
 e "edit swing 0.05: parses" 'click Button "music swing +"'
 e "preview mood lobby" 'click Button "music mood lobby"'
 e "playing song from 0.00 s, mood lobby" "keypress Space"

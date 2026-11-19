@@ -5,7 +5,8 @@
 -- [MUSIC_SYNTH]'s check, run by util/jam_check.sh natively and on the web:
 -- parse errors by line, jam.songs' hashes and render cost, then a player:
 -- a mood landing on a bar, the stream going on through a main-thread
--- stall, stop. Each part logs a "jam check:" line; the script compares.
+-- stall, stop; on the web 12 s more played for the check's capture. Each
+-- part logs a "jam check:" line; the script compares.
 local log = buildat.Logger("jam_check")
 local jam = require("buildat/extension/jam")
 local magic = require("buildat/extension/urho3d")
@@ -46,9 +47,9 @@ for _, h in ipairs({{"scrap_heat"}, {"scrap_heat", "calm"}, {"yard_vamp"}}) do
 	local s = assert(jam.song(jam.songs[h[1]]))
 	songs[h[1]] = s
 	local a = s:analyze(10, h[2])
-	say(string.format("hash %s%s %s, %s ms per s", h[1],
+	say(string.format("hash %s%s %s, %s ms per s, %s LUFS", h[1],
 			h[2] and ("/" .. h[2]) or "", a:match('"hash": "(%x+)"'),
-			a:match('"cpu_ms_per_s": ([%d.]+)')))
+			a:match('"cpu_ms_per_s": ([%d.]+)'), a:match('"lufs": ([-%d.]+)')))
 end
 
 -- **The player**, a step a frame: started mid-bar, a mood asked for, the
@@ -95,6 +96,27 @@ step(function()
 	say(p:playing() and "stop FAILED" or "stopped")
 	return true
 end)
+-- [MUSIC_WEB_RING] On the web, 12 s of Scrap Heat from its start for the
+-- check's capture of what the page plays, the drive stalling the page's
+-- thread meanwhile (a few frames a second): what is heard then
+local web = tostring(buildat.resources().platform):find("^web") ~= nil
+local long, long_t0 = nil, nil
+if web then
+	step(function()
+		long = assert(jam.play(song))
+		long_t0 = now()
+		say("long play started")
+		return true
+	end)
+	step(function()
+		if now() - long_t0 < 12e6 then
+			return false
+		end
+		say(string.format("long play done, heard %.2f s of 12", long:position()))
+		long:stop()
+		return true
+	end)
+end
 
 wait_until = now()
 magic.SubscribeToEvent("Update", function()

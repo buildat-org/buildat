@@ -731,8 +731,9 @@ if(BUILD_CLIENT)
 			list(APPEND WEB_LINK_FLAGS
 				-pthread
 				# The workers the pool's threads run on, made before main():
-				# as many as the page found cores for (index.html)
-				-sPTHREAD_POOL_SIZE=Module.buildatThreads
+				# as many as the page found cores for (index.html), and
+				# one for jam's music ([MUSIC_WEB_RING])
+				-sPTHREAD_POOL_SIZE=Module.buildatThreads+1
 				# A mesh task's stack is a native thread's in miniature
 				-sDEFAULT_PTHREAD_STACK_SIZE=2097152
 				# The page makes the shared memory itself, the largest

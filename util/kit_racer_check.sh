@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~4 min (2026-11-18)
-# covers: apps/workbench/templates/brimstone_speedway/** builtin/kit/client_lua/move.lua builtin/kit/client_lua/players.lua builtin/kit/client_lua/controls.lua builtin/kit/kit.cpp
+# covers: apps/workbench/templates/brimstone_speedway/** builtin/kit/client_lua/music.lua builtin/kit/types/mute_button.prefab.json builtin/kit/client_lua/move.lua builtin/kit/client_lua/players.lua builtin/kit/client_lua/controls.lua builtin/kit/kit.cpp
 # [KIT_TOP_DOWN] (7), (8) The Brimstone Speedway template (a top-down racer:
 # local/brim_car in kit/controls' plane horizontal, its race, checkpoints,
 # crates and mines) on Workbench; one server, kitboss (the admin) and kitbob
@@ -46,8 +46,14 @@
 #   (Yard Vamp) in play, the race's (Scrap Heat) from a run's start on the
 #   grid, kitbob joining it where kitboss's is (the same place on the
 #   song's timeline, by the logs' clocks), the lobby's again after the
-#   race, and none once the round is stopped.
-# Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/grid.png, $t/push.png,
+#   race, and none once the round is stopped. [KIT_MUSIC_LOAD_HOLD] no song
+#   played while a scene loads (kitbob's join, kitboss's trial scene):
+#   none before "the scene loaded" but a held one.
+#   [KIT_MUTE_BUTTON] The lobby's mute button (top right): "Sound off" in
+#   the scripted run (muted), clicked: "kit: sound on" and it reads "Sound
+#   on" (lobby_sound.png), clicked again muted (SDL's dummy driver: nothing
+#   heard either way).
+# Screenshots, kept with KEEP_TMP=1: $t/lobby.png, $t/lobby_sound.png, $t/grid.png, $t/push.png,
 # $t/drift.png, $t/wreck.png, $t/result.png, $t/track.png, $t/trial.png
 #   util/kit_racer_check.sh
 set -u
@@ -328,6 +334,15 @@ await() # <log> <offset> <seconds> <regex>
 	fail "no \"$4\" in $1 in $3 s ($SL, $CL)"
 }
 seen() { tail -c +$(($2 + 1)) "$1" | grep -qaE "$3"; } # <log> <offset> <regex>
+# [KIT_MUSIC_LOAD_HOLD] from a scene entered (kit:you) on, no song played
+# (a "from" line not held, an "on at") before the load's end
+held_first() # <log> <offset>
+{
+	tail -c +$(($2 + 1)) "$1" | sed -n '/kit: this player is entity/,$p' |
+		sed '/kit: music: the scene loaded/q' |
+		grep -aE 'kit: music [0-9]+ (".*" from .*|on at .*)' | grep -avq "held: the scene loading"
+	[ $? -ne 0 ]
+}
 cmd() { printf '%s\n' "$@" >&$FD; }
 step() # <seconds> <regex in the client's log> <command>...
 {
@@ -392,7 +407,7 @@ client() # <name>: its commands from the fifo $t/<name>.cmd, its log $t/<name>.l
 	mkfifo "$t/$1.cmd"
 	sleep 900 > "$t/$1.cmd" &
 	CHECK_PIDS+=($!)
-	DISPLAY=$d WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 BUILDAT_JOIN_NAME=kit$1 \
+	DISPLAY=$d WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy BUILDAT_JOIN_NAME=kit$1 \
 		timeout 600 bin/buildat -C "$t/client_cache_$1" -D "$t/cu_$1" \
 		-s localhost:$SERVER_PORT -w 1024x700 -l 3 -o sound_mute=1 -c - \
 		< "$t/$1.cmd" > "$t/$1.log" 2>&1 &
@@ -430,6 +445,10 @@ await "$CL" 0 10 "kit: ui full screen [0-9]+ up"
 await "$CL" 0 10 'kit: ui [0-9]+ list .* shown, layer [0-9]+: "Pick your poison \| Race: The Bone Yard, by buildat \| Time trial: The Bone Yard, by buildat"'
 cmd "frames 10" "screenshot $t/lobby.png"
 await "$CL" 0 5 'kit: music [0-9]+ "Yard Vamp" from '
+step 10 "kit: sound on" "frames 3" 'click Button "Sound off"'
+cmd "frames 5" "screenshot $t/lobby_sound.png"
+step 10 "kit: sound muted" "frames 3" 'click Button "Sound on"'
+echo "ok: the lobby's mute button: unmuted, its text Sound on, muted again"
 pause_items "Continue" "Retry|To lobby"
 m=$(mark "$SL")
 mc=$(mark "$CL")
@@ -445,6 +464,11 @@ exec 4> "$t/bob.cmd"
 as bob
 await "$CL" 0 120 "Joined as kitbob"
 await "$CL" 0 60 "kit: ui full screen [0-9]+ up"
+# [KIT_MUSIC_LOAD_HOLD] no music while his scene loaded (the generator's
+# track): none played before the load's end (a song come then held)
+await "$CL" 0 30 'kit: music: the scene loaded'
+held_first "$CL" 0 || fail "kitbob's music played while his scene loaded ($CL)"
+echo "ok: kitbob's music held while his scene loaded: $(grep -aoE 'kit: music: the scene loaded.*' "$CL" | head -1)"
 m=$(mark "$SL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Race: The*"'
 await "$SL" "$m" 5 "local/brim_race $RACE: kitbob is on the grid, slot 2"
@@ -572,9 +596,14 @@ echo "ok: the race: kitboss's mine, kitbob's wreck and his respawn at checkpoint
 
 # 4. The time trial: no lap over the line with no checkpoint, then one
 m=$(mark "$SL")
+mh=$(mark "$CL")
 step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "Lobby"'
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
+# [KIT_MUSIC_LOAD_HOLD] the trial's scene entered: its music held, then on
+await "$CL" "$mh" 30 'kit: music: the scene loaded'
+held_first "$CL" "$mh" || fail "the trial's music played while its scene loaded ($CL)"
+echo "ok: the trial's music held while its scene loaded: $(tail -c +$((mh + 1)) "$CL" | grep -aoE 'kit: music: the scene loaded.*' | head -1)"
 # (4z37h) Retry: the trial from its start again
 m=$(mark "$SL")
 pause_open "Retry, To lobby"
