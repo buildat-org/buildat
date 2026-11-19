@@ -34,8 +34,9 @@
 -- (its own teleport) with full health.
 -- The announcer (`announce`, to a kit/ui_text for everyone) calls the start,
 -- the leader, the wrecks and the finish.
--- The music (`music`, a kit/music on the root above the lobby's): played to
--- a player from their run's start to its end or their leaving.
+-- (4z37i) go, to each racer at GO (a trial's at its own): the run's song
+-- linked from it (kit/music's play; the lobby's left its stop), so none
+-- plays in the countdown or on the result.
 -- (4z37h) The pause menu's Retry (`retry`, a kit/pause_menu_action to the
 -- player, linked to the lobby's again): shown in a time trial and to a
 -- racer alone on the grid or in a race, hidden otherwise (one player can't
@@ -97,12 +98,6 @@ local function slot(c, k)
 	local side = (k % 2 == 1) and -0.5 or 0.5
 	local p = c.pos
 	return {p[1] - fx * back + fz * side, p[2], p[3] - fz * back - fx * side}
-end
-
-local function music(c, by, on)
-	if c.params.music ~= 0 then
-		c:send(c.params.music, on and "play" or "stop", nil, by)
-	end
 end
 
 -- Retry shown to by or not
@@ -263,12 +258,10 @@ local function enter(c, by)
 	-- (the car's client part clears the tyre marks on a new run)
 	r.run = (r.run or 0) + 1
 	c:body_var(by, "run", r.run)
-	music(c, by, true)
 	if r.mode == "race" then
 		if c.state.phase ~= "grid" then
 			-- (a race on: back to the lobby to wait)
 			r.mode = nil
-			music(c, by, false)
 			show(c, by, r)
 			c:emit("hud", "A race is on: the next one starts from the lobby.", by)
 			c:send(c.params.lobby, "lobby", nil, by)
@@ -315,7 +308,6 @@ local function race_over(c, why)
 		if not r.done then
 			c:emit("result", "Out of time: DNF|" .. table.concat(standings(c), "|"), by)
 			c:send(c.params.lobby, "over", nil, by)
-			music(c, by, false)
 		end
 		r.mode = nil
 		clear_weapon(c, by, r)
@@ -343,7 +335,6 @@ local function finish_race(c, by, r)
 	clear_weapon(c, by, r)
 	set_open(c, by, r, false)
 	c:send(c.params.lobby, "over", nil, by)
-	music(c, by, false)
 	results(c)
 	c:emit("finished", r.done, by)
 	if #c.state.finished >= #c.state.racers then
@@ -378,7 +369,6 @@ local function lap(c, by, r)
 			c:log(name, "finished the trial in", clock(r.t))
 			r.mode = nil
 			c:send(c.params.lobby, "over", nil, by)
-			music(c, by, false)
 			return
 		end
 		r.lap = r.lap + 1
@@ -525,6 +515,7 @@ return {
 			board = "The five best laps as they change. Value: \"1. name 23.4|2. ...\".",
 			lap_time = "A time trial's lap. Value: its seconds.",
 			finished = "A player finished. Value: their place (a race) or time (a trial).",
+			go = "The player's run is off: the race's GO, or their trial's.",
 		},
 	},
 	params = {
@@ -537,7 +528,6 @@ return {
 		grid_screen = {type = "entity", default = 0},
 		mine = {type = "entity", default = 0},
 		scorch = {type = "entity", default = 0},
-		music = {type = "entity", default = 0},
 		retry = {type = "entity", default = 0},
 		gun_damage = {type = "number", default = 3, min = 0, max = 100},
 		mine_damage = {type = "number", default = 9, min = 0, max = 100},
@@ -562,7 +552,7 @@ return {
 		start = "none", checkpoint = "number", lap = "none", fire = "number",
 		crate = "string", mine = "entity", ram = "string", back = "none"},
 	outputs = {hud = "string", announce = "string", result = "string",
-		board = "string", lap_time = "number", finished = "number"},
+		board = "string", lap_time = "number", finished = "number", go = "none"},
 	on_start = function(c)
 		c:after(0.1, "tick")
 		board(c)
@@ -605,6 +595,7 @@ return {
 			for _, by in ipairs(c.state.racers) do
 				c:speed(by, 1)
 				view(c, by).at = 0
+				c:emit("go", nil, by)
 			end
 			rank(c)
 			return
@@ -633,7 +624,6 @@ return {
 					drop_racer(c, by)
 				end
 				r.mode = nil
-				music(c, by, false)
 			elseif r and r.mode == "trial" then
 				if r.count then
 					r.count = r.count - 0.1
@@ -641,6 +631,7 @@ return {
 						r.count, r.t, r.lap_at = nil, 0, 0
 						c:speed(by, 1)
 						show(c, by, r, "GO!")
+						c:emit("go", nil, by)
 					else
 						show(c, by, r, tostring(math.ceil(r.count)))
 					end
@@ -705,7 +696,6 @@ return {
 		if input == "entered" then
 			return enter(c, by)
 		elseif input == "left" then
-			music(c, by, false)
 			if r.mode == "race" then
 				drop_racer(c, by)
 				c:speed(by, 1)

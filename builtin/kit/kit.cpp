@@ -20201,10 +20201,25 @@ struct Module: public interface::Module, public Interface
 		ss_ answer, error;
 		bool runaway = false;
 		int64_t spent = 0;
+		// (4z37i) "kit:generating" {"on"} to those in its scene (every
+		// scene's for one on the root) around the run: their client says
+		// Generating... while it lasts past 0.3 s (ui.lua)
+		ss_ gen_scene;
+		scene_of(e, &gen_scene);
+		auto generating = [&](bool on){
+			network::access(m_server, [&](network::Interface *inetwork){
+				for(auto &o : m_peers)
+					if(gen_scene.empty() || o.second.scene == gen_scene)
+						inetwork->send(o.first, "kit:generating",
+								on ? "{\"on\": true}" : "{\"on\": false}");
+			});
+		};
+		generating(true);
 		m_building = true;
 		const bool called = box_call(request_of(e, e.comps[comp], r), answer,
 				error, &runaway, &spent);
 		m_building = false;
+		generating(false);
 		if(spent_out)
 			*spent_out = spent;
 		auto it = m_entities.find(e.id);
@@ -23160,6 +23175,7 @@ struct Module: public interface::Module, public Interface
 		}
 		session_ops();
 		playtest_tick();
+		round_controls_tick();
 		rules_watch();
 		if(!m_watches.empty())
 			watch_flush();
@@ -33370,7 +33386,8 @@ struct Module: public interface::Module, public Interface
 				"step is is refused (the version before runs on), in play the "
 				"body stops. movement.raw_keys = true: the side camera's keys "
 				"as they are (f, r); touch = \"drive\" (Gas, Brake, the stick's "
-				"r), touch_buttons = {{\"Turn\", \"jump\"}}, touch_axes = "
+				"r), touch_buttons = {{\"Turn\", \"jump\"}} (above Brake; a "
+				"third \"low\": under Gas), touch_axes = "
 				"{{\"Left\", \"r\", -1}, {\"Right\", \"r\", 1}} (a stack at the "
 				"lower left, each holding f or r at that value); help = "
 				"{{\"[forward]/[back]\", \"gas, brake\", \"f\"}...} and touch_help "
@@ -39152,7 +39169,12 @@ struct Module: public interface::Module, public Interface
 			"(value: a mood name, from the next bar, faded over a beat). It "
 			"runs from when it went on, on the round's clock, so all hear "
 			"the same bar; the round's end stops it; a scene change keeps it "
-			"if it is still the one. get_state's round.music says what each "
+			"if it is still the one. With a kit/lobby the music follows each "
+			"player's runs by links: the lobby's song (autoplay) played by its "
+			"in_lobby and stopped by its entered, a run's song (autoplay off, "
+			"a higher priority) played by the game's start (as GO) and stopped "
+			"by the lobby's left: silence in the countdown and on the result "
+			"until they pick Again or the lobby. get_state's round.music says what each "
 			"player hears, its mood and bar. You cannot listen: "
 			"analyze_music measures a song (loudness, peaks, bands, each "
 			"track, the loop's join). Aim at about -17 LUFS with master "
@@ -41282,6 +41304,9 @@ struct Module: public interface::Module, public Interface
 		j.set("running", m_session.running);
 		j.set("by", m_session.by);
 		j.set("persistent", m_host.persistent);
+		// (4z37i) round_controls_tick()'s
+		j.set("rounds", m_rc_rounds);
+		j.set("bots", m_rc_bots);
 		// The builds the last Stop discarded, until the next Play, and
 		// whether builds are always kept
 		j.set("discarded", discarded_counts());
@@ -45101,6 +45126,47 @@ struct Module: public interface::Module, public Interface
 		if(!n)
 			return refuse("no bots made in play");
 		log_i(MODULE, "%s removed all bots (%zu)", cs(p.name), n);
+	}
+
+	// (4z37i) Whether End all rounds and Remove all bots have anything to
+	// do (a game session; a bot made in play in the default or one), in the
+	// editor state ("rounds", "bots"), sent to the builders as either turns.
+	// simplified: reckoned twice a second (a walk of each round's entities),
+	// not at each session's start and end and each bot's making and removal
+	bool m_rc_rounds = false, m_rc_bots = false;
+	int64_t m_rc_at = 0;
+	void round_controls_tick()
+	{
+		const int64_t now = interface::os::time_us();
+		if(now - m_rc_at < 500000)
+			return;
+		m_rc_at = now;
+		bool rounds = false, bots = false;
+		sv_<uint64_t> sids = {0};
+		for(auto &s : m_sessions)
+			if(!s.second->draft && !s.second->bench){
+				rounds = true;
+				sids.push_back(s.first);
+			}
+		for(uint64_t sid : sids){
+			SessionScope sc(*this, sid);
+			for(auto &e : m_entities)
+				if(e.second.made && is_bot(e.second)){
+					bots = true;
+					break;
+				}
+			if(bots)
+				break;
+		}
+		if(rounds == m_rc_rounds && bots == m_rc_bots)
+			return;
+		m_rc_rounds = rounds;
+		m_rc_bots = bots;
+		each_session([&]{
+			for(auto &o : m_peers)
+				if(can_edit(o.first))
+					send_state(o.first);
+		});
 	}
 
 	// A bot gone with what is under it, what it carried and drove let go

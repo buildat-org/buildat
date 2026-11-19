@@ -65,7 +65,8 @@
 #     turn the view (controls.lua's line) with nothing selected or edited;
 #     tapped, it is selected, and a drag from its middle moves it (the
 #     server's log); the stick at the world's lower left walks (the body
-#     moved); the touch bar (Jump) in the world's lower right;
+#     moved); the touch bar (Jump) in the world's lower right, play's
+#     stack (4z37i: a column, a 12 mm pitch);
 #   - a drag from the header's empty part (the palette's, its title a
 #     label) moves the divider (the world taller, the UI half wider);
 #   - m1600x900: Walk by mouse as the desktop's, a click into the crosshair.
@@ -673,6 +674,10 @@ if touch and gest:
     assert bx >= wr[0] and by >= wr[1] and bx + bw <= wr[0] + wr[2] + 1 and \
             by + bh <= wr[1] + wr[3] + 1 and bx + bw > wr[0] + wr[2] / 2, \
             f"the touch bar {b[-1]} not at the world's lower right {wr}"
+    # (4z37i) play's stack: a column of thumb() buttons (a 12 mm pitch: the
+    # side about 11.4 mm), not a row
+    side, mm = re.search(r"side (\d+) \(([\d.]+) mm\)", b[-1]).groups()
+    assert 10.5 <= float(mm) <= 11.6 and bw <= int(side) + 20, f"the touch bar {b[-1]} not play's stack"
     print(f"ok: Walk: {e1} tapped and dragged; the looks turned {yaws} with no edit; "
         f"the stick walked {walked:.2f} m; {b[-1].split('kit: ')[-1]}")
 print(f"ok: {seen['targets']} target dumps, {seen['windows']} window dumps, the button placed; "

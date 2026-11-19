@@ -42,7 +42,7 @@
 -- at the finger and a finger held still the right; [KIT_TOUCH_THUMBS] a
 -- stack at the lower right, thumb-sized (thumb()): from the top the app's
 -- (Menu) and Exit in a seat half as high, the movement's touch_buttons, Jump
--- (a car: Brake, Gas lowest); the world's actions (held while pressed) a
+-- (a car: Brake, Gas, then a touch_buttons' "low" one); the world's actions (held while pressed) a
 -- stack above it, or left of it where that does not fit; the movement's
 -- touch_axes a stack at the lower left, the stick beside it.
 -- For a drive: "event kit_body" logs the body and the corrections (and the
@@ -1845,14 +1845,18 @@ local function on_ui(x, y)
 			or (E.editing and M.over_ui(x, y)) or (M.ui_at and M.ui_at(x, y))
 end
 
--- [KIT_TOUCH_THUMBS] A thumb's button side, UI pixels: 16 mm (the phone test
--- of 2026-11-19: 15 to 18) at a phone's 160 CSS pixels an inch (a CSS pixel
--- about as big to the eye on any screen: app.cpp's apply_ui_scale; natively
--- under BUILDAT_TOUCH=1 one to a device pixel)
+-- [KIT_TOUCH_THUMBS] A thumb's button side, UI pixels: a pitch (a button's
+-- edge to the same edge of the next) of 12 mm less the stacks' 4 px gap, at
+-- a phone's 160 CSS pixels an inch (a CSS pixel about as big to the eye on
+-- any screen: app.cpp's apply_ui_scale; natively under BUILDAT_TOUCH=1 one
+-- to a device pixel). The 12 mm: the user's phone, 2026-11-19, alpha.46's
+-- buttons in a wide landscape (address bar shown), edge to edge; 16 mm
+-- before was too big in portrait
+local THUMB_PITCH_MM, THUMB_GAP = 12, 4
 local function thumb()
 	local density = tonumber(buildat.display_density and buildat.display_density()) or 1
 	local css = magic.ui.scale / math.max(0.1, density)
-	return math.floor(16 / 25.4 * 160 / css)
+	return math.floor(THUMB_PITCH_MM / 25.4 * 160 / css) - THUMB_GAP
 end
 
 -- A row of buttons {label, pressed or nil, released} at the lower right,
@@ -1862,7 +1866,7 @@ local function button_row(list, y, least, s, parent)
 	local bar = (parent or magic.ui.root):CreateChild("Window")
 	bar.defaultStyle = K.STYLE
 	bar:SetStyleAuto()
-	bar:SetLayout(s and magic.LM_VERTICAL or magic.LM_HORIZONTAL, 4,
+	bar:SetLayout(s and magic.LM_VERTICAL or magic.LM_HORIZONTAL, THUMB_GAP,
 			magic.IntRect(6, 6, 6, 6))
 	bar:SetAlignment(magic.HA_RIGHT, magic.VA_BOTTOM)
 	bar:SetPosition(-8, -y)
@@ -1932,7 +1936,8 @@ local function labels(list)
 end
 
 -- [KIT_TOUCH_SEAT_BUTTONS] The movement's touch_buttons {{label, input}...}
--- (input jump or down), nil: none declared
+-- (input jump or down; (4z37i) a third "low": under Gas, lowest), nil: none
+-- declared
 local function touch_buttons()
 	local tb = decl().touch_buttons
 	if type(tb) ~= "table" then
@@ -1942,7 +1947,7 @@ local function touch_buttons()
 	for _, b in ipairs(tb) do
 		if type(b) == "table" and type(b[1]) == "string" and
 				(b[2] == "jump" or b[2] == "down") then
-			l[#l + 1] = {b[1], b[2]}
+			l[#l + 1] = {b[1], b[2], low = b[3] == "low"}
 		end
 	end
 	return l
@@ -1964,13 +1969,13 @@ end
 
 -- [KIT_PHONE_EDITING] stage 4b: edit, the editor's touch mode walking
 -- (wr, the world's rect in pixels): the movement's own buttons only, at
--- the touch size, at the world's lower right (simplified: a row there, as
--- before the thumbs' stacks of play)
+-- the world's lower right; (4z37i) in play's stack (thumb(), fitted to the
+-- world's height)
 local function make_bar(wr)
 	local tb = touch_buttons()
 	local tb_kind = ""
 	for _, b in ipairs(tb or {}) do
-		tb_kind = tb_kind .. ":" .. b[1] .. "=" .. b[2]
+		tb_kind = tb_kind .. ":" .. b[1] .. "=" .. b[2] .. (b.low and "_" or "")
 	end
 	local ax = touch_axes()
 	for _, b in ipairs(ax) do
@@ -1980,7 +1985,8 @@ local function make_bar(wr)
 	local root = magic.ui.root
 	local kind = touch_kind() .. (M.seated() and ":seat" or "") .. ":" ..
 			M.keys_version() .. (tb and ":tb" or "") .. tb_kind ..
-			(edit and ":edit" or string.format(":%dx%d", root.width, root.height))
+			(edit and ":edit" .. math.floor(wr[4]) or
+			string.format(":%dx%d", root.width, root.height))
 	if C.bar and C.bar_kind == kind then
 		return
 	end
@@ -2000,7 +2006,8 @@ local function make_bar(wr)
 	C.touch_held = {}
 	C.touch_axis = {}
 	-- (the stack's order, top to bottom: rank 1 the app's and Exit, half
-	-- high; 2 the movement's; 3 Brake; 4 Gas, lowest under the thumb)
+	-- high; 2 the movement's; 3 Brake; 4 Gas, under the thumb; 5 the
+	-- movement's low ones)
 	local list = {}
 	if touch_kind() == "drive" then
 		list[#list + 1] = {"Brake", function() C.gas = -1 end,
@@ -2012,7 +2019,7 @@ local function make_bar(wr)
 		for _, b in ipairs(tb) do
 			local input = b[2]
 			list[#list + 1] = {b[1], function() C.touch_held[input] = true end,
-				function() C.touch_held[input] = nil end, rank = 2}
+				function() C.touch_held[input] = nil end, rank = b.low and 5 or 2}
 		end
 	elseif touch_kind() ~= "tap" and touch_kind() ~= "drive" then
 		list[#list + 1] = {"Jump", nil, function() C.touch_jump = true end, rank = 2}
@@ -2038,29 +2045,31 @@ local function make_bar(wr)
 		lefts[#lefts + 1] = {b[1], function() C.touch_axis[input] = v end,
 			function() if C.touch_axis[input] == v then C.touch_axis[input] = nil end end}
 	end
+	-- [KIT_TOUCH_THUMBS] The thumbs' side: thumb(), less where the stack
+	-- would be over 0.92 of the height (a landscape phone's; (4z37i) in
+	-- edit, the world's), 40 at least
+	local col = {}
+	for rank = 1, 5 do
+		for _, b in ipairs(list) do
+			if b.rank == rank then
+				col[#col + 1] = b
+			end
+		end
+	end
+	local full, half = 0, 0
+	for _, b in ipairs(col) do
+		if b.half then half = half + 1 else full = full + 1 end
+	end
+	local high = edit and wr[4] / magic.ui.scale or root.height
+	local room = high * 0.92 - 16 - 12 - 4 * math.max(0, #col - 1)
+	local s = math.max(40, math.floor(math.min(thumb(),
+			room / math.max(1, full + half / 2))))
+	C.thumb = s
+	C.bar = button_row(col, 8, nil, s)
 	if edit then
-		C.bar = button_row(list, 8, 48)
 		C.abar = button_row({}, 8)
 		C.lbar = button_row({}, 8)
 	else
-		-- [KIT_TOUCH_THUMBS] The thumbs' side: thumb(), less where the stack
-		-- would be over 0.92 of the height (a landscape phone's), 40 at least
-		local col = {}
-		for rank = 1, 4 do
-			for _, b in ipairs(list) do
-				if b.rank == rank then
-					col[#col + 1] = b
-				end
-			end
-		end
-		local full, half = 0, 0
-		for _, b in ipairs(col) do
-			if b.half then half = half + 1 else full = full + 1 end
-		end
-		local room = root.height * 0.92 - 16 - 12 - 4 * math.max(0, #col - 1)
-		local s = math.max(40, math.floor(math.min(thumb(),
-				room / math.max(1, full + half / 2))))
-		C.bar = button_row(col, 8, nil, s)
 		-- (the world's actions over it where they fit, else beside it in
 		-- as many columns as they take, the first rightmost)
 		local avail = root.height * 0.92 - 16
@@ -2086,7 +2095,6 @@ local function make_bar(wr)
 		C.lbar = button_row(lefts, 8, nil, s)
 		C.lbar:SetAlignment(magic.HA_LEFT, magic.VA_BOTTOM)
 		C.lbar:SetPosition(8, -8)
-		C.thumb = s
 	end
 	C.bar_at = nil
 	log:info("kit: the touch bar: " .. labels(list) .. "; the world's: " ..
@@ -2939,8 +2947,11 @@ magic.SubscribeToEvent("Update", function(_, data)
 			C.bar:SetPosition(tonumber(bx), tonumber(by))
 			if wr then
 				local p = C.bar.screenPosition
-				log:info(string.format("kit: the touch bar in the world at %d %d %d %d",
-						p.x * sc, p.y * sc, C.bar.width * sc, C.bar.height * sc))
+				local mm = C.thumb * sc / math.max(0.1, tonumber(buildat.display_density and
+						buildat.display_density()) or 1) / 160 * 25.4
+				log:info(string.format("kit: the touch bar in the world at %d %d %d %d, " ..
+						"side %d (%.1f mm)", p.x * sc, p.y * sc, C.bar.width * sc,
+						C.bar.height * sc, C.thumb * sc, mm))
 			else
 				-- (for a check: the stacks' rects, pixels, and the side in
 				-- CSS pixels and in mm at thumb()'s 160 an inch)
@@ -2949,12 +2960,15 @@ magic.SubscribeToEvent("Update", function(_, data)
 					return string.format("%d %d %d %d", p.x * sc, p.y * sc,
 							b.width * sc, b.height * sc)
 				end
-				local css = C.thumb * sc / math.max(0.1, tonumber(
+				local per = sc / math.max(0.1, tonumber(
 						buildat.display_density and buildat.display_density()) or 1)
+				local css, pitch = C.thumb * per, (C.thumb + THUMB_GAP) * per
 				log:info(string.format("kit: the touch stacks of %dx%d: side %d " ..
-						"(%.0f CSS px, %.1f mm); right %s; world's %s; left %s",
+						"(%.0f CSS px, %.1f mm), pitch %.0f CSS px (%.1f mm); " ..
+						"right %s; world's %s; left %s",
 						r.width * sc, r.height * sc, C.thumb * sc, css,
-						css / 160 * 25.4, rect(C.bar), rect(C.abar), rect(C.lbar)))
+						css / 160 * 25.4, pitch, pitch / 160 * 25.4, rect(C.bar),
+						rect(C.abar), rect(C.lbar)))
 			end
 		end
 	end

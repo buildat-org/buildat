@@ -132,7 +132,8 @@ return {
 	root = true,
 	outputs = {lap = "none", fire = "number", smash = "number", ram = "string"},
 	movement = {body = BODY, raw_keys = true, touch = "drive", bodies = true,
-		touch_buttons = {{"Handbrake", "jump"}},
+		-- (4z37i: Brake, Gas, Handbrake, each brake beside Gas)
+		touch_buttons = {{"Handbrake", "jump", "low"}},
 		touch_axes = {{"Left", "r", -1}, {"Right", "r", 1}},
 		help = {{"[forward]/[back]", "gas, brake", "f"},
 			{"[left]/[right]", "steer", "r"}, {"[jump]", "handbrake", "jump"},

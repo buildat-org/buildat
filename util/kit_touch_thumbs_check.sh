@@ -5,11 +5,14 @@
 # covers: builtin/kit/client_lua/controls.lua builtin/kit/client_lua/ui.lua apps/workbench/main/client_lua/init.lua apps/workbench/templates/brimstone_speedway/types/brim_car.lua apps/workbench/templates/crag_trial/types/crag_bike.lua util/web_drive.js
 # [KIT_TOUCH_THUMBS] Kit's touch buttons in play, as the phone test of
 # 2026-11-19 asked: Workbench's web client in headless Chrome by finger
-# (TOUCH=1) as a phone, portrait 412x915 turned to landscape:
+# (TOUCH=1) as a phone, portrait 412x915 turned to landscape (915x412),
+# then a wide landscape with the address bar shown (915x350):
 #   - Brimstone Speedway, its time trial: the stack at the lower right
-#     vertical, its side 15 to 18 mm (thumb(): 160 CSS px an inch), Gas
-#     lowest, Brake over it; the car's touch_axes (Left, Right) a stack at
-#     the lower left; in landscape the side still at least 15 mm;
+#     vertical, (4z37i) a button's edge to the next's 12 mm (thumb(): 160
+#     CSS px an inch) in portrait and landscape, no more in the wide one
+#     (shrunk only past 0.92 of the height); Brake, Gas, Handbrake from the
+#     top (each brake beside Gas); the car's touch_axes (Left, Right) a
+#     stack at the lower left, the same side;
 #   - a press is its finger's: Gas held, the finger slid off it, still held;
 #     lifted there, released; Gas and Right held by two fingers: the car
 #     driven and turned 20 degrees or more, Right lifted: steering only let go;
@@ -18,7 +21,7 @@
 #     (the page loaded again);
 #   - Crag Trial, The Crags: the bike's lean stack (Lean left, Lean right),
 #     Lean right held: r 1.
-# Shots: $t/brim/{portrait,landscape}.png, $t/crag/{portrait,landscape}.png
+# Shots: $t/brim/{portrait,landscape,wide}.png, $t/crag/{portrait,landscape,wide}.png
 # (KEEP_TMP=1 keeps them)
 #   util/kit_touch_thumbs_check.sh
 set -u
@@ -58,6 +61,11 @@ def new_game(name):
 def mark(name):
     return [["eval", "console.log('CHECK: %s'), 'mark'" % name], ["event", "kit_body"],
             ["waitlog", "kit: zoom ", 10]]
+# (4z37i) the user's wide landscape: the address bar shown
+def wide():
+    return [["viewport", 915, 350], ["frames", 10], ["wait", 1000],
+            ["waitlog_any", "kit: the touch stacks of 915x350:", 10], ["frames", 5],
+            ["shot", "${OUT}/wide.png"]]
 def trial():
     return [["waitlog_any", "kit: the touch Menu over the full screen shown", 20],
             ["tap", "Button", "Time trial: The*"], ["waitlog", "GO!", 20], ["frames", 5]]
@@ -65,7 +73,8 @@ def trial():
 B = login(True) + new_game("Brimstone Speedway") + trial()
 B += [["waitlog_any", "kit: the touch stacks of [0-9]+x9[0-9][0-9]:", 10], ["shot", "${OUT}/portrait.png"]]
 # (Gas's and Brake's places: down and up again, before GO's car goes)
-B += [["tap", "Button", "Brake"], ["frames", 3], ["tap", "Button", "Gas"], ["frames", 3]]
+B += [["tap", "Button", "Brake"], ["frames", 3], ["tap", "Button", "Gas"], ["frames", 3],
+      ["tap", "Button", "Handbrake"], ["frames", 3]]
 # Slid off and lifted
 off = [W // 2, H // 3]
 B += [["touch", "find", [["Button", "Gas", 0], ["Button", "Brake", 0],
@@ -98,7 +107,7 @@ B += [["event", "kit_edit {\"op\": \"mode\", \"on\": true}"], ["waitlog", "kit e
 B += login(False) + [["waitlog", "kit: ui full screen [0-9]+ up", 60], ["frames", 5]] + trial() + mark("rejoined")
 B += [["turn", "landscape"], ["frames", 10], ["wait", 1000],
       ["waitlog_any", "kit: the touch stacks of 9[0-9][0-9]x[0-9]+:", 10], ["frames", 5],
-      ["shot", "${OUT}/landscape.png"], ["eval", "console.log('CHECK: done'), 'mark'"]]
+      ["shot", "${OUT}/landscape.png"]] + wide() + [["eval", "console.log('CHECK: done'), 'mark'"]]
 json.dump(B, open(t + "/brim.json", "w"), indent=0)
 # ---- Crag Trial
 C = login(True) + new_game("Crag Trial")
@@ -109,7 +118,7 @@ C += [["tap", "Button", "The Crags*"], ["waitlog", "player physics enabled", 20]
 C += [["touch", "touchEnd", []], ["frames", 5],
       ["turn", "landscape"], ["frames", 10], ["wait", 1000],
       ["waitlog_any", "kit: the touch stacks of 9[0-9][0-9]x[0-9]+:", 10], ["frames", 5],
-      ["shot", "${OUT}/landscape.png"], ["eval", "console.log('CHECK: done'), 'mark'"]]
+      ["shot", "${OUT}/landscape.png"]] + wide() + [["eval", "console.log('CHECK: done'), 'mark'"]]
 json.dump(C, open(t + "/crag.json", "w"), indent=0)
 PY
 for g in brim crag; do
@@ -123,7 +132,8 @@ t = sys.argv[1]
 def lines(g):
     return open(f"{t}/{g}/page.log", errors="replace").read().splitlines()
 def stacks(L, size):
-    m = [re.search(r"kit: the touch stacks of (%s): side (\d+) \(\d+ CSS px, ([\d.]+) mm\); "
+    m = [re.search(r"kit: the touch stacks of (%s): side (\d+) \(\d+ CSS px, ([\d.]+) mm\), "
+                   r"pitch (\d+) CSS px \(([\d.]+) mm\); "
                    r"right (-?\d+) (-?\d+) (\d+) (\d+); world's .*; left (-?\d+) (-?\d+) (\d+) (\d+)" % size, l)
          for l in L]
     m = [x for x in m if x]
@@ -133,14 +143,16 @@ def check_stacks(L, size, n_left):
     m = stacks(L, size)
     size = m[1]
     W, H = map(int, size.split("x"))
-    side, mm = int(m[2]), float(m[3])
-    rx, ry, rw, rh, lx, ly, lw, lh = map(int, m.groups()[3:])
-    assert 15 <= mm <= 18, f"{size}: the side {mm} mm: {m[0]}"
+    side, mm, pitch, pmm = int(m[2]), float(m[3]), int(m[4]), float(m[5])
+    rx, ry, rw, rh, lx, ly, lw, lh = map(int, m.groups()[5:])
+    # (12 mm a pitch; the wide landscape's no more, shrunk past 0.92 of it)
+    assert 11.6 <= pmm <= 12.1 or (H < 400 and 8 <= pmm <= 12.1), f"{size}: the pitch {pmm} mm: {m[0]}"
+    assert lw < side + 20, f"{size}: the left stack not the same side: {m[0]}"
     assert W - 20 <= rx + rw <= W and H - 20 <= ry + rh <= H, f"{size}: not at the lower right: {m[0]}"
     assert rh > rw and rw < side + 20, f"{size}: not a column: {m[0]}"
     if n_left:
         assert lx <= 20 and H - 20 <= ly + lh <= H and lh > lw, f"{size}: no stack at the lower left: {m[0]}"
-    print(f"ok: {size}: side {side} px, {mm} mm, right {rx},{ry} {rw}x{rh}, left {lx},{ly} {lw}x{lh}")
+    print(f"ok: {size}: side {side} px ({mm} mm), pitch {pitch} CSS px ({pmm} mm), right {rx},{ry} {rw}x{rh}, left {lx},{ly} {lw}x{lh}")
 def after(L, name):
     i = next(i for i, l in enumerate(L) if "CHECK: " + name in l)
     m = next(re.search(r"kit: zoom ([\d.]+) \((\S+)\), input f (\S+) r (\S+), yaw (\S+)", l) for l in L[i:]
@@ -148,13 +160,14 @@ def after(L, name):
     return float(m[1]), m[2], float(m[3]), float(m[4]), float(m[5])
 L = lines("brim")
 check_stacks(L, r"\d+x9\d\d", 2)
-check_stacks(L, r"9\d\dx\d+", 2)
+check_stacks(L, r"9\d\dx4\d\d", 2)
+check_stacks(L, r"915x350", 2)
 ys = {}
 for l in L:
-    m = re.search(r"kit: touch button (Gas|Brake) up by finger \d+ at \d+,(\d+)", l)
+    m = re.search(r"kit: touch button (Gas|Brake|Handbrake) up by finger \d+ at \d+,(\d+)", l)
     if m and m[1] not in ys:
         ys[m[1]] = int(m[2])
-assert ys.get("Gas", 0) > ys.get("Brake", 1e9), f"Gas not under Brake: {ys}"
+assert ys.get("Handbrake", 0) > ys.get("Gas", 1e9) > ys.get("Brake", 2e9), f"not Brake, Gas, Handbrake from the top: {ys}"
 sb, s, l_, lf, sr, b, both, rl = (after(L, n) for n in ("slid onto Brake", "slid off", "lifted",
     "left", "slid onto Right", "before", "both", "right lifted"))
 assert sb[2] == -1, f"Gas slid onto Brake: not Brake's: {sb}"
@@ -175,13 +188,14 @@ assert abs(rj[0] - p[0]) < 0.01, f"the zoom not kept across the rejoin: {p} -> {
 print(f"ok: pinched to {p[0]} ({p[1]}), {sec[0]} in the second trial, {rj[0]} rejoined")
 L = lines("crag")
 check_stacks(L, r"\d+x9\d\d", 2)
-check_stacks(L, r"9\d\dx\d+", 2)
+check_stacks(L, r"9\d\dx4\d\d", 2)
+check_stacks(L, r"915x350", 2)
 assert any("; the left: Lean left, Lean right" in l for l in L), "no lean stack"
 le = after(L, "lean")
 assert le[3] == 1, f"Lean right not r 1: {le}"
 print("ok: Crag Trial's lean stack, Lean right held: r 1")
 PY
-for p in brim/portrait brim/landscape crag/portrait crag/landscape; do
+for p in brim/portrait brim/landscape brim/wide crag/portrait crag/landscape crag/wide; do
 	[ -s "$t/$p.png" ] || fail "no screenshot $t/$p.png"
 done
-echo "PASS: Kit's touch stacks as a phone: thumb-sized columns at the lower right and left in portrait and landscape, presses by finger (held slid off, let go lifted, two fingers two buttons), Brimstone's car steered by its stack, the pinch zoom kept into a second trial and across a rejoin ($t)"
+echo "PASS: Kit's touch stacks as a phone: thumb-sized columns (a 12 mm pitch) at the lower right and left in portrait and landscape, presses by finger (held slid off, let go lifted, two fingers two buttons), Brimstone's car steered by its stack, the pinch zoom kept into a second trial and across a rejoin ($t)"

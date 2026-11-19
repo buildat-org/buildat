@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~1.5 min (2026-11-19)
+# cost: ~2 min (2026-11-19)
 # covers: builtin/kit/kit.cpp builtin/kit/box/box.c builtin/kit/types/lights_out.lua builtin/kit/types/lights_out_tile.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua builtin/kit/client_lua/polygon_edit.lua apps/sample_kit/main/kit/gen_*.lua
 # [KIT_GENERATORS] (kit_plan 4q) Generators, in apps/sample_kit; kitboss
 # builds in Kit's editor, Ended:
@@ -34,6 +34,9 @@
 #      and one out of its range refused. Its reseed 7: Play builds it again
 #      live (its on_start's c:generate): seed 7's posts in the round, the
 #      sign under it kept; Stop: the authored ones back (the save's).
+#   6. (4z37i) Generating...: not for those builds (short); in the wasm
+#      interpreter gen_runaway's (some 0.7 s, cut by its meter) shown,
+#      then hidden ($t/generating.png).
 #
 #   util/kit_generators_check.sh
 set -u
@@ -291,5 +294,33 @@ want "$s" "sample_kit/gen_posts $G: gen_posts: seed 7, $P7C posts" \
 	"Entity $G generated $G live: $((3 + P7C)) children ($((3 + P1C)) gone)"
 check_save $G $((3 + P1C)) $H
 echo "ok: Play builds it again live from its reseed, Stop puts the authored ones back"
-echo "PASS: generators: kit/lights_out builds its board as placed and as its size changes, overrides and a builder's child kept, an undo putting the old ones back; the cap and the meter refuse a build; the board plays and is solved; the save keeps the output; a generator past 63 children Run again (with params), clear of the scene's entities, its own output replaced, one undo; a points param's values checked; a round's live build from a seed undone at Stop"
+# (4z37i) 6. Generating...: none for the builds above (each well under
+# 0.3 s); in the wasm interpreter gen_runaway's build runs some 0.7 s
+# before its meter cuts it: the notice shown, then hidden as it ends
+for l in "$t/boss1.log" "$t/boss2.log"; do
+	! grep -aq "stopped notice shown: Generating" "$l" || fail "Generating... for a short build ($l)"
+done
+cat > "$t/boss3.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 60000 kit editor: edit rights: yes
+click Button "Edit"
+wait_log 10000 kit editor: state:
+event kit_edit {"op": "place", "type": "sample_kit/gen_runaway", "pos": [10, 1, 12]}
+wait_log 10000 kit: the stopped notice shown: Generating...
+EOF
+echo "screenshot $t/generating.png" >> "$t/boss3.cmds"
+cat >> "$t/boss3.cmds" <<'EOF'
+wait_log 30000 kit editor: refused: place:
+frames 5
+quit
+EOF
+BUILDAT_CHECK_WASM_INTERPRETER=1 server 3
+BUILDAT_JOIN_CREATE= client boss3
+stop
+grep -aq "The box is up (interpreter)" "$t/srv3.log" || fail "not the interpreter ($t/srv3.log)"
+[ -s "$t/generating.png" ] || fail "no $t/generating.png"
+grep -aE "I kit +: kit: the stopped notice" "$t/boss3.log" | tail -2 | sed 's/.*notice //' | tr '\n' '|' |
+	grep -qx "shown: Generating...|hidden|" || fail "Generating... not shown, then hidden ($t/boss3.log)"
+echo "ok: Generating... while a build runs past 0.3 s, gone as it ends ($t/generating.png); none for short ones"
+echo "PASS: generators: kit/lights_out builds its board as placed and as its size changes, overrides and a builder's child kept, an undo putting the old ones back; the cap and the meter refuse a build; the board plays and is solved; the save keeps the output; a generator past 63 children Run again (with params), clear of the scene's entities, its own output replaced, one undo; a points param's values checked; a round's live build from a seed undone at Stop; Generating... for a long build only"
 # vim: set noet ts=4 sw=4:

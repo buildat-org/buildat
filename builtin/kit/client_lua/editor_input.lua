@@ -829,13 +829,13 @@ function M.add_menu_items(menu)
 		if E.running then M.stop() else M.play() end
 	end, {order = 11})
 	-- [KIT_BUILDER_ROUND_CONTROLS] a builder's, in edit mode too and in a
-	-- round: every round ended, every bot made in play gone (the server's
-	-- refusal says when there is none)
+	-- round: every round ended, every bot made in play gone; (4z37i) each
+	-- shown only while there is one (the state's rounds and bots)
 	menu.add(function()
-		return E.can_edit and "End all rounds" or nil
+		return E.can_edit and E.rounds and "End all rounds" or nil
 	end, function() send({op = "end_rounds"}) end, {order = 12})
 	menu.add(function()
-		return E.can_edit and "Remove all bots" or nil
+		return E.can_edit and E.bots and "Remove all bots" or nil
 	end, function() send({op = "remove_bots"}) end, {order = 13})
 	menu.add("Credits...", function() M.show_credits(menu) end,
 			{order = 70, page = true})
@@ -3543,6 +3543,12 @@ function M.editor(options)
 			log:info("kit editor: the server is " .. (E.running and "Running" or
 					"Ended") .. " (by " .. E.by .. ")" ..
 					(E.persistent and ", persistent" or ""))
+		end
+		-- (4z37i) a round to end, a bot to remove: the pause menu's items
+		if E.rounds ~= (s.rounds == true) or E.bots ~= (s.bots == true) then
+			E.rounds, E.bots = s.rounds == true, s.bots == true
+			log:info("kit editor: rounds running: " .. (E.rounds and "yes" or "no") ..
+					", bots in play: " .. (E.bots and "yes" or "no"))
 		end
 		-- [KIT_TERRAIN_PLAY_RULES] who builds outside every region
 		E.terrain_rules = type(s.terrain_rules) == "table" and

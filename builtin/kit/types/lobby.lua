@@ -3,7 +3,11 @@
 -- "over" (a run's result). A player who comes in while Running (and every
 -- player at Play) is in the lobby. play (from the lobby or over) and again
 -- (from over, or a run started over) start a run: "entered", by them;
--- over ends it, lobby goes back, each "left" if they were playing.
+-- over ends it, lobby goes back, each "left" if they were playing; in the
+-- lobby (come in, or back) "in_lobby". (4z37i) So the music follows the
+-- states by links alone: a lobby song's play from in_lobby and stop from
+-- entered, a run's song's play from the game's start (GO) and stop from
+-- left: none in a run's countdown or on its result.
 -- Its screens follow the state: kit/ui_panels `lobby_screen` (in the lobby)
 -- and `over_screen` (over) shown to that player alone, hidden as they leave
 -- it (each a panel whose `to` is "player": their own; a screen, `screen`
@@ -46,6 +50,9 @@ local function set(c, by, now)
 	if now == "playing" then
 		c:emit("entered", nil, by)
 	end
+	if now == "lobby" then
+		c:emit("in_lobby", nil, by)
+	end
 end
 
 return {
@@ -64,6 +71,7 @@ return {
 		outputs = {
 			entered = "A player's run started.",
 			left = "A player's run ended: over, or back to the lobby.",
+			in_lobby = "A player came into the lobby, or back to it. Link it to a lobby song's play.",
 		},
 	},
 	params = {
@@ -76,7 +84,7 @@ return {
 		-- [KIT_SCENE_PACKAGES] the scene a player's play is taking them to
 		going = {default = {}}},
 	inputs = {play = "any", again = "none", lobby = "none", over = "none"},
-	outputs = {entered = "none", left = "none"},
+	outputs = {entered = "none", left = "none", in_lobby = "none"},
 	on_join = function(c, by)
 		if not c.player then
 			return
