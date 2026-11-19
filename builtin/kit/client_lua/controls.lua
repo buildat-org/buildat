@@ -1857,9 +1857,9 @@ end
 
 -- A row of buttons {label, pressed or nil, released} at the lower right,
 -- y up from the bottom; [KIT_TOUCH_THUMBS] side s: a column of them s wide,
--- each s high ({..., half = true}: half that)
-local function button_row(list, y, least, s)
-	local bar = magic.ui.root:CreateChild("Window")
+-- each s high ({..., half = true}: half that), in parent (default the root)
+local function button_row(list, y, least, s, parent)
+	local bar = (parent or magic.ui.root):CreateChild("Window")
 	bar.defaultStyle = K.STYLE
 	bar:SetStyleAuto()
 	bar:SetLayout(s and magic.LM_VERTICAL or magic.LM_HORIZONTAL, 4,
@@ -1908,7 +1908,8 @@ end
 local function touch_button(x, y)
 	local sc = magic.ui.scale
 	for _, row in ipairs(C.rows) do
-		local bar, list = row.bar, row.bar.visible and row.list
+		local bar = row.bar
+		local list = bar.visible and (not row.outer or row.outer.visible) and row.list
 		for i = 1, list and bar:GetNumChildren() or 0 do
 			local btn = bar:GetChild(i - 1)
 			local p, s = btn.screenPosition, btn.size
@@ -2059,13 +2060,28 @@ local function make_bar(wr)
 		local s = math.max(40, math.floor(math.min(thumb(),
 				room / math.max(1, full + half / 2))))
 		C.bar = button_row(col, 8, nil, s)
-		-- (the world's actions over it where they fit, else beside it)
-		local a_h = 12 + #acts * (s + 4) - 4
-		local over = C.bar.height + 6 + a_h <= root.height * 0.92 - 16
-		C.abar = button_row(acts, over and 8 + C.bar.height + 6 or 8, nil, s)
-		if not over then
-			C.abar:SetPosition(-8 - C.bar.width - 6, -8)
+		-- (the world's actions over it where they fit, else beside it in
+		-- as many columns as they take, the first rightmost)
+		local avail = root.height * 0.92 - 16
+		local over = C.bar.height + 6 + 12 + #acts * (s + 4) - 4 <= avail
+		local per = math.max(1, math.floor((avail - 8) / (s + 4)))
+		C.abar = magic.ui.root:CreateChild("UIElement")
+		C.abar:SetAlignment(magic.HA_RIGHT, magic.VA_BOTTOM)
+		C.abar:SetPosition(over and -8 or -8 - C.bar.width - 6,
+				over and -(8 + C.bar.height + 6) or -8)
+		C.abar.visible = #acts > 0
+		local w, h = 0, 0
+		for i = 1, #acts, per do
+			local part = {}
+			for j = i, math.min(#acts, i + per - 1) do
+				part[#part + 1] = acts[j]
+			end
+			local col = button_row(part, 0, nil, s, C.abar)
+			C.rows[#C.rows].outer = C.abar
+			col:SetPosition(-w, 0)
+			w, h = w + col.width + 6, math.max(h, col.height)
 		end
+		C.abar:SetFixedSize(math.max(0, w - 6), h)
 		C.lbar = button_row(lefts, 8, nil, s)
 		C.lbar:SetAlignment(magic.HA_LEFT, magic.VA_BOTTOM)
 		C.lbar:SetPosition(8, -8)
@@ -2118,7 +2134,29 @@ function M.touch_left_top()
 end
 
 if TOUCH then
+	-- [KIT_TOUCH_THUMBS] A mouse's left button on a bar's button (a touch
+	-- screen with a mouse, a scripted click), not a finger's mouse the
+	-- platform makes of it: none within half a second of a finger
+	magic.SubscribeToEvent("MouseButtonDown", function(_, data)
+		if data:GetInt("Button") ~= magic.MOUSEB_LEFT or
+				buildat.get_time_us() - (C.touch_us or -1e9) < 500000 then
+			return
+		end
+		local mp = magic.input:GetMousePosition()
+		C.mouse_btn = touch_button(mp.x, mp.y)
+		if C.mouse_btn and C.mouse_btn[2] then
+			C.mouse_btn[2]()
+		end
+	end)
+	magic.SubscribeToEvent("MouseButtonUp", function(_, data)
+		local b = data:GetInt("Button") == magic.MOUSEB_LEFT and C.mouse_btn
+		if b then
+			C.mouse_btn = nil
+			b[3]()
+		end
+	end)
 	magic.SubscribeToEvent("TouchBegin", function(_, data)
+		C.touch_us = buildat.get_time_us()
 		if not C.on then
 			return
 		end
@@ -2217,6 +2255,7 @@ if TOUCH then
 		end
 	end)
 	magic.SubscribeToEvent("TouchEnd", function(_, data)
+		C.touch_us = buildat.get_time_us()
 		local id = data:GetInt("TouchID")
 		local f = C.fingers[id]
 		C.fingers[id] = nil

@@ -38,7 +38,7 @@
 -- A touchscreen (BUILDAT_TOUCH=1, Kit's controls.lua): a stick at the
 -- lower left, a drag elsewhere turns the view, a tap is the left click at
 -- the finger and a finger held still the right click; Jump (a car's Gas
--- and Brake, a seat's Exit) and Menu at the lower right
+-- and Brake, a seat's Exit) and Menu a stack at the lower right
 local log = buildat.Logger("workbench")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")

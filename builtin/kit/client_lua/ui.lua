@@ -574,8 +574,11 @@ end
 -- hotbar there the hotbar's too: its unit is a finger's, not its percents.
 -- simplified: by the default order, hotbar, item line, health, hint, as far
 -- as they were dragged or not
--- ([KIT_TOUCH_THUMBS] x0, x1: the bars over that stretch only; the stacks
--- stand in the corners)
+-- ([KIT_TOUCH_THUMBS] x0, x1: the bars over that stretch only, the stacks
+-- standing in the corners; what stands on the hotbar at least as high as the
+-- hotbar was lifted. simplified: the hotbar's lift as last placed, within
+-- half a second)
+local hotbar_lift = {0, -1e9}
 local function own_lift(name, V, x0, x1)
 	local r = magic.ui.root
 	local top = TOUCH and M.touch_bar_top and M.touch_bar_top()
@@ -586,9 +589,16 @@ local function own_lift(name, V, x0, x1)
 		top = M.touch_bar_top(x0, x1)
 	end
 	local lift = top and math.max(0, r.height - top) or 0
+	local now = buildat.get_time_us()
+	if name == "hotbar" then
+		hotbar_lift = {lift, now}
+	end
 	local line = math.max(16, 2.4 * V)
 	local over = name == "item_line" and 1 or name == "health" and 2 or
 			name == "hint" and 3 or nil
+	if over and now - hotbar_lift[2] < 500000 then
+		lift = math.max(lift, hotbar_lift[1])
+	end
 	return over and lift + M.hud_unit() + 4 + (over - 1) * (line + 4) or lift
 end
 
