@@ -346,7 +346,11 @@ namespace interface
 //                               them; then those it does not declare, or
 //                               whose value it refuses, are left out
 //                               (logged). No c; none: the parameters as
-//                               they were, so filtered
+//                               they were, so filtered. [KIT_API_1] What
+//                               is left out goes to the component's
+//                               old_params {name: value} (saved, exported,
+//                               in the entity's Log; the builder op
+//                               clear_old_params, {"id", "comp"}, drops it)
 // c: c.id, c.pos, c.params (read), c.state (read and written; a table in
 // it changed in place is written too), [KIT_ZONE_SHAPES] c:params_of(type)
 // (the parameters of the same entity's component of that type, as its own

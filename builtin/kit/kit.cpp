@@ -267,6 +267,10 @@ struct Instance
 	// authored: a prefab copy's parameters set on this copy, kept as the
 	// prefab changes ([KIT] stage 4d)
 	std::set<ss_> overrides;
+	// authored ([KIT_API_1]): what a migrate (or an edited local/ type's
+	// file) left out, {name: value}, kept for its builder (get_entity, the
+	// builder op clear_old_params); undefined if none
+	json::Value old_params;
 	// runtime, not saved ([KIT] stage 4l): the meter it spent in this cost
 	// window
 	int64_t spent = 0;
@@ -4659,9 +4663,10 @@ struct Module: public interface::Module, public Interface
 	// version takes them: through its migrate(params, from) where it has
 	// one, then those it does not declare or whose value it refuses left
 	// out, each logged (a migrate that fails leaves the parameters as
-	// they were for that)
+	// they were for that). [KIT_API_1] dropped: those left out, {name:
+	// [value, why]}
 	void migrate_params(const ss_ &type, int64_t from, json::Value &params,
-			const ss_ &who)
+			const ss_ &who, json::Value *dropped = nullptr)
 	{
 		const Type &t = m_types[type];
 		if(t.handlers.count("migrate")){
@@ -4692,9 +4697,16 @@ struct Module: public interface::Module, public Interface
 					jstr(d, "type") == "entity" ? "" : check_param(d, *it);
 			if(bad.empty())
 				kept.set(it.key(), *it);
-			else
+			else {
 				log_w(MODULE, "%s: %s's %s of version %lli left out: %s",
 						cs(who), cs(type), cs(it.key()), (long long)from, cs(bad));
+				if(dropped){
+					json::Value d = json::array();
+					d.append(*it);
+					d.append(bad);
+					dropped->set(it.key(), d);
+				}
+			}
 		}
 		params = kept;
 	}
@@ -4835,9 +4847,28 @@ struct Module: public interface::Module, public Interface
 			const bool object = migrate_object(e, in, pj);
 			// [KIT] stage 5: an instance of an older version is upgraded to
 			// the type's, its parameters through the type's migrate
+			// [KIT_API_1] what it left out kept, as old_params
+			const json::Value &op = cj.get("old_params");
+			if(op.is_object() && op.size())
+				in.old_params = op.deepcopy();
+			auto keep_old = [&](const ss_ &k, const json::Value &v,
+					const ss_ &bad, int64_t ver){
+				if(in.old_params.is_undefined())
+					in.old_params = json::object();
+				in.old_params.set(k, v);
+				add_log(e.id, "kept as old_params: "+k+" ("+(bad ==
+						"not a parameter of it" ? ss_("no longer a parameter") :
+						"its value "+bad.substr(0, 60)+": not taken")+" of "+
+						in.type+" v"+itos(ver)+")");
+			};
 			if(!object && in.version < t.version){
 				pj = pj.is_object() ? pj.deepcopy() : json::object();
-				migrate_params(in.type, in.version, pj, "Entity "+itos(e.id));
+				json::Value dropped = json::object();
+				migrate_params(in.type, in.version, pj, "Entity "+itos(e.id),
+						&dropped);
+				for(json::Iterator it(dropped); it; ++it)
+					keep_old(it.key(), (*it).at(0), (*it).at(1).as_string(),
+							t.version);
 				log_i(MODULE, "Entity %s's %s upgraded from version %lli to "
 						"%lli", cs(itos(e.id)), cs(in.type), (long long)in.version,
 						(long long)t.version);
@@ -4870,9 +4901,12 @@ struct Module: public interface::Module, public Interface
 					// what was placed: what it no longer takes is dropped, not
 					// the project
 					if(lenient && (!decl.get(it.key()).is_object() || !bad.empty())){
-						log_w(MODULE, "Entity %s: %s's %s dropped (its file has %s)",
-								cs(itos(e.id)), cs(in.type), cs(it.key()),
+						log_w(MODULE, "Entity %s: %s's %s kept as old_params (its "
+								"file has %s)", cs(itos(e.id)), cs(in.type),
+								cs(it.key()),
 								bad.empty() ? "no such parameter" : cs("it "+bad));
+						keep_old(it.key(), *it, bad.empty() ?
+								ss_("not a parameter of it") : bad, t.version);
 						continue;
 					}
 					if(!decl.get(it.key()).is_object()){
@@ -4990,6 +5024,8 @@ struct Module: public interface::Module, public Interface
 			cj.set("type", in.type);
 			cj.set("version", in.version);
 			cj.set("params", in.params);
+			if(!in.old_params.is_undefined())
+				cj.set("old_params", in.old_params);
 			if(!in.overrides.empty()){
 				json::Value ov = json::array();
 				for(const ss_ &o : in.overrides)
@@ -33862,6 +33898,13 @@ struct Module: public interface::Module, public Interface
 				R"J({"type": "object", "properties": {"id": {"type": "integer"},
 				"comp": {"type": "integer", "description": "From 0"}},
 				"required": ["id"]})J", R"J({"comp": 0})J"},
+			// [KIT_API_1]
+			{"clear_old_params", "clear_old_params", "Removes the old_params "
+				"of entity id's component comp: the values an upgrade of its "
+				"type left out (shown in get_state, logged). One undo.",
+				R"J({"type": "object", "properties": {"id": {"type": "integer"},
+				"comp": {"type": "integer", "description": "From 0"}},
+				"required": ["id"]})J", R"J({"comp": 0})J"},
 			{"keep", "keep", "When Stopped: puts the builds the last Stop "
 				"discarded (what players built and made in play) into the start: "
 				"all of them, or those named in names.",
@@ -43342,6 +43385,23 @@ struct Module: public interface::Module, public Interface
 			what = text.empty() ? "cleared "+itos(e->id)+"'s comments" :
 					"set "+itos(e->id)+"'s comments ("+itos(text.size())+
 					" bytes)";
+			return true;
+		}
+		// [KIT_API_1] {"op": "clear_old_params", "id", "comp"}: what a
+		// migrate left out of that component, gone
+		if(op == "clear_old_params"){
+			Entity *e = nullptr;
+			Instance *in = instance_arg(j, e, why);
+			if(!in)
+				return false;
+			if(in->old_params.is_undefined()){
+				why = "entity "+itos(e->id)+"'s "+in->type+" has no old_params";
+				return false;
+			}
+			Entity copy = *e;
+			copy.comps[in - &e->comps[0]].old_params = json::Value();
+			change.push_back(std::make_pair(e->id, entity_json(copy)));
+			what = "cleared "+itos(e->id)+"'s "+in->type+"'s old_params";
 			return true;
 		}
 		if(op == "add_component" || op == "remove_component" ||
