@@ -30,7 +30,9 @@
 #      refused naming the screen's buttons; an output emitted every tick
 #      (local/ticker) one entry with its count, first and last value and
 #      time; muted by its name and by "<id>:<name>" (the answer's muted);
-#   5. get_state's filters: scene, ids, type, state false (10);
+#   5. get_state's filters: scene, ids, type, state false (10); (4z37f)
+#      its generators: a kit/lights_out's, its run_generator with a size,
+#      the last run's counts, a run of no generator refused;
 #   6. get_goal_warnings' level lines: default names, a scene with no way
 #      in, the timer with no link of four (12); [KIT_SIDE_SCENERY] (3) parts
 #      wholly in front of a side view's clip, placed and moved there: in the
@@ -670,6 +672,19 @@ elif phase == "state":
     assert sorted(e["id"] for e in tm) == sorted(T), tm
     assert "no scene named" in refused("get_state", {"scene": "nope"})
     assert "ids: a list" in refused("get_state", {"ids": 5})
+    # [KIT_GENERATORS] (4z37f) get_state's generators, run_generator with a
+    # param (its last run then), one that is none refused; both undone
+    L = placed(call("place", {"type": "kit/lights_out", "pos": [40, 1, 40]}))
+    gen = lambda: [g for g in state().get("generators", []) if g["id"] == L][0]
+    g = gen()
+    assert g["type"] == "kit/lights_out" and g["children"] == 25 and g["last"]["ok"], g
+    t = call("run_generator", {"id": L, "params": {"size": 6}})
+    assert "built %d again: 36 children (25 kept, 11 new, 0 gone)" % L in t, t
+    g = gen()
+    assert g["children"] == 36 and g["last"]["children"] == 36 and g["last"]["kept"] == 25, g
+    assert "no generator" in refused("run_generator", {"id": MT})
+    call("undo")
+    call("undo")
 elif phase == "goals":
     rpc("initialize", init)
     T = s["T"]
