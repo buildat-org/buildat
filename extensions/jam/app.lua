@@ -89,8 +89,8 @@ local function unless_changed(fn)
 	if not MU.on() or MU.text == app.saved then
 		return fn()
 	end
-	ui_utils.show_confirm_dialog("The song has changes that are not " ..
-			"saved. Discard them?", fn, function()
+	ui_utils.show_confirm_dialog("The song has unsaved changes. Discard them?",
+			fn, function()
 		-- (the template list back on its placeholder: the same pick again
 		-- is a pick)
 		if app.drop then
@@ -165,7 +165,7 @@ function file_row(r)
 	end):SetName("jam save")
 	button(r, "Export WAV", function()
 		if not MU.song then
-			say("no WAV: " .. tostring(MU.err))
+			say("WAV not exported: " .. tostring(MU.err))
 			return
 		end
 		say("rendering " .. file_name(".wav"))
@@ -179,14 +179,14 @@ local function export_wav()
 	local song = jam.song(MU.text)
 	local bytes, why = song and song:wav(0, MU.mood)
 	if not bytes then
-		say("no WAV: " .. tostring(why or MU.err))
+		say("WAV not exported: " .. tostring(why or MU.err))
 		return
 	end
 	local name = file_name(".wav")
 	local path, err = api.save_file(name, bytes)
 	say(path and string.format("exported %s, %d bytes, %.2f s", path ~= "" and
 			path:match("[^/\\]+$") or name, #bytes, (#bytes - 44) / 176400) or
-			"no WAV: " .. tostring(err))
+			"WAV not exported: " .. tostring(err))
 end
 
 magic.SubscribeToEvent("Update", function()
@@ -212,7 +212,8 @@ magic.SubscribeToEvent("Update", function()
 	-- A file from the disk: text of jam's size at most, Windows' line ends
 	-- read as \n
 	if #data > 65536 then
-		say("not opened: " .. name .. " is " .. #data .. " bytes, 65536 at most")
+		say("not opened: " .. name .. " is " .. #data .. " bytes, over the " ..
+				"65536-byte limit")
 		return
 	end
 	data = data:gsub("\r\n", "\n")

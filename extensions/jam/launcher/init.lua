@@ -7,6 +7,6 @@
 return function(ctx)
 	return {{id = "app", label = "jam music maker", order = 187,
 		category = "app",
-		description = "Songs as text, edited in views and exported",
+		description = "Make songs in an editor or as text and export them for a game",
 		run = function() ctx.launch{extension = "jam"} end}}
 end

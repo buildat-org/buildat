@@ -1084,8 +1084,8 @@ local function play(at)
 	if MU.mood then
 		MU.player:mood(MU.mood, true)
 	end
-	say(string.format("playing %s from %.2f s, mood %s", MU.loop or "song",
-			at or 0, MU.mood or "all"))
+	say(string.format("playing %s from %.2f s, mood %s",
+			(MU.loop or "song"):gsub("^s:", "section "), at or 0, MU.mood or "all"))
 end
 
 -- One note (a token, a drum's hit) on a track, as the song's buses hear it;
@@ -1266,7 +1266,8 @@ local function draw_song(body)
 			end
 		end
 	end
-	text(page, "Play order (a section's entries: its patterns layered, x its repeats)", DIM)
+	text(page, "Play order: a+b plays two patterns together, x2 plays an entry twice",
+			DIM)
 	for k, sn in ipairs(m.play) do
 		sec_row(sn, k)
 		shown[sn] = true
@@ -1274,7 +1275,7 @@ local function draw_song(body)
 	for _, sec in ipairs(m.sections) do
 		if not shown[sec.name] then
 			if not shown[""] then
-				text(page, "Not played", DIM)
+				text(page, "Not in the play order", DIM)
 				shown[""] = true
 			end
 			sec_row(sec.name, nil)
@@ -1301,12 +1302,12 @@ local function draw_song(body)
 			end
 			MU.draw()
 		end):SetName("music play from")
-		button(d, "Loop it", function()
+		button(d, "Loop this section", function()
 			MU.loop = "s:" .. s.name
 			play()
 			MU.draw()
 		end):SetName("music loop it")
-		button(d, "Loop here", function()
+		button(d, "Loop the song from here", function()
 			set_text(J.set_loop(m, s.name), "loop " .. s.name)
 		end):SetName("music loop here")
 		local pats = {}
@@ -1320,7 +1321,7 @@ local function draw_song(body)
 			end
 			en[#en + 1] = {layer = {pn}, rep = 1}
 			set_text(J.set_entries(m, s.name, en), "section " .. s.name .. " + " .. pn)
-		end, "Add")
+		end, "Add a pattern")
 		return
 	end
 	local ei = MU.ssel.entry
@@ -1374,7 +1375,7 @@ local function draw_song(body)
 			MU.ssel.entry = nil
 			entries(function(en) table.remove(en, ei) end, ei .. " removed")
 		else
-			say("a section keeps one entry")
+			say("a section needs at least one entry")
 		end
 	end):SetName("music entry remove")
 end
@@ -1432,7 +1433,7 @@ local function pattern_head(body, p, roll)
 			MU.draw()
 		end):SetName("music page >")
 	end
-	button(r, "Loop it", function()
+	button(r, "Loop this pattern", function()
 		MU.loop = "pattern"
 		play()
 		MU.draw()
@@ -1515,7 +1516,7 @@ local function note_row(parent, lane, step, n, len)
 			end
 		end):SetName("music pitch " .. d)
 	end
-	text(r, " vel " .. J.fmt(n.vel))
+	text(r, " velocity " .. J.fmt(n.vel))
 	for _, v in ipairs({{"?", 0.5}, {"-", math.max(0.05, n.vel - 0.1)},
 			{"+", math.min(1, n.vel + 0.1)}, {"!", 1}}) do
 		button(r, v[1], function()
@@ -1523,7 +1524,7 @@ local function note_row(parent, lane, step, n, len)
 					"velocity")
 		end):SetName("music vel " .. v[1])
 	end
-	text(r, " len " .. len)
+	text(r, " length " .. len)
 	for _, dl in ipairs({-1, 1}) do
 		button(r, dl < 0 and "-" or "+", function()
 			local st = J.steps(p, lane)
@@ -1666,8 +1667,8 @@ local function draw_grid(body)
 	-- The selection's row
 	local d = row(body)
 	if not sel_lane then
-		text(d, "Click a step: place it, or select it; the selected again: out",
-				DIM)
+		text(d, "Click an empty step to fill it, a filled one to select it, the " ..
+				"selected one to clear it", DIM)
 		return
 	end
 	local step = MU.sel.step
@@ -1675,7 +1676,7 @@ local function draw_grid(body)
 	if not step then
 		text(d, sel_lane.key .. ":")
 		if sel_lane.copies then
-			button(d, "Own steps", function()
+			button(d, "Unlink from " .. sel_lane.copies[1].from, function()
 				set_text(J.unlink(m, p.name, sel_lane.key) or m.text, "lane " ..
 						sel_lane.key .. " unlinked in " .. p.name)
 			end):SetName("music unlink")
@@ -1869,7 +1870,7 @@ local function roll_press(p, lane, pitch, step, x, y, dx)
 			local len = math.max(1, dc + 1)
 			local t = place_toks(p, st, step, pitch, len)
 			roll_edit(p, lane, t, "note " .. J.name(pitch) .. " at step " .. step ..
-					", " .. len .. " long", {step = step, pitch = pitch})
+					", length " .. len, {step = step, pitch = pitch})
 			audition(lane.track, J.name(pitch))
 		end
 		return
@@ -1893,7 +1894,7 @@ local function roll_press(p, lane, pitch, step, x, y, dx)
 			local sel = MU.rsel
 			if sel and sel.step == hit.step and sel.pitch == pitch then
 				roll_edit(p, lane, remove_toks(p, st, hit), "note " .. J.name(pitch) ..
-						" at step " .. hit.step .. " out", nil)
+						" at step " .. hit.step .. " removed", nil)
 			else
 				MU.rsel = {step = hit.step, pitch = pitch}
 				say("selected note " .. J.name(pitch) .. " at " .. p.name .. " " ..
@@ -1903,11 +1904,11 @@ local function roll_press(p, lane, pitch, step, x, y, dx)
 		elseif resize then
 			local len = math.max(1, hit.len + dc)
 			roll_edit(p, lane, J.len_toks(p, st, hit.step, len), "note at step " ..
-					hit.step .. " " .. len .. " long", {step = hit.step, pitch = pitch})
+					hit.step .. ", length " .. len, {step = hit.step, pitch = pitch})
 		else
 			local to = math.max(1, math.min(p.len, hit.step + dc))
 			roll_edit(p, lane, move_toks(p, st, hit, dc, dr), "note " ..
-					J.name(pitch) .. " moved to step " .. to .. " " .. J.name(pitch + dr),
+					J.name(pitch) .. " moved to step " .. to .. " as " .. J.name(pitch + dr),
 					{step = to, pitch = pitch + dr})
 			audition(lane.track, J.name(pitch + dr))
 		end
@@ -1928,7 +1929,8 @@ local function draw_roll(body)
 		lane = lanes[1]
 	end
 	if not lane then
-		text(body, "No melodic lane in " .. p.name .. " (the grid has its drums)", DIM)
+		text(body, p.name .. " has no melodic lanes. Its drums are in the Pattern view.",
+				DIM)
 		return
 	end
 	MU.roll_lane = lane.key
@@ -1959,11 +1961,11 @@ local function draw_roll(body)
 		MU.roll_top = math.min(127, math.floor((lo + hi) / 2 + rows / 2))
 		MU.roll_for = p.name .. lane.key
 	end
-	button(head, "Up", function()
+	button(head, "Scroll up", function()
 		MU.roll_top = math.min(127, MU.roll_top + 12)
 		MU.draw()
 	end):SetName("music roll up")
-	button(head, "Down", function()
+	button(head, "Scroll down", function()
 		MU.roll_top = math.max(rows - 1, MU.roll_top - 12)
 		MU.draw()
 	end):SetName("music roll down")
@@ -2034,23 +2036,23 @@ local function draw_roll(body)
 	end
 	local d = row(body)
 	if not hit then
-		text(d, "Click: a note, or select one (again: out); a drag draws one; a note " ..
-				"dragged moves, its end resizes", DIM)
+		text(d, "Click to place or select a note, again to remove it. Drag to draw a " ..
+				"note, move one, or resize one by its end.", DIM)
 		return
 	end
-	text(d, lane.key .. " step " .. hit.step .. ": " .. J.name(hit.pitch) .. ", " ..
-			hit.len .. " long")
-	for _, mv in ipairs({{"<", -1, 0}, {">", 1, 0}, {"Up", 0, 1}, {"Dn", 0, -1}}) do
+	text(d, lane.key .. " step " .. hit.step .. ": " .. J.name(hit.pitch) ..
+			", length " .. hit.len)
+	for _, mv in ipairs({{"<", -1, 0}, {">", 1, 0}, {"Up", 0, 1}, {"Down", 0, -1}}) do
 		button(d, mv[1], function()
 			local to = math.max(1, math.min(p.len, hit.step + mv[2]))
 			roll_edit(p, lane, move_toks(p, st, hit, mv[2], mv[3]), "note " ..
-					J.name(hit.pitch) .. " moved to step " .. to .. " " ..
+					J.name(hit.pitch) .. " moved to step " .. to .. " as " ..
 					J.name(hit.pitch + mv[3]), {step = to, pitch = hit.pitch + mv[3]})
 		end):SetName("music move " .. mv[1])
 	end
 	button(d, "Remove", function()
 		roll_edit(p, lane, remove_toks(p, st, hit), "note " .. J.name(hit.pitch) ..
-				" at step " .. hit.step .. " out", nil)
+				" at step " .. hit.step .. " removed", nil)
 	end):SetName("music remove")
 	note_row(body, lane, hit.step, hit.n, hit.len)
 end
@@ -2121,7 +2123,7 @@ local function draw_inst(body)
 	choose(ar, "src", srcs, i.src, function(v)
 		set_text(J.set_inst(m, i.name, "src", v), "inst " .. i.name .. " src " .. v)
 	end, "inst " .. i.name .. (i.base and " (from " .. i.base .. ")" or ""))
-	text(ar, track and "heard on " .. track or "on no track", DIM)
+	text(ar, track and "played on track " .. track or "not on any track", DIM)
 	local notes = drum and {"X", "x", "g"} or inst_notes(m, i.name)
 	if #notes == 0 then
 		notes = {"C3", "C4"}
@@ -2170,9 +2172,9 @@ local function draw_inst(body)
 	text(cr, "chord (intervals)", DIM)
 	for _, g in ipairs({i.src, "all", "filter"}) do
 		if J.INST[g] then
-			text(page, g == i.src and "Source: " .. g or g == "all" and "Every source" or
+			text(page, g == i.src and "Source: " .. g or g == "all" and "All sources" or
 					"Filter" .. (vals.ftype and vals.ftype ~= "none" and "" or
-					" (ftype none: off)"), DIM)
+					" (off while ftype is none)"), DIM)
 			for _, d in ipairs(J.INST[g]) do
 				param_row(page, d, vals[d[1]], own[d[1]] ~= nil, function(v, quiet)
 					set(d[1], v, quiet)
@@ -2326,7 +2328,8 @@ local function draw_mixer(body)
 		el:SetFixedWidth(W)
 	end
 	if not sel or not (m.track[sel.track] or sel.track == "bus") then
-		text(body, "Pick a cell: its parameters here; a mood's row: heard in it", DIM)
+		text(body, "Pick a cell to edit it here. A mood's cells also switch the preview " ..
+				"to that mood.", DIM)
 		return
 	end
 	local mood = sel.row:match("^mood (.+)$")
@@ -2394,7 +2397,7 @@ local function draw_text(body)
 	local f = edit(body, MU.text, function(s)
 		set_text(s, "typed", true)
 		if MU.status_text then
-			MU.status_text:SetText(MU.err and "Error: " .. MU.err or "Parses")
+			MU.status_text:SetText(MU.err and "Error: " .. MU.err or "No errors")
 			MU.status_text:SetColor(MU.err and WARN or DIM)
 		end
 	end)
@@ -2411,13 +2414,13 @@ end
 
 local function analyze()
 	if not MU.song then
-		say("not analysed: " .. tostring(MU.err))
+		say("not analyzed: " .. tostring(MU.err))
 		MU.draw()
 		return
 	end
 	local t0 = now_us()
 	local j = network.parse_json(MU.song:analyze(0, MU.mood)) or {}
-	say(string.format("analysed%s: %s LUFS, peak %s dBFS, %s s, hash %s (%d ms)",
+	say(string.format("analyzed%s: %s LUFS, peak %s dBFS, %s s, hash %s (%d ms)",
 			MU.mood and " in " .. MU.mood or "", tostring(j.lufs), tostring(j.peak_dbfs),
 			tostring(j.seconds), tostring(j.hash), (now_us() - t0) / 1000))
 	MU.draw()
@@ -2477,7 +2480,7 @@ local function header(win)
 		if MU.player then
 			play()
 		end
-		say("loop " .. v)
+		say("loop " .. v:gsub("^s:", "section "))
 		MU.draw()
 	end, "Play")
 	text(r2, " tempo")
@@ -2522,7 +2525,7 @@ local function header(win)
 		end, (MU.mood or "all") == md)):SetName("music mood " .. md)
 	end
 	MU.status_text = text(r3, "  " .. (MU.err and "Error: " .. MU.err or MU.status or
-			"Parses"), MU.err and WARN or DIM)
+			"No errors"), MU.err and WARN or DIM)
 	if MU.opts.file_row then
 		MU.opts.file_row(row(win))
 	end
@@ -2798,14 +2801,14 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 		end
 		if key == magic.KEY_DELETE then
 			roll_edit(p, lane, remove_toks(p, st, hit), "note " .. J.name(hit.pitch) ..
-					" at step " .. hit.step .. " out", nil)
+					" at step " .. hit.step .. " removed", nil)
 		else
 			local mv = ({[magic.KEY_LEFT] = {-1, 0}, [magic.KEY_RIGHT] = {1, 0},
 				[magic.KEY_UP] = {0, 1}, [magic.KEY_DOWN] = {0, -1}})[key]
 			if mv then
 				local to = math.max(1, math.min(p.len, hit.step + mv[1]))
 				roll_edit(p, lane, move_toks(p, st, hit, mv[1], mv[2]), "note " ..
-						J.name(hit.pitch) .. " moved to step " .. to .. " " ..
+						J.name(hit.pitch) .. " moved to step " .. to .. " as " ..
 						J.name(hit.pitch + mv[2]), {step = to, pitch = hit.pitch + mv[2]})
 			end
 		end
