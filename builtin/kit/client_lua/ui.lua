@@ -157,7 +157,17 @@ buildat.sub_packet("kit:mine", function(data)
 	if type(m) ~= "table" then
 		return
 	end
+	-- ([KIT_STILL_LOOKS] each entity whose own changed read again: a still
+	-- look drawn as it is now)
+	local function stir(id)
+		if P.nodes[id] then
+			P.nodes[id].calm = 0
+		end
+	end
 	if m.all then
+		for id in pairs(mine) do
+			stir(id)
+		end
 		mine = {}
 	end
 	for _, o in ipairs(type(m.list) == "table" and m.list or {}) do
@@ -165,6 +175,7 @@ buildat.sub_packet("kit:mine", function(data)
 		if id and type(o.key) == "string" then
 			mine[id] = mine[id] or {}
 			mine[id][o.key] = o.value
+			stir(id)
 		end
 	end
 end)

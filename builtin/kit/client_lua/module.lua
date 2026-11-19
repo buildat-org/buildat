@@ -266,7 +266,11 @@ local function call(n, part, fn, ...)
 	if type(f) ~= "function" or (n.failed and n.failed[part]) then
 		return
 	end
-	local ok, err = pcall(f, n.e, ...)
+	-- (here, not by the frame: a still look's part is called too)
+	local e = n.e
+	e.look, e.hinge, e.body, e.swing = n.look, n.hinge, n.body, n.swing
+	e.mine, e.you = n.id == P.you, P.you
+	local ok, err = pcall(f, e, ...)
 	if not ok then
 		n.failed = n.failed or {}
 		n.failed[part] = true
@@ -1229,8 +1233,9 @@ end
 local hud = nil
 -- [KIT_STILL_LOOKS] A look that has stood still CALM frames in play, with
 -- nothing else on it that changes by the frame (no text, HUD line, client
--- part, state, slide, attachment, preview, pose, moving links; its parent
--- not sliding), is read again only once the server updates its node
+-- part with on_update, pending prediction, slide, attachment, preview,
+-- pose, moving links; its parent not sliding), is read again only once
+-- the server updates its node
 -- (replicate.take_changed(): its attributes or vars came), in play and in
 -- edit mode: a node's place, turn and show are dear reads through the
 -- sandbox, and a track of 250 polygons read each frame was some 18 ms of
@@ -1239,7 +1244,13 @@ local hud = nil
 -- turn or show (controls.lua's world() keeps what it made of it till
 -- then); n.still: skipped this frame. A client without take_changed reads
 -- a still one each 16th frame, staggered by its id (drawn so up to 16
--- frames late), and every look each frame in edit mode
+-- frames late), and every look each frame in edit mode. (0a7h) A look's
+-- state: the server's kit:<key> marks its node; this player's own (ui.lua's
+-- kit:mine) sets n.calm = 0; a prediction keeps it read till confirmed or
+-- its time is up. A client part's on_add, on_state, on_enter, on_leave and
+-- on_use come without the frame's read. Anything else that changes how a
+-- look is drawn from outside its entity's node must set n.calm = 0 too, or
+-- a still look never shows it
 local CALM, frame_no = 8, 0
 local changed = {}
 -- (for "event kit_looks": what the frames since the last ask read and cost)
@@ -1255,13 +1266,29 @@ local function still(id, n)
 	elseif E.editing or (frame_no + id) % 16 == 0 then
 		return false
 	end
+	-- (one past its time dropped here: its look drawn again this frame)
+	if n.predicted and next(n.predicted) then
+		local now = buildat.get_time_us()
+		for k, p in pairs(n.predicted) do
+			if now >= p.till then
+				n.predicted[k] = nil
+			end
+		end
+		return false
+	end
 	local show = n.show
 	local look = show.look
+	-- (a part not here yet, or its on_add not run: read till it has)
+	for _, t in ipairs(type(show.client) == "table" and show.client or {}) do
+		local part = P.parts[t]
+		if not (part and n.added) or part.on_update then
+			return false
+		end
+	end
 	local pn = n.pid and n.pid ~= 0 and P.nodes[n.pid]
-	return not (n.text or show.hud ~= nil or show.client ~= nil or look.state or
-			look.hidden or n.rest or n.slide_to or n.wear_wanted or n.ghost or
-			n.see_through or n.attach_to or P.preview[id] or P.pose[id] or
-			(pn and pn.slide_to))
+	return not (n.text or show.hud ~= nil or look.hidden or n.rest or
+			n.slide_to or n.wear_wanted or n.ghost or n.see_through or
+			n.attach_to or P.preview[id] or P.pose[id] or (pn and pn.slide_to))
 end
 local function update_play(_, data)
 	local dt = data:GetFloat("TimeStep")
@@ -1456,10 +1483,6 @@ local function update_play(_, data)
 		if #parts > 0 then
 			n.e = n.e or entity_view(id, n)
 			local e = n.e
-			e.look, e.hinge, e.body, e.mine = n.look, n.hinge, n.body,
-					id == P.you
-			e.you = P.you
-			e.swing = n.swing
 			if not n.added then
 				n.added, n.vals = true, {}
 				for _, part in ipairs(parts) do
