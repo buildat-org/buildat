@@ -22757,7 +22757,11 @@ struct Module: public interface::Module, public Interface
 			round_join(peer, false);
 		else
 			send_items(p.name);
-		send_state(peer);
+		// (a template's first builder: the state in edit mode comes next,
+		// from the caller's m_open_tools; one in play before it had a web
+		// client ask for the pointer lock, and pause, in the editor)
+		if(!(m_open_tools && can_edit_u(peer)))
+			send_state(peer);
 	}
 
 	void on_tick(const interface::TickEvent &event)

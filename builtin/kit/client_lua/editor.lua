@@ -7591,6 +7591,15 @@ function MEM.restore(was)
 	end
 end
 
+-- Whether play or edit mode is known: the server's first state came, and
+-- no remembered edit mode waits for its answer. An app with a mouse look
+-- takes the pointer after this: on the web a lock asked for and not given
+-- in 0.5 s pauses the game, and a Create's first state comes seconds into
+-- the world's load (Firefox, 2026-11-19: the menu up over the editor)
+function M.mode_settled()
+	return E.state_seen == true and MEM.edit ~= "asked"
+end
+
 function M.remember(key)
 	MEM.key = key
 	local t = {}

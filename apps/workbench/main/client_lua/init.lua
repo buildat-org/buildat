@@ -282,10 +282,15 @@ kit.editor{scene = scene, camera = camera_node, ground_y = 1, bar = false,
 -- menu, the tools at the pointer and a touchscreen free it. On the web a
 -- lost pointer lock opens the menu (the editor's crosshair goes down to
 -- the pointer instead), whose click takes it back
-local editing, looking = false, false
+-- The pointer taken once Kit knows play or edit mode (kit.mode_settled():
+-- a Create's edit mode comes seconds into the world's load, and on the web
+-- a lock asked for in play and not given in 0.5 s opened the menu over the
+-- editor), or after 10 s without its state
+local editing, looking, settled = false, false, false
 local menu
 local function capture(on)
-	ui_utils.mouse_look(on and not TOUCH and (not editing or looking) and
+	ui_utils.mouse_look(on and settled and not TOUCH and
+			(not editing or looking) and
 			not kit.pointer_free(),
 			function()
 		if not kit.drop_crosshair() then
@@ -342,7 +347,7 @@ kit.controls{camera = camera_node, capture = capture,
 	paused = function() return menu.held() end,
 	act = function(x, y, left) act(target(x, y), left) end,
 	buttons = {{"Menu", function() menu.open() end}}}
-capture(true)
+-- (the pointer taken once Kit knows play or edit mode: below)
 magic.ui:SetFocusElement(nil)
 
 magic.SubscribeToEvent("KeyDown", function(_, data)
@@ -386,7 +391,21 @@ local function show_pointed()
 	kit.show_target(f and target(f.x, f.y) or nil)
 end
 
-magic.SubscribeToEvent("Update", function()
+-- (the pointer taken once the mode is settled: capture() above)
+local waited = 0
+magic.SubscribeToEvent("Update", function(_, d)
+	if not settled then
+		waited = waited + d:GetFloat("TimeStep")
+		if kit.mode_settled() or waited >= 10 then
+			settled = true
+			editing, looking = kit.editing(), kit.looking()
+			log:info("workbench: the mode settled: " .. (editing and "edit" or
+					"play") .. (kit.mode_settled() and "" or " (no state in 10 s)"))
+			if not menu.held() then
+				capture(true)
+			end
+		end
+	end
 	-- Edit mode frees the pointer for the editor's clicks, but in its
 	-- crosshair
 	if kit.editing() ~= editing or kit.looking() ~= looking then
