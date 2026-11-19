@@ -1077,8 +1077,8 @@ local ACCOUNT_COMMANDS = {setpassword = true, clearpassword = true}
 function core.__chat_message(name, message)
 	local command = message:match("^/(%S+)")
 	if core.__public and command and ACCOUNT_COMMANDS[command] then
-		core.chat_send_player(name, "Passwords are this server's accounts': " ..
-				"change yours in the menu")
+		core.chat_send_player(name, "Passwords belong to this server's " ..
+				"accounts: change yours in the menu")
 		return true
 	end
 	for _, cb in ipairs(core.registered_on_chat_messages or {}) do

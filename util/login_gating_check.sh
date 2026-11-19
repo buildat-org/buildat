@@ -21,7 +21,7 @@
 #      (no password, no code): the contrast that gives 3 its teeth;
 #   6. a kept login logs in by its token, said so ("by kept login", the
 #      client's and the server's), and an admin's password reset ends it
-#      ("The saved login has ended"); [ACCOUNT_WHO] Log out ends it too:
+#      ("The saved login has expired"); [ACCOUNT_WHO] Log out ends it too:
 #      its token, sent again by a copy of the client's storage, is
 #      refused;
 #   7. with TOTP on (the secret put in the store), a wrong code is refused
@@ -194,7 +194,7 @@ grep -aq "accounts: logged out" "$t/k1out.log" || fail "Log out not answered
 $(grep -aiE 'logged|log out|server window' "$t/k1out.log" | tail -5)"
 nolog "$srv_log" | grep -q "erin logged out" || fail "the server did not end the token"
 c=$(rejoin k1old "Login refused")
-echo "$c" | grep -qF 'Login refused: The saved login has ended: log in again' ||
+echo "$c" | grep -qF 'Login refused: The saved login has expired: log in again' ||
 	fail "a kept login outlived Log out
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
 sleep 1 # the ended kept login counts as a failure: the address waits 1 s
@@ -203,7 +203,7 @@ c=$(BUILDAT_JOIN_ADMIN="password erin otherpass123" join k2 erin rightpass123 0 
 nolog "$srv_log" | grep -q "reset the password of erin" || fail "the reset
 $(echo "$c" | grep -iE 'login|joined|refused|admin' | tail -5)"
 c=$(rejoin k1 "Login refused")
-echo "$c" | grep -qF 'Login refused: The saved login has ended: log in again' ||
+echo "$c" | grep -qF 'Login refused: The saved login has expired: log in again' ||
 	fail "a kept login outlived the password
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
 kill $srv; wait $srv 2>/dev/null

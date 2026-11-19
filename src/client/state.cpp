@@ -80,9 +80,9 @@ static ss_ unpack_packet(const ss_ &data)
 	if(data[0] == interface::PACKET_PLAIN)
 		return data.substr(1);
 	if(data[0] != interface::PACKET_ZSTD)
-		throw interface::RecordError("The server compressed its files by a "
+		throw interface::RecordError("The server compressed its files with "
 				"method "+itos((int64_t)(uint8_t)data[0])+
-				" this does not know");
+				", which this client does not know");
 	std::ostringstream os(std::ios::binary);
 	interface::decompress_zstd(data.substr(1), os);
 	return os.str();
@@ -557,7 +557,7 @@ struct CState: public State
 		}
 		if(address.empty()){
 			if(error)
-				*error = "Cannot connect to empty address";
+				*error = "Cannot connect to an empty address";
 			return false;
 		}
 		ss_ host;

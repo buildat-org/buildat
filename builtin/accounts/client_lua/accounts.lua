@@ -350,7 +350,7 @@ local function show_here(name)
 	M.close()
 	local w = page_window(380)
 	window = w
-	page_text(w, name .. " is logged in on another client already.")
+	page_text(w, name .. " is already logged in on another client.")
 	local choices = {
 		{"Kick out the other clients", function()
 			buildat.send_packet("accounts:here", "kick")
@@ -358,7 +358,7 @@ local function show_here(name)
 			window = page_window(380)
 			page_text(window, "Waiting for the other clients to leave...")
 		end},
-		{"Log in as guest", function()
+		{"Log in as a guest", function()
 			guest_join = true
 			last_login = nil
 			buildat.send_packet("accounts:here", "guest")
@@ -519,7 +519,7 @@ show_login = function(error_text)
 				send_login("", "", "", nil, keep and keep.on, "", token)
 			end)
 		end)
-		label("or with an account of this server:")
+		label("or with an account on this server:")
 	end
 	label("Name")
 	-- The name used last on this server, kept on the client; else the one
@@ -682,7 +682,7 @@ function show_create(error_text)
 		local n = name:GetText()
 		local pw = password:GetText()
 		if pw ~= password2:GetText() then
-			return show_create("The two passwords are not the same")
+			return show_create("The passwords do not match")
 		end
 		buildat.storage_write("name", n)
 		M.name = n
@@ -900,12 +900,12 @@ local function on_login_result(data)
 						return show_login(why ~= "cancelled" and why or nil)
 					end
 					send_login("", "", code, nil, keep, "", token)
-				end, "The name you have in this community is taken here by "..
-						"an account of this server. Pick another; it is kept "..
+				end, "Your name in this community is taken here by an "..
+						"account on this server. Pick another one; it is kept "..
 						"for this community on the Starport. If that account "..
 						"is yours, choose \"That's my account\" and log in "..
-						"with its password: your ID is linked to it, and logs "..
-						"in as it from then on.")
+						"with its password. Your ID is then linked to it and "..
+						"logs in as it from then on.")
 				return
 			end
 		end
@@ -1068,8 +1068,8 @@ end)
 
 buildat.sub_packet("accounts:link_result", function(data)
 	local text = cereal.binary_input(data, TEXT).text
-	text = text == "" and "The Starport ID is linked: it logs in as this "..
-			"account now" or text
+	text = text == "" and "The Starport ID is linked. It now logs in as "..
+			"this account." or text
 	log:info("link result: " .. text)
 	if page_kind == "account" then
 		account_page(page_back, text)
@@ -1333,7 +1333,8 @@ local DIM = magic.Color(rgb("dim"))
 -- or bad(name, error) for a text that is not JSON.
 function M.settings_rows(page, set, notes, save, bad)
 	local encode = require("buildat/extension/network").write_json
-	page_text(page, "Each value is JSON; Enter in a field saves it.", DIM)
+	page_text(page, "Each value is JSON; press Enter in a field to save it.",
+			DIM)
 	local keys = {}
 	for k in pairs(set) do
 		keys[#keys + 1] = k
@@ -1458,7 +1459,7 @@ passwd_page = function(back, message)
 	local old, new1, new2
 	local function change()
 		if new1:GetText() ~= new2:GetText() then
-			return passwd_page(back, "The new passwords differ")
+			return passwd_page(back, "The new passwords do not match")
 		end
 		M.passwd(old:GetText(), new1:GetText())
 	end
@@ -1577,9 +1578,9 @@ ntfy_page = function(back)
 	local w = open_page("ntfy", "Pushes to your phone (ntfy)", back)
 	local st = ntfy_state
 	if st.ask then
-		page_text(w, "Get a push on your phone for reports and the " ..
-				"server's trouble? It goes through ntfy, an app for " ..
-				"Android and iOS; nothing is sent until you add it.")
+		page_text(w, "Get a push on your phone for reports and server " ..
+				"problems? It goes through ntfy, an app for Android and " ..
+				"iOS. Nothing is sent until you add it.")
 		local r = row(w)
 		button(r, "Add now", function()
 			st.ask = false
@@ -1603,8 +1604,8 @@ ntfy_page = function(back)
 			ntfy_send("never")
 			done()
 		end)
-		page_text(w, "Don't add: not asked again. It stays in My account.",
-				DIM)
+		page_text(w, "Don't add: you are not asked again. You can still " ..
+				"add it in My account.", DIM)
 		return
 	end
 	if st.note ~= "" then
@@ -1616,13 +1617,14 @@ ntfy_page = function(back)
 		end
 		return
 	end
-	page_text(w, st.url ~= "" and "On: reports and the server's trouble " ..
-			"are pushed to this ntfy topic, at most one push in 5 minutes." or
-			"Off. Subscribe to this topic in the ntfy app, then Save. It is " ..
-			"made for you on this server; the part before the topic is the " ..
-			"ntfy server, ntfy.sh or your own.")
-	page_text(w, "A push says what happened and how many are open, never " ..
-			"who or what: anyone who knows a topic's name can read it.", DIM)
+	page_text(w, st.url ~= "" and "On: reports and server problems are " ..
+			"pushed to this ntfy topic, at most once every 5 minutes." or
+			"Off. Subscribe to this topic in the ntfy app, then press Save. " ..
+			"The topic was made for you on this server; the part of the " ..
+			"address before it is the ntfy server, ntfy.sh or your own.")
+	page_text(w, "A push says what happened and how many reports are open, " ..
+			"never who or what: anyone who knows a topic's name can read it.",
+			DIM)
 	-- A line of its own each: the whole address shows
 	local function line(label, text)
 		page_text(w, label)
@@ -1727,7 +1729,7 @@ account_page = function(back, message)
 		-- One per Starport ([ID_CLAIM_ACCOUNT] 5)
 		for _, l in ipairs(M.links) do
 			local r = row(w)
-			local t = page_text(r, "Linked: an ID of " .. l)
+			local t = page_text(r, "Linked: an ID from " .. l)
 			t:SetWordwrap(false)
 			local b = button(r, "Unlink", function()
 				buildat.send_packet("accounts:unlink_starport", l)
@@ -1784,7 +1786,7 @@ ban_page = function(name, back)
 	local rb = nil
 	local function draw()
 		rb:GetChild(0):SetText((report and "[x]" or "[ ]") ..
-				" Report to Starport (a Starport ID only)")
+				" Report to the Starport (Starport IDs only)")
 	end
 	local choices = {}
 	for i, x in ipairs(BAN_REASONS) do
@@ -1955,23 +1957,24 @@ function ag.draw()
 			ag.draw()
 		end, true)
 		if not tls then
-			page_text(w, "Plain HTTP: the token goes unencrypted. Fine on " ..
-					"this machine or a LAN you trust; a server for others " ..
-					"wants HTTPS.", DIM)
+			page_text(w, "Plain HTTP sends the token unencrypted: fine on " ..
+					"this machine or a trusted LAN, but a server for others " ..
+					"needs HTTPS.", DIM)
 		end
 		if not public_https(url) then
-			page_text(w, "This address is this machine's or its LAN's: an " ..
-					"agent here reaches it, a cloud agent does not.", DIM)
+			page_text(w, "This address is on this machine or its LAN: an " ..
+					"agent here can reach it, a cloud agent cannot.", DIM)
 		end
 		return
 	end
 	if not r.on then
-		page_text(w, "Agent access is off on this server (its admin turns " ..
-				"it on in Accounts).", WARN)
+		page_text(w, "Agent access is off on this server. Its admin can " ..
+				"turn it on in Accounts.", WARN)
 	else
 		page_text(w, "Your own agentic tool works here through MCP as " ..
-				tostring(M.who()) .. "'s agent, with your rights: its edits " ..
-				"go straight into the live round, logged as its own.", DIM)
+				tostring(M.who()) .. "'s agent, with your rights. Its edits " ..
+				"go straight into the live round and are logged as its own.",
+				DIM)
 		-- [KIT_AGENTS_OAUTH] A tool that signs in by OAuth makes its own
 		local url = M.mcp_url(buildat.server_address() or "",
 				buildat.connection_encrypted())
@@ -1990,10 +1993,10 @@ function ag.draw()
 		end
 	end
 	if r.on and ag.make then
-		page_text(w, "A token, for a tool that does not sign in:", DIM)
+		page_text(w, "A token for a tool that does not sign in:", DIM)
 		if r.admin then
 			button(w, ag.scope == "admin" and "Scope: Admin (all you may do)" or
-					"Scope: Builder (edits; no admin's rights)", function()
+					"Scope: Builder (edits, no admin rights)", function()
 				ag.scope = ag.scope == "admin" and "builder" or "admin"
 				ag.draw()
 			end)
@@ -2115,7 +2118,7 @@ users_page = function(back)
 	-- or the server
 	local admin = u.level >= 40
 	if admin and admins > 0 and id_only_admins == admins then
-		page_text(w, "Every admin logs in only by a Starport ID: while the "..
+		page_text(w, "Every admin logs in only with a Starport ID. While the "..
 				"Starport cannot be reached, nobody can manage this server. "..
 				"Give an admin a local password (Password... on their row).",
 				magic.Color(rgb("error")))
@@ -2372,13 +2375,13 @@ local STARPORT_HELP = {
 	"The server reads that file again within seconds of a change, so it can "..
 	"also be edited by hand or by a script, and nothing has to restart.",
 	"# Starport: on / off",
-	"Off: the server is on no list and takes no Starport IDs; the "..
-	"Starports are told at once and keep the listing for when it comes "..
+	"Off: the server is on no list and accepts no Starport IDs. The "..
+	"Starports are told at once and keep the listing for when it is turned "..
 	"back on.",
 	"# Unlisted",
-	"Yes: the server stays off the public lists, and still takes Starport "..
-	"IDs. For a private community that wants Starport logins without "..
-	"advertising itself.",
+	"Yes: the server stays off the public lists but still accepts Starport "..
+	"IDs. This is for a private community that wants Starport logins "..
+	"without advertising itself.",
 	"# The Starports",
 	"Each Starport the server announces to, with what it last answered: "..
 	"listed; unlisted; unclaimed (an operator has not claimed it yet); "..
@@ -2390,10 +2393,10 @@ local STARPORT_HELP = {
 	"Anyone with the code can claim it: keep it among this server's admins. "..
 	"(A server in a fleet is claimed by the fleet line instead.)",
 	"Accounts linked to its IDs: how many of this server's accounts log in "..
-	"by an ID of that Starport. Removing the Starport stops their ID "..
+	"with an ID from that Starport. Removing the Starport stops their ID "..
 	"logins; an admin can give them passwords on the Accounts page.",
 	"Follows: the blocklists of that Starport this server subscribes to. "..
-	"An ID they ban cannot join; its account here cannot log in by "..
+	"An ID they ban cannot join, and its account here cannot log in with a "..
 	"password either, unless it is an admin or a moderator.",
 	"Add a Starport: its address. A host name alone, like "..
 	"starport.example.org, means http://starport.example.org:29595, "..
@@ -2402,24 +2405,24 @@ local STARPORT_HELP = {
 	"https://starport.buildat.org in it; turning Starport IDs on with none "..
 	"added adds that one, unlisted.",
 	"# The listing",
-	"What the Starport shows of this server. Nothing is sent until Save the "..
-	"listing; a dropdown with a red ? is a choice not made yet, which the "..
-	"Starport refuses (its status then says which). Unlisted, they may be "..
-	"left out: the name is then the server's address.",
+	"What the Starport shows about this server. Nothing is sent until you "..
+	"press Save the listing. A dropdown with a red ? is a choice not made "..
+	"yet, which the Starport refuses (its status then says which). An "..
+	"unlisted server may leave them out; its name is then its address.",
 	"Name: what the list shows, 1 to 60 characters. Example: Lakeside "..
 	"builders' plans.",
 	"Description: a sentence or two, up to 500 characters. Example: A shared "..
 	"floor plan for the lakeside house; visitors welcome to look.",
-	"Public address: where players reach this server. Empty: the address "..
-	"the announce comes from, and this server's own port. Behind a proxy "..
-	"with TLS, its https:// address, which clients join by a secure "..
-	"WebSocket; the Starport checks the server through it. Examples: "..
-	"https://fp.example.org, fp.example.org:30000. Empty, and this page "..
-	"reached by https at an address that is not this machine's or the "..
-	"LAN's, the field has that address in it.",
+	"Public address: where players reach this server. If it is empty, the "..
+	"address the announcement comes from and this server's own port are "..
+	"used. Behind a proxy with TLS, use its https:// address: clients join "..
+	"through a secure WebSocket, and the Starport checks the server "..
+	"through it. Examples: https://fp.example.org, fp.example.org:30000. "..
+	"If this page was opened by https at an address outside this machine "..
+	"and the LAN, an empty field is filled with that address.",
 	"Sign-up address: with access \"external\" only, where an account is "..
 	"made before joining. Example: https://example.org/join.",
-	"Region: where the server is, for players choosing a near one and for a "..
+	"Region: where the server is, for players choosing a nearby one and for a "..
 	"pool's choice. Example: eu, us-east.",
 	"Fleet: puts this server in a fleet of one operator's servers, shown "..
 	"together. The line is the fleet's id and code, from the Fleets page "..
@@ -2435,7 +2438,7 @@ local STARPORT_HELP = {
 	"and end. app: not a game -- a tool, a creative or social space (the "..
 	"floor planner is one). other: none of these.",
 	"# Audience",
-	"The server's own rating, as an app store's. everyone: for all ages. "..
+	"The server's own rating, like an app store's. everyone: for all ages. "..
 	"teen: 13 and over. adult: 18 and over. Starports may hide some "..
 	"audiences (the official one leaves adult out), and a player's filters "..
 	"and age decide what they see.",
@@ -2460,10 +2463,10 @@ local STARPORT_HELP = {
 	"like) or betting.",
 	"Personal data: yes if the server collects personal data beyond play, "..
 	"such as e-mail addresses.",
-	"An audience of everyone with unmoderated chat or player content is "..
-	"looked at by the Starport's moderators. Moderators may relabel a "..
-	"listing that says less than it has; its operator gets a statement of "..
-	"reasons and can appeal.",
+	"A listing for everyone with unmoderated chat or player content is "..
+	"reviewed by the Starport's moderators. Moderators may relabel a "..
+	"listing that declares less than the server has; its operator gets a "..
+	"statement of reasons and can appeal.",
 }
 -- A heading is a line beginning with "# "
 
@@ -2523,9 +2526,9 @@ starport_page = function(back, panel, confirm_remove)
 	end
 	if panel == "ids" then
 		local u = M.users
-		page_text(w, "Whether players log in here by their Starport ID, "..
-				"made on a Starport this server is listed on. The Starports "..
-				"are on the Starports panel.", DIM)
+		page_text(w, "Whether players can log in here with a Starport ID "..
+				"from a Starport this server is listed on. The Starports "..
+				"are set on the Starports panel.", DIM)
 		if not u then
 			page_text(w, "Waiting for the server...")
 			return back_row()
@@ -2565,8 +2568,8 @@ starport_page = function(back, panel, confirm_remove)
 	if info.message and info.message ~= "" then
 		page_text(w, info.message, WARN)
 	end
-	page_text(w, "Kept in the app's starport.json; an edit there counts too",
-			DIM)
+	page_text(w, "Kept in the app's starport.json; edits to that file count "..
+			"too", DIM)
 	if panel == "starports" then
 		local r = row(w)
 		button(r, c.enabled == false and "Starport: off" or "Starport: on",
@@ -2574,7 +2577,7 @@ starport_page = function(back, panel, confirm_remove)
 			c.enabled = c.enabled == false
 			save()
 		end)
-		button(r, c.unlisted and "Unlisted: yes (IDs, not in the list)" or
+		button(r, c.unlisted and "Unlisted: yes (IDs only, no listing)" or
 				"Unlisted: no", function()
 			c.unlisted = not c.unlisted
 			save()
@@ -3023,8 +3026,8 @@ stats_page = function(back)
 		return t
 	end
 
-	page_text(w, "The week, by the hour (players: the most faint, the "..
-			"average solid, the fewest a line)", WARN)
+	page_text(w, "The week, by hour (players: the most faint, the "..
+			"average solid, the fewest as a line)", WARN)
 	local hours, hbars, gbars, hmarks = by_unit(v.hours), {}, {}, {}
 	local first = v.hour - 167
 	for i = 1, 168 do
@@ -3044,10 +3047,10 @@ stats_page = function(back)
 	local g1 = bar_graph(w, hbars, width, 110, hmarks, hour_line)
 	page_text(w, "The longest tick gap in each hour", DIM)
 	local g2 = bar_graph(w, gbars, width, 40, nil, hour_line)
-	g1.label = page_text(w, "Point at a bar for its hour.", DIM)
+	g1.label = page_text(w, "Point at a bar to see its hour.", DIM)
 	g2.label = g1.label
 
-	page_text(w, "The half year, by the day", WARN)
+	page_text(w, "The half year, by day", WARN)
 	local days, dbars, nbars, mbars, dmarks = by_unit(v.days), {}, {}, {}, {}
 	local dfirst = v.day - 181
 	for i = 1, 182 do
@@ -3070,7 +3073,7 @@ stats_page = function(back)
 	page_text(w, "Different players each day, and accounts made", DIM)
 	local d2 = bar_graph(w, nbars, width, 40, nil, day_line)
 	local d3 = bar_graph(w, mbars, width, 30, nil, day_line)
-	d1.label = page_text(w, "Point at a bar for its day (UTC days).", DIM)
+	d1.label = page_text(w, "Point at a bar to see its day (UTC).", DIM)
 	d2.label, d3.label = d1.label, d1.label
 
 	page_text(w, "Accounts", WARN)
@@ -3084,7 +3087,7 @@ stats_page = function(back)
 	page_text(w, string.format("Made in the last 30 days: %d. Not joined "..
 			"in 90 days: %d.", tonumber(v.made_30) or 0,
 			tonumber(v.idle_90) or 0))
-	page_text(w, "The most time joined", WARN)
+	page_text(w, "The most time on the server", WARN)
 	for _, t in ipairs(v.top or {}) do
 		page_text(w, string.format("%s: %s; last joined %s, made %s", t[1],
 				duration(t[4]), t[3] > 0 and when(t[3] + off) or "never",
@@ -3144,10 +3147,9 @@ health_page = function(back)
 	if h.mail then
 		page_text(w, h.mail, h.mail:sub(1, 5) == "Sent:" and nil or WARN)
 	end
-	page_text(w, "Only the mail server's answer is checked here. Whether "..
-			"mail reaches inboxes (SPF, DKIM, DMARC) is for an online mail "..
-			"tester: find one, send its address a test mail from here, and "..
-			"read its report.", DIM)
+	page_text(w, "This checks only the mail server's answer. To see whether "..
+			"mail reaches inboxes (SPF, DKIM, DMARC), send a test mail from "..
+			"here to an online mail tester and read its report.", DIM)
 
 	head("The server's sandbox")
 	page_text(w, "Layers: " .. tostring(h.box ~= nil and h.box ~= "" and
@@ -3169,7 +3171,7 @@ health_page = function(back)
 					x.status or "not announced yet"))
 		end
 		if info and #(info.starports or {}) == 0 then
-			page_text(w, "On no Starport (the Starports panel).", DIM)
+			page_text(w, "Not on any Starport (see the Starports panel).", DIM)
 		end
 		button(w, "Announce now", function()
 			M.admin("announce_now")
@@ -3181,11 +3183,11 @@ health_page = function(back)
 	head("Address")
 	local addr = buildat.server_address() or "?"
 	local tls = buildat.connection_encrypted()
-	page_text(w, "Reached at " .. tostring(addr) .. (tls and ", under TLS" or
+	page_text(w, "Reached at " .. tostring(addr) .. (tls and ", over TLS" or
 			", not encrypted"))
 	page_text(w, "Public address: " .. (admin_public_address() or
-			"none (only an https address that is not this machine's or the "..
-			"LAN's counts)"), DIM)
+			"none (only an https address outside this machine and the LAN "..
+			"counts)"), DIM)
 
 	head("Disk")
 	page_text(w, tostring(h.disk_path or "?") .. ": " .. bytes(h.disk_used) ..
@@ -3238,7 +3240,7 @@ health_page = function(back)
 		lines = lines + 1
 	end
 	if lines == 0 then
-		page_text(w, "None since the start.", DIM)
+		page_text(w, "None since the server started.", DIM)
 	end
 	list.viewPosition = magic.IntVector2(0, 1000000)
 	if back then
@@ -3274,7 +3276,7 @@ updates_page = function(back)
 	if ready ~= "" then
 		page_text(w, ready .. " is ready.", WARN)
 		if u.asked then
-			page_text(w, "Update now was asked: everyone on is told, and " ..
+			page_text(w, "Update now was pressed: everyone on is told, and " ..
 					"the server restarts a minute later.")
 		else
 			button(w, "Update now", function() M.admin("update_now") end, true)
@@ -3300,10 +3302,10 @@ updates_page = function(back)
 	ui_utils.dropdown(w, choices, current, function(v)
 		M.admin("setting", "update_policy", v)
 	end, {label = "Updates"})
-	page_text(w, "A new release, or a new version of this app, is made " ..
-			"ready while the server runs on; then the server restarts onto " ..
-			"it, at once when nobody is on. Whoever is on is told a minute " ..
-			"before, with At once and Update now too.", DIM)
+	page_text(w, "A new release, or a new version of this app, is prepared " ..
+			"while the server keeps running. Then the server restarts onto " ..
+			"it, at once if nobody is on. Players who are on are told a " ..
+			"minute before, also with At once and Update now.", DIM)
 	if M.message and M.message ~= "" then
 		page_text(w, M.message, WARN)
 	end
@@ -3380,9 +3382,9 @@ server_entries = function()
 	if M.hello and M.hello["local"] == 1 then
 		add("Mine", "Open to LAN", "lan", function()
 			local w = M.server_open("Open to LAN")
-			page_text(w, "Players on the LAN find the server under " ..
-					"LAN in their launcher's Servers and join it; " ..
-					"until then it listens on this computer only.")
+			page_text(w, "Once it is open, players on the LAN find the " ..
+					"server under LAN in their launcher's Servers. Until " ..
+					"then, it listens on this computer only.")
 			M.lan_row(w)
 		end)
 	end

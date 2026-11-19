@@ -527,7 +527,7 @@ echo "ok: a stopped client's picture answered in 5 s, its late one refused"
 # 4. Token clients refused: a builder token for the Host; kitbob already here
 headless "$t/agent_host.log" agent bin/buildat -T "$tok_b"
 CLIENT=$HL
-await "$t/agent_host.log" 0 120 "Login refused: kitboss is a Host: an agent's client logs in as one with an admin token only"
+await "$t/agent_host.log" 0 120 "Login refused: kitboss is a Host: an agent's client logs in as one only with an admin token"
 tr '\0' ' ' < /proc/$HL/cmdline | grep -qF "${tok_b#bat_}" &&
 	fail "the token in the client's command line"
 kill $HL

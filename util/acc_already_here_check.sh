@@ -143,7 +143,7 @@ await "$t/a.log" 120 "acc_check_walked"
 grep -aqE "kitbob joined from \S+ by password$" "$t/srv.log" ||
 	fail "kitbob's first join not by password ($t/srv.log)"
 {
-	choose "Log in as guest"
+	choose "Log in as a guest"
 	echo "wait_log_any 60000 accounts: logged in as guest"
 	echo "wait_log 120000 kicked by kitboss"
 	echo "wait_log 10000 leave: Left the server"

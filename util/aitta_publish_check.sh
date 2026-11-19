@@ -140,7 +140,7 @@ mapfile -t cmds < <(
 	echo "shot extension.png"
 )
 client u publish "${cmds[@]}"
-said publish "A name is 1 to 40 of a-z, 0-9 and _" ||
+said publish "A name must be 1 to 40 characters: a-z, 0-9 and _" ||
 	fail "New app... did not refuse Bad-Name with its reason (publish.log)"
 [ -f "$t/u/dev_apps/hello/main/client_lua/init.lua" ] ||
 	fail "New app... made no hello in dev_apps"
