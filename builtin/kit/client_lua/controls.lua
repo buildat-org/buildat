@@ -296,14 +296,14 @@ local function world(skip)
 					qy, qp, qr, links}
 			else
 				-- [KIT_STILL_LOOKS] kept till its place, turn or show change
-				-- (module.lua's n.gen; one with a state made each time)
+				-- (module.lua's n.gen) or its state turns
 				local c = n.world_made
-				if not (c and n.gen and c.gen == n.gen and n.look and not show.look.state) then
+				if not (c and n.gen and c.gen == n.gen and n.look and c.on == on) then
 					local p = n.node.position
 					local q = n.node.rotation
 					local tilted = q.x ~= 0 or q.z ~= 0
 					local qy, qp, qr = MV.turn_angles(q.w, q.x, q.y, q.z)
-					c = {gen = n.gen, box = MV.look_box(show.look, on, {p.x, p.y, p.z}, qy,
+					c = {gen = n.gen, on = on, box = MV.look_box(show.look, on, {p.x, p.y, p.z}, qy,
 							tilted and qp or 0, tilted and qr or 0),
 						-- [KIT_PLANE] stage 3: a polygon's prism
 						poly = show.look.shape == "polygon" and MV.look_poly(show.look, on,
