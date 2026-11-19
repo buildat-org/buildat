@@ -329,6 +329,10 @@ local function view_choices()
 	if ses.kind ~= "bench" and st.can_make_scenes then
 		c[#c + 1] = {"New scene...", "\0new"}
 	end
+	-- (4z37i) the Scenes window, as the desktop's scene list has it
+	if scenes then
+		c[#c + 1] = {"Scenes...", "\0scenes"}
+	end
 	return c
 end
 
@@ -337,6 +341,8 @@ local function pick_view(v)
 	SH.view_key = nil
 	if v == "\0new" then
 		M.scene_dialog()
+	elseif v == "\0scenes" then
+		M.scenes_dialog()
 	elseif v:sub(1, 1) == "\1" then
 		if v:sub(2) ~= ((E.state or {}).scene or "") then
 			M.switch_scene(v:sub(2))

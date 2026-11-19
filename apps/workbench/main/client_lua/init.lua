@@ -333,6 +333,15 @@ menu.add(function() return picker and "Games..." or nil end, function()
 		log:info("pause: the projects closed")
 		menu.close()
 	end
+	-- (kit_plan 4z37i) The running game's Export and Publish, the editor's
+	-- (Publish closes the list: its form is the editor's)
+	world_menu.running_panel = function(add, close)
+		add("Export this game", function() kit.export_game(true) end)
+		add("Publish this game...", function()
+			close()
+			kit.publish_game()
+		end)
+	end
 	menu.hold(function() end)
 	buildat.send_packet("main:projects", "")
 	log:info("pause: projects asked")

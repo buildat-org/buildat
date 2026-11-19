@@ -1473,10 +1473,9 @@ rebuild_bar = function(if_changed)
 			-- choice, and the bar's one row at 1280x800 holds it so)
 			choices[#choices + 1] = {"Add from a file...", "\0file"}
 		end
-		-- [KIT_SCENE_ADD_LIVE]
-		if #scenes > 1 then
-			choices[#choices + 1] = {"Scenes...", "\0scenes"}
-		end
+		-- [KIT_SCENE_ADD_LIVE] (4z37i: one scene too, for its Import,
+		-- Export and Publish)
+		choices[#choices + 1] = {"Scenes...", "\0scenes"}
 		-- (in the first row as the view's: a dropdown is not probed)
 		local sd
 		sd = ui_utils.dropdown(bar_row, choices, current_scene(),
@@ -2290,22 +2289,12 @@ local function new_tab(w)
 		end)
 	end):SetName("publish prefabs")
 	-- [KIT_PROJECT_EXPORT] The game's start as a template file, which
-	-- New's "From a file..." makes a game of on another server.
-	-- simplified: here, not on Workbench's Games page beside Copy,
-	-- which is an admin's and out of a builder's reach
+	-- New's "From a file..." makes a game of on another server. Here for a
+	-- builder; Workbench's Games list (an admin's) has them too (4z37i)
 	if (E.state.project or "") ~= "" then
 		local r = row(w)
-		button(r, "Export this game", function()
-			log:info("kit editor: export this project")
-			send({op = "export_project"})
-		end)
-		-- (as the server only: a template with one's own key is the
-		-- launcher's, from the exported file)
-		button(r, "Publish this game...", function()
-			NT.publish_checked("this game", function()
-				NT.publish_as("project")
-			end)
-		end):SetName("publish project")
+		button(r, "Export this game", function() M.export_game() end)
+		button(r, "Publish this game...", M.publish_game):SetName("publish project")
 	end
 	-- [KIT_SCENE_PACKAGES] The Aittas' scene packages, this project's
 	-- game's first, each added as a new scene; this scene exported as a
@@ -2343,18 +2332,45 @@ local function new_tab(w)
 	if (E.state.project or "") ~= "" then
 		local r = row(w)
 		button(r, "Export this scene", function()
-			log:info("kit editor: export this scene")
-			send({op = "export_scene", scene = current_scene()})
+			M.export_scene(current_scene())
 		end)
 		button(r, "Publish this scene...", function()
-			NT.publish_checked("this scene", function()
-				local scene = current_scene()
-				NT.publish_as("scene", scene, function()
-					send({op = "export_scene", scene = scene, publish = true})
-				end)
-			end)
+			M.publish_scene(current_scene())
 		end):SetName("publish scene")
 	end
+end
+
+-- (kit_plan 4z37i) Also Workbench's Games list (note: the answer a
+-- notification, the editor's status line being under the list) and the
+-- Scenes window's
+function M.export_game(note)
+	log:info("kit editor: export this project")
+	E.export_note = note
+	send({op = "export_project"})
+end
+
+-- (as the server only: a template with one's own key is the launcher's,
+-- from the exported file; the form the editor's, so the tools on)
+function M.publish_game()
+	if not E.editing then
+		M.set_tools(true)
+	end
+	NT.publish_checked("this game", function()
+		NT.publish_as("project")
+	end)
+end
+
+function M.export_scene(scene)
+	log:info("kit editor: export the scene " .. scene)
+	send({op = "export_scene", scene = scene})
+end
+
+function M.publish_scene(scene)
+	NT.publish_checked("this scene", function()
+		NT.publish_as("scene", scene, function()
+			send({op = "export_scene", scene = scene, publish = true})
+		end)
+	end)
 end
 
 -- The Place tab ([KIT_PALETTE_SECTIONS] was Components): the types and the
@@ -6387,6 +6403,9 @@ function M.scenes_dialog()
 		table.insert(cols[i], {e = e, indent = indent or 0})
 		return e
 	end
+	-- (4z37i) a phone's: each scene's buttons on a row under its name (they
+	-- ran off the right edge)
+	local two, removes = narrow() or NT.sh.on(), {}
 	for _, s in ipairs(M.scene_rows()) do
 		local n = s.name
 		local r = row(w)
@@ -6407,6 +6426,14 @@ function M.scenes_dialog()
 		ui_utils.selectable(nb, nt, n == current_scene())
 		nb:SetName("scene " .. n)
 		cell(1, nb, depth > 0 and 20 * depth + 4 or 0)
+		if two then
+			r = row(w)
+			-- (simplified: a deeper scene's buttons as a third level's; the
+			-- name above says where it is)
+			if depth > 0 then
+				r:CreateChild("UIElement"):SetFixedWidth(10 * math.min(depth, 3))
+			end
+		end
 		-- (button() returns its Text too: one value into cell)
 		cell(2, (button(r, listed[n] and "Unlist" or "List", function()
 			log:info("kit editor: " .. (listed[n] and "unlist " or "list ") .. n)
@@ -6437,6 +6464,7 @@ function M.scenes_dialog()
 			drop("dialog")
 		end)
 		b:SetName("remove " .. n)
+		removes[#removes + 1] = b
 		if why then
 			t:SetColor(DIM)
 			NT.sg.tip(b, "remove " .. n, why, "dialog")
@@ -6453,10 +6481,42 @@ function M.scenes_dialog()
 			x.e:SetFixedWidth(most - x.indent)
 		end
 	end
+	-- (4z37i) a scene package from a file at the root (each row's Add
+	-- here... under it), the selected one (the one edited) as a file or
+	-- published: the palette's New tab's
+	local cur = current_scene()
+	local r = row(w)
+	if E.state.can_make_scenes then
+		button(r, "Import a scene...", function()
+			drop("dialog")
+			M.add_scene_file("")
+		end):SetName("import scene")
+	end
+	if (E.state.project or "") ~= "" then
+		r = two and row(w) or r
+		button(r, "Export " .. cur, function()
+			M.export_scene(cur)
+		end):SetName("export scene")
+		button(r, "Publish " .. cur .. "...", function()
+			drop("dialog")
+			M.publish_scene(cur)
+		end):SetName("publish selected scene")
+	end
 	br = br or row(w)
 	button(br, "Close", function()
 		drop("dialog")
 	end)
+	-- (for a drive: the rows' width to each row's last, a Remove, and the
+	-- room, the window's or the touch pane's, in UI units; the touch pane
+	-- is sized after this, so its room the pane's less its view's border:
+	-- no scroll bar, scrollBarsAutoVisible off)
+	local need = 0
+	for _, b in ipairs(removes) do
+		need = math.max(need, b.screenPosition.x + b.width - w.screenPosition.x)
+	end
+	log:info("kit editor: the Scenes window's rows " .. need .. " wide of " ..
+			math.floor(NT.sh.on() and (NT.sh.pane_w() - 12) / S.font or
+			math.min(W.dialog.width, magic.ui.root.width) - 6))
 end
 
 -- [KIT_SCENE_TREE] A scene put under another (or the root): each it may go

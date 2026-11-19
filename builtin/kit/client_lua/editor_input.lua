@@ -3805,11 +3805,13 @@ function M.editor(options)
 				math.floor(#file / 1024 + 0.5) .. " KiB): see your downloads" or
 				"Exported to " .. path
 		log:info("kit editor: " .. E.status)
-		if E.editing then
+		-- (E.export_note: asked from Workbench's Games list, over the editor)
+		if E.editing and not E.export_note then
 			people()
 		else
 			ui_utils.show_notification(E.status, 4)
 		end
+		E.export_note = nil
 	end
 	buildat.sub_packet("kit:project_export", save_export)
 	buildat.sub_packet("kit:scene_export", save_export)

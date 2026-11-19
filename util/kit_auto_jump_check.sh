@@ -100,7 +100,8 @@ again() # <auto_jump>
 	echo 'wait_log 10000 kit editor: the server is Ended (by kitboss)'
 	ed "{\"op\": \"set\", \"id\": 4, \"comp\": 0, \"param\": \"auto_jump\", \"value\": \"$1\"}"
 	echo 'event kit_edit {"op": "play"}'
-	echo 'wait_log 10000 kit editor: the server is Running (by kitboss)'
+	# The put waited for from the play, not after its Running: the two can
+	# come in one frame, and a wait started after the first missed the put
 	echo 'wait_log 10000 the server put the player at (0, 1.4, 0)'
 	mode false
 	echo 'frames 30'

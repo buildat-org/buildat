@@ -15,7 +15,8 @@
 #   2. The Server window's Admin / Publishing: the key made (author
 #      crags; publish.key mode 600), the Aitta listed, not bound; bound on
 #      the Aitta (its bind request); Check again: bound; kitbob given the
-#      right (page.png).
+#      right (page.png). (4z37i) Games..., the running game's Publish this
+#      game...: the editor's form, as crags (games_publish.png), cancelled.
 #   3. kitbob in the scene loop: the New tab asks through the server;
 #      Publish this scene..., As this server (crags), the form (form.png),
 #      its licence CC-BY-4.0: crags/loop 1.0.0 on the Aitta.
@@ -366,6 +367,17 @@ cmd "frames 10" "screenshot $t/page.png"
 step 10 "pause: the menu shown" "frames 3" "keypress Escape"
 step 10 "pause: the menu closed" "frames 3" "keypress Escape"
 echo "ok: the Publishing page: the key made (mode 600), the Aitta listed, bound there, kitbob's right given"
+# (4z37i) The Games list's Publish for the running game: the editor's form
+menu
+# (the running game selected)
+step 10 "world_menu: the list shown" "frames 3" 'click Button "Games..."'
+step 10 "kit editor: publish this game: [0-9]+ goal warnings" "frames 3" 'click Button "Publish this game..."'
+if ! grep -aq "kit editor: publish this game: 0 goal warnings" "$CL"; then
+	step 10 "kit editor: published with goal warnings" "frames 3" 'click Button "Publish anyway"'
+fi
+await "$CL" 0 10 "kit editor: the publish form, project crag 1\.0\.0 to $AR, CC0-1\.0, as crags by kitboss"
+cmd "frames 5" "screenshot $t/games_publish.png" "frames 2" 'click Button "Cancel"'
+echo "ok: the Games list's Publish this game...: the editor's form for crag"
 
 # 3. kitbob publishes The Loop through the editor
 as bob
