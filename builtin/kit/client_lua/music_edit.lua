@@ -1337,16 +1337,16 @@ local function draw_song(body)
 	end):SetName("music rep +")
 	button(d, "<", function()
 		if ei > 1 then
+			MU.ssel.entry = ei - 1
 			entries(function(en) en[ei], en[ei - 1] = en[ei - 1], en[ei] end,
 					ei .. " earlier")
-			MU.ssel.entry = ei - 1
 		end
 	end):SetName("music entry <")
 	button(d, ">", function()
 		if ei < #s.entries then
+			MU.ssel.entry = ei + 1
 			entries(function(en) en[ei], en[ei + 1] = en[ei + 1], en[ei] end,
 					ei .. " later")
-			MU.ssel.entry = ei + 1
 		end
 	end):SetName("music entry >")
 	button(d, "Remove", function()
@@ -1475,11 +1475,12 @@ local function note_row(parent, lane, step, n, len)
 	local r = row(parent)
 	for _, d in ipairs({-12, -1, 1, 12}) do
 		button(r, (d > 0 and "+" or "") .. d, function()
+			-- (the roll's selection with it, before it is drawn again)
+			if MU.view == "roll" and MU.rsel then
+				MU.rsel.pitch = math.max(0, math.min(127, MU.rsel.pitch + d))
+			end
 			local tok = retoken(lane, step, function(x) return shifted(x, d) end, "pitch")
 			if tok then
-				if MU.rsel then
-					MU.rsel.pitch = MU.rsel.pitch + d
-				end
 				audition(lane.track, tok)
 			end
 		end):SetName("music pitch " .. d)
@@ -2629,6 +2630,11 @@ magic.SubscribeToEvent("Update", function()
 	if not MU.win then
 		return
 	end
+	if MU.close_due then
+		MU.close_due = nil
+		MU.close()
+		return
+	end
 	local t = now_us()
 	if MU.aud and t >= MU.aud_stop then
 		stop_audition()
@@ -2656,9 +2662,9 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 	end
 	local key, q = d:GetInt("Key"), d:GetInt("Qualifiers")
 	if key == magic.KEY_ESCAPE then
-		if not ui_utils.dropdown_open() then
-			MU.close()
-		end
+		-- (closed next frame: Kit's own handler, after this one, sees it
+		-- open and leaves the Escape alone)
+		MU.close_due = not ui_utils.dropdown_open() or nil
 		return
 	end
 	local f = magic.ui.focusElement

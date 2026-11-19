@@ -17,6 +17,9 @@
 #      note drawn in the roll (a click; a drag, moved, resized), gtr's bright stepped up, kick's calm mood
 #      gain -3 to -2: those lines alone changed, as expected, the text
 #      parses, the hash another; Apply sends it;
+#      then the other buttons of each view (sections' entries, the loop,
+#      a param lane, Undo, an instrument's choices and source, a track's
+#      pan, the reverb, tempo, swing, a mood, Space), the server takes it;
 #   3. Scrap Heat with a comment added and a lane's spacing changed (set
 #      as an agent would): the editor's hash the original's;
 #   4. the touch mode (BUILDAT_TEST_KIT_UI_MODE=2): the editor opened, a
@@ -367,15 +370,57 @@ assert re.sub(r" bright=\S+", "", a[at["inst"]]) == re.sub(r" bright=\S+", "", b
 assert b[at["mood"]] == a[at["mood"]].replace("kick=-3", "kick=-2"), b[at["mood"]]
 print("ok: the edits changed the lines they should: " + " | ".join(b[i].strip() for i in sorted(want)))
 PY
+# The rest of the views' buttons, each an edit that parses
+e() # <log after "kit editor: music "> <command>...
+{
+	local re=$1
+	shift
+	step 10 "kit editor: music $re" "frames 2" "$@"
+}
+view song ""
+e "section chorus" 'click Button "music section chorus 3"'
+e "edit loop chorus: parses" 'click Button "music loop here"'
+e "entry chorus 1" 'click Button "music entry chorus 1"'
+e "edit section chorus 1 repeat 2: parses" 'click Button "music rep +"'
+e "edit section chorus 1 later: parses" 'click Button "music entry >"'
+e "edit section chorus 2 removed: parses" 'click Button "music entry remove"'
+view pattern ""
+e "lane ld1 lead" 'click Button "music lane lead"'
+e "edit lane lead~cut added to ld1: parses" 'click DropDownList "music add param"' \
+	"frames 3" 'click Text "music add param: cut"'
+e "edit placed [0-9.]+ at ld1 lead~cut step 1: parses" 'click BorderImage "music step lead~cut 1"'
+e "edit value [0-9.]+: ld1 lead~cut step 1: parses" 'click Button "music value +"'
+e "undone" 'click Button "music undo"'
+view inst ""
+e "instrument gtr" 'click Button "music inst gtr"'
+e "edit inst gtr bright default: parses" 'click Button "music param bright x"'
+e "edit inst gtr ftype lp: parses" 'click DropDownList "music choice ftype"' \
+	"frames 3" 'click Text "music choice ftype: lp"'
+e "edit inst gtr src osc: parses" 'click DropDownList "music src"' "frames 3" \
+	'click Text "music src: osc"'
+view mixer ""
+e "mixer gtl pan" 'click Button "music mix gtl pan"'
+e "edit track gtl pan -?[0-9.]+: parses" 'click Button "music track pan +"'
+e "mixer reverb" 'click Button "music mix bus rev"'
+e "edit reverb decay [0-9.]+: parses" 'click Button "music bus decay +"'
+e "edit tempo 164: parses" 'click Button "music tempo +"'
+e "edit swing 0.05: parses" 'click Button "music swing +"'
+e "preview mood lobby" 'click Button "music mood lobby"'
+e "playing song from 0.00 s, mood lobby" "keypress Space"
+e "stopped" "frames 10" "keypress Space"
+m=$(mark "$SL")
+apply
+await "$SL" "$m" 10 "An edit by kitboss: set $ID's kit/music song to"
 step 10 "kit editor: music closed" "frames 2" 'click Button "music close"'
-echo "ok: Scrap Heat edited in the grid, the roll, the instrument and the mixer; the hash $H0 before, $HASH after, the same for a step put back"
+echo "ok: Scrap Heat edited in the grid, the roll, the instrument and the mixer; the hash $H0 before, $HASH after, the same for a step put back; the other views' buttons edit it and the server takes it"
 
 # 3. The same music, its text another: the same hash
 set_song variant
 step 10 "kit editor: music opened .*, parses" "frames 3" 'click Button "song edit"'
 analyze
 [ "$HASH" = "$H0" ] || fail "a comment and spacing changed the hash ($H0, $HASH)"
-echo "ok: a comment and a lane's spacing leave the hash $H0"
+step 10 "kit editor: music closed" "frames 2" "keypress Escape"
+echo "ok: a comment and a lane's spacing leave the hash $H0; Escape closes the editor"
 quit
 
 # 4. The touch mode: a step tapped
