@@ -315,8 +315,8 @@ local function privs_page()
 		return
 	end
 	accounts.page_text(w, "What each account may do in the world " ..
-			account.world .. ", kept with it. An admin has every " ..
-			"privilege while one.")
+			account.world .. ", saved with the world. An admin has " ..
+			"every privilege.")
 	local all = split(world_privs[1])
 	for i = 2, #world_privs - 1, 2 do
 		local name, has = world_privs[i], {}

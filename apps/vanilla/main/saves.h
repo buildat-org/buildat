@@ -308,7 +308,7 @@ struct Saves
 	{
 		if(!m_scene || !m_world_save || save != m_world_name){
 			send_strings(m_server, peer, "main:trim_info", {save,
-					"Trimming works on the world running: start "+save+
+					"Trimming works only on the running world: start "+save+
 					" first."});
 			return;
 		}
@@ -535,8 +535,7 @@ struct Saves
 			return;
 		if(m_starting && values[0] == m_world_name){
 			menu_error(m_server, packet.sender,
-					"The world that is running is not "
-					"deleted");
+					"The running world cannot be deleted");
 			return;
 		}
 		ss_ entry;
@@ -600,8 +599,7 @@ struct Saves
 			return;
 		if(m_starting && values[0] == m_world_name){
 			menu_error(m_server, packet.sender,
-					"The world that is running is not "
-					"renamed");
+					"The running world cannot be renamed");
 			return;
 		}
 		bool ok = false;

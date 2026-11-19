@@ -41,7 +41,7 @@ local function to_params(values, wave_type, dropped)
 		p.wave = SFXR_WAVES[wave_type]
 		if not p.wave then
 			return nil, "wave type " .. tostring(wave_type) ..
-					" is none of sfxr's (0 to 3)"
+					" is not one of sfxr's (0 to 3)"
 		end
 	end
 	local t = {}
@@ -104,7 +104,7 @@ function I.sfs(data)
 				", not 100 to 102)"
 	end
 	if #data < size then
-		return nil, "an sfxr sound of version " .. version .. " cut short"
+		return nil, "an sfxr sound of version " .. version .. ", cut short"
 	end
 	local v, dropped = {}, {}
 	local wave_type = int32()
@@ -205,7 +205,7 @@ end
 local function from_json(s)
 	local body = s:match("^%s*{(.*)}%s*$")
 	if not body or body:find("[{%[]") then
-		return nil, "not jsfxr's JSON"
+		return nil, "not jsfxr JSON"
 	end
 	local v, dropped, wave_type = {}, {}, nil
 	for key, value in body:gmatch('"([^"]*)"%s*:%s*([^,]*)') do
@@ -225,7 +225,7 @@ local function from_json(s)
 		end
 	end
 	if wave_type == nil then
-		return nil, "jsfxr's JSON with no wave_type"
+		return nil, "jsfxr JSON without a wave_type"
 	end
 	return to_params(v, wave_type, dropped)
 end
@@ -277,7 +277,7 @@ function I.lua_table(s, at)
 					out[#out + 1] = ESCAPES[n]
 					i = i + 2
 				else
-					error("an escape \\" .. n .. " at " .. i, 0)
+					error("an unknown escape \\" .. n .. " at " .. i, 0)
 				end
 			elseif c == "\n" then
 				break
@@ -286,7 +286,7 @@ function I.lua_table(s, at)
 				i = i + 1
 			end
 		end
-		error("a string not closed", 0)
+		error("an unclosed string", 0)
 	end
 	local function tbl()
 		local t, n = {}, 0
@@ -389,7 +389,7 @@ function I.pasted(s)
 	if p then
 		return p, dropped, "jsfxr"
 	end
-	why[#why + 1] = "not jsfxr's: " .. tostring(dropped)
+	why[#why + 1] = "not jsfxr: " .. tostring(dropped)
 	return nil, table.concat(why, "; ")
 end
 

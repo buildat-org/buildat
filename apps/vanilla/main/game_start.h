@@ -59,7 +59,7 @@ struct GameStart
 		log_i(MODULE, "%s switches the world to %s", cs(m_names[by]), cs(name));
 		if(m_scene){
 			luanti::access(m_server, [&](luanti::Interface *i){
-				i->chat_send("", "The server switches to the world "+name+
+				i->chat_send("", "The server is switching to the world "+name+
 						": join again in a moment");
 			});
 		}

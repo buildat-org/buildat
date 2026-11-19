@@ -7,6 +7,6 @@
 return function(ctx)
 	return {{id = "designer", label = "weave texture designer", order = 186,
 		category = "app",
-		description = "Seamless pixel-art textures made of parameters",
+		description = "Make seamless pixel-art textures from parameters",
 		run = function() ctx.launch{extension = "weave"} end}}
 end

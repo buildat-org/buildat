@@ -174,8 +174,8 @@ local VOICE_LEN = 1 + 2 * G.SFXR_PARAMS + 4
 local VOICE_LEN_EXT = VOICE_LEN + 2 * (#G.PARAMS - G.SFXR_PARAMS)
 local function unpack_voice(s)
 	if (#s ~= VOICE_LEN and #s ~= VOICE_LEN_EXT) or s:find("[^%w%-_]") then
-		error("blip: a blip1 layer is " .. VOICE_LEN .. " or " ..
-				VOICE_LEN_EXT .. " characters of A-Z a-z 0-9 - _", 4)
+		error("blip: a blip1 layer must be " .. VOICE_LEN .. " or " ..
+				VOICE_LEN_EXT .. " characters from A-Z a-z 0-9 - _", 4)
 	end
 	local pos = 1
 	local function get(chars)
@@ -189,7 +189,7 @@ local function unpack_voice(s)
 	local p = {v = G.VERSION}
 	p.wave = G.WAVES[get(1) + 1]
 	if not p.wave then
-		error("blip: a blip1 sound's wave is not one of blip1's", 4)
+		error("blip: a blip1 sound has an unknown wave", 4)
 	end
 	for i = 1, G.SFXR_PARAMS do
 		local d = G.PARAMS[i]
@@ -233,7 +233,7 @@ local function apply(p, t, layer)
 	for k, v in pairs(t) do
 		if k == "v" then
 			if v ~= G.VERSION then
-				error("blip: v = " .. tostring(v) .. ", this is blip1", 3)
+				error("blip: v is " .. tostring(v) .. ", but this is blip1", 3)
 			end
 		elseif k == "wave" then
 			if WAVE_INDEX[v] == nil then
@@ -244,8 +244,8 @@ local function apply(p, t, layer)
 		elseif k == "seed" then
 			if type(v) ~= "number" or v ~= floor(v) or v < 0 or
 					v > SEED_MAX then
-				error("blip: seed is " .. tostring(v) .. ", not a whole 0.." ..
-						SEED_MAX, 3)
+				error("blip: seed is " .. tostring(v) .. ", not a whole number " ..
+						"from 0 to " .. SEED_MAX, 3)
 			end
 			p.seed = v
 		elseif k == "at" and layer then
@@ -255,7 +255,7 @@ local function apply(p, t, layer)
 			p.at = clamp(v, 0, G.MAX_AT)
 		elseif k == "layers" and not layer then
 			if type(v) ~= "table" or #v + 1 > G.MAX_LAYERS then
-				error("blip: layers is a list of at most " ..
+				error("blip: layers must be a list of at most " ..
 						(G.MAX_LAYERS - 1) .. " sounds", 3)
 			end
 			p.layers = {}
@@ -265,7 +265,7 @@ local function apply(p, t, layer)
 		elseif k ~= 1 then
 			local d = BY_NAME[k]
 			if not d then
-				error("blip: no parameter " .. tostring(k), 3)
+				error("blip: unknown parameter " .. tostring(k), 3)
 			end
 			if type(v) ~= "number" or v ~= v then
 				error("blip: " .. k .. " is not a number", 3)
@@ -286,11 +286,11 @@ function G.layer(sound)
 		p = sound[1] ~= nil and G.unpack(sound[1]) or G.defaults()
 		apply(p, sound, true)
 	else
-		error("blip: a layer is a blip1 string or a table, not a " ..
+		error("blip: a layer must be a blip1 string or a table, not a " ..
 				type(sound), 2)
 	end
 	if p.layers then
-		error("blip: a layer with layers of its own", 2)
+		error("blip: a layer cannot have layers of its own", 2)
 	end
 	p.at = p.at or 0
 	return p
@@ -307,7 +307,7 @@ function G.params(sound)
 		return G.unpack(sound)
 	end
 	if type(sound) ~= "table" then
-		error("blip: a sound is a blip1 string or a table, not a " ..
+		error("blip: a sound must be a blip1 string or a table, not a " ..
 				type(sound), 2)
 	end
 	local p = sound[1] ~= nil and G.unpack(sound[1]) or G.defaults()
@@ -1050,7 +1050,7 @@ end
 function G.preset(name, seed)
 	local f = PRESET[name]
 	if not f then
-		error("blip: no preset " .. tostring(name), 2)
+		error("blip: unknown preset " .. tostring(name), 2)
 	end
 	local r = G.rng(seed)
 	local p = G.defaults()

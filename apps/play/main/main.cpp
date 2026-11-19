@@ -204,7 +204,7 @@ struct Module: public interface::Module
 				r.address.compare(0, 4, "127.") == 0;
 		if(!local && !m_allowed.count(to))
 			return refuse(r.peer, "not on Luanti's list", to,
-					"this page reaches only the servers on Luanti's public "
+					"This page can reach only the servers on Luanti's public "
 					"list (and this machine's, from a page on it)");
 		if(m_bridges.size() >= MAX_BRIDGES)
 			return refuse(r.peer, "full", to);

@@ -707,7 +707,7 @@ local KEYS = {
 	{id = "gear3", label = "Third gear", default = "3"},
 	{id = "gear4", label = "Fourth gear", default = "4"},
 	{id = "reverse", label = "Reverse", default = "R"},
-	{id = "reset", label = "The car back to the start", default = "Backspace"},
+	{id = "reset", label = "Reset the car", default = "Backspace"},
 	{id = "chat", label = "Chat", default = "T", shared = "chat"},
 }
 local key = {}
@@ -1121,7 +1121,7 @@ local function open_hill_menu()
 			end, {label_width = 130, height = row_h})
 		end
 	end
-	m:add("Make it", function()
+	m:add("Make the hill", function()
 		seed_read()
 		local v = values
 		local params = string.format(
@@ -1201,7 +1201,7 @@ local function draw_hud(watched)
 		ask[1] = go .. (circuit and " starts your laps" or " starts the clock")
 	elseif race == 2 then
 		ask[1] = circuit and string.format("%d laps in the round", laps) or
-				string.format("Finished in %.2f s. %s: another run", t,
+				string.format("Finished in %.2f s. %s for another run", t,
 				touch and "Start" or key_name.reset)
 	elseif race == 3 then
 		ask[1] = "The hill is being made"

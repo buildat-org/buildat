@@ -47,9 +47,9 @@ $worlds
 click Button "w2"
 wait_log 5000 world_menu: the list shown
 delay 500
-expect_error Disconnected from server: The server switches
+expect_error Disconnected from server: The server is switching
 click Button "Play"
-wait_log 30000 Disconnected from server: The server switches to the world w2
+wait_log 30000 Disconnected from server: The server is switching to the world w2
 wait_log 30000 reconnect: joined
 $placed
 delay 1500

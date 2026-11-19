@@ -7,6 +7,6 @@
 return function(ctx)
 	return {{id = "designer", label = "blip sound designer", order = 185,
 		category = "app",
-		description = "sfxr's sounds, made and exported for a game",
+		description = "Make sfxr-style sounds and export them for a game",
 		run = function() ctx.launch{extension = "blip"} end}}
 end

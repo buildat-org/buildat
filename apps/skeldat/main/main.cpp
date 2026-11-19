@@ -422,7 +422,7 @@ struct Module: public interface::Module, public PlayersHost,
 			i->configure({"skeldat", {{"seed", "Seed", "", "empty: random"},
 					size, speed, terrain,
 					// The high score, written at the end (step_end())
-					{"ended", "The surface all bones after", "", "", true},
+					{"ended", "Covered in bones after", "", "", true},
 					// Who played it, with their hours ([SKELDAT_HIGH_SCORES])
 					{"players", "Players", "", "", true}}, "world"});
 		});
@@ -1402,7 +1402,7 @@ struct Module: public interface::Module, public PlayersHost,
 		}
 		reload_for(m_players.name_of(peer)+" switches the world to "+name,
 				"play\n"+name+"\n"+seed,
-				"The server switches to the world "+name);
+				"The server is switching to the world "+name);
 	}
 
 	void on_world_close(const world_menu::Close &event)

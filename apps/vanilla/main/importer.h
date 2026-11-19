@@ -328,7 +328,7 @@ struct Importer
 		const ss_ full = no_room(m_server, size);
 		if(size <= 0 || !full.empty())
 			return menu_error(m_server, packet.sender,
-					size <= 0 ? ss_("An empty file") :
+					size <= 0 ? ss_("The file is empty") :
 					full+"; the zip is "+mb_text(size)+". Delete a world or "
 					"a game first.");
 		// The save's name from the file's: letters, digits, _ and -

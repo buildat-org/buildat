@@ -650,7 +650,7 @@ local function open_designer(sound, on_save, opts)
 	button(layer_row, "Remove", function()
 		local ls = layers()
 		if #ls == 0 then
-			say("the only layer is not removed")
+			say("the only layer cannot be removed")
 			return
 		end
 		if d.layer == 1 then
@@ -830,8 +830,8 @@ local function open_designer(sound, on_save, opts)
 		end
 		set_sound(p, "imported from " .. from)
 		status.text = status.text .. "\nClose to " .. from ..
-				"'s sound, not the same" .. (#dropped > 0 and
-				("; dropped " .. table.concat(dropped, ", ")) or "")
+				"'s sound but not identical" .. (#dropped > 0 and
+				("; dropped: " .. table.concat(dropped, ", ")) or "")
 	end
 	-- Over the designer: a field to paste into, Import and Cancel (and
 	-- Escape); a paste that does not read keeps it open, the reason
@@ -850,8 +850,8 @@ local function open_designer(sound, on_save, opts)
 		field.textSelectable = true
 		field.textCopyable = true
 		field:SetFixedSize(math.min(480, ui_w - 40), 140)
-		text(dw, "A blip1 string, a sound table or the code Copy makes;\n" ..
-				"or jsfxr's string or JSON")
+		text(dw, "A blip1 string, a sound table or the code Copy makes,\n" ..
+				"or a jsfxr string or JSON")
 		local why = text(dw, "", field.width)
 		why:SetWordwrap(true)
 		local brow = dw:CreateChild("UIElement")

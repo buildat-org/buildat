@@ -141,7 +141,7 @@ static ss_ world_mods_problem(interface::Server *server, const ss_ &game_path,
 		names.insert(m.name);
 	for(const ModInfo &m : extra)
 		if(names.count(m.name))
-			return "the mod "+m.name+" has the name of one of the game's";
+			return "the mod "+m.name+" has the same name as one of the game's";
 	for(const ModInfo &m : extra)
 		names.insert(m.name);
 	ss_ out;

@@ -220,10 +220,10 @@ local function add_filter(menu, filter, total, shown, on_change)
 	local text = menu.window:CreateChild("Text")
 	text:SetStyleAuto()
 	if filter ~= "" then
-		text:SetText("filter (enter to apply): " .. shown .. " of " ..
+		text:SetText("Filter (Enter to apply): " .. shown .. " of " ..
 				total .. " shown")
 	else
-		text:SetText("filter (enter to apply), " .. total .. " in the list:")
+		text:SetText("Filter (Enter to apply), " .. total .. " in the list:")
 	end
 	local edit = menu.window:CreateChild("LineEdit")
 	edit:SetStyleAuto()
@@ -482,7 +482,7 @@ function draw(saves, save_games)
 				if public == "public_running" then
 					add("Stop the world...", function()
 						ui_utils.show_confirm_dialog("Stop the world? Everyone " ..
-								"is held until an admin starts one again.",
+								"waits until an admin starts one again.",
 								function()
 							waiting("Stopping...")
 							buildat.send_packet("main:stop_world", "")
@@ -999,7 +999,7 @@ function draw_new_save_name(gameid, state)
 	-- first run types the seed it knows how to play)
 	local seed_text = menu.window:CreateChild("Text")
 	seed_text:SetStyleAuto()
-	seed_text:SetText("seed (empty for a random one):")
+	seed_text:SetText("Seed (empty for a random one):")
 	local seed_edit = menu.window:CreateChild("LineEdit")
 	seed_edit:SetStyleAuto()
 	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
@@ -1442,8 +1442,8 @@ local function draw_world_mods(flat)
 	t:SetStyleAuto()
 	t:SetWordwrap(true)
 	t:SetFixedWidth(fit(860))
-	t:SetText(note ~= "" and note or "Turned on here, a mod runs when the " ..
-			"world starts. It is Lua that runs on the server.")
+	t:SetText(note ~= "" and note or "A mod turned on here runs when the " ..
+			"world starts. It is Lua code that runs on the server.")
 	local function send(name, packet, on)
 		waiting("Saving...")
 		changed_worlds[save] = true
@@ -1483,9 +1483,9 @@ local function draw_world_mods(flat)
 			elseif builtin then
 				text = (state == "b1" and "[x] " or "[ ] ") .. name ..
 						"  -- comes with Buildat" .. (deps == "" and "" or
-						state == "b1" and ("; " .. deps .. " light the map no more") or
-						("; recommended: " .. deps .. " light the map, and the " ..
-						"map is lit again at every step"))
+						state == "b1" and ("; " .. deps .. " no longer light the map") or
+						("; recommended: without it, " .. deps .. " relight the " ..
+						"map at every step"))
 			else
 				text = (state == "1" and "[x] " or "[ ] ") .. name ..
 						(deps ~= "" and ("  -- needs " .. deps) or "")
@@ -1556,7 +1556,7 @@ local function draw_world_txp(flat)
 	t:SetWordwrap(true)
 	t:SetFixedWidth(fit(860))
 	t:SetText(note ~= "" and note or "The pack's images, models and sounds " ..
-			"in place of the game's, from the world's next start. A pack's " ..
+			"replace the game's from the world's next start. A pack's " ..
 			"override.txt is not applied.")
 	local function send(packet, name)
 		waiting("Saving...")
@@ -1657,8 +1657,8 @@ local function draw_trim(flat)
 	if #flat >= 11 then
 		line("On disk " .. mb(tonumber(flat[3])) .. ", " .. flat[4] ..
 				" sections, " .. flat[5] .. " with player builds.")
-		line("To a size: the sections furthest from the origin go first; " ..
-				"none with player builds or next to one. Target in MB:")
+		line("To a size: the sections farthest from the origin go first, " ..
+				"but none with player builds or next to them. Target in MB:")
 		local size = edit("")
 		menu:add("Trim to this size...", function()
 			local n = tonumber(size:GetText())
@@ -1824,8 +1824,8 @@ buildat.sub_packet("main:import_mods", function(data)
 		end
 	end
 	ui_utils.show_confirm_dialog(v[1] .. " brings mods of its own: " .. mods ..
-			". A world's mods run with all of the server's reach, its " ..
-			"accounts among them. Keep them only if you trust where the " ..
+			". A world's mods can reach everything on the server, its " ..
+			"accounts included. Keep them only if you trust where the " ..
 			"world came from.", answer("keep"), answer("drop"),
 			"Keep the mods", "Leave them out")
 end)
@@ -1849,7 +1849,7 @@ buildat.sub_packet("main:trim_ask", function(data)
 				{"array", "string"}))
 	end
 	ui_utils.show_confirm_dialog(v[2] .. " Compacting the save afterwards " ..
-			"holds the world still while it runs, seconds or more on a " ..
+			"pauses the world while it runs: seconds or more for a " ..
 			"large one.", function()
 		waiting("Forgetting and compacting...")
 		local out = {v[1], "do"}
