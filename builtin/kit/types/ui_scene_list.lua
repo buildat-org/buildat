@@ -76,12 +76,12 @@ return {
 	},
 	about = {
 		group = "UI",
-		what = "A button a listed scene, to pick one.",
+		what = "A button for each listed scene, to pick one.",
 		keywords = "track level map lobby menu choose",
 		inputs = {
 			show = "Shows it.",
 			hide = "Hides it.",
-			toggle = "Shows it if hidden, else hides it.",
+			toggle = "Shows it if hidden, otherwise hides it.",
 		},
 		outputs = {
 			picked = "A player pressed a scene's button. Value: the scene's name.",

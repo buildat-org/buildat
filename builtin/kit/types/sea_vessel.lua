@@ -16,10 +16,10 @@ local BODY = {r = 1.5, h = 2}
 return {
 	version = 1,
 	about = {
-		what = "A sea vessel's movement: it floats, a seat's holder steers it with the rudder.",
+		what = "A sea vessel's movement: it floats, and the player in its seat steers it with the rudder.",
 		inputs = {
-			throttle = "Thrust while nobody holds its seat. Value: 1 forward to -1 back.",
-			steer = "The rudder while nobody holds its seat. Value: 1 right to -1 left.",
+			throttle = "Sets the thrust while nobody is in its seat. Value: 1 forward to -1 back.",
+			steer = "Sets the rudder while nobody is in its seat. Value: 1 right to -1 left.",
 		},
 	},
 	component = true,

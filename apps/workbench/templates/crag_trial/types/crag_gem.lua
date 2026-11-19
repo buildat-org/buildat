@@ -9,8 +9,8 @@ return {
 	zone = "size",
 	about = {
 		group = "Game",
-		what = "A gem to collect in Crag Trial: ride through it. Each rider takes their own.",
-		inputs = {reset = "Back where it was, for the rider (everyone's with nobody)."},
+		what = "A gem to collect in Crag Trial: ride through it. Each rider collects their own copy.",
+		inputs = {reset = "Puts it back for the rider, or for everyone with no rider."},
 		outputs = {collected = "A rider took it."},
 	},
 	look = {shape = "box", size = 0.24, color = "#4cc9f0", offset = {0.5, 0.5, 0},

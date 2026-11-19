@@ -36,7 +36,7 @@ return {
 		group = "Building",
 		what = "A pad that moves a player who steps on it or uses it.",
 		inputs = {
-			teleport = "Moves who set it off.",
+			teleport = "Moves the player who set it off.",
 		},
 		outputs = {
 			teleported = "A player was moved.",

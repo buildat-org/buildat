@@ -102,16 +102,16 @@ return {
 	},
 	about = {
 		group = "UI",
-		what = "A box on the players' screens, holding the UI elements under " ..
-				"it; keyboard \"auto\": a full screen, or an over one out of " ..
-				"play, goes by the arrow keys and Enter.",
+		what = "A box on the players' screens that holds the UI elements under " ..
+				"it. With keyboard \"auto\", a full screen, or an over one while " ..
+				"out of play, is driven by the arrow keys and Enter.",
 		inputs = {
 			show = "Shows it.",
 			hide = "Hides it.",
-			toggle = "Shows it if hidden, else hides it.",
+			toggle = "Shows it if hidden, otherwise hides it.",
 		},
 		outputs = {
-			shown = "Show, hide or toggle came. Value: true shown, false hidden.",
+			shown = "Sent on show, hide or toggle. Value: true if shown, false if hidden.",
 		},
 	},
 	inputs = {show = "none", hide = "none", toggle = "none"},

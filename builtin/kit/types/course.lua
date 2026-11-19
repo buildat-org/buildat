@@ -6,7 +6,7 @@
 return {
 	version = 1,
 	about = {
-		what = "Takes a free object along a course and back, by the round's time.",
+		what = "Moves a free object along a course and back, timed by the round's clock.",
 	},
 	component = true,
 	movement = {timed = true, body = {r = 0.5, h = 1}},

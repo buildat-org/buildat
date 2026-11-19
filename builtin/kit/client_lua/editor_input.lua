@@ -929,11 +929,11 @@ end
 
 local BRUSH_TEXT = {raise = "raise the ground", lower = "lower the ground",
 	smooth = "smooth the ground", flatten = "flatten to the stroke's start",
-	paint = "paint the biome's ground", decorate = "decorate (the biome's)",
+	paint = "paint the biome's ground", decorate = "scatter the biome's decorations",
 	dedecorate = "take the World's decorations away",
 	fill = "drag: fill a rectangle up to here",
-	reset = "back to the generated ground",
-	seed = "a ball of ground here, in the air too (an island's start)"}
+	reset = "reset to the generated ground",
+	seed = "a ball of ground here, even in the air (to start an island)"}
 
 terrain_panel = function(w)
 	local r
@@ -1402,9 +1402,9 @@ function NT.pick_parent(id)
 	end
 	local e, is_made = find(id)
 	if id == child or not e or is_made or not (e.pos or NT.is_panel(e)) then
-		E.status = "Switch parent: " .. (id == child and "not itself" or
-				is_made and "not one made in play" or
-				"one with a position or a panel") .. "; " .. NT.parent_cancel()
+		E.status = "Switch parent: " .. (id == child and "not to itself" or
+				is_made and "not to one made in play" or
+				"pick one with a position, or a panel") .. "; " .. NT.parent_cancel()
 		log:info("kit editor: switch parent of " .. child .. ": not " .. id)
 		people()
 		return true
@@ -2735,7 +2735,7 @@ local function compute_guide()
 		else
 			g.left = "pick the new parent of " .. S.reparent
 		end
-		g.note = "Esc: cancel the parent's switch"
+		g.note = "Esc: cancel the parent switch"
 		return g
 	end
 	local kn = near_knob(mx, my)
@@ -3408,11 +3408,11 @@ function M.editor(options)
 					"no"), function()
 				send({op = "always_keep", on = not E.always_keep})
 			end)
-			ui.text("Players' builds kept at End without asking (a builder's)",
+			ui.text("Keeps players' builds at End without asking (builders only)",
 					"dim")
 		else
-			ui.text("Nothing to set here: Kit's settings are a builder's, " ..
-					"in a world of rounds", "dim")
+			ui.text("Nothing to set here: Kit's settings are for builders, " ..
+					"in a world with rounds", "dim")
 		end
 	end})
 

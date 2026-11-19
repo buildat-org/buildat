@@ -64,11 +64,11 @@ return {
 		what = "A counter that sells a copy of a prefab for money from the buyer's wallet.",
 		outputs = {
 			bought = "A player bought one. Value: the copy's id.",
-			refused = "A player had too little money.",
-			lost = "A ship it sold was lost (no value: a team's add counts 1).",
+			refused = "A player did not have enough money.",
+			lost = "A ship it sold was lost (no value, so a team's add counts 1).",
 		},
 		inputs = {
-			lost = "Kit's: a ship it sold was lost. Value: the ship's id.",
+			lost = "Sent by Kit: a ship it sold was lost. Value: the ship's id.",
 		},
 	},
 	outputs = {bought = "entity", refused = "none", lost = "none"},

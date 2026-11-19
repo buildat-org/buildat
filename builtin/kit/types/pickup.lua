@@ -30,7 +30,7 @@ return {
 	},
 	about = {
 		group = "Items",
-		what = "Items lying in the world: a player walking in takes what fits.",
+		what = "Items lying in the world: a player who walks into them takes what fits.",
 		outputs = {
 			taken = "A player walked in and took some. Value: how many.",
 		},

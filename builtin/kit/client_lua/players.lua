@@ -683,7 +683,7 @@ function M.spectate_view(dt, cam_pos, cam_rot, yaw, pitch, follows)
 	end
 	if SP.target then
 		set_hint("Watching " .. name_of(SP.target) .. "\n[Left click] next  " ..
-				"[Right click] back")
+				"[Right click] previous")
 		if follows then
 			SP.pos = nil
 			return SP.target
@@ -695,7 +695,7 @@ function M.spectate_view(dt, cam_pos, cam_rot, yaw, pitch, follows)
 	if follows then
 		SP.pos = nil
 		set_hint(#watchable() > 0 and "[Left click] watch a player  " ..
-				"[Right click] back" or nil)
+				"[Right click] previous" or nil)
 		return P.you
 	end
 	-- (a copy: the node's own follows a shake)
@@ -719,7 +719,7 @@ function M.spectate_view(dt, cam_pos, cam_rot, yaw, pitch, follows)
 			"][" .. tostring(M.key_name("right")) .. "] move, [" ..
 			tostring(M.key_name("jump")) .. "] up, [" ..
 			tostring(M.key_name("down")) .. "] down\n[Left click] watch a " ..
-			"player  [Right click] back")
+			"player  [Right click] previous")
 	return P.you, SP.pos, rot
 end
 

@@ -8,7 +8,7 @@ return {
 	version = 1,
 	component = true,
 	about = {
-		what = "An engine on a ship: adds thrust and lift to its airship movement.",
+		what = "An engine on a ship: it adds thrust and lift to the ship's airship movement.",
 	},
 	params = {
 		thrust = {cat = "physics", type = "number", default = 3, min = 0, max = 100},

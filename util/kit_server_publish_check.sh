@@ -250,7 +250,7 @@ elif phase == "pub":
     t = call("install_from_aitta", {"kind": "scene", "key": key, "aitta": bad}, error=True)
     assert "is not one the server fetches from" in t, t
     t = call("install_from_aitta", {"kind": "template", "key": key, "aitta": aitta}, error=True)
-    assert "a template's install is an admin's" in t, t
+    assert "only an admin installs a template" in t, t
     t = call("publish_log", error=True)
     assert "an admin's" in t, t
     rs = log_is([("kitbob", "1.0.0"), ("kitboss", "1.0.1")])

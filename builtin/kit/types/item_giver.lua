@@ -17,8 +17,8 @@ return {
 		group = "Items",
 		what = "A player who uses it gets its items.",
 		outputs = {
-			given = "A player got them.",
-			refused = "They did not fit: the inventory refused them.",
+			given = "A player got its items.",
+			refused = "The items did not fit in the inventory.",
 		},
 	},
 	outputs = {given = "none", refused = "none"},

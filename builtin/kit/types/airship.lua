@@ -19,11 +19,11 @@ local BODY = {r = 1.5, h = 2}
 return {
 	version = 1,
 	about = {
-		what = "An airship's movement: it holds its altitude; a seat's holder steers, climbs and sinks.",
+		what = "An airship's movement: it holds its altitude, and the player in its seat steers, climbs and sinks.",
 		inputs = {
-			throttle = "Thrust while nobody holds its seat. Value: 1 forward to -1 back.",
-			steer = "Steers while nobody holds its seat. Value: 1 right to -1 left.",
-			climb = "Climbs while nobody holds its seat. Value: 1 up to -1 down.",
+			throttle = "Sets the thrust while nobody is in its seat. Value: 1 forward to -1 back.",
+			steer = "Steers while nobody is in its seat. Value: 1 right to -1 left.",
+			climb = "Climbs while nobody is in its seat. Value: 1 up to -1 down.",
 		},
 	},
 	component = true,

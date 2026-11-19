@@ -34,14 +34,14 @@ return {
 		group = "Game",
 		what = "A team: its colour, its spawn pad and a shared score.",
 		inputs = {
-			join = "Who set it off becomes a member, put on its pad.",
+			join = "The player who set it off joins the team and is put on its pad.",
 			add = "Adds to the score. Value: a number; none adds 1.",
 			set = "Sets the score. Value: a number.",
 		},
 		outputs = {
-			scored = "add or set came. Value: the new score.",
-			reached = "The score first came to win_score. Value: this team's id, for an arena's win.",
-			joined = "A player became a member, as the one who set it off: a goal of their own, a greeting.",
+			scored = "The score changed by add or set. Value: the new score.",
+			reached = "The score first reached win_score. Value: this team's id, for an arena's win.",
+			joined = "A player joined, as the one who set it off: for a goal of their own or a greeting.",
 		},
 	},
 	inputs = {join = "none", add = "any", set = "number"},

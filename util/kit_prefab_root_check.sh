@@ -487,7 +487,7 @@ EOF
 	n=$((n + 1))
 	cat <<EOF
 keypress z
-wait_log 5000 kit editor: The voxels stay: turned
+wait_log 5000 kit editor: The voxels stay: it is turned
 EOF
 	undo
 	# ---- 3: the palette's menu

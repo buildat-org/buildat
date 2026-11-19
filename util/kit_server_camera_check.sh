@@ -325,7 +325,7 @@ elif phase == "views":
     assert mag(imgs[0], 0.5, 0.5), imgs[0][2](64, 48)
     text = refused("get_view", {"views": [{"pos": C, "yaw": 0, "width": 1024,
         "height": 768}] * 3})
-    assert "1572864 at most a call" in text, text
+    assert "1572864 at most per call" in text, text
     assert "turn around" in refused("get_view", {"preset": "turn", "id": 999999})
     # [KIT_TEXTURE_DESIGNER] a recipe texture the camera makes from its name:
     # a polygon wearing a green one, its face green

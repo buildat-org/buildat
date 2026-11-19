@@ -116,7 +116,7 @@ EOF
 	refused '{"op": "move", "id": 5, "pos": [-3, 1, 2]}' \
 		"move: entity 5 at -3, 2 is outside kit/symmetry 4's authored slice +x"
 	refused '{"op": "place", "type": "kit/symmetry", "pos": [1, 1, 1]}' \
-		"place: its scene has kit/symmetry 4 already: one a scene"
+		"place: its scene has kit/symmetry 4 already: one per scene"
 	edit '{"op": "set", "id": 45, "comp": 0, "param": "color", "value": "#ff0000"}'
 	edit '{"op": "move", "id": 5, "pos": [6, 1, 3]}'
 	edit '{"op": "prefab_reset", "id": 45, "comp": 0, "param": "color"}'

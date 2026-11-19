@@ -431,7 +431,7 @@ boss, bob, ses = lines("boss"), lines("bob"), lines("session")
 # 1. The warnings, in the order they came
 text = "\n".join(boss)
 for want in ("a use goal with no object to use",
-		"nothing activates it: no link to its activate, autostart off",
+		"nothing activates it: no link into its activate, and autostart is off",
 		"no chain of links reaches ◆ 10 goal: last reached ◆ 9 goal, first cut off ◆ 13 goal",
 		"kit editor: at publish: ",
 		"publish cancelled", "published with goal warnings",

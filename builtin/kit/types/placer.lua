@@ -20,9 +20,9 @@ return {
 	},
 	about = {
 		group = "Items",
-		what = "Using an item puts a copy of a prefab ahead of the player.",
+		what = "Using its item puts a copy of a prefab in front of the player.",
 		outputs = {
-			placed = "A player's use put a copy down. Value: the copy's id.",
+			placed = "A player placed a copy. Value: the copy's id.",
 		},
 	},
 	outputs = {placed = "entity"},

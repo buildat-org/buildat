@@ -1486,7 +1486,7 @@ EOF
 	cell 10 1 -20
 	pick "$G" 220 stamped
 	cat <<'EOF'
-wait_log 5000 kit editor: No stamp at this turn
+wait_log 5000 kit editor: No stamp at this angle
 sync 5000
 quit
 EOF

@@ -246,7 +246,7 @@ if phase == "voxels":
     assert "size: three whole numbers 1...32" in edit({"action": "fill", "at": A,
         "size": [33, 1, 1], "voxel": v1}, True)
     assert "action: fill, hollow" in edit({"action": "explode", "at": A, "size": [1, 1, 1]}, True)
-    assert "is no voxel of the scene's" in edit({"action": "fill", "at": A,
+    assert "is not one of the scene's voxels" in edit({"action": "fill", "at": A,
         "size": [1, 1, 1], "voxel": "nope"}, True)
     assert "turn: a multiple of 90" in edit({"action": "paste", "at": B, "turn": 45}, True)
     assert "a voxel World: edit_voxels" in refused("edit_terrain", {"tool": "raise",

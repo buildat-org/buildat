@@ -77,11 +77,11 @@ return {
 		group = "Game",
 		what = "Where players appear, and where copies are made.",
 		inputs = {
-			spawn = "Makes a copy; with nothing to copy, puts who set it off here.",
+			spawn = "Makes a copy; with nothing to copy, puts the player who set it off here.",
 			clear = "Takes its copies away.",
 		},
 		outputs = {
-			spawned = "A copy was made or a player put here. Value: the copy's id; none for a player.",
+			spawned = "A copy was made or a player was put here. Value: the copy's id; none for a player.",
 		},
 	},
 	inputs = {spawn = "none", clear = "none"},

@@ -765,7 +765,7 @@ mouse_click left
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 wait_log_any 10000 kit: items: none
-wait_log_any 10000 kit: builds discarded: Builds while playing were discarded (kitbob 1, you
+wait_log_any 10000 kit: builds discarded: Builds made during play were discarded (kitbob 1, you
 frames 5
 look_dir 0.6 -0.25 1
 frames 10
@@ -1012,7 +1012,7 @@ want "$s2" "builds discarded: kitbob 1, kitboss " \
 	"kitboss keeps the builds of kitboss " \
 	"1 builds discarded: kitboss 1" "The builds of kitboss 1 discarded for good" \
 	"An edit (keep) by peer"
-want "$t/again.log" "kit: builds discarded: Your builds while playing were discarded."
+want "$t/again.log" "kit: builds discarded: Your builds made during play were discarded."
 # The door placed in the round: shut, it stopped the admin's walk short of
 # the zone behind it; open, the walk went through into the zone
 awk '/kit\/door 19: opened by kitboss/ { o = NR } /kit\/trigger_zone 20: kitboss entered/ { if(!o) bad = 1; e = NR } END { exit !(o && e > o && !bad) }' "$s2" ||

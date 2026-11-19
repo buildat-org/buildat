@@ -33,7 +33,7 @@ return {
 	},
 	about = {
 		group = "Creatures",
-		what = "Says its lines in turn over its head, as it is used.",
+		what = "Says its lines in turn above its head, one each time it is used.",
 		inputs = {
 			say = "Says the next line.",
 		},

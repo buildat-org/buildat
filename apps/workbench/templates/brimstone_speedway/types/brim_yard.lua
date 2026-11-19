@@ -212,7 +212,7 @@ return {
 	gizmo = {shape = "sphere", size = 0.6, color = "#d08020"},
 	about = {
 		group = "Game",
-		what = "Brimstone Speedway's track generator: the road, walls, run-off, mud, finish line, checkpoints and junk along a corner list; Run builds them again.",
+		what = "Brimstone Speedway's track generator: it builds the road, walls, run-off, mud, finish line, checkpoints and junk along a list of corners; Run rebuilds them.",
 	},
 	params = {
 		corners = {type = "points", level = true, values = {

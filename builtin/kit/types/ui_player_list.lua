@@ -86,11 +86,11 @@ return {
 	},
 	about = {
 		group = "UI",
-		what = "The players, their teams' colours and scores, on the screen.",
+		what = "The players with their team colours and scores, on the screen.",
 		inputs = {
 			show = "Shows it.",
 			hide = "Hides it.",
-			toggle = "Shows it if hidden, else hides it.",
+			toggle = "Shows it if hidden, otherwise hides it.",
 		},
 	},
 	inputs = {show = "none", hide = "none", toggle = "none"},

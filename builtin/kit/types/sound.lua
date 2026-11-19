@@ -10,7 +10,7 @@ return {
 	},
 	about = {
 		group = "World",
-		what = "Plays a sound at it, or as loud for everyone in its scene.",
+		what = "Plays a sound at its place, or at full volume for everyone in its scene.",
 		inputs = {
 			play = "Plays it.",
 		},

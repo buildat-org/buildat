@@ -48,7 +48,7 @@ return {
 		},
 		outputs = {
 			moving = "It started to move. Value: true going out, false going home.",
-			arrived = "It got there. Value: true out, false home.",
+			arrived = "It arrived. Value: true out, false home.",
 		},
 	},
 	inputs = {go = "none", back = "none", toggle = "none"},

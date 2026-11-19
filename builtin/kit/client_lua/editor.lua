@@ -364,7 +364,8 @@ function M.try(id, input, ty, s)
 	end
 	if not ok then
 		E.status = "Try " .. input .. ": " .. (ty == "position" and
-				"three numbers" or ty == "bool" and "true or false" or "a " .. ty)
+				"needs three numbers" or ty == "bool" and "needs true or false" or
+				"needs a " .. ty)
 		return people()
 	end
 	if not E.running then
@@ -729,10 +730,10 @@ function NT.parallax_note(e)
 				local f, fy = tonumber(p.follow) or 0.5, tonumber(p.follow_y) or 1
 				local r, lx = tonumber(p["repeat"]) or 0, x.pos and x.pos[1] or 0
 				return (under and "Under parallax layer " .. NT.entity_label(x) ..
-						": in play drawn" or "A parallax layer: in play what is under " ..
-						"it is drawn") .. string.format(" moving with the camera by " ..
-						"%g of its travel from x %g%s%s, never met. " ..
-						"Shown here where authored: as play draws it with the camera " ..
+						": in play it is drawn" or "A parallax layer: in play, what is " ..
+						"under it is drawn") .. string.format(" moving with the camera by " ..
+						"%g of its travel from x %g%s%s, never touched. " ..
+						"Shown here where it was placed, as play draws it with the camera " ..
 						"at x %g.", 1 - f, lx, fy < 1 and string.format(" (%g up and " ..
 						"down)", 1 - fy) or "", r > 0 and ", repeated every " ..
 						r .. " m" or "", lx)
@@ -1928,7 +1929,7 @@ function NT.items(w)
 	if #IT.rows == 0 then
 		text(w, "No item types", DIM)
 	end
-	text(w, "Drag one into the world: a pickup of it", DIM)
+	text(w, "Drag one into the world to place it as a pickup", DIM)
 	IT.filter()
 	-- For a check: the list as it changes
 	local line = "kit editor: items (" .. #said .. "): " ..
@@ -2657,8 +2658,8 @@ end
 -- The type's average cost, its instances' now ([KIT] stage 4l)
 function NT.cost_line(t)
 	local c = E.costs and E.costs.types and E.costs.types[t]
-	return c and string.format("Costs %.2f%% of Kit's budget an instance", c) or
-			"Its cost: none running"
+	return c and string.format("Cost: %.2f%% of Kit's budget each", c) or
+			"Cost: unknown until one runs"
 end
 
 -- A favourite's button: its text and what it does, redraw after
@@ -3326,7 +3327,7 @@ function NT.apply_params(e, ci, decl)
 			v = NT.points_of(v)
 		end
 		if v == nil then
-			bad = k .. ": three numbers"
+			bad = k .. ": needs three numbers"
 			E.status = bad
 		else
 			send({op = "set", id = e.id, comp = ci - 1, param = k, value = v})
@@ -3612,7 +3613,7 @@ function NT.params_form(w, e, ci, c, t, keep)
 			for _, d in ipairs(decl[k].values) do
 				cols[#cols + 1] = tostring(d.name)
 			end
-			text(w, table.concat(cols, " ") .. ", a point a line", DIM)
+			text(w, table.concat(cols, " ") .. ", one point per line", DIM)
 			local lines = {}
 			for _, p in ipairs(v) do
 				local ns = {}
@@ -3757,7 +3758,7 @@ function NT.goal_check()
 		local c = goal_of(e)
 		local p = c and c.params or {}
 		if c and not activated[e.id] and p.autostart ~= true then
-			warn(e, "nothing activates it: no link to its activate, autostart off")
+			warn(e, "nothing activates it: no link into its activate, and autostart is off")
 		end
 		if c and p.kind == "use" and not by[tonumber(p.target) or 0] then
 			warn(e, "a use goal with no object to use (target)")
@@ -3781,7 +3782,7 @@ function NT.goal_check()
 		if c and fin ~= 0 then
 			local fe = by[fin]
 			if not (fe and goal_of(fe)) then
-				warn(e, "validate reachable names no goal")
+				warn(e, "validate_reachable names no goal")
 			else
 				r.final[fin] = true
 				local depth = walk(from_, e.id)
@@ -3979,7 +3980,7 @@ end
 function NT.sym_copy_section(w, e, b)
 	local src = find(b.source)
 	text(w, "Copy of " .. (src and NT.entity_label(src) or tostring(b.source)) ..
-			", slice " .. b.slice .. ": its parameters only", DIM)
+			", slice " .. b.slice .. ": only its parameters can be changed", DIM)
 	button(w, "Go to source " .. b.source, function()
 		local from = drawn_at(e)
 		local fx, fy, fz = from.x, from.y, from.z
@@ -4024,7 +4025,7 @@ function NT.sym_section(w, e)
 	end
 	table.sort(lines, function(a, b) return a.text < b.text end)
 	local ov = #lines == 1 and "1 override" or #lines .. " overrides"
-	text(w, #lines == 0 and "No overrides: each copy is its source's image" or
+	text(w, #lines == 0 and "No overrides: each copy matches its source" or
 			ov .. ":", DIM)
 	for _, l in ipairs(lines) do
 		local r = row(w)
@@ -4096,7 +4097,7 @@ function NT.actions(w, e, parented, pe, under, rm)
 	end
 	if parented then
 		local armed = S.reparent == e.id
-		add(armed and "Switch parent: cancel" or "Switch parent", function()
+		add(armed and "Switch parent: Cancel" or "Switch parent", function()
 			NT.arm_parent(not armed and e.id or nil)
 		end)
 	end
@@ -4108,7 +4109,7 @@ function NT.actions(w, e, parented, pe, under, rm)
 	end
 	if under then
 		local on = S.under == e.id
-		add(on and "Placing under this: stop" or "Place under this", function()
+		add(on and "Stop placing under this" or "Place under this", function()
 			S.under = not on and e.id or nil
 			log:info("kit editor: placing under " .. tostring(S.under or "the scene"))
 			refresh()
@@ -4227,8 +4228,8 @@ local function comments_item(w, e, title_row)
 	local function save(s)
 		s = s or E.comment_drafts[e.id] or now
 		if #s > MAX_COMMENTS then
-			E.status = "Comments: " .. MAX_COMMENTS .. " bytes at most, these are "
-					.. #s
+			E.status = "Comments too long: " .. #s .. " bytes, at most " ..
+					MAX_COMMENTS
 			return people()
 		end
 		log:info("kit editor: comments of " .. e.id .. " saved, " .. #s ..
@@ -4296,7 +4297,7 @@ local function inspector(w, e, is_made)
 		text(w, gc.reachable[e.id], DIM)
 	end
 	if gc and gc.final[e.id] then
-		text(w, "A final goal: drawn gold on the map", DIM)
+		text(w, "A final goal: drawn in gold on the map", DIM)
 	end
 	-- [KIT] stage 4l: what it costs, changed in place as "kit:costs" comes
 	S.cost_text = text(w, M.cost_line(e.id), DIM)
@@ -4339,7 +4340,7 @@ local function inspector(w, e, is_made)
 		local r, at = row(w), {e.pos[1], e.pos[2], e.pos[3]}
 		local function move()
 			if not (at[1] and at[2] and at[3]) then
-				E.status = "Move: three numbers"
+				E.status = "Move: needs three numbers"
 				return people()
 			end
 			local by = {at[1] - e.pos[1], at[2] - e.pos[2], at[3] - e.pos[3]}
@@ -4388,7 +4389,7 @@ local function inspector(w, e, is_made)
 			local a = {e.yaw or 0, e.pitch or 0, e.roll or 0}
 			local function turn()
 				if not (a[1] and a[2] and a[3]) then
-					E.status = "Turn: three numbers"
+					E.status = "Turn: needs three numbers"
 					return people()
 				end
 				send({op = "move", id = e.id, pos = e.pos, yaw = a[1], pitch = a[2],
@@ -4463,7 +4464,7 @@ local function inspector(w, e, is_made)
 	end
 	if under and not sh then
 		local on = S.under == e.id
-		button(w, on and "Placing under this: stop" or "Place under this",
+		button(w, on and "Stop placing under this" or "Place under this",
 				function()
 			S.under = not on and e.id or nil
 			log:info("kit editor: placing under " ..
@@ -4760,9 +4761,9 @@ local function inspector(w, e, is_made)
 	-- [KIT_HUD_BUTTONS_MOUSE_LOOK] a button out of a panel (ui.lua)
 	local c1 = e.components and e.components[1]
 	if c1 and c1.type == "kit/ui_button" and not NT.is_panel(NT.parent_of(e)) then
-		NT.warn_text(w, "Out of a panel: shown only on a touchscreen or with " ..
-				"a free pointer (top-down). In mouse look a key (a kit/action) " ..
-				"or a panel a key opens reaches it.")
+		NT.warn_text(w, "Not in a panel: shown only on a touchscreen or with " ..
+				"a free pointer (top-down). In mouse look, players reach it with " ..
+				"a key (a kit/action) or through a panel a key opens.")
 	end
 end
 
@@ -5465,7 +5466,7 @@ end
 -- the frame. Its shape: the room left of the panel, or a desktop's or a
 -- phone's fitted in it (the HUD laid out in it as on that screen: its units
 -- are of the shorter side)
-local HUD_SHAPES = {{"The room left", "fit"}, {"Desktop 1920x1080", "1920x1080"},
+local HUD_SHAPES = {{"Available space", "fit"}, {"Desktop 1920x1080", "1920x1080"},
 	{"Phone 412x915", "412x915"}, {"Phone 915x412", "915x412"}}
 
 -- (390: Kit's own elements' rows, health_blink_below's, at a desktop's
@@ -5922,7 +5923,7 @@ people_rows = function(b)
 			t:SetFixedWidth((NT.sh.pane_w() - 36) / S.font)
 		end
 	end
-	para((E.session or {}).kind == "bench" and "Only Save reaches the prefab" or
+	para((E.session or {}).kind == "bench" and "Only Save changes the prefab" or
 			E.persistent and "Edits change the world" or E.running and
 			"Running: edits change the start and the round" or
 			"Ended: edits change the start", DIM)
@@ -6287,7 +6288,7 @@ E.scene_copy = E.scene_copy == true
 E.scene_under = E.scene_under or ""
 function M.scene_dialog()
 	local w, br = dialog("New scene")
-	text(w, "A new scene: its own World and entities")
+	text(w, "A new scene, with its own World and entities")
 	local r = row(w)
 	label(r, "Scene name:")
 	edit(r, E.scene_name, function(s)
@@ -6452,7 +6453,7 @@ function M.scenes_dialog()
 		-- [KIT_SCENES_REMOVE_TIP] One that cannot go: dimmed, its click
 		-- nothing, why on a pointer's rest or a finger held (Kit's tip,
 		-- signals.lua); the server's other refusals (a player on it) its own
-		local why = (n == E.state.world_scene and "The first scene: always kept")
+		local why = (n == E.state.world_scene and "The first scene is always kept")
 				or (under[n] and "Has scenes under it") or (n == current_scene()
 				and "The scene you're editing: switch to another first") or nil
 		local b, t = button(r, "Remove", function()
@@ -6573,12 +6574,12 @@ function M.scene_added(a)
 	end
 	-- [KIT_SCENE_ADD_LIVE] Running: in unlisted
 	if a.unlisted then
-		para("Added, not listed: try it, then list it (Scenes... in the " ..
+		para("Added but not listed: try it, then list it (Scenes... in the " ..
 				"scene list).")
 	end
-	para("The scene " .. tostring(a.scene) .. " is added." ..
+	para("The scene " .. tostring(a.scene) .. " was added." ..
 			(#dropped > 0 and " Left out, as this game has no entity of " ..
-			"the name:" or ""))
+			"that name:" or ""))
 	for i, d in ipairs(dropped) do
 		if i > 12 then
 			para("and " .. (#dropped - 12) .. " more (see the log)", DIM)
@@ -6587,7 +6588,7 @@ function M.scene_added(a)
 		para(tostring(d), DIM)
 	end
 	if #kept > 0 then
-		para("Its types this game has its own of, kept: " ..
+		para("Kept this game's own types: " ..
 				table.concat(kept, ", "))
 	end
 	br = br or row(w)
@@ -6646,24 +6647,24 @@ function M.publishing_page(accounts)
 	end
 	if I.key == "" then
 		acc.page_text(w, "The server has no publishing key. Its releases " ..
-				"go under the author name an Aitta binds the key to, once; " ..
-				"neither changes after.", DIM)
+				"go out under the author name that an Aitta binds the key to. " ..
+				"Neither can be changed later.", DIM)
 		local a = acc.page_field(w, "Author name (a-z, 0-9, _)")
 		a:SetName("publishing author")
 		acc.page_button(w, "Make the key", function()
 			publishing({op = "keygen", author = a:GetText()})
 		end):SetName("publishing keygen")
 	else
-		acc.page_text(w, "Releases go as " .. I.author .. ", signed with " ..
+		acc.page_text(w, "Releases go out as " .. I.author .. ", signed with " ..
 				"the server's key (kept on the server, never sent). Bind it on " ..
-				"each Aitta below: join the Aitta, log in there and bind the " ..
-				"author name and this key.")
+				"each Aitta below: join the Aitta, log in there, and bind this " ..
+				"author name and key.")
 		acc.page_field(w, "Author name", false, nil, I.author)
 		acc.page_field(w, "Public key", false, nil, I.key):SetName(
 				"publishing key")
 	end
-	acc.page_text(w, "The Aittas it publishes to and installs from (it " ..
-			"fetches from no other), comma separated:", DIM)
+	acc.page_text(w, "The Aittas the server publishes to and installs from " ..
+			"(no others), comma-separated:", DIM)
 	local urls = {}
 	for _, a in ipairs(I.aittas or {}) do
 		urls[#urls + 1] = a.url
@@ -6682,7 +6683,7 @@ function M.publishing_page(accounts)
 	-- join_server); the user joins the Aitta from the launcher
 	for _, a in ipairs(I.aittas or {}) do
 		acc.page_text(w, a.url .. ": " .. (I.key == "" and "no key yet" or
-				a.bound == "" and "binds the key to " .. I.author or
+				a.bound == "" and "the key is bound to " .. I.author or
 				"Bind on " .. a.url .. "...: join it, log in, and bind the " ..
 				"author " .. I.author .. " and the public key above (" ..
 				a.bound .. ")"), (I.key == "" or a.bound ~= "") and WARN or
@@ -6695,8 +6696,8 @@ function M.publishing_page(accounts)
 		end)
 	end
 	-- Who may publish as the server
-	acc.page_text(w, "Who may publish as the server (their name in each " ..
-			"release; an admin always):", DIM)
+	acc.page_text(w, "Who may publish as the server (their name goes in " ..
+			"each release; an admin always may):", DIM)
 	for _, p in ipairs(I.people or {}) do
 		local r = acc.page_row(w)
 		acc.page_text(r, p.name .. (p.admin and " (admin)" or
@@ -6722,7 +6723,7 @@ function M.publishing_page(accounts)
 			publishing({op = "install_template", aitta = t.aitta, key = t.key})
 		end):SetName("install template " .. t.name)
 	end
-	acc.page_text(w, "Published (the log, private):", DIM)
+	acc.page_text(w, "Published so far (a private log):", DIM)
 	local log_rows = I.log or {}
 	for i = #log_rows, math.max(1, #log_rows - 19), -1 do
 		local l = log_rows[i]
@@ -6812,7 +6813,7 @@ function M.draw_publish_form()
 		M.draw_publish_form()
 	end)
 	if F.what ~= "prefabs" then
-		field("Title (none: as it is):", "title")
+		field("Title (empty: unchanged):", "title")
 	end
 	button(row(w), "Licence: " .. F.licence, function()
 		for i, l in ipairs(LICENCES) do
@@ -6868,8 +6869,8 @@ function NT.publish_as(what, scene, own)
 			return own()
 		end
 		if not can then
-			E.status = "Publishing here is as this server, with the Host's " ..
-					"leave and its key bound on an Aitta (the Publishing page)"
+			E.status = "Here you can publish only as this server, which needs the " ..
+					"Host's permission and its key bound on an Aitta (the Publishing page)"
 			log:info("kit editor: " .. E.status)
 			return people()
 		end
@@ -7177,7 +7178,7 @@ function NT.type_window()
 	local w, br = dialog(f.existing and "Edit type" or "New type", rw)
 	f.win = W.dialog
 	text(w, f.existing and "The game's type " .. f.name or
-			"A type of this game's own, local/<name>: Lua run in Kit's box")
+			"A type of this game's own, local/<name>: Lua that runs in Kit's box")
 	local r = row(w)
 	label(r, "Name:")
 	edit(r, f.name, function(s)
@@ -7267,7 +7268,7 @@ buildat.sub_packet("kit:type", function(data)
 		f.name, f.source, f.client, f.status, f.ok = tostring(a.type),
 				tostring(a.source or ""):gsub("\t", "    "),
 				(tostring(a.client or ""):gsub("\t", "    ")),
-				a.custom and "" or "Not this game's: Save makes a copy under "
+				a.custom and "" or "Not this game's own: Save makes a copy under "
 				.. "the name you give it", true
 		f.existing = a.custom == true
 	else
@@ -7568,7 +7569,7 @@ function IT.sheet(w)
 	local f, own = IT.form, not new and IT.own(n)
 	text(w, new and "A new item type of yours" or "Item type " ..
 			M.shown(n))
-	text(w, new and "From a preset, its fields changed here" or own and
+	text(w, new and "Starts from a preset: change its fields here" or own and
 			"The game's own: Save makes its next version" or
 			(sheet.package and "A package's" or "Kit's") ..
 			": Copy as new to change it", DIM)

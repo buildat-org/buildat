@@ -194,13 +194,13 @@ return {
 		group = "World",
 		what = "Particles and a light the clients show, on a signal or a world event.",
 		inputs = {
-			burst = "One burst. Value: where, if its where is \"value\": a position, entity, player or team.",
-			on = "A burst now and then every few seconds, until off. Value: as burst's.",
-			off = "Stops the bursts that on started.",
-			color = "Changes its colour from now on. Value: a team's name or #rrggbb; \"\" its own.",
+			burst = "Fires one burst. Value: where, if its `where` is \"value\": a position, entity, player or team.",
+			on = "Fires a burst now and every few seconds until off. Value: as for burst.",
+			off = "Stops the bursts started by on.",
+			color = "Changes its colour from now on. Value: a team's name or #rrggbb; \"\" for its own.",
 		},
 		outputs = {
-			fired = "A burst went off. Value: where, a position.",
+			fired = "A burst went off. Value: its position.",
 		},
 	},
 	inputs = {burst = "any", on = "any", off = "none", color = "string"},

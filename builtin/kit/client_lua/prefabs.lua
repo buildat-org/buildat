@@ -147,8 +147,8 @@ function PF.section(w, e)
 		text(w, "A free object: its copies change with the prefab", DIM)
 	end
 	if info and info.version ~= e.prefab.version then
-		text(w, "Prefab is at v" .. tostring(info.version) ..
-				": follows at its next save", DIM)
+		text(w, "The prefab is at v" .. tostring(info.version) ..
+				": this copy follows at its next save", DIM)
 	end
 	if info and not free and info.voxels and (e.prefab.voxels or 0) < info.voxels then
 		local behind = "voxels v" .. tostring(e.prefab.voxels or 0) .. ", prefab v" ..
@@ -338,7 +338,7 @@ function PF.bench_close()
 	end
 	local w = dialog()
 	text(w, "Close without saving " .. tostring(q.prefab) .. "?")
-	text(w, "What was changed since the last Save is dropped, no undo.", DIM)
+	text(w, "Changes since the last save are lost and can't be undone.", DIM)
 	local br = row(w)
 	button(br, "Close it", go)
 	button(br, "Keep editing", close)
@@ -370,7 +370,7 @@ local function mode_switched()
 	end
 	if (e.yaw or 0) % 90 ~= 0 or (e.pitch or 0) ~= 0 or (e.roll or 0) ~= 0 then
 		E.status = q.to == "free" and "The stamp's voxels stay: clear them by hand"
-				or "No stamp at this turn: turn it by 90s, then Refresh voxels"
+				or "No stamp at this angle: turn it in steps of 90, then Refresh voxels"
 		log:info("kit editor: " .. E.status)
 	elseif q.to ~= "free" then
 		PF.stamp_dialog(q.id)
@@ -412,8 +412,8 @@ function PF.state()
 	end
 	PF.pending = nil
 	if (e.yaw or 0) % 90 ~= 0 or (e.pitch or 0) ~= 0 or (e.roll or 0) ~= 0 then
-		E.status = string.format("The voxels stay: turned %g, and a stamp takes "
-				.. "multiples of 90", e.yaw)
+		E.status = string.format("The voxels stay: it is turned %g, and a stamp needs "
+				.. "a multiple of 90", e.yaw)
 		log:info("kit editor: " .. E.status)
 		return
 	end

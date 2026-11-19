@@ -121,12 +121,12 @@ return {
 	version = 1,
 	about = {
 		group = "Players",
-		what = "Brimstone Speedway's car, seen from above: a heavy body on four tyres. W gas, S brake, A and D steer, Space the handbrake. Grip by the floor's surface: dirt (the default), gravel, mud, oil, asphalt, boost; finish the lap line.",
+		what = "Brimstone Speedway's car, seen from above: a heavy body on four tyres. W is the gas, S the brake, A and D steer and Space is the handbrake. Its grip depends on the floor's surface: dirt (the default), gravel, mud, oil, asphalt, boost or finish (the lap line).",
 		outputs = {
-			lap = "Over the finish line with every checkpoint passed (the race's lap_open).",
-			fire = "The race's fire key pressed (its body var fire). Value: the car's heading (degrees, kit's yaw).",
-			smash = "A wall hit hard. Value: the speed into it.",
-			ram = "A boosted car hit another. Value: the other's by.",
+			lap = "It crossed the finish line with every checkpoint passed (the race's lap_open).",
+			fire = "The race's fire key was pressed (its body var fire). Value: the car's heading (degrees, kit's yaw).",
+			smash = "It hit a wall hard. Value: its speed at impact.",
+			ram = "It hit another car while boosted. Value: the other's by.",
 		},
 	},
 	root = true,

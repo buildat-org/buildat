@@ -45,7 +45,7 @@ return {
 		inputs = {
 			open = "Opens it.",
 			close = "Shuts it.",
-			toggle = "Opens it if shut, else shuts it.",
+			toggle = "Opens it if shut, otherwise shuts it.",
 		},
 		outputs = {
 			opened = "It opened.",

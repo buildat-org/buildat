@@ -1886,9 +1886,9 @@ buildat.sub_packet("kit:discarded", function(data)
 		others = others or name ~= d.you
 	end
 	table.sort(list)
-	local s = others and "Builds while playing were discarded (" ..
+	local s = others and "Builds made during play were discarded (" ..
 			table.concat(list, ", ") .. ")." or
-			"Your builds while playing were discarded."
+			"Your builds made during play were discarded."
 	log:info("kit: builds discarded: " .. s)
 	if P.notice then
 		P.notice:Remove()
@@ -2328,7 +2328,7 @@ function M.allows(action, x, y, z)
 		return true
 	end
 	if (action == "dig" or action == "place") and not E.running then
-		return false, "The server is not Running"
+		return false, "The game is not running"
 	end
 	local n = region_at(x, y, z)
 	if not n then
@@ -2811,7 +2811,7 @@ function VIEW.next()
 	local w, h = type(v) == "table" and tonumber(v.w) or 0,
 			type(v) == "table" and tonumber(v.h) or 0
 	if w < 16 or h < 16 or w > 1024 or h > 768 then
-		return skip("a size 16x16 to 1024x768")
+		return skip("the size must be from 16x16 to 1024x768")
 	end
 	local main = magic.renderer:GetViewport(0)
 	local from, cam0

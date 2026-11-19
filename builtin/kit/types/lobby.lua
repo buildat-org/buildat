@@ -60,13 +60,13 @@ return {
 	no_position = true,
 	about = {
 		group = "Game",
-		what = "Each player's lobby, run and result, and the screens for them. out_of_play: there a player is out of play, hidden from the others; keep_own_body: their own body still drawn for them, the camera on it (a result card over their frozen bike).",
+		what = "Each player's lobby, run and result, and their screens. out_of_play: in the lobby and the result, a player is out of play and hidden from the others. keep_own_body: their own body is still drawn for them, with the camera on it (a result card over their frozen bike).",
 		keywords = "menu start round result card",
 		inputs = {
 			play = "The player who set it off starts a run (from the lobby or a result). Value: a scene to go to first.",
-			again = "The player who set it off starts a run again (from a result, or over in a run).",
+			again = "The player who set it off starts a run again (from a result, or restarts during a run).",
 			lobby = "The player who set it off goes back to the lobby.",
-			over = "The player's run is over: their result.",
+			over = "Ends the player's run and shows their result.",
 		},
 		outputs = {
 			entered = "A player's run started.",

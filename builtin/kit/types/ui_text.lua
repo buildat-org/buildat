@@ -77,13 +77,13 @@ return {
 	},
 	about = {
 		group = "UI",
-		what = "A text on the players' screens.",
+		what = "Text on the players' screens.",
 		inputs = {
 			value = "Fills {value} in its text. Value: what to show; none empties it.",
 			clear = "Empties {value}.",
 			show = "Shows it.",
 			hide = "Hides it.",
-			toggle = "Shows it if hidden, else hides it.",
+			toggle = "Shows it if hidden, otherwise hides it.",
 		},
 	},
 	inputs = {value = "any", clear = "none", show = "none", hide = "none",

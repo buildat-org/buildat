@@ -8,15 +8,15 @@ return {
 	state = {count = {default = 0, shared = true}},
 	about = {
 		group = "Logic",
-		what = "Counts, and draws its count over it.",
+		what = "Counts, and shows the count above itself.",
 		inputs = {
 			count = "Adds one.",
 			add = "Adds to the count. Value: the number to add.",
-			reset = "Sets it to 0.",
+			reset = "Sets the count to 0.",
 		},
 		outputs = {
-			reached = "It came to its target. Value: the count.",
-			changed = "Any input came. Value: the count.",
+			reached = "The count reached its target. Value: the count.",
+			changed = "An input came. Value: the count.",
 		},
 	},
 	inputs = {count = "none", add = "number", reset = "none"},

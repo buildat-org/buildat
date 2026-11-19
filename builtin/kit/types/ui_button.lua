@@ -91,7 +91,7 @@ return {
 		inputs = {
 			show = "Shows it.",
 			hide = "Hides it.",
-			toggle = "Shows it if hidden, else hides it.",
+			toggle = "Shows it if hidden, otherwise hides it.",
 		},
 		outputs = {
 			pressed = "A player pressed it.",

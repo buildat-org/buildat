@@ -32,7 +32,7 @@ return {
 		inputs = {
 			play = "Plays it: to the player who sent it, or to everyone.",
 			stop = "Stops it: for the player who sent it, or for everyone.",
-			mood = "Value: a mood of the song (its track levels), from the next bar; \"\" every track.",
+			mood = "Sets the mood from the next bar. Value: one of the song's moods (track levels); \"\" for every track.",
 		},
 	},
 	inputs = {play = "none", stop = "none", mood = "string"},

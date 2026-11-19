@@ -20,10 +20,10 @@ return {
 	},
 	about = {
 		group = "Players",
-		what = "Hit points of a player or of what it is placed on.",
+		what = "The hit points of a player or of the entity it is placed on.",
 		inputs = {
 			heal = "Adds hit points. Value: how many; none heals fully.",
-			set = "Sets the hit points. Value: how many; 0 here neither kills nor signals died.",
+			set = "Sets the hit points. Value: how many; 0 neither kills nor sends died.",
 		},
 		outputs = {
 			damaged = "A hit landed. Value: the amount.",

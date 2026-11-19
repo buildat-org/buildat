@@ -96,7 +96,7 @@ return {
 			value = "Sets what it shows. Value: a number, within its min and max.",
 			show = "Shows it.",
 			hide = "Hides it.",
-			toggle = "Shows it if hidden, else hides it.",
+			toggle = "Shows it if hidden, otherwise hides it.",
 		},
 	},
 	inputs = {value = "number", show = "none", hide = "none",
