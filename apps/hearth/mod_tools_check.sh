@@ -154,12 +154,12 @@ client neo "$t/neo_banned.log" '{"cmd":"me"}' 'expect_error Disconnected from se
 grep -a "Login refused" "$t/neo_banned.log" | grep -aq "until 20[0-9-]* [0-9:]* UTC: Spam" ||
 	fail "neo's refusal: $(grep -a 'Login refused' "$t/neo_banned.log" | head -2)"
 client mia "$t/mia_ban2.log" '{"cmd":"ban","name":"hal","days":1,"reason":"Spam","text":""}' "$Q"
-answer "$t/mia_ban2.log" 1001 | grep -q "not banned here" ||
+answer "$t/mia_ban2.log" 1001 | grep -q "cannot be banned here" ||
 	fail "a helper banned: $(answer "$t/mia_ban2.log" 1001)"
 client mem "$t/mem_tools.log" "{\"cmd\":\"delete\",\"message\":$M4,\"reason\":\"Spam\",\"text\":\"\"}
 {\"cmd\":\"ban\",\"name\":\"neo\",\"days\":0,\"reason\":\"Spam\",\"text\":\"\"}" "$Q"
-answer "$t/mem_tools.log" 1001 | grep -q "only a [A-Za-z]* deletes" &&
-	answer "$t/mem_tools.log" 1002 | grep -q "only a [A-Za-z]* bans" ||
+answer "$t/mem_tools.log" 1001 | grep -q "only a [A-Za-z]* can delete" &&
+	answer "$t/mem_tools.log" 1002 | grep -q "only a [A-Za-z]* can ban" ||
 	fail "a member's delete or ban: $(answer "$t/mem_tools.log" 1001)"
 echo 86460 > "$t/srv/sim_clock"
 for _i in $(seq 100); do

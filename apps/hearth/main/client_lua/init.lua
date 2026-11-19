@@ -1141,7 +1141,7 @@ show_notifications = function()
 		end
 		if #items == 0 then
 			add_text(v, "None yet. Replies in the threads you follow, " ..
-					"mentions (@" .. me.account .. ") and answers come here.")
+					"mentions (@" .. me.account .. ") and answers appear here.")
 		end
 		v:fit()
 	end)
@@ -1156,8 +1156,8 @@ show_following = function()
 			thread_row(v, th)
 		end
 		if #list_ == 0 then
-			add_text(v, "None. A thread you start or write in is followed, " ..
-					"and Follow on a thread follows it.")
+			add_text(v, "None. You follow the threads you start or write " ..
+					"in, and any thread where you press Follow.")
 		end
 		v:fit()
 	end)
@@ -1279,7 +1279,7 @@ show_topic = function(id)
 		end
 		if #shown == 0 then
 			add_text(v, #t.threads == 0 and "No threads yet." or
-					"Nothing here is that.")
+					"No threads match this filter.")
 		end
 		v:fit()
 	end, function(why)
@@ -1316,7 +1316,7 @@ show_thread = function(id, at, missing)
 			text(w, "Tracker: " .. t.link, DIM, W)
 		elseif t.link_waiting ~= "" then
 			text(w, "Tracker: " .. t.link_waiting ..
-					" (its domain waits for a moderator)", WARN, W)
+					" (its domain is waiting for a moderator)", WARN, W)
 		end
 		local bar = row(w)
 		button(bar, t.following and "Stop following" or "Follow", function()
@@ -1420,7 +1420,7 @@ show_thread = function(id, at, missing)
 						"file") .. ", " .. size_text(f.bytes) ..
 						(f.vetted == false and "; a new account's image, " ..
 						(f.shown and "not shown to everyone yet" or
-						"not shown until a helper says") or ""), DIM, W - 32)
+						"not shown until a helper approves it") or ""), DIM, W - 32)
 			end
 			-- [HEARTH_THANKS]: the count at the top right, as dim as the
 			-- author's name
@@ -1854,15 +1854,15 @@ show_compose = function(o)
 	end
 	local w = open(title)
 	if o.feedback then
-		text(w, "Goes to this Hearth's Feedback topic, which its makers read",
-				DIM, W)
+		text(w, "This goes to the Hearth's Feedback topic, which its " ..
+				"makers read.", DIM, W)
 	elseif o.game then
-		text(w, "Goes to this Hearth's topic for games" ..
-				(o.server.source == "unknown" and "; where it came from " ..
-				"is not known" or ""),
+		text(w, "This goes to the Hearth's topic for games" ..
+				(o.server.source == "unknown" and "; where the game came " ..
+				"from is not known" or "") .. ".",
 				DIM, W)
 	elseif o.server then
-		text(w, "Goes to this Hearth's topic for servers", DIM, W)
+		text(w, "This goes to the Hearth's topic for servers.", DIM, W)
 	end
 	local title_e, kind, topic_pick
 	if not o.edit then
@@ -2032,8 +2032,9 @@ show_search = function(q)
 				add_text(v, "Nothing matches \"" .. q .. "\".")
 			end
 		else
-			add_text(v, "Words in titles and messages; the last word may be " ..
-					"the start of one. Enter searches.")
+			add_text(v, "Searches the words in titles and messages; the " ..
+					"last word may be the start of a word. Press Enter to " ..
+					"search.")
 		end
 		v:fit()
 		e:SetFocus(true)
@@ -2096,14 +2097,13 @@ show_account = function(name)
 		end
 		if a.trust and lv < 10 then
 			local tr = a.trust
-			text(w, "A " .. ln(0) .. " posts less, and its links wait for " ..
-					"a " .. ln(20) .. "'s approval, until it has been active " ..
-					"on five days -- a day it read a thread or wrote a " ..
-					"message that stands, counted once the day is over (" ..
-					(tr.days or 0) .. " so far) -- or a " .. ln(20) ..
-					" trusts it; " ..
-					"and with none of its messages hidden in 30 days (" ..
-					tr.hidden .. " hidden).", nil, W)
+			text(w, "A " .. ln(0) .. " posts less, and a " .. ln(20) ..
+					" must approve its links, until it has been active on " ..
+					"five days (" .. (tr.days or 0) .. " so far) or a " ..
+					ln(20) .. " trusts it, and none of its messages have " ..
+					"been hidden in 30 days (" .. tr.hidden .. " hidden). " ..
+					"A day counts once it is over, if the account read a " ..
+					"thread or wrote a message that stands that day.", nil, W)
 		end
 		local v = list()
 		for _, m in ipairs(a.messages) do
@@ -2211,7 +2211,7 @@ local function mod_dialog(title, m, s, draw, send)
 		local e2
 		local function again() redraw_(e2) end
 		draw(w, s, again)
-		text(w, "Why (they are told it):", DIM)
+		text(w, "Reason (they are told it):", DIM)
 		choices(w, MOD_REASONS, s.reason, function(i)
 			s.reason = i
 			again()
@@ -2236,7 +2236,7 @@ end
 show_delete = function(m, first, thread_id)
 	mod_dialog("Delete", m, {what = first and 2 or 1}, function(w, s, again)
 		if first then
-			text(w, "The thread's first message: the whole thread goes.", DIM, W)
+			text(w, "This is the thread's first message: the whole thread is deleted.", DIM, W)
 			return
 		end
 		choices(w, {"This message", "The whole thread"}, s.what, function(i)
@@ -2411,8 +2411,8 @@ show_settings = function()
 				add_row(v, "New topic...", "", function()
 					go(function() show_topic_edit(nil) end)
 				end)
-				v:header("Tracker domains (a link to one is shown whoever " ..
-						"posted it)")
+				v:header("Tracker domains (links to them are shown, whoever " ..
+						"posted them)")
 				for _, d in ipairs(domains) do
 					add_row(v, d, "remove", function()
 						req("tracker_domains", {remove = {d}}, redraw)
@@ -2445,7 +2445,7 @@ show_settings = function()
 				if me.admin then
 					addresses("Aittas", "aittas")
 					addresses("This Hearth's", "addresses")
-					v:header("Files (bytes; seconds unused)")
+					v:header("Files (bytes; seconds since last use)")
 				end
 				for _, k in ipairs(me.admin and {"budget", "lod2_after",
 						"delete_after"} or {}) do
@@ -2660,7 +2660,7 @@ accounts.on_joined = function()
 	if not ui.list_view then
 		local w = accounts.page_window(600)
 		w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
-		text(w, "This Hearth needs a newer Buildat. Update it to use it.",
+		text(w, "This Hearth needs a newer Buildat. Update Buildat to use it.",
 				WARN, 568)
 		return
 	end

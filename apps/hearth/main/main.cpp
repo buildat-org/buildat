@@ -1292,7 +1292,7 @@ struct Module: public interface::Module
 			body += "- "+p.s(1)+" #"+itos(p.i(0))+"\n";
 		}
 		body += (fixed.empty() ? "" : "\n")+ss_("## Changelog\n\n");
-		ss_ log = f.changelog.empty() ? ss_("No changelog came with it.") :
+		ss_ log = f.changelog.empty() ? ss_("The release has no changelog.") :
 				f.changelog;
 		// A CRLF file's \r is a control character to text_ok
 		log.erase(std::remove(log.begin(), log.end(), '\r'), log.end());
@@ -1892,7 +1892,7 @@ struct Module: public interface::Module
 				"aria-label=\"Search\"> <button>Search</button></form>"
 				"</header>\n"+content+
 				"\n<p class=\"meta\">Posts are CC-BY-SA. To take part, open "
-				"this server in the buildat client (<a href=\""+app+"\">"
+				"this server in the Buildat client (or <a href=\""+app+"\">"
 				"in the browser</a>).</p></body></html>\n";
 	}
 
@@ -1965,7 +1965,7 @@ struct Module: public interface::Module
 
 	// [HEARTH_NEW_IMAGES] What a reader sees for an image not shown yet
 	static constexpr const char *NOT_SHOWN = "a new account's image, not "
-			"shown until a helper says";
+			"shown until a helper approves it";
 
 	// [HEARTH_NEW_IMAGES] The message's HTML with its images not shown to
 	// this viewer (`files`, files_of's) as a line saying so; the link
@@ -2421,8 +2421,8 @@ struct Module: public interface::Module
 					"AND time > ?");
 			a.b(name).b(by).b(now_s() - UNDO_S);
 			if(!a.step())
-				throw Exception("a "+level_name(LV_HELPER)+" takes back only "
-						"its own approval, within 7 days");
+				throw Exception("a "+level_name(LV_HELPER)+" can take back only "
+						"their own approval, within 7 days");
 		}
 		accounts::access(m_server, [&](accounts::Interface *a){
 			const int was = a->level(name);
@@ -2879,8 +2879,8 @@ struct Module: public interface::Module
 					"AND state = 'open'");
 			w.b(name);
 			if(held && w.step())
-				throw Exception(ss_("a link of yours is waiting for "
-						"approval already")+how);
+				throw Exception(ss_("a link of yours is already waiting for "
+						"approval")+how);
 		}
 		// An edit counts as a message: each keeps the old body
 		Q m(m_db, "SELECT (SELECT count(*) FROM messages WHERE author = ? "
@@ -2973,7 +2973,7 @@ struct Module: public interface::Module
 			const ss_ &text)
 	{
 		if(accounts::level(m_server, author) >= LV_ADMIN)
-			throw Exception("the "+level_name(LV_ADMIN)+"'s message is not "
+			throw Exception("the "+level_name(LV_ADMIN)+"'s message cannot be "
 					"deleted");
 		const ss_ statement = reason+(text.empty() ? ss_() : ": "+text);
 		set_hidden(message_id, DELETED, statement);

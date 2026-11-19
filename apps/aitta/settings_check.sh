@@ -94,7 +94,7 @@ echo "ok: the admin's Settings page: a bad JSON refused, play_url saved and link
 # 2.
 printf 'wait_log_any 30000 "id":1,\nwait_log_any 30000 aitta: row\nclick Button "Settings"\nquit\n' > "$t/plain.cmds"
 BUILDAT_AITTA_REQS='{"cmd":"settings"}' client plain "$t/plain.log" "$t/plain.cmds"
-grep -aq "only the admin reads settings" "$t/plain.log" ||
+grep -aq "only the admin can read settings" "$t/plain.log" ||
 	fail "the request not refused to a plain account"
 grep -aq 'click: no visible, uncovered Button "Settings"' "$t/plain.log" ||
 	fail "a Settings entry for a plain account"

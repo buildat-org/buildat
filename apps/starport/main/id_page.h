@@ -86,7 +86,7 @@ margin-right:1.5em}
 <fieldset><legend>Recovery e-mail</legend>
 <input id="email" type="email" autocomplete="email">
 <button type="button" id="setemail">Set</button>
-<div id="confirmbox" class="hide"><label>Code from the mail
+<div id="confirmbox" class="hide"><label>Code from the e-mail
  <input id="ecode"></label>
 <button type="button" id="confirmemail">Confirm</button></div></fieldset>
 <fieldset><legend>Password</legend>
@@ -104,8 +104,8 @@ margin-right:1.5em}
 <label><input id="sconsent" type="checkbox"> Under 13: I have a
  parent's consent</label></div></div>
 <button type="button" id="setage">Save</button></fieldset>
-<p>With TOTP on, a change of the e-mail, the password or TOTP takes a
-code: put it in TOTP's Code first.</p>
+<p>With TOTP on, changing the e-mail, the password or TOTP needs a
+code: enter it in TOTP's Code first.</p>
 </div>
 <script>
 "use strict";
@@ -152,7 +152,7 @@ function show(id){
 function fail(e){
 	if(e.message == "session"){ keep(null); show("login"); }
 	$("err").textContent = e.message == "totp" ?
-		"Put a code from your authenticator in TOTP's Code" : e.message || e;
+		"Enter a code from your authenticator in TOTP's Code" : e.message || e;
 	$("ok").textContent = "";
 }
 function done(t){ $("ok").textContent = t; $("err").textContent = ""; }
@@ -173,8 +173,8 @@ async function signed_in(){
 	if(authorize){
 		show("allow");
 		if(rename){
-			$("fleetl").firstChild.textContent = "The name you have on this "
-				+ "server is taken there by an account of its own. Pick "
+			$("fleetl").firstChild.textContent = "Your name on this server "
+				+ "is already taken there by another account. Pick "
 				+ "another: ";
 			$("fleetl").classList.remove("hide");
 			$("fleet").required = true;
@@ -214,7 +214,7 @@ async function start(){
 			const b = document.createElement("b");
 			b.textContent = i.name || (i.site ? "a website" : "a server");
 			$("what").append(b, " at " + i.origin + " asks who you are. "
-				+ "Allowing signs you in there, by the name you have on it.");
+				+ "Allowing signs you in there with your name on it.");
 		} catch(e){ return fail(e); }
 	}
 	if(session){
@@ -307,7 +307,7 @@ $("totpgo").onclick = act(async () => {
 		const r = await call("totp", {session, cmd: "begin"});
 		secret = r.secret;
 		$("totpkey").textContent = "Add this key to an authenticator app, "
-			+ "then put the code it shows in Code: " + r.secret;
+			+ "then enter the code it shows in Code: " + r.secret;
 		$("totpkey").classList.remove("hide");
 		return signed_in();
 	}
@@ -321,7 +321,7 @@ $("setemail").onclick = act(async () => {
 	const r = await call("email", {session, email: $("email").value,
 		totp: code()});
 	await signed_in();
-	done(r == "sent" ? "A code went to the address" : "Set");
+	done(r == "sent" ? "A code was sent to the address" : "Set");
 });
 $("confirmemail").onclick = act(async () => {
 	await call("confirm_email", {session, code: $("ecode").value});

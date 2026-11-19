@@ -87,7 +87,7 @@ end
 local function diff_page(id)
 	req("review_diff", {release = id}, function(d)
 		local page = accounts.server_open(id .. (d.base ~= "" and
-				", against " .. d.base or ", with no reviewed version before"),
+				", against " .. d.base or ", with no earlier reviewed version"),
 				function() review_page(id) end)
 		for _, f in ipairs(d.added) do
 			text(page, "added: " .. f, YELLOW)
@@ -100,7 +100,7 @@ local function diff_page(id)
 			text(page, lines_cut(c.diff, 300), GREY)
 		end
 		if #d.added + #d.removed + #d.changed == 0 then
-			text(page, "No file changed.")
+			text(page, "No files changed.")
 		end
 		log:info("aitta: diff " .. id .. " against " .. (d.base ~= "" and
 				d.base or "nothing") .. ": " .. #d.added .. " added, " ..
@@ -109,12 +109,12 @@ local function diff_page(id)
 end
 
 local CHECKLIST = {
-	"The licences fit the files.",
-	"The audience is honest.",
+	"The licences match the files.",
+	"The audience rating is honest.",
 	"The description says what it does.",
-	"Nothing does harm beyond what the server's sandbox lets it: phoning home, " ..
-			"mining, fetching code.",
-	"No assets taken without a licence.",
+	"It does no harm that the server's sandbox allows, such as phoning " ..
+			"home, mining or fetching code.",
+	"No assets are used without a licence.",
 }
 
 review_page = function(id)
@@ -144,7 +144,7 @@ review_page = function(id)
 		end
 		local top = accounts.page_row(page)
 		button(top, v.base ~= "" and "Diff against " .. v.base or
-				"Diff (no reviewed version before)", function() diff_page(id) end)
+				"Diff (nothing reviewed before)", function() diff_page(id) end)
 		button(top, "Playtest", function()
 			req("playtest", {release = id}, function(t)
 				log:info("aitta: playtest " .. id)
@@ -159,12 +159,12 @@ review_page = function(id)
 			t:SetFixedWidth(page.width - 120)
 			button(row, "View", function() file_page(id, f.path) end)
 		end
-		text(page, "Check:")
+		text(page, "Check that:")
 		for _, c in ipairs(CHECKLIST) do
 			text(page, "- " .. c, GREY)
 		end
 		text(page, v.playtested and "You have playtested it." or
-				"Not playtested by you.", GREY)
+				"You have not playtested it.", GREY)
 		local note = edit(page, "Note")
 		local marks = accounts.page_row(page)
 		local function mark(action, extra)
@@ -200,7 +200,7 @@ local review_filter = "unreviewed"
 review_list = function()
 	req("review_list", {filter = review_filter}, function(list)
 		local page = accounts.server_open("Review: " .. review_filter ..
-				", the oldest first", function() home() end)
+				", oldest first", function() home() end)
 		local filters = accounts.page_row(page)
 		for _, f in ipairs({"unreviewed", "reviewed", "delisted", "all"}) do
 			button(filters, f, function()
@@ -230,7 +230,7 @@ local reports_page, group_page, appeals_page, statements_page
 
 reports_page = function()
 	req("mod_queue", nil, function(list)
-		local page = accounts.server_open("Reports, the most urgent first",
+		local page = accounts.server_open("Reports, most urgent first",
 				function() home() end)
 		button(page, "Appeals", function() appeals_page() end)
 		for _, g in ipairs(list) do
@@ -273,9 +273,9 @@ group_page = function(gid)
 					" " .. h.action .. " (" .. h.reason .. ")" ..
 					(h.text ~= "" and ": " .. h.text or ""), GREY)
 		end
-		text(page, "The release's own page: Review releases, all.", GREY)
-		local note = edit(page, "To the author (the statement's text)")
-		local days = edit(page, "A bar's days (none: until lifted)")
+		text(page, "The release's own page is under Review releases, all.", GREY)
+		local note = edit(page, "Statement to the author")
+		local days = edit(page, "Days barred (empty: until lifted)")
 		local function decide(decision, action)
 			req("mod_decide", {group = gid, decision = decision,
 					action = action, text = note:GetText(),
@@ -339,7 +339,7 @@ statements_page = function()
 					((st.text or "") ~= "" and ": " .. st.text or ""), YELLOW)
 			-- One open appeal a statement: the server says so to a second
 			if st.action ~= "restored" then
-				local why = edit(page, "Why it is wrong")
+				local why = edit(page, "Why the decision is wrong")
 				button(page, "Appeal", function()
 					req("appeal", {statement = st.id, text = why:GetText()},
 							function()
@@ -365,18 +365,18 @@ local NOTES = {
 	max_size = "The largest upload, in bytes.",
 	update_delay = "Seconds before a package's next release is listed.",
 	page_delay = "Seconds a release is listed before the page at / shows it.",
-	public_url = "This Aitta's address as its pages give it in the " ..
+	public_url = "This Aitta's address, as its pages show it in " ..
 			"commands; \"\" for the request's own host.",
-	play_url = "The play server's page a serverless package's \"Play in " ..
-			"the browser\" opens, <play_url>/#run=<author>/<name>; \"\" " ..
-			"for no link.",
+	play_url = "The play server page that a serverless package's \"Play " ..
+			"in the browser\" link opens, <play_url>/#run=<author>/<name>; " ..
+			"\"\" for no link.",
 	app_hosting_provider = "A hosting provider's address: each app's " ..
 			"\"Host at <domain>\" link, <provider>?aitta=<this>&package=" ..
 			"<author>/<name>; \"\" for none.",
 	anon_weight = "What an anonymous report weighs.",
 	key_weight = "What a report with the client's report key weighs.",
-	thresholds = "Reported past \"hide\", a release is out of the list " ..
-			"until a moderator looks; past \"delist\", delisted. By reason.",
+	thresholds = "By reason: past \"hide\", a reported release is hidden " ..
+			"until a moderator looks; past \"delist\", it is delisted.",
 }
 local function settings_page()
 	req("settings", nil, function(set)
@@ -429,12 +429,12 @@ home = function()
 			message = nil
 		end
 		if me.author == "" then
-			text(page, "Bind an author name to your key to publish. The key " ..
-					(offer and "and the name are your launcher's, from its " ..
-					"publish screen" or "is the line `bin/buildat aitta " ..
-					"keygen <file>` printed; the name is what your " ..
-					"releases' meta.json say as \"author\"") ..
-					", and neither changes after.", GREY)
+			text(page, "Bind an author name to your key to publish. " ..
+					(offer and "The key and the name come from your " ..
+					"launcher's publish screen" or "The key is the line " ..
+					"`bin/buildat aitta keygen <file>` printed; the name is " ..
+					"the \"author\" in your releases' meta.json") ..
+					". Neither can be changed later.", GREY)
 			local author = edit(page, "Author name (a-z, 0-9, _)")
 			local key = edit(page, "Public key")
 			if offer then
@@ -444,7 +444,7 @@ home = function()
 			button(page, "Bind", function()
 				req("bind", {author = author:GetText(), key = key:GetText()},
 						function()
-					message = offer and "Bound. Leave to the launcher and " ..
+					message = offer and "Bound. Go back to the launcher and " ..
 							"publish from Settings, Developer." or
 							"Bound. Publish with: bin/buildat aitta " ..
 							"publish <release .zip> <this server's address>"

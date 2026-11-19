@@ -810,7 +810,7 @@ struct Module: public interface::Module, public moderation::Host
 			}
 			l = load("listings", id);
 			if(!l.is_object() || !same(jstr(l, "secret"), jstr(b, "secret"))){
-				refuse(r, "no such listing, or not its secret", "no_listing");
+				refuse(r, "no such listing, or the wrong secret", "no_listing");
 				return;
 			}
 		} else {
@@ -1061,8 +1061,8 @@ struct Module: public interface::Module, public moderation::Host
 				put("listings", jstr(l, "id"), l);
 				if(differs)
 					open_group(jstr(l, "id")+"|category", jstr(l, "id"),
-							"category", "Starport: not the app or the "
-							"categories of the rest of pool "+jstr(l, "pool"));
+							"category", "Starport: its app or categories differ "
+							"from the rest of pool "+jstr(l, "pool"));
 			}
 			return;
 		}
@@ -1087,7 +1087,7 @@ struct Module: public interface::Module, public moderation::Host
 	{
 		json::Value l = load("listings", jstr(b, "id"));
 		if(!l.is_object() || !same(jstr(l, "secret"), jstr(b, "secret"))){
-			refuse(r, "no such listing, or not its secret", "no_listing");
+			refuse(r, "no such listing, or the wrong secret", "no_listing");
 			return;
 		}
 		l.set("withdrawn", true);
@@ -1127,10 +1127,10 @@ struct Module: public interface::Module, public moderation::Host
 		if(jstr(l, "verify") != "ok")
 			return jstr(l, "verify") == "failed" ?
 					"unverified: the challenge to its address failed" :
-					"unverified: being checked";
+					"unverified: its address is being checked";
 		if(jstr(l, "owner").empty())
-			return "unclaimed: an operator account claims it with the claim "
-					"code (starport_claim.txt)";
+			return "unclaimed: an operator account can claim it with the "
+					"claim code (starport_claim.txt)";
 		const ss_ f = filtered_out(l);
 		if(!f.empty())
 			return "filtered out by this instance: "+f;
@@ -1139,7 +1139,7 @@ struct Module: public interface::Module, public moderation::Host
 		if(now_s() - jint(l, "last_announce") > 900)
 			return "offline";
 		if(l.get("unlisted").is_true())
-			return "unlisted by its server: it takes Starport IDs, and is "
+			return "unlisted by its server: it takes Starport IDs but is "
 					"not in the list";
 		return st == "hidden" ? "hidden from filtered views" : "listed";
 	}
@@ -1352,7 +1352,7 @@ struct Module: public interface::Module, public moderation::Host
 	void api_list(const network::HttpRequest &r, const json::Value &b)
 	{
 		if(!m_rates.ok("list", network::address_key(r.address), 60, 60)){
-			refuse(r, "listed too often", "too_often");
+			refuse(r, "too many list requests; try again later", "too_often");
 			return;
 		}
 		const ss_ key = jstr(b, "key");
@@ -1495,7 +1495,7 @@ struct Module: public interface::Module, public moderation::Host
 	{
 		if(!m_rates.ok("report_addr", network::address_key(r.address),
 				10, 3600)){
-			refuse(r, "too many reports from this address; try later");
+			refuse(r, "too many reports from this address; try again later");
 			return;
 		}
 		const ss_ listing = jstr(b, "listing");
@@ -1530,7 +1530,7 @@ struct Module: public interface::Module, public moderation::Host
 			key_seen(key);
 			h = moderation::key_hash(key);
 			if(!m_rates.ok("report_key", h, 5, 3600)){
-				refuse(r, "too many reports from this key; try later");
+				refuse(r, "too many reports from this key; try again later");
 				return;
 			}
 		}
@@ -1758,8 +1758,8 @@ struct Module: public interface::Module, public moderation::Host
 		mail(owner, jstr(o, "email"), sp+": "+jstr(s, "action")+": "+name,
 				"Your listing \""+name+"\" ("+jstr(s, "listing")+") on "+sp+
 				":\n\n    "+jstr(s, "action")+", for "+jstr(s, "reason")+
-				"\n\n"+jstr(s, "text")+"\n\n"+"Appeal from your account on "+
-				sp+"; another moderator than the one who acted decides.\n");
+				"\n\n"+jstr(s, "text")+"\n\n"+"You can appeal from your account on "+
+				sp+"; a moderator other than the one who acted will decide.\n");
 	}
 
 	// An event on the Overview ([STARPORT_UI]): for the accounts and roles
@@ -1811,7 +1811,7 @@ struct Module: public interface::Module, public moderation::Host
 		// Up to a hundred lookups a request, and nobody needs to log in
 		if(!m_rates.ok("report_status", network::address_key(r.address),
 				30, 60)){
-			refuse(r, "asked too often", "too_often");
+			refuse(r, "too many requests; try again later", "too_often");
 			return;
 		}
 		json::Value out;
@@ -1832,7 +1832,7 @@ struct Module: public interface::Module, public moderation::Host
 	{
 		// Every report read, for anyone: once a few seconds an address
 		if(!m_rates.ok("transparency", network::address_key(r.address), 10, 60)){
-			refuse(r, "asked too often", "too_often");
+			refuse(r, "too many requests; try again later", "too_often");
 			return;
 		}
 		respond(r, 200, transparency());
@@ -2351,8 +2351,8 @@ struct Module: public interface::Module, public moderation::Host
 			if(!r.origin.empty() && what != "authorize_info" &&
 					what != "redeem" &&
 					(sep == ss_::npos || r.origin.substr(sep + 3) != r.host))
-				throw Exception("a web page logs in to a Starport ID on "
-						"the Starport's own page");
+				throw Exception("a web page can log in to a Starport ID only "
+						"on the Starport's own page");
 			result = id_call(r, what, b);
 		} catch(std::exception &e){
 			error = e.what();
@@ -2378,7 +2378,7 @@ struct Module: public interface::Module, public moderation::Host
 			throw Exception("Starport is not ready");
 		if(what == "register"){
 			if(!setting("id_registration").is_true())
-				throw Exception("this Starport makes no new IDs");
+				throw Exception("this Starport does not create new IDs");
 			if(!m_rates.ok("id_register", network::address_bin(r.address), 5,
 					86400))
 				throw Exception("too many new IDs from this network today");
@@ -2422,7 +2422,7 @@ struct Module: public interface::Module, public moderation::Host
 			};
 			if(!m_rates.ok("id_login_wrong", bin, 30, 3600, false))
 				throw Exception("too many wrong logins from this network; "
-						"try later");
+						"try again later");
 			json::Value id = load("ids", name);
 			if(!acc->check_password(name, jstr(b, "password")))
 				wrong("wrong name or password");
@@ -2479,8 +2479,9 @@ struct Module: public interface::Module, public moderation::Host
 			auto it = m_handoffs.find(jstr(b, "code"));
 			if(it == m_handoffs.end() || it->second.until < now_s() ||
 					it->second.origin != r.origin)
-				throw Exception("no such sign-in: it is taken once, within "
-						"a minute, by a page of the server it was for");
+				throw Exception("no such sign-in: a sign-in is used once, "
+						"within a minute, by a page of the server it was made "
+						"for");
 			const json::Value out = it->second.out;
 			m_handoffs.erase(it);
 			return out;
@@ -2491,7 +2492,7 @@ struct Module: public interface::Module, public moderation::Host
 			if(!m_rates.ok("id_reset", name, 3, 86400) ||
 					!m_rates.ok("id_reset_addr",
 						network::address_key(r.address), 10, 86400))
-				throw Exception("too many resets; try later");
+				throw Exception("too many resets; try again later");
 			// Said the same whether or not there is an address, so a
 			// name's e-mail cannot be probed
 			if(!jstr(o, "email").empty() && can_mail()){
@@ -2502,12 +2503,12 @@ struct Module: public interface::Module, public moderation::Host
 				put("ids", name, id);
 				const ss_ sp = jstr(m_settings, "name");
 				mail(name, jstr(o, "email"), sp+": a new password",
-						"A new password for the Starport ID "+name+" on "+sp+
-						" was asked for. The code is:\n\n    "+code+"\n\n"
-						"If that was not you, nothing needs doing.\n");
+						"Someone asked for a new password for the Starport ID "+
+						name+" on "+sp+". The code is:\n\n    "+code+"\n\n"
+						"If that was not you, you can ignore this e-mail.\n");
 			}
 			return json::Value("if the ID has a recovery e-mail, a code "
-					"went to it");
+					"was sent to it");
 		}
 		if(what == "reset"){
 			const ss_ name = jstr(b, "name");
@@ -2516,7 +2517,7 @@ struct Module: public interface::Module, public moderation::Host
 					jstr(id, "reset_code").empty() ||
 					now_s() - jint(id, "reset_ts") > 86400 ||
 					!same(jstr(id, "reset_code"), jstr(b, "code")))
-				throw Exception("not the code, or it is over a day old");
+				throw Exception("wrong code, or it is over a day old");
 			const ss_ err = acc->set_password(name, jstr(b, "password"));
 			if(!err.empty())
 				throw Exception(err);
@@ -2649,8 +2650,8 @@ struct Module: public interface::Module, public moderation::Host
 			throw Exception("this ID is suspended");
 		if(!id.get("adult").is_true() && id.get("birth_year").is_undefined())
 			throw Exception("say your age first: servers on this Starport "
-					"have age limits, so an ID says whether its owner is 18 "
-					"or over (in the client: Starport settings..., Starport "
+					"have age limits, so an ID must say whether its owner is "
+					"18 or over (in the client: Starport settings..., Starport "
 					"ID..., Change the age...)");
 		// [STARPORT_SITE_LOGIN] A website's: its origin, its own scope and
 		// secret, no audience
@@ -2662,7 +2663,7 @@ struct Module: public interface::Module, public moderation::Host
 		const int64_t age = age_low(id);
 		if((aud == "adult" && age < 18) || (aud == "teen" && age < 13))
 			throw Exception("this server's audience is "+aud+": not for "
-					"this ID's age");
+					"this ID's age group");
 		const ss_ scope = site ? "site:"+jstr(l, "id") : id_scope_of(l);
 		json::Value scopes = id.get("scopes").is_object() ?
 				id.get("scopes").deepcopy() : json::object();
@@ -2784,7 +2785,7 @@ struct Module: public interface::Module, public moderation::Host
 		// ([SECURITY_RUN_2]; that server refuses the token, but the
 		// sign-in window would show its host)
 		if(jstr(l, "verify") != "ok" || jstr(l, "status") == "banned")
-			throw Exception("this listing is not verified (yet): its server "
+			throw Exception("this listing is not verified yet: its server "
 					"has not answered the Starport at its address");
 		return l;
 	}
@@ -3025,7 +3026,7 @@ struct Module: public interface::Module, public moderation::Host
 			return r;
 		}
 		if(!mod)
-			throw Exception("for moderators");
+			throw Exception("only for moderators");
 		json::Value r;
 		if(cmd == "group")
 			return cmd_group(jstr(q, "group"));
@@ -3048,7 +3049,7 @@ struct Module: public interface::Module, public moderation::Host
 			return json::Value(true);
 		}
 		if(!admin)
-			throw Exception("for the admin");
+			throw Exception("only for the admin");
 		if(cmd == "settings")
 			return all_settings();
 		if(cmd == "set_settings")
@@ -3158,7 +3159,7 @@ struct Module: public interface::Module, public moderation::Host
 		if(email.size() > 200 || at == ss_::npos || at == 0 ||
 				at != email.rfind('@') || at + 1 == email.size() ||
 				email.find_first_of(" \t\r\n<>,;\"()") != ss_::npos)
-			throw Exception("an e-mail address");
+			throw Exception("not an e-mail address");
 		json::Value o = load("operators", name);
 		if(!o.is_object())
 			o = json::object();
@@ -3170,14 +3171,14 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		if(!interface::mail_supported())
 			throw Exception("this Starport's libcurl cannot send mail (a "
-					"minimal build): its admin installs a full one, or turns "
+					"minimal build): its admin must install a full one or turn "
 					"email_confirmation off");
 		if(!can_mail())
-			throw Exception("this Starport cannot send mail: its admin sets "
-					"the mail server (Admin, Health), or turns "
+			throw Exception("this Starport cannot send mail: its admin must "
+					"set the mail server (Admin, Health) or turn "
 					"email_confirmation off");
 		if(!m_rates.ok("mail", name, 3, 3600))
-			throw Exception("three codes an hour; try later");
+			throw Exception("at most three codes an hour; try again later");
 		const ss_ code = random_hex(4);
 		o.set("email_pending", email);
 		o.set("email_code", code);
@@ -3190,7 +3191,7 @@ struct Module: public interface::Module, public moderation::Host
 				"\n"
 				"    "+code+"\n"
 				"\n"
-				"If that was not you, nothing needs doing.\n");
+				"If that was not you, you can ignore this e-mail.\n");
 		return json::Value("sent");
 	}
 
@@ -3232,7 +3233,7 @@ struct Module: public interface::Module, public moderation::Host
 		if(now_s() - jint(o, "email_code_ts") > 86400)
 			throw Exception("the code is over a day old; ask for another");
 		if(!same(jstr(o, "email_code"), code))
-			throw Exception("not the code");
+			throw Exception("wrong code");
 		o.set("email", jstr(o, "email_pending"));
 		o.set("email_pending", "");
 		o.set("email_code", "");
@@ -3253,7 +3254,7 @@ struct Module: public interface::Module, public moderation::Host
 		const ss_ code = hex(interface::sha256::hmac(unhex(jstr(l, "secret")),
 				"buildat-claim-1\n")).substr(0, 16);
 		if(!same(code, jstr(q, "code")))
-			throw Exception("not its claim code");
+			throw Exception("wrong claim code");
 		// A server with a new key: its old listing's record comes along
 		const ss_ old = jstr(q, "replaces");
 		if(!old.empty()){
@@ -3451,7 +3452,7 @@ struct Module: public interface::Module, public moderation::Host
 			for(const ss_ &id : store("blocklists")->list(""))
 				n += jstr(load("blocklists", id), "owner") == name;
 			if(n >= 20)
-				throw Exception("20 blocklists an account");
+				throw Exception("an account can have at most 20 blocklists");
 			json::Value list = json::object();
 			list.set("id", random_hex(6));
 			list.set("name", lname);
@@ -3551,7 +3552,7 @@ struct Module: public interface::Module, public moderation::Host
 			for(const ss_ &id : store("fleets")->list(""))
 				n += jstr(load("fleets", id), "owner") == name;
 			if(n >= 20)
-				throw Exception("20 fleets an account");
+				throw Exception("an account can have at most 20 fleets");
 			f = json::object();
 			f.set("id", random_hex(6));
 			f.set("owner", name);
@@ -3611,7 +3612,7 @@ struct Module: public interface::Module, public moderation::Host
 			for(const ss_ &id : store("sites")->list(""))
 				n += jstr(load("sites", id), "owner") == name;
 			if(n >= 20)
-				throw Exception("20 sites an account");
+				throw Exception("an account can have at most 20 sites");
 			f = json::object();
 			f.set("id", random_hex(6));
 			f.set("owner", name);

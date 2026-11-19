@@ -283,7 +283,7 @@ for day in 1 2 3 4; do
 {"cmd":"reply","thread":1,"body":"cheap deals at https://spam.example"}'
 	[ "$(level h_sam_d$day.log 1001)" = 0 ] ||
 		fail "sam stood on day $day: $(ans h_sam_d$day.log 1001)"
-	ans h_sam_d$day.log 1004 | grep -q "waiting for approval already" ||
+	ans h_sam_d$day.log 1004 | grep -q "already waiting for approval" ||
 		fail "sam's link on day $day: $(ans h_sam_d$day.log 1004)"
 done
 advance $D
@@ -300,7 +300,7 @@ ans h_admin1.log 1001 | grep -q '"ok":true' || fail "the hide: $(ans h_admin1.lo
 hc sam sampass1234 h_sam1b.log '{"cmd":"me"}
 {"cmd":"reply","thread":2,"body":"more at https://spam.example"}'
 [ "$(level h_sam1b.log 1001)" = 0 ] || fail "sam still stands with a message hidden: $(ans h_sam1b.log 1001)"
-ans h_sam1b.log 1002 | grep -q "waiting for approval already" || fail "sam's link after the hide: $(ans h_sam1b.log 1002)"
+ans h_sam1b.log 1002 | grep -q "already waiting for approval" || fail "sam's link after the hide: $(ans h_sam1b.log 1002)"
 echo "ok: +1 to +5 days"
 
 # 3. +8 days: the daily pass after the retention

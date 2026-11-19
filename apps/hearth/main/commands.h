@@ -240,14 +240,14 @@
 			if(!t.step())
 				throw Exception("no such thread");
 			if(t.s(0) != name && !mod)
-				throw Exception("only whoever started the thread links it");
+				throw Exception("only whoever started the thread can link it");
 			if(!t.s(1).empty() && !mod)
-				throw Exception("the thread is about a package already");
+				throw Exception("the thread is already about a package");
 			Q k(m_db, "SELECT 1 FROM threads WHERE kind = 'release' AND "
 					"subject = ?");
 			k.b(subject);
 			if(!k.step())
-				throw Exception("no release here is that package");
+				throw Exception("no release here is of that package");
 			Q u(m_db, "UPDATE threads SET subject = ? WHERE id = ?");
 			u.b(subject).b(thread_id).step();
 			return json::Value(true);
@@ -281,7 +281,7 @@
 		if(cmd == "new_topic"){
 			// The tree changes rarely, by a trusted hand: a moderator's
 			if(!mod)
-				throw Exception("only a "+level_name(LV_MODERATOR)+" adds topics");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" can add topics");
 			const ss_ topic_name = jstr(q, "name"), about = jstr(q, "about");
 			need(text_ok(topic_name, NAME_MAX, false, "the name"));
 			if(!about.empty())
@@ -306,7 +306,7 @@
 		// [HEARTH_UI] A topic's name and what it is about, by a moderator
 		if(cmd == "edit_topic"){
 			if(!mod)
-				throw Exception("only a "+level_name(LV_MODERATOR)+" edits topics");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" can edit topics");
 			const ss_ topic_name = jstr(q, "name"), about = jstr(q, "about");
 			need(text_ok(topic_name, NAME_MAX, false, "the name"));
 			if(!about.empty())
@@ -321,7 +321,7 @@
 		// about a server the client was playing on
 		if(cmd == "topic_category"){
 			if(!mod)
-				throw Exception("only a "+level_name(LV_MODERATOR)+" sets a topic's category");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" can set a topic's category");
 			const ss_ category = jstr(q, "category");
 			// [LIVELY_MENU] "announcements": its threads lead the feed
 			if(category != "" && category != "servers" &&
@@ -339,7 +339,7 @@
 		// its subtopics have their own mark
 		if(cmd == "topic_mod_threads"){
 			if(!mod)
-				throw Exception("only a "+level_name(LV_MODERATOR)+" sets who starts a topic's threads");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" can set who starts a topic's threads");
 			Q u(m_db, "UPDATE topics SET mod_threads = ? WHERE id = ?");
 			u.b((int64_t)q.get("on").is_true()).b(jint(q, "topic")).step();
 			if(sqlite3_changes(m_db) == 0)
@@ -348,7 +348,7 @@
 		}
 		if(cmd == "topic_tracker"){
 			if(!mod)
-				throw Exception("only a "+level_name(LV_MODERATOR)+" marks a tracker");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" can mark a tracker");
 			Q u(m_db, "UPDATE topics SET tracker = ? WHERE id = ?");
 			u.b((int64_t)q.get("on").is_true()).b(jint(q, "topic")).step();
 			if(sqlite3_changes(m_db) == 0)
@@ -361,7 +361,7 @@
 			std::set<ss_> domains = tracker_domains();
 			if(!q.get("add").is_undefined() || !q.get("remove").is_undefined()){
 				if(!mod)
-					throw Exception("only a "+level_name(LV_MODERATOR)+" sets the tracker domains");
+					throw Exception("only a "+level_name(LV_MODERATOR)+" can set the tracker domains");
 				for(const char *k : {"add", "remove"}){
 					const json::Value &l = q.get(k);
 					for(unsigned i = 0; l.is_array() && i < l.size(); i++){
@@ -397,7 +397,7 @@
 			if(!t.step())
 				throw Exception("no such thread");
 			if(t.s(0) != name && !mod)
-				throw Exception("only whoever started the ticket links it");
+				throw Exception("only whoever started the ticket can link it");
 			if(!t.i(2) || (t.s(1) != "problem" && t.s(1) != "patch"))
 				throw Exception("only a ticket (a problem or a patch in a "
 						"tracker) has a tracker link");
@@ -445,7 +445,7 @@
 			const bool png = data.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0;
 			const bool jpeg = data.compare(0, 3, "\xff\xd8\xff") == 0;
 			if(!limits(lv).links && !patch && !png && !jpeg)
-				throw Exception("no files yet but a patch or an image (a "+
+				throw Exception("only a patch or an image for now (a "+
 						level_name(LV_NEW)+"'s limit, until it has been "
 						"active on five days or a "+level_name(LV_HELPER)+
 						" approves it)");
@@ -461,7 +461,7 @@
 					"file_links WHERE file = f.id)");
 			u.b(name).step();
 			if(lv < LV_MODERATOR && u.i(0) >= (64 << 20))
-				throw Exception("64 MiB of files not in a message yet at most; "
+				throw Exception("at most 64 MiB of files not yet in a message; "
 						"post them or wait a day");
 			need(text_ok(file_name, NAME_MAX, false, "the file's name"));
 			if(data.empty())
@@ -514,7 +514,7 @@
 		}
 		if(cmd == "file_settings"){
 			if(!admin)
-				throw Exception("only the "+level_name(LV_ADMIN)+" sets the files' budget");
+				throw Exception("only the "+level_name(LV_ADMIN)+" can set the files' budget");
 			json::Value v = file_settings();
 			bool any = false;
 			for(const char *k : FILE_SETTINGS)
@@ -543,8 +543,8 @@
 			// member either), by a helper or above; with message, each of its
 			// images that is a new account's ([HEARTH_MOD_TOOLS])
 			if(lv < LV_HELPER)
-				throw Exception("a "+level_name(LV_HELPER)+" says whether "
-						"everyone sees an image");
+				throw Exception("only a "+level_name(LV_HELPER)+" can say "
+						"whether everyone sees an image");
 			std::vector<int64_t> ids;
 			if(q.get("message").is_number()){
 				Q m(m_db, "SELECT body FROM messages WHERE id = ?");
@@ -593,7 +593,7 @@
 			// saying so, the author told why and able to appeal; purged after
 			// DELETED_KEEP_S. The admin's message is no one's to delete.
 			if(!mod)
-				throw Exception("only a "+level_name(LV_MODERATOR)+" deletes");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" can delete");
 			const ss_ reason = jstr(q, "reason"), text = jstr(q, "text");
 			need(text_ok(reason, 60, false, "the reason"));
 			if(!text.empty())
@@ -619,7 +619,7 @@
 			// messages of those days deleted, each as Delete does it. Not on
 			// a helper or above.
 			if(!mod)
-				throw Exception("only a "+level_name(LV_MODERATOR)+" bans");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" can ban");
 			const ss_ who = jstr(q, "name"), reason = jstr(q, "reason"),
 					text = jstr(q, "text");
 			need(text_ok(who, NAME_MAX, false, "the name"));
@@ -630,7 +630,7 @@
 			if(days < 0 || days > 3650 || del < 0 || del > 30)
 				throw Exception("days out of range");
 			if(accounts::level(m_server, who) >= LV_HELPER)
-				throw Exception("a "+level_name(LV_HELPER)+" or above is not "
+				throw Exception("a "+level_name(LV_HELPER)+" or above cannot be "
 						"banned here");
 			ss_ why;
 			accounts::access(m_server, [&](accounts::Interface *ai){
@@ -657,7 +657,7 @@
 			// A claim of copyright or personal data a moderator has upheld:
 			// gone at once, whatever its use
 			if(!mod)
-				throw Exception("only a "+level_name(LV_MODERATOR)+" deletes a file");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" can delete a file");
 			Q d(m_db, "DELETE FROM files WHERE id = ?");
 			d.b(jint(q, "file")).step();
 			if(sqlite3_changes(m_db) == 0)
@@ -668,7 +668,7 @@
 			// [HEARTH_DISCUSSED_API]: the base of /api/v1/discussed's links,
 			// as the public reaches this Hearth; "" for the request's Host
 			if(!admin)
-				throw Exception("only the "+level_name(LV_ADMIN)+" sets the public address");
+				throw Exception("only the "+level_name(LV_ADMIN)+" can set the public address");
 			ss_ u = jstr(q, "url");
 			while(!u.empty() && u.back() == '/')
 				u.pop_back();
@@ -688,7 +688,7 @@
 			// [PACKAGE_SUBJECT]: the Aittas read and this Hearth's own
 			// addresses, set by a moderator; without either, the current
 			if(!admin)
-				throw Exception("only the "+level_name(LV_ADMIN)+" sets the release sources");
+				throw Exception("only the "+level_name(LV_ADMIN)+" can set the release sources");
 			json::Value v = setting("release_sources");
 			// Neither given: as they are, nothing fetched again
 			if(q.get("aittas").is_undefined() && q.get("addresses").is_undefined())
@@ -742,23 +742,23 @@
 					subject = jstr(q, "subject"), kind = jstr(q, "kind"),
 					version = jstr(q, "version");
 			if(server && subject.rfind("server:", 0) != 0)
-				throw Exception("a server's thread has its subject");
+				throw Exception("a server's thread needs a \"server:\" subject");
 			if(game && subject.rfind("game:", 0) != 0)
-				throw Exception("a game's thread has its subject");
+				throw Exception("a game's thread needs a \"game:\" subject");
 			const json::Value top = topic(topic_id);
 			if(!top.is_object())
 				throw Exception("no such topic");
 			if(top.get("mod_threads").is_true() && !mod)
-				throw Exception("only a "+level_name(LV_MODERATOR)+" starts "
-						"a thread in "+top.get("name").as_string()+"; a reply "
-						"in one is open to all");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" can start "
+						"a thread in "+top.get("name").as_string()+"; anyone can "
+						"reply");
 			if(!POSTED_KINDS.count(kind))
 				throw Exception("a thread is a discussion, a question, a "
 						"problem, an idea or a patch");
 			if(kind == "patch" && !top.get("tracker").is_true())
-				throw Exception("a patch is a ticket, in a tracker topic");
+				throw Exception("a patch can only be posted in a tracker topic");
 			if(!version.empty() && !version_ok(version))
-				throw Exception("a version is 1 to 40 of letters, digits "
+				throw Exception("a version is 1 to 40 characters of letters, digits "
 						"and .+_-");
 			need(text_ok(title, TITLE_MAX, false, "the title"));
 			need(text_ok(body, BODY_MAX, true, "the message"));
@@ -784,7 +784,7 @@
 			const int64_t thread_id = jint(q, "thread");
 			const ss_ status = jstr(q, "status"), fixed_in = jstr(q, "fixed_in");
 			if(!mod)
-				throw Exception("only a "+level_name(LV_MODERATOR)+" sets a problem's status");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" can set a problem's status");
 			Q t(m_db, "SELECT kind FROM threads WHERE id = ?");
 			t.b(thread_id);
 			if(!t.step() || (t.s(0) != "problem" && t.s(0) != "patch"))
@@ -796,7 +796,7 @@
 				throw Exception("a patch is open, applied or wontfix");
 			if(!fixed_in.empty() && ((status != "fixed" && status != "applied")
 					|| !version_ok(fixed_in)))
-				throw Exception("fixed_in is a version, and only with fixed or "
+				throw Exception("fixed_in must be a version, and only with fixed or "
 						"applied");
 			Q u(m_db, "UPDATE threads SET status = ?, fixed_in = ? WHERE id = ?");
 			u.b(status).b(fixed_in).b(thread_id).step();
@@ -840,10 +840,10 @@
 			if(!m.step())
 				throw Exception("no such message");
 			if(m.s(0) != name && !mod)
-				throw Exception("only its author edits a message");
+				throw Exception("only its author can edit a message");
 			// What the moderator hid stays what the appeal is read against
 			if((m.i(2) || m.i(3)) && !mod)
-				throw Exception("a hidden message is not edited");
+				throw Exception("a hidden message cannot be edited");
 			need(text_ok(body, BODY_MAX, true, "the message"));
 			const bool held = check_limits(name, lv, false, body);
 			check_images(name, lv, m.i(4), id, body);
@@ -870,8 +870,8 @@
 			if(!t.step())
 				throw Exception("no such thread");
 			if(t.s(0) != name && !mod)
-				throw Exception("only whoever started the thread says what "
-						"answered it");
+				throw Exception("only whoever started the thread can mark its "
+						"answer");
 			ss_ by;
 			if(message_id != 0){
 				Q m(m_db, "SELECT author FROM messages WHERE id = ? AND "
@@ -897,7 +897,7 @@
 			const int64_t message_id = jint(q, "message");
 			const bool on = q.get("on").is_true();
 			if(lv < LV_MEMBER)
-				throw Exception("thanks are a "+level_name(LV_MEMBER)+"'s");
+				throw Exception("only a "+level_name(LV_MEMBER)+" can thank");
 			Q m(m_db, "SELECT m.author, m.thread, m.hidden, t.hidden FROM "
 					"messages m JOIN threads t ON t.id = m.thread WHERE "
 					"m.id = ?");
@@ -1003,20 +1003,20 @@
 			if(!m.step())
 				throw Exception("no such message");
 			if(appeal && m.s(0) != name)
-				throw Exception("only its author appeals");
+				throw Exception("only its author can appeal");
 			if(appeal && m.i(1) != HIDDEN && m.i(1) != DELETED)
 				throw Exception("the message is not hidden or deleted by a "+
 						level_name(LV_MODERATOR));
 			if(!appeal && m.s(0) == name)
-				throw Exception("one's own message is edited, not reported");
+				throw Exception("you cannot report your own message; edit it instead");
 			if(!appeal && m.i(1))
-				throw Exception("the message is hidden already");
+				throw Exception("the message is already hidden");
 			Q o(m_db, "SELECT 1 FROM reports WHERE kind = ? AND message = ? AND "
 					"by = ? AND state = 'open'");
 			o.b(cmd).b(id).b(name);
 			if(o.step())
-				throw Exception(appeal ? "the appeal is waiting already" :
-						"the report is waiting already");
+				throw Exception(appeal ? "the appeal is already waiting" :
+						"the report is already waiting");
 			Q d(m_db, "SELECT count(*) FROM reports WHERE by = ? AND time > ? "
 					"AND kind IN ('report', 'appeal')");
 			d.b(name).b(now_s() - 86400).step();
@@ -1055,7 +1055,7 @@
 		}
 		if(cmd == "queue"){
 			if(lv < LV_HELPER)
-				throw Exception("only a "+level_name(LV_HELPER)+" or higher sees the "
+				throw Exception("only a "+level_name(LV_HELPER)+" or higher can see the "
 						"queue");
 			json::Value list = json::array();
 			Q r(m_db, "SELECT r.id, r.kind, r.message, r.by, r.reason, r.time, "
@@ -1086,7 +1086,7 @@
 			// and refusing an appeal say why: the author is told it. A held
 			// link ([TRUST_LADDER]): approve or reject, a helper's too.
 			if(lv < LV_HELPER)
-				throw Exception("only a "+level_name(LV_MODERATOR)+" moderates");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" can moderate");
 			const ss_ action = jstr(q, "action"), statement = jstr(q, "statement");
 			Q r(m_db, "SELECT r.kind, r.message, m.author, m.thread, m.hidden "
 					"FROM reports r JOIN messages m ON m.id = r.message WHERE "
@@ -1110,13 +1110,13 @@
 				} else if(action == "reject"){
 					delete_message(message_id);
 				} else {
-					throw Exception("a held link is approved or rejected");
+					throw Exception("a held link can only be approved or rejected");
 				}
 				settle(action == "approve" ? "upheld" : "dismissed");
 				return json::Value(true);
 			}
 			if(!mod)
-				throw Exception("only a "+level_name(LV_MODERATOR)+" moderates");
+				throw Exception("only a "+level_name(LV_MODERATOR)+" can moderate");
 			// Hidden by reports and dismissed: shown again, and its reports
 			// overturned, which weigh their reporters' next ones nothing
 			if(!appeal && action == "dismiss" && r.i(4) == REPORTED){
@@ -1132,7 +1132,7 @@
 			// whitelist or dismissed
 			if(r.s(0) == "domain"){
 				if(action != "accept" && action != "dismiss")
-					throw Exception("a domain is accepted or dismissed");
+					throw Exception("a domain can only be accepted or dismissed");
 				Q d(m_db, "SELECT reason FROM reports WHERE id = ?");
 				d.b(jint(q, "report")).step();
 				if(action == "accept"){
@@ -1144,8 +1144,8 @@
 				return json::Value(true);
 			}
 			if(action != "dismiss" && action != (appeal ? "restore" : "hide"))
-				throw Exception(appeal ? "an appeal is restored or dismissed" :
-						"a report is hidden or dismissed");
+				throw Exception(appeal ? "an appeal can only be restored or dismissed" :
+						"a report can only be hidden or dismissed");
 			if(action == "hide" || (appeal && action == "dismiss"))
 				need(text_ok(statement, 1000, true, "the statement"));
 			else if(!statement.empty())
@@ -1178,7 +1178,7 @@
 			const ss_ who = jstr(q, "name");
 			if(lv < LV_HELPER)
 				throw Exception("only a "+level_name(LV_HELPER)+" or higher "
-						"trusts an account");
+						"can trust an account");
 			need(text_ok(who, NAME_MAX, false, "the name"));
 			trust_account(who, name, lv, q.get("on").is_true());
 			return json::Value(true);
@@ -1199,7 +1199,7 @@
 		if(cmd == "staff"){
 			if(lv < LV_HELPER)
 				throw Exception("only a "+level_name(LV_HELPER)+" or higher "
-						"lists them");
+						"can list the staff");
 			json::Value list = json::array();
 			accounts::access(m_server, [&](accounts::Interface *a){
 				for(const ss_ &n : a->account_names()){
