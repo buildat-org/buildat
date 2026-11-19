@@ -1399,7 +1399,8 @@ overridden for one run by -o (see README.md).
     vsync           present synchronised to the display
     max_fps         frame limiter; 0 is unlimited
     multisampling   MSAA samples: 1, 2, 4, 8 or 16
-    sound_volume_db decibels below full, 0 to -30 and off under it
+    sound_volume_db decibels below full, 0 to -30 and off under it; -3 by
+                    default
     sound_mute      that gain forced to zero
     music_volume_db the music's (sound type "Music": jam's songs) under
                     that, the same scale

@@ -89,7 +89,9 @@ namespace app
 		// nothing). 0 dB is full, the steps are 3 dB down to -30, and
 		// SOUND_OFF_DB is the step under that, which is silence. The
 		// gain is made from it where it is applied and nowhere else.
-		float sound_volume_db = 0.0f;
+		// -3 by default ([VOLUME_DEFAULT], kit_plan 4z37h: not the loudest
+		// application on the machine); a saved one stays as it is
+		float sound_volume_db = -3.0f;
 		// [MUSIC_SYNTH] the "Music" sound type's, under the master's
 		float music_volume_db = 0.0f;
 		bool sound_mute = false;
