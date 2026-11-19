@@ -1,7 +1,7 @@
 # skeldat
 
 A bounded world that bones and skeletons are taking over: dig, craft
-and burn lanterns to push the bones back, lure the skeletons with their
+and burn lanterns to push the bones back, and lure the skeletons with their
 own marker skulls. Your score is the days until the bones cover the
 whole surface: every column's top voxel. What is under it does not
 count, and a skeleton beside a deep hole (a shaft dug down, a pit)
@@ -42,29 +42,30 @@ module under it.
   that falls behind the bones says so in the chat, once a minute.
 - The skateboard: walking downhill (ground a voxel lower two ahead, not
   sneaking) puts the player on a board by itself. It rides steps of up
-  to 2 as a slope, loses no speed but by climbing and by S (the brake),
-  turns toward where the camera looks, flies off crests, jumps twice
-  as hard as a walk, and is left for walking at a stop, a wall, water or
-  a ladder. Shift held on it lays the player flat, through holes one
-  voxel high; up again where there is room. The others see a flat box
-  under a player on one, and the player lying on it.
+  to 2 as a slope, loses speed only by climbing and by S (the brake),
+  turns toward where the camera looks, flies off crests, and jumps
+  twice (once more in the air), a little higher than a walk. The player
+  walks again at a stop, a wall, water or a ladder. Holding Shift on it
+  lays the player flat, to pass through holes one voxel high; they stand
+  up again where there is room. The others see a flat box under a player
+  on one, and the player lying on it.
 - The world's edge: the last 16 columns of each side rise up to 12 in
-  bone blocks, the outermost column a bone wall nothing digs (made once
-  when a world is first in), and bone hills drawn beyond it to the view.
+  bone blocks, the outermost column a bone wall nothing digs (made once,
+  the first time a world loads), and bone hills drawn beyond it to the view.
 - Items on the ground: Q drops one of the held stack ahead (Ctrl+Q all
   of it), a dig or a kill drops what does not fit, and a death drops half
-  the player's stacks at random. A drop lies a game day, kept with the
-  world, and a living player within 1.5 voxels takes what fits.
+  the player's stacks at random. A drop lies for a game day, saved with
+  the world, and a living player within 1.5 voxels takes what fits.
 - The bow (three sticks as the arc, three bones down the side): held,
   the left button draws it over a second and the release shoots an
-  arrow from the inventory at a speed by the draw (the server times it);
+  arrow from the inventory at a speed set by the draw (the server times it);
   it digs nothing. An arrow is a bone over a stick (4). A stuck arrow,
   anyone's, is picked up by walking near it, and after a minute is kept
   as a voxel, picked up the same way or dug. The held item is drawn in
   the hand; the bow as a mesh that bends with the draw.
 - The Bone Crown (three Deep Skulls, a diamond, two bone blocks): a right
   click with it held puts it on or takes it off. Worn, it burns a coal of
-  the main inventory every 4 game hours and is a lantern's sphere round
+  the main inventory every 4 game hours and clears a lantern's sphere around
   its wearer, and lures at sunrise and sunset as a lantern does; out of
   coal it does nothing. A bone skeleton within 24 fights its wearer
   before anyone nearer, closes in and snatches it, and drops it where it
@@ -75,7 +76,7 @@ module under it.
   bones of every voxel within 3 with it, bone blocks and skulls too.
 - Torchlight: a skeleton whose feet or head have a lamp light of 10 or
   more (within 3 of a torch, 2 of a lantern) burns as in daylight, unless
-  bones are round it.
+  bones are around it.
 - An admin (accounts' admin, or the launcher's own client) has fly (K),
   fast (J) and noclip (H), and Admin... in the pause menu: each player's
   inventory, an item given or a stack taken, and the player made

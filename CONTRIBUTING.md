@@ -39,11 +39,11 @@ it touches:
 
 No CLA, no paperwork, no copyright assignment. A `Signed-off-by:` line
 in the commit (`git commit -s`), the Developer Certificate of Origin's
-form, is welcome and is not required.
+form, is welcome but not required.
 
 Every file outside `vendor/` in the two subtrees above carries
 `SPDX-License-Identifier: Apache-2.0 OR MIT` in its header; a new file
-there wants the same line. `MIT.txt` and `LICENSE` beside it have the
+there needs the same line. `MIT.txt` and `LICENSE` beside it have the
 texts.
 
 Code taken from elsewhere
@@ -53,7 +53,7 @@ Where a file **transcribes** another project's source rather than
 reimplementing a behaviour, the header says so and names that project's
 licence -- `builtin/luanti/lua/misc.lua`'s day/night table is the
 example. Reimplementing a documented behaviour is not transcription and
-wants no such line.
+needs no such line.
 
 Assets follow the same rule, written down where they sit:
 `extensions/luanti_client/res/LICENSE` is how it is done.
@@ -77,20 +77,19 @@ A change is expected to leave the quick tier green:
 
     util/run_all.sh quick
 
-CI on GitHub is not green yet; a local run is what counts.
-
 and, if it touches the Luanti module or a renderer, the full tier,
-which wants the game media (`util/media_fetch.sh`). The tiers are
+which needs the game media (`util/media_fetch.sh`). The tiers are
 described at the top of `util/run_all.sh`;
-`util/checks_in_docker.sh` runs one the way CI does.
+`util/checks_in_docker.sh` runs one the way CI does. CI on GitHub is
+not green yet, so a local run is what counts.
 
 Non-trivial logic leaves one runnable check behind. A runner says
-`PASS:` or `FAIL:` on its last line and exits by it -- that contract is
+`PASS:` or `FAIL:` on its last line and exits to match; that contract is
 in `util/check_lib.sh`, and `util/check_contract.sh` reads every runner
 for it.
 
 Style
 -----
 
-Match the file you are in. The tree is tabs, 80 columns, and comments
+Match the file you are in. The tree uses tabs, 80 columns, and comments
 that say why rather than what.
