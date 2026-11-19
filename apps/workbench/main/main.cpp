@@ -333,8 +333,8 @@ struct Module: public interface::Module
 		}
 		// [KIT_PROJECT_EXPORT] a template's or an export's zip, picked
 		f.choices.push_back({"file", "From a file..."});
-		f.notes["file"] = "A template or an exported game (a .zip), "
-				"picked at Create.";
+		f.notes["file"] = "A template or an exported game (a .zip file), "
+				"chosen when you press Create.";
 		f.files["file"] = ".zip";
 		world_menu::access(m_server, [&](world_menu::Interface *i){
 			i->configure({"Workbench", {f}, "game", true});
@@ -388,7 +388,7 @@ struct Module: public interface::Module
 			reload_for(m_names[event.peer]+" switches the project to "+
 					event.name, "play\n"+event.name+"\n"+
 					(event.created ? "1" : "0")+"\n"+from,
-					"The server switches to the game "+event.name);
+					"The server is switching to the game "+event.name);
 			return;
 		}
 		if(!start_project(event.name, false, event.created, from))
@@ -414,7 +414,7 @@ struct Module: public interface::Module
 			}
 		});
 		if(dir.empty())
-			return "no game "+name;
+			return "there is no game "+name;
 		const ss_ zip = dir+"/import.zip", to = dir+"/import";
 		ss_ why;
 		if(file.empty() || !fs::write_file(zip, file) ||
@@ -427,7 +427,7 @@ struct Module: public interface::Module
 					fs::remove_all(to+"/"+n);
 			}
 		} catch(std::exception &e){
-			why = ss_("not a zip it takes: ")+e.what();
+			why = ss_("not a zip file it can read: ")+e.what();
 		}
 		json::json_error_t e;
 		const json::Value m = why.empty() ?
@@ -435,7 +435,7 @@ struct Module: public interface::Module
 		if(why.empty())
 			why = interface::aitta::check_manifest(m);
 		if(why.empty() && interface::aitta::kind_of(m) != "template")
-			why = "not a template (its meta.json's kind)";
+			why = "not a template: its meta.json names another kind";
 		if(why.empty())
 			why = interface::aitta::template_refusal(to);
 		// [ALPHA_KIT_PACKAGES_PUBLIC] the version that made it, when another
@@ -454,8 +454,8 @@ struct Module: public interface::Module
 	// [KIT_PROJECT_EXPORT] Manage's Copy...: done and said over the menu
 	void on_project_copy(const world_menu::Copy &event)
 	{
-		ss_ why = m_switching || !picker(event.peer) ? "not now, or not an "
-				"admin's" : "";
+		ss_ why = m_switching || !picker(event.peer) ? "a switch is under way, "
+				"or you are not an admin" : "";
 		const bool ok = why.empty() && copy_project(event.name, event.to, why);
 		world_menu::access(m_server, [&](world_menu::Interface *i){
 			if(ok)
@@ -480,23 +480,24 @@ struct Module: public interface::Module
 		storage::access(m_server, [&](storage::Interface *i){
 			if(!i->valid_name(name) || name[0] == '_' || !i->valid_name(to) ||
 					to[0] == '_'){
-				why = "a game's name is a directory's, not starting with _";
+				why = "a game's name must be a valid directory name, not "
+						"starting with _";
 				return;
 			}
 			for(const storage::SaveInfo &info : i->list())
 				if(info.name == to){
-					why = to+" is taken";
+					why = "the name "+to+" is taken";
 					return;
 				}
 			storage::Save *s = m_save && name == m_project ? m_save :
 					i->open(name);
 			if(!s){
-				why = "no game "+name;
+				why = "there is no game "+name;
 				return;
 			}
 			const ss_ from = s->path(), dir = from.substr(0,
 					from.rfind('/'))+"/"+to;
-			why = !interface::fs::create_directories(dir) ? "cannot make "+dir :
+			why = !interface::fs::create_directories(dir) ? "cannot create "+dir :
 					s->copy_to(dir+"/save.sqlite");
 			if(!why.empty())
 				interface::fs::remove_all(dir);
@@ -544,7 +545,7 @@ struct Module: public interface::Module
 			return false;
 		}
 		if(m_save && name == m_project){
-			why = "the running game is not renamed";
+			why = "the running game cannot be renamed";
 			return false;
 		}
 		bool ok = false;
@@ -553,8 +554,8 @@ struct Module: public interface::Module
 					to[0] != '_' && i->rename(name, to);
 		});
 		if(!ok){
-			why = "not renamed: "+name+" is no game, or "+to+" is taken or "
-					"no name";
+			why = "not renamed: there is no game "+name+", or the name "+to+
+					" is taken or empty";
 			return false;
 		}
 		log_i(MODULE, "workbench: the project \"%s\" renamed \"%s\"",

@@ -180,8 +180,8 @@ local function open(opts)
 	hint:SetPosition(MARGIN, h - 54)
 	hint:SetFixedWidth(half - 2 * MARGIN)
 	hint:SetColor(color("dim"))
-	hint.text = "Tab moves the keyboard; in here Enter finds the next, " ..
-			"Shift+Enter the one before"
+	hint.text = "Tab moves the focus; here Enter finds the next match, " ..
+			"Shift+Enter the previous one"
 
 	local view = left:CreateChild("ScrollView")
 	-- **The style gives it a panel that clips**, which is what a scroll

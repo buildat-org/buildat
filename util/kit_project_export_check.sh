@@ -128,7 +128,7 @@ client() # <n>: kitboss, its commands from the fifo $t/c<n>.cmd, its log $t/boss
 }
 switched() # <project>: the switch's goodbye, the client gone (it leaves by itself), the project up
 {
-	await "$CL" 0 60 "Disconnected from server: The server switches to the game $1"
+	await "$CL" 0 60 "Disconnected from server: The server is switching to the game $1"
 	exec 3>&-
 	wait $CLIENT
 	wait_for_log "$SL" "workbench: switched to \"$1\"" 120 || fail "$1 did not start ($SL)"
@@ -584,7 +584,7 @@ if [ -n "$web" ]; then
  ["file", "${OUT}/imported.template.zip"],
  ["click", "Button", "Create"],
  ["waitlog", "world_menu: create webimport from imported.template.zip \\([0-9]+ bytes\\)", 30],
- ["waitlog", "Disconnected from server: The server switches to the game webimport", 60]
+ ["waitlog", "Disconnected from server: The server is switching to the game webimport", 60]
 ]
 J
 	page web1
