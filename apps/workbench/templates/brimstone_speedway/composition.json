@@ -8,6 +8,7 @@
 		{"id": 7, "parent": 1, "name": "the lobby", "components": [{"type": "kit/lobby", "params": {"lobby_screen": 6, "over_screen": 12, "keep_own_body": true}, "links": [{"output": "entered", "to_name": "the race", "input": "entered"}, {"output": "left", "to_name": "the race", "input": "left"}, {"output": "entered", "to": 11, "input": "follow"}, {"output": "left", "to": 11, "input": "unfollow"}]}]},
 		{"id": 8, "parent": 6, "name": "the tracks", "components": [{"type": "kit/ui_scene_list", "params": {"title": "Pick your poison", "size": 3, "anchor": "top", "y": 6}, "links": [{"output": "picked", "to": 7, "input": "play"}]}]},
 		{"id": 9, "parent": 6, "name": "the lobby's chat and view", "components": [{"type": "kit/ui_panel", "params": {"layout": "auto", "anchor": "bottom", "width": 0, "height": 0, "gap": 1, "background": "none", "border": "none", "shown": true}}]},
+		{"id": 1315, "parent": 6, "name": "the mute button", "components": [{"type": "kit/ui_button", "params": {"label": "", "action": "mute", "anchor": "top_right", "x": 1, "y": 1, "size": 2.4}}]},
 		{"id": 10, "parent": 9, "name": "the lobby's chat", "components": [{"type": "kit/ui_chat"}]},
 		{"id": 11, "parent": 9, "name": "the lobby's view", "components": [{"type": "kit/ui_view", "params": {"title": "On the track"}}]},
 		{"id": 12, "parent": 1, "name": "the result card", "components": [{"type": "kit/ui_panel", "params": {"screen": "over", "to": "player", "title": "The flag is down", "layout": "column", "width": 0, "height": 0, "size": 2.2}}]},
@@ -577,5 +578,5 @@
 		{"id": 1313, "parent": 1048, "name": "a tyre stack", "built": {"by": 1048, "member": 265}, "pos": [-85.6875, 1.3125, -29.8125], "pitch": 90, "components": [{"type": "kit/polygon", "params": {"collision": false, "color": "#1c1c1e", "depth": 1.6, "points": [[0.72, -0.02], [0.5, 0.51], [-0.03, 0.73], [-0.56, 0.51], [-0.78, -0.02], [-0.56, -0.55], [-0.03, -0.77], [0.5, -0.55]]}}]},
 		{"id": 1314, "parent": 1048, "name": "a tyre stack", "built": {"by": 1048, "member": 266}, "pos": [-66.4375, 1.3125, 2.5], "pitch": 90, "components": [{"type": "kit/polygon", "params": {"collision": false, "color": "#1c1c1e", "depth": 1.6, "points": [[0.75, 0.03], [0.53, 0.56], [0, 0.78], [-0.53, 0.56], [-0.75, 0.03], [-0.53, -0.51], [0, -0.72], [0.53, -0.51]]}}]}
 	],
-	"next_id": 1315
+	"next_id": 1316
 }

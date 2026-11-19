@@ -36216,6 +36216,9 @@ struct Module: public interface::Module, public Interface
 		if(action == "pause_menu")
 			return "press: "+itos(id)+" opens the pause menu (Escape's): "
 					"press its items";
+		if(action == "mute")
+			return "press: "+itos(id)+" mutes a player's own client "
+					"([KIT_MUTE_BUTTON]): nothing of the game's to press";
 		if(!action.empty() && !m_action_names.count(action))
 			return "press: "+itos(id)+"'s action "+action+" is no action of the "
 					"game";
@@ -39458,6 +39461,11 @@ struct Module: public interface::Module, public Interface
 				"the entity they name whoever set them off. get_state marks the "
 				"root's (app_root; scene \"\" lists them); any scene's edits "
 				"reach them.\n"
+				// [KIT_MUTE_BUTTON]
+				"- A mute button: place the prefab kit/mute_button (a "
+				"kit/ui_button of action \"mute\", top right; set_parent it "
+				"into a lobby screen). It mutes and unmutes the player's own "
+				"client, its text Sound on or Sound off.\n"
 				// [KIT_AGENT_FEEDBACK_1117]
 				"- In a type's Lua: c:params_of(type) reads the params of the "
 				"same entity's component of that type (a polygon's points), "

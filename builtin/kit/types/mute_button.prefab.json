@@ -1,0 +1,13 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "mute_button",
+	"group": "UI",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "mute button",
+			"components": [{"type": "kit/ui_button", "version": 2, "params": {
+				"label": "", "action": "mute", "anchor": "top_right",
+				"x": 1, "y": 1}}]}
+	]
+}
