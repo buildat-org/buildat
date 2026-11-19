@@ -46,9 +46,9 @@ for _, h in ipairs({{"scrap_heat"}, {"scrap_heat", "calm"}, {"yard_vamp"}}) do
 	local s = assert(jam.song(jam.songs[h[1]]))
 	songs[h[1]] = s
 	local a = s:analyze(10, h[2])
-	say(string.format("hash %s%s %s, %s ms per s", h[1],
+	say(string.format("hash %s%s %s, %s ms per s, %s LUFS", h[1],
 			h[2] and ("/" .. h[2]) or "", a:match('"hash": "(%x+)"'),
-			a:match('"cpu_ms_per_s": ([%d.]+)')))
+			a:match('"cpu_ms_per_s": ([%d.]+)'), a:match('"lufs": ([-%d.]+)')))
 end
 
 -- **The player**, a step a frame: started mid-bar, a mood asked for, the

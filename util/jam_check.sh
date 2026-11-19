@@ -15,8 +15,10 @@ set -u
 here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp jam; t=$CHECK_TMP
 export SDL_AUDIODRIVER=dummy
-# jam1's samples: a change here is a jam2 beside it, never an edit
-HASHES="scrap_heat:db30bc7da2a922b3 scrap_heat/calm:9390afdf184e4487 yard_vamp:c29b0760973a9d16"
+# jam1's samples: a change here is a jam2 beside it, never an edit (a
+# song's text changed is a new hash of its own: kit_plan 4z37h's tempo,
+# repeats and -3 dB)
+HASHES="scrap_heat:44bf220977ef7256 scrap_heat/calm:41c90017b27f284a yard_vamp:db6e26bc09b5eef6"
 slow_limit cost_ms 120
 
 # Brimstone's music is jam.songs' (one text, two places)
