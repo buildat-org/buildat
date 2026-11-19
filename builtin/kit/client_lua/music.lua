@@ -15,8 +15,8 @@
 -- scene, the generator's track made for it) until the world has settled,
 -- no music: a few frames a second there made it sound broken. Back on the
 -- song's timeline, where everyone else is, in its mood. Settled: a second
--- since, none of the world's files or chunks for a second, nothing queued
--- (idle_pending(): the meshes) and frames under 250 ms for half a second
+-- since, a chunk come (or 3 s), none of the world's files or chunks for a
+-- second, nothing queued (idle_pending(): the meshes) and frames under 250 ms for half a second
 -- (a few a second jam plays through, not a stall).
 -- simplified: 30 s at most; a generator run with no scene entered (the
 -- editor's Run) is not held
@@ -126,8 +126,12 @@ local function settled(t, dt)
 	if t - held < 1e6 or not quick_us or t - quick_us < 0.5e6 then
 		return false
 	end
+	-- (the world's first chunk may take a moment: 3 s without one)
 	local a = buildat.last_arrival()
 	if a and a.kind ~= "other" and t - a.t < 1e6 then
+		return false
+	end
+	if t - held < 3e6 and not (a and a.kind == "chunk" and a.t > held) then
 		return false
 	end
 	return buildat.idle_pending() == ""
@@ -138,9 +142,11 @@ magic.SubscribeToEvent("Update", function(_, ev)
 	if held and settled(now(), ev:GetFloat("TimeStep")) then
 		local was = held
 		held, quick_us, last_pos = nil, nil, nil
+		log:info(string.format("kit: music: the scene loaded, held %.1f s",
+				(now() - was) / 1e6))
 		if cur and start() then
-			log:info(string.format("kit: music %d on at %.2f s, held %.1f s",
-					cur.id, expected(), (now() - was) / 1e6))
+			log:info(string.format("kit: music %d on at %.2f s", cur.id,
+					expected()))
 		elseif cur then
 			cur = nil
 		end

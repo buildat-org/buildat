@@ -40,9 +40,9 @@
 #   (Yard Vamp) in play, the race's (Scrap Heat) from a run's start on the
 #   grid, kitbob joining it where kitboss's is (the same place on the
 #   song's timeline, by the logs' clocks), the lobby's again after the
-#   race, and none once the round is stopped. [KIT_MUSIC_LOAD_HOLD] held
-#   while a scene loads: kitbob's join, kitboss's trial scene, each then
-#   on again ("on at").
+#   race, and none once the round is stopped. [KIT_MUSIC_LOAD_HOLD] no song
+#   played while a scene loads (kitbob's join, kitboss's trial scene):
+#   none before "the scene loaded" but a held one.
 #   [KIT_MUTE_BUTTON] The lobby's mute button (top right): "Sound off" in
 #   the scripted run (muted), clicked: "kit: sound on" and it reads "Sound
 #   on" (lobby_sound.png), clicked again muted (SDL's dummy driver: nothing
@@ -318,6 +318,15 @@ await() # <log> <offset> <seconds> <regex>
 	fail "no \"$4\" in $1 in $3 s ($SL, $CL)"
 }
 seen() { tail -c +$(($2 + 1)) "$1" | grep -qaE "$3"; } # <log> <offset> <regex>
+# [KIT_MUSIC_LOAD_HOLD] from a scene entered (kit:you) on, no song played
+# (a "from" line not held, an "on at") before the load's end
+held_first() # <log> <offset>
+{
+	tail -c +$(($2 + 1)) "$1" | sed -n '/kit: this player is entity/,$p' |
+		sed '/kit: music: the scene loaded/q' |
+		grep -aE 'kit: music [0-9]+ (".*" from .*|on at .*)' | grep -avq "held: the scene loading"
+	[ $? -ne 0 ]
+}
 cmd() { printf '%s\n' "$@" >&$FD; }
 step() # <seconds> <regex in the client's log> <command>...
 {
@@ -410,11 +419,11 @@ exec 4> "$t/bob.cmd"
 as bob
 await "$CL" 0 120 "Joined as kitbob"
 await "$CL" 0 60 "kit: ui full screen [0-9]+ up"
-# [KIT_MUSIC_LOAD_HOLD] the lobby's song held while his scene loaded (the
-# generator's track), then on
-await "$CL" 0 5 'kit: music [0-9]+ .*held'
-await "$CL" 0 30 'kit: music [0-9]+ on at [0-9.]+ s, held [0-9.]+ s'
-echo "ok: kitbob's music held while his scene loaded: $(grep -aoE 'kit: music [0-9]+ on at .*' "$CL" | head -1)"
+# [KIT_MUSIC_LOAD_HOLD] no music while his scene loaded (the generator's
+# track): none played before the load's end (a song come then held)
+await "$CL" 0 30 'kit: music: the scene loaded'
+held_first "$CL" 0 || fail "kitbob's music played while his scene loaded ($CL)"
+echo "ok: kitbob's music held while his scene loaded: $(grep -aoE 'kit: music: the scene loaded.*' "$CL" | head -1)"
 m=$(mark "$SL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Race: The*"'
 await "$SL" "$m" 5 "local/brim_race $RACE: kitbob is on the grid, slot 2"
@@ -543,8 +552,9 @@ step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
 await "$CL" "$m" 10 '"Lap 1/1   Time [0-9.]+   GO!'
 # [KIT_MUSIC_LOAD_HOLD] the trial's scene entered: its music held, then on
-await "$CL" "$mh" 30 'kit: music [0-9]+ on at [0-9.]+ s, held [0-9.]+ s'
-echo "ok: the trial's music held while its scene loaded: $(tail -c +$((mh + 1)) "$CL" | grep -aoE 'kit: music [0-9]+ on at .*' | head -1)"
+await "$CL" "$mh" 30 'kit: music: the scene loaded'
+held_first "$CL" "$mh" || fail "the trial's music played while its scene loaded ($CL)"
+echo "ok: the trial's music held while its scene loaded: $(tail -c +$((mh + 1)) "$CL" | grep -aoE 'kit: music: the scene loaded.*' | head -1)"
 mc=$(mark "$CL")
 step 5 "kit: body replayed" "event kit_looks" "event kit_body"
 r0=$(grep -aoP 'kit: body replayed \K[0-9]+ of [0-9]+' "$CL" | tail -1)
