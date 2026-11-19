@@ -18,7 +18,7 @@ return {
 		group = "Game",
 		what = "A checkpoint across Brimstone Speedway's track: passed in order, they open the lap.",
 		inputs = {
-			respawn = "Puts the player back here if the value is its order.",
+			respawn = "Puts the player back here if the value is its order. Value: a checkpoint's order.",
 		},
 		outputs = {
 			passed = "A car passed it. Value: its order.",

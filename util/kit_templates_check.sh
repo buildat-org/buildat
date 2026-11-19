@@ -542,7 +542,7 @@ for m in ("kitboss is ready", "kitbob is ready", "2 of 2 ready"):
 	assert m in srv, m
 # Nothing single across the seam: no parity warning at Play
 assert "entities outside it in the other slices" not in srv, "a parity warning"
-for hint in ("Take the flag at the middle", "The flag is out in "):
+for hint in ("Take the flag from the middle", "The flag is out in "):
 	assert 'shown: "' + hint in boss, hint
 PY
 echo "ok: capture the flag plays a round to a capture"

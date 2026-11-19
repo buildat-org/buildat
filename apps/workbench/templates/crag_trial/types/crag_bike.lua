@@ -90,8 +90,8 @@ return {
 	version = 1,
 	about = {
 		group = "Players",
-		what = "Crag Trial's bike: W gas, S brake, A and D lean, Space turns; the head on the ground crashes.",
-		outputs = {crash = "The rider's head hit something: back to the start in a second."},
+		what = "Crag Trial's bike: W is the gas, S the brake, A and D lean and Space turns around; the rider's head on the ground is a crash.",
+		outputs = {crash = "The rider's head hit something; the rider goes back to the start a second later."},
 	},
 	root = true,
 	outputs = {crash = "none"},
