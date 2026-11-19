@@ -552,10 +552,14 @@ step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
 # (4z37h) Retry: the trial from its start again
 m=$(mark "$SL")
-mc=$(mark "$CL")
 step 10 "pause: the items .*Retry, To lobby" "keypress Escape"
+# (the first start's GO may come by now, and be drawn again: the second's
+# after its countdown's 3)
+mc=$(mark "$CL")
 cmd "frames 3" 'click Button "Retry"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
+await "$CL" "$mc" 10 '"Lap 1/1   Time [0-9.]+   3"'
+mc=$(mark "$CL")
 echo "ok: the pause menu's Retry in the trial: started again"
 await "$CL" "$mc" 10 '"Lap 1/1   Time [0-9.]+   GO!'
 mc=$(mark "$CL")
@@ -617,15 +621,6 @@ assert not n, n
 PY
 step 10 "Wrote screenshot $t/trial.png" "frames 10" "screenshot $t/trial.png"
 echo "ok: the trial: over the line at the start no lap, then checkpoints, the lap, the result; no correction"
-# (4z37h) To lobby in a trial: the lobby, the items gone
-step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "Lobby"'
-m=$(mark "$SL")
-step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
-await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
-step 10 "pause: the items .*Retry, To lobby" "keypress Escape"
-step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "To lobby"'
-pause_items "Continue" "Retry|To lobby"
-echo "ok: the pause menu's To lobby in the trial: the lobby, Retry and To lobby gone"
 
 # 5. The effects (brim_car.client.lua's through kit.effect and kit.mark,
 # each kind's first made logged; Kit's counts by event kit_effects)
@@ -642,6 +637,15 @@ assert made > 100 and marks > 20 and kept > 0, (made, marks, kept)
 print("ok: the effects: %d particles, %d bursts dropped, %d marks (%d kept)" % (made, dropped, marks, kept))
 PY
 echo "ok: the effects' kinds: $(grep -aoP 'brim_car: effect \K[a-z]+' "$CL" | sort -u | tr '\n' ' ')"
+# (4z37h) To lobby in a trial: the lobby, the items gone
+step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "Lobby"'
+m=$(mark "$SL")
+step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
+await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
+step 10 "pause: the items .*Retry, To lobby" "keypress Escape"
+step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "To lobby"'
+pause_items "Continue" "Retry|To lobby"
+echo "ok: the pause menu's To lobby in the trial: the lobby, Retry and To lobby gone"
 # [MUSIC_SYNTH] the round stopped: no music
 mc=$(mark "$CL")
 step 10 "kit: music [0-9]+ stopped" 'event kit_edit {"op": "stop"}'
