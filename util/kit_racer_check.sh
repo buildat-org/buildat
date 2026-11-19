@@ -40,7 +40,8 @@
 #   alone on the grid, To lobby alone with kitbob there too, neither in the
 #   lobby; in the trial Retry starts it again, To lobby takes him to the
 #   lobby. The joins and the runs' starts not running the Bone Yard's
-#   generator (its output kept in the composition).
+#   generator (its output kept in the composition); in that output, the
+#   east straight's two bends' run-off joined, no wall stub between.
 #   [MUSIC_SYNTH] The music (kit/music, played by jam): the lobby's song
 #   (Yard Vamp) in play, the race's (Scrap Heat) from a run's start on the
 #   grid, kitbob joining it where kitboss's is (the same place on the
@@ -72,6 +73,16 @@ def find(name, s):
             e.get("parent") == scene[s]]
 print("RACE=%d TRIAL=%d CRATE=%d" % (find("the race", "world")[0],
       find("the race", "trial")[0], find("crate", "world")[1]))
+# (4z37h) Two bends' run-off on one side close together joined: on the
+# east straight between corners 7 and 8 (x 95, both 5 m) the outside wall
+# out at 6 + 5 m all along, none at the road's edge (6 m)
+gen = [e["id"] for e in d["entities"] if any(c["type"] == "local/brim_yard"
+       for c in e.get("components", []))][0]
+for e in d["entities"]:
+    if e.get("parent") == gen and e["name"] in ("a concrete wall", "a tyre wall"):
+        for q in e["components"][0]["params"]["points"]:
+            x, z = e["pos"][0] + q[0], e["pos"][2] + q[1]
+            assert not (100.5 < x < 105.5 and 5 < z < 50), ("a wall stub", e["id"], x, z)
 PY
 . "$t/ids"
 # The Bone Yard's line: its corners, each bend's radius (local/brim_yard's
@@ -340,13 +351,27 @@ drive() # <who> <seconds> <stop regex>: the driver on that client (env TARGET, F
 }
 # (4z37h) Escape's pause menu: its items line matching <regex> and not
 # <regex 2> (if given), then Continue
+pause_open() # <regex>: Escape's menu open, its items line matching
+{
+	# (an item reaches the client with its scene's entities, which may
+	# still be drawn as a run starts: closed and opened again until then)
+	local i m items=
+	for i in $(seq 10); do
+		m=$(mark "$CL")
+		step 10 "pause: the items" "keypress Escape"
+		items=$(tail -c +$((m + 1)) "$CL" | grep -a "pause: the items" | tail -1)
+		echo "$items" | grep -qE "$1" && return 0
+		step 10 "pause: the menu closed" "frames 3" 'click Button "Continue"'
+		sleep 1
+	done
+	fail "the pause menu not \"$1\": $items ($CL)"
+}
 pause_items() # <regex> [regex 2]
 {
 	local m items
 	m=$(mark "$CL")
-	step 10 "pause: the items" "keypress Escape"
+	pause_open "$1"
 	items=$(tail -c +$((m + 1)) "$CL" | grep -a "pause: the items" | tail -1)
-	echo "$items" | grep -qE "$1" || fail "the pause menu not \"$1\": $items ($CL)"
 	[ -z "${2:-}" ] || ! echo "$items" | grep -qE "$2" ||
 		fail "the pause menu with \"$2\": $items ($CL)"
 	step 10 "pause: the menu closed" "frames 3" 'click Button "Continue"'
@@ -552,7 +577,7 @@ step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
 # (4z37h) Retry: the trial from its start again
 m=$(mark "$SL")
-step 10 "pause: the items .*Retry, To lobby" "keypress Escape"
+pause_open "Retry, To lobby"
 # (the first start's GO may come by now, and be drawn again: the second's
 # after its countdown's 3)
 mc=$(mark "$CL")
@@ -642,7 +667,7 @@ step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "Lobby"'
 m=$(mark "$SL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
-step 10 "pause: the items .*Retry, To lobby" "keypress Escape"
+pause_open "Retry, To lobby"
 step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "To lobby"'
 pause_items "Continue" "Retry|To lobby"
 echo "ok: the pause menu's To lobby in the trial: the lobby, Retry and To lobby gone"
