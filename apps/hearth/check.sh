@@ -569,7 +569,7 @@ client carol carolpass1234 "$t/carol12b.log" "{\"cmd\":\"moderate\",\"report\":$
 answer "$t/carol12b.log" 1001 | grep -q '"ok":true' || fail "the approval: $(answer "$t/carol12b.log" 1001)"
 answer "$t/carol12b.log" 1002 | grep -q '"approved_by":\[{"name":"carol".*"level":10' ||
 	fail "erin after the approval: $(answer "$t/carol12b.log" 1002 | cut -c1-300)"
-answer "$t/carol12b.log" 1003 | grep -q "only its own approval" || fail "a helper took back another's trust"
+answer "$t/carol12b.log" 1003 | grep -q "only their own approval" || fail "a helper took back another's trust"
 answer "$t/carol12b.log" 1004 | grep -q '"ok":true' || fail "carol trusted dave: $(answer "$t/carol12b.log" 1004)"
 get /m/$held > /dev/null; grep -q "erinlamps.example" "$t/page" || fail "the approved link not shown"
 # erin and dave, members on one network (every client is 127.0.0.1):
