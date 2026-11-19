@@ -294,7 +294,8 @@ buildat.set_voxel_physics_boxes(node, volume_data, voxel_reg [, ...])
 buildat.clear_voxel_physics_boxes(node)
 buildat.set_triangle_geometry(node, verts)
 - A triangle list as the node's CustomGeometry, 12 numbers a vertex:
-  position, normal, colour (rgba), texture coordinate.
+  position, normal, colour (rgba), texture coordinate. verts may instead be
+  a list of such lists: a geometry each (a material each), up to 64.
 buildat.set_line_geometry(node, verts)
 - A line list, 7 numbers a vertex: position and colour (rgba).
 buildat.set_cell_geometry(node, cells, size, r, g, b, a [, v])
@@ -1627,6 +1628,13 @@ replicate.main_scene
   wanted more than once. Urho3D copies a component through its attributes,
   so a material made in Lua -- which has no resource name to be referred to
   -- is not copied and has to be set on the copy.
+
+replicate.take_changed()
+- The ids of the replicated nodes the server has updated (their
+  attributes or node vars) since the last call: {[node id] = true}. A
+  script that would read its nodes' places each frame -- a sandbox call
+  each -- reads only these. Collected from the first call on. One set: a
+  second caller would empty the first's (Kit uses it).
 
 network
 -------
