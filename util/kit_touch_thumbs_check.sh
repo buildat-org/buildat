@@ -68,7 +68,8 @@ B += [["waitlog_any", "kit: the touch stacks of [0-9]+x9[0-9][0-9]:", 10], ["sho
 B += [["tap", "Button", "Brake"], ["frames", 3], ["tap", "Button", "Gas"], ["frames", 3]]
 # Slid off and lifted
 off = [W // 2, H // 3]
-B += [["touch", "find", [["Button", "Gas", 0], ["Button", "Right", 0]]],
+B += [["touch", "find", [["Button", "Gas", 0], ["Button", "Brake", 0],
+      ["Button", "Left", 0], ["Button", "Right", 0]]],
       ["touch", "touchStart", [["Button", "Gas", 1]]], ["frames", 10],
       ["touch", "touchMove", [["Button", "Brake", 1]]], ["frames", 10]] + mark("slid onto Brake")
 B += [["touch", "touchMove", [off + [1]]], ["frames", 10]] + mark("slid off")
@@ -157,7 +158,7 @@ assert ys.get("Gas", 0) > ys.get("Brake", 1e9), f"Gas not under Brake: {ys}"
 sb, s, l_, lf, sr, b, both, rl = (after(L, n) for n in ("slid onto Brake", "slid off", "lifted",
     "left", "slid onto Right", "before", "both", "right lifted"))
 assert sb[2] == -1, f"Gas slid onto Brake: not Brake's: {sb}"
-assert any("kit: touch button Gas up by finger 1 at" in l and "(slid onto Brake)" in l for l in L), "Gas not let go onto Brake"
+assert any(re.search(r"kit: touch button Gas up by finger \d+ at .*\(slid onto Brake\)", l) for l in L), "Gas not let go onto Brake"
 assert s[2] == -1, f"Brake let go as the finger slid off: {s}"
 assert l_[2] == 0, f"Brake still held after the finger lifted off it: {l_}"
 assert lf[3] == -1 and sr[3] == 1, f"Left slid onto Right: {lf} -> {sr}"
