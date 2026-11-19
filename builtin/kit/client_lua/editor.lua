@@ -435,15 +435,23 @@ end
 
 -- The authored entities the editor sees: the root's, the scenes, and
 -- those of the scene it is in
+-- (kept while the state is the same table, as scene_cache: a new list a
+-- call was a pass over Brimstone's 575 a call, several a frame. Callers
+-- read it, none changes it)
+local ents_cache = {}
 local function entities()
-	local r = {}
 	local cur = current_scene()
+	if ents_cache.state == E.state and ents_cache.cur == cur then
+		return ents_cache.r
+	end
+	local r = {}
 	for _, e in ipairs(all_entities()) do
 		local s = scene_name(e)
 		if s == nil or s == cur then
 			r[#r + 1] = e
 		end
 	end
+	ents_cache = {state = E.state, cur = cur, r = r}
 	return r
 end
 
@@ -757,14 +765,30 @@ end
 -- Where it is drawn: an edit's preview (P.preview[id] = {x, y, z, yaw, q = its
 -- turn, angles = {yaw, pitch, roll} of a selection's handles, till: let go,
 -- until the node is there), else its node's, else its row's
-local function drawn_at(e)
+-- drawn_xyz(e): the same as numbers; a look's from its node's place as
+-- Kit's play pass last read it (n.raw: read again as the server updates
+-- the node), not read through the sandbox again: the editor asks it of
+-- every entity each frame (its marks, the pointer's pick)
+local function drawn_xyz(e)
 	local pv = P.preview[e.id]
 	if pv then
-		return magic.Vector3(pv[1], pv[2], pv[3])
+		return pv[1], pv[2], pv[3]
 	end
 	local n = P.nodes[e.id]
-	return n and n.node.position or center(e)
+	local r = n and n.look and n.raw
+	if r then
+		return r[1], r[2], r[3]
+	end
+	if n then
+		local p = n.node.position
+		return p.x, p.y, p.z
+	end
+	return e.pos[1], e.pos[2], e.pos[3]
 end
+local function drawn_at(e)
+	return magic.Vector3(drawn_xyz(e))
+end
+NT.drawn_xyz = drawn_xyz
 
 -- [KIT_FREE_ROTATION] A row's turn in the world, as drawn
 function NT.drawn_turn(e)
@@ -1001,8 +1025,8 @@ local function pick(mx, my, skip, nearest)
 	local oo, dd = {o.x, o.y, o.z}, {v.x, v.y, v.z}
 	-- A box round a point, as drawn in edit mode: its whole cell (a voxel
 	-- in it, such as one the entity owns, is the entity)
-	local function cell_t(p)
-		local c = {p.x, p.y, p.z}
+	local function cell_t(x, y, z)
+		local c = {x, y, z}
 		local t0, t1 = 0, math.huge
 		for i = 1, 3 do
 			local lo, hi = c[i] - 0.5, c[i] + 0.5
@@ -1018,7 +1042,10 @@ local function pick(mx, my, skip, nearest)
 		end
 		return t0 <= t1 and t0 or nil
 	end
-	local all = entities()
+	local all = {}
+	for i, e in ipairs(entities()) do
+		all[i] = e
+	end
 	for _, e in ipairs(made()) do
 		if e.kind ~= "player" then
 			all[#all + 1] = e
@@ -1031,12 +1058,28 @@ local function pick(mx, my, skip, nearest)
 			-- Its look as drawn, else its cell (its node's, or its row's
 			-- before the node has come)
 			local t
-			-- (the plan: its cell, the box drawn round it there)
-			if n and K.look_frame(n) and not P.preview[e.id] and
-					S.view ~= "2d" then
-				t = K.entity_t(n, o, v)
+			-- (the plan: its cell, the box drawn round it there. A look
+			-- far off the ray by its box's reach round its node not met:
+			-- entity_t is a dozen sandbox calls)
+			if S.view ~= "2d" and n and not P.preview[e.id] and n.box and
+					n.look then
+				local r, b = n.raw, n.box
+				local far = false
+				if r and not P.pose[e.id] and not n.slide_to and
+						not (n.pid and n.pid ~= 0) then
+					local wx, wy, wz = r[1] - oo[1], r[2] - oo[2], r[3] - oo[3]
+					local tt = wx * dd[1] + wy * dd[2] + wz * dd[3]
+					local qx, qy, qz = wx - dd[1] * tt, wy - dd[2] * tt, wz - dd[3] * tt
+					local reach = 0.5 + math.sqrt(b.off[1] ^ 2 + b.off[2] ^ 2 +
+							b.off[3] ^ 2) + math.sqrt(b.size[1] ^ 2 + b.size[2] ^ 2 +
+							b.size[3] ^ 2) / 2
+					far = qx * qx + qy * qy + qz * qz > reach * reach
+				end
+				if not far then
+					t = K.entity_t(n, o, v)
+				end
 			else
-				t = cell_t(drawn_at(e))
+				t = cell_t(drawn_xyz(e))
 			end
 			if t and (not et or t < et) then
 				id, et = e.id, t

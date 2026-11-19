@@ -14,7 +14,8 @@
 #      "pressed" to the door's "toggle"; leaves edit
 #      mode and uses the new button twice: the door opens and closes to
 #      glass. Back in edit mode an undo removes the link, and the button
-#      then moves no door.
+#      then moves no door. Idle frames in edit mode read no still look
+#      ([KIT_STILL_LOOKS], "event kit_looks").
 #   2. A second player (kitbob) is refused edit mode, a packet of each
 #      kind of edit, one that is no JSON, and the accounts' builder grant
 #      of their own. The admin makes them a builder in the editor; they
@@ -176,6 +177,10 @@ wait_log_any 60000 replicated: entity 4 open = false
 wait_log_any 60000 kit editor: edit rights: yes
 click Button "Edit"
 wait_log 10000 kit editor: state: 15 entities, 0 to undo
+event kit_looks
+frames 30
+event kit_looks
+wait_log 5000 kit: looks:
 mouse_pos 921 213
 mouse_click left
 wait_log 5000 kit editor: cursor at 6,2,2
@@ -380,6 +385,16 @@ want "$s" "kitboss is in edit mode" \
 	"sample_kit/button 17: pressed by kitboss times 3"
 [ "$(grep -ac "sample_kit/door 18: opened" "$s")" = 2 ] ||
 	fail "the door moved after the undo took the link away ($s)"
+# [KIT_STILL_LOOKS] Idle frames in edit mode read no still look (each look
+# every frame there once, Brimstone's editor 25 ms of a frame); counts, as
+# the machines' ms differ. (The first line after Edit only resets them.)
+python3 -I - "$(grep -aoP 'kit: looks: .*' "$t/boss.log" | sed -n 2p)" \
+		<<'EOF' || fail "edit mode's idle frames' looks ($t/boss.log)"
+import re, sys
+f, read, looks = re.search(r"(\d+) frames, ([0-9.]+) read a frame of ([0-9.]+)", sys.argv[1]).groups()
+assert int(f) >= 20 and float(looks) >= 5 and float(read) <= 0.2 * float(looks), sys.argv[1]
+print("ok: edit mode's idle frames read %s of %s looks a frame" % (read, looks))
+EOF
 echo "ok: the admin edits: edit mode, place, move, delete, the inspector, the link, undo; the edit works in play"
 for op in mode place move delete set link unlink undo builder restart save_prefab stamp prefab_detach prefab_reset prefab_rename prefab_delete; do
 	grep -aqE "An edit \($op\) by peer [0-9]+ refused: no edit rights here" "$s" ||

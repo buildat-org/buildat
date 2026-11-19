@@ -296,23 +296,28 @@ local function parts_of(n)
 	return r
 end
 
+-- (P.by_nid: the entity ids by their node's id; n.nid its node's id)
+P.by_nid = {}
 replicate.sub_sync_node_added({}, function(node)
 	local id = tonumber(node:GetName():match("^kit:(%d+)$"))
 	if id then
-		P.nodes[id] = {node = node, id = id}
+		local nid = node:GetID()
+		P.nodes[id] = {node = node, id = id, nid = nid}
+		P.by_nid[nid] = id
 	end
 end)
 replicate.sub_sync_node_removed(function(node, node_id)
-	for id, n in pairs(P.nodes) do
-		if n.node:GetID() == node_id then
-			if n.added then
-				for _, part in ipairs(parts_of(n)) do
-					call(n, part, "on_remove")
-				end
+	local id = P.by_nid[node_id]
+	local n = id and P.nodes[id]
+	P.by_nid[node_id] = nil
+	if n and n.nid == node_id then
+		if n.added then
+			for _, part in ipairs(parts_of(n)) do
+				call(n, part, "on_remove")
 			end
-			drop_look(n)
-			P.nodes[id] = nil
 		end
+		drop_look(n)
+		P.nodes[id] = nil
 	end
 end)
 
@@ -698,6 +703,7 @@ do
 			down = l > 0.1 and {-ex.y / l, -ey.y / l} or {0, -1}
 		end
 		-- 1: the faces' (all of it untextured), 2: the top tile's
+		-- (set_triangle_geometry's 12 numbers a vertex)
 		local geo = {{}, {}}
 		local function tri(g, p1, p2, p3, nr, uv)
 			-- Wound so it faces its normal (voxel_mesh's)
@@ -707,13 +713,17 @@ do
 					(e1x * e2y - e1y * e2x) * nr[3] < 0 then
 				p2, p3 = p3, p2
 			end
-			local nv, list = magic.Vector3(nr[1], nr[2], nr[3]), geo[g]
+			local list = geo[g]
 			for _, p in ipairs({p1, p2, p3}) do
 				local u, v = 0, 0
 				if W then
 					u, v = uv(W(p[1], p[2], p[3]))
 				end
-				list[#list + 1] = {p[1], p[2], p[3], u, v, nv}
+				local o = #list
+				list[o + 1], list[o + 2], list[o + 3] = p[1], p[2], p[3]
+				list[o + 4], list[o + 5], list[o + 6] = nr[1], nr[2], nr[3]
+				list[o + 7], list[o + 8], list[o + 9], list[o + 10] = 1, 1, 1, 1
+				list[o + 11], list[o + 12] = u, v
 			end
 		end
 		-- The sides, each its edge's normal out (counter-clockwise: to the right);
@@ -809,23 +819,17 @@ do
 				end
 			end
 		end
-		local cg = node:CreateComponent("CustomGeometry")
-		local used = {}
+		-- [KIT_STILL_LOOKS] The geometries' vertices handed over in one call:
+		-- defined a vertex a call, Brimstone Speedway's 270 polygons were most
+		-- of a join's two seconds (2026-11-19)
+		local used, lists = {}, {}
 		for g = 1, 2 do
 			if geo[g][1] then
-				used[#used + 1] = g
+				used[#used + 1], lists[#lists + 1] = g, geo[g]
 			end
 		end
-		cg:SetNumGeometries(#used)
-		for i, g in ipairs(used) do
-			cg:BeginGeometry(i - 1, magic.TRIANGLE_LIST)
-			for _, v in ipairs(geo[g]) do
-				cg:DefineVertex(magic.Vector3(v[1], v[2], v[3]))
-				cg:DefineNormal(v[6])
-				cg:DefineTexCoord(magic.Vector2(v[4], v[5]))
-			end
-		end
-		cg:Commit()
+		buildat.set_triangle_geometry(node, lists)
+		local cg = node:GetComponent("CustomGeometry")
 		cg.castShadows = true
 		if tiles then
 			local function tile(i)
@@ -1226,19 +1230,29 @@ local hud = nil
 -- [KIT_STILL_LOOKS] A look that has stood still CALM frames in play, with
 -- nothing else on it that changes by the frame (no text, HUD line, client
 -- part, state, slide, attachment, preview, pose, moving links; its parent
--- not sliding), is read again each 16th frame only, staggered by its id: a
--- node's place, turn and show are dear reads through the sandbox, and a
--- track of 250 polygons read each frame was some 18 ms of the frame
--- (Brimstone Speedway's, 2026-11-18). n.gen counts what changed in its
--- place, turn or show (controls.lua's world() keeps what it made of it
--- till then); n.still: skipped this frame.
--- simplified: a still one moved or changed by the server is drawn so up to
--- 16 frames late; in edit mode every look is read each frame
+-- not sliding), is read again only once the server updates its node
+-- (replicate.take_changed(): its attributes or vars came), in play and in
+-- edit mode: a node's place, turn and show are dear reads through the
+-- sandbox, and a track of 250 polygons read each frame was some 18 ms of
+-- the frame in play (Brimstone Speedway's, 2026-11-18), 25 of the editor's
+-- 150 on llvmpipe (2026-11-19). n.gen counts what changed in its place,
+-- turn or show (controls.lua's world() keeps what it made of it till
+-- then); n.still: skipped this frame. A client without take_changed reads
+-- a still one each 16th frame, staggered by its id (drawn so up to 16
+-- frames late), and every look each frame in edit mode
 local CALM, frame_no = 8, 0
+local changed = {}
 -- (for "event kit_looks": what the frames since the last ask read and cost)
 local LK = {frames = 0, read = 0, looks = 0, us = 0}
 local function still(id, n)
-	if E.editing or not n.look or (n.calm or 0) < CALM or (frame_no + id) % 16 == 0 then
+	if not n.look or (n.calm or 0) < CALM then
+		return false
+	end
+	if replicate.take_changed then
+		if changed[n.nid] then
+			return false
+		end
+	elseif E.editing or (frame_no + id) % 16 == 0 then
 		return false
 	end
 	local show = n.show
@@ -1259,6 +1273,7 @@ local function update_play(_, data)
 		M.moving_tick()
 	end
 	frame_no = frame_no + 1
+	changed = replicate.take_changed and replicate.take_changed() or changed
 	local busy = {}
 	for id, n in pairs(P.nodes) do
 		n.still = still(id, n)
