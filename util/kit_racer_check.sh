@@ -44,10 +44,12 @@
 #   generator (its output kept in the composition); in that output, the
 #   east straight's two bends' run-off joined, no wall stub between.
 #   [MUSIC_SYNTH] The music (kit/music, played by jam): the lobby's song
-#   (Yard Vamp) in play, the race's (Scrap Heat) from a run's start on the
-#   grid, kitbob joining it where kitboss's is (the same place on the
-#   song's timeline, by the logs' clocks), the lobby's again after the
-#   race, and none once the round is stopped. [KIT_MUSIC_LOAD_HOLD] no song
+#   (Yard Vamp) in play; (4z37i) none on the grid and in the countdown, the
+#   race's (Scrap Heat) from GO on both (the same place on the song's
+#   timeline, by the logs' clocks); none on the result card, the lobby's
+#   once its Lobby is pressed; the trial's Retry: none in its countdown,
+#   the race's from its GO; none on the trial's result; none once the round
+#   is stopped. [KIT_MUSIC_LOAD_HOLD] no song
 #   played while a scene loads (kitbob's join, kitboss's trial scene):
 #   none before "the scene loaded" but a held one.
 #   [KIT_MUTE_BUTTON] The lobby's mute button (top right): "Sound off" in
@@ -335,6 +337,37 @@ await() # <log> <offset> <seconds> <regex>
 	fail "no \"$4\" in $1 in $3 s ($SL, $CL)"
 }
 seen() { tail -c +$(($2 + 1)) "$1" | grep -qaE "$3"; } # <log> <offset> <regex>
+# (4z37i) From <offset> to the first line matching <regex> no song started
+# and, at that line, none on: one stopped since (or, with a fourth 1, none
+# on at the offset)
+quiet() # <log> <offset> <regex> [1]
+{
+	tail -c +$(($2 + 1)) "$1" | awk -v re="$3" -v off="${4:-0}" '
+		$0 ~ re { found = 1; exit }
+		/kit: music [0-9]+ stopped/ { off = 1; next }
+		/kit: music [0-9]+ (".*" from |on at )/ { print "a song: " $0; bad = 1; exit }
+		END { if (bad) exit 1; if (!found) print "no \"" re "\""; else if (!off) print "a song still on"
+			exit !(found && off) }'
+}
+# (4z37i) The race's song from its start, at the countdown's end: the first
+# "Scrap Heat" after the first line matching <regex> after <offset> (the
+# countdown's start) comes <seconds> or more after it
+song_at_go() # <log> <offset> <regex> <seconds>
+{
+	python3 -I - "$@" <<'PY'
+import re, sys
+log, at, start, least = sys.argv[1], int(sys.argv[2]), sys.argv[3], float(sys.argv[4])
+L = open(log, "rb").read()[at:].decode(errors="replace").splitlines()
+def t(l):
+    h, m, s = re.search(r"(\d+):(\d+):([\d.]+) ", l).groups()
+    return int(h) * 3600 + int(m) * 60 + float(s)
+i = next(i for i, l in enumerate(L) if re.search(start, l))
+song = next(l for l in L[i:] if '"Scrap Heat" from' in l)
+at = float(re.search(r"from ([\d.]+) s", song)[1])
+assert t(song) - t(L[i]) >= least and at < 1.5, (L[i], song)
+print("%.1f s after the countdown's start, from %.2f s" % (t(song) - t(L[i]), at))
+PY
+}
 # [KIT_MUSIC_LOAD_HOLD] from a scene entered (kit:you) on, no song played
 # (a "from" line not held, an "on at") before the load's end
 held_first() # <log> <offset>
@@ -468,7 +501,8 @@ mc=$(mark "$CL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Race: The*"'
 await "$SL" "$m" 5 "local/brim_race $RACE: kitboss is on the grid, slot 1"
 await "$CL" 0 10 '"On the grid: 1 car. Start when ready."'
-await "$CL" "$mc" 5 'kit: music [0-9]+ "Scrap Heat" from '
+# (4z37i) the lobby's song stopped as the run started, no race song yet
+await "$CL" "$mc" 5 'kit: music [0-9]+ stopped'
 pause_items "Retry, To lobby"
 echo "ok: a project from it: the top-down camera, the car's movement and hook; the lobby's tracks; Race: kitboss on the grid"
 BUILDAT_JOIN_CREATE=1 client bob
@@ -483,6 +517,7 @@ await "$CL" 0 30 'kit: music: the scene loaded'
 held_first "$CL" 0 || fail "kitbob's music played while his scene loaded ($CL)"
 echo "ok: kitbob's music held while his scene loaded: $(grep -aoE 'kit: music: the scene loaded.*' "$CL" | head -1)"
 m=$(mark "$SL")
+mbr=$(mark "$CL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Race: The*"'
 await "$SL" "$m" 5 "local/brim_race $RACE: kitbob is on the grid, slot 2"
 cmd "frames 20" "screenshot $t/grid.png"
@@ -492,28 +527,40 @@ as boss
 pause_items "To lobby" "Retry"
 as bob
 echo "ok: the pause menu: Retry and To lobby alone on the grid, To lobby alone with two, neither in the lobby"
-# [MUSIC_SYNTH] kitbob's race song from where kitboss's is by now
-await "$CL" 0 5 'kit: music [0-9]+ "Scrap Heat" from '
-python3 -I - "$t/boss.log" "$CL" <<'PY' || fail "kitbob's race song not where kitboss's is ($t/boss.log, $CL)"
+
+# 1. The start: the countdown, both go at once
+as boss
+m=$(mark "$SL")
+mb=$(mark "$t/bob.log")
+mo=$(mark "$CL")
+cmd "frames 3" 'click Button "Start the race"'
+await "$SL" "$m" 5 "local/brim_race $RACE: kitboss starts the race: 2 cars"
+await "$CL" "$mo" 10 '"GO! Eat dirt, scrap heaps!"'
+await "$t/bob.log" "$mb" 2 '"GO! Eat dirt, scrap heaps!"'
+echo "ok: the countdown, GO on both screens"
+# [MUSIC_SYNTH] (4z37i) no song on the grid or in the countdown; the race's
+# from GO, on both at the same place on its timeline
+await "$t/boss.log" "$mo" 5 'kit: music [0-9]+ "Scrap Heat" from '
+await "$t/bob.log" "$mb" 5 'kit: music [0-9]+ "Scrap Heat" from '
+why=$(quiet "$t/boss.log" "$mc" '"Scrap Heat" from') || fail "kitboss's music before GO: $why ($t/boss.log)"
+why=$(quiet "$t/bob.log" "$mbr" '"Scrap Heat" from') || fail "kitbob's music before GO: $why ($t/bob.log)"
+# (the countdown 3: GO some 4 s after "Engines hot!")
+for lo in "boss $mo" "bob $mb"; do
+	set -- $lo
+	r=$(song_at_go "$t/$1.log" "$2" "Engines hot" 3) || fail "the race's song not from GO: $r ($t/$1.log)"
+	echo "ok: kit$1's race song $r"
+done
+python3 -I - "$t/boss.log" "$t/bob.log" <<'PY' || fail "kitbob's race song not where kitboss's is ($t/boss.log, $t/bob.log)"
 import re, sys
 def start(path):
     l = [x for x in open(path, errors="replace") if '"Scrap Heat" from' in x][0]
     h, m, s = re.search(r"(\d+):(\d+):([\d.]+) ", l).groups()
     return int(h) * 3600 + int(m) * 60 + float(s), float(re.search(r"from ([\d.]+) s", l).group(1))
 (ta, a), (tb, b) = start(sys.argv[1]), start(sys.argv[2])
-assert tb > ta + 1 and abs((b - a) - (tb - ta)) < 0.3, (ta, a, tb, b)
-print("ok: the music: kitbob joined the race's song at %.2f s, %.2f s after kitboss's start at %.2f s" % (b, tb - ta, a))
+assert a < 1.5 and abs((b - a) - (tb - ta)) < 0.3, (ta, a, tb, b)
+print("ok: the music: none before GO; the race's song from GO at %.2f s on kitboss's, %.2f s on kitbob's %.2f s later" % (a, b, tb - ta))
 PY
-
-# 1. The start: the countdown, both go at once
-as boss
-m=$(mark "$SL")
-mb=$(mark "$t/bob.log")
-cmd "frames 3" 'click Button "Start the race"'
-await "$SL" "$m" 5 "local/brim_race $RACE: kitboss starts the race: 2 cars"
-await "$CL" "$m" 10 '"GO! Eat dirt, scrap heaps!"'
-await "$t/bob.log" "$mb" 2 '"GO! Eat dirt, scrap heaps!"'
-echo "ok: the countdown, GO on both screens"
+mgo=$(mark "$CL")
 # The fire key's mouse button (the race's client part): a press of the action
 m=$(mark "$SL")
 step 5 "kit: action fire pressed" "mouse_down left" "frames 3" "mouse_up left"
@@ -602,15 +649,19 @@ await "$SL" "$m" 2 "local/brim_race $RACE: the race is over: everyone finished"
 await "$t/bob.log" 0 5 'shown, layer [0-9]+: "You: 2nd \| 1st  kitboss  [0-9.:]+ \| 2nd  kitbob '
 as boss
 await "$CL" 0 5 'shown, layer [0-9]+: "You: 1st \| 1st  kitboss  [0-9.:]+ \| 2nd  kitbob '
-cmd "frames 10" "screenshot $t/result.png"
-# [MUSIC_SYNTH] the lobby's song again once the race is over
-await "$CL" "$mc" 5 'kit: music [0-9]+ "Yard Vamp" from '
-echo "ok: the race: kitboss's mine, kitbob's wreck and his respawn at checkpoint 2; kitboss 1st, kitbob 2nd"
+step 10 "Wrote screenshot $t/result.png" "frames 10" "screenshot $t/result.png"
+# [MUSIC_SYNTH] (4z37i) none on the result card; the lobby's song once its
+# Lobby is pressed
+why=$(quiet "$CL" "$mgo" "Wrote screenshot $t/result.png") || fail "music on kitboss's result card: $why ($CL)"
+echo "ok: the race: kitboss's mine, kitbob's wreck and his respawn at checkpoint 2; kitboss 1st, kitbob 2nd; no music on the result card"
 
 # 4. The time trial: no lap over the line with no checkpoint, then one
 m=$(mark "$SL")
 mh=$(mark "$CL")
 step 10 "kit: ui full screen [0-9]+ up" "frames 3" 'click Button "Lobby"'
+await "$CL" "$mh" 5 'kit: music [0-9]+ "Yard Vamp" from '
+echo "ok: the music: the lobby's song after the result card's Lobby"
+mh=$(mark "$CL")
 step 10 "kit: ui full screen none" "frames 3" 'click Button "Time trial: The*"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
 # [KIT_MUSIC_LOAD_HOLD] the trial's scene entered: its music held, then on
@@ -623,12 +674,19 @@ pause_open "Retry, To lobby"
 # (the first start's GO may come by now, and be drawn again: the second's
 # after its countdown's 3)
 mc=$(mark "$CL")
+mr=$mc
 cmd "frames 3" 'click Button "Retry"'
 await "$SL" "$m" 10 "local/brim_race $TRIAL: kitboss starts a time trial"
 await "$CL" "$mc" 10 '"Lap 1/1   Time [0-9.]+   3"'
 mc=$(mark "$CL")
 echo "ok: the pause menu's Retry in the trial: started again"
 await "$CL" "$mc" 10 '"Lap 1/1   Time [0-9.]+   GO!'
+# [MUSIC_SYNTH] (4z37i) none in the Retry's countdown, the race's song from
+# its GO (its countdown 3 s)
+await "$CL" "$mc" 5 'kit: music [0-9]+ "Scrap Heat" from '
+why=$(quiet "$CL" "$mc" '"Scrap Heat" from' 1) || fail "music in the trial's countdown: $why ($CL)"
+r=$(song_at_go "$CL" "$mr" '"Lap 1/1   Time [0-9.]+   3"' 2) || fail "the trial's song not from its GO: $r ($CL)"
+echo "ok: the music: none in the trial's countdown, the race's song from its GO: $r"
 mc=$(mark "$CL")
 step 5 "kit: body replayed" "event kit_looks" "event kit_body"
 r0=$(grep -aoP 'kit: body replayed \K[0-9]+ of [0-9]+' "$CL" | tail -1)
@@ -687,6 +745,7 @@ n = [l for l in lines(sys.argv[3], sys.argv[4]) if "kit: the body corrected by" 
 assert not n, n
 PY
 step 10 "Wrote screenshot $t/trial.png" "frames 10" "screenshot $t/trial.png"
+why=$(quiet "$CL" "$mc" "Wrote screenshot $t/trial.png") || fail "music on the trial's result card: $why ($CL)"
 echo "ok: the trial: over the line at the start no lap, then checkpoints, the lap, the result; no correction"
 
 # 5. The effects (brim_car.client.lua's through kit.effect and kit.mark,
@@ -716,7 +775,7 @@ echo "ok: the pause menu's To lobby in the trial: the lobby, Retry and To lobby 
 # [MUSIC_SYNTH] the round stopped: no music
 mc=$(mark "$CL")
 step 10 "kit: music [0-9]+ stopped" 'event kit_edit {"op": "stop"}'
-echo "ok: the music: the lobby's, the race's from a run's start, the lobby's after it, none once stopped"
+echo "ok: the music: the lobby's, none in a countdown, the race's from GO, none on a result, the lobby's after it, none once stopped"
 # (4z37h) The Bone Yard's generator never run: its output is the
 # composition's (a join, a race's start, a trial's take it as it is)
 ! grep -aE "the loop [0-9]+ m, [0-9]+ corners" "$SL" ||
