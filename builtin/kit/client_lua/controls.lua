@@ -42,7 +42,7 @@
 -- at the finger and a finger held still the right; [KIT_TOUCH_THUMBS] a
 -- stack at the lower right, thumb-sized (thumb()): from the top the app's
 -- (Menu) and Exit in a seat half as high, the movement's touch_buttons, Jump
--- (a car: Brake, Gas lowest); the world's actions (held while pressed) a
+-- (a car: Brake, Gas, then a touch_buttons' "low" one); the world's actions (held while pressed) a
 -- stack above it, or left of it where that does not fit; the movement's
 -- touch_axes a stack at the lower left, the stick beside it.
 -- For a drive: "event kit_body" logs the body and the corrections (and the

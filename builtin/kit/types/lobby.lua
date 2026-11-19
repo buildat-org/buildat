@@ -71,7 +71,7 @@ return {
 		outputs = {
 			entered = "A player's run started.",
 			left = "A player's run ended: over, or back to the lobby.",
-			in_lobby = "A player is in the lobby: as they come in, or back from a run or its result (a lobby song played to them, say, stopped by entered).",
+			in_lobby = "A player came into the lobby, or back to it. Link it to a lobby song's play.",
 		},
 	},
 	params = {
