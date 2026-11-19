@@ -9299,7 +9299,8 @@ struct Module: public interface::Module, public Interface
 	// its JSON files), a kit/bot that drives, and each Lua file naming one
 	// of experimental_names() outside a comment. Publishing is not blocked.
 	// simplified: a comment is "--" to the line's end (a string holding
-	// "--" hides the rest of its line); a kit/bot_driver a spawner names is
+	// "--" hides the rest of its line, a --[[ block's later lines are read
+	// as code); a kit/bot_driver a spawner names is
 	// not seen (Brimstone's generator says it anyway)
 	ss_ pub_experimental(const sv_<std::pair<ss_, ss_>> &files)
 	{
@@ -9554,7 +9555,7 @@ struct Module: public interface::Module, public Interface
 							(int64_t)10000000000000000LL), row.stringify());
 					a.set("what", "Published "+id+" as the server on "+
 							jstr(row, "aitta")+": "+result+(exp.empty() ? exp :
-							" "+exp));
+							". "+exp));
 				} else {
 					a.set("why", "Not published: "+err.substr(0, 300));
 				}
