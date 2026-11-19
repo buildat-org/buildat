@@ -38972,7 +38972,7 @@ struct Module: public interface::Module, public Interface
 			"- Links carry signals: link an output of an entity's component to "
 			"an input of another entity, and each time the output fires the "
 			"input gets its value. The value types must meet (none, number, "
-			"string, ...). get_links lists them; unlink takes one away. "
+			"string, ...). get_links lists them, unlink removes one. "
 			"to_name links by name, in the scene of who set it off (a root "
 			"entity's signal reaching each scene's own).\n"
 			"- Nothing runs while the round is Ended. start runs it (Play), "
@@ -38998,15 +38998,15 @@ struct Module: public interface::Module, public Interface
 			"local/<name> (its description says the file), live at once; "
 			"edit_type changes a few lines; "
 			"get_type reads a type's file (Kit's are examples), "
-			"delete_type takes one away. A movement of your own steps the "
+			"delete_type removes one. A movement of your own steps the "
 			"players (kit/controls' movement): its events are its outputs, "
 			"its client part's draw(s, node) draws them (the Crag Trial "
-			"template's local/crag_bike is one). State with kept = true (best "
+			"template's local/crag_bike). State with kept = true (best "
 			"times) outlives Stop and restarts; clear_kept clears it.\n"
-			"- Work in small steps and read back: get_state (or list_types) "
-			"first, then place, set_param, link, start, try_input, get_events "
-			"and get_log, stop, fix, again. An edit's arguments are 4 KB at "
-			"most. Kit's refusals come back as tool errors saying why.\n"
+			"- Work in small steps and read back: get_state (or list_types), "
+			"then place, set_param, link, start, try_input, get_events, "
+			"get_log, stop, fix, again. An edit's arguments are 4 KB at "
+			"most. A refusal is a tool error saying why.\n"
 			// [KIT_AGENT_NEXT_1] 2, 3b
 			"- Big changes in a draft (your own copy; publish or leave_draft), "
 			"a checkpoint of the start before them; playtest runs bots "
@@ -39023,9 +39023,8 @@ struct Module: public interface::Module, public Interface
 			"- Buildat's source, for what the tools and this guide leave out "
 			"(how a type or tool behaves, a limit, a refusal's reason): "
 			"https://github.com/buildat-org/buildat/tree/v"+BUILDAT_VERSION+
-			" (builtin/kit/api.h the type API, builtin/kit/types Kit's types, "
-			"builtin/kit/kit.cpp the server, builtin/kit/client_lua the "
-			"client).\n";
+			" (in builtin/kit: api.h the type API, types Kit's types, kit.cpp "
+			"the server, client_lua the client).\n";
 		// [KIT_SCENE_TREE] (get_guide's: the instructions are cut at 4000)
 		if(full)
 			s += "- Scenes in a tree: a scene may sit under another "
