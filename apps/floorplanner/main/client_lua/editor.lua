@@ -1941,7 +1941,7 @@ do
 		local lo = {math.min(a[1], b[1]), math.min(a[2], b[2]), math.min(a[3], b[3])}
 		local hi = {math.max(a[1], b[1]), math.max(a[2], b[2]), math.max(a[3], b[3])}
 		if (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1) * (hi[3] - lo[3] + 1) > MAX_BOX then
-			doc.notice("A box of more than " .. MAX_BOX .. " voxels: make it smaller")
+			doc.notice("The box has over " .. MAX_BOX .. " voxels: make it smaller")
 			return
 		end
 		local mat = default_material()
@@ -2106,7 +2106,7 @@ do
 			end
 		end
 		if #ops == 0 then
-			doc.notice("Copies are of objects; select one")
+			doc.notice("Only objects can be copied: select one")
 			return
 		end
 		send(ops, function(err)
@@ -2422,8 +2422,8 @@ do
 			end
 		end
 		if faceless > 0 then
-			doc.notice(faceless .. " walls were selected by a box, not by a face: "
-					.. "click a wall on the face to paint")
+			doc.notice(faceless .. " walls were selected with a box, not by a face: "
+					.. "click a wall's face to paint it")
 		end
 		if #ops > 0 then
 			send(ops)
@@ -3086,7 +3086,7 @@ local function build_props()
 		end
 		panel.label(props, "Drag one to move them all;")
 		panel.label(props, "drop one on another to merge;")
-		panel.label(props, "double click an edge: a node into it")
+		panel.label(props, "double click an edge to add a node")
 		if n > 0 then
 			panel.button(props, "Delete (" .. keys.name("delete") .. ")",
 				delete_selected)
@@ -3217,7 +3217,7 @@ local function build_props()
 			end
 			-- The part a palette double click goes on, the palette showing
 			-- what it has now; a part with none of its own shows the frame's
-			panel.label(props, "Selected part (the palette's double click):")
+			panel.label(props, "Part to paint (double click in the palette):")
 			local part = DOOR_PARTS[S.sel_face[sel.id]] and S.sel_face[sel.id] or
 					"mat"
 			local slots = {{"Frame", "mat"}, {"Leaf", "mat_leaf"}}
@@ -3288,7 +3288,7 @@ local function build_props()
 		end)
 		panel.label(props, "Voxel tool (" .. keys.name("voxel") ..
 				"): a click places, Ctrl+click")
-		panel.label(props, "digs, Shift+click gives a voxel the entry")
+		panel.label(props, "digs, Shift+click paints with the entry")
 		if S.tool == "voxel" then
 			M.voxel_mode_dropdown()
 			M.voxel_alone_dropdown(sel.id)
@@ -3360,7 +3360,7 @@ local function build_props()
 					set(i.def, {ints = {d = math.floor(v * p.steps + 0.5)}})
 				end
 			end)
-			panel.label(props, "Up along its depth (yaw turns it)")
+			panel.label(props, "Climbs along its depth (yaw turns it)")
 		end
 		int_field(sel.id, "X mm", "x", i.x)
 		int_field(sel.id, "Z mm", "z", i.z)
@@ -3468,8 +3468,8 @@ local function build_props()
 			end
 		end)
 		if S.calib and S.calib.id == sel.id and S.calib.measured then
-			panel.label(props, "The two points are " ..
-					math.floor(S.calib.measured + 0.5) .. " mm apart; really:")
+			panel.label(props, "Measured " ..
+					math.floor(S.calib.measured + 0.5) .. " mm; the real distance:")
 			panel.field(props, "Distance mm", "", function(t)
 				local v = tonumber(t)
 				if v and v > 0 then
@@ -3522,7 +3522,7 @@ local function build_props()
 		panel.button(props, "Delete (" .. keys.name("delete") .. ")",
 				delete_selected)
 	elseif S.tool == "hosted" then
-		panel.label(props, "Click a wall to put in (I: the next):")
+		panel.label(props, "Click a wall to put one in (I: next kind):")
 		local kinds = {}
 		for _, k in ipairs({KIND.opening, KIND.door, KIND.window, KIND.switch}) do
 			kinds[#kinds + 1] = {KIND_NAMES[k], k}
@@ -6775,7 +6775,7 @@ do
 				end
 				if from then
 					g.right = "stop drawing"
-					g.note = "Type a length and Enter to draw it that long"
+					g.note = "Type a length and press Enter to draw it"
 				end
 			end
 		elseif E.tools[tool] and E.tools[tool].guide then
@@ -6850,7 +6850,7 @@ do
 					end
 				end
 			elseif S.voxel_box and S.voxel_box.cancelled then
-				g.left = "given up: let go of the buttons"
+				g.left = "cancelled: let go of the buttons"
 			elseif S.voxel_box and S.voxel_box.id == id then
 				-- The box a release here would make, from where it was pressed
 				local vb = S.voxel_box

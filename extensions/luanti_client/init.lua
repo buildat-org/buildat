@@ -221,7 +221,7 @@ local BINDINGS = {
 	{action = "chat", key = KEY_T, name = "T", what = "Say something"},
 	{action = "inventory", key = KEY_E, name = "E", what = "Inventory"},
 	{action = "drop", key = KEY_Q, name = "Q",
-			what = "Drop what is held - with Ctrl one of it"},
+			what = "Drop what is held (Ctrl: one)"},
 	{action = "hotbar", first = KEY_1, last = KEY_8, name = "1 - 8",
 			what = "Pick a hotbar slot"},
 	{action = "hud", key = KEY_F1, name = "F1", what = "The HUD on and off"},
@@ -230,7 +230,7 @@ local BINDINGS = {
 	{action = "debug", key = KEY_F5, name = "F5",
 			what = "The debug line on and off"},
 	{action = "menu", key = KEY_ESCAPE, name = "Escape",
-			what = "Close what is open - or this menu"},
+			what = "Close what is open, or this menu"},
 	-- Listed for the player's sake; the code for these is the mouse
 	-- handling rather than a key lookup
 	{action = "dig", name = "Left mouse", what = "Dig, or hit"},
@@ -3502,7 +3502,7 @@ local function show_client(host, port, name, password, mode, origin)
 				-- between that and the world feeling broken.
 				if not avatar.fly and client.privileges and
 						not client.privileges.fly then
-					add_chat("Flying: the server has not given you the "..
+					add_chat("Cannot fly: you do not have the "..
 							"\"fly\" privilege")
 					return
 				end
@@ -3858,7 +3858,7 @@ show_connect_dialog = function(address, name)
 		show()
 		network.http_get("https://servers.luanti.org/list", function(body, err)
 			if not body then
-				status.text = "The list did not come: " .. tostring(err)
+				status.text = "Could not get the list: " .. tostring(err)
 				official_rows = {}
 				show()
 				-- What a check waits for, as below
@@ -3921,7 +3921,7 @@ show_connect_dialog = function(address, name)
 		end)
 		source_buttons[name] = b
 	end
-	source_button("recent", "Servers used")
+	source_button("recent", "Recent servers")
 	source_button("official", "Official list")
 	-- The filter is put back as it was left ([BOX_PLAYTEST_2] 13b)
 	local filter_label = sources:CreateChild("Text")

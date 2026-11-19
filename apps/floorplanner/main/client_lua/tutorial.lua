@@ -203,7 +203,7 @@ return function(doc)
 				end},
 		{function() return click("Build the lamp from voxels on the dresser:\n" ..
 				"- Click the \"Lamp\" entry in the palette (the ceiling " ..
-				"lamps made it)\n" ..
+				"lamps added it)\n" ..
 				"- Pick \"Voxels\"" .. kk("voxel") .. "\n" ..
 				"- Choose \"3D\" in the view dropdown" .. kk("view_3d") .. "\n" ..
 				"- Click the dresser's top to start a volume there\n" ..
@@ -231,8 +231,8 @@ return function(doc)
 					return false
 				end},
 		{function() return click("Stairs:\n" ..
-				"- Click the \"drywall\" entry in the palette (what is made " ..
-				"gets the entry chosen)\n" ..
+				"- Click the \"drywall\" entry in the palette (new things get " ..
+				"the chosen entry)\n" ..
 				"- Pick \"Object\"" .. kk("box") .. "\n" ..
 				"- Set \"Shape\" to \"stairs\" in its panel\n" ..
 				"- Drag their footprint in a room\n" ..
@@ -241,7 +241,7 @@ return function(doc)
 		{"A floor above:\n" ..
 				"- Press the floor's button in the toolbar (it says its name)\n" ..
 				"- Press \"Add a floor above\"\n" ..
-				"The new floor is edited now, the one below drawn under it.",
+				"You now edit the new floor; the one below is drawn under it.",
 				function() return #of("layout") >= 2 end},
 		{function() return click("- Draw a room on the new floor with \"Room\", over the " ..
 				"one below\nIn the plan view (\"2D\"" ..
@@ -284,7 +284,7 @@ return function(doc)
 				k("use") end,
 				function() return lamps_state() ~= mark.lamps end,
 				function() mark.lamps = lamps_state() end},
-		{function() return click("The light is the plan's place and moment:\n" ..
+		{function() return click("The light follows the plan's place and time:\n" ..
 				"- Switch the lamp on again if it is off\n" ..
 				"- Open \"Menu\", \"Plan settings\"\n" ..
 				"- Type an evening time such as 22:00 in \"Time\"\n" ..
@@ -305,7 +305,7 @@ return function(doc)
 					local t = S().sun_temp
 					return (st and st.ints.lapse ~= 0) or (t and t.lapse ~= 0)
 				end},
-		{"That is the basics. Backups, members, copying and exporting are " ..
+		{"Those are the basics. Backups, members, copying and exporting are " ..
 				"in \"Menu\".\n- Press \"End\" to close this",
 				function() return false end},
 	}

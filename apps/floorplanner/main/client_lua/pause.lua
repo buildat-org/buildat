@@ -260,7 +260,7 @@ do
 	local function keys_page()
 		local w = dialog("Keys")
 		panel.label(w, "Press a key's button, then the new key.")
-		panel.label(w, "Escape leaves it, Backspace puts back the default.")
+		panel.label(w, "Escape cancels, Backspace restores the default.")
 		local cols = panel.row(w)
 		local half = math.ceil(#keys.BINDINGS / 2)
 		local col = panel.column(cols)
@@ -593,10 +593,10 @@ do
 		if not b then
 			panel.label(w, "Waiting for the server...")
 		elseif #b.rows == 0 then
-			panel.label(w, "None yet: one is made when the plan opens changed,")
-			panel.label(w, "and each hour it is open and changes.")
+			panel.label(w, "None yet: one is made when a changed plan opens,")
+			panel.label(w, "and every hour while it is open and changing.")
 		else
-			panel.label(w, "Each opens view only.")
+			panel.label(w, "Each one opens as view only.")
 			for _, r in ipairs(b.rows) do
 				local here = E.doc.backup and E.doc.plan_name:sub(-#r.id - 1) ==
 						"-" .. r.id
@@ -612,9 +612,9 @@ do
 	-- backup first
 	local function restore_page()
 		local w = dialog("Restore " .. E.doc.backup.of .. " to this backup?")
-		panel.label(w, "It becomes as it was " .. E.doc.backup.label)
-		panel.label(w, "for everyone in it. How it is now is kept")
-		panel.label(w, "as a backup, which can be restored in turn.")
+		panel.label(w, "It goes back to how it was " .. E.doc.backup.label)
+		panel.label(w, "for everyone in it. Its current state is kept")
+		panel.label(w, "as a backup, which can be restored too.")
 		local r = panel.row(w)
 		panel.button(r, "Restore", function()
 			close_pause()

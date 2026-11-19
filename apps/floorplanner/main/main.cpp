@@ -1171,7 +1171,8 @@ struct Plan
 			set_<int32_t> seen;
 			for(int32_t v : e.lists.at(f.name)){
 				if(!is_a(v, f.ref))
-					return e.type+"."+f.name+" holds what is not a "+f.ref;
+					return e.type+"."+f.name+" holds something that is not a "+
+							f.ref;
 				if(!seen.insert(v).second)
 					return e.type+"."+f.name+" holds an id twice";
 			}
@@ -1952,7 +1953,7 @@ struct Module: public interface::Module
 		};
 		if(!valid_plan_name(req.name))
 			return refuse("A plan's name is 1 to 40 letters, digits, _ or -, "
-					"not starting with _");
+					"and cannot start with _");
 		bool exists = false;
 		for(const ss_ &n : plan_names())
 			exists |= n == req.name;
@@ -2179,7 +2180,7 @@ struct Module: public interface::Module
 			send(packet.sender, "fp:chat", pack(why));
 		};
 		if(!plan->m_backup_of.empty() || !role_edits(peer_role(packet.sender)))
-			return refuse("Only an editor of the plan sets its branch point");
+			return refuse("Only the plan's editors can set its branch point");
 		namespace fs = interface::fs;
 		const ss_ path = plan->m_save->path();
 		const size_t slash = path.find_last_of("/\\");
@@ -2502,8 +2503,8 @@ struct Module: public interface::Module
 			if(!valid_image_name(im.name) || !image_names.insert(im.name).second
 					|| im.data.size() > MAX_IMAGE_BYTES ||
 					!image_matches_name(im.name, im.data))
-				return refuse("A picture in the file is not one a plan can "
-						"have");
+				return refuse("The file has a picture that a plan cannot "
+						"use");
 		}
 
 		// The ops: every entity made, and then its references set, since
@@ -2607,7 +2608,8 @@ struct Module: public interface::Module
 			if(vol.first <= 0 || e == plan->m_ents.end() ||
 					e->second.type != "definition" ||
 					e->second.ints["kind"] != DK_VOXEL)
-				return discard("The file has voxels of no voxel volume");
+				return discard("The file has voxels for a missing voxel "
+						"volume");
 			if(vol.second.size() > MAX_VOXELS)
 				return discard("A voxel volume in the file is too big");
 			std::map<int32_t, int32_t> cells;
@@ -2711,7 +2713,7 @@ struct Module: public interface::Module
 				continue;
 			const ss_ role = peer_role(pair.first);
 			if(role.empty()){
-				to_plans(pair.first, "You are no longer let into this plan");
+				to_plans(pair.first, "You no longer have access to this plan");
 				continue;
 			}
 			send_privs(pair.first);
@@ -2862,8 +2864,8 @@ struct Module: public interface::Module
 			const Usage &u = usage_all();
 			auto it = u.plans.find(user);
 			if(it != u.plans.end() && it->second >= MAX_PLANS)
-				return "You have "+itos((int)MAX_PLANS)+" plans, as many as "
-						"anyone has: delete one first";
+				return "You have "+itos((int)MAX_PLANS)+" plans, the most allowed: "
+						"delete one first";
 		}
 		return over_limit(user, more);
 	}
@@ -2881,7 +2883,7 @@ struct Module: public interface::Module
 			});
 			if(usage_all().total + more > budget)
 				return "This server's storage for new accounts is full: "
-						"nothing more can be kept for one until it is trusted";
+						"nothing more can be saved until the account is trusted";
 		}
 		const uint64_t used = usage(user);
 		if(used + more <= USER_BYTES)
@@ -3130,7 +3132,7 @@ struct Module: public interface::Module
 				continue;
 			const ss_ role = peer_role(pair.first);
 			if(role.empty()){
-				to_plans(pair.first, "You are no longer let into this plan");
+				to_plans(pair.first, "You no longer have access to this plan");
 				continue;
 			}
 			send_privs(pair.first);
@@ -3173,7 +3175,7 @@ struct Module: public interface::Module
 				made += m.second.creator == user;
 			if(made >= MAX_MADE_GROUPS && !is_admin(user))
 				return result("You have made "+itos((int)MAX_MADE_GROUPS)+
-						" groups, as many as anyone makes: delete one first");
+						" groups, the most allowed: delete one first");
 			const int32_t id = m_next_group++;
 			m_groups_save->store("main")->set("next", itos(m_next_group));
 			m_groups[id].name = r.name;
@@ -3282,7 +3284,7 @@ struct Module: public interface::Module
 			if(invites_today(user, false) >= MAX_INVITES_A_DAY &&
 					!is_admin(user))
 				return refused("You have invited "+itos(MAX_INVITES_A_DAY)+
-						" today, as many as anyone does in a day");
+						" today, the most allowed in a day");
 			invites_today(user, true);
 			more.declined.erase(r.name);
 			g.invites[r.name] = user;
@@ -3295,8 +3297,8 @@ struct Module: public interface::Module
 			if(!g.members.count(r.name))
 				return result("No member "+r.name);
 			if(!group_trusted(id))
-				return result("Only a trusted group's admins vouch: every "
-						"admin of it is trusted first");
+				return result("Only a trusted group's admins can vouch, and a "
+						"group is trusted once all its admins are");
 			if(level_of(r.name) >= accounts::LV_MEMBER)
 				return result(r.name+" is trusted already");
 			ss_ why;
@@ -3319,7 +3321,7 @@ struct Module: public interface::Module
 			if(m == g.members.end())
 				return result("No member "+r.name);
 			if(r.arg != "1" && m->second == "admin" && admins == 1)
-				return result("A group keeps at least one admin");
+				return result("A group needs at least one admin");
 			m->second = r.arg == "1" ? "admin" : "member";
 		} else if(r.cmd == "delete"){
 			log_i(MODULE, "%s deleted the group %i (%s)", cs(user), id,
@@ -3488,7 +3490,7 @@ struct Module: public interface::Module
 			if(pair.second != 0){
 				auto p = plan.m_ents.find(pair.second);
 				if(p == plan.m_ents.end() || p->second.type != "palette")
-					return "A voxel of what is not a palette entry";
+					return "A voxel's material is not a palette entry";
 				if(!voxels.count(pair.first))
 					added++;
 			}
@@ -3810,7 +3812,7 @@ struct Module: public interface::Module
 		auto git = m_groups.find(c.group);
 		const ss_ user = pit->second.name;
 		if(git == m_groups.end() || !git->second.members.count(user))
-			return send_chat(packet.sender, "Not a member of that group");
+			return send_chat(packet.sender, "You are not a member of that group");
 		c.text = "<"+user+"> "+c.text;
 		c.old = 0;
 		std::deque<ss_> &kept = m_group_chat[c.group];

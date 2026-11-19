@@ -108,7 +108,7 @@ has "c is trusted: edits on 3 days" || fail "c not trusted on the third day"
 has "b edited on a day" && fail "b's days in a's untrusted group counted"
 echo "ok: trusted on the third edit day in a trusted group, not in an untrusted one"
 adm adm2 "BUILDAT_FP_GROUP=$(printf 'admin 2 a 1\nvouch 2 d')"
-grep -qa "Group: Only a trusted group's admins vouch" "$tmp/adm2.log" ||
+grep -qa "Group: Only a trusted group's admins can vouch" "$tmp/adm2.log" ||
 	fail "a vouch in a group with an untrusted admin ($tmp/adm2.log)"
 adm adm3 "BUILDAT_FP_GROUP=$(printf 'admin 2 a 0\nvouch 2 d')"
 has "adm vouched for d in the group 2" || fail "the vouch ($tmp/adm3.log)"

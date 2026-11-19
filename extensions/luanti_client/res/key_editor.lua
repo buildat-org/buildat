@@ -93,7 +93,7 @@ function M.draw(o)
 	title:SetText("Key bindings")
 	local hint = window:CreateChild("Text")
 	hint:SetStyleAuto()
-	hint:SetText("Pick a row and press a key. Escape leaves it, Backspace puts the default back.")
+	hint:SetText("Pick a row and press a key. Escape cancels, Backspace restores the default.")
 	-- Two columns, so that the rows fit a 720 window ([BOX_FIXES] a): the
 	-- buttons interleave left, right, left... which is the order the
 	-- grid nav walks with two columns

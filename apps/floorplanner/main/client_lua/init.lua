@@ -378,7 +378,7 @@ local function step(from, kind)
 			end
 		end
 		if skipped > 0 then
-			doc.notice(skipped .. " voxels changed by somebody else since")
+			doc.notice(skipped .. " voxels were changed by someone else and left as they are")
 		end
 		if next(sets) then
 			doc.set_voxels(ops.def, sets, kind)
@@ -387,7 +387,7 @@ local function step(from, kind)
 	end
 	local left, skipped = still_applies(ops)
 	if skipped > 0 then
-		doc.notice(skipped .. " changed by somebody else since; left as is")
+		doc.notice(skipped .. " were changed by someone else and left as they are")
 	end
 	if #left > 0 then
 		doc.send(left, nil, kind)
@@ -1318,10 +1318,10 @@ local function show_group(id)
 	for _, n in ipairs(g.untrusted) do
 		new[n] = true
 	end
-	text(g.trusted == 1 and "A trusted group: a new member who edits on " ..
-			"3 days here is trusted, or when an admin vouches for them." or
-			"Not a trusted group: it leads to no trust until every admin " ..
-			"of it is trusted.")
+	text(g.trusted == 1 and "A trusted group: a new member becomes trusted after " ..
+			"editing here on 3 days, or when an admin vouches for them." or
+			"Not a trusted group: it gives no trust until all its admins " ..
+			"are trusted.")
 	text("Members:")
 	local names = {}
 	for n in pairs(g.members) do
@@ -1433,7 +1433,7 @@ function doc.show_groups()
 		end)
 	end
 	if #gs.groups == 0 then
-		text("You are in no group. A group's members share plans with " ..
+		text("You are not in any group. A group's members share plans with " ..
 				"each other.")
 	end
 	text("A new group, by name:")
