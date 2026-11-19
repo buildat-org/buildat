@@ -150,3 +150,96 @@ local g0, g1 = wide("gravel", 8)
 assert(g1 > g0 + 2, string.format("on gravel from %.1f m/s, 2 s on the throttle: %.1f", g0, g1))
 print(string.format("ok: run wide at %.1f m/s, 2 s on the throttle: %.1f on gravel (%.1f on dirt, " ..
 	"%.1f on mud); from %.1f m/s on gravel %.1f", v0, vg, vd, vm, g0, g1))
+
+-- (4z37i (4)) A bot's lap of the Bone Yard: local/brim_yard's output (its
+-- default corners, built here through a stand-in for its c) as the world,
+-- its racing line (the kit/path it makes) as the line, kit/bot's own
+-- controller (bot.lua's follow) driving brim_car as kit.cpp steps a driving
+-- bot: its inputs each 0.1 s (a think), the car stepped at its rate and
+-- substeps. At skill 0, 50 and 100 it goes round in order and is back where
+-- it started within 150 s, never hits a wall hard, its middle never off the
+-- road (the run-off's gravel allowed under skill 50), and the higher its
+-- skill the faster.
+local bot = load_env("builtin/kit/types/bot.lua", env())
+local yard = load_env("apps/workbench/templates/brimstone_speedway/types/brim_yard.lua", env())
+local poly_t = load_env("builtin/kit/types/polygon.lua", env())
+local kids = {}
+local gc = {params = {}, pos = {0, 0, 0}, entities = {}}
+for k, d in pairs(yard.params) do
+	gc.params[k] = d.default
+end
+function gc:child(t) kids[#kids + 1] = t return #kids end
+function gc:link() end
+function gc:log() end
+yard.on_build(gc)
+local polys, path = {}, nil
+for _, k in ipairs(kids) do
+	if k.type == "kit/polygon" then
+		local look = {shape = "polygon"}
+		for n, d in pairs(poly_t.params) do
+			look[n] = d.default
+		end
+		for n, v in pairs(k.params) do
+			look[n] = v
+		end
+		look.solid = look.collision
+		polys[#polys + 1] = MV.look_poly(look, false, k.pos, k.yaw or 0, k.pitch or 0, k.roll or 0)
+	elseif k.type == "kit/path" then
+		path = {points = {}}
+		for i, q in ipairs(k.params.points) do
+			path.points[i] = {k.pos[1] + q[1], k.pos[2], k.pos[3] + q[2]}
+		end
+	end
+end
+assert(path and #path.points >= 60, "no racing line from brim_yard")
+local yw = MV.world{cell = function() return nil end, plane = 1, horizontal = true,
+	polys = polys}
+local function lap(skill)
+	local p = {}
+	for k, d in pairs(car.params) do
+		p[k] = d.default
+	end
+	local P = path.points
+	local a, b = P[1], P[2]
+	local s = {pos = {a[1], 0.5, a[3]}, yaw = math.deg(math.atan2(b[1] - a[1], b[3] - a[3]))}
+	local st = {at = 0, slow = 0, back = 0, t = 0}
+	local knobs = {skill = skill, grip = bot.params.grip.default, brake = bot.params.brake.default}
+	local n, per = #P, math.floor(p.rate / 10 + 0.5)
+	local inp = {f = 0, r = 0, jump = 0}
+	local done, last, steps, gravel = 0, 1, 0, 0
+	MV.steps(car, s, {inp}, 1 / p.rate, p.substeps, yw, p)
+	while done < n do
+		if steps % per == 0 then
+			local o = bot.follow(st, {pos = s.pos, vel = s.vel, yaw = s.yaw, top = p.speed},
+				path, knobs, per / p.rate)
+			inp = {f = o.f, r = o.r, jump = 0}
+			-- (along the line in order: a step back is no progress)
+			local d = (st.at - last) % n
+			if d < n / 2 then
+				done = done + d
+			end
+			last = st.at
+		end
+		MV.steps(car, s, {inp}, 1 / p.rate, p.substeps, yw, p)
+		steps = steps + 1
+		local u = yw:under(s.c[1], 0.6, s.c[2])
+		local surf = u and u.surface or "none"
+		if surf == "gravel" then
+			gravel = gravel + 1 / p.rate
+		end
+		assert(surf ~= "none" and (surf ~= "gravel" or skill < 50), string.format(
+			"skill %d: off the road (%s) at %.1f,%.1f after %.1f s", skill, surf, s.c[1],
+			s.c[2], steps / p.rate))
+		assert((tonumber(s.bumps) or 0) == 0, string.format("skill %d: hit a wall at %.1f,%.1f " ..
+			"(%.1f m/s) after %.1f s", skill, s.c[1], s.c[2], s.bump_v or 0, steps / p.rate))
+		assert(steps < 150 * p.rate, string.format("skill %d: no lap in 150 s (at point %d of %d)",
+			skill, st.at, n))
+	end
+	local t = steps / p.rate
+	print(string.format("ok: a bot at skill %d drove a lap of the Bone Yard's racing line in %.1f s " ..
+		"(%.1f s on the run-off's gravel), no wall hit", skill, t, gravel))
+	return t
+end
+local t0, t50, t100 = lap(0), lap(50), lap(100)
+assert(t100 < t50 and t50 < t0, string.format("the laps not faster by skill: %.1f, %.1f, %.1f",
+	t0, t50, t100))

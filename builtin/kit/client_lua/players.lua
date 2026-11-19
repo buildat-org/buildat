@@ -574,7 +574,10 @@ function M.others_bodies(r)
 			if z and a.t - z.t > 1e-3 then
 				vx, vz = (a.p.x - z.p.x) / (a.t - z.t), (a.p.z - z.p.z) / (a.t - z.t)
 			end
-			out[#out + 1] = {a.p.x, a.p.z, r, vx, vz, "player:" .. tostring(id)}
+			-- ([KIT_BOT_DRIVE] a driving bot's "bot:<id>", as the server's)
+			local n = P.nodes[id]
+			local bot = n and type(n.show) == "table" and n.show.bot
+			out[#out + 1] = {a.p.x, a.p.z, r, vx, vz, (bot and "bot:" or "player:") .. tostring(id)}
 		end
 	end
 	return out

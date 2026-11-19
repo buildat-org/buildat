@@ -41,6 +41,13 @@
 -- as the step it is on, each its own text (a new step a new goal here): a
 -- helm's `keep` (m) is how far from the goal's place it stops, a gun's
 -- `hold` aims without firing.
+-- [KIT_BOT_DRIVE] (4z37i (4)) `drive`: no goals; it drives the players'
+-- movement (the scene's kit/controls': a race's car) along a kit/path
+-- (`path`, else its scene's first; c.path), its inputs follow()'s, its
+-- one knob `skill` (%: how near the line, how late its braking and how
+-- fast; the `skill` input, its dialog's one row). kit.cpp steps it as a
+-- player's body: c:speed, c:body_var, the movement's events and zones as
+-- for a player.
 -- simplified: one goal at a time; a bot's use passes no who-may-use
 -- rule (a region's or a part's own), the upgrade is may_use() for a bot
 local DEG = 180 / math.pi
@@ -58,6 +65,8 @@ local CLOSE = 0.25
 -- A gun's most error (degrees, at aim 0); how long a dialog waits
 local AIM_OFF, ASK_S = 8, 60
 local KNOBS = {"aim", "reaction", "speed"}
+-- [KIT_BOT_DRIVE] a driving bot's one knob
+local DRIVE_KNOBS = {"skill"}
 
 local function move(c, to, range)
 	c:propose_move({to = to, range = range,
@@ -65,6 +74,9 @@ local function move(c, to, range)
 end
 
 local function knobs(c)
+	if c.params.drive then
+		return "skill " .. c.state.skill .. "%"
+	end
 	return "aim " .. c.state.aim .. "%, reaction " .. c.state.reaction ..
 			" s, speed " .. c.state.speed .. "%"
 end
@@ -106,6 +118,154 @@ local function gun(c, g, s)
 		fire = fire}
 end
 
+-- [KIT_BOT_DRIVE] A driving bot's inputs for now ({f, r}: the players'
+-- keys) on path (c.path: {points = {{x, y, z}...}}, a loop), its body b
+-- (c.body: {pos, vel, yaw, top}) and k (skill %, grip and brake m/s^2);
+-- st its memory (the bot's state: at, slow, back, t, yaw0), dt since the
+-- last. Steered toward a point ahead on the line (further the faster),
+-- off it by up to WANDER m at skill 0 (slowly to and fro), less the
+-- turn's own rate; its speed the least of the car's top (times 0.7...1 by
+-- skill) and what each bend ahead allows (sqrt(grip x its radius)) with
+-- the braking to it (at brake, after a reaction's run); off the throttle
+-- while it slides. Stuck (under 1 m/s on the throttle 1.5 s) or facing
+-- the wrong way: backs off steered the other way, then on again.
+-- simplified: no handbrake; a lone car's line (nobody overtaken round)
+local WANDER, STUCK_S, BACK_S = 1.2, 1.5, 1.2
+
+local function radius(P, i)
+	local n = #P
+	local a, b, q = P[(i - 2) % n + 1], P[(i - 1) % n + 1], P[i % n + 1]
+	local cr = (b[1] - a[1]) * (q[3] - a[3]) - (b[3] - a[3]) * (q[1] - a[1])
+	if cr > -1e-6 and cr < 1e-6 then
+		return 1e9
+	end
+	local function d(u, v)
+		return math.sqrt((u[1] - v[1]) ^ 2 + (u[3] - v[3]) ^ 2)
+	end
+	return d(a, b) * d(b, q) * d(a, q) / (2 * math.abs(cr))
+end
+
+local function follow(st, b, path, k, dt)
+	local P = path.points
+	local n = #P
+	local x, z = b.pos[1], b.pos[3]
+	local vx, vz = b.vel[1], b.vel[3]
+	local v = math.sqrt(vx * vx + vz * vz)
+	local yaw = b.yaw
+	local s = math.max(0, math.min(100, k.skill)) / 100
+	st.t = st.t + dt
+	-- Where on the line: the nearest segment (near the last, else anywhere)
+	local best, bi, bt
+	local function try(i)
+		local a, q = P[(i - 1) % n + 1], P[i % n + 1]
+		local ex, ez = q[1] - a[1], q[3] - a[3]
+		local l2 = ex * ex + ez * ez
+		local t = l2 > 0 and math.max(0, math.min(1, ((x - a[1]) * ex + (z - a[3]) * ez) / l2)) or 0
+		local px, pz = a[1] + ex * t - x, a[3] + ez * t - z
+		local d2 = px * px + pz * pz
+		if not best or d2 < best then
+			best, bi, bt = d2, (i - 1) % n + 1, t
+		end
+	end
+	if st.at >= 1 then
+		for i = st.at - 3, st.at + 8 do
+			try(i)
+		end
+	end
+	if not best or best > 15 * 15 then
+		best = nil
+		for i = 1, n do
+			try(i)
+		end
+	end
+	st.at = bi
+	-- The point ahead: along the line from there, off it by the wander
+	local function seg(i)
+		local a, q = P[(i - 1) % n + 1], P[i % n + 1]
+		return a, q, math.sqrt((q[1] - a[1]) ^ 2 + (q[3] - a[3]) ^ 2)
+	end
+	local look = 4 + 0.45 * v
+	local i, a, q, l = bi, seg(bi)
+	local u = bt * l + look
+	for _ = 1, n do
+		if u <= l then
+			break
+		end
+		u = u - l
+		i = i + 1
+		a, q, l = seg(i)
+	end
+	local f = l > 0 and u / l or 0
+	local ox, oz = l > 0 and (q[3] - a[3]) / l or 0, l > 0 and -(q[1] - a[1]) / l or 0
+	local off = WANDER * (1 - s) * math.sin(st.t * 0.45 + (k.seed or 0))
+	local tx = a[1] + (q[1] - a[1]) * f + ox * off
+	local tz = a[3] + (q[3] - a[3]) * f + oz * off
+	local bearing = math.atan2(tx - x, tz - z) * DEG
+	local err = wrap(bearing - yaw)
+	local rate = wrap(yaw - (st.yaw0 or yaw)) / dt
+	st.yaw0 = yaw
+	-- Backing off: steered the other way (the nose swings toward the line)
+	if st.back > 0 then
+		st.back = st.back - dt
+		return {f = -1, r = err > 0 and -1 or 1}
+	end
+	if math.abs(err) > 110 and v < 6 then
+		st.back = BACK_S
+		return {f = -1, r = err > 0 and -1 or 1}
+	end
+	-- The speed: the bends' ahead within the braking's reach
+	local grip = k.grip * (0.5 + 0.5 * s)
+	local brake = k.brake * (0.6 + 0.4 * s)
+	local react = 0.7 - 0.5 * s
+	local vt = (b.top or 30) * (0.7 + 0.3 * s)
+	local reach = v * v / (2 * brake) + v * react + 10
+	local _, _, l0 = seg(bi)
+	local dist = (1 - bt) * l0
+	for j = bi + 1, bi + n do
+		if dist > reach then
+			break
+		end
+		local vc = math.sqrt(grip * radius(P, j))
+		local free = math.max(0, dist - v * react)
+		vt = math.min(vt, math.sqrt(vc * vc + 2 * brake * free))
+		local _, _, lj = seg(j)
+		dist = dist + lj
+	end
+	-- (the way it goes, a slide's too; under a crawl its nose)
+	local head = v > 3 and math.atan2(vx, vz) * DEG or yaw
+	local steer = wrap(bearing - head) - 0.15 * rate
+	local slide = v > 3 and math.abs(wrap(head - yaw)) > 15
+	local fw = clamp((vt - v) * 0.5)
+	if slide and fw > 0 then
+		fw = 0
+	end
+	-- Stuck: on the throttle, hardly moving
+	if fw > 0.3 and v < 1 then
+		st.slow = st.slow + dt
+		if st.slow > STUCK_S then
+			st.slow, st.back = 0, BACK_S
+		end
+	else
+		st.slow = 0
+	end
+	return {f = fw, r = clamp(steer / 12)}
+end
+
+-- [KIT_BOT_DRIVE] A driving bot's think: c:drive (kit.cpp steps the scene's
+-- players' movement for it, not a seat's) by follow() on c.path. Held
+-- (asked, no path, or its car stopped by c:speed: a race's grid): its
+-- inputs let go, its being stuck forgotten
+local function drive_think(c)
+	local b, p, st = c.body, c.path, c.state
+	if st.asker ~= 0 or not b or not p or #p.points < 3 or (b.top or 0) < 0.1 then
+		st.slow, st.back = 0, 0
+		c:drive({})
+		return
+	end
+	c:drive(follow(st, b, p, {skill = st.skill, grip = c.params.grip,
+		brake = c.params.brake, seed = c.id}, 0.1))
+end
+
 -- A goal's key: its id and its text (a "crew" goal's step)
 local function gkey(g)
 	return g.id .. " " .. g.text
@@ -130,6 +290,10 @@ local function stuck(c, g, why)
 end
 
 local function think(c)
+	if c.params.drive then
+		drive_think(c)
+		return plate(c)
+	end
 	local g = c.goal
 	local st = g and g.station
 	if c.state.asker ~= 0 then
@@ -233,7 +397,8 @@ return {
 	about = {
 		what = "A bot: it does the goals a player would, one at a time.",
 		inputs = {
-			ask = "Asks the player who set it off for its aim, reaction and speed (a dialog).",
+			ask = "Asks the player who set it off for its knobs in a dialog.",
+			skill = "Sets a driving bot's skill. Value: 0 to 100 (%).",
 		},
 		outputs = {
 			stuck = "It cannot do its goal. Value: why.",
@@ -255,6 +420,14 @@ return {
 		aim = {type = "number", default = 75, min = 0, max = 100},
 		reaction = {type = "number", default = 0.4, min = 0, max = 3},
 		speed = {type = "number", default = 90, min = 30, max = 100},
+		-- [KIT_BOT_DRIVE] (a kit/path: 0 its scene's first; %; m/s^2 the
+		-- lateral acceleration it takes a bend at and its braking, at skill
+		-- 100: Brimstone Speedway's car's on dirt)
+		drive = {type = "bool", default = false},
+		path = {type = "entity", default = 0},
+		skill = {type = "number", default = 60, min = 0, max = 100},
+		grip = {type = "number", default = 12, min = 1, max = 40},
+		brake = {type = "number", default = 8, min = 1, max = 40},
 	},
 	state = {
 		plate = {default = "", shared = true},
@@ -273,9 +446,19 @@ return {
 		-- (the player its dialog is up for, 0 none; their by)
 		asker = {default = 0, shared = true},
 		asked = {default = ""},
+		-- [KIT_BOT_DRIVE] (shared: its dialog); follow()'s memory
+		skill = {default = 60, param = "skill", shared = true},
+		driving = {default = false, param = "drive", shared = true},
+		at = {default = 0},
+		slow = {default = 0},
+		back = {default = 0},
+		t = {default = 0},
+		yaw0 = {default = false},
 	},
-	inputs = {ask = "none"},
+	inputs = {ask = "none", skill = "number"},
 	outputs = {stuck = "string"},
+	-- (util/kit_racer_sim_check.lua drives with it offline)
+	follow = follow,
 	on_start = function(c)
 		c.state.goal, c.state.used, c.state.stuck = 0, false, false
 		c.state.cooling, c.state.ready, c.state.near = false, true, 0
@@ -286,6 +469,10 @@ return {
 		c:after(0.25)
 	end,
 	on_input = function(c, input, value, by)
+		if input == "skill" and tonumber(value) then
+			c.state.skill = math.max(0, math.min(100, tonumber(value)))
+			return c:log("knobs:", knobs(c), "by", c:name(by))
+		end
 		local pid = tonumber(tostring(by):match("^player:(%d+)$"))
 		if input ~= "ask" or not pid then
 			return
@@ -306,7 +493,7 @@ return {
 		local i = 0
 		for w in tostring(text):gmatch("%S+") do
 			i = i + 1
-			local k, v = KNOBS[i], tonumber(w)
+			local k, v = (c.params.drive and DRIVE_KNOBS or KNOBS)[i], tonumber(w)
 			if k and v and v == v then
 				c.state[k] = math.max(k == "speed" and 30 or 0,
 						math.min(k == "reaction" and 3 or 100, v))
@@ -345,6 +532,6 @@ return {
 		end
 		think(c)
 		-- (at a station, oftener: its inputs follow what it aims at)
-		c:after(c.seat ~= 0 and 0.1 or 0.25)
+		c:after((c.seat ~= 0 or c.params.drive) and 0.1 or 0.25)
 	end,
 }

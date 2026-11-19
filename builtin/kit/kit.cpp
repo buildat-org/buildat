@@ -2632,6 +2632,10 @@ struct Module: public interface::Module, public Interface
 		// [KIT_GUIDE_BOTS] a bot's: drawn as a player, its pose as last set
 		bool bot = false;
 		ss_ pose_sent;
+		// [KIT_BOT_DRIVE] a driving bot's: the players' movement (bot_car()),
+		// s.pose last set on its node ("kit_mpose")
+		bool car = false;
+		ss_ mpose_sent;
 	};
 	std::map<uint64_t, Drive> m_drives;
 	int64_t m_drive_gen = 0;
@@ -2644,6 +2648,16 @@ struct Module: public interface::Module, public Interface
 		double from[3] = {0, 0, 0};
 	};
 	std::map<uint64_t, BotSeat> m_bot_seats;
+	// [KIT_BOT_DRIVE] A driving bot's (kit/bot `drive`) as a player's Body has
+	// them: its c:drive input, c:body_var's vars and c:speed's factor; kept
+	// over a put (its drive is not), gone with the bot or at Stop
+	struct BotBody
+	{
+		ss_ input;
+		json::Value vars = json::object();
+		double speed = 1;
+	};
+	std::map<uint64_t, BotBody> m_bot_bodies;
 	std::map<uint64_t, json::Value> m_motions;
 	// What each peer has of each track: its gen, its last key's time
 	std::map<size_t, std::map<uint64_t, std::pair<int64_t, double>>> m_track_sent;
@@ -2699,6 +2713,7 @@ struct Module: public interface::Module, public Interface
 		m_motions.clear();
 		if(!m_session.running){
 			m_drives.clear();
+			m_bot_bodies.clear();
 			return;
 		}
 		for(auto &f : m_free_objects){
@@ -2768,6 +2783,22 @@ struct Module: public interface::Module, public Interface
 			}
 			d.type = mv->type;
 			d.params = move_params(e, *mv, d.scene);
+			// [KIT_BOT_DRIVE] a driving bot: the players' movement, as a body's
+			// (body_movement()), c:speed's factor on it
+			const ss_ car = d.bot ? bot_car(e, d.scene) : ss_();
+			d.car = !car.empty();
+			if(d.car){
+				d.type = car;
+				d.params = params_of(car, scene_instance(car, d.scene));
+				const json::Value &g = d.params.get("gravity");
+				const double gf = env_gravity(d.scene);
+				const double sf = m_bot_bodies[e.id].speed;
+				if(g.is_number() && gf != 1)
+					d.params.set("gravity", g.as_number() * gf);
+				if(sf != 1 && d.params.get("speed").is_number())
+					d.params.set("speed", d.params.get("speed").as_number() * sf);
+				d.params = json::load_string(d.params.stringify().c_str());
+			}
 			// [KIT_AIRSHIPS] a ship's parts summed for its movement
 			if(hull_of(e) && m_free_objects.count(e.id)){
 				const json::Value parts = ship_parts(e.id);
@@ -21123,6 +21154,16 @@ struct Module: public interface::Module, public Interface
 				who.is_number() && who.as_number() > 0 ?
 				(uint64_t)who.as_number() : 0;
 		const double f = s.at(1u).is_number() ? s.at(1u).as_number() : 1;
+		// [KIT_BOT_DRIVE] a driving bot's (sync_motions() puts it on its car)
+		if(const Entity *bot = who.is_string() ? bot_of(who.as_string()) : nullptr){
+			if(!reach(e, comp, by).count(bot->id) || !(f >= 0 && f <= 10))
+				return add_log(e.id, "speed "+who.as_string()+" refused: "+
+						(f >= 0 && f <= 10 ? "not a player it reaches" : "a factor from 0 to 10"));
+			if(m_bot_bodies[bot->id].speed != f)
+				log_i(MODULE, "%s's speed x%g", cs(bot_name(*bot)), f);
+			m_bot_bodies[bot->id].speed = f;
+			return;
+		}
 		auto pi = m_entities.find(pid);
 		ss_ why;
 		if(pi == m_entities.end() || pi->second.kind != "player")
@@ -21168,6 +21209,8 @@ struct Module: public interface::Module, public Interface
 					(ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9'));
 		const bool clear = v.is_undefined() || v.is_null();
 		auto pi = m_entities.find(pid);
+		// [KIT_BOT_DRIVE] a driving bot's (step_drives() puts them in its state)
+		const Entity *bot = who.is_string() ? bot_of(who.as_string()) : nullptr;
 		ss_ why;
 		if(!key_ok)
 			why = "a key of 1 to 32 letters, digits or _";
@@ -21175,33 +21218,36 @@ struct Module: public interface::Module, public Interface
 				(v.is_number() && std::isfinite(v.as_number())) ||
 				(v.is_string() && v.as_string().size() <= 64)))
 			why = "a value a number, a boolean or a string of 64 bytes at most";
-		else if(pi == m_entities.end() || pi->second.kind != "player")
+		else if(!bot && (pi == m_entities.end() || pi->second.kind != "player"))
 			why = "no player";
-		else if(!reach(e, comp, by).count(pid))
+		else if(!reach(e, comp, by).count(bot ? bot->id : pid))
 			why = "not a player it reaches";
-		const size_t peer = why.empty() ? peer_of_player(pid) : 0;
-		if(why.empty() && (!peer || !m_host.controls))
+		const size_t peer = why.empty() && !bot ? peer_of_player(pid) : 0;
+		if(why.empty() && !bot && (!peer || !m_host.controls))
 			why = "they are not here";
-		Body *b = why.empty() ? &m_bodies[peer] : nullptr;
-		if(b && !clear && b->vars.get(key).is_undefined() &&
-				b->vars.size() >= MAX_BODY_VARS)
+		Body *b = why.empty() && !bot ? &m_bodies[peer] : nullptr;
+		json::Value *vars = b ? &b->vars : why.empty() && bot ?
+				&m_bot_bodies[bot->id].vars : nullptr;
+		if(vars && !clear && vars->get(key).is_undefined() &&
+				vars->size() >= MAX_BODY_VARS)
 			why = itos(MAX_BODY_VARS)+" keys a body at most";
 		if(!why.empty()){
 			add_log(e.id, "body_var "+(who.is_string() ? who.as_string().substr(0, 64) :
 					itos(pid))+" "+key.substr(0, 32)+" refused: "+why);
 			return;
 		}
-		const json::Value &was = b->vars.get(key);
+		const json::Value &was = vars->get(key);
 		if(clear ? was.is_undefined() :
 				(!was.is_undefined() && was.stringify() == v.stringify()))
 			return;
 		if(clear)
-			b->vars.del_key(key);
+			vars->del_key(key);
 		else
-			b->vars.set(key, v.deepcopy());
-		log_i(MODULE, "%s's body var %s = %s", cs(pi->second.name), cs(key),
-				cs(clear ? ss_("nil") : v.stringify()));
-		with_vars(*b);
+			vars->set(key, v.deepcopy());
+		log_i(MODULE, "%s's body var %s = %s", cs(bot ? bot_name(*bot) : pi->second.name),
+				cs(key), cs(clear ? ss_("nil") : v.stringify()));
+		if(b)
+			with_vars(*b);
 	}
 
 	// [KIT_VEHICLE_MOVEMENTS] c:set_param(id, type, param, value): a parameter of an
@@ -24411,8 +24457,9 @@ struct Module: public interface::Module, public Interface
 
 	// [KIT_PLANE] stage 4: the server's steps' s.events ({"name" | ["name",
 	// value]...}): outputs of the movement's component (none placed: nowhere),
-	// as by the body's player (box.c's "@events")
-	void movement_events(const ss_ &type, const ss_ &player,
+	// as by the body's player (box.c's "@events"; by: theirs, [KIT_BOT_DRIVE]
+	// a bot's "bot:<id>")
+	void movement_events(const ss_ &type, const ss_ &by,
 			const ss_ &scene, const json::Value &ev)
 	{
 		uint64_t id = 0;
@@ -24423,7 +24470,7 @@ struct Module: public interface::Module, public Interface
 		r.entity = id;
 		r.comp = comp;
 		r.handler = "@events";
-		r.by = by_of(player);
+		r.by = by;
 		r.args.append(ev);
 		queue_run(r);
 	}
@@ -24433,7 +24480,17 @@ struct Module: public interface::Module, public Interface
 	// set as it changes
 	void movement_pose(size_t peer, Body &b)
 	{
-		const json::Value &ps = b.state.get("pose");
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end() || !pi->second.player)
+			return;
+		auto ei = m_entities.find(pi->second.player);
+		if(ei != m_entities.end())
+			movement_pose(ei->second, b.state, b.mpose_sent);
+	}
+	// (on an entity's node: a player's, [KIT_BOT_DRIVE] a driving bot's)
+	void movement_pose(const Entity &e, const json::Value &state, ss_ &mpose_sent)
+	{
+		const json::Value &ps = state.get("pose");
 		ss_ pose;
 		for(unsigned k = 0; ps.is_array() && k < ps.size() && k < 8; k++){
 			char buf[32];
@@ -24441,19 +24498,15 @@ struct Module: public interface::Module, public Interface
 					ps.at(k).as_number() : 0.0);
 			pose += buf;
 		}
-		auto pi = m_peers.find(peer);
-		if(pi == m_peers.end() || !pi->second.player)
+		if(!e.node)
 			return;
-		auto ei = m_entities.find(pi->second.player);
-		if(ei == m_entities.end() || !ei->second.node)
+		const ss_ sent = itos(e.node)+"|"+pose;
+		if(sent == mpose_sent)
 			return;
-		const ss_ sent = itos(ei->second.node)+"|"+pose;
-		if(sent == b.mpose_sent)
-			return;
-		b.mpose_sent = sent;
-		main_context::access(m_server, scene_of(ei->second),
+		mpose_sent = sent;
+		main_context::access(m_server, scene_of(e),
 				[&](magic::Scene *sc){
-			magic::Node *n = sc->GetNode(ei->second.node);
+			magic::Node *n = sc->GetNode(e.node);
 			if(n)
 				n->SetVar(magic::StringHash("kit_mpose"),
 						magic::Variant(pose.c_str()));
@@ -24579,33 +24632,29 @@ struct Module: public interface::Module, public Interface
 		ss_ others;
 		if(b.plane_h && !b.seat && m_types[b.type].decl.get("movement").get(
 				"bodies").is_true())
-			bodies_lit(others, pe, pos, r + reach);
+			bodies_lit(others, pe.scene, &pe, 0, pos, r + reach);
 		snapshot(o, pe.scene, b.state, v ? v->id : 0, pos, r, h, reach, b.plane_z,
 				b.plane_h, others);
 	}
 
 	// [KIT_TOP_DOWN] (8) ",bodies={{x, z, r, vx, vz, by}...}": the other players'
-	// bodies in pe's scene within reach (+ their r) of pos, in play and not
-	// seated, for a movement that asks (movement.bodies; move.lua's W:circle)
-	void bodies_lit(ss_ &o, const Peer &pe, const double pos[3], double reach)
+	// bodies in the scene within reach (+ their r) of pos, in play and not
+	// seated, for a movement that asks (movement.bodies; move.lua's W:circle);
+	// not pe's nor the bot own's. [KIT_BOT_DRIVE] the driving bots' too
+	void bodies_lit(ss_ &o, const ss_ &scene, const Peer *pe, uint64_t own,
+			const double pos[3], double reach)
 	{
 		o += ",bodies={";
 		char buf[160];
-		for(auto &bp : m_bodies){
-			auto pi = m_peers.find(bp.first);
-			const Body &ob = bp.second;
-			if(pi == m_peers.end() || &pi->second == &pe || pi->second.scene != pe.scene ||
-					ob.type.empty() || ob.seat || pi->second.editing ||
-					out_of_play(pi->second.player))
-				continue;
-			const json::Value &sp = ob.state.get("pos"), &sv = ob.state.get("vel");
+		auto add = [&](const json::Value &sp, const json::Value &sv, const ss_ &type,
+				const ss_ &by){
 			if(!pos_ok(sp))
-				continue;
+				return;
 			const double x = sp.at(0u).as_number(), z = sp.at(2u).as_number();
-			const double r = num(body_decl(ob.type), "r", 0.45, 0.05, 8);
+			const double r = num(body_decl(type), "r", 0.45, 0.05, 8);
 			if((x - pos[0]) * (x - pos[0]) + (z - pos[2]) * (z - pos[2]) >
 					(reach + r) * (reach + r))
-				continue;
+				return;
 			auto vel = [&](unsigned k){
 				return sv.is_array() && k < sv.size() && sv.at(k).is_number() &&
 						std::isfinite(sv.at(k).as_number()) ? sv.at(k).as_number() : 0.0;
@@ -24613,8 +24662,22 @@ struct Module: public interface::Module, public Interface
 			snprintf(buf, sizeof buf, "{%.17g,%.17g,%.17g,%.17g,%.17g,", x, z, r,
 					vel(0), vel(2));
 			o += buf;
-			lua_lit(json::Value("player:"+itos(pi->second.player)), o);
+			lua_lit(json::Value(by), o);
 			o += "},";
+		};
+		for(auto &dp : m_drives)
+			if(dp.second.car && dp.first != own && dp.second.scene == scene)
+				add(dp.second.state.get("pos"), dp.second.state.get("vel"),
+						dp.second.type, "bot:"+itos(dp.first));
+		for(auto &bp : m_bodies){
+			auto pi = m_peers.find(bp.first);
+			const Body &ob = bp.second;
+			if(pi == m_peers.end() || &pi->second == pe || pi->second.scene != scene ||
+					ob.type.empty() || ob.seat || pi->second.editing ||
+					out_of_play(pi->second.player))
+				continue;
+			add(ob.state.get("pos"), ob.state.get("vel"), ob.type,
+					"player:"+itos(pi->second.player));
 		}
 		o += "}";
 	}
@@ -24944,6 +25007,12 @@ struct Module: public interface::Module, public Interface
 			else
 				++it;
 		}
+		// [KIT_BOT_DRIVE] (and the bodies of driving bots gone)
+		for(auto it = m_bot_bodies.begin(); it != m_bot_bodies.end();)
+			if(!is_bot_id(it->first))
+				it = m_bot_bodies.erase(it);
+			else
+				++it;
 		std::vector<uint64_t> unseat;
 		// [KIT_LEFTOVERS_1116] each scene's plane (NaN: none), for creatures
 		std::map<ss_, std::pair<double, bool>> planes;
@@ -24964,8 +25033,10 @@ struct Module: public interface::Module, public Interface
 				continue;
 			}
 			const double rate = num(d.params, "rate", 60, 10, 120), dt = 1 / rate;
-			// [KIT_CREATURES_8A] far from players: asleep with its section
-			if(d.creature && !creature_awake(e, d, now))
+			// [KIT_CREATURES_8A] far from players: asleep with its section.
+			// [KIT_BOT_DRIVE] not a driving bot: the players' movement, which
+			// steps as theirs does (a world of shapes loads no sections)
+			if(d.creature && !d.car && !creature_awake(e, d, now))
 				continue;
 			if(d.t < now - 1)
 				d.t = now - 1;
@@ -24988,7 +25059,11 @@ struct Module: public interface::Module, public Interface
 			}
 			ss_ in = !held ? ss_() : holder_bot ? m_bot_seats[holder_bot].input : d.input;
 			const double shots = row_num(d.state, "shots");
-			if(!held){
+			// [KIT_BOT_DRIVE] a driving bot's: its c:drive, as a player's keys
+			BotBody *bb = d.car ? &m_bot_bodies[e.id] : nullptr;
+			if(bb)
+				in = bb->input;
+			else if(!held){
 				const json::Value &st = mv->state;
 				in = "{f=";
 				lua_lit(json::Value(std::max(-1.0, std::min(1.0, row_num(st, "throttle")))), in);
@@ -25002,8 +25077,9 @@ struct Module: public interface::Module, public Interface
 				in = "{f=0,r=0,yaw=0,jump=0,go=0,tx=0,ty=0,tz=0}";
 			const json::Value bd = body_decl(d.type);
 			double r = num(bd, "r", 0.45, 0.05, 8), h = num(bd, "h", 1.7, 0.05, 16);
-			// [KIT_CREATURES_8A] a creature's body its parameters'
-			if(d.creature){
+			// [KIT_CREATURES_8A] a creature's body its parameters' (a driving
+			// bot's its movement's)
+			if(d.creature && !d.car){
 				r = num(d.params, "width", 2 * r, 0.1, 3) / 2;
 				h = num(d.params, "height", h, 0.1, 4);
 			}
@@ -25011,6 +25087,11 @@ struct Module: public interface::Module, public Interface
 			const json::Value &sp = d.state.get("pos");
 			for(unsigned k = 0; k < 3 && sp.is_array() && k < sp.size(); k++)
 				pos[k] = sp.at(k).is_number() ? sp.at(k).as_number() : 0;
+			// ([KIT_BODY_VARS] a driving bot's c:body_var's, as with_vars())
+			if(bb && bb->vars.size())
+				d.state.set("vars", bb->vars.deepcopy());
+			else if(bb && !d.state.get("vars").is_undefined())
+				d.state.del_key("vars");
 			ss_ o = "Sreturn {type=";
 			lua_lit(json::Value(d.type), o);
 			o += ",params=";
@@ -25047,10 +25128,15 @@ struct Module: public interface::Module, public Interface
 				plane = pi->second.first;
 				level = pi->second.second;
 			}
+			// [KIT_BOT_DRIVE] ([KIT_TOP_DOWN] (8)) a driving bot meets the others'
+			// bodies as a player's does
+			ss_ others;
+			if(bb && level && m_types[d.type].decl.get("movement").get("bodies").is_true())
+				bodies_lit(others, d.scene, 0, e.id, pos, r + reach);
 			if(d.deck)
 				deck_snapshot(o, d, e, pos, r, h, reach);
 			else
-				snapshot(o, d.scene, d.state, e.id, pos, r, h, reach, plane, level);
+				snapshot(o, d.scene, d.state, e.id, pos, r, h, reach, plane, level, others);
 			o += "}";
 			ss_ answer, why;
 			bool runaway = false;
@@ -25064,6 +25150,16 @@ struct Module: public interface::Module, public Interface
 			}
 			d.state = json::load_string(answer.c_str());
 			d.t += n * dt;
+			// [KIT_BOT_DRIVE] its steps' events as a player's (by "bot:<id>"),
+			// its s.pose for the others' draw hook
+			if(bb && d.state.is_object()){
+				const json::Value ev = d.state.get("events");
+				if(!ev.is_undefined())
+					d.state.del_key("events");
+				if(ev.is_array() && ev.size())
+					movement_events(d.type, "bot:"+itos(e.id), d.scene, ev);
+				movement_pose(e, d.state, d.mpose_sent);
+			}
 			// [KIT_SHIP] a gun's shots (kit/turret's): its holder's, at most a few a tick
 			if(held)
 				for(int k = 0; k < 4 && k < row_num(d.state, "shots") - shots; k++)
@@ -25813,6 +25909,17 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
+	// [KIT_BOT_DRIVE] A driving bot's movement (its kit/bot's `drive`): its
+	// scene's players' (kit/controls'), "" for none or a bot that walks
+	ss_ bot_car(const Entity &e, const ss_ &scene)
+	{
+		const Instance *in = bot_comp(e);
+		if(!in || !in->params.get("drive").is_true() || scene_holds(scene))
+			return "";
+		const ss_ t = jstr(controls_params(scene), "movement", "kit/walker");
+		return is_movement(t) ? t : "";
+	}
+
 	// A bot put at a world place (yaw: NAN keeps its own), its walk begun
 	// again from there
 	void bot_put(uint64_t id, const double w[3], double yaw)
@@ -26075,6 +26182,56 @@ struct Module: public interface::Module, public Interface
 		return 1;
 	}
 
+	// [KIT_BOT_DRIVE] A driving bot's ",body={pos, vel, yaw, top}" (its drive's
+	// state, the world's; top its movement's speed) and ",path={points =
+	// {{x, y, z}...}}": its kit/bot's `path`, else its scene's first kit/path
+	// (by id), the points in the world; none: no path.
+	// simplified: the path's turn about y only
+	void bot_path_lit(const Entity &e, const Drive &d, ss_ &o)
+	{
+		json::Value b = json::object();
+		for(const char *k : {"pos", "vel", "yaw"})
+			if(!d.state.get(k).is_undefined())
+				b.set(k, d.state.get(k));
+		b.set("top", row_num(d.params, "speed"));
+		o += ",body=";
+		lua_lit(b, o);
+		const Instance *bc = bot_comp(e);
+		const double want = bc ? row_num(bc->params, "path") : 0;
+		ss_ scene, ps;
+		scene_of(e, &scene);
+		for(auto &p : m_entities){
+			const Entity &pe = p.second;
+			if(!pe.has_pos || (want > 0 && (double)p.first != want))
+				continue;
+			const Instance *pin = nullptr;
+			for(const Instance &in : pe.comps)
+				if(in.type == "kit/path" && in.disabled.empty())
+					pin = &in;
+			if(!pin || !scene_of(pe, &ps) || ps != scene)
+				continue;
+			const json::Value pts = params_of("kit/path", pin).get("points");
+			double w[3];
+			Turn q;
+			world_of(pe, w, &q);
+			o += ",path={points={";
+			char buf[100];
+			for(unsigned i = 0; pts.is_array() && i < pts.size(); i++){
+				const json::Value &pt = pts.at(i);
+				if(!pt.is_array() || pt.size() < 2 || !pt.at(0u).is_number() ||
+						!pt.at(1u).is_number())
+					continue;
+				double v[3] = {pt.at(0u).as_number(), 0, pt.at(1u).as_number()};
+				q.apply(v);
+				snprintf(buf, sizeof buf, "{%.6g,%.6g,%.6g},", w[0] + v[0], w[1] + v[1],
+						w[2] + v[2]);
+				o += buf;
+			}
+			o += "}}";
+			return;
+		}
+	}
+
 	// c.goal: the bot's goal, of those in its scene active for it, not for
 	// players only, that it can act on now the one of the highest `priority`
 	// (ties: the first by id): {id, kind, text, target, via, carry, item,
@@ -26094,6 +26251,10 @@ struct Module: public interface::Module, public Interface
 		auto bs = m_bot_seats.find(e.id);
 		if(bs != m_bot_seats.end())
 			o += ",seat="+itos(bs->second.seat);
+		// [KIT_BOT_DRIVE] a driving bot: no goals, its body and its path
+		auto di = m_drives.find(e.id);
+		if(di != m_drives.end() && di->second.car)
+			return bot_path_lit(e, di->second, o);
 		const ss_ key = "bot:"+itos(e.id);
 		ss_ scene, gs;
 		scene_of(e, &scene);
@@ -26845,13 +27006,19 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// c:drive (a bot's): its seat's input; false: out of it
+	// ([KIT_BOT_DRIVE] a driving bot's: its own body's, fire the jump key)
 	void bot_drive(uint64_t bot, const json::Value &v)
 	{
 		auto it = m_bot_seats.find(bot);
-		if(it == m_bot_seats.end())
+		auto di = m_drives.find(bot);
+		const bool car = it == m_bot_seats.end() && di != m_drives.end() && di->second.car;
+		if(!car && it == m_bot_seats.end())
 			return;
-		if(!v.is_array())
-			return bot_unseat(bot, "c:leave_seat");
+		if(!v.is_array()){
+			if(!car)
+				bot_unseat(bot, "c:leave_seat");
+			return;
+		}
 		ss_ in = "{f=";
 		lua_lit(json::Value(v.at(0u).is_number() ? v.at(0u).as_number() : 0.0), in);
 		in += ",r=";
@@ -26859,7 +27026,7 @@ struct Module: public interface::Module, public Interface
 		in += ",yaw=0,jump=";
 		in += v.at(2u).is_true() ? "1" : "0";
 		in += ",go=0,tx=0,ty=0,tz=0}";
-		it->second.input = in;
+		(car ? m_bot_bodies[bot].input : it->second.input) = in;
 	}
 
 	// Each tick (step_drives): a bot in a seat where the seat is, its keys
@@ -27444,7 +27611,7 @@ struct Module: public interface::Module, public Interface
 					b.state.del_key("events");
 					b.state_json = json_exact(b.state);
 					if(ev.is_array() && ev.size() && m_session.running)
-						movement_events(b.type, pi->second.name, pi->second.scene, ev);
+						movement_events(b.type, by_of(pi->second.name), pi->second.scene, ev);
 				}
 				with_vars(b);
 				stepped = true;
@@ -29576,12 +29743,13 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// c:respawn_waiting(): every player of the round waiting to respawn
-	// back at their spawn; how many
+	// back at their spawn ([KIT_BOT_DRIVE] a bot too); how many
 	int respawn_waiting()
 	{
 		sv_<uint64_t> list;
 		for(auto &e : m_entities)
-			if(e.second.kind == "player" && player_waiting(e.first))
+			if((e.second.kind == "player" || (e.second.has_pos && is_bot(e.second))) &&
+					player_waiting(e.first))
 				list.push_back(e.first);
 		for(uint64_t id : list)
 			revive(id);
@@ -39530,6 +39698,21 @@ struct Module: public interface::Module, public Interface
 				"reaches) builds it live for the round: a new layout, nothing "
 				"saved, the authored one back at stop. Brimstone Speedway's "
 				"local/brim_yard is one.\n"
+				// [KIT_BOT_DRIVE] (4z37i (4))
+				"- Driving bots: a kit/bot with drive = true (the prefab "
+				"kit/bot_driver) drives the players' movement (the scene's "
+				"kit/controls movement: a race's car) along a kit/path (its "
+				"path param, else the scene's first; a loop through its points, "
+				"a racing line; local/brim_yard makes one), braking for the "
+				"bends ahead and backing off when stuck. It is a player to the "
+				"game: \"bot:<id>\" in c.players, zones, c:speed, c:body_var and "
+				"the movement's events. Its one knob is skill (0...100 %, "
+				"default 60: how near the line, how late it brakes, how fast): "
+				"the bot's skill param or input (try_input on the bot, value a "
+				"number), or its Add bot dialog. Players add them as CTF's: a "
+				"kit/spawner of the prefab and kit/pause_menu_actions linked to "
+				"its spawn and clear (try_input on the spawner as an agent). "
+				"Brimstone Speedway's race puts them on its grid.\n"
 				// [KIT_ROOT_EDIT]
 				"- The app root: a game of several tracks (Crag Trial's "
 				"template) has its kit/lobby and its screens there (place or "

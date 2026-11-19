@@ -42,6 +42,14 @@
 -- racer alone on the grid or in a race, hidden otherwise (one player can't
 -- restart a shared race); a lone racer's Retry ends the race at once, so
 -- they are back on the grid. To lobby (the lobby's lobby) forfeits a race.
+-- (4z37i (4)) Bots (Kit's driving bots, "bot:<id>": kit/bot_driver, added
+-- from the pause menu) race as players do: each one in a race's scene rolls
+-- onto the grid while it is open (the tick), waits for GO, counts in the
+-- places and on the result card; one added during a race waits frozen where
+-- it is for the next. No crates for them (no weapons, no Fire), no time
+-- trials (no lap records), no lobby, no Retry: those are the players'. A
+-- race of bots alone (every player finished or gone) runs on until it ends
+-- or a player comes onto the grid: that ends it.
 local PAINTS = 6
 local WEAPONS = {gun = 6, mines = 3, boost = 1}
 local NAMES = {gun = "Gun", mines = "Mines", boost = "Ram boost"}
@@ -75,12 +83,15 @@ local function checkpoints(c)
 end
 
 local function player_of(c, by)
-	local id = tonumber(tostring(by):match("^player:(%d+)$"))
 	for _, p in ipairs(c.players or {}) do
-		if p.id == id then
+		if p.by == by then
 			return p
 		end
 	end
+end
+
+local function is_bot(by)
+	return tostring(by):match("^bot:%d+$") ~= nil
 end
 
 local function say(c, text)
@@ -107,10 +118,21 @@ local function retry(c, by, on)
 	end
 end
 
--- Retry to each racer: only one racing alone may
+-- The players racing (bots not)
+local function people(c)
+	local n = 0
+	for _, b in ipairs(c.state.racers) do
+		n = n + (is_bot(b) and 0 or 1)
+	end
+	return n
+end
+
+-- Retry to each racer: only one player racing alone may (bots or not)
 local function retry_racers(c)
 	for _, b in ipairs(c.state.racers) do
-		retry(c, b, #c.state.racers == 1)
+		if not is_bot(b) then
+			retry(c, b, people(c) == 1)
+		end
 	end
 end
 
@@ -123,6 +145,10 @@ local function set_open(c, by, r, want)
 end
 
 local function show(c, by, r, note)
+	-- (a bot has no screen)
+	if is_bot(by) then
+		return
+	end
 	if note then
 		r.note, r.note_left = note, 2
 	end
@@ -245,7 +271,9 @@ local function clear_weapon(c, by, r)
 	end
 end
 
--- A run's start for the player (the lobby's entered)
+local race_over
+
+-- A run's start for the player (the lobby's entered; a bot's: the tick's)
 local function enter(c, by)
 	local r = view(c, by)
 	local p = player_of(c, by)
@@ -259,6 +287,10 @@ local function enter(c, by)
 	r.run = (r.run or 0) + 1
 	c:body_var(by, "run", r.run)
 	if r.mode == "race" then
+		-- (4z37i (4)) a race of bots alone: over for a player who comes
+		if c.state.phase ~= "grid" and not is_bot(by) and people(c) == 0 then
+			race_over(c, "a player comes: only bots on the track")
+		end
 		if c.state.phase ~= "grid" then
 			-- (a race on: back to the lobby to wait)
 			r.mode = nil
@@ -276,7 +308,7 @@ local function enter(c, by)
 		c:body_var(by, "paint", (k - 1) % PAINTS + 1)
 		c:speed(by, 0)
 		c:teleport(slot(c, k), {yaw = c.yaw or 0})
-		if c.params.grid_screen ~= 0 then
+		if c.params.grid_screen ~= 0 and not is_bot(by) then
 			c:send(c.params.grid_screen, "show", nil, by)
 		end
 		c:log(c:name(by), "is on the grid, slot", k)
@@ -299,13 +331,13 @@ local function enter(c, by)
 end
 
 -- The race over: the grid open again
-local function race_over(c, why)
+function race_over(c, why)
 	c:log("the race is over:", why)
 	-- (ended in its countdown: none to GO)
 	c:after(nil, "count")
 	for _, by in ipairs(c.state.racers) do
 		local r = view(c, by)
-		if not r.done then
+		if not r.done and not is_bot(by) then
 			c:emit("result", "Out of time: DNF|" .. table.concat(standings(c), "|"), by)
 			c:send(c.params.lobby, "over", nil, by)
 		end
@@ -334,10 +366,17 @@ local function finish_race(c, by, r)
 	end
 	clear_weapon(c, by, r)
 	set_open(c, by, r, false)
-	c:send(c.params.lobby, "over", nil, by)
+	if not is_bot(by) then
+		c:send(c.params.lobby, "over", nil, by)
+	end
 	results(c)
 	c:emit("finished", r.done, by)
-	if #c.state.finished >= #c.state.racers then
+	-- (those who finished and left are no longer racers)
+	local on = 0
+	for _, b in ipairs(c.state.racers) do
+		on = on + (view(c, b).done and 0 or 1)
+	end
+	if on == 0 then
 		race_over(c, "everyone finished")
 	end
 end
@@ -437,7 +476,7 @@ local function fire(c, by, r, p, heading)
 	if r.weapon == "gun" then
 		local best, bd
 		for _, q in ipairs(c.players or {}) do
-			local qb = "player:" .. q.id
+			local qb = q.by
 			if q.id ~= p.id and racing(c, qb) and q.pos and not q.away and
 					not view(c, qb).wrecked then
 				local dx, dz = q.pos[1] - at[1], q.pos[3] - at[3]
@@ -609,6 +648,28 @@ return {
 				race_over(c, "out of time")
 			end
 		end
+		-- (4z37i (4)) racers no longer listed (a bot removed): out
+		local listed = {}
+		for _, p in ipairs(c.players or {}) do
+			listed[p.by] = true
+		end
+		for i = #st.racers, 1, -1 do
+			if not listed[st.racers[i]] then
+				c:log(st.racers[i], "is gone: out of the race")
+				table.remove(st.racers, i)
+			end
+		end
+		-- The bots here: onto an open grid, else frozen till the next race
+		for _, p in ipairs(c.players or {}) do
+			if p.bot and not p.away and c.params.mode == "race" and
+					not racing(c, p.by) then
+				if st.phase == "grid" then
+					c:send(c.id, "entered", nil, p.by)
+				else
+					c:speed(p.by, 0)
+				end
+			end
+		end
 		if st.said_left > 0 then
 			st.said_left = st.said_left - 0.1
 			if st.said_left <= 0 then
@@ -616,7 +677,7 @@ return {
 			end
 		end
 		for _, p in ipairs(c.players or {}) do
-			local by = "player:" .. p.id
+			local by = p.by
 			local r = c.state.runs[by]
 			if r and r.mode and (not p.here or p.away) then
 				-- (gone: out of the race)
@@ -652,6 +713,11 @@ return {
 	end,
 	on_died = function(c, player, by, kind)
 		local pb = "player:" .. tostring(player)
+		for _, p in ipairs(c.players or {}) do
+			if p.id == player then
+				pb = p.by
+			end
+		end
 		local r = c.state.runs[pb]
 		if not (r and r.mode == "race") or r.wrecked then
 			return
@@ -663,7 +729,8 @@ return {
 		if p and p.pos then
 			effects_wreck(c, p.pos)
 		end
-		local killer = type(by) == "string" and by:match("^player:") and by ~= pb and
+		local killer = type(by) == "string" and (by:match("^player:") or is_bot(by)) and
+				by ~= pb and
 				c:name(by) or nil
 		if not c.state.first_blood then
 			c.state.first_blood = true
@@ -689,7 +756,7 @@ return {
 		c:body_var(by, "fire", r.shots)
 	end,
 	on_input = function(c, input, value, by)
-		if type(by) ~= "string" or not by:match("^player:%d+$") then
+		if type(by) ~= "string" or not (by:match("^player:%d+$") or is_bot(by)) then
 			return
 		end
 		local r = view(c, by)
@@ -719,7 +786,7 @@ return {
 		elseif input == "back" then
 			return back(c, by, r)
 		elseif input == "start" then
-			if c.state.phase ~= "grid" or not racing(c, by) then
+			if c.state.phase ~= "grid" or not racing(c, by) or is_bot(by) then
 				return
 			end
 			c.state.phase = "countdown"
@@ -758,6 +825,9 @@ return {
 		elseif r.mode ~= "race" or c.state.phase ~= "running" or r.wrecked then
 			return
 		elseif input == "crate" then
+			if is_bot(by) then
+				return
+			end
 			local kind = WEAPONS[value] and value
 			if not kind then
 				local all = {"gun", "mines", "boost"}
