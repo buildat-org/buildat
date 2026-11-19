@@ -1337,7 +1337,11 @@ undrawn=$(grep -ac "client1 lets the bow go undrawn" "$s1")
 python3 -I - "$t/bow1.log" "$s1" <<'PY' || fail "the bow's draws: $speeds, $undrawn undrawn ($s1, $t/bow1.log)"
 import re, sys
 held = [float(x) for x in re.findall(r"skeldat: the bow released at ([\d.]+)", open(sys.argv[1], errors="replace").read())]
-srv = [float(a or b) for a, b in re.findall(r"client1 (?:shoots an arrow at [\d.]+ \(drawn ([\d.]+)\)|lets the bow go undrawn \(([\d.]+)\))", open(sys.argv[2], errors="replace").read())]
+srv_lines = re.findall(r"client1 (?:shoots an arrow at [\d.]+ \(drawn ([\d.]+)\)|lets the bow go undrawn \(([\d.]+)\))", open(sys.argv[2], errors="replace").read())
+srv = [float(a or b) for a, b in srv_lines]
+# The server's verdict by its line: its hold is printed to 0.01, so a
+# 0.091 it let go undrawn reads "0.10"
+undrawn = [bool(b) for a, b in srv_lines]
 assert len(held) == len(srv) and len(held) >= 7, (held, srv)
 # [SK_BOW_DRAW_SLOW_HOST] The client's slowest frame average (its "frames
 # N ms" lines): its draw is its frames' time steps, smoothed, the
@@ -1345,8 +1349,8 @@ assert len(held) == len(srv) and len(held) >= 7, (held, srv)
 # 4 frames a second)
 frames = [float(x) / 1000 for x in re.findall(r"skeldat: frames ([\d.]+) ms", open(sys.argv[1], errors="replace").read())]
 apart = max([0.15] + frames)
-for h, s in zip(held, srv):
-    assert abs(h - s) <= apart and ((s < 0.1) == (h < 0.1) or abs(h - 0.1) < 0.05), (h, s, apart)
+for h, s, u in zip(held, srv, undrawn):
+    assert abs(h - s) <= apart and (u == (h < 0.1) or abs(h - 0.1) < 0.05), (h, s, u, apart)
 # The tap is one frame at least (a mouse_up waits for the frame that read
 # the down, [SEQ_HOLD_FRAME]): under 0.5, or two of the client's slowest
 # frame average (0.47 at 2 to 4 frames a second)
