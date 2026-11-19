@@ -316,6 +316,10 @@ local function changed()
 end
 
 function M.set_tools(on)
+	if not on and E.editing and S.primary and M.ask_unapplied(S.primary,
+			function() M.set_tools(on) end) then
+		return
+	end
 	-- [KIT_PLAYTEST_TWEAKS] play mode runs the game if it has ended
 	if not on and E.editing and not E.running then
 		M.play()
@@ -1934,11 +1938,47 @@ function NT.entity_lists()
 	return tabs, indent
 end
 
+-- (4z37h) A list's fitter: fit(s) is a row's name s cut to "..." so that
+-- its button fits the palette's width (NT.room): on a phone a generator's
+-- long line put a scroll bar across the list. Measured on the side before
+-- the row is made (a row once wider keeps the list wider); done() when the
+-- list is made
+local function name_fitter()
+	local p, t = button(magic.ui.root, "", function() end)
+	local function width(s)
+		t:SetText(s)
+		return t.width + 16
+	end
+	local function fit(s)
+		local room = NT.room or 1e9
+		if width(s) <= room then
+			return s
+		end
+		local cs = {}
+		for ch in s:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+			cs[#cs + 1] = ch
+		end
+		-- (the most characters that fit, by halves)
+		local lo, hi = 0, #cs
+		while lo < hi do
+			local mid = math.ceil((lo + hi) / 2)
+			if width(table.concat(cs, "", 1, mid) .. "...") <= room then
+				lo = mid
+			else
+				hi = mid - 1
+			end
+		end
+		return table.concat(cs, "", 1, lo) .. "..."
+	end
+	return fit, function() p:Remove() end
+end
+
 function NT.entities(w)
 	local tabs, indent = NT.entity_lists()
 	local tab = S.list_tab or "Game-wide"
-	-- [KIT_GENERATORS] (4z37f) this scene's generators first, each with Run
-	-- (its params in the inspector)
+	local fit_name, fitted = name_fitter()
+	-- [KIT_GENERATORS] (4z37f) this scene's generators first (Run and its
+	-- params in the inspector; 4z37h no Run here, the user's)
 	local gens = {}
 	for _, g in ipairs(E.state and E.state.generators or {}) do
 		if g.scene == (E.state.scene or "") then
@@ -1950,19 +1990,27 @@ function NT.entities(w)
 		for _, g in ipairs(gens) do
 			local gr = row(w)
 			NT.name_item(gr, "palette", find(g.id) or {id = g.id, name = g.name},
-					(g.name ~= "" and g.name or g.type) .. ": " .. NT.gen_line(g),
-					function()
+					fit_name((g.name ~= "" and g.name or g.type) .. ": " ..
+					NT.gen_line(g)), function()
 						M.select(g.id)
-					end)
-			button(gr, "Run", function()
-				log:info("kit editor: run generator " .. g.id)
-				send({op = "build", id = g.id, comp = g.comp})
-			end):SetName("run generator " .. g.id)
+					end, nil, S.sel[g.id] ~= nil):SetName("generator " .. g.id)
 		end
 	end
 	local tr = row(w)
-	if NT.sh.on() then
-		-- ([KIT_PHONE_EDITING] a dropdown: the three ran off a phone's pane)
+	-- ([KIT_PHONE_EDITING] a dropdown: the three ran off a phone's pane;
+	-- 4z37h the desktop mode's on a phone too, measured as the bar's)
+	local drop_tabs = NT.sh.on()
+	if not drop_tabs then
+		local used = 0
+		for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
+			local probe = button(magic.ui.root, name .. " (" .. #tabs[name] .. ")",
+					function() end)
+			used = used + probe.minWidth + 4
+			probe:Remove()
+		end
+		drop_tabs = used > (NT.room or 1e9)
+	end
+	if drop_tabs then
 		local c = {}
 		for _, name in ipairs({"Game-wide", "Scene", "Positioned"}) do
 			c[#c + 1] = {name .. " (" .. #tabs[name] .. ")", name}
@@ -1992,18 +2040,17 @@ function NT.entities(w)
 				M.select(e.id)
 			end
 		end
-		NT.name_item(gr, "palette", e, string.rep("    ", indent[e.id] or 0) ..
-				NT.entity_label(e) .. (e.pos and " at " .. table.concat(at, ",") or ""),
-				pick)
-		local sb = button(gr, e.id == S.primary and "Selected" or
-				S.reparent and (e.pos or NT.is_panel(e)) and "Parent" or "Select",
-				pick)
+		-- (4z37h) the row is its button: no Select, selected by its look
+		local sb = NT.name_item(gr, "palette", e, fit_name(string.rep("    ",
+				indent[e.id] or 0) .. NT.entity_label(e) .. (e.pos and " at " ..
+				table.concat(at, ",") or "")), pick, nil, S.sel[e.id] ~= nil)
 		-- For a driven click by whose it is
 		sb:SetName("select " .. e.id)
 		n = n + 1
 		ids[#ids + 1] = (indent[e.id] or 0) > 0 and
 				string.rep(">", indent[e.id]) .. e.id or e.id
 	end
+	fitted()
 	if n == 0 then
 		text(w, "None", DIM)
 	end
@@ -2761,6 +2808,8 @@ palette = function()
 		body:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
 	end
 	NT.names_list("palette", view)
+	-- (a list's rows fit this: name_fitter)
+	NT.room = room
 	local fill = tab == "Items" and NT.items or
 			tab == "Terrain" and terrain_panel or tab == "Voxels" and
 			NT.voxels or tab == "Box" and NT.box_section or
@@ -3192,6 +3241,21 @@ function NT.position_of(v)
 	return x and {tonumber(x), tonumber(y), tonumber(z)}
 end
 
+-- A points param's text (a point a line) as its list
+function NT.points_of(s)
+	local pts = {}
+	for line in tostring(s):gmatch("[^\n]+") do
+		local p = {}
+		for x in line:gmatch("%S+") do
+			p[#p + 1] = tonumber(x)
+		end
+		if #p > 0 then
+			pts[#pts + 1] = p
+		end
+	end
+	return pts
+end
+
 -- What Apply does: e's component ci's pending values sent and dropped.
 -- Returns the client's own refusal (a position not three numbers), if any
 function NT.apply_params(e, ci, decl)
@@ -3199,6 +3263,8 @@ function NT.apply_params(e, ci, decl)
 	for k, v in pairs(E.pending[key] or {}) do
 		if decl[k] and decl[k].type == "position" then
 			v = NT.position_of(v)
+		elseif decl[k] and decl[k].type == "points" and type(v) == "string" then
+			v = NT.points_of(v)
 		end
 		if v == nil then
 			bad = k .. ": three numbers"
@@ -3471,7 +3537,8 @@ function NT.params_form(w, e, ci, c, t, keep)
 	-- simplified: no point editing of a standing one in other games (their 2D is
 	-- the plan)
 	for _, k in ipairs(points) do
-		local r, v = row(w), values[k] or decl[k].default
+		-- (the params' own: a typed list not set yet is pending's text)
+		local r, v = row(w), (c.params or {})[k] or decl[k].default
 		label(r, k:upper() .. ": " .. (type(v) == "table" and #v or 0))
 		if M.side_game() or e.pos and (decl[k].level or
 				NT.pg.flat(NT.drawn_turn(e))) then
@@ -3495,9 +3562,14 @@ function NT.params_form(w, e, ci, c, t, keep)
 				end
 				lines[#lines + 1] = table.concat(ns, " ")
 			end
-			local now = table.concat(lines, "\n")
+			-- (4z37h) typed and not set: pending, as a field's, which leaving
+			-- the inspector asks of (M.ask_unapplied)
+			local was = table.concat(lines, "\n")
+			local now = type(values[k]) == "string" and values[k] or was
 			local f = edit(row(w), now, function(s)
 				now = s
+				E.pending[key] = E.pending[key] or {}
+				E.pending[key][k] = s ~= was and s or nil
 			end)
 			f:SetName("points " .. k)
 			f.multiLine = true
@@ -3507,15 +3579,9 @@ function NT.params_form(w, e, ci, c, t, keep)
 			f:SetFixedHeight(160)
 			f.cursorPosition = 0
 			button(w, "Set " .. k, function()
-				local pts = {}
-				for line in now:gmatch("[^\n]+") do
-					local p = {}
-					for x in line:gmatch("%S+") do
-						p[#p + 1] = tonumber(x)
-					end
-					if #p > 0 then
-						pts[#pts + 1] = p
-					end
+				local pts = NT.points_of(now)
+				if E.pending[key] then
+					E.pending[key][k] = nil
 				end
 				log:info("kit editor: " .. key .. " " .. k .. " set, " .. #pts ..
 						" points")
@@ -5884,6 +5950,11 @@ function NT.palette_chosen(item)
 end
 
 local function select(id, add, by_tab)
+	-- (4z37h) the inspector left with edits not applied: asked first
+	if not add and S.primary and S.primary ~= id and M.ask_unapplied(
+			S.primary, function() select(id, add, by_tab) end) then
+		return
+	end
 	if not add then
 		S.sel = {}
 	end
@@ -6047,6 +6118,54 @@ local function prefab_dialog(ids)
 end
 
 M.prefab_dialog = prefab_dialog
+
+-- (4z37h) The inspector left (another selection, none, play mode) with an
+-- entity's edits not applied (E.pending: fields, a points list typed):
+-- Save (applied), Discard or Cancel, then go() for the first two. False
+-- (go not called) when there is nothing to ask of. The user's: "asking
+-- with a dialog whether to save or discard when leaving the inspector"
+function M.ask_unapplied(id, go)
+	local e = find(id)
+	local keys, n = {}, 0
+	for key, t in pairs(E.pending) do
+		local kid = tonumber(tostring(key):match("^(%d+)/"))
+		if kid == id and next(t) then
+			keys[#keys + 1] = key
+			for _ in pairs(t) do
+				n = n + 1
+			end
+		end
+	end
+	if not e or n == 0 then
+		return false
+	end
+	local function done(save)
+		drop("dialog")
+		for _, key in ipairs(keys) do
+			local ci = tonumber(key:match("/(%d+)$"))
+			local c = ci and (e.components or {})[ci]
+			if save and c then
+				NT.apply_params(e, ci, type_of(c.type).params or {})
+			end
+			E.pending[key] = nil
+		end
+		log:info("kit editor: unapplied edits of " .. id ..
+				(save and " saved" or " discarded"))
+		go()
+	end
+	local w, br = dialog("Unapplied edits")
+	text(w, NT.entity_label(e) .. ": " ..
+			n .. (n == 1 and " edit" or " edits") .. " not applied")
+	br = br or row(w)
+	button(br, "Save", function() done(true) end):SetName("unapplied save")
+	button(br, "Discard", function() done(false) end):SetName("unapplied discard")
+	button(br, "Cancel", function()
+		drop("dialog")
+		log:info("kit editor: unapplied edits of " .. id .. " kept")
+	end):SetName("unapplied cancel")
+	log:info("kit editor: unapplied edits of " .. id .. ": " .. n .. " asked")
+	return true
+end
 
 -- [KIT_SCENES] The scene edited switched (the server takes the builder
 -- there), and a new one made: its World the current one's copied, or none
@@ -6233,8 +6352,18 @@ function M.scenes_dialog()
 		if depth > 0 then
 			r:CreateChild("UIElement"):SetFixedWidth(20 * depth)
 		end
-		cell(1, label(r, n .. (listed[n] and " (listed)" or " (not listed)")),
-				depth > 0 and 20 * depth + 4 or 0)
+		-- (4z37h) the name a thing to pick: to that scene, the one edited
+		-- selected
+		local nb, nt = button(r, n .. (listed[n] and " (listed)" or
+				" (not listed)"), function()
+			drop("dialog")
+			if n ~= current_scene() then
+				M.switch_scene(n)
+			end
+		end)
+		ui_utils.selectable(nb, nt, n == current_scene())
+		nb:SetName("scene " .. n)
+		cell(1, nb, depth > 0 and 20 * depth + 4 or 0)
 		-- (button() returns its Text too: one value into cell)
 		cell(2, (button(r, listed[n] and "Unlist" or "List", function()
 			log:info("kit editor: " .. (listed[n] and "unlist " or "list ") .. n)

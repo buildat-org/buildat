@@ -219,12 +219,17 @@ function NT.names_list(key, view)
 end
 
 function NT.name_item(parent, key, e, s, fn, color, selected)
-	local b, t = item(parent, s, function()
+	local b, t = button(parent, s, function()
 		-- (the finger held for the menu: not a click)
 		if not SG.tip_used() then
 			fn()
 		end
-	end, color, selected)
+	end)
+	-- (4z37h) a thing to pick, selected amber: Kit's lists alike
+	ui_utils.selectable(b, t, selected)
+	if color then
+		t:SetColor(color)
+	end
 	local l = NAMES[key]
 	if l then
 		l.items[#l.items + 1] = {b = b, id = e.id, key = key}

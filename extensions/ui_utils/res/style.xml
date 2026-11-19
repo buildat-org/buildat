@@ -24,6 +24,19 @@
     <element type="ListItemSelected" style="ListItem" auto="false">
         <attribute name="Image Rect" value="32 112 48 128" />
     </element>
+    <!-- (4z37h) A thing to pick (ui_utils.selectable): a light cyan fill,
+         stronger under the pointer or pressed; selected amber with a bar at
+         its left edge (not by colour alone) -->
+    <element type="Selectable" style="BorderImage" auto="false">
+        <attribute name="Image Rect" value="64 112 80 128" />
+        <attribute name="Border" value="4 4 4 4" />
+        <attribute name="Hover Image Offset" value="16 0" />
+        <attribute name="Pressed Image Offset" value="16 0" />
+        <attribute name="Pressed Child Offset" value="0 0" />
+    </element>
+    <element type="SelectableSelected" style="Selectable" auto="false">
+        <attribute name="Image Rect" value="96 112 112 128" />
+    </element>
     <element type="CheckBox" style="BorderImage">
         <attribute name="Min Size" value="16 16" />
         <attribute name="Max Size" value="16 16" />
