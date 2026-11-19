@@ -57,6 +57,10 @@ cleanup() {
 trap cleanup EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 api() { curl -s -m 10 "$@"; }
+# The list as this build's client asks for it: an alpha's listings are
+# served only to a client of that very alpha ([ALPHA_BUILDS])
+ver=$(cat "$here/VERSION")
+served() { api -d "{\"version\":\"$ver\"}" "localhost:$SP/api/v1/list"; }
 
 mkdir -p "$tmp/sp" "$tmp/an/apps/floorplanner" "$tmp/an2/apps/floorplanner" \
 	"$tmp/cl"
@@ -109,7 +113,7 @@ echo "ok: listed as $id and verified"
 	"localhost:$AN/api/v1/starport/challenge?listing=$id&nonce=claim")" = 404 ] ||
 	fail "the challenge answered for the nonce \"claim\""
 
-api "localhost:$SP/api/v1/list" | grep -q "\"$id\"" &&
+served | grep -q "\"$id\"" &&
 	fail "an unclaimed listing was served"
 echo "ok: unclaimed, not served"
 # A port out of int64's range is refused, not cast ([REWORK_FIXES])
@@ -141,7 +145,7 @@ BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":
 n=$(grep -c 'sp: {"id":[0-9]*,"ok":true' "$tmp/cl.log")
 [ "$n" -ge 5 ] || fail "$n of 5 commands went through (cl.log)"
 
-api "localhost:$SP/api/v1/list" | grep -q "\"$id\"" ||
+served | grep -q "\"$id\"" ||
 	fail "the claimed listing is not served"
 echo "ok: claimed and served"
 
@@ -164,7 +168,7 @@ for _ in $(seq 300); do
 	kill -0 "${pids[-1]}" 2>/dev/null || break
 	sleep 0.2
 done
-api "localhost:$SP/api/v1/list" | python3 -c "
+served | python3 -c "
 import json, sys
 s = [x for x in json.load(sys.stdin)['servers'] if x['name'] == 'Check main']
 assert s and s[0]['fleet']['name'] == 'Check fleet' and s[0]['pool'] == 'main', s
@@ -174,9 +178,9 @@ echo "ok: a server joined the fleet by its config line"
 # id and secret: an unknown kind is listed as "other", an unknown key
 # passed on in the list. Then the server's own announce (its config
 # touched) puts the listing back as it was
-python3 - "$SP" "$AN2" "$tmp/an2/apps/floorplanner" <<'PY' ||
+python3 - "$SP" "$AN2" "$tmp/an2/apps/floorplanner" "$ver" <<'PY' ||
 import json, sys, urllib.request
-sp, port, d = sys.argv[1:]
+sp, port, d, ver = sys.argv[1:]
 B = "http://127.0.0.1:%s/api/v1/" % sp
 st = list(json.load(open(d + "/starport_state.json")).values())[0]
 b = json.load(open(d + "/starport.json"))
@@ -186,7 +190,8 @@ b.update(id=st["id"], secret=st["secret"], port=int(port), login="both",
         kind="warp", warp_speed=9)
 a = json.loads(urllib.request.urlopen(B + "announce", json.dumps(b).encode()).read())
 assert a.get("ok"), a
-s = [x for x in json.loads(urllib.request.urlopen(B + "list").read())["servers"]
+s = [x for x in json.loads(urllib.request.urlopen(B + "list",
+        json.dumps({"version": ver}).encode()).read())["servers"]
         if x["name"] == "Check main"]
 assert s and s[0]["kind"] == "other" and s[0]["warp_speed"] == 9, s
 PY
@@ -195,7 +200,7 @@ echo " " >> "$tmp/an2/apps/floorplanner/starport.json"
 back=
 # Once a second: the Starport answers an address 60 lists a minute
 for _ in $(seq 30); do
-	api "localhost:$SP/api/v1/list" | python3 -c 'import json, sys
+	served | python3 -c 'import json, sys
 s = [x for x in json.load(sys.stdin)["servers"] if x["name"] == "Check main"]
 sys.exit(0 if s and s[0]["kind"] != "other" and "warp_speed" not in s[0] else 1)' &&
 		{ back=1; break; }
@@ -205,14 +210,14 @@ done
 echo "ok: a newer announce's kind listed as \"other\", its unknown key passed on"
 # 10g: access from the Accounts settings, not the file's "open": invite
 # only (a server the launcher did not start), with IDs or without
-api "localhost:$SP/api/v1/list" | python3 -c "
+served | python3 -c "
 import json, sys
 a = {x['name']: x['access'] for x in json.load(sys.stdin)['servers']}
 assert a.get('Check main') == 'starport' and a.get('Check house') == 'invite', a
 " || fail "access is not derived from the Accounts settings"
 echo "ok: access from the Accounts settings: starport, invite"
 
-token=$(python3 - "$SP" <<'PY'
+token=$(python3 - "$SP" "$ver" <<'PY'
 import json, sys, time, urllib.request
 B = "http://127.0.0.1:%s/api/v1/" % sys.argv[1]
 def call(w, **k):
@@ -224,7 +229,8 @@ r = call("id/register", name="grown", password="secret1", birth_year=y - 40)
 assert r["ok"] and r["result"]["me"]["adult"] and \
 		"birth_year" not in r["result"]["me"], r
 s = r["result"]["session"]
-lid = [x["id"] for x in call("list")["servers"] if x["name"] == "Check main"][0]
+lid = [x["id"] for x in call("list", version=sys.argv[2])["servers"]
+        if x["name"] == "Check main"][0]
 r = call("id/token", session=s, listing=lid)
 assert r["ok"] and r["result"]["need_name"], r
 r = call("id/token", session=s, listing=lid, name="grownup")
@@ -348,10 +354,10 @@ json.dump(c, open(sys.argv[1], "w"))
 PY
 # Once a second: the Starport answers an address 60 lists a minute
 for _ in $(seq 30); do
-	api "localhost:$SP/api/v1/list" | grep -q '"Check main"' || break
+	served | grep -q '"Check main"' || break
 	sleep 1
 done
-api "localhost:$SP/api/v1/list" | grep -q '"Check main"' &&
+served | grep -q '"Check main"' &&
 	fail "an unlisted server is still in the list"
 echo "ok: unlisted, out of the list, by the watched file alone"
 tokens=$(python3 - "$SP" "$AN2" <<'PY'
@@ -384,10 +390,10 @@ json.dump(c, open(sys.argv[1], "w"))
 PY
 # Once a second: the Starport answers an address 60 lists a minute
 for _ in $(seq 30); do
-	api "localhost:$SP/api/v1/list" | grep -q '"Check house"' || break
+	served | grep -q '"Check house"' || break
 	sleep 1
 done
-api "localhost:$SP/api/v1/list" | grep -q '"Check house"' &&
+served | grep -q '"Check house"' &&
 	fail "a removed Starport still lists the server"
 grep -q "Withdrawn from" "$tmp/an.log" ||
 	fail "no withdrawal in an.log"
