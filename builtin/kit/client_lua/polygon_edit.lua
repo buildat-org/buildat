@@ -407,9 +407,9 @@ function G.guide(g, mx, my)
 	end
 	local p = pointer_at(mx, my, dr.d)
 	g.left = #dr.pts >= 3 and under(dr.pts[1], mx, my) and "close the polygon" or
-			p and string.format("a point of the polygon at %g,%g", uv(p)) or nil
+			p and string.format("add a point at %g,%g", uv(p)) or nil
 	g.right = "stop drawing"
-	g.note = not S.touch and "Enter: close it, Backspace: its last point back, " ..
+	g.note = not S.touch and "Enter: close it, Backspace: remove the last point, " ..
 			"Esc: stop" or nil
 	return g
 end

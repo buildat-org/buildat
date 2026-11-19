@@ -385,7 +385,7 @@ step 10 "kit editor: the tip of remove menu at .*: The scene you're editing: swi
 	'click Button "remove menu"'
 step 10 "kit editor: the tip of remove racing at .*: Has scenes under it" \
 	'click Button "remove racing"'
-step 10 "kit editor: the tip of remove world at .*: The first scene: always kept" \
+step 10 "kit editor: the tip of remove world at .*: The first scene is always kept" \
 	'click Button "remove world"'
 cmd "frames 10"
 ! tail -c +$((m + 1)) "$CL" | grep -qa "kit editor: remove the scene" ||

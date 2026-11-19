@@ -812,7 +812,7 @@ par()
 }
 near() { awk -v a="$1" -v b="$2" -v e="$3" 'BEGIN { exit !((a - b) ^ 2 <= e * e) }'; }
 grep -aq "kit editor: placed kit/parallax at" "$p" || fail "kit/parallax not placed from the palette ($p)"
-grep -aq "kit editor: $CP: Under parallax layer .*Shown here where authored" "$p" ||
+grep -aq "kit editor: $CP: Under parallax layer .*Shown here where it was placed" "$p" ||
 	fail "no inspector note on $CP under $LP ($p)"
 grep -aq "kit editor: $CP: collision (none: under a parallax layer)" "$p" ||
 	fail "the collision row of $CP under $LP not marked ($p)"

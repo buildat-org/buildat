@@ -287,7 +287,7 @@ screenshot @T@/hud_lobby.png
 click DropDownList "hud shape"
 wait_log 10000 hud shape open
 frames 3
-click Text "hud shape: The room left"
+click Text "hud shape: Available space"
 wait_log 10000 kit editor: the HUD view's shape is fit
 frames 5
 event kit_edit {"op": "set", "id": 14, "comp": 0, "param": "text", "value": "Builder done"}

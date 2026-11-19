@@ -834,16 +834,16 @@ local function add_steps(body, e)
 	end
 	local other = a.other and find(a.other)
 	local steps = a.into and {
-		{"source", "its source", function() return others(output_choices) end,
+		{"source", "pick a source", function() return others(output_choices) end,
 			"other"},
-		{"output", "the source's output", function()
+		{"output", "pick the source's output", function()
 			return output_choices(other or {})
 		end, "out"},
 	} or {
-		{"output", "an output", function() return output_choices(e) end, "out"},
-		{"target", "its target", function() return others(input_choices) end,
+		{"output", "pick an output", function() return output_choices(e) end, "out"},
+		{"target", "pick a target", function() return others(input_choices) end,
 			"other"},
-		{"input", "the target's input", function()
+		{"input", "pick the target's input", function()
 			return input_choices(other)
 		end, "input"},
 	}
@@ -870,7 +870,7 @@ local function add_steps(body, e)
 		SG.add = nil
 		return
 	end
-	text(body, "Add link, " .. n .. " of " .. #steps .. ": " .. step[2],
+	text(body, "Add link, step " .. n .. " of " .. #steps .. ": " .. step[2],
 			LIVE_COLOR)
 	local choices = step[3]()
 	for _, c in ipairs(choices) do
@@ -944,7 +944,7 @@ local function add_form(body, e)
 	tight(r, "Link", function()
 		local comp, output = tostring(a.out):match("^(%d+) (.*)$")
 		if not (comp and a.other and a.input) then
-			E.status = "Add link: an output, " .. (a.into and "a source" or "a target") ..
+			E.status = "Add link: pick an output, " .. (a.into and "a source" or "a target") ..
 					" and an input"
 			return SG.status()
 		end
@@ -1416,7 +1416,7 @@ function SG.links()
 			return
 		end
 		if is_made then
-			text(body, "Made in play or a player: its links are not edited", DIM)
+			text(body, "Made in play, or a player: its links can't be edited", DIM)
 			return
 		end
 		-- Its name, what is typed kept as the table is drawn again

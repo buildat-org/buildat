@@ -403,7 +403,7 @@ EOF
 	cat <<'EOF'
 event kit_select 14
 frames 3
-click Button "Placing under this: stop"
+click Button "Stop placing under this"
 wait_log 5000 kit editor: placing under the scene
 frames 3
 EOF

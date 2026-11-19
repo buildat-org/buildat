@@ -300,7 +300,7 @@ click Button "End"
 wait_log 10000 kit editor: the server is Ended (by kitboss)
 wait_log_any 10000 replicated: entity 17 presses = 0
 wait_log_any 30000 kit editor: state: 20 entities
-wait_log_any 10000 kit: builds discarded: Your builds while playing were discarded.
+wait_log_any 10000 kit: builds discarded: Your builds made during play were discarded.
 frames 3
 screenshot @T@/stopped.png
 delay 1000
@@ -337,7 +337,7 @@ wait_log 10000 kit editor: selected 3
 keypress b
 wait_log 10000 replicated: entity 4 open = true
 wait_log 60000 kit editor: the server is Ended (by kitboss)
-wait_log_any 10000 kit: builds discarded: Builds while playing were discarded (kitboss 1).
+wait_log_any 10000 kit: builds discarded: Builds made during play were discarded (kitboss 1).
 event kit_edit {"op": "place", "type": "sample_kit/marker", "pos": [0, 1, 0]}
 wait_log 10000 kit editor: state: 20 entities
 keypress b
