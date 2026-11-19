@@ -700,7 +700,7 @@ client bob bobpass1234 "$t/bob14.log" "{\"cmd\":\"new_thread\",\"topic\":$DT,\"t
 {\"cmd\":\"reply\",\"thread\":$DTH,\"body\":\"Nice entry\"}
 {\"cmd\":\"topic\",\"topic\":$DT}
 {\"cmd\":\"topic_mod_threads\",\"topic\":$DT,\"on\":false}"
-answer "$t/bob14.log" 1001 | grep -q "only a Steward starts a thread in Devlog" ||
+answer "$t/bob14.log" 1001 | grep -q "only a Steward can start a thread in Devlog" ||
 	fail "bob's thread in the devlog: $(answer "$t/bob14.log" 1001)"
 answer "$t/bob14.log" 1002 | grep -q '"ok":true' ||
 	fail "bob's reply in the devlog: $(answer "$t/bob14.log" 1002)"
