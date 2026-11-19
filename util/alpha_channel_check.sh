@@ -342,12 +342,17 @@ export GIT_AUTHOR_NAME=c GIT_AUTHOR_EMAIL=c@example.org GIT_COMMITTER_NAME=c GIT
 mkdir -p "$t/bin"
 cat > "$t/bin/gh" <<G
 #!/bin/sh
+# release view: a release for each tag but gh.norelease's (unlogged)
+if [ "\$1 \$2" = "release view" ]; then
+	! grep -qxF "\$3" "$t/gh.norelease" 2>/dev/null
+	exit
+fi
 echo "\$*" >> "$t/gh.log"
 exit \$(cat "$t/gh.status" 2>/dev/null || echo 0)
 G
 chmod +x "$t/bin/gh"
 fresh() { # a repository at version $1 with bare remotes
-	rm -rf "$t/repo" "$t/gh.git" "$t/bb.git" "$t/gh.log" "$t/gh.status"
+	rm -rf "$t/repo" "$t/gh.git" "$t/bb.git" "$t/gh.log" "$t/gh.status" "$t/gh.norelease"
 	git init -q --bare "$t/gh.git"
 	git init -q --bare "$t/bb.git"
 	git init -q -b dev "$t/repo"
@@ -401,14 +406,17 @@ for x in v0.8.0-alpha.5 v0.8.0-alpha.6 v0.8.0-alpha.7 v0.8.0-alpha.8 v0.8.0-alph
 done
 echo 0.8.0-alpha.11 > "$t/repo/VERSION"
 git -C "$t/repo" commit -q -m set -- VERSION
+# (alpha.1's package run failed: no release, its tag deleted by a push)
+echo v0.8.0-alpha.1 > "$t/gh.norelease"
 r alpha > "$t/r3.log" 2>&1 || fail "alpha.12: $(cat "$t/r3.log")"
 [ "$(ver)" = 0.8.0-alpha.12 ] || fail "after alpha.11 came $(ver)"
 want="release delete v0.7.0-alpha.20 --repo o/r --cleanup-tag --yes
-release delete v0.8.0-alpha.1 --repo o/r --cleanup-tag --yes
 release delete v0.8.0-alpha.5 --repo o/r --cleanup-tag --yes
 release delete v0.8.0-alpha.6 --repo o/r --cleanup-tag --yes
 release delete v0.8.0-alpha.7 --repo o/r --cleanup-tag --yes"
 [ "$(cat "$t/gh.log")" = "$want" ] || fail "the prune: $(cat "$t/gh.log")"
+! git -C "$t/gh.git" rev-parse -q --verify refs/tags/v0.8.0-alpha.1 > /dev/null ||
+	fail "alpha.1's tag (no release) not deleted"
 rm -f "$t/gh.log"
 echo 1 > "$t/gh.status"
 r alpha > "$t/r4.log" 2>&1 || fail "gh failing failed the release: $(cat "$t/r4.log")"
