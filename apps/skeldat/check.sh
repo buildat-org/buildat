@@ -2959,7 +2959,7 @@ PY
 # no shelter line. A skeleton in lava (walled in) burns in lava 4 hp a
 # second (two burns a second apart at least: a test marker over a voxel
 # not loaded yet floats, and the lava can run out), no "is in water"; one
-# in water dies at once. The fixtures clear of seed 2's trees (tree_at;
+# in water (walled in as well) dies at once. The fixtures clear of seed 2's trees (tree_at;
 # (29,3) and (-23,-22) the nearest, (32,25) the cave skeleton's), whose
 # sections can be made after a marker went up and put a crown through a
 # room.
@@ -3006,7 +3006,11 @@ lava=$(for dz in -2 -1 0 1 2; do for dx in -2 -1 0 1 2; do
 # The player in a stone column 3 high, roofed, which no arrow passes
 box=$(for d in "-1 -1" "0 -1" "1 -1" "-1 0" "1 0" "-1 1" "0 1" "1 1"; do
 	for k in 1 2 3; do printf 'marker %s skeldat:stone 0; ' "$d"; done; done)
-test="$box$(room 30 -6 x)$(room 0 30 z)${lava}marker 20 -20 skeldat:water_source; "
+# The water walled in too, and its skeleton with it: on the open flat the
+# water spreads and the skeleton walks off at once (for the room's
+# shelter), and in a loaded run its body was first stepped out of it
+pond=$(walls "19 -21" "20 -21" "21 -21" "19 -20" "21 -20" "19 -19" "20 -19" "21 -19")
+test="$box$(room 30 -6 x)$(room 0 30 z)${lava}${pond}marker 20 -20 skeldat:water_source; "
 test="${test}marker 0 0 skeldat:stone 2; "
 test="${test}skeleton 36 -6; skeleton -25 0 marked; skeleton 0 31; cave_skeleton 34 32; skeleton -12 -20; skeleton 20 -20"
 # [SKELDAT_CHECK_WAITS] The lava's burns are read by the log's times, and
