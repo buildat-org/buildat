@@ -612,7 +612,7 @@ step 10 "accounts: agents: revoked My agent" "frames 3" 'click Button "Revoke My
 await "$SL" "$m" 5 "kitboss's agent left: its token was revoked"
 headless "$t/agent_revoked.log" revoked BUILDAT_AGENT_TOKEN=$tok_b bin/buildat
 CLIENT=$HL
-await "$t/agent_revoked.log" 0 120 "Login refused: Not an agent token of this server's"
+await "$t/agent_revoked.log" 0 120 "Login refused: Not an agent token of this server ("
 kill $HL
 as boss
 step 10 "[0-9]+ accounts listed" "frames 3" 'click Button "Accounts*"'

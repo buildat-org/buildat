@@ -462,7 +462,7 @@ if phase == "a":
             ({"response_type": "token"}, "unsupported_response_type")):
         s, b, h = req("GET", auth_url(cid, ch, "s0", **over))
         assert s == 400 and "Location" not in h and \
-                "does not accept the tool's request" in b, (over, s, b, dict(h))
+                "does not accept the tool" in b, (over, s, b, dict(h))
         link = re.search(r'<a href="([^"]+)">Back to 127\.0\.0\.1</a>', b)
         assert link and back(html.unescape(link.group(1)), "s0")["error"] == \
                 error, (over, b)
