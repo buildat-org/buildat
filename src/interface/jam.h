@@ -22,6 +22,8 @@ namespace interface
 	{
 		static const int RATE = 44100;
 		static const size_t MAX_TEXT = 65536;
+		// A WAV's length at most: 50 MiB of 16-bit stereo
+		static constexpr double MAX_WAV_SECONDS = 300;
 
 		struct Song;
 
@@ -84,6 +86,10 @@ namespace interface
 		// from the start; track: that one alone
 		ss_ analyze(const Song &song, double seconds, const ss_ &mood,
 				const ss_ &track);
+		// [JAM_APP] A WAV file (16-bit stereo, RATE) of the song's first
+		// seconds, at most MAX_WAV_SECONDS (0: its play order once through),
+		// in mood; "" for no such mood
+		ss_ wav(const Song &song, double seconds, const ss_ &mood);
 	}
 }
 // vim: set noet ts=4 sw=4:

@@ -331,6 +331,9 @@ struct Inst
 	int ftype = 0, poles = 2;
 	double cut = 2000, res = 0.2, fenv = 0, fa = 0.002, fd = 0.3, fs = 0,
 			fr = 0.1, ktrack = 0.5, velf = 0.5, drive = 0;
+	// [JAM_APP] the filter's LFO: flfo octaves either way at flforate Hz, on
+	// the song's timeline (not the note's): a sweep across notes and loops
+	double flfo = 0, flforate = 0.1;
 	bool drum() const
 	{
 		return src == S_KICK || src == S_SNARE || src == S_HAT ||
@@ -371,7 +374,8 @@ static const NumKey INST_KEYS[] = {
 	{"fenv", &Inst::fenv, -10, 10}, {"fa", &Inst::fa, 0, 30},
 	{"fd", &Inst::fd, 0, 60}, {"fs", &Inst::fs, 0, 1}, {"fr", &Inst::fr, 0, 60},
 	{"ktrack", &Inst::ktrack, -2, 2}, {"velf", &Inst::velf, -4, 4},
-	{"drive", &Inst::drive, 0, 60},
+	{"drive", &Inst::drive, 0, 60}, {"flfo", &Inst::flfo, -8, 8},
+	{"flforate", &Inst::flforate, 0, 20},
 };
 
 struct TrackP
@@ -432,6 +436,7 @@ struct Event
 	int track = 0, inst = 0, nn = 0;
 	double notes[MAX_NOTES] = {0};
 	double vel = 0, len = 0;
+	double chance = 1; // [JAM_APP] %N: played on N % of the passes
 	bool mute = false, slide = false, stacc = false, glide = false, open = false;
 };
 
@@ -998,8 +1003,25 @@ struct Parser
 			if(j > at + 1 && number(mods.substr(at + 1, j - at - 1), &v))
 				e.vel = v; // (capped at 1 after the velocity's random part)
 		}
+		// [JAM_APP] %N: the note played on N % of the passes over it, drawn
+		// from the track's seed, the note's time and the pass (so a loop
+		// varies, the same every time it is played)
+		size_t pc = mods.find('%');
+		if(pc != ss_::npos){
+			size_t j = pc + 1;
+			while(j < mods.size() && (isdigit((unsigned char)mods[j]) ||
+					mods[j] == '.'))
+				j++;
+			double v = -1;
+			if(j == pc + 1 || !number(mods.substr(pc + 1, j - pc - 1), &v) ||
+					v < 0 || v > 100){
+				ln = tk0.line;
+				err("token " + tk0.s.substr(0, 40) + ": % takes 0..100");
+			}
+			e.chance = v / 100;
+		}
 		for(char c : mods)
-			if(!strchr("!?@.0123456789m~'", c)){
+			if(!strchr("!?@.0123456789m~'%", c)){
 				ln = tk0.line;
 				err("token " + tk0.s.substr(0, 40) + ": unknown modifier " +
 						ss_(1, c));
@@ -1046,7 +1068,9 @@ struct Parser
 				int ti = (int)(std::find(song.track_names.begin(),
 						song.track_names.end(), tr) - song.track_names.begin());
 				const TrackP &tp = song.tracks[ti];
-				const Inst &inst = song.insts[tp.inst];
+				// (a copy: inst_with() below grows insts, which moved a
+				// reference's instrument away mid-lane)
+				const Inst inst = song.insts[tp.inst];
 				const sv_<Tok> &toks = pat.lanes.at(tr);
 				const int64_t seed = tp.has("seed") ? (int64_t)tp.seed : ti + 1;
 				const double hum = tp.hum * rate / 1000;
@@ -1227,7 +1251,7 @@ struct Voice
 	double midi = 0, vel = 0, lf = 0, lt = 0, gate = 0, t = 0, iv = 0;
 	int32_t rng = 1;
 	bool mute = false, open = false, killed = false, done = false;
-	int64_t offset = 0;
+	int64_t offset = 0, t0 = 0; // t0: the timeline's sample it starts on
 	double level = 0, env = 0, ainc = 0, dc = 0, rc = 0, dg = 0;
 	int stage = 1;
 	int fmode = 0, fstage = 1;
@@ -1579,7 +1603,11 @@ static void voice_render(Voice &v, double *out, int n, double *fbuf,
 					fenv = p.fs + (fenv - p.fs) * v.fdc;
 				else
 					fenv = fenv * v.frc;
-				c = svf_coef(p.cut * exp2_(p.fenv * fenv + key), p.res);
+				double o = p.fenv * fenv + key;
+				if(p.flfo != 0)
+					o = o + p.flfo * sin_ph(p.flforate / RATE *
+							(double)(v.t0 + (int64_t)t + i));
+				c = svf_coef(p.cut * exp2_(o), p.res);
 			}
 			double v0 = sbuf[i];
 			double v3 = v0 - ic2;
@@ -1872,6 +1900,7 @@ struct EngineImpl
 	float outL[BLOCK], outR[BLOCK];
 	int out_at = BLOCK; // the next unread sample of out
 	int64_t pos = 0, abs = 0; // the song's sample, the timeline's
+	int64_t pass = 0; // the times the loop has wrapped (%N's draw)
 	size_t ei = 0;
 	bool pending = false;
 	int64_t pending_at = 0, mood_at = -1;
@@ -2045,6 +2074,11 @@ struct EngineImpl
 		Track &tr = tracks[e.track];
 		const TrackP &tp = S.tracks[e.track];
 		const Inst *inst = &S.insts[e.inst];
+		if(e.chance < 1){
+			int32_t s = hash3(tr.seed, e.t, pass);
+			if((rnd(s) + 1) / 2 >= e.chance)
+				return;
+		}
 		if(e.glide){
 			for(Voice *v : tr.voices)
 				if(v->gate > 0 && !v->killed){
@@ -2076,6 +2110,7 @@ struct EngineImpl
 				v->iv = iv + tp.transpose + cents / 100;
 				v->offset = offset + (int64_t)std::floor((k - 1) * inst->strum *
 						RATE);
+				v->t0 = abs + v->offset;
 				tr.voices.push_back(v);
 			}
 	}
@@ -2113,6 +2148,7 @@ struct EngineImpl
 			if(pos >= S.end_t){
 				pos = S.loop_t;
 				ei = S.loop_ei;
+				pass++;
 			}
 		}
 		for(Track &t : tracks) process(t, n);
@@ -2158,6 +2194,7 @@ struct EngineImpl
 		}
 		abs = at;
 		pos = song_sample(S, at);
+		pass = at < S.end_t ? 0 : (at - S.loop_t) / (S.end_t - S.loop_t);
 		ei = std::lower_bound(S.events.begin(), S.events.end(), pos,
 				[](const Event &e, int64_t p){ return e.t < p; }) -
 				S.events.begin();
@@ -2409,6 +2446,46 @@ ss_ bands_json(const Loudness &L)
 	return o + "}";
 }
 } // namespace
+
+// [JAM_APP] A WAV file's bytes: 16-bit stereo at RATE, the first seconds
+// (the play order once through when 0) in mood; "" when there is no such mood
+ss_ wav(const Song &song0, double seconds, const ss_ &mood)
+{
+	auto copy = std::make_shared<Song>(song0);
+	Engine e(copy);
+	if(!e.set_mood(mood, true))
+		return "";
+	int64_t n = (int64_t)std::floor(std::min(seconds > 0 ? seconds :
+			(double)copy->end_t / RATE, MAX_WAV_SECONDS) * RATE);
+	ss_ o(44 + n * 4, '\0');
+	auto u32 = [&](size_t at, uint32_t v){
+		for(int i = 0; i < 4; i++) o[at + i] = (char)((v >> (8 * i)) & 255);
+	};
+	memcpy(&o[0], "RIFF", 4);
+	u32(4, (uint32_t)(36 + n * 4));
+	memcpy(&o[8], "WAVEfmt ", 8);
+	u32(16, 16);
+	u32(20, 1 | (2 << 16)); // PCM, 2 channels
+	u32(24, RATE);
+	u32(28, RATE * 4);
+	u32(32, 4 | (16 << 16)); // 4 bytes a frame, 16 bits
+	memcpy(&o[36], "data", 4);
+	u32(40, (uint32_t)(n * 4));
+	float l[BLOCK], r[BLOCK];
+	size_t at = 44;
+	for(int64_t done = 0; done < n; done += BLOCK){
+		int k = (int)std::min<int64_t>(BLOCK, n - done);
+		e.render(l, r, k);
+		for(int i = 0; i < k; i++)
+			for(float x : {l[i], r[i]}){
+				int s = (int)std::floor(std::max(-1.0, std::min(1.0,
+						(double)x)) * 32767 + 0.5);
+				o[at++] = (char)(s & 255);
+				o[at++] = (char)((s >> 8) & 255);
+			}
+	}
+	return o;
+}
 
 ss_ analyze(const Song &song0, double seconds, const ss_ &mood,
 		const ss_ &track)

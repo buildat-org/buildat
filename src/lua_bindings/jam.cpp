@@ -616,6 +616,25 @@ static int l_analyze(lua_State *L)
 	return 1;
 }
 
+// [JAM_APP] song:wav([seconds[, mood]]) -> a WAV file's bytes (16-bit
+// stereo, 44100 Hz): the first seconds (the play order once through), at
+// most 300, or nil and why
+static int l_wav(lua_State *L)
+{
+	Song *s = check<Song>(L, 1, SONG, "song");
+	double sec = lua_isnoneornil(L, 2) ? 0 : number_at(L, 2, "seconds", 0,
+			jam::MAX_WAV_SECONDS);
+	ss_ mood = opt_string(L, 3, "the mood", 64);
+	ss_ w = jam::wav(*s->s, sec, mood);
+	if(w.empty()){
+		lua_pushnil(L);
+		lua_pushstring(L, ("no mood " + mood).c_str());
+		return 2;
+	}
+	lua_pushlstring(L, w.data(), w.size());
+	return 1;
+}
+
 // The SoundSource a sandbox passes: its wrapper's metatable holds the
 // unsafe instance (client/core/magic_sandbox), and tolua says what it is
 static SoundSource* source_at(lua_State *L, int index)
@@ -756,6 +775,7 @@ void init_jam(lua_State *L)
 	static const luaL_Reg song_methods[] = {
 		{"info", guarded<l_info>},
 		{"analyze", guarded<l_analyze>},
+		{"wav", guarded<l_wav>},
 		{"play", guarded<l_play>},
 		{nullptr, nullptr},
 	};

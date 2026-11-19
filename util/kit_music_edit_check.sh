@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-11-19)
-# covers: builtin/kit/client_lua/music_edit.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua src/impl/jam.cpp extensions/jam/songs.lua
-# drives: builtin/kit/client_lua/music_edit.lua
+# covers: extensions/jam/music_edit.lua builtin/kit/client_lua/editor.lua builtin/kit/client_lua/editor_input.lua src/impl/jam.cpp extensions/jam/songs.lua
+# drives: extensions/jam/music_edit.lua
 # [JAM_EDITOR] Kit's music editor (music_edit.lua) on a kit/music's song, on
 # Workbench: kitboss (the admin, by the setup code) on a headless weston's
 # Xwayland, the audio SDL's dummy driver:
@@ -47,7 +47,7 @@ python3 -I - "$here" <<'PY' || fail "music_edit.lua's ranges are not jam's"
 import re, sys
 root = sys.argv[1]
 cpp = open(root + "/src/impl/jam.cpp").read()
-lua = open(root + "/builtin/kit/client_lua/music_edit.lua").read()
+lua = open(root + "/extensions/jam/music_edit.lua").read()
 num = r"(-?[0-9.e]+)"
 def table(name):
     body = cpp.split(name + "[] = {", 1)[1].split("};", 1)[0]

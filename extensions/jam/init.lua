@@ -19,7 +19,13 @@
 --   player:stop(), player:playing()
 --   song:info() -> {title, tempo, bar, loop = {from, to}, tracks, moods}
 --   song:analyze([seconds[, mood[, track]]]) -> its measures as JSON
+--   song:wav([seconds[, mood]]) -> a WAV file's bytes (16-bit stereo), the
+--     play order once through (at most 300 s)
 --   jam.songs: example songs' texts by name (songs.lua)
+--   jam.editor(A): the music editor (music_edit.lua) made for a caller,
+--     A {K, NT, magic, ui_utils, log[, log_prefix]}: Kit's helpers and
+--     NT.mu its handle (builtin/kit/client_lua/editor.lua)
+-- The launch tile runs the jam app ([JAM_APP], app.lua).
 -- Its versioning is its format's (jam1), not the engine's.
 local api = buildat.safe or buildat
 local magic = require("buildat/core/urho3d")
@@ -59,6 +65,18 @@ function M.safe.play(song, opts)
 		return nil, "no mood " .. tostring(opts.mood)
 	end
 	return p
+end
+
+-- [JAM_APP] One editor for Kit and the app: a new one a caller
+function M.safe.editor(A)
+	return api.run_extension_file("music_edit.lua")(A)
+end
+
+-- The launch tile's way in (launcher/init.lua): the jam app, made once
+local open_app = nil
+function M.on_untrusted_launch(request)
+	open_app = open_app or api.run_extension_file("app.lua")(M.safe)
+	open_app()
 end
 
 return M

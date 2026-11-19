@@ -3342,7 +3342,7 @@ end
 -- it is typed (the first error by its line under it), Play/Stop a preview
 -- through jam as the players hear it (the music volume), and the song's
 -- moods to hear it in. Apply sends it with the rest; mark() marks Apply.
--- [JAM_EDITOR] Edit... opens the music editor on it (music_edit.lua, NT.mu)
+-- [JAM_EDITOR] Edit... opens the music editor on it (jam's music_edit.lua, NT.mu)
 -- simplified: no touch mode field entry (its keyboard covers it on a phone)
 function NT.song_section(w, e, key, k, values, mark)
 	local jam = require("buildat/extension/jam")
@@ -8227,13 +8227,10 @@ do
 		plane_at = plane_at})
 end
 
--- [JAM_EDITOR] The music editor on a song parameter (music_edit.lua, NT.mu)
-do
-	local ok, err, install = buildat.run_script_file("kit/music_edit.lua")
-	assert(ok and type(install) == "function", "kit: music_edit.lua: " ..
-			tostring(err))
-	install({K = K, NT = NT, magic = magic, ui_utils = ui_utils, log = log})
-end
+-- [JAM_EDITOR] The music editor on a song parameter (NT.mu): jam's
+-- (extensions/jam/music_edit.lua), the jam app's too
+require("buildat/extension/jam").editor({K = K, NT = NT, magic = magic,
+	ui_utils = ui_utils, log = log})
 
 -- [KIT_EDITOR_LOCALS] The rest of the editor: ports, press and drag, the
 -- terrain and voxels tools, mouse, fingers and keys, guides, drawing and
